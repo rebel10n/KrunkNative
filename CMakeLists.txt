@@ -777,6 +777,13 @@ else ()
     target_include_directories(window_state_test PRIVATE client/include)
     add_test(NAME window_state_test COMMAND window_state_test)
 
+    # win_geom_test: the shared geometry rule of the draggable / resizable windows (developer
+    # console, editor Quick GUI and side panels): off-screen saves, small windows, grip resizes
+    add_executable(win_geom_test client/tests/win_geom_test.c client/src/ui/win_geom.c)
+    target_include_directories(win_geom_test PRIVATE client/include)
+    target_link_libraries(win_geom_test PRIVATE m)
+    add_test(NAME win_geom_test COMMAND win_geom_test)
+
     # backend_online_test: online mode's defaults (the public finder / account service, never
     # localhost) and the native brain transport over loopback (client/src/net/online_mode.c,
     # backend_common.c, backend_native.c; on Windows backend_winhttp.c, which CI runs there too)

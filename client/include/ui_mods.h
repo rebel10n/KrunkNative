@@ -28,3 +28,4 @@ int  ui_mods_pointer(int down, float x, float y);
 // syncDevConsoleInterface: (re)inserts the rows whenever their windows are shown and
 // mirrors the switches. Per frame from ui_console_tick().
 void ui_mods_tick(Client*);
+void ui_mods_reload(void);                  // F5 (game_reload.c): the stored keys / switches read again

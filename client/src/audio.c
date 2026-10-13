@@ -947,6 +947,14 @@ void audio_reload(const char *name) {
     clip_free(&g_audio.clips[clip]);  // UNLOADED: the next play reads the file again
 }
 
+void audio_reload_all(void) {
+    if (!g_audio.ready) return;
+    for (int i = 0; i < g_audio.clip_count; i++) {
+        stop_matching(i, 0, VOICE_2D);
+        clip_free(&g_audio.clips[i]);
+    }
+}
+
 void audio_stop_3d_loops(void) {
     if (!g_audio.ready) return;
     stop_matching(-1, 1, VOICE_3D_LOOP);

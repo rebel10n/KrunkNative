@@ -35,6 +35,8 @@
 #include <stdio.h>
 #include <update_ui.h>
 #include <third_person.h>
+#include <win_geom.h>   // the console box stays in the window (win_geom.h)
+#include <game_reload.h> // `reload`: F5's full reload
 #include <stdlib.h>
 #include <string.h>
 #ifdef __EMSCRIPTEN__
@@ -52,6 +54,15 @@
 #define CON_TEXT_MAX 512
 #define CON_PENDING_MAX 64
 #define CON_GEOM_KEY "krk_dev_console_geom"
+// devconsole.css .modal: padding 7px on a content-box, so offsetWidth = width + 14 (and the
+// height likewise). Geometry is kept as the outer box (devConsole.ts saves offsetWidth /
+// offsetHeight), so the CSS width / height written back is the outer size minus this.
+#define CON_PAD 14.0f
+#define CON_MIN_W (280.0f + CON_PAD) // .modal min-width: 280px / min-height: 160px, outer
+#define CON_MIN_H (160.0f + CON_PAD)
+#define CON_DEF_W 744.0f             // .modal width: min(744px, calc(100vw - 16px))
+#define CON_DEF_H 280.0f             // .modal height: min(280px, calc(100vh - 16px))
+#define CON_DEF_MARGIN 8.0f          // .modal right: 8px; top: 8px
 #define CON_AHK_BASE 29819          // antihackkey.json
 #define CON_VERSION "jhiLQ"         // version.json
 
@@ -152,11 +163,13 @@ typedef struct {
     float dx, dy, start_x, start_y, start_w, start_h;
     HtmlElem pressed;
     int save_timer;
+    float fit_vw, fit_vh;        // the viewport the box was last fitted to (0: refit)
 } ConState;
 
 static ConState g_con = {.history_idx = -1, .mode_override = -1};
 
 static void con_exec(const char *line);
+static void reset_geom(void);
 
 // ---------------------------------------------------------------- helpers
 
@@ -1071,16 +1084,15 @@ static void cmd_quit(const int argc, char **argv, const char *rest) {
 // reconnect: location.reload() in devConsole; KrunkNative reconnects to the last server
 // (a `connect` target, a Direct Connect server or the matchmade lobby, sought again for a
 // fresh join ticket), also after `disconnect`. Offline (also after a `disconnect` from the
-// offline game): the local game starts over on the same map. The Reconnect key (F5 by
-// default, ui_controls.c) runs this command.
-static void cmd_reconnect(const int argc, char **argv, const char *rest) {
-    (void) argc; (void) argv; (void) rest;
+// offline game): the local game starts over on the same map. The Reconnect key (unbound by
+// default, ui_controls.c) runs this command, and F5's reload (game_reload.c) ends with it.
+int ui_console_reconnect(void) {
     Client *client = con_client();
-    if (!client) return;
+    if (!client) return 0;
     if (client->offline) {
         local_game_host(client, client->game.ready ? client->game.current_map_index : -1, client->game.ready ? game_mode_id(&client->game) : 0);
         append("Restarted the offline game.", COL_INFO);
-        return;
+        return 1;
     }
     if (servers_ui_reconnect_offline()) {
         // `disconnect` left the offline game: it starts again on the map it played
@@ -1089,17 +1101,24 @@ static void cmd_reconnect(const int argc, char **argv, const char *rest) {
             client->offline_start_map = game->maps[game->current_map_index];
         }
         client->net_should_quit = 1; // as menu_request_play: no transport retries behind it
-        if (local_game_start(client)) append("Restarted the offline game.", COL_INFO);
+        const int started = local_game_start(client);
+        if (started) append("Restarted the offline game.", COL_INFO);
         else append("reconnect failed: the offline game did not start", COL_ERROR);
         client->offline_start_map = NULL;
-        return;
+        return started;
     }
     if (!servers_ui_reconnect()) {
         append("reconnect: no server to reconnect to", COL_ERROR);
-        return;
+        return 0;
     }
     appendf(COL_INFO, "Reconnecting to %s:%u...", client->net_address, (unsigned int) client->net_port);
     menu_show_connecting();
+    return 1;
+}
+
+static void cmd_reconnect(const int argc, char **argv, const char *rest) {
+    (void) argc; (void) argv; (void) rest;
+    ui_console_reconnect();
 }
 
 // clearPingCounter
@@ -1163,6 +1182,22 @@ static void cmd_sandbox(const int argc, char **argv, const char *rest) {
         return;
     }
     go_offline(client, index, "sandbox");
+}
+
+// console_reset (KrunkNative): the console back at the stylesheet's place and size (top right,
+// 744 x 280 at most), the saved krk_dev_console_geom gone. For a console a drag or an old save
+// left somewhere awkward; one outside the window is brought back on its own (con_fit).
+static void cmd_console_reset(const int argc, char **argv, const char *rest) {
+    (void) argc; (void) argv; (void) rest;
+    reset_geom();
+    append("Console position and size reset.", COL_INFO);
+}
+
+// reload (KrunkNative): F5's full reload (game_reload.h, doc/console.md "F5: full reload")
+static void cmd_reload(const int argc, char **argv, const char *rest) {
+    (void) argc; (void) argv; (void) rest;
+    append("Reloading...", COL_INFO);
+    game_reload_request("console");
 }
 
 static void cmd_ahk(const int argc, char **argv, const char *rest) {
@@ -1317,6 +1352,8 @@ static void register_commands(void) {
     register_local("disconnect", NO_ARGS, "disconnect and stay in the menu", cmd_disconnect);
     register_local("quit", NO_ARGS, "close the window", cmd_quit);
     register_local("reconnect", NO_ARGS, "reconnect to the last server", cmd_reconnect);
+    register_local("reload", NO_ARGS, "full reload (F5): settings, binds, textures, models, sounds, shaders, menu; then rejoin", cmd_reload);
+    register_local("console_reset", NO_ARGS, "put the console back at its default place and size", cmd_console_reset);
     register_local("offline", ARGS(A_MAP_OPT), "switch to offline mode (the in-process server), optionally on a map", cmd_offline);
     register_local("sandbox", NO_ARGS, "play offline on the sandbox (editor test) map", cmd_sandbox);
     register_local("ahk", NO_ARGS, "show current antihack key", cmd_ahk);
@@ -1975,6 +2012,7 @@ static void update(const int go_to_game) {
 
 void ui_console_toggle(const int go_to_game) {
     g_con.visible = !g_con.visible;
+    if (g_con.visible) g_con.fit_vw = g_con.fit_vh = 0.0f; // shown: fitted again with its laid-out size
     update(go_to_game);
 }
 
@@ -2089,19 +2127,53 @@ static int pos_committed(void) {
     return html_dom_get_attr(g_con.modal, "data-pos-committed", buf, sizeof(buf)) >= 0 && !strcmp(buf, "1");
 }
 
-static void clamp_pos(void) {
+// KrunkNative: devConsole.ts clampPos, for the size too, through the rule every draggable window
+// follows (win_geom.h). Saved geometry from a bigger monitor or window (a resolution change, F11,
+// an F4 / F5 restart) used to stay where it was: clampPos measured the box while the overlay was
+// display:none (offsetWidth 0), so a saved left of 5000 only came back to the viewport's right
+// edge, fully outside, and nothing clamped again on a resize. Now the box is fitted on load, on
+// every viewport change and when the console is shown; the whole box stays inside, shrunk to
+// the viewport when it is larger (never below the stylesheet's minimum).
+static const WinGeomRules CON_RULES = {CON_MIN_W, CON_MIN_H, 0.0f, 0.0f};
+
+// The console's outer box: left / top from the inline style, the size from the layout while the
+// overlay is shown, else the inline size, else the stylesheet's default for this viewport.
+static void con_geom_read(WinGeom *g, const float vw, const float vh) {
+    char buf[32];
+    const float ow = html_dom_offset_width(g_con.modal), oh = html_dom_offset_height(g_con.modal);
+    g->x = (float) style_px(g_con.modal, "left");
+    g->y = (float) style_px(g_con.modal, "top");
+    if (ow > 0.0f) g->w = ow;
+    else if (html_dom_get_style(g_con.modal, "width", buf, sizeof(buf)) >= 0) g->w = (float) atoi(buf) + CON_PAD;
+    else g->w = fminf(CON_DEF_W, vw - 2.0f * CON_DEF_MARGIN) + CON_PAD;
+    if (oh > 0.0f) g->h = oh;
+    else if (html_dom_get_style(g_con.modal, "height", buf, sizeof(buf)) >= 0) g->h = (float) atoi(buf) + CON_PAD;
+    else g->h = fminf(CON_DEF_H, vh - 2.0f * CON_DEF_MARGIN) + CON_PAD;
+}
+
+// Writes the box back; the size only when it differs from `was` (NULL: always).
+static void con_geom_write(const WinGeom *g, const WinGeom *was) {
+    set_px(g_con.modal, "left", g->x);
+    set_px(g_con.modal, "top", g->y);
+    if (!was || fabsf(g->w - was->w) >= 0.5f) set_px(g_con.modal, "width", g->w - CON_PAD);
+    if (!was || fabsf(g->h - was->h) >= 0.5f) set_px(g_con.modal, "height", g->h - CON_PAD);
+}
+
+// Fits a placed box (data-pos-committed) into the viewport; the CSS-anchored default always
+// fits. Returns 1 when the box moved or shrank.
+static int con_fit(void) {
+    if (!g_con.built || !pos_committed()) return 0;
     float vw, vh, dpr;
     html_dom_viewport(&vw, &vh, &dpr);
-    const float w = html_dom_offset_width(g_con.modal);
-    const float h = html_dom_offset_height(g_con.modal);
-    const float max_x = vw - w > 0 ? vw - w : 0;
-    const float max_y = vh - h > 0 ? vh - h : 0;
-    float left = (float) style_px(g_con.modal, "left");
-    float top = (float) style_px(g_con.modal, "top");
-    left = left < 0 ? 0 : left > max_x ? max_x : left;
-    top = top < 0 ? 0 : top > max_y ? max_y : top;
-    set_px(g_con.modal, "left", left);
-    set_px(g_con.modal, "top", top);
+    if (vw <= 0.0f || vh <= 0.0f) return 0;
+    g_con.fit_vw = vw;
+    g_con.fit_vh = vh;
+    WinGeom g;
+    con_geom_read(&g, vw, vh);
+    const WinGeom was = g;
+    if (!win_geom_fit(&g, vw, vh, &CON_RULES)) return 0;
+    con_geom_write(&g, &was);
+    return 1;
 }
 
 // commitInitialPos: from the CSS anchor (right/top) to absolute pixels
@@ -2131,6 +2203,8 @@ static void save_geom(void) {
     g_con.save_timer = html_timer_add(150, save_geom_now, NULL);
 }
 
+// restoreGeom; the saved box is fitted to this viewport (con_fit) before it is used, and a
+// saved size alone is placed where the stylesheet anchors the console (right / top 8px).
 static void restore_geom(void) {
     char buf[256];
     if (html_storage_get(CON_GEOM_KEY, buf, sizeof(buf)) < 0) return;
@@ -2139,18 +2213,45 @@ static void restore_geom(void) {
         cJSON_Delete(g);
         return;
     }
+    float vw, vh, dpr;
+    html_dom_viewport(&vw, &vh, &dpr);
     const cJSON *w = cJSON_GetObjectItem(g, "width"), *h = cJSON_GetObjectItem(g, "height");
     const cJSON *l = cJSON_GetObjectItem(g, "left"), *t = cJSON_GetObjectItem(g, "top");
-    if (cJSON_IsNumber(w) && w->valuedouble >= 280) set_px(g_con.modal, "width", (float) w->valuedouble);
-    if (cJSON_IsNumber(h) && h->valuedouble >= 160) set_px(g_con.modal, "height", (float) h->valuedouble);
-    if (cJSON_IsNumber(l) && cJSON_IsNumber(t)) {
-        html_dom_set_style(g_con.modal, "transform", "none");
-        set_px(g_con.modal, "left", (float) l->valuedouble);
-        set_px(g_con.modal, "top", (float) t->valuedouble);
-        html_dom_set_attr(g_con.modal, "data-pos-committed", "1");
-        clamp_pos();
-    }
+    WinGeom box = {0.0f, 0.0f, fminf(CON_DEF_W, vw - 2.0f * CON_DEF_MARGIN) + CON_PAD, fminf(CON_DEF_H, vh - 2.0f * CON_DEF_MARGIN) + CON_PAD};
+    const int sized_w = cJSON_IsNumber(w) && isfinite(w->valuedouble) && w->valuedouble >= 280;
+    const int sized_h = cJSON_IsNumber(h) && isfinite(h->valuedouble) && h->valuedouble >= 160;
+    const int placed = cJSON_IsNumber(l) && cJSON_IsNumber(t) && isfinite(l->valuedouble) && isfinite(t->valuedouble);
+    if (sized_w) box.w = (float) w->valuedouble; // saved as offsetWidth: the outer box
+    if (sized_h) box.h = (float) h->valuedouble;
     cJSON_Delete(g);
+    if (!sized_w && !sized_h && !placed) return;
+    if (placed) {
+        box.x = (float) l->valuedouble;
+        box.y = (float) t->valuedouble;
+    } else {
+        box.x = vw - CON_DEF_MARGIN - box.w;
+        box.y = CON_DEF_MARGIN;
+    }
+    if (vw > 0.0f && vh > 0.0f) {
+        win_geom_fit(&box, vw, vh, &CON_RULES);
+        g_con.fit_vw = vw;
+        g_con.fit_vh = vh;
+    }
+    html_dom_set_style(g_con.modal, "transform", "none");
+    con_geom_write(&box, NULL);
+    html_dom_set_attr(g_con.modal, "data-pos-committed", "1");
+}
+
+// console_reset (KrunkNative): the stylesheet's place and size again, the saved geometry gone
+static void reset_geom(void) {
+    if (g_con.save_timer) html_timer_cancel(g_con.save_timer);
+    g_con.save_timer = 0;
+    g_con.dragging = g_con.resizing = 0;
+    html_storage_set(CON_GEOM_KEY, NULL);
+    if (!g_con.built) return;
+    static const char *const PROPS[] = {"left", "top", "width", "height", "transform"};
+    for (size_t i = 0; i < sizeof(PROPS) / sizeof(PROPS[0]); i++) html_dom_set_style(g_con.modal, PROPS[i], "");
+    html_dom_remove_attr(g_con.modal, "data-pos-committed");
 }
 
 static int pick_hint(const float x, const float y) {
@@ -2183,14 +2284,18 @@ int ui_console_mouse(const int action, double x, double y, const int css) {
         if (g_con.dragging) {
             set_px(g_con.modal, "left", fx - g_con.dx);
             set_px(g_con.modal, "top", fy - g_con.dy);
-            clamp_pos();
+            con_fit(); // clampPos
             return 1;
         }
         if (g_con.resizing) {
-            const float w = g_con.start_w + (fx - g_con.start_x);
-            const float h = g_con.start_h + (fy - g_con.start_y);
-            set_px(g_con.modal, "width", w > 280 ? w : 280);
-            set_px(g_con.modal, "height", h > 160 ? h : 160);
+            // outer size (start_w / start_h are offsetWidth / offsetHeight); the grip stops at the
+            // viewport's right / bottom edge and at the stylesheet's minimum (280 x 160)
+            float vw, vh, dpr;
+            html_dom_viewport(&vw, &vh, &dpr);
+            WinGeom g = {(float) style_px(g_con.modal, "left"), (float) style_px(g_con.modal, "top"),
+                         g_con.start_w + (fx - g_con.start_x), g_con.start_h + (fy - g_con.start_y)};
+            win_geom_fit_resize(&g, vw, vh, &CON_RULES);
+            con_geom_write(&g, NULL);
             return 1;
         }
         return 0;
@@ -2327,6 +2432,15 @@ void ui_console_tick(Client *client) {
         if (!g_con.built) return;
     }
     ui_mods_tick(client);
+    { // KrunkNative: the window changed size (a resize, F11, another monitor) or the console was shown
+        float vw, vh, dpr;
+        html_dom_viewport(&vw, &vh, &dpr);
+        if (vw > 0.0f && vh > 0.0f && (vw != g_con.fit_vw || vh != g_con.fit_vh) && !g_con.dragging && !g_con.resizing) {
+            g_con.fit_vw = vw;
+            g_con.fit_vh = vh;
+            con_fit();
+        }
+    }
     if (!g_con.visible) return;
     if (g_con.focus_pending) {
         g_con.focus_pending = 0;

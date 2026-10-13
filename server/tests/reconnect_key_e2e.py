@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Reconnect key (F5) and console `sandbox` / `offline <map>` end-to-end test
-(client/src/ui/ui_controls.c reconnect_key, client/src/ui/ui_console.c cmd_reconnect /
-cmd_sandbox / cmd_offline, client/src/main.c --sandbox / --map).
+"""F5 (Reload Game: the full reload, which ends with `reconnect`), console `reconnect` /
+`sandbox` / `offline <map>` end-to-end test (client/src/ui/ui_controls.c reload_key,
+client/src/game_reload.c, client/src/ui/ui_console.c ui_console_reconnect / cmd_sandbox /
+cmd_offline, client/src/main.c --sandbox / --map).
 
   python3 -I server/tests/reconnect_key_e2e.py BUILD_DIR      (run from the repository root)
 
   1. online: server_bin on a free port (kn_proto.free_ports); a headless client_bin joins it
-     (--connect) and plays; F5 reconnects to the same server (the server sees a second join)
+     (--connect) and plays; F5 reloads and rejoins the same server (the server sees a second join)
      and the player is back in the game (input script `state`: menu closed, a weapon, a new spawn)
   2. offline: client_bin --offline --map kanji plays the catalogue's Kanji; F5 restarts the local
      game on the same map; `sandbox` switches to the sandbox map (catalogue "Test"), F5 restarts
-     it there; after `disconnect` F5 starts the offline game again on that map; `offline Burg`
-     switches maps; `help` lists `sandbox`
+     it there; after `disconnect` the console's `reconnect` starts the offline game again on that
+     map; `offline Burg` switches maps; `help` lists `sandbox`
   3. client_bin --sandbox starts on the sandbox map
 Keys and console lines go through KRUNKNATIVE_INPUT_SCRIPT (times from `play`). Needs a headless
 GL device (KRUNKNATIVE_HEADLESS=1: EGL; KRUNKNATIVE_EGL_DEVICE picks it).
@@ -138,10 +139,10 @@ def online():
     st = states(lines)
     check("online: the client joins the server and plays", any(here in l for l in lines) and st and in_game(st[0]),
           f"states {st}")
-    after = between(lines, r"\[controls\] reconnect key")
-    check("online: F5 runs the console's reconnect", any(re.search(r"\] reconnect$", l) for l in after)
+    after = between(lines, r"\[controls\] reload key")
+    check("online: F5 reloads, then reconnects", any("[reload] rejoining the server" in l for l in after)
           and any(f"[mm] reconnect: 127.0.0.1:{port}" in l for l in after))
-    check("online: F5 reconnects to the same server", any(here in l for l in between(lines, r"\[controls\] reconnect key", r"state t=1")),
+    check("online: F5 reconnects to the same server", any(here in l for l in between(lines, r"\[controls\] reload key", r"state t=1")),
           "; ".join(l for l in after if "connected" in l))
     check("online: the server sees the client join again", read(server_log).count("connected from 127.0.0.1") >= 2)
     check("online: still in the game after the reconnect (spawned again)",
@@ -152,30 +153,30 @@ def offline():
     lines = run_client("offline", ["--offline", "--map", "kanji"],
                        "0 play\n2000 state\n3000 down F5\n3050 up F5\n6000 state\n"
                        "7000 con sandbox\n10000 state\n11000 down F5\n11050 up F5\n14000 state\n"
-                       "15000 con disconnect\n17000 down F5\n17050 up F5\n20000 state\n"
+                       "15000 con disconnect\n17000 con reconnect\n20000 state\n"
                        "21000 con help\n22000 con offline Burg\n25000 state\n26000 quit\n")
     st = states(lines)
     check("offline: --map kanji starts on the catalogue map", any(re.search(r"startup map kanji: maps/\S*kanji\.json", l) for l in lines)
           and any("[sandbox] Loaded map Kanji (0)" in l for l in lines))
     check("offline: the player plays", st and in_game(st[0]), f"states {st}")
-    first = between(lines, r"\[controls\] reconnect key", r"\] sandbox$")
+    first = between(lines, r"\[controls\] reload key", r"\] sandbox$")
     check("offline: F5 restarts the local game on the same map",
           any(re.search(r"\[sandbox\] Loaded map 0 mode", l) for l in first) and any("Restarted the offline game" in l for l in first),
           "; ".join(first))
     check("offline: in the game again after F5", len(st) >= 2 and in_game(st[1]), f"states {st}")
 
-    sandbox = between(lines, r"\] sandbox$", r"\[controls\] reconnect key")
+    sandbox = between(lines, r"\] sandbox$", r"\[controls\] reload key")
     m = [re.search(r"\[sandbox\] Loaded map (\d+) mode", l) for l in sandbox]
     slot = next((x.group(1) for x in m if x), None)
     check("offline: `sandbox` switches to the sandbox map", slot is not None and len(st) >= 3 and st[2]["pos"].startswith("0.000,0.000"),
           f"slot {slot}, states {st}")
     second = between(lines, r"\] sandbox$")
-    second = between(second, r"\[controls\] reconnect key", r"\] disconnect$")
+    second = between(second, r"\[controls\] reload key", r"\] disconnect$")
     check("sandbox: F5 restarts it on the sandbox map", slot is not None and any(f"[sandbox] Loaded map {slot} mode" in l for l in second),
           "; ".join(second))
 
     third = between(lines, r"\] disconnect$", r"\] help$")
-    check("offline: F5 after `disconnect` starts the offline game again on the sandbox map",
+    check("offline: `reconnect` after `disconnect` starts the offline game again on the sandbox map",
           any("[sandbox] Loaded map Test (" in l for l in third) and any("Restarted the offline game" in l for l in third),
           "; ".join(third))
     check("console help lists `sandbox`", any(re.search(r"^\[console\]\s+sandbox\s+play offline on the sandbox", l) for l in lines))

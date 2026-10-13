@@ -104,6 +104,9 @@ void servers_ui_connect_direct(const char *host, int port); // console `connect`
 void servers_ui_disconnect(void);           // console `disconnect`: stay disconnected, no automatic seek
 int  servers_ui_reconnect(void);            // console `reconnect`: the last server (lobby: sought again); 1 = started
 int  servers_ui_reconnect_offline(void);    // console `reconnect`: 1 = `disconnect` left the offline game, start it again
+// F5's restart fallback (game_reload.c): what the next process joins to come back to this session,
+// 2 = the matchmade lobby id, 1 = "host:port", 0 when there is no server to come back to.
+int  servers_ui_session_target(char *out, size_t n);
 void servers_ui_tick(Client*);
 int  servers_ui_retry(void);                 // the error screen's "seek a new game" link; 1 = handled
 // A lost session (every NET_STATUS_FAILED, main thread): a server shutdown ERROR (004004 / 004006),

@@ -620,6 +620,7 @@ void ed_quickgui_reset(void);                           // page leave
 int ed_quickgui_button(int glfw_button);                // the Open On button (settings.quickGUIOpen)
 void ed_quickgui_cursor(double fb_x, double fb_y);      // title bar drag
 void ed_quickgui_release(void);
+void ed_quickgui_refit(void);                            // the window resized: back inside (win_geom.h)
 int ed_object_painter_click(vec3 hit);                  // shift+click painter; 1 = handled
 void ed_quickgui_install(HtmlHandlerEntry *table, size_t *count, size_t max);
 typedef void (*EdFileFn)(void *user, const char *path);

@@ -30,6 +30,11 @@
 //                                each frame; multi-life tests: server/tests/gunfight.sh)
 //   100 wheel 1 | wheel -1       one mouse wheel event (up / down) through the scroll callback
 //   100 blur                     the window loses focus (alt-tab)
+//   100 nethit 0 | nethit 1      a NET_PACKET_HIT from the server (no target, no damage; 1 = the kill
+//                                variant) through the client's event handler: the hit sound and
+//                                marker, as when your shot lands (hitmarker tests, alive or dead)
+//   100 resize 800 600           the window's size (glfwSetWindowSize; headless: the framebuffer-size
+//                                event follows at the frame's end, like a window manager's resize)
 //   100 om add 28 | om drop 20   an Object Manager Weapons-tab click without the window: left (add the
 //                                extra loadout slot, in hand when it lands; again: take it out) / right
 //                                (a pickup at the crosshair)
@@ -559,6 +564,11 @@ static void script_run(Client *client, const ScriptEvent *e) {
         fprintf(stderr, "[input_script] clip t=%.0f %s text=%s\n", g_script.time, e->arg, text);
     } else if (!strcmp(e->cmd, "con")) {
         ui_console_exec(e->arg); // con <word>: a one-word developer console command (`end`)
+    } else if (!strcmp(e->cmd, "nethit")) {
+        const NetHitPacket hit = {.target_uid = -1, .kill = (uint8_t) (e->v[0] != 0.0f)};
+        client_handle_game_event(client, NET_PACKET_HIT, &hit, (uint16_t) sizeof(hit));
+    } else if (!strcmp(e->cmd, "resize")) {
+        if (e->v[0] >= 1.0f && e->v[1] >= 1.0f) glfwSetWindowSize(client->window, (int) e->v[0], (int) e->v[1]);
     } else if (!strcmp(e->cmd, "blur")) {
         client_window_focus_lost(client); // alt-tab (the GLFW focus callback)
     } else if (!strcmp(e->cmd, "play") && g_script.menu_mode) {

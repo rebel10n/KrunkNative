@@ -697,6 +697,11 @@ void gltf_model_forget(const char *path) {
         if (!m->shadowed && !strcmp(m->path, path)) m->shadowed = 1;
 }
 
+void gltf_model_forget_all(void) {
+    for (GltfModel *m = g_gltf_models; m; m = m->next)
+        if (!m->shadowed && !m->is_override) m->shadowed = 1;
+}
+
 int gltf_model_animated(const GltfModel *model) {
     return model && model->data && model->data->animations_count > 0;
 }

@@ -37,7 +37,7 @@ silent (only the `] line` echo), as in the mod.
 
 | Command | v3.1.1 behaviour | Native |
 |---|---|---|
-| help [cmd] | "N commands:" + sorted list / `name args — desc` / "unknown command: x" | same (89 commands, with `give` / `drop`, `cls` and `thirdperson` / `firstperson`) |
+| help [cmd] | "N commands:" + sorted list / `name args — desc` / "unknown command: x" | same (91 commands, with `give` / `drop`, `cls`, `thirdperson` / `firstperson`, `reload` and `console_reset`) |
 | clear | empties the log | same; Krunker Box Office alias `cls` |
 | echo / print text | prints the text | same |
 | bind [key] [cmd] | session key binds by `e.key` / `e.code` ("bound k -> cmd", "no binds", "k = (unbound)") | same; fired on keydown while hidden, not while typing |
@@ -47,7 +47,9 @@ silent (only the `] line` echo), as in the mod.
 | connect [local\|host] | points the matchmaker at a host and seeks a game | connects the TCP client to `host[:port]` (IPv4/localhost; "local" = 127.0.0.1:default). Prints "Connecting through …" and "Server: tcp://…". On the web: "endpoint updated; live seek is unavailable on this page". A game link or lobby id (`connect CH2:kz862`, the long `CHITOWN2:kz862` too) joins that game through the matchmaker ("Joining game …") |
 | disconnect | resets the endpoints and goes back to "/" | leaves the session/offline game, back to the default server, menu open. On the web: `location.href = '/'` |
 | quit | `window.close()` | closes the window (web: `window.close()`) |
-| reconnect | `location.reload()` | reconnects to the last server or lobby, also after `disconnect` (offline, or after a `disconnect` from the offline game: restarts it on the same map). The Reconnect bind (F5 by default, Settings > Controls > General) runs it natively; on the web that key stays `location.reload()`, and the address bar (`?game=<id>`, `?offline=1&map=<key>`, `?sandbox`) brings the reload back to the same game |
+| reconnect | `location.reload()` | reconnects to the last server or lobby, also after `disconnect` (offline, or after a `disconnect` from the offline game: restarts it on the same map). The Reconnect bind (unbound by default, Settings > Controls > General) runs it natively; on the web that key is `location.reload()`. F5's full reload (`reload`, below) ends with it |
+| reload | `location.reload()` (the mod's F5) | Krunker Box Office: the full reload F5 does (the Reload Game bind, Settings > Controls > General), see [F5: full reload](#f5-full-reload). On the web: `location.reload()`, and the address bar (`?game=<id>`, `?offline=1&map=<key>`, `?sandbox`) brings the reload back to the same game |
+| console_reset | – | Krunker Box Office: the console back at the stylesheet's place and size (top right, 744 x 280 at most) and the saved geometry (`krk_dev_console_geom`) deleted |
 | offline [map] | `playCustomMap()` + clearPingCounter | starts the embedded offline game, ping 0 (`--offline`, web `?offline=1`); a map (catalogue key, name or path under assets/maps) picks where it plays, like `--map` / `?map=` |
 | sandbox | – (v7.1.4: `?sandbox` / `?test` load `config.blankMap`) | Krunker Box Office: the offline game on the sandbox map, the catalogue's `Test` (maps/custom/Test.json, what the editor's Test plays with no map of its own); `--sandbox`, web `?sandbox` |
 | ahk | `IO AHK: <ahNum> (base: 29819)` | `IO AHK: 0 (base: 29819)` (the native protocol never rotates it) |
@@ -439,6 +441,73 @@ argument; for those the signature row is the hint. No console command but `give`
 class, weapon or setting name. On the web, Shift reaches C
 through kn-shim (`x = 1` on key events).
 
+### Console geometry (Krunker Box Office)
+
+The console's place and size are saved as `krk_dev_console_geom` (devConsole.ts: left, top and
+the outer `offsetWidth` / `offsetHeight`) after a titlebar drag or a grip resize. v3.1.1 clamps
+the box into the window on load and while dragging, but measured it while the overlay was
+`display:none` (size 0), so a saved left of 5000 from a bigger monitor only came back to the
+window's right edge, entirely outside, and nothing clamped it again after a resize, F11, or an
+F4 / F5 restart into a smaller window. It also wrote the saved outer width back as the CSS
+(content-box) width, so the box grew by its 14 px padding at every save. Now
+(`client/include/win_geom.h`, shared with the editor's Quick GUI and side panels):
+
+- on load, on every viewport change (resize, F11, another monitor) and when the console is
+  shown, the whole box is fitted into the window: moved inside, and shrunk to the window when
+  it is larger (never below the stylesheet's 280 x 160 minimum);
+- a titlebar drag cannot take any of it outside; the grip stops at the window's right and
+  bottom edges;
+- the saved size is the outer box and is written back as the outer box;
+- `console_reset` puts it back at the default place and size.
+
+The automatic fits do not overwrite the saved geometry; only a drag or resize does. The editor's
+Quick GUI (which QuickSettings let a drag take anywhere) keeps at least its 120 x 24 px titlebar
+strip in the window, and the editor's side panels never grow past what the page leaves beside the
+other panel.
+
+## F5: full reload
+
+F5 (the Reload Game bind, `cont_gameReloadKey`, Settings > Controls > General; the console's
+`reload`) reloads the client the way the browser's F5 reloads Krunker: settings, binds and every
+asset come from disk again, then the player is back in the same game. It works in game and in
+the menu (also with the console open or a text field focused, as a function key), and keeps the
+stored settings, the account and the session. The Reconnect bind, which had F5 before, is unbound
+by default now (`reconnect` in the console).
+
+Natively, in place, in this order (`client/src/game_reload.c`):
+
+1. Settings: the Client tab (`knClient`, custom.css, the resource swapper folder) read again and
+   each changed live row applied (window resolution, raw input, Exit button, Discord, audio output,
+   HS sound); the game settings (`knSettings`) read again and pushed, a setting the file no longer
+   has back to its default, the page's controls synced, the UI scale applied; the binds
+   (`cont_*`), the console mods (toggle key, F8 cycle, force offline) and Ctrl TP read again.
+2. Assets: every cached texture read again into the same GL texture and every OBJ model into the
+   same geometry, so everything already drawn follows (through the resource swapper / a map's
+   resource pack like any load); GLTF models and sounds are read again at their next use (playing
+   sounds stop); the menu's window templates (`ui/windows`) are read again.
+3. Page: an open menu window is generated again (Settings shows the new values) and the HUD is
+   rewritten.
+4. Back into the game: the console's `reconnect`. Offline the local game restarts on the same map
+   and mode (the map is built again with the new textures and models); online the client rejoins
+   the same server (a matchmade lobby is sought again for a fresh ticket). In the menu with no game,
+   it stays there; when nothing can be rejoined it returns to the menu. A notice says what happened.
+
+What a running process cannot load again makes F5 restart the client instead, like F4 (the same
+command line, the window kept as it is), and the new process comes back to the same session
+(`KRUNKNATIVE_RELOAD_RESUME`: the offline map and mode, the server address, or the lobby id
+once the matchmaker answers):
+
+- a file of the menu page tree changed (`ui/`, or `ui/v10/` for the v10 Game version; not
+  `ui/windows`, which reloads in place) since the client started or last reloaded;
+- a shader (`assets/shaders`) or a map file (`assets/maps`) changed;
+- a startup-only Client setting (the red "*" rows: audio backend, process priority, resource
+  swapper on / off, start offline, account mode, account service / server finder URL) changed;
+- the saved Game version wants another menu page tree (v7 `ui/` vs v10 `ui/v10/`).
+
+The log says which (`[reload] restart: ...`). If the restart cannot exec, everything else still
+reloads in place. On the web F5 is the browser's reload: the page, its stylesheets, images and
+every asset load again, and the address bar brings the reload back to the same game.
+
 `/map` and `/maps` on the server use the same catalogue, as v3.1.1 cmd_map / cmd_maps do:
 `Maps: <official names>` then `Custom: <custom map names>`. A map outside the rotation is
 added to the game's list when it is picked.
@@ -468,9 +537,9 @@ added to the game's list when it is picked.
   signatures, candidate notes) #cccccc instead of #b8b8b8.
 - No hotkey fires while a text field has focus (`ui_text_input_focused()`: an input,
   textarea, select or contenteditable element, #chatInput or #terminalInput). This covers
-  the mods.ts keys (F1, F4, F6, T, B, F8, the console key binds), game binds (Reconnect,
-  F5, included), the voice key, Ctrl TP clicks, gamepad presses and main.c's F11 / N.
-  v3.1.1 still let F5 (reload) and F6 (editor) through. The console key (`) still closes the console from
+  the mods.ts keys (F1, F4, F6, T, B, F8, the console key binds), game binds (Reconnect
+  included), the voice key, Ctrl TP clicks, gamepad presses and main.c's F11 / N. Reload Game
+  (F5) still works there when it is on a function key, as in v3.1.1; v3.1.1 also let F6 (editor) through. The console key (`) still closes the console from
   its own input, as in v3.1.1.
 - devConsole mirrors the browser's `console.*` output into the log. Krunker Box Office has no
   JavaScript console, so only game lines appear.

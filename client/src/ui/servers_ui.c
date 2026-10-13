@@ -1368,6 +1368,17 @@ int servers_ui_reconnect(void) {
     return 1;
 }
 
+int servers_ui_session_target(char *out, const size_t n) {
+    if (!g_client || !out || !n) return 0;
+    if (!g_last_direct && g_brain_mode && g_pin != PIN_DIRECT && g_game_id[0]) {
+        snprintf(out, n, "%s", g_game_id); // `connect <id>` seeks it again (servers_ui_connect_game)
+        return 2;
+    }
+    if (!g_client->net_address[0]) return 0;
+    snprintf(out, n, "%s:%u", g_client->net_address, (unsigned int) g_client->net_port);
+    return 1;
+}
+
 // ---- KrunkNative: rejoining when the server goes away or refuses the join key. v7.1.4's server
 // sends ["error", "GAME UPDATING"] before an update restart and its client shows the Game
 // Updating screen until the player picks Find a Game (backToOrigin: a fresh matchmaker seek).

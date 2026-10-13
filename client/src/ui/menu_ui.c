@@ -12,6 +12,7 @@
 // Window contents come from ui/windows (ui_windows.c); state, classes, maps, connection
 // and menu open/close are direct DOM writes.
 #include <ui_logic.h>
+#include <game_reload.h> // F5: game_reload_tick
 #include <badges.h> // WP-E part 2c: the custom badge in the class box
 #include <ks_client.h> // ks_client_pointer_free
 #include <backend_ui.h>
@@ -1419,6 +1420,7 @@ void client_menu_tick(Client *client) {
 
     client_hud_html_tick(client, (float) glfwGetTime()); // HTML HUD (hud_ui.c)
     hud_zombies_tick(client); // power-up timers, finiteAmmo reserve, zombie round (hud_zombies.c)
+    game_reload_tick(client); // F5 / `reload`, and the game a reload restart comes back to (game_reload.c)
     ui_console_tick(client); // developer console (ui_console.c)
     update_ui_tick(client);  // Outdated / Update now (update_ui.c)
     ui_interact_tick(client); // the interact prompt and hold progress (ui_interact.c)

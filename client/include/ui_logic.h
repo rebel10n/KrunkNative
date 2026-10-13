@@ -178,6 +178,7 @@ typedef struct {
     const char *label;       // windows[n].label ("settings", "server_browser", ...)
 } UiWindowMeta;
 int         ui_windows_load(void);                       // ui/windows/windows.json + files; 1 on success
+int         ui_windows_reload(void);                     // F5: the templates read again (game_reload.c)
 const char *ui_windows_html(const char *key);            // the captured markup of showWindow(key), "" when absent
 const UiWindowMeta *ui_windows_meta(const char *key);    // NULL when v7 has no such window
 int         ui_settings_view_tab_count(int view);        // windows[0].tabs[basic|advanced].length
@@ -220,6 +221,7 @@ void ui_settings_export(void);                   // exportSettings (log)
 char *ui_settings_export_text(void);             // exportSettings(true): the text, malloc'd (account settings upload)
 void ui_settings_apply_values(HtmlElem root);    // applySettingValues
 void ui_settings_push_saved(void);               // pushSavedSettings (CORE_SETTINGS first)
+int  ui_settings_reload(void);                   // F5: knSettings read again and pushed (game_reload.c); changed count
 void ui_settings_search(const char *query);      // windows[0].searchList body
 void ui_settings_collapse_folder(HtmlElem header); // windows[0].collapseFolder
 // Apply one setting to the game (value as String(value): numbers, "true"/"false", text).
@@ -364,7 +366,8 @@ enum {
     // WP-C: v7.1.4 binds.reset / binds.resetLast (input[13]); KrunkNative ids, stored as cont_resetKey /
     // cont_resetLastKey like v7
     UI_CONTROL_RESET = 38, UI_CONTROL_RESET_LAST = 39,
-    // KrunkNative addition: Reconnect (F5, cont_reconnectKey), the console's `reconnect`
+    // KrunkNative addition: Reconnect (unbound by default, cont_reconnectKey; F5 until the Reload
+    // Game bind took it), the console's `reconnect`
     UI_CONTROL_RECONNECT = 40,
     // KrunkNative addition: the Object Manager (F1, cont_objectManagerKey) toggles the spawn menu
     // (client/src/ui/object_manager_ui.c); the slot held F1's earlier Game Settings bind
@@ -380,7 +383,10 @@ enum {
     // KrunkNative addition: Third Person (cont_thirdPersonKey, unbound by default) toggles the
     // over-the-shoulder camera like the console's thirdperson / firstperson (third_person.h)
     UI_CONTROL_THIRD_PERSON = 47,
-    UI_CONTROL_COUNT = 48
+    // KrunkNative addition: Reload Game (F5, cont_gameReloadKey): the full reload (game_reload.h),
+    // the console's `reload`
+    UI_CONTROL_GAME_RELOAD = 48,
+    UI_CONTROL_COUNT = 49
 };
 
 // Input-related settings ClientSettings does not carry (written by client_apply_setting).
@@ -592,6 +598,7 @@ void ui_notify_tick(double now_ms);              // hud_ui.c per frame: steps th
 // switch after its bind matching (`input` = a text field has focus); 0 = not consumed.
 int  ui_mod_keys_keydown(Client*, int glfw_key, int input); // F1 clearLog, F4 "/", F5 reload, F6 editor, T Ctrl TP
 int  ui_mod_keys_ctrl_tp_mouse(Client*, int glfw_button, int action); // Ctrl TP canvas mouse wrapper; 1 = taken
+void ui_mod_keys_reload(void); // F5 (game_reload.c): Ctrl TP read again from storage
 // END ui_bhop block
 
 // BEGIN hud_popups block (client/src/ui/hud_popups.c): the game-overlay canvas text popups

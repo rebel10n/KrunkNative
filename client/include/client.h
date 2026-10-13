@@ -904,6 +904,10 @@ Geometry *load_obj_model(char*, int);
 // every material and mesh holding it follows. 0 when `path` is not cached or cannot be read.
 int texture_cache_reload(const char *path);
 int geometry_cache_reload(const char *path);
+// F5 (game_reload.c): every cached texture / OBJ model read again the same way. Returns how
+// many were reloaded.
+int texture_cache_reload_all(void);
+int geometry_cache_reload_all(void);
 // Fills geometry->bound_center/bound_radius from its local vertices (loaders.c); geometry
 // whose vertices move in the shader (liquid waves) must leave the radius at 0.
 void geometry_set_bounds(Geometry*, const vertex *vertices, size_t vertex_count);

@@ -2010,8 +2010,8 @@ menu re-seeks the same lobby so the server attaches (or drops) the account.
    transport retried a crashed server's address after its restart) seeks once at once and a
    second refusal within 30 s is shown ("Could not rejoin: ... again"). The error screen keeps the
    server's message ("GAME UPDATING" is v7's "Game Updating" header) with "Rejoining a game...".
-   Direct (pinned) servers have no tickets: the transport retries them. Console `reconnect` / F5
-   seek again too (`autoChangeGame` after a server stop), never with the old ticket.
+   Direct (pinned) servers have no tickets: the transport retries them. Console `reconnect` / F5 (its reload
+   ends with it) seek again too (`autoChangeGame` after a server stop), never with the old ticket.
    A session the transport lost with no server `ERROR` (not a kick or ban: a gateway or network
    drop, a crashed server) shows the transport's own reason instead of a bare "Disconnected from
    server": `Disconnected: <reason>`, ID `0x000001` and, like v7.1.4's `io_disconnect(null,

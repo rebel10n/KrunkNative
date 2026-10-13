@@ -58,6 +58,7 @@
 #include <lobby_ui.h> // WP-E: lobby packets, match vote cards (net/lobby_events.c)
 #include <game_config.h> // WP-E: GAME_CONFIG on INIT, the round's networkData
 #include <map_catalog.h> // startup map lookup (--map, --sandbox, ?map=, ?sandbox)
+#include <game_reload.h> // F5: the full reload (game_reload.c)
 #include <ks_client.h> // KrunkScript client host: the map's client script (ks/ks_client_host.c)
 #include <ks_game.h> // ks_game_free
 
@@ -429,6 +430,7 @@ int main(int argc, char **argv) {
     printf(KN_PRODUCT_NAME " (KrunkNative client) %s\n", kn_build_string());
     install_root_chdir(); // packaged installs started from elsewhere: ui/ + assets/ (install_root.h)
     debug_capture_startup(); // KRUNKNATIVE_CAMERA/SCREENSHOT runs ignore stored settings (debug_capture.c)
+    game_reload_startup();   // F5: files changed from now on are new; the session an F5 restart hands over
 
     char *rand_memory = malloc(1);
     pcg32_srandom(time(NULL), *(unsigned int *) &rand_memory);

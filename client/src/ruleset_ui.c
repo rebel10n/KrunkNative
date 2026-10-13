@@ -82,6 +82,26 @@ void client_ruleset_env_cleanup(void) {
 #endif
 }
 
+int client_ruleset_page_pending(void) {
+#ifdef __EMSCRIPTEN__
+    return 0; // one page on the web
+#else
+    const Ruleset *saved = client_ruleset_saved(), *page = client_ruleset_page();
+    if (saved == page) return 0;
+    const char *user_dir = getenv("KRUNKNATIVE_UI_DIR");
+    if (user_dir && *user_dir && !g_ui_env_set) return 0; // the user's page tree wins
+    const char *dir = saved->ui_page_dir ? saved->ui_page_dir : "";
+    const char *loaded = page->ui_page_dir ? page->ui_page_dir : "";
+    if (!strcmp(dir, loaded)) return 0;
+    if (dir[0]) {
+        char index[600];
+        snprintf(index, sizeof(index), "%s%s/index.html", ui_default_path(), dir);
+        if (!file_exists(index)) return 0; // startup would show ui/ again
+    }
+    return 1;
+#endif
+}
+
 ClientRulesetResult client_ruleset_select(Client *client, const char *name) {
     if (!name) return CLIENT_RULESET_UNKNOWN;
     const char *n = name[0] == 'v' || name[0] == 'V' ? name + 1 : name;

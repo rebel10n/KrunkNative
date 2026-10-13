@@ -288,6 +288,21 @@ int ui_windows_load(void) {
     return 1;
 }
 
+// F5 (game_reload.c): the templates read again from ui/windows; callers only use them while they
+// generate a window, so the old strings can go.
+int ui_windows_reload(void) {
+    for (int i = 0; i < g_file_count; i++) free(g_files[i].html);
+    for (int v = 0; v < 2; v++)
+        for (int t = 0; t < g_settings_tab_count[v]; t++) free(g_settings_tabs[v][t].html);
+    for (int t = 0; t < g_controls_tab_count; t++) free(g_controls_tabs[t].html);
+    memset(g_files, 0, sizeof(g_files));
+    memset(g_settings_tabs, 0, sizeof(g_settings_tabs));
+    memset(g_controls_tabs, 0, sizeof(g_controls_tabs));
+    g_file_count = g_settings_tab_count[0] = g_settings_tab_count[1] = g_controls_tab_count = 0;
+    g_loaded = 0;
+    return ui_windows_load();
+}
+
 static const UiWindowFile *find_file(const char *key) {
     for (int i = 0; i < g_file_count; i++) {
         if (!strcmp(g_files[i].key, key)) return &g_files[i];

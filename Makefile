@@ -190,6 +190,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, bil
 	./$(DEBUG_DIR)/target_select_test
 	./$(DEBUG_DIR)/meshopt_test .
 	./$(DEBUG_DIR)/window_state_test
+	./$(DEBUG_DIR)/win_geom_test
 	./$(DEBUG_DIR)/mod_pack_test .
 
 # --------------------------------------------------------------------------- html-engine
@@ -431,8 +432,16 @@ pickup-chat-e2e: build ## Pickup feedback on server_bin: Object Manager Junk + G
 	timeout 120 $(PYTHON) -I server/tests/pickup_chat_e2e.py $(DEBUG_DIR)
 
 .PHONY: reconnect-test
-reconnect-test: build ## Reconnect key (F5) online + offline, console sandbox / offline <map>, --sandbox (headless; EGL_DEVICE=...)
+reconnect-test: build ## F5 (reload + rejoin) online + offline, console reconnect / sandbox / offline <map>, --sandbox (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I server/tests/reconnect_key_e2e.py $(DEBUG_DIR)
+
+.PHONY: console-reload-test
+console-reload-test: build ## Dev console kept in the window (off-screen save, resize, F11, drag, console_reset) + F5 full reload in place and its restart fallback (headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I server/tests/console_reload_e2e.py $(DEBUG_DIR)
+
+.PHONY: hitmarker-test
+hitmarker-test: build ## The hit marker never stays on the death screen: hit -> die, a hit while dead, respawn (headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I server/tests/hitmarker_death_e2e.py $(DEBUG_DIR)
 
 .PHONY: ui-transitions-test
 ui-transitions-test: build ## UI state across ESC / death / end screen / spectate / windows / map change / disconnect / offline<->online, Object Manager scroll (headless; EGL_DEVICE=...)

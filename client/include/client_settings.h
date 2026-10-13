@@ -27,6 +27,13 @@ void client_settings_startup(Client *client, int *offline);
 // After the native shutdown: closes Discord RPC and, when a restart was requested
 // (settings marked "*", Clear Cache & Storage), starts the client again.
 void client_settings_exit(void);
+// Before this process re-executes itself (a relaunch, F5's restart fallback): the environment it
+// set from the settings (brain URL, audio backend, the Game version's page tree) is dropped, so
+// the next process reads the saved settings again.
+void client_settings_before_exec(void);
+// F5 (game_reload.c): the Client tab's store read again and its live settings applied. Returns
+// the name of a changed setting that only applies at startup (the "*" rows), else NULL.
+const char *ui_client_settings_reload(void);
 
 // ---- game side
 int  client_settings_hs_sound_always(void);              // "Always Play HS Sound on Kill"

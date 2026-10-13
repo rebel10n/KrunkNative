@@ -39,6 +39,11 @@ static void keys_load(void) {
     g_keys.ctrl_tp_enabled = html_storage_get(CTRL_TP_KEY, value, sizeof(value)) >= 0 && !strcmp(value, "1");
 }
 
+void ui_mod_keys_reload(void) {
+    g_keys.loaded = 0;
+    keys_load();
+}
+
 static void toggle_ctrl_tp(void) {
     g_keys.ctrl_tp_enabled = !g_keys.ctrl_tp_enabled;
     html_storage_set(CTRL_TP_KEY, g_keys.ctrl_tp_enabled ? "1" : "0"); // String(+window.ctrlTpEnabled)

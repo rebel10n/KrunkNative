@@ -100,6 +100,51 @@ int geometry_cache_reload(const char *path) {
     return 1;
 }
 
+// The cache keys first: geometry_cache_reload erases and re-inserts its entry.
+static char **cache_keys(const int textures, size_t *count) {
+    *count = 0;
+    const size_t size = textures ? vt_size(&g_texture_cache) : vt_size(&g_geometry_cache);
+    char **keys = size ? malloc(size * sizeof(char *)) : NULL;
+    if (!keys) return NULL;
+    if (textures) {
+        for (texture_cache_map_itr it = vt_first(&g_texture_cache); !vt_is_end(it) && *count < size; it = vt_next(it))
+            keys[(*count)++] = strdup(it.data->key);
+    } else {
+        for (geometry_cache_map_itr it = vt_first(&g_geometry_cache); !vt_is_end(it) && *count < size; it = vt_next(it))
+            keys[(*count)++] = strdup(it.data->key);
+    }
+    return keys;
+}
+
+// Only keys that name a readable file: the cache also holds generated textures (v7sign:...
+// canvas signs), which have no file to read again.
+static int cache_key_is_file(const char *key) {
+    char swapped[1024];
+    FILE *f = fopen(file_redirect(key, swapped, sizeof(swapped)), "rb");
+    if (f) fclose(f);
+    return f != NULL;
+}
+
+static int cache_reload_all(const int textures) {
+    size_t count;
+    char **keys = cache_keys(textures, &count);
+    int done = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (keys[i] && cache_key_is_file(keys[i])) done += textures ? texture_cache_reload(keys[i]) : geometry_cache_reload(keys[i]);
+        free(keys[i]);
+    }
+    free(keys);
+    return done;
+}
+
+int texture_cache_reload_all(void) {
+    return cache_reload_all(1);
+}
+
+int geometry_cache_reload_all(void) {
+    return cache_reload_all(0);
+}
+
 GlyphCacheEntry *load_glyph(const char c) {
     glyph_cache_map_itr cached = vt_get(&g_glyph_cache, c);
     if (!vt_is_end(cached)) return cached.data->val;

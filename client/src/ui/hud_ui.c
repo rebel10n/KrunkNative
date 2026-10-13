@@ -1309,6 +1309,10 @@ static void hud_hit_step(const double now_ms) {
 void hud_ui_hit(Client *client, const int kill) {
     HudUi *ui = &g_hud_ui;
     if (!html_ui_available() || ui->visible != 1) return;
+    // Dead (a hit credited after the death: a projectile, the kill shot's HIT behind the KILL):
+    // v7's game-overlay draws the marker on the overlay canvas, which the death card hides, and
+    // its fade runs out before a respawn. #knHitmarker would stay on the death screen instead.
+    if (client && !hud_in_game(client)) return;
 
     // showHit(): hitSet (Display tab hitmarker settings, 134.js hitm*)
     const ClientRenderSettings *rs = client_render_settings();
@@ -3766,6 +3770,9 @@ void client_hud_html_tick(Client *client, const float now_f) {
         // closing the menu rewrites them (valid = 0 below).
         if (hud->scoped || hud->aim_dot) hud_reset_aim(client);
         hud_hide_crosshair();
+        // the hit marker too: its fade (hud_hit_step) only runs while playing, so a marker from
+        // the last hits before the death stayed on the death screen, frozen at its opacity
+        if (ui->hit_active) hud_hide_hit();
         if (ui->dmg_last_ms >= 0.0) hud_dmg_hide_all();
         if (ui->nums_last_ms >= 0.0) hud_nums_hide_all();
         hud_speed_step(client, now * 1000.0); // hides it

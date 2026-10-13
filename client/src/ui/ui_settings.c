@@ -872,6 +872,40 @@ void ui_settings_push_saved(void) {
     }
 }
 
+// F5 (game_reload.c): knSettings read again from disk, every setting pushed again; a setting the
+// file no longer has goes back to its default, and each changed one syncs the page like a change
+// in the window (sync_controls). Returns how many settings changed.
+int ui_settings_reload(void) {
+    cJSON *old = g_settings;
+    g_settings = NULL;
+    ui_settings_load();
+    if (g_defaults && g_defaults->child) settings_repair();
+    Client *client = menu_ui()->client;
+    int changed = 0;
+    char text[256];
+    const cJSON *item;
+    cJSON_ArrayForEach(item, g_settings) {
+        const cJSON *was = old ? cJSON_GetObjectItem(old, item->string) : NULL;
+        if (was && cJSON_Compare(was, item, 1)) continue;
+        ui_setting_to_string(item, text, sizeof(text));
+        sync_controls(item->string, text);
+        changed++;
+    }
+    cJSON_ArrayForEach(item, old) { // dropped from the file: the default again
+        if (cJSON_GetObjectItem(g_settings, item->string)) continue;
+        const cJSON *def = ui_setting_value(item->string);
+        if (!def) continue;
+        ui_setting_to_string(def, text, sizeof(text));
+        client_apply_setting(client, item->string, text);
+        sync_controls(item->string, text);
+        changed++;
+    }
+    cJSON_Delete(old);
+    ui_settings_push_saved();
+    menu_scale_base(); // scaleUI / uiScaling
+    return changed;
+}
+
 // ---------------------------------------------------------------- settings window helpers
 
 static void str_tolower(char *s) {

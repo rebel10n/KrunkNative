@@ -23,6 +23,10 @@ void client_ruleset_startup(void);
 const Ruleset *client_ruleset_page(void);
 // Relaunch: drop the KRUNKNATIVE_UI_DIR this process set (the next one reads the setting again).
 void client_ruleset_env_cleanup(void);
+// 1 when the saved Game version wants another menu page tree than the one loaded and a restart
+// would load it (natively; the user's KRUNKNATIVE_UI_DIR and a missing ui/<dir> keep the page).
+// F5 (game_reload.c) restarts for it.
+int client_ruleset_page_pending(void);
 
 typedef enum {
     CLIENT_RULESET_UNKNOWN = 0,     // not a ruleset name

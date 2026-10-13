@@ -610,11 +610,15 @@ static char **read_cmdline(void) {
 }
 #endif
 
-static void relaunch(void) {
+void client_settings_before_exec(void) {
     // the next process reads the settings again: drop what this one put into the environment
     if (!g_cs.brain_env_was_set) set_env("KRUNKNATIVE_BRAIN_URL", NULL);
     client_ruleset_env_cleanup(); // the next process picks the page of the saved Game version
     if (g_cs.audio_env_set) set_env("KRUNKNATIVE_AUDIO_BACKEND", NULL);
+}
+
+static void relaunch(void) {
+    client_settings_before_exec();
     client_render_window_before_exec(g_cs.client ? g_cs.client : menu_ui()->client); // KRUNKNATIVE_RESTORE_WINDOW
     fflush(stdout);
     fflush(stderr);
@@ -1123,6 +1127,44 @@ static void apply_setting(const ClientSetting *s) {
         cs_string("audioOutput", output, sizeof(output));
         audio_set_output_device(output); // re-opens the device live
     }
+}
+
+// F5 (game_reload.c): the store read again from disk; each changed live setting applied like a
+// change in the tab (apply_setting), custom.css and the swapper folder read again. Rows of the
+// game store (CS_GAME) follow the game settings' own reload.
+const char *ui_client_settings_reload(void) {
+#ifdef __EMSCRIPTEN__
+    return NULL; // the web reload is the browser's (location.reload)
+#else
+    enum { N = COUNT(SETTINGS) };
+    static char before[N][256];
+    for (int i = 0; i < N; i++) setting_value(&SETTINGS[i], before[i], sizeof(before[i]));
+    cJSON_Delete(g_cs.store);
+    g_cs.store = NULL;
+    store_load();
+    const char *restart = NULL;
+    for (int i = 0; i < N; i++) {
+        const ClientSetting *s = &SETTINGS[i];
+        if ((s->flags & CS_GAME) || s->kind == CS_BUTTON || !setting_shown(s)) continue;
+        char now[256];
+        setting_value(s, now, sizeof(now));
+        if (!strcmp(now, before[i])) continue;
+        printf("[client] reload: %s %s -> %s\n", s->key, before[i], now);
+        if (s->flags & CS_RESTART) {
+            if (!restart) restart = s->name; // applies at startup only
+            continue;
+        }
+        apply_setting(s);
+    }
+    apply_custom_css(); // custom.css may have changed with the switch left on
+    if (!restart && cs_bool("swapper")) { // new or removed files in the swapper folder
+        for (int i = 0; i < g_swap.count; i++) free(g_swap.files[i]);
+        g_swap.count = g_swap.root_count = 0;
+        swap_init();
+    }
+    rerender();
+    return restart;
+#endif
 }
 
 static void set_client_setting(const char *key, const char *value) {

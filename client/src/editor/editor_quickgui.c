@@ -17,6 +17,7 @@
 //   stops the selected group, as here.
 #include "editor_internal.h"
 #include <math.h>
+#include <win_geom.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -183,10 +184,24 @@ static void qs_build(EdBuf *b, const char *json) {
     edb_add(b, "</textarea></div></div></div>");
 }
 
+// KrunkNative: placed or dragged, the menu keeps its titlebar strip in the window (win_geom.h;
+// QuickSettings let a drag take it anywhere, also out of reach)
+static const WinGeomRules QS_RULES = {150.0f, WIN_GEOM_KEEP_H, WIN_GEOM_KEEP_W, WIN_GEOM_KEEP_H};
+
 static void qs_set_position(const float x, const float y) {
     char v[32];
-    g_qs_x = x;
-    g_qs_y = fmaxf(y, 0.0f);
+    float vw = 0, vh = 0, dpr = 1;
+    html_dom_viewport(&vw, &vh, &dpr);
+    WinGeom g = {x, y, html_dom_offset_width(g_qs), html_dom_offset_height(g_qs)};
+    if (g.w <= 0) g.w = 150.0f;  // setWidth(150)
+    if (g.h <= 0) g.h = 238.0f;  // not laid out yet: the menu's height at the default font
+    if (vw > 0 && vh > 0) {
+        const float h = g.h;
+        win_geom_fit(&g, vw, vh, &QS_RULES);
+        g.h = h; // its height is the content's: only the position follows
+    }
+    g_qs_x = g.x;
+    g_qs_y = fmaxf(g.y, 0.0f);
     snprintf(v, sizeof(v), "%gpx", g_qs_x);
     html_dom_set_style(g_qs, "left", v);
     snprintf(v, sizeof(v), "%gpx", g_qs_y);
@@ -283,6 +298,10 @@ void ed_quickgui_cursor(const double fb_x, const double fb_y) {
 }
 
 void ed_quickgui_release(void) { g_qs_dragging = 0; }
+
+void ed_quickgui_refit(void) {
+    if (g_qs && !g_qs_hidden) qs_set_position(g_qs_x, g_qs_y);
+}
 
 static int h_qs_drag(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) user; (void) args; (void) argc;

@@ -58,6 +58,7 @@ int gltf_model_animated(const GltfModel*); // has animations (clips)
 // The file behind `path` changed (a resource pack came or went, mod_pack.c): the next
 // gltf_model_load(path) parses it again; instances keep the model they were made from.
 void gltf_model_forget(const char *path);
+void gltf_model_forget_all(void); // F5 (game_reload.c): every file model; not the viewer's imports
 // The viewer's imports (v7 RENDER.updateMesh(key, data, "gltf" | "glb")): from now on
 // gltf_model_load(path) answers the model parsed from `source`; the model `path` had stays alive
 // for the instances that use it. 0 when `source` cannot be loaded (nothing changes).

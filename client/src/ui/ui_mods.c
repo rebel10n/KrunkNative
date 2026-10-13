@@ -53,6 +53,11 @@ static void mods_load(void) {
     g_mods.force_offline = mods_read_bool(MODS_KEY_FORCE_OFFLINE, 1);
 }
 
+void ui_mods_reload(void) {
+    g_mods.loaded = 0;
+    mods_load();
+}
+
 int ui_mods_dev_console_enabled(void) {
     mods_load();
     return g_mods.dev_enabled;

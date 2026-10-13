@@ -30,6 +30,7 @@
 #include <sky.h>
 #include <ui_logic.h> // ui_text_input_focused
 #include <backend_ui.h> // account_ui_twofa_handler: the 2FA popup of a password login
+#include <win_geom.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -644,6 +645,39 @@ static int resize_handle_at(const HtmlElem e) {
     return panel && html_dom_has_class(panel, "right") ? 1 : 0;
 }
 
+// KrunkNative: a panel never takes more than the page leaves beside the other one (win_geom.h:
+// the body less the other panel is its viewport, 220 px its minimum), also when the window narrows
+static float fit_panel_width(const int right, const float w) {
+    static const WinGeomRules PANEL = {220.0f, 0.0f, 0.0f, 0.0f};
+    const float body_w = html_dom_offset_width(html_dom_by_id("uiBase"));
+    const HtmlElem other = html_dom_query(0, right ? ".left.panel" : ".right.panel");
+    const float other_w = g_ed.panel_hidden[!right] || !other ? 0.0f : html_dom_offset_width(other);
+    WinGeom g = {0.0f, 0.0f, w, 0.0f};
+    if (body_w > 0.0f) win_geom_fit_resize(&g, body_w - other_w, 1e9f, &PANEL);
+    return g.w;
+}
+
+static void set_panel_width(const HtmlElem panel, const int right, const float w) {
+    char v[32];
+    snprintf(v, sizeof(v), "%gpx", w);
+    html_dom_set_style(panel, "width", v);
+    if (right) {
+        snprintf(v, sizeof(v), "%gpx", html_dom_offset_width(html_dom_by_id("uiBase")) - w);
+        html_dom_set_style(panel, "left", v);
+    }
+    g_ed.panel_width[right] = w;
+}
+
+static void fit_panels(void) {
+    for (int right = 0; right < 2; right++) {
+        const HtmlElem panel = html_dom_query(0, right ? ".right.panel" : ".left.panel");
+        if (!panel || g_ed.panel_hidden[right]) continue;
+        const float w = html_dom_offset_width(panel);
+        const float fitted = w > 0.0f ? fit_panel_width(right, w) : w;
+        if (w > 0.0f && fabsf(fitted - w) >= 0.5f) set_panel_width(panel, right, fitted);
+    }
+}
+
 static void resize_drag(const float page_x) {
     if (g_resize_drag < 0) return;
     HtmlElem panel = html_dom_query(0, g_resize_drag ? ".right.panel" : ".left.panel");
@@ -652,15 +686,8 @@ static void resize_drag(const float page_x) {
     const float body_w = html_dom_offset_width(html_dom_by_id("uiBase"));
     const float handle_w = 5.0f; // .resize width (t.clientWidth)
     float w = g_resize_drag ? body_w - page_x / scale + handle_w / 2 : page_x / scale + handle_w / 2; // clientLeft 0
-    w = fminf(fmaxf(w, 220.0f), 600.0f);
-    char v[32];
-    snprintf(v, sizeof(v), "%gpx", w);
-    html_dom_set_style(panel, "width", v);
-    if (g_resize_drag) {
-        snprintf(v, sizeof(v), "%gpx", body_w - w);
-        html_dom_set_style(panel, "left", v);
-    }
-    g_ed.panel_width[g_resize_drag] = w;
+    w = fit_panel_width(g_resize_drag, fminf(fmaxf(w, 220.0f), 600.0f));
+    set_panel_width(panel, g_resize_drag, w);
     relayout_center();
 }
 
@@ -1856,7 +1883,9 @@ static void page_resize(Client *client, const int w, const int h) {
     (void) client; (void) w; (void) h;
     if (!g_ed.active) return;
     editor_scale_ui();
+    fit_panels();
     relayout_center();
+    ed_quickgui_refit();
 }
 
 // settled once the KRUNKNATIVE_EDITOR_SCRIPT ran (about 1 s after enter, also without one):

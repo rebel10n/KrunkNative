@@ -28,7 +28,8 @@
 #include <hud_social.h> // WP-E: spray / spray wheel, taunts, quick chat (hud_social.c)
 #include <sprays.h>     // the spray wheel takes the mouse wheel
 #include <third_person.h> // the Third Person bind
-#include <app_mode.h>   // app_reload: the Reconnect key on the web
+#include <app_mode.h>   // app_reload: the Reload Game / Reconnect keys on the web
+#include <game_reload.h> // the Reload Game key natively
 #include <object_manager.h> // the Object Manager's Undo / Remove binds
 #include <GLFW/glfw3.h>
 #include <math.h>
@@ -223,10 +224,12 @@ static const V7Bind V7_BINDS[] = {
     {"killSB", -1, "sandboxKill", -1, -1, -1},
     {"spawnBot", -1, "sandboxSpawnBot", 107, -1, -1},
     {"clearBots", -1, "sandboxClearBots", 109, -1, -1},
-    // KrunkNative addition (not a v7.1.4 ControlBind): Reconnect, F5 (keyCode 116) by default.
-    // v7 has no such bind (the browser's F5 reloads the page); the native client reconnects
-    // in place instead (console `reconnect`), the web build still reloads (reconnect_key).
-    {"reconnect", -1, "reconnectKey", 116, -1, UI_CONTROL_RECONNECT},
+    // KrunkNative additions (not v7.1.4 ControlBinds): Reload Game, F5 (keyCode 116) by default: v7
+    // has no such bind, the browser's F5 reloads the page; natively it is the full in-place reload
+    // (game_reload.h, console `reload`), the web build still reloads the page (reload_key).
+    // Reconnect (console `reconnect`) had F5 before and is unbound by default now.
+    {"gameReload", -1, "gameReloadKey", 116, -1, UI_CONTROL_GAME_RELOAD},
+    {"reconnect", -1, "reconnectKey", -1, -1, UI_CONTROL_RECONNECT},
     // KrunkNative addition: the Object Manager, F1 (keyCode 112): toggles the spawn menu and the pointer.
     {"objectManager", -1, "objectManagerKey", 112, -1, UI_CONTROL_OBJECT_MANAGER},
     // KrunkNative additions: the Object Manager's Undo (U, 85) and Remove at the crosshair (Delete, 46)
@@ -299,6 +302,7 @@ static const ControlRow TAB_GENERAL[] = {
     {"Spray Wheel (Hold)", "sprayWheel", -1, 0, "Weapon"}, {"Player List", "playerList", -1, 0, "Interface"},
     {"InGame Leaderboard", "scoreBoard", -1, 0, "Interface"}, {"Hide Players", "hidePlayers", -1, 0, "Players"},
     // KrunkNative additions, last so v7's rows keep their places (binds.reconnect / objectManager above)
+    {"Reload Game", "gameReload", -1, 0, "Connection"},
     {"Reconnect", "reconnect", -1, 0, "Connection"},
     {"Object Manager", "objectManager", -1, 0, "Sandbox"},
     {"Object Manager Undo", "omUndo", -1, 0, "Sandbox"},
@@ -1292,10 +1296,22 @@ static void release_code(Client *client, const int code) {
 
 // ---------------------------------------------------------------- GLFW events
 
-// The Reconnect bind (F5): the console's `reconnect` natively (the same server or lobby, the
-// offline game restarted on its map). On the web it stays the page reload (mods.ts F5:
+// The Reload Game bind (F5): the full reload natively (game_reload.h: settings, binds, assets,
+// then back into the same game). On the web it is the page reload (mods.ts F5:
 // location.reload()); the address bar keeps ?game=<id> / ?offline=1&map= / ?sandbox
 // (servers_ui.c), so the reload lands back in the same game.
+static void reload_key(void) {
+#ifdef __EMSCRIPTEN__
+    g_ctl.game_key = 0; // no preventDefault: the browser's own F5 reloads too
+    app_reload(NULL);
+#else
+    printf("[controls] reload key\n");
+    game_reload_request("F5");
+#endif
+}
+
+// The Reconnect bind (unbound by default): the console's `reconnect` natively (the same server
+// or lobby, the offline game restarted on its map); the page reload on the web.
 static void reconnect_key(void) {
 #ifdef __EMSCRIPTEN__
     g_ctl.game_key = 0; // no preventDefault: the browser's own F5 reloads too
@@ -1324,6 +1340,12 @@ int ui_controls_key_event(Client *client, const int key, const int scancode, con
         return 1;
     }
 
+    // Reload Game: in game and in the menu, also with the console open; while typing only on a
+    // function key (F5 never types; the browser's F5 reloads from a text field too)
+    if (press && code >= 0 && bind_is(UI_CONTROL_GAME_RELOAD, code) && ((code >= 112 && code <= 123) || (!g_ctl.chat_focused && !ui_text_input_focused()))) {
+        reload_key();
+        return 1;
+    }
     if (ui_console_key_event(client, key, scancode, action, mods)) return 1; // dev console + mods.ts keys (ui_console.c)
 
     // Reconnect works in game and in the menu, but not while typing (chat, a menu field)
