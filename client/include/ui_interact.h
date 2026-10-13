@@ -12,3 +12,6 @@ void ui_interact_drop(Client*);                  // dropKey: "drpw"
 // confirmKey (v7 controls.js binds.confirm, "confirmKey" K by default; ui_controls.c):
 // "cnfm" when a confirmation is pending. 1 = consumed.
 int  ui_interact_confirm(Client*);
+// --render-scenario state.interact (ui_scenario.c): this innerHTML is the prompt while in game,
+// whatever the scan finds ("" / NULL: the scan again)
+void ui_interact_scenario(const char *html);

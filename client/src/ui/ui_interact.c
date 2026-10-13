@@ -17,11 +17,17 @@
 #define INTERACT_KEY_COLOR "#FBC02D"        // COLORS.interactPopup.key
 #define INTERACT_ENOUGH_COLOR "#9eeb56"     // COLORS.interactPopup.enough
 #define INTERACT_NOT_ENOUGH_COLOR "#eb5656" // COLORS.interactPopup.notEnough
+#define INTERACT_BOTTOM "220px"             // updateInteract: interactMsg.style.bottom (desktop)
 
 static struct {
     int prompt_shown;
     char prompt[768];
+    char scenario[768]; // ui_interact_scenario: the prompt shown in place of the scan's
 } g_interact;
+
+void ui_interact_scenario(const char *html) {
+    snprintf(g_interact.scenario, sizeof(g_interact.scenario), "%s", html ? html : "");
+}
 
 static int in_game(const Client *client) {
     return client && client->me && client->me->active && client->game.ready && !html_ui_is_menu_open();
@@ -191,7 +197,10 @@ static void update_prompt(Client *client) {
     const HtmlElem msg = html_dom_by_id("interactMsg");
     if (!msg) return;
     char html[sizeof(g_interact.prompt)] = "";
-    if (in_game(client)) build_prompt(client, html, sizeof(html));
+    if (in_game(client)) {
+        if (g_interact.scenario[0]) snprintf(html, sizeof(html), "%s", g_interact.scenario);
+        else build_prompt(client, html, sizeof(html));
+    }
     if (html[0]) {
         if (!g_interact.prompt_shown || strcmp(html, g_interact.prompt)) {
             html_dom_set_html(msg, html);
@@ -201,6 +210,12 @@ static void update_prompt(Client *client) {
         // the visibility pass, the spectator HUD) hide #interactMsg without telling us.
         char display[16];
         if (html_dom_get_style(msg, "display", display, sizeof(display)) < 0 || strcmp(display, "block") != 0) html_dom_set_display(msg, "block");
+        // ... and its bottom (players.js:3940): main.css gives #interactMsg no top/bottom, so
+        // without it the box sits at its static position, the top of the zero-height
+        // #midGameUIHider (the top edge of the screen). 220px on desktop (77px is mobile,
+        // "50%" the Opensea prompt, type 11: neither is ported).
+        char bottom[16];
+        if (html_dom_get_style(msg, "bottom", bottom, sizeof(bottom)) < 0 || strcmp(bottom, INTERACT_BOTTOM) != 0) html_dom_set_style(msg, "bottom", INTERACT_BOTTOM);
         g_interact.prompt_shown = 1;
     } else if (g_interact.prompt_shown) {
         html_dom_set_html(msg, "");

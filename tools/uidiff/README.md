@@ -194,6 +194,7 @@ client_bin --render-scenario <scenario.json> <out.png>
 | `spin`, `spinMulti`, `spinResult` | int, bool, `{rand, item}` | the store's prize wheel screen without a brain: `prizeWheel(spin, null, spinMulti)` with noAnim (the wheel at its full size), then optionally the spin's reply (rolls `rand`, skins `item`: numbers, or arrays for a multi-spin) with the spin itself skipped: the won item's reveal (`store_ui_scenario_wheel` / `_result`; the reveal needs `account`) |
 | `spinHistory` | array of `{ind, dte, fds}` | with `spin`: a `spinH` reply, the Spin History popup opens |
 | `matchVotes` | array of `{mode, map, name, votes}` | the end screen's vote cards (a `MATCH_VOTE_STATE` packet through `lobby_events_handle`), with `endscreen` |
+| `interact` | string | in game: `#interactMsg`'s innerHTML, shown through `ui_interact_tick` as if the player stood at an interactable (`ui_interact_scenario`) |
 
 ### Regions JSON
 
@@ -255,7 +256,9 @@ signed in with spin tickets (`account.skins`). `tools/kref/spin_e2e.py` spins fo
 
 In-game (v7's sandbox, Free for All on Kanji, local player `Local User`): `ingame-plain`,
 `ingame-scoped`, `ingame-reloading`, `ingame-scoreboard`, `ingame-chat-open`, `ingame-killfeed`,
-`ingame-death`, `ingame-death-self`, `ingame-endscreen`, `ingame-pause-esc`. HUD regions follow
+`ingame-death`, `ingame-death-self`, `ingame-endscreen`, `ingame-pause-esc`, `ingame-interact`
+(Freight's "Press [G] to pickup Junk" trigger prompt: v7's own updateInteract writes it in the
+reference). HUD regions follow
 v7's elements (`#timerHolder`, `#matchInfo`, `#pingDisplay`, `#chatInputHolder`, `#chatList`,
 `#bottomLeftPlayer`, `#weapHolder`, `#ammoHolder`, `#killFeed`, `#centerLeaderDisplay`, the death
 screen rows) plus the crosshair. Skipped: what v7 draws on its overlay canvas or what changes per

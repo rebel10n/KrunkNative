@@ -478,6 +478,13 @@ game("ingame-scoped", game_state(hud(aim=1)),
      "Assault Rifle aimed (right mouse held): crosshair hidden, red aim dot.")
 game("ingame-reloading", game_state(hud(ammo=27, reloading=True)), hud_regions(rects("ingame/ingame-reloading")),
      "3 shots fired, R pressed: 27 | 28 while reloading.")
+# the interact prompt (Freight's "pickup Junk" interact-key trigger, players.js updateInteract type 7):
+# v7 writes the markup, display and bottom: 220px itself (capture-v7.js FORCE_INTERACT); natively
+# state.interact puts the same markup through ui_interact_tick
+rc = rects("ingame/ingame-interact")
+game("ingame-interact", game_state(hud(), interact='Press <span style="color:#FBC02D">[G]</span> to pickup Junk'),
+     hud_regions(rc, [R("interact", pad(rc["interactMsg"], 2), "text", "#interactMsg: Press [G] to pickup Junk, bottom 220px")]),
+     "Interact prompt of an onInteractKey trigger (Freight's Junk): #interactMsg 220px above the bottom.")
 game("ingame-scoreboard", game_state(hud(scoreboard=True), scoreboard=[{"rank": 1, "name": "Local User", "score": 0}]),
      hud_regions(rects("ingame/ingame-scoreboard")), "Tab held: v7's #centerLeaderDisplay table, one row.")
 game("ingame-chat-open", game_state(hud(), chatOpen=True, chatInput="gg"), hud_regions(rects("ingame/ingame-chat-open")),

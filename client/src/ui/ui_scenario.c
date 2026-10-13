@@ -24,6 +24,7 @@
 #include <GLFW/glfw3.h>
 #include <headless.h> // swap/current window that also work without a window (KRUNKNATIVE_HEADLESS)
 #include <ui_logic.h>
+#include <ui_interact.h> // state.interact
 #include <backend_ui.h> // WP-E part 2c: state.account
 #include <app_mode.h> // state.page: hub / editor / viewer pages
 #include <debug_capture.h> // state.pageActions calls with arguments
@@ -238,6 +239,7 @@ static void warn_unknown_keys(void) {
         "spinMulti",  // with spin: the wheel's Nx spin (prizeWheel(i, null, multi))
         "spinHistory", // with spin: a "spinH" reply [{ind, dte, fds}] (the Spin History popup)
         "matchVotes", // [{mode, map, name, votes}]: the end screen's vote cards (a MATCH_VOTE_STATE packet)
+        "interact",   // #interactMsg's innerHTML in game (ui_interact_scenario): the prompt without an interactable
     };
     const cJSON *item;
     cJSON_ArrayForEach(item, g_sc.state) {
@@ -838,6 +840,7 @@ static int ui_scenario_apply(Client *client) {
             return 0;
         }
         apply_pose(client);
+        ui_interact_scenario(st_str("interact")); // the prompt from the next HUD tick on
         run_frames(client, 2); // HUD visible + first value write (session edge seeds chat)
         apply_chat();
     }

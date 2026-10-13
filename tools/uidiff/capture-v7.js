@@ -76,7 +76,9 @@ const RECT_IDS = ['windowHeader', 'menuWindow', 'windowHolder', 'signedOutHeader
   'topLeftMain',
   // the prize wheel screen (win-spin*)
   'spinWindow', 'spinInfo', 'spinItems', 'spinButton', 'spinKR', 'spinHistoryBtn', 'spinItem', 'spinItemCanvas',
-  'spinItemName', 'spinUIBtns', 'spinNextBtn', 'spinAgainBtn', 'spinEquipBtn', 'spinHistoryPop', 'shopSideSellB'];
+  'spinItemName', 'spinUIBtns', 'spinNextBtn', 'spinAgainBtn', 'spinEquipBtn', 'spinHistoryPop', 'shopSideSellB',
+  // the interact prompt (ingame-interact)
+  'interactMsg'];
 const RECTS = `(() => { const o = {}; for (const id of ${JSON.stringify(RECT_IDS)}) { const e = document.getElementById(id);
   if (!e) continue; const cs = getComputedStyle(e); if (cs.display === 'none' || cs.visibility === 'hidden') continue;
   const r = e.getBoundingClientRect(); if (r.width < 1 || r.height < 1) continue;
@@ -381,6 +383,17 @@ scenario('ingame-reloading', 'ingame', async (c) => {
   await shoot(c, 3);
   await key(c, 'r', 'KeyR', 82);
   await settle(c, 300);
+});
+// the interact prompt of an onInteractKey trigger (players.js updateInteract type 7), as Freight's
+// "pickup Junk" triggers show it: every frame, before v7's updateInteract, its changeInteract gets
+// such a trigger, so v7's own code writes the prompt's markup, display and bottom (220px)
+const FORCE_INTERACT = `(() => { const pl = Game.players, up = pl.updateInteract, junk = { uid: 9999, interactMsg: 'pickup Junk' };
+  pl.updateInteract = function (p) { if (p.isYou) pl.changeInteract(p, junk, 7); return up.apply(this, arguments); };
+  return 1; })()`;
+scenario('ingame-interact', 'ingame', async (c) => {
+  await enterGame(c);
+  await c.eval(FORCE_INTERACT);
+  await settle(c, 800);
 });
 scenario('ingame-chat-open', 'ingame', async (c) => {
   await enterGame(c);
