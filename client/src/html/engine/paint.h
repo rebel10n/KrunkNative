@@ -101,6 +101,10 @@ typedef struct PaintHost {
     /* The bitmap of a <canvas> box (premultiplied texture, size in px); 0 = paint nothing.
      * *flip_y = 1: the texture's row 0 is the bottom (a GL render target, html_dom_canvas_gl). */
     int (*canvas_image)(void *user, const Box *box, uint32_t *tex, float *w, float *h, int *flip_y);
+    /* Selected byte range [*start, *end) of `run` (relative to run->text) of text box `tb`, the
+     * highlight colour and, when *has_fg, the selected text's colour (selection.c).  0 = none. */
+    int (*selection_range)(void *user, const Box *tb, const TextRun *run, uint32_t *start, uint32_t *end,
+                           CssColor *bg, CssColor *fg, int *has_fg);
 } PaintHost;
 
 struct PaintCtx {

@@ -58,6 +58,7 @@
 #include "anim.h"
 #include "events.h"
 #include "widgets.h"
+#include "selection.h"
 #include "util.h"
 
 #ifndef PATH_MAX
@@ -152,6 +153,7 @@ struct Engine {
     /* input */
     float mouse_x, mouse_y;
     int key_consumed;
+    Selection sel;                           /* page text selection (selection.c) */
     int cursor_shape;                        /* GLFW standard cursor id, 0 = default */
     GLFWcursor *cursors[9];
 
@@ -1304,6 +1306,254 @@ static void wh_blur(void *user, HtmlElem e)
 }
 
 /* ------------------------------------------------------------------------- */
+/* Page text selection (selection.c): mousedown's default action outside form */
+/* controls, Ctrl+C / Ctrl+A, the highlight through PaintHost.selection_range */
+/* ------------------------------------------------------------------------- */
+
+static int paint_selection_hook(void *user, const Box *tb, const TextRun *run, uint32_t *start, uint32_t *end,
+                                CssColor *bg, CssColor *fg, int *has_fg)
+{
+    Engine *g = user;
+    return sel_run_range(&g->sel, tb, run, start, end, bg, fg, has_fg);
+}
+
+static void sel_mark_contexts(Engine *g, Box *b)
+{
+    if (paint_is_stacking_context(b)) paint_mark_dirty(&g->paint, b);
+    for (Box *c = b->first_child; c; c = c->next) sel_mark_contexts(g, c);
+}
+
+/* The region's paint contexts re-record (the highlight changed). */
+static void sel_repaint(Engine *g, HtmlElem root)
+{
+    Box *b = root ? engine_elem_box(g, root) : NULL;
+    if (!b) return;
+    paint_mark_dirty(&g->paint, b);
+    sel_mark_contexts(g, b);
+    g->need_paint = 1;
+}
+
+static void sel_drop(Engine *g)
+{
+    const HtmlElem root = g->sel.root;
+    const int was = sel_active(&g->sel);
+    sel_clear(&g->sel);
+    if (was) sel_repaint(g, root);
+}
+
+/* Segments of the current region on the current layout; 0 when it is gone. */
+static int sel_refresh_segments(Engine *g)
+{
+    if (!g->sel.root || !engine_flush_layout(g)) return 0;
+    if (!dom_elem_data(g->dom, g->sel.root)) return 0;
+    Box *b = engine_elem_box(g, g->sel.root);
+    if (!b) return 0;
+    sel_collect(&g->sel, b);
+    return 1;
+}
+
+/* Before paint: entries hold Box pointers, so re-resolve on the new layout. */
+static void sel_before_paint(Engine *g)
+{
+    if (!g->sel.root) return;
+    if (!sel_active(&g->sel)) { /* a caret only (a click): nothing to paint */
+        g->sel.n_entries = 0;
+        return;
+    }
+    if (!sel_refresh_segments(g) || !sel_resolve(&g->sel, g->dom)) {
+        sel_clear(&g->sel);
+        paint_invalidate_all(&g->paint); /* the region (or its boxes) is gone: no cached highlight survives */
+    }
+}
+
+static void sel_node_removed(Engine *g, HtmlElem e, int include_root)
+{
+    if (!g->sel.root) return;
+    lxb_dom_node_t *n = dom_elem_node(g->dom, e);
+    if (!n) return;
+    lxb_dom_node_t *root = dom_elem_node(g->dom, g->sel.root);
+    const int root_gone = root && ((include_root && root == n) || sel_node_inside(root, n));
+    const int ends_gone = sel_node_inside(g->sel.anchor.node, n) || sel_node_inside(g->sel.focus.node, n);
+    if (root_gone || ends_gone) {
+        sel_clear(&g->sel);
+        paint_invalidate_all(&g->paint); /* rare: the highlight may sit in contexts the removal leaves alone */
+        g->need_paint = 1;
+    }
+}
+
+static HtmlElem sel_hit(Engine *g, float x, float y)
+{
+    Box *b = eh_hit_test(g, x, y);
+    return b ? eh_box_elem(g, b) : 0;
+}
+
+/* A left press: mousedown's default action, after events_mouse_button ran it
+ * (a prevented mousedown or a widget capture starts nothing and keeps the
+ * selection, like Chrome). */
+static void sel_press(Engine *g, int mods)
+{
+    Selection *s = &g->sel;
+    if (g->events.down_prevented) return;
+    const double now = engine_now_ms();
+    const float x = g->mouse_x, y = g->mouse_y;
+    if (now - s->last_press_ms <= SEL_MULTI_CLICK_MS && fabsf(x - s->last_press_x) <= SEL_MULTI_CLICK_PX
+        && fabsf(y - s->last_press_y) <= SEL_MULTI_CLICK_PX) s->clicks = s->clicks >= 3 ? 1 : s->clicks + 1;
+    else s->clicks = 1;
+    s->last_press_ms = now;
+    s->last_press_x = x;
+    s->last_press_y = y;
+
+    const HtmlElem target = sel_hit(g, x, y);
+    HtmlElem region = sel_region_for(g->dom, target);
+    const HtmlElem old_root = s->root;
+    const int had = sel_active(s);
+    /* only a press on an element holding selectable text starts one: a canvas, an image or an
+     * empty panel (the editor's viewport) clears instead of selecting the page's text */
+    Box *tbox = region ? engine_elem_box(g, target) : NULL;
+    while (tbox && tbox->type == BOX_INLINE && tbox->parent) tbox = tbox->parent; /* its text sits in the block's lines */
+    if (tbox && tbox->scrollbar_w > 0) { /* a press on the vertical scrollbar is not a text press */
+        float lx, ly;
+        layout_point_to_box(tbox, x, y, &lx, &ly);
+        const float bar_x = (tbox->flags & BOXF_RTL) ? box_padding_x(tbox) : box_padding_x(tbox) + box_padding_w(tbox) - tbox->scrollbar_w;
+        if (lx >= bar_x && lx < bar_x + tbox->scrollbar_w) return;
+    }
+    if (!tbox || !sel_collect(s, tbox)) region = 0;
+    if (!region) { /* click-away */
+        sel_drop(g);
+        return;
+    }
+    Box *rb = engine_elem_box(g, region);
+    if (!rb) return;
+    if (s->root != region) sel_clear(s);
+    s->root = region;
+    sel_collect(s, rb);
+    SelPoint p;
+    if (!sel_point_at(s, x, y, &p)) {
+        sel_clear(s);
+        if (had) sel_repaint(g, old_root);
+        return;
+    }
+    if ((mods & EV_MOD_SHIFT) && had && old_root == region && s->clicks == 1) { /* shift+click extends */
+        s->focus = p;
+        s->granularity = SEL_CHAR;
+    } else if (s->clicks >= 2) {
+        SelPoint a, b;
+        const int got = s->clicks == 2 ? sel_word_at(s, p, &a, &b) : sel_block_at(s, p, &a, &b);
+        if (!got) a = b = p;
+        s->granularity = s->clicks == 2 ? SEL_WORD : SEL_BLOCK;
+        s->word_a = a;
+        s->word_b = b;
+        s->anchor = a;
+        s->focus = b;
+    } else {
+        s->granularity = SEL_CHAR;
+        s->anchor = s->focus = p;
+    }
+    s->dragging = 1;
+    if (had && old_root != region) sel_repaint(g, old_root);
+    sel_repaint(g, region);
+}
+
+static void sel_drag_to(Engine *g, float x, float y)
+{
+    Selection *s = &g->sel;
+    if (!s->dragging || !sel_refresh_segments(g)) return;
+    SelPoint p;
+    if (!sel_point_at(s, x, y, &p)) return;
+    if (p.node == s->focus.node && p.off == s->focus.off && s->granularity == SEL_CHAR) return;
+    sel_extend_to(s, p);
+    sel_repaint(g, s->root);
+}
+
+/* Dragging above / below a scrolling region scrolls it (once per frame). */
+static void sel_autoscroll(Engine *g)
+{
+    Selection *s = &g->sel;
+    if (!s->dragging || !s->root) return;
+    Box *b = engine_elem_box(g, s->root);
+    if (!b) return;
+    Box *sc = (b->flags & BOXF_SCROLL_CONTAINER) ? b : b->scroller;
+    EvScrollInfo si;
+    HtmlRect r;
+    if (!sc || !eh_scroll_info(g, sc, &si) || !si.can_y || !layout_box_rect_in_viewport(sc, &r)) return;
+    float d = g->mouse_y < r.y ? g->mouse_y - r.y : g->mouse_y > r.y + r.h ? g->mouse_y - (r.y + r.h) : 0.0f;
+    if (d == 0.0f) return;
+    if (d > SEL_AUTOSCROLL_MAX_PX) d = SEL_AUTOSCROLL_MAX_PX;
+    if (d < -SEL_AUTOSCROLL_MAX_PX) d = -SEL_AUTOSCROLL_MAX_PX;
+    const float max_y = si.scroll_h - si.client_h > 0 ? si.scroll_h - si.client_h : 0.0f;
+    float ny = si.scroll_y + d;
+    ny = ny < 0 ? 0 : ny > max_y ? max_y : ny;
+    if (ny == si.scroll_y) return;
+    eh_set_scroll(g, sc, si.scroll_x, ny);
+    sel_drag_to(g, g->mouse_x, g->mouse_y);
+}
+
+static void sel_copy(Engine *g)
+{
+    if (!sel_refresh_segments(g)) return;
+    char *text = sel_text(&g->sel);
+    if (!text) return;
+    wh_clipboard_set(g, text);
+    vlog("selection copied (%zu bytes)", strlen(text));
+    free(text);
+}
+
+/* Ctrl+A outside a text control: the focused element's region (the console's
+ * .logs, focusable through tabindex), else the current selection's region. */
+static int sel_select_all(Engine *g)
+{
+    Selection *s = &g->sel;
+    const HtmlElem f = events_focused(&g->events);
+    HtmlElem region = f ? sel_region_for(g->dom, f) : 0;
+    if (!region) region = s->root;
+    if (!region) return 0;
+    const HtmlElem old_root = s->root;
+    if (old_root && old_root != region) sel_drop(g);
+    s->root = region;
+    SelPoint a, b;
+    if (!sel_refresh_segments(g) || !sel_all(s, &a, &b)) {
+        sel_clear(s);
+        return 0;
+    }
+    s->anchor = a;
+    s->focus = b;
+    s->granularity = SEL_CHAR;
+    s->dragging = 0;
+    sel_repaint(g, region);
+    return 1;
+}
+
+/* Ctrl/Cmd+C, Ctrl/Cmd+A and Escape for the page selection.  Text controls
+ * keep their own (widgets.c).  Returns 1 when the key was taken. */
+static int sel_key(Engine *g, int key, int action, int mods)
+{
+    if (action != GLFW_PRESS && action != GLFW_REPEAT) return 0;
+    const HtmlElem f = events_focused(&g->events);
+    if (f && events_takes_text(&g->events, f)) return 0;
+    const int accel = (mods & (GLFW_MOD_CONTROL | GLFW_MOD_SUPER)) != 0 && !(mods & GLFW_MOD_ALT);
+    if (accel && key == GLFW_KEY_C && sel_active(&g->sel)) {
+        if (action == GLFW_PRESS) sel_copy(g);
+        return 1;
+    }
+    if (accel && key == GLFW_KEY_A) return sel_select_all(g);
+    if (key == GLFW_KEY_ESCAPE && sel_active(&g->sel)) sel_drop(g); /* and the key goes on */
+    return 0;
+}
+
+int engine_selection_text(Engine *g, char *buf, size_t cap)
+{
+    if (!g || !buf || !cap) return -1;
+    buf[0] = 0;
+    if (!sel_active(&g->sel) || !sel_refresh_segments(g)) return -1;
+    char *t = sel_text(&g->sel);
+    if (!t) return -1;
+    snprintf(buf, cap, "%s", t);
+    const int n = (int) strlen(t);
+    free(t);
+    return n;
+}
+
+/* ------------------------------------------------------------------------- */
 /* engine.h accessors                                                         */
 /* ------------------------------------------------------------------------- */
 
@@ -1346,6 +1596,7 @@ void engine_before_remove(Engine *g, HtmlElem e, int include_root)
         while (a && a != e) a = dom_parent(g->dom, a);
         if (a == e) canvas_drop(g, i);
     }
+    sel_node_removed(g, e, include_root);
     /* Boxes point at the nodes about to be destroyed (text nodes included). */
     detach_boxes(g, e, include_root, 0);
     if (include_root) {
@@ -1580,6 +1831,7 @@ static void engine_destroy(Engine *g)
     dl_free(&g->overlay);
     kn_arena_free(&g->overlay_arena);
     if (g->widgets) widgets_destroy(g->widgets);
+    sel_free(&g->sel);
     events_fini(&g->events);
     anim_free(&g->anim);
     for (uint32_t i = 0; i < g->anim_base_cap; i++) free(g->anim_base[i]);
@@ -1722,6 +1974,8 @@ static Engine *engine_create(const char *ui_dir, const char *page, const int wid
     g->paint.host.canvas_image = paint_canvas_image_hook;
     g->paint.host.scrollbar_style = paint_scrollbar_style_hook;
     g->paint.host.widget_paint = paint_widget_hook;
+    g->paint.host.selection_range = paint_selection_hook;
+    sel_init(&g->sel);
     kn_arena_init(&g->overlay_arena, 16 * 1024);
 
     /* GL */
@@ -1947,6 +2201,7 @@ void html_ui_backend_render(UI *ui)
     engine_flush_layout(g);
     run_after_layout(g);
     engine_flush_layout(g); /* observers may have mutated the page */
+    sel_autoscroll(g);
 
     const int overlay_open = g->widgets && widgets_popup_owner(g->widgets);
     const double widget_wake = g->widgets ? widgets_next_repaint_ms(g->widgets, engine_now_ms()) : -1.0;
@@ -1954,6 +2209,7 @@ void html_ui_backend_render(UI *ui)
 
     if (g->need_paint && g->tree) {
         const double t0 = wall_ms();
+        sel_before_paint(g);
         g->paint.body = engine_elem_box(g, dom_body(g->dom)); /* boxes are recycled on rebuilds */
         /* the overlay's glyphs can rebuild a full atlas under g->dl (see paint_build):
          * then paint both again against the new atlas */
@@ -2012,6 +2268,7 @@ void html_ui_backend_mouse_move(const double x, const double y)
     g->mouse_y = (float) y;
     events_mouse_move(&g->events, g->mouse_x, g->mouse_y);
     if (g->widgets) widgets_pointer_moved(g->widgets, g->mouse_x, g->mouse_y);
+    sel_drag_to(g, g->mouse_x, g->mouse_y);
 }
 
 void html_ui_backend_mouse_button(const int glfw_button, const int glfw_action, const int mods)
@@ -2020,6 +2277,9 @@ void html_ui_backend_mouse_button(const int glfw_button, const int glfw_action, 
     if (!g || glfw_button < 0 || glfw_button > GLFW_MOUSE_BUTTON_LAST) return;
     if (glfw_action != GLFW_PRESS && glfw_action != GLFW_RELEASE) return;
     events_mouse_button(&g->events, glfw_button, glfw_action, mods);
+    if (glfw_button != GLFW_MOUSE_BUTTON_LEFT) return;
+    if (glfw_action == GLFW_PRESS) sel_press(g, mods);
+    else g->sel.dragging = 0;
 }
 
 void html_ui_backend_scroll(const double dx, const double dy)
@@ -2036,6 +2296,10 @@ void html_ui_backend_key(const int glfw_key, const int scancode, const int glfw_
 {
     Engine *g = g_engine;
     if (!g) return;
+    if (sel_key(g, glfw_key, glfw_action, mods)) {
+        g->key_consumed = 1;
+        return;
+    }
     g->key_consumed = events_key(&g->events, glfw_key, scancode, glfw_action, mods);
 }
 

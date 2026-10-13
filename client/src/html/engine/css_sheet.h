@@ -41,6 +41,7 @@ typedef enum CssPseudoElem {
     CSS_PE_COLOR_SWATCH,
     CSS_PE_COLOR_SWATCH_WRAPPER,
     CSS_PE_SLIDER_TRACK,            /* ::-webkit-slider-runnable-track */
+    CSS_PE_SELECTION,               /* ::selection (selection.c: highlight colours) */
     CSS_PE_COUNT
 } CssPseudoElem;
 

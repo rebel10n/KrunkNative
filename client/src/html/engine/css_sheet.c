@@ -190,6 +190,7 @@ static const struct {
     { "-webkit-outer-spin-button", CSS_PE_OUTER_SPIN_BUTTON },
     { "-webkit-color-swatch", CSS_PE_COLOR_SWATCH },
     { "-webkit-color-swatch-wrapper", CSS_PE_COLOR_SWATCH_WRAPPER },
+    { "selection", CSS_PE_SELECTION },
 };
 
 static int pseudo_element_kind(const char *name, size_t len)
@@ -263,7 +264,7 @@ int css_sheet_strip_pseudo_element(const char *sel, size_t len, char *out, size_
                 continue;
             }
             if (two) {
-                return -1; /* ::-moz-range-thumb, ::selection, ... */
+                return -1; /* ::-moz-range-thumb, ::-moz-selection, ... */
             }
             /* a pseudo-class: copy through */
         }
@@ -285,6 +286,17 @@ int css_sheet_strip_pseudo_element(const char *sel, size_t len, char *out, size_
             out[0] = '*';
             out[1] = '\0';
             o = 1;
+        } else if (pe != CSS_PE_NONE && p + t < out + o && (p[t] == ' ' || p[t] == '\t' || p[t] == '\n')) {
+            /* `.logs ::selection`: a descendant combinator before the pseudo-element
+             * means `.logs *::selection` */
+            if (t + 3 > cap) {
+                return -1;
+            }
+            memmove(out, p, t);
+            out[t] = ' ';
+            out[t + 1] = '*';
+            out[t + 2] = '\0';
+            o = t + 2;
         } else if (p != out || t != o) {
             memmove(out, p, t);
             out[t] = '\0';

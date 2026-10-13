@@ -1243,6 +1243,41 @@ static int run_quads(Painter *p, const TextRun *run, unsigned synth, float fs, f
     return m;
 }
 
+/* Pen x of byte `off` (relative to run->text) inside a run, run-relative. */
+static float run_offset_x(const TextRun *run, uint32_t off)
+{
+    if (off == 0) return 0.0f;
+    if (off >= run->len) return run->width;
+    for (int i = 0; i < run->glyph_count; i++) {
+        if (run->glyphs[i].cluster >= off) return run->glyphs[i].x;
+    }
+    return run->width;
+}
+
+/* Selection highlight of bytes [a, b) of a run whose pen starts at (rx, ry) in
+ * the frame: one line-height tall band centred on the text's content area
+ * (Chrome paints the selection over the line's text fragment). */
+static void paint_selection_rect(Painter *p, const Box *tb, const TextRun *run, uint32_t a, uint32_t b, float rx, float ry,
+                                 CssColor bg)
+{
+    const CssComputed *s = tb->style;
+    const CssColor c = paint_resolve_color(bg, s);
+    if (c.a == 0) return;
+    const float asc = tb->fm.ascent, desc = tb->fm.descent;
+    float lh = asc + desc;
+    switch (s->line_height.kind) {
+    case CSS_LEN_NUMBER: lh = s->line_height.px * s->font_size; break;
+    case CSS_LEN_VALUE: lh = s->line_height.px + s->line_height.pct * 0.01f * s->font_size; break;
+    default: if (tb->fm.line_height > 0) lh = tb->fm.line_height; break;
+    }
+    if (lh < asc + desc) lh = asc + desc;
+    const float top = ry - asc - (lh - (asc + desc)) * 0.5f;
+    float x0 = run_offset_x(run, a), x1 = run_offset_x(run, b);
+    if (b >= run->len && run->ellipsis) x1 = run->width + run->ellipsis_w;
+    if (x1 <= x0) return;
+    emit_rect(p, dl_rect(rx + x0, top, x1 - x0, lh), c);
+}
+
 static void paint_text_run(Painter *p, const Box *tb, const TextRun *run, float dx, float dy)
 {
     const CssComputed *s = tb->style;
@@ -1266,11 +1301,20 @@ static void paint_text_run(Painter *p, const Box *tb, const TextRun *run, float 
     const unsigned synth = run->synth;
     const float fs = run->font_size > 0 ? run->font_size : s->font_size;
 
+    /* the page selection (selection.c): highlight under the selected glyphs */
+    uint32_t sel_a = 0, sel_b = 0;
+    CssColor sel_bg = {0}, sel_fg = {0};
+    int sel_has_fg = 0;
+    const int selected = p->ctx->host.selection_range
+        && p->ctx->host.selection_range(p->ctx->host.user, tb, run, &sel_a, &sel_b, &sel_bg, &sel_fg, &sel_has_fg);
+    if (selected) paint_selection_rect(p, tb, run, sel_a, sel_b, rx, ry, sel_bg);
+
     if (text_decoration_of(tb) & CSS_TEXT_DECORATION_UNDERLINE) {
         const float thick = fmaxf(1.0f, floorf(fs / 18.0f));
         const float off = fmaxf(1.0f, roundf(fs * 0.09f));
         emit_rect(p, dl_rect(rx, ry + off, run->width + (run->ellipsis ? run->ellipsis_w : 0), thick), color);
     }
+
 
     DlGlyphQuad *quads = (DlGlyphQuad *) parena(p, (size_t) n * sizeof *quads);
     if (!quads) return;
@@ -1306,6 +1350,46 @@ static void paint_text_run(Painter *p, const Box *tb, const TextRun *run, float 
             it.u.text_shadow.bounds = bounds;
         }
         emit(p, &it);
+    }
+    if (selected && sel_has_fg) {
+        /* ::selection { color }: the selected glyphs in their own pass */
+        DlGlyphQuad *sq = (DlGlyphQuad *) parena(p, (size_t) n * sizeof *sq);
+        if (!sq) return;
+        int nu = 0, ns = 0;
+        for (int i = 0; i < run->glyph_count; i++) {
+            const Glyph *g = &run->glyphs[i];
+            DlGlyphQuad q;
+            if (!glyph_to_quad(p, g, g->synth ? g->synth : synth, fs, rx + g->x, ry, &q)) continue;
+            if (g->cluster >= sel_a && g->cluster < sel_b) sq[ns++] = q;
+            else quads[nu++] = q;
+        }
+        /* ellipsis glyphs are never selected: rebuild them after the unselected ones */
+        if (run->ellipsis) {
+            DlRect eb;
+            DlGlyphQuad *all = (DlGlyphQuad *) parena(p, (size_t) n * sizeof *all);
+            if (all) {
+                const int ma = run_quads(p, run, synth, fs, rx, ry, 0, 0, all, &eb);
+                for (int i = nu + ns; i < ma; i++) quads[nu++] = all[i];
+            }
+        }
+        if (color.a != 0 && nu > 0) {
+            memset(&it, 0, sizeof it);
+            it.op = DL_GLYPHS;
+            it.u.glyphs.quads = quads;
+            it.u.glyphs.n = nu;
+            it.u.glyphs.color = color;
+            emit(p, &it);
+        }
+        const CssColor fg = paint_resolve_color(sel_fg, s);
+        if (fg.a != 0 && ns > 0) {
+            memset(&it, 0, sizeof it);
+            it.op = DL_GLYPHS;
+            it.u.glyphs.quads = sq;
+            it.u.glyphs.n = ns;
+            it.u.glyphs.color = fg;
+            emit(p, &it);
+        }
+        return;
     }
     if (color.a == 0) return;
     memset(&it, 0, sizeof it);

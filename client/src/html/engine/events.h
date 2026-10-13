@@ -45,8 +45,10 @@
  *   - Keys while an input/select is focused never reach the game: every
  *     events_key()/events_char() call reports consumed.  Escape blurs the
  *     focused control and is consumed (the engine must not toggle the menu).
+ *   - Text selection outside inputs is engine.c + selection.c (mousedown's
+ *     default action: down_prevented below).
  *   - Not implemented (deliberately): Tab traversal, title tooltips,
- *     dblclick, text selection outside inputs, IME.
+ *     dblclick events, IME.
  */
 #ifndef KN_HTML_EVENTS_H
 #define KN_HTML_EVENTS_H
@@ -236,6 +238,8 @@ typedef struct EventSystem {
     HtmlElem focus;
     HtmlElem capture;              /* pointer capture target (widgets)           */
     HtmlElem down_target;          /* mousedown target for click synthesis       */
+    uint8_t down_prevented;        /* last press: mousedown default prevented (a listener
+                                      returned 0, a widget took it): no text selection starts */
     uint8_t cursor;                /* CssCursor of the hovered element           */
 
     EvResizeObserver *observers;
@@ -283,6 +287,9 @@ const char *events_cursor_name(int css_cursor);
 /* Element-level focusability as used by click focus (input/select/textarea/
  * button, a[href], [tabindex]; not disabled, not type=hidden). */
 int events_is_focusable(EventSystem *es, HtmlElem e);
+/* A text-editing control (text-like input, textarea, select, contenteditable):
+ * it owns its own selection and Ctrl+C / Ctrl+A. */
+int events_takes_text(EventSystem *es, HtmlElem e);
 
 /* ---- dispatch ------------------------------------------------------------- */
 

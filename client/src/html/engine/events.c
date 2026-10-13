@@ -533,6 +533,8 @@ static int is_disabled(EventSystem *es, HtmlElem e)
     return dom_has_attr(es->dom, e, "disabled");
 }
 
+int events_takes_text(EventSystem *es, HtmlElem e) { return alive(es, e) && takes_text(es, e); }
+
 static int is_checkbox(EventSystem *es, HtmlElem e)
 {
     char buf[32];
@@ -995,6 +997,7 @@ static void mouse_press(EventSystem *es, int button, int mods)
 {
     es->buttons |= 1u << button;
     es->mods = mods;
+    es->down_prevented = 1; /* cleared below when mousedown's default action runs */
     HtmlElem target = es->capture ? es->capture : hit_elem(es, es->mouse_x, es->mouse_y);
     if (es->widgets.mouse_down) {
         int bits = es->widgets.mouse_down(es->widgets.user, target, es->mouse_x, es->mouse_y, button, mods);
@@ -1024,7 +1027,7 @@ static void mouse_press(EventSystem *es, int button, int mods)
     }
     if (target && is_disabled(es, target)) { restyle(es); return; }
     if (button == EV_BUTTON_RIGHT) fire_ex(es, target, "contextmenu", 0, button, 1);
-    fire_ex(es, target, "mousedown", 0, button, 1);
+    es->down_prevented = fire_ex(es, target, "mousedown", 0, button, 1) == 0 || es->capture != 0;
     restyle(es);
 }
 
@@ -1102,6 +1105,51 @@ int events_scroll(EventSystem *es, float dx, float dy, float x, float y)
 
 static int key_is_enter(int key) { return key == EV_KEY_ENTER || key == EV_KEY_KP_ENTER; }
 
+/* Sequential focus navigation (HTML "focus navigation order", simplified: document order, no
+ * positive-tabindex ordering, which ui/ never uses). A candidate is focusable, rendered (has a
+ * box) and has no negative tabindex. Moves from `from` forwards or
+ * backwards with wrap-around. */
+static int tab_candidate(EventSystem *es, HtmlElem e)
+{
+    if (!events_is_focusable(es, e)) return 0;
+    const char *ti = attr(es, e, "tabindex");
+    if (ti && atoi(ti) < 0) return 0;
+    HtmlRect r;
+    if (es->host.elem_rect && !es->host.elem_rect(es->host.user, e, &r)) return 0;
+    return 1;
+}
+
+/* Pre-order successor of e (elements only), 0 after the last. */
+static HtmlElem tree_next(EventSystem *es, HtmlElem e)
+{
+    HtmlElem c = dom_first_child(es->dom, e);
+    if (c) return c;
+    for (; e; e = dom_parent(es->dom, e)) {
+        HtmlElem n = dom_next(es->dom, e);
+        if (n) return n;
+    }
+    return 0;
+}
+
+static void focus_step(EventSystem *es, HtmlElem from, int backwards)
+{
+    /* document order walk from the top of from's tree: the page is a few thousand nodes */
+    HtmlElem top = from;
+    while (top && dom_parent(es->dom, top)) top = dom_parent(es->dom, top);
+    HtmlElem first = 0, last = 0, prev = 0, next = 0;
+    int seen = 0;
+    for (HtmlElem e = top; e; e = tree_next(es, e)) {
+        if (e == from) { seen = 1; continue; }
+        if (!tab_candidate(es, e)) continue;
+        if (!first) first = e;
+        last = e;
+        if (!seen) prev = e;
+        else if (!next) next = e;
+    }
+    HtmlElem to = backwards ? (prev ? prev : last) : (next ? next : first);
+    if (to && to != from) focus_set(es, to);
+}
+
 int events_key(EventSystem *es, int key, int scancode, int action, int mods)
 {
     const char *type = action == EV_RELEASE ? "keyup" : "keydown";
@@ -1127,6 +1175,9 @@ int events_key(EventSystem *es, int key, int scancode, int action, int mods)
     int r = fire_ex(es, f, type, key, 0, 1); /* document capture listener first, then on<type> up the tree */
     if (r && es->widgets.key && es->widgets.key(es->widgets.user, f, key, scancode, action, mods)) {
         /* consumed by the widget (caret, backspace, popup navigation) */
+    } else if (r && action != EV_RELEASE && key == EV_KEY_TAB) {
+        /* the browser's default action: Tab / Shift+Tab move the focus (login form: name -> password) */
+        focus_step(es, f, (mods & EV_MOD_SHIFT) != 0);
     }
     if (action != EV_RELEASE && key_is_enter(key)) fire_ex(es, f, "keypress", key, 0, 1);
     return 1;

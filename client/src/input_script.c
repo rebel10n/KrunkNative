@@ -16,7 +16,8 @@
 //                                the sandbox server's player too (the dev "tp")
 //   0 tp x y z yaw pitch         online: the dev "tp" packet to feet x/y/z, then face yaw/pitch
 //   100 down W | up W            keys through the key callback: W A S D SPACE SHIFT TAB ESC ENTER DELETE, any
-//                                A-Z / 0-9, F1-F12
+//                                A-Z / 0-9, F1-F12, GRAVE (the dev console's `); CTRL+ / SHIFT+ / ALT+ prefixes
+//                                set the modifier bits (down CTRL+C: copy the page selection)
 //   100 mdown right | mup right  mouse buttons (left / right), through the mouse button callback
 //   100 cursor 640 360           move the cursor (window coordinates) through the cursor callback
 //   100 click 640 360            cursor there, then a left press + release (e.g. a KrunkScript DIV)
@@ -74,6 +75,8 @@
 //                                frame count, avg / p50 / p95 / max ms (perf logs, never asserted here)
 //   100 type rifle               type the rest of the line through the char callback (the focused
 //                                text field; the menu or the chat must have the keyboard)
+//   100 clip @copied             log the system clipboard (GLFW): "[input_script] clip t=100 @copied
+//                                text=<C-escaped clipboard>" (selection + Ctrl+C tests)
 //   1200 shot /tmp/a.png         write the frame (world + first-person layer) after this frame's input
 //   1200 frames /tmp/f 120       write this and the next 119 finished frames (page included) as
 //                                /tmp/f_0000.png ... (input_script_frame_presented)
@@ -215,6 +218,7 @@ static int script_key(const char *name) {
     if (name[0] >= 'A' && name[0] <= 'Z' && !name[1]) return GLFW_KEY_A + (name[0] - 'A');
     if (name[0] >= '0' && name[0] <= '9' && !name[1]) return GLFW_KEY_0 + (name[0] - '0');
     if (!strcmp(name, "ESC")) return GLFW_KEY_ESCAPE;
+    if (!strcmp(name, "GRAVE")) return GLFW_KEY_GRAVE_ACCENT;
     if (!strcmp(name, "ENTER")) return GLFW_KEY_ENTER;
     if (name[0] == 'F' && name[1] >= '1' && name[1] <= '9') { // F1..F12 (F5: the Reconnect bind)
         const int f = atoi(name + 1);
@@ -226,13 +230,21 @@ static int script_key(const char *name) {
 static void script_run(Client *client, const ScriptEvent *e) {
     if (!strcmp(e->cmd, "down") || !strcmp(e->cmd, "up")) {
         // through the window's key callback (main.c: KrunkScript key hooks, then the binds)
-        const int key = script_key(e->arg);
+        const char *name = e->arg;
+        int mods = 0;
+        for (;;) { // CTRL+ / SHIFT+ / ALT+ prefixes
+            if (!strncmp(name, "CTRL+", 5)) { mods |= GLFW_MOD_CONTROL; name += 5; }
+            else if (!strncmp(name, "SHIFT+", 6)) { mods |= GLFW_MOD_SHIFT; name += 6; }
+            else if (!strncmp(name, "ALT+", 4)) { mods |= GLFW_MOD_ALT; name += 4; }
+            else break;
+        }
+        const int key = script_key(name);
         const int action = e->cmd[0] == 'd' ? GLFW_PRESS : GLFW_RELEASE;
         GLFWkeyfun cb = glfwSetKeyCallback(client->window, NULL);
         glfwSetKeyCallback(client->window, cb);
         if (key != GLFW_KEY_UNKNOWN) {
-            if (cb) cb(client->window, key, 0, action, 0);
-            else ui_controls_key_event(client, key, 0, action, 0);
+            if (cb) cb(client->window, key, 0, action, mods);
+            else ui_controls_key_event(client, key, 0, action, mods);
         }
     } else if (!strcmp(e->cmd, "mdown") || !strcmp(e->cmd, "mup")) {
         const int button = !strcmp(e->arg, "right") ? GLFW_MOUSE_BUTTON_RIGHT : GLFW_MOUSE_BUTTON_LEFT;
@@ -508,6 +520,17 @@ static void script_run(Client *client, const ScriptEvent *e) {
             n += snprintf(line + n, sizeof(line) - (size_t) n, " %s=%s", id, !el ? "-" : html_dom_is_shown(el) ? "1" : "0");
         }
         fprintf(stderr, "%s\n", line);
+    } else if (!strcmp(e->cmd, "clip")) {
+        const char *clip = glfwGetClipboardString(client->window);
+        char text[512];
+        size_t n = 0;
+        for (const char *c = clip ? clip : ""; *c && n + 4 < sizeof(text); c++) {
+            if (*c == '\n') { text[n++] = '\\'; text[n++] = 'n'; }
+            else if (*c == '\\') { text[n++] = '\\'; text[n++] = '\\'; }
+            else text[n++] = *c;
+        }
+        text[n] = 0;
+        fprintf(stderr, "[input_script] clip t=%.0f %s text=%s\n", g_script.time, e->arg, text);
     } else if (!strcmp(e->cmd, "con")) {
         ui_console_exec(e->arg); // con <word>: a one-word developer console command (`end`)
     } else if (!strcmp(e->cmd, "blur")) {

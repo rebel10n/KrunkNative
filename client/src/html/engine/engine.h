@@ -50,6 +50,9 @@ void engine_flush_style(Engine *g);
 /* Styles + layout up to date (what a browser does before a geometry read).
  * Returns the layout tree (NULL when nothing could be laid out). */
 LayoutTree *engine_flush_layout(Engine *g);
+/* The page text selection (selection.c) as UTF-8 into buf; its length, -1 when
+ * nothing is selected.  Tests and the input-script probe read it. */
+int engine_selection_text(Engine *g, char *buf, size_t cap);
 /* Box of an element after engine_flush_layout(), NULL when display:none. */
 Box *engine_elem_box(Engine *g, HtmlElem e);
 

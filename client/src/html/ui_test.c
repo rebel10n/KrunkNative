@@ -864,6 +864,215 @@ static int cmd_dump_boxes(int argc, char **argv) {
     return 0;
 }
 
+// ------------------------------------------------------------------ selection
+// Page text selection (engine/selection.c) on the developer console's markup and
+// stylesheet (client/src/ui/ui_console.c OVERLAY_HTML + ui/css/devconsole.css): drag
+// across lines, Ctrl+C into the GLFW clipboard, double / triple click, shift+click,
+// Ctrl+A in the focused .logs, Escape and click-away, user-select:none (the titlebar),
+// the text input keeping its own keys, a line appended / removed under the selection,
+// and the ::selection highlight in the frame. Exit 0 when every check passed.
+
+static int g_sel_fail;
+#define SEL_CHECK(cond, ...) do { if (!(cond)) { g_sel_fail++; fprintf(stderr, "selection FAIL %s:%d: ", __FILE__, __LINE__); \
+    fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } } while (0)
+
+static double g_sel_clock = 1000.0;
+
+static void sel_frame(UtHarness *h) {
+    ut_frame(h, g_sel_clock, NULL, NULL);
+}
+
+static void sel_mouse(UtHarness *h, float x, float y, int action, int mods) {
+    engine_set_clock_override(g_sel_clock); // input time = this frame's (multi-click detection)
+    html_ui_mouse_move(x, y);
+    if (action >= 0) html_ui_mouse_button(GLFW_MOUSE_BUTTON_LEFT, action, mods);
+    sel_frame(h);
+}
+
+// A press, a drag in steps and a release; the clock moves on so it is never a double click.
+static void sel_drag(UtHarness *h, float x0, float y0, float x1, float y1) {
+    g_sel_clock += 1000.0;
+    sel_mouse(h, x0, y0, GLFW_PRESS, 0);
+    for (int i = 1; i <= 4; i++) sel_mouse(h, x0 + (x1 - x0) * i / 4.0f, y0 + (y1 - y0) * i / 4.0f, -1, 0);
+    sel_mouse(h, x1, y1, GLFW_RELEASE, 0);
+}
+
+static void sel_click(UtHarness *h, float x, float y, int clicks, int mods) {
+    g_sel_clock += 1000.0;
+    for (int i = 0; i < clicks; i++) {
+        g_sel_clock += 100.0;
+        sel_mouse(h, x, y, GLFW_PRESS, mods);
+        sel_mouse(h, x, y, GLFW_RELEASE, mods);
+    }
+}
+
+static void sel_key(UtHarness *h, int key, int mods) {
+    html_ui_key(key, 0, GLFW_PRESS, mods);
+    html_ui_key(key, 0, GLFW_RELEASE, mods);
+    sel_frame(h);
+}
+
+static const char *sel_clipboard(UtHarness *h) {
+    const char *c = glfwGetClipboardString(headless_current_window() ? headless_current_window() : h->window);
+    return c ? c : "";
+}
+
+static char g_sel_buf[8192];
+static const char *sel_now(void) {
+    if (engine_selection_text(engine_get(), g_sel_buf, sizeof(g_sel_buf)) < 0) return "";
+    return g_sel_buf;
+}
+
+// The rect of the n-th .logs line (CSS px).
+static HtmlRect sel_line(HtmlElem logs, int n) {
+    HtmlElem items[64];
+    HtmlRect r = {0};
+    const int count = html_dom_query_all(logs, "div", items, 64);
+    if (n < count) html_dom_get_rect(items[n], &r);
+    return r;
+}
+
+// Orange-ish (::selection background #f39c00 under the modal's opacity 0.95) pixels in a rect.
+static int sel_orange_pixels(UtHarness *h, HtmlRect r) {
+    const int x0 = (int) r.x, y0 = (int) r.y, w = (int) r.w, hh = (int) r.h;
+    if (w <= 0 || hh <= 0) return 0;
+    unsigned char *px = malloc((size_t) w * (size_t) hh * 4);
+    if (!px) return 0;
+    glFinish();
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, h->fbo);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(x0, h->h - y0 - hh, w, hh, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    int n = 0;
+    for (int i = 0; i < w * hh; i++) {
+        const unsigned char *p = px + (size_t) i * 4;
+        if (p[0] > 200 && p[1] > 120 && p[1] < 175 && p[2] < 70) n++;
+    }
+    free(px);
+    return n;
+}
+
+static int cmd_selection(int argc, char **argv) {
+    const char *out_png = argc > 1 ? argv[1] : NULL;
+    const int w = 1024, h = 600;
+    UtHarness hs;
+    if (!ut_harness_init(&hs, w, h)) {
+        ut_harness_fini(&hs);
+        return 1;
+    }
+    g_sel_fail = 0;
+    sel_frame(&hs);
+    html_ui_set_menu_open(1);
+    html_ui_add_stylesheet("css/devconsole.css");
+    html_dom_insert_html(html_dom_body(), HTML_INSERT_BEFORE_END,
+        "<div id=\"devConsoleOverlay\"><div class=\"modal\" data-kn-pointer=\"1\">"
+        "<div class=\"titlebar\"><span>Console</span><span class=\"x\">x</span></div>"
+        "<div class=\"body\"><div class=\"logs\" tabindex=\"-1\" style=\"outline: none;\"></div>"
+        "<div class=\"inputShell\"><div class=\"hints\"></div>"
+        "<form class=\"row\" onsubmit=\"return false\"><input type=\"text\" autocomplete=\"off\" spellcheck=\"false\">"
+        "<button type=\"submit\">Submit</button></form></div></div><div class=\"grip\"></div></div></div>");
+    const HtmlElem overlay = html_dom_by_id("devConsoleOverlay");
+    const HtmlElem logs = overlay ? html_dom_query(overlay, ".logs") : 0;
+    const HtmlElem input = overlay ? html_dom_query(overlay, ".row input") : 0;
+    const HtmlElem title = overlay ? html_dom_query(overlay, ".titlebar span") : 0;
+    if (!logs || !input || !title) {
+        fprintf(stderr, "selection: console markup missing\n");
+        ut_harness_fini(&hs);
+        return 1;
+    }
+    html_dom_set_display(overlay, "block");
+    static const char *lines[] = {"alpha beta gamma", "second line here", "third: x=1 y=2", "fourth"};
+    for (int i = 0; i < 4; i++) {
+        char html[160];
+        snprintf(html, sizeof(html), "<div style=\"color: #e0e0e0;\">%s</div>", lines[i]);
+        html_dom_insert_html(logs, HTML_INSERT_BEFORE_END, html);
+    }
+    for (int i = 0; i < 3; i++) sel_frame(&hs);
+
+    const HtmlRect l0 = sel_line(logs, 0), l1 = sel_line(logs, 1), l2 = sel_line(logs, 2);
+    SEL_CHECK(l0.h > 0 && l1.y > l0.y, "console lines laid out (%.1f,%.1f %.1fx%.1f)", l0.x, l0.y, l0.w, l0.h);
+    const float cy0 = l0.y + l0.h * 0.5f, cy1 = l1.y + l1.h * 0.5f, cy2 = l2.y + l2.h * 0.5f;
+    const float left = l0.x + 0.5f;
+    // positions: the line rect and character counts at the monospace advance (LuconDevConsole
+    // 12px: Lucida Console's 0.6 em)
+    const float cw = 12.0f * 0.6f;
+
+    // 1. drag from the start of line 0 into line 1 (after "second")
+    sel_drag(&hs, left, cy0, left + cw * 6.0f + 1.0f, cy1);
+    SEL_CHECK(!strcmp(sel_now(), "alpha beta gamma\nsecond"), "drag across lines selected \"%s\"", sel_now());
+    if (out_png) { // the frame with the highlight (before Ctrl+C: nothing visual changes)
+        if (ut_read_back_png(&hs, out_png)) printf("selection: frame -> %s\n", out_png);
+    }
+    SEL_CHECK(sel_orange_pixels(&hs, l0) > 200, "line 0 highlighted (%d px)", sel_orange_pixels(&hs, l0));
+    SEL_CHECK(sel_orange_pixels(&hs, l2) == 0, "line 2 not highlighted (%d px)", sel_orange_pixels(&hs, l2));
+
+    // 2. Ctrl+C: the system clipboard
+    glfwSetClipboardString(headless_current_window() ? headless_current_window() : hs.window, "old");
+    sel_key(&hs, GLFW_KEY_C, GLFW_MOD_CONTROL);
+    SEL_CHECK(!strcmp(sel_clipboard(&hs), "alpha beta gamma\nsecond"), "Ctrl+C copied \"%s\"", sel_clipboard(&hs));
+
+    // 3. a line appended below keeps the selection (the box subtree is rebuilt)
+    html_dom_insert_html(logs, HTML_INSERT_BEFORE_END, "<div style=\"color: #e0e0e0;\">fifth</div>");
+    sel_frame(&hs);
+    SEL_CHECK(!strcmp(sel_now(), "alpha beta gamma\nsecond"), "selection kept across an append: \"%s\"", sel_now());
+
+    // 4. shift+click extends the focus into line 2
+    sel_click(&hs, left + cw * 6.0f + 1.0f, cy2, 1, GLFW_MOD_SHIFT);
+    SEL_CHECK(!strcmp(sel_now(), "alpha beta gamma\nsecond line here\nthird:"), "shift+click extended to \"%s\"", sel_now());
+
+    // 5. Escape clears
+    sel_key(&hs, GLFW_KEY_ESCAPE, 0);
+    SEL_CHECK(!strcmp(sel_now(), ""), "Escape cleared (\"%s\")", sel_now());
+
+    // 6. double click selects a word, triple click the line
+    sel_click(&hs, left + cw * 7.5f, cy0, 2, 0);
+    SEL_CHECK(!strcmp(sel_now(), "beta"), "double click selected \"%s\"", sel_now());
+    sel_key(&hs, GLFW_KEY_C, GLFW_MOD_CONTROL);
+    SEL_CHECK(!strcmp(sel_clipboard(&hs), "beta"), "Ctrl+C after the double click: \"%s\"", sel_clipboard(&hs));
+    sel_click(&hs, left + cw * 2.5f, cy2, 3, 0);
+    SEL_CHECK(!strcmp(sel_now(), "third: x=1 y=2"), "triple click selected \"%s\"", sel_now());
+
+    // 7. click-away on user-select:none (the titlebar): cleared, and no selection starts there
+    HtmlRect tr = {0};
+    html_dom_get_rect(title, &tr);
+    sel_drag(&hs, tr.x + 2, tr.y + tr.h * 0.5f, tr.x + tr.w - 2, tr.y + tr.h * 0.5f);
+    SEL_CHECK(!strcmp(sel_now(), ""), "user-select:none titlebar selected \"%s\"", sel_now());
+
+    // 8. Ctrl+A with the logs focused (a click focuses them: tabindex=-1) selects every line
+    sel_click(&hs, left + 2, cy1, 1, 0);
+    sel_key(&hs, GLFW_KEY_A, GLFW_MOD_CONTROL);
+    SEL_CHECK(!strcmp(sel_now(), "alpha beta gamma\nsecond line here\nthird: x=1 y=2\nfourth\nfifth"), "Ctrl+A selected \"%s\"", sel_now());
+    sel_key(&hs, GLFW_KEY_C, GLFW_MOD_CONTROL);
+    SEL_CHECK(strstr(sel_clipboard(&hs), "fourth\nfifth") != NULL, "Ctrl+C after Ctrl+A: \"%s\"", sel_clipboard(&hs));
+
+    // 9. the text input keeps its own Ctrl+A / Ctrl+C (widgets.c) and the page selection is left alone
+    html_dom_focus(input);
+    html_dom_set_value(input, "typed text");
+    sel_frame(&hs);
+    sel_key(&hs, GLFW_KEY_A, GLFW_MOD_CONTROL);
+    sel_key(&hs, GLFW_KEY_C, GLFW_MOD_CONTROL);
+    SEL_CHECK(!strcmp(sel_clipboard(&hs), "typed text"), "input Ctrl+A/Ctrl+C copied \"%s\"", sel_clipboard(&hs));
+
+    // 10. removing a selected line drops the selection
+    sel_drag(&hs, left, cy0, left + cw * 5.0f + 1.0f, cy0);
+    SEL_CHECK(!strcmp(sel_now(), "alpha"), "drag in one line selected \"%s\"", sel_now());
+    html_dom_remove(html_dom_first_child(logs));
+    sel_frame(&hs);
+    SEL_CHECK(!strcmp(sel_now(), ""), "a removed line's selection is cleared (\"%s\")", sel_now());
+
+    // 11. a click (no drag) selects nothing and clears
+    sel_drag(&hs, left, cy0, left + cw * 3.0f, cy0);
+    sel_click(&hs, left + cw * 3.0f, cy1, 1, 0);
+    SEL_CHECK(!strcmp(sel_now(), ""), "a plain click left \"%s\"", sel_now());
+
+    ut_harness_fini(&hs);
+    if (g_sel_fail) {
+        fprintf(stderr, "selection: %d check(s) failed\n", g_sel_fail);
+        return 1;
+    }
+    printf("selection: all checks passed\n");
+    return 0;
+}
+
 // ------------------------------------------------------------------ subcommand table
 //
 // HOW TO ADD A SUBCOMMAND: implement `int ui_test_cmd_<name>(int argc, char **argv)`
@@ -880,6 +1089,7 @@ static const UiTestSubcommand g_subcommands[] = {
     {"render-page",  "<w> <h> <bg> <out.png> [opts]", "render ui/index.html offscreen to PNG (--menu-preset, --set, --class, --hover, --frames, --anim-time)", cmd_render_page},
     {"bench",        "<w> <h> [--frames N]", "per-stage frame timings of the menu (restyle/layout/paint/submit)",              cmd_bench},
     {"bench-dynamic", "<w> <h> [--frames N] [--hud]", "menu hover sweep + 20 Hz HUD writes: per-stage timings", cmd_bench_dynamic},
+    {"selection",    "[frame.png]", "page text selection on the dev console markup: drag, Ctrl+C clipboard, word/line clicks, Ctrl+A, highlight", cmd_selection},
     {"dump-boxes",   "[selector] [--size WxH]", "print the box tree with local + viewport rects (accepts render-page page options)", cmd_dump_boxes},
 };
 
