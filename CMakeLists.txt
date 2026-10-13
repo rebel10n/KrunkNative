@@ -688,9 +688,6 @@ else ()
         add_test(NAME mod_pack_test COMMAND mod_pack_test ${CMAKE_SOURCE_DIR})
     endif ()
 
-    # kn_editor_mcp: Krunker map editor MCP server (tools/editor-mcp/README.md)
-    add_subdirectory(tools/editor-mcp)
-
     # KrunkScript (doc/v7/krunkscript.md 6.6): ksc (check; WP2 adds run) over the ks
     # sources only, and ks_front_test (lexer/parser/checker + shared/tests/ks suite)
     file(GLOB KS_SOURCES shared/src/ks/*.c)
@@ -713,6 +710,9 @@ else ()
         target_link_libraries(ks_vm_test PRIVATE -fsanitize=address,undefined)
     endif ()
     add_test(NAME ks_vm_test COMMAND ks_vm_test ${CMAKE_SOURCE_DIR}/shared/tests/ks)
+
+    # kn_editor_mcp: Krunker map editor MCP server (tools/editor-mcp/README.md)
+    add_subdirectory(tools/editor-mcp)
 
     # ui_test: engine driver for dumps, probes, renders and benchmarks
     # (client/src/html/ui_test.c holds the subcommand table). It is the engine plus
