@@ -1375,11 +1375,14 @@ static void net_handle_input_batch(ClientConnection *client, const NetPacket *pa
 
 // ENT after its fields were stored (also replayed by accounts.c once a deferred join settled).
 void net_resume_ent(ClientConnection *client, const int spectate) {
+    // v7.1.4 "vc" relays whatever findSocketPlayer finds: every ENT adds a player, a spectator's
+    // too (player.spectating), and a dead player keeps it. v3.1.1 left ctx.player null for
+    // spectators, which this server copied: spectators could not be heard (v7's muteSpec setting
+    // exists to silence them on the receiving side).
+    client->voice_player = 1;
     if (spectate) {
-        client->voice_player = 0; // io_ent spectate: ctx.player = null
         net_start_spectating(client);
     } else {
-        client->voice_player = 1; // io_ent: ctx.player = ctx.server.addPlayer(...) on the first ENT
         net_request_spawn(client);
         // A spectator plays again once it actually spawned (not on the end screen).
         if (client->player && client->player->active) net_set_spectating(client, 0);

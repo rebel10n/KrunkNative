@@ -93,4 +93,7 @@ case "$os" in
 esac
 ls -la "$out"
 # not for a cross build (Linux host, CMAKE=mingw64-cmake)
-if [ "$os" = macos ] || [ -n "${MSYSTEM:-}" ]; then "$out/$client" --version; fi
+if [ "$os" = macos ] || [ -n "${MSYSTEM:-}" ]; then
+    "$out/$client" --version
+    "$out/$client" --voice-info | grep -q '^opus=libopus ' # voice chat's codec is linked in (client/lib/opus)
+fi

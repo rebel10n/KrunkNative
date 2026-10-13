@@ -14,7 +14,7 @@
 # without libcurl (http:// finder/auth only: public servers use the server packages). What stays
 # dynamic is the OS's: libc, libm, libdl, libpthread, libEGL.so.1 (libglvnd/Mesa; headless mode) and the libraries loaded at run time
 # with dlopen (libGL/libEGL/libGLESv2, X11/Wayland/xkbcommon by GLFW, ALSA/PulseAudio/JACK by
-# miniaudio, libopus by voice.c). The NEEDED list is checked at the end.
+# miniaudio; libopus is compiled in: client/lib/opus). The NEEDED list is checked at the end.
 #
 # Usage: tools/release/build-client-linux.sh [--deps] [--docker <image>] <dynamic|polyfilled> <out dir>
 #   --deps            apt-get install the build dependencies first (sudo when not root)
@@ -152,3 +152,4 @@ allowed='^(libc|libm|libdl|libpthread|librt|libEGL|ld-linux-x86-64|ld-linux-aarc
     done
 } | tee "$out/build-info.txt"
 "$out/client_bin" --version
+"$out/client_bin" --voice-info | grep -q '^opus=libopus ' # voice chat's codec is linked in

@@ -464,6 +464,15 @@ void html_clipboard_write(const char *text) {
 
 void html_dom_asset_url(const char *path, char *out, const size_t n) {
     if (!out || !n) return;
+    while (path && path[0] == '.' && path[1] == '/') path += 2;
+    while (path && path[0] == '/') path++;
+    // img/ is the page's own tree (ui/img, the static site next to index.html): the game
+    // content has no img/ and the asset hosts 404 it (img/shop/filter/vignette.png,
+    // img/shop/spins/*, img/backgrounds/*), so v7's assetsUrl("/img/...") stays page-relative.
+    if (path && !strncmp(path, "img/", 4)) {
+        snprintf(out, n, "%s", path);
+        return;
+    }
     char rel[512];
     snprintf(rel, sizeof(rel), "/assets/%s", path ? path : "");
     char *url = asset_url(rel);

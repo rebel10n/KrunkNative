@@ -132,6 +132,7 @@ licenses() {
     cp "$repo/client/lib/freetype/LICENSE.TXT" "$root/licenses/freetype.txt"
     cp "$repo/client/lib/lexbor/LICENSE" "$root/licenses/lexbor.txt"
     cp "$repo/client/lib/miniaudio/LICENSE" "$root/licenses/miniaudio.txt"
+    cp "$repo/client/lib/opus/COPYING" "$root/licenses/opus.txt"
     cp "$repo/client/lib/nanosvg/LICENSE.txt" "$root/licenses/nanosvg.txt"
     cp "$repo/client/lib/cgltf/LICENSE" "$root/licenses/cgltf.txt"
     sed -n '/^\/\*/,/\*\//p' "$repo/shared/lib/cJSON/cJSON.h" | sed -n '1,/\*\//p' > "$root/licenses/cJSON.txt"
@@ -155,6 +156,7 @@ Third-party components compiled into the binaries, with their licenses in licens
   FreeType    FreeType License (FTL)      licenses/freetype.txt
   Lexbor      Apache License 2.0          licenses/lexbor.txt
   miniaudio   public domain / MIT-0       licenses/miniaudio.txt
+  Opus        BSD 3-Clause (libopus)      licenses/opus.txt
   nanosvg     zlib License                licenses/nanosvg.txt
   cgltf       MIT                         licenses/cgltf.txt
   cJSON       MIT                         licenses/cJSON.txt
@@ -390,7 +392,7 @@ Architecture: $darch
 Maintainer: Krunker Box Office <noreply@krunk.io>
 Installed-Size: $(du -sk "$root/opt" | cut -f1)
 Depends: $depends
-Recommends: libgl1, libopus0, libasound2 | libasound2t64 | libpulse0
+Recommends: libgl1, libasound2 | libasound2t64 | libpulse0
 Section: games
 Priority: optional
 Homepage: https://github.com/rebel10n/KrunkNative
@@ -419,7 +421,6 @@ Release: ${pkg_rest:-1}
 Summary: $summary
 License: Proprietary
 URL: https://github.com/rebel10n/KrunkNative
-Recommends: opus
 %description
 $description
 %install

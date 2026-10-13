@@ -164,6 +164,9 @@ void html_timers_tick(double now_ms);                                 // called 
 // the asset host, not next to the page. Native "/assets/<path>" (the engine reads it from
 // assets_path(), client/src/html/engine/image.c), web the asset host's versioned URL
 // (shared/src/utils.c asset_url: Module.krunkNativeAssetBase + assets/<path>?v=<version>).
+// "img/..." is the page's own tree (ui/img; the content tree has none): returned page-relative.
+// textures/ previews, sprays, scopes, melee icons must come through here: ui/textures holds only
+// the v7.1.4 reference slice (weapon previews 1..19), the content tree all of them.
 void html_dom_asset_url(const char *path, char *out, size_t n);
 
 // ---- page address + clipboard

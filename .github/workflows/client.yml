@@ -207,6 +207,7 @@ jobs:
           mkdir t && unzip -q out/krunknative-client-windows-amd64.zip -d t
           ldd t/krunknative-client-windows-amd64/client.exe
           t/krunknative-client-windows-amd64/client.exe --version
+          t/krunknative-client-windows-amd64/client.exe --voice-info | grep '^opus=libopus ' # voice chat's codec
           t/krunknative-client-windows-amd64/server.exe --version
 
       - uses: actions/upload-artifact@v7
@@ -283,6 +284,7 @@ jobs:
           mkdir t && tar -xzf "out/krunknative-client-macos-${{ matrix.arch }}.tar.gz" -C t
           codesign --verify --deep --strict t/KrunkNative.app
           (cd / && "$GITHUB_WORKSPACE/t/KrunkNative.app/Contents/MacOS/client_bin" --version)
+          (cd / && "$GITHUB_WORKSPACE/t/KrunkNative.app/Contents/MacOS/client_bin" --voice-info) | grep '^opus=libopus '
           otool -L t/KrunkNative.app/Contents/MacOS/client_bin
 
       - uses: actions/upload-artifact@v7

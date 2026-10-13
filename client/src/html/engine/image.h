@@ -59,11 +59,9 @@
  * reproduces that with textureLod.  Upscaled images are plain bilinear.
  * Without mips, large PNGs drawn small (logo_4 at ~0.47x, menu icons,
  * sprites) alias visibly.
- * image_texture(entry, 1) lazily creates `tex_nearest`, a second texture
- * object with the same level-0 pixels, GL_NEAREST and no mips (MAX_LEVEL 0)
- * for `pixelated`/`crisp-edges` (the 8x8 class icons depend on this).
- * gl_backend.c re-applies the matching filters per draw from DL_IMAGE's
- * `nearest` flag.  Everything here stays within the
+ * `pixelated`/`crisp-edges` (the 8x8 class icons depend on it) needs no second
+ * texture: gl_backend.c sets GL_NEAREST on the same object per draw from
+ * DL_IMAGE's `nearest` flag, which samples the base level only.  Everything here stays within the
  * GLES 3.0 subset (see client/include/gl.h).
  *
  * Web build
@@ -94,7 +92,6 @@ typedef struct ImageEntry {
     unsigned tex;          /* mipmapped GL_LINEAR texture, 0 when failed      */
     int w, h;              /* intrinsic size in image px (0 when failed)      */
     int failed;            /* 1: missing, unreadable, undecodable, bad URL    */
-    unsigned tex_nearest;  /* GL_NEAREST twin, created by image_texture()     */
     int vector;            /* 1: SVG, image_texture_sized() rasterises per size */
 } ImageEntry;
 
@@ -118,10 +115,8 @@ int image_decode_data_url(const char *url, unsigned char **out, size_t *out_len)
 
 const ImageEntry *image_get(ImageCache *cache, const char *url, const char *base_url);
 
-/* Texture for the requested sampling: nearest != 0 returns `tex_nearest`,
- * creating it on first request (same pixels, GL_NEAREST).  Returns 0 for a
- * failed entry or when the twin could not be created (caller may fall back
- * to `tex`). */
+/* The entry's texture (both samplings; `nearest` is applied by the backend per
+ * draw).  0 only for a failed entry. */
 unsigned image_texture(const ImageEntry *entry, int nearest);
 
 /* Texture for drawing `entry` over dev_w x dev_h device pixels (the size the

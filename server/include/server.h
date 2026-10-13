@@ -146,8 +146,8 @@ typedef struct {
     unsigned char has_idle_look:1;
     unsigned char joined:1;        // spawned in the current round (respawned by the next round)
     unsigned char announced:1;     // "<name> joined the game" was broadcast for this connection
-    unsigned char voice_player:1;  // v3.1.1 ctx.player for io_vc: set by every non-spectate ENT, cleared
-                                   // by a spectate ENT, kept across deaths, round ends and map changes
+    unsigned char voice_player:1;  // v7 findSocketPlayer for "vc": set by every ENT (spectators too), kept
+                                   // across deaths, round ends and map changes
 
     NetChatLimiter chat_limiter;   // io_ct burst limit
     uint32_t ping_seq;             // seq of the outstanding PING, 0 none

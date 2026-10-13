@@ -1,6 +1,7 @@
 // Client voice chat (client/include/voice_chat.h): Krunker v3.1.1 src/index.js
 //   toggleRecord   push to talk: getUserMedia, MediaRecorder restarted every voiceRate, each
 //                  stop -> readAsDataURL -> io.send("vc", dataUrl); #voiceDisplay opacity
+//                  (KrunkNative records the clips itself on both platforms: libopus + WebM)
 //   voiceChat      "vc" from the server: dropped while the voice volume is 0
 //   addVoiceStream one Howl per clip in voiceStreamQueues[alias]; plays when loaded, first in
 //                  its queue and its player is known; longer than voiceChatMaxLength * 1.2: gone
@@ -31,10 +32,6 @@
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
-#elif defined(_WIN32)
-#include <windows.h>
-#else
-#include <dlfcn.h>
 #endif
 
 #define VOICE_FRAME_SAMPLES (VOICE_SAMPLE_RATE * VOICE_FRAME_MS / 1000) // 2880
@@ -185,16 +182,15 @@ static uint8_t *data_url_decode(const char *url, size_t *out_len) {
     return out;
 }
 
-// ---------------------------------------------------------------- libopus (run-time loaded)
+// ---------------------------------------------------------------- libopus (vendored, linked)
 
-typedef struct OpusEncoder OpusEncoder;
-typedef struct OpusDecoder OpusDecoder;
-#define OPUS_APPLICATION_AUDIO 2049 // Chrome's AudioTrackOpusEncoder
-#define OPUS_SET_BITRATE_REQUEST 4002
+// KrunkNative fix: libopus used to be dlopen()ed, and the Windows / macOS packages (and Linux
+// systems without libopus0) had none. Those clients sent 8 kHz WAV and silently dropped every
+// Opus clip, which is every clip from a browser (MediaRecorder) and from any client that had
+// libopus: they heard nobody. client/lib/opus is now compiled into every client.
+#include <opus.h>
 
 static struct {
-    int tried, ok;
-    void *lib;
     OpusEncoder *(*encoder_create)(int32_t fs, int channels, int application, int *error);
     int (*encoder_ctl)(OpusEncoder *, int request, ...);
     int32_t (*encode_float)(OpusEncoder *, const float *pcm, int frame_size, unsigned char *data, int32_t max_bytes);
@@ -202,63 +198,21 @@ static struct {
     OpusDecoder *(*decoder_create)(int32_t fs, int channels, int *error);
     int (*decode_float)(OpusDecoder *, const unsigned char *data, int32_t len, float *pcm, int frame_size, int fec);
     void (*decoder_destroy)(OpusDecoder *);
-} g_opus;
+} g_opus = {opus_encoder_create, opus_encoder_ctl,  opus_encode_float, opus_encoder_destroy,
+            opus_decoder_create, opus_decode_float, opus_decoder_destroy};
 
-#ifndef __EMSCRIPTEN__
-static void *opus_symbol(const char *name) {
-#ifdef _WIN32
-    return (void *) GetProcAddress((HMODULE) g_opus.lib, name);
-#else
-    return dlsym(g_opus.lib, name);
-#endif
-}
-
-static void *opus_open(const char *path) {
-#ifdef _WIN32
-    return (void *) LoadLibraryA(path);
-#else
-    return dlopen(path, RTLD_NOW | RTLD_LOCAL);
-#endif
-}
-#endif
-
+// KRUNKNATIVE_OPUS=0 (tests): behave like a client without Opus (WAV clips, Opus clips undecodable).
 static int opus_available(void) {
-#ifdef __EMSCRIPTEN__
-    return 0; // the browser encodes (MediaRecorder) and decodes (decodeAudioData)
-#else
-    if (g_opus.tried) return g_opus.ok;
-    g_opus.tried = 1;
-
-    const char *forced = getenv("KRUNKNATIVE_OPUS");
-    if (forced && !strcmp(forced, "0")) return 0;
-    static const char *const NAMES[] = {
-#ifdef _WIN32
-        "opus.dll", "libopus-0.dll", "libopus.dll",
-#elif defined(__APPLE__)
-        "libopus.0.dylib", "libopus.dylib", "/opt/homebrew/lib/libopus.0.dylib", "/usr/local/lib/libopus.0.dylib",
-#else
-        "libopus.so.0", "libopus.so",
-#endif
-    };
-    if (forced && *forced) g_opus.lib = opus_open(forced);
-    for (size_t i = 0; !g_opus.lib && i < sizeof(NAMES) / sizeof(NAMES[0]); i++) g_opus.lib = opus_open(NAMES[i]);
-    if (!g_opus.lib) {
-        fprintf(stderr, "[voice] libopus not found: voice clips are sent as WAV and Opus clips cannot be played\n");
-        return 0;
+    static int cached = -1;
+    if (cached < 0) {
+        const char *forced = getenv("KRUNKNATIVE_OPUS");
+        cached = !(forced && !strcmp(forced, "0"));
     }
+    return cached;
+}
 
-    *(void **) &g_opus.encoder_create = opus_symbol("opus_encoder_create");
-    *(void **) &g_opus.encoder_ctl = opus_symbol("opus_encoder_ctl");
-    *(void **) &g_opus.encode_float = opus_symbol("opus_encode_float");
-    *(void **) &g_opus.encoder_destroy = opus_symbol("opus_encoder_destroy");
-    *(void **) &g_opus.decoder_create = opus_symbol("opus_decoder_create");
-    *(void **) &g_opus.decode_float = opus_symbol("opus_decode_float");
-    *(void **) &g_opus.decoder_destroy = opus_symbol("opus_decoder_destroy");
-    g_opus.ok = g_opus.encoder_create && g_opus.encoder_ctl && g_opus.encode_float && g_opus.encoder_destroy &&
-        g_opus.decoder_create && g_opus.decode_float && g_opus.decoder_destroy;
-    if (!g_opus.ok) fprintf(stderr, "[voice] libopus is incomplete, Opus disabled\n");
-    return g_opus.ok;
-#endif
+const char *voice_opus_version(void) {
+    return opus_get_version_string();
 }
 
 // ---------------------------------------------------------------- WebM (Matroska) writer
@@ -826,7 +780,9 @@ static void rem_speaker(const char *name, const int force, const int last) {
             queue->count--;
         }
         clip_unref(removed);
-        if (queue->count && queue->clips[0]->ready && queue->clips[0]->has_src) clip_play(queue->clips[0], name);
+        // v7 f1769: the next ready clip plays whether or not its speaker is a known player (v3.1.1
+        // also wanted srcObj, which left clips of spectators and unseen speakers stuck forever)
+        if (queue->count && queue->clips[0]->ready) clip_play(queue->clips[0], name);
         queue = queue_find(name); // clip_play may have ended the queue already
     }
     if (queue && (!queue->count || force)) queue_delete(queue);
@@ -858,16 +814,11 @@ static void clip_loaded(VoiceClip *clip) {
     if (duration <= VOICE_CHAT_MAX_LENGTH * 1.2) {
         clip->ready = 1;
         VoiceQueue *queue = queue_find(name);
-        if (queue && queue->count && queue->clips[0] == clip && clip->has_src) clip_play(clip, name);
+        // v7 queueVoiceChatAudio onload: plays when first in its queue, srcObj or not (only the
+        // spatial placement needs it)
+        if (queue && queue->count && queue->clips[0] == clip) clip_play(clip, name);
     } else {
         rem_speaker(name, 0, 1);
-    }
-    if (!clip->has_src) {
-        // Never playable (srcObj is fixed at arrival): v3.1.1 keeps the Howl; only the
-        // queue entry matters (it blocks the queue just the same), not its samples.
-        free(clip->pcm.pcm);
-        clip->pcm.pcm = NULL;
-        clip->pcm.frames = 0;
     }
     clip_unref(clip);
 }
@@ -914,6 +865,9 @@ EM_JS(void, voice_web_decode_take, (int id, float *dst), {
 });
 #endif
 
+static void clip_failed(VoiceClip *clip, size_t bytes);
+static void voice_notice(const char *fmt, ...);
+
 static void voice_poll_loading(void) {
 #ifdef __EMSCRIPTEN__
     for (int i = 0; i < g_play.loading_count;) {
@@ -938,9 +892,56 @@ static void voice_poll_loading(void) {
         // "load" fires whether or not the clip is still queued (initGame may have reset the
         // queues meanwhile); a failed decode never fires it.
         if (clip->pcm.pcm) clip_loaded(clip);
+        else clip_failed(clip, 0);
         clip_unref(clip); // the decode's reference
     }
 #endif
+}
+
+// KrunkNative fix: a clip that cannot be decoded leaves its queue. Howler never fires "load" for
+// one, so in v3.1.1 / v7 it stays first in voiceStreamQueues[name] for good and that speaker is
+// never heard again (an Opus clip on a client without Opus, a Safari MP4 clip, a cut-off file).
+static void clip_failed(VoiceClip *clip, const size_t bytes) {
+    static int warned;
+    voice_log("cannot decode clip from %s (%zu bytes)", clip->name, bytes);
+    if (!warned) {
+        warned = 1;
+        fprintf(stderr, "[voice] a voice clip from %s could not be decoded (%zu bytes); it is skipped\n", clip->name, bytes);
+    }
+    VoiceQueue *queue = queue_find(clip->name);
+    if (!queue) return;
+    for (int i = 0; i < queue->count; i++) {
+        if (queue->clips[i] != clip) continue;
+        memmove(queue->clips + i, queue->clips + i + 1, sizeof(*queue->clips) * (size_t) (queue->count - i - 1));
+        queue->count--;
+        const int was_first = i == 0;
+        char name[VOICE_NAME_MAX];
+        snprintf(name, sizeof(name), "%s", clip->name);
+        clip_unref(clip); // the queue slot
+        if (was_first && queue->count && queue->clips[0]->ready) clip_play(queue->clips[0], name);
+        queue = queue_find(name);
+        if (queue && !queue->count) queue_delete(queue);
+        return;
+    }
+}
+
+static void clip_start_decode(VoiceClip *clip, const char *audio) {
+    // Opus (WebM / Ogg) and WAV / MP3 decode in C on every platform (the web build links libopus
+    // too: Safari's decodeAudioData has no WebM Opus). Anything else goes to the browser.
+    if (clip_decode(audio, &clip->pcm)) {
+        clip_loaded(clip);
+        return;
+    }
+#ifdef __EMSCRIPTEN__
+    if (g_play.loading_count < (int) (sizeof(g_play.loading) / sizeof(g_play.loading[0]))) {
+        clip->loading = 1;
+        clip->web_id = voice_web_decode_start(audio);
+        clip->refs++;
+        g_play.loading[g_play.loading_count++] = clip;
+        return;
+    }
+#endif
+    clip_failed(clip, strlen(audio));
 }
 
 // window.addVoiceStream(player, name, audio) / v7 queueVoiceChatAudio: `volume` multiplies the Howl
@@ -971,30 +972,34 @@ static void add_voice_stream(const int has_src, const char *name, const char *au
     clip->spatial = has_src && g_vset.chat_type == 1; // !!sourcePlayer && !!voiceChatType
     clip->ref_distance = g_vset.distance;
     queue->clips[queue->count++] = clip;
-
-#ifdef __EMSCRIPTEN__
-    if (g_play.loading_count < (int) (sizeof(g_play.loading) / sizeof(g_play.loading[0]))) {
-        clip->loading = 1;
-        clip->web_id = voice_web_decode_start(audio);
-        clip->refs++;
-        g_play.loading[g_play.loading_count++] = clip;
-    }
-#else
-    if (clip_decode(audio, &clip->pcm)) clip_loaded(clip);
-    else voice_log("cannot decode clip from %s (%zu bytes)", name, strlen(audio)); // stays queued, never ready
-#endif
+    clip->refs++; // held across the decode (clip_loaded / clip_failed may drop the queue slot)
+    clip_start_decode(clip, audio);
+    clip_unref(clip);
 }
 
 // v7 queueVoiceChatAudio's drops: muteSpec (we have no sid: spectating, or the speaker is not
 // active) and the speaker's account in mutedVoiceAccountIds.
 static int voice_dropped(const Client *client, const Player *speaker, const int account_id) {
-    if (g_vset.mute_spec && (!client || !client->me || spectate_active() || (speaker && !speaker->active))) return 1;
+    // v7's spectator is an inactive entry of Game.players (sourcePlayer && !sourcePlayer.active);
+    // KrunkNative sends spectators no SPAWN, so a speaker without a player is one too.
+    if (g_vset.mute_spec && (!client || !client->me || spectate_active() || !speaker || !speaker->active)) return 1;
     return social_voice_muted(account_id);
 }
 
 // window.voiceChat(audio, name, sid) (older servers: every channel, full volume)
+// voiceVolume 0 (the Pro preset's value) drops every clip we receive, as in v7; say so once.
+static int voice_volume_off(const char *name) {
+    if (audio_get_volume(AUDIO_CAT_VOICE) > 0.0f) return 0;
+    static int warned;
+    if (!warned) {
+        warned = 1;
+        voice_notice("Voice: %s is talking, but your Voice Chat volume is 0 (Settings > Audio)", name);
+    }
+    return 1;
+}
+
 static void voice_chat(Client *client, const char *audio, const char *name, const int sid) {
-    if (!(audio_get_volume(AUDIO_CAT_VOICE) > 0.0f)) return; // if (SOUND.volumes[1])
+    if (voice_volume_off(name)) return; // if (SOUND.volumes[1])
     char scrambled[VOICE_NAME_MAX];
     name = streamer_name(name, scrambled, sizeof(scrambled)); // streamerModeEnabled && Filter: UTILS.scrambleS(hk)
     const Player *player = client && sid >= 0 ? game_find_player(&client->game, sid) : NULL;
@@ -1007,7 +1012,7 @@ static void voice_chat(Client *client, const char *audio, const char *name, cons
 // v7 io_voiceChat(audio, name, sid, channel, volume, isFinal, accountId): SOUND.volumes[1] * volume
 // must be > 0 and the channel -1 or ours (vLN02023). isFinal (never set by v7's server) is ignored.
 static void voice_chat_v7(Client *client, const char *audio, const char *name, const int sid, const VoiceV7Meta *meta) {
-    if (!(audio_get_volume(AUDIO_CAT_VOICE) * meta->volume > 0.0f)) return;
+    if (voice_volume_off(name) || !(meta->volume > 0.0f)) return; // SOUND.volumes[1] * volume > 0
     if (meta->channel != CHAT_CHANNEL_ALL && meta->channel != hud_ui_chat_channel()) return;
     char scrambled[VOICE_NAME_MAX];
     name = streamer_name(name, scrambled, sizeof(scrambled));
@@ -1110,7 +1115,117 @@ static struct {
     char input[256];     // settings.tmp.audioInput
 } g_rec = {.ready = 1};
 
+// ---- status: what the player sees of the microphone (KrunkNative addition, v7 shows nothing:
+// a refused getUserMedia only leaves the icon on mic_off). Failures go to the chat as a system
+// line ("Voice unavailable: <reason>") and the console; #voiceIcon shows the live input level.
+
+static void voice_display_opacity(const char *opacity);
+
+#define VOICE_LEVEL_SILENT 1e-4f   // RMS below this for VOICE_SILENT_SECONDS: a muted / denied mic
+#define VOICE_SILENT_SECONDS 1.5
+#define VOICE_NO_DATA_SECONDS 1.0  // a session whose device delivered nothing at all after this
+
+static struct {
+    float level;            // RMS of the last drained block, 0..1
+    double session_start;   // glfwGetTime() of session_opened
+    double loud_at;         // last time the level was over VOICE_LEVEL_SILENT
+    uint64_t session_samples;
+    int warned_silent;      // once per session
+    int warned_mic_volume;  // once per run: micVolume 0 (the Pro preset) makes every clip silent
+    char last_error[160];
+} g_status;
+
+static void voice_notice(const char *fmt, ...) {
+    char text[200];
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(text, sizeof(text), fmt, args);
+    va_end(args);
+    fprintf(stderr, "[voice] %s\n", text);
+#ifdef UI_SCENARIO_SUPPORTED
+    if (ui_scenario_active()) return;
+#endif
+    hud_ui_add_chat(NULL, text, "#fc03ec"); // a server-coloured system line
+}
+
+static void voice_unavailable(const char *reason) {
+    snprintf(g_status.last_error, sizeof(g_status.last_error), "%s", reason);
+    voice_notice("Voice unavailable: %s", reason);
+}
+
+const char *voice_last_error(void) {
+    return g_status.last_error;
+}
+
+float voice_input_level(void) {
+    return g_status.level;
+}
+
+// #voiceIcon while recording: the mic glyph's brightness follows the input level, so a dead
+// microphone is visible at once (the icon stays dim).
+static void voice_show_level(void) {
+    const HtmlElem icon = html_dom_by_id("voiceIcon");
+    if (!icon) return;
+    char opacity[16];
+    const float lit = g_status.level > 0.0f ? 0.45f + 0.55f * fminf(1.0f, sqrtf(g_status.level * 8.0f)) : 0.45f;
+    snprintf(opacity, sizeof(opacity), "%.2f", (double) lit);
+    html_dom_set_style(icon, "opacity", opacity);
+}
+
+// One drained block of `n` mono samples.
+static void voice_note_samples(const float *pcm, const size_t n) {
+    if (!n) return;
+    double sum = 0.0;
+    for (size_t i = 0; i < n; i++) sum += (double) pcm[i] * pcm[i];
+    g_status.level = (float) sqrt(sum / (double) n);
+    g_status.session_samples += n;
+    if (g_status.level > VOICE_LEVEL_SILENT) g_status.loud_at = glfwGetTime();
+}
+
+// Per frame while a session runs: a device that delivers nothing, or only digital silence (macOS
+// without microphone permission, a hardware mute switch, the wrong input picked).
+static void voice_check_session(void) {
+    const double now = glfwGetTime();
+    if (g_status.warned_silent) return;
+    if (!g_status.session_samples && now - g_status.session_start > VOICE_NO_DATA_SECONDS) {
+        g_status.warned_silent = 1;
+        voice_unavailable("the microphone delivers no audio (check the input device and its permission)");
+    } else if (g_status.session_samples && now - g_status.loud_at > VOICE_SILENT_SECONDS &&
+               now - g_status.session_start > VOICE_SILENT_SECONDS) {
+        g_status.warned_silent = 1;
+        voice_notice("Voice: the microphone is silent (muted, or no permission to use it)");
+    }
+}
+
+// Captured samples (48 kHz mono) -> the level meter and, while the recorder runs, this run's clip.
+static void rec_append(const float *pcm, const size_t n) {
+    voice_note_samples(pcm, n);
+    if (!g_rec.recorder_on || !n) return;
+    if (g_rec.samples + n > g_rec.cap) {
+        size_t cap = g_rec.cap ? g_rec.cap : VOICE_SAMPLE_RATE;
+        while (cap < g_rec.samples + n) cap *= 2;
+        float *grown = realloc(g_rec.pcm, cap * sizeof(float));
+        if (!grown) return;
+        g_rec.pcm = grown;
+        g_rec.cap = cap;
+    }
+    memcpy(g_rec.pcm + g_rec.samples, pcm, n * sizeof(float));
+    g_rec.samples += n;
+}
+
 #ifndef __EMSCRIPTEN__
+// KRUNKNATIVE_VOICE_INPUT=tone:<hz> | file:<wav> (tests): a generated sine at 0.3 amplitude or a
+// WAV file (looped, any rate / channel count, mixed down and resampled to 48 kHz) instead of a
+// capture device, fed in real time (glfwGetTime) like a microphone. No audio device is opened.
+static struct {
+    int on;
+    double hz;
+    float *wav;          // 48 kHz mono
+    size_t wav_frames, wav_pos;
+    double phase;
+    double fed_until;    // glfwGetTime() the samples so far cover
+} g_synth;
+
 static struct {
     int context_ready;
     ma_context context;
@@ -1162,6 +1277,56 @@ static int capture_context(void) {
 static void capture_close(void) {
     if (g_cap.device_open) ma_device_uninit(&g_cap.device);
     g_cap.device_open = 0;
+    g_synth.on = 0;
+}
+
+static int synth_open(const char *spec) {
+    free(g_synth.wav);
+    memset(&g_synth, 0, sizeof(g_synth));
+    if (!strncmp(spec, "tone:", 5)) {
+        g_synth.hz = atof(spec + 5);
+        if (!(g_synth.hz > 0.0 && g_synth.hz < VOICE_SAMPLE_RATE / 2)) return 0;
+    } else {
+        ma_decoder_config config = ma_decoder_config_init(ma_format_f32, 1, VOICE_SAMPLE_RATE);
+        ma_uint64 frames = 0;
+        void *pcm = NULL;
+        if (ma_decode_file(spec + 5, &config, &frames, &pcm) != MA_SUCCESS || !frames) return 0;
+        g_synth.wav = malloc((size_t) frames * sizeof(float));
+        if (g_synth.wav) memcpy(g_synth.wav, pcm, (size_t) frames * sizeof(float));
+        ma_free(pcm, NULL);
+        if (!g_synth.wav) return 0;
+        g_synth.wav_frames = (size_t) frames;
+    }
+    g_synth.on = 1;
+    g_synth.fed_until = glfwGetTime();
+    return 1;
+}
+
+// Writes the samples the synthetic microphone produced since the last call into the ring.
+static void synth_feed(void) {
+    if (!g_synth.on || !g_cap.rb_ready) return;
+    const double now = glfwGetTime();
+    size_t want = (size_t) ((now - g_synth.fed_until) * VOICE_SAMPLE_RATE);
+    if (!want) return;
+    g_synth.fed_until += (double) want / VOICE_SAMPLE_RATE;
+    while (want) {
+        ma_uint32 n = (ma_uint32) (want < 4096 ? want : 4096);
+        void *dst = NULL;
+        if (ma_pcm_rb_acquire_write(&g_cap.rb, &n, &dst) != MA_SUCCESS || !n) return; // full: dropped, like the device
+        float *out = dst;
+        for (ma_uint32 i = 0; i < n; i++) {
+            if (g_synth.wav) {
+                out[i] = g_synth.wav[g_synth.wav_pos];
+                g_synth.wav_pos = (g_synth.wav_pos + 1) % g_synth.wav_frames;
+            } else {
+                out[i] = (float) (0.3 * sin(g_synth.phase));
+                g_synth.phase += 2.0 * M_PI * g_synth.hz / VOICE_SAMPLE_RATE;
+                if (g_synth.phase > 2.0 * M_PI) g_synth.phase -= 2.0 * M_PI;
+            }
+        }
+        ma_pcm_rb_commit_write(&g_cap.rb, n);
+        want -= n;
+    }
 }
 
 // getUserMedia({audio: audioInput != "default" ? {deviceId: {exact}} : true})
@@ -1169,166 +1334,204 @@ static void capture_close(void) {
 // the next session reuses it unless the requested input changed (v3.1.1 asks getUserMedia
 // again with the current audioInput every session).
 static int capture_open(void) {
-    const char *forced = getenv("KRUNKNATIVE_VOICE_INPUT"); // tests: a virtual microphone by name
+    const char *forced = getenv("KRUNKNATIVE_VOICE_INPUT"); // tests: a virtual microphone by name, or tone: / file:
     const char *input = forced && *forced ? forced : g_rec.input;
-    if (g_cap.device_open && !strcmp(g_cap.opened_input, input)) {
+    const int synthetic = !strncmp(input, "tone:", 5) || !strncmp(input, "file:", 5);
+    if ((g_cap.device_open || g_synth.on) && !strcmp(g_cap.opened_input, input)) {
         // Between sessions nobody reads the ring (the callback drops what does not fit):
         // whatever is in it is stale, the session records from now on.
         capture_discard();
+        if (g_synth.on) g_synth.fed_until = glfwGetTime();
         return 1;
     }
     capture_close();
-    if (!capture_context()) return 0;
     if (!g_cap.rb_ready) {
-        if (ma_pcm_rb_init(ma_format_f32, 1, VOICE_CAPTURE_FRAMES, NULL, NULL, &g_cap.rb) != MA_SUCCESS) return 0;
+        if (ma_pcm_rb_init(ma_format_f32, 1, VOICE_CAPTURE_FRAMES, NULL, NULL, &g_cap.rb) != MA_SUCCESS) {
+            voice_unavailable("out of memory");
+            return 0;
+        }
         g_cap.rb_ready = 1;
     }
     capture_discard(); // the audio thread is stopped here: nothing races the reader
 
+    if (synthetic) {
+        if (!synth_open(input)) {
+            voice_unavailable("the test input could not be opened");
+            return 0;
+        }
+        snprintf(g_cap.opened_input, sizeof(g_cap.opened_input), "%s", input);
+        voice_log("microphone open: synthetic %s", input);
+        return 1;
+    }
+
+    if (!capture_context()) {
+        voice_unavailable("no audio backend for the microphone");
+        return 0;
+    }
     ma_device_config config = ma_device_config_init(ma_device_type_capture);
     config.capture.format = ma_format_f32;
-    config.capture.channels = 1;
-    config.sampleRate = VOICE_SAMPLE_RATE;
+    config.capture.channels = 1;         // miniaudio mixes a stereo / multichannel mic down
+    config.sampleRate = VOICE_SAMPLE_RATE; // and resamples 44.1 kHz etc. to Opus' 48 kHz
     config.dataCallback = capture_callback;
 
     ma_device_id id;
     if (input[0] && strcmp(input, "default") != 0) {
         ma_device_info *infos = NULL;
         ma_uint32 count = 0;
-        if (ma_context_get_devices(&g_cap.context, NULL, NULL, &infos, &count) != MA_SUCCESS) return 0;
         int found = 0;
-        for (ma_uint32 i = 0; i < count && !found; i++) {
-            if (!strcmp(infos[i].name, input)) {
-                id = infos[i].id;
-                found = 1;
+        if (ma_context_get_devices(&g_cap.context, NULL, NULL, &infos, &count) == MA_SUCCESS) {
+            for (ma_uint32 i = 0; i < count && !found; i++) {
+                if (!strcmp(infos[i].name, input)) {
+                    id = infos[i].id;
+                    found = 1;
+                }
             }
         }
-        if (!found) return 0; // deviceId: {exact}: OverconstrainedError
-        config.capture.pDeviceID = &id;
+        // KrunkNative difference: v7's {exact} deviceId fails for good once the saved device is
+        // unplugged or renamed (OverconstrainedError: voice never works again until the setting is
+        // changed). Fall back to the default microphone and say so.
+        if (found) config.capture.pDeviceID = &id;
+        else if (!forced) voice_notice("Voice: input \"%s\" not found, using the default microphone", input);
+        else {
+            voice_unavailable("the requested input device is not present");
+            return 0;
+        }
     }
 
-    if (ma_device_init(&g_cap.context, &config, &g_cap.device) != MA_SUCCESS) return 0;
+    const ma_result r = ma_device_init(&g_cap.context, &config, &g_cap.device);
+    if (r != MA_SUCCESS) {
+        char reason[160];
+        snprintf(reason, sizeof(reason), "cannot open the microphone (%s: %s)", ma_get_backend_name(g_cap.context.backend), ma_result_description(r));
+        voice_unavailable(reason);
+        return 0;
+    }
     g_cap.device_open = 1;
     snprintf(g_cap.opened_input, sizeof(g_cap.opened_input), "%s", input);
     if (ma_device_start(&g_cap.device) != MA_SUCCESS) {
         capture_close();
+        voice_unavailable("the microphone would not start");
         return 0;
     }
-    voice_log("microphone open: %s", g_cap.device.capture.name);
+    voice_log("microphone open: %s (%s)", g_cap.device.capture.name, ma_get_backend_name(g_cap.context.backend));
     return 1;
 }
 
 static void capture_drain(void) {
     if (!g_cap.rb_ready) return;
+    synth_feed();
     for (;;) {
         ma_uint32 n = ma_pcm_rb_available_read(&g_cap.rb);
         if (!n) return;
         void *src = NULL;
         if (ma_pcm_rb_acquire_read(&g_cap.rb, &n, &src) != MA_SUCCESS || !n) return;
-        if (g_rec.recorder_on) {
-            if (g_rec.samples + n > g_rec.cap) {
-                size_t cap = g_rec.cap ? g_rec.cap : VOICE_SAMPLE_RATE;
-                while (cap < g_rec.samples + n) cap *= 2;
-                float *grown = realloc(g_rec.pcm, cap * sizeof(float));
-                if (grown) {
-                    g_rec.pcm = grown;
-                    g_rec.cap = cap;
-                }
-            }
-            if (g_rec.samples + n <= g_rec.cap) {
-                memcpy(g_rec.pcm + g_rec.samples, src, n * sizeof(float));
-                g_rec.samples += n;
-            }
-        }
+        rec_append(src, n);
         ma_pcm_rb_commit_read(&g_cap.rb, n);
     }
 }
 #else
-// v3.1.1's capture, verbatim: getUserMedia -> one MediaRecorder per stream, started and
-// stopped by C (voice_update), every stop -> Blob -> readAsDataURL -> a queued clip that C
-// takes and sends. No UI logic here: C owns cB / cC / the interval / #voiceDisplay.
-EM_JS(void, voice_web_open, (const char *device, int bits), {
-    var v = window.knVoice = window.knVoice || {clips: [], decodes: {}, nextId: 1, state: 0};
+// Web capture (KrunkNative change): getUserMedia -> a ScriptProcessor tap on the stream at the
+// page's AudioContext rate, mixed down to mono by the node (channelCount 1, explicit); C pulls the
+// samples (voice_web_take_pcm), resamples them to 48 kHz and encodes the clips with the same
+// libopus + WebM writer as native. v3.1.1 / v7 used MediaRecorder, whose files differ per browser
+// (Chrome WebM, Firefox Ogg, Safari MP4/AAC that no other client can decode). Firefox refuses to
+// connect a stream to a context of another sample rate, hence no fixed 48 kHz context.
+// No UI logic here: C owns the session, the interval, #voiceIcon and the messages.
+EM_JS(void, voice_web_open, (const char *device), {
+    var v = window.knVoice = window.knVoice || {decodes: {}, nextId: 1, state: 0};
     var id = UTF8ToString(device);
     v.state = 1;
-    try {
-        navigator.mediaDevices.getUserMedia({
-            audio: id && id != "default" ? {deviceId: {exact: id}} : true,
-            video: false
-        }).then(function (stream) {
+    v.error = "";
+    var fail = function (e) {
+        var n = e && e.name || "";
+        v.error = n == "NotAllowedError" || n == "SecurityError" ? "microphone permission denied (allow it in the browser's site settings)"
+            : n == "NotFoundError" ? "no microphone found"
+            : n == "NotReadableError" ? "the microphone is in use by another program or blocked by the system"
+            : "the microphone could not be opened (" + (n || String(e)) + ")";
+        v.state = 3;
+    };
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        v.error = window.isSecureContext === false ? "the page is not served over https, so the browser allows no microphone"
+            : "this browser has no microphone access (getUserMedia)";
+        v.state = 3;
+        return;
+    }
+    var open = function (constraints, retry) {
+        navigator.mediaDevices.getUserMedia({audio: constraints, video: false}).then(function (stream) {
             if (window.knVoiceInputs) window.knVoiceInputs();
-            // v3.1.1 keeps every earlier stream open as well; the microphone is just as open
-            // with only the newest one, so the previous one is released instead of leaked.
             if (v.stream && v.stream !== stream) v.stream.getTracks().forEach(function (t) { t.stop(); });
             v.stream = stream;
-            v.recorder = new MediaRecorder(stream, {mimetype: "audio/ogg", bitsPerSecond: bits}); // micQuality
-            var parts = [];
-            v.recorder.addEventListener("dataavailable", function (e) { parts.push(e.data); });
-            v.recorder.addEventListener("stop", function () {
-                var blob = new Blob(parts, {type: "audio/ogg; codecs=opus"});
-                parts.length = 0;
-                var reader = new FileReader();
-                reader.addEventListener("load", function () { v.clips.push(reader.result); });
-                reader.readAsDataURL(blob);
-            });
+            var Ctx = window.AudioContext || window.webkitAudioContext;
+            if (!v.ctx) v.ctx = new Ctx();
+            if (v.ctx.state == "suspended" && v.ctx.resume) v.ctx.resume();
+            if (v.source) v.source.disconnect();
+            if (!v.node) {
+                v.node = v.ctx.createScriptProcessor(4096, 1, 1);
+                v.node.channelCount = 1;
+                v.node.channelCountMode = "explicit";
+                v.node.channelInterpretation = "speakers";
+                v.chunks = [];
+                v.queued = 0;
+                v.node.onaudioprocess = function (e) {
+                    if (!v.capturing || v.queued > v.ctx.sampleRate * 2) return; // 2 s backlog: drop, like the native ring
+                    var data = new Float32Array(e.inputBuffer.getChannelData(0));
+                    v.chunks.push(data);
+                    v.queued += data.length;
+                };
+                var mute = v.ctx.createGain();
+                mute.gain.value = 0;
+                v.node.connect(mute);
+                mute.connect(v.ctx.destination); // a ScriptProcessor only runs when it reaches the destination
+            }
+            v.source = v.ctx.createMediaStreamSource(stream);
+            v.source.connect(v.node);
             v.state = 2;
-        }).catch(function () { v.state = 3; });
-    } catch (e) { v.state = 3; }
+        }).catch(function (e) {
+            // KrunkNative difference: v7 asks for {exact: audioInput} and fails for good once that
+            // device is gone; fall back to the default microphone
+            if (retry && e && e.name == "OverconstrainedError") { v.fallback = 1; open(true, false); }
+            else fail(e);
+        });
+    };
+    try { open(id && id != "default" ? {deviceId: {exact: id}} : true, !!(id && id != "default")); } catch (e) { fail(e); }
 });
 
-// 0 idle, 1 asking, 2 open, 3 refused
+// 0 idle, 1 asking, 2 open, 3 refused (voice_web_error says why)
 EM_JS(int, voice_web_state, (void), {
     return window.knVoice ? window.knVoice.state : 0;
 });
 
-// recorder.start() and cA = setInterval(..., config.voiceRate) on the page's own timer (the
-// frame loop can run far slower than 2 Hz in a background tab): each tick stops the recorder
-// (one clip) and starts it again while cB (`recording`) holds, else the session is over.
-EM_JS(void, voice_web_session_start, (int rate_ms), {
-    var v = window.knVoice, r = v && v.recorder;
-    if (!r) return;
-    v.recording = 1;
-    v.ended = 0;
-    if (r.state != "recording") r.start();
-    v.timer = setInterval(function () {
-        if (r.state == "recording") r.stop();
-        if (v.recording) {
-            r.start();
-        } else {
-            clearInterval(v.timer);
-            v.timer = 0;
-            v.ended = 1;
-        }
-    }, rate_ms);
-});
-
-EM_JS(void, voice_web_set_recording, (int on), {
-    if (window.knVoice) window.knVoice.recording = on;
-});
-
-// 1 once the interval saw cB false (C then dims #voiceDisplay and sets cC).
-EM_JS(int, voice_web_take_ended, (void), {
+EM_JS(char *, voice_web_error, (void), {
     var v = window.knVoice;
-    if (!v || !v.ended) return 0;
-    v.ended = 0;
-    return 1;
+    var text = v && v.fallback ? (v.fallback = 0, "\x01") : v && v.error ? v.error : "";
+    return stringToNewUTF8(text);
 });
 
-EM_JS(void, voice_web_close, (void), {
+EM_JS(int, voice_web_rate, (void), {
+    return window.knVoice && window.knVoice.ctx ? window.knVoice.ctx.sampleRate | 0 : 0;
+});
+
+EM_JS(void, voice_web_capture, (int on), {
     var v = window.knVoice;
     if (!v) return;
-    // End of a session: the stream stays open (v3.1.1 never stops it, the microphone stays in
-    // use after the first push to talk); the next session asks getUserMedia again.
-    if (v.timer) clearInterval(v.timer);
-    v.timer = 0;
-    if (v.recorder && v.recorder.state == "recording") v.recorder.stop();
-    v.state = 0;
+    v.capturing = on;
+    v.chunks = [];
+    v.queued = 0;
 });
 
-EM_JS(char *, voice_web_take_clip, (void), {
+// Up to `max` captured samples into dst; returns how many.
+EM_JS(int, voice_web_take_pcm, (float *dst, int max), {
     var v = window.knVoice;
-    if (!v || !v.clips.length) return 0;
-    return stringToNewUTF8(v.clips.shift());
+    if (!v || !v.chunks || !v.chunks.length) return 0;
+    var n = 0;
+    while (v.chunks.length && n < max) {
+        var c = v.chunks[0];
+        var take = Math.min(c.length, max - n);
+        HEAPF32.set(take == c.length ? c : c.subarray(0, take), (dst >> 2) + n);
+        n += take;
+        if (take == c.length) v.chunks.shift(); else v.chunks[0] = c.subarray(take);
+    }
+    v.queued -= n;
+    return n;
 });
 
 // window.updateAudioInputs / getAudioInputs
@@ -1349,6 +1552,33 @@ EM_JS(char *, voice_web_inputs, (void), {
     }
     return stringToNewUTF8(JSON.stringify(window.knVoiceInputOptions));
 });
+
+// The page's rate -> 48 kHz mono, then the recorder (miniaudio's linear resampler, one per rate).
+static void web_drain(void) {
+    static ma_linear_resampler resampler;
+    static int resampler_rate;
+    float in[4096], out[4096 * 2];
+    const int rate = voice_web_rate();
+    if (rate <= 0) return;
+    if (rate != resampler_rate) {
+        if (resampler_rate) ma_linear_resampler_uninit(&resampler, NULL);
+        resampler_rate = 0;
+        if (rate != VOICE_SAMPLE_RATE) {
+            const ma_linear_resampler_config config = ma_linear_resampler_config_init(ma_format_f32, 1, (ma_uint32) rate, VOICE_SAMPLE_RATE);
+            if (ma_linear_resampler_init(&config, NULL, &resampler) != MA_SUCCESS) return;
+        }
+        resampler_rate = rate;
+    }
+    for (int n; (n = voice_web_take_pcm(in, 4096)) > 0;) {
+        if (rate == VOICE_SAMPLE_RATE) {
+            rec_append(in, (size_t) n);
+            continue;
+        }
+        ma_uint64 frames_in = (ma_uint64) n, frames_out = sizeof(out) / sizeof(out[0]);
+        ma_linear_resampler_process_pcm_frames(&resampler, in, &frames_in, out, &frames_out);
+        rec_append(out, (size_t) frames_out);
+    }
+}
 #endif
 
 // The recording indicator: v7.1.4's #voiceIcon toggles .voiceOn / .voiceOff (toggleRecord);
@@ -1409,33 +1639,42 @@ static void recorder_start(void) {
     g_rec.recorder_on = 1;
 }
 
+// One recorder run (voiceRate ms) -> a clip. Native and web alike: samples drained from the
+// microphone (native ring / the page's tap) are encoded here.
 static void recorder_stop(Client *client) {
     if (!g_rec.recorder_on) return;
-    g_rec.recorder_on = 0;
 #ifdef __EMSCRIPTEN__
-    (void) client; // the page's interval stops the recorder; clips come from voice_web_take_clip()
+    web_drain();
 #else
     capture_drain();
+#endif
+    g_rec.recorder_on = 0;
     // The recorder ran voiceRate ms of sample time: what the microphone delivered past that
     // (this frame came late) belongs to the next run, so clips cover the stream like
     // Chrome's timer-driven stop()/start() and not the frame pacing.
     const size_t limit = (size_t) VOICE_SAMPLE_RATE * VOICE_RATE_MS / 1000;
     const size_t n = g_rec.samples < limit ? g_rec.samples : limit;
+    // KrunkNative fix: only whole 60 ms Opus frames reach a clip; the remainder of a run (20 ms of
+    // every 500 ms) stays for the next one instead of being thrown away (a click every half second)
+    const size_t used = opus_available() ? n / VOICE_FRAME_SAMPLES * VOICE_FRAME_SAMPLES : n;
     size_t len = 0;
     int frames = 0;
-    char *url = clip_encode(g_rec.pcm, n, &len, &frames);
-    memmove(g_rec.pcm, g_rec.pcm + n, (g_rec.samples - n) * sizeof(float));
-    g_rec.samples -= n;
-    if (url) send_clip(client, url, len, frames);
+    char *url = used ? clip_encode(g_rec.pcm, used, &len, &frames) : NULL;
+    memmove(g_rec.pcm, g_rec.pcm + used, (g_rec.samples - used) * sizeof(float));
+    g_rec.samples -= used;
+    if (url && frames > 0) send_clip(client, url, len, frames);
+    else if (used && !url) voice_unavailable("the voice encoder failed");
     free(url);
-#endif
 }
 
 static void session_end(void) {
     g_rec.session = 0;
     g_rec.samples = 0;
+    g_status.level = 0.0f;
+    const HtmlElem icon = html_dom_by_id("voiceIcon");
+    if (icon) html_dom_set_style(icon, "opacity", "");
 #ifdef __EMSCRIPTEN__
-    voice_web_close();
+    voice_web_capture(0); // the stream stays open, like the page's MediaRecorder stream did
 #endif
     // native: the capture device stays open (capture_open), like the page's stream
 }
@@ -1448,14 +1687,22 @@ static void session_opened(void) {
     g_rec.recording = 1;
     g_rec.session = 1;
     g_rec.samples = 0;
+    g_status.session_start = g_status.loud_at = glfwGetTime();
+    g_status.session_samples = 0;
+    g_status.warned_silent = 0;
+    g_status.last_error[0] = 0;
+    if (!(g_vset.mic_volume > 0.0f) && !g_status.warned_mic_volume) {
+        g_status.warned_mic_volume = 1; // the Pro preset sets micVolume 0: every receiver drops our clips
+        voice_notice("Voice: your Mic Volume setting is 0, nobody will hear you (Settings > Audio)");
+    }
     recorder_start();
     g_rec.next_tick = glfwGetTime() + VOICE_RATE_MS / 1000.0;
 #ifdef __EMSCRIPTEN__
-    voice_web_session_start(VOICE_RATE_MS);
+    voice_web_capture(1);
 #endif
 }
 
-// .catch: no microphone.
+// .catch: no microphone (capture_open / the page said why: voice_unavailable).
 static void session_refused(void) {
     g_rec.pending = 0;
     g_rec.recording = 0;
@@ -1466,7 +1713,9 @@ static void session_refused(void) {
 
 void voice_toggle_record(Client *client, int down) {
     if (ui_text_input_focused()) return;       // document.activeElement.tagName != "INPUT" (+ any text field)
-    if (!client || !(client->me || spectate_active())) return; // player || window.spectating
+    // v3.1.1 `player || window.spectating`; v7 has no such check (its server drops a clip without a
+    // player). KrunkNative: a dead player (client->me is kept) and a spectator may talk.
+    if (!client || !(client->me || spectate_active())) return;
     // v7 voiceChatTrigger 0 (Press / Toggle): a press flips the recording, a release keeps it
     if (g_vset.trigger == 0) down = down ? !g_rec.recording : g_rec.recording;
     if (down && !g_rec.recording && g_rec.ready) {
@@ -1474,7 +1723,7 @@ void voice_toggle_record(Client *client, int down) {
         voice_log("record");
 #ifdef __EMSCRIPTEN__
         g_rec.pending = 1;
-        voice_web_open(g_rec.input, g_vset.mic_quality);
+        voice_web_open(g_rec.input);
 #else
         if (capture_open()) session_opened();
         else session_refused();
@@ -1482,9 +1731,6 @@ void voice_toggle_record(Client *client, int down) {
     } else if (!down && g_rec.recording && g_rec.session) {
         voice_log("release");
         g_rec.recording = 0;
-#ifdef __EMSCRIPTEN__
-        voice_web_set_recording(0);
-#endif
     }
 }
 
@@ -1502,21 +1748,29 @@ void voice_update(Client *client) {
     }
     if (g_rec.pending) {
         const int state = voice_web_state();
-        if (state == 2) session_opened();
-        else if (state == 3) session_refused();
+        char *error = state >= 2 ? voice_web_error() : NULL;
+        if (error && error[0] == '\x01') voice_notice("Voice: the saved input device is gone, using the default microphone");
+        if (state == 2) {
+            session_opened();
+        } else if (state == 3) {
+            voice_unavailable(error && error[0] && error[0] != '\x01' ? error : "the microphone could not be opened");
+            session_refused();
+        }
+        free(error);
     }
-    for (char *url; (url = voice_web_take_clip()) != NULL; free(url)) send_clip(client, url, strlen(url), -1);
-    if (g_rec.session && voice_web_take_ended()) {
-        voice_display_opacity("0.5");
-        g_rec.ready = 1;
-        session_end();
-    }
+    if (g_rec.session) web_drain();
 #else
     if (g_rec.session) capture_drain();
+#endif
+    if (g_rec.session) {
+        voice_check_session();
+        voice_show_level();
+    }
 
     // cA = setInterval(..., config.voiceRate)
     if (g_rec.session && glfwGetTime() >= g_rec.next_tick) {
         g_rec.next_tick += VOICE_RATE_MS / 1000.0;
+        if (g_rec.next_tick < glfwGetTime()) g_rec.next_tick = glfwGetTime() + VOICE_RATE_MS / 1000.0; // a long stall
         recorder_stop(client);
         if (g_rec.recording) {
             recorder_start();
@@ -1526,7 +1780,6 @@ void voice_update(Client *client) {
             session_end();
         }
     }
-#endif
 
     voice_poll_loading();
     instances_update();

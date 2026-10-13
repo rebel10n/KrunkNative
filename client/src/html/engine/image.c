@@ -51,7 +51,7 @@ typedef struct ImageSlot {
     unsigned use_clock;
     uint8_t lazy;          /* raster file: pixels decoded on first draw, evictable */
     unsigned last_frame;   /* image_cache_frame() count of its last draw (LRU)      */
-    size_t bytes;          /* GL bytes held (level 0 + mips, + the nearest twin)   */
+    size_t bytes;          /* GL bytes held (level 0 + mips)   */
 } ImageSlot;
 
 struct ImageCache {
@@ -100,12 +100,7 @@ ImageCache *image_cache_create(const char *ui_dir) {
 }
 
 static void image_slot_free(ImageSlot *slot) {
-    GLuint textures[2];
-    int n = 0;
-
-    if (slot->entry.tex) textures[n++] = slot->entry.tex;
-    if (slot->entry.tex_nearest) textures[n++] = slot->entry.tex_nearest;
-    if (n) glDeleteTextures(n, textures);
+    if (slot->entry.tex) glDeleteTextures(1, &slot->entry.tex);
     for (int i = 0; i < IMAGE_SVG_SIZES; i++) {
         if (slot->sized[i].tex) glDeleteTextures(1, &slot->sized[i].tex);
     }
@@ -324,16 +319,18 @@ static int image_fetch_web(const char *key, const char *path, unsigned char **by
 
 #endif
 
-static int image_read(const ImageCache *cache, const char *key, unsigned char **bytes, size_t *len) {
-    /* "/assets/<path>" (html_dom_asset_url): game content, read from the asset tree */
-    if (!strncmp(key, IMAGE_ASSETS_PREFIX, sizeof(IMAGE_ASSETS_PREFIX) - 1)) {
-        const char *assets = assets_path();
-        char *asset = assets ? concat(assets, key + sizeof(IMAGE_ASSETS_PREFIX) - 1) : NULL;
-        const int ok = asset && ensure_asset_file(asset) && read_file(asset, bytes, len) == 0;
-        free(asset);
-        return ok;
-    }
+/* Reads `key` from the asset tree (assets_path(), the game content).  On the web
+ * ensure_asset_file() fetches it from the asset host first. */
+static int image_read_assets(const char *rel, unsigned char **bytes, size_t *len) {
+    const char *assets = assets_path();
+    char *asset = assets ? concat(assets, rel) : NULL;
+    const int ok = asset && ensure_asset_file(asset) && read_file(asset, bytes, len) == 0;
+    free(asset);
+    return ok;
+}
 
+/* Reads `key` from the page root (ui/). */
+static int image_read_page(const ImageCache *cache, const char *key, unsigned char **bytes, size_t *len) {
     char *path = concat(cache->root, key);
     if (!path) return 0;
 
@@ -348,6 +345,24 @@ static int image_read(const ImageCache *cache, const char *key, unsigned char **
 
     free(path);
     return ok;
+}
+
+/* The two trees a page image can live in are tried in both directions, because which one
+ * holds a file is not something the URL can be trusted to say:
+ *   - "assets/<path>" (html_dom_asset_url, Krunker's UTILS.assetsUrl) is game content, but
+ *     some of v7's assetsUrl paths are page files its asset host also serves (img/shop/...,
+ *     img/backgrounds/...), and assets/ has no img/ tree;
+ *   - a page-relative URL is a page file, but ui/ carries only the slice of textures/ the
+ *     v7.1.4 reference tree had (weapon_1..19, 53 of 563 sprays, one melee icon), while the
+ *     content tree has all of it: every later weapon, spray or melee preview is there.
+ * Trying only the named root left those elements blank (the Grappler's and every v7 weapon
+ * past 19's loadout preview, the shop's spin card backgrounds). */
+static int image_read(const ImageCache *cache, const char *key, unsigned char **bytes, size_t *len) {
+    if (!strncmp(key, IMAGE_ASSETS_PREFIX, sizeof(IMAGE_ASSETS_PREFIX) - 1)) {
+        const char *rel = key + sizeof(IMAGE_ASSETS_PREFIX) - 1;
+        return image_read_assets(rel, bytes, len) || image_read_page(cache, rel, bytes, len);
+    }
+    return image_read_page(cache, key, bytes, len) || image_read_assets(key, bytes, len);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -611,7 +626,7 @@ static void image_load(const ImageCache *cache, ImageSlot *slot, const char *dat
     const int svg = svg_sniff(bytes, len);
     unsigned char *px = NULL;
     if (svg) {
-        /* tex holds the intrinsic-size raster (fallback, nearest twin);
+        /* tex holds the intrinsic-size raster (the fallback);
          * paint draws device-size rasters through image_texture_sized() */
         slot->svg = svg_image_create(bytes, len);
         float fw = 0, fh = 0;
@@ -707,12 +722,8 @@ void image_entry_touch(ImageCache *cache, const ImageEntry *entry) {
 
 /* Frees a lazy entry's textures; it keeps its size and decodes again when drawn. */
 static void image_evict(ImageCache *cache, ImageSlot *slot) {
-    GLuint textures[2];
-    int n = 0;
-    if (slot->entry.tex) textures[n++] = slot->entry.tex;
-    if (slot->entry.tex_nearest) textures[n++] = slot->entry.tex_nearest;
-    if (n) glDeleteTextures(n, textures);
-    slot->entry.tex = slot->entry.tex_nearest = 0;
+    if (slot->entry.tex) glDeleteTextures(1, &slot->entry.tex);
+    slot->entry.tex = 0;
     cache->bytes -= slot->bytes < cache->bytes ? slot->bytes : cache->bytes;
     slot->bytes = 0;
 }
@@ -748,7 +759,7 @@ void image_cache_stats(const ImageCache *cache, int *resident, size_t *bytes, in
 }
 
 const ImageEntry *image_get(ImageCache *cache, const char *url, const char *base_url) {
-    static const ImageEntry failed_entry = {0, 0, 0, 1, 0, 0};
+    static const ImageEntry failed_entry = {0, 0, 0, 1, 0};
     if (!cache) return &failed_entry;
 
     char key[IMAGE_KEY_MAX];
@@ -778,56 +789,14 @@ const ImageEntry *image_get(ImageCache *cache, const char *url, const char *base
     return &slot->entry;
 }
 
-/* Reads the pixels of `tex` back through a scratch FBO (GLES3-safe) and
- * uploads them into a second texture with GL_NEAREST sampling. */
-static unsigned image_clone_nearest(const unsigned tex, const int w, const int h) {
-    GLint prev_read_fbo = 0;
-    GLint prev_pack = 4;
-
-    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &prev_read_fbo);
-    glGetIntegerv(GL_PACK_ALIGNMENT, &prev_pack);
-
-    unsigned char *px = malloc((size_t) w * (size_t) h * 4);
-    if (!px) return 0;
-
-    GLuint fbo = 0;
-    glGenFramebuffers(1, &fbo);
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo);
-    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
-
-    const int complete = glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE;
-
-    if (complete) {
-        glPixelStorei(GL_PACK_ALIGNMENT, 4);
-        glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px);
-        glPixelStorei(GL_PACK_ALIGNMENT, prev_pack);
-    }
-
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint) prev_read_fbo);
-    glDeleteFramebuffers(1, &fbo);
-
-    const unsigned clone = complete ? image_upload(px, w, h, 0) : 0;
-    free(px);
-
-    return clone;
-}
-
+/* One texture serves both samplings: gl_backend sets GL_NEAREST (base level only, which
+ * is what the old MAX_LEVEL 0 twin held) or the mipmapped linear filter on it per draw
+ * from DL_IMAGE's `nearest` flag.  A readback twin used to back `pixelated`; when it could
+ * not be made the lazy path drew nothing at all (blank class icons, tab icons, skins). */
 unsigned image_texture(const ImageEntry *entry, const int nearest) {
-    if (!entry || entry->failed || !entry->tex) return 0;
-    if (!nearest) return entry->tex;
-
-    if (!entry->tex_nearest) {
-        /* entries are cache-owned; the const on the API only protects the
-         * geometry fields from paint, the lazy twin is an internal cache */
-        ImageEntry *mutable_entry = (ImageEntry *) entry;
-        mutable_entry->tex_nearest = image_clone_nearest(entry->tex, entry->w, entry->h);
-
-        if (!mutable_entry->tex_nearest) {
-            fprintf(stderr, "[image] could not create the nearest-filtered twin of texture %u\n", entry->tex);
-        }
-    }
-
-    return entry->tex_nearest;
+    (void) nearest;
+    if (!entry || entry->failed) return 0;
+    return entry->tex;
 }
 
 unsigned image_texture_sized(const ImageEntry *entry, const int nearest, float dev_w, float dev_h, float frac_x,

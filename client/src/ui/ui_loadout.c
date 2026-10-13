@@ -565,6 +565,21 @@ static void asset(const char *path, char *out, const size_t n) {
     html_dom_asset_url(path, out, n);
 }
 
+// A weapon's default preview, v7's UTILS.assetsUrl("/textures/previews/weapons/" + src + ".png"):
+// from the content tree, which has every weapon (ui/textures only the v7.1.4 slice, 1..19).
+static void weapon_preview(const LoadoutWeapon *w, char *out, const size_t n) {
+    char path[96];
+    snprintf(path, sizeof(path), "textures/previews/weapons/%s.png", w && w->src ? w->src : "undefined");
+    asset(path, out, n);
+}
+
+// assetsUrl("/textures/previews/cosmetics/<type>_default.png")
+static void cosmetic_default(const int type, char *out, const size_t n) {
+    char path[64];
+    snprintf(path, sizeof(path), "textures/previews/cosmetics/%d_default.png", type);
+    asset(path, out, n);
+}
+
 static int g_tab = 1;          // windows[2].tabIndex
 static int g_charm_slot;       // vLN01715: the loadout slot charmSelector opened Select Charm for
 
@@ -663,14 +678,14 @@ static void gen_tab_loadout(StrBuf *out, const int class_index) {
     const int knife = lc.primary == 12;
     SlotView prim = {.color = "#efefef"}, sec = {.color = lc.secondary ? "#2196F3" : "#efefef"}, mel = {.color = "#efefef"};
     snprintf(prim.name, sizeof(prim.name), "%s", knife ? "None" : pw ? pw->name : "");
-    snprintf(prim.img, sizeof(prim.img), "textures/previews/weapons/%s.png", pw && pw->src ? pw->src : "undefined");
+    weapon_preview(pw, prim.img, sizeof(prim.img));
     const int sec_id = sel(SEL_SECONDARY);
     const LoadoutWeapon *sw = weapon_at(sec_id) ? (sw_copy = *weapon_at(sec_id), &sw_copy) : NULL;
     snprintf(sec.name, sizeof(sec.name), "%s", lc.secondary && sw ? sw->name : "None");
-    snprintf(sec.img, sizeof(sec.img), "textures/previews/weapons/%s.png", sw && sw->src ? sw->src : "undefined");
+    weapon_preview(sw, sec.img, sizeof(sec.img));
     const int melee = sel(SEL_MELEE);
     snprintf(mel.name, sizeof(mel.name), "%s", melee == -2 ? "Random" : "Combat Knife");
-    snprintf(mel.img, sizeof(mel.img), "textures/previews/cosmetics/3_default.png");
+    cosmetic_default(3, mel.img, sizeof(mel.img));
     if (has_inventory()) { // `if (account)`: the selected skins
         const int ps = weapon_skin(lc.primary);
         if (!knife && !slot_item(&prim, ps) && ps == -2) {
@@ -725,7 +740,9 @@ static void gen_tab_loadout(StrBuf *out, const int class_index) {
         const int r = sel(SEL_RETICLE);
         if (r >= 0 && r < RETICLE_COUNT) {
             snprintf(rname, sizeof(rname), "%s", RETICLES[r]);
-            snprintf(rimg, sizeof(rimg), "textures/reticles/reticle_%d.png", r);
+            char path[64];
+            snprintf(path, sizeof(path), "textures/reticles/reticle_%d.png", r);
+            asset(path, rimg, sizeof(rimg));
         } else if (r == -2) {
             snprintf(rname, sizeof(rname), "Custom");
             html_storage_get("savedReticle", rimg, sizeof(rimg));
@@ -814,17 +831,17 @@ static void gen_tab_customize(StrBuf *out) {
         }
         SlotView v = {.color = "#efefef"};
         snprintf(v.name, sizeof(v.name), "%s", pick == -2 ? "Random" : "None");
-        char path[64];
-        if (cs->type < 0) snprintf(path, sizeof(path), "textures/sprays/0.png");
-        else snprintf(path, sizeof(path), "textures/previews/cosmetics/%d_default.png", cs->type);
-        snprintf(v.img, sizeof(v.img), "%s", path);
+        if (cs->type < 0) asset("textures/sprays/0.png", v.img, sizeof(v.img));
+        else cosmetic_default(cs->type, v.img, sizeof(v.img));
         const char *img_class = cs->type == 16 ? "custIconCard" : "custIcon";
         int spray_item = 0;
         const char *spray_base = cs->type < 0 ? spray_name(pick) : NULL;
         const ViewerSkin *s = cs->type < 0 && spray_base ? NULL : (has_inventory() ? store_skin(pick) : NULL);
         if (spray_base) { // KrunkNative's default sprays (Game.sprays of v3.1.1): free items
             snprintf(v.name, sizeof(v.name), "%s", spray_base);
-            snprintf(v.img, sizeof(v.img), "textures/sprays/%d.png", BASE_SPRAYS[pick].id);
+            char path[64];
+            snprintf(path, sizeof(path), "textures/sprays/%d.png", BASE_SPRAYS[pick].id);
+            asset(path, v.img, sizeof(v.img));
             spray_item = 1;
         } else if (s && (cs->type < 0 ? s->type == 4 : s->type == cs->type)) {
             slot_item(&v, pick);
@@ -1011,11 +1028,14 @@ static void pick_card(StrBuf *out, const int pos, void *user) {
     const int type = g_pick.type;
     if (g_pick.kind == PICKER_SPRAY) {
         if (e->kind == PICK_RANDOM) {
-            sb_append(out, "<div class='noBtnCard blackShad' onclick='selectSpray(-2)' style='height:158px;border: 5px solid lightgrey'>Random<div class='itemOwn' style='opacity:0;''>by \?\?\?</div><img draggable='false' style='margin-top:10px;width:110px;' class='noBtnImgC skinSil' src='textures/sprays/0.png' onmouseenter='playTick()'><div class='skinRandom blackShad' style='top: 80px;'>?</div></div>");
+            { char sp[256]; asset("textures/sprays/0.png", sp, sizeof(sp)); sb_appendf(out, "<div class='noBtnCard blackShad' onclick='selectSpray(-2)' style='height:158px;border: 5px solid lightgrey'>Random<div class='itemOwn' style='opacity:0;''>by \?\?\?</div><img draggable='false' style='margin-top:10px;width:110px;' class='noBtnImgC skinSil' src='%s' onmouseenter='playTick()'><div class='skinRandom blackShad' style='top: 80px;'>?</div></div>", sp); }
         } else if (e->kind == PICK_FREE_SPRAY) {
             const int i = e->ind, frames = BASE_SPRAYS[i].id == 88 ? 4 : 0; // Verb: 4 frames x 250 ms
-            sb_appendf(out, "<div class='noBtnCard blackShad' style='height:158px;border: 5px solid lightgrey'onclick='selectSpray(%d);cancelTip()' data-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'>%s<div class='itemOwn'>Free Spray</div><div draggable='false' class='sprayImg' onmouseenter='playTick()' style='background: url(&quot;textures/sprays/%d.png&quot;) -1px;%s'></div></div>",
-                       i, i, BASE_SPRAYS[i].name, BASE_SPRAYS[i].id, frames ? "animation: sprayAnm4 1.25s steps(4) infinite;" : "");
+            char spray_path[64], spray_url[256];
+            snprintf(spray_path, sizeof(spray_path), "textures/sprays/%d.png", BASE_SPRAYS[i].id);
+            asset(spray_path, spray_url, sizeof(spray_url));
+            sb_appendf(out, "<div class='noBtnCard blackShad' style='height:158px;border: 5px solid lightgrey'onclick='selectSpray(%d);cancelTip()' data-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'>%s<div class='itemOwn'>Free Spray</div><div draggable='false' class='sprayImg' onmouseenter='playTick()' style='background: url(&quot;%s&quot;) -1px;%s'></div></div>",
+                       i, i, BASE_SPRAYS[i].name, spray_url, frames ? "animation: sprayAnm4 1.25s steps(4) infinite;" : "");
         } else {
             const ViewerSkin *s = store_skin(e->ind);
             if (s) spray_card(out, e, s);
@@ -1051,7 +1071,7 @@ static void pick_card(StrBuf *out, const int pos, void *user) {
 static char *gen_items_list(const char *fn, const int type) {
     const char *img_class = type ? (type == 16 ? "skinImgP" : type == 5 ? "skinImgD" : "skinImgC") : "skinImg";
     pick_begin(PICKER_ITEMS, fn, img_class, type);
-    snprintf(g_pick.default_img, sizeof(g_pick.default_img), "textures/previews/cosmetics/%d_default.png", type);
+    cosmetic_default(type, g_pick.default_img, sizeof(g_pick.default_img));
     pick_add(PICK_NONE, -3, 0);
     pick_add(PICK_RANDOM, -2, 0);
     int n;
@@ -1072,7 +1092,7 @@ static char *gen_items_list(const char *fn, const int type) {
 static char *gen_skins(void) {
     const LoadoutWeapon *w = weapon_at(g_skin_weapon);
     pick_begin(PICKER_SKIN, "selectSkin", "skinImg", 0);
-    snprintf(g_pick.default_img, sizeof(g_pick.default_img), "textures/previews/weapons/%s.png", w && w->src ? w->src : "undefined");
+    weapon_preview(w, g_pick.default_img, sizeof(g_pick.default_img));
     pick_add(PICK_NONE, -3, 0);
     pick_add(PICK_RANDOM, -2, 0);
     int n;
@@ -1106,7 +1126,7 @@ static char *gen_secondary(void) {
             const int skin = has_inventory() ? weapon_skin(i) : -1;
             char img[256];
             if (skin >= 0 && store_skin(skin)) skin_thumb(skin, img, sizeof(img));
-            else snprintf(img, sizeof(img), "textures/previews/weapons/%s.png", w->src ? w->src : "undefined");
+            else weapon_preview(w, img, sizeof(img));
             sb_append(&out, "<div class='skinCard blackShad' style='height: 165px;border:5px solid lightgrey'");
             if (unlocked) sb_appendf(&out, " onclick='skinSelector(%d, true)'", i);
             sb_append(&out, ">");
@@ -1188,8 +1208,11 @@ static char *gen_reticle(void) {
         sb_append(&out, "<div class='noBtnCard blackShad' style='height:140px;border:5px solid lightgrey'><div style='color: #fff;margin-top: 33px;' onclick='window.windows[31].newPop()' onmouseenter='playTick()'>ADD<br>CUSTOM</div></div>");
         custom_images(&out, "krk_custRets", "selectReticle", "removeReticle");
         for (int i = 0; i < RETICLE_COUNT; i++) {
-            sb_appendf(&out, "<div class='noBtnCard blackShad' style='height:140px;border:5px solid lightgrey' onclick='selectReticle(%d)'>%s<div class='itemOwn' style='margin-top:1px'>Default</div><img loading='lazy' class='noBtnImgR' draggable='false' src='textures/reticles/reticle_%d.png' onmouseenter='playTick()' /></div>",
-                       i, RETICLES[i], i);
+            char path[64], url[256];
+            snprintf(path, sizeof(path), "textures/reticles/reticle_%d.png", i);
+            asset(path, url, sizeof(url));
+            sb_appendf(&out, "<div class='noBtnCard blackShad' style='height:140px;border:5px solid lightgrey' onclick='selectReticle(%d)'>%s<div class='itemOwn' style='margin-top:1px'>Default</div><img loading='lazy' class='noBtnImgR' draggable='false' src='%s' onmouseenter='playTick()' /></div>",
+                       i, RETICLES[i], url);
         }
     }
     sb_append(&out, "</div>");
@@ -1537,8 +1560,11 @@ static void update_aim_dot(void) {
     if (!dot) return;
     const int r = sel(SEL_RETICLE);
     char src[512] = "";
-    if (r >= 0 && r < RETICLE_COUNT) snprintf(src, sizeof(src), "textures/reticles/reticle_%d.png", r);
-    else if (r == -2) html_storage_get("savedReticle", src, sizeof(src));
+    if (r >= 0 && r < RETICLE_COUNT) {
+        char path[64];
+        snprintf(path, sizeof(path), "textures/reticles/reticle_%d.png", r);
+        asset(path, src, sizeof(src));
+    } else if (r == -2) html_storage_get("savedReticle", src, sizeof(src));
     if (src[0]) html_dom_set_attr(dot, "src", src);
 }
 

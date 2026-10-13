@@ -97,6 +97,7 @@ esac
 [ -x "$root/client_bin" ] || { RC=1; result install=fail "(no $root/client_bin)"; }
 
 v="$("$root/client_bin" --version)" && "$root/server_bin" --version || { RC=1; result install=ok version=fail; }
+"$root/client_bin" --voice-info | grep -q '^opus=libopus ' || { RC=1; result install=ok version=fail "(no Opus: voice chat)"; }
 # the launcher (entry point when the package has one): --version needs no display or network
 if [ -x "$root/krunknative" ]; then
     lv="$("$root/krunknative" --version)" || { RC=1; result install=ok version=fail "(launcher)"; }

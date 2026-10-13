@@ -959,11 +959,37 @@ def sc_hub_items():
     record("hub-items", "bottom", "itemsList.scrollTop", ">20000 (thousands of rows)", bottom, bottom != "-" and float(bottom) > 20000)
 
 
+def sc_loadout_images():
+    """Every image the Change Loadout tabs and the Store's Prize Wheels draw resolves to a file
+    (KRUNKNATIVE_HTML_IMAGE_LOG lists none missing). The loadout is a user's: Grappler secondary
+    (weapon 20, a preview only the content tree has: ui/textures stops at weapon_19), equipped
+    skins. Before, its preview, and natively every pixelated icon whose nearest-filter twin could
+    not be made (class / tab icons), rendered as nothing; the store's spin cards lost their
+    vignette (img/ is the page's tree, the asset form missed it)."""
+    miss_log = os.path.join(WORK, "loadout-images.misses")
+    script = ["0 menu", "300 call showWindow 3", "400 call windows.2.switchTab 1", "1200 vis @loadout windowHolder",
+              "1300 call windows.2.switchTab 0", "2000 vis @class windowHolder", "2100 call showWindow 14",
+              "2200 call windows.13.switchTab 1", "3000 vis @wheels windowHolder", "3100 quit"]
+    lines = run_client("loadout-images", ["--offline", "--map", "kanji"], "\n".join(script), timeout=120,
+                       env_extra={"KRUNKNATIVE_MODE": "offline", "KRUNKNATIVE_FIXED_DELTA": "16",
+                                  "KRUNKNATIVE_HTML_IMAGE_LOG": miss_log},
+                       storage={"secondaryInd": "20", "classindex": "4", "skins": '{"3":-2,"0":1405,"5":5501,"1":2592}'})
+    if lines is None:
+        return
+    shown = {m.group(1): m.group(2) for m in (re.search(r"\[input_script\] vis t=\d+ @(\S+) windowHolder=(\S+)", l) for l in lines) if m}
+    for label in ("loadout", "class", "wheels"):
+        record("loadout-images", label, "windowHolder", "1", shown.get(label, "-"), shown.get(label) == "1")
+    # "undefined" is v7's own knife preview URL (textures/previews/weapons/undefined.png 404s on the real site too)
+    misses = sorted({l.split("\t")[1] for l in read(miss_log).splitlines() if l.startswith("image-miss\t")} - {"undefined"})
+    record("loadout-images", "all", "missing images", "none", " ".join(misses[:4]) or "none", not misses)
+
+
 SCENARIOS = {
     "endscreen": sc_endscreen, "endscreen-tdm": sc_endscreen_team, "death": sc_death, "death-menu": sc_death_menu, "forced-spawn": sc_forced_spawn, "spectate": sc_spectate,
     "map-change": sc_map_change, "interact": sc_interact, "custom-gui": sc_custom_gui, "krunkscript": sc_krunkscript,
     "spray": sc_spray, "windows": sc_windows, "online": sc_online, "lost-end": sc_lost_during_end, "outdated": sc_outdated,
     "comp": sc_comp, "om-scroll": sc_om_scroll, "skins-grid": sc_skins_grid, "hub-items": sc_hub_items,
+    "loadout-images": sc_loadout_images,
 }
 SCENARIOS["endscreen-cursor"] = sc_endscreen_cursor
 

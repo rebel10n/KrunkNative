@@ -111,6 +111,40 @@ foreach (src IN LISTS SERVER_CORE_SOURCES)
     list(REMOVE_ITEM SERVER_SOURCES ${CMAKE_SOURCE_DIR}/${src})
 endforeach ()
 
+# libopus (client/lib/opus, client/lib/opus/KRUNKNATIVE.md): voice chat's codec, compiled into
+# every client (native and web) so that no package can ship without it. Static, float API,
+# no DNN features (DRED / OSCE / deep PLC), no programs or tests; the server never links it.
+macro(krunknative_add_opus)
+    set(OPUS_BUILD_SHARED_LIBRARY OFF CACHE BOOL "" FORCE)
+    set(OPUS_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(OPUS_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
+    set(OPUS_INSTALL_PKG_CONFIG_MODULE OFF CACHE BOOL "" FORCE)
+    set(OPUS_INSTALL_CMAKE_CONFIG_MODULE OFF CACHE BOOL "" FORCE)
+    set(OPUS_DRED OFF CACHE BOOL "" FORCE)
+    set(OPUS_OSCE OFF CACHE BOOL "" FORCE)
+    set(OPUS_DEEP_PLC OFF CACHE BOOL "" FORCE)
+    if (EMSCRIPTEN)
+        set(OPUS_DISABLE_INTRINSICS ON CACHE BOOL "" FORCE) # no SSE/NEON in wasm32 (portable C)
+        set(OPUS_STACK_PROTECTOR OFF CACHE BOOL "" FORCE)
+        set(OPUS_FORTIFY_SOURCE OFF CACHE BOOL "" FORCE)
+    endif ()
+    if (MINGW)
+        # MinGW has no libssp in the static -static builds (tools/release/build-client.sh)
+        set(OPUS_STACK_PROTECTOR OFF CACHE BOOL "" FORCE)
+        set(OPUS_FORTIFY_SOURCE OFF CACHE BOOL "" FORCE)
+    endif ()
+    # the root include_directories(shared/include) would shadow celt's own headers (shared's
+    # modes.h for celt/modes.h): opus compiles with its own include paths only
+    get_directory_property(KN_OPUS_SAVED_INCLUDES INCLUDE_DIRECTORIES)
+    set_directory_properties(PROPERTIES INCLUDE_DIRECTORIES "")
+    add_subdirectory(client/lib/opus EXCLUDE_FROM_ALL)
+    set_directory_properties(PROPERTIES INCLUDE_DIRECTORIES "${KN_OPUS_SAVED_INCLUDES}")
+    # opus builds -O2 even in Debug trees: unoptimised it is several times slower (its own warning)
+    if (NOT MSVC)
+        target_compile_options(opus PRIVATE -O2)
+    endif ()
+endmacro()
+
 if (EMSCRIPTEN)
     # ------------------------------------------------------------------
     # Web build (emcmake cmake ...): client only, output dist/web/client.js
@@ -143,6 +177,9 @@ if (EMSCRIPTEN)
     target_compile_definitions(client PRIVATE KRUNKNATIVE_CLIENT)
     target_include_directories(client PRIVATE client/include server/include)
     target_link_libraries(client PRIVATE freetype cJSON pcg_basic kn_build_info m)
+    krunknative_add_opus()
+    target_link_libraries(client PRIVATE opus) # voice chat: Opus decode of every clip (voice.c)
+    target_compile_definitions(client PRIVATE KRUNKNATIVE_HAVE_OPUS=1)
 
     # HTML UI on the web: the browser page is the UI. The C UI logic drives the page's
     # DOM through web_dom.c (html_dom.h) and ui/js/kn-shim.js; the engine itself is not
@@ -334,6 +371,10 @@ else ()
     krunknative_link_gl(${CLIENT_BINARY})
     # miniaudio (client/src/miniaudio.c) loads its audio backends with dlopen().
     target_link_libraries(${CLIENT_BINARY} PRIVATE ${CMAKE_DL_LIBS})
+    # voice chat (client/src/voice.c): the vendored libopus, linked statically on every platform
+    krunknative_add_opus()
+    target_link_libraries(${CLIENT_BINARY} PRIVATE opus)
+    target_compile_definitions(${CLIENT_BINARY} PRIVATE KRUNKNATIVE_HAVE_OPUS=1)
     krunknative_link_headless(${CLIENT_BINARY})
     target_include_directories(${CLIENT_BINARY} PRIVATE client/include)
     # Optional TLS for the backend client (client/src/net/backend_native.c: https:// auth service

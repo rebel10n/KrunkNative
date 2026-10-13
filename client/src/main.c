@@ -420,6 +420,10 @@ int main(int argc, char **argv) {
             printf(KN_PRODUCT_NAME " (KrunkNative client) %s\n", kn_build_string());
             return 0;
         }
+        if (!strcmp(argv[i], "--voice-info")) { // packaging checks: the voice codec is linked in
+            printf("opus=%s\n", voice_opus_version());
+            return 0;
+        }
     }
     printf(KN_PRODUCT_NAME " (KrunkNative client) %s\n", kn_build_string());
     install_root_chdir(); // packaged installs started from elsewhere: ui/ + assets/ (install_root.h)

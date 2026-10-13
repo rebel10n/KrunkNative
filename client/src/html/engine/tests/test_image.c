@@ -211,11 +211,19 @@ static double row_mean_alpha(const unsigned char *px, const int w, const int y) 
     return sum / w;
 }
 
+/* image_get() + the decode a first draw does (lazy rasters, image.h): the pixel and texture
+ * state checks below need the texture. */
+static const ImageEntry *get_loaded(ImageCache *cache, const char *url, const char *base) {
+    const ImageEntry *e = image_get(cache, url, base);
+    (void) image_entry_load(cache, e);
+    return e;
+}
+
 static void check_loaded(ImageCache *cache, const Expected *list, const int n, const char *what) {
     int loaded = 0;
 
     for (int i = 0; i < n; i++) {
-        const ImageEntry *e = image_get(cache, list[i].url, list[i].base);
+        const ImageEntry *e = get_loaded(cache, list[i].url, list[i].base);
 
         CHECK(!e->failed, "%s %s failed to load", what, list[i].url);
         CHECK(e->tex != 0, "%s %s has no texture", what, list[i].url);
@@ -271,7 +279,7 @@ static void test_url_resolution(void) {
 
 static void test_pixels(ImageCache *cache) {
     /* palette + tRNS (color type 3, 4-bit), 8x8 class icon */
-    const ImageEntry *icon = image_get(cache, "textures/classes/icon_0.png", "index.html");
+    const ImageEntry *icon = get_loaded(cache, "textures/classes/icon_0.png", "index.html");
     CHECK(!icon->failed && icon->w == 8 && icon->h == 8, "icon_0 load");
 
     if (!icon->failed) {
@@ -286,7 +294,7 @@ static void test_pixels(ImageCache *cache) {
     }
 
     /* RGBA (color type 6) 8x8 icon with (255,255,255,0) transparent texels */
-    const ImageEntry *icon13 = image_get(cache, "textures/classes/icon_13.png", "index.html");
+    const ImageEntry *icon13 = get_loaded(cache, "textures/classes/icon_13.png", "index.html");
     CHECK(!icon13->failed, "icon_13 load");
 
     if (!icon13->failed) {
@@ -300,7 +308,7 @@ static void test_pixels(ImageCache *cache) {
     }
 
     /* RGB (color type 2): alpha must be 255 everywhere */
-    const ImageEntry *map = image_get(cache, "img/maps/map_10.png", "index.html");
+    const ImageEntry *map = get_loaded(cache, "img/maps/map_10.png", "index.html");
     CHECK(!map->failed && map->w == 200 && map->h == 80, "map_10 load");
 
     if (!map->failed) {
@@ -318,7 +326,7 @@ static void test_pixels(ImageCache *cache) {
      * texels. convert logo_6.png -crop 1x1+X+Y txt:
      *   (0,0) -> (255,255,255,0), (936,0) -> (255,255,255,70), (975,0) -> (255,255,255,189),
      *   (1000,300) -> (0,0,0,255); row 0 mean alpha 0.061217, row 684 mean alpha 0.144204 */
-    const ImageEntry *logo = image_get(cache, "img/logo_6.png", "index.html");
+    const ImageEntry *logo = get_loaded(cache, "img/logo_6.png", "index.html");
     CHECK(!logo->failed && logo->w == 2048 && logo->h == 685, "logo_6 load");
 
     if (!logo->failed) {
@@ -339,7 +347,7 @@ static void test_pixels(ImageCache *cache) {
 }
 
 static void test_texture_state(ImageCache *cache) {
-    const ImageEntry *icon = image_get(cache, "textures/classes/icon_1.png", "index.html");
+    const ImageEntry *icon = get_loaded(cache, "textures/classes/icon_1.png", "index.html");
     CHECK(!icon->failed, "icon_1 load");
     if (icon->failed) return;
 
@@ -366,7 +374,7 @@ static void test_texture_state(ImageCache *cache) {
     /* mips are built from premultiplied texels: every level keeps rgb <= a,
      * and a non-square NPOT chain (prem_bg 1277x562) is complete down to 1x1 */
     {
-        const ImageEntry *logo = image_get(cache, "img/logo_6.png", "index.html");
+        const ImageEntry *logo = get_loaded(cache, "img/logo_6.png", "index.html");
         glBindTexture(GL_TEXTURE_2D, logo->tex);
         GLint lw = 0, lh = 0;
         glGetTexLevelParameteriv(GL_TEXTURE_2D, 2, GL_TEXTURE_WIDTH, &lw);
@@ -382,7 +390,7 @@ static void test_texture_state(ImageCache *cache) {
         CHECK(premul_ok, "logo_6 level 2 has rgb > alpha (mips not premultiplied)");
         free(px);
 
-        const ImageEntry *give = image_get(cache, "img/prem_bg.png", "index.html");
+        const ImageEntry *give = get_loaded(cache, "img/prem_bg.png", "index.html");
         glBindTexture(GL_TEXTURE_2D, give->tex);
         glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, &v);
         CHECK(v == 10, "prem_bg MAX_LEVEL %d, expected 10", v);
@@ -392,42 +400,17 @@ static void test_texture_state(ImageCache *cache) {
         glBindTexture(GL_TEXTURE_2D, 0);
     }
 
-    /* image_texture(): linear by default, lazily created nearest twin with identical pixels */
+    /* image_texture(): one texture for both samplings (gl_backend applies GL_NEAREST per
+     * draw).  The old readback twin could fail and then the lazy draw path drew nothing. */
     CHECK(image_texture(icon, 0) == icon->tex, "image_texture(0) != tex");
-    CHECK(icon->tex_nearest == 0, "tex_nearest created eagerly");
-
-    const unsigned nearest = image_texture(icon, 1);
-    CHECK(nearest != 0 && nearest != icon->tex, "nearest twin %u (tex %u)", nearest, icon->tex);
-    CHECK(nearest == icon->tex_nearest, "tex_nearest not stored");
-    CHECK(image_texture(icon, 1) == nearest, "nearest twin recreated");
-
-    if (nearest) {
-        glBindTexture(GL_TEXTURE_2D, nearest);
-        glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &v);
-        CHECK(v == GL_NEAREST, "nearest MIN_FILTER %d", v);
-        glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, &v);
-        CHECK(v == GL_NEAREST, "nearest MAG_FILTER %d", v);
-        glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, &v);
-        CHECK(v == GL_CLAMP_TO_EDGE, "nearest WRAP_S %d", v);
-        glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, &v);
-        CHECK(v == 0, "nearest MAX_LEVEL %d", v);
-        glGetTexLevelParameteriv(GL_TEXTURE_2D, 1, GL_TEXTURE_WIDTH, &v);
-        CHECK(v == 0, "nearest twin has mip level 1 (width %d)", v);
-        glBindTexture(GL_TEXTURE_2D, 0);
-
-        unsigned char *a = read_texture(icon->tex, icon->w, icon->h);
-        unsigned char *b = read_texture(nearest, icon->w, icon->h);
-        CHECK(!memcmp(a, b, (size_t) icon->w * icon->h * 4), "nearest twin pixels differ");
-        free(a);
-        free(b);
-    }
+    CHECK(image_texture(icon, 1) == icon->tex, "image_texture(1) %u != tex %u", image_texture(icon, 1), icon->tex);
 
     /* binding state is restored after a lazy load mid-frame */
     GLuint probe = 0;
     glGenTextures(1, &probe);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, probe);
-    const ImageEntry *fresh = image_get(cache, "textures/classes/icon_2.png", "index.html");
+    const ImageEntry *fresh = get_loaded(cache, "textures/classes/icon_2.png", "index.html");
     (void) image_texture(fresh, 1);
     glGetIntegerv(GL_TEXTURE_BINDING_2D, &v);
     CHECK((GLuint) v == probe, "texture binding not restored (%d != %u)", v, probe);
@@ -437,6 +420,42 @@ static void test_texture_state(ImageCache *cache) {
     glDeleteTextures(1, &probe);
 
     CHECK(glGetError() == GL_NO_ERROR, "GL error left behind");
+}
+
+/* Lazy entries (875ff60): the header gives the size, the first draw decodes.  A pixelated
+ * image must get a texture from that first draw, and keep getting one after an eviction:
+ * the class / tab icons, the loadout's skin previews went blank when it did not. */
+static void test_lazy_nearest(ImageCache *cache) {
+    const ImageEntry *e = image_get(cache, "textures/classes/icon_14.png", "index.html");
+    CHECK(!e->failed && e->w == 8 && e->h == 8, "icon_14 header %dx%d", e->w, e->h);
+    CHECK(image_entry_lazy(e) && !image_entry_resident(e), "icon_14 not lazy before its first draw");
+    CHECK(image_texture(e, 1) == 0, "texture before the decode");
+    CHECK(image_entry_load(cache, e) == 1, "icon_14 decode");
+    const unsigned t = image_texture(e, 1);
+    CHECK(t != 0 && t == image_texture(e, 0), "pixelated draw: tex %u (smooth %u)", t, image_texture(e, 0));
+    if (t) {
+        unsigned char *px = read_texture(t, 8, 8);
+        int opaque = 0;
+        for (int i = 0; i < 64; i++) opaque += px[i * 4 + 3] != 0;
+        CHECK(opaque > 0, "icon_14 texture is empty");
+        free(px);
+    }
+    CHECK(glGetError() == GL_NO_ERROR, "GL error after a lazy pixelated load");
+}
+
+/* A page image is looked up in both trees: ui/ for the page's files, assets_path() for the
+ * game content (ui/textures has only the v7.1.4 slice).  "assets/<path>" is
+ * html_dom_asset_url's form; its img/ files exist under ui/ only. */
+static void test_roots(ImageCache *cache) {
+    /* ui-only: an img/ file requested through the asset form (v7's assetsUrl("/img/...")) */
+    const ImageEntry *a = image_get(cache, "/assets/img/timer.png", "index.html");
+    CHECK(!a->failed && a->w == 32, "assets/img/timer.png not found under ui/ (failed %d, w %d)", a->failed, a->w);
+    /* assets-only: a texture ui/ lacks, requested page-relative */
+    const char *only = getenv("KN_TEST_ASSETS_ONLY");   /* e.g. textures/previews/weapons/weapon_21.png */
+    if (only && *only) {
+        const ImageEntry *b = image_get(cache, only, "index.html");
+        CHECK(!b->failed && b->w > 0, "%s not found in the asset tree (failed %d)", only, b->failed);
+    }
 }
 
 static void test_failures(ImageCache *cache) {
@@ -607,6 +626,8 @@ int main(const int argc, char **argv) {
     check_loaded(cache, k_css_url, (int) (sizeof(k_css_url) / sizeof(k_css_url[0])), "url()");
     test_pixels(cache);
     test_texture_state(cache);
+    test_lazy_nearest(cache);
+    test_roots(cache);
     test_failures(cache);
 
     const int count = image_cache_count(cache);
@@ -615,8 +636,8 @@ int main(const int argc, char **argv) {
 
     /* a second cache on the same context must be independent */
     cache = image_cache_create(ui_dir);
-    const ImageEntry *e = image_get(cache, "img/timer.png", "index.html");
-    CHECK(!e->failed && e->w == 32, "reload after destroy");
+    const ImageEntry *e = get_loaded(cache, "img/timer.png", "index.html");
+    CHECK(!e->failed && e->w == 32 && e->tex, "reload after destroy");
     image_cache_destroy(cache);
 
     glfwDestroyWindow(window);

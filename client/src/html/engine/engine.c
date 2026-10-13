@@ -459,17 +459,20 @@ static unsigned glb_lazy_image_resolver(void *user, const void *lazy, int neares
     const ImageEntry *e = lazy;
     if (!g || !e) return 0;
     if (!image_entry_resident(e)) {
+        /* Over the frame's budget: this draw is skipped, but the next frame resolves it
+         * again (glb_submit runs every frame) and at least one decode always goes through,
+         * so a deferred image appears a frame or two later instead of never. */
         if (g->decodes && g->decode_ms >= ENGINE_IMAGE_DECODE_BUDGET_MS && g_clock_override < 0.0) {
             g->decodes_deferred++;
             return 0;
         }
         const double t0 = wall_ms();
-        image_entry_load(g->images, e);
+        image_entry_load(g->images, e); /* a decode / upload failure is logged there, once */
         g->decode_ms += wall_ms() - t0;
         g->decodes++;
     }
     image_entry_touch(g->images, e);
-    return image_texture(e, nearest);
+    return image_texture(e, nearest);   /* the same texture for pixelated draws: no twin to fail */
 }
 
 /* gl_backend: SVG images (DL_IMAGE.vector = their ImageEntry) at device size. */

@@ -45,10 +45,10 @@ int text_glyph_quad(TextSystem *ts, const Glyph *g, float device_size, unsigned 
 uint32_t text_atlas_generation(const TextSystem *ts) { (void) ts; return g_atlas_gen; }
 int text_subpixel(const TextSystem *ts) { (void) ts; return 1; }
 
-static ImageEntry g_img_a = {1, 200, 80, 0, 101, 0};   /* map thumb */
-static ImageEntry g_img_b = {2, 128, 128, 0, 102, 0};  /* menu icon */
-static ImageEntry g_img_c = {3, 8, 8, 0, 103, 0};      /* class icon */
-static ImageEntry g_img_fail = {0, 0, 0, 1, 0, 0};
+static ImageEntry g_img_a = {1, 200, 80, 0, 0};   /* map thumb */
+static ImageEntry g_img_b = {2, 128, 128, 0, 0};  /* menu icon */
+static ImageEntry g_img_c = {3, 8, 8, 0, 0};      /* class icon */
+static ImageEntry g_img_fail = {0, 0, 0, 1, 0};
 
 static const char *g_last_image_base;
 
@@ -62,10 +62,17 @@ const ImageEntry *image_get(ImageCache *cache, const char *url, const char *base
     return &g_img_fail;
 }
 
+int image_entry_lazy(const ImageEntry *entry)
+{
+    (void) entry;   /* the stub entries are resident: paint emits their texture id */
+    return 0;
+}
+
 unsigned image_texture(const ImageEntry *entry, int nearest)
 {
     if (entry->failed) return 0;
-    return nearest ? entry->tex_nearest : entry->tex;
+    (void) nearest;   /* one texture: the backend applies GL_NEAREST per draw */
+    return entry->tex;
 }
 
 /* ---- tiny test framework ---------------------------------------------------- */
@@ -344,11 +351,12 @@ static void test_background_radius_clip(void)
     CHECK_F(r.tl, 25);
     CHECK_F(r.br, 25);
 
-    /* pixelated: nearest texture; style change picked up without paint_dirty via the style hash */
+    /* pixelated: the same texture flagged nearest; style change picked up without paint_dirty
+     * via the style hash */
     st(b)->image_rendering = CSS_IMAGE_RENDERING_PIXELATED;
     st(b)->hash_non_inherited ^= 1;
     build(root);
-    CHECK(g_dl.n == 4 && g_dl.items[2].u.image.tex == 102 && g_dl.items[2].u.image.nearest == 1);
+    CHECK(g_dl.n == 4 && g_dl.items[2].u.image.tex == 2 && g_dl.items[2].u.image.nearest == 1);
 }
 
 static void test_border_triangle(void)

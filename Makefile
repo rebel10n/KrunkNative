@@ -429,6 +429,10 @@ reconnect-test: build ## Reconnect key (F5) online + offline, console sandbox / 
 ui-transitions-test: build ## UI state across ESC / death / end screen / spectate / windows / map change / disconnect / offline<->online, Object Manager scroll (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I server/tests/ui_transitions_e2e.py $(DEBUG_DIR)
 
+.PHONY: voice-test
+voice-test: build ## Voice chat end to end: a test tone from client A, decoded by B (PTT / toggle / dead / spectator / team / volumes; WEB_DIST=dist/web adds the browser over ws + WebRTC; headless, null audio)
+	timeout 900 $(PYTHON) -I server/tests/voice_e2e.py $(DEBUG_DIR) $(if $(WEB_DIST),--web $(WEB_DIST),)
+
 .PHONY: modes-test
 modes-test: build ## Objective modes: each rotation mode's HUD, the CTF flag cycle offline + online (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I server/tests/modes_e2e.py $(DEBUG_DIR)

@@ -24,6 +24,7 @@
 #include <console.h>   // the developer console takes the keyboard while open (ui_console.c)
 #include <ui_interact.h> // v7 interaction: "int" / "intSec" type, uid, "drpw", "cnfm" (ui_interact.c)
 #include <voice_chat.h> // voiceKey -> toggleRecord (client/src/voice.c)
+#include <ctype.h>
 #include <hud_social.h> // WP-E: spray / spray wheel, taunts, quick chat (hud_social.c)
 #include <sprays.h>     // the spray wheel takes the mouse wheel
 #include <app_mode.h>   // app_reload: the Reconnect key on the web
@@ -1034,7 +1035,21 @@ int ui_text_input_focused(void) {
     if (!el) return 0;
     char tag[16] = "", editable[16] = "";
     html_dom_tag(el, tag, sizeof(tag));
-    if (!strcmp(tag, "input") || !strcmp(tag, "textarea") || !strcmp(tag, "select")) return 1;
+    if (!strcmp(tag, "textarea") || !strcmp(tag, "select")) return 1;
+    if (!strcmp(tag, "input")) {
+        // Only fields that take typing. v7 checks tagName == "INPUT", but in the browser a click
+        // into the game blurs the menu's switches and sliders; here a focused checkbox / range /
+        // button (the Spectate switch, a volume slider) kept every game key, push to talk included,
+        // away until something else took the focus.
+        char type[24] = "";
+        if (html_dom_get_attr(el, "type", type, sizeof(type)) < 0) return 1; // type defaults to text
+        for (char *p = type; *p; p++) *p = (char) tolower((unsigned char) *p);
+        static const char *const NON_TEXT[] = {"checkbox", "radio", "range", "button", "submit", "reset", "color", "file", "image", "hidden"};
+        for (size_t i = 0; i < sizeof(NON_TEXT) / sizeof(NON_TEXT[0]); i++) {
+            if (!strcmp(type, NON_TEXT[i])) return 0;
+        }
+        return 1;
+    }
     return html_dom_get_attr(el, "contenteditable", editable, sizeof(editable)) >= 0 && strcmp(editable, "false");
 }
 

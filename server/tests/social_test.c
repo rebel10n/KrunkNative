@@ -338,7 +338,7 @@ static void test_voice_channels(void) {
     CHECK(clip_v7(c, &meta, alias, sizeof(alias), NULL) != NULL, "v3 clip to every v7 peer");
     CHECK(!d->clip_count, "v3 clip: no echo");
 
-    // a spectator (no voice player) is not relayed
+    // a connection without a player (no ENT yet) is not relayed
     reset_received();
     conn(c)->voice_player = 0;
     voice_send_clip_v7(CLIP, strlen(CLIP), 5, &send, voice_send_fn, c);
