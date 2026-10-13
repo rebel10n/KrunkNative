@@ -2,6 +2,7 @@
 // cmd_* of the v3.1.1 offline server's packetHandlers.ts, with its reply strings. Native
 // differences are commented in place and listed in doc/console.md.
 #include <chat_commands.h>
+#include <game_config.h> // game_config_is_custom (third person)
 #include <ai.h>
 #include <bots.h>
 #include "modes/mode_internal.h"
@@ -1797,6 +1798,57 @@ static void cmd_drop(ChatCtx *c) {
     reply(c, "You can't drop your class weapons: only picked-up and Object Manager weapons drop.");
 }
 
+// ---------------------------------------------------------------- third-person camera (KrunkNative)
+
+// Third person shows around corners, so the server decides who may use it
+// (doc/v7/decisions.md "Third person"). The rule, in order:
+//   - the offline sandbox (and the server console): always;
+//   - a DEV peer: always, so hosts and admins can spectate-style record anywhere;
+//   - a ranked / comp match: never (not even the host), it is a competitive advantage;
+//   - a custom game: the host itself, and everyone once the host sets knTPCam;
+//   - a server that opened its cheats to everyone (perms off, gameserver.cheats "all"): everyone;
+//   - anything else (the public rotation): refused.
+static int third_person_allowed(ChatCtx *c, const char **reason) {
+    const Game *game = c->host->game;
+    if (reason) *reason = "Third person is off on this server";
+    if (c->sender == CHAT_CMD_CONSOLE || (game && game->is_sandbox)) return 1;
+    if (c->has_self && c->self.dev) return 1;
+    if ((c->has_self && c->self.ranked) || (game && game->config.comp)) {
+        if (reason) *reason = "No third person in ranked";
+        return 0;
+    }
+    if (game && game_config_is_custom(game)) {
+        if (c->has_self && c->self.premium_host) return 1;
+        if (game->config.tp_cam) return 1;
+        if (reason) *reason = "The host has third person off";
+        return 0;
+    }
+    if (!c->host->perms && c->host->cheats_open) return 1;
+    return 0;
+}
+
+// thirdperson [on|off]: ask the server for the third-person camera. The reply is the
+// NET_CHEAT_THIRD_PERSON grant (the client only switches once it arrives), a denial the notify.
+static void cmd_third_person(ChatCtx *c) {
+    const char *reason = NULL;
+    if (!third_person_allowed(c, &reason)) {
+        om_notify(c, reason ? reason : "Third person is off on this server");
+        if (c->host->log) {
+            char line[160];
+            snprintf(line, sizeof(line), "[gameserver] third person denied: %d (%s)", c->sender, reason ? reason : "?");
+            c->host->log(c->host->user, line);
+        }
+        reply(c, "Third Person - Not allowed here (%s)", reason ? reason : "server rule");
+        // the refusal is also an "off": the client stops asking (it would again each round)
+        if (c->sender != CHAT_CMD_CONSOLE) send_cheat(c, c->sender, NET_CHEAT_THIRD_PERSON, 0);
+        return;
+    }
+    // The client always sends on / off (its own state); a bare command asks for the camera.
+    const int on = chat_parse_toggle(c->argc ? c->argv[0] : NULL, 0);
+    if (c->sender != CHAT_CMD_CONSOLE) send_cheat(c, c->sender, NET_CHEAT_THIRD_PERSON, on); // the console has no camera
+    reply(c, "Third Person - %s", on ? "Enabled" : "Disabled");
+}
+
 static const ChatCommand COMMANDS[] = {
     {{"c", NULL, "", "show connected players and menu count", CHAT_PERM_ANY}, cmd_c},
     {{"count", "c", "", "alias for /c (show connected players and menu count)", CHAT_PERM_ANY}, cmd_c},
@@ -1855,6 +1907,8 @@ static const ChatCommand COMMANDS[] = {
     // KrunkNative Object Manager (its own rules: object_manager_caps)
     {{"give", NULL, "[selector] <weapon|item> [player|selector]", "give a weapon (an extra loadout slot) or an item; others: devs and the host", CHAT_PERM_ANY}, cmd_give},
     {{"drop", NULL, "", "drop the weapon in your hand in front of you", CHAT_PERM_ANY}, cmd_drop},
+    // KrunkNative third-person camera: its own rule (third_person_allowed), not the perms gate
+    {{"thirdperson", NULL, "[on|off]", "ask for the third-person camera (offline, devs, custom hosts / knTPCam)", CHAT_PERM_ANY}, cmd_third_person},
 };
 
 #define COMMAND_COUNT ((int) (sizeof(COMMANDS) / sizeof(COMMANDS[0])))
@@ -2000,4 +2054,11 @@ void chat_command_premium_action(ChatCommandHost *host, const int sender_id, con
         default:
             break;
     }
+}
+
+int chat_third_person_allowed(ChatCommandHost *host, const int sender_id, const char **reason) {
+    if (!host || !host->game) return 0;
+    ChatCtx c;
+    ctx_for_sender(&c, host, sender_id, "thirdperson");
+    return third_person_allowed(&c, reason);
 }

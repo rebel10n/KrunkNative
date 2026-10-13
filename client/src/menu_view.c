@@ -8,8 +8,8 @@
 //   controls.js camLookAt / update (chase camera), config.js camChaseTrn/Spd/Dst
 #include <menu_view.h>
 #include <spectate.h>
-#include <bots.h>  // bot_object_blocks_player: the boxes that stop a player
-#include <world.h> // world_terrain_fraction
+#include <bots.h>  // bot_object_blocks_player (death_cam_test)
+#include <world.h> // world_solid_fraction
 #include <math.h>
 #include <stdint.h>
 
@@ -68,31 +68,16 @@ static void chase_look_at(const vec3 at) {
 }
 
 // KrunkNative (not in v7.1.4, see DEATH_CAM_WALL_GAP): pull the chase goal back along the
-// segment from the death eye to the first solid object box (player collision's set, minus triangle
-// meshes) or the terrain. CONTROLS.update only ever moves along that segment, so the camera
-// stays in open space between the death position and the goal.
+// segment from the death eye to the first solid object box, map triangle or the terrain
+// (world_solid_fraction, shared with the third-person camera). CONTROLS.update only ever moves
+// along that segment, so the camera stays in open space between the death position and the goal.
 static void chase_clamp_target(const Game *game) {
     const vec3 from = g_view.position;
-    vec3 seg = {g_view.target.x - from.x, g_view.target.y - from.y, g_view.target.z - from.z};
+    const vec3 seg = {g_view.target.x - from.x, g_view.target.y - from.y, g_view.target.z - from.z};
     const float len = sqrtf(seg.x * seg.x + seg.y * seg.y + seg.z * seg.z);
     if (!(len > 0.0f) || !game) return;
-    // line_in_rect divides by each component: no exact zero (as airdrop.c)
-    if (seg.x == 0.0f) seg.x = 1e-6f;
-    if (seg.y == 0.0f) seg.y = 1e-6f;
-    if (seg.z == 0.0f) seg.z = 1e-6f;
 
-    float t = 1.0f;
-    const Map *map = game->map;
-    for (size_t i = 0; map && i < map->object_count; i++) {
-        const Object *o = map->objects[i];
-        if (!bot_object_blocks_player(o) || o->complex_coll) continue;
-        const float hit = line_in_rect(from, seg, o->position, object_box_size(o));
-        if (hit > 0.0f && hit < t) t = hit;
-    }
-    if (map) {
-        const float hit = world_terrain_fraction(game, from, seg);
-        if (hit > 0.0f && hit < t) t = hit;
-    }
+    const float t = world_solid_fraction(game, from, seg);
     if (t >= 1.0f) return;
 
     const float keep = fmaxf(0.0f, t * len - DEATH_CAM_WALL_GAP) / len;

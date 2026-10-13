@@ -34,6 +34,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <update_ui.h>
+#include <third_person.h>
 #include <stdlib.h>
 #include <string.h>
 #ifdef __EMSCRIPTEN__
@@ -1279,6 +1280,20 @@ static void cmd_netinfo(const int argc, char **argv, const char *rest) {
     }
 }
 
+// thirdperson / firstperson (Source style, KrunkNative): the over-the-shoulder camera
+// (client/src/third_person.c). thirdperson asks the server ("/thirdperson on"), which grants it
+// offline, to devs and to custom games whose host allows it, and refuses it elsewhere with a
+// notify; firstperson goes back at once.
+static void cmd_thirdperson(const int argc, char **argv, const char *rest) {
+    (void) argc; (void) argv; (void) rest;
+    third_person_request(con_client());
+}
+
+static void cmd_firstperson(const int argc, char **argv, const char *rest) {
+    (void) argc; (void) argv; (void) rest;
+    third_person_first_person(con_client());
+}
+
 // update [check|now|download]: the client update (update_ui.c, doc/backend.md "Client updates")
 static void cmd_update(const int argc, char **argv, const char *rest) {
     (void) rest;
@@ -1319,6 +1334,8 @@ static void register_commands(void) {
     register_local("rot", NO_ARGS, "show local player rotation", cmd_rot);
     register_local("rotation", NO_ARGS, "alias for rot", cmd_rot);
     register_local("ping", NO_ARGS, "show current ping", cmd_ping_local);
+    register_local("thirdperson", NO_ARGS, "over-the-shoulder camera (offline, devs, custom games that allow it)", cmd_thirdperson);
+    register_local("firstperson", NO_ARGS, "back to the first-person camera", cmd_firstperson);
     register_local("netinfo", NO_ARGS, "show the game transport (WebRTC/WebSocket, UDP/TCP) and its state", cmd_netinfo);
     register_local("show_navmeshes", ARGS(A_NAV_OFF), "visualize generated source-style nav meshes in 3D (off to clear)", cmd_show_navmeshes);
     // Server commands (mirror server/packetHandlers.ts cmds table)

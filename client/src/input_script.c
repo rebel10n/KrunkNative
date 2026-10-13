@@ -42,6 +42,11 @@
 //                                `om aim 1` turns the look onto handle 1 of the btools selection
 //   100 flags                    log each mirrored CTF flag (position, carrier, team), its crystal / stand meshes and
 //                                its #tScoreM text: "[input_script] flag t=100 i=0 team=1 carrier=-1 pos=..."
+//   100 tpstate                  log the KrunkNative third-person camera of the last frame (third_person.h):
+//                                "[input_script] tpstate t=100 view=1 model=1 own=1 viewmodel=0 keep=14.9
+//                                cam=x,y,z eye=x,y,z wall=0" (own: the local model went into the world pass,
+//                                viewmodel: the first-person pass drew, wall: the camera sits in a solid box or
+//                                solid geometry lies between the eye and it)
 //   100 state                    log the held weapon slot, the menu / pointer lock state, position, ammo, ended,
 //                                the charge (chargeTime s, fullCharge), the reload and fire timers, the grapple / rope, the GLFW
 //                                cursor mode (cursor=normal: the mouse shows, disabled: locked to the game)
@@ -94,6 +99,9 @@
 #include <hud_modes.h>  // `flags`
 #include <mode_world.h> // `flags`
 #include <object_manager.h> // `om object` (OM_TAB_OBJECTS)
+#include <third_person.h> // `tpstate`
+#include <world.h>        // `tpstate`: world_solid_fraction
+#include <bots.h>         // `tpstate`: bot_object_blocks_player
 #include <GLFW/glfw3.h>
 #include <png_write.h>
 #include <frame_target.h>
@@ -452,6 +460,24 @@ static void script_run(Client *client, const ScriptEvent *e) {
                 me ? me->grapple.active : 0,
                 me ? me->grapple.range : 0.0f,
                 cursor_mode == GLFW_CURSOR_NORMAL ? "normal" : cursor_mode == GLFW_CURSOR_DISABLED ? "disabled" : "hidden");
+    } else if (!strcmp(e->cmd, "tpstate")) {
+        const Player *me = client->me;
+        const ThirdPersonFrame f = third_person_last_frame(client);
+        const vec3 cam = client->camera.position;
+        const vec3 eye = me ? (vec3) {me->position.x, me->position.y + me->height - game_constants.camera_height, me->position.z} : cam;
+        int wall = 0;
+        const Map *map = client->game.map;
+        for (size_t i = 0; map && i < map->object_count && !wall; i++) {
+            const Object *o = map->objects[i];
+            if (!bot_object_blocks_player(o) || o->complex_coll) continue;
+            const vec3 sz = object_box_size(o);
+            wall = cam.x > o->position.x - sz.x * 0.5f && cam.x < o->position.x + sz.x * 0.5f && cam.y > o->position.y &&
+                   cam.y < o->position.y + sz.y && cam.z > o->position.z - sz.z * 0.5f && cam.z < o->position.z + sz.z * 0.5f;
+        }
+        const vec3 seg = {cam.x - eye.x, cam.y - eye.y, cam.z - eye.z};
+        if (!wall && (seg.x != 0.0f || seg.y != 0.0f || seg.z != 0.0f)) wall = world_solid_fraction(&client->game, eye, seg) < 1.0f;
+        fprintf(stderr, "[input_script] tpstate t=%.0f view=%d model=%d own=%d viewmodel=%d keep=%.2f cam=%.2f,%.2f,%.2f eye=%.2f,%.2f,%.2f wall=%d\n",
+                g_script.time, f.view, f.model, f.own_model, f.viewmodel, f.keep, cam.x, cam.y, cam.z, eye.x, eye.y, eye.z, wall);
     } else if (!strcmp(e->cmd, "flags")) {
         // flags: one log line per mirrored flag (hud_modes: position, carrier, team) with its
         // crystal / stand meshes as drawn (mode_world) and the HUD text (CTF flag-cycle checks)

@@ -452,6 +452,7 @@ typedef struct {
     unsigned char shoe_hidden[2]; // randomLeg: the shoe of the other leg is hidden
     float head_mlt;               // the headMlt the head / face / hat / head holders are scaled for
     int render_you;               // built as the local first-person model (the pet goes to the world scene)
+    int kn_third_person;          // the local model built for the KrunkNative third-person camera (third_person.h)
 
     // v7.1.4 pet (pets.h): the follower of petIndex, in world space, toward pet_holder (petHolder:
     // (3, player.height, 0) on the anchor); NULL when none

@@ -3,6 +3,7 @@
 #include <gltf.h>
 #include <render_settings.h>
 #include <skin_fx.h>
+#include <third_person.h> // the local third-person model
 #include <pets.h>
 #include <vfx.h>
 #include "viewer/viewer_store.h" // game.store.skins: weapon / melee skins
@@ -933,7 +934,10 @@ void player_generate_meshes(Player *player, const int render_you) {
 
     // TODO: mode specific skins
 
-    const int third_person = !render_you || player->game->config.third_person || player->game->map->config.cam_offset.x || player->game->map->config.cam_offset.y || player->game->map->config.cam_offset.z;
+    // KrunkNative: the local player's model for the third-person camera (third_person.h) is the
+    // same third-person model as v7's game.config.thirdPerson builds for renderYou
+    const int kn_third_person = render_you && third_person_model();
+    const int third_person = !render_you || kn_third_person || player->game->config.third_person || player->game->map->config.cam_offset.x || player->game->map->config.cam_offset.y || player->game->map->config.cam_offset.z;
 
     PlayerMesh *player_mesh = calloc(1, sizeof(PlayerMesh));
     if (!player_mesh) return;
@@ -956,6 +960,7 @@ void player_generate_meshes(Player *player, const int render_you) {
     player_mesh->anchor->scale = player_mesh->body_anchor->scale = player_mesh->upper_body_anchor->scale = (vec3) {1.0f, 1.0f, 1.0f};
     player->mesh = player_mesh;
     player_mesh->render_you = render_you;
+    player_mesh->kn_third_person = kn_third_person;
     player_mesh->pet_clock = -1.0;
 
     // generateMeshes: petHolder = genObj3D(3, player.height, 0) on objInstances; regenMeshes / players.add:
@@ -1264,7 +1269,7 @@ void player_update_meshes(Player *player, const int is_preview) {
     const float weapon_rotation = settings->weapon_rot;
     const vec3 weapon_offset_mlt = {settings->weapon_off_x, settings->weapon_off_y, settings->weapon_off_z};
 
-    const int third_person = player->game->config.third_person || player->game->map->config.cam_offset.x || player->game->map->config.cam_offset.y || player->game->map->config.cam_offset.z;
+    const int third_person = player_mesh->kn_third_person || player->game->config.third_person || player->game->map->config.cam_offset.x || player->game->map->config.cam_offset.y || player->game->map->config.cam_offset.z;
     const float aim_val_mlt = animate_aim && player->is_you ? player->aim_val : 0.0f;
     const float aim_mlt = player->weapon->animate_while_aiming ? 0.0f : aim_val_mlt;
     const float anim_mlt = (1.0f - (1.0f - game_constants.aim_anim_mlt) * aim_val_mlt) * game_constants.anim_mlt * weapon_bobbing_mlt;
@@ -1338,7 +1343,7 @@ void player_update_meshes(Player *player, const int is_preview) {
     step_half -= step_half * player->crouch_val * game_constants.crouch_anim_mlt;
     step_anim -= step_anim * player->crouch_val * game_constants.crouch_anim_mlt;
 
-    if (!player->render_you) {
+    if (!player->render_you || third_person) { // v7 swings every legMeshes entry (renderYou + thirdPerson has legs)
         for (int i = 0; i < 4; i++) {
             // waist items with noLegs (and first-person meshes) have no legs to swing
             if (i < 2 ? !player_mesh->legs[i] : !player_mesh->crouched_legs[i - 2]) continue;

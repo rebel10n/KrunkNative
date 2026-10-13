@@ -31,6 +31,11 @@ int terrain_raycast(const Game*, vec3 origin, vec3 direction, float max_distance
 // terrain stop of hitscan rays, projectile steps and canSee (lineInRect fractions).
 #define WORLD_HAVE_TERRAIN_FRACTION 1
 float world_terrain_fraction(const Game*, vec3 origin, vec3 segment);
+// KrunkNative camera collision (the death chase cam, the third-person camera): the fraction (0, 1]
+// of `segment` from origin where it first enters a solid object box (bot_object_blocks_player's
+// set; "cpx" objects count by their baked triangles, not their box), a map triangle ("tris") or
+// the terrain. 1 when the segment is clear. Only a segment that starts in open space means much.
+float world_solid_fraction(const Game*, vec3 origin, vec3 segment);
 // The terrain height straight under (x, z): raycast(x, -z, 10000, 0, 0, -20000), 0 = no terrain / miss.
 int world_terrain_height(const Game*, float x, float z, float *height);
 

@@ -37,7 +37,7 @@ silent (only the `] line` echo), as in the mod.
 
 | Command | v3.1.1 behaviour | Native |
 |---|---|---|
-| help [cmd] | "N commands:" + sorted list / `name args — desc` / "unknown command: x" | same (84 commands, with `give` / `drop` and `cls`) |
+| help [cmd] | "N commands:" + sorted list / `name args — desc` / "unknown command: x" | same (89 commands, with `give` / `drop`, `cls` and `thirdperson` / `firstperson`) |
 | clear | empties the log | same; Krunker Box Office alias `cls` |
 | echo / print text | prints the text | same |
 | bind [key] [cmd] | session key binds by `e.key` / `e.code` ("bound k -> cmd", "no binds", "k = (unbound)") | same; fired on keydown while hidden, not while typing |
@@ -60,6 +60,7 @@ silent (only the `] line` echo), as in the mod.
 | ping | overwritten by the server command | same (it is the server `/ping`) |
 | show_navmeshes [off] | v7.1.4: the nav mesh visualizer (below) | same (v7.1.4 command; v3.1.1 has none) |
 | tool_snap [units\|off] | – | Krunker Box Office: the Tool Gun's / Physics Gun's grid step (0.1 to 100 units, or off), the Object Manager's Snap field; no argument prints it. Client-local (stored as `kn_omSnapStep`), so no target selector |
+| thirdperson / firstperson | – (Source engine commands) | Krunker Box Office: the over-the-shoulder camera (doc/v7/decisions.md "Third person"). `thirdperson` asks the server (`/thirdperson on`); it switches when the grant arrives ("Third Person - Enabled") or prints the refusal (public / ranked servers, custom games whose host has `knTPCam` off). `firstperson` goes back at once. Also the Controls bind "Third Person" (unbound by default) |
 
 ## Server commands (`/cmd` in chat, or the console without the slash)
 
@@ -108,6 +109,7 @@ io.send wrapper). The other commands run in the offline game's chat handler. `/b
 | summon | [name] | dev | spawns a Soul Sanctum AI | ✔ "Summonable: …" / "Unknown summon 'x'. Try: …" / "Summoned Soul Fiend (21)." (templates = the first BOT per name on soul_sanctum.json, game.ts aliases weep / wander / fiend / angered / gate / lord) |
 | bhop | [on\|off\|held] | client | "Bhop - Disabled" / "Bhop - Hold Jump/Crouch" in the console + notify | ✔ (`ui_bhop_set_mode` + `ui_notify`) |
 | clear | – | client | Krunker Box Office: empties your own chat log (#chatList); local only, nothing is sent and other players' chat is untouched | ✔ (`hud_ui_clear_chat`, chat only: in the console `clear` / `/clear` is the console's own) |
+| thirdperson | [on\|off] | own rule | – (Krunker Box Office) | the third-person camera's permission (`chat_third_person_allowed`): the offline sandbox, DEV peers, the custom game's host and everyone with the host's `knTPCam`, open-cheat servers; else a notify ("Third person is off on this server", "No third person in ranked", "The host has third person off"), "Third Person - Not allowed here (…)" and `NET_CHEAT_THIRD_PERSON` 0. Granted: "Third Person - Enabled" / "Disabled" and the cheat flag 1 / 0 |
 
 ## Target selectors (Krunker Box Office)
 

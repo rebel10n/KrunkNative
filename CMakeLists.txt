@@ -948,6 +948,18 @@ else ()
         target_link_libraries(death_cam_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # third_person_test: the KrunkNative third-person camera (client/src/third_person_cam.c): the
+    # collision pull-in (world_solid_fraction: boxes, map triangles, terrain) on synthetic walls and
+    # every Kanji / Sandstorm spawn, the aim correction, the server's `thirdperson` permission.
+    # GL-free: it includes third_person_cam.c, the GL target only provides headers.
+    add_executable(third_person_test client/tests/third_person_test.c ${SHARED_HEADERS} ${SHARED_SOURCES})
+    target_include_directories(third_person_test PRIVATE client/include client/lib)
+    target_link_libraries(third_person_test PRIVATE freetype glfw m)
+    krunknative_link_gl(third_person_test)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(third_person_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # BACKEND SERVICES (services/, doc/backend.md): knsvc (+ knsvc_db, kn_migrate and the
     # brain when libpq is available). Optional; never affects the game targets. Tests: ctest.
     option(KRUNKNATIVE_SERVICES "Build the backend services (services/; needs OpenSSL, libpq for the DB parts)" ON)

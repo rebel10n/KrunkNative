@@ -71,6 +71,7 @@ const GameConfig g_default_game_config = {
     .kill_cams = 1,
     .allow_anonymous = 1,
     .om_weapons = 1, // KrunkNative knOmWeps
+    .tp_cam = 0,     // KrunkNative knTPCam: the host must allow third person
     .spec_slots = 2,
     .team_size = 3,
     .minimaps = 1,

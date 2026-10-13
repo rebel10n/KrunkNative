@@ -376,7 +376,10 @@ enum {
     UI_CONTROL_OM_ROTATE = 44,
     // KrunkNative additions: the Tool Gun's grid step down / up (PageDown / PageUp, cont_omSnapDownKey / cont_omSnapUpKey)
     UI_CONTROL_OM_SNAP_DOWN = 45, UI_CONTROL_OM_SNAP_UP = 46,
-    UI_CONTROL_COUNT = 47
+    // KrunkNative addition: Third Person (cont_thirdPersonKey, unbound by default) toggles the
+    // over-the-shoulder camera like the console's thirdperson / firstperson (third_person.h)
+    UI_CONTROL_THIRD_PERSON = 47,
+    UI_CONTROL_COUNT = 48
 };
 
 // Input-related settings ClientSettings does not carry (written by client_apply_setting).

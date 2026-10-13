@@ -13,6 +13,7 @@
 // in world units, velocities per ms, gravity per ms^2, lifetimes in ms).
 #include <gl.h>
 #include <vfx.h>
+#include <third_person.h> // camera_offset_active: no viewmodel muzzle in third person
 #include <projectiles_render.h>
 #include <html_ui.h>
 #include <ui_logic.h>
@@ -823,7 +824,7 @@ static vec3 muzzle_local(const Player *player, const VfxWeaponFx *fx, const int 
 
 static int camera_offset_active(const Client *client) {
     const Map *map = client->game.map;
-    return client->game.config.third_person || (map && (map->config.cam_offset.x || map->config.cam_offset.y || map->config.cam_offset.z));
+    return client->game.config.third_person || third_person_model() || (map && (map->config.cam_offset.x || map->config.cam_offset.y || map->config.cam_offset.z));
 }
 
 static int project_to_screen(Camera *camera, const vec3 position, vec2 *out) {

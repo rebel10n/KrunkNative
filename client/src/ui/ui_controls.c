@@ -27,6 +27,7 @@
 #include <ctype.h>
 #include <hud_social.h> // WP-E: spray / spray wheel, taunts, quick chat (hud_social.c)
 #include <sprays.h>     // the spray wheel takes the mouse wheel
+#include <third_person.h> // the Third Person bind
 #include <app_mode.h>   // app_reload: the Reconnect key on the web
 #include <object_manager.h> // the Object Manager's Undo / Remove binds
 #include <GLFW/glfw3.h>
@@ -236,6 +237,8 @@ static const V7Bind V7_BINDS[] = {
     // alternate key), in game with a KN building gun in hand
     {"omSnapDown", -1, "omSnapDownKey", 34, -1, UI_CONTROL_OM_SNAP_DOWN},
     {"omSnapUp", -1, "omSnapUpKey", 33, -1, UI_CONTROL_OM_SNAP_UP},
+    // KrunkNative addition: Third Person, unbound (no free v7 key; bind one or use the console)
+    {"thirdPerson", -1, "thirdPersonKey", -1, -1, UI_CONTROL_THIRD_PERSON},
     {"streak", 0, "18", 49, -1, UI_CONTROL_STREAK0},
     {"streak", 1, "19", 50, -1, UI_CONTROL_STREAK0 + 1},
     {"streak", 2, "20", 51, -1, UI_CONTROL_STREAK0 + 2},
@@ -303,6 +306,7 @@ static const ControlRow TAB_GENERAL[] = {
     {"Physics Gun Rotate (held)", "omRotate", -1, 0, "Sandbox"},
     {"Tool Gun Snap Down", "omSnapDown", -1, 0, "Sandbox"},
     {"Tool Gun Snap Up", "omSnapUp", -1, 0, "Sandbox"},
+    {"Third Person", "thirdPerson", -1, 0, "Camera"},
 };
 static const ControlRow TAB_CHAT[] = {
     {"Chat", "chat", -1, 0, "Interface & Audio"}, {"Voice", "voiceChat", -1, 0, "Interface & Audio"},
@@ -1332,6 +1336,12 @@ int ui_controls_key_event(Client *client, const int key, const int scancode, con
         (!ui_text_input_focused() || object_manager_ui_search_focused())) {
         g_ctl.game_key = 1; // web: preventDefault, the browser's own F1 (help) must not open
         object_manager_ui_toggle(client);
+        return 1;
+    }
+
+    // Third person (KrunkNative): in game, not while typing
+    if (press && code >= 0 && !menu && bind_is(UI_CONTROL_THIRD_PERSON, code) && !g_ctl.chat_focused && !ui_text_input_focused()) {
+        third_person_toggle(client);
         return 1;
     }
 

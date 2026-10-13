@@ -1612,6 +1612,7 @@ typedef struct {
     unsigned char kill_cams;          // kCams (1)
     unsigned char allow_anonymous;    // aAnon (1; nothing reads it in v7)
     unsigned char om_weapons;         // KrunkNative knOmWeps (1): the Object Manager's extra loadout weapons in custom games
+    unsigned char tp_cam;             // KrunkNative knTPCam (0): the host lets everyone use the third-person camera
     // KrunkNative knClanWar / knClanA / knClanB: v10's mode.clanWar (players.setTeam team = account
     // clan) as a host option of team modes: team 1 = clan A, team 2 = clan B, everyone else
     // spectates. Empty tags: the first two clans to join claim the teams (server/src/accounts.c).
@@ -2750,6 +2751,7 @@ typedef enum {
     NET_CHEAT_FORCE_HIDE = 2,      // "fh"  -> me->force_hide
     NET_CHEAT_BORDERS = 3,         // "borders" -> !game.config.disable_borders
     NET_CHEAT_FORCE_COLLIDE = 4,   // "forcecol" -> map objects forced collidable
+    NET_CHEAT_THIRD_PERSON = 5,    // KrunkNative /thirdperson: the third-person camera granted (1) / taken (0)
 } NetCheatFlag;
 
 typedef struct {

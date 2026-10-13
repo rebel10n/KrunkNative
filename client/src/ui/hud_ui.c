@@ -43,6 +43,7 @@ void hud_ui_hit(Client*, int kill);
 #include <html_ui.h>
 #include <html_dom.h>
 #include <ui_logic.h>
+#include <third_person.h>
 #include <hud_map.h> // part 2a: minimap layout
 #include <render_settings.h>
 #include "../viewer/viewer_store.h" // store.skins: the melee skin icon
@@ -3778,11 +3779,14 @@ void client_hud_html_tick(Client *client, const float now_f) {
     // 95.js toggleAim: with an attachment (and the normal first-person camera) the reticle image
     // (textures/reticles/reticle_<reticleIndex>.png, drawn centred by 91.js) shows once fully aimed.
     // aiming cancels an inspect in v3.1.1, so the dot never shows during one; keep that explicit
-    next.aim_dot = weapon && weapon_attachment(weapon, DEFAULT_ATTACHMENT_INDEX) && me->aim_val >= 1.0f && !game->config.third_person && !me->inspecting && !ui->ended;
+    next.aim_dot = weapon && weapon_attachment(weapon, DEFAULT_ATTACHMENT_INDEX) && me->aim_val >= 1.0f && !game->config.third_person && !third_person_view(client) && !me->inspecting && !ui->ended;
     next.weapon = weapon;
     hud_timer(client, next.timer_text, sizeof(next.timer_text));
     next_extra.spread = (int) lroundf(hud_spread(me));
     next_extra.aim_pct = (int) lroundf(CLAMP(me->aim_val, 0.0f, 1.0f) * 100.0f);
+    // v7 updateCrosshair: with a camera offset (thirdPerson) the crosshair stays while aiming; so does
+    // KrunkNative's third person (aiming down sights switches it to first person: third_person_view is off)
+    if (third_person_view(client)) next_extra.aim_pct = 0;
     next_extra.scoreboard = hud_scoreboard_key(client) && !client_render_settings()->old_scoreboard; // g6: leaderType == 1 only
     hud_loadout(me, &next_extra);
     int ping = client->net_ping_ms >= 0 ? client->net_ping_ms : -1; // Krunker shows "-" for -1

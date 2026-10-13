@@ -12,6 +12,7 @@
 #include <sprays.h> // WP-E: the v7 spray wheel overlay
 #include <hud_social.h> // WP-E: social_reset_server
 #include <camera_feel.h>
+#include <third_person.h>
 #include <input_script.h> // KRUNKNATIVE_INPUT_SCRIPT movement/feel test driver
 #include <frame_target.h>  // web: the frame draws offscreen, the canvas gets it whole
 #include <html_ui.h>
@@ -1689,6 +1690,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
     // the last one reaches half a netRate period; it carries that summed delta (net/recon.c).
     int input_sampled = 0;
     g_look_unsampled = 0;
+    third_person_frame(client); // KrunkNative third person: the local model's mode, the re-ask after INIT
     if (client->me && client->me->active) {
         Input input = {0};
         vec2 mouse_delta = {0};
@@ -1764,9 +1766,17 @@ static void client_tick_game(Client *client, const float now, const float frame_
         input.y_dir = player_wrap_yaw(input.y_dir);
         g_look.x = input.x_dir;
         g_look.y = input.y_dir;
+        // KrunkNative third person: g_look stays the view (the camera, the crosshair); the input
+        // aims the eye at what the crosshair ray hits, so the server's hitscan from the eye agrees
+        if (third_person_view(client)) {
+            const vec2 aim = third_person_input_look(client, g_look);
+            input.x_dir = player_clamp_pitch(aim.x);
+            input.y_dir = player_wrap_yaw(aim.y);
+        }
 
         if (input_sampled) {
-            g_look_sent = g_look;
+            g_look_sent.x = input.x_dir; // what me->direction takes (the resync test above)
+            g_look_sent.y = input.y_dir;
             input.seq = client->net_next_input_seq++;
             // KrunkScript: INPUTS.disableDefault (dontSendInputs) neither predicts nor sends,
             // DEFAULT.disablePrediction (noPred) sends without predicting (index.js:16840-16847)
@@ -1813,7 +1823,9 @@ static void client_tick_game(Client *client, const float now, const float frame_
     // frame shows this frame's input.
     if (client->me && client->me->active) {
         camera_feel_apply(client);
-        if (g_look_unsampled) { // WP-C netRate: the look of this unsampled frame (rotateCam from CONTROLS)
+        if (third_person_view(client)) {
+            third_person_apply_camera(client, g_look, delta); // over the shoulder (third_person.c)
+        } else if (g_look_unsampled) { // WP-C netRate: the look of this unsampled frame (rotateCam from CONTROLS)
             client->camera.rotation.x += player_clamp_pitch(g_look.x) - client->me->direction.x;
             const float yaw = g_look.y - client->me->direction.y;
             client->camera.rotation.y += yaw - 2.0f * (float) M_PI * roundf(yaw / (2.0f * (float) M_PI));
@@ -1828,6 +1840,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
     // resolution/antiAlias/aspectRatio/saturationn/hue: world + first-person passes go
     // through the scaled scene target when one is needed (render_target.c).
     const int scene_target = !scenario && render_target_begin(client);
+    int tp_own_model = 0; // KrunkNative third person: the local model drawn in the world pass
 
     if (!scenario) vfx_update(client, delta); // combat effects from this frame's game tick (vfx.c)
     // store-item material animations: frames, movT, pulsT, rgb, rAnim (skin_fx.c), with textureAnim
@@ -1848,7 +1861,18 @@ static void client_tick_game(Client *client, const float now, const float frame_
         sky_render(&client->camera); // Krunker's backgroundScene pass: sky dome first (sky.c)
         shadow_begin_world();
         spectate_render_begin(client); // first-person spectating hides the followed player's model
+        // KrunkNative third person: the local (third-person) model is drawn with the world
+        Player *tp_me = third_person_draw_model(client) ? client->me : NULL;
+        tp_own_model = tp_me != NULL;
+        if (tp_me) {
+            scene_remove_player_mesh(client->fps_scene, tp_me->mesh, tp_me->loadout_size);
+            scene_add_player_mesh(client->scene, tp_me->mesh, tp_me->loadout_size);
+        }
         scene_render(client->scene, &client->camera);
+        if (tp_me) {
+            scene_remove_player_mesh(client->scene, tp_me->mesh, tp_me->loadout_size);
+            scene_add_player_mesh(client->fps_scene, tp_me->mesh, tp_me->loadout_size);
+        }
         spectate_render_end(client);
         shadow_end_world();
         vfx_render_world(client);   // tracers, impacts, casings, explosions, map particles
@@ -1863,7 +1887,11 @@ static void client_tick_game(Client *client, const float now, const float frame_
         Camera fps_camera = client->camera;
         fps_camera.fov = ui_controls_fps_fov();
         // hideADS: no weapon model while fully aimed (render_settings.h)
-        if (ui_controls_weapon_visible(client) && !client_render_hide_weapon_ads(client)) {
+        // KrunkNative third person (third_person.h): the local model went into the world pass (or is
+        // hidden, camera pulled into the head); never a viewmodel. v7's own thirdPerson keeps this pass.
+        const int viewmodel = ui_controls_weapon_visible(client) && !client_render_hide_weapon_ads(client) && !third_person_view(client);
+        third_person_note_frame(tp_own_model, viewmodel);
+        if (viewmodel) {
             if (!scenario) shadow_begin_world(); // v3.1.1 arms/weapon receive the sun shadow too
             scene_render(client->fps_scene, &fps_camera);
             if (!scenario) shadow_end_world();

@@ -179,7 +179,7 @@ static void test_tables(void) {
     printf("option tables...\n");
     size_t n = 0;
     game_config_options(GAME_CONFIG_SERVER, &n);
-    CHECK(n == 89, "serverConfig has %zu entries, v7 85 + KrunkNative knOmWeps (Object Manager) + knClanWar / knClanA / knClanB", n);
+    CHECK(n == 90, "serverConfig has %zu entries, v7 85 + KrunkNative knOmWeps (Object Manager) + knTPCam (third person) + knClanWar / knClanA / knClanB", n);
     game_config_options(GAME_CONFIG_CLASS, &n);
     CHECK(n == 79, "classConfig has %zu entries, v7 79", n);
     game_config_options(GAME_CONFIG_WEAPON, &n);

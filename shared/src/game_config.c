@@ -132,6 +132,9 @@ static const GameConfigOption k_server_options[] = {
     // KrunkNative addition (not a v7.1.4 serverConfig key): the Object Manager's extra loadout weapons and
     // weapon pickups for every player of a custom game (shared/src/object_manager.c)
     {"knOmWeps", "Object Manager Weapons", "Other", NULL, GC_BOOL, GC_STORE_U8, 0, 0, .def = 1.0f, .offset = offsetof(GameConfig, om_weapons)},
+    // KrunkNative addition (not a v7.1.4 serverConfig key): the host of a custom game lets every
+    // player use the third-person camera (console `thirdperson`, doc/v7/decisions.md "Third person").
+    {"knTPCam", "Third Person Camera", "Other", NULL, GC_BOOL, GC_STORE_U8, 0, 0, .def = 0.0f, .offset = offsetof(GameConfig, tp_cam)},
     // KrunkNative: v10 mode.clanWar as host options (doc/v10/ranked-impl.md "Clan wars"): clan vs clan
     {"knClanWar", "Clan War", "Teams", NULL, GC_BOOL, GC_STORE_U8, 0, 0, .def = 0.0f, .offset = offsetof(GameConfig, clan_war)},
     {"knClanA", "Alpha Clan", "Teams", NULL, GC_INPUT, GC_STORE_STR, 0, 0, .def_str = "", .len = 16, .offset = offsetof(GameConfig, clan_war_tags[0])},

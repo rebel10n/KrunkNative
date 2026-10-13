@@ -93,6 +93,12 @@ void chat_command_premium_action(ChatCommandHost*, int sender_id, int index);
 // (io_tp: CHAT_PERM_DEV_CHEAT, io_cycle: CHAT_PERM_DEV): 1 = allowed, else the sender got
 // the notify. label names the action in the denial log.
 int chat_command_allowed(ChatCommandHost*, int sender_id, ChatCommandPerm, const char *label);
+// KrunkNative third-person camera (doc/v7/decisions.md "Third person"): may this sender use it?
+// Allowed in the offline sandbox, for DEV peers, the custom game's host, everyone in a custom game
+// whose host set knTPCam, and on a server whose owner opened the cheats (perms off, cheats "all");
+// refused in ranked / comp (devs excepted) and on public servers. 0 = refused, *reason (if given)
+// is the notify text.
+int chat_third_person_allowed(ChatCommandHost*, int sender_id, const char **reason);
 // pnhBannedAddresses.has(address): connections from it are refused (close 4003).
 int chat_command_ip_banned(const ChatCommandHost*, const char *address);
 // The table (for help, completion and doc/console.md).

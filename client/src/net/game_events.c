@@ -26,6 +26,7 @@
 #include <console.h>   // chat lines mirrored into the developer console (ui_console.c)
 #include <sprays.h>      // NET_PACKET_SPRAY: addSpray (sprays.c)
 #include <chat_commands.h> // NET_PACKET_CHEAT: /forcecol on the client's map copy
+#include <third_person.h>
 #include <voice_chat.h>    // NET_PACKET_VOICE: "vc" -> voiceChat (client/src/voice.c)
 #include <hud_social.h>    // WP-E part 2b: NET_PACKET_CHAT_V7 / VOICE_V7 / SPRAY_V7 (social_v7.h)
 #include <lobby_ui.h>      // WP-E: GAME_CONFIG / NETWORK_DATA / MATCH_VOTE_STATE (client/src/net/lobby_events.c)
@@ -376,6 +377,9 @@ static void events_cheat(Client *client, const NetCheatPacket *packet) {
             break;
         case NET_CHEAT_FORCE_COLLIDE:
             if (client->game.ready) chat_map_force_collide(client->game.map, on);
+            break;
+        case NET_CHEAT_THIRD_PERSON: // KrunkNative `thirdperson` granted / taken (third_person.c)
+            third_person_on_grant(client, on);
             break;
         default:
             break;
@@ -948,6 +952,7 @@ void client_game_events_reset(Client *client) {
     hud_popups_on_init(); // "init": bN = 0
     hud_v7modes_on_init(); // ui-v7: #krTagHolder emptied, the speed-run list rebuilt
     hud_map_on_init(client); // part 2a: overlay.miniMap.reset + overlay.resetAll (no death markers)
+    third_person_on_init(client); // the third-person grant is per round: asked again once in game
     g_death_info_valid = 0;
 #ifdef HUD_UI_HAVE_HIDE_END_SCREEN
     hud_ui_hide_end_screen(client); // no-op unless the end screen is up
