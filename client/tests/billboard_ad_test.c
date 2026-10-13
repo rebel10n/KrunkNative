@@ -202,6 +202,15 @@ static void test_canvas(const char *out) {
     const int w = BILLBOARD_AD_WIDTH, h = BILLBOARD_AD_HEIGHT;
     Canvas2D *c = c2d_create();
     c2d_set_size(c, w, h, w, h);
+    // GameFont is gitignored game content (assets/), so CI has no font: skip like no GL context
+    c2d_set_font(c, 100, "GameFont");
+    if (c2d_measure_text(c, "FRVR") <= 0.0) {
+        printf("SKIP: GameFont not available (gitignored assets)\n");
+        c2d_destroy(c);
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return;
+    }
 
     // layout: two lines at the largest size that fits 1968 x 944 (drawMultilineText)
     static BillboardAdLayout layout;
