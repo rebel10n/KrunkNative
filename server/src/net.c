@@ -215,6 +215,11 @@ static void net_resync_live_world(ClientConnection *client) {
     }
 }
 
+// NetKillPacket.fists NET_KILL_NUKE: protocol 1.x.2 peers (and any later minor)
+static int net_peer_takes_kill_nuke(const ClientConnection *client) {
+    return client->peer_minor > NET_PROTOCOL_MINOR_EXT || client->peer_patch >= NET_PROTOCOL_PATCH_KILL_NUKE;
+}
+
 static void net_game_send(Game *game, const int uid, const int type, const void *payload, const uint16_t length) {
     (void) game;
 
@@ -227,6 +232,13 @@ static void net_game_send(Game *game, const int uid, const int type, const void 
             if (skip >= 0 && client->id == skip) continue;
             if (!net_peer_takes(client, type)) continue;
             if (!net_recipient_takes(client, type, payload, length)) continue; // v7: the live world only to the living
+            if (type == NET_PACKET_KILL && length == sizeof(NetKillPacket) && !net_peer_takes_kill_nuke(client)) {
+                NetKillPacket kill; // a pre-patch-2 peer reads any non-zero fists as a fists kill
+                memcpy(&kill, payload, sizeof(kill));
+                kill.fists &= NET_KILL_FISTS;
+                net_send_packet(client->fd, (NetPacketType) type, &kill, sizeof(kill));
+                continue;
+            }
             net_send_packet(client->fd, (NetPacketType) type, payload, length);
         }
         return;

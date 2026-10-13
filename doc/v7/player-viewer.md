@@ -938,7 +938,7 @@ Modes can disable streaks (`mode.disabledStreaks`).
 
 | idx | Streak | slot | kills | Mechanics | Status | Tag |
 |---|---|---|---|---|---|---|
-| 0 | Nuke | 2 | 25 | Same kill/score as v3. **New:** `reqAccount` (guests can't earn it, except in sandbox). Timer is `gameTimer-1` when under 10 s remain in untimed modes, otherwise 10000 (`streaks.js:17-23`). Custom-map triggers `onNukeStart`/`onNukeEnd`. 1/140 chance of skin 4040 in pubs. | CHANGED | [GAMEPLAY] minor |
+| 0 | Nuke | 2 | 25 | Same kill/score as v3. **New:** `reqAccount` (needs `player.account`; v7.1.4's server gives every player one, guests via `createGuestAccount`, so in practice everyone earns it). Timer is `gameTimer-1` when under 10 s remain in untimed modes, otherwise 10000 (`streaks.js:17-23`). Custom-map triggers `onNukeStart`/`onNukeEnd`. 1/140 chance of skin 4040 in pubs. | CHANGED | [GAMEPLAY] minor |
 | 1 | Airdrop | 1 | 12 | Needs open sky (500 up). Drops an `airDrop` package: KR/Junk/Trapped/Skin/Juggernaut/War Machine/Nuke/Slimer packages (`airDropPackages.js`). `noCustoms`. | NEW | [GAMEPLAY] |
 | 2 | Refill | 0 | 5 | devOnly: refills the thrown knife | NEW (dev) | - |
 | 3 | Bombardment | 2 | 20 | devOnly: carpet-bombs a grid over the spawn bounds, a bomb every 500 ms (stored[2]). Hits apply Rooted + Dizzy, and kills give +100. | NEW (dev) | - |

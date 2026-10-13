@@ -29,8 +29,24 @@ static int g_last_explosion_radius = -1;
 static int g_end_count;
 static NetProjectileEndPacket g_last_end;
 
+// test_nuke: the Nuke's packets
+static int g_nuke_states[2];  // "n" 0 / 1 broadcasts
+static int g_nuke_kills;      // KILL packets flagged as Nuke kills (stk 0)
+static int g_nuke_hit_uid = -1; // the uid that got the target-less "4"
+static int g_nuke_medal;      // the "Nuke" medal's score
+
 static void test_send(Game *game, const int uid, const int type, const void *payload, const uint16_t length) {
-    (void) game; (void) uid;
+    (void) game;
+    if (type == NET_PACKET_NUKE && length == sizeof(NetNukePacket)) {
+        const int state = ((const NetNukePacket *) payload)->state;
+        if (state == 0 || state == 1) g_nuke_states[state]++;
+    }
+    if (type == NET_PACKET_KILL && length == sizeof(NetKillPacket) && (((const NetKillPacket *) payload)->fists & NET_KILL_NUKE)) g_nuke_kills++;
+    if (type == NET_PACKET_HIT && length == sizeof(NetHitPacket) && ((const NetHitPacket *) payload)->target_uid == -1) g_nuke_hit_uid = uid;
+    if (type == NET_PACKET_KILL_MEDALS && length == sizeof(NetKillMedalsPacket)) {
+        const NetKillMedalsPacket *m = payload;
+        if (m->count == 1 && !strcmp(m->medals[0].text, "Nuke")) g_nuke_medal = m->medals[0].score;
+    }
     if (type == NET_PACKET_PROJECTILE_END && length == sizeof(NetProjectileEndPacket)) {
         g_last_end = *(const NetProjectileEndPacket *) payload;
         g_end_count++;
@@ -355,11 +371,13 @@ static void test_streaks(Game *game) {
     player_set_streak_indexes(p, bad);
     CHECK(p->streak_indexes[0] == -1 && p->streak_indexes[1] == -1 && p->streak_indexes[2] == STREAK_JUGGERNAUT, "picks only count in their own slot");
 
-    // the default pick: 25 kills earn a Nuke only with an account (offline sandbox counts)
+    // the default pick: 25 kills earn a Nuke, guests included (v7.1.4's server gives every player
+    // an account object, so reqAccount never refuses)
     player_set_streak_indexes(p, NULL);
     p->has_account = 0;
     kill_n(game, p, 25);
-    CHECK(!p->streaks_owned[STREAK_NUKE] && p->real_kill_streak == 0, "a guest earns no Nuke; the counter resets at 25");
+    CHECK(p->streaks_owned[STREAK_NUKE] == 1 && p->real_kill_streak == 0, "a guest earns the Nuke at 25; the counter resets");
+    p->streaks_owned[STREAK_NUKE] = 0;
     p->has_account = 1;
     kill_n(game, p, 24);
     CHECK(!p->streaks_owned[STREAK_NUKE] && p->real_kill_streak == 24, "24 kills: nothing yet");
@@ -427,6 +445,62 @@ static void test_streaks(Game *game) {
     PlayerKillInfo nuke_info = {.weapon_id = -1};
     player_kill(nuked, p, &nuke_info, 1);
     CHECK(p->streak_weapon == 2 && p->weapon_streak == 1, "Nuke kills are not weapon kills");
+}
+
+// streaks.js Nuke: a guest's 25-kill Nuke through the streak key ("k2" -> checkStreak), "n" 0, 10 s
+// later "n" 1 and every active enemy dies (not the caller, its team mates, god mode players or the
+// dead), 50 score each, the "Nuke" medal, a "4" to the caller; the kills carry stk 0. NextBots
+// never earn streaks (v7: streakIndexs []).
+static void test_nuke(const cJSON **maps) {
+    printf("nuke...\n");
+    g_nuke_states[0] = g_nuke_states[1] = g_nuke_kills = g_nuke_medal = 0; // test_streaks called one in already
+    g_nuke_hit_uid = -1;
+    Game game = {0};
+    game_configure(&game, NULL, maps, 1, NULL, 0, NULL, 0, NULL, 0);
+    game_init(&game, 0, -1, 1);
+    game.hooks.send = test_send;
+    game.lag_comp = 0;
+    game.mode = mode_init(MODE_ID_TDM);
+
+    Player *caller = add_player(&game, 1, 0);
+    Player *mate = add_player(&game, 2, 0);
+    Player *enemy = add_player(&game, 3, 0);
+    Player *bot = add_player(&game, 4, 0);
+    Player *god = add_player(&game, 5, 0);
+    Player *dead = add_player(&game, 6, 0);
+    caller->team = mate->team = 1;
+    enemy->team = bot->team = god->team = dead->team = 2;
+    bot->is_bot = 1;
+    god->god_mode = 1;
+    player_kill(dead, NULL, NULL, 1);
+    caller->has_account = 0; // a guest
+
+    for (int i = 0; i < 25; i++) player_kill(add_player(&game, 100 + i, 0), caller, NULL, 1); // dead ones stay dead
+    CHECK(caller->streaks_owned[STREAK_NUKE] == 1, "a guest's 25 kills earn the Nuke");
+    const float score0 = (float) caller->score;
+    player_check_streak(caller, 2);
+    CHECK(!caller->streaks_owned[STREAK_NUKE] && g_nuke_states[0] == 1 && game.nuke_player == caller && fabsf(game.nuke_timer - 10.0f) < 1e-6f,
+          "the streak key calls it in: \"n\" 0, 10 s");
+    float now = game.now;
+    for (int i = 0; i < 990; i++) game_tick(&game, now += 0.01f, 0.01f);
+    CHECK(g_nuke_states[1] == 0 && enemy->active && bot->active, "nothing before 10 s");
+    for (int i = 0; i < 20; i++) game_tick(&game, now += 0.01f, 0.01f);
+    CHECK(g_nuke_states[1] == 1 && !game.nuke_timer, "\"n\" 1 at 10 s");
+    CHECK(!enemy->active && !bot->active, "the enemies die (bots too)");
+    CHECK(caller->active && mate->active && god->active && !dead->active, "not the caller, a team mate or god mode");
+    CHECK(g_nuke_kills == 2 && g_nuke_medal == 100 && g_nuke_hit_uid == caller->uid && (float) caller->score - score0 == 100.0f,
+          "2 Nuke kills (stk 0), the Nuke medal +100, the \"4\" to the caller, score +100 (%d kills, medal %d, hit %d, +%.0f)",
+          g_nuke_kills, g_nuke_medal, g_nuke_hit_uid, (float) caller->score - score0);
+
+    // NextBots: player.js streakIndexs [] (shared/src/bots.c) earn nothing
+    const int none[STREAK_SLOTS] = {-1, -1, -1};
+    player_set_streak_indexes(bot, none);
+    player_spawn(bot);
+    for (int i = 0; i < 25; i++) player_kill(add_player(&game, 200 + i, 0), bot, NULL, 1);
+    CHECK(!bot->streaks_owned[STREAK_NUKE] && bot->real_kill_streak == 0, "no streak picks: no Nuke");
+
+    mode_fini(game.mode);
+    game.mode = NULL;
 }
 
 static void test_upgrades(Game *game) {
@@ -598,6 +672,7 @@ int main(void) {
     test_charge(&game);
     test_effects(&game);
     test_streaks(&game);
+    test_nuke(maps);
     test_upgrades(&game);
     test_mode_multipliers(&game);
     test_chall_mode(&game);

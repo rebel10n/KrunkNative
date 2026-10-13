@@ -5,6 +5,7 @@
 // zPerksHolder) reads Player.streaks_owned / effects / perks; the server owns every decision.
 #include <client.h>
 #include <audio.h>
+#include <camera_feel.h>
 #include <spectate.h>
 #include <ui_logic.h>
 #include <html_dom.h>
@@ -90,9 +91,15 @@ int combat_events_handle(Client *client, const int type, const void *payload, co
             if (client->me && streak.streak < STREAK_COUNT) client->me->streaks_owned[streak.streak] = streak.count;
             return 1;
         }
-        case NET_PACKET_NUKE: { // io_nukeUpdate: siren on call-in, the blast on detonation
+        case NET_PACKET_NUKE: { // io_nukeUpdate: siren_0 on the call-in; the blast: nuke_0, the white flash, RENDER.shake(1)
             COMBAT_READ(NetNukePacket, nuke);
-            audio_play(nuke.state ? "nuke_0" : "siren_0", 1.0f, 0, 1.0f);
+            if (nuke.state == 0) {
+                audio_play("siren_0", 1.0f, 0, 1.0f);
+            } else if (nuke.state == 1) {
+                audio_play("nuke_0", 1.0f, 0, 1.0f);
+                hud_ui_nuke_flash();
+                camera_feel_shake(1.0f);
+            }
             return 1;
         }
         case NET_PACKET_JUGGERNAUT: { // io_setJuggernaut (+ addPlayerSound jug_0 loop, maxHealth)

@@ -1834,6 +1834,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
     menu_view_camera(client, delta); // no active player: pre-spawn menu camera / death chase cam
     ks_client_camera(client); // KrunkScript GAME.CAMERA: a detached camera replaces the pose
     camera_feel_update(MIN(delta, game_constants.max_delta)); // RENDER.updateShake(deltaMs)
+    hud_ui_nuke_flash_step(delta); // index.js gameLoop: the Nuke's #imgFlash fades by gameTimeDiff
     for (size_t i = 0; i < client->game.player_count; i++) player_mesh_debug_log(client->game.players[i], now); // KRUNKNATIVE_PLAYER_LOG
 
     // World + first-person scene, then the native HUD / overlay (client_tick composites the page after).

@@ -176,8 +176,9 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
 
     if (killer) { // g1: b8 found, even when it is the victim (hC = "": weapon + victim only, e.g. own rocket)
         const int self = killer == victim;
+        const int stk = packet->fists & NET_KILL_NUKE ? STREAK_NUKE : -1; // info.stk: the Nuke's icon
         hud_ui_add_killfeed_ex(client, self ? NULL : events_name(killer), !self && killer == client->me, victim_name,
-                               victim && victim == client->me, weapon && weapon->icon ? weapon->icon : NULL, packet->headshot, 0.0);
+                               victim && victim == client->me, weapon && weapon->icon ? weapon->icon : NULL, packet->headshot, stk, 0.0);
     } else {
 #ifdef HUD_UI_HAVE_KILLFEED_SUICIDE
         hud_ui_add_killfeed_suicide(client, victim_name, victim && victim == client->me);
@@ -200,7 +201,7 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
         const int weapon_index = death && death->weapon_index >= 0 ? death->weapon_index : packet->weapon_index;
         const Weapon *killer_weapon = death && death->weapon_index >= 0 ? events_weapon(client, death->weapon_index) : weapon;
         card.killer = events_name(killer);
-        card.weapon = events_weapon_label(killer, killer_weapon, weapon_index, packet->fists || (death && death->fists), &card.weapon_color);
+        card.weapon = events_weapon_label(killer, killer_weapon, weapon_index, (packet->fists & NET_KILL_FISTS) || (death && death->fists), &card.weapon_color);
         card.class_index = packet->killer_class >= 0 ? packet->killer_class : 0;
         if (death) {
             card.level = player_card_class_level(death->class_stat); // f1975: the killer's class level from "3" [1]

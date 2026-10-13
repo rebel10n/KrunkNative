@@ -845,14 +845,18 @@ static void hud_feed_open(char *out, const size_t size, size_t *len, const int c
 
 // f2024(killer, info, killerHtml, victimHtml): inner markup of a kill row. `killer` NULL = the victim
 // killed itself (hC = ""): only the weapon and the victim.
+// `streak` >= 0: info.stk (a Nuke kill): the streak's icon instead of the weapon's.
 static void hud_feed_row_html(const int chat, const char *killer, const int killer_is_you, const char *victim,
-                              const int victim_is_you, const char *weapon_icon, const int headshot, char *out,
-                              const size_t size) {
+                              const int victim_is_you, const char *weapon_icon, const int headshot, const int streak,
+                              char *out, const size_t size) {
     size_t len = 0;
     out[0] = 0;
     hud_feed_open(out, size, &len, chat);
     if (killer || killer_is_you) hud_feed_name_span(out, size, &len, killer ? killer : "", killer_is_you, 0);
-    if (weapon_icon && !strcmp(weapon_icon, FEED_MELEE_ICON)) {
+    if (streak >= 0) { // info.stk != null: <img class='streakChatIcon' src='/img/streaks/<stk>.png' />
+        hb_append(out, size, &len, "<img class='streakChatIcon' src='img/streaks/%d.png' />", streak);
+        if (headshot) hb_append(out, size, &len, "<img class='headShotChatIcon' src='img/headshot_0.png'>");
+    } else if (weapon_icon && !strcmp(weapon_icon, FEED_MELEE_ICON)) {
         hb_append(out, size, &len, "<img style='opacity:0.7;margin-right:%dpx;' class='meleeChatIcon' src='textures/melee/icon_0.png' />",
                   FEED_MELEE_PAD);
     } else if (weapon_icon && weapon_icon[0]) {
@@ -1678,6 +1682,36 @@ static void hud_feed_clear(const int remove_nodes) {
 
 // The game loop's bR pass: every row's life drops by the frame delta, clamped to
 // config.dltMx like Krunker's, and the row is removed (elm.remove(), no fade) at 0.
+// io_nukeUpdate(1): #imgFlash display block, opacity 1, no background image; the game loop then
+// takes gameTimeDiff * 0.002 off the opacity each frame (gone after 500 ms) and hides it at 0.
+#define NUKE_FLASH_FADE_PER_MS 0.002
+static double g_nuke_flash; // the opacity, 0 = hidden
+
+void hud_ui_nuke_flash(void) {
+    const HtmlElem el = html_ui_available() ? html_dom_by_id("imgFlash") : 0;
+    if (!el) return;
+    html_dom_set_style(el, "background-image", "");
+    html_dom_set_style(el, "opacity", "1");
+    html_dom_set_display(el, "block");
+    g_nuke_flash = 1.0;
+}
+
+void hud_ui_nuke_flash_step(const float delta) {
+    if (g_nuke_flash <= 0.0) return;
+    g_nuke_flash -= (double) delta * 1000.0 * NUKE_FLASH_FADE_PER_MS;
+    const HtmlElem el = html_ui_available() ? html_dom_by_id("imgFlash") : 0;
+    if (!el) return;
+    if (g_nuke_flash <= 0.0) {
+        g_nuke_flash = 0.0;
+        html_dom_set_style(el, "opacity", "0");
+        html_dom_set_display(el, "none");
+        return;
+    }
+    char value[16];
+    snprintf(value, sizeof(value), "%.3f", g_nuke_flash);
+    html_dom_set_style(el, "opacity", value);
+}
+
 static void hud_feed_step(const double now_ms) {
     HudUi *ui = &g_hud_ui;
     double dt = ui->feed_last_ms >= 0.0 ? now_ms - ui->feed_last_ms : 0.0;
@@ -1699,7 +1733,7 @@ void hud_ui_add_killfeed(Client *client, const char *killer, const char *victim,
     const char *you = hud_my_name(client);
     const int killer_is_you = killer && you[0] && strcmp(killer, you) == 0;
     const int victim_is_you = victim && you[0] && strcmp(victim, you) == 0;
-    hud_ui_add_killfeed_ex(client, killer, killer_is_you, victim, victim_is_you, weapon_icon, is_headshot, 0.0);
+    hud_ui_add_killfeed_ex(client, killer, killer_is_you, victim, victim_is_you, weapon_icon, is_headshot, -1, 0.0);
 }
 
 // Old Scoreboard (oldScoreboard -> switchLeaderboard(0), leaderType 0): gE() writes kill
@@ -1759,13 +1793,13 @@ static void hud_feed_insert(const int chat, const char *html, double age_ms) {
 static void hud_h2h_count(const char *killer, int killer_is_you, const char *victim, int victim_is_you);
 
 void hud_ui_add_killfeed_ex(Client *client, const char *killer, const int killer_is_you, const char *victim, const int victim_is_you,
-                            const char *weapon_icon, const int is_headshot, const double age_ms) {
+                            const char *weapon_icon, const int is_headshot, const int streak, const double age_ms) {
     (void) client;
     hud_h2h_count(killer, killer_is_you, victim, victim_is_you); // player.killedBy (death screen)
     if (!client_render_settings()->show_kills) return; // SETTINGS.tmp.showKills
     const int chat = hud_feed_in_chat();
     char html[1024];
-    hud_feed_row_html(chat, killer, killer_is_you, victim ? victim : "", victim_is_you, weapon_icon, is_headshot, html, sizeof(html));
+    hud_feed_row_html(chat, killer, killer_is_you, victim ? victim : "", victim_is_you, weapon_icon, is_headshot, streak, html, sizeof(html));
     hud_feed_insert(chat, html, age_ms);
 }
 

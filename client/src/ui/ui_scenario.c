@@ -752,7 +752,8 @@ static void apply_timed(Client *client, const double capture_ms) {
             const char *icon = obj_str(row, "weaponIcon");
             hud_ui_add_killfeed_ex(client, obj_str(row, "killer"), (int) obj_num(row, "killerIsYou", 0),
                                    obj_str(row, "victim"), (int) obj_num(row, "victimIsYou", 0),
-                                   icon, (int) obj_num(row, "headshot", 0), obj_num(row, "age_ms", 0.0) - ahead);
+                                   icon, (int) obj_num(row, "headshot", 0), (int) obj_num(row, "streak", -1), // stk: a Nuke kill's icon
+                                   obj_num(row, "age_ms", 0.0) - ahead);
         }
     }
     const cJSON *hit = st("hit");

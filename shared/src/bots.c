@@ -866,6 +866,10 @@ static int bot_spawn(Game *game, GameBot *bot) {
         if (!p) return 0;
         p->uid = bot->uid;
         p->is_bot = 1;
+        // v7.1.4 NextBots keep player.js streakIndexs = [] (handleEnter is the only place that
+        // sets them): no streak is ever earned, maxPossibleStreak 0
+        static const int no_streaks[STREAK_SLOTS] = {-1, -1, -1};
+        player_set_streak_indexes(p, no_streaks);
         snprintf(p->name, sizeof(p->name), "%s", bot->name);
         const GameModeConfig *mode = game->mode ? &game->mode->config : NULL;
         p->team = mode && mode->teams && bot->team >= 1 && bot->team <= 2 ? bot->team : 0; // validTeam

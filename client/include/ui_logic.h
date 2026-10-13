@@ -310,8 +310,9 @@ void hud_ui_add_chat_channel(const char *name, const char *msg, const char *colo
 void hud_ui_clear_chat(void);                    // empty #chatList, no join lines seeded
 // hud_ui_add_killfeed with explicit "You" flags and the row's age (into its 4 s life). A NULL
 // killer (not "You") is a self-kill: weapon + victim only. Old Scoreboard puts the row in #chatList.
+// `streak` >= 0: a streak kill (v7 info.stk, the Nuke's): its img/streaks icon replaces the weapon's.
 void hud_ui_add_killfeed_ex(Client*, const char *killer, int killer_is_you, const char *victim, int victim_is_you,
-                            const char *weapon_icon, int is_headshot, double age_ms);
+                            const char *weapon_icon, int is_headshot, int streak, double age_ms);
 void hud_ui_hit_elapsed(Client*, int kill, double elapsed_ms); // hud_ui_hit `elapsed_ms` ago
 
 // Scenario overrides (NULL clears): the `state.hud` payload replaces the values the HUD
@@ -613,6 +614,8 @@ void hud_popups_set_comp(int comp);              // Game.isComp: io_addMedal sho
 // #ammoMax / #reloadMsg, #roundMessage. Every frame after client_hud_html_tick().
 void hud_zombies_tick(Client*);
 // END hud_popups block
+void hud_ui_nuke_flash(void); // io_nukeUpdate(1): the white #imgFlash, fading out over 500 ms
+void hud_ui_nuke_flash_step(float delta); // the game loop's fade (gameTimeDiff, seconds here)
 void hud_ui_kill_streak(Client*, int uid, int streak); // killStreakMessage ("kst"): "<who> on a N Kill Streak" chat line
 // KrunkScript game.ui hideDefault() (v7): hides #gameUIHider and #fullMenHider (0 = shows them
 // again). #customGUIHolder follows #inGameUI's visibility and its children are the script's.

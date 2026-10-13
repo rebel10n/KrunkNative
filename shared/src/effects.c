@@ -481,10 +481,14 @@ static void streak_send(Player *player, const int streak) {
     game_send(player->game, player->uid, NET_PACKET_STREAK, &packet, sizeof(packet));
 }
 
-// players.addStreak: reqAccount streaks need an account (the offline sandbox counts as one,
-// decisions.md), noCustoms ones (the Airdrop) are off in custom games and the sandbox.
+// players.addStreak: `(!noCustoms || !isCustom) && (isSandbox || !reqAccount || player.account)`.
+// noCustoms streaks (the Airdrop) are off in custom games and the sandbox. reqAccount (the Nuke)
+// never refuses a player in v7.1.4: its server gives every player an Account object, guests
+// included (server/index.ts handleEnter: `account || createGuestAccount(...)`, NextBots
+// createAccount), and the sandbox passes isSandbox. KN's has_account means a backend account
+// (guests 0), so gating on it here kept every guest on a dedicated server from ever earning the
+// Nuke: 25 kills, no tray icon, and the streak key did nothing.
 static void streak_add(Player *player, const int streak) {
-    if (g_streaks[streak].req_account && !player->has_account) return;
     if (g_streaks[streak].no_customs && game_config_is_custom(player->game)) return; // isCustom (WP-E, WP-H)
     if (player->streaks_owned[streak] < 255) player->streaks_owned[streak]++;
     streak_send(player, streak);

@@ -759,7 +759,7 @@ void game_tick_world(Game *game, const float now, const float delta, const float
                     if (!player->active || player == game->nuke_player || (player->team && game->nuke_player->team == player->team) || player->god_mode) continue;
 
                     PlayerKillInfo kill_info = {
-                        .streak = 0,
+                        .streak = STREAK_NUKE + 1, // {stk: 0}: the kill feed's streak icon
                         .weapon_id = -1,
                     };
 
@@ -776,6 +776,8 @@ void game_tick_world(Game *game, const float now, const float delta, const float
                     medals.medals[0].score = nuke_reward;
                     medals.kills = (int32_t) game->nuke_player->kills;
                     game_send(game, game->nuke_player->uid, NET_PACKET_KILL_MEDALS, &medals, sizeof(medals));
+                    const NetHitPacket hit = {.target_uid = -1}; // send("4"): the hit marker and hit_0, no damage number
+                    game_send(game, game->nuke_player->uid, NET_PACKET_HIT, &hit, sizeof(hit));
                     player_score(game->nuke_player, nuke_reward, 1);
                 }
                 // v7 streaks.js: findTriggers("onNukeEnd", nukePlayer) in custom games; KN fires it on

@@ -215,8 +215,10 @@ static int effect_max(const Game *game, const int effect) {
 // airDropPackages[i].claim
 static void package_claim(Game *game, AirDrop *d, Player *claimer) {
     const AirDropPackage *p = &g_airdrop_packages[d->index];
-    if (p->streak >= 0) { // streaks[s].activate (account needed; the offline sandbox never gets here)
-        if (!claimer->has_account || !claimer->active) return;
+    if (p->streak >= 0) { // streaks[s].activate; the offline sandbox never gets here
+        // `if (!player || !player.account) return false`: every v7.1.4 server player has an
+        // account object, guests too (effects.c streak_add), so only a dead claimer is refused
+        if (!claimer->active) return;
         switch (p->streak) {
             case STREAK_NUKE: game_start_nuke(game, claimer); break;
             case STREAK_JUGGERNAUT: if (!player_has_equipment(claimer)) player_set_juggernaut(claimer, 1); break;

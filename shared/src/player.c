@@ -2732,7 +2732,7 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
         .weapon_index = weapon_index,
         .headshot = (uint8_t) (kill_info && kill_info->headshot),
         .wallbang = (uint8_t) (kill_info && kill_info->wallbang),
-        .fists = (uint8_t) (kill_info && kill_info->fists),
+        .fists = (uint8_t) ((kill_info && kill_info->fists ? NET_KILL_FISTS : 0) | (kill_info && kill_info->streak == STREAK_NUKE + 1 ? NET_KILL_NUKE : 0)),
         .victim_deaths = (int32_t) player->deaths,
         .killer_kills = killer ? (int32_t) killer->kills : 0,
         .killer_class = killer ? killer->class_index : -1,

@@ -851,7 +851,7 @@ typedef struct {
     const char *name;
     int slot;              // the loadout slot it can be picked in
     int kills;             // realKillStreak needed
-    unsigned char req_account:1; // reqAccount: guests can't earn it (sandbox and offline can)
+    unsigned char req_account:1; // reqAccount: needs player.account, which every v7.1.4 server player has (effects.c streak_add)
     unsigned char no_customs:1;  // noCustoms: not in custom games
     unsigned char dev_only:1;    // devOnly
 } StreakConfig;
@@ -1440,7 +1440,7 @@ typedef struct Player_t {
 } Player;
 
 typedef struct {
-    int streak;
+    int streak;         // v7 info.stk + 1 (STREAK_NUKE + 1: a Nuke kill), 0 = not a streak kill
     int weapon_id;      // index into Game.weapons, -1 = none (fall/nuke)
     unsigned char headshot:1;
     unsigned char wallbang:1;
@@ -2317,7 +2317,10 @@ NetHelloPacket net_hello_make(void); // this build's HELLO: protocol major.minor
 // canSlideT, the exact slide ms). A 1.3.0 peer checks exact sizes and drops those, so they only go
 // to peers net_peer_has_wpc accepts; every reader takes the shorter and longer forms (prefix read).
 // A missing patch byte (2-byte HELLO) reads as 0.
-#define NET_PROTOCOL_PATCH 1
+// Patch 2: NetKillPacket.fists carries NET_KILL_NUKE; servers clear it for older peers, which read
+// any non-zero fists as a fists kill.
+#define NET_PROTOCOL_PATCH 2
+#define NET_PROTOCOL_PATCH_KILL_NUKE 2
 int net_peer_has_wpc(int minor, int patch); // the peer's HELLO / INIT minor.patch (same major) takes WP-C sizes
 
 // Packet id blocks of the v7.1.4 upgrade (doc/v7/decisions.md "Packet id blocks", map-logic.md
@@ -2518,13 +2521,16 @@ typedef struct {
     int32_t weapon_index;  // Game.weapons index, -1 none
     uint8_t headshot;
     uint8_t wallbang;
-    uint8_t fists;
+    uint8_t fists;         // NET_KILL_FISTS (Krunker fs) | NET_KILL_NUKE (patch 2 peers only, net.c strips it for older ones)
     int32_t victim_deaths;
     int32_t killer_kills;
     int32_t killer_class;  // kill card icon
     int32_t score;         // kill reward the killer earned (kill card "+N"), 0 none
     float respawn_delay;   // seconds before the victim may respawn (config.deathDelay)
 } NetKillPacket;
+_Static_assert(sizeof(NetKillPacket) == 35, "NetKillPacket: older peers check this exact size");
+#define NET_KILL_FISTS 0x01 // NetKillPacket.fists bit 0: melee without the knife (Krunker fs)
+#define NET_KILL_NUKE 0x02  // bit 1: a Nuke kill, v7 info {stk: 0} (the kill feed's img/streaks/0.png)
 
 typedef struct {
     int32_t target_uid;
