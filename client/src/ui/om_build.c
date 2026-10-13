@@ -4,8 +4,11 @@
 // object_manager_edit); this file only aims, drags and sends OM_ACTION_EDIT, and draws the beam,
 // the selection box and the handles (client/src/om_gizmo.c).
 //
-// Physics Gun (WEAPON_ID_PHYS_GUN in hand): hold fire on a spawned object (your own, any for devs
-// and the host) to grab it; it follows the crosshair at its grab distance, the wheel changes the
+// Every object the crosshair is on can be taken (object_manager_pick: jump pads, teleporters,
+// ladders, ramps, triggers, pickups, zones, planes as well as solid ones): spawned objects (your
+// own, any for devs and the host) and, for devs and the host (OM_CAP_MAP), the map's own objects.
+//
+// Physics Gun (WEAPON_ID_PHYS_GUN in hand): hold fire on an object to grab it; it follows the crosshair at its grab distance, the wheel changes the
 // distance (OM_PHYSGUN_DIST_*), the rotate key (E, cont_omRotateKey) held turns it with the mouse
 // instead of the view, a quarter turn per 90 degrees of mouse (Krunker's AABB collision only
 // follows quarter turns). Releasing fire leaves it where it is (frozen), or with "Drop" on lets it
@@ -14,8 +17,9 @@
 // btools (the Tool Gun with Move or Resize, the Tools pane): the pointer stays locked and the
 // crosshair is the cursor. Fire on a spawned object selects it (a yellow box); Move shows X / Y /
 // Z arrows, Resize a handle on each face. Fire held on a handle drags it: the handle follows the
-// point of its axis nearest to the crosshair ray, the change snaps to the grid step (1 / 2 / 5 /
-// 10 units, the Tools pane), Resize keeps the opposite face (crouch held: both faces move) and
+// point of its axis nearest to the crosshair ray, the change snaps to the grid step (any step from
+// OB_SNAP_MIN to OB_SNAP_MAX units or off: the Tools pane's field, the snap keys PageDown / PageUp, the
+// console's `tool_snap`), Resize keeps the opposite face (crouch held: both faces move) and
 // OM_EDIT_SIZE_MIN. Fire on nothing clears the selection.
 //
 // Edits go out at most every OB_SEND_SECONDS while a grab or drag changes the pose, and once at
@@ -34,14 +38,18 @@
 #include <string.h>
 
 #define OB_SEND_SECONDS 0.1   // edits while dragging: 10 / s (the server takes one per OM_EDIT_INTERVAL)
-#define OB_SNAP_STORAGE "kn_omSnap"
+#define OB_SNAP_STORAGE "kn_omSnapStep" // the step in units, "0" off (kn_omSnap held the old 1 / 2 / 5 / 10 index)
+#define OB_SNAP_OLD_STORAGE "kn_omSnap"
 #define OB_DROP_STORAGE "kn_omPhysDrop"
 #define OB_WHEEL_STEP 10.0f   // grab distance per wheel step (units)
 #define OB_ARROW 7.0f         // a Move arrow reaches this far past the face
 #define OB_HANDLE 2.6f        // a handle's box (units)
 #define OB_HANDLES_MAX 6
 
-static const float k_snaps[OB_SNAPS] = {1.0f, 2.0f, 5.0f, 10.0f};
+static const float k_snaps[OB_SNAPS] = {1.0f, 2.0f, 5.0f, 10.0f}; // the old indices
+// The snap keys step through these (and the field takes any value between)
+static const float k_snap_steps[] = {0.0f, 0.1f, 0.25f, 0.5f, 1.0f, 2.0f, 2.5f, 5.0f, 10.0f, 20.0f, 25.0f, 50.0f, 100.0f};
+#define OB_SNAP_STEP_COUNT ((int) (sizeof(k_snap_steps) / sizeof(k_snap_steps[0])))
 
 typedef struct {
     int axis;  // 0 x, 1 y, 2 z
@@ -51,7 +59,7 @@ typedef struct {
 
 static struct {
     int loaded;
-    int snap_index;
+    float snap;           // the grid step (units), 0 off
     int drop;             // the Physics Gun's release: 0 freeze in place, 1 down onto the surface below
     int was_shoot;
     // the Physics Gun
@@ -76,26 +84,51 @@ static struct {
 static void ob_load(void) {
     if (g_ob.loaded) return;
     g_ob.loaded = 1;
-    g_ob.snap_index = 2; // 5 units
-    char value[8];
-    if (html_storage_get(OB_SNAP_STORAGE, value, sizeof(value)) >= 0 && atoi(value) >= 0 && atoi(value) < OB_SNAPS) g_ob.snap_index = atoi(value);
+    g_ob.snap = 5.0f;
+    char value[24];
+    if (html_storage_get(OB_SNAP_STORAGE, value, sizeof(value)) >= 0) {
+        const float v = (float) atof(value);
+        if (isfinite(v)) g_ob.snap = v <= 0.0f ? 0.0f : fminf(fmaxf(v, OB_SNAP_MIN), OB_SNAP_MAX);
+    } else if (html_storage_get(OB_SNAP_OLD_STORAGE, value, sizeof(value)) >= 0 && atoi(value) >= 0 && atoi(value) < OB_SNAPS) {
+        g_ob.snap = k_snaps[atoi(value)]; // the old 1 / 2 / 5 / 10 pick carries over
+    }
     if (html_storage_get(OB_DROP_STORAGE, value, sizeof(value)) >= 0) g_ob.drop = atoi(value) != 0;
 }
 
-int om_build_snap_index(void) {
+float om_build_snap(void) {
     ob_load();
-    return g_ob.snap_index;
+    return g_ob.snap;
 }
 
-float om_build_snap(void) { return k_snaps[om_build_snap_index()]; }
-
-void om_build_set_snap(const int index) {
+float om_build_set_snap(const float step) {
     ob_load();
-    if (index < 0 || index >= OB_SNAPS) return;
-    g_ob.snap_index = index;
-    char value[8];
-    snprintf(value, sizeof(value), "%d", index);
+    if (!isfinite(step)) return g_ob.snap;
+    g_ob.snap = step <= 0.0f ? 0.0f : fminf(fmaxf(roundf(step * 1000.0f) / 1000.0f, OB_SNAP_MIN), OB_SNAP_MAX);
+    char value[24];
+    snprintf(value, sizeof(value), "%g", g_ob.snap);
     html_storage_set(OB_SNAP_STORAGE, value);
+    return g_ob.snap;
+}
+
+// The snap keys: the next common step up (dir 1) or down (-1) from the current one
+float om_build_step_snap(const int dir) {
+    const float now = om_build_snap();
+    if (dir > 0) {
+        for (int i = 0; i < OB_SNAP_STEP_COUNT; i++) {
+            if (k_snap_steps[i] > now + 1e-4f) return om_build_set_snap(k_snap_steps[i]);
+        }
+        return now;
+    }
+    for (int i = OB_SNAP_STEP_COUNT; i-- > 0;) {
+        if (k_snap_steps[i] < now - 1e-4f) return om_build_set_snap(k_snap_steps[i]);
+    }
+    return now;
+}
+
+void om_build_snap_text(char *out, const size_t size) {
+    const float s = om_build_snap();
+    if (s <= 0.0f) snprintf(out, size, "off");
+    else snprintf(out, size, "%g", s);
 }
 
 int om_build_drop(void) {
@@ -140,11 +173,13 @@ static int ob_axis_param(const vec3 eye, const vec3 dir, const vec3 origin, cons
     return 1;
 }
 
-// The spawned object the crosshair is on (editable), -1 none; `point` where the ray met it
+// The object the crosshair is on that this player may edit, -1 none; `point` where the ray met
+// it. The map's own objects only with OM_CAP_MAP (the authority checks again).
 static int ob_pick(Client *client, const Player *me, vec3 *point) {
     ObjectManagerAim aim;
-    if (!object_manager_aim(&client->game, me, me->direction.x, me->direction.y, &aim)) return -1;
+    if (!object_manager_pick(&client->game, me, me->direction.x, me->direction.y, &aim)) return -1;
     if (aim.object < 0 || !object_manager_editable(&client->game, aim.object)) return -1;
+    if (object_manager_is_map_object(&client->game, aim.object) && !(object_manager_ui_caps() & OM_CAP_MAP)) return -1;
     *point = aim.point;
     return aim.object;
 }
@@ -153,7 +188,7 @@ static int ob_handles(const int tool, const ObjectManagerPose *p, ObHandle *out)
     const vec3 c = ob_centre(p);
     int n = 0;
     for (int axis = 0; axis < 3; axis++) {
-        const float half = v_get(p->size, axis) * 0.5f;
+        const float half = fmaxf(v_get(p->size, axis), 1.0f) * 0.5f; // (flat things: pads, planes)
         if (tool == OM_TOOL_MOVE) {
             out[n++] = (ObHandle) {axis, 1, v_add(c, v_scale(v_axis(axis), half + OB_ARROW))};
         } else {

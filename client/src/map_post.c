@@ -8,6 +8,7 @@
 // handles, the spin / distance lists and the leaderboard meshes.
 #include <gl.h>
 #include <map_post.h>
+#include <shadow.h> // map edits: the casters follow the edited objects
 #include <ambient.h>
 #include <user_asset.h>
 #include <terrain_mesh.h>
@@ -513,12 +514,23 @@ static SpawnedMesh *post_spawned_find(const Object *object) {
     return NULL;
 }
 
+// Object Manager map edits changed what stands in the map: the shadow casters and the light
+// objects are rebuilt on the next frame (map_post_frame)
+static int g_map_edits_dirty;
+
+typedef struct {
+    const Object *object; // a detached map object
+    int visible;          // its mesh's visibility before
+} DetachedMesh;
+static DetachedMesh *g_detached;
+static size_t g_detached_count;
+
 static void post_spawned_frame(Scene *scene, const Map *map) {
     if (!scene || !map) return;
     g_spawned_scene = scene;
     for (size_t i = 0; i < map->object_count; i++) {
         const Object *object = map->objects[i];
-        if (!object->spawned) continue;
+        if (!object->spawned && !object->map_edit) continue; // (map_edit: a map object's stand-in)
         SpawnedMesh *entry = post_spawned_find(object);
         if (!entry) {
             SpawnedMesh *grown = realloc(g_spawned, (g_spawned_count + 1) * sizeof(SpawnedMesh));
@@ -526,6 +538,7 @@ static void post_spawned_frame(Scene *scene, const Map *map) {
             g_spawned = grown;
             entry = &g_spawned[g_spawned_count++];
             *entry = (SpawnedMesh) {object, 0};
+            if (object->map_edit) g_map_edits_dirty = 1;
             if (object->mesh) {
                 scene_add_mesh(scene, object->mesh);
                 entry->in_scene = 1;
@@ -543,6 +556,7 @@ static void post_spawned_frame(Scene *scene, const Map *map) {
 }
 
 void map_post_object_freed(const Object *object) {
+    if (object->map_edit) g_map_edits_dirty = 1;
     for (size_t i = 0; i < g_spawned_count; i++) {
         if (g_spawned[i].object != object) continue;
         if (g_spawned[i].in_scene && g_spawned_scene && object->mesh) scene_remove_mesh(g_spawned_scene, object->mesh);
@@ -560,13 +574,61 @@ void map_post_object_freed(const Object *object) {
     }
 }
 
+static void post_pickup_forget(const Object *object) {
+    for (size_t i = 0; i < g_pickup_count; i++) {
+        if (g_pickups[i].object != object) continue;
+        if (g_pickups[i].mesh) {
+            if (g_pickup_scene) scene_remove_mesh(g_pickup_scene, g_pickups[i].mesh);
+            mesh_fini(g_pickups[i].mesh);
+        }
+        g_pickups[i] = g_pickups[--g_pickup_count];
+        return;
+    }
+}
+
+void map_post_object_detach(const Object *object, const int uid) {
+    (void) uid;
+    g_map_edits_dirty = 1;
+    Mesh *mesh = object->mesh;
+    DetachedMesh *grown = realloc(g_detached, (g_detached_count + 1) * sizeof(DetachedMesh));
+    if (grown) {
+        g_detached = grown;
+        g_detached[g_detached_count++] = (DetachedMesh) {object, mesh ? mesh->visible : 0};
+    }
+    if (mesh) mesh->visible = 0;
+    for (size_t i = 0; mesh && i < g_distance_count; i++) { // a sign's render distance would show it again
+        if (g_distance_meshes[i].mesh == mesh) g_distance_meshes[i].visible = 0;
+    }
+    post_pickup_forget(object); // the stand-in's pickup takes the uid's model
+}
+
+void map_post_object_attach(const Object *object, const int uid) {
+    g_map_edits_dirty = 1;
+    for (size_t i = 0; i < g_detached_count; i++) {
+        if (g_detached[i].object != object) continue;
+        if (object->mesh) ((Mesh *) object->mesh)->visible = g_detached[i].visible;
+        for (size_t k = 0; object->mesh && k < g_distance_count; k++) {
+            if (g_distance_meshes[k].mesh == object->mesh) g_distance_meshes[k].visible = g_detached[i].visible;
+        }
+        g_detached[i] = g_detached[--g_detached_count];
+        break;
+    }
+    if (object->prefab == PREFAB_WEAPON_PICKUP && g_pickup_scene) {
+        PickupMesh *pickups = realloc(g_pickups, (g_pickup_count + 1) * sizeof(PickupMesh));
+        if (pickups) {
+            g_pickups = pickups;
+            g_pickups[g_pickup_count++] = (PickupMesh) {uid, object, -2, NULL};
+        }
+    }
+}
+
 // Spawned objects that exist when a map loads were added by client_load_map: track them as in the
 // scene already. map_post_unload only forgets them (client_unload_map removes every object mesh).
 static void post_spawned_load(Scene *scene, const Map *map) {
     g_spawned_scene = scene;
     for (size_t i = 0; map && i < map->object_count; i++) {
         const Object *object = map->objects[i];
-        if (!object->spawned) continue;
+        if (!object->spawned && !object->map_edit) continue;
         SpawnedMesh *grown = realloc(g_spawned, (g_spawned_count + 1) * sizeof(SpawnedMesh));
         if (!grown) break;
         g_spawned = grown;
@@ -579,6 +641,10 @@ static void post_spawned_unload(void) {
     g_spawned = NULL;
     g_spawned_count = 0;
     g_spawned_scene = NULL;
+    free(g_detached); // (client_unload_map restored the map edits first)
+    g_detached = NULL;
+    g_detached_count = 0;
+    g_map_edits_dirty = 0;
 }
 
 // "ana" on a map object (world_events.c): Game.playAnim(obj, clip, 1) on its GLTF user asset
@@ -592,6 +658,12 @@ void map_post_frame(Scene *scene, const Game *game, const Camera *camera, const 
     user_asset_frame();
     post_builds_frame(scene, game ? game->map : NULL);
     post_spawned_frame(scene, game ? game->map : NULL); // Object Manager objects (before the pickups: they add theirs)
+    if (g_map_edits_dirty && game && game->map) { // map edits: the casters and the light objects where the objects are now
+        g_map_edits_dirty = 0;
+        shadow_load_map(game->map);
+        post_lights_unload();
+        post_lights(game->map);
+    }
     post_pickups_frame(game);
     zone_mesh_frame(game, delta_ms);
 

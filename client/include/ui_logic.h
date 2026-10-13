@@ -373,7 +373,9 @@ enum {
     // KrunkNative addition: the Physics Gun's rotate key (E, cont_omRotateKey): held while carrying,
     // the mouse turns the object instead of the view (client/src/ui/om_build.c)
     UI_CONTROL_OM_ROTATE = 44,
-    UI_CONTROL_COUNT = 45
+    // KrunkNative additions: the Tool Gun's grid step down / up (PageDown / PageUp, cont_omSnapDownKey / cont_omSnapUpKey)
+    UI_CONTROL_OM_SNAP_DOWN = 45, UI_CONTROL_OM_SNAP_UP = 46,
+    UI_CONTROL_COUNT = 47
 };
 
 // Input-related settings ClientSettings does not carry (written by client_apply_setting).
@@ -490,15 +492,21 @@ void object_manager_ui_key(Client*, int action); // the Undo / Remove binds in g
 void object_manager_ui_chat_sent(const char *text); // a chat / console line went out: `/give <weapon>` equips it once given
 void ui_controls_select_slot(int slot);          // ui_controls.c: equip loadout slot `slot` with the next input frame
 int  object_manager_ui_tool(void);               // the Tool Gun's tool (ObjectManagerTool) picked in the Tools pane
-void object_manager_ui_pick_physgun(void);       // the Tools pane's Physics Gun row: in hand (added first when not carried)
+void object_manager_ui_pick_physgun(void);       // the Tools pane's Physics Gun tile: in hand (added first when not carried)
+int  object_manager_ui_caps(void);
+int  ui_controls_take_slot(void);                // ui_controls.c: the pending slot pick (Input.select_slot) for a frame the controls do not fill               // OM_CAP_* of this server's last answer, 0 none yet
+void object_manager_ui_snap_changed(void);       // the grid step changed (keys, console): the pane's field and a status line
 // KrunkNative Physics Gun and btools (client/src/ui/om_build.c)
-#define OB_SNAPS 4                               // the btools' grid steps: 1 / 2 / 5 / 10 units
+#define OB_SNAPS 4                               // the old grid steps (1 / 2 / 5 / 10 units): kn_omSnap's index
+#define OB_SNAP_MIN 0.1f                         // the btools' grid step: any value in OB_SNAP_MIN..OB_SNAP_MAX, or 0 (off)
+#define OB_SNAP_MAX 100.0f
 void om_build_input(Client*, Input*, float prev_pitch, float prev_yaw, int sampled); // main.c: per frame, the pointer locked
 void om_build_render(Client*);                   // main.c: after the world (the beam, the box, the handles)
 void om_build_fini(void);
-int  om_build_snap_index(void);
-float om_build_snap(void);
-void om_build_set_snap(int index);
+float om_build_snap(void);                       // the grid step (units), 0 off (kn_omSnapStep)
+float om_build_set_snap(float step);             // clamped to OB_SNAP_MIN..OB_SNAP_MAX (<= 0: off); the step set
+float om_build_step_snap(int dir);               // the snap keys: the next common step up (1) / down (-1)
+void om_build_snap_text(char *out, size_t size); // "5", "0.25", "off"
 int  om_build_drop(void);                        // the Physics Gun lets go: 0 frozen in place, 1 down onto the surface
 void om_build_set_drop(int on);
 int  om_build_grabbing(void);

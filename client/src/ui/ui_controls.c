@@ -231,6 +231,10 @@ static const V7Bind V7_BINDS[] = {
     {"omUndo", -1, "omUndoKey", 85, -1, UI_CONTROL_OM_UNDO},
     {"omRemove", -1, "omRemoveKey", 46, -1, UI_CONTROL_OM_REMOVE},
     {"omRotate", -1, "omRotateKey", 69, -1, UI_CONTROL_OM_ROTATE},
+    // KrunkNative additions: the Tool Gun's grid step down / up (PageDown 34 / PageUp 33: v7's ] is aim's
+    // alternate key), in game with a KN building gun in hand
+    {"omSnapDown", -1, "omSnapDownKey", 34, -1, UI_CONTROL_OM_SNAP_DOWN},
+    {"omSnapUp", -1, "omSnapUpKey", 33, -1, UI_CONTROL_OM_SNAP_UP},
     {"streak", 0, "18", 49, -1, UI_CONTROL_STREAK0},
     {"streak", 1, "19", 50, -1, UI_CONTROL_STREAK0 + 1},
     {"streak", 2, "20", 51, -1, UI_CONTROL_STREAK0 + 2},
@@ -296,6 +300,8 @@ static const ControlRow TAB_GENERAL[] = {
     {"Object Manager Undo", "omUndo", -1, 0, "Sandbox"},
     {"Object Manager Remove", "omRemove", -1, 0, "Sandbox"},
     {"Physics Gun Rotate (held)", "omRotate", -1, 0, "Sandbox"},
+    {"Tool Gun Snap Down", "omSnapDown", -1, 0, "Sandbox"},
+    {"Tool Gun Snap Up", "omSnapUp", -1, 0, "Sandbox"},
 };
 static const ControlRow TAB_CHAT[] = {
     {"Chat", "chat", -1, 0, "Interface & Audio"}, {"Voice", "voiceChat", -1, 0, "Interface & Audio"},
@@ -1207,6 +1213,11 @@ static void press_button(Client *client, const int code) {
     if (bind_is(UI_CONTROL_INSPECT, code)) player_inspect_weapon(me); // Game.players.wInspect(player)
     if (bind_is(UI_CONTROL_OM_UNDO, code)) object_manager_ui_key(client, OM_ACTION_UNDO);         // KrunkNative Object Manager
     if (bind_is(UI_CONTROL_OM_REMOVE, code)) object_manager_ui_key(client, OM_ACTION_REMOVE_AIM);
+    const Weapon *held = me && me->active ? me->weapon : NULL; // the snap keys: only with a KN building gun in hand
+    if (held && (held->kn_tool || held->kn_physgun) && (bind_is(UI_CONTROL_OM_SNAP_DOWN, code) || bind_is(UI_CONTROL_OM_SNAP_UP, code))) {
+        om_build_step_snap(bind_is(UI_CONTROL_OM_SNAP_UP, code) ? 1 : -1);
+        object_manager_ui_snap_changed();
+    }
     for (int i = 0; i < 5; i++) { // v7.1.4 streak loadout: slots 0-2 (callInStreak); 3-4 are v3 leftovers
         if (bind_is(UI_CONTROL_STREAK0 + i, code)) {
             if (i < STREAK_SLOTS) combat_call_in_streak(client, i);
@@ -1590,6 +1601,14 @@ void ui_controls_fill_input(Client *client, Input *input, const float dx, const 
 // KrunkNative Object Manager: equip loadout slot `slot` with the next input frame (-1 cancels).
 void ui_controls_select_slot(const int slot) {
     g_ctl.pending_slot = slot >= 0 && slot < 126 ? slot + 1 : 0;
+}
+
+// The pending slot pick for an input frame the controls do not fill (a window open over the
+// game: the Object Manager's gun tiles switch at once), 0 none
+int ui_controls_take_slot(void) {
+    const int slot = g_ctl.pending_slot;
+    g_ctl.pending_slot = 0;
+    return slot;
 }
 
 // After the input frame: didPressed, aba6 and the wheel "key" are one-frame events.

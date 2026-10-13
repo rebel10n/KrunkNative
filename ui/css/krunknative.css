@@ -441,8 +441,49 @@ img.knOmProp {
 #menuWindow.dark div.knOmTool span.knOmToolName {
   color: #fff; /* main.css * { color } would win on the span */
 }
-#menuWindow.dark div.knOmTool.knOmPhys {
-  margin-top: 6px;
+/* the Tool Gun / Physics Gun tiles: the weapons' own icons, the one in hand marked */
+#menuWindow.dark div.knOmGuns {
+  display: flex;
+  margin-bottom: 6px;
+}
+#menuWindow.dark div.knOmGun {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 0 2px;
+  padding: 3px 2px;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background-color: rgba(255, 255, 255, 0.07);
+  cursor: pointer;
+}
+#menuWindow.dark div.knOmGun:hover {
+  background-color: rgba(255, 255, 255, 0.14);
+}
+#menuWindow.dark div.knOmGun.knOmToolA {
+  border-color: var(--yellow);
+}
+#menuWindow.dark img.knOmGunIcon {
+  width: 64px;
+  height: 32px;
+  object-fit: contain;
+}
+#menuWindow.dark span.knOmGunName {
+  font-size: 12px;
+  color: #fff;
+  white-space: nowrap;
+}
+#menuWindow.dark input.knOmSnapBox {
+  width: 46px;
+  margin-left: 4px;
+  padding: 0 4px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 3px;
+  background-color: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-size: 13px;
+  text-align: right;
 }
 #menuWindow.dark div.knOmOpt {
   display: flex;

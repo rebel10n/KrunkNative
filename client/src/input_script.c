@@ -34,7 +34,7 @@
 //                                (a pickup at the crosshair)
 //   100 om tool 1                a Tools-pane pick (0 Deleter, 1 Duplicator, 2 Rotator, 3 Info, 4 Move,
 //                                5 Resize): sets the Tool Gun's tool and puts the Tool Gun in hand (fire it
-//                                with `mdown left`); `om physgun 0` the Physics Gun row, `om snap 0..3` /
+//                                with `mdown left`); `om physgun 0` the Physics Gun tile, `om snap 2.5` (the step, 0 off) /
 //                                `om release 0|1` the pane's Snap / Release, `om object 10` an Objects tile,
 //                                `om npc 1` an NPCs tile (1 the Ghost),
 //                                `om entity 14` an Entities tile (spawned at the crosshair floor point),
@@ -410,7 +410,10 @@ static void script_run(Client *client, const ScriptEvent *e) {
             else if (!strcmp(what, "object")) object_manager_ui_pick_entry(OM_TAB_OBJECTS, id);
             else if (!strcmp(what, "npc")) object_manager_ui_pick_entry(OM_TAB_NPCS, id);
             else if (!strcmp(what, "entity")) object_manager_ui_pick_entry(OM_TAB_ENTITIES, id);
-            else if (!strcmp(what, "snap")) om_build_set_snap(id);
+            else if (!strcmp(what, "snap")) { // the grid step in units (decimals too: `om snap 0.5`), 0 off
+                om_build_set_snap((float) atof(strstr(e->arg, what) + strlen(what)));
+                object_manager_ui_snap_changed();
+            }
             else if (!strcmp(what, "release")) om_build_set_drop(id);
             else if (!strcmp(what, "aim") && client->me) {
                 float pitch, yaw;

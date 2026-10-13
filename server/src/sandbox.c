@@ -8,6 +8,7 @@
 #include <knet.h>   // NET_LOOPBACK_FD_BASE, net_set_loopback_send
 #include <ks_server.h> // KrunkScript server host
 #include <bots.h>
+#include <object_manager.h> // object_manager_restore_map
 #include <ai.h>
 #include <modes.h>
 #include <game_config.h> // WP-E: embedded map config offline
@@ -306,6 +307,7 @@ void sandbox_stop(void) {
     game->player_count = 0;
     game_bots_free(game);
     game_ai_free(game); // the AI list and its data records (shared/src/ai.c)
+    object_manager_restore_map(game); // the map's own Objects back from the Object Manager's edits (map_fini frees them)
     if (game->map) map_fini(game->map);
     if (game->mode) mode_fini(game->mode);
     free(game->vote_kick);

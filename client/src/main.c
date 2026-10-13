@@ -14,6 +14,7 @@
 #include <input_script.h> // KRUNKNATIVE_INPUT_SCRIPT movement/feel test driver
 #include <frame_target.h>  // web: the frame draws offscreen, the canvas gets it whole
 #include <html_ui.h>
+#include <object_manager.h> // object_manager_restore_map (client_unload_map)
 #include <ui_logic.h> // keybinds, chat and input settings (client/src/ui/ui_controls.c), every build
 #include <console.h>   // developer console pointer hooks (client/src/ui/ui_console.c)
 #include <debug_capture.h>
@@ -883,6 +884,7 @@ void client_load_map(Client *client) {
 
 void client_unload_map(Client *client) {
     if (!client->game.map) return;
+    object_manager_restore_map(&client->game); // the Object Manager's map edits: the map's own objects (and meshes) back first
 
     shadow_unload_map();
     map_post_unload(client->scene);
@@ -1730,6 +1732,10 @@ static void client_tick_game(Client *client, const float now, const float frame_
             }
             // KrunkNative Object Manager: the Physics Gun / btools take fire, the wheel and the rotate key
             om_build_input(client, &input, om_prev_pitch, om_prev_yaw, input_sampled);
+        } else if (input_sampled) {
+            // a window over the game (the Object Manager's Tool Gun / Physics Gun tiles): the slot pick
+            // still goes out, so the gun is in hand at once and not only when the window closes
+            input.select_slot = (unsigned char) ui_controls_take_slot();
         }
         // Round over, v3.1.1 parity (index.js endGame / gameLoop): through the endAnim title the
         // controls stay enabled, so WASD/jump/shots/ADS still act locally in the shrinking slow

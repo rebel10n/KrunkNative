@@ -1,0 +1,37 @@
+{
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "window": 100,
+    "connected": true,
+    "ready": true,
+    "inGame": true,
+    "name": "Local User",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "windowActions": [
+      [
+        "knOmTab",
+        0
+      ],
+      [
+        "knOmSearch",
+        ""
+      ],
+      [
+        "knOmPhys"
+      ]
+    ]
+  },
+  "frames": 30,
+  "ref": "doc/ref/krunknative/kn-om-physgun.png",
+  "note": "KrunkNative Object Manager (window 100; a KN baseline): the Tools pane's Physics Gun tile (the weapon's icon) clicked, which added the Physics Gun and put it in hand at once through the offline sandbox server (the tile marked, the pane's line 'Physics Gun in hand: works on the map too')."
+}

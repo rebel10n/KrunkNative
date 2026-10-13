@@ -313,6 +313,7 @@ void ui_console_on_cheat(const int flag, const int on) {
 
 static const ConArg A_CMD[] = {{"cmd", ARG_STRING, 1}};
 static const ConArg A_TEXT[] = {{"text", ARG_STRING, 0}};
+static const ConArg A_SNAP[] = {{"units|off", ARG_STRING, 0}};
 static const ConArg A_UPDATE[] = {{"check|now|download", ARG_STRING, 0}};
 static const ConArg A_BIND[] = {{"key", ARG_STRING, 1}, {"command", ARG_STRING, 1}};
 static const ConArg A_KEY[] = {{"key", ARG_STRING, 0}};
@@ -823,6 +824,27 @@ static void cmd_echo(const int argc, char **argv, const char *rest) {
     append(text, COL_LOG);
 }
 
+// tool_snap [units|off]: the Tool Gun's / Physics Gun's grid step (the Object Manager's Snap field;
+// client-local, persisted as kn_omSnapStep). No argument: the current step. Not a player command:
+// no target selector.
+static void cmd_tool_snap(const int argc, char **argv, const char *rest) {
+    (void) rest;
+    char text[32];
+    if (argc >= 1 && argv[0][0]) {
+        const int off = !strcasecmp(argv[0], "off") || !strcasecmp(argv[0], "none");
+        char *end = NULL;
+        const double v = off ? 0.0 : strtod(argv[0], &end);
+        if (!off && (!end || *end || !isfinite(v) || v < 0.0)) {
+            appendf(COL_ERROR, "tool_snap: a step from %g to %g units, or off", (double) OB_SNAP_MIN, (double) OB_SNAP_MAX);
+            return;
+        }
+        om_build_set_snap((float) v);
+        object_manager_ui_snap_changed();
+    }
+    om_build_snap_text(text, sizeof(text));
+    appendf(COL_INFO, "tool_snap %s", text);
+}
+
 // editor: the loaded map (its raw JSON, so hub/custom/online maps work too) opens in the map editor
 // as an unsaved copy, through the same storage handoff as the editor's "Open in New Tab"
 // (editor.c open_start_projects: knEditorHandoff + editor.html?handoff=1).
@@ -1237,6 +1259,7 @@ static void register_commands(void) {
     register_local("echo", ARGS(A_TEXT), "print text to console", cmd_echo);
     register_local("print", ARGS(A_TEXT), "alias for echo", cmd_echo);
     register_local("editor", NO_ARGS, "open the current map in the map editor (an unsaved copy)", cmd_editor);
+    register_local("tool_snap", ARGS(A_SNAP), "the Tool Gun's grid step in units (0.1 to 100), or off", cmd_tool_snap);
     register_local("bind", ARGS(A_BIND), "bind a key to a command (session only)", cmd_bind);
     register_local("unbind", ARGS(A_KEY), "remove a key bind", cmd_unbind);
     register_local("alias", ARGS(A_ALIAS), "define a command alias", cmd_alias);

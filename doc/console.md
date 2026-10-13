@@ -59,6 +59,7 @@ silent (only the `] line` echo), as in the mod.
 | rot / rotation | `rotation: yaw=… pitch=… xDire=…` | same |
 | ping | overwritten by the server command | same (it is the server `/ping`) |
 | show_navmeshes [off] | v7.1.4: the nav mesh visualizer (below) | same (v7.1.4 command; v3.1.1 has none) |
+| tool_snap [units\|off] | – | Krunker Box Office: the Tool Gun's / Physics Gun's grid step (0.1 to 100 units, or off), the Object Manager's Snap field; no argument prints it. Client-local (stored as `kn_omSnapStep`), so no target selector |
 
 ## Server commands (`/cmd` in chat, or the console without the slash)
 
@@ -299,12 +300,14 @@ bind is needed.
 
 `give "physics gun"` and `give "tool gun"` hand out the Object Manager's building guns (the
 spawn right; doc/v7/decisions.md "Physics Gun", "Building tools"). They have no console commands
-of their own: the Physics Gun's rotate key is "Physics Gun Rotate (held)" (E) under Sandbox in
-Change Controls, and the btools' grid step and the Physics Gun's Release are rows of the Object
-Manager's Tools pane.
+of their own (`give physgun` / `give toolgun` work too): the Physics Gun's rotate key is "Physics Gun
+Rotate (held)" (E) under Sandbox in Change Controls, the grid step is the Tools pane's Snap field,
+PageDown / PageUp ("Tool Gun Snap Down / Up") or `tool_snap`, and the Physics Gun's Release is a
+row of the Tools pane. Devs and the host change the map's own objects with both guns too
+(doc/v7/decisions.md "Map edits").
 
-Tests: `server/tests/object_manager_test.c` (test_give_drop, test_public_refusals, test_edits) and
-`server/tests/object_manager_e2e.py` parts 4 and 5.
+Tests: `server/tests/object_manager_test.c` (test_give_drop, test_public_refusals, test_edits, test_map_edits) and
+`server/tests/object_manager_e2e.py` parts 4 to 6.
 
 Not chat commands, so not ported here: the `pnh`, `prmA`, `noclip`/`tp` packets,
 `clearLog`, and the `tmc` terminal message (map terminals; see the open items).

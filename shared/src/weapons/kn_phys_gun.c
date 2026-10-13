@@ -2,7 +2,7 @@
 
 // KrunkNative Physics Gun (WEAPON_ID_PHYS_GUN), Garry's Mod's physgun: not a Krunker v7.1.4 weapon
 // (doc/v7/decisions.md "Physics Gun"). The Object Manager's Tools pane equips it. Holding fire grabs
-// the spawned object at the crosshair and carries it at its grab distance (the wheel changes it,
+// the object at the crosshair (spawned ones; the map's own too for devs and the host) and carries it at its grab distance (the wheel changes it,
 // the rotate key turns it); the client sends the poses as OM_ACTION_EDIT (client/src/ui/om_build.c,
 // shared/src/object_manager.c). It never shoots (player.c skips the fire path: kn_physgun). The
 // Zapper's model, sound and feel (weapon 24, shared/src/weapons/v7_zapper.c) with a tint.

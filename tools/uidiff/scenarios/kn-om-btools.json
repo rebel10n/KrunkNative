@@ -31,8 +31,8 @@
         4
       ],
       [
-        "knOmSnap",
-        3
+        "knOmSnapSet",
+        2.5
       ],
       [
         "knOmPhysDrop",
@@ -42,5 +42,5 @@
   },
   "frames": 30,
   "ref": "doc/ref/krunknative/kn-om-btools.png",
-  "note": "KrunkNative Object Manager (window 100; a KN baseline): the Tools pane with the btools' Move picked (the Tool Gun equipped), Snap 10 and the Physics Gun's Release set to Drop."
+  "note": "KrunkNative Object Manager (window 100; a KN baseline): the Tools pane with the btools' Move picked (the Tool Gun tile marked: in hand at once), a free Snap step of 2.5 typed into the field and the Physics Gun's Release set to Drop."
 }

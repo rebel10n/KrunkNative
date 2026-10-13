@@ -15,9 +15,13 @@
 // OM_ACTION_TOOL request with that tool. The HUD shows "TOOL: <NAME>" beside the ammo (#knToolHud)
 // while it is in hand. The tool is kept in storage (kn_omTool).
 //
-// Building (client/src/ui/om_build.c): the pane's Physics Gun row equips the Physics Gun; Move and
-// Resize are Tool Gun tools driven by handles (no OM_ACTION_TOOL shots); the Snap row picks the
-// btools' grid step, the Release row the Physics Gun's let-go (Freeze / Drop).
+// Building (client/src/ui/om_build.c): the pane's two gun tiles (the weapons' own icons) put the
+// Tool Gun (with the picked tool) or the Physics Gun in hand at once: its slot when carried, else
+// added as an extra slot and equipped when it lands, even with the window open. Move and Resize are
+// Tool Gun tools driven by handles (no OM_ACTION_TOOL shots); the Snap row takes any grid step
+// (OB_SNAP_MIN..OB_SNAP_MAX, Off; the PageDown / PageUp keys and the console's `tool_snap` too), the Release row
+// the Physics Gun's let-go (Freeze / Drop). Devs and the host (OM_CAP_MAP) change the map's own
+// objects with both guns as well; the pane says so.
 //
 // Console: `give` / `drop` are server commands (shared/src/chat_commands.c); a `give` of a weapon
 // to yourself equips it like the Weapons tab's left click (object_manager_ui_chat_sent).
@@ -259,17 +263,40 @@ static const char *om_tool_gun_line(void) {
     const Client *client = om_client();
     const Player *me = client ? client->me : NULL;
     if (g_om.caps >= 0 && !(g_om.caps & OM_CAP_SPAWN)) return "Only developers and the host can use the Tool Gun here";
-    if (me && me->weapon && me->weapon->kn_tool) return "Tool Gun in hand: shoot to use";
+    const int map = g_om.caps >= 0 && (g_om.caps & OM_CAP_MAP);
+    if (me && me->weapon && me->weapon->kn_tool) return map ? "Tool Gun in hand: works on the map too" : "Tool Gun in hand: shoot to use";
+    if (me && me->weapon && me->weapon->kn_physgun) return map ? "Physics Gun in hand: works on the map too" : "Physics Gun in hand";
     for (int i = 0; me && me->loadout && i < me->loadout_size; i++) {
         if (me->loadout[i] == WEAPON_ID_TOOL_GUN) return "Tool Gun in your loadout";
     }
     return "Pick a tool to equip the Tool Gun";
 }
 
+int object_manager_ui_caps(void) { return g_om.caps > 0 ? g_om.caps : 0; }
+
+// A gun tile of the Tools pane: the weapon's own icon (textures/weapons), in hand marked
+static void om_gun_tile(char **buf, size_t *len, size_t *cap, const char *id, const char *handler, const int weapon_id, const int held) {
+    const Weapon *w = rules_weapon(weapon_id);
+    om_append(buf, len, cap,
+              "<div id='%s' class='knOmGun%s' onclick='%s'><img class='knOmGunIcon' src='textures/weapons/%s.png'/>"
+              "<span class='knOmGunName'>%s</span></div>",
+              id, held ? " knOmToolA" : "", handler, w && w->icon ? w->icon : "icon_0", w ? w->name : "?");
+}
+
+static int om_holds(const int weapon_id) {
+    const Client *client = om_client();
+    const Player *me = client ? client->me : NULL;
+    return me && me->active && me->loadout && me->loadout_index >= 0 && me->loadout_index < me->loadout_size && me->loadout[me->loadout_index] == weapon_id;
+}
+
 // The right pane: the tools (the picked one marked), its hint, and whether the Tool Gun is in hand
 static void om_tools_html(char **buf, size_t *len, size_t *cap) {
     const int allowed = g_om.caps < 0 || (g_om.caps & OM_CAP_SPAWN);
-    om_append(buf, len, cap, "<div id='knOmTools' class='knOmTools%s'><div class='knOmToolsTitle'>Tools</div>", allowed ? "" : " knOmOff");
+    om_append(buf, len, cap, "<div id='knOmTools' class='knOmTools%s'><div class='knOmToolsTitle'>Tools</div><div class='knOmGuns'>", allowed ? "" : " knOmOff");
+    // not id='knOmPhys' / 'knOmGun': on the web window.<id> would be the element (named access, as knOmSearchBox)
+    om_gun_tile(buf, len, cap, "knOmToolGunTile", "knOmToolGunPick()", WEAPON_ID_TOOL_GUN, om_holds(WEAPON_ID_TOOL_GUN));
+    om_gun_tile(buf, len, cap, "knOmPhysRow", "knOmPhys()", WEAPON_ID_PHYS_GUN, om_holds(WEAPON_ID_PHYS_GUN));
+    om_append(buf, len, cap, "</div>");
     for (int i = 0; i < OM_TOOL_COUNT; i++) {
         const ObjectManagerToolInfo *t = object_manager_tool_info(i);
         om_append(buf, len, cap,
@@ -277,16 +304,14 @@ static void om_tools_html(char **buf, size_t *len, size_t *cap) {
                   "<span class='knOmToolName'>%s</span></div>",
                   i, i == g_om.tool ? " knOmToolA" : "", i, t->icon, t->name);
     }
-    // not id='knOmPhys': on the web window.knOmPhys would be the element (named access, as knOmSearchBox)
+    char snap[16];
+    om_build_snap_text(snap, sizeof(snap));
+    // the grid step: any value (Enter / leaving the field applies it), Off, and PageDown / PageUp in game
     om_append(buf, len, cap,
-              "<div id='knOmPhysRow' class='knOmTool knOmPhys' onclick='knOmPhys()'><span class='material-icons'>pan_tool</span>"
-              "<span class='knOmToolName'>Physics Gun</span></div><div class='knOmOpt'><span class='knOmOptName'>Snap</span>");
-    for (int i = 0; i < OB_SNAPS; i++) {
-        static const char *const snaps[OB_SNAPS] = {"1", "2", "5", "10"};
-        om_append(buf, len, cap, "<span id='knOmSnap%d' class='knOmOptBtn%s' onclick='knOmSnap(%d)'>%s</span>", i,
-                  i == om_build_snap_index() ? " knOmOptA" : "", i, snaps[i]);
-    }
-    om_append(buf, len, cap, "</div><div class='knOmOpt'><span class='knOmOptName'>Release</span>"
+              "<div class='knOmOpt'><span class='knOmOptName'>Snap</span><input id='knOmSnapBox' class='knOmSnapBox' type='text' maxlength='6' "
+              "value='%s' onchange='knOmSnapSet(this.value)'/><span id='knOmSnapOff' class='knOmOptBtn%s' onclick='knOmSnapSet(0)'>Off</span></div>",
+              om_build_snap() > 0.0f ? snap : "", om_build_snap() > 0.0f ? "" : " knOmOptA");
+    om_append(buf, len, cap, "<div class='knOmOpt'><span class='knOmOptName'>Release</span>"
                              "<span id='knOmDrop0' class='knOmOptBtn%s' onclick='knOmPhysDrop(0)'>Freeze</span>"
                              "<span id='knOmDrop1' class='knOmOptBtn%s' onclick='knOmPhysDrop(1)'>Drop</span></div>",
               om_build_drop() ? "" : " knOmOptA", om_build_drop() ? " knOmOptA" : "");
@@ -405,14 +430,15 @@ static void om_update_tools(void) {
         const HtmlElem row = html_dom_by_id(id);
         if (row && html_dom_has_class(row, "knOmToolA") != (i == g_om.tool)) html_dom_set_class(row, "knOmToolA", i == g_om.tool);
     }
-    for (int i = 0; i < OB_SNAPS + 2; i++) {
-        char id[16];
-        if (i < OB_SNAPS) snprintf(id, sizeof(id), "knOmSnap%d", i);
-        else snprintf(id, sizeof(id), "knOmDrop%d", i - OB_SNAPS);
-        const HtmlElem b = html_dom_by_id(id);
-        const int on = i < OB_SNAPS ? i == om_build_snap_index() : (i - OB_SNAPS) == om_build_drop();
+    for (int i = 0; i < 3; i++) {
+        static const char *const ids[3] = {"knOmSnapOff", "knOmDrop0", "knOmDrop1"};
+        const HtmlElem b = html_dom_by_id(ids[i]);
+        const int on = i == 0 ? om_build_snap() <= 0.0f : (i - 1) == om_build_drop();
         if (b && html_dom_has_class(b, "knOmOptA") != on) html_dom_set_class(b, "knOmOptA", on);
     }
+    const HtmlElem tg = html_dom_by_id("knOmToolGunTile"), pg = html_dom_by_id("knOmPhysRow");
+    if (tg && html_dom_has_class(tg, "knOmToolA") != om_holds(WEAPON_ID_TOOL_GUN)) html_dom_set_class(tg, "knOmToolA", om_holds(WEAPON_ID_TOOL_GUN));
+    if (pg && html_dom_has_class(pg, "knOmToolA") != om_holds(WEAPON_ID_PHYS_GUN)) html_dom_set_class(pg, "knOmToolA", om_holds(WEAPON_ID_PHYS_GUN));
     const ObjectManagerToolInfo *t = object_manager_tool_info(g_om.tool);
     const HtmlElem hint = html_dom_by_id("knOmToolHint");
     if (hint && t) html_dom_set_text(hint, t->hint);
@@ -493,12 +519,14 @@ static void om_expect_equip(const int weapon_id) {
     g_om.pending_at = glfwGetTime();
 }
 
-// A KN gun in hand: its slot when carried, else added as an extra slot (equipped when it lands)
+// A KN gun in hand at once: its slot when carried (picked with the next input frame, also while the
+// window is open), else added as an extra slot and equipped when its LOADOUT_EXTRA lands
 static void om_equip_gun(const Player *me, const int weapon_id, const char *text) {
     for (int i = 0; me->loadout && i < me->loadout_size; i++) {
         if (me->loadout[i] != weapon_id) continue;
         if (i != me->loadout_index) ui_controls_select_slot(i);
         om_set_status(text, 0);
+        om_update_tools();
         return;
     }
     om_set_status(text, 0);
@@ -638,9 +666,21 @@ int object_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlAr
         object_manager_ui_pick_physgun();
         return 0;
     }
-    if (!strcmp(name, "knOmSnap")) {
-        om_build_set_snap(arg_num(args, argc, 0, 2));
-        om_update_tools();
+    if (!strcmp(name, "knOmSnapSet")) { // the field's value (any step, "off" / 0 / empty: off)
+        float step = 0.0f;
+        if (argc > 0 && args[0].kind == HTML_ARG_NUM) step = (float) args[0].num;
+        else if (argc > 0 && (args[0].kind == HTML_ARG_STR || args[0].kind == HTML_ARG_THIS_VALUE) && args[0].str) step = (float) atof(args[0].str);
+        else if (ev && ev->target) {
+            char value[24] = "";
+            html_dom_get_value(ev->target, value, sizeof(value));
+            step = (float) atof(value);
+        }
+        om_build_set_snap(step);
+        object_manager_ui_snap_changed();
+        return 0;
+    }
+    if (!strcmp(name, "knOmToolGunPick")) { // the Tool Gun tile: in hand with the tool picked
+        om_pick_tool(g_om.tool);
         return 0;
     }
     if (!strcmp(name, "knOmPhysDrop")) {
@@ -851,6 +891,17 @@ void object_manager_ui_chat_sent(const char *text) {
     const Player *me = client ? client->me : NULL;
     int id = -1;
     if (me && object_manager_give_lookup(text + 6, &id, NULL) == OM_GIVE_WEAPON) om_expect_equip(id);
+}
+
+// The grid step changed (the field, the snap keys, `tool_snap`): the field and a status line
+void object_manager_ui_snap_changed(void) {
+    char snap[16], text[48];
+    om_build_snap_text(snap, sizeof(snap));
+    snprintf(text, sizeof(text), om_build_snap() > 0.0f ? "Snap: %s units" : "Snap: %s", snap);
+    om_set_status(text, 0);
+    om_update_tools();
+    const HtmlElem box = om_window_open() ? html_dom_by_id("knOmSnapBox") : 0;
+    if (box) html_dom_set_value(box, om_build_snap() > 0.0f ? snap : "");
 }
 
 // A new connection / map: the caps belong to the server we talked to.

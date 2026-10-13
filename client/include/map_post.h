@@ -13,6 +13,11 @@ void map_post_frame(Scene *scene, const Game *game, const Camera *camera, float 
 // KrunkNative Object Manager: an object spawned at run time is being freed (map_object_free):
 // its mesh leaves the scene it was added to.
 void map_post_object_freed(const Object *object);
+// KrunkNative Object Manager map edits (shared/src/object_manager.c): the map's own object at
+// `uid` leaves for a stand-in (its mesh hides, its pickup model goes) / comes back. The sun's
+// shadow map and the light objects follow on the next frame.
+void map_post_object_detach(const Object *object, int uid);
+void map_post_object_attach(const Object *object, int uid);
 Mesh *prefab_build_dynamic(const Object *object); // prefab.c: the mesh of a player build (caller owns it)
 Mesh *prefab_pickup_mesh(int weapon_id, int no_texture, float *scale); // prefab.c: a weapon pickup's model (caller owns it)
 Mesh *prefab_weapon_mesh(const Weapon *weapon, int no_texture);   // prefab.c: a weapon's model, unposed (caller owns it)

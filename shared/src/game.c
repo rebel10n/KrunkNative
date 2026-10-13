@@ -197,6 +197,7 @@ void game_init(Game *game, int map_index, int mode_index, const unsigned char is
     game->current_map_index = map_to_load;
     game->current_mode_index = mode_to_load;
 
+    object_manager_restore_map(game); // KrunkNative: the map's own Objects back from the Object Manager's edits
     if (map_changed) {
         Map *new_map = map_init_ex(game->maps[map_to_load], !game->server); // a server's map has no meshes
 

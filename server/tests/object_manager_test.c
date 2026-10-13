@@ -7,7 +7,10 @@
 // commands (by name / id, to others, without privilege; the dropped weapon is a pickup in front
 // that another player takes), the Tool Gun (its tools, ownership, the spawn right, public) and the
 // edits (the Physics Gun's grab / carry / turn / drop, the btools' snapped move and resize, undo,
-// ownership, limits, no box into a player, a client mirror and its collision following).
+// ownership, limits, no box into a player, a client mirror and its collision following), and the
+// map edits on Kanji (a map block carried, resized, deleted, turned, copied; a jump pad moved and
+// launching at its new spot; a guest refused; undo to the map's own Object; joiner replay; round
+// start restoring the map).
 // Run from the repository root: ./<build>/object_manager_test
 #include <server_sandbox.h>
 #include <server.h>
@@ -1063,7 +1066,10 @@ static void test_tool_gun(TestClient *a, TestClient *b) {
           "and places the copy (status %u limit %u)", r.status, r.limit);
     pump(20);
     r = request_at(a, OM_ACTION_TOOL, OM_TOOL_DUPLICATOR, -1.55f, p->direction.y + 3.0f);
-    CHECK(r.status == OM_STATUS_UNSUPPORTED || r.status == OM_STATUS_NOTHING, "nothing copied off the map (status %u)", r.status);
+    // the floor under a: a map object (copied: devs copy the map's objects too) or the terrain (nothing)
+    CHECK(r.status == OM_STATUS_UNSUPPORTED || r.status == OM_STATUS_NOTHING || (r.status == OM_STATUS_OK && r.limit == OM_TOOL_COPIED),
+          "the Duplicator on the floor (status %u limit %u)", r.status, r.limit);
+    p->om_copy = 0;
     if (dup) { // the copy is a's own: undo takes it back
         pump(20);
         request(a, OM_ACTION_UNDO, 0, 0.0f);
@@ -1102,8 +1108,8 @@ static void test_tool_gun(TestClient *a, TestClient *b) {
     r = request_at(a, OM_ACTION_TOOL, OM_TOOL_DELETER, pitch, yaw);
     CHECK(r.status == OM_STATUS_OK && bo && !bo->active, "a dev deletes b's (status %u)", r.status);
     pump(20);
-    r = request_at(a, OM_ACTION_TOOL, OM_TOOL_DELETER, pitch, yaw);
-    CHECK(r.status == OM_STATUS_NOTHING, "nothing left (status %u)", r.status);
+    r = request(b, OM_ACTION_TOOL, OM_TOOL_DELETER, 0.0f);
+    CHECK(r.status == OM_STATUS_NOTHING || r.status == OM_STATUS_DENIED, "no spawn left for b, the map is not b's (status %u)", r.status);
 
     // the spawn right: a custom game's guest keeps no Tool Gun and fires no tool
     game->is_sandbox = 0;
@@ -1411,6 +1417,221 @@ static void test_edits(TestClient *a, TestClient *b) {
     clean_up(b);
 }
 
+// ---------------------------------------------------------------- map edits (the map's own objects)
+
+// The first map object of `prefab` the tools may change (and, solid_only, a solid one), -1 none
+static int map_object_of(const Game *game, const int prefab, const int solid_only) {
+    for (size_t i = 0; game->map && i < game->map->object_count; i++) {
+        const Object *o = game->map->objects[i];
+        if ((prefab < 0 || o->prefab == prefab) && object_manager_map_editable(game, (int) i) &&
+            (!solid_only || (o->collision_type != COLLISION_TYPE_NONE && bot_object_blocks_player(o))) && o->scale.x < 60.0f &&
+            o->scale.z < 60.0f && o->scale.y < 60.0f)
+            return (int) i;
+    }
+    return -1;
+}
+
+static void stand_near(Player *p, const Object *o) {
+    p->position = (vec3) {o->position.x + o->scale.x * 0.5f + 12.0f, o->position.y + o->scale.y + 2.0f, o->position.z};
+    p->velocity = (vec3) {0};
+}
+
+static int map_ops_since(const TestClient *c, const int op, const int uid) {
+    int n = 0;
+    for (int i = 0; i < c->count; i++) {
+        const NetPacket *k = &c->packets[i];
+        if (k->type != NET_PACKET_SPAWNED_OBJ || k->length < sizeof(NetSpawnedObjPacket)) continue;
+        NetSpawnedObjPacket head;
+        memcpy(&head, k->payload, sizeof(head));
+        n += head.op == op && head.id == uid;
+    }
+    return n;
+}
+
+static void mirror_apply(Game *mirror, const TestClient *c) {
+    for (int i = 0; i < c->count; i++) {
+        if (c->packets[i].type == NET_PACKET_SPAWNED_OBJ) object_manager_apply_spawned(mirror, c->packets[i].payload, c->packets[i].length);
+    }
+}
+
+static int same_box(const Object *a, const Object *b) {
+    return a && b && a->active == b->active && fabsf(a->position.x - b->position.x) < 0.01f && fabsf(a->position.y - b->position.y) < 0.01f &&
+           fabsf(a->position.z - b->position.z) < 0.01f && fabsf(a->scale.x - b->scale.x) < 0.01f && fabsf(a->scale.y - b->scale.y) < 0.01f &&
+           fabsf(a->scale.z - b->scale.z) < 0.01f;
+}
+
+// a: a dev (local), b: a sandbox guest (OM_CAP_SPAWN, not OM_CAP_MAP); late: joins mid-way
+static void test_map_edits(TestClient *a, TestClient *b, TestClient *late) {
+    printf("map edits (the map's own objects)...\n");
+    Player *p = player_of(a), *q = player_of(b);
+    ClientConnection *bc = conn(b);
+    if (!p || !q || !bc) return;
+    Game *game = &g_server->game;
+    p->god_mode = q->god_mode = 1;
+    pump(200);
+    const ObjectManagerPerms dev = {.dev = 1}, guest = {0}, host = {.host = 1};
+    CHECK((object_manager_caps(game, &dev) & OM_CAP_MAP) && (object_manager_caps(game, &host) & OM_CAP_MAP) &&
+          !(object_manager_caps(game, &guest) & OM_CAP_MAP), "OM_CAP_MAP: devs and the host, not a sandbox guest");
+
+    // b's client mirror
+    Game mirror;
+    memset(&mirror, 0, sizeof(mirror));
+    const cJSON *maps[1] = {game->map->raw_data};
+    int modes[1] = {MODE_ID_FFA};
+    game_configure(&mirror, NULL, maps, 1, modes, 1, NULL, 0, NULL, 0);
+    game_init(&mirror, 0, 0, 0);
+
+    const int block = map_object_of(game, PREFAB_CUBE, 1);
+    const int pad = map_object_of(game, PREFAB_BOOST_PAD, 0);
+    CHECK(block >= 0 && pad >= 0, "a map block and a jump pad (%d, %d)", block, pad);
+    if (block < 0 || pad < 0) return;
+    Object *const original = game->map->objects[block];
+    const vec3 home = original->position, home_size = original->scale;
+    CHECK(object_manager_editable(game, block) && object_manager_is_map_object(game, block) && !object_manager_map_edited(game, block),
+          "the block is editable, as the map has it");
+
+    // the Physics Gun moves it: a stand-in at the same uid, b hears MAP_EDIT, its mirror follows
+    request(a, OM_ACTION_ADD_WEAPON, WEAPON_ID_PHYS_GUN, 0.0f);
+    pump(4);
+    hold(a, WEAPON_ID_PHYS_GUN);
+    stand_near(p, original);
+    pump(4);
+    ObjectManagerPose from, to;
+    object_manager_pose(game, block, &from);
+    to = from;
+    to.position.y += 7.0f;
+    reset_received();
+    NetSpawnResultPacket r = edit_at(a, OM_EDIT_SOURCE_PHYSGUN, block, &to, OM_EDIT_BEGIN);
+    pump(2);
+    const Object *moved = game->map->objects[block];
+    CHECK(r.status == OM_STATUS_OK && moved != original && moved->map_edit && fabsf(moved->position.y - (home.y + 7.0f)) < 0.02f &&
+          object_manager_map_edited(game, block) == 1, "carried up 7 (status %u, y %.2f, was %.2f)", r.status, moved->position.y, home.y);
+    CHECK(map_ops_since(b, OM_SPAWNED_MAP_EDIT, block) == 1, "b hears OM_SPAWNED_MAP_EDIT");
+    mirror_apply(&mirror, b);
+    CHECK(same_box(mirror.map->objects[block], moved), "b's client moves the map block (same uid, same box)");
+    const vec3 top = {moved->position.x, moved->position.y + 60.0f, moved->position.z};
+    const float hit = line_in_rect(top, (vec3) {0.0f, -100.0f, 0.0f}, moved->position, moved->scale);
+    CHECK(hit > 0.0f && fabsf(top.y - 100.0f * hit - (moved->position.y + moved->scale.y)) < 0.05f, "its collision box went with it");
+
+    // a guest may not touch the map: edit, Deleter, Rotator
+    bc->local = 0;
+    request(b, OM_ACTION_ADD_WEAPON, WEAPON_ID_PHYS_GUN, 0.0f);
+    pump(4);
+    hold(b, WEAPON_ID_PHYS_GUN);
+    stand_near(q, moved);
+    pump(20);
+    r = edit_at(b, OM_EDIT_SOURCE_PHYSGUN, block, &from, OM_EDIT_BEGIN);
+    CHECK(r.status == OM_STATUS_DENIED && fabsf(game->map->objects[block]->position.y - (home.y + 7.0f)) < 0.02f, "a guest's edit of the map: refused (status %u)", r.status);
+
+    // Resize (the Tool Gun's btools): grows, collision follows
+    request(a, OM_ACTION_ADD_WEAPON, WEAPON_ID_TOOL_GUN, 0.0f);
+    pump(4);
+    hold(a, WEAPON_ID_TOOL_GUN);
+    object_manager_pose(game, block, &from);
+    object_manager_pose_resize(&from, 0, 1, 4.0f, 2.0f, 0, &to);
+    pump(20);
+    r = edit_at(a, OM_EDIT_SOURCE_BTOOLS, block, &to, OM_EDIT_BEGIN);
+    CHECK(r.status == OM_STATUS_OK && fabsf(game->map->objects[block]->scale.x - (from.size.x + 4.0f)) < 0.02f,
+          "Resize the +x face out 4 (status %u, %.2f)", r.status, game->map->objects[block]->scale.x);
+
+    // a joiner gets the edited map
+    join(late, 1);
+    pump(10);
+    Game joined;
+    memset(&joined, 0, sizeof(joined));
+    game_configure(&joined, NULL, maps, 1, modes, 1, NULL, 0, NULL, 0);
+    game_init(&joined, 0, 0, 0);
+    mirror_apply(&joined, late);
+    CHECK(map_ops_since(late, OM_SPAWNED_MAP_EDIT, block) == 1 && same_box(joined.map->objects[block], game->map->objects[block]),
+          "the joiner gets the edited block (MAP_EDIT replayed)");
+
+    // the jump pad: carried 20 along x; the boost follows (a player on the new spot is launched)
+    object_manager_pose(game, pad, &from);
+    to = from;
+    to.position.x += 20.0f;
+    stand_near(p, game->map->objects[pad]);
+    hold(a, WEAPON_ID_PHYS_GUN);
+    pump(20);
+    reset_received();
+    r = edit_at(a, OM_EDIT_SOURCE_PHYSGUN, pad, &to, OM_EDIT_BEGIN);
+    const Object *pad_now = game->map->objects[pad];
+    CHECK(r.status == OM_STATUS_OK && pad_now->jump_pad && fabsf(pad_now->position.x - to.position.x) < 0.02f,
+          "the jump pad moved (status %u)", r.status);
+    q->position = (vec3) {pad_now->position.x, pad_now->position.y + 0.5f, pad_now->position.z};
+    q->velocity = (vec3) {0};
+    for (int i = 0; i < 6; i++) input(b, -1, 0);
+    CHECK(q->velocity.y > 0.05f || q->position.y > pad_now->position.y + 1.5f, "the pad launches a player at its new spot (vy %.3f, y %.2f)",
+          q->velocity.y, q->position.y - pad_now->position.y);
+
+    // Deleter on the block: a placeholder, inactive; b hears MAP_DELETE
+    hold(a, WEAPON_ID_TOOL_GUN);
+    const Object *cur = game->map->objects[block];
+    stand_near(p, cur);
+    pump(20);
+    float pitch, yaw;
+    aim_at(p, (vec3) {cur->position.x, cur->position.y + cur->scale.y * 0.5f, cur->position.z}, &pitch, &yaw);
+    reset_received();
+    r = request_at(a, OM_ACTION_TOOL, OM_TOOL_DELETER, pitch, yaw);
+    pump(2);
+    CHECK(r.status == OM_STATUS_OK && !game->map->objects[block]->active && object_manager_map_edited(game, block) == 2, "Deleter: the map block goes (status %u)", r.status);
+    CHECK(map_ops_since(b, OM_SPAWNED_MAP_DELETE, block) == 1, "b hears MAP_DELETE");
+    mirror_apply(&mirror, b);
+    CHECK(!mirror.map->objects[block]->active, "b's client takes it out");
+    // Remove (the Delete key) never takes map objects
+    r = request_at(a, OM_ACTION_REMOVE_AIM, 0, -1.55f, p->direction.y);
+    CHECK(r.status != OM_STATUS_OK || object_manager_map_edited(game, block) == 2, "Remove at the crosshair leaves the map alone (status %u)", r.status);
+
+    // Undo, newest first: the delete, the pad's carry, the resize, the carry -> the map's own Object back
+    reset_received();
+    pump(20);
+    r = request(a, OM_ACTION_UNDO, 0, 0.0f);
+    CHECK(r.status == OM_STATUS_OK && game->map->objects[block]->active && object_manager_map_edited(game, block) == 1, "undo the delete");
+    pump(20);
+    r = request(a, OM_ACTION_UNDO, 0, 0.0f);
+    CHECK(r.status == OM_STATUS_OK && fabsf(game->map->objects[pad]->position.x - from.position.x) < 0.02f && !object_manager_map_edited(game, pad),
+          "undo the pad's move: the map's pad back (x %.2f, was %.2f)", game->map->objects[pad]->position.x, from.position.x);
+    pump(20);
+    r = request(a, OM_ACTION_UNDO, 0, 0.0f);
+    CHECK(r.status == OM_STATUS_OK && fabsf(game->map->objects[block]->scale.x - home_size.x) < 0.02f, "undo the resize");
+    pump(20);
+    r = request(a, OM_ACTION_UNDO, 0, 0.0f);
+    CHECK(r.status == OM_STATUS_OK && game->map->objects[block] == original && original->position.y == home.y && !object_manager_map_edited(game, block),
+          "undo the carry: the map's own object is back (status %u)", r.status);
+    pump(2);
+    CHECK(map_ops_since(b, OM_SPAWNED_MAP_RESTORE, block) == 1, "b hears MAP_RESTORE");
+    mirror_apply(&mirror, b);
+    CHECK(same_box(mirror.map->objects[block], original) && !mirror.map->objects[block]->map_edit, "b's client has the map's block back");
+
+    // the Rotator on a map object (in place, an undo step), then the round start puts it back
+    hold(a, WEAPON_ID_TOOL_GUN);
+    stand_near(p, original);
+    pump(20);
+    aim_at(p, (vec3) {original->position.x, original->position.y + original->scale.y * 0.5f, original->position.z}, &pitch, &yaw);
+    r = request_at(a, OM_ACTION_TOOL, OM_TOOL_ROTATOR, pitch, yaw);
+    const Object *turned = game->map->objects[block];
+    CHECK(r.status == OM_STATUS_OK && turned != original && fabsf(turned->scale.x - home_size.z) < 0.02f && fabsf(turned->scale.z - home_size.x) < 0.02f,
+          "Rotator: a quarter turn of the map block (status %u)", r.status);
+    // Duplicator: a map object copied is the dev's own spawn
+    pump(20);
+    r = request_at(a, OM_ACTION_TOOL, OM_TOOL_DUPLICATOR, pitch, yaw);
+    CHECK(r.status == OM_STATUS_OK && r.limit == OM_TOOL_COPIED, "Duplicator copies a map object (status %u)", r.status);
+    pump(20);
+    r = request_at(a, OM_ACTION_TOOL, OM_TOOL_DUPLICATOR, -0.5f, p->direction.y + 1.2f);
+    const Object *copy = last_spawned();
+    CHECK(r.status == OM_STATUS_OK && r.limit == OM_TOOL_PASTED && copy && copy->spawned && copy->prefab == PREFAB_CUBE, "and places it as a spawn");
+    world_round_start(game);
+    CHECK(game->map->objects[block] == original && !object_manager_map_edited(game, block) && !object_manager_map_edited(game, pad),
+          "round start: the map as it was");
+
+    bc->local = 1;
+    p->god_mode = q->god_mode = 0;
+    leave(late);
+    clean_up(a);
+    clean_up(b);
+    object_manager_restore_map(&mirror); // (the mirrors' maps are freed: their own Objects back first)
+    object_manager_restore_map(&joined);
+}
+
 static void test_join_sync(TestClient *a, TestClient *late, TestClient *old) {
     printf("join sync...\n");
     pump(20);
@@ -1604,6 +1825,16 @@ int main(void) {
         for (int i = 0; i < CLIENTS; i++) leave(&g_clients[i]);
         sandbox_stop();
     } else CHECK(0, "sandbox");
+    // the map's own objects: Kanji has jump pads (Burg has none)
+    const cJSON *kanji = map_catalog_json((size_t) map_catalog_index_of_key("311_kanji"));
+    CHECK(kanji != NULL, "kanji");
+    if (kanji && start(kanji, MODE_ID_FFA)) {
+        join(&g_clients[0], 1);
+        join(&g_clients[1], 1);
+        test_map_edits(&g_clients[0], &g_clients[1], &g_clients[2]);
+        for (int i = 0; i < CLIENTS; i++) leave(&g_clients[i]);
+        sandbox_stop();
+    } else CHECK(0, "sandbox (kanji)");
     printf("%d checks, %d failures\n", g_checks, g_failures);
     printf(g_failures ? "Test FAILED\n" : "Test OK\n");
     return g_failures ? 1 : 0;

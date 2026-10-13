@@ -368,6 +368,9 @@ typedef struct {
     // KrunkNative Object Manager (shared/src/object_manager.c): spawned at run time from a menu
     // record (raw points into the game's ObjectManager records); removed with the builds at round start
     unsigned char spawned:1;
+    // a map object's stand-in while the Object Manager has it edited (a replacement built from the
+    // edited record, or the deleted placeholder); the map's own Object waits detached (object_manager.c)
+    unsigned char map_edit:1;
     int spawn_owner;                    // uid of the player who spawned it (spawned objects only)
     // ---- end WP-B
 
@@ -1312,7 +1315,7 @@ typedef struct Player_t {
     int extra_weapon_count;
     float om_tokens;              // Object Manager request bucket (OM_RATE_*), refilled by game time
     float om_tokens_at;           // game->now of the last refill
-    int om_copy;                  // Tool Gun Duplicator: the copied spawned object's uid + 1, 0 none (authority)
+    int om_copy;                  // Tool Gun Duplicator: the copied spawned object's uid + 1, a map object's -(uid + 1), 0 none (authority)
     float om_edit_at;             // game->now of the last accepted Object Manager edit (OM_EDIT_INTERVAL, authority)
 
     Input *input_queue;

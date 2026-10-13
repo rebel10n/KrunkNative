@@ -27,6 +27,20 @@
 //
 // Spawned map objects live in Map.objects after the map's own (uid = index, like the builds),
 // flagged Object.spawned, and go at the next round start with the builds (world_remove_builds).
+//
+// Map edits: devs and the host (OM_CAP_MAP) also delete, duplicate, turn, move, resize and carry
+// the map's own objects with the Tool Gun and the Physics Gun. The map's Object leaves its uid for a
+// stand-in (Object.map_edit): one built from the map record with the edited "p" / "s" / "r" / "d",
+// or an inactive placeholder for a delete; the original waits detached and comes back with Undo, at
+// the next round start and before a map change (object_manager_restore_map). Everyone hears
+// SPAWNED_OBJ OM_SPAWNED_MAP_EDIT (the pose keys only: every client has the map's record) /
+// MAP_DELETE / MAP_RESTORE, replayed to joiners. Triggers and KrunkScript keep addressing the uid:
+// a moved object's trigger fires where it went (its trigger state starts over), a deleted one's
+// stops and actions aimed at it find the inactive placeholder. Pickups, zombies machines, flags,
+// objectives, zones of the modes, nodes, complex-collision and animated (GLTF) assets stay as they
+// are (object_manager_map_editable). The bot grid is rebuilt at most once a second after map edits
+// (bot_nav_invalidate); the client re-renders the sun's shadow map on each edit; ambient-occlusion
+// planes stay where the map built them.
 #include <shared.h>
 
 #define NET_PACKET_SPAWN_REQ (NET_PACKET_BLOCK_SANDBOX + 0)
@@ -71,7 +85,7 @@ typedef enum {
     OM_STATUS_DEAD,      // not spawned
     OM_STATUS_KEEP,      // DROP_HELD: not an extra weapon (class / melee weapons stay; v7's drpw takes picked ones)
     OM_STATUS_NO_TOOL,   // TOOL: the Tool Gun is not in hand
-    OM_STATUS_UNSUPPORTED, // TOOL: the tool does not work on that (Rotator / Duplicator: spawned objects only)
+    OM_STATUS_UNSUPPORTED, // TOOL / EDIT: the tool does not work on that (a pickup, a mode object, an animated asset ...)
     OM_STATUS_BLOCKED,   // EDIT: the object would end up inside a player
     OM_STATUS_BOUNDS,    // EDIT: out of reach, or past the size limits (OM_EDIT_SIZE_*)
     OM_STATUS_COUNT
@@ -80,6 +94,7 @@ typedef enum {
 #define OM_CAP_WEAPONS 1u // extra loadout weapons and weapon pickups
 #define OM_CAP_SPAWN 2u   // objects, entities, NPCs (dev, host, sandbox)
 #define OM_CAP_DEV 4u     // the player passes the dev checks
+#define OM_CAP_MAP 8u     // the Tool Gun / Physics Gun also change the map's own objects (devs, the host outside ranked)
 
 // What a spawned thing is (NetSpawnedObjPacket.kind, the undo list). Only map objects (and the
 // Piss's puddles) travel in SPAWNED_OBJ: spawnables, airdrops, AIs and bots replicate through
@@ -145,6 +160,11 @@ const ObjectManagerToolInfo *object_manager_tool_info(int tool); // NULL out of 
 #define OM_SPAWNED_ADD 1
 #define OM_SPAWNED_REMOVE 2
 #define OM_SPAWNED_UPDATE 3 // an edited object: the record (JSON) follows, it replaces the object at its uid
+// a map object (id = its uid, owner = the editor): MAP_EDIT carries the edited keys of its record
+// ({"p", "s", "r" / "d"}, JSON) applied to the map's own record; MAP_DELETE / MAP_RESTORE nothing
+#define OM_SPAWNED_MAP_EDIT 4
+#define OM_SPAWNED_MAP_DELETE 5
+#define OM_SPAWNED_MAP_RESTORE 6
 
 // ---- edits (OM_ACTION_EDIT): the Physics Gun and the Move / Resize tools
 typedef enum {
@@ -156,8 +176,8 @@ typedef enum {
 #define OM_EDIT_DROP 2         // the Physics Gun's release with "Drop": down onto the surface below
 #define OM_EDIT_INTERVAL 0.05f // seconds between one player's edits (clients send at most 10 / s)
 #define OM_EDIT_SIZE_MIN 1.0f  // per axis (units)
-#define OM_EDIT_SIZE_MAX 200.0f
-#define OM_EDIT_RANGE 420.0f   // the edited box's centre from the editor's eye
+#define OM_EDIT_SIZE_MAX 200.0f // (a map object bigger than this may keep its size, never grow)
+#define OM_EDIT_RANGE 420.0f   // the edited box's nearest point from the editor's eye
 #define OM_EDITS_MAX 256       // the undo history of edits in a round (the oldest go)
 #define OM_PHYSGUN_DIST_MIN 8.0f // the grab distance the wheel changes (units)
 #define OM_PHYSGUN_DIST_MAX 300.0f
@@ -261,7 +281,7 @@ void object_manager_request(Game *game, Player *player, const NetSpawnReqPacket 
                             NetSpawnResultPacket *out);
 void object_manager_send_extras(Game *game, const Player *player, int target); // LOADOUT_EXTRA of `player`
 void object_manager_send_state(Game *game, int uid);   // a joiner: every live spawned object
-void object_manager_round_start(Game *game);           // after world_remove_builds: drop the records
+void object_manager_round_start(Game *game);           // after world_remove_builds: drop the records (map edits restored)
 // The extra weapons `player` may keep (a spawn with caps lacking OM_CAP_WEAPONS clears them).
 int object_manager_keep_extras(const Game *game, const ObjectManagerPerms *perms);
 // The kept extra weapons in place (the Tool Gun goes without OM_CAP_SPAWN); returns the new count.
@@ -275,13 +295,20 @@ void object_manager_edit(Game *game, Player *player, const NetSpawnEditPacket *e
 
 // ---- edits (both sides): the pose of a spawned object the edits take (active, not a pickup or a
 // zombies machine), and the btools' handle math (pure: the client drags, the tests check)
-int object_manager_editable(const Game *game, int uid);
+int object_manager_editable(const Game *game, int uid); // a spawned object, or a map object object_manager_map_editable takes
 int object_manager_pose(const Game *game, int uid, ObjectManagerPose *out);
+// ---- map edits (both sides)
+int object_manager_is_map_object(const Game *game, int uid);   // one of the map's own uids (edited or not)
+int object_manager_map_editable(const Game *game, int uid);    // a map object the tools may change now (not deleted)
+int object_manager_map_edited(const Game *game, int uid);      // 1 changed, 2 deleted, 0 as the map has it
+// Puts every edited map object back (the map's own Objects at their uids). Round start, map change.
+void object_manager_restore_map(Game *game);
 float object_manager_snap(float value, float step); // to the nearest multiple of step (step <= 0: as is)
 // Move: `delta` units along axis 0 x / 1 y / 2 z, snapped
 void object_manager_pose_move(const ObjectManagerPose *from, int axis, float delta, float snap, ObjectManagerPose *out);
 // Resize: the face on `axis` facing `sign` (+1 / -1) pushed out by `delta` (snapped; inward when
 // negative), the opposite face kept, or both faces moved when `symmetric`; OM_EDIT_SIZE_MIN at least
+// (growth stops at OM_EDIT_SIZE_MAX, or at the size it had when that is bigger)
 void object_manager_pose_resize(const ObjectManagerPose *from, int axis, int sign, float delta, float snap, int symmetric,
                                 ObjectManagerPose *out);
 // `turns` quarter turns: w and l swap on odd ones (the AABB follows the model), not for ramps / ladders
@@ -301,3 +328,7 @@ typedef struct {
     int object;   // map object uid, -1 terrain
 } ObjectManagerAim;
 int object_manager_aim(const Game *game, const Player *player, float pitch, float yaw, ObjectManagerAim *out);
+// What the tools pick at the crosshair: the nearest object of any kind (solid or not: jump pads,
+// teleporters, zones, triggers, planes, at least a unit thick), terrain in the way; object -1 none
+// (normal is +y). 0: nothing in reach.
+int object_manager_pick(const Game *game, const Player *player, float pitch, float yaw, ObjectManagerAim *out);

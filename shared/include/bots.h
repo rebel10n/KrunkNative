@@ -197,6 +197,10 @@ typedef struct GameBots_t {
     float quota_empty;              // fill: ms the game has had no human (while quota bots remain)
     BotNav *nav;                    // the current map's grid (built on first use)
     const void *nav_failed_key;     // a map the grid could not be built for
+    // KrunkNative Object Manager map edits: the grid is stale (bot_nav_invalidate); it is rebuilt
+    // on the next use at least BOT_NAV_REBUILD_SECONDS after the last rebuild (Game.now)
+    unsigned char nav_dirty:1;
+    float nav_built_at;
     int path_budget;                // A* searches left this tick
     unsigned char stopped:1;        // bot_stop is in effect (bot_start / bot_stop off resume)
 } GameBots;
@@ -251,6 +255,10 @@ void bot_generate_name(char *out, size_t size);
 // shared/src/bot_nav.c
 BotNav *bot_nav_for(Game*);                       // the current map's grid (NULL: none could be built)
 void bot_nav_free(BotNav*);
+// The map's solid boxes changed (Object Manager map edits): rebuild the grid on a later use, at
+// most once every BOT_NAV_REBUILD_SECONDS (the old grid serves until then)
+#define BOT_NAV_REBUILD_SECONDS 1.0f
+void bot_nav_invalidate(Game*);
 int  bot_nav_node_count(const BotNav*);
 int  bot_nav_find_path(Game*, vec3 from, vec3 to, BotPath *out); // 1 = a route (maybe partial)
 int  bot_nav_random_point(Game*, vec3 *out);      // a walkable point of the largest area

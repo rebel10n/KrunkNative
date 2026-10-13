@@ -476,13 +476,22 @@ BotNav *bot_nav_for(Game *game) {
     GameBots *bots = game_bots(game);
     if (!bots || !game->map) return NULL;
     BotNav *nav = bots->nav;
-    if (nav && nav->key == game->map->raw_data && nav->key_objects == game->map->object_count) return nav;
+    const int stale = bots->nav_dirty && (game->now - bots->nav_built_at >= BOT_NAV_REBUILD_SECONDS || game->now < bots->nav_built_at);
+    if (nav && nav->key == game->map->raw_data && nav->key_objects == game->map->object_count && !stale) return nav;
     bot_nav_free(nav);
     bots->nav = NULL;
-    if (bots->nav_failed_key == game->map->raw_data) return NULL;
+    bots->nav_dirty = 0;
+    bots->nav_built_at = game->now;
+    if (bots->nav_failed_key == game->map->raw_data && !stale) return NULL;
+    bots->nav_failed_key = NULL;
     bots->nav = nav_build(game->map);
     if (!bots->nav) bots->nav_failed_key = game->map->raw_data;
     return bots->nav;
+}
+
+void bot_nav_invalidate(Game *game) {
+    GameBots *bots = game ? game->bots : NULL;
+    if (bots) bots->nav_dirty = 1;
 }
 
 int bot_nav_node_count(const BotNav *nav) { return nav ? nav->node_count : 0; }

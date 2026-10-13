@@ -17,7 +17,10 @@ bridged remote browser), so it is neither DEV nor host.
      dev, refused to the guest
   5. edits (OM_ACTION_EDIT): the dev's Physics Gun moves a crate, the guest hears OM_SPAWNED_UPDATE and
      may not edit it; Undo puts it back
-  6. the rate limit answers a burst with "Slow down"
+  6. map edits: the dev's Deleter takes a map object (the guest hears OM_SPAWNED_MAP_DELETE, a late
+     joiner gets it replayed), Undo brings it back (MAP_RESTORE), the Rotator and a Physics Gun edit
+     change one in place (MAP_EDIT with the new pose); the guest may not touch the map
+  7. the rate limit answers a burst with "Slow down"
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
 import os
@@ -49,7 +52,7 @@ OBJECT_CRATE = 10  # object_manager_entries(OM_TAB_OBJECTS)[10]
 AI_ADD_V7, SPAWNABLE_V7 = 162, 148
 NPC_GHOST, ENTITY_KR_TAG = 1, 0  # object_manager_entries(): NPCs[1] Ghost (harmless), Entities[0] KR Tag
 OK, DENIED, LIMIT, RATE = 0, 1, 2, 3
-CAP_WEAPONS, CAP_SPAWN, CAP_DEV = 1, 2, 4
+CAP_WEAPONS, CAP_SPAWN, CAP_DEV, CAP_MAP = 1, 2, 4, 8
 SHOTGUN, CROSSBOW = 5, 13
 results = []
 procs = []
@@ -193,6 +196,16 @@ def spawned_adds_since(peer, since):
     return out
 
 
+def map_ops_since(peer, since, op):
+    """(uid, pose JSON) of each SPAWNED_OBJ map op (4 MAP_EDIT, 5 MAP_DELETE, 6 MAP_RESTORE) since the mark"""
+    out = []
+    for p in peer.of_type(SPAWNED_OBJ, since):
+        o, _kind, _r, u, _owner = struct.unpack("<BBHii", p[:12])
+        if o == op:
+            out.append((u, p[12:].split(b"\0", 1)[0].decode()))
+    return out
+
+
 def updates_since(peer, since, uid):
     out = []
     for p in peer.of_type(SPAWNED_OBJ, since):
@@ -213,7 +226,7 @@ def run():
         return
 
     r = host.request(QUERY)
-    check("dev caps on a public server: weapons + spawn + dev", r is not None and r[1] == CAP_WEAPONS | CAP_SPAWN | CAP_DEV, str(r))
+    check("dev caps on a public server: weapons + spawn + dev + map", r is not None and r[1] == CAP_WEAPONS | CAP_SPAWN | CAP_DEV | CAP_MAP, str(r))
     r = guest.request(QUERY)
     check("guest caps on a public server: none", r is not None and r[1] == 0, str(r))
     r = guest.request(ADD_WEAPON, SHOTGUN)
@@ -385,6 +398,74 @@ def run():
         ups = updates_since(guest, gmark, uid)
         check("Undo puts it back", r is not None and r[0] == OK and bool(ups) and abs(_json.loads(ups[-1])["p"][1] - pos[1]) < 0.11, str(ups[-1:]))
         host.request(UNDO)
+    host.request(CLEAR_WEAPONS)
+
+    # part 6: the map's own objects (the floor under the dev, looking straight down)
+    time.sleep(3)
+    import json as _json
+    MAP_EDIT, MAP_DELETE, MAP_RESTORE = 4, 5, 6
+    mark = host.say('/give "tool gun"')
+    slot = None
+    for s in range(1, 6):
+        host.hold(s)
+        r = host.request(TOOL, TOOL_INFO, -1.5)
+        if r is not None and r[0] != NO_TOOL:
+            slot = s
+            break
+    check("dev: the Tool Gun in hand again", slot is not None, str(r))
+    for _ in range(6):  # every spawn of the dev's goes (the Ghost from part 3 would stand nearer than the floor)
+        r = host.request(UNDO)
+        if r is None or r[0] != OK:
+            break
+    r = guest.request(TOOL, TOOL_DELETER, -1.5)
+    check("guest: the map's floor is not the guest's", r is not None and r[0] == DENIED, str(r))
+    gmark = len(guest.packets)
+    r = host.request(TOOL, TOOL_DELETER, -1.5)
+    guest.pump(0.5)
+    deleted = map_ops_since(guest, gmark, MAP_DELETE)
+    check("dev: the Deleter takes the map object underfoot, the guest hears MAP_DELETE", r is not None and r[0] == OK and len(deleted) == 1,
+          f"{r} {deleted}")
+    if deleted:
+        uid = deleted[0][0]
+        late2 = Peer(PORT)
+        check("a second late joiner spawned", late2.spawn() is not None)
+        late2.pump(1.0)
+        check("the joiner gets the deleted map object replayed", [u for u, _ in map_ops_since(late2, 0, MAP_DELETE)] == [uid],
+              str(map_ops_since(late2, 0, MAP_DELETE)))
+        gmark = len(guest.packets)
+        r = host.request(UNDO)
+        guest.pump(0.5)
+        check("Undo: the map object is back (MAP_RESTORE)", r is not None and r[0] == OK and [u for u, _ in map_ops_since(guest, gmark, MAP_RESTORE)] == [uid],
+              str(map_ops_since(guest, gmark, MAP_RESTORE)))
+        gmark = len(guest.packets)
+        r = host.request(TOOL, TOOL_ROTATOR, -1.5)
+        guest.pump(0.5)
+        edits = [e for e in map_ops_since(guest, gmark, MAP_EDIT) if e[0] == uid]
+        check("Rotator on the map object: MAP_EDIT in place", r is not None and r[0] == OK and len(edits) == 1, f"{r} {edits}")
+        if edits:
+            pose = _json.loads(edits[0][1])
+            host.request(UNDO)
+            mark = host.say('/give "physics gun"')
+            phys = None
+            for s in range(1, 7):
+                host.hold(s)
+                r = host.edit(uid, [pose["p"][0], pose["p"][1] - 0.5, pose["p"][2]], [pose["s"][2], pose["s"][1], pose["s"][0]])
+                if r is not None and r[0] != NO_TOOL:
+                    phys = s
+                    break
+                time.sleep(0.1)
+            guest.pump(0.5)
+            moved = [_json.loads(e[1]) for e in map_ops_since(guest, gmark, MAP_EDIT) if e[0] == uid]
+            check("Physics Gun edit of the map object: down 0.5, the guest hears it", phys is not None and r[0] == OK and bool(moved) and
+                  abs(moved[-1]["p"][1] - (pose["p"][1] - 0.5)) < 0.02, f"{r} {moved[-1:]}")
+            r = guest.edit(uid, pose["p"], pose["s"])
+            check("guest: no edits of the map", r is not None and r[0] == DENIED, str(r))
+            gmark = len(guest.packets)
+            host.request(UNDO)
+            guest.pump(0.5)
+            check("Undo: the map's own object again", [u for u, _ in map_ops_since(guest, gmark, MAP_RESTORE)] == [uid],
+                  str(map_ops_since(guest, gmark, MAP_RESTORE)))
+        late2.close()
     host.request(CLEAR_WEAPONS)
 
     time.sleep(3)  # the bucket refills
