@@ -5,7 +5,9 @@
 // public game: a guest refused, a dev allowed, ranked) and the join sync (a late v7 joiner gets
 // the extras and the spawned objects; a v3 peer never sees ids 250-253), the `give` / `drop`
 // commands (by name / id, to others, without privilege; the dropped weapon is a pickup in front
-// that another player takes) and the Tool Gun (its tools, ownership, the spawn right, public).
+// that another player takes), the Tool Gun (its tools, ownership, the spawn right, public) and the
+// edits (the Physics Gun's grab / carry / turn / drop, the btools' snapped move and resize, undo,
+// ownership, limits, no box into a player, a client mirror and its collision following).
 // Run from the repository root: ./<build>/object_manager_test
 #include <server_sandbox.h>
 #include <server.h>
@@ -911,20 +913,26 @@ static void test_tool_gun(TestClient *a, TestClient *b) {
     r = request_at(a, OM_ACTION_TOOL, OM_TOOL_INFO, -1.55f, p->direction.y + 3.0f);
     CHECK(r.status == OM_STATUS_OK && strstr(notify_text(a), "part of the map"), "Info on the map: '%s'", notify_text(a));
 
-    // Rotator: a quarter turn (w / l swapped), the same thing in the undo list
+    // Rotator: a quarter turn (w / l swapped) in place: the same uid, an undo step
     const float ry = o->rotation.y;
-    const vec3 sc = o->scale;
+    const vec3 sc = o->scale, at = o->position;
+    const size_t count_before = game->map->object_count;
     pump(20);
     r = request_at(a, OM_ACTION_TOOL, OM_TOOL_ROTATOR, pitch, yaw);
-    const Object *turned = last_spawned();
-    CHECK(r.status == OM_STATUS_OK && !o->active && turned && turned != o && turned->prefab == PREFAB_CRATE, "Rotator (status %u)", r.status);
-    if (turned) {
-        const float d = fmodf(turned->rotation.y - ry + 4.0f * (float) M_PI, 2.0f * (float) M_PI);
-        CHECK(fabsf(d - (float) M_PI / 2.0f) < 0.02f, "a quarter turn (%.3f -> %.3f)", ry, turned->rotation.y);
-        CHECK(fabsf(turned->scale.x - sc.z) < 0.01f && fabsf(turned->scale.z - sc.x) < 0.01f, "w and l swapped");
-        CHECK(fabsf(turned->position.x - o->position.x) < 0.01f && fabsf(turned->position.z - o->position.z) < 0.01f, "in place");
-    }
-    o = turned;
+    const Object *turned = game->map->objects[uid];
+    CHECK(r.status == OM_STATUS_OK && turned->active && turned->prefab == PREFAB_CRATE && game->map->object_count == count_before,
+          "Rotator in place (status %u)", r.status);
+    const float d = fmodf(turned->rotation.y - ry + 4.0f * (float) M_PI, 2.0f * (float) M_PI);
+    CHECK(fabsf(d - (float) M_PI / 2.0f) < 0.02f, "a quarter turn (%.3f -> %.3f)", ry, turned->rotation.y);
+    CHECK(fabsf(turned->scale.x - sc.z) < 0.01f && fabsf(turned->scale.z - sc.x) < 0.01f, "w and l swapped");
+    CHECK(fabsf(turned->position.x - at.x) < 0.01f && fabsf(turned->position.z - at.z) < 0.01f, "in place");
+    pump(20);
+    r = request(a, OM_ACTION_UNDO, 0, 0.0f);
+    CHECK(r.status == OM_STATUS_OK && game->map->objects[uid]->active && fabsf(game->map->objects[uid]->rotation.y - ry) < 0.02f,
+          "Undo turns it back (status %u)", r.status);
+    pump(20);
+    request_at(a, OM_ACTION_TOOL, OM_TOOL_ROTATOR, pitch, yaw);
+    o = game->map->objects[uid];
 
     // Duplicator: copy, then place the copy on the floor elsewhere
     const int before = spawned_count();
@@ -1032,6 +1040,258 @@ static void test_public_refusals(TestClient *dev, TestClient *guest) {
     game->is_sandbox = 1;
     gc->local = 1;
     clean_up(dev);
+}
+
+
+// ---------------------------------------------------------------- edits: Physics Gun, btools
+
+static NetSpawnResultPacket edit_at(TestClient *c, const int source, const int uid, const ObjectManagerPose *pose, const int flags) {
+    const Player *p = player_of(c);
+    NetSpawnEditPacket e;
+    memset(&e, 0, sizeof(e));
+    e.req = (NetSpawnReqPacket) {.action = OM_ACTION_EDIT, .item = (int16_t) source, .pitch = p ? p->direction.x : 0.0f, .yaw = p ? p->direction.y : 0.0f};
+    e.uid = uid;
+    e.position[0] = pose->position.x, e.position[1] = pose->position.y, e.position[2] = pose->position.z;
+    e.size[0] = pose->size.x, e.size[1] = pose->size.y, e.size[2] = pose->size.z;
+    e.quarter = (uint8_t) pose->quarter;
+    e.flags = (uint8_t) flags;
+    c->count = 0;
+    send_to(c, NET_PACKET_SPAWN_REQ, &e, sizeof(e));
+    pump(2);
+    NetSpawnResultPacket r = {.status = OM_STATUS_COUNT};
+    const NetPacket *packet = last(c, NET_PACKET_SPAWN_RESULT);
+    if (packet && packet->length == sizeof(r)) memcpy(&r, packet->payload, sizeof(r));
+    return r;
+}
+
+// The last OM_SPAWNED_UPDATE `c` got for `uid`: its record's "p" (1 found)
+static int update_p(const TestClient *c, const int uid, vec3 *p) {
+    int found = 0;
+    for (int i = 0; i < c->count; i++) {
+        const NetPacket *k = &c->packets[i];
+        if (k->type != NET_PACKET_SPAWNED_OBJ || k->length <= sizeof(NetSpawnedObjPacket)) continue;
+        NetSpawnedObjPacket head;
+        memcpy(&head, k->payload, sizeof(head));
+        if (head.op != OM_SPAWNED_UPDATE || head.id != uid) continue;
+        cJSON *rec = cJSON_Parse((const char *) k->payload + sizeof(head));
+        const cJSON *a = cJSON_GetObjectItem(rec, "p");
+        if (cJSON_GetArraySize(a) == 3) {
+            *p = (vec3) {(float) cJSON_GetArrayItem(a, 0)->valuedouble, (float) cJSON_GetArrayItem(a, 1)->valuedouble, (float) cJSON_GetArrayItem(a, 2)->valuedouble};
+            found = 1;
+        }
+        cJSON_Delete(rec);
+    }
+    return found;
+}
+
+static void test_pose_math(void) {
+    printf("edit math...\n");
+    CHECK(object_manager_snap(7.4f, 5.0f) == 5.0f && object_manager_snap(7.6f, 5.0f) == 10.0f && object_manager_snap(3.3f, 0.0f) == 3.3f, "snap");
+    const ObjectManagerPose box = {{0.0f, 0.0f, 0.0f}, {10.0f, 10.0f, 4.0f}, 0, 0};
+    ObjectManagerPose o;
+    object_manager_pose_move(&box, 0, 6.6f, 5.0f, &o);
+    CHECK(o.position.x == 5.0f && o.position.y == 0.0f && o.size.x == 10.0f, "move x 6.6 snapped to 5 (%.2f)", o.position.x);
+    object_manager_pose_move(&box, 1, 2.2f, 1.0f, &o);
+    CHECK(o.position.y == 2.0f, "move y");
+    object_manager_pose_resize(&box, 0, 1, 4.0f, 2.0f, 0, &o);
+    CHECK(o.size.x == 14.0f && o.position.x == 2.0f, "+x face out 4: size 14, centre +2 (%.2f, %.2f)", o.size.x, o.position.x);
+    object_manager_pose_resize(&box, 0, -1, 4.0f, 2.0f, 0, &o);
+    CHECK(o.size.x == 14.0f && o.position.x == -2.0f, "-x face out 4: centre -2");
+    object_manager_pose_resize(&box, 0, 1, 4.0f, 2.0f, 1, &o);
+    CHECK(o.size.x == 18.0f && o.position.x == 0.0f, "symmetric: both faces (%.2f)", o.size.x);
+    object_manager_pose_resize(&box, 1, 1, 5.0f, 5.0f, 0, &o);
+    CHECK(o.size.y == 15.0f && o.position.y == 0.0f, "top face up: the feet stay");
+    object_manager_pose_resize(&box, 1, -1, 5.0f, 5.0f, 0, &o);
+    CHECK(o.size.y == 15.0f && o.position.y == -5.0f, "bottom face down: the feet go down (%.2f)", o.position.y);
+    object_manager_pose_resize(&box, 2, 1, -20.0f, 1.0f, 0, &o);
+    CHECK(o.size.z == OM_EDIT_SIZE_MIN && fabsf(o.position.z - (OM_EDIT_SIZE_MIN - 4.0f) * 0.5f) < 0.001f, "the minimum size (%.2f)", o.size.z);
+    object_manager_pose_turn(&box, 1, &o);
+    CHECK(o.quarter == 1 && o.size.x == 4.0f && o.size.z == 10.0f, "a quarter turn swaps w and l");
+    const ObjectManagerPose ramp = {{0, 0, 0}, {10, 5, 20}, 3, 1};
+    object_manager_pose_turn(&ramp, 1, &o);
+    CHECK(o.quarter == 0 && o.size.x == 10.0f && o.size.z == 20.0f, "a ramp turns its \"d\" only");
+}
+
+static void test_edits(TestClient *a, TestClient *b) {
+    printf("edits (Physics Gun, Move / Resize)...\n");
+    Player *p = player_of(a), *q = player_of(b);
+    ClientConnection *bc = conn(b);
+    if (!p || !q || !bc) return;
+    Game *game = &g_server->game;
+    p->god_mode = q->god_mode = 1;
+    clean_up(a);
+    clean_up(b);
+    pump(200);
+    CHECK(g_weapons[WEAPON_ID_PHYS_GUN] == &g_phys_gun && g_phys_gun.kn_physgun && object_manager_weapon_allowed(WEAPON_ID_PHYS_GUN) &&
+          !object_manager_weapon_listed(WEAPON_ID_PHYS_GUN), "the Physics Gun: an extra slot, not a Weapons tile");
+    CHECK(object_manager_tool_info(OM_TOOL_MOVE)->handles && object_manager_tool_info(OM_TOOL_RESIZE)->handles, "Move / Resize are handle tools");
+
+    // b's client: a mirror game that applies what b hears
+    Game mirror;
+    memset(&mirror, 0, sizeof(mirror));
+    const cJSON *maps[1] = {game->map->raw_data};
+    int modes[1] = {MODE_ID_FFA};
+    game_configure(&mirror, NULL, maps, 1, modes, 1, NULL, 0, NULL, 0);
+    game_init(&mirror, 0, 0, 0);
+    const int crate = entry_index(OM_TAB_OBJECTS, "Crate");
+    b->count = 0;
+    NetSpawnResultPacket r = request_at(a, OM_ACTION_SPAWN_OBJECT, crate, -0.6f, p->direction.y);
+    const int uid = (int) game->map->object_count - 1;
+    pump(2);
+    for (int i = 0; i < b->count; i++) {
+        if (b->packets[i].type == NET_PACKET_SPAWNED_OBJ) object_manager_apply_spawned(&mirror, b->packets[i].payload, b->packets[i].length);
+    }
+    ObjectManagerPose from, to;
+    CHECK(r.status == OM_STATUS_OK && object_manager_pose(game, uid, &from), "a crate to edit (status %u)", r.status);
+    const ObjectManagerPose spawned_pose = from;
+    // an edit needs the Physics Gun in hand
+    to = from;
+    to.position.x += 10.0f;
+    pump(20);
+    r = edit_at(a, OM_EDIT_SOURCE_PHYSGUN, uid, &to, OM_EDIT_BEGIN);
+    CHECK(r.status == OM_STATUS_NO_TOOL, "no Physics Gun in hand (status %u)", r.status);
+    pump(20);
+    r = request(a, OM_ACTION_ADD_WEAPON, WEAPON_ID_PHYS_GUN, 0.0f);
+    pump(4);
+    hold(a, WEAPON_ID_PHYS_GUN);
+    CHECK(r.status == OM_STATUS_OK && p->weapon == &g_phys_gun, "the Physics Gun in hand (status %u)", r.status);
+    // it never fires
+    for (int i = 0; i < 20; i++) input(a, -1, 0);
+    Input in = {.seq = ++a->seq, .move_dir = -1, .delta = 1.0f / 60.0f, .x_dir = 0.0f, .y_dir = p->direction.y, .shoot = 1};
+    NetInputPacket packet;
+    net_packet_from_input(&packet, &in);
+    send_to(a, NET_PACKET_INPUT, &packet, sizeof(packet));
+    pump(4);
+    CHECK(p->reloads[p->loadout_index] == 0.0f, "the Physics Gun fires nothing");
+
+    // grab and carry: the pose in place, everyone gets the update, collision follows
+    reset_received();
+    r = edit_at(a, OM_EDIT_SOURCE_PHYSGUN, uid, &to, OM_EDIT_BEGIN);
+    const Object *o = game->map->objects[uid];
+    CHECK(r.status == OM_STATUS_OK && o->active && fabsf(o->position.x - to.position.x) < 0.06f, "grab + move (status %u, x %.2f)", r.status, o->position.x);
+    pump(2);
+    vec3 seen;
+    CHECK(update_p(b, uid, &seen) && fabsf(seen.x - o->position.x) < 0.06f, "the other player gets OM_SPAWNED_UPDATE (x %.2f)", seen.x);
+    for (int i = 0; i < b->count; i++) {
+        if (b->packets[i].type == NET_PACKET_SPAWNED_OBJ) object_manager_apply_spawned(&mirror, b->packets[i].payload, b->packets[i].length);
+    }
+    const Object *m = mirror.map && (size_t) uid < mirror.map->object_count ? mirror.map->objects[uid] : NULL;
+    CHECK(m && m->spawned && m->active && fabsf(m->position.x - o->position.x) < 0.001f && fabsf(m->position.z - o->position.z) < 0.001f,
+          "b's client moves its copy in place (same uid)");
+    if (m) {
+        const vec3 top = {m->position.x, m->position.y + 50.0f, m->position.z};
+        const float hit = line_in_rect(top, (vec3) {0.0f, -100.0f, 0.0f}, m->position, m->scale);
+        CHECK(hit > 0.0f && fabsf(top.y - 100.0f * hit - (o->position.y + o->scale.y)) < 0.05f, "and its collision box with it");
+    }
+    const cJSON *rp = cJSON_GetObjectItem(o->raw, "p");
+    CHECK(fabsf((float) cJSON_GetArrayItem(rp, 0)->valuedouble - o->position.x) < 0.06f, "the record a joiner gets follows (OM_SPAWNED_ADD replays it)");
+    ObjectManagerAim aim;
+    float pitch, yaw;
+    aim_at(p, (vec3) {o->position.x, o->position.y + o->scale.y * 0.5f, o->position.z}, &pitch, &yaw);
+    CHECK(object_manager_aim(game, p, pitch, yaw, &aim) && aim.object == uid, "the crosshair ray hits it where it went (object %d)", aim.object);
+    // the editor's own clock
+    to.position.x += 2.0f;
+    r = edit_at(a, OM_EDIT_SOURCE_PHYSGUN, uid, &to, 0);
+    CHECK(r.status == OM_STATUS_RATE || r.status == OM_STATUS_OK, "edits are paced (status %u)", r.status);
+    pump(6);
+    r = edit_at(a, OM_EDIT_SOURCE_PHYSGUN, uid, &to, 0);
+    CHECK(r.status == OM_STATUS_OK, "the drag goes on (status %u)", r.status);
+    // turned (quarter) by the rotate key, then released with Drop: down onto the floor
+    object_manager_pose(game, uid, &from);
+    object_manager_pose_turn(&from, 1, &to);
+    to.position.y += 25.0f;
+    pump(6);
+    r = edit_at(a, OM_EDIT_SOURCE_PHYSGUN, uid, &to, OM_EDIT_DROP);
+    o = game->map->objects[uid];
+    CHECK(r.status == OM_STATUS_OK && fabsf(o->position.y - from.position.y) < 0.6f, "Drop: back on the floor (%.2f, was %.2f)", o->position.y, from.position.y);
+    CHECK(fabsf(o->scale.x - from.size.z) < 0.01f, "and turned (w / l %.1f %.1f)", o->scale.x, o->scale.z);
+
+    // btools: Resize with the Tool Gun, collision follows the new size
+    pump(20);
+    request(a, OM_ACTION_ADD_WEAPON, WEAPON_ID_TOOL_GUN, 0.0f);
+    pump(4);
+    hold(a, WEAPON_ID_TOOL_GUN);
+    object_manager_pose(game, uid, &from);
+    object_manager_pose_resize(&from, 1, 1, 7.7f, 5.0f, 0, &to);
+    pump(20);
+    r = edit_at(a, OM_EDIT_SOURCE_BTOOLS, uid, &to, OM_EDIT_BEGIN);
+    o = game->map->objects[uid];
+    CHECK(r.status == OM_STATUS_OK && fabsf(o->scale.y - (from.size.y + 10.0f)) < 0.01f, "Resize the top face up 10 (snap 5; %.2f)", o->scale.y);
+    const vec3 above = {o->position.x, o->position.y + 60.0f, o->position.z};
+    const float t = line_in_rect(above, (vec3) {0.0f, -100.0f, 0.0f}, o->position, o->scale);
+    CHECK(t > 0.0f && fabsf(above.y - 100.0f * t - (o->position.y + o->scale.y)) < 0.05f, "a ray from above lands on the new top (%.2f)", above.y - 100.0f * t);
+    object_manager_pose_move(&from, 2, 5.0f, 5.0f, &to);
+    to.size = o->scale;
+    pump(6);
+    r = edit_at(a, OM_EDIT_SOURCE_BTOOLS, uid, &to, OM_EDIT_BEGIN);
+    CHECK(r.status == OM_STATUS_OK && fabsf(game->map->objects[uid]->position.z - to.position.z) < 0.06f, "Move along z (status %u)", r.status);
+    // limits
+    ObjectManagerPose bad = to;
+    bad.size.x = OM_EDIT_SIZE_MAX + 50.0f;
+    pump(6);
+    r = edit_at(a, OM_EDIT_SOURCE_BTOOLS, uid, &bad, 0);
+    CHECK(r.status == OM_STATUS_BOUNDS, "too big (status %u)", r.status);
+    bad = to;
+    bad.position.x += 1000.0f;
+    pump(6);
+    r = edit_at(a, OM_EDIT_SOURCE_BTOOLS, uid, &bad, 0);
+    CHECK(r.status == OM_STATUS_BOUNDS, "out of reach (status %u)", r.status);
+    // never into a player
+    bad = to;
+    q->position = (vec3) {p->position.x + sinf(p->direction.y) * 25.0f, p->position.y, p->position.z + cosf(p->direction.y) * 25.0f}; // behind a
+    q->velocity = (vec3) {0};
+    bad.position = q->position;
+    bad.position.y = q->position.y - 1.0f;
+    pump(6);
+    r = edit_at(a, OM_EDIT_SOURCE_BTOOLS, uid, &bad, 0);
+    CHECK(r.status == OM_STATUS_BLOCKED, "into b: refused (status %u)", r.status);
+
+    // Undo: the move, the resize, then the drop, the turn and the carry, one step per grab / drag
+    const vec3 home = game->map->objects[uid]->position;
+    pump(20);
+    r = request(a, OM_ACTION_UNDO, 0, 0.0f);
+    CHECK(r.status == OM_STATUS_OK && fabsf(game->map->objects[uid]->position.z - (home.z - 5.0f)) < 0.06f, "undo the move (z %.2f)", game->map->objects[uid]->position.z);
+    pump(20);
+    r = request(a, OM_ACTION_UNDO, 0, 0.0f);
+    CHECK(r.status == OM_STATUS_OK && fabsf(game->map->objects[uid]->scale.y - from.size.y) < 0.01f, "undo the resize (%.2f)", game->map->objects[uid]->scale.y);
+    pump(20);
+    r = request(a, OM_ACTION_UNDO, 0, 0.0f);
+    o = game->map->objects[uid];
+    CHECK(r.status == OM_STATUS_OK && o->active && fabsf(o->position.x - spawned_pose.position.x) < 0.06f &&
+          fabsf(o->position.y - spawned_pose.position.y) < 0.06f && fabsf(o->scale.x - spawned_pose.size.x) < 0.01f,
+          "undo the grab: carry, turn and drop in one step (x %.2f, was %.2f)", o->position.x, spawned_pose.position.x);
+    pump(20);
+    r = request(a, OM_ACTION_UNDO, 0, 0.0f);
+    CHECK(r.status == OM_STATUS_OK && !game->map->objects[uid]->active, "then the spawn itself (status %u)", r.status);
+
+    // someone else's object: refused unless dev / host; a custom game's guest edits nothing
+    pump(20);
+    r = request_at(a, OM_ACTION_SPAWN_OBJECT, crate, -0.6f, p->direction.y);
+    const int mine = (int) game->map->object_count - 1;
+    bc->local = 0;
+    pump(20);
+    r = request(b, OM_ACTION_ADD_WEAPON, WEAPON_ID_PHYS_GUN, 0.0f);
+    pump(4);
+    hold(b, WEAPON_ID_PHYS_GUN);
+    q->position = p->position;
+    object_manager_pose(game, mine, &from);
+    object_manager_pose_move(&from, 1, 10.0f, 1.0f, &to);
+    pump(20);
+    r = edit_at(b, OM_EDIT_SOURCE_PHYSGUN, mine, &to, OM_EDIT_BEGIN);
+    CHECK(r.status == OM_STATUS_DENIED && fabsf(game->map->objects[mine]->position.y - from.position.y) < 0.01f, "b may not move a's object (status %u)", r.status);
+    game->is_sandbox = 0;
+    pump(20);
+    r = request_at(b, OM_ACTION_SPAWN_OBJECT, crate, -0.6f, q->direction.y);
+    r = edit_at(b, OM_EDIT_SOURCE_PHYSGUN, mine, &to, OM_EDIT_BEGIN);
+    CHECK(r.status == OM_STATUS_DENIED, "custom guest: no edits (status %u)", r.status);
+    game->is_sandbox = 1;
+    bc->local = 1;
+    pump(20);
+    r = edit_at(a, OM_EDIT_SOURCE_PHYSGUN, mine, &to, OM_EDIT_BEGIN);
+    CHECK(r.status == OM_STATUS_NO_TOOL, "a holds the Tool Gun, not the Physics Gun (status %u)", r.status);
+    p->god_mode = q->god_mode = 0;
+    clean_up(a);
+    clean_up(b);
 }
 
 static void test_join_sync(TestClient *a, TestClient *late, TestClient *old) {
@@ -1218,6 +1478,8 @@ int main(void) {
         test_objects(&g_clients[0], &g_clients[1]);
         test_give_drop(&g_clients[0], &g_clients[1]);
         test_tool_gun(&g_clients[0], &g_clients[1]);
+        test_pose_math();
+        test_edits(&g_clients[0], &g_clients[1]);
         test_join_sync(&g_clients[0], &g_clients[2], &g_clients[3]);
         test_permissions(&g_clients[0], &g_clients[1]);
         test_public_refusals(&g_clients[0], &g_clients[1]);

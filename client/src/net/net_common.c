@@ -556,6 +556,13 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             break;
         }
         case NET_PACKET_SPAWN_REQ: { // KrunkNative Object Manager (shared/include/object_manager.h)
+            if (length == sizeof(NetSpawnEditPacket)) { // OM_ACTION_EDIT: the request + a pose
+                NetSpawnEditPacket e;
+                memcpy(&e, payload, sizeof(e));
+                printf("{\"type\":\"spawn_edit\",\"id\":%u,\"uid\":%d,\"p\":[%g,%g,%g],\"s\":[%g,%g,%g],\"quarter\":%u,\"flags\":%u}", (unsigned int) type,
+                       e.uid, e.position[0], e.position[1], e.position[2], e.size[0], e.size[1], e.size[2], (unsigned int) e.quarter, (unsigned int) e.flags);
+                break;
+            }
             LOG_READ(NetSpawnReqPacket, "spawn_req");
             printf("{\"type\":\"spawn_req\",\"id\":%u,\"action\":%u,\"item\":%d,\"pitch\":%g,\"yaw\":%g}", (unsigned int) type,
                    (unsigned int) packet.action, packet.item, packet.pitch, packet.yaw);

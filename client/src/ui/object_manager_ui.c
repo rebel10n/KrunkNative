@@ -15,6 +15,10 @@
 // OM_ACTION_TOOL request with that tool. The HUD shows "TOOL: <NAME>" beside the ammo (#knToolHud)
 // while it is in hand. The tool is kept in storage (kn_omTool).
 //
+// Building (client/src/ui/om_build.c): the pane's Physics Gun row equips the Physics Gun; Move and
+// Resize are Tool Gun tools driven by handles (no OM_ACTION_TOOL shots); the Snap row picks the
+// btools' grid step, the Release row the Physics Gun's let-go (Freeze / Drop).
+//
 // Console: `give` / `drop` are server commands (shared/src/chat_commands.c); a `give` of a weapon
 // to yourself equips it like the Weapons tab's left click (object_manager_ui_chat_sent).
 //
@@ -256,7 +260,7 @@ static const char *om_tool_gun_line(void) {
     if (g_om.caps >= 0 && !(g_om.caps & OM_CAP_SPAWN)) return "Only developers and the host can use the Tool Gun here";
     if (me && me->weapon && me->weapon->kn_tool) return "Tool Gun in hand: shoot to use";
     for (int i = 0; me && me->loadout && i < me->loadout_size; i++) {
-        if (me->loadout[i] == WEAPON_ID_TOOL_GUN) return "Tool Gun in your loadout: pick a tool to hold it";
+        if (me->loadout[i] == WEAPON_ID_TOOL_GUN) return "Tool Gun in your loadout";
     }
     return "Pick a tool to equip the Tool Gun";
 }
@@ -272,6 +276,19 @@ static void om_tools_html(char **buf, size_t *len, size_t *cap) {
                   "<span class='knOmToolName'>%s</span></div>",
                   i, i == g_om.tool ? " knOmToolA" : "", i, t->icon, t->name);
     }
+    // not id='knOmPhys': on the web window.knOmPhys would be the element (named access, as knOmSearchBox)
+    om_append(buf, len, cap,
+              "<div id='knOmPhysRow' class='knOmTool knOmPhys' onclick='knOmPhys()'><span class='material-icons'>pan_tool</span>"
+              "<span class='knOmToolName'>Physics Gun</span></div><div class='knOmOpt'><span class='knOmOptName'>Snap</span>");
+    for (int i = 0; i < OB_SNAPS; i++) {
+        static const char *const snaps[OB_SNAPS] = {"1", "2", "5", "10"};
+        om_append(buf, len, cap, "<span id='knOmSnap%d' class='knOmOptBtn%s' onclick='knOmSnap(%d)'>%s</span>", i,
+                  i == om_build_snap_index() ? " knOmOptA" : "", i, snaps[i]);
+    }
+    om_append(buf, len, cap, "</div><div class='knOmOpt'><span class='knOmOptName'>Release</span>"
+                             "<span id='knOmDrop0' class='knOmOptBtn%s' onclick='knOmPhysDrop(0)'>Freeze</span>"
+                             "<span id='knOmDrop1' class='knOmOptBtn%s' onclick='knOmPhysDrop(1)'>Drop</span></div>",
+              om_build_drop() ? "" : " knOmOptA", om_build_drop() ? " knOmOptA" : "");
     const ObjectManagerToolInfo *t = object_manager_tool_info(g_om.tool);
     om_append(buf, len, cap, "<div id='knOmToolHint' class='knOmToolHint'>%s</div>", t ? t->hint : "");
     om_append(buf, len, cap, "<div id='knOmToolGun' class='knOmToolGun'>%s</div></div>", om_tool_gun_line());
@@ -387,6 +404,14 @@ static void om_update_tools(void) {
         const HtmlElem row = html_dom_by_id(id);
         if (row && html_dom_has_class(row, "knOmToolA") != (i == g_om.tool)) html_dom_set_class(row, "knOmToolA", i == g_om.tool);
     }
+    for (int i = 0; i < OB_SNAPS + 2; i++) {
+        char id[16];
+        if (i < OB_SNAPS) snprintf(id, sizeof(id), "knOmSnap%d", i);
+        else snprintf(id, sizeof(id), "knOmDrop%d", i - OB_SNAPS);
+        const HtmlElem b = html_dom_by_id(id);
+        const int on = i < OB_SNAPS ? i == om_build_snap_index() : (i - OB_SNAPS) == om_build_drop();
+        if (b && html_dom_has_class(b, "knOmOptA") != on) html_dom_set_class(b, "knOmOptA", on);
+    }
     const ObjectManagerToolInfo *t = object_manager_tool_info(g_om.tool);
     const HtmlElem hint = html_dom_by_id("knOmToolHint");
     if (hint && t) html_dom_set_text(hint, t->hint);
@@ -467,6 +492,19 @@ static void om_expect_equip(const int weapon_id) {
     g_om.pending_at = glfwGetTime();
 }
 
+// A KN gun in hand: its slot when carried, else added as an extra slot (equipped when it lands)
+static void om_equip_gun(const Player *me, const int weapon_id, const char *text) {
+    for (int i = 0; me->loadout && i < me->loadout_size; i++) {
+        if (me->loadout[i] != weapon_id) continue;
+        if (i != me->loadout_index) ui_controls_select_slot(i);
+        om_set_status(text, 0);
+        return;
+    }
+    om_set_status(text, 0);
+    om_expect_equip(weapon_id);
+    om_send(OM_ACTION_ADD_WEAPON, weapon_id);
+}
+
 // The tools pane: pick `tool` and put the Tool Gun in hand (added as an extra slot first when it
 // is not carried; the server refuses it without the spawn right)
 static void om_pick_tool(const int tool) {
@@ -488,15 +526,27 @@ static void om_pick_tool(const int tool) {
     }
     char text[96];
     snprintf(text, sizeof(text), "Tool: %s", object_manager_tool_info(tool)->name);
-    for (int i = 0; me->loadout && i < me->loadout_size; i++) {
-        if (me->loadout[i] != WEAPON_ID_TOOL_GUN) continue;
-        if (i != me->loadout_index) ui_controls_select_slot(i);
-        om_set_status(text, 0);
+    om_equip_gun(me, WEAPON_ID_TOOL_GUN, text);
+}
+
+// The Tools pane's Physics Gun row
+void object_manager_ui_pick_physgun(void) {
+    const Client *client = om_client();
+    const Player *me = client ? client->me : NULL;
+    if (!me) {
+        om_set_status("Join a game to use the Physics Gun", 1);
         return;
     }
-    om_set_status(text, 0);
-    om_expect_equip(WEAPON_ID_TOOL_GUN);
-    om_send(OM_ACTION_ADD_WEAPON, WEAPON_ID_TOOL_GUN);
+    if (!om_server_ok(client)) {
+        om_set_status("This server has no Object Manager", 1);
+        return;
+    }
+    om_equip_gun(me, WEAPON_ID_PHYS_GUN, "Physics Gun: hold fire on an object to carry it");
+}
+
+int object_manager_ui_tool(void) {
+    om_load_tool();
+    return g_om.tool;
 }
 
 static void om_pick(const int tab, const int item, const int alt) {
@@ -532,6 +582,10 @@ static void om_pick(const int tab, const int item, const int alt) {
 // A Weapons-tab click without the window (input scripts: `om add <id>` / `om drop <id>`)
 void object_manager_ui_pick_weapon(const int weapon_id, const int drop) {
     om_pick(OM_TAB_WEAPONS, weapon_id, drop);
+}
+
+void object_manager_ui_pick_entry(const int tab, const int item) {
+    om_pick(tab, item, 0);
 }
 
 void object_manager_ui_pick_tool(const int tool) {
@@ -579,6 +633,20 @@ int object_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlAr
         om_send(OM_ACTION_REMOVE_AIM, 0);
         return 0;
     }
+    if (!strcmp(name, "knOmPhys")) {
+        object_manager_ui_pick_physgun();
+        return 0;
+    }
+    if (!strcmp(name, "knOmSnap")) {
+        om_build_set_snap(arg_num(args, argc, 0, 2));
+        om_update_tools();
+        return 0;
+    }
+    if (!strcmp(name, "knOmPhysDrop")) {
+        om_build_set_drop(arg_num(args, argc, 0, 0));
+        om_update_tools();
+        return 0;
+    }
     if (!strcmp(name, "knOmTool")) {
         om_pick_tool(arg_num(args, argc, 0, -1));
         return 0;
@@ -599,6 +667,13 @@ static void om_on_result(const NetSpawnResultPacket *r) {
     if (r->action == OM_ACTION_QUERY) {
         om_update_status();
         om_update_tools();
+        return;
+    }
+    if (r->action == OM_ACTION_EDIT) { // a drag's edits: only refusals speak (a rate answer is the pace)
+        if (r->status != OM_STATUS_OK && r->status != OM_STATUS_RATE) {
+            om_build_refused(r->status);
+            om_set_status(object_manager_status_text(r->status), 1);
+        }
         return;
     }
     if (r->status != OM_STATUS_OK) {
@@ -708,7 +783,8 @@ static void om_tool_shots(Client *client, const Player *me) {
     const int same = g_om.shot_me == me && g_om.shot_slot == slot && slot >= 0;
     if (same && me->weapon && me->weapon->kn_tool && reload > g_om.shot_reload + 1e-4f && om_server_ok(client)) {
         om_load_tool();
-        om_send(OM_ACTION_TOOL, g_om.tool);
+        const ObjectManagerToolInfo *info = object_manager_tool_info(g_om.tool);
+        if (info && !info->handles) om_send(OM_ACTION_TOOL, g_om.tool); // Move / Resize: om_build.c drags instead
     }
     g_om.shot_me = me;
     g_om.shot_slot = slot;
@@ -719,10 +795,13 @@ static void om_tool_shots(Client *client, const Player *me) {
 // use next to #ammoHolder so the HUD markup stays v7's)
 static void om_tool_hud(const Player *me) {
     char text[sizeof(g_om.hud_text)] = "";
-    if (me && me->active && me->weapon && me->weapon->kn_tool) {
+    if (me && me->active && me->weapon && me->weapon->kn_physgun) {
+        snprintf(text, sizeof(text), "PHYSICS GUN: %s", om_build_drop() ? "DROP" : "FREEZE");
+    } else if (me && me->active && me->weapon && me->weapon->kn_tool) {
         om_load_tool();
         const ObjectManagerToolInfo *t = object_manager_tool_info(g_om.tool);
-        snprintf(text, sizeof(text), "TOOL: %s", t ? t->name : "?");
+        if (t && t->handles) snprintf(text, sizeof(text), "TOOL: %s (SNAP %g)", t->name, (double) om_build_snap());
+        else snprintf(text, sizeof(text), "TOOL: %s", t ? t->name : "?");
         for (char *c = text; *c; c++) *c = (char) (*c >= 'a' && *c <= 'z' ? *c - 32 : *c);
     }
     HtmlElem hud = html_dom_by_id("knToolHud");
@@ -775,6 +854,7 @@ void object_manager_ui_chat_sent(const char *text) {
 
 // A new connection / map: the caps belong to the server we talked to.
 void object_manager_ui_reset(void) {
+    om_build_reset();
     g_om.caps = -1;
     g_om.queried = 0;
     g_om.pending_equip = -1;

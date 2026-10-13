@@ -20,7 +20,10 @@
 // Console (shared/src/chat_commands.c, doc/console.md): `give <weapon|entity> [player]` runs
 // OM_ACTION_ADD_WEAPON / OM_ACTION_SPAWN_ENTITY for a player, `drop` OM_ACTION_DROP_HELD (or v7's
 // drpw for a picked-up weapon). The Tool Gun (WEAPON_ID_TOOL_GUN, the window's Tools pane) sends
-// each shot as OM_ACTION_TOOL with the tool picked there.
+// each shot as OM_ACTION_TOOL with the tool picked there. The Physics Gun (WEAPON_ID_PHYS_GUN) and
+// the Move / Resize tools (btools) send OM_ACTION_EDIT: a NetSpawnEditPacket (the request with a
+// pose) that moves, resizes or turns a spawned object in place, replicated as SPAWNED_OBJ
+// OM_SPAWNED_UPDATE; Undo takes edits back too (the previous pose is kept).
 //
 // Spawned map objects live in Map.objects after the map's own (uid = index, like the builds),
 // flagged Object.spawned, and go at the next round start with the builds (world_remove_builds).
@@ -53,6 +56,7 @@ typedef enum {
     OM_ACTION_UNDO,          // remove this player's last spawned thing
     OM_ACTION_DROP_HELD,     // the extra weapon in hand: a weapon pickup a step in front, out of the loadout (drop, Z)
     OM_ACTION_TOOL,          // item = ObjectManagerTool: a Tool Gun shot at the crosshair (the Tool Gun in hand)
+    OM_ACTION_EDIT,          // NetSpawnEditPacket only (item = ObjectManagerEditSource): a spawned object's new pose
     OM_ACTION_COUNT
 } ObjectManagerAction;
 
@@ -68,6 +72,8 @@ typedef enum {
     OM_STATUS_KEEP,      // DROP_HELD: not an extra weapon (class / melee weapons stay; v7's drpw takes picked ones)
     OM_STATUS_NO_TOOL,   // TOOL: the Tool Gun is not in hand
     OM_STATUS_UNSUPPORTED, // TOOL: the tool does not work on that (Rotator / Duplicator: spawned objects only)
+    OM_STATUS_BLOCKED,   // EDIT: the object would end up inside a player
+    OM_STATUS_BOUNDS,    // EDIT: out of reach, or past the size limits (OM_EDIT_SIZE_*)
     OM_STATUS_COUNT
 } ObjectManagerStatus;
 
@@ -114,6 +120,8 @@ typedef enum {
     OM_TOOL_DUPLICATOR,  // copy the spawned object at the crosshair; the next shot places the copy
     OM_TOOL_ROTATOR,     // turn the spawned object at the crosshair a quarter turn
     OM_TOOL_INFO,        // what is at the crosshair: kind, owner, uid (a NOTIFY to the shooter)
+    OM_TOOL_MOVE,        // btools: select a spawned object, drag its X / Y / Z arrows (OM_ACTION_EDIT, the client's handles)
+    OM_TOOL_RESIZE,      // btools: drag a face handle to resize along its axis (shift: both faces)
     OM_TOOL_COUNT
 } ObjectManagerTool;
 
@@ -122,6 +130,7 @@ typedef struct {
     const char *icon;  // Material Icons ligature
     const char *hint;  // the pane's line under the name
     unsigned char mutates; // ownership applies (your own spawns unless dev / host)
+    unsigned char handles; // btools: driven by the client's handles (OM_ACTION_EDIT), no OM_ACTION_TOOL shots
 } ObjectManagerToolInfo;
 const ObjectManagerToolInfo *object_manager_tool_info(int tool); // NULL out of range
 
@@ -135,6 +144,32 @@ const ObjectManagerToolInfo *object_manager_tool_info(int tool); // NULL out of 
 
 #define OM_SPAWNED_ADD 1
 #define OM_SPAWNED_REMOVE 2
+#define OM_SPAWNED_UPDATE 3 // an edited object: the record (JSON) follows, it replaces the object at its uid
+
+// ---- edits (OM_ACTION_EDIT): the Physics Gun and the Move / Resize tools
+typedef enum {
+    OM_EDIT_SOURCE_PHYSGUN = 0, // the Physics Gun in hand
+    OM_EDIT_SOURCE_BTOOLS,      // the Tool Gun in hand (Move / Resize)
+} ObjectManagerEditSource;
+
+#define OM_EDIT_BEGIN 1        // a new undo step: a grab or a drag starts (its first edit)
+#define OM_EDIT_DROP 2         // the Physics Gun's release with "Drop": down onto the surface below
+#define OM_EDIT_INTERVAL 0.05f // seconds between one player's edits (clients send at most 10 / s)
+#define OM_EDIT_SIZE_MIN 1.0f  // per axis (units)
+#define OM_EDIT_SIZE_MAX 200.0f
+#define OM_EDIT_RANGE 420.0f   // the edited box's centre from the editor's eye
+#define OM_EDITS_MAX 256       // the undo history of edits in a round (the oldest go)
+#define OM_PHYSGUN_DIST_MIN 8.0f // the grab distance the wheel changes (units)
+#define OM_PHYSGUN_DIST_MAX 300.0f
+
+// A spawned object's pose as edits see it: the feet (bottom centre), the world-axis box, the
+// quarter turns about y (map.js "d" for ramps and ladders, `directed`).
+typedef struct {
+    vec3 position;
+    vec3 size;
+    int quarter;
+    int directed;
+} ObjectManagerPose;
 
 // Caps and rates (server-side): one table so hosts can be tuned in one place.
 #define OM_RATE_BURST 10.0f        // request bucket size
@@ -166,6 +201,16 @@ typedef struct {
     int16_t item;      // the request's item
     uint16_t limit;    // the cap that was hit (OM_STATUS_LIMIT), else 0
 } NetSpawnResultPacket;
+
+typedef struct {
+    NetSpawnReqPacket req; // action OM_ACTION_EDIT, item ObjectManagerEditSource, the view (pitch, yaw)
+    int32_t uid;           // the spawned object
+    float position[3];     // its new pose (ObjectManagerPose)
+    float size[3];
+    uint8_t quarter;
+    uint8_t flags;         // OM_EDIT_*
+    uint16_t reserved;
+} NetSpawnEditPacket;
 
 typedef struct {
     int32_t uid;
@@ -221,6 +266,26 @@ void object_manager_round_start(Game *game);           // after world_remove_bui
 int object_manager_keep_extras(const Game *game, const ObjectManagerPerms *perms);
 // The kept extra weapons in place (the Tool Gun goes without OM_CAP_SPAWN); returns the new count.
 int object_manager_filter_extras(const Game *game, const ObjectManagerPerms *perms, int *weapon_ids, int count);
+
+// OM_ACTION_EDIT (a NetSpawnEditPacket): the same rules as the other actions (OM_CAP_SPAWN, Remove's
+// ownership), the editor's own rate (OM_EDIT_INTERVAL), reach and size limits, no box into a
+// player; applied in place and sent to everyone as OM_SPAWNED_UPDATE.
+void object_manager_edit(Game *game, Player *player, const NetSpawnEditPacket *edit, const ObjectManagerPerms *perms,
+                         NetSpawnResultPacket *out);
+
+// ---- edits (both sides): the pose of a spawned object the edits take (active, not a pickup or a
+// zombies machine), and the btools' handle math (pure: the client drags, the tests check)
+int object_manager_editable(const Game *game, int uid);
+int object_manager_pose(const Game *game, int uid, ObjectManagerPose *out);
+float object_manager_snap(float value, float step); // to the nearest multiple of step (step <= 0: as is)
+// Move: `delta` units along axis 0 x / 1 y / 2 z, snapped
+void object_manager_pose_move(const ObjectManagerPose *from, int axis, float delta, float snap, ObjectManagerPose *out);
+// Resize: the face on `axis` facing `sign` (+1 / -1) pushed out by `delta` (snapped; inward when
+// negative), the opposite face kept, or both faces moved when `symmetric`; OM_EDIT_SIZE_MIN at least
+void object_manager_pose_resize(const ObjectManagerPose *from, int axis, int sign, float delta, float snap, int symmetric,
+                                ObjectManagerPose *out);
+// `turns` quarter turns: w and l swap on odd ones (the AABB follows the model), not for ramps / ladders
+void object_manager_pose_turn(const ObjectManagerPose *from, int turns, ObjectManagerPose *out);
 
 // ---- both sides
 // Replace the extra weapon list (invalid / duplicate / over-cap ids dropped) and rebuild the

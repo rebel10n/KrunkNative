@@ -1236,6 +1236,7 @@ typedef struct Player_t {
     float om_tokens;              // Object Manager request bucket (OM_RATE_*), refilled by game time
     float om_tokens_at;           // game->now of the last refill
     int om_copy;                  // Tool Gun Duplicator: the copied spawned object's uid + 1, 0 none (authority)
+    float om_edit_at;             // game->now of the last accepted Object Manager edit (OM_EDIT_INTERVAL, authority)
 
     Input *input_queue;
     size_t input_queue_size;

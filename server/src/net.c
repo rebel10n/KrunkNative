@@ -1451,7 +1451,18 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             break;
         }
         case NET_PACKET_SPAWN_REQ: { // KrunkNative Object Manager (F1 spawn menu), v7 peers
-            if (!ks_server_peer_v7(client) || packet->length != sizeof(NetSpawnReqPacket)) break;
+            if (!ks_server_peer_v7(client)) break;
+            if (packet->length == sizeof(NetSpawnEditPacket)) { // OM_ACTION_EDIT: the request + a pose
+                NetSpawnEditPacket edit;
+                memcpy(&edit, packet->payload, sizeof(edit));
+                if (edit.req.action != OM_ACTION_EDIT) break;
+                const ObjectManagerPerms perms = net_om_perms(client);
+                NetSpawnResultPacket result;
+                object_manager_edit(&g_server->game, client->player, &edit, &perms, &result);
+                net_send_packet(client->fd, NET_PACKET_SPAWN_RESULT, &result, sizeof(result));
+                break;
+            }
+            if (packet->length != sizeof(NetSpawnReqPacket)) break;
             NetSpawnReqPacket req;
             memcpy(&req, packet->payload, sizeof(req));
             net_handle_object_manager(client, &req);

@@ -15,7 +15,9 @@ bridged remote browser), so it is neither DEV nor host.
   4. `give` / `drop` (chat commands): refused to the guest, the dev's go through; a dropped weapon
      is a pickup the guest hears; the Tool Gun's tools (Info, Rotator, Duplicator, Deleter) for the
      dev, refused to the guest
-  5. the rate limit answers a burst with "Slow down"
+  5. edits (OM_ACTION_EDIT): the dev's Physics Gun moves a crate, the guest hears OM_SPAWNED_UPDATE and
+     may not edit it; Undo puts it back
+  6. the rate limit answers a burst with "Slow down"
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
 import os
@@ -36,7 +38,8 @@ WORK = tempfile.mkdtemp(prefix="kn-om-e2e-", dir=os.path.expanduser("~/.cache"))
 SPAWN, FORWARDED, PICKUP = 4, 85, 128
 SPAWN_REQ, SPAWN_RESULT, LOADOUT_EXTRA, SPAWNED_OBJ = 250, 251, 252, 253
 QUERY, ADD_WEAPON, REMOVE_WEAPON, CLEAR_WEAPONS, DROP_WEAPON, SPAWN_ENTITY, SPAWN_NPC, SPAWN_OBJECT, REMOVE_AIM, UNDO = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
-DROP_HELD, TOOL = 10, 11
+DROP_HELD, TOOL, EDIT = 10, 11, 12
+PHYS_GUN, EDIT_PHYSGUN, EDIT_BEGIN = 31, 0, 1
 TOOL_DELETER, TOOL_DUPLICATOR, TOOL_ROTATOR, TOOL_INFO = 0, 1, 2, 3
 TOOL_COPIED, TOOL_PASTED, TOOL_SHOWN = 1, 2, 3
 NO_TOOL = 9
@@ -146,6 +149,20 @@ class Peer(kn_proto.Conn):
             self.send(INPUT, struct.pack("<iifffBBBb", self.seq, -1, 1.0 / 60.0, 0.0, 0.0, 1 if shoot and i == 15 else 0, 0, 0, scroll))
         self.pump(0.3)
 
+    def edit(self, uid, pos, size, quarter=0, flags=EDIT_BEGIN):
+        """One OM_ACTION_EDIT (the Physics Gun's); its SPAWN_RESULT as (status, caps, limit)."""
+        mark = len(self.packets)
+        self.send(SPAWN_REQ, struct.pack("<BBhff", EDIT, 0, EDIT_PHYSGUN, 0.0, 0.0) + struct.pack("<i3f3fBBH", uid, *pos, *size, quarter, flags, 0))
+        end = time.time() + 3
+        while time.time() < end:
+            self.read(timeout=0.2)
+            for t, p in self.packets[mark:]:
+                if t == SPAWN_RESULT and len(p) == 8:
+                    a, status, caps, _extra, _it, limit = struct.unpack("<BBBBhH", p)
+                    if a == EDIT:
+                        return status, caps, limit
+        return None
+
     def of_type(self, ptype, since=0):
         return [p for t, p in self.packets[since:] if t == ptype]
 
@@ -173,6 +190,15 @@ def spawned_adds_since(peer, since):
         op, kind, _r, uid, owner = struct.unpack("<BBHii", p[:12])
         if op == 1:
             out.append((uid, owner, p[12:].split(b"\0", 1)[0].decode()))
+    return out
+
+
+def updates_since(peer, since, uid):
+    out = []
+    for p in peer.of_type(SPAWNED_OBJ, since):
+        op, _kind, _r, u, _owner = struct.unpack("<BBHii", p[:12])
+        if op == 3 and u == uid:
+            out.append(p[12:].split(b"\0", 1)[0].decode())
     return out
 
 
@@ -300,7 +326,7 @@ def run():
     check("Rotator", r is not None and r[0] == OK, str(r))
     guest.pump(0.5)
     ops = [struct.unpack("<BBHii", p[:12])[0] for p in guest.of_type(SPAWNED_OBJ, gmark)]
-    check("the guest sees the turn (REMOVE + ADD)", 1 in ops and 2 in ops, str(ops))
+    check("the guest sees the turn in place (OM_SPAWNED_UPDATE)", 3 in ops, str(ops))
     r = host.request(TOOL, TOOL_DUPLICATOR, -0.45)
     check("Duplicator copies", r is not None and r[0] == OK and r[2] == TOOL_COPIED, str(r))
     r = host.request(TOOL, TOOL_DUPLICATOR, -0.3)
@@ -323,6 +349,42 @@ def run():
     check("the guest gets the dropped Crossbow pickup", len(drops) == 1, str(spawned_adds_since(guest, gmark)))
     check("the dev's extras: the Tool Gun only", extras_for(guest, host.me["uid"]) == [TOOL_GUN], str(extras_for(guest, host.me["uid"])))
     host.request(UNDO)
+    host.request(CLEAR_WEAPONS)
+
+    # part 5: edits (the Physics Gun) on a public server
+    time.sleep(3)
+    mark = host.say('/give "physics gun"')
+    check("dev: give the Physics Gun", host.heard(mark, "Physics Gun added to your loadout"))
+    gmark = len(guest.packets)
+    r = host.request(SPAWN_OBJECT, OBJECT_CRATE, -0.45)
+    guest.pump(0.5)
+    crates = [a for a in spawned_adds_since(guest, gmark) if '"i":1,' in a[2] or a[2].endswith('"i":1}')]
+    check("dev places a crate to carry", r is not None and r[0] == OK and len(crates) == 1, str(r))
+    if crates:
+        uid, _owner, rec = crates[0]
+        import json as _json
+        d = _json.loads(rec)
+        pos, size = d["p"], d.get("s", [12, 12, 12])
+        quarter = round(d.get("r", [0, 0, 0])[1] / 1.5707963) % 4
+        r = None
+        for s in range(1, 6):  # the Physics Gun's slot: an extra after the class loadout
+            host.hold(s)
+            r = host.edit(uid, [pos[0], pos[1] + 6.0, pos[2]], size, quarter)
+            if r is not None and r[0] != NO_TOOL:
+                break
+            time.sleep(0.1)
+        check("dev: grab and lift it", r is not None and r[0] == OK, str(r))
+        guest.pump(0.5)
+        ups = updates_since(guest, gmark, uid)
+        check("the guest hears OM_SPAWNED_UPDATE with the new spot", bool(ups) and abs(_json.loads(ups[-1])["p"][1] - (pos[1] + 6.0)) < 0.11, str(ups[-1:]))
+        r = guest.edit(uid, [pos[0], pos[1] + 12.0, pos[2]], size, quarter)
+        check("the guest may not edit it", r is not None and r[0] == DENIED, str(r))
+        gmark = len(guest.packets)
+        r = host.request(UNDO)
+        guest.pump(0.5)
+        ups = updates_since(guest, gmark, uid)
+        check("Undo puts it back", r is not None and r[0] == OK and bool(ups) and abs(_json.loads(ups[-1])["p"][1] - pos[1]) < 0.11, str(ups[-1:]))
+        host.request(UNDO)
     host.request(CLEAR_WEAPONS)
 
     time.sleep(3)  # the bucket refills

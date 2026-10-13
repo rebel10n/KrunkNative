@@ -395,10 +395,12 @@ img.knOmProp {
   min-width: 0;
 }
 #menuWindow.dark div.knOmTools {
-  width: 160px;
+  width: 184px;
+  max-height: 420px; /* never taller than the status line + the grid */
+  overflow: hidden;
   flex-shrink: 0;
   margin-left: 12px;
-  padding: 8px;
+  padding: 6px 8px;
   border-radius: 5px;
   background-color: rgba(0, 0, 0, 0.35);
 }
@@ -406,18 +408,19 @@ img.knOmProp {
   font-size: 16px;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.6);
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 #menuWindow.dark div.knOmTool {
   display: flex;
   align-items: center;
-  margin-bottom: 4px;
-  padding: 5px 6px;
+  margin-bottom: 2px;
+  padding: 2px 6px;
   border: 2px solid transparent;
   border-radius: 4px;
   background-color: rgba(255, 255, 255, 0.05);
   color: #fff;
-  font-size: 16px;
+  font-size: 15px;
+  white-space: nowrap;
   cursor: pointer;
 }
 #menuWindow.dark div.knOmTool:hover {
@@ -434,14 +437,40 @@ img.knOmProp {
 #menuWindow.dark div.knOmTool span.knOmToolName {
   color: #fff; /* main.css * { color } would win on the span */
 }
-#menuWindow.dark div.knOmToolHint {
-  margin-top: 8px;
+#menuWindow.dark div.knOmTool.knOmPhys {
+  margin-top: 6px;
+}
+#menuWindow.dark div.knOmOpt {
+  display: flex;
+  align-items: center;
+  margin-top: 4px;
   font-size: 13px;
+}
+#menuWindow.dark span.knOmOptName {
+  flex-grow: 1;
+  color: rgba(255, 255, 255, 0.6);
+}
+#menuWindow.dark span.knOmOptBtn {
+  margin-left: 2px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  cursor: pointer;
+}
+#menuWindow.dark span.knOmOptBtn.knOmOptA {
+  border-color: var(--yellow);
+  color: var(--yellow);
+}
+#menuWindow.dark div.knOmToolHint {
+  margin-top: 6px;
+  font-size: 12px;
   color: rgba(255, 255, 255, 0.55);
 }
 #menuWindow.dark div.knOmToolGun {
-  margin-top: 8px;
-  font-size: 13px;
+  margin-top: 6px;
+  font-size: 12px;
   color: var(--yellow);
 }
 #menuWindow.dark div.knOmTools.knOmOff div.knOmTool {

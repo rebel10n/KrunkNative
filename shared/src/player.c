@@ -1901,6 +1901,9 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
             // with the fire input as `place`; the Build Tool never takes the shoot path
             if (player->weapon->grapple_range > 0.0f && player->reloads[player->loadout_index] <= 0.0f && player->swap_timer <= 0.0f && player->reload_timer <= 0.0f) {
                 combat_try_grapple(player, will_shoot); // player.js:1911: tryGrapple(this, grapRang, fire, input)
+            } else if (player->weapon->kn_physgun) {
+                // KrunkNative Physics Gun: never fires; the client grabs with the fire button held
+                // and sends the poses as Object Manager edits (object_manager.h OM_ACTION_EDIT)
             } else if (player->weapon->build && player->reloads[player->loadout_index] <= 0.0f && player->swap_timer <= 0.0f && player->reload_timer <= 0.0f) {
                 player_build(player, will_shoot);
             } else if (will_shoot && player->reloads[player->loadout_index] <= 0.0f && player->swap_timer <= 0.0f && player->reload_timer <= 0.0f) {

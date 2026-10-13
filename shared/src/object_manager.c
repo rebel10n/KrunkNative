@@ -30,12 +30,24 @@ typedef struct {
     int32_t id;   // map object uid / sid / bot id
     int owner;    // player uid
     unsigned serial; // OM_SUB_AI: GameAI.serial (sids are reused once an AI is gone)
+    unsigned seq;    // ObjectManager.seq at the spawn (undo takes the newest spawn or edit)
 } OmThing;
+
+// An edit's undo step: the object's pose before a grab / drag / turn ({"p", "s", "r", "d"} of its record)
+typedef struct {
+    unsigned seq;
+    int uid;     // the object
+    int editor;  // the player who edited it (their undo)
+    cJSON *pose;
+} OmEdit;
 
 typedef struct ObjectManager_t {
     cJSON *records;    // array owning the spawned objects' records (Object.raw points into it)
     OmThing *things;   // every spawn of this round, oldest first (undo, caps)
     size_t thing_count, thing_capacity;
+    OmEdit *edits;     // the edits' undo steps of this round, oldest first (OM_EDITS_MAX)
+    size_t edit_count, edit_capacity;
+    unsigned seq;      // spawns and edits, in order
 } ObjectManager;
 
 static ObjectManager *om_of(Game *game) {
@@ -61,7 +73,7 @@ int object_manager_weapon_listed(const int weapon_id) {
 
 // The Tool Gun is no Weapons-tile (the Tools pane equips it) and never a pickup, but an extra slot
 int object_manager_weapon_allowed(const int weapon_id) {
-    return object_manager_weapon_listed(weapon_id) || weapon_id == WEAPON_ID_TOOL_GUN;
+    return object_manager_weapon_listed(weapon_id) || weapon_id == WEAPON_ID_TOOL_GUN || weapon_id == WEAPON_ID_PHYS_GUN;
 }
 
 #define SCRAP(name, icon, json) {name, icon, OM_ENTRY_RECORD, 0, json}
@@ -279,6 +291,8 @@ static const ObjectManagerToolInfo k_tools[OM_TOOL_COUNT] = {
     [OM_TOOL_DUPLICATOR] = {"Duplicator", "content_copy", "Shoot an object to copy it, shoot again to place the copy", 0},
     [OM_TOOL_ROTATOR] = {"Rotator", "rotate_90_degrees_cw", "Turns the spawned object you shoot a quarter turn", 1},
     [OM_TOOL_INFO] = {"Info", "info", "Shows what you shoot: type, owner and uid", 0},
+    [OM_TOOL_MOVE] = {"Move", "open_with", "Shoot an object to select it, drag an arrow to move it", 1, 1},
+    [OM_TOOL_RESIZE] = {"Resize", "aspect_ratio", "Shoot an object to select it, drag a face (crouch: both)", 1, 1},
 };
 
 const ObjectManagerToolInfo *object_manager_tool_info(const int tool) {
@@ -295,7 +309,7 @@ int object_manager_filter_extras(const Game *game, const ObjectManagerPerms *per
     const int spawn = (object_manager_caps(game, perms) & OM_CAP_SPAWN) != 0;
     int n = 0;
     for (int i = 0; weapon_ids && i < count; i++) {
-        if (weapon_ids[i] != WEAPON_ID_TOOL_GUN || spawn) weapon_ids[n++] = weapon_ids[i];
+        if ((weapon_ids[i] != WEAPON_ID_TOOL_GUN && weapon_ids[i] != WEAPON_ID_PHYS_GUN) || spawn) weapon_ids[n++] = weapon_ids[i];
     }
     return n;
 }
@@ -327,6 +341,8 @@ const char *object_manager_status_text(const int status) {
         case OM_STATUS_KEEP: return "You can't drop that weapon";
         case OM_STATUS_NO_TOOL: return "Equip the Tool Gun first";
         case OM_STATUS_UNSUPPORTED: return "That tool only works on spawned objects";
+        case OM_STATUS_BLOCKED: return "It would end up inside a player";
+        case OM_STATUS_BOUNDS: return "Out of reach or too big";
         default: return "Failed";
     }
 }
@@ -516,7 +532,7 @@ static int thing_push(ObjectManager *om, const int kind, const int sub, const in
         om->things = grown;
         om->thing_capacity = cap;
     }
-    om->things[om->thing_count++] = (OmThing) {(uint8_t) kind, (uint8_t) sub, id, owner, 0};
+    om->things[om->thing_count++] = (OmThing) {(uint8_t) kind, (uint8_t) sub, id, owner, 0, ++om->seq};
     return 1;
 }
 
@@ -565,7 +581,7 @@ static void spawned_send(Game *game, const int target, const int op, const int u
     NetSpawnedObjPacket head = {.op = (uint8_t) op, .kind = OM_KIND_OBJECT, .id = uid, .owner = o ? o->spawn_owner : -1};
     memcpy(buffer, &head, sizeof(head));
     uint16_t length = sizeof(head);
-    if (op == OM_SPAWNED_ADD) {
+    if (op == OM_SPAWNED_ADD || op == OM_SPAWNED_UPDATE) {
         char *json = o && o->raw ? cJSON_PrintUnformatted(o->raw) : NULL;
         const size_t n = json ? strlen(json) : 0;
         if (!json || n > OM_RECORD_MAX) {
@@ -617,6 +633,188 @@ static void spawned_remove(Game *game, const int uid) {
     if (game_is_authority(game)) spawned_send(game, NET_TARGET_ALL, OM_SPAWNED_REMOVE, uid, o);
 }
 
+// ---------------------------------------------------------------- edits: poses (both sides)
+
+static int om_directed(const int prefab) { return prefab == PREFAB_RAMP || prefab == PREFAB_LADDER; }
+
+int object_manager_editable(const Game *game, const int uid) {
+    const Object *o = game ? spawned_object(game, uid) : NULL;
+    if (!o || !o->active || !o->raw || o->pickup) return 0; // pickups keep their runtime spot
+    return o->prefab != PREFAB_MYSTERY_BOX && o->prefab != PREFAB_PERK_MACHINE && o->prefab != PREFAB_KRUM_MACHINE; // zombies machines
+}
+
+int object_manager_pose(const Game *game, const int uid, ObjectManagerPose *out) {
+    if (!object_manager_editable(game, uid) || !out) return 0;
+    const Object *o = game->map->objects[uid];
+    out->position = o->position;
+    out->size = o->scale;
+    out->directed = om_directed(o->prefab);
+    const int d = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(o->raw, "d"));
+    const int q = (int) lroundf(o->rotation.y / ((float) M_PI / 2.0f));
+    out->quarter = ((out->directed ? d : q) % 4 + 4) % 4;
+    return 1;
+}
+
+float object_manager_snap(const float value, const float step) {
+    return step > 0.0f ? roundf(value / step) * step : value;
+}
+
+static float *axis_of(vec3 *v, const int axis) { return axis == 0 ? &v->x : axis == 1 ? &v->y : &v->z; }
+
+void object_manager_pose_move(const ObjectManagerPose *from, const int axis, const float delta, const float snap, ObjectManagerPose *out) {
+    *out = *from;
+    if (axis < 0 || axis > 2) return;
+    *axis_of(&out->position, axis) += object_manager_snap(delta, snap);
+}
+
+// The box is centred on the feet in x / z and stands on them in y
+void object_manager_pose_resize(const ObjectManagerPose *from, const int axis, const int sign, const float delta, const float snap,
+                                const int symmetric, ObjectManagerPose *out) {
+    *out = *from;
+    if (axis < 0 || axis > 2) return;
+    const float size = *axis_of(&out->size, axis);
+    float grow = object_manager_snap(delta, snap) * (symmetric ? 2.0f : 1.0f);
+    if (size + grow < OM_EDIT_SIZE_MIN) grow = OM_EDIT_SIZE_MIN - size;
+    if (size + grow > OM_EDIT_SIZE_MAX) grow = OM_EDIT_SIZE_MAX - size;
+    *axis_of(&out->size, axis) = size + grow;
+    // the centre moves half the growth toward the dragged face (not at all when symmetric)
+    const float shift = symmetric ? 0.0f : grow * 0.5f * (sign < 0 ? -1.0f : 1.0f);
+    if (axis == 1) out->position.y += shift - grow * 0.5f; // feet = centre - size / 2
+    else *axis_of(&out->position, axis) += shift;
+}
+
+void object_manager_pose_turn(const ObjectManagerPose *from, const int turns, ObjectManagerPose *out) {
+    *out = *from;
+    out->quarter = ((from->quarter + turns) % 4 + 4) % 4;
+    if (!from->directed && (turns % 2)) {
+        out->size.x = from->size.z;
+        out->size.z = from->size.x;
+    }
+}
+
+// The record with the pose's "p", "s" and "r" (or map.js "d"), doubles rounded like map.js
+static cJSON *om_pose_record(const cJSON *raw, const ObjectManagerPose *pose) {
+    cJSON *record = cJSON_Duplicate(raw, 1);
+    if (!record) return NULL;
+    const double p[3] = {round(pose->position.x * 10.0) / 10.0, round(pose->position.y * 10.0) / 10.0, round(pose->position.z * 10.0) / 10.0};
+    const double sz[3] = {round(pose->size.x * 100.0) / 100.0, round(pose->size.y * 100.0) / 100.0, round(pose->size.z * 100.0) / 100.0};
+    cJSON_DeleteItemFromObject(record, "p");
+    cJSON_DeleteItemFromObject(record, "s");
+    cJSON_DeleteItemFromObject(record, "r");
+    cJSON_AddItemToObject(record, "p", cJSON_CreateDoubleArray(p, 3));
+    cJSON_AddItemToObject(record, "s", cJSON_CreateDoubleArray(sz, 3));
+    if (pose->directed) {
+        cJSON_DeleteItemFromObject(record, "d");
+        cJSON_AddNumberToObject(record, "d", pose->quarter);
+    } else if (pose->quarter) {
+        const double r[3] = {0.0, round(pose->quarter * (M_PI / 2.0) * 100.0) / 100.0, 0.0};
+        cJSON_AddItemToObject(record, "r", cJSON_CreateDoubleArray(r, 3));
+    }
+    return record;
+}
+
+// Swaps a fresh object built from `record` (owned by the round's records from here on) in at
+// `uid`: collision, the mesh and the record all follow; the old object and its record go.
+static int om_replace(Game *game, ObjectManager *om, const int uid, cJSON *record) {
+    Object *old = spawned_object(game, uid);
+    Object *o = old && record ? map_object_from_json(game->map, record, !game->server) : NULL;
+    if (!o) {
+        cJSON_Delete(record);
+        return 0;
+    }
+    o->spawned = 1;
+    o->spawn_owner = old->spawn_owner;
+    o->destroyed_by = -1;
+    cJSON_AddItemToArray(om->records, record);
+    const cJSON *old_raw = old->raw;
+    game->map->objects[uid] = o;
+    map_object_free(old);
+    for (cJSON *item = om->records->child; old_raw && item; item = item->next) { // its record leaves the round's
+        if (item != old_raw) continue;
+        cJSON_Delete(cJSON_DetachItemViaPointer(om->records, item));
+        break;
+    }
+    return 1;
+}
+
+// The object's pose `pose` in place, sent to everyone as OM_SPAWNED_UPDATE (authority)
+static int om_apply_pose(Game *game, ObjectManager *om, const int uid, const ObjectManagerPose *pose) {
+    const Object *o = spawned_object(game, uid);
+    if (!o || !o->raw || !om_replace(game, om, uid, om_pose_record(o->raw, pose))) return 0;
+    spawned_send(game, NET_TARGET_ALL, OM_SPAWNED_UPDATE, uid, game->map->objects[uid]);
+    return 1;
+}
+
+// An undo step for `editor`'s edit of `uid`: the pose before it
+static void om_edit_push(ObjectManager *om, const int uid, const int editor, const cJSON *raw) {
+    if (om->edit_count == OM_EDITS_MAX) { // the oldest goes
+        cJSON_Delete(om->edits[0].pose);
+        memmove(om->edits, om->edits + 1, (om->edit_count - 1) * sizeof(OmEdit));
+        om->edit_count--;
+    }
+    if (om->edit_count == om->edit_capacity) {
+        const size_t cap = om->edit_capacity ? om->edit_capacity * 2 : 32;
+        OmEdit *grown = realloc(om->edits, cap * sizeof(OmEdit));
+        if (!grown) return;
+        om->edits = grown;
+        om->edit_capacity = cap;
+    }
+    cJSON *pose = cJSON_CreateObject();
+    static const char *const keys[] = {"p", "s", "r", "d"};
+    for (int k = 0; pose && k < 4; k++) {
+        const cJSON *v = cJSON_GetObjectItem(raw, keys[k]);
+        if (v) cJSON_AddItemToObject(pose, keys[k], cJSON_Duplicate(v, 1));
+    }
+    om->edits[om->edit_count++] = (OmEdit) {++om->seq, uid, editor, pose};
+}
+
+// The newest undo step of `editor` is an edit of `uid` (a drag's later edits add none)
+static int om_edit_open(const ObjectManager *om, const int uid, const int editor) {
+    for (size_t i = om->edit_count; i-- > 0;) {
+        if (om->edits[i].editor == editor) return om->edits[i].uid == uid;
+    }
+    return 0;
+}
+
+// The tracked spawn of map object `uid` (its owner), NULL none
+static const OmThing *om_object_thing(const ObjectManager *om, const int uid) {
+    for (size_t i = 0; om && i < om->thing_count; i++) {
+        if (om->things[i].kind == OM_KIND_OBJECT && om->things[i].id == uid) return &om->things[i];
+    }
+    return NULL;
+}
+
+// Undo of an edit: the saved "p" / "s" / "r" / "d" back on the object
+static int om_edit_undo(Game *game, ObjectManager *om, const size_t index) {
+    const OmEdit e = om->edits[index];
+    memmove(om->edits + index, om->edits + index + 1, (om->edit_count - index - 1) * sizeof(OmEdit));
+    om->edit_count--;
+    const Object *o = spawned_object(game, e.uid);
+    int ok = 0;
+    cJSON *record = o && o->raw && e.pose ? cJSON_Duplicate(o->raw, 1) : NULL;
+    if (record) {
+        static const char *const keys[] = {"p", "s", "r", "d"};
+        for (int k = 0; k < 4; k++) {
+            cJSON_DeleteItemFromObject(record, keys[k]);
+            const cJSON *v = cJSON_GetObjectItem(e.pose, keys[k]);
+            if (v) cJSON_AddItemToObject(record, keys[k], cJSON_Duplicate(v, 1));
+        }
+        ok = om_replace(game, om, e.uid, record);
+        if (ok) spawned_send(game, NET_TARGET_ALL, OM_SPAWNED_UPDATE, e.uid, game->map->objects[e.uid]);
+    }
+    cJSON_Delete(e.pose);
+    return ok;
+}
+
+// Player `p`'s box overlaps the box (feet `pos`, `size`)
+static int om_box_hits_player(const Player *p, const vec3 pos, const vec3 size) {
+    const float r = p->scale > 0.0f ? p->scale : game_constants.player_scale;
+    const float h = p->height > 0.0f ? p->height : 10.0f;
+    const float eps = 0.05f;
+    return fabsf(p->position.x - pos.x) < r + size.x * 0.5f - eps && fabsf(p->position.z - pos.z) < r + size.z * 0.5f - eps &&
+           p->position.y < pos.y + size.y - eps && p->position.y + h > pos.y + eps;
+}
+
 void object_manager_send_state(Game *game, const int uid) {
     for (size_t i = 0; game && game->map && i < game->map->object_count; i++) {
         const Object *o = game->map->objects[i];
@@ -631,6 +829,8 @@ void object_manager_round_start(Game *game) {
     cJSON_Delete(om->records);
     om->records = NULL;
     om->thing_count = 0;
+    for (size_t i = 0; i < om->edit_count; i++) cJSON_Delete(om->edits[i].pose);
+    om->edit_count = 0;
     for (size_t i = 0; i < game->player_count; i++) { // the Duplicator's copies were of this round's objects
         if (game->players[i]) game->players[i]->om_copy = 0;
     }
@@ -646,13 +846,14 @@ int object_manager_apply_spawned(Game *game, const void *payload, const uint16_t
         spawned_remove(game, head.id);
         return 1;
     }
-    if (head.op != OM_SPAWNED_ADD || length <= sizeof(head)) return 0;
+    if ((head.op != OM_SPAWNED_ADD && head.op != OM_SPAWNED_UPDATE) || length <= sizeof(head)) return 0;
     const char *json = (const char *) payload + sizeof(head);
     const size_t n = length - sizeof(head);
     if (json[n - 1] != 0) return 0;
     ObjectManager *om = om_of(game);
     cJSON *record = om ? cJSON_Parse(json) : NULL;
     if (!record) return 0;
+    if (head.op == OM_SPAWNED_UPDATE && spawned_object(game, head.id)) return om_replace(game, om, head.id, record); // an edit
     if (spawned_object(game, head.id)) spawned_remove(game, head.id); // a stale copy at that uid
     return spawned_add(game, om, record, head.owner, head.id) >= 0;
 }
@@ -674,7 +875,7 @@ static int om_take_token(Player *player) {
 
 static int om_add_weapon(Player *player, const int id, const unsigned int caps, NetSpawnResultPacket *out) {
     if (!object_manager_weapon_allowed(id) || !om_weapon(player->game, id)) return OM_STATUS_INVALID;
-    if (id == WEAPON_ID_TOOL_GUN && !(caps & OM_CAP_SPAWN)) return OM_STATUS_DENIED; // the Tool Gun follows the spawn rights
+    if ((id == WEAPON_ID_TOOL_GUN || id == WEAPON_ID_PHYS_GUN) && !(caps & OM_CAP_SPAWN)) return OM_STATUS_DENIED; // the spawn rights' guns
     for (int i = 0; i < player->extra_weapon_count; i++) {
         if (player->extra_weapons[i] == id) return OM_STATUS_OK; // already carried
     }
@@ -1060,6 +1261,13 @@ static int tool_rotator(Game *game, Player *player, const NetSpawnReqPacket *req
     ObjectManager *om = game->object_manager;
     if (!om_may_touch(&om->things[index], player, who)) return OM_STATUS_DENIED;
     const int old = om->things[index].id;
+    ObjectManagerPose pose, turned;
+    if (object_manager_pose(game, old, &pose)) { // in place, an undo step (pickups below: a new uid)
+        object_manager_pose_turn(&pose, 1, &turned);
+        const cJSON *raw = spawned_object(game, old)->raw;
+        om_edit_push(om, old, player->uid, raw);
+        return om_apply_pose(game, om, old, &turned) ? OM_STATUS_OK : OM_STATUS_INVALID;
+    }
     cJSON *record = cJSON_Duplicate(spawned_object(game, old)->raw, 1);
     if (!record) return OM_STATUS_INVALID;
     const int prefab = map_raw_object_prefab(record);
@@ -1222,15 +1430,110 @@ static int om_tool(Game *game, Player *player, const NetSpawnReqPacket *req, con
     return k_tool_fns[req->item](game, player, req, who, out);
 }
 
+// The newest of the player's spawns and edits goes: a spawn is removed, an edit's pose restored
 static int om_undo(Game *game, Player *player, const int any) {
     ObjectManager *om = game->object_manager;
+    const OmThing *thing = NULL;
     for (size_t i = om ? om->thing_count : 0; i-- > 0;) {
         const OmThing *t = &om->things[i];
         if ((!any && t->owner != player->uid) || !thing_alive(game, t)) continue;
-        thing_remove(game, t);
-        return OM_STATUS_OK;
+        thing = t;
+        break;
     }
-    return OM_STATUS_NOTHING;
+    long edit = -1;
+    for (size_t i = om ? om->edit_count : 0; i-- > 0;) {
+        if ((!any && om->edits[i].editor != player->uid) || !object_manager_editable(game, om->edits[i].uid)) continue;
+        edit = (long) i;
+        break;
+    }
+    if (edit >= 0 && (!thing || om->edits[edit].seq > thing->seq)) return om_edit_undo(game, om, (size_t) edit) ? OM_STATUS_OK : OM_STATUS_INVALID;
+    if (!thing) return OM_STATUS_NOTHING;
+    thing_remove(game, thing);
+    return OM_STATUS_OK;
+}
+
+// ---------------------------------------------------------------- edits (authority)
+
+void object_manager_edit(Game *game, Player *player, const NetSpawnEditPacket *edit, const ObjectManagerPerms *perms,
+                         NetSpawnResultPacket *out) {
+    memset(out, 0, sizeof(*out));
+    const unsigned int caps = object_manager_caps(game, perms);
+    out->action = OM_ACTION_EDIT;
+    out->item = edit->req.item;
+    out->caps = (uint8_t) caps;
+    out->extra_max = PLAYER_EXTRA_WEAPONS_MAX;
+    out->status = OM_STATUS_OK;
+    if (!player || !player->active || !game_is_authority(game) || !game->map) {
+        out->status = OM_STATUS_DEAD;
+        return;
+    }
+    if (!(caps & OM_CAP_SPAWN)) {
+        out->status = OM_STATUS_DENIED;
+        return;
+    }
+    // its own clock: a drag sends up to 10 edits a second, the request bucket stays for the rest
+    const float now = game->now;
+    if (player->om_edit_at > 0.0f && now >= player->om_edit_at && now - player->om_edit_at < OM_EDIT_INTERVAL) {
+        out->status = OM_STATUS_RATE;
+        return;
+    }
+    const Weapon *w = player->weapon;
+    if (!w || (edit->req.item == OM_EDIT_SOURCE_PHYSGUN ? !w->kn_physgun : !w->kn_tool)) {
+        out->status = OM_STATUS_NO_TOOL;
+        return;
+    }
+    ObjectManager *om = om_of(game);
+    const int uid = edit->uid;
+    ObjectManagerPose from;
+    const OmThing *t = om ? om_object_thing(om, uid) : NULL;
+    if (!om || !t || !object_manager_pose(game, uid, &from)) {
+        out->status = spawned_object(game, uid) ? OM_STATUS_UNSUPPORTED : OM_STATUS_NOTHING;
+        return;
+    }
+    const OmWho who = {caps, perms && perms->host};
+    if (!om_may_touch(t, player, &who)) {
+        out->status = OM_STATUS_DENIED;
+        return;
+    }
+    ObjectManagerPose to = from;
+    to.position = (vec3) {edit->position[0], edit->position[1], edit->position[2]};
+    to.size = (vec3) {edit->size[0], edit->size[1], edit->size[2]};
+    to.quarter = edit->quarter;
+    const float v[6] = {to.position.x, to.position.y, to.position.z, to.size.x, to.size.y, to.size.z};
+    int ok = edit->quarter < 4;
+    for (int k = 0; k < 6; k++) ok &= isfinite(v[k]) != 0;
+    for (int k = 3; k < 6; k++) ok &= v[k] >= OM_EDIT_SIZE_MIN - 0.001f && v[k] <= OM_EDIT_SIZE_MAX + 0.001f;
+    if (!ok) {
+        out->status = OM_STATUS_BOUNDS;
+        return;
+    }
+    Object *o = game->map->objects[uid];
+    if (edit->flags & OM_EDIT_DROP) { // down onto whatever is below (itself out of the way)
+        const int collision = o->collision_type;
+        o->collision_type = COLLISION_TYPE_NONE;
+        const vec3 down = {0.0f, -OM_AIM_RANGE, 0.0f};
+        float hit;
+        int object;
+        if (om_ray(game, (vec3) {to.position.x, to.position.y + 0.1f, to.position.z}, down, &hit, &object)) to.position.y = to.position.y + 0.1f + down.y * hit;
+        o->collision_type = (unsigned char) collision;
+    }
+    const vec3 eye = {player->position.x, player->position.y + player->height - game_constants.camera_height, player->position.z};
+    const vec3 c = {to.position.x - eye.x, to.position.y + to.size.y * 0.5f - eye.y, to.position.z - eye.z};
+    if (sqrtf(c.x * c.x + c.y * c.y + c.z * c.z) > OM_EDIT_RANGE) {
+        out->status = OM_STATUS_BOUNDS;
+        return;
+    }
+    for (size_t i = 0; i < game->player_count; i++) { // never into a player (one already inside may stay)
+        const Player *p = game->players[i];
+        if (!p || !p->active) continue;
+        if (om_box_hits_player(p, to.position, to.size) && !om_box_hits_player(p, from.position, from.size)) {
+            out->status = OM_STATUS_BLOCKED;
+            return;
+        }
+    }
+    player->om_edit_at = now > 0.0f ? now : 1e-6f;
+    if ((edit->flags & OM_EDIT_BEGIN) || !om_edit_open(om, uid, player->uid)) om_edit_push(om, uid, player->uid, o->raw);
+    if (!om_apply_pose(game, om, uid, &to)) out->status = OM_STATUS_INVALID;
 }
 
 void object_manager_request(Game *game, Player *player, const NetSpawnReqPacket *req, const ObjectManagerPerms *perms,
@@ -1243,7 +1546,7 @@ void object_manager_request(Game *game, Player *player, const NetSpawnReqPacket 
     out->extra_max = PLAYER_EXTRA_WEAPONS_MAX;
     out->status = OM_STATUS_OK;
     if (req->action == OM_ACTION_QUERY) return;
-    if (req->action >= OM_ACTION_COUNT) {
+    if (req->action >= OM_ACTION_COUNT || req->action == OM_ACTION_EDIT) { // (an edit is a NetSpawnEditPacket: object_manager_edit)
         out->status = OM_STATUS_INVALID;
         return;
     }
@@ -1256,7 +1559,7 @@ void object_manager_request(Game *game, Player *player, const NetSpawnReqPacket 
     if (!(caps & (weapons ? OM_CAP_WEAPONS : OM_CAP_SPAWN)) &&
         !(takes_back && (caps & OM_CAP_WEAPONS)) && // undo / remove also take back pickups
         !(req->action == OM_ACTION_REMOVE_WEAPON || req->action == OM_ACTION_CLEAR_WEAPONS) && // giving back is always fine
-        !(req->action == OM_ACTION_DROP_HELD && player->weapon && player->weapon->kn_tool)) {    // (putting the Tool Gun away too)
+        !(req->action == OM_ACTION_DROP_HELD && player->weapon && (player->weapon->kn_tool || player->weapon->kn_physgun))) { // (the guns put away too)
         out->status = OM_STATUS_DENIED;
         return;
     }

@@ -369,7 +369,10 @@ enum {
     // KrunkNative additions: the Object Manager's Undo (U, cont_omUndoKey) and Remove at the
     // crosshair (Delete, cont_omRemoveKey), in game
     UI_CONTROL_OM_UNDO = 42, UI_CONTROL_OM_REMOVE = 43,
-    UI_CONTROL_COUNT = 44
+    // KrunkNative addition: the Physics Gun's rotate key (E, cont_omRotateKey): held while carrying,
+    // the mouse turns the object instead of the view (client/src/ui/om_build.c)
+    UI_CONTROL_OM_ROTATE = 44,
+    UI_CONTROL_COUNT = 45
 };
 
 // Input-related settings ClientSettings does not carry (written by client_apply_setting).
@@ -480,6 +483,23 @@ void object_manager_ui_pick_tool(int tool);      // a Tools-pane pick: the Tool 
 void object_manager_ui_key(Client*, int action); // the Undo / Remove binds in game: OM_ACTION_UNDO / OM_ACTION_REMOVE_AIM
 void object_manager_ui_chat_sent(const char *text); // a chat / console line went out: `/give <weapon>` equips it once given
 void ui_controls_select_slot(int slot);          // ui_controls.c: equip loadout slot `slot` with the next input frame
+int  object_manager_ui_tool(void);               // the Tool Gun's tool (ObjectManagerTool) picked in the Tools pane
+void object_manager_ui_pick_physgun(void);       // the Tools pane's Physics Gun row: in hand (added first when not carried)
+// KrunkNative Physics Gun and btools (client/src/ui/om_build.c)
+#define OB_SNAPS 4                               // the btools' grid steps: 1 / 2 / 5 / 10 units
+void om_build_input(Client*, Input*, float prev_pitch, float prev_yaw, int sampled); // main.c: per frame, the pointer locked
+void om_build_render(Client*);                   // main.c: after the world (the beam, the box, the handles)
+void om_build_fini(void);
+int  om_build_snap_index(void);
+float om_build_snap(void);
+void om_build_set_snap(int index);
+int  om_build_drop(void);                        // the Physics Gun lets go: 0 frozen in place, 1 down onto the surface
+void om_build_set_drop(int on);
+int  om_build_grabbing(void);
+void om_build_refused(int status);               // a refused edit: the grab / drag ends
+void om_build_reset(void);                       // a new map / connection
+int  om_build_handle_look(Client*, int index, float *pitch, float *yaw); // input scripts: the look onto a handle
+void object_manager_ui_pick_entry(int tab, int item); // an Objects / Entities / NPCs tile click without the window
 // END object_manager_ui block
 
 // BEGIN ui_loadout block (client/src/ui/ui_loadout.c): Change Loadout + item pickers,

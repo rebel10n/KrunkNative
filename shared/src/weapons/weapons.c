@@ -12,7 +12,8 @@ const Weapon *g_weapons[WEAPON_TABLE_COUNT] = {
     &g_build_tool, &g_grappler, &g_tehchy9, &g_noob_tube, &g_slimer,
     &g_zapper, &g_minigun, &g_war_machine, &g_akimbo_pistol, &g_charge_rifle,
     &g_tool_gun, // KrunkNative (WEAPON_ID_TOOL_GUN)
-    &g_piss,     // KrunkNative (WEAPON_ID_PISS)
+    [WEAPON_ID_PISS] = &g_piss,         // KrunkNative (decisions.md "Piss")
+    [WEAPON_ID_PHYS_GUN] = &g_phys_gun, // KrunkNative (object_manager.h OM_ACTION_EDIT)
 };
 
 // v7.1.4 src/data/attach.js. The Acog's `noVertM` has no reader; its `req` is the per-class rank

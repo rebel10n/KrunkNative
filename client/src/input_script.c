@@ -30,8 +30,11 @@
 //   100 om add 28 | om drop 20   an Object Manager Weapons-tab click without the window: left (add the
 //                                extra loadout slot, in hand when it lands; again: take it out) / right
 //                                (a pickup at the crosshair)
-//   100 om tool 1                a Tools-pane pick (0 Deleter, 1 Duplicator, 2 Rotator, 3 Info): sets the
-//                                Tool Gun's tool and puts the Tool Gun in hand (fire it with `mdown left`)
+//   100 om tool 1                a Tools-pane pick (0 Deleter, 1 Duplicator, 2 Rotator, 3 Info, 4 Move,
+//                                5 Resize): sets the Tool Gun's tool and puts the Tool Gun in hand (fire it
+//                                with `mdown left`); `om physgun 0` the Physics Gun row, `om snap 0..3` /
+//                                `om release 0|1` the pane's Snap / Release, `om object 10` an Objects tile,
+//                                `om aim 1` turns the look onto handle 1 of the btools selection
 //   100 flags                    log each mirrored CTF flag (position, carrier, team), its crystal / stand meshes and
 //                                its #tScoreM text: "[input_script] flag t=100 i=0 team=1 carrier=-1 pos=..."
 //   100 state                    log the held weapon slot, the menu / pointer lock state, position, ammo, ended,
@@ -69,6 +72,7 @@
 #include <sprays.h>  // `vis :spray`
 #include <hud_modes.h>  // `flags`
 #include <mode_world.h> // `flags`
+#include <object_manager.h> // `om object` (OM_TAB_OBJECTS)
 #include <GLFW/glfw3.h>
 #include <png_write.h>
 #include <frame_target.h>
@@ -281,7 +285,17 @@ static void script_run(Client *client, const ScriptEvent *e) {
         int id = -1;
         if (sscanf(e->arg, "%15s", what) == 1 && sscanf(strstr(e->arg, what) + strlen(what), "%d", &id) == 1 && id >= 0) {
             if (!strcmp(what, "tool")) object_manager_ui_pick_tool(id);
-            else object_manager_ui_pick_weapon(id, !strcmp(what, "drop"));
+            else if (!strcmp(what, "physgun")) object_manager_ui_pick_physgun();
+            else if (!strcmp(what, "object")) object_manager_ui_pick_entry(OM_TAB_OBJECTS, id);
+            else if (!strcmp(what, "snap")) om_build_set_snap(id);
+            else if (!strcmp(what, "release")) om_build_set_drop(id);
+            else if (!strcmp(what, "aim") && client->me) {
+                float pitch, yaw;
+                if (om_build_handle_look(client, id, &pitch, &yaw)) {
+                    g_script.look_yaw += remainderf(yaw - client->me->direction.y, 2.0f * (float) M_PI);
+                    g_script.look_pitch += pitch - client->me->direction.x;
+                }
+            } else object_manager_ui_pick_weapon(id, !strcmp(what, "drop"));
         }
         fprintf(stderr, "[input_script] om t=%.0f %s %d\n", g_script.time, what, id);
     } else if (!strcmp(e->cmd, "state")) {

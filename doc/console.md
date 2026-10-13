@@ -236,8 +236,14 @@ up. The Tool Gun is put away instead. Z does the same: the server routes a "drpw
 slot to `OM_ACTION_DROP_HELD` and answers with SPAWN_RESULT (the client's toast), so no extra
 bind is needed.
 
-Tests: `server/tests/object_manager_test.c` (test_give_drop, test_public_refusals) and
-`server/tests/object_manager_e2e.py` part 4.
+`give "physics gun"` and `give "tool gun"` hand out the Object Manager's building guns (the
+spawn right; doc/v7/decisions.md "Physics Gun", "Building tools"). They have no console commands
+of their own: the Physics Gun's rotate key is "Physics Gun Rotate (held)" (E) under Sandbox in
+Change Controls, and the btools' grid step and the Physics Gun's Release are rows of the Object
+Manager's Tools pane.
+
+Tests: `server/tests/object_manager_test.c` (test_give_drop, test_public_refusals, test_edits) and
+`server/tests/object_manager_e2e.py` parts 4 and 5.
 
 Not chat commands, so not ported here: the `pnh`, `prmA`, `noclip`/`tp` packets,
 `clearLog`, and the `tmc` terminal message (map terminals; see the open items).

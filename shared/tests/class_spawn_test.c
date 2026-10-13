@@ -373,7 +373,7 @@ int main(void) {
         game_init(&game, 0, -1, 1);
 
         CHECK(game.class_count == sizeof(expected_classes) / sizeof(expected_classes[0]), "class count %zu", game.class_count);
-        CHECK(game.weapon_count == WEAPON_COUNT, "weapon count %zu", game.weapon_count);
+        CHECK(game.weapon_count == WEAPON_TABLE_COUNT, "weapon count %zu", game.weapon_count);
 
         printf("Spawning %zu classes on %s...\n", game.class_count, maps[m]);
         for (int c = 0; c < (int) game.class_count; c++) check_class(&game, c, maps[m]);

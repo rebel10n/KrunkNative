@@ -230,6 +230,7 @@ static const V7Bind V7_BINDS[] = {
     // KrunkNative additions: the Object Manager's Undo (U, 85) and Remove at the crosshair (Delete, 46)
     {"omUndo", -1, "omUndoKey", 85, -1, UI_CONTROL_OM_UNDO},
     {"omRemove", -1, "omRemoveKey", 46, -1, UI_CONTROL_OM_REMOVE},
+    {"omRotate", -1, "omRotateKey", 69, -1, UI_CONTROL_OM_ROTATE},
     {"streak", 0, "18", 49, -1, UI_CONTROL_STREAK0},
     {"streak", 1, "19", 50, -1, UI_CONTROL_STREAK0 + 1},
     {"streak", 2, "20", 51, -1, UI_CONTROL_STREAK0 + 2},
@@ -294,6 +295,7 @@ static const ControlRow TAB_GENERAL[] = {
     {"Object Manager", "objectManager", -1, 0, "Sandbox"},
     {"Object Manager Undo", "omUndo", -1, 0, "Sandbox"},
     {"Object Manager Remove", "omRemove", -1, 0, "Sandbox"},
+    {"Physics Gun Rotate (held)", "omRotate", -1, 0, "Sandbox"},
 };
 static const ControlRow TAB_CHAT[] = {
     {"Chat", "chat", -1, 0, "Interface & Audio"}, {"Voice", "voiceChat", -1, 0, "Interface & Audio"},

@@ -188,6 +188,7 @@ typedef struct {
     unsigned char no_cross:1;        // noCross: no crosshair
     unsigned char can_upgrade:1;     // canUpgrade (krumMachine)
     unsigned char kn_tool:1;         // KrunkNative Tool Gun (object_manager.h OM_ACTION_TOOL): fires no bullet, spends no ammo
+    unsigned char kn_physgun:1;      // KrunkNative Physics Gun (object_manager.h OM_ACTION_EDIT): never fires, the client grabs
     int tint;                        // KrunkNative: viewmodel / pickup colour multiplier 0xRRGGBB, 0 = none
     int effect_on_hit;          // effectOnHit + 1 (0 = none): EffectId given on hit, floor(charge * 10) stacks
     int deployable;             // deployable + 1 (0 = none): the spawnable a shot places (Slimer pads)
@@ -230,6 +231,7 @@ extern const Weapon g_charge_rifle;
 // KrunkNative-only weapons after v7's table (WEAPON_ID_TOOL_GUN...)
 extern const Weapon g_tool_gun;
 extern const Weapon g_piss; // WEAPON_ID_PISS (shared/src/weapons/kn_piss.c)
+extern const Weapon g_phys_gun;
 
 // Krunker v7.1.4 weapon attachments (src/data/attach.js). `dotSrc` is never read by the client.
 typedef struct {
@@ -286,7 +288,8 @@ const WeaponAttachment *weapon_attachment(const Weapon *weapon, int attach_index
 // WEAPON_COUNT, so v7's lists (loadout, market, host config, challenges) never show them.
 #define WEAPON_ID_TOOL_GUN 29
 #define WEAPON_ID_PISS 30 // KrunkNative Piss (doc/v7/decisions.md "Piss")
-#define WEAPON_TABLE_COUNT 31
+#define WEAPON_ID_PHYS_GUN 31
+#define WEAPON_TABLE_COUNT 32
 
 extern const Weapon *g_weapons[WEAPON_TABLE_COUNT];
 // v7.1.4 upgradeWeapons.js entry of weapon `id` (krumMachine upgrades), NULL out of range.

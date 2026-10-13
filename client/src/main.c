@@ -804,6 +804,7 @@ int main(int argc, char **argv) {
     vfx_fini();
     ai_render_reset(&INSTANCE); // AI meshes in the world scene (ai_render.c)
     nav_overlay_fini(); // show_navmeshes: waits for a running build, GL buffers, the line program
+    om_build_fini();    // the Object Manager overlay's GL buffers (om_gizmo.c)
     shadow_fini(); // sun shadow FBO/texture/program (shadow.c)
     sky_fini();    // sky dome VAO/buffers/program (sky.c)
     render_target_fini();
@@ -1694,6 +1695,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
         g_look_shown_valid = 0;
         input.x_dir = g_look.x;
         input.y_dir = g_look.y;
+        const float om_prev_pitch = input.x_dir, om_prev_yaw = input.y_dir; // the look before this frame's mouse (om_build.c)
 
         if (client->mouse_state.locked && !menu_open) {
             if (!input_sampled) {
@@ -1715,6 +1717,8 @@ static void client_tick_game(Client *client, const float now, const float frame_
                 client->mouse_state.scroll_delta = 0;
                 client->last_swap_key = 0; // weapon keys are press events now (CONTROLS.aba6)
             }
+            // KrunkNative Object Manager: the Physics Gun / btools take fire, the wheel and the rotate key
+            om_build_input(client, &input, om_prev_pitch, om_prev_yaw, input_sampled);
         }
         // Round over, v3.1.1 parity (index.js endGame / gameLoop): through the endAnim title the
         // controls stay enabled, so WASD/jump/shots/ADS still act locally in the shrinking slow
@@ -1821,6 +1825,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
         shadow_end_world();
         vfx_render_world(client);   // tracers, impacts, casings, explosions, map particles
         nav_overlay_render(client); // show_navmeshes: nav areas + connections, over the world (nav_overlay.c)
+        om_build_render(client);    // Object Manager: the Physics Gun's beam, the btools' box and handles (om_build.c)
     }
 
     if ((!scenario || SCENARIO_PREVIEW()) && !ks_client_3d_disabled()) {
