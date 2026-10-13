@@ -508,6 +508,33 @@ static int pseudo_has_content(const CssComputed *c)
     return c->content.kind == CSS_CONTENT_STRING || c->content.kind == CSS_CONTENT_ATTR;
 }
 
+/* Whether g.entries (the element's own declarations) read a non-inherited
+ * property from the parent: `inherit` (`unset` is `initial` for those), or a
+ * var() / pending shorthand that may substitute to it.  Inherited properties
+ * need no flag: a change of the parent's inherited range restyles children. */
+static int entries_explicit_inherit(void)
+{
+    for (size_t i = 0; i < g.entries.len; i++) {
+        const CssDecl *d = g.entries.data[i].decl;
+        if (CSS_PROP_IS_CUSTOM(d->prop) || css_prop_is_inherited(d->prop)) {
+            continue;
+        }
+        if (d->has_var) {
+            return 1;
+        }
+        for (int k = 0; k < d->ntok; k++) {
+            if (d->tokens[k].type == CSS_TOK_WHITESPACE) {
+                continue;
+            }
+            if (d->tokens[k].type == CSS_TOK_IDENT && kn_str_ieq(d->tokens[k].text, d->tokens[k].len, "inherit")) {
+                return 1;
+            }
+            break;
+        }
+    }
+    return 0;
+}
+
 /* Recomputes one element (and its ::before/::after) from the matches.
  * Returns bit 1 when the element's record changed, bit 2 when its inherited
  * values changed, bit 4 when a pseudo record changed. */
@@ -519,6 +546,7 @@ static int restyle_one(Dom *dom, ElemData *d, const CssComputed *parent)
     int inherited_changed;
 
     compute_element(dom, d->node, parent, &tmp);
+    d->explicit_inherit = (uint8_t)entries_explicit_inherit();
     inherited_changed = !inherited_equal(d->computed, &tmp);
     if (store_computed(&d->computed, &tmp)) {
         result |= 1;
@@ -569,6 +597,7 @@ static void restyle_subtree(Dom *dom, lxb_dom_node_t *node, const CssComputed *p
     ElemData *d = dom_node_data(node);
     int need;
     int child_force = force;
+    int changed = 0;   /* this element's record changed: restyle explicit-inherit children */
     int was_none;
     lxb_dom_node_t *c;
 
@@ -585,6 +614,7 @@ static void restyle_subtree(Dom *dom, lxb_dom_node_t *node, const CssComputed *p
         if (r & 2) {
             child_force = 1;
         }
+        changed = (r & 1) != 0;
     }
     if (d->dirty & DOM_DIRTY_DESCENDANTS) {
         child_force = 1;
@@ -600,10 +630,13 @@ static void restyle_subtree(Dom *dom, lxb_dom_node_t *node, const CssComputed *p
     if (was_none && need) {
         child_force = 1; /* descendants were skipped while hidden */
     }
-    if (child_force || (d->dirty & DOM_DIRTY_HAS_DIRTY)) {
+    if (child_force || changed || (d->dirty & DOM_DIRTY_HAS_DIRTY)) {
         for (c = node->first_child; c != NULL; c = c->next) {
             if (c->type == LXB_DOM_NODE_TYPE_ELEMENT) {
-                restyle_subtree(dom, c, d->computed, child_force);
+                /* e.g. #miniMapCanvas { border-radius: inherit } under .roundMap: a
+                 * non-inherited value of the parent changed, the inherited range did not */
+                const ElemData *cd = dom_node_data(c);
+                restyle_subtree(dom, c, d->computed, child_force || (changed && cd != NULL && cd->explicit_inherit));
             }
         }
     }

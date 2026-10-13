@@ -83,6 +83,9 @@ typedef struct ElemData {
     CssComputed *after;         /* ::after                                    */
 
     uint32_t dirty;             /* enum DomDirty bits                          */
+    uint8_t explicit_inherit;   /* css_cascade.c: a non-inherited property reads
+                                 * the parent (`inherit`, or var() that may be),
+                                 * so a parent change must restyle this element */
     uint32_t pseudo;            /* enum DomPseudoState bits                    */
 
     DomInlineDecl *inline_decls;

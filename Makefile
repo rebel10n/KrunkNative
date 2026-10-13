@@ -206,6 +206,9 @@ offline-dead-test: build ## Offline play: a dead local player gets no tracers / 
 slowmo-arms-test: build ## The first-person arms stay locked to the camera through the round-end slow motion and after it (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 300 $(PYTHON) -I client/tests/slowmo_arms_e2e.py $(DEBUG_DIR)
 
+minimap-round-test: build ## The in-game minimap is round after joining, respawning, a map change, spectating and at other sizes / minimapScale (headless; EGL_DEVICE=)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/minimap_round_e2e.py $(DEBUG_DIR)
+
 preview-hole-test: build ## The menu shade covers the class preview box seamlessly at many window sizes / UI scales (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 1800 $(PYTHON) -I client/tests/preview_hole_e2e.py $(DEBUG_DIR)
 
@@ -232,7 +235,7 @@ ui-import: ## Regenerate ui/ from the Krunker reference (fonts, windows, icon li
 assets-import: ## Copy the v3.1.1 content mod.zip lacks (textures/previews/) into assets/ (tools/ui-import/game_assets.py)
 	$(PYTHON) -I tools/ui-import/game_assets.py --assets assets
 
-.PHONY: assets-import-v7 assets-check-v7 assets-import-live assets-check-live gltf-test viewer-diff frame-yield-test offline-dead-test resize-early-test console-settings-test slowmo-arms-test preview-hole-test preview-hole-test-web
+.PHONY: assets-import-v7 assets-check-v7 assets-import-live assets-check-live gltf-test viewer-diff frame-yield-test offline-dead-test resize-early-test console-settings-test slowmo-arms-test minimap-round-test preview-hole-test preview-hole-test-web
 assets-import-v7: ## Import Krunker v7.1.4 content into assets/ (models, textures, sounds, skins.json...) and regenerate client/src/viewer/viewer_store_table.c
 	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --assets assets
 	node tools/ui-import/gen_viewer_store.js

@@ -16,7 +16,9 @@
  *
  * Dirty protocol (see dom.h): cascade_restyle() visits elements whose
  * ElemData.dirty has STYLE/DESCENDANTS/HAS_DIRTY, recomputes them (children
- * of an element whose inherited values changed are recomputed too), clears
+ * of an element whose inherited values changed are recomputed too, and so are
+ * children that read a non-inherited value of it with `inherit` or var(),
+ * ElemData.explicit_inherit, when its record changed at all), clears
  * those bits and raises DOM_DIRTY_STYLE_CHANGED where the computed record or
  * the ::before/::after records changed.  Subtrees under display:none are not
  * computed (like browsers); they are restyled when the ancestor becomes

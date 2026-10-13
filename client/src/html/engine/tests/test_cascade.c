@@ -1187,6 +1187,35 @@ static void test_dynamic(void)
     dom_remove_class(g_dom, e, "foo");
     check_str("class after remove", dom_get_attr(g_dom, e, "class", NULL), "bar");
     check_int("has_class", dom_has_class(g_dom, e, "bar"), 1);
+
+    /* `inherit` of a non-inherited property follows a parent-only change: hud_map.c adds
+     * .roundMap (border-radius: 50%) to #miniMapOverlay, #miniMapCanvas has
+     * border-radius: inherit (main.css). The minimap stayed square when only the parent
+     * was restyled (its inherited range did not change, so the child was skipped). */
+    dom_set_style(g_dom, dom_by_id(g_dom, "inGameUI"), "display", "block"); /* in game: none on the menu */
+    e = dom_by_id(g_dom, "miniMapOverlay");
+    dom_set_style(g_dom, e, "display", "block");
+    restyle();
+    check("#miniMapCanvas", "border-top-left-radius", "0px");
+    dom_add_class(g_dom, e, "roundMap");
+    restyle();
+    check("#miniMapOverlay", "border-top-left-radius", "50%");
+    check("#miniMapCanvas", "border-top-left-radius", "50%");
+    dom_remove_class(g_dom, e, "roundMap");
+    restyle();
+    check("#miniMapCanvas", "border-top-left-radius", "0px");
+    /* the class added while hidden: restyled when shown again */
+    dom_set_style(g_dom, e, "display", "none");
+    restyle();
+    dom_add_class(g_dom, e, "roundMap");
+    restyle();
+    dom_set_style(g_dom, e, "display", "block");
+    restyle();
+    check("#miniMapCanvas", "border-top-left-radius", "50%");
+    dom_remove_class(g_dom, e, "roundMap");
+    dom_set_style(g_dom, e, "display", "none");
+    dom_set_style(g_dom, dom_by_id(g_dom, "inGameUI"), "display", NULL);
+    restyle();
 }
 
 /* innerHTML of the host-game window (ui/windows/8.html, the largest v7 window template). */
