@@ -1,0 +1,22 @@
+{
+  "scenario": "ingame-charge-over",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "charge-bar",
+      "rect": [
+        706,
+        296,
+        26,
+        128
+      ],
+      "kind": "image",
+      "fuzz": 15,
+      "max_pct": 1.5,
+      "note": "interactMProg at 1.1 (an ovrChrg weapon past full): red, 1.2x thicker, shaken -5.2 px"
+    }
+  ]
+}

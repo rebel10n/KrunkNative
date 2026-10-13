@@ -453,6 +453,8 @@ void ui_controls_touch_shoot(int on);            // #mobileUI shoot buttons: UCU
 float build_ui_charge_progress(const Player *me); // interMProg: chargeTime / (chrgTime || throwCharge), 0 none
 void build_ui_render(Client*);                    // per frame, after the HUD: the charge bar and the build wheel
 int  build_ui_shown(void);                        // the last build_ui_render drew something (tests)
+void build_ui_scenario(double prog, int over);    // --render-scenario state.charge: this charge bar (prog < 0: off)
+int  build_ui_scenario_active(void);              // a scenario charge bar is set (main.c draws it in scenario mode)
 void build_ui_fini(void);                         // its canvas (GL)
 // END build_ui block
 

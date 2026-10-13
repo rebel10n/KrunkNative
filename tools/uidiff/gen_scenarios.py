@@ -459,8 +459,8 @@ def hud_regions(rc, extra=()):
     return regs
 
 
-def game(name, state, regs, note, size=(1280, 720), frames=3):
-    add(name, {"ref": "%s/ingame/%s.png" % (REF, name), "size": list(size), "background": GAME_BG, "state": state,
+def game(name, state, regs, note, size=(1280, 720), frames=3, background=GAME_BG):
+    add(name, {"ref": "%s/ingame/%s.png" % (REF, name), "size": list(size), "background": background, "state": state,
                "frames": frames, "note": note}, regs)
 
 
@@ -485,6 +485,32 @@ rc = rects("ingame/ingame-interact")
 game("ingame-interact", game_state(hud(), interact='Press <span style="color:#FBC02D">[G]</span> to pickup Junk'),
      hud_regions(rc, [R("interact", pad(rc["interactMsg"], 2), "text", "#interactMsg: Press [G] to pickup Junk, bottom 220px")]),
      "Interact prompt of an onInteractKey trigger (Freight's Junk): #interactMsg 220px above the bottom.")
+# the weapon charge bar (game-overlay.js interactMProg at the progM* settings' defaults: rotated
+# 270 deg, left 56 %, top 50 %, 400 x 30 * 0.5 * uiScale, filling upwards, black shadow stroke).
+# capture-v7.js pins the local player's interMProg / overCharged; natively state.charge
+# (build_ui_scenario). The grey pages show its rgba(0,0,0,.4) back and stroke. Regions: the bar
+# from v7's geometry (uiScale 0.579 at 1280 x 720, 0.869 at 1920 x 1080) padded by 4 px; fuzz 15 %:
+# the fill's sub-pixel left edge under the 1 px black stroke is 0x20 in Chromium, 0x00 natively.
+CHARGE_GREY = "#808080"
+CHARGE_FUZZ = 15
+game("ingame-charge", game_state(hud(), charge=0.5),
+     [r for r in hud_regions(rects("ingame/ingame-charge")) if r["name"] == "crosshair"] +  # the HUD: ingame-plain
+     [R("charge-bar", [712, 298, 18, 124], "image",
+        "interactMProg at 0.5: upright, right of the crosshair, lower half white", fuzz=CHARGE_FUZZ)],
+     "Charge bar (Charge Rifle / Crossbow / knife throw) half charged: v7's interactMProg.")
+game("ingame-charge-1920", game_state(hud(), charge=0.5),
+     [R("charge-bar", [1071, 449, 22, 182], "image", "interactMProg at 0.5, uiScale 0.869", fuzz=CHARGE_FUZZ)],
+     "Charge bar half charged at 1920 x 1080.", size=(1920, 1080))
+game("ingame-charge-over", game_state(hud(), charge=1.1),
+     [R("charge-bar", [706, 296, 26, 128], "image",
+        "interactMProg at 1.1 (an ovrChrg weapon past full): red, 1.2x thicker, shaken -5.2 px",
+        fuzz=CHARGE_FUZZ)],
+     "Charge bar over-charging (prog 1.1) over grey: oColor fill, the back and the shadow stroke.",
+     background=CHARGE_GREY)
+game("ingame-charge-cross", game_state(hud(), charge={"prog": 0, "over": True}),
+     [R("charge-bar", [694, 296, 54, 128], "image", "overCharged: the empty back and the red cross", fuzz=CHARGE_FUZZ)],
+     "Over-charged weapon (overCharged, prog 0) over grey: the red cross on the empty bar.",
+     background=CHARGE_GREY)
 game("ingame-scoreboard", game_state(hud(scoreboard=True), scoreboard=[{"rank": 1, "name": "Local User", "score": 0}]),
      hud_regions(rects("ingame/ingame-scoreboard")), "Tab held: v7's #centerLeaderDisplay table, one row.")
 game("ingame-chat-open", game_state(hud(), chatOpen=True, chatInput="gg"), hud_regions(rects("ingame/ingame-chat-open")),

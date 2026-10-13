@@ -395,6 +395,23 @@ scenario('ingame-interact', 'ingame', async (c) => {
   await c.eval(FORCE_INTERACT);
   await settle(c, 800);
 });
+// the weapon charge bar (game-overlay.js interactMProg) at the progM* settings' defaults (upright,
+// right of the crosshair): index.js passes the local player's interMProg / overCharged to
+// io_interMProg every frame, so those two are pinned on Game's own player object
+async function chargeBar(c, prog, over, bg) {
+  await enterGame(c);
+  if (bg) await c.eval(flatPage(bg)); // a grey page shows the bar's rgba(0,0,0,.4) back and its shadow stroke
+  const r = await c.eval(`(() => { const me = Game.players.list.find((p) => p.isYou); if (!me) return 'no player';
+    Object.defineProperty(me, 'interMProg', { configurable: true, get() { return ${prog}; }, set() {} });
+    Object.defineProperty(me, 'overCharged', { configurable: true, get() { return ${!!over}; }, set() {} });
+    return 1; })()`);
+  if (r !== 1) console.error('[capture-v7] charge bar: ' + r);
+  await settle(c, 500);
+}
+scenario('ingame-charge', 'ingame', (c) => chargeBar(c, 0.5));
+scenario('ingame-charge-1920', 'ingame', (c) => chargeBar(c, 0.5), { size: [1920, 1080] });
+scenario('ingame-charge-over', 'ingame', (c) => chargeBar(c, 1.1, false, '#808080'));
+scenario('ingame-charge-cross', 'ingame', (c) => chargeBar(c, 0, true, '#808080'));
 scenario('ingame-chat-open', 'ingame', async (c) => {
   await enterGame(c);
   await key(c, 'Enter', 'Enter', 13);

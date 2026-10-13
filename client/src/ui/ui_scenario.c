@@ -147,6 +147,17 @@ static const char *st_str(const char *key) {
     return cJSON_IsString(item) ? item->valuestring : NULL;
 }
 
+// state.charge: the charge bar (interactMProg) with this interMProg, or {prog, over} for the
+// overCharged cross; drawn by build_ui_render instead of the local player's charge
+static void apply_charge(void) {
+    const cJSON *v = cJSON_GetObjectItem(g_sc.state, "charge");
+    if (cJSON_IsNumber(v)) build_ui_scenario(cJSON_GetNumberValue(v), 0);
+    else if (cJSON_IsObject(v)) {
+        const cJSON *prog = cJSON_GetObjectItem(v, "prog");
+        build_ui_scenario(cJSON_IsNumber(prog) ? cJSON_GetNumberValue(prog) : 0.0, cJSON_IsTrue(cJSON_GetObjectItem(v, "over")));
+    }
+}
+
 static const char *obj_str(const cJSON *obj, const char *key) {
     const cJSON *item = cJSON_GetObjectItemCaseSensitive(obj, key);
     return cJSON_IsString(item) ? item->valuestring : NULL;
@@ -240,6 +251,7 @@ static void warn_unknown_keys(void) {
         "spinHistory", // with spin: a "spinH" reply [{ind, dte, fds}] (the Spin History popup)
         "matchVotes", // [{mode, map, name, votes}]: the end screen's vote cards (a MATCH_VOTE_STATE packet)
         "interact",   // #interactMsg's innerHTML in game (ui_interact_scenario): the prompt without an interactable
+        "charge",     // in game: the charge bar's interMProg (a number) or {prog, over} (build_ui_scenario)
     };
     const cJSON *item;
     cJSON_ArrayForEach(item, g_sc.state) {
@@ -396,6 +408,7 @@ void ui_scenario_end(void) {
     g_sc.bg_fbo = g_sc.bg_tex = 0;
     hud_ui_set_override(NULL);
     hud_ui_set_override_scoreboard(NULL);
+    build_ui_scenario(-1.0, 0);
     cJSON_Delete(g_sc.root);
     g_sc.root = NULL;
     g_sc.active = 0;
@@ -841,6 +854,7 @@ static int ui_scenario_apply(Client *client) {
         }
         apply_pose(client);
         ui_interact_scenario(st_str("interact")); // the prompt from the next HUD tick on
+        apply_charge();
         run_frames(client, 2); // HUD visible + first value write (session edge seeds chat)
         apply_chat();
     }

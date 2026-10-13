@@ -3,7 +3,9 @@
 //   - interactMProg (game-overlay.js:1781-1830, index.js io_interMProg): the charge bar of the
 //     Charge Rifle, Crossbow, Zapper and the knife throw. player.js procInputs sets
 //     interMProg = chargeTime / (weapon.chrgTime || throwCharge) while charging or decaying and 0
-//     once the charge is gone; it shows while > 0 or overCharged. Past 1 (an ovrChrg weapon
+//     once the charge is gone; it shows while > 0 or overCharged. Its place, size, rotation,
+//     colours and shadow are the progM* settings (draw_charge): upright right of the crosshair,
+//     filling upwards. Past 1 (an ovrChrg weapon
 //     creeping towards chrgTime * config.overCharge) the fill turns red, grows and shakes; an
 //     overCharged weapon shows a red cross instead of the fill.
 //   - the Build Tool's pick wheel (game-overlay.js:1655-1700): while selectBuild (aim held with a
@@ -23,6 +25,7 @@
 #include <ui_logic.h>
 #include <world.h>
 #include <render_settings.h>
+#include <cJSON.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,6 +39,8 @@ static const int k_build_icons[WORLD_BUILD_COUNT] = {0, 3, 1, 4};
 static struct {
     Canvas2D *canvas;
     int drawn;
+    int sc_on, sc_over; // build_ui_scenario: a fixed charge bar instead of the local player's
+    double sc_prog;
 } g_bui;
 
 // scaleBase's scale (1700 x 900 * uiCustomScale fit), as sprays.c wheel_ui_scale
@@ -72,29 +77,76 @@ float build_ui_charge_progress(const Player *me) {
     return me->charge_time > 0.0f && full > 0.0f ? me->charge_time / full : 0.0f;
 }
 
-static void draw_charge(Canvas2D *c, const Player *me, const double w, const double h) {
-    const double prog = build_ui_charge_progress(me);
-    const int over = me->over_charged;
+// settingValue(key) as a number, else `def`
+static double setting_or(const char *key, const double def) {
+    double v;
+    return ui_setting_number(key, &v) && v == v ? v : def;
+}
+
+// settingValue(key) as a CSS colour, else `def`
+static void setting_color(const char *key, const char *def, float rgba[4]) {
+    const cJSON *v = ui_setting_value(key);
+    const char *css = cJSON_IsString(v) ? cJSON_GetStringValue(v) : NULL;
+    if (!css || !c2d_parse_color(css, rgba)) c2d_parse_color(def, rgba);
+}
+
+// The interactMProg overlay item as settings.js's "editing" progM* settings set it (their set()
+// runs at startup, so these, not the object literal of game-overlay.js:239, are what v7 shows):
+// progMColor #ffffff, progMOColor #eb2f2f, progMOpac 1, progMShadow true, progMScale 0.5
+// (`|| 1`), progMOffX 5.6 / progMOffY 5 (left / top = * 10 %), progMRot 270 deg. At the defaults
+// the bar stands upright just right of the crosshair and fills from the bottom up.
+typedef struct {
+    float color[4], o_color[4];
+    double opacity, scale, left, top, rot;
+    int shadow;
+} ChargeStyle;
+
+static ChargeStyle charge_style(void) {
+    ChargeStyle st;
+    setting_color("progMColor", "#ffffff", st.color);
+    setting_color("progMOColor", "#eb2f2f", st.o_color);
+    st.opacity = setting_or("progMOpac", 1.0);
+    st.shadow = !ui_setting_is_false("progMShadow");
+    st.scale = setting_or("progMScale", 0.5);
+    if (st.scale == 0.0) st.scale = 1.0; // p18105 || 1
+    st.left = setting_or("progMOffX", 5.6) * 10.0;
+    st.top = setting_or("progMOffY", 5.0) * 10.0;
+    st.rot = setting_or("progMRot", 270.0) * M_PI / 180.0;
+    return st;
+}
+
+// roundRect(x, y, w, h, r, true, shadow): the fill, then with progMShadow a stroke of the same
+// path (strokeStyle #000000; the canvas's lineWidth there is the default 1)
+static void charge_rect(Canvas2D *c, const double x, const double w, const double h, const double r, const int shadow) {
+    round_rect_fill(c, x, 0, w, h, r);
+    if (shadow) c2d_stroke(c);
+}
+
+static void draw_charge(Canvas2D *c, const double prog, const int over, const double w, const double h) {
     if (!(prog > 0.0) && !over) return; // interactMProg.display = prog > 0 || overCharged
-    // interactMProg: left 56 %, top 50 %, 400 x 30 at scale 0.5, colour #fff, oColor #eb2f2f
-    double bw = 400.0 * 0.5, bh = 30.0 * 0.5, shake = 0.0;
+    const ChargeStyle st = charge_style();
+    double bw = 400.0 * st.scale, bh = 30.0 * st.scale, shake = 0.0;
     if (prog > 1.0) {
         const double k = (prog - 1.0) / (1.0 - BUILD_UI_OVER_CHARGE) * 300.0;
         shake = sin((prog - 1.0) * k) * 8.0;
         bh *= 1.0 + (prog - 1.0) * 2.0;
     }
     c2d_save(c);
-    c2d_translate(c, w * 0.56 + shake, h * 0.5);
+    c2d_translate(c, w / 100.0 * st.left + shake, h / 100.0 * st.top); // calcPercent(width, left) + shake
+    if (st.rot != 0.0) c2d_rotate(c, st.rot);
+    c2d_set_global_alpha(c, st.opacity);
+    c2d_set_line_width(c, 1.0);
+    c2d_set_stroke_color(c, 0.0f, 0.0f, 0.0f, 1.0f);
     c2d_set_fill_color(c, 0.0f, 0.0f, 0.0f, 0.4f);
-    round_rect_fill(c, -bw / 2, 0, bw, bh, 4);
+    charge_rect(c, -bw / 2, bw, bh, 4, st.shadow);
     if (!over) {
-        if (prog > 1.0) c2d_set_fill_color(c, 0xeb / 255.0f, 0x2f / 255.0f, 0x2f / 255.0f, 1.0f);
-        else c2d_set_fill_color(c, 1.0f, 1.0f, 1.0f, 1.0f);
-        round_rect_fill(c, -bw / 2, 0, bw * fmin(1.0, prog), bh, 2);
-    } else { // the cross: a black 14 px stroke under a red 10 px one, arms 30 / 28
+        const float *fill = prog > 1.0 ? st.o_color : st.color;
+        c2d_set_fill_color(c, fill[0], fill[1], fill[2], fill[3]);
+        charge_rect(c, -bw / 2, bw * fmin(1.0, prog), bh, 2, st.shadow); // strokeStyle = null keeps #000
+    } else { // the cross: a black 14 px stroke under an oColor 10 px one, arms 30 / 28
         c2d_translate(c, 0, bh / 2);
         for (int i = 0; i < 2; i++) {
-            if (i) c2d_set_stroke_color(c, 0xeb / 255.0f, 0x2f / 255.0f, 0x2f / 255.0f, 1.0f);
+            if (i) c2d_set_stroke_color(c, st.o_color[0], st.o_color[1], st.o_color[2], st.o_color[3]);
             else c2d_set_stroke_color(c, 0.0f, 0.0f, 0.0f, 1.0f);
             c2d_set_line_width(c, i ? 10 : 14);
             const double a = i ? 28 : 30;
@@ -197,10 +249,13 @@ static void draw_build_cross(Canvas2D *c, const ClientRenderSettings *rs, const 
 void build_ui_render(Client *client) {
     const Player *me = client ? client->me : NULL;
     const int in_game = me && me->active && me->weapon && !html_ui_is_menu_open() && !hud_ui_end_screen_up();
-    const int wheel = in_game && me->select_build && me->weapon->build;
-    const int charge = in_game && (build_ui_charge_progress(me) > 0.0f || me->over_charged);
+    const int sc = g_bui.sc_on;
+    const int wheel = !sc && in_game && me->select_build && me->weapon->build;
+    const double prog = sc ? g_bui.sc_prog : build_ui_charge_progress(me);
+    const int over = sc ? g_bui.sc_over : me && me->over_charged;
+    const int charge = (sc || in_game) && (prog > 0.0 || over);
     const ClientRenderSettings *rs = client_render_settings();
-    const int cross = in_game && me->weapon->build && !me->select_build && rs && rs->crosshair_type == 0;
+    const int cross = !sc && in_game && me->weapon->build && !me->select_build && rs && rs->crosshair_type == 0;
     const int show = wheel || charge || cross;
     if (!show && !g_bui.drawn) return;
 
@@ -223,7 +278,7 @@ void build_ui_render(Client *client) {
         c2d_save(c);
         c2d_scale(c, scale, scale);
         if (cross) draw_build_cross(c, rs, w, h);
-        if (charge) draw_charge(c, me, w, h);
+        if (charge) draw_charge(c, prog, over, w, h);
         if (wheel) {
             c2d_save(c);
             c2d_translate(c, w / 2, h / 2);
@@ -233,6 +288,16 @@ void build_ui_render(Client *client) {
         c2d_restore(c);
     }
     c2d_composite(c);
+}
+
+void build_ui_scenario(const double prog, const int over) {
+    g_bui.sc_on = prog >= 0.0;
+    g_bui.sc_prog = g_bui.sc_on ? prog : 0.0;
+    g_bui.sc_over = g_bui.sc_on && over;
+}
+
+int build_ui_scenario_active(void) {
+    return g_bui.sc_on;
 }
 
 int build_ui_shown(void) {

@@ -1,0 +1,22 @@
+{
+  "scenario": "ingame-charge-cross",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "charge-bar",
+      "rect": [
+        694,
+        296,
+        54,
+        128
+      ],
+      "kind": "image",
+      "fuzz": 15,
+      "max_pct": 1.5,
+      "note": "overCharged: the empty back and the red cross"
+    }
+  ]
+}
