@@ -9,7 +9,8 @@
 // directory that holds ui/ (POSIX: exec, same pid; Windows: a new process).
 //
 //   krunknative [--cli|--headless] [--no-update] [--check] [--no-launch] [--updates-url URL]
-//               [--assets-dir DIR] [--allow-checkout-assets] [--] [client args...]
+//               [--assets-dir DIR] [--allow-checkout-assets] [--threads N] [--asset-mirrors URLS|off]
+//               [--] [client args...]
 // Unknown arguments go to client_bin. Exit codes: 0 ok, 1 usage, 2 failed with nothing
 // playable, 3 --check found a newer build.
 #include "launcher_ui.h"
@@ -67,7 +68,11 @@ typedef struct {
     char last_cli[400];
     double speed_t0;
     int64_t speed_b0;
-    double speed;
+    double speed;      // bytes/s, smoothed (EWMA over ~1 s samples); 0 = no sample yet
+    double xfer_t0;    // when this transfer started (ETA needs a few seconds of history)
+    int download_started;
+    int threads;       // --threads / KRUNKNATIVE_ASSET_THREADS (0 = default)
+    char mirrors[1024]; // --asset-mirrors / KRUNKNATIVE_ASSET_MIRRORS ("off" = none)
 } Launcher;
 
 static Launcher L;
@@ -121,23 +126,45 @@ static void fmt_mb(char *out, const size_t n, const int64_t done, const int64_t 
     else snprintf(out, n, "%.1f MB", (double) done / mb);
 }
 
+static void fmt_eta(char *out, const size_t n, const double s) {
+    if (s < 60) snprintf(out, n, "%d s left", (int) s + 1);
+    else if (s < 3600) snprintf(out, n, "%d min %02d s left", (int) s / 60, (int) s % 60);
+    else snprintf(out, n, "%d h %02d min left", (int) s / 3600, (int) s / 60 % 60);
+}
+
+// Speed: bytes over the last ~1 s window, smoothed (alpha 0.3) so the number does not jump with
+// every finished batch. ETA = remaining / smoothed speed, shown only after 3 s of transfer and
+// once the speed is known (an early ETA is a guess).
 static void transfer_progress(const char *what, const int64_t done, const int64_t total, const size_t files_done,
                               const size_t files_total) {
     const double t = now_s();
     if (t - L.speed_t0 >= 1.0) {
-        L.speed = (double) (done - L.speed_b0) / (t - L.speed_t0);
+        const double sample = (double) (done - L.speed_b0) / (t - L.speed_t0);
+        L.speed = L.speed > 0 ? 0.7 * L.speed + 0.3 * (sample > 0 ? sample : 0) : (sample > 0 ? sample : 0);
         L.speed_t0 = t;
         L.speed_b0 = done;
     }
-    char detail[200], mb[64];
+    char detail[256], mb[64], eta[48] = "";
     fmt_mb(mb, sizeof(mb), done, total);
-    if (files_total) snprintf(detail, sizeof(detail), "%s  -  %zu / %zu files  -  %.1f MB/s", mb, files_done, files_total, L.speed / 1048576.0);
-    else snprintf(detail, sizeof(detail), "%s  -  %.1f MB/s", mb, L.speed / 1048576.0);
+    if (total > done && L.speed > 1024 && t - L.xfer_t0 >= 3.0) {
+        char e[40];
+        fmt_eta(e, sizeof(e), (double) (total - done) / L.speed);
+        snprintf(eta, sizeof(eta), "  -  %s", e);
+    }
+    if (files_total)
+        snprintf(detail, sizeof(detail), "%s  -  %zu / %zu files  -  %.1f MB/s%s", mb, files_done, files_total, L.speed / 1048576.0, eta);
+    else snprintf(detail, sizeof(detail), "%s  -  %.1f MB/s%s", mb, L.speed / 1048576.0, eta);
     pthread_mutex_lock(&L.lock);
     snprintf(L.view.status, sizeof(L.view.status), "%s", what);
     snprintf(L.view.detail, sizeof(L.view.detail), "%s", detail);
     L.view.progress = total > 0 ? (double) done / (double) total : -1;
     pthread_mutex_unlock(&L.lock);
+}
+
+static void transfer_start(void) {
+    L.speed_t0 = L.xfer_t0 = now_s();
+    L.speed_b0 = 0;
+    L.speed = 0;
 }
 
 // ------------------------------------------------------------------ build identity
@@ -225,8 +252,7 @@ static int update_executables(const KnUpdateManifest *m) {
         return 0;
     }
     kn_sha256_init(&s.sha);
-    L.speed_t0 = now_s();
-    L.speed_b0 = 0;
+    transfer_start();
     KnHttp *http = kn_http_new(30000);
     char err[512] = "";
     KnHttpSink sink = {.write = pkg_write, .user = &s, .cancel = &L.cancel};
@@ -285,6 +311,10 @@ static void assets_progress(void *user, const char *phase, const int64_t done, c
         L.view.progress = files_total ? (double) files_done / (double) files_total : -1;
         pthread_mutex_unlock(&L.lock);
     } else if (!strcmp(phase, "download")) {
+        if (!L.download_started) {
+            L.download_started = 1;
+            transfer_start();
+        }
         transfer_progress("Downloading game content", done, total, files_done, files_total);
     }
 }
@@ -301,17 +331,22 @@ static int sync_assets(const KnUpdateManifest *m) {
     kn_assets_local_version(L.assets_dir, local, sizeof(local));
     if (!m->assets.version[0] || !strcmp(local, m->assets.version)) return 1;
     status(-1, NULL, local[0] ? "Updating game content" : "Downloading game content");
-    L.speed_t0 = now_s();
-    L.speed_b0 = 0;
-    KnAssetsSyncOpts opts = {.progress = assets_progress, .cancel = &L.cancel, .threads = 4};
+    L.download_started = 0;
+    KnAssetsSyncOpts opts = {.progress = assets_progress, .cancel = &L.cancel, .threads = L.threads,
+                             .mirrors = L.mirrors[0] ? L.mirrors : NULL};
     KnAssetsSyncResult r;
     char err[512] = "";
     if (!kn_assets_sync(L.assets_dir, m, &opts, &r, err, sizeof(err))) {
         fail(assets_present(L.assets_dir), err, "Game content download failed");
         return 0;
     }
-    printf("[launcher] game content %s: %zu downloaded (%.1f MB), %zu removed, %zu unchanged, %zu verified\n",
-           m->assets.version, r.fetched, (double) r.bytes / 1048576.0, r.removed, r.kept, r.adopted);
+    const double secs = L.download_started ? now_s() - L.xfer_t0 : 0;
+    printf("[launcher] game content %s: %zu downloaded (%.1f MB%s%.0f s, %.1f MB/s), %zu removed, %zu unchanged, %zu verified\n",
+           m->assets.version, r.fetched, (double) r.bytes / 1048576.0, secs > 0 ? " in " : "", secs > 0 ? secs : 0,
+           secs > 0 ? (double) r.bytes / 1048576.0 / secs : 0, r.removed, r.kept, r.adopted);
+    for (int g = 0; g < r.origin_count && r.unique; g++)
+        printf("[launcher]   %s: %zu files, %.1f MB%s\n", r.origins[g].url, r.origins[g].files,
+               (double) r.origins[g].bytes / 1048576.0, r.origins[g].disabled ? " (stopped using it)" : "");
     return 1;
 }
 
@@ -415,7 +450,7 @@ static int run_phase(LauncherUi *ui) {
             if (ui) {
                 action = launcher_ui_frame(ui, &v);
                 if (action == UI_QUIT && !L.cancel) {
-                    L.cancel = 1; // downloads stop; an install in progress finishes (or rolls back) first
+                    __atomic_store_n(&L.cancel, 1, __ATOMIC_RELAXED); // downloads stop; an install in progress finishes (or rolls back) first
                     launcher_ui_hide(ui);
                 }
             } else {
@@ -474,7 +509,8 @@ static void wait_for_pid(const long pid) {
 static void usage(void) {
     printf(KN_PRODUCT_NAME " launcher (updates the game, then starts it)\n"
            "Usage: krunknative [--cli|--headless] [--no-update] [--check] [--no-launch] [--wait-pid PID]\n"
-           "                   [--updates-url URL|off] [--assets-dir DIR] [--] [client args...]\n"
+           "                   [--updates-url URL|off] [--assets-dir DIR] [--threads N] [--asset-mirrors URLS|off]\n"
+           "                   [--] [client args...]\n"
            "  --cli, --headless  no window: progress on stdout\n"
            "  --no-update        do not install a newer build (still syncs the game content)\n"
            "  --check            report whether a newer build exists (exit 3) and stop\n"
@@ -483,8 +519,11 @@ static void usage(void) {
            "  --assets-dir DIR   game content directory (env KRUNKNATIVE_ASSETS_DIR); refused inside a git\n"
            "                     checkout (the sync deletes files it does not list) unless\n"
            "  --allow-checkout-assets\n"
+           "  --threads N        game content: connections per origin (default %d; env KRUNKNATIVE_ASSET_THREADS)\n"
+           "  --asset-mirrors U  game content mirrors (by path) besides the objects, \"off\" = none\n"
+           "                     (default: the manifest's; env KRUNKNATIVE_ASSET_MIRRORS)\n"
            "Other arguments are passed to client_bin.\n",
-           KN_UPDATE_DEFAULT_URL);
+           KN_UPDATE_DEFAULT_URL, KN_ASSETS_THREADS_DEFAULT);
 }
 
 int main(int argc, char **argv) {
@@ -504,6 +543,8 @@ int main(int argc, char **argv) {
         else if (!strcmp(a, "--no-launch")) L.no_launch = 1;
         else if (!strcmp(a, "--updates-url") && i + 1 < argc) snprintf(L.updates_url, sizeof(L.updates_url), "%s", argv[++i]);
         else if (!strcmp(a, "--assets-dir") && i + 1 < argc) snprintf(L.assets_override, sizeof(L.assets_override), "%s", argv[++i]);
+        else if (!strcmp(a, "--threads") && i + 1 < argc) L.threads = atoi(argv[++i]);
+        else if (!strcmp(a, "--asset-mirrors") && i + 1 < argc) snprintf(L.mirrors, sizeof(L.mirrors), "%s", argv[++i]);
         else if (!strcmp(a, "--wait-pid") && i + 1 < argc) L.wait_pid = strtol(argv[++i], NULL, 10);
         else if (!strcmp(a, "--root") && i + 1 < argc) snprintf(L.root_override, sizeof(L.root_override), "%s", argv[++i]); // tests
         else if (!strcmp(a, "--version")) {
@@ -525,6 +566,9 @@ int main(int argc, char **argv) {
         const char *env = getenv("KRUNKNATIVE_ASSETS_DIR");
         if (env && *env) snprintf(L.assets_override, sizeof(L.assets_override), "%s", env);
     }
+    if (!L.threads && getenv("KRUNKNATIVE_ASSET_THREADS")) L.threads = atoi(getenv("KRUNKNATIVE_ASSET_THREADS"));
+    if (!L.mirrors[0] && getenv("KRUNKNATIVE_ASSET_MIRRORS"))
+        snprintf(L.mirrors, sizeof(L.mirrors), "%s", getenv("KRUNKNATIVE_ASSET_MIRRORS"));
     printf(KN_PRODUCT_NAME " launcher %s\n", kn_build_string());
     if (L.wait_pid > 0) wait_for_pid(L.wait_pid);
     char ua[128];

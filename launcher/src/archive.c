@@ -159,7 +159,8 @@ static int parse_tar(const unsigned char *d, const size_t n, Entries *out, char 
     return 1;
 }
 
-static unsigned char *gunzip(const unsigned char *d, const size_t n, size_t *out_len, char *err, const size_t errn) {
+static unsigned char *gunzip_max(const unsigned char *d, const size_t n, size_t *out_len, const size_t max, char *err,
+                                 const size_t errn) {
     if (n < 18 || d[0] != 0x1f || d[1] != 0x8b || d[2] != 8) {
         set_err(err, errn, "not a gzip file", NULL);
         return NULL;
@@ -178,7 +179,7 @@ static unsigned char *gunzip(const unsigned char *d, const size_t n, size_t *out
         return NULL;
     }
     const uint32_t isize = (uint32_t) d[n - 4] | (uint32_t) d[n - 3] << 8 | (uint32_t) d[n - 2] << 16 | (uint32_t) d[n - 1] << 24;
-    if (isize == 0 || isize > ARCHIVE_MAX || n - 8 - p > INT32_MAX) {
+    if (isize == 0 || isize > max || n - 8 - p > INT32_MAX) {
         set_err(err, errn, "gzip too large or empty", NULL);
         return NULL;
     }
@@ -195,6 +196,15 @@ static unsigned char *gunzip(const unsigned char *d, const size_t n, size_t *out
     }
     *out_len = isize;
     return out;
+}
+
+static unsigned char *gunzip(const unsigned char *d, const size_t n, size_t *out_len, char *err, const size_t errn) {
+    return gunzip_max(d, n, out_len, ARCHIVE_MAX, err, errn);
+}
+
+unsigned char *kn_gunzip_mem(const unsigned char *data, const size_t len, const size_t max, size_t *out_len, char *err,
+                             const size_t errn) {
+    return gunzip_max(data, len, out_len, max < ARCHIVE_MAX ? max : ARCHIVE_MAX, err, errn);
 }
 
 // ------------------------------------------------------------------ zip

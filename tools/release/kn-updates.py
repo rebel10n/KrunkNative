@@ -280,6 +280,12 @@ def write_manifest(root, build, assets, grace_h):
         # the assets/ files the packages ship: not in the content set, never removed by a sync
         "assets": dict(assets, packaged=sorted(build.get("package_assets", []))),
     }
+    # Optional by-path mirrors of the content (the Pages CDN, deploy/pages/assets_cdn.py) the launcher
+    # downloads from alongside the objects (launcher/src/assets_sync.c). Unset: no "mirrors" key, and
+    # launchers use their built-in default for assets.krunk.io; "" or "off": an empty list (none).
+    mirrors = os.environ.get("KN_UPDATES_MIRRORS")
+    if mirrors is not None:
+        manifest["assets"]["mirrors"] = [] if mirrors.strip() in ("", "off") else mirrors.split()
     # last: a client never sees a manifest whose files are missing
     root.write_json(f"public/client/{build['channel']}.json", manifest, pretty=True)
     return manifest

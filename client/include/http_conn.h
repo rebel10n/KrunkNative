@@ -24,6 +24,7 @@ typedef struct {
 } HttpConn;
 
 // Connects (and runs the TLS handshake, verifying the certificate for a->host). 0 on failure.
+// Host lookups are cached for 5 minutes and TLS sessions per host, process-wide.
 // timeout_ms bounds the connect and every later send/receive (SO_SNDTIMEO / SO_RCVTIMEO).
 int http_conn_open(HttpConn *c, const HttpAddr *a, int timeout_ms);
 void http_conn_close(HttpConn *c);

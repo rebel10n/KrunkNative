@@ -97,6 +97,17 @@ int64_t kn_fs_size(const char *path) {
     return (int64_t) d.nFileSizeHigh << 32 | d.nFileSizeLow;
 }
 
+int kn_fs_stat(const char *path, int64_t *size, int64_t *mtime) {
+    wchar_t *w = wide(path);
+    WIN32_FILE_ATTRIBUTE_DATA d;
+    const int ok = w && GetFileAttributesExW(w, GetFileExInfoStandard, &d);
+    free(w);
+    if (!ok || (d.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))) return 0;
+    *size = (int64_t) d.nFileSizeHigh << 32 | d.nFileSizeLow;
+    *mtime = (int64_t) ((uint64_t) d.ftLastWriteTime.dwHighDateTime << 32 | d.ftLastWriteTime.dwLowDateTime);
+    return 1;
+}
+
 static int mkdir_one(const char *path) {
     wchar_t *w = wide(path);
     const int ok = w && (CreateDirectoryW(w, NULL) || GetLastError() == ERROR_ALREADY_EXISTS);
@@ -209,6 +220,18 @@ int64_t kn_fs_size(const char *path) {
     struct stat st;
     if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) return -1;
     return (int64_t) st.st_size;
+}
+
+int kn_fs_stat(const char *path, int64_t *size, int64_t *mtime) {
+    struct stat st;
+    if (lstat(path, &st) != 0 || !S_ISREG(st.st_mode)) return 0;
+    *size = (int64_t) st.st_size;
+#ifdef __APPLE__
+    *mtime = (int64_t) st.st_mtimespec.tv_sec * 1000000000 + st.st_mtimespec.tv_nsec;
+#else
+    *mtime = (int64_t) st.st_mtim.tv_sec * 1000000000 + st.st_mtim.tv_nsec;
+#endif
+    return 1;
 }
 
 static int mkdir_one(const char *path) {
@@ -430,6 +453,25 @@ int kn_fs_write_atomic(const char *path, const void *data, const size_t len) {
         return 0;
     }
     return 1;
+}
+
+int kn_fs_copy(const char *from, const char *to) {
+    FILE *in = FOPEN(from, "rb");
+    if (!in) return 0;
+    FILE *out = FOPEN(to, "wb");
+    if (!out) {
+        fclose(in);
+        return 0;
+    }
+    char buf[65536];
+    size_t r;
+    int ok = 1;
+    while (ok && (r = fread(buf, 1, sizeof(buf), in)) > 0) ok = fwrite(buf, 1, r, out) == r;
+    ok = ok && !ferror(in);
+    fclose(in);
+    if (fclose(out) != 0) ok = 0;
+    if (!ok) kn_fs_remove(to);
+    return ok;
 }
 
 int kn_fs_sha256(const char *path, char out_hex[65]) {

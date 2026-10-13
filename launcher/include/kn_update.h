@@ -19,6 +19,7 @@
 #define KN_UPDATE_URL_MAX 512
 #define KN_INSTALL_MARKER "kn-install.json"
 #define KN_ASSETS_STATE ".kn-assets.json"     // the asset list a sync last completed, in the assets dir
+#define KN_UPDATE_MAX_MIRRORS 4
 
 // Build identity: the kn-build metadata (tools/release/version-meta.sh) or kn_build_info().
 typedef struct {
@@ -66,6 +67,15 @@ typedef struct {
         // content set, never removed by a sync (the executable update owns them)
         char **packaged;
         size_t packaged_count;
+        // "mirrors": more places with the same content, tried alongside objects (launcher/src/
+        // assets_sync.c): strings or {"url","layout"}; layout "path" (default: <url><path>, a copy
+        // of the asset tree such as the Pages CDN) or "objects" (<url><aa>/<sha256>).
+        // mirrors_set = the manifest had the key (an empty list turns the built-in default off).
+        struct {
+            char url[KN_UPDATE_URL_MAX];
+            int by_path;
+        } mirrors[KN_UPDATE_MAX_MIRRORS];
+        int mirror_count, mirrors_set;
     } assets;
 } KnUpdateManifest;
 

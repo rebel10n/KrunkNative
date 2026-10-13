@@ -3,6 +3,15 @@
 // channel manifest names, downloading only the files whose content differs (by sha256) from the
 // content-addressed objects, verifying each, and recording the completed list in
 // <assets>/.kn-assets.json. Files the user added (not in the last list) are never touched.
+//
+// Downloads (doc/backend.md "Client updates"): every unique sha256 once (paths with the same
+// content are copied), largest first, from all origins at once: the manifest's objects plus its
+// assets.mirrors (the Pages CDN by default for assets.krunk.io), each with its own workers pulling
+// from one queue, so the faster origin serves more. Small files go HTTP/1.1-pipelined over
+// kept-alive connections; a file that fails on one origin is retried on the others, then again
+// with backoff. Partial downloads stay in <assets>/.kn-sync/<sha256>.part and are resumed
+// (Range) by the next attempt or run; every file is verified (size + sha256) before it is
+// renamed into place. No fsync: an interrupted sync is redone from the parts and the hashes.
 #include <kn_update.h>
 #include <stdint.h>
 
@@ -10,13 +19,37 @@ typedef struct {
     // From worker threads, serialised by the sync: phase "list" / "check" / "download" / "done".
     void (*progress)(void *user, const char *phase, int64_t done, int64_t total, size_t files_done, size_t files_total);
     void *user;
-    volatile int *cancel;
-    int threads;      // parallel downloads (default 4)
+    volatile int *cancel; // non-zero stops the sync (set it with __atomic_store_n from another thread)
+    int threads;      // connections per origin (default KN_ASSETS_THREADS_DEFAULT, at most 64)
+    const char *mirrors; // optional: "off" = only the manifest's objects; else space-separated
+                         // by-path base URLs replacing the manifest's / built-in mirrors
+    // optional (assets_bench): only the entries this returns 1 for are part of the sync
+    int (*select)(void *user, const KnAssetEntry *e);
 } KnAssetsSyncOpts;
+
+#define KN_ASSETS_THREADS_DEFAULT 16
+#define KN_ASSETS_MAX_ORIGINS 5 // the objects + KN_UPDATE_MAX_MIRRORS
+// The built-in mirror of the default origin (deploy/pages/assets_cdn.py): used when a manifest
+// from https://assets.krunk.io/ names no assets.mirrors.
+#define KN_ASSETS_DEFAULT_ORIGIN "https://assets.krunk.io/"
+#define KN_ASSETS_DEFAULT_MIRROR "https://krunknative-assets.pages.dev/assets/"
+
+typedef struct {
+    char url[512];
+    size_t files;     // unique objects it served
+    int64_t bytes;
+    size_t failures;  // per-file failures (404, mismatch, transport)
+    int disabled;     // stopped after repeated transport failures
+} KnAssetsOriginStat;
 
 typedef struct {
     size_t fetched, removed, kept, adopted, hashed;
-    int64_t bytes;
+    int64_t bytes;           // downloaded this run (resumed part bytes not included)
+    size_t unique, copied;   // objects downloaded, paths filled by copying a duplicate
+    int64_t resumed;         // bytes of earlier partial downloads reused
+    size_t retries;
+    KnAssetsOriginStat origins[KN_ASSETS_MAX_ORIGINS];
+    int origin_count;
 } KnAssetsSyncResult;
 
 // The version of the last completed sync ("" = none). 1 when a state file was read.

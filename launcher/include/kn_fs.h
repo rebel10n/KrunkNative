@@ -10,6 +10,11 @@ FILE *kn_fs_fopen(const char *path, const char *mode); // _wfopen on Windows
 int kn_fs_exists(const char *path);
 int kn_fs_is_dir(const char *path);
 int64_t kn_fs_size(const char *path);           // -1 = missing / not a regular file
+// Size and modification time (ns since the epoch; Windows: 100 ns ticks) of a regular file that is
+// not a symlink. 0 = missing / not a regular file / a symlink.
+int kn_fs_stat(const char *path, int64_t *size, int64_t *mtime);
+// Copies a file (from -> to, to created or truncated). 1 ok.
+int kn_fs_copy(const char *from, const char *to);
 int kn_fs_mkdirs(const char *path);             // mkdir -p; 1 ok
 int kn_fs_mkdirs_parent(const char *file_path); // the parent directory of a file
 int kn_fs_rmtree(const char *path);             // rm -rf; 1 ok (also when missing)

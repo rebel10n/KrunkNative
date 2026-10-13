@@ -13,3 +13,6 @@
 int kn_archive_extract(const char *archive_path, const char *dest_dir, char *err, size_t errn);
 // Same, from memory.
 int kn_archive_extract_mem(const unsigned char *data, size_t len, const char *dest_dir, char *err, size_t errn);
+// One gzip member into memory (malloc'd, NUL not added), at most max bytes uncompressed. NULL on
+// error (err says why). The gzip CRC is not checked: callers verify a sha256 of the result.
+unsigned char *kn_gunzip_mem(const unsigned char *data, size_t len, size_t max, size_t *out_len, char *err, size_t errn);

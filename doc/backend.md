@@ -1401,16 +1401,36 @@ It has no email flow at all: no email field, no verification, no reset by email,
   (`chat` ict, `post` ps / com, `gift` kr, `market` li / pi, `trade` ctr / trA, `clan` create,
   `publish` uploadM) -> `["po", null, "Verify your email to use this feature"]`. Default none
   (v7.1.4 parity).
-* **Not implemented (v7.1.4 has neither)**: password reset by email and 2FA recovery by email.
-* **Mail**: `knsvc/smtp.h`'s `kn_mailer` (3.10): "Verify your Krunker Box Office email", text + HTML, From
+* **Password reset by email (Krunker Box Office; v7.1.4: "contact recovery@yendis.ch")**: `["rpr",
+  name | email]` mails a one-time code (12 base32 characters, shown `XXXX-XXXX-XXXX`, 60 bits,
+  stored as sha256 in `email_tokens` kind `reset`, `reset_ttl_min` 30, a new request voids the
+  older code) to the account's **verified** email (an address shared by several accounts: one
+  mail, a code per account, at most 3). The answer is always `["rpr", null, "If that account has
+  a verified email, a reset code is on its way. Check your inbox."]` (no account or address
+  enumeration; the resend limits above apply silently, only the per-IP cap answers "Too many
+  emails. Please Try Later"). `["rpc", code]` -> `["rpc", null, username]` checks it (typed codes
+  ignore case and dashes; 0 / 1 / 8 read as O / I / B); `["rps", code, new, repeat]` -> `["rps",
+  null, msg, username, token]` sets the password, uses the code up, revokes every session and
+  issues one (the client signs in with it); errors "Invalid or expired code.", "Passwords do not
+  match.", the password rules. The mail also links `<link_base>/auth/reset-password?token=<code>`:
+  GET a small form page, POST (form-urlencoded `token`, `password`, `repeat`) sets it (no cookies;
+  CSP, no-store, no-referrer, frame-ancestors none). Procs `P_RESET_REQUEST`, `P_RESET_CHECK`,
+  `P_RESET_APPLY` (C on every driver). 2FA recovery by email is not implemented.
+* **Mail**: `knsvc/smtp.h`'s `kn_mailer` (3.10): "Verify your Krunker Box Office email" / "Reset your
+  Krunker Box Office password", text + HTML, From
   `smtp.from`. Every mail is a `mail_log` row (queued -> sent with the Message-ID, or failed with
   the server's reply); log lines mask the address (`p***@example.org`); credentials and tokens are
   never logged or stored.
 * **Client**: `client/src/ui/account_ui.c`: v7's 2FA popup (QR code: `client/src/ui/qr_code.c`,
   an SVG data URL; six digit inputs, `onInput2FA` / `onKeyDown2FA`, also on the hub and editor
   pages' login popups), the account window's optional email input (Register), and an Email block
-  in Settings > Account Security (address, Verified / Not verified, Resend, change). The HTML
-  engine sizes `<input type=number min max>` like Blink (the six digit boxes in one row).
+  in Settings > Account Security (address, Verified / Not verified, Resend, change), and
+  "Forgot password?" under the login form (`knResetOpen`: name or email -> the mailed code, also
+  "Got a code already?" -> the new password; Enter submits each step). Enter in the password field
+  logs in; Tab / Shift+Tab move the focus like a browser (`events.c` focus_step). Login errors say
+  why: Offline Mode, no account server configured, server unreachable / socket not open, no
+  answer within 8 s. The HTML engine sizes `<input type=number min max>` like Blink (the six
+  digit boxes in one row). Native e2e: `make native-auth-test` (`client/tests/native_auth_e2e.py`).
 
 | key | default | meaning |
 | --- | --- | --- |
@@ -1423,6 +1443,7 @@ It has no email flow at all: no email field, no verification, no reset by email,
 | `smtp.timeout_ms`, `smtp.retries`, `smtp.retry_delay_ms`, `smtp.queue_max` | 20000, 2, 5000, 256 | |
 | `accounts.email.link_base` | `brain.public_url` | base of the verify link |
 | `accounts.email.verify_ttl_h` | 24 | link lifetime |
+| `accounts.email.reset_ttl_min` | 30 | password reset code lifetime |
 | `accounts.email.resend_cooldown_s` / `max_per_account_day` / `max_per_address_day` / `max_per_ip_hour` | 60 / 5 / 5 / 10 | |
 | `accounts.email.required` | false | register needs an email ("Email Required") |
 | `accounts.email.require_verified` | `[]` | gated features, list or `a,b` |
@@ -2194,11 +2215,23 @@ Before the game it:
    the next start. deb/rpm installs (and read-only roots) are left to the package manager: the window
    names the download;
 3. syncs the game content when the manifest's content version differs from
-   `<assets>/.kn-assets.json`: downloads the list, diffs it (a file the last list vouches for with the
-   right size is kept; a file of the right size the list does not vouch for is hashed and adopted),
-   downloads only the missing / changed objects (4 parallel keep-alive connections, each verified),
-   deletes files the previous list had and the new one does not (never the user's own files), records
-   the list. First install = everything (~1.6 GB);
+   `<assets>/.kn-assets.json`: downloads the list (gzip on the wire), diffs it (a file the last list
+   vouches for with the right size is kept; a file of the right size the list does not vouch for is
+   adopted when `<assets>/.kn-hashes` knows its size + mtime, else hashed, 8 at a time), downloads
+   only the missing / changed objects, deletes files the previous list had and the new one does not
+   (never the user's own files), records the list and the hash cache. First install = everything
+   (~1.9 GB). Downloads (`launcher/src/assets_sync.c`): each unique sha256 once (duplicate paths are
+   copied), from every origin at once: the manifest's `objects` plus `assets.mirrors` (by-path copies
+   such as the Pages CDN; without the key, a manifest from `https://assets.krunk.io/` uses
+   `https://krunknative-assets.pages.dev/assets/`), 16 keep-alive connections per origin
+   (`--threads`, `KRUNKNATIVE_ASSET_THREADS`; `--asset-mirrors URLS|off`, `KRUNKNATIVE_ASSET_MIRRORS`)
+   pulling from one queue, half from the large end, half taking batches of up to 16 small files
+   HTTP/1.1-pipelined (8 in flight). DNS lookups and TLS sessions are cached per host. A failed file
+   moves to another origin, then is retried with backoff (3 rounds over all origins); an origin with
+   8 transport failures in a row is dropped for the run (never the last). Partial downloads stay in
+   `<assets>/.kn-sync/<sha256>.part` and continue with `Range` (also in the next run); every file is
+   checked (size + sha256) before its rename into place; no fsync. Measured from the dev machine in
+   Oct 2026 (19,194 files, 1.9 GB): 462 s with 4 connections to `assets.krunk.io`, 41-50 s now;
 4. copies the package's own `assets/` files into the content dir when that is another directory;
 5. starts `client_bin` (cwd = the directory with `ui/`; `KRUNKNATIVE_ASSETS_DIR=<content dir>`,
    `KRUNKNATIVE_LAUNCHER=<launcher>`; POSIX `exec`, Windows a new process). Unknown arguments and

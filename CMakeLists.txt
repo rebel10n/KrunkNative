@@ -695,6 +695,27 @@ else ()
     target_link_libraries(update_test PRIVATE cJSON m)
     add_test(NAME update_test COMMAND update_test)
 
+    # assets_bench (launcher/tests/assets_bench.c): the content sync into a directory with timings,
+    # against the live origins by hand or a local server in assets_sync_e2e (keep-alive, pipelining,
+    # parallel origins, resume, hash mismatch, fallback, cancel). POSIX (the e2e is Python + sockets).
+    if (NOT WIN32)
+        add_executable(assets_bench launcher/tests/assets_bench.c launcher/src/assets_sync.c
+                       launcher/src/update_core.c launcher/src/http_fetch.c launcher/src/fs.c launcher/src/archive.c
+                       client/src/net/http_conn.c client/src/stb_image.c shared/src/auth_join.c)
+        target_include_directories(assets_bench PRIVATE launcher/include client/include shared/include)
+        target_link_libraries(assets_bench PRIVATE cJSON Threads::Threads m)
+        if (OpenSSL_FOUND)
+            target_link_libraries(assets_bench PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+            target_compile_definitions(assets_bench PRIVATE KRUNKNATIVE_HAVE_TLS=1)
+        endif ()
+        find_package(Python3 COMPONENTS Interpreter QUIET)
+        if (Python3_FOUND)
+            add_test(NAME assets_sync_e2e COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/launcher/tests/assets_sync_e2e.py
+                     $<TARGET_FILE:assets_bench>)
+            set_tests_properties(assets_sync_e2e PROPERTIES TIMEOUT 300)
+        endif ()
+    endif ()
+
     # qr_code_test (email-verify): the v7.1.4 2FA popup's QR code encoder (client/src/ui/qr_code.c)
     # against python-qrcode goldens (client/tests/data/qr_golden.json)
     add_executable(qr_code_test client/tests/qr_code_test.c client/src/ui/qr_code.c)

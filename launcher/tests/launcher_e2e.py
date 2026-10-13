@@ -266,7 +266,8 @@ def main():
         check(after["user-added.txt"] == before["user-added.txt"], "the user's own file untouched")
         check(read(os.path.join(assets, "sound", "b.ogg")) == b"B1" and read(os.path.join(assets, "css", "fonts", "font2.ttf")) == b"FONT"
               and read(os.path.join(assets, "css", "fonts", "copy.ttf")) == b"FONT", "stale + missing content fetched (two paths, one object)")
-        check(objects_fetched(paths) == sorted([sha256(b"B1"), sha256(b"FONT"), sha256(b"FONT")]), "only the needed objects were requested")
+        # FONT once: two paths with one content are downloaded once and copied (assets_sync.c)
+        check(objects_fetched(paths) == sorted([sha256(b"B1"), sha256(b"FONT")]), "only the needed objects were requested, each once")
         check(f"({new12}," in out, "the launcher started the new client (it reports the patched commit)")
         check(not os.path.exists(os.path.join(inst, ".kn-update")), "no update state left behind")
         state = json.loads(read(os.path.join(assets, ".kn-assets.json")))

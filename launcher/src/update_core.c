@@ -320,6 +320,21 @@ int kn_update_manifest_parse(const char *json, const size_t len, const char *man
             }
             if (out->assets.packaged_count > 1)
                 qsort(out->assets.packaged, out->assets.packaged_count, sizeof(char *), str_cmp);
+            const cJSON *mirrors = cJSON_GetObjectItemCaseSensitive(a, "mirrors");
+            out->assets.mirrors_set = cJSON_IsArray(mirrors);
+            const cJSON *me;
+            cJSON_ArrayForEach(me, mirrors) {
+                if (out->assets.mirror_count >= KN_UPDATE_MAX_MIRRORS) break;
+                const char *murl = cJSON_IsString(me) ? me->valuestring : json_str(me, "url");
+                const char *layout = cJSON_IsObject(me) ? json_str(me, "layout") : "";
+                if (layout[0] && strcmp(layout, "path") != 0 && strcmp(layout, "objects") != 0) continue;
+                char *dst = out->assets.mirrors[out->assets.mirror_count].url;
+                if (!murl || !murl[0] || !kn_update_resolve_url(manifest_url, murl, dst, KN_UPDATE_URL_MAX - 1)) continue;
+                const size_t dl = strlen(dst);
+                if (dst[dl - 1] != '/') strcat(dst, "/");
+                out->assets.mirrors[out->assets.mirror_count].by_path = strcmp(layout, "objects") != 0;
+                out->assets.mirror_count++;
+            }
         } else {
             out->assets.objects[0] = 0;
         }

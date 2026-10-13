@@ -131,6 +131,25 @@ static void test_manifest(void) {
     CHECK(m.assets.packaged_count == 2); // the unsafe one dropped
     CHECK(kn_update_is_packaged(&m, "maps/a.json") && kn_update_is_packaged(&m, "shaders/b.frag"));
     CHECK(!kn_update_is_packaged(&m, "textures/a.png"));
+    CHECK(!m.assets.mirrors_set && m.assets.mirror_count == 0); // no key: the launcher's default
+    kn_update_manifest_free(&m);
+
+    // assets.mirrors: strings (by path) or {url, layout}; relative to the manifest; bad ones dropped
+    const char *mirrored =
+        "{\"format\":1,\"build\":{\"commit\":\"abcdef1\"},\"assets\":{\"version\":\"v1\",\"manifest\":\"../assets/v1.json\","
+        "\"objects\":\"../assets/objects/\",\"mirrors\":[\"https://cdn.example/assets\",{\"url\":\"/mirror/objects/\","
+        "\"layout\":\"objects\"},{\"url\":\"https://x.example/\",\"layout\":\"zip\"},\"ftp://no\",7]}}";
+    CHECK(kn_update_manifest_parse(mirrored, strlen(mirrored), url, &m, err, sizeof(err)));
+    CHECK(m.assets.mirrors_set && m.assets.mirror_count == 2);
+    CHECK_STR(m.assets.mirrors[0].url, "https://cdn.example/assets/");
+    CHECK(m.assets.mirrors[0].by_path == 1);
+    CHECK_STR(m.assets.mirrors[1].url, "https://assets.krunk.io/mirror/objects/");
+    CHECK(m.assets.mirrors[1].by_path == 0);
+    kn_update_manifest_free(&m);
+    const char *none = "{\"format\":1,\"build\":{\"commit\":\"abcdef1\"},\"assets\":{\"version\":\"v1\","
+                       "\"manifest\":\"v1.json\",\"objects\":\"o/\",\"mirrors\":[]}}";
+    CHECK(kn_update_manifest_parse(none, strlen(none), url, &m, err, sizeof(err)));
+    CHECK(m.assets.mirrors_set && m.assets.mirror_count == 0); // an empty list: no mirrors at all
     kn_update_manifest_free(&m);
 
     CHECK(!kn_update_manifest_parse("[]", 2, url, &m, err, sizeof(err)));

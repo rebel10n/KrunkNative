@@ -12,6 +12,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <time.h>
 #include <unistd.h>
 #ifdef KRUNKNATIVE_HAVE_TLS
 #include <openssl/err.h>
@@ -64,28 +65,98 @@ const char *http_url_target(const char *url) {
     return p;
 }
 
-// Blocking connect with a timeout (non-blocking connect + poll), then blocking again.
-static int connect_to(const HttpAddr *a, const int timeout_ms) {
+// DNS cache: the launcher's download workers open dozens of connections to the same two hosts
+// at once; one lookup per host:port per 5 minutes instead of one per connection. An address
+// that fails to connect drops the entry, so the next attempt resolves again.
+#define DNS_CACHE_N 8
+#define DNS_CACHE_TTL_S 300
+#define DNS_CACHE_ADDRS 4
+typedef struct {
+    char host[128], port[8];
+    time_t at;
+    int n;
+    struct {
+        struct sockaddr_storage addr;
+        socklen_t len;
+        int family, socktype, protocol;
+    } a[DNS_CACHE_ADDRS];
+} DnsEntry;
+static DnsEntry g_dns[DNS_CACHE_N];
+static pthread_mutex_t g_dns_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static int dns_lookup(const HttpAddr *a, DnsEntry *out) {
+    const time_t now = time(NULL);
+    pthread_mutex_lock(&g_dns_lock);
+    for (int i = 0; i < DNS_CACHE_N; i++) {
+        if (g_dns[i].n && now - g_dns[i].at < DNS_CACHE_TTL_S && !strcmp(g_dns[i].host, a->host) &&
+            !strcmp(g_dns[i].port, a->port)) {
+            *out = g_dns[i];
+            pthread_mutex_unlock(&g_dns_lock);
+            return 1;
+        }
+    }
+    pthread_mutex_unlock(&g_dns_lock);
     struct addrinfo hints = {0}, *res = NULL;
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
-    if (getaddrinfo(a->host, a->port, &hints, &res) != 0 || !res) return -1;
+    if (getaddrinfo(a->host, a->port, &hints, &res) != 0 || !res) return 0;
+    memset(out, 0, sizeof(*out));
+    snprintf(out->host, sizeof(out->host), "%s", a->host);
+    snprintf(out->port, sizeof(out->port), "%s", a->port);
+    out->at = now;
+    for (struct addrinfo *ai = res; ai && out->n < DNS_CACHE_ADDRS; ai = ai->ai_next) {
+        if (ai->ai_addrlen > sizeof(out->a[0].addr)) continue;
+        memcpy(&out->a[out->n].addr, ai->ai_addr, ai->ai_addrlen);
+        out->a[out->n].len = (socklen_t) ai->ai_addrlen;
+        out->a[out->n].family = ai->ai_family;
+        out->a[out->n].socktype = ai->ai_socktype;
+        out->a[out->n].protocol = ai->ai_protocol;
+        out->n++;
+    }
+    freeaddrinfo(res);
+    if (!out->n) return 0;
+    pthread_mutex_lock(&g_dns_lock);
+    int slot = 0;
+    for (int i = 0; i < DNS_CACHE_N; i++) {
+        if (!strcmp(g_dns[i].host, a->host) && !strcmp(g_dns[i].port, a->port)) {
+            slot = i;
+            break;
+        }
+        if (g_dns[i].at < g_dns[slot].at) slot = i; // empty (at 0) or the oldest
+    }
+    g_dns[slot] = *out;
+    pthread_mutex_unlock(&g_dns_lock);
+    return 1;
+}
+
+static void dns_forget(const HttpAddr *a) {
+    pthread_mutex_lock(&g_dns_lock);
+    for (int i = 0; i < DNS_CACHE_N; i++)
+        if (!strcmp(g_dns[i].host, a->host) && !strcmp(g_dns[i].port, a->port)) memset(&g_dns[i], 0, sizeof(g_dns[i]));
+    pthread_mutex_unlock(&g_dns_lock);
+}
+
+// Blocking connect (SO_SNDTIMEO bounds it) to the first address that answers.
+static int connect_to(const HttpAddr *a, const int timeout_ms) {
+    DnsEntry d;
+    if (!dns_lookup(a, &d)) return -1;
     int fd = -1;
-    for (struct addrinfo *ai = res; ai && fd < 0; ai = ai->ai_next) {
-        fd = (int) socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+    for (int i = 0; i < d.n && fd < 0; i++) {
+        fd = (int) socket(d.a[i].family, d.a[i].socktype, d.a[i].protocol);
         if (fd < 0) continue;
         struct timeval tv = {timeout_ms / 1000, (timeout_ms % 1000) * 1000};
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-        if (connect(fd, ai->ai_addr, ai->ai_addrlen) != 0) {
+        if (connect(fd, (const struct sockaddr *) &d.a[i].addr, d.a[i].len) != 0) {
             close(fd);
             fd = -1;
         }
     }
-    freeaddrinfo(res);
-    if (fd >= 0) {
-        const int one = 1;
-        setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+    if (fd < 0) {
+        dns_forget(a);
+        return -1;
     }
+    const int one = 1;
+    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
     return fd;
 }
 
@@ -134,6 +205,48 @@ static void tls_load_ca_bundle(SSL_CTX *ctx) {
 }
 #endif
 
+// TLS session cache: the last session (ticket) per host, so a reconnect (a kept-alive connection
+// the server closed, a retry) resumes instead of running a full handshake. TSan reports races
+// inside libcrypto here and in the handshake itself: libcrypto is not instrumented, so its atomic
+// reference counts are invisible to it (the same reports come from the code before this cache).
+#define TLS_SESS_N 8
+static struct {
+    char host[128];
+    SSL_SESSION *sess;
+} g_tls_sess[TLS_SESS_N];
+static pthread_mutex_t g_tls_sess_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static int tls_new_session(SSL *ssl, SSL_SESSION *sess) {
+    const char *host = SSL_get_servername(ssl, TLSEXT_NAMETYPE_host_name);
+    if (!host || strlen(host) >= sizeof(g_tls_sess[0].host)) return 0;
+    pthread_mutex_lock(&g_tls_sess_lock);
+    int slot = -1;
+    for (int i = 0; i < TLS_SESS_N && slot < 0; i++)
+        if (!strcmp(g_tls_sess[i].host, host)) slot = i;
+    for (int i = 0; i < TLS_SESS_N && slot < 0; i++)
+        if (!g_tls_sess[i].host[0]) slot = i;
+    if (slot < 0) slot = 0;
+    if (g_tls_sess[slot].sess) SSL_SESSION_free(g_tls_sess[slot].sess);
+    snprintf(g_tls_sess[slot].host, sizeof(g_tls_sess[slot].host), "%s", host);
+    g_tls_sess[slot].sess = sess;
+    pthread_mutex_unlock(&g_tls_sess_lock);
+    return 1; // the cache owns sess now
+}
+
+// Single use (RFC 8446 C.4: a client should not reuse a ticket): the session leaves the cache when
+// a connection takes it; that connection's own new ticket refills the slot.
+static void tls_resume(SSL *ssl, const char *host) {
+    pthread_mutex_lock(&g_tls_sess_lock);
+    for (int i = 0; i < TLS_SESS_N; i++)
+        if (g_tls_sess[i].sess && !strcmp(g_tls_sess[i].host, host)) {
+            SSL_set_session(ssl, g_tls_sess[i].sess); // takes its own reference
+            SSL_SESSION_free(g_tls_sess[i].sess);
+            g_tls_sess[i].sess = NULL;
+            break;
+        }
+    pthread_mutex_unlock(&g_tls_sess_lock);
+}
+
 static void tls_init_once(void) {
 #ifdef KRUNKNATIVE_TLS_STATIC
     OPENSSL_init_ssl(OPENSSL_INIT_NO_LOAD_CONFIG, NULL);
@@ -142,6 +255,8 @@ static void tls_init_once(void) {
     if (!g_tls_ctx) return;
     SSL_CTX_set_min_proto_version(g_tls_ctx, TLS1_2_VERSION);
     SSL_CTX_set_verify(g_tls_ctx, SSL_VERIFY_PEER, NULL);
+    SSL_CTX_set_session_cache_mode(g_tls_ctx, SSL_SESS_CACHE_CLIENT | SSL_SESS_CACHE_NO_INTERNAL_STORE);
+    SSL_CTX_sess_set_new_cb(g_tls_ctx, tls_new_session);
     if (SSL_CTX_set_default_verify_paths(g_tls_ctx) != 1) fprintf(stderr, "[http] TLS: no system CA store\n");
 #ifdef KRUNKNATIVE_TLS_STATIC
     tls_load_ca_bundle(g_tls_ctx);
@@ -161,6 +276,7 @@ int http_conn_open(HttpConn *c, const HttpAddr *a, const int timeout_ms) {
         pthread_once(&g_tls_once, tls_init_once);
         SSL *ssl = g_tls_ctx ? SSL_new(g_tls_ctx) : NULL;
         c->ssl = ssl;
+        if (ssl) tls_resume(ssl, a->host);
         if (!c->ssl || !SSL_set_fd(c->ssl, c->fd) || !SSL_set_tlsext_host_name(c->ssl, a->host) ||
             !SSL_set1_host(c->ssl, a->host) || SSL_connect(c->ssl) != 1) {
             const long verify = c->ssl ? SSL_get_verify_result(c->ssl) : X509_V_OK;
