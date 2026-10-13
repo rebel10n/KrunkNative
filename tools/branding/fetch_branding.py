@@ -11,7 +11,9 @@ and writes every icon the builds use (``OUTPUTS`` below):
   platform/web/icons/       the PWA (pwa.py copies them to <dist>/img/pwa/; the manifest and
                             <head> links point there): 32 px favicon, 180 px apple-touch-icon,
                             192 / 512 px manifest icons (the 512 one doubles as maskable: the art
-                            is full-bleed and its centre circle holds the face and the badge)
+                            is full-bleed and its centre circle holds the face and the badge),
+                            and og_1200x630.jpg, krunker.io's link-preview image (og:image /
+                            twitter:image, pwa.py)
   assets/img/icon.png       the native window icon (client/src/main.c and the launcher,
                             glfwSetWindowIcon) and the Linux desktop entry's icon (256 px)
   client/icon.ico           the Windows executables' icon (client/win.rc, client_bin and the
@@ -67,6 +69,7 @@ SOURCES = (
     ("icon256x256.png", "https://krunker.io/img/pwa/icon256x256.png"),
     ("icon512x512.png", "https://krunker.io/img/pwa/icon512x512.png"),
     ("icon1024x1024.png", "https://krunker.io/img/pwa/icon1024x1024.png"),
+    ("og_1200x630.jpg", "https://assets.krunker.io/promo/og_1200x630.jpg"),
 )
 ANDROID_RES = "platform/android/app/src/main/res"
 IOS_ICON = "platform/ios/KrunkNative/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
@@ -79,6 +82,7 @@ OUTPUTS = (
     ("platform/web/icons/icon-192.png", "icon192x192.png", "copy"),
     ("platform/web/icons/icon-512.png", "icon512x512.png", "copy"),
     ("platform/web/icons/apple-touch-icon.png", "icon1024x1024.png", ("png", 180)),
+    ("platform/web/icons/og_1200x630.jpg", "og_1200x630.jpg", "copy"),
     ("assets/img/icon.png", "icon256x256.png", "copy"),
     ("client/icon.ico", "icon1024x1024.png", ("ico", (16, 24, 32, 48, 64, 128, 256))),
     (IOS_ICON, "icon1024x1024.png", ("png", 1024, "RGB")),
@@ -123,8 +127,8 @@ def download(url):
         try:
             with opener.open(urllib.request.Request(url, headers=headers), timeout=60) as r:
                 data = r.read()
-            if not data.startswith(b"\x89PNG\r\n\x1a\n"):
-                raise SystemExit("%s: not a PNG" % url)
+            if not data.startswith((b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff")):
+                raise SystemExit("%s: not a PNG or JPEG" % url)
             return data
         except urllib.error.HTTPError as e:
             if e.code not in (429, 500, 502, 503, 504) or attempt == 3:
