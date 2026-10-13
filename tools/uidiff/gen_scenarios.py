@@ -524,6 +524,46 @@ game("ingame-killfeed",
                   R("weapon-streak", [1170, 540, 30, 20], "text", "weapon kill streak counter (1KS) next to the rack",
                     skip=True)]),
      "The local player killed a sandbox bot (spawned with pressButton(107)): kill feed + Spawned a Bot.")
+# The objective modes' HUD (the public rotation), each on Kanji with the sandbox playing that mode
+# (capture-v7.js modeScenario: map config.modes). v7 hides #teamScores until a team has scored and
+# then lists only the teams that did (index.js f1996); #gameMessage (in #topMidHold: top -5px,
+# scale .8) carries the gmsg and the CTF notices (Game.updateFlags: config.flagMsg / flagMsgE /
+# flagMsgRC). The #game-overlay canvas (flag pings, objective / zone markers, capture bars) is
+# hidden in the references: KrunkNative draws it on its own layer (hud_objectives.c), which
+# --render-scenario leaves out. state.modeHud pins what the sandbox's packets would set.
+def mode_regions(rc):
+    regs = [dict(r, skip=True, note=r["note"] + " (v7 draws it on #game-overlay, hidden in these references)")
+            if r["name"] == "crosshair" else r for r in hud_regions(rc)]
+    regs.append(R("game-message", [400, 0, 480, 30], "text",
+                  "#gameMessage band (#topMidHold top -5px, scale .8): the gmsg / CTF flag notice, or empty"))
+    regs.append(R("team-scores", pad(rc["teamScores"], 3) if "teamScores" in rc else [9, 84, 200, 30], "text",
+                  "#teamScores under #matchInfo: hidden until a team scores, then only the teams that scored"))
+    return regs
+
+
+def mode_game(name, mode_name, mode_hud, note, chat=()):
+    game(name, game_state(hud(), chat=chat, modeName=mode_name, modeHud=mode_hud),
+         mode_regions(rects("ingame/" + name)), note)
+
+
+mode_game("ingame-mode-point", "Hardpoint", {"team": 1, "gameMessage": "next objective 00:45"},
+          "Hardpoint at spawn: no team has scored (no #teamScores), gmsg next objective 00:45 (pinned).")
+mode_game("ingame-mode-point-scored", "Hardpoint",
+          {"team": 1, "teamScores": [30, None], "gameMessage": "next objective 00:45"},
+          "Hardpoint, team 1 (the local player's) has 30: #teamScores with that team only, white square.")
+mode_game("ingame-mode-ctf", "Capture the Flag", {"team": 1, "gameMessage": ""},
+          "Capture the Flag at spawn: no #teamScores, no notice.")
+mode_game("ingame-mode-ctf-scored", "Capture the Flag",
+          {"team": 1, "teamScores": [1, None], "flagInfo": ["AT BASE", "AWAY"], "gameMessage": ""},
+          "Capture the Flag, team 1 (the local player's) captured once: its row with the blue flag icon and AT BASE (team 2 has no row).")
+mode_game("ingame-mode-ctf-enemyflag", "Capture the Flag",
+          {"team": 1, "flagCarrier": ["enemy", None], "flagInfo": ["Bot", "AT BASE"], "gameMessage": ""},
+          "Capture the Flag, a bot carries the local player's flag: #gameMessage Enemy has your Flag (flagMsgE).",
+          chat=BOT_CHAT)
+mode_game("ingame-mode-kc", "Kill Confirmed", {"team": 1, "gameMessage": ""},
+          "Kill Confirmed at spawn: no #teamScores.")
+mode_game("ingame-mode-dom", "Domination", {"team": 1, "gameMessage": ""},
+          "Domination at spawn: no #teamScores (v7 Kanji has dom zones; 311 Kanji has none, the HUD is the same).")
 DEATH_REGS = [
     R("death-weapons", [380, 570, 470, 75], "text",
       "#deathUIHolder top row: [Desert Eagle] icon, kills 1 - 0, [Assault Rifle] icon"),

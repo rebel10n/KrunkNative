@@ -21,6 +21,8 @@ int  hud_modes_spawnable_type(int index, int *data_c);                    // WP-
 #define HUD_MODES_MAX_SPAWNABLES MODE_MAX_SPAWNABLES
 const char *hud_modes_game_message(void);                 // what #gameMessage shows ("" none)
 const char *hud_modes_flag_info(int team);                // teamFlags[team] ("AT BASE" / "AWAY" / carrier), "" none
+struct cJSON;
+void hud_modes_scenario(Client*, const struct cJSON *mode_hud); // --render-scenario state.modeHud (see .c)
 
 // WP-D: the v7.1.4 mode state the HUD shows (ui-v7 owns the DOM): team scores 1..5 (sdm), rounds
 // ("rds"), lockout ("lkt"), the local KR Tags ("krt"), the last "tx" / "Switching Sides" popup.

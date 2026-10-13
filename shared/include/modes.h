@@ -534,7 +534,8 @@ void mode_set_player_loadout(struct Player_t*, const int *weapons, int count, in
 int mode_is_team(const struct Game_t*);                      // mode.teams
 int mode_team_class(const struct Game_t*, int team);         // the class a team is forced to, -1 none
 int mode_apply_outfit(const struct Game_t*, struct Player_t*); // modelOverrides (Infected, Stalker) into Player.cosmetics; 1 = changed
-// Domination capture interpolation between "uct" packets (game.js updateDomZones, client half)
+// Domination capture interpolation between "uct" packets (game.js updateDomZones, client half),
+// and the players' onZone (player.js update: mode.collisionCheck runs on the client too)
 void mode_dom_client_tick(struct Game_t*, float delta);
 int mode_has_all_zones(const struct Game_t*);        // hasAllZones: the team owning every dom zone, 0 none
 // The objective a uid names (map objectives), NULL none; the active one with uid = active_objective.

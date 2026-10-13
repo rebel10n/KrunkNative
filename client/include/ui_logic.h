@@ -272,6 +272,7 @@ void hud_ui_end_refresh(void); // re-render the end screen tab (the Battle Pass 
 void hud_ui_end_results_now(const Client*); // --render-scenario endscreen.results: skip config.endAnim
 void hud_ui_skin_found(Client*, int uid, int skin); // season-system: NET_PACKET_SKIN_FOUND (v7 "skin" / "skinF")
 void hud_ui_end_challenge_completed(int icon, const char *name);
+void hud_ui_render_team(const Client*);     // the player card's team type / name (io_updateTeam, isYou)
 int  hud_ui_end_screen_up(void);            // END to INIT (title animation or results): no menu over it unless toggled
 int  hud_ui_end_screen_interactive(void);   // end-screen results up: pointer free, mouse goes to the page
 int  hud_ui_toggle_end_screen(Client*);     // UI.toggleEndScreen: results <-> menu (Escape, controller Start); 1 = acted
@@ -461,7 +462,8 @@ void build_ui_fini(void);                         // its canvas (GL)
 // END build_ui block
 
 // BEGIN hud_objectives block (client/src/ui/hud_objectives.c): the objective modes' game-overlay
-// canvas items (the CTF flag pings)
+// canvas items (flag pings, the Hardpoint Capture / Next marker, CONTESTED, Domination zones and
+// the capture bar)
 void hud_objectives_render(Client*);              // per frame, after the HUD
 int  hud_objectives_shown(void);                  // the last hud_objectives_render drew something (tests)
 void hud_objectives_fini(void);                   // its canvas (GL)

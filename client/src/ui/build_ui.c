@@ -53,8 +53,8 @@ static double build_ui_scale(const float vw, const float vh) {
     return sy < sx ? sy : sx;
 }
 
-// CanvasRenderingContext2D.prototype.roundRect(x, y, w, h, r, fill) (game-overlay.js:2289)
-static void round_rect_fill(Canvas2D *c, const double x, const double y, const double w, const double h, const double r) {
+// CanvasRenderingContext2D.prototype.roundRect(x, y, w, h, r, fill) (game-overlay.js:2289); also hud_objectives.c
+void build_ui_round_rect(Canvas2D *c, const double x, const double y, const double w, const double h, const double r) {
     c2d_begin_path(c);
     c2d_move_to(c, x + r, y);
     c2d_line_to(c, x + w - r, y);
@@ -118,7 +118,7 @@ static ChargeStyle charge_style(void) {
 // roundRect(x, y, w, h, r, true, shadow): the fill, then with progMShadow a stroke of the same
 // path (strokeStyle #000000; the canvas's lineWidth there is the default 1)
 static void charge_rect(Canvas2D *c, const double x, const double w, const double h, const double r, const int shadow) {
-    round_rect_fill(c, x, 0, w, h, r);
+    build_ui_round_rect(c, x, 0, w, h, r);
     if (shadow) c2d_stroke(c);
 }
 

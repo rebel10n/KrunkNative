@@ -1,6 +1,6 @@
 // World-anchored overlay items of Krunker v3.1.1's #game-overlay canvas: player nametags,
-// the Hardpoint marker and bomb site letters (v7's CTF flag pings are client/src/ui/hud_objectives.c).
-// See client/include/nametags.h.
+// and bomb site letters (v7's flag pings and Hardpoint / Domination markers are
+// client/src/ui/hud_objectives.c). See client/include/nametags.h.
 //
 // Reference: Krunker_v3.1.1/src/libs/game-overlay.js overlay.render (the AI.ais, players,
 // flags, objectives and sites blocks), src/index.js gameLoop (the nameVisRate pass that
@@ -108,7 +108,6 @@ static struct {
     int layer_shown;
     StyleCache layer_w, layer_h, layer_transform;
     Tag tags[NT_MAX_TAGS];
-    Marker objective;
     Marker sites[NT_MAX_SITES];
     AITag ai_tags[GAME_AI_MAX];
     double next_vis;         // next nameVisRate pass (glfwGetTime seconds)
@@ -281,7 +280,6 @@ static HtmlElem nt_layer(void) {
 
     // A fresh document: every element handle is stale.
     memset(g_nt.tags, 0, sizeof(g_nt.tags));
-    memset(&g_nt.objective, 0, sizeof(g_nt.objective));
     memset(g_nt.sites, 0, sizeof(g_nt.sites));
     memset(g_nt.ai_tags, 0, sizeof(g_nt.ai_tags));
     for (int i = 0; i < NT_MAX_TAGS; i++) g_nt.tags[i].uid = -1;
@@ -817,49 +815,8 @@ static Marker *nt_marker(Marker *marker, const char *id, const int image) {
     return marker;
 }
 
-// drawImage(img) centred on the projected point, aP = aO * 70 px wide.
-static void nt_image_marker(Marker *marker, const char *id, const char *src, const Camera *camera, const vec3 p) {
-    double fx, fy;
-    const float size = nt_distance_scale(camera->position, p) * 70.0f;
-    if (!nt_project(camera, p, &fx, &fy)) {
-        if (marker->el) nt_display(marker->el, 0, &marker->shown);
-        return;
-    }
-    if (!nt_marker(marker, id, 1)) return;
-    char v[48];
-    if (strcmp(marker->src.value, src)) {
-        snprintf(marker->src.value, sizeof(marker->src.value), "%s", src);
-        html_dom_set_attr(marker->el, "src", src);
-    }
-    snprintf(v, sizeof(v), "%.4f%%", fx * 100.0);
-    nt_style(marker->el, "left", v, &marker->left);
-    snprintf(v, sizeof(v), "%.4f%%", fy * 100.0);
-    nt_style(marker->el, "top", v, &marker->top);
-    nt_px(v, sizeof(v), size);
-    if (strcmp(marker->size.value, v)) {
-        snprintf(marker->size.value, sizeof(marker->size.value), "%s", v);
-        html_dom_set_style(marker->el, "width", v);
-        html_dom_set_style(marker->el, "height", v); // flag_r/b, objective_1: 128 x 128
-        nt_px(v, sizeof(v), -size * 0.5f);
-        html_dom_set_style(marker->el, "margin-left", v);
-        html_dom_set_style(marker->el, "margin-top", v);
-    }
-    nt_display(marker->el, 1, &marker->shown);
-}
-
 static void nt_hide_markers(void) {
-    nt_display(g_nt.objective.el, 0, &g_nt.objective.shown);
     for (int s = 0; s < NT_MAX_SITES; s++) nt_display(g_nt.sites[s].el, 0, &g_nt.sites[s].shown);
-}
-
-static void nt_objective(Client *client) {
-    vec3 center, half;
-    if (!hud_modes_active_objective(client, &center, &half) || nt_point_in_box(client->camera.position, center, half)) {
-        nt_display(g_nt.objective.el, 0, &g_nt.objective.shown);
-        return;
-    }
-    center.y += NT_MARKER_UP;
-    nt_image_marker(&g_nt.objective, "knObjectivePing", "textures/objective_1.png", &client->camera, center);
 }
 
 // Game.map.manager.sites (BOMB_SITE objects in map order): "A", "B", ... in 50 px GameFont
@@ -1026,9 +983,8 @@ void nametags_tick(Client *client) {
         nt_hide_markers();
         return;
     }
-    // the CTF flag pings are canvas drawing in v7 (game-overlay.js flags block): client/src/ui/hud_objectives.c
-    if (mode->objective) nt_objective(client);
-    else nt_display(g_nt.objective.el, 0, &g_nt.objective.shown);
+    // the flag pings and the Hardpoint / Domination markers are canvas drawing in v7
+    // (game-overlay.js f1565, the dom zone circles): client/src/ui/hud_objectives.c
     if (mode->site) nt_sites(client);
     else for (int s = 0; s < NT_MAX_SITES; s++) nt_display(g_nt.sites[s].el, 0, &g_nt.sites[s].shown);
 }

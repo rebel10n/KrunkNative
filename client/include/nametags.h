@@ -10,8 +10,8 @@
 //                     enemies with line of sight (Game.canSee), everyone while spectating,
 //                     hideNames / mode hideNames / Game.config.nameTags, and the killer's
 //                     tag forced on by g1() (menu_view_killer_uid) until the next pass
-//   mode markers      the active Hardpoint marker (objective_1) and the bomb site letters
-//                     (A, B, ...); v7's CTF flag pings are client/src/ui/hud_objectives.c
+//   mode markers      the bomb site letters (A, B, ...); v7's flag pings, Hardpoint and
+//                     Domination markers are drawn by client/src/ui/hud_objectives.c
 //
 // Drawn the way the HTML HUD draws the canvas's other items (damage numbers, speedometer):
 // as page elements, in a full-viewport layer inserted right after the <canvas id=

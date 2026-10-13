@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Objective modes end-to-end: the HUD of the public rotation's modes (FFA, Capture the Flag,
-Kill Confirmed) and a full CTF flag cycle, on the real client.
+"""Objective modes end-to-end: the HUD of each mode of the public rotation (FFA, Hardpoint,
+Domination, Capture the Flag, Kill Confirmed) and a full CTF flag cycle, on the real client.
 
   python3 -I server/tests/modes_e2e.py BUILD_DIR [scenario ...]   (from the repository root)
 
@@ -9,8 +9,8 @@ picks the GPU) driven by an input script (client/src/input_script.c): `vis` prob
 page elements are shown (`:objectives`: the game-overlay layer of hud_objectives.c drew), `flags`
 logs the client's flag mirror with its crystal / stand meshes. Expectations follow Krunker v7.1.4:
   - #teamScores is hidden until a team has scored (index.js f1996 over Game.teamScores = {});
-  - #gameMessage carries the gmsg and the CTF notices;
-  - the objective canvas items (CTF's flag pings) exist in CTF only (game-overlay.js);
+  - #gameMessage carries the gmsg ("next objective ..." in Hardpoint) and the CTF notices;
+  - the objective canvas items exist in Hardpoint / Domination / CTF only (game-overlay.js);
   - CTF (game.js pickupFlag / dropFlag / resetFlag / updateFlags): a pickup gives the flag a
     carrier (hidden on its carrier, "Guest" in #tScoreM), a death drops it where the carrier died
     (y + flagOff, "AWAY"), a touch by its own team returns it home ("AT BASE"), and a dropped flag
@@ -149,6 +149,16 @@ def sc_ffa():
     sc_mode_hud("ffa", "ffa", "kanji", False)
 
 
+def sc_point():
+    # Littletown's first objective (uid 0) is up from the start; standing on it scores 10 / 1.5 s
+    sc_mode_hud("point", "point", "littletown", True, scores_after="28 1 305", message="1")
+
+
+def sc_dom():
+    # Subzero's zone A: 10 s to secure, then +10 team score every 1.5 s
+    sc_mode_hud("dom", "dom", "subzero_new", True, scores_after="334.5 18 -17")
+
+
 def sc_ctf_hud():
     sc_mode_hud("ctf-hud", "ctf", "kanji", True)
 
@@ -250,7 +260,7 @@ def sc_ctf_cycle_online():
             server.wait()
 
 
-SCENARIOS = {"ffa": sc_ffa, "ctf-hud": sc_ctf_hud, "kc": sc_kc,
+SCENARIOS = {"ffa": sc_ffa, "point": sc_point, "dom": sc_dom, "ctf-hud": sc_ctf_hud, "kc": sc_kc,
              "ctf-cycle": sc_ctf_cycle, "ctf-cycle-online": sc_ctf_cycle_online}
 
 

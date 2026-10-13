@@ -1855,7 +1855,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
 
     if (!scenario) vfx_render_screen(client); // overlay-canvas muzzle flash + damage overlay
     if (!scenario) nametags_tick(client); // overlay-canvas nametags + mode markers (page elements)
-    if (!scenario) hud_objectives_render(client);     // v7 flag pings (game-overlay canvas)
+    if (!scenario) hud_objectives_render(client);     // v7 flag pings, Hardpoint / Domination markers (game-overlay canvas)
     if (!scenario || build_ui_scenario_active()) build_ui_render(client); // v7 charge bar (interactMProg) and build wheel (game-overlay canvas)
     if (!scenario) sprays_wheel_render(client, delta); // WP-E: v7 spray wheel (game-overlay canvas)
     if (!scenario) ks_overlay_frame(frame_delta); // KrunkScript overlay canvas: script render(), below the HTML page

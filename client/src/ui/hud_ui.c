@@ -2065,6 +2065,10 @@ static void hud_render_team(const Client *client) {
     dom_style("bottomLeftTeamName", "color", teams && team >= 1 && team <= 2 && mode->config.team_colors[team - 1] ? mode->config.team_colors[team - 1] : "#fff");
 }
 
+void hud_ui_render_team(const Client *client) {
+    hud_render_team(client);
+}
+
 static void hud_render_scope(const int scoped) {
     dom_style("aimRecticle", "opacity", scoped ? "1" : "0");
 }

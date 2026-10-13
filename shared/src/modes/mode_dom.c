@@ -175,9 +175,18 @@ void mode_tick_dom(Game *game, const float delta) {
     if (changed_count) mode_send_dom_update(game, changed_zones, changed_count, NET_TARGET_ALL);
 }
 
-// The client half of updateDomZones: captureT grows between "uct" packets.
+// The client half of updateDomZones: captureT grows between "uct" packets; and the players' onZone.
 void mode_dom_client_tick(Game *game, const float delta) {
-    if (!game || !game->mode || !game->mode->config.dom || game_is_authority(game)) return;
+    if (!game || !game->mode || game_is_authority(game)) return;
+    // player.js update runs on the client too: onZone = null, then mode.collisionCheck (the
+    // game-overlay's capture bar / CONTESTED box read the local player's onZone)
+    for (size_t i = 0; i < game->player_count; i++) {
+        Player *player = game->players[i];
+        if (!player) continue;
+        player->mode.on_zone = -1;
+        if (player->active && game->mode->config.collision_check) game->mode->config.collision_check(game, player);
+    }
+    if (!game->mode->config.dom) return;
     for (int z = 0; z < game->mode->dom_zone_count; z++) {
         int captured;
         dom_step(game, &game->mode->dom_zones[z], delta, 0, &captured);

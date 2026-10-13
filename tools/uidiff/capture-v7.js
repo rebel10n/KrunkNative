@@ -78,7 +78,9 @@ const RECT_IDS = ['windowHeader', 'menuWindow', 'windowHolder', 'signedOutHeader
   'spinWindow', 'spinInfo', 'spinItems', 'spinButton', 'spinKR', 'spinHistoryBtn', 'spinItem', 'spinItemCanvas',
   'spinItemName', 'spinUIBtns', 'spinNextBtn', 'spinAgainBtn', 'spinEquipBtn', 'spinHistoryPop', 'shopSideSellB',
   // the interact prompt (ingame-interact)
-  'interactMsg'];
+  'interactMsg',
+  // the objective modes' HUD (ingame-mode-*)
+  'teamScores', 'tScoreV1', 'tScoreV2', 'gameMessage', 'topMidHold', 'specGMessage'];
 const RECTS = `(() => { const o = {}; for (const id of ${JSON.stringify(RECT_IDS)}) { const e = document.getElementById(id);
   if (!e) continue; const cs = getComputedStyle(e); if (cs.display === 'none' || cs.visibility === 'hidden') continue;
   const r = e.getBoundingClientRect(); if (r.width < 1 || r.height < 1) continue;
@@ -507,6 +509,57 @@ minimapScenario('ingame-minimap-sandstorm', 'sandstorm_v3.json');
 minimapScenario('ingame-minimap-burg', 'burg_new.json');
 minimapScenario('ingame-minimap-311-burg', 'kn:311_burg.json');
 
+// The objective modes' HUD (the public rotation: Hardpoint, CTF, Kill Confirmed, Domination) on
+// Kanji, the sandbox playing that mode (map config.modes). The #game-overlay canvas items (flag
+// pings, the objective / zone markers, capture bars) are hidden: KrunkNative draws them on its
+// own layer, which --render-scenario leaves out; tools/uidiff covers the page. The local team,
+// the team scores and #gameMessage are logged / pinned for the KrunkNative scenario's modeHud.
+const HIDE_OVERLAY = `(() => { const o = document.getElementById('game-overlay'); if (o) o.style.opacity = '0'; return 1; })()`;
+const PIN_GMSG = (text) => `(() => { const t = document.getElementById('gameMessage'); if (!t) return 0; t.textContent = ${JSON.stringify(text)};
+  for (const k of ['textContent', 'innerHTML', 'innerText']) Object.defineProperty(t, k, { configurable: true, set() {}, get() { return ${JSON.stringify(text)}; } });
+  return 1; })()`;
+// the sandbox puts the local player on team 1 (the KrunkNative scenarios pin modeHud.team 1)
+async function modeBase(c, name) {
+  await enterGame(c);
+  await c.eval(HIDE_OVERLAY);
+  console.error(`[capture-v7] ${name}: ` + JSON.stringify(await c.eval(`(() => ({mode: Game.mode && Game.mode.alias,
+    team: (Game.players.list.find(p => p.isYou) || {}).team, scores: Game.teamScores, msg: gameMessage.textContent}))()`)));
+}
+function modeScenario(name, mode, run) {
+  scenario(name, 'ingame', async (c) => { await modeBase(c, name); if (run) await run(c); await settle(c, 800); }, { mode });
+}
+modeScenario('ingame-mode-point', 'point', async (c) => { await c.eval(PIN_GMSG('next objective 00:45')); });
+modeScenario('ingame-mode-ctf', 'ctf', async (c) => { await c.eval(PIN_GMSG('')); });
+// a sandbox bot carries the local player's flag (game.updateCarrier + updateFlagInfo: "ufl" /
+// "ufi"), so Game.updateFlags writes config.flagMsgE "Enemy has your Flag" into #gameMessage
+modeScenario('ingame-mode-ctf-enemyflag', 'ctf', async (c) => {
+  await c.eval(SPAWN_BOT);
+  await sleep(1500);
+  console.error('[capture-v7] ingame-mode-ctf-enemyflag: ' + JSON.stringify(await c.eval(`(() => { try {
+    const me = sandboxPlayer, bot = ${SERVER_BOT}, flag = sandboxGame.map.manager.flags.find(f => !f.neutral && f.team == me.team);
+    if (!bot || !flag) return {bot: !!bot, flag: !!flag};
+    sandboxGame.updateCarrier(flag, bot); sandboxGame.updateFlagInfo(flag, 'Bot'); return {team: me.team, flagTeam: flag.team};
+  } catch (e) { return String(e.stack); } })()`)));
+  await sleep(500);
+});
+// a team has scored: io_teamScore ("ts" from the sandbox's teamScoreUpd batch) shows #teamScores
+// with that team only (f1996 lists Game.teamScores' keys); CTF adds the flag icon and status
+const TEAM_SCORE = (team, score) => `(() => { sandboxGame.giveTeamScore(${team}, ${score}); return 1; })()`;
+modeScenario('ingame-mode-point-scored', 'point', async (c) => {
+  await c.eval(PIN_GMSG('next objective 00:45'));
+  await c.eval(TEAM_SCORE(1, 30));
+  await sleep(1200);
+});
+modeScenario('ingame-mode-ctf-scored', 'ctf', async (c) => {
+  await c.eval(PIN_GMSG(''));
+  await c.eval(TEAM_SCORE(1, 1));
+  await sleep(1200);
+  await c.eval(`(() => { const f = sandboxGame.map.manager.flags.find(f => !f.neutral && f.team == 2); if (f) sandboxGame.updateFlagInfo(f, 'AWAY'); return 1; })()`);
+  await sleep(500);
+});
+modeScenario('ingame-mode-kc', 'kc', async (c) => { await c.eval(PIN_GMSG('')); });
+modeScenario('ingame-mode-dom', 'dom', async (c) => { await c.eval(PIN_GMSG('')); });
+
 // the sandbox's own game end (game.js endGame(): the "end" packet, v7's end animation)
 scenario('ingame-endscreen', 'ingame', async (c) => {
   await enterGame(c);
@@ -587,12 +640,15 @@ const SEED_RNG = `(() => { let a = 0x4b4e; Math.random = function () { a |= 0; a
 // The sandbox's map (Kanji unless the scenario names one: "<file>" in v7's public/maps, or
 // "kn:<file>" in KrunkNative's assets/maps) with its game config narrowed to Free for All (the
 // map's own config lists up to 13 modes, of which the sandbox plays a random one)
-function mapJson(file) {
+// `mode`: a v7 mode alias the sandbox plays instead (its index in map.modes, the full mode list)
+const V7_MODE_INDEX = { ffa: 0, point: 2, ctf: 3, kc: 19, dom: 25 };
+function mapJson(file, mode) {
   const kn = /^kn:/.test(file || '');
   const src = kn ? path.join(REPO, 'assets', 'maps', file.slice(3)) : path.join(V7_PUBLIC, 'maps', file || 'kanji.json');
   const m = JSON.parse(fs.readFileSync(src, 'utf8'));
-  if (m.config) m.config.modes = [0];
-  else m.config = { modes: [0] };
+  const modes = [V7_MODE_INDEX[mode || 'ffa']];
+  if (m.config) m.config.modes = modes;
+  else m.config = { modes };
   return JSON.stringify(m);
 }
 
@@ -609,7 +665,7 @@ async function openPage(o) {
   const base = `http://127.0.0.1:${o.httpPort}/`;
   await c.send('Page.navigate', { url: base + 'manifest.json' });
   await sleep(300);
-  const storage = Object.assign({}, GUEST_STORAGE, o.page === 'index.html' ? { custMap: mapJson(o.map) } : {});
+  const storage = Object.assign({}, GUEST_STORAGE, o.page === 'index.html' ? { custMap: mapJson(o.map, o.mode) } : {});
   await c.eval(`(() => { localStorage.clear(); const s = ${JSON.stringify(storage)}; for (const k in s) localStorage.setItem(k, s[k]); return 1; })()`);
   await c.send('Page.addScriptToEvaluateOnNewDocument', { source: SEED_RNG });
   await c.send('Page.navigate', { url: base + o.page + (o.query ? '?' + o.query : '') });
@@ -623,7 +679,7 @@ async function capture(sc, idx) {
   // (base + 1000 + 0..7) off the defaults, for parallel runs.
   const base = +process.env.KN_CAPTURE_PORT_BASE || 0;
   const { c, close, errors } = await openPage({ w: sc.size[0], h: sc.size[1], port: (base || 9500) + (idx % 8), httpPort: (base ? base + 1000 : 6900) + (idx % 8),
-    page: sc.page, query: sc.query || '', map: sc.map, settle: 12000 });
+    page: sc.page, query: sc.query || '', map: sc.map, mode: sc.mode, settle: 12000 });
   try {
     await sc.run(c);
     const dir = path.join(OUT, sc.dir);

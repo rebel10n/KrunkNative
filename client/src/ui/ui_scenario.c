@@ -24,6 +24,8 @@
 #include <GLFW/glfw3.h>
 #include <headless.h> // swap/current window that also work without a window (KRUNKNATIVE_HEADLESS)
 #include <ui_logic.h>
+#include <hud_modes.h>
+#include <modes.h>
 #include <ui_interact.h> // state.interact
 #include <backend_ui.h> // WP-E part 2c: state.account
 #include <app_mode.h> // state.page: hub / editor / viewer pages
@@ -249,6 +251,7 @@ static void warn_unknown_keys(void) {
         "spinResult", // {rand, item} (arrays for a multi-spin): the wheel's spin reply (the won item's reveal)
         "spinMulti",  // with spin: the wheel's Nx spin (prizeWheel(i, null, multi))
         "spinHistory", // with spin: a "spinH" reply [{ind, dte, fds}] (the Spin History popup)
+        "modeHud", // with modeName: pinned mode HUD state (hud_modes_scenario: scores, flags, gmsg)
         "matchVotes", // [{mode, map, name, votes}]: the end screen's vote cards (a MATCH_VOTE_STATE packet)
         "interact",   // #interactMsg's innerHTML in game (ui_interact_scenario): the prompt without an interactable
         "charge",     // in game: the charge bar's interMProg (a number) or {prog, over} (build_ui_scenario)
@@ -343,8 +346,12 @@ int ui_scenario_begin(const char *scenario_path, const char *out_png) {
     }
     pcg32_srandom(SCENARIO_RNG_SEED, 1u); // map/mode/spawn picks
     srand(SCENARIO_RNG_SEED);             // menu speech bubbles
+    // modeName: the offline game's mode (offline.c offline_mode_id reads KRUNKNATIVE_MODE)
     const char *mode = st_str("modeName");
-    if (mode && strcmp(mode, "Free for All") != 0) fprintf(stderr, "[scenario] warning: modeName '%s': only Free for All is available\n", mode);
+    if (mode && mode[0]) {
+        if (mode_find(mode) < 0) fprintf(stderr, "[scenario] warning: modeName '%s': no such mode, Free for All\n", mode);
+        else scenario_setenv("KRUNKNATIVE_MODE", mode);
+    }
 
     // html_storage (settings, class index, name) must not read or write the user's files.
     if (!scenario_make_storage_dir(g_sc.storage_dir, sizeof(g_sc.storage_dir))) {
@@ -493,6 +500,7 @@ static void scenario_frame(Client *client, const double clock_ms, const int pres
     if (delta <= 0.0) delta = SCENARIO_FRAME_MS / 1000.0;
     g_sc.last_now_s = now_s;
     client->last_frame_time = now_s;
+    hud_modes_scenario(client, st("modeHud")); // the pinned mode state, before the HUD tick reads it
     client_tick(client, (float) now_s, (float) delta);
     if (present) headless_swap_buffers(client->window);
     glfwPollEvents();

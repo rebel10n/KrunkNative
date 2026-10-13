@@ -12,6 +12,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <spawnables.h>
+#include <spectate.h>
+#include <cJSON.h>
 #include <lobby_ui.h> // the comp menu (comp_ui.c)
 
 Player *client_find_player(Client*, int uid);                      // client/src/main.c
@@ -75,6 +77,8 @@ typedef struct {
 } HudModes;
 
 static HudModes g_modes = {.mode_id = -1, .lives = -1};
+static char g_scenario_message[NET_GAME_MESSAGE_SIZE]; // --render-scenario modeHud.gameMessage
+static int g_scenario_message_set;
 
 static const GameModeConfig *hud_mode_config(const Client *client) {
     return client->game.mode ? &client->game.mode->config : NULL;
@@ -126,6 +130,8 @@ static void hud_modes_apply_loadout(Client *client, const NetLoadoutPacket *pack
     if (had_mesh) client_add_player_mesh(client, player, is_you);
 }
 
+static void hud_modes_chat_line(const char *msg, char *html, size_t size);
+
 static void hud_modes_add_action(Client *client, const NetActionPacket *packet) {
     const Player *actor = client_find_player(client, packet->uid);
     if (!actor || !html_ui_available() || !html_ui_is_ready()) return;
@@ -158,9 +164,14 @@ static void hud_modes_add_action(Client *client, const NetActionPacket *packet) 
     raw[sizeof(raw) - 1] = 0;
     html_escape(raw, text, sizeof(text));
 
-    // addChat(null, msg, 1): a plain game line
-    snprintf(html, sizeof(html), "<div class='chatItem'><span class='chatMsg'>%s %s %s</span></div><br>", left, text, right);
+    char msg[1024];
+    snprintf(msg, sizeof(msg), "%s %s %s", left, text, right);
+    hud_modes_chat_line(msg, html, sizeof(html));
+}
 
+// io_addChat(-1, null, msg, 1): a plain game line in #chatList (every channel)
+static void hud_modes_chat_line(const char *msg, char *html, const size_t size) {
+    snprintf(html, size, "<div class='chatItem'><span class='chatMsg'>%s</span></div><br>", msg);
     const HtmlElem list = html_dom_by_id("chatList");
     if (!list) return;
     char id[32];
@@ -269,8 +280,20 @@ static int hud_modes_handle_v7(Client *client, const int packet_type, const void
         case NET_PACKET_DOM_CAPTURE: {
             V7_READ(NetDomCapturePacket, capture);
             if (mode && capture.uid >= 0 && capture.uid < mode->dom_zone_count) {
-                mode->dom_zones[capture.uid].captured_by = capture.team;
-                mode->dom_zones[capture.uid].capture_t = 0.0f;
+                // io_captureControl: updateDomZone(uid, team, 0, team, [team], 1), then the chat line
+                // "Zone X Captured" in killFeed.ally / enemy (the viewer's team: 1 while spectating)
+                ModeDomZone *zone = &mode->dom_zones[capture.uid];
+                zone->captured_by = capture.team;
+                zone->capture_t = 0.0f;
+                zone->last_team_on = capture.team;
+                zone->mlt = 1.0f;
+                const int viewer = client->me && client->me->team ? client->me->team : spectate_active() ? 1 : 0;
+                if (html_ui_available() && html_ui_is_ready()) {
+                    char msg[160], html[512];
+                    snprintf(msg, sizeof(msg), "<span style='color:%s'>Zone %c Captured</span>",
+                             capture.team == viewer ? MODES_COLOR_ALLY : MODES_COLOR_ENEMY, 'A' + capture.uid % 26);
+                    hud_modes_chat_line(msg, html, sizeof(html));
+                }
             }
             return 1;
         }
@@ -592,7 +615,7 @@ const char *hud_modes_game_message(void) {
 }
 
 static void hud_modes_message(const Client *client, const GameModeConfig *config) {
-    const char *text = g_modes.message;
+    const char *text = g_scenario_message_set ? g_scenario_message : g_modes.message;
     if (!strcmp(text, NET_GAME_MESSAGE_WAITING)) text = "waiting for players"; // i18n player.waiting
 
     if (config && config->flags && client->me) {
@@ -874,3 +897,36 @@ const char *hud_modes_flag_info(const int team) {
     return team >= 1 && team <= 2 ? g_modes.flag_info[team - 1] : "";
 }
 
+// --render-scenario state.modeHud (ui_scenario.c, every frame): the mode state a server would
+// have sent, pinned. team: the local player's; teamScores [t1, t2]; flagInfo [t1, t2] (#tScoreM); flagCarrier [t1, t2]:
+// who carries each team's flag ("me", "enemy", null at base); gameMessage: the gmsg text.
+void hud_modes_scenario(Client *client, const cJSON *hud) {
+    if (!cJSON_IsObject(hud)) return;
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(hud, "team"); // the local player's team (the "you" icon)
+    if (cJSON_IsNumber(v) && client->me && client->me->team != v->valueint) {
+        client->me->team = v->valueint;
+        hud_ui_render_team(client); // the card's team name (the spawn already rendered the sandbox's)
+    }
+    v = cJSON_GetObjectItemCaseSensitive(hud, "teamScores");
+    for (int t = 0; t < 2 && cJSON_IsArray(v); t++) {
+        const cJSON *n = cJSON_GetArrayItem(v, t);
+        if (cJSON_IsNumber(n)) g_modes.team_scores[t] = n->valueint;
+        g_modes.score_seen[t] = cJSON_IsNumber(n); // null: the team has not scored
+    }
+    v = cJSON_GetObjectItemCaseSensitive(hud, "flagInfo");
+    for (int t = 0; t < 2 && cJSON_IsArray(v); t++) {
+        const cJSON *s = cJSON_GetArrayItem(v, t);
+        if (cJSON_IsString(s)) snprintf(g_modes.flag_info[t], NET_MODE_TEXT_SIZE, "%s", s->valuestring);
+    }
+    v = cJSON_GetObjectItemCaseSensitive(hud, "flagCarrier");
+    for (int f = 0; f < g_modes.flag_count && cJSON_IsArray(v); f++) {
+        const int team = g_modes.flags[f].team;
+        if (team < 1 || team > 2) continue;
+        const cJSON *who = cJSON_GetArrayItem(v, team - 1);
+        g_modes.flags[f].carrier_uid = cJSON_IsString(who) && !strcmp(who->valuestring, "me") && client->me ? client->me->uid
+                                     : cJSON_IsString(who) ? 0x7ffffff0 : -1;
+    }
+    v = cJSON_GetObjectItemCaseSensitive(hud, "gameMessage");
+    g_scenario_message_set = cJSON_IsString(v); // over the sandbox's own gmsg packets
+    if (g_scenario_message_set) snprintf(g_scenario_message, sizeof(g_scenario_message), "%s", v->valuestring);
+}

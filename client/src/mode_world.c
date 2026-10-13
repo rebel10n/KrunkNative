@@ -12,8 +12,9 @@
 // flags of the oneflag modes and the only ones they ignore, every medals.js spawnable type has its
 // model (game.js createSpawnable: noAnim ones stay still), and DOMINATION_ZONEs (no map object)
 // get their objective_4 zone in Domination (resetDomZones: meshRef.visible = mode.dom).
-// v7.1.4 flag stands (MapManager getZoneDat): addCube(.., flagZoneS, 5, flagZoneS), 5 units tall,
-// fogged (no noFog), zone_b_1 / zone_r_1. The flag pings are client/src/ui/hud_objectives.c.
+// v7.1.4 zone walls (MapManager addDominationZone / getZoneDat): addCube(.., 5, ..), so the
+// Domination zones and the CTF flag stands are 5 units tall whatever the zone's height, fogged
+// (no noFog), the stands zone_b_1 / zone_r_1. The 2D markers are client/src/ui/hud_objectives.c.
 // Everything is created lazily for the current map + mode and removed on change.
 #include <gl.h>
 #include <mode_world.h>
@@ -28,7 +29,7 @@ Player *client_find_player(Client*, int uid); // client/src/main.c
 
 #define MODE_WORLD_EMISSIVE_ENEMY 8729652 // getFlagDat "0" / tag emissive (your team's tag)
 #define MODE_WORLD_EMISSIVE_ALLY 4360861  // getFlagDat "1" / tag emissive (enemy tag)
-#define MODE_WORLD_ZONE_HEIGHT 5.0f       // MapManager getZoneDat addCube height (flag stands)
+#define MODE_WORLD_ZONE_HEIGHT 5.0f       // MapManager addDominationZone / getZoneDat addCube height
 
 typedef struct {
     Mesh *crystal;
@@ -207,9 +208,12 @@ static void mode_world_build(Client *client) {
         material->base.transparent = 1;
         material->no_depth_write = 1;
         material->double_sided = 1;
+        material->fog_enabled = 1; // addDominationZone has no noFog
         mesh->no_shadow_receive = 1;
+        // addCube(x, y, z, s[0], 5, s[2]): the walls are always MODE_WORLD_ZONE_HEIGHT tall from
+        // the zone's bottom, whatever its own height (the trigger box keeps it)
         mesh->transform.position = (vec3) {zone->position.x, zone->position.y - zone->half.y, zone->position.z};
-        mesh->transform.scale = (vec3) {zone->half.x * 2.0f, zone->half.y * 2.0f, zone->half.z * 2.0f};
+        mesh->transform.scale = (vec3) {zone->half.x * 2.0f, MODE_WORLD_ZONE_HEIGHT, zone->half.z * 2.0f};
         scene_add_mesh(client->scene, mesh);
         g_world.dom_zones[z] = mesh;
     }
