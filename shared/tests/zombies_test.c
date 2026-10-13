@@ -536,7 +536,13 @@ static void test_airdrops(Game *game) {
     memset(&input, 0, sizeof(input));
     input.interact_held = 1;
     reset_sent();
-    for (int i = 0; i < 40 && d->active; i++) airdrop_player_collide(b, &input, 0.1f);
+    // player.js:1718-1726: interProg += dt / claimTime; the claim happens on the frame it reaches 1
+    // (50 ms steps: float sums may need one more step, never one fewer)
+    const int claim_frames = (int) ceilf(d->claim_time / 50.0f - 1e-3f);
+    b->interact_progress = 0.0f;
+    int frames = 0;
+    for (; frames < 200 && d->active; frames++) airdrop_player_collide(b, &input, 0.05f);
+    CHECK(d->claim_time > 0.0f && frames >= claim_frames && frames <= claim_frames + 1, "claimed after claimTime %.0f ms (%d x 50 ms, want %d)", d->claim_time, frames, claim_frames);
     CHECK(!d->active && g_count[NET_PACKET_AIRDROP_REMOVE] == 1 && g_count[NET_PACKET_AIRDROP_CLAIM] == 1, "claimed after the hold");
     NetAirDropClaimPacket krp;
     memcpy(&krp, g_last[NET_PACKET_AIRDROP_CLAIM], sizeof(krp));

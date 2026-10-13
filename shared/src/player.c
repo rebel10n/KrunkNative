@@ -99,6 +99,11 @@ void player_spawn(Player *player) {
     // WP-E death screen: player.js reset() of the life counters, spawnTime = Date.now()
     player->life_start = player->game->now;
     player->life_shots = player->life_hits = player->life_kills = player->life_score = 0;
+    // player.js init (:434-445): interProg = 0, makingProg = doingInter = false. A hold that
+    // was under way when the player died does not carry into the new life.
+    player->interact_progress = 0.0f;
+    player->making_progress = 0;
+    player->doing_interact = 0;
 
     const size_t class_count = player->game->class_count ? player->game->class_count : sizeof(g_classes) / sizeof(g_classes[0]);
     const ClassConfig *classes = player->game->classes ? player->game->classes : g_classes;

@@ -1160,6 +1160,105 @@ static void test_trigger_map_parse(void) {
     printf("Trigger map parse test %s\n", g_failures != failures ? "FAILED" : "OK");
 }
 
+// v7.1.4 interact timing. Timed: onHoldMouse triggers (player.js:1389-1398, interProg +=
+// dt / onInteractT, onInteractT = (constE || 1) * 1000, GameObject.js:235) and airdrop claims
+// (zombies_test). Every procInputs clears makingProg and zeroes interProg when no hold advanced it
+// (player.js:875, :1773-1775): letting go, leaving the object or leaving the ground restarts the
+// hold; init() zeroes it (player.js:434). onInteractKey triggers (Freight's "pickup Junk") have
+// no hold: "int" 7 on the key press runs game.onTrigger at once (players.js:3456-3467).
+static void hold_frames(Player *p, const Input *input, const int frames) {
+    for (int i = 0; i < frames; i++) player_proc_input(p, input, 0, 0);
+}
+
+static void test_interact_hold(Game *game) {
+    const int failures = g_failures;
+    printf("Running interact hold test...\n");
+    TestMap tm = {0};
+    tm_add(&tm, (vec3) {0.0f, 990.0f, 0.0f}, (vec3) {400.0f, 10.0f, 400.0f}); // the floor: top at 1000
+    Object *zone = tm_add(&tm, (vec3) {0.0f, 995.0f, 0.0f}, (vec3) {14.0f, 14.0f, 14.0f});
+    TriggerData *t = tm_trigger(&tm, zone, TRIGGER_EVENT_ON_INTERACT, TRIGGER_ACTION_GIVE_SCORE);
+    t->constant_event = 2; // Event Value 2: a 2 s hold
+    tm_use(game, &tm);
+    Player *a = tm_ready(game, 1);
+    place(a, 0.0f, 0.0f);
+    a->score = 0;
+    const Input hold = {.shoot = 1, .delta = 0.025f, .move_dir = -1}, idle = {.delta = 0.025f, .move_dir = -1};
+    hold_frames(a, &idle, 4); // settle on the floor
+    CHECK(a->on_ground && a->interact_progress == 0.0f, "on the floor, nothing held");
+
+    hold_frames(a, &hold, 76); // 1.9 s
+    CHECK(a->score == 0 && near(a->interact_progress, 0.95f, 0.01f), "onHoldMouse: 1.9 of 2 s held, not fired (%.3f)", a->interact_progress);
+    hold_frames(a, &idle, 1);
+    CHECK(a->score == 0 && a->interact_progress == 0.0f, "letting go cancels the hold (%.3f)", a->interact_progress);
+    hold_frames(a, &hold, 76);
+    CHECK(a->score == 0 && near(a->interact_progress, 0.95f, 0.01f), "the hold starts over (%.3f)", a->interact_progress);
+    hold_frames(a, &hold, 5); // 2 s (+ a frame for the float sum, which lands a hair under 1)
+    CHECK(a->score == 1 && a->interact_progress < 0.05f, "fires once the bar fills (2 s, score %d, %.3f)", a->score, a->interact_progress);
+
+    // leaving the object: interProg back to 0
+    a->score = 0;
+    hold_frames(a, &hold, 40);
+    CHECK(near(a->interact_progress, 0.5f, 0.02f), "1 s held (%.3f)", a->interact_progress);
+    place(a, 100.0f, 0.0f);
+    hold_frames(a, &hold, 1);
+    CHECK(a->interact_progress == 0.0f && a->score == 0, "leaving the trigger cancels the hold (%.3f, %d)", a->interact_progress, a->score);
+
+    // off the ground (inside the trigger, above the floor): no progress
+    place(a, 0.0f, 0.0f);
+    hold_frames(a, &idle, 4);
+    hold_frames(a, &hold, 40);
+    a->position.y = 1006.0f;
+    a->velocity.y = 0.0f;
+    a->on_ground = 0;
+    hold_frames(a, &hold, 1);
+    CHECK(!a->on_ground && a->interact_progress == 0.0f && a->score == 0, "in the air: the hold restarts (%d %.3f %d)", a->on_ground, a->interact_progress, a->score);
+
+    // a new life starts with an empty bar (player.js init)
+    a->interact_progress = 0.5f;
+    a->making_progress = 1;
+    a->doing_interact = 1;
+    player_spawn(a);
+    CHECK(a->interact_progress == 0.0f && !a->making_progress && !a->doing_interact, "spawn: interProg / makingProg / doingInter reset");
+    tm_restore(game, &tm);
+
+    // Freight's "pickup Junk" (assets/maps/freight.json; its "si" 586 size written out as the
+    // Object Manager's Junk "s"), placed at the origin: an
+    // onInteractKey trigger without Event Value, so no hold; one "int" 7 takes it (selfDestruct).
+    const char *json =
+        "{\"name\":\"t\",\"spawns\":[[0,0,0]],\"objects\":["
+        "{\"p\":[0,1000,0],\"i\":29,\"pl\":1,\"cdy\":1,\"tm\":0,\"su\":1,\"te\":16,\"sfd\":1,"
+        "\"tas\":[{\"esa\":29736,\"ev\":0.1,\"er\":1,\"ef\":2,\"ta\":34},{\"ta\":59,\"tct\":\"0.01\"}],"
+        "\"rsc\":20,\"sd\":1,\"ms\":5,\"aid\":\"30082\",\"inm\":\"pickup Junk\",\"s\":[8.29,3.15,8.6]}]}";
+    cJSON *raw = cJSON_Parse(json);
+    Map *map = raw ? map_init(raw) : NULL;
+    CHECK(map && map->object_count == 1, "Junk parsed (%zu)", map ? map->object_count : 0);
+    if (map && map->object_count == 1) {
+        Object *junk = map->objects[0];
+        CHECK(junk->trig && junk->trig->event == TRIGGER_EVENT_ON_INTERACT_KEY && junk->trig->constant_event == 0 && junk->start_destroyed,
+              "Junk: onInteractKey, no Event Value, starts destroyed (rsc spawns it)");
+        junk->active = 1; // spawned (spawnChance)
+        junk->destroyed = 0;
+        Object **saved = game->map->objects;
+        const size_t saved_count = game->map->object_count;
+        game->map->objects = map->objects;
+        game->map->object_count = 1;
+        a = tm_ready(game, 1);
+        place(a, 0.0f, 0.0f);
+        GameInteractScan scan;
+        game_interact_scan(game, a, &scan);
+        CHECK(scan.last_type == GAME_INTERACT_KEY && scan.last_uid == 0, "Junk prompt: type 7 (%d)", scan.last_type);
+        CHECK(a->interact_progress == 0.0f, "no bar for a press interact");
+        game->now += 1.0f;
+        game_player_interact_v7(game, a, GAME_INTERACT_KEY, 0, 0);
+        CHECK(!junk->active, "one press takes the Junk at once (v7 has no hold for onInteractKey)");
+        game->map->objects = saved;
+        game->map->object_count = saved_count;
+    }
+    if (map) map_fini(map);
+    cJSON_Delete(raw);
+    printf("Interact hold test %s\n", g_failures != failures ? "FAILED" : "OK");
+}
+
 // players.spray (shared/src/interact.c): the ray skips noVis ("v") objects and lands on the
 // rendered wall behind them, on server_bin as well (no meshes: map.c parses "v" itself).
 static const SentPacket *spray_once(Game *game, Player *player) {
@@ -1437,6 +1536,7 @@ int main(void) {
     test_trigger_player_actions(&game);
     test_trigger_interface_actions(&game);
     test_trigger_events(&game);
+    test_interact_hold(&game);
     test_checkpoints_teleporters(&game);
     test_trigger_map_parse();
     test_spray_invisible(&game);
