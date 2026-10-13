@@ -2,13 +2,11 @@ name: Deploy kru
 
 # Push to main (or a manual run): build the web client + services, run deploy/ansible/central.yml against
 # the central node (assets., matchmaker., coordinator.krunk.io, play.krunk.io), then publish
-# the front end (krunk.io, deploy/pages/README.md "GitHub Pages"): GitHub Pages (job `pages`, once the
-# repository variable GH_PAGES is 1) and, until KN_CF_FRONTEND is 0, the old Cloudflare Pages
-# project too. After the services, so a new page never talks to old ones. The site settings
+# the front end (krunk.io, deploy/pages/README.md "GitHub Pages") on GitHub Pages (job `pages`, once
+# the repository variable GH_PAGES is 1). After the services, so a new page never talks to old ones. The site settings
 # (asset origins, ...) are repository variables, deploy/pages/site.sh; pages.yml republishes
 # this build with changed ones, without a build.
 # Secrets: KRU_SSH_KEY (private key for root@kru), KRU_HOST, KRU_PORT, KRU_KNOWN_HOSTS,
-#          CLOUDFLARE_API_TOKEN (Pages: Edit + Zone Read/Cache Purge on krunk.io), CLOUDFLARE_ACCOUNT_ID,
 #          optional KN_SMTP_HOST, KN_SMTP_PORT, KN_SMTP_TLS, KN_SMTP_USER, KN_SMTP_PASSWORD, KN_SMTP_FROM
 #          (kn_brain's outbound mail -> /etc/krunknative/smtp.env; deploy/ansible/README.md).
 # kn-brain runs --migrate, so a deploy applies new DB migrations. A successful run starts
@@ -169,21 +167,6 @@ jobs:
             !dist/web/assets/**
           retention-days: 30
           if-no-files-found: error
-
-      # The old front end: dist/web -> Cloudflare Pages project krunknative (krunk.io, www. while
-      # the DNS points there). KN_CF_FRONTEND=0 stops it (README "Cutover", last step).
-      # Secrets: CLOUDFLARE_API_TOKEN (Account > Cloudflare Pages > Edit), CLOUDFLARE_ACCOUNT_ID.
-      - uses: actions/setup-node@v7
-        if: vars.KN_CF_FRONTEND != '0'
-        with:
-          node-version: 22
-
-      - name: Deploy front end (Cloudflare Pages)
-        if: vars.KN_CF_FRONTEND != '0'
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: deploy/pages/deploy.sh
 
       - name: Cleanup key
         if: always()

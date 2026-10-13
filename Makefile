@@ -278,7 +278,7 @@ uidiff: ## Render tools/uidiff scenarios with client_bin --render-scenario (HTML
 
 # --------------------------------------------------------------------------- web
 
-.PHONY: web web-debug web-serve pages pages-github assets-cdn
+.PHONY: web web-debug web-serve pages-github assets-cdn
 web: ## Build the Emscripten client into dist/web/ (release; KN_GA_ID=G-... adds Google Analytics)
 	@$(EMSDK_ACTIVATE); $(call CONFIGURE,web,$(WEB_DIR)) && $(call BUILD,$(WEB_DIR))
 	@$(PYTHON) -I deploy/pages/ga.py $(DIST_WEB) --id "$(KN_GA_ID)"
@@ -287,9 +287,6 @@ web: ## Build the Emscripten client into dist/web/ (release; KN_GA_ID=G-... adds
 web-debug: ## Build the Emscripten client with debug info into dist/web/
 	@$(EMSDK_ACTIVATE); $(call CONFIGURE,web-debug,$(WEB_DEBUG_DIR)) && $(call BUILD,$(WEB_DEBUG_DIR))
 	@$(PYTHON) -I deploy/pages/ga.py $(DIST_WEB) --id "$(KN_GA_ID)"
-
-pages: web ## Build and deploy the web client to the old Cloudflare Pages front end (deploy/pages/README.md)
-	deploy/pages/deploy.sh
 
 pages-github: ## Stage dist/web for GitHub Pages into dist/gh-pages, as CI publishes it (deploy/pages/README.md)
 	@[ -f $(DIST_WEB)/client.wasm ] || { echo "no web build yet: run 'make web' first"; exit 1; }

@@ -23,7 +23,7 @@ repository variable `KN_UPDATES_UPLOAD=1`.
 Routing on kru (Cloudflare tunnel ingress, managed in Cloudflare): `assets.krunk.io -> :8081`,
 `matchmaker.krunk.io -> :8082`, `coordinator.krunk.io -> :8083`, `play.krunk.io -> :8084` (the
 last one is kept by the `kn_bridge` role, see [net-bridge](#net-bridge-playkrunkio)). The page itself (`krunk.io`,
-`www.`) is on Cloudflare Pages: `make pages`, see `deploy/pages/README.md` (also caching and
+`www.`) is on GitHub Pages (deploy-kru.yml job `pages`), see `deploy/pages/README.md` (also caching and
 the krunker.party redirect: the site 301s, `coordinator.`/`matchmaker.krunker.party` keep
 working for old clients and are not redirected). With `kn_edge_origin_enabled` the same four
 krunk.io names are also reachable through abulxt's edges, see [Edge origin](#edge-origin-abulxts-edges-instead-of-cloudflare). Not managed here:

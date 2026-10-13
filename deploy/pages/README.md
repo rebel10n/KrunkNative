@@ -6,7 +6,7 @@ one at run time (kn-config.json, below); services stay on the central node:
 
 | host | what | where |
 | --- | --- | --- |
-| `krunk.io`, `www.krunk.io` | dist/web without assets/ (index/social/editor/viewer, ui/, client.<hash>.*, kn-config.json) | GitHub Pages (`rebel10n/KrunkNative`, deploy-kru.yml job `pages`); before the cutover the Cloudflare Pages project `krunknative` |
+| `krunk.io`, `www.krunk.io` | dist/web without assets/ (index/social/editor/viewer, ui/, client.<hash>.*, kn-config.json) | GitHub Pages (`rebel10n/KrunkNative`, deploy-kru.yml job `pages`, custom domain `krunk.io`, HTTPS enforced) |
 | `krunknative-assets.pages.dev` | asset origin `cdn`: `/assets/` (the game content, 19.3k files, 1.9 GB) | Cloudflare Pages project `krunknative-assets`, its pages.dev URL only (assets-cdn.yml) |
 | `assets.krunk.io` | asset origin `own`: `/assets/`, and `/updates/` for the launcher | kru OpenResty :8081 (tunnel; later abulxt's edges, deploy/ansible role kn_edge_origin) |
 | `coordinator.krunk.io` | kn_brain auth + community + matchmaker | kru :8083 (tunnel) |
@@ -15,14 +15,12 @@ one at run time (kn-config.json, below); services stay on the central node:
 | `<edge>-<n>.krunk.io` | game servers, DNS only | edges (deploy/ansible cf_dns) |
 
 Names this setup owns: the DNS records `krunk.io` and `www.krunk.io` (CNAME to
-`rebel10n.github.io`, DNS only) and the Cloudflare Pages projects `krunknative` (old front end)
-and `krunknative-assets`. It only *uses* `assets.krunk.io` (the own origin): its DNS and server
+`rebel10n.github.io`, DNS only) and the Cloudflare Pages project `krunknative-assets`. It only *uses* `assets.krunk.io` (the own origin): its DNS and server
 belong to the edge-origin work (deploy/ansible role kn_edge_origin), which must keep what the page
 relies on there (CORS `*`, `/assets/version.txt` no-store, `?v=` caching, byte ranges).
 
 ```sh
 make web && make pages-github  # stage dist/web for GitHub Pages into dist/gh-pages (CI publishes it)
-make pages                     # make web + deploy/pages/deploy.sh: the old Cloudflare Pages front end
 make assets-cdn                # mirror the own origin and deploy it to the asset CDN
 deploy/pages/check.sh https://krunk.io/                       # a published site + its asset origins
 deploy/pages/check.sh --assets https://krunknative-assets.pages.dev/
@@ -31,11 +29,10 @@ deploy/pages/check.sh --assets https://krunknative-assets.pages.dev/
 The site's settings are in `site.sh` (each one an environment variable; CI passes the repository
 variables of the same name, empty = the default): `KN_ASSET_ORIGIN KN_ASSET_FALLBACK
 KN_ASSET_OWN_URL KN_ASSET_CDN_URL KN_BRAIN_URL KN_BRIDGE_URL KN_RTC_URL KN_WT_URL KN_GA_ID`
-(Analytics below), plus `KN_PAGES_CNAME` (github.sh) and `KN_PAGES_PROJECT KN_PAGES_BRANCH`
-(deploy.sh). Cloudflare credentials: `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`, else
+(Analytics below), plus `KN_PAGES_CNAME` (github.sh). Cloudflare credentials (the asset CDN): `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`, else
 `~/.config/kn-secrets/cloudflare.env`.
 
-`stage.py` (run by `github.sh` and `deploy.sh`) copies dist/web without assets/, renames the client
+`stage.py` (run by `github.sh`) copies dist/web without assets/, renames the client
 to `client.<hash>.{js,wasm,data}`, writes `kn-config.json` and a top-level `404.html` (without one
 Cloudflare Pages runs the site as an SPA and answers every unknown path with `index.html`, so a
 missing image "loads" HTML; GitHub Pages serves it with status 404), and fills in the `<meta>`
@@ -160,9 +157,9 @@ release, and `KRUNKNATIVE_UPDATES_URL` / `--updates-url` points a single install
 
 ## Cutover
 
-From Cloudflare Pages to GitHub Pages, once the change with this README is on main. Each step is
-verified before the next; the old front end keeps deploying (`KN_CF_FRONTEND` unset) until the
-last step, so the DNS can go back at any time.
+From Cloudflare Pages to GitHub Pages. **Done on 2026-10-13**: steps 1-6 ran in order, and the
+old Cloudflare Pages project `krunknative`, its deploy step and deploy.sh are gone. Kept as the
+record of how it was done, and for moving the apex to another DNS host (step 4).
 
 1. Enable Pages and the deploy: `gh api -X POST repos/rebel10n/KrunkNative/pages -f build_type=workflow`,
    `gh variable set GH_PAGES --body 1`, rerun Deploy kru (`gh workflow run deploy-kru.yml`).
@@ -185,16 +182,15 @@ last step, so the DNS can go back at any time.
    host without CNAME flattening / ALIAS (FreeDNS) GitHub's A records `185.199.108.153`,
    `185.199.109.153`, `185.199.110.153`, `185.199.111.153` and AAAA `2606:50c0:8000::153`,
    `2606:50c0:8001::153`, `2606:50c0:8002::153`, `2606:50c0:8003::153`; `www` is a CNAME to
-   `rebel10n.github.io` on both. Back: the saved records (proxied CNAMEs to `krunknative.pages.dev`;
-   the Pages project still has both domains).
+   `rebel10n.github.io` on both. (If GitHub shows no certificate state for a long time, remove the
+   custom domain and add it again: `-F cname=null`, then `-f cname=krunk.io`.)
 5. HTTPS: wait for GitHub's certificate (`gh api repos/rebel10n/KrunkNative/pages --jq
    .https_certificate.state` = `approved`; minutes, up to an hour; https://krunk.io shows a
    certificate error until then), then `gh api -X PUT repos/rebel10n/KrunkNative/pages -F
    https_enforced=true`. Verify: `deploy/pages/check.sh https://krunk.io/`.
-6. Retire the old front end after a quiet period: `gh variable set KN_CF_FRONTEND --body 0`, remove
-   `krunk.io` / `www.krunk.io` from the project `krunknative` (check the DNS records are still the
-   GitHub ones afterwards), later delete the project and drop `https://krunknative.pages.dev` from
-   `kn_web_origins` (deploy/ansible/group_vars/all.yml).
+6. Retire the old front end: remove `krunk.io` / `www.krunk.io` from the Cloudflare Pages project
+   `krunknative` (the DNS records stay the GitHub ones), delete the project, drop its deploy step,
+   deploy.sh and `https://krunknative.pages.dev` from `kn_web_origins`.
 
 `kn-bridge` (`KN_BRIDGE_URL`, default `wss://play.krunk.io/native`) is the net-bridge endpoint
 the game connects through: Pages cannot carry WebSockets to a TCP game server, so the default
@@ -259,12 +255,3 @@ and neither 301 nor 308 helps there (CORS preflights and WebSocket upgrades do n
 redirects, game servers are not HTTP). They keep pointing at the same tunnel / IPs until
 the old clients are gone.
 
-## Cache purge
-
-`deploy.sh` (the old Cloudflare front end) ends by purging Cloudflare's edge cache for the page
-hosts (`KN_PURGE_HOSTS`, default `krunk.io www.krunk.io`, zone `KN_PURGE_ZONE`) so every client
-loads the new build on its next page load. CI (deploy-kru.yml) runs the same script while
-`KN_CF_FRONTEND` is not 0; once the hosts are DNS only (GitHub Pages) there is nothing of
-theirs in Cloudflare's cache and the purge is a no-op. The
-hashed `client.<hash>.*` files and `?v=` assets change URL with each build and are not purged.
-The token needs Zone Read + Cache Purge on the zone; `KN_PURGE_HOSTS=` skips the purge.
