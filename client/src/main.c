@@ -811,6 +811,7 @@ int main(int argc, char **argv) {
     html_ui_fini();
     voice_fini();
     sprays_wheel_fini(); // its canvas (GL)
+    hud_objectives_fini(); // the objective markers canvas (GL)
     build_ui_fini();     // the charge bar / build wheel canvas (GL)
     audio_fini();
     headless_shutdown();
@@ -1852,6 +1853,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
 
     if (!scenario) vfx_render_screen(client); // overlay-canvas muzzle flash + damage overlay
     if (!scenario) nametags_tick(client); // overlay-canvas nametags + mode markers (page elements)
+    if (!scenario) hud_objectives_render(client);     // v7 flag pings (game-overlay canvas)
     if (!scenario || build_ui_scenario_active()) build_ui_render(client); // v7 charge bar (interactMProg) and build wheel (game-overlay canvas)
     if (!scenario) sprays_wheel_render(client, delta); // WP-E: v7 spray wheel (game-overlay canvas)
     if (!scenario) ks_overlay_frame(frame_delta); // KrunkScript overlay canvas: script render(), below the HTML page

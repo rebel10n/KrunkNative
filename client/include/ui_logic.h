@@ -458,6 +458,13 @@ int  build_ui_scenario_active(void);              // a scenario charge bar is se
 void build_ui_fini(void);                         // its canvas (GL)
 // END build_ui block
 
+// BEGIN hud_objectives block (client/src/ui/hud_objectives.c): the objective modes' game-overlay
+// canvas items (the CTF flag pings)
+void hud_objectives_render(Client*);              // per frame, after the HUD
+int  hud_objectives_shown(void);                  // the last hud_objectives_render drew something (tests)
+void hud_objectives_fini(void);                   // its canvas (GL)
+// END hud_objectives block
+
 // BEGIN object_manager_ui block (client/src/ui/object_manager_ui.c): the KrunkNative Object Manager
 // (F1 spawn menu, shared/include/object_manager.h). Not a v7 window: id 54 follows the Connect window.
 #define OBJECT_MANAGER_WINDOW 54

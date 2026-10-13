@@ -1,5 +1,6 @@
 // World-anchored overlay items of Krunker v3.1.1's #game-overlay canvas: player nametags,
-// CTF flag pings, the Hardpoint marker and bomb site letters. See client/include/nametags.h.
+// the Hardpoint marker and bomb site letters (v7's CTF flag pings are client/src/ui/hud_objectives.c).
+// See client/include/nametags.h.
 //
 // Reference: Krunker_v3.1.1/src/libs/game-overlay.js overlay.render (the AI.ais, players,
 // flags, objectives and sites blocks), src/index.js gameLoop (the nameVisRate pass that
@@ -107,7 +108,6 @@ static struct {
     int layer_shown;
     StyleCache layer_w, layer_h, layer_transform;
     Tag tags[NT_MAX_TAGS];
-    Marker flags[MODE_MAX_FLAGS];
     Marker objective;
     Marker sites[NT_MAX_SITES];
     AITag ai_tags[GAME_AI_MAX];
@@ -281,7 +281,6 @@ static HtmlElem nt_layer(void) {
 
     // A fresh document: every element handle is stale.
     memset(g_nt.tags, 0, sizeof(g_nt.tags));
-    memset(g_nt.flags, 0, sizeof(g_nt.flags));
     memset(&g_nt.objective, 0, sizeof(g_nt.objective));
     memset(g_nt.sites, 0, sizeof(g_nt.sites));
     memset(g_nt.ai_tags, 0, sizeof(g_nt.ai_tags));
@@ -849,32 +848,8 @@ static void nt_image_marker(Marker *marker, const char *id, const char *src, con
 }
 
 static void nt_hide_markers(void) {
-    for (int f = 0; f < MODE_MAX_FLAGS; f++) nt_display(g_nt.flags[f].el, 0, &g_nt.flags[f].shown);
     nt_display(g_nt.objective.el, 0, &g_nt.objective.shown);
     for (int s = 0; s < NT_MAX_SITES; s++) nt_display(g_nt.sites[s].el, 0, &g_nt.sites[s].shown);
-}
-
-static void nt_flags(Client *client, const int local_team) {
-    const int count = hud_modes_flag_count();
-    for (int f = 0; f < MODE_MAX_FLAGS; f++) {
-        Marker *marker = &g_nt.flags[f];
-        vec3 position;
-        int team = 0, carrier = -1;
-        if (f >= count || !hud_modes_flag(f, &position, &team, &carrier)) {
-            nt_display(marker->el, 0, &marker->shown);
-            continue;
-        }
-        // Flag.img: the carrier's position + flagHOff while carried (its live model here)
-        if (carrier >= 0) {
-            const Player *holder = client_find_player(client, carrier);
-            if (holder) position = (vec3) {holder->position.x, holder->position.y + MODE_FLAG_HOFF, holder->position.z};
-        }
-        position.y += NT_MARKER_UP;
-        char id[32];
-        snprintf(id, sizeof(id), "knFlagPing_%d", f);
-        // a3[U.team == aD ? 1 : 0]: the own flag blue, the enemy flag red
-        nt_image_marker(marker, id, team == local_team ? "textures/flag_b.png" : "textures/flag_r.png", &client->camera, position);
-    }
 }
 
 static void nt_objective(Client *client) {
@@ -1051,11 +1026,17 @@ void nametags_tick(Client *client) {
         nt_hide_markers();
         return;
     }
-    const int local_team = client->me && client->me->team ? client->me->team : spectate_active() ? 1 : 0;
-    if (mode->flags) nt_flags(client, local_team);
-    else for (int f = 0; f < MODE_MAX_FLAGS; f++) nt_display(g_nt.flags[f].el, 0, &g_nt.flags[f].shown);
+    // the CTF flag pings are canvas drawing in v7 (game-overlay.js flags block): client/src/ui/hud_objectives.c
     if (mode->objective) nt_objective(client);
     else nt_display(g_nt.objective.el, 0, &g_nt.objective.shown);
     if (mode->site) nt_sites(client);
     else for (int s = 0; s < NT_MAX_SITES; s++) nt_display(g_nt.sites[s].el, 0, &g_nt.sites[s].shown);
+}
+
+int nametags_project(const Camera *camera, const vec3 point, double *fx, double *fy) {
+    return nt_project(camera, point, fx, fy);
+}
+
+double nametags_ui_scale(const float vw, const float vh) {
+    return nt_ui_scale(vw, vh);
 }

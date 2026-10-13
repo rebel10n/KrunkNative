@@ -10,8 +10,8 @@
 //                     enemies with line of sight (Game.canSee), everyone while spectating,
 //                     hideNames / mode hideNames / Game.config.nameTags, and the killer's
 //                     tag forced on by g1() (menu_view_killer_uid) until the next pass
-//   mode markers      CTF flag pings (flag_r / flag_b), the active Hardpoint marker
-//                     (objective_1) and the bomb site letters (A, B, ...)
+//   mode markers      the active Hardpoint marker (objective_1) and the bomb site letters
+//                     (A, B, ...); v7's CTF flag pings are client/src/ui/hud_objectives.c
 //
 // Drawn the way the HTML HUD draws the canvas's other items (damage numbers, speedometer):
 // as page elements, in a full-viewport layer inserted right after the <canvas id=
@@ -24,3 +24,10 @@
 // Per frame, after the world camera is posed and the scene rendered (main.c client_tick_game,
 // overlay part). Hides everything by itself once it stops being called (no game).
 void nametags_tick(Client *client);
+
+// Shared with the other game-overlay items (client/src/ui/hud_objectives.c):
+// project a world point through the world camera into viewport fractions (0..1, y down);
+// 0 when it is outside the frustum (three.js frustum.containPoint).
+int nametags_project(const Camera *camera, vec3 point, double *fx, double *fy);
+// scaleBase's UI scale (the canvas context's ctx.scale(scale)) for a vw x vh viewport.
+double nametags_ui_scale(float vw, float vh);

@@ -397,6 +397,10 @@ reconnect-test: build ## Reconnect key (F5) online + offline, console sandbox / 
 ui-transitions-test: build ## UI state across ESC / death / end screen / spectate / windows / map change / disconnect / offline<->online, Object Manager scroll (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I server/tests/ui_transitions_e2e.py $(DEBUG_DIR)
 
+.PHONY: modes-test
+modes-test: build ## Objective modes: each rotation mode's HUD, the CTF flag cycle offline + online (headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I server/tests/modes_e2e.py $(DEBUG_DIR)
+
 $(BRIDGE_DIR)/node_modules: $(BRIDGE_DIR)/package.json $(BRIDGE_DIR)/package-lock.json
 	cd $(BRIDGE_DIR) && npm ci
 	@touch $@

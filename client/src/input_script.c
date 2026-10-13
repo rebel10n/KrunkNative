@@ -32,13 +32,16 @@
 //                                (a pickup at the crosshair)
 //   100 om tool 1                a Tools-pane pick (0 Deleter, 1 Duplicator, 2 Rotator, 3 Info): sets the
 //                                Tool Gun's tool and puts the Tool Gun in hand (fire it with `mdown left`)
+//   100 flags                    log each mirrored CTF flag (position, carrier, team), its crystal / stand meshes and
+//                                its #tScoreM text: "[input_script] flag t=100 i=0 team=1 carrier=-1 pos=..."
 //   100 state                    log the held weapon slot, the menu / pointer lock state, position, ammo, ended,
 //                                the charge (chargeTime s, fullCharge), the reload and fire timers, the grapple / rope
 //   100 con end                  a developer console command (the rest of the line: con bot_add 5)
 //   100 vis @dead endUI chatHolder  log what the player sees of these page elements (html_dom_is_shown):
 //                                "[input_script] vis t=100 @dead endUI=1 chatHolder=0" (- = no such id,
 //                                @words are labels). Not on the page: :preview (the menu's class
-//                                preview is drawn), :spray (the spray wheel is drawn);
+//                                preview is drawn), :spray (the spray wheel is drawn), :objectives (the
+//                                objective modes' overlay layer drew: hud_objectives.c);
 //                                UI state transition checks (server/tests/ui_transitions_e2e.py)
 //   100 scroll @grid knOmGrid    log scroll containers' scrollTop (html_dom_get_scroll), like vis:
 //                                "[input_script] scroll t=100 @grid knOmGrid=196.0" (- = no such id or
@@ -64,6 +67,8 @@
 #include <html_ui.h>
 #include <console.h> // `con`: ui_console_exec
 #include <sprays.h>  // `vis :spray`
+#include <hud_modes.h>  // `flags`
+#include <mode_world.h> // `flags`
 #include <GLFW/glfw3.h>
 #include <png_write.h>
 #include <frame_target.h>
@@ -292,6 +297,19 @@ static void script_run(Client *client, const ScriptEvent *e) {
                 me && me->reloads && me->loadout_index >= 0 && me->loadout_index < me->loadout_size ? me->reloads[me->loadout_index] : 0.0f,
                 me ? me->grapple.active : 0,
                 me ? me->grapple.range : 0.0f);
+    } else if (!strcmp(e->cmd, "flags")) {
+        // flags: one log line per mirrored flag (hud_modes: position, carrier, team) with its
+        // crystal / stand meshes as drawn (mode_world) and the HUD text (CTF flag-cycle checks)
+        for (int f = 0; f < hud_modes_flag_count(); f++) {
+            vec3 p = {0}, crystal = {0}, stand = {0};
+            int team = 0, carrier = -1, cv = 0, sv = 0;
+            if (!hud_modes_flag(f, &p, &team, &carrier)) continue;
+            const int meshes = mode_world_flag_meshes(f, &crystal, &cv, &stand, &sv);
+            fprintf(stderr, "[input_script] flag t=%.0f i=%d team=%d carrier=%d pos=%.1f,%.1f,%.1f mesh=%d crystal=%.1f,%.1f,%.1f vis=%d "
+                    "stand=%.1f,%.1f,%.1f svis=%d info=%s\n",
+                    g_script.time, f, team, carrier, p.x, p.y, p.z, meshes, crystal.x, crystal.y, crystal.z, cv, stand.x, stand.y, stand.z, sv,
+                    hud_modes_flag_info(team));
+        }
     } else if (!strcmp(e->cmd, "type")) {
         // type <text>: one char callback per code point (ASCII), as typing it
         GLFWcharfun cb = glfwSetCharCallback(client->window, NULL);
@@ -332,9 +350,9 @@ static void script_run(Client *client, const ScriptEvent *e) {
                 else n += snprintf(line + n, sizeof(line) - (size_t) n, " %s=-", id);
                 continue;
             }
-            if (!strcmp(id, ":preview") || !strcmp(id, ":spray")) {
+            if (!strcmp(id, ":preview") || !strcmp(id, ":spray") || !strcmp(id, ":objectives")) {
                 const ClassPreview *cp = &client->class_preview;
-                const int shown = id[1] == 's' ? sprays_wheel_shown()
+                const int shown = id[1] == 's' ? sprays_wheel_shown() : id[1] == 'o' ? hud_objectives_shown()
                     : html_ui_available() && html_ui_is_menu_open() && cp->has_rect && cp->visible && cp->width > 0.0f && cp->height > 0.0f;
                 n += snprintf(line + n, sizeof(line) - (size_t) n, " %s=%d", id, shown);
                 continue;

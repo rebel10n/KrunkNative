@@ -3794,9 +3794,14 @@ void client_hud_html_tick(Client *client, const float now_f) {
         ui->streak = (int) me->kill_streak;
         dom_text_int("streakVal", ui->streak);
     }
+    static int shown_team = -1; // io_updateTeam (isYou): the card's team name follows a team change too
     if (class_changed) {
         hud_render_class(hud->class_index);
         hud_render_team(client);
+        shown_team = me->team;
+    } else if (force || (int) me->team != shown_team) {
+        hud_render_team(client);
+        shown_team = me->team;
     }
     if (scope_changed) hud_render_scope(hud->scoped);
     if (aim_dot_changed) dom_style("aimDot", "opacity", hud->aim_dot ? "1" : "0");

@@ -12,6 +12,8 @@
 // flags of the oneflag modes and the only ones they ignore, every medals.js spawnable type has its
 // model (game.js createSpawnable: noAnim ones stay still), and DOMINATION_ZONEs (no map object)
 // get their objective_4 zone in Domination (resetDomZones: meshRef.visible = mode.dom).
+// v7.1.4 flag stands (MapManager getZoneDat): addCube(.., flagZoneS, 5, flagZoneS), 5 units tall,
+// fogged (no noFog), zone_b_1 / zone_r_1. The flag pings are client/src/ui/hud_objectives.c.
 // Everything is created lazily for the current map + mode and removed on change.
 #include <gl.h>
 #include <mode_world.h>
@@ -26,6 +28,7 @@ Player *client_find_player(Client*, int uid); // client/src/main.c
 
 #define MODE_WORLD_EMISSIVE_ENEMY 8729652 // getFlagDat "0" / tag emissive (your team's tag)
 #define MODE_WORLD_EMISSIVE_ALLY 4360861  // getFlagDat "1" / tag emissive (enemy tag)
+#define MODE_WORLD_ZONE_HEIGHT 5.0f       // MapManager getZoneDat addCube height (flag stands)
 
 typedef struct {
     Mesh *crystal;
@@ -233,9 +236,11 @@ static void mode_world_build(Client *client) {
             material->base.transparent = 1;
             material->no_depth_write = 1;
             material->double_sided = 1;
+            material->fog_enabled = 1; // getZoneDat has no noFog (the crystal's getFlagDat has)
             flag->zone->no_shadow_receive = 1;
             flag->zone->transform.position = (vec3) {origin.x, ground, origin.z};
-            flag->zone->transform.scale = (vec3) {MODE_FLAG_ZONE_SIZE, MODE_FLAG_ZONE_HEIGHT, MODE_FLAG_ZONE_SIZE};
+            // addCube(x, y, z, flagZoneS, 5, flagZoneS): 5 tall (the capture trigger is flagZoneH)
+            flag->zone->transform.scale = (vec3) {MODE_FLAG_ZONE_SIZE, MODE_WORLD_ZONE_HEIGHT, MODE_FLAG_ZONE_SIZE};
             scene_add_mesh(client->scene, flag->zone);
         }
         if (flag->crystal) {
@@ -262,7 +267,7 @@ static void mode_world_flag_colors(ModeWorldFlag *flag, const int flag_team, con
     }
     if (flag->zone) {
         BasicMaterial *material = (BasicMaterial *) flag->zone->material;
-        material->texture = mode_world_texture(own ? "zone_b" : "zone_r");
+        material->texture = mode_world_texture(own ? "zone_b_1" : "zone_r_1"); // getZoneDat texSrc "zone_" + b/r + "_1"
     }
 }
 
@@ -413,4 +418,14 @@ void mode_world_tick(Client *client) {
 void mode_world_unload(Client *client) {
     (void) client;
     mode_world_clear();
+}
+
+int mode_world_flag_meshes(const int f, vec3 *crystal, int *crystal_visible, vec3 *stand, int *stand_visible) {
+    if (f < 0 || f >= g_world.flag_count || f >= MODE_MAX_FLAGS || !g_world.flags[f].crystal) return 0;
+    const ModeWorldFlag *flag = &g_world.flags[f];
+    if (crystal) *crystal = flag->crystal->transform.position;
+    if (crystal_visible) *crystal_visible = flag->crystal->visible;
+    if (stand) *stand = flag->zone ? flag->zone->transform.position : (vec3) {0};
+    if (stand_visible) *stand_visible = flag->zone ? flag->zone->visible : 0;
+    return 1;
 }

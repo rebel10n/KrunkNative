@@ -42,6 +42,7 @@ typedef struct {
 typedef struct {
     int mode_id;                     // -1: no round yet
     int team_scores[2];
+    unsigned char score_seen[2];     // Game.teamScores has the team (it scored this round): f1996 lists only those
     char flag_info[2][NET_MODE_TEXT_SIZE];
     int lives;                       // -1: the mode has none
     int locked;
@@ -171,10 +172,25 @@ static void hud_modes_add_action(Client *client, const NetActionPacket *packet) 
     html_dom_scroll_to_bottom(list);
 }
 
+// game.updateFlag (the "ufl" packet / the join sync's flg): the client's flag object moves to the
+// sent x, y, z and takes the carrier; while carried the packet carries the ping (ufp: img only), so
+// the object keeps where it was taken from. The minimap (hud_map.c) draws these objects.
+static void hud_modes_mirror_flag(Client *client, const int index) {
+    GameMode *mode = client ? client->game.mode : NULL;
+    if (!mode || index < 0 || index >= mode->flag_count || index >= MODE_MAX_FLAGS) return;
+    const NetModeFlag *in = &g_modes.flags[index];
+    ModeFlag *flag = &mode->flags[index];
+    flag->carrier_uid = in->carrier_uid;
+    if (in->carrier_uid < 0) flag->position = (vec3) {in->position[0], in->position[1], in->position[2]};
+}
+
 static void hud_modes_apply_state(Client *client, const NetModeStatePacket *packet) {
     g_modes.mode_id = packet->mode_id;
     g_modes.team_scores[0] = packet->team_scores[0];
     g_modes.team_scores[1] = packet->team_scores[1];
+    // the join sync's getTeamScores lists the teams that scored; KN's state packet carries both
+    // scores, so a team with 0 counts as not listed (KN deviation: a team that scored 0 net)
+    for (int t = 0; t < 2; t++) g_modes.score_seen[t] = g_modes.score_seen[t] || packet->team_scores[t] != 0;
     for (int t = 0; t < 2; t++) {
         memcpy(g_modes.flag_info[t], packet->flag_info[t], NET_MODE_TEXT_SIZE);
         g_modes.flag_info[t][NET_MODE_TEXT_SIZE - 1] = 0;
@@ -185,6 +201,7 @@ static void hud_modes_apply_state(Client *client, const NetModeStatePacket *pack
     g_modes.message[sizeof(g_modes.message) - 1] = 0;
     g_modes.flag_count = packet->flag_count < MODE_MAX_FLAGS ? packet->flag_count : MODE_MAX_FLAGS;
     memcpy(g_modes.flags, packet->flags, sizeof(g_modes.flags));
+    for (int f = 0; f < g_modes.flag_count; f++) hud_modes_mirror_flag(client, f);
 
     Game *game = &client->game;
     game->move_lock = packet->move_lock;
@@ -402,7 +419,10 @@ int hud_modes_handle_event(Client *client, const int packet_type, const void *pa
         }
         case NET_PACKET_TEAM_SCORE: {
             MODES_READ(NetTeamScorePacket, score);
-            if (score.team >= 1 && score.team <= 2) g_modes.team_scores[score.team - 1] = score.score;
+            if (score.team >= 1 && score.team <= 2) {
+                g_modes.team_scores[score.team - 1] = score.score;
+                g_modes.score_seen[score.team - 1] = 1; // io_teamScore: Game.teamScores[team] = score
+            }
             if (score.team >= 1 && score.team < MODE_TEAMS) { // v7: sdm teams 3..5 too
                 g_modes.team_scores_v7[score.team] = score.score;
                 if (game->mode) game->mode->team_scores[score.team] = score.score;
@@ -414,6 +434,7 @@ int hud_modes_handle_event(Client *client, const int packet_type, const void *pa
             if (flag.index >= 0 && flag.index < MODE_MAX_FLAGS) {
                 g_modes.flags[flag.index] = flag.flag;
                 if (flag.index >= g_modes.flag_count) g_modes.flag_count = flag.index + 1;
+                hud_modes_mirror_flag(client, flag.index);
                 if (flag.flag.team >= 1 && flag.flag.team <= 2) {
                     memcpy(g_modes.flag_info[flag.flag.team - 1], flag.info, NET_MODE_TEXT_SIZE);
                     g_modes.flag_info[flag.flag.team - 1][NET_MODE_TEXT_SIZE - 1] = 0;
@@ -520,11 +541,12 @@ static void dom_set_display(const char *id, const char *value) {
     if (html_dom_get_style(el, "display", current, sizeof(current)) < 0 || strcmp(current, value)) html_dom_set_display(el, value);
 }
 
-// initGame's #teamScores rows: CTF shows the score, the flag icon and the flag status;
-// the other team modes a team colour square and the score. The local team's icon gets
-// "you" (blue flag / white square).
+// f1996's #teamScores rows: CTF shows the score, the flag icon and the flag status; the other
+// team modes a team colour square and the score. The local team's icon gets "you" (blue flag /
+// white square). Only the teams in Game.teamScores (those that scored this round) get a row, and
+// #teamScores stays hidden until one has (v7 starts every round with teamScores = {}).
 static void hud_modes_scores(const Client *client, const GameModeConfig *config) {
-    if (!config || !config->teams) {
+    if (!config || !config->teams || !(g_modes.score_seen[0] || g_modes.score_seen[1])) {
         dom_set_display("teamScores", "none");
         g_modes.shown_scores[0] = 0;
         return;
@@ -536,6 +558,7 @@ static void hud_modes_scores(const Client *client, const GameModeConfig *config)
     html[0] = 0;
 
     for (int t = 1; t <= 2; t++) {
+        if (!g_modes.score_seen[t - 1]) continue;
         const int score = g_modes.team_scores[t - 1];
         if (config->flags) {
             char info[NET_MODE_TEXT_SIZE * 6];
@@ -846,3 +869,8 @@ const HudModesV7 *hud_modes_v7(void) {
     state.popup_seq = g_modes.popup_seq;
     return &state;
 }
+
+const char *hud_modes_flag_info(const int team) {
+    return team >= 1 && team <= 2 ? g_modes.flag_info[team - 1] : "";
+}
+
