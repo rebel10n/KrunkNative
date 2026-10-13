@@ -114,14 +114,18 @@
       "name": "game-message",
       "rect": [
         400,
-        0,
+        8,
         480,
         30
       ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#gameMessage band (#topMidHold top -5px, scale .8): the gmsg / CTF flag notice, or empty"
+      "note": "#gameMessage band (#topMidHold top -5px, scale .8): the gmsg / CTF flag notice, or empty; KN: #topMidHold at --kn-hud-top (hud.css), 8px lower than v7 at 720p (intentional margin), compared against v7's band",
+      "ref_offset": [
+        0,
+        -8
+      ]
     },
     {
       "name": "team-scores",
