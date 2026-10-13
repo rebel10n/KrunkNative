@@ -867,8 +867,8 @@ static void open_start_projects(const char *query) {
             opened++;
         }
     }
-#ifdef __EMSCRIPTEN__
-    // web "Open in New Tab": the map came through storage (editor_view.c)
+    // web "Open in New Tab" (editor_view.c) and the game console's `editor` (ui_console.c): the map
+    // came through storage (native storage is files, so another process reads it too)
     if (query && strstr(query, "handoff=1")) {
         const int n = html_storage_get("knEditorHandoff", NULL, 0);
         char *text = n > 0 ? malloc((size_t) n + 1) : NULL;
@@ -879,7 +879,6 @@ static void open_start_projects(const char *query) {
             free(text);
         }
     }
-#endif
     if (opened) return;
     EditorProject *p = ed_project_create();
     ed_project_activate(p);

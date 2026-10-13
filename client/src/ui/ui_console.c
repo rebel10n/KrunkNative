@@ -23,6 +23,7 @@
 #include <chat_commands.h>
 #include <map_catalog.h>
 #include <ai.h>
+#include <app_mode.h> // editor: app_route_url_target
 #include <nav_overlay.h>
 #include <object_manager.h> // give: weapon / item names
 #include <weapons.h>
@@ -822,6 +823,34 @@ static void cmd_echo(const int argc, char **argv, const char *rest) {
     append(text, COL_LOG);
 }
 
+// editor: the loaded map (its raw JSON, so hub/custom/online maps work too) opens in the map editor
+// as an unsaved copy, through the same storage handoff as the editor's "Open in New Tab"
+// (editor.c open_start_projects: knEditorHandoff + editor.html?handoff=1).
+static void cmd_editor(const int argc, char **argv, const char *rest) {
+    (void) argc;
+    (void) argv;
+    (void) rest;
+    Client *client = con_client();
+    const Map *map = client && client->game.ready ? client->game.map : NULL;
+    if (!map || !map->raw_data) {
+        append("No map loaded.", COL_ERROR);
+        return;
+    }
+    char *text = cJSON_PrintUnformatted(map->raw_data);
+    if (!text) {
+        append("Could not export the map.", COL_ERROR);
+        return;
+    }
+    html_storage_set("knEditorHandoff", text);
+    cJSON_free(text);
+    if (!app_route_url_target("editor.html?handoff=1", 1)) {
+        html_storage_set("knEditorHandoff", NULL);
+        append("The map editor is not available in this build.", COL_ERROR);
+        return;
+    }
+    appendf(COL_INFO, "Opening %s in the map editor (a copy: Save asks where).", map->name ? map->name : "the map");
+}
+
 static ConPair *pair_find(ConPair *pairs, const int count, const char *key) {
     for (int i = 0; i < count; i++) if (!strcmp(pairs[i].key, key)) return &pairs[i];
     return NULL;
@@ -1206,6 +1235,7 @@ static void register_commands(void) {
     register_local("clear", NO_ARGS, "clear console output", cmd_clear);
     register_local("echo", ARGS(A_TEXT), "print text to console", cmd_echo);
     register_local("print", ARGS(A_TEXT), "alias for echo", cmd_echo);
+    register_local("editor", NO_ARGS, "open the current map in the map editor (an unsaved copy)", cmd_editor);
     register_local("bind", ARGS(A_BIND), "bind a key to a command (session only)", cmd_bind);
     register_local("unbind", ARGS(A_KEY), "remove a key bind", cmd_unbind);
     register_local("alias", ARGS(A_ALIAS), "define a command alias", cmd_alias);
