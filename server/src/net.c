@@ -154,14 +154,11 @@ static void net_game_send(Game *game, const int uid, const int type, const void 
 static void net_change_map_internal(int map_index, int mode_index, int respawn_joined);
 
 // GameHooks.next_round: the end screen ran out, start the next round on the voted match
-// (WP-E game_next_match: endData.mts tally) and respawn everyone who played. No picks (no
-// map list): a random rotation map, as before.
+// (WP-E game_next_match: endData.mts tally, no votes = a random pick) and respawn everyone who
+// played. No picks: game_init picks a random playable rotation pair (game_pick_rotation_pair).
 static void net_game_next_round(Game *game) {
     int map_index, mode_index;
-    if (!game_next_match(game, &map_index, &mode_index)) {
-        map_index = game_pick_next_map(game);
-        mode_index = game_pick_next_mode(game);
-    }
+    if (!game_next_match(game, &map_index, &mode_index)) map_index = mode_index = -1;
     net_change_map_internal(map_index, mode_index, 1);
 }
 

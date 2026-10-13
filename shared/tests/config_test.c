@@ -495,6 +495,128 @@ static void test_votes(void) {
     for (int i = 0; i < 4; i++) cJSON_Delete(maps_json[i]);
 }
 
+// The public rotation over Krunker's 24 rotation maps (decisions.md "Public mode rotation").
+static int pair_ok(const Game *game, const int map_index, const int mode_id) {
+    int listed = 0;
+    for (size_t i = 0; i < game->mode_count; i++) listed |= game->modes[i] == mode_id;
+    return listed && map_index >= 0 && (size_t) map_index < game->map_count && mode_config(mode_id) &&
+           !mode_config(mode_id)->prevent_custom && game_map_offers_mode(game->maps[map_index], mode_id);
+}
+
+static const char *map_name_of(const Game *game, const int map_index) {
+    const cJSON *name = cJSON_GetObjectItem(game->maps[map_index], "name");
+    return cJSON_IsString(name) ? name->valuestring : "?";
+}
+
+static void test_rotation(void) {
+    printf("public rotation: startup pair, no-vote picks, votes...\n");
+    // the objects check: Arena has no flags / objectives, Kanji has them all
+    load_default_maps();
+    const cJSON *arena = g_maps[21], *kanji = g_maps[10], *lostworld = g_maps[7];
+    CHECK(arena && kanji && lostworld, "official maps load");
+    if (!arena || !kanji || !lostworld) return;
+    CHECK(game_map_offers_mode(kanji, MODE_ID_CTF) && game_map_offers_mode(kanji, MODE_ID_DOM) && game_map_offers_mode(kanji, MODE_ID_POINT),
+          "Kanji: ctf / dom / hardpoint");
+    CHECK(!game_map_offers_mode(arena, MODE_ID_FFA) && game_map_offers_mode(arena, MODE_ID_CHS), "Arena: config.modes [33] only");
+    CHECK(!game_map_offers_mode(lostworld, MODE_ID_KC), "Lostworld does not list Kill Confirmed");
+    cJSON *bare = cJSON_Parse("{\"name\":\"bare\",\"objects\":[],\"config\":{\"modes\":[0,2,3,25]}}");
+    CHECK(game_map_offers_mode(bare, MODE_ID_FFA) && !game_map_offers_mode(bare, MODE_ID_POINT) && !game_map_offers_mode(bare, MODE_ID_CTF) &&
+          !game_map_offers_mode(bare, MODE_ID_DOM), "listed modes without their objects are left out");
+    cJSON_Delete(bare);
+
+    Game game;
+    memset(&game, 0, sizeof(game));
+    const size_t rotation_count = sizeof(g_rotation_modes) / sizeof(g_rotation_modes[0]);
+    int *modes = malloc(rotation_count * sizeof(int));
+    memcpy(modes, g_rotation_modes, rotation_count * sizeof(int));
+    game_configure(&game, NULL, NULL, 0, modes, rotation_count, NULL, 0, NULL, 0); // Krunker's rotation maps
+    game.hooks.send = test_send;
+    CHECK(game.map_count == 24, "24 rotation maps (%zu)", game.map_count);
+
+    // the first round: a random playable pair, every mode of the rotation comes up
+    int seen_mode[MODE_COUNT] = {0}, seen_map[64] = {0}, bad = 0;
+    for (int i = 0; i < 2000; i++) {
+        int map_index = -1, mode_index = -1;
+        if (!game_pick_rotation_pair(&game, &map_index, &mode_index)) {
+            bad++;
+            continue;
+        }
+        bad += !pair_ok(&game, map_index, game.modes[mode_index]);
+        seen_mode[game.modes[mode_index]] = 1;
+        seen_map[map_index] = 1;
+    }
+    int modes_seen = 0, maps_seen = 0;
+    for (int i = 0; i < MODE_COUNT; i++) modes_seen += seen_mode[i];
+    for (int i = 0; i < 64; i++) maps_seen += seen_map[i];
+    CHECK(!bad, "startup pairs are playable (%d bad)", bad);
+    CHECK(modes_seen == (int) rotation_count && maps_seen >= 18, "startup: %d modes, %d maps", modes_seen, maps_seen);
+    for (int i = 0; i < 20; i++) {
+        game_init(&game, -1, -1, 1);
+        CHECK(game.ready && pair_ok(&game, game.current_map_index, game_mode_id(&game)), "game_init(-1, -1): %s on %s",
+              mode_name(game_mode_id(&game)), map_name_of(&game, game.current_map_index));
+    }
+
+    // round ends nobody votes on: genMatchList's cards, one of them at random
+    int count_mode[MODE_COUNT] = {0};
+    memset(seen_map, 0, sizeof(seen_map));
+    bad = 0;
+    const int rounds = 600;
+    printf("  20 consecutive no-vote rounds:");
+    for (int round = 0; round < rounds; round++) {
+        g_sent_count = 0;
+        game.end_timer = 0.0f;
+        game_end_round(&game);
+        const NetMatchVoteStatePacket *v = votes_to(NET_TARGET_ALL);
+        CHECK(v && v->count >= 2, "picks offered (%d)", v ? v->count : -1);
+        for (int i = 0; v && i < v->count; i++) bad += !pair_ok(&game, v->entries[i].map_index, v->entries[i].mode_id);
+        int map_index = -1, mode_index = -1;
+        if (!game_next_match(&game, &map_index, &mode_index)) {
+            bad++;
+            continue;
+        }
+        const int mode_id = game.modes[mode_index];
+        bad += !pair_ok(&game, map_index, mode_id);
+        count_mode[mode_id]++;
+        seen_map[map_index] = 1;
+        if (round < 20) printf("%s(%s, %s)", round ? ", " : " ", mode_config(mode_id)->alias, map_name_of(&game, map_index));
+    }
+    printf("\n  modes over %d rounds:", rounds);
+    modes_seen = maps_seen = 0;
+    for (int i = 0; i < MODE_COUNT; i++) {
+        if (count_mode[i]) printf(" %s %d", mode_config(i)->alias, count_mode[i]);
+        modes_seen += count_mode[i] > 0;
+    }
+    for (int i = 0; i < 64; i++) maps_seen += seen_map[i];
+    printf(", %d maps\n", maps_seen);
+    CHECK(!bad, "every offered and played pair is playable (%d bad)", bad);
+    CHECK(modes_seen == (int) rotation_count && maps_seen >= 18, "no votes: %d modes, %d maps", modes_seen, maps_seen);
+    CHECK(count_mode[MODE_ID_FFA] < rounds * 3 / 4 && count_mode[MODE_ID_FFA] > rounds / 4, "FFA is one card of three (%d / %d)",
+          count_mode[MODE_ID_FFA], rounds);
+
+    // votes still win: two for the last card beat one for the first
+    for (int round = 0; round < 50; round++) {
+        g_sent_count = 0;
+        game.end_timer = 0.0f;
+        game_end_round(&game);
+        const NetMatchVoteStatePacket *v = votes_to(NET_TARGET_ALL);
+        if (!v || v->count < 2) {
+            CHECK(0, "picks offered");
+            break;
+        }
+        const NetMatchVoteEntry first = v->entries[0], last = v->entries[v->count - 1];
+        game_vote_match(&game, 1, first.mode_id, first.map_index);
+        game_vote_match(&game, 2, last.mode_id, last.map_index);
+        game_vote_match(&game, 3, last.mode_id, last.map_index);
+        int map_index = -1, mode_index = -1;
+        CHECK(game_next_match(&game, &map_index, &mode_index) && map_index == last.map_index && game.modes[mode_index] == last.mode_id,
+              "the most votes win (%d on %d)", last.mode_id, last.map_index);
+    }
+    game.end_timer = 0.0f;
+    const cJSON **maps = game.maps;
+    game_off(&game);
+    free((void *) maps);
+}
+
 static void test_network(const cJSON *map) {
     printf("networkData rates, viewDis...\n");
     Game game;
@@ -540,6 +662,7 @@ int main(void) {
     test_map_config(sandstorm);
     test_sync(sandstorm);
     test_votes();
+    test_rotation();
     test_network(sandstorm);
     test_account_hook();
     cJSON_Delete(sandstorm);

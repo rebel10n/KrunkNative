@@ -170,13 +170,18 @@ void game_configure(
     }
 }
 
-void game_init(Game *game, const int map_index, const int mode_index, const unsigned char is_local) {
+void game_init(Game *game, int map_index, int mode_index, const unsigned char is_local) {
     game->ready = 0;
     game->is_local = is_local;
 
     game_clear_players(game);
 
     if (!game->map_count || !game->mode_count) return;
+
+    // Neither given (a public server's first round, or no end-screen picks): a playable random
+    // pair of the rotation (v7.1.4 server startup). A hosted game keeps v7 init's independent
+    // config.maps / config.modes picks below (game.js:3428-3429).
+    if (map_index < 0 && mode_index < 0 && !game_config_is_custom(game)) game_pick_rotation_pair(game, &map_index, &mode_index);
 
     const int map_to_load = map_index >= 0 && map_index < game->map_count ? map_index : (int) pcg32_boundedrand(game->map_count);
     const int map_changed = !game->map || game->map->raw_data != game->maps[map_to_load];
@@ -826,19 +831,6 @@ void game_players_add(Game *game, Player *player) {
     game->leaders_dirty = 1;
 
     mode_player_added(game, player); // players.add: setTeam + lives (authority only)
-}
-
-// endData.mts[0] without votes: mode 0 with a random rotation map (pickWinningMap).
-// endData.mts[0] without votes: mode 0 when the rotation has it, else a random
-// rotation mode. Returns an index into game->modes.
-int game_pick_next_mode(const Game *game) {
-    if (!game->mode_count || !game->modes) return 0;
-
-    for (size_t i = 0; i < game->mode_count; i++) {
-        if (game->modes[i] == MODE_ID_FFA) return (int) i;
-    }
-
-    return (int) pcg32_boundedrand((uint32_t) game->mode_count);
 }
 
 int game_pick_next_map(const Game *game) {

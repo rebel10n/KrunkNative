@@ -1950,7 +1950,6 @@ void game_set_endless(Game*, int on);   // /endless: pause the round clock (TIME
 void game_send_round_state(Game*, int uid); // TIMER (+ END while the end screen is up) for a joiner
 void game_player_left(Game*, Player*);   // drop references (nuke, damage) to a leaving player
 int game_pick_next_map(const Game*);     // next round's map: random rotation map (no map votes)
-int game_pick_next_mode(const Game*);    // next round's game->modes index: FFA when rotated, else random (endData.mts[0])
 int game_mode_index_for(Game*, int mode_id); // game->modes index of a Krunker mode id (appended when missing), -1 unknown
 int game_mode_id(const Game*);           // the current round's Krunker mode id, -1 none
 // Projectiles (shared/src/projectile.c), authority only.

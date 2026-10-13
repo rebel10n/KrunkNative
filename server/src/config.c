@@ -355,21 +355,25 @@ int gs_config_from_json(GsConfig *cfg, const cJSON *s, char *err, const size_t e
     const int maps = gs_read_lines(s, "maps", &cfg->maps[0][0], sizeof(cfg->maps[0]), GS_MAX_LIST);
     if (maps >= 0) cfg->map_count = maps;
 
-    const cJSON *modes = gs_item(s, "modes");
-    if (modes) {
+    // modes: names / aliases / ids; "rotation" (alone, as server.cfg's `modes rotation` list, or
+    // among others) adds Krunker's public rotation (map.js rotationModes). Duplicates count once.
+    if (gs_item(s, "modes")) {
         cfg->mode_count = 0;
-        if (cJSON_IsString(modes) && !strcmp(modes->valuestring, "rotation")) {
-            for (size_t i = 0; i < sizeof(g_rotation_modes) / sizeof(g_rotation_modes[0]); i++) cfg->modes[cfg->mode_count++] = g_rotation_modes[i];
-        } else {
-            char names[GS_MAX_LIST][GS_STR_SMALL];
-            const int n = gs_read_lines(s, "modes", &names[0][0], sizeof(names[0]), GS_MAX_LIST);
-            for (int i = 0; i < n; i++) {
-                const int id = mode_find(names[i]);
-                if (id < 0) {
-                    snprintf(err, err_size, "gameserver.modes: unknown mode '%s'", names[i]);
-                    return -1;
-                }
-                cfg->modes[cfg->mode_count++] = id;
+        char names[GS_MAX_LIST][GS_STR_SMALL];
+        const int n = gs_read_lines(s, "modes", &names[0][0], sizeof(names[0]), GS_MAX_LIST);
+        for (int i = 0; i < n; i++) {
+            const int rotation = !strcasecmp(names[i], "rotation");
+            const int id = rotation ? -1 : mode_find(names[i]);
+            if (!rotation && id < 0) {
+                snprintf(err, err_size, "gameserver.modes: unknown mode '%s'", names[i]);
+                return -1;
+            }
+            const size_t add = rotation ? sizeof(g_rotation_modes) / sizeof(g_rotation_modes[0]) : 1;
+            for (size_t r = 0; r < add; r++) {
+                const int mode_id = rotation ? g_rotation_modes[r] : id;
+                int dup = 0;
+                for (int k = 0; k < cfg->mode_count; k++) dup |= cfg->modes[k] == mode_id;
+                if (!dup && cfg->mode_count < GS_MAX_LIST) cfg->modes[cfg->mode_count++] = mode_id;
             }
         }
     }
@@ -988,13 +992,35 @@ const cJSON **gs_build_map_list(const GsConfig *cfg, size_t *count) {
     return list;
 }
 
+// A mode this server's lobby can play: its minPlayers fit the mode's lobby size (gs_lobby_size:
+// max_players, mode_max_players, mode_team_size) and team modes have a player per team.
+static int gs_mode_fits_lobby(const GsConfig *cfg, const int mode_id) {
+    const GameModeConfig *mode = mode_config(mode_id);
+    if (!mode) return 0;
+    const int size = gs_lobby_size(cfg, mode_id);
+    const int teams = mode->teams ? (mode->multi_team ? mode->multi_team : 2) : 1;
+    return mode->min_players <= size && teams <= size;
+}
+
+// The game's mode list. KN (decisions.md "Public mode rotation"): a rotation of several modes
+// drops the ones the lobby cannot play (gs_mode_fits_lobby); a single mode is kept as configured.
 int *gs_build_mode_list(const GsConfig *cfg, size_t *count) {
     *count = 0;
     if (!cfg->mode_count) return NULL;
     int *modes = calloc((size_t) cfg->mode_count, sizeof(int));
     if (!modes) return NULL;
-    memcpy(modes, cfg->modes, (size_t) cfg->mode_count * sizeof(int));
-    *count = (size_t) cfg->mode_count;
+    for (int i = 0; i < cfg->mode_count; i++) {
+        if (cfg->mode_count > 1 && !gs_mode_fits_lobby(cfg, cfg->modes[i])) {
+            server_log_error("config: mode %s left out of the rotation (lobby of %d, needs %d players)", mode_name(cfg->modes[i]),
+                             gs_lobby_size(cfg, cfg->modes[i]), mode_config(cfg->modes[i]) ? mode_config(cfg->modes[i])->min_players : 0);
+            continue;
+        }
+        modes[(*count)++] = cfg->modes[i];
+    }
+    if (!*count) { // nothing fits: play the list as configured rather than nothing
+        memcpy(modes, cfg->modes, (size_t) cfg->mode_count * sizeof(int));
+        *count = (size_t) cfg->mode_count;
+    }
     return modes;
 }
 

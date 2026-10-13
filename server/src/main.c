@@ -762,6 +762,9 @@ int main(int argc, char **argv) {
     // map list: the command line map.json + Krunker's rotation, else gameserver.maps /
     // custom_map_dirs, else Krunker's rotation; GameConfig from gameserver.game
     g_server->game.server = g_server;
+    // The listen port joins the random seed: instances a deploy starts in the same second (one
+    // per port) open on different rotation pairs (game_init -> game_pick_rotation_pair).
+    pcg32_srandom(((uint64_t) pcg32_random() << 32) ^ (uint64_t) time(NULL), ((uint64_t) cfg->listen_port << 32) ^ (uint64_t) (uintptr_t) &args);
     accounts_configure_public(&g_server->game, startup_map);
     game_init(&g_server->game, startup_map ? 0 : -1, -1, 0);
     server_configure_bots(cfg); // server.cfg bots / bot_quota / bot_difficulty (Krunker v7.1.4 bot players)

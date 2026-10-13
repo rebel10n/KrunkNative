@@ -160,3 +160,9 @@ void game_send_match_votes(Game*, int uid); // MATCH_VOTE_STATE to `uid` (NET_TA
 // appended when missing). 0: no picks, the caller rotates as before.
 int game_next_match(Game*, int *map_index, int *mode_index);
 void game_force_next_match(Game*, int mode_id, int map_index); // forceMap / forceMode (-1 keeps the current one)
+// 1 when `map` can host mode `mode_id`: its config.modes (else the top-level "modes", else [0])
+// list the mode and it has the mode's objects (objectives, flags, domination zones, bomb sites).
+int game_map_offers_mode(const cJSON *map, int mode_id);
+// A random playable (map, mode) pair of the rotation: a map that offers one of game->modes, then
+// one of those modes (v7.1.4 server startup). *mode_index is a game->modes index. 0: none.
+int game_pick_rotation_pair(const Game*, int *map_index, int *mode_index);

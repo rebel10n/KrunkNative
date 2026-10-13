@@ -1548,7 +1548,7 @@ Precedence: **CLI flags > environment > config file > defaults**.
 | `team_size` | `0` | team modes: lobby size = 2 × team_size (0 = off) |
 | `mode_team_size` | `{}` | per-mode team size; `mode_max_players` wins over team sizes |
 | `maps` | `[]` (Krunker rotation) | rotation: map catalogue names, keys or indices (`shared/include/map_catalog.h`: `"Burg"`, `"311_burg"` (the v3.1.1 Burg), `"152_burg"`, `"13"`; the old keys `"v3_burg"` / `"old_burg"` still resolve) |
-| `modes` | `["ffa"]` | rotation modes (aliases/names/ids) or `"rotation"` (Krunker's public mode rotation) |
+| `modes` | `["ffa"]` | rotation modes (aliases/names/ids); `"rotation"` (also as server.cfg `modes rotation` or inside a list) adds Krunker's public rotation ffa, point, ctf, kc, dom. Rounds rotate over the (map, mode) pairs a map supports (its `config.modes` plus the mode's objects, `game_map_offers_mode`); with no end-screen votes a random card wins; a multi-mode list drops modes whose minPlayers / teams do not fit the lobby (doc/v7/decisions.md "Public mode rotation") |
 | `custom_map_dirs` | `[]` | extra directories of map JSONs appended to the rotation (catalogue keys are skipped) |
 | `round_seconds` | `0` | round length override for every mode (0 = the mode's game time) |
 | `mode_round_seconds` | `{}` | per-mode round length (`{"ffa":300}`) |

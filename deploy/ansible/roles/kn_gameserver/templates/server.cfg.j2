@@ -11,6 +11,12 @@ query_port      0
 listen_host     "{{ kn_gameserver_listen_host }}"
 public_host     "{{ kn_gameserver_hostname_fmt | format(n) }}"
 max_players     {{ kn_gameserver_max_players }}
+{% set kn_gs_modes = kn_gameserver_instance_modes[n] | default(kn_gameserver_modes) %}
+{% if kn_gs_modes %}
+// Mode rotation: each round end offers Krunker's vote cards over the maps that support each mode;
+// nobody votes = a random card. "rotation" = Krunker's public modes (ffa, point, ctf, kc, dom).
+modes           {{ kn_gs_modes | join(',') if (kn_gs_modes is iterable and kn_gs_modes is not string) else kn_gs_modes }}
+{% endif %}
 {% if kn_gameserver_billboard %}
 // In-map billboards (v3.1.1 billboards / game.updateBillboards; default "Your Ad Here").
 billboard       "{{ kn_gameserver_billboard }}"
@@ -26,7 +32,7 @@ bans_file       "{{ kn_state_dir }}/gs-{{ n }}/bans.json"
 shutdown_reason_file "{{ kn_gameserver_stop_reason_file }}"
 // SIGTERM drains: no new players, the round finishes (at most this many seconds), then stop.
 shutdown_grace  {{ kn_gameserver_drain_timeout }}
-// Coordinator link (matchmaking): wss:// through Cloudflare, certificate verified against
+// Coordinator link (matchmaking): wss:// through the edges, certificate verified against
 // the system CA store; the brain hands clients public_host/port, not the TCP peer.
 {% set kn_gs_link = kn_gameserver_coordinator_url if (n not in kn_gameserver_online_instances or kn_gameserver_coordinator_online_instances | bool) else '' %}
 coordinator_url "{{ kn_gs_link }}"

@@ -1694,6 +1694,82 @@ static int gc_map_modes(const cJSON *map, int *out, const int max) {
     return n;
 }
 
+// KN difference (decisions.md "Public mode rotation"): v7 trusts a map's config.modes. KN also
+// checks the map has the objects the mode plays on, because maps without config.modes (custom
+// maps, KN maps, the top-level v3 "modes") fall back to lists that were never checked.
+enum { GC_MAP_OBJECTIVE = 1, GC_MAP_FLAG = 2, GC_MAP_DOM = 4, GC_MAP_SITE = 8 };
+
+static int gc_map_features(const cJSON *map) {
+    int features = 0;
+    const cJSON *objects = gc_item(map, "objects"), *obj;
+    cJSON_ArrayForEach(obj, (cJSON_IsArray(objects) ? objects : NULL)) {
+        switch (map_raw_object_prefab(obj)) {
+            case PREFAB_OBJECTIVE: features |= GC_MAP_OBJECTIVE; break;
+            case PREFAB_FLAG: features |= GC_MAP_FLAG; break;
+            case PREFAB_DOMINATION_ZONE: features |= GC_MAP_DOM; break;
+            case PREFAB_BOMB_SITE: features |= GC_MAP_SITE; break;
+            default: break;
+        }
+    }
+    return features;
+}
+
+static int gc_mode_fits(const GameModeConfig *mode, const int features) {
+    if (mode->objective && !(features & GC_MAP_OBJECTIVE)) return 0; // hardpoint, deposit, king, team defender
+    if (mode->flags && !(features & GC_MAP_FLAG)) return 0;           // capture the flag, blitz
+    if (mode->dom && !(features & GC_MAP_DOM)) return 0;              // domination
+    if (mode->site && !(features & GC_MAP_SITE)) return 0;            // defuse
+    return 1;
+}
+
+static int gc_map_lists_mode(const cJSON *map, const int mode_id) {
+    int modes[64];
+    const int n = gc_map_modes(map, modes, 64);
+    for (int k = 0; k < n; k++) {
+        if (modes[k] == mode_id) return 1;
+    }
+    return 0;
+}
+
+int game_map_offers_mode(const cJSON *map, const int mode_id) {
+    const GameModeConfig *mode = gc_mode(mode_id);
+    return mode && gc_map_lists_mode(map, mode_id) && gc_mode_fits(mode, gc_map_features(map));
+}
+
+// A public game's first round, and its next one when the end screen had no picks: the v7.1.4
+// server seeds a lobby with a random rotation map (server/index.ts:1106-1114, 3657) and a random
+// mode among the map's modes in the rotation (takeRandomStartupModeIndex, :1178-1204, 3659).
+// KN: only maps that offer one of game->modes (game_map_offers_mode) count, so the pair is always
+// playable; with more than one mode the preventCustomGames modes stay out, as in genMatchList.
+int game_pick_rotation_pair(const Game *game, int *map_index, int *mode_index) {
+    if (!game || !game->map_count || !game->mode_count || !game->modes) return 0;
+    const int strict = game->mode_count > 1;
+    int eligible = 0, pick_map = -1, pick_mode = -1;
+    for (size_t i = 0; i < game->map_count; i++) {
+        const cJSON *map = game->maps[i];
+        const int features = gc_map_features(map);
+        int candidates = 0, chosen = -1;
+        for (size_t m = 0; m < game->mode_count; m++) {
+            const GameModeConfig *mode = gc_mode(game->modes[m]);
+            if (!mode || (strict && mode->prevent_custom)) continue;
+            if (!gc_map_lists_mode(map, game->modes[m]) || !gc_mode_fits(mode, features)) continue;
+            int dup = 0; // a mode listed twice in game->modes counts once
+            for (size_t d = 0; d < m; d++) dup |= game->modes[d] == game->modes[m];
+            if (dup) continue;
+            if (gc_rand(++candidates) == 0) chosen = (int) m; // uniform among the map's modes
+        }
+        if (!candidates) continue;
+        if (gc_rand(++eligible) == 0) { // uniform among the maps with a mode
+            pick_map = (int) i;
+            pick_mode = chosen;
+        }
+    }
+    if (pick_map < 0) return 0;
+    if (map_index) *map_index = pick_map;
+    if (mode_index) *mode_index = pick_mode;
+    return 1;
+}
+
 static void gc_shuffle(int *modes, int *maps, const int n) { // UTILS.yateShuffle
     for (int i = n - 1; i > 0; i--) {
         const int j = gc_rand(i + 1);
@@ -1707,7 +1783,8 @@ static void gc_shuffle(int *modes, int *maps, const int n) { // UTILS.yateShuffl
 
 // getPossibleMatches + genMatchList for a public game: every "mode,map" a map's config.modes
 // offers, in the normal and party buckets, FFA first when the rotation has it. KN servers also
-// configure their mode rotation (game->modes): a pick must be in it.
+// configure their mode rotation (game->modes): a pick must be in it, and the map must have the
+// mode's objects (gc_mode_fits). No votes: init picks one of these at random (game_next_match).
 static void gc_gen_match_list(Game *game, GameConfigState *st) {
     enum { MAX_PAIRS = 512 };
     int normal_mode[MAX_PAIRS], normal_map[MAX_PAIRS], party_mode[MAX_PAIRS], party_map[MAX_PAIRS];
@@ -1715,9 +1792,11 @@ static void gc_gen_match_list(Game *game, GameConfigState *st) {
     for (size_t i = 0; i < game->map_count; i++) {
         int modes[64];
         const int n = gc_map_modes(game->maps[i], modes, 64);
+        const int features = gc_map_features(game->maps[i]);
         for (int k = 0; k < n; k++) {
             const GameModeConfig *mode = gc_mode(modes[k]);
             if (!mode || mode->prevent_custom || !gc_has_mode(game, modes[k])) continue; // KN has no events (eventIndex 0)
+            if (!gc_mode_fits(mode, features)) continue;
             int dup = 0;
             const int in_party = mode->party;
             int *bucket_mode = in_party ? party_mode : normal_mode, *bucket_map = in_party ? party_map : normal_map;

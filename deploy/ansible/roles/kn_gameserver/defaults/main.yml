@@ -16,6 +16,13 @@ kn_gameserver_name_prefix: "Krunker Box Office {{ kn_edge_name | capitalize }}"
 # k_regions; accounts.region_index); per host in the inventory.
 kn_gameserver_region: local
 kn_gameserver_max_players: 8
+# server.cfg modes: "rotation" (Krunker's public modes: ffa, point, ctf, kc, dom) or a list of
+# mode aliases / names / ids, e.g. [ffa, tdm, "rotation"]; "" = Free for All only. Every round end
+# offers vote cards over the maps that support each mode; no votes = a random card. Modes the lobby
+# cannot play (minPlayers above max_players) are left out of a multi-mode rotation.
+kn_gameserver_modes: rotation
+# Per-instance override (instance number -> modes), e.g. {3: [tdm], 4: "ffa,kc"}.
+kn_gameserver_instance_modes: {}
 # server.cfg shutdown_reason_file: the "Restart game servers" handlers write "update" here
 # for the restart (players see GAME UPDATING and rejoin), then remove it. A tmpfs path
 # outside the unit's sandbox writes (ProtectSystem=strict still lets server_bin read it).
@@ -36,9 +43,9 @@ kn_gameserver_auth_url: "{{ kn_coordinator_url }}"
 # Address the game sockets bind to (= the A record of <edge>-<n>).
 kn_gameserver_listen_host: "{{ kn_public_ip }}"
 # Internal game-server <-> coordinator link (kn_brain internal_ws, matchmaking /mm/seek-game).
-# wss:// through Cloudflare (or, with the edge origin, abulxt's edges) to kn-brain-coord on the
-# central node; server_bin verifies the certificate against the system CA store. The node
-# advertises public_host/port + region in its hello (the TCP peer is the tunnel or the edge).
+# wss:// through the edges (coordinator.krunk.io: DNS-only CNAME to abulxt's edges) to
+# kn-brain-coord on the central node; server_bin verifies the certificate against the system CA
+# store. The node advertises public_host/port + region in its hello (the TCP peer is the edge).
 # "" = standalone (finder-listed only).
 kn_gameserver_coordinator_url: "wss://coordinator.{{ kn_domain }}/mm/internal/ws"
 # The secret is brain.internal_secret of that coordinator: read from the central node's
