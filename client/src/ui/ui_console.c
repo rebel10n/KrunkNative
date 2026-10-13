@@ -27,6 +27,8 @@
 #include <nav_overlay.h>
 #include <object_manager.h> // give: weapon / item names
 #include <weapons.h>
+#include <ruleset_ui.h>      // ruleset: the Krunker version toggle
+#include <client_settings.h> // ui_client_settings_select_ruleset
 #include <ctype.h>
 #include <math.h>
 #include <stdarg.h>
@@ -315,6 +317,7 @@ static const ConArg A_CMD[] = {{"cmd", ARG_STRING, 1}};
 static const ConArg A_TEXT[] = {{"text", ARG_STRING, 0}};
 static const ConArg A_SNAP[] = {{"units|off", ARG_STRING, 0}};
 static const ConArg A_UPDATE[] = {{"check|now|download", ARG_STRING, 0}};
+static const ConArg A_RULESET[] = {{"v7|v10", ARG_STRING, 1}};
 static const ConArg A_BIND[] = {{"key", ARG_STRING, 1}, {"command", ARG_STRING, 1}};
 static const ConArg A_KEY[] = {{"key", ARG_STRING, 0}};
 static const ConArg A_ALIAS[] = {{"name", ARG_STRING, 1}, {"command", ARG_STRING, 1}};
@@ -1171,6 +1174,37 @@ static void cmd_version(const int argc, char **argv, const char *rest) {
     appendf(COL_INFO, "Version: %s", CON_VERSION);
 }
 
+// ruleset [v7|v10]: the Krunker version of this session, the saved one (Settings > General
+// "Game version"), and the ones this build has; with an argument, save it (ruleset_ui.h)
+static void cmd_ruleset(const int argc, char **argv, const char *rest) {
+    (void) rest;
+    if (argc && argv[0][0]) {
+        const char *n = argv[0][0] == 'v' || argv[0][0] == 'V' ? argv[0] + 1 : argv[0];
+        if (!strcmp(n, "3") || !strcmp(n, "3.1.1")) {
+            append("Krunker v3.1.1 is coming soon.", COL_ERROR);
+            return;
+        }
+        if (!ruleset_find(argv[0])) {
+            appendf(COL_ERROR, "Unknown ruleset '%s' (v7, v10)", argv[0]);
+            return;
+        }
+        ui_client_settings_select_ruleset(argv[0]);
+    }
+    const Client *client = con_client();
+    const Ruleset *now = client && client->game.rules ? client->game.rules : ruleset_current();
+    const Ruleset *saved = client_ruleset_saved(), *page = client_ruleset_page();
+    appendf(COL_INFO, "Playing Krunker v%s (%s)%s", now->version, now->key, client && client->offline ? " offline" : "");
+    appendf(COL_INFO, "Game version setting: v%s, menu page: v%s", saved->version, page->version);
+    char list[96] = "";
+    for (int id = 0; id < RULESET_COUNT; id++) {
+        const Ruleset *r = ruleset_get((RulesetId) id);
+        if (!r) continue;
+        const size_t len = strlen(list);
+        snprintf(list + len, sizeof(list) - len, "%s%s", len ? ", " : "", r->key);
+    }
+    appendf(COL_INFO, "Available: %s (v3 coming soon)", list);
+}
+
 static void cmd_toggle(const int argc, char **argv, const char *rest) {
     (void) rest;
     if (!argc || !argv[0][0]) {
@@ -1272,6 +1306,7 @@ static void register_commands(void) {
     register_local("sandbox", NO_ARGS, "play offline on the sandbox (editor test) map", cmd_sandbox);
     register_local("ahk", NO_ARGS, "show current antihack key", cmd_ahk);
     register_local("version", NO_ARGS, "show current client version", cmd_version);
+    register_local("ruleset", ARGS(A_RULESET), "show or set the Krunker version (v7, v10): offline games and quick join", cmd_ruleset);
     register_local("build", NO_ARGS, "alias for version", cmd_version);
     register_local("verison", NO_ARGS, "alias for version", cmd_version);
     register_local("update", ARGS(A_UPDATE), "check for a newer client (update check), install it through the launcher (update now) or download it", cmd_update);

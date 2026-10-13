@@ -417,6 +417,10 @@ billboard-e2e: build ## server.cfg billboard / billboard_image: packets before I
 idle-kick-e2e: build ## Server idle kick: shooting / strafing / looking / chatting / respawning players stay, AFK and menu idlers are kicked
 	timeout 120 $(PYTHON) -I server/tests/idle_kick_e2e.py $(DEBUG_DIR)
 
+.PHONY: ruleset-e2e
+ruleset-e2e: build ## Version toggle on server_bin: server.cfg ruleset / --ruleset v10, INIT ruleset, v7-only peers refused, server-info ruleset
+	timeout 120 $(PYTHON) -I server/tests/ruleset_e2e.py $(DEBUG_DIR)
+
 .PHONY: reconnect-test
 reconnect-test: build ## Reconnect key (F5) online + offline, console sandbox / offline <map>, --sandbox (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I server/tests/reconnect_key_e2e.py $(DEBUG_DIR)

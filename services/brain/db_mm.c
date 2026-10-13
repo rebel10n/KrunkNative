@@ -555,17 +555,17 @@ const kn_proc P_RQ_RATINGS = {
  * brains list nodes by connected_at like registry.ts lists them by hello order. */
 #define SQL_NODE_LOBBIES                                                                                         \
     "x AS (SELECT * FROM json_to_recordset($13::json) AS x(gid text, lid text, region text, players int,"         \
-    "      max int, cs boolean, pr boolean, mode text, map text, v text, tuple json)),"                         \
+    "      max int, cs boolean, pr boolean, mode text, map text, v text, rs text, tuple json)),"                         \
     "del AS (DELETE FROM mm_lobbies WHERE node_id IN (SELECT node_id FROM n)"                                    \
     "        AND game_id NOT IN (SELECT gid FROM x)),"                                                           \
     "ins AS (INSERT INTO mm_lobbies (game_id, node_id, local_id, region, players, max_players, custom,"          \
-    "        protected, mode, map, version, tuple, updated_at)"                                                  \
-    "  SELECT gid, $1::text, lid, region, players, max, cs, pr, mode, map, v, tuple, now() FROM x"               \
+    "        protected, mode, map, version, ruleset, tuple, updated_at)"                                         \
+    "  SELECT gid, $1::text, lid, region, players, max, cs, pr, mode, map, v, coalesce(rs, 'v7'), tuple, now() FROM x"               \
     "  WHERE EXISTS (SELECT 1 FROM n)"                                                                           \
     "  ON CONFLICT (game_id) DO UPDATE SET node_id = EXCLUDED.node_id, local_id = EXCLUDED.local_id,"            \
     "   region = EXCLUDED.region, players = EXCLUDED.players, max_players = EXCLUDED.max_players,"               \
     "   custom = EXCLUDED.custom, protected = EXCLUDED.protected, mode = EXCLUDED.mode, map = EXCLUDED.map,"     \
-    "   version = EXCLUDED.version, tuple = EXCLUDED.tuple, updated_at = now()"                                  \
+    "   version = EXCLUDED.version, ruleset = EXCLUDED.ruleset, tuple = EXCLUDED.tuple, updated_at = now()"                                  \
     "  RETURNING 1)"                                                                                             \
     "SELECT (SELECT count(*) FROM n) AS owned"
 
@@ -589,7 +589,7 @@ static void node_lobbies(Dbx *x, const char *node, const char *lobbies_json) {
         char players[24], max[24];
         dbx_i64s(players, (int64_t)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(it, "players")));
         dbx_i64s(max, (int64_t)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(it, "max")));
-        const char *args[12] = {
+        const char *args[13] = {
             nz(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(it, "gid"))), node,
             nz(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(it, "lid"))),
             nz(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(it, "region"))), players, max,
@@ -597,23 +597,24 @@ static void node_lobbies(Dbx *x, const char *node, const char *lobbies_json) {
             cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(it, "pr")) ? "1" : "0",
             nz(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(it, "mode"))),
             nz(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(it, "map"))),
-            nz(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(it, "v"))), tuple ? tuple : "[]"};
+            nz(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(it, "v"))), tuple ? tuple : "[]",
+            cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(it, "rs")) ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(it, "rs")) : "v7"};
         dbx_exec(x,
                  SQL(.sqlite = "INSERT INTO mm_lobbies (game_id, node_id, local_id, region, players, max_players, custom,"
-                               " protected, mode, map, version, tuple, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,"
-                               " $10, $11, $12, {now}) ON CONFLICT (game_id) DO UPDATE SET node_id = excluded.node_id,"
+                               " protected, mode, map, version, tuple, updated_at, ruleset) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,"
+                               " $10, $11, $12, {now}, $13) ON CONFLICT (game_id) DO UPDATE SET node_id = excluded.node_id,"
                                " local_id = excluded.local_id, region = excluded.region, players = excluded.players,"
                                " max_players = excluded.max_players, custom = excluded.custom, protected = excluded.protected,"
                                " mode = excluded.mode, map = excluded.map, version = excluded.version, tuple = excluded.tuple,"
-                               " updated_at = excluded.updated_at",
+                               " updated_at = excluded.updated_at, ruleset = excluded.ruleset",
                      .mysql = "INSERT INTO mm_lobbies (game_id, node_id, local_id, region, players, max_players, custom,"
-                              " protected, mode, map, version, tuple, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,"
-                              " $10, $11, $12, {now}) ON DUPLICATE KEY UPDATE node_id = VALUES(node_id),"
+                              " protected, mode, map, version, tuple, updated_at, ruleset) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,"
+                              " $10, $11, $12, {now}, $13) ON DUPLICATE KEY UPDATE node_id = VALUES(node_id),"
                               " local_id = VALUES(local_id), region = VALUES(region), players = VALUES(players),"
                               " max_players = VALUES(max_players), custom = VALUES(custom), protected = VALUES(protected),"
                               " mode = VALUES(mode), map = VALUES(map), version = VALUES(version), tuple = VALUES(tuple),"
-                              " updated_at = VALUES(updated_at)"),
-                 12, args);
+                              " updated_at = VALUES(updated_at), ruleset = VALUES(ruleset)"),
+                 13, args);
         free(tuple);
     }
     cJSON_Delete(a);

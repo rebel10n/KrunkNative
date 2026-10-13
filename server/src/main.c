@@ -1,4 +1,5 @@
 #include <server_cli.h>
+#include <ruleset.h> // --ruleset / server.cfg ruleset
 #include <server_accounts.h>
 #include <brain.h>
 #include <info_query.h>
@@ -227,6 +228,7 @@ typedef struct {
     const char *config_path; // --config FILE
     const char *brain_url;   // --brain URL
     const char *region;      // --region ID
+    const char *ruleset;     // --ruleset v7|v10 (ruleset.h)
     const char *node_id;     // --node-id ID
     const char *name;        // --name TEXT
     const char *public_host; // --public-host HOST
@@ -367,6 +369,7 @@ static int parse_args(const int argc, char **argv, ServerArgs *args) {
             size_t offset;
         } string_flags[] = {
             {"--brain", offsetof(ServerArgs, brain_url)},     {"--region", offsetof(ServerArgs, region)},
+            {"--ruleset", offsetof(ServerArgs, ruleset)},
             {"--node-id", offsetof(ServerArgs, node_id)},     {"--name", offsetof(ServerArgs, name)},
             {"--public-host", offsetof(ServerArgs, public_host)},
         };
@@ -445,6 +448,8 @@ static void print_usage(FILE *stream, const char *argv0) {
             "Game:\n"
             "  --port PORT   TCP port to listen on (default %d); the server-info query answers on UDP PORT\n"
             "  --port PORT   TCP port to listen on (default %d)\n"
+            "  --ruleset VER Krunker version this server plays: v7 (7.1.4, default) or v10 (10.0.2);\n"
+            "                clients of another version are refused (server.cfg ruleset)\n"
             "  --mode MODE   game mode: alias (tdm, point, ctf, infect, gun, ...), name or id;\n"
             "                'rotation' plays Krunker's public rotation (default: ffa)\n"
             "  --round-seconds S  round length in seconds instead of the mode's game time (testing)\n"
@@ -685,6 +690,15 @@ int main(int argc, char **argv) {
     if (args.port) cfg->listen_port = args.port;
     if (args.brain_url) snprintf(cfg->brain_url, sizeof(cfg->brain_url), "%s", args.brain_url);
     if (args.region) snprintf(cfg->region, sizeof(cfg->region), "%s", args.region);
+    if (args.ruleset) snprintf(cfg->ruleset, sizeof(cfg->ruleset), "%s", args.ruleset);
+    // one ruleset per process (ruleset.h), chosen before any game table is set up
+    if (cfg->ruleset[0]) {
+        const Ruleset *rules = ruleset_find(cfg->ruleset);
+        if (!rules || !ruleset_set_current(rules->id)) {
+            fprintf(stderr, "Unknown ruleset '%s' (v7 or v10; v3.1.1 is not available yet)\n", cfg->ruleset);
+            return 2;
+        }
+    }
     if (args.node_id) snprintf(cfg->node_id, sizeof(cfg->node_id), "%s", args.node_id);
     if (args.name) snprintf(cfg->name, sizeof(cfg->name), "%s", args.name);
     if (args.hostname) snprintf(cfg->name, sizeof(cfg->name), "%s", args.hostname);
@@ -788,6 +802,7 @@ int main(int argc, char **argv) {
     server_log("Starting " KN_PRODUCT_NAME " server v%d.%d.%d%s", g_server_version.major, g_server_version.minor, g_server_version.patch,
                interactive ? "" : " (headless)");
     server_log("Build %s", kn_build_string());
+    server_log("Ruleset Krunker v%s (%s)", ruleset_current()->version, ruleset_current()->key);
 
     if (g_server->game.ready) {
         const cJSON *name = cJSON_GetObjectItem(g_server->game.maps[g_server->game.current_map_index], "name");

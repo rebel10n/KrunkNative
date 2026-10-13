@@ -1,4 +1,5 @@
 // Server-info query responder and finder heartbeat (server/include/info_query.h).
+#include <ruleset.h>
 #include <bots.h>
 #include <build_info.h>
 #include <info_query.h>
@@ -78,6 +79,7 @@ void info_query_update(const float now) {
     info.commit_time = build->commit_time;
     snprintf(info.build_time, sizeof(info.build_time), "%s", build->build_time);
     snprintf(info.protocol, sizeof(info.protocol), "%s", kn_build_protocol());
+    snprintf(info.ruleset, sizeof(info.ruleset), "%s", ruleset_current()->key);
     info.port = cfg->public_port ? cfg->public_port : cfg->listen_port;
     iq_add_tag(&info, cfg->online_mode ? "online" : "offline");
     if (cfg->password[0]) iq_add_tag(&info, "password");

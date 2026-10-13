@@ -243,6 +243,30 @@ int main(void) {
         registry_free(v);
     }
 
+    /* version toggle: quick join stays within the client's ruleset (meta.ruleset, ?ruleset=);
+     * lobbies without one (servers from before the toggle) play v7; by id any ruleset joins */
+    {
+        Registry *v = registry_new();
+        MmPolicy pv = {.cross_region = 1, .default_max_players = 8};
+        MmNode *n1 = add_node(v, "RS1", "CH", 0);
+        MmNode *n2 = add_node(v, "RS2", "CH", 0);
+        cJSON *t1 = cJSON_Parse("[\"seven\",\"CH\",2,8,{\"i\":\"Burg\",\"cs\":false}]");
+        cJSON *t2 = cJSON_Parse("[\"ten\",\"CH\",6,8,{\"i\":\"Burg\",\"cs\":false,\"ruleset\":\"v10\"}]");
+        CHECK(registry_lobby_upsert(v, n1, t1) == 0 && registry_lobby_upsert(v, n2, t2) == 0);
+        cJSON_Delete(t1);
+        cJSON_Delete(t2);
+        CHECK(!strcmp(registry_lobby(v, "RS1:seven", NULL)->ruleset, "v7") && !strcmp(registry_lobby(v, "RS2:ten", NULL)->ruleset, "v10"));
+        MmPickQuery q7 = {.region = "CH", .auto_change = 1, .now_ms = 2000};
+        CHECK(registry_pick(v, &pv, &q7, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "RS1:seven")); /* no ?ruleset= = v7 */
+        MmPickQuery q10 = {.region = "CH", .auto_change = 1, .now_ms = 2000, .ruleset = "v10"};
+        CHECK(registry_pick(v, &pv, &q10, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "RS2:ten"));
+        MmPickQuery qid = {.region = "CH", .game_id = "RS2:ten", .auto_change = 0, .now_ms = 2000};
+        CHECK(registry_pick(v, &pv, &qid, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "RS2:ten"));
+        registry_lobby_remove(v, n1, "seven");
+        CHECK(registry_pick(v, &pv, &q7, &pick) == MM_PICK_NO_MATCH); /* only a v10 lobby left */
+        registry_free(v);
+    }
+
     /* short game ids (shared/src/server_names.c): ?game=CH2:kz862 is CHITOWN2:kz862 */
     {
         Registry *s = registry_new();

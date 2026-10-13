@@ -175,6 +175,29 @@ void game_configure(
     }
 }
 
+int game_adopt_rules(Game *game, const Ruleset *rules) {
+    if (!game || !rules || !ruleset_set_current(rules->id)) return 0;
+    if (game->rules == rules && game->weapons && game->classes) return 1;
+    game_config_free(game); // host overrides point into the old tables
+    Weapon **weapons = calloc(rules->weapon_count, sizeof(Weapon *));
+    ClassConfig *classes = calloc(rules->class_count, sizeof(ClassConfig));
+    if (!weapons || !classes) {
+        free(weapons);
+        free(classes);
+        return 0;
+    }
+    memcpy(weapons, rules->weapons, rules->weapon_count * sizeof(Weapon *));
+    memcpy(classes, rules->classes, rules->class_count * sizeof(ClassConfig));
+    free(game->weapons);
+    free(game->classes);
+    game->weapons = weapons;
+    game->weapon_count = rules->weapon_count;
+    game->classes = classes;
+    game->class_count = rules->class_count;
+    game->rules = rules;
+    return 1;
+}
+
 void game_init(Game *game, int map_index, int mode_index, const unsigned char is_local) {
     game->ready = 0;
     game->is_local = is_local;

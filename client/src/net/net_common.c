@@ -93,15 +93,15 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             break;
         }
         case NET_PACKET_INIT: {
-            if (length < sizeof(NetInitPacket)) { // longer: a newer server (prefix)
+            if (length < NET_INIT_PACKET_V1_SIZE) { // longer: a newer server (prefix); 17 bytes: no ruleset (v7)
                 client_net_log_bad_payload("init", type, payload, length);
                 break;
             }
 
-            NetInitPacket packet;
-            memcpy(&packet, payload, sizeof(packet));
+            NetInitPacket packet = {0};
+            memcpy(&packet, payload, length < sizeof(packet) ? length : sizeof(packet));
 
-            printf("{\"type\":\"init\",\"id\":%u,\"major\":%u,\"minor\":%u,\"patch\":%u,\"map_index\":%d,\"mode_index\":%d,\"tick_rate\":%u,\"client_id\":%d}",
+            printf("{\"type\":\"init\",\"id\":%u,\"major\":%u,\"minor\":%u,\"patch\":%u,\"map_index\":%d,\"mode_index\":%d,\"tick_rate\":%u,\"client_id\":%d,\"ruleset\":%u}",
                    (unsigned int) type,
                    (unsigned int) packet.major,
                    (unsigned int) packet.minor,
@@ -109,7 +109,8 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
                    packet.map_index,
                    packet.mode_index,
                    (unsigned int) packet.tick_rate,
-                   packet.client_id);
+                   packet.client_id,
+                   (unsigned int) packet.ruleset);
             break;
         }
         case NET_PACKET_ENT: {

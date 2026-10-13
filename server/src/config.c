@@ -344,6 +344,7 @@ int gs_config_from_json(GsConfig *cfg, const cJSON *s, char *err, const size_t e
     }
 
     gs_read_str(s, "region", cfg->region, sizeof(cfg->region));
+    gs_read_str(s, "ruleset", cfg->ruleset, sizeof(cfg->ruleset)); // --ruleset / server.cfg ruleset (main.c checks it)
     gs_read_str(s, "node_id", cfg->node_id, sizeof(cfg->node_id));
     gs_read_str(s, "name", cfg->name, sizeof(cfg->name));
     gs_read_str(s, "listen_host", cfg->listen_host, sizeof(cfg->listen_host));
@@ -646,7 +647,7 @@ static void gs_resolve_brain_url(GsConfig *cfg, const cJSON *brain) {
 static const char *const k_cfg_aliases[][2] = {
     {"hostname", "name"},           {"sv_password", "password"},        {"maxplayers", "max_players"},
     {"sv_maxplayers", "max_players"}, {"mapcycle", "maps"},             {"map", "maps"},
-    {"mode", "modes"},              {"sv_region", "region"},            {"region_id", "region"},
+    {"mode", "modes"},              {"sv_region", "region"},            {"game_version", "ruleset"},            {"region_id", "region"},
     {"ip", "listen_host"},          {"public_ip", "public_host"},       {"rcon_ip", "rcon_host"},
     {"coordinator_url", "brain_url"}, {"coordinator", "brain_url"},     {"coordinator_secret", "brain_secret"},
     {"coordinator_http_url", "brain_http_url"}, {"sv_tags", "tags"},   {"online-mode", "online_mode"},

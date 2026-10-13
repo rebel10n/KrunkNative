@@ -40,5 +40,8 @@ char *ui_client_settings_tab_html(int searching);
 // A game settings tab with the client's rows added (the Sound tab's Audio Output); NULL =
 // unchanged (malloc'd otherwise).
 char *ui_client_settings_extend_tab(const char *tab);         // the tab body (malloc'd); searching: rows for windows[0].searchList
-// Inline handlers: clientExitPopup(), closeClient(), knClientSet(key, value), knClientAction(name).
+// Settings > General "Game version" / console `ruleset` (ruleset_ui.h): saves it, offers a restart
+// when the menu page changes, notifies otherwise.
+void  ui_client_settings_select_ruleset(const char *value);
+// Inline handlers: clientExitPopup(), closeClient(), knClientSet(key, value), knClientAction(name), knSetRuleset(value).
 int   ui_client_settings_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc);

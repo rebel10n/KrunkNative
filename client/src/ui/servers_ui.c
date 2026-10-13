@@ -18,6 +18,7 @@
 #include <ui_logic.h>
 #include <map_catalog.h>
 #include <online_mode.h> // server finder URL, online / offline mode
+#include <ruleset_ui.h>    // seek ?ruleset=, the row's version badge
 #include <build_info.h>   // kn_build_protocol (seek-game proto)
 #include <modes.h>       // gameModes alias / name (server rows, host modes)
 #include <game_config.h> // WP-E host types (GAME_HOST_CUSTOM, hostTypes titles)
@@ -544,6 +545,8 @@ static void seek(const char *game_id, const int auto_change, void *quiet) {
     int n = snprintf(path, sizeof(path), "/mm/seek-game?hostname=krunknative&region=%s&autoChangeGame=%s", enc, auto_change ? "true" : "false");
     // the protocol this client speaks: the brain never matches it to a node of another major
     n += snprintf(path + n, sizeof(path) - (size_t) n, "&proto=%s", kn_build_protocol());
+    // the Krunker version the player picked (ruleset_ui.h): quick join only picks lobbies of it
+    n += snprintf(path + n, sizeof(path) - (size_t) n, "&ruleset=%s", client_ruleset_saved()->key);
     if (game_id && game_id[0]) {
         backend_url_encode(enc, sizeof(enc), game_id);
         n += snprintf(path + n, sizeof(path) - (size_t) n, "&game=%s", enc);
@@ -895,6 +898,8 @@ static void rebuild_finder_rows(void) {
         const char *protocol = cJSON_GetStringValue(cJSON_GetObjectItem(e, "protocol"));
         if (version) cJSON_AddStringToObject(meta, "version", version);
         if (protocol) cJSON_AddStringToObject(meta, "protocol", protocol);
+        const char *ruleset = cJSON_GetStringValue(cJSON_GetObjectItem(e, "ruleset")); // the version badge
+        if (ruleset && ruleset[0]) cJSON_AddStringToObject(meta, "ruleset", ruleset);
         cJSON_AddItemToArray(t, meta);
         cJSON_AddItemToArray(g_finder_rows, t);
         g_finder_players += players > 0 ? players : 0;
@@ -1136,6 +1141,15 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
     char *badge = servers_ui_entry_badge_html(t); // Outdated / Incompatible (build versions)
     sb_append(sb, badge);
     free(badge);
+    // the Krunker version the server plays (meta.ruleset, server_bin --ruleset), on rows that are not
+    // v7.1.4 (v7 rows look as before; servers from before the toggle carry none). A server of
+    // another version is joinable: the client adopts its ruleset for the session.
+    const char *rs = cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(t, 4), "ruleset"));
+    const Ruleset *rules = rs && rs[0] ? ruleset_find(rs) : NULL;
+    if (rs && rs[0] && (!rules || rules->id != RULESET_V7_1_4))
+        sb_appendf(sb, " <span class='serverBadge serverRuleset' style='color:#fff;background:#7e57c2;border-radius:4px;padding:0 6px;font-size:14px;vertical-align:middle' "
+                       "title='Krunker v%s%s'>v%s</span>",
+                   rules ? rules->version : rs, rules ? "" : ": not available in this client", rules ? rules->version : rs);
     sb_appendf(sb, "<div class='serverPCount'>%d/%d</div>", row_players(t), tuple_int(t, 3));
     // v7 shows tuple[0].split(":")[0] on custom / official rows and in the mode-grouped browser.
     // KrunkNative: on every brain lobby, as the server's proper name ("Chicago 2", the node id

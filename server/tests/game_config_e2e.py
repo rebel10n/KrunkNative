@@ -77,7 +77,7 @@ def vote_states(conn):
 
 
 def inits(conn):
-    return [struct.unpack("<BBBiiHi", p) for t, p in conn.packets if t == kn_proto.INIT]
+    return [struct.unpack("<BBBiiHi", p[:17]) for t, p in conn.packets if t == kn_proto.INIT]  # 18 bytes from the ruleset byte
 
 
 def main():

@@ -19,6 +19,7 @@
 // cheats), no idle kicks. The sandbox plays as a hosted game, so every map's embedded "config"
 // applies (WP-E, decisions.md "Embedded map config") and reaches this client as GAME_CONFIG.
 #include <client.h>
+#include <ruleset_ui.h>
 #include <server_sandbox.h>
 #include <map_catalog.h>
 #include <ks_storage.h> // WP6: the sandbox's offline GAME.STORAGE / Save Data store
@@ -49,7 +50,7 @@ void client_offline_send(Client *client, const NetPacketType type, const void *p
 
 // HELLO + a guest JOIN with the menu nickname (no brain ticket or session: nothing to verify).
 static void offline_hello(Client *client) {
-    const NetHelloPacket hello = {NET_PROTOCOL_MAJOR, NET_PROTOCOL_MINOR, NET_PROTOCOL_PATCH}; // the minor gates the v7 packets (KrunkScript 200-203), the patch WP-C sizes
+    const NetHelloPacket hello = net_hello_make(); // the minor gates the v7 packets (KrunkScript 200-203), the patch WP-C sizes, the mask the rulesets
     client_offline_send(client, NET_PACKET_HELLO, &hello, sizeof(hello));
     NetJoinPacket join;
     memset(&join, 0, sizeof(join));
@@ -202,6 +203,7 @@ int local_game_start(Client *client) {
     for (size_t i = 0; pick && i < client->game.map_count; i++) {
         if (client->game.maps[i] == pick) map_index = (int) i;
     }
+    client_ruleset_before_offline(client); // the sandbox plays the saved Krunker version (ruleset_ui.h)
     return offline_begin(client, map_index);
 }
 

@@ -27,6 +27,7 @@ typedef struct {
 typedef struct {
     // ---- identity / network (brain registration)
     char region[32];            // brain region key, the 2-letter code ("SV", "CH"; MM_NODE_REGION)
+    char ruleset[16];           // Krunker version this server plays (shared/include/ruleset.h): "v7" (default), "v10"
     char node_id[16];           // lobby id prefix ("NY" -> "NY:ab12c"; MM_NODE_ID)
     char name[GS_STR_SMALL];    // human-readable server name (server browser)
     char listen_host[GS_STR_SMALL];

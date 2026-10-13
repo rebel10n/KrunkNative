@@ -15,6 +15,7 @@
 // natively ends the main loop (glfwSetWindowShouldClose) so main.c runs its normal
 // shutdown. The web build keeps the item hidden, like krunker.io in a browser.
 #include <client_settings.h>
+#include <ruleset_ui.h> // Settings > General "Game version"
 #include <ui_logic.h>
 #include <backend_ui.h> // servers_ui_region_options (Default Region)
 #include <discord_rpc.h>
@@ -612,6 +613,7 @@ static char **read_cmdline(void) {
 static void relaunch(void) {
     // the next process reads the settings again: drop what this one put into the environment
     if (!g_cs.brain_env_was_set) set_env("KRUNKNATIVE_BRAIN_URL", NULL);
+    client_ruleset_env_cleanup(); // the next process picks the page of the saved Game version
     if (g_cs.audio_env_set) set_env("KRUNKNATIVE_AUDIO_BACKEND", NULL);
     client_render_window_before_exec(g_cs.client ? g_cs.client : menu_ui()->client); // KRUNKNATIVE_RESTORE_WINDOW
     fflush(stdout);
@@ -1006,11 +1008,79 @@ static char *extend_sound_tab(const char *tab) {
     return sb_finish(&sb);
 }
 
+// Version toggle (ruleset_ui.h): General > Localization's first row, "Game version". v3.1.1 is
+// listed but disabled until its ruleset exists. Shown in both views and in uidiff only when asked
+// (clientChrome), so the captured v7 tabs stay pixel-identical.
+static char *ui_client_settings_extend_tab_rest(const char *tab);
+static void rerender(void);
+
+static void append_game_version_row(StrBuf *sb) {
+    const Ruleset *saved = client_ruleset_saved();
+    sb_append(sb, "<div class=\"settName\" id=\"knGameVersionRow\" title=\"The Krunker version of offline games and quick join; "
+                  "a server you join plays its own. A different menu page loads after a restart\">Game version "
+                  "<span style=\"color: #eb5656\">*</span> <select id=\"knGameVersion\" onchange=\"knSetRuleset(this.value)\" class=\"inputGrey2\">");
+    sb_append(sb, "<option value=\"v3\" disabled=\"\">v3.1.1 (coming soon)</option>");
+    for (int id = RULESET_V7_1_4; id < RULESET_COUNT; id++) {
+        const Ruleset *r = ruleset_get((RulesetId) id);
+        if (!r) continue;
+        sb_appendf(sb, "<option value=\"%s\"%s>v%s</option>", r->key, r == saved ? " selected=\"\"" : "", r->version);
+    }
+    sb_append(sb, "</select></div>");
+}
+
+static char *extend_general_tab(const char *tab) {
+    if (!tab || !chrome_visible()) return NULL;
+    const char *body = strstr(tab, "id=\"setBod_local\">");
+    if (!body) return NULL;
+    body += strlen("id=\"setBod_local\">");
+    StrBuf sb = {0};
+    sb_append_n(&sb, tab, (size_t) (body - tab));
+    append_game_version_row(&sb);
+    sb_append(&sb, body);
+    return sb_finish(&sb);
+}
+
+static void ruleset_restart_answered(const int accepted, const char *text, void *user) {
+    (void) text;
+    (void) user;
+    if (accepted) restart_client();
+}
+
+// knSetRuleset(value) / the console's `ruleset`: save, then offer the restart a page change needs
+void ui_client_settings_select_ruleset(const char *value) {
+    Client *client = g_cs.client ? g_cs.client : menu_ui()->client;
+    const ClientRulesetResult r = client_ruleset_select(client, value);
+    rerender(); // an open Settings window shows the new choice (the console sets it too)
+    if (r == CLIENT_RULESET_UNAVAILABLE) {
+        ui_notify("Krunker v3.1.1 is coming soon");
+    } else if (r == CLIENT_RULESET_SAVED_RELOAD) {
+        ui_confirm("The menu of this Game version loads after a client restart. Restart now?", ruleset_restart_answered, NULL);
+    } else if (r == CLIENT_RULESET_SAVED) {
+        const Ruleset *saved = client_ruleset_saved();
+        char text[96];
+        snprintf(text, sizeof(text), "Game version: Krunker v%s", saved->version);
+        ui_notify(text);
+    }
+}
+
 // A settings tab as shown: Localization > Default Region lists the matchmaker's regions (the
 // static capture only has "Local"; servers_ui_region_options), the Sound tab gains the
-// client's rows. NULL = `tab` unchanged.
+// client's rows, General gains "Game version". NULL = `tab` unchanged.
 char *ui_client_settings_extend_tab(const char *tab) {
     if (!tab) return NULL;
+    char *general = extend_general_tab(tab);
+    if (general) {
+        char *more = ui_client_settings_extend_tab_rest(general);
+        if (more) {
+            free(general);
+            return more;
+        }
+        return general;
+    }
+    return ui_client_settings_extend_tab_rest(tab);
+}
+
+static char *ui_client_settings_extend_tab_rest(const char *tab) {
     char *regions = NULL;
     const char *row = strstr(tab, "setSetting(&quot;defaultRegion&quot;");
     const char *open = row ? strchr(row, '>') : NULL;
@@ -1215,6 +1285,10 @@ int ui_client_settings_handle(const char *name, const HtmlEvent *ev, const HtmlA
     }
     if (!strcmp(name, "knClientAction")) {
         do_action(arg_text(ev, args, argc, 0, kbuf, sizeof(kbuf)));
+        return 1;
+    }
+    if (!strcmp(name, "knSetRuleset")) {
+        ui_client_settings_select_ruleset(arg_text(ev, args, argc, 0, kbuf, sizeof(kbuf)));
         return 1;
     }
     return -1; // not ours: the modules after it in MODULE_HANDLERS (ui_handlers.c) get the name

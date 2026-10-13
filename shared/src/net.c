@@ -1,3 +1,4 @@
+#include <ruleset.h> // HELLO ruleset mask, INIT ruleset
 #include <shared.h>
 #include <knet.h> // virtual (UDP) descriptors
 #include <math.h>
@@ -498,9 +499,29 @@ int net_packet_read_hello(NetHelloPacket *hello, const NetPacket *packet) {
 }
 
 int net_packet_read_init(NetInitPacket *init, const NetPacket *packet) {
-    if (packet->length < sizeof(*init)) return 0;
-    memcpy(init, packet->payload, sizeof(*init));
+    if (packet->length < NET_INIT_PACKET_V1_SIZE) return 0; // a server from before the ruleset byte: v7.1.4
+    memset(init, 0, sizeof(*init));
+    memcpy(init, packet->payload, packet->length < sizeof(*init) ? packet->length : sizeof(*init));
     return 1;
+}
+
+uint8_t net_ruleset_wire(const int ruleset_id) {
+    return ruleset_id >= 0 && ruleset_id < 254 ? (uint8_t) (ruleset_id + 1) : 0;
+}
+
+int net_ruleset_from_wire(const uint8_t wire) {
+    return wire ? wire - 1 : RULESET_V7_1_4; // 0: a server from before the toggle
+}
+
+NetHelloPacket net_hello_make(void) {
+    NetHelloPacket hello = {NET_PROTOCOL_MAJOR, NET_PROTOCOL_MINOR, NET_PROTOCOL_PATCH, 0};
+    for (int id = 0; id < RULESET_COUNT && id < 8; id++)
+        if (ruleset_get((RulesetId) id)) hello.rulesets |= (uint8_t) (1u << id); // the client adopts any of them (INIT)
+    return hello;
+}
+
+uint8_t net_hello_rulesets(const NetHelloPacket *hello, const uint16_t length) {
+    return length > offsetof(NetHelloPacket, rulesets) && hello->rulesets ? hello->rulesets : NET_HELLO_RULESETS_DEFAULT;
 }
 
 int net_packet_read_recon(NetReconPacket *recon, const NetPacket *packet, const Player *keep) {

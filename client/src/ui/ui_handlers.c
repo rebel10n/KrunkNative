@@ -522,6 +522,7 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"window.closeClient", h_client},
     {"knClientSet", h_client},
     {"knClientAction", h_client},
+    {"knSetRuleset", h_client}, // Settings > General "Game version" (ruleset_ui.h)
     // popups / misc page chrome
     {"bdayPlay", h_bday_play},
     {"kn.hideErrorNotification", h_hide_error_notification},

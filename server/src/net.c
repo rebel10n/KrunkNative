@@ -14,6 +14,7 @@
 #include <game_config.h>    // WP-E: GAME_CONFIG / NETWORK_DATA, match votes, viewDis
 #include <social_v7.h>      // WP-E part 2b: chat / voice channels, multi-spray, taunts
 #include <comp_lobby.h>     // v7 comp lobby (lobbyPlayers): ranked matches and comp hosts
+#include <ruleset.h>         // the server's ruleset (INIT, HELLO refusal)
 #include <net_ext.h>         // NET_PACKET_EXT (254): the v10+ envelope
 #include <object_manager.h>  // KrunkNative Object Manager (spawn menu): ids 250-254
 #include <errno.h>
@@ -532,6 +533,7 @@ static void net_send_init(ClientConnection *client) {
         .major = NET_PROTOCOL_MAJOR,
         .minor = NET_PROTOCOL_MINOR, // 1.1: accepts ENT V5 / V6, 1.2: V7 (client_enter_game sends them only then)
         .patch = NET_PROTOCOL_PATCH, // 1.3.1: ENT V8 (WP-C)
+        .ruleset = net_ruleset_wire(ruleset_current()->id), // version toggle: the client adopts it
         .map_index = g_server->game.current_map_index,
         .mode_index = game_mode_id(&g_server->game), // Krunker "init" modeIndex: the mode id
         .tick_rate = g_server->config.tick_rate,
@@ -1426,6 +1428,16 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             if (net_packet_read_hello(&hello, packet)) { // the peer's protocol minor.patch (v7 AI / WP-C gates)
                 client->peer_minor = hello.major == NET_PROTOCOL_MAJOR ? hello.minor : 0;
                 client->peer_patch = hello.major == NET_PROTOCOL_MAJOR ? hello.patch : 0;
+                // version toggle (ruleset.h): a peer that cannot play this server's ruleset is
+                // refused, never mixed (a HELLO without the mask is a v7.1.4-only build)
+                const int rules = ruleset_current()->id;
+                if (!(net_hello_rulesets(&hello, packet->length) & (1u << rules))) {
+                    char message[96];
+                    snprintf(message, sizeof(message), "This server plays Krunker v%s", ruleset_current()->version);
+                    server_log("Refusing client %d: it cannot play ruleset %s", client->id, ruleset_current()->key);
+                    net_kick_client(client->id, message, NET_ERROR_CODE_RULESET);
+                    break;
+                }
             }
             ks_server_on_hello(client, packet); // the peer's protocol minor (KrunkScript packet gate)
             if (client->peer_minor >= NET_PROTOCOL_MINOR_V7 && g_server->game.ready) { // WP-E: its INIT went out before the HELLO

@@ -1979,6 +1979,10 @@ typedef struct Game_t {
 } Game;
 
 void game_configure(Game*, const GameConfig*, const cJSON**, size_t, int*, size_t, Weapon**, size_t, ClassConfig*, size_t);
+// Version toggle (ruleset.h): makes the process ruleset `rules` current and gives the game its
+// weapon and class tables (host overrides dropped; maps, modes and config kept). Call between
+// rounds (before game_init). 0 when `rules` is NULL; 1 also when it was already the game's.
+int game_adopt_rules(Game*, const struct Ruleset_t *rules);
 void game_init(Game*, int, int, unsigned char);
 void game_tick(Game*, float, float);
 // game_tick with the world (player simulation) on its own step: the in-process offline
@@ -2261,6 +2265,9 @@ typedef struct {
     uint8_t major;
     uint8_t minor;
     uint8_t patch;
+    // version toggle (ruleset.h): bit RulesetId = a ruleset this client can play. Optional: a
+    // HELLO without it (every build before the toggle, net-bridge) reads as v7.1.4 only.
+    uint8_t rulesets;
 } NetHelloPacket;
 
 typedef struct {
@@ -2271,7 +2278,18 @@ typedef struct {
     int32_t mode_index;
     uint16_t tick_rate;
     int32_t client_id;
+    // version toggle: the server's ruleset, net_ruleset_wire (RulesetId + 1). Optional: a 17-byte
+    // INIT (a server from before the toggle) reads as 0 = v7.1.4. Older clients prefix-read INIT.
+    uint8_t ruleset;
 } NetInitPacket;
+
+#define NET_INIT_PACKET_V1_SIZE (offsetof(NetInitPacket, ruleset)) // 17 bytes: before the ruleset
+#define NET_HELLO_RULESETS_DEFAULT (1u << 1)                       // RULESET_V7_1_4: a HELLO without the mask
+#define NET_ERROR_CODE_RULESET "004010"                            // NetErrorPacket: the server plays another Krunker version
+uint8_t net_ruleset_wire(int ruleset_id);   // INIT.ruleset of a RulesetId (id + 1)
+int net_ruleset_from_wire(uint8_t wire);    // RulesetId of INIT.ruleset (0 = RULESET_V7_1_4, an older server)
+uint8_t net_hello_rulesets(const NetHelloPacket *hello, uint16_t length); // the mask, NET_HELLO_RULESETS_DEFAULT when absent
+NetHelloPacket net_hello_make(void); // this build's HELLO: protocol major.minor.patch + every ruleset it can play
 
 // INIT major.minor: the protocol the server speaks. 1.0 servers drop ENTs longer than V4 (38 bytes)
 // without spawning anyone, so a client only sends the longer ENT (V5 spray, V6 weapon skins) to a

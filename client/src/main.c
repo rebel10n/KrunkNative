@@ -1,5 +1,6 @@
 #include <gl.h>
 #include <GLFW/glfw3.h>
+#include <ruleset_ui.h> // the Krunker version toggle
 #include <client.h>
 #include <cosmetics.h>
 #include <skin_fx.h>
@@ -700,6 +701,10 @@ int main(int argc, char **argv) {
 
     if (!SCENARIO_ACTIVE()) audio_init();
 
+    // Krunker version (Settings > General "Game version", ruleset_ui.h): the process ruleset and,
+    // natively, its page tree (KRUNKNATIVE_UI_DIR = ui/<dir> when it exists), before the page loads
+    client_ruleset_startup();
+
     // HTML/CSS menu (doc/html-ui-engine.md). ui/ sits next to assets/; natively the
     // in-house engine (client/src/html/engine) renders it over the scene, on the web
     // the browser renders the same page and the C UI logic drives it through web_dom.c.
@@ -1155,6 +1160,8 @@ void client_send_cycle_packet(Client *client) {
 // INIT: a new session or round on map init->map_index (already resolved to the
 // client's own map list by client_map_prepare_init).
 void client_apply_init(Client *client, const NetInitPacket *init) {
+    // the server's Krunker version (INIT.ruleset): adopted for the session, refused when missing
+    if (!client_ruleset_on_init(client, init)) return;
     client->net_ent_size = net_ent_size_for(init->major, init->minor, init->patch);
     client->net_server_minor = init->major == NET_PROTOCOL_MAJOR ? init->minor : 0; // WP-B packet gate
     client->net_client_id = init->client_id;

@@ -1,5 +1,6 @@
 // Account-aware game behaviour + the game side of the brain protocol
 // (server/include/server_accounts.h, doc/backend.md section 8).
+#include <ruleset.h> // meta.ruleset
 #include <server_accounts.h>
 #include <server_log.h>
 #include <brain.h>
@@ -219,6 +220,9 @@ static cJSON *acc_lobby_tuple(void) {
     // build identity (build_info.h): the brain flags outdated lobbies and matches protocols
     // (services/brain/release_info.c); federated with the tuple like every meta field
     cJSON_AddStringToObject(meta, "proto", kn_build_protocol());
+    // the Krunker version this server plays (--ruleset, ruleset.h): the brain only seeks clients of
+    // the same one into it, the server browser shows it
+    cJSON_AddStringToObject(meta, "ruleset", ruleset_current()->key);
     cJSON_AddStringToObject(meta, "build", kn_build_info()->describe);
     cJSON_AddStringToObject(meta, "commit", kn_build_info()->commit);
     cJSON_AddNumberToObject(meta, "commitTime", (double) kn_build_info()->commit_time);
@@ -291,6 +295,7 @@ static cJSON *acc_hello(void) {
     cJSON_AddNumberToObject(hello, "commitTime", (double) build->commit_time);
     cJSON_AddStringToObject(hello, "buildTime", build->build_time);
     cJSON_AddStringToObject(hello, "protocol", kn_build_protocol());
+    cJSON_AddStringToObject(hello, "ruleset", ruleset_current()->key);
     cJSON_AddNumberToObject(hello, "maxPlayers", g_server->config.max_players);
     cJSON_AddBoolToObject(hello, "custom", g_gs_config.custom_games);
     cJSON_AddNumberToObject(hello, "maxLobbies", 1);

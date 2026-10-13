@@ -8,7 +8,7 @@
 //
 // JSON: {"v":1,"game":"krunknative","name","map","mode","modeId","players","max","bots",
 //        "tags":[...],"community","online_mode","password","region","version","port","nonce",
-//        "commit","commit_time","build_time","protocol"}
+//        "commit","commit_time","build_time","protocol","ruleset"}
 // version = the build's git describe; commit (12 hex), commit_time (unix s), build_time (ISO-8601
 // UTC) and protocol ("major.minor") come from shared/include/build_info.h. The finder compares them
 // with the latest server release (services/brain/release_info.c, doc/backend.md "Build version").
@@ -44,6 +44,7 @@ typedef struct {
     int64_t commit_time;            // its committer date, unix seconds (0 unknown)
     char build_time[24];            // ISO-8601 UTC
     char protocol[8];               // NET_PROTOCOL_MAJOR.MINOR, "1.3"
+    char ruleset[8];                // the Krunker version it plays (ruleset.h key): "v7", "v10"; "" = v7 (older servers)
     char nonce[SERVER_INFO_NONCE_MAX + 1];
 } ServerInfo;
 
