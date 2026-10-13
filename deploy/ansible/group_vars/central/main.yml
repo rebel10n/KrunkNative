@@ -45,7 +45,7 @@ kn_edge_origin_hosts:
 # rules), only when CF_API_TOKEN + CF_ACCOUNT_ID are in the environment. Set false once the
 # play.krunk.io record points at the edges: otherwise a run with those variables puts the
 # proxied tunnel CNAME back.
-kn_cloudflare_tunnel: true
+kn_cloudflare_tunnel: false   # 2026-10-13: assets/matchmaker/play/coordinator.krunk.io are CNAMEs to the abulxt edges
 
 # redis-tier (doc/backend.md 3.11, deploy/README.md "Database cutover"): our own PostgreSQL cluster
 # (127.0.0.1:5434) and Redis (127.0.0.1:6380) on kru, and the coordinator moved from coord.db to
