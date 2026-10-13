@@ -835,6 +835,17 @@ else ()
         target_link_libraries(projectiles_render_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # death_cam_test: the death chase camera (client/src/menu_view.c) stays near the death position
+    # and out of solid boxes (walls behind the victim, long frames, Kanji / Sandstorm spawns). GL-free:
+    # it includes menu_view.c and stubs spectate_active, the GL target only provides headers.
+    add_executable(death_cam_test client/tests/death_cam_test.c ${SHARED_HEADERS} ${SHARED_SOURCES})
+    target_include_directories(death_cam_test PRIVATE client/include client/lib)
+    target_link_libraries(death_cam_test PRIVATE freetype glfw m)
+    krunknative_link_gl(death_cam_test)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(death_cam_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # BACKEND SERVICES (services/, doc/backend.md): knsvc (+ knsvc_db, kn_migrate and the
     # brain when libpq is available). Optional; never affects the game targets. Tests: ctest.
     option(KRUNKNATIVE_SERVICES "Build the backend services (services/; needs OpenSSL, libpq for the DB parts)" ON)

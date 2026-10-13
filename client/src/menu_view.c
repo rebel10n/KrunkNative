@@ -8,6 +8,8 @@
 //   controls.js camLookAt / update (chase camera), config.js camChaseTrn/Spd/Dst
 #include <menu_view.h>
 #include <spectate.h>
+#include <bots.h>  // bot_object_blocks_player: the boxes that stop a player
+#include <world.h> // world_terrain_fraction
 #include <math.h>
 #include <stdint.h>
 
@@ -16,6 +18,11 @@
 #define CAM_CHASE_SPD 0.0012f     // config.camChaseSpd: glide rate per ms
 #define CAM_CHASE_DST 24.0f       // config.camChaseDst: stop this far from the killer
 #define END_ANIM_MS 5000.0f       // config.endAnim
+#define CAM_DELTA_MAX_MS 33.0f    // config.dltMx = Math.round(1000 / 30): gameLoop's gameTimeDiff cap
+// KrunkNative: the death chase stops this far in front of the first solid box / terrain between
+// the death eye and its goal (v7.1.4 has no test: a killer within camChaseDst put the goal behind
+// the victim, often inside or past a wall, and the player saw the void until the respawn).
+#define DEATH_CAM_WALL_GAP 2.0f
 
 static struct {
     float menu_yaw;   // menuCameraYaw (never reset by Krunker, so the spin carries over rounds)
@@ -60,6 +67,38 @@ static void chase_look_at(const vec3 at) {
     g_view.chase = 1;
 }
 
+// KrunkNative (not in v7.1.4, see DEATH_CAM_WALL_GAP): pull the chase goal back along the
+// segment from the death eye to the first solid object box (player collision's set, minus triangle
+// meshes) or the terrain. CONTROLS.update only ever moves along that segment, so the camera
+// stays in open space between the death position and the goal.
+static void chase_clamp_target(const Game *game) {
+    const vec3 from = g_view.position;
+    vec3 seg = {g_view.target.x - from.x, g_view.target.y - from.y, g_view.target.z - from.z};
+    const float len = sqrtf(seg.x * seg.x + seg.y * seg.y + seg.z * seg.z);
+    if (!(len > 0.0f) || !game) return;
+    // line_in_rect divides by each component: no exact zero (as airdrop.c)
+    if (seg.x == 0.0f) seg.x = 1e-6f;
+    if (seg.y == 0.0f) seg.y = 1e-6f;
+    if (seg.z == 0.0f) seg.z = 1e-6f;
+
+    float t = 1.0f;
+    const Map *map = game->map;
+    for (size_t i = 0; map && i < map->object_count; i++) {
+        const Object *o = map->objects[i];
+        if (!bot_object_blocks_player(o) || o->complex_coll) continue;
+        const float hit = line_in_rect(from, seg, o->position, object_box_size(o));
+        if (hit > 0.0f && hit < t) t = hit;
+    }
+    if (map) {
+        const float hit = world_terrain_fraction(game, from, seg);
+        if (hit > 0.0f && hit < t) t = hit;
+    }
+    if (t >= 1.0f) return;
+
+    const float keep = fmaxf(0.0f, t * len - DEATH_CAM_WALL_GAP) / len;
+    g_view.target = (vec3) {from.x + seg.x * keep, from.y + seg.y * keep, from.z + seg.z * keep};
+}
+
 void menu_view_death_cam(Client *client, const Player *killer) {
     menu_view_reset();
     if (!client || !killer) return;
@@ -77,6 +116,7 @@ void menu_view_death_cam(Client *client, const Player *killer) {
     g_view.killer_uid = killer->uid;
     const vec3 at = {killer->position.x, killer->position.y + killer->height / 1.5f, killer->position.z};
     chase_look_at(at);
+    chase_clamp_target(&client->game);
 }
 
 void menu_view_reset(void) {
@@ -128,6 +168,12 @@ float menu_view_world_delta(Client *client, const float delta) {
 
 void menu_view_camera(Client *client, const float delta) {
     const Player *me = client->me;
+    // CONTROLS.update(gameTimeDiff * deltaMlt): gameTimeDiff = min(frame, dltMx), then the endAnim
+    // scale. Without the cap one long frame (a hitch while the death card loads, an alt-tab, a
+    // throttled browser tab) moved the chase camera by delta * camChaseSpd times its distance:
+    // past ~1.7 s it overshoots further each frame and the camera flies off the map.
+    const float frame_ms = fminf(delta * 1000.0f, CAM_DELTA_MAX_MS * menu_view_time_scale()); // delta is already endAnim-scaled
+    const float ms = frame_ms * (client->game.config.delta_mlt > 0.0f ? client->game.config.delta_mlt : 1.0f);
 
     if (spectate_active() || (me && me->active)) {
         menu_view_reset(); // CONTROLS.reset() on spawn / spectate start; their cameras pose themselves
@@ -144,7 +190,7 @@ void menu_view_camera(Client *client, const float delta) {
             // camPos[6]) stays (rotation.y = [5], x = [4], z = [6]); no menu yaw (map-G)
             client->camera.rotation = map->camera_rotation;
         } else {
-            g_view.menu_yaw = fmodf(g_view.menu_yaw + delta * 1000.0f * MENU_CAM_YAW_RATE, 2.0f * (float) M_PI);
+            g_view.menu_yaw = fmodf(g_view.menu_yaw + frame_ms * MENU_CAM_YAW_RATE, 2.0f * (float) M_PI);
             client->camera.rotation = (vec3) {0.0f, g_view.menu_yaw, 0.0f};
         }
         client->camera.zoom = 1.0f;
@@ -154,7 +200,7 @@ void menu_view_camera(Client *client, const float delta) {
     // Dead: the chase camera (CONTROLS.update runs every frame, menu open or not). Without
     // a killer the camera keeps the death pose.
     if (!g_view.chase) return;
-    chase_update(delta * 1000.0f);
+    chase_update(ms);
     client->camera.position = g_view.position;
     client->camera.rotation = (vec3) {g_view.pitch, g_view.yaw, 0.0f};
 }
