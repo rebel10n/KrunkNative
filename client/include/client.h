@@ -611,6 +611,17 @@ typedef struct {
     char net_disconnect_code[8];   // its Krunker error code ("000005" idle kick), under net_lock
     char net_status_code[8];       // error code for NET_STATUS_FAILED (under net_lock): "000005" kick, "000001" connect error, "000000" drop
     int net_hold_retry;            // the server closed with an ERROR: no automatic reconnect until `reconnect`
+    // A session the transport lost without a server ERROR (client_net_set_drop, under net_lock): its
+    // own account of why, for the error screen ("Disconnected: <reason>", v7's Code / Reason line).
+    char net_drop_reason[112];     // "" = none yet for this session (the first explanation wins)
+    char net_drop_tag[24];         // short cause: timeout, ice, gateway, offline, reset, closed, ...
+    int net_drop_close_code;       // the WebSocket close code (web), 0 otherwise
+    // NET_STATUS_FAILED details (under net_lock) for menu_poll_connection: a live session dropped
+    // (not a kick / server stop / connect failure: servers_ui.c rejoins), v7's "Code:" / "Reason:".
+    int net_status_dropped;
+    int net_close_intended;        // a server switch / quit closes the session on purpose: not a drop (no rejoin)
+    int net_status_close_code;
+    char net_status_close_reason[24];
     int net_session_connected;     // transport-private: a session was established (disconnect vs. failed connect)
     char net_address[64];          // server address/port, for net_main() and error messages
     char net_ws_url[512];          // web: game WebSocket URL override (brain seek webUrl / /native?target=), "" = default (net_web.c)
@@ -706,6 +717,11 @@ void on_client_socket_connect(Client*);
 void on_client_socket_disconnect(Client*);
 void on_client_socket_error(Client*, int);
 void on_client_socket_failed(Client*, const char*); // connect attempt failed with this message
+// The transport's reason for the session it is about to report lost (before
+// on_client_socket_disconnect; any thread). tag: a short cause for the error screen's "Reason:"
+// (timeout, ice, gateway, offline, reset, closed), close_code: the WebSocket close code or 0. The
+// first call per session wins (the most specific cause is reported first).
+void client_net_set_drop(Client*, const char *tag, int close_code, const char *fmt, ...) __attribute__((format(printf, 4, 5)));
 void client_net_request_reconnect(Client*);        // page `reconnect`: retry now instead of after the backoff
 // Krunker disconnect(reason, code): close the remote session for good (no auto-retry until
 // client_net_request_reconnect); NET_STATUS_FAILED carries reason/code. No-op without a session.

@@ -52,7 +52,9 @@ jobs:
         id: meta
         run: |
           set -euo pipefail
-          tools/release/version-meta.sh "$GITHUB_SHA" | tee -a "$GITHUB_OUTPUT"
+          # the service sources' own commit (the same identity Deploy edges stamps into the edges'
+          # server_bin), so the finder's outdated check never flags an edge for unrelated pushes
+          tools/release/version-meta.sh --server "$GITHUB_SHA" | tee -a "$GITHUB_OUTPUT"
 
       - name: Release tag
         id: tag

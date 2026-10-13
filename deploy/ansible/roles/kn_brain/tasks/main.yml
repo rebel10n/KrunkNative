@@ -8,14 +8,14 @@
 
 - name: Release config directory
   ansible.builtin.file:
-    path: "{{ kn_svc_base }}/releases/{{ kn_release_id }}/config"
+    path: "{{ kn_svc_base }}/releases/{{ kn_svc_release_id }}/config"
     state: directory
     mode: "0755"
 
 - name: Release config (no secrets)
   ansible.builtin.template:
     src: config.json.j2
-    dest: "{{ kn_svc_base }}/releases/{{ kn_release_id }}/config/config.json"
+    dest: "{{ kn_svc_base }}/releases/{{ kn_svc_release_id }}/config/config.json"
     mode: "0644"
   notify: Restart kn_brain
 
@@ -114,7 +114,7 @@
 
 - name: Release changed -> restart
   ansible.builtin.debug:
-    msg: "current -> {{ kn_release_id }}"
+    msg: "current -> {{ kn_svc_release_id }}"
   changed_when: kn_release_changed | default(false) | bool
   notify: Restart kn_brain
 

@@ -20,6 +20,12 @@ kn_gameserver_max_players: 8
 # for the restart (players see GAME UPDATING and rejoin), then remove it. A tmpfs path
 # outside the unit's sandbox writes (ProtectSystem=strict still lets server_bin read it).
 kn_gameserver_stop_reason_file: /run/krunknative-deploy/gameserver-stop-reason
+# A deploy restart drains: every instance refuses new players and finishes its round (server.cfg
+# shutdown_grace), then restarts; an empty instance restarts at once. All instances of a host drain
+# in parallel, so a deploy waits at most this long per host (chitown, then the rest). Players still
+# in a round when it runs out get "GAME UPDATING" and rejoin with a fresh ticket. One v7 public
+# round is 4 minutes.
+kn_gameserver_drain_timeout: 240
 # In-map billboard text (server.cfg billboard); empty = the engine default "Your Ad Here".
 kn_gameserver_billboard: ""
 # online_mode 1 (accounts verified via auth_url hasJoined) on these instances; the

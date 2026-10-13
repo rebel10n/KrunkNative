@@ -4,9 +4,14 @@ name: Deploy edges
 # edges' Debian releases (deploy/ansible/build.sh: bullseye = clara, bookworm = ashburn,
 # trixie = angeles + chitown) and runs deploy/ansible/edges.yml (by default the edge infra:
 # firewall, fail2ban (this repo's drop-ins only; abulxt owns the base), user, release, gameserver; DNS needs a token with Zone DNS:Edit), chitown first: the rest only after
-# chitown's instance 1 answers the server-info query again. This RESTARTS the live game
-# servers of the selected edges (players are dropped). The edges also run abulxt: only the
-# KrunkNative release + kn-gameserver@ units are touched (no firewall, no DNS here).
+# chitown's instance 1 answers the server-info query again. The game servers restart only when
+# server_bin, its data or its config changed: server_bin is reproducible and stamped with the last
+# commit that changed the service sources (tools/release/version-meta.sh --server), and the release
+# dir is named by its content (role kn_release), so most pushes change nothing on the edges. A
+# restart drains: every instance finishes its round (kn_gameserver_drain_timeout, 240 s, all
+# instances of a host in parallel), its players get "GAME UPDATING" and rejoin with a fresh ticket.
+# The edges also run abulxt: only the KrunkNative release + kn-gameserver@ units are touched (no
+# firewall, no DNS here).
 #
 # Secrets: EDGES_SSH_KEY (CI-only ed25519, comment krunknative-github-ci-edges, in each edge's
 #          root authorized_keys with no-agent/X11/port-forwarding), EDGES_KNOWN_HOSTS (the edges'
@@ -64,7 +69,7 @@ jobs:
 
       - name: Version metadata
         id: meta
-        run: tools/release/version-meta.sh "$(git rev-parse HEAD)" | tee -a "$GITHUB_OUTPUT"
+        run: tools/release/version-meta.sh --server "$(git rev-parse HEAD)" | tee -a "$GITHUB_OUTPUT"
 
       # edge name -> inventory host (deploy/ansible/inventory/hosts.yml)
       - name: Hosts
@@ -184,7 +189,8 @@ jobs:
         run: ansible -m ansible.builtin.ping "kru,${FIRST:+$FIRST,}$REST"
 
       # Instance 1 of an edge answers the server-info query (services/scripts/kn-query.py);
-      # once the new server_bin reports its commit (kn_version.h), it must be this build's.
+      # once the new server_bin reports its commit (kn_version.h), it must be this build's (the
+      # service sources' commit, version-meta.sh --server: unchanged when the push did not touch them).
       - name: Health check helper
         run: |
           cat > "$RUNNER_TEMP/edge-health.sh" << 'EOF'

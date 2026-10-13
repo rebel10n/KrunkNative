@@ -1,6 +1,38 @@
+# The release id is the content: a hash of exactly what is shipped (this host's binaries, the data
+# files, the migrations). A push that changes none of them (the service binaries are reproducible
+# and stamped with their own source commit, tools/release/version-meta.sh --server) finds its
+# release already in place: nothing is copied, `current` does not move and no service restarts
+# (kn_release_changed). -e kn_svc_release_id=<id> overrides it.
+- name: Release id from the shipped content
+  ansible.builtin.shell: |
+    set -euo pipefail
+    {
+      cd {{ (kn_artifact_root ~ '/' ~ kn_build_codename ~ '/bin') | quote }}
+      for b in {{ kn_release_bins | map('quote') | join(' ') }}; do [ ! -f "$b" ] || sha256sum "$b"; done
+      cd {{ (kn_repo_root ~ '/assets') | quote }}
+      find {{ kn_release_assets | map('quote') | join(' ') }} -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum
+      {% if kn_release_migrations | default(false) | bool %}
+      cd {{ (kn_repo_root ~ '/services/db') | quote }}
+      find migrations -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum
+      {% endif %}
+    } | sha256sum | cut -c1-12
+  args:
+    executable: /bin/bash
+  register: kn_release_digest
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  check_mode: false
+  when: kn_svc_release_id is not defined
+
+- name: Release id
+  ansible.builtin.set_fact:
+    kn_svc_release_id: "{{ kn_build_codename }}-{{ kn_release_digest.stdout | trim }}"
+  when: kn_svc_release_id is not defined
+
 - name: Release directory
   ansible.builtin.file:
-    path: "{{ kn_svc_base }}/releases/{{ kn_release_id }}"
+    path: "{{ kn_svc_base }}/releases/{{ kn_svc_release_id }}"
     state: directory
     owner: root
     group: root
@@ -10,11 +42,11 @@
   register: kn_release_bin_sync
   ansible.posix.synchronize:
     src: "{{ kn_artifact_root }}/{{ kn_build_codename }}/bin/"
-    dest: "{{ kn_svc_base }}/releases/{{ kn_release_id }}/bin/"
+    dest: "{{ kn_svc_base }}/releases/{{ kn_svc_release_id }}/bin/"
     archive: false
     recursive: true
     checksum: true
-    times: true
+    times: false # content only: a fresh checkout's / build's newer mtimes are not a change
     perms: true
     use_ssh_args: true
     rsync_opts: "{{ ['--chmod=D755,F755', '--chown=root:root'] + (kn_release_bins | map('regex_replace', '^', '--include=') | list) + ['--exclude=*'] }}"
@@ -29,11 +61,11 @@
   register: kn_release_data_sync
   ansible.posix.synchronize:
     src: "{{ kn_repo_root }}/assets/{{ item }}"
-    dest: "{{ kn_svc_base }}/releases/{{ kn_release_id }}/assets/"
+    dest: "{{ kn_svc_base }}/releases/{{ kn_svc_release_id }}/assets/"
     archive: false
     recursive: true
     checksum: true
-    times: true
+    times: false # content only: a fresh checkout's / build's newer mtimes are not a change
     use_ssh_args: true
     rsync_opts: ["--chmod=D755,F644", "--chown=root:root", "--mkpath"]
   loop: "{{ kn_release_assets }}"
@@ -45,11 +77,11 @@
   register: kn_release_mig_sync
   ansible.posix.synchronize:
     src: "{{ kn_repo_root }}/services/db/migrations"
-    dest: "{{ kn_svc_base }}/releases/{{ kn_release_id }}/services/db/"
+    dest: "{{ kn_svc_base }}/releases/{{ kn_svc_release_id }}/services/db/"
     archive: false
     recursive: true
     checksum: true
-    times: true
+    times: false # content only: a fresh checkout's / build's newer mtimes are not a change
     delete: true
     use_ssh_args: true
     rsync_opts: ["--chmod=D755,F644", "--chown=root:root", "--mkpath"]
@@ -58,16 +90,16 @@
   retries: 6
   delay: 10
 
-- name: Flip current -> releases/{{ kn_release_id }}
+- name: Flip current -> releases/{{ kn_svc_release_id }}
   ansible.builtin.file:
-    src: "{{ kn_svc_base }}/releases/{{ kn_release_id }}"
+    src: "{{ kn_svc_base }}/releases/{{ kn_svc_release_id }}"
     dest: "{{ kn_svc_current }}"
     state: link
     force: true
   register: kn_release_link
 
-# Services restart when anything of the running release changed: a new release id,
-# or the same id (dirty tree redeployed) with new binaries/data.
+# Services restart when anything of the running release changed: a new release id (= new
+# content), or files of the same id rewritten (a release dir edited by hand).
 - name: Did the release change
   ansible.builtin.set_fact:
     kn_release_changed: >-
@@ -80,3 +112,4 @@
   ansible.builtin.include_tasks: prune.yml
   vars:
     prune_dir: "{{ kn_svc_base }}/releases"
+    prune_keep: "{{ kn_svc_release_id }}"

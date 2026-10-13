@@ -1865,6 +1865,19 @@ menu re-seeks the same lobby so the server attaches (or drops) the account.
    server's message ("GAME UPDATING" is v7's "Game Updating" header) with "Rejoining a game...".
    Direct (pinned) servers have no tickets: the transport retries them. Console `reconnect` / F5
    seek again too (`autoChangeGame` after a server stop), never with the old ticket.
+   A session the transport lost with no server `ERROR` (not a kick or ban: a gateway or network
+   drop, a crashed server) shows the transport's own reason instead of a bare "Disconnected from
+   server": `Disconnected: <reason>`, ID `0x000001` and, like v7.1.4's `io_disconnect(null,
+   "000001", closeEvent)`, `Code: <WebSocket close code> | Reason: <cause>` (timeout, ice,
+   gateway, offline, reset, closed, ...). Examples: "no data from the server for 10 s (WebRTC)",
+   "the network path to the connection gateway was lost", "the connection gateway is
+   restarting", "the server closed the connection", "your network is offline". Then
+   "Reconnecting..." and, for a matchmade session, a fresh ticket for the same lobby 1 s later
+   (`autoChangeGame`; the transport holds so the old ticket is not resent); direct servers: the
+   transport reconnects. When the rejoined sessions keep dropping within 20 s it stops after 4
+   tries ("gave up after 4 quick reconnects"). The gateways tell their players before a restart (doc/transport.md
+   "Goodbyes"): "GAME UPDATING" / "Server restarting" (004004 / 004006), the restart rejoin
+   above.
 
 Servers window (2): `GET /mm/game-list` + `GET /api/player-count` (cached
 `serverBrowserRate` 10 s), region groups, Custom Games group (`meta.cs`), search, Hide
@@ -2126,6 +2139,17 @@ Optional: a Cloudflare cache rule making `assets.krunk.io/updates/client/builds/
   servers" handlers) write `update` to `/run/krunknative-deploy/gameserver-stop-reason`
   (`shutdown_reason_file`) for the restart and remove it after: players see "GAME UPDATING" and
   rejoin (8.5, 9.4).
+* Restarts only for a change (deploy-kru.yml / deploy-edges.yml run on every push). The service
+  binaries are built reproducibly and stamped with the last commit that changed their sources
+  (`tools/release/version-meta.sh --server`, also the release metadata of 8.12), the release dir
+  is named by a hash of what it ships (`kn_svc_release_id`, role kn_release, content-only rsync),
+  kn-rtc builds with `-buildvcs=false` and the net-bridge bundle is deterministic: a push that
+  changes none of a service's inputs leaves it running. Until 2026-10-12 every push restarted
+  kn-rtc (Go stamped the commit into it) and both brains and every game server (a new release dir
+  per commit). A game server restart drains in parallel on each host: no new players, the round
+  finishes (`kn_gameserver_drain_timeout`, 240 s = `shutdown_grace`), then "GAME UPDATING". The
+  kn_rtc / kn_bridge handlers write `update` to `/run/krunknative-deploy/gateway-stop-reason`
+  (`KRUNK_NATIVE_STOP_REASON_FILE`) around their restart, so the gateways send "GAME UPDATING".
 * nginx (mirrors the jail's `ansible/templates/nginx/*.j2`): brain host
   `matchmaker.<domain>/<x> -> /mm/<x>` (incl. `/internal/ws` upgrade),
   `api.` -> `/api/`, `social.` -> `/social/`, `play.<host>` = web client + `/native` +

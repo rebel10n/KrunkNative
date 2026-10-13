@@ -3,7 +3,16 @@
 # kn_version.h computes from git locally, passed to builds that have no git (deploy/ansible/build.sh
 # runs cmake in a Debian container) as -DKRUNKNATIVE_VERSION_* cache variables.
 #
-# Usage: tools/release/version-meta.sh [commit]   (default HEAD; needs the tags: fetch-depth 0)
+# Usage: tools/release/version-meta.sh [--server] [commit]   (default HEAD; needs the tags and the
+#        history: fetch-depth 0)
+#
+# --server: the identity of the service binaries (server_bin, kn_brain, kn_migrate) instead of the
+#   commit's: the last commit up to <commit> that changed their inputs (SERVER_PATHS below), and that
+#   commit's time as the build time. A push that touches none of them (the web client, docs, deploy
+#   settings) then builds byte-identical binaries, so the deploys copy nothing and restart nothing
+#   (deploy-kru.yml, deploy-edges.yml), and the release metadata names the same commit, so the
+#   finder's outdated check (doc/backend.md 8.12) sees the edges as current. The binaries report
+#   that commit (server_bin --version, KNINFO).
 # Prints GITHUB_OUTPUT lines:
 #   describe     git describe (server-v* / vN tags, never v3.1.1-parity), e.g. v1.0.0-51-g6f0cea9
 #   commit       full sha;  commit12  first 12 hex digits
@@ -14,13 +23,29 @@
 #   kn_build     the one-line JSON kn_brain reads from release notes (<!-- kn-build ... -->)
 set -euo pipefail
 
+server=0
+if [ "${1:-}" = --server ]; then
+    server=1
+    shift
+fi
 rev="${1:-HEAD}"
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 git() { command git -C "$repo" "$@"; }
+# Everything the service binaries and their release (deploy/ansible kn_release) are built from.
+SERVER_PATHS=(shared server services cmake CMakeLists.txt CMakePresets.json .gitmodules
+              assets/maps assets/skins.json deploy/ansible/build.sh tools/release/version-meta.sh)
 
 commit="$(git rev-parse "$rev^{commit}")"
+if [ "$server" = 1 ]; then
+    source_commit="$(git log -1 --format=%H "$commit" -- "${SERVER_PATHS[@]}")"
+    [ -n "$source_commit" ] || { echo "version-meta.sh: no commit touches the server paths (shallow clone? fetch-depth 0)" >&2; exit 1; }
+    commit="$source_commit"
+fi
 describe="$(git describe --tags --match 'server-v*' --match 'v[0-9]*' --exclude '*-parity*' --always "$commit")"
 commit_time="$(git log -1 --format=%ct "$commit")"
+if [ "$server" = 1 ] && [ -z "${SOURCE_DATE_EPOCH:-}" ]; then
+    SOURCE_DATE_EPOCH="$commit_time" # reproducible: the same inputs, the same binary
+fi
 if [ -n "${SOURCE_DATE_EPOCH:-}" ]; then
     build_time="$(date -u -d "@$SOURCE_DATE_EPOCH" +%Y-%m-%dT%H:%M:%SZ 2> /dev/null || date -u -r "$SOURCE_DATE_EPOCH" +%Y-%m-%dT%H:%M:%SZ)"
 else

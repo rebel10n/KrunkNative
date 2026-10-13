@@ -2,6 +2,8 @@
 # central node (kn_brain) and the edges (server_bin):
 #   {{ kn_svc_base }}/releases/<id>/{bin,assets,services/db/migrations}
 #   {{ kn_svc_base }}/current -> releases/<id>
+# <id> = kn_svc_release_id: <codename>-<sha256 of the shipped files, 12 hex> (tasks/main.yml), so
+# an unchanged build is the release already in place and restarts nothing.
 kn_svc_base: /opt/krunknative-svc
 kn_svc_current: "{{ kn_svc_base }}/current"
 # Which container build to ship (deploy/ansible/build.sh): one per Debian release

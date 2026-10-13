@@ -13,9 +13,10 @@ Group={{ kn_group }}
 # server_bin resolves ./assets (maps) relative to the working directory.
 WorkingDirectory={{ kn_svc_current }}
 ExecStart={{ kn_svc_current }}/bin/server_bin --headless --no-cli --cfg {{ kn_etc_dir }}/server-%i.cfg
-# SIGTERM: drain the round (shutdown_grace), finder shutdown heartbeat, exit.
+# SIGTERM: drain the round (shutdown_grace = kn_gameserver_drain_timeout), finder shutdown
+# heartbeat, exit. The stop timeout leaves room for the drain.
 KillSignal=SIGTERM
-TimeoutStopSec=30
+TimeoutStopSec={{ (kn_gameserver_drain_timeout | int) + 30 }}
 Restart=always
 RestartSec=3
 LimitNOFILE=65536

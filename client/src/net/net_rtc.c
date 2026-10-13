@@ -48,6 +48,15 @@ EM_JS(int, kn_rtc_wanted, (void), {
 // Shared helpers on Module (installed once): the session's diagnostics.
 EM_JS(void, kn_rtc_install, (void), {
     if (Module.knRtcDiag) return;
+    // Tab closed / reloaded / navigated: the knet goodbye (net_wt.c kn_dg_bye) and the channel's
+    // close go out now; a page that just vanishes looks like a lost network to the gateway
+    // ("ICE consent lost" 15 s later) and leaves the player in the game server until KNET_TIMEOUT.
+    addEventListener('pagehide', () => {
+        const s = Module.knRtc;
+        if (!s || !s.up || s.done) return;
+        try { _kn_dg_bye(); } catch (e) {}
+        try { if (s.dc) s.dc.close(); } catch (e) {}
+    });
     const cand = (c) => c ? (c.candidateType || '?') + ' ' + (c.address || c.ip || '(hidden)') + ':' + c.port + '/' + (c.protocol || '?') : '-';
     // Candidate pairs and the selected path from getStats (resolves to a short text).
     Module.knRtcStats = async (s) => {
@@ -249,8 +258,13 @@ EM_JS(void, kn_rtc_close, (void), {
     if (!s.done && !s.up) console.warn('[rtc] attempt abandoned by the client -- ' + Module.knRtcDiag(s));
     s.done = true;
     (s.timers || []).forEach((t) => clearTimeout(t));
+    // The channel closes first and the connection a moment later: closing both at once dropped the
+    // knet goodbye net_wt.c just sent and the SCTP stream reset, so the gateway saw only silence
+    // ("ICE consent lost") and the game server kept the player until its knet timeout.
+    const open = s.dc && s.dc.readyState === 'open';
     try { if (s.dc) s.dc.close(); } catch (e) {}
-    try { if (s.pc) s.pc.close(); } catch (e) {}
+    if (open) setTimeout(() => { try { if (s.pc) s.pc.close(); } catch (e) {} }, 300);
+    else { try { if (s.pc) s.pc.close(); } catch (e) {} }
 });
 
 // netinfo: the session's states, timings, path and recent events ("" without one).

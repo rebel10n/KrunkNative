@@ -14,6 +14,10 @@ kn_release_id: >-
      | default(lookup('ansible.builtin.pipe', 'git -C ' ~ kn_repo_root ~ ' rev-parse --short=12 HEAD')
                ~ ('-dirty' if lookup('ansible.builtin.pipe', 'git -C ' ~ kn_repo_root ~ ' status --porcelain -uno') else ''), true) }}
 kn_keep_releases: 3
+# A deploy restart of the WebRTC gateway / net-bridge writes "update" here first (their handlers):
+# they tell every player "GAME UPDATING" before closing (net-bridge/rtc stopMessage, webBridge.ts
+# stopMessage), the client rejoins with a fresh ticket. tmpfs, removed right after the restart.
+kn_gateway_stop_reason_file: /run/krunknative-deploy/gateway-stop-reason
 
 # Local build outputs (deploy/ansible/build.sh, or CI). Per Debian release because
 # clara is bullseye (glibc 2.31, OpenSSL 1.1); trixie hosts use the bookworm build.

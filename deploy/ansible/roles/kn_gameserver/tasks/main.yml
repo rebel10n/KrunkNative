@@ -64,7 +64,7 @@
 
 - name: Release changed -> restart
   ansible.builtin.debug:
-    msg: "current -> {{ kn_release_id }}"
+    msg: "current -> {{ kn_svc_release_id }}"
   changed_when: kn_release_changed | default(false) | bool
   notify: Restart game servers
 

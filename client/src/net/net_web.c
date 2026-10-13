@@ -175,10 +175,28 @@ static bool net_web_on_error(int event_type, const EmscriptenWebSocketErrorEvent
     return true;
 }
 
+// 1 = the browser believes it is online (navigator.onLine; no API = assume so).
+EM_JS(int, kn_net_online, (void), { return typeof navigator === 'undefined' || navigator.onLine !== false ? 1 : 0; });
+
+// Why a live WebSocket session ended, for the error screen (client_net_set_drop). The codes: RFC
+// 6455; the reasons are net-bridge's (webBridge.ts endSession / shutdown).
+static void net_web_explain_close(Client *client, const int code, const char *reason) {
+    if (!kn_net_online()) client_net_set_drop(client, "offline", code, "your network is offline (the browser reports no connection)");
+    else if (code == 1012 || code == 1001)
+        client_net_set_drop(client, "gateway", code, "the connection gateway is restarting%s%s", reason[0] ? ": " : "", reason);
+    else if (code == 1006)
+        client_net_set_drop(client, "lost", code, "the connection was lost without a close (a network drop, or a proxy closed it)");
+    else if (strstr(reason, "native tcp closed")) client_net_set_drop(client, "closed", code, "the server closed the connection");
+    else if (strstr(reason, "idle timeout")) client_net_set_drop(client, "timeout", code, "the connection gateway closed it after no data for a while");
+    else if (strstr(reason, "native tcp")) client_net_set_drop(client, "unreachable", code, "the game server is unreachable (%s)", reason);
+    else client_net_set_drop(client, "closed", code, "the WebSocket closed (code %d%s%s)", code, reason[0] ? ": " : "", reason);
+}
+
 static bool net_web_on_close(int event_type, const EmscriptenWebSocketCloseEvent *event, void *user_data) {
     (void) event_type;
 
     Client *client = user_data;
+    if (client->net_session_connected && !g_web_switching && !client->net_should_quit) net_web_explain_close(client, event->code, event->reason);
 
     pthread_mutex_lock(&client->net_lock);
     client->net_socket = -1;
@@ -330,6 +348,7 @@ void client_net_switch_server(Client *client) {
     }
     if (g_web_socket) {
         g_web_switching = 1;
+        if (client->net_session_connected) client->net_close_intended = 1; // a switch, not a drop (events.c)
         emscripten_websocket_close(g_web_socket, 1000, "switch server");
         return;
     }

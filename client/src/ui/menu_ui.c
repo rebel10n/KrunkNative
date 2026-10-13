@@ -53,6 +53,8 @@ static MenuUi g_ui;
 // Region name override (ui_scenario.c `state.region`); "" = MENU_REGION_NAME.
 static char g_region_label[64];
 static char g_connect_code[8]; // Krunker's error code on the connection error screen ("000000")
+static int g_connect_close_code;        // ... its "Code:" (a lost session's WebSocket close code), 0 none
+static char g_connect_close_reason[24]; // ... its "Reason:" (a lost session's cause), "" = "0"
 static int g_error_screen;      // the Lost Connection screen shows (menu_apply_error_screen)
 
 // Krunker v7.1.4 idle kick (index.js gameLoop + config.kickTimer 120000): while the menu is
@@ -690,12 +692,15 @@ void menu_update_instructions(void) {
         if (servers_ui_account_required()) sb_append(&eb, "<div style='font-size:20px'><a href='#' onclick='showWindow(5);return false'>Log in</a> to join it.</div>");
         sb_append(&eb, "</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>ID: 0x");
         sb_append_esc(&eb, g_connect_code[0] ? g_connect_code : "000000");
-        sb_append(&eb, " | Code: 0 | Reason: 0</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>Region: ");
+        // v7.1.4 f2040: "Code: <close code> | Reason: <close reason>" of the socket's close event; here
+        // the transport's (events.c: the WebSocket close code, a short cause such as timeout / ice)
+        sb_appendf(&eb, " | Code: %d | Reason: ", g_connect_close_code);
+        sb_append_esc(&eb, g_connect_close_reason[0] ? g_connect_close_reason : "0");
+        sb_append(&eb, "</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>Region: ");
         sb_append_esc(&eb, g_region_label[0] ? g_region_label : MENU_REGION_NAME);
         // while servers_ui.c rejoins with a fresh ticket, its status replaces the extensions hint
         if (servers_ui_rejoining())
-            sb_appendf(&eb, "</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.8)'>%s</div>",
-                       servers_ui_pinned() || !servers_ui_brain_mode() ? "Reconnecting..." : "Rejoining a game...");
+            sb_appendf(&eb, "</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.8)'>%s</div>", servers_ui_rejoin_text());
         else
             sb_append(&eb, "</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>If you have any extensions, disable them</div>");
         // Find a Game: seek a new game (or retry a pinned server: console connect / Direct Connect).
@@ -1141,12 +1146,15 @@ void menu_retry_connect(void) {
 static void menu_poll_connection(Client *client) {
     char error[sizeof(client->net_status_error)];
     char code[sizeof(client->net_status_code)];
+    char close_reason[sizeof(client->net_status_close_reason)];
 
     pthread_mutex_lock(&client->net_lock);
     const int status = client->net_status;
     client->net_status = NET_STATUS_NONE;
     memcpy(error, client->net_status_error, sizeof(error));
-    memcpy(code, client->net_status_code, sizeof(code)); // "(Error 0x<code>)": 000005 idle kick, 000001 connect error
+    memcpy(code, client->net_status_code, sizeof(code)); // "(Error 0x<code>)": 000005 idle kick, 000001 connect error / lost session
+    const int dropped = client->net_status_dropped, close_code = client->net_status_close_code;
+    memcpy(close_reason, client->net_status_close_reason, sizeof(close_reason));
     pthread_mutex_unlock(&client->net_lock);
 
     if (status == NET_STATUS_CONNECTED) {
@@ -1172,8 +1180,12 @@ static void menu_poll_connection(Client *client) {
     int keep_screen = 0;
     if (status == NET_STATUS_FAILED) {
         const int was_rejoining = servers_ui_rejoining();
-        servers_ui_connection_lost(error, sizeof(error), code);
-        keep_screen = was_rejoining && !strcmp(code, "000001");
+        servers_ui_connection_lost(error, sizeof(error), code, dropped);
+        keep_screen = was_rejoining && !dropped && !strcmp(code, "000001");
+        if (!keep_screen) {
+            g_connect_close_code = close_code;
+            snprintf(g_connect_close_reason, sizeof(g_connect_close_reason), "%s", close_reason);
+        }
     }
 
     if (!html_ui_available() || !g_ui.dom_ready) return;

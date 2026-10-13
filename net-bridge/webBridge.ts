@@ -15,6 +15,7 @@
  * protocol on `/ws`.
  */
 
+import fs from "fs";
 import net from "net";
 import type { IncomingMessage } from "http";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
@@ -161,6 +162,68 @@ export function admit(req: IncomingMessage): { status: number; reason: string } 
   return null;
 }
 
+// Stopping (SIGTERM): every player gets a game-level ERROR first, like a game server's own stop
+// (server/src/main.c server_send_shutdown_message): one native frame NET_PACKET_ERROR (30) with a
+// NetErrorPacket {message[96], code[8]} (shared/include/shared.h), injected at a frame boundary of
+// the server's stream, then the WebSocket closes with 1012 (service restart). The client shows it
+// and rejoins with a fresh ticket (client/src/ui/servers_ui.c, 004004 / 004006). The text comes
+// from the first line of KRUNK_NATIVE_STOP_REASON_FILE (a deploy writes "update" there around the
+// restart; ignored when older than 15 min, like server_bin's shutdown_reason_file).
+const STOP_REASON_FILE = process.env.KRUNK_NATIVE_STOP_REASON_FILE || "";
+const STOP_REASON_MAX_AGE_MS = 15 * 60 * 1000;
+const NET_PACKET_ERROR = 30;
+const ERROR_MESSAGE_SIZE = 96;
+const ERROR_CODE_SIZE = 8;
+// A frame still arriving when the stop comes gets this long to complete before the plain close.
+export const STOP_FRAME_WAIT_MS = 300;
+
+export function stopMessage(file: string = STOP_REASON_FILE): { message: string; code: string } {
+  let reason = "";
+  try {
+    if (file && Date.now() - fs.statSync(file).mtimeMs <= STOP_REASON_MAX_AGE_MS) {
+      reason = fs.readFileSync(file, "utf8").split("\n")[0].trim().toLowerCase();
+    }
+  } catch (_err) {
+    reason = "";
+  }
+  return reason === "update" ? { message: "GAME UPDATING", code: "004004" } : { message: "Server restarting", code: "004006" };
+}
+
+// [30][len16 BE][NetErrorPacket]: both strings NUL-terminated inside their fixed fields.
+export function errorFrame(message: string, code: string): Buffer {
+  const frame = Buffer.alloc(3 + ERROR_MESSAGE_SIZE + ERROR_CODE_SIZE);
+  frame[0] = NET_PACKET_ERROR;
+  frame.writeUInt16BE(ERROR_MESSAGE_SIZE + ERROR_CODE_SIZE, 1);
+  Buffer.from(message, "utf8").subarray(0, ERROR_MESSAGE_SIZE - 1).copy(frame, 3);
+  Buffer.from(code, "utf8").subarray(0, ERROR_CODE_SIZE - 1).copy(frame, 3 + ERROR_MESSAGE_SIZE);
+  return frame;
+}
+
+// Where the server -> browser byte stream is in its native frames (1 byte type, 2 bytes length,
+// payload), so a frame of our own never lands inside one of the server's.
+export type FrameCursor = { left: number; header: number[] };
+
+// Advance over chunk. until: return the offset of the first frame boundary at or after the start
+// of chunk (-1 when chunk ends inside a frame); otherwise chunk.length.
+export function scanFrames(cursor: FrameCursor, chunk: Buffer, until: boolean): number {
+  let i = 0;
+  for (;;) {
+    if (until && cursor.left === 0 && cursor.header.length === 0) return i;
+    if (i >= chunk.length) return until ? -1 : i;
+    if (cursor.left > 0) {
+      const n = Math.min(cursor.left, chunk.length - i);
+      cursor.left -= n;
+      i += n;
+      continue;
+    }
+    cursor.header.push(chunk[i++]);
+    if (cursor.header.length === 3) {
+      cursor.left = (cursor.header[1] << 8) | cursor.header[2];
+      cursor.header.length = 0;
+    }
+  }
+}
+
 // Stop reading from TCP while the browser is this far behind, resume below it.
 const WS_HIGH_WATER = 1 << 20;
 const WS_LOW_WATER = 256 << 10;
@@ -182,6 +245,8 @@ type PassthroughSession = {
   lastActivity: number;
   awaitingPong: boolean;
   timer: NodeJS.Timeout | null;
+  frames: FrameCursor;
+  stop: { frame: Buffer; message: string } | null; // stopping: the ERROR frame waits for a frame boundary
 };
 
 const sessions = new Set<PassthroughSession>();
@@ -249,6 +314,8 @@ function handleConnection(ws: WebSocket, req: IncomingMessage): void {
     lastActivity: Date.now(),
     awaitingPong: false,
     timer: null,
+    frames: { left: 0, header: [] },
+    stop: null,
   };
   sessions.add(session);
   perIp.set(client, (perIp.get(client) || 0) + 1);
@@ -300,6 +367,14 @@ function handleConnection(ws: WebSocket, req: IncomingMessage): void {
   tcp.on("data", (chunk: Buffer) => {
     session.lastActivity = Date.now();
     if (ws.readyState !== WebSocket.OPEN) return;
+    if (session.stop) {
+      // stopping: finish the server's frame in progress, then our ERROR and the close
+      const end = scanFrames(session.frames, chunk, true);
+      if (end !== 0) ws.send(end < 0 ? chunk : chunk.subarray(0, end), { binary: true });
+      if (end >= 0) finishStop(session);
+      return;
+    }
+    scanFrames(session.frames, chunk, false);
     ws.send(chunk, { binary: true }, (err) => {
       if (err) {
         endSession(session, `ws send error: ${err.message}`);
@@ -371,14 +446,42 @@ export function createServer(): WebSocketServer {
   return wss;
 }
 
+function finishStop(session: PassthroughSession): void {
+  const stop = session.stop;
+  if (!stop || !releaseSession(session)) return;
+  console.info(`[web-bridge] #${session.id} ${session.remote} closed (bridge stopping, told "${stop.message}")`);
+  session.pending.length = 0;
+  session.tcp.destroy();
+  if (session.ws.readyState === WebSocket.OPEN) session.ws.send(stop.frame, { binary: true });
+  closeWs(session.ws, 1012, stop.message);
+}
+
+// Graceful stop of one session: the ERROR frame now if the server's stream is at a frame boundary,
+// else right after the frame in progress (STOP_FRAME_WAIT_MS at most, then a plain close).
+function stopSession(session: PassthroughSession, message: string, code: string): void {
+  if (!sessions.has(session) || session.stop) return;
+  session.stop = { frame: errorFrame(message, code), message };
+  if (session.ws.readyState !== WebSocket.OPEN || !session.tcpConnected) {
+    endSession(session, "bridge stopping");
+    return;
+  }
+  if (session.frames.left === 0 && session.frames.header.length === 0) {
+    finishStop(session);
+    return;
+  }
+  setTimeout(() => endSession(session, "bridge stopping (mid-frame)"), STOP_FRAME_WAIT_MS).unref?.();
+}
+
 export function closeAllSessions(force = false): void {
+  const { message, code } = stopMessage();
+  if (!force && sessions.size) console.info(`[web-bridge] stopping: telling ${sessions.size} session(s) "${message}" (${code})`);
   for (const session of Array.from(sessions)) {
     if (force) {
       releaseSession(session);
       session.tcp.destroy();
       session.ws.terminate();
     } else {
-      endSession(session, "bridge shutting down");
+      stopSession(session, message, code);
     }
   }
 }

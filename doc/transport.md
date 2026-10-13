@@ -32,7 +32,10 @@ answers on the game socket.
 - `DATA` (both directions): `[0x06][token4][seq2][ack2][ack_bits4][ack_delay2]`, then messages:
   - `0x10` reliable: `[offset4][len2][bytes]`, one byte-stream segment.
   - `0x20` unreliable: `[flags1][id2][len2][type1][payload]`, one whole game frame.
-- `DISCONNECT` (both directions): `[0x07][token4]`.
+- `DISCONNECT` (both directions): `[0x07][token4]`, optionally followed by one game frame
+  `[type1][len2][payload]` that the receiver delivers before it closes. A relay that ends the
+  session says why with it: kn-rtc stopping sends the browser an `ERROR` frame (`NetErrorPacket`,
+  "GAME UPDATING" / "Server restarting"). Older receivers ignore the tail.
 
 The MTU is 1000 bytes, which fits a WebTransport datagram on any path QUIC accepts, and a
 DataChannel message in one SCTP chunk.
@@ -115,6 +118,23 @@ Diagnostics:
   the knet session (server or browser), or that ICE consent was lost (tab closed, sleep or
   network change). For a failed open it gives the ICE state and the number of checks that
   arrived: 0 means the browser's UDP never reached the port.
+
+**Goodbyes.** "ICE consent lost" at the gateway means the browser went silent: no STUN and no
+data. In the logs of 2026-10-12 these were browsers closing without a goodbye, not a gateway
+keepalive problem: UDP receive-buffer drops on kru were 51 in 46 days, and the gateway kept
+relaying server datagrams the whole time while the browser stopped sending both checks and data
+at the same moment. Three things make an ending explicit now:
+- The client closes the DataChannel first and the RTCPeerConnection 300 ms later
+  (`kn_rtc_close`); closing both at once dropped its knet goodbye and the SCTP stream reset. A
+  `pagehide` handler sends the goodbye when the tab closes or reloads.
+- kn-rtc sends the game server a knet `DISCONNECT` for every browser that left without one
+  (tab closed, network lost, gateway stopping). The token comes from the server's `ACCEPT` /
+  `DATA`. The player is freed at once instead of after `KNET_TIMEOUT` (10 s), so no ghost.
+- On SIGTERM kn-rtc sends every browser a `DISCONNECT` with an `ERROR` frame, waits 300 ms,
+  then closes. The text comes from the first line of `KRUNK_NATIVE_STOP_REASON_FILE`: `update`
+  gives "GAME UPDATING" (004004), anything else "Server restarting" (004006). net-bridge does
+  the same over the WebSocket: an `ERROR` frame at a frame boundary of the server's stream, then
+  close 1012. The client shows it and rejoins (doc/backend.md 9.4).
 
 Not to be confused with the game transport: the matchmaker and social WebSocket
 (`wss://coordinator.krunk.io/social/ws`) is always open next to it. A server kick also ends
@@ -206,6 +226,12 @@ instead of `kn-rtc`.
   TCP. `make test-net` runs the clean and lossy variants.
 - `tools/kref/wt-e2e.sh BUILD WEB_DIST`: server, relay, net-bridge and headless
   Chromium. It passes when the page connected over WebTransport.
+- `server/tests/gateway_restart_e2e.py BUILD WEB_DIST`: the web client in game while (A) a
+  deploy restarts kn-rtc (reason `update`), (B) net-bridge restarts, (C) kn-rtc is killed with
+  -9. It checks the ERROR each gateway sends, the error screen (Game Updating / Server
+  restarting / `Disconnected: <transport reason>`, then "Reconnecting..."), that the game server
+  freed the player at once in A, and that the page is back in game each time. The gateways' unit
+  tests: `npm test` in net-bridge and `go test ./...` in net-bridge/rtc (`make bridge-check`).
 - `tools/kref/rtc-e2e.sh BUILD WEB_DIST [seconds]`: server, kn-rtc, net-bridge and headless
   Chromium with `?transport=rtc`. It clicks to play, walks and shoots. It passes when the
   session came up over WebRTC and the page got in game, and it reports knet RTT

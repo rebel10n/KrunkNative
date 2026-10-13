@@ -83,7 +83,8 @@ built on the runner with its Node; the Cloudflare DNS/tunnel step is skipped wit
 `.github/workflows/deploy-edges.yml` (dispatch only, input `hosts`: `all` or e.g. `chitown,clara`,
 `dry_run` = `--check --diff`) builds server_bin for bullseye/bookworm/trixie and runs
 `edges.yml --tags release,gameserver`, chitown first, the others only once chitown-1 answers the
-server-info query again. It restarts the selected edges' game servers. Secrets: `EDGES_SSH_KEY`
+server-info query again. It restarts the game servers only when server_bin, its data or its
+config changed (below, "Restarts"), draining them. Secrets: `EDGES_SSH_KEY`
 (a CI-only ed25519 key, private half in `~/.config/kn-secrets/github-ci/edges_ci_ed25519`; in each
 edge's root `authorized_keys` as
 `no-agent-forwarding,no-X11-forwarding,no-port-forwarding ssh-ed25519 ... krunknative-github-ci-edges`,
@@ -94,7 +95,38 @@ config is `ssh_config` with kru -> `KRU_HOST:KRU_PORT` and the edges -> the CI k
 the `krunknative-github-ci-edges` line on the edges and the secret.
 
 Release builds (`.github/workflows/release.yml`) use the same `build.sh` (bookworm + bullseye,
-`TARGETS=server_bin`); `KN_CMAKE_ARGS` passes the build version (`tools/release/version-meta.sh`).
+`TARGETS=server_bin`); `KN_CMAKE_ARGS` passes the build version (`tools/release/version-meta.sh
+--server`: the last commit that changed the service sources, with its time as the build time).
+
+### Restarts
+
+A restart drops players, and both deploys run on every push, so a service restarts only when
+what it runs changed:
+
+- kn_brain, kn_migrate and server_bin are reproducible container builds stamped with their own
+  source commit (`version-meta.sh --server`; two builds of the same tree are byte-identical).
+  `kn_svc_release_id` (role kn_release) is `<codename>-<sha256 of the shipped binaries, data and
+  migrations>`, and the syncs compare content only (`times: false`). An unchanged build finds its
+  release in place: nothing is copied, `current` stays, and no handler fires. `-e
+  kn_svc_release_id=` overrides it. `kn_release_id` (the commit) still names the web releases.
+- kn-rtc builds with `-buildvcs=false`. Go's default VCS stamping changed the binary on every
+  commit, so every push restarted the gateway. net-bridge's esbuild bundle is deterministic.
+- Templates (units, env files, `server.cfg`, `config.json`) restart their service when their text
+  changes, e.g. `kn_brain_developers`.
+- When a game server must restart, all instances of a host drain in parallel (one `systemctl
+  restart` call). Each refuses new players, finishes its round (`kn_gameserver_drain_timeout`,
+  240 s, as `shutdown_grace`; the unit's `TimeoutStopSec` is 30 s more), and its players get
+  "GAME UPDATING" and rejoin. An empty instance restarts at once.
+- kn-rtc / kn-bridge restarts write `update` to `kn_gateway_stop_reason_file` first. The
+  gateways then tell every player "GAME UPDATING" before they close, and the clients rejoin
+  (doc/transport.md "Goodbyes").
+
+Checked with a local harness: two systemd Debian containers (central: kn_user, kn_release,
+kn_brain, kn_bridge, kn_rtc; edge: kn_user, kn_release, kn_gameserver), production URLs
+overridden. One apply converges. A second apply, then `--check --diff` twice, and an apply after
+touching every shipped file (new mtimes, as in a fresh CI checkout) report `changed=0` with no
+handler. A changed drain timeout drains a connected player for the old `shutdown_grace`, then
+sends GAME UPDATING, while the empty instance restarts at once.
 
 ## net-bridge (play.krunk.io)
 

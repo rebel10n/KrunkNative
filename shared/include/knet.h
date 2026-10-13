@@ -36,7 +36,10 @@ enum {
     KNET_DENY = 0x05,             // S->C [type][salt4][len1][reason]
     KNET_DATA = 0x06,             // both [type][token4][seq2][ack2][ack_bits4][ack_delay2] messages...
                                   //   ack_delay = 1/10 ms since `ack` arrived (RTT samples subtract it)
-    KNET_DISCONNECT = 0x07,       // both [type][token4]
+    KNET_DISCONNECT = 0x07,       // both [type][token4], optionally followed by one game frame
+                                  //   [type1][len2 BE][payload] the receiver delivers before closing: a relay
+                                  //   that ends the session (net-bridge/rtc stopping) says why with an
+                                  //   ERROR frame (NetErrorPacket). Older receivers ignore the tail.
 };
 
 #define KNET_DATA_HEADER 15
@@ -167,7 +170,8 @@ void knet_conn_free(KnetConn *conn);
 int knet_conn_send(KnetConn *conn, uint8_t type, const void *payload, uint16_t length, int mode);
 
 // One received datagram (any KNET_* type; only DATA is consumed here, the rest return 0).
-// Returns 1 for a DATA datagram of this connection, 0 otherwise. DISCONNECT sets *closed.
+// Returns 1 for a DATA datagram of this connection, 0 otherwise. DISCONNECT sets *closed (its
+// game frame, if it carries one, is delivered first).
 int knet_conn_receive(KnetConn *conn, const uint8_t *datagram, size_t length, double now,
                       KnetDeliverFn deliver, void *user, int *closed);
 
@@ -178,6 +182,8 @@ int knet_conn_timed_out(const KnetConn *conn, double now);
 int knet_conn_rtt_ms(const KnetConn *conn);           // -1 before the first sample
 size_t knet_conn_unacked(const KnetConn *conn);       // reliable bytes not yet acked
 size_t knet_build_disconnect(uint8_t *out, uint32_t token);
+// DISCONNECT carrying one game frame (out needs 8 + length bytes; length <= KNET_MTU - 8).
+size_t knet_build_disconnect_frame(uint8_t *out, uint32_t token, uint8_t type, const void *payload, uint16_t length);
 
 // ------------------------------------------------------------------ handshake
 size_t knet_build_connect_request(uint8_t *out, uint32_t salt);

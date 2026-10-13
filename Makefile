@@ -339,8 +339,9 @@ bridge-install: ## Install net-bridge dependencies
 bridge: $(BRIDGE_DIR)/node_modules ## Host dist/web/ and bridge /native WebSocket <-> native TCP server (port 8080)
 	cd $(BRIDGE_DIR) && npm run web
 
-bridge-check: $(BRIDGE_DIR)/node_modules ## Typecheck net-bridge
-	cd $(BRIDGE_DIR) && npm run typecheck
+bridge-check: $(BRIDGE_DIR)/node_modules ## Typecheck + unit-test net-bridge, and test the WebRTC gateway when Go is installed
+	cd $(BRIDGE_DIR) && npm run typecheck && npm test
+	@if command -v go >/dev/null; then cd $(BRIDGE_DIR)/rtc && GOTOOLCHAIN=local go test ./...; else echo "go not installed, skipping net-bridge/rtc tests"; fi
 
 # WebTransport relay (net-bridge/wt, doc/transport.md): HTTP/3 on UDP WT_ADDR, datagrams 1:1 to
 # the game server's UDP port. Without WT_CERT/WT_KEY it makes a self-signed cert and writes its

@@ -1,5 +1,5 @@
-# Keep the newest kn_keep_releases directories of prune_dir (by mtime), never the
-# one `current` points at. Shared by kn_release and kn_web.
+# Keep the newest kn_keep_releases directories of prune_dir (by mtime), never prune_keep (the
+# release `current` points at; default kn_release_id). Shared by kn_release and kn_web.
 - name: List releases in {{ prune_dir }}
   ansible.builtin.find:
     paths: "{{ prune_dir }}"
@@ -14,4 +14,4 @@
   loop: "{{ (prune_found.files | sort(attribute='mtime', reverse=true))[kn_keep_releases | int:] }}"
   loop_control:
     label: "{{ item.path }}"
-  when: item.path | basename != kn_release_id
+  when: item.path | basename != (prune_keep | default(kn_release_id))

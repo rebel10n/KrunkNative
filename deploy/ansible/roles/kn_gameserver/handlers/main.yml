@@ -19,14 +19,23 @@
   listen: Restart game servers
   when: kn_gameserver_active
 
-- name: Restart game server instances
+- name: Reload systemd units (game servers)
   ansible.builtin.systemd_service:
-    name: "kn-gameserver@{{ item }}"
-    state: restarted
     daemon_reload: true
-  loop: "{{ range(1, (kn_gameserver_count | int) + 1) | list }}"
   when: kn_gameserver_active
   ignore_errors: "{{ ansible_check_mode }}"
+  listen: Restart game servers
+
+# One systemctl call for every instance: their stops (drains, up to kn_gameserver_drain_timeout
+# each) run in parallel and each instance starts again as soon as its own drain ended. One
+# restart after another would add the drains up (11 instances on angeles). The timeout bounds the
+# deploy; systemd finishes whatever is left of the jobs on its own. (--check: not run.)
+- name: Restart game server instances (drain, in parallel)
+  ansible.builtin.command:
+    argv: "{{ ['timeout', ((kn_gameserver_drain_timeout | int) + 60) | string, 'systemctl', 'restart']
+              + (range(1, (kn_gameserver_count | int) + 1) | map('regex_replace', '^(.*)$', 'kn-gameserver@\\1') | list) }}"
+  changed_when: true
+  when: kn_gameserver_active
   listen: Restart game servers
 
 - name: Clear the stop reason

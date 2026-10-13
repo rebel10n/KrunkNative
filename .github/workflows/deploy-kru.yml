@@ -9,6 +9,12 @@ name: Deploy kru
 #          (kn_brain's outbound mail -> /etc/krunknative/smtp.env; deploy/ansible/README.md).
 # kn-brain runs --migrate, so a deploy applies new DB migrations. A successful run starts
 # Deploy edges (workflow_run), so the game servers follow the services.
+# Services restart only when what they run changed (players are dropped by a restart): the
+# kn_brain / kn_migrate build is reproducible and stamped with the last commit that changed the
+# service sources (tools/release/version-meta.sh --server), the release dir is named by its content
+# (role kn_release), kn-rtc builds without VCS stamping and the net-bridge bundle is deterministic,
+# so a push that only touches the web client, docs or other settings copies nothing and restarts
+# nothing. A gateway that must restart tells its players why first (GAME UPDATING) and they rejoin.
 on:
   push:
     branches: [main]
@@ -38,6 +44,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
+          fetch-depth: 0 # version-meta.sh --server: the last commit that changed the service sources
 
       - name: Install tools
         run: |
@@ -60,8 +67,15 @@ jobs:
       - name: Build web client (dist/web)
         run: make web
 
-      # Debian bookworm container: same glibc/OpenSSL as kru.
+      # Debian bookworm container: same glibc/OpenSSL as kru. Stamped with the service sources'
+      # own commit and its time, so an unchanged source builds a byte-identical kn_brain (no restart).
+      - name: Version metadata (service binaries)
+        id: meta
+        run: tools/release/version-meta.sh --server "$GITHUB_SHA" | tee -a "$GITHUB_OUTPUT"
+
       - name: Build services (dist/deploy/bookworm)
+        env:
+          KN_CMAKE_ARGS: ${{ steps.meta.outputs.cmake_flags }}
         run: TARGETS="kn_brain kn_migrate" deploy/ansible/build.sh bookworm
 
       # Pinned Go, never the runner's preinstalled one; GOTOOLCHAIN=local so a go.mod asking

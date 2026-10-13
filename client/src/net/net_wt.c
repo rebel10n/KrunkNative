@@ -191,12 +191,29 @@ static void wt_stop_timer(void) {
 }
 
 // The session (or the attempt) is over. Before UP: the next backend, else the WebSocket path.
+EM_JS(int, kn_dg_online, (void), { return typeof navigator === 'undefined' || navigator.onLine !== false ? 1 : 0; });
+
+// Why a live knet session ended, for the error screen (client_net_set_drop): the reasons below
+// come from wt_tick / wt_receive / kn_dg_on_close and net_rtc.c's fail().
+static void wt_explain(Client *client, const char *why) {
+    const char *label = wt_label_of(g_wt.backend);
+    if (!kn_dg_online()) client_net_set_drop(client, "offline", 0, "your network is offline (the browser reports no connection)");
+    else if (strstr(why, "no datagram")) client_net_set_drop(client, "timeout", 0, "no data from the server for %.0f s (%s)", KNET_TIMEOUT, label);
+    else if (strstr(why, "server closed")) client_net_set_drop(client, "closed", 0, "the server closed the connection");
+    else if (strstr(why, "ICE") || strstr(why, "peer connection") || strstr(why, "DTLS"))
+        client_net_set_drop(client, "ice", 0, "the network path to the connection gateway was lost (%s: %s)", label, why);
+    else if (strstr(why, "gateway")) client_net_set_drop(client, "gateway", 0, "the connection gateway closed the connection (%s)", label);
+    else if (strstr(why, "overflow")) client_net_set_drop(client, "overflow", 0, "the connection fell too far behind (transport overflow)");
+    else client_net_set_drop(client, "closed", 0, "%s (%s)", why, label);
+}
+
 static void wt_finish(const char *why) {
     Client *client = g_wt.client;
     const int was_up = g_wt.state == WT_UP;
     const int was_attempt = g_wt.state != WT_IDLE && !was_up;
     if (g_wt.state == WT_IDLE) return;
     wt_stop_timer();
+    if (was_up && client && !g_wt.closing) wt_explain(client, why);
     if (was_up) {
         uint8_t bye[8];
         wt_emit(NULL, bye, knet_build_disconnect(bye, g_wt.conn.token));
@@ -357,6 +374,15 @@ EMSCRIPTEN_KEEPALIVE void kn_dg_on_close(const int gen) {
     wt_finish(g_wt.state == WT_OPENING ? "could not open a session" : "the gateway closed the session");
 }
 
+// The page is going away (net_rtc.c's pagehide): the knet goodbye goes out before the browser
+// drops the connection without a word, so the game server frees the player at once instead of
+// keeping it for KNET_TIMEOUT.
+EMSCRIPTEN_KEEPALIVE void kn_dg_bye(void) {
+    if (g_wt.state != WT_UP) return;
+    uint8_t bye[8];
+    wt_emit(NULL, bye, knet_build_disconnect(bye, g_wt.conn.token));
+}
+
 // The backend's own verdict (net_rtc.c: signaling refused, UDP blocked, ICE lost, ...), as a
 // malloc'd string; the browser console already has the full diagnostics.
 EMSCRIPTEN_KEEPALIVE void kn_dg_on_fail(const int gen, char *reason) {
@@ -455,6 +481,7 @@ int net_wt_send(const NetPacketType type, const void *payload, const uint16_t le
 void net_wt_close(const int reconnect) {
     if (g_wt.state == WT_IDLE) return;
     Client *client = g_wt.client;
+    if (client && g_wt.state == WT_UP) client->net_close_intended = 1; // a switch / quit, not a drop (events.c)
     g_wt.closing = 1; // no WebSocket fallback / delayed retry from wt_finish
     wt_finish("closed by the client");
     g_wt.closing = 0;

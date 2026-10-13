@@ -4,6 +4,7 @@
 // NetStatus under net_lock and client_menu_tick() (main thread) turns it into
 // net_connected updates and the page's connection state (menu_ui.c).
 #include <client.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -22,10 +23,34 @@ static void net_set_status_code(Client *client, const NetStatus status, const ch
 
 static void net_set_status(Client *client, const NetStatus status, const char *error) {
     net_set_status_code(client, status, error, status == NET_STATUS_FAILED ? "000001" : "");
+    pthread_mutex_lock(&client->net_lock);
+    client->net_status_dropped = 0;
+    client->net_status_close_code = 0;
+    client->net_status_close_reason[0] = 0;
+    pthread_mutex_unlock(&client->net_lock);
+}
+
+void client_net_set_drop(Client *client, const char *tag, const int close_code, const char *fmt, ...) {
+    pthread_mutex_lock(&client->net_lock);
+    if (!client->net_drop_reason[0]) {
+        va_list args;
+        va_start(args, fmt);
+        vsnprintf(client->net_drop_reason, sizeof(client->net_drop_reason), fmt, args);
+        va_end(args);
+        snprintf(client->net_drop_tag, sizeof(client->net_drop_tag), "%s", tag ? tag : "");
+        client->net_drop_close_code = close_code;
+    }
+    pthread_mutex_unlock(&client->net_lock);
 }
 
 void on_client_socket_connect(Client *client) {
     client->net_session_connected = 1;
+    pthread_mutex_lock(&client->net_lock);
+    client->net_drop_reason[0] = 0; // a new session: no drop explained yet
+    client->net_drop_tag[0] = 0;
+    client->net_drop_close_code = 0;
+    client->net_close_intended = 0;
+    pthread_mutex_unlock(&client->net_lock);
     net_set_status(client, NET_STATUS_CONNECTED, NULL);
 
     printf("connected to server %s:%u\n", client->net_address, (unsigned int) client->net_port);
@@ -39,20 +64,55 @@ void on_client_socket_disconnect(Client *client) {
 
     char reason[sizeof(client->net_disconnect_reason)];
     char code[sizeof(client->net_disconnect_code)];
+    char drop[sizeof(client->net_drop_reason)], tag[sizeof(client->net_drop_tag)];
     pthread_mutex_lock(&client->net_lock);
     snprintf(reason, sizeof(reason), "%s", client->net_disconnect_reason);
     snprintf(code, sizeof(code), "%s", client->net_disconnect_code);
+    snprintf(drop, sizeof(drop), "%s", client->net_drop_reason);
+    snprintf(tag, sizeof(tag), "%s", client->net_drop_tag);
+    const int close_code = client->net_drop_close_code;
+    const int intended = client->net_close_intended;
+    client->net_close_intended = 0;
     client->net_disconnect_reason[0] = 0;
     client->net_disconnect_code[0] = 0;
+    client->net_drop_reason[0] = 0;
+    client->net_drop_tag[0] = 0;
+    client->net_drop_close_code = 0;
     pthread_mutex_unlock(&client->net_lock);
 
-    // Krunker gW(): a server error (idle kick, ...) closes for good and stays on the
-    // error screen; only the page's reconnect link (or going offline) tries again.
-    if (reason[0]) client->net_hold_retry = 1;
-    net_set_status_code(client, NET_STATUS_FAILED, reason[0] ? reason : "Disconnected from server", // server ERROR (e.g. idle kick) wins
-                        reason[0] ? (code[0] ? code : "000000") : "000000");
+    if (reason[0]) {
+        // Krunker gW(): a server error (idle kick, ...) closes for good and stays on the
+        // error screen; only the page's reconnect link (or going offline) tries again.
+        client->net_hold_retry = 1;
+        net_set_status_code(client, NET_STATUS_FAILED, reason, code[0] ? code : "000000"); // server ERROR (e.g. idle kick) wins
+        printf("disconnected from server: %s (%s)\n", reason, code[0] ? code : "000000");
+        return;
+    }
 
-    printf("disconnected from server\n");
+    if (intended) { // a server switch (or a stop without a reason): the next session follows
+        net_set_status_code(client, NET_STATUS_FAILED, "Disconnected from server", "000000");
+        printf("disconnected from server (switching)\n");
+        return;
+    }
+
+    // The transport lost the session without a word from the server: say what it saw (v7's
+    // io_disconnect(null, "000001", closeEvent): "Code: <close code> | Reason: <close reason>").
+    // A matchmade session (a join ticket) is rejoined with a fresh ticket by servers_ui.c
+    // (servers_ui_connection_lost): the transport holds so the old ticket is not resent meanwhile.
+    char message[sizeof(client->net_status_error)];
+    snprintf(message, sizeof(message), "Disconnected: %s", drop[0] ? drop : "the connection was closed");
+    pthread_mutex_lock(&client->net_lock);
+    const int ticket = client->net_join.client_key[0] != 0;
+    pthread_mutex_unlock(&client->net_lock);
+    if (ticket && !client->offline && !client->net_should_quit) client->net_hold_retry = 1;
+    net_set_status_code(client, NET_STATUS_FAILED, message, "000001");
+    pthread_mutex_lock(&client->net_lock);
+    client->net_status_dropped = 1;
+    client->net_status_close_code = close_code;
+    snprintf(client->net_status_close_reason, sizeof(client->net_status_close_reason), "%s", tag[0] ? tag : "closed");
+    pthread_mutex_unlock(&client->net_lock);
+
+    printf("disconnected from server: %s\n", drop[0] ? drop : "connection closed");
 }
 
 void on_client_socket_failed(Client *client, const char *message) {

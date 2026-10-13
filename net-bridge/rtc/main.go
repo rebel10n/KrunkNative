@@ -30,6 +30,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -54,6 +55,14 @@ import (
 
 const (
 	knetConnectResponse = 0x03
+	knetAccept          = 0x04 // S->C [type][salt4][token4]
+	knetData            = 0x06 // both [type][token4]...
+	knetDisconnectType  = 0x07 // both [type][token4] (+ one game frame: shared/include/knet.h)
+	netPacketError      = 30   // NET_PACKET_ERROR (shared/include/shared.h): NetErrorPacket {message[96], code[8]}
+	errorMessageSize    = 96
+	errorCodeSize       = 8
+	stopReasonMaxAge    = 15 * time.Minute // server_bin ignores an older shutdown_reason_file too
+	stopGrace           = 300 * time.Millisecond
 	knetForwardedMax    = 47
 	maxDatagram         = 1200
 	maxOfferBytes       = 32 << 10
@@ -281,15 +290,78 @@ type session struct {
 	ua      string // browser family/version from the signaling request (logs)
 	// timings since the POST (ms, 0 = not reached) and the ICE state history, for the logs
 	tAnswer, tICE, tDTLS, tOpen atomic.Int64
-	iceState                    atomic.Value // string: the last ICE connection state
-	iceLost                     atomic.Bool  // ICE went disconnected/failed after connecting
-	knetBye                     atomic.Value // string: who sent the knet DISCONNECT ("server" / "browser")
+	iceState                    atomic.Value  // string: the last ICE connection state
+	iceLost                     atomic.Bool   // ICE went disconnected/failed after connecting
+	knetBye                     atomic.Value  // string: who sent the knet DISCONNECT ("server" / "browser")
+	token                       atomic.Uint32 // the knet session token (from the server's ACCEPT / DATA), 0 = none yet
+	dc                          atomic.Pointer[webrtc.DataChannel]
+}
+
+// notifyStop: the gateway is stopping: tell the browser why (its knet goodbye with an ERROR
+// frame). 1 = sent (the caller gives it a moment to leave before closing the connection).
+func (s *session) notifyStop(message, code string) bool {
+	token, dc := s.token.Load(), s.dc.Load()
+	if token == 0 || dc == nil || dc.ReadyState() != webrtc.DataChannelStateOpen || s.closed.Load() {
+		return false
+	}
+	return dc.Send(knetByeWithError(token, message, code)) == nil
 }
 
 func (s *session) since() int64 { return max(time.Since(s.started).Milliseconds(), 1) }
 
-// knetDisconnect: a knet DISCONNECT datagram ([0x07][token4]).
-func knetDisconnect(b []byte) bool { return len(b) == 5 && b[0] == 0x07 }
+// knetDisconnect: a knet DISCONNECT datagram ([0x07][token4], possibly with a game frame).
+func knetDisconnect(b []byte) bool { return len(b) >= 5 && b[0] == knetDisconnectType }
+
+// knetToken: the session token a server datagram carries (ACCEPT, DATA, DISCONNECT), 0 if none.
+func knetToken(b []byte) uint32 {
+	switch {
+	case len(b) >= 9 && b[0] == knetAccept:
+		return binary.BigEndian.Uint32(b[5:9])
+	case len(b) >= 15 && b[0] == knetData, len(b) >= 5 && b[0] == knetDisconnectType:
+		return binary.BigEndian.Uint32(b[1:5])
+	}
+	return 0
+}
+
+// knetBye: [0x07][token4], the goodbye the gateway sends the game server for a browser that left
+// without one (tab closed, network lost, gateway stopping), so its player is freed at once instead
+// of after the server's 10 s knet timeout.
+func knetBye(token uint32) []byte {
+	b := []byte{knetDisconnectType, 0, 0, 0, 0}
+	binary.BigEndian.PutUint32(b[1:], token)
+	return b
+}
+
+// knetByeWithError: the browser's goodbye when the gateway stops: DISCONNECT carrying an ERROR
+// frame ([30][len2][NetErrorPacket]) the client shows and acts on like a game server's
+// (servers_ui.c: 004004 / 004006 rejoin with a fresh ticket).
+func knetByeWithError(token uint32, message, code string) []byte {
+	payload := make([]byte, errorMessageSize+errorCodeSize)
+	copy(payload[:errorMessageSize-1], message)
+	copy(payload[errorMessageSize:errorMessageSize+errorCodeSize-1], code)
+	b := append(knetBye(token), netPacketError, byte(len(payload)>>8), byte(len(payload)))
+	return append(b, payload...)
+}
+
+// stopMessage: what the players are told when the gateway stops, from the first line of
+// KRUNK_NATIVE_STOP_REASON_FILE (a deploy writes "update" there around the restart; an older
+// file is ignored), like server_bin's server_shutdown_message: update -> "GAME UPDATING"
+// (004004), anything else -> "Server restarting" (004006): the client rejoins either way.
+func stopMessage(reasonFile string) (string, string) {
+	reason := ""
+	if reasonFile != "" {
+		if st, err := os.Stat(reasonFile); err == nil && time.Since(st.ModTime()) <= stopReasonMaxAge {
+			if data, err := os.ReadFile(reasonFile); err == nil {
+				reason, _, _ = strings.Cut(string(data), "\n")
+				reason = strings.ToLower(strings.TrimSpace(reason))
+			}
+		}
+	}
+	if reason == "update" {
+		return "GAME UPDATING", "004004"
+	}
+	return "Server restarting", "004006"
+}
 
 // browserFamily: "Chrome/153", "Firefox/131", "Safari/18.1", "Edge/140" or "?" (logs only).
 func browserFamily(ua string) string {
@@ -339,6 +411,16 @@ func (s *session) close(why string) {
 	if s.closed.Swap(true) { // (pc.Close can call back into here)
 		return
 	}
+	// the browser left without a knet goodbye (tab closed, network lost, the gateway stopping):
+	// say it for the browser, or the game server keeps the player until its knet timeout
+	if who, _ := s.knetBye.Load().(string); who == "" {
+		if token := s.token.Load(); token != 0 {
+			bye := knetBye(token)
+			for i := 0; i < 3; i++ {
+				s.udp.Write(bye)
+			}
+		}
+	}
 	s.udp.Close()
 	s.g.release(s.client)
 	s.g.live.Delete(s.id)
@@ -373,6 +455,7 @@ func (s *session) onDataChannel(dc *webrtc.DataChannel) {
 		log.Printf("[rtc] #%d note: channel is ordered=%v maxRetransmits=%v (want unordered, 0)", s.id, dc.Ordered(), dc.MaxRetransmits())
 	}
 	dc.OnOpen(func() {
+		s.dc.Store(dc)
 		s.tOpen.Store(s.since())
 		log.Printf("[rtc] #%d %s (ice %s) %s -> udp %s; open in %d ms (answer %d, ICE %d, DTLS %d)", s.id, s.client, s.peerHost(), s.ua, s.target,
 			s.tOpen.Load(), s.tAnswer.Load(), s.tICE.Load(), s.tDTLS.Load())
@@ -409,6 +492,8 @@ func (s *session) serverToBrowser(dc *webrtc.DataChannel) {
 		s.fromSrv.Add(1)
 		if knetDisconnect(buf[:n]) {
 			s.knetBye.CompareAndSwap(nil, "server")
+		} else if s.token.Load() == 0 {
+			s.token.Store(knetToken(buf[:n]))
 		}
 		if n > maxDatagram || s.drop() {
 			continue
@@ -605,6 +690,7 @@ func main() {
 	publicIP := flag.String("public-ip", os.Getenv("KRUNK_NATIVE_RTC_PUBLIC_IP"), "comma-separated IPs to advertise instead of the bound address (1:1 NAT)")
 	origins := flag.String("origins", os.Getenv("KRUNK_NATIVE_RTC_ORIGINS"), "comma-separated allowed Origin values; empty = any (dev)")
 	infoFile := flag.String("info-file", os.Getenv("KRUNK_NATIVE_RTC_INFO"), "write {\"url\"} JSON here (the web client reads /rtc.json)")
+	stopReasonFile := flag.String("stop-reason-file", os.Getenv("KRUNK_NATIVE_STOP_REASON_FILE"), "on SIGTERM, \"update\" in its first line tells players GAME UPDATING (else Server restarting)")
 	publicURL := flag.String("public-url", os.Getenv("KRUNK_NATIVE_RTC_URL"), "URL advertised in -info-file (default http://<http><path>)")
 	verbose := flag.Bool("v", os.Getenv("KRUNK_NATIVE_RTC_DEBUG") != "", "pion debug logging")
 	flag.Parse()
@@ -694,10 +780,23 @@ func main() {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-stop
-		log.Printf("[rtc] stopping (%d sessions)", g.count())
+		message, code := stopMessage(*stopReasonFile)
+		log.Printf("[rtc] stopping (%d sessions): telling players %q (%s)", g.count(), message, code)
 		srv.Close()
+		// every browser gets the reason first (its client shows it and rejoins with a fresh ticket),
+		// then a moment for those datagrams to leave before the connections close
+		told := 0
 		g.live.Range(func(_, v any) bool {
-			v.(*session).close("gateway stopping")
+			if v.(*session).notifyStop(message, code) {
+				told++
+			}
+			return true
+		})
+		if told > 0 {
+			time.Sleep(stopGrace)
+		}
+		g.live.Range(func(_, v any) bool {
+			v.(*session).close(fmt.Sprintf("gateway stopping (told %q)", message))
 			return true
 		})
 		mux.Close()

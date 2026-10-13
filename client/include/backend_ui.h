@@ -101,11 +101,13 @@ int  servers_ui_reconnect(void);            // console `reconnect`: the last ser
 int  servers_ui_reconnect_offline(void);    // console `reconnect`: 1 = `disconnect` left the offline game, start it again
 void servers_ui_tick(Client*);
 int  servers_ui_retry(void);                 // the error screen's "seek a new game" link; 1 = handled
-// A lost session (every NET_STATUS_FAILED, main thread): a server shutdown ERROR (004004 / 004006)
-// or a refused join key (004001) starts a rejoin through the matchmaker with a fresh ticket
-// (direct servers: the transport retries). error may be rewritten (a second refusal). 1 = rejoining.
-int  servers_ui_connection_lost(char *error, size_t error_size, const char *code);
+// A lost session (every NET_STATUS_FAILED, main thread): a server shutdown ERROR (004004 / 004006),
+// a refused join key (004001) or a session the transport lost without a server ERROR (dropped: not
+// a kick / ban) starts a rejoin through the matchmaker with a fresh ticket (direct servers: the
+// transport retries). error may be rewritten (a second refusal, quick drops). 1 = rejoining.
+int  servers_ui_connection_lost(char *error, size_t error_size, const char *code, int dropped);
 int  servers_ui_rejoining(void);             // 1 = a rejoin is due / seeking (the error screen says so)
+const char *servers_ui_rejoin_text(void);    // "Reconnecting..." / "Rejoining a game..." for that line
 int  servers_ui_join_link(const char *text);  // Join window / pasted link or "NODE:lobby" id (v3.1.1 f9); 1 = joining
 int  servers_ui_connect_game(const char *text); // Connect window / console connect given a game link or id (CH2:kz862); 1 = joining, 0 = an address
 void servers_ui_invite_link(char *out, size_t n); // copyInviteLink: <origin>/?game=<id>, the id unescaped, short (CH2:kz862)

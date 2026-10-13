@@ -478,8 +478,10 @@ function shutdown(signal: NodeJS.Signals): void {
     return;
   }
 
+  // the bridge's players get their ERROR frame and close first (webBridge.ts closeAllSessions);
+  // destroying their sockets at once would discard both
   closeBridgeSessions(false);
-  destroyActiveSockets();
+  setTimeout(destroyActiveSockets, webBridge.STOP_FRAME_WAIT_MS + 200).unref?.();
 }
 
 const signals: NodeJS.Signals[] = ["SIGTERM", "SIGINT", "SIGHUP"];

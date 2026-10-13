@@ -1,6 +1,30 @@
+# A restart tells the players why: kn-rtc reads "update" from KRUNK_NATIVE_STOP_REASON_FILE on
+# SIGTERM and sends every browser v7.1.4's "GAME UPDATING" (their clients rejoin with a fresh
+# ticket) before it closes. All of them listen to "Restart kn_rtc" and run in this order.
+- name: Stop reason directory (kn_rtc)
+  ansible.builtin.file:
+    path: "{{ kn_gateway_stop_reason_file | dirname }}"
+    state: directory
+    mode: "0755"
+  listen: Restart kn_rtc
+
+- name: Stop reason for the restart, update (kn_rtc)
+  ansible.builtin.copy:
+    dest: "{{ kn_gateway_stop_reason_file }}"
+    content: "update\n"
+    mode: "0644"
+  listen: Restart kn_rtc
+
 - name: Restart kn_rtc
   ansible.builtin.systemd_service:
     name: kn-rtc
     state: restarted
     daemon_reload: true
   ignore_errors: "{{ ansible_check_mode }}"
+  listen: Restart kn_rtc
+
+- name: Clear the stop reason (kn_rtc)
+  ansible.builtin.file:
+    path: "{{ kn_gateway_stop_reason_file }}"
+    state: absent
+  listen: Restart kn_rtc

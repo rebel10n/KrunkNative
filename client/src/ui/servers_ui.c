@@ -74,8 +74,9 @@ static int g_quick_join_left;    // quickJoinRegion: remaining candidates
 static char **g_quick_join;      // candidate game ids
 static int g_quick_join_count, g_quick_join_next;
 
-// Rejoining after the server went away or refused the join key (servers_ui_connection_lost)
-enum { REJOIN_NONE, REJOIN_RESTART, REJOIN_KEY, REJOIN_DIRECT };
+// Rejoining after the server went away, refused the join key or the transport lost the session
+// (servers_ui_connection_lost)
+enum { REJOIN_NONE, REJOIN_RESTART, REJOIN_KEY, REJOIN_DIRECT, REJOIN_DROP };
 static int g_rejoin;             // REJOIN_* of the pending / running rejoin
 static double g_rejoin_at;       // glfwGetTime() of its next attempt, 0 = none due
 static double g_rejoin_until;    // REJOIN_RESTART / REJOIN_DIRECT: give up after this
@@ -88,6 +89,11 @@ static char g_rejoin_game[160];  // the lobby to seek again ("" = the region's b
 #define REJOIN_WINDOW 120.0      // s a restart rejoin keeps trying (a deploy restarts in ~15 s)
 #define REJOIN_KEY_WINDOW 30.0   // a second refused join key within this is shown, not retried
 #define REJOIN_SETTLED 5.0       // s connected after which a rejoin is over
+#define REJOIN_DROP_DELAY 1.0    // s after a lost session (no server ERROR) before the rejoin seek
+#define REJOIN_DROP_STABLE 20.0  // a session that lasted this long resets the quick-drop count
+#define REJOIN_DROP_MAX 4        // sessions in a row lost within REJOIN_DROP_STABLE: stop rejoining
+static double g_session_started; // glfwGetTime() the current / last session connected (rejoin_tick), 0 none
+static int g_drop_streak;        // consecutive lost sessions shorter than REJOIN_DROP_STABLE
 
 static void rejoin_cancel(void) {
     if (g_rejoin == REJOIN_NONE && g_rejoin_at <= 0.0) return;
@@ -507,7 +513,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
     } else {
         const cJSON *err = cJSON_GetObjectItem(res, "error");
         fprintf(stderr, "[mm] seek failed (HTTP %d): %s\n", status, cJSON_IsString(err) ? err->valuestring : "no response");
-        if (rejoin && g_rejoin == REJOIN_RESTART && glfwGetTime() + REJOIN_RETRY_DELAY < g_rejoin_until) {
+        if (rejoin && (g_rejoin == REJOIN_RESTART || g_rejoin == REJOIN_DROP) && glfwGetTime() + REJOIN_RETRY_DELAY < g_rejoin_until) {
             // the restarted server (or another one of the region) is not listed yet: try again,
             // the error screen keeps the server's message ("Rejoining...")
             g_rejoin_at = glfwGetTime() + REJOIN_RETRY_DELAY;
@@ -549,7 +555,7 @@ static void seek(const char *game_id, const int auto_change, void *quiet) {
     g_seek_inflight = 1;
     if (!backend_http_get(path, on_seek, quiet)) {
         g_seek_inflight = 0;
-        if (g_rejoin_seek && g_rejoin == REJOIN_RESTART && glfwGetTime() + REJOIN_RETRY_DELAY < g_rejoin_until) {
+        if (g_rejoin_seek && (g_rejoin == REJOIN_RESTART || g_rejoin == REJOIN_DROP) && glfwGetTime() + REJOIN_RETRY_DELAY < g_rejoin_until) {
             g_rejoin_seek = 0;
             g_rejoin_at = glfwGetTime() + REJOIN_RETRY_DELAY; // the restart rejoin tries again
             return;
@@ -1348,10 +1354,49 @@ static int ci_contains(const char *text, const char *needle) {
     return 0;
 }
 
+// A lost session (no server ERROR: the transport's own reason is on the screen, events.c).
+// Matchmade: a fresh ticket for the same lobby (autoChangeGame: the region's best when it is
+// gone; the transport holds meanwhile, so the old ticket is never resent). Direct / no
+// matchmaker: the transport reconnects. Sessions that keep dropping right away stop it.
+static int connection_dropped(char *error, const size_t error_size) {
+    const double now = glfwGetTime();
+    const int quick = g_session_started > 0.0 && now - g_session_started < REJOIN_DROP_STABLE;
+    g_drop_streak = quick ? g_drop_streak + 1 : 1;
+    if (g_drop_streak > REJOIN_DROP_MAX) {
+        char original[128];
+        snprintf(original, sizeof(original), "%s", error);
+        snprintf(error, error_size, "%s (gave up after %d quick reconnects)", original, REJOIN_DROP_MAX);
+        fprintf(stderr, "[mm] connection lost %d times in a row within %.0f s: not rejoining (%s)\n", g_drop_streak,
+                REJOIN_DROP_STABLE, original);
+        rejoin_cancel();
+        return 0;
+    }
+    if (!g_brain_mode || g_pin == PIN_DIRECT || backend_available() != 1) {
+        // the transport reconnects on its own, with its backoff (a dead server is not hammered);
+        // only a held one (it had a ticket) is asked to
+        printf("[mm] connection lost (%s): reconnecting\n", error);
+        if (g_rejoin != REJOIN_DIRECT || now >= g_rejoin_until) g_rejoin_until = now + REJOIN_WINDOW;
+        g_rejoin = REJOIN_DIRECT;
+        g_rejoin_at = g_client->net_hold_retry ? now + REJOIN_DROP_DELAY : 0.0;
+        menu_update_instructions();
+        return 1;
+    }
+    if (g_rejoin != REJOIN_DROP || now >= g_rejoin_until) g_rejoin_until = now + REJOIN_WINDOW;
+    g_rejoin = REJOIN_DROP;
+    g_rejoin_at = now + REJOIN_DROP_DELAY;
+    snprintf(g_rejoin_game, sizeof(g_rejoin_game), "%s", g_game_id);
+    printf("[mm] connection lost (%s): rejoining %s through the matchmaker\n", error,
+           g_rejoin_game[0] ? g_rejoin_game : "the region's best lobby");
+    menu_update_instructions();
+    return 1;
+}
+
 // Main thread, for every NET_STATUS_FAILED (menu_ui.c menu_poll_connection): error / code are
-// what the screen shows; error may be rewritten. 1 = a rejoin is under way.
-int servers_ui_connection_lost(char *error, const size_t error_size, const char *code) {
+// what the screen shows; error may be rewritten. dropped: the transport lost a live session
+// without a server ERROR (events.c). 1 = a rejoin is under way.
+int servers_ui_connection_lost(char *error, const size_t error_size, const char *code, const int dropped) {
     if (!g_client || g_client->offline || !code) return servers_ui_rejoining();
+    if (dropped) return g_pin == PIN_IDLE ? servers_ui_rejoining() : connection_dropped(error, error_size);
     const int restart = !strcmp(code, NET_ERROR_CODE_UPDATING) || !strcmp(code, NET_ERROR_CODE_SHUTDOWN);
     const int key = !strcmp(code, NET_ERROR_CODE_TICKET) && ci_contains(error, "join key");
     if ((!restart && !key) || g_pin == PIN_IDLE) return servers_ui_rejoining();
@@ -1398,11 +1443,19 @@ int servers_ui_rejoining(void) {
     return g_rejoin != REJOIN_NONE && (g_rejoin_at > 0.0 || g_rejoin_seek || g_rejoin == REJOIN_DIRECT);
 }
 
+// The error screen's line while rejoining: the same lobby again after a lost connection or on a
+// direct server, else a (possibly other) game through the matchmaker.
+const char *servers_ui_rejoin_text(void) {
+    if (g_rejoin == REJOIN_DROP || g_rejoin == REJOIN_DIRECT || servers_ui_pinned() || !g_brain_mode) return "Reconnecting...";
+    return "Rejoining a game...";
+}
+
 static void rejoin_tick(Client *client) {
     static double connected_since = -1.0;
     const double now = glfwGetTime();
     if (!client->net_connected) connected_since = -1.0;
-    else if (connected_since < 0.0) connected_since = now;
+    else if (connected_since < 0.0) connected_since = g_session_started = now;
+    if (connected_since >= 0.0 && now - connected_since >= REJOIN_DROP_STABLE) g_drop_streak = 0; // a session that lasted
     if (g_rejoin == REJOIN_NONE) return;
     if (connected_since >= 0.0 && now - connected_since >= REJOIN_SETTLED && g_rejoin_at <= 0.0 && !g_rejoin_seek) {
         rejoin_cancel(); // back in a lobby

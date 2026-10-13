@@ -18,8 +18,9 @@ from kn_proto.free_ports().
      then a new server_bin). The client shows the reason, seeks again (never sends its old
      ticket), gets a fresh ticket for the restarted server's lobby and is back in the game
   5. client_bin: the server is killed (-9: no message), restarted after the ticket expired; the
-     transport retries the old address with the old ticket, the server answers "Join key
-     expired", the client rejoins with a fresh ticket and is back in the game
+     client shows the transport's reason ("Disconnected: the server closed the connection"),
+     holds the transport (the old ticket is never resent), rejoins through the matchmaker with a
+     fresh ticket for the restarted server's lobby and is back in the game
   6. client_bin against a server whose join_secret is wrong: every ticket is refused ("Invalid
      join key"); the client rejoins once, then shows "Could not rejoin: ... again"
   0. (first) resuming: a transport reconnect re-sends the seek ticket after it expired (the edges'
@@ -359,17 +360,19 @@ def client_key_expired(brain_port, node):
     old = node.game
     p, log = client("expired", brain_port, SCRIPT.format(respawn=20000, state=34000, quit=35000))
     check("5: the client joins the lobby and plays", wait_for(lambda: states(read_log(log)), 40), read_log(log)[-400:])
-    node.stop(signal.SIGKILL, 0)  # a crash: no message, the transport retries the address
-    time.sleep(6.5)  # brain.join_ttl_s 5: the ticket expires
+    node.stop(signal.SIGKILL, 0)  # a crash: no message from the server, only the transport's
+    time.sleep(6.5)  # brain.join_ttl_s 5: the old ticket expires
     node2 = Node(brain_port)
     finish(p, 60)
     text = read_log(log)
-    check("5: the restarted server refused the old ticket as expired", "Join key expired" in node2.text(), node2.text()[-400:])
-    check("5: the client took that as 'rejoin with a new ticket'",
-          "join key refused (Join key expired)" in text
-          and re.search(r"\[mm\] rejoin: %s with a fresh join ticket" % re.escape(node2.game or "-"), text) is not None,
-          text[-600:])
-    check("5: joined the restarted server's lobby", joined(text) == [old, node2.game], str(joined(text)))
+    check("5: the client shows the transport's reason (no server ERROR)",
+          re.search(r"disconnected from server: the (server closed the connection|connection was reset)", text) is not None
+          and "rejoining %s through the matchmaker" % old in text, text[-600:])
+    check("5: the old ticket never reached the restarted server", "Join key" not in node2.text(), node2.text()[-400:])
+    check("5: it rejoined with a fresh ticket for the restarted server's lobby",
+          re.search(r"\[mm\] rejoin: %s with a fresh join ticket" % re.escape(node2.game or "-"), text) is not None, text[-600:])
+    js = joined(text)
+    check("5: joined the restarted server's lobby", len(js) >= 2 and js[0] == old and js[-1] == node2.game, str(js))
     st = states(text)
     check("5: back in the game", len(st) >= 2 and in_game(st[-1]), str(st))
     node2.stop()

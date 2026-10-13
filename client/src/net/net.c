@@ -68,6 +68,24 @@ static void net_wait_readable(const int socket, const int timeout_ms) {
 #endif
 }
 
+// A recv() error that ended the session, for the error screen (client_net_set_drop).
+static void net_drop_from_errno(Client *client, const int error) {
+#ifdef WIN32
+    const int reset = error == WSAECONNRESET || error == WSAECONNABORTED, timeout = error == WSAETIMEDOUT;
+    const int offline = error == WSAENETDOWN || error == WSAENETUNREACH || error == WSAEHOSTUNREACH;
+    char text[64];
+    snprintf(text, sizeof(text), "error %d", error);
+#else
+    const int reset = error == ECONNRESET || error == ECONNABORTED || error == EPIPE, timeout = error == ETIMEDOUT;
+    const int offline = error == ENETDOWN || error == ENETUNREACH || error == EHOSTUNREACH;
+    const char *text = strerror(error);
+#endif
+    if (reset) client_net_set_drop(client, "reset", 0, "the connection was reset (%s)", text);
+    else if (timeout) client_net_set_drop(client, "timeout", 0, "the connection timed out (%s)", text);
+    else if (offline) client_net_set_drop(client, "offline", 0, "the network is unreachable (%s)", text);
+    else client_net_set_drop(client, "error", 0, "connection error (%s)", text);
+}
+
 int net_poll(Client *client, const int socket, NetPacketBuffer *read_buffer) {
     char buffer[NET_BUFFER_SIZE];
     int read;
@@ -78,12 +96,16 @@ int net_poll(Client *client, const int socket, NetPacketBuffer *read_buffer) {
 #else
         if (read < 0 && WOULD_BLOCK(NET_ERRNO)) return 1;
 #endif
-
+        if (read == 0) client_net_set_drop(client, "closed", 0, "the server closed the connection");
+        else net_drop_from_errno(client, NET_ERRNO);
         return 0;
     }
 
     // recv() never returns more than the buffer has room for, so a large read cannot overflow it.
-    if (!net_buffer_push(read_buffer, buffer, (size_t) read)) return 0;
+    if (!net_buffer_push(read_buffer, buffer, (size_t) read)) {
+        client_net_set_drop(client, "protocol", 0, "receive buffer overflow");
+        return 0;
+    }
 
     NetPacket packet;
     int result;
@@ -101,7 +123,10 @@ int net_poll(Client *client, const int socket, NetPacketBuffer *read_buffer) {
         client_net_queue_packet(client, &packet);
     }
 
-    if (result < 0) return 0;
+    if (result < 0) {
+        client_net_set_drop(client, "protocol", 0, "malformed data from the server");
+        return 0;
+    }
 
     return 1;
 }
@@ -343,7 +368,7 @@ void client_net_stop(Client *client, const char *reason) {
     if (client->net_thread_running) {
         pthread_mutex_lock(&client->net_lock);
         const int socket = client->net_socket;
-        if (socket >= 0) { // on_client_socket_disconnect shows it instead of "Disconnected from server"
+        if (socket >= 0) { // on_client_socket_disconnect shows it instead of a transport drop
             snprintf(client->net_disconnect_reason, sizeof(client->net_disconnect_reason), "%s", reason ? reason : "Disconnected");
             snprintf(client->net_disconnect_code, sizeof(client->net_disconnect_code), "000000");
         }
@@ -382,6 +407,7 @@ void client_net_switch_server(Client *client) {
     if (client->net_thread_running) {
         pthread_mutex_lock(&client->net_lock);
         const int socket = client->net_socket;
+        if (socket >= 0) client->net_close_intended = 1; // a switch, not a drop (events.c)
         pthread_mutex_unlock(&client->net_lock);
         client->net_retry_now = 1;
         if (socket >= 0) net_socket_shutdown(socket);

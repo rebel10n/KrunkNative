@@ -157,6 +157,16 @@ size_t knet_build_disconnect(uint8_t *out, const uint32_t token) {
     put32(out + 1, token);
     return 5;
 }
+
+size_t knet_build_disconnect_frame(uint8_t *out, const uint32_t token, const uint8_t type, const void *payload, uint16_t length) {
+    if (length > KNET_MTU - 8) length = KNET_MTU - 8;
+    knet_build_disconnect(out, token);
+    out[5] = type;
+    out[6] = (uint8_t) (length >> 8);
+    out[7] = (uint8_t) length;
+    if (length) memcpy(out + 8, payload, length);
+    return 8 + (size_t) length;
+}
 // KNET_PART2
 
 // ------------------------------------------------------------------ connection
@@ -434,6 +444,11 @@ int knet_conn_receive(KnetConn *conn, const uint8_t *in, const size_t length, co
                       const KnetDeliverFn deliver, void *user, int *closed) {
     if (closed) *closed = 0;
     if (length >= 5 && in[0] == KNET_DISCONNECT && get32(in + 1) == conn->token) {
+        // a relay's goodbye can say why: one game frame after the token (knet.h KNET_DISCONNECT)
+        if (length >= 8 && deliver) {
+            const uint16_t n = (uint16_t) ((in[6] << 8) | in[7]);
+            if ((size_t) n + 8 <= length) deliver(user, in[5], in + 8, n);
+        }
         if (closed) *closed = 1;
         return 1;
     }

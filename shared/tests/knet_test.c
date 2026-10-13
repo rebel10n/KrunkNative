@@ -215,9 +215,40 @@ static void test_timeout(void) {
     printf("timeout OK\n");
 }
 
+// A relay's goodbye with a reason (net-bridge/rtc stopping): the frame is delivered, then closed.
+static struct {
+    int count;
+    uint8_t type;
+    char text[16];
+} g_bye;
+
+static void bye_deliver(void *user, const uint8_t type, const uint8_t *payload, const uint16_t length) {
+    (void) user;
+    g_bye.count++;
+    g_bye.type = type;
+    snprintf(g_bye.text, sizeof(g_bye.text), "%.*s", (int) length, (const char *) payload);
+}
+
+static void test_disconnect_frame(void) {
+    KnetConn conn;
+    knet_conn_init(&conn, 9, 0.0);
+    uint8_t d[64];
+    const size_t n = knet_build_disconnect_frame(d, 9, 30, "restart", 7);
+    CHECK(n == 15 && knet_datagram_token(d, n) == 9, "frame disconnect size %zu", n);
+    int closed = 0;
+    CHECK(knet_conn_receive(&conn, d, n, 1.0, bye_deliver, NULL, &closed) && closed, "frame disconnect not closed");
+    CHECK(g_bye.count == 1 && g_bye.type == 30 && !strcmp(g_bye.text, "restart"), "frame not delivered (%d)", g_bye.count);
+    closed = 0;
+    CHECK(knet_conn_receive(&conn, d, n - 1, 1.0, bye_deliver, NULL, &closed) && closed && g_bye.count == 1,
+          "truncated frame delivered");
+    knet_conn_free(&conn);
+    printf("disconnect frame OK\n");
+}
+
 int main(void) {
     test_handshake();
     test_timeout();
+    test_disconnect_frame();
     run_session(0, 0, 0, 0.0005, "clean (loopback)");
     run_session(0, 0, 0, 0.05, "50 ms");
     run_session(5, 0, 0, 0.03, "5% drop 30 ms");

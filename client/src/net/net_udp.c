@@ -267,13 +267,17 @@ int net_udp_client_session(Client *client, const struct sockaddr_in *address) {
             knet_sim_filter(&g_cu.sim, in, (size_t) got, cu_sim_receive, &closed);
         }
         const double now = cu_now();
-        if (closed) why = "server closed the session";
-        else if (knet_conn_timed_out(&g_cu.conn, now)) {
+        if (closed) {
+            why = "server closed the session";
+            client_net_set_drop(client, "closed", 0, "the server closed the connection");
+        } else if (knet_conn_timed_out(&g_cu.conn, now)) {
             closed = 1;
             why = "timed out";
+            client_net_set_drop(client, "timeout", 0, "no data from the server for %.0f s", KNET_TIMEOUT);
         } else if (g_cu.conn.failed) {
             closed = 1;
             why = "transport overflow";
+            client_net_set_drop(client, "overflow", 0, "the connection fell too far behind (transport overflow)");
         } else {
             knet_conn_flush(&g_cu.conn, now, cu_emit, NULL);
         }

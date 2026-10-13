@@ -24,6 +24,8 @@ rcon_port       0
 bans_file       "{{ kn_state_dir }}/gs-{{ n }}/bans.json"
 // Read on SIGTERM: a deploy writes "update" there (players see GAME UPDATING, then rejoin).
 shutdown_reason_file "{{ kn_gameserver_stop_reason_file }}"
+// SIGTERM drains: no new players, the round finishes (at most this many seconds), then stop.
+shutdown_grace  {{ kn_gameserver_drain_timeout }}
 // Coordinator link (matchmaking): wss:// through Cloudflare, certificate verified against
 // the system CA store; the brain hands clients public_host/port, not the TCP peer.
 {% set kn_gs_link = kn_gameserver_coordinator_url if (n not in kn_gameserver_online_instances or kn_gameserver_coordinator_online_instances | bool) else '' %}

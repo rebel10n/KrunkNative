@@ -32,14 +32,16 @@
     quiet: true
   when: ansible_all_ipv4_addresses is defined
 
-# Static and reproducible (-trimpath, empty build id): an unchanged source gives a
-# byte-identical binary (no copy, no restart).
+# Static and reproducible (-trimpath, empty build id, -buildvcs=false): an unchanged source gives
+# a byte-identical binary (no copy, no restart). Without -buildvcs=false a build inside a git
+# checkout (CI) stamps vcs.revision/vcs.time/vcs.modified, so every push changed the binary and
+# restarted the gateway, dropping every web player (2026-10-12: 17 restarts in 24 h).
 - name: Build kn-rtc on the controller (go build)
   ansible.builtin.shell: |
     set -eu
     mkdir -p {{ (kn_rtc_binary | dirname) | quote }}
     cd {{ (kn_repo_root ~ '/net-bridge/rtc') | quote }}
-    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w -buildid=' -o {{ kn_rtc_binary | quote }} .
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -buildvcs=false -ldflags='-s -w -buildid=' -o {{ kn_rtc_binary | quote }} .
   args:
     executable: /bin/bash
   delegate_to: localhost
