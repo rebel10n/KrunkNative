@@ -367,7 +367,10 @@ enum {
     // KrunkNative addition: the Object Manager (F1, cont_objectManagerKey) toggles the spawn menu
     // (client/src/ui/object_manager_ui.c); the slot held F1's earlier Game Settings bind
     UI_CONTROL_OBJECT_MANAGER = 41,
-    UI_CONTROL_COUNT = 42
+    // KrunkNative additions: the Object Manager's Undo (U, cont_omUndoKey) and Remove at the
+    // crosshair (Delete, cont_omRemoveKey), in game
+    UI_CONTROL_OM_UNDO = 42, UI_CONTROL_OM_REMOVE = 43,
+    UI_CONTROL_COUNT = 44
 };
 
 // Input-related settings ClientSettings does not carry (written by client_apply_setting).
@@ -456,6 +459,7 @@ int  object_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlA
 char *object_manager_window_gen(int id, const char **header); // NULL for other ids
 int  object_manager_events_handle(Client*, int type, const void *payload, uint16_t length); // packets 251-253
 void object_manager_ui_reset(void);              // a new server (INIT): its caps are unknown again
+void object_manager_ui_key(Client*, int action); // the Undo / Remove binds in game: OM_ACTION_UNDO / OM_ACTION_REMOVE_AIM
 void ui_controls_select_slot(int slot);          // ui_controls.c: equip loadout slot `slot` with the next input frame
 // END object_manager_ui block
 

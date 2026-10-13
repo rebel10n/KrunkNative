@@ -2,7 +2,8 @@
 // KrunkNative Object Manager: a Garry's Mod style spawn menu (F1). Not a Krunker v7.1.4 feature
 // (doc/v7/decisions.md "Object Manager"). Players carry extra loadout weapons and drop weapon
 // pickups at the crosshair; devs, the game host and the offline sandbox also spawn objects,
-// entities and NPCs. Everything is server-authoritative, rate limited and capped.
+// entities and NPCs, and take them back (undo, remove at the crosshair). Everything is
+// server-authoritative, rate limited and capped.
 //
 // Packets: NET_PACKET_BLOCK_SANDBOX (250-254), sent only to peers that announced
 // NET_PROTOCOL_MINOR_V7 (server/src/net.c net_peer_takes); clients send SPAWN_REQ only to such
@@ -85,14 +86,14 @@ typedef enum {
 
 typedef struct {
     const char *name;
-    const char *icon;     // a Material Icons ligature for the grid
+    const char *icon;     // a Material Icons ligature for the grid, or a page image ("img/props/prop_1.png")
     unsigned char kind;   // ObjectManagerEntryKind
     short data;
     const char *json;     // OM_ENTRY_RECORD
 } ObjectManagerEntry;
 
-// The entries of a tab (OM_TAB_ENTITIES / OM_TAB_NPCS; NULL and 0 for the others). The index is
-// the request's item.
+// The entries of a tab (OM_TAB_OBJECTS / OM_TAB_ENTITIES / OM_TAB_NPCS; NULL and 0 for Weapons).
+// The index is the request's item.
 const ObjectManagerEntry *object_manager_entries(int tab, int *count);
 
 #define OM_SPAWNED_ADD 1
@@ -157,6 +158,8 @@ int object_manager_weapon_listed(int weapon_id); // the Weapons tab: every weapo
 
 // ---- rules
 unsigned int object_manager_caps(const Game *game, const ObjectManagerPerms *perms); // OM_CAP_*
+// OM_ACTION_REMOVE_AIM: the spawned thing nearest along the crosshair (objects, AIs, bots,
+// spawnables, airdrops) goes when it is the player's own, or the player is a dev or the host.
 const char *object_manager_status_text(int status); // the menu's message for a refusal
 
 // ---- authority

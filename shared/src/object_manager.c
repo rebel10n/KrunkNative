@@ -99,6 +99,58 @@ static const ObjectManagerEntry k_entities[] = {
 #undef SCRAP
 #undef SCRAP_TAS
 
+// The Objects tab: map prefabs at their default size (prefab_data), blocks with a texture ("t")
+#define BLOCK(name, t) {name, "view_in_ar", OM_ENTRY_RECORD, 0, "{\"i\":0,\"t\":" #t "}"}
+#define PROP(name, icon, i) {name, icon, OM_ENTRY_RECORD, 0, "{\"i\":" #i "}"}
+static const ObjectManagerEntry k_objects[] = {
+    BLOCK("Stone Block", 0),
+    BLOCK("Wood Block", 2),
+    BLOCK("Brick Block", 11),
+    BLOCK("Metal Block", 17),
+    BLOCK("Grass Block", 8),
+    BLOCK("Grid Block", 3),
+    {"Ramp", "signal_cellular_alt", OM_ENTRY_RECORD, 0, "{\"i\":9,\"t\":2}"},
+    {"Ladder", "stairs", OM_ENTRY_RECORD, 0, "{\"i\":3}"},
+    {"Cylinder", "circle", OM_ENTRY_RECORD, 0, "{\"i\":48,\"t\":0}"},
+    {"Jump Pad", "keyboard_double_arrow_up", OM_ENTRY_RECORD, 0, "{\"i\":46,\"bm\":1.5}"},
+    PROP("Crate", "img/props/prop_1.png", 1),
+    {"Crate (Destructible)", "img/props/prop_1.png", OM_ENTRY_RECORD, 0, "{\"i\":1,\"h\":100,\"cdy\":1}"},
+    PROP("Barrel", "img/props/prop_2.png", 2),
+    PROP("Explosive Barrel", "img/props/prop_51.png", 51),
+    PROP("Acid Barrel", "img/props/prop_20.png", 20),
+    PROP("Stack", "img/props/prop_8.png", 8),
+    PROP("Cone", "img/props/prop_16.png", 16),
+    PROP("Cardboard Box", "img/props/prop_36.png", 36),
+    PROP("Pallet", "img/props/prop_37.png", 37),
+    PROP("Cage", "img/props/prop_50.png", 50),
+    PROP("Teddy", "img/props/prop_28.png", 28),
+    PROP("Pumpkin", "img/props/prop_56.png", 56),
+    PROP("Skeleton", "img/props/prop_58.png", 58),
+    PROP("Knight", "img/props/prop_59.png", 59),
+    PROP("Gift", "img/props/prop_60.png", 60),
+    PROP("Container", "local_shipping", 17),
+    PROP("Open Container", "local_shipping", 19),
+    PROP("Vehicle", "directions_car", 7),
+    PROP("Police Car", "local_police", 49),
+    PROP("Dumpster", "delete", 81),
+    PROP("Door", "door_front", 21),
+    PROP("Window", "window", 22),
+    PROP("Sheet Metal", "crop_portrait", 86),
+    PROP("Tree", "park", 15),
+    PROP("Grass", "grass", 18),
+    PROP("Christmas Tree", "forest", 61),
+    PROP("Candy Cane", "cake", 62),
+    PROP("Lamp", "light", 83),
+    PROP("AC Unit", "ac_unit", 85),
+    PROP("Antenna", "settings_input_antenna", 87),
+    PROP("Satellite Dish", "satellite_alt", 88),
+    PROP("Water Tower", "water", 84),
+    PROP("Weapon Box", "inventory_2", 90),
+    PROP("Tiles", "grid_view", 73),
+};
+#undef BLOCK
+#undef PROP
+
 static const ObjectManagerEntry k_npcs[] = {
     {"Bot", "smart_toy", OM_ENTRY_BOT, 0, NULL},
     {"Ghost", "blur_on", OM_ENTRY_AI, 0, NULL},
@@ -121,6 +173,10 @@ static const ObjectManagerEntry k_npcs[] = {
 };
 
 const ObjectManagerEntry *object_manager_entries(const int tab, int *count) {
+    if (tab == OM_TAB_OBJECTS) {
+        if (count) *count = (int) (sizeof(k_objects) / sizeof(k_objects[0]));
+        return k_objects;
+    }
     if (tab == OM_TAB_ENTITIES) {
         if (count) *count = (int) (sizeof(k_entities) / sizeof(k_entities[0]));
         return k_entities;
@@ -596,9 +652,36 @@ static int om_limit(Game *game, const ObjectManager *om, const Player *player, c
     return 0;
 }
 
-// A catalogue record at the floor point, turned to face the player (a quarter turn: the AABB
-// collision matches the model). Owned by the round's records from here on.
-static int om_spawn_record(Game *game, ObjectManager *om, Player *player, const char *json, const vec3 at) {
+// The feet (bottom centre) of a `size` box placed on the face the crosshair hit: on a floor at the
+// hit, under a ceiling, or against a wall on the floor in front of it (dropped down to it).
+static vec3 om_place_box(const Game *game, const ObjectManagerAim *aim, const double size[3]) {
+    vec3 p = aim->point;
+    if (aim->normal.y > 0.5f) return p;
+    if (aim->normal.y < -0.5f) {
+        p.y -= (float) size[1];
+        return p;
+    }
+    const float half = fabsf(aim->normal.x) > 0.5f ? (float) size[0] * 0.5f : (float) size[2] * 0.5f;
+    p.x += aim->normal.x * (half + 0.05f);
+    p.z += aim->normal.z * (half + 0.05f);
+    const vec3 down = {0.0f, -OM_AIM_RANGE, 0.0f};
+    float t;
+    int object;
+    if (om_ray(game, (vec3) {p.x, p.y + 0.5f, p.z}, down, &t, &object)) p.y = p.y + 0.5f + down.y * t;
+    return p;
+}
+
+// map.js "d" quarter (ramps, ladders) along the player's look: 0 +x, 1 +z, 2 -x, 3 -z
+static int om_look_quarter(const Player *player) {
+    const float lx = sinf(player->direction.y + (float) M_PI), lz = cosf(player->direction.y + (float) M_PI);
+    if (fabsf(lx) >= fabsf(lz)) return lx > 0.0f ? 0 : 2;
+    return lz > 0.0f ? 1 : 3;
+}
+
+// A catalogue record placed on the surface at the crosshair (aim) or at `at` (aim NULL), turned to
+// face the player (a quarter turn: the AABB collision matches the model; ramps and ladders take
+// map.js's "d" instead). Owned by the round's records from here on.
+static int om_spawn_record(Game *game, ObjectManager *om, Player *player, const char *json, vec3 at, const ObjectManagerAim *aim) {
     cJSON *record = cJSON_Parse(json);
     if (!record) return -1;
     const int prefab = map_raw_object_prefab(record);
@@ -610,13 +693,19 @@ static int om_spawn_record(Game *game, ObjectManager *om, Player *player, const 
         else if (pd && pd->has_default_size) size[k] = pd->default_size[k];
     }
     // facing the player: yaw snapped to a quarter turn (w / l swap on the odd ones)
+    const int directed = prefab == PREFAB_RAMP || prefab == PREFAB_LADDER;
     const double quarter = round((player->direction.y + M_PI) / (M_PI / 2.0));
-    const int turn = ((int) quarter % 4 + 4) % 4;
+    const int turn = directed ? 0 : ((int) quarter % 4 + 4) % 4;
     if (turn % 2) {
         const double w = size[0];
         size[0] = size[2];
         size[2] = w;
     }
+    if (directed) {
+        cJSON_DeleteItemFromObject(record, "d");
+        cJSON_AddNumberToObject(record, "d", om_look_quarter(player));
+    }
+    if (aim) at = om_place_box(game, aim, size);
     const double pos[3] = {round(at.x * 10.0) / 10.0, round(at.y * 10.0) / 10.0, round(at.z * 10.0) / 10.0};
     const double rot[3] = {0.0, round(turn * (M_PI / 2.0) * 100.0) / 100.0, 0.0};
     cJSON_DeleteItemFromObject(record, "p");
@@ -691,11 +780,81 @@ static int om_spawn_entry(Game *game, Player *player, const NetSpawnReqPacket *r
             thing_push(om, OM_KIND_ENTITY, OM_SUB_AIRDROP, sid, player->uid);
             return OM_STATUS_OK;
         }
-        case OM_ENTRY_RECORD:
-            return om_spawn_record(game, om, player, e->json, at) >= 0 ? OM_STATUS_OK : OM_STATUS_INVALID;
+        case OM_ENTRY_RECORD: // objects sit on the face they hit; scraps / machines stand on the floor point
+            return om_spawn_record(game, om, player, e->json, at, tab == OM_TAB_OBJECTS ? &aim : NULL) >= 0 ? OM_STATUS_OK : OM_STATUS_INVALID;
         default:
             return OM_STATUS_INVALID;
     }
+}
+
+// The tracked thing's box for the crosshair test: (bottom centre, full size); 0 when it is gone.
+static int thing_box(Game *game, const OmThing *t, vec3 *pos, vec3 *size) {
+    if (!thing_alive(game, t)) return 0;
+    if (t->kind == OM_KIND_OBJECT) {
+        const Object *o = spawned_object(game, t->id);
+        *pos = o->position;
+        *size = (vec3) {fmaxf(o->scale.x, 1.0f), fmaxf(o->scale.y, 1.0f), fmaxf(o->scale.z, 1.0f)};
+        return 1;
+    }
+    if (t->kind == OM_KIND_NPC && t->sub == OM_SUB_BOT) {
+        const GameBot *bot = bot_by_id(game, t->id);
+        const Player *p = bot ? bot->player : NULL;
+        if (!p || !p->active) return 0;
+        *pos = p->position;
+        *size = (vec3) {4.0f, p->height > 0.0f ? p->height : 10.0f, 4.0f};
+        return 1;
+    }
+    if (t->kind == OM_KIND_NPC) {
+        const GameAI *ai = game_ai_find(game, t->id);
+        *pos = ai->position; // game_ai_line_hit's box
+        *size = (vec3) {ai->scale * 2.0f, ai->height * 2.0f, ai->scale * 2.0f};
+        return 1;
+    }
+    if (t->sub == OM_SUB_AIRDROP) {
+        const AirDrop *d = &game->zombies.drops[t->id - 1];
+        *pos = (vec3) {d->position.x, d->position.y - 1.0f, d->position.z};
+        *size = (vec3) {10.0f, 10.0f, 10.0f};
+        return 1;
+    }
+    for (int i = 0; game->mode && i < MODE_MAX_SPAWNABLES; i++) {
+        const ModeSpawnable *s = &game->mode->spawnables[i];
+        if (!s->active || s->sid != t->id) continue;
+        *pos = (vec3) {s->position.x, s->position.y - 4.0f, s->position.z};
+        *size = (vec3) {6.0f, 8.0f, 6.0f};
+        return 1;
+    }
+    return 0;
+}
+
+// OM_ACTION_REMOVE_AIM: the nearest tracked thing the crosshair reaches before a wall
+static int om_remove_aim(Game *game, Player *player, const NetSpawnReqPacket *req, const unsigned int caps, const int host) {
+    ObjectManager *om = game->object_manager;
+    if (!om || !game->map) return OM_STATUS_NOTHING;
+    const vec3 eye = {player->position.x, player->position.y + player->height - game_constants.camera_height, player->position.z};
+    const vec3 dir = om_look(isfinite(req->pitch) ? player_clamp_pitch(req->pitch) : player->direction.x, isfinite(req->yaw) ? req->yaw : player->direction.y);
+    const vec3 segment = {dir.x * OM_AIM_RANGE, dir.y * OM_AIM_RANGE, dir.z * OM_AIM_RANGE};
+    float wall = 2.0f;
+    int wall_object = -1;
+    om_ray(game, eye, segment, &wall, &wall_object);
+    int best = -1;
+    float best_t = 2.0f;
+    for (size_t i = 0; i < om->thing_count; i++) {
+        vec3 pos, size;
+        if (!thing_box(game, &om->things[i], &pos, &size)) continue;
+        // the eye inside it (spawned on top of the player) counts as the nearest: line_in_rect only
+        // reports boxes ahead of the origin
+        const int inside = fabsf(eye.x - pos.x) <= size.x * 0.5f && fabsf(eye.z - pos.z) <= size.z * 0.5f && eye.y >= pos.y && eye.y <= pos.y + size.y;
+        const float t = inside ? 1e-6f : line_in_rect(eye, segment, pos, size);
+        if (t > 0.0f && t <= 1.0f && t < best_t && t <= wall + 0.001f) {
+            best_t = t;
+            best = (int) i;
+        }
+    }
+    if (best < 0) return OM_STATUS_NOTHING;
+    const OmThing *t = &om->things[best];
+    if (t->owner != player->uid && !(caps & OM_CAP_DEV) && !host) return OM_STATUS_DENIED; // someone else's
+    thing_remove(game, t);
+    return OM_STATUS_OK;
 }
 
 static int om_undo(Game *game, Player *player, const int any) {
@@ -728,8 +887,9 @@ void object_manager_request(Game *game, Player *player, const NetSpawnReqPacket 
         return;
     }
     const int weapons = req->action <= OM_ACTION_DROP_WEAPON;
+    const int takes_back = req->action == OM_ACTION_UNDO || req->action == OM_ACTION_REMOVE_AIM;
     if (!(caps & (weapons ? OM_CAP_WEAPONS : OM_CAP_SPAWN)) &&
-        !(req->action == OM_ACTION_UNDO && (caps & OM_CAP_WEAPONS)) && // undo also takes back pickups
+        !(takes_back && (caps & OM_CAP_WEAPONS)) && // undo / remove also take back pickups
         !(req->action == OM_ACTION_REMOVE_WEAPON || req->action == OM_ACTION_CLEAR_WEAPONS)) { // giving back is always fine
         out->status = OM_STATUS_DENIED;
         return;
@@ -746,6 +906,8 @@ void object_manager_request(Game *game, Player *player, const NetSpawnReqPacket 
         case OM_ACTION_UNDO: out->status = (uint8_t) om_undo(game, player, 0); break;
         case OM_ACTION_SPAWN_ENTITY: out->status = (uint8_t) om_spawn_entry(game, player, req, OM_TAB_ENTITIES, out); break;
         case OM_ACTION_SPAWN_NPC: out->status = (uint8_t) om_spawn_entry(game, player, req, OM_TAB_NPCS, out); break;
-        default: out->status = OM_STATUS_INVALID; break; // objects: part 3
+        case OM_ACTION_SPAWN_OBJECT: out->status = (uint8_t) om_spawn_entry(game, player, req, OM_TAB_OBJECTS, out); break;
+        case OM_ACTION_REMOVE_AIM: out->status = (uint8_t) om_remove_aim(game, player, req, caps, perms && perms->host); break;
+        default: out->status = OM_STATUS_INVALID; break;
     }
 }

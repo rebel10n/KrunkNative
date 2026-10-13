@@ -15,8 +15,8 @@
 //   0 pose x y z yaw pitch       place the local player at rest (like tools/kref/movement-rec.js); offline
 //                                the sandbox server's player too (the dev "tp")
 //   0 tp x y z yaw pitch         online: the dev "tp" packet to feet x/y/z, then face yaw/pitch
-//   100 down W | up W            keys through the key callback: W A S D SPACE SHIFT TAB ESC ENTER, any A-Z / 0-9,
-//                                F1-F12
+//   100 down W | up W            keys through the key callback: W A S D SPACE SHIFT TAB ESC ENTER DELETE, any
+//                                A-Z / 0-9, F1-F12
 //   100 mdown right | mup right  mouse buttons (left / right), through the mouse button callback
 //   100 cursor 640 360           move the cursor (window coordinates) through the cursor callback
 //   100 click 640 360            cursor there, then a left press + release (e.g. a KrunkScript DIV)
@@ -153,7 +153,7 @@ static int script_key(const char *name) {
         {"W", GLFW_KEY_W}, {"A", GLFW_KEY_A}, {"S", GLFW_KEY_S}, {"D", GLFW_KEY_D},
         {"SPACE", GLFW_KEY_SPACE}, {"SHIFT", GLFW_KEY_LEFT_SHIFT}, {"R", GLFW_KEY_R}, {"E", GLFW_KEY_E},
         {"Q", GLFW_KEY_Q}, {"C", GLFW_KEY_C}, {"X", GLFW_KEY_X}, {"1", GLFW_KEY_1}, {"2", GLFW_KEY_2}, {"3", GLFW_KEY_3}, {"N", GLFW_KEY_N},
-        {"F", GLFW_KEY_F}, {"G", GLFW_KEY_G}, {"T", GLFW_KEY_T}, {"TAB", GLFW_KEY_TAB},
+        {"F", GLFW_KEY_F}, {"G", GLFW_KEY_G}, {"T", GLFW_KEY_T}, {"TAB", GLFW_KEY_TAB}, {"DELETE", GLFW_KEY_DELETE},
     };
     for (size_t i = 0; i < sizeof(keys) / sizeof(keys[0]); i++) {
         if (!strcmp(name, keys[i].name)) return keys[i].key;

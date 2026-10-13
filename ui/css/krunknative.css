@@ -340,6 +340,9 @@ input.knOmSearch {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 8px;
+  max-height: 404px; /* six rows: the tabs and the buttons stay in view, the grid scrolls */
+  overflow-y: auto;
+  padding-right: 4px;
 }
 #menuWindow.dark div.knOmItem {
   position: relative;
@@ -358,6 +361,10 @@ input.knOmSearch {
 }
 img.knOmIcon {
   width: 120px;
+  height: 60px;
+}
+img.knOmProp {
+  width: auto;
   height: 60px;
 }
 #menuWindow.dark div.knOmGlyph {

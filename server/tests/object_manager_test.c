@@ -403,7 +403,7 @@ static void test_npcs_entities(TestClient *a, TestClient *b) {
     const ObjectManagerEntry *npcs = object_manager_entries(OM_TAB_NPCS, &npc_count);
     const ObjectManagerEntry *entities = object_manager_entries(OM_TAB_ENTITIES, &entity_count);
     CHECK(npcs && npc_count >= 12 && entities && entity_count >= 20, "catalogues (%d NPCs, %d entities)", npc_count, entity_count);
-    CHECK(object_manager_entries(OM_TAB_WEAPONS, NULL) == NULL && object_manager_entries(OM_TAB_OBJECTS, NULL) == NULL, "no entries for the other tabs");
+    CHECK(object_manager_entries(OM_TAB_WEAPONS, NULL) == NULL, "the Weapons tab has no entries (g_weapons)");
 
     // every NPC kind spawns at the crosshair floor (the cap stops the rest)
     pump(200);
@@ -506,6 +506,162 @@ static void test_npcs_entities(TestClient *a, TestClient *b) {
     CHECK((object_manager_caps(game, &host) & OM_CAP_SPAWN) && !(object_manager_caps(game, &guest) & OM_CAP_SPAWN), "host spawns, guest not");
     CHECK(!(object_manager_caps(game, &ranked_host) & OM_CAP_SPAWN), "not in ranked");
     game->is_sandbox = 1;
+    p->god_mode = 0;
+}
+
+// The (pitch, yaw) from `p`'s eye to `target` (player_proc_input's look: x = -sin(yaw) cos(pitch)).
+static void aim_at(const Player *p, const vec3 target, float *pitch, float *yaw) {
+    const float eye = p->position.y + p->height - game_constants.camera_height;
+    const float dx = target.x - p->position.x, dy = target.y - eye, dz = target.z - p->position.z;
+    *yaw = atan2f(-dx, -dz);
+    *pitch = atan2f(dy, sqrtf(dx * dx + dz * dz));
+}
+
+static NetSpawnResultPacket request_at(TestClient *c, const int action, const int item, const float pitch, const float yaw) {
+    const NetSpawnReqPacket req = {.action = (uint8_t) action, .item = (int16_t) item, .pitch = pitch, .yaw = yaw};
+    c->count = 0;
+    send_to(c, NET_PACKET_SPAWN_REQ, &req, sizeof(req));
+    pump(2);
+    NetSpawnResultPacket r = {.status = OM_STATUS_COUNT};
+    const NetPacket *packet = last(c, NET_PACKET_SPAWN_RESULT);
+    if (packet && packet->length == sizeof(r)) memcpy(&r, packet->payload, sizeof(r));
+    return r;
+}
+
+static const Object *last_spawned(void) {
+    const Map *map = g_server->game.map;
+    for (size_t i = map->object_count; i-- > 0;) {
+        if (map->objects[i]->spawned && map->objects[i]->active) return map->objects[i];
+    }
+    return NULL;
+}
+
+static int entry_index(const int tab, const char *name) {
+    int count = 0;
+    const ObjectManagerEntry *e = object_manager_entries(tab, &count);
+    for (int i = 0; i < count; i++) {
+        if (!strcmp(e[i].name, name)) return i;
+    }
+    return -1;
+}
+
+// part 3: the Objects tab, placement, remove at the crosshair
+static void test_objects(TestClient *a, TestClient *b) {
+    printf("objects...\n");
+    Player *p = player_of(a);
+    if (!p) return;
+    p->god_mode = 1;
+    int count = 0;
+    const ObjectManagerEntry *objects = object_manager_entries(OM_TAB_OBJECTS, &count);
+    CHECK(objects && count >= 40, "objects catalogue (%d)", count);
+    for (int i = 0; i < count; i++) CHECK(objects[i].kind == OM_ENTRY_RECORD && objects[i].json, "object %s is a record", objects[i].name);
+    pump(200);
+
+    // straight down: the crate stands on the floor under the player, turned to a quarter
+    const int crate = entry_index(OM_TAB_OBJECTS, "Crate");
+    CHECK(crate >= 0, "a Crate entry");
+    const float feet = p->position.y;
+    NetSpawnResultPacket r = request_at(a, OM_ACTION_SPAWN_OBJECT, crate, -1.55f, p->direction.y);
+    pump(2);
+    const Object *o = last_spawned();
+    CHECK(r.status == OM_STATUS_OK && o && o->prefab == PREFAB_CRATE, "crate spawned (status %u)", r.status);
+    if (o) {
+        CHECK(fabsf(o->position.y - feet) < 0.6f, "on the floor (crate y %.2f, feet %.2f)", o->position.y, feet);
+        CHECK(o->collision_type == COLLISION_TYPE_BOX && o->scale.x > 5.0f, "a solid box (%.1f)", o->scale.x);
+        const float q = o->rotation.y / ((float) M_PI / 2.0f);
+        CHECK(fabsf(q - roundf(q)) < 0.01f, "turned to a quarter (r.y %.3f)", o->rotation.y);
+        CHECK(count_type(b, NET_PACKET_SPAWNED_OBJ) >= 1, "the other player gets it");
+    }
+    // standing inside it, the remove tool still finds it (any aim)
+    pump(20);
+    r = request_at(a, OM_ACTION_REMOVE_AIM, 0, 0.3f, p->direction.y);
+    CHECK(r.status == OM_STATUS_OK && o && !o->active, "a crate around the player is removed from inside (status %u)", r.status);
+    // a second pallet at the same aim lands on top of the first (the ray meets its top face)
+    const int pallet = entry_index(OM_TAB_OBJECTS, "Pallet");
+    pump(20);
+    r = request_at(a, OM_ACTION_SPAWN_OBJECT, pallet, -0.6f, p->direction.y);
+    const Object *bottom = last_spawned();
+    pump(20);
+    r = request_at(a, OM_ACTION_SPAWN_OBJECT, pallet, -0.6f, p->direction.y);
+    const Object *top = last_spawned();
+    CHECK(bottom && top && top != bottom && fabsf(top->position.y - (bottom->position.y + bottom->scale.y)) < 0.6f,
+          "the second pallet stands on the first (%.2f on %.2f + %.2f)", top ? top->position.y : -1.0f, bottom ? bottom->position.y : -1.0f,
+          bottom ? bottom->scale.y : -1.0f);
+
+    // a ramp carries map.js's direction along the look
+    pump(20);
+    const int ramp = entry_index(OM_TAB_OBJECTS, "Ramp");
+    r = request_at(a, OM_ACTION_SPAWN_OBJECT, ramp, -0.4f, 0.0f);
+    const Object *ro = last_spawned();
+    CHECK(r.status == OM_STATUS_OK && ro && ro->prefab == PREFAB_RAMP && ro->ramp, "ramp spawned (status %u)", r.status);
+    if (ro) CHECK(cJSON_IsNumber(cJSON_GetObjectItem(ro->raw, "d")), "with a \"d\"");
+
+    // every entry spawns (the per-player object cap may end the run)
+    int ok = 0;
+    for (int i = 0; i < count; i++) {
+        pump(16);
+        r = request_at(a, OM_ACTION_SPAWN_OBJECT, i, -0.5f, (float) i * 0.37f);
+        ok += r.status == OM_STATUS_OK;
+        CHECK(r.status == OM_STATUS_OK || r.status == OM_STATUS_NO_TARGET || r.status == OM_STATUS_LIMIT, "%s (status %u)", objects[i].name, r.status);
+    }
+    CHECK(ok >= count - 4, "%d of %d objects placed", ok, count);
+
+    // remove at the crosshair: the thing the ray reaches first
+    for (int i = 0; i < 80; i++) {
+        pump(16);
+        if (request(a, OM_ACTION_UNDO, 0, 0.0f).status != OM_STATUS_OK) break;
+    }
+    pump(200);
+    const float yaw = p->direction.y;
+    r = request_at(a, OM_ACTION_SPAWN_OBJECT, crate, -0.6f, yaw);
+    pump(2);
+    o = last_spawned();
+    CHECK(r.status == OM_STATUS_OK && o, "a crate in front");
+    if (o) {
+        float pitch, aim_yaw;
+        aim_at(p, (vec3) {o->position.x, o->position.y + o->scale.y * 0.5f, o->position.z}, &pitch, &aim_yaw);
+        const Object *crate_obj = o;
+        // someone else (a guest of a custom game, no dev) cannot take it away
+        ClientConnection *gc = conn(b);
+        Player *gp = player_of(b);
+        g_server->game.is_sandbox = 0;
+        if (gc && gp) {
+            gc->local = 0;
+            gp->position = p->position;
+            gp->height = p->height;
+            pump(20);
+            r = request_at(b, OM_ACTION_REMOVE_AIM, 0, pitch, aim_yaw);
+            CHECK(r.status == OM_STATUS_DENIED && crate_obj->active, "not the owner: refused (status %u)", r.status);
+            gc->local = 1;
+        }
+        g_server->game.is_sandbox = 1;
+        pump(20);
+        r = request_at(a, OM_ACTION_REMOVE_AIM, 0, pitch, aim_yaw);
+        CHECK(r.status == OM_STATUS_OK && !crate_obj->active, "the owner removes it at the crosshair (status %u)", r.status);
+        pump(20);
+        r = request_at(a, OM_ACTION_REMOVE_AIM, 0, pitch, aim_yaw);
+        CHECK(r.status == OM_STATUS_NOTHING, "nothing left there (status %u)", r.status);
+    }
+
+    // an NPC at the crosshair
+    pump(20);
+    const int ghost = entry_index(OM_TAB_NPCS, "Ghost");
+    r = request_at(a, OM_ACTION_SPAWN_NPC, ghost, -0.4f, yaw);
+    pump(2);
+    const GameAIs *ais = g_server->game.ai;
+    const GameAI *g = NULL;
+    for (int i = 0; ais && i < ais->count; i++) {
+        if (ais->ais[i].active && !strcmp(ais->ais[i].name, "Ghost")) g = &ais->ais[i];
+    }
+    CHECK(r.status == OM_STATUS_OK && g, "a ghost in front (status %u)", r.status);
+    if (g) {
+        const int sid = g->sid;
+        float pitch, aim_yaw;
+        aim_at(p, (vec3) {g->position.x, g->position.y + g->height, g->position.z}, &pitch, &aim_yaw);
+        pump(20);
+        r = request_at(a, OM_ACTION_REMOVE_AIM, 0, pitch, aim_yaw);
+        CHECK(r.status == OM_STATUS_OK && !game_ai_find(&g_server->game, sid), "the ghost removed at the crosshair (status %u)", r.status);
+    }
     p->god_mode = 0;
 }
 
@@ -628,6 +784,15 @@ static void test_permissions(TestClient *dev, TestClient *guest) {
     CHECK(r.status == OM_STATUS_DENIED, "public guest: no NPCs");
     r = request(guest, OM_ACTION_SPAWN_ENTITY, 0, -1.0f);
     CHECK(r.status == OM_STATUS_DENIED, "public guest: no entities");
+    r = request(guest, OM_ACTION_SPAWN_OBJECT, 0, -1.0f);
+    CHECK(r.status == OM_STATUS_DENIED, "public guest: no objects");
+    r = request(guest, OM_ACTION_REMOVE_AIM, 0, -1.0f);
+    CHECK(r.status == OM_STATUS_DENIED, "public guest: no remove tool");
+    r = request(dev, OM_ACTION_SPAWN_OBJECT, 0, -1.0f);
+    CHECK(r.status == OM_STATUS_OK, "public: the dev places an object (status %u)", r.status);
+    pump(20);
+    request(dev, OM_ACTION_UNDO, 0, 0.0f);
+    pump(20);
     r = request(dev, OM_ACTION_SPAWN_NPC, 1, -1.0f);
     CHECK(r.status == OM_STATUS_OK, "public: the dev spawns an NPC (status %u)", r.status);
     pump(20);
@@ -681,6 +846,7 @@ int main(void) {
         test_rate(&g_clients[0]);
         test_pickups(&g_clients[0], &g_clients[1]);
         test_npcs_entities(&g_clients[0], &g_clients[1]);
+        test_objects(&g_clients[0], &g_clients[1]);
         test_join_sync(&g_clients[0], &g_clients[2], &g_clients[3]);
         test_permissions(&g_clients[0], &g_clients[1]);
         for (int i = 0; i < CLIENTS; i++) leave(&g_clients[i]);

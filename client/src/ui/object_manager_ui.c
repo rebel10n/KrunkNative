@@ -5,8 +5,9 @@
 //
 // Window: tabs Objects / Entities / NPCs / Weapons over a searchable grid of icons. Weapons:
 // left click adds the weapon to the loadout as an extra slot (again: takes it out), right click
-// drops it as a pickup at the crosshair. Opening it in game frees the pointer (like the player
-// list key); F1 or Escape closes it and gives the pointer back to the game.
+// drops it as a pickup at the crosshair; the other tabs spawn at the crosshair. Remove / Undo
+// buttons, and in game the U (undo) and Delete (remove at the crosshair) binds. Opening it in game
+// frees the pointer (like the player list key); F1 or Escape closes it and gives it back.
 #include <client.h>
 #include <html_dom.h>
 #include <html_ui.h>
@@ -175,10 +176,15 @@ static void om_grid_html(char **buf, size_t *len, size_t *cap) {
             if (!om_matches(entries[i].name)) continue;
             char name[96];
             om_escape(name, sizeof(name), entries[i].name);
-            om_append(buf, len, cap,
-                      "<div class='knOmItem' onclick='knOmPick(%d,%d)'><div class='knOmGlyph'><span class='material-icons'>%s</span></div>"
-                      "<div class='knOmName'>%s</div></div>",
-                      g_om.tab, i, entries[i].icon ? entries[i].icon : "help", name);
+            const char *icon = entries[i].icon ? entries[i].icon : "help";
+            if (strstr(icon, ".png")) // a page image (img/props)
+                om_append(buf, len, cap, "<div class='knOmItem' onclick='knOmPick(%d,%d)'><img class='knOmIcon knOmProp' src='%s'/><div class='knOmName'>%s</div></div>",
+                          g_om.tab, i, icon, name);
+            else
+                om_append(buf, len, cap,
+                          "<div class='knOmItem' onclick='knOmPick(%d,%d)'><div class='knOmGlyph'><span class='material-icons'>%s</span></div>"
+                          "<div class='knOmName'>%s</div></div>",
+                          g_om.tab, i, icon, name);
             shown++;
         }
     }
@@ -191,7 +197,8 @@ static void om_grid_html(char **buf, size_t *len, size_t *cap) {
 static const char *om_hint(void) {
     switch (g_om.tab) {
         case OM_TAB_WEAPONS: return "Left click: add to your loadout (again: take it out) | Right click: drop it at your crosshair";
-        case OM_TAB_NPCS: return "Left click: spawn at your crosshair | Undo takes back your last spawn";
+        case OM_TAB_OBJECTS: return "Left click: place it on the surface at your crosshair, facing you | U: undo, Delete: remove at the crosshair";
+        case OM_TAB_NPCS: return "Left click: spawn at your crosshair | U: undo, Delete: remove at the crosshair";
         case OM_TAB_ENTITIES: return "Left click: spawn at your crosshair (power-ups despawn on their own timer)";
         default: return "Left click: spawn at your crosshair";
     }
@@ -231,7 +238,8 @@ char *object_manager_window_gen(const int id, const char **header) {
         om_append(&buf, &len, &cap, "<div class='button small buttonR knOmBtn' onclick='knOmClear()'>Clear Extras (%d/%d)</div>",
                   me ? me->extra_weapon_count : 0, PLAYER_EXTRA_WEAPONS_MAX);
     }
-    om_append(&buf, &len, &cap, "<div class='button small knOmBtn' onclick='knOmUndo()'>Undo</div></div></div></div>");
+    om_append(&buf, &len, &cap, "<div class='button small knOmBtn' onclick='knOmRemove()'>Remove</div>"
+                                "<div class='button small knOmBtn' onclick='knOmUndo()'>Undo</div></div></div></div>");
     return buf;
 }
 
@@ -249,7 +257,15 @@ static void om_set_status(const char *text, const int error) {
     snprintf(g_om.status, sizeof(g_om.status), "%s", text ? text : "");
     g_om.status_error = error;
     g_om.status_at = glfwGetTime();
-    om_refresh_body();
+    if (om_window_open()) {
+        om_refresh_body();
+    } else if (text && text[0]) { // the Undo / Remove binds in game: a toast instead
+        char html[400];
+        char esc[200];
+        om_escape(esc, sizeof(esc), text);
+        snprintf(html, sizeof(html), "<span style='color:%s'>%s</span>", error ? "#eb5656" : "#fff", esc);
+        ui_notify(html);
+    }
 }
 
 // ---------------------------------------------------------------- open / close
@@ -315,10 +331,11 @@ static void om_pick(const int tab, const int item, const int alt) {
         om_set_status("This server has no Object Manager", 1);
         return;
     }
-    if (tab == OM_TAB_NPCS || tab == OM_TAB_ENTITIES) {
+    if (tab == OM_TAB_NPCS || tab == OM_TAB_ENTITIES || tab == OM_TAB_OBJECTS) {
         int count = 0;
         object_manager_entries(tab, &count);
-        if (item >= 0 && item < count) om_send(tab == OM_TAB_NPCS ? OM_ACTION_SPAWN_NPC : OM_ACTION_SPAWN_ENTITY, item);
+        const int action = tab == OM_TAB_NPCS ? OM_ACTION_SPAWN_NPC : tab == OM_TAB_ENTITIES ? OM_ACTION_SPAWN_ENTITY : OM_ACTION_SPAWN_OBJECT;
+        if (item >= 0 && item < count) om_send(action, item);
         return;
     }
     if (tab == OM_TAB_WEAPONS) {
@@ -370,6 +387,10 @@ int object_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlAr
         om_send(OM_ACTION_UNDO, 0);
         return 0;
     }
+    if (!strcmp(name, "knOmRemove")) { // what the crosshair is on (the view the window was opened over)
+        om_send(OM_ACTION_REMOVE_AIM, 0);
+        return 0;
+    }
     if (!strcmp(name, "knOmClear")) {
         om_send(OM_ACTION_CLEAR_WEAPONS, 0);
         return 0;
@@ -403,10 +424,13 @@ static void om_on_result(const NetSpawnResultPacket *r) {
         case OM_ACTION_CLEAR_WEAPONS: snprintf(text, sizeof(text), "Extra weapons cleared"); break;
         case OM_ACTION_DROP_WEAPON: snprintf(text, sizeof(text), "%s dropped at your crosshair", w ? w->name : "Weapon"); break;
         case OM_ACTION_UNDO: snprintf(text, sizeof(text), "Undone"); break;
+        case OM_ACTION_REMOVE_AIM: snprintf(text, sizeof(text), "Removed"); break;
         case OM_ACTION_SPAWN_NPC:
-        case OM_ACTION_SPAWN_ENTITY: {
+        case OM_ACTION_SPAWN_ENTITY:
+        case OM_ACTION_SPAWN_OBJECT: {
             int count = 0;
-            const ObjectManagerEntry *entries = object_manager_entries(r->action == OM_ACTION_SPAWN_NPC ? OM_TAB_NPCS : OM_TAB_ENTITIES, &count);
+            const int tab = r->action == OM_ACTION_SPAWN_NPC ? OM_TAB_NPCS : r->action == OM_ACTION_SPAWN_ENTITY ? OM_TAB_ENTITIES : OM_TAB_OBJECTS;
+            const ObjectManagerEntry *entries = object_manager_entries(tab, &count);
             snprintf(text, sizeof(text), "%s spawned at your crosshair", entries && r->item >= 0 && r->item < count ? entries[r->item].name : "It");
             break;
         }
@@ -465,6 +489,11 @@ int object_manager_events_handle(Client *client, const int type, const void *pay
         default:
             return 0;
     }
+}
+
+void object_manager_ui_key(Client *client, const int action) {
+    if (!client || !client->me || !client->me->active || !om_server_ok(client)) return;
+    om_send(action, 0);
 }
 
 // A new connection / map: the caps belong to the server we talked to.

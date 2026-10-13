@@ -24,7 +24,7 @@
         364,
         350,
         332,
-        60
+        62
       ],
       "kind": "image",
       "fuzz": 8,
@@ -35,14 +35,14 @@
       "name": "om-footer",
       "rect": [
         356,
-        415,
+        416,
         568,
-        58
+        56
       ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "hint + Clear Extras (0/24) + Undo"
+      "note": "hint + Clear Extras (0/24) + Remove + Undo"
     }
   ]
 }

@@ -27,6 +27,7 @@
 #include <hud_social.h> // WP-E: spray / spray wheel, taunts, quick chat (hud_social.c)
 #include <sprays.h>     // the spray wheel takes the mouse wheel
 #include <app_mode.h>   // app_reload: the Reconnect key on the web
+#include <object_manager.h> // the Object Manager's Undo / Remove binds
 #include <GLFW/glfw3.h>
 #include <math.h>
 #include <stdio.h>
@@ -226,6 +227,9 @@ static const V7Bind V7_BINDS[] = {
     {"reconnect", -1, "reconnectKey", 116, -1, UI_CONTROL_RECONNECT},
     // KrunkNative addition: the Object Manager, F1 (keyCode 112): toggles the spawn menu and the pointer.
     {"objectManager", -1, "objectManagerKey", 112, -1, UI_CONTROL_OBJECT_MANAGER},
+    // KrunkNative additions: the Object Manager's Undo (U, 85) and Remove at the crosshair (Delete, 46)
+    {"omUndo", -1, "omUndoKey", 85, -1, UI_CONTROL_OM_UNDO},
+    {"omRemove", -1, "omRemoveKey", 46, -1, UI_CONTROL_OM_REMOVE},
     {"streak", 0, "18", 49, -1, UI_CONTROL_STREAK0},
     {"streak", 1, "19", 50, -1, UI_CONTROL_STREAK0 + 1},
     {"streak", 2, "20", 51, -1, UI_CONTROL_STREAK0 + 2},
@@ -288,6 +292,8 @@ static const ControlRow TAB_GENERAL[] = {
     // KrunkNative additions, last so v7's rows keep their places (binds.reconnect / objectManager above)
     {"Reconnect", "reconnect", -1, 0, "Connection"},
     {"Object Manager", "objectManager", -1, 0, "Sandbox"},
+    {"Object Manager Undo", "omUndo", -1, 0, "Sandbox"},
+    {"Object Manager Remove", "omRemove", -1, 0, "Sandbox"},
 };
 static const ControlRow TAB_CHAT[] = {
     {"Chat", "chat", -1, 0, "Interface & Audio"}, {"Voice", "voiceChat", -1, 0, "Interface & Audio"},
@@ -1197,6 +1203,8 @@ static void press_button(Client *client, const int code) {
     if (bind_is(UI_CONTROL_INTERACT_SEC, code)) ui_interact_key(client, 1); // io.send("intSec", type, id)
     if (bind_is(UI_CONTROL_DROP, code)) ui_interact_drop(client);           // io.send("drpw")
     if (bind_is(UI_CONTROL_INSPECT, code)) player_inspect_weapon(me); // Game.players.wInspect(player)
+    if (bind_is(UI_CONTROL_OM_UNDO, code)) object_manager_ui_key(client, OM_ACTION_UNDO);         // KrunkNative Object Manager
+    if (bind_is(UI_CONTROL_OM_REMOVE, code)) object_manager_ui_key(client, OM_ACTION_REMOVE_AIM);
     for (int i = 0; i < 5; i++) { // v7.1.4 streak loadout: slots 0-2 (callInStreak); 3-4 are v3 leftovers
         if (bind_is(UI_CONTROL_STREAK0 + i, code)) {
             if (i < STREAK_SLOTS) combat_call_in_streak(client, i);

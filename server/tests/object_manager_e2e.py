@@ -32,7 +32,8 @@ BUILD = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
 WORK = tempfile.mkdtemp(prefix="kn-om-e2e-", dir=os.path.expanduser("~/.cache"))
 SPAWN, FORWARDED, PICKUP = 4, 85, 128
 SPAWN_REQ, SPAWN_RESULT, LOADOUT_EXTRA, SPAWNED_OBJ = 250, 251, 252, 253
-QUERY, ADD_WEAPON, REMOVE_WEAPON, CLEAR_WEAPONS, DROP_WEAPON, SPAWN_ENTITY, SPAWN_NPC, UNDO = 0, 1, 2, 3, 4, 5, 6, 9
+QUERY, ADD_WEAPON, REMOVE_WEAPON, CLEAR_WEAPONS, DROP_WEAPON, SPAWN_ENTITY, SPAWN_NPC, SPAWN_OBJECT, REMOVE_AIM, UNDO = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
+OBJECT_CRATE = 10  # object_manager_entries(OM_TAB_OBJECTS)[10]
 AI_ADD_V7, SPAWNABLE_V7 = 162, 148
 NPC_GHOST, ENTITY_KR_TAG = 1, 0  # object_manager_entries(): NPCs[1] Ghost (harmless), Entities[0] KR Tag
 OK, DENIED, LIMIT, RATE = 0, 1, 2, 3
@@ -134,8 +135,12 @@ def extras_for(peer, uid):
 
 
 def spawned_adds(peer):
+    return spawned_adds_since(peer, 0)
+
+
+def spawned_adds_since(peer, since):
     out = []
-    for p in peer.of_type(SPAWNED_OBJ):
+    for p in peer.of_type(SPAWNED_OBJ, since):
         op, kind, _r, uid, owner = struct.unpack("<BBHii", p[:12])
         if op == 1:
             out.append((uid, owner, p[12:].split(b"\0", 1)[0].decode()))
@@ -185,15 +190,40 @@ def run():
     r = host.request(SPAWN_ENTITY, ENTITY_KR_TAG, -0.4)
     check("dev spawns a KR Tag", r is not None and r[0] == OK, str(r))
     guest.pump(1.0)
-    check("the guest sees the AI (AI_ADD_V7)", bool(guest.of_type(AI_ADD_V7, mark)))
+    check("the guest sees the Ghost (AI_ADD_V7)", any(len(p) > 8 and p[8:].split(b"\0", 1)[0] == b"Ghost" for p in guest.of_type(AI_ADD_V7, mark)))
     check("the guest sees the spawnable (SPAWNABLE_V7)", bool(guest.of_type(SPAWNABLE_V7, mark)))
+
+    # part 3: objects and the remove tool
+    r = guest.request(SPAWN_OBJECT, OBJECT_CRATE, -0.6)
+    check("guest object refused", r is not None and r[0] == DENIED, str(r))
+    r = guest.request(REMOVE_AIM, 0, -0.6)
+    check("guest remove tool refused", r is not None and r[0] == DENIED, str(r))
+    for _ in range(2):  # the KR Tag and the Ghost go first: the remove ray takes the nearest spawned thing
+        host.request(UNDO)
+    mark = len(guest.packets)
+    r = host.request(SPAWN_OBJECT, OBJECT_CRATE, -0.45)  # a few steps ahead, not around the player
+    check("dev places a crate", r is not None and r[0] == OK, str(r))
+    guest.pump(0.5)
+    crate = [a for a in spawned_adds_since(guest, mark) if '"i":1,' in a[2] or a[2].endswith('"i":1}')]
+    check("the guest gets the crate (SPAWNED_OBJ)", len(crate) == 1, str(spawned_adds_since(guest, mark)))
+    mark = len(guest.packets)
+    r = host.request(REMOVE_AIM, 0, -0.45)
+    check("dev removes it at the crosshair", r is not None and r[0] == OK, str(r))
+    guest.pump(0.5)
+    removed = [struct.unpack("<BBHii", p[:12]) for p in guest.of_type(SPAWNED_OBJ, mark)]
+    check("the guest hears the REMOVE", bool(crate) and any(op == 2 and uid == crate[0][0] for op, _k, _r, uid, _o in removed), str(removed))
+
+    r = host.request(SPAWN_NPC, NPC_GHOST, -0.25)  # an AI up for the joiner
+    check("dev spawns another Ghost", r is not None and r[0] == OK, str(r))
 
     late = Peer(PORT)
     check("late v7 joiner spawned", late.spawn() is not None)
     late.pump(1.0)
     check("the joiner gets the dev's extras", extras_for(late, host.me["uid"]) == [SHOTGUN], str(extras_for(late, host.me["uid"])))
     check("the joiner gets the spawned pickup", [a[0] for a in spawned_adds(late)] == [a[0] for a in adds], str(spawned_adds(late)))
-    check("the joiner gets the spawned AI", bool(late.of_type(AI_ADD_V7)))
+    # Sandstorm has AIs of its own: look for the Ghost by name (NetAIAddV7Packet: int32 sid, int32 index, name)
+    ghosts = [p for p in late.of_type(AI_ADD_V7) if len(p) > 8 and p[8:].split(b"\0", 1)[0] == b"Ghost"]
+    check("the joiner gets the spawned Ghost", len(ghosts) == 1, str(len(ghosts)))
 
     old = Peer(PORT, v7=False)
     check("v3 peer spawned", old.spawn() is not None)
