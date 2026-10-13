@@ -484,6 +484,21 @@ static const ViewerSkin *player_slot_skin(const Player *player, const int slot, 
     return skin && skin->type == 0 && skin->weapon - 1 == player->loadout[slot] ? skin : NULL;
 }
 
+Mesh *player_hose_mesh(const WeaponStream *stream, const int color) {
+    if (!stream || stream->hose_radius <= 0.0f || stream->hose_length <= 0.0f) return NULL;
+    Geometry *geometry = create_hose_geo(stream->hose_radius, stream->hose_length, 18); // hoseSides ?? 18
+    BasicMaterial *material = geometry ? basic_material_init() : NULL;
+    if (!material) return NULL;
+    material->color = krunker_get_color(color);
+    Mesh *mesh = mesh_init(geometry, (Material *) material);
+    if (!mesh) {
+        material_fini((Material *) material);
+        return NULL;
+    }
+    mesh->transform.scale = (vec3) {1.0f, 1.0f, 1.0f};
+    return mesh;
+}
+
 // getMat for store items: client/src/skin_fx.c (skin_fx_apply / skin_fx_apply_gltf / skin_fx_apply_dye)
 
 // mesh_fini / gltf_instance_fini, after dropping the skin animations registered on them
@@ -1130,6 +1145,26 @@ void player_generate_meshes(Player *player, const int render_you) {
                         else arms->weapon_right = weapon_mesh;
 
                         if (!weapon->akimbo) break;
+                    }
+                }
+
+                // KrunkNative Piss (e1624e4 hoseViewModel): the model-less weapon's hose in the skin colour
+                // (genHose color: skinCol). First person in the weapon anchor (hoseView*); third person
+                // on the lower body at the pelvis (hosePelvisHeight - legHeight up, -(hosePelvisForward -
+                // hoseLength / 2) forward). Shown and hidden with the slot like any weapon mesh.
+                if (weapon->stream && !weapon->src) {
+                    const WeaponStream *stream = weapon->stream;
+                    Mesh *hose = player_hose_mesh(stream, colors[0]);
+                    if (hose) {
+                        if (third_person) {
+                            hose->transform.parent = player_mesh->body_anchor;
+                            hose->transform.position = (vec3) {0.0f, stream->pelvis_height - game_constants.leg_height,
+                                                               -(stream->pelvis_forward - stream->hose_length * 0.5f)};
+                        } else {
+                            hose->transform.parent = &arms->anchor;
+                            hose->transform.position = stream->hose_view;
+                        }
+                        arms->weapon_right = hose;
                     }
                 }
 

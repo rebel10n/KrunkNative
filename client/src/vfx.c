@@ -17,6 +17,7 @@
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <render_settings.h>
+#include <piss.h> // KrunkNative Piss: the stream's arc and the puddles
 #include <math.h>
 #include <pcg_basic.h>
 #include <stddef.h>
@@ -27,7 +28,7 @@
 #define VFX_TEXTURE_UNIT 0 // vfx.frag `tex`
 
 #define VFX_MAX_SPRITES 1024
-#define VFX_MAX_BOXES 256
+#define VFX_MAX_BOXES 512 // KN: + the Piss's spray (7 streaks every 55 ms, ~850 ms each, per sprayer)
 #define VFX_MAX_TRAILS 32
 #define VFX_MAX_DEBRIS 256
 #define VFX_MAX_AREAS 64
@@ -722,6 +723,33 @@ static void spawn_casing(const vec3 position, const float yaw, const float pitch
     box->spin = rand_float(config->spin[0], config->spin[1]);
 }
 
+// index.js spawnMustardSpray (KrunkNative Piss, shared/include/piss.h): `particles` streaks of the
+// stream's colour from the hose along (yaw, pitch), each with its own yaw / pitch jitter, speed
+// x0.72-1.28 and life x0.75-1.25 under the stream's gravity (PARTICLES.physObj: BASIC material,
+// rand roll, lookDir). KN: none outlives the stream, which stopped `time_ms` after the hose (the
+// branch's flew through walls), and the spray ignores the particles setting like a tracer would
+// not: it is the weapon's only feedback.
+#define VFX_SPRAY_PITCH_JITTER 0.08f
+#define VFX_PUDDLE_OPACITY 0.38f  // spawnMustardPuddle: MeshBasicMaterial opacity 0.38
+#define VFX_PUDDLE_LIFT 0.025f    // ... position y + 0.025
+#define VFX_PUDDLE_SEGMENTS 24    // CircleGeometry(1, 24)
+#define VFX_PUDDLE_FADE_MS 150.0f // KN: fades in
+static void spawn_stream_spray(const WeaponStream *stream, const vec3 source, const float pitch, const float yaw, const float time_ms) {
+    const vec4 color = color_from_hex(stream->color, 1.0f);
+    for (int i = 0; i < stream->particles; i++) {
+        const float u = yaw + rand_float(-stream->spread, stream->spread);
+        const float v = pitch + rand_float(-stream->spread * 0.55f, stream->spread * 0.55f) + rand_float(-VFX_SPRAY_PITCH_JITTER, VFX_SPRAY_PITCH_JITTER);
+        const float spd = stream->speed * rand_float(0.72f, 1.28f);
+        const float life = fminf(stream->life * rand_float(0.75f, 1.25f), time_ms * rand_float(1.0f, 1.08f));
+        const float scale = stream->size * rand_float(0.14f, 0.24f);
+        const vec3 size = {scale, scale, stream->size * rand_float(0.55f, 0.95f)};
+        VfxBox *box = box_spawn(source, direction_from_angles(u, v), spd * fmaxf(life, 1.0f), spd, stream->gravity, v3(0.0f, 0.0f, 0.0f), size,
+                                color, 0, 1);
+        if (!box) return;
+        box->roll = rand_float((float) -M_PI, (float) M_PI);
+    }
+}
+
 // 88.js ExplosionManager.explodeAt(x, y, z, scale)
 static void spawn_debris(const vec3 position, const float seed, const float size_min, const float size_range,
                          const float velocity_min, const float velocity_range) {
@@ -829,8 +857,27 @@ static int project_to_screen(Camera *camera, const vec3 position, vec2 *out) {
 
 // 95.js shoot(), client half: muzzle sprites, overlay flash, casings, predicted
 // projectile, then per pellet the impact effect, tracer and trail.
+// fireMustard on the shooter's client (KrunkNative Piss): the spray from the hose tip
+// (hoseTip.getWorldPosition() while the first-person hose shows, else the stream's source) along the
+// view, bounded by the stream's own trace through the map.
+static void local_stream_shot(Client *client, Player *me) {
+    const WeaponStream *stream = me->weapon->stream;
+    const float pitch = me->direction.x, yaw = me->direction.y; // the stream's aim (player_shoot)
+    PissStream trace;
+    if (!player_stream_trace(me, pitch, yaw, 0, &trace)) return;
+    vec3 source = trace.source;
+    const vec3 tip = {stream->hose_view.x, stream->hose_view.y, stream->hose_view.z - stream->hose_length * 0.5f};
+    const int sprite_model = client->game.map && client->game.map->config.model == MODEL_TYPE_SPRITE;
+    if (me->render_you && !sprite_model && !camera_offset_active(client) && ui_controls_weapon_visible(client)) arms_point(me, tip, &source);
+    spawn_stream_spray(stream, source, pitch, yaw, trace.time);
+}
+
 static void local_shot(Client *client, Player *me) {
     const Weapon *weapon = me->weapon;
+    if (weapon && weapon->stream) {
+        local_stream_shot(client, me);
+        return;
+    }
     // players.build / tryGrapple set the fire timer without shoot(): no muzzle, casing or tracer
     if (!weapon || weapon->melee || weapon->build || weapon->grapple_range > 0.0f) return;
 
@@ -1011,6 +1058,26 @@ void vfx_remote_shot(Client *client, const Player *shooter, const vec3 hit, cons
     if (has_normal && me && v3_length(v3_sub(shooter->position, me->position)) <= 160.0f) {
         spawn_impact(hit, normal_yaw, normal_pitch);
     }
+}
+
+void vfx_remote_stream_shot(Client *client, const Player *shooter, const WeaponStream *stream, const vec3 hit) {
+    (void) client;
+    if (!shooter || !stream || stream->speed <= 0.0f) return;
+    const float pitch = shooter->direction.x, yaw = shooter->direction.y;
+    const vec3 source = piss_stream_source(shooter, stream, pitch, yaw);
+    // the time the stream took to reach `hit`: from the x / z distance, or from the height when
+    // it went (nearly) straight up or down (y(t) = y0 + vy t - g t^2 / 2)
+    const float vh = stream->speed * fabsf(cosf(pitch)), vy = stream->speed * sinf(pitch);
+    const float dx = hit.x - source.x, dz = hit.z - source.z;
+    float time = stream->life;
+    if (vh > stream->speed * 0.1f) {
+        time = sqrtf(dx * dx + dz * dz) / vh;
+    } else if (stream->gravity > 0.0f) {
+        const float a = 0.5f * stream->gravity, b = -vy, c = hit.y - source.y;
+        const float d = b * b - 4.0f * a * c;
+        if (d >= 0.0f) time = (-b + sqrtf(d)) / (2.0f * a);
+    }
+    spawn_stream_spray(stream, source, pitch, yaw, fminf(fmaxf(time, 0.0f), stream->life));
 }
 
 // ---------------------------------------------------------------- map particle areas
@@ -1453,6 +1520,19 @@ static void batch_box(const vec3 corner, const vec3 ex, const vec3 ey, const vec
     }
 }
 
+static void batch_puddle(const GamePuddle *puddle) {
+    const float fade = fminf(1.0f, puddle->age / VFX_PUDDLE_FADE_MS);
+    const vec4 color = color_from_hex(puddle->color, VFX_PUDDLE_OPACITY * fmaxf(fade, 0.05f));
+    const vec3 c = {puddle->position.x, puddle->position.y + VFX_PUDDLE_LIFT, puddle->position.z};
+    for (int k = 0; k < VFX_PUDDLE_SEGMENTS; k++) {
+        const float a0 = (float) k / VFX_PUDDLE_SEGMENTS * 2.0f * (float) M_PI;
+        const float a1 = (float) (k + 1) / VFX_PUDDLE_SEGMENTS * 2.0f * (float) M_PI;
+        batch_vertex(c, 0.0f, 0.0f, color);
+        batch_vertex(v3(c.x + cosf(a0) * puddle->radius, c.y, c.z + sinf(a0) * puddle->radius), 0.0f, 0.0f, color);
+        batch_vertex(v3(c.x + cosf(a1) * puddle->radius, c.y, c.z + sinf(a1) * puddle->radius), 0.0f, 0.0f, color);
+    }
+}
+
 static void batch_phys_box(const VfxBox *box) {
     vec3 x, y, z;
     look_basis(box->forward, &x, &y, &z);
@@ -1720,6 +1800,17 @@ void vfx_render_world(Client *client) {
             // game shows these cubes as one flat grey (#989A9F) on every face: the debris
             // geometry gets no usable normals, so only ambient + emissive reach it.
             batch_box(corner, v3(edge, 0, 0), v3(0, edge, 0), v3(0, 0, edge), debris_color(color), 0, (vec4) {0});
+        }
+    }
+
+    // KrunkNative Piss puddles (spawnMustardPuddle): flat CircleGeometry(radius, 24) discs of the
+    // stream's colour, MeshBasicMaterial transparent 0.38, depthWrite false, DoubleSide
+    if (client->game.puddles.count) {
+        VfxDrawState puddle_state = {0};
+        puddle_state.blend = VFX_BLEND_NORMAL;
+        puddle_state.fog = 1;
+        if (batch_state(puddle_state)) {
+            for (int i = 0; i < client->game.puddles.count; i++) batch_puddle(&client->game.puddles.items[i]);
         }
     }
 

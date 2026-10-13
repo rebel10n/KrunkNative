@@ -17,6 +17,31 @@ typedef struct {
     unsigned char dont_pred:1; // dontPred: no lag compensation (stateConst 0; the Crossbow)
 } ProjectileConfig;
 
+// KrunkNative Piss (WEAPON_ID_PISS, shared/include/piss.h; doc/v7/decisions.md "Piss"): the stream
+// and puddles of the v3.1.1 reconstruction's grappling-gun branch (0c317bf / e1624e4, the
+// weapons.js mustard* / mustardPuddle* / hose* fields). Krunker units: speed units/ms, gravity
+// units/ms^2, times in ms like the branch.
+typedef struct {
+    int color;              // mustardColor 0xRRGGBB (16765745 = #ffd231)
+    int particles;          // mustardParticles: client spray particles per shot
+    float speed;            // mustardSpeed: stream speed (units/ms)
+    float spread;           // mustardSpread: particle yaw jitter (+-, pitch +-0.55x), visual only
+    float gravity;          // mustardGravity (units/ms^2)
+    float life;             // mustardLife (ms): how long the stream (and a particle, x0.75-1.25) flies
+    float size;             // mustardSize: particle size (scale x0.14-0.24, length x0.55-0.95)
+    float pelvis_forward;   // hosePelvisForward / mustardPelvisForward: the source in front of the feet
+    float pelvis_height;    // hosePelvisHeight / mustardPelvisHeight: ... above them (- crouch x 1.25)
+    float puddle_radius;    // mustardPuddleRadius
+    float puddle_life;      // mustardPuddleLife (ms)
+    float puddle_dps;       // mustardPuddleDPS
+    float puddle_tick;      // mustardPuddleTick (ms): damage every tick of dps x tick / 1000
+    int puddles_per_player; // KN: live puddles per owner (the oldest goes)
+    int puddles_max;        // mustardMaxPuddles: live puddles in the game (the oldest goes)
+    float hose_radius;      // hoseRadius (genHose)
+    float hose_length;      // hoseLength
+    vec3 hose_view;         // first-person centre in the weapon anchor (the branch: hoseViewX, hoseViewY - 1.5, hoseViewZ)
+} WeaponStream;
+
 typedef struct {
     const char *name;
     const char *src;
@@ -169,6 +194,7 @@ typedef struct {
     float deploy_range;         // deployRang
     float grapple_range;        // grapRang (Grappler)
     ProjectileConfig projectile_config; // pj_*: speed 0 = none (also the bullet-drop flight of hitscan guns)
+    const WeaponStream *stream; // KrunkNative Piss: a stream instead of a bullet (shared/src/piss.c), NULL none
 } Weapon;
 
 extern const Weapon g_awp;
@@ -203,6 +229,7 @@ extern const Weapon g_akimbo_pistol;
 extern const Weapon g_charge_rifle;
 // KrunkNative-only weapons after v7's table (WEAPON_ID_TOOL_GUN...)
 extern const Weapon g_tool_gun;
+extern const Weapon g_piss; // WEAPON_ID_PISS (shared/src/weapons/kn_piss.c)
 
 // Krunker v7.1.4 weapon attachments (src/data/attach.js). `dotSrc` is never read by the client.
 typedef struct {
@@ -258,7 +285,8 @@ const WeaponAttachment *weapon_attachment(const Weapon *weapon, int attach_index
 // game's weapon table (Game.weapons), so loadouts, pickups and packets take them, but not in
 // WEAPON_COUNT, so v7's lists (loadout, market, host config, challenges) never show them.
 #define WEAPON_ID_TOOL_GUN 29
-#define WEAPON_TABLE_COUNT 30
+#define WEAPON_ID_PISS 30 // KrunkNative Piss (doc/v7/decisions.md "Piss")
+#define WEAPON_TABLE_COUNT 31
 
 extern const Weapon *g_weapons[WEAPON_TABLE_COUNT];
 // v7.1.4 upgradeWeapons.js entry of weapon `id` (krumMachine upgrades), NULL out of range.

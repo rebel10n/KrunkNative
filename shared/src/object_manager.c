@@ -10,6 +10,7 @@
 #include <modes.h>
 #include <prefabs.h>
 #include <weapons.h>
+#include <piss.h>
 #include <world.h>
 #include <cJSON.h>
 #include <ctype.h>
@@ -45,7 +46,7 @@ static ObjectManager *om_of(Game *game) {
 }
 
 static const Weapon *om_weapon(const Game *game, const int id) {
-    const size_t count = game && game->weapon_count ? game->weapon_count : WEAPON_COUNT;
+    const size_t count = game && game->weapon_count ? game->weapon_count : WEAPON_TABLE_COUNT;
     Weapon *const *all = game && game->weapons ? game->weapons : (Weapon *const *) g_weapons;
     return id >= 0 && (size_t) id < count ? all[id] : NULL;
 }
@@ -53,7 +54,8 @@ static const Weapon *om_weapon(const Game *game, const int id) {
 // ---------------------------------------------------------------- catalogue
 
 int object_manager_weapon_listed(const int weapon_id) {
-    if (weapon_id < 0 || weapon_id >= WEAPON_COUNT || !g_weapons[weapon_id]) return 0;
+    if (weapon_id < 0 || weapon_id >= WEAPON_TABLE_COUNT || !g_weapons[weapon_id]) return 0;
+    if (weapon_id >= WEAPON_COUNT) return weapon_id == WEAPON_ID_PISS; // KrunkNative-only weapons: the Piss is a Weapons tile
     return weapon_id != WEAPON_ID_KNIFE && !g_weapons[weapon_id]->bomb; // every class has the knife; bombs are site-mode only
 }
 
@@ -638,6 +640,7 @@ int object_manager_apply_spawned(Game *game, const void *payload, const uint16_t
     if (!game || !game->ready || !game->map || length < sizeof(NetSpawnedObjPacket) || game_is_authority(game)) return 0;
     NetSpawnedObjPacket head;
     memcpy(&head, payload, sizeof(head));
+    if (head.kind == OM_KIND_PUDDLE) return piss_apply_spawned(game, payload, length); // KrunkNative Piss
     if (head.kind != OM_KIND_OBJECT) return 0;
     if (head.op == OM_SPAWNED_REMOVE) {
         spawned_remove(game, head.id);

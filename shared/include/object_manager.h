@@ -75,12 +75,14 @@ typedef enum {
 #define OM_CAP_SPAWN 2u   // objects, entities, NPCs (dev, host, sandbox)
 #define OM_CAP_DEV 4u     // the player passes the dev checks
 
-// What a spawned thing is (NetSpawnedObjPacket.kind, the undo list). Only map objects travel in
-// SPAWNED_OBJ: spawnables, airdrops, AIs and bots replicate through their own v7 packets.
+// What a spawned thing is (NetSpawnedObjPacket.kind, the undo list). Only map objects (and the
+// Piss's puddles) travel in SPAWNED_OBJ: spawnables, airdrops, AIs and bots replicate through
+// their own v7 packets.
 typedef enum {
     OM_KIND_OBJECT = 0, // a map object (uid): pickups, scraps, machines, prefabs
     OM_KIND_ENTITY,     // a spawnable (sid) or an airdrop (sid)
     OM_KIND_NPC,        // an AI (sid) or a bot (GameBot.id)
+    OM_KIND_PUDDLE,     // KrunkNative Piss: a puddle (GamePuddle.id) + NetPuddlePayload (shared/include/piss.h); never in the undo list
 } ObjectManagerKind;
 
 // ---- catalogue (both sides): the Entities and NPCs tabs (the Weapons tab lists g_weapons)
@@ -189,7 +191,7 @@ typedef struct {
 } ObjectManagerPerms;
 
 // ---- catalogue (both sides)
-int object_manager_weapon_listed(int weapon_id); // the Weapons tab: every weapon but the knife and the bomb
+int object_manager_weapon_listed(int weapon_id); // the Weapons tab: every v7 weapon but the knife and the bomb, + the KN Piss
 int object_manager_weapon_allowed(int weapon_id); // an extra slot may hold it: the listed ones and the Tool Gun
 int object_manager_entity_giveable(int index);    // `give` takes this Entities entry: spawnables and scrap pickups
 

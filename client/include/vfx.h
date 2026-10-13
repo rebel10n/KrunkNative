@@ -31,6 +31,9 @@ void vfx_fini(void);                     // GL objects; call with the context cu
 // impact particles); normal_yaw/normal_pitch are the face angles Krunker sends
 // (aM/aN: yaw 0 = +z, PI/2 = +x, pitch PI/2 = up). `trail` = weapon.trail.
 void vfx_remote_shot(Client*, const Player *shooter, vec3 hit, int has_normal, float normal_yaw, float normal_pitch, int trail);
+// KrunkNative Piss: another player's stream shot (NET_PACKET_SHOT of a stream weapon): the spray
+// from its hose along its view, ending about where the stream stopped (`hit`).
+void vfx_remote_stream_shot(Client*, const Player *shooter, const WeaponStream *stream, vec3 hit);
 // 88.js effect(x, y, z, yaw, pitch, 0): impact puffs plus the bullet hole (index.js g8
 // spawns it at a projectile's end with yaw = pitch = 0).
 void vfx_impact(Client*, vec3 position, float yaw, float pitch);

@@ -219,7 +219,7 @@ Giving to another player: devs and the host only. The server console and rcon co
 
 Names match like the Object Manager search, normalised to letters and digits: exact first,
 else a unique prefix, else a unique substring (`give alien` is the Alien Blaster, `give krtag`
-the KR Tag, `give 13` the Crossbow by id; a weapon wins over an item of the same name). Quote
+the KR Tag, `give 13` the Crossbow by id, `give piss` the KrunkNative Piss (id 30, doc/v7/decisions.md "Piss"); a weapon wins over an item of the same name). Quote
 names with spaces for a target (`give "desert eagle" Bob`); without a target the whole rest is
 the name. Refusals: "Unknown weapon or item 'x'.", "'x' matches N weapons and items: be more
 specific.", "Only developers and the host can give to other players." (plus the notify "Host or

@@ -340,7 +340,7 @@ static const char *hud_weapon_icon_src(const Weapon *slot, const int can_throw, 
 
 // weaponConfig index of `w` (the default table; maps / custom games reuse its ids), 0 unknown.
 static int weapon_index_of(const Weapon *w) {
-    for (int i = 0; i < WEAPON_COUNT; i++) {
+    for (int i = 0; i < WEAPON_TABLE_COUNT; i++) { // KrunkNative-only weapons too (the Piss)
         if (g_weapons[i] == w) return i;
     }
     return 0;

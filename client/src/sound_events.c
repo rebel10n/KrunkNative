@@ -14,6 +14,7 @@
 #include <audio.h>
 #include <client_settings.h> // Settings > Client "Always Play HS Sound on Kill"
 #include <cosmetics.h>
+#include <piss.h> // KrunkNative Piss: PISS_SOUND_INTERVAL
 #include "viewer/viewer_store.h"
 #include <math.h>
 #include <pcg_basic.h>
@@ -56,6 +57,7 @@ typedef struct {
     unsigned short step_events, land_events; // Player.step_events / land_events last seen (local player)
     float last_shell;
     float last_bounce;
+    float last_spray; // KrunkNative Piss: the last spray sound (PISS_SOUND_INTERVAL)
 } PlayerTrack;
 
 static struct {
@@ -65,6 +67,7 @@ static struct {
     int map_index;
     int ambient;            // ambient_N currently looping, 0 = none
     int preloaded;
+    float now; // sound_events_tick's clock (the remote Piss spray throttle)
 } g_sound;
 
 // weapon.sound per weapon (v7.1.4 src/data/weapons.js; Weapon.sound carries the same name), and
@@ -331,6 +334,15 @@ static void local_shot(PlayerTrack *track, const Player *me, const float now) {
 
     if (weapon->build) return; // players.build sets the fire timer without a sound
 
+    // KrunkNative Piss (fireMustard): SOUND.play("spray", 0.12, rate 0.85-1.08) at most every 220 ms
+    if (weapon->stream) {
+        if (weapon->sound && now - track->last_spray >= PISS_SOUND_INTERVAL) {
+            track->last_spray = now;
+            audio_play(weapon->sound, 0.12f, 0, rand_float(0.85f, 1.08f));
+        }
+        return;
+    }
+
     const int entry = weapon_entry(weapon);
     if (entry < 0) return;
 
@@ -509,6 +521,7 @@ static void preload_common(void) {
 }
 
 void sound_events_tick(Client *client, const float now, const float delta) {
+    g_sound.now = now;
     if (!audio_available()) return;
 
     if (!g_sound.preloaded) {
@@ -563,6 +576,16 @@ void sound_events_remote_shot(Client *client, const Player *shooter, const int b
     // shoot() on the server -> "s" packet -> playerSound -> play3D(weapon.sound, 0.85, rate); a
     // full-charge shot plays weapon.sound + "_blast" (NetShotPacket.first 2).
     if (!shooter || shooter == client->me) return;
+    // KrunkNative Piss (fireMustard on the server): playSound("spray", 0.22, rate 0.85-1.08) at most
+    // every 220 ms per sprayer
+    if (shooter->weapon && shooter->weapon->stream) {
+        int fresh;
+        PlayerTrack *track = remote_track(shooter, &fresh);
+        if (!shooter->weapon->sound || (track && !fresh && g_sound.now - track->last_spray < PISS_SOUND_INTERVAL)) return;
+        if (track) track->last_spray = g_sound.now;
+        audio_play_3d(shooter->weapon->sound, shooter->position, 0.22f, rand_float(0.85f, 1.08f), 0.0f, 0.0f);
+        return;
+    }
     const int entry = weapon_entry(shooter->weapon);
     if (entry < 0) return;
     char name[48];

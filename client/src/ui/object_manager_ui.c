@@ -201,7 +201,7 @@ static void om_grid_html(char **buf, size_t *len, size_t *cap) {
     int shown = 0;
     om_append(buf, len, cap, "<div id='knOmGrid' class='knOmGrid'>");
     if (g_om.tab == OM_TAB_WEAPONS) {
-        for (int id = 0; id < WEAPON_COUNT; id++) {
+        for (int id = 0; id < WEAPON_TABLE_COUNT; id++) {
             if (!object_manager_weapon_listed(id)) continue;
             const Weapon *w = g_weapons[id];
             if (!om_matches(w->name)) continue;
@@ -355,7 +355,7 @@ static void om_update_loadout(void) {
     if (!om_window_open() || g_om.tab != OM_TAB_WEAPONS) return;
     const Client *client = om_client();
     const Player *me = client ? client->me : NULL;
-    for (int id = 0; id < WEAPON_COUNT; id++) {
+    for (int id = 0; id < WEAPON_TABLE_COUNT; id++) {
         char tile_id[16];
         snprintf(tile_id, sizeof(tile_id), "knOmW%d", id);
         const HtmlElem tile = html_dom_by_id(tile_id);

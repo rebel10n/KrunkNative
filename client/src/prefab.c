@@ -2062,8 +2062,13 @@ Mesh *prefab_weapon_mesh(const Weapon *weapon, const int no_texture) {
 // pose (y + pickupOff, rotateY / X / Z) is the caller's (map_post.c). NULL for an unknown id.
 // Weapon transparency / glow flags (seeThrough, transp) are not in KN's weapon table (documented).
 Mesh *prefab_pickup_mesh(const int weapon_id, const int no_texture, float *scale) {
-    if (weapon_id < 0 || weapon_id >= WEAPON_COUNT || !g_weapons[weapon_id]) return NULL;
+    if (weapon_id < 0 || weapon_id >= WEAPON_TABLE_COUNT || !g_weapons[weapon_id]) return NULL;
     const Weapon *weapon = g_weapons[weapon_id];
+    if (weapon->stream && !weapon->src) { // KrunkNative Piss: no model, the hose (genHose's mustard default colour) x2
+        Mesh *hose = player_hose_mesh(weapon->stream, weapon->stream->color);
+        if (hose && scale) *scale = 2.0f;
+        return hose;
+    }
     Mesh *mesh = prefab_weapon_mesh(weapon, no_texture);
     if (mesh && scale) *scale = (weapon->scale != 0.0f ? weapon->scale : 1.0f) * (weapon->equipment ? 2.0f : 1.0f);
     return mesh;

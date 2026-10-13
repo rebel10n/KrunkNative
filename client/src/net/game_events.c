@@ -387,7 +387,10 @@ static void events_shot(Client *client, const NetShotPacket *packet) {
     if (!shooter || shooter == client->me) return;
 
     const vec3 hit = {packet->hit[0], packet->hit[1], packet->hit[2]};
-    vfx_remote_shot(client, shooter, hit, packet->has_normal, packet->normal_yaw, packet->normal_pitch, packet->trail);
+    const int w = packet->weapon_index;
+    const Weapon *weapon = w >= 0 && (size_t) w < client->game.weapon_count && client->game.weapons ? client->game.weapons[w] : NULL;
+    if (weapon && weapon->stream) vfx_remote_stream_shot(client, shooter, weapon->stream, hit); // KrunkNative Piss: the spray, no tracer
+    else vfx_remote_shot(client, shooter, hit, packet->has_normal, packet->normal_yaw, packet->normal_pitch, packet->trail);
     if (packet->first) sound_events_remote_shot(client, shooter, packet->first == 2);
 }
 

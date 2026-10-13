@@ -909,6 +909,10 @@ void geometry_set_bounds(Geometry*, const vertex *vertices, size_t vertex_count)
 Geometry *create_cube_geo();
 Geometry *create_plane_geo();
 Geometry *create_ramp_geo();
+Geometry *create_hose_geo(float radius, float length, int sides); // KrunkNative Piss: render.js genHose (cached)
+// KrunkNative Piss: the hose (genHose) of a stream weapon in `color` (0xRRGGBB; the player's skin
+// colour on players, as the branch passes skinCol), MeshLambert-like BasicMaterial; NULL none.
+Mesh *player_hose_mesh(const WeaponStream *stream, int color);
 
 Mesh *prefab_init(Object*, const vec4*, const cJSON*);
 void prefab_begin_map(const cJSON *objects, const cJSON *colors); // per-map prefab state (shared model materials, the raw objects) before prefab_init()

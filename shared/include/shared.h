@@ -1452,6 +1452,7 @@ int player_hit_is_leg(const Player *target, float base_y, float hit_y);
 // Damage of one weapon hit after head / leg multipliers (noHeadShot, per-weapon lsMlt, no leg
 // multiplier on a headshot) and headshotOnly; `damage` is after falloff.
 float player_hit_damage(const struct Game_t*, const Weapon*, float damage, int head, int leg);
+int player_can_damage(const Player *dealer, const Player *victim); // teams, friendly fire, noPVP / forcePVP (KrunkNative Piss puddles)
 // ---- end WP-B ----
 
 // WP-E: GameConfig carries every v7.1.4 serverConfig key (GAME_CONFIG_V7, shared/include/game_config.h).
@@ -1783,6 +1784,28 @@ typedef struct {
 } GameZombies;
 // ---- end WP-H
 
+// KrunkNative Piss (shared/include/piss.h, shared/src/piss.c): the puddles of the stream.
+#define GAME_PUDDLES_MAX 64
+typedef struct {
+    int id;         // SPAWNED_OBJ id (OM_KIND_PUDDLE)
+    int owner;      // the owner's uid
+    int weapon_id;  // the kill feed's weapon
+    vec3 position;  // centre on the ground (+ PISS_PUDDLE_LIFT)
+    float radius;
+    float dps;      // authority
+    float life;     // ms left (authority)
+    float age;      // ms since it appeared (client fade in)
+    int color;      // 0xRRGGBB
+} GamePuddle;
+
+typedef struct {
+    GamePuddle items[GAME_PUDDLES_MAX]; // oldest first
+    int count;
+    int next_id;
+    float tick;        // ms since the last damage tick (authority)
+    float tick_period; // the latest puddle's weapon puddle_tick (ms)
+} GamePuddles;
+
 typedef struct Game_t {
     GameConfig config;
     GameMode *mode;
@@ -1860,6 +1883,7 @@ typedef struct Game_t {
     // KrunkNative Object Manager (shared/include/object_manager.h): spawned object records and the
     // per-player spawn lists. Allocated on first use, NULL none.
     struct ObjectManager_t *object_manager;
+    GamePuddles puddles; // KrunkNative Piss (shared/include/piss.h): live puddles (authority; clients a copy)
 } Game;
 
 void game_configure(Game*, const GameConfig*, const cJSON**, size_t, int*, size_t, Weapon**, size_t, ClassConfig*, size_t);

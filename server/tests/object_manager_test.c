@@ -745,6 +745,8 @@ static void test_give_drop(TestClient *a, TestClient *b) {
     CHECK(object_manager_give_lookup("Alien", &id, NULL) == OM_GIVE_WEAPON && id == 11, "prefix Alien -> 11 (%d)", id);
     CHECK(object_manager_give_lookup("\"tool gun\"", &id, NULL) == OM_GIVE_WEAPON && id == WEAPON_ID_TOOL_GUN, "tool gun (%d)", id);
     CHECK(object_manager_give_lookup("24", &id, NULL) == OM_GIVE_WEAPON && id == 24, "by id");
+    CHECK(object_manager_give_lookup("piss", &id, NULL) == OM_GIVE_WEAPON && id == WEAPON_ID_PISS, "piss -> the KrunkNative Piss (%d)", id);
+    CHECK(object_manager_weapon_listed(WEAPON_ID_PISS) && object_manager_weapon_allowed(WEAPON_ID_PISS), "the Piss is a Weapons tile");
     CHECK(object_manager_give_lookup("12", &id, NULL) == OM_GIVE_NONE, "no knife");
     CHECK(object_manager_give_lookup("krtag", &id, NULL) == OM_GIVE_ENTITY && id == 0, "krtag -> the KR Tag entry (%d)", id);
     CHECK(object_manager_give_lookup("a", &id, &matches) == OM_GIVE_NONE && matches > 1, "'a' is ambiguous (%d)", matches);

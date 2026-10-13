@@ -7,6 +7,7 @@
 #include <ks_game.h> // KrunkScript hook points (onPlayerUpdate / Spawn / Damage / Death)
 #include <triggers_v7.h> // WP-C: onPlayerSpawn / Damage / Die / Kill map triggers
 #include <player_card.h> // WP-E: the death screen's life accuracy
+#include <piss.h> // KrunkNative Piss: the stream and its puddles
 #include <math.h>
 #include <pcg_basic.h>
 #include <stdio.h>
@@ -2323,6 +2324,8 @@ static int combat_can_damage(const Player *dealer, const Player *victim) {
            dealer->game->config.friendly_fire; // v7 game.config.frFire
 }
 
+int player_can_damage(const Player *dealer, const Player *victim) { return combat_can_damage(dealer, victim); }
+
 // lineInRect against every shootable object and (authority only) every other living player's
 // hitbox: x/z +-(scale + hitboxPadW), y from the feet to adjustedHeight + hitboxPadH (v7.1.4:
 // game hitBoxPad 0.6, 0.1 in Ranked, + class hbS / hbH; v3.1.1 padded by mode.hitBoxPad || 1).
@@ -3145,6 +3148,124 @@ static void player_grapple_pull(Player *player, const float delta_ms, const floa
     player->position = (vec3) {(float) nx, (float) ny, (float) nz};
 }
 
+// ---------------------------------------------------------------- Piss (KrunkNative)
+// shared/include/piss.h: the stream flies the branch's particle arc from the hose; it stops at the
+// first player, AI, map object or terrain, and a landing leaves a puddle on the ground below.
+
+// findPuddleGroundY: the highest surface under (x, z) at most 0.5 above `from_y` (map objects the
+// stream can hit, then the terrain), within PISS_GROUND_PROBE. 0: nothing below.
+static int stream_ground(Player *player, const float x, const float from_y, const float z, float *ground) {
+    const vec3 origin = {x, from_y + 0.5f, z};
+    const vec3 down = {0.0f, -(PISS_GROUND_PROBE + 0.5f), 0.0f};
+    HitList hits = {0};
+    combat_trace(player, origin, down, 0, &hits);
+    float t = 2.0f;
+    for (size_t i = 0; i < hits.count; i++) t = fminf(t, hits.items[i].t);
+    free(hits.items);
+    const float terrain_t = world_terrain_fraction(player->game, origin, down);
+    if (terrain_t > 0.0f) t = fminf(t, terrain_t);
+    if (t > 1.0f) return 0;
+    *ground = origin.y + down.y * t;
+    return 1;
+}
+
+int player_stream_trace(Player *player, const float pitch, const float yaw, const int include_players, PissStream *out) {
+    const WeaponStream *stream = player && player->weapon ? player->weapon->stream : NULL;
+    if (!stream || !out || !player->game || !player->game->map) return 0;
+    memset(out, 0, sizeof(*out));
+    out->source = piss_stream_source(player, stream, pitch, yaw);
+    out->velocity = (vec3) {sinf(yaw + (float) M_PI) * cosf(pitch) * stream->speed, sinf(pitch) * stream->speed,
+                            cosf(yaw + (float) M_PI) * cosf(pitch) * stream->speed};
+    out->gravity = stream->gravity;
+    out->time = stream->life;
+    out->end = piss_stream_at(out->source, out->velocity, out->gravity, stream->life);
+
+    for (float t0 = 0.0f; t0 < stream->life && !out->hit; t0 += PISS_TRACE_STEP_MS) {
+        const float t1 = fminf(stream->life, t0 + PISS_TRACE_STEP_MS);
+        const vec3 a = piss_stream_at(out->source, out->velocity, out->gravity, t0);
+        const vec3 b = piss_stream_at(out->source, out->velocity, out->gravity, t1);
+        const vec3 seg = {b.x - a.x, b.y - a.y, b.z - a.z};
+        HitList hits = {0};
+        combat_trace(player, a, seg, include_players, &hits);
+        hit_list_sort(&hits);
+        const float terrain_t = world_terrain_fraction(player->game, a, seg);
+        const Hit *first = hits.count ? &hits.items[0] : NULL;
+        float t = first ? first->t : 2.0f;
+        if (terrain_t > 0.0f && terrain_t <= t) { // the terrain wins ties, like shoot
+            t = terrain_t;
+            first = NULL;
+            out->hit = PISS_HIT_TERRAIN;
+        } else if (first) {
+            out->hit = first->player ? PISS_HIT_PLAYER : first->ai ? PISS_HIT_AI : PISS_HIT_OBJECT;
+            out->player = first->player;
+            out->ai = first->ai;
+            out->object = first->object;
+        }
+        if (out->hit) {
+            out->time = t0 + (t1 - t0) * t;
+            out->end = (vec3) {a.x + seg.x * t, a.y + seg.y * t, a.z + seg.z * t};
+        }
+        free(hits.items);
+    }
+
+    // a landing: the puddle on the ground below, a step back from a wall (buildMustardPuddle +
+    // findPuddleGroundY, with the landing point the trace found instead of the branch's fixed throw)
+    if (out->hit == PISS_HIT_OBJECT || out->hit == PISS_HIT_TERRAIN) {
+        float hx = out->velocity.x, hz = out->velocity.z;
+        const float h = sqrtf(hx * hx + hz * hz);
+        if (h > 1e-6f) {
+            hx /= h;
+            hz /= h;
+        }
+        const float x = out->end.x - hx * 0.3f, z = out->end.z - hz * 0.3f;
+        float ground;
+        if (stream_ground(player, x, out->end.y, z, &ground)) {
+            out->puddle = 1;
+            out->puddle_at = (vec3) {roundf(x * 10.0f) / 10.0f, roundf((ground + PISS_PUDDLE_LIFT) * 100.0f) / 100.0f, roundf(z * 10.0f) / 10.0f};
+        }
+    }
+    return 1;
+}
+
+// fireMustard (authority): the stream's hit takes the weapon's damage (no head / leg zones), a
+// landing makes a puddle; everyone else sees the spray from the SHOT (hit = where it stopped).
+static void combat_fire_stream(Player *player, const int weapon_id, const float pitch, const float yaw) {
+    Game *game = player->game;
+    if (!game_is_authority(game)) return;
+    const Weapon *weapon = player->weapon;
+    PissStream stream;
+    if (!player_stream_trace(player, pitch, yaw, 1, &stream)) return;
+    if (player->active) player->life_shots++;
+    game_inc_stat(game, player, "s");
+
+    const float damage = weapon->damage * player_attr_damage(player);
+    if (stream.hit == PISS_HIT_PLAYER && stream.player) {
+        Player *victim = stream.player;
+        if (player->active) player->life_hits++;
+        game_inc_stat(game, player, "h");
+        const float dealt = player_hit_damage(game, weapon, damage, 0, 0);
+        if (dealt > 0.0f && player_change_health(victim, player, dealt, 0) && victim->active) {
+            PlayerKillInfo info = {.weapon_id = weapon_id, .distance = stream.time / fmaxf(1.0f, weapon->stream->life)};
+            player_kill(victim, player, &info, 0);
+        }
+    } else if (stream.hit == PISS_HIT_AI && stream.ai) {
+        if (player->active) player->life_hits++;
+        game_inc_stat(game, player, "h");
+        game_ai_damage_ex(game, stream.ai, player, player->smite ? 10000.0f : damage, 0, stream.end.y, -1, 0);
+    } else if (stream.hit == PISS_HIT_OBJECT && stream.object) {
+        game_object_hit(game, (Object *) stream.object, player, damage, 0, GAME_HIT_SHOT); // onShoot / destructibles
+    }
+    if (stream.puddle) piss_puddle_spawn(game, player, weapon_id, stream.puddle_at);
+
+    NetShotPacket packet = {
+        .uid = player->uid,
+        .weapon_index = weapon_id,
+        .hit = {stream.end.x, stream.end.y, stream.end.z},
+        .first = 1,
+    };
+    game_send(game, NET_TARGET_EXCEPT(player->uid), NET_PACKET_SHOT, &packet, sizeof(packet)); // players + spectators
+}
+
 void player_shoot(Player *player) {
     // v7.1.4 shoot: `!player.disableShooting && config.canShoot` (KrunkScript; 1 without a script)
     if (!ks_player_allows(player, KS_PLAYER_CAN_SHOOT)) return;
@@ -3218,6 +3339,13 @@ void player_shoot(Player *player) {
     // KrunkNative Tool Gun: the fire timer, the recoil and the client's tracer only; the client
     // sends the shot as OM_ACTION_TOOL (object_manager_ui.c) and the authority applies the tool
     if (weapon->kn_tool) return;
+
+    // KrunkNative Piss: the stream instead of a bullet, straight along the view (buildMustardPacket
+    // reads player.pitch / yaw: noSpread, and the recoil kick only moves the viewmodel)
+    if (weapon->stream) {
+        combat_fire_stream(player, weapon_id, player->direction.x, player->direction.y);
+        return;
+    }
 
     // deployRang (Slimer): tryDeployable places the weapon's spawnable (Slime Pad) instead of firing
     if (weapon->deploy_range > 0.0f) {

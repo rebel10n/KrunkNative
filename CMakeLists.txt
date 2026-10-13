@@ -471,7 +471,8 @@ else ()
     endif ()
 
     # charge_grapple_test: the Charge Rifle charge / blast and the Grappler rope against v7.1.4
-    foreach (wpb_test weapons_v7_test combat_test charge_grapple_test)
+    # piss_test: the KrunkNative Piss's stream, puddles, caps and their SPAWNED_OBJ replication
+    foreach (wpb_test weapons_v7_test combat_test charge_grapple_test piss_test)
         add_executable(${wpb_test} ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/${wpb_test}.c)
         target_link_libraries(${wpb_test} PRIVATE m)
         if (CMAKE_SYSTEM_NAME STREQUAL "Windows")

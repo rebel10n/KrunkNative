@@ -424,6 +424,94 @@ Geometry *create_cube_geo() {
     return geometry;
 }
 
+// KrunkNative Piss: render.js genHose (the e1624e4 branch) - a CylinderGeometry(radius, radius,
+// length, sides) along z (rotation.x = PI / 2) with a SphereGeometry(radius, sides, max(8, sides / 2))
+// at each end; the Piss's weapon mesh (player_hose_mesh). One cached geometry per size, never freed
+// (like the cube).
+#define HOSE_GEO_CACHE 4
+typedef struct {
+    float radius, length;
+    int sides;
+    Geometry *geometry;
+} HoseGeoEntry;
+
+Geometry *create_hose_geo(const float radius, const float length, const int sides_in) {
+    static HoseGeoEntry cache[HOSE_GEO_CACHE];
+    static int cached;
+    const int sides = sides_in >= 3 ? sides_in : 18;
+    for (int i = 0; i < cached; i++)
+        if (cache[i].radius == radius && cache[i].length == length && cache[i].sides == sides) return cache[i].geometry;
+
+    const int rings = sides / 2 > 8 ? sides / 2 : 8;
+    const int cyl_vertices = (sides + 1) * 2, sphere_vertices = (sides + 1) * (rings + 1);
+    const size_t nv = (size_t) (cyl_vertices + 2 * sphere_vertices);
+    const size_t ni = (size_t) (sides * 6 + 2 * sides * rings * 6);
+    vertex *v = calloc(nv, sizeof(vertex));
+    unsigned int *idx = calloc(ni, sizeof(unsigned int));
+    Geometry *geometry = calloc(1, sizeof(Geometry));
+    if (!v || !idx || !geometry) {
+        free(v);
+        free(idx);
+        free(geometry);
+        return NULL;
+    }
+
+    size_t n = 0, k = 0;
+    for (int e = 0; e < 2; e++) { // the tube: rings at z -length / 2 and +length / 2
+        for (int x = 0; x <= sides; x++) {
+            const float th = (float) x / (float) sides * 2.0f * (float) M_PI;
+            v[n++] = (vertex) {{radius * sinf(th), radius * cosf(th), (e ? 0.5f : -0.5f) * length}, {(float) x / (float) sides, (float) e}};
+        }
+    }
+    for (int x = 0; x < sides; x++) {
+        const unsigned int a = (unsigned int) x, b = (unsigned int) (sides + 1 + x);
+        const unsigned int tri[6] = {a, a + 1, b, b, a + 1, b + 1};
+        memcpy(idx + k, tri, sizeof(tri));
+        k += 6;
+    }
+    for (int e = 0; e < 2; e++) { // the end caps
+        const unsigned int base = (unsigned int) n;
+        const float cz = (e ? 0.5f : -0.5f) * length;
+        for (int y = 0; y <= rings; y++) {
+            const float ph = (float) y / (float) rings * (float) M_PI;
+            for (int x = 0; x <= sides; x++) {
+                const float th = (float) x / (float) sides * 2.0f * (float) M_PI;
+                v[n++] = (vertex) {{radius * sinf(ph) * sinf(th), radius * sinf(ph) * cosf(th), cz + radius * cosf(ph)},
+                                   {(float) x / (float) sides, (float) y / (float) rings}};
+            }
+        }
+        for (int y = 0; y < rings; y++) {
+            for (int x = 0; x < sides; x++) {
+                const unsigned int a = base + (unsigned int) (y * (sides + 1) + x), b = a + (unsigned int) (sides + 1);
+                const unsigned int tri[6] = {a, b, a + 1, b, b + 1, a + 1};
+                memcpy(idx + k, tri, sizeof(tri));
+                k += 6;
+            }
+        }
+    }
+
+    unsigned int vbo;
+    glGenVertexArrays(1, &geometry->vao);
+    glGenBuffers(1, &geometry->ebo);
+    glGenBuffers(1, &vbo);
+    glBindVertexArray(geometry->vao);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, (long) (nv * sizeof(vertex)), v, GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, geometry->ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (long) (k * sizeof(unsigned int)), idx, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex), NULL);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(vertex), (void *) (3 * sizeof(float)));
+    glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
+    geometry->index_count = (int) k;
+    geometry_set_bounds(geometry, v, nv);
+    free(v);
+    free(idx);
+
+    if (cached < HOSE_GEO_CACHE) cache[cached++] = (HoseGeoEntry) {radius, length, sides, geometry};
+    return geometry;
+}
+
 static const vertex plane_vertices[] = {
     {-0.5f, 1.0f, 0.5f, 0.0f, 0.0f},
     {0.5f, 1.0f, -0.5f, 1.0f, 1.0f},

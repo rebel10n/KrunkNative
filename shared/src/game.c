@@ -1,4 +1,5 @@
 #include <object_manager.h>
+#include <piss.h> // KrunkNative Piss puddles
 #include <shared.h>
 #include <ai.h>
 #include <map_ai.h>
@@ -414,6 +415,7 @@ void game_start_round(Game *game) {
     zombies_round_start(game); // WP-H finishInit: mystery boxes / krum machines, power-ups, airdrops
     if (game->mode) mode_round_start(game);
     world_round_start(game); // WP-B: resetZone, movedObjs, saveColls (shared/src/world.c)
+    piss_round_start(game);  // KrunkNative Piss: no puddles
     trigger_multi_event(game, TRIGGER_EVENT_ON_GAME_START, NULL);
 }
 
@@ -577,6 +579,7 @@ void game_send_round_state(Game *game, const int uid) {
     if (!game->ready || !game_is_authority(game)) return;
 
     object_manager_send_state(game, uid); // KrunkNative: spawned objects first (their pickups sync below)
+    piss_send_state(game, uid);           // KrunkNative Piss: the live puddles
     game_send_object_state(game, uid); // init dest / gates / banks (shared/src/triggers.c)
     world_send_state(game, uid);        // init zone / mov (shared/src/world.c, WP-B)
     zombies_send_state(game, uid);      // init pwup / mybx / krm, the wave, airdrops (WP-H)
@@ -595,6 +598,7 @@ void game_send_round_state(Game *game, const int uid) {
 
 void game_player_left(Game *game, Player *player) {
     mode_player_left(game, player); // players.remove: dropFlag
+    piss_player_left(game, player);  // KrunkNative Piss: its puddles go
     game_player_drop_all(game, player); // players.remove: dropWeapon(player, true) (WP-C)
     trigger_player_left(game, player);  // its looping sounds stop, queued actions lose it (WP-C)
     if (game->nuke_player == player) {
@@ -807,6 +811,8 @@ void game_tick_world(Game *game, const float now, const float delta, const float
     zombies_tick(game, delta); // WP-H #8 power-ups, #14 airdrops, #21-22 machines (clients: timers, falls)
     game_tick_map_objects(game, delta * 1000.0f); // teleporter cooldowns; authority: onTimer triggers, destructible respawns
     if (authority && !game->end_timer) spawnables_update(game, delta); // #19 (WP-D)
+    if (authority && !game->end_timer) piss_tick(game, delta); // KrunkNative Piss: puddle lifetimes and damage
+    if (!authority) piss_client_tick(game, delta);
     if (authority && !game->end_timer && game->mode) mode_tick(game, delta); // objectives, flags, tags, conversions, forceSpawn
     if (!authority && !game->end_timer && game->mode) mode_dom_client_tick(game, delta); // v7 dom captureT interpolation (WP-D)
     if (authority && !game->end_timer) zone_update(game, delta); // #24 (WP-B)

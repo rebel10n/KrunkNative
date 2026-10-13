@@ -1,17 +1,19 @@
-// Every v7.1.4 weapon through the three ways a player gets it, over the offline sandbox server
+// Every v7.1.4 weapon (and the KrunkNative Piss: extra slot and pickup only, no class has it)
+// through the three ways a player gets it, over the offline sandbox server
 // (server_sandbox.h, the authority server_bin and the offline client run): (a) the class / mode
 // loadout (a class that holds it, else players.giveWeapon as a streak / mode hands it out),
 // (b) a KrunkNative Object Manager extra loadout slot (OM_ACTION_ADD_WEAPON + slot pick) and
 // (c) an Object Manager weapon pickup dropped at the feet and taken with the v7 "int" (type 6).
 // Each case is driven by real input frames (NET_PACKET_INPUT): equip, ADS, fire held at a target
 // player 40 units ahead (melee: 8), tactical and empty reloads, and the weapon's special
-// mechanic (charge, grapple, build, deploy, burst, pellets, projectiles / splash, throw).
+// mechanic (charge, grapple, build, deploy, burst, pellets, projectiles / splash, throw, stream puddles).
 // Prints the weapon x path x behaviour table; a FAIL line names each broken cell.
 // Run from the repository root: ./<build>/weapons_audit_test [-v]
 #include <server_sandbox.h>
 #include <server.h>
 #include <shared.h>
 #include <object_manager.h>
+#include <piss.h> // KrunkNative Piss: puddles
 #include <weapons.h>
 #include <world.h>
 #include <spawnables.h>
@@ -172,7 +174,7 @@ typedef struct {
     char how[32];
 } Cell;
 
-static Cell g_cells[WEAPON_COUNT][PATH_COUNT];
+static Cell g_cells[WEAPON_TABLE_COUNT][PATH_COUNT];
 
 static void cell(Cell *c, const int b, const int ok, const char *fmt, ...) {
     va_list args;
@@ -375,7 +377,9 @@ static FireResult hold_fire(const int id, int slot, const int hold, const int sc
 static void run_case(const int id, const int path) {
     Cell *c = &g_cells[id][path];
     const Weapon *w = g_server->game.weapons[id];
-    if (w->bomb || (path != PATH_CLASS && !object_manager_weapon_listed(id))) {
+    // KrunkNative-only weapons (id >= WEAPON_COUNT) are in no class loadout; the unlisted ones (the
+    // Tool Gun: the Object Manager's Tools pane) are object_manager_test's
+    if (w->bomb || (path != PATH_CLASS && !object_manager_weapon_listed(id)) || (id >= WEAPON_COUNT && (path == PATH_CLASS || !object_manager_weapon_listed(id)))) {
         c->na = 1;
         snprintf(c->how, sizeof(c->how), "n/a");
         return;
@@ -451,6 +455,19 @@ static void run_case(const int id, const int path) {
         snprintf(special, sizeof(special), "grapple %d pulled %.1f", fr.grappled, fr.pulled);
         special_ok = fr.grappled && fr.pulled > 25.0f; // v7 reels 0.04 units / ms
         cell(c, B_FIRE, fr.grappled, "grapple %d", fr.grappled);
+    } else if (w->stream) { // KrunkNative Piss: the arc up to B 40 units away, then a puddle on the floor
+        g_pitch = 0.5f;
+        fr = hold_fire(id, slot, 30, 0);
+        const int before = piss_puddle_count(&g_server->game, a->uid);
+        a = player_of(&g_a);
+        arena(a, NULL, 40.0f);
+        g_pitch = -0.5f;
+        FireResult floor = hold_fire(id, slot, 10, 0);
+        const int puddles = piss_puddle_count(&g_server->game, player_of(&g_a)->uid);
+        fr.min_ammo = floor.min_ammo < fr.min_ammo ? floor.min_ammo : fr.min_ammo;
+        snprintf(special, sizeof(special), "stream dmg %.0f, puddles %d -> %d", fr.damage, before, puddles);
+        special_ok = fr.damage > 0.0f && puddles > before;
+        cell(c, B_FIRE, fr.damage > 0.0f, "dmg %.0f", fr.damage);
     } else if (w->deploy_range > 0.0f) {
         g_pitch = -0.8f;
         fr = hold_fire(id, slot, 4, 0);
@@ -572,13 +589,13 @@ int main(int argc, char **argv) {
     g_server->game.round_endless = 1; // the audit outlasts a match: no end screen
     join(&g_a);
     join(&g_b);
-    for (int id = 0; id < WEAPON_COUNT; id++) {
+    for (int id = 0; id < WEAPON_TABLE_COUNT; id++) {
         if (only >= 0 && (last >= 0 ? (id < only || id > last) : id != only)) continue;
         for (int path = 0; path < PATH_COUNT; path++) run_case(id, path);
     }
     // the table
     int broken = 0;
-    for (int id = 0; id < WEAPON_COUNT; id++) {
+    for (int id = 0; id < WEAPON_TABLE_COUNT; id++) {
         if (only >= 0 && (last >= 0 ? (id < only || id > last) : id != only)) continue;
         for (int path = 0; path < PATH_COUNT; path++) {
             const Cell *c = &g_cells[id][path];
