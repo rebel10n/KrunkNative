@@ -58,6 +58,7 @@ void online_mode_init(const char *cli_mode, const char *cli_finder) {
     if ((!mode || !*mode) && web_mode) mode = web_mode;
 #endif
     if ((!mode || !*mode) && html_storage_get("knMode", stored, sizeof(stored)) > 0) mode = stored;
+    snprintf(g_finder, sizeof(g_finder), "%s", ONLINE_DEFAULT_FINDER_URL); // a re-init starts from the default
     g_online = !(mode && !strcmp(mode, "offline"));
 
     const char *finder = cli_finder ? cli_finder : getenv("KRUNKNATIVE_FINDER_URL");

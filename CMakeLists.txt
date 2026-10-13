@@ -699,6 +699,22 @@ else ()
     target_include_directories(window_state_test PRIVATE client/include)
     add_test(NAME window_state_test COMMAND window_state_test)
 
+    # backend_online_test: online mode's defaults (the public finder / account service, never
+    # localhost) and the native brain transport over loopback (client/src/net/online_mode.c,
+    # backend_common.c, backend_native.c; on Windows backend_winhttp.c, which CI runs there too)
+    add_executable(backend_online_test client/tests/backend_online_test.c client/src/net/online_mode.c
+                   client/src/net/backend_common.c client/src/net/backend_native.c client/src/net/backend_winhttp.c
+                   client/src/net/http_conn.c)
+    target_include_directories(backend_online_test PRIVATE client/include shared/include)
+    target_link_libraries(backend_online_test PRIVATE glfw freetype cJSON Threads::Threads m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(backend_online_test PRIVATE ws2_32 winhttp)
+    elseif (OpenSSL_FOUND)
+        target_link_libraries(backend_online_test PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+        target_compile_definitions(backend_online_test PRIVATE KRUNKNATIVE_HAVE_TLS=1)
+    endif ()
+    add_test(NAME backend_online_test COMMAND backend_online_test)
+
     # meshopt_test: the EXT_meshopt_compression decoder (client/lib/meshopt, client/src/gltf_meshopt.c)
     # against the meshoptimizer npm decoder's goldens (client/tests/data/meshopt_golden.json)
     add_executable(meshopt_test client/tests/meshopt_test.c client/src/gltf_meshopt.c)

@@ -13,13 +13,13 @@
 //     ["__open"] after the socket opened, ["__close"] after it dropped (it reconnects
 //     on its own with a backoff while anything wants it open).
 //
-// Native: http:// / ws:// only (TLS is terminated by nginx in deployments; point the
-// client at the plain listener or a local proxy), worker threads + queues. Web:
+// Native: worker threads + queues; POSIX over http_conn.c (https:// / wss:// with OpenSSL),
+// Windows over WinHTTP (backend_winhttp.c: TLS, system proxy, WebSockets on Windows 8+). Web:
 // XMLHttpRequest (emscripten_async_wget2_data) and the browser WebSocket.
 //
 // The brain URL (no trailing slash) comes from, first match wins:
-//   native: --brain <url>, KRUNKNATIVE_BRAIN_URL, the `knBrainUrl` storage key, else
-//           http://127.0.0.1:5050 (probed; the client never reads config/config.json)
+//   native: --brain <url>, KRUNKNATIVE_BRAIN_URL, the `knBrainUrl` storage key, else the
+//           online mode's account service (online_mode.h; probed; never config/config.json)
 //   web:    ?brain=<url>, Module.krunkNativeBrainUrl, else the page origin
 //           (`?brain=0` / `?offline=1` disable it).
 // Without a URL every call is a no-op: offline / singleplayer and direct connects
@@ -27,7 +27,10 @@
 #include <cJSON.h>
 #include <stddef.h>
 
-typedef void (*BackendHttpFn)(void *user, int status, const char *body, size_t length); // status 0 = transport error
+// status 0 = transport error; body is then the reason as plain text ("cannot connect to ...",
+// "host not found (WinHTTP error 12007)"), never JSON, and the failure is already logged as
+// "[http] <method> <url> failed: <reason>".
+typedef void (*BackendHttpFn)(void *user, int status, const char *body, size_t length);
 typedef void (*BackendSocialFn)(void *user, const cJSON *frame);
 
 // Startup: the CLI value (--brain, may be NULL). Call once before backend_poll().
@@ -35,7 +38,7 @@ void backend_init(const char *cli_url);
 int backend_enabled(void);
 const char *backend_url(void);          // "" when disabled
 void backend_set_url(const char *url);  // runtime change (settings); "" disables
-int backend_url_is_default(void);       // the URL is a default (web: page origin; native: http://127.0.0.1:5050): probed
+int backend_url_is_default(void);       // the URL is a default (web: page origin; native: the online-mode account service): probed
 // A default URL is only used once GET /mm/status (kn_brain only; net-bridge's fallback
 // routes do not answer it) confirmed a brain: 1 = brain, 0 = none, -1 = probing / not yet.
 // Explicit URLs count as available. The social socket stays closed until it is 1.

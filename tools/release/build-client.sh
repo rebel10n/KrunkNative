@@ -51,7 +51,7 @@ esac
 grep -E 'GL backend|OpenSSL' "$build.configure.log" || true
 
 targets=("${client%.exe}" "${server%.exe}")
-[ "$os" = windows ] && targets=(client server)
+[ "$os" = windows ] && targets=(client server backend_online_test)
 if cmake --build "$build" --target help 2> /dev/null | grep '^kn_launcher:' > /dev/null; then targets+=(kn_launcher); fi
 cmake --build "$build" --target "${targets[@]}"
 

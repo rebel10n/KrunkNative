@@ -278,7 +278,8 @@ void *net_main(void *user_data) {
         server_address.sin_port = htons(client->net_port);
         pthread_mutex_unlock(&client->net_lock);
         server_address.sin_addr.s_addr = inet_addr(host);
-#ifndef WIN32
+        // host names (the matchmaker's / finder's *.krunk.io): getaddrinfo on every platform
+        // (ws2tcpip.h on Windows; inet_addr alone left Windows on 255.255.255.255)
         if (server_address.sin_addr.s_addr == INADDR_NONE) {
             struct addrinfo hints = {0}, *res = NULL;
             hints.ai_family = AF_INET;
@@ -286,9 +287,10 @@ void *net_main(void *user_data) {
             if (getaddrinfo(host, NULL, &hints, &res) == 0 && res) {
                 server_address.sin_addr = ((struct sockaddr_in *) res->ai_addr)->sin_addr;
                 freeaddrinfo(res);
+            } else {
+                fprintf(stderr, "[net] cannot resolve %s\n", host);
             }
         }
-#endif
 
         // UDP first (net_udp.c, doc/transport.md); a server that does not answer the UDP
         // handshake gets the TCP session below. KRUNKNATIVE_NET_TRANSPORT=tcp|udp forces one.

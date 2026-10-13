@@ -125,6 +125,34 @@ int kn_install_assets_dir(const KnInstall *in, const char *override, char *out, 
     return finish_dir(dir, out, n);
 }
 
+int kn_install_dir_in_checkout(const char *dir, char *root, const size_t n) {
+    char path[KN_PATH_MAX];
+#ifdef _WIN32
+    if (!kn_fs_absolute(dir, path, sizeof(path))) return 0;
+#else
+    // resolve symlinks: a worktree's assets/<dir> links into the main checkout
+    char *real = realpath(dir, NULL);
+    if (real) {
+        snprintf(path, sizeof(path), "%s", real);
+        free(real);
+    } else if (!kn_fs_absolute(dir, path, sizeof(path))) {
+        return 0;
+    }
+#endif
+    for (;;) {
+        char git[KN_PATH_MAX];
+        kn_fs_join(git, sizeof(git), path, ".git");
+        if (kn_fs_exists(git)) {
+            if (root && n) snprintf(root, n, "%s", path);
+            return 1;
+        }
+        const size_t before = strlen(path);
+        kn_fs_dirname(path);
+        const size_t after = strlen(path);
+        if (!after || after >= before) return 0;
+    }
+}
+
 // ------------------------------------------------------------------ swap
 
 typedef struct {

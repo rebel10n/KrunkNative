@@ -35,6 +35,10 @@ int kn_install_user_data_dir(char *out, size_t n);
 // Where the game content lives (created; absolute, trailing '/'). override = --assets-dir /
 // KRUNKNATIVE_ASSETS_DIR. "" (returns 0) for a dev launcher without a marker and no override.
 int kn_install_assets_dir(const KnInstall *in, const char *override, char *out, size_t n);
+// The git checkout (a directory with .git, also a worktree's .git file) that holds `dir` or is
+// below it, symlinks resolved: its root in `root`, 1 = inside one. The launcher refuses to sync
+// game content there (a sync deletes files it does not list) unless --allow-checkout-assets.
+int kn_install_dir_in_checkout(const char *dir, char *root, size_t n);
 
 // Moves every file of the extracted package `staged` into the root (a ui/ directory next to a
 // kn-install.json as a whole), keeping the replaced ones in <state>/backup until the journal

@@ -40,3 +40,8 @@ The shared checkout /home/user/src/KrunkNative is the integration tree: it must 
     change that landed in those files in between, and the patch still applies cleanly (it happened: 0bf1b86
     undid all of 72c5dec). Check before sending: `git diff origin/main --stat` must list only files you changed on
     purpose, and no hunk may remove lines you didn't write.
+13. The machine is the user's desktop: leave nothing running and keep the load down. Every client_bin, ui_test,
+    server_bin, kn_brain, Xvfb, wine or headless browser you start is stopped when your step ends, also on failure
+    or timeout (`timeout`, `trap 'kill 0' EXIT`, Python try/finally + kill). At most one client_bin of yours at a
+    time unless a test needs more, builds at `-j8` at most, the web build only when you deliver, and every client
+    run has a frame or time limit (prefer --render-scenario / KRUNKNATIVE_FIXED_DELTA).

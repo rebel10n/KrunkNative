@@ -2,9 +2,12 @@
 // (blocking HTTP/1.1 GETs, "Connection: close") and one social socket thread (a small
 // RFC 6455 client: JSON text frames, masked, ping/pong, reassembly). Both hand their
 // results to the main thread through mutex-protected queues drained by backend_poll().
-// http:// and ws://, plus https:// and wss:// when the build found OpenSSL
+// POSIX: http:// and ws://, plus https:// and wss:// when the build found OpenSSL
 // (KRUNKNATIVE_HAVE_TLS: libssl, peer verified against the system CA store and the
-// host name; the online-mode defaults https://coordinator.krunk.io need it).
+// host name; the online-mode defaults https://coordinator.krunk.io need it), over http_conn.c.
+// Windows: WinHTTP (backend_winhttp.c: TLS against the Windows certificate store, the system
+// proxy, WebSockets on Windows 8+). A Windows client used to compile this file to no-op stubs:
+// no account service, an empty server finder and a game connection to 127.0.0.1.
 #ifndef __EMSCRIPTEN__
 #include <backend.h>
 #include <cJSON.h>
@@ -17,21 +20,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-
-#ifdef WIN32
-// No Windows transport yet: the backend stays disabled there.
-void backend_init(const char *cli_url) { (void) cli_url; backend_store_url(""); }
-void backend_set_url(const char *url) { (void) url; }
-int backend_url_is_default(void) { return 0; }
-int backend_http_get(const char *path, BackendHttpFn fn, void *user) { (void) path; (void) fn; (void) user; return 0; }
-int backend_http_request(const char *method, const char *url, const char *json_body, BackendHttpFn fn, void *user) { (void) method; (void) url; (void) json_body; (void) fn; (void) user; return 0; }
-void backend_poll(void) {}
-void backend_social_open(void) {}
-int backend_social_is_open(void) { return 0; }
-int backend_social_send_text(const char *json) { (void) json; return 0; }
-#else
+#include <stddef.h>
 #include <html_dom.h>
 #include <online_mode.h>
+#ifdef _WIN32
+#include <windows.h>
+#include "backend_winhttp.h"
+#else
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -40,6 +35,7 @@ int backend_social_send_text(const char *json) { (void) json; return 0; }
 #include <sys/types.h>
 #include <unistd.h>
 #include <http_conn.h>
+#endif
 
 #define HTTP_TIMEOUT_MS 8000
 #define HTTP_MAX_BODY (4u * 1024u * 1024u)
@@ -49,15 +45,13 @@ int backend_social_send_text(const char *json) { (void) json; return 0; }
 
 // ------------------------------------------------------------------ small helpers
 
-static int64_t now_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (int64_t) ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-}
-
 static void sleep_ms(const int ms) {
+#ifdef _WIN32
+    Sleep((DWORD) ms);
+#else
     struct timespec ts = {ms / 1000, (long) (ms % 1000) * 1000000L};
     nanosleep(&ts, NULL);
+#endif
 }
 
 typedef struct {
@@ -91,6 +85,7 @@ typedef struct HttpJob {
     void *user;
     int status;
     size_t length;
+    char err[192];  // status 0: why (handed to the callback as the body, backend.h)
 } HttpJob;
 
 typedef struct WsMsg {
@@ -118,13 +113,14 @@ static void push_tail(void **head, void *item, const size_t next_offset) {
 
 // ------------------------------------------------------------------ URL
 
-static int g_url_default; // the URL is the local default (127.0.0.1:5050): probe it
+static int g_url_default; // the URL is the mode's default account service (online_mode.h): probe it
 
 // Online mode's account service (online_mode.h, ONLINE_DEFAULT_ACCOUNT_URL). The client
 // never reads the backend's config/config.json (it holds the database credentials): a
 // local backend reaches the client as KRUNKNATIVE_BRAIN_URL (the Makefile's run exports
 // it). backend_startup passes "" in offline mode: no account service at all.
 void backend_init(const char *cli_url) {
+    g_url_default = 0;
     if (cli_url && !cli_url[0]) {
         backend_store_url("");
         return;
@@ -185,17 +181,33 @@ static size_t dechunk(char *body, const size_t len) {
     return out;
 }
 
+#ifdef _WIN32
+static void http_run(HttpJob *job) {
+    char *req_body = job->body;
+    job->body = NULL;
+    job->status = 0;
+    char *resp = NULL;
+    size_t len = 0;
+    const int status = kn_winhttp_request(job->method, job->url, req_body, HTTP_TIMEOUT_MS, &resp, &len, job->err, sizeof(job->err));
+    free(req_body);
+    job->body = resp;
+    job->length = len;
+    job->status = resp ? status : 0;
+}
+#else
 static void http_run(HttpJob *job) {
     HttpAddr a;
     char *req_body = job->body;
     job->body = NULL;
     job->status = 0;
     if (!http_url_parse(job->url, &a)) {
+        snprintf(job->err, sizeof(job->err), "%s", strncmp(job->url, "https://", 8) ? "bad URL" : "https:// needs a client built with OpenSSL");
         free(req_body);
         return;
     }
     HttpConn c;
     if (!http_conn_open(&c, &a, HTTP_TIMEOUT_MS)) {
+        snprintf(job->err, sizeof(job->err), "cannot connect to %s:%s%s", a.host, a.port, a.tls ? " (TLS)" : "");
         free(req_body);
         return;
     }
@@ -222,6 +234,7 @@ static void http_run(HttpJob *job) {
     const int sent = req.data && http_conn_send(&c, req.data, req.len);
     free(req.data);
     if (!sent) {
+        snprintf(job->err, sizeof(job->err), "send to %s failed", a.host);
         http_conn_close(&c);
         return;
     }
@@ -234,11 +247,15 @@ static void http_run(HttpJob *job) {
         if (!bytes_push(&resp, buf, (size_t) r) || resp.len > HTTP_MAX_BODY) break;
     }
     http_conn_close(&c);
-    if (!resp.data) return;
+    if (!resp.data) {
+        snprintf(job->err, sizeof(job->err), "no answer from %s:%s (%s)", a.host, a.port, errno == EAGAIN || errno == EWOULDBLOCK ? "timed out" : "closed");
+        return;
+    }
 
     int status = 0;
     char *header_end = strstr(resp.data, "\r\n\r\n");
     if (sscanf(resp.data, "HTTP/%*s %d", &status) != 1 || !header_end) {
+        snprintf(job->err, sizeof(job->err), "not an HTTP answer from %s", a.host);
         free(resp.data);
         return;
     }
@@ -259,6 +276,7 @@ static void http_run(HttpJob *job) {
     }
     free(resp.data);
 }
+#endif
 
 static void *http_thread(void *arg) {
     (void) arg;
@@ -346,6 +364,7 @@ static void ws_queue_in(char *text, const char *event) {
     pthread_mutex_unlock(&g_lock);
 }
 
+#ifndef _WIN32
 static int ws_send_frame(HttpConn *c, const int opcode, const char *data, const size_t len) {
     unsigned char head[14];
     size_t n = 0;
@@ -542,6 +561,87 @@ static void *ws_thread(void *arg) {
     return NULL;
 }
 
+#else
+// Windows: WinHTTP's WebSocket (backend_winhttp.c). A reader thread blocks on receive while
+// this thread flushes the outgoing queue (WinHTTP allows one send and one receive at a time).
+typedef struct {
+    KnWinWs *ws;
+    volatile LONG done;
+} WinWsReader;
+
+static void *ws_reader(void *arg) {
+    WinWsReader *r = arg;
+    for (;;) {
+        char *msg = NULL;
+        size_t len = 0;
+        int text = 0;
+        if (!kn_winws_recv(r->ws, &msg, &len, &text)) break;
+        // binary frames are v3.1.1 msgpack (sent before the brain saw ?enc=json): ignored
+        if (text) ws_queue_in(msg, NULL);
+        else free(msg);
+    }
+    InterlockedExchange(&r->done, 1);
+    return NULL;
+}
+
+static void ws_session_win(KnWinWs *ws, const unsigned generation) {
+    WinWsReader reader = {ws, 0};
+    pthread_t t;
+    if (pthread_create(&t, NULL, ws_reader, &reader) != 0) return;
+    for (;;) {
+        pthread_mutex_lock(&g_lock);
+        WsMsg *out = g_ws_out;
+        g_ws_out = NULL;
+        const int stale = generation != g_ws_generation;
+        pthread_mutex_unlock(&g_lock);
+        int ok = !stale;
+        while (out) {
+            WsMsg *next = out->next;
+            if (ok) ok = kn_winws_send_text(ws, out->text, strlen(out->text));
+            free(out->text);
+            free(out);
+            out = next;
+        }
+        if (!ok || reader.done) break;
+        sleep_ms(30);
+    }
+    kn_winws_abort(ws);
+    pthread_join(t, NULL);
+}
+
+static void *ws_thread(void *arg) {
+    (void) arg;
+    int backoff = WS_BACKOFF_MIN_MS;
+    for (;;) {
+        char ws_url[320];
+        pthread_mutex_lock(&g_lock);
+        backend_social_ws_url(ws_url, sizeof(ws_url));
+        const unsigned generation = g_ws_generation;
+        pthread_mutex_unlock(&g_lock);
+        char err[192] = "";
+        KnWinWs *ws = ws_url[0] ? kn_winws_open(ws_url, 5000, err, sizeof(err)) : NULL;
+        if (ws) {
+            pthread_mutex_lock(&g_lock);
+            g_ws_open = 1;
+            pthread_mutex_unlock(&g_lock);
+            ws_queue_in(NULL, "__open");
+            backoff = WS_BACKOFF_MIN_MS;
+            ws_session_win(ws, generation);
+            pthread_mutex_lock(&g_lock);
+            g_ws_open = 0;
+            pthread_mutex_unlock(&g_lock);
+            ws_queue_in(NULL, "__close");
+            kn_winws_free(ws);
+        } else if (ws_url[0] && backoff == WS_BACKOFF_MIN_MS) {
+            fprintf(stderr, "[backend] social socket %s: %s\n", ws_url, err);
+        }
+        sleep_ms(backoff);
+        backoff = backoff * 2 > WS_BACKOFF_MAX_MS ? WS_BACKOFF_MAX_MS : backoff * 2;
+    }
+    return NULL;
+}
+#endif
+
 void backend_social_open(void) {
     if (!backend_enabled() || !backend_social_allowed()) return;
     pthread_mutex_lock(&g_lock);
@@ -591,7 +691,16 @@ void backend_poll(void) {
 
     while (done) {
         HttpJob *next = done->next;
-        if (done->fn) done->fn(done->user, done->status, done->body ? done->body : "", done->length);
+        if (!done->status) {
+            // a transport error: say which request and why (silent before: an empty server
+            // finder looked like "no servers"); the reason is also the callback's body
+            if (!done->err[0]) snprintf(done->err, sizeof(done->err), "no answer");
+            fprintf(stderr, "[http] %s %s failed: %s\n", done->method, done->url, done->err);
+        }
+        if (done->fn) {
+            const char *body = done->status ? (done->body ? done->body : "") : done->err;
+            done->fn(done->user, done->status, body, done->status ? done->length : strlen(done->err));
+        }
         free(done->url);
         free(done->body);
         free(done);
@@ -606,5 +715,4 @@ void backend_poll(void) {
         in = next;
     }
 }
-#endif // WIN32
 #endif // !__EMSCRIPTEN__

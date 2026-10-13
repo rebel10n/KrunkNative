@@ -694,6 +694,7 @@ static cJSON *g_finder_rows;      // the finder-only entries as tuples (owned, r
 static double g_finder_players;   // players on finder-only servers (the "In Game" total)
 static int g_finder_loading;
 static double g_finder_loaded_ms = -1e18;
+static char g_finder_error[256];  // the last finder request's failure ("" = ok), shown in the browser
 
 static int logged_in(void) { return account_get() && account_session_token()[0]; }
 
@@ -1226,8 +1227,15 @@ static void on_finder(void *user, const int status, const char *body, const size
         servers_ui_note_list_response(res); // download_url / downloads (build versions)
         cJSON_Delete(g_finder_servers);
         g_finder_servers = cJSON_Duplicate(servers, 1);
-    } else if (status != 200) {
-        printf("[finder] %s: %s\n", online_finder_url(), status ? "error" : "unreachable");
+        g_finder_error[0] = 0;
+        printf("[finder] %s: %d servers\n", online_finder_url(), cJSON_GetArraySize(servers));
+    } else {
+        // the failure goes to the log and into the browser (it used to look like "no servers"):
+        // the transport's reason (status 0, backend.h), the HTTP status, or an unusable answer
+        if (!status) snprintf(g_finder_error, sizeof(g_finder_error), "%s", body && body[0] ? body : "unreachable");
+        else if (status != 200) snprintf(g_finder_error, sizeof(g_finder_error), "HTTP %d", status);
+        else snprintf(g_finder_error, sizeof(g_finder_error), "not a server list");
+        fprintf(stderr, "[finder] %s failed: %s\n", online_finder_url(), g_finder_error);
     }
     cJSON_Delete(res);
     g_finder_loaded_ms = now_ms();
@@ -1239,6 +1247,23 @@ static void finder_refresh(void) {
     char url[320];
     snprintf(url, sizeof(url), "%s%s", online_finder_url(), online_mode_online() ? "" : "?online_mode=0");
     g_finder_loading = backend_http_request("GET", url, NULL, on_finder, NULL);
+    if (!g_finder_loading) {
+        snprintf(g_finder_error, sizeof(g_finder_error), "the request could not be sent");
+        fprintf(stderr, "[finder] %s failed: %s\n", url, g_finder_error);
+    } else {
+        printf("[finder] GET %s\n", url);
+    }
+}
+
+// The finder's failure as a row above the list (servers_window_gen), "" when it answered.
+static void append_finder_error(StrBuf *sb) {
+    if (!g_finder_error[0] || !online_finder_url()[0]) return;
+    sb_append(sb, "<div id='finderError' class='setBodH' style='padding:10px;margin-left:0px;width:calc(100% - 40px);color:#ff6b6b'>"
+                  "Server finder unavailable: ");
+    sb_append_esc(sb, g_finder_error);
+    sb_append(sb, " <span style='color:rgba(255,255,255,0.5)'>(");
+    sb_append_esc(sb, online_finder_url());
+    sb_append(sb, ")</span></div>");
 }
 
 // The finder entry for host:port is an online-mode server.
@@ -1600,6 +1625,7 @@ static char *gen_list(void) {
     sb_append(&sb, "<div id='hostMenuBtn' style='display:inline-block;vertical-align:middle' onclick='windows[0].tabIndex=0;showWindow(1);'><span class='material-icons' style='color:#fff;font-size:40px;margin-bottom:-1px;'>miscellaneous_services</span></div></div><div id=\"hideFull\" style=\"display:inline-block;float:right;margin-right:20px;margin-top:3px;\"><span style='color:#fff'>Hide Full</span><label class='switch2' style='margin-top: 4px;margin-left: 11px;'><input type='checkbox' onclick='toggleHF(this.checked);windows[1].searchList()'");
     if (hide_full()) sb_append(&sb, " checked");
     sb_append(&sb, "><span class='slider2'></span></label></div></div></div><div style='height:10px'></div>");
+    append_finder_error(&sb);
     char *servers = get_servers();
     if (old) {
         // the custom-games carousel (customsInfo.length >= 3) needs user-assets thumbnails: not shown

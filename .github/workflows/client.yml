@@ -189,6 +189,17 @@ jobs:
       - name: Build
         run: tools/release/build-client.sh windows win-bin
 
+      # The brain transport (WinHTTP, client/src/net/backend_winhttp.c) is really in client.exe and
+      # works: client.exe once shipped backend_native.c's Windows stubs (no account service, an
+      # empty server finder, a game connection to 127.0.0.1).
+      - name: Windows brain transport
+        run: |
+          set -euo pipefail
+          ./build-windows/backend_online_test.exe
+          for s in '[backend] brain %s' WinHttpWebSocketCompleteUpgrade '[http] %s %s failed: %s'; do
+            grep -qaF "$s" win-bin/client.exe || { echo "client.exe lacks the brain transport ($s)" >&2; exit 1; }
+          done
+
       - name: Package
         run: |
           set -euo pipefail

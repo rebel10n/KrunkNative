@@ -9,7 +9,7 @@
 // directory that holds ui/ (POSIX: exec, same pid; Windows: a new process).
 //
 //   krunknative [--cli|--headless] [--no-update] [--check] [--no-launch] [--updates-url URL]
-//               [--assets-dir DIR] [--] [client args...]
+//               [--assets-dir DIR] [--allow-checkout-assets] [--] [client args...]
 // Unknown arguments go to client_bin. Exit codes: 0 ok, 1 usage, 2 failed with nothing
 // playable, 3 --check found a newer build.
 #include "launcher_ui.h"
@@ -44,6 +44,7 @@
 typedef struct {
     // options
     int cli, no_update, check_only, no_launch;
+    int allow_checkout_assets; // --allow-checkout-assets: sync into a git checkout's assets/ anyway
     long wait_pid; // the client's "Update now": let it exit first
     char updates_url[KN_UPDATE_URL_MAX];
     char assets_override[KN_PATH_MAX];
@@ -328,6 +329,12 @@ static void *work(void *arg) {
     if (kn_install_recover(&L.in)) status(-1, NULL, "Rolled back an interrupted update");
     if (L.in.root_writable) kn_install_cleanup(&L.in);
     if (!kn_install_assets_dir(&L.in, L.assets_override, L.assets_dir, sizeof(L.assets_dir))) L.assets_dir[0] = 0;
+    char checkout[KN_PATH_MAX];
+    if (L.assets_dir[0] && !L.allow_checkout_assets && kn_install_dir_in_checkout(L.assets_dir, checkout, sizeof(checkout))) {
+        // a dev run pointed at a repository's assets/: the sync would rewrite and delete files there
+        fail(0, L.assets_dir, "The game content directory is inside the git checkout %s (use --allow-checkout-assets)", checkout);
+        goto out;
+    }
 
     KnUpdateManifest m;
     memset(&m, 0, sizeof(m));
@@ -473,7 +480,9 @@ static void usage(void) {
            "  --check            report whether a newer build exists (exit 3) and stop\n"
            "  --no-launch        update, but do not start the game\n"
            "  --updates-url URL  channel manifest (default %s; env KRUNKNATIVE_UPDATES_URL)\n"
-           "  --assets-dir DIR   game content directory (env KRUNKNATIVE_ASSETS_DIR)\n"
+           "  --assets-dir DIR   game content directory (env KRUNKNATIVE_ASSETS_DIR); refused inside a git\n"
+           "                     checkout (the sync deletes files it does not list) unless\n"
+           "  --allow-checkout-assets\n"
            "Other arguments are passed to client_bin.\n",
            KN_UPDATE_DEFAULT_URL);
 }
@@ -490,6 +499,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(a, "--")) rest = 1;
         else if (!strcmp(a, "--cli") || !strcmp(a, "--headless")) L.cli = 1;
         else if (!strcmp(a, "--no-update")) L.no_update = 1;
+        else if (!strcmp(a, "--allow-checkout-assets")) L.allow_checkout_assets = 1;
         else if (!strcmp(a, "--check")) L.check_only = L.cli = 1;
         else if (!strcmp(a, "--no-launch")) L.no_launch = 1;
         else if (!strcmp(a, "--updates-url") && i + 1 < argc) snprintf(L.updates_url, sizeof(L.updates_url), "%s", argv[++i]);

@@ -158,6 +158,7 @@ network: build services ## Coordinator + N dedicated servers from one file (NETW
 test: build ## Run the shared movement/collision test (+ the knet transport, billboard ad, lag compensation, editor bus, editor model, nav mesh, client update, meshopt, window state and resource pack tests)
 	./$(DEBUG_DIR)/$(TEST_BIN)
 	./$(DEBUG_DIR)/update_test
+	./$(DEBUG_DIR)/backend_online_test
 	./$(DEBUG_DIR)/knet_test
 	./$(DEBUG_DIR)/server_names_test
 	./$(DEBUG_DIR)/lagcomp_test
@@ -469,6 +470,13 @@ LAUNCHER_E2E_ARGS ?=
 .PHONY: launcher-e2e
 launcher-e2e: build ## Launcher + updates server end to end: executable update, self-update, content diff, deb, corrupt package, the client's Update now
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I launcher/tests/launcher_e2e.py $(DEBUG_DIR) $(LAUNCHER_E2E_ARGS)
+
+# A launcher-started client is online (launcher/tests/launcher_online_e2e.py): stub finder +
+# matchmaker and a server_bin on free ports, the server browser, the finder error, and the
+# refused game content dir inside a git checkout.
+.PHONY: launcher-online-e2e
+launcher-online-e2e: build ## Launcher-started client: finder + matchmaker requests, browser rows, finder errors shown
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I launcher/tests/launcher_online_e2e.py $(DEBUG_DIR)
 
 .PHONY: smoke smoke-native smoke-web lint check
 check: test ks-test editor-mcp-test lint bridge-check ## Everything CI runs that does not need a display
