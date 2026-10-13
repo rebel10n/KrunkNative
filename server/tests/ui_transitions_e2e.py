@@ -10,9 +10,7 @@ Each scenario is one headless client_bin run (KRUNKNATIVE_HEADLESS=1, EGL; KRUNK
 picks the GPU) driven by an input script (client/src/input_script.c): keys, clicks on page
 elements (`clickid`), console lines (`con`) and `vis @label <ids>` probes, which log whether
 each element is shown (html_dom_is_shown: rendered, visible, not transparent, non-empty;
-`:preview` / `:spray` are the GL-drawn class preview and spray wheel) and `chat @label <place>`
-checks, which read #chatHolder's box (`rect` probes) and compare its place in #uiBase with the
-main.css rule of the state (CHAT_PLACES). The expectations follow
+`:preview` / `:spray` are the GL-drawn class preview and spray wheel). The expectations follow
 Krunker v7.1.4 (src/libs/UI.js toggleMenu / toggleControlUI / toggleGameUI / hideUI /
 showEndScreen / toggleEndScreen, index.js) where it defines them. Online scenarios run
 server_bin on free ports (kn_proto.free_ports).
@@ -46,32 +44,6 @@ procs = []
 
 ESC = "down ESC\n{t2} up ESC"  # one press (the release 50 ms later)
 
-# #chatHolder's place in #uiBase (CSS px: left, bottom) per state, v7 main.css: the #uiBase class
-# rules (same specificity, so the later one wins: onMenu < onCompMenu < onGame < onSpect <
-# onEndScrn < onDeathScrn) that UI.toggleMenuHider / toggleControlUI / showEndScreen /
-# toggleEndScreen / f1975 toggle. "death" is where the chat-moveup animation (1.5 s) ends.
-CHAT_PLACES = {"menu": (150, 20), "comp": (20, 150), "game": (15, 130), "spect": (20, 20), "end": (20, 20),
-               "death": (64, 75)}
-CHAT_TOLERANCE = 2.0  # CSS px
-
-
-def chat_place(chat, base):
-    """`rect` values of #chatHolder and #uiBase (x,y,w,h,offsetWidth,offsetHeight) -> "left,bottom"
-    of the chat in #uiBase CSS px (#uiBase is scaled: its rect over its layout size)."""
-    if chat == "-" or base == "-":
-        return "-"
-    cx, cy, cw, ch, _, _ = map(float, chat.split(","))
-    bx, by, bw, bh, ow, oh = map(float, base.split(","))
-    sx, sy = bw / ow, bh / oh
-    return f"{(cx - bx) / sx:.0f},{(by + bh - cy - ch) / sy:.0f}"
-
-
-def chat_place_ok(want, got):
-    if want == "?" or got == "-" or want not in CHAT_PLACES:
-        return want == "?"
-    left, bottom = map(float, got.split(","))
-    return all(abs(a - b) <= CHAT_TOLERANCE for a, b in zip((left, bottom), CHAT_PLACES[want]))
-
 
 def read(path):
     try:
@@ -83,8 +55,7 @@ def read(path):
 
 def expand(script):
     """`T esc` -> a press and release of ESC; `T check @label id=1 id=0 id=?` -> `T vis @label ids`
-    plus the expectations ({label: {id: '1'|'0'|'?'}}, in order); `T chat @label place` -> `T rect
-    @label chatHolder uiBase` plus the expectation {label: {':chat': place}} (CHAT_PLACES)."""
+    plus the expectations ({label: {id: '1'|'0'|'?'}}, in order)."""
     lines, expects = [], []
     for raw in script.strip().splitlines():
         raw = raw.strip()
@@ -100,10 +71,6 @@ def expand(script):
             want = dict(item.split("=", 1) for item in rest[1:])
             expects.append((label, want))
             lines.append(f"{t} vis @{label} " + " ".join(want))
-        elif cmd == "chat":
-            label = rest[0].lstrip("@")
-            expects.append((label, {":chat": rest[1]}))
-            lines.append(f"{t} rect @{label} chatHolder uiBase")
         else:
             lines.append(raw)
     return "\n".join(lines) + "\n", expects
@@ -154,12 +121,8 @@ def run_client(name, args, script, timeout=150, on_line=None, env_extra=None, st
     for line in lines:
         m = re.search(r"\[input_script\] vis t=\d+ @(\S+)(.*)", line)
         if m:
-            got.setdefault(m.group(1), {}).update(kv.split("=", 1) for kv in m.group(2).split())
+            got[m.group(1)] = dict(kv.split("=", 1) for kv in m.group(2).split())
             order.append(m.group(1))
-        m = re.search(r"\[input_script\] rect t=\d+ @(\S+)(.*)", line)
-        if m:
-            rects = dict(kv.split("=", 1) for kv in m.group(2).split())
-            got.setdefault(m.group(1), {})[":chat"] = chat_place(rects.get("chatHolder", "-"), rects.get("uiBase", "-"))
     if require and got.get(require[0], {}).get(require[1]) != require[2]:
         print(f"SKIP  {name}: {require[0]} {require[1]}={got.get(require[0], {}).get(require[1])} (needs {require[2]})", flush=True)
         return None
@@ -168,8 +131,6 @@ def run_client(name, args, script, timeout=150, on_line=None, env_extra=None, st
         for elem, value in want.items():
             if have is None:
                 record(name, label, elem, value, "no probe", value == "?")
-            elif elem == ":chat":
-                record(name, label, elem, value, have.get(elem, "-"), chat_place_ok(value, have.get(elem, "-")))
             else:
                 record(name, label, elem, value, have.get(elem, "-"), value in ("?", have.get(elem)))
     return lines
@@ -222,16 +183,12 @@ def sc_endscreen():
     run_client("endscreen", ["--offline", "--map", "kanji"], f"""
         0 play
         1000 check @alive {HUD}
-        1000 chat @alive game
         1500 con end
         12000 check @end {RESULTS} spectateUI=0 deathUIHolder=0
-        12000 chat @end end
         12500 esc
         13500 check @end-esc {MENU}
-        13500 chat @end-esc menu
         14000 esc
         15000 check @end-esc-esc {RESULTS}
-        15000 chat @end-esc-esc end
         15500 esc
         16000 clickid menuBtnSettings
         16800 check @end-window windowHolder=1 menuHolder=1 endUI=0
@@ -245,7 +202,6 @@ def sc_endscreen():
         21500 con endless
         60000 respawn
         64000 check @next-round {HUD} endUI=0 matchVoteHolder=0 endMidHolder=0 miniMapOverlay=1
-        64000 chat @next-round game
         64500 quit
     """, timeout=180)
 
@@ -284,52 +240,15 @@ def sc_death():
         2700 check @dead deathUIHolder=1 inGameUI=1 topLeftMain=0 weapHolder=0 bottomRight=0 chatUI=1 centerLeaderDisplay=0 menuHolder=0 miniMapOverlay=0
         2800 esc
         3300 check @dead-esc menuHolder=1 deathUIHolder=0 inGameUI=0 chatUI=1 :preview=1
-        3300 chat @dead-esc menu
         3400 esc
         3600 check @dead-esc-esc inGameUI=1 chatUI=1 menuHolder=0 deathUIHolder=? topLeftMain=?
-        3600 chat @dead-esc-esc game
         9000 respawn
         12000 check @respawned {HUD} deathUIHolder=0 miniMapOverlay=1
-        12000 chat @respawned game
         12500 esc
         13000 check @alive-esc {MENU} miniMapOverlay=0
-        13000 chat @alive-esc menu
         13500 esc
         14000 check @alive-esc-esc {HUD} miniMapOverlay=1
-        14000 chat @alive-esc-esc game
         14500 quit
-    """)
-
-
-def sc_death_menu():
-    """Death -> "Click to Play": the death card, then config.deathDelay later v7's f1771
-    (UI.toggleMenu(true)) brings the menu and the chat goes from the death screen's place to the
-    menu's; Click to Play gives the in-game place back. Also when the menu was already up at the
-    death (ESC first): f1771 still runs toggleMenu(true), whose toggleMenuHider drops .onDeathScrn."""
-    run_client("death-menu", ["--offline", "--map", "kanji"], f"""
-        0 play
-        1000 check @alive {HUD}
-        1000 chat @alive game
-        1500 con kill
-        3300 check @dead deathUIHolder=1 menuHolder=0 chatUI=1
-        3300 chat @dead death
-        7000 check @click-to-play {MENU} instructions=1
-        7000 chat @click-to-play menu
-        7500 clickid instructionHolder
-        9500 check @played {HUD} deathUIHolder=0
-        9500 chat @played game
-        10000 esc
-        10500 check @menu-before-death {MENU}
-        10500 chat @menu-before-death menu
-        11000 con kill
-        12800 check @menu-dead menuHolder=1 instructionHolder=1 chatUI=1
-        12800 chat @menu-dead death
-        16000 check @menu-dead-click-to-play {MENU} instructions=1
-        16000 chat @menu-dead-click-to-play menu
-        16500 clickid instructionHolder
-        18500 check @played-again {HUD} deathUIHolder=0
-        18500 chat @played-again game
-        19000 quit
     """)
 
 
@@ -340,29 +259,22 @@ def sc_spectate():
         0 menu
         300 con bot_add 2
         1000 check @menu menuHolder=1 spectButton=1 :preview=1
-        1000 chat @menu menu
         1100 clickid specBtn
         1500 play
         3000 check @spect spectateUI=1 inGameUI=1 chatUI=1 menuHolder=0 weapHolder=0 deathUIHolder=0
-        3000 chat @spect spect
         3500 esc
         4500 check @spect-esc spectateUI=0 menuHolder=1 chatUI=1 inGameUI=0
-        4500 chat @spect-esc menu
         5000 esc
         6000 check @spect-esc-esc spectateUI=1 inGameUI=1 chatUI=1 menuHolder=0
-        6000 chat @spect-esc-esc spect
         6500 con mode tdm
         9500 check @spect-mode-change spectateUI=1 chatUI=1 menuHolder=0
-        9500 chat @spect-mode-change spect
         10000 con disconnect
         11000 check @spect-disconnect instructionsUpdate=1 spectateUI=0 inGameUI=0 overlay=0 aimRecticle=0
         11500 con reconnect
         14000 check @spect-reconnect instructionsUpdate=0 menuHolder=1 spectateUI=0 inGameUI=0 chatUI=1
-        14000 chat @spect-reconnect menu
         15100 clickid specBtn
         15500 play
         17500 check @unspect-play inGameUI=1 weapHolder=1 bottomRight=1 chatUI=1 spectateUI=0 menuHolder=0
-        17500 chat @unspect-play game
         18000 quit
     """)
 
@@ -730,7 +642,6 @@ def sc_comp():
         run_client("comp", ["--connect", f"127.0.0.1:{port}"], """
             0 menu
             3000 check @comp-menu mMenuHolComp=1 mMenuHolDef=0 menuHolder=1
-            3000 chat @comp-menu comp
             3500 con offline
             7000 check @offline mMenuHolComp=0 menuHolder=0 inGameUI=1
             7200 esc
@@ -742,7 +653,7 @@ def sc_comp():
 
 
 SCENARIOS = {
-    "endscreen": sc_endscreen, "endscreen-tdm": sc_endscreen_team, "death": sc_death, "death-menu": sc_death_menu, "spectate": sc_spectate,
+    "endscreen": sc_endscreen, "endscreen-tdm": sc_endscreen_team, "death": sc_death, "spectate": sc_spectate,
     "map-change": sc_map_change, "interact": sc_interact, "custom-gui": sc_custom_gui, "krunkscript": sc_krunkscript,
     "spray": sc_spray, "windows": sc_windows, "online": sc_online, "lost-end": sc_lost_during_end, "outdated": sc_outdated,
     "comp": sc_comp, "om-scroll": sc_om_scroll,

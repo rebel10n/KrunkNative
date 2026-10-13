@@ -653,7 +653,8 @@ static void net_spawn_client(ClientConnection *client) {
         client->om_extra_count = 0;
         player_set_extra_weapons(client->player, NULL, 0);
         if (had) object_manager_send_extras(&g_server->game, client->player, NET_TARGET_ALL);
-    } else {
+    } else { // (the Tool Gun only while this player may spawn: a host who handed over the game loses it)
+        client->om_extra_count = object_manager_filter_extras(&g_server->game, &om_perms, client->om_extras, client->om_extra_count);
         player_set_extra_weapons(client->player, client->om_extras, client->om_extra_count);
     }
     player_spawn(client->player);
@@ -814,15 +815,35 @@ static ObjectManagerPerms net_om_perms(const ClientConnection *client) {
 
 // NET_PACKET_SPAWN_REQ: one Object Manager action, answered with NET_PACKET_SPAWN_RESULT. The
 // connection keeps the extra weapons across map changes (the players are freed there).
+static void net_keep_om_extras(ClientConnection *client) {
+    if (!client || !client->player) return;
+    client->om_extra_count = client->player->extra_weapon_count;
+    memcpy(client->om_extras, client->player->extra_weapons, sizeof(client->om_extras));
+}
+
 static void net_handle_object_manager(ClientConnection *client, const NetSpawnReqPacket *req) {
     const ObjectManagerPerms perms = net_om_perms(client);
     NetSpawnResultPacket result;
     object_manager_request(&g_server->game, client->player, req, &perms, &result);
-    if (client->player) {
-        client->om_extra_count = client->player->extra_weapon_count;
-        memcpy(client->om_extras, client->player->extra_weapons, sizeof(client->om_extras));
-    }
+    net_keep_om_extras(client);
     net_send_packet(client->fd, NET_PACKET_SPAWN_RESULT, &result, sizeof(result));
+}
+
+// The drop key ("drpw", int action 2) on an Object Manager extra slot: v7's dropWeapon only takes
+// picked-up weapons back to their pickup, so the extra one is tossed as OM_ACTION_DROP_HELD
+// instead (a v7 peer gets the SPAWN_RESULT). 1 = handled.
+static int net_drop_extra(ClientConnection *client, const int action) {
+    if (action != 2 || !client->player || !ks_server_peer_v7(client) || !object_manager_holds_extra(client->player)) return 0;
+    const NetSpawnReqPacket req = {.action = OM_ACTION_DROP_HELD, .pitch = client->player->direction.x, .yaw = client->player->direction.y};
+    net_handle_object_manager(client, &req);
+    return 1;
+}
+
+// `give` / `drop` changed a player's extra weapons (shared/src/chat_commands.c): the connection
+// keeps them across respawns and map changes, as after a SPAWN_REQ
+static void net_chat_om_extras(void *user, const int id) {
+    (void) user;
+    net_keep_om_extras(net_client_by_id(id));
 }
 
 static int net_chat_peer_count(void *user) {
@@ -843,6 +864,7 @@ static int net_chat_peer_at(void *user, const int index, ChatPeer *out) {
         .spectating = net_is_spectating(client),
         .dev = net_client_is_dev(client),
         .premium_host = accounts_is_custom_host(client),
+        .ranked = accounts_ranked_active(), // the Object Manager's rules (give / drop)
         .account_id = client->acct.account_id, // backend account (server/src/accounts.c), 0 guest
     };
     return 1;
@@ -904,6 +926,7 @@ ChatCommandHost *net_chat_host(void) {
     g_chat_host.ban_account = net_chat_ban_account;     // gameserver.bans_file "accounts"
     g_chat_host.unban_account = net_chat_unban_account;
     g_chat_host.list_account_bans = net_chat_list_account_bans;
+    g_chat_host.om_extras_changed = net_chat_om_extras;
     return &g_chat_host;
 }
 
@@ -1460,13 +1483,13 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
                 NetInteractV7Packet interact;
                 memcpy(&interact, packet->payload, sizeof(interact));
                 if (interact.action == 1) game_player_interact_v7(&g_server->game, client->player, interact.type, interact.uid, interact.secondary);
-                else game_player_interact(&g_server->game, client->player, interact.action, interact.secondary);
+                else if (!net_drop_extra(client, interact.action)) game_player_interact(&g_server->game, client->player, interact.action, interact.secondary);
                 break;
             }
             NetInteractPacket interact = {0};
             if (packet->length > sizeof(interact)) break;
             memcpy(&interact, packet->payload, packet->length);
-            game_player_interact(&g_server->game, client->player, interact.action, interact.secondary);
+            if (!net_drop_extra(client, interact.action)) game_player_interact(&g_server->game, client->player, interact.action, interact.secondary);
             break;
         }
         case NET_PACKET_CONFIRM_INTERACT: { // "cnfm" (WP-C): confirmInteract

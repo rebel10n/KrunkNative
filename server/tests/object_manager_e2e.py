@@ -12,7 +12,10 @@ bridged remote browser), so it is neither DEV nor host.
      players hear LOADOUT_EXTRA / SPAWNED_OBJ + PICKUP
   3. join sync: a late v7 peer gets the dev's extras and the pickup; a v3 (1.0) peer never sees
      ids 250-254 and its own requests are ignored
-  4. the rate limit answers a burst with "Slow down"
+  4. `give` / `drop` (chat commands): refused to the guest, the dev's go through; a dropped weapon
+     is a pickup the guest hears; the Tool Gun's tools (Info, Rotator, Duplicator, Deleter) for the
+     dev, refused to the guest
+  5. the rate limit answers a burst with "Slow down"
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
 import os
@@ -33,6 +36,12 @@ WORK = tempfile.mkdtemp(prefix="kn-om-e2e-", dir=os.path.expanduser("~/.cache"))
 SPAWN, FORWARDED, PICKUP = 4, 85, 128
 SPAWN_REQ, SPAWN_RESULT, LOADOUT_EXTRA, SPAWNED_OBJ = 250, 251, 252, 253
 QUERY, ADD_WEAPON, REMOVE_WEAPON, CLEAR_WEAPONS, DROP_WEAPON, SPAWN_ENTITY, SPAWN_NPC, SPAWN_OBJECT, REMOVE_AIM, UNDO = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
+DROP_HELD, TOOL = 10, 11
+TOOL_DELETER, TOOL_DUPLICATOR, TOOL_ROTATOR, TOOL_INFO = 0, 1, 2, 3
+TOOL_COPIED, TOOL_PASTED, TOOL_SHOWN = 1, 2, 3
+NO_TOOL = 9
+TOOL_GUN = 29
+CHAT_SEND, INPUT, NOTIFY = 8, 5, 82
 OBJECT_CRATE = 10  # object_manager_entries(OM_TAB_OBJECTS)[10]
 AI_ADD_V7, SPAWNABLE_V7 = 162, 148
 NPC_GHOST, ENTITY_KR_TAG = 1, 0  # object_manager_entries(): NPCs[1] Ghost (harmless), Entities[0] KR Tag
@@ -116,6 +125,26 @@ class Peer(kn_proto.Conn):
                     if a == action and it == item:
                         return status, caps, limit
         return None
+
+    def say(self, text):
+        """A chat line (a `/command`); the packet mark before it (for heard())."""
+        time.sleep(0.45)  # the server's chat burst limit (3 / s)
+        mark = len(self.packets)
+        self.send(CHAT_SEND, text.encode() + b"\0")
+        self.pump(0.6)
+        return mark
+
+    def heard(self, mark, text):
+        return any(text.encode() in p for _, p in self.packets[mark:])
+
+    def hold(self, slot, shoot=False):
+        """Input frames picking loadout slot `slot` (the scroll byte: slot + 2), past the swap timer."""
+        self.seq = getattr(self, "seq", 0)
+        for i in range(16):
+            self.seq += 1
+            scroll = slot + 2 if i == 0 else 0
+            self.send(INPUT, struct.pack("<iifffBBBb", self.seq, -1, 1.0 / 60.0, 0.0, 0.0, 1 if shoot and i == 15 else 0, 0, 0, scroll))
+        self.pump(0.3)
 
     def of_type(self, ptype, since=0):
         return [p for t, p in self.packets[since:] if t == ptype]
@@ -234,6 +263,67 @@ def run():
     old.send(SPAWN_REQ, struct.pack("<BBhff", ADD_WEAPON, 0, SHOTGUN, 0.0, 0.0))
     old.pump(0.5)
     check("a v3 peer's request is ignored", not old.of_type(SPAWN_RESULT))
+
+
+    # part 4: give / drop (chat commands) and the Tool Gun on a public server
+    time.sleep(3)  # the request bucket refills
+    host.request(CLEAR_WEAPONS)
+    mark = guest.say("/give crossbow")
+    check("guest: give refused with a reason", guest.heard(mark, "extra weapons are off"))
+    mark = guest.say('/give "tool gun"')
+    check("guest: no Tool Gun", guest.heard(mark, "only developers and the host can spawn"))
+    mark = guest.say("/drop")
+    check("guest: class weapons stay", guest.heard(mark, "can't drop your class weapons"))
+    r = guest.request(TOOL, TOOL_DELETER, -0.45)
+    check("guest: no tools", r is not None and r[0] == DENIED, str(r))
+    mark = host.say('/give "tool gun"')
+    check("dev: give the Tool Gun", host.heard(mark, "Tool Gun added to your loadout"))
+    guest.pump(0.3)
+    check("the guest hears the dev's LOADOUT_EXTRA with the Tool Gun", extras_for(guest, host.me["uid"]) == [TOOL_GUN], str(extras_for(guest, host.me["uid"])))
+    slot = None
+    for s in range(1, 6):  # the class loadout's size: the first extra slot is the Tool Gun
+        host.hold(s)
+        r = host.request(TOOL, TOOL_INFO, -1.5)
+        if r is not None and r[0] != NO_TOOL:
+            slot = s
+            break
+    check("dev: the Tool Gun in hand, Info answers", slot is not None and r[0] == OK and r[2] == TOOL_SHOWN, str(r))
+    r = host.request(SPAWN_OBJECT, OBJECT_CRATE, -0.45)
+    check("dev places a crate", r is not None and r[0] == OK, str(r))
+    mark = len(host.packets)
+    r = host.request(TOOL, TOOL_INFO, -0.45)
+    notes = [p for p in host.of_type(NOTIFY, mark)]
+    check("Info on the crate: a NOTIFY with its type and owner", r is not None and r[0] == OK and any(b"Crate" in p and b"owner" in p for p in notes),
+          str([kn_proto.uncstr(p) for p in notes]))
+    gmark = len(guest.packets)
+    r = host.request(TOOL, TOOL_ROTATOR, -0.45)
+    check("Rotator", r is not None and r[0] == OK, str(r))
+    guest.pump(0.5)
+    ops = [struct.unpack("<BBHii", p[:12])[0] for p in guest.of_type(SPAWNED_OBJ, gmark)]
+    check("the guest sees the turn (REMOVE + ADD)", 1 in ops and 2 in ops, str(ops))
+    r = host.request(TOOL, TOOL_DUPLICATOR, -0.45)
+    check("Duplicator copies", r is not None and r[0] == OK and r[2] == TOOL_COPIED, str(r))
+    r = host.request(TOOL, TOOL_DUPLICATOR, -0.3)
+    check("and places the copy", r is not None and r[0] == OK and r[2] == TOOL_PASTED, str(r))
+    r = guest.request(TOOL, TOOL_DELETER, -0.45)
+    check("guest Deleter refused", r is not None and r[0] == DENIED, str(r))
+    r = host.request(TOOL, TOOL_DELETER, -0.45)
+    check("Deleter removes the crate", r is not None and r[0] == OK, str(r))
+    host.request(UNDO)  # the copy
+    # drop: a given weapon in hand goes down in front, a pickup the guest hears
+    mark = host.say("/give crossbow")
+    check("dev: give crossbow", host.heard(mark, "Crossbow added"))
+    if slot is not None:
+        host.hold(slot + 1)
+    gmark = len(guest.packets)
+    mark = host.say("/drop")
+    check("dev: drop", host.heard(mark, "Dropped the Crossbow"), str(slot))
+    guest.pump(0.5)
+    drops = [a for a in spawned_adds_since(guest, gmark) if '"i":26' in a[2] and '"w":13' in a[2]]
+    check("the guest gets the dropped Crossbow pickup", len(drops) == 1, str(spawned_adds_since(guest, gmark)))
+    check("the dev's extras: the Tool Gun only", extras_for(guest, host.me["uid"]) == [TOOL_GUN], str(extras_for(guest, host.me["uid"])))
+    host.request(UNDO)
+    host.request(CLEAR_WEAPONS)
 
     time.sleep(3)  # the bucket refills
     mark = len(host.packets)

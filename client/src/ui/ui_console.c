@@ -24,6 +24,8 @@
 #include <map_catalog.h>
 #include <ai.h>
 #include <nav_overlay.h>
+#include <object_manager.h> // give: weapon / item names
+#include <weapons.h>
 #include <ctype.h>
 #include <math.h>
 #include <stdarg.h>
@@ -341,6 +343,8 @@ static const ConArg A_NAV_OFF[] = {{"off", ARG_STRING, 1}}; // show_navmeshes: [
 // KrunkNative teleports (shared/src/chat_commands.c cmd_tp / cmd_bring)
 static const ConArg A_TP[] = {{"x|player", ARG_STRING, 0}, {"y", ARG_NUMBER, 1}, {"z", ARG_NUMBER, 1}};
 static const ConArg A_BRING[] = {{"player|all", ARG_STRING, 0}, {"x", ARG_NUMBER, 1}, {"y", ARG_NUMBER, 1}, {"z", ARG_NUMBER, 1}};
+// KrunkNative Object Manager (shared/src/chat_commands.c cmd_give / cmd_drop)
+static const ConArg A_GIVE[] = {{"weapon|item", ARG_STRING, 0}, {"player", ARG_STRING, 1}};
 #define ARGS(a) a, (int) (sizeof(a) / sizeof(a[0]))
 #define NO_ARGS NULL, 0
 
@@ -1280,6 +1284,8 @@ static void register_commands(void) {
     register_server("bot_difficulty", ARGS(A_BOT_DIFF), "set default bot difficulty");
     register_server("tp", ARGS(A_TP), "teleport yourself to x y z (feet, as pos prints) or to a player");
     register_server("bring", ARGS(A_BRING), "bring a player (or all) to you, or to x y z");
+    register_server("give", ARGS(A_GIVE), "give a weapon (an extra loadout slot) or an item; others: devs and the host");
+    register_server("drop", NO_ARGS, "drop the weapon in your hand in front of you");
 }
 
 // ---------------------------------------------------------------- execution
@@ -1573,6 +1579,12 @@ static void arg_candidates(const char *cmd, const int arg, const char *prefix, C
     } else if (cmd_is(cmd, WORDS("tp", "bring"))) {
         if (arg == 0 && !strcmp(cmd, "bring")) cand_add(c, "all", prefix);
         if (arg == 0) con_player_candidates(c, prefix); // bots included: they are players
+    } else if (!strcmp(cmd, "give")) { // the Object Manager's weapons (the Tool Gun too) and items
+        for (int w = 0; arg == 0 && w < WEAPON_TABLE_COUNT; w++) cand_add(c, object_manager_give_name(OM_GIVE_WEAPON, w), prefix);
+        int count = 0;
+        object_manager_entries(OM_TAB_ENTITIES, &count);
+        for (int e = 0; arg == 0 && e < count; e++) cand_add(c, object_manager_give_name(OM_GIVE_ENTITY, e), prefix);
+        if (arg == 1) con_player_candidates(c, prefix);
     } else if (!strcmp(cmd, "bot_type")) {
         if (arg == 0) con_words(c, prefix, WORDS("nextbot", "tfue"));
     } else if (!strcmp(cmd, "show_navmeshes")) {

@@ -9,6 +9,15 @@
 // buttons, and in game the U (undo) and Delete (remove at the crosshair) binds. Opening it in game
 // frees the pointer (like the player list key); F1 or Escape closes it and gives it back.
 //
+// Tools (right pane, #knOmTools): the Tool Gun's tools (object_manager_tool_info). Picking one
+// sets the tool and equips the Tool Gun (an extra slot, added like a Weapons-tab click when it is
+// not carried); each Tool Gun shot (a fresh fire timer on its slot, object_manager_ui_tick) is an
+// OM_ACTION_TOOL request with that tool. The HUD shows "TOOL: <NAME>" beside the ammo (#knToolHud)
+// while it is in hand. The tool is kept in storage (kn_omTool).
+//
+// Console: `give` / `drop` are server commands (shared/src/chat_commands.c); a `give` of a weapon
+// to yourself equips it like the Weapons tab's left click (object_manager_ui_chat_sent).
+//
 // Scroll: #knOmGrid is the scroll container (max-height). Picks, server results and LOADOUT_EXTRA
 // update the page in place (om_update_*: the status line's text, the tiles' knOmOwned class and
 // badge, the Clear Extras count) so the grid keeps its scrollTop. Only new results rebuild it and
@@ -26,8 +35,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h> // strncasecmp
 
 #define OM_TAB_STORAGE "kn_omTab"
+#define OM_TOOL_STORAGE "kn_omTool"
+#define OM_EQUIP_SECONDS 3.0 // a pending equip (pick / give) waits this long for its LOADOUT_EXTRA
 #define OM_STATUS_SECONDS 4.0
 #define OM_BADGE_HTML "<div class='knOmBadge'>LOADOUT</div>" // on a weapon tile in the loadout (knOmOwned)
 
@@ -45,6 +57,14 @@ static struct {
     int from_game;        // opened while the game had the pointer: closing gives it back
     int pending_equip;    // weapon id just added by this client: equip it when LOADOUT_EXTRA lands, -1 none
     int queried;          // a QUERY for the caps went out on this connection (object_manager_ui_tick)
+    double pending_at;    // glfwGetTime() of pending_equip
+    int tool;             // ObjectManagerTool the Tool Gun applies
+    int tool_loaded;
+    // the Tool Gun's shots: the fire timer of the held slot (as vfx.c detect_local_shot)
+    const Player *shot_me;
+    int shot_slot;
+    float shot_reload;
+    char hud_text[48];    // what #knToolHud shows, "" hidden
 } g_om = {.tab = OM_TAB_WEAPONS, .caps = -1, .pending_equip = -1};
 
 static Client *om_client(void) { return menu_ui()->client; }
@@ -53,7 +73,18 @@ static int om_window_open(void) {
     return menu_ui()->active_window == OBJECT_MANAGER_WINDOW && menu_window_is_open();
 }
 
+static void om_load_tool(void) {
+    if (g_om.tool_loaded) return;
+    g_om.tool_loaded = 1;
+    char value[8];
+    if (html_storage_get(OM_TOOL_STORAGE, value, sizeof(value)) >= 0) {
+        const int tool = atoi(value);
+        if (tool >= 0 && tool < OM_TOOL_COUNT) g_om.tool = tool;
+    }
+}
+
 static void om_load_tab(void) {
+    om_load_tool();
     if (g_om.tab_loaded) return;
     g_om.tab_loaded = 1;
     char value[8];
@@ -219,6 +250,33 @@ static const char *om_hint(void) {
     }
 }
 
+static const char *om_tool_gun_line(void) {
+    const Client *client = om_client();
+    const Player *me = client ? client->me : NULL;
+    if (g_om.caps >= 0 && !(g_om.caps & OM_CAP_SPAWN)) return "Only developers and the host can use the Tool Gun here";
+    if (me && me->weapon && me->weapon->kn_tool) return "Tool Gun in hand: shoot to use";
+    for (int i = 0; me && me->loadout && i < me->loadout_size; i++) {
+        if (me->loadout[i] == WEAPON_ID_TOOL_GUN) return "Tool Gun in your loadout: pick a tool to hold it";
+    }
+    return "Pick a tool to equip the Tool Gun";
+}
+
+// The right pane: the tools (the picked one marked), its hint, and whether the Tool Gun is in hand
+static void om_tools_html(char **buf, size_t *len, size_t *cap) {
+    const int allowed = g_om.caps < 0 || (g_om.caps & OM_CAP_SPAWN);
+    om_append(buf, len, cap, "<div id='knOmTools' class='knOmTools%s'><div class='knOmToolsTitle'>Tools</div>", allowed ? "" : " knOmOff");
+    for (int i = 0; i < OM_TOOL_COUNT; i++) {
+        const ObjectManagerToolInfo *t = object_manager_tool_info(i);
+        om_append(buf, len, cap,
+                  "<div id='knOmTool%d' class='knOmTool%s' onclick='knOmTool(%d)'><span class='material-icons'>%s</span>"
+                  "<span class='knOmToolName'>%s</span></div>",
+                  i, i == g_om.tool ? " knOmToolA" : "", i, t->icon, t->name);
+    }
+    const ObjectManagerToolInfo *t = object_manager_tool_info(g_om.tool);
+    om_append(buf, len, cap, "<div id='knOmToolHint' class='knOmToolHint'>%s</div>", t ? t->hint : "");
+    om_append(buf, len, cap, "<div id='knOmToolGun' class='knOmToolGun'>%s</div></div>", om_tool_gun_line());
+}
+
 static void om_clear_label(char *out, const size_t size, const Player *me) {
     snprintf(out, size, "Clear Extras (%d/%d)", me ? me->extra_weapon_count : 0, PLAYER_EXTRA_WEAPONS_MAX);
 }
@@ -250,11 +308,13 @@ char *object_manager_window_gen(const int id, const char **header) {
               // not id='knOmSearch': on the web window.knOmSearch would be the element (named access),
               // so kn-shim.js installs no knOmSearch forwarder and oninput throws
               "</div><input id='knOmSearchBox' class='knOmSearch' type='text' maxlength='40' placeholder='Search' value='%s' "
-              "oninput='knOmSearch(this)'/></div><div id='knOmBody'>",
+              "oninput='knOmSearch(this)'/></div><div class='knOmMain'><div id='knOmBody'>",
               search);
     char *body = om_body_html();
     om_append(&buf, &len, &cap, "%s</div>", body ? body : "");
     free(body);
+    om_tools_html(&buf, &len, &cap);
+    om_append(&buf, &len, &cap, "</div>"); // .knOmMain
     om_append(&buf, &len, &cap, "<div class='knOmFoot'><div class='knOmHint'>%s</div><div class='knOmBtns'>", om_hint());
     if (g_om.tab == OM_TAB_WEAPONS) {
         char clear[48];
@@ -313,6 +373,25 @@ static void om_update_loadout(void) {
         om_clear_label(label, sizeof(label), me);
         html_dom_set_text(clear, label);
     }
+}
+
+// The Tools pane in place: the picked tool, its hint, the caps, the Tool Gun line
+static void om_update_tools(void) {
+    if (!om_window_open()) return;
+    const HtmlElem pane = html_dom_by_id("knOmTools");
+    if (!pane) return;
+    html_dom_set_class(pane, "knOmOff", g_om.caps >= 0 && !(g_om.caps & OM_CAP_SPAWN));
+    for (int i = 0; i < OM_TOOL_COUNT; i++) {
+        char id[16];
+        snprintf(id, sizeof(id), "knOmTool%d", i);
+        const HtmlElem row = html_dom_by_id(id);
+        if (row && html_dom_has_class(row, "knOmToolA") != (i == g_om.tool)) html_dom_set_class(row, "knOmToolA", i == g_om.tool);
+    }
+    const ObjectManagerToolInfo *t = object_manager_tool_info(g_om.tool);
+    const HtmlElem hint = html_dom_by_id("knOmToolHint");
+    if (hint && t) html_dom_set_text(hint, t->hint);
+    const HtmlElem gun = html_dom_by_id("knOmToolGun");
+    if (gun) html_dom_set_text(gun, om_tool_gun_line());
 }
 
 static void om_set_status(const char *text, const int error) {
@@ -383,6 +462,43 @@ static int arg_num(const HtmlArg *args, const int argc, const int i, const int d
     return def;
 }
 
+static void om_expect_equip(const int weapon_id) {
+    g_om.pending_equip = weapon_id;
+    g_om.pending_at = glfwGetTime();
+}
+
+// The tools pane: pick `tool` and put the Tool Gun in hand (added as an extra slot first when it
+// is not carried; the server refuses it without the spawn right)
+static void om_pick_tool(const int tool) {
+    if (tool < 0 || tool >= OM_TOOL_COUNT) return;
+    g_om.tool = tool;
+    char value[8];
+    snprintf(value, sizeof(value), "%d", tool);
+    html_storage_set(OM_TOOL_STORAGE, value);
+    om_update_tools();
+    const Client *client = om_client();
+    const Player *me = client ? client->me : NULL;
+    if (!me) {
+        om_set_status("Join a game to use the Tool Gun", 1);
+        return;
+    }
+    if (!om_server_ok(client)) {
+        om_set_status("This server has no Object Manager", 1);
+        return;
+    }
+    char text[96];
+    snprintf(text, sizeof(text), "Tool: %s", object_manager_tool_info(tool)->name);
+    for (int i = 0; me->loadout && i < me->loadout_size; i++) {
+        if (me->loadout[i] != WEAPON_ID_TOOL_GUN) continue;
+        if (i != me->loadout_index) ui_controls_select_slot(i);
+        om_set_status(text, 0);
+        return;
+    }
+    om_set_status(text, 0);
+    om_expect_equip(WEAPON_ID_TOOL_GUN);
+    om_send(OM_ACTION_ADD_WEAPON, WEAPON_ID_TOOL_GUN);
+}
+
 static void om_pick(const int tab, const int item, const int alt) {
     const Client *client = om_client();
     if (!client || !client->me) {
@@ -407,7 +523,7 @@ static void om_pick(const int tab, const int item, const int alt) {
         } else if (om_has_extra(client->me, item)) {
             om_send(OM_ACTION_REMOVE_WEAPON, item);
         } else {
-            g_om.pending_equip = item;
+            om_expect_equip(item);
             om_send(OM_ACTION_ADD_WEAPON, item);
         }
     }
@@ -416,6 +532,11 @@ static void om_pick(const int tab, const int item, const int alt) {
 // A Weapons-tab click without the window (input scripts: `om add <id>` / `om drop <id>`)
 void object_manager_ui_pick_weapon(const int weapon_id, const int drop) {
     om_pick(OM_TAB_WEAPONS, weapon_id, drop);
+}
+
+void object_manager_ui_pick_tool(const int tool) {
+    om_load_tool();
+    om_pick_tool(tool);
 }
 
 int object_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
@@ -458,6 +579,10 @@ int object_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlAr
         om_send(OM_ACTION_REMOVE_AIM, 0);
         return 0;
     }
+    if (!strcmp(name, "knOmTool")) {
+        om_pick_tool(arg_num(args, argc, 0, -1));
+        return 0;
+    }
     if (!strcmp(name, "knOmClear")) {
         om_send(OM_ACTION_CLEAR_WEAPONS, 0);
         return 0;
@@ -473,6 +598,7 @@ static void om_on_result(const NetSpawnResultPacket *r) {
     g_om.extra_max = r->extra_max;
     if (r->action == OM_ACTION_QUERY) {
         om_update_status();
+        om_update_tools();
         return;
     }
     if (r->status != OM_STATUS_OK) {
@@ -483,7 +609,7 @@ static void om_on_result(const NetSpawnResultPacket *r) {
         om_set_status(text, 1);
         return;
     }
-    const Weapon *w = r->item >= 0 && r->item < WEAPON_COUNT ? g_weapons[r->item] : NULL;
+    const Weapon *w = r->item >= 0 && r->item < WEAPON_TABLE_COUNT && r->action != OM_ACTION_TOOL ? g_weapons[r->item] : NULL;
     char text[160] = "";
     switch (r->action) {
         case OM_ACTION_ADD_WEAPON: snprintf(text, sizeof(text), "%s added to your loadout", w ? w->name : "Weapon"); break;
@@ -492,6 +618,17 @@ static void om_on_result(const NetSpawnResultPacket *r) {
         case OM_ACTION_DROP_WEAPON: snprintf(text, sizeof(text), "%s dropped at your crosshair", w ? w->name : "Weapon"); break;
         case OM_ACTION_UNDO: snprintf(text, sizeof(text), "Undone"); break;
         case OM_ACTION_REMOVE_AIM: snprintf(text, sizeof(text), "Removed"); break;
+        case OM_ACTION_DROP_HELD:
+            if (r->item == WEAPON_ID_TOOL_GUN) snprintf(text, sizeof(text), "Tool Gun put away");
+            else snprintf(text, sizeof(text), "%s dropped", w ? w->name : "Weapon");
+            break;
+        case OM_ACTION_TOOL:
+            if (r->limit == OM_TOOL_SHOWN) return; // Info: the NOTIFY carries the text
+            if (r->limit == OM_TOOL_COPIED) snprintf(text, sizeof(text), "Copied: shoot a surface to place the copy");
+            else if (r->limit == OM_TOOL_PASTED) snprintf(text, sizeof(text), "Copy placed");
+            else if (r->item == OM_TOOL_ROTATOR) snprintf(text, sizeof(text), "Rotated");
+            else snprintf(text, sizeof(text), "Removed");
+            break;
         case OM_ACTION_SPAWN_NPC:
         case OM_ACTION_SPAWN_ENTITY:
         case OM_ACTION_SPAWN_OBJECT: {
@@ -524,6 +661,7 @@ static void om_on_extras(Client *client, const NetLoadoutExtraPacket *packet) {
     if (had_mesh) client_add_player_mesh(client, player, is_you);
 
     if (is_you) {
+        if (g_om.pending_equip >= 0 && glfwGetTime() - g_om.pending_at > OM_EQUIP_SECONDS) g_om.pending_equip = -1; // a refused give
         if (g_om.pending_equip >= 0) { // the weapon this client just added: in hand with the next input frame
             for (int i = player_loadout_base(player); i < player->loadout_size; i++) {
                 if (player->loadout[i] == g_om.pending_equip) ui_controls_select_slot(i);
@@ -531,6 +669,7 @@ static void om_on_extras(Client *client, const NetLoadoutExtraPacket *packet) {
             g_om.pending_equip = -1;
         }
         om_update_loadout(); // owned marks, the extras count (in place: the grid keeps its scroll)
+        om_update_tools();   // the Tools pane's Tool Gun line
     }
 }
 
@@ -561,9 +700,53 @@ int object_manager_events_handle(Client *client, const int type, const void *pay
 // Per frame: the local player's Build Tool cost waiver (Player.build_free, doc/v7/decisions.md
 // "Build Tool cost") follows this server's OM_CAP_SPAWN, as the authority's does; with the caps
 // unknown, holding a Build Tool asks once (OM_ACTION_QUERY) so the wheel and helper are right.
+// A Tool Gun shot of the local player: its slot's fire timer jumped (player_shoot ran in the last
+// tick; shots are no shared/ events, vfx.c detect_local_shot watches the same) -> OM_ACTION_TOOL
+static void om_tool_shots(Client *client, const Player *me) {
+    const int slot = me->active && me->reloads && me->loadout_index >= 0 && me->loadout_index < me->loadout_size ? me->loadout_index : -1;
+    const float reload = slot >= 0 ? me->reloads[slot] : 0.0f;
+    const int same = g_om.shot_me == me && g_om.shot_slot == slot && slot >= 0;
+    if (same && me->weapon && me->weapon->kn_tool && reload > g_om.shot_reload + 1e-4f && om_server_ok(client)) {
+        om_load_tool();
+        om_send(OM_ACTION_TOOL, g_om.tool);
+    }
+    g_om.shot_me = me;
+    g_om.shot_slot = slot;
+    g_om.shot_reload = reload;
+}
+
+// "TOOL: DELETER" beside the ammo counter while the Tool Gun is in hand (#knToolHud, made on first
+// use next to #ammoHolder so the HUD markup stays v7's)
+static void om_tool_hud(const Player *me) {
+    char text[sizeof(g_om.hud_text)] = "";
+    if (me && me->active && me->weapon && me->weapon->kn_tool) {
+        om_load_tool();
+        const ObjectManagerToolInfo *t = object_manager_tool_info(g_om.tool);
+        snprintf(text, sizeof(text), "TOOL: %s", t ? t->name : "?");
+        for (char *c = text; *c; c++) *c = (char) (*c >= 'a' && *c <= 'z' ? *c - 32 : *c);
+    }
+    HtmlElem hud = html_dom_by_id("knToolHud");
+    if (!strcmp(text, g_om.hud_text) && (hud || !text[0])) return;
+    if (!hud && text[0]) {
+        const HtmlElem ammo = html_dom_by_id("ammoHolder");
+        if (!ammo) return;
+        html_dom_insert_html(ammo, HTML_INSERT_BEFORE_BEGIN, "<div id='knToolHud' class='knToolHud'></div>");
+        hud = html_dom_by_id("knToolHud");
+        if (!hud) return;
+    }
+    if (hud) {
+        html_dom_set_text(hud, text);
+        html_dom_set_class(hud, "knToolHudOn", text[0] != 0);
+    }
+    snprintf(g_om.hud_text, sizeof(g_om.hud_text), "%s", text);
+    om_update_tools(); // the pane's Tool Gun line follows the hand
+}
+
 void object_manager_ui_tick(Client *client) {
     Player *me = client ? client->me : NULL;
+    om_tool_hud(me);
     if (!me) return;
+    om_tool_shots(client, me);
     if (g_om.caps < 0) {
         me->build_free = 0;
         if (!g_om.queried && me->active && me->weapon && me->weapon->build && om_server_ok(client)) {
@@ -578,6 +761,16 @@ void object_manager_ui_tick(Client *client) {
 void object_manager_ui_key(Client *client, const int action) {
     if (!client || !client->me || !client->me->active || !om_server_ok(client)) return;
     om_send(action, 0);
+}
+
+// A chat / console line went out: `/give <weapon>` to yourself equips the weapon when its
+// LOADOUT_EXTRA lands, like the Weapons tab's left click (the server answers in the chat)
+void object_manager_ui_chat_sent(const char *text) {
+    if (!text || strncasecmp(text, "/give ", 6) != 0) return;
+    const Client *client = om_client();
+    const Player *me = client ? client->me : NULL;
+    int id = -1;
+    if (me && object_manager_give_lookup(text + 6, &id, NULL) == OM_GIVE_WEAPON) om_expect_equip(id);
 }
 
 // A new connection / map: the caps belong to the server we talked to.

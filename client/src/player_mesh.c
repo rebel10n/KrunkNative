@@ -1106,6 +1106,10 @@ void player_generate_meshes(Player *player, const int render_you) {
                             BasicMaterial *weapon_mat = basic_material_init();
                             weapon_mesh = mesh_init(weapon_geo, (Material *) weapon_mat);
                             weapon_mat->texture = weapon_tex;
+                            if (weapon->tint) { // KrunkNative weapons (the Tool Gun): a colour over the reused model
+                                weapon_mat->color = (vec4) {(float) ((weapon->tint >> 16) & 255) / 255.0f, (float) ((weapon->tint >> 8) & 255) / 255.0f,
+                                                            (float) (weapon->tint & 255) / 255.0f, 1.0f};
+                            }
                             if (skin) skin_fx_apply(weapon_mesh, skin, texture, model, glow, glow && !(skin->flags & VS_NO_EMIS));
                         }
                         arms->weapon_models[j] = weapon_model;

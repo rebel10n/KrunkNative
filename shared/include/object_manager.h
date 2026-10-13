@@ -17,6 +17,11 @@
 //                            thing appears / goes; replayed to joiners (object_manager_send_state).
 //                            One id for every kind (OM_KIND_*): 254 stays spare.
 //
+// Console (shared/src/chat_commands.c, doc/console.md): `give <weapon|entity> [player]` runs
+// OM_ACTION_ADD_WEAPON / OM_ACTION_SPAWN_ENTITY for a player, `drop` OM_ACTION_DROP_HELD (or v7's
+// drpw for a picked-up weapon). The Tool Gun (WEAPON_ID_TOOL_GUN, the window's Tools pane) sends
+// each shot as OM_ACTION_TOOL with the tool picked there.
+//
 // Spawned map objects live in Map.objects after the map's own (uid = index, like the builds),
 // flagged Object.spawned, and go at the next round start with the builds (world_remove_builds).
 #include <shared.h>
@@ -46,6 +51,8 @@ typedef enum {
     OM_ACTION_SPAWN_OBJECT,  // item = object catalogue index, at the crosshair
     OM_ACTION_REMOVE_AIM,    // remove the spawned thing at the crosshair
     OM_ACTION_UNDO,          // remove this player's last spawned thing
+    OM_ACTION_DROP_HELD,     // the extra weapon in hand: a weapon pickup a step in front, out of the loadout (drop, Z)
+    OM_ACTION_TOOL,          // item = ObjectManagerTool: a Tool Gun shot at the crosshair (the Tool Gun in hand)
     OM_ACTION_COUNT
 } ObjectManagerAction;
 
@@ -58,6 +65,9 @@ typedef enum {
     OM_STATUS_NO_TARGET, // nothing to place it on at the crosshair
     OM_STATUS_NOTHING,   // nothing to undo / remove
     OM_STATUS_DEAD,      // not spawned
+    OM_STATUS_KEEP,      // DROP_HELD: not an extra weapon (class / melee weapons stay; v7's drpw takes picked ones)
+    OM_STATUS_NO_TOOL,   // TOOL: the Tool Gun is not in hand
+    OM_STATUS_UNSUPPORTED, // TOOL: the tool does not work on that (Rotator / Duplicator: spawned objects only)
     OM_STATUS_COUNT
 } ObjectManagerStatus;
 
@@ -95,6 +105,31 @@ typedef struct {
 // The entries of a tab (OM_TAB_OBJECTS / OM_TAB_ENTITIES / OM_TAB_NPCS; NULL and 0 for Weapons).
 // The index is the request's item.
 const ObjectManagerEntry *object_manager_entries(int tab, int *count);
+
+// ---- the Tool Gun's tools (the window's Tools pane; one function each in object_manager.c)
+typedef enum {
+    OM_TOOL_DELETER = 0, // remove the spawned thing at the crosshair (OM_ACTION_REMOVE_AIM)
+    OM_TOOL_DUPLICATOR,  // copy the spawned object at the crosshair; the next shot places the copy
+    OM_TOOL_ROTATOR,     // turn the spawned object at the crosshair a quarter turn
+    OM_TOOL_INFO,        // what is at the crosshair: kind, owner, uid (a NOTIFY to the shooter)
+    OM_TOOL_COUNT
+} ObjectManagerTool;
+
+typedef struct {
+    const char *name;  // "Deleter"
+    const char *icon;  // Material Icons ligature
+    const char *hint;  // the pane's line under the name
+    unsigned char mutates; // ownership applies (your own spawns unless dev / host)
+} ObjectManagerToolInfo;
+const ObjectManagerToolInfo *object_manager_tool_info(int tool); // NULL out of range
+
+// OM_ACTION_TOOL answered OK: NetSpawnResultPacket.limit says what happened
+#define OM_TOOL_DONE 0   // removed / rotated
+#define OM_TOOL_COPIED 1 // Duplicator: copied, the next shot places it
+#define OM_TOOL_PASTED 2 // Duplicator: the copy placed
+#define OM_TOOL_SHOWN 3  // Info: the text came as a NET_PACKET_NOTIFY
+
+#define OM_DROP_TOSS 8.0f // DROP_HELD: how far in front of the player the pickup lands (units)
 
 #define OM_SPAWNED_ADD 1
 #define OM_SPAWNED_REMOVE 2
@@ -155,6 +190,15 @@ typedef struct {
 
 // ---- catalogue (both sides)
 int object_manager_weapon_listed(int weapon_id); // the Weapons tab: every weapon but the knife and the bomb
+int object_manager_weapon_allowed(int weapon_id); // an extra slot may hold it: the listed ones and the Tool Gun
+int object_manager_entity_giveable(int index);    // `give` takes this Entities entry: spawnables and scrap pickups
+
+// `give`: a weapon by id or name, else an Entities entry by name. Names compare normalised
+// (letters and digits, case-insensitive): exact, else a unique prefix, else a unique substring
+// (the Object Manager search). OM_GIVE_NONE: unknown, or *matches > 1 (ambiguous).
+typedef enum { OM_GIVE_NONE = 0, OM_GIVE_WEAPON, OM_GIVE_ENTITY } ObjectManagerGiveKind;
+int object_manager_give_lookup(const char *query, int *id, int *matches);
+const char *object_manager_give_name(int kind, int id); // the weapon / entry name, NULL unknown
 
 // ---- rules
 unsigned int object_manager_caps(const Game *game, const ObjectManagerPerms *perms); // OM_CAP_*
@@ -163,6 +207,7 @@ unsigned int object_manager_caps(const Game *game, const ObjectManagerPerms *per
 const char *object_manager_status_text(int status); // the menu's message for a refusal
 
 // ---- authority
+int object_manager_holds_extra(const Player *player); // the slot in hand is an extra one (DROP_HELD's case)
 // Runs one request for `player` (NULL: not spawned) and fills `out`. Sends LOADOUT_EXTRA /
 // SPAWNED_OBJ / PICKUP to everyone as needed; the caller sends `out` back.
 void object_manager_request(Game *game, Player *player, const NetSpawnReqPacket *req, const ObjectManagerPerms *perms,
@@ -172,6 +217,8 @@ void object_manager_send_state(Game *game, int uid);   // a joiner: every live s
 void object_manager_round_start(Game *game);           // after world_remove_builds: drop the records
 // The extra weapons `player` may keep (a spawn with caps lacking OM_CAP_WEAPONS clears them).
 int object_manager_keep_extras(const Game *game, const ObjectManagerPerms *perms);
+// The kept extra weapons in place (the Tool Gun goes without OM_CAP_SPAWN); returns the new count.
+int object_manager_filter_extras(const Game *game, const ObjectManagerPerms *perms, int *weapon_ids, int count);
 
 // ---- both sides
 // Replace the extra weapon list (invalid / duplicate / over-cap ids dropped) and rebuild the

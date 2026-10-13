@@ -162,6 +162,8 @@ typedef struct {
     unsigned char build:1;           // build (Build Tool)
     unsigned char no_cross:1;        // noCross: no crosshair
     unsigned char can_upgrade:1;     // canUpgrade (krumMachine)
+    unsigned char kn_tool:1;         // KrunkNative Tool Gun (object_manager.h OM_ACTION_TOOL): fires no bullet, spends no ammo
+    int tint;                        // KrunkNative: viewmodel / pickup colour multiplier 0xRRGGBB, 0 = none
     int effect_on_hit;          // effectOnHit + 1 (0 = none): EffectId given on hit, floor(charge * 10) stacks
     int deployable;             // deployable + 1 (0 = none): the spawnable a shot places (Slimer pads)
     float deploy_range;         // deployRang
@@ -199,6 +201,8 @@ extern const Weapon g_minigun;
 extern const Weapon g_war_machine;
 extern const Weapon g_akimbo_pistol;
 extern const Weapon g_charge_rifle;
+// KrunkNative-only weapons after v7's table (WEAPON_ID_TOOL_GUN...)
+extern const Weapon g_tool_gun;
 
 // Krunker v7.1.4 weapon attachments (src/data/attach.js). `dotSrc` is never read by the client.
 typedef struct {
@@ -239,7 +243,7 @@ const WeaponAttachment *weapon_attachment(const Weapon *weapon, int attach_index
 
 // Indexed exactly like Krunker v7.1.4's weaponConfig (class loadouts and packets use these ids;
 // 0-18 keep their v3.1.1 meaning).
-#define WEAPON_COUNT 29
+#define WEAPON_COUNT 29 // v7.1.4's weaponConfig: what the v7 menus, skins and host config list
 #define WEAPON_ID_PISTOL 2
 #define WEAPON_ID_KNIFE 12
 #define WEAPON_ID_CROSSBOW 13
@@ -250,7 +254,12 @@ const WeaponAttachment *weapon_attachment(const Weapon *weapon, int attach_index
 #define WEAPON_ID_MINIGUN 25
 #define WEAPON_ID_WAR_MACHINE 26
 #define WEAPON_ID_CHARGE_RIFLE 28
+// KrunkNative-only ids follow v7's table (doc/v7/decisions.md "Tool Gun"): in g_weapons and the
+// game's weapon table (Game.weapons), so loadouts, pickups and packets take them, but not in
+// WEAPON_COUNT, so v7's lists (loadout, market, host config, challenges) never show them.
+#define WEAPON_ID_TOOL_GUN 29
+#define WEAPON_TABLE_COUNT 30
 
-extern const Weapon *g_weapons[WEAPON_COUNT];
+extern const Weapon *g_weapons[WEAPON_TABLE_COUNT];
 // v7.1.4 upgradeWeapons.js entry of weapon `id` (krumMachine upgrades), NULL out of range.
 const Weapon *weapon_upgraded(int id);

@@ -529,7 +529,7 @@ void ui_window_meta(const int id, const char **cls, const char **style) {
     snprintf(key, sizeof(key), "%d", id);
     const UiWindowMeta *m = ui_windows_meta(key);
     if (cls) *cls = m ? m->cls : "dark";
-    if (style) *style = m ? m->style : id == OBJECT_MANAGER_WINDOW ? "overflow-y: auto; width: 940px;" : "overflow-y: auto;";
+    if (style) *style = m ? m->style : id == OBJECT_MANAGER_WINDOW ? "overflow-y: auto; width: 1120px;" : "overflow-y: auto;";
 }
 
 char *ui_window_generate(const int id, const char **header, int *sticky) {

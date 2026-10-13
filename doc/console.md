@@ -37,7 +37,7 @@ silent (only the `] line` echo), as in the mod.
 
 | Command | v3.1.1 behaviour | Native |
 |---|---|---|
-| help [cmd] | "N commands:" + sorted list / `name args — desc` / "unknown command: x" | same (76 commands) |
+| help [cmd] | "N commands:" + sorted list / `name args — desc` / "unknown command: x" | same (78 commands, with `give` / `drop`) |
 | clear | empties the log | same |
 | echo / print text | prints the text | same |
 | bind [key] [cmd] | session key binds by `e.key` / `e.code` ("bound k -> cmd", "no binds", "k = (unbound)") | same; fired on keydown while hidden, not while typing |
@@ -198,6 +198,47 @@ Tests: `server/tests/sandbox_test.c` (test_tp_bring: positions, packets, a guest
 unknown names, a bot by id) and `server/tests/host_tp_e2e.py` (server_bin + two protocol
 clients + rcon).
 
+## Object Manager (Krunker Box Office `give` / `drop`)
+
+Neither v3.1.1 nor v7.1.4 has them: they put the Object Manager's weapons and items
+(`shared/include/object_manager.h`, F1) on the console, in `shared/src/chat_commands.c`, so chat,
+the dev console, the server console, rcon and the offline game share them. The perm column is
+`any`: the Object Manager's own rules decide (`object_manager_caps`, the same as its menu), not
+PERMS. Extra weapons wherever its Weapons tab works (devs anywhere; everyone in the offline
+sandbox, and in custom games while the host's `knOmWeps` allows; never public, ranked or comp),
+items and the Tool Gun where it spawns (devs, the custom game's host, the offline sandbox).
+Giving to another player: devs and the host only. The server console and rcon count as a dev.
+
+| Command | Args | Reply |
+|---|---|---|
+| give | weapon | "Crossbow added to your loadout." An extra loadout slot, the Weapons tab's left click (`OM_ACTION_ADD_WEAPON`): the connection keeps it across respawns, the client equips it when its LOADOUT_EXTRA lands |
+| give | item | "KR Tag dropped at your feet." The Entities tab's spawnables and scrap pickups (`object_manager_entity_giveable`; not the machines or an airdrop), at the receiver's feet |
+| give | weapon\|item player | "Gave Famas to Name." |
+| give | – | "Usage: /give <weapon\|item> [player] (…)" |
+| drop | – | "Dropped the Crossbow." / "Tool Gun put away." / "You can't drop your melee weapon." / "You can't drop your class weapons: only picked-up and Object Manager weapons drop." |
+
+Names match like the Object Manager search, normalised to letters and digits: exact first,
+else a unique prefix, else a unique substring (`give alien` is the Alien Blaster, `give krtag`
+the KR Tag, `give 13` the Crossbow by id; a weapon wins over an item of the same name). Quote
+names with spaces for a target (`give "desert eagle" Bob`); without a target the whole rest is
+the name. Refusals: "Unknown weapon or item 'x'.", "'x' matches N weapons and items: be more
+specific.", "Only developers and the host can give to other players." (plus the notify "Host or
+developer required"), "Not allowed: extra weapons are off in this game." / "Not allowed: only
+developers and the host can spawn here." (plus the same notify), and the Object Manager's limits.
+
+`drop` follows v7.1.4's dropWeapon (players.js, the drop key Z, `dropKey`, "drpw"): a weapon
+picked up from a map pickup goes back into that pickup at your feet; never a melee, never a
+class weapon (v7 drops only what `lastPicked` knows), never the last weapon, not in noPickups
+modes. An Object Manager extra slot, which v7 doesn't have, is tossed as a new weapon pickup
+`OM_DROP_TOSS` (8) units in front of you, short of a wall and on the floor below
+(`OM_ACTION_DROP_HELD`, the `OM_CAP_WEAPONS` rule), and leaves the loadout; anyone may pick it
+up. The Tool Gun is put away instead. Z does the same: the server routes a "drpw" on an extra
+slot to `OM_ACTION_DROP_HELD` and answers with SPAWN_RESULT (the client's toast), so no extra
+bind is needed.
+
+Tests: `server/tests/object_manager_test.c` (test_give_drop, test_public_refusals) and
+`server/tests/object_manager_e2e.py` part 4.
+
 Not chat commands, so not ported here: the `pnh`, `prmA`, `noclip`/`tp` packets,
 `clearLog`, and the `tmc` terminal message (map terminals; see the open items).
 
@@ -314,6 +355,7 @@ and adds completion for arguments:
 | bot_kick, bot_kill | all, the bots' names |
 | tp | 1: player names in the game (bots included) |
 | bring | 1: all and the player names in the game (bots included) |
+| give | 1: the Object Manager's weapons (the Tool Gun too) and giveable items, 2: player names |
 | bot_type | nextbot / tfue |
 | bot_mimic, bot_stop | on / off |
 | show_navmeshes | on / off |
@@ -321,8 +363,8 @@ and adds completion for arguments:
 | bot, bot_add, bot_place, bot_config | tfue, autoRespawn and common `key=` options |
 
 The other commands take free text (echo, print, say, game, unbanip) or no
-argument; for those the signature row is the hint. No console command takes a class,
-weapon or setting name, so there are no such candidates. On the web, Shift reaches C
+argument; for those the signature row is the hint. No console command but `give` takes a
+class, weapon or setting name. On the web, Shift reaches C
 through kn-shim (`x = 1` on key events).
 
 `/map` and `/maps` on the server use the same catalogue, as v3.1.1 cmd_map / cmd_maps do:

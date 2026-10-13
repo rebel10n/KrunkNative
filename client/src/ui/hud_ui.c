@@ -2219,7 +2219,7 @@ static void hud_toggle_game_ui(const int on) {
     dom_display("overlay", block);
     dom_display("vignette", block);
     dom_display("interactMsg", "none");
-    // (.onGame is toggleControlUI's, not toggleGameUI's: hud_apply_visibility and its cache own it)
+    g_hud_ui.in_game = on;
     // Krunker's crosshair and hit marker live on the overlay canvas hidden above.
     if (!on) {
         hud_hide_crosshair();
@@ -3536,9 +3536,6 @@ static void hud_spectator_tick(Client *client, const double now) {
 
 void hud_ui_relayout(void) {
     g_hud_ui.visible = -1;
-    // .onGame too: spectating writes it behind this cache (hud_spectate.c), and when spectating
-    // ends with no menu toggle (disconnect, INIT) the next pass must drop it (toggleControlUI)
-    g_hud_ui.in_game = -1;
 }
 
 // The page parts of a round (INIT, and a fresh page during one).

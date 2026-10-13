@@ -3,7 +3,9 @@
 // across respawns), weapon pickups dropped at the crosshair (SPAWNED_OBJ + PICKUP, undo, round
 // start), the rate limit, the permissions (sandbox, custom game with and without knOmWeps,
 // public game: a guest refused, a dev allowed, ranked) and the join sync (a late v7 joiner gets
-// the extras and the spawned objects; a v3 peer never sees ids 250-253).
+// the extras and the spawned objects; a v3 peer never sees ids 250-253), the `give` / `drop`
+// commands (by name / id, to others, without privilege; the dropped weapon is a pickup in front
+// that another player takes) and the Tool Gun (its tools, ownership, the spawn right, public).
 // Run from the repository root: ./<build>/object_manager_test
 #include <server_sandbox.h>
 #include <server.h>
@@ -19,6 +21,7 @@
 #include <map_catalog.h>
 #include <modes.h>
 #include <knet.h> // NET_LOOPBACK_FD_BASE
+#include <social_v7.h> // NetChatV7Packet (give / drop replies)
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -665,6 +668,370 @@ static void test_objects(TestClient *a, TestClient *b) {
     p->god_mode = 0;
 }
 
+
+// ---------------------------------------------------------------- give / drop / Tool Gun
+
+static void say(TestClient *c, const char *text) {
+    NetChatSendPacket packet;
+    memset(&packet, 0, sizeof(packet));
+    snprintf(packet.text, sizeof(packet.text), "%s", text);
+    pump(40); // under the chat burst limit (3 / s)
+    c->count = 0;
+    send_to(c, NET_PACKET_CHAT_SEND, &packet, (uint16_t) (strlen(packet.text) + 1));
+    pump(3);
+}
+
+// The last Server line `c` got since its packets were cleared ("" none)
+static const char *server_line(const TestClient *c) {
+    static char text[NET_CHAT_TEXT_SIZE];
+    text[0] = 0;
+    for (int i = 0; i < c->count; i++) {
+        const NetPacket *p = &c->packets[i];
+        NetChatPacket chat;
+        if (p->type == NET_PACKET_CHAT && p->length >= sizeof(chat)) memcpy(&chat, p->payload, sizeof(chat));
+        else if (p->type == NET_PACKET_CHAT_V7 && p->length >= sizeof(NetChatV7Packet)) {
+            NetChatV7Packet v7;
+            memcpy(&v7, p->payload, sizeof(v7));
+            chat = v7.chat;
+        } else continue;
+        if (chat.uid == -1) snprintf(text, sizeof(text), "%s", chat.text);
+    }
+    return text;
+}
+
+static const char *notify_text(const TestClient *c) {
+    static NetNotifyPacket n;
+    const NetPacket *p = last(c, NET_PACKET_NOTIFY);
+    if (!p || p->length != sizeof(n)) return "";
+    memcpy(&n, p->payload, sizeof(n));
+    n.text[sizeof(n.text) - 1] = 0;
+    return n.text;
+}
+
+static int slot_of(const Player *p, const int id) {
+    for (int i = 0; p && i < p->loadout_size; i++) {
+        if (p->loadout[i] == id) return i;
+    }
+    return -1;
+}
+
+static void hold(TestClient *c, const int id) {
+    const int slot = slot_of(player_of(c), id);
+    if (slot >= 0) input(c, slot, 0);
+}
+
+static void clean_up(TestClient *c) {
+    for (int i = 0; i < 80; i++) {
+        pump(16);
+        if (request(c, OM_ACTION_UNDO, 0, 0.0f).status != OM_STATUS_OK) break;
+    }
+    pump(20);
+    request(c, OM_ACTION_CLEAR_WEAPONS, 0, 0.0f);
+    pump(20);
+}
+
+static void test_give_drop(TestClient *a, TestClient *b) {
+    printf("give / drop...\n");
+    Player *p = player_of(a), *q = player_of(b);
+    ClientConnection *bc = conn(b);
+    if (!p || !q || !bc) return;
+    clean_up(a);
+    clean_up(b);
+    pump(200);
+
+    // lookups (shared): names normalised, exact > prefix > substring, ids, entities, ambiguity
+    int id = -1, matches = 0;
+    CHECK(object_manager_give_lookup("crossbow", &id, NULL) == OM_GIVE_WEAPON && id == 13, "crossbow -> 13 (%d)", id);
+    CHECK(object_manager_give_lookup("Alien", &id, NULL) == OM_GIVE_WEAPON && id == 11, "prefix Alien -> 11 (%d)", id);
+    CHECK(object_manager_give_lookup("\"tool gun\"", &id, NULL) == OM_GIVE_WEAPON && id == WEAPON_ID_TOOL_GUN, "tool gun (%d)", id);
+    CHECK(object_manager_give_lookup("24", &id, NULL) == OM_GIVE_WEAPON && id == 24, "by id");
+    CHECK(object_manager_give_lookup("12", &id, NULL) == OM_GIVE_NONE, "no knife");
+    CHECK(object_manager_give_lookup("krtag", &id, NULL) == OM_GIVE_ENTITY && id == 0, "krtag -> the KR Tag entry (%d)", id);
+    CHECK(object_manager_give_lookup("a", &id, &matches) == OM_GIVE_NONE && matches > 1, "'a' is ambiguous (%d)", matches);
+    CHECK(object_manager_give_lookup("mystery box", &id, NULL) == OM_GIVE_NONE, "machines are no give");
+
+    // give yourself a weapon: an extra slot, the connection keeps it
+    reset_received();
+    say(a, "/give crossbow");
+    CHECK(slot_of(p, 13) >= player_loadout_base(p) && p->extra_weapon_count == 1, "give crossbow: an extra slot (%d extras)", p->extra_weapon_count);
+    CHECK(strstr(server_line(a), "Crossbow added to your loadout") != NULL, "reply '%s'", server_line(a));
+    CHECK(conn(a)->om_extra_count == 1 && conn(a)->om_extras[0] == 13, "the connection keeps a given weapon");
+    CHECK(count_type(b, NET_PACKET_LOADOUT_EXTRA) >= 1, "the others hear LOADOUT_EXTRA");
+    say(a, "/give \"Alien Blaster\"");
+    CHECK(slot_of(p, 11) >= 0 && p->extra_weapon_count == 2, "a quoted name");
+    say(a, "/give zzzz");
+    CHECK(strstr(server_line(a), "Unknown weapon or item") != NULL, "unknown: '%s'", server_line(a));
+    say(a, "/give a");
+    CHECK(strstr(server_line(a), "be more specific") != NULL, "ambiguous: '%s'", server_line(a));
+    say(a, "/give");
+    CHECK(strstr(server_line(a), "Usage: /give") != NULL, "usage");
+
+    // give another player: a dev may, a guest may not
+    char line[96];
+    snprintf(line, sizeof(line), "/give famas %d", q->uid);
+    say(a, line);
+    CHECK(slot_of(q, 14) >= 0 && q->extra_weapon_count == 1, "the dev gives b a Famas ('%s')", server_line(a));
+    CHECK(strstr(server_line(a), "Gave Famas to") != NULL, "reply '%s'", server_line(a));
+    CHECK(bc->om_extra_count == 1 && bc->om_extras[0] == 14, "b's connection keeps it");
+    bc->local = 0; // a remote guest: neither dev nor host
+    snprintf(line, sizeof(line), "/give \"desert eagle\" %d", p->uid);
+    say(b, line);
+    CHECK(slot_of(p, 10) < 0, "a guest gives nobody else anything");
+    CHECK(strstr(server_line(b), "Only developers and the host") != NULL, "refusal '%s'", server_line(b));
+    CHECK(strstr(notify_text(b), "Host or developer") != NULL, "and the notify '%s'", notify_text(b));
+    // an item: the sandbox guest may spawn, at their own feet
+    say(b, "/give krtag");
+    CHECK(strstr(server_line(b), "KR Tag dropped at your feet") != NULL, "give krtag: '%s'", server_line(b));
+
+    // drop: the held extra weapon becomes a pickup in front of the player, out of the loadout
+    pump(200);
+    hold(a, 13);
+    CHECK(p->weapon == &g_crossbow, "the Crossbow in hand");
+    const size_t objects = g_server->game.map->object_count;
+    const vec3 at = p->position;
+    const float yaw = p->direction.y;
+    say(a, "/drop");
+    CHECK(strstr(server_line(a), "Dropped the Crossbow") != NULL, "drop: '%s'", server_line(a));
+    CHECK(slot_of(p, 13) < 0 && p->extra_weapon_count == 1 && conn(a)->om_extra_count == 1, "out of the loadout and the connection");
+    const Object *o = g_server->game.map->object_count > objects ? g_server->game.map->objects[g_server->game.map->object_count - 1] : NULL;
+    GamePickup k;
+    CHECK(o && o->spawned && o->prefab == PREFAB_WEAPON_PICKUP && game_pickup_state(&g_server->game, (int) (g_server->game.map->object_count - 1), &k) &&
+          k.active && k.weapon == 13, "a Crossbow pickup");
+    if (o) {
+        const float dx = o->position.x - at.x, dz = o->position.z - at.z;
+        const float ahead = dx * -sinf(yaw) + dz * -cosf(yaw);
+        CHECK(ahead > 1.0f && ahead <= OM_DROP_TOSS + 0.5f && sqrtf(dx * dx + dz * dz) < OM_DROP_TOSS + 1.0f, "in front of the player (%.1f ahead)", ahead);
+        CHECK(fabsf(o->position.y - at.y) < 3.0f, "on the floor (%.1f, feet %.1f)", o->position.y, at.y);
+        // another player picks it up (v7 interact type 6 on its uid)
+        pump(200);
+        q->position = o->position;
+        q->velocity = (vec3) {0};
+        const int uid = (int) (g_server->game.map->object_count - 1);
+        const NetInteractV7Packet interact = {.action = 1, .type = GAME_INTERACT_PICKUP, .uid = uid};
+        send_to(b, NET_PACKET_INTERACT, &interact, sizeof(interact));
+        pump(4);
+        CHECK(slot_of(q, 13) >= 0, "b picked the dropped Crossbow up");
+    }
+    // the drop key ("drpw") on an extra slot does the same, answered by SPAWN_RESULT
+    pump(200);
+    hold(a, 11);
+    reset_received();
+    const NetInteractV7Packet drpw = {.action = 2};
+    send_to(a, NET_PACKET_INTERACT, &drpw, sizeof(drpw));
+    pump(3);
+    const NetPacket *res = last(a, NET_PACKET_SPAWN_RESULT);
+    NetSpawnResultPacket r = {.status = OM_STATUS_COUNT};
+    if (res && res->length == sizeof(r)) memcpy(&r, res->payload, sizeof(r));
+    CHECK(r.action == OM_ACTION_DROP_HELD && r.status == OM_STATUS_OK && r.item == 11 && slot_of(p, 11) < 0, "drop key on an extra (status %u)", r.status);
+    // class weapons and the melee stay (v7: only picked-up weapons drop)
+    hold(a, p->loadout[0]);
+    say(a, "/drop");
+    CHECK(strstr(server_line(a), "can't drop your class weapons") != NULL && p->loadout_size >= 2, "a class weapon stays: '%s'", server_line(a));
+    hold(a, WEAPON_ID_KNIFE);
+    say(a, "/drop");
+    CHECK(strstr(server_line(a), "melee") != NULL && slot_of(p, WEAPON_ID_KNIFE) >= 0, "the melee stays: '%s'", server_line(a));
+
+    // without the privilege: a custom game with knOmWeps off
+    Game *game = &g_server->game;
+    game->is_sandbox = 0;
+    game->config.om_weapons = 0;
+    pump(200);
+    say(b, "/give crossbow");
+    CHECK(strstr(server_line(b), "extra weapons are off") != NULL, "no weapons: '%s'", server_line(b));
+    CHECK(strstr(notify_text(b), "extra weapons are off") != NULL, "notify '%s'", notify_text(b));
+    say(b, "/give krtag");
+    CHECK(strstr(server_line(b), "only developers and the host can spawn") != NULL, "no items: '%s'", server_line(b));
+    hold(b, 14);
+    say(b, "/drop");
+    CHECK(strstr(server_line(b), "Not allowed") != NULL && slot_of(q, 14) >= 0, "no drop either: '%s'", server_line(b));
+    say(a, "/give eagle");
+    CHECK(slot_of(p, 10) >= 0, "a dev still gives himself one");
+    game->config.om_weapons = 1;
+    game->is_sandbox = 1;
+    bc->local = 1;
+    clean_up(a);
+    clean_up(b);
+}
+
+static void test_tool_gun(TestClient *a, TestClient *b) {
+    printf("tool gun...\n");
+    Player *p = player_of(a), *q = player_of(b);
+    ClientConnection *bc = conn(b);
+    if (!p || !q || !bc) return;
+    Game *game = &g_server->game;
+    p->god_mode = q->god_mode = 1;
+    pump(200);
+    CHECK(object_manager_tool_info(OM_TOOL_DELETER) && !strcmp(object_manager_tool_info(OM_TOOL_DELETER)->name, "Deleter"), "tools catalogue");
+    CHECK(g_weapons[WEAPON_ID_TOOL_GUN] == &g_tool_gun && g_tool_gun.kn_tool && !object_manager_weapon_listed(WEAPON_ID_TOOL_GUN) &&
+          object_manager_weapon_allowed(WEAPON_ID_TOOL_GUN), "the Tool Gun is an extra slot, not a Weapons tile");
+
+    // without the Tool Gun in hand: refused
+    NetSpawnResultPacket r = request(a, OM_ACTION_TOOL, OM_TOOL_INFO, 0.0f);
+    CHECK(r.status == OM_STATUS_NO_TOOL, "no Tool Gun in hand (status %u)", r.status);
+    pump(20);
+    r = request(a, OM_ACTION_ADD_WEAPON, WEAPON_ID_TOOL_GUN, 0.0f);
+    pump(4);
+    hold(a, WEAPON_ID_TOOL_GUN);
+    CHECK(r.status == OM_STATUS_OK && p->weapon == &g_tool_gun, "the Tool Gun in hand (status %u)", r.status);
+
+    // its shot: the fire timer, no ammo spent, nobody hurt
+    for (int i = 0; i < 20; i++) input(a, -1, 0); // past the swap timer
+    const float health = q->health;
+    q->position = (vec3) {p->position.x - sinf(p->direction.y) * 20.0f, p->position.y, p->position.z - cosf(p->direction.y) * 20.0f};
+    const unsigned int ammo = p->ammo[p->loadout_index];
+    Input in = {.seq = ++a->seq, .move_dir = -1, .delta = 1.0f / 60.0f, .x_dir = 0.0f, .y_dir = p->direction.y, .shoot = 1};
+    NetInputPacket packet;
+    net_packet_from_input(&packet, &in);
+    send_to(a, NET_PACKET_INPUT, &packet, sizeof(packet));
+    pump(4);
+    CHECK(p->reloads[p->loadout_index] > 0.0f, "the Tool Gun fired (fire timer %.2f)", p->reloads[p->loadout_index]);
+    CHECK(p->ammo[p->loadout_index] == ammo && q->health == health, "a Tool Gun shot spends no ammo and hurts nobody");
+
+    // a crate of a's in front
+    const int crate = entry_index(OM_TAB_OBJECTS, "Crate");
+    pump(20);
+    r = request_at(a, OM_ACTION_SPAWN_OBJECT, crate, -0.6f, p->direction.y);
+    const Object *o = last_spawned();
+    CHECK(r.status == OM_STATUS_OK && o && o->prefab == PREFAB_CRATE, "a crate (status %u)", r.status);
+    if (!o) return;
+    float pitch, yaw;
+    aim_at(p, (vec3) {o->position.x, o->position.y + o->scale.y * 0.5f, o->position.z}, &pitch, &yaw);
+    const int uid = (int) (game->map->object_count - 1);
+
+    // Info: kind, owner, uid as a NOTIFY
+    pump(20);
+    r = request_at(a, OM_ACTION_TOOL, OM_TOOL_INFO, pitch, yaw);
+    char want[32];
+    snprintf(want, sizeof(want), "object %d", uid);
+    CHECK(r.status == OM_STATUS_OK && r.limit == OM_TOOL_SHOWN && strstr(notify_text(a), "Crate") && strstr(notify_text(a), want),
+          "Info: '%s' (status %u)", notify_text(a), r.status);
+    pump(20);
+    r = request_at(a, OM_ACTION_TOOL, OM_TOOL_INFO, -1.55f, p->direction.y + 3.0f);
+    CHECK(r.status == OM_STATUS_OK && strstr(notify_text(a), "part of the map"), "Info on the map: '%s'", notify_text(a));
+
+    // Rotator: a quarter turn (w / l swapped), the same thing in the undo list
+    const float ry = o->rotation.y;
+    const vec3 sc = o->scale;
+    pump(20);
+    r = request_at(a, OM_ACTION_TOOL, OM_TOOL_ROTATOR, pitch, yaw);
+    const Object *turned = last_spawned();
+    CHECK(r.status == OM_STATUS_OK && !o->active && turned && turned != o && turned->prefab == PREFAB_CRATE, "Rotator (status %u)", r.status);
+    if (turned) {
+        const float d = fmodf(turned->rotation.y - ry + 4.0f * (float) M_PI, 2.0f * (float) M_PI);
+        CHECK(fabsf(d - (float) M_PI / 2.0f) < 0.02f, "a quarter turn (%.3f -> %.3f)", ry, turned->rotation.y);
+        CHECK(fabsf(turned->scale.x - sc.z) < 0.01f && fabsf(turned->scale.z - sc.x) < 0.01f, "w and l swapped");
+        CHECK(fabsf(turned->position.x - o->position.x) < 0.01f && fabsf(turned->position.z - o->position.z) < 0.01f, "in place");
+    }
+    o = turned;
+
+    // Duplicator: copy, then place the copy on the floor elsewhere
+    const int before = spawned_count();
+    pump(20);
+    r = request_at(a, OM_ACTION_TOOL, OM_TOOL_DUPLICATOR, pitch, yaw);
+    CHECK(r.status == OM_STATUS_OK && r.limit == OM_TOOL_COPIED, "Duplicator copies (status %u limit %u)", r.status, r.limit);
+    pump(20);
+    r = request_at(a, OM_ACTION_TOOL, OM_TOOL_DUPLICATOR, -0.5f, p->direction.y + 1.2f);
+    const Object *dup = last_spawned();
+    CHECK(r.status == OM_STATUS_OK && r.limit == OM_TOOL_PASTED && spawned_count() == before + 1 && dup && dup != o && dup->prefab == PREFAB_CRATE,
+          "and places the copy (status %u limit %u)", r.status, r.limit);
+    pump(20);
+    r = request_at(a, OM_ACTION_TOOL, OM_TOOL_DUPLICATOR, -1.55f, p->direction.y + 3.0f);
+    CHECK(r.status == OM_STATUS_UNSUPPORTED || r.status == OM_STATUS_NOTHING, "nothing copied off the map (status %u)", r.status);
+    if (dup) { // the copy is a's own: undo takes it back
+        pump(20);
+        request(a, OM_ACTION_UNDO, 0, 0.0f);
+        CHECK(!dup->active, "the copy is undone like a spawn");
+    }
+
+    // Deleter: someone else's spawn is refused unless dev or host
+    bc->local = 0; // b: the sandbox lets it spawn, but it is no dev
+    pump(20);
+    r = request(b, OM_ACTION_ADD_WEAPON, WEAPON_ID_TOOL_GUN, 0.0f);
+    pump(4);
+    hold(b, WEAPON_ID_TOOL_GUN);
+    CHECK(r.status == OM_STATUS_OK && q->weapon == &g_tool_gun, "b's Tool Gun (status %u)", r.status);
+    q->position = p->position;
+    q->height = p->height;
+    pump(20);
+    r = request_at(b, OM_ACTION_TOOL, OM_TOOL_DELETER, pitch, yaw);
+    CHECK(r.status == OM_STATUS_DENIED && o && o->active, "Deleter on a's crate: refused for b (status %u)", r.status);
+    pump(20);
+    r = request_at(b, OM_ACTION_TOOL, OM_TOOL_ROTATOR, pitch, yaw);
+    CHECK(r.status == OM_STATUS_DENIED, "and so is the Rotator (status %u)", r.status);
+    pump(20);
+    r = request_at(a, OM_ACTION_TOOL, OM_TOOL_DELETER, pitch, yaw);
+    CHECK(r.status == OM_STATUS_OK && o && !o->active, "the owner deletes it (status %u)", r.status);
+    // b's own crate: b deletes it; a dev deletes b's
+    pump(20);
+    r = request_at(b, OM_ACTION_SPAWN_OBJECT, crate, -0.6f, p->direction.y);
+    const Object *bo = last_spawned();
+    pump(20);
+    r = request_at(b, OM_ACTION_TOOL, OM_TOOL_DELETER, pitch, yaw);
+    CHECK(r.status == OM_STATUS_OK && bo && !bo->active, "b deletes its own (status %u)", r.status);
+    pump(20);
+    r = request_at(b, OM_ACTION_SPAWN_OBJECT, crate, -0.6f, p->direction.y);
+    bo = last_spawned();
+    pump(20);
+    r = request_at(a, OM_ACTION_TOOL, OM_TOOL_DELETER, pitch, yaw);
+    CHECK(r.status == OM_STATUS_OK && bo && !bo->active, "a dev deletes b's (status %u)", r.status);
+    pump(20);
+    r = request_at(a, OM_ACTION_TOOL, OM_TOOL_DELETER, pitch, yaw);
+    CHECK(r.status == OM_STATUS_NOTHING, "nothing left (status %u)", r.status);
+
+    // the spawn right: a custom game's guest keeps no Tool Gun and fires no tool
+    game->is_sandbox = 0;
+    pump(20);
+    r = request(b, OM_ACTION_TOOL, OM_TOOL_INFO, 0.0f);
+    CHECK(r.status == OM_STATUS_DENIED, "custom guest: no tools (status %u)", r.status);
+    pump(20);
+    request(b, OM_ACTION_CLEAR_WEAPONS, 0, 0.0f);
+    pump(20);
+    r = request(b, OM_ACTION_ADD_WEAPON, WEAPON_ID_TOOL_GUN, 0.0f);
+    CHECK(r.status == OM_STATUS_DENIED, "custom guest: no Tool Gun (status %u)", r.status);
+    int ids[2] = {WEAPON_ID_TOOL_GUN, 5};
+    const ObjectManagerPerms guest = {0};
+    CHECK(object_manager_filter_extras(game, &guest, ids, 2) == 1 && ids[0] == 5, "a respawn without the spawn right drops the Tool Gun");
+    game->is_sandbox = 1;
+    bc->local = 1;
+    p->god_mode = q->god_mode = 0;
+    clean_up(a);
+    clean_up(b);
+}
+
+// After test_permissions (a public game): give and the tools are refused to a guest
+static void test_public_refusals(TestClient *dev, TestClient *guest) {
+    printf("public give / tools...\n");
+    Game *game = &g_server->game;
+    ClientConnection *gc = conn(guest);
+    if (!gc) return;
+    game->is_sandbox = 0;
+    gc->local = 0;
+    CHECK(!game_config_is_custom(game), "public");
+    Player *gp = player_of(guest);
+    if (gp && !gp->active) {
+        gp->death_time = game->now - 10.0f;
+        NetEntPacket ent = {.class_index = 0, .secondary_index = -1, .cosmetics = PLAYER_COSMETICS_NONE, .slid_cont = 1, .lag_comp = 1.0f};
+        send_to(guest, NET_PACKET_ENT, &ent, (uint16_t) NET_ENT_PACKET_V7_SIZE);
+        pump(6);
+        gp = player_of(guest);
+    }
+    CHECK(gp && gp->active, "the guest is back");
+    say(guest, "/give crossbow");
+    CHECK(strstr(server_line(guest), "extra weapons are off") != NULL && gp && slot_of(gp, 13) < 0, "public: give refused '%s'", server_line(guest));
+    say(guest, "/give \"tool gun\"");
+    CHECK(strstr(server_line(guest), "only developers and the host can spawn") != NULL, "public: no Tool Gun '%s'", server_line(guest));
+    pump(20);
+    NetSpawnResultPacket r = request(guest, OM_ACTION_TOOL, OM_TOOL_DELETER, -1.0f);
+    CHECK(r.status == OM_STATUS_DENIED, "public: no tools (status %u)", r.status);
+    say(guest, "/drop");
+    CHECK(strstr(server_line(guest), "class weapons") != NULL, "public: class weapons stay '%s'", server_line(guest));
+    say(dev, "/give \"tool gun\"");
+    CHECK(slot_of(player_of(dev), WEAPON_ID_TOOL_GUN) >= 0, "public: a dev has one ('%s')", server_line(dev));
+    game->is_sandbox = 1;
+    gc->local = 1;
+    clean_up(dev);
+}
+
 static void test_join_sync(TestClient *a, TestClient *late, TestClient *old) {
     printf("join sync...\n");
     pump(20);
@@ -847,8 +1214,11 @@ int main(void) {
         test_pickups(&g_clients[0], &g_clients[1]);
         test_npcs_entities(&g_clients[0], &g_clients[1]);
         test_objects(&g_clients[0], &g_clients[1]);
+        test_give_drop(&g_clients[0], &g_clients[1]);
+        test_tool_gun(&g_clients[0], &g_clients[1]);
         test_join_sync(&g_clients[0], &g_clients[2], &g_clients[3]);
         test_permissions(&g_clients[0], &g_clients[1]);
+        test_public_refusals(&g_clients[0], &g_clients[1]);
         for (int i = 0; i < CLIENTS; i++) leave(&g_clients[i]);
         sandbox_stop();
     } else CHECK(0, "sandbox");

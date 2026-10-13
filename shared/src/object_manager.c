@@ -12,6 +12,7 @@
 #include <weapons.h>
 #include <world.h>
 #include <cJSON.h>
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,6 +55,11 @@ static const Weapon *om_weapon(const Game *game, const int id) {
 int object_manager_weapon_listed(const int weapon_id) {
     if (weapon_id < 0 || weapon_id >= WEAPON_COUNT || !g_weapons[weapon_id]) return 0;
     return weapon_id != WEAPON_ID_KNIFE && !g_weapons[weapon_id]->bomb; // every class has the knife; bombs are site-mode only
+}
+
+// The Tool Gun is no Weapons-tile (the Tools pane equips it) and never a pickup, but an extra slot
+int object_manager_weapon_allowed(const int weapon_id) {
+    return object_manager_weapon_listed(weapon_id) || weapon_id == WEAPON_ID_TOOL_GUN;
 }
 
 #define SCRAP(name, icon, json) {name, icon, OM_ENTRY_RECORD, 0, json}
@@ -189,10 +195,107 @@ const ObjectManagerEntry *object_manager_entries(const int tab, int *count) {
     return NULL;
 }
 
+// `give krtag`: the items a player picks up (spawnables, the editor's scrap pickups), dropped at
+// the receiver's feet; not the machines or an airdrop crate on their head
+int object_manager_entity_giveable(const int index) {
+    const int count = (int) (sizeof(k_entities) / sizeof(k_entities[0]));
+    if (index < 0 || index >= count) return 0;
+    const ObjectManagerEntry *e = &k_entities[index];
+    return e->kind == OM_ENTRY_SPAWNABLE || (e->kind == OM_ENTRY_RECORD && e->json && strstr(e->json, "\"inm\":\"pickup"));
+}
+
+// lowercase letters and digits only ("KR Tag" -> "krtag"), like the chat commands' player queries
+static void om_normalise(const char *in, char *out, const size_t n) {
+    size_t len = 0;
+    for (; in && *in && len + 1 < n; in++) {
+        if (isalnum((unsigned char) *in)) out[len++] = (char) tolower((unsigned char) *in);
+    }
+    out[len] = 0;
+}
+
+const char *object_manager_give_name(const int kind, const int id) {
+    if (kind == OM_GIVE_WEAPON) return object_manager_weapon_allowed(id) ? g_weapons[id]->name : NULL;
+    if (kind == OM_GIVE_ENTITY) return object_manager_entity_giveable(id) ? k_entities[id].name : NULL;
+    return NULL;
+}
+
+// pass 0 exact, 1 prefix, 2 substring
+static int om_name_matches(const char *name, const char *query, const int pass) {
+    char key[64];
+    om_normalise(name, key, sizeof(key));
+    if (pass == 0) return !strcmp(key, query);
+    if (pass == 1) return !strncmp(key, query, strlen(query));
+    return strstr(key, query) != NULL;
+}
+
+int object_manager_give_lookup(const char *query, int *id, int *matches) {
+    char q[64];
+    om_normalise(query, q, sizeof(q));
+    if (matches) *matches = 0;
+    if (!q[0]) return OM_GIVE_NONE;
+    int digits = 1;
+    for (const char *c = q; *c; c++) digits &= isdigit((unsigned char) *c) != 0;
+    if (digits) { // a weapon id
+        const int w = atoi(q);
+        if (!object_manager_weapon_allowed(w)) return OM_GIVE_NONE;
+        if (id) *id = w;
+        if (matches) *matches = 1;
+        return OM_GIVE_WEAPON;
+    }
+    const int entity_count = (int) (sizeof(k_entities) / sizeof(k_entities[0]));
+    for (int pass = 0; pass < 3; pass++) {
+        int weapon = -1, weapons = 0, entity = -1, entities = 0;
+        for (int w = 0; w < WEAPON_TABLE_COUNT; w++) {
+            if (object_manager_weapon_allowed(w) && om_name_matches(g_weapons[w]->name, q, pass)) {
+                weapon = w;
+                weapons++;
+            }
+        }
+        for (int e = 0; e < entity_count; e++) {
+            if (object_manager_entity_giveable(e) && om_name_matches(k_entities[e].name, q, pass)) {
+                entity = e;
+                entities++;
+            }
+        }
+        if (matches) *matches = weapons + entities;
+        if (weapons == 1) { // a weapon wins over an entity of the same name ("Grenade Launcher")
+            if (id) *id = weapon;
+            if (matches) *matches = 1;
+            return OM_GIVE_WEAPON;
+        }
+        if (!weapons && entities == 1) {
+            if (id) *id = entity;
+            return OM_GIVE_ENTITY;
+        }
+        if (weapons + entities > 1) return OM_GIVE_NONE; // ambiguous
+    }
+    return OM_GIVE_NONE;
+}
+
+static const ObjectManagerToolInfo k_tools[OM_TOOL_COUNT] = {
+    [OM_TOOL_DELETER] = {"Deleter", "delete_forever", "Removes the spawned thing you shoot", 1},
+    [OM_TOOL_DUPLICATOR] = {"Duplicator", "content_copy", "Shoot an object to copy it, shoot again to place the copy", 0},
+    [OM_TOOL_ROTATOR] = {"Rotator", "rotate_90_degrees_cw", "Turns the spawned object you shoot a quarter turn", 1},
+    [OM_TOOL_INFO] = {"Info", "info", "Shows what you shoot: type, owner and uid", 0},
+};
+
+const ObjectManagerToolInfo *object_manager_tool_info(const int tool) {
+    return tool >= 0 && tool < OM_TOOL_COUNT ? &k_tools[tool] : NULL;
+}
+
 // ---------------------------------------------------------------- rules
 
 int object_manager_keep_extras(const Game *game, const ObjectManagerPerms *perms) {
     return (object_manager_caps(game, perms) & OM_CAP_WEAPONS) != 0;
+}
+
+int object_manager_filter_extras(const Game *game, const ObjectManagerPerms *perms, int *weapon_ids, const int count) {
+    const int spawn = (object_manager_caps(game, perms) & OM_CAP_SPAWN) != 0;
+    int n = 0;
+    for (int i = 0; weapon_ids && i < count; i++) {
+        if (weapon_ids[i] != WEAPON_ID_TOOL_GUN || spawn) weapon_ids[n++] = weapon_ids[i];
+    }
+    return n;
 }
 
 // Extra weapons: devs anywhere; everyone else in the offline sandbox, and in custom / hosted games
@@ -219,6 +322,9 @@ const char *object_manager_status_text(const int status) {
         case OM_STATUS_NO_TARGET: return "Aim at a surface";
         case OM_STATUS_NOTHING: return "Nothing to remove";
         case OM_STATUS_DEAD: return "Spawn in first";
+        case OM_STATUS_KEEP: return "You can't drop that weapon";
+        case OM_STATUS_NO_TOOL: return "Equip the Tool Gun first";
+        case OM_STATUS_UNSUPPORTED: return "That tool only works on spawned objects";
         default: return "Failed";
     }
 }
@@ -285,7 +391,7 @@ void player_set_extra_weapons(Player *player, const int *weapon_ids, const int c
     int n = 0;
     for (int i = 0; weapon_ids && i < count && n < PLAYER_EXTRA_WEAPONS_MAX; i++) {
         const int id = weapon_ids[i];
-        if (!object_manager_weapon_listed(id) || !om_weapon(player->game, id)) continue;
+        if (!object_manager_weapon_allowed(id) || !om_weapon(player->game, id)) continue;
         int dup = 0;
         for (int k = 0; k < n; k++) dup |= list[k] == id;
         if (!dup) list[n++] = id;
@@ -523,6 +629,9 @@ void object_manager_round_start(Game *game) {
     cJSON_Delete(om->records);
     om->records = NULL;
     om->thing_count = 0;
+    for (size_t i = 0; i < game->player_count; i++) { // the Duplicator's copies were of this round's objects
+        if (game->players[i]) game->players[i]->om_copy = 0;
+    }
 }
 
 int object_manager_apply_spawned(Game *game, const void *payload, const uint16_t length) {
@@ -560,8 +669,9 @@ static int om_take_token(Player *player) {
     return 1;
 }
 
-static int om_add_weapon(Player *player, const int id, NetSpawnResultPacket *out) {
-    if (!object_manager_weapon_listed(id) || !om_weapon(player->game, id)) return OM_STATUS_INVALID;
+static int om_add_weapon(Player *player, const int id, const unsigned int caps, NetSpawnResultPacket *out) {
+    if (!object_manager_weapon_allowed(id) || !om_weapon(player->game, id)) return OM_STATUS_INVALID;
+    if (id == WEAPON_ID_TOOL_GUN && !(caps & OM_CAP_SPAWN)) return OM_STATUS_DENIED; // the Tool Gun follows the spawn rights
     for (int i = 0; i < player->extra_weapon_count; i++) {
         if (player->extra_weapons[i] == id) return OM_STATUS_OK; // already carried
     }
@@ -589,9 +699,8 @@ static int om_remove_weapon(Player *player, const int id, const int all) {
     return OM_STATUS_OK;
 }
 
-static int om_drop_weapon(Game *game, Player *player, const NetSpawnReqPacket *req, NetSpawnResultPacket *out) {
-    const int id = req->item;
-    if (!object_manager_weapon_listed(id) || !om_weapon(game, id)) return OM_STATUS_INVALID;
+// A WEAPON_PICKUP of weapon `id` spawned by `player` with its floor point at `p` (the caps checked)
+static int om_place_pickup(Game *game, Player *player, const int id, const vec3 p, NetSpawnResultPacket *out) {
     ObjectManager *om = om_of(game);
     if (!om || !game->map) return OM_STATUS_INVALID;
     if (things_count(game, om, player->uid, OM_KIND_OBJECT, 1) >= OM_PICKUPS_PER_PLAYER) {
@@ -606,9 +715,6 @@ static int om_drop_weapon(Game *game, Player *player, const NetSpawnReqPacket *r
         out->limit = OM_OBJECTS_MAX;
         return OM_STATUS_LIMIT;
     }
-    ObjectManagerAim aim;
-    if (!object_manager_aim(game, player, req->pitch, req->yaw, &aim)) return OM_STATUS_NO_TARGET;
-    const vec3 p = om_floor_point(game, &aim, 3.0f);
     const PrefabData *pd = prefab_data(PREFAB_WEAPON_PICKUP);
     // a map.js WEAPON_PICKUP record: the pad at the floor point, turned to face the player
     cJSON *record = cJSON_CreateObject();
@@ -627,6 +733,51 @@ static int om_drop_weapon(Game *game, Player *player, const NetSpawnReqPacket *r
     spawned_send(game, NET_TARGET_ALL, OM_SPAWNED_ADD, uid, game->map->objects[uid]);
     game_pickup_send(game, NET_TARGET_ALL, uid);
     return OM_STATUS_OK;
+}
+
+static int om_drop_weapon(Game *game, Player *player, const NetSpawnReqPacket *req, NetSpawnResultPacket *out) {
+    const int id = req->item;
+    if (!object_manager_weapon_listed(id) || !om_weapon(game, id) || !game->map) return OM_STATUS_INVALID;
+    ObjectManagerAim aim;
+    if (!object_manager_aim(game, player, req->pitch, req->yaw, &aim)) return OM_STATUS_NO_TARGET;
+    return om_place_pickup(game, player, id, om_floor_point(game, &aim, 3.0f), out);
+}
+
+int object_manager_holds_extra(const Player *player) {
+    return player && player->loadout && player->extra_weapon_count > 0 && player->loadout_index >= player_loadout_base(player) &&
+           player->loadout_index < player->loadout_size;
+}
+
+// OM_DROP_TOSS along the look (flat), short of a wall, then down onto the floor below
+static vec3 om_toss_point(const Game *game, const Player *player) {
+    const vec3 dir = om_look(0.0f, player->direction.y);
+    const vec3 from = {player->position.x, player->position.y + 2.0f, player->position.z};
+    const vec3 segment = {dir.x * OM_DROP_TOSS, 0.0f, dir.z * OM_DROP_TOSS};
+    float t;
+    int object;
+    float reach = OM_DROP_TOSS;
+    if (om_ray(game, from, segment, &t, &object)) reach = fmaxf(0.0f, OM_DROP_TOSS * t - 2.0f);
+    vec3 p = {from.x + dir.x * reach, from.y, from.z + dir.z * reach};
+    const vec3 down = {0.0f, -OM_AIM_RANGE, 0.0f};
+    if (om_ray(game, p, down, &t, &object)) p.y = p.y + down.y * t;
+    else p.y = player->position.y;
+    return p;
+}
+
+// OM_ACTION_DROP_HELD (`drop`, the drop key on an extra slot): the weapon in hand becomes a
+// pickup a step in front of the player and leaves the loadout. Only extra slots: the class
+// loadout and the melee stay (v7's dropWeapon takes picked-up weapons back to their pickup, never
+// a melee, never the last weapon). The Tool Gun is put away, never a pickup.
+static int om_drop_held(Game *game, Player *player, NetSpawnResultPacket *out) {
+    if (!object_manager_holds_extra(player)) return OM_STATUS_KEEP;
+    const int id = player->loadout[player->loadout_index];
+    out->item = (int16_t) id;
+    const Weapon *w = om_weapon(game, id);
+    if (!w || w->melee) return OM_STATUS_KEEP;
+    if (!object_manager_weapon_listed(id)) return om_remove_weapon(player, id, 0);
+    if (!game->map || (game->mode && game->mode->config.no_pickups)) return OM_STATUS_DENIED; // dropWeapon: !mode.noPickups
+    const int status = om_place_pickup(game, player, id, om_toss_point(game, player), out);
+    return status == OM_STATUS_OK ? om_remove_weapon(player, id, 0) : status;
 }
 
 static void thing_remove(Game *game, const OmThing *t) {
@@ -828,10 +979,10 @@ static int thing_box(Game *game, const OmThing *t, vec3 *pos, vec3 *size) {
     return 0;
 }
 
-// OM_ACTION_REMOVE_AIM: the nearest tracked thing the crosshair reaches before a wall
-static int om_remove_aim(Game *game, Player *player, const NetSpawnReqPacket *req, const unsigned int caps, const int host) {
+// The nearest tracked thing the crosshair reaches before a wall (index into om->things), -1 none
+static int om_aim_thing(Game *game, const Player *player, const NetSpawnReqPacket *req) {
     ObjectManager *om = game->object_manager;
-    if (!om || !game->map) return OM_STATUS_NOTHING;
+    if (!om || !game->map) return -1;
     const vec3 eye = {player->position.x, player->position.y + player->height - game_constants.camera_height, player->position.z};
     const vec3 dir = om_look(isfinite(req->pitch) ? player_clamp_pitch(req->pitch) : player->direction.x, isfinite(req->yaw) ? req->yaw : player->direction.y);
     const vec3 segment = {dir.x * OM_AIM_RANGE, dir.y * OM_AIM_RANGE, dir.z * OM_AIM_RANGE};
@@ -852,11 +1003,220 @@ static int om_remove_aim(Game *game, Player *player, const NetSpawnReqPacket *re
             best = (int) i;
         }
     }
+    return best;
+}
+
+// Who may take back / change a tracked thing: its owner, devs and the host (Remove / Undo's rule)
+typedef struct {
+    unsigned int caps;
+    int host;
+} OmWho;
+
+static int om_may_touch(const OmThing *t, const Player *player, const OmWho *who) {
+    return t->owner == player->uid || (who->caps & OM_CAP_DEV) || who->host;
+}
+
+// OM_ACTION_REMOVE_AIM (and the Tool Gun's Deleter): the nearest tracked thing at the crosshair
+static int om_remove_aim(Game *game, Player *player, const NetSpawnReqPacket *req, const OmWho *who) {
+    const int best = om_aim_thing(game, player, req);
     if (best < 0) return OM_STATUS_NOTHING;
-    const OmThing *t = &om->things[best];
-    if (t->owner != player->uid && !(caps & OM_CAP_DEV) && !host) return OM_STATUS_DENIED; // someone else's
+    const OmThing *t = &((ObjectManager *) game->object_manager)->things[best];
+    if (!om_may_touch(t, player, who)) return OM_STATUS_DENIED; // someone else's
     thing_remove(game, t);
     return OM_STATUS_OK;
+}
+
+// ---------------------------------------------------------------- the Tool Gun's tools
+
+static int tool_deleter(Game *game, Player *player, const NetSpawnReqPacket *req, const OmWho *who, NetSpawnResultPacket *out) {
+    (void) out;
+    return om_remove_aim(game, player, req, who);
+}
+
+// The aimed tracked thing when it is a spawned map object, else a status (*index -1)
+static int om_aim_object(Game *game, const Player *player, const NetSpawnReqPacket *req, int *index) {
+    *index = om_aim_thing(game, player, req);
+    if (*index < 0) return OM_STATUS_NOTHING;
+    const OmThing *t = &((ObjectManager *) game->object_manager)->things[*index];
+    if (t->kind != OM_KIND_OBJECT || !spawned_object(game, t->id) || !spawned_object(game, t->id)->raw) {
+        *index = -1;
+        return OM_STATUS_UNSUPPORTED;
+    }
+    return OM_STATUS_OK;
+}
+
+// Rotator: a quarter turn clockwise seen from above, as om_spawn_record faces things: yaw + PI/2
+// with w and l swapped (the AABB follows the model), ramps and ladders one map.js "d" step. The
+// turned copy replaces the object under a new uid (uids never move mid-round); the undo list
+// keeps its place.
+static int tool_rotator(Game *game, Player *player, const NetSpawnReqPacket *req, const OmWho *who, NetSpawnResultPacket *out) {
+    (void) out;
+    int index;
+    const int status = om_aim_object(game, player, req, &index);
+    if (status != OM_STATUS_OK) return status;
+    ObjectManager *om = game->object_manager;
+    if (!om_may_touch(&om->things[index], player, who)) return OM_STATUS_DENIED;
+    const int old = om->things[index].id;
+    cJSON *record = cJSON_Duplicate(spawned_object(game, old)->raw, 1);
+    if (!record) return OM_STATUS_INVALID;
+    const int prefab = map_raw_object_prefab(record);
+    if (prefab == PREFAB_RAMP || prefab == PREFAB_LADDER) {
+        const int d = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(record, "d"));
+        cJSON_DeleteItemFromObject(record, "d");
+        cJSON_AddNumberToObject(record, "d", ((d + 1) % 4 + 4) % 4);
+    } else {
+        double size[3] = {10.0, 10.0, 10.0}, rot[3] = {0.0, 0.0, 0.0};
+        const cJSON *sz = cJSON_GetObjectItem(record, "s"), *r = cJSON_GetObjectItem(record, "r");
+        for (int k = 0; k < 3; k++) {
+            if (cJSON_IsArray(sz)) size[k] = cJSON_GetNumberValue(cJSON_GetArrayItem(sz, k));
+            if (cJSON_IsArray(r)) rot[k] = cJSON_GetNumberValue(cJSON_GetArrayItem(r, k));
+        }
+        const double w = size[0];
+        size[0] = size[2];
+        size[2] = w;
+        rot[1] = fmod(rot[1] + M_PI / 2.0, 2.0 * M_PI);
+        rot[1] = round(rot[1] * 100.0) / 100.0;
+        cJSON_DeleteItemFromObject(record, "s");
+        cJSON_DeleteItemFromObject(record, "r");
+        cJSON_AddItemToObject(record, "s", cJSON_CreateDoubleArray(size, 3));
+        cJSON_AddItemToObject(record, "r", cJSON_CreateDoubleArray(rot, 3));
+    }
+    const int owner = om->things[index].owner;
+    const int uid = spawned_add(game, om, record, owner, -1);
+    if (uid < 0) return OM_STATUS_INVALID;
+    spawned_remove(game, old);
+    om->things[index].id = uid;
+    spawned_send(game, NET_TARGET_ALL, OM_SPAWNED_ADD, uid, game->map->objects[uid]);
+    if (game->map->objects[uid]->pickup) game_pickup_send(game, NET_TARGET_ALL, uid);
+    return OM_STATUS_OK;
+}
+
+// Duplicator: a shot at a spawned object copies it (anyone's: copying changes nothing); the next
+// shot places the copy on the surface at the crosshair, facing as the original did, as the
+// shooter's own spawn (the object caps apply).
+static int tool_duplicator(Game *game, Player *player, const NetSpawnReqPacket *req, const OmWho *who, NetSpawnResultPacket *out) {
+    (void) who;
+    ObjectManager *om = om_of(game);
+    if (!om || !game->map) return OM_STATUS_INVALID;
+    const Object *copy = player->om_copy > 0 ? spawned_object(game, player->om_copy - 1) : NULL;
+    if (!copy || !copy->raw) {
+        player->om_copy = 0;
+        int index;
+        const int status = om_aim_object(game, player, req, &index);
+        if (status != OM_STATUS_OK) return status;
+        player->om_copy = om->things[index].id + 1;
+        out->limit = OM_TOOL_COPIED;
+        return OM_STATUS_OK;
+    }
+    const int limit = om_limit(game, om, player, OM_KIND_OBJECT);
+    if (limit) {
+        out->limit = (uint16_t) limit;
+        return OM_STATUS_LIMIT;
+    }
+    if (copy->pickup && things_count(game, om, player->uid, OM_KIND_OBJECT, 1) >= OM_PICKUPS_PER_PLAYER) {
+        out->limit = OM_PICKUPS_PER_PLAYER;
+        return OM_STATUS_LIMIT;
+    }
+    ObjectManagerAim aim;
+    if (!object_manager_aim(game, player, req->pitch, req->yaw, &aim)) return OM_STATUS_NO_TARGET;
+    cJSON *record = cJSON_Duplicate(copy->raw, 1);
+    if (!record) return OM_STATUS_INVALID;
+    double size[3] = {copy->scale.x, copy->scale.y, copy->scale.z};
+    const cJSON *sz = cJSON_GetObjectItem(record, "s");
+    for (int k = 0; cJSON_IsArray(sz) && k < 3; k++) size[k] = cJSON_GetNumberValue(cJSON_GetArrayItem(sz, k));
+    const vec3 at = copy->pickup ? om_floor_point(game, &aim, 3.0f) : om_place_box(game, &aim, size);
+    const double pos[3] = {round(at.x * 10.0) / 10.0, round(at.y * 10.0) / 10.0, round(at.z * 10.0) / 10.0};
+    cJSON_DeleteItemFromObject(record, "p");
+    cJSON_AddItemToObject(record, "p", cJSON_CreateDoubleArray(pos, 3));
+    const int uid = spawned_add(game, om, record, player->uid, -1);
+    if (uid < 0) return OM_STATUS_INVALID;
+    thing_push(om, OM_KIND_OBJECT, 0, uid, player->uid);
+    spawned_send(game, NET_TARGET_ALL, OM_SPAWNED_ADD, uid, game->map->objects[uid]);
+    if (game->map->objects[uid]->pickup) game_pickup_send(game, NET_TARGET_ALL, uid);
+    player->om_copy = 0;
+    out->limit = OM_TOOL_PASTED;
+    return OM_STATUS_OK;
+}
+
+static const char *om_player_name(const Game *game, const int uid, char *buf, const size_t n) {
+    for (size_t i = 0; i < game->player_count; i++) {
+        const Player *p = game->players[i];
+        if (p && p->uid == uid) {
+            snprintf(buf, n, "%s", p->name[0] ? p->name : "Guest");
+            return buf;
+        }
+    }
+    snprintf(buf, n, "#%d (left)", uid);
+    return buf;
+}
+
+// "CRATE" -> "Crate", "WEAPON_PICKUP" -> "Weapon Pickup"
+static void om_title(const char *in, char *out, const size_t n) {
+    size_t len = 0;
+    int start = 1;
+    for (; in && *in && len + 1 < n; in++) {
+        const char c = *in == '_' ? ' ' : *in;
+        out[len++] = (char) (start ? toupper((unsigned char) c) : tolower((unsigned char) c));
+        start = c == ' ';
+    }
+    out[len] = 0;
+}
+
+// Info: what the crosshair is on, as a NOTIFY to the shooter (the client toasts it)
+static int tool_info(Game *game, Player *player, const NetSpawnReqPacket *req, const OmWho *who, NetSpawnResultPacket *out) {
+    (void) who;
+    NetNotifyPacket notify;
+    memset(&notify, 0, sizeof(notify));
+    char what[64] = "", owner[PLAYER_NAME_SIZE + 16];
+    const int index = om_aim_thing(game, player, req);
+    if (index >= 0) {
+        const OmThing *t = &((ObjectManager *) game->object_manager)->things[index];
+        if (t->kind == OM_KIND_OBJECT) {
+            const Object *o = spawned_object(game, t->id);
+            om_title(o ? prefab_name(o->prefab) : NULL, what, sizeof(what));
+            if (o && o->raw && o->prefab == PREFAB_WEAPON_PICKUP) {
+                const Weapon *w = om_weapon(game, (int) cJSON_GetNumberValue(cJSON_GetObjectItem(o->raw, "w")));
+                if (w) snprintf(what, sizeof(what), "%s Pickup", w->name);
+            }
+            snprintf(notify.text, sizeof(notify.text), "%s, object %d, owner %s", what[0] ? what : "Object", t->id, om_player_name(game, t->owner, owner, sizeof(owner)));
+        } else if (t->kind == OM_KIND_NPC && t->sub == OM_SUB_BOT) {
+            const GameBot *bot = bot_by_id(game, t->id);
+            snprintf(notify.text, sizeof(notify.text), "Bot %s, bot %d, owner %s", bot && bot->player ? bot->player->name : "?", t->id,
+                     om_player_name(game, t->owner, owner, sizeof(owner)));
+        } else if (t->kind == OM_KIND_NPC) {
+            const GameAI *ai = game_ai_find(game, t->id);
+            snprintf(notify.text, sizeof(notify.text), "NPC %s, sid %d, owner %s", ai ? ai->name : "?", t->id, om_player_name(game, t->owner, owner, sizeof(owner)));
+        } else {
+            snprintf(notify.text, sizeof(notify.text), "%s, sid %d, owner %s", t->sub == OM_SUB_AIRDROP ? "Airdrop" : "Spawnable", t->id,
+                     om_player_name(game, t->owner, owner, sizeof(owner)));
+        }
+    } else {
+        ObjectManagerAim aim;
+        if (!object_manager_aim(game, player, req->pitch, req->yaw, &aim)) return OM_STATUS_NO_TARGET;
+        if (aim.object < 0) snprintf(notify.text, sizeof(notify.text), "Terrain (part of the map)");
+        else {
+            om_title(prefab_name(game->map->objects[aim.object]->prefab), what, sizeof(what));
+            snprintf(notify.text, sizeof(notify.text), "%s, object %d (part of the map)", what[0] ? what : "Object", aim.object);
+        }
+    }
+    game_send(game, player->uid, NET_PACKET_NOTIFY, &notify, sizeof(notify));
+    out->limit = OM_TOOL_SHOWN;
+    return OM_STATUS_OK;
+}
+
+typedef int (*OmToolFn)(Game *, Player *, const NetSpawnReqPacket *, const OmWho *, NetSpawnResultPacket *);
+static const OmToolFn k_tool_fns[OM_TOOL_COUNT] = {
+    [OM_TOOL_DELETER] = tool_deleter,
+    [OM_TOOL_DUPLICATOR] = tool_duplicator,
+    [OM_TOOL_ROTATOR] = tool_rotator,
+    [OM_TOOL_INFO] = tool_info,
+};
+
+// OM_ACTION_TOOL: the Tool Gun in hand, then the tool's own function
+static int om_tool(Game *game, Player *player, const NetSpawnReqPacket *req, const OmWho *who, NetSpawnResultPacket *out) {
+    if (req->item < 0 || req->item >= OM_TOOL_COUNT || !k_tool_fns[req->item]) return OM_STATUS_INVALID;
+    if (!player->weapon || !player->weapon->kn_tool) return OM_STATUS_NO_TOOL;
+    return k_tool_fns[req->item](game, player, req, who, out);
 }
 
 static int om_undo(Game *game, Player *player, const int any) {
@@ -888,20 +1248,22 @@ void object_manager_request(Game *game, Player *player, const NetSpawnReqPacket 
         out->status = OM_STATUS_DEAD;
         return;
     }
-    const int weapons = req->action <= OM_ACTION_DROP_WEAPON;
+    const int weapons = req->action <= OM_ACTION_DROP_WEAPON || req->action == OM_ACTION_DROP_HELD;
     const int takes_back = req->action == OM_ACTION_UNDO || req->action == OM_ACTION_REMOVE_AIM;
     if (!(caps & (weapons ? OM_CAP_WEAPONS : OM_CAP_SPAWN)) &&
         !(takes_back && (caps & OM_CAP_WEAPONS)) && // undo / remove also take back pickups
-        !(req->action == OM_ACTION_REMOVE_WEAPON || req->action == OM_ACTION_CLEAR_WEAPONS)) { // giving back is always fine
+        !(req->action == OM_ACTION_REMOVE_WEAPON || req->action == OM_ACTION_CLEAR_WEAPONS) && // giving back is always fine
+        !(req->action == OM_ACTION_DROP_HELD && player->weapon && player->weapon->kn_tool)) {    // (putting the Tool Gun away too)
         out->status = OM_STATUS_DENIED;
         return;
     }
+    const OmWho who = {caps, perms && perms->host};
     if (!om_take_token(player)) {
         out->status = OM_STATUS_RATE;
         return;
     }
     switch (req->action) {
-        case OM_ACTION_ADD_WEAPON: out->status = (uint8_t) om_add_weapon(player, req->item, out); break;
+        case OM_ACTION_ADD_WEAPON: out->status = (uint8_t) om_add_weapon(player, req->item, caps, out); break;
         case OM_ACTION_REMOVE_WEAPON: out->status = (uint8_t) om_remove_weapon(player, req->item, 0); break;
         case OM_ACTION_CLEAR_WEAPONS: out->status = (uint8_t) om_remove_weapon(player, -1, 1); break;
         case OM_ACTION_DROP_WEAPON: out->status = (uint8_t) om_drop_weapon(game, player, req, out); break;
@@ -909,7 +1271,9 @@ void object_manager_request(Game *game, Player *player, const NetSpawnReqPacket 
         case OM_ACTION_SPAWN_ENTITY: out->status = (uint8_t) om_spawn_entry(game, player, req, OM_TAB_ENTITIES, out); break;
         case OM_ACTION_SPAWN_NPC: out->status = (uint8_t) om_spawn_entry(game, player, req, OM_TAB_NPCS, out); break;
         case OM_ACTION_SPAWN_OBJECT: out->status = (uint8_t) om_spawn_entry(game, player, req, OM_TAB_OBJECTS, out); break;
-        case OM_ACTION_REMOVE_AIM: out->status = (uint8_t) om_remove_aim(game, player, req, caps, perms && perms->host); break;
+        case OM_ACTION_REMOVE_AIM: out->status = (uint8_t) om_remove_aim(game, player, req, &who); break;
+        case OM_ACTION_DROP_HELD: out->status = (uint8_t) om_drop_held(game, player, out); break;
+        case OM_ACTION_TOOL: out->status = (uint8_t) om_tool(game, player, req, &who, out); break;
         default: out->status = OM_STATUS_INVALID; break;
     }
 }

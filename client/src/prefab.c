@@ -2050,6 +2050,10 @@ Mesh *prefab_weapon_mesh(const Weapon *weapon, const int no_texture) {
     Mesh *mesh = prefab_model_mesh(model, model, no_texture || client_render_settings()->no_textures);
     if (!mesh) return NULL;
     ((BasicMaterial *) mesh->material)->double_sided = 0;
+    if (weapon->tint) { // KrunkNative weapons (the Tool Gun)
+        ((BasicMaterial *) mesh->material)->color = (vec4) {(float) ((weapon->tint >> 16) & 255) / 255.0f,
+                                                            (float) ((weapon->tint >> 8) & 255) / 255.0f, (float) (weapon->tint & 255) / 255.0f, 1.0f};
+    }
     return mesh;
 }
 

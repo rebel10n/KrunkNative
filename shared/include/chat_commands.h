@@ -44,6 +44,7 @@ typedef struct {
     int dev;                 // passes requireDev while perms are on
     int premium_host;        // isPremiumCustomHost: the account that hosts this custom lobby (CHAT_PERM_CHEAT)
     int account_id;          // player.account.id, 0 = guest (no account ban possible)
+    int ranked;              // a ranked match is on (ObjectManagerPerms.ranked: give / drop)
 } ChatPeer;
 
 typedef struct ChatCommandHost {
@@ -71,6 +72,9 @@ typedef struct ChatCommandHost {
     int  (*ban_account)(void *user, int account_id, const char *name); // add (persisted), 1 = ok
     int  (*unban_account)(void *user, int account_id);                 // 1 = it was banned
     int  (*list_account_bans)(void *user, int *out, int max);          // ids into out, returns the total
+    // KrunkNative give / drop changed connection `id`'s Object Manager extra weapons (optional):
+    // the server keeps them on the connection, as after a SPAWN_REQ.
+    void (*om_extras_changed)(void *user, int id);
 
     // per-server state (pnhBannedAddresses, forceCollideState)
     char ip_bans[CHAT_CMD_IP_BANS_MAX][CHAT_CMD_ADDRESS_SIZE];

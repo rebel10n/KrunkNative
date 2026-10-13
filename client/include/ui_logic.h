@@ -470,7 +470,9 @@ int  object_manager_events_handle(Client*, int type, const void *payload, uint16
 void object_manager_ui_reset(void);              // a new server (INIT): its caps are unknown again
 void object_manager_ui_tick(Client*);            // per frame: me->build_free from the caps (asks once with a Build Tool)
 void object_manager_ui_pick_weapon(int weapon_id, int drop); // a Weapons-tab left (add / take out) or right (drop) click
+void object_manager_ui_pick_tool(int tool);      // a Tools-pane pick: the Tool Gun's tool, the Tool Gun in hand
 void object_manager_ui_key(Client*, int action); // the Undo / Remove binds in game: OM_ACTION_UNDO / OM_ACTION_REMOVE_AIM
+void object_manager_ui_chat_sent(const char *text); // a chat / console line went out: `/give <weapon>` equips it once given
 void ui_controls_select_slot(int slot);          // ui_controls.c: equip loadout slot `slot` with the next input frame
 // END object_manager_ui block
 

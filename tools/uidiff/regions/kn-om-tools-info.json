@@ -1,0 +1,61 @@
+{
+  "scenario": "kn-om-tools-info",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "om-header",
+      "rect": [
+        308,
+        160,
+        660,
+        100
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "title, tabs (Weapons active), search box, status line"
+    },
+    {
+      "name": "om-grid",
+      "rect": [
+        312,
+        264,
+        546,
+        236
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#knOmGrid: the NPCs grid"
+    },
+    {
+      "name": "om-footer",
+      "rect": [
+        308,
+        504,
+        660,
+        56
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "hint + Clear Extras (3/24) + Remove + Undo"
+    },
+    {
+      "name": "om-tools",
+      "rect": [
+        862,
+        246,
+        104,
+        192
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#knOmTools: Info picked, the Tool Gun line"
+    }
+  ]
+}

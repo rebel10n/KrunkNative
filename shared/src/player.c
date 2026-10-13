@@ -3157,7 +3157,8 @@ void player_shoot(Player *player) {
     const int charging = !game->config.no_charge_weapons;
 
     // fullChrgSht weapons (Charge Rifle) spend a round only on the full-charge shot
-    if (!player->unlimited_ammo && (!weapon->full_charge_shot || full) && player->ammo[player->loadout_index] > 0) player->ammo[player->loadout_index]--;
+    // (the KrunkNative Tool Gun spends none: each shot is an Object Manager request, see below)
+    if (!player->unlimited_ammo && !weapon->kn_tool && (!weapon->full_charge_shot || full) && player->ammo[player->loadout_index] > 0) player->ammo[player->loadout_index]--;
 
     player->did_act = 1;
 
@@ -3213,6 +3214,10 @@ void player_shoot(Player *player) {
     }
 #endif
     // TODO: muzzle flash & casings
+
+    // KrunkNative Tool Gun: the fire timer, the recoil and the client's tracer only; the client
+    // sends the shot as OM_ACTION_TOOL (object_manager_ui.c) and the authority applies the tool
+    if (weapon->kn_tool) return;
 
     // deployRang (Slimer): tryDeployable places the weapon's spawnable (Slime Pad) instead of firing
     if (weapon->deploy_range > 0.0f) {

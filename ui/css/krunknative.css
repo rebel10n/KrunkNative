@@ -424,6 +424,87 @@ img.knOmProp {
   color: rgba(255, 255, 255, 0.6);
 }
 
+/* Object Manager: the Tools pane right of the grid (the Tool Gun's tools, object_manager_ui.c) */
+#menuWindow.dark div.knOmMain {
+  display: flex;
+  align-items: flex-start;
+}
+#menuWindow.dark div#knOmBody {
+  flex-grow: 1;
+  min-width: 0;
+}
+#menuWindow.dark div.knOmTools {
+  width: 160px;
+  flex-shrink: 0;
+  margin-left: 12px;
+  padding: 8px;
+  border-radius: 5px;
+  background-color: rgba(0, 0, 0, 0.35);
+}
+#menuWindow.dark div.knOmToolsTitle {
+  font-size: 16px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 8px;
+}
+#menuWindow.dark div.knOmTool {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+  padding: 5px 6px;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background-color: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
+}
+#menuWindow.dark div.knOmTool:hover {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+#menuWindow.dark div.knOmTool.knOmToolA {
+  border-color: var(--yellow);
+}
+#menuWindow.dark div.knOmTool span.material-icons {
+  font-size: 22px;
+  margin-right: 8px;
+  color: rgba(255, 255, 255, 0.85);
+}
+#menuWindow.dark div.knOmTool span.knOmToolName {
+  color: #fff; /* main.css * { color } would win on the span */
+}
+#menuWindow.dark div.knOmToolHint {
+  margin-top: 8px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.55);
+}
+#menuWindow.dark div.knOmToolGun {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--yellow);
+}
+#menuWindow.dark div.knOmTools.knOmOff div.knOmTool {
+  opacity: 0.45;
+}
+#menuWindow.dark div.knOmTools.knOmOff div.knOmToolGun {
+  color: #eb5656;
+}
+/* The Tool Gun's tool beside the ammo counter (made next to #ammoHolder while it is in hand) */
+#knToolHud {
+  display: none;
+}
+#knToolHud.knToolHudOn {
+  display: inline-block; /* left of the ammo box: the weapon rack sits above it */
+  vertical-align: middle;
+  margin-right: 10px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background-color: var(--div-black);
+  font-size: 20px;
+  color: var(--yellow);
+  text-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
+}
+
 /* Object Manager: many loadout weapons (extra slots) make a compact rack, six per column
  * (hud_ui.c sets knManyWeaps on #weapHolder past four slots). */
 #weapHolder.knManyWeaps {

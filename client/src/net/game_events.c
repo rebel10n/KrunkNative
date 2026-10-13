@@ -67,6 +67,7 @@ void client_chat_send(Client *client, const char *text) {
     if (!net_chat_sanitize(packet.text, sizeof(packet.text), text, strlen(text))) return;
     if (!client->offline && client->net_socket < 0) return;
     if (!net_chat_allow(&limiter, (float) glfwGetTime())) return;
+    object_manager_ui_chat_sent(packet.text); // KrunkNative: `/give <weapon>` equips it once given
 
     if (social_server_v7(client)) { // v7 f1909: "ct", channel (#chatSwitch), msg
         NetChatV7SendPacket v7 = {.channel = (uint8_t) (hud_ui_chat_channel() == CHAT_CHANNEL_TEAM ? CHAT_CHANNEL_TEAM : CHAT_CHANNEL_GLOBAL)};
@@ -1005,8 +1006,5 @@ void client_game_events_tick(Client *client) {
     if (glfwGetTime() < client->net_death_time + client->net_respawn_delay) return;
 
     client->net_death_menu_pending = 0;
-    // f1771 runs UI.toggleMenu(true) also when the menu is up already (ESC before the death or
-    // during it): toggleMenuHider(true) drops .onDeathScrn, so the chat leaves the death
-    // screen's place (main.css #uiBase.onDeathScrn #chatHolder) for the menu's.
-    if (html_ui_available()) client_set_menu_open(client, 1);
+    if (html_ui_available() && !html_ui_is_menu_open()) client_set_menu_open(client, 1);
 }

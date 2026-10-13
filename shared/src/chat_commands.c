@@ -7,6 +7,8 @@
 #include "modes/mode_internal.h"
 #include "triggers_internal.h" // trigger_send_change_position ("chgp")
 #include <map_catalog.h>
+#include <object_manager.h> // give / drop (KrunkNative Object Manager)
+#include <weapons.h>
 #include <ctype.h>
 #include <math.h>
 #include <stdarg.h>
@@ -1445,6 +1447,183 @@ static void cmd_bring(ChatCtx *c) {
 }
 
 // v3.1.1 `cmds`, in its order; descriptions from the v3.1.1 dev console mod.
+
+// ---------------------------------------------------------------- give / drop (KrunkNative)
+// Not v3.1.1 / v7.1.4 commands: the Object Manager's (shared/include/object_manager.h) weapons
+// and items from the console. The Object Manager's own rules decide (object_manager_caps), not
+// PERMS: extra weapons wherever its Weapons tab works, items and the Tool Gun where it spawns.
+
+static ObjectManagerPerms om_perms_of(const ChatCtx *c) {
+    ObjectManagerPerms perms;
+    memset(&perms, 0, sizeof(perms));
+    if (c->sender == CHAT_CMD_CONSOLE) perms.dev = 1; // the server console / rcon
+    else if (c->has_self) {
+        perms.dev = (unsigned char) !!c->self.dev;
+        perms.host = (unsigned char) !!c->self.premium_host;
+        perms.ranked = (unsigned char) !!c->self.ranked;
+    }
+    return perms;
+}
+
+static void om_notify(ChatCtx *c, const char *text) {
+    if (c->sender == CHAT_CMD_CONSOLE) return;
+    NetNotifyPacket notify;
+    memset(&notify, 0, sizeof(notify));
+    snprintf(notify.text, sizeof(notify.text), "%s", text);
+    game_send(c->host->game, c->sender, NET_PACKET_NOTIFY, &notify, sizeof(notify));
+}
+
+// One Object Manager request for `player` with the sender's rights; the extras the server keeps
+static NetSpawnResultPacket om_run(ChatCtx *c, Player *player, const int action, const int item, const float pitch) {
+    const ObjectManagerPerms perms = om_perms_of(c);
+    const NetSpawnReqPacket req = {.action = (uint8_t) action, .item = (int16_t) item, .pitch = pitch, .yaw = player->direction.y};
+    NetSpawnResultPacket out;
+    object_manager_request(c->host->game, player, &req, &perms, &out);
+    if (c->host->om_extras_changed) c->host->om_extras_changed(c->host->user, player->uid);
+    return out;
+}
+
+static void om_reply_failure(ChatCtx *c, const NetSpawnResultPacket *r, const char *denied) {
+    if (r->status == OM_STATUS_DENIED) {
+        reply(c, "%s", denied);
+        om_notify(c, denied);
+    } else if (r->status == OM_STATUS_LIMIT && r->limit) {
+        reply(c, "%s (%u).", object_manager_status_text(r->status), (unsigned int) r->limit);
+    } else {
+        reply(c, "%s.", object_manager_status_text(r->status));
+    }
+}
+
+// parseArgs: words, "quoted words" as one
+static int split_quoted(const char *rest, char *work, const size_t n, char **argv, const int max) {
+    snprintf(work, n, "%s", rest ? rest : "");
+    int argc = 0;
+    char *p = work;
+    while (*p && argc < max) {
+        while (*p == ' ') p++;
+        if (!*p) break;
+        if (*p == '"') {
+            argv[argc++] = ++p;
+            while (*p && *p != '"') p++;
+        } else {
+            argv[argc++] = p;
+            while (*p && *p != ' ') p++;
+        }
+        if (*p) *p++ = 0;
+    }
+    return argc;
+}
+
+static void join_words(char **argv, const int count, char *out, const size_t n) {
+    size_t len = 0;
+    out[0] = 0;
+    for (int i = 0; i < count && len < n; i++) len += (size_t) snprintf(out + len, n - len, "%s%s", i ? " " : "", argv[i]);
+}
+
+// give <weapon|item> [player]: an extra loadout slot (OM_ACTION_ADD_WEAPON, the Weapons tab's
+// left click) or an Entities item at the receiver's feet (OM_ACTION_SPAWN_ENTITY). Names match
+// like the Object Manager search; another player than you: devs and the host only.
+static void cmd_give(ChatCtx *c) {
+    char work[NET_CHAT_TEXT_SIZE], item[NET_CHAT_TEXT_SIZE];
+    char *argv[CHAT_ARGS_MAX];
+    const int argc = split_quoted(c->rest, work, sizeof(work), argv, CHAT_ARGS_MAX);
+    if (!argc) {
+        reply(c, "Usage: /give <weapon|item> [player] (e.g. /give sniper, /give \"tool gun\", /give krtag)");
+        return;
+    }
+    int id = -1, matches = 0;
+    join_words(argv, argc, item, sizeof(item));
+    int kind = object_manager_give_lookup(item, &id, &matches);
+    Player *target = c->player;
+    if (kind == OM_GIVE_NONE && argc >= 2) { // the last word names the receiver
+        ResolveReason reason;
+        Player *p = resolve_player(c, argv[argc - 1], &reason);
+        char head[NET_CHAT_TEXT_SIZE];
+        join_words(argv, argc - 1, head, sizeof(head));
+        int head_id = -1, head_matches = 0;
+        const int head_kind = p ? object_manager_give_lookup(head, &head_id, &head_matches) : OM_GIVE_NONE;
+        if (head_kind != OM_GIVE_NONE) {
+            kind = head_kind;
+            id = head_id;
+            target = p;
+            snprintf(item, sizeof(item), "%s", head);
+        } else if (!p && reason == RESOLVE_AMBIGUOUS && object_manager_give_lookup(head, NULL, NULL) != OM_GIVE_NONE) {
+            reply(c, "Player '%s' is ambiguous.", argv[argc - 1]);
+            return;
+        }
+    }
+    if (kind == OM_GIVE_NONE) {
+        if (matches > 1) reply(c, "'%s' matches %d weapons and items: be more specific.", item, matches);
+        else reply(c, "Unknown weapon or item '%s'.", item);
+        return;
+    }
+    const char *name = object_manager_give_name(kind, id);
+    if (!target) {
+        reply(c, "Name a player: /give %s <player>.", name);
+        return;
+    }
+    const ObjectManagerPerms perms = om_perms_of(c);
+    char who[PLAYER_NAME_SIZE + 16];
+    player_label(target, who, sizeof(who));
+    if (target != c->player && !perms.dev && !perms.host) {
+        reply(c, "Only developers and the host can give to other players.");
+        om_notify(c, "Host or developer required");
+        return;
+    }
+    if (!target->active) {
+        reply(c, "%s is not spawned.", target == c->player ? "You are" : who);
+        return;
+    }
+    const int weapon = kind == OM_GIVE_WEAPON;
+    // an item lands at the receiver's feet: the crosshair straight down
+    const NetSpawnResultPacket r = om_run(c, target, weapon ? OM_ACTION_ADD_WEAPON : OM_ACTION_SPAWN_ENTITY, id, weapon ? 0.0f : (float) -M_PI / 2.0f);
+    if (r.status != OM_STATUS_OK) {
+        om_reply_failure(c, &r, weapon && id != WEAPON_ID_TOOL_GUN ? "Not allowed: extra weapons are off in this game."
+                                                                    : "Not allowed: only developers and the host can spawn here.");
+        return;
+    }
+    if (target == c->player) reply(c, weapon ? "%s added to your loadout." : "%s dropped at your feet.", name);
+    else reply(c, "Gave %s to %s.", name, who);
+}
+
+// drop: the weapon in hand on the ground in front of you. An Object Manager extra slot becomes a
+// pickup a step ahead (OM_ACTION_DROP_HELD); a picked-up weapon goes back into its pickup at your
+// feet (v7.1.4 players.dropWeapon, the drop key's "drpw"). v7 never drops a melee, a class weapon
+// (no lastPicked) or the last weapon.
+static void cmd_drop(ChatCtx *c) {
+    Player *p = c->player;
+    if (!p) {
+        reply(c, "drop needs a player: run it in game.");
+        return;
+    }
+    if (!p->active || !p->loadout || p->loadout_index < 0 || p->loadout_index >= p->loadout_size) {
+        reply(c, "Spawn first.");
+        return;
+    }
+    const int id = p->loadout[p->loadout_index];
+    const Weapon *w = p->weapon;
+    const char *name = w && w->name ? w->name : "weapon";
+    if (object_manager_holds_extra(p)) {
+        const NetSpawnResultPacket r = om_run(c, p, OM_ACTION_DROP_HELD, 0, p->direction.x);
+        if (r.status != OM_STATUS_OK) om_reply_failure(c, &r, "Not allowed: weapon pickups are off in this game.");
+        else if (id == WEAPON_ID_TOOL_GUN) reply(c, "Tool Gun put away.");
+        else reply(c, "Dropped the %s.", name);
+        return;
+    }
+    if (!w || w->melee) {
+        reply(c, "You can't drop your melee weapon.");
+        return;
+    }
+    if (id >= 0 && id < PLAYER_PICKED_MAX && p->last_picked[id]) {
+        const int before = p->loadout_size;
+        game_player_drop_weapon(c->host->game, p);
+        if (p->loadout_size < before) reply(c, "Dropped the %s.", name);
+        else reply(c, "You can't drop the %s here.", name);
+        return;
+    }
+    reply(c, "You can't drop your class weapons: only picked-up and Object Manager weapons drop.");
+}
+
 static const ChatCommand COMMANDS[] = {
     {{"c", NULL, "", "show connected players and menu count", CHAT_PERM_ANY}, cmd_c},
     {{"count", "c", "", "alias for /c (show connected players and menu count)", CHAT_PERM_ANY}, cmd_c},
@@ -1498,6 +1677,9 @@ static const ChatCommand COMMANDS[] = {
     // KrunkNative: v7.1.4's admin teleports (handleAdminAction 4 / 5 / 9) with coordinates
     {{"tp", NULL, "<x> <y> <z> | <player>", "teleport yourself to a coordinate or to a player", CHAT_PERM_HOST_DEV}, cmd_tp},
     {{"bring", NULL, "<player|all> [<x> <y> <z>]", "bring players to you or to a coordinate", CHAT_PERM_HOST_DEV}, cmd_bring},
+    // KrunkNative Object Manager (its own rules: object_manager_caps)
+    {{"give", NULL, "<weapon|item> [player]", "give a weapon (an extra loadout slot) or an item; others: devs and the host", CHAT_PERM_ANY}, cmd_give},
+    {{"drop", NULL, "", "drop the weapon in your hand in front of you", CHAT_PERM_ANY}, cmd_drop},
 };
 
 #define COMMAND_COUNT ((int) (sizeof(COMMANDS) / sizeof(COMMANDS[0])))

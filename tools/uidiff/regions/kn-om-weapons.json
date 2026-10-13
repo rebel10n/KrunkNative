@@ -8,9 +8,9 @@
     {
       "name": "om-header",
       "rect": [
-        356,
+        308,
         160,
-        568,
+        660,
         100
       ],
       "kind": "text",
@@ -21,9 +21,9 @@
     {
       "name": "om-grid",
       "rect": [
-        364,
+        312,
         264,
-        552,
+        546,
         236
       ],
       "kind": "image",
@@ -34,15 +34,28 @@
     {
       "name": "om-footer",
       "rect": [
-        356,
+        308,
         504,
-        568,
+        660,
         56
       ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
       "note": "hint + Clear Extras (3/24) + Remove + Undo"
+    },
+    {
+      "name": "om-tools",
+      "rect": [
+        862,
+        246,
+        104,
+        192
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#knOmTools: the Tools pane (the picked tool marked, its hint, the Tool Gun line)"
     }
   ]
 }
