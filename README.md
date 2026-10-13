@@ -4,7 +4,11 @@ Krunker.io - except it's awesome. A rewrite of the game in native C using minima
 
 Krunker Box Office was formerly called KrunkNative. The repository, the binaries' file names (`client_bin`, `server_bin`, the `krunknative` launcher, the `krunknative-*` packages), the `KRUNKNATIVE_*` environment variables and the `kn_*` targets keep that name. The app icons are krunker.io's current ones, pinned in `tools/branding/branding.lock` (`make branding`).
 
-![Demo](/doc/demo.png)
+![Krunker Box Office: the menu over Kanji](/doc/screenshots/menu.jpg)
+
+| In game (Kanji) | Object Manager (F1) | Bot navmesh (`show_navmeshes`) |
+|---|---|---|
+| ![In game on Kanji](/doc/screenshots/ingame-kanji.jpg) | ![The Object Manager](/doc/screenshots/object-manager.jpg) | ![The navmesh overlay on Kanji](/doc/screenshots/navmesh.jpg) |
 
 # Building
 
