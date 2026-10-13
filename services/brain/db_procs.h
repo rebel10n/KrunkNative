@@ -114,7 +114,8 @@ cJSON *db_season_match(Dbx *x, int64_t id, int season, int64_t now_s, const cJSO
                        cJSON **progress);
 
 /* ---- account security: v7.1.4 2FA (TOTP), email verification (db_security.c, 0109) */
-extern const kn_proc P_EMAIL_STATE, P_EMAIL_REQUEST, P_EMAIL_VERIFY, P_TWOFA_CONFIRM, P_TWOFA_DISABLE, P_TWOFA_LOGIN;
+extern const kn_proc P_EMAIL_STATE, P_EMAIL_REQUEST, P_EMAIL_VERIFY, P_TWOFA_CONFIRM, P_TWOFA_DISABLE, P_TWOFA_LOGIN,
+    P_RESET_REQUEST, P_RESET_CHECK, P_RESET_APPLY;
 
 /* ---- matchmaking (db_mm.c) */
 extern const kn_proc P_RQ_JOIN, P_RQ_STATE, P_RQ_ACTION, P_RQ_EXPIRE, P_RQ_LOCK, P_RQ_CANDIDATES, P_RQ_MATCH_CREATE,

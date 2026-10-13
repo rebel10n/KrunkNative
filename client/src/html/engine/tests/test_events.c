@@ -267,7 +267,7 @@ static int g_widget_down_bits;
 static int w_mouse_down(void *u, HtmlElem e, float x, float y, int button, int mods) { (void)u; (void)x; (void)y; (void)mods; logf_("W down %u btn=%d", e, button); return g_widget_down_bits; }
 static void w_mouse_move(void *u, HtmlElem e, float x, float y, int buttons) { (void)u; logf_("W move %u %.0f,%.0f buttons=%d", e, x, y, buttons); }
 static void w_mouse_up(void *u, HtmlElem e, float x, float y, int button) { (void)u; (void)x; (void)y; logf_("W up %u btn=%d", e, button); }
-static int w_key(void *u, HtmlElem e, int key, int sc, int action, int mods) { (void)u; (void)sc; (void)mods; logf_("W key %u key=%d action=%d", e, key, action); return 1; }
+static int w_key(void *u, HtmlElem e, int key, int sc, int action, int mods) { (void)u; (void)sc; (void)mods; logf_("W key %u key=%d action=%d", e, key, action); return key != EV_KEY_TAB; /* text widgets leave Tab to the engine (widgets.c) */ }
 static int w_chr(void *u, HtmlElem e, uint32_t cp) { (void)u; logf_("W chr %u cp=%u", e, cp); return 1; }
 static void w_focus(void *u, HtmlElem e) { (void)u; logf_("W focus %u", e); }
 static void w_blur(void *u, HtmlElem e) { (void)u; logf_("W blur %u", e); }
@@ -835,6 +835,46 @@ static void test_focus_keys(void)
     CHECK(events_is_focusable(&g_es, sel_) && events_is_focusable(&g_es, cb_) && !events_is_focusable(&g_es, lbl_));
 }
 
+/* Tab / Shift+Tab: sequential focus navigation in document order over focusable, rendered,
+ * non-negative-tabindex elements, wrapping around (the login form: name -> password -> email) */
+static void test_tab_focus(void)
+{
+    events_focus(&g_es, txt_);
+    CHECK(events_focused(&g_es) == txt_);
+    log_clear();
+    events_key(&g_es, EV_KEY_TAB, 0, EV_PRESS, 0);
+    CHECK(events_focused(&g_es) == num_ && focused(num_) && !focused(txt_));
+    CHECK(log_hasf("W blur %u", txt_) && log_hasf("W focus %u", num_));
+    events_key(&g_es, EV_KEY_TAB, 0, EV_RELEASE, 0); /* releases never move it */
+    CHECK(events_focused(&g_es) == num_);
+    events_key(&g_es, EV_KEY_TAB, 0, EV_PRESS, EV_MOD_SHIFT);
+    CHECK(events_focused(&g_es) == txt_);
+    events_key(&g_es, EV_KEY_TAB, 0, EV_PRESS, EV_MOD_SHIFT);
+    CHECK(events_focused(&g_es) == cb_); /* the checkbox before it */
+    events_key(&g_es, EV_KEY_TAB, 0, EV_PRESS, EV_MOD_SHIFT);
+    CHECK(events_focused(&g_es) == sel_); /* wraps to the last; #dis (disabled) is skipped */
+    events_key(&g_es, EV_KEY_TAB, 0, EV_PRESS, 0);
+    CHECK(events_focused(&g_es) == cb_); /* and forward from the last back to the first */
+    /* tabindex=-1 and unrendered elements are skipped */
+    dom_set_attr(&g_dom, num_, "tabindex", "-1");
+    events_focus(&g_es, txt_);
+    events_key(&g_es, EV_KEY_TAB, 0, EV_PRESS, 0);
+    CHECK(events_focused(&g_es) == cb2_);
+    dom_remove_attr(&g_dom, num_, "tabindex");
+    g_dom.elems[num_].has_rect = 0;
+    events_focus(&g_es, txt_);
+    events_key(&g_es, EV_KEY_TAB, 0, EV_PRESS, 0);
+    CHECK(events_focused(&g_es) == cb2_);
+    g_dom.elems[num_].has_rect = 1;
+    /* a keydown handler that prevents default keeps the focus */
+    g_listener_result = 0;
+    events_focus(&g_es, txt_);
+    events_key(&g_es, EV_KEY_TAB, 0, EV_PRESS, 0);
+    CHECK(events_focused(&g_es) == txt_);
+    g_listener_result = 1;
+    events_blur(&g_es);
+}
+
 static void test_select(void)
 {
     log_clear();
@@ -1004,6 +1044,7 @@ int main(int argc, char **argv)
     test_label_checkbox();
     test_prevent_default();
     test_focus_keys();
+    test_tab_focus();
     test_select();
     test_scroll();
     test_resize_observer();

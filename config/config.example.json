@@ -173,6 +173,7 @@
       "require_verified": [],
       "link_base": "",
       "verify_ttl_h": 24,
+      "reset_ttl_min": 30,
       "resend_cooldown_s": 60,
       "max_per_account_day": 5,
       "max_per_address_day": 5,

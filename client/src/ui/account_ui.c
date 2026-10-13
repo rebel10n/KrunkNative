@@ -34,6 +34,7 @@
 #include "../viewer/viewer_store.h" // WP-E part 2c: challenge reward skins (store.skins)
 #include "qr_code.h"                // v7.1.4 2FA: the otpauth:// QR code (QrCode.toDataURL)
 #include <ruleset.h>
+#include <online_mode.h>  // auth_unreachable: offline mode
 
 #define RANK_VAR 0.03            // config.rankVar
 #define ACC_STR_WAIT "Please wait..." // generic.wait
@@ -556,6 +557,7 @@ static void mail_count(int count);
 static void mail_read_data(const cJSON *rows);
 static void twofa_res(const cJSON *frame);
 static void email_frame(const char *label, const cJSON *frame);
+static int reset_frame(const char *label, const cJSON *frame);
 
 static void on_social(void *user, const cJSON *frame) {
     (void) user;
@@ -604,6 +606,7 @@ static void on_social(void *user, const cJSON *frame) {
         twofa_res(frame);
     } else if (!strcmp(label, "emailS") || !strcmp(label, "cemail") || !strcmp(label, "emailv")) {
         email_frame(label, frame);
+    } else if (reset_frame(label, frame)) { // KrunkNative forgot password: rpr / rpc / rps
     } else if (!strcmp(label, "clm")) { // claimRewardResponse(lastReward, funds)
         if (g_logged_in && g_acc.data) {
             cJSON_ReplaceItemInArray(g_acc.data, 11, cJSON_CreateNumber(num_at(frame, 1)));
@@ -1067,15 +1070,252 @@ static void read_input(const char *id, char *out, const size_t n) {
     if (el) html_dom_get_value(el, out, n);
 }
 
-// No brain answering: v3.1.1's account requests would never be answered either; say so
-// instead of pretending (the guest has no account without the backend).
-// No account server: v3.1.1's registerAcc / loginAcc transport failure text ("Please try
-// again." in #accResp); the reason goes to the log, the menu never pretends to log in.
+// No account server answering. v3.1.1 only says "Please try again." in #accResp; KrunkNative
+// names the reason, so a player can tell offline mode, a down server and no connection apart
+// (the details also go to the log).
 static void auth_unreachable(void) {
-    if (backend_enabled()) printf("[account] no account server at %s (GET /mm/status found no kn_brain): start it with make backend-up\n", backend_url());
-    else printf("[account] no account server configured (--brain / KRUNKNATIVE_BRAIN_URL / knBrainUrl)\n");
-    show_acc_resp("Please try again.");
+    const char *msg;
+    if (!online_mode_online()) {
+        msg = "Accounts are off in Offline Mode. Switch Account Mode to Online in Settings &gt; Client and restart.";
+        printf("[account] offline mode: no account service\n");
+    } else if (!backend_enabled()) {
+#ifdef _WIN32
+        msg = "Accounts are not available in this build yet. Please try again after the next update.";
+#else
+        msg = "No account server is set. Check Settings &gt; Client &gt; Matchmaker URL.";
+#endif
+        printf("[account] no account server configured (--brain / KRUNKNATIVE_BRAIN_URL / knBrainUrl)\n");
+    } else if (backend_available() == 0) {
+        msg = "Can't reach the account server. Check your internet connection and try again.";
+        printf("[account] no account server at %s (GET /mm/status found no kn_brain)\n", backend_url());
+    } else if (!backend_social_is_open()) {
+        msg = "Can't reach the account server. Check your internet connection and try again.";
+        printf("[account] the social socket to %s did not open\n", backend_url());
+    } else {
+        msg = "The account server did not answer. Please try again.";
+        printf("[account] no answer from %s within %.0f s\n", backend_url(), AUTH_TIMEOUT_SECONDS);
+    }
+    show_acc_resp(msg);
     g_auth_sent_at = 0;
+}
+
+// ---- KrunkNative password reset ("Forgot password?" in the guest Account window)
+//
+// v7.1.4's login form only says "For lost Passwords/Accounts contact recovery@yendis.ch".
+// kn_brain mails a one-time code to the account's verified email (services/brain/
+// account_security.c): ["rpr", name | email] -> ["rpr", err | null, msg]; ["rpc", code] ->
+// ["rpc", err | null, username]; ["rps", code, new, repeat] -> ["rps", err | null, msg,
+// username, token]. Step 1 asks for the name or email, step 2 for the code (pasted or typed;
+// the mail's link opens the same form on the brain's site instead), step 3 for the new
+// password; a success signs in with the returned session, like a login.
+
+static struct {
+    int step;          // 0 = the login form, 1 = name / email, 2 = code, 3 = new password
+    char code[32];     // the checked code (step 3)
+    char user[64];     // its account
+    char note[320];    // the line under the fields (escaped HTML)
+    int note_error;
+} g_reset;
+
+static void reset_note(const char *text, const int error) {
+    HtmlElem el = html_dom_by_id("knResetRes");
+    copy_str(g_reset.note, sizeof(g_reset.note), text);
+    g_reset.note_error = error;
+    if (!el) return;
+    html_dom_set_text(el, text ? text : "");
+    html_dom_set_style(el, "color", error ? "#e33b3b" : "rgba(255,255,255,0.5)");
+}
+
+// The reset steps over the Account window's guest form (window 5's #menuWindow content)
+static void reset_render(void) {
+    HtmlElem win = html_dom_by_id("menuWindow");
+    if (!win || g_reset.step <= 0) return;
+    StrBuf sb = {0};
+    sb_append(&sb, "<div style='position:relative;z-index:9'><div id='referralHeader'>Reset Password</div><div style='height:20px;'></div>");
+    if (g_reset.step == 1) {
+        sb_append(&sb, "<div style='font-size:18px;color:rgba(255,255,255,0.5);margin-bottom:12px'>Enter your username or the verified "
+                       "email of your account. We'll email you a reset code.</div>"
+                       "<input id='knResetWho' type='text' placeholder='Username or Email' class='accountInput' style='margin-top:0'>");
+    } else if (g_reset.step == 2) {
+        sb_append(&sb, "<div style='font-size:18px;color:rgba(255,255,255,0.5);margin-bottom:12px'>Enter the code from the email "
+                       "(XXXX-XXXX-XXXX). It works once and expires after 30 minutes.</div>"
+                       "<input id='knResetCode' type='text' placeholder='Reset Code' class='accountInput' style='margin-top:0' "
+                       "autocomplete='one-time-code'>");
+    } else {
+        sb_append(&sb, "<div style='font-size:18px;color:rgba(255,255,255,0.5);margin-bottom:12px'>Choose a new password for <span style='color:#fff'>");
+        sb_append_esc(&sb, g_reset.user);
+        sb_append(&sb, "</span>.</div><input id='knResetPass' type='password' placeholder='New Password' class='accountInput' style='margin-top:0'>"
+                       "<input id='knResetPass2' type='password' placeholder='Repeat Password' class='accountInput'>");
+    }
+    sb_appendf(&sb, "<div class='setBodH' style='margin-left:0px;width:calc(100%% - 40px)'><div id='knResetRes' style='margin-top:20px;"
+                    "margin-bottom:20px;font-size:18px;color:%s;text-align:center'>",
+               g_reset.note_error ? "#e33b3b" : "rgba(255,255,255,0.5)");
+    sb_append_esc(&sb, g_reset.note);
+    sb_append(&sb, "</div></div><div style='width:100%;text-align:center;margin-top:10px;background-color:rgba(0,0,0,0.3);padding-top:10px;padding-bottom:20px;'>"
+                   "<div class='accBtn button buttonG' onclick='knResetBack()'>Back</div>");
+    sb_appendf(&sb, "<div class='accBtn button buttonP' id='knResetGo' onclick='knResetNext()'>%s</div>",
+               g_reset.step == 1 ? "Send Code" : g_reset.step == 2 ? "Continue" : "Set Password");
+    if (g_reset.step == 1) sb_append(&sb, "<div style='margin-top:14px;font-size:16px;color:rgba(255,255,255,0.5)'>Got a code already? "
+                                         "<span id='knResetHave' onclick='knResetHave()' style='color:rgba(255,255,255,0.8);cursor:pointer;"
+                                         "text-decoration:underline'>Enter it</span></div>");
+    if (g_reset.step == 2) sb_append(&sb, "<div style='margin-top:14px;font-size:16px;color:rgba(255,255,255,0.5)'>No email? "
+                                         "<span id='knResetResend' onclick='knResetResend()' style='color:rgba(255,255,255,0.8);cursor:pointer;text-decoration:underline'>Send another code</span></div>");
+    sb_append(&sb, "</div></div>");
+    html_dom_set_html(win, sb.data ? sb.data : "");
+    free(sb.data);
+    const char *focus = g_reset.step == 1 ? "knResetWho" : g_reset.step == 2 ? "knResetCode" : "knResetPass";
+    HtmlElem f = html_dom_by_id(focus);
+    if (f) html_dom_focus(f);
+}
+
+static void reset_open(const int step, const char *note, const int error) {
+    g_reset.step = step;
+    copy_str(g_reset.note, sizeof(g_reset.note), note);
+    g_reset.note_error = error;
+    if (step <= 0) {
+        memset(&g_reset, 0, sizeof(g_reset));
+        menu_rerender_if_open(5); // the login form again
+        return;
+    }
+    reset_render();
+}
+
+static void reset_send(const char *label, const char *a, const char *b, const char *c) {
+    cJSON *frame = cJSON_CreateArray();
+    cJSON_AddItemToArray(frame, cJSON_CreateString(label));
+    cJSON_AddItemToArray(frame, cJSON_CreateString(a ? a : ""));
+    if (b) cJSON_AddItemToArray(frame, cJSON_CreateString(b));
+    if (c) cJSON_AddItemToArray(frame, cJSON_CreateString(c));
+    backend_social_send(frame);
+    cJSON_Delete(frame);
+}
+
+static char g_reset_who[256]; // step 1's input, for "Send another code"
+
+static void reset_next(void) {
+    if (!backend_enabled() || backend_available() == 0) {
+        auth_unreachable();
+        HtmlElem res = html_dom_by_id("accResp");
+        char text[320] = "";
+        if (res) html_dom_get_text(res, text, sizeof(text));
+        reset_note(text[0] ? text : "Please try again.", 1);
+        return;
+    }
+    if (g_reset.step == 1) {
+        read_input("knResetWho", g_reset_who, sizeof(g_reset_who));
+        if (!g_reset_who[0]) {
+            reset_note("Enter your username or email", 1);
+            return;
+        }
+        reset_note(ACC_STR_WAIT, 0);
+        reset_send("rpr", g_reset_who, NULL, NULL);
+    } else if (g_reset.step == 2) {
+        char code[64];
+        read_input("knResetCode", code, sizeof(code));
+        if (!code[0]) {
+            reset_note("Enter the code from the email", 1);
+            return;
+        }
+        copy_str(g_reset.code, sizeof(g_reset.code), code);
+        reset_note(ACC_STR_WAIT, 0);
+        reset_send("rpc", code, NULL, NULL);
+    } else if (g_reset.step == 3) {
+        char p1[128], p2[128];
+        read_input("knResetPass", p1, sizeof(p1));
+        read_input("knResetPass2", p2, sizeof(p2));
+        if (!p1[0] || strcmp(p1, p2) != 0) {
+            reset_note(p1[0] ? "Passwords do not match." : "Enter a new password", 1);
+            return;
+        }
+        reset_note(ACC_STR_WAIT, 0);
+        reset_send("rps", g_reset.code, p1, p2);
+        memset(p1, 0, sizeof(p1));
+        memset(p2, 0, sizeof(p2));
+    }
+}
+
+// ["rpr" | "rpc" | "rps", error | null, message, ...]
+static int reset_frame(const char *label, const cJSON *frame) {
+    const int rpr = !strcmp(label, "rpr"), rpc = !strcmp(label, "rpc"), rps = !strcmp(label, "rps");
+    if (!rpr && !rpc && !rps) return 0;
+    if (g_reset.step <= 0) return 1;
+    const char *err = str_at(frame, 1), *msg = str_at(frame, 2);
+    if (err) {
+        reset_note(err, 1);
+        return 1;
+    }
+    if (rpr) {
+        reset_open(2, msg ? msg : "Check your inbox.", 0);
+    } else if (rpc) {
+        copy_str(g_reset.user, sizeof(g_reset.user), msg);
+        reset_open(3, "", 0);
+    } else {
+        // signed in with the new session: the same restore as a saved login
+        const char *user = str_at(frame, 3), *token = str_at(frame, 4);
+        memset(&g_reset, 0, sizeof(g_reset));
+        if (user && user[0] && token && token[0]) {
+            html_storage_set("krunker_username", user);
+            html_storage_set("krunker_token", token);
+            copy_str(g_token, sizeof(g_token), token);
+            g_restore_sent = 0;
+            try_restore();
+        }
+        menu_rerender_if_open(5);
+        show_acc_resp(msg ? msg : "Password updated.");
+        ui_notify(msg ? "Password updated. You are now logged in." : "Password updated.");
+    }
+    return 1;
+}
+
+int account_ui_reset_enter(const HtmlElem target) {
+    if (g_reset.step <= 0 || !target) return 0;
+    static const char *const ids[] = {"knResetWho", "knResetCode", "knResetPass", "knResetPass2"};
+    for (size_t i = 0; i < sizeof(ids) / sizeof(ids[0]); i++) {
+        if (target == html_dom_by_id(ids[i])) {
+            if (target == html_dom_by_id("knResetPass")) {
+                HtmlElem next = html_dom_by_id("knResetPass2");
+                if (next) html_dom_focus(next);
+            } else {
+                reset_next();
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// knResetOpen / knResetNext / knResetBack / knResetHave / knResetResend (onclick names C writes)
+static int reset_handle(const char *name) {
+    if (!strcmp(name, "knResetOpen")) {
+        char who[64];
+        read_input("accName", who, sizeof(who));
+        reset_open(1, "", 0);
+        HtmlElem in = html_dom_by_id("knResetWho");
+        if (in && who[0]) html_dom_set_value(in, who);
+        return 1;
+    }
+    if (!strcmp(name, "knResetNext")) {
+        reset_next();
+        return 1;
+    }
+    if (!strcmp(name, "knResetBack")) {
+        reset_open(g_reset.step >= 2 ? g_reset.step - 1 : 0, "", 0);
+        return 1;
+    }
+    if (!strcmp(name, "knResetHave")) { // a code from an earlier request (the game was restarted meanwhile)
+        reset_open(2, "", 0);
+        return 1;
+    }
+    if (!strcmp(name, "knResetResend")) {
+        if (!g_reset_who[0]) {
+            reset_open(1, "", 0);
+            return 1;
+        }
+        reset_note(ACC_STR_WAIT, 0);
+        reset_send("rpr", g_reset_who, NULL, NULL);
+        return 1;
+    }
+    return 0;
 }
 
 int account_ui_twofa_handler(const char *name) {
@@ -1084,12 +1324,16 @@ int account_ui_twofa_handler(const char *name) {
 
 int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) ev;
-    if (name && (!strcmp(name, "registerAcc") || !strcmp(name, "loginAcc")) && (!backend_enabled() || !backend_social_is_open())) {
-        if (backend_available() == 0) backend_probe_start(); // maybe the backend came up since: ask again
-        else backend_social_open();
+    // No account service, or the probe found none: say why at once. A socket that is still
+    // connecting (the first seconds after start, a slow TLS handshake) is not a failure: the
+    // request is queued until it opens (backend_social_send) and AUTH_TIMEOUT_SECONDS reports
+    // a socket that never does.
+    if (name && (!strcmp(name, "registerAcc") || !strcmp(name, "loginAcc")) && (!backend_enabled() || backend_available() == 0)) {
+        if (backend_enabled()) backend_probe_start(); // maybe the backend came up since: ask again
         auth_unreachable();
         return 1;
     }
+    if (name && !g_logged_in && reset_handle(name)) return 1; // KrunkNative forgot password (works without a brain: says why)
     if (!name || (!backend_enabled() && !g_scenario)) return -1; // g_scenario: --render-scenario's stand-in account
     if (battlepass_ui_handle(name, ev, args, argc) >= 0) return 1; // before the Store: creatorCodeAction(.., 3)
     if (store_ui_handle(name, ev, args, argc) >= 0) return 1;
@@ -2020,4 +2264,14 @@ void account_window_post(const int id) {
     if (pass && !html_dom_by_id("accEmail"))
         html_dom_insert_html(pass, HTML_INSERT_AFTER_END,
                              "<input id='accEmail' type='email' placeholder='Enter Email (optional, Register only)' class='accountInput'>");
+    // KrunkNative: password reset by email (v7.1.4: "contact recovery@yendis.ch")
+    HtmlElem mail = html_dom_by_id("accEmail");
+    if (mail && !html_dom_by_id("knForgot"))
+        html_dom_insert_html(mail, HTML_INSERT_AFTER_END,
+                             "<div id='knForgot' style='text-align:right;margin-top:6px;font-size:17px;color:rgba(255,255,255,0.5)'>"
+                             "<span onclick='knResetOpen()' style='cursor:pointer;color:rgba(255,255,255,0.8);text-decoration:underline'>"
+                             "Forgot password?</span></div>");
+    HtmlElem resp = html_dom_by_id("accResp");
+    if (resp) html_dom_set_html(resp, "Forgot your password? Reset it with the email on your account.");
+    if (g_reset.step > 0) reset_render(); // a re-render (account update) keeps the reset step
 }

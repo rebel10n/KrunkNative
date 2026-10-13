@@ -257,3 +257,153 @@ static kn_db_result *run_twofa_login(kn_dbconn *c, int n, const char *const *p) 
 const kn_proc P_TWOFA_CONFIRM = {"twofa_confirm", NULL, run_twofa_confirm};
 const kn_proc P_TWOFA_DISABLE = {"twofa_disable", NULL, run_twofa_disable};
 const kn_proc P_TWOFA_LOGIN = {"twofa_login", NULL, run_twofa_login};
+
+/* ------------------------------------------------------------------ password reset (KrunkNative) */
+
+/* Reset codes are emailed (12 base32 characters, shown as XXXX-XXXX-XXXX) and typed into the
+ * client or opened as <link_base>/auth/reset-password?token=<code>. email_tokens rows of kind
+ * 'reset' hold sha256 of the normalized code; the address must be the account's verified email. */
+
+/* (who, ip, code1, code2, code3, ttl_s, cooldown_s, acct_day, addr_day, ip_hour, can_send, now_ms)
+ * who = a username or a verified email (up to 3 accounts share one address: one mail, one code
+ * each). -> {send, to, logId, ipLimited, accounts: [{id, username, code}]}. Never refuses: the
+ * caller answers the same text whether or not an account matched (no account enumeration). */
+static kn_db_result *run_reset_request(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    const char *who = P(0), *ip = P(1);
+    const int64_t now_ms = PI(11), cooldown = PI(6);
+    cJSON *out = cJSON_CreateObject();
+    cJSON *list = cJSON_AddArrayToObject(out, "accounts");
+    cJSON_AddNumberToObject(out, "send", 0);
+    if (!who || !*who) return dbx_json(&x, "reset", out);
+    /* the per-IP cap first: it is the only limit the caller reveals */
+    if (PI(9) > 0 && ip && *ip &&
+        dbx_int(&x, SQL(.any = "SELECT count(*) FROM mail_log WHERE ip = $1 AND created_at > {ago:3600}"), KN_DB_ARGS(ip), 0) >= PI(9)) {
+        cJSON_AddNumberToObject(out, "ipLimited", 1);
+        return dbx_json(&x, "reset", out);
+    }
+    cJSON *rows = strchr(who, '@')
+                      ? dbx_rows(&x, SQL(.any = "SELECT id AS id__i, username, email FROM accounts WHERE lower(email) = lower($1)"
+                                                " AND email_verified_at IS NOT NULL ORDER BY id LIMIT 3"),
+                                 KN_DB_ARGS(who))
+                      : dbx_rows(&x, SQL(.any = "SELECT id AS id__i, username, email FROM accounts WHERE lower(username) = lower($1)"
+                                                " AND email IS NOT NULL AND email_verified_at IS NOT NULL"),
+                                 KN_DB_ARGS(who));
+    const int count = cJSON_GetArraySize(rows);
+    if (count <= 0 || PI(10) == 0) {
+        cJSON_Delete(rows);
+        return dbx_json(&x, "reset", out);
+    }
+    const char *to = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(rows, 0), "email"));
+    char addr[256];
+    snprintf(addr, sizeof addr, "%s", to ? to : "");
+    char first_id[24];
+    snprintf(first_id, sizeof first_id, "%lld", (long long) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(rows, 0), "id")));
+    /* silent limits: the account's cooldown and day cap, the address's day cap */
+    const int64_t last = dbx_int(&x, SQL(.any = "SELECT {epoch_ms:created_at} FROM mail_log WHERE account_id = {int:$1}"
+                                                " ORDER BY created_at DESC LIMIT 1"),
+                                 KN_DB_ARGS(first_id), 0);
+    int limited = last > 0 && cooldown * 1000 - (now_ms - last) > 0;
+    if (!limited && PI(7) > 0)
+        limited = dbx_int(&x, SQL(.any = "SELECT count(*) FROM mail_log WHERE account_id = {int:$1} AND created_at > {ago:86400}"),
+                          KN_DB_ARGS(first_id), 0) >= PI(7);
+    if (!limited && PI(8) > 0)
+        limited = dbx_int(&x, SQL(.any = "SELECT count(*) FROM mail_log WHERE lower(to_addr) = lower($1) AND created_at > {ago:86400}"),
+                          KN_DB_ARGS(addr), 0) >= PI(8);
+    if (limited || !addr[0]) {
+        cJSON_Delete(rows);
+        return dbx_json(&x, "reset", out);
+    }
+    for (int i = 0; i < count && i < 3; i++) {
+        const cJSON *r = cJSON_GetArrayItem(rows, i);
+        const char *code = P(2 + i);
+        if (!code || !*code) break;
+        char id[24];
+        snprintf(id, sizeof id, "%lld", (long long) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(r, "id")));
+        /* one live reset code per account: a new request drops the older ones */
+        dbx_exec(&x, SQL(.any = "UPDATE email_tokens SET used_at = {now} WHERE account_id = {int:$1} AND kind = 'reset' AND used_at IS NULL"),
+                 KN_DB_ARGS(id));
+        dbx_exec(&x, SQL(.any = "INSERT INTO email_tokens (token_hash, account_id, kind, email, expires_at)"
+                                " VALUES ({hash:$1}, {int:$2}, 'reset', $3, {later:$4})"),
+                 KN_DB_ARGS(code, id, addr, P(5)));
+        cJSON *a = cJSON_CreateObject();
+        cJSON_AddNumberToObject(a, "id", (double) pint(id));
+        cJSON_AddStringToObject(a, "username", cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(r, "username")));
+        cJSON_AddStringToObject(a, "code", code);
+        cJSON_AddItemToArray(list, a);
+    }
+    cJSON_Delete(rows);
+    int64_t log_id = 0;
+    if (dbx_is_pg(&x))
+        log_id = dbx_int(&x, SQL(.pg = "INSERT INTO mail_log (account_id, kind, to_addr, ip) VALUES ($1::int, 'reset', $2, $3) RETURNING id"),
+                         KN_DB_ARGS(first_id, addr, ip), 0);
+    else
+        log_id = dbx_insert_id(&x, SQL(.any = "INSERT INTO mail_log (account_id, kind, to_addr, ip) VALUES ($1, 'reset', $2, $3)"),
+                               KN_DB_ARGS(first_id, addr, ip));
+    cJSON_ReplaceItemInObject(out, "send", cJSON_CreateNumber(cJSON_GetArraySize(list) > 0));
+    cJSON_AddStringToObject(out, "to", addr);
+    cJSON_AddNumberToObject(out, "logId", (double) log_id);
+    return dbx_json(&x, "reset", out);
+}
+const kn_proc P_RESET_REQUEST = {"reset_request", NULL, run_reset_request};
+
+/* The live reset code row of `code` (normalized) or a refusal recorded in x. */
+static cJSON *reset_row(Dbx *x, const char *code) {
+    if (!code || strlen(code) < 8 || strlen(code) > 64) {
+        dbx_refuse(x, "Invalid or expired code.");
+        return NULL;
+    }
+    cJSON *row = dbx_row(x, SQL(.any = "SELECT t.account_id AS id__i, a.username, (t.used_at IS NOT NULL) AS used__b,"
+                                       " (t.expires_at <= {now}) AS expired__b, (lower(t.email) = lower(a.email)) AS same__b"
+                                       " FROM email_tokens t JOIN accounts a ON a.id = t.account_id"
+                                       " WHERE t.token_hash = {hash:$1} AND t.kind = 'reset' {for_update}"),
+                         KN_DB_ARGS(code));
+    if (!row) {
+        if (!dbx_failed(x)) dbx_refuse(x, "Invalid or expired code.");
+        return NULL;
+    }
+    if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(row, "used")) || cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(row, "expired")) ||
+        !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(row, "same"))) {
+        cJSON_Delete(row);
+        dbx_refuse(x, "Invalid or expired code.");
+        return NULL;
+    }
+    return row;
+}
+
+/* (code) -> {id, username}: the code is valid (nothing changes) */
+static kn_db_result *run_reset_check(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    cJSON *row = reset_row(&x, P(0));
+    if (!row) return dbx_finish(&x, NULL);
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "id", cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(row, "id")));
+    cJSON_AddStringToObject(o, "username", cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "username")));
+    cJSON_Delete(row);
+    return dbx_json(&x, "reset", o);
+}
+const kn_proc P_RESET_CHECK = {"reset_check", NULL, run_reset_check};
+
+/* (code, new_hash, session_token, ttl_s) -> {id, username, token}: the code is used up, the new
+ * password set, every session revoked and one fresh session issued (like P_SET_PASSWORD). */
+static kn_db_result *run_reset_apply(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    cJSON *row = reset_row(&x, P(0));
+    if (!row) return dbx_finish(&x, NULL);
+    char id[24];
+    snprintf(id, sizeof id, "%lld", (long long) cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(row, "id")));
+    dbx_exec(&x, SQL(.any = "UPDATE accounts SET password_hash = $2 WHERE id = {int:$1}"), KN_DB_ARGS(id, P(1)));
+    dbx_exec(&x, SQL(.any = "UPDATE email_tokens SET used_at = {now} WHERE account_id = {int:$1} AND kind = 'reset' AND used_at IS NULL"),
+             KN_DB_ARGS(id));
+    dbx_exec(&x, SQL(.any = "DELETE FROM sessions WHERE account_id = {int:$1}"), KN_DB_ARGS(id));
+    dbx_exec(&x, SQL(.any = "INSERT INTO sessions (token_hash, account_id, expires_at, origin)"
+                            " VALUES ({hash:$1}, {int:$2}, {later:$3}, 'password')"),
+             KN_DB_ARGS(P(2), id, P(3)));
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "id", (double) pint(id));
+    cJSON_AddStringToObject(o, "username", cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(row, "username")));
+    cJSON_AddStringToObject(o, "token", P(2) ? P(2) : "");
+    cJSON_Delete(row);
+    return dbx_json(&x, "reset", o);
+}
+const kn_proc P_RESET_APPLY = {"reset_apply", NULL, run_reset_apply};

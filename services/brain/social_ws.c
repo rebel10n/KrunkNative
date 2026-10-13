@@ -552,6 +552,9 @@ static const SocialRoute k_routes[] = {
     {"cemail", sh_email_set},           /* KrunkNative email verification */
     {"emailv", sh_email_resend},
     {"emailS", sh_email_state},
+    {"rpr", sh_reset_request},          /* KrunkNative forgot password (account_security.c) */
+    {"rpc", sh_reset_check},
+    {"rps", sh_reset_set},
     {"las", sh_logout_all},
     {"r", sh_page},
     {"sp", sh_search},

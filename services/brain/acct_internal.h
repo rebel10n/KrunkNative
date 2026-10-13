@@ -279,6 +279,9 @@ void social_email_state_push(int64_t account_id, const cJSON *state, SocialSessi
 void sh_email_set(SocialSession *s, const cJSON *f);           /* "cemail" */
 void sh_email_resend(SocialSession *s, const cJSON *f);        /* "emailv" */
 void sh_email_state(SocialSession *s, const cJSON *f);         /* "emailS" */
+void sh_reset_request(SocialSession *s, const cJSON *f);       /* "rpr": forgot password, mail a code */
+void sh_reset_check(SocialSession *s, const cJSON *f);         /* "rpc": is the code valid */
+void sh_reset_set(SocialSession *s, const cJSON *f);           /* "rps": code + new password */
 void sh_twofa_enable(SocialSession *s, const cJSON *f);        /* "a2FA" */
 void sh_twofa_enable_confirm(SocialSession *s, const cJSON *f);/* "a2FAc" */
 void sh_twofa_disable(SocialSession *s, const cJSON *f);       /* "d2FA" */

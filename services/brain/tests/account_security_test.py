@@ -5,7 +5,8 @@
 captured -> its link verifies the address ("emailS" pushed, verified-gated features open). Plus the
 token rules (reuse, expiry, a changed address drops old links), the resend rate limits (cooldown,
 per-account day cap), mail_log (statuses, Message-ID, the server's error, no tokens), a rejected
-recipient, and v7.1.4's TOTP 2FA lock after 10 wrong codes.
+recipient, v7.1.4's TOTP 2FA lock after 10 wrong codes, and KrunkNative's password reset by
+emailed code (rpr / rpc / rps, the /auth/reset-password page, no account enumeration).
 
   account_security_test.py <kn_brain> <repo root> [database]
 Database: argument, else $KN_MM_TEST_DATABASE, else config/config.json's database.name; every run
@@ -30,6 +31,7 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 try:
@@ -277,6 +279,108 @@ async def scenario(port, smtp):
     return addr
 
 
+def reset_code(msg):
+    """(code as shown, link token) of a password reset mail."""
+    m = email.message_from_bytes(msg["data"], policy=email.policy.default)
+    text = m.get_body(("plain",)).get_content()
+    code = re.search(r"code ([A-Z2-7]{4}-[A-Z2-7]{4}-[A-Z2-7]{4})", text)
+    link = re.search(r"/auth/reset-password\?token=([A-Z2-7]{12})", text)
+    return m, text, code.group(1) if code else None, link.group(1) if link else None
+
+
+def http_post_form(port, path, fields):
+    data = urllib.parse.urlencode(fields).encode()
+    req = urllib.request.Request("http://127.0.0.1:%d%s" % (port, path), data=data, method="POST",
+                                 headers={"Content-Type": "application/x-www-form-urlencoded"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, r.read().decode()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode()
+
+
+async def reset_scenario(port, smtp):
+    """Forgot password: ["rpr"] -> the mailed code -> ["rpc"] / ["rps"] (and the link's page)."""
+    ws_url = "ws://127.0.0.1:%d/social/ws" % port
+    stamp = os.getpid() % 100000
+    name, addr = "rst%d" % stamp, "reset%d@example.org" % stamp
+    async with Social(ws_url) as s:
+        before = len(smtp.messages)
+        r = await s.call("a", "a", 0, [name, "pass_word1", None, addr], "c")
+        check(r[1] is None, "reset: register %s" % name)
+        await s.recv("emailS")
+        mails = smtp.wait_messages(before + 1)  # the verification mail
+        _, _, _, vtoken = mail_parts(mails[-1])
+        await asyncio.sleep(1.1)
+        r = await s.call("rpr", "rpr", name)
+        check(r[1] is None and "If that account" in r[2], "rpr for an unverified address: the neutral text")
+        await asyncio.sleep(0.5)
+        check(len(smtp.messages) == before + 1, "no reset mail while the address is unverified")
+        status, _ = http_get(port, "/auth/verify-email?token=" + (vtoken or ""))
+        check(status == 200, "reset: address verified")
+    async with Social(ws_url) as g:  # a guest socket, as the login window has
+        before = len(smtp.messages)
+        r = await g.call("rpr", "rpr", "nobody_%d" % os.getpid())
+        check(r[1] is None and "If that account has a verified email" in r[2], "rpr for an unknown name: the neutral text")
+        r = await g.call("rpr", "rpr", "unknown%d@example.org" % os.getpid())
+        check(r[1] is None and "If that account" in r[2], "rpr for an unknown address: the same text")
+        await asyncio.sleep(0.5)
+        check(len(smtp.messages) == before, "no mail for unknown accounts")
+        await asyncio.sleep(1.1)  # resend_cooldown_s = 1
+        r = await g.call("rpr", "rpr", addr.upper())
+        check(r[1] is None and "If that account" in r[2], "rpr by the verified address")
+        mails = smtp.wait_messages(before + 1)
+        check(len(mails) == before + 1 and mails[-1]["rcpt"] == [addr], "reset mail to the verified address")
+        m, text, code, link_token = reset_code(mails[-1])
+        check(str(m["Subject"]) == "Reset your Krunker Box Office password" and name in text, "reset mail subject + account name")
+        check(code and link_token and code.replace("-", "") == link_token, "reset mail: code %r and link" % code)
+        check("expires in 30 minutes" in text, "reset code lifetime 30 minutes")
+        dump = " ".join(query("SELECT * FROM email_tokens") or []) + " ".join(query("SELECT * FROM mail_log") or [])
+        check(code and code.replace("-", "") not in dump, "no reset code stored in clear")
+        r = await g.call("rpc", "rpc", "AAAA-AAAA-AAAA")
+        check(r[1] == "Invalid or expired code.", "rpc with a wrong code refused: %r" % r[1])
+        r = await g.call("rpc", "rpc", code.lower())
+        check(r[1] is None and r[2] == name, "rpc accepts the code (any case): %r" % r[1:])
+        r = await g.call("rps", "rps", code, "new_pass_2", "new_pass_X")
+        check(r[1] == "Passwords do not match.", "rps: mismatch refused")
+        r = await g.call("rps", "rps", code, "x", "x")
+        check(r[1] and r[1].startswith("Password must be"), "rps: too short refused: %r" % r[1])
+        r = await g.call("rps", "rps", code, "new_pass_2", "new_pass_2")
+        check(r[1] is None and r[3] == name and len(r[4] or "") >= 32, "rps sets the password and returns a session: %r" % r[1:3])
+        token = r[4]
+        r = await g.call("rps", "rps", code, "new_pass_3", "new_pass_3")
+        check(r[1] == "Invalid or expired code.", "a used code is refused")
+    async with Social(ws_url) as s:
+        r = await s.call("a", "a", 1, [name, "new_pass_2", None], "c")
+        check(r[1] is None and r[3] == name, "login with the new password: %r" % r[1:4])
+        r2 = await s.call("a", "a", 1, [name, None, token], "c")
+        check(r2[1] is None, "the session from rps logs in")
+
+    # the mailed link's page: GET shows the form, POST sets the password
+    async with Social(ws_url) as g:
+        await asyncio.sleep(1.1)
+        before = len(smtp.messages)
+        r = await g.call("rpr", "rpr", name)
+        check(r[1] is None, "rpr by username")
+        mails = smtp.wait_messages(before + 1)
+        _, _, code2, tok2 = reset_code(mails[-1])
+    status, body = http_get(port, "/auth/reset-password?token=" + (tok2 or ""))
+    check(status == 200 and 'name="password"' in body and (tok2 or "?") in body, "the link's page shows the form")
+    status, body = http_get(port, "/auth/reset-password?token=%3Cscript%3E")
+    check(status == 400 and "<script>" not in body, "a bad link token is refused (escaped)")
+    status, body = http_post_form(port, "/auth/reset-password", {"token": tok2, "password": "web_pass_9", "repeat": "web_pass_8"})
+    check(status == 400 and "do not match" in body and 'name="password"' in body, "page: mismatch keeps the form")
+    status, body = http_post_form(port, "/auth/reset-password", {"token": tok2, "password": "web_pass_9", "repeat": "web_pass_9"})
+    check(status == 200 and "Password changed" in body, "page: password changed")
+    async with Social(ws_url) as s:
+        r = await s.call("a", "a", 1, [name, "web_pass_9", None], "c")
+        check(r[1] is None, "login with the password set on the page: %r" % r[1:4])
+        r2 = await s.call("a", "a", 1, [name, None, token], "c")
+        check(r2[1], "the reset revoked the older sessions: %r" % r2[1])
+        r = await s.call("a", "a", 1, [name, "pass_word1", None], "c")
+        check(r[1] == "Invalid login.", "the original password no longer works: %r" % r[1])
+
+
 def main():
     global DBCFG
     if DRIVER == "postgres":
@@ -316,6 +420,7 @@ def main():
                                     cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
         port = bound_port(log_path, proc)
         asyncio.run(scenario(port, smtp))
+        asyncio.run(reset_scenario(port, smtp))
     except Exception as e:  # noqa: BLE001
         check(False, "exception: %r" % e)
     finally:
