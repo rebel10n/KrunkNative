@@ -25,6 +25,7 @@ Standard library only.
 import argparse
 import concurrent.futures
 import hashlib
+import http.client
 import json
 import os
 import re
@@ -63,7 +64,9 @@ def log(msg):
     print("assets_cdn: " + msg, file=sys.stderr, flush=True)
 
 
-def get(url, tries=4):
+def get(url, tries=6):
+    # The origin sits behind a tunnel that now and then cuts a body short
+    # (IncompleteRead is an HTTPException, not an OSError): retry those too.
     for attempt in range(tries):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": UA})
@@ -72,10 +75,10 @@ def get(url, tries=4):
         except urllib.error.HTTPError as e:
             if e.code == 404 or attempt == tries - 1:
                 raise
-        except (OSError, ValueError):
+        except (OSError, ValueError, http.client.HTTPException):
             if attempt == tries - 1:
                 raise
-        time.sleep(2 ** attempt)
+        time.sleep(min(2 ** attempt, 20))
 
 
 def version_of(base):
