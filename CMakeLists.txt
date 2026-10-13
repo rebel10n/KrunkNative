@@ -702,6 +702,13 @@ else ()
     target_link_libraries(qr_code_test PRIVATE cJSON)
     add_test(NAME qr_code_test COMMAND qr_code_test ${CMAKE_SOURCE_DIR})
 
+    # vic_title_test: the round-end title's fade / zoom (client/src/ui/vic_title.c) frame by frame
+    # against v7.1.4's overlay.vicTitle code run in node (client/tests/data/vic_title_golden.json)
+    add_executable(vic_title_test client/tests/vic_title_test.c client/src/ui/vic_title.c)
+    target_include_directories(vic_title_test PRIVATE client/src/ui)
+    target_link_libraries(vic_title_test PRIVATE cJSON m)
+    add_test(NAME vic_title_test COMMAND vic_title_test ${CMAKE_SOURCE_DIR})
+
     # window_state_test: the window state F4 / the Settings relaunch pass to the new process
     # (KRUNKNATIVE_RESTORE_WINDOW) and a normal restart keeps (client/src/window_state.c)
     add_executable(window_state_test client/tests/window_state_test.c client/src/window_state.c)

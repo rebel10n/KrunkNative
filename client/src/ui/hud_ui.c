@@ -55,6 +55,9 @@ void hud_ui_hit(Client*, int kill);
 #include <progression.h> // WP-E part 2c: overlay.medalsList (the Medals tab)
 #include <hud_social.h> // WP-E part 2b: mute lists, chat channels
 #include <voice_chat.h> // voice_is_speaking: the player list speaker icon
+#include <menu_view.h>  // menu_view_time_scale: the round-end slow motion scales the title's dt
+#include <input_script.h> // input_script_delta: KRUNKNATIVE_FIXED_DELTA frames
+#include "vic_title.h" // overlay.vicTitle (GL/DOM-free, client/tests/vic_title_test.c)
 #include <cJSON.h>
 #include <limits.h>
 #include <ctype.h>
@@ -221,13 +224,17 @@ typedef struct {
     double end_start_ms;     // HUD clock of the END
     HtmlElem end_title;      // #knVicTitle (0 until created)
     char end_title_key[64];  // last written title layer state
+    VicTitle vic;            // overlay.vicTitle, stepped once per frame like overlay.render
+    double tick_last_ms;     // HUD clock of the previous client_hud_html_tick (< 0 = none yet)
+    double tick_jump_ms;     // scenario mode: the part of a pinned-clock jump still to replay
     int hide_default;        // KrunkScript game.ui.hidden (hud_ui_hide_default)
     int streak;              // last written #streakVal
 } HudUi;
 
 static unsigned g_combat_hash; // hud_combat_step: FNV-1a of the last written perks / streaks state, 0 = rewrite
 
-static HudUi g_hud_ui = {.visible = -1, .in_game = -1, .cross_shown = -1, .ping = INT_MIN, .chat_shown = -1, .board_shown = -1, .old_board = -1, .feed_last_ms = -1.0, .dmg_last_ms = -1.0, .nums_last_ms = -1.0, .speed_shown = -1, .show_ui = -1};
+static HudUi g_hud_ui = {.visible = -1, .in_game = -1, .cross_shown = -1, .ping = INT_MIN, .chat_shown = -1, .board_shown = -1, .old_board = -1, .feed_last_ms = -1.0, .dmg_last_ms = -1.0, .nums_last_ms = -1.0, .speed_shown = -1, .show_ui = -1,
+                         .vic = {0.0, 0.05, 2.5, 0.005, 0.01}, .tick_last_ms = -1.0};
 
 // Scenario values (client_bin --render-scenario, ui_scenario.c) that replace what the
 // tick samples from the game; both NULL outside scenario mode.
@@ -2506,9 +2513,14 @@ int hud_ui_project(const Client *client, const float x, const float y, const flo
     return hud_project(client, x, y, z, sx, sy);
 }
 
-// #knVicTitle: aV.vicTitle on the #game-overlay canvas (below #uiBase): a full-screen
+// #knVicTitle: overlay.vicTitle on the #game-overlay canvas (below #uiBase): a full-screen
 // rgba(0,0,0,.33) fill and img/<vic|def|dra>.png centred at its natural size x scale, both
-// at the title opacity. Created next to #game-overlay so it stacks like the canvas.
+// at globalAlpha = the title opacity. Created next to #game-overlay so it stacks like the
+// canvas, at page ready: game-overlay.js loads the three images at startup and only draws one
+// once it isReady, so on the web they must not start loading at the END (behind a CDN round
+// trip the whole zoom ran before the image arrived). One <img> per type, the shown one by display.
+static const char *const END_TITLE_TYPES[3] = {"vic", "def", "dra"};
+
 static HtmlElem hud_end_title(void) {
     HudUi *ui = &g_hud_ui;
     if (ui->end_title) return ui->end_title;
@@ -2516,29 +2528,21 @@ static HtmlElem hud_end_title(void) {
     if (!el) {
         const HtmlElem canvas = html_dom_by_id("game-overlay");
         if (!canvas) return 0;
-        html_dom_insert_html(canvas, HTML_INSERT_AFTER_END,
-            "<div id='knVicTitle' style='position:absolute;left:0;top:0;width:100%;height:100%;z-index:1;pointer-events:none;"
-            "background-color:rgba(0,0,0,0.33);display:none'><img id='knVicTitleImg' style='position:absolute;left:50%;top:50%;"
-            "transform:translate(-50%,-50%)'></div>");
+        char html[1024];
+        size_t len = 0;
+        hb_append(html, sizeof(html), &len, "<div id='knVicTitle' style='position:absolute;left:0;top:0;width:100%%;height:100%%;z-index:1;"
+                                            "pointer-events:none;background-color:rgba(0,0,0,0.33);display:none'>");
+        for (int i = 0; i < 3; i++) {
+            hb_append(html, sizeof(html), &len, "<img id='knVicTitle_%s' src='./img/%s.png' style='position:absolute;left:50%%;top:50%%;"
+                                                "transform:translate(-50%%,-50%%);display:none'>", END_TITLE_TYPES[i], END_TITLE_TYPES[i]);
+        }
+        hb_append(html, sizeof(html), &len, "</div>");
+        html_dom_insert_html(canvas, HTML_INSERT_AFTER_END, html);
         el = html_dom_by_id("knVicTitle");
     }
     ui->end_title = el;
     ui->end_title_key[0] = 0;
     return el;
-}
-
-// The overlay's vicTitle integration (per frame, bp = dt / 16) replayed in 16 ms steps up
-// to `elapsed_ms`, so any clock (scenario or live) gives the same state.
-static void hud_end_title_state(const double elapsed_ms, double *opacity, double *scale) {
-    double o = 0.0, sc = 2.5, dec = 0.01; // the reset branch leaves decrement at 0.01
-    for (double t = 0.0; t < elapsed_ms && t < END_ANIM_MS; t += 16.0) {
-        o += 0.05;
-        sc -= dec;
-        sc = sc > 1.0 ? sc : 1.0;
-        dec += 0.01;
-    }
-    *opacity = o < 1.0 ? o : 1.0;
-    *scale = sc;
 }
 
 static void hud_end_title_hide(void) {
@@ -2547,28 +2551,38 @@ static void hud_end_title_hide(void) {
     ui->end_title_key[0] = 0;
 }
 
-static void hud_end_title_draw(const double elapsed_ms) {
+// One overlay.render frame of the title (vic_title.c): `show` = #endUI up with vicTitle.show,
+// `dt_ms` = the frame's gameTimeDiff. Hidden: v7's reset branch, and the layer goes away.
+static void hud_end_title_frame(const int show, const double dt_ms) {
     HudUi *ui = &g_hud_ui;
+    double opacity = 0.0, scale = 1.0;
+    if (!vic_title_frame(&ui->vic, show, dt_ms, &opacity, &scale)) {
+        if (ui->end_title_key[0]) hud_end_title_hide();
+        return;
+    }
     const HtmlElem title = hud_end_title();
     if (!title) return;
 
-    double opacity, scale;
-    hud_end_title_state(elapsed_ms, &opacity, &scale);
     // overlay px -> CSS px: the canvas is scaled by c7 = innerHeight / #uiBase height
     float vw = 0.0f, vh = 0.0f, dpr = 1.0f;
     html_dom_viewport(&vw, &vh, &dpr);
     const float base_h = hud_ui_height();
     const double c7 = base_h > 0.0f && vh > 0.0f ? vh / base_h : 1.0;
-    const char *src = g_end_result < 0 ? "./img/dra.png" : g_end_result ? "./img/vic.png" : "./img/def.png";
+    const char *type_name = vic_title_type(g_end_result < 0 ? -1 : g_end_result); // io_gameEnd: vicTitle.type
+    int type = 0;
+    while (type < 2 && strcmp(END_TITLE_TYPES[type], type_name)) type++;
     char key[64], text[48];
-    snprintf(key, sizeof(key), "%.3f|%.3f|%.4f|%s", opacity, scale, c7, src);
+    snprintf(key, sizeof(key), "%.3f|%.3f|%.4f|%d", opacity, scale, c7, type);
     if (!strcmp(key, ui->end_title_key)) return;
     snprintf(ui->end_title_key, sizeof(ui->end_title_key), "%s", key);
 
-    const HtmlElem img = html_dom_by_id("knVicTitleImg");
-    if (img) {
-        char current[32];
-        if (html_dom_get_attr(img, "src", current, sizeof(current)) < 0 || strcmp(current, src)) html_dom_set_attr(img, "src", src);
+    for (int i = 0; i < 3; i++) {
+        char id[32];
+        snprintf(id, sizeof(id), "knVicTitle_%s", END_TITLE_TYPES[i]);
+        const HtmlElem img = html_dom_by_id(id);
+        if (!img) continue;
+        html_dom_set_display(img, i == type ? "block" : "none");
+        if (i != type) continue;
         snprintf(text, sizeof(text), "%.2fpx", END_TITLE_W * scale * c7);
         html_dom_set_style(img, "width", text);
         snprintf(text, sizeof(text), "%.2fpx", END_TITLE_H * scale * c7);
@@ -2905,18 +2919,35 @@ static void hud_end_results(const Client *client) {
     hud_end_card_render(client);
 }
 
-// Per frame while the end screen is up: animate the title, then switch to the results.
+// Per frame (overlay.render runs every frame): the results once config.endAnim ran out (f1912 ->
+// f1913: vicTitle.show = false), else one vicTitle step. Its dt is the frame's gameTimeDiff:
+// the frame time clamped to config.dltMx, then scaled by the round-end slow motion
+// (endAnimationTimer / endAnim, menu_view_time_scale), as v7's overlay.render gets it.
+// toggleMenu(true) hides #endUI, so an open menu takes the reset branch.
 static void hud_end_step(const Client *client, const double now_ms) {
     HudUi *ui = &g_hud_ui;
-    if (!ui->ended || !ui->end_phase) return;
-    const double elapsed = now_ms - ui->end_start_ms;
-    if (ui->end_phase == 1 && elapsed >= END_ANIM_MS) {
-        ui->end_phase = 2;
-        hud_end_results(client);
-        return;
+    double dt = ui->tick_last_ms >= 0.0 ? now_ms - ui->tick_last_ms : 0.0;
+    ui->tick_last_ms = now_ms;
+    if (g_hud_clock_s >= 0.0 && dt > 1000.0 / 60.0 + 0.5) { // a scenario clock jump (replayed below)
+        ui->tick_jump_ms = dt - 1000.0 / 60.0;
+        dt = 1000.0 / 60.0;
     }
-    if (ui->end_phase == 1 && html_ui_is_menu_open()) hud_end_title_hide(); // never under a menu
-    else if (ui->end_phase == 1) hud_end_title_draw(elapsed > 0.0 ? elapsed : 0.0);
+    dt = input_script_delta((float) (dt / 1000.0)) * 1000.0; // KRUNKNATIVE_FIXED_DELTA: the game's frame step
+    dt = dt > 0.0 ? (dt < VIC_TITLE_DT_MAX_MS ? dt : VIC_TITLE_DT_MAX_MS) : 0.0;
+    if (ui->ended && ui->end_phase == 1 && now_ms - ui->end_start_ms >= END_ANIM_MS) {
+        ui->end_phase = 2;
+        hud_end_results(client); // hides the title
+    }
+    const int show = ui->ended && ui->end_phase == 1 && !html_ui_is_menu_open();
+    const double world = client && client->game.ready ? menu_view_time_scale() : 1.0;
+    if (g_hud_clock_s >= 0.0 && show) {
+        // --render-scenario: the pinned clock jumps to the capture time; replay the jump as the
+        // 60 Hz frames it stands for, so a capture `after_ms` past the END shows that frame.
+        double left = ui->tick_jump_ms;
+        ui->tick_jump_ms = 0.0;
+        for (; left > 0.0; left -= 1000.0 / 60.0) hud_end_title_frame(show, (left < 1000.0 / 60.0 ? left : 1000.0 / 60.0) * world);
+    }
+    hud_end_title_frame(show, dt * world);
 }
 
 void hud_ui_show_end_screen(Client *client, const int result, const char *next_round) {
@@ -2936,8 +2967,7 @@ void hud_ui_show_end_screen(Client *client, const int result, const char *next_r
         ui->end_phase = 1;
         ui->end_start_ms = hud_now_ms(client);
         dom_style("endUI", "background-color", "");
-        hud_end_screen_dom(1);
-        hud_end_step(client, ui->end_start_ms);
+        hud_end_screen_dom(1); // the title draws from this frame's HUD tick on (overlay.render after io_gameEnd)
         return;
     }
     char text[64];
@@ -3603,6 +3633,7 @@ static void hud_reset_page(Client *client) {
     ui->end_phase = 0;
     ui->end_title = 0;
     ui->end_title_key[0] = 0;
+    hud_end_title(); // the title images load with the page (game-overlay.js preloads them)
     client->hud_html.valid = 0;
 
     const HtmlElem base = html_dom_by_id("uiBase");
