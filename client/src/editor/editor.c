@@ -21,6 +21,7 @@
 // - The page is "production" (krunker.io): the Event Objects counter and warning stay hidden
 //   and localOnly prefabs are not offered, as on the public v7 editor.
 #include "editor_internal.h"
+#include "editor_ai.h"
 #include <app_mode.h>
 #include <debug_capture.h> // debug_capture_dispatch (script "ui:")
 #include <gl.h>
@@ -734,6 +735,7 @@ static int h_transform(void *u, const HtmlEvent *ev, const HtmlArg *a, const int
         case 8: ed_obj_duplicate(); break;
         case 9: g_ed.wireframe = !g_ed.wireframe; editor_update_wireframe(); break;
         case 10: g_ed.snapping = !g_ed.snapping; editor_update_snapping(); break;
+        case 11: ed_ai_toggle(); break; // the AI panel (editor_ai.c)
         default: break;
     }
     return 1;
@@ -785,6 +787,7 @@ static void install_handlers(void) {
     ed_quickgui_install(table, &count, sizeof(table) / sizeof(table[0]));
     ed_project_install(table, &count, sizeof(table) / sizeof(table[0]));
     ed_script_install(table, &count, sizeof(table) / sizeof(table[0]));
+    ed_ai_install(table, &count, sizeof(table) / sizeof(table[0])); // the AI panel (editor_ai.c)
     html_ui_set_handlers(table, count, NULL, h_fallback);
     html_ui_set_listener(NULL, "keydown", h_keydown);
     html_ui_set_listener(NULL, "knpointerdown", l_page_pointer);
@@ -797,7 +800,7 @@ static void wire_canvas_buttons(void) {
     static const struct { const char *id; int which; } buttons[] = {
         {"translateOption", 0}, {"rotateOption", 1}, {"scaleOption", 2}, {"spaceOption", 3},
         {"faceOption", 4}, {"groupOption", 5}, {"canvasAdd", 6}, {"deleteOption", 7}, {"duplicateOption", 8},
-        {"wireframeOption", 9}, {"snappingOption", 10},
+        {"wireframeOption", 9}, {"snappingOption", 10}, {"knAiOption", 11},
     };
     for (size_t i = 0; i < sizeof(buttons) / sizeof(buttons[0]); i++) {
         char v[48];
@@ -978,6 +981,7 @@ static void page_leave(Client *client) {
     ed_net_reset();
     ed_prompt_reset();
     ed_script_reset();
+    ed_ai_reset();
     if (g_ed.looking) glfwSetInputMode(g_ed.client->window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
     g_ed.active = 0;
     ed_projects_fini();
@@ -1357,6 +1361,7 @@ static void run_script_text(const char *text) {
         else if (!strcmp(cmd, "ui") && arg) debug_capture_dispatch(arg); // inline-handler calls: "ui:showWindow(3)"
         else if (!strcmp(cmd, "publish")) ed_net_script_publish(arg); // editor_net.c
         else if (ed_net_script(cmd, arg)) {} // net: (editor_net.c, tools/editor/publish_e2e.py)
+        else if (ed_ai_script(cmd, arg)) {} // ai: (editor_ai.c, tools/editor/ai_e2e.py)
         else if (!strcmp(cmd, "script")) ed_script_command(arg); // editor_script.c: open, tab:server, load:FILE, type:TEXT, validate, ...
         else if (!strcmp(cmd, "dump") && arg) {
             char *path = strchr(arg, ':');
@@ -1462,6 +1467,7 @@ static void page_tick(Client *client, const float now, const float dt) {
     tele_tick();
     ed_window_tick(dt);
     ed_script_tick();
+    ed_ai_tick();
     ed_backup_tick(now);
     ed_toolbar_account_check(); // _toolbar.show() again on login / account change
     if (now >= g_ed.proj->history_next) {

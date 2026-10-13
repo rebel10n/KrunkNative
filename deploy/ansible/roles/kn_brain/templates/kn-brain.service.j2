@@ -16,6 +16,8 @@ WorkingDirectory={{ kn_state_dir }}
 EnvironmentFile={{ kn_etc_dir }}/secrets.env
 # KN_SMTP_* (outbound mail: email verification), optional; written from the controller's env.
 EnvironmentFile=-{{ kn_etc_dir }}/smtp.env
+# KN_AI_UPSTREAM_URL / KN_AI_UPSTREAM_KEY (the map editor's AI proxy, services/brain/ai.h), optional.
+EnvironmentFile=-{{ kn_etc_dir }}/ai.env
 # KN_REDIS_URL / _USERNAME / _PREFIX (role kn_redis; password KN_REDIS_PASSWORD in secrets.env):
 # the optional hot tier. Absent or Redis down = the database alone (doc/backend.md 3.11).
 EnvironmentFile=-{{ kn_etc_dir }}/redis.env

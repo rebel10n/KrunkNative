@@ -11,6 +11,14 @@
 int kn_winhttp_request(const char *method, const char *url, const char *json_body, int timeout_ms,
                        char **body, size_t *length, char *err, size_t errn);
 
+// A streamed request (client/src/net/http_stream.c): headers = extra "Name: value\r\n" lines (NULL
+// none), body sent as application/json (NULL none). on_head once with the status and content type,
+// then on_data per piece as it arrives (return 0 to stop: the call then ends with status 0,
+// "cancelled"). Returns the HTTP status, 0 on a transport error (`err` says why). Blocking.
+int kn_winhttp_stream(const char *method, const char *url, const char *headers, const char *body, int timeout_ms,
+                      void (*on_head)(void *user, int status, const char *content_type), int (*on_data)(void *user, const char *data, size_t len),
+                      void *user, char *err, size_t errn);
+
 typedef struct KnWinWs KnWinWs;
 // ws:// / wss:// (http(s):// accepted): connect + upgrade. NULL on failure (`err` says why).
 KnWinWs *kn_winws_open(const char *url, int timeout_ms, char *err, size_t errn);

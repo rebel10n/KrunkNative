@@ -62,6 +62,9 @@ set(KN_BRAIN_SOURCES
     db_security.c
     # redis-tier: optional Redis / Valkey hot tier (stubs without hiredis; doc/backend.md 3.11)
     hot.c
+    # editor-ai: the map editor's AI proxy (/ai/models, /ai/chat, health probe, server tools)
+    ai.c
+    ../../shared/src/ai_proto.c
 )
 
 # Sources another agent has listed but not landed yet must not break configure
@@ -157,6 +160,12 @@ if (TARGET ${SERVER_BINARY} OR TARGET server_bin)
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/editor/publish_e2e.py ${CMAKE_BINARY_DIR}
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_editor_publish_e2e PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e;editor")
+        # editor-ai: the editor's AI panel against kn_brain + a stub upstream / stub MCP (headless
+        # client_bin --editor: guest gating, a streamed reply, editor tools, approvals, web search, history)
+        add_test(NAME brain_editor_ai_e2e
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/editor/ai_e2e.py ${CMAKE_BINARY_DIR}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_editor_ai_e2e PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e;editor;ai")
     endif ()
 endif ()
 
@@ -186,6 +195,12 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/season_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_season PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+    # editor-ai: the AI proxy (ai.c) against a stub upstream and a stub MCP server (tests/ai_stub.py; sqlite
+    # scratch database unless KN_TEST_DB_DRIVER says otherwise; never the live provider)
+    add_test(NAME brain_ai
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/ai_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_ai PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;ai")
     # email-verify: verification mails through a fake SMTP server, links, rate limits, gates, 2FA lock
     add_test(NAME brain_account_security
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/account_security_test.py

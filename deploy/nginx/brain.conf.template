@@ -63,7 +63,7 @@ server {
     ssl_certificate     /etc/letsencrypt/live/${PLAY_DOMAIN}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${PLAY_DOMAIN}/privkey.pem;
 
-    location ~ ^/(mm|api|social)/ {
+    location ~ ^/(mm|api|social|ai)/ {
         proxy_pass http://kn_brain;
         include /etc/nginx/snippets/krunknative-proxy.conf;
     }

@@ -101,6 +101,27 @@
     msg: "KN_SMTP_HOST / KN_SMTP_PASSWORD not set: {{ kn_etc_dir }}/smtp.env left as it is (kn_brain sends no mail without it). Source ~/.config/kn-secrets/smtp.env or set the KN_SMTP_* CI secrets."
   when: (kn_brain_smtp_host | length == 0) or (kn_brain_smtp_password | length == 0)
 
+# The editor's AI proxy: the provider key stays server-side (EnvironmentFile of the kn-brain units).
+- name: AI env file (the editor AI's upstream key, never logged)
+  ansible.builtin.copy:
+    dest: "{{ kn_etc_dir }}/ai.env"
+    content: |
+      # Managed by KrunkNative deploy/ansible (role kn_brain): the map editor AI's upstream. Never commit.
+      {% for k, v in {'KN_AI_UPSTREAM_URL': kn_brain_ai_upstream_url, 'KN_AI_UPSTREAM_KEY': kn_brain_ai_upstream_key} | dictsort -%}
+      {{ k }}={{ v | string | to_json(ensure_ascii=False) }}
+      {% endfor %}
+    owner: root
+    group: "{{ kn_group }}"
+    mode: "0640"
+  when: (kn_brain_ai_upstream_url | length > 0) and (kn_brain_ai_upstream_key | length > 0)
+  no_log: true
+  notify: Restart kn_brain
+
+- name: Note when no AI upstream was given
+  ansible.builtin.debug:
+    msg: "KN_AI_UPSTREAM_URL / KN_AI_UPSTREAM_KEY not set: {{ kn_etc_dir }}/ai.env left as it is (the editor's AI answers 503 without it). Source ~/.config/kn-secrets/ai.env or set the KN_AI_UPSTREAM_* CI secrets."
+  when: (kn_brain_ai_upstream_url | length == 0) or (kn_brain_ai_upstream_key | length == 0)
+
 - name: Systemd target
   ansible.builtin.copy:
     dest: /etc/systemd/system/krunknative.target

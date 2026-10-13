@@ -8,7 +8,8 @@ name: Deploy kru
 # this build with changed ones, without a build.
 # Secrets: KRU_SSH_KEY (private key for root@kru), KRU_HOST, KRU_PORT, KRU_KNOWN_HOSTS,
 #          optional KN_SMTP_HOST, KN_SMTP_PORT, KN_SMTP_TLS, KN_SMTP_USER, KN_SMTP_PASSWORD, KN_SMTP_FROM
-#          (kn_brain's outbound mail -> /etc/krunknative/smtp.env; deploy/ansible/README.md).
+#          (kn_brain's outbound mail -> /etc/krunknative/smtp.env; deploy/ansible/README.md),
+#          optional KN_AI_UPSTREAM_URL, KN_AI_UPSTREAM_KEY (the editor AI's provider -> /etc/krunknative/ai.env).
 # kn-brain runs --migrate, so a deploy applies new DB migrations. A successful run starts
 # Deploy edges (workflow_run), so the game servers follow the services.
 # Services restart only when what they run changed (players are dropped by a restart): the
@@ -135,6 +136,8 @@ jobs:
           KN_SMTP_USER: ${{ secrets.KN_SMTP_USER }}
           KN_SMTP_PASSWORD: ${{ secrets.KN_SMTP_PASSWORD }}
           KN_SMTP_FROM: ${{ secrets.KN_SMTP_FROM }}
+          KN_AI_UPSTREAM_URL: ${{ secrets.KN_AI_UPSTREAM_URL }}
+          KN_AI_UPSTREAM_KEY: ${{ secrets.KN_AI_UPSTREAM_KEY }}
         run: |
           # Overrides ansible.cfg's `-F ssh_config` (the runner has no host aliases).
           export ANSIBLE_SSH_ARGS="-F /dev/null -i $HOME/.ssh/id_kru -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts -o ControlMaster=auto -o ControlPersist=60s"

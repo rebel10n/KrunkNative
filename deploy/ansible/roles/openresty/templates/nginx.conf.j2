@@ -43,7 +43,7 @@
         }
 
 {% if openresty_api_routes %}
-        location ~ ^/(auth|mm|api|social)/ {
+        location ~ ^/(auth|mm|api|social|ai)/ {
             proxy_pass http://{{ openresty_coordinator_upstream }};
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;

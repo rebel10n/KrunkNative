@@ -191,6 +191,16 @@
     "verify_peer": true,
     "timeout_ms": 20000
   },
+  "ai": {
+    "_comment": "The map editor's AI proxy (services/brain/ai.h). The upstream URL and key come from the KN_AI_UPSTREAM_URL / KN_AI_UPSTREAM_KEY environment (~/.config/kn-secrets/ai.env locally, /etc/krunknative/ai.env on kru): never put the key here. Unset = the AI routes answer 503.",
+    "enabled": true,
+    "api": "chat",
+    "default_model": "glm-5.3-flash",
+    "models_hide": [],
+    "max_tokens": 4096,
+    "health_interval_s": 900,
+    "limit": {"rpm": 60, "daily": 3000, "daily_tokens": 20000000, "concurrent": 3}
+  },
   "gameserver": {
     "region": "local",
     "node_id": "LOC",

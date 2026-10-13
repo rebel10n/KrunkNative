@@ -24,6 +24,7 @@
 #include "finder.h"
 #include "hot.h"
 #include "releases.h"
+#include "ai.h"
 #include "build_info.h"
 #include "knsvc/config.h"
 #include "knsvc/db.h"
@@ -61,6 +62,8 @@ static const BrainModule k_brain_modules[] = {
     /* coord-auth: central auth + server finder (roles.h decides what runs) */
     {"auth", auth_init, auth_shutdown},
     {"finder", finder_init, finder_shutdown},
+    /* editor-ai: the map editor's AI proxy (ai.h; community role) */
+    {"ai", ai_init, ai_shutdown},
 };
 #define BRAIN_MODULE_COUNT (sizeof(k_brain_modules) / sizeof(k_brain_modules[0]))
 

@@ -42,6 +42,12 @@ kn_brain_smtp_tls: "{{ lookup('ansible.builtin.env', 'KN_SMTP_TLS') | default('a
 kn_brain_smtp_user: "{{ lookup('ansible.builtin.env', 'KN_SMTP_USER') }}"
 kn_brain_smtp_password: "{{ lookup('ansible.builtin.env', 'KN_SMTP_PASSWORD') }}"
 kn_brain_smtp_from: "{{ lookup('ansible.builtin.env', 'KN_SMTP_FROM') | default('Krunker Box Office <noreply@caan.edu>', true) }}"
+# The map editor's AI proxy (services/brain/ai.h): the upstream URL + key from the controller's environment
+# (`set -a; . ~/.config/kn-secrets/ai.env; set +a` locally, the KN_AI_UPSTREAM_* secrets in deploy-kru.yml in
+# CI), written to {{ kn_etc_dir }}/ai.env (root:kn 0640, no_log) only when both are set; an existing file is
+# kept otherwise. Without it the /ai routes answer 503 (the editor shows "AI unavailable").
+kn_brain_ai_upstream_url: "{{ lookup('ansible.builtin.env', 'KN_AI_UPSTREAM_URL') }}"
+kn_brain_ai_upstream_key: "{{ lookup('ansible.builtin.env', 'KN_AI_UPSTREAM_KEY') }}"
 # accounts.email.require_verified: social features that need a verified email (chat, post, gift,
 # market, trade, clan, publish). Krunker v7.1.4 gates nothing on email: [].
 kn_brain_email_require_verified: []

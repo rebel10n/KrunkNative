@@ -3,6 +3,7 @@
 // built with editor_gui.c, plus the control helpers every panel file uses (editor_panel_kit.h). The object panel is editor_inspector.c, the environment / terrain / zone
 // panels editor_env.c and the left Essential panel editor_gameconfig.c.
 #include "editor_internal.h"
+#include "editor_ai.h"
 #include "editor_panel_kit.h"
 #include <app_mode.h>    // app_route_url (Documentation, links)
 #include <backend_ui.h>  // account_get (the Account menu)
@@ -212,7 +213,7 @@ enum {
     TB_TEST, TB_HOST, TB_QUICK_START, TB_TEMPLATES, TB_TOOLS,
     TB_PUBLISH_GAME, TB_PUBLISH_ASSET, TB_PUBLISH_GUIDE,
     TB_LOGIN, TB_ACCOUNT_NAME, TB_MY_GAMES, TB_MY_ASSETS,
-    TB_CONTROLS, TB_GUIDE, TB_DOCUMENTATION,
+    TB_CONTROLS, TB_GUIDE, TB_DOCUMENTATION, TB_AI,
     TB_PROJECT = 900, // + ED_PM_* (editor_project.c)
     TB_CREATE = 1000, // + prefab id
 };
@@ -345,6 +346,7 @@ static void toolbar_action(EdCtl *c) {
         case TB_CONTROLS: editor_show_window(1); break;
         case TB_GUIDE: editor_show_window(8); break;
         case TB_DOCUMENTATION: open_documentation(); break;
+        case TB_AI: ed_ai_toggle(); break; // KrunkNative: the AI panel (editor_ai.c)
         default: break;
     }
 }
@@ -563,6 +565,8 @@ void ed_toolbar_show(void) {
     } else {
         tb_option(t, "Login", TB_LOGIN);
     }
+    // KrunkNative: the map editor's AI panel (editor_ai.c; signed-in accounts), also the canvas "AI" button
+    tb_option(t, "AI Assistant", TB_AI);
     tb_end(t);
 
     tb_root_begin(t, "Help");

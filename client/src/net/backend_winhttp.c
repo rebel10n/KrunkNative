@@ -169,6 +169,53 @@ int kn_winhttp_request(const char *method, const char *url, const char *json_bod
     return data ? status : 0;
 }
 
+int kn_winhttp_stream(const char *method, const char *url, const char *headers, const char *body, const int timeout_ms,
+                      void (*on_head)(void *user, int status, const char *content_type), int (*on_data)(void *user, const char *data, size_t len),
+                      void *user, char *err, const size_t errn) {
+    Handles h;
+    if (!open_request(&h, method && method[0] ? method : "GET", url, timeout_ms, err, errn)) return 0;
+    // the defaults + the caller's lines, as one wide header block
+    char all[4096];
+    snprintf(all, sizeof(all), "Accept: text/event-stream, application/json\r\n%s%s", body ? "Content-Type: application/json\r\n" : "",
+             headers ? headers : "");
+    wchar_t *wh = widen(all);
+    const DWORD body_len = body ? (DWORD) strlen(body) : 0;
+    const int sent = wh && WinHttpSendRequest(h.request, wh, (DWORD) -1L, (void *) body, body_len, body_len, 0) &&
+                     WinHttpReceiveResponse(h.request, NULL);
+    free(wh);
+    if (!sent) {
+        request_error(err, errn, GetLastError());
+        close_handles(&h);
+        return 0;
+    }
+    DWORD code = 0, size = sizeof(code);
+    WinHttpQueryHeaders(h.request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_HEADER_NAME_BY_INDEX, &code, &size,
+                        WINHTTP_NO_HEADER_INDEX);
+    wchar_t wtype[128] = L"";
+    DWORD tsize = sizeof(wtype);
+    char ctype[128] = "";
+    if (WinHttpQueryHeaders(h.request, WINHTTP_QUERY_CONTENT_TYPE, WINHTTP_HEADER_NAME_BY_INDEX, wtype, &tsize, WINHTTP_NO_HEADER_INDEX))
+        WideCharToMultiByte(CP_UTF8, 0, wtype, -1, ctype, sizeof(ctype), NULL, NULL);
+    if (on_head) on_head(user, (int) code, ctype);
+    for (;;) {
+        char buf[8192];
+        DWORD got = 0;
+        if (!WinHttpReadData(h.request, buf, sizeof(buf), &got)) {
+            request_error(err, errn, GetLastError());
+            close_handles(&h);
+            return 0;
+        }
+        if (!got) break;
+        if (on_data && !on_data(user, buf, got)) {
+            set_err(err, errn, "cancelled", 0);
+            close_handles(&h);
+            return 0;
+        }
+    }
+    close_handles(&h);
+    return (int) code;
+}
+
 // ------------------------------------------------------------------ WebSocket (Windows 8+)
 
 // The WebSocket functions are looked up at run time: winhttp.dll of Windows 7 lacks them, and

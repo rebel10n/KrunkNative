@@ -70,6 +70,20 @@ done
 ```
 
 Unset (no host or password): the file is left as it is and kn_brain sends no mail.
+
+The map editor's AI (`services/brain/ai.h`): `KN_AI_UPSTREAM_URL` (the OpenAI-compatible base, `.../v1`)
+and `KN_AI_UPSTREAM_KEY` become `/etc/krunknative/ai.env` the same way (root:kn 0640, `no_log`, an optional
+`EnvironmentFile` of the kn-brain units). The key never reaches a client: kn_brain adds it to its own
+upstream requests. Locally: `~/.config/kn-secrets/ai.env`; in CI the repository secrets of the same names:
+
+```sh
+set -a; . ~/.config/kn-secrets/ai.env; set +a
+for k in KN_AI_UPSTREAM_URL KN_AI_UPSTREAM_KEY; do printf '%s' "${!k}" | gh secret set "$k" --repo <owner>/<repo>; done
+```
+
+Unset: the file is left as it is; without one the `/ai/*` routes answer 503 and the editor shows "AI
+unavailable". After a deploy `curl -s https://coordinator.krunk.io/ai/status` shows the upstream's health
+(the brain's known-prompt probe: `healthy`, or `degraded` when the provider drops request content).
 `kn_brain_email_require_verified` (default `[]`, v7.1.4 parity) lists the social features that
 need a verified email.
 

@@ -2,7 +2,7 @@
 
 /**
  * Same-origin brain for the web build (KrunkNative backend): `net-bridge --web`
- * reverse-proxies the brain's public routes (`/mm/*`, `/api/*`, `/social/*`) and its
+ * reverse-proxies the brain's public routes (`/mm/*`, `/api/*`, `/social/*`, `/ai/*`) and its
  * social WebSocket (`/social/ws`, `/api/ws`) to kn_brain, like the nginx deployment
  * does, so the page's same-origin brain URL works. When no brain answers, HTTP
  * requests fall back to the bridge's own routes (publicRoutes.ts) and WebSocket
@@ -21,7 +21,7 @@ import type { Duplex } from "stream";
 
 export type BrainTarget = { host: string; port: number; url: string };
 
-const PROXIED_PREFIXES = ["/mm/", "/api/", "/social/"];
+const PROXIED_PREFIXES = ["/mm/", "/api/", "/social/", "/ai/"];
 const WS_PATHS = new Set(["/social/ws", "/api/ws"]);
 
 export function resolveBrain(cliUrl?: string | null): BrainTarget {
