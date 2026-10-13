@@ -68,6 +68,8 @@ int spawnable_drop_ex(Game*, int type, Player *owner, const SpawnableData*, vec3
 void spawnables_update(Game*, float delta);      // game.update #19: pickups, timers ("dsp")
 void spawnables_reset(Game*);                    // finishInit resetSpawnables
 void spawnables_send_all(Game*, int uid);        // sync.spwns for a joiner
+int spawnable_alive(const Game*, int sid);       // KrunkNative Object Manager: an active spawnable has this sid
+int spawnable_remove(Game*, int sid);            // KrunkNative Object Manager: despawn it now ("dsp"); 1 when it was active
 int spawnable_shoot(Game*, Player*, int sid);    // game.shootSpawnable (canShoot); 1 when consumed
 // game.pickupSpawnable(ai, s) for aiOnly spawnables (the Zombie Portal), called by WP-F's AI
 // collision pass once per active AI. 1 when it consumed one.

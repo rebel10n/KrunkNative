@@ -360,6 +360,15 @@ img.knOmIcon {
   width: 120px;
   height: 60px;
 }
+#menuWindow.dark div.knOmGlyph {
+  height: 60px;
+  line-height: 60px;
+}
+#menuWindow.dark div.knOmGlyph span.material-icons {
+  font-size: 46px;
+  line-height: 60px;
+  color: rgba(255, 255, 255, 0.85);
+}
 #menuWindow.dark div.knOmName {
   font-size: 14px;
   color: #fff;

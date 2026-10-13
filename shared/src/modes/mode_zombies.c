@@ -29,6 +29,14 @@ static const char *const k_templates[] = {
 #define ZOMBIE_TEMPLATES ((int) (sizeof(k_templates) / sizeof(k_templates[0])))
 static const char *const k_template_names[] = {"Walker", "Brute", "Flesh Colossal", "Runner", "Rascal"};
 
+const char *mode_zombie_template(const int kind, const char **name) {
+    if (kind < 0 || kind >= ZOMBIE_TEMPLATES) return NULL;
+    if (name) *name = k_template_names[kind];
+    return k_templates[kind];
+}
+
+int mode_zombie_template_count(void) { return ZOMBIE_TEMPLATES; }
+
 // zom.js vA119: special waves (every 5th)
 static const struct {
     const char *name;

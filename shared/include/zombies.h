@@ -191,3 +191,9 @@ int airdrop_interact_prompt(const Game*, const Player*); // the drop slot a play
 void airdrop_send_all(Game*, int uid);
 int airdrop_apply_packet(Game*, int type, const void *payload, uint16_t length); // client: "ad" / "rad" / "krp"
 void airdrop_reset(Game*);
+int airdrop_alive(const Game*, int sid, int owner_uid); // KrunkNative Object Manager: drop `sid` of `owner_uid` is still up
+int airdrop_remove(Game*, int sid);                    // KrunkNative Object Manager: gone unclaimed ("rad"); 1 when it was up
+void zombies_machine_added(Game*, int uid);            // KrunkNative Object Manager: a machine object appended mid-round
+// KrunkNative Object Manager: zom.js template `kind` (0..mode_zombie_template_count()-1) as map object JSON, NULL past the end
+const char *mode_zombie_template(int kind, const char **name);
+int mode_zombie_template_count(void);

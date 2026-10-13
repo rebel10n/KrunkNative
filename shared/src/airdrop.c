@@ -260,6 +260,22 @@ static void drop_claim(Game *game, AirDrop *d, Player *claimer) {
     package_claim(game, d, claimer);
 }
 
+int airdrop_alive(const Game *game, const int sid, const int owner_uid) {
+    if (!game || sid < 1 || sid > game->zombies.drop_count) return 0;
+    const AirDrop *d = &game->zombies.drops[sid - 1];
+    return d->active && d->sid == sid && d->owner_uid == owner_uid;
+}
+
+int airdrop_remove(Game *game, const int sid) {
+    if (!game || sid < 1 || sid > game->zombies.drop_count) return 0;
+    AirDrop *d = &game->zombies.drops[sid - 1];
+    if (!d->active) return 0;
+    d->active = 0;
+    d->can_claim = 0;
+    if (game_is_authority(game)) drop_remove_send(game, d);
+    return 1;
+}
+
 void airdrop_tick(Game *game, const float delta_ms) {
     GameZombies *z = &game->zombies;
     const int authority = game_is_authority(game);

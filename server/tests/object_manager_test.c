@@ -12,6 +12,10 @@
 #include <game_config.h>
 #include <weapons.h>
 #include <world.h>
+#include <ai.h>
+#include <bots.h>
+#include <spawnables.h>
+#include <zombies.h>
 #include <map_catalog.h>
 #include <modes.h>
 #include <knet.h> // NET_LOOPBACK_FD_BASE
@@ -372,10 +376,147 @@ static void test_pickups(TestClient *a, TestClient *b) {
     } else CHECK(0, "REMOVE sent");
 }
 
+static int ai_count(void) {
+    const GameAIs *ais = g_server->game.ai;
+    int n = 0;
+    for (int i = 0; ais && i < ais->count; i++) n += ais->ais[i].active;
+    return n;
+}
+
+static int index_of_entry(const int tab, const int kind, const int data) {
+    int count = 0;
+    const ObjectManagerEntry *e = object_manager_entries(tab, &count);
+    for (int i = 0; i < count; i++) {
+        if (e[i].kind == kind && (data < 0 || e[i].data == data)) return i;
+    }
+    return -1;
+}
+
+// part 2: the NPCs and Entities tabs
+static void test_npcs_entities(TestClient *a, TestClient *b) {
+    printf("NPCs and entities...\n");
+    Player *p = player_of(a);
+    if (!p) return;
+    p->god_mode = 1;
+    if (player_of(b)) player_of(b)->god_mode = 1;
+    int npc_count = 0, entity_count = 0;
+    const ObjectManagerEntry *npcs = object_manager_entries(OM_TAB_NPCS, &npc_count);
+    const ObjectManagerEntry *entities = object_manager_entries(OM_TAB_ENTITIES, &entity_count);
+    CHECK(npcs && npc_count >= 12 && entities && entity_count >= 20, "catalogues (%d NPCs, %d entities)", npc_count, entity_count);
+    CHECK(object_manager_entries(OM_TAB_WEAPONS, NULL) == NULL && object_manager_entries(OM_TAB_OBJECTS, NULL) == NULL, "no entries for the other tabs");
+
+    // every NPC kind spawns at the crosshair floor (the cap stops the rest)
+    pump(200);
+    const int ais_before = ai_count();
+    const int bots_before = game_bots_count(&g_server->game);
+    int ok = 0, limited = 0;
+    for (int i = 0; i < npc_count; i++) {
+        pump(20);
+        const NetSpawnResultPacket r = request(a, OM_ACTION_SPAWN_NPC, i, -1.0f);
+        CHECK(r.status == OM_STATUS_OK || r.status == OM_STATUS_LIMIT, "NPC %s (status %u)", npcs[i].name, r.status);
+        ok += r.status == OM_STATUS_OK;
+        if (r.status == OM_STATUS_LIMIT) limited = r.limit;
+    }
+    pump(4);
+    // the cap counts live NPCs: one killed in the brawl makes room for another
+    CHECK(ok >= OM_NPCS_PER_PLAYER && limited == OM_NPCS_PER_PLAYER, "%d NPCs spawned, then the per-player cap (%d)", ok, limited);
+    CHECK(game_bots_count(&g_server->game) == bots_before + 1, "the Bot entry added a bot");
+    // the AIs fight each other right away: one may already be down
+    CHECK(ai_count() >= ais_before + OM_NPCS_PER_PLAYER - 3 && ai_count() <= ais_before + OM_NPCS_PER_PLAYER - 1, "the AIs (%d -> %d)",
+          ais_before, ai_count());
+    const GameBots *bots = g_server->game.bots;
+    if (bots && bots->count) CHECK(bots->list[bots->count - 1].pinned, "the bot is pinned to the spot");
+    // the AIs reach the other v7 player (AI_ADD_V7 through the regular AI sync)
+    pump(30);
+    CHECK(count_type(b, NET_PACKET_AI_ADD_V7) >= OM_NPCS_PER_PLAYER - 1, "AI_ADD_V7 to the other player (%d)", count_type(b, NET_PACKET_AI_ADD_V7));
+
+    // undo: the newest NPC goes
+    const int before = ai_count() + game_bots_count(&g_server->game);
+    pump(20);
+    NetSpawnResultPacket r = request(a, OM_ACTION_UNDO, 0, 0.0f);
+    pump(2);
+    CHECK(r.status == OM_STATUS_OK && ai_count() + game_bots_count(&g_server->game) == before - 1, "undo removes the last NPC (%d -> %d)", before,
+          ai_count() + game_bots_count(&g_server->game));
+    for (int i = 0; i < 20; i++) { // undo everything this player spawned
+        pump(20);
+        if (request(a, OM_ACTION_UNDO, 0, 0.0f).status != OM_STATUS_OK) break;
+    }
+    CHECK(ai_count() == ais_before && game_bots_count(&g_server->game) == bots_before, "every spawned NPC undone (AIs %d, bots %d)",
+          ai_count(), game_bots_count(&g_server->game));
+
+    // entities: spawnables, an airdrop, scraps and machines (map objects)
+    const int machines = g_server->game.zombies.perk_machine_count + g_server->game.zombies.krum_count + g_server->game.zombies.box_count;
+    const size_t objects = g_server->game.map->object_count;
+    int spawned_ok = 0;
+    for (int i = 0; i < entity_count && i < OM_ENTITIES_PER_PLAYER; i++) {
+        pump(20);
+        r = request(a, OM_ACTION_SPAWN_ENTITY, i, -0.4f); // a few steps away: touch pickups stay up
+        CHECK(r.status == OM_STATUS_OK, "entity %s (status %u)", entities[i].name, r.status);
+        spawned_ok += r.status == OM_STATUS_OK;
+    }
+    pump(2);
+    const int tag = index_of_entry(OM_TAB_ENTITIES, OM_ENTRY_SPAWNABLE, SPAWNABLE_KR_TAG);
+    CHECK(tag >= 0, "a KR Tag entry");
+    int alive_spawnables = 0;
+    for (int i = 0; i < MODE_MAX_SPAWNABLES; i++) alive_spawnables += g_server->game.mode->spawnables[i].active;
+    CHECK(alive_spawnables >= 15, "spawnables up (%d)", alive_spawnables);
+    int drops = 0;
+    for (int i = 0; i < g_server->game.zombies.drop_count; i++) drops += g_server->game.zombies.drops[i].active;
+    CHECK(drops == 1, "one airdrop falling (%d)", drops);
+    const size_t records = g_server->game.map->object_count - objects;
+    int records_expected = 0;
+    for (int i = 0; i < entity_count && i < OM_ENTITIES_PER_PLAYER; i++) records_expected += entities[i].kind == OM_ENTRY_RECORD;
+    CHECK((int) records == records_expected, "record entries appended %zu map objects (%d)", records, records_expected);
+    for (size_t i = objects; i < g_server->game.map->object_count; i++) {
+        const Object *o = g_server->game.map->objects[i];
+        CHECK(o->spawned && o->active && o->scale.x > 0.0f, "record %zu spawned with a size", i);
+        if (o->prefab == PREFAB_TRIGGER) CHECK(o->trig && !o->destroyed, "a scrap is a live trigger (no start-destroyed)");
+    }
+    const int machines_after = g_server->game.zombies.perk_machine_count + g_server->game.zombies.krum_count + g_server->game.zombies.box_count;
+    int machines_listed = 0;
+    for (int i = 0; i < entity_count && i < OM_ENTITIES_PER_PLAYER; i++) machines_listed += entities[i].json && strstr(entities[i].json, "\"i\":9") != NULL;
+    CHECK(machines_after - machines == machines_listed, "machines registered with the zombies runtime (%d)", machines_after - machines);
+
+    // undo everything, then the entity cap with KR Tags (12 s each: the cap is reached before any expires)
+    for (int i = 0; i < 40; i++) {
+        pump(20);
+        if (request(a, OM_ACTION_UNDO, 0, 0.0f).status != OM_STATUS_OK) break;
+    }
+    pump(200);
+    int tags = 0, cap = 0;
+    for (int i = 0; i < OM_ENTITIES_PER_PLAYER + 2; i++) {
+        pump(16); // the bucket refills 4 per second
+        r = request(a, OM_ACTION_SPAWN_ENTITY, tag, -0.4f);
+        tags += r.status == OM_STATUS_OK;
+        if (r.status == OM_STATUS_LIMIT) cap = r.limit;
+    }
+    CHECK(tags == OM_ENTITIES_PER_PLAYER && cap == OM_ENTITIES_PER_PLAYER, "entity cap %d (%d spawned, limit %d)", OM_ENTITIES_PER_PLAYER, tags, cap);
+    for (int i = 0; i < 40; i++) {
+        pump(20);
+        if (request(a, OM_ACTION_UNDO, 0, 0.0f).status != OM_STATUS_OK) break;
+    }
+    drops = 0;
+    for (int i = 0; i < g_server->game.zombies.drop_count; i++) drops += g_server->game.zombies.drops[i].active;
+    CHECK(drops == 0 && spawned_count() == 0, "every entity undone (drops %d, objects %d)", drops, spawned_count());
+
+    // the rules: a custom game's host spawns, a guest of a public game does not
+    const ObjectManagerPerms host = {.host = 1}, guest = {0}, ranked_host = {.host = 1, .ranked = 1};
+    Game *game = &g_server->game;
+    game->is_sandbox = 0;
+    CHECK((object_manager_caps(game, &host) & OM_CAP_SPAWN) && !(object_manager_caps(game, &guest) & OM_CAP_SPAWN), "host spawns, guest not");
+    CHECK(!(object_manager_caps(game, &ranked_host) & OM_CAP_SPAWN), "not in ranked");
+    game->is_sandbox = 1;
+    p->god_mode = 0;
+}
+
 static void test_join_sync(TestClient *a, TestClient *late, TestClient *old) {
     printf("join sync...\n");
     pump(20);
     request(a, OM_ACTION_ADD_WEAPON, 5, 0.0f);
+    pump(20);
+    request(a, OM_ACTION_DROP_WEAPON, 1, -1.4f); // something to sync (the earlier ones were undone)
+    pump(20);
+    request(a, OM_ACTION_DROP_WEAPON, 2, -1.4f);
     pump(4);
     const int live = spawned_count();
     join(late, 1);
@@ -483,6 +624,14 @@ static void test_permissions(TestClient *dev, TestClient *guest) {
     CHECK(r.status == OM_STATUS_DENIED && r.caps == 0, "public guest refused (status %u caps %u)", r.status, r.caps);
     r = request(guest, OM_ACTION_DROP_WEAPON, 9, -1.4f);
     CHECK(r.status == OM_STATUS_DENIED, "public guest: no pickups");
+    r = request(guest, OM_ACTION_SPAWN_NPC, 1, -1.0f);
+    CHECK(r.status == OM_STATUS_DENIED, "public guest: no NPCs");
+    r = request(guest, OM_ACTION_SPAWN_ENTITY, 0, -1.0f);
+    CHECK(r.status == OM_STATUS_DENIED, "public guest: no entities");
+    r = request(dev, OM_ACTION_SPAWN_NPC, 1, -1.0f);
+    CHECK(r.status == OM_STATUS_OK, "public: the dev spawns an NPC (status %u)", r.status);
+    pump(20);
+    request(dev, OM_ACTION_UNDO, 0, 0.0f);
     gc->acct.flags |= NET_PLAYER_INFO_DEV;
     pump(20);
     r = request(guest, OM_ACTION_ADD_WEAPON, 9, 0.0f);
@@ -531,6 +680,7 @@ int main(void) {
         test_loadout(&g_clients[0], &g_clients[1]);
         test_rate(&g_clients[0]);
         test_pickups(&g_clients[0], &g_clients[1]);
+        test_npcs_entities(&g_clients[0], &g_clients[1]);
         test_join_sync(&g_clients[0], &g_clients[2], &g_clients[3]);
         test_permissions(&g_clients[0], &g_clients[1]);
         for (int i = 0; i < CLIENTS; i++) leave(&g_clients[i]);

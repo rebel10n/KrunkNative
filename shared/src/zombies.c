@@ -581,6 +581,30 @@ void zombies_shoot_spawnables(Game *game, Player *player, const vec3 origin, con
 
 // ------------------------------------------------------------------ lifecycle
 
+// KrunkNative Object Manager: a MYSTERY_BOX / KRUM_MACHINE / PERK_MACHINE object appended mid-round
+// joins the machines zombies_round_start registers (both sides). A box shows when no other is up.
+void zombies_machine_added(Game *game, const int uid) {
+    GameZombies *z = &game->zombies;
+    Object *o = object_at(game, uid);
+    if (!o) return;
+    if (o->prefab == PREFAB_MYSTERY_BOX && z->box_count < ZOMBIES_MAX_MACHINES) {
+        const int active = zombies_active_mystery_box(game);
+        ZombieMachine *m = &z->boxes[z->box_count++];
+        m->uid = uid;
+        machine_clear(m);
+        o->active = active < 0; // the only box: up now (switchMysteryBox would pick it)
+        if (game_is_authority(game)) machine_sync(game, m, ZOMBIE_MACHINE_MYSTERY_BOX, NET_TARGET_ALL);
+    } else if (o->prefab == PREFAB_KRUM_MACHINE && z->krum_count < ZOMBIES_MAX_MACHINES) {
+        ZombieMachine *m = &z->krums[z->krum_count++];
+        m->uid = uid;
+        machine_clear(m);
+        o->active = 1;
+    } else if (o->prefab == PREFAB_PERK_MACHINE && z->perk_machine_count < ZOMBIES_MAX_MACHINES) {
+        z->perk_free_taken[z->perk_machine_count] = 0;
+        z->perk_machines[z->perk_machine_count++] = uid;
+    }
+}
+
 void zombies_round_start(Game *game) {
     GameZombies *z = &game->zombies;
     memset(z->powerups, 0, sizeof(z->powerups));

@@ -1,0 +1,48 @@
+{
+  "scenario": "kn-om-npcs",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "om-header",
+      "rect": [
+        356,
+        156,
+        568,
+        90
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "title, tabs (NPCs active), search box"
+    },
+    {
+      "name": "om-grid",
+      "rect": [
+        364,
+        262,
+        552,
+        244
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "17 NPC tiles with Material Icons glyphs"
+    },
+    {
+      "name": "om-footer",
+      "rect": [
+        356,
+        508,
+        568,
+        56
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "hint + Undo"
+    }
+  ]
+}

@@ -64,12 +64,36 @@ typedef enum {
 #define OM_CAP_SPAWN 2u   // objects, entities, NPCs (dev, host, sandbox)
 #define OM_CAP_DEV 4u     // the player passes the dev checks
 
-// What a spawned thing is (NetSpawnedObjPacket.kind, the undo list).
+// What a spawned thing is (NetSpawnedObjPacket.kind, the undo list). Only map objects travel in
+// SPAWNED_OBJ: spawnables, airdrops, AIs and bots replicate through their own v7 packets.
 typedef enum {
-    OM_KIND_OBJECT = 0, // a map object (uid)
-    OM_KIND_ENTITY,     // reserved: entities replicate through their own packets
-    OM_KIND_NPC,        // reserved: NPCs replicate through the AI / bot packets
+    OM_KIND_OBJECT = 0, // a map object (uid): pickups, scraps, machines, prefabs
+    OM_KIND_ENTITY,     // a spawnable (sid) or an airdrop (sid)
+    OM_KIND_NPC,        // an AI (sid) or a bot (GameBot.id)
 } ObjectManagerKind;
+
+// ---- catalogue (both sides): the Entities and NPCs tabs (the Weapons tab lists g_weapons)
+typedef enum {
+    OM_ENTRY_AI = 0,      // a built-in AI kind (ai.c ai_builtin), data = its index
+    OM_ENTRY_AI_TEMPLATE, // a Soul Sanctum AI (game_ai_resolve_template by name)
+    OM_ENTRY_ZOMBIE,      // a zombies template (mode_zombie_template), data = its kind
+    OM_ENTRY_BOT,         // a v7 bot player (bots.c), pinned to the spot
+    OM_ENTRY_SPAWNABLE,   // a medals.js spawnable, data = SpawnableType (they despawn on their own timer)
+    OM_ENTRY_AIRDROP,     // an airdrop crate falling onto the spot, data = package (-1 random)
+    OM_ENTRY_RECORD,      // a map object record (json, "p" added; "s" defaults to the prefab's size)
+} ObjectManagerEntryKind;
+
+typedef struct {
+    const char *name;
+    const char *icon;     // a Material Icons ligature for the grid
+    unsigned char kind;   // ObjectManagerEntryKind
+    short data;
+    const char *json;     // OM_ENTRY_RECORD
+} ObjectManagerEntry;
+
+// The entries of a tab (OM_TAB_ENTITIES / OM_TAB_NPCS; NULL and 0 for the others). The index is
+// the request's item.
+const ObjectManagerEntry *object_manager_entries(int tab, int *count);
 
 #define OM_SPAWNED_ADD 1
 #define OM_SPAWNED_REMOVE 2
@@ -80,6 +104,10 @@ typedef enum {
 #define OM_PICKUPS_PER_PLAYER 16   // live weapon pickups a player spawned
 #define OM_OBJECTS_PER_PLAYER 64   // live spawned map objects (pickups included) per player
 #define OM_OBJECTS_MAX 256         // live spawned map objects in the game
+#define OM_NPCS_PER_PLAYER 12      // live AIs + bots a player spawned
+#define OM_NPCS_MAX 32             // live spawned AIs + bots in the game (GAME_AI_LIMIT / GAME_BOTS_MAX still apply)
+#define OM_ENTITIES_PER_PLAYER 24  // live spawnables + airdrops a player spawned
+#define OM_ENTITIES_MAX 64         // in the game (MODE_MAX_SPAWNABLES, AIRDROP_MAX still apply)
 #define OM_AIM_RANGE 400.0f        // crosshair placement range (units)
 #define OM_RECORD_MAX 480          // the longest record JSON a SPAWNED_OBJ carries
 

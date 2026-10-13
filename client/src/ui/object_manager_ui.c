@@ -168,6 +168,19 @@ static void om_grid_html(char **buf, size_t *len, size_t *cap) {
                       owned ? "<div class='knOmBadge'>LOADOUT</div>" : "");
             shown++;
         }
+    } else {
+        int count = 0;
+        const ObjectManagerEntry *entries = object_manager_entries(g_om.tab, &count);
+        for (int i = 0; entries && i < count; i++) {
+            if (!om_matches(entries[i].name)) continue;
+            char name[96];
+            om_escape(name, sizeof(name), entries[i].name);
+            om_append(buf, len, cap,
+                      "<div class='knOmItem' onclick='knOmPick(%d,%d)'><div class='knOmGlyph'><span class='material-icons'>%s</span></div>"
+                      "<div class='knOmName'>%s</div></div>",
+                      g_om.tab, i, entries[i].icon ? entries[i].icon : "help", name);
+            shown++;
+        }
     }
     if (!shown) {
         om_append(buf, len, cap, "<div class='knOmEmpty'>%s</div>", g_om.search[0] ? "No matches" : "Nothing to spawn here yet");
@@ -178,6 +191,8 @@ static void om_grid_html(char **buf, size_t *len, size_t *cap) {
 static const char *om_hint(void) {
     switch (g_om.tab) {
         case OM_TAB_WEAPONS: return "Left click: add to your loadout (again: take it out) | Right click: drop it at your crosshair";
+        case OM_TAB_NPCS: return "Left click: spawn at your crosshair | Undo takes back your last spawn";
+        case OM_TAB_ENTITIES: return "Left click: spawn at your crosshair (power-ups despawn on their own timer)";
         default: return "Left click: spawn at your crosshair";
     }
 }
@@ -300,6 +315,12 @@ static void om_pick(const int tab, const int item, const int alt) {
         om_set_status("This server has no Object Manager", 1);
         return;
     }
+    if (tab == OM_TAB_NPCS || tab == OM_TAB_ENTITIES) {
+        int count = 0;
+        object_manager_entries(tab, &count);
+        if (item >= 0 && item < count) om_send(tab == OM_TAB_NPCS ? OM_ACTION_SPAWN_NPC : OM_ACTION_SPAWN_ENTITY, item);
+        return;
+    }
     if (tab == OM_TAB_WEAPONS) {
         if (!object_manager_weapon_listed(item)) return;
         if (alt) {
@@ -382,6 +403,13 @@ static void om_on_result(const NetSpawnResultPacket *r) {
         case OM_ACTION_CLEAR_WEAPONS: snprintf(text, sizeof(text), "Extra weapons cleared"); break;
         case OM_ACTION_DROP_WEAPON: snprintf(text, sizeof(text), "%s dropped at your crosshair", w ? w->name : "Weapon"); break;
         case OM_ACTION_UNDO: snprintf(text, sizeof(text), "Undone"); break;
+        case OM_ACTION_SPAWN_NPC:
+        case OM_ACTION_SPAWN_ENTITY: {
+            int count = 0;
+            const ObjectManagerEntry *entries = object_manager_entries(r->action == OM_ACTION_SPAWN_NPC ? OM_TAB_NPCS : OM_TAB_ENTITIES, &count);
+            snprintf(text, sizeof(text), "%s spawned at your crosshair", entries && r->item >= 0 && r->item < count ? entries[r->item].name : "It");
+            break;
+        }
         default: snprintf(text, sizeof(text), "Done"); break;
     }
     om_set_status(text, 0);

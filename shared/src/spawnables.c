@@ -126,6 +126,22 @@ static void spawnable_destroy(Game *game, const int slot) {
     mode_send_spawnable(game, slot); // "dsp sid"
 }
 
+int spawnable_alive(const Game *game, const int sid) {
+    for (int i = 0; game && game->mode && sid >= 0 && i < MODE_MAX_SPAWNABLES; i++) {
+        if (game->mode->spawnables[i].active && game->mode->spawnables[i].sid == sid) return 1;
+    }
+    return 0;
+}
+
+int spawnable_remove(Game *game, const int sid) {
+    for (int i = 0; game && game->mode && sid >= 0 && i < MODE_MAX_SPAWNABLES; i++) {
+        if (!game->mode->spawnables[i].active || game->mode->spawnables[i].sid != sid) continue;
+        spawnable_destroy(game, i);
+        return 1;
+    }
+    return 0;
+}
+
 // stopInteract(game, serverIO, player, spawnable): 1 = this player can't take it now
 static int spawnable_stop(const Game *game, const Player *player, const ModeSpawnable *spawnable) {
     const GameModeConfig *config = &game->mode->config;

@@ -32,7 +32,9 @@ BUILD = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
 WORK = tempfile.mkdtemp(prefix="kn-om-e2e-", dir=os.path.expanduser("~/.cache"))
 SPAWN, FORWARDED, PICKUP = 4, 85, 128
 SPAWN_REQ, SPAWN_RESULT, LOADOUT_EXTRA, SPAWNED_OBJ = 250, 251, 252, 253
-QUERY, ADD_WEAPON, REMOVE_WEAPON, CLEAR_WEAPONS, DROP_WEAPON, UNDO = 0, 1, 2, 3, 4, 9
+QUERY, ADD_WEAPON, REMOVE_WEAPON, CLEAR_WEAPONS, DROP_WEAPON, SPAWN_ENTITY, SPAWN_NPC, UNDO = 0, 1, 2, 3, 4, 5, 6, 9
+AI_ADD_V7, SPAWNABLE_V7 = 162, 148
+NPC_GHOST, ENTITY_KR_TAG = 1, 0  # object_manager_entries(): NPCs[1] Ghost (harmless), Entities[0] KR Tag
 OK, DENIED, LIMIT, RATE = 0, 1, 2, 3
 CAP_WEAPONS, CAP_SPAWN, CAP_DEV = 1, 2, 4
 SHOTGUN, CROSSBOW = 5, 13
@@ -172,11 +174,26 @@ def run():
     check("and its PICKUP state", any(len(p) >= 8 and struct.unpack("<ii", p[:8]) == (adds[0][0], CROSSBOW) for p in guest.of_type(PICKUP, mark))
           if adds else False)
 
+    # part 2: NPCs and entities, dev only on a public server
+    r = guest.request(SPAWN_NPC, NPC_GHOST, -0.6)
+    check("guest NPC refused", r is not None and r[0] == DENIED, str(r))
+    r = guest.request(SPAWN_ENTITY, ENTITY_KR_TAG, -0.6)
+    check("guest entity refused", r is not None and r[0] == DENIED, str(r))
+    mark = len(guest.packets)
+    r = host.request(SPAWN_NPC, NPC_GHOST, -0.6)
+    check("dev spawns a Ghost", r is not None and r[0] == OK, str(r))
+    r = host.request(SPAWN_ENTITY, ENTITY_KR_TAG, -0.4)
+    check("dev spawns a KR Tag", r is not None and r[0] == OK, str(r))
+    guest.pump(1.0)
+    check("the guest sees the AI (AI_ADD_V7)", bool(guest.of_type(AI_ADD_V7, mark)))
+    check("the guest sees the spawnable (SPAWNABLE_V7)", bool(guest.of_type(SPAWNABLE_V7, mark)))
+
     late = Peer(PORT)
     check("late v7 joiner spawned", late.spawn() is not None)
     late.pump(1.0)
     check("the joiner gets the dev's extras", extras_for(late, host.me["uid"]) == [SHOTGUN], str(extras_for(late, host.me["uid"])))
     check("the joiner gets the spawned pickup", [a[0] for a in spawned_adds(late)] == [a[0] for a in adds], str(spawned_adds(late)))
+    check("the joiner gets the spawned AI", bool(late.of_type(AI_ADD_V7)))
 
     old = Peer(PORT, v7=False)
     check("v3 peer spawned", old.spawn() is not None)
