@@ -8,6 +8,7 @@
 #include "triggers_internal.h" // trigger_send_change_position ("chgp")
 #include <map_catalog.h>
 #include <object_manager.h> // give / drop (KrunkNative Object Manager)
+#include <target_select.h>
 #include <weapons.h>
 #include <ctype.h>
 #include <math.h>
@@ -168,47 +169,82 @@ static int player_fields(const Player *player, char fields[2][64]) {
     return 2;
 }
 
-typedef enum { RESOLVE_OK, RESOLVE_EMPTY, RESOLVE_AMBIGUOUS, RESOLVE_NOT_FOUND } ResolveReason;
+// ---------------------------------------------------------------- target selection (KrunkNative)
+// Every player-targeting command resolves its target through shared/src/target_select.c: a name or
+// id as v3.1.1's resolveOnlinePlayerByQuery (exact normalised name / id, else a unique prefix), or a
+// selector (*, @me / !, @others, @bots, @humans, @team, @enemies, @alive, @dead, a Joel* glob) that
+// may match several players. A selector never widens who may run a command: allowed() gates first.
 
-// resolveOnlinePlayerByQuery: exact (normalised) name/id match, else a unique prefix.
-static Player *resolve_player(const ChatCtx *c, const char *raw, ResolveReason *reason) {
-    char query[64];
-    normalise(raw, query, sizeof(query));
-    *reason = RESOLVE_EMPTY;
-    if (!query[0]) return NULL;
+#define CHAT_TARGETS_MAX 128
 
+typedef struct {
+    Player *players[CHAT_TARGETS_MAX];
+    int count;
+    int selector;               // a selector / glob that left several (or no) players: replies count them
+} ChatTargets;
+
+static int fill_candidates(const ChatCtx *c, TargetCandidate *cands, Player **map, const int max) {
     const Game *game = c->host->game;
-    Player *exact = NULL, *prefix = NULL;
-    int exact_n = 0, prefix_n = 0;
-    for (size_t i = 0; i < game->player_count; i++) {
+    int n = 0;
+    for (size_t i = 0; i < game->player_count && n < max; i++) {
         Player *p = game->players[i];
         if (!p) continue;
-        char fields[2][64];
-        player_fields(p, fields);
-        if (!fields[0][0] && !fields[1][0]) continue;
-        if (!strcmp(fields[0], query) || !strcmp(fields[1], query)) {
-            exact = p;
-            exact_n++;
-        } else if ((fields[0][0] && !strncmp(fields[0], query, strlen(query))) || !strncmp(fields[1], query, strlen(query))) {
-            prefix = p;
-            prefix_n++;
-        }
+        cands[n] = (TargetCandidate) {.name = p->name, .id = p->uid, .team = p->team, .bot = (unsigned char) !!p->is_bot,
+                                      .alive = (unsigned char) !!p->active, .self = (unsigned char) (p == c->player)};
+        map[n++] = p;
     }
-    if (exact_n == 1) { *reason = RESOLVE_OK; return exact; }
-    if (exact_n > 1) { *reason = RESOLVE_AMBIGUOUS; return NULL; }
-    if (prefix_n == 1) { *reason = RESOLVE_OK; return prefix; }
-    *reason = prefix_n > 1 ? RESOLVE_AMBIGUOUS : RESOLVE_NOT_FOUND;
-    return NULL;
+    return n;
 }
 
-static Player *resolve_or_reply(ChatCtx *c, const char *query) {
-    ResolveReason reason;
-    Player *player = resolve_player(c, query, &reason);
-    if (player) return player;
-    if (reason == RESOLVE_AMBIGUOUS) reply(c, "Player '%s' is ambiguous.", query);
-    else reply(c, "Player '%s' not found.", query);
-    return NULL;
+static void reply_no_target(ChatCtx *c, const char *query, const TargetResult *r) {
+    switch (r->status) {
+        case TARGET_AMBIGUOUS: reply(c, "Player '%s' is ambiguous.", query); break;
+        case TARGET_NO_MATCH: reply(c, "No players match '%s'.", query); break;
+        case TARGET_NO_SELF: reply(c, "'%s' needs your own player (none here).", query); break;
+        default: reply(c, "Player '%s' not found.", query); break;
+    }
 }
+
+// The players `query` names (quiet: no reply on failure). `alive_only` drops unspawned players from
+// a selector's matches (a single name still resolves, the command decides what "not spawned" means).
+static int select_players(ChatCtx *c, const char *query, const int alive_only, ChatTargets *out, TargetResult *r) {
+    static TargetCandidate cands[CHAT_TARGETS_MAX];
+    static Player *map[CHAT_TARGETS_MAX];
+    int idx[CHAT_TARGETS_MAX];
+    const int n = fill_candidates(c, cands, map, CHAT_TARGETS_MAX);
+    target_select(cands, n, query, 0, idx, CHAT_TARGETS_MAX, r);
+    out->count = 0;
+    for (int i = 0; i < r->count && i < CHAT_TARGETS_MAX; i++) {
+        Player *p = map[idx[i]];
+        if (alive_only && r->selector && !p->active) continue;
+        out->players[out->count++] = p;
+    }
+    if (r->status == TARGET_OK && !out->count) r->status = TARGET_NO_MATCH; // matched only unspawned players
+    // a selector that leaves one player answers like that player's name ("God mode ON on Sam")
+    out->selector = r->selector && out->count != 1;
+    return out->count;
+}
+
+static int select_or_reply(ChatCtx *c, const char *query, const int alive_only, ChatTargets *out) {
+    TargetResult r;
+    if (select_players(c, query, alive_only, out, &r)) return out->count;
+    if (r.status == TARGET_NO_MATCH && alive_only && r.count) reply(c, "No spawned players match '%s'.", query);
+    else reply_no_target(c, query, &r);
+    return 0;
+}
+
+// One player: a name / id, or a selector that matches exactly one (tp, ip, banip, unban).
+static Player *resolve_or_reply(ChatCtx *c, const char *query) {
+    ChatTargets t;
+    if (!select_or_reply(c, query, 0, &t)) return NULL;
+    if (t.count > 1) {
+        reply(c, "'%s' matches %d players: name one.", query, t.count);
+        return NULL;
+    }
+    return t.players[0];
+}
+
+static const char *players_word(const int n) { return n == 1 ? "player" : "players"; }
 
 static int is_toggle_literal(const char *s) {
     if (!s) return 0;
@@ -227,15 +263,33 @@ int chat_parse_toggle(const char *arg, const int current) {
 }
 
 typedef struct {
-    Player *player;
+    ChatTargets targets;
     const char *mode_arg;
-    int is_self;
+    int is_self;                // the caller alone, named by no query ("god", "god on")
 } ToggleTarget;
 
-// resolveDevToggleTarget: "" -> self, "on" -> self + mode, "<who...> [on|off]" -> target.
+// The query of `parts` words, args.join(" ").trim()
+static void join_query(ChatCtx *c, const int parts, char *query, const size_t size) {
+    size_t len = 0;
+    query[0] = 0;
+    for (int i = 0; i < parts; i++) {
+        len += (size_t) snprintf(query + len, size - len, "%s%s", i ? " " : "", c->argv[i]);
+        if (len >= size) break;
+    }
+    char *start = query;
+    while (*start == ' ') start++;
+    memmove(query, start, strlen(start) + 1);
+    for (size_t n = strlen(query); n && query[n - 1] == ' '; n--) query[n - 1] = 0;
+}
+
+// resolveDevToggleTarget: "" -> self, "on" -> self + mode, "<who...> [on|off]" -> target(s).
+// KrunkNative: <who> may be a selector (god *, god @bots off): every spawned match.
 static int toggle_target(ChatCtx *c, const char *label, ToggleTarget *out) {
     int parts = c->argc;
     out->mode_arg = NULL;
+    out->is_self = 0;
+    out->targets.count = 0;
+    out->targets.selector = 0;
     if (c->argc == 1 && is_toggle_literal(c->argv[0])) {
         out->mode_arg = c->argv[0];
         parts = 0;
@@ -249,38 +303,48 @@ static int toggle_target(ChatCtx *c, const char *label, ToggleTarget *out) {
             reply(c, "%s unavailable (no active player).", label);
             return 0;
         }
-        out->player = c->player;
+        out->targets.players[0] = c->player;
+        out->targets.count = 1;
         out->is_self = 1;
         return 1;
     }
 
-    char query[NET_CHAT_TEXT_SIZE] = "";
-    size_t len = 0;
-    for (int i = 0; i < parts; i++) {
-        len += (size_t) snprintf(query + len, sizeof(query) - len, "%s%s", i ? " " : "", c->argv[i]);
-        if (len >= sizeof(query)) break;
-    }
-    char *start = query;
-    while (*start == ' ') start++;
-    for (size_t n = strlen(start); n && start[n - 1] == ' '; n--) start[n - 1] = 0;
-
-    Player *player = resolve_or_reply(c, start);
-    if (!player) return 0;
-    if (!player->active) {
+    char query[NET_CHAT_TEXT_SIZE];
+    join_query(c, parts, query, sizeof(query));
+    if (!select_or_reply(c, query, 1, &out->targets)) return 0;
+    if (!out->targets.selector && !out->targets.players[0]->active) {
         reply(c, "%s unavailable (target not active).", label);
         return 0;
     }
-    out->player = player;
-    out->is_self = player == c->player;
+    out->is_self = !out->targets.selector && out->targets.players[0] == c->player;
     return 1;
 }
 
-// targetSuffix: "" for self, " on <name>" otherwise
-static const char *target_suffix(const ToggleTarget *t, char *buf, const size_t n) {
-    char name[PLAYER_NAME_SIZE + 16];
-    if (t->is_self) buf[0] = 0;
-    else snprintf(buf, n, " on %s", player_label(t->player, name, sizeof(name)));
-    return buf;
+typedef int (*ToggleGet)(const Player*);
+typedef void (*ToggleSet)(ChatCtx*, Player*, int on);
+
+// One on/off cheat over the targets. With no on|off a single target flips; several go ON unless
+// every one already is (then OFF), so `god *` never leaves a mixed lobby. `force` >= 0 overrides
+// (ungod). Replies "God mode ON" / "God mode ON on X" / "God mode ON: 5 players".
+static void run_toggle(ChatCtx *c, const char *label, const ToggleGet get, const ToggleSet set, const int force) {
+    ToggleTarget t;
+    if (!toggle_target(c, label, &t)) return;
+    int next;
+    if (force >= 0) next = force;
+    else if (t.mode_arg || t.targets.count == 1) next = chat_parse_toggle(t.mode_arg, get(t.targets.players[0]));
+    else {
+        int all_on = 1;
+        for (int i = 0; i < t.targets.count; i++) all_on &= !!get(t.targets.players[i]);
+        next = !all_on;
+    }
+    for (int i = 0; i < t.targets.count; i++) set(c, t.targets.players[i], next);
+    if (t.is_self) reply(c, "%s %s", label, next ? "ON" : "OFF");
+    else if (!t.targets.selector) {
+        char name[PLAYER_NAME_SIZE + 16];
+        reply(c, "%s %s on %s", label, next ? "ON" : "OFF", player_label(t.targets.players[0], name, sizeof(name)));
+    } else {
+        reply(c, "%s %s: %d %s", label, next ? "ON" : "OFF", t.targets.count, players_word(t.targets.count));
+    }
 }
 
 static const char *map_name(const Game *game, const int index) {
@@ -311,41 +375,63 @@ static void cmd_c(ChatCtx *c) {
     reply(c, "%d connected, %d in menu", n, in_menu);
 }
 
-static void cmd_kick_or_ban(ChatCtx *c, const int ban) {
-    if (!allowed(c, CHAT_PERM_DEV)) return;
-    if (!c->rest[0]) {
-        reply(c, ban ? "Usage: /ban <name|id>" : "Usage: /kick <name|id>");
-        return;
-    }
-    Player *target = resolve_or_reply(c, c->rest);
-    if (!target) return;
-    if (target == c->player) {
-        reply(c, ban ? "Cannot ban yourself." : "Cannot kick yourself.");
-        return;
-    }
-    GameBot *bot = game_bot_of(c->host->game, target);
-    if (bot) { // a v7.1.4 bot player leaves like a kicked guest (BotManager.remove)
-        char name[PLAYER_NAME_SIZE + 16];
-        player_label(target, name, sizeof(name));
-        game_bots_remove(c->host->game, bot);
-        if (ban) reply(c, "Disconnected %s, but no account id was available to persist a ban.", name);
-        else reply(c, "Kicked %s.", name);
-        return;
-    }
-    if (!peer_by_id(c->host, target->uid, NULL) || !c->host->disconnect) {
-        reply(c, "Target socket not found.");
-        return;
-    }
+// One kick / ban; 1 = done. `quiet`: a selector run counts instead of one line per player.
+static int kick_or_ban_one(ChatCtx *c, Player *target, const int ban, const int quiet) {
     char label[PLAYER_NAME_SIZE + 16];
     player_label(target, label, sizeof(label));
+    GameBot *bot = game_bot_of(c->host->game, target);
+    if (bot) { // a v7.1.4 bot player leaves like a kicked guest (BotManager.remove)
+        game_bots_remove(c->host->game, bot);
+        if (quiet) return 1;
+        if (ban) reply(c, "Disconnected %s, but no account id was available to persist a ban.", label);
+        else reply(c, "Kicked %s.", label);
+        return 1;
+    }
+    if (!peer_by_id(c->host, target->uid, NULL) || !c->host->disconnect) {
+        if (!quiet) reply(c, "Target socket not found.");
+        return 0;
+    }
     ChatPeer peer;
     const int account = ban && peer_by_id(c->host, target->uid, &peer) && peer.account_id > 0 && c->host->ban_account
                             ? peer.account_id : 0;
     if (account) c->host->ban_account(c->host->user, account, label); // pnhBannedAccountIds.add(accountId)
     c->host->disconnect(c->host->user, target->uid, ban ? "Banned" : "Kicked", ban ? "004003" : "004002");
+    if (quiet) return 1;
     if (ban && account) reply(c, "Banned %s (account %d).", label, account);
     else if (ban) reply(c, "Disconnected %s, but no account id was available to persist a ban.", label); // a guest
     else reply(c, "Kicked %s.", label);
+    return 1;
+}
+
+static void cmd_kick_or_ban(ChatCtx *c, const int ban) {
+    if (!allowed(c, CHAT_PERM_DEV)) return;
+    if (!c->rest[0]) {
+        reply(c, ban ? "Usage: /ban <name|id|selector>" : "Usage: /kick <name|id|selector>");
+        return;
+    }
+    ChatTargets t;
+    if (!select_or_reply(c, c->rest, 0, &t)) return;
+    if (!t.selector) {
+        if (t.players[0] == c->player) {
+            reply(c, ban ? "Cannot ban yourself." : "Cannot kick yourself.");
+            return;
+        }
+        kick_or_ban_one(c, t.players[0], ban, 0);
+        return;
+    }
+    // a selector (kick *, kick @bots): every match but the caller. The players are copied first:
+    // removing a bot frees its Player.
+    int uids[CHAT_TARGETS_MAX], n = 0, done = 0;
+    for (int i = 0; i < t.count; i++) if (t.players[i] != c->player) uids[n++] = t.players[i]->uid;
+    if (!n) {
+        reply(c, ban ? "Cannot ban yourself." : "Cannot kick yourself.");
+        return;
+    }
+    for (int i = 0; i < n; i++) {
+        Player *p = game_find_player(c->host->game, uids[i]);
+        if (p) done += kick_or_ban_one(c, p, ban, 1);
+    }
+    reply(c, "%s: %d %s", ban ? "Banned" : "Kicked", done, players_word(done));
 }
 
 static void cmd_kick(ChatCtx *c) { cmd_kick_or_ban(c, 0); }
@@ -784,75 +870,83 @@ static void cmd_cycle(ChatCtx *c) {
     if (c->host->change_map && game->map_count) c->host->change_map(c->host->user, game_pick_next_map(game), game->current_mode_index);
 }
 
+static int get_god(const Player *p) { return p->god_mode; }
+static void set_god(ChatCtx *c, Player *p, const int on) {
+    p->god_mode = (unsigned char) on;
+    if (on) {
+        p->health = (float) p->max_health;
+        mode_send_health(c->host->game, p); // ["h", hp]
+    }
+}
+
 static void cmd_god(ChatCtx *c) {
     if (!allowed(c, CHAT_PERM_CHEAT)) return;
-    ToggleTarget t;
-    if (!toggle_target(c, "God mode", &t)) return;
-    const int next = chat_parse_toggle(t.mode_arg, t.player->god_mode);
-    t.player->god_mode = (unsigned char) next;
-    if (next) {
-        t.player->health = (float) t.player->max_health;
-        mode_send_health(c->host->game, t.player); // ["h", hp]
-    }
-    char suffix[PLAYER_NAME_SIZE + 24];
-    reply(c, "God mode %s%s", next ? "ON" : "OFF", target_suffix(&t, suffix, sizeof(suffix)));
+    run_toggle(c, "God mode", get_god, set_god, -1);
+}
+
+// ungod [target] (KrunkNative): god mode OFF, the same gate as /god
+static void cmd_ungod(ChatCtx *c) {
+    if (!allowed(c, CHAT_PERM_CHEAT)) return;
+    run_toggle(c, "God mode", get_god, set_god, 0);
+}
+
+static int get_smite(const Player *p) { return p->smite; }
+static void set_smite(ChatCtx *c, Player *p, const int on) {
+    (void) c;
+    p->smite = (unsigned char) on;
 }
 
 static void cmd_smite(ChatCtx *c) {
     if (!allowed(c, CHAT_PERM_CHEAT)) return;
-    ToggleTarget t;
-    if (!toggle_target(c, "Smite", &t)) return;
-    const int next = chat_parse_toggle(t.mode_arg, t.player->smite);
-    t.player->smite = (unsigned char) next;
-    char suffix[PLAYER_NAME_SIZE + 24];
-    reply(c, "Smite %s%s", next ? "ON" : "OFF", target_suffix(&t, suffix, sizeof(suffix)));
+    run_toggle(c, "Smite", get_smite, set_smite, -1);
 }
 
 // notarget (KrunkNative, like Source's): bots and AIs ignore the player (bots.c bot_is_enemy,
 // ai.c ai_find_target) and drop them if already targeted. Shots still hit both ways.
+static int get_notarget(const Player *p) { return p->notarget; }
+static void set_notarget(ChatCtx *c, Player *p, const int on) {
+    (void) c;
+    p->notarget = (unsigned char) on;
+}
+
 static void cmd_notarget(ChatCtx *c) {
     if (!allowed(c, CHAT_PERM_CHEAT)) return;
-    ToggleTarget t;
-    if (!toggle_target(c, "Notarget", &t)) return;
-    const int next = chat_parse_toggle(t.mode_arg, t.player->notarget);
-    t.player->notarget = (unsigned char) next;
-    char suffix[PLAYER_NAME_SIZE + 24];
-    reply(c, "Notarget %s%s", next ? "ON" : "OFF", target_suffix(&t, suffix, sizeof(suffix)));
+    run_toggle(c, "Notarget", get_notarget, set_notarget, -1);
+}
+
+static int get_noclip(const Player *p) { return p->noclip; }
+static void set_noclip(ChatCtx *c, Player *p, const int on) {
+    p->noclip = (unsigned char) on;
+    send_cheat(c, p->uid, NET_CHEAT_NOCLIP, on); // ["noc", next]
 }
 
 static void cmd_noclip(ChatCtx *c) {
     if (!allowed(c, CHAT_PERM_CHEAT)) return;
-    ToggleTarget t;
-    if (!toggle_target(c, "Noclip", &t)) return;
-    const int next = chat_parse_toggle(t.mode_arg, t.player->noclip);
-    t.player->noclip = (unsigned char) next;
-    send_cheat(c, t.player->uid, NET_CHEAT_NOCLIP, next); // ["noc", next]
-    char suffix[PLAYER_NAME_SIZE + 24];
-    reply(c, "Noclip %s%s", next ? "ON" : "OFF", target_suffix(&t, suffix, sizeof(suffix)));
+    run_toggle(c, "Noclip", get_noclip, set_noclip, -1);
+}
+
+static int get_forcehide(const Player *p) { return p->force_hide; }
+static void set_forcehide(ChatCtx *c, Player *p, const int on) {
+    p->force_hide = (unsigned char) on;
+    send_cheat(c, p->uid, NET_CHEAT_FORCE_HIDE, on); // ["fh", next]
 }
 
 static void cmd_forcehide(ChatCtx *c) {
     if (!allowed(c, CHAT_PERM_DEV_CHEAT)) return;
-    ToggleTarget t;
-    if (!toggle_target(c, "Forcehide", &t)) return;
-    const int next = chat_parse_toggle(t.mode_arg, t.player->force_hide);
-    t.player->force_hide = (unsigned char) next;
-    send_cheat(c, t.player->uid, NET_CHEAT_FORCE_HIDE, next); // ["fh", next]
-    char suffix[PLAYER_NAME_SIZE + 24];
-    reply(c, "Forcehide %s%s", next ? "ON" : "OFF", target_suffix(&t, suffix, sizeof(suffix)));
+    run_toggle(c, "Forcehide", get_forcehide, set_forcehide, -1);
+}
+
+static int get_unlimitedammo(const Player *p) { return p->unlimited_ammo; }
+static void set_unlimitedammo(ChatCtx *c, Player *p, const int on) {
+    p->unlimited_ammo = (unsigned char) on;
+    if (on) p->can_throw = 1;
+    send_cheat(c, p->uid, NET_CHEAT_UNLIMITED_AMMO, on); // ["unl", next] (+ "uamo")
+    mode_send_loadout(c->host->game, p);
 }
 
 static void cmd_unlimitedammo(ChatCtx *c) {
     if (!allowed(c, CHAT_PERM_DEV_CHEAT)) return;
-    ToggleTarget t;
-    if (!toggle_target(c, "Unlimited ammo", &t)) return;
-    const int next = chat_parse_toggle(t.mode_arg, t.player->unlimited_ammo);
-    t.player->unlimited_ammo = (unsigned char) next;
-    if (next) t.player->can_throw = 1;
-    send_cheat(c, t.player->uid, NET_CHEAT_UNLIMITED_AMMO, next); // ["unl", next] (+ "uamo")
-    mode_send_loadout(c->host->game, t.player);
-    char suffix[PLAYER_NAME_SIZE + 24];
-    reply(c, "Unlimited ammo %s%s", next ? "ON" : "OFF", target_suffix(&t, suffix, sizeof(suffix)));
+    run_toggle(c, "Unlimited ammo", get_unlimitedammo, set_unlimitedammo, -1);
 }
 
 // killTargetPlayer: players.kill(target, source) with godMode lifted for the kill.
@@ -868,9 +962,27 @@ static void kill_player(Player *target, Player *source) {
 static void cmd_kill(ChatCtx *c) {
     if (!allowed(c, CHAT_PERM_CHEAT)) return;
     Player *player = c->player;
-    if (!player || !player->active) return;
+    // KrunkNative: the server console and rcon (no player) kill targets too, as nobody (no credit)
+    if ((!player || !player->active) && c->sender != CHAT_CMD_CONSOLE) return;
     if (!c->rest[0]) {
-        kill_player(player, player);
+        if (player) kill_player(player, player);
+        return;
+    }
+    Game *game = c->host->game;
+
+    // KrunkNative selectors (kill *, kill @bots, kill Joel*): every spawned matching player
+    if (target_is_selector(c->rest)) {
+        ChatTargets t;
+        if (!select_or_reply(c, c->rest, 1, &t)) return;
+        char names[CHAT_TEXT_MAX] = "";
+        size_t len = 0;
+        for (int i = 0; i < t.count; i++) {
+            char label[PLAYER_NAME_SIZE + 16];
+            player_label(t.players[i], label, sizeof(label));
+            kill_player(t.players[i], player);
+            if (len < sizeof(names)) len += (size_t) snprintf(names + len, sizeof(names) - len, "%s%s", i ? ", " : "", label);
+        }
+        reply(c, "Killed %d %s: %s.", t.count, players_word(t.count), names);
         return;
     }
 
@@ -882,7 +994,6 @@ static void cmd_kill(ChatCtx *c) {
         reply(c, "Kill target '%s' not found.", c->rest);
         return;
     }
-    Game *game = c->host->game;
     Player *exact[64], *partial[64];
     int exact_n = 0, partial_n = 0;
     for (size_t i = 0; i < player_slots(c); i++) {
@@ -1435,16 +1546,23 @@ static void cmd_bring(ChatCtx *c) {
         len += (size_t) snprintf(query + len, sizeof(query) - len, "%s%s", i ? " " : "", tokens[i]);
     }
     Game *game = c->host->game;
-    if (!strcasecmp(query, "all") || !strcmp(query, "*")) {
+    if (!strcasecmp(query, "all") || target_is_selector(query)) { // all = *: every spawned player but you
+        ChatTargets t;
+        TargetResult r;
+        select_players(c, !strcasecmp(query, "all") ? "*" : query, 1, &t, &r);
+        if (r.status == TARGET_NO_SELF) {
+            reply_no_target(c, query, &r);
+            return;
+        }
         int moved = 0;
-        for (size_t i = 0; i < player_slots(c); i++) {
-            Player *p = game->players[i];
-            if (!p || !p->active || p == self) continue;
-            tp_move(game, p, to);
+        for (int i = 0; i < t.count; i++) {
+            if (t.players[i] == self) continue;
+            tp_move(game, t.players[i], to);
             moved++;
         }
         if (moved) reply(c, "Brought %d player%s to %s.", moved, plural(moved), where);
-        else reply(c, "Nobody to bring.");
+        else if (!strcasecmp(query, "all") || !strcmp(query, "*")) reply(c, "Nobody to bring.");
+        else reply(c, "No players match '%s'.", query);
         return;
     }
     Player *target = tp_spawned_target(c, query);
@@ -1538,28 +1656,40 @@ static void join_words(char **argv, const int count, char *out, const size_t n) 
 static void cmd_give(ChatCtx *c) {
     char work[NET_CHAT_TEXT_SIZE], item[NET_CHAT_TEXT_SIZE];
     char *argv[CHAT_ARGS_MAX];
-    const int argc = split_quoted(c->rest, work, sizeof(work), argv, CHAT_ARGS_MAX);
+    int argc = split_quoted(c->rest, work, sizeof(work), argv, CHAT_ARGS_MAX);
     if (!argc) {
-        reply(c, "Usage: /give <weapon|item> [player] (e.g. /give sniper, /give \"tool gun\", /give krtag)");
+        reply(c, "Usage: /give <weapon|item> [player|selector] (e.g. /give sniper, /give \"tool gun\", /give krtag, /give * sniper)");
         return;
     }
-    int id = -1, matches = 0;
-    join_words(argv, argc, item, sizeof(item));
-    int kind = object_manager_give_lookup(item, &id, &matches);
-    Player *target = c->player;
-    if (kind == OM_GIVE_NONE && argc >= 2) { // the last word names the receiver
-        ResolveReason reason;
-        Player *p = resolve_player(c, argv[argc - 1], &reason);
+    int id = -1, matches = 0, kind = OM_GIVE_NONE;
+    ChatTargets targets = {.count = 0};
+    const char *query = NULL;
+    // KrunkNative: give <selector> <weapon|item> too (give * sniper): only a selector leads, so
+    // "give tool gun" never reads "tool" as a player
+    if (argc >= 2 && target_is_selector(argv[0])) {
+        join_words(argv + 1, argc - 1, item, sizeof(item));
+        kind = object_manager_give_lookup(item, &id, &matches);
+        if (kind != OM_GIVE_NONE) query = argv[0];
+    }
+    if (kind == OM_GIVE_NONE) {
+        join_words(argv, argc, item, sizeof(item));
+        kind = object_manager_give_lookup(item, &id, &matches);
+    }
+    if (kind == OM_GIVE_NONE && argc >= 2) { // the last word names the receiver(s)
+        TargetResult r;
+        ChatTargets found;
+        const int any = select_players(c, argv[argc - 1], 0, &found, &r);
         char head[NET_CHAT_TEXT_SIZE];
         join_words(argv, argc - 1, head, sizeof(head));
         int head_id = -1, head_matches = 0;
-        const int head_kind = p ? object_manager_give_lookup(head, &head_id, &head_matches) : OM_GIVE_NONE;
-        if (head_kind != OM_GIVE_NONE) {
+        const int head_kind = object_manager_give_lookup(head, &head_id, &head_matches);
+        if (head_kind != OM_GIVE_NONE && (any || r.selector)) {
             kind = head_kind;
             id = head_id;
-            target = p;
+            matches = head_matches;
+            query = argv[argc - 1];
             snprintf(item, sizeof(item), "%s", head);
-        } else if (!p && reason == RESOLVE_AMBIGUOUS && object_manager_give_lookup(head, NULL, NULL) != OM_GIVE_NONE) {
+        } else if (head_kind != OM_GIVE_NONE && r.status == TARGET_AMBIGUOUS) {
             reply(c, "Player '%s' is ambiguous.", argv[argc - 1]);
             return;
         }
@@ -1570,32 +1700,63 @@ static void cmd_give(ChatCtx *c) {
         return;
     }
     const char *name = object_manager_give_name(kind, id);
-    if (!target) {
+    if (query) {
+        if (!select_or_reply(c, query, 0, &targets)) return;
+    } else if (c->player) {
+        targets.players[0] = c->player;
+        targets.count = 1;
+    } else {
         reply(c, "Name a player: /give %s <player>.", name);
         return;
     }
     const ObjectManagerPerms perms = om_perms_of(c);
-    char who[PLAYER_NAME_SIZE + 16];
-    player_label(target, who, sizeof(who));
-    if (target != c->player && !perms.dev && !perms.host) {
+    int others = 0;
+    for (int i = 0; i < targets.count; i++) others |= targets.players[i] != c->player;
+    if (others && !perms.dev && !perms.host) { // a selector never widens the gate
         reply(c, "Only developers and the host can give to other players.");
         om_notify(c, "Host or developer required");
         return;
     }
-    if (!target->active) {
-        reply(c, "%s is not spawned.", target == c->player ? "You are" : who);
-        return;
-    }
     const int weapon = kind == OM_GIVE_WEAPON;
-    // an item lands at the receiver's feet: the crosshair straight down
-    const NetSpawnResultPacket r = om_run(c, target, weapon ? OM_ACTION_ADD_WEAPON : OM_ACTION_SPAWN_ENTITY, id, weapon ? 0.0f : (float) -M_PI / 2.0f);
-    if (r.status != OM_STATUS_OK) {
-        om_reply_failure(c, &r, weapon && id != WEAPON_ID_TOOL_GUN ? "Not allowed: extra weapons are off in this game."
-                                                                    : "Not allowed: only developers and the host can spawn here.");
+    const char *denied = weapon && id != WEAPON_ID_TOOL_GUN ? "Not allowed: extra weapons are off in this game."
+                                                            : "Not allowed: only developers and the host can spawn here.";
+    if (!targets.selector) {
+        Player *target = targets.players[0];
+        char who[PLAYER_NAME_SIZE + 16];
+        player_label(target, who, sizeof(who));
+        if (!target->active) {
+            reply(c, "%s is not spawned.", target == c->player ? "You are" : who);
+            return;
+        }
+        // an item lands at the receiver's feet: the crosshair straight down
+        const NetSpawnResultPacket r = om_run(c, target, weapon ? OM_ACTION_ADD_WEAPON : OM_ACTION_SPAWN_ENTITY, id, weapon ? 0.0f : (float) -M_PI / 2.0f);
+        if (r.status != OM_STATUS_OK) {
+            om_reply_failure(c, &r, denied);
+            return;
+        }
+        if (target == c->player) reply(c, weapon ? "%s added to your loadout." : "%s dropped at your feet.", name);
+        else reply(c, "Gave %s to %s.", name, who);
         return;
     }
-    if (target == c->player) reply(c, weapon ? "%s added to your loadout." : "%s dropped at your feet.", name);
-    else reply(c, "Gave %s to %s.", name, who);
+    int given = 0, spawned = 0;
+    NetSpawnResultPacket failure = {0};
+    for (int i = 0; i < targets.count; i++) {
+        Player *target = targets.players[i];
+        if (!target->active) continue;
+        spawned++;
+        const NetSpawnResultPacket r = om_run(c, target, weapon ? OM_ACTION_ADD_WEAPON : OM_ACTION_SPAWN_ENTITY, id, weapon ? 0.0f : (float) -M_PI / 2.0f);
+        if (r.status == OM_STATUS_OK) given++;
+        else if (failure.status == OM_STATUS_OK) failure = r;
+    }
+    if (!spawned) {
+        reply(c, "No spawned players match '%s'.", query);
+        return;
+    }
+    if (!given) {
+        om_reply_failure(c, &failure, denied);
+        return;
+    }
+    reply(c, "Gave %s: %d %s", name, given, players_word(given));
 }
 
 // drop: the weapon in hand on the ground in front of you. An Object Manager extra slot becomes a
@@ -1639,8 +1800,8 @@ static void cmd_drop(ChatCtx *c) {
 static const ChatCommand COMMANDS[] = {
     {{"c", NULL, "", "show connected players and menu count", CHAT_PERM_ANY}, cmd_c},
     {{"count", "c", "", "alias for /c (show connected players and menu count)", CHAT_PERM_ANY}, cmd_c},
-    {{"kick", NULL, "<name|id>", "kick a player", CHAT_PERM_DEV}, cmd_kick},
-    {{"ban", NULL, "<name|id>", "ban a player account", CHAT_PERM_DEV}, cmd_ban},
+    {{"kick", NULL, "<name|id|selector>", "kick a player (kick @bots: every match but you)", CHAT_PERM_DEV}, cmd_kick},
+    {{"ban", NULL, "<name|id|selector>", "ban a player account (or every match but you)", CHAT_PERM_DEV}, cmd_ban},
     {{"unban", NULL, "<accountId|name|id>", "unban an account", CHAT_PERM_DEV}, cmd_unban},
     {{"bans", NULL, "", "list banned account ids", CHAT_PERM_DEV}, cmd_bans},
     {{"ip", NULL, "<name|id>", "show a player's IP", CHAT_PERM_DEV}, cmd_ip},
@@ -1659,15 +1820,16 @@ static const ChatCommand COMMANDS[] = {
     {{"maps", NULL, "", "list available maps", CHAT_PERM_DEV}, cmd_maps},
     {{"cycle", NULL, "", "cycle to the next map", CHAT_PERM_DEV}, cmd_cycle},
     {{"game", NULL, "<text>", "send a game command", CHAT_PERM_DEV}, cmd_game},
-    {{"god", NULL, "[target] [on|off]", "toggle god mode (self or target)", CHAT_PERM_CHEAT}, cmd_god},
-    {{"smite", NULL, "[target] [on|off]", "toggle smite-on-hit (self or target)", CHAT_PERM_CHEAT}, cmd_smite},
-    {{"noclip", NULL, "[target] [on|off]", "toggle noclip (self or target)", CHAT_PERM_CHEAT}, cmd_noclip},
-    {{"notarget", NULL, "[target] [on|off]", "toggle notarget: bots and AIs ignore you (self or target)", CHAT_PERM_CHEAT}, cmd_notarget},
-    {{"kill", NULL, "[target]", "kill yourself or every matching player", CHAT_PERM_CHEAT}, cmd_kill},
+    {{"god", NULL, "[target] [on|off]", "toggle god mode (self, target or selector: * @bots @team Joel*)", CHAT_PERM_CHEAT}, cmd_god},
+    {{"ungod", NULL, "[target]", "turn god mode off (self, target or selector)", CHAT_PERM_CHEAT}, cmd_ungod},
+    {{"smite", NULL, "[target] [on|off]", "toggle smite-on-hit (self, target or selector)", CHAT_PERM_CHEAT}, cmd_smite},
+    {{"noclip", NULL, "[target] [on|off]", "toggle noclip (self, target or selector)", CHAT_PERM_CHEAT}, cmd_noclip},
+    {{"notarget", NULL, "[target] [on|off]", "toggle notarget: bots and AIs ignore you (self, target or selector)", CHAT_PERM_CHEAT}, cmd_notarget},
+    {{"kill", NULL, "[target]", "kill yourself or every matching player (or selector: * @bots @enemies)", CHAT_PERM_CHEAT}, cmd_kill},
     {{"team", NULL, "<red|blue>", "switch teams", CHAT_PERM_ANY}, cmd_team},
     {{"teams", NULL, "", "list teams and players", CHAT_PERM_ANY}, cmd_teams},
-    {{"forcehide", NULL, "[target] [on|off]", "toggle forcehide (self or target)", CHAT_PERM_DEV_CHEAT}, cmd_forcehide},
-    {{"unlimitedammo", NULL, "[target] [on|off]", "toggle unlimited ammo (self or target)", CHAT_PERM_DEV_CHEAT}, cmd_unlimitedammo},
+    {{"forcehide", NULL, "[target] [on|off]", "toggle forcehide (self, target or selector)", CHAT_PERM_DEV_CHEAT}, cmd_forcehide},
+    {{"unlimitedammo", NULL, "[target] [on|off]", "toggle unlimited ammo (self, target or selector)", CHAT_PERM_DEV_CHEAT}, cmd_unlimitedammo},
     {{"score", NULL, "[amount]", "add score (default +100)", CHAT_PERM_DEV_CHEAT}, cmd_score},
     {{"summon", NULL, "[name]", "spawn a Soul Sanctum AI by name (no arg lists summonable names)", CHAT_PERM_DEV_CHEAT}, cmd_summon},
     {{"players", NULL, "", "list connected players (id, name, team)", CHAT_PERM_ANY}, cmd_players},
@@ -1689,9 +1851,9 @@ static const ChatCommand COMMANDS[] = {
     {{"bot_diff", "bot_difficulty", "<value>", "alias for bot_difficulty", CHAT_PERM_HOST_DEV}, cmd_bot_difficulty},
     // KrunkNative: v7.1.4's admin teleports (handleAdminAction 4 / 5 / 9) with coordinates
     {{"tp", NULL, "<x> <y> <z> | <player>", "teleport yourself to a coordinate or to a player", CHAT_PERM_HOST_DEV}, cmd_tp},
-    {{"bring", NULL, "<player|all> [<x> <y> <z>]", "bring players to you or to a coordinate", CHAT_PERM_HOST_DEV}, cmd_bring},
+    {{"bring", NULL, "<player|all|selector> [<x> <y> <z>]", "bring players to you or to a coordinate", CHAT_PERM_HOST_DEV}, cmd_bring},
     // KrunkNative Object Manager (its own rules: object_manager_caps)
-    {{"give", NULL, "<weapon|item> [player]", "give a weapon (an extra loadout slot) or an item; others: devs and the host", CHAT_PERM_ANY}, cmd_give},
+    {{"give", NULL, "[selector] <weapon|item> [player|selector]", "give a weapon (an extra loadout slot) or an item; others: devs and the host", CHAT_PERM_ANY}, cmd_give},
     {{"drop", NULL, "", "drop the weapon in your hand in front of you", CHAT_PERM_ANY}, cmd_drop},
 };
 

@@ -1264,12 +1264,13 @@ static void register_commands(void) {
     register_local("netinfo", NO_ARGS, "show the game transport (WebRTC/WebSocket, UDP/TCP) and its state", cmd_netinfo);
     register_local("show_navmeshes", ARGS(A_NAV_OFF), "visualize generated source-style nav meshes in 3D (off to clear)", cmd_show_navmeshes);
     // Server commands (mirror server/packetHandlers.ts cmds table)
-    register_server("god", ARGS(A_TOGGLE), "toggle god mode (self or target)");
-    register_server("noclip", ARGS(A_TOGGLE), "toggle noclip (self or target)");
-    register_server("smite", ARGS(A_TOGGLE), "toggle smite-on-hit (self or target)");
-    register_server("notarget", ARGS(A_TOGGLE), "toggle notarget: bots and AIs ignore you (self or target)");
-    register_server("forcehide", ARGS(A_TOGGLE), "toggle forcehide (self or target)");
-    register_server("unlimitedammo", ARGS(A_TOGGLE), "toggle unlimited ammo (self or target)");
+    register_server("god", ARGS(A_TOGGLE), "toggle god mode (self, target or selector: * @bots @team Joel*)");
+    register_server("ungod", ARGS(A_TARGET), "turn god mode off (self, target or selector)");
+    register_server("noclip", ARGS(A_TOGGLE), "toggle noclip (self, target or selector)");
+    register_server("smite", ARGS(A_TOGGLE), "toggle smite-on-hit (self, target or selector)");
+    register_server("notarget", ARGS(A_TOGGLE), "toggle notarget: bots and AIs ignore you (self, target or selector)");
+    register_server("forcehide", ARGS(A_TOGGLE), "toggle forcehide (self, target or selector)");
+    register_server("unlimitedammo", ARGS(A_TOGGLE), "toggle unlimited ammo (self, target or selector)");
     register_server("c", NO_ARGS, "show connected players and menu count");
     register_server("count", NO_ARGS, "alias for /c (show connected players and menu count)");
     register_server("ping", ARGS(A_NAME_ID), "show your ping (devs can target players)");
@@ -1537,8 +1538,13 @@ static void con_map_candidates(ConCands *c, const char *prefix) {
     }
 }
 
+// The player names, then the target selectors (shared/include/target_select.h) once one is typed
 static void con_player_candidates(ConCands *c, const char *prefix) {
     const Client *client = con_client();
+    if (prefix[0] == '*' || prefix[0] == '@' || prefix[0] == '!') {
+        static const char *const SELECTORS[] = {"*", "@me", "@others", "@bots", "@humans", "@team", "@enemies", "@alive", "@dead"};
+        for (size_t i = 0; i < sizeof(SELECTORS) / sizeof(SELECTORS[0]); i++) cand_add(c, SELECTORS[i], prefix);
+    }
     if (!client) return;
     for (size_t i = 0; i < client->game.player_count; i++) {
         const Player *p = client->game.players[i];
@@ -1597,7 +1603,7 @@ static void arg_candidates(const char *cmd, const int arg, const char *prefix, C
         if (arg == 0) for (int i = 0; i < g_con.bind_count; i++) cand_add(c, g_con.binds[i].key, prefix);
     } else if (!strcmp(cmd, "toggle")) {
         if (arg == 0) con_words(c, prefix, WORDS("god", "noclip", "smite", "forcehide", "unlimitedammo", "borders", "forcecol", "endless", "bhop"));
-    } else if (cmd_is(cmd, WORDS("god", "noclip", "smite", "forcehide", "unlimitedammo"))) {
+    } else if (cmd_is(cmd, WORDS("god", "ungod", "noclip", "smite", "notarget", "forcehide", "unlimitedammo"))) {
         if (arg == 0) con_player_candidates(c, prefix); // resolveDevToggleTarget: [target] [on|off]
         if (arg <= 1) con_words(c, prefix, ON_OFF);
     } else if (cmd_is(cmd, WORDS("borders", "forcecol"))) {

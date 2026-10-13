@@ -4,6 +4,8 @@
 #include <brain.h>
 #include <build_info.h>
 #include <map_catalog.h>
+#include <target_select.h>
+#include <bots.h>
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
@@ -218,26 +220,44 @@ static int cli_find_map(const char *query) {
     return prefix_matches == 1 ? prefix_match : -1;
 }
 
-static ClientConnection *cli_find_client(const char *query) {
+#define SERVER_CLI_TARGETS_MAX 256
+
+// The connections `query` names (shared/src/target_select.c): an id or an exact normalised name
+// (no prefix, as before), or a selector / glob (*, @humans, @alive, @dead, Joel*). The console is
+// nobody's player, so @me / @team / @enemies match nobody. Returns the count (out[] gets up to max).
+static int cli_select_clients(const char *query, ClientConnection **out, const int max, TargetResult *r) {
     long id;
-    const int numeric = cli_parse_int(query, &id);
-
-    for (size_t i = 0; i < g_server->client_count; i++) {
-        ClientConnection *client = &g_server->clients[i];
-        if (numeric && client->id == id) return client;
+    if (cli_parse_int(query, &id)) { // an id first: a player named "12" never hides connection 12
+        for (size_t i = 0; i < g_server->client_count; i++) {
+            if (g_server->clients[i].id != id) continue;
+            if (max > 0) out[0] = &g_server->clients[i];
+            *r = (TargetResult) {.status = TARGET_OK, .count = 1};
+            return 1;
+        }
     }
-
-    for (size_t i = 0; i < g_server->client_count; i++) {
-        ClientConnection *client = &g_server->clients[i];
-        char a[SERVER_PLAYER_NAME_MAX];
-        char b[SERVER_PLAYER_NAME_MAX];
-
-        cli_normalize(client->name, a, sizeof(a));
-        cli_normalize(query, b, sizeof(b));
-        if (b[0] && !strcmp(a, b)) return client;
+    static TargetCandidate cands[SERVER_CLI_TARGETS_MAX];
+    int idx[SERVER_CLI_TARGETS_MAX];
+    int n = 0;
+    for (size_t i = 0; i < g_server->client_count && n < SERVER_CLI_TARGETS_MAX; i++) {
+        const ClientConnection *client = &g_server->clients[i];
+        const Player *p = client->player;
+        cands[n++] = (TargetCandidate) {.name = client->name, .id = client->id, .team = p ? p->team : 0,
+                                        .alive = (unsigned char) (p && p->active)};
     }
+    const int count = target_select(cands, n, query, TARGET_EXACT_ONLY, idx, SERVER_CLI_TARGETS_MAX, r);
+    for (int i = 0; i < count && i < max && i < SERVER_CLI_TARGETS_MAX; i++) out[i] = &g_server->clients[idx[i]];
+    return count < max ? count : max;
+}
 
-    return NULL;
+static ClientConnection *cli_find_client(const char *query) {
+    ClientConnection *client = NULL;
+    TargetResult r;
+    return cli_select_clients(query, &client, 1, &r) == 1 && !r.selector ? client : NULL;
+}
+
+static void cli_log_no_match(const char *query, const TargetResult *r) {
+    if (r->selector) server_log("No players match '%s'.", query);
+    else server_log("No player matches '%s'. Use 'players' to list ids.", query);
 }
 
 // ------------------------------------------------------------------ commands
@@ -285,8 +305,8 @@ static const CliCommand g_cli_commands[] = {
     {CLI_NAMES("help", "?"), "help [command]", "List commands, or show help for one command", CLI_ARG_COMMAND, cli_cmd_help},
     {CLI_NAMES("status"), "status", "Show version, port, map, mode, players, uptime and tick rate", CLI_ARG_NONE, cli_cmd_status},
     {CLI_NAMES("players", "list"), "players", "List connected players (id, slot, name, class, state, address)", CLI_ARG_NONE, cli_cmd_players},
-    {CLI_NAMES("kick"), "kick <id|name>", "Disconnect a player (use the id shown by 'players')", CLI_ARG_PLAYER, cli_cmd_kick},
-    {CLI_NAMES("ban"), "ban <id|name>", "Kick a player and ban their account (guests: their IP); saved to bans_file", CLI_ARG_PLAYER, cli_cmd_ban},
+    {CLI_NAMES("kick"), "kick <id|name|selector>", "Disconnect a player (the id shown by 'players'), or every match of * @bots @humans Joel*", CLI_ARG_PLAYER, cli_cmd_kick},
+    {CLI_NAMES("ban"), "ban <id|name|selector>", "Kick a player and ban their account (guests: their IP); saved to bans_file", CLI_ARG_PLAYER, cli_cmd_ban},
     {CLI_NAMES("map", "maps", "changelevel"), "map [name|index]", "List the map rotation, or switch every client to another map", CLI_ARG_MAP, cli_cmd_map},
     {CLI_NAMES("mode", "modes"), "mode [alias|index]", "List the game modes, or restart the map in another mode (kept for the next rounds)", CLI_ARG_MODE, cli_cmd_mode},
 #ifdef SERVER_HAVE_NET_CHAT
@@ -294,10 +314,10 @@ static const CliCommand g_cli_commands[] = {
 #endif
     {CLI_NAMES("round"), "round [end | time <s> | length <s>]", "Show the round clock, end the round now, set the seconds left, or the length of later rounds (0 = mode default)", CLI_ARG_TEXT, cli_cmd_round},
     {CLI_NAMES("lagcomp", "lag_comp"), "lagcomp [on | off | anchor exact|arrival|v3 | scale <0.1-1>]", "Show or change lag compensation (server.cfg lag_comp, lag_comp_anchor, lag_comp_scale)", CLI_ARG_TEXT, cli_cmd_lagcomp},
-    {CLI_NAMES("op"), "op <id|name>", "Let a player run DEV chat commands and cheats", CLI_ARG_PLAYER, cli_cmd_op},
-    {CLI_NAMES("deop"), "deop <id|name>", "Take op away again", CLI_ARG_PLAYER, cli_cmd_deop},
+    {CLI_NAMES("op"), "op <id|name|selector>", "Let a player run DEV chat commands and cheats", CLI_ARG_PLAYER, cli_cmd_op},
+    {CLI_NAMES("deop"), "deop <id|name|selector>", "Take op away again", CLI_ARG_PLAYER, cli_cmd_deop},
     {CLI_NAMES("clear", "cls"), "clear", "Clear the screen", CLI_ARG_NONE, cli_cmd_clear},
-    {CLI_NAMES("send", "move"), "send <id|name|*> <gameId|host:port> [reason]", "Move player(s) to another server of the network (lobby id from the coordinator, or a direct address)", CLI_ARG_PLAYER, cli_cmd_send},
+    {CLI_NAMES("send", "move"), "send <id|name|selector> <gameId|host:port> [reason]", "Move player(s) to another server of the network (lobby id from the coordinator, or a direct address)", CLI_ARG_PLAYER, cli_cmd_send},
     {CLI_NAMES("drain"), "drain [update|restart|reason]", "Refuse new players, finish the round, then stop (like SIGTERM); the reason is what players are told", CLI_ARG_TEXT, cli_cmd_drain},
     {CLI_NAMES("quit", "exit", "stop"), "quit [update|restart|reason]", "Disconnect everyone and stop the server now (also Ctrl+C / Ctrl+D); \"update\" tells players GAME UPDATING", CLI_ARG_TEXT, cli_cmd_quit},
 };
@@ -447,11 +467,38 @@ static void cli_cmd_players(const char *args) {
 
 static void cli_cmd_kick(const char *args) {
     if (!*args) {
-        server_log("Usage: kick <id|name>   (see 'players' for ids)");
+        server_log("Usage: kick <id|name|selector>   (see 'players' for ids; kick @bots, kick *)");
         return;
     }
 
     pthread_mutex_lock(&g_server->lock);
+
+    if (target_is_selector(args)) { // every matching connection (menu and spectators too), then the bots
+        ClientConnection *clients[SERVER_CLI_TARGETS_MAX];
+        TargetResult r;
+        const int n = cli_select_clients(args, clients, SERVER_CLI_TARGETS_MAX, &r);
+        int ids[SERVER_CLI_TARGETS_MAX];
+        for (int i = 0; i < n; i++) ids[i] = clients[i]->id;
+        for (int i = 0; i < n; i++) net_kick_client(ids[i], "Kicked", "004002"); // deferred past this command
+        // bots are players without a connection: target_select over them too (@bots, *, Bot*)
+        Game *game = &g_server->game;
+        int bots = 0;
+        for (int i = game_bots_count(game) - 1; i >= 0; i--) {
+            GameBot *bot = &game->bots->list[i];
+            const Player *p = bot->player;
+            const TargetCandidate cand = {.name = bot->name, .id = p ? p->uid : -1, .team = p ? p->team : 0, .bot = 1,
+                                          .alive = (unsigned char) (p && p->active)};
+            int hit;
+            TargetResult br;
+            if (!target_select(&cand, 1, args, TARGET_EXACT_ONLY, &hit, 1, &br)) continue;
+            game_bots_remove(game, bot);
+            bots++;
+        }
+        if (!n && !bots) cli_log_no_match(args, &r);
+        else server_log("Kicked: %d player%s", n + bots, n + bots == 1 ? "" : "s");
+        pthread_mutex_unlock(&g_server->lock);
+        return;
+    }
 
     ClientConnection *client = cli_find_client(args);
 
@@ -646,18 +693,23 @@ static void cli_cmd_round(const char *args) {
 
 static void cli_set_op(const char *args, const int op) {
     if (!*args) {
-        server_log("Usage: %s <id|name>", op ? "op" : "deop");
+        server_log("Usage: %s <id|name|selector>", op ? "op" : "deop");
         return;
     }
     pthread_mutex_lock(&g_server->lock);
-    ClientConnection *client = cli_find_client(args);
-    if (!client) {
-        server_log("No player matches '%s'. Use 'players' to list ids.", args);
+    ClientConnection *clients[SERVER_CLI_TARGETS_MAX];
+    TargetResult r;
+    const int n = cli_select_clients(args, clients, SERVER_CLI_TARGETS_MAX, &r);
+    const char *note = g_server->config.perms ? "" : g_server->config.cheats_open ? " (perms are off: everyone may run every command)"
+                                                                                   : " (perms are off: ops only add the cheats)";
+    if (!n) {
+        cli_log_no_match(args, &r);
+    } else if (!r.selector) {
+        clients[0]->op = (unsigned char) op;
+        server_log("%s %s (id %d)%s", op ? "Opped" : "De-opped", clients[0]->name, clients[0]->id, note);
     } else {
-        client->op = (unsigned char) op;
-        server_log("%s %s (id %d)%s", op ? "Opped" : "De-opped", client->name, client->id,
-                   g_server->config.perms ? "" : g_server->config.cheats_open ? " (perms are off: everyone may run every command)"
-                                                                                  : " (perms are off: ops only add the cheats)");
+        for (int i = 0; i < n; i++) clients[i]->op = (unsigned char) op;
+        server_log("%s: %d player%s%s", op ? "Opped" : "De-opped", n, n == 1 ? "" : "s", note);
     }
     pthread_mutex_unlock(&g_server->lock);
 }
@@ -683,18 +735,7 @@ static void cli_cmd_drain(const char *args) {
 }
 
 // ban: the account (bans_file "accounts", /ban) and, for guests, the address (/banip).
-static void cli_cmd_ban(const char *args) {
-    if (!*args) {
-        server_log("Usage: ban <id|name>   (see 'players' for ids)");
-        return;
-    }
-    pthread_mutex_lock(&g_server->lock);
-    ClientConnection *client = cli_find_client(args);
-    if (!client) {
-        server_log("No player matches '%s'. Use 'players' to list ids.", args);
-        pthread_mutex_unlock(&g_server->lock);
-        return;
-    }
+static void cli_ban_one(ClientConnection *client) {
     if (client->acct.account_id > 0) {
         accounts_ban_account(client->acct.account_id, client->acct.username);
         server_log("Banned %s (account %d)", client->name, client->acct.account_id);
@@ -705,6 +746,20 @@ static void cli_cmd_ban(const char *args) {
         server_log("Banned guest %s (ip %s)", client->name, client->address);
     }
     net_kick_client(client->id, "Banned", "004003");
+}
+
+static void cli_cmd_ban(const char *args) {
+    if (!*args) {
+        server_log("Usage: ban <id|name|selector>   (see 'players' for ids)");
+        return;
+    }
+    pthread_mutex_lock(&g_server->lock);
+    ClientConnection *clients[SERVER_CLI_TARGETS_MAX];
+    TargetResult r;
+    const int n = cli_select_clients(args, clients, SERVER_CLI_TARGETS_MAX, &r);
+    if (!n) cli_log_no_match(args, &r);
+    for (int i = 0; i < n; i++) cli_ban_one(clients[i]); // net_kick_client defers the close
+    if (n && r.selector) server_log("Banned: %d player%s", n, n == 1 ? "" : "s");
     pthread_mutex_unlock(&g_server->lock);
 }
 
@@ -714,7 +769,7 @@ static void cli_cmd_ban(const char *args) {
 static void cli_cmd_send(const char *args) {
     char who[64] = "", target[160] = "", reason[64] = "";
     if (sscanf(args, "%63s %159s %63[^\n]", who, target, reason) < 2) {
-        server_log("Usage: send <id|name|*> <gameId|host:port> [reason]");
+        server_log("Usage: send <id|name|selector> <gameId|host:port> [reason]");
         return;
     }
     NetRedirectPacket packet;
@@ -733,13 +788,10 @@ static void cli_cmd_send(const char *args) {
     }
     snprintf(packet.reason, sizeof(packet.reason), "%s", reason[0] ? reason : "Moving to another server...");
     pthread_mutex_lock(&g_server->lock);
-    int sent = 0;
-    for (size_t i = 0; i < g_server->client_count; i++) {
-        ClientConnection *client = &g_server->clients[i];
-        if (strcmp(who, "*") && client != cli_find_client(who)) continue;
-        net_send_packet(client->fd, NET_PACKET_REDIRECT, &packet, sizeof(packet));
-        sent++;
-    }
+    ClientConnection *clients[SERVER_CLI_TARGETS_MAX];
+    TargetResult r;
+    const int sent = cli_select_clients(who, clients, SERVER_CLI_TARGETS_MAX, &r);
+    for (int i = 0; i < sent; i++) net_send_packet(clients[i]->fd, NET_PACKET_REDIRECT, &packet, sizeof(packet));
     pthread_mutex_unlock(&g_server->lock);
     if (!sent) server_log("No player matches '%s'.", who);
     else server_log("Sent %d player(s) to %s", sent, target);

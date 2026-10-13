@@ -541,6 +541,14 @@ else ()
         target_link_libraries(bot_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # target_select_test: player target selectors (shared/src/target_select.c: *, @me, @bots, @team,
+    # Joel* ...) and the chat commands over them (god * / ungod * / give * / kick *, permissions)
+    add_executable(target_select_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/target_select_test.c)
+    target_link_libraries(target_select_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(target_select_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # navgen_test: the Krunker v7.1.4 generated nav mesh (shared/src/navgen.c) against v7's navgen.ts
     add_executable(navgen_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/navgen_test.c)
     target_link_libraries(navgen_test PRIVATE m)

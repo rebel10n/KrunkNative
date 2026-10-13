@@ -77,7 +77,7 @@ io.send wrapper). The other commands run in the offline game's chat handler. `/b
 | ais | – | any | "AI (n): …" / "No AI." | ✔ every listed AI, dead ones too (shared/src/ai.c) |
 | team | red\|blue | any | sets the team and suicides; "Switched to red team." / "Already on red." / "Usage: /team red\|blue" / "/team only works in team modes." | ✔ online, ✔ **offline** |
 | teams | – | any | "Red (n): …", "Blue (n): …" / "Not a team mode." / "No players." | ✔ online, ✔ **offline** |
-| kick | name\|id | dev | close 4002; "Kicked X." / "Cannot kick yourself." / "Target socket not found." | ✔ (ERROR "Kicked" 004002, removed after the poll pass) |
+| kick | name\|id\|selector | dev | close 4002; "Kicked X." / "Cannot kick yourself." / "Target socket not found." | ✔ (ERROR "Kicked" 004002, removed after the poll pass) |
 | ban | name\|id | dev | account ban + close 4003 | ✔ "Banned X (account N)." when server_bin has accounts (the host's ban_account callback); guests: "Disconnected X, but no account id was available to persist a ban." |
 | unban | accountId\|name\|id | dev | "Unbanned account N." / "Account N was not banned." / "No valid account id to unban." | ✔ (the list is always empty) |
 | bans | – | dev | "Banned accounts (n): …" / "Ban list is empty." | ✔ "Ban list is empty." |
@@ -95,17 +95,57 @@ io.send wrapper). The other commands run in the offline game's chat handler. `/b
 | maps | – | dev | "Maps: …" | ✔ (long lists are split over several lines); **offline** "Built-in maps (n):" |
 | cycle | – | dev | cycleToMap(pickCycleMap()) | ✔ online; **offline** "Cycled to X (i) [Mode]." |
 | game | text | dev | "Game command received: …" | ✔ |
-| god | [target] [on\|off] | cheat | godMode + refill; "God mode ON[ on X]" | ✔ (`Player.god_mode`, "h" sent); **offline** "God mode ON" |
+| god | [target] [on\|off] | cheat | godMode + refill; "God mode ON[ on X]" (selectors: "God mode ON: N players") | ✔ (`Player.god_mode`, "h" sent); **offline** "God mode ON" |
+| ungod | [target] | cheat | Krunker Box Office: `god [target] off` ("God mode OFF[ on X]", "God mode OFF: N players") | ✔ |
 | smite | [target] [on\|off] | cheat | 10000 damage per hit | ✔ (`Player.smite`, applied in `player_change_health`); **offline** |
 | notarget | [target] [on\|off] | cheat | KrunkNative (Source's notarget): bots and AIs never target the player, and drop a current target; "Notarget ON[ on X]" | ✔ (`Player.notarget`, bots.c `bot_is_enemy`, ai.c `ai_find_target`); **offline** |
 | noclip | [target] [on\|off] | cheat | "noc" to the target | ✔ (`NET_CHEAT_NOCLIP` sets the client's `me->noclip`, chat "Noclip - Enabled"); **offline** |
-| kill | [target] | cheat | suicide / kills every match: "Killed N players + M AIs: …" / "Kill target 'x' not found." | ✔ online (players and AIs: name or sid, exact beats partial); **offline** "You killed yourself." / "Killed player X." |
+| kill | [target] | cheat | suicide / kills every match: "Killed N players + M AIs: …" / "Kill target 'x' not found." | ✔ online (players and AIs: name or sid, exact beats partial; a selector kills the spawned matching players; the server console / rcon kill targets too, with no killer); **offline** "You killed yourself." / "Killed player X." |
 | forcehide | [target] [on\|off] | dev | "fh" to the target | ✔ (`NET_CHEAT_FORCE_HIDE`, chat "Hide - Enabled"); **offline** |
 | unlimitedammo | [target] [on\|off] | dev | "unl" + "uamo" | ✔ (`NET_CHEAT_UNLIMITED_AMMO` + loadout packet); **offline** |
 | score | [amount] | dev | "+N score (total T)." / "Usage: /score <amount> (default 100)." | ✔ online; **offline** "Usage: score <amount> (default 100)." |
 | summon | [name] | dev | spawns a Soul Sanctum AI | ✔ "Summonable: …" / "Unknown summon 'x'. Try: …" / "Summoned Soul Fiend (21)." (templates = the first BOT per name on soul_sanctum.json, game.ts aliases weep / wander / fiend / angered / gate / lord) |
 | bhop | [on\|off\|held] | client | "Bhop - Disabled" / "Bhop - Hold Jump/Crouch" in the console + notify | ✔ (`ui_bhop_set_mode` + `ui_notify`) |
 | clear | – | client | Krunker Box Office: empties your own chat log (#chatList); local only, nothing is sent and other players' chat is untouched | ✔ (`hud_ui_clear_chat`, chat only: in the console `clear` / `/clear` is the console's own) |
+
+## Target selectors (Krunker Box Office)
+
+v3.1.1 and v7.1.4 commands take one player (resolveOnlinePlayerByQuery: the normalised name or
+id, exact, else a unique prefix). Krunker Box Office keeps that and adds selectors, in one resolver
+(`shared/src/target_select.c`, `shared/include/target_select.h`) behind every player-targeting
+command: the chat / console commands (`shared/src/chat_commands.c`, so chat, the dev console,
+the offline game, the server console and rcon) and the server CLI's own kick, ban, op, deop and
+send (`server/src/cli.c`).
+
+| Selector | Matches |
+|---|---|
+| `*`, `@all`, `@a` | every player, humans and bots |
+| `@me`, `@s`, `!` | yourself (the server console and rcon have no player: "'@me' needs your own player (none here).") |
+| `@others` | everyone but you |
+| `@bots`, `@humans` | bots / humans only |
+| `@team`, `@enemies` | your team (you included) / everyone else; in FFA `@team` is you alone |
+| `@alive`, `@dead` | spawned / not spawned |
+| `Joel*`, `*bot`, `s?m` | a case-insensitive glob over names (`*` any run, `?` one character), as typed or normalised (`bluebot*` finds "Blue Bot") |
+
+- Commands: god, ungod, smite, noclip, notarget, forcehide, unlimitedammo, kill, kick, ban,
+  bring, give (chat / console); kick, ban, op, deop, send (server CLI). Commands that need one
+  player (tp, ip, banip, unban, ping) take a selector that matches exactly one ("'*' matches 3
+  players: name one."). bot_kick / bot_kill keep their own `all|index|name` matching.
+- Replies count the players: "God mode ON: 5 players", "Gave Crossbow: 6 players", "Kicked: 3
+  players", "Killed 2 players: A, B.". A selector that leaves one player answers like its name
+  ("God mode ON on Sam"); one matching nobody says so ("No players match 'zed*'.", "No spawned
+  players match '@dead'.").
+- The cheats and give / bring act on the spawned matches; kick / ban on every match but you.
+  On/off cheats with no on|off over several players turn everyone ON unless all already are
+  (then OFF), so `god *` never leaves a mixed lobby.
+- Permissions stay per command: the gate (`allowed()`, give's "others: devs and the host") runs
+  before the target is resolved, so a selector never widens who may run a command. A guest's
+  `kick *` gets "DEV only" like `kick Name`.
+- `ungod [target]` (Krunker Box Office) is `god [target] off`, with god's gate.
+- The server CLI matches connections (menu clients and spectators too) by id or exact name, as
+  before, and its `kick <selector>` also removes matching bots.
+- `give <selector> <weapon|item>` reads a leading selector (`give * sniper`); `give <weapon|item>
+  <player|selector>` still works (`give sniper @bots`).
 
 ## Bots (Krunker v7.1.4 `bot_*`)
 
@@ -198,7 +238,7 @@ always; offline always); everyone else gets the notify "Host or developer requir
 |---|---|---|
 | tp | x y z | "Teleported to 10.00 2.00 -35.50." (your feet go there, the coordinates `pos` prints) |
 | tp | player | "Teleported to Name." (to that player's feet) / "Player 'x' not found." / "Player 'x' is ambiguous." / "Name is not spawned." / "You are already there." |
-| bring | player\|all | "Brought Name to you." / "Brought N players to you." / "Nobody to bring." |
+| bring | player\|all\|selector | "Brought Name to you." / "Brought N players to you." / "Nobody to bring." |
 | bring | player\|all x y z | "Brought Name to 0.00 10.00 0.00." / "Brought N players to …" |
 
 Players match like `/kick`: the name or id with everything but letters and digits removed,
@@ -234,7 +274,8 @@ Giving to another player: devs and the host only. The server console and rcon co
 | give | weapon | "Crossbow added to your loadout." An extra loadout slot, the Weapons tab's left click (`OM_ACTION_ADD_WEAPON`): the connection keeps it across respawns, the client equips it when its LOADOUT_EXTRA lands |
 | give | item | "KR Tag dropped at your feet." The Entities tab's spawnables and scrap pickups (`object_manager_entity_giveable`; not the machines or an airdrop), at the receiver's feet |
 | give | weapon\|item player | "Gave Famas to Name." |
-| give | – | "Usage: /give <weapon\|item> [player] (…)" |
+| give | selector weapon\|item, weapon\|item selector | "Gave Crossbow: 6 players" (every spawned match; others: devs and the host) |
+| give | – | "Usage: /give <weapon\|item> [player\|selector] (…)" |
 | drop | – | "Dropped the Crossbow." / "Tool Gun put away." / "You can't drop your melee weapon." / "You can't drop your class weapons: only picked-up and Object Manager weapons drop." |
 
 Names match like the Object Manager search, normalised to letters and digits: exact first,
@@ -367,7 +408,7 @@ and adds completion for arguments:
 | bind | 1: keys (bound keys, then `e.key` values a-z / 0-9 / F1-F12 / Space / Tab / Shift / Control / Alt, then `e.code` KeyA… / Digit0…), 2: command names |
 | unbind | bound keys |
 | toggle | the server toggles: god, noclip, smite, forcehide, unlimitedammo, borders, forcecol, endless, bhop |
-| god, noclip, smite, forcehide, unlimitedammo | 1: player names in the game, or on / off; 2: on / off |
+| god, ungod, noclip, smite, notarget, forcehide, unlimitedammo | 1: player names in the game (and the selectors once `*`, `@` or `!` is typed), or on / off; 2: on / off |
 | borders, forcecol | on / off |
 | bhop | on / off / held |
 | kill | player names in the game and the active AIs' names |

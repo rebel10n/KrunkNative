@@ -184,6 +184,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, bil
 	./$(DEBUG_DIR)/ks_storage_test
 	./$(DEBUG_DIR)/navgen_test
 	./$(DEBUG_DIR)/season_test
+	./$(DEBUG_DIR)/target_select_test
 	./$(DEBUG_DIR)/meshopt_test .
 	./$(DEBUG_DIR)/window_state_test
 	./$(DEBUG_DIR)/mod_pack_test .
@@ -394,6 +395,10 @@ test-net: build ## knet transport unit test (loss/dup/reorder), v7 chat/voice ch
 	./$(DEBUG_DIR)/social_test
 	server/tests/udp_e2e.sh $(DEBUG_DIR)
 	KN_UDP_LOSS="15 5 5" server/tests/udp_e2e.sh $(DEBUG_DIR)
+
+.PHONY: target-select-e2e
+target-select-e2e: build ## Player target selectors on server_bin: god * / ungod * / give * over clients and bots, a guest refused, kick @bots, rcon op / kick *
+	timeout 300 $(PYTHON) -I server/tests/target_select_e2e.py $(DEBUG_DIR)
 
 .PHONY: billboard-e2e
 billboard-e2e: build ## server.cfg billboard / billboard_image: packets before INIT for late joiners and map changes, unset and URL configs send none
