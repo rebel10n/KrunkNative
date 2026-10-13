@@ -8,6 +8,9 @@
 #include <shared.h>
 #include <map_catalog.h>
 #include <knet.h>
+#include <ai.h>   // NET_PACKET_AI_SHOT / NET_PACKET_AI_ANIM
+#include <bots.h> // bot players for the dead-filter match
+#include <social_v7.h> // NET_PACKET_CHAT_V7
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -29,6 +32,9 @@ typedef struct {
     int count;
     int closed;
     int pongs;
+    unsigned long long bytes;  // every framed byte received (packets[] stops at MAX_RECEIVED)
+    int type_count[256];       // every packet received, by NetPacketType
+    unsigned long long type_bytes[256]; // and their framed bytes
 } TestClient;
 
 static void client_send(TestClient *c, const NetPacketType type, const void *payload, const uint16_t length) {
@@ -43,8 +49,11 @@ static void pump(TestClient *c, const int frames) {
         int n;
         while ((n = sandbox_receive(c->fd, bytes, sizeof(bytes))) > 0) {
             CHECK(net_buffer_push(&c->buffer, bytes, (size_t) n), "buffer overflow");
+            c->bytes += (unsigned long long) n;
             NetPacket packet;
             while (net_buffer_next(&c->buffer, &packet) > 0) {
+                c->type_count[packet.type & 0xff]++;
+                c->type_bytes[packet.type & 0xff] += NET_PACKET_HEADER_SIZE + packet.length;
                 if (packet.type == NET_PACKET_PING && packet.length == sizeof(NetPingPacket)) {
                     client_send(c, NET_PACKET_PONG, packet.payload, packet.length);
                     c->pongs++;
@@ -688,10 +697,189 @@ static void test_tp_bring(void) {
     sandbox_stop();
 }
 
+// The packets Krunker v7.1.4 sends only to `player.active || player.spectating` (server/src/net.c
+// net_live_only_packet): player sync, tracers, projectile launches, explosions, broadcast
+// sounds, object / AI clips.
+static const int k_live_only[] = {NET_PACKET_STATE, NET_PACKET_SHOT, NET_PACKET_PROJECTILE, NET_PACKET_AI_SHOT,
+                                  NET_PACKET_EXPLOSION, NET_PACKET_SOUND, NET_PACKET_OBJECT_ANIM, NET_PACKET_AI_ANIM};
+
+static int live_only_after(const TestClient *c, const int from, char *first, const size_t size) {
+    int n = 0;
+    for (int i = from; i < c->count; i++) {
+        for (size_t k = 0; k < sizeof(k_live_only) / sizeof(k_live_only[0]); k++) {
+            if (c->packets[i].type != k_live_only[k]) continue;
+            if (!n++) snprintf(first, size, "type %d", (int) c->packets[i].type);
+        }
+    }
+    return n;
+}
+
+static int index_of_projectile(const TestClient *c, const int from, const int id, NetProjectilePacket *out) {
+    for (int i = from; i < c->count; i++) {
+        if (c->packets[i].type != NET_PACKET_PROJECTILE || c->packets[i].length != sizeof(NetProjectilePacket)) continue;
+        memcpy(out, c->packets[i].payload, sizeof(*out));
+        if (out->id == id) return i;
+    }
+    return -1;
+}
+
+static int got_projectile_end(const TestClient *c, const int from, const int id) {
+    for (int i = from; i < c->count; i++) {
+        if (c->packets[i].type != NET_PACKET_PROJECTILE_END || c->packets[i].length != sizeof(NetProjectileEndPacket)) continue;
+        NetProjectileEndPacket end;
+        memcpy(&end, c->packets[i].payload, sizeof(end));
+        if (end.id == id) return 1;
+    }
+    return 0;
+}
+
+static int got_chat_v7(const TestClient *c, const int from, const char *needle) {
+    for (int i = from; i < c->count; i++) {
+        if (c->packets[i].type != NET_PACKET_CHAT_V7 || c->packets[i].length != sizeof(NetChatV7Packet)) continue;
+        NetChatV7Packet chat;
+        memcpy(&chat, c->packets[i].payload, sizeof(chat));
+        chat.chat.text[sizeof(chat.chat.text) - 1] = 0;
+        if (strstr(chat.chat.text, needle)) return 1;
+    }
+    return 0;
+}
+
+// A server projectile with no owner (above the map, flying up), returns its slot
+static int launch_projectile(const vec3 at, const float speed, const float range) {
+    const ProjectileConfig config = {.speed = speed, .range = range};
+    uint64_t before = 0;
+    for (int i = 0; i < GAME_MAX_PROJECTILES; i++) before |= (uint64_t) g_server->game.projectiles[i].active << i;
+    game_spawn_projectile(&g_server->game, NULL, 0, &config, at, 0.0f, 1.4f, 0);
+    for (int i = 0; i < GAME_MAX_PROJECTILES; i++) {
+        if (g_server->game.projectiles[i].active && !(before >> i & 1)) return i;
+    }
+    return -1;
+}
+
+static void pump_three(TestClient *a, TestClient *b, TestClient *c, const int frames) {
+    for (int f = 0; f < frames; f++) {
+        pump(a, 1);
+        pump(b, 0);
+        pump(c, 0);
+    }
+}
+
+// "bullets keep getting sent to the client after the player is dead": in a bot match a dead
+// player gets no live-world packet (k_live_only) until its respawn, but still the kill feed,
+// chat and projectile ends; a spectator gets everything. On the respawn the projectiles still
+// in flight that it missed are resent, and the player sync resumes for every active player.
+static void test_dead_player_live_filter(void) {
+    size_t map_count = 0;
+    const cJSON **maps = load_maps(&map_count);
+    const SandboxConfig cfg = {.maps = maps, .map_count = map_count, .map_index = 0, .mode_id = MODE_ID_FFA};
+    CHECK(sandbox_start(&cfg), "sandbox_start (dead filter)");
+    BotAssignments preset;
+    bot_difficulty_assignments(BOT_DIFFICULTY_NORMAL, &preset);
+    game_bots_configure(&g_server->game, &preset);
+    game_bots_set_quota(&g_server->game, 6, 0);
+
+    static TestClient a, b, spec;
+    const NetHelloPacket hello = {NET_PROTOCOL_MAJOR, NET_PROTOCOL_MINOR_V7, 0};
+    const NetEntPacket ent = {.class_index = 0, .secondary_index = -1, .cosmetics = PLAYER_COSMETICS_NONE, .slid_cont = 1, .lag_comp = 1.0f};
+    NetEntPacket ent_spec = ent;
+    ent_spec.spectate = 1;
+    mix_join(&a, &hello, sizeof(hello), &ent, (uint16_t) NET_ENT_PACKET_V7_SIZE);
+    pump(&a, 30);
+    mix_join(&b, &hello, sizeof(hello), &ent, (uint16_t) NET_ENT_PACKET_V7_SIZE);
+    mix_join(&spec, &hello, sizeof(hello), &ent_spec, (uint16_t) NET_ENT_PACKET_V7_SIZE);
+    pump_three(&a, &b, &spec, 60);
+    NetSpawnPacket me_a = {0}, me_b = {0};
+    CHECK(spawn_of(&a, 1, &me_a) && spawn_of(&b, 1, &me_b), "A and B spawned");
+
+    // alive: 10 s of the bot match
+    const unsigned long long alive_bytes0 = b.bytes;
+    const int alive_shots0 = b.type_count[NET_PACKET_SHOT];
+    pump_three(&a, &b, &spec, 600);
+    const unsigned long long alive_bytes = b.bytes - alive_bytes0;
+    const int alive_shots = b.type_count[NET_PACKET_SHOT] - alive_shots0;
+    CHECK(alive_shots > 0, "alive: B sees the bots' tracers (%d SHOT)", alive_shots);
+
+    // dead: B kills itself and stays on the death screen 10 s; meanwhile a projectile that
+    // outlives the death screen, one that ends during it, A's chat and A's death (kill feed)
+    b.count = 0;
+    spec.count = 0;
+    chat(&b, "/kill");
+    pump_three(&a, &b, &spec, 2);
+    NetKillPacket kill = {0};
+    const int kill_b = index_of_kill(&b, 0, me_b.uid, &kill);
+    CHECK(kill_b >= 0, "B got its own KILL");
+    const unsigned long long dead_bytes0 = b.bytes;
+    unsigned long long dead_type0[256];
+    memcpy(dead_type0, b.type_bytes, sizeof(dead_type0));
+    const int spec_shots0 = spec.type_count[NET_PACKET_SHOT];
+    const vec3 sky = {me_b.position[0], me_b.position[1] + 400.0f, me_b.position[2]};
+    const int long_slot = launch_projectile(sky, 0.05f, 5000.0f);  // ~100 s of flight
+    const int short_slot = launch_projectile(sky, 0.5f, 50.0f);    // ~0.1 s
+    CHECK(long_slot >= 0 && short_slot >= 0 && long_slot != short_slot, "projectiles launched (%d, %d)", long_slot, short_slot);
+    pump_three(&a, &b, &spec, 60);
+    chat(&a, "dead players read chat");
+    pump_three(&a, &b, &spec, 60);
+    const Player *pa = server_player(me_a.uid);
+    if (pa && !pa->active) { // a bot got A first: back in, to die on cue
+        client_send(&a, NET_PACKET_ENT, &ent, (uint16_t) NET_ENT_PACKET_V7_SIZE);
+        pump_three(&a, &b, &spec, 5);
+    }
+    CHECK(pa && pa->active, "A alive before its /kill");
+    chat(&a, "/kill");
+    pump_three(&a, &b, &spec, 480);
+    const unsigned long long dead_bytes = b.bytes - dead_bytes0;
+    CHECK(b.count < MAX_RECEIVED, "dead: B's packets all kept (%d)", b.count);
+    char first[32] = "";
+    const int leaked = kill_b >= 0 ? live_only_after(&b, kill_b + 1, first, sizeof(first)) : -1;
+    CHECK(leaked == 0, "dead: B gets no live-world packet (%d, first %s)", leaked, first);
+    int feed = 0;
+    for (int i = kill_b + 1; kill_b >= 0 && i < b.count; i++) feed += b.packets[i].type == NET_PACKET_KILL;
+    CHECK(feed > 0, "dead: B still gets the kill feed (%d KILL)", feed);
+    CHECK(got_chat_v7(&b, kill_b + 1, "dead players read chat"), "dead: B still gets chat");
+    CHECK(got_projectile_end(&b, kill_b + 1, short_slot), "dead: B still gets projectile ends (v7 \"pre\" to all)");
+    CHECK(count_type(&b, NET_PACKET_HEALTH) > 0, "dead: B still gets health (v7 \"h\" to all)");
+    CHECK(spec.type_count[NET_PACKET_SHOT] - spec_shots0 > 0, "spectator: still gets tracers (%d SHOT)", spec.type_count[NET_PACKET_SHOT] - spec_shots0);
+    NetProjectilePacket seen;
+    CHECK(index_of_projectile(&spec, 0, long_slot, &seen) >= 0, "spectator: gets the projectile launch");
+    printf("dead filter: B alive %.0f B/s (%d SHOT/10 s), dead %.0f B/s:", alive_bytes / 10.0, alive_shots, dead_bytes / 10.0);
+    for (int t = 0; t < 256; t++) {
+        if (b.type_bytes[t] > dead_type0[t]) printf(" %d=%llu", t, b.type_bytes[t] - dead_type0[t]);
+    }
+    printf("\n");
+
+    // respawn: the in-flight projectile is resent from its current state, the ended one is not,
+    // and every active player's position follows
+    b.count = 0;
+    client_send(&b, NET_PACKET_ENT, &ent, (uint16_t) NET_ENT_PACKET_V7_SIZE);
+    client_send(&a, NET_PACKET_ENT, &ent, (uint16_t) NET_ENT_PACKET_V7_SIZE);
+    const int respawn_shots0 = b.type_count[NET_PACKET_SHOT];
+    pump_three(&a, &b, &spec, 30);
+    const int spawn_b = index_of_spawn(&b, 0, me_b.uid);
+    CHECK(spawn_b >= 0, "B respawned");
+    const GameProjectile *flying = long_slot >= 0 ? &g_server->game.projectiles[long_slot] : NULL;
+    const int resent = spawn_b >= 0 ? index_of_projectile(&b, spawn_b, long_slot, &seen) : -1;
+    CHECK(flying && flying->active && resent > spawn_b, "respawn: the projectile in flight is resent (%d)", resent);
+    if (resent > spawn_b && flying) {
+        CHECK(fabsf(seen.position[1] - sky.y) > 100.0f && fabsf(seen.range - 5000.0f) > 100.0f && seen.owner_uid == -1,
+              "respawn: from its current state (y %.1f, range %.1f)", seen.position[1], seen.range);
+    }
+    CHECK(index_of_projectile(&b, 0, short_slot, &seen) < 0 || g_server->game.projectiles[short_slot].active,
+          "respawn: an ended projectile is not resent");
+    pump_three(&a, &b, &spec, 300);
+    for (size_t i = 0; spawn_b >= 0 && i < g_server->game.player_count; i++) {
+        const Player *p = g_server->game.players[i];
+        if (!p || !p->active || p->uid == me_b.uid) continue;
+        CHECK(states_about(&b, spawn_b, p->uid) > 0, "respawn: B gets player %d's position again", p->uid);
+    }
+    CHECK(b.type_count[NET_PACKET_SHOT] - respawn_shots0 > 0, "respawn: B sees tracers again (%d)", b.type_count[NET_PACKET_SHOT] - respawn_shots0);
+    sandbox_stop();
+}
+
 int main(void) {
     test_join_move_leave();
     test_wpc_peer_mix();
     test_dead_player_sync();
+    test_dead_player_live_filter();
     test_idle_kick_map_change();
     test_tp_bring();
     test_restart_and_disconnect();

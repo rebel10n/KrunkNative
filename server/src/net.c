@@ -130,6 +130,87 @@ static int net_peer_takes(const ClientConnection *client, const int type) {
     return type < NET_PACKET_BLOCK_MODES || type >= NET_PACKET_BLOCK_MODES + 10 || ks_server_peer_v7(client);
 }
 
+// ------------------------------------------------------------------ live-world filter
+// Krunker v7.1.4 sends the live world only to `player.active || player.spectating`: the "k"
+// player sync (game.js updateState, which also skips player.locked), the "9" tracers
+// (players.js), "pr" projectile launches (projectiles.js), "ex" explosions and "s" broadcast
+// sounds (game.js explosion / playSound), "ana" object and AI clips (game.js playAnim, AI.js).
+// A dead player (death screen and menu until its next spawn) and a connection that never
+// spawned get none of them; everything else (kill feed "3", chat, "h" health, "pre"
+// projectile ends, leaderboard, timer, objectives, spawns / leaves, "end") still goes to
+// every connection. Every broadcast below and the STATE sync go through this one filter.
+// Kept for everyone on purpose (KrunkNative differences): SPAWN goes out at once where v7 defers
+// a player's "0" until the viewer is live (players.sync sentTo), and GRAPPLE (v7's "k" grapple
+// slot) is sent as changes only, so a release missed on the death screen would leave a stale
+// rope after the respawn. Both are a few bytes per event.
+static int net_live_only_packet(const int type) {
+    switch (type) {
+        case NET_PACKET_STATE:       // "k"
+        case NET_PACKET_SHOT:        // "9"
+        case NET_PACKET_PROJECTILE:  // "pr" (resent on spawn: net_resync_live_world)
+        case NET_PACKET_AI_SHOT:     // "pr" of an AI (the AI half of the same launch)
+        case NET_PACKET_EXPLOSION:   // "ex"
+        case NET_PACKET_SOUND:       // "s" of game.playSound (a trigger's sound sent to one player is not filtered, triggers.js "s" / "so")
+        case NET_PACKET_OBJECT_ANIM: // "ana" isObj
+        case NET_PACKET_AI_ANIM:     // "ana" of an AI
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+// v7 `player.active || player.spectating`
+static int net_client_in_live_world(const ClientConnection *client) {
+    return net_is_spectating(client) || (client->player && client->player->active);
+}
+
+// Does the broadcast of `type` reach `client`? Live-world packets only reach a connection in the
+// live world. A held-back PROJECTILE is remembered (missed_projectiles) and resent when the
+// connection spawns: KrunkNative difference, v7 never resends a "pr", so a rocket fired during
+// the death screen flew on invisible after the respawn.
+static int net_recipient_takes(ClientConnection *client, const int type, const void *payload, const uint16_t length) {
+    int slot = -1;
+    if ((type == NET_PACKET_PROJECTILE && length == sizeof(NetProjectilePacket)) ||
+        (type == NET_PACKET_PROJECTILE_END && length == sizeof(NetProjectileEndPacket))) {
+        int32_t id; // first field of both
+        memcpy(&id, payload, sizeof(id));
+        if (id >= 0 && id < GAME_MAX_PROJECTILES) slot = id;
+    }
+    if (slot >= 0) client->missed_projectiles &= ~(UINT64_C(1) << slot); // a launch it sees, or the slot's end
+    if (!net_live_only_packet(type) || net_client_in_live_world(client)) return 1;
+    if (slot >= 0 && type == NET_PACKET_PROJECTILE) client->missed_projectiles |= UINT64_C(1) << slot;
+    return 0;
+}
+
+// On spawn: the projectiles still in flight that the connection missed while it was out of the
+// live world, from their current position, velocity and remaining range (AI shots with their
+// shooter). Transient events (tracers, explosions, sounds, clips) are not replayed, like v7;
+// the player positions follow with the next STATE (the client snaps on spawn).
+static void net_resync_live_world(ClientConnection *client) {
+    const uint64_t missed = client->missed_projectiles;
+    client->missed_projectiles = 0;
+    for (int slot = 0; missed && slot < GAME_MAX_PROJECTILES; slot++) {
+        const GameProjectile *p = &g_server->game.projectiles[slot];
+        if (!(missed & (UINT64_C(1) << slot)) || !p->active || !net_peer_takes(client, NET_PACKET_PROJECTILE)) continue;
+        const NetProjectilePacket packet = {
+            .id = p->id,
+            .owner_uid = p->owner_uid,
+            .weapon_index = p->weapon_index,
+            .position = {p->position.x, p->position.y, p->position.z},
+            .velocity = {p->velocity.x, p->velocity.y, p->velocity.z},
+            .gravity = p->config.gravity,
+            .range = p->range,
+            .ai_kind = (uint8_t) p->ai_kind,
+        };
+        net_send_packet(client->fd, NET_PACKET_PROJECTILE, &packet, sizeof(packet));
+        const GameAIShot *shot = g_server->game.ai ? &g_server->game.ai->shots[slot] : NULL;
+        if (p->ai_kind && shot && shot->used && net_peer_takes(client, NET_PACKET_AI_SHOT)) {
+            const NetAIShotPacket ai_shot = {.projectile = p->id, .sid = shot->sid};
+            net_send_packet(client->fd, NET_PACKET_AI_SHOT, &ai_shot, sizeof(ai_shot));
+        }
+    }
+}
+
 static void net_game_send(Game *game, const int uid, const int type, const void *payload, const uint16_t length) {
     (void) game;
 
@@ -137,10 +218,11 @@ static void net_game_send(Game *game, const int uid, const int type, const void 
         const int skip = uid <= NET_TARGET_EXCEPT(0) ? NET_TARGET_EXCEPT_UID(uid) : -1;
 
         for (size_t i = 0; i < g_server->client_count; i++) {
-            const ClientConnection *client = &g_server->clients[i];
+            ClientConnection *client = &g_server->clients[i];
             if (uid == NET_TARGET_NON_PLAYERS && client->player) continue;
             if (skip >= 0 && client->id == skip) continue;
             if (!net_peer_takes(client, type)) continue;
+            if (!net_recipient_takes(client, type, payload, length)) continue; // v7: the live world only to the living
             net_send_packet(client->fd, (NetPacketType) type, payload, length);
         }
         return;
@@ -492,6 +574,7 @@ static void net_send_spectate_state(ClientConnection *client) {
     game_sync_leaders(&g_server->game, client->id);
     game_send_round_state(&g_server->game, client->id);
     game_ai_sync_non_players(&g_server->game); // AI.sync sends spectators every AI ("aai" first)
+    net_resync_live_world(client); // projectiles launched while it was in the menu
 }
 
 // ENT with spectate = 1: a live player leaves the match first (LEAVE to the others),
@@ -579,6 +662,7 @@ static void net_spawn_client(ClientConnection *client) {
     net_mark_client_spawned(client);
     if (first_spawn) net_send_existing_spawns(client);
     net_broadcast_spawn(client->player);
+    net_resync_live_world(client); // what the live-world filter held back while dead / in the menu
 
     if (first_spawn) {
         // io_ent first spawn: leaderboard + round clock for the joiner, then
@@ -659,7 +743,10 @@ static void net_change_map_internal(const int map_index, const int mode_index, c
     accounts_round_ending(); // stats of a round abandoned before its END
     net_free_players();
 
-    for (size_t i = 0; i < g_server->client_count; i++) g_server->clients[i].joined = 0;
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        g_server->clients[i].joined = 0;
+        g_server->clients[i].missed_projectiles = 0; // game_init drops every projectile
+    }
 
     game_init(&g_server->game, map_index, mode_index, 0);
     ks_server_round_init(); // KrunkScript: (re)load the map's server script, start()
@@ -903,6 +990,7 @@ void net_add_client(ClientConnection *client) {
     client->voice_v7 = (SocialAssembly) {0};
     memset(&client->custom_values, 0, sizeof(client->custom_values)); // WP-C: no custVals yet
     client->om_extra_count = 0; // Object Manager: no extra weapons yet
+    client->missed_projectiles = 0;
     g_server->clients[g_server->client_count] = *client;
 
     ClientConnection *stored_client = &g_server->clients[g_server->client_count++];
@@ -1610,10 +1698,10 @@ static void net_broadcast_states_tick(void) {
         const int spectating = net_is_spectating(client);
         // v7.1.4 game.js updateState: "k" only to `(player.active || player.spectating) &&
         // !player.locked`. A dead player (death screen and menu until its next SPAWN), one that
-        // never spawned and a locked one (lockPlayer, the blindfolded seeker) get no player
-        // positions: the kill cam looked at the killer once at death (io_killPlayer camLookAt,
-        // killer.interpolate = false) and the killer holds still there.
-        if (!spectating && (!client->player || !client->player->active || client->player->mode.locked)) continue;
+        // never spawned (net_client_in_live_world) and a locked one (lockPlayer, the blindfolded
+        // seeker) get no player positions: the kill cam looked at the killer once at death
+        // (io_killPlayer camLookAt, killer.interpolate = false) and the killer holds still there.
+        if (!net_client_in_live_world(client) || (!spectating && client->player->mode.locked)) continue;
         const Player *viewer = spectating ? NULL : client->player; // spectators see everyone
         batch.length = 0;
         for (size_t j = 0; j < state_count; j++) {
