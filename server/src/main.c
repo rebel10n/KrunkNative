@@ -165,7 +165,11 @@ static void server_configure_bots(const GsConfig *cfg) {
     bot_difficulty_assignments(difficulty, &preset);
     game_bots_configure(&g_server->game, &preset);
     game_bots_set_quota(&g_server->game, quota, cfg->bot_quota > 0);
-    server_log("Bots: %s %d, difficulty %g (%s)", cfg->bot_quota > 0 ? "fill to" : "keep", quota, (double) difficulty, cfg->bot_difficulty);
+    game_bots_set_quota_grace(&g_server->game, cfg->bot_quota_grace);
+    if (cfg->bot_quota > 0)
+        server_log("Bots: fill to %d players while a human plays (none in an empty lobby after %g s), difficulty %g (%s)", quota,
+                   (double) cfg->bot_quota_grace, (double) difficulty, cfg->bot_difficulty);
+    else server_log("Bots: keep %d, difficulty %g (%s)", quota, (double) difficulty, cfg->bot_difficulty);
 }
 
 static void server_tick_drain(void) {

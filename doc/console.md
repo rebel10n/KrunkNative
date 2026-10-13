@@ -151,6 +151,24 @@ lower rarities likelier. server.cfg `bots` / `bot_quota` / `bot_difficulty` (Kru
 addition; config.botLimit 16) keep or fill the lobby; the info query reports them as `bots`,
 never as `players`, and the coordinator only counts connections. Ranked lobbies get none.
 
+Fill mode (`bot_quota N`, on in prod: role kn_gameserver `kn_gameserver_bot_quota`, default
+max_players; `kn_gameserver_bots_enabled: false` / `kn_gameserver_instance_bot_quota` turn it off):
+- An empty lobby stays empty. With no human in the game the quota bots stay `bot_quota_grace`
+  seconds (default 10, so a quick rejoin keeps the match), then all leave at once.
+- With humans, bots fill the game to N players (never past max_players): one human = N - 1
+  bots. A joining human makes a bot leave at once (`game_bots_human_joined`, not on the 300 ms
+  quota tick), from the human's team in team modes, so teams stay balanced and the join never
+  waits; a leaving human brings one back on the next tick. New bots go to the smaller team.
+- Humans are the non-bot players in the game. Spectators and clients still in the menu have no
+  player and do not count (v7 `checkPlayerLimit` also counts `players.list` without `isBot`).
+- The connection limit (`net_add_client`) counts connections only, so a lobby of bots is never
+  "full" to a human. The lobby tuple's player count (brain matchmaker, server browser, quick
+  join) and the info query / finder `players` are humans; `bots` rides along in the lobby meta
+  and the finder listing for information only.
+- Round ends and map / mode changes keep the fill (the bots rejoin the next round). Ranked
+  matches and hosted custom games get no quota bots (they leave when one starts).
+- Bots earn nothing: stats, challenges, medals, KR and BP go to accounts only.
+
 AI (`bot_type nextbot`, the default): Idle / Hunt / Attack / Hide with the BotProfile presets
 (reaction time, aim focus, dodge, chase timeout, coward / retreat), aim-down-sights and recoil
 control by skill, reloads and the secondary on an empty primary. `bot_type tfue` runs bots.js

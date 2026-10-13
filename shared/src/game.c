@@ -838,6 +838,7 @@ void game_players_add(Game *game, Player *player) {
     game->leaders_dirty = 1;
 
     mode_player_added(game, player); // players.add: setTeam + lives (authority only)
+    if (!player->is_bot) game_bots_human_joined(game, player); // fill quota: a bot makes room at once
 }
 
 int game_pick_next_map(const Game *game) {

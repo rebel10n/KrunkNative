@@ -23,6 +23,18 @@ kn_gameserver_max_players: 8
 kn_gameserver_modes: rotation
 # Per-instance override (instance number -> modes), e.g. {3: [tdm], 4: "ffa,kc"}.
 kn_gameserver_instance_modes: {}
+# NextBot fill (server.cfg bot_quota, doc/console.md "Bots"): once a human is in the game the
+# lobby is filled up to this many players with bots; one leaves per human that joins and one
+# comes back per human that leaves. An empty lobby has none (they leave
+# kn_gameserver_bot_quota_grace seconds after the last human). Bots never count as players in
+# the lobby list / matchmaker, earn nothing and never join ranked or hosted custom games.
+# Off switch: kn_gameserver_bots_enabled: false (or a quota of 0).
+kn_gameserver_bots_enabled: true
+kn_gameserver_bot_quota: "{{ kn_gameserver_max_players }}"
+kn_gameserver_bot_difficulty: normal
+kn_gameserver_bot_quota_grace: 10
+# Per-instance override (instance number -> quota, 0 = no bots), e.g. {2: 0, 3: 6}.
+kn_gameserver_instance_bot_quota: {}
 # server.cfg shutdown_reason_file: the "Restart game servers" handlers write "update" here
 # for the restart (players see GAME UPDATING and rejoin), then remove it. A tmpfs path
 # outside the unit's sandbox writes (ProtectSystem=strict still lets server_bin read it).

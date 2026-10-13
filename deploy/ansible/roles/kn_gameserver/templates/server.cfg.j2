@@ -17,6 +17,14 @@ max_players     {{ kn_gameserver_max_players }}
 // nobody votes = a random card. "rotation" = Krunker's public modes (ffa, point, ctf, kc, dom).
 modes           {{ kn_gs_modes | join(',') if (kn_gs_modes is iterable and kn_gs_modes is not string) else kn_gs_modes }}
 {% endif %}
+{% set kn_gs_bots = (kn_gameserver_instance_bot_quota[n] | default(kn_gameserver_bot_quota)) | int if kn_gameserver_bots_enabled | bool else 0 %}
+{% if kn_gs_bots > 0 %}
+// NextBot fill: with a human in the game, bots fill the lobby to this many players (one leaves per
+// human that joins); an empty lobby has none after bot_quota_grace seconds. Never in ranked / custom.
+bot_quota       {{ [kn_gs_bots, 16] | min }}
+bot_quota_grace {{ kn_gameserver_bot_quota_grace }}
+bot_difficulty  {{ kn_gameserver_bot_difficulty }}
+{% endif %}
 {% if kn_gameserver_billboard %}
 // Shown on every billboard of every map instead of its poster (doc/backend.md "Billboards").
 billboard       "{{ kn_gameserver_billboard }}"

@@ -11,7 +11,8 @@ No database or coordinator: one standalone server_bin from a generated server.cf
   3. the bots fight: KILL packets with bot killers, LEADERBOARD rows for the bots, states
   4. a late joiner gets the bots' SPAWN + PLAYER_INFO
   5. rcon bot_list / bot_difficulty / bot_stop / bot_kill / bot_kick (LEAVE per bot)
-  6. a second server with `bot_quota 3`: 3 bots in an empty lobby, 2 once a human joins
+  6. a second server with `bot_quota 3`: none in an empty lobby, 2 once a human joins
+     (fill mode in depth: server/tests/bot_fill_e2e.py)
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
 import os
@@ -183,8 +184,10 @@ def main():
 
     # 6. quota
     start_server(1, "bot_quota 3\nbot_difficulty easy\n")
-    info = wait_for(lambda: query(PORTS[1]) if query(PORTS[1]).get("bots") == 3 else None, 10) or {}
-    check("bot_quota 3 fills the empty lobby", info.get("bots") == 3, str(info.get("bots")))
+    info = wait_for(lambda: query(PORTS[1]), 10) or {}
+    time.sleep(1.0)
+    info = query(PORTS[1]) if info else {}
+    check("bot_quota 3 keeps the empty lobby empty", info.get("bots") == 0, str(info.get("bots")))
     c, _ = join(PORTS[1], "Human")
     info = wait_for(lambda: query(PORTS[1]) if query(PORTS[1]).get("bots") == 2 else None, 5) or query(PORTS[1])
     check("a human takes a bot's slot", info.get("bots") == 2 and info.get("players") == 1, str({k: info.get(k) for k in ("bots", "players")}))

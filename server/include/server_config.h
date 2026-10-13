@@ -111,8 +111,11 @@ typedef struct {
     // console). bots: keep N bots in the lobby; bot_quota: fill the lobby up to N players with
     // bots that leave as humans join (wins over bots). Both capped at config.botLimit (16) and
     // the lobby size. bot_difficulty: easy | normal | hard | max | a number (botDifficultyConfig).
+    // bot_quota keeps an empty lobby empty: no humans in the game = no bots, after
+    // bot_quota_grace seconds (default 10) so a quick rejoin keeps the match.
     int bots;
     int bot_quota;
+    float bot_quota_grace;
     char bot_difficulty[16];
     char log_file[GS_STR_LARGE];         // append every log line here too ("" = stdout/stderr only)
     char cfg_path[GS_STR_LARGE];         // server.cfg actually loaded ("" none)

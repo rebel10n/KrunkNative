@@ -64,13 +64,14 @@ void server_transport_flush_all(void) {
 
 // ------------------------------------------------------------------ tick
 
-// The quota's lobby size: the round's max players; ranked matches get no quota bots.
+// The quota's lobby size: the round's max players. Ranked matches and hosted custom games get no
+// quota bots (a host adds its own with bot_add); the quota bots leave when one starts.
 static void server_bot_slots(void) {
     char tags[4][24];
     const int n = accounts_info_tags(tags, 4);
-    int ranked = 0;
-    for (int i = 0; i < n; i++) ranked |= !strcmp(tags[i], "ranked");
-    g_server->game.bots->slots = ranked ? -1 : g_server->config.max_players;
+    int no_bots = 0;
+    for (int i = 0; i < n; i++) no_bots |= !strcmp(tags[i], "ranked") || !strcmp(tags[i], "custom");
+    g_server->game.bots->slots = no_bots ? -1 : g_server->config.max_players;
 }
 
 void server_core_tick(const float now, const float delta, const double tick_wall) {

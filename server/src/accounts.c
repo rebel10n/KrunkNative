@@ -13,6 +13,7 @@
 #include <ranked.h>      // RANKED_TEAM_SIZE
 #include <ks_storage.h>    // WP6: GAME.STORAGE / KR reward replies ("acct-r")
 #include <season.h>       // v7 endGame BPP of the commit (bp_match_points), map rewards
+#include <bots.h>         // game_bots_count (lobby meta "bots")
 #include <pcg_basic.h>
 #include <math.h>
 #include <stdio.h>
@@ -175,7 +176,7 @@ static cJSON *acc_lobby_tuple(void) {
     cJSON *tuple = cJSON_CreateArray();
     cJSON_AddItemToArray(tuple, cJSON_CreateString(g_acc.lobby_id));
     cJSON_AddItemToArray(tuple, cJSON_CreateString(g_gs_config.region));
-    cJSON_AddItemToArray(tuple, cJSON_CreateNumber(acc_player_count()));
+    cJSON_AddItemToArray(tuple, cJSON_CreateNumber(acc_player_count())); // humans only: bots never fill a lobby
     cJSON_AddItemToArray(tuple, cJSON_CreateNumber(g_server->config.max_players));
 
     cJSON *meta = cJSON_CreateObject();
@@ -214,6 +215,9 @@ static cJSON *acc_lobby_tuple(void) {
     if (g_gs_config.web_url[0]) cJSON_AddStringToObject(meta, "webUrl", g_gs_config.web_url);
     cJSON_AddNumberToObject(meta, "timeLeft", game->end_timer > 0.0f ? 0 : (int) ceilf(game->round_timer > 0.0f ? game->round_timer : 0.0f));
     cJSON_AddBoolToObject(meta, "draining", g_acc.draining);
+    // bot players (server.cfg bot_quota): informational, never in the player count above, so a
+    // bot-filled lobby neither looks full nor gets quick-joined as populated
+    cJSON_AddNumberToObject(meta, "bots", game_bots_count(game));
     // WP-E: a hosted game's config.hostTypes index (comp / zombies / raid) and its privacy, for the
     // custom games list; the brain passes meta through, older brains and clients ignore them
     if (game->config.host_type > 0) cJSON_AddNumberToObject(meta, "hostType", game->config.host_type);

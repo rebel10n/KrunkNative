@@ -22,6 +22,7 @@
 
 #define GAME_BOTS_MAX 32            // parseBotConfigAssignments: Math.min(32, count) per bot_add
 #define GAME_BOT_LIMIT 16           // config.botLimit: the server.cfg quota cap
+#define BOT_QUOTA_GRACE_MS 10000.0f // fill: an empty lobby's bots wait this long for a rejoin (server.cfg bot_quota_grace)
 #define GAME_BOT_UID_BASE 1         // offline (no alloc_uid hook): uids after the local player's 0
 #define GAME_BOT_ACCOUNT_BASE 2000000 // NextBot createAccount: Account(2_000_000 + id)
 #define GAME_BOT_CLAN_SIZE 8
@@ -177,11 +178,14 @@ typedef struct GameBots_t {
     BotType type;                   // bot_type
     BotConfig config[2];            // manager defaults per type (BotManager.config / NextBotManager.config)
     // server.cfg (KrunkNative addition): keep `quota` bots, or (fill) fill the game up to
-    // `quota` players with bots that leave as humans join. 0 = off.
+    // `quota` players with bots that leave as humans join. 0 = off. Fill keeps an empty lobby
+    // empty: with no human in the game the quota bots stay `quota_grace` ms, then all leave.
     int quota;
     unsigned char quota_fill:1;
-    int slots;                      // lobby size for the quota (0 = game->config.max_players, -1 = no quota bots: ranked)
+    int slots;                      // lobby size for the quota (0 = game->config.max_players, -1 = no quota bots: ranked / custom)
     float quota_timer;              // ms until the quota adds / removes the next bot
+    float quota_grace;              // fill: ms the bots wait for a human after the last one left
+    float quota_empty;              // fill: ms the game has had no human (while quota bots remain)
     BotNav *nav;                    // the current map's grid (built on first use)
     const void *nav_failed_key;     // a map the grid could not be built for
     int path_budget;                // A* searches left this tick
@@ -209,6 +213,10 @@ int  game_bots_configure(Game*, const BotAssignments*);
 int  game_bots_set_type(Game*, BotType);
 // server.cfg bots / bot_quota (+ bot_difficulty applied with game_bots_configure).
 void game_bots_set_quota(Game*, int quota, int fill);
+void game_bots_set_quota_grace(Game*, float seconds);   // fill: empty-lobby grace (default 10 s)
+// game_players_add of a human (authority): a fill quota bot over the lobby size leaves at once
+// (from the human's team in team modes), so a join never waits for the 300 ms quota tick.
+void game_bots_human_joined(Game*, const Player*);
 
 // game.init: every Player was freed by the host; forget them, drop the non-persistent bots
 // v7 resets, respawn the rest on the next tick.

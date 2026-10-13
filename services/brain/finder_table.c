@@ -299,6 +299,8 @@ cJSON *finder_list(FinderTable *t, const FinderFilter *f, uint64_t now_ms) {
         cJSON_AddNumberToObject(o, "modeId", (double) kn_json_int(info, "modeId", 0));
         cJSON_AddNumberToObject(o, "players", (double) kn_json_int(info, "players", 0));
         cJSON_AddNumberToObject(o, "max", (double) kn_json_int(info, "max", 0));
+        /* bot players (server.cfg bot_quota): never in "players", so bot-filled servers do not look full */
+        cJSON_AddNumberToObject(o, "bots", (double) kn_json_int(info, "bots", 0));
         cJSON *tags = cJSON_AddArrayToObject(o, "tags");
         const cJSON *it;
         cJSON_ArrayForEach(it, cJSON_GetObjectItemCaseSensitive(info, "tags")) {

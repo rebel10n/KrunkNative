@@ -449,6 +449,106 @@ static void test_quota(Game *game) {
     run("/bot_kick all");
 }
 
+static void remove_human(Game *game, const int uid) {
+    for (size_t i = 0; i < game->player_count; i++) {
+        Player *p = game->players[i];
+        if (p->is_bot || p->uid != uid) continue;
+        game_player_left(game, p);
+        memmove(&game->players[i], &game->players[i + 1], (game->player_count - i - 1) * sizeof(Player *));
+        game->player_count--;
+        free(p->loadout);
+        free(p->ammo);
+        free(p->reloads);
+        free(p->input_queue);
+        free(p);
+        return;
+    }
+}
+
+static int team_count(const Game *game, const int team) {
+    int n = 0;
+    for (size_t i = 0; i < game->player_count; i++) n += game->players[i]->team == team;
+    return n;
+}
+
+// server.cfg bot_quota (fill): an empty lobby stays empty, one human gets quota - 1 bots, a join
+// removes a bot at once (no 300 ms wait), a leave brings one back, the last leave empties the
+// lobby after the grace, a rejoin inside the grace keeps the bots; TDM teams stay balanced.
+static void test_quota_fill(Game *game, const int tdm_index) {
+    printf("Running bot quota fill test...\n");
+    free_players(game);
+    game_init(game, 0, 0, 1);
+    game->config.max_players = 8;
+    game_bots_set_quota(game, 8, 1);
+    game_bots_set_quota_grace(game, 10.0f);
+    tick(game, 5.0f, 30.0f);
+    CHECK(count_bots(game, 0) == 0, "empty lobby: no bots (%d)", count_bots(game, 0));
+    add_human(game, 800, "A");
+    tick(game, 4.0f, 30.0f);
+    CHECK(count_bots(game, 0) == 7, "1 human: quota - 1 = 7 bots (%d)", count_bots(game, 0));
+    add_human(game, 801, "B");
+    CHECK(count_bots(game, 0) == 6, "a join removes a bot at once (%d)", count_bots(game, 0));
+    for (int i = 0; i < 6; i++) {
+        char name[8];
+        snprintf(name, sizeof(name), "H%d", i);
+        add_human(game, 810 + i, name);
+    }
+    CHECK(count_bots(game, 0) == 0 && game->player_count == 8, "8 humans: no bots, never over the lobby (%d bots, %zu players)",
+          count_bots(game, 0), game->player_count);
+    tick(game, 2.0f, 30.0f);
+    CHECK(count_bots(game, 0) == 0, "a full lobby of humans stays bot-free (%d)", count_bots(game, 0));
+    for (int i = 0; i < 6; i++) remove_human(game, 810 + i);
+    tick(game, 3.0f, 30.0f);
+    CHECK(count_bots(game, 0) == 6, "leaves bring the bots back (%d)", count_bots(game, 0));
+    remove_human(game, 801);
+    remove_human(game, 800);
+    tick(game, 5.0f, 30.0f);
+    CHECK(count_bots(game, 0) == 6, "the last human left: the bots wait out the grace (%d)", count_bots(game, 0));
+    add_human(game, 802, "Back");
+    tick(game, 6.0f, 30.0f);
+    CHECK(count_bots(game, 0) == 7, "a rejoin inside the grace keeps the match (%d)", count_bots(game, 0));
+    remove_human(game, 802);
+    tick(game, 9.0f, 30.0f);
+    CHECK(count_bots(game, 0) == 7, "9 s into the grace: still 7 (%d)", count_bots(game, 0));
+    tick(game, 1.5f, 30.0f);
+    CHECK(count_bots(game, 0) == 0 && game_bots_count(game) == 0, "after the grace the empty lobby is empty (%d)", game_bots_count(game));
+    tick(game, 3.0f, 30.0f);
+    CHECK(count_bots(game, 0) == 0, "and stays empty (%d)", count_bots(game, 0));
+
+    // a round change keeps the fill state (the bots rejoin the next round)
+    add_human(game, 803, "R");
+    tick(game, 4.0f, 30.0f);
+    free_players(game);
+    game_init(game, 0, tdm_index, 1);
+    add_human(game, 803, "R");
+    tick(game, 4.0f, 30.0f);
+    CHECK(count_bots(game, 1) == 7, "TDM next round: 7 bots back (%d)", count_bots(game, 1));
+    int diff = team_count(game, 1) - team_count(game, 2);
+    CHECK(diff >= -1 && diff <= 1, "TDM teams balanced with bots (%d / %d)", team_count(game, 1), team_count(game, 2));
+    for (int i = 0; i < 3; i++) {
+        char name[8];
+        snprintf(name, sizeof(name), "T%d", i);
+        add_human(game, 820 + i, name);
+        diff = team_count(game, 1) - team_count(game, 2);
+        CHECK(game->player_count == 8 && diff >= -1 && diff <= 1, "TDM join %d: a bot of the human's team left (%d / %d, %zu players)", i,
+              team_count(game, 1), team_count(game, 2), game->player_count);
+    }
+    tick(game, 2.0f, 30.0f);
+    diff = team_count(game, 1) - team_count(game, 2);
+    CHECK(count_bots(game, 0) == 4 && diff >= -1 && diff <= 1, "TDM 4 humans + 4 bots (%d bots, %d / %d)", count_bots(game, 0),
+          team_count(game, 1), team_count(game, 2));
+
+    // ranked / custom (slots -1): no quota bots
+    game->bots->slots = -1;
+    tick(game, 2.0f, 30.0f);
+    CHECK(count_bots(game, 0) == 0, "slots -1 (ranked): the quota bots leave (%d)", count_bots(game, 0));
+    game->bots->slots = 0;
+    game_bots_set_quota(game, 0, 0);
+    run("/bot_kick all");
+    free_players(game);
+    game_init(game, 0, 0, 1);
+}
+
 // The nav grid (bot_nav.c): Sandstorm's walkable surfaces, a route between spawns that only
 // steps over walkable cells, and objective volumes (no collider) are not floors.
 static void test_nav(Game *game, const int sandstorm) {
@@ -610,6 +710,7 @@ int main(void) {
     test_fight(&game);
     test_teams(&game, 1);
     test_quota(&game);
+    test_quota_fill(&game, 1);
     test_nav(&game, 1);
     test_cost(&game, 1);
     test_map_bots();

@@ -626,6 +626,7 @@ GameBots *game_bots(Game *game) {
         game->bots->type = BOT_TYPE_NEXTBOT;
         bot_config_defaults(BOT_TYPE_NEXTBOT, &game->bots->config[BOT_TYPE_NEXTBOT]);
         bot_config_defaults(BOT_TYPE_TFUE, &game->bots->config[BOT_TYPE_TFUE]);
+        game->bots->quota_grace = BOT_QUOTA_GRACE_MS;
     }
     return game->bots;
 }
@@ -1076,6 +1077,12 @@ void game_bots_set_quota(Game *game, const int quota, const int fill) {
     bots->quota = quota < 0 ? 0 : quota > GAME_BOT_LIMIT ? GAME_BOT_LIMIT : quota;
     bots->quota_fill = (unsigned char) !!fill;
     bots->quota_timer = 0.0f;
+    bots->quota_empty = 0.0f;
+}
+
+void game_bots_set_quota_grace(Game *game, const float seconds) {
+    GameBots *bots = game_bots(game);
+    if (bots) bots->quota_grace = seconds > 0.0f ? seconds * 1000.0f : 0.0f;
 }
 
 void game_bots_on_init(Game *game) {
@@ -1855,28 +1862,100 @@ static void bot_update(Game *game, GameBot *bot, const float dt, const float del
     bot_queue_frames(bot, self, &f, delta_s);
 }
 
-// server.cfg quota: add / remove one bot every 300 ms toward the wanted count.
+// ---------------------------------------------------------------- server.cfg quota
+// KrunkNative addition (v7.1.4 has no auto-fill; doc/v7/decisions.md "Bot fill"). Humans are the
+// non-bot players in the game: spectators and clients still in the menu have no Player, so they
+// do not count (v7 checkPlayerLimit also counts players.list without isBot).
+
+static int bot_quota_slots(const Game *game, const GameBots *bots) {
+    return bots->slots < 0 ? 0 : bots->slots > 0 ? bots->slots : game->config.max_players > 0 ? game->config.max_players : 8;
+}
+
+static int bot_count_humans(const Game *game) {
+    int humans = 0;
+    for (size_t i = 0; i < game->player_count; i++) humans += game->players[i] && !game->players[i]->is_bot;
+    return humans;
+}
+
+static int bot_count_quota(const GameBots *bots) {
+    int n = 0;
+    for (int i = 0; i < bots->count; i++) n += bots->list[i].quota;
+    return n;
+}
+
+// The quota bots the lobby should have: fixed `quota`, or (fill) `quota` minus the humans, none
+// without a human; never more than the slots the humans and the other bots leave.
+static int bot_quota_want(const Game *game, const GameBots *bots, const int humans, const int quota_bots) {
+    const int slots = bot_quota_slots(game, bots);
+    int want = bots->quota_fill ? (humans > 0 ? bots->quota - humans : 0) : bots->quota;
+    const int room = slots - humans - (bots->count - quota_bots); // humans need slots
+    if (want > room) want = room;
+    return want < 0 ? 0 : want;
+}
+
+// The quota bot to remove: one on `team` when it has one, else one on the team with the most
+// players (teams stay balanced), else the newest.
+static GameBot *bot_quota_victim(Game *game, GameBots *bots, int team) {
+    if (team <= 0) {
+        int counts[MODE_TEAMS] = {0};
+        for (size_t i = 0; i < game->player_count; i++) {
+            const Player *p = game->players[i];
+            if (p && p->team > 0 && p->team < MODE_TEAMS) counts[p->team]++;
+        }
+        for (int t = 1; t < MODE_TEAMS; t++) {
+            if (!counts[t] || (team > 0 && counts[t] <= counts[team])) continue;
+            int has_bot = 0;
+            for (int i = 0; i < bots->count && !has_bot; i++) has_bot = bots->list[i].quota && bots->list[i].player && bots->list[i].player->team == t;
+            if (has_bot) team = t;
+        }
+    }
+    for (int i = bots->count - 1; team > 0 && i >= 0; i--) {
+        if (bots->list[i].quota && bots->list[i].player && bots->list[i].player->team == team) return &bots->list[i];
+    }
+    for (int i = bots->count - 1; i >= 0; i--) {
+        if (bots->list[i].quota) return &bots->list[i];
+    }
+    return NULL;
+}
+
+void game_bots_human_joined(Game *game, const Player *player) {
+    GameBots *bots = game ? game->bots : NULL;
+    if (!bots || !bots->quota || !player || player->is_bot || !game_is_authority(game)) return;
+    bots->quota_empty = 0.0f;
+    const int humans = bot_count_humans(game);
+    int quota_bots = bot_count_quota(bots);
+    // one bot leaves per human at once (from the human's team), and any over the lobby size
+    while (quota_bots > bot_quota_want(game, bots, humans, quota_bots)) {
+        GameBot *bot = bot_quota_victim(game, bots, player->team);
+        if (!bot) break;
+        game_bots_remove(game, bot);
+        quota_bots--;
+    }
+}
+
+// Add / remove one bot every 300 ms toward the wanted count. Fill: after the last human left the
+// bots wait `quota_grace` ms (a quick rejoin keeps the match), then all of them leave at once.
 static void bot_quota_tick(Game *game, GameBots *bots, const float dt) {
     if (!bots->quota) return;
+    const int humans = bot_count_humans(game);
+    int quota_bots = bot_count_quota(bots);
+    if (bots->quota_fill && !humans && quota_bots) {
+        bots->quota_empty += dt;
+        if (bots->quota_empty < bots->quota_grace) return; // hold the match for a rejoin
+        for (GameBot *bot; (bot = bot_quota_victim(game, bots, 0));) game_bots_remove(game, bot);
+        return;
+    }
+    if (humans) bots->quota_empty = 0.0f;
     bots->quota_timer -= dt;
     if (bots->quota_timer > 0.0f) return;
     bots->quota_timer = 300.0f;
-    int humans = 0, quota_bots = 0;
-    for (size_t i = 0; i < game->player_count; i++) humans += game->players[i] && !game->players[i]->is_bot;
-    for (int i = 0; i < bots->count; i++) quota_bots += bots->list[i].quota;
-    const int slots = bots->slots < 0 ? 0 : bots->slots > 0 ? bots->slots : game->config.max_players > 0 ? game->config.max_players : 8;
-    int want = bots->quota_fill ? bots->quota - humans : bots->quota;
-    if (want > slots - humans - (bots->count - quota_bots)) want = slots - humans - (bots->count - quota_bots); // humans need slots
-    if (want < 0) want = 0;
+    const int want = bot_quota_want(game, bots, humans, quota_bots);
     if (quota_bots < want) {
-        GameBot *bot = game_bots_add(game, NULL, NULL, 0.0f);
+        GameBot *bot = game_bots_add(game, NULL, NULL, 0.0f); // team 0: players.add puts it on the smaller team
         if (bot) bot->quota = 1;
     } else if (quota_bots > want) {
-        for (int i = bots->count - 1; i >= 0; i--) {
-            if (!bots->list[i].quota) continue;
-            game_bots_remove(game, &bots->list[i]);
-            break;
-        }
+        GameBot *bot = bot_quota_victim(game, bots, 0);
+        if (bot) game_bots_remove(game, bot);
     }
 }
 
