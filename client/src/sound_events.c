@@ -32,7 +32,7 @@ int player_collides(Player *player, const Object *object, float pad);
 #define BOUNCE_INTERVAL 0.25f   // one bounce_0 per pad launch (Krunker plays it per colliding frame)
 #define TELEPORT_DISTANCE 20.0f // per-frame moves above max(this, TELEPORT_SPEED * delta) are
 #define TELEPORT_SPEED 400.0f   // spawns/teleports, not steps (units, units/s)
-#define MAX_LOADOUT 8
+#define MAX_LOADOUT (NET_LOADOUT_MAX + PLAYER_EXTRA_WEAPONS_MAX) // the class loadout + Object Manager extra slots
 #define MAX_REMOTE 64
 
 typedef struct {
@@ -329,13 +329,18 @@ static void local_shot(PlayerTrack *track, const Player *me, const float now) {
         return;
     }
 
+    if (weapon->build) return; // players.build sets the fire timer without a sound
+
     const int entry = weapon_entry(weapon);
     if (entry < 0) return;
 
-    // shoot(): playSound(weapon.sound, 0.85, ..., rate randFloat(0.9, 1.1)) -> SOUND.play.
-    audio_play(WEAPON_SOUNDS[entry].sound, 0.85f, 0, rand_float(0.9f, 1.1f));
+    // shoot(): playSound(fullCharge ? weapon.sound + "_blast" : weapon.sound, 0.85, ..., rate
+    // randFloat(0.9, 1.1)) -> SOUND.play; tryGrapple plays weapon.sound the same way.
+    char blast[48];
+    snprintf(blast, sizeof(blast), "%s_blast", WEAPON_SOUNDS[entry].sound);
+    audio_play(me->shot_blast && weapon->full_charge_shot ? blast : WEAPON_SOUNDS[entry].sound, 0.85f, 0, rand_float(0.9f, 1.1f));
 
-    if (WEAPON_SOUNDS[entry].casings && now - track->last_shell > SHELL_INTERVAL) {
+    if (WEAPON_SOUNDS[entry].casings && !(weapon->grapple_range > 0.0f) && now - track->last_shell > SHELL_INTERVAL) {
         track->last_shell = now;
         play_numbered("case_", 0, 1, 0.45f, rand_float(0.8f, 1.3f));
     }
@@ -500,6 +505,7 @@ static void preload_common(void) {
     };
     for (size_t i = 0; i < sizeof(COMMON) / sizeof(COMMON[0]); i++) audio_preload(COMMON[i]);
     for (size_t i = 0; i < sizeof(WEAPON_SOUNDS) / sizeof(WEAPON_SOUNDS[0]); i++) audio_preload(WEAPON_SOUNDS[i].sound);
+    audio_preload("weapon_29_blast"); // the Charge Rifle's full-charge shot (shoot(..., fullCharge))
 }
 
 void sound_events_tick(Client *client, const float now, const float delta) {
@@ -553,12 +559,15 @@ void sound_events_kill(const int headshot, const Player *killer, const int weapo
     audio_play(name, 1.0f, 0, 1.0f);
 }
 
-void sound_events_remote_shot(Client *client, const Player *shooter) {
-    // shoot() on the server -> "s" packet -> playerSound -> play3D(weapon.sound, 0.85, rate).
+void sound_events_remote_shot(Client *client, const Player *shooter, const int blast) {
+    // shoot() on the server -> "s" packet -> playerSound -> play3D(weapon.sound, 0.85, rate); a
+    // full-charge shot plays weapon.sound + "_blast" (NetShotPacket.first 2).
     if (!shooter || shooter == client->me) return;
     const int entry = weapon_entry(shooter->weapon);
     if (entry < 0) return;
-    audio_play_3d(WEAPON_SOUNDS[entry].sound, shooter->position, 0.85f, rand_float(0.9f, 1.1f), 0.0f, 0.0f);
+    char name[48];
+    snprintf(name, sizeof(name), blast ? "%s_blast" : "%s", WEAPON_SOUNDS[entry].sound);
+    audio_play_3d(name, shooter->position, 0.85f, rand_float(0.9f, 1.1f), 0.0f, 0.0f);
 }
 
 void sound_events_explosion(const vec3 position) {

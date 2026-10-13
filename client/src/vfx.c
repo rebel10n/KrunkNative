@@ -197,6 +197,14 @@ static const VfxPhysConfig vfx_phys_configs[] = {
 #define VFX_EXPLOSION_LARGE 8
 #define VFX_EXPLOSION_SMALL 15
 #define VFX_EXPLOSION_COLOR 0xbbbbbb
+// particles.js f1501 (the Grappler rope, PARTICLES.addRope): a 5-sided cylinder (KN: a box) of
+// RENDER.ropeColor #b3b3b3, MeshBasicMaterial, scale 0.3 across, from the hook to the muzzle
+#define VFX_ROPE_COLOR 0xb3b3b3
+#define VFX_ROPE_SCALE 0.3f
+// players.build (client): buildHelper #55acee / buildHelperN #ee5555 cubes, opacity 0.7, noShader
+#define VFX_BUILD_OK_COLOR 0x55acee
+#define VFX_BUILD_NO_COLOR 0xee5555
+#define VFX_BUILD_OPACITY 0.7f
 #define VFX_EXPLOSION_EMISSIVENESS 0.55f
 #define VFX_EXPLOSION_DAMPING 3.0f
 #define VFX_EXPLOSION_LIFE_MIN 2.2f
@@ -823,7 +831,8 @@ static int project_to_screen(Camera *camera, const vec3 position, vec2 *out) {
 // projectile, then per pellet the impact effect, tracer and trail.
 static void local_shot(Client *client, Player *me) {
     const Weapon *weapon = me->weapon;
-    if (!weapon || weapon->melee) return;
+    // players.build / tryGrapple set the fire timer without shoot(): no muzzle, casing or tracer
+    if (!weapon || weapon->melee || weapon->build || weapon->grapple_range > 0.0f) return;
 
     const VfxWeaponFx *fx = weapon_fx(weapon);
     const int scoped = weapon->scope && me->aim_val >= 1.0f;
@@ -1613,6 +1622,27 @@ static float view_distance(const vec3 position, const vec3 camera_position, cons
     return v3_dot(v3_sub(position, camera_position), forward);
 }
 
+// f1501.updateMesh: from the hook (x, y, z) to the held weapon's muzzle (weaponMeshes[loadoutIndex]
+// .muzzles[0]), else to the middle of the player; shown while the parent is active and grappling.
+static int rope_box(const Player *player, VfxBox *box) {
+    if (!player || !player->active || !player->grapple.active || !player->weapon) return 0;
+    vec3 start;
+    if (!held_arms(player) || !arms_point(player, muzzle_local(player, weapon_fx(player->weapon), 0), &start)) {
+        start = player->position;
+        start.y += player->height / 2.0f;
+    }
+    const vec3 hook = player->grapple.point;
+    const vec3 along = v3_sub(start, hook);
+    const float length = v3_length(along);
+    if (!(length > 1e-3f)) return 0;
+    memset(box, 0, sizeof(*box));
+    box->position = v3_add(hook, v3_scale(along, 0.5f));
+    box->forward = along;
+    box->size = v3(VFX_ROPE_SCALE, VFX_ROPE_SCALE, length);
+    box->color = color_from_hex(VFX_ROPE_COLOR, 1.0f);
+    return 1;
+}
+
 void vfx_render_world(Client *client) {
     if (!client->game.ready || !vfx_gl_init()) return;
 
@@ -1645,6 +1675,14 @@ void vfx_render_world(Client *client) {
             if (!box->active || box->fog != pass) continue;
             if (!started) started = batch_state(opaque);
             batch_phys_box(box);
+        }
+
+        // Grappler ropes (PARTICLES.ropes): MeshBasicMaterial, drawn with the unfogged boxes
+        for (size_t i = 0; pass == 0 && i < client->game.player_count; i++) {
+            VfxBox rope;
+            if (!rope_box(client->game.players[i], &rope)) continue;
+            if (!started) started = batch_state(opaque);
+            batch_phys_box(&rope);
         }
 
         // projectile physObjs: MeshBasicMaterial boxes (fog: false) like the tracers
@@ -1728,6 +1766,23 @@ void vfx_render_world(Client *client) {
             state.cull = 1;
             if (!batch_state(state)) break;
             batch_trail(&vfx.trails[item->index]);
+        }
+    }
+
+    // the Build Tool's helper: player.js:1846 hides it without a build weapon, while the fire
+    // timer runs or while the build wheel is up (selectBuild); players.build places it otherwise
+    const Player *me = client->me;
+    if (me && me->active && me->weapon && me->weapon->build && me->build_preview.active && !me->select_build && me->reloads &&
+        me->loadout_index >= 0 && me->loadout_index < me->loadout_size && me->reloads[me->loadout_index] <= 0.0f) {
+        VfxDrawState state = {0};
+        state.blend = VFX_BLEND_NORMAL;
+        state.cull = 1;
+        if (batch_state(state)) {
+            const vec3 size = v3_add(me->build_preview.size, v3(0.1f, 0.1f, 0.1f)); // scaleMesh(w + 0.1, h + 0.1, l + 0.1)
+            const vec3 feet = me->build_preview.feet;
+            const vec3 corner = {feet.x - size.x * 0.5f, feet.y - 0.05f, feet.z - size.z * 0.5f};
+            const vec4 color = color_from_hex(me->build_preview.can ? VFX_BUILD_OK_COLOR : VFX_BUILD_NO_COLOR, VFX_BUILD_OPACITY);
+            batch_box(corner, v3(size.x, 0, 0), v3(0, size.y, 0), v3(0, 0, size.z), color, 0, (vec4) {0});
         }
     }
 

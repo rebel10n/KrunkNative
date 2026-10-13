@@ -8,6 +8,7 @@
 #include <spectate.h>
 #include <ui_logic.h>
 #include <html_dom.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -111,6 +112,19 @@ int combat_events_handle(Client *client, const int type, const void *payload, co
                 client->me->streak_weapon = wstk.weapon;
                 client->me->weapon_streak = wstk.count;
             }
+            return 1;
+        }
+        case NET_PACKET_GRAPPLE: { // the "k" sync's grapple slot: another player's rope (vfx.c draws it)
+            COMBAT_READ(NetGrapplePacket, grap);
+            Player *player = client_find_player(client, grap.uid);
+            if (!player || player == client->me) return 1; // our own is predicted (and in RECON)
+            if (!grap.active || !isfinite(grap.point[0]) || !isfinite(grap.point[1]) || !isfinite(grap.point[2])) {
+                player_end_grapple(player);
+                return 1;
+            }
+            player->grapple.active = 1;
+            player->grapple.point = (vec3) {grap.point[0], grap.point[1], grap.point[2]};
+            player->grapple.range = 0.0f; // not simulated: remote players are interpolated
             return 1;
         }
         case NET_PACKET_UPGRADES: { // "inat" upgrades[]: krumMachine slots and their ammo

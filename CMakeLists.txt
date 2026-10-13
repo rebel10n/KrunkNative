@@ -470,7 +470,8 @@ else ()
         target_link_libraries(zombies_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
-    foreach (wpb_test weapons_v7_test combat_test)
+    # charge_grapple_test: the Charge Rifle charge / blast and the Grappler rope against v7.1.4
+    foreach (wpb_test weapons_v7_test combat_test charge_grapple_test)
         add_executable(${wpb_test} ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/${wpb_test}.c)
         target_link_libraries(${wpb_test} PRIVATE m)
         if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -569,6 +570,14 @@ else ()
     target_link_libraries(object_manager_test PRIVATE kn_server_core m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(object_manager_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    # weapons_audit_test: every v7 weapon through the class loadout, an Object Manager extra slot and
+    # a dropped pickup over the sandbox (equip, ADS, fire, ammo, reloads, the special mechanics)
+    add_executable(weapons_audit_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/weapons_audit_test.c)
+    target_link_libraries(weapons_audit_test PRIVATE kn_server_core m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(weapons_audit_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
     # sandbox_config_test (map-logic WP-E): the offline sandbox plays a map's embedded config, its

@@ -386,7 +386,7 @@ static void events_shot(Client *client, const NetShotPacket *packet) {
 
     const vec3 hit = {packet->hit[0], packet->hit[1], packet->hit[2]};
     vfx_remote_shot(client, shooter, hit, packet->has_normal, packet->normal_yaw, packet->normal_pitch, packet->trail);
-    if (packet->first) sound_events_remote_shot(client, shooter);
+    if (packet->first) sound_events_remote_shot(client, shooter, packet->first == 2);
 }
 
 // "pr": a projectile in flight (rockets, bolts, blaster shots, thrown knives).
@@ -884,6 +884,7 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         case NET_PACKET_PERKS:
         case NET_PACKET_UPGRADES:
         case NET_PACKET_WEAPON_STREAK:
+        case NET_PACKET_GRAPPLE:
             return combat_events_handle(client, type, payload, length); // WP-B (client/src/net/combat_events.c)
         case NET_PACKET_BLOCK_ZOMBIES + 0: // map-logic WP-H (client/src/net/zombie_events.c): mybx / krm, smybx,
         case NET_PACKET_BLOCK_ZOMBIES + 1: // pwup, upz, uamo reserves, sic

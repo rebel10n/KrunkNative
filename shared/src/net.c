@@ -16,6 +16,7 @@ _Static_assert(sizeof(PlayerCosmeticsV7) == 36, "PlayerCosmeticsV7 is nine int32
 _Static_assert(NET_ENT_PACKET_V9_SIZE == NET_ENT_PACKET_V8_SIZE + 37, "ENT cosmetics_v7, show_badges must follow anon_mode (WP-F)");
 _Static_assert(NET_SPAWN_PACKET_V4_SIZE == NET_SPAWN_PACKET_V3_SIZE + 36, "SPAWN cosmetics_v7 must follow head_mlt (WP-F)");
 _Static_assert(NET_RECON_PACKET_V1_SIZE == 58 && NET_RECON_PACKET_V2_SIZE == 72, "RECON v7 locks must be the last bytes (WP-C; net-bridge reads 58)");
+_Static_assert(NET_RECON_PACKET_V3_SIZE == NET_RECON_PACKET_V2_SIZE + 17, "RECON grapple must follow the v7 locks");
 _Static_assert(NET_INPUT_PACKET_V1_SIZE == 22 && NET_INPUT_PACKET_V2_SIZE == 23 && sizeof(NetInputPacket) == 24, "INPUT slowdown then scroll must be the last bytes");
 
 #ifdef WIN32
@@ -244,6 +245,14 @@ void net_packet_from_recon(NetReconPacket *packet, const Player *player, const i
     packet->can_slide_timer = player->can_slide_timer;
     // slideTimer as the physics counts it (player.c movement_slide_ms: slide_ms unless slide_timer moved)
     packet->slide_ms = (float) (player->slide_ms / 1000.0) == player->slide_timer ? player->slide_ms : (double) player->slide_timer * 1000.0;
+    // [23] player.grapple || 0
+    packet->grapple_active = (uint8_t) !!player->grapple.active;
+    if (player->grapple.active) {
+        packet->grapple[0] = player->grapple.point.x;
+        packet->grapple[1] = player->grapple.point.y;
+        packet->grapple[2] = player->grapple.point.z;
+        packet->grapple[3] = player->grapple.range;
+    }
 }
 
 // index.js reconcilePlayer(l, true) up to the replay: every field of the "l" packet is
@@ -272,7 +281,14 @@ void net_packet_apply_recon(Player *player, const NetReconPacket *packet) {
     player->can_slide = !!(packet->flags & NET_RECON_CAN_SLIDE);
     player->on_terrain = !!(packet->flags & NET_RECON_ON_TERRAIN);
     player->noclip = !!(packet->flags & NET_RECON_NOCLIP);
-    // players.reload(player, 0, false, weaponIndex, undefined, true)
+    // [23] tmpPlayer.grapple = grapple || null (a RECON without it keeps the predicted one)
+    if (packet->grapple_active != NET_RECON_GRAPPLE_KEEP) {
+        player->grapple.active = packet->grapple_active == 1;
+        player->grapple.point = (vec3) {packet->grapple[0], packet->grapple[1], packet->grapple[2]};
+        player->grapple.range = packet->grapple[3];
+        if (!player->grapple.active) memset(&player->grapple, 0, sizeof(player->grapple));
+    }
+    // players.reload(player, 0, false, weaponIndex, undefined, true): swapWeapon's noEndGrapple
     if (packet->loadout_index >= 0 && packet->loadout_index < player->loadout_size && packet->loadout_index != player->loadout_index) {
         player_swap_weapon(player, packet->loadout_index, 0, 0, 1);
     }
@@ -298,13 +314,22 @@ size_t net_reconcile(Player *player, const NetReconPacket *packet, Input *pendin
 
 // After the client's tick ran its newest input: that input's physPow knockback becomes its
 // velObj (players.js shoot: if (!IO) a1.velObj = {...}) for later reconciliation replays.
+// The same for tryGrapple's input.grapObj (if (!serverIO) a1.grapObj = {x, y, z, r}).
 void net_recon_take_vel_obj(Player *player, Input *pending, const size_t count) {
-    if (!player->has_shot_vel_obj) return;
+    if (!player->has_shot_vel_obj && !player->has_shot_grap_obj) return;
+    const int vel = player->has_shot_vel_obj, grap = player->has_shot_grap_obj;
     player->has_shot_vel_obj = 0;
+    player->has_shot_grap_obj = 0;
     for (size_t i = count; i-- > 0;) {
         if (pending[i].seq != player->input_seq) continue;
-        pending[i].vel_obj = player->shot_vel_obj;
-        pending[i].has_vel_obj = 1;
+        if (vel) {
+            pending[i].vel_obj = player->shot_vel_obj;
+            pending[i].has_vel_obj = 1;
+        }
+        if (grap) {
+            pending[i].grap_obj = player->shot_grap_obj;
+            pending[i].has_grap_obj = 1;
+        }
         return;
     }
 }
@@ -486,6 +511,13 @@ int net_packet_read_recon(NetReconPacket *recon, const NetPacket *packet, const 
         recon->wall_jump_count = (uint16_t) (keep && keep->wall_jump_count > 0 ? MIN(keep->wall_jump_count, UINT16_MAX) : 0);
         recon->can_slide_timer = keep ? keep->can_slide_timer : 0.0f;
         recon->slide_ms = (double) recon->slide_timer * 1000.0;
+    }
+    if (packet->length < NET_RECON_PACKET_V3_SIZE) { // no grapple sent: the predicted one stays
+        recon->grapple_active = NET_RECON_GRAPPLE_KEEP;
+        memset(recon->grapple, 0, sizeof(recon->grapple));
+    } else if (recon->grapple_active > 1 || !isfinite(recon->grapple[0]) || !isfinite(recon->grapple[1]) || !isfinite(recon->grapple[2]) ||
+               !isfinite(recon->grapple[3])) {
+        recon->grapple_active = 0;
     }
     return 1;
 }

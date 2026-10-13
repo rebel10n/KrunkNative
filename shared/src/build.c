@@ -15,6 +15,8 @@
 
 #define BUILD_MAX 1200 // config.buildMax
 
+int game_object_shootable(const Object*); // shared/src/player.c (the hitscan object filter)
+
 const WorldBuildObject g_build_objects[WORLD_BUILD_COUNT] = {
     // name, w, h, l, cost, health, places, rot_facing, rot_dir, ramp, colour
     {"Build Block", 10.0f, 10.0f, 10.0f, 10, 300, WORLD_BUILD_PLACES_ALL, 0, 0, 0, 0x5e432b},
@@ -490,7 +492,11 @@ int player_build(Player *player, const int place) {
     if (terrain_t > 0.0f) best = terrain_t;
     for (size_t i = 0; i < game->map->object_count; i++) {
         const Object *o = game->map->objects[i];
-        if (!o->active || o->no_shoot) continue;
+        // manager.objects, active && !noShoot: KN's map list also holds what v7 keeps out of
+        // manager.objects or flags noShoot (zones, bomb sites, no-collision props); those go the
+        // way a shot (and players.spray) skips them, else a zone the player stands in takes the
+        // ray at a negative fraction and the build lands behind the player. Builds always count.
+        if (!o->active || o->no_shoot || (!o->dynamic && !game_object_shootable(o))) continue;
         const BuildBox box = build_box(o);
         int has = 0;
         double v = o->dynamic ? build_snap_func(o->build_index, &ray, bi, &box, &has) : NAN;
@@ -500,9 +506,12 @@ int player_build(Player *player, const int place) {
             target = o;
         }
     }
-    if (best != best) return 0;
+    player->build_preview.active = 0;
+    if (best != best) return 0; // else if (!serverIO): both helpers hidden
 
-    int can = player->score >= build->cost; // !config.isProd || score >= cost
+    // !config.isProd || score >= cost. KrunkNative deviation: player->build_free (OM_CAP_SPAWN) waives
+    // the cost (and the score payment below) in the sandbox and for devs / a custom game's host.
+    int can = player->build_free || player->score >= build->cost;
     const double dist = range * best - 0.0001;
     double hx = player->position.x + dist * sin(yaw + M_PI) * cos(pitch);
     double hy = eye + dist * sin(pitch);
@@ -551,6 +560,11 @@ int player_build(Player *player, const int place) {
             can = 0; // manager.collisionC(x, y, z, w / 2, h / 2, l / 2, obj, -0.01)
         }
     }
+    // the client's buildHelper (can) / buildHelperN (can't): w, h, l + 0.1, moved to (x, y - 0.05, z)
+    player->build_preview.active = 1;
+    player->build_preview.can = (unsigned char) !!can;
+    player->build_preview.feet = (vec3) {(float) hx, (float) hy, (float) hz};
+    player->build_preview.size = (vec3) {(float) w, (float) h, (float) l};
     if (place && can) {
         if (player->reloads && player->loadout_index >= 0) player->reloads[player->loadout_index] = player->weapon->rate;
         player->did_shoot = 1;
@@ -558,6 +572,6 @@ int player_build(Player *player, const int place) {
     }
     if (!authority || !can) return 0;
     if (!game_build_object(game, bi, (vec3) {(float) hx, (float) hy, (float) hz}, (vec3) {(float) w, (float) h, (float) l}, (float) dir, 0, player)) return 0;
-    player_score(player, -build->cost, 0);
+    if (!player->build_free) player_score(player, -build->cost, 0);
     return 1;
 }

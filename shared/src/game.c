@@ -580,6 +580,7 @@ void game_send_round_state(Game *game, const int uid) {
     game_send_object_state(game, uid); // init dest / gates / banks (shared/src/triggers.c)
     world_send_state(game, uid);        // init zone / mov (shared/src/world.c, WP-B)
     zombies_send_state(game, uid);      // init pwup / mybx / krm, the wave, airdrops (WP-H)
+    game_sync_grapples(game, uid);      // the others' Grappler ropes ("k" grapple slots)
 
     if (game->end_timer > 0.0f) {
         game_send_timer(game, uid, (int) game->end_timer, 1);

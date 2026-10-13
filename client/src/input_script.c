@@ -27,7 +27,11 @@
 //                                each frame; multi-life tests: server/tests/gunfight.sh)
 //   100 wheel 1 | wheel -1       one mouse wheel event (up / down) through the scroll callback
 //   100 blur                     the window loses focus (alt-tab)
-//   100 state                    log the held weapon slot, the menu / pointer lock state, position, ammo, ended
+//   100 om add 28 | om drop 20   an Object Manager Weapons-tab click without the window: left (add the
+//                                extra loadout slot, in hand when it lands; again: take it out) / right
+//                                (a pickup at the crosshair)
+//   100 state                    log the held weapon slot, the menu / pointer lock state, position, ammo, ended,
+//                                the charge (chargeTime s, fullCharge), the reload and fire timers, the grapple / rope
 //   100 con end                  a developer console command (the rest of the line: con bot_add 5)
 //   100 vis @dead endUI chatHolder  log what the player sees of these page elements (html_dom_is_shown):
 //                                "[input_script] vis t=100 @dead endUI=1 chatHolder=0" (- = no such id,
@@ -123,7 +127,7 @@ static void script_load(void) {
             sscanf(rest, "%f %f %f %f %f", &e->v[0], &e->v[1], &e->v[2], &e->v[3], &e->v[4]);
         }
         (void) b;
-        if (!strcmp(e->cmd, "con") || !strcmp(e->cmd, "vis") || !strcmp(e->cmd, "scroll") || !strcmp(e->cmd, "type")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
+        if (!strcmp(e->cmd, "con") || !strcmp(e->cmd, "vis") || !strcmp(e->cmd, "scroll") || !strcmp(e->cmd, "type") || !strcmp(e->cmd, "om")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
             while (*rest == ' ' || *rest == '\t') rest++;
             snprintf(e->arg, sizeof(e->arg), "%s", rest);
             for (size_t len = strlen(e->arg); len && (e->arg[len - 1] == '\n' || e->arg[len - 1] == '\r' || e->arg[len - 1] == ' '); len--) e->arg[len - 1] = 0;
@@ -255,14 +259,26 @@ static void script_run(Client *client, const ScriptEvent *e) {
         GLFWscrollfun cb = glfwSetScrollCallback(client->window, NULL);
         glfwSetScrollCallback(client->window, cb);
         if (cb) cb(client->window, 0.0, e->v[0]);
+    } else if (!strcmp(e->cmd, "om")) {
+        char what[16] = "";
+        int id = -1;
+        if (sscanf(e->arg, "%15s", what) == 1 && sscanf(strstr(e->arg, what) + strlen(what), "%d", &id) == 1 && id >= 0) {
+            object_manager_ui_pick_weapon(id, !strcmp(what, "drop"));
+        }
+        fprintf(stderr, "[input_script] om t=%.0f %s %d\n", g_script.time, what, id);
     } else if (!strcmp(e->cmd, "state")) {
         // state: one log line with the held slot and the menu/lock state (scripted checks)
         const Player *me = client->me;
-        fprintf(stderr, "[input_script] state t=%.0f slot=%d/%d weapon=%s menu=%d locked=%d pos=%.3f,%.3f,%.3f ammo=%d aim=%.2f ended=%d\n",
+        fprintf(stderr, "[input_script] state t=%.0f slot=%d/%d weapon=%s menu=%d locked=%d pos=%.3f,%.3f,%.3f ammo=%d aim=%.2f ended=%d "
+                "charge=%.3f full=%d reload=%.2f fire=%.2f grapple=%d rope=%.1f\n",
                 g_script.time, me ? me->loadout_index : -1, me ? (int) me->loadout_size : 0,
                 me && me->weapon ? me->weapon->name : "-", html_ui_available() && html_ui_is_menu_open(), client->mouse_state.locked,
                 me ? me->position.x : 0.0f, me ? me->position.y : 0.0f, me ? me->position.z : 0.0f,
-                me && me->ammo && me->loadout_size ? (int) me->ammo[me->loadout_index] : -1, me ? me->aim_val : 0.0f, client_round_ended(client));
+                me && me->ammo && me->loadout_size ? (int) me->ammo[me->loadout_index] : -1, me ? me->aim_val : 0.0f, client_round_ended(client),
+                me ? me->charge_time : 0.0f, me ? me->full_charge : 0, me ? me->reload_timer : 0.0f,
+                me && me->reloads && me->loadout_index >= 0 && me->loadout_index < me->loadout_size ? me->reloads[me->loadout_index] : 0.0f,
+                me ? me->grapple.active : 0,
+                me ? me->grapple.range : 0.0f);
     } else if (!strcmp(e->cmd, "type")) {
         // type <text>: one char callback per code point (ASCII), as typing it
         GLFWcharfun cb = glfwSetCharCallback(client->window, NULL);

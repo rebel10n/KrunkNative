@@ -449,6 +449,13 @@ float ui_controls_speed_limit(void);
 void ui_controls_touch_shoot(int on);            // #mobileUI shoot buttons: UCUz1 (ui_mobile.c)
 // END ui_controls block
 
+// BEGIN build_ui block (client/src/ui/build_ui.c): the held weapon's game-overlay canvas items
+float build_ui_charge_progress(const Player *me); // interMProg: chargeTime / (chrgTime || throwCharge), 0 none
+void build_ui_render(Client*);                    // per frame, after the HUD: the charge bar and the build wheel
+int  build_ui_shown(void);                        // the last build_ui_render drew something (tests)
+void build_ui_fini(void);                         // its canvas (GL)
+// END build_ui block
+
 // BEGIN object_manager_ui block (client/src/ui/object_manager_ui.c): the KrunkNative Object Manager
 // (F1 spawn menu, shared/include/object_manager.h). Not a v7 window: id 54 follows the Connect window.
 #define OBJECT_MANAGER_WINDOW 54
@@ -459,6 +466,8 @@ int  object_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlA
 char *object_manager_window_gen(int id, const char **header); // NULL for other ids
 int  object_manager_events_handle(Client*, int type, const void *payload, uint16_t length); // packets 251-253
 void object_manager_ui_reset(void);              // a new server (INIT): its caps are unknown again
+void object_manager_ui_tick(Client*);            // per frame: me->build_free from the caps (asks once with a Build Tool)
+void object_manager_ui_pick_weapon(int weapon_id, int drop); // a Weapons-tab left (add / take out) or right (drop) click
 void object_manager_ui_key(Client*, int action); // the Undo / Remove binds in game: OM_ACTION_UNDO / OM_ACTION_REMOVE_AIM
 void ui_controls_select_slot(int slot);          // ui_controls.c: equip loadout slot `slot` with the next input frame
 // END object_manager_ui block

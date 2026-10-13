@@ -563,6 +563,8 @@ static void net_spawn_client(ClientConnection *client) {
     client->player->has_account = (unsigned char) (client->acct.account_id > 0 || client->local);
     // KrunkNative Object Manager: the connection's extra weapons, while this game allows them
     const ObjectManagerPerms om_perms = net_om_perms(client);
+    // the Build Tool's cost waiver follows the Object Manager's spawn right (shared.h build_free)
+    client->player->build_free = (object_manager_caps(&g_server->game, &om_perms) & OM_CAP_SPAWN) != 0;
     if (!object_manager_keep_extras(&g_server->game, &om_perms)) {
         const int had = client->player->extra_weapon_count > 0;
         client->om_extra_count = 0;
@@ -1561,8 +1563,8 @@ static void net_send_reconciliation(void) {
 
         NetReconPacket packet;
         net_packet_from_recon(&packet, player, player->input_seq);
-        // WP-C: the v7 movement locks only to 1.3.1+ peers (1.3.0 / net-bridge read exactly 58 bytes)
-        const uint16_t size = net_peer_has_wpc(client->peer_minor, client->peer_patch) ? NET_RECON_PACKET_V2_SIZE : NET_RECON_PACKET_V1_SIZE;
+        // WP-C: the v7 movement locks (and the grapple) only to 1.3.1+ peers (1.3.0 / net-bridge read exactly 58 bytes)
+        const uint16_t size = net_peer_has_wpc(client->peer_minor, client->peer_patch) ? NET_RECON_PACKET_V3_SIZE : NET_RECON_PACKET_V1_SIZE;
         net_send_packet(client->fd, NET_PACKET_RECON, &packet, size);
     }
 }
@@ -1582,6 +1584,7 @@ static void net_broadcast_states_tick(void) {
     net_send_pings();
     if (g_server->game.end_timer > 0.0f) return;
     net_send_reconciliation();
+    game_sync_grapples(&g_server->game, NET_TARGET_ALL); // the "k" sync's grapple slot
 
     static double next_state_at; // gameserver.ts K_PACKET_INTERVAL_MS
     const double state_now = net_time();

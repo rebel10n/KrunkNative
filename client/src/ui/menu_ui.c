@@ -1500,6 +1500,7 @@ void client_menu_tick(Client *client) {
     ui_console_tick(client); // developer console (ui_console.c)
     update_ui_tick(client);  // Outdated / Update now (update_ui.c)
     ui_interact_tick(client); // the interact prompt and hold progress (ui_interact.c)
+    object_manager_ui_tick(client); // the Build Tool cost waiver (OM caps)
 
     // Round end: the end screen frees the pointer (Krunker exits pointer lock so its
     // results can be clicked) and relocks when the next round starts.

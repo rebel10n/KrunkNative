@@ -363,7 +363,7 @@ static void test_wpc_peer_mix(void) {
     const NetPacket *recon_old = last(&old, NET_PACKET_RECON);
     const NetPacket *recon_now = last(&now, NET_PACKET_RECON);
     CHECK(recon_old && recon_old->length == NET_RECON_PACKET_V1_SIZE, "1.3.0 peer: RECON V1 (%u)", recon_old ? recon_old->length : 0);
-    CHECK(recon_now && recon_now->length == NET_RECON_PACKET_V2_SIZE, "1.3.1 peer: RECON V2 (%u)", recon_now ? recon_now->length : 0);
+    CHECK(recon_now && recon_now->length == NET_RECON_PACKET_V3_SIZE, "1.3.1 peer: RECON V3 (the v7 locks + the grapple, %u)", recon_now ? recon_now->length : 0);
     NetReconPacket recon;
     CHECK(recon_now && net_packet_read_recon(&recon, recon_now, NULL) && recon.ack_seq == 29 && recon.wall_jump_count == 0 &&
           recon.can_slide_timer == 0.0f && (float) (recon.slide_ms / 1000.0) == recon.slide_timer, "RECON V2 movement locks");

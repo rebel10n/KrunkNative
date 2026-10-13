@@ -44,6 +44,7 @@ static struct {
     double status_at;     // glfwGetTime() of it
     int from_game;        // opened while the game had the pointer: closing gives it back
     int pending_equip;    // weapon id just added by this client: equip it when LOADOUT_EXTRA lands, -1 none
+    int queried;          // a QUERY for the caps went out on this connection (object_manager_ui_tick)
 } g_om = {.tab = OM_TAB_WEAPONS, .caps = -1, .pending_equip = -1};
 
 static Client *om_client(void) { return menu_ui()->client; }
@@ -412,6 +413,11 @@ static void om_pick(const int tab, const int item, const int alt) {
     }
 }
 
+// A Weapons-tab click without the window (input scripts: `om add <id>` / `om drop <id>`)
+void object_manager_ui_pick_weapon(const int weapon_id, const int drop) {
+    om_pick(OM_TAB_WEAPONS, weapon_id, drop);
+}
+
 int object_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     if (!name || strncmp(name, "knOm", 4) != 0) return -1;
     if (!strcmp(name, "knOmTab")) {
@@ -552,6 +558,23 @@ int object_manager_events_handle(Client *client, const int type, const void *pay
     }
 }
 
+// Per frame: the local player's Build Tool cost waiver (Player.build_free, doc/v7/decisions.md
+// "Build Tool cost") follows this server's OM_CAP_SPAWN, as the authority's does; with the caps
+// unknown, holding a Build Tool asks once (OM_ACTION_QUERY) so the wheel and helper are right.
+void object_manager_ui_tick(Client *client) {
+    Player *me = client ? client->me : NULL;
+    if (!me) return;
+    if (g_om.caps < 0) {
+        me->build_free = 0;
+        if (!g_om.queried && me->active && me->weapon && me->weapon->build && om_server_ok(client)) {
+            g_om.queried = 1;
+            om_send(OM_ACTION_QUERY, 0);
+        }
+        return;
+    }
+    me->build_free = (g_om.caps & OM_CAP_SPAWN) != 0;
+}
+
 void object_manager_ui_key(Client *client, const int action) {
     if (!client || !client->me || !client->me->active || !om_server_ok(client)) return;
     om_send(action, 0);
@@ -560,6 +583,7 @@ void object_manager_ui_key(Client *client, const int action) {
 // A new connection / map: the caps belong to the server we talked to.
 void object_manager_ui_reset(void) {
     g_om.caps = -1;
+    g_om.queried = 0;
     g_om.pending_equip = -1;
     g_om.status[0] = 0;
 }

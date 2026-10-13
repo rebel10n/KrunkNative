@@ -25,6 +25,10 @@
 #define COMBAT_SPREAD_RECOVER 0.985f// config.spreadRecover (per ms)
 #define COMBAT_SPREAD_MLT 240.0f    // config.spreadMlt (recoilAnim term)
 #define COMBAT_CROUCH_SPREAD 0.55f  // config.crouchSpread
+// v7.1.4 Grappler (players.js tryGrapple, player.js procInputs grapple)
+#define GRAPPLE_MIN_RANGE 35.0f     // the rope reels in while range > 35
+#define GRAPPLE_REEL_SPEED 0.04f    // units of rope per ms (range -= delta * 0.04)
+#define GRAPPLE_RELEASE_SLACK 0.2f  // after the collisions: getD3D - range >= 0.2 lets go (blocked)
 
 
 #ifdef KRUNKNATIVE_CLIENT
@@ -35,6 +39,9 @@ void player_melee(Player*);
 void player_shoot(Player*);
 static void combat_spawn(Player*, const ClassConfig*);
 static void combat_update_charge(Player*, const Input*, float delta);
+static void combat_try_grapple(Player*, int fire);
+static void player_grapple_pull(Player*, float delta_ms, float decel);
+static double grapple_d3d(vec3 a, vec3 b);
 void player_step(Player*, float);
 void player_cancel_inspect(Player*);
 
@@ -121,11 +128,14 @@ void player_spawn(Player *player) {
     const int primary_index = primary >= 0 && primary < (int) weapon_count && weapons[primary] ? primary : fallback_weapon;
     // setClass(game, classIndex, secIndex): the picked secondary when it is a secondary weapon, else the Pistol.
     const int picked_secondary = player->secondary_index;
-    // v7.1.4: customOnly secondaries (Grappler) need a custom game (KN has none yet) and noComp
-    // ones stay out of comp lobbies (weapons.js `!this.noComp || !game.isComp`; ranked included).
+    // v7.1.4 weapons.js req: customOnly secondaries (Grappler) only in a custom game that is not
+    // comp (`game.isCustom && !game.isComp`; KN's hosted games and the offline sandbox are custom,
+    // game_config_is_custom; official restrictSecs has no KN equivalent, the isDev bypass is
+    // per account) and noComp ones stay out of comp lobbies (`!this.noComp || !game.isComp`).
     const int ranked = player->game->config.comp;
+    const int custom = game_config_is_custom(player->game) && !ranked;
     const int secondary_index = picked_secondary >= 0 && picked_secondary < (int) weapon_count && weapons[picked_secondary] && weapons[picked_secondary]->secondary &&
-        !weapons[picked_secondary]->custom_only && !(ranked && weapons[picked_secondary]->no_comp)
+        (!weapons[picked_secondary]->custom_only || custom) && !(ranked && weapons[picked_secondary]->no_comp)
         ? picked_secondary : WEAPON_ID_PISTOL < (int) weapon_count ? WEAPON_ID_PISTOL : -1;
     const int melee_index = WEAPON_ID_KNIFE < (int) weapon_count ? WEAPON_ID_KNIFE : primary_index;
 
@@ -190,6 +200,7 @@ void player_spawn(Player *player) {
     player->did_jump = 0;
     player->did_wall_jump = 0;
     player->did_act = 0;
+    player_end_grapple(player); // Player.reset: grapple = null
 
     player->air_time = 0.0f;
     player->covered_distance = 0.0f;
@@ -941,9 +952,9 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
             }
 
             if (object->ladder) {
-                // below the top, not crouched, not grappling (no grapple yet). v7 dropped the
-                // bottom clamp: climbing down carries on below the ladder.
-                if (!(player->position.y < top) || player->crouch_val != 0.0f) continue;
+                // below the top, not crouched, not grappling. v7 dropped the bottom clamp:
+                // climbing down carries on below the ladder.
+                if (!(player->position.y < top) || player->crouch_val != 0.0f || player->grapple.active) continue;
 
                 player->velocity.y = 0.0f;
                 player->on_ladder = 1;
@@ -1202,6 +1213,7 @@ void player_swap_weapon(Player *player, const int index, const int force_swap, c
     }
 
     int loadout_changed = force_swap || player->loadout_index != index;
+    const int prev_index = player->loadout_index;
     player->loadout_index = index;
 
     if (!instant_swap && loadout_changed) {
@@ -1222,6 +1234,8 @@ void player_swap_weapon(Player *player, const int index, const int force_swap, c
             loadout_changed = 1;
         }
     }
+    // swapWeapon: !noEndGrapple && the slot changed -> endGrapple (a reconcile's swap keeps it)
+    if (!recon && prev_index != player->loadout_index) player_end_grapple(player);
 
 #ifdef KRUNKNATIVE_CLIENT
     if (loadout_changed && !recon) player_cancel_inspect(player); // swapWeapon: cancelInspect
@@ -1263,7 +1277,13 @@ void player_swap_weapon(Player *player, const int index, const int force_swap, c
 
 void player_reload(Player *player) {
     if (player->reload_timer || (int) player->ammo[player->loadout_index] >= mode_ammo_limit(player->game, (int) player->weapon->ammo)) return;
-    if (player->weapon->no_reload && !zombies_finite_ammo(player)) return; // v7.1.4 noReload (streak equipment; finiteAmmo reloads it)
+    // v7.1.4 noReload (streak equipment; finiteAmmo reloads it). KrunkNative deviation: in an
+    // Object Manager extra slot (v7 has none) it reloads like any weapon. v7 hands these out for
+    // one magazine and takes them away empty (removeOnEmpty, tryDeployable's removeWeapon); an
+    // extra slot cannot be taken away (player_remove_weapon only edits the base), so without a
+    // reload the Slimer / Minigun / War Machine would sit there empty for the rest of the life.
+    const int extra_slot = player->loadout_index >= player_loadout_base(player);
+    if (player->weapon->no_reload && !zombies_finite_ammo(player) && !extra_slot) return;
     if (!zombies_reload_allowed(player)) return; // WP-H: finiteAmmo with an empty reserve
 
     // reload * (reSpd || 1) * attributes.reload (Sleight of Hand) * (perk 2 ? 0.5 : 1) * (kranked
@@ -1550,7 +1570,7 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
             // v7.1.4 player.js: crouchVal reaching 1 -> if (manager.isServer) game.incStat("crc", this)
             if (player->crouch_val >= 1.0f && !recon) game_inc_stat(player->game, player, "crc");
 
-            if (player->on_ground) {
+            if (player->on_ground || player->grapple.active) {
                 if (!recon && player->render_you) player->bob_anim.y -= game_constants.crouch_anim * 1.4f * delta;
             } else {
                 player->position.y += game_constants.crouch_speed * delta;
@@ -1558,7 +1578,7 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
         } else if (!crouch && player->crouch_val > 0.0f) {
             player->crouch_val = MAX(0.0f, player->crouch_val - game_constants.crouch_speed * delta);
 
-            if (player->on_ground) {
+            if (player->on_ground || player->grapple.active) {
                 if (!recon && player->render_you) player->bob_anim.y += game_constants.crouch_anim * delta;
             } else {
                 player->position.y -= game_constants.crouch_speed * delta;
@@ -1743,6 +1763,10 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
             }
         }
 
+        // player.js:1271-1290: jump lets go, then the rope reels in and holds the player on its sphere
+        if (input->jump) player_end_grapple(player);
+        if (player->grapple.active) player_grapple_pull(player, dt, decel);
+
         if (!input->shoot && !recon) player->doing_interact = 0;
 
         const int can_jump = player->on_ground && !player->did_jump; // wasOnGround
@@ -1759,6 +1783,11 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
         if (!player->noclip) player_do_map_collisions(player, input, move_dir, can_jump, delta, recon);
         else player->was_on_ground = can_jump ? 1 : 0;
         if (player->noclip) world_player_pvp_zones(player); // WP-B: v7 clears noPVP / forcePVP in noclip too
+
+        // player.js:1756-1762: a collision that kept the player off the rope's sphere lets go
+        if (player->grapple.active && grapple_d3d(player->position, player->grapple.point) - player->grapple.range >= GRAPPLE_RELEASE_SLACK) {
+            player_end_grapple(player);
+        }
 
         if (!player->did_jump && player->ramp_fix && fabsf(player->position.y - *player->ramp_fix) <= game_constants.climb_height) {
             if (!player->on_ramp) {
@@ -1863,11 +1892,13 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
 
             // map-logic WP-B: players.build runs whenever the timers allow (player.js:1911-1914),
             // with the fire input as `place`; the Build Tool never takes the shoot path
-            if (player->weapon->build && player->reloads[player->loadout_index] <= 0.0f && player->swap_timer <= 0.0f && player->reload_timer <= 0.0f) {
+            if (player->weapon->grapple_range > 0.0f && player->reloads[player->loadout_index] <= 0.0f && player->swap_timer <= 0.0f && player->reload_timer <= 0.0f) {
+                combat_try_grapple(player, will_shoot); // player.js:1911: tryGrapple(this, grapRang, fire, input)
+            } else if (player->weapon->build && player->reloads[player->loadout_index] <= 0.0f && player->swap_timer <= 0.0f && player->reload_timer <= 0.0f) {
                 player_build(player, will_shoot);
             } else if (will_shoot && player->reloads[player->loadout_index] <= 0.0f && player->swap_timer <= 0.0f && player->reload_timer <= 0.0f) {
-                if (player->weapon->grapple_range || player->weapon->build) {
-                    // v7.1.4 tryGrapple (Grappler): grapple physics are WP-A phase 2; until then it never fires.
+                if (player->weapon->build) {
+                    // (players.build above)
                 } else if (player->weapon->melee) {
                     player_melee(player);
                 } else {
@@ -1891,6 +1922,8 @@ weapon_done:;
         if (!player->noclip) player->velocity.y -= input->vel_obj.y;
         player->on_ground = 0;
     }
+    // ... and input.grapObj: the grapple this frame's Grappler shot hooked
+    if (!move_lock && recon && input->has_grap_obj) player->grapple = input->grap_obj;
 
     // Wall jump: at most wallJumpMax per airborne period (v3.1.1: unlimited); the class / mode
     // wallJV, wallJYV and config.wallJP shape it.
@@ -2259,6 +2292,14 @@ static int combat_object_shootable(const Object *object) {
         case PREFAB_SPAWN_POINT:
         case PREFAB_CAMERA_POSITION:
         case PREFAB_SPECTATE_CAM:
+        // v7.1.4 MapManager keeps these out of manager.objects (addObjective -> objectives,
+        // addDominationZone -> domzones, addBombSite -> sites, addEnvironmentZone -> envZones),
+        // so shots, sprays, builds and the Grappler pass through them. KN bug fixed: a bomb
+        // site zone (Kanji's A / B) stopped hitscan rays and builds like a wall.
+        case PREFAB_OBJECTIVE:
+        case PREFAB_BOMB_SITE:
+        case PREFAB_DOMINATION_ZONE:
+        case PREFAB_ENVIRONMENT_ZONE:
             return 0;
         default:
             return 1;
@@ -2789,7 +2830,7 @@ static void combat_send_shot(Player *player, const int ray, const float pitch, c
             shot_height + end * sinf(pitch),
             player->position.z + end * cosf(yaw + (float) M_PI) * cosf(pitch),
         },
-        .first = (uint8_t) (ray == 0),
+        .first = (uint8_t) (ray == 0 ? (player->shot_blast ? 2 : 1) : 0), // 2: playSound(weapon.sound + "_blast")
     };
 
     if (last && last->object) {
@@ -2987,6 +3028,116 @@ static void combat_try_deploy(Player *player, const int weapon_id) {
     if (player->ammo[player->loadout_index] <= 0) player_remove_weapon(player, weapon_id);
 }
 
+// ---------------------------------------------------------------- Grappler (v7.1.4)
+// players.js tryGrapple / endGrapple, player.js procInputs (the rope, the release) and the recon
+// branch (input.grapObj). Both sides run it: the authority's grapple rides in RECON (V3) for the
+// owner and NET_PACKET_GRAPPLE for everyone's rope; the owner predicts its own (client).
+
+static double grapple_js_round1(const double v) { return floor(v * 10.0 + 0.5) / 10.0; } // Number.round(1)
+
+static double grapple_d3d(const vec3 a, const vec3 b) { // UTILS.getD3D
+    const double dx = (double) a.x - b.x, dy = (double) a.y - b.y, dz = (double) a.z - b.z;
+    return sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+void player_end_grapple(Player *player) { // manager.endGrapple: grapple = null
+    if (player) memset(&player->grapple, 0, sizeof(player->grapple));
+}
+
+// The grapple slot of v7's "k" sync (game.js: grapple ? [x, y, z] : 0 per other player):
+// NET_TARGET_ALL sends every hook that appeared, moved or let go since the others last heard
+// (a dead player has none); a connection uid gets every current hook (a joiner).
+void game_sync_grapples(Game *game, const int uid) {
+    if (!game || !game_is_authority(game)) return;
+    for (size_t i = 0; i < game->player_count; i++) {
+        Player *p = game->players[i];
+        if (!p) continue;
+        const int active = p->active && p->grapple.active;
+        const vec3 point = active ? p->grapple.point : (vec3) {0.0f, 0.0f, 0.0f};
+        const int changed = active != p->grapple_sent.active || point.x != p->grapple_sent.point.x || point.y != p->grapple_sent.point.y ||
+                            point.z != p->grapple_sent.point.z;
+        if (uid == NET_TARGET_ALL ? !changed : !active || p->uid == uid) continue;
+        const NetGrapplePacket packet = {.uid = p->uid, .active = (uint8_t) active, .point = {point.x, point.y, point.z}};
+        game_send(game, uid == NET_TARGET_ALL ? NET_TARGET_EXCEPT(p->uid) : uid, NET_PACKET_GRAPPLE, &packet, sizeof(packet));
+        if (uid == NET_TARGET_ALL) {
+            p->grapple_sent.active = (unsigned char) active;
+            p->grapple_sent.point = point;
+        }
+    }
+}
+
+// tryGrapple(player, grapRang, fire, input): runs whenever the timers allow, acts on `fire`. The
+// first active, shootable map object without noGrapple ("gp") along the look ray within grapRang
+// takes the hook (the point rounded to 0.1); the rope starts at the hit distance plus the eye
+// height (height - cameraHeight) + 0.001. A miss still spends the shot (rate) and the hook.
+static void combat_try_grapple(Player *player, const int fire) {
+    if (!fire || !player->active || !player->weapon) return;
+    Game *game = player->game;
+    const Weapon *weapon = player->weapon;
+    player->did_shoot = 1;
+    player->charge_time = 0.0f;
+    player->full_charge = 0;
+    player->did_act = 1;
+    player_end_grapple(player);
+    player->reloads[player->loadout_index] = weapon->rate;
+    // game.playSound(weapon.sound): client/src/sound_events.c hears the fire timer jump
+    player->recoil_force += weapon->recoil;
+#ifdef KRUNKNATIVE_CLIENT
+    if (!game->server && player->render_you) { // recoilTween (weapon.recoilAnim) + cancelInspect
+        player_feel_recoil(player);
+        player_cancel_inspect(player);
+    }
+#endif
+    const double range = weapon->grapple_range;
+    const double yaw = player->direction.y, pitch = player->direction.x;
+    const double eye = (double) player->position.y + player->height - game_constants.camera_height;
+    const vec3 origin = {player->position.x, (float) eye, player->position.z};
+    const vec3 dir = combat_shot_vector((float) range, player->direction.x, player->direction.y);
+    float best = 2.0f;
+    for (size_t i = 0; game->map && i < game->map->object_count; i++) {
+        const Object *object = game->map->objects[i];
+        if (!combat_object_shootable(object) || object->no_grapple) continue;
+        const float t = line_in_rect(origin, dir, object->position, object->scale);
+        if (t > 0.0f && t <= 1.0f && t < best) best = t;
+    }
+    if (best > 1.0f) return;
+    const double dist = range * best;
+    PlayerGrapple *g = &player->grapple;
+    g->active = 1;
+    g->point.x = (float) grapple_js_round1(player->position.x + dist * sin(yaw + M_PI) * cos(pitch));
+    g->point.y = (float) grapple_js_round1(eye + dist * sin(pitch));
+    g->point.z = (float) grapple_js_round1(player->position.z + dist * cos(yaw + M_PI) * cos(pitch));
+    g->range = (float) (dist + player->height - game_constants.camera_height + 0.001);
+    if (!game_is_authority(game)) { // if (!serverIO) input.grapObj: the replays hook again
+        player->shot_grap_obj = *g;
+        player->has_shot_grap_obj = 1;
+    }
+    // PARTICLES.addRope: client/src/vfx.c draws every active grapple
+}
+
+// procInputs while grappling: range -= delta * 0.04 while > 35; off the sphere of radius range
+// round the hook, the player is put back on it (UTILS.getDrs angles) and the velocity becomes
+// that step times pow(decel, delta) per ms, the frame's friction (vLN01569).
+static void player_grapple_pull(Player *player, const float delta_ms, const float decel) {
+    PlayerGrapple *g = &player->grapple;
+    if (g->range > GRAPPLE_MIN_RANGE) g->range -= delta_ms * GRAPPLE_REEL_SPEED;
+    const double d = grapple_d3d(player->position, g->point);
+    if (!(d > g->range) || delta_ms <= 0.0f) return;
+    // getDrs(player, grapple): [yaw, pitch] from the player to the hook
+    const double dx = (double) g->point.x - player->position.x, dy = (double) g->point.y - player->position.y, dz = (double) g->point.z - player->position.z;
+    const double pitch = -atan2(dy, sqrt(dx * dx + dz * dz));
+    const double yaw = -atan2(-dx, dz) + M_PI / 2.0;
+    const double r = g->range;
+    const double nx = g->point.x + r * sin(yaw + M_PI / 2.0) * cos(pitch);
+    const double nz = g->point.z + r * cos(yaw + M_PI / 2.0) * cos(pitch);
+    const double ny = g->point.y + r * sin(pitch);
+    const double k = pow(decel, delta_ms) / delta_ms;
+    player->velocity.x = (float) ((nx - player->last_position.x) * k);
+    player->velocity.y = (float) ((ny - player->last_position.y) * k);
+    player->velocity.z = (float) ((nz - player->last_position.z) * k);
+    player->position = (vec3) {(float) nx, (float) ny, (float) nz};
+}
+
 void player_shoot(Player *player) {
     // v7.1.4 shoot: `!player.disableShooting && config.canShoot` (KrunkScript; 1 without a script)
     if (!ks_player_allows(player, KS_PLAYER_CAN_SHOOT)) return;
@@ -2995,6 +3146,7 @@ void player_shoot(Player *player) {
     const Weapon *weapon = player->weapon;
     const int weapon_id = combat_weapon_index(player);
     const int full = player->full_charge; // procInputs: shoot(..., fullCharge)
+    player->shot_blast = (unsigned char) !!full;
     const int charging = !game->config.no_charge_weapons;
 
     // fullChrgSht weapons (Charge Rifle) spend a round only on the full-charge shot
@@ -3161,7 +3313,7 @@ static void combat_update_charge(Player *player, const Input *input, const float
                 player->full_charge = 0;
                 player->over_charged = 1;
             }
-        } else if (player->charge_time >= full) {
+        } else if (player->charge_time >= full - 1e-5f) { // v7 sums whole ms: 70 frames of 10 ms are 700, not 699.99
             player->full_charge = 1;
             player->charge_time = full;
         }

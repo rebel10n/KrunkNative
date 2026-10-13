@@ -785,6 +785,15 @@ typedef enum {
     TEAM_OPTIONS_TRAITOR
 } TeamOptions;
 
+// v7.1.4 player.grapple (players.js tryGrapple, player.js procInputs): the hook point on the map
+// object the Grappler's ray hit (rounded to 0.1) and the rope length, which reels in by 0.04
+// units/ms down to 35 while the player is held on a sphere of that radius round the point.
+typedef struct {
+    unsigned char active;
+    vec3 point;
+    float range;
+} PlayerGrapple;
+
 typedef struct {
     int seq;
     int move_dir;
@@ -815,6 +824,10 @@ typedef struct {
     // since replays skip shooting (index.js reconcilePlayer -> procInputs(recon = true)).
     unsigned char has_vel_obj;
     vec3 vel_obj;
+    // input.grapObj (players.js tryGrapple, client only, never sent): the grapple this frame's
+    // Grappler shot hooked; a replay sets player.grapple from it (procInputs recon branch).
+    unsigned char has_grap_obj;
+    PlayerGrapple grap_obj;
     // Server only, never sent: when this frame reached the server on the Game.state_now clock,
     // pulled back by the deltas of the frames after it in the same "q" batch (the client
     // generated it that much earlier). The anchor of anchored lag compensation
@@ -1079,6 +1092,9 @@ typedef struct Player_t {
     unsigned char recon_noclip:1; // the noclip the last "l" told the owner (a flip snaps at once)
     unsigned char has_shot_vel_obj:1;
     vec3 shot_vel_obj;
+    unsigned char has_shot_grap_obj:1; // shot_grap_obj: this input's input.grapObj (tryGrapple, client)
+    PlayerGrapple shot_grap_obj;
+    PlayerGrapple grapple_sent;   // authority: the grapple the others last heard (NET_PACKET_GRAPPLE)
 
     float dt;
     float send_rate;
@@ -1235,6 +1251,8 @@ typedef struct Player_t {
     float charge_time;            // chargeTime (s): Crossbow / knife throw / Zapper / Charge Rifle charge
     unsigned char full_charge:1;  // fullCharge: held to chrgTime on a weapon without ovrChrg
     unsigned char over_charged:1; // overCharged: held past chrgTime * 1.2 (ovrChrg); un-aim to charge again
+    unsigned char shot_blast:1;   // the last shot was a full-charge one (shoot(..., fullCharge)): "_blast" sound
+    PlayerGrapple grapple;        // grapple (Grappler): the hook point and rope length, active 0 = null
     unsigned char is_juggernaut:1;// isJuggernaut (Juggernaut streak): 2000 HP, Minigun, no regen
     float head_mlt;               // headMlt (0 = 1): head hitbox scale (Big Head FFA), spawn "headMlt"
     float adjusted_height;        // adjustedHeight: height with the head scaled by head_mlt (hit tests)
@@ -1278,6 +1296,18 @@ typedef struct Player_t {
     int colliding_obj_count;
     uint64_t colliding_seen;           // bit i: colliding_objs[i] was touched this tick (vA541)
     int build_index;                   // buildIndex: the Build Tool's buildObjs.js pick (0..3)
+    // KrunkNative deviation (doc/v7/decisions.md "Build Tool cost"): builds cost no score where the
+    // Object Manager grants spawn rights (OM_CAP_SPAWN: the offline sandbox, devs, a custom
+    // game's host). The authority sets it at every spawn, the client from its OM caps.
+    unsigned char build_free:1;
+    // players.build's client half (buildHelper / buildHelperN): where the next build would go and
+    // whether it may (blue) or not (red); active 0 = the look ray hits nothing (both hidden).
+    struct {
+        unsigned char active:1;
+        unsigned char can:1;
+        vec3 feet;  // x, y (the bottom), z
+        vec3 size;  // w, h, l as placed (rotated)
+    } build_preview;
     unsigned char select_build:1;      // selectBuild: aiming with the Build Tool (the pick wheel is up)
     // ---- end WP-B
     // ---- WP-C: v7.1.4 trigger / interaction state (shared/src/triggers_v7.c, interact.c) ----
@@ -1354,6 +1384,8 @@ float player_lerp_angle(float a, float b, float t); // index.js Math.lerpAngle (
 void player_reset_feel(Player*); // spawn: step/bob/lean/recoil animation state back to rest
 void player_inspect_weapon(Player*); // wInspect: toggle the weapon inspect (local player, inspKey)
 void player_cancel_inspect(Player*);
+void player_end_grapple(Player*); // manager.endGrapple: grapple = null (Grappler)
+void game_sync_grapples(struct Game_t*, int uid); // NET_PACKET_GRAPPLE: NET_TARGET_ALL the changes, a uid every hook (joiner)
 void player_melee_anim_reset(Player*); // resetMeleeAnim (stop meleeAnim.anim first with player_melee_anim_stop)
 void player_melee_anim_stop(Player*);  // meleeAnim.anim.stop()
 void player_melee_anim_start(Player*, const MeleeAnimStep *step, const MeleeAnimStep *then); // then: onComplete step or NULL
@@ -2273,10 +2305,18 @@ typedef struct {
     uint16_t wall_jump_count; // wallJumpC
     float can_slide_timer;    // canSlideT (s)
     double slide_ms;          // slideTimer (ms, exact)
+    // ---- v7.1.4 io_syncPlayer [23] grapple || 0 (the Grappler's hook and rope length): the
+    // client snaps its grapple with the rest, then replays (input.grapObj). Sent with V2 to the
+    // same peers; a 1.3.1 reader takes the longer form (prefix read), a shorter RECON keeps the
+    // client's own predicted grapple (net_packet_read_recon).
+    uint8_t grapple_active;   // 1 hooked, 0 none; NET_RECON_GRAPPLE_KEEP (read side only): not sent
+    float grapple[4];         // x, y, z, range
 } NetReconPacket;
+#define NET_RECON_GRAPPLE_KEEP 0xFF // net_packet_read_recon of a shorter RECON: the client keeps its own grapple
 
 #define NET_RECON_PACKET_V1_SIZE (offsetof(NetReconPacket, wall_jump_count)) // 58 bytes (1.0 - 1.3.0, net-bridge)
-#define NET_RECON_PACKET_V2_SIZE (sizeof(NetReconPacket))                    // + the v7 movement locks (1.3.1)
+#define NET_RECON_PACKET_V2_SIZE (offsetof(NetReconPacket, grapple_active))  // + the v7 movement locks (1.3.1)
+#define NET_RECON_PACKET_V3_SIZE (sizeof(NetReconPacket))                    // + the grapple (1.3.1 readers prefix-read it)
 
 // Krunker "q": consecutive input frames (seq ascending) as whole NetInputPackets.
 typedef struct {
@@ -2394,7 +2434,8 @@ typedef struct {
     float normal_yaw;      // aM: 0 = +z, PI/2 = +x
     float normal_pitch;    // aN: PI/2 = up
     uint8_t trail;         // weapon.trail
-    uint8_t first;         // first ray of the shot (shotguns send one per pellet): play the sound once
+    uint8_t first;         // first ray of the shot (shotguns send one per pellet): play the sound once;
+                           // 2: a full-charge shot (v7 weapon.sound + "_blast"; older clients play the plain one)
 } NetShotPacket;
 
 typedef struct {
@@ -2820,6 +2861,7 @@ typedef struct {
 #define NET_PACKET_PERKS (NET_PACKET_BLOCK_COMBAT + 0)         // S->C to all: NetPerksPacket ("upk" sid, perks)
 #define NET_PACKET_UPGRADES (NET_PACKET_BLOCK_COMBAT + 1)      // S->C to all: NetUpgradesPacket (v7 inat upgrades[]: krumMachine slots)
 #define NET_PACKET_WEAPON_STREAK (NET_PACKET_BLOCK_COMBAT + 2) // S->C to the killer: NetWeaponStreakPacket ("wstk" weapon, count)
+#define NET_PACKET_GRAPPLE (NET_PACKET_BLOCK_COMBAT + 3)       // S->C to the others: NetGrapplePacket (the "k" sync's grapple slot)
 
 // ---- WP-E packets (player-viewer: HUD, death screen, social), ids in NET_PACKET_BLOCK_SOCIAL
 // (240-249). Sent only to peers that announced NET_PROTOCOL_MINOR_V7 (server/src/net.c
@@ -2920,6 +2962,16 @@ typedef struct {
     int32_t weapon;                // currentStreakWeapon (weapon id)
     int32_t count;                 // weaponStreak
 } NetWeaponStreakPacket;
+
+// v7.1.4 game.js player sync ("k"): each other player's grapple ? [x, y, z] : 0, which the client
+// turns into a rope (index.js PARTICLES.addRope when the point changes, gone at 0). KrunkNative
+// sends it when it changes (server/src/net.c net_sync_grapples) instead of in every sync; the
+// owner predicts its own and gets the authority's in RECON V3.
+typedef struct {
+    int32_t uid;
+    uint8_t active;
+    float point[3];
+} NetGrapplePacket;
 
 typedef struct {
     int32_t uid;
@@ -3213,7 +3265,7 @@ int   net_rate_hz(int index);           // options {30, 60, 120, 144, 240, 360};
 float net_input_rate_take(float *accum, float frame_delta, int rate_hz); // adds frame_delta (s); the input delta (s) to sample now, or -1
 int  net_packet_read_input_batch(NetInputBatchPacket*, const NetPacket*);
 size_t net_reconcile(Player*, const NetReconPacket*, Input *pending, size_t count, int move_lock); // snap + replay, returns pending left
-void net_recon_take_vel_obj(Player*, Input *pending, size_t count); // the last input's shot knockback -> its velObj
+void net_recon_take_vel_obj(Player*, Input *pending, size_t count); // the last input's shot knockback / grapple -> its velObj / grapObj
 int  net_recon_due(Player*, double now, double *next_at); // the server's "l" schedule: 1 = send one now
 // io_tp's ack state: feet at x/y/z, no velocity, on the ground, no jump/wall/ladder/crouch/
 // slide carry-over, canSlide (server, offline game and the client's own copy).

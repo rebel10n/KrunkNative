@@ -13,7 +13,7 @@ void sound_events_tick(Client *client, float now, float delta);
 // the protocol carries them (Krunker index.js handlers named in sound_events.c).
 void sound_events_hitmarker(void);                       // gF: hit_0
 void sound_events_kill(int headshot, const Player *killer, int weapon_index); // getKillSnd: headshot_0 or the melee skin's killSnd
-void sound_events_remote_shot(Client *client, const Player *shooter); // "s": play3D weapon sound
+void sound_events_remote_shot(Client *client, const Player *shooter, int blast); // "s": play3D weapon sound (blast: + "_blast")
 void sound_events_explosion(vec3 position);              // gb: play3D explosion
 void sound_events_change_ambient(int ambient);           // WP-C "camb": changeAmbient(soundscape) (the next map resets it)
 
