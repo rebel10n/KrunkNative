@@ -1006,5 +1006,8 @@ void client_game_events_tick(Client *client) {
     if (glfwGetTime() < client->net_death_time + client->net_respawn_delay) return;
 
     client->net_death_menu_pending = 0;
-    if (html_ui_available() && !html_ui_is_menu_open()) client_set_menu_open(client, 1);
+    // f1771 runs UI.toggleMenu(true) also when the menu is up already (ESC before the death or
+    // during it): toggleMenuHider(true) drops .onDeathScrn, so the chat leaves the death
+    // screen's place (main.css #uiBase.onDeathScrn #chatHolder) for the menu's.
+    if (html_ui_available()) client_set_menu_open(client, 1);
 }
