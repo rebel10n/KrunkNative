@@ -649,7 +649,8 @@ int object_manager_pose(const Game *game, const int uid, ObjectManagerPose *out)
     out->position = o->position;
     out->size = o->scale;
     out->directed = om_directed(o->prefab);
-    const int d = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(o->raw, "d"));
+    const cJSON *dj = cJSON_GetObjectItem(o->raw, "d"); // only ramps / ladders have one ((int) NaN is UB)
+    const int d = cJSON_IsNumber(dj) ? (int) dj->valuedouble : 0;
     const int q = (int) lroundf(o->rotation.y / ((float) M_PI / 2.0f));
     out->quarter = ((out->directed ? d : q) % 4 + 4) % 4;
     return 1;

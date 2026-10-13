@@ -514,6 +514,122 @@ static void test_npcs_entities(TestClient *a, TestClient *b) {
     p->god_mode = 0;
 }
 
+static void undo_all(TestClient *c) {
+    for (int i = 0; i < 80; i++) {
+        pump(20);
+        if (request(c, OM_ACTION_UNDO, 0, 0.0f).status != OM_STATUS_OK) break;
+    }
+}
+
+// Where the newest live thing of `entry` stands (the spawnable / airdrop / record spawned since
+// `sid0` / `objects`); 0 when nothing is up.
+static int entity_spot(const ObjectManagerEntry *entry, const int sid0, const size_t objects, vec3 *at) {
+    const Game *game = &g_server->game;
+    if (entry->kind == OM_ENTRY_SPAWNABLE) {
+        for (int s = 0; game->mode && s < MODE_MAX_SPAWNABLES; s++) {
+            const ModeSpawnable *sp = &game->mode->spawnables[s];
+            if (!sp->active || sp->sid < sid0 || sp->type != entry->data) continue;
+            *at = (vec3) {sp->position.x, sp->position.y - 1.0f, sp->position.z};
+            return 1;
+        }
+        return 0;
+    }
+    if (entry->kind == OM_ENTRY_AIRDROP) {
+        for (int d = 0; d < game->zombies.drop_count; d++) {
+            const AirDrop *drop = &game->zombies.drops[d];
+            if (!drop->active) continue;
+            *at = drop->position;
+            return 1;
+        }
+        return 0;
+    }
+    if (game->map->object_count <= objects) return 0;
+    const Object *o = game->map->objects[game->map->object_count - 1];
+    if (!o->spawned || !o->active) return 0;
+    *at = o->position;
+    return 1;
+}
+
+// Every Entities entry spawned at the crosshair, then both players step onto it (pads launch,
+// pickups are taken, scraps / machines trigger), several Slime Pads at once and their despawn.
+// A crash anywhere on these paths fails the run (ASan builds report it with the stack).
+static void test_entity_touch(TestClient *a, TestClient *b) {
+    printf("every Entities entry, stepped on...\n");
+    int count = 0;
+    const ObjectManagerEntry *entries = object_manager_entries(OM_TAB_ENTITIES, &count);
+    Player *p = player_of(a), *q = player_of(b);
+    if (!entries || !p || !q) return;
+    undo_all(a);
+    const float round_timer = g_server->game.round_timer; // ~60 s of pumps: the round must not end meanwhile
+    g_server->game.round_timer = 600.0f;
+    p->god_mode = q->god_mode = 1; // the Nuke, falls after a launch
+    const vec3 home = p->position, q_home = q->position;
+    const vec2 dir = p->direction;
+    const int slime = index_of_entry(OM_TAB_ENTITIES, OM_ENTRY_SPAWNABLE, SPAWNABLE_SLIME_PAD);
+    const int mega = index_of_entry(OM_TAB_ENTITIES, OM_ENTRY_SPAWNABLE, SPAWNABLE_MEGA_SLIME_PAD);
+    CHECK(slime >= 0 && mega >= 0, "Slime Pad and Mega Slime Pad entries");
+
+    for (int i = 0; i < count; i++) {
+        if (!(p = player_of(a)) || !(q = player_of(b))) break;
+        p->position = home, p->velocity = (vec3) {0}, p->direction = dir;
+        q->position = q_home, q->velocity = (vec3) {0};
+        const int sid0 = g_server->game.mode->next_spawnable_sid;
+        const size_t objects = g_server->game.map->object_count;
+        pump(20);
+        NetSpawnResultPacket r = request(a, OM_ACTION_SPAWN_ENTITY, i, -0.6f);
+        CHECK(r.status == OM_STATUS_OK, "spawn %s (status %u)", entries[i].name, r.status);
+        if (entries[i].kind == OM_ENTRY_AIRDROP) pump(900); // it falls AIRDROP_HEIGHT first
+        vec3 at;
+        if (!entity_spot(&entries[i], sid0, objects, &at)) {
+            CHECK(entries[i].kind == OM_ENTRY_SPAWNABLE && !spawnable_info(entries[i].data)->always_active, "%s is up", entries[i].name);
+            continue;
+        }
+        const int pad = i == slime || i == mega;
+        float launch_p = 0.0f, launch_q = 0.0f;
+        for (int f = 0; f < 30; f++) { // both stand in it for half a second (the server ticks every other step)
+            if (!(p = player_of(a)) || !(q = player_of(b))) break;
+            p->position = q->position = at;
+            p->velocity = q->velocity = (vec3) {0};
+            pump(1);
+            launch_p = fmaxf(launch_p, p->velocity.y), launch_q = fmaxf(launch_q, q->velocity.y);
+        }
+        if (pad) CHECK(launch_p > 0.1f && launch_q > 0.1f, "%s launches both players (%.3f, %.3f)", entries[i].name, launch_p, launch_q);
+        CHECK(player_of(a) && player_of(b), "both players still in after %s", entries[i].name);
+        pump(60); // the launch / pickup plays out
+        undo_all(a);
+    }
+
+    // several pads at once, walked across, then left to their 10 s despawn
+    if ((p = player_of(a)) && (q = player_of(b))) {
+        p->position = home, p->velocity = (vec3) {0}, p->direction = dir;
+        int pads = 0;
+        for (int i = 0; i < 8; i++) {
+            pump(20);
+            p->direction.y = dir.y + (float) i * 0.7f;
+            pads += request(a, OM_ACTION_SPAWN_ENTITY, i % 2 ? mega : slime, -0.6f).status == OM_STATUS_OK;
+        }
+        CHECK(pads == 8, "8 pads spawned (%d)", pads);
+        for (int s = 0; s < MODE_MAX_SPAWNABLES; s++) {
+            const ModeSpawnable *sp = &g_server->game.mode->spawnables[s];
+            if (!sp->active || (sp->type != SPAWNABLE_SLIME_PAD && sp->type != SPAWNABLE_MEGA_SLIME_PAD)) continue;
+            p->position = q->position = (vec3) {sp->position.x, sp->position.y - 1.0f, sp->position.z};
+            pump(3);
+        }
+        pump(60 * 11);
+        int left = 0;
+        for (int s = 0; s < MODE_MAX_SPAWNABLES; s++) {
+            const ModeSpawnable *sp = &g_server->game.mode->spawnables[s];
+            left += sp->active && (sp->type == SPAWNABLE_SLIME_PAD || sp->type == SPAWNABLE_MEGA_SLIME_PAD);
+        }
+        CHECK(left == 0, "the pads despawn on their 10 s timer (%d left)", left);
+    }
+    undo_all(a);
+    if ((p = player_of(a))) p->position = home, p->velocity = (vec3) {0}, p->direction = dir, p->god_mode = 0;
+    if ((q = player_of(b))) q->position = q_home, q->velocity = (vec3) {0}, q->god_mode = 0;
+    pump(30);
+    g_server->game.round_timer = round_timer;
+}
+
 // The (pitch, yaw) from `p`'s eye to `target` (player_proc_input's look: x = -sin(yaw) cos(pitch)).
 static void aim_at(const Player *p, const vec3 target, float *pitch, float *yaw) {
     const float eye = p->position.y + p->height - game_constants.camera_height;
@@ -1483,6 +1599,7 @@ int main(void) {
         test_join_sync(&g_clients[0], &g_clients[2], &g_clients[3]);
         test_permissions(&g_clients[0], &g_clients[1]);
         test_public_refusals(&g_clients[0], &g_clients[1]);
+        test_entity_touch(&g_clients[0], &g_clients[1]); // last: power-ups change loadouts and scores
         for (int i = 0; i < CLIENTS; i++) leave(&g_clients[i]);
         sandbox_stop();
     } else CHECK(0, "sandbox");
