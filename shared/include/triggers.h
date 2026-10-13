@@ -129,6 +129,10 @@ typedef enum {
     TRIGGER_ACTION_SPAWN_BOT = 69,             // "Spawn Bot at Node" (devOnly)
     TRIGGER_ACTION_FORCE_AI_TARGET = 70,       // "Force AI Target"
     TRIGGER_ACTION_MODE_SPECIFIC = 71,         // "Mode Specific"
+    // v10.0.2 (doc/v10/map-format.md §5; v10 map dialect only, map_dialect_action_count)
+    TRIGGER_ACTION_SPAWN_ENTITY = 72,          // "Spawn Entity": tct "archetype[|tag]" at the trigger
+    TRIGGER_ACTION_DESPAWN_ENTITY = 73,        // "Despawn Entity": tct tag
+    TRIGGER_ACTION_SET_ENTITY_VALUE = 74,      // "Set Entity Value": tct "tag|key", value getActionValue(tc)
     TRIGGER_ACTION_COUNT
 } TriggerAction;
 
@@ -176,6 +180,13 @@ int trigger_text_valid(const char *text);
 #define TRIGGER_V7_CONDITION_COUNT 12   // triggers.conditions
 #define TRIGGER_V7_ACTION_COUNT 72      // triggers.actions
 #define TRIGGER_V7_ACTION_LIMIT 5       // config.triggerActionLimit (editor save / validation; the runtime has no cap)
+// v10.0.2 (doc/v10/map-format.md §5): + condition 12 "Custom Action", actions 72-74, and
+// triggerActionLimit 8. The tables hold the v10 rows; a v7 map dialect stops at the v7 counts
+// (shared/include/map_dialect.h), the limit is Ruleset.trigger_action_limit.
+#define TRIGGER_V10_CONDITION_COUNT 13
+#define TRIGGER_V10_ACTION_COUNT 75
+#define TRIGGER_V10_ACTION_LIMIT 8
+#define TRIGGER_V10_CONDITION_CUSTOM 12 // mainScript.shouldTrigger(playerId | "NONE", triggerSid, param)
 #define TRIGGER_V7_CHAIN_LIMIT 30       // config.triggerLimit (v3.1.1 20)
 #define TRIGGER_V7_CUSTOM_VALUE_LIMIT 30 // config.custValLimit
 #define TRIGGER_V7_KEY_MAX 10           // "tcc" / input condition values: [a-z0-9_]{0,10}
@@ -195,7 +206,7 @@ static inline int trigger_v7_event_is_ai(const int event) {
 
 // One entry of "tas" (MapManager.addTrigger action sanitize, MapManager.js:1938-2041).
 typedef struct {
-    int action;                    // ta: parseInt || 0 (an index into the 72 v7 actions; validated by WP-C)
+    int action;                    // ta: parseInt || 0 (an index into the 72 v7 / 75 v10 actions; validated by WP-C)
     int constant;                  // tc: parseInt || 0
     int constant2;                 // tc2: parseInt || 0
     unsigned char has_text:1;      // tct passed the <= 70 chars charset check
@@ -243,7 +254,7 @@ typedef struct {
                              // 6 premium, 7 partner, 8 level
     unsigned char single_use_player:1; // sup: once per player id per round (uses[])
     int action_count;
-    TriggerActionData *actions; // tas (any length; validation caps it at TRIGGER_V7_ACTION_LIMIT); owned
+    TriggerActionData *actions; // tas (any length; validation caps it at the ruleset's trigger_action_limit); owned
 
     // ---- WP-C: v7 runtime state (shared/src/triggers_v7.c). A TriggerData without actions
     // (actions NULL: hand-built in tests, v3-shaped AI data) runs the mirror fields above as its

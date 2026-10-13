@@ -19,6 +19,9 @@ void shadow_unload_map(void);
 // map-G: re-aim the sun camera after an ENVIRONMENT_ZONE swap (-1 = the map's own shadowR /
 // shadowD / lightD), with the direction already in g_render_lighting.
 void shadow_environment(int shadow_r, int shadow_d, float light_d);
+// v10 skyLight.shadow.normalBias (map "shadowNB" 0..5, world units along the surface normal;
+// 0 = v7, which has none). shadow_load_map sets the map's; environment zones set theirs (0).
+void shadow_set_normal_bias(float normal_bias);
 // Renders the shadow map if it is out of date. Restores framebuffer, viewport,
 // program, VAO, cull/depth/blend state.
 void shadow_update(void);

@@ -495,7 +495,30 @@ static void trigger_custom(Game *game, const char *player_id, const char *param,
     ks_game_on_custom_trigger(game, player_id, param, value);
 }
 
-static const TriggerScriptHooks g_trigger_hooks = {.on_custom_trigger = trigger_custom};
+// Trigger condition 12 (v10.0.2 "Custom Action"): !!mainScript.shouldTrigger(playerId, sid, param);
+// no script or no hook fails the condition. A runtime error fails it too.
+static int trigger_should(Game *game, const char *player_id, const int trigger_sid, const char *param)
+{
+    if (!server_hook(game, "shouldTrigger")) return 0;
+    KsScript *s = game->ks->script;
+    KsValue args[3] = {ks_str(s, player_id, strlen(player_id)), ks_num(trigger_sid), ks_str(s, param, strlen(param))};
+    ks_handle_pin(s, args[0]);
+    ks_handle_pin(s, args[2]);
+    KsValue result = ks_undef();
+    const int rc = ks_script_call_hook_value(s, "shouldTrigger", args, 3, &result);
+    ks_handle_unpin(s, args[2]);
+    ks_handle_unpin(s, args[0]);
+    if (rc != 0) return 0;
+    switch (result.tag) { // !!value (JS ToBoolean)
+        case KS_UNDEF: case KS_NULL: return 0;
+        case KS_BOOL: return result.as.b != 0;
+        case KS_NUM: return result.as.num != 0.0 && result.as.num == result.as.num;
+        case KS_STR: { size_t len = 0; ks_str_utf8(result, &len); return len != 0; }
+        default: return 1;
+    }
+}
+
+static const TriggerScriptHooks g_trigger_hooks = {.on_custom_trigger = trigger_custom, .should_trigger = trigger_should};
 
 // ---------------------------------------------------------------------------
 // Flags, rate limits, per-player state

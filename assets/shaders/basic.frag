@@ -44,6 +44,8 @@ uniform bool fog_enabled;
 // Sun shadow (shadow.c). The depth map is bound to texture unit 1 (SHADOW_TEXTURE_UNIT).
 uniform bool shadow_enabled;
 uniform float shadow_bias;
+uniform float shadow_normal_bias; // v10 shadowNB: world units along the normal (0 = v7: the vertex shadow_coord)
+uniform mat4 shadow_matrix;       // world -> [0,1] shadow coords (also in basic.vert)
 uniform sampler2D shadow_map;
 
 uniform mat3 tex_transform;
@@ -117,9 +119,11 @@ const float RECIPROCAL_PI = 0.3183098861837907;
 // gradient, not the AmbientLight, so it does not take part here.
 // three.js r150 getShadow() for BasicShadowMap: one nearest-texel compare, lit outside the
 // shadow camera frustum.
-float krunker_shadow_mask() {
+// three r186 normalBias: shadowWorldPosition = worldPosition + shadowWorldNormal * normalBias.
+float krunker_shadow_mask(vec3 normal) {
     if (!shadow_enabled) return 1.0;
-    vec3 coord = shadow_coord.xyz / shadow_coord.w;
+    vec4 sc = shadow_normal_bias > 0.0 ? shadow_matrix * vec4(world_pos + normal * shadow_normal_bias, 1.0) : shadow_coord;
+    vec3 coord = sc.xyz / sc.w;
     coord.z += shadow_bias;
     bool in_frustum = coord.x >= 0.0 && coord.x <= 1.0 && coord.y >= 0.0 && coord.y <= 1.0 && coord.z <= 1.0;
     if (!in_frustum) return 1.0;
@@ -220,7 +224,7 @@ vec3 krunker_lambert(vec3 diffuse, vec3 normal) {
     vec3 irradiance = ambient_color.rgb * ambient_intensity * light_scale;
     if (use_light_map) irradiance += texture(light_map, tex_coord).rgb * light_map_intensity;
     vec3 outgoing = irradiance * diffuse * RECIPROCAL_PI + emissive_radiance;
-    vec3 sun = light_color.rgb * light_intensity * light_scale * krunker_shadow_mask(); // getShadow scales the light
+    vec3 sun = light_color.rgb * light_intensity * light_scale * krunker_shadow_mask(normal); // getShadow scales the light
     outgoing += krunker_direct(sun, normalize(light_direction), diffuse, normal, view_dir);
 
     for (int i = 0; i < point_light_count && i < MAX_LIGHTS; i++) {

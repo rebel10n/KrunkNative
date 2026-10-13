@@ -53,6 +53,7 @@ static const Hook server_hooks[] = {
     {"onPlayerDamage", 3}, {"onPlayerUpdate", 3}, {"onCustomTrigger", 3},
     {"onNetworkMessage", 3}, {"onChatMessage", 2}, {"onPlayerLeave", 1}, {"onGameEnd", 0},
     {"onAdFinished", 2}, {"onServerClosed", 0},
+    {"shouldTrigger", 3}, // v10.0.2: trigger condition 12 "Custom Action" (playerId, triggerSid, param) -> bool
 };
 
 int ks_hook_param_count(KsSide side, const char *name) {

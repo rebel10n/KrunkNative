@@ -1,5 +1,5 @@
 #pragma once
-// Krunker v7.1.4 prefab and texture tables (doc/v7/map-logic.md §1.4, §1.5.1), shared by the map
+// Krunker v7.1.4 prefab and texture tables (+ the v10.0.2 prefabs 97-98) (doc/v7/map-logic.md §1.4, §1.5.1), shared by the map
 // loader (shared/src/map.c), validation (map_validate.h), the server, the client renderer and the
 // editor tables (tools/editor/gen_editor_data.py).
 //
@@ -14,7 +14,7 @@
 #include <stddef.h>
 #include <prefab_flags.h>
 
-#define PREFAB_TABLE_COUNT 97  // == PREFAB_COUNT (shared.h Prefab)
+#define PREFAB_TABLE_COUNT 99  // == PREFAB_COUNT (shared.h Prefab): v7.1.4 0-96 + v10.0.2 97-98
 #define PREFAB_TEXTURE_COUNT 20
 
 typedef struct {
@@ -102,12 +102,13 @@ typedef struct {
     unsigned short roles;        // PREFAB_R_*
 } PrefabInfo;
 
-// NULL for ids outside 0..96.
+// NULL for ids outside 0..98 (the tables of every dialect; map_dialect_prefab_count says which a map may use).
 const PrefabInfo *prefab_info(int id);
 const PrefabData *prefab_data(int id);
 int prefab_has_flag(int id, PrefabFlag flag);
 int prefab_has_role(int id, unsigned roles); // any of `roles`
-// v7 name ("CAMERA") or a v3.1.1 alias ("SPECTATE_CAM", "BOT"); case-sensitive. -1 none.
+// v7 / v10 name ("CAMERA") or an alias ("SPECTATE_CAM", "BOT" of v3.1.1; "BOT_PATH_NODE", v10's
+// name of 41 TERMINAL); case-sensitive. -1 none.
 int prefab_id_from_name(const char *name);
 const char *prefab_name(int id); // "CUBE", NULL out of range
 

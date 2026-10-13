@@ -107,6 +107,8 @@ void       ks_script_free(KsScript *);
 int        ks_script_has_hook(const KsScript *, const char *name);
 // Hook call with already-converted arguments; returns 0 ok, -1 runtime error (already logged).
 int        ks_script_call_hook(KsScript *, const char *name, const KsValue *args, int argc);
+// The same, keeping the hook's return value in *result (undefined when it returns nothing).
+int        ks_script_call_hook_value(KsScript *, const char *name, const KsValue *args, int argc, KsValue *result);
 int        ks_script_failed(const KsScript *);                    // load error -> never call hooks
 void      *ks_script_user(KsScript *);                            // host_user given to ks_script_new
 void       ks_script_seed(KsScript *, uint64_t seed);             // UTILS.rand* stream (6.4)

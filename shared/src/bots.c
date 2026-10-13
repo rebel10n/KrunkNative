@@ -22,6 +22,7 @@
 //   (only the AI's engage range), scoreOnDeath, head / pet / shoes / wrist (no such v3.1.1 slots).
 #include <bots.h>
 #include <ai.h>
+#include <map_dialect.h> // v10 setupLocal usePathing
 #include <pcg_basic.h>
 #include <ctype.h>
 #include <math.h>
@@ -321,6 +322,7 @@ static const BotKey k_keys[] = {
     K_CB("targetTeam", target_team),
     K_SI("team", team),
     {"tfue", KT_BOOL, KW_TFUE, KC_U8, 0, 0},
+    K_CB("usePathing", use_pathing), // v10.0.2 (KrunkNative: also a bot_config key)
     K_CB("useSpawnDelay", use_spawn_delay),
     K_CB("voiceChat", voice_chat),
     K_SI("waist", waist),
@@ -843,6 +845,10 @@ static void bot_reset_ai(GameBot *bot, const Player *p) {
     bot->path_index = 0;
     bot->path_timer = 0.0f;
     bot->path_stranded = 0;
+    bot->route_path = -1; // resetTargeting -> resetPathInfo
+    bot->route_node = 0;
+    bot->route_dir = 1;
+    bot->has_route_target = 0;
     memset(&bot->mimic, 0, sizeof(bot->mimic));
     bot->mimic.move_dir = MOVE_NONE;
 }
@@ -1023,8 +1029,8 @@ void game_bots_setup_local(Game *game) {
         BotAssignments a;
         bot_assignments_init(&a);
         const int level = bot_rand_int(i == 0 ? 26 : 1, i == 0 ? 50 : 25);
-        char *argv[16];
-        char buf[16][48];
+        char *argv[20];
+        char buf[20][48];
         int argc = 0;
         snprintf(buf[argc], sizeof(buf[argc]), "targetBots=on"); argv[argc] = buf[argc]; argc++;
         snprintf(buf[argc], sizeof(buf[argc]), "randomCosmetics=on"); argv[argc] = buf[argc]; argc++;
@@ -1041,6 +1047,8 @@ void game_bots_setup_local(Game *game) {
         snprintf(buf[argc], sizeof(buf[argc]), "roam=on"); argv[argc] = buf[argc]; argc++;
         snprintf(buf[argc], sizeof(buf[argc]), "targetDistance=500"); argv[argc] = buf[argc]; argc++;
         snprintf(buf[argc], sizeof(buf[argc]), "persistent=on"); argv[argc] = buf[argc]; argc++;
+        // v10 setupLocal adds usePathing: true (L174979); v7's had no such key
+        if (map_dialect_of(game) >= MAP_DIALECT_V10) { snprintf(buf[argc], sizeof(buf[argc]), "usePathing=on"); argv[argc] = buf[argc]; argc++; }
         bot_parse_assignments(argc, argv, &a);
         game_bots_add(game, &a, NULL, 0.0f);
     }
@@ -1501,6 +1509,77 @@ static Player *bot_acquire(Game *game, GameBot *bot, Player *self, const float d
 }
 
 // The NextBot behaviour (Idle / Hunt / Attack / Hide) for one tick of dt ms.
+// ---- v10.0.2 botPaths (L174340-174600). The pathing helpers are v10's functions _61139 / _61143
+// and the usePathing branch of findTarget.
+
+// _61139: the walk direction from node `index`: a reversible path heads away from its nearer end
+// (in the middle a coin flip), a one-way path forwards.
+static int bot_path_direction(const int index, const MapBotPath *path) {
+    const float n = (float) path->node_count;
+    if (!path->reversible) return 1;
+    return (float) index >= 0.8f * n ? -1 : (float) index <= 0.2f * n ? 1 : bot_chance(0.5) ? -1 : 1;
+}
+
+// _61143: the nearest node over every path (one-way paths only their first 80 % of nodes), `skip`
+// excluded (-1 none). Fills route_path / route_node / route_dir as it improves; a node within 20
+// ends the search. Returns the path index, -1 none.
+static int bot_nearest_path(GameBot *bot, const Map *map, const vec3 from, const int skip) {
+    int best = -1;
+    float best_d = INFINITY;
+    for (size_t i = 0; i < map->bot_path_count; i++) {
+        if ((int) i == skip) continue;
+        const MapBotPath *path = &map->bot_path_list[i];
+        const int limit = path->reversible ? (int) path->node_count : (int) floorf(0.8f * (float) path->node_count);
+        for (int k = 0; k < limit; k++) {
+            const float d = bot_d3d(from, path->nodes[k]);
+            if (d >= best_d) continue;
+            best = (int) i;
+            best_d = d;
+            bot->route_path = best;
+            bot->route_node = k;
+            bot->route_dir = bot_path_direction(k, path);
+            if (d <= 20.0f) return best;
+        }
+    }
+    return best;
+}
+
+// findTarget's usePathing function: the next node to walk to, 0 none (no paths, nothing found).
+static int bot_next_path_node(GameBot *bot, const Map *map, const vec3 from, vec3 *out) {
+    if (!map || !map->bot_path_count) return 0;
+    if (bot->route_path >= 0 && (size_t) bot->route_path < map->bot_path_count) {
+        const MapBotPath *path = &map->bot_path_list[bot->route_path];
+        bot->route_node += bot->route_dir;
+        if (bot->route_node < 0 || bot->route_node >= (int) path->node_count) {
+            if (path->reversible) { // turn around at the end
+                bot->route_dir = -bot->route_dir;
+                bot->route_node += 2 * bot->route_dir;
+                if (bot->route_node < 0 || bot->route_node >= (int) path->node_count) return 0; // a 1-node path (v10: undefined)
+                *out = path->nodes[bot->route_node];
+                return 1;
+            }
+            const int next = bot_nearest_path(bot, map, from, bot->route_path); // another path, ignoring this one
+            if (next < 0) return 0;
+            *out = map->bot_path_list[next].nodes[bot->route_node];
+            return 1;
+        }
+        *out = path->nodes[bot->route_node];
+        return 1;
+    }
+    const int first = bot_nearest_path(bot, map, from, -1);
+    if (first < 0) return 0;
+    *out = map->bot_path_list[first].nodes[bot->route_node];
+    return 1;
+}
+
+// resetPathInfo
+static void bot_reset_route(GameBot *bot) {
+    bot->route_path = -1;
+    bot->route_node = 0;
+    bot->route_dir = 1;
+    bot->has_route_target = 0;
+}
+
 static void bot_update_nextbot(Game *game, GameBot *bot, Player *self, const float dt, BotFrame *f) {
     const BotConfig *cfg = &bot->config;
     const BotProfile profile = bot_profile(cfg->difficulty);
@@ -1689,7 +1768,18 @@ static void bot_update_nextbot(Game *game, GameBot *bot, Player *self, const flo
     bot_set_state(bot, BOT_STATE_HUNT);
     if (cfg->roam) {
         bot->roam_timer -= dt;
-        if (!bot->has_roam || bot->roam_timer <= 0.0f || bot_d2d(bot->roam_target, self->position) < NB_TARGET_REACHED_DISTANCE) bot_pick_roam(game, bot, self);
+        // KrunkNative: usePathing on a NextBot walks the v10 botPaths node by node as its roam goal
+        // (v10 has only the tfue-style Bot; this keeps the key meaningful for both managers)
+        const float reached = bot->has_route_target ? BOT_PATH_RADIUS : NB_TARGET_REACHED_DISTANCE;
+        if (!bot->has_roam || bot->roam_timer <= 0.0f || bot_d2d(bot->roam_target, self->position) < reached) {
+            bot->has_route_target = 0;
+            if (cfg->use_pathing && bot_next_path_node(bot, game->map, self->position, &bot->roam_target)) {
+                bot->has_roam = bot->has_route_target = 1;
+                bot->roam_timer = bot_rand_float(7000.0f, 14000.0f);
+            } else {
+                bot_pick_roam(game, bot, self);
+            }
+        }
         int on_path;
         const vec3 point = bot_route(game, bot, self, bot->roam_target, dt, &on_path, &f->jump);
         float want_yaw, want_pitch;
@@ -1729,6 +1819,7 @@ static void bot_update_tfue(Game *game, GameBot *bot, Player *self, const float 
         if (best) {
             bot->target_uid = best->uid;
             bot->action_freq = 2000.0f;
+            bot_reset_route(bot); // v10: a new target drops the path (resetPathInfo)
         } else {
             bot->target_uid = -1;
         }
@@ -1736,7 +1827,15 @@ static void bot_update_tfue(Game *game, GameBot *bot, Player *self, const float 
     Player *target = bot_target(game, bot);
     if (!target) bot->target_uid = -1;
 
-    if (!target && roam_rad > 0.0f && cfg->roam) {
+    // v10 usePathing: no target and no current path target -> the next botPaths node (it wins over
+    // roaming); goToTarget drops the path target once within pathRadius, so the next tick picks
+    // the following node.
+    if (!target && cfg->use_pathing && !bot->has_route_target && bot_next_path_node(bot, game->map, self->position, &bot->route_target)) {
+        bot->has_route_target = 1;
+        bot->has_roam = 0;
+        bot->roam_timer = 0.0f; // resetRoam
+    }
+    if (!target && !bot->has_route_target && roam_rad > 0.0f && cfg->roam) {
         bot->roam_timer -= dt;
         if (bot->roam_timer <= 0.0f) {
             bot->roam_timer = roam_time;
@@ -1745,7 +1844,9 @@ static void bot_update_tfue(Game *game, GameBot *bot, Player *self, const float 
             bot->has_roam = 1;
         }
     }
-    const vec3 goal = target ? target->position : bot->has_roam ? bot->roam_target : bot->start;
+    // target || roamTarget || pathTarget || startP
+    const vec3 goal = target ? target->position : bot->has_roam ? bot->roam_target : bot->has_route_target ? bot->route_target : bot->start;
+    const int on_route = !target && !bot->has_roam && bot->has_route_target;
     float yaw_t, pitch_t;
     bot_drs(goal, self->position, target ? game_constants.crouch_distance * target->crouch_val : 0.0f, &yaw_t, &pitch_t);
     if (bot->tick % 10 == 0) { // aim jitter: 0.2 - difficulty * 0.2
@@ -1758,7 +1859,9 @@ static void bot_update_tfue(Game *game, GameBot *bot, Player *self, const float 
         f->pitch = bot->pitch = bot_turn_pitch(bot->pitch, pitch_t, turn_speed * dt);
     }
     const float dist = bot_d3d(self->position, goal);
-    if (cfg->follow_target && dist >= 10.0f) { // followDistance 10
+    // goToTarget(d, isPath): a path target is walked to until within pathRadius, then dropped
+    if (on_route && dist <= BOT_PATH_RADIUS) bot->has_route_target = 0;
+    if (cfg->follow_target && (on_route ? dist > BOT_PATH_RADIUS : dist >= 10.0f)) { // followDistance 10
         bot_walk(game, bot, self, goal, dt, f);
         if (cfg->slide_hop) {
             f->jump = self->on_ground && self->slide_timer <= 0.05f;

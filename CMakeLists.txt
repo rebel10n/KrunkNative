@@ -645,6 +645,15 @@ else ()
         target_link_libraries(map_v7_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # map_v10_test: the Krunker v10.0.2 map format (doc/v10/map-format.md) under the v10 ruleset, and
+    # the v7 dialect on the same input: prefabs 41 / 97 / 98, dyn, mp, shadowNB, archetypes,
+    # entities, scripts.shared, botPaths walking, trigger condition 12 / actions 72-74 / 8 actions
+    add_executable(map_v10_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/map_v10_test.c)
+    target_link_libraries(map_v10_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(map_v10_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # world_v7_test (map-logic WP-B): tris, terrain, BR zone, score / check points / resets, zones, PvP, moves, builds
     add_executable(world_v7_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/world_v7_test.c)
     target_link_libraries(world_v7_test PRIVATE m)

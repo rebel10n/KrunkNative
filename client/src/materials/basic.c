@@ -1,6 +1,7 @@
 #include <gl.h>
 #include <client.h>
 #include <render_settings.h>
+#include <map_dialect.h> // map_dialect_light_unit_factor: v7 1, v10 PI (THREE r186 light units)
 #include <GLFW/glfw3.h>
 #include <math.h>
 #include <string.h>
@@ -161,11 +162,14 @@ static vec3 basic_vec3_normalize(const vec3 v) {
 // three.js r150 WebGLLights.setup: colour * intensity * (useLegacyLights ? PI : 1) for point,
 // spot and directional lights, colour * intensity for rect-area lights; the PI cancels against
 // BRDF_Lambert in basic.frag. Light directions point from the target to the light.
+// v10.0.2 (THREE r186, physical lights only) multiplies the map's point / spot / directional
+// intensities by config.lightIntensityScaling = PI instead (render.js addPointLight etc.,
+// L200274-200296); rect-area lights keep intensity || 1. The factor is the ruleset's.
 static void basic_upload_lights(const unsigned int program, const int lighting) {
     if (gl_uniform_location(&u_point_light_count, program) < 0) return;
 
     basic_light_uniforms_init();
-    const float scale = g_render_lighting.correct_lights ? 1.0f : (float) M_PI;
+    const float scale = (g_render_lighting.correct_lights ? 1.0f : (float) M_PI) * map_dialect_light_unit_factor();
     int count = 0;
 
     const int overridden = g_lights_override_count >= 0;
@@ -257,8 +261,10 @@ void basic_material_update_uniforms(Material *base) {
     gl_uniform_4f(&u_light_color, program, g_render_lighting.light_color.x, g_render_lighting.light_color.y, g_render_lighting.light_color.z, g_render_lighting.light_color.w);
     gl_uniform_4f(&u_fog_color, program, g_render_lighting.fog_color.x, g_render_lighting.fog_color.y, g_render_lighting.fog_color.z, g_render_lighting.fog_color.w);
     gl_uniform_3f(&u_light_direction, program, g_render_lighting.light_direction.x, g_render_lighting.light_direction.y, g_render_lighting.light_direction.z);
-    gl_uniform_1f(&u_ambient_intensity, program, g_render_lighting.ambient_intensity);
-    gl_uniform_1f(&u_light_intensity, program, g_render_lighting.light_intensity);
+    // v10 sceneInit: ambientI / lightI * lightIntensityScaling (L201738, L201743); v7: x 1
+    const float light_units = map_dialect_light_unit_factor();
+    gl_uniform_1f(&u_ambient_intensity, program, g_render_lighting.ambient_intensity * light_units);
+    gl_uniform_1f(&u_light_intensity, program, g_render_lighting.light_intensity * light_units);
     gl_uniform_1f(&u_fog_near, program, g_render_lighting.fog_near);
     gl_uniform_1f(&u_fog_far, program, g_render_lighting.fog_far);
     gl_uniform_1i(&u_lighting_enabled, program, g_render_lighting.enabled);
@@ -300,11 +306,13 @@ void basic_material_update_uniforms(Material *base) {
         glActiveTexture(GL_TEXTURE0); // g_active_texture tracks unit 0 only
     }
 
-    // lightMap: legacy lights upload lightMapIntensity * PI (three r150 refreshUniformsCommon)
+    // lightMap: legacy lights upload lightMapIntensity * PI (three r150 refreshUniformsCommon);
+    // v10 sets lightMapIntensity = i * lightIntensityScaling (L199446)
     gl_uniform_1i(&u_use_light_map, program, material->light_map != 0);
     if (material->light_map) {
         gl_uniform_1i(&u_light_map, program, BASIC_LIGHT_MAP_TEXTURE_UNIT);
-        gl_uniform_1f(&u_light_map_intensity, program, material->light_map_intensity * (g_render_lighting.correct_lights ? 1.0f : (float) M_PI));
+        gl_uniform_1f(&u_light_map_intensity, program,
+                      material->light_map_intensity * (g_render_lighting.correct_lights ? 1.0f : (float) M_PI) * light_units);
         glActiveTexture(GL_TEXTURE0 + BASIC_LIGHT_MAP_TEXTURE_UNIT);
         glBindTexture(GL_TEXTURE_2D, material->light_map);
         glActiveTexture(GL_TEXTURE0);

@@ -33,6 +33,7 @@
 #define SHADOW_DEFAULT_FAR 1200.0f    // config.shadowDst (map shadowD overrides)
 #define SHADOW_NEAR 0.5f              // three.js DirectionalLightShadow camera near
 #define SHADOW_BIAS -0.0004f          // skyLight.shadow.bias
+static float g_shadow_normal_bias;    // v10 skyLight.shadow.normalBias (map shadowNB), 0 in v7
 #define SHADOW_LIGHT_DISTANCE 500.0f  // config.lightDistance (map lightD overrides)
 #define SHADOW_EXTENT_DIVISOR 2.5f    // map.js shadLength/shadWidth = extent / 2.5
 
@@ -322,7 +323,12 @@ void shadow_load_map(const Map *map) {
     }
 
     g_shadow_raw = raw;
+    g_shadow_normal_bias = map->env.shadow_nb;
     shadow_setup_light(-1, -1, -1.0f);
+}
+
+void shadow_set_normal_bias(const float normal_bias) {
+    g_shadow_normal_bias = normal_bias;
 }
 
 // v7 render.js updateEnvironment: an ENVIRONMENT_ZONE re-creates the sun with its own
@@ -465,6 +471,7 @@ void shadow_end_world(void) {
 static GlUniform u_shadow_enabled = GL_UNIFORM_INIT("shadow_enabled");
 static GlUniform u_shadow_matrix = GL_UNIFORM_INIT("shadow_matrix");
 static GlUniform u_shadow_bias = GL_UNIFORM_INIT("shadow_bias");
+static GlUniform u_shadow_normal_bias = GL_UNIFORM_INIT("shadow_normal_bias");
 static GlUniform u_shadow_map = GL_UNIFORM_INIT("shadow_map");
 
 void shadow_apply_mesh_uniforms(const Mesh *mesh) {
@@ -477,6 +484,7 @@ void shadow_apply_mesh_uniforms(const Mesh *mesh) {
 
     gl_uniform_mat4(&u_shadow_matrix, program, GL_TRUE, shadow.shadow_matrix);
     gl_uniform_1f(&u_shadow_bias, program, SHADOW_BIAS);
+    gl_uniform_1f(&u_shadow_normal_bias, program, g_shadow_normal_bias);
     gl_uniform_1i(&u_shadow_map, program, SHADOW_TEXTURE_UNIT);
 }
 

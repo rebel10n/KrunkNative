@@ -17,13 +17,13 @@ KrunkScript `shared` script, and `GAME.ENTITIES`.
 
 v7 has 97 prefabs (0-96). v10 has 99 (0-98). Textures 0-19 (WALL..SNOW, L154019) are unchanged.
 
-| id | v7.1.4 | v10.0.2 | v10 evidence | notes |
-|---|---|---|---|---|
-| 0-40 | same | same | | flag sets identical except `canDynamic` below |
-| **41** | TERMINAL (`PF:1386`, `map.js:646` builds nothing) | **BOT_PATH_NODE** | L155465 `'name': "BOT_PATH_NODE"`, `noCol`, `noCollision`, `tool`, `defaultSize [3,5,3]`, `lineCol 65535`, octahedron geo `#00ffff` | v10 drops TERMINAL from the table. The loader still skips both names (L167396 `"BOT_PATH_NODE" != _ && "TERMINAL" != _`), so either way an id-41 object builds nothing. Only the editor meaning changes. v7 editor already emitted BOT_PATH_NODE via `getPrefabIdByName` (returned 0 there, see doc/v7/editor.md:470). |
-| 42-96 | same | same | | |
-| **97** | - | **SCRAPCRATE** | L156724: crate_0.obj/crate_0.png, `scale 5`, `hasHealth`, `canInterface`, `canWallJump`, `canGrapple`, `canImpulse`, `editBulletCol`, `editAICol`, `stepSrc`, shadows | Loader has no special branch, so it is a generic prop (same path as CRATE, `scale` 5 vs CRATE 6). Scrap is also a currency (L102865 `'scrap': 5`). Guess: tied to the scrap/quick-sell economy, not gameplay. |
-| **98** | - | **ENTITY** | L156744: `isEntity`, `scalable`, `tool`, `transparent`, `opacity 0.3`, `lineCol 65484`, `defaultSize [10,10,10]` | An entity instance placement (section 4). No map object is built (L167403 `if ("ENTITY" != _) {...} else { entityInstances.push }`). |
+| id | v7.1.4 | v10.0.2 | v10 evidence | notes | implemented (KN) |
+|---|---|---|---|---|---|
+| 0-40 | same | same | | flag sets identical except `canDynamic` below | yes (`canDynamic` flag: PF_CANDYNAMIC) |
+| **41** | TERMINAL (`PF:1386`, `map.js:646` builds nothing) | **BOT_PATH_NODE** | L155465 `'name': "BOT_PATH_NODE"`, `noCol`, `noCollision`, `tool`, `defaultSize [3,5,3]`, `lineCol 65535`, octahedron geo `#00ffff` | v10 drops TERMINAL from the table. The loader still skips both names (L167396 `"BOT_PATH_NODE" != _ && "TERMINAL" != _`), so either way an id-41 object builds nothing. Only the editor meaning changes. v7 editor already emitted BOT_PATH_NODE via `getPrefabIdByName` (returned 0 there, see doc/v7/editor.md:470). | yes: `PREFAB_BOT_PATH_NODE` (= `PREFAB_TERMINAL`), name `BOT_PATH_NODE` in the v10 dialect, both names resolve; builds nothing |
+| 42-96 | same | same | | | yes |
+| **97** | - | **SCRAPCRATE** | L156724: crate_0.obj/crate_0.png, `scale 5`, `hasHealth`, `canInterface`, `canWallJump`, `canGrapple`, `canImpulse`, `editBulletCol`, `editAICol`, `stepSrc`, shadows | Loader has no special branch, so it is a generic prop (same path as CRATE, `scale` 5 vs CRATE 6). Scrap is also a currency (L102865 `'scrap': 5`). Guess: tied to the scrap/quick-sell economy, not gameplay. | yes: `PREFAB_SCRAPCRATE`, a MODEL_PROP (crate_0, scale 5), v10 dialect only |
+| **98** | - | **ENTITY** | L156744: `isEntity`, `scalable`, `tool`, `transparent`, `opacity 0.3`, `lineCol 65484`, `defaultSize [10,10,10]` | An entity instance placement (section 4). No map object is built (L167403 `if ("ENTITY" != _) {...} else { entityInstances.push }`). | yes: `PREFAB_ENTITY`, no map object; kept in `Map.entity_instances` for the entities package (TODO) |
 
 New prefab flag `canDynamic: true` on CUBE (L154373), TRIGGER (L155203) and CUSTOM_ASSET (L155540).
 It is editor metadata that allows the per-object `dyn` key (section 2).
@@ -36,14 +36,14 @@ named it TERMINAL too (it was already a no-op in v7, `shared/include/shared.h:13
 
 Key extraction over the parser (`_59474[...]` L167380-168500 vs `v12622.*` `map.js:250-1250`):
 
-| key | v10 meaning | evidence | v7 |
-|---|---|---|---|
-| `dyn` (bool) | dynamic object: `obj.dyn = !!dyn`; forces `noAmb` (L163775), always gets a meshRef, stays in collision even with `noCol` (L165943, L166187). `GAME.OBJECTS` position setters call `game.moveObject(uid, x,y,z)` (L181706); `moveObject` only acts when `obj.dyn` (L187877), re-quads the object, updates shadows, pushes riding players (`onTopOf` -> `movX/Y/Z`, `movedWithObject`) and broadcasts `mo` | L167488 `'dyn': void 0 !== _["dyn"] ? !!_["dyn"] : void 0` (CUBE), L167732 (CUSTOM_ASSET), L168320 (TRIGGER) | new (v7 has no runtime object move with player carry) |
-| `mp` (object) | per-map-object "mapProps" for custom-asset companion maps: `mp[<code>] = {ch: uvChannel, fy: flipY, i: intensity/scale}` where code is one of `n e s a m r l p b` (normal, emissive, spec, alpha, metalness, roughness, lightMap, displacement, bump) | L167718 `'mp': _['mp']`, L165531 `mapProps`, applied in `applyAssetCompanionMaps` L199452-199489 (table L199443) | new (v7 had only the `asset` letter flags, `MM:1863-1874`) |
-| `eid`, `ar`, `tag`, `as`, `sp` | ENTITY instance: entity id 1..9999, archetype id, tag (<=32 chars), `as` (0 = don't auto-spawn), `sp` spawn params (object). `p`, `r` reused (only `r[1]` = yaw is applied) | L168363-168371; spawnPending L184314-184331 | new |
-| `aoM` -> `aoMlt` | ambient-occlusion size multiplier per object (`8 * aoMlt` AO plane size) | L163750 `void 0 !== _["aoM"] && (this["aoMlt"] = ...)`, L168387 | v7 had none (8 fixed). Guess: set by the editor on objects; not seen in parsed keys, so possibly only on built objects |
-| `cv` | gone from the parsed set; `cv0/cv1/cv2` remain (L167662) | key diff | `map.js:553-555` reads `cv0..cv2` only; `cv` was a false hit, so treat as unchanged |
-| everything else | identical key set and the same defaults (spot-checked CUBE, PLANE, SPRITE, LIGHT_*, ZONE branches) | | |
+| key | v10 meaning | evidence | v7 | implemented (KN) |
+|---|---|---|---|---|
+| `dyn` (bool) | dynamic object: `obj.dyn = !!dyn`; forces `noAmb` (L163775), always gets a meshRef, stays in collision even with `noCol` (L165943, L166187). `GAME.OBJECTS` position setters call `game.moveObject(uid, x,y,z)` (L181706); `moveObject` only acts when `obj.dyn` (L187877), re-quads the object, updates shadows, pushes riding players (`onTopOf` -> `movX/Y/Z`, `movedWithObject`) and broadcasts `mo` | L167488 `'dyn': void 0 !== _["dyn"] ? !!_["dyn"] : void 0` (CUBE), L167732 (CUSTOM_ASSET), L168320 (TRIGGER) | new (v7 has no runtime object move with player carry) | parsed (`Object.dyn`, canDynamic prefabs, v10 dialect): noAmb (ambient.c) and keeps health / interface with noCol. Runtime move (`moveObject`, rider carry, `mo`) is TODO for the KS / entities package |
+| `mp` (object) | per-map-object "mapProps" for custom-asset companion maps: `mp[<code>] = {ch: uvChannel, fy: flipY, i: intensity/scale}` where code is one of `n e s a m r l p b` (normal, emissive, spec, alpha, metalness, roughness, lightMap, displacement, bump) | L167718 `'mp': _['mp']`, L165531 `mapProps`, applied in `applyAssetCompanionMaps` L199452-199489 (table L199443) | new (v7 had only the `asset` letter flags, `MM:1863-1874`) | parsed and stored (`Object.mp`, CUSTOM_ASSET / asset TRIGGER). Not rendered: BasicMaterial has no normal / metal / rough / bump maps (client/src/user_asset.c) |
+| `eid`, `ar`, `tag`, `as`, `sp` | ENTITY instance: entity id 1..9999, archetype id, tag (<=32 chars), `as` (0 = don't auto-spawn), `sp` spawn params (object). `p`, `r` reused (only `r[1]` = yaw is applied) | L168363-168371; spawnPending L184314-184331 | new | yes: `MapEntityInstance` (eid, archetype, position, rotation, tag, auto_spawn, spawn_params); 64 max, unknown archetypes dropped like loadMapData |
+| `aoM` -> `aoMlt` | ambient-occlusion size multiplier per object (`8 * aoMlt` AO plane size) | L163750 `void 0 !== _["aoM"] && (this["aoMlt"] = ...)`, L168387 | v7 had none (8 fixed). Guess: set by the editor on objects; not seen in parsed keys, so possibly only on built objects | no (not a parsed key in v10.0.2) |
+| `cv` | gone from the parsed set; `cv0/cv1/cv2` remain (L167662) | key diff | `map.js:553-555` reads `cv0..cv2` only; `cv` was a false hit, so treat as unchanged | n/a |
+| everything else | identical key set and the same defaults (spot-checked CUBE, PLANE, SPRITE, LIGHT_*, ZONE branches) | | | unchanged |
 
 Texture-id character whitelist (custom texture ids such as `skyDomeTexA`, `skyDomeEmisTex`, `mmId`):
 v7 `/[^\dtlnesacdgxufq]+/` -> v10 `/[^\dtlnesacdgxufqmrpbhv]+/` (L164733, L159097; v7 `MM:891`).
@@ -54,22 +54,27 @@ validates these ids must widen the set, or v10 maps lose sky domes and minimap i
 
 Keys read off the map root in `generate` (L167200-168560):
 
-| key | change | evidence | v7 |
-|---|---|---|---|
-| `archetypes` | **new**: entity archetype list (section 4) | L167386 | - |
-| `botPaths` | now consumed by bots at runtime: `[{p: [[x,y,z],...], r: reversible}]` -> `map.botPaths[{pathNodes, reversible}]`; bots with `config.usePathing` (on for the newer bot type, L174979) walk them (L174550-174600) | L168471-168486 | v7 runtime ignored it (editor only, `editor.js:3581,3937`); KN already keeps `map->bot_paths` (`shared/src/map.c:673`) |
-| `scripts.shared` | **new third script** (besides `client`/`server`), compiled into `game.sharedScript` and run on both sides for entity simulation (L187094-187097, L189962) | `'shared' == _ ? this.sharedScript = ... : this.mainScript = ...` | v7 has `client`/`server` only |
-| `shadowNB` | **new**: sky-light shadow `normalBias`, clamp 0..5, default 0 | L201758 | - (`R:2738-2772` sets only `bias = -0.0004`) |
-| `correctLights` | **removed as a toggle**: THREE r186 has no legacy lights, so lights are always physical. Still parsed per environment zone (L164748), with no effect seen | renderer `init` L199044-199061 has no `useLegacyLights` | `R:408` `useLegacyLights = !correctLights` |
-| `outputEncoding` | now maps to `renderer.outputColorSpace`; table `Default->NoColorSpace, sRGB->SRGBColorSpace, Linear->LinearSRGBColorSpace`; **index 0 is forced to 2 (Linear)** (`0 == _ && (_ = 2)`) | L17259, L199057-199058 | `config.js:948` (Default = LinearEncoding), `R:407` |
-| `ambientI`, `lightI` and all light intensities | **multiplied by `lightIntensityScaling = Math.PI`** (r155+ physical units) | `_7479 = Math.PI` L18383; L201738, L201743; point/spot/dir/rect L200274-200296; KS lights L183152-183205; lightMap L199446 | unscaled (`R:2744,2754,1718-1762`) |
-| everything else (`ambient light sky fog fogD lightD sunAngX/Y shadowR/D skyDome* terrain* zone* ocean oc* tris xyz colors spawns camPos dthY nAmb oldAO hasLM welMsg gui config modes`) | unchanged | | |
+| key | change | evidence | v7 | implemented (KN) |
+|---|---|---|---|---|
+| `archetypes` | **new**: entity archetype list (section 4) | L167386 | - | yes: `Map.archetypes` (id, name, coll, hp, data, parts, footprint, soft zones), `map_archetype()`; validation in map_validate.c |
+| `botPaths` | now consumed by bots at runtime: `[{p: [[x,y,z],...], r: reversible}]` -> `map.botPaths[{pathNodes, reversible}]`; bots with `config.usePathing` (on for the newer bot type, L174979) walk them (L174550-174600) | L168471-168486 | v7 runtime ignored it (editor only, `editor.js:3581,3937`); KN already keeps `map->bot_paths` (`shared/src/map.c:673`) | yes: `Map.bot_path_list` (all dialects); tfue bots with `usePathing` walk them (v10 setupLocal turns it on), NextBots too (KN addition) |
+| `scripts.shared` | **new third script** (besides `client`/`server`), compiled into `game.sharedScript` and run on both sides for entity simulation (L187094-187097, L189962) | `'shared' == _ ? this.sharedScript = ... : this.mainScript = ...` | v7 has `client`/`server` only | stored (`Map.shared_script`, v10 dialect); not run (entities package) |
+| `shadowNB` | **new**: sky-light shadow `normalBias`, clamp 0..5, default 0 | L201758 | - (`R:2738-2772` sets only `bias = -0.0004`) | yes: `MapEnvironment.shadow_nb` 0..5, `shadow_normal_bias` in basic.frag (world units along the normal) |
+| `correctLights` | **removed as a toggle**: THREE r186 has no legacy lights, so lights are always physical. Still parsed per environment zone (L164748), with no effect seen | renderer `init` L199044-199061 has no `useLegacyLights` | `R:408` `useLegacyLights = !correctLights` | yes: the v10 dialect always renders physical lights (map_environment.c) |
+| `outputEncoding` | now maps to `renderer.outputColorSpace`; table `Default->NoColorSpace, sRGB->SRGBColorSpace, Linear->LinearSRGBColorSpace`; **index 0 is forced to 2 (Linear)** (`0 == _ && (_ = 2)`) | L17259, L199057-199058 | `config.js:948` (Default = LinearEncoding), `R:407` | no (unchanged v7 behaviour; renderer package) |
+| `ambientI`, `lightI` and all light intensities | **multiplied by `lightIntensityScaling = Math.PI`** (r155+ physical units) | `_7479 = Math.PI` L18383; L201738, L201743; point/spot/dir/rect L200274-200296; KS lights L183152-183205; lightMap L199446 | unscaled (`R:2744,2754,1718-1762`) | yes: `Ruleset.light_unit_factor` (`map_dialect_light_unit_factor()`) multiplies ambient, sun, point / spot / directional and lightMap intensities in basic.c; rect-area unscaled like v10 |
+| everything else (`ambient light sky fog fogD lightD sunAngX/Y shadowR/D skyDome* terrain* zone* ocean oc* tris xyz colors spawns camPos dthY nAmb oldAO hasLM welMsg gui config modes`) | unchanged | | | unchanged |
 
-Lighting note for KN: KN's `basic.frag` already uses map intensities directly. To match v10's
-image, `ambientI` and `lightI` stay as stored, and the overall look stays equal only if the shader
-model matches THREE's physical lights. v10 also makes linear output the default (index 0 -> 2).
-**Guess:** v10 maps authored for r186 have intensities tuned for x PI, so v7-tuned maps render
-about 3x brighter in v10. Check against the live game before porting this.
+Lighting note for KN (implemented, verified): the x PI does not brighten v7 maps. v7 maps use legacy
+lights (`useLegacyLights = !correctLights`), which three r150 already multiplies by PI; v10 (r186) has
+only physical lights (x 1) and multiplies the intensities by `lightIntensityScaling = PI` instead, so
+ambient, sun and directional light come out the same. KN's v10 ruleset renders physical lights
+(`correct_lights` forced on) with intensities x `Ruleset.light_unit_factor` (PI): headless captures of
+Sandstorm and Kanji under the v7 and the v10 ruleset differ no more than two runs of the same build
+(animated content). What does change in v10: point / spot lights fall off with the physical
+inverse-square curve instead of the legacy linear one, and a map with `correctLights: true` (none under
+assets/maps) renders PI times brighter than in v7. The linear output default (`outputEncoding` 0 -> 2)
+is not ported.
 
 Spawns (`spawns[i] = [x,y,z,team,dir,comp,teamOnly,spread]`, L168458-168469) are identical to
 `map.js:1469-1478`. Terrain (`Terrain.CONFIG_PROPS` L161995) and zone (`Zone.CONFIG_PROPS`
@@ -147,11 +152,11 @@ objects 5000/7500, collidable 4500/6000, signs 100, prize wheels 10, leaderboard
 
 ## 5. Triggers (TRG vs L162268-163696)
 
-| list | v7 | v10 | change |
-|---|---|---|---|
-| events | 32 (`TRG:7-103`) | 32 (L162268) | identical names and order; descriptions are now real text instead of "REPLACE" |
-| conditions | 12 (`TRG:104-320`) | **13** (L162365) | new **12 "Custom Action"**: `mainScript.shouldTrigger(playerId or "NONE", triggerSid, customParam)`; true passes (L162580-162597). Condition vals shape is unchanged |
-| actions | 72 (`TRG:321-1609`) | **75** (L162600) | indices 0-71 are unchanged (same names, order, value shapes). New: **72 "Spawn Entity"** (Text, `trigConstTx = "arch[|tag]"`, spawns at the trigger object's position), **73 "Despawn Entity"** (Text tag), **74 "Set Entity Value"** (Both, `"tag|key"`, number = `getActionValue(...trigConst)`, `entities.setVar`) (L163648-163700) |
+| list | v7 | v10 | change | implemented (KN) |
+|---|---|---|---|---|
+| events | 32 (`TRG:7-103`) | 32 (L162268) | identical names and order; descriptions are now real text instead of "REPLACE" | unchanged |
+| conditions | 12 (`TRG:104-320`) | **13** (L162365) | new **12 "Custom Action"**: `mainScript.shouldTrigger(playerId or "NONE", triggerSid, customParam)`; true passes (L162580-162597). Condition vals shape is unchanged | yes: condition 12 calls `TriggerScriptHooks.should_trigger` -> KrunkScript `shouldTrigger(playerId, sid, param)` (server hook); v7 dialect: 12 conditions |
+| actions | 72 (`TRG:321-1609`) | **75** (L162600) | indices 0-71 are unchanged (same names, order, value shapes). New: **72 "Spawn Entity"** (Text, `trigConstTx = "arch[|tag]"`, spawns at the trigger object's position), **73 "Despawn Entity"** (Text tag), **74 "Set Entity Value"** (Both, `"tag|key"`, number = `getActionValue(...trigConst)`, `entities.setVar`) (L163648-163700) | yes: 72-74 parse and run through `TriggerScriptHooks.spawn_entity / despawn_entities / set_entity_value` (NULL until the entities package: no-ops); v7 dialect: 72 actions |
 
 `triggerActionLimit` 5 -> **8** (actions per trigger object; config L20057, v7 `config.js`).
 
@@ -191,11 +196,15 @@ getter points to editor.krunker.io), so editor-only fields cannot be verified fr
 
 | map source | loads in v10? | caveats |
 |---|---|---|
-| v7.1.4 maps | yes, unchanged | lights about PI brighter unless intensities are retuned (guess, verify visually); `outputEncoding 0` now means Linear; `correctLights` ignored |
+| v7.1.4 maps | yes, unchanged | lights look the same (legacy x PI in v7 = physical x lightIntensityScaling PI in v10, checked on Sandstorm / Kanji, see the lighting note); point / spot falloff is physical; `outputEncoding 0` now means Linear; `correctLights` ignored |
 | v3.1.1 maps | yes (v7 already loaded them; v10 adds no removals) | id 41 builds nothing in all three versions |
-| v10 maps in KN today | geometry loads; ignored: `archetypes`, ENTITY (98, treated as unknown), SCRAPCRATE (97), `dyn`, `mp`, `shadowNB`, `scripts.shared`; KN's validator may reject ids > 96 | `PREFAB_COUNT` = 97 (`shared/include/shared.h:189`) |
+| v10 maps in KN | the v10 ruleset loads them (map_dialect.h): prefabs 97 / 98, `dyn`, `mp`, `shadowNB`, `archetypes`, entity instances, `scripts.shared`, `botPaths` and triggers are read (section tables, "implemented"); the v7 ruleset still reads them the v7 way (97 / 98 unknown -> CUBE, 6+ actions rejected) | entities do not run yet (entities package) |
 
 ## 9. Port checklist (map side, in order)
+
+Status (v10-maps package): items 1-4 and the map-data part of 5 (archetype parse and validation,
+ENTITY instances, `scripts.shared` stored) are done, and the renderer constant of 7 (x PI) is in
+`Ruleset.light_unit_factor`; the entity manager, KS (6) and `outputEncoding` are open.
 
 1. `PREFAB_SCRAPCRATE = 97` (generic prop like CRATE, scale 5) and `PREFAB_ENTITY = 98` (no object;
    collect instance), plus `PREFAB_BOT_PATH_NODE` as an alias of 41. Raise `PREFAB_COUNT`.

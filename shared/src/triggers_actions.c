@@ -1,4 +1,5 @@
-// Krunker v7.1.4 trigger actions 0-71 (data/triggers.js:321-1610; doc/v7/map-logic.md §3.7):
+// Krunker v7.1.4 trigger actions 0-71 (data/triggers.js:321-1610; doc/v7/map-logic.md §3.7) and
+// the v10.0.2 entity actions 72-74 (doc/v10/map-format.md §5; v10 map dialect only):
 // actions[ta].execute(game, serverIO, player h, trigger j, action a, chain), in table order.
 //
 // Targets are the map interfaces d (map.manager.interfaces: objects with an "in" and collision,
@@ -30,6 +31,33 @@
 // The trigger text of an action (trigConstTx), NULL when it has none (an empty or dropped "tct").
 static const char *action_text(const TriggerActionData *a) {
     return a->has_text && a->text[0] ? a->text : NULL;
+}
+
+// String.trim() of `text` into out
+static void trigger_trim(const char *text, char *out, const size_t size) {
+    while (*text == ' ' || *text == '\t' || *text == '\n' || *text == '\r') text++;
+    size_t n = strlen(text);
+    while (n && (text[n - 1] == ' ' || text[n - 1] == '\t' || text[n - 1] == '\n' || text[n - 1] == '\r')) n--;
+    if (n >= size) n = size - 1;
+    memcpy(out, text, n);
+    out[n] = 0;
+}
+
+// (text + "").split("|"): [0] and [1] trimmed into first / second ("" when missing). 0 without text.
+static int trigger_split_text(const char *text, char *first, char *second, const size_t size) {
+    first[0] = second[0] = 0;
+    if (!text) return 0;
+    char part[TRIGGER_TEXT_MAX + 1];
+    const char *bar = strchr(text, '|');
+    const size_t n = bar ? (size_t) (bar - text) : strlen(text);
+    snprintf(part, sizeof(part), "%.*s", (int) n, text);
+    trigger_trim(part, first, size);
+    if (bar) {
+        const char *end = strchr(bar + 1, '|');
+        snprintf(part, sizeof(part), "%.*s", (int) (end ? (size_t) (end - bar - 1) : strlen(bar + 1)), bar + 1);
+        trigger_trim(part, second, size);
+    }
+    return 1;
 }
 
 static int targets(const TriggerSource *j, const Object *d) {
@@ -645,6 +673,31 @@ void trigger_action_execute(Game *game, Player *h, const TriggerSource *j, const
                 }
             }
             break;
+        // v10.0.2 entity actions (L163648-163700): game.entities does the work (the entities package,
+        // TriggerScriptHooks); without it they do nothing, like v10 without game.entities.
+        case TRIGGER_ACTION_SPAWN_ENTITY: { // tct "archetype[|tag]" (tag trimmed, <= 32) at the trigger's position
+            const TriggerScriptHooks *hooks = game->script_hooks;
+            char arch[TRIGGER_TEXT_MAX + 1], tag[TRIGGER_TEXT_MAX + 1];
+            if (!hooks || !hooks->spawn_entity || !trigger_split_text(action_text(a), arch, tag, sizeof(arch)) || !arch[0]) break;
+            tag[32] = 0; // .substr(0, 32)
+            hooks->spawn_entity(game, arch, tag[0] ? tag : NULL, j->position);
+            break;
+        }
+        case TRIGGER_ACTION_DESPAWN_ENTITY: { // tct: the tag (trimmed)
+            const TriggerScriptHooks *hooks = game->script_hooks;
+            char tag[TRIGGER_TEXT_MAX + 1];
+            if (!hooks || !hooks->despawn_entities || !action_text(a)) break;
+            trigger_trim(a->text, tag, sizeof(tag));
+            hooks->despawn_entities(game, tag);
+            break;
+        }
+        case TRIGGER_ACTION_SET_ENTITY_VALUE: { // tct "tag|key" (both trimmed, non-empty), value getActionValue(tc || 0)
+            const TriggerScriptHooks *hooks = game->script_hooks;
+            char tag[TRIGGER_TEXT_MAX + 1], key[TRIGGER_TEXT_MAX + 1];
+            if (!hooks || !hooks->set_entity_value || !trigger_split_text(action_text(a), tag, key, sizeof(tag)) || !tag[0] || !key[0]) break;
+            if (trigger_action_value(game, h, j, NULL, a, a->constant, &value)) hooks->set_entity_value(game, tag, key, value);
+            break;
+        }
         case TRIGGER_ACTION_REWARD_JUNK:    // public games only
         case TRIGGER_ACTION_REWARD_SKIN:    // public games only
         case TRIGGER_ACTION_VIDEO_AD:       // "vad": no ads natively

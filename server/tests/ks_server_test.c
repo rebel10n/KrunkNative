@@ -279,6 +279,7 @@ static const char *k_script =
     "public action onPlayerDamage(str id, str doerID, num amount) { GAME.log(\"damage\", id, doerID, toStr amount); }\n"
     "public action onPlayerDeath(str id, str killerID) { GAME.log(\"death\", id, killerID); }\n"
     "public action onCustomTrigger(str playerID, str customParam, num value) { GAME.log(\"trigger\", playerID, customParam, toStr value); }\n"
+    "public bool action shouldTrigger(str playerID, num sid, str param) { GAME.log(\"should\", playerID, toStr sid, param); return param == \"go\"; }\n"
     "public action onChatMessage(str msg, str playerID) { GAME.log(\"chat\", msg, playerID); }\n"
     "public action onPlayerLeave(str playerID) { GAME.log(\"leave\", playerID); }\n"
     "public action onGameEnd() { GAME.log(\"end\"); }\n"
@@ -478,6 +479,15 @@ static void test_host(void)
         g_server->game.script_hooks->on_custom_trigger(&g_server->game, "NONE", "First", 3);
     pump(1);
     CHECK(has_log(a, "trigger NONE First 3"), "onCustomTrigger");
+    // v10 trigger condition 12: shouldTrigger's return value (Game.script_hooks.should_trigger)
+    const TriggerScriptHooks *hooks = g_server->game.script_hooks;
+    CHECK(hooks && hooks->should_trigger, "shouldTrigger hook registered");
+    if (hooks && hooks->should_trigger) {
+        CHECK(hooks->should_trigger(&g_server->game, "7", 12, "go") == 1, "shouldTrigger true");
+        CHECK(hooks->should_trigger(&g_server->game, "7", 12, "stop") == 0, "shouldTrigger false");
+    }
+    pump(1);
+    CHECK(has_log(a, "should 7 12 go") && has_log(a, "should 7 12 stop"), "shouldTrigger arguments");
     Player *pb = server_player(b->uid), *pa = server_player(a->uid);
     if (pb && pa) {
         player_change_health(pb, pa, 10.0f, 0);

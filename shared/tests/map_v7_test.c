@@ -274,16 +274,16 @@ static void check_all_prefabs_fixture(void) {
     CHECK(json != NULL, "v7_all_prefabs.json missing");
     if (!json) return;
     Map *map = map_init_ex(json, 0);
-    CHECK(map && map->object_count == PREFAB_COUNT - 4, "93 map objects (no EVENT, TERMINAL, AI_SPAWNER, BOT_SPAWNER): %zu",
+    CHECK(map && map->object_count == PREFAB_V7_COUNT - 4, "93 map objects (no EVENT, TERMINAL, AI_SPAWNER, BOT_SPAWNER): %zu",
           map ? map->object_count : 0);
-    if (!map || map->object_count != PREFAB_COUNT - 4) {
+    if (!map || map->object_count != PREFAB_V7_COUNT - 4) {
         cJSON_Delete(json);
         return;
     }
     // objects in file order, skipping 40, 41, 55, 95
     const Object *by_id[PREFAB_COUNT] = {0};
     for (size_t i = 0; i < map->object_count; i++) by_id[map->objects[i]->prefab] = map->objects[i];
-    for (int id = 0; id < PREFAB_COUNT; id++) {
+    for (int id = 0; id < PREFAB_V7_COUNT; id++) {
         const int skipped = id == PREFAB_EVENT || id == PREFAB_TERMINAL || id == PREFAB_AI_SPAWNER || id == PREFAB_BOT_SPAWNER;
         CHECK(skipped ? !by_id[id] : by_id[id] != NULL, "prefab %d (%s) %s", id, prefab_name(id), skipped ? "built" : "missing");
     }
@@ -503,7 +503,7 @@ static void check_validation(void) {
 
 static void check_tables(void) {
     printf("Running tables...\n");
-    CHECK(PREFAB_COUNT == 97 && PREFAB_TEXTURE_COUNT == 20, "97 prefabs, 20 textures");
+    CHECK(PREFAB_V7_COUNT == 97 && PREFAB_COUNT == 99 && PREFAB_TEXTURE_COUNT == 20, "97 v7 prefabs (99 with v10's), 20 textures");
     CHECK(!strcmp(prefab_name(PREFAB_CAMERA), "CAMERA") && !strcmp(prefab_name(PREFAB_AI_SPAWNER), "AI_SPAWNER") &&
               !strcmp(prefab_name(PREFAB_MAP_ANCHOR), "MAP_ANCHOR") && !strcmp(prefab_name(PREFAB_KNIGHT), "KNIGHT"),
           "enum order matches v7 prefabs.js");

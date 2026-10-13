@@ -163,6 +163,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, bil
 	./$(DEBUG_DIR)/server_names_test
 	./$(DEBUG_DIR)/lagcomp_test
 	./$(DEBUG_DIR)/map_v7_test
+	./$(DEBUG_DIR)/map_v10_test
 	./$(DEBUG_DIR)/world_v7_test
 	./$(DEBUG_DIR)/triggers_test
 	./$(DEBUG_DIR)/trigger_authority_test

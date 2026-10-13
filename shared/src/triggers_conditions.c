@@ -6,15 +6,17 @@
 // min, max), anything else -> def.
 #include <shared.h>
 #include "triggers_internal.h"
+#include <map_dialect.h>
 #include <cJSON.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#define CONDITION_KEY_MAX 30 // the longest input value: v10 Custom Param (len 30); the v7 keys are 10
 typedef struct {
     double number[3];
-    char key[3][TRIGGER_V7_KEY_MAX + 1];
+    char key[3][CONDITION_KEY_MAX + 1];
 } ConditionValues;
 
 // JS parseInt of a JSON value: numbers truncate, strings read their leading integer, else NaN (0 + ok 0).
@@ -47,7 +49,7 @@ static void js_input(const cJSON *v, char *out, const int len) {
         text = cJSON_IsTrue(v) ? "true" : "false";
     }
     int n = 0;
-    for (; text && *text && n < len && n < TRIGGER_V7_KEY_MAX; text++) {
+    for (; text && *text && n < len && n < CONDITION_KEY_MAX; text++) {
         const char c = *text;
         if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') out[n++] = c;
     }
@@ -128,7 +130,7 @@ static int player_count(const Game *game, const int filter) {
 
 int trigger_condition_check(Game *game, Player *player, const TriggerSource *obj, const TriggerActionData *a) {
     int cd = a->condition;
-    if (cd < 0 || cd >= TRIGGER_V7_CONDITION_COUNT) cd = 0; // !conditions[cd]: 0
+    if (cd < 0 || cd >= map_dialect_condition_count(map_dialect_of(game))) cd = 0; // !conditions[cd]: 0 (v7 12, v10 13)
     if (cd == 0) return 1;
     ConditionValues v;
     condition_values(a, cd, &v);
@@ -163,6 +165,12 @@ int trigger_condition_check(Game *game, Player *player, const TriggerSource *obj
             if (!player) return 0;
             trigger_account(game, player, &account);
             return compare_val((int) v.number[0], (double) account.inventory_value, (int) v.number[1]);
+        case TRIGGER_V10_CONDITION_CUSTOM: { // v10 Custom Action (L162580-162597): needs a player and the trigger
+            if (!player || !obj || !game->script_hooks || !game->script_hooks->should_trigger) return 0;
+            char id[16];
+            snprintf(id, sizeof(id), "%d", player->uid); // _57778 ? id : "NONE" (the player is required above)
+            return game->script_hooks->should_trigger(game, id, obj->uid, v.key[0]) != 0;
+        }
         default:
             return 1;
     }

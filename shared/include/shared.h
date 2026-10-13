@@ -91,7 +91,7 @@ extern const GameConstants *g_rules_constants;
 
 // Krunker v7.1.4 data/prefabs.js prefab ids (map object "i"; doc/v7/map-logic.md §1.4).
 // Ids 0-59 keep their v3.1.1 index; 33 and 55 were renamed (the v3 names stay as aliases);
-// 60-96 are new. The per-prefab data is shared/include/prefabs.h (g_prefab_data, prefab_info).
+// 60-96 are new; v10.0.2 adds 97-98 and renames 41 (doc/v10/map-format.md §1). The per-prefab data is shared/include/prefabs.h (g_prefab_data, prefab_info).
 typedef enum {
     PREFAB_CUBE,
     PREFAB_CRATE,
@@ -134,7 +134,7 @@ typedef enum {
     PREFAB_LIQUID,
     PREFAB_SOUND_EMITTER,
     PREFAB_EVENT,
-    PREFAB_TERMINAL,            // 41: v7 builds nothing (no object, no uid)
+    PREFAB_BOT_PATH_NODE,       // 41: v7 TERMINAL, v10 BOT_PATH_NODE; builds nothing in both (no object, no uid)
     PREFAB_PREMIUM_ZONE,
     PREFAB_VERIFIED_ZONE,
     PREFAB_CUSTOM_ASSET,
@@ -190,7 +190,11 @@ typedef enum {
     PREFAB_KRUM_MACHINE,        // 94
     PREFAB_BOT_SPAWNER,         // 95
     PREFAB_MAP_ANCHOR,          // 96
-    PREFAB_COUNT,                // 97
+    PREFAB_V7_COUNT,            // 97: the v7.1.4 table ends here (the v3 / v7 map dialects stop at 96)
+    PREFAB_SCRAPCRATE = PREFAB_V7_COUNT, // 97 (v10.0.2): a generic model prop like CRATE (scale 5)
+    PREFAB_ENTITY,              // 98 (v10.0.2): an entity instance (Map.entity_instances), no map object
+    PREFAB_COUNT,               // 99: every id of the newest table; the map dialect says how many a map may use
+    PREFAB_TERMINAL = PREFAB_BOT_PATH_NODE, // v3.1.1 / v7.1.4 name of 41
     PREFAB_SPECTATE_CAM = PREFAB_CAMERA,  // v3.1.1 name of 33
     PREFAB_BOT = PREFAB_AI_SPAWNER,       // v3.1.1 name of 55
 } Prefab;
@@ -294,6 +298,11 @@ typedef struct {
     unsigned char kpd_zone:1;           // KPD_ZONE: solid unless account.canFlag
     unsigned char redirection:1;        // AI_REDIRECTION: steers AIs along direction / bounce (boostDr)
     unsigned char server_node:1;        // SERVER_NODE: tagged spawn node (node_tag, spread), pass-through
+    // v10.0.2 (doc/v10/map-format.md §2; v10 map dialect, the canDynamic prefabs CUBE / TRIGGER /
+    // CUSTOM_ASSET): "dyn" = !!dyn. A dynamic object forces noAmb (no AO planes) and keeps its
+    // GameObject (health, interface) even with noCol. TODO(v10 KS / entities): GAME.OBJECTS
+    // position setters move dyn objects at run time (game.moveObject: re-quad, carry riders, "mo").
+    unsigned char dyn:1;
 
     unsigned int team;
     unsigned int score_points;          // "sp": score zone points / gate price
@@ -348,6 +357,9 @@ typedef struct {
     int spray_id;                       // SPRAY "spt" (2482)
     float spread;                       // SERVER_NODE "ssp" 0..50
     const char *node_tag;               // SERVER_NODE "nt" <= 70 chars (in raw), NULL none
+    // v10.0.2 CUSTOM_ASSET / asset TRIGGER "mp" (mapProps, in raw): the companion maps' settings,
+    // {<n e s a m r l p b>: {ch: uv channel, fy: flipY, i: intensity}} (applyAssetCompanionMaps). NULL none.
+    const cJSON *mp;
 
     // ---- map-logic WP-B (shared/src/world.c, build.c)
     unsigned char tel_checkpoint:1;     // TELEPORTER "tcp" (telCheckPoint): to the player's check point
@@ -447,6 +459,7 @@ typedef struct {
     int tone_mapping;                   // 0..4
     float tone_mapping_exposure;        // 1
     int output_encoding;                // 0..2
+    float shadow_nb;                    // v10 "shadowNB": the sun's shadow normalBias 0..5 (0; v7 maps / zones: 0)
 } MapEnvironment;
 
 typedef struct {
@@ -483,6 +496,52 @@ typedef struct {
     int nid;          // PATH_NODE "nid"
     size_t object;    // index into Map.objects
 } MapPathNode;
+
+// "botPaths" [{p: [[x, y, z], ...], r: reversible}] (map.js: parseInt(x) || 0 per coordinate, entries
+// without an array p are skipped). v10 bots with usePathing walk them (shared/src/bots.c).
+typedef struct {
+    vec3 *nodes;
+    size_t node_count;
+    unsigned char reversible:1;
+} MapBotPath;
+
+// ---- v10.0.2 Entities (doc/v10/map-format.md §4): the map data only. TODO(entities package): the
+// manager (spawnPending, onEntityInit / simulateEntity, bodies, packets e+ e- es ee ea+ ea-) reads
+// Map.archetypes / Map.entity_instances and Map.shared_script; nothing runs them yet.
+#define MAP_ARCHETYPE_LIMIT 32          // config.archetypeLimit
+#define MAP_ARCHETYPE_OBJECT_LIMIT 40   // config.archetypeObjectLimit
+#define MAP_ENTITY_LIMIT 64             // config.entityLimit (map.js keeps the first 64 instances)
+#define MAP_ENTITY_TAG_MAX 32
+#define MAP_ARCHETYPE_NAME_MAX 24
+
+typedef struct {     // a soft zone part (soft: 1): the rider glue box, not a body
+    vec3 centre, half;
+} MapArchetypeSoftZone;
+
+typedef struct {     // entities.loadMapData archetype record
+    int id;                             // 1..9999
+    char name[MAP_ARCHETYPE_NAME_MAX + 1]; // name || "archetype_<id>"
+    int coll;                           // 0 none, 1 solid, 2 bullets only (noPCol)
+    float hp;
+    const cJSON *data;                  // "data" object (raw), NULL = {}
+    const cJSON *objects;               // "objects" parts (raw array: i p s c o aid n soft as ...)
+    int object_count;
+    float foot_cx, foot_cz, foot_hx, foot_hz, foot_h; // footprint of the solid parts (soft ones excluded)
+    MapArchetypeSoftZone *soft_zones;
+    int soft_zone_count;
+} MapArchetype;
+
+typedef struct {     // an ENTITY (98) object: manager.entityInstances
+    int eid;                            // parseInt(eid)
+    int archetype;                      // parseInt(ar)
+    vec3 position;                      // p || [0, 0, 0]
+    vec3 rotation;                      // r || [0, 0, 0] (only r[1], the yaw, is applied)
+    char tag[MAP_ENTITY_TAG_MAX + 1];   // (tag + "").slice(0, 32), "" none
+    unsigned char has_tag:1;
+    unsigned char auto_spawn:1;         // as !== 0 (spawnPending skips as: 0)
+    const cJSON *spawn_params;          // "sp" when an object (raw), NULL none
+    const cJSON *raw;
+} MapEntityInstance;
 
 typedef struct {
     const cJSON *raw_data;
@@ -527,7 +586,14 @@ typedef struct {
     const cJSON *game_config;           // "config" {modes, classes, settings, weps, cls, prks} (WP-E)
     const cJSON *gui;                   // "gui" custom HUD elements (WP-C / WP-G)
     const cJSON *scripts;               // "scripts" {client, server} base64 KrunkScript
-    const cJSON *bot_paths;             // "botPaths" (no v7 runtime consumer; kept for round-trip)
+    const cJSON *bot_paths;             // "botPaths" raw (the v7 runtime ignores it; kept for round-trip)
+    MapBotPath *bot_path_list;          // botPaths parsed (v10 bots with usePathing walk them)
+    size_t bot_path_count;
+    const cJSON *shared_script;         // v10 "scripts.shared" (the entity simulation script, run on both sides), NULL none
+    MapArchetype *archetypes;           // v10 "archetypes" (map dialect v10 only)
+    size_t archetype_count;
+    MapEntityInstance *entity_instances; // v10 ENTITY objects, <= MAP_ENTITY_LIMIT
+    size_t entity_instance_count;
     const cJSON *editor_player;         // "player" {pos, rot} (editor test spawn)
 
     // object lists (indices into objects) and pending spawners (raw records, no map object)
@@ -581,6 +647,12 @@ int map_raw_object_kept(const cJSON *raw_obj);
 //   RECTAREA_LIGHT: (r2, r0, r1)
 // Old v3 maps go through the same table: rotated v3 planes look different, exactly as in v7.
 void map_object_rotation(const Object *object, float out[9]);
+// A custom texture id (skyDomeTexA, skyDomeEmisTex, mmId) as the map dialect accepts it: the
+// digits of a number or of a string made only of digits and the dialect's letters (v7
+// "tlnesacdgxufq", v10 + "mrpbhv"), else 0 (map_dialect.h).
+int map_texture_id(const cJSON *item);
+// The v10 archetype with that id, NULL none.
+const MapArchetype *map_archetype(const Map *map, int id);
 void map_reset(Map*);
 void map_fini(Map*); // NOTE: ensure no meshes from the map are part of the scene, they are free()'d!
 // KrunkNative Object Manager: an Object for one raw map object record (`raw_obj` must outlive it:

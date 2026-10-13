@@ -52,6 +52,7 @@ const TriggerActionInfo g_trigger_actions[TRIGGER_ACTION_COUNT] = {
     {"Give Challenge Progress", T}, {"Play Animation (Self)", T}, {"Give Effect", N},
     {"Give Challenge Progress (All)", T}, {"Give Random Effect", N}, {"Play Video Ad", N}, {"Drop Powerup", N},
     {"Spawn Bot at Node", N}, {"Force AI Target", N}, {"Mode Specific", N},
+    {"Spawn Entity", T}, {"Despawn Entity", T}, {"Set Entity Value", T}, // v10.0.2
 };
 #undef N
 #undef T

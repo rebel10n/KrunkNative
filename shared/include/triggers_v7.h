@@ -42,6 +42,15 @@ typedef struct TriggerScriptHooks {
     void (*on_player_spawn)(Game *game, int player_sid);
     void (*on_player_damage)(Game *game, int victim_sid, int doer_sid, int amount);
     void (*on_player_death)(Game *game, int victim_sid, int killer_sid);
+    // v10.0.2 condition 12 "Custom Action": mainScript.shouldTrigger(player id or "NONE", trigger
+    // sid, param) -> bool. NULL (no script / no hook) fails the condition, as v10 does.
+    int (*should_trigger)(Game *game, const char *player_id, int trigger_sid, const char *param);
+    // v10.0.2 actions 72-74 (doc/v10/map-format.md §5). TODO(entities package): the entity manager
+    // sets these; NULL = no entities system, the actions do nothing (as v10 without game.entities).
+    // spawn_entity: entities.spawn(archetype name or id, x, y, z, {}, tag ? {tag} : undefined).
+    void (*spawn_entity)(Game *game, const char *archetype, const char *tag, vec3 position);
+    void (*despawn_entities)(Game *game, const char *tag);            // every live entity with the tag, "trigger"
+    void (*set_entity_value)(Game *game, const char *tag, const char *key, double value); // setVar on each
 } TriggerScriptHooks;
 // Stored in Game.script_hooks (NULL clears). Action 58 calls on_custom_trigger(game, the player's
 // decimal uid or "NONE", tct ("" none), tc) after its tad delay, on the authority only. The

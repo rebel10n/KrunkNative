@@ -401,7 +401,8 @@ static AoBox *ao_collect_boxes(const Map *map, const cJSON *objects, const int m
         const double ak = ao_round2(ao_json_number(cJSON_GetArrayItem(s, 2)));
 
         const int no_vis = ao_json_truthy(cJSON_GetObjectItem(t, "v"));
-        const int no_amb = ao_json_present(cJSON_GetObjectItem(t, "ab"));
+        // v10: a dyn object forces noAmb (GameObject: this.dyn && (this.noAmb = true), L163775)
+        const int no_amb = ao_json_present(cJSON_GetObjectItem(t, "ab")) || map->objects[object_index - 1]->dyn;
         const cJSON *raw_h = cJSON_GetObjectItem(t, "h");
         const int health = (int) ao_json_number(ao_json_truthy(raw_h) ? raw_h : cJSON_GetObjectItem(t, "hp"));
         const int can_destroy = ao_json_present(cJSON_GetObjectItem(t, "cdy"));

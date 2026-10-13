@@ -65,6 +65,7 @@ typedef struct {
     unsigned char random_jump;
     unsigned char retreat;          // NextBot: break off and hide when low on health
     unsigned char score_on_death;   // parsed only (no score drop spawnable natively)
+    unsigned char use_pathing;      // v10.0.2 usePathing (tfue bots): idle bots walk the map's "botPaths"
     float dmg_mlt;
     float speed_mlt;
     float range_mlt;
@@ -98,6 +99,8 @@ typedef struct {
 } BotAssignments;
 
 typedef enum { BOT_STATE_IDLE, BOT_STATE_HUNT, BOT_STATE_ATTACK, BOT_STATE_HIDE } BotState;
+
+#define BOT_PATH_RADIUS 10.0f       // v10 BotManager.config.pathRadius: a path node counts as reached within it
 
 // Navigation (shared/src/bot_nav.c): a smoothed A* route over the map's walkable grid.
 #define BOT_PATH_MAX 64
@@ -168,6 +171,12 @@ typedef struct {
     vec3 path_goal;
     float path_timer;               // ms until the route may be recomputed
     int path_stranded;              // the goal is unreachable and we are as close as it gets
+    // v10.0.2 botPaths walking (Bot.pathInfo / pathTarget, usePathing; shared/src/bots.c bot_next_path_node)
+    int route_path;                 // pathIndex: Map.bot_path_list index, -1 = null
+    int route_node;                 // pathNodeIndex
+    int route_dir;                  // pathDirection +1 / -1
+    unsigned char has_route_target; // pathTarget != null
+    vec3 route_target;
 } GameBot;
 
 typedef struct GameBots_t {

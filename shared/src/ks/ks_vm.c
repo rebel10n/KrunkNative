@@ -932,6 +932,15 @@ int ks_script_call_hook(KsScript *s, const char *name, const KsValue *args, int 
     return vm_entry(s, (uint32_t)a, args, argc < 0 ? 0 : argc, NULL);
 }
 
+int ks_script_call_hook_value(KsScript *s, const char *name, const KsValue *args, int argc, KsValue *result)
+{
+    if (result) *result = ks_undef();
+    if (!s || s->failed || !name) return -1;
+    int a = find_public(s, name);
+    if (a < 0) return 0;
+    return vm_entry(s, (uint32_t)a, args, argc < 0 ? 0 : argc, result);
+}
+
 int ks_script_failed(const KsScript *s) { return !s || s->failed; }
 void *ks_script_user(KsScript *s) { return s ? s->user : NULL; }
 

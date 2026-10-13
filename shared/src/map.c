@@ -1,6 +1,7 @@
 #include <shared.h>
 #include <map_catalog.h>
 #include <prefabs.h>
+#include <map_dialect.h> // v7 / v10 prefab ids, texture-id charset (ruleset.h)
 #include <terrain.h> // map_terrain_free (WP-B)
 #include <cJSON.h>
 #include <math.h>
@@ -36,20 +37,22 @@ const int g_rotation_maps[] = {0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
 
 // prefabs.prefabs[i || id || 0] || prefabs.prefabs[0] (v7 map.js generate): a JS array index
 // is a number or its canonical string; anything else (a prefab *name*, 5.5, true) is undefined.
+// The table is the map dialect's: v7 ends at 96 (97 / 98 fall back to CUBE like v7), v10 at 98.
 static int map_prefab_index(const cJSON *item) {
+    const int count = map_dialect_prefab_count(map_dialect_current());
     if (cJSON_IsNumber(item)) {
         const double v = cJSON_GetNumberValue(item);
-        return v >= 0.0 && v < PREFAB_COUNT && v == (double) (int) v ? (int) v : -1;
+        return v >= 0.0 && v < count && v == (double) (int) v ? (int) v : -1;
     }
     if (cJSON_IsString(item)) {
         const char *text = cJSON_GetStringValue(item);
         if (!text[0] || (text[0] == '0' && text[1])) return -1;
         int value = 0;
         for (const char *c = text; *c; c++) {
-            if (*c < '0' || *c > '9' || value > PREFAB_COUNT) return -1;
+            if (*c < '0' || *c > '9' || value > count) return -1;
             value = value * 10 + (*c - '0');
         }
-        return value < PREFAB_COUNT ? value : -1;
+        return value < count ? value : -1;
     }
     return -1;
 }
@@ -206,6 +209,19 @@ static int map_asset_id(const cJSON *item) {
     return (int) value;
 }
 
+int map_texture_id(const cJSON *item) {
+    // p && !/[^\d<letters>]+/gim.test(p) ? p : 0 (v7 MapManager.js:889-891, Minimap.js:370; v10 widens the set)
+    if (cJSON_IsNumber(item)) return (int) cJSON_GetNumberValue(item);
+    const char *text = cJSON_GetStringValue(item);
+    if (!text || !text[0]) return 0;
+    const char *letters = map_dialect_texture_id_letters(map_dialect_current());
+    for (const char *c = text; *c; c++) {
+        const char lower = (char) (*c >= 'A' && *c <= 'Z' ? *c + 32 : *c);
+        if (!(*c >= '0' && *c <= '9') && !strchr(letters, lower)) return 0;
+    }
+    return map_asset_id(item);
+}
+
 // UTILS.isHexColor ? value : fallback
 static void map_color(const cJSON *obj, const char *key, const char *fallback, char out[MAP_COLOR_SIZE]) {
     const char *text = cJSON_GetStringValue(cJSON_GetObjectItem(obj, key));
@@ -329,8 +345,9 @@ static void map_parse_interface(Object *object, const cJSON *raw_obj, const int 
     const int clamp_interface = (roles & PREFAB_R_INTERFACE_CLAMP) != 0;
 
     // the builders make no GameObject for a noCol ("l" / "col") object: no health, no interface
-    // (the non-solid v7 volumes that are GameObjects keep theirs: PREFAB_R_KEEP_NONSOLID)
-    if (object->collision_type == COLLISION_TYPE_NONE && !(roles & PREFAB_R_KEEP_NONSOLID)) has_health = has_interface = 0;
+    // (the non-solid v7 volumes that are GameObjects keep theirs: PREFAB_R_KEEP_NONSOLID; v10:
+    // so does a dyn object, `noCol && !dyn || new GameObject`, L165943 / L166187)
+    if (object->collision_type == COLLISION_TYPE_NONE && !(roles & PREFAB_R_KEEP_NONSOLID) && !object->dyn) has_health = has_interface = 0;
 
     if (has_health) {
         // health: parseInt(h || hp) || 0; a health makes it destructible (canDestroy)
@@ -460,6 +477,16 @@ static void map_parse_generic(Object *object, const cJSON *raw_obj) {
 
     object->objective_uid = -1;
     object->node_id = -1;
+
+    // v10: "dyn" on the canDynamic prefabs (dyn !== undefined ? !!dyn : undefined, L167488 /
+    // L167732 / L168320); "mp" on the custom-asset builders (CUSTOM_ASSET, asset TRIGGER: L167718,
+    // L168283). A v7 dialect reads neither.
+    if (map_dialect_current() >= MAP_DIALECT_V10) {
+        const int prefab = map_raw_object_prefab(raw_obj);
+        if (prefab_has_flag(prefab, PF_CANDYNAMIC)) object->dyn = (unsigned char) map_truthy(cJSON_GetObjectItem(raw_obj, "dyn"));
+        const cJSON *mp = cJSON_GetObjectItem(raw_obj, "mp");
+        if ((prefab == PREFAB_CUSTOM_ASSET || prefab == PREFAB_TRIGGER) && cJSON_IsObject(mp)) object->mp = mp;
+    }
 }
 
 // Prefab-specific keys of the v7 prefabs (map.js generate, MapManager builders).
@@ -570,8 +597,8 @@ static void map_parse_environment(MapEnvironment *env, const cJSON *raw, const i
     map_color(raw, "skyDomeCol1", "#dce8ed", env->sky_dome_col[1]);
     map_color(raw, "skyDomeCol2", "#dce8ed", env->sky_dome_col[2]);
     map_color(raw, "skyDomeEmis", "#000000", env->sky_dome_emis);
-    env->sky_dome_tex_asset = map_asset_id(cJSON_GetObjectItem(raw, "skyDomeTexA"));
-    env->sky_dome_emis_tex = map_asset_id(cJSON_GetObjectItem(raw, "skyDomeEmisTex"));
+    env->sky_dome_tex_asset = map_texture_id(cJSON_GetObjectItem(raw, "skyDomeTexA"));
+    env->sky_dome_emis_tex = map_texture_id(cJSON_GetObjectItem(raw, "skyDomeEmisTex"));
     env->sky_dome_mov_t = map_float(raw, "skyDomeMovT", 0.0f);
     env->sky_dome_mov_d = map_float(raw, "skyDomeMovD", 0.0f);
     env->amb_ind = map_has(raw, "ambInd") ? map_int(raw, "ambInd") : 1;
@@ -580,6 +607,10 @@ static void map_parse_environment(MapEnvironment *env, const cJSON *raw, const i
     env->tone_mapping_exposure = map_round(map_clampf(map_float_or(raw, "toneMappingExposure", 1.0f), 0.0f, 10.0f), 10.0f);
     env->output_encoding = map_clamp(map_int(raw, "outputEncoding"), 0, 2);
     env->correct_lights = (unsigned char) map_truthy(cJSON_GetObjectItem(raw, "correctLights"));
+    // v10 sceneInit: normalBias = isNumber(shadowNB) ? limitMM(shadowNB, 0, 5) : 0 (L201758). The
+    // zone data (addEnvironmentZone) has no shadowNB: 0 there.
+    env->shadow_nb = !zone && map_dialect_current() >= MAP_DIALECT_V10 && cJSON_IsNumber(cJSON_GetObjectItem(raw, "shadowNB"))
+                         ? map_clampf((float) cJSON_GetNumberValue(cJSON_GetObjectItem(raw, "shadowNB")), 0.0f, 5.0f) : 0.0f;
 }
 
 // a terrain seed is a string or a number in the corpus: kept as text ("" = none)
@@ -589,13 +620,136 @@ static void map_seed_text(const cJSON *item, char *out, const size_t size) {
     else if (cJSON_IsNumber(item) && cJSON_GetNumberValue(item) != 0.0) snprintf(out, size, "%.17g", cJSON_GetNumberValue(item));
 }
 
+// map.js botPaths (v10 L168471-168486, the v7 loader ignores the key): {pathNodes: p.map(parseInt
+// x / y / z || 0), reversible: !!r} for every entry whose p is an array.
+static void map_parse_bot_paths(Map *map) {
+    const int count = map->bot_paths ? cJSON_GetArraySize(map->bot_paths) : 0;
+    if (count <= 0) return;
+    map->bot_path_list = calloc((size_t) count, sizeof(MapBotPath));
+    if (!map->bot_path_list) return;
+    const cJSON *entry;
+    cJSON_ArrayForEach(entry, map->bot_paths) {
+        const cJSON *nodes = cJSON_GetObjectItem(entry, "p");
+        if (!cJSON_IsArray(nodes)) continue;
+        MapBotPath *path = &map->bot_path_list[map->bot_path_count++];
+        path->reversible = (unsigned char) map_truthy(cJSON_GetObjectItem(entry, "r"));
+        const int n = cJSON_GetArraySize(nodes);
+        path->nodes = n > 0 ? calloc((size_t) n, sizeof(vec3)) : NULL;
+        const cJSON *node;
+        cJSON_ArrayForEach(node, nodes) {
+            if (!path->nodes) break;
+            // parseInt(node[k]) || 0: a number or numeric string, truncated
+            path->nodes[path->node_count++] = (vec3) {(float) map_item_int(cJSON_GetArrayItem(node, 0)),
+                                                      (float) map_item_int(cJSON_GetArrayItem(node, 1)),
+                                                      (float) map_item_int(cJSON_GetArrayItem(node, 2))};
+        }
+    }
+}
+
+// A JSON number array entry k (p / s of an archetype part), fallback when missing or not a number.
+static float map_array_number(const cJSON *array, const int k, const float fallback) {
+    const float v = map_number(cJSON_GetArrayItem(array, k));
+    return cJSON_IsArray(array) && v == v ? v : fallback;
+}
+
+// v10 entities.loadMapData(archetypes): one record per entry with an id; the footprint of the
+// solid parts (min / max of p -+ s/2 in x / z, max of p.y + s.y), soft parts become soft zones
+// (L184118-184170). Validation (map_validate.c) rejects malformed lists for custom maps; this
+// keeps whatever loads, like the manager.
+static void map_parse_archetypes(Map *map, const cJSON *list) {
+    const int count = cJSON_IsArray(list) ? cJSON_GetArraySize(list) : 0;
+    if (count <= 0) return;
+    map->archetypes = calloc((size_t) count, sizeof(MapArchetype));
+    if (!map->archetypes) return;
+    const cJSON *entry;
+    cJSON_ArrayForEach(entry, list) {
+        const cJSON *id = cJSON_GetObjectItem(entry, "id");
+        if (!cJSON_IsObject(entry) || !id || cJSON_IsNull(id)) continue;
+        MapArchetype *a = &map->archetypes[map->archetype_count++];
+        a->id = map_item_int(id);
+        const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(entry, "name"));
+        if (name && name[0]) snprintf(a->name, sizeof(a->name), "%s", name);
+        else snprintf(a->name, sizeof(a->name), "archetype_%d", a->id);
+        a->coll = map_int(entry, "coll");
+        a->hp = map_float(entry, "hp", 0.0f);
+        const cJSON *data = cJSON_GetObjectItem(entry, "data");
+        a->data = cJSON_IsObject(data) ? data : NULL;
+        const cJSON *objects = cJSON_GetObjectItem(entry, "objects");
+        a->objects = cJSON_IsArray(objects) ? objects : NULL;
+        a->object_count = a->objects ? cJSON_GetArraySize(objects) : 0;
+        float min_x = 0.0f, max_x = 0.0f, min_z = 0.0f, max_z = 0.0f, height = 0.0f; // the manager starts at 0
+        a->soft_zones = a->object_count ? calloc((size_t) a->object_count, sizeof(MapArchetypeSoftZone)) : NULL;
+        const cJSON *part;
+        cJSON_ArrayForEach(part, a->objects) {
+            const cJSON *pp = cJSON_GetObjectItem(part, "p"), *ps = cJSON_GetObjectItem(part, "s");
+            const vec3 pos = {map_array_number(pp, 0, 0.0f), map_array_number(pp, 1, 0.0f), map_array_number(pp, 2, 0.0f)};
+            const vec3 size = {map_array_number(ps, 0, 2.0f), map_array_number(ps, 1, 2.0f), map_array_number(ps, 2, 2.0f)};
+            if (map_truthy(cJSON_GetObjectItem(part, "soft"))) {
+                if (a->soft_zones) {
+                    a->soft_zones[a->soft_zone_count++] = (MapArchetypeSoftZone) {
+                        {pos.x, pos.y + size.y / 2.0f, pos.z}, {size.x / 2.0f, size.y / 2.0f, size.z / 2.0f}};
+                }
+                continue;
+            }
+            min_x = fminf(min_x, pos.x - size.x / 2.0f);
+            max_x = fmaxf(max_x, pos.x + size.x / 2.0f);
+            min_z = fminf(min_z, pos.z - size.z / 2.0f);
+            max_z = fmaxf(max_z, pos.z + size.z / 2.0f);
+            height = fmaxf(height, pos.y + size.y);
+        }
+        a->foot_cx = (min_x + max_x) / 2.0f;
+        a->foot_cz = (min_z + max_z) / 2.0f;
+        a->foot_hx = fmaxf(0.1f, (max_x - min_x) / 2.0f);
+        a->foot_hz = fmaxf(0.1f, (max_z - min_z) / 2.0f);
+        a->foot_h = fmaxf(0.1f, height);
+    }
+}
+
+const MapArchetype *map_archetype(const Map *map, const int id) {
+    for (size_t i = 0; map && i < map->archetype_count; i++) {
+        if (map->archetypes[i].id == id) return &map->archetypes[i];
+    }
+    return NULL;
+}
+
+// map.js ENTITY (L168363-168371): eid != null && ar != null && fewer than 64 instances. The
+// manager (loadMapData) then keeps only instances whose archetype exists.
+static void map_add_entity_instance(Map *map, const cJSON *raw_obj) {
+    const cJSON *eid = cJSON_GetObjectItem(raw_obj, "eid"), *ar = cJSON_GetObjectItem(raw_obj, "ar");
+    if (!map_has(raw_obj, "eid") || !map_has(raw_obj, "ar") || map->entity_instance_count >= MAP_ENTITY_LIMIT) return;
+    MapEntityInstance e = {0};
+    e.eid = map_item_int(eid);
+    e.archetype = map_item_int(ar);
+    if (!map_archetype(map, e.archetype)) return;
+    const cJSON *p = cJSON_GetObjectItem(raw_obj, "p"), *r = cJSON_GetObjectItem(raw_obj, "r");
+    e.position = (vec3) {map_array_number(p, 0, 0.0f), map_array_number(p, 1, 0.0f), map_array_number(p, 2, 0.0f)};
+    e.rotation = (vec3) {map_array_number(r, 0, 0.0f), map_array_number(r, 1, 0.0f), map_array_number(r, 2, 0.0f)};
+    const cJSON *tag = cJSON_GetObjectItem(raw_obj, "tag");
+    if (map_has(raw_obj, "tag")) { // (tag + "").slice(0, 32)
+        e.has_tag = 1;
+        if (cJSON_IsString(tag)) snprintf(e.tag, sizeof(e.tag), "%.32s", cJSON_GetStringValue(tag));
+        else if (cJSON_IsNumber(tag)) snprintf(e.tag, sizeof(e.tag), "%g", cJSON_GetNumberValue(tag));
+        else snprintf(e.tag, sizeof(e.tag), "%s", cJSON_IsTrue(tag) ? "true" : cJSON_IsFalse(tag) ? "false" : "[object Object]");
+    }
+    // spawnPending: 0 !== as (missing / any other value spawns)
+    const cJSON *as = cJSON_GetObjectItem(raw_obj, "as");
+    e.auto_spawn = !(cJSON_IsNumber(as) && cJSON_GetNumberValue(as) == 0.0);
+    const cJSON *sp = cJSON_GetObjectItem(raw_obj, "sp");
+    e.spawn_params = cJSON_IsObject(sp) ? sp : NULL;
+    e.raw = raw_obj;
+    MapEntityInstance *grown = realloc(map->entity_instances, (map->entity_instance_count + 1) * sizeof(e));
+    if (!grown) return;
+    map->entity_instances = grown;
+    map->entity_instances[map->entity_instance_count++] = e;
+}
+
 static void map_parse_top_level(Map *map, const cJSON *raw) {
     map->name = cJSON_GetStringValue(cJSON_GetObjectItem(raw, "name"));
     map->welcome = map_text(raw, "welMsg", 70);
     map->no_ambient = (unsigned char) map_truthy(cJSON_GetObjectItem(raw, "nAmb"));
     map->old_ao = (unsigned char) map_truthy(cJSON_GetObjectItem(raw, "oldAO"));
     map->has_lightmaps = (unsigned char) map_truthy(cJSON_GetObjectItem(raw, "hasLM"));
-    map->minimap_asset = map_asset_id(cJSON_GetObjectItem(raw, "mmId"));
+    map->minimap_asset = map_texture_id(cJSON_GetObjectItem(raw, "mmId"));
     map_parse_environment(&map->env, raw, 0);
 
     MapTerrainConfig *terrain = &map->terrain;
@@ -672,6 +826,12 @@ static void map_parse_top_level(Map *map, const cJSON *raw) {
     map->scripts = cJSON_IsObject(item) ? item : NULL;
     item = cJSON_GetObjectItem(raw, "botPaths");
     map->bot_paths = cJSON_IsArray(item) ? item : NULL;
+    map_parse_bot_paths(map);
+    if (map_dialect_current() >= MAP_DIALECT_V10) {
+        item = cJSON_GetObjectItem(map->scripts, "shared");
+        map->shared_script = cJSON_IsString(item) ? item : NULL;
+        map_parse_archetypes(map, cJSON_GetObjectItem(raw, "archetypes"));
+    }
     item = cJSON_GetObjectItem(raw, "player");
     map->editor_player = cJSON_IsObject(item) ? item : NULL;
 }
@@ -1053,6 +1213,8 @@ Map *map_init_ex(const cJSON *raw_data, const int build_meshes) {
             map_push((void **) &map->ai_spawners, &map->ai_spawner_count, &raw_obj, sizeof(raw_obj));
         } else if (prefab_id == PREFAB_BOT_SPAWNER) {
             map_push((void **) &map->bot_spawners, &map->bot_spawner_count, &raw_obj, sizeof(raw_obj));
+        } else if (prefab_id == PREFAB_ENTITY) {
+            map_add_entity_instance(map, raw_obj); // v10: an instance for the entities package, no map object
         }
         if (!map_raw_object_kept(raw_obj)) continue;
 
@@ -1183,6 +1345,16 @@ void map_fini(Map *map) {
     free(map->env_zones);
     free((void *) map->ai_spawners);
     free((void *) map->bot_spawners);
+    for (size_t i = 0; i < map->bot_path_count; i++) free(map->bot_path_list[i].nodes);
+    free(map->bot_path_list);
+    for (size_t i = 0; i < map->archetype_count; i++) free(map->archetypes[i].soft_zones);
+    free(map->archetypes);
+    free(map->entity_instances);
+    map->bot_path_list = NULL;
+    map->archetypes = NULL;
+    map->entity_instances = NULL;
+    map->bot_path_count = map->archetype_count = map->entity_instance_count = 0;
+    map->shared_script = NULL;
     map->modes = NULL;
     map->tris = NULL;
     map->path_nodes = NULL;

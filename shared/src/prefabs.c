@@ -75,7 +75,8 @@ static const PrefabInfo k_prefab_info[PREFAB_TABLE_COUNT] = {
     // v7 builds EVENT objects only on official maps, client-side (prefab localOnly); KN has no
     // event objects and no shipped map has one: never a map object.
     [PREFAB_EVENT] = {G(MODEL), C(NONE), NO_OBJ},
-    [PREFAB_TERMINAL] = {G(NONE), C(NONE), NO_OBJ}, // v7 map.js: empty branch
+    // v7 TERMINAL / v10 BOT_PATH_NODE: map.js skips both names (v10 L167396), no object either way
+    [PREFAB_BOT_PATH_NODE] = {G(NONE), C(NONE), NO_OBJ},
     [PREFAB_PREMIUM_ZONE] = {G(NONE), C(FORCED), NOSHOOT | ZONE | BORDER | HP | INC},
     [PREFAB_VERIFIED_ZONE] = {G(NONE), C(FORCED), NOSHOOT | NOWJ | ZONE | BORDER | HP | INC},
     [PREFAB_CUSTOM_ASSET] = {G(SPECIAL), C(OPTIONAL), HP | IN},
@@ -134,6 +135,10 @@ static const PrefabInfo k_prefab_info[PREFAB_TABLE_COUNT] = {
     // map.js addBot: a pending map bot (WP-F), not a map object
     [PREFAB_BOT_SPAWNER] = {G(NONE), C(NONE), NO_OBJ},
     [PREFAB_MAP_ANCHOR] = {G(NONE), C(NONE), NOWJ},           // manager.mapAnchors (minimap bounds)
+    // v10.0.2: SCRAPCRATE has no own loader branch (a generic addMesh prop, CRATE's flags at scale
+    // 5); ENTITY builds no map object, map.c keeps it as an entity instance (Map.entity_instances)
+    [PREFAB_SCRAPCRATE] = MODEL_PROP,
+    [PREFAB_ENTITY] = {G(NONE), C(NONE), NO_OBJ},
 };
 
 const PrefabInfo *prefab_info(const int id) {
@@ -161,6 +166,7 @@ int prefab_id_from_name(const char *name) {
     }
     if (!strcmp(name, "SPECTATE_CAM")) return PREFAB_CAMERA; // v3.1.1 names
     if (!strcmp(name, "BOT")) return PREFAB_AI_SPAWNER;
+    if (!strcmp(name, "BOT_PATH_NODE")) return PREFAB_BOT_PATH_NODE; // v10's name of 41 (v7 table: TERMINAL)
     return -1;
 }
 

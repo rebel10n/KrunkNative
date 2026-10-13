@@ -3,7 +3,9 @@
 #include <map_validate.h>
 #include <prefabs.h>
 #include <trigger_v7_data.h>
+#include <map_dialect.h> // the ruleset's prefab / condition counts and trigger action limit (v7, v10)
 
+#include <ctype.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -151,7 +153,7 @@ static void check_text(Report *r, const cJSON *holder, const char *key, const in
 static void check_condition(Report *r, const cJSON *entry, const int object, const int action) {
     const cJSON *cd = cJSON_GetObjectItem(entry, "cd");
     if (!truthy(cd)) return;
-    const int index = js_index(cd, TRIGGER_V7_CONDITION_COUNT);
+    const int index = js_index(cd, map_dialect_condition_count(map_dialect_current()));
     if (index < 0) {
         report(r, MAP_ISSUE_ERROR, object, action, "trigger_condition", "INVALID CONDITION");
         return;
@@ -201,6 +203,172 @@ typedef struct {
     int count;
     int id;
 } InterfaceCount;
+
+// JSON.stringify(value || {}).length >= 15000 (archetype data / entity spawn params)
+static int json_too_large(const cJSON *value) {
+    if (!value || !truthy(value)) return 0;
+    char *text = cJSON_PrintUnformatted(value);
+    const int large = text && js_length(text) >= 15000;
+    free(text);
+    return large;
+}
+
+// [0, 1, ..., max].indexOf(parseInt(v)) >= 0
+static int js_int_in(const cJSON *v, const int max) {
+    long n = 0;
+    return js_parse_int(v, &n) && n >= 0 && n <= max;
+}
+
+// /[^<allowed>]+/ finds nothing in text (word characters plus `extra`)
+static int word_chars_ok(const char *text, const char *extra) {
+    for (const char *c = text; *c; c++) {
+        if (!(isalnum((unsigned char) *c) || *c == '_' || strchr(extra, *c))) return 0;
+    }
+    return 1;
+}
+
+// v10 validateMap "archetypes" (L187580-187650): null passes; <= 32 entries; ids 1..9999 unique;
+// name <= 24 of [\w -]; coll 0..2; hp >= 0; data an object under 15000 chars of JSON; 1..40
+// parts, no ENTITY part; part names /^\w{1,12}$/; soft 0 / 1. ids[id] = 1 for each archetype.
+// The generic per-object check v10 also runs on parts (_61121) is not repeated here.
+static void check_archetypes(Report *r, const cJSON *list, unsigned char *ids) {
+    if (!list || cJSON_IsNull(list)) return;
+    if (!cJSON_IsArray(list)) {
+        report(r, MAP_ISSUE_ERROR, -1, -1, "archetype_list", "Archetype list error.");
+        return;
+    }
+    if (cJSON_GetArraySize(list) > MAP_ARCHETYPE_LIMIT) {
+        report(r, MAP_ISSUE_ERROR, -1, -1, "archetype_limit", "Too many archetypes.");
+        return;
+    }
+    const cJSON *a;
+    cJSON_ArrayForEach(a, list) {
+        long id = 0;
+        if (!cJSON_IsObject(a)) {
+            report(r, MAP_ISSUE_ERROR, -1, -1, "archetype", "Archetype error.");
+            return;
+        }
+        if (!js_parse_int(cJSON_GetObjectItem(a, "id"), &id) || id < 1 || id > 9999) {
+            report(r, MAP_ISSUE_ERROR, -1, -1, "archetype_id", "Archetype id error.");
+            return;
+        }
+        if (ids[id]) {
+            report(r, MAP_ISSUE_ERROR, -1, -1, "archetype_duplicate", "Duplicate archetype id. (ID: %ld)", id);
+            return;
+        }
+        ids[id] = 1;
+        if (present(a, "name")) {
+            const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(a, "name"));
+            if (!name || js_length(name) > MAP_ARCHETYPE_NAME_MAX) {
+                report(r, MAP_ISSUE_ERROR, -1, -1, "archetype_name", "Archetype name error. (ID: %ld)", id);
+                return;
+            }
+            if (!word_chars_ok(name, " -")) {
+                report(r, MAP_ISSUE_ERROR, -1, -1, "archetype_name_chars", "Illegal characters in Archetype name. (ID: %ld)", id);
+                return;
+            }
+        }
+        if (present(a, "coll") && !js_int_in(cJSON_GetObjectItem(a, "coll"), 2)) {
+            report(r, MAP_ISSUE_ERROR, -1, -1, "archetype_coll", "Archetype collision error. (ID: %ld)", id);
+            return;
+        }
+        const cJSON *hp = cJSON_GetObjectItem(a, "hp");
+        if (present(a, "hp") && (!is_number(hp) || cJSON_GetNumberValue(hp) < 0)) {
+            report(r, MAP_ISSUE_ERROR, -1, -1, "archetype_hp", "Archetype health error. (ID: %ld)", id);
+            return;
+        }
+        const cJSON *data = cJSON_GetObjectItem(a, "data");
+        if (present(a, "data") && !cJSON_IsObject(data)) {
+            report(r, MAP_ISSUE_ERROR, -1, -1, "archetype_data", "Archetype data error. (ID: %ld)", id);
+            return;
+        }
+        if (json_too_large(data)) {
+            report(r, MAP_ISSUE_ERROR, -1, -1, "archetype_data_size", "Archetype data too large. (ID: %ld)", id);
+            return;
+        }
+        const cJSON *parts = cJSON_GetObjectItem(a, "objects");
+        if (!cJSON_IsArray(parts) || !cJSON_GetArraySize(parts)) {
+            report(r, MAP_ISSUE_ERROR, -1, -1, "archetype_objects", "Archetype missing objects. (ID: %ld)", id);
+            return;
+        }
+        if (cJSON_GetArraySize(parts) > MAP_ARCHETYPE_OBJECT_LIMIT) {
+            report(r, MAP_ISSUE_ERROR, -1, -1, "archetype_object_limit", "Archetype exceeds object limit. (ID: %ld)", id);
+            return;
+        }
+        const cJSON *part;
+        cJSON_ArrayForEach(part, parts) {
+            const int prefab = cJSON_IsObject(part) ? js_index(cJSON_GetObjectItem(part, "i"), PREFAB_COUNT) : -1;
+            if (prefab < 0) {
+                report(r, MAP_ISSUE_ERROR, -1, -1, "archetype_part", "Invalid Archetype Object. (ID: %ld)", id);
+                return;
+            }
+            if (prefab_has_flag(prefab, PF_ISENTITY)) {
+                report(r, MAP_ISSUE_ERROR, -1, -1, "archetype_entity", "Archetypes cannot contain entities. (ID: %ld)", id);
+                return;
+            }
+            const cJSON *n = cJSON_GetObjectItem(part, "n");
+            if (present(part, "n")) { // /^\w{1,12}$/.test(n + "")
+                char number[32];
+                const char *text = cJSON_GetStringValue(n);
+                if (!text && cJSON_IsNumber(n)) snprintf(number, sizeof(number), "%g", cJSON_GetNumberValue(n));
+                if (!text) text = cJSON_IsNumber(n) ? number : cJSON_IsTrue(n) ? "true" : cJSON_IsFalse(n) ? "false" : "-";
+                if (!text[0] || strlen(text) > 12 || !word_chars_ok(text, "")) {
+                    report(r, MAP_ISSUE_ERROR, -1, -1, "archetype_part_name", "Archetype part name error. (ID: %ld)", id);
+                    return;
+                }
+            }
+            if (present(part, "soft") && !js_int_in(cJSON_GetObjectItem(part, "soft"), 1)) {
+                report(r, MAP_ISSUE_ERROR, -1, -1, "archetype_soft", "Archetype part soft-zone error. (ID: %ld)", id);
+                return;
+            }
+        }
+    }
+}
+
+// v10 ENTITY object checks (L187700-187730): <= 64; eid 1..9999 unique; ar a known archetype;
+// tag <= 32 of [\w-]; as 0 / 1; sp an object under 15000 chars of JSON.
+static void check_entity(Report *r, const cJSON *object, const int index, int *entities, unsigned char *eids,
+                         const unsigned char *archetypes) {
+    if (++*entities > MAP_ENTITY_LIMIT) {
+        report(r, MAP_ISSUE_ERROR, index, -1, "entity_limit", "Too many entities.");
+        return;
+    }
+    long eid = 0, ar = 0;
+    if (!js_parse_int(cJSON_GetObjectItem(object, "eid"), &eid) || eid < 1 || eid >= 10000) {
+        report(r, MAP_ISSUE_ERROR, index, -1, "entity_id", "Entity id error.");
+        return;
+    }
+    if (eids[eid]) {
+        report(r, MAP_ISSUE_ERROR, index, -1, "entity_duplicate", "Duplicate entity id. (ID: %ld)", eid);
+        return;
+    }
+    eids[eid] = 1;
+    if (!js_parse_int(cJSON_GetObjectItem(object, "ar"), &ar) || ar < 1 || ar > 9999 || !archetypes[ar]) {
+        report(r, MAP_ISSUE_ERROR, index, -1, "entity_archetype", "Unknown entity archetype. (ID: %ld)", eid);
+        return;
+    }
+    if (present(object, "tag")) {
+        const char *tag = cJSON_GetStringValue(cJSON_GetObjectItem(object, "tag"));
+        if (!tag || js_length(tag) > MAP_ENTITY_TAG_MAX) {
+            report(r, MAP_ISSUE_ERROR, index, -1, "entity_tag", "Entity tag error. (ID: %ld)", eid);
+            return;
+        }
+        if (!word_chars_ok(tag, "-")) {
+            report(r, MAP_ISSUE_ERROR, index, -1, "entity_tag_chars", "Illegal characters in Entity tag. (ID: %ld)", eid);
+            return;
+        }
+    }
+    if (present(object, "as") && !js_int_in(cJSON_GetObjectItem(object, "as"), 1)) {
+        report(r, MAP_ISSUE_ERROR, index, -1, "entity_auto_spawn", "Entity auto spawn error. (ID: %ld)", eid);
+        return;
+    }
+    const cJSON *sp = cJSON_GetObjectItem(object, "sp");
+    if (present(object, "sp") && !cJSON_IsObject(sp)) {
+        report(r, MAP_ISSUE_ERROR, index, -1, "entity_params", "Entity spawn params error. (ID: %ld)", eid);
+    } else if (json_too_large(sp)) {
+        report(r, MAP_ISSUE_ERROR, index, -1, "entity_params_size", "Entity spawn params too large. (ID: %ld)", eid);
+    }
+}
 
 size_t map_validate(const cJSON *map, const MapValidateOptions *options, MapIssue *issues, const size_t max, size_t *errors) {
     static const MapValidateOptions defaults = {0};
@@ -266,9 +434,20 @@ size_t map_validate(const cJSON *map, const MapValidateOptions *options, MapIssu
         }
     }
 
+    const MapDialect dialect = map_dialect_current();
+    const int prefab_count = map_dialect_prefab_count(dialect);
+    const int action_limit = map_dialect_trigger_action_limit(ruleset_current());
+    // v10: the archetype list is checked before the objects; its id flags feed the ENTITY checks
+    unsigned char *archetype_ids = dialect >= MAP_DIALECT_V10 ? calloc(2 * 10000, 1) : NULL;
+    unsigned char *entity_ids = archetype_ids ? archetype_ids + 10000 : NULL;
+    int entities = 0;
+    if (archetype_ids) check_archetypes(&r, cJSON_GetObjectItem(map, "archetypes"), archetype_ids);
+
     const cJSON *objects = cJSON_GetObjectItem(map, "objects");
     const int object_count = cJSON_IsArray(objects) ? cJSON_GetArraySize(objects) : 0;
-    if (!object_count) {
+    if (r.stop) {
+        // first_only: an archetype error is v10's answer
+    } else if (!object_count) {
         report(&r, MAP_ISSUE_ERROR, -1, -1, "objects_missing", "Missing objects.");
     } else if (object_count > (r.opt->featured ? MAP_V7_OBJECT_LIMIT_FEATURED : MAP_V7_OBJECT_LIMIT)) {
         report(&r, MAP_ISSUE_ERROR, -1, -1, "objects_limit", "Map exceeds overall object limit.");
@@ -313,7 +492,7 @@ size_t map_validate(const cJSON *map, const MapValidateOptions *options, MapIssu
 
         // validateMap: prefabs.prefabs[i || 0]
         const cJSON *i_item = cJSON_GetObjectItem(object, "i");
-        const int prefab = js_index(i_item, PREFAB_TABLE_COUNT);
+        const int prefab = js_index(i_item, prefab_count);
         if (prefab < 0) {
             report(&r, MAP_ISSUE_ERROR, index, -1, "object_prefab", "Invalid Object.");
             cJSON_Delete(pooled_json);
@@ -349,6 +528,7 @@ size_t map_validate(const cJSON *map, const MapValidateOptions *options, MapIssu
             report(&r, MAP_ISSUE_ERROR, index, -1, "leaderboard_limit", "Too many Leaderboards.");
         }
         if (prefab_has_flag(prefab, PF_AI) && ++ais > MAP_V7_AI_LIMIT) report(&r, MAP_ISSUE_ERROR, index, -1, "ai_limit", "Too many AI.");
+        if (entity_ids && prefab_has_flag(prefab, PF_ISENTITY) && !r.stop) check_entity(&r, object, index, &entities, entity_ids, archetype_ids);
         // not checked by validateMap: addPendingBots / addMapAnchor stop at the limit
         if (prefab == 95 /* BOT_SPAWNER */ && ++bots == MAP_V7_BOT_LIMIT + 1) {
             report(&r, MAP_ISSUE_WARNING, index, -1, "bot_limit", "more than %d BOT_SPAWNERs: the rest are not added", MAP_V7_BOT_LIMIT);
@@ -356,14 +536,17 @@ size_t map_validate(const cJSON *map, const MapValidateOptions *options, MapIssu
         if (prefab == 96 /* MAP_ANCHOR */ && ++anchors == MAP_V7_ANCHOR_LIMIT + 1) {
             report(&r, MAP_ISSUE_WARNING, index, -1, "anchor_limit", "more than %d MAP_ANCHORs: the rest are ignored", MAP_V7_ANCHOR_LIMIT);
         }
-        if (prefab == 41 /* TERMINAL */) report(&r, MAP_ISSUE_WARNING, index, -1, "terminal", "TERMINAL builds nothing in v7");
+        if (prefab == 41 /* TERMINAL / BOT_PATH_NODE */) {
+            report(&r, MAP_ISSUE_WARNING, index, -1, "terminal",
+                   dialect >= MAP_DIALECT_V10 ? "BOT_PATH_NODE builds nothing (bots walk \"botPaths\")" : "TERMINAL builds nothing in v7");
+        }
         if (prefab == 33 /* CAMERA */ && present(object, "obi") && !present(object, "obl")) {
             report(&r, MAP_ISSUE_WARNING, index, -1, "camera_obi", "v3 SPECTATE_CAM \"obi\" is not read by v7 (\"obl\"): links to objective 0");
         }
 
         const cJSON *tas = cJSON_GetObjectItem(object, "tas");
         if (cJSON_IsArray(tas)) {
-            if (cJSON_GetArraySize(tas) > TRIGGER_V7_ACTION_LIMIT) {
+            if (cJSON_GetArraySize(tas) > action_limit) {
                 report(&r, MAP_ISSUE_ERROR, index, -1, "trigger_actions", "Trigger Has Too Many Actions");
             }
             int a = 0;
@@ -422,12 +605,13 @@ size_t map_validate(const cJSON *map, const MapValidateOptions *options, MapIssu
         if (!cJSON_IsObject(object)) continue;
         const cJSON *i_item = cJSON_GetObjectItem(object, "i");
         const cJSON *pick = truthy(i_item) ? i_item : cJSON_GetObjectItem(object, "id");
-        if (js_index(pick, PREFAB_TABLE_COUNT) < 0) report(&r, MAP_ISSUE_ERROR, index, -1, "object_id", "Object ID error.");
+        if (js_index(pick, prefab_count) < 0) report(&r, MAP_ISSUE_ERROR, index, -1, "object_id", "Object ID error.");
         else if (js_index(cJSON_GetObjectItem(object, "t"), PREFAB_TEXTURE_COUNT) < 0) {
             report(&r, MAP_ISSUE_ERROR, index, -1, "object_texture", "Object Texture error.");
         }
     }
 
+    free(archetype_ids);
     if (errors) *errors = r.errors;
     return r.count;
 }

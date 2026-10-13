@@ -12,6 +12,7 @@
 #include <sky.h>
 #include <shadow.h>
 #include <ocean.h>
+#include <map_dialect.h>
 #include <math.h>
 #include <string.h>
 
@@ -24,7 +25,9 @@ static void env_output(RenderLighting *l, const MapEnvironment *env) {
     l->tone_mapping = env->tone_mapping;
     l->tone_mapping_exposure = env->tone_mapping_exposure;
     l->output_encoding = env->output_encoding;
-    l->correct_lights = env->correct_lights;
+    // v10.0.2 (THREE r186) has no legacy lights: "correctLights" is still parsed but every map
+    // renders with physical lights (renderer init L199044-199061), their intensities x PI (basic.c)
+    l->correct_lights = env->correct_lights || map_dialect_current() >= MAP_DIALECT_V10;
 }
 
 void map_environment_map_loaded(const Map *map, const GameMode *mode) {
@@ -95,6 +98,7 @@ static void env_apply_zone(const Map *map, const int index) {
 
     glClearColor(l->sky_color.x, l->sky_color.y, l->sky_color.z, 1.0f);
     sky_load(mode_sky ? NULL : env_zone_raw(map, index));
+    shadow_set_normal_bias(env->shadow_nb); // a zone's data has no shadowNB: 0
     shadow_environment(env->shadow_r, env->shadow_d, env->light_d);
 }
 
@@ -108,6 +112,7 @@ int map_environment_update(const Map *map, const vec3 camera_position) {
         glClearColor(g_render_lighting.sky_color.x, g_render_lighting.sky_color.y, g_render_lighting.sky_color.z, 1.0f);
         const int mode_sky = g_env_mode && g_env_mode->config.has_sky_col;
         sky_load(mode_sky ? NULL : map->raw_data);
+        shadow_set_normal_bias(map->env.shadow_nb);
         shadow_environment(-1, -1, -1.0f);
     } else {
         env_apply_zone(map, zone);
