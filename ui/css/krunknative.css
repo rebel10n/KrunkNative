@@ -299,9 +299,11 @@ input.knOmSearch {
 }
 #menuWindow.dark div.knOmGrid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  /* as many columns as fit (5 at the default window): the tiles wrap, never a horizontal scroll */
+  grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
   gap: 8px;
   max-height: 404px; /* six rows: the tabs and the buttons stay in view, the grid scrolls */
+  overflow-x: hidden;
   overflow-y: auto;
   padding-right: 4px;
 }
@@ -321,11 +323,13 @@ input.knOmSearch {
   border-color: var(--yellow);
 }
 img.knOmIcon {
-  width: 120px;
-  height: 60px;
+  width: 100%;
+  max-width: 120px;
+  height: auto;
 }
 img.knOmProp {
   width: auto;
+  max-width: 100%;
   height: 60px;
 }
 #menuWindow.dark div.knOmGlyph {
