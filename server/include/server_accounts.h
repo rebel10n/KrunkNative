@@ -44,9 +44,12 @@ int accounts_reward(const Player*);
 void accounts_progress(const Player*, int stat, const char *key, int value, int weapon, int streak, int item);
 // season-system: GameHooks.give_skin (v7 game.giveSkin -> sendUserSkin through kn_brain)
 void accounts_give_skin(const Player*, int skin, const char *reason);
+void accounts_on_kill(const Player *victim, const Player *killer); // GameHooks.kill: v10 Turf Wars clan kills
 
 // Ranked lobbies (brain queue): the account's team (1 / 2) from the roster, 0 = mode picks.
 int accounts_assigned_team(const ClientConnection*);
+int accounts_clan_war_allowed(const ClientConnection*); // knClanWar: only the two clans play, others spectate
+const char *accounts_clan_war_label(void);              // "Clan War: [A] vs [B]", NULL when none
 // 1 while this lobby plays a ranked match (its roster's teams are fixed: no "cd" team picks).
 int accounts_ranked_active(void);
 // A one-line server notice in the chat of `client` (v7's ranked.* messages, refusals).

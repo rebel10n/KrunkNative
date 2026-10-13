@@ -93,6 +93,13 @@ extern const kn_proc P_STORAGE_UPDATE, P_STORAGE_LOAD, P_MAP_REWARD;
 /* ---- player-viewer WP-E part 2c: badges, v7 challenges, medal counts (db_progress.c) */
 extern const kn_proc P_CHALLENGES, P_PROGRESS, P_BADGE_SELECT, P_BADGE_CLAIM, P_MEDALS;
 
+/* ---- Krunker v10.0.2 ranked (db_ranked.c, 0205_ranked_v10) */
+extern const kn_proc P_RK_JOIN, P_RK_POLL, P_RK_EXPIRE, P_RK_MATCH_RUN, P_RK_MATCH_READY,
+    P_RK_MATCH_FAILED, P_RK_MATCH_FINISH, P_RK_CLAIM, P_RK_SEASON_CLOSE, P_RK_PURCHASE;
+
+/* ---- Krunker v10.0.2 Turf Wars (db_turf.c, 0206_turf_wars) */
+extern const kn_proc P_TURF_RECORD, P_TURF_SETTLE, P_TURF_LOOT_SET;
+
 /* ---- Krunker v7.1.4 seasons and the Battle Pass (db_season.c, 0108_seasons) */
 extern const kn_proc P_SEASON_ENSURE, P_BP_DATA, P_BP_CLAIM, P_BP_BUY, P_BP_SKIP, P_SEASON_STATS;
 /* The season's active pass (malloc'd; NULL when none / on failure); *row: its battlepasses row. */

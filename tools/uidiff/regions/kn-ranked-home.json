@@ -1,0 +1,61 @@
+{
+  "scenario": "kn-ranked-home",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "rk-tabs",
+      "rect": [
+        300,
+        170,
+        680,
+        40
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "the five tabs"
+    },
+    {
+      "name": "rk-banner-start",
+      "rect": [
+        300,
+        215,
+        680,
+        90
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "status banner, FIND MATCH, All regions, region"
+    },
+    {
+      "name": "rk-card",
+      "rect": [
+        300,
+        300,
+        220,
+        180
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "rank card: icon, Gold 2, rating, quick stats"
+    },
+    {
+      "name": "rk-progress",
+      "rect": [
+        520,
+        300,
+        460,
+        180
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "Ranked Progression with milestones"
+    }
+  ]
+}

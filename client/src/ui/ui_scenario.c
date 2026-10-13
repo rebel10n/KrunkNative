@@ -244,7 +244,8 @@ static void warn_unknown_keys(void) {
         "dead", "killcard", "endscreen", "hit", "preview", "scrollbars", "page", "pageQuery", "pageActions",
         "clientChrome", "settingsView", "windowActions", "after_ms", "customMap", "pose", "spectate", "mapFile",
         "account", // WP-E part 2c: a stand-in logged-in account (account_ui_scenario)
-        "ranked",  // the Ranked window's state: {rating: /mm/queue/rating, party: a poll response, tab}
+        "ranked",  // the Ranked window's state: {tab, info, profile, board, history, shop, status, searching}
+        "turf",    // the Turf Wars window's state: {tab, status, clan, players, board}
         "update",  // the menu's Outdated / Update now box (update_ui_scenario)
         "connectError", // with connected:false, the Lost Connection screen's error text (menu_ui.c)
         "spin",    // the store's prize wheel screen: prizeWheel(spin) without the backend (store_ui.c)
@@ -845,7 +846,8 @@ static int ui_scenario_apply(Client *client) {
     if (in_game) client->menu_lock_grace_until = 1e18;
     if (st_has("gameName")) menu_set_game_name(st_str("gameName"));
     account_ui_scenario(st("account")); // WP-E part 2c: a stand-in logged-in account (badges, challenges)
-    ranked_ui_scenario(st("ranked"));   // the Ranked window's rank card / party (ranked_ui.c)
+    ranked_ui_scenario(st("ranked"));   // the Ranked window (ranked_ui.c)
+    turf_ui_scenario(st("turf"));       // the Turf Wars window (turf_ui.c)
     update_ui_scenario(st("update"));   // the Outdated box without a network check
     if (menu_open) apply_window(client);
     account_ui_scenario_post(); // account.c2fa: v7.1.4's 2FA popup over the window

@@ -8,6 +8,7 @@
 #include <game_config.h>
 #include <comp_lobby.h>
 #include <ranked.h>
+#include <turf_wars.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -63,6 +64,137 @@ static void test_rating(void) {
         ok &= ranked_class_allowed(c) == want;
     }
     CHECK(ok, "config.rankedClasses [0, 1, 2, 3, 4, 5, 6, 8, 12, 13, 15]");
+}
+
+// Krunker v10.0.2 ranked (shared/include/ranked.h): seasons, the map pool, ranks, TrueSkill, RP.
+static void test_v10(void) {
+    printf("Running v10 ranked rules test...\n");
+    // currentRankedSeason: 0 before 2025-08 UTC, then monthly
+    CHECK(ranked_season_at(1753999199) == 0, "2025-07-31 23:59:59 UTC is the Beta season (0)");
+    CHECK(ranked_season_at(1754006400) == 1, "2025-08-01 00:00 UTC is season 1");
+    CHECK(ranked_season_at(1760313600) == 3, "2025-10-13 is season 3");
+    CHECK(ranked_season_at(1798761600) == 18, "2027-01-01 is season 18");
+    // getRankedMaps: values from an independent port of v10's JS (scripts outside the repo)
+    static const int want[][RANKED_SEASON_MAPS] = {{2, 4, 14, 39, 42}, {2, 4, 14, 39, 42}, {2, 4, 14, 39, 42},
+                                                   {2, 4, 14, 17, 42}, {2, 11, 14, 39, 42}, {2, 4, 14, 17, 39}};
+    static const int seasons[] = {0, 1, 2, 13, 14, 15};
+    for (int i = 0; i < 6; i++) {
+        int got[RANKED_SEASON_MAPS];
+        ranked_season_maps(seasons[i], got);
+        CHECK(!memcmp(got, want[i], sizeof(got)), "season %d map pool [%d,%d,%d,%d,%d]", seasons[i], got[0], got[1], got[2], got[3], got[4]);
+    }
+    CHECK(ranked_pool_map_name(42) && !strcmp(ranked_pool_map_name(42), "Frontier") && !ranked_pool_map_name(0), "rankedMapPoolInfo names");
+    // ranks
+    CHECK(ranked_rank_of(10.0, 5) == RANK_UNRANKED, "unranked during the 6 placement matches");
+    CHECK(ranked_display(0.0) == 1000 && ranked_display(12.345) == 2235, "display = 1000 + round(100 cr)");
+    CHECK(ranked_rank_of(0.0, 6) == RANK_SILVER2, "cr 0 (MMR 1000) places at Silver 2");
+    CHECK(ranked_rank_of(-10.0, 6) == RANK_BRONZE1 && ranked_rank_of(-20.0, 6) == RANK_BRONZE1, "low ratings stay Bronze 1");
+    CHECK(ranked_rank_of(37.0, 6) == RANK_KRACKED && ranked_rank_of(36.99, 6) == RANK_MASTER, "Kracked from 4700");
+    CHECK(!strcmp(ranked_rank_name(RANK_GOLD3), "Gold 3") && !strcmp(ranked_rank_color(RANK_PLATINUM), "#41bdea") &&
+          !strcmp(ranked_rank_icon(RANK_SILVER1), "img/ranked/ranks/rank_silver.svg"), "rank names, colours, icons");
+    // TrueSkill: equal teams, the winners gain what the losers lose, sigma shrinks
+    RankedSkill s[8];
+    int team[8], ab[8] = {0};
+    for (int i = 0; i < 8; i++) {
+        s[i] = ranked_skill_default();
+        team[i] = i >= 4;
+    }
+    ranked_update(s, team, ab, 8, 0);
+    CHECK(s[0].mu > RANKED_MU0 && s[4].mu < RANKED_MU0 && near(s[0].mu - RANKED_MU0, RANKED_MU0 - s[4].mu), "symmetric win (%.3f / %.3f)", s[0].mu, s[4].mu);
+    CHECK(s[0].sigma < RANKED_SIGMA0 && s[4].sigma < RANKED_SIGMA0, "sigma shrinks");
+    const double gain1 = s[0].mu - RANKED_MU0;
+    RankedSkill d[8];
+    for (int i = 0; i < 8; i++) d[i] = ranked_skill_default();
+    ranked_update(d, team, ab, 8, -1);
+    CHECK(near(d[0].mu, RANKED_MU0) && d[0].sigma < RANKED_SIGMA0, "a draw between equals moves no mu");
+    // an upset gains more than an expected win
+    RankedSkill u[8];
+    for (int i = 0; i < 8; i++) u[i] = (RankedSkill){i < 4 ? 20.0 : 30.0, 4.0};
+    RankedSkill e[8];
+    memcpy(e, u, sizeof(u));
+    ranked_update(u, team, ab, 8, 0);
+    ranked_update(e, team, ab, 8, 1);
+    CHECK(u[0].mu - 20.0 > e[4].mu - 30.0 && e[4].mu > 30.0, "upsets gain more (%.3f vs %.3f)", u[0].mu - 20.0, e[4].mu - 30.0);
+    // abandon: never gains, and loses RANKED_ABANDON_MU more
+    RankedSkill a[8];
+    for (int i = 0; i < 8; i++) a[i] = ranked_skill_default();
+    ab[1] = 1;
+    ranked_update(a, team, ab, 8, 0);
+    CHECK(a[1].mu < RANKED_MU0 - RANKED_ABANDON_MU + 1e-9 && near(a[0].mu - RANKED_MU0, gain1), "an abandoner on the winning team loses (%.3f)", a[1].mu);
+    CHECK(ranked_conservative(a[1]) < ranked_conservative(ranked_skill_default()), "an abandoner's conservative rating drops");
+    RankedSkill dr[8];
+    for (int i = 0; i < 8; i++) dr[i] = (RankedSkill){30.0, 3.0};
+    ranked_update(dr, team, ab, 8, -1);
+    CHECK(ranked_conservative(dr[1]) < 30.0 - 9.0 && ranked_conservative(dr[0]) > 30.0 - 9.0, "a draw: the abandoner drops, the others gain certainty");
+    ab[1] = 0;
+    // decay, seeds
+    RankedSkill dec = ranked_decay((RankedSkill){30.0, 2.0}, 6.0);
+    CHECK(near(dec.sigma, 2.0), "no decay within 7 days");
+    dec = ranked_decay((RankedSkill){30.0, 2.0}, 30.0);
+    CHECK(dec.sigma > 2.0 && dec.sigma <= RANKED_SIGMA0 && near(dec.mu, 30.0), "idle sigma grows (%.3f)", dec.sigma);
+    const RankedSkill prev = {35.0, 2.0};
+    RankedSkill seed = ranked_season_seed(&prev, -1);
+    CHECK(near(seed.mu, 30.0) && near(seed.sigma, RANKED_SIGMA0 * 2.0 / 3.0), "soft reset: half way to mu0");
+    seed = ranked_season_seed(NULL, 300);
+    CHECK(near(seed.mu, 30.0), "a v7 Elo 300 seeds mu 30");
+    seed = ranked_season_seed(NULL, 0);
+    CHECK(near(seed.mu, RANKED_MU0) && near(seed.sigma, RANKED_SIGMA0 * 2.0 / 3.0), "a v7 player at 0: mu0, sigma 2/3 sigma0 (0205)");
+    seed = ranked_season_seed(NULL, -1);
+    CHECK(near(seed.mu, RANKED_MU0) && near(seed.sigma, RANKED_SIGMA0), "no history: the default");
+    // Ranked Points
+    CHECK(ranked_season_points(0.0, 5, 3) == 0 && ranked_season_points(0.0, 50, 3) == 500 && ranked_season_points(0.0, 150, 3) == 1000 &&
+          ranked_season_points(0.0, 1, 0) == 1000, "season conversion: 0 below 6, matches/100, Beta 1:1");
+    CHECK(ranked_match_points(50) == 25 && ranked_match_points(500) == 60 && ranked_match_points(-4) == 0, "per-match RP clamp(reward/2, 0, 60)");
+    CHECK(ranked_region_index("eu") == 3 && ranked_region_index("4") == 4 && ranked_region_index("xx") == -1 &&
+          !strcmp(ranked_region_code(2), "as") && !strcmp(ranked_region_name("na"), "North America"), "regions as/eu/na = 2/3/4");
+}
+
+// Krunker v10.0.2 Turf Wars rules (shared/include/turf_wars.h)
+static void test_turf(void) {
+    printf("Running Turf Wars rules test...\n");
+    CHECK(turf_day_at(1773705599) == 0 && turf_day_at(1773705600) == 0 && turf_day_at(1773705600 + 86400) == 1 &&
+          turf_day_at(1773705600 + 86400 * 30 + 5) == 30, "getDayNumber: days since 2026-03-17 UTC");
+    CHECK(turf_game_eligible(0, 0, 1, 0, 0) && turf_game_eligible(3, 1, 1, 0, 0) && !turf_game_eligible(1, 0, 1, 0, 0) &&
+          !turf_game_eligible(2, 2, 1, 0, 0) && !turf_game_eligible(2, 0, 0, 0, 0) && !turf_game_eligible(2, 0, 1, 1, 0) &&
+          !turf_game_eligible(2, 0, 1, 0, 1), "eligible: Burg/Sandstorm/Subzero, FFA/TDM, public, no custom map, not ranked");
+    CHECK(turf_kill_counts("AAA", 0, 1, "BBB") && turf_kill_counts("AAA", 0, 1, "") && !turf_kill_counts("AAA", 0, 1, "aaa") &&
+          !turf_kill_counts("", 0, 1, "BBB") && !turf_kill_counts("AAA", 1, 1, "BBB") && !turf_kill_counts("AAA", 0, 0, "BBB"),
+          "counted kills: a clan member's, not on its own clan (case-insensitive), no bots / guests");
+    CHECK(turf_cut(650, 0) == 390 && turf_cut(650, 1) == 195 && turf_cut(650, 2) == 65 && turf_cut(650, 3) == 0, "60 / 30 / 10 split");
+    CHECK(turf_loot_mode("top_performance") == TURF_LOOT_TOP_PERFORMANCE && turf_loot_mode("x") == -1 &&
+          !strcmp(turf_loot_mode_name(TURF_LOOT_EVEN), "even"), "loot mode names");
+    const int kills[5] = {40, 30, 20, 7, 3};
+    int64_t out[5], total;
+    for (int m = 0; m < TURF_LOOT_COUNT; m++) {
+        TurfLoot l = turf_loot_default();
+        l.mode = m;
+        l.clan_pct = 10;
+        l.top_player_count = 2;
+        turf_loot_clamp(&l);
+        const int64_t bank = turf_loot_split(&l, 1001, kills, 5, out);
+        total = bank;
+        int nonneg = bank >= 0;
+        for (int i = 0; i < 5; i++) {
+            total += out[i];
+            nonneg &= out[i] >= 0;
+        }
+        CHECK(total == 1001 && nonneg, "loot %s: shares + bank = the cut", turf_loot_mode_name(m));
+    }
+    TurfLoot even = turf_loot_default();
+    even.mode = TURF_LOOT_EVEN;
+    even.clan_pct = 20;
+    CHECK(turf_loot_split(&even, 390, kills, 2, out) == 78 && out[0] == 156 && out[1] == 156, "even: 20%% bank, the rest split");
+    TurfLoot perf = turf_loot_default();
+    perf.mode = TURF_LOOT_PERFORMANCE;
+    CHECK(turf_loot_split(&perf, 100, kills, 5, out) == 0 && out[0] == 40 && out[4] == 3, "performance: by kills");
+    TurfLoot topw = turf_loot_default();
+    topw.mode = TURF_LOOT_TOP_WEIGHTED;
+    topw.top_player_count = 2;
+    turf_loot_clamp(&topw);
+    turf_loot_split(&topw, 1000, kills, 5, out);
+    CHECK(out[0] == 400 && out[1] == 400 && out[2] == 66, "top weighted: 80%% to the top 2, 20%% to the rest");
+    TurfLoot bank = turf_loot_default();
+    CHECK(turf_loot_split(&bank, 500, kills, 5, out) == 500 && out[0] == 0, "clan bank: all of it");
 }
 
 // The game server's ranked lobby config (server/src/accounts.c): the comp host type's setup with
@@ -182,6 +314,8 @@ static void test_comp_lobby(void) {
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     test_rating();
+    test_v10();
+    test_turf();
     test_comp_config();
     test_comp_lobby();
     if (g_failures) {

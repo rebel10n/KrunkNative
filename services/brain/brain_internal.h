@@ -95,6 +95,12 @@ void ranked_shutdown(Brain *b);
 typedef void (*RankedResultCb)(void *ud, const char *err, const cJSON *reply);
 void ranked_result(Brain *b, const cJSON *frame, RankedResultCb cb, void *ud);
 
+/* ---- v10 Turf Wars (turf.c, 0206_turf_wars) */
+int turf_init(Brain *b);
+void turf_shutdown(Brain *b);
+/* internal WS "turf-kills" {mapId, records}: cb once (same callback shape as ranked_result) */
+void turf_record(Brain *b, const cJSON *frame, RankedResultCb cb, void *ud);
+
 /* ---- public routes (public_routes.c) */
 int public_routes_init(Brain *b);
 

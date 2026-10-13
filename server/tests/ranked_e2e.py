@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
-"""Krunker v7.1.4 ranked end to end (doc/backend.md 6.5 + 8.6): the queue, a 4v4 comp match on a
-real server_bin, the comp lobby rules and the ratings.
+"""Krunker v10.0.2 ranked end to end (doc/v10/ranked-impl.md, doc/backend.md 8.6): the solo queue, a
+4v4 comp match on a real server_bin, the comp lobby rules and the TrueSkill profiles.
 
   python3 -I server/tests/ranked_e2e.py BUILD_DIR      (run from the repository root)
 
 Creates its own PostgreSQL database (sudo -n -u postgres createdb; KN_TEST_DB to reuse one),
 migrates it, starts one coordinator (kn_brain, ranked min level 0) and one server_bin (ports from
 kn_proto.free_ports()), registers 8 accounts, then:
-  1. all 8 queue /mm/queue/join (a party of two + six solos) and poll until "Join"
+  1. all 8 queue /mm/ranked/queue (solo, region na) and long-poll until MATCHED
   2. 8 protocol test clients (kn_proto, v7 HELLO) JOIN the match with their tickets:
      "Joined Ranked Match..." (ranked.join); INIT plays Hardpoint (the comp host's overDat
-     modes [2]); NET_PACKET_COMP_LOBBY carries every roster entry on its queue team, the party
-     on one team; a stranger is refused ("Game in Progress")
+     modes [2]); NET_PACKET_COMP_LOBBY carries every roster entry on its queue team; a stranger
+     is refused ("Game in Progress")
   3. comp lobby rules: ENT before a class -> "Please select a Class to Spawn", no SPAWN;
      Rocketeer (not in config.rankedClasses: classLim7 0) refused, Triggerman taken; a team mate
      asking for Triggerman too is refused (classLim0 1 per team); "t" -> "Can't switch while
      in-game"; spectate -> "Spectating Disabled in Ranked" and a spawn on the roster team
   4. a player quits mid-match: needAll ends the round, ranked-result -> the other team wins:
-     winners +16 (eloK 32 at equal ratings), the abandoner RankedCooldown + 1 abandon
-     (/mm/queue/rating), players.player_elo mirrors the season rating
+     winners' MMR up, the abandoner's down + COOLDOWN + 1 abandon (/mm/ranked/profile),
+     players.player_elo mirrors the MMR, the match history has it
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
 import json
@@ -185,30 +185,24 @@ def run():
                                   stdout=open(os.path.join(WORK, "game.log"), "w"), stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL))
     check("server linked to the coordinator", bool(wait_for(lambda: "welcomed" in log("game.log"))))
 
-    # 1. eight accounts queue (a party of two, six solos) until Join
+    # 1. eight accounts queue (solo, v10) until MATCHED
     tokens = [secrets.token_hex(16) for _ in range(8)]
     names = [f"rk_p{i}" for i in range(8)]
     for name, tok in zip(names, tokens):
         psql(f"SELECT kn_register('{name}', 'x', '127.0.0.1', '', 0, 0, '{tok}', 3600, 'e2e')")
     ids = {n: int(psql(f"SELECT id FROM accounts WHERE username = '{n}'")) for n in names}
-    keys = []
-    code, j0 = http("/mm/queue/join", token=tokens[0], region="local", ready=0, classIndex=0)
-    st = wait_for(lambda: http("/mm/queue/poll", clientKey=j0["clientKey"])[1])
-    party = st["partyId"] if st else ""
-    code, j1 = http("/mm/queue/join", token=tokens[1], region="local", ready=1, party=party, classIndex=0)
-    http("/mm/queue/update-ready", clientKey=j0["clientKey"], isReady="true")
-    keys = [j0, j1] + [http("/mm/queue/join", token=t, region="local", ready=1, classIndex=0)[1] for t in tokens[2:]]
-    check("8 queue entries", all(k.get("clientKey") for k in keys), json.dumps([k.get("status") for k in keys]))
+    keys = [http("/mm/ranked/queue", token=t, regions="na")[1] for t in tokens]
+    check("8 queue entries", all(k.get("payload", {}).get("clientKey") for k in keys), json.dumps([k.get("payload", {}).get("status") for k in keys]))
+    keys = [k["payload"]["clientKey"] for k in keys if k.get("payload", {}).get("clientKey")]
 
-    def all_joined():
-        states = [http("/mm/queue/poll", clientKey=k["clientKey"])[1] for k in keys]
-        return states if all(s and s["status"]["t"] == "Join" for s in states) else None
-    states = wait_for(all_joined, timeout=30)
-    check("all 8 matched into one game", bool(states) and len({s["status"]["c"]["gameId"] for s in states}) == 1)
+    def all_matched():
+        states = [http("/mm/ranked/poll", clientKey=k)[1] for k in keys]
+        return states if len(states) == 8 and all(s and s["payload"]["status"] == "MATCHED" for s in states) else None
+    states = wait_for(all_matched, timeout=30)
+    check("all 8 matched into one game", bool(states) and len({s["payload"]["assignment"]["gameId"] for s in states}) == 1)
     if not states:
         return
-    for k in keys:
-        http("/mm/queue/leave", clientKey=k["clientKey"])
+    states = [{"status": {"c": dict(s["payload"]["assignment"])}} for s in states]  # the shape below: port, clientId
 
     # 2. the test clients join with their tickets
     conns = []
@@ -237,8 +231,7 @@ def run():
     check("comp lobby: 8 entries with account names", len(table) == 8 and sorted(e["n"] for e in table.values()) == sorted(names),
           json.dumps(table)[:300])
     teams = {e["n"]: e["t"] for e in table.values()}
-    check("roster teams 4 + 4, the party on one team", sorted(teams.values()) == [1, 1, 1, 1, 2, 2, 2, 2] and teams.get(names[0]) == teams.get(names[1]),
-          json.dumps(teams))
+    check("roster teams 4 + 4", sorted(teams.values()) == [1, 1, 1, 1, 2, 2, 2, 2], json.dumps(teams))
     # 3. comp lobby rules
     a = conns[2]
     a.ent(class_index=0)
@@ -276,22 +269,27 @@ def run():
     conns[quitter].close()
     ended = wait_for(lambda: "[ranked] match" in log("game.log") and " over: winner team" in log("game.log"), timeout=20)
     check("abandon ends the match", bool(ended), "" if ended else log("game.log")[-400:])
-    rated = wait_for(lambda: all(http("/mm/queue/rating", token=t)[1].get("games") == 1 for t in tokens), timeout=15)
+    prof = lambda t: http("/mm/ranked/profile", token=t, region="na")[1].get("profile", {})
+    rated = wait_for(lambda: all(prof(t).get("total_matches") == 1 for t in tokens), timeout=15)
     check("every roster player rated once", bool(rated))
     quit_team = teams[names[quitter]]
     for i, t in enumerate(tokens):
-        code, r = http("/mm/queue/rating", token=t)
+        r = prof(t)
+        code, h = http("/mm/ranked/history", token=t, region="na")
+        m = (h.get("matchHistory") or {}).get("matches", [{}])[0] if code == 200 else {}
         if i == quitter:
-            check("abandoner: abandons 1, rating 0, RankedCooldown", r.get("abandons") == 1 and r.get("rating") == 0 and r.get("cooldownMs", 0) > 7000000,
-                  json.dumps(r))
+            q = http("/mm/ranked/queue", token=t, regions="na")[1]
+            check("abandoner: abandons 1, MMR down, COOLDOWN", r.get("abandons") == 1 and m.get("mmr_change", 0) < 0 and m.get("abandoned") is True
+                  and q.get("payload", {}).get("code") == "COOLDOWN", json.dumps(r)[:300])
         elif teams[names[i]] != quit_team:
-            check(f"winner {names[i]}: +16", r.get("rating") == 16 and r.get("wins") == 1, json.dumps(r))
+            check(f"winner {names[i]}: MMR up, a win", r.get("wins") == 1 and m.get("mmr_change", 0) > 0 and m.get("victory") == 1, json.dumps(m)[:300])
             elo = psql(f"SELECT player_elo FROM players WHERE player_id = {ids[names[i]]}")
-            check(f"players.player_elo mirrors the season rating ({names[i]})", elo == "16", elo)
+            check(f"players.player_elo mirrors the MMR ({names[i]})", elo == str(r.get("mmr")), f"{elo} vs {r.get('mmr')}")
         else:
-            check(f"loser {names[i]}: floored at 0", r.get("rating") == 0 and r.get("losses") == 1, json.dumps(r))
-    code, j = http("/mm/queue/join", token=tokens[quitter], region="local", ready=1)
-    check("abandoner cannot requeue", j.get("status") == "RankedCooldown", json.dumps(j))
+            check(f"loser {names[i]}: MMR down, a loss", r.get("losses") == 1 and m.get("mmr_change", 0) < 0, json.dumps(m)[:300])
+    conns[0].read(timeout=1.5)
+    chat = [t for t in chats(conns[0]) if t.startswith("Ranked: ")]
+    check("the rating chat (v10 lrmr): games remaining until ranked", any("games remaining until ranked" in t for t in chat), str(chat[-1:]))
     for c in conns:
         c.close()
 

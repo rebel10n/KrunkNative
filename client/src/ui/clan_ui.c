@@ -24,7 +24,10 @@
 #define COL_PREMIUM "#FBC02D"         // COLORS.premium
 #define COL_VERIFIED_PLAYER "#40C4FF" // COLORS.verified.player
 
-static const char *const k_clan_tabs[] = {"Members", "Stats", "Requests", "Clan War"}; // config.clanTabs
+// config.clanTabs + v10's "Settings" tab (its Turf Wars Loot Distribution section; logo, banner,
+// MOTD, recruitment and ownership transfer of v10's tab are not ported: doc/v10/ranked-impl.md)
+static const char *const k_clan_tabs[] = {"Members", "Stats", "Requests", "Clan War", "Settings"};
+#define CLAN_TABS 5
 static const struct {
     const char *name;
     int max;
@@ -240,6 +243,121 @@ static void gen_war(StrBuf *sb, const cJSON **by_s7, const int n, const int lead
 static void send_req(const int action, const char *value);
 
 // the clan page of the signed-in member (clanData loaded)
+// ---- v10 Turf Wars loot distribution (GET / PUT /api/clans/<id>/loot-config, services/brain/turf.c)
+static cJSON *g_loot;      // the config (owned), NULL = not loaded
+static int g_loot_inflight;
+static char g_loot_msg[96];
+
+static const struct {
+    const char *mode, *label, *desc;
+} k_loot_modes[] = {
+    {"clan_bank", "Clan Bank (default)", "All rewards go to the clan treasury."},
+    {"even", "Even Split", "Rewards are split equally among eligible participants."},
+    {"top_weighted", "Top Weighted", "Top players get a larger share; the rest share the remainder."},
+    {"performance", "Performance (by kills)", "Rewards are proportional to kills."},
+    {"top_performance", "Top N by Performance", "Rewards are proportional to kills among the top N."},
+};
+
+static void on_loot(void *user, const int status, const char *body, const size_t length) {
+    (void) length;
+    const int saving = (int) (intptr_t) user;
+    g_loot_inflight = 0;
+    cJSON *res = cJSON_Parse(body);
+    const cJSON *data = cJSON_GetObjectItem(res, "data");
+    if (status == 200 && data) {
+        cJSON_Delete(g_loot);
+        const cJSON *cfg = cJSON_GetArrayItem(cJSON_GetObjectItem(data, "config"), 0);
+        g_loot = cJSON_Duplicate(cfg ? cfg : data, 1);
+        snprintf(g_loot_msg, sizeof(g_loot_msg), "%s", saving ? "Loot config saved." : "");
+    } else {
+        const char *e = cJSON_GetStringValue(cJSON_GetObjectItem(res, "message"));
+        snprintf(g_loot_msg, sizeof(g_loot_msg), "%s", e ? e : saving ? "Failed to save loot config" : "Failed to load loot config");
+        if (!g_loot) g_loot = cJSON_CreateObject();
+    }
+    cJSON_Delete(res);
+    menu_rerender_if_open(13);
+}
+
+static void fetch_loot(void) {
+    if (g_loot || g_loot_inflight || !g_clan || backend_available() != 1) return;
+    char path[96];
+    snprintf(path, sizeof(path), "/api/clans/%d/loot-config", (int) jnum(g_clan, "clan_id"));
+    g_loot_inflight = backend_http_get(path, on_loot, (void *) 0) == 0;
+}
+
+static void gen_loot(StrBuf *sb, const int leader) {
+    const AccountInfo *a = account_get();
+    int manage = leader; // the owner, or a Commander (role 3: config.clanRoles perms 2)
+    const cJSON *m;
+    cJSON_ArrayForEach(m, cJSON_GetObjectItem(g_clan, "members")) {
+        if (a && (int) jnum(m, "i") == a->id && k_clan_roles[(int) jnum(m, "r") % CLAN_ROLES].perms == 2) manage = 1;
+    }
+    fetch_loot();
+    sb_append(sb, "<div class='setHed' style='margin-top:20px'>Turf Wars Loot Distribution</div><div class='setBodH'>");
+    if (!g_loot) {
+        sb_append(sb, "<div class='settName'>Loading loot config...</div></div>");
+        return;
+    }
+    const char *mode = jstr(g_loot, "distribution_mode");
+    sb_append(sb, "<div class='settName'>Distribution Mode<select id='lootMode' class='inputGrey2' style='float:right'");
+    if (!manage) sb_append(sb, " disabled");
+    sb_append(sb, ">");
+    const char *desc = k_loot_modes[0].desc;
+    (void) m;
+    for (size_t i = 0; i < sizeof(k_loot_modes) / sizeof(k_loot_modes[0]); i++) {
+        const int sel = !strcmp(mode, k_loot_modes[i].mode);
+        if (sel) desc = k_loot_modes[i].desc;
+        sb_appendf(sb, "<option value='%s'%s>%s</option>", k_loot_modes[i].mode, sel ? " selected" : "", k_loot_modes[i].label);
+    }
+    sb_appendf(sb, "</select></div><div class='settName' style='color:rgba(0,0,0,0.5)'>%s</div>", desc);
+    static const struct {
+        const char *id, *key, *label;
+    } fields[] = {{"lootClanPct", "clan_pct", "Clan Treasury Cut (%)"},       {"lootTopCount", "top_player_count", "Top Player Count"},
+                  {"lootTopPct", "top_player_pct", "Top Players Share (%)"}, {"lootRemainder", "remainder_pct", "Remainder Share (%)"},
+                  {"lootMinGames", "min_games_required", "Minimum Games Required"}};
+    for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++)
+        sb_appendf(sb, "<div class='settName'>%s<input id='%s' type='number' class='inputGrey2' style='float:right;width:80px' value='%d'%s></div>",
+                   fields[i].label, fields[i].id, (int) jnum(g_loot, fields[i].key), manage ? "" : " disabled");
+    if (jstr(g_loot, "updated_by")[0]) {
+        sb_append(sb, "<div class='settName' style='color:rgba(0,0,0,0.5)'>Last updated by ");
+        sb_append_esc(sb, jstr(g_loot, "updated_by"));
+        sb_append(sb, "</div>");
+    }
+    if (manage) sb_append(sb, "<a class='clanSubmitBtn' onclick='windows[12].saveLoot()'>Save Loot Config</a>");
+    if (g_loot_msg[0]) {
+        sb_append(sb, "<div class='settName' style='color:rgba(0,0,0,0.6)'>");
+        sb_append_esc(sb, g_loot_msg);
+        sb_append(sb, "</div>");
+    }
+    sb_append(sb, "</div>");
+}
+
+static void save_loot(void) {
+    if (!g_clan) return;
+    char mode[32] = "clan_bank", v[16];
+    HtmlElem e = html_dom_by_id("lootMode");
+    if (e) html_dom_get_value(e, mode, sizeof(mode));
+    cJSON *cfg = cJSON_CreateObject();
+    cJSON_AddStringToObject(cfg, "distribution_mode", mode);
+    static const char *const ids[] = {"lootClanPct", "lootTopCount", "lootTopPct", "lootRemainder", "lootMinGames"};
+    static const char *const keys[] = {"clan_pct", "top_player_count", "top_player_pct", "remainder_pct", "min_games_required"};
+    for (int i = 0; i < 5; i++) {
+        e = html_dom_by_id(ids[i]);
+        v[0] = 0;
+        if (e) html_dom_get_value(e, v, sizeof(v));
+        if (v[0]) cJSON_AddNumberToObject(cfg, keys[i], atoi(v));
+    }
+    char *json = cJSON_PrintUnformatted(cfg);
+    cJSON_Delete(cfg);
+    char token[256], encj[1024], path[1600];
+    backend_url_encode(token, sizeof(token), account_session_token());
+    backend_url_encode(encj, sizeof(encj), json ? json : "{}");
+    free(json);
+    // GET-only transport (backend_http_get): the brain's loot route accepts POST /?config=
+    snprintf(path, sizeof(path), "%s/api/clans/%d/loot-config?token=%s&config=%s", backend_url(), (int) jnum(g_clan, "clan_id"), token, encj);
+    g_loot_inflight = backend_http_request("POST", path, NULL, on_loot, (void *) 1) == 0;
+}
+
 static void gen_clan_page(StrBuf *sb) {
     const cJSON *members = cJSON_GetObjectItem(g_clan, "members");
     const cJSON *mem[CLAN_MAX_MEMBERS];
@@ -261,7 +379,7 @@ static void gen_clan_page(StrBuf *sb) {
     sb_appendf(sb, "<div class='settName'>Level<span class='floatR'>%d</span></div><div class='settName'>Total Score<span class='floatR'>%s</span></div>", level, total);
     sb_appendf(sb, "<div class='xpBar' style='margin-bottom:10px'><div class='xpBarB' style='width:%d%%'></div><span class='xpBarV'>%s / %s</span></div>", prog, cur, need);
     sb_append(sb, "<div class='menuTabsNew' style='margin-top:15px;'>");
-    for (int i = 0; i < 4; i++) sb_appendf(sb, "<div class='menuTabNew%s' onclick='windows[12].switchTab(%d)'>%s</div>", g_clan_tab == i ? " tabANew" : "", i, k_clan_tabs[i]);
+    for (int i = 0; i < CLAN_TABS; i++) sb_appendf(sb, "<div class='menuTabNew%s' onclick='windows[12].switchTab(%d)'>%s</div>", g_clan_tab == i ? " tabANew" : "", i, k_clan_tabs[i]);
     sb_append(sb, "</div>");
     if (g_clan_tab == 1) {
         const int n = sorted_members(members, mem, CLAN_MAX_MEMBERS, "s7");
@@ -274,6 +392,8 @@ static void gen_clan_page(StrBuf *sb) {
     } else if (g_clan_tab == 0) {
         const int n = sorted_members(members, mem, CLAN_MAX_MEMBERS, "s");
         gen_members(sb, mem, n, leader_id, leader);
+    } else if (g_clan_tab == 4) {
+        gen_loot(sb, leader);
     } else {
         gen_requests(sb);
     }
@@ -431,8 +551,15 @@ int clan_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
         HtmlElem in = html_dom_by_id(id);
         if (in) html_dom_get_value(in, value, sizeof(value));
         send_req(action, value);
+    } else if (!strcmp(m, "saveLoot")) {
+        save_loot();
     } else if (!strcmp(m, "switchTab")) {
         g_clan_tab = arg_num(args, argc, 0, 0);
+        if (g_clan_tab == 4) {
+            cJSON_Delete(g_loot);
+            g_loot = NULL;
+            g_loot_msg[0] = 0;
+        }
         menu_rerender_if_open(13);
     } else if (!strcmp(m, "kickReq")) { // confKickClan(name, id)
         const char *who = argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str ? args[0].str : "";

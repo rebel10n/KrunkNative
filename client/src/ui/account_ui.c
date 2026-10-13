@@ -1095,6 +1095,7 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     if (store_ui_handle(name, ev, args, argc) >= 0) return 1;
     if (clan_ui_handle(name, ev, args, argc) >= 0) return 1;
     if (ranked_ui_handle(name, ev, args, argc) >= 0) return 1;
+    if (turf_ui_handle(name, ev, args, argc) >= 0) return 1;
     if (!strcmp(name, "registerAcc") || !strcmp(name, "loginAcc")) {
         char user[64], pass[128];
         read_input("accName", user, sizeof(user));

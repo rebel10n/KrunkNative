@@ -134,7 +134,7 @@ All keys are optional; env `KN_BRAIN_<KEY>` / CLI `--brain.<key>=` override.
 | `brain.matchmaking.soft_cap` | `0` | if > 0, quick join treats lobbies at/above this player count as full unless nothing else has room |
 | `brain.matchmaking.require_version` | `false` | honour the client's `dataQuery.v` (lobbies with another `meta.v` are skipped) |
 | `brain.host_timeout_s` | `10` | how long a host-game request waits for a game server |
-| `brain.ranked.*` | see 6.5 | ranked queue (min level, mode, maps, rating window, K, abandon penalty/cooldown, timeouts) |
+| `brain.ranked.*`, `brain.turf.*` | see 6.5 | v10 ranked queue / profiles and Turf Wars (doc/v10/ranked-impl.md) |
 
 ### gameserver / accounts
 
@@ -737,8 +737,8 @@ FORCE_ENTER, HEAD/POST/OPTIONS on the list routes, player counts, the 404
 * An `OPTIONS` preflight on `seek-game` / `host-game` answers 204 and issues no
   ticket.
 * `seek-game` appends `region` and `webUrl` after the v3.1.1 keys.
-* `/mm/queue/*` exists (the v3.1.1 client's ClientManager calls it; the
-  reconstruction has no such routes, see 6.5), as do `/mm/status`, `/mm/regions`,
+* `/mm/ranked/*` exists (v10's ranked queue over HTTP instead of its matchmaker WebSocket; the
+  old `/mm/queue/*` answers ClientOutdated, see 6.5), as do `/mm/status`, `/mm/regions`,
   `/mm/brains`, `/mm/host-game` and `/mm/admin/drain`.
 
 Matchmaking is HTTP to the brain only. No game server answers it:
@@ -793,6 +793,7 @@ Node -> brain:
 | `host-request` | `rid`, `region`?, `config`, `hostAccountId`? | a player asked this server (game socket `custom`) to host a game; the brain finds a server with capacity -> `host-request-reply` |
 | `host-reply` | `rid`, `ok`, `lobbyId`?, `err`? | answer to the brain's `host` |
 | `ranked-result` | `rid`, `matchId`, `lobbyId`, `winner` (0, 1, -1 draw), `players`, `abandoned` | ranked match end (6.5) -> `ranked-result-reply` |
+| `turf-kills` | `rid`, `matchId`, `mapId`, `mode`, `records` [{clan_name, player_id, map_id, kills, deaths}] | v10 Turf Wars: an eligible round's counted clan kills (6.5) -> `turf-kills-reply` {ok, recorded} |
 
 Brain -> node:
 
@@ -956,84 +957,29 @@ node draining (still listed with `meta.draining`, no longer offered). Used by
 `deploy/deploy.sh drain`.
 
 
-### 6.5 Ranked (`ranked.c`, `0201_ranked.sql`, `0204_ranked_seasons.sql`)
+### 6.5 Ranked and Turf Wars (`ranked.c`, `turf.c`, `0205_ranked_v10.sql`, `0206_turf_wars.sql`)
 
-Krunker v7.1.4's ranked (doc/v7/decisions.md "Ranked"). What v7.1.4 itself keeps: the Ranked
-window (`windows[26]`, header "Ranked", dark popup, tabs, a party invite link, region flags; its
-`gen()` is empty in the reconstruction), its strings (`windows.ranked.login`, `windows.ranked.level`,
-`ranked.join` "Joined Ranked Match. Abandoning a match will result in a temporary ban",
-`ranked.progress` "Game in Progress", `ranked.switch` "Can't switch while in-game",
-`ranked.spectate` "Spectating Disabled in Ranked", the comp lobby's spawn refusals,
-`custom.host.ranked`), the constants of `src/config.js` (eloPer 120, eloK 32, minRankedLevel 15,
-rankedCooldown 7200000, rankedDeduction 30, rankedClasses), the comp lobby of `game.isComp`
-(`config.hostTypes[1]` "Comp Server Setup", lobbyPlayers / canSpawn / the comp menu) and the
-ranked reward skins of `store.js` (`ranked: true`, `rseas` 1-4, limT "Ranked", not sold, spun or
-quick-sold). Its client has no queue code and its server no ranked code left, so the queue keeps
-the v3.1.1 ClientManager route shapes Krunker Box Office already served and the rating formula is
-v3.1.1's `updateELO` / `checkLeave` (shared/include/ranked.h). v3.1.1's three queues (Solo / Duo /
-Quad: r1v1, r2v2, r4v4) and Krunker Box Office's own ranked modes (ids 37 / 38: an objective variant and
-first to 10 kills) are gone; 37 / 38 stay reserved for ranked with no mode.
+Krunker v10.0.2's ranked (solo queue, TrueSkill per season and region, 14 ranks, Ranked Points,
+milestones, RP shop) and Turf Wars (v10's clan war: daily per-map territory control by counted
+clan kills, a KR pool split 60 / 30 / 10). The design, the v10 evidence, the route table, the
+deviations and the tests are in `doc/v10/ranked-impl.md`. Summary:
 
-State is in the shared database (`mm_ranked_parties`, `mm_ranked_members`, `mm_ranked_matches`,
-`mm_ranked_match_players`, `mm_ranked_bans`, `ranked_ratings`; queue logic in the plpgsql
-functions `kn_rq_*` on PostgreSQL, the `P_RQ_*` kn_procs of `db_mm.c` elsewhere; the matcher lock
-is `pg_try_advisory_xact_lock`, the sqlite write lock or `SELECT ... FOR UPDATE NOWAIT` on
-`mm_ranked_lock`), so any brain serves any client. Ratings are per season: `ranked_ratings
-(account_id, season, rating, peak, games, wins, losses, abandons, updated_at)`, the season being
-`accounts.current_season` (the season registry `seasons` is season-system's 0108; ranked only
-uses the number). The current season's rating is mirrored to svc-accounts'
-`players.player_elo` (accounts op `"elo"` `{id, mode: 1, elo}`), the field v7's profile data
-carries; `player_elo2` / `player_elo4` are no longer written (v7's `player_elo4` is Junk).
-
-Routes (each also without the `/mm` prefix; all GET):
-
-| route | answer |
-| --- | --- |
-| `/mm/queue/join?token=SESSION&region=R&party=ID\|&ready=0\|1&classIndex=N` | `{"clientId","clientKey","status":null}`, or `{"clientId":null,"clientKey":null,"status":ERR[, "cooldownMs"]}` (ERR = `AccountAlreadyPlaying`, `LoginRequired`, `LevelTooLow`, `PartyNotFound`, `PartyFull`, `RankedCooldown`, `InvalidQueue` for a `queues` list without `"ranked"`). `classIndex` outside config.rankedClasses becomes 0. |
-| `/mm/queue/poll?clientKey=` | poll state (below); members that stop polling for `poll_timeout_s` are dropped |
-| `/mm/queue/update-ready?clientKey&isReady=true\|false` | state |
-| `/mm/queue/update-class?clientKey&classIndex=N` | state |
-| `/mm/queue/kick-party-member?clientKey&kickClientId=` | state (leader only) |
-| `/mm/queue/promote-party-member?clientKey&promoteClientId=` | state (leader only) |
-| `/mm/queue/leave?clientKey=` | `{"left":true}` (v3.1.1 "unqueue") |
-| `/mm/queue/rating?token=SESSION` | the Ranked window's rank card: `{season, rating, peak, games, wins, losses, abandons, rank, level, minLevel, teamSize, cooldownMs}`; 401 `LoginRequired` without a session |
-
-`/mm/queue/update-queues` is gone (one queue). Unknown key: 404 `{"error":"InvalidClientKey"}`
-(the client then drops the queue). State (v3.1.1 poll response):
-`{"status":{"t":"Queued"|"CreatingGame"|"Join","c":{...}},"partyId","partyLeaderId",
-"partyMembers":[{"clientId","accountId":<username>,"accountData":"{\"c\":clan,\"cR\":rank,\"e\":rating}",
-"classIndex","isReady"}],"queueIds":["ranked"],"region"}`; `c` is `{queueSize}` while
-Queued and `{gameId, host, port, webUrl, matchId, clientId: <this player's ticket>}`
-on Join. `HostGame` is not used (the brain creates the lobby). Join tickets reserve
-no seat: either connect with `clientId` or seek `?game=gameId&token=`.
-
-Matching (every second, by whichever brain gets the matcher lock): parties whose members are
-all ready, per region; a party fills at most one team (`team_size`, 4). The longest-waiting
-party anchors; parties within `rating_window + window_growth x wait` (max `window_max`) of its
-average rating fill team 0, then team 1 (a party always plays on one team). The match is hosted
-with `host` (config `{"ranked":true, "matchId", "queue":"ranked", "teamSize", "mode"/"modes":
-2 (Hardpoint: the comp host's overDat mode, which the game server keeps), "maps":[a catalogue index from brain.ranked.maps], "private":true,
-"startGraceS", "teams":[[{accountId, name}],[...]]}`); hosting failure puts the parties back
-(10 s back-off). The game server plays it as a comp lobby (doc section 8.6).
-
-Results: the game server sends `{"type":"ranked-result","rid","matchId","winner":0|1|-1,
-"players":[...],"abandoned":[accountIds]}`; the brain closes the match once (idempotent), rates
-each player against the other team's average (`ranked_delta`: K `brain.ranked.k` 32, divisor
-330, floored at 0), an abandoner instead loses `abandon_penalty` (30) and gets a `cooldown_s`
-(2 h) queue ban, upserts this season's `ranked_ratings` row, mirrors `player_elo`, and replies
-`{"type":"ranked-result-reply","rid","ok":true,"ratings":[{accountId,name,team,key:"elo",season,
-old,new,delta,rank,abandoned?}]}`. Ranks are v3.1.1's `eloIconId`: one per eloPer (120) rating,
-1..8. Matches without a result are aborted after `match_timeout_s`. Ranked reward skins (v7
-`rseas`) are not granted yet: v7.1.4 has no rule for them.
-
-Config `brain.ranked.*`: `enabled`, `min_level` (15), `team_size` (4: 1..4), `maps` (catalogue indices or names; default the comp host's maps 0, 2, 4, 5,
-11, 12, 14, 17, 23: Burg, Sandstorm, Undergrowth, Shipment, Industry, Lumber, Site, Bureau,
-Atomic), `rating_window`, `window_growth`, `window_max`, `k`, `abandon_penalty`, `cooldown_s`,
-`poll_timeout_s`, `creating_timeout_s`, `match_timeout_s`, `start_grace_s`; the season is
-`accounts.current_season` (7). Tests: `ctest -R brain_ranked` (`tests/ranked_test.py`, every
-store driver) and `server/tests/ranked_e2e.py BUILD_DIR` (a 4v4 on a real server_bin with
-protocol test clients). The matcher's advisory lock key includes the schema (`0202`), so schemas
-sharing a database match independently.
+- Routes: `/mm/ranked/{queue,poll,leave,connection,info,profile,leaderboard,history,claim-milestone,
+  shop,purchase}` and `/api/territorial-wars/*`, `/api/clans/:id/loot-config`. The v7 party queue
+  (`/mm/queue/*`) answers 410 `{"status":"ClientOutdated"}`.
+- State: `ranked_profiles`, `ranked_queue`, `ranked_points(_tx)`, `ranked_season_payouts`,
+  `ranked_shop(_purchases)` (0205), the 0201 match tables (+ v10 columns) and `turf_kills`,
+  `turf_days`, `turf_clan_days`, `turf_payouts`, `turf_loot_config` (0206). The procs are C on
+  every driver (`db_ranked.c`, `db_turf.c`); the v7 tables (`ranked_ratings`, `mm_ranked_parties`)
+  stay, and 0205 seeds every v7 rating into the Beta season (0) profile of region "na".
+- Game server: the `host` config and the `ranked-result` frame keep their shapes (results add
+  assists / damage / objective / reward / timeMs); new `turf-kills` frame (reliable) at the end of
+  each eligible round.
+- Config: `brain.ranked.*` (`enabled`, `min_level` 10, `team_size` 4, `season` -1 = the calendar,
+  `ruleset` "v10", `host_regions` {"na": "<game-server region>"}, `rating_window` 150,
+  `window_growth` 10, `window_max` 1000, `cooldown_s` 1800, `poll_timeout_s` 30,
+  `creating_timeout_s`, `match_timeout_s`, `start_grace_s` 60) and `brain.turf.*` (`enabled`,
+  `kr_per_kill` 1, `day` -1 = the clock, `settle_check_ms` 60000).
 
 ## 7. Social WebSocket, accounts, profiles (svc-accounts)
 

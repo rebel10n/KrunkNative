@@ -11,6 +11,7 @@
 #include <map_validate.h>
 #include <game_config.h> // WP-E: v7 host types, setupGameConfig / applyConfig per round
 #include <ranked.h>      // RANKED_TEAM_SIZE
+#include <turf_wars.h>   // v10 Turf Wars: which kills count
 #include <ks_storage.h>    // WP6: GAME.STORAGE / KR reward replies ("acct-r")
 #include <season.h>       // v7 endGame BPP of the commit (bp_match_points), map rewards
 #include <bots.h>         // game_bots_count (lobby meta "bots")
@@ -19,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 
 #define ACC_SNAPSHOT_INTERVAL 5.0f   // brainClient.ts SNAPSHOT_INTERVAL_MS
@@ -68,6 +70,22 @@ static struct {
     uint32_t next_central_rid;
 } g_acc;
 
+// v10 Turf Wars (territorialWars): this round's counted clan kills per account, flushed to the brain
+// at the round end (recordGameEndKills -> onRecordTerritorialWarsKills).
+#define ACC_TURF_MAX 128
+typedef struct {
+    int account_id;
+    char clan[8];
+    int kills, deaths;
+} TurfRecord;
+static struct {
+    int eligible;              // this round counts (decided at the round start)
+    int map_index;
+    TurfRecord records[ACC_TURF_MAX];
+    int count;
+} g_turf;
+static char g_clan_war_claimed[2][8]; // knClanWar: the clans that claimed an untagged side
+
 // Ranked lobby state (brain queue, see "ranked" below).
 #define ACC_RANKED_MAX 8
 
@@ -78,6 +96,9 @@ typedef struct {
     unsigned char joined:1;    // connected and settled at least once
     unsigned char left:1;      // left (or never came) before the end: abandoned
     int kills, deaths, score;  // snapshot when leaving
+    int assists, damage, objective, reward; // v10 ranked profile totals (snapshot too)
+    float joined_at;           // server time of the first join (time played)
+    float time_played;         // seconds in the match (snapshot)
 } RankedSlot;
 
 static struct {
@@ -711,6 +732,80 @@ static int acc_should_commit(const ClientConnection *client) {
     return client->acct.account_id > 0 && client->acct.match_since > 0.0f && !client->acct.committed;
 }
 
+// ------------------------------------------------------------------ v10 Turf Wars
+
+static void acc_turf_round_start(void) {
+    const Game *game = &g_server->game;
+    memset(&g_turf, 0, sizeof(g_turf));
+    const int map = game->current_map_index >= 0 && (size_t) game->current_map_index < game->map_count
+                        ? map_catalog_index_of_json(game->maps[game->current_map_index]) : -1;
+    // isEligibleGame (isPubType) + isEligibleMap: an official public round on Burg / Sandstorm /
+    // Subzero in FFA / TDM. A hosted custom game (even with mimicPubs, a clan war host included)
+    // or a published map never counts: v10 requires official servers.
+    g_turf.eligible = brain_enabled() && turf_game_eligible(map, game_mode_id(game), !g_acc.custom && game_is_pub_type(game),
+                                                            g_acc.published_map[0] != 0, g_rk.active);
+    g_turf.map_index = map;
+}
+
+static TurfRecord *acc_turf_record(const ClientConnection *client) {
+    for (int i = 0; i < g_turf.count; i++) {
+        if (g_turf.records[i].account_id == client->acct.account_id) return &g_turf.records[i];
+    }
+    if (g_turf.count >= ACC_TURF_MAX) return NULL;
+    TurfRecord *r = &g_turf.records[g_turf.count++];
+    memset(r, 0, sizeof(*r));
+    r->account_id = client->acct.account_id;
+    snprintf(r->clan, sizeof(r->clan), "%s", client->acct.clan);
+    return r;
+}
+
+// GameHooks.kill: territorialWars.onPlayerDeath
+void accounts_on_kill(const Player *victim, const Player *killer) {
+    if (!g_turf.eligible || !victim || !killer || killer == victim) return;
+    ClientConnection *k = acc_client_by_id(killer->uid);
+    ClientConnection *v = victim->is_bot ? NULL : acc_client_by_id(victim->uid);
+    const int k_account = k && k->acct.account_id > 0 && k->acct.join_state == SERVER_JOIN_READY && !k->acct.hack;
+    const char *v_clan = v && v->acct.account_id > 0 ? v->acct.clan : "";
+    if (!k || !turf_kill_counts(k->acct.clan, killer->is_bot, k_account, v_clan)) return;
+    TurfRecord *kr = acc_turf_record(k);
+    if (kr) kr->kills++;
+    if (v && v->acct.account_id > 0 && v->acct.clan[0]) { // deaths of clan members killed by another clan
+        TurfRecord *vr = acc_turf_record(v);
+        if (vr) vr->deaths++;
+    }
+}
+
+// recordGameEndKills: [{clan_name, player_id, map_id, kills, deaths}] for the day (the brain's
+// clock decides the day: a round crossing midnight counts for the day it ends on)
+static void acc_turf_flush(void) {
+    if (!g_turf.eligible || !g_turf.count || !brain_linked()) {
+        g_turf.count = 0;
+        return;
+    }
+    cJSON *frame = cJSON_CreateObject();
+    cJSON_AddStringToObject(frame, "type", "turf-kills");
+    cJSON_AddNumberToObject(frame, "rid", brain_next_rid()); // reliable: acknowledged by "turf-kills-reply"
+    cJSON_AddStringToObject(frame, "matchId", g_acc.match_id);
+    cJSON_AddNumberToObject(frame, "mapId", g_turf.map_index);
+    cJSON_AddNumberToObject(frame, "mode", game_mode_id(&g_server->game));
+    cJSON *records = cJSON_AddArrayToObject(frame, "records");
+    for (int i = 0; i < g_turf.count; i++) {
+        const TurfRecord *r = &g_turf.records[i];
+        if (!r->kills && !r->deaths) continue;
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddStringToObject(o, "clan_name", r->clan);
+        cJSON_AddNumberToObject(o, "player_id", r->account_id);
+        cJSON_AddNumberToObject(o, "map_id", g_turf.map_index);
+        cJSON_AddNumberToObject(o, "kills", r->kills);
+        cJSON_AddNumberToObject(o, "deaths", r->deaths);
+        cJSON_AddItemToArray(records, o);
+    }
+    server_log("[turf] round on map %d: %d clan player record(s)", g_turf.map_index, cJSON_GetArraySize(records));
+    if (cJSON_GetArraySize(records)) brain_post(frame, 1);
+    else cJSON_Delete(frame);
+    g_turf.count = 0;
+}
+
 // Round end (first tick after the END packets): every account that played this round.
 static void acc_commit_round(void) {
     ClientConnection *list[64];
@@ -721,6 +816,7 @@ static void acc_commit_round(void) {
     }
     acc_commit(list, count, 1, g_acc.match_id);
     g_acc.round_committed = 1;
+    acc_turf_flush();
 }
 
 // A leaving player, or players still in a round that is abandoned (map change): partial.
@@ -766,6 +862,7 @@ void accounts_round_changed(void) {
 
     if (g_acc.round_counter) g_acc.billboard_cycle++; // pickBillboard at every map cycle
     acc_new_match_id();
+    acc_turf_round_start();
     g_acc.round_end_seen = 0;
     g_acc.round_committed = 0;
     for (size_t i = 0; i < g_server->client_count; i++) {
@@ -816,7 +913,8 @@ static void acc_ranked_setup(const cJSON *config) {
     const cJSON *size = cJSON_GetObjectItem(config, "teamSize");
     g_rk.team_size = cJSON_IsNumber(size) && size->valueint > 0 ? size->valueint : 1;
     const cJSON *grace = cJSON_GetObjectItem(config, "startGraceS");
-    g_rk.grace = cJSON_IsNumber(grace) && grace->valuedouble > 0.0 ? (float) grace->valuedouble : 50.0f; // needAllTimer 50 s
+    // v10 rankedTimeForFirstConnect 60 s (needAllTimer when ranked)
+    g_rk.grace = cJSON_IsNumber(grace) && grace->valuedouble > 0.0 ? (float) grace->valuedouble : RANKED_TIME_FIRST_CONNECT_MS / 1000.0f;
     const cJSON *team;
     int t = 0;
     cJSON_ArrayForEach(team, cJSON_GetObjectItem(config, "teams")) {
@@ -853,9 +951,60 @@ int accounts_is_custom_host(const ClientConnection *client) {
     return g_acc.custom && g_acc.host_account_id && client->acct.account_id == g_acc.host_account_id;
 }
 
+// ------------------------------------------------------------------ clan war (v10 mode.clanWar)
+// v10 players.setTeam: `if (mode.clanWar) team = account.clan || 1`. No v10 mode sets the flag, so
+// KrunkNative offers it as host options of team modes (knClanWar, knClanA / knClanB): the two
+// clans are the teams, members are sorted onto their clan's team and everyone else (no clan,
+// another clan, guests) may only spectate. Untagged sides are claimed by the first clans to
+// join. A clan war is a hosted custom game, so it never counts for Turf Wars (official public
+// games only, as v10's isEligibleGame requires).
+
+static int acc_clan_war_active(void) {
+    const Game *game = &g_server->game;
+    return g_acc.custom && game->config.clan_war && game->mode && game->mode->config.teams && !game->mode->config.multi_team &&
+           !g_rk.active;
+}
+
+// the team (1 / 2) of a clan in this war, 0 = not one of its two clans
+static int acc_clan_war_team(const char *clan, const int claim) {
+    if (!clan || !clan[0]) return 0;
+    const GameConfig *cfg = &g_server->game.config;
+    for (int t = 0; t < 2; t++) {
+        const char *tag = cfg->clan_war_tags[t][0] ? cfg->clan_war_tags[t] : g_clan_war_claimed[t];
+        if (tag[0] && !strcasecmp(tag, clan)) return t + 1;
+    }
+    for (int t = 0; claim && t < 2; t++) {
+        if (!cfg->clan_war_tags[t][0] && !g_clan_war_claimed[t][0]) {
+            snprintf(g_clan_war_claimed[t], sizeof(g_clan_war_claimed[t]), "%s", clan);
+            server_log("[clanwar] clan [%s] takes team %d", clan, t + 1);
+            return t + 1;
+        }
+    }
+    return 0;
+}
+
+// 1 when `client` may play (not only spectate) in the current game
+int accounts_clan_war_allowed(const ClientConnection *client) {
+    if (!acc_clan_war_active()) return 1;
+    const int account = client->acct.account_id > 0 && client->acct.join_state == SERVER_JOIN_READY;
+    return account && acc_clan_war_team(client->acct.clan, 1) > 0;
+}
+
+const char *accounts_clan_war_label(void) {
+    static char label[64];
+    if (!acc_clan_war_active()) return NULL;
+    const GameConfig *cfg = &g_server->game.config;
+    const char *a = cfg->clan_war_tags[0][0] ? cfg->clan_war_tags[0] : g_clan_war_claimed[0][0] ? g_clan_war_claimed[0] : "?";
+    const char *b = cfg->clan_war_tags[1][0] ? cfg->clan_war_tags[1] : g_clan_war_claimed[1][0] ? g_clan_war_claimed[1] : "?";
+    snprintf(label, sizeof(label), "Clan War: [%s] vs [%s]", a, b);
+    return label;
+}
+
 int accounts_assigned_team(const ClientConnection *client) {
     const RankedSlot *slot = g_rk.active ? acc_ranked_slot(client->acct.account_id) : NULL;
-    return slot ? slot->team + 1 : 0;
+    if (slot) return slot->team + 1;
+    if (acc_clan_war_active() && client->acct.account_id > 0) return acc_clan_war_team(client->acct.clan, 1);
+    return 0;
 }
 
 int accounts_ranked_active(void) {
@@ -875,6 +1024,11 @@ static void acc_ranked_snapshot(RankedSlot *slot, const ClientConnection *client
     slot->kills = (int) client->player->kills;
     slot->deaths = (int) client->player->deaths;
     slot->score = client->player->score;
+    slot->assists = (int) client->player->assists;
+    slot->damage = (int) client->player->damage_dealt;
+    slot->objective = client->player->mode.objective_score;
+    slot->reward = client->player->reward;
+    if (slot->joined) slot->time_played = g_server->now - slot->joined_at;
 }
 
 static ClientConnection *acc_client_by_account(const int account_id) {
@@ -935,6 +1089,11 @@ static void acc_ranked_send_result(void) {
         cJSON_AddNumberToObject(p, "score", slot->score);
         cJSON_AddNumberToObject(p, "kills", slot->kills);
         cJSON_AddNumberToObject(p, "deaths", slot->deaths);
+        cJSON_AddNumberToObject(p, "assists", slot->assists);
+        cJSON_AddNumberToObject(p, "damage", slot->damage);
+        cJSON_AddNumberToObject(p, "objective", slot->objective);
+        cJSON_AddNumberToObject(p, "reward", slot->reward);
+        cJSON_AddNumberToObject(p, "timeMs", (double) (slot->time_played > 0.0f ? slot->time_played * 1000.0f : 0.0f));
         cJSON_AddItemToArray(players, p);
         if (slot->left || !slot->joined) cJSON_AddItemToArray(abandoned, cJSON_CreateNumber(slot->account_id));
     }
@@ -950,10 +1109,20 @@ static void acc_handle_ranked_reply(const cJSON *frame) {
         const cJSON *new_value = cJSON_GetObjectItem(rating, "new");
         const cJSON *delta = cJSON_GetObjectItem(rating, "delta");
         if (!cJSON_IsNumber(id) || !cJSON_IsNumber(new_value)) continue;
+        // v10 lrmr (LATEST_RANKED_MMR_CHANGE: mmrChange, latestRank) as the end screen's "Rating +N"
+        const cJSON *rank = cJSON_GetObjectItem(rating, "rank"), *rp = cJSON_GetObjectItem(rating, "rp");
+        const cJSON *matches = cJSON_GetObjectItem(rating, "matches");
+        const int placed = cJSON_IsNumber(matches) && matches->valueint >= RANKED_PLACEMENT_MATCHES;
         char text[NET_CHAT_TEXT_SIZE];
-        snprintf(text, sizeof(text), "Ranked rating: %.0f -> %.0f (%+.0f)%s",
-                 cJSON_IsNumber(old_value) ? old_value->valuedouble : 0.0, new_value->valuedouble,
-                 cJSON_IsNumber(delta) ? delta->valuedouble : 0.0, acc_truthy(cJSON_GetObjectItem(rating, "abandoned")) ? " (abandoned)" : "");
+        if (placed)
+            snprintf(text, sizeof(text), "Ranked: %+.0f Rating (%.0f -> %.0f, %s)%s, +%d RP",
+                     cJSON_IsNumber(delta) ? delta->valuedouble : 0.0, cJSON_IsNumber(old_value) ? old_value->valuedouble : 0.0,
+                     new_value->valuedouble, ranked_rank_name(cJSON_IsNumber(rank) ? rank->valueint : 0),
+                     acc_truthy(cJSON_GetObjectItem(rating, "abandoned")) ? " (abandoned)" : "", cJSON_IsNumber(rp) ? rp->valueint : 0);
+        else
+            snprintf(text, sizeof(text), "Ranked: %d games remaining until ranked%s, +%d RP",
+                     RANKED_PLACEMENT_MATCHES - (cJSON_IsNumber(matches) ? matches->valueint : 0),
+                     acc_truthy(cJSON_GetObjectItem(rating, "abandoned")) ? " (abandoned)" : "", cJSON_IsNumber(rp) ? rp->valueint : 0);
         server_log("[ranked] account %d %s", id->valueint, text);
         ClientConnection *client = acc_client_by_account(id->valueint);
         if (client) acc_chat_to(client, text);
@@ -1134,6 +1303,7 @@ static void acc_set_ready(ClientConnection *client) {
     }
     RankedSlot *slot = g_rk.active ? acc_ranked_slot(client->acct.account_id) : NULL;
     if (slot && !slot->joined) acc_chat_to(client, "Joined Ranked Match. Abandoning a match will result in a temporary ban"); // ranked.join
+    if (slot && !slot->joined) slot->joined_at = g_server->now;
     if (slot) slot->joined = 1;
     const int was_waiting = client->acct.join_state != SERVER_JOIN_READY;
     client->acct.join_state = SERVER_JOIN_READY;
@@ -1635,6 +1805,7 @@ static void acc_revert_custom(const char *why) {
     g_acc.custom = 0;
     g_acc.host_account_id = 0;
     g_acc.published_map[0] = 0;
+    memset(g_clan_war_claimed, 0, sizeof(g_clan_war_claimed));
     g_acc.kr_rewards = 0;
     accounts_configure_public(&g_server->game, g_acc.cli_map);
     net_change_map(-1, -1);
@@ -1832,6 +2003,7 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
     }
 
     g_acc.custom = 1;
+    memset(g_clan_war_claimed, 0, sizeof(g_clan_war_claimed)); // a new clan war: the sides are open again
     g_acc.custom_since = g_server->now;
     // WP6: a hosted published map is v7's customMap played with defaultSetts: GAME.STORAGE, Save /
     // Load Data and (host option krRewards, customGameConfig.js:438-445) KR rewards use its name.

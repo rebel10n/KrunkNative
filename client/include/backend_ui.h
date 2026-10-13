@@ -74,6 +74,10 @@ int  battlepass_ui_end_html(StrBuf *sb);    // tabs.performance's #endBPLayout; 
 // ---- clan_ui.c (windows[12], the menu Clans window = showWindow(13))
 char *clan_window_gen(void);                // guest: LOGIN REQUIRED; member: the clan page
 int  clan_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
+// v10 Turf Wars window (turf_ui.c): TURF_WINDOW
+char *turf_window_gen(void);
+void turf_ui_scenario(const cJSON *state); // --render-scenario: state.turf
+int  turf_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 void clan_ui_frame(const cJSON *frame);     // "cln" / "clnL" replies
 void clan_ui_reset(void);                   // account changed: drop clanData
 int  account_add_skin(int skin_index);      // acc.skins += 1 of skin; returns the owned count

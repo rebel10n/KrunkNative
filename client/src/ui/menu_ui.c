@@ -1274,6 +1274,13 @@ static void setup_dom(void) {
             "<div class=\"button small buttonO\" id=\"menuBtnRanked\" onmouseenter=\"playTick()\" "
             "onclick=\"playSelect(),showWindow(27)\">Ranked</div>");
     }
+    // v10's #menuBtnTurfWars (icon flag): the Turf Wars window, after Ranked
+    if (!scenario_on() && !by_id("menuBtnTurfWars")) {
+        HtmlElem ranked = by_id("menuBtnRanked");
+        if (ranked) html_dom_insert_html(ranked, HTML_INSERT_AFTER_END,
+            "<div class=\"button small buttonG\" id=\"menuBtnTurfWars\" onmouseenter=\"playTick()\" "
+            "onclick=\"playSelect(),openTurfWars()\">Turf Wars</div>");
+    }
     // Hosting is the dedicated server (server_bin, doc/backend.md 8.7): no Host Game button.
     // Hidden, not removed, so v7's #subLogoButtons markup stays; --render-scenario keeps it.
     if (!scenario_on()) set_display("menuBtnHost", "none");

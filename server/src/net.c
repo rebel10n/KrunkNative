@@ -270,6 +270,12 @@ static void net_game_give_skin(Game *game, const Player *player, const int skin,
     accounts_give_skin(player, skin, reason);
 }
 
+// GameHooks.kill: v10 Turf Wars (accounts.c)
+static void net_game_kill(Game *game, const Player *victim, const Player *killer) {
+    (void) game;
+    accounts_on_kill(victim, killer);
+}
+
 // GameHooks.respawn: a mode respawns a dead player itself (forceSpawn, Krunker "frs").
 static void net_game_respawn(Game *game, const int uid) {
     (void) game;
@@ -1479,6 +1485,13 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             client->show_badges = ent.show_badges;
 
             int spectate = ent.spectate;
+            if (!spectate && !accounts_clan_war_allowed(client)) { // v10 mode.clanWar: the teams are the two clans
+                const char *label = accounts_clan_war_label();
+                char text[NET_CHAT_TEXT_SIZE];
+                snprintf(text, sizeof(text), "%s: only members of these clans can play. Spectating.", label ? label : "Clan War");
+                accounts_notice(client, text);
+                spectate = 1;
+            }
             if (spectate && accounts_ranked_active()) {
                 accounts_notice(client, "Spectating Disabled in Ranked"); // ranked.spectate
                 spectate = 0;
@@ -1646,6 +1659,7 @@ void net_install_game_hooks(void) {
     g_server->game.hooks.reward = net_game_reward; // endGame player.reward (accounts.c)
     g_server->game.hooks.progress = net_game_progress; // WP-E part 2c: stats / challenge tallies (accounts.c)
     g_server->game.hooks.give_skin = net_game_give_skin; // season-system: found skins (accounts.c)
+    g_server->game.hooks.kill = net_game_kill;           // v10 Turf Wars clan kills (accounts.c)
     g_server->game.hooks.alloc_uid = net_game_alloc_uid; // bot players (shared/src/bots.c)
     ks_storage_install_game_hooks(&g_server->game); // WP6: Save / Load Data, Reward KR (ks_storage.c)
 }

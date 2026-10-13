@@ -85,9 +85,11 @@ system's Adwaita Mono on the reference machine.
   are created by `client/src/ui/ui_terminal.c`).
 - `css/hud.css` — the in-game HUD's crosshair and hit marker built from divs (v7 draws them on
   its overlay canvas).
-- `css/ranked-kn.css` — the body of v7.1.4's Ranked window (its gen() is empty in the
-  reconstruction and its stylesheet has no ranked rules): a few rules laying out v7's own
-  window pieces, added at run time by `client/src/ui/ranked_ui.c`.
+- `css/ranked-kn.css` — the Ranked window (slot 27) in Krunker v10.0.2's layout and the Turf Wars
+  window (v10 shows both as Svelte popups whose styles live in its JS bundle), added at run time
+  by `client/src/ui/ranked_ui.c` / `turf_ui.c` (doc/v10/ranked-impl.md).
+- `img/ranked/ranks/rank_*.svg` — v10.0.2's eight rank icons, unchanged from
+  `assets.krunker.io/img/ranked/ranks/` (the ranked window, `shared/src/ranked.c` ranked_rank_icon).
 - `css/devconsole.css` + `css/fonts/lucon.ttf` — the offline build's developer console
   (`mod/devConsole.ts` in the jail tree): its injected `<style>` (only the root-relative font
   URL made relative). `client/src/ui/ui_console.c` adds the sheet at run time

@@ -1,0 +1,89 @@
+{
+  "ref": "doc/ref/krunknative/kn-ranked-home.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#d6c6c6",
+  "state": {
+    "menu": true,
+    "window": 27,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Player",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "account": {
+      "name": "Player",
+      "score": 200000,
+      "funds": 2500,
+      "premium": 0,
+      "badges": [],
+      "stats": {}
+    },
+    "ranked": {
+      "tab": 0,
+      "info": {
+        "season": 15,
+        "minLevel": 10
+      },
+      "profile": {
+        "profile": {
+          "rank": 8,
+          "conservative_rating": 7.12,
+          "mmr": 1712,
+          "wins": 31,
+          "losses": 21,
+          "draws": 0,
+          "abandons": 1,
+          "total_kills": 812,
+          "total_deaths": 640,
+          "total_assists": 120,
+          "total_score": 51000,
+          "total_objective_score": 900,
+          "total_damage_done": 91000,
+          "total_time_played": 15600000,
+          "highest_kill_count": 34,
+          "highest_damage_in_match": 4100,
+          "peak_mmr": 1790,
+          "last_milestone_claimed": 1,
+          "total_accuracy": 0,
+          "total_matches": 52,
+          "placement_left": 0
+        },
+        "milestones": [
+          {
+            "matches": 10,
+            "reward": 100
+          },
+          {
+            "matches": 25,
+            "reward": 200
+          },
+          {
+            "matches": 50,
+            "reward": 350
+          },
+          {
+            "matches": 75,
+            "reward": 500
+          },
+          {
+            "matches": 100,
+            "reward": 750
+          }
+        ],
+        "rankedPoints": 1840,
+        "season": 15,
+        "currentSeason": 15
+      }
+    }
+  },
+  "frames": 3,
+  "note": "KrunkNative: the v10 Ranked window (Home tab, signed in): no Krunker reference (v10's is a Svelte popup)"
+}

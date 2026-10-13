@@ -56,6 +56,7 @@ static const BrainModule k_brain_modules[] = {
     {"creations", creations_init, NULL},
     {"public-routes", public_routes_init, NULL},
     {"ranked", ranked_init, ranked_shutdown},
+    {"turf", turf_init, turf_shutdown},
     {"internal-ws", internal_ws_init, internal_ws_shutdown},
     /* coord-auth: central auth + server finder (roles.h decides what runs) */
     {"auth", auth_init, auth_shutdown},

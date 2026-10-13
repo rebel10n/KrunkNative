@@ -1,0 +1,35 @@
+{
+  "scenario": "kn-turf",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "tw-tabs",
+      "rect": [
+        300,
+        170,
+        680,
+        40
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "the four tabs"
+    },
+    {
+      "name": "tw-map",
+      "rect": [
+        300,
+        210,
+        680,
+        390
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "territory map and its labels"
+    }
+  ]
+}

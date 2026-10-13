@@ -586,6 +586,7 @@ static const UiModuleHandler MODULE_HANDLERS[] = {
     store_ui_handle,           // store_ui.c: Store (windows[13])
     clan_ui_handle,            // clan_ui.c: Clans (windows[12])
     ranked_ui_handle,          // ranked_ui.c: Ranked (windows[26])
+    turf_ui_handle,            // turf_ui.c: v10 Turf Wars
     ui_settings_handle,        // ui_settings.c: Game Settings (windows[0])
     ui_controls_handle,        // ui_controls.c: Change Controls (windows[6])
     ui_loadout_handle,         // ui_loadout.c: Change Loadout (windows[2]) and the pickers

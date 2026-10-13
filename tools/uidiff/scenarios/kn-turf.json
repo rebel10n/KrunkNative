@@ -1,0 +1,84 @@
+{
+  "ref": "doc/ref/krunknative/kn-turf.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#d6c6c6",
+  "state": {
+    "menu": true,
+    "window": 101,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Player",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "account": {
+      "name": "Player",
+      "score": 200000,
+      "funds": 2500,
+      "premium": 0,
+      "badges": [],
+      "stats": {},
+      "clan": "AAA"
+    },
+    "turf": {
+      "tab": 0,
+      "status": [
+        {
+          "map_id": 0,
+          "map_name": "Burg",
+          "clan_id": 1,
+          "clan_name": "AAA",
+          "kills": 35,
+          "total_kills_today": 12,
+          "estimated_reward": 120,
+          "guaranteed_reward": 72,
+          "leaderboard": [
+            {
+              "clan_name": "AAA",
+              "kills": 8,
+              "position": 1
+            },
+            {
+              "clan_name": "BBB",
+              "kills": 4,
+              "position": 2
+            }
+          ]
+        },
+        {
+          "map_id": 2,
+          "map_name": "Sandstorm",
+          "clan_id": null,
+          "clan_name": null,
+          "kills": 0,
+          "total_kills_today": 0,
+          "leaderboard": []
+        },
+        {
+          "map_id": 3,
+          "map_name": "Subzero",
+          "clan_id": 3,
+          "clan_name": "CCC",
+          "kills": 9,
+          "total_kills_today": 3,
+          "leaderboard": [
+            {
+              "clan_name": "CCC",
+              "kills": 3,
+              "position": 1
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "frames": 3,
+  "note": "KrunkNative: the v10 Turf Wars window (Overview): no Krunker reference (v10's is a Svelte popup)"
+}

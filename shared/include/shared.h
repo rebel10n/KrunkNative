@@ -1609,6 +1609,11 @@ typedef struct {
     unsigned char kill_cams;          // kCams (1)
     unsigned char allow_anonymous;    // aAnon (1; nothing reads it in v7)
     unsigned char om_weapons;         // KrunkNative knOmWeps (1): the Object Manager's extra loadout weapons in custom games
+    // KrunkNative knClanWar / knClanA / knClanB: v10's mode.clanWar (players.setTeam team = account
+    // clan) as a host option of team modes: team 1 = clan A, team 2 = clan B, everyone else
+    // spectates. Empty tags: the first two clans to join claim the teams (server/src/accounts.c).
+    unsigned char clan_war;
+    char clan_war_tags[2][17];
     int spec_slots;                   // specSlots 0..4 (2)
     int team_size;                    // tmSize: select 0..3 = 1v1..4v4 (3)
     unsigned char no_cosmetics;       // noCosm (comp 1)
@@ -1715,6 +1720,9 @@ typedef struct {
     // gives the skin; the server then tallies "find" {item} and sends NET_PACKET_SKIN_FOUND).
     // NULL = nothing (offline, servers without rewards).
     void (*give_skin)(struct Game_t*, const Player*, int skin, const char *reason);
+    // v10 Turf Wars (territorialWars.onPlayerDeath): a player died, killer NULL / the victim for
+    // a suicide. The server tallies clan kills (server/src/accounts.c); NULL = nothing.
+    void (*kill)(struct Game_t*, const Player *victim, const Player *killer);
 } GameHooks;
 
 // Server projectiles (Krunker v3.1.1 src/data/projectile.js). Units per second

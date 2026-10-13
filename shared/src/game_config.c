@@ -132,6 +132,10 @@ static const GameConfigOption k_server_options[] = {
     // KrunkNative addition (not a v7.1.4 serverConfig key): the Object Manager's extra loadout weapons and
     // weapon pickups for every player of a custom game (shared/src/object_manager.c)
     {"knOmWeps", "Object Manager Weapons", "Other", NULL, GC_BOOL, GC_STORE_U8, 0, 0, .def = 1.0f, .offset = offsetof(GameConfig, om_weapons)},
+    // KrunkNative: v10 mode.clanWar as host options (doc/v10/ranked-impl.md "Clan wars"): clan vs clan
+    {"knClanWar", "Clan War", "Teams", NULL, GC_BOOL, GC_STORE_U8, 0, 0, .def = 0.0f, .offset = offsetof(GameConfig, clan_war)},
+    {"knClanA", "Alpha Clan", "Teams", NULL, GC_INPUT, GC_STORE_STR, 0, 0, .def_str = "", .len = 16, .offset = offsetof(GameConfig, clan_war_tags[0])},
+    {"knClanB", "Bravo Clan", "Teams", NULL, GC_INPUT, GC_STORE_STR, 0, 0, .def_str = "", .len = 16, .offset = offsetof(GameConfig, clan_war_tags[1])},
     {"limitClasses", "Limit Classes", "Class Limits", "Class Limits", GC_BOOL, GC_STORE_U8, GC_BASIC | GC_HIDE_E | GC_HAS_DEF_C, GC_HT(1), .def = 0.0f, .def_c = 1.0f, .offset = offsetof(GameConfig, limit_classes)},
     {"classLim0", "Triggerman", "Other", NULL, GC_NUM, GC_STORE_INT, GC_BASIC | GC_HIDE_E | GC_HAS_DEF_C, GC_HT(1), .def = 0.0f, .def_c = 1.0f, .min = 0.0f, .max = 20.0f, .step = 1.0f, .offset = offsetof(GameConfig, class_limits[0])},
     {"classLim1", "Hunter", "Other", NULL, GC_NUM, GC_STORE_INT, GC_BASIC | GC_HIDE_E | GC_HAS_DEF_C, GC_HT(1), .def = 0.0f, .def_c = 1.0f, .min = 0.0f, .max = 20.0f, .step = 1.0f, .offset = offsetof(GameConfig, class_limits[1])},

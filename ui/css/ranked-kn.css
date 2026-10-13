@@ -1,81 +1,92 @@
-/* KrunkNative: the body of the Ranked window (windows[26], client/src/ui/ranked_ui.c). Krunker
- * v7.1.4 keeps the window (dark, menuWindowF) but its gen() is empty in the reconstruction and
- * its stylesheet has no ranked rules left, so these few rules lay out v7's own pieces (bigMenTabs,
- * setBodH / settName rows, inputGrey, joinBtn, menuLink) in the dark window: the "Krunker
- * Competitive" head of the comp menu (#cmpDatBox), the party slots and the find-match button.
- * Added at run time (html_ui_add_stylesheet) the first time the window opens. */
-.accountEloIcon{display: inline-block;
-  width: 1.5em;
-  height: 1.5em;
-  margin-top: 2px;
-  vertical-align: middle;}
-.rkdHead{position: relative;
-  margin-top: 15px;
-  padding: 10px 20px;
-  border-radius: 6px;
-  background-color: rgba(0, 0, 0, 0.4);
-  color: #fff;}
-.rkdTitle{display: inline-block;
-  font-size: 30px;}
-.rkdSub{font-size: 22px;
-  color: rgba(255, 255, 255, 0.7);}
-.rkdHead .rkdRank{position: absolute;
-  right: 20px;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 24px;}
-.rkdRank{color: #ff6a0b;
-  white-space: nowrap;}
-.rkdElo{color: rgba(255, 255, 255, 0.5);
-  margin-left: 4px;}
-.rkdVal{float: right;
-  display: flex;
-  align-items: center;
-  color: #fff;}
-.rkdVal .inputGrey{float: none;
-  width: 160px;
-  margin-right: 10px;}
-/* the party key: "Create Party" while empty, "Join Party" once a key is typed (v3.1.1's rules) */
-#rankedPartyKey + span{display: inherit;}
-#rankedPartyKey + span > a{display: none;}
-#rankedPartyKey:not(:placeholder-shown) + span > .partyJoin{display: block;}
-#rankedPartyKey:placeholder-shown + span > .partyCreate{display: block;}
-.rkdVal .menuLink,
-.rkdSlotSub .menuLink{color: #fff;
-  cursor: pointer;}
-.rkdSlots{display: flex;
-  flex-direction: row;
-  justify-content: space-between;
-  margin: 5px 5px 15px 5px;}
-.rkdSlot{position: relative;
-  width: calc(25% - 8px);
-  padding: 10px 0;
-  text-align: center;
-  border-radius: 6px;
-  background-color: rgba(0, 0, 0, 0.4);
-  border-bottom: 4px solid rgba(255, 255, 255, 0.2);
-  color: #fff;}
-.rkdSlot.ready{border-bottom-color: #2ecc71;}
-.rkdSlot.unready{border-bottom-color: #eb5656;}
-.rkdSlot.open{opacity: 0.6;}
-.rkdSlotIcn{width: 64px;
-  height: 64px;}
-.rkdLead{position: absolute;
-  top: 6px;
-  left: 8px;
-  color: #ffc147;}
-.rkdSlotName{font-size: 20px;
-  margin-top: 4px;}
-.rkdSlotSub{font-size: 16px;
-  color: rgba(255, 255, 255, 0.7);}
-.rkdReady{color: #2ecc71;}
-.rkdUnready{color: #eb5656;}
-.rkdWarn{text-align: center;
-  font-size: 18px;
-  color: rgba(255, 255, 255, 0.6);
-  margin-bottom: 10px;}
-.rkdGo{background-color: #ff6a0b;
-  color: #fff;
-  font-size: 26px;
-  margin-bottom: 10px;}
-.rkdGo.rkdBusy{background-color: rgba(0, 0, 0, 0.4);}
+/* Krunker Box Office: the Ranked window (window slot 27, client/src/ui/ranked_ui.c) in Krunker
+ * v10.0.2's layout. v10's ranked is a Svelte popup (rankedMenuModal) whose rules ship inside its
+ * JS bundle; these rules follow its look (dark cards, the #5ce05a accent of
+ * .ranked-matchmaking-status, the v10 rank colours) with v7's own pieces (bigMenTabs, setBodH /
+ * settName rows, inputGrey, joinBtn, menuLink). Added at run time (html_ui_add_stylesheet) the
+ * first time the window opens; the Turf Wars window (turf_ui.c) shares the .tw* rules below. */
+.rkWin{position: relative; color: #fff;}
+.rkTabs{margin-top: 15px;}
+.rkTabs .bigMenTab{width: 20%; padding-top: 10px; padding-bottom: 5px;}
+.rkBanner{margin-top: 14px; padding: 14px 20px; border-radius: 6px; background-color: rgba(0, 0, 0, 0.4); font-size: 22px;
+  box-shadow: 0 0 50px rgba(92, 224, 90, 0.25);}
+.rkBannerIcon{margin-right: 10px;}
+.rkStartRow{margin-top: 12px; display: flex; align-items: center; gap: 18px;}
+.rkStart{width: 280px; text-align: center; background-color: #5ce05a; box-shadow: inset 0 -7px 0 0 #3fb63d;}
+.rkStart.cancel{background-color: #ff3939; box-shadow: inset 0 -7px 0 0 #c92727;}
+.rkStart.rejoin{background-color: #fbc02d; box-shadow: inset 0 -7px 0 0 #c99a24;}
+.rkAll{cursor: pointer; font-size: 18px; color: rgba(255, 255, 255, 0.8);}
+.rkCheck{display: inline-block; width: 18px; height: 18px; margin-right: 8px; vertical-align: middle; border: 2px solid #5ce05a; border-radius: 3px;}
+.rkCheck.on{background-color: #5ce05a;}
+.rkRegion{margin-left: auto; font-size: 18px; color: rgba(255, 255, 255, 0.6);}
+.rkHomeGrid{margin-top: 14px; display: flex; gap: 14px;}
+.rkCard{position: relative; flex: 0 0 340px; padding: 16px; border-radius: 12px; background-color: rgba(0, 0, 0, 0.3); text-align: center;}
+.rkSeasonBanner{font-size: 14px; color: rgba(255, 255, 255, 0.6); text-transform: uppercase; letter-spacing: 1px;}
+.rkRankIcon{width: 96px; height: 96px; margin: 8px auto;}
+.rkRowIcon{width: 22px; height: 22px; vertical-align: middle;}
+.rkRankName{font-size: 28px;}
+.rkRating{font-size: 22px; margin-top: 4px;}
+.rkRating span, .rkUnranked{color: rgba(255, 255, 255, 0.6); font-size: 16px;}
+.rkQuick{display: flex; justify-content: space-around; margin-top: 12px; font-size: 13px; color: rgba(255, 255, 255, 0.6);}
+.rkQuick span{display: block; font-size: 20px; color: #fff;}
+.rkDecay{margin-top: 10px; font-size: 13px; color: #fbc02d;}
+.rkProg{flex: 1; padding: 20px; border-radius: 12px; background-color: rgba(0, 0, 0, 0.3);}
+.rkProgHead{display: flex; justify-content: space-between; font-size: 18px;}
+.rkProgHead b{color: #5ce05a;}
+.rkProgBar{position: relative; height: 12px; margin: 22px 0 46px; border-radius: 6px; background-color: rgba(255, 255, 255, 0.1);}
+.rkProgBar > div:first-child{height: 100%; border-radius: 6px; background-color: #5ce05a;}
+.rkMilestone{position: absolute; top: -6px; transform: translateX(-50%); text-align: center;}
+.rkMsNum{width: 24px; height: 24px; line-height: 24px; border-radius: 12px; background-color: #333; font-size: 12px;}
+.rkMsBonus{margin-top: 4px; font-size: 12px; white-space: nowrap; color: rgba(255, 255, 255, 0.6);}
+.rkMsBonus.claimed{color: #5ce05a;}
+.rkMsBonus.claimable{cursor: pointer; color: #222; background-color: #5ce05a; border-radius: 4px; padding: 2px 6px;}
+.rkProgFoot{font-size: 16px; color: rgba(255, 255, 255, 0.6);}
+.rkEst{color: #5ce05a; font-size: 20px;}
+.rkHow{margin-top: 8px; font-size: 13px; color: rgba(255, 255, 255, 0.5);}
+.rkMapsHed{margin-top: 16px; font-size: 18px; color: rgba(255, 255, 255, 0.7);}
+.rkMaps{display: flex; gap: 10px; margin-top: 8px;}
+.rkMap{position: relative; flex: 1; height: 90px; border-radius: 8px; overflow: hidden; background-color: rgba(0, 0, 0, 0.4);}
+.rkMap img{width: 100%; height: 100%; object-fit: cover;}
+.rkMapName{position: absolute; left: 8px; bottom: 6px; font-size: 16px; text-shadow: 0 0 4px #000;}
+.rkFoot{margin-top: 12px; font-size: 14px; color: rgba(255, 255, 255, 0.5);}
+.rkLoading, .rkEmpty{margin-top: 20px; padding: 30px; text-align: center; color: rgba(255, 255, 255, 0.6);}
+.rkControls{display: flex; align-items: center; gap: 14px; margin-top: 14px;}
+.rkRegionTab{cursor: pointer; padding: 6px 12px; border-radius: 4px; background-color: rgba(0, 0, 0, 0.3); margin-right: 6px;}
+.rkRegionTab.active{background-color: #5ce05a; color: #222;}
+.rkStats{margin-top: 14px;}
+.rkVal{float: right; color: rgba(255, 255, 255, 0.7);}
+.rkTable{width: 100%; margin-top: 12px; border-collapse: collapse; font-size: 16px;}
+.rkTable th{text-align: left; padding: 8px; color: rgba(255, 255, 255, 0.6); border-bottom: 1px solid rgba(255, 255, 255, 0.15);}
+.rkTable td{padding: 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.06);}
+.rkClan{color: rgba(255, 255, 255, 0.5);}
+.rkWIN, .positive{color: #5ce05a;}
+.rkLOSS, .negative, .rkABANDON{color: #ff3939;}
+.rkDRAW{color: #fbc02d;}
+.rkPager{margin-top: 10px; text-align: center;}
+.rkPager .disabled{opacity: 0.3; pointer-events: none;}
+.rkShopHead{margin-top: 14px; font-size: 20px;}
+.rkRp{float: right; color: #ff5500;}
+.rkShop{display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px;}
+.rkItem{width: 200px; padding: 12px; border-radius: 8px; background-color: rgba(0, 0, 0, 0.35); text-align: center;}
+.rkItemName{font-size: 16px;}
+.rkItemPrice{margin-top: 6px; color: #ff5500;}
+.rkReq{font-size: 12px; color: rgba(255, 255, 255, 0.5);}
+.rkBuy{cursor: pointer; margin-top: 8px; padding: 6px; border-radius: 4px; background-color: #5ce05a; color: #222;}
+.rkBuy.owned{background-color: rgba(255, 255, 255, 0.15); color: #fff; cursor: default;}
+.rkPopup{position: absolute; left: 50%; top: 120px; width: 460px; margin-left: -230px; padding: 24px; border-radius: 8px;
+  background-color: #1d1d1d; box-shadow: 0 0 40px rgba(0, 0, 0, 0.8); text-align: center; z-index: 5;}
+.rkPopupTitle{font-size: 26px;}
+.rkPopupText{margin: 12px 0; font-size: 18px; color: rgba(255, 255, 255, 0.8);}
+.rkPopupOk{width: 160px; margin: 0 auto; text-align: center;}
+
+/* Turf Wars (turf_ui.c) */
+.twMapWrap{position: relative; margin-top: 14px;}
+.twMap{display: block; width: 100%; height: auto; border-radius: 8px;}
+.twLabel{position: absolute; transform: translate(-50%, -50%); font-size: 20px; text-align: center; text-shadow: 0 0 4px #000;}
+.twLabelClan{font-size: 16px; color: #5ce05a;}
+.twCards{display: flex; gap: 12px; margin-top: 12px;}
+.twCard{flex: 1; padding: 14px; border-radius: 8px; background-color: rgba(0, 0, 0, 0.35);}
+.twCardHead{font-size: 22px;}
+.twCtrl{font-size: 14px; color: rgba(255, 255, 255, 0.6);}
+.twCtrl b{color: #5ce05a;}
+.twReward{margin-top: 6px; font-size: 14px; color: rgba(255, 255, 255, 0.7);}
+.twRules li{margin: 6px 0; color: rgba(255, 255, 255, 0.8);}
