@@ -1158,6 +1158,7 @@ void client_apply_init(Client *client, const NetInitPacket *init) {
     // KrunkScript: the map's client script, reloaded every INIT, then start(); script packets
     // only exist on servers of protocol minor >= NET_PROTOCOL_MINOR_V7
     ks_client_round(client, init->major == NET_PROTOCOL_MAJOR ? init->minor : 0);
+    hud_ui_on_init(client); // the HUD per the new round's state, the comp lobby's menu or the default one
 }
 
 static void client_handle_net_packet(Client *client, const NetPacket *packet) {

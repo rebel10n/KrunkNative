@@ -785,6 +785,14 @@ static void test_focus_keys(void)
     CHECK(events_focused(&g_es) == 0 && !focused(txt_));
     CHECK(log_hasf("W blur %u", txt_));
     CHECK(!log_has("L window keydown"));
+    /* Escape on a focused checkbox (focused by its click) blurs it and still reaches the window
+     * listener (the menu's Spectate switch must not swallow the Escape that closes the menu) */
+    events_focus(&g_es, cb_);
+    CHECK(events_focused(&g_es) == cb_);
+    log_clear();
+    CHECK(events_key(&g_es, EV_KEY_ESCAPE, 0, EV_PRESS, 0) == 0);
+    CHECK(events_focused(&g_es) == 0);
+    CHECK(log_has("L window keydown target=0 key=256"));
     /* Escape with nothing focused goes to the window listener; consumed only if it prevents default */
     log_clear();
     CHECK(events_key(&g_es, EV_KEY_ESCAPE, 0, EV_PRESS, 0) == 0);

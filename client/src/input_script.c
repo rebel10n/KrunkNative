@@ -20,6 +20,8 @@
 //   100 mdown right | mup right  mouse buttons (left / right), through the mouse button callback
 //   100 cursor 640 360           move the cursor (window coordinates) through the cursor callback
 //   100 click 640 360            cursor there, then a left press + release (e.g. a KrunkScript DIV)
+//   100 clickid specBtn          the same at the centre of a page element's box (a display:none one: its
+//                                nearest rendered ancestor, e.g. a switch's <label>)
 //   100 look dyaw dpitch         turn the next input's look by these radians (CONTROLS rotation)
 //   5000 respawn                 Play again when dead, as soon as the death delay allows (retried
 //                                each frame; multi-life tests: server/tests/gunfight.sh)
@@ -27,6 +29,11 @@
 //   100 blur                     the window loses focus (alt-tab)
 //   100 state                    log the held weapon slot, the menu / pointer lock state, position, ammo, ended
 //   100 con end                  a developer console command (the rest of the line: con bot_add 5)
+//   100 vis @dead endUI chatHolder  log what the player sees of these page elements (html_dom_is_shown):
+//                                "[input_script] vis t=100 @dead endUI=1 chatHolder=0" (- = no such id,
+//                                @words are labels). Not on the page: :preview (the menu's class
+//                                preview is drawn), :spray (the spray wheel is drawn);
+//                                UI state transition checks (server/tests/ui_transitions_e2e.py)
 //   1200 shot /tmp/a.png         write the frame (world + first-person layer) after this frame's input
 //   1200 frames /tmp/f 120       write this and the next 119 finished frames (page included) as
 //                                /tmp/f_0000.png ... (input_script_frame_presented)
@@ -40,6 +47,7 @@
 #include <ui_logic.h>
 #include <html_ui.h>
 #include <console.h> // `con`: ui_console_exec
+#include <sprays.h>  // `vis :spray`
 #include <GLFW/glfw3.h>
 #include <png_write.h>
 #include <frame_target.h>
@@ -53,7 +61,7 @@
 typedef struct {
     float t;          // ms
     char cmd[16];
-    char arg[160];
+    char arg[1024];
     float v[5];
 } ScriptEvent;
 
@@ -89,7 +97,7 @@ static void script_load(void) {
         return;
     }
 
-    char line[256];
+    char line[1200];
     while (fgets(line, sizeof(line), file) && g_script.count < SCRIPT_MAX_EVENTS) {
         char *hash = strchr(line, '#');
         if (hash) *hash = 0;
@@ -97,7 +105,7 @@ static void script_load(void) {
         ScriptEvent *e = &g_script.events[g_script.count];
         memset(e, 0, sizeof(*e));
         char a[32] = {0}, b[32] = {0};
-        const int n = sscanf(line, "%f %15s %159s", &e->t, e->cmd, e->arg);
+        const int n = sscanf(line, "%f %15s %1023s", &e->t, e->cmd, e->arg);
         strncpy(a, e->arg, sizeof(a) - 1);
         if (n < 2) continue;
 
@@ -108,7 +116,7 @@ static void script_load(void) {
             sscanf(rest, "%f %f %f %f %f", &e->v[0], &e->v[1], &e->v[2], &e->v[3], &e->v[4]);
         }
         (void) b;
-        if (!strcmp(e->cmd, "con")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
+        if (!strcmp(e->cmd, "con") || !strcmp(e->cmd, "vis")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
             while (*rest == ' ' || *rest == '\t') rest++;
             snprintf(e->arg, sizeof(e->arg), "%s", rest);
             for (size_t len = strlen(e->arg); len && (e->arg[len - 1] == '\n' || e->arg[len - 1] == '\r' || e->arg[len - 1] == ' '); len--) e->arg[len - 1] = 0;
@@ -178,13 +186,30 @@ static void script_run(Client *client, const ScriptEvent *e) {
         glfwSetMouseButtonCallback(client->window, cb);
         if (cb) cb(client->window, button, action, 0);
         else ui_controls_mouse_event(client, button, action, 1);
-    } else if (!strcmp(e->cmd, "cursor") || !strcmp(e->cmd, "click")) {
+    } else if (!strcmp(e->cmd, "cursor") || !strcmp(e->cmd, "click") || !strcmp(e->cmd, "clickid")) {
         // cursor x y / click x y: move the cursor (window coordinates) through the cursor
-        // callback; click also presses and releases the left button there
-        glfwSetCursorPos(client->window, e->v[0], e->v[1]);
+        // callback; click also presses and releases the left button there. clickid <id>: the
+        // centre of that page element's box (CSS px -> window coordinates).
+        double x = e->v[0], y = e->v[1];
+        if (!strcmp(e->cmd, "clickid")) {
+            HtmlElem el = html_ui_available() ? html_dom_by_id(e->arg) : 0;
+            HtmlRect r = {0};
+            while (el && !html_dom_get_rect(el, &r)) el = html_dom_parent(el); // a hidden checkbox: its <label>
+            if (!el) {
+                fprintf(stderr, "[input_script] clickid %s: not shown\n", e->arg);
+                return;
+            }
+            float vw = 0.0f, vh = 0.0f;
+            int ww = 0, wh = 0;
+            html_dom_viewport(&vw, &vh, NULL);
+            glfwGetWindowSize(client->window, &ww, &wh);
+            x = (r.x + r.w * 0.5f) * (vw > 0.0f && ww > 0 ? ww / vw : 1.0f);
+            y = (r.y + r.h * 0.5f) * (vh > 0.0f && wh > 0 ? wh / vh : 1.0f);
+        }
+        glfwSetCursorPos(client->window, x, y);
         GLFWcursorposfun pos = glfwSetCursorPosCallback(client->window, NULL);
         glfwSetCursorPosCallback(client->window, pos);
-        if (pos) pos(client->window, e->v[0], e->v[1]);
+        if (pos) pos(client->window, x, y);
         if (e->cmd[1] == 'l') {
             GLFWmousebuttonfun cb = glfwSetMouseButtonCallback(client->window, NULL);
             glfwSetMouseButtonCallback(client->window, cb);
@@ -231,6 +256,33 @@ static void script_run(Client *client, const ScriptEvent *e) {
                 me && me->weapon ? me->weapon->name : "-", html_ui_available() && html_ui_is_menu_open(), client->mouse_state.locked,
                 me ? me->position.x : 0.0f, me ? me->position.y : 0.0f, me ? me->position.z : 0.0f,
                 me && me->ammo && me->loadout_size ? (int) me->ammo[me->loadout_index] : -1, me ? me->aim_val : 0.0f, client_round_ended(client));
+    } else if (!strcmp(e->cmd, "vis")) {
+        // vis <id> [<id> ...]: one log line with each element's visibility (1 shown, 0 not, - absent)
+        char line[2048];
+        int n = snprintf(line, sizeof(line), "[input_script] vis t=%.0f", g_script.time);
+        for (const char *c = e->arg; *c && n > 0 && (size_t) n < sizeof(line);) {
+            while (*c == ' ' || *c == '\t') c++;
+            char id[64];
+            size_t len = 0;
+            while (c[len] && c[len] != ' ' && c[len] != '\t') len++;
+            if (!len) break;
+            snprintf(id, sizeof(id), "%.*s", (int) (len < sizeof(id) ? len : sizeof(id) - 1), c);
+            c += len;
+            if (id[0] == '@') { // a label for the log reader
+                n += snprintf(line + n, sizeof(line) - (size_t) n, " %s", id);
+                continue;
+            }
+            if (!strcmp(id, ":preview") || !strcmp(id, ":spray")) {
+                const ClassPreview *cp = &client->class_preview;
+                const int shown = id[1] == 's' ? sprays_wheel_shown()
+                    : html_ui_available() && html_ui_is_menu_open() && cp->has_rect && cp->visible && cp->width > 0.0f && cp->height > 0.0f;
+                n += snprintf(line + n, sizeof(line) - (size_t) n, " %s=%d", id, shown);
+                continue;
+            }
+            const HtmlElem el = html_ui_available() ? html_dom_by_id(id) : 0;
+            n += snprintf(line + n, sizeof(line) - (size_t) n, " %s=%s", id, !el ? "-" : html_dom_is_shown(el) ? "1" : "0");
+        }
+        fprintf(stderr, "%s\n", line);
     } else if (!strcmp(e->cmd, "con")) {
         ui_console_exec(e->arg); // con <word>: a one-word developer console command (`end`)
     } else if (!strcmp(e->cmd, "blur")) {
@@ -276,8 +328,16 @@ void input_script_tick(Client *client) {
         while (g_script.next < g_script.count && !strcmp(g_script.events[g_script.next].cmd, "play")) g_script.next++;
     }
 
+    // A `vis` probe never shares a frame with the input before it: after a stalled frame the due
+    // events would otherwise run together and the probe would read the page before the UI
+    // reacted to them (the HUD / menu passes run later in the frame).
+    int ran = 0;
     while (g_script.next < g_script.count && g_script.events[g_script.next].t <= g_script.time + 1e-3f) {
-        script_run(client, &g_script.events[g_script.next++]);
+        const ScriptEvent *e = &g_script.events[g_script.next];
+        if (ran && !strcmp(e->cmd, "vis") && strcmp(g_script.events[g_script.next - 1].cmd, "vis") != 0) break;
+        script_run(client, e);
+        g_script.next++;
+        ran = 1;
     }
 
     if (g_script.respawn_pending) {

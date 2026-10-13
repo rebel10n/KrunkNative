@@ -171,6 +171,8 @@ int html_dom_get_rect(const HtmlElem e, HtmlRect *out) {
     return 0;
 }
 
+int html_dom_is_shown(const HtmlElem e) { (void) e; return 0; }
+
 float html_dom_offset_width(const HtmlElem e) { (void) e; return 0.0f; }
 float html_dom_offset_height(const HtmlElem e) { (void) e; return 0.0f; }
 

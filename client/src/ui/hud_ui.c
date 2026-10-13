@@ -2176,7 +2176,7 @@ static void hud_render_scoreboard(const int shown, const char *html) {
 /* ------------------------------------------------------------ death screen / end screen */
 
 static void hud_toggle_game_ui(int on);
-static void hud_end_screen_dom(void);
+static void hud_end_screen_dom(int start);
 static void hud_combat_reset(void);
 static double hud_now_ms(const Client *client);
 static const Weapon *hud_weapon_by_name(const Game *game, const char *name);
@@ -2425,14 +2425,19 @@ void hud_ui_hide_death(Client *client) {
 }
 
 // UI.showEndScreen(false) -> UI.hideUI(false) (incl. toggleMenu(false)), plus the
-// results' #endInfo / #endMidHolder once they show.
-static void hud_end_screen_dom(void) {
-    // showEndScreen(false)
-    dom_display("endMidHolder", "none");
-    dom_display("matchVoteHolder", "none");
-    dom_display("teamTotal0", "none");
-    dom_display("teamTotal1", "none");
-    dom_display("endInfo", "none");
+// results' #endInfo once they show. `start` (the END): showEndScreen's resets of the results'
+// parts (#endMidHolder, the vote cards, the team totals, #endInfo), which the results
+// (hud_end_results) fill and show later. Without it (the menu closed over the end screen:
+// UI.toggleEndScreen) only #endUI and the page around it come back, like v7, whose
+// toggleMenu(true) hides #endUI alone and leaves the results' parts as they were.
+static void hud_end_screen_dom(const int start) {
+    if (start) { // showEndScreen(false)
+        dom_display("endMidHolder", "none");
+        dom_display("matchVoteHolder", "none");
+        dom_display("teamTotal0", "none");
+        dom_display("teamTotal1", "none");
+        dom_display("endInfo", "none");
+    }
     dom_display("endUI", "");
     const HtmlElem base = html_dom_by_id("uiBase");
     if (base) {
@@ -2465,10 +2470,7 @@ static void hud_end_screen_dom(void) {
         html_dom_set_attr(sub, "src", g_end_result < 0 ? "./img/dra.png" : g_end_result ? "./img/vic.png" : "./img/def.png");
         html_dom_set_display(sub, g_hud_ui.end_phase == 2 ? "" : "none");
     }
-    if (g_hud_ui.end_phase == 2) {
-        dom_display("endInfo", "block");
-        dom_display("endMidHolder", "inline-block");
-    }
+    if (g_hud_ui.end_phase == 2) dom_display("endInfo", "block");
     if (g_end_timer[0]) {
         char text[64];
         snprintf(text, sizeof(text), "Next Round in %s", g_end_timer); // i18n timer.end
@@ -2920,7 +2922,7 @@ void hud_ui_show_end_screen(Client *client, const int result, const char *next_r
         ui->end_phase = 1;
         ui->end_start_ms = hud_now_ms(client);
         dom_style("endUI", "background-color", "");
-        hud_end_screen_dom();
+        hud_end_screen_dom(1);
         hud_end_step(client, ui->end_start_ms);
         return;
     }
@@ -3249,7 +3251,7 @@ static void hud_apply_visibility(Client *client, const int in_game, const int vi
     }
     // The end screen stays down while the menu is over it (UI.toggleEndScreen ->
     // toggleMenu(true) hid #endUI); it comes back when the menu closes.
-    if (ui->ended && !html_ui_is_menu_open()) hud_end_screen_dom();
+    if (ui->ended && !html_ui_is_menu_open()) hud_end_screen_dom(0);
 }
 
 // KrunkScript game.ui hideDefault() (v7 createKrunkScriptApiContext.js): game.ui.hidden, and
@@ -3474,6 +3476,18 @@ static void hud_net_stats_step(const double now_s) {
 // and keeps the player holders hidden; this keeps the shared pieces live at 20 Hz:
 // the sBoardKey leaderboard (#newLeaderDisplay), the round clock and ping. Kill feed and
 // chat rows arrive through their own entry points. Player-only overlays stay off.
+// f1987 outside the playing HUD (spectating, the death screen): v7 polls the board key before
+// its tmpPlayer.active test, so the board follows Tab there too (the player tick renders it
+// from its value groups while alive).
+static void hud_board_step(const Client *client) {
+    HudUi *ui = &g_hud_ui;
+    const int board = !ui->ended && hud_scoreboard_key(client);
+    char board_html[4096];
+    board_html[0] = 0;
+    if (board) hud_scoreboard_html(client, g_hud_override.scoreboard, board_html, sizeof(board_html));
+    if (board != ui->board_shown || (board && hud_hash(board_html) != ui->board_hash)) hud_render_scoreboard(board, board_html);
+}
+
 static void hud_spectator_tick(Client *client, const double now) {
     HudUi *ui = &g_hud_ui;
     HtmlHudState *hud = &client->hud_html;
@@ -3488,11 +3502,7 @@ static void hud_spectator_tick(Client *client, const double now) {
     if (now < hud->next_emit_time) return;
     hud->next_emit_time = now + HUD_UI_MIN_INTERVAL;
 
-    const int board = !ui->ended && hud_scoreboard_key(client);
-    char board_html[4096];
-    board_html[0] = 0;
-    if (board) hud_scoreboard_html(client, g_hud_override.scoreboard, board_html, sizeof(board_html));
-    if (board != ui->board_shown || (board && hud_hash(board_html) != ui->board_hash)) hud_render_scoreboard(board, board_html);
+    hud_board_step(client);
 
     char timer[sizeof(hud->timer_text)];
     hud_timer(client, timer, sizeof(timer));
@@ -3508,14 +3518,33 @@ static void hud_spectator_tick(Client *client, const double now) {
     hud->valid = 0; // the player HUD rewrites everything when we play again
 }
 
-// A fresh page (ready edge): nothing we created or wrote still exists.
-static void hud_reset_page(Client *client) {
-    HudUi *ui = &g_hud_ui;
+void hud_ui_relayout(void) {
+    g_hud_ui.visible = -1;
+}
+
+// The page parts of a round (INIT, and a fresh page during one).
+static void hud_round_page(Client *client) {
     comp_ui_round(client); // f1904(Game.isComp): the comp lobby's menu or the default one
     if (!client->game.config.comp) ranked_ui_left_match(); // a round outside a comp lobby: no ranked match any more
     // io_startGame: `if (chatChannel != 1 && Game.isComp) switchChat(chatSwitch)`: a comp lobby
     // (ranked) starts on the team channel
     if (client->game.config.comp && g_chat_channel != CHAT_CHANNEL_TEAM && client->game.mode && client->game.mode->config.teams) hud_switch_chat();
+}
+
+void hud_ui_on_init(Client *client) {
+    hud_ui_relayout();
+    hud_ui_on_config(client);
+}
+
+void hud_ui_on_config(Client *client) {
+    // before the page's first ready tick hud_reset_page does it
+    if (client && html_ui_available() && html_ui_is_ready() && client->hud_html.was_ready) hud_round_page(client);
+}
+
+// A fresh page (ready edge): nothing we created or wrote still exists.
+static void hud_reset_page(Client *client) {
+    HudUi *ui = &g_hud_ui;
+    hud_round_page(client);
 
     hud_feed_clear(0);
     hud_popups_page_reset();
@@ -3630,6 +3659,10 @@ void client_hud_html_tick(Client *client, const float now_f) {
         if (ui->nums_last_ms >= 0.0) hud_nums_hide_all();
         hud_speed_step(client, now * 1000.0); // hides it
         hud->valid = 0; // TODO: death screen / end screen (#killCardHolder, #endUI) once the game exposes them
+        if (ui->visible == 1 && ui->dead && now >= hud->next_emit_time) { // the death screen: Tab still shows the board
+            hud->next_emit_time = now + HUD_UI_MIN_INTERVAL;
+            hud_board_step(client);
+        }
         return;
     }
 

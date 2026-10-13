@@ -377,6 +377,10 @@ test-net: build ## knet transport unit test (loss/dup/reorder), v7 chat/voice ch
 reconnect-test: build ## Reconnect key (F5) online + offline, console sandbox / offline <map>, --sandbox (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I server/tests/reconnect_key_e2e.py $(DEBUG_DIR)
 
+.PHONY: ui-transitions-test
+ui-transitions-test: build ## UI state across ESC / death / end screen / spectate / windows / map change / disconnect / offline<->online (headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I server/tests/ui_transitions_e2e.py $(DEBUG_DIR)
+
 $(BRIDGE_DIR)/node_modules: $(BRIDGE_DIR)/package.json $(BRIDGE_DIR)/package-lock.json
 	cd $(BRIDGE_DIR) && npm ci
 	@touch $@

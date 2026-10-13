@@ -121,6 +121,7 @@ void menu_toggle_window(int open);               // UI.toggleWindow
 void menu_close_window(void);                    // closeWindow
 void menu_rerender_if_open(int id);              // rerenderIfOpen
 int  menu_window_is_open(void);                  // #windowHolder display == block
+int  menu_error_screen_shown(void);              // the Lost Connection screen (#instructionsUpdate) is up
 void menu_scale_base(void);                      // scaleBase
 void menu_send_preview_rect(void);               // sendPreviewRect -> client_class_preview_set_rect
 void menu_schedule_rect(void);                   // scheduleRect
@@ -274,6 +275,16 @@ void hud_ui_end_challenge_completed(int icon, const char *name);
 int  hud_ui_end_screen_up(void);            // END to INIT (title animation or results): no menu over it unless toggled
 int  hud_ui_end_screen_interactive(void);   // end-screen results up: pointer free, mouse goes to the page
 int  hud_ui_toggle_end_screen(Client*);     // UI.toggleEndScreen: results <-> menu (Escape, controller Start); 1 = acted
+// The HUD's visibility pass (UI.toggleGameUI / toggleControlUI per the current state: playing,
+// dead, menu, end screen) runs again next frame, and every piece that follows its layout epoch
+// re-applies itself after it. A state owner that gives the HUD back without a menu / pointer
+// change (spectating ended, a speed-run mode left, a new INIT) calls this instead of
+// restoring the elements it hid.
+void hud_ui_relayout(void);
+// INIT (a new session, round, map or mode): v7 resetGameSessionState's toggleGameUI(true) (the
+// relayout above) and f1904(Game.isComp) (the comp lobby's menu or the default one).
+void hud_ui_on_init(Client*);
+void hud_ui_on_config(Client*); // a GAME_CONFIG applied (it may follow the INIT): f1904 again with it
 char *hud_ui_player_list_html(void);        // windows[22].gen(): "Player List" (pListKey, showWindow(23)); malloc'd
 // "<victim> committed <random config.suicides entry>" kill-feed row (no killer/weapon).
 #define HUD_UI_HAVE_KILLFEED_SUICIDE 1

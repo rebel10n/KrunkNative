@@ -632,6 +632,10 @@ static int can_play(void) {
 // toggleMenu(true), which brings the whole menu (Spectate switch included) back over the error
 // box when Servers / Settings / Changelog open; KrunkNative keeps the chrome hidden while the
 // error box shows (the windows sit outside #menuHolder).
+int menu_error_screen_shown(void) {
+    return g_error_screen;
+}
+
 static void menu_apply_error_screen(const int on) {
     if (on == g_error_screen) return;
     g_error_screen = on;
@@ -1155,6 +1159,7 @@ static void menu_poll_connection(Client *client) {
             // player can enter again after the transport reconnects, and show the menu
             // (Krunker's disconnect() shows the error screen over it).
             if (client->game.player_count) client_clear_players(client);
+            hud_ui_hide_end_screen(client); // its end screen went with it (Escape must not bring the results back)
             client->in_game = 0;
             client->spawn_requested = 0;
             client->menu_play_pending = 0;

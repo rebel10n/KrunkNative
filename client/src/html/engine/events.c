@@ -512,6 +512,20 @@ static const char *input_type(EventSystem *es, HtmlElem e, char *buf, size_t cap
     return buf;
 }
 
+/* A control text is typed into: <textarea>, <select>, a text-like <input>. */
+static int takes_text(EventSystem *es, HtmlElem e)
+{
+    if (is_tag(es, e, "textarea") || is_tag(es, e, "select")) return 1;
+    if (!is_tag(es, e, "input")) return dom_has_attr(es->dom, e, "contenteditable");
+    char buf[16];
+    const char *t = input_type(es, e, buf, sizeof(buf));
+    static const char *const no_text[] = {"checkbox", "radio", "range", "button", "submit", "reset", "color", "file", "image"};
+    for (size_t i = 0; i < sizeof(no_text) / sizeof(no_text[0]); i++) {
+        if (!strcmp(t, no_text[i])) return 0;
+    }
+    return 1;
+}
+
 static int is_disabled(EventSystem *es, HtmlElem e)
 {
     if (!is_form_control(es, e)) return 0;
@@ -1103,6 +1117,11 @@ int events_key(EventSystem *es, int key, int scancode, int action, int mods)
     }
     if (action != EV_RELEASE && key == EV_KEY_ESCAPE) {
         focus_set(es, 0);
+        /* A text field keeps its Escape (it only blurs). A switch / button / link that kept the
+         * focus after a click does not: the key goes on to the window listener as if nothing
+         * were focused (the menu's Spectate switch must not swallow the Escape that closes
+         * the menu). */
+        if (!takes_text(es, f)) return fire_ex(es, 0, type, key, 0, 0) == 0;
         return 1;
     }
     int r = fire_ex(es, f, type, key, 0, 1); /* document capture listener first, then on<type> up the tree */

@@ -25,6 +25,7 @@ void sprays_wheel_open(void);      // sprayWheelOpen (+ updateSprayWheel: owned 
 void sprays_wheel_close(void);     // sprayWheelClose
 int sprays_wheel_is_open(void);    // the key is held
 int sprays_wheel_opened(void);     // sprayWheelOpened: held long enough to show (takes the scroll)
+int sprays_wheel_shown(void);      // the last sprays_wheel_render drew the wheel (tests: input script `vis :spray`)
 void sprays_wheel_change(int step); // sprayWheelChange
 int sprays_wheel_selected(void);   // getSprayIndex().index
 void sprays_wheel_render(Client*, float delta_seconds); // per frame, after the HUD canvases

@@ -604,6 +604,31 @@ int html_dom_get_rect(const HtmlElem e, HtmlRect *out)
     return 1;
 }
 
+/* A box paints something: a non-empty area of its own that is not visibility:hidden, or a
+ * descendant that does (absolutely positioned HUD parts hang off zero-height holders). */
+static int box_shows_area(const Box *box)
+{
+    if (!box || (box->style && box->style->opacity <= 0.01f)) return 0;
+    if (!(box->flags & BOXF_HIDDEN) && box->w > 0.0f && box->h > 0.0f) return 1;
+    for (const Box *c = box->first_child; c; c = c->next) {
+        if (box_shows_area(c)) return 1;
+    }
+    return 0;
+}
+
+int html_dom_is_shown(const HtmlElem e)
+{
+    Engine *g = engine_get();
+    if (!alive(engine_dom(g), e)) return 0;
+    engine_flush_layout(g);
+    const Box *box = engine_elem_box(g, e);
+    if (!box) return 0;
+    for (const Box *b = box->parent; b; b = b->parent) {
+        if (b->style && b->style->opacity <= 0.01f) return 0;
+    }
+    return box_shows_area(box);
+}
+
 float html_dom_offset_width(const HtmlElem e)
 {
     Engine *g = engine_get();

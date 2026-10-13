@@ -192,6 +192,10 @@ static void speed_run_tick(const Client *client, const int on, const int relayou
     const Game *game = &client->game;
     const int active = on && do_log_time(game) && !spectate_active();
     if (active != g_v7.speed_run || (active && relayout)) {
+        // Leaving a speed-run mode (Parkour -> FFA, the offline game reloads and respawns in one
+        // frame): v7's init toggleGameUI(true) brings #weapHolder / #bottomRight back; here the
+        // HUD's visibility pass does (with the death / menu state it knows).
+        if (!active && g_v7.speed_run) hud_ui_relayout();
         g_v7.speed_run = active;
         v7_display("speedRunHolder", active ? "block" : "none"); // f1889: none, then custUI
         if (active) {

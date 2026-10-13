@@ -93,6 +93,10 @@ void     html_dom_code_lines(HtmlElem, const HtmlCodeLine *lines, int n);
 // RGBA8, row 0 on top, w x h px. The C UI draws on the CPU (client/src/ui/canvas2d.c).
 void     html_dom_canvas_put(HtmlElem canvas, const unsigned char *rgba, int w, int h);
 int      html_dom_get_rect(HtmlElem, HtmlRect *out);
+// What a player sees of the element (tests: the input script's `vis`): 1 when it is rendered
+// (no display:none on it or an ancestor), not visibility:hidden, its opacity (times its
+// ancestors') above 0 and it covers a non-empty area (its own box or what overflows it).
+int      html_dom_is_shown(HtmlElem);
 float    html_dom_offset_width(HtmlElem);
 float    html_dom_offset_height(HtmlElem);
 void     html_dom_viewport(float *w, float *h, float *dpr);          // innerWidth/innerHeight/devicePixelRatio

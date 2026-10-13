@@ -197,7 +197,10 @@ static void update_prompt(Client *client) {
             html_dom_set_html(msg, html);
             snprintf(g_interact.prompt, sizeof(g_interact.prompt), "%s", html);
         }
-        if (!g_interact.prompt_shown) html_dom_set_display(msg, "block");
+        // v7 updateInteract writes the display every frame: the HUD's passes (toggleGameUI,
+        // the visibility pass, the spectator HUD) hide #interactMsg without telling us.
+        char display[16];
+        if (html_dom_get_style(msg, "display", display, sizeof(display)) < 0 || strcmp(display, "block") != 0) html_dom_set_display(msg, "block");
         g_interact.prompt_shown = 1;
     } else if (g_interact.prompt_shown) {
         html_dom_set_html(msg, "");

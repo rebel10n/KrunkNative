@@ -116,7 +116,6 @@ static void hs_apply_shown(void) {
     hs_set_display("overlay", "block");
     hs_set_display("vignette", "block");
     hs_set_display("aimRecticle", "block");
-    hs_set_display("chatUI", "block");
     hs_set_display("interactMsg", "none");
     hs_set_display("knCrosshair", "none"); // hud_ui.c's player crosshair (overlay canvas: !spectating only)
     hs_set_display("knHitmarker", "none");
@@ -126,15 +125,15 @@ static void hs_apply_shown(void) {
     if (base && !html_dom_has_class(base, "onSpect")) html_dom_set_class(base, "onSpect", 1);
 }
 
-// toggleControlUI(false) (menu / end screen over the spectator view); the chat stays.
-static void hs_apply_hidden(const int still_spectating) {
+// toggleControlUI(false) (menu / end screen over the spectator view). The chat (#chatUI) is
+// never written here: v7 sets it only from the showUI setting (hud_ui.c owns it).
+static void hs_apply_hidden(void) {
     hs_set_display("spectateUI", "none");
     hs_set_display("inGameUI", "none");
     hs_set_display("customGUIHolder", "none");
     hs_set_display("overlay", "none");
     hs_set_display("vignette", "none");
     hs_set_display("aimRecticle", "none");
-    if (still_spectating) hs_set_display("chatUI", "block");
     // toggleControlUI(false) drops .onGame (toggleMenuHider(true) drops .onSpect): the chat
     // goes back to its .onMenu place beside the menu instead of staying at the in-game one.
     const HtmlElem base = html_dom_by_id("uiBase");
@@ -469,15 +468,15 @@ void hud_spectate_tick(Client *client) {
 
     if (!active) {
         if (g_hs.was_active) {
-            // Spectating ended (own spawn, INIT, disconnect): hud_ui.c takes the HUD back;
-            // toggleGameUI(true) without Bf5 puts the chat back above the player HUD.
-            const int playing = client->in_game && !html_ui_is_menu_open(); // entering the game (SPAWN pending or done)
+            // Spectating ended (own spawn, INIT, disconnect): hud_ui.c takes the HUD back. Its
+            // visibility pass re-applies every holder hs_apply_shown wrote for the current state
+            // (playing, dead, menu): with no spawn in between (INIT, disconnect) nothing else
+            // would, and the spectator's #inGameUI / #overlay / .onGame would stay.
             hs_set_display("spectateUI", "none");
             hs_set_display("knSpecCross", "none");
-            if (!client->me) hs_set_display("chatUI", "none");
-            (void) playing; // the chat's place follows uiBase.onGame (main.css)
             const HtmlElem base = html_dom_by_id("uiBase");
             if (base) html_dom_set_class(base, "onSpect", 0);
+            hud_ui_relayout();
             g_hs.shown = -1;
         }
         g_hs.was_active = 0;
@@ -487,12 +486,9 @@ void hud_spectate_tick(Client *client) {
     g_hs.was_active = 1;
 
     if (shown) hs_apply_shown(); // every frame: only differing inline styles are written
-    else if (g_hs.shown != 0) hs_apply_hidden(1);
+    else if (g_hs.shown != 0) hs_apply_hidden();
     g_hs.shown = shown;
-    if (!shown) {
-        hs_set_display("chatUI", "block");
-        return;
-    }
+    if (!shown) return;
 
     hs_update_slots(client);
     hs_update_stats(client);

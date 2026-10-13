@@ -265,6 +265,10 @@ int sprays_wheel_opened(void) {
     return g_wheel.open && g_wheel.timer >= SPRAY_WHEEL_DELAY; // sprayWheelOpened
 }
 
+int sprays_wheel_shown(void) {
+    return g_wheel.drawn;
+}
+
 // sprayWheelChange(dir): wraps over the list (v7 wraps at sprayWheelMax whatever the list holds).
 void sprays_wheel_change(const int step) {
     if (g_wheel.count <= 0) return;
@@ -322,12 +326,17 @@ static void wheel_advance(const int i, const ViewerSkin *skin, const float delta
 }
 
 // game-overlay.js render: the spray wheel, centred, while it is open and the player is alive (no
-// death screen) with the menu closed (v9926). v7 also hides it under a sniper's scope image (v9929),
-// which KrunkNative draws on the page, not on this canvas: the wheel shows over it.
+// death screen) with the menu and the end screen down (v9926: endUI / menuHolder / the death UI
+// shown hide it). v7 also hides it under a sniper's scope image (v9929), which KrunkNative draws
+// on the page, not on this canvas: the wheel shows over it.
 void sprays_wheel_render(Client *client, const float delta_seconds) {
     const float delta_ms = delta_seconds * 1000.0f;
+    // io_killPlayer: sprayWheelClose() for the local player; a key still held at the respawn
+    // does not bring it back (it opens on a press)
+    if (g_wheel.open && client && client->me && !client->me->active) sprays_wheel_close();
     if (g_wheel.open) g_wheel.timer += delta_seconds; // sprayWheelUpdate
-    const int show = sprays_wheel_opened() && g_wheel.count > 0 && client && client->me && client->me->active && !html_ui_is_menu_open();
+    const int show = sprays_wheel_opened() && g_wheel.count > 0 && client && client->me && client->me->active && !html_ui_is_menu_open() &&
+                     !hud_ui_end_screen_up();
     if (!show && !g_wheel.drawn) return;
 
     GLFWwindow *window = headless_current_window();

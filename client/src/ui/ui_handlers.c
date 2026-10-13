@@ -671,6 +671,22 @@ static int target_is_form_control(const HtmlElem el) {
     return !strcmp(tag, "input") || !strcmp(tag, "textarea") || !strcmp(tag, "select");
 }
 
+// A control that takes typed text (Escape leaves it): not a checkbox / radio / range / button,
+// which keep the focus after a click (the menu's Spectate switch, a settings toggle) and must
+// not swallow the Escape that closes the menu.
+static int target_takes_text(const HtmlElem el) {
+    char tag[16], type[16] = "";
+    if (!el || html_dom_tag(el, tag, sizeof(tag)) <= 0) return 0;
+    if (strcmp(tag, "input") != 0) return !strcmp(tag, "textarea") || !strcmp(tag, "select");
+    if (html_dom_get_attr(el, "type", type, sizeof(type)) < 0) return 1;
+    for (char *c = type; *c; c++) *c = (char) (*c >= 'A' && *c <= 'Z' ? *c + 32 : *c);
+    static const char *const NO_TEXT[] = {"checkbox", "radio", "range", "button", "submit", "reset", "color", "file", "image"};
+    for (size_t i = 0; i < sizeof(NO_TEXT) / sizeof(NO_TEXT[0]); i++) {
+        if (!strcmp(type, NO_TEXT[i])) return 0;
+    }
+    return 1;
+}
+
 // Keys typed into menu inputs must not reach the game: Escape blurs the focused input
 // (document capture listener in krunknative.js, which also stopped propagation) and
 // Enter in #accName commits the nickname. Otherwise ESC closes an open window first
@@ -684,7 +700,11 @@ static int l_window_keydown(void *user, const HtmlEvent *ev, const HtmlArg *args
     // web: GLFW's keydown (window capture) already bound this key in the controls window
     if (ui_controls_take_swallowed_key()) return 0;
     if (ui_console_page_key(ev)) return 0; // Enter/Escape/Tab/arrows/` in the console input
-    if (target_is_form_control(ev->target)) {
+    // Escape on a focused switch / button (focused by its click) blurs it and goes on to the
+    // menu below; a text field keeps it (blur only).
+    const int escape_control = html_key_is_escape(ev->key) && target_is_form_control(ev->target) && !target_takes_text(ev->target);
+    if (escape_control) html_dom_blur(ev->target);
+    if (target_is_form_control(ev->target) && !escape_control) {
         // Enter in #chatInput (menu chat natively, every chat Enter on the web): send/blur.
         // Natively in game main.c routes the chat key before the page sees it.
         if (html_key_is_enter(ev->key) && ev->target == html_dom_by_id("chatInput")) {
@@ -709,6 +729,9 @@ static int l_window_keydown(void *user, const HtmlEvent *ev, const HtmlArg *args
             menu_toggle_window(0);
             return 0;
         }
+        // The Lost Connection screen stays (v7 f2040: no way back into the dead session); its
+        // tabs (Reconnect, Find a Game, ...) leave it.
+        if (ui->menu_open && menu_error_screen_shown()) return 0;
 #ifdef __EMSCRIPTEN__
         // Web: Escape never leaves the menu (v3.1.1 pressButton(27) only toggles the end
         // screen). Escape is no user activation, and the browser ends a pointer lock taken

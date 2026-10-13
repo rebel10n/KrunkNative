@@ -3,6 +3,7 @@
 // endData.mts, updMatchVote ("mv") writes each card's total and colours our pick, voteOnMatch
 // sends "maVote".
 #include <lobby_ui.h>
+#include <ui_logic.h> // hud_ui_on_config
 #include <game_config.h>
 #include <map_catalog.h>
 #include <modes.h>
@@ -154,7 +155,9 @@ int lobby_vote_handler(void *user, const HtmlEvent *ev, const HtmlArg *args, con
 int lobby_events_handle(Client *client, const int type, const void *payload, const uint16_t length) {
     switch (type) {
         case NET_PACKET_GAME_CONFIG:
-            game_config_receive(&client->game, payload, length);
+            // v7 gets the config inside its init; here it may follow the INIT (a HELLO still on
+            // its way): the round's page parts that depend on it (the comp menu) follow it too
+            if (game_config_receive(&client->game, payload, length)) hud_ui_on_config(client);
             return 1;
         case NET_PACKET_NETWORK_DATA: {
             NetNetworkDataPacket packet;

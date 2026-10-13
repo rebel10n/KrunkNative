@@ -1324,7 +1324,9 @@ int ui_controls_key_event(Client *client, const int key, const int scancode, con
 
     // pressButton(27): N() lets Escape through while the controls are disabled, and
     // pressButton toggles the end-screen results <-> the menu (UI.toggleEndScreen).
-    if (press && code == 27 && hud_ui_toggle_end_screen(client)) {
+    // A menu window open over the results' menu closes first (the page's Escape, ui_handlers.c),
+    // like everywhere else in the menu; the next Escape brings the results back.
+    if (press && code == 27 && !(menu && menu_window_is_open()) && hud_ui_toggle_end_screen(client)) {
 #ifdef __EMSCRIPTEN__
         g_ctl.swallowed_key = 1; // the page's own Escape handling (ui_handlers.c) must not run too
 #endif
