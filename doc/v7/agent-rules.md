@@ -34,3 +34,9 @@ The shared checkout /home/user/src/KrunkNative is the integration tree: it must 
     patch from a fresh worktree of origin/main with your changes applied), then `git diff --binary origin/main`.
     A patch made from a stale base silently reverts other people's commits (it happened: 557c53e put back the
     push trigger of Deploy kru). State the exact base commit in your report.
+12. Rebase with git (commit your work in the worktree's detached HEAD and `git rebase origin/main`, or apply your
+    own patch onto a fresh worktree of origin/main); never bring a worktree "up to date" by copying files, or by
+    `git diff` against a newer origin/main than the files you started from. Either way, the diff then removes every
+    change that landed in those files in between, and the patch still applies cleanly (it happened: 0bf1b86
+    undid all of 72c5dec). Check before sending: `git diff origin/main --stat` must list only files you changed on
+    purpose, and no hunk may remove lines you didn't write.
