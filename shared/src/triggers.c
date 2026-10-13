@@ -155,6 +155,17 @@ void game_play_sound(Game *game, const char *name, const int uid, const vec3 pos
     game_send(game, NET_TARGET_ALL, NET_PACKET_SOUND, &packet, sizeof(packet)); // active or spectating, the source too (a6)
 }
 
+// io_foundJunk (index.js:1563-1576): io_addChat(-1, null, "<span style='color:#fff'>You</span>
+// found <span style='color:#cc51f8'>[" + parseFloat(junk).toFixed(2) + "]</span> Junk", 1).
+void game_found_junk(Game *game, const Player *player, const double amount) {
+    if (!game_is_authority(game) || !player) return;
+    char text[64];
+    snprintf(text, sizeof(text), "You found [%.2f] Junk", amount);
+    NetChatPacket packet;
+    net_packet_chat(&packet, -1, NET_CHAT_FOUND_JUNK, NULL, text);
+    game_send(game, player->uid, NET_PACKET_CHAT, &packet, sizeof(packet));
+}
+
 // ---------------------------------------------------------------- positions
 
 // game_change_position (players.changePosition): shared/src/world.c (map-logic WP-B).

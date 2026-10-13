@@ -10,7 +10,9 @@
 // KN notes:
 // - The KR / Junk / Skin packages pay into the account (additionalReward, sendUserJunk,
 //   giveSkin). KN has no backend call for that yet (decisions.md "Backend-only triggers"), so
-//   they are claimed (the "krp" line goes out) but pay nothing.
+//   they are claimed (the "krp" line goes out) but pay nothing. A Junk Package still prints
+//   sendUserJunk's "You found [x] Junk" for a claimer with an account (game_found_junk; KN has no
+//   junk wallet, decisions.md "Reward Junk").
 // - The trapped explosion goes through game_explosion, which hurts its source by a fifth; v7
 //   skips the source of a streak explosion (data.stk). The source is the drop's owner, who sees
 //   the real package and so normally doesn't claim it.
@@ -241,8 +243,11 @@ static void package_claim(Game *game, AirDrop *d, Player *claimer) {
             game_explosion(game, at, 50.0f, 300.0f, owner ? owner : claimer, -1);
             break;
         }
-        default: // KR / Junk / Skin: account rewards, no backend call yet (see the header)
+        default: { // KR / Junk / Skin: account rewards, no backend call yet (see the header)
+            static const double k_junk[7] = {0.05, 0.1, 0.2, 0.3, 0.5, 1.0, 2.5}; // the Junk Packages by rarity
+            if (p->icon == 3 && claimer->has_account && p->rarity >= 0 && p->rarity < 7) game_found_junk(game, claimer, k_junk[p->rarity]);
             break;
+        }
     }
 }
 

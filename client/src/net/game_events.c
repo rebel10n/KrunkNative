@@ -340,6 +340,9 @@ static void events_chat(const NetChatPacket *packet) {
         case NET_CHAT_SERVER:
             hud_ui_add_chat(NULL, text, SERVER_CHAT_COLOR);
             break;
+        case NET_CHAT_FOUND_JUNK: // io_foundJunk
+            hud_ui_found_junk(text);
+            break;
         default:
             hud_ui_add_chat(NULL, text, NULL);
             break;

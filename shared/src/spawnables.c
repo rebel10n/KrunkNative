@@ -177,6 +177,12 @@ static void spawnable_refill_knife(Game *game, Player *player) {
     game_send(game, player->uid, NET_PACKET_REFILL, NULL, 0);
 }
 
+// game.playSound(name, 1.2, sid, x, y, z, true) of the weapon / ammo onPickups (medals.js:293,
+// :332, :359, :384): at the player, the player included
+static void spawnable_sound(Game *game, const Player *player, const char *name) {
+    game_play_sound(game, name, player->uid, player->position, 1.2f, 0.0f);
+}
+
 // medals.js onPickup / onCollision of one spawnable for one player (authority)
 static void spawnable_pickup(Game *game, Player *player, const int slot) {
     ModeSpawnable *spawnable = &game->mode->spawnables[slot];
@@ -228,6 +234,7 @@ static void spawnable_pickup(Game *game, Player *player, const int slot) {
             if (count < 10) count = mode_rand_int(8, 12);
             if (player->ammo && player->loadout_size) player->ammo[0] += (unsigned int) count;
             mode_send_loadout(game, player); // "uamo"
+            spawnable_sound(game, player, "reload_3");
             player_score(player, 5, 0);
             mode_send_medal(game, player, "Scavenger", 5);
             break;
@@ -240,9 +247,11 @@ static void spawnable_pickup(Game *game, Player *player, const int slot) {
                 player_score(player, 5, 0);
                 mode_send_medal(game, player, "Armed", 5);
             }
+            spawnable_sound(game, player, "reload_3");
             break;
         case SPAWNABLE_MELEE_PICKUP:
             spawnable_refill_knife(game, player);
+            spawnable_sound(game, player, "melee_equip");
             break;
         case SPAWNABLE_AMMO_CACHE: // every player: full ammo, knife back
             for (size_t i = 0; i < game->player_count; i++) {
@@ -257,6 +266,7 @@ static void spawnable_pickup(Game *game, Player *player, const int slot) {
                 zombies_reserves_reset(other); // WP-H: resetAmmo(true, true) refills the reserves too
                 if (zombies_finite_ammo(other)) zombies_send_reserves(other);
             }
+            spawnable_sound(game, player, "reload_3");
             break;
         case SPAWNABLE_NUKE: // every non-ally AI dies, every player +400
             for (int i = game->ai ? game->ai->count - 1 : -1; i >= 0; --i) {

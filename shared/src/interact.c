@@ -521,6 +521,15 @@ static void set_loadout(Game *game, Player *p, int *ids, unsigned int *ammo, con
     mode_send_loadout(game, p); // broadcast("inat", sid, loadout, loadoutIndex, ...)
 }
 
+// io_playerInteractions (index.js:14464-14475): an "inat" for you plays SOUND.play("pick_0", 0.2).
+// KN sends it to the picker of a type 6 pickup as a 2D sound (uid -2): NET_PACKET_LOADOUT also
+// stands in for "uamo" (ammo refills, silent in v7), so the client cannot play it per loadout.
+static void send_pick_sound(Game *game, const Player *p) {
+    NetSoundPacket packet = {.uid = -2, .volume = 0.2f, .rate = 1.0f};
+    snprintf(packet.name, sizeof(packet.name), "pick_0");
+    game_send(game, p->uid, NET_PACKET_SOUND, &packet, sizeof(packet));
+}
+
 // interact type 6: one targeted weapon pickup (players.js:3283-3367)
 static void use_pickup(Game *game, Player *p, const int uid) {
     GamePickup *k = pickup_of(game, uid);
@@ -541,6 +550,7 @@ static void use_pickup(Game *game, Player *p, const int uid) {
             p->ammo[slot] = have ? have->ammo : w->ammo;
             mode_send_loadout(game, p);
         }
+        send_pick_sound(game, p); // giveWeapon's "inat"
         if (price && !k->method) send_purchase(game, p, 0, price);
         return;
     }
@@ -581,6 +591,7 @@ static void use_pickup(Game *game, Player *p, const int uid) {
     }
     set_loadout(game, p, ids, ammo, count, !replaced, picked);
     pickup_send(game, NET_TARGET_ALL, uid); // the pickup half of "inat" (pickupLeft, active)
+    send_pick_sound(game, p);
     if (k->score && !k->method) send_purchase(game, p, 0, k->score);
 }
 

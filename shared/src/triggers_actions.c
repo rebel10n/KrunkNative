@@ -10,8 +10,9 @@
 // and 57 Load Data go to the account backends of GameHooks (reward_kr, storage_save,
 // storage_load: kn_brain or the offline sandbox's file store, server/src/ks_storage.c; NULL =
 // nothing); 62 / 65 Give Challenge Progress tally the map's key for the account's challenges
-// (GameHooks.progress -> the stats commit); 59 Reward Junk, 60 Reward Skin and 67 video ads do
-// nothing (no store backend in the game server).
+// (GameHooks.progress -> the stats commit); 59 Reward Junk only prints the finder's chat line
+// (reward_junk: KN has no junk wallet); 60 Reward Skin and 67 video ads do nothing (no store
+// backend in the game server).
 // Select-index actions (47, 50, 51, 61, 64) index the runtime tables directly with the raw value,
 // as v7 does (§3.7 "Select-index quirk").
 #include <shared.h>
@@ -23,8 +24,10 @@
 #include <ks_storage_data.h> // WP6: Save Data keys / values
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <ruleset.h>
+#include <bots.h>
 
 #define CHAIN_OK(game, chain) trigger_chain_left(game, chain)
 
@@ -83,6 +86,26 @@ static void send_popup(Game *game, const int target, const char *text) {
     memset(&packet, 0, sizeof(packet));
     snprintf(packet.text, sizeof(packet.text), "%s", text); // "am" [text, null, 0, 1]
     game_send(game, target, NET_PACKET_POPUP, &packet, sizeof(packet));
+}
+
+// 59 Reward Junk (triggers.js:1392-1404): (!isSandbox && isPubType() && h.account) and v =
+// parseFloat(trigConstTx || 0) with !!v && !(v >= 100) -> game.sendUserJunk("trigger", h, v), whose
+// "jnk" reply prints "You found [v] Junk" for the finder (game_found_junk).
+// [KN] KrunkNative has no junk wallet (doc/v7/decisions.md "Reward Junk"): nothing is credited and
+// the line is the whole reward, so it shows in every game (sandbox and offline too) for any human
+// player; bots (never an account in v7) get nothing.
+static void reward_junk(Game *game, const Player *h, const TriggerActionData *a) {
+    if (!h || game_player_is_bot(game, h)) return;
+    const char *text = action_text(a);
+    double v = 0.0;
+    if (text) {
+        while (*text == ' ' || *text == '\t' || *text == '\n' || *text == '\r') text++;
+        const char *digits = text + (*text == '+' || *text == '-');
+        // parseFloat reads decimals only: "0x10" is 0, "inf" / "nan" NaN (strtod takes all three)
+        if (!(digits[0] == '0' && (digits[1] == 'x' || digits[1] == 'X'))) v = strtod(text, NULL);
+    }
+    if (isnan(v) || v == 0.0 || v >= 100.0) return;
+    game_found_junk(game, h, v);
 }
 
 static int has_account(const Game *game, const Player *player) {
@@ -698,7 +721,9 @@ void trigger_action_execute(Game *game, Player *h, const TriggerSource *j, const
             if (trigger_action_value(game, h, j, NULL, a, a->constant, &value)) hooks->set_entity_value(game, tag, key, value);
             break;
         }
-        case TRIGGER_ACTION_REWARD_JUNK:    // public games only
+        case TRIGGER_ACTION_REWARD_JUNK:
+            reward_junk(game, h, a);
+            break;
         case TRIGGER_ACTION_REWARD_SKIN:    // public games only
         case TRIGGER_ACTION_VIDEO_AD:       // "vad": no ads natively
         default:

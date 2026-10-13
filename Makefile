@@ -421,6 +421,10 @@ idle-kick-e2e: build ## Server idle kick: shooting / strafing / looking / chatti
 ruleset-e2e: build ## Version toggle on server_bin: server.cfg ruleset / --ruleset v10, INIT ruleset, v7-only peers refused, server-info ruleset
 	timeout 120 $(PYTHON) -I server/tests/ruleset_e2e.py $(DEBUG_DIR)
 
+.PHONY: pickup-chat-e2e
+pickup-chat-e2e: build ## Pickup feedback on server_bin: Object Manager Junk + G prints "You found [0.01] Junk" to the finder only, a weapon pickup plays pick_0
+	timeout 120 $(PYTHON) -I server/tests/pickup_chat_e2e.py $(DEBUG_DIR)
+
 .PHONY: reconnect-test
 reconnect-test: build ## Reconnect key (F5) online + offline, console sandbox / offline <map>, --sandbox (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I server/tests/reconnect_key_e2e.py $(DEBUG_DIR)

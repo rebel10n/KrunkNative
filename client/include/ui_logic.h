@@ -271,6 +271,7 @@ void hud_ui_add_reward_skin(int skin);
 void hud_ui_end_refresh(void); // re-render the end screen tab (the Battle Pass bpData came in late)
 void hud_ui_end_results_now(const Client*); // --render-scenario endscreen.results: skip config.endAnim
 void hud_ui_skin_found(Client*, int uid, int skin); // season-system: NET_PACKET_SKIN_FOUND (v7 "skin" / "skinF")
+void hud_ui_found_junk(const char *line);           // NET_CHAT_FOUND_JUNK "You found [x.xx] Junk" (v7 io_foundJunk)
 void hud_ui_end_challenge_completed(int icon, const char *name);
 void hud_ui_render_team(const Client*);     // the player card's team type / name (io_updateTeam, isYou)
 int  hud_ui_end_screen_up(void);            // END to INIT (title animation or results): no menu over it unless toggled

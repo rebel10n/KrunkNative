@@ -1250,8 +1250,49 @@ static void test_interact_hold(Game *game) {
         CHECK(scan.last_type == GAME_INTERACT_KEY && scan.last_uid == 0, "Junk prompt: type 7 (%d)", scan.last_type);
         CHECK(a->interact_progress == 0.0f, "no bar for a press interact");
         game->now += 1.0f;
+        g_sent_count = 0;
         game_player_interact_v7(game, a, GAME_INTERACT_KEY, 0, 0);
         CHECK(!junk->active, "one press takes the Junk at once (v7 has no hold for onInteractKey)");
+        // 59 Reward Junk "0.01": sendUserJunk's "jnk" -> io_foundJunk, the finder's own line
+        const SentPacket *line = find_sent(NET_PACKET_CHAT, a->uid, 0);
+        NetChatPacket chat = {0};
+        if (line && line->length == sizeof(chat)) memcpy(&chat, line->payload, sizeof(chat));
+        CHECK(line && chat.uid == -1 && chat.kind == NET_CHAT_FOUND_JUNK && !strcmp(chat.text, "You found [0.01] Junk"),
+              "Junk: \"You found [0.01] Junk\" to the finder (%s)", line ? chat.text : "no CHAT");
+        CHECK(!find_sent(NET_PACKET_CHAT, NET_TARGET_ALL, 0) && !find_sent(NET_PACKET_CHAT, -2, 1), "Junk: the line is the finder's only");
+
+        // the Amount: parseFloat(tct || 0), non-zero and < 100 (toFixed(2)); bots have no account
+        TriggerActionData *reward = junk->trig->action_count == 2 ? &junk->trig->actions[1] : NULL;
+        CHECK(reward && reward->action == TRIGGER_ACTION_REWARD_JUNK, "Junk: the second action is Reward Junk");
+        static const struct { const char *tct; const char *line; } amounts[] = {
+            {" 2.5", "You found [2.50] Junk"}, {"99.999", "You found [100.00] Junk"}, {"-1", "You found [-1.00] Junk"},
+            {"100", NULL}, {"0", NULL}, {"abc", NULL}, {"0x10", NULL}, {"", NULL},
+        };
+        for (size_t i = 0; reward && i < sizeof(amounts) / sizeof(amounts[0]); i++) {
+            snprintf(reward->text, sizeof(reward->text), "%s", amounts[i].tct);
+            reward->has_text = amounts[i].tct[0] != 0;
+            junk->active = 1; // respawned ("su" single use: untriggered again)
+            junk->destroyed = 0;
+            junk->trig->triggered = 0;
+            game->now += 1.0f;
+            g_sent_count = 0;
+            game_player_interact_v7(game, a, GAME_INTERACT_KEY, 0, 0);
+            line = find_sent(NET_PACKET_CHAT, a->uid, 0);
+            memset(&chat, 0, sizeof(chat));
+            if (line && line->length == sizeof(chat)) memcpy(&chat, line->payload, sizeof(chat));
+            CHECK(!junk->active && (amounts[i].line ? line && !strcmp(chat.text, amounts[i].line) : !line),
+                  "Junk \"%s\": %s (%s)", amounts[i].tct, amounts[i].line ? amounts[i].line : "no line", line ? chat.text : "none");
+        }
+        if (reward) snprintf(reward->text, sizeof(reward->text), "0.01"), reward->has_text = 1;
+        junk->active = 1;
+        junk->destroyed = 0;
+        junk->trig->triggered = 0;
+        a->is_bot = 1;
+        game->now += 1.0f;
+        g_sent_count = 0;
+        game_player_interact_v7(game, a, GAME_INTERACT_KEY, 0, 0);
+        CHECK(!junk->active && !find_sent(NET_PACKET_CHAT, -2, 0), "Junk: a bot takes it without a line");
+        a->is_bot = 0;
         game->map->objects = saved;
         game->map->object_count = saved_count;
     }

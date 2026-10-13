@@ -1979,6 +1979,27 @@ void hud_ui_skin_found(Client *client, const int uid, const int skin_index) {
     hud_add_chat_markup(markup);
 }
 
+// v7 io_foundJunk's line: io_addChat(-1, null, "<span style='color:#fff'>You</span> found <span
+// style='color:#cc51f8'>[" + amount + "]</span> Junk", 1). `line` is the server's plain
+// "You found [x.xx] Junk"; anything else shows as a plain game line.
+void hud_ui_found_junk(const char *line) {
+    if (!html_ui_available() || !html_ui_is_ready() || !line) return;
+    static const char prefix[] = "You found [";
+    const char *amount = !strncmp(line, prefix, sizeof(prefix) - 1) ? line + sizeof(prefix) - 1 : NULL;
+    const char *end = amount ? strchr(amount, ']') : NULL;
+    if (!end || strcmp(end, "] Junk") != 0) {
+        hud_ui_add_chat(NULL, line, NULL);
+        return;
+    }
+    char raw[32], value[64], markup[256];
+    size_t len = 0;
+    value[0] = 0;
+    snprintf(raw, sizeof(raw), "%.*s", (int) (end - amount), amount);
+    hb_append_escaped(value, sizeof(value), &len, raw);
+    snprintf(markup, sizeof(markup), "<span style='color:#fff'>You</span> found <span style='color:#cc51f8'>[%s]</span> Junk", value);
+    hud_add_chat_markup(markup);
+}
+
 // Empties #chatList and marks the session's join lines as written (a scenario brings
 // its own chat history).
 void hud_ui_clear_chat(void) {

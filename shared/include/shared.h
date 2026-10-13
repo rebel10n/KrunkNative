@@ -2113,6 +2113,9 @@ int  game_spawn_at_checkpoint(Game*, Player*);          // respawn at the player
 // game.playSound -> "s" to every connection: `uid` >= 0 plays at that player (playerSound
 // sid), else at `position`. Names: config.emitterSounds / networkSounds, "asset:<id>" user assets.
 void game_play_sound(Game*, const char *name, int uid, vec3 position, float volume, float rate);
+// game.sendUserJunk's "jnk" reply (io_foundJunk): "You found [x.xx] Junk" to the finder only
+// (NET_CHAT_FOUND_JUNK). KN has no junk wallet: nothing is credited (doc/v7/decisions.md).
+void game_found_junk(Game*, const Player*, double amount);
 void game_set_endless(Game*, int on);   // /endless: pause the round clock (TIMER keeps the frozen value) / resume it from there
 void game_send_round_state(Game*, int uid); // TIMER (+ END while the end screen is up) for a joiner
 void game_player_left(Game*, Player*);   // drop references (nuke, damage) to a leaving player
@@ -2246,6 +2249,9 @@ typedef enum {
     NET_CHAT_PLAYER = 0,  // "<name>: <text>"
     NET_CHAT_GAME = 1,    // plain game line (gB type 1)
     NET_CHAT_SERVER = 2,  // server message, #fc03ec (gB type 2)
+    // v7 "jnk" -> io_foundJunk: the finder's "You found [x.xx] Junk" (text: that plain line; the
+    // client colours "You" and the amount). Older clients show it as a plain game line.
+    NET_CHAT_FOUND_JUNK = 3,
 } NetChatKind;
 
 enum {
