@@ -40,13 +40,15 @@
 //   100 flags                    log each mirrored CTF flag (position, carrier, team), its crystal / stand meshes and
 //                                its #tScoreM text: "[input_script] flag t=100 i=0 team=1 carrier=-1 pos=..."
 //   100 state                    log the held weapon slot, the menu / pointer lock state, position, ammo, ended,
-//                                the charge (chargeTime s, fullCharge), the reload and fire timers, the grapple / rope
+//                                the charge (chargeTime s, fullCharge), the reload and fire timers, the grapple / rope, the GLFW
+//                                cursor mode (cursor=normal: the mouse shows, disabled: locked to the game)
 //   100 con end                  a developer console command (the rest of the line: con bot_add 5)
 //   100 vis @dead endUI chatHolder  log what the player sees of these page elements (html_dom_is_shown):
 //                                "[input_script] vis t=100 @dead endUI=1 chatHolder=0" (- = no such id,
 //                                @words are labels). Not on the page: :preview (the menu's class
 //                                preview is drawn), :spray (the spray wheel is drawn), :objectives (the
-//                                objective modes' overlay layer drew: hud_objectives.c);
+//                                objective modes' overlay layer drew: hud_objectives.c), :cursor (the
+//                                mouse cursor shows: GLFW cursor mode normal);
 //                                UI state transition checks (server/tests/ui_transitions_e2e.py)
 //   100 scroll @grid knOmGrid    log scroll containers' scrollTop (html_dom_get_scroll), like vis:
 //                                "[input_script] scroll t=100 @grid knOmGrid=196.0" (- = no such id or
@@ -416,10 +418,12 @@ static void script_run(Client *client, const ScriptEvent *e) {
         }
         fprintf(stderr, "[input_script] om t=%.0f %s %d\n", g_script.time, what, id);
     } else if (!strcmp(e->cmd, "state")) {
-        // state: one log line with the held slot and the menu/lock state (scripted checks)
+        // state: one log line with the held slot and the menu/lock state (scripted checks); cursor =
+        // the window's GLFW cursor mode (normal: the player sees the mouse, disabled: the game has it)
         const Player *me = client->me;
+        const int cursor_mode = glfwGetInputMode(client->window, GLFW_CURSOR);
         fprintf(stderr, "[input_script] state t=%.0f slot=%d/%d weapon=%s menu=%d locked=%d pos=%.3f,%.3f,%.3f ammo=%d aim=%.2f ended=%d "
-                "charge=%.3f full=%d reload=%.2f fire=%.2f grapple=%d rope=%.1f\n",
+                "charge=%.3f full=%d reload=%.2f fire=%.2f grapple=%d rope=%.1f cursor=%s\n",
                 g_script.time, me ? me->loadout_index : -1, me ? (int) me->loadout_size : 0,
                 me && me->weapon ? me->weapon->name : "-", html_ui_available() && html_ui_is_menu_open(), client->mouse_state.locked,
                 me ? me->position.x : 0.0f, me ? me->position.y : 0.0f, me ? me->position.z : 0.0f,
@@ -427,7 +431,8 @@ static void script_run(Client *client, const ScriptEvent *e) {
                 me ? me->charge_time : 0.0f, me ? me->full_charge : 0, me ? me->reload_timer : 0.0f,
                 me && me->reloads && me->loadout_index >= 0 && me->loadout_index < me->loadout_size ? me->reloads[me->loadout_index] : 0.0f,
                 me ? me->grapple.active : 0,
-                me ? me->grapple.range : 0.0f);
+                me ? me->grapple.range : 0.0f,
+                cursor_mode == GLFW_CURSOR_NORMAL ? "normal" : cursor_mode == GLFW_CURSOR_DISABLED ? "disabled" : "hidden");
     } else if (!strcmp(e->cmd, "flags")) {
         // flags: one log line per mirrored flag (hud_modes: position, carrier, team) with its
         // crystal / stand meshes as drawn (mode_world) and the HUD text (CTF flag-cycle checks)
@@ -479,6 +484,10 @@ static void script_run(Client *client, const ScriptEvent *e) {
                 HtmlScroll sc;
                 if (el && html_dom_get_scroll(el, &sc)) n += snprintf(line + n, sizeof(line) - (size_t) n, " %s=%.1f", id, sc.top);
                 else n += snprintf(line + n, sizeof(line) - (size_t) n, " %s=-", id);
+                continue;
+            }
+            if (!strcmp(id, ":cursor")) {
+                n += snprintf(line + n, sizeof(line) - (size_t) n, " %s=%d", id, glfwGetInputMode(client->window, GLFW_CURSOR) == GLFW_CURSOR_NORMAL);
                 continue;
             }
             if (!strcmp(id, ":preview") || !strcmp(id, ":spray") || !strcmp(id, ":objectives")) {

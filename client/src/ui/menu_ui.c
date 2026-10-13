@@ -1014,6 +1014,13 @@ static void menu_request_play(const int offline) {
 
 void menu_play(void) {
     if (!can_play()) return;
+    // A click while the controls are off is CONTROLS.toggle(true); once the end screen shows its
+    // results, CONTROLS.disable() has locked them, so it only runs UI.toggleEndScreen(): the
+    // results come back over the menu and the pointer stays free for them (no lock request).
+    if (hud_ui_end_screen_interactive()) {
+        hud_ui_toggle_end_screen(g_ui.client);
+        return;
+    }
     request_pointer_lock_if_web();
     menu_request_play(0);
     menu_request_open(0);

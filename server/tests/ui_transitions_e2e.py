@@ -224,13 +224,13 @@ def sc_endscreen():
         1000 check @alive {HUD}
         1000 chat @alive game
         1500 con end
-        12000 check @end {RESULTS} spectateUI=0 deathUIHolder=0
+        12000 check @end {RESULTS} spectateUI=0 deathUIHolder=0 :cursor=1
         12000 chat @end end
         12500 esc
-        13500 check @end-esc {MENU}
+        13500 check @end-esc {MENU} :cursor=1
         13500 chat @end-esc menu
         14000 esc
-        15000 check @end-esc-esc {RESULTS}
+        15000 check @end-esc-esc {RESULTS} :cursor=1
         15000 chat @end-esc-esc end
         15500 esc
         16000 clickid menuBtnSettings
@@ -241,13 +241,51 @@ def sc_endscreen():
         19000 check @end-window-esc {RESULTS}
         19500 esc
         20000 clickid instructionHolder
-        21000 check @end-play-click {RESULTS}
+        21000 check @end-play-click {RESULTS} :cursor=1
         21500 con endless
         60000 respawn
-        64000 check @next-round {HUD} endUI=0 matchVoteHolder=0 endMidHolder=0 miniMapOverlay=1
+        64000 check @next-round {HUD} endUI=0 matchVoteHolder=0 endMidHolder=0 miniMapOverlay=1 :cursor=0
         64000 chat @next-round game
         64500 quit
     """, timeout=180)
+
+
+def sc_endscreen_cursor():
+    """The mouse on the end screen (v7 io_endGame: CONTROLS.disable() -> exitPointerLock once the
+    results show, config.endAnim after the END): hidden during the title, shown with the results,
+    also when the round ends with the menu open or while spectating, and when Click to Play over
+    the results only brings them back (CONTROLS.toggle(true) while locked: UI.toggleEndScreen())."""
+    run_client("endscreen-cursor", ["--offline", "--map", "kanji"], f"""
+        0 play
+        1000 check @alive {HUD} :cursor=0
+        1400 esc
+        1800 check @menu menuHolder=1 :cursor=1
+        2000 con end
+        6500 check @title endUI=1 menuHolder=0
+        12000 check @results {RESULTS} :cursor=1
+        12500 esc
+        13500 check @results-menu {MENU} :cursor=1
+        14000 clickid instructionHolder
+        15000 check @results-play-click {RESULTS} :cursor=1
+        15500 clickid instructionHolder
+        16500 check @results-click-again {RESULTS} :cursor=1
+        32000 check @next-round {HUD} endUI=0 :cursor=0
+        32500 quit
+    """)
+    run_client("endscreen-cursor-spect", ["--offline", "--map", "kanji"], """
+        0 menu
+        300 con bot_add 2
+        1100 clickid specBtn
+        1500 play
+        3000 check @spect spectateUI=1 menuHolder=0 :cursor=0
+        3500 con end
+        14000 check @spect-results endUI=1 endInfo=1 menuHolder=0 :cursor=1
+        14500 esc
+        15500 check @spect-results-menu menuHolder=1 endUI=0 :cursor=1
+        16000 clickid instructionHolder
+        17000 check @spect-results-play-click endUI=1 endInfo=1 menuHolder=0 :cursor=1
+        17500 quit
+    """)
 
 
 def sc_endscreen_team():
@@ -330,6 +368,35 @@ def sc_death_menu():
         18500 check @played-again {HUD} deathUIHolder=0
         18500 chat @played-again game
         19000 quit
+    """)
+
+
+def sc_forced_spawn():
+    """A forceSpawn mode (Mag Dump): after config.deathDelay the menu (CLICK TO PLAY) is up when the
+    server spawns the player on its own; the chat must leave the menu's place for the in-game one.
+    (The death card's toggleGameUI(false) / the spawn's toggleGameUI(true) never touch .onGame: a
+    pass that took them for it played the whole life with the chat at the menu's place.) Two
+    lives. KrunkNative leaves the menu on that spawn (client_player_spawned); v7 keeps it up until
+    a click (io_addPlayers leaves the UI alone)."""
+    run_client("forced-spawn", ["--offline", "--map", "kanji"], f"""
+        0 play
+        300 con mode md
+        3000 respawn
+        5000 check @alive {HUD}
+        5000 chat @alive game
+        5500 con kill
+        7300 check @dead deathUIHolder=1 menuHolder=0
+        7300 chat @dead death
+        9300 check @click-to-play menuHolder=1 instructionHolder=1 inGameUI=0
+        9300 chat @click-to-play menu
+        14000 check @forced-spawn inGameUI=1 menuHolder=0 deathUIHolder=0 chatUI=1
+        14000 chat @forced-spawn game
+        14500 con kill
+        18300 check @click-to-play-2 menuHolder=1 instructionHolder=1
+        18300 chat @click-to-play-2 menu
+        23000 check @forced-spawn-2 inGameUI=1 menuHolder=0 deathUIHolder=0
+        23000 chat @forced-spawn-2 game
+        23500 quit
     """)
 
 
@@ -673,7 +740,7 @@ def sc_lost_during_end():
         run_client("lost-end", ["--connect", f"127.0.0.1:{port}"], f"""
             0 play
             1000 con end
-            12000 check @end endUI=1 matchVoteHolder=?
+            12000 check @end endUI=1 matchVoteHolder=? :cursor=1
             12100 check @kill-server endUI=?
             24000 check @lost instructionsUpdate=1 endUI=0
             24500 esc
@@ -892,11 +959,12 @@ def sc_hub_items():
 
 
 SCENARIOS = {
-    "endscreen": sc_endscreen, "endscreen-tdm": sc_endscreen_team, "death": sc_death, "death-menu": sc_death_menu, "spectate": sc_spectate,
+    "endscreen": sc_endscreen, "endscreen-tdm": sc_endscreen_team, "death": sc_death, "death-menu": sc_death_menu, "forced-spawn": sc_forced_spawn, "spectate": sc_spectate,
     "map-change": sc_map_change, "interact": sc_interact, "custom-gui": sc_custom_gui, "krunkscript": sc_krunkscript,
     "spray": sc_spray, "windows": sc_windows, "online": sc_online, "lost-end": sc_lost_during_end, "outdated": sc_outdated,
     "comp": sc_comp, "om-scroll": sc_om_scroll, "skins-grid": sc_skins_grid, "hub-items": sc_hub_items,
 }
+SCENARIOS["endscreen-cursor"] = sc_endscreen_cursor
 
 
 def main():
