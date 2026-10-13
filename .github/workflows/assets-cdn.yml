@@ -1,0 +1,109 @@
+name: Asset CDN
+
+# The game content on the Cloudflare Pages asset CDN (deploy/pages/README.md "Asset CDN"):
+# deploy/pages/assets-cdn.sh mirrors the own origin (https://assets.krunk.io/: the launcher's
+# content index + the packaged files, what the native client gets) and deploys it to the Pages
+# project krunknative-assets on its *.pages.dev URL. Runs after every Deploy kru, every 6 hours
+# and by hand; it stops after one request when the CDN already has the origin's
+# assets/version.txt. Only new objects are downloaded (actions/cache) and only new files
+# uploaded (wrangler's hash check).
+# Variables: KN_ASSET_CDN=1 (the project exists), KN_ASSET_CDN_URL (its https://<sub>.pages.dev/),
+#            optional KN_ASSET_OWN_URL, KN_ASSET_CDN_PROJECT, KN_ASSET_CDN_EXCLUDE.
+# Secrets: CLOUDFLARE_API_TOKEN (Account > Cloudflare Pages > Edit), CLOUDFLARE_ACCOUNT_ID.
+on:
+  workflow_run:
+    workflows: ["Deploy kru"]
+    types: [completed]
+  schedule:
+    - cron: "41 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Deploy even when the CDN has the origin's version
+        type: boolean
+        default: false
+
+concurrency:
+  group: assets-cdn
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: >-
+      vars.KN_ASSET_CDN == '1' &&
+      (github.event_name != 'workflow_run' ||
+       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      KN_ASSET_OWN_URL: ${{ vars.KN_ASSET_OWN_URL }}
+      KN_ASSET_CDN_URL: ${{ vars.KN_ASSET_CDN_URL }}
+      KN_ASSET_CDN_PROJECT: ${{ vars.KN_ASSET_CDN_PROJECT }}
+      KN_ASSET_CDN_EXCLUDE: ${{ vars.KN_ASSET_CDN_EXCLUDE }}
+      KN_ASSET_CDN_OBJECTS: ${{ github.workspace }}/.objects
+      KN_ASSET_CDN_FORCE: "1" # checked below
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Versions
+        id: v
+        run: |
+          set -euo pipefail
+          . deploy/pages/site.sh
+          version=$(curl -fsS "${KN_ASSET_OWN_URL}assets/version.txt" | tr -d '[:space:]')
+          state=changed
+          if [ -n "$KN_ASSET_CDN_URL" ]; then
+            state=$(python3 -I deploy/pages/assets_cdn.py dist/assets-cdn --origin "$KN_ASSET_OWN_URL" --current "$KN_ASSET_CDN_URL")
+          fi
+          [ "${{ inputs.force }}" = true ] && state=changed
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "state=$state" >> "$GITHUB_OUTPUT"
+          echo "own origin $version: CDN $state" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Restore the object cache
+        if: steps.v.outputs.state == 'changed'
+        uses: actions/cache/restore@v6
+        with:
+          path: .objects
+          key: kn-assets-objects-${{ steps.v.outputs.version }}
+          restore-keys: kn-assets-objects-
+
+      - uses: actions/setup-node@v7
+        if: steps.v.outputs.state == 'changed'
+        with:
+          node-version: 22
+
+      - name: Mirror and deploy (deploy/pages/assets-cdn.sh)
+        if: steps.v.outputs.state == 'changed'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: deploy/pages/assets-cdn.sh
+
+      - name: Save the object cache
+        if: steps.v.outputs.state == 'changed'
+        uses: actions/cache/save@v6
+        with:
+          path: .objects
+          key: kn-assets-objects-${{ steps.v.outputs.version }}
+
+      # The deployed CDN answers like the page expects: the version, CORS, a byte range.
+      - name: Verify
+        if: steps.v.outputs.state == 'changed' && vars.KN_ASSET_CDN_URL != ''
+        run: |
+          set -euo pipefail
+          cdn="$KN_ASSET_CDN_URL"
+          want="${{ steps.v.outputs.version }}"
+          for _ in $(seq 30); do
+            got=$(curl -fsS "${cdn}assets/version.txt" | tr -d '[:space:]') || got=
+            [ "$got" = "$want" ] && break
+            sleep 10
+          done
+          [ "$got" = "$want" ] || { echo "::error::${cdn}assets/version.txt is '$got', not $want"; exit 1; }
+          h=$(curl -fsS -o /dev/null -D - -H 'Origin: https://krunk.io' -H 'Range: bytes=0-15' "${cdn}assets/img/icon.png?v=$want")
+          echo "$h"
+          grep -qi '^access-control-allow-origin: \*' <<< "$h" || { echo "::error::no CORS header"; exit 1; }
+          grep -qi '^HTTP/[0-9.]* 206' <<< "$h" || echo "::warning::no 206 for a byte range"

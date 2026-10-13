@@ -379,6 +379,14 @@ jobs:
           test -f dist/web/js/loader.js
           ls -la dist/web
 
+      # What deploy-kru.yml publishes on GitHub Pages (deploy/pages/README.md), staged once to
+      # catch a broken page before main: kn-config.json, the meta knobs, the Pages limits.
+      - name: Stage for GitHub Pages (check)
+        env:
+          KN_PAGES_LIVE_URL: ""
+          KN_GH_PAGES_STAGE: ${{ runner.temp }}/gh-pages
+        run: deploy/pages/github.sh && cat "$KN_GH_PAGES_STAGE/kn-config.json"
+
       # dist/web/assets is a symlink/copy of the (gitignored, ~1.5 GB) game
       # assets; it is never shipped in the artifact.
       - name: Stage web artifact (without assets/)
@@ -395,45 +403,6 @@ jobs:
           name: KrunkNative-web
           path: stage/web/**
           if-no-files-found: error
-
-  pages:
-    name: Deploy web build to GitHub Pages
-    needs: web
-    # krunk.io is served from Cloudflare Pages (deploy/pages); this GitHub Pages mirror only runs
-    # once Pages is enabled for the repository and the variable GH_PAGES is "1".
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.GH_PAGES == '1'
-    runs-on: ubuntu-latest
-    continue-on-error: false
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    concurrency:
-      group: pages
-      cancel-in-progress: false
-    steps:
-      - name: Download web build
-        uses: actions/download-artifact@v8
-        with:
-          name: KrunkNative-web
-          path: stage/web
-
-      - name: Configure Pages
-        uses: actions/configure-pages@v6
-
-      # The published page has no game assets (models/textures 404) and no
-      # /native bridge; only the `?offline=1` embedded-server path is usable.
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v5
-        with:
-          path: stage/web
-
-      - name: Deploy
-        id: deployment
-        uses: actions/deploy-pages@v5
 
   # Krunker's mobile apps wrapped the web game; platform/android does the same with
   # the web client from the `web` job bundled into the APK (platform/README.md).

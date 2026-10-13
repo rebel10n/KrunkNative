@@ -1,0 +1,74 @@
+name: Pages
+
+# Republish the front end on GitHub Pages without building anything (deploy/pages/README.md
+# "Asset origins"): the web build of the last successful Deploy kru, restaged with the current
+# repository variables (deploy/pages/site.sh: KN_ASSET_ORIGIN, KN_ASSET_FALLBACK, KN_ASSET_*_URL,
+# KN_PAGES_CNAME). E.g. moving the page to the other asset origin:
+#   gh variable set KN_ASSET_ORIGIN --body own && gh workflow run pages.yml
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stage:
+    if: github.ref == 'refs/heads/main' && vars.GH_PAGES == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read # the artifact of another run
+    env:
+      KN_ASSET_ORIGIN: ${{ vars.KN_ASSET_ORIGIN }}
+      KN_ASSET_FALLBACK: ${{ vars.KN_ASSET_FALLBACK }}
+      KN_ASSET_OWN_URL: ${{ vars.KN_ASSET_OWN_URL }}
+      KN_ASSET_CDN_URL: ${{ vars.KN_ASSET_CDN_URL }}
+      KN_PAGES_CNAME: ${{ vars.KN_PAGES_CNAME }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Last deployed web build
+        id: run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          id=$(gh run list -R "$GITHUB_REPOSITORY" --workflow deploy-kru.yml --branch main --status success \
+            --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          [ -n "$id" ] || { echo "::error::no successful Deploy kru run on main"; exit 1; }
+          echo "Deploy kru run $id" >> "$GITHUB_STEP_SUMMARY"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: KrunkNative-web-deployed
+          path: dist/web
+          run-id: ${{ steps.run.outputs.id }}
+          github-token: ${{ github.token }}
+
+      # The live site is this very project now: keep its client files for cached pages.
+      - name: Stage front end (GitHub Pages)
+        run: deploy/pages/github.sh dist/web
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist/gh-pages
+
+  pages:
+    needs: stage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

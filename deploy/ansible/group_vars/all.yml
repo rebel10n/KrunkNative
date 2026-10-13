@@ -27,11 +27,13 @@ kn_web_dist: "{{ kn_repo_root }}/dist/web"
 kn_domain: krunk.io
 kn_matchmaker_url: "https://matchmaker.{{ kn_domain }}"
 kn_coordinator_url: "https://coordinator.{{ kn_domain }}"
-# Page origins allowed to call the brains (CORS): the Pages front end (krunk.io, www.,
-# the pages.dev preview) and the legacy domain, whose subdomains stay up for old clients.
+# Page origins allowed to call the brains (CORS): the front end (krunk.io, www.), its GitHub
+# Pages address (before the custom domain is set; deploy/pages/README.md "Cutover"), the old
+# Cloudflare Pages project and the legacy domain, whose subdomains stay up for old clients.
 kn_web_origins:
   - "https://{{ kn_domain }}"
   - "https://www.{{ kn_domain }}"
+  - "https://rebel10n.github.io"
   - "https://krunknative.pages.dev"
   - "https://krunker.party"
 

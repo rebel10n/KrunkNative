@@ -193,25 +193,20 @@ The bridge listens on `KRUNK_NATIVE_BRIDGE_HOST:KRUNK_NATIVE_BRIDGE_PORT`
 (default `127.0.0.1:8080`). Set `KRUNK_NATIVE_WEB_COI=1` if the build uses
 threads and needs `SharedArrayBuffer` (adds the COOP/COEP headers).
 
-CI builds the web client on every push (`KrunkNative-web` artifact) and
-publishes it to GitHub Pages on pushes to `main`. The published page carries
-**no game assets** (they are ~1.5 GB and not in the repo), so models and
-textures 404 there, and there is no `/native` bridge behind GitHub Pages;
-only the `?offline=1` path is usable on the hosted page. It is meant as a
-smoke test of the build, not as a playable deployment. Pages must be set to
-"GitHub Actions" as the source in the repository settings for the deploy job
-to succeed.
+CI builds the web client on every push (`KrunkNative-web` artifact).
 
-The playable deployment is **https://krunk.io**: the page on Cloudflare Pages
-(`make pages`), game content from `assets.krunk.io` and the services on the
-central node (`deploy/pages/README.md`, `deploy/ansible/README.md`). The old
-`krunker.party` site redirects there.
+The playable deployment is **https://krunk.io**: the page on GitHub Pages (published by
+deploy-kru.yml after the services; `make pages-github` stages it locally), the game content
+from one of two asset origins the page picks at run time (`kn-config.json`: the Cloudflare
+Pages asset CDN on its pages.dev URL, or `assets.krunk.io`) and the services on the central
+node (`deploy/pages/README.md`, `deploy/ansible/README.md`). The old `krunker.party` site
+redirects there.
 
 Google Analytics is configured by one setting, `KN_GA_ID` (a GA4 measurement id
 `G-...`; empty or `off` disables it). The `ui/` pages never contain it (the native
 engine renders them); `deploy/pages/ga.py` puts Google's gtag.js snippet right after
-`<head>` of every page at web build/deploy time. `make pages` / `deploy/pages/deploy.sh`
-default to `G-6EGYKRF020` (krunk.io); `make web` is off unless asked
+`<head>` of every page at web build/deploy time. The published site (`deploy/pages/site.sh`)
+defaults to `G-6EGYKRF020` (krunk.io); `make web` is off unless asked
 (`make web KN_GA_ID=G-...`, then `make web-serve` or `make bridge` serve it with the tag).
 
 # HTML UI (in-house engine)

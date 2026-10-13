@@ -98,14 +98,23 @@ static void web_asset_mark_missing(const char *path) {
 // Module.krunkNativeAssetBase ("" = relative to the page, else e.g.
 // "https://assets.krunk.io/"), plus "?v=<Module.krunkNativeAssetVersion>" when the
 // asset host published one (assets/version.txt, read by ui/js/loader.js): versioned
-// URLs are immutable, unversioned ones revalidate (deploy/README.md "Caching").
+// URLs are immutable, unversioned ones revalidate (deploy/pages/README.md "Caching").
+// fallback = 1: the same path below Module.krunkNativeAssetFallback, the second asset
+// origin a failed download is retried on (loader.js, kn-config.json "asset_fallback";
+// deploy/pages/README.md "Asset origins"); NULL when there is none.
 // Returned string is malloc'd and owned by the caller.
-EM_JS(char *, web_asset_url, (const char *path_ptr), {
+EM_JS(char *, web_asset_url_at, (const char *path_ptr, int fallback), {
+    var base = fallback ? Module.krunkNativeAssetFallback : Module.krunkNativeAssetBase;
+    if (fallback && !base) return 0;
     var path = UTF8ToString(path_ptr);
-    var url = (Module.krunkNativeAssetBase || '') + (path.charAt(0) === '/' ? path.substring(1) : path);
+    var url = (base || '') + (path.charAt(0) === '/' ? path.substring(1) : path);
     if (Module.krunkNativeAssetVersion) url += '?v=' + encodeURIComponent(Module.krunkNativeAssetVersion);
     return stringToNewUTF8(url);
 });
+
+static char *web_asset_url(const char *path) {
+    return web_asset_url_at(path, 0);
+}
 
 char *asset_url(const char *path) {
     return path ? web_asset_url(path) : NULL;
@@ -131,6 +140,17 @@ int ensure_asset_file(const char *path) {
     int error = 0;
 
     emscripten_wget_data(url, &data, &size, &error);
+
+    char *fallback = error || !data ? web_asset_url_at(path, 1) : NULL;
+    if (fallback) { // the primary origin failed (missing there, or down): the other one
+        free(data);
+        data = NULL;
+        error = 0;
+        free(url);
+        url = fallback;
+        emscripten_wget_data(url, &data, &size, &error);
+        if (!error && data) fprintf(stderr, "asset %s: loaded from the fallback origin\n", path);
+    }
 
     if (error || !data) {
         fprintf(stderr, "failed to fetch asset %s (HTTP error or missing file)\n", url);
@@ -172,11 +192,18 @@ EM_JS(int, web_asset_prefetch, (const char *path_ptr), {
     if (state.failed[path]) return -1;
     if (state.pending[path]) return 0;
     state.pending[path] = 1;
-    var url = (Module.krunkNativeAssetBase || '') + (path.charAt(0) === '/' ? path.substring(1) : path);
-    if (Module.krunkNativeAssetVersion) url += '?v=' + encodeURIComponent(Module.krunkNativeAssetVersion);
-    fetch(url).then(function (r) {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.arrayBuffer();
+    var rel = path.charAt(0) === '/' ? path.substring(1) : path;
+    var query = Module.krunkNativeAssetVersion ? '?v=' + encodeURIComponent(Module.krunkNativeAssetVersion) : '';
+    function get(base) {
+        return fetch((base || '') + rel + query).then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.arrayBuffer();
+        });
+    }
+    // the second asset origin when the first fails (web_asset_url_at)
+    get(Module.krunkNativeAssetBase).catch(function (e) {
+        if (!Module.krunkNativeAssetFallback) throw e;
+        return get(Module.krunkNativeAssetFallback);
     }).then(function (buffer) {
         delete state.pending[path];
         if (FS.analyzePath(path).exists) return;
