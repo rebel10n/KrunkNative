@@ -1213,6 +1213,21 @@ static void test_dynamic(void)
     restyle();
     check("#miniMapCanvas", "border-top-left-radius", "50%");
     dom_remove_class(g_dom, e, "roundMap");
+    restyle();
+    check("#miniMapCanvas", "border-top-left-radius", "0px");
+    /* a query of the parent between the change and the restyle (getComputedStyle, a box
+     * query) recomputes it outside the walk: the walk then skipped the children it would
+     * have restyled, explicit-inherit ones and, for an inherited change, all of them */
+    dom_add_class(g_dom, e, "roundMap");
+    cascade_elem_computed(g_dom, e);
+    restyle();
+    check("#miniMapCanvas", "border-top-left-radius", "50%");
+    dom_set_style(g_dom, e, "letter-spacing", "3px");
+    cascade_elem_computed(g_dom, e);
+    restyle();
+    check("#miniMapCanvas", "letter-spacing", "3px");
+    dom_set_style(g_dom, e, "letter-spacing", NULL);
+    dom_remove_class(g_dom, e, "roundMap");
     dom_set_style(g_dom, e, "display", "none");
     dom_set_style(g_dom, dom_by_id(g_dom, "inGameUI"), "display", NULL);
     restyle();

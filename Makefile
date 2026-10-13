@@ -214,7 +214,7 @@ selection-test: build ## Page text selection (dev console): engine checks (ui_te
 slowmo-arms-test: build ## The first-person arms stay locked to the camera through the round-end slow motion and after it (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 300 $(PYTHON) -I client/tests/slowmo_arms_e2e.py $(DEBUG_DIR)
 
-minimap-round-test: build ## The in-game minimap is round after joining, respawning, a map change, spectating and at other sizes / minimapScale (headless; EGL_DEVICE=)
+minimap-round-test: build ## The in-game minimap is round from its first visible frame after joining, respawning, a map change, spectating and at other sizes / minimapScale (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/minimap_round_e2e.py $(DEBUG_DIR)
 
 preview-hole-test: build ## The menu shade covers the class preview box seamlessly at many window sizes / UI scales (headless; EGL_DEVICE=)

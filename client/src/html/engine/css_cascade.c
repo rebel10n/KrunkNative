@@ -660,6 +660,19 @@ uint32_t cascade_restyle(Dom *dom, CssSheet *ua, CssSheet **author, int n_author
     return g.computed_count;
 }
 
+/* A query recomputed `node` outside a restyle walk and its record changed: the
+ * children that read one of its non-inherited values (ElemData.explicit_inherit)
+ * are marked so the next cascade_restyle() recomputes them. */
+static void mark_explicit_inherit_children(Dom *dom, lxb_dom_node_t *node)
+{
+    for (lxb_dom_node_t *c = node->first_child; c != NULL; c = c->next) {
+        const ElemData *cd = dom_node_data(c);
+        if (cd != NULL && cd->explicit_inherit) {
+            dom_mark_dirty(dom, cd->handle, DOM_DIRTY_STYLE);
+        }
+    }
+}
+
 /* Makes sure every ancestor of `node` (and node itself) has an up-to-date
  * computed record, ignoring display:none skipping.  An element is
  * recomputed when it is dirty, has never been computed, or an ancestor was
@@ -685,6 +698,14 @@ static const CssComputed *ensure_computed_rec(Dom *dom, lxb_dom_node_t *node, in
         int r = restyle_one(dom, d, parent);
         if (r & (1 | 4)) {
             d->dirty |= DOM_DIRTY_STYLE_CHANGED;
+        }
+        /* The restyle walk no longer sees this element as dirty: what it would have done for
+         * the children is queued for it (a query between a class change and the next frame's
+         * restyle left #miniMapCanvas without .roundMap's border-radius). */
+        if (r & 2) {
+            dom_mark_dirty(dom, d->handle, DOM_DIRTY_DESCENDANTS); /* inherited values changed */
+        } else if (r & 1) {
+            mark_explicit_inherit_children(dom, node); /* restyle_subtree's `changed` */
         }
         d->dirty &= ~DOM_DIRTY_STYLE;
         *recomputed = 1;

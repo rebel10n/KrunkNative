@@ -11,6 +11,16 @@
 //   (customsData && config.isProd: v7 production), and with the showMinimap setting off.
 //   Settings: minimapScale (setScale), minimapZoom (setZoom), miniMapHudScale (setHudScale).
 // Documented differences:
+//   - The shape (.roundMap: #miniMapCanvas has border-radius: inherit) is set every frame the
+//     minimap is enabled, before the overlay is shown, from the state it will be drawn in
+//     (mm_shape_type). v7 toggles it only inside update(), which runs only while the map is drawn,
+//     but its overlay shows whenever the HUD does: after Play the HUD came up waiting for our
+//     SPAWN with the shape the last drawn frame left (the spectator's square), for as long as
+//     the ENT took (online: a round trip plus the server's join checks, up to seconds).
+//   - v7's type is window.spectating && #spectateUI shown, and after Play from spectating the
+//     spectator view stays until our SPAWN (client_enter_game). While an ENT is in flight the
+//     type here follows what it asks for (the Spectate switch), so the round player map shows
+//     from the Play click on instead of the square one until the spawn.
 //   - v7 bug fixed: the spectator's specMiniMap key toggles a setting that does not exist
 //     (setSetting("specMiniMap"), index.js:16357), so it does nothing. Here it hides / shows
 //     the minimap while spectating (a session toggle, like showSpectatorNameTags).
@@ -380,19 +390,31 @@ static void mm_directions(const int shown, const float yaw) {
 
 /* ------------------------------------------------------------ minimap update */
 
+// update(..., spectating): type 0 the spectator's whole map (square), 1 the player's (round);
+// v7 passes window.spectating && #spectateUI shown. While an ENT is in flight (spawn_requested,
+// SPAWN / SPECTATE clears it) the type is the one it asks for (see the top).
+static int mm_shape_type(const Client *client) {
+    if (client->spawn_requested) return !spectate_requested();
+    return !spectate_active();
+}
+
+// Minimap.update's classList.toggle("roundMap", type == 1); hud_map_tick calls it every frame the
+// minimap is enabled, ahead of hud_minimap_apply_layout's display, so the overlay never shows with
+// another state's shape.
+static void mm_set_type(const int type) {
+    g_mm.type = type;
+    mm_class("miniMapOverlay", "roundMap", type == 1); // no DOM write when it is set already
+}
+
 static void mm_update(Client *client, const double dt) {
     CpuCanvas *c = &g_mm.cv;
     const Game *game = &client->game;
     const Map *map = game->map;
     const GameMode *mode = game->mode;
-    const int spectating = spectate_active();
+    const int type = g_mm.type; // mm_set_type, this frame
+    const int spectating = !type;
     const Player *me = client->me;
 
-    const int type = spectating ? 0 : 1;
-    if (type != g_mm.type) {
-        g_mm.type = type;
-        mm_class("miniMapOverlay", "roundMap", type == 1);
-    }
     const Player *focused = NULL;
     if (!type && spectate_target_uid() >= 0) focused = client_find_player(client, spectate_target_uid());
     const int team = me && me->team ? me->team : spectating ? 1 : 0; // v9928
@@ -728,6 +750,7 @@ void hud_map_tick(Client *client) {
     int enabled = game->ready && game->map && setting_on("showMinimap", 1) && !(game->mode && game->mode->config.no_minimap) &&
                   game->config.minimaps && !mm_custom_map(client);
     if (spectating && g_mm.spec_hidden) enabled = 0;
+    if (enabled) mm_set_type(mm_shape_type(client)); // the shape before the overlay is ever shown
     if (enabled != g_mm.enabled || g_mm.applied != enabled) {
         g_mm.enabled = enabled;
         hud_minimap_apply_layout();
