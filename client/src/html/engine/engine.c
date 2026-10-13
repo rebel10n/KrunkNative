@@ -850,35 +850,17 @@ static void restore_scroll_offsets(Engine *g)
     g->saved_scroll_len = 0;
 }
 
-/* Is `node` inside the subtree of `root` (strictly below it unless include_root)? */
-static int node_within(const lxb_dom_node_t *node, const lxb_dom_node_t *root, int include_root)
-{
-    if (node == root) return include_root;
-    for (const lxb_dom_node_t *n = node ? node->parent : NULL; n; n = n->parent) {
-        if (n == root) return 1;
-    }
-    return 0;
-}
-
-static void detach_boxes_rec(Box *b, const lxb_dom_node_t *root, int include_root)
-{
-    for (; b; b = b->next) {
-        if (b->node && node_within(b->node, root, include_root)) b->node = NULL;
-        detach_boxes_rec(b->first_child, root, include_root);
-    }
-}
-
-/* Boxes keep raw node pointers and layout's box release reads them
- * (ElemData.box bookkeeping): before nodes are destroyed (or moved), cut the
- * link from every box of the affected subtree.  The boxes themselves are
- * released by the layout_children_changed() that the DOM's CHILDREN bit
- * triggers on the next flush; until then they are inert (no node). */
+/* Boxes keep raw node pointers and borrow styles from ElemData, and layout's
+ * box release reads them (ElemData.box bookkeeping): before nodes are
+ * destroyed (or moved), layout cuts every box of the affected subtree loose
+ * (layout_nodes_removed).  The boxes themselves are released by the
+ * layout_children_changed() that the DOM's CHILDREN bit triggers on the next
+ * flush; until then they are inert. */
 static void detach_boxes(Engine *g, HtmlElem e, int include_root, int clear_elem_boxes)
 {
     lxb_dom_node_t *root = dom_elem_node(g->dom, e);
     if (!root || !g->tree) return;
-    Box *top = layout_tree_root(g->tree);
-    if (top) detach_boxes_rec(top, root, include_root);
+    layout_nodes_removed(g->tree, root, include_root);
     if (clear_elem_boxes) {
         for (HtmlElem c = include_root ? e : dom_next_in_tree(g->dom, e, e); c; c = dom_next_in_tree(g->dom, c, e)) {
             ElemData *d = dom_elem_data(g->dom, c);

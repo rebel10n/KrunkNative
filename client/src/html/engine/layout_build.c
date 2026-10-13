@@ -1286,6 +1286,39 @@ void layout_rebuild_all(LayoutTree *t)
     if (t) rebuild_all(t);
 }
 
+/* Is `node` inside the subtree of `root` (strictly below it unless include_root)? */
+static int node_within(const lxb_dom_node_t *node, const lxb_dom_node_t *root, int include_root)
+{
+    if (node == root) return include_root;
+    for (const lxb_dom_node_t *n = node ? node->parent : NULL; n; n = n->parent) {
+        if (n == root) return 1;
+    }
+    return 0;
+}
+
+/* A box of a removed node and everything below it (its DOM descendants plus
+ * generated boxes: ::before/::after text has no node and borrows the pseudo
+ * style, anonymous boxes own theirs). */
+static void detach_box_subtree(LayoutTree *t, Box *b)
+{
+    b->node = NULL;
+    if (b->style != b->own_style) b->style = &t->anon_style;
+    for (Box *c = b->first_child; c; c = c->next) detach_box_subtree(t, c);
+}
+
+static void detach_rec(LayoutTree *t, Box *b, const lxb_dom_node_t *root, int include_root)
+{
+    for (; b; b = b->next) {
+        if (b->node && node_within(b->node, root, include_root)) detach_box_subtree(t, b);
+        else detach_rec(t, b->first_child, root, include_root);
+    }
+}
+
+void layout_nodes_removed(LayoutTree *t, lxb_dom_node_t *root, int include_root)
+{
+    if (t && t->root && root) detach_rec(t, t->root, root, include_root);
+}
+
 static int len_eq(const CssLength *a, const CssLength *b)
 {
     return a->kind == b->kind && a->px == b->px && a->pct == b->pct;

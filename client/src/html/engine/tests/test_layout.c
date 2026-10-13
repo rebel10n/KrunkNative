@@ -27,6 +27,7 @@
 #include "css_cascade.h"
 #include "css_sheet.h"
 #include "dom.h"
+#include "image.h"
 #include "layout.h"
 #include "text.h"
 #include "ua_css.h"
@@ -84,6 +85,19 @@ static int png_size(void *user, const char *url, const char *base, float *w, flo
     if (got < 24 || memcmp(hdr, "\x89PNG", 4) != 0) return 0;
     *w = (float)((hdr[16] << 24) | (hdr[17] << 16) | (hdr[18] << 8) | hdr[19]);
     *h = (float)((hdr[20] << 24) | (hdr[21] << 16) | (hdr[22] << 8) | hdr[23]);
+    return 1;
+}
+
+/* Stands in for image.c's resolver (layout_build.c's content: url() on <img>;
+ * image.c needs GL and the asset tree): the URL as-is, query/fragment cut. */
+int image_resolve_url(const char *url, const char *base_url, char *out, size_t cap)
+{
+    (void)base_url;
+    size_t n = strcspn(url, "?#");
+    while (n && *url == '/') { url++; n--; }
+    if (n >= cap) return 0;
+    memcpy(out, url, n);
+    out[n] = 0;
     return 1;
 }
 
@@ -1367,6 +1381,54 @@ static void t_incremental(void)
     fx_free(fx);
 }
 
+/* innerHTML replacement under a restyled ancestor, in the engine's order
+ * (engine_before_remove -> dom_set_html -> restyle -> post_restyle walks the
+ * tree: the ancestor's layout_restyled() before the host's
+ * layout_children_changed()).  The removed boxes stay in the tree until that
+ * rebuild; their borrowed styles (ElemData computed / ::before) were freed with
+ * the nodes, so the ancestor's transform toggle must not read them (a
+ * heap-use-after-free under ASan; without ASan the stale position:fixed made it
+ * REBUILT).  The menu's #instructions innerHTML at startup hit this. */
+static void t_innerhtml_detach(void)
+{
+    Fx *fx = fx_html(
+        "<div id=outer style='width:300px'><div id=host style='width:200px'>"
+        "<div id=gone><span id=gsp>a<div id=gblk>b</div>c</span>"
+        "<div id=fx style='position:fixed;top:0;left:0;width:5px;height:5px'>d</div></div></div></div>",
+        "#gone::before { content: 'p'; } #gsp::after { content: 'q'; }");
+    HtmlElem outer = dom_by_id(fx->dom, "outer"), host = dom_by_id(fx->dom, "host");
+    CHECK(bx(fx, "fx") && bx(fx, "gblk"), "detach: removed subtree laid out first");
+
+    layout_nodes_removed(fx->tree, dom_elem_node(fx->dom, host), 0);
+    static const char html[] = "<b id=fresh>new</b>";
+    dom_set_html(fx->dom, host, html, strlen(html));
+    ElemData *oed = dom_elem_data(fx->dom, outer);
+    CssComputed old = *oed->computed;
+    dom_set_style(fx->dom, outer, "transform", "translateX(3px)");
+    cascade_restyle(fx->dom, g_ua, fx->sheets, fx->ns);
+    int r = layout_restyled(fx->tree, dom_elem_node(fx->dom, outer), &old);
+    CHECK(r == LAYOUT_RESTYLE_TRANSFORM, "detach: removed position:fixed no longer counts (%d)", r);
+    r = layout_children_changed(fx->tree, dom_elem_node(fx->dom, host));
+    CHECK(r == LAYOUT_RESTYLE_REBUILT, "detach: host rebuilt (%d)", r);
+    layout_run(fx->tree, fx->vw, fx->vh);
+    HtmlRect fr = rc(fx, "fresh"), hr = rc(fx, "host");
+    CHECK(bx(fx, "fresh") && NEAR(fr.x, hr.x, 0.01) && NEAR(hr.x, 3, 0.01) && fr.w > 0,
+          "detach: new content laid out under the moved ancestor (%.1f, %.1f)", fr.x, hr.x);
+
+    /* removing the host itself (include_root, like html_dom_remove) */
+    layout_nodes_removed(fx->tree, dom_elem_node(fx->dom, host), 1);
+    dom_remove(fx->dom, host);
+    old = *oed->computed;
+    dom_set_style(fx->dom, outer, "transform", "");
+    cascade_restyle(fx->dom, g_ua, fx->sheets, fx->ns);
+    r = layout_restyled(fx->tree, dom_elem_node(fx->dom, outer), &old);
+    CHECK(r == LAYOUT_RESTYLE_TRANSFORM, "detach: removed host, transform cleared (%d)", r);
+    r = layout_children_changed(fx->tree, dom_elem_node(fx->dom, outer));
+    layout_run(fx->tree, fx->vw, fx->vh);
+    CHECK(r == LAYOUT_RESTYLE_REBUILT && rc(fx, "outer").h == 0, "detach: outer empty after the rebuild (%d)", r);
+    fx_free(fx);
+}
+
 /* ------------------------------------------------------------------------- */
 /* menu                                                                       */
 /* ------------------------------------------------------------------------- */
@@ -1511,6 +1573,7 @@ int main(int argc, char **argv)
     t_root_overflow();
     t_container_scrollbars();
     t_incremental();
+    t_innerhtml_detach();
     t_intrinsic_font_restyle();
     t_menu();
 

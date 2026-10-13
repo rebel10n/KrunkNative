@@ -328,11 +328,20 @@ Box *layout_box_for_node(lxb_dom_node_t *node);
  * layout_rebuild_all(): rebuild every box in place (same LayoutTree*).
  * After any REBUILT, Box pointers held outside layout (hover, pointer
  * capture, paint caches) for boxes in that subtree are stale: re-resolve
- * them through ElemData.box.  Released boxes are recycled. */
+ * them through ElemData.box.  Released boxes are recycled.
+ * layout_nodes_removed(): call BEFORE the nodes under `root` (and `root`
+ * itself when include_root) are destroyed or moved (innerHTML, remove,
+ * reparenting).  Boxes keep raw node pointers and borrow their styles from
+ * the nodes' ElemData (computed / ::before / ::after), which die with them:
+ * every box of the subtree (generated ones included) drops both and falls
+ * back to the tree's own style.  The boxes stay in the tree, inert, until the
+ * layout_children_changed() of the old parent releases them; restyles of
+ * their ancestors in between (layout_restyled) see no removed content. */
 enum { LAYOUT_RESTYLE_NONE = 0, LAYOUT_RESTYLE_PAINT, LAYOUT_RESTYLE_TRANSFORM, LAYOUT_RESTYLE_LAYOUT, LAYOUT_RESTYLE_REBUILT };
 int  layout_restyled(LayoutTree *tree, lxb_dom_node_t *node, const CssComputed *old_style);
 int  layout_children_changed(LayoutTree *tree, lxb_dom_node_t *node);
 void layout_rebuild_all(LayoutTree *tree);
+void layout_nodes_removed(LayoutTree *tree, lxb_dom_node_t *root, int include_root);
 
 /* Scrolling: sets (clamped) offsets, refreshes sticky descendants' positions
  * and marks paint dirty.  No relayout. */
