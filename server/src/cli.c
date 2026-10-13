@@ -354,7 +354,7 @@ static void cli_cmd_help(const char *args) {
     const ChatCommandInfo *chat = chat_command_list(&chat_count);
     char line[256] = "";
     size_t used = 0;
-    server_log("Krunker v3.1.1 chat commands (players type them as /cmd; here without the slash, as the server):");
+    server_log("Chat commands (players type them as /cmd; here without the slash, as the server):");
     for (int i = 0; i < chat_count; i++) {
         if (cli_find_command(chat[i].name, strlen(chat[i].name))) continue; // the CLI's own version wins
         used += (size_t) snprintf(line + used, sizeof(line) - used, "%s%s", used ? " " : "  ", chat[i].name);
