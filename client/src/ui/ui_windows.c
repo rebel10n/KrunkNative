@@ -471,8 +471,11 @@ LOADOUT_GEN(40) LOADOUT_GEN(41) LOADOUT_GEN(43) LOADOUT_GEN(44) LOADOUT_GEN(45) 
 LOADOUT_GEN(50) LOADOUT_GEN(51) LOADOUT_GEN(52)
 #undef LOADOUT_GEN
 
+static char *gen_object_manager(void) { return object_manager_window_gen(OBJECT_MANAGER_WINDOW, NULL); }
+
 static const WindowDef WINDOWS[] = {
     {SERVERS_WINDOW_CONNECT, servers_connect_window_gen}, // KrunkNative: the menu's Connect button (servers_ui.c)
+    {OBJECT_MANAGER_WINDOW, gen_object_manager},          // KrunkNative: the Object Manager (object_manager_ui.c)
     {1, gen_settings},
     {3, gen_loadout},
     {7, gen_7},
@@ -526,7 +529,7 @@ void ui_window_meta(const int id, const char **cls, const char **style) {
     snprintf(key, sizeof(key), "%d", id);
     const UiWindowMeta *m = ui_windows_meta(key);
     if (cls) *cls = m ? m->cls : "dark";
-    if (style) *style = m ? m->style : "overflow-y: auto;";
+    if (style) *style = m ? m->style : id == OBJECT_MANAGER_WINDOW ? "overflow-y: auto; width: 940px;" : "overflow-y: auto;";
 }
 
 char *ui_window_generate(const int id, const char **header, int *sticky) {
@@ -542,6 +545,7 @@ char *ui_window_generate(const int id, const char **header, int *sticky) {
     char *live = account_window_gen(id, header);
     if (!live) live = battlepass_window_gen(id, header); // v7.1.4 Battle Pass (battlepass_ui.c)
     if (!live) live = servers_window_gen(id, header);
+    if (!live) live = object_manager_window_gen(id, header); // KrunkNative Object Manager (F1)
     if (live) return live;
     const WindowDef *w = find_window(id);
     return w ? w->gen() : gen_static(key);
@@ -554,6 +558,9 @@ void ui_img_url(const char *path, char *out, const size_t n) {
 }
 
 void ui_window_post(const int id) {
+    // KrunkNative Object Manager: shown over the game without the menu around it (krunknative.css
+    // html.kn-bare-window); menu_close_window takes the class off
+    html_dom_set_class(html_dom_root(), "kn-bare-window", id == OBJECT_MANAGER_WINDOW);
     if (id == 1 || id == 32 || id == 41) { // 32 / 41: the reticle / scope pickers' settings rows
         ui_settings_apply_values(html_dom_by_id("menuWindow"));
     } else if (id == 5) {

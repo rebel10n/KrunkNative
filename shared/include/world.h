@@ -70,6 +70,7 @@ extern const WorldBuildObject g_build_objects[WORLD_BUILD_COUNT];
 int game_build_object(Game*, int build_index, vec3 feet, vec3 size, float direction, int grounded, Player *player);
 void world_apply_build_packet(Game*, const NetBuildPacket*); // client: "bo" / syncData.dyno
 void world_remove_builds(Game*);                             // game.removeBuilds (finishInit)
+int world_put_object(Game*, size_t uid, Object *object);     // KrunkNative Object Manager (client): object at the server uid
 void world_send_builds(Game*, int uid);                      // syncData.dyno for a joiner
 // The Build Tool (players.build / procInputs selectBuild), for the weapon code: holding aim picks
 // Player.build_index from the look delta (radians this input); firing calls player_build(place):

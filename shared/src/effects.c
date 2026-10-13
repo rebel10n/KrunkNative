@@ -347,10 +347,12 @@ void player_set_upgrades(Player *player, const unsigned char slots) {
 // Rebuild the loadout keeping each kept weapon's ammo and upgrade (updateLoadout with the old
 // ammos / upgrades), then put `index` in hand and tell everyone ("inat").
 static void apply_loadout(Player *player, const int *ids, const int count, int index) {
-    int old_ids[NET_LOADOUT_MAX + 1];
-    unsigned int old_ammo[NET_LOADOUT_MAX + 1];
+    // + the Object Manager's extra weapons (KrunkNative): they keep their ammo too
+    int old_ids[NET_LOADOUT_MAX + 1 + PLAYER_EXTRA_WEAPONS_MAX];
+    unsigned int old_ammo[NET_LOADOUT_MAX + 1 + PLAYER_EXTRA_WEAPONS_MAX];
     const unsigned char old_upgrades = player->upgraded_slots;
-    const int old_count = player->loadout_size < NET_LOADOUT_MAX + 1 ? player->loadout_size : NET_LOADOUT_MAX + 1;
+    const int old_max = NET_LOADOUT_MAX + 1 + PLAYER_EXTRA_WEAPONS_MAX;
+    const int old_count = player->loadout_size < old_max ? player->loadout_size : old_max;
     for (int i = 0; i < old_count; i++) {
         old_ids[i] = player->loadout[i];
         old_ammo[i] = player->ammo ? player->ammo[i] : 0;
@@ -363,7 +365,7 @@ static void apply_loadout(Player *player, const int *ids, const int count, int i
         for (int k = 0; k < old_count; k++) {
             if (old_ids[k] == player->loadout[i]) {
                 player->ammo[i] = old_ammo[k];
-                if (old_upgrades >> k & 1) upgrades |= (unsigned char) (1u << i);
+                if (k < 8 && i < 8 && (old_upgrades >> k & 1)) upgrades |= (unsigned char) (1u << i);
                 old_ids[k] = -1;
                 break;
             }
@@ -394,7 +396,7 @@ void player_give_weapon(Player *player, const int weapon_id) {
     int count = 0;
     int has_primary = 0;
     int replaced = -1;
-    for (int i = 0; i < player->loadout_size && count < NET_LOADOUT_MAX; i++) {
+    for (int i = 0; i < player_loadout_base(player) && count < NET_LOADOUT_MAX; i++) {
         const Weapon *w = weapon_at(player->game, player->loadout[i]);
         ids[count] = player->loadout[i];
         if (w && replaced < 0 && weapon_kind(w) == kind) {
@@ -423,7 +425,7 @@ void player_remove_weapon(Player *player, const int weapon_id) {
     int ids[NET_LOADOUT_MAX + 1];
     int count = 0;
     int removed = -1;
-    for (int i = 0; i < player->loadout_size && count < NET_LOADOUT_MAX; i++) {
+    for (int i = 0; i < player_loadout_base(player) && count < NET_LOADOUT_MAX; i++) {
         if (removed < 0 && player->loadout[i] == weapon_id) {
             removed = i;
             continue;

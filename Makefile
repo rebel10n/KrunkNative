@@ -174,6 +174,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, lag
 	./$(DEBUG_DIR)/config_test
 	./$(DEBUG_DIR)/comp_ranked_test
 	./$(DEBUG_DIR)/sandbox_config_test
+	./$(DEBUG_DIR)/object_manager_test
 	./$(DEBUG_DIR)/ks_storage_test
 	./$(DEBUG_DIR)/navgen_test
 	./$(DEBUG_DIR)/season_test

@@ -217,7 +217,7 @@ static void change_weapon(Game *game, Player *h, const int id, const int seconda
     if (secondary ? !w->secondary : (w->secondary || w->melee)) return;
     int ids[NET_LOADOUT_MAX + 1];
     int count = 0, replaced = 0;
-    for (int i = 0; i < h->loadout_size && count < NET_LOADOUT_MAX; i++) {
+    for (int i = 0; i < player_loadout_base(h) && count < NET_LOADOUT_MAX; i++) {
         const Weapon *have = weapon_at(game, h->loadout[i]);
         ids[count] = h->loadout[i];
         const int same_kind = have && (secondary ? have->secondary : !have->secondary && !have->melee && !have->equipment);

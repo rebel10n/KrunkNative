@@ -987,6 +987,7 @@ void menu_toggle_window(const int open) {
 
 void menu_close_window(void) {
     close_window_state();
+    html_dom_set_class(html_dom_root(), "kn-bare-window", 0); // ui_window_post: the Object Manager's bare window
     set_display("windowHolder", "none");
     HtmlElem mw = by_id("menuWindow");
     if (mw) html_dom_set_html(mw, "");

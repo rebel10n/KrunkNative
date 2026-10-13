@@ -303,3 +303,137 @@ a.knDlLink:hover {
   text-align: center;
   margin-top: 12px;
 }
+
+/* KrunkNative Object Manager (F1, client/src/ui/object_manager_ui.c): tabs + search over a grid
+ * of icons. Not a v7 window (id 54); #menuWindow gets its width inline (ui_window_meta). */
+#menuWindow.dark div.knOmTop {
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+}
+#menuWindow.dark div.knOmTabs {
+  margin: 0 !important;
+  flex-grow: 1;
+  width: auto;
+}
+input.knOmSearch {
+  margin-left: 12px;
+  width: 190px;
+  height: 42px;
+  font-size: 18px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 5px;
+  background-color: rgba(0, 0, 0, 0.68);
+  color: #fff;
+}
+#menuWindow.dark div.knOmStatus {
+  min-height: 24px;
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 8px;
+}
+#menuWindow.dark div.knOmStatus.knOmErr {
+  color: #eb5656;
+}
+#menuWindow.dark div.knOmGrid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+#menuWindow.dark div.knOmItem {
+  position: relative;
+  background-color: rgba(0, 0, 0, 0.35);
+  border: 2px solid transparent;
+  border-radius: 5px;
+  padding: 8px 6px 6px;
+  text-align: center;
+  cursor: pointer;
+}
+#menuWindow.dark div.knOmItem:hover {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+#menuWindow.dark div.knOmItem.knOmOwned {
+  border-color: var(--yellow);
+}
+img.knOmIcon {
+  width: 120px;
+  height: 60px;
+}
+#menuWindow.dark div.knOmName {
+  font-size: 14px;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#menuWindow.dark div.knOmBadge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 10px;
+  color: #000;
+  background-color: var(--yellow);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+#menuWindow.dark div.knOmEmpty {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.45);
+  padding: 40px 0;
+  font-size: 18px;
+}
+#menuWindow.dark div.knOmFoot {
+  display: flex;
+  align-items: center;
+  margin-top: 12px;
+}
+#menuWindow.dark div.knOmHint {
+  flex-grow: 1;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.45);
+}
+#menuWindow.dark div.knOmBtns {
+  display: flex;
+  flex-shrink: 0;
+}
+#menuWindow.dark div.knOmBtn {
+  margin-left: 8px;
+}
+#menuWindow.dark div.knOmTitle {
+  text-transform: uppercase;
+  font-size: 22px;
+  margin-bottom: 18px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* Object Manager: many loadout weapons (extra slots) make a compact rack, six per column
+ * (hud_ui.c sets knManyWeaps on #weapHolder past four slots). */
+#weapHolder.knManyWeaps {
+  grid-auto-flow: column;
+  grid-template-rows: repeat(6, auto);
+  column-gap: 5px;
+  row-gap: 3px;
+}
+#weapHolder.knManyWeaps .weapIcon {
+  width: 72px;
+  height: 36px;
+}
+#weapHolder.knManyWeaps .weapSkin {
+  max-width: 80px;
+  font-size: 9px;
+}
+#weapHolder.knManyWeaps .weapKey {
+  font-size: 11px;
+  padding: 1px 5px;
+}
+
+/* The Object Manager shows over the game, not over the pause menu: the menu around its window
+ * (title, buttons, class box, side links) is hidden while it is up (ui_window_post sets the class). */
+html.kn-bare-window #menuHolder,
+html.kn-bare-window #infoHider,
+html.kn-bare-window #aHider,
+html.kn-bare-window #instructions {
+  visibility: hidden;
+}

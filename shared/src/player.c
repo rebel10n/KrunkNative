@@ -167,6 +167,8 @@ void player_spawn(Player *player) {
         player->loadout[i] = loadout[i];
         player->ammo[i] = (unsigned int) mode_ammo_limit(player->game, (int) weapons[player->loadout[i]]->ammo); // v7 ammoLimit (aon 0)
     }
+    player->loadout_base = loadout_size;
+    player_loadout_append_extras(player); // KrunkNative Object Manager: extra weapons after the class loadout
 
     player->velocity.x = 0.0f;
     player->velocity.y = 0.0f;
@@ -1191,8 +1193,10 @@ static void movement_try_jump(Player *player, const int jump, const int recon) {
 
 void player_swap_weapon(Player *player, const int index, const int force_swap, const int instant_swap, const int recon) {
     // v7.1.4 swapWeapon: a noSwap weapon in hand (Minigun, War Machine) only gives way to another
-    // noSwap one (a loadout change forces the swap).
-    if (!force_swap && player->weapon && player->weapon->no_swap && player->loadout && index >= 0 && index < player->loadout_size) {
+    // noSwap one (a loadout change forces the swap). KrunkNative Object Manager: one held in an
+    // extra loadout slot does not lock the loadout (v7 only hands them out with a streak).
+    const int extra_slot = player->loadout_index >= player_loadout_base(player);
+    if (!force_swap && !extra_slot && player->weapon && player->weapon->no_swap && player->loadout && index >= 0 && index < player->loadout_size) {
         const Weapon *target = player->game->weapons[player->loadout[index]];
         if (target && !target->no_swap) return;
     }
@@ -1332,11 +1336,18 @@ float player_clamp_pitch(const float pitch) {
 // melee key on melee step the weapon index. Up past ammos.length - (length > 3 ? 3 : 2)
 // wraps to 0 (so the melee of a 3+ weapon loadout is never scrolled to); down from slot 0
 // goes to min(length - 1, 2), from any other slot straight to 0.
+// KrunkNative Object Manager: with extra loadout weapons the wheel steps through every slot and
+// wraps at both ends (v7's wrap would never reach most of them).
 void player_scroll_weapon(Player *player, const int dir, const int recon) {
     const int length = (int) player->loadout_size;
     if (length <= 1 || !dir) return;
 
     int index = player->loadout_index;
+    if (player_loadout_base(player) < length) {
+        index = ((index + (dir > 0 ? 1 : -1)) % length + length) % length;
+        player_swap_weapon(player, index, 0, 0, recon);
+        return;
+    }
     if (dir == 1) {
         index++;
         if (index > length - (length > 3 ? 3 : 2)) index = 0;
@@ -1463,6 +1474,10 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
             else if (swap_melee) player_scroll_weapon(player, 1, recon);
             else player_swap_weapon(player, 0, 0, 0, recon);
         }
+    } else if (!input->swap && input->select_slot) {
+        // KrunkNative Object Manager: a number key picks a slot (extra loadout weapons)
+        const int slot = input->select_slot - 1;
+        if (slot < player->loadout_size && slot != player->loadout_index) player_swap_weapon(player, slot, 0, 0, recon);
     } else if (!input->swap && input->scroll) {
         player_scroll_weapon(player, input->scroll, recon);
     }

@@ -563,6 +563,14 @@ else ()
         target_link_libraries(social_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # object_manager_test: the KrunkNative Object Manager (F1 spawn menu) over the sandbox: extra
+    # loadout weapons, pickups at the crosshair, permissions, rate limit, join sync
+    add_executable(object_manager_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/object_manager_test.c)
+    target_link_libraries(object_manager_test PRIVATE kn_server_core m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(object_manager_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # sandbox_config_test (map-logic WP-E): the offline sandbox plays a map's embedded config, its
     # players count as having an account; GAME_CONFIG / NETWORK_DATA only to protocol-1.3 peers
     add_executable(sandbox_config_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/sandbox_config_test.c)

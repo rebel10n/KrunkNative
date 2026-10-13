@@ -492,6 +492,94 @@ static void post_pickups_frame(const Game *game) {
     }
 }
 
+// ---- KrunkNative Object Manager: objects spawned at run time (shared/src/object_manager.c). Their
+// meshes come from map_object_from_json like the map's own; they join the scene here (the map's
+// were added by client_load_map), show while active, and leave it when the object is freed
+// (map_post_object_freed, from map_object_free). A spawned WEAPON_PICKUP joins the pickup meshes.
+typedef struct {
+    const Object *object;
+    int in_scene; // its mesh was added to g_spawned_scene here
+} SpawnedMesh;
+
+static SpawnedMesh *g_spawned;
+static size_t g_spawned_count;
+static Scene *g_spawned_scene;
+
+static SpawnedMesh *post_spawned_find(const Object *object) {
+    for (size_t i = 0; i < g_spawned_count; i++) {
+        if (g_spawned[i].object == object) return &g_spawned[i];
+    }
+    return NULL;
+}
+
+static void post_spawned_frame(Scene *scene, const Map *map) {
+    if (!scene || !map) return;
+    g_spawned_scene = scene;
+    for (size_t i = 0; i < map->object_count; i++) {
+        const Object *object = map->objects[i];
+        if (!object->spawned) continue;
+        SpawnedMesh *entry = post_spawned_find(object);
+        if (!entry) {
+            SpawnedMesh *grown = realloc(g_spawned, (g_spawned_count + 1) * sizeof(SpawnedMesh));
+            if (!grown) continue;
+            g_spawned = grown;
+            entry = &g_spawned[g_spawned_count++];
+            *entry = (SpawnedMesh) {object, 0};
+            if (object->mesh) {
+                scene_add_mesh(scene, object->mesh);
+                entry->in_scene = 1;
+            }
+            if (object->prefab == PREFAB_WEAPON_PICKUP && g_pickup_scene) {
+                PickupMesh *pickups = realloc(g_pickups, (g_pickup_count + 1) * sizeof(PickupMesh));
+                if (pickups) {
+                    g_pickups = pickups;
+                    g_pickups[g_pickup_count++] = (PickupMesh) {(int) i, object, -2, NULL};
+                }
+            }
+        }
+        if (object->mesh) ((Mesh *) object->mesh)->visible = object->active && !object->no_vis;
+    }
+}
+
+void map_post_object_freed(const Object *object) {
+    for (size_t i = 0; i < g_spawned_count; i++) {
+        if (g_spawned[i].object != object) continue;
+        if (g_spawned[i].in_scene && g_spawned_scene && object->mesh) scene_remove_mesh(g_spawned_scene, object->mesh);
+        g_spawned[i] = g_spawned[--g_spawned_count];
+        break;
+    }
+    for (size_t i = 0; i < g_pickup_count; i++) {
+        if (g_pickups[i].object != object) continue;
+        if (g_pickups[i].mesh) {
+            if (g_pickup_scene) scene_remove_mesh(g_pickup_scene, g_pickups[i].mesh);
+            mesh_fini(g_pickups[i].mesh);
+        }
+        g_pickups[i] = g_pickups[--g_pickup_count];
+        break;
+    }
+}
+
+// Spawned objects that exist when a map loads were added by client_load_map: track them as in the
+// scene already. map_post_unload only forgets them (client_unload_map removes every object mesh).
+static void post_spawned_load(Scene *scene, const Map *map) {
+    g_spawned_scene = scene;
+    for (size_t i = 0; map && i < map->object_count; i++) {
+        const Object *object = map->objects[i];
+        if (!object->spawned) continue;
+        SpawnedMesh *grown = realloc(g_spawned, (g_spawned_count + 1) * sizeof(SpawnedMesh));
+        if (!grown) break;
+        g_spawned = grown;
+        g_spawned[g_spawned_count++] = (SpawnedMesh) {object, object->mesh != NULL};
+    }
+}
+
+static void post_spawned_unload(void) {
+    free(g_spawned);
+    g_spawned = NULL;
+    g_spawned_count = 0;
+    g_spawned_scene = NULL;
+}
+
 // "ana" on a map object (world_events.c): Game.playAnim(obj, clip, 1) on its GLTF user asset
 static void post_object_anim(Client *client, Object *object, const char *clip, const int raw) {
     (void) client;
@@ -502,6 +590,7 @@ static void post_object_anim(Client *client, Object *object, const char *clip, c
 void map_post_frame(Scene *scene, const Game *game, const Camera *camera, const float delta_ms) {
     user_asset_frame();
     post_builds_frame(scene, game ? game->map : NULL);
+    post_spawned_frame(scene, game ? game->map : NULL); // Object Manager objects (before the pickups: they add theirs)
     post_pickups_frame(game);
     zone_mesh_frame(game, delta_ms);
 
@@ -706,6 +795,7 @@ void map_post_load(Scene *scene, const Map *map) {
     user_asset_map_load(scene);
     terrain_mesh_load(scene, map);
     post_pickups_load(scene, map);
+    post_spawned_load(scene, map);
     zone_mesh_load(scene, map);
     client_world_set_anim_handler(post_object_anim);
     ambient_load_map(scene, map);
@@ -715,6 +805,7 @@ void map_post_unload(Scene *scene) {
     ambient_unload_map(scene);
     post_lights_unload();
     post_builds_clear();
+    post_spawned_unload();
     post_pickups_unload();
     terrain_mesh_unload();
     zone_mesh_unload();

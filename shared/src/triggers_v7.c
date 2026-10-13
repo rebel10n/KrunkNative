@@ -53,6 +53,32 @@ static void runtime_free_objects(TriggerRuntime *rt) {
     rt->map = NULL;
 }
 
+// The per-uid arrays grown to `count` objects, the new tail zeroed; chains[object_count] (the AI
+// chain, chain_counter) moves to the new end. 0: out of memory (the caller rebuilds them).
+static int runtime_grow(TriggerRuntime *rt, const size_t count) {
+    const size_t old = rt->object_count;
+    TriggerValueSet **values = realloc(rt->object_values, (count + 1) * sizeof(TriggerValueSet *));
+    if (!values) return 0;
+    rt->object_values = values;
+    int *chains = realloc(rt->chains, (count + 1) * sizeof(int));
+    if (!chains) return 0;
+    rt->chains = chains;
+    GamePickup *pickups = realloc(rt->pickups, (count + 1) * sizeof(GamePickup));
+    if (!pickups) return 0;
+    rt->pickups = pickups;
+    unsigned char *moved = realloc(rt->pickup_moved, count + 1);
+    if (!moved) return 0;
+    rt->pickup_moved = moved;
+    const int ai_chain = rt->chains[old];
+    memset(rt->object_values + old, 0, (count + 1 - old) * sizeof(TriggerValueSet *));
+    memset(rt->chains + old, 0, (count + 1 - old) * sizeof(int));
+    memset(rt->pickups + old, 0, (count + 1 - old) * sizeof(GamePickup));
+    memset(rt->pickup_moved + old, 0, count + 1 - old);
+    rt->chains[count] = ai_chain;
+    rt->object_count = count;
+    return 1;
+}
+
 TriggerRuntime *trigger_runtime(Game *game) {
     if (!game) return NULL;
     if (!game->trigger_rt) {
@@ -61,6 +87,9 @@ TriggerRuntime *trigger_runtime(Game *game) {
     }
     TriggerRuntime *rt = game->trigger_rt;
     const size_t count = game->map ? game->map->object_count : 0;
+    // KrunkNative: objects appended mid-round (builds, the Object Manager's) keep every existing
+    // object's state (custVals, chains, pickups); v7 keys these by uid and never loses them.
+    if (rt->map == game->map && rt->object_values && count > rt->object_count && runtime_grow(rt, count)) return rt;
     if (rt->map != game->map || rt->object_count != count) {
         runtime_free_objects(rt);
         rt->map = game->map;

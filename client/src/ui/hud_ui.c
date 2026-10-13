@@ -70,6 +70,8 @@ void hud_ui_hit(Client*, int kill);
 #define HUD_UI_MIN_INTERVAL 0.0    // HUD sampled every frame like index.js gameLoop; writes stay change-gated
 #define HUD_UI_FPS_INTERVAL 0.1    // seconds between #ingameFPS updates (lastFpsDisplayUpdate >= 100)
 #define HUD_UI_LOADOUT_MAX 3       // Player.loadout slots mirrored into #weapDisplay
+// KrunkNative Object Manager: with extra loadout weapons every slot shows (a compact rack)
+#define HUD_UI_LOADOUT_ALL (NET_LOADOUT_MAX + 1 + PLAYER_EXTRA_WEAPONS_MAX)
 
 // Krunker colors (13.js): killFeed, hudHealth, ping, chat server messages, xp bar.
 #define FEED_COLOR_ENEMY "#eb5656"
@@ -130,7 +132,8 @@ typedef struct {
     int scoreboard;                   // Tab held while the game owns the input
     int loadout_index;
     int loadout_size;
-    const Weapon *loadout[HUD_UI_LOADOUT_MAX];
+    int loadout_base;                 // Object Manager: slots from here on are extra weapons (number keys)
+    const Weapon *loadout[HUD_UI_LOADOUT_ALL];
     int can_throw;                    // player.canThrow: melee slot shows the knife, else fists (thrown)
     int melee_icon;                   // store.skins[meleeIndex].id || 0: melee/icon_<id> of the melee skin
 } HudUiExtra;
@@ -354,16 +357,18 @@ static const char *hud_weapon_key(const Weapon *w, char *out, const size_t size)
 // at opacity 1, holstered ones at 0.5; inside .weapItemInner the key name (slots > 0), the
 // weapon (or skin, in its rarity colour) name, the per-weapon kill streak (hidden at 0) and
 // the icon. Only #weapItem_N's opacity changes on a swap.
-static void hud_weapon_rack_html(const Weapon *const *loadout, const int count, const int index, const int can_throw, const int melee_icon, char *out,
-                                 const size_t size) {
+static void hud_weapon_rack_html(const Weapon *const *loadout, const int count, const int base, const int index, const int can_throw, const int melee_icon,
+                                 char *out, const size_t size) {
     size_t len = 0;
     out[0] = 0;
 
-    for (int i = 0; i < count && i < HUD_UI_LOADOUT_MAX; i++) {
+    for (int i = 0; i < count && i < HUD_UI_LOADOUT_ALL; i++) {
         const Weapon *w = loadout[i];
         char src[256], key[32];
         hb_append(out, size, &len, "<div class='weapItem' id='weapItem_%d' style='opacity:%s'><div class=\"weapItemInner\">", i, i == index ? "1" : "0.5");
-        if (i) {
+        if (i >= base && i < 9) { // Object Manager extra slot: its number key (ui_controls.c)
+            hb_append(out, size, &len, "<div class='weapKey'>%d</div>", i + 1);
+        } else if (i && i < base) {
             hb_append(out, size, &len, "<div class='weapKey'>");
             hb_append_escaped(out, size, &len, hud_weapon_key(w, key, sizeof(key)));
             hb_append(out, size, &len, "</div>");
@@ -968,7 +973,9 @@ static void hud_loadout(const Player *me, HudUiExtra *extra) {
     extra->can_throw = me->can_throw;
     const ViewerSkin *melee = viewer_skin(me->skins.melee);
     extra->melee_icon = melee && melee->type == 3 && melee->id > 0 ? melee->id : 0;
-    for (int i = 0; i < me->loadout_size && i < HUD_UI_LOADOUT_MAX; i++) {
+    extra->loadout_base = player_loadout_base(me);
+    const int shown = extra->loadout_base < me->loadout_size ? HUD_UI_LOADOUT_ALL : HUD_UI_LOADOUT_MAX; // every slot with extras
+    for (int i = 0; i < me->loadout_size && i < shown; i++) {
         const int id = me->loadout ? me->loadout[i] : -1;
         extra->loadout[extra->loadout_size++] = id >= 0 && (size_t) id < weapon_count ? weapons[id] : NULL;
     }
@@ -2090,8 +2097,10 @@ static void hud_render_loadout(const HudUiExtra *extra, const int rebuild) {
 
     if (rebuild) {
         g_combat_hash = 0; // the new .weapStreakHolder counters start at 0: hud_combat_step rewrites them
-        char html[4096];
-        hud_weapon_rack_html(extra->loadout, extra->loadout_size, extra->loadout_index, extra->can_throw, extra->melee_icon, html, sizeof(html));
+        static char html[32768]; // up to HUD_UI_LOADOUT_ALL slots
+        const int base = extra->loadout_base > 0 && extra->loadout_base < extra->loadout_size ? extra->loadout_base : extra->loadout_size;
+        hud_weapon_rack_html(extra->loadout, extra->loadout_size, base, extra->loadout_index, extra->can_throw, extra->melee_icon, html, sizeof(html));
+        html_dom_set_class(host, "knManyWeaps", extra->loadout_size > 4); // Object Manager: the compact rack
         html_dom_set_html(host, html);
         g_hud_ui.rack_can_throw = extra->can_throw;
         return;
@@ -3066,9 +3075,16 @@ static void hud_apply_override(const Client *client, HtmlHudState *next, HudUiEx
         const cJSON *slot;
         extra->loadout_size = 0;
         cJSON_ArrayForEach(slot, item) {
-            if (extra->loadout_size >= HUD_UI_LOADOUT_MAX) break;
+            if (extra->loadout_size >= HUD_UI_LOADOUT_ALL) break;
             const cJSON *name = cJSON_GetObjectItemCaseSensitive(slot, "name");
             extra->loadout[extra->loadout_size++] = hud_weapon_by_name(&client->game, cJSON_IsString(name) ? name->valuestring : NULL);
+        }
+        // Object Manager scenarios: the slots from loadoutBase on are extra weapons; without it the
+        // rack keeps v7's HUD_UI_LOADOUT_MAX slots
+        extra->loadout_base = hud_json_int(h, "loadoutBase", -1);
+        if (extra->loadout_base < 0) {
+            if (extra->loadout_size > HUD_UI_LOADOUT_MAX) extra->loadout_size = HUD_UI_LOADOUT_MAX;
+            extra->loadout_base = extra->loadout_size;
         }
     }
     extra->loadout_index = hud_json_int(h, "loadoutIndex", extra->loadout_index);
@@ -3721,7 +3737,7 @@ void client_hud_html_tick(Client *client, const float now_f) {
     const int class_changed = force || next.class_index != hud->class_index;
     const int scope_changed = force || next.scoped != hud->scoped;
     const int aim_dot_changed = force || next.aim_dot != hud->aim_dot;
-    const int loadout_rebuild = force || next_extra.loadout_size != ui->extra.loadout_size ||
+    const int loadout_rebuild = force || next_extra.loadout_size != ui->extra.loadout_size || next_extra.loadout_base != ui->extra.loadout_base ||
                                 memcmp(next_extra.loadout, ui->extra.loadout, sizeof(next_extra.loadout)) != 0 ||
                                 next_extra.melee_icon != ui->extra.melee_icon;
     const int loadout_changed = loadout_rebuild || next_extra.loadout_index != ui->extra.loadout_index || next.weapon != hud->weapon ||

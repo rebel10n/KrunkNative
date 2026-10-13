@@ -10,6 +10,7 @@
 
 #ifdef KRUNKNATIVE_CLIENT
 #include <client.h>
+#include <map_post.h> // map_post_object_freed (Object Manager)
 #elif defined(KRUNKNATIVE_SERVER)
 #include <server.h>
 #endif
@@ -772,6 +773,180 @@ void map_object_rotation(const Object *object, float out[9]) {
     memcpy(out, m, sizeof(m));
 }
 
+// One kept map object record -> a new Object, not yet in any map (map_init_ex's loop, and the
+// KrunkNative Object Manager's run-time records through map_object_from_json). `position` /
+// `scale` get the record's rounded p / s (before the ladder offsets). NULL: out of memory.
+static Object *map_parse_object(const cJSON *raw_obj, const vec4 *parsed_colors, const int map_no_ambient, const int build_meshes,
+                                vec3 *out_position, vec3 *out_scale) {
+    (void) parsed_colors;
+    (void) build_meshes;
+    const cJSON *obj_pos = cJSON_GetObjectItem(raw_obj, "p");
+    const cJSON *obj_scale = cJSON_GetObjectItem(raw_obj, "s");
+    const int prefab_id = map_raw_object_prefab(raw_obj);
+
+    const PrefabInfo *info = prefab_info(prefab_id);
+    Object *object = calloc(1, sizeof(Object));
+    if (!object) return NULL;
+
+    // v7 map.js: p = limit(p, positionRange).round(2), s = (parseFloat(s) || 0).round(2)
+    vec3 position, scale;
+    float *pv = &position.x, *sv = &scale.x;
+    for (int k = 0; k < 3; k++) {
+        const float p = map_number(cJSON_GetArrayItem(obj_pos, k));
+        const float sz = map_number(cJSON_GetArrayItem(obj_scale, k));
+        pv[k] = map_round(map_clampf(p == p ? p : 0.0f, -500000.0f, 500000.0f), 100.0f);
+        sv[k] = map_round(sz == sz ? sz : 0.0f, 100.0f);
+    }
+
+    object->active = 1;
+    object->raw = raw_obj;
+    object->position = position;
+    object->scale = scale;
+    object->prefab = prefab_id;
+    map_parse_generic(object, raw_obj);
+    const cJSON *obj_ab = cJSON_GetObjectItem(raw_obj, "ab"); // "ab != null", so ab: 0 counts too
+    object->ambient_enabled = !map_no_ambient && (!obj_ab || cJSON_IsNull(obj_ab));
+    object->fog_enabled = !map_has(raw_obj, "nf"); // noFog: nf != null
+    // noVis: v == null ? undefined : 1, passed to every rendered builder but addCanvas (SIGN) /
+    // addShowcase / particles. Parsed here so server_bin (no meshes) knows it too: players.spray
+    // skips noVis objects.
+    object->no_vis = prefab_id != PREFAB_SIGN && prefab_id != PREFAB_SHOWCASE && prefab_id != PREFAB_PARTICLES &&
+                     map_has(raw_obj, "v");
+
+    if (info && (info->roles & PREFAB_R_NO_SHOOT)) object->no_shoot = 1;
+
+    map_parse_prefab_keys(object, raw_obj, prefab_id);
+
+    const cJSON *dir = cJSON_GetObjectItem(raw_obj, "d");
+
+    if (prefab_id == PREFAB_LADDER) {
+        object->ladder = 1;
+        object->direction = cJSON_IsNumber(dir) ? (unsigned char) ((((int) cJSON_GetNumberValue(dir) % 4) + 4) % 4) : 0;
+
+        const float direction = (float) M_PI * 0.5f * (float) object->direction;
+
+        object->position.x += game_constants.ladder_scale * cosf(direction);
+        object->position.z += game_constants.ladder_scale * sinf(direction);
+
+        object->scale.x = (object->direction % 2 ? game_constants.ladder_width : game_constants.ladder_scale) * 2.0f;
+        object->scale.z = (object->direction % 2 ? game_constants.ladder_scale : game_constants.ladder_width) * 2.0f;
+    }
+
+    if (prefab_id == PREFAB_RAMP) {
+        const cJSON *boost = cJSON_GetObjectItem(raw_obj, "b");
+
+        Ramp *ramp = calloc(1, sizeof(Ramp));
+        if (!ramp) {
+            free(object);
+            return NULL;
+        }
+
+        object->direction = cJSON_IsNumber(dir) ? (unsigned char) ((((int) cJSON_GetNumberValue(dir) % 4) + 4) % 4) : 0;
+
+        ramp->boost = cJSON_IsNumber(boost) ? (float) cJSON_GetNumberValue(boost) : 0.0f;
+        ramp->start.x = position.x;
+        ramp->start.y = position.z;
+        ramp->end.x = position.x;
+        ramp->end.y = position.z;
+
+        if (object->direction % 2) {
+            ramp->start.y -= scale.z * 0.5f * (object->direction < 2 ? 1.0f : -1.0f);
+            ramp->end.y += scale.z * 0.5f * (object->direction < 2 ? 1.0f : -1.0f);
+        } else {
+            ramp->start.x -= scale.x * 0.5f * (object->direction < 2 ? 1.0f : -1.0f);
+            ramp->end.x += scale.x * 0.5f * (object->direction < 2 ? 1.0f : -1.0f);
+        }
+
+        object->ramp = ramp;
+    }
+
+    const int no_collisions = map_truthy(cJSON_GetObjectItem(raw_obj, "l")) || map_truthy(cJSON_GetObjectItem(raw_obj, "col"));
+
+    // isBorder: bo == null ? undefined : 1 (the prefabs whose builders take it)
+    if (info && (info->roles & PREFAB_R_BORDER)) object->is_border = (unsigned char) map_has(raw_obj, "bo");
+
+    switch (info ? info->collision : PREFAB_COL_NONE) {
+        case PREFAB_COL_NONE:
+            object->collision_type = COLLISION_TYPE_NONE;
+            break;
+        case PREFAB_COL_FORCED:
+            object->collision_type = COLLISION_TYPE_BOX;
+            break;
+        case PREFAB_COL_FORCED_CYLINDER:
+            object->collision_type = COLLISION_TYPE_CYLINDER;
+            break;
+        case PREFAB_COL_OPTIONAL_CYLINDER:
+            object->collision_type = no_collisions ? COLLISION_TYPE_NONE : COLLISION_TYPE_CYLINDER;
+            break;
+        default:
+            object->collision_type = no_collisions ? COLLISION_TYPE_NONE : COLLISION_TYPE_BOX;
+            break;
+    }
+
+    // notWallJ: wj != null; the non-solid prefabs and the own-branch ones never wall-jump
+    object->wall_jumpable = info && !(info->roles & PREFAB_R_NO_WALL_JUMP) && !map_has(raw_obj, "wj");
+
+    switch (prefab_id) {
+        case PREFAB_VERIFIED_ZONE:
+            object->verified = 1;
+            break;
+        case PREFAB_PREMIUM_ZONE:
+            object->premium = 1;
+            break;
+        case PREFAB_TEAM_ZONE:
+            object->team_zone = 1;
+            object->team = (unsigned int) map_int(raw_obj, "tm");
+            break;
+        case PREFAB_SCORE_ZONE:
+            object->score_zone = 1;
+            // addScoreZone(..., parseInt(sp) || 1)
+            object->score_points = (unsigned int) (map_int(raw_obj, "sp") ? map_int(raw_obj, "sp") : 1);
+            break;
+        case PREFAB_TELEPORTER:
+            object->teleporter = 1;
+            break;
+        case PREFAB_CHECK_POINT:
+            object->checkpoint = 1;
+            break;
+        case PREFAB_WEAPON_PICKUP:
+            object->pickup = 1;
+            break;
+        case PREFAB_FLAG:
+            object->flag = 1;
+            break;
+        case PREFAB_TRIGGER:
+            object->trigger = 1;
+            object->team = (unsigned int) map_int(raw_obj, "tm");
+            break;
+        case PREFAB_DEATH_ZONE:
+            object->kill = 1;
+            break;
+        case PREFAB_OBJECTIVE:
+            object->objective = 1;
+            break;
+        case PREFAB_BOMB_SITE:
+            object->bomb_site = 1;
+            break;
+        default:
+            break;
+    }
+
+    map_parse_interface(object, raw_obj, prefab_id); // destructibles, interfaces, gates, banks, triggers, check points, teleporters
+
+#ifdef KRUNKNATIVE_CLIENT
+    if (build_meshes) {
+        object->mesh = prefab_init(object, parsed_colors, raw_obj);
+        client_animate_object_texture(object, 0.0f);
+        object->no_vis = object->no_vis || (object->mesh && !((Mesh *) object->mesh)->visible); // + meshes created hidden (objectives)
+        if (object->mesh && !object->active && !object->no_vis) ((Mesh *) object->mesh)->visible = 0; // meshRef.visible = active
+    }
+#endif
+
+    *out_position = position;
+    *out_scale = scale;
+    return object;
+}
+
 Map *map_init(const cJSON *raw_data) {
     return map_init_ex(raw_data, 1);
 }
@@ -872,9 +1047,6 @@ Map *map_init_ex(const cJSON *raw_data, const int build_meshes) {
 
     for (int i = 0; i < cJSON_GetArraySize(objects); i++) {
         const cJSON *raw_obj = cJSON_GetArrayItem(objects, i);
-
-        const cJSON *obj_pos = cJSON_GetObjectItem(raw_obj, "p");
-        const cJSON *obj_scale = cJSON_GetObjectItem(raw_obj, "s");
         const int prefab_id = map_raw_object_prefab(raw_obj);
 
         if (prefab_id == PREFAB_AI_SPAWNER) {
@@ -884,163 +1056,9 @@ Map *map_init_ex(const cJSON *raw_data, const int build_meshes) {
         }
         if (!map_raw_object_kept(raw_obj)) continue;
 
-        const PrefabInfo *info = prefab_info(prefab_id);
-        Object *object = calloc(1, sizeof(Object));
-        if (!object) continue;
-
-        // v7 map.js: p = limit(p, positionRange).round(2), s = (parseFloat(s) || 0).round(2)
         vec3 position, scale;
-        float *pv = &position.x, *sv = &scale.x;
-        for (int k = 0; k < 3; k++) {
-            const float p = map_number(cJSON_GetArrayItem(obj_pos, k));
-            const float sz = map_number(cJSON_GetArrayItem(obj_scale, k));
-            pv[k] = map_round(map_clampf(p == p ? p : 0.0f, -500000.0f, 500000.0f), 100.0f);
-            sv[k] = map_round(sz == sz ? sz : 0.0f, 100.0f);
-        }
-
-        object->active = 1;
-        object->raw = raw_obj;
-        object->position = position;
-        object->scale = scale;
-        object->prefab = prefab_id;
-        map_parse_generic(object, raw_obj);
-        const cJSON *obj_ab = cJSON_GetObjectItem(raw_obj, "ab"); // "ab != null", so ab: 0 counts too
-        object->ambient_enabled = !map_no_ambient && (!obj_ab || cJSON_IsNull(obj_ab));
-        object->fog_enabled = !map_has(raw_obj, "nf"); // noFog: nf != null
-        // noVis: v == null ? undefined : 1, passed to every rendered builder but addCanvas (SIGN) /
-        // addShowcase / particles. Parsed here so server_bin (no meshes) knows it too: players.spray
-        // skips noVis objects.
-        object->no_vis = prefab_id != PREFAB_SIGN && prefab_id != PREFAB_SHOWCASE && prefab_id != PREFAB_PARTICLES &&
-                         map_has(raw_obj, "v");
-
-        if (info && (info->roles & PREFAB_R_NO_SHOOT)) object->no_shoot = 1;
-
-        map_parse_prefab_keys(object, raw_obj, prefab_id);
-
-        const cJSON *dir = cJSON_GetObjectItem(raw_obj, "d");
-
-        if (prefab_id == PREFAB_LADDER) {
-            object->ladder = 1;
-            object->direction = cJSON_IsNumber(dir) ? (unsigned char) ((((int) cJSON_GetNumberValue(dir) % 4) + 4) % 4) : 0;
-
-            const float direction = (float) M_PI * 0.5f * (float) object->direction;
-
-            object->position.x += game_constants.ladder_scale * cosf(direction);
-            object->position.z += game_constants.ladder_scale * sinf(direction);
-
-            object->scale.x = (object->direction % 2 ? game_constants.ladder_width : game_constants.ladder_scale) * 2.0f;
-            object->scale.z = (object->direction % 2 ? game_constants.ladder_scale : game_constants.ladder_width) * 2.0f;
-        }
-
-        if (prefab_id == PREFAB_RAMP) {
-            const cJSON *boost = cJSON_GetObjectItem(raw_obj, "b");
-
-            Ramp *ramp = calloc(1, sizeof(Ramp));
-            if (!ramp) {
-                free(object);
-                continue;
-            }
-
-            object->direction = cJSON_IsNumber(dir) ? (unsigned char) ((((int) cJSON_GetNumberValue(dir) % 4) + 4) % 4) : 0;
-
-            ramp->boost = cJSON_IsNumber(boost) ? (float) cJSON_GetNumberValue(boost) : 0.0f;
-            ramp->start.x = position.x;
-            ramp->start.y = position.z;
-            ramp->end.x = position.x;
-            ramp->end.y = position.z;
-
-            if (object->direction % 2) {
-                ramp->start.y -= scale.z * 0.5f * (object->direction < 2 ? 1.0f : -1.0f);
-                ramp->end.y += scale.z * 0.5f * (object->direction < 2 ? 1.0f : -1.0f);
-            } else {
-                ramp->start.x -= scale.x * 0.5f * (object->direction < 2 ? 1.0f : -1.0f);
-                ramp->end.x += scale.x * 0.5f * (object->direction < 2 ? 1.0f : -1.0f);
-            }
-
-            object->ramp = ramp;
-        }
-
-        const int no_collisions = map_truthy(cJSON_GetObjectItem(raw_obj, "l")) || map_truthy(cJSON_GetObjectItem(raw_obj, "col"));
-
-        // isBorder: bo == null ? undefined : 1 (the prefabs whose builders take it)
-        if (info && (info->roles & PREFAB_R_BORDER)) object->is_border = (unsigned char) map_has(raw_obj, "bo");
-
-        switch (info ? info->collision : PREFAB_COL_NONE) {
-            case PREFAB_COL_NONE:
-                object->collision_type = COLLISION_TYPE_NONE;
-                break;
-            case PREFAB_COL_FORCED:
-                object->collision_type = COLLISION_TYPE_BOX;
-                break;
-            case PREFAB_COL_FORCED_CYLINDER:
-                object->collision_type = COLLISION_TYPE_CYLINDER;
-                break;
-            case PREFAB_COL_OPTIONAL_CYLINDER:
-                object->collision_type = no_collisions ? COLLISION_TYPE_NONE : COLLISION_TYPE_CYLINDER;
-                break;
-            default:
-                object->collision_type = no_collisions ? COLLISION_TYPE_NONE : COLLISION_TYPE_BOX;
-                break;
-        }
-
-        // notWallJ: wj != null; the non-solid prefabs and the own-branch ones never wall-jump
-        object->wall_jumpable = info && !(info->roles & PREFAB_R_NO_WALL_JUMP) && !map_has(raw_obj, "wj");
-
-        switch (prefab_id) {
-            case PREFAB_VERIFIED_ZONE:
-                object->verified = 1;
-                break;
-            case PREFAB_PREMIUM_ZONE:
-                object->premium = 1;
-                break;
-            case PREFAB_TEAM_ZONE:
-                object->team_zone = 1;
-                object->team = (unsigned int) map_int(raw_obj, "tm");
-                break;
-            case PREFAB_SCORE_ZONE:
-                object->score_zone = 1;
-                // addScoreZone(..., parseInt(sp) || 1)
-                object->score_points = (unsigned int) (map_int(raw_obj, "sp") ? map_int(raw_obj, "sp") : 1);
-                break;
-            case PREFAB_TELEPORTER:
-                object->teleporter = 1;
-                break;
-            case PREFAB_CHECK_POINT:
-                object->checkpoint = 1;
-                break;
-            case PREFAB_WEAPON_PICKUP:
-                object->pickup = 1;
-                break;
-            case PREFAB_FLAG:
-                object->flag = 1;
-                break;
-            case PREFAB_TRIGGER:
-                object->trigger = 1;
-                object->team = (unsigned int) map_int(raw_obj, "tm");
-                break;
-            case PREFAB_DEATH_ZONE:
-                object->kill = 1;
-                break;
-            case PREFAB_OBJECTIVE:
-                object->objective = 1;
-                break;
-            case PREFAB_BOMB_SITE:
-                object->bomb_site = 1;
-                break;
-            default:
-                break;
-        }
-
-        map_parse_interface(object, raw_obj, prefab_id); // destructibles, interfaces, gates, banks, triggers, check points, teleporters
-
-#ifdef KRUNKNATIVE_CLIENT
-        if (build_meshes) {
-            object->mesh = prefab_init(object, parsed_colors, raw_obj);
-            client_animate_object_texture(object, 0.0f);
-            object->no_vis = object->no_vis || (object->mesh && !((Mesh *) object->mesh)->visible); // + meshes created hidden (objectives)
-            if (object->mesh && !object->active && !object->no_vis) ((Mesh *) object->mesh)->visible = 0; // meshRef.visible = active
-        }
-#endif
+        Object *object = map_parse_object(raw_obj, parsed_colors, map_no_ambient, build_meshes, &position, &scale);
+        if (!object) continue;
 
         if (position.x - scale.x * 0.5f < map->dimensions.min.x) {
             map->dimensions.min.x = position.x - scale.x * 0.5f;
@@ -1102,6 +1120,28 @@ void map_reset(Map *map) {
         if (object->mesh && !object->no_vis) ((Mesh *) object->mesh)->visible = object->active;
 #endif
     }
+}
+
+Object *map_object_from_json(const Map *map, const cJSON *raw_obj, const int build_meshes) {
+    if (!cJSON_IsObject(raw_obj) || !map_raw_object_kept(raw_obj)) return NULL;
+    const int map_no_ambient = map && map_flag_is_set(cJSON_GetObjectItem(map->raw_data, "nAmb"));
+    vec3 position, scale;
+    return map_parse_object(raw_obj, NULL, map_no_ambient, build_meshes, &position, &scale);
+}
+
+void map_object_free(Object *object) {
+    if (!object) return;
+    if (object->tex_anim) free(object->tex_anim);
+    free(object->ramp);
+    if (object->trig) free(object->trig->actions);
+    free(object->trig);
+#ifdef KRUNKNATIVE_CLIENT
+    if (object->mesh) {
+        map_post_object_freed(object); // map_post.c: a run-time object's mesh leaves the scene
+        mesh_fini(object->mesh);
+    }
+#endif
+    free(object);
 }
 
 void map_fini(Map *map) {

@@ -176,7 +176,7 @@ void scene_remove_mesh(Scene *scene, Mesh *mesh) {
 
     if (index == -1) return;
 
-    memcpy(&scene->meshes[index], &scene->meshes[index + 1], (scene->mesh_count - index - 1) * sizeof(Mesh *));
+    memmove(&scene->meshes[index], &scene->meshes[index + 1], (scene->mesh_count - index - 1) * sizeof(Mesh *)); // overlapping: memmove
     scene->mesh_count--;
 
     if (!scene->mesh_count) {

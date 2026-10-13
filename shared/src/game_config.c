@@ -128,6 +128,9 @@ static const GameConfigOption k_server_options[] = {
     {"bstOfR", "Best of", "Other", NULL, GC_BOOL, GC_STORE_U8, GC_BASIC | GC_HIDE_E | GC_HAS_DEF_C, GC_HT(1), .def = 0.0f, .def_c = 1.0f, .offset = offsetof(GameConfig, best_of)},
     {"headClipFix", "Stop Head Clipping", "Other", NULL, GC_BOOL, GC_STORE_U8, GC_HAS_DEF_C, GC_HT(0) | GC_HT(1), .def = 0.0f, .def_c = 1.0f, .offset = offsetof(GameConfig, head_clip_fix)},
     {"minimaps", "Minimaps", "Other", NULL, GC_BOOL, GC_STORE_U8, 0, 0, .def = 1.0f, .offset = offsetof(GameConfig, minimaps)},
+    // KrunkNative addition (not a v7.1.4 serverConfig key): the Object Manager's extra loadout weapons and
+    // weapon pickups for every player of a custom game (shared/src/object_manager.c)
+    {"knOmWeps", "Object Manager Weapons", "Other", NULL, GC_BOOL, GC_STORE_U8, 0, 0, .def = 1.0f, .offset = offsetof(GameConfig, om_weapons)},
     {"limitClasses", "Limit Classes", "Class Limits", "Class Limits", GC_BOOL, GC_STORE_U8, GC_BASIC | GC_HIDE_E | GC_HAS_DEF_C, GC_HT(1), .def = 0.0f, .def_c = 1.0f, .offset = offsetof(GameConfig, limit_classes)},
     {"classLim0", "Triggerman", "Other", NULL, GC_NUM, GC_STORE_INT, GC_BASIC | GC_HIDE_E | GC_HAS_DEF_C, GC_HT(1), .def = 0.0f, .def_c = 1.0f, .min = 0.0f, .max = 20.0f, .step = 1.0f, .offset = offsetof(GameConfig, class_limits[0])},
     {"classLim1", "Hunter", "Other", NULL, GC_NUM, GC_STORE_INT, GC_BASIC | GC_HIDE_E | GC_HAS_DEF_C, GC_HT(1), .def = 0.0f, .def_c = 1.0f, .min = 0.0f, .max = 20.0f, .step = 1.0f, .offset = offsetof(GameConfig, class_limits[1])},

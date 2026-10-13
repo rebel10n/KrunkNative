@@ -2,7 +2,10 @@
 
 Per-region pixel diff of the native HTML/CSS UI against the Krunker v7.1.4
 reference captures in `doc/ref/krunker-v7.1.4/` (made by `capture-v7.js`, see
-[References](#references); the v3.1.1 captures stay in `doc/ref/krunker-v3.1.1/`). `make uidiff` builds `client_bin`
+[References](#references); the v3.1.1 captures stay in `doc/ref/krunker-v3.1.1/`). KrunkNative-only
+UI with no Krunker counterpart (the `kn-*` scenarios: the Object Manager window and its HUD rack)
+diffs against KN's own renders in `doc/ref/krunknative/` (llvmpipe, made with `--render-scenario`
+from the same scenario): a regression baseline, not a parity reference. `make uidiff` builds `client_bin`
 with the in-house engine (`HTML_ENGINE=ON`) and renders every scenario through the
 real client and its C UI logic (see [Rendering with client_bin](#rendering-with-client_bin)):
 

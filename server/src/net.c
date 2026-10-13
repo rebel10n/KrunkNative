@@ -14,6 +14,7 @@
 #include <game_config.h>    // WP-E: GAME_CONFIG / NETWORK_DATA, match votes, viewDis
 #include <social_v7.h>      // WP-E part 2b: chat / voice channels, multi-spray, taunts
 #include <comp_lobby.h>     // v7 comp lobby (lobbyPlayers): ranked matches and comp hosts
+#include <object_manager.h>  // KrunkNative Object Manager (spawn menu): ids 250-254
 #include <errno.h>
 #include <math.h>
 #include <stdio.h>
@@ -122,6 +123,8 @@ static int net_peer_takes(const ClientConnection *client, const int type) {
         (type >= NET_PACKET_BLOCK_AIRDROP && type < NET_PACKET_BLOCK_LOBBY)) return ks_server_peer_v7(client);
     // player-viewer WP-E: the HUD / death screen / social packets (NET_PACKET_BLOCK_SOCIAL, 240-249)
     if (type >= NET_PACKET_BLOCK_SOCIAL && type < NET_PACKET_BLOCK_SOCIAL + 10) return ks_server_peer_v7(client);
+    // KrunkNative Object Manager (NET_PACKET_BLOCK_SANDBOX, 250-254): v7 peers only
+    if (type >= NET_PACKET_BLOCK_SANDBOX && type < NET_PACKET_BLOCK_END) return ks_server_peer_v7(client);
     // WP-E part 2b: v7 peers get every spray as NET_PACKET_SPRAY_V7 (multi-spray), older ones the v3 "sp"
     if (type == NET_PACKET_SPRAY) return !ks_server_peer_v7(client);
     return type < NET_PACKET_BLOCK_MODES || type >= NET_PACKET_BLOCK_MODES + 10 || ks_server_peer_v7(client);
@@ -164,6 +167,7 @@ static void net_game_next_round(Game *game) {
 
 static ClientConnection *net_client_by_id(int id);
 static void net_spawn_client(ClientConnection *client);
+static ObjectManagerPerms net_om_perms(const ClientConnection *client);
 
 // GameHooks.reward: player.reward at endGame (accounts only, server/src/accounts.c).
 static int net_game_reward(Game *game, const Player *player) {
@@ -455,6 +459,13 @@ static void net_send_spawn(ClientConnection *client, const Player *player, const
     // WP-C: 1.3.0 and older peers only take the V2 SPAWN; 1.3.1 peers prefix-read the WP-F V4
     const uint16_t size = net_peer_has_wpc(client->peer_minor, client->peer_patch) ? NET_SPAWN_PACKET_V4_SIZE : NET_SPAWN_PACKET_V2_SIZE;
     net_send_packet(client->fd, NET_PACKET_SPAWN, &packet, size);
+
+    // KrunkNative Object Manager: the SPAWN rebuilt the class loadout; the extra weapons follow it
+    if (player->extra_weapon_count > 0 && ks_server_peer_v7(client)) {
+        NetLoadoutExtraPacket extra = {.uid = player->uid};
+        for (int i = 0; i < player->extra_weapon_count && i < PLAYER_EXTRA_WEAPONS_MAX; i++) extra.weapons[extra.count++] = (uint8_t) player->extra_weapons[i];
+        net_send_packet(client->fd, NET_PACKET_LOADOUT_EXTRA, &extra, sizeof(extra));
+    }
 }
 
 static void net_broadcast_spawn(const Player *player) {
@@ -553,6 +564,16 @@ static void net_spawn_client(ClientConnection *client) {
     // account, or the host's own machine (the offline sandbox counts as an account, decisions.md)
     player_set_streak_indexes(client->player, client->streak_indexes_set ? client->streak_indexes : NULL);
     client->player->has_account = (unsigned char) (client->acct.account_id > 0 || client->local);
+    // KrunkNative Object Manager: the connection's extra weapons, while this game allows them
+    const ObjectManagerPerms om_perms = net_om_perms(client);
+    if (!object_manager_keep_extras(&g_server->game, &om_perms)) {
+        const int had = client->player->extra_weapon_count > 0;
+        client->om_extra_count = 0;
+        player_set_extra_weapons(client->player, NULL, 0);
+        if (had) object_manager_send_extras(&g_server->game, client->player, NET_TARGET_ALL);
+    } else {
+        player_set_extra_weapons(client->player, client->om_extras, client->om_extra_count);
+    }
     player_spawn(client->player);
     accounts_player_card(client, client->player); // WP-E: class stat of the spawned class + pcStatIndex value
     client->joined = 1;
@@ -694,6 +715,28 @@ static ChatCommandHost g_chat_host;
 // connection counts by the address it forwards (NET_PACKET_FORWARDED, net_handle_forwarded).
 static int net_client_is_dev(const ClientConnection *client) {
     return client->op || client->local || (client->acct.flags & NET_PLAYER_INFO_DEV);
+}
+
+// KrunkNative Object Manager: who is asking (shared/src/object_manager.c decides what they may do)
+static ObjectManagerPerms net_om_perms(const ClientConnection *client) {
+    return (ObjectManagerPerms) {
+        .dev = (unsigned char) !!net_client_is_dev(client),
+        .host = (unsigned char) !!accounts_is_custom_host(client),
+        .ranked = (unsigned char) !!accounts_ranked_active(),
+    };
+}
+
+// NET_PACKET_SPAWN_REQ: one Object Manager action, answered with NET_PACKET_SPAWN_RESULT. The
+// connection keeps the extra weapons across map changes (the players are freed there).
+static void net_handle_object_manager(ClientConnection *client, const NetSpawnReqPacket *req) {
+    const ObjectManagerPerms perms = net_om_perms(client);
+    NetSpawnResultPacket result;
+    object_manager_request(&g_server->game, client->player, req, &perms, &result);
+    if (client->player) {
+        client->om_extra_count = client->player->extra_weapon_count;
+        memcpy(client->om_extras, client->player->extra_weapons, sizeof(client->om_extras));
+    }
+    net_send_packet(client->fd, NET_PACKET_SPAWN_RESULT, &result, sizeof(result));
 }
 
 static int net_chat_peer_count(void *user) {
@@ -860,6 +903,7 @@ void net_add_client(ClientConnection *client) {
     client->voice = (SocialAssembly) {0};
     client->voice_v7 = (SocialAssembly) {0};
     memset(&client->custom_values, 0, sizeof(client->custom_values)); // WP-C: no custVals yet
+    client->om_extra_count = 0; // Object Manager: no extra weapons yet
     g_server->clients[g_server->client_count] = *client;
 
     ClientConnection *stored_client = &g_server->clients[g_server->client_count++];
@@ -1294,6 +1338,13 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             memcpy(&spray, packet->payload, sizeof(spray));
             const int owned = spray.index >= 0 && accounts_owns_skin(client, spray.index); // canUseSkin
             game_player_spray_request(&g_server->game, client->player, spray.index, owned);
+            break;
+        }
+        case NET_PACKET_SPAWN_REQ: { // KrunkNative Object Manager (F1 spawn menu), v7 peers
+            if (!ks_server_peer_v7(client) || packet->length != sizeof(NetSpawnReqPacket)) break;
+            NetSpawnReqPacket req;
+            memcpy(&req, packet->payload, sizeof(req));
+            net_handle_object_manager(client, &req);
             break;
         }
         case NET_PACKET_TAUNT: // WP-E: "prpt", i (handleModeTaunt -> players.taunt)

@@ -116,6 +116,9 @@ void net_packet_from_input(NetInputPacket *packet, const Input *input) {
     const float slowdown = roundf(input->slowdown * 10.0f);
     packet->slowdown = (uint8_t) (slowdown <= 0.0f ? 0 : slowdown >= 10.0f ? 10 : slowdown);
     packet->scroll = (int8_t) (input->scroll > 0 ? 1 : input->scroll < 0 ? -1 : 0);
+    // KrunkNative Object Manager: a slot pick rides in the scroll byte as slot + 2 (2..127). Clients
+    // only send it to servers that granted extra weapons; older servers read any > 0 as a scroll.
+    if (input->select_slot && input->select_slot <= 126) packet->scroll = (int8_t) (input->select_slot + 1);
 
     if (input->shoot) packet->flags |= NET_INPUT_SHOOT;
     if (input->scope) packet->flags |= NET_INPUT_SCOPE;
@@ -138,6 +141,10 @@ void net_packet_to_input(Input *input, const NetInputPacket *packet) {
     input->swap = packet->swap;
     input->slowdown = (packet->slowdown > 10 ? 10 : packet->slowdown) / 10.0f;
     input->scroll = (signed char) (packet->scroll > 0 ? 1 : packet->scroll < 0 ? -1 : 0);
+    if (packet->scroll >= 2) { // KrunkNative Object Manager slot pick (net_packet_from_input)
+        input->select_slot = (unsigned char) (packet->scroll - 1);
+        input->scroll = 0;
+    }
     input->shoot = !!(packet->flags & NET_INPUT_SHOOT);
     input->scope = !!(packet->flags & NET_INPUT_SCOPE);
     input->jump = !!(packet->flags & NET_INPUT_JUMP);

@@ -178,7 +178,7 @@ static void test_tables(void) {
     printf("option tables...\n");
     size_t n = 0;
     game_config_options(GAME_CONFIG_SERVER, &n);
-    CHECK(n == 85, "serverConfig has %zu entries, v7 85", n);
+    CHECK(n == 86, "serverConfig has %zu entries, v7 85 + KrunkNative knOmWeps (Object Manager)", n);
     game_config_options(GAME_CONFIG_CLASS, &n);
     CHECK(n == 79, "classConfig has %zu entries, v7 79", n);
     game_config_options(GAME_CONFIG_WEAPON, &n);

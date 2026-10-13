@@ -160,6 +160,9 @@ typedef struct {
     // WP-C: v7 player.custVals are never reset, but KN frees the players at every map change: the
     // connection keeps them across rounds (net_free_players / net_spawn_client)
     TriggerValueSet custom_values;
+    // KrunkNative Object Manager: the extra loadout weapons, kept across map changes like custVals
+    int om_extras[PLAYER_EXTRA_WEAPONS_MAX];
+    int om_extra_count;
 } ClientConnection;
 
 typedef struct {

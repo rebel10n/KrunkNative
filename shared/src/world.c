@@ -6,6 +6,7 @@
 // teleportFromNode, "mo" / "mf"), object animations ("ana") and the world part of the join sync.
 // Runs on the authority (server / offline sandbox server) and, for prediction, on the client.
 #include <world.h>
+#include <object_manager.h>
 #include <account.h>
 #include <triggers_v7.h>
 #include <math.h>
@@ -556,6 +557,7 @@ void world_round_start(Game *game) {
     }
     game->world.moved_count = 0;
     world_remove_builds(game); // finishInit: removeBuilds
+    object_manager_round_start(game); // KrunkNative: the Object Manager's records of those objects go too
     zone_reset(game);          // finishInit: resetZone
 
     // generateTriggerTypes: saveColls when a trigger listens to onEnterObject / onExitObject

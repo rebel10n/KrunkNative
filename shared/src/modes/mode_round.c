@@ -703,7 +703,7 @@ void mode_player_spawned(Game *game, Player *player) {
     int weapons[NET_LOADOUT_MAX];
     int count = mode_gun_loadout(game, player, weapons);
     if (!count && mode_no_melee(game)) { // setClass: no knife slot with noMelee (Classic FFA)
-        for (int i = 0; i < player->loadout_size && count < NET_LOADOUT_MAX; i++) {
+        for (int i = 0; i < player_loadout_base(player) && count < NET_LOADOUT_MAX; i++) {
             if (player->loadout[i] != WEAPON_ID_KNIFE) weapons[count++] = player->loadout[i];
         }
     }

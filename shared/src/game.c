@@ -1,3 +1,4 @@
+#include <object_manager.h>
 #include <shared.h>
 #include <ai.h>
 #include <map_ai.h>
@@ -67,6 +68,7 @@ const GameConfig g_default_game_config = {
     .log_time = 1,
     .kill_cams = 1,
     .allow_anonymous = 1,
+    .om_weapons = 1, // KrunkNative knOmWeps
     .spec_slots = 2,
     .team_size = 3,
     .minimaps = 1,
@@ -569,6 +571,7 @@ void game_set_endless(Game *game, const int on) {
 void game_send_round_state(Game *game, const int uid) {
     if (!game->ready || !game_is_authority(game)) return;
 
+    object_manager_send_state(game, uid); // KrunkNative: spawned objects first (their pickups sync below)
     game_send_object_state(game, uid); // init dest / gates / banks (shared/src/triggers.c)
     world_send_state(game, uid);        // init zone / mov (shared/src/world.c, WP-B)
     zombies_send_state(game, uid);      // init pwup / mybx / krm, the wave, airdrops (WP-H)

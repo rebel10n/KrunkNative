@@ -279,7 +279,7 @@ void zombies_give_weapon(Player *player, const int weapon_id, const int upgraded
 
     int ids[NET_LOADOUT_MAX + 1];
     int count = 0;
-    for (int i = 0; i < player->loadout_size && count < NET_LOADOUT_MAX; i++) ids[count++] = player->loadout[i];
+    for (int i = 0; i < player_loadout_base(player) && count < NET_LOADOUT_MAX; i++) ids[count++] = player->loadout[i];
     unsigned int old_ammo[NET_LOADOUT_MAX + 1];
     int old_ids[NET_LOADOUT_MAX + 1];
     const int old_count = count;

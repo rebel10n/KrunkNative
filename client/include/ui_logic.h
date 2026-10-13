@@ -364,8 +364,9 @@ enum {
     UI_CONTROL_RESET = 38, UI_CONTROL_RESET_LAST = 39,
     // KrunkNative addition: Reconnect (F5, cont_reconnectKey), the console's `reconnect`
     UI_CONTROL_RECONNECT = 40,
-    // KrunkNative addition: Game Settings (F1, cont_settingsKey) opens Settings on its Game tab
-    UI_CONTROL_SETTINGS = 41,
+    // KrunkNative addition: the Object Manager (F1, cont_objectManagerKey) toggles the spawn menu
+    // (client/src/ui/object_manager_ui.c); the slot held F1's earlier Game Settings bind
+    UI_CONTROL_OBJECT_MANAGER = 41,
     UI_CONTROL_COUNT = 42
 };
 
@@ -444,6 +445,19 @@ void ui_controls_set_speed_limit(float limit);   // speedLmt (gradSpeed)
 float ui_controls_speed_limit(void);
 void ui_controls_touch_shoot(int on);            // #mobileUI shoot buttons: UCUz1 (ui_mobile.c)
 // END ui_controls block
+
+// BEGIN object_manager_ui block (client/src/ui/object_manager_ui.c): the KrunkNative Object Manager
+// (F1 spawn menu, shared/include/object_manager.h). Not a v7 window: id 54 follows the Connect window.
+#define OBJECT_MANAGER_WINDOW 54
+void object_manager_ui_toggle(Client*);          // the F1 bind: open (pointer freed) / close (pointer back)
+int  object_manager_ui_escape(void);             // Escape on the window: 1 = back to the game
+int  object_manager_ui_search_focused(void);     // its search box has the keyboard (F1 still toggles)
+int  object_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // knOm*; -1 not ours
+char *object_manager_window_gen(int id, const char **header); // NULL for other ids
+int  object_manager_events_handle(Client*, int type, const void *payload, uint16_t length); // packets 251-253
+void object_manager_ui_reset(void);              // a new server (INIT): its caps are unknown again
+void ui_controls_select_slot(int slot);          // ui_controls.c: equip loadout slot `slot` with the next input frame
+// END object_manager_ui block
 
 // BEGIN ui_loadout block (client/src/ui/ui_loadout.c): Change Loadout + item pickers,
 // K.P.D popup, Changelog (Krunker v3.1.1 guest state).

@@ -34,6 +34,7 @@
 #include <cosmetics.h>     // player card items (cosmetic_item)
 #include "../viewer/viewer_store.h" // store skins / rarities (the killer's weapon skin)
 #include <game_config.h>   // game_config_is_custom (the report prompt)
+#include <object_manager.h> // KrunkNative Object Manager: NET_PACKET_SPAWN_RESULT / LOADOUT_EXTRA / SPAWNED_OBJ
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -900,6 +901,10 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         case NET_PACKET_MATCH_VOTE_STATE:
         case NET_PACKET_COMP_LOBBY:
             return lobby_events_handle(client, type, payload, length); // WP-E
+        case NET_PACKET_SPAWN_RESULT: // KrunkNative Object Manager (client/src/ui/object_manager_ui.c)
+        case NET_PACKET_LOADOUT_EXTRA:
+        case NET_PACKET_SPAWNED_OBJ:
+            return object_manager_events_handle(client, type, payload, length);
         case NET_PACKET_ZONE:
         case NET_PACKET_BUILD:
         case NET_PACKET_LOG_TIME:

@@ -224,8 +224,8 @@ static const V7Bind V7_BINDS[] = {
     // v7 has no such bind (the browser's F5 reloads the page); the native client reconnects
     // in place instead (console `reconnect`), the web build still reloads (reconnect_key).
     {"reconnect", -1, "reconnectKey", 116, -1, UI_CONTROL_RECONNECT},
-    // KrunkNative addition: Game Settings, F1 (keyCode 112): Settings opened on its Game tab.
-    {"settings", -1, "settingsKey", 112, -1, UI_CONTROL_SETTINGS},
+    // KrunkNative addition: the Object Manager, F1 (keyCode 112): toggles the spawn menu and the pointer.
+    {"objectManager", -1, "objectManagerKey", 112, -1, UI_CONTROL_OBJECT_MANAGER},
     {"streak", 0, "18", 49, -1, UI_CONTROL_STREAK0},
     {"streak", 1, "19", 50, -1, UI_CONTROL_STREAK0 + 1},
     {"streak", 2, "20", 51, -1, UI_CONTROL_STREAK0 + 2},
@@ -285,8 +285,9 @@ static const ControlRow TAB_GENERAL[] = {
     {"Inspect", "inspect", -1, 0, "Weapon"}, {"Spray", "spray", -1, 0, "Weapon"},
     {"Spray Wheel (Hold)", "sprayWheel", -1, 0, "Weapon"}, {"Player List", "playerList", -1, 0, "Interface"},
     {"InGame Leaderboard", "scoreBoard", -1, 0, "Interface"}, {"Hide Players", "hidePlayers", -1, 0, "Players"},
-    // KrunkNative addition, last so v7's rows keep their places (binds.reconnect above)
+    // KrunkNative additions, last so v7's rows keep their places (binds.reconnect / objectManager above)
     {"Reconnect", "reconnect", -1, 0, "Connection"},
+    {"Object Manager", "objectManager", -1, 0, "Sandbox"},
 };
 static const ControlRow TAB_CHAT[] = {
     {"Chat", "chat", -1, 0, "Interface & Audio"}, {"Voice", "voiceChat", -1, 0, "Interface & Audio"},
@@ -350,6 +351,7 @@ static struct {
     int shoot;               // left mouse button (v7 routes it through binds.shoot: 10001)
     int aim;                 // right mouse button (binds.aim: 10003)
     int pending_swap;        // aba6: 1 swap(secondary) 2 melee 3 primary 4 equipment
+    int pending_slot;        // KrunkNative Object Manager: Input.select_slot (0 none), kept until an input frame takes it
     int scroll_pressed;      // the wheel "key" is down until the end of this input frame
 
     int chat_focused;        // #chatInput has focus (focusChat(1) / focusChat())
@@ -1167,27 +1169,6 @@ static void show_player_list(void *user) {
     menu_show_window(23, 0);
 }
 
-// Settings on its Game tab: 2 in the basic view (General, Display, Game, Sound), 4 in the
-// advanced one (General, Controls, Display, Render, Game, Sound); windows[0].changeTab(N).
-static void show_game_settings(void *user) {
-    (void) user;
-    const HtmlArg arg = {HTML_ARG_NUM, menu_ui()->settings_view ? 4.0 : 2.0, NULL};
-    HtmlEvent ev;
-    memset(&ev, 0, sizeof(ev));
-    ev.type = "click";
-    ev.value = "";
-    html_ui_dispatch("windows.0.changeTab", &ev, &arg, 1);
-    if (menu_ui()->active_window != 1) menu_show_window(1, 1);
-}
-
-static void game_settings_key(Client *client) {
-    if (ui_controls_enabled(client)) { // in game: free the pointer like pListKey
-        ui_controls_reset_keys();
-        client_set_menu_open(client, 1);
-    }
-    html_timer_add(0.0, show_game_settings, NULL);
-}
-
 // window.pressButton(keyCode), the parts with an in-game effect.
 static void press_button(Client *client, const int code) {
     // pListKey (Alt): only while the game owns the input (N()'s `!controls.enabled` return)
@@ -1248,6 +1229,12 @@ static void press_code(Client *client, const int code) {
     if (bind_is(UI_CONTROL_VOICE, code)) g_voice_key = 1;
     g_ctl.keys[slot] = 1;
     g_ctl.did_pressed[slot] = 1;
+    // KrunkNative Object Manager: with extra loadout weapons the number row (1-9) picks slots and
+    // keeps nothing else bound to those keys (streak call-ins, taunts) from acting on them
+    if (code >= 49 && code <= 57 && client && client->me && player_loadout_base(client->me) < client->me->loadout_size) {
+        g_ctl.pending_slot = code - 48;
+        return;
+    }
     if (bind_is(UI_CONTROL_SWAP, code)) g_ctl.pending_swap = 1;
     else if (bind_is(UI_CONTROL_MELEE, code)) g_ctl.pending_swap = 2;
     else if (bind_is(UI_CONTROL_PRIMARY, code)) g_ctl.pending_swap = 3;
@@ -1304,9 +1291,11 @@ int ui_controls_key_event(Client *client, const int key, const int scancode, con
         reconnect_key();
         return 1;
     }
-    // Game Settings (F1): in game and in the menu, not while typing
-    if (press && code >= 0 && bind_is(UI_CONTROL_SETTINGS, code) && !g_ctl.chat_focused && !ui_text_input_focused()) {
-        game_settings_key(client);
+    // Object Manager (F1): in game and in the menu, not while typing (its own search box excepted)
+    if (press && code >= 0 && bind_is(UI_CONTROL_OBJECT_MANAGER, code) && !g_ctl.chat_focused &&
+        (!ui_text_input_focused() || object_manager_ui_search_focused())) {
+        g_ctl.game_key = 1; // web: preventDefault, the browser's own F1 (help) must not open
+        object_manager_ui_toggle(client);
         return 1;
     }
 
@@ -1579,11 +1568,18 @@ void ui_controls_fill_input(Client *client, Input *input, const float dx, const 
     input->shoot = g_ctl.shoot || ui_controls_down(UI_CONTROL_SHOOT);
     input->scope = g_ctl.aim || ui_controls_down(UI_CONTROL_AIM);
     input->swap = input_swap(client ? client->me : NULL);
+    input->select_slot = (unsigned char) g_ctl.pending_slot; // Object Manager slot pick (number keys)
+    g_ctl.pending_slot = 0;
     input->slowdown = 1.0f - roundf(g_ctl.speed_lmt * 10.0f) / 10.0f; // b9[12]: 1 - speedLmt.round(1)
     // WP-C v7.1.4 input[13] isPressed("resetLast") ? 2 : isPressed("reset") ? 1 : 0, input[14] isPressed("interact")
     input->reset = ui_controls_down(UI_CONTROL_RESET_LAST) ? 2 : ui_controls_down(UI_CONTROL_RESET) ? 1 : 0;
     input->interact_held = ui_controls_down(UI_CONTROL_INTERACT) ? 1 : 0;
     ui_bhop_fill_input(client, input); // v3.1.1 mod patchInputs: bhop jump/crouch slots (ui_bhop.c)
+}
+
+// KrunkNative Object Manager: equip loadout slot `slot` with the next input frame (-1 cancels).
+void ui_controls_select_slot(const int slot) {
+    g_ctl.pending_slot = slot >= 0 && slot < 126 ? slot + 1 : 0;
 }
 
 // After the input frame: didPressed, aba6 and the wheel "key" are one-frame events.

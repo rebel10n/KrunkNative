@@ -284,6 +284,8 @@ void mode_set_player_loadout(Player *player, const int *weapons, const int count
     player->ammo = new_ammo;
     player->reloads = new_reloads;
     player->loadout_size = size;
+    player->loadout_base = size;
+    player_loadout_append_extras(player); // KrunkNative Object Manager: the extra weapons stay after it
     player->can_throw = !mode_no_knives(game);
     player->upgraded_slots = 0; // v7.1.4 updateLoadout without upgrades[]: no krumMachine slots (WP-B)
 

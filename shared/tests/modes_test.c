@@ -1300,7 +1300,8 @@ static NetLeaderStatsPacket leader_stats_sent(int *found) {
 
 static void test_leader_stats(Game *game) {
     printf("Running leader stats test...\n");
-    CHECK(NET_PACKET_LEADER_STATS == NET_PACKET_BLOCK_SOCIAL && NET_PACKET_BLOCK_END == 250, "WP-E block 240-249");
+    CHECK(NET_PACKET_LEADER_STATS == NET_PACKET_BLOCK_SOCIAL && NET_PACKET_BLOCK_SANDBOX == 250, "WP-E block 240-249");
+    CHECK(NET_PACKET_BLOCK_END == 255, "KrunkNative Object Manager block 250-254");
     CHECK(sizeof(NetLeaderStatsPacket) <= NET_MAX_PAYLOAD, "LEADER_STATS fits a frame (%zu)", sizeof(NetLeaderStatsPacket));
 
     start_mode(game, MODE_ID_FFA); // ["score", "kills", "deaths"], orderByScore

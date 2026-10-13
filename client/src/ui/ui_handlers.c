@@ -592,6 +592,7 @@ static const UiModuleHandler MODULE_HANDLERS[] = {
     hud_ui_handle,             // hud_ui.c: chat, player list, end screen, death screen
     ui_client_settings_handle, // ui_client_settings.c: Settings > Client, the Exit item
     update_ui_handle,          // update_ui.c: knUpdateNow / knUpdateDownload (the Outdated box)
+    object_manager_ui_handle,  // object_manager_ui.c: the KrunkNative Object Manager (knOm*)
 };
 
 static int h_fallback(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
@@ -726,6 +727,7 @@ static int l_window_keydown(void *user, const HtmlEvent *ev, const HtmlArg *args
     }
     if (html_key_is_escape(ev->key)) {
         if (ui->menu_open && menu_window_is_open()) {
+            if (object_manager_ui_escape()) return 0; // the Object Manager opened in game: straight back to it
             menu_toggle_window(0);
             return 0;
         }

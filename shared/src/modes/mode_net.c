@@ -164,7 +164,7 @@ void mode_send_loadout(Game *game, const Player *player) {
     NetLoadoutPacket packet;
     memset(&packet, 0, sizeof(packet));
     packet.uid = player->uid;
-    packet.count = player->loadout_size < NET_LOADOUT_MAX ? player->loadout_size : NET_LOADOUT_MAX;
+    packet.count = player_loadout_base(player) < NET_LOADOUT_MAX ? player_loadout_base(player) : NET_LOADOUT_MAX; // the base: extra weapons ride in LOADOUT_EXTRA
     for (int i = 0; i < packet.count; i++) {
         packet.weapons[i] = player->loadout[i];
         packet.ammo[i] = player->ammo ? (int32_t) player->ammo[i] : 0;

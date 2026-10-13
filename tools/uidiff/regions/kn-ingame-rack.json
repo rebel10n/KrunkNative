@@ -1,0 +1,35 @@
+{
+  "scenario": "kn-ingame-rack",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "weapon-rack",
+      "rect": [
+        1150,
+        484,
+        124,
+        186
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#weapHolder.knManyWeaps: 11 slots in two columns, the held Minigun at full opacity, number keys on the extras"
+    },
+    {
+      "name": "ammo",
+      "rect": [
+        1146,
+        674,
+        128,
+        40
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#ammoDisplay 250 | 250"
+    }
+  ]
+}

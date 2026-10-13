@@ -349,6 +349,10 @@ typedef struct {
     unsigned char tel_checkpoint:1;     // TELEPORTER "tcp" (telCheckPoint): to the player's check point
     unsigned char dynamic:1;            // a player build (game.buildObj): removed by removeBuilds
     int build_index;                    // buildObjs.js index of a build (typeInd; dynamic objects only)
+    // KrunkNative Object Manager (shared/src/object_manager.c): spawned at run time from a menu
+    // record (raw points into the game's ObjectManager records); removed with the builds at round start
+    unsigned char spawned:1;
+    int spawn_owner;                    // uid of the player who spawned it (spawned objects only)
     // ---- end WP-B
 
     CollisionType collision_type;
@@ -561,6 +565,12 @@ int map_raw_object_kept(const cJSON *raw_obj);
 void map_object_rotation(const Object *object, float out[9]);
 void map_reset(Map*);
 void map_fini(Map*); // NOTE: ensure no meshes from the map are part of the scene, they are free()'d!
+// KrunkNative Object Manager: an Object for one raw map object record (`raw_obj` must outlive it:
+// object->raw points into it), parsed exactly like map_init does with `map`'s ambient setting;
+// not added to the map (no side lists, no dimensions). NULL: not a kept object / out of memory.
+Object *map_object_from_json(const Map *map, const cJSON *raw_obj, int build_meshes);
+// Frees one object made by map_init / map_object_from_json (client: its mesh leaves the scene first).
+void map_object_free(Object *object);
 
 // ---- WP-A: v7.1.4 per-class movement knobs (config.js classConfig "Movement", player.js,
 // movement.js). No official v7 class sets one; custom maps can (config.cls). A field left 0 reads
@@ -794,6 +804,9 @@ typedef struct {
     unsigned char reload:1;
     // input[11] (CONTROLS.aba6): 1 swapSecondary, 2 swapMelee, 3 primary (slot 0), 4 swapEquipment.
     unsigned char swap:3;
+    // KrunkNative Object Manager: 0 none, n = equip loadout slot n - 1 (the number keys with extra
+    // loadout weapons). Sent in NetInputPacket.scroll as n + 1 (>= 2); see net_packet_from_input.
+    unsigned char select_slot;
     // input[10]: the wheel, wDG6 * scrollDirM (-1 / 0 / 1), only when no swap key was
     // pressed; procInputs steps the weapon index with reload/pY2 (player_scroll_weapon).
     signed char scroll;
@@ -857,6 +870,7 @@ struct Game_t;
 #define PLAYER_COLLIDING_OBJS_MAX 64   // map-logic WP-B: enter / exit trigger objects a player is inside (collidingObjs)
 #define PLAYER_PICKED_MAX 64           // WP-C: lastPicked slots (weapon ids 0..63)
 #define PLAYER_RESERVE_MAX 8           // map-logic WP-H: finiteAmmo reserves (one per loadout weapon)
+#define PLAYER_EXTRA_WEAPONS_MAX 24    // KrunkNative Object Manager: extra loadout weapons per player
 
 typedef struct {
     int uid;      // dealer uid, -1 = free slot
@@ -1183,6 +1197,14 @@ typedef struct Player_t {
 
     int loadout_size;
     int loadout_index;
+    // KrunkNative Object Manager (shared/src/object_manager.c): the extra loadout weapons follow the
+    // class / mode loadout ("base", slots [0, loadout_base)) in slots [loadout_base, loadout_size).
+    // 0 = the whole loadout is base (player_loadout_base). Packets and v7 loadout logic see the base.
+    int loadout_base;
+    int extra_weapons[PLAYER_EXTRA_WEAPONS_MAX]; // weapon ids, in the order they were added
+    int extra_weapon_count;
+    float om_tokens;              // Object Manager request bucket (OM_RATE_*), refilled by game time
+    float om_tokens_at;           // game->now of the last refill
 
     Input *input_queue;
     size_t input_queue_size;
@@ -1319,6 +1341,14 @@ float player_wrap_yaw(float yaw); // controls.js xDr = rotation.y % Math.PI2: (-
 float player_clamp_pitch(float pitch); // controls.js pitchObj clamp [-pi/2, pi/2], non-finite -> 0
 int player_look_follows_camera(const Player*); // class (movSch || 0) == 0 && trnSp == 1: frames without an input frame turn it with the camera
 void player_scroll_weapon(Player*, int dir, int recon); // manager.reload(player, +-1): wheel / melee on melee
+// KrunkNative Object Manager: the class / mode part of the loadout (slots [0, base)); the extra
+// weapons (shared/src/object_manager.c) follow it. The whole loadout for a player without extra
+// weapons (every v7 rule then sees exactly v7's loadout) or when no base is recorded.
+static inline int player_loadout_base(const Player *player) {
+    return player->extra_weapon_count > 0 && player->loadout_base > 0 && player->loadout_base <= player->loadout_size
+        ? player->loadout_base : player->loadout_size;
+}
+void player_loadout_append_extras(Player *player); // object_manager.c: base -> base + extras (loadout_base set)
 void player_update(Player*, float);
 float player_lerp_angle(float a, float b, float t); // index.js Math.lerpAngle (remote yaw/pitch interpolation), shortest arc
 void player_reset_feel(Player*); // spawn: step/bob/lean/recoil animation state back to rest
@@ -1452,6 +1482,7 @@ typedef struct {
     unsigned char hide_nametags_allies; // nameTagsFR (nameTags = hide_nametags: enemies)
     unsigned char kill_cams;          // kCams (1)
     unsigned char allow_anonymous;    // aAnon (1; nothing reads it in v7)
+    unsigned char om_weapons;         // KrunkNative knOmWeps (1): the Object Manager's extra loadout weapons in custom games
     int spec_slots;                   // specSlots 0..4 (2)
     int team_size;                    // tmSize: select 0..3 = 1v1..4v4 (3)
     unsigned char no_cosmetics;       // noCosm (comp 1)
@@ -1779,6 +1810,9 @@ typedef struct Game_t {
     // v7.1.4 game.lobbyPlayers of a comp lobby (shared/include/comp_lobby.h), NULL until used
     struct CompLobby_t *comp_lobby;
     GameZombies zombies; // map-logic WP-H (shared/include/zombies.h): machines, power-ups, waves, airdrops
+    // KrunkNative Object Manager (shared/include/object_manager.h): spawned object records and the
+    // per-player spawn lists. Allocated on first use, NULL none.
+    struct ObjectManager_t *object_manager;
 } Game;
 
 void game_configure(Game*, const GameConfig*, const cJSON**, size_t, int*, size_t, Weapon**, size_t, ClassConfig*, size_t);
@@ -1881,6 +1915,9 @@ typedef struct {
     vec3 origin;               // orgX/Y/Z
 } GamePickup;
 int game_pickup_state(const Game*, int uid, GamePickup *out);
+void game_pickup_added(Game*, int uid);              // KrunkNative Object Manager: a pickup object appended mid-round
+void game_pickup_disable(Game*, int uid);            // KrunkNative Object Manager: a spawned pickup removed
+void game_pickup_send(Game*, int target, int uid);   // NET_PACKET_PICKUP of one pickup
 void game_pickup_set(Game*, int uid, int weapon, int active, const vec3 *position, int ammo); // client mirror of "inat" pickups
 
 // Map triggers, interfaces, check points, teleporters (shared/src/triggers.c).
@@ -2105,7 +2142,8 @@ int net_peer_has_wpc(int minor, int patch); // the peer's HELLO / INIT minor.pat
 #define NET_PACKET_BLOCK_PROTOCOL 195   // 195-199 player-viewer WP-C: protocol / input
 #define NET_PACKET_BLOCK_KRUNKSCRIPT 200 // 200-239 KrunkScript (doc/v7/krunkscript.md)
 #define NET_PACKET_BLOCK_SOCIAL 240     // 240-249 player-viewer WP-E: HUD, death screen, social
-#define NET_PACKET_BLOCK_END 250
+#define NET_PACKET_BLOCK_SANDBOX 250    // 250-254 KrunkNative Object Manager (shared/include/object_manager.h)
+#define NET_PACKET_BLOCK_END 255
 uint16_t net_ent_size_for(int major, int minor, int patch); // the ENT a client sends to an INIT major.minor.patch server: V8 from 1.3.1, V7 from 1.2, V6 for 1.1, else V4
 
 typedef struct {

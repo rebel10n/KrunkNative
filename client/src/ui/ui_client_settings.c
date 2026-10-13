@@ -1193,7 +1193,7 @@ static const char *arg_text(const HtmlEvent *ev, const HtmlArg *args, const int 
 }
 
 int ui_client_settings_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
-    if (!name) return 0;
+    if (!name) return -1;
     if (!strcmp(name, "clientExitPopup")) {
         // v7.1.4 clientExitPopup(): genericPopup "Are you sure you want to close krunker?" YES / NO
         ui_confirm("Are you sure you want to close krunker?", exit_answered, NULL);
@@ -1213,5 +1213,5 @@ int ui_client_settings_handle(const char *name, const HtmlEvent *ev, const HtmlA
         do_action(arg_text(ev, args, argc, 0, kbuf, sizeof(kbuf)));
         return 1;
     }
-    return 0;
+    return -1; // not ours: the modules after it in MODULE_HANDLERS (ui_handlers.c) get the name
 }

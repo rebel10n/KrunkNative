@@ -9,6 +9,7 @@
 #include <client.h>
 #include <ai.h>
 #include <social_v7.h> // WP-E part 2b packets
+#include <object_manager.h> // KrunkNative Object Manager packets
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -552,6 +553,36 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             LOG_READ(NetSkinsPacket, "skins");
             printf("{\"type\":\"skins\",\"id\":%u,\"uid\":%d,\"skins\":[%d,%d],\"melee\":%d}",
                    (unsigned int) type, packet.uid, packet.skins.primary, packet.skins.secondary, packet.skins.melee);
+            break;
+        }
+        case NET_PACKET_SPAWN_REQ: { // KrunkNative Object Manager (shared/include/object_manager.h)
+            LOG_READ(NetSpawnReqPacket, "spawn_req");
+            printf("{\"type\":\"spawn_req\",\"id\":%u,\"action\":%u,\"item\":%d,\"pitch\":%g,\"yaw\":%g}", (unsigned int) type,
+                   (unsigned int) packet.action, packet.item, packet.pitch, packet.yaw);
+            break;
+        }
+        case NET_PACKET_SPAWN_RESULT: {
+            LOG_READ(NetSpawnResultPacket, "spawn_result");
+            printf("{\"type\":\"spawn_result\",\"id\":%u,\"action\":%u,\"status\":%u,\"caps\":%u,\"item\":%d,\"limit\":%u}", (unsigned int) type,
+                   (unsigned int) packet.action, (unsigned int) packet.status, (unsigned int) packet.caps, packet.item, (unsigned int) packet.limit);
+            break;
+        }
+        case NET_PACKET_LOADOUT_EXTRA: {
+            LOG_READ(NetLoadoutExtraPacket, "loadout_extra");
+            printf("{\"type\":\"loadout_extra\",\"id\":%u,\"uid\":%d,\"weapons\":[", (unsigned int) type, packet.uid);
+            for (int i = 0; i < packet.count && i < PLAYER_EXTRA_WEAPONS_MAX; i++) printf("%s%u", i ? "," : "", (unsigned int) packet.weapons[i]);
+            printf("]}");
+            break;
+        }
+        case NET_PACKET_SPAWNED_OBJ: {
+            if (length < sizeof(NetSpawnedObjPacket)) {
+                client_net_log_bad_payload("spawned_obj", type, payload, length);
+                break;
+            }
+            NetSpawnedObjPacket head;
+            memcpy(&head, payload, sizeof(head));
+            printf("{\"type\":\"spawned_obj\",\"id\":%u,\"op\":%u,\"kind\":%u,\"uid\":%d,\"owner\":%d,\"record_bytes\":%u}", (unsigned int) type,
+                   (unsigned int) head.op, (unsigned int) head.kind, head.id, head.owner, (unsigned int) (length - sizeof(head)));
             break;
         }
 #undef LOG_READ

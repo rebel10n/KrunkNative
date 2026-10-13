@@ -200,6 +200,28 @@ static void pickup_send(Game *game, const int target, const int uid) {
     game_send(game, target, NET_PACKET_PICKUP, &packet, sizeof(packet));
 }
 
+// KrunkNative Object Manager: a WEAPON_PICKUP object appended mid-round (both sides): its pickup
+// state from its record, as interact_reset_pickups sets up the map's own (no random weapons).
+void game_pickup_added(Game *game, const int uid) {
+    GamePickup *k = pickup_of(game, uid);
+    if (!k) return;
+    pickup_parse(k, game->map->objects[uid]);
+    const Weapon *w = weapon_at(game, k->weapon);
+    k->ammo = w ? (int) w->ammo : 0;
+    k->active = !w || !w->bomb || site_mode(game);
+    game->trigger_rt->pickup_moved[uid] = 0;
+}
+
+// KrunkNative Object Manager: a spawned pickup was removed (both sides); the authority tells everyone.
+void game_pickup_disable(Game *game, const int uid) {
+    GamePickup *k = pickup_of(game, uid);
+    if (!k) return;
+    k->active = 0;
+    if (game_is_authority(game)) pickup_send(game, NET_TARGET_ALL, uid);
+}
+
+void game_pickup_send(Game *game, const int target, const int uid) { pickup_send(game, target, uid); }
+
 // "pkups" [uid, pickup, orgPickup, active, [x, y, z]] for joiners: every pickup (random weapons too)
 void interact_send_pickups(Game *game, const int uid) {
     const TriggerRuntime *rt = trigger_runtime(game);
@@ -523,7 +545,7 @@ static void use_pickup(Game *game, Player *p, const int uid) {
     int ids[NET_LOADOUT_MAX + 1];
     unsigned int ammo[NET_LOADOUT_MAX + 1];
     int count = 0;
-    for (int i = 0; i < p->loadout_size && count < NET_LOADOUT_MAX; i++) {
+    for (int i = 0; i < player_loadout_base(p) && count < NET_LOADOUT_MAX; i++) {
         ids[count] = p->loadout[i];
         ammo[count++] = p->ammo ? p->ammo[i] : 0;
     }
@@ -635,6 +657,7 @@ static vec3 drop_position(const Player *p, const int spread) {
 void game_player_drop_weapon(Game *game, Player *p) {
     if (!game || !p || !p->active || !game_is_authority(game) || !p->loadout || (game->mode && game->mode->config.no_pickups)) return;
     if (p->loadout_index < 0 || p->loadout_index >= p->loadout_size) return;
+    if (p->loadout_index >= player_loadout_base(p)) return; // an Object Manager extra weapon (the menu takes it out)
     const int weapon = p->loadout[p->loadout_index];
     const Weapon *w = weapon_at(game, weapon);
     if (!w || w->melee || (site_mode(game) && !w->bomb)) return;
@@ -649,7 +672,7 @@ void game_player_drop_weapon(Game *game, Player *p) {
     int ids[NET_LOADOUT_MAX + 1];
     unsigned int ammo[NET_LOADOUT_MAX + 1];
     int count = 0;
-    for (int i = 0; i < p->loadout_size && count < NET_LOADOUT_MAX; i++) {
+    for (int i = 0; i < player_loadout_base(p) && count < NET_LOADOUT_MAX; i++) {
         if (i == p->loadout_index) continue;
         ids[count] = p->loadout[i];
         ammo[count++] = p->ammo ? p->ammo[i] : 0;

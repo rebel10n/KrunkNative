@@ -111,7 +111,9 @@ static void script_load(void) {
 
         // numeric args follow the command; key/button names are kept as text
         const char *rest = strstr(line, e->cmd) + strlen(e->cmd);
-        if (n < 3 || (a[0] >= '0' && a[0] <= '9') || a[0] == '-' || a[0] == '.') {
+        // (down / up always name a key: "down 4" is the 4 key, not a number)
+        const int key_cmd = !strcmp(e->cmd, "down") || !strcmp(e->cmd, "up");
+        if (n < 3 || (!key_cmd && ((a[0] >= '0' && a[0] <= '9') || a[0] == '-' || a[0] == '.'))) {
             e->arg[0] = 0;
             sscanf(rest, "%f %f %f %f %f", &e->v[0], &e->v[1], &e->v[2], &e->v[3], &e->v[4]);
         }

@@ -26,9 +26,9 @@ const WorldBuildObject g_build_objects[WORLD_BUILD_COUNT] = {
 static size_t build_static_count(const Game *game) {
     const Map *map = game->map;
     if (!map) return 0;
-    // the map's own objects come first; builds are appended (and removed) after them
+    // the map's own objects come first; builds (and Object Manager objects) are appended after them
     size_t count = map->object_count;
-    while (count > 0 && map->objects[count - 1]->dynamic) count--;
+    while (count > 0 && (map->objects[count - 1]->dynamic || map->objects[count - 1]->spawned)) count--;
     return count;
 }
 
@@ -155,7 +155,8 @@ void world_apply_build_packet(Game *game, const NetBuildPacket *packet) {
     Object *object = build_make(packet->build_index, feet, size, (float) packet->direction * (float) M_PI / 2.0f);
     if (!object) return;
     if (uid < map->object_count) { // a placeholder (or a stale build) at that uid
-        build_free(map->objects[uid]);
+        if (map->objects[uid]->spawned) map_object_free(map->objects[uid]); // a stale Object Manager object
+        else build_free(map->objects[uid]);
         map->objects[uid] = object;
     } else if (!build_push(map, object)) {
         build_free(object);
@@ -164,7 +165,8 @@ void world_apply_build_packet(Game *game, const NetBuildPacket *packet) {
     game->world.build_count++;
 }
 
-// game.removeBuilds: every dynamic object goes, buildCount = 0
+// game.removeBuilds: every dynamic object goes, buildCount = 0. KrunkNative: the Object Manager's
+// spawned objects go with them (object_manager_round_start drops their records afterwards).
 void world_remove_builds(Game *game) {
     Map *map = game->map;
     game->world.build_count = 0;
@@ -172,10 +174,39 @@ void world_remove_builds(Game *game) {
     size_t kept = 0;
     for (size_t i = 0; i < map->object_count; i++) {
         Object *object = map->objects[i];
-        if (object->dynamic) build_free(object);
+        if (object->spawned) map_object_free(object);
+        else if (object->dynamic) build_free(object);
         else map->objects[kept++] = object;
     }
     map->object_count = kept;
+}
+
+// KrunkNative Object Manager (client): put `object` at exactly the server's `uid`, after the map's
+// own objects. Missing uids before it (objects removed before this client joined) get destroyed
+// build placeholders, like world_apply_build_packet's; a placeholder already at `uid` is replaced.
+// 0: refused (a map object's uid, a live object there) or out of memory; `object` is not freed.
+int world_put_object(Game *game, const size_t uid, Object *object) {
+    Map *map = game->map;
+    if (!map || uid > 1000000 || uid < build_static_count(game)) return 0;
+    while (map->object_count < uid) {
+        Object *gap = build_make(0, (vec3) {0.0f, -100000.0f, 0.0f}, (vec3) {0.0f, 0.0f, 0.0f}, 0.0f);
+        if (!gap) return 0;
+        gap->active = 0;
+        gap->destroyed = 1;
+        gap->collision_type = COLLISION_TYPE_NONE;
+        if (!build_push(map, gap)) {
+            build_free(gap);
+            return 0;
+        }
+    }
+    if (uid < map->object_count) {
+        Object *old = map->objects[uid];
+        if (!old->dynamic || !old->destroyed) return 0; // only a placeholder gives way
+        build_free(old);
+        map->objects[uid] = object;
+        return 1;
+    }
+    return build_push(map, object);
 }
 
 // syncData.dyno: [typeInd, x, y, z, w, h, l, 0, uid] of every active build. KrunkNative sends the

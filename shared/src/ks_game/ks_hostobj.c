@@ -230,7 +230,7 @@ static void send_loadout(Game *game, const Player *p)
     NetLoadoutPacket packet;
     memset(&packet, 0, sizeof(packet));
     packet.uid = p->uid;
-    packet.count = p->loadout_size < NET_LOADOUT_MAX ? p->loadout_size : NET_LOADOUT_MAX;
+    packet.count = player_loadout_base(p) < NET_LOADOUT_MAX ? player_loadout_base(p) : NET_LOADOUT_MAX; // the base: extra weapons ride in LOADOUT_EXTRA
     for (int i = 0; i < packet.count; i++) {
         packet.weapons[i] = p->loadout[i];
         packet.ammo[i] = p->ammo ? (int32_t) p->ammo[i] : 0;
@@ -268,6 +268,8 @@ static void set_loadout(Game *game, Player *p, const int *ids, const int count, 
     p->ammo = ammo;
     p->reloads = reloads;
     p->loadout_size = count;
+    p->loadout_base = count;
+    player_loadout_append_extras(p); // KrunkNative Object Manager: the extra weapons stay after it
     p->can_throw = 1;
     if (index < 0 || index >= count) index = 0;
     p->loadout_index = -1; // force the swap to re-equip
@@ -331,7 +333,7 @@ static KsValue pl_change_slot(KsScript *s, void *native, const KsValue *args, co
     if (!w) return ks_undef();
     if (secondary ? !(w->secondary && !w->equipment && !w->melee) : !is_primary(w)) return ks_undef();
     int ids[NET_LOADOUT_MAX + 1], n = 0, replaced = 0;
-    for (int i = 0; i < p->loadout_size && n < NET_LOADOUT_MAX; i++) ids[n++] = p->loadout[i];
+    for (int i = 0; i < player_loadout_base(p) && n < NET_LOADOUT_MAX; i++) ids[n++] = p->loadout[i];
     for (int i = 0; i < n; i++) {
         const Weapon *cur = weapon_at(game, ids[i]);
         if (secondary ? (cur && cur->secondary) : is_primary(cur)) {
@@ -363,7 +365,7 @@ static KsValue pl_give_weapon(KsScript *s, void *native, const KsValue *args, in
     const Weapon *w = weapon_at(game, wid);
     if (!w || w->equipment) return ks_undef();
     int ids[NET_LOADOUT_MAX + 1], n = 0, placed = -1, primary_at = -1;
-    for (int i = 0; i < p->loadout_size && n < NET_LOADOUT_MAX; i++) ids[n++] = p->loadout[i];
+    for (int i = 0; i < player_loadout_base(p) && n < NET_LOADOUT_MAX; i++) ids[n++] = p->loadout[i];
     for (int i = 0; i < n; i++) {
         const Weapon *cur = weapon_at(game, ids[i]);
         if (ids[i] == wid) return ks_undef();
@@ -400,7 +402,7 @@ static KsValue pl_remove_kind(KsScript *s, void *native, const KsValue *args, in
     if (!on_server(r)) return ks_undef();
     Game *game = p->game;
     int at = -1;
-    for (int i = 0; i < p->loadout_size; i++) {
+    for (int i = 0; i < player_loadout_base(p); i++) {
         const Weapon *cur = weapon_at(game, p->loadout[i]);
         if ((kind == 0 && is_primary(cur)) || (kind == 1 && cur && cur->secondary) || (kind == 2 && cur && cur->melee)) {
             at = i;
@@ -409,7 +411,7 @@ static KsValue pl_remove_kind(KsScript *s, void *native, const KsValue *args, in
     }
     if (at < 0 || (kind == 2 && p->loadout_size <= 1) || p->loadout_size <= 1) return ks_undef();
     int ids[NET_LOADOUT_MAX], n = 0;
-    for (int i = 0; i < p->loadout_size && n < NET_LOADOUT_MAX; i++)
+    for (int i = 0; i < player_loadout_base(p) && n < NET_LOADOUT_MAX; i++)
         if (i != at) ids[n++] = p->loadout[i];
     int index = p->loadout_index;
     if (at < index) index--;
