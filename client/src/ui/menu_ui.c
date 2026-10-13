@@ -377,13 +377,13 @@ static void place_hole(const char *parent_id, const char *hole_id, const char *s
     float k = offset_width > 0.0f ? pr.w / offset_width : 1.0f;
     if (k == 0.0f) k = 1.0f;
     char v[48];
-    snprintf(v, sizeof(v), "%.3fpx", (x - pr.x) / k);
+    snprintf(v, sizeof(v), "%.4fpx", (x - pr.x) / k);
     html_dom_set_style(hole, "left", v);
-    snprintf(v, sizeof(v), "%.3fpx", (y - pr.y) / k);
+    snprintf(v, sizeof(v), "%.4fpx", (y - pr.y) / k);
     html_dom_set_style(hole, "top", v);
-    snprintf(v, sizeof(v), "%.3fpx", w / k);
+    snprintf(v, sizeof(v), "%.4fpx", w / k);
     html_dom_set_style(hole, "width", v);
-    snprintf(v, sizeof(v), "%.3fpx", h / k);
+    snprintf(v, sizeof(v), "%.4fpx", h / k);
     html_dom_set_style(hole, "height", v);
     if (shadow) {
         html_dom_set_style(hole, "position", "absolute");
@@ -433,17 +433,34 @@ float menu_preview_backdrop_alpha(void) {
     return popup_open() && g_ui.menu_open ? 0.875f : 0.5f;
 }
 
+// The preview box in whole device pixels: the class preview dims and draws exactly
+// [x, x + w) x [y, y + h) of the framebuffer (class_preview.c), and the holes cut into the
+// page's shades must cover the same pixels, or a column/row at the edge is left undimmed
+// (no shade at all) or dimmed twice. The rect goes to both as CSS px = device px / dpr, so
+// x * dpr lands on a whole pixel for the engine's cut-out snapping and the browser's raster
+// alike. Natively the page is laid out in framebuffer px (dpr 1, html_cursor_scale), so
+// this is the canvas rect rounded to whole px; on the web dpr = devicePixelRatio
+// (e.g. 1.25 under 125% scaling) and the CSS rect is fractional.
+static void preview_device_rect(const HtmlRect *r, const float dpr, int *x, int *y, int *w, int *h) {
+    *x = (int) lroundf(r->x * dpr);
+    *y = (int) lroundf(r->y * dpr);
+    *w = (int) lroundf(r->w * dpr);
+    *h = (int) lroundf(r->h * dpr);
+}
+
 void menu_send_preview_rect(void) {
     HtmlElem canvas = by_id("classPreviewCanvas");
-    if (!g_ui.dom_ready) {
-        HtmlRect r = {0};
-        if (canvas && g_ui.menu_open) html_dom_get_rect(canvas, &r);
-        update_preview_hole(canvas && g_ui.menu_open, roundf(r.x), roundf(r.y), roundf(r.w), roundf(r.h));
-        return;
-    }
     float vw, vh, dpr = 1.0f;
     html_dom_viewport(&vw, &vh, &dpr);
     if (dpr <= 0.0f) dpr = 1.0f;
+    if (!g_ui.dom_ready) {
+        HtmlRect r = {0};
+        int x, y, w, h;
+        if (canvas && g_ui.menu_open) html_dom_get_rect(canvas, &r);
+        preview_device_rect(&r, dpr, &x, &y, &w, &h);
+        update_preview_hole(canvas && g_ui.menu_open, (float) x / dpr, (float) y / dpr, (float) w / dpr, (float) h / dpr);
+        return;
+    }
 
     int visible = 0, x = 0, y = 0, w = 0, h = 0;
     if (canvas && g_ui.menu_open) {
@@ -452,18 +469,15 @@ void menu_send_preview_rect(void) {
         HtmlElem cc = by_id("menuClassContainer");
         const int hidden = r.w == 0.0f || r.h == 0.0f || (cc && inline_style_is(cc, "visibility", "hidden"));
         visible = !hidden;
-        x = (int) lroundf(r.x);
-        y = (int) lroundf(r.y);
-        w = (int) lroundf(r.w);
-        h = (int) lroundf(r.h);
+        preview_device_rect(&r, dpr, &x, &y, &w, &h);
     }
-    update_preview_hole(visible, (float) x, (float) y, (float) w, (float) h);
+    update_preview_hole(visible, (float) x / dpr, (float) y / dpr, (float) w / dpr, (float) h / dpr);
 
     char key[96];
     snprintf(key, sizeof(key), "%d,%d,%d,%d,%d,%g", visible, x, y, w, h, dpr);
     if (!strcmp(key, g_ui.last_rect)) return;
     snprintf(g_ui.last_rect, sizeof(g_ui.last_rect), "%s", key);
-    client_class_preview_set_rect(g_ui.client, visible, (float) x, (float) y, (float) w, (float) h, dpr);
+    client_class_preview_set_rect(g_ui.client, visible, (float) x / dpr, (float) y / dpr, (float) w / dpr, (float) h / dpr, dpr);
 }
 
 static void rect_timer_fire(void *user) {

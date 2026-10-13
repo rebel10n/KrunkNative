@@ -14,6 +14,7 @@
 #include <gl.h>
 #include <client.h>
 #include <html_ui.h>
+#include <html_dom.h> // html_dom_viewport
 #include <ui_logic.h> // menu_preview_backdrop_alpha
 #include <math.h>
 #include <stdio.h>
@@ -52,6 +53,8 @@
 //   is open, so the C side can be checked without the page sending previewRect.
 // - KRUNKNATIVE_PREVIEW_DUMP=<file.ppm> writes the framebuffer right after the
 //   preview draw (before the page is composited) once, PREVIEW_DUMP_FRAME frames in.
+// - KRUNKNATIVE_PREVIEW_LOG=1 prints the box's framebuffer rect whenever it changes
+//   (client/tests/preview_hole_e2e.py checks the page's shade around it).
 // - KRUNKNATIVE_PREVIEW_WORLD=1 also keeps a copy of the third-person model in the
 //   world scene in front of the idle menu camera, animated like an in-game player
 //   (player_update_meshes(.., 0), map lighting), to compare with other players.
@@ -318,12 +321,14 @@ void client_class_preview_render(Client *client) {
     ClassPreview *preview = &client->class_preview;
 
     static int test_rect = -1;
+    static int rect_log;
     static int world_dummy;
     static const char *dump_path;
     static int frames;
 
     if (test_rect < 0) {
         test_rect = getenv("KRUNKNATIVE_PREVIEW_TEST") != NULL;
+        rect_log = getenv("KRUNKNATIVE_PREVIEW_LOG") != NULL;
         world_dummy = getenv("KRUNKNATIVE_PREVIEW_WORLD") != NULL;
         dump_path = getenv("KRUNKNATIVE_PREVIEW_DUMP");
     }
@@ -342,25 +347,25 @@ void client_class_preview_render(Client *client) {
     if (!html_ui_is_menu_open() || !preview->has_rect || !preview->visible) return;
     if (preview->width <= 0.0f || preview->height <= 0.0f) return;
 
-    // CSS px -> framebuffer px. Natively CSS px == window px (the page is rendered at
-    // the framebuffer size), so scale by framebuffer/window for HiDPI; on the web
-    // the canvas is sized in device pixels, i.e. CSS px * devicePixelRatio.
+    // CSS px -> framebuffer px. The rect is whole device px / dpr (menu_ui.c
+    // preview_device_rect), so it lands on exactly the pixels of the page's holes.
+    // Scale by framebuffer / CSS viewport, which is what the page's px are worth here:
+    // - natively the page is laid out in framebuffer px (html_ui_resize gets the framebuffer
+    //   size, html_cursor_scale maps the cursor into it): 1, also on HiDPI / Retina windows
+    //   (scaling by framebuffer/window put the dim and the model off the hole there);
+    // - on the web the canvas is round(CSS px * devicePixelRatio): x * (fb / vw) is within
+    //   0.5 px of the whole x * dpr, so it rounds to it. Emscripten's GLFW stops following
+    //   devicePixelRatio after its first change (one matchMedia query for the starting ratio,
+    //   e.g. a second browser zoom step) and keeps a canvas the browser stretches; dpr would
+    //   then put the box off by the zoom ratio, fb / vw keeps it over the hole.
     int fb_width, fb_height;
     glfwGetFramebufferSize(client->window, &fb_width, &fb_height);
     if (fb_width <= 0 || fb_height <= 0) return;
 
-    float scale_x = preview->dpr;
-    float scale_y = preview->dpr;
-
-#ifndef __EMSCRIPTEN__
-    int window_width, window_height;
-    glfwGetWindowSize(client->window, &window_width, &window_height);
-
-    if (window_width > 0 && window_height > 0) {
-        scale_x = (float) fb_width / (float) window_width;
-        scale_y = (float) fb_height / (float) window_height;
-    }
-#endif
+    float view_width = 0.0f, view_height = 0.0f;
+    html_dom_viewport(&view_width, &view_height, NULL);
+    const float scale_x = view_width > 0.0f ? (float) fb_width / view_width : preview->dpr;
+    const float scale_y = view_height > 0.0f ? (float) fb_height / view_height : preview->dpr;
 
     const int rect_x = (int) lroundf(preview->x * scale_x);
     const int rect_top = (int) lroundf(preview->y * scale_y);
@@ -369,6 +374,14 @@ void client_class_preview_render(Client *client) {
     const int rect_y = fb_height - rect_top - rect_height; // GL viewports are bottom-up
 
     if (rect_width <= 0 || rect_height <= 0) return;
+    if (rect_log) { // KRUNKNATIVE_PREVIEW_LOG: the box's device-px rect whenever it changes
+        static int last[6];
+        const int now_rect[6] = {rect_x, rect_top, rect_width, rect_height, fb_width, fb_height};
+        if (memcmp(last, now_rect, sizeof(last)) != 0) {
+            memcpy(last, now_rect, sizeof(last));
+            printf("[preview] rect %d,%d %dx%d (framebuffer %dx%d)\n", rect_x, rect_top, rect_width, rect_height, fb_width, fb_height);
+        }
+    }
 
     // Dim the world inside the box like Krunker's menu backdrop does (UI coords are
     // framebuffer pixels from the top-left; ui_update() ran with the full viewport).
