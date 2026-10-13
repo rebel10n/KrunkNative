@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """UI state transitions end-to-end: what the player sees of every state-managed piece of the
 page before and after ESC / the menu, death, the end screen, spectating, menu windows, map and
-mode changes, disconnect / reconnect, Lost Connection and offline <-> online.
+mode changes, disconnect / reconnect, Lost Connection and offline <-> online, and the Object
+Manager grid's scroll position through its clicks (`scroll` probes: scrollTop).
 
   python3 -I server/tests/ui_transitions_e2e.py BUILD_DIR [scenario ...]   (from the repository root)
 
@@ -422,6 +423,103 @@ def sc_windows():
     """)
 
 
+def sc_om_scroll():
+    """The Object Manager (F1, client/src/ui/object_manager_ui.c): its grid (#knOmGrid, a scroll
+    container) keeps its scrollTop through whatever a click on it does (a weapon added / taken out,
+    a right-click drop, Undo / Remove / Clear Extras, object / entity / NPC spawns and their
+    results, LOADOUT_EXTRA); a tab switch and a search show new results from the top. `scroll`
+    probes (input_script.c) log scrollTop; `[object-manager] action N` lines show each click landed."""
+    tile = "640 400"  # a tile at 1280x720 (the third row before scrolling)
+    probes = [  # (label, rule): "0", ">0" or "=label" (the same scrollTop as that probe)
+        ("open", "0"), ("w-wheel", ">0"), ("w-add", "=w-wheel"), ("w-take-out", "=w-wheel"), ("w-drop", "=w-wheel"),
+        ("w-undo", "=w-wheel"), ("w-remove", "=w-wheel"), ("w-add2", "=w-wheel"), ("w-clear", "=w-wheel"),
+        ("o-tab", "0"), ("o-wheel", ">0"), ("o-spawn", "=o-wheel"), ("e-tab", "0"), ("e-wheel", ">0"), ("e-spawn", "=e-wheel"),
+        ("n-tab", "0"), ("n-wheel", ">0"), ("n-spawn", "=n-wheel"), ("w-tab", "0"), ("w-wheel2", ">0"), ("w-search", "0"),
+    ]
+    lines = run_client("om-scroll", ["--offline", "--map", "kanji"], f"""
+        0 play
+        1000 down F1
+        1050 up F1
+        2000 check @om windowHolder=1 knOmGrid=1
+        2000 scroll @open knOmGrid
+        2100 cursor {tile}
+        2200 wheel -1
+        2300 wheel -1
+        2800 scroll @w-wheel knOmGrid
+        2900 click {tile}
+        3900 scroll @w-add knOmGrid
+        4000 click {tile}
+        5000 scroll @w-take-out knOmGrid
+        5100 mdown right
+        5150 mup right
+        6100 scroll @w-drop knOmGrid
+        6200 clickid knOmUndoBtn
+        7200 scroll @w-undo knOmGrid
+        7300 clickid knOmRemoveBtn
+        8300 scroll @w-remove knOmGrid
+        8400 click {tile}
+        9400 scroll @w-add2 knOmGrid
+        9500 clickid knOmClearBtn
+        10500 scroll @w-clear knOmGrid
+        10600 clickid knOmTab0
+        11300 scroll @o-tab knOmGrid
+        11400 cursor {tile}
+        11500 wheel -1
+        11600 wheel -1
+        12100 scroll @o-wheel knOmGrid
+        12200 click {tile}
+        13200 scroll @o-spawn knOmGrid
+        13300 clickid knOmTab1
+        14000 scroll @e-tab knOmGrid
+        14100 cursor {tile}
+        14200 wheel -1
+        14700 scroll @e-wheel knOmGrid
+        14800 click {tile}
+        15800 scroll @e-spawn knOmGrid
+        15900 clickid knOmTab2
+        16600 scroll @n-tab knOmGrid
+        16700 cursor {tile}
+        16800 wheel -1
+        17300 scroll @n-wheel knOmGrid
+        17400 click {tile}
+        18400 scroll @n-spawn knOmGrid
+        18500 clickid knOmTab3
+        19200 scroll @w-tab knOmGrid
+        19300 cursor {tile}
+        19400 wheel -1
+        19500 wheel -1
+        20000 scroll @w-wheel2 knOmGrid
+        20100 clickid knOmSearchBox
+        20600 type a
+        21300 scroll @w-search knOmGrid
+        21500 quit
+    """)
+    if lines is None:
+        return
+    got = {}
+    for line in lines:
+        m = re.search(r"\[input_script\] scroll t=\d+ @(\S+) knOmGrid=(\S+)", line)
+        if m:
+            got[m.group(1)] = m.group(2)
+    for label, rule in probes:
+        have = got.get(label, "no probe")
+        try:
+            top = float(have)
+        except ValueError:
+            top = None
+        if rule.startswith("="):
+            ok = top is not None and have == got.get(rule[1:])
+        elif rule == ">0":
+            ok = top is not None and top > 0.0
+        else:
+            ok = top == 0.0
+        record("om-scroll", label, "knOmGrid.scrollTop", rule, have, ok)
+    # every click reached the sandbox server: ADD, REMOVE, DROP, UNDO, REMOVE_AIM, ADD, CLEAR, OBJECT, ENTITY, NPC
+    actions = [int(m.group(1)) for m in (re.search(r"\[object-manager\] action (\d+) item", line) for line in lines) if m]
+    want = [0, 1, 2, 4, 9, 8, 1, 3, 7, 5, 6]
+    record("om-scroll", "clicks", "actions", " ".join(map(str, want)), " ".join(map(str, actions)), actions == want)
+
+
 def sc_online():
     """Online: ESC / death on a server, offline and back online, disconnect / reconnect, then the
     server goes away (Lost Connection): ESC keeps the error box (v7 f2040 is terminal), and
@@ -558,7 +656,7 @@ SCENARIOS = {
     "endscreen": sc_endscreen, "endscreen-tdm": sc_endscreen_team, "death": sc_death, "spectate": sc_spectate,
     "map-change": sc_map_change, "interact": sc_interact, "custom-gui": sc_custom_gui, "krunkscript": sc_krunkscript,
     "spray": sc_spray, "windows": sc_windows, "online": sc_online, "lost-end": sc_lost_during_end, "outdated": sc_outdated,
-    "comp": sc_comp,
+    "comp": sc_comp, "om-scroll": sc_om_scroll,
 }
 
 

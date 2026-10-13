@@ -34,6 +34,11 @@
 //                                @words are labels). Not on the page: :preview (the menu's class
 //                                preview is drawn), :spray (the spray wheel is drawn);
 //                                UI state transition checks (server/tests/ui_transitions_e2e.py)
+//   100 scroll @grid knOmGrid    log scroll containers' scrollTop (html_dom_get_scroll), like vis:
+//                                "[input_script] scroll t=100 @grid knOmGrid=196.0" (- = no such id or
+//                                not a scroll container)
+//   100 type rifle               type the rest of the line through the char callback (the focused
+//                                text field; the menu or the chat must have the keyboard)
 //   1200 shot /tmp/a.png         write the frame (world + first-person layer) after this frame's input
 //   1200 frames /tmp/f 120       write this and the next 119 finished frames (page included) as
 //                                /tmp/f_0000.png ... (input_script_frame_presented)
@@ -118,7 +123,7 @@ static void script_load(void) {
             sscanf(rest, "%f %f %f %f %f", &e->v[0], &e->v[1], &e->v[2], &e->v[3], &e->v[4]);
         }
         (void) b;
-        if (!strcmp(e->cmd, "con") || !strcmp(e->cmd, "vis")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
+        if (!strcmp(e->cmd, "con") || !strcmp(e->cmd, "vis") || !strcmp(e->cmd, "scroll") || !strcmp(e->cmd, "type")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
             while (*rest == ' ' || *rest == '\t') rest++;
             snprintf(e->arg, sizeof(e->arg), "%s", rest);
             for (size_t len = strlen(e->arg); len && (e->arg[len - 1] == '\n' || e->arg[len - 1] == '\r' || e->arg[len - 1] == ' '); len--) e->arg[len - 1] = 0;
@@ -258,10 +263,17 @@ static void script_run(Client *client, const ScriptEvent *e) {
                 me && me->weapon ? me->weapon->name : "-", html_ui_available() && html_ui_is_menu_open(), client->mouse_state.locked,
                 me ? me->position.x : 0.0f, me ? me->position.y : 0.0f, me ? me->position.z : 0.0f,
                 me && me->ammo && me->loadout_size ? (int) me->ammo[me->loadout_index] : -1, me ? me->aim_val : 0.0f, client_round_ended(client));
-    } else if (!strcmp(e->cmd, "vis")) {
-        // vis <id> [<id> ...]: one log line with each element's visibility (1 shown, 0 not, - absent)
+    } else if (!strcmp(e->cmd, "type")) {
+        // type <text>: one char callback per code point (ASCII), as typing it
+        GLFWcharfun cb = glfwSetCharCallback(client->window, NULL);
+        glfwSetCharCallback(client->window, cb);
+        for (const char *c = e->arg; cb && *c; c++) cb(client->window, (unsigned char) *c);
+    } else if (!strcmp(e->cmd, "vis") || !strcmp(e->cmd, "scroll")) {
+        // vis <id> [<id> ...]: one log line with each element's visibility (1 shown, 0 not, - absent);
+        // scroll <id> [<id> ...]: their scrollTop instead
+        const int scroll = e->cmd[0] == 's';
         char line[2048];
-        int n = snprintf(line, sizeof(line), "[input_script] vis t=%.0f", g_script.time);
+        int n = snprintf(line, sizeof(line), "[input_script] %s t=%.0f", e->cmd, g_script.time);
         for (const char *c = e->arg; *c && n > 0 && (size_t) n < sizeof(line);) {
             while (*c == ' ' || *c == '\t') c++;
             char id[64];
@@ -272,6 +284,13 @@ static void script_run(Client *client, const ScriptEvent *e) {
             c += len;
             if (id[0] == '@') { // a label for the log reader
                 n += snprintf(line + n, sizeof(line) - (size_t) n, " %s", id);
+                continue;
+            }
+            if (scroll) {
+                const HtmlElem el = html_ui_available() ? html_dom_by_id(id) : 0;
+                HtmlScroll sc;
+                if (el && html_dom_get_scroll(el, &sc)) n += snprintf(line + n, sizeof(line) - (size_t) n, " %s=%.1f", id, sc.top);
+                else n += snprintf(line + n, sizeof(line) - (size_t) n, " %s=-", id);
                 continue;
             }
             if (!strcmp(id, ":preview") || !strcmp(id, ":spray")) {
@@ -330,13 +349,14 @@ void input_script_tick(Client *client) {
         while (g_script.next < g_script.count && !strcmp(g_script.events[g_script.next].cmd, "play")) g_script.next++;
     }
 
-    // A `vis` probe never shares a frame with the input before it: after a stalled frame the due
+    // A `vis` / `scroll` probe never shares a frame with the input before it: after a stalled frame the due
     // events would otherwise run together and the probe would read the page before the UI
     // reacted to them (the HUD / menu passes run later in the frame).
     int ran = 0;
     while (g_script.next < g_script.count && g_script.events[g_script.next].t <= g_script.time + 1e-3f) {
         const ScriptEvent *e = &g_script.events[g_script.next];
-        if (ran && !strcmp(e->cmd, "vis") && strcmp(g_script.events[g_script.next - 1].cmd, "vis") != 0) break;
+        const char *prev = ran ? g_script.events[g_script.next - 1].cmd : NULL;
+        if (prev && (!strcmp(e->cmd, "vis") || !strcmp(e->cmd, "scroll")) && strcmp(prev, "vis") != 0 && strcmp(prev, "scroll") != 0) break;
         script_run(client, e);
         g_script.next++;
         ran = 1;

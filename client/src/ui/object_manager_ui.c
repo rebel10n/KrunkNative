@@ -8,6 +8,12 @@
 // drops it as a pickup at the crosshair; the other tabs spawn at the crosshair. Remove / Undo
 // buttons, and in game the U (undo) and Delete (remove at the crosshair) binds. Opening it in game
 // frees the pointer (like the player list key); F1 or Escape closes it and gives it back.
+//
+// Scroll: #knOmGrid is the scroll container (max-height). Picks, server results and LOADOUT_EXTRA
+// update the page in place (om_update_*: the status line's text, the tiles' knOmOwned class and
+// badge, the Clear Extras count) so the grid keeps its scrollTop. Only new results rebuild it and
+// start at the top: a tab switch (v7's own tabbed windows set menuWindow.scrollTop = 0 on
+// switchTab, index.js windows[3]) and a search (om_refresh_body).
 #include <client.h>
 #include <html_dom.h>
 #include <html_ui.h>
@@ -23,6 +29,7 @@
 
 #define OM_TAB_STORAGE "kn_omTab"
 #define OM_STATUS_SECONDS 4.0
+#define OM_BADGE_HTML "<div class='knOmBadge'>LOADOUT</div>" // on a weapon tile in the loadout (knOmOwned)
 
 static const char *const TAB_NAMES[OM_TAB_COUNT] = {"Objects", "Entities", "NPCs", "Weapons"};
 
@@ -125,7 +132,7 @@ static void om_escape(char *out, const size_t size, const char *text) {
 }
 
 // The line above the grid: the last result for a while, else what this game allows.
-static void om_status_html(char **buf, size_t *len, size_t *cap) {
+static const char *om_status_text(int *error_out) {
     const Client *client = om_client();
     const char *text = "";
     int error = 0;
@@ -144,6 +151,13 @@ static void om_status_html(char **buf, size_t *len, size_t *cap) {
         text = "Only developers and the host can spawn here";
         error = 1;
     }
+    *error_out = error;
+    return text;
+}
+
+static void om_status_html(char **buf, size_t *len, size_t *cap) {
+    int error = 0;
+    const char *text = om_status_text(&error);
     char esc[400];
     om_escape(esc, sizeof(esc), text);
     om_append(buf, len, cap, "<div id='knOmStatus' class='knOmStatus%s'>%s</div>", error ? " knOmErr" : "", esc);
@@ -163,10 +177,10 @@ static void om_grid_html(char **buf, size_t *len, size_t *cap) {
             om_escape(name, sizeof(name), w->name);
             const int owned = om_has_extra(me, id);
             om_append(buf, len, cap,
-                      "<div class='knOmItem%s' onclick='knOmPick(%d,%d)' oncontextmenu='knOmAlt(%d,%d)'>"
+                      "<div id='knOmW%d' class='knOmItem%s' onclick='knOmPick(%d,%d)' oncontextmenu='knOmAlt(%d,%d)'>"
                       "<img class='knOmIcon' src='textures/weapons/%s.png'/><div class='knOmName'>%s</div>%s</div>",
-                      owned ? " knOmOwned" : "", OM_TAB_WEAPONS, id, OM_TAB_WEAPONS, id, w->icon ? w->icon : "icon_0", name,
-                      owned ? "<div class='knOmBadge'>LOADOUT</div>" : "");
+                      id, owned ? " knOmOwned" : "", OM_TAB_WEAPONS, id, OM_TAB_WEAPONS, id, w->icon ? w->icon : "icon_0", name,
+                      owned ? OM_BADGE_HTML : "");
             shown++;
         }
     } else {
@@ -178,13 +192,13 @@ static void om_grid_html(char **buf, size_t *len, size_t *cap) {
             om_escape(name, sizeof(name), entries[i].name);
             const char *icon = entries[i].icon ? entries[i].icon : "help";
             if (strstr(icon, ".png")) // a page image (img/props)
-                om_append(buf, len, cap, "<div class='knOmItem' onclick='knOmPick(%d,%d)'><img class='knOmIcon knOmProp' src='%s'/><div class='knOmName'>%s</div></div>",
-                          g_om.tab, i, icon, name);
+                om_append(buf, len, cap, "<div id='knOmI%d' class='knOmItem' onclick='knOmPick(%d,%d)'><img class='knOmIcon knOmProp' src='%s'/><div class='knOmName'>%s</div></div>",
+                          i, g_om.tab, i, icon, name);
             else
                 om_append(buf, len, cap,
-                          "<div class='knOmItem' onclick='knOmPick(%d,%d)'><div class='knOmGlyph'><span class='material-icons'>%s</span></div>"
+                          "<div id='knOmI%d' class='knOmItem' onclick='knOmPick(%d,%d)'><div class='knOmGlyph'><span class='material-icons'>%s</span></div>"
                           "<div class='knOmName'>%s</div></div>",
-                          g_om.tab, i, icon, name);
+                          i, g_om.tab, i, icon, name);
             shown++;
         }
     }
@@ -202,6 +216,10 @@ static const char *om_hint(void) {
         case OM_TAB_ENTITIES: return "Left click: spawn at your crosshair (power-ups despawn on their own timer)";
         default: return "Left click: spawn at your crosshair";
     }
+}
+
+static void om_clear_label(char *out, const size_t size, const Player *me) {
+    snprintf(out, size, "Clear Extras (%d/%d)", me ? me->extra_weapon_count : 0, PLAYER_EXTRA_WEAPONS_MAX);
 }
 
 static char *om_body_html(void) {
@@ -224,10 +242,13 @@ char *object_manager_window_gen(const int id, const char **header) {
     // v7 hides #windowHeader: the title is part of the window
     om_append(&buf, &len, &cap, "<div class='knOm'><div class='knOmTitle'>Object Manager</div><div class='knOmTop'><div class='bigMenTabs knOmTabs'>");
     for (int i = 0; i < OM_TAB_COUNT; i++) {
-        om_append(&buf, &len, &cap, "<div class='bigMenTab%s' onclick='knOmTab(%d)'>%s</div>", i == g_om.tab ? " bigMenTabA" : "", i, TAB_NAMES[i]);
+        om_append(&buf, &len, &cap, "<div id='knOmTab%d' class='bigMenTab%s' onclick='knOmTab(%d)'>%s</div>", i, i == g_om.tab ? " bigMenTabA" : "", i,
+                  TAB_NAMES[i]);
     }
     om_append(&buf, &len, &cap,
-              "</div><input id='knOmSearch' class='knOmSearch' type='text' maxlength='40' placeholder='Search' value='%s' "
+              // not id='knOmSearch': on the web window.knOmSearch would be the element (named access),
+              // so kn-shim.js installs no knOmSearch forwarder and oninput throws
+              "</div><input id='knOmSearchBox' class='knOmSearch' type='text' maxlength='40' placeholder='Search' value='%s' "
               "oninput='knOmSearch(this)'/></div><div id='knOmBody'>",
               search);
     char *body = om_body_html();
@@ -235,15 +256,17 @@ char *object_manager_window_gen(const int id, const char **header) {
     free(body);
     om_append(&buf, &len, &cap, "<div class='knOmFoot'><div class='knOmHint'>%s</div><div class='knOmBtns'>", om_hint());
     if (g_om.tab == OM_TAB_WEAPONS) {
-        om_append(&buf, &len, &cap, "<div class='button small buttonR knOmBtn' onclick='knOmClear()'>Clear Extras (%d/%d)</div>",
-                  me ? me->extra_weapon_count : 0, PLAYER_EXTRA_WEAPONS_MAX);
+        char clear[48];
+        om_clear_label(clear, sizeof(clear), me);
+        om_append(&buf, &len, &cap, "<div id='knOmClearBtn' class='button small buttonR knOmBtn' onclick='knOmClear()'>%s</div>", clear);
     }
-    om_append(&buf, &len, &cap, "<div class='button small knOmBtn' onclick='knOmRemove()'>Remove</div>"
-                                "<div class='button small knOmBtn' onclick='knOmUndo()'>Undo</div></div></div></div>");
+    om_append(&buf, &len, &cap, "<div id='knOmRemoveBtn' class='button small knOmBtn' onclick='knOmRemove()'>Remove</div>"
+                                "<div id='knOmUndoBtn' class='button small knOmBtn' onclick='knOmUndo()'>Undo</div></div></div></div>");
     return buf;
 }
 
-// Rebuilds the status + grid only (the search box keeps its focus and caret).
+// Rebuilds the status + grid only (the search box keeps its focus and caret): the search
+// changed the results, so the new grid starts at the top.
 static void om_refresh_body(void) {
     if (!om_window_open()) return;
     const HtmlElem body = html_dom_by_id("knOmBody");
@@ -251,6 +274,44 @@ static void om_refresh_body(void) {
     char *html = om_body_html();
     html_dom_set_html(body, html ? html : "");
     free(html);
+    const HtmlElem grid = html_dom_by_id("knOmGrid");
+    if (grid) html_dom_set_scroll(grid, 0.0f, 0.0f);
+}
+
+// The status line in place (a result, the caps): the grid keeps its scroll position.
+static void om_update_status(void) {
+    if (!om_window_open()) return;
+    const HtmlElem status = html_dom_by_id("knOmStatus");
+    if (!status) return;
+    int error = 0;
+    html_dom_set_text(status, om_status_text(&error));
+    html_dom_set_class(status, "knOmErr", error);
+}
+
+// The loadout in place (LOADOUT_EXTRA): the weapon tiles' knOmOwned class and LOADOUT badge,
+// the Clear Extras count. Tiles the search hides have no element.
+static void om_update_loadout(void) {
+    if (!om_window_open() || g_om.tab != OM_TAB_WEAPONS) return;
+    const Client *client = om_client();
+    const Player *me = client ? client->me : NULL;
+    for (int id = 0; id < WEAPON_COUNT; id++) {
+        char tile_id[16];
+        snprintf(tile_id, sizeof(tile_id), "knOmW%d", id);
+        const HtmlElem tile = html_dom_by_id(tile_id);
+        if (!tile) continue;
+        const int owned = om_has_extra(me, id);
+        if (owned == html_dom_has_class(tile, "knOmOwned")) continue;
+        html_dom_set_class(tile, "knOmOwned", owned);
+        const HtmlElem badge = html_dom_query(tile, ".knOmBadge");
+        if (owned && !badge) html_dom_insert_html(tile, HTML_INSERT_BEFORE_END, OM_BADGE_HTML);
+        else if (!owned && badge) html_dom_remove(badge);
+    }
+    const HtmlElem clear = html_dom_by_id("knOmClearBtn");
+    if (clear) {
+        char label[48];
+        om_clear_label(label, sizeof(label), me);
+        html_dom_set_text(clear, label);
+    }
 }
 
 static void om_set_status(const char *text, const int error) {
@@ -258,7 +319,7 @@ static void om_set_status(const char *text, const int error) {
     g_om.status_error = error;
     g_om.status_at = glfwGetTime();
     if (om_window_open()) {
-        om_refresh_body();
+        om_update_status();
     } else if (text && text[0]) { // the Undo / Remove binds in game: a toast instead
         char html[400];
         char esc[200];
@@ -308,7 +369,7 @@ int object_manager_ui_escape(void) {
 }
 
 int object_manager_ui_search_focused(void) {
-    const HtmlElem search = om_window_open() ? html_dom_by_id("knOmSearch") : 0;
+    const HtmlElem search = om_window_open() ? html_dom_by_id("knOmSearchBox") : 0;
     return search && html_dom_active_element() == search;
 }
 
@@ -360,7 +421,7 @@ int object_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlAr
             char value[8];
             snprintf(value, sizeof(value), "%d", tab);
             html_storage_set(OM_TAB_STORAGE, value);
-            menu_show_window(OBJECT_MANAGER_WINDOW, 1);
+            menu_show_window(OBJECT_MANAGER_WINDOW, 1); // another grid: it starts at the top (v7 switchTab)
         }
         return 0;
     }
@@ -405,7 +466,7 @@ static void om_on_result(const NetSpawnResultPacket *r) {
     g_om.caps = r->caps;
     g_om.extra_max = r->extra_max;
     if (r->action == OM_ACTION_QUERY) {
-        om_refresh_body();
+        om_update_status();
         return;
     }
     if (r->status != OM_STATUS_OK) {
@@ -463,7 +524,7 @@ static void om_on_extras(Client *client, const NetLoadoutExtraPacket *packet) {
             }
             g_om.pending_equip = -1;
         }
-        if (om_window_open()) menu_show_window(OBJECT_MANAGER_WINDOW, 1); // owned marks, the extras count
+        om_update_loadout(); // owned marks, the extras count (in place: the grid keeps its scroll)
     }
 }
 
