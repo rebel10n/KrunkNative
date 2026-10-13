@@ -438,7 +438,8 @@ static void test_traitor(Game *game) {
     CHECK(game->ai->count == count + 1 && !strcmp(game->ai->ais[count].name, "Dave's Ghost"), "Dave's Ghost spawned");
     if (game->ai->count == count + 1) {
         const GameAI *ghost = &game->ai->ais[count];
-        CHECK(ghost->index == 0 && ghost->max_health == 0.0f && ghost->bob_d == 1.0f && ghost->data.glow, "built-in kind 0: the ghost");
+        CHECK(ghost->index == 0 && ghost->max_health == 0.0f && ghost->bob_d == 1.0f && !ghost->data.glow && !ghost->data.frames,
+              "built-in kind 0: the ghost (no frames, no glow: v7's dat conf)");
     }
     game->mode->wait_timer_count = waits;
     game->mode->config = config;

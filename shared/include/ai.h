@@ -45,7 +45,7 @@ typedef struct {
                                   // e emissive, n normal, s specular, a alphaTest, m metal, r rough, p displ., b bump
     unsigned char has_anim:1;     // hasAnim: g / q / f
     unsigned char no_frames:1;    // v3.1.1 built-in Jack O' Lantern
-    unsigned char glow:1;         // built-in obj: emissive #ffffff + "<src>_e" emissiveMap (glowText)
+    unsigned char glow:1;         // emissive #ffffff + "<src>_e" emissiveMap: v3.1.1 servers' ghosts only (v7 clients never glow ghost_0)
     unsigned char no_vis:1;       // noVis ("v"): no mesh
     unsigned char no_fog:1;       // nf
     unsigned char f_trans:1;      // ft
@@ -390,6 +390,7 @@ void game_ai_reset(Game*);                       // AI.reset (game.init): drops 
 void game_ai_free(Game*);                        // game_ai_reset + free the list
 void game_ai_spawn_map(Game*);                   // = map_ai_spawn_pending (shared/include/map_ai.h)
 void game_ai_data_defaults(GameAIData*);         // AI.init's defaults for an empty `dat`
+void game_ai_builtin_data(int index, GameAIData*); // the built-in kind's record (AI.js vA767[index])
 // AI.spawn(sid 0 = generateSID, index, name, x, y, z, data NULL = built-in kind): NULL past
 // config.aiLimit (40 listed AIs) unless `force` (cSpawn / zombies addAI(..., true)).
 GameAI *game_ai_spawn(Game*, int sid, int index, const char *name, vec3 position, const GameAIData *data);

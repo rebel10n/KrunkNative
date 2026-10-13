@@ -420,6 +420,9 @@ static void ai_build_data(const cJSON *o, GameAIData *d, char *name, const size_
 
 // ---------------------------------------------------------------- built-in kinds (AI.js vA767)
 
+// vA767[index]. No glow: AI.init (AI.js:328-333) builds a client's mesh from the obj conf
+// (emissive #ffffff, glowText) only without `dat`, and a v7 client always has one (AI.js:1158
+// cSpawn passes getData's dat), whose emissive comes from an "e" in the asset id alone.
 static void ai_builtin(const int index, GameAIData *d) {
     game_ai_data_defaults(d);
     d->targets_players = 0;
@@ -450,15 +453,22 @@ static void ai_builtin(const int index, GameAIData *d) {
             d->anim_speed = 1.8f, d->m_y_off = -0.001f, d->hbh = 2.9f, d->hbw = 1.4f, d->effect_on_shot = 4;
             break;
         case 4: // Lost Soul (Lord of Souls minion)
-            d->frames = 2, d->frame_time = 400.0f, d->side = 2, d->glow = 1, d->can_shoot = 1, d->vision = 500, d->projectile = 1;
+            d->frames = 2, d->frame_time = 400.0f, d->side = 2, d->can_shoot = 1, d->vision = 500, d->projectile = 1;
             d->pj_damage = 10.0f, d->pj_speed = 0.9f, d->pj_scale = 1.6f, d->pj_model_scale = 1.4f;
             d->health = 300.0f, d->targets_players = 1, d->score = 10, d->speed = 0.8f, d->fire_rate = 2500, d->turn_speed = 20.0f;
             break;
         default: // 0: the ghost (Traitor's "<name>'s Ghost")
-            d->side = 2, d->glow = 1, d->bob_d = 1.0f, d->bob_s = 0.005f;
+            // no frames, as in v7 (vA767[0], AI.js:3-14): its mesh maps the whole ghost_0 strip
+            // (two 512px frames; the model's UVs cover one), so both half-frames and the black gutter
+            // between them show. The Object Manager's Ghost adds the spawner's strip (game_ai_builtin_data).
+            d->side = 2, d->bob_d = 1.0f, d->bob_s = 0.005f;
             break;
     }
     ai_asset_flags(d);
+}
+
+void game_ai_builtin_data(const int index, GameAIData *d) {
+    ai_builtin(index, d);
 }
 
 // ---------------------------------------------------------------- list / records
@@ -2242,8 +2252,6 @@ void game_ai_apply_add_v7(Game *game, const NetAIAddV7Packet *p) {
     d.pj_spin = p->pj_spin;
     d.pj_trans = p->pj_trans;
     d.pj_glow = p->pj_glow;
-    // the built-in ghosts: AI.init's mesh conf takes the data path on the client (cSpawn passes dat)
-    if (!d.asset && p->index == 0 && !p->frames) d.glow = 1;
     ai_mirror_init(game, p->sid, p->index, name, (vec3) {p->position[0], p->position[1], p->position[2]}, &d);
 }
 

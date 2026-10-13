@@ -1107,7 +1107,18 @@ static int om_spawn_entry(Game *game, Player *player, const NetSpawnReqPacket *r
         case OM_ENTRY_AI_TEMPLATE: {
             const GameAITemplate *t = e->kind == OM_ENTRY_AI_TEMPLATE ? game_ai_resolve_template(e->name) : NULL;
             if (e->kind == OM_ENTRY_AI_TEMPLATE && !t) return OM_STATUS_INVALID;
-            GameAI *ai = t ? game_ai_spawn(game, 0, 0, t->name, at, &t->data) : game_ai_spawn(game, 0, e->data, e->name, at, NULL);
+            GameAIData ghost;
+            const GameAIData *data = t ? &t->data : NULL;
+            if (!t && e->data == 0) {
+                // the Ghost: the built-in kind 0, drawn as v7 draws a map's ghost (an AI_SPAWNER without
+                // aid: MapManager.addAI fct 2, fs 5 -> frames 2, frameT 500, MapManager.js:3027-3042).
+                // Kind 0's own conf has no frames (AI.js:3-14): the whole two-frame strip, gutter and all.
+                game_ai_builtin_data(0, &ghost);
+                ghost.frames = 2;
+                ghost.frame_time = 500.0f;
+                data = &ghost;
+            }
+            GameAI *ai = game_ai_spawn(game, 0, t ? 0 : e->data, t ? t->name : e->name, at, data);
             if (!ai) return OM_STATUS_LIMIT; // config.aiLimit
             if (thing_push(om, OM_KIND_NPC, OM_SUB_AI, ai->sid, player->uid)) om->things[om->thing_count - 1].serial = ai->serial;
             game_ai_sync(game); // AI.sync() right away, as /summon

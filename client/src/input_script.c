@@ -36,6 +36,7 @@
 //                                5 Resize): sets the Tool Gun's tool and puts the Tool Gun in hand (fire it
 //                                with `mdown left`); `om physgun 0` the Physics Gun row, `om snap 0..3` /
 //                                `om release 0|1` the pane's Snap / Release, `om object 10` an Objects tile,
+//                                `om npc 1` an NPCs tile (1 the Ghost),
 //                                `om aim 1` turns the look onto handle 1 of the btools selection
 //   100 flags                    log each mirrored CTF flag (position, carrier, team), its crystal / stand meshes and
 //                                its #tScoreM text: "[input_script] flag t=100 i=0 team=1 carrier=-1 pos=..."
@@ -406,6 +407,7 @@ static void script_run(Client *client, const ScriptEvent *e) {
             if (!strcmp(what, "tool")) object_manager_ui_pick_tool(id);
             else if (!strcmp(what, "physgun")) object_manager_ui_pick_physgun();
             else if (!strcmp(what, "object")) object_manager_ui_pick_entry(OM_TAB_OBJECTS, id);
+            else if (!strcmp(what, "npc")) object_manager_ui_pick_entry(OM_TAB_NPCS, id);
             else if (!strcmp(what, "snap")) om_build_set_snap(id);
             else if (!strcmp(what, "release")) om_build_set_drop(id);
             else if (!strcmp(what, "aim") && client->me) {
