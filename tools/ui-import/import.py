@@ -66,6 +66,9 @@ LIGA_OUTLINED_REL = os.path.join("client", "src", "html", "engine", "material_ic
 REFS = {
     "v3": {"public": "/home/user/jails/kru/src/Krunker_v3.1.1/public", "manifest": "menu-assets.txt"},
     "v7": {"public": "/home/user/jails/kru/src/Krunker_v7.1.4/public", "manifest": "menu-assets-v7.txt"},
+    # the live krunker.io site (Krunker v10), mirrored by fetch_live_site.py; written to <ui>/v10/
+    "v10": {"public": os.path.expanduser("~/.cache/kn-v10/live/site/public"), "manifest": "menu-assets-v7.txt",
+            "client_js": os.path.expanduser("~/Downloads/v10.0.2.js")},
 }
 
 
@@ -385,8 +388,10 @@ def resolve_windows_source(ui_dir):
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--ui", default=os.path.join(REPO, "ui"), help="ui directory (default: <repo>/ui)")
-    ap.add_argument("--ref", choices=sorted(REFS), default="v7", help="Krunker reference to import (default v7)")
+    ap.add_argument("--ref", choices=sorted(REFS), default="v7", help="Krunker reference to import (default v7; v10 = the live site into <ui>/v10/)")
     ap.add_argument("--public", default=None, help="the reference's public/ tree (default per --ref)")
+    ap.add_argument("--client-js", default=None,
+                    help="v10: the live client script, parsed (never run) by v10_bundle.js for the Svelte menu")
     ap.add_argument("--viewer-store", action="store_true",
                     help="also regenerate client/src/viewer/viewer_store_table.c (v3 always does when node is there)")
     ap.add_argument("--windows-out", default=None, help="output dir for window files (default: <ui>/windows)")
@@ -411,6 +416,8 @@ def main(argv):
     public = os.path.abspath(args.public or ref["public"])
     v7 = args.ref == "v7"
     sys.path.insert(0, HERE)
+    if args.ref == "v10":
+        return import_v10(args, ui_dir, public, ref)
     if v7:
         # the page first: fonts, windows and assets read what it links
         import index_page  # tools/ui-import/index_page.py
@@ -477,6 +484,67 @@ def main(argv):
     if not args.no_assets:
         import menu_assets  # every image the pages and the C UI reference (tools/ui-import/menu-assets*.txt)
         menu_assets.import_menu_assets(ui_dir, write_if_changed, log, public, os.path.join(HERE, ref["manifest"]), auto=v7)
+    return 0
+
+
+def import_v10(args, ui_dir, public, ref):
+    """--ref v10: the live page into <ui>/v10/ (v10_page.py), its fonts (+ .ttf) and every file the
+    page, its stylesheets and the C UI's image list reference, from the mirror. The material icon
+    fonts are byte-identical to v7's, so the ligature headers are not regenerated."""
+    import menu_assets
+    import v10_page
+    client_js = args.client_js or ref.get("client_js")
+    if client_js and not os.path.isfile(client_js):
+        log("v10: %s not found, the Svelte mounts stay empty" % client_js)
+        client_js = None
+    out = v10_page.import_v10(ui_dir, write_if_changed, log, public, client_js)
+    if not args.no_fonts:
+        try:
+            import fontTools  # noqa: F401
+            import brotli  # noqa: F401
+        except ImportError as exc:
+            raise SystemExit("missing dependency (%s): pip install fonttools brotli" % exc)
+        os.environ.setdefault("SOURCE_DATE_EPOCH", "0")
+        for family, woff2 in font_face_woff2s(out):
+            rel = os.path.relpath(woff2, out)
+            src = os.path.join(public, rel)
+            if not os.path.isfile(src):
+                src = os.path.join(ui_dir, rel)  # the live site 404s on it (e.g. Play subsets): v7's copy
+            if os.path.isfile(src):
+                with open(src, "rb") as fh:
+                    write_if_changed(woff2, fh.read())
+            convert_woff2(family, woff2, args.force)
+    if not args.no_assets:
+        known = set()
+        for dest, _ in menu_assets.manifest_entries(os.path.join(HERE, ref["manifest"])):
+            known.add(dest)
+        entries = [(rel, rel) for rel, _ in menu_assets.collect_page_refs(out, pages=v10_page.PAGES)]
+        entries += [(d, d) for d in sorted(known)]
+        copied = missing = 0
+        seen = set()
+        for dest, src in entries:
+            if dest in seen:
+                continue
+            seen.add(dest)
+            path = os.path.join(public, src)
+            if not os.path.isfile(path):
+                fallback = os.path.join(ui_dir, src)  # the live hosts no longer serve it: v7's copy
+                if not os.path.isfile(fallback):
+                    missing += 1
+                    continue
+                path = fallback
+            with open(path, "rb") as fh:
+                copied += write_if_changed(os.path.join(out, dest), fh.read())
+        log("v10: page files: %d referenced, %d rewritten, %d on neither host nor in ui/" % (len(seen), copied, missing))
+        # the native engine has no WebP decoder: <name>.webp.png sidecars (as game_assets.py --v7 does)
+        import fetch_live_assets
+        sidecars = 0
+        for root, _, names in os.walk(out):
+            for name in names:
+                if name.endswith(".webp") and fetch_live_assets.webp_sidecar(os.path.join(root, name)):
+                    sidecars += 1
+        if sidecars:
+            log("v10: %d .webp.png sidecars written" % sidecars)
     return 0
 
 

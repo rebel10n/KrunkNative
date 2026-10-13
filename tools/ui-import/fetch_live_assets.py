@@ -11,7 +11,10 @@ models and sounds, HUD images...). The v7 client loads them from its CDNs:
 
 ``live_assets.lock`` (next to this script) pins every file taken from there: install root
 (``assets`` = assets/, ``ui`` = the page's ui/ tree for ``img/``), path, source URL, sha256 and
-size. Installing only ever ADDS files: an existing file is never overwritten (Krunker content
+size. ``live_assets_v10.lock`` (``--lock``) pins the Krunker v10 (live client) content the same
+way: files v7.1.4 never had (root ``assets``) and the v10 versions of files whose v7.1.4 copy
+differs (root ``assets-v10`` = ``assets/v10/<path>``: v7 content is never replaced).
+Installing only ever ADDS files: an existing file is never overwritten (Krunker content
 already in the tree wins, a different hash is reported). ``deploy/ansible`` role ``kn_web``
 (``--tags web_assets``) syncs ``assets/`` to the web asset host and role ``kn_updates`` re-indexes
 the same tree as the launcher's content index, so both pick installed files up; ``ui/img`` files
@@ -267,7 +270,9 @@ def write_lock(path, entries):
 
 
 def dest_of(entry, assets, ui):
-    base = ui if entry["root"] == "ui" else assets
+    # root assets-v10: a Krunker v10 file whose name v7.1.4 already uses with other content
+    # (live_assets_v10.lock); it goes to assets/v10/<path> so the v7 file stays as it is
+    base = ui if entry["root"] == "ui" else os.path.join(assets, "v10") if entry["root"] == "assets-v10" else assets
     rel = os.path.normpath(entry["path"])
     if rel.startswith("..") or os.path.isabs(rel):
         raise SystemExit("refusing path outside the tree: %s" % entry["path"])
@@ -308,7 +313,7 @@ def cmd_install(a):
             continue
         data = None
         if a.stage:
-            staged = os.path.join(a.stage, e["root"], e["path"])
+            staged = os.path.join(a.stage, "assets" if e["root"] == "assets-v10" else e["root"], e["path"])  # fetch stages by host path
             if os.path.isfile(staged):
                 with open(staged, "rb") as f:
                     data = f.read()
@@ -452,8 +457,9 @@ def main():
         if name == "install":
             p.add_argument("--stage", help="staging tree from `fetch` (<stage>/assets/..., <stage>/ui/...)")
             p.add_argument("--dry-run", action="store_true")
-            p.add_argument("--roots", default="assets,ui",
-                           help="install roots (comma list): assets = assets/ (untracked game content), ui = ui/img (tracked)")
+            p.add_argument("--roots", default="assets,assets-v10,ui",
+                           help="install roots (comma list): assets = assets/ (untracked game content), assets-v10 = "
+                                "assets/v10/ (v10 versions of v7 files), ui = ui/img (tracked)")
     p = sub.add_parser("fetch")
     p.add_argument("--list", required=True, help="TSV: category, path (relative to the asset host)")
     p.add_argument("--stage", required=True)

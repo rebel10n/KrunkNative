@@ -200,6 +200,9 @@ if (EMSCRIPTEN)
         COMMAND ${CMAKE_COMMAND} -E make_directory ${WEB_DIST_DIR}
         COMMAND ${CMAKE_COMMAND} -E rm -rf ${WEB_DIST_DIR}/js
         COMMAND ${CMAKE_COMMAND} -E ${KN_WEB_COPY_UI} ${CMAKE_SOURCE_DIR}/ui ${WEB_DIST_DIR}
+        # ui/v10 (the Krunker v10.0.2 page, tools/ui-import --ref v10) is not served until the
+        # ruleset toggle loads it (doc/v10/version-toggle.md); keep its 15 MB out of the site
+        COMMAND ${CMAKE_COMMAND} -E rm -rf ${WEB_DIST_DIR}/v10
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:client> ${WEB_DIST_DIR}/client.js
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE_DIR:client>/client.wasm ${WEB_DIST_DIR}/client.wasm
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE_DIR:client>/client.data ${WEB_DIST_DIR}/client.data

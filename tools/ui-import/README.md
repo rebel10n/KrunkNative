@@ -40,6 +40,34 @@ pickers' `#skinList` cut to their first 4 cards (templates; C lists the items), 
 Advanced tab bodies over 32 KB emptied (per-weapon/class matrices), and the hidden per-weapon
 clones of the settings rows (`<key>_<weapon>_div`) dropped (no per-weapon settings storage yet).
 
+## Krunker v10, the live krunker.io (`--ref v10`)
+
+Writes a separate tree, `ui/v10/` (`ui/` stays v7.1.4). Provenance per file: `ui/README.md`.
+
+```sh
+# 1. mirror the live site (pages, stylesheets, fonts, every image they and the client script name)
+KN_FETCH_PROXY=http://127.0.0.1:8888 python3 -I tools/ui-import/fetch_live_site.py --stage ~/.cache/kn-v10/live/site \
+    --client-js ~/Downloads/v10.0.2.js --manifest tools/ui-import/menu-assets-v7.txt
+# 2. the page tree (the client script is parsed by v10_bundle.js, never run)
+python3 -I tools/ui-import/import.py --ui ui --ref v10 [--public <stage>/public] [--client-js v10.js]
+```
+
+| Step | Module | Output |
+|---|---|---|
+| site mirror | `fetch_live_site.py` | `<stage>/public/` (krunker.io + assets.krunker.io in one tree, each path asked of the host the reference names and then the other) + `<stage>/site.lock` (url, path, status, sha256, size, UTC date; resumable). Same politeness as `fetch_live_assets.py` (`KN_FETCH_JOBS` <= 4, delay, retries with backoff). `.js` is never downloaded |
+| Svelte menu | `v10_bundle.js` | `mounts.json` (the HTML each boot `mount(Component, {target})` produces in the initial state), `svelte.css` (all `{hash, code}` component stylesheets), `i18n-en.json`, `report.txt`. acorn AST plus a whitelist interpreter over a toy DOM: Svelte runtime helpers are recognised by shape (template, sibling, if/each blocks, set_text, set_attribute, ...), unknown runtime calls are skipped, there is no host access and no `eval`. acorn: `net-bridge/node_modules` (`KN_NODE_MODULES=` from a worktree) |
+| pages | `v10_page.py` | `ui/v10/{index,social}.html` (v7 rules + the mounts filled in + `css/svelte.css` linked), their stylesheets, our glue files, `windows/versions.txt` |
+| fonts, files | `import.py` | every font (`.ttf` next to each `.woff2`) and every file the pages, stylesheets and `menu-assets-v7.txt` name, from the mirror (`ui/` for what the hosts 404 on); `.webp.png` sidecars |
+
+`capture_v10_live.js <stage>` is the rendered-DOM capture, which RUNS the live client. Run it
+only with the user's approval. It uses sandboxed headless Chromium with a temporary profile,
+`KN_FETCH_PROXY`, an allow-list of krunker.io / *.krunker.io / font+cdnjs hosts (GET/HEAD
+only), no WebSocket and no sendBeacon. Blocked requests go to `blocked.tsv`. Output:
+`<stage>/v10-capture/`. v10 content for `assets/` is pinned in `live_assets_v10.lock`
+(`fetch_live_assets.py install --lock tools/ui-import/live_assets_v10.lock`): root `assets` for
+new files, root `assets-v10` (= `assets/v10/<path>`) for v10 versions of files v7.1.4 has with
+other content.
+
 ## Krunker v3.1.1 (`--ref v3`)
 
 ## What it produces
@@ -147,7 +175,8 @@ ignores user site-packages), i.e. installed system-wide:
 
 ```
 --ui DIR            ui directory (default <repo>/ui)
---ref v7|v3         Krunker reference (default v7)
+--ref v7|v3|v10     Krunker reference (default v7; v10 = the live site into <ui>/v10/)
+--client-js FILE     v10: the live client script (parsed, never run)
 --public DIR        the reference's public/ tree (default per --ref)
 --viewer-store      also regenerate client/src/viewer/viewer_store_table.c (v7)
 --editor-page       v7: also import editor.html + its CSS
