@@ -435,7 +435,8 @@ def sc_spectate():
 
 
 def sc_map_change():
-    """Map and mode changes with the menu closed (the offline game reloads and respawns in one frame)."""
+    """Map and mode changes with the menu closed (the offline game reloads and respawns in one frame).
+    A fresh CTF round has no #teamScores: v7 f1996 shows it only once a team has scored."""
     run_client("map-change", ["--offline", "--map", "kanji"], f"""
         0 play
         1000 check @alive {HUD} speedRunHolder=0
@@ -454,10 +455,10 @@ def sc_map_change():
         19500 check @map-change {HUD}
         20000 con mode ctf
         23000 respawn
-        25000 check @ctf teamScores=1 inGameUI=1
+        25000 check @ctf teamScores=0 inGameUI=1
         25500 esc
         26000 esc
-        27000 check @ctf-esc-esc teamScores=1 {HUD}
+        27000 check @ctf-esc-esc teamScores=0 {HUD}
         27500 con kill
         28000 check @ctf-dead teamScores=0 deathUIHolder=1
         28500 quit
