@@ -33,7 +33,7 @@ fail2ban_sshd_settings:
 # OpenResty 127.0.0.1:kn_edge_origin_port, in place of the Cloudflare proxy + tunnel. Off until the
 # cutover (Deploy kru runs central.yml on every push): true adds the vhost and the edge ingress;
 # the tunnel keeps working either way. The front end (krunk.io, www.) is not here (GitHub Pages).
-kn_edge_origin_enabled: false
+kn_edge_origin_enabled: true    # on since 2026-10-13 (krunk.io cutover to the abulxt edges)
 kn_edge_origin_port: 8086
 kn_edge_origin_sni: "kn-origin.{{ kn_domain }}"
 kn_edge_origin_hosts:
