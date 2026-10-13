@@ -411,11 +411,13 @@ int main(int argc, char **argv) {
     // --version before anything needs assets or a GL context (build identity: build_info.h)
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--version")) {
-            printf("KrunkNative client %s\n", kn_build_string());
+            // "KrunkNative client" stays in the line: launchers check it before installing a
+            // staged update (launcher.c staged_client_runs), the installed ones included
+            printf(KN_PRODUCT_NAME " (KrunkNative client) %s\n", kn_build_string());
             return 0;
         }
     }
-    printf("KrunkNative client %s\n", kn_build_string());
+    printf(KN_PRODUCT_NAME " (KrunkNative client) %s\n", kn_build_string());
     install_root_chdir(); // packaged installs started from elsewhere: ui/ + assets/ (install_root.h)
     debug_capture_startup(); // KRUNKNATIVE_CAMERA/SCREENSHOT runs ignore stored settings (debug_capture.c)
 
@@ -600,7 +602,7 @@ int main(int argc, char **argv) {
 #endif
 
     headless_window_hints(); // headless: no GLFW context (headless_make_context_current creates it)
-    INSTANCE.window = glfwCreateWindow(window_width, window_height, "KrunkNative", NULL, NULL);
+    INSTANCE.window = glfwCreateWindow(window_width, window_height, KN_PRODUCT_NAME, NULL, NULL);
     if (!INSTANCE.window) {
         const char *reason = NULL;
 #ifndef __EMSCRIPTEN__ // emscripten's GLFW port has no glfwGetError
@@ -610,7 +612,9 @@ int main(int argc, char **argv) {
         return -1;
     }
 
-#ifndef __EMSCRIPTEN__ // browsers have no window icon
+#ifndef __EMSCRIPTEN__ // browsers have no window icon (the page's favicon / PWA icons)
+    // assets/img/icon.png: krunker.io's 256 px app icon (tools/branding/fetch_branding.py).
+    // macOS windows have no icon (the .app's .icns is the Dock's).
     GLFWimage icon = {0};
     char *icon_path = concat(assets_path(), "img/icon.png");
 
@@ -618,9 +622,13 @@ int main(int argc, char **argv) {
     icon.pixels = stbi_load(icon_path, &icon.width, &icon.height, &icon_channels, 4);
 
     if (icon.pixels) {
+#ifndef __APPLE__
         glfwSetWindowIcon(INSTANCE.window, 1, &icon);
+#endif
         stbi_image_free(icon.pixels);
     }
+    printf("[window] title \"%s\", icon %s (%dx%d)\n", glfwGetWindowTitle(INSTANCE.window), icon.pixels ? icon_path : "none",
+           icon.width, icon.height);
 
     free(icon_path);
 #endif

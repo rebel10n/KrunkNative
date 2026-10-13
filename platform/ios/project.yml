@@ -1,4 +1,5 @@
-# XcodeGen spec for the KrunkNative iOS app (https://github.com/yonaskolb/XcodeGen):
+# XcodeGen spec for the Krunker Box Office iOS app (https://github.com/yonaskolb/XcodeGen);
+# the project, target and bundle keep the old name KrunkNative (CI and build paths use it):
 #   ./prepare.sh [dist/web dir]   # bundle the web client into web/
 #   xcodegen generate             # -> KrunkNative.xcodeproj
 #   xcodebuild -project KrunkNative.xcodeproj -scheme KrunkNative -sdk iphonesimulator \
@@ -29,7 +30,7 @@ targets:
     info:
       path: KrunkNative/Info.plist
       properties:
-        CFBundleDisplayName: KrunkNative
+        CFBundleDisplayName: Krunker Box Office
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSRequiresIPhoneOS: true
@@ -49,7 +50,7 @@ targets:
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
           NSAllowsLocalNetworking: true
-        NSLocalNetworkUsageDescription: KrunkNative connects to game servers on your local network.
+        NSLocalNetworkUsageDescription: Krunker Box Office connects to game servers on your local network.
         # KrunkNative configuration (empty = bundled client with the offline server):
         # open this URL instead of the bundled client (like Krunker's apps): the build setting
         # KN_SERVER_URL (xcodebuild ... KN_SERVER_URL=https://krunk.io/, client.yml's .ipa)

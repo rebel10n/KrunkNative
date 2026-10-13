@@ -1,4 +1,4 @@
-# KrunkNative HTML/CSS engine (pure C11, no JavaScript)
+# Krunker Box Office HTML/CSS engine (pure C11, no JavaScript)
 
 The only HTML UI backend of the native client (built by default, `KRUNKNATIVE_HTML_ENGINE=ON`;
 OFF builds client/src/html/stub.c instead). It renders ui/index.html and ignores `<script>`:

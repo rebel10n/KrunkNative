@@ -184,7 +184,7 @@ async def scenario(port, smtp):
         check(mail["tls"] and mail["auth_user"] == SMTP_USER and mail["rcpt"] == [addr], "over STARTTLS, authenticated, to the lower-cased address")
         check(mail["mail_from"] == "noreply@caan.edu", "envelope sender noreply@caan.edu")
         m, text, html, token = mail_parts(mail)
-        check(str(m["From"]) == "Krunker <noreply@caan.edu>" and str(m["Subject"]) == "Verify your Krunker email", "From / Subject")
+        check(str(m["From"]) == "Krunker Box Office <noreply@caan.edu>" and str(m["Subject"]) == "Verify your Krunker Box Office email", "From / Subject")
         check(m["Message-ID"] and m["Date"] and m.get_content_type() == "multipart/alternative", "Message-ID, Date, text + HTML")
         check(token and name in text and "expires in 24 hours" in text and token in html, "link + username in both parts")
         st = await s.recv("emailS")

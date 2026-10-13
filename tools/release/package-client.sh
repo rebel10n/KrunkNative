@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# Packages a native client build as release assets (.github/workflows/client.yml), named like
-# fastfetch's: krunknative-client-<platform>.<ext> + <file>.sha256 (sha256sum format).
+# Packages a native Krunker Box Office client build as release assets (.github/workflows/client.yml),
+# named like fastfetch's: krunknative-client-<platform>.<ext> + <file>.sha256 (sha256sum format).
+# Players see "Krunker Box Office" (formerly KrunkNative: window titles, the desktop entry, the
+# .app's CFBundleName / CFBundleDisplayName); the file names keep the old name on purpose: the
+# updates manifest, the Download window, CI and installed launchers' self-update locate the
+# packages, the launcher (krunknative / KrunkNative.exe) and KrunkNative.app by these names.
 #
 #   linux-amd64 linux-aarch64                       .tar.gz .zip .deb .rpm  (distro OpenSSL 3, glibc 2.34+)
 #   linux-amd64-polyfilled linux-aarch64-polyfilled .tar.gz .zip .deb .rpm  (static deps, glibc 2.17+)
@@ -134,17 +138,17 @@ licenses() {
     cp "$repo/shared/lib/pcg_basic/LICENSE.txt" "$root/licenses/pcg_basic.txt"
     cp "$repo/server/lib/replxx/LICENSE.md" "$root/licenses/replxx.md"
     cat > "$root/LICENSE-NOTICE.txt" << 'EOF'
-KrunkNative client: license notice
-==================================
+Krunker Box Office client: license notice
+=========================================
 
-KrunkNative (https://github.com/rebel10n/KrunkNative) is a native C port of Krunker.
-The KrunkNative repository does not currently carry a license file: no license to the
-KrunkNative source or binaries is granted by this package beyond what its authors
-state in the repository.
+Krunker Box Office (formerly KrunkNative, https://github.com/rebel10n/KrunkNative) is a
+native C port of Krunker. Its repository does not currently carry a license file: no license
+to the Krunker Box Office source or binaries is granted by this package beyond what its
+authors state in the repository.
 
 Krunker, its maps, menu artwork, models, textures, sounds and other game content are the
 property of their owners (Yendis Entertainment / FRVR). They are included only so the game
-runs; they are not covered by any KrunkNative license.
+runs; they are not covered by any Krunker Box Office license.
 
 Third-party components compiled into the binaries, with their licenses in licenses/:
   GLFW        zlib/libpng License         licenses/glfw.md
@@ -177,14 +181,14 @@ readme() {
         macos-*) runtime="macOS 11+ ($arch), rendering through Metal (ANGLE)" ;;
     esac
     case "$package" in
-        deb|rpm) run="Start \"KrunkNative\" from the applications menu, or run: krunknative" ;;
+        deb|rpm) run="Start \"Krunker Box Office\" from the applications menu, or run: krunknative" ;;
         app) run="Open KrunkNative.app. It is not notarized: on the first start right-click it and pick Open, or run
   xattr -dr com.apple.quarantine KrunkNative.app" ;;
         *) run="Run ./$entry from this directory (Windows: double-click $entry)." ;;
     esac
     {
-        echo "KrunkNative client ($platform)"
-        echo "=================================="
+        echo "Krunker Box Office client ($platform)"
+        echo "========================================="
         echo
         echo "Version:   $describe"
         echo "Commit:    ${KN_COMMIT:-unknown}"
@@ -210,7 +214,7 @@ readme() {
         echo "should use the server packages: https://github.com/rebel10n/KrunkNative/releases/tag/server-latest"
         echo
         echo "Command line: $client --help. Releases: https://github.com/rebel10n/KrunkNative/releases"
-        echo "kn-install.json marks this directory as a KrunkNative install for the updater."
+        echo "kn-install.json marks this directory as a Krunker Box Office install for the updater."
     } > "$file"
 }
 
@@ -292,9 +296,11 @@ if [ "$os" = macos ]; then
     if command -v sips > /dev/null && command -v iconutil > /dev/null; then
         iconset="$work/krunknative.iconset"
         mkdir -p "$iconset"
-        for s in 16 32 128 256; do
-            sips -z "$s" "$s" "$repo/assets/img/icon.png" --out "$iconset/icon_${s}x${s}.png" > /dev/null
-            d=$((s * 2)); [ "$d" -le 256 ] && sips -z "$d" "$d" "$repo/assets/img/icon.png" --out "$iconset/icon_${s}x${s}@2x.png" > /dev/null
+        # krunker.io's 1024 px app icon (tools/branding/fetch_branding.py; the iOS app's too)
+        icon_src="$repo/platform/ios/KrunkNative/Assets.xcassets/AppIcon.appiconset/icon-1024.png"
+        for s in 16 32 128 256 512; do
+            sips -z "$s" "$s" "$icon_src" --out "$iconset/icon_${s}x${s}.png" > /dev/null
+            d=$((s * 2)); sips -z "$d" "$d" "$icon_src" --out "$iconset/icon_${s}x${s}@2x.png" > /dev/null
         done
         iconutil -c icns "$iconset" -o "$app/Contents/Resources/krunknative.icns"
     fi
@@ -305,19 +311,19 @@ if [ "$os" = macos ]; then
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>KrunkNative</string>
-  <key>CFBundleDisplayName</key><string>KrunkNative</string>
+  <key>CFBundleName</key><string>Krunker Box Office</string>
+  <key>CFBundleDisplayName</key><string>Krunker Box Office</string>
   <key>CFBundleIdentifier</key><string>io.krunk.krunknative</string>
   <key>CFBundleExecutable</key><string>$entry</string>
   <key>CFBundleIconFile</key><string>krunknative</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>${short:-0.0.0}</string>
   <key>CFBundleVersion</key><string>${KN_COMMIT_TIME:-0}</string>
-  <key>CFBundleGetInfoString</key><string>KrunkNative $describe</string>
+  <key>CFBundleGetInfoString</key><string>Krunker Box Office $describe</string>
   <key>LSMinimumSystemVersion</key><string>${minos:-11.0}</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.action-games</string>
   <key>NSHighResolutionCapable</key><true/>
-  <key>NSMicrophoneUsageDescription</key><string>KrunkNative uses the microphone for in-game voice chat.</string>
+  <key>NSMicrophoneUsageDescription</key><string>Krunker Box Office uses the microphone for in-game voice chat.</string>
 </dict>
 </plist>
 EOF
@@ -345,14 +351,14 @@ pkg_root() { # pkg_root <dir> <deb|rpm>
     cat > "$root/usr/share/applications/krunknative.desktop" << EOF
 [Desktop Entry]
 Type=Application
-Name=KrunkNative
+Name=Krunker Box Office
 GenericName=First-person shooter
-Comment=Native port of Krunker
+Comment=Krunker, native (formerly KrunkNative)
 Exec=$( [ -n "$launcher" ] && echo "krunknative %U" || echo "/opt/krunknative/$entry" )
 Icon=krunknative
 Terminal=false
 Categories=Game;ActionGame;
-Keywords=krunker;fps;shooter;
+Keywords=krunker;fps;shooter;krunknative;box office;
 EOF
 }
 
@@ -366,7 +372,7 @@ if [ "$os" = linux ] && command -v readelf > /dev/null; then
     glibc_min="$(readelf -V "$bindir/$client" "$bindir/$server" ${launcher:+"$launcher"} | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -uV | tail -1)"
 fi
 summary="Native C port of the Krunker first-person shooter"
-description="KrunkNative client ($describe, protocol ${KN_PROTOCOL:-?}): the game, its HTML menu and the dedicated server. The game content (models, textures, sounds, about 1.7 GB) is not in this package: the first start downloads it."
+description="Krunker Box Office client ($describe, protocol ${KN_PROTOCOL:-?}): the game, its HTML menu and the dedicated server. The game content (models, textures, sounds, about 1.7 GB) is not in this package: the first start downloads it."
 
 for f in $formats; do
     case "$f" in
@@ -381,7 +387,7 @@ for f in $formats; do
 Package: krunknative
 Version: $pkg_base${pkg_rest:++$pkg_rest}
 Architecture: $darch
-Maintainer: KrunkNative <noreply@krunk.io>
+Maintainer: Krunker Box Office <noreply@krunk.io>
 Installed-Size: $(du -sk "$root/opt" | cut -f1)
 Depends: $depends
 Recommends: libgl1, libopus0, libasound2 | libasound2t64 | libpulse0

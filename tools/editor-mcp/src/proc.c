@@ -62,7 +62,7 @@ int proc_run(const Ctx *ctx, char *const argv[], char *const env[], const char *
     // only binaries kn_editor_mcp found itself
     char client[PATH_MAX];
     if (proc_find_client(ctx, client, sizeof(client)) != 0 || strcmp(argv[0], client) != 0) {
-        log_msg(LOG_ERROR, "proc", "refusing to run %s (not KrunkNative's client_bin)", argv[0]);
+        log_msg(LOG_ERROR, "proc", "refusing to run %s (not Krunker Box Office's client_bin)", argv[0]);
         return -1;
     }
     char *base[16];

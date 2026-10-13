@@ -309,7 +309,7 @@ static int t_compile(Ctx *ctx, const cJSON *args, ToolResult *r) {
 
 const ToolDef g_tools_check[] = {
     {"map_validate", "Validate map",
-     "Check a project with KrunkNative's own map loader and nav grid: schema (types, NaN, missing p/s, unknown prefabs, prefabs "
+     "Check a project with Krunker Box Office's own map loader and nav grid: schema (types, NaN, missing p/s, unknown prefabs, prefabs "
      "the native engine does not implement yet), property availability and ranges, colour / size pool indices, textures missing "
      "from assets, triggers (bad events / actions, v7-only ones, invalid text, dangling interface targets), teleporter channels, "
      "spawns (inside solids, over the void, overlapping, team balance, unreachable via the shared bot nav grid), limits (objects, "
@@ -321,11 +321,11 @@ const ToolDef g_tools_check[] = {
      "p/s/r rounded (round, default 2), defaults stripped, colours folded into a palette (ci/ei), sizes pooled (xyz/si), "
      "complex-collision objects baked into tris (bake_tris, the editor's own bake), "
      "KrunkScript checked and base64-encoded (scripts {client, server} replaces them). Blocks on validation errors unless force. "
-     "Verifies the output loads in KrunkNative. output writes it (allowed dirs); inline:true returns the JSON.",
+     "Verifies the output loads in Krunker Box Office. output writes it (allowed dirs); inline:true returns the JSON.",
      S({"type":"object","properties":{PROJECT_ARG,"output":{"type":"string"},"inline":{"type":"boolean"},"round":{"type":"integer","default":2},"pool_sizes":{"type":"boolean","default":true},"fold_colors":{"type":"boolean","default":true},"strip_defaults":{"type":"boolean","default":true},"drop_editor_only":{"type":"boolean","default":true},"encode_scripts":{"type":"boolean","default":true},"bake_tris":{"type":"boolean","default":true},"scripts":{"type":"object","properties":{"client":{"type":"string"},"server":{"type":"string"}}},"force":{"type":"boolean"}}}),
      0, 0, 1, 0, t_compile},
     {"playtest", "Playtest map",
-     "Run the map in KrunkNative's game simulation (shared game code, offline authority, no window): bots play for `seconds` "
+     "Run the map in Krunker Box Office's game simulation (shared game code, offline authority, no window): bots play for `seconds` "
      "(default 20) and an optional scripted walker follows `path` waypoints. Reports spawn reachability (nav grid), bot falls "
      "out of the map, stuck spots, kills, coverage and tick timings, plus a screenshot from the first spawn (screenshot:false "
      "skips it).",

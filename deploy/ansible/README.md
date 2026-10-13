@@ -1,6 +1,6 @@
 # deploy/ansible
 
-Ansible for the KrunkNative central node (`kru`) and the edge game servers.
+Ansible for the Krunker Box Office central node (`kru`) and the edge game servers.
 
 | playbook | hosts | what |
 | --- | --- | --- |
@@ -48,7 +48,7 @@ set `kn_brain_internal_secret` from an ansible-vault file to pin it). The last 3
 
 Outbound mail (kn_brain's email verification, `doc/backend.md` 7.9): `KN_SMTP_HOST`, `KN_SMTP_PORT`,
 `KN_SMTP_TLS` (`implicit` for 465, `starttls`, `auto`), `KN_SMTP_USER`, `KN_SMTP_PASSWORD`, `KN_SMTP_FROM`
-(default `Krunker <noreply@caan.edu>`) in the controller's environment become
+(default `Krunker Box Office <noreply@caan.edu>`) in the controller's environment become
 `/etc/krunknative/smtp.env` (root:kn 0640, written with `no_log`, an optional `EnvironmentFile` of
 the kn-brain units). Locally they live in `~/.config/kn-secrets/smtp.env` (mode 600):
 
@@ -187,10 +187,10 @@ hop (doc/transport.md).
 
 ## Edge firewall
 
-The edges run abulxt's OpenResty relays and KrunkNative's game servers, so their host
+The edges run abulxt's OpenResty relays and Krunker Box Office's game servers, so their host
 firewall is a shared contract, **edge-firewall-contract v1**, implemented by one role.
 
-**`roles/edge_firewall` is vendored**: the same role ships byte-identical in abulxt and KrunkNative
+**`roles/edge_firewall` is vendored**: the same role ships byte-identical in abulxt and Krunker Box Office
 (both at `deploy/ansible/roles/edge_firewall`). Never edit one copy alone: change both repos
 together, re-stamp with `roles/edge_firewall/check-vendored.sh --stamp` (rewrites `VERSION`:
 contract version + sha256 of the role), then check both copies:
@@ -210,7 +210,7 @@ and their full edge play with tag `firewall`), with all inputs in group_vars, th
   then `include "/etc/nftables.d/*.nft"`. `edge_firewall_owner` fills its `# Owner:` line.
 - `edge_firewall_dropins`: this repo's drop-in, `{name, priority, source, comment, tcp,
   udp}`, rendered to `/etc/nftables.d/<priority>-<name>.nft`; it only adds elements to the
-  two sets. abulxt: `50-abulxt.nft` (tcp 80/443/8080, udp 443). KrunkNative:
+  two sets. abulxt: `50-abulxt.nft` (tcp 80/443/8080, udp 443). Krunker Box Office:
   `60-krunknative.nft` (game ports 21015..21015+count-1, tcp and udp). Port lists must not
   overlap between repos (nft 0.9.8 on santaclara/clara rejects duplicate interval elements);
   an empty list renders no line.
@@ -237,12 +237,12 @@ One firewall command per repo (from `deploy/ansible`; add `--check --diff` first
 | repo | command |
 | --- | --- |
 | abulxt | `ansible-playbook playbooks/firewall.yml --vault-password-file <file>` |
-| KrunkNative | `ansible-playbook firewall.yml` |
+| Krunker Box Office | `ansible-playbook firewall.yml` |
 
 ### Handover (who owns the base)
 
 Exactly one repo has `edge_firewall_own_base: true` (now abulxt). To move the base, change
-both repos in the same change window (abulxt `inventory/group_vars/edge.yml`, KrunkNative
+both repos in the same change window (abulxt `inventory/group_vars/edge.yml`, Krunker Box Office
 `group_vars/edges/main.yml`):
 
 1. New owner `edge_firewall_own_base: true`, old owner `edge_firewall_own_base: false`.
@@ -258,7 +258,7 @@ line).
 
 Every host of both repos (the four edges, amph, kru) runs fail2ban under one shared contract,
 **fail2ban-contract v1**, implemented by one role. **`roles/fail2ban` is vendored** exactly like
-`roles/edge_firewall`: byte-identical in abulxt and KrunkNative (`deploy/ansible/roles/fail2ban`),
+`roles/edge_firewall`: byte-identical in abulxt and Krunker Box Office (`deploy/ansible/roles/fail2ban`),
 re-stamped with `roles/fail2ban/check-vendored.sh --stamp` after an edit, then checked:
 
 ```sh
@@ -266,7 +266,7 @@ roles/fail2ban/check-vendored.sh ~/jails/unblocker/src/abulxt/deploy/ansible/rol
 ```
 
 Per host exactly one repo owns the base (`fail2ban_own_base: true`): abulxt on the edges and
-amph, KrunkNative on kru. Both repos set the same `fail2ban_*` variables in the same order
+amph, Krunker Box Office on kru. Both repos set the same `fail2ban_*` variables in the same order
 (this repo: `group_vars/all.yml`; kru's ownership, approval gate and sshd settings in `group_vars/central/main.yml`), and keep `fail2ban_ignoreip` identical.
 
 - Base (owner only): `/etc/fail2ban/jail.local` with `[DEFAULT]` ignoreip (127.0.0.1/8, ::1,
@@ -324,7 +324,7 @@ One fail2ban command per repo (from `deploy/ansible`; add `--check --diff` first
 | repo | command |
 | --- | --- |
 | abulxt | `ansible-playbook playbooks/fail2ban.yml --vault-password-file <file>` |
-| KrunkNative | `ansible-playbook fail2ban.yml` |
+| Krunker Box Office | `ansible-playbook fail2ban.yml` |
 
 Handover of a host's base works like the firewall's (above): flip `fail2ban_own_base` in both
 repos together, run the new owner first (only `# Owner:` lines change), then the old owner

@@ -1,7 +1,7 @@
 # Mobile: web, Android, iOS
 
 Krunker v3.1.1 ran in mobile browsers with a dedicated touch UI, and its Android/iOS
-apps were fullscreen web views around the web game. KrunkNative does the same: the
+apps were fullscreen web views around the web game. Krunker Box Office does the same: the
 **web build is the mobile client**, and `platform/android` / `platform/ios` wrap it.
 
 ## Mobile web (the touch UI)
@@ -9,7 +9,7 @@ apps were fullscreen web views around the web game. KrunkNative does the same: t
 `client/src/ui/ui_mobile.c` ports v3.1.1's mobile code paths (unpacked client: 132.js
 CONTROLS, 103.js UI, 134.js settings, 1.js `mobileControlPositions`, index.js):
 
-| v3.1.1 | KrunkNative |
+| v3.1.1 | Krunker Box Office |
 | --- | --- |
 | `CONTROLS.checkMobile()`: Android/webOS/iPhone/iPad/iPod/BlackBerry/Windows Phone UA, or no `requestPointerLock` | same; plus iPadOS desktop-mode Safari (Macintosh UA with multi-touch) and `?mobile=1` / `?mobile=0` to force it |
 | `UsePointerLock = ... && !isMobile`, `locklessChange()` | no pointer lock on phones; the menu never reopens for a missing lock |
@@ -31,11 +31,11 @@ controls without a third-party script. Known v3.1.1 quirk not copied: nipplejs o
 learns the joystick centre 100 ms after the first ever touch, so in v3.1.1 the very
 first joystick touch does nothing.
 
-KrunkNative additions (the Krunker *apps* did this, the v3.1.1 page did not): the TAP TO
+Krunker Box Office additions (the Krunker *apps* did this, the v3.1.1 page did not): the TAP TO
 PLAY gesture requests fullscreen and locks the screen to landscape where the browser
 allows it (Android Chrome; iPhone Safari has no element fullscreen). Pages inside the
-KrunkNative apps (user agent token `KrunkNativeApp`) skip it. v3.1.1 changes no
-graphics settings on mobile, so neither does KrunkNative.
+Krunker Box Office apps (user agent token `KrunkNativeApp`) skip it. v3.1.1 changes no
+graphics settings on mobile, so neither does Krunker Box Office.
 
 The page already carries v3.1.1's viewport meta (`user-scalable=0`), the `#mobileUI`
 markup and the `img/mobile/` icons.

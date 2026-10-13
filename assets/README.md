@@ -6,7 +6,7 @@ and deployed to the asset host separately (`deploy/ansible` role `kn_web`, tag `
 
 ## Krunker v7.1.4 content (current)
 
-KrunkNative is being upgraded in place to Krunker v7.1.4 (`doc/v7/decisions.md`). Import the v7
+Krunker Box Office is being upgraded in place to Krunker v7.1.4 (`doc/v7/decisions.md`). Import the v7
 content set with:
 
 ```sh

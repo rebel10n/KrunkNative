@@ -9,12 +9,13 @@ The ui/ pages stay as imported (tools/ui-import strips v7's own manifest links: 
 HTML engine has no use for them); this runs on the assembled web build (CMake's web_dist
 target, after ui/ is copied) and
 
-- copies manifest.webmanifest to <dist>/ and icons/* to <dist>/img/pwa/ (made from the iOS
-  app icon, platform/ios/.../icon-1024.png, scaled with nearest-neighbour: it is pixel art);
-- puts the manifest link, the apple-touch-icon and mobile-web-app-capable into <head> of
-  <dist>/index.html (the game page, the manifest's start_url) and names the home screen app
-  KrunkNative (v7's apple-mobile-web-app-title is "Krunker FRVR"). v7's other Apple metas
-  (apple-mobile-web-app-capable, black-translucent status bar, theme-color) stay.
+- copies manifest.webmanifest to <dist>/ and icons/* to <dist>/img/pwa/ (krunker.io's live PWA
+  icons, pinned and written by tools/branding/fetch_branding.py);
+- puts the manifest link, the apple-touch-icon, the 32 px icon (as krunker.io links it, next to
+  the page's 16 px favicon) and mobile-web-app-capable into <head> of <dist>/index.html (the game
+  page, the manifest's start_url) and names the home screen app Krunker Box Office (v7's
+  apple-mobile-web-app-title is "Krunker FRVR"). v7's other Apple metas (apple-mobile-web-app-
+  capable, black-translucent status bar, theme-color #FFD600) stay.
 
 Idempotent: the block between the markers is replaced on every run.
 
@@ -26,20 +27,22 @@ import shutil
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+# the markers keep their old text: a page written by an older pwa.py is still recognised
 BEGIN = "<!-- KrunkNative PWA (platform/web/pwa.py) -->"
 END = "<!-- /KrunkNative PWA -->"
 BLOCK = BEGIN + """
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" href="img/pwa/apple-touch-icon.png">
+<link rel="apple-touch-icon" sizes="180x180" href="img/pwa/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="img/pwa/icon-32.png">
 <meta name="mobile-web-app-capable" content="yes">
 """ + END + "\n"
 EXISTING_RE = re.compile(re.escape(BEGIN) + r".*?" + re.escape(END) + r"\n?", re.S)
 TITLE_RE = re.compile(r'<meta\s+name="apple-mobile-web-app-title"[^>]*>', re.I)
-TITLE = '<meta name="apple-mobile-web-app-title" content="KrunkNative">'
+TITLE = '<meta name="apple-mobile-web-app-title" content="Krunker Box Office">'
 
 
 def inject(page):
-    """page with exactly one PWA block, right before </head>, and the KrunkNative title."""
+    """page with exactly one PWA block, right before </head>, and the Krunker Box Office title."""
     page = EXISTING_RE.sub("", page)
     page = TITLE_RE.sub(TITLE, page) if TITLE_RE.search(page) else page.replace("</head>", TITLE + "\n</head>", 1)
     at = page.find("</head>")

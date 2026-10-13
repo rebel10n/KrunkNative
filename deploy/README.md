@@ -1,4 +1,4 @@
-# KrunkNative deployment
+# Krunker Box Office deployment
 
 Everything needed to run the backend locally and across regions/nodes. Protocols
 and config keys: `doc/backend.md`. The layout mirrors the v3.1.1 jail's `ansible/`

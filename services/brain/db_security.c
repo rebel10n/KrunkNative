@@ -168,7 +168,7 @@ static kn_db_result *run_email_verify(kn_dbconn *c, int n, const char *const *p)
     const char *refusal = NULL;
     if (used && matches && verified) refusal = "This email is already verified.";
     else if (used || !matches) refusal = "This link is no longer valid.";
-    else if (expired) refusal = "This link has expired. Request a new one in Krunker.";
+    else if (expired) refusal = "This link has expired. Request a new one in Krunker Box Office.";
     if (refusal) {
         cJSON_Delete(row);
         return dbx_finish(&x, kn_db_result_user_error(refusal));

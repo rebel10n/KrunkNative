@@ -123,7 +123,7 @@ void ksc_log(const int is_error, const char *fmt, ...) {
 void ksc_warn_light(const char *what) {
     if (g_ksc.warned_lights) return;
     g_ksc.warned_lights = 1;
-    ksc_log(0, "%s: the KrunkNative renderer has no %s yet; the object is a placeholder (methods work, no light)", what, what);
+    ksc_log(0, "%s: the Krunker Box Office renderer has no %s yet; the object is a placeholder (methods work, no light)", what, what);
 }
 
 int ksc_call(const char *hook, const KsValue *args, const int argc) {

@@ -232,6 +232,13 @@ assets-import-live: ## Add the files the v7.1.4 tree lacks from Krunker's live a
 assets-check-live: ## List live_assets.lock files missing from (exit 1) or differing in assets/ and ui/img
 	$(PYTHON) -I tools/ui-import/fetch_live_assets.py check --assets assets --ui ui
 
+.PHONY: branding branding-check
+branding: ## Fetch krunker.io's app icons (tools/branding/branding.lock, sha256-pinned; KN_FETCH_PROXY=) and write the PWA / window / Windows / Android / iOS icons
+	$(PYTHON) -I tools/branding/fetch_branding.py install
+
+branding-check: ## The verbatim krunker.io icons in the tree match tools/branding/branding.lock (exit 1 otherwise)
+	$(PYTHON) -I tools/branding/fetch_branding.py check
+
 .PHONY: maps-import-v7 maps-check-v7
 maps-import-v7: ## Import Krunker v7.1.4's 32 official maps into assets/maps/ (+ ui/img/maps thumbnails; tools/maps/import_v7_maps.py)
 	$(PYTHON) -I tools/maps/import_v7_maps.py

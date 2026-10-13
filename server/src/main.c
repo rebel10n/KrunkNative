@@ -416,7 +416,7 @@ static int parse_args(const int argc, char **argv, ServerArgs *args) {
 
 static void print_usage(FILE *stream, const char *argv0) {
     fprintf(stream,
-            "KrunkNative dedicated server (one lobby per process; doc/backend.md section 8).\n"
+            KN_PRODUCT_NAME " dedicated server (one lobby per process; doc/backend.md section 8).\n"
             "Usage: %s [options] [map.json]\n"
             "       %s --rcon [HOST:]PORT --rcon-password PW [command ...]   (remote console client)\n"
             "\n"
@@ -662,7 +662,7 @@ int main(int argc, char **argv) {
         return 0;
     }
     if (args.version) {
-        printf("KrunkNative server_bin %d.%d.%d (Krunker v3.1.1 port)\n", g_server_version.major, g_server_version.minor, g_server_version.patch);
+        printf(KN_PRODUCT_NAME " server_bin %d.%d.%d (Krunker v3.1.1 port)\n", g_server_version.major, g_server_version.minor, g_server_version.patch);
         // build identity (shared/include/build_info.h): what the finder / coordinator compare
         printf("build %s\n", kn_build_string());
         return 0;
@@ -777,7 +777,7 @@ int main(int argc, char **argv) {
     if (cfg->log_file[0] && server_log_open_file(cfg->log_file))
         fprintf(stderr, "Cannot open log file %s: %s (logging to the console only)\n", cfg->log_file, strerror(errno));
 
-    server_log("Starting KrunkNative server v%d.%d.%d%s", g_server_version.major, g_server_version.minor, g_server_version.patch,
+    server_log("Starting " KN_PRODUCT_NAME " server v%d.%d.%d%s", g_server_version.major, g_server_version.minor, g_server_version.patch,
                interactive ? "" : " (headless)");
     server_log("Build %s", kn_build_string());
 
@@ -852,7 +852,7 @@ int main(int argc, char **argv) {
     pthread_mutex_destroy(&g_server->lock);
 
     const int exit_code = reason == SERVER_STOP_ERROR ? 1 : 0;
-    printf("KrunkNative server stopped.\n");
+    printf(KN_PRODUCT_NAME " server stopped.\n");
     fflush(stdout);
     server_log_open_file(NULL);
 

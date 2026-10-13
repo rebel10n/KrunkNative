@@ -310,9 +310,9 @@ jobs:
           }
           {
             if [ "$TAG" = server-latest ]; then
-              echo "Rolling build of the KrunkNative dedicated server, replaced on every push to \`main\`. Servers listed in the server browser that run an older build or protocol show as **Outdated**."
+              echo "Rolling build of the Krunker Box Office dedicated server, replaced on every push to \`main\`. Servers listed in the server browser that run an older build or protocol show as **Outdated**."
             else
-              echo "KrunkNative dedicated server $TAG."
+              echo "Krunker Box Office dedicated server $TAG."
             fi
             echo
             echo "| | |"
@@ -341,6 +341,6 @@ jobs:
       - name: Publish
         run: |
           set -euo pipefail
-          if [ "$TAG" = server-latest ]; then title="Dedicated server (latest build)"; else title="Dedicated server ${TAG#server-}"; fi
+          if [ "$TAG" = server-latest ]; then title="Krunker Box Office server (latest build)"; else title="Krunker Box Office server ${TAG#server-}"; fi
           tools/release/publish.sh "$TAG" "$title" notes.md release-assets/*
           echo "### [$TAG](https://github.com/$GH_REPO/releases/tag/$TAG): $COMMIT12, protocol $PROTOCOL" >> "$GITHUB_STEP_SUMMARY"

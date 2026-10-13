@@ -191,6 +191,8 @@ static int staged_client_runs(const char *staged, char *why, const size_t whyn) 
     char out[1024];
     char *argv[] = {path, "--version", NULL};
     const int code = kn_proc_run(path, argv, 30000, out, sizeof(out));
+    // "KrunkNative client": every client's --version has it (Krunker Box Office ones: "Krunker
+    // Box Office (KrunkNative client) <build>"), so older and newer packages both pass
     if (code != 0 || !strstr(out, "KrunkNative client")) {
         out[strcspn(out, "\r\n")] = 0;
         snprintf(why, whyn, "the new client does not start here (exit %d%s%.200s)", code, out[0] ? ": " : "", out);
@@ -359,7 +361,7 @@ static void *work(void *arg) {
             status(-1, NULL, "Development build: not updating");
         } else if (!kn_install_self_updatable(&L.in.marker)) {
             status(-1, kn_update_download_url(&m, L.in.platform, L.in.marker.package),
-                   "Update %s available: update KrunkNative with your package manager", m.build.describe);
+                   "Update %s available: update " KN_PRODUCT_NAME " with your package manager", m.build.describe);
         } else if (!L.in.root_writable) {
             status(-1, L.in.root, "Update available, but the install directory is read-only");
         } else if (!update_executables(&m)) {
@@ -381,7 +383,7 @@ static void *work(void *arg) {
             goto out_m;
         }
     }
-    status(1, NULL, "Starting KrunkNative");
+    status(1, NULL, "Starting " KN_PRODUCT_NAME);
     L.ok = 1;
 out_m:
     kn_update_manifest_free(&m);
@@ -463,7 +465,8 @@ static void wait_for_pid(const long pid) {
 }
 
 static void usage(void) {
-    printf("Usage: krunknative [--cli|--headless] [--no-update] [--check] [--no-launch] [--wait-pid PID]\n"
+    printf(KN_PRODUCT_NAME " launcher (updates the game, then starts it)\n"
+           "Usage: krunknative [--cli|--headless] [--no-update] [--check] [--no-launch] [--wait-pid PID]\n"
            "                   [--updates-url URL|off] [--assets-dir DIR] [--] [client args...]\n"
            "  --cli, --headless  no window: progress on stdout\n"
            "  --no-update        do not install a newer build (still syncs the game content)\n"
@@ -494,7 +497,7 @@ int main(int argc, char **argv) {
         else if (!strcmp(a, "--wait-pid") && i + 1 < argc) L.wait_pid = strtol(argv[++i], NULL, 10);
         else if (!strcmp(a, "--root") && i + 1 < argc) snprintf(L.root_override, sizeof(L.root_override), "%s", argv[++i]); // tests
         else if (!strcmp(a, "--version")) {
-            printf("KrunkNative launcher %s\n", kn_build_string());
+            printf(KN_PRODUCT_NAME " launcher %s\n", kn_build_string());
             return 0;
         } else if (!strcmp(a, "--help") || !strcmp(a, "-h")) {
             usage();
@@ -512,7 +515,7 @@ int main(int argc, char **argv) {
         const char *env = getenv("KRUNKNATIVE_ASSETS_DIR");
         if (env && *env) snprintf(L.assets_override, sizeof(L.assets_override), "%s", env);
     }
-    printf("KrunkNative launcher %s\n", kn_build_string());
+    printf(KN_PRODUCT_NAME " launcher %s\n", kn_build_string());
     if (L.wait_pid > 0) wait_for_pid(L.wait_pid);
     char ua[128];
     snprintf(ua, sizeof(ua), "KrunkNative-launcher/%s (%s)", kn_build_info()->describe, kn_update_platform_default());

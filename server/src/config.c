@@ -10,6 +10,7 @@
 //   CLI:   server_bin's own flags (--port, --mode, ...) and --gameserver.<key>=<json|text>
 //          (main.c), applied last.
 #include <server_config.h>
+#include <build_info.h> // KN_PRODUCT_NAME
 #include <server.h> // g_server (effective lobby size in the summary)
 #include <server_log.h>
 #include <map_catalog.h>
@@ -33,7 +34,7 @@ void gs_config_defaults(GsConfig *cfg) {
     memset(cfg, 0, sizeof(*cfg));
     gs_copy(cfg->region, sizeof(cfg->region), "local");
     gs_copy(cfg->node_id, sizeof(cfg->node_id), "LOC");
-    gs_copy(cfg->name, sizeof(cfg->name), "KrunkNative");
+    gs_copy(cfg->name, sizeof(cfg->name), KN_PRODUCT_NAME); // the server browser name (hostname)
     gs_copy(cfg->listen_host, sizeof(cfg->listen_host), "0.0.0.0");
     cfg->listen_port = NET_DEFAULT_PORT;
     cfg->host_type = -1; // WP-E: a public game

@@ -152,7 +152,7 @@
     "daily_reward_kr": 50,
     "skins_file": "assets/skins.json",
     "assets_dir": "assets",
-    "twofa_issuer": "Krunker",
+    "twofa_issuer": "Krunker Box Office",
     "email": {
       "required": false,
       "require_verified": [],
@@ -171,14 +171,14 @@
     "tls": "implicit",
     "user": "noreply@example.com",
     "password": "",
-    "from": "Krunker <noreply@caan.edu>",
+    "from": "Krunker Box Office <noreply@caan.edu>",
     "verify_peer": true,
     "timeout_ms": 20000
   },
   "gameserver": {
     "region": "local",
     "node_id": "LOC",
-    "name": "KrunkNative",
+    "name": "Krunker Box Office",
     "listen_host": "0.0.0.0",
     "listen_port": 21015,
     "public_host": "127.0.0.1",
@@ -217,7 +217,7 @@
     },
     "custom_games": true,
     "motd": [
-      "Welcome to KrunkNative, $!"
+      "Welcome to Krunker Box Office, $!"
     ],
     "join_message": "$ joined the game",
     "leave_message": "$ left the game",

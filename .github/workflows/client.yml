@@ -471,9 +471,9 @@ jobs:
           }
           {
             if [ "$TAG" = client-latest ]; then
-              echo "Rolling build of the KrunkNative game client, replaced on every push to \`main\`. Clients that run an older build or protocol than this are flagged outdated."
+              echo "Rolling build of the Krunker Box Office game client, replaced on every push to \`main\`. Clients that run an older build or protocol than this are flagged outdated."
             else
-              echo "KrunkNative game client $TAG."
+              echo "Krunker Box Office game client $TAG."
             fi
             echo
             echo "| | |"
@@ -495,7 +495,7 @@ jobs:
             app_row "Android 7.0+" krunknative-android.apk "the app plays krunk.io fullscreen"
             app_row "iPhone / iPad (sideload)" krunknative-ios-unsigned.ipa "unsigned: AltStore / Sideloadly sign it; or open krunk.io in Safari, Share > Add to Home Screen"
             echo
-            echo "Unpack and run \`krunknative\` (Windows: \`KrunkNative.exe\`; macOS: open \`KrunkNative.app\`, unsigned: right-click > Open the first time), or install the .deb/.rpm and start KrunkNative from the applications menu. The first start downloads the game content (about 1.7 GB); the launcher keeps the client up to date. README.txt in each package has the details. Not sure which Linux package? Take the polyfilled one. Check a download with \`sha256sum -c <file>.sha256\`."
+            echo "Unpack and run \`krunknative\` (Windows: \`KrunkNative.exe\`; macOS: open \`KrunkNative.app\`, unsigned: right-click > Open the first time), or install the .deb/.rpm and start Krunker Box Office from the applications menu. The first start downloads the game content (about 1.7 GB); the launcher keeps the client up to date. README.txt in each package has the details. Not sure which Linux package? Take the polyfilled one. Check a download with \`sha256sum -c <file>.sha256\`."
             echo
             echo "Phones and tablets play the web client: Android, install the APK (allow your browser to install apps when asked); iPhone / iPad, open https://krunk.io in Safari and tap Share > Add to Home Screen (the .ipa is for sideloading tools only)."
             echo
@@ -508,7 +508,7 @@ jobs:
       - name: Publish
         run: |
           set -euo pipefail
-          if [ "$TAG" = client-latest ]; then title="Native client (latest build)"; else title="Native client ${TAG#client-}"; fi
+          if [ "$TAG" = client-latest ]; then title="Krunker Box Office client (latest build)"; else title="Krunker Box Office client ${TAG#client-}"; fi
           tools/release/publish.sh "$TAG" "$title" notes.md release-assets/*
           echo "### [$TAG](https://github.com/$GH_REPO/releases/tag/$TAG): $COMMIT12, protocol $PROTOCOL" >> "$GITHUB_STEP_SUMMARY"
 

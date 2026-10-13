@@ -1150,7 +1150,7 @@ void ui_controls_reset_keys(void) {
 static void log_once(const int id, const char *what) {
     if (g_ctl.logged[id]) return;
     g_ctl.logged[id] = 1;
-    printf("[controls] %s: not available in KrunkNative (no-op)\n", what);
+    printf("[controls] %s: not available in Krunker Box Office (no-op)\n", what);
 }
 
 static void flip_setting(const char *key) {

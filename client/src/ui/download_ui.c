@@ -58,7 +58,7 @@ static const DlPkg PKGS[] = {
     {"linux-aarch64-polyfilled", DL_OS_LINUX, "aarch64", "Linux aarch64 (any distro)", "aarch64, any distribution (glibc 2.17+)", {"deb", "rpm", "tar.gz", "zip"}},
     {"linux-aarch64", DL_OS_LINUX, "aarch64", "Linux aarch64 (glibc 2.35+)", "aarch64 for current distros (glibc 2.35+, OpenSSL 3)", {"deb", "rpm", "tar.gz", "zip"}},
     {"android", DL_OS_ANDROID, NULL, "Android", "Android 7.0 or newer", {"apk"}},
-    {"ios", DL_OS_IOS, NULL, "iPhone / iPad", "Add KrunkNative to your Home Screen", {"ipa"}},
+    {"ios", DL_OS_IOS, NULL, "iPhone / iPad", "Add Krunker Box Office to your Home Screen", {"ipa"}},
 };
 #define PKG_COUNT ((int) (sizeof(PKGS) / sizeof(PKGS[0])))
 
@@ -289,21 +289,21 @@ static void rec_howto(StrBuf *sb, const DlDevice *d, const DlOs os) {
                           "choose Open. The launcher downloads the game content (about 1.7 GB) and keeps it up to date.");
             break;
         case DL_OS_LINUX:
-            sb_append(sb, "Install the .deb / .rpm and start KrunkNative from the applications menu, or unpack the "
+            sb_append(sb, "Install the .deb / .rpm and start Krunker Box Office from the applications menu, or unpack the "
                           ".tar.gz and run <b>./krunknative</b>. The launcher downloads the game content (about 1.7 GB) "
                           "on the first start and keeps the client up to date.");
             break;
         case DL_OS_ANDROID:
-            sb_append(sb, d->app ? "You are playing in the KrunkNative app: it always runs the latest game from krunk.io."
+            sb_append(sb, d->app ? "You are playing in the Krunker Box Office app: it always runs the latest game from krunk.io."
                                  : "Open the downloaded file and allow your browser to install apps when asked. The app "
                                    "plays krunk.io fullscreen with touch controls and controllers, always up to date.");
             break;
         case DL_OS_IOS:
             if (d->standalone) {
-                sb_append(sb, "KrunkNative is on your Home Screen already: it always runs the latest version.");
+                sb_append(sb, "Krunker Box Office is on your Home Screen already: it always runs the latest version.");
             } else {
                 sb_append(sb, "In Safari, tap Share (the square with an arrow), then <b>Add to Home Screen</b>. "
-                              "KrunkNative then opens fullscreen like an app, always up to date.");
+                              "Krunker Box Office then opens fullscreen like an app, always up to date.");
             }
             {
                 char url[256];

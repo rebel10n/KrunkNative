@@ -1,6 +1,6 @@
-# KrunkNative HTML UI engine
+# Krunker Box Office HTML UI engine
 
-KrunkNative shows Krunker v3.1.1's own menu and HUD: the page is `ui/index.html`
+Krunker Box Office shows Krunker v3.1.1's own menu and HUD: the page is `ui/index.html`
 (Krunker's markup + `css/main.css`, trimmed, see [ui/README.md](/ui/README.md)), and
 the behaviour Krunker's game JavaScript gave it is ported to C. **No JavaScript runs in
 the native client**: the in-house HTML/CSS engine ignores `<script>`, and the C UI

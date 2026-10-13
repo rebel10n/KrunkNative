@@ -632,7 +632,7 @@ static void relaunch(void) {
     }
     fprintf(stderr, "[client] restart failed: %s\n", strerror(errno));
 #else
-    fprintf(stderr, "[client] restart: start KrunkNative again to apply the settings\n");
+    fprintf(stderr, "[client] restart: start Krunker Box Office again to apply the settings\n");
 #endif
 }
 #endif
@@ -1164,7 +1164,7 @@ static void do_action(const char *action) {
         if (f) {
             fclose(f);
         } else if ((f = fopen(path, "wb"))) {
-            fputs("/* KrunkNative custom CSS: applied over the menu and HUD (Settings > Client > Custom CSS).\n"
+            fputs("/* Krunker Box Office custom CSS: applied over the menu and HUD (Settings > Client > Custom CSS).\n"
                   " * Toggle Custom CSS off and on to reload it after editing. */\n", f);
             fclose(f);
         }

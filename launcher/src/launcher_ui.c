@@ -1,9 +1,11 @@
 // The launcher window (launcher_ui.h).
 #include "launcher_ui.h"
 
+#include <build_info.h>
 #include <gl.h>
 #include <headless.h>
 #include <png_write.h>
+#include <stb_image.h>
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -231,6 +233,25 @@ static int text_wrapped(LauncherUi *ui, const int font, const float x, float y, 
 
 // ------------------------------------------------------------------ window
 
+// The client's window icon: the install's assets/img/icon.png next to ui/ (every package ships
+// it; krunker.io's 256 px app icon, tools/branding/fetch_branding.py). macOS windows have no
+// icon (the .app's .icns is the Dock's); Windows also has it in the exe (client/win.rc).
+static void set_window_icon(GLFWwindow *window, const char *ui_dir) {
+    char path[4096];
+    snprintf(path, sizeof(path), "%s/../assets/img/icon.png", ui_dir ? ui_dir : ".");
+    GLFWimage icon = {0};
+    int channels = 0;
+    icon.pixels = stbi_load(path, &icon.width, &icon.height, &channels, 4);
+    if (icon.pixels) {
+#ifndef __APPLE__
+        glfwSetWindowIcon(window, 1, &icon);
+#endif
+        stbi_image_free(icon.pixels);
+    }
+    printf("[launcher] window \"%s\", icon %s (%dx%d)\n", glfwGetWindowTitle(window), icon.pixels ? path : "none", icon.width,
+           icon.height);
+}
+
 LauncherUi *launcher_ui_open(const char *ui_dir) {
     int argc = 1;
     char *argv[] = {"krunknative", NULL};
@@ -256,13 +277,14 @@ LauncherUi *launcher_ui_open(const char *ui_dir) {
     headless_window_hints();
     LauncherUi *ui = calloc(1, sizeof(*ui));
     if (!ui) return NULL;
-    ui->window = glfwCreateWindow(WIN_W, WIN_H, "KrunkNative", NULL, NULL);
+    ui->window = glfwCreateWindow(WIN_W, WIN_H, KN_PRODUCT_NAME, NULL, NULL);
     if (!ui->window || !headless_make_context_current(ui->window) || !kn_gl_load(headless_get_proc_address)) {
         if (ui->window) glfwDestroyWindow(ui->window);
         free(ui);
         glfwTerminate();
         return NULL;
     }
+    set_window_icon(ui->window, ui_dir);
     int fw = WIN_W, fh = WIN_H, ww = WIN_W, wh = WIN_H;
     glfwGetFramebufferSize(ui->window, &fw, &fh);
     glfwGetWindowSize(ui->window, &ww, &wh);
@@ -315,8 +337,8 @@ LauncherAction launcher_ui_frame(LauncherUi *ui, const LauncherView *v) {
     if (glfwWindowShouldClose(ui->window)) return UI_QUIT;
     // the window title mirrors the status: the only text when the fonts are missing
     char title[256];
-    if (v->progress >= 0 && !v->error) snprintf(title, sizeof(title), "KrunkNative - %s (%d%%)", v->status, (int) (v->progress * 100));
-    else snprintf(title, sizeof(title), "KrunkNative - %s", v->status);
+    if (v->progress >= 0 && !v->error) snprintf(title, sizeof(title), KN_PRODUCT_NAME " - %s (%d%%)", v->status, (int) (v->progress * 100));
+    else snprintf(title, sizeof(title), KN_PRODUCT_NAME " - %s", v->status);
     if (strcmp(title, ui->title) != 0) {
         snprintf(ui->title, sizeof(ui->title), "%s", title);
         glfwSetWindowTitle(ui->window, title);
@@ -332,7 +354,7 @@ LauncherAction launcher_ui_frame(LauncherUi *ui, const LauncherView *v) {
     static const float track[4] = {0.24f, 0.24f, 0.26f, 1};
     ui->nverts = 0;
     rect(ui, 0, 0, WIN_W, 4, accent);
-    text(ui, FONT_TITLE, 24, 48, "KRUNKNATIVE", white);
+    text(ui, FONT_TITLE, 24, 48, "KRUNKER BOX OFFICE", white);
     LauncherAction action = UI_NONE;
     if (v->error) {
         const int lines = ui->has_text ? text_wrapped(ui, FONT_BODY, 24, 88, WIN_W - 48, 2, v->status, red) : 1;

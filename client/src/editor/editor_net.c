@@ -1151,7 +1151,7 @@ static void on_pub_lookup(void *user, const int status, const char *body, const 
 void ed_net_publish(void) {
     // publishMap()
     if (!backend_enabled() || backend_available() == 0) {
-        editor_message("Publishing needs the KrunkNative backend (kn_brain); use Export instead.");
+        editor_message("Publishing needs the Krunker Box Office backend (kn_brain); use Export instead.");
         return;
     }
     const AccountInfo *a = account();

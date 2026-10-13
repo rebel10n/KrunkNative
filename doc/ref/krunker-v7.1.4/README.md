@@ -2,7 +2,7 @@
 
 Screenshots, DOM dumps and element rects of the REAL Krunker v7.1.4 client (its own
 `public/index.html` / `social.html` and bundled `js/index.js`), headless Chromium at 1280x720
-unless noted. They are the acceptance reference for KrunkNative's HTML/CSS UI: `make uidiff`
+unless noted. They are the acceptance reference for Krunker Box Office's HTML/CSS UI: `make uidiff`
 renders the scenarios of `tools/uidiff/scenarios/` with the native client and diffs them against
 these images. The v3.1.1 references stay in `doc/ref/krunker-v3.1.1/`.
 
@@ -48,7 +48,7 @@ matchmaker the page starts v7's in-browser sandbox game. Determinism:
   config narrowed to Free for All, so the sandbox is always FFA on Kanji (`loadSandbox`);
 - a seeded `Math.random` installed before any page script, and v7's reconstruction slip
   `requestAnimationFrame(fn, delay)` (a decompiled `setTimeout`: death screen delay, copyGameLink,
-  the end-screen results) run as `setTimeout`, as in the original game and in KrunkNative;
+  the end-screen results) run as `setTimeout`, as in the original game and in Krunker Box Office;
 - the menu undoes the sandbox chrome (`CONNECTED_MENU` of `tools/ui-import/v7_page.js`: the
   connected guest menu), shows the stream panel (`Loading Streams...`) instead of the ad slot,
   pins `#mainLogoFace` to `f_0` and removes the hook's session timer box;

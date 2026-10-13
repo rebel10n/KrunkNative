@@ -4,7 +4,7 @@
 // Every gameserver key of config/config.example.json works here too.
 
 // ---- identity
-hostname        "My KrunkNative Server"
+hostname        "My Krunker Box Office Server"
 region          CH                 // region code shown in server lists (SV LA CH VA, local)
 community       ""                 // network / community name in lists ("" = the coordinator's)
 tags            "fun,casual"       // extra info-query tags

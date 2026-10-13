@@ -8,6 +8,11 @@
 #include <stdint.h>
 #include <stddef.h>
 
+// The product name players see (window titles, banners, --version, the launcher). The project
+// was called KrunkNative: identifiers (repo, KRUNKNATIVE_* variables, kn_* targets, file and
+// package names, user agents, protocol strings) keep that name.
+#define KN_PRODUCT_NAME "Krunker Box Office"
+
 typedef struct {
     const char *describe;     // "v1.0.0-51-g6f0cea9", "6f0cea9-dirty", "unknown"
     const char *commit;       // 12 hex digits, "" unknown

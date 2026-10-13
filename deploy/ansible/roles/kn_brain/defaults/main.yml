@@ -38,7 +38,7 @@ kn_brain_smtp_port: "{{ lookup('ansible.builtin.env', 'KN_SMTP_PORT') | default(
 kn_brain_smtp_tls: "{{ lookup('ansible.builtin.env', 'KN_SMTP_TLS') | default('auto', true) }}"
 kn_brain_smtp_user: "{{ lookup('ansible.builtin.env', 'KN_SMTP_USER') }}"
 kn_brain_smtp_password: "{{ lookup('ansible.builtin.env', 'KN_SMTP_PASSWORD') }}"
-kn_brain_smtp_from: "{{ lookup('ansible.builtin.env', 'KN_SMTP_FROM') | default('Krunker <noreply@caan.edu>', true) }}"
+kn_brain_smtp_from: "{{ lookup('ansible.builtin.env', 'KN_SMTP_FROM') | default('Krunker Box Office <noreply@caan.edu>', true) }}"
 # accounts.email.require_verified: social features that need a verified email (chat, post, gift,
 # market, trade, clan, publish). Krunker v7.1.4 gates nothing on email: [].
 kn_brain_email_require_verified: []

@@ -404,6 +404,9 @@ else ()
         launcher/src/install.c launcher/src/assets_sync.c
         client/src/net/http_conn.c client/src/headless.c client/src/png_write.c client/src/stb_image.c
         shared/src/auth_join.c)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        list(APPEND LAUNCHER_SOURCES client/win.rc) # the exe icon + "Krunker Box Office" version info
+    endif ()
     add_executable(kn_launcher WIN32 ${LAUNCHER_SOURCES})
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         set_target_properties(kn_launcher PROPERTIES OUTPUT_NAME KrunkNative)

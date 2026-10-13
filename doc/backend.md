@@ -1,4 +1,4 @@
-# KrunkNative backend
+# Krunker Box Office backend
 
 Loosely based on the Krunker v3.1.1 offline reconstruction's backend
 (`/home/user/jails/kru/src/Krunker_v3.1.1/{matchmaker,server,ansible}`), ported to
@@ -520,15 +520,15 @@ brain draining).
 | --- | --- | --- |
 | `GET /ping` | publicRoutes `/ping` | `{"success":"true"}` (region latency probe, also `/mm/ping`) |
 | `GET /mm/ping-list[?hostname=]` | `registry.regions()` | `{"<region>": "host[:port]"}` — one ping host per live region (`brain.regions[].ping_host`, else a live node's public host); the client fetches `http(s)://<value>/ping` |
-| `GET /mm/regions` | (KrunkNative) | `[{"id","name","players","games","nodes"}]` known + live regions |
+| `GET /mm/regions` | (Krunker Box Office) | `[{"id","name","players","games","nodes"}]` known + live regions |
 | `GET /mm/game-list[?hostname=]` | `/mm/game-list` | `{"success":true,"totalPlayerCount":N,"games":[tuple,...]}` all live lobbies of every region |
 | `GET /mm/game-info?game=ID` | `/mm/game-info` | the tuple; unknown id -> best quick-join pick (v3.1.1), `InvalidGameId` if none |
 | `GET /mm/seek-game?region=R[&game=ID][&autoChangeGame=true][&dataQuery=JSON][&token=SESSION]` | `/mm/seek-game` | `{"gameId","lobbyId","host","port","clientId","changeReason","region","webUrl"}` |
 | `GET /mm/host-game?region=R&config=JSON[&token=SESSION]` (also `POST`, JSON body `{region, config}`) | (game socket `custom` in v3.1.1) | same as seek-game, for a freshly hosted custom lobby |
-| `GET /mm/brains` | (KrunkNative) | `[{"id","region","publicUrl","nodes","lastSeen"}]` live brains (federation debug) |
-| `GET /mm/status` | (KrunkNative) | `{"brain","region","version","nodes","lobbies","players","draining"}` |
+| `GET /mm/brains` | (Krunker Box Office) | `[{"id","region","publicUrl","nodes","lastSeen"}]` live brains (federation debug) |
+| `GET /mm/status` | (Krunker Box Office) | `{"brain","region","version","nodes","lobbies","players","draining"}` |
 | `GET /api/player-count`, `/social/player-count` | same | `{"playerCount":N}` |
-| `POST /mm/admin/drain?node=ID` | (KrunkNative) | Bearer `brain.internal_secret`; see 6.4 |
+| `POST /mm/admin/drain?node=ID` | (Krunker Box Office) | Bearer `brain.internal_secret`; see 6.4 |
 
 seek-game details:
 
@@ -743,7 +743,7 @@ live reservations of every brain; cap = min(maxPlayers, mode cap)
 1. `game=ID` requested: if it exists and has room (or `FORCE_ENTER`/`force=1`) -> it.
    Otherwise `autoChangeGame=false` -> `GameFull` / `InvalidGameId`; with
    `autoChangeGame` (default) continue and answer `changeReason: "game_changed"`.
-   KrunkNative: a guest (no valid `token`) asking for an `onlineMode` lobby is
+   Krunker Box Office: a guest (no valid `token`) asking for an `onlineMode` lobby is
    treated like a full one, but with `AccountRequired` (403).
 2. Public pool = non-custom lobbies (custom lobbies are only reachable by id),
    minus password protected ones (hello `password` or meta `pr`) and, for guests,
@@ -806,9 +806,9 @@ rankedCooldown 7200000, rankedDeduction 30, rankedClasses), the comp lobby of `g
 (`config.hostTypes[1]` "Comp Server Setup", lobbyPlayers / canSpawn / the comp menu) and the
 ranked reward skins of `store.js` (`ranked: true`, `rseas` 1-4, limT "Ranked", not sold, spun or
 quick-sold). Its client has no queue code and its server no ranked code left, so the queue keeps
-the v3.1.1 ClientManager route shapes KrunkNative already served and the rating formula is
+the v3.1.1 ClientManager route shapes Krunker Box Office already served and the rating formula is
 v3.1.1's `updateELO` / `checkLeave` (shared/include/ranked.h). v3.1.1's three queues (Solo / Duo /
-Quad: r1v1, r2v2, r4v4) and KrunkNative's own ranked modes (ids 37 / 38: an objective variant and
+Quad: r1v1, r2v2, r4v4) and Krunker Box Office's own ranked modes (ids 37 / 38: an objective variant and
 first to 10 kills) are gone; 37 / 38 stay reserved for ranked with no mode.
 
 State is in the shared database (`mm_ranked_parties`, `mm_ranked_members`, `mm_ranked_matches`,
@@ -996,7 +996,7 @@ socialURL `<brain>/social`). Frames are arrays `["label", ...args]`:
 
 * binary: msgpack + 2 trailing bytes (the client's anti-cheat nibbles; ignored on
   receive, `0,0` on send), exactly `server/io.ts` encodePacket/decodePacket;
-* text: JSON (KrunkNative clients). Replies use the encoding of the client's most
+* text: JSON (Krunker Box Office clients). Replies use the encoding of the client's most
   recent frame; `?enc=json` makes the greeting JSON too.
 
 On open the brain sends `["pi", null]` (client answers `["po"]`) and
@@ -1006,13 +1006,13 @@ previous one finished (v3.1.1 ran them on synchronous SQLite), so e.g. `["f", ..
 then `["r", "profile", ...]` sees the follow. Errors
 without their own reply label are `["po", null, "message"]` (the page's `io_po`
 error popup). Rate limit: 20 frames/s, burst 60 (excess dropped). Pushes that only
-the KrunkNative menu understands (`gmc`, `ua`) go to JSON clients only.
+the Krunker Box Office menu understands (`gmc`, `ua`) go to JSON clients only.
 
 Auth (`socialWs.ts` handleAuth / packetHandlers io_a):
 
 | request | reply |
 | --- | --- |
-| `["a", 0, [name, pass, ref, email?], captcha]` register (email: KrunkNative, optional; 7.9) | `["a", null, id, username, data40, token, info]` or `["a", "error", null, null, null, null]` |
+| `["a", 0, [name, pass, ref, email?], captcha]` register (email: Krunker Box Office, optional; 7.9) | `["a", null, id, username, data40, token, info]` or `["a", "error", null, null, null, null]` |
 | `["a", 1, [name, pass, null], captcha]` login | same |
 | `["a", 1, [name, null, token]]` token resume | same (token unchanged) |
 | `["a", -1]` logout | none (session token revoked) |
@@ -1076,7 +1076,7 @@ Other labels (request -> reply):
 | `["trCA"]` | decline every open incoming offer |
 | `["a2FA"]` / `["a2FAc", code]` / `["d2FA"]` / `["d2FAc", code]` | v7.1.4 2FA (authenticator app, 7.9): `["c2fa", 0, "a2FAc", otpauthUri]` -> `["c2fa", 2, null, null, true]`; `["c2fa", 0, "d2FAc"]` -> `["c2fa", 2, null, null, false]`; a wrong code: `["c2fa", 0, label, null, null, "Invalid Code"]` |
 | password login of a 2FA account | `["c2fa", 0, "2fa"]` (the code popup); then `["2fa", code]` -> `["c2fa", 1]` + the `a` reply, or `["c2fa", 0, "2fa", null, null, "Invalid Code"]`. Token resumes skip 2FA; internal `login` answers `2FA required.` |
-| `["cemail", email]` / `["emailv"]` / `["emailS"]` | KrunkNative email verification (7.9): `["cemail" \| "emailv", error, message, state]`, `["emailS", state]` |
+| `["cemail", email]` / `["emailv"]` / `["emailS"]` | Krunker Box Office email verification (7.9): `["cemail" \| "emailv", error, message, state]`, `["emailS", state]` |
 | `["las"]` | log out every other session of the account |
 | `["uploadM", mapJson, thumbDataUrl, description, videoId, category]` | `["pubMR", "Map Published!" \| "Map Updated!"]` / `["upMp", err]`: publishes the map under its JSON `name` (3-30 chars; v3.1.1 catalogue names reserved; republishing your own map bumps `map_updatecounter`); a PNG data URL thumbnail (<= 200 KB) becomes `map_image` |
 | `["edMp", name]` | `["edMp", mapJson \| null]` (own maps; devs / creation mods any) |
@@ -1090,12 +1090,12 @@ Other labels (request -> reply):
 | `["chg"]` | `["chgL", activeChallenges]`: `[{CI, T, DAT, REW, IC, N, PV, PT, TR?, PER}]` (v7 `account.activeChallenges`; TR = ms left of a daily / weekly one; 3 daily + 3 weekly rotate per account and UTC day / week) (WP-E part 2c, `progress.c`) |
 | `["bdg", badge]` | `["bdgr", badge]` / `["po", null, "You dont own this badge"]`: `player_stats.bdg` (-1 clears; v7 io_badgeUpdate) |
 | `["cbdg", badge]` | `["cbdgr", badge]` / `["po", null, err]` ("Badge not claimable", "Requirements not met", "Badge already claimed"): a claimable badge whose rule holds (Nuclear I-IV: `stats.n`) |
-| `["mdl"]` | `["mdl", {medal: count}]`: the account's medal counts (KrunkNative) |
+| `["mdl"]` | `["mdl", {medal: count}]`: the account's medal counts (Krunker Box Office) |
 | `["bpdl"]` | `["bpdl", pass \| null]` then (signed in) `["bppd", {id, bpp, tier, items_claimed}]`: v7 io_dataLoaded / io_syncBpProg (7.8) |
 | `["bpclm", itemId]` | `["bpclmr", null, null, skin, null, null, {id, tier, col, sk}]` + `bppd` / `["po", null, err]` ("Item not found", "Level not reached", "VIP Tier required", "Item already claimed") |
 | `["xstbp", tier, code]` | `["purbp", "kr", null, null, tier, price, "KR", txid, null]` + `bppd` (+ `nbdgr`) + `ua` / `["purbp", "kr", {err}, "1"]`: the VIP tier for `tier1_price_kr` KR |
 | `["xstbpl", levels]` | `["purbpl", "kr", null, null, levels, bpp, price, "KR", txid, null, badge]` + `bppd` + `ua` / `["purbpl", "kr", {err}, null, levels]`: skipped levels for `skip_price_kr` KR each |
-| `["sst", name?, season?]` | `["sst", {season, name, kills, deaths, wins, games, score, timePlayed, bpp, tier, level, levels} \| null]`: the profile's season block (KrunkNative) |
+| `["sst", name?, season?]` | `["sst", {season, name, kills, deaths, wins, games, score, timePlayed, bpp, tier, level, levels} \| null]`: the profile's season block (Krunker Box Office) |
 | `["flg", name, 0\|1]` / `["ver", name, 0\|1]` | `["fgr", ok]` (mods) / `["verr", ok]` (devs) |
 
 Server pushes: `["ua", data40, info]` (v3.1.1 `updateAccount`) after a stats commit
@@ -1209,7 +1209,7 @@ and `kills` / `deaths` / `won` / `games` / `score` / `timePlayed` into `season_s
   Chromium: the untouched v3.1.1 `social.html` logs in through its own popup,
   resumes by token, posts, and renders profile, feed, leaderboards and the 36-map
   catalogue from the brain.
-* KrunkNative web client: client-integration's build (`?brain=<brain url>`)
+* Krunker Box Office web client: client-integration's build (`?brain=<brain url>`)
   registers and logs in through the menu's account window in headless Chromium.
 
 ### 7.8 Seasons and the Battle Pass (`season.c`, `db_season.c`, `0108_seasons.sql`)
@@ -1236,7 +1236,7 @@ Pass window), endGame's `tmpBPData` and challenges.finalize's `REW.bpp`, with th
 * **Claims**: a card's skin goes to the inventory (`skin_transactions` source `battlepass`,
   ref `bp:<pass>:<item>`) when its level is reached, its track is free or the account has the
   VIP tier, and it is not in `items_claimed`.
-* **KR purchases** (KrunkNative: v7 sold them for USD through Xsolla / Steam): the VIP tier
+* **KR purchases** (Krunker Box Office: v7 sold them for USD through Xsolla / Steam): the VIP tier
   (`tier1_price_kr`, default 1200) and skipped levels (`skip_price_kr` each, default 200; at most
   up to the last level) are debited through `db_add_funds` (`kr_transactions` sources
   `battlepass` / `battlepass-skip`, ref `bp:<pass>:tier1` / `bp:<pass>:skip<n>`) in the same
@@ -1273,10 +1273,10 @@ It has no email flow at all: no email field, no verification, no reset by email,
   `["2fa", code]` finishes it. Every accepted code moves `twofa_last_step` (never accepted twice);
   10 wrong codes within 15 minutes lock the code step for 15 minutes ("Too many attempts. Please
   Try Later"); a wrong code is not a login failure (no `(name, IP)` throttle: the password was
-  right). The reason of a repeated prompt rides as a 6th element (`"Invalid Code"`): KrunkNative
+  right). The reason of a repeated prompt rides as a 6th element (`"Invalid Code"`): Krunker Box Office
   shows it in the popup (v7 shows nothing). Token resumes skip 2FA (as v7). Procs
   `P_TWOFA_CONFIRM`, `P_TWOFA_DISABLE`, `P_TWOFA_LOGIN`.
-* **Email verification (KrunkNative)**: an optional email at register (`["a", 0, [name, pass, ref,
+* **Email verification (Krunker Box Office)**: an optional email at register (`["a", 0, [name, pass, ref,
   email]]`) or later in the menu (`["cemail", email]`; a new address is stored unverified and
   voids older links) mails a link `<link_base>/auth/verify-email?token=<43 chars>` (GET, also
   `/api/verify-email`, an HTML page; tokens stored as sha256, 24 h, one use; the address must
@@ -1293,7 +1293,7 @@ It has no email flow at all: no email field, no verification, no reset by email,
   `publish` uploadM) -> `["po", null, "Verify your email to use this feature"]`. Default none
   (v7.1.4 parity).
 * **Not implemented (v7.1.4 has neither)**: password reset by email and 2FA recovery by email.
-* **Mail**: `knsvc/smtp.h`'s `kn_mailer` (3.10): "Verify your Krunker email", text + HTML, From
+* **Mail**: `knsvc/smtp.h`'s `kn_mailer` (3.10): "Verify your Krunker Box Office email", text + HTML, From
   `smtp.from`. Every mail is a `mail_log` row (queued -> sent with the Message-ID, or failed with
   the server's reply); log lines mask the address (`p***@example.org`); credentials and tokens are
   never logged or stored.
@@ -1309,7 +1309,7 @@ It has no email flow at all: no email field, no verification, no reset by email,
 | `smtp.port` | 465 implicit / 587 | |
 | `smtp.tls` | `auto` | `implicit` (465), `starttls`, `none` (no AUTH then), `auto` = by port |
 | `smtp.user` / `smtp.password` | | AUTH PLAIN / LOGIN (`smtp.auth`: `auto`, `plain`, `login`); prefer `KN_SMTP_PASSWORD` |
-| `smtp.from` | `Krunker <noreply@caan.edu>` | From header and envelope sender (`smtp.reply_to` optional) |
+| `smtp.from` | `Krunker Box Office <noreply@caan.edu>` | From header and envelope sender (`smtp.reply_to` optional) |
 | `smtp.verify_peer` / `smtp.ca_file` | `true` / | certificate checks |
 | `smtp.timeout_ms`, `smtp.retries`, `smtp.retry_delay_ms`, `smtp.queue_max` | 20000, 2, 5000, 256 | |
 | `accounts.email.link_base` | `brain.public_url` | base of the verify link |
@@ -1317,7 +1317,7 @@ It has no email flow at all: no email field, no verification, no reset by email,
 | `accounts.email.resend_cooldown_s` / `max_per_account_day` / `max_per_address_day` / `max_per_ip_hour` | 60 / 5 / 5 / 10 | |
 | `accounts.email.required` | false | register needs an email ("Email Required") |
 | `accounts.email.require_verified` | `[]` | gated features, list or `a,b` |
-| `accounts.twofa_issuer` | `Krunker` | the otpauth issuer |
+| `accounts.twofa_issuer` | `Krunker Box Office` | the otpauth issuer |
 
 Deployment: `KN_SMTP_*` from `~/.config/kn-secrets/smtp.env` or the deploy-kru CI secrets become
 `/etc/krunknative/smtp.env` (`deploy/ansible/README.md`).
@@ -1450,7 +1450,7 @@ ticket), `session` = the social session token, `name` reserved (guests stay
    ticket holders keep the ticket identity, session-only joins become guests.
 6. `player-join {lobbyId, clientId: jti, accountId}` releases the ticket's slot
    reservation; `player-leave` on disconnect.
-7. Resume (KrunkNative): an expired ticket whose `jti` this lobby admitted (READY) is accepted
+7. Resume (Krunker Box Office): an expired ticket whose `jti` this lobby admitted (READY) is accepted
    again until 30 min after that session's last connection ended (`accounts.c`
    `acc_resume_allowed`, at most 256 remembered): the transport reconnects of 5.3 used to end in
    `"Join key expired"` a few minutes into a match (the edges' logs: kn-rtc sessions failing,
@@ -1893,12 +1893,12 @@ Without a brain the guest stubs over the game connection are unchanged (uidiff h
 | Clans window (13) | windows[12] gen / sendReq / resp / kick / updReq / updRol / mangFunds / chngFunds / delReq (`client/src/ui/clan_ui.c`) | `["cln",1\|2,tag]` create / join request, `["cln",3]` my clan, `["cln",4,1]` -> `["clnL"]`, `["cln",5,id]`, `["cln",6,id,{r}]`, `["cln",7,kr,{wd}]`, `["clnR",id,1\|0]`; Clan War contracts (8) answer "Coming Soon" |
 | Mail window (30) | windows[29], mailListResponse / readMailResponse / updateMailCount | `["kml",tab]` -> `["kml",tab,rows]`, `["rml",id]` -> `["rml",[row]]`, `["raml"]`, push `["gmc",n]`; `#mailCount` 99+ |
 | 2FA at login | twoFAres / pick2FAkey / sub2FA (#twoFAPop grid) | password login -> `["c2fa",1]`; `["2fa",1,[cells]]` -> `["c2fa",2]` + `a` |
-| 2FA enable | act2FA (no markup in the shipped page: KrunkNative adds a row to the Account window's Settings tab) | `["2fa"]` -> `["c2fa",null,null,pattern]` |
+| 2FA enable | act2FA (no markup in the shipped page: Krunker Box Office adds a row to the Account window's Settings tab) | `["2fa"]` -> `["c2fa",null,null,pattern]` |
 | Daily reward (level >= 5) | cK / dd (#claimHolder timer, "Play 1 Game" until a round ended), claimReward (ad-gated upstream) | `["clm"]` -> `["clm",lastReward,funds]` |
 | Prize wheels (Store tab 0) | windows[13] tab 0, prizeWheel, spinButton/spinUI onclick, spinResponse | `["spin",i]` -> `["spin",null,rand,skin,funds,follow]`, `["unbx"]`. The canvas wheel is a white disc (no 2D canvas natively); the won item shows its preview PNG (`textures/previews/` from the asset tree, `make assets-import`; noimg fallback) |
-| Ranked (27), from the menu bar's Ranked button (after Server Finder) | v7.1.4 windows[26] (tabs, justCopied, region; gen() empty in v7: the body is KrunkNative's in v7's window classes), joinQueue / leaveQueue / updateQueueStatus, QueueManager | `/mm/queue/rating` (the Season tab's rank card), `/mm/queue/join` (token, region, party, ready, classIndex), `/mm/queue/poll` every 1 s, update-ready / update-class / kick / promote / leave; "Join" `{gameId,host,port,webUrl,clientId}` is joined with that ticket; Host Game refuses while queued or in a ranked match (`custom.host.ranked`). Status under CLICK TO PLAY. In the match: the comp menu (`#mMenuHolComp`, `client/src/ui/comp_ui.c`) |
+| Ranked (27), from the menu bar's Ranked button (after Server Finder) | v7.1.4 windows[26] (tabs, justCopied, region; gen() empty in v7: the body is Krunker Box Office's in v7's window classes), joinQueue / leaveQueue / updateQueueStatus, QueueManager | `/mm/queue/rating` (the Season tab's rank card), `/mm/queue/join` (token, region, party, ready, classIndex), `/mm/queue/poll` every 1 s, update-ready / update-class / kick / promote / leave; "Join" `{gameId,host,port,webUrl,clientId}` is joined with that ticket; Host Game refuses while queued or in a ranked match (`custom.host.ranked`). Status under CLICK TO PLAY. In the match: the comp menu (`#mMenuHolComp`, `client/src/ui/comp_ui.c`) |
 | Battle Pass (6) | v7.1.4 windows[5] (home / Challenges tabs, claims, purchasePop, skipLevelPop), the end screen's #endBPLayout (`client/src/ui/battlepass_ui.c`) | `["bpdl"]` -> `bpdl` + `bppd`, `["bpclm",id]` -> `bpclmr`, `["xstbp",1,code]` -> `purbp`, `["xstbpl",n]` -> `purbpl`; push `["bpEnd",tmpBPData]` after a commit (7.8). The daily (and weekly) challenges are its Challenges tab; the Challenges window (33) keeps map / weapon / nightmare |
-| Season stats | KrunkNative: the hub profile's "Season 7" stat tab, the leaderboards' Season / S7 Kills / S7 Wins buttons (`social_ui.c`) | `["sst",name]` -> `sst`; `["r","leaders","season_score"\|"season_kills"\|"season_wins",...]` |
+| Season stats | Krunker Box Office: the hub profile's "Season 7" stat tab, the leaderboards' Season / S7 Kills / S7 Wins buttons (`social_ui.c`) | `["sst",name]` -> `sst`; `["r","leaders","season_score"\|"season_kills"\|"season_wins",...]` |
 | playMap / `?play=` / `?game=` | playMap -> `/?play=`, autoHostMap | brain: a public lobby whose `meta.map`/`meta.m` matches, else `/mm/host-game` (`customMap` for non-catalogue maps: the game server fetches `/api/map-data`); offline: published maps are fetched (`/api/map-data?name=`) and hosted in the local game |
 
 ### 9.6 net-bridge `/native?target=`

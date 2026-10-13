@@ -1,9 +1,9 @@
-# Menu interactions: real Krunker v3.1.1 vs KrunkNative
+# Menu interactions: real Krunker v3.1.1 vs Krunker Box Office
 
 Every clickable element of `ui/index.html` and of the menu windows, driven in the
-real game (offline v3.1.1 server, headless Chromium over CDP) and in KrunkNative's
+real game (offline v3.1.1 server, headless Chromium over CDP) and in Krunker Box Office's
 native client (Xvfb + xdotool), both at 1280x720, guest (logged-out) state,
-2026-10-10. Each `<name>.png` is a pair: **left = real v3.1.1, right = KrunkNative
+2026-10-10. Each `<name>.png` is a pair: **left = real v3.1.1, right = Krunker Box Office
 native**, both scaled to 50 %. The world behind the menu differs (different maps /
 camera), compare the page. `web/<name>.png` are triptychs real | native | web
 build (`make web`, same 1280x720 viewport). `detail-*.png` are 1:1 crops.
@@ -26,7 +26,7 @@ links resolve against `https://krunker.io/` (the page's own site), and
 
 ## Page (`ui/index.html`)
 
-| Element | v3.1.1 (guest) | KrunkNative | Status | Pair |
+| Element | v3.1.1 (guest) | Krunker Box Office | Status | Pair |
 |---|---|---|---|---|
 | `.lgn` Login or Register / Profile item | `showWindow(5)` Account | same | OK | `w5-account` |
 | Shop / Challenges / Ranked | windows 14 / 33 / 27: LOGIN REQUIRED card (click: Account) | same | OK | `w14-store`, `w33-challenges`, `w27-ranked` |
@@ -56,7 +56,7 @@ links resolve against `https://krunker.io/` (the page's own site), and
 
 ## Change Loadout (window 3) and the pickers
 
-| Element | v3.1.1 (guest) | KrunkNative | Status | Pair |
+| Element | v3.1.1 (guest) | Krunker Box Office | Status | Pair |
 |---|---|---|---|---|
 | Rows per class | Attachment only if the primary has a non-forced attach slot, Reticle if it has one, Secondary greyed for classes without | was a fixed Triggerman template (wrong rows for 10 classes) | FIXED | `w6-pick-runngun` |
 | Class | window 6 | same | OK | `w6-class` |

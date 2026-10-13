@@ -78,17 +78,17 @@ cp "$repo/shared/lib/pcg_basic/LICENSE.txt" "$stage/licenses/pcg_basic.txt"
 sed -n '/^\/\*/,/\*\//p' "$repo/shared/lib/cJSON/cJSON.h" | sed -n '1,/\*\//p' > "$stage/licenses/cJSON.txt"
 
 cat > "$stage/LICENSE-NOTICE.txt" << 'EOF'
-KrunkNative dedicated server: license notice
-=============================================
+Krunker Box Office dedicated server: license notice
+====================================================
 
-KrunkNative (https://github.com/rebel10n/KrunkNative) is a native C port of Krunker.
-The KrunkNative repository does not currently carry a license file: no license to the
-KrunkNative source or binaries is granted by this package beyond what its authors
-state in the repository.
+Krunker Box Office (formerly KrunkNative, https://github.com/rebel10n/KrunkNative) is a
+native C port of Krunker. Its repository does not currently carry a license file: no license
+to the Krunker Box Office source or binaries is granted by this package beyond what its
+authors state in the repository.
 
 Krunker, its maps and other game content are the property of their owners
 (Yendis Entertainment / FRVR). The map files under assets/maps are included only so
-this server can run the game; they are not covered by any KrunkNative license.
+this server can run the game; they are not covered by any Krunker Box Office license.
 
 Third-party components compiled into server_bin, with their licenses in licenses/:
   cJSON      MIT                     licenses/cJSON.txt
@@ -112,8 +112,8 @@ case "$platform" in
 esac
 
 cat > "$stage/README.txt" << EOF
-KrunkNative dedicated server ($platform)
-========================================
+Krunker Box Office dedicated server ($platform)
+===============================================
 
 Version:   ${KN_DESCRIBE:-unknown}
 Commit:    ${KN_COMMIT:-unknown}
@@ -129,7 +129,7 @@ Run
   3. Open the game port (default 21015) for TCP and UDP. The server-info query
      answers on UDP of the same port:  python3 kn-query.py <host> 21015
 
-To be listed in the KrunkNative server browser set finder_url in cfg/server.cfg
+To be listed in the Krunker Box Office server browser set finder_url in cfg/server.cfg
 (https://matchmaker.krunk.io). Servers built from an old commit or speaking an older
 protocol are shown as "Outdated": download the current build again from
 https://github.com/rebel10n/KrunkNative/releases/tag/server-latest

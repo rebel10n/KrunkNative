@@ -17,7 +17,7 @@
 
 static void usage(FILE *f) {
     fprintf(f,
-        "kn_editor_mcp %s - Krunker map editor MCP server (KrunkNative)\n"
+        "kn_editor_mcp %s - Krunker map editor MCP server (Krunker Box Office)\n"
         "usage: kn_editor_mcp [options]          MCP over stdio (default)\n"
         "  --root DIR             KrunkNative checkout (assets, client_bin); default: auto-detect\n"
         "  --workspace DIR        scratch dir for new maps / prefab library (allowed for writes)\n"

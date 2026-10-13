@@ -1714,7 +1714,7 @@ static int try_join(void) {
     cJSON *welcome = NULL;
     char version[32];
     snprintf(version, sizeof(version), "%s", BUS_VERSION);
-    if (!edbus_client_connect(&B.up, &B.paths, "editor", "krunknative-editor", "KrunkNative Editor", version, 1500, &welcome)) return 0;
+    if (!edbus_client_connect(&B.up, &B.paths, "editor", "krunknative-editor", "Krunker Box Office Editor", version, 1500, &welcome)) return 0;
     B.self_id = (int) ed_json_num(welcome, "peer", 0);
     cJSON_Delete(welcome);
     B.mode = BUS_CLIENT;

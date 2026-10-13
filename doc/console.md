@@ -1,6 +1,6 @@
 # Developer console and chat commands
 
-KrunkNative ports the Krunker v3.1.1 **offline build's** developer console and its chat
+Krunker Box Office ports the Krunker v3.1.1 **offline build's** developer console and its chat
 commands one to one. Neither exists in the original game client, which sends every chat
 line raw ("ct"). They come from the reconstruction in the jail tree:
 
@@ -26,7 +26,7 @@ line raw ("ct"). They come from the reconstruction in the jail tree:
 Permissions match v3.1.1 PERMS: off by default, so everyone may run every command.
 `server_bin --perms` (or `PERMS=1`) restricts DEV commands to clients from 127.0.0.1 and
 clients `op`'d on the server CLI. The cheat commands (god/smite/noclip/kill) use the
-same rule, since KrunkNative has no premium accounts. A denial answers `notify` ("DEV
+same rule, since Krunker Box Office has no premium accounts. A denial answers `notify` ("DEV
 only" / "DEV or premium custom host only"), as v3.1.1 does; the mod's toast shows it.
 
 ## Local console commands (devConsole.ts `registerLocal`)
@@ -49,7 +49,7 @@ silent (only the `] line` echo), as in the mod.
 | quit | `window.close()` | closes the window (web: `window.close()`) |
 | reconnect | `location.reload()` | reconnects to the last server or lobby, also after `disconnect` (offline, or after a `disconnect` from the offline game: restarts it on the same map). The Reconnect bind (F5 by default, Settings > Controls > General) runs it natively; on the web that key stays `location.reload()`, and the address bar (`?game=<id>`, `?offline=1&map=<key>`, `?sandbox`) brings the reload back to the same game |
 | offline [map] | `playCustomMap()` + clearPingCounter | starts the embedded offline game, ping 0 (`--offline`, web `?offline=1`); a map (catalogue key, name or path under assets/maps) picks where it plays, like `--map` / `?map=` |
-| sandbox | – (v7.1.4: `?sandbox` / `?test` load `config.blankMap`) | KrunkNative: the offline game on the sandbox map, the catalogue's `Test` (maps/custom/Test.json, what the editor's Test plays with no map of its own); `--sandbox`, web `?sandbox` |
+| sandbox | – (v7.1.4: `?sandbox` / `?test` load `config.blankMap`) | Krunker Box Office: the offline game on the sandbox map, the catalogue's `Test` (maps/custom/Test.json, what the editor's Test plays with no map of its own); `--sandbox`, web `?sandbox` |
 | ahk | `IO AHK: <ahNum> (base: 29819)` | `IO AHK: 0 (base: 29819)` (the native protocol never rotates it) |
 | version / build / verison | `Version: jhiLQ` | same |
 | toggle var | sends `/var` | same |
@@ -127,7 +127,7 @@ custom host; the console and rcon always; offline always), with perms on **or** 
 | bot_config | [key=value …] | "Bot config: accuracy=100 attackTarget=true …" / "Bot config updated (k=v); N live bots updated." |
 | bot_difficulty, bot_diff | easy\|normal\|hard\|max\|number | "Bot difficulty: 3" / "Bot difficulty set to 1.8 (N live bots updated; applies to future bot_add)." (botDifficultyConfig: accuracy 25/50/85/100, targetDistance 1200/1200/1800/5000) |
 | bot_stop | [on\|off] | "Stopped N live bots; applies to future bot_add." / "Resumed …" (BOT_STOP_CONFIG / BOT_RESUME_CONFIG). No argument toggles. |
-| bot_start (bot_resume) | | KrunkNative: resumes bots after bot_stop ("Resumed N live bots; …") |
+| bot_start (bot_resume) | | Krunker Box Office: resumes bots after bot_stop ("Resumed N live bots; …") |
 | bot_mimic | [on\|off] | "Mimic-style follow mode set (N live bots updated)." / "Combat follow mode set (…)." (+ devConsole's mimicTarget: the bot copies its target's input frames) |
 
 The key=value options are BOT_CONFIG_TYPES with its aliases (`god`, `hp`, `skill`, `bhop`, …):
@@ -146,7 +146,7 @@ Bots are players: `players.add` with `isBot`, SKINS + SPAWN + an account-style P
 featured / premium chance), states, kills, leaderboard rows. Names come from names.js (80%
 handles, else colour + separator + noun), classes at random (no Rocketeer / Runner), a
 secondary, weapon / cosmetic skins from `assets/skins.json` (array index) under a rarity cap,
-lower rarities likelier. server.cfg `bots` / `bot_quota` / `bot_difficulty` (KrunkNative
+lower rarities likelier. server.cfg `bots` / `bot_quota` / `bot_difficulty` (Krunker Box Office
 addition; config.botLimit 16) keep or fill the lobby; the info query reports them as `bots`,
 never as `players`, and the coordinator only counts connections. Ranked lobbies get none.
 
@@ -164,12 +164,12 @@ given (v7 bot_add bots are level 0); cosmetics per slot with a chance; a bot kee
 scoreOnDeath are parsed but have no native effect; the sandbox Spawn Bot / Clear Bots keys
 (numpad + / -) are not bound.
 
-## Teleports (KrunkNative `tp` / `bring`)
+## Teleports (Krunker Box Office `tp` / `bring`)
 
 v3.1.1 has only the `tp` packet (the mod's Ctrl TP: a camera-ray hit). v7.1.4's admin menu
 moves players (`server/index.ts` handleAdminAction 4 "go to", 5 "bring", 9 "bring all", through
 `movePlayerTo` = `players.changePosition(p, x, y, z, doRecon, stopMomentum, dir, true)`) but has
-no console command for it. KrunkNative adds two, in `shared/src/chat_commands.c`, so chat, the
+no console command for it. Krunker Box Office adds two, in `shared/src/chat_commands.c`, so chat, the
 dev console, the server console, rcon and the offline game share them. Gate: `CHAT_PERM_HOST_DEV`
 like `bot_*` (DEV accounts, ops, the server's own machine, the custom host; the console and rcon
 always; offline always); everyone else gets the notify "Host or developer required".
@@ -213,7 +213,7 @@ Source-style nav mesh of the current map in 3D: `show_navmeshes` builds and show
 | `nav: overlay cleared` (info) | `off` |
 | `nav: renderer/scene not available (are you in a game?)` (error) | no map loaded |
 | `nav: no current map data captured yet` (error) | the map has no JSON |
-| `nav: no walkable ground under this map's spawns (nothing to draw)` (warn) | KrunkNative, after the first line, when the mesh is empty (v7 prints only "0 areas, 0 nodes") |
+| `nav: no walkable ground under this map's spawns (nothing to draw)` (warn) | Krunker Box Office, after the first line, when the mesh is empty (v7 prints only "0 areas, 0 nodes") |
 
 The mesh is v7's `buildGeneratedNavMesh` (`shared/navgen.ts` + the `extractBoxes` /
 `extractLadders` it uses from `shared/navmesh.ts`), ported to C in `shared/src/navgen.c`
@@ -239,10 +239,10 @@ on the new map; any other map change (rotation, a server's `map`) clears it, as 
 `ensureNavOverlayOwnerCurrent` does.
 
 v7's overlay state also holds a bot path group (`navOverlay.pathGroup`), but nothing ever
-fills it: `show_navmeshes` draws no bot paths in v7.1.4, so neither does KrunkNative. The
+fills it: `show_navmeshes` draws no bot paths in v7.1.4, so neither does Krunker Box Office. The
 entity bounding-box overlay is a separate command (`ent_bbox`), not part of this one.
 
-KrunkNative differences:
+Krunker Box Office differences:
 - Two v7.1.4 navgen bugs are fixed (`shared/src/navgen.c`). Each gave an empty mesh: v7's
   overlay reported "0 areas, 0 nodes, 0 obstacle links" and drew nothing.
   - navmesh.ts drops objects whose `l` / `col` key merely exists. The engine treats them as
@@ -263,7 +263,7 @@ KrunkNative differences:
   22 s on Shipwrecked). The C build (-O2) takes 2 to 30 ms on most maps and 0.1 to 0.2 s on
   Lagoon (50 000 nodes). The web build has no threads and builds inside the command.
 - In v7's offline sandbox, its bots get the generated mesh only while the overlay is on
-  (`OfflineNextBotManager.mapData`). KrunkNative's bots don't depend on the overlay: they
+  (`OfflineNextBotManager.mapData`). Krunker Box Office's bots don't depend on the overlay: they
   always path over `bot_nav.c`'s grid (see Bots). They do not use the generated mesh: v7's
   links climb up to 21 units (jumpHeight 18 + climbHeight 3) while a standing jump peaks near 14
   (jump 0.072, gravity 0.00015 + 0.000032 while rising),
@@ -278,11 +278,11 @@ native counterpart is `client_bin --offline <map>` with `KRUNKNATIVE_CAMERA` at 
 expected numbers in `shared/tests/navgen_test.c` come from v7's `navgen.ts` run under node (an
 esbuild bundle of `buildGeneratedNavMesh` + `findGeneratedNavPath`) on the same JSON.
 
-## Argument completion (KrunkNative extension)
+## Argument completion (Krunker Box Office extension)
 
 devConsole.ts completes only the command name: Tab fills the longest common prefix, and
 the hints list the commands that start with what you typed. Past the first word it
-shows a single row with the command's signature and description. KrunkNative keeps both
+shows a single row with the command's signature and description. Krunker Box Office keeps both
 and adds completion for arguments:
 
 - The hints list the command's signature row followed by the candidates for the argument
@@ -358,5 +358,5 @@ added to the game's list when it is picked.
   F5, included), the voice key, Ctrl TP clicks, gamepad presses and main.c's F11 / N.
   v3.1.1 still let F5 (reload) and F6 (editor) through. The console key (`) still closes the console from
   its own input, as in v3.1.1.
-- devConsole mirrors the browser's `console.*` output into the log. KrunkNative has no
+- devConsole mirrors the browser's `console.*` output into the log. Krunker Box Office has no
   JavaScript console, so only game lines appear.

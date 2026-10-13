@@ -11,7 +11,7 @@ kn_gameserver_enabled: false
 # Escape hatch: false keeps a host's units down regardless of kn_gameserver_enabled
 # (e.g. if its game ports cannot be opened). edge_firewall opens them on every edge.
 kn_gameserver_ports_open: true
-kn_gameserver_name_prefix: "KrunkNative {{ kn_edge_name | capitalize }}"
+kn_gameserver_name_prefix: "Krunker Box Office {{ kn_edge_name | capitalize }}"
 # Region id = the 2-letter code the client shows (SV LA CH VA: client/src/ui/servers_ui.c
 # k_regions; accounts.region_index); per host in the inventory.
 kn_gameserver_region: local

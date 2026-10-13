@@ -1034,7 +1034,7 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
     }
     if (!strcmp(name, "showPurchase") || !strcmp(name, "premiumPopup")) { // no payments in KrunkNative
         if (!account_get()) menu_show_window(5, 1);
-        else ui_alert("Purchases are not available in KrunkNative.");
+        else ui_alert("Purchases are not available in Krunker Box Office.");
         return 1;
     }
     if (!strcmp(name, "creatorCodeAction")) {

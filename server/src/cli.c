@@ -387,7 +387,7 @@ static void cli_cmd_status(const char *args) {
 
     const int mode_id = cli_current_mode_id();
 
-    server_log("KrunkNative server v%d.%d.%d, listening on port %u",
+    server_log(KN_PRODUCT_NAME " server v%d.%d.%d, listening on port %u",
                g_server_version.major, g_server_version.minor, g_server_version.patch,
                (unsigned int) g_server->config.listen_port);
     server_log("  build      %s", kn_build_string());

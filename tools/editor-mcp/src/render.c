@@ -515,7 +515,7 @@ char *render_spawn_shot(Ctx *ctx, Project *p, const double pos[3], const double 
 
 const ToolDef g_tools_render[] = {
     {"render_view", "Render a view",
-     "Render the map with KrunkNative's renderer (headless client_bin; live projects: the editor's renderer) and return a PNG. "
+     "Render the map with Krunker Box Office's renderer (headless client_bin; live projects: the editor's renderer) and return a PNG. "
      "Camera: position + target, or position + yaw/pitch (degrees), or none: frames ids (or the whole map) from yaw/pitch "
      "(default 45 / -30). fov degrees (default 70), ortho = orthographic half height, fog:false disables fog, width/height "
      "(default 1024x576, max 2048).",

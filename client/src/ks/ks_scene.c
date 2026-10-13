@@ -604,7 +604,7 @@ static KsValue sc_add_asset(KsScript *s, void *u, const KsValue *a, int n) {
         }
     } else if (fbx) {
         o->model_failed = 1;
-        ksc_log(1, "SCENE.addAsset(\"%s\"): FBX models are not supported by KrunkNative", raw);
+        ksc_log(1, "SCENE.addAsset(\"%s\"): FBX models are not supported by Krunker Box Office", raw);
     } else {
         snprintf(rel, sizeof(rel), "user-assets/%s/model.obj", digits);
         char *path = k ? concat(assets_path(), rel) : NULL;

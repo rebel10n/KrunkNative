@@ -5,7 +5,7 @@ Scope: everything player-facing (movement, classes, weapons, cosmetics, HUD, con
 settings, account) plus the model viewer. The map editor is out of scope; it gets its
 own survey.
 
-**Policy (user decision, 2026-10-12).** KrunkNative upgrades **in place** to Krunker
+**Policy (user decision, 2026-10-12).** Krunker Box Office upgrades **in place** to Krunker
 v7.1.4. v7.1.4 movement constants, weapon and class stats, settings and player
 features are adopted directly, with no v3.1.1 option. v3.1.1 is preserved on the
 `v3.1.1` branch/tag, and AGENTS.md's parity section now names v7.1.4. This document
@@ -45,8 +45,8 @@ Refs look like `v7 src/data/player.js:123`, `v3 src/data/players.js:456` and
   - 1.5 Controls, HUD, killcam, spectate, emotes/sprays/voice
   - 1.6 Status effects, perks and pickups
   - 1.7 Settings: every key in settings.js
-- 2 The viewer: v7.1.4, v3.1.1 and KrunkNative
-- 3 Gap analysis against KrunkNative (consolidated)
+- 2 The viewer: v7.1.4, v3.1.1 and Krunker Box Office
+- 3 Gap analysis against Krunker Box Office (consolidated)
 - 4 Implementation plan (six work packages)
 - 5 Appendix: bugs found, open questions
 
@@ -361,7 +361,7 @@ State renames that matter for recordings: `velX/velY/velZ` -> `velocity.{x,y,z}`
 
 Lean/bob math in procInputs is identical (v3 players.js:581-602, v7 player.js:959-968).
 
-### 1.1.6 Gap vs KrunkNative
+### 1.1.6 Gap vs Krunker Box Office
 
 | v7 item | KN status | Owning KN code |
 |---|---|---|
@@ -568,7 +568,7 @@ Scope: `src/data/classes.js`, `weapons.js`, `upgradeWeapons.js`, `weaponTypes.js
 v3.1.1 and v7.1.4, plus the client and server code that reads them. Method: both
 `weapons.js` tables were loaded under Node and diffed field by field (v3's nested
 `projectile: {..}` is flattened to v7's `pj_*` names). Every value below comes
-from that diff or from the cited line. Times are in ms in JS. KrunkNative (KN)
+from that diff or from the cited line. Times are in ms in JS. Krunker Box Office (KN)
 stores the same values in seconds (`rate 900` -> `.rate = 0.9f`).
 
 Tags: **[GAMEPLAY]** = changes shared stats or v3.1.1 behaviour; **[CLIENT]** =
@@ -954,7 +954,7 @@ v7 streaks, slots and airdrops are missing.
 
 ---
 
-### 1.2.6 Gap summary vs KrunkNative
+### 1.2.6 Gap summary vs Krunker Box Office
 
 | Item | KN status | Owning file(s) |
 |---|---|---|
@@ -983,7 +983,7 @@ v7 streaks, slots and airdrops are missing.
 
 ### 1.2.7 Gameplay-altering v7 changes (policy: adopt v7.1.4 in place)
 
-Policy (user decision, 2026-10-12): KrunkNative upgrades in place to v7.1.4.
+Policy (user decision, 2026-10-12): Krunker Box Office upgrades in place to v7.1.4.
 Every row below is adopted as v7 defines it, with no v3.1.1 option; v3.1.1
 stays on the `v3.1.1` branch/tag. The list says which changes alter v3.1.1
 gameplay, so implementers know which tests and recordings to redo.
@@ -1388,7 +1388,7 @@ KN's `ui/index.html` is the v3.1.1 HUD. None of the new v7 HUD ids exist in it, 
 | Voice packets | C->S `"vc", dataUrl`; S->C `"vc", dataUrl, alias, sid`; server drops it if there is no player or it is over 256 KiB, then relays to everyone (`KN shared/include/voice.h:3-17`) | C->S **`"vc", dataUrl, channel, micVolume, micQuality`** (`v7 src/index.js:2288-2291`); S->C **`"vc", dataUrl, name, sid, channel, volume, isFinal, accountId`** (`v7 server/index.ts:4241-4263`: must start with `data:audio/`, ≤ 750 000 chars, volume clamped 0-1). The receiver plays it only if `channel == -1` or matches its own channel, and scales by `micVolume` (`v7 src/index.js:2275-2287`) | [GAMEPLAY] | v3 (`KN shared/src/voice.c`, `server/src/net.c:868-877`) |
 | Voice playback | Howl queue per speaker; clips over `voiceChatMaxLength` 0.65 s x 1.2 are dropped (`v3 src/index.js:1610-1648`) | Same queue and limits (`v7 src/config.js:2075-2076`); **spatial/proximity** mode `voiceChatType` 1 places the Howl at the speaker's head with `refDistance = voiceDistance*5` (slider 1-10, default 5 -> 25), rolloff 1; `muteSpec`; mute list; `dialogueVolume`, `micVolume` settings (`v7 src/index.js:2221-2273`, `v7 src/libs/settings.js:2807-2914,2990`) | [CLIENT] | v3 present (`KN client/src/voice.c:989`); proximity, channels and mute missing |
 
-### 1.5.9 Gap summary for KrunkNative
+### 1.5.9 Gap summary for Krunker Box Office
 
 Biggest gaps, in rough priority order. Each one is adopted v7 behaviour; KN keeps no v3 fallback.
 
@@ -1478,7 +1478,7 @@ How to read the table:
 - **Default**: `X (mobile Y)` means v7 uses `isMobile ? Y : X`. `fov` is `config.fov + 20` with `config.fov = 80`.
 - **v3 -> v7**: NEW, SAME, CHANGED (the changes are listed) or REMOVED. "mobile default" means only the `isMobile` default changed and the desktop default is the same as v3. "per-weapon" means v7 marks the key `perWep`/`perWepG`. v7 `init()` (settings.js:4296) then clones it into hidden `key_<weaponIndex>` entries, edited through `gpSetts`/`vmSetts` = "Per Weapon". KN has no per-weapon storage.
 - **Scope**: [GAMEPLAY] means the value leaves the client: it goes into the `en` (enter) packet, the `vc` voice packet or the `prmA` dev packet, or it changes the input stream the server simulates (`netRate`). Everything else is [CLIENT].
-- **KrunkNative**: *present* = the key is in KN's settings UI/store (`ui/windows/settings-tab-*.html`, `client/src/ui/ui_settings.c`) and the engine uses it. The owning consumer is named; most render/HUD keys go through the `RS_TABLE` in `client/src/ui/ui_render_settings.c`. *present (needs v7 change)* = it works, but KN still has the v3 default/range/step/options or only a global (not per-weapon) value. *partial* = KN stores and shows the key but nothing reads it (a no-op), or a KN-specific setting covers it. *missing* = no key and no behaviour. *n/a* = staff/dev only. "(needs: X)" marks a missing setting that only makes sense once feature X exists.
+- **Krunker Box Office**: *present* = the key is in KN's settings UI/store (`ui/windows/settings-tab-*.html`, `client/src/ui/ui_settings.c`) and the engine uses it. The owning consumer is named; most render/HUD keys go through the `RS_TABLE` in `client/src/ui/ui_render_settings.c`. *present (needs v7 change)* = it works, but KN still has the v3 default/range/step/options or only a global (not per-weapon) value. *partial* = KN stores and shows the key but nothing reads it (a no-op), or a KN-specific setting covers it. *missing* = no key and no behaviour. *n/a* = staff/dev only. "(needs: X)" marks a missing setting that only makes sense once feature X exists.
 - KN's settings UI is the v3.1.1 page. Its 193 `setSetting("...")` keys match the 193 v3 settings.js keys exactly, so no v7-only key exists in KN under its v7 name. KN also has its own Client tab (`client/src/ui/ui_client_settings.c`: `rawInput`, `vsync`, `windowMode`, `discordRPC`, `audioBackend`, ...), which is not part of settings.js.
 - v7 also adds a *basic/advanced* settings view: 85 keys carry `sType: "advanced"` and are hidden in basic mode, which has fewer tabs (v7 `src/index.js:4020-4035`). KN only has the v3 single (advanced-style) view.
 
@@ -1486,14 +1486,14 @@ How to read the table:
 
 #### `local`
 
-| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | KrunkNative | Ref |
+| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `defaultRegion` | Default Region | select | regionCache | region list | region used by matchmaking/server list | SAME | [CLIENT] | present: servers_ui.c, ui_client_settings.c | v7 src/libs/settings.js:19; v3 src/libs/settings.js:35 |
 | `lang` | Language | select | browser locale | locale list | UI locale (i18n tables) | SAME | [CLIENT] | partial: stored only; KN UI is English-only | v7 src/libs/settings.js:37; v3 src/libs/settings.js:55 |
 
 #### `network`
 
-| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | KrunkNative | Ref |
+| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `netRate` | Network Rate (Hz) | select | 3 (mobile 1) | 0=30, 1=60, 2=120, 3=144, 4=240, 5=360 | client input sample/send rate (Hz) in the game loop | NEW | [GAMEPLAY] | missing: recon.c samples one input per frame (v3 behaviour) | v7 src/libs/settings.js:55 |
 | `lagComp` | Lag Compensation | slider | 1 | 0..1 step 0.1 | sent in `en` packet; server lag-comp amount | SAME | [GAMEPLAY] | present: ui_render_settings.c -> main.c ENT lag_comp | v7 src/libs/settings.js:74; v3 src/libs/settings.js:75 |
@@ -1502,14 +1502,14 @@ How to read the table:
 
 #### `serverb`
 
-| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | KrunkNative | Ref |
+| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `oldBrowser` | Legacy Browser | checkbox | true |  | legacy server browser layout | CHANGED: default false->true; cat interface->serverb; label "Use Old Browser"->"Legacy Browser" | [CLIENT] | partial: stored only | v7 src/libs/settings.js:115; v3 src/libs/settings.js:547 |
 | `defaultRegionOnly` | Default Region Only | checkbox | false |  | server browser lists default region only | NEW | [CLIENT] | missing: servers_ui.c | v7 src/libs/settings.js:126 |
 
 #### `experimental`
 
-| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | KrunkNative | Ref |
+| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `rawMouse` | Raw Mouse Input | checkbox | false |  | raw/unaccelerated mouse input | NEW | [CLIENT] | partial: KN Client tab `rawInput` (ui_client_settings.c) | v7 src/libs/settings.js:137 |
 | `flickClamp` | Mouse Flick Fix | checkbox+slider | 200 | 0..500 step 10 | max per-event mouse delta when flick fix on | SAME | [CLIENT] | partial: stored only | v7 src/libs/settings.js:148; v3 src/libs/settings.js:118 |
@@ -1520,14 +1520,14 @@ How to read the table:
 
 #### `kpd`
 
-| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | KrunkNative | Ref |
+| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `kpdVision` | KPD Vision | checkbox (paired, hidden) | true |  | KPD (staff) wallhack vision toggle | NEW | [CLIENT] | n/a (needs: KPD): staff only | v7 src/libs/settings.js:208 |
 | `kpdVisionCol` | KPD Vision | checkbox+color | #00ffff |  | KPD vision color | NEW | [CLIENT] | n/a (needs: KPD): staff only | v7 src/libs/settings.js:222 |
 
 #### `dev`
 
-| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | KrunkNative | Ref |
+| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `forceUpdate` | Force Update Skins | checkbox | true |  | dev: push skin changes live (prmA) | NEW | [GAMEPLAY] | n/a (needs: dev): dev only | v7 src/libs/settings.js:237 |
 | `forceRegen` | Always Regenerate Player | checkbox | false |  | dev: regenerate player on skin update | NEW | [GAMEPLAY] | n/a (needs: dev): dev only | v7 src/libs/settings.js:246 |
@@ -1537,7 +1537,7 @@ How to read the table:
 
 #### `gameplay`
 
-| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | KrunkNative | Ref |
+| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `gpSetts` | Gameplay Settings | select | 0 | 0=All, 1=Per Weapon | edit sensitivities for all / per weapon | NEW | [CLIENT] | missing (needs: per-weapon settings): no per-weapon settings | v7 src/libs/settings.js:2396 |
 | `sensitivityX` | X Sensitivity | slider | 1 (mobile 1.4) | 0.1..15 step 0.1 | mouse X sens (per weapon) | CHANGED: mobile default; per-weapon | [CLIENT] | present (needs v7 change): ui_settings.c; global only | v7 src/libs/settings.js:2414; v3 src/libs/settings.js:1421 |
@@ -1550,7 +1550,7 @@ How to read the table:
 
 #### `controller`
 
-| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | KrunkNative | Ref |
+| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `disableCons` | Disable Controllers | checkbox | false |  | ignore gamepads | NEW | [CLIENT] | missing: gamepad.c | v7 src/libs/settings.js:2517 |
 | `sensitivityXCntrl` | X Sensitivity | slider | 4 | 0.1..15 step 0.1 | stick X sens (*5) | CHANGED: default 1->4 | [CLIENT] | present (needs v7 change): ui_settings.c -> gamepad.c | v7 src/libs/settings.js:2529; v3 src/libs/settings.js:1512 |
@@ -1567,7 +1567,7 @@ How to read the table:
 
 #### `mobile`
 
-| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | KrunkNative | Ref |
+| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `sensitivityXMbl` | X Sensitivity | slider | 1.4 | 0.1..15 step 0.1 | touch X sens (*4) | CHANGED: default 1->1.4 | [CLIENT] | present (needs v7 change): ui_mobile.c | v7 src/libs/settings.js:2678; v3 src/libs/settings.js:1624 |
 | `sensitivityYMbl` | Y Sensitivity | slider | 1.4 | 0.1..15 step 0.1 | touch Y sens (*4) | CHANGED: default 1->1.4 | [CLIENT] | present (needs v7 change): ui_mobile.c | v7 src/libs/settings.js:2693; v3 src/libs/settings.js:1637 |
@@ -1579,7 +1579,7 @@ How to read the table:
 
 #### `controls` (hidden in UI)
 
-| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | KrunkNative | Ref |
+| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `scoreBoardTrigger` | InGame Leaderboard Trigger Type | select | 1 | 0=Press (Toggle), 1=Continuous (Hold) | leaderboard key toggle vs hold | NEW | [CLIENT] | missing: ui_controls.c hold only | v7 src/libs/settings.js:4265 |
 | `voiceChatTrigger` | Voicechat Trigger Type | select | 1 | 0=Press (Toggle), 1=Continuous (Hold) | voice key toggle vs hold | NEW | [CLIENT] | missing (needs: voice v7): voice.c | v7 src/libs/settings.js:4280 |
@@ -1588,7 +1588,7 @@ How to read the table:
 
 #### `interface`
 
-| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | KrunkNative | Ref |
+| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `scaleUI` | UI Scale | checkbox+slider | 0.7 (mobile 0.9) | 0.1..1 step 0.1 | menu/HUD scale | CHANGED: default 0.8->0.7 (mobile 0.9) | [CLIENT] | present (needs v7 change): menu_ui.c, nametags.c, vfx.c | v7 src/libs/settings.js:747; v3 src/libs/settings.js:487 |
 | `uiScaling` | UI Scale | checkbox (paired, hidden) | true |  | enable UI scaling | SAME | [CLIENT] | present: menu_ui.c, social_ui.c | v7 src/libs/settings.js:765; v3 src/libs/settings.js:507 |
@@ -1637,7 +1637,7 @@ How to read the table:
 
 #### `minimap`
 
-| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | KrunkNative | Ref |
+| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `showMinimap` | Show Minimap | checkbox | true |  | minimap on/off | NEW | [CLIENT] | missing (needs: minimap): no minimap | v7 src/libs/settings.js:1384 |
 | `minimapScale` | Minimap Scale | slider | 1 | 0.5..1.5 step 0.1 | minimap size | NEW | [CLIENT] | missing (needs: minimap): no minimap | v7 src/libs/settings.js:1398 |
@@ -1646,7 +1646,7 @@ How to read the table:
 
 #### `medals`
 
-| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | KrunkNative | Ref |
+| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `showMedals` | Show Medals | checkbox | true |  | medal popups | CHANGED: cat interface->medals | [CLIENT] | present: hud_popups.c | v7 src/libs/settings.js:1440; v3 src/libs/settings.js:829 |
 | `classicMedals` | Classic Medals | checkbox | false |  | classic (v3-style) medal display | NEW | [CLIENT] | missing (needs: v7 medals): KN only has classic medals | v7 src/libs/settings.js:1451 |
@@ -1659,7 +1659,7 @@ How to read the table:
 
 #### `crosshair`
 
-| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | KrunkNative | Ref |
+| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `crosshairSho` | Type | select | 1 | 0=Off, 1=Dynamic, 2=Shapes, 3=Layered, 4=Image, 5=Precision | crosshair type | CHANGED: labels 1 Default->Dynamic, 2 Custom->Shapes | [CLIENT] | present: hud_ui.c | v7 src/libs/settings.js:1669; v3 src/libs/settings.js:1049 |
 | `crosshairStyle` | Style | select | 0 | 0=Cross, 1=Hollow Circle, 2=Solid Circle, 3=Hollow Square, 4=Solid Square | crosshair preset shape | SAME | [CLIENT] | present: hud_ui.c | v7 src/libs/settings.js:1727; v3 src/libs/settings.js:1116 |
@@ -1679,7 +1679,7 @@ How to read the table:
 
 #### `crosshairm`
 
-| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | KrunkNative | Ref |
+| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `crosshairShoM` | Type | select | 3 | 0=Off, 1=Shapes, 2=Image, 3=Precision | throw crosshair type (melee canThrow, not ADS) | NEW | [CLIENT] | missing (needs: throw crosshair): no throw crosshair (knife can throw) | v7 src/libs/settings.js:1953 |
 | `crosshairStyleM` | Style | select | 0 | 0=Cross, 1=Hollow Circle, 2=Solid Circle, 3=Hollow Square, 4=Solid Square | throw crosshair preset | NEW | [CLIENT] | missing (needs: throw crosshair): no throw crosshair (knife can throw) | v7 src/libs/settings.js:2009 |
@@ -1699,7 +1699,7 @@ How to read the table:
 
 #### `hitmarker`
 
-| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | KrunkNative | Ref |
+| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `hitm` | Show | checkbox | true |  | hitmarker on/off | SAME | [CLIENT] | present: hud_ui.c | v7 src/libs/settings.js:2231; v3 src/libs/settings.js:1275 |
 | `hitmCol` | Color | color | #FFFFFF |  | hitmarker color | SAME | [CLIENT] | present: hud_ui.c | v7 src/libs/settings.js:2243; v3 src/libs/settings.js:1285 |
@@ -1715,7 +1715,7 @@ How to read the table:
 
 #### `chat`
 
-| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | KrunkNative | Ref |
+| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `shwChat` | Show Chat Box | select | 0 | 0=Always, 1=While Focused, 2=Off | chat box visibility | SAME | [CLIENT] | present: ui_controls.c | v7 src/libs/settings.js:1546; v3 src/libs/settings.js:934 |
 | `chatFilter` | Profanity Filter | checkbox | false |  | profanity filter | SAME | [CLIENT] | partial: stored only | v7 src/libs/settings.js:1562; v3 src/libs/settings.js:949 |
@@ -1731,7 +1731,7 @@ How to read the table:
 
 #### `quality`
 
-| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | KrunkNative | Ref |
+| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `resolution` | Resolution | slider | 0.6 (mobile 0.4) | 0.1..2 step 0.1 | render scale (setResMlt) | CHANGED: mobile default | [CLIENT] | present: ui_render_settings.c -> render_target.c | v7 src/libs/settings.js:264; v3 src/libs/settings.js:158 |
 | `updateRate` | Frame Cap | slider | 0 | 0..1200 step 10 | frame cap (0 = unlimited, min 10) | SAME | [CLIENT] | present: ui_render_settings.c | v7 src/libs/settings.js:284; v3 src/libs/settings.js:172 |
@@ -1765,13 +1765,13 @@ How to read the table:
 
 #### `post`
 
-| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | KrunkNative | Ref |
+| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `postProcessing` | Post Processing | checkbox | true (mobile false) |  | post FX composer | CHANGED: mobile default; cat quality->post | [CLIENT] | present: ui_render_settings.c (no visible pass, as v3) | v7 src/libs/settings.js:736; v3 src/libs/settings.js:219 |
 
 #### `editing`
 
-| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | KrunkNative | Ref |
+| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `hudHealthHigh` | HUD Health High | color | #9eeb56 |  | HUD HP bar color (full) | CHANGED: type fixed switch->color | [CLIENT] | present: hud_spectate.c | v7 src/libs/settings.js:3500; v3 src/libs/settings.js:2059 |
 | `hudHealthLow` | HUD Health Low | color | #eb5656 |  | HUD HP bar color (damaged) | SAME | [CLIENT] | present: hud_spectate.c | v7 src/libs/settings.js:3511; v3 src/libs/settings.js:2067 |
@@ -1814,7 +1814,7 @@ How to read the table:
 
 #### `gameprivacy`
 
-| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | KrunkNative | Ref |
+| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `streamMode` | Streamer Mode | checkbox | false |  | streamer mode (hide names/ids) | SAME | [CLIENT] | present: nametags.c, streamer.c | v7 src/libs/settings.js:3002; v3 src/libs/settings.js:1813 |
 | `anonMode` | Anonymous Mode | checkbox | false |  | anonymous flag in `en` | SAME | [GAMEPLAY] | partial: stored only; not sent | v7 src/libs/settings.js:3017; v3 src/libs/settings.js:1825 |
@@ -1828,7 +1828,7 @@ How to read the table:
 
 #### `viewmodel`
 
-| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | KrunkNative | Ref |
+| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `vmSetts` | View Model Settings | select | 0 | 0=All, 1=Per Weapon | edit viewmodel for all / per weapon | NEW | [CLIENT] | missing (needs: per-weapon settings): no per-weapon settings | v7 src/libs/settings.js:3127 |
 | `fov` | Field of View (FOV) | slider | 100 | 60..150 step 5 | camera FOV (per weapon) | CHANGED: default 90->100; label "Field of View"->"Field of View (FOV)"; per-weapon | [CLIENT] | present (needs v7 change): ui_settings.c; global only | v7 src/libs/settings.js:3145; v3 src/libs/settings.js:1837 |
@@ -1857,7 +1857,7 @@ How to read the table:
 
 #### `mods`
 
-| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | KrunkNative | Ref |
+| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `canLoadMods` | Load Mods | checkbox | true |  | allow mods | SAME | [CLIENT] | partial: stored only | v7 src/libs/settings.js:3978; v3 src/libs/settings.js:2272 |
 | `canChangeLogo` | Allow Logo Changes | checkbox | true |  | mods may change logo | SAME | [CLIENT] | partial: stored only | v7 src/libs/settings.js:3989; v3 src/libs/settings.js:2281 |
@@ -1883,7 +1883,7 @@ How to read the table:
 
 #### `audio`
 
-| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | KrunkNative | Ref |
+| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `sound` | Master Volume | slider | 0.8 | 0..1 step 0.01 | master volume | CHANGED: step 0.1->0.01 | [CLIENT] | present (needs v7 change): audio.c | v7 src/libs/settings.js:2775; v3 src/libs/settings.js:1707 |
 | `ambientVolume` | Ambient Volume | slider | 1 | 0..1 step 0.01 | ambient volume | CHANGED: step 0.1->0.01 | [CLIENT] | present (needs v7 change): audio.c | v7 src/libs/settings.js:2792; v3 src/libs/settings.js:1721 |
@@ -1903,7 +1903,7 @@ How to read the table:
 
 ### Removed in v7 (v3.1.1 settings with no v7 entry)
 
-| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | KrunkNative | Ref |
+| Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `servSendR` | High Tickrate | checkbox | false |  | "High Tickrate" flag in ENT | REMOVED | [GAMEPLAY] | partial: stored only; not sent | v3 src/libs/settings.js:98 |
 | `xpBarCol` | XP Bar Color | color | #FBC02D |  | in-game XP bar color | REMOVED | [CLIENT] | present: hud_ui.c | v3 src/libs/settings.js:912 |
@@ -1966,9 +1966,9 @@ The 40 "needs v7 change" rows break down as:
 - Per-weapon settings framework: `gpSetts`, `vmSetts` + the 21 per-weapon keys. Basic/advanced settings view: `sType` (85 keys).
 - KPD/dev, not needed for players: `kpdVision`, `kpdVisionCol`, `forceUpdate`, `forceRegen`, `extraBan`.
 
-## 2. The viewer: v7.1.4, v3.1.1 and KrunkNative
+## 2. The viewer: v7.1.4, v3.1.1 and Krunker Box Office
 
-Sections 2.1-2.6 describe the v7.1.4 viewer, 2.7 the v3.1.1 viewer and the v3 -> v7 diff, 2.8 KrunkNative's viewer and its gaps.
+Sections 2.1-2.6 describe the v7.1.4 viewer, 2.7 the v3.1.1 viewer and the v3 -> v7 diff, 2.8 Krunker Box Office's viewer and its gaps.
 
 ### 2.1 Page, launch and data sources
 
@@ -2127,13 +2127,13 @@ Dev config editors (f453 cosmetics, f454 weapons, **new**, :1355-1705). They edi
 | Zip | zip.js callback API + zip-ext.js | zip.js `ZipReader` promises + fflate; models of any of the 4 formats |
 | Embedded API | none | `init()` returns applyOptions/updatePlayer/... (dead in this build) |
 
-### 2.8 KrunkNative's viewer
+### 2.8 Krunker Box Office's viewer
 
 #### 2.8.1 What it implements
 
-KrunkNative's viewer is a **faithful port of the v3.1.1 viewer**, not v7. The data, GUI and behaviour are v3's, and the code comments quote v3 identifiers (`E`, `Z`, `F`, `G`, `H`, `W`, `U`, `$`, `K`, `J`, `Q`).
+Krunker Box Office's viewer is a **faithful port of the v3.1.1 viewer**, not v7. The data, GUI and behaviour are v3's, and the code comments quote v3 identifiers (`E`, `Z`, `F`, `G`, `H`, `W`, `U`, `$`, `K`, `J`, `Q`).
 
-| Aspect | KrunkNative | Ref |
+| Aspect | Krunker Box Office | Ref |
 |---|---|---|
 | Launch (native) | `client_bin --viewer [query]` (query optional, without `?`). `app_mode_parse_args` strips `--viewer` from argv; a `viewer.html` link inside the game (Mods window "Model Viewer", `ui/windows/4.html`) is routed through `parse_page_url` to `APP_MODE_VIEWER`. No Makefile or CMake target mentions the viewer | KN client/src/app_mode.c:115-130, 245-275; client/src/main.c:213, 375, 602 |
 | Launch (web) | `viewer.html?<query>`: `web_start_page` takes the mode from `location.pathname` and the query from `location.search`. (The `index.html?page=viewer` route in the viewer.c header comment is not implemented in app_mode.c; the comment looks stale) | KN client/src/app_mode.c:318-345; client/src/viewer/viewer.c:3 |
@@ -2213,7 +2213,7 @@ Legend: **present** = matches v7; **partial** = the v3 version exists but v7 cha
 8. **dat.gui port**: the v7 dev editors need number (slider/step/min/max) and colour controllers plus `addColor` in `client/src/viewer/viewer_gui.c`. A clipboard write is also needed for Export Config.
 9. **Store item view**: v7's item window embeds the showcase page in an iframe. KN would need either an embedded viewer surface in the game page or a separate scene pass, which depends on the store/inventory UI work.
 
-## 3. Gap analysis against KrunkNative (consolidated)
+## 3. Gap analysis against Krunker Box Office (consolidated)
 
 The per-item tables live in each section: 1.1.6 (movement), 1.2.6 (combat), 1.3.1
 and 1.4.6 (cosmetics and account), 1.5 and 1.5.9 (controls and HUD), 1.6 (effects),
@@ -2480,7 +2480,7 @@ its tests, and the [GAMEPLAY] items that break existing tests.
   from v7 references; the v3 baselines stay on the `v3.1.1` tag.
 - **Part 2c (landed):** badges on nametags and the menu class tag (privacy settings), the badge
   collection popup, select / claim and the auto-awarded Nuclear badges; v7 challenges (window 33
-  with KrunkNative's Daily / Weekly sections, map / weapon / nightmare categories, the end
+  with Krunker Box Office's Daily / Weekly sections, map / weapon / nightmare categories, the end
   screen's completed cards and reward skins); v7's getLevelProg; v7's getClanCol (no rank /
   challenge colours); per-match medal counts (`NET_PACKET_END_MEDALS` 243, the end screen's
   Medals tab) and per-account medal counts (profile "Medals" stat tab). The game server tallies
@@ -2578,7 +2578,7 @@ its tests, and the [GAMEPLAY] items that break existing tests.
    - `specMiniMap` hides / shows the minimap while spectating (a session toggle like
      `showSpectatorNameTags`) instead of setting the missing `specMiniMap` setting.
    - Related, also fixed in part 2a: v7's `io_addMedal` queues a repeated medal with count 1
-     whatever count it came with; KrunkNative keeps the count (`client/src/ui/hud_popups.c`).
+     whatever count it came with; Krunker Box Office keeps the count (`client/src/ui/hud_popups.c`).
 4. **GLTF dependency and v7 assets.** 22 animated items and the pets are GLTF/GLB/FBX.
    Recommendation: adopt `cgltf` (single header, MIT) for GLTF/GLB only, and skip FBX
    unless an item needs it. The v7 model set (hats 510, body 305, back 171, waist 92,

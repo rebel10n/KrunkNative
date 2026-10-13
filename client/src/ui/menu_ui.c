@@ -928,7 +928,7 @@ void menu_show_window(const int id, const int force) {
         return;
     }
     if (!ui_window_key(id)) {
-        menu_log("window %d is not available in KrunkNative", id);
+        menu_log("window %d is not available in Krunker Box Office", id);
         return;
     }
     const int was_open = menu_window_is_open();

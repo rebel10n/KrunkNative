@@ -256,7 +256,7 @@ static const StaticResource k_resources[] = {
     {"krunker://prefabs", "prefabs", "Prefab catalog", "Every prefab (v3.1.1 + v7.1.4) with flags, default size and allowed properties", "application/json"},
     {"krunker://properties", "properties", "Object property schema", "Friendly name, map key, type, range and availability of every object property", "application/json"},
     {"krunker://textures", "textures", "Textures", "Texture list (t index / name, variants)", "application/json"},
-    {"krunker://triggers", "triggers", "Trigger spec", "Trigger events, actions, conditions and emitter sounds (v7.1.4; native = simulated by KrunkNative)", "application/json"},
+    {"krunker://triggers", "triggers", "Trigger spec", "Trigger events, actions, conditions and emitter sounds (v7.1.4; native = simulated by Krunker Box Office)", "application/json"},
     {"krunker://catalog", "catalog", "Map catalog", "Official and community maps shipped in assets/maps", "application/json"},
     {"krunker://config", "config", "Map settings schema", "Top-level map keys and the game / server config lists", "application/json"},
     {"krunker://limits", "limits", "Limits", "Object / spawn / trigger / size limits (v7.1.4)", "application/json"},
@@ -488,8 +488,8 @@ static cJSON *rpc_error(const cJSON *id, const int code, const char *message) {
 }
 
 static const char *k_instructions =
-    "Krunker map editor (KrunkNative kn_editor_mcp). Work on projects: local map files (map_open / map_new) and, when a "
-    "KrunkNative editor runs with its bus (client_bin --editor --mcp-bus), live editor projects (projects_list). Every tool "
+    "Krunker map editor (Krunker Box Office kn_editor_mcp). Work on projects: local map files (map_open / map_new) and, when a "
+    "Krunker Box Office editor runs with its bus (client_bin --editor --mcp-bus), live editor projects (projects_list). Every tool "
     "takes an optional `project` (id, path, basename or map name; default: the focused one). Objects have stable ids "
     "(objects_query / object_get); all edits are batched, validated against the prefab schema (krunker://prefabs) and undoable "
     "(undo / redo / history). Coordinates: Krunker units, y up, p is the bottom centre of an object, rotations in radians. "
@@ -511,7 +511,7 @@ static cJSON *handle_initialize(const cJSON *params) {
     cJSON_AddObjectToObject(caps, "logging");
     cJSON *info = cJSON_AddObjectToObject(r, "serverInfo");
     cJSON_AddStringToObject(info, "name", "kn_editor_mcp");
-    cJSON_AddStringToObject(info, "title", "Krunker Map Editor (KrunkNative)");
+    cJSON_AddStringToObject(info, "title", "Krunker Map Editor (Krunker Box Office)");
     cJSON_AddStringToObject(info, "version", KN_MCP_VERSION);
     cJSON_AddStringToObject(r, "instructions", k_instructions);
     const cJSON *client = js_get(params, "clientInfo");

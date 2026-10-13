@@ -17,6 +17,8 @@ links, with the transformations documented in ``ui/README.md``:
 - ``<canvas id="canvas">`` (the web build's WebGL target) becomes the first body child,
   ``css/krunknative.css`` + ``css/hud.css`` (ours) are linked after Krunker's stylesheets
   and ``js/kn-shim.js`` + ``js/loader.js`` (web glue) load before ``</body>``.
+- the page ``<title>`` is the product name, ``Krunker Box Office`` (v7: ``Krunker``; the web
+  build's tab and bookmarks).
 - the "Experiments" footer link (``abTestsPopup()``, v7's A/B test opt-in popup) and the
   separator after it are dropped from ``#termsInfo`` (intentional difference: KrunkNative
   runs no A/B tests), so Contact / Terms / Changelog stay evenly spaced.
@@ -69,6 +71,7 @@ AB_TESTS_LINK_RE = re.compile(r'<span class="terms"[^>]*onclick="abTestsPopup\(\
 
 def transform_index(html):
     html = AB_TESTS_LINK_RE.sub("", html)
+    html = re.sub(r"<title>[^<]*</title>", "<title>Krunker Box Office</title>", html, count=1)
     html = re.sub(r"<script\b[^>]*>.*?</script>\s*", "", html, flags=re.S | re.I)
     html = re.sub(r"<!--.*?-->\s*", "", html, flags=re.S)
     html = re.sub(r"<meta property=\"og:[^>]*>\s*", "", html)

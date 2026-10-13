@@ -115,7 +115,7 @@ cmd_up() {
                 --host 127.0.0.1 --port "$port" --custom ${web:+--web-url "$web"} --quiet
         else
             start "game$i" "$SERVER_BIN" --headless --port "$port" --node-id "$node" --region "$REGION" \
-                --name "KrunkNative $node" --public-host 127.0.0.1 --public-port "$port" --brain "$BRAIN_URL" \
+                --name "Krunker Box Office $node" --public-host 127.0.0.1 --public-port "$port" --brain "$BRAIN_URL" \
                 ${web:+--gameserver.web_url="$web"} "${EXTRA[@]}"
         fi
     done

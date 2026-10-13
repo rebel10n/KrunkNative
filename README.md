@@ -1,6 +1,8 @@
-# KrunkNative
+# Krunker Box Office
 
 Krunker.io - except it's awesome. A rewrite of the game in native C using minimal libraries, focused on freedom and performance.
+
+Krunker Box Office was formerly called KrunkNative. The repository, the binaries' file names (`client_bin`, `server_bin`, the `krunknative` launcher, the `krunknative-*` packages), the `KRUNKNATIVE_*` environment variables and the `kn_*` targets keep that name. The app icons are krunker.io's current ones, pinned in `tools/branding/branding.lock` (`make branding`).
 
 ![Demo](/doc/demo.png)
 
@@ -69,7 +71,7 @@ env -u DISPLAY KRUNKNATIVE_HEADLESS=1 KRUNKNATIVE_SCREENSHOT=/tmp/angle.png /tmp
 
 # Running
 
-If you wish to run KrunkNative, you must first add game assets, please read [the assets readme](/assets/README.md) for more information. The client looks for the `assets` folder in the same directory in release mode, or in the parent directory in development mode (when the binary is inside the `cmake-build-release` or `cmake-build-debug` folder).
+If you wish to run Krunker Box Office, you must first add game assets, please read [the assets readme](/assets/README.md) for more information. The client looks for the `assets` folder in the same directory in release mode, or in the parent directory in development mode (when the binary is inside the `cmake-build-release` or `cmake-build-debug` folder).
 
 Everything goes through the Makefile (`make help` lists all targets; CMake does
 the actual compiling, presets are in `CMakePresets.json`). By default the client
@@ -215,7 +217,7 @@ default to `G-6EGYKRF020` (krunk.io); `make web` is off unless asked
 # HTML UI (in-house engine)
 
 The menu and in-game HUD are Krunker v3.1.1's own HTML/CSS (`ui/index.html`),
-rendered natively by KrunkNative's HTML/CSS engine: pure C11 on top of
+rendered natively by Krunker Box Office's HTML/CSS engine: pure C11 on top of
 [Lexbor](https://github.com/lexbor/lexbor) (HTML parsing, DOM, selectors) and
 FreeType, drawn with OpenGL over the 3D scene (`client/src/html/engine/`). There
 is no JavaScript in the native client: the engine ignores `<script>`, and the

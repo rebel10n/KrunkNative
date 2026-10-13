@@ -2,7 +2,7 @@
 
 Screenshots and DOM dumps of the REAL Krunker v3.1.1 client (the offline server
 from the `Krunker_v3.1.1` tree, headless Chromium 1280x720 unless noted), taken
-2026-10-10. They are the acceptance reference for KrunkNative's HTML/CSS UI:
+2026-10-10. They are the acceptance reference for Krunker Box Office's HTML/CSS UI:
 our menu and HUD are diffed against these images.
 
 - `menu/` — logged-out loaded menu (`real-1280.png`, `real-1920.png`), the

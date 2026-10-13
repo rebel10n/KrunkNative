@@ -103,7 +103,7 @@ function buildLobbyTuple(ctx: PublicRouteContext): LobbyTuple {
     current,
     MAX_PLAYERS,
     {
-      map: "KrunkNative",
+      map: "Krunker Box Office",
       mode: "FFA",
       custom: true,
       native: true,

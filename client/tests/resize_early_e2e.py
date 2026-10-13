@@ -80,7 +80,7 @@ def xdotool(display, *args, timeout=10):
 
 def find_window(display, pid, deadline):
     while time.time() < deadline:
-        ids = xdotool(display, "search", "--all", "--pid", str(pid), "--name", "KrunkNative")
+        ids = xdotool(display, "search", "--all", "--pid", str(pid), "--name", "Krunker Box Office")
         if ids:
             return ids.split()[0]
         time.sleep(0.005)

@@ -423,7 +423,7 @@ static int t_triggers_catalog(Ctx *ctx, const cJSON *args, ToolResult *r) {
     (void) ctx;
     (void) args;
     cJSON *o = cJSON_Duplicate(schema_triggers(), 1);
-    cJSON_AddStringToObject(o, "note", "native = simulated by KrunkNative (v3.1.1 set); v7-only events / actions are kept in the map and run on v7 servers");
+    cJSON_AddStringToObject(o, "note", "native = simulated by Krunker Box Office (v3.1.1 set); v7-only events / actions are kept in the map and run on v7 servers");
     cJSON *keys = cJSON_AddObjectToObject(o, "keys");
     cJSON_AddStringToObject(keys, "te", "event");
     cJSON_AddStringToObject(keys, "tce", "event value (timer s, storage threshold, ...)");
@@ -805,7 +805,7 @@ const ToolDef g_tools_logic[] = {
      S({"type":"object","properties":{PROJECT_ARG}}), 1, 0, 1, 0, t_triggers_list},
     {"triggers_catalog", "Trigger catalog",
      "Trigger events (32), actions (72) and conditions of v7.1.4 with their value kind (number, text, sound, both) and whether "
-     "KrunkNative simulates them natively, plus the map keys they use.",
+     "Krunker Box Office simulates them natively, plus the map keys they use.",
      S({"type":"object","properties":{}}), 1, 0, 1, 0, t_triggers_catalog},
     {"triggers_create", "Create triggers",
      "Create TRIGGER objects (one undo step): [{p, s (default 10^3), event (name or id, e.g. \"onEnter\"), event_value, action "

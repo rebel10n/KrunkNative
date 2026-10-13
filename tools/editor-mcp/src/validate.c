@@ -43,7 +43,7 @@ int native_map_load(const Doc *doc, NativeMap *out, char *err, const size_t errs
     }
     out->map = map_init(out->json);
     if (!out->map) {
-        snprintf(err, errsz, "KrunkNative's map loader (map_init) rejected the map (objects / spawns must be arrays)");
+        snprintf(err, errsz, "Krunker Box Office's map loader (map_init) rejected the map (objects / spawns must be arrays)");
         native_map_free(out);
         return -1;
     }
@@ -230,7 +230,7 @@ static void check_objects(Ctx *ctx, Doc *doc, Diags *d, const cJSON *colors_json
         const SchemaPrefab *pf = schema_prefab(prefab);
         if (!obj_prefab_raw_valid(o)) diag_ids(diag(d, "error", "object.unknown_prefab", "object %d names an unknown prefab (the game loads it as a CUBE)", id), id, 0);
         else if (map_raw_object_prefab(o) != prefab && pf)
-            diag_ids(diag(d, "warning", "object.not_native", "%s (prefab %d, %s) is not implemented by KrunkNative's native loader yet: it loads as prefab %d", pf->name, prefab, pf->since, map_raw_object_prefab(o)), id, 0);
+            diag_ids(diag(d, "warning", "object.not_native", "%s (prefab %d, %s) is not implemented by Krunker Box Office's native loader yet: it loads as prefab %d", pf->name, prefab, pf->since, map_raw_object_prefab(o)), id, 0);
         const cJSON *p = js_get(o, "p"), *s = js_get(o, "s"), *si = js_get(o, "si");
         if (!cJSON_IsArray(p) || cJSON_GetArraySize(p) < 3) diag_ids(diag(d, "error", "object.no_position", "object %d has no p [x,y,z]: the game drops it", id), id, 0);
         else if (!all_finite(p)) diag_ids(diag(d, "error", "object.nan", "object %d has a non-numeric / non-finite position", id), id, 0);
@@ -290,7 +290,7 @@ static void check_objects(Ctx *ctx, Doc *doc, Diags *d, const cJSON *colors_json
                 const char *src = js_str(tex, "src", NULL);
                 tex_missing[t] = 1;
                 if (src && strcmp(js_str(tex, "name", ""), "DEFAULT") && !texture_file_exists(ctx, src))
-                    diag(d, "warning", "texture.missing_file", "texture %s (assets/textures/%s.png) is not in the KrunkNative assets", js_str(tex, "name", "?"), src);
+                    diag(d, "warning", "texture.missing_file", "texture %s (assets/textures/%s.png) is not in the Krunker Box Office assets", js_str(tex, "name", "?"), src);
             }
             if (js_get(o, "at")) diag_ids(diag(d, "info", "object.asset_texture", "object %d uses custom texture asset %s (not available offline)", id, cJSON_IsString(js_get(o, "at")) ? js_get(o, "at")->valuestring : "(id)"), id, 0);
         }
@@ -341,14 +341,14 @@ static void check_logic(Doc *doc, Diags *d) {
         const int id = o->valueint;
         const int te = js_int(o, "te", 0), ta = js_int(o, "ta", 0);
         if (te < 0 || te >= events) diag_ids(diag(d, "error", "trigger.bad_event", "trigger %d: event %d does not exist (0..%d)", id, te, events - 1), id, 0);
-        else if (te >= 16) diag_ids(diag(d, "warning", "trigger.event_not_native", "trigger %d: event %s (v7) is not simulated by KrunkNative yet", id, schema_event_name(te)), id, 0);
+        else if (te >= 16) diag_ids(diag(d, "warning", "trigger.event_not_native", "trigger %d: event %s (v7) is not simulated by Krunker Box Office yet", id, schema_event_name(te)), id, 0);
         const cJSON *tas = js_get(o, "tas");
         if (cJSON_IsArray(tas)) {
             if (cJSON_GetArraySize(tas) > schema_limit("triggerActionLimit", 5))
                 diag_ids(diag(d, "error", "trigger.too_many_actions", "trigger %d has %d actions (limit %.0f)", id, cJSON_GetArraySize(tas), schema_limit("triggerActionLimit", 5)), id, 0);
         } else if (js_get(o, "ta") || is_trigger) {
             if (ta < 0 || ta >= actions) diag_ids(diag(d, "error", "trigger.bad_action", "trigger %d: action %d does not exist (0..%d)", id, ta, actions - 1), id, 0);
-            else if (ta >= 32) diag_ids(diag(d, "warning", "trigger.action_not_native", "trigger %d: action %s (v7) is not simulated by KrunkNative yet", id, schema_action_name(ta)), id, 0);
+            else if (ta >= 32) diag_ids(diag(d, "warning", "trigger.action_not_native", "trigger %d: action %s (v7) is not simulated by Krunker Box Office yet", id, schema_action_name(ta)), id, 0);
         }
         const cJSON *tct = js_get(o, "tct");
         if (cJSON_IsString(tct) && !trigger_text_valid(tct->valuestring))

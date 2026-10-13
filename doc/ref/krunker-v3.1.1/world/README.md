@@ -1,13 +1,13 @@
 # World rendering parity captures (map geometry)
 
-Camera-matched pairs of the REAL Krunker v3.1.1 client and KrunkNative, taken
+Camera-matched pairs of the REAL Krunker v3.1.1 client and Krunker Box Office, taken
 2026-10-10 at 1280x720, vertical FOV 90, render resolution 1, UI hidden.
 
 Per pose `<name>`:
 
 - `<name>-krunker.png` — real game (reference server, headless Chromium/SwiftShader)
-- `<name>-native.png` — KrunkNative after the world-rendering fixes
-- `<name>-native-before.png` — KrunkNative at the start of that work (same harness;
+- `<name>-native.png` — Krunker Box Office after the world-rendering fixes
+- `<name>-native-before.png` — Krunker Box Office at the start of that work (same harness;
   stored as 256-colour PNGs to fit the size budget; none for the two setting variants of
   existing poses, the old build had no lighting setting)
 
@@ -53,7 +53,7 @@ Stacked cubes losing their bottom face (93.js) are not visible from outside; 244
 cubes per stock map are affected. The vehicle shows horizontal lines natively with the sun
 shadow on (see the report: shadow self-shadowing on props), none with `shadows` off.
 
-Setting runs (4th column of `world-poses.txt`): KrunkNative reads them from
+Setting runs (4th column of `world-poses.txt`): Krunker Box Office reads them from
 `$XDG_CONFIG_HOME/krunknative/knSettings.json`, the real game from
 `localStorage.kro_setngss_<key>` in a separate Chromium profile.
 
@@ -62,7 +62,7 @@ those posters can legitimately differ between the two images.
 
 ## How they were produced
 
-KrunkNative (`client/src/debug_capture.c`):
+Krunker Box Office (`client/src/debug_capture.c`):
 
 ```sh
 tools/kref/world-native.sh sandstorm "7,107,-60,0,0" out.png <build dir>

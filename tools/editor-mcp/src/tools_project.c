@@ -902,7 +902,7 @@ static int t_prefabs(Ctx *ctx, const cJSON *args, ToolResult *r) {
 
 const ToolDef g_tools_project[] = {
     {"projects_list", "List projects",
-     "Open projects (local map files and live editor projects when a KrunkNative editor hosts the bus), the focused one, the "
+     "Open projects (local map files and live editor projects when a Krunker Box Office editor hosts the bus), the focused one, the "
      "editor connection / permission state, the allowed map directories and the workspace.",
      S({"type":"object","properties":{}}), 1, 0, 1, 0, t_projects_list},
     {"map_open", "Open a map",
@@ -932,7 +932,7 @@ const ToolDef g_tools_project[] = {
     {"project_focus", "Focus project", "Make a project the default target of tools (and focus its editor window for live projects).",
      S({"type":"object","properties":{PROJECT_ARG},"required":["project"]}), 1, 0, 1, 0, t_project_focus},
     {"editor_connect", "Connect to the editor",
-     "Attach to the live KrunkNative editor bus (connects and runs the permission handshake; the editor shows a dialog). "
+     "Attach to the live Krunker Box Office editor bus (connects and runs the permission handshake; the editor shows a dialog). "
      "retry:true asks again after a denial; scopes narrows the request (read, edit, project).",
      S({"type":"object","properties":{"retry":{"type":"boolean"},"scopes":{"type":"array","items":{"type":"string","enum":["read","edit","project"]}}}}),
      0, 0, 0, 0, t_editor_connect},

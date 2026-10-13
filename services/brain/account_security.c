@@ -42,7 +42,7 @@ static int64_t now_ms(void) {
     clock_gettime(CLOCK_REALTIME, &ts);
     return (int64_t) ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
-#define DEFAULT_FROM "Krunker <noreply@caan.edu>"
+#define DEFAULT_FROM "Krunker Box Office <noreply@caan.edu>"
 
 /* accounts.email.require_verified feature names -> bits */
 static const char *const k_features[] = {"chat", "post", "gift", "market", "trade", "clan", "publish"};
@@ -90,7 +90,7 @@ static void load_config(Brain *b) {
     for (size_t n = strlen(c->link_base); n > 0 && c->link_base[n - 1] == '/'; n--) c->link_base[n - 1] = 0;
     snprintf(c->from, sizeof c->from, "%s", kn_config_str(cfg, "smtp.from", DEFAULT_FROM));
     snprintf(c->reply_to, sizeof c->reply_to, "%s", kn_config_str(cfg, "smtp.reply_to", ""));
-    snprintf(c->issuer, sizeof c->issuer, "%s", kn_config_str(cfg, "accounts.twofa_issuer", "Krunker"));
+    snprintf(c->issuer, sizeof c->issuer, "%s", kn_config_str(cfg, "accounts.twofa_issuer", "Krunker Box Office"));
 }
 
 static void start_mailer(Brain *b) {
@@ -224,16 +224,16 @@ static int send_verify_mail(int64_t log_id, const char *username, const char *to
     kn_buf_init(&html);
     kn_buf_appendf(&text,
                    "Hi %s,\n\n"
-                   "Please confirm that this is the email address of your Krunker account by opening this link:\n\n"
+                   "Please confirm that this is the email address of your Krunker Box Office account by opening this link:\n\n"
                    "%s\n\n"
-                   "The link expires in %d hours. If you did not add this address to a Krunker account, you can ignore this email.\n\n"
-                   "Krunker\n",
+                   "The link expires in %d hours. If you did not add this address to a Krunker Box Office account, you can ignore this email.\n\n"
+                   "Krunker Box Office\n",
                    username, link, hours);
     kn_buf_append_str(&html, "<!DOCTYPE html><html><body style=\"margin:0;padding:24px;background:#f2f2f2;font-family:Arial,sans-serif\">"
                              "<div style=\"max-width:520px;margin:0 auto;background:#fff;border-radius:6px;padding:24px;color:#333\">"
                              "<h2 style=\"margin:0 0 16px;color:#222\">Verify your email</h2><p>Hi ");
     html_escape(&html, username);
-    kn_buf_append_str(&html, ",</p><p>Please confirm that this is the email address of your Krunker account.</p>"
+    kn_buf_append_str(&html, ",</p><p>Please confirm that this is the email address of your Krunker Box Office account.</p>"
                              "<p style=\"text-align:center;margin:28px 0\"><a href=\"");
     html_escape(&html, link);
     kn_buf_append_str(&html, "\" style=\"background:#fc0;color:#000;text-decoration:none;font-weight:bold;padding:12px 28px;"
@@ -241,10 +241,10 @@ static int send_verify_mail(int64_t log_id, const char *username, const char *to
                              "Or open this link: ");
     html_escape(&html, link);
     kn_buf_appendf(&html, "</p><p style=\"font-size:13px;color:#777\">The link expires in %d hours. If you did not add this address "
-                          "to a Krunker account, you can ignore this email.</p></div></body></html>",
+                          "to a Krunker Box Office account, you can ignore this email.</p></div></body></html>",
                    hours);
     kn_mail m = {.from = s_cfg.from, .to = to, .reply_to = s_cfg.reply_to[0] ? s_cfg.reply_to : NULL,
-                 .subject = "Verify your Krunker email", .text = text.data, .html = html.data};
+                 .subject = "Verify your Krunker Box Office email", .text = text.data, .html = html.data};
     MailCtx *ctx = calloc(1, sizeof *ctx);
     int rc = -1;
     if (ctx) {
@@ -405,7 +405,7 @@ static void verify_page(kn_http_req *req, int status, const char *title, const c
     kn_buf b;
     kn_buf_init(&b);
     kn_buf_append_str(&b, "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">"
-                          "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Krunker - ");
+                          "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Krunker Box Office - ");
     html_escape(&b, title);
     kn_buf_append_str(&b, "</title><style>body{margin:0;background:#1d1d1d;color:#fff;font-family:Arial,sans-serif;text-align:center}"
                           "div{max-width:560px;margin:15vh auto 0;padding:32px;background:rgba(0,0,0,.35);border-radius:6px}"
@@ -435,7 +435,7 @@ static void verify_done(kn_db_result *res, void *ud) {
     const int64_t id = kn_json_int(o, "id", 0);
     KN_INFO(MOD, "account %lld verified %s", (long long) id, masked);
     char text[400];
-    snprintf(text, sizeof text, "%s is now the verified email of your Krunker account %s. You can close this page.",
+    snprintf(text, sizeof text, "%s is now the verified email of your Krunker Box Office account %s. You can close this page.",
              email ? email : "Your email", cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(o, "username")));
     verify_page(req, 200, "Email verified", text);
     cJSON *st = cJSON_CreateObject();

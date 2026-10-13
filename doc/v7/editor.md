@@ -1,7 +1,7 @@
 # Map editor: Krunker v7.1.4 parity spec
 
 Status: survey and plan, no code changes yet (written 2026-10-12).
-Policy: KrunkNative is upgraded **in place** to Krunker v7.1.4. There is no
+Policy: Krunker Box Office is upgraded **in place** to Krunker v7.1.4. There is no
 v3.1.1 compatibility mode; v3.1.1 lives on branch `v3.1.1` / tag
 `v3.1.1-parity`. Wherever the v7.1.4 editor differs from v3.1.1, the native
 editor takes the v7.1.4 behaviour. Old (v3.1.1) map files must still import,
@@ -1224,7 +1224,7 @@ v3.1.1 instead redirected to `social.html`.
 
 ### 1.13 Reference quirks: decisions for the port
 
-The default is to match v7.1.4. The rows below break that default. Where KrunkNative fixes something, a code comment must say "intentional difference from v7.1.4".
+The default is to match v7.1.4. The rows below break that default. Where Krunker Box Office fixes something, a code comment must say "intentional difference from v7.1.4".
 
 | Quirk | Decision |
 |---|---|
@@ -1256,7 +1256,7 @@ The default is to match v7.1.4. The rows below break that default. Where KrunkNa
 | A folder header finds its body with `getElementById` in KN's first port | v7 looks inside the header's parent (`querySelector("[id='xB']")`); KN does the same, so Class Config's repeated Camera / Movement / ... folders open their own body (`editor_gui.c`) |
 | "Element Label" has two `onChange` handlers; only the delayed refresh survives | keep: the label is stored as typed and sanitised by the export |
 | Pending Select Asset / Icon / Image / Custom targets | dropped when another window opens (v7 keeps the last viewModels / KE.activeAction argument) |
-| Group members follow the owner's scale (KrunkNative) | **removed**: translation and Y rotation only, as v7 (the scale branch is disabled) |
+| Group members follow the owner's scale (Krunker Box Office) | **removed**: translation and Y rotation only, as v7 (the scale branch is disabled) |
 | `config.isProd` (the counters' Event row, `localOnly` prefabs in the menus) | the page is production, as krunker.io: Event Objects stay hidden and Event / Terminal / Bot Spawner are not offered (the v7 reference capture is production too) |
 | Rebinding a key stores `e.key` (`","`), which never equals the `keyCode` (188) it is compared with | **fix**: binds match by key code and by character (`editor.c:key_is`) |
 | Templates window: the Load tile quotes `'importMap'` inside a single-quoted attribute (a syntax error) | **fix** (`editor_panels.c`) |
@@ -1265,7 +1265,7 @@ The default is to match v7.1.4. The rows below break that default. Where KrunkNa
 | Account ▸ Login opens `loginPopup` (socket `a`) | opens the hub, which owns login (open question 1); the editor shows the hub session's name |
 | Wireframe (`forceWire`) | desktop GL only: OpenGL ES (web, ANGLE) has no `glPolygonMode` and draws filled (`scene.c`) |
 | Drag & drop import | native only (GLFW drop); the web build has no drop glue yet |
-| File menu | gains KrunkNative's **Projects** submenu (several maps, detached views, the editor bus) |
+| File menu | gains Krunker Box Office's **Projects** submenu (several maps, detached views, the editor bus) |
 | The Trigger Event folder never renders in v7's page as served (the hook script's `Object.prototype.events` accessor swallows `vO234.events`) | **fix**: shown (WP4's `ed_triggers_panel`). `v7ref.js` captures `prefabs` and `logic` without `public/js/hook.js`, so the v7 dumps of prefabs 29 / 55 show it too (`doc/ref/.../editor/README.md`) |
 | AI_SPAWNER "Offset Shot" binds the misspelt `objConfig.shoOffH`: always shows off, never edits `shotOffH` | **fix**: the switch shows and edits the object's `shof` (`editor_inspector.c`) |
 | ENVIRONMENT_ZONE "Emissive" has no stringified getter, so the input shows its `#ffffff` default | **fix**: shows the zone's `skyDomeEmis` |
@@ -1282,12 +1282,12 @@ The default is to match v7.1.4. The rows below break that default. Where KrunkNa
 | The Sounds window writes its empty / error text into `#assetTList` (the Textures list) | its own `#assetSList` |
 | `mapResp` share link / update-video URL come from an archive.org capture (`https://web.archive.org/web/.../https://youtube.com/...`) | the plain URLs |
 | Prefabs panel: the Object Painter div is built shown when `objectPainterType` is set (`addDiv(.., objectPainterType)`), so a rebuilt panel hides the JSON field of an active painter | **fix**: the div follows the Object Painter switch (`editor_tools.c`) |
-| Optimize Faces / Color Merging change objects outside the history poll's one-second steps | each is one undo step (KrunkNative) |
+| Optimize Faces / Color Merging change objects outside the history poll's one-second steps | each is one undo step (Krunker Box Office) |
 | Export GLTF / Export MTL build from three's meshes (Lambert copies of what the renderer made) | the meshes are built from the object data, GL-free (`editor_export.c`): the shapes of `prefab.c` and the prefab OBJ models; asset models, ladders, sprites, lights, AI, canvases and random billboards are left out; the material colour is the object's `c` (no vertex colours); one node per object |
 | OBJMTLExporter cuts the last character off the texture name and keeps the slash (`map_Kd /wall_0.pn`, zip entry `wall_0.pn`; every asset texture is `texture.pn`) | **fix**: `map_Kd wall_0.png`, asset textures `<id>_texture.png` |
 | GLTFExporter re-encodes each texture upside down (flipY) | the PNG is embedded as is and `TEXCOORD_0` is flipped (same result) |
 | KrunkScript window opens `scripting.html` as a second browser window | an **in-page window** (`#knScriptWin`) at the same place (10% / 10%, 80% x 80%) with a close button; CodeMirror is the engine's code view (`html_dom_code_view`), folding and the find dialog are not ported (the fold gutter shows its markers) (`editor_script.c`) |
-| Validation is the `ksC` / `ksT` socket round trip (offline: "Please Reconnect to Validate Script") | **local**: the C checker (`ks_validate`, as ksc), immediate; diagnostics also run live (300 ms after an edit) and mark the error line; KrunkNative lists them under the code (`#knScriptErrors`, v7 used `alert()`); the button and tab icons still change on Validate only |
+| Validation is the `ksC` / `ksT` socket round trip (offline: "Please Reconnect to Validate Script") | **local**: the C checker (`ks_validate`, as ksc), immediate; diagnostics also run live (300 ms after an edit) and mark the error line; Krunker Box Office lists them under the code (`#knScriptErrors`, v7 used `alert()`); the button and tab icons still change on Validate only |
 | The code reaches `KE.scripts` on Validate, tab switch and window close only | it is kept in the project as typed (300 ms), so exports and saves never miss edits; "Script Saved" still shows on those three |
 | show-hint's alias rewrite touches every listed entry and stays in the shared table | **fix**: only the entries matched through the alias show it (`editor_script_lang.c`) |
 | The `def` rule swallows a call's `(` but the bare `)` rule dedents, so auto-indent drops a level after any line with a call | **fix**: the call's `(` counts as an opening bracket (`editor_script_lang.c`) |
@@ -1370,7 +1370,7 @@ The default is to match v7.1.4. The rows below break that default. Where KrunkNa
 
 ---
 
-## 3. Gap analysis against KrunkNative's editor
+## 3. Gap analysis against Krunker Box Office's editor
 
 ### How the native editor works today
 
@@ -1514,7 +1514,7 @@ The native editor (`client/src/editor/*`, about 11.3k lines) is a near-complete 
 | Templates (client/server skeletons) and 18 script template maps | P | WP1 / WP2 | – |
 | Storage `scripts{client,server}` base64, omit-if-template | P | `editor_model.c` | – |
 | Test: drop the server script, compile the client, pass it to the game; Host keeps both | P | `editor_script.c`, `editor.c:editor_test_map` | – |
-| Editor bus / MCP | P | `editor_bus_link.c`, `tools/editor-mcp` `script_get` / `script_set` | KrunkNative addition. |
+| Editor bus / MCP | P | `editor_bus_link.c`, `tools/editor-mcp` `script_get` / `script_set` | Krunker Box Office addition. |
 
 ### 3.9 Map settings
 

@@ -127,7 +127,7 @@ ENV
         targets+="${targets:+,}127.0.0.1:$port"
         {
             echo "KN_GAMESERVER_NODE_ID=$node"
-            echo "KN_GAMESERVER_NAME=KrunkNative $node"
+            echo "KN_GAMESERVER_NAME=Krunker Box Office $node"
             echo "KN_GAMESERVER_REGION=$region"
             echo "KN_GAMESERVER_PORT=$port"
             echo "KN_GAMESERVER_PUBLIC_HOST=$pub"

@@ -179,7 +179,7 @@ def client_download_template(html):
     if "Download Krunker Client" not in html or start < 0 or end < start:
         raise SystemExit("windows_v7.py: window %s no longer looks like v7's Download Client window" % CLIENT_WINDOW)
     html = html[:start] + CLIENT_PLACEHOLDER + html[end + len("</ul></div>"):]
-    html = html.replace("Download Krunker Client", "Download KrunkNative")
+    html = html.replace("Download Krunker Client", "Download Krunker Box Office")
     if "krunker.zip" in html:
         raise SystemExit("windows_v7.py: window %s still links krunker.zip" % CLIENT_WINDOW)
     return html

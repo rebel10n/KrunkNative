@@ -347,8 +347,8 @@ static int webm_write(VoiceBuf *out, const uint8_t *const *packets, const int *s
 
     ebml_uint(&info, 0x2AD7B1, 1000000); // TimecodeScale: 1 ms
     ebml_float(&info, 0x4489, (float) (count > 0 ? (count - 1) * VOICE_FRAME_MS : 0)); // Duration
-    ebml_string(&info, 0x4D80, "KrunkNative"); // MuxingApp
-    ebml_string(&info, 0x5741, "KrunkNative"); // WritingApp
+    ebml_string(&info, 0x4D80, "Krunker Box Office"); // MuxingApp
+    ebml_string(&info, 0x5741, "Krunker Box Office"); // WritingApp
 
     VoiceBuf opus_head = {0};
     vbuf_put(&opus_head, "OpusHead", 8);

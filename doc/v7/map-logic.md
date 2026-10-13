@@ -1,6 +1,6 @@
 # Map logic: Krunker v3.1.1 → v7.1.4 delta specification
 
-Status: survey and specification only. No code has been changed. Written 2026-10-12 for the KrunkNative in-place upgrade to v7.1.4.
+Status: survey and specification only. No code has been changed. Written 2026-10-12 for the Krunker Box Office in-place upgrade to v7.1.4.
 
 Contents:
 - §0 Scope and policy
@@ -35,13 +35,13 @@ Contents:
 - The trigger system.
 - Game modes, templates, custom game config and airdrops.
 - Server/client authority and packets.
-- A KrunkNative gap analysis.
+- A Krunker Box Office gap analysis.
 - A staged implementation plan.
 
 Implementation agents work from this document alone, so every claim carries a source reference.
 
 **Policy (user decision, relayed by the coordinator).**
-- KrunkNative upgrades **in place** to Krunker v7.1.4. There is no v3.1.1 compatibility mode; v3.1.1 is preserved on branch/tag `v3.1.1`.
+- Krunker Box Office upgrades **in place** to Krunker v7.1.4. There is no v3.1.1 compatibility mode; v3.1.1 is preserved on branch/tag `v3.1.1`.
 - Wherever v7 changed v3 behaviour (map fields, prefabs, triggers, modes, physics), KN adopts the v7 behaviour directly, with no toggles.
 - v3.1.1 map JSON must still load, **exactly as v7.1.4 loads old maps**: v7's own defaults, shims and ignored keys are the compatibility specification (§1.10).
 - Where v7.1.4 is self-contradictory or broken (reconstruction gaps, obvious bugs), this document says so and records a decision. Search for **Decision:**.
@@ -2191,7 +2191,7 @@ The join sync must carry, through the per-feature packets above or a single `SYN
 - `game_pick_next_map` is random, with no votes (`KN shared/src/game.c:676-692`), and `next_round` was duplicated in `server/src/net.c:130-134` and the former `client/src/net/local_game.c:158-161`. That file is being replaced by the in-process sandbox (`server/src/sandbox.c` + `client/src/net/offline.c`), which runs `server_bin`'s own core, so the server path is now the only one.
 - **Decision:** a single shared `game_end_round` / `game_next_match` in `shared/` implements the v7 `mts` / vote / `init` flow for both the server and the sandbox. This removes the duplication.
 
-## 6. Gap analysis against KrunkNative
+## 6. Gap analysis against Krunker Box Office
 
 **Status legend:**
 - **supported**: matches v7.

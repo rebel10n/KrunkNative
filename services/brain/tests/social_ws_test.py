@@ -544,7 +544,7 @@ async def scenario(base, internal_url, secret):
         await b.call("a", "a", 1, [bob, None, bob_token])
         r = await b.call("c2fa", "a2FA")
         uri = r[3] or ""
-        m = re.match(r"otpauth://totp/Krunker:(\w+)\?secret=([A-Z2-7]+)&issuer=Krunker", uri)
+        m = re.match(r"otpauth://totp/Krunker%20Box%20Office:(\w+)\?secret=([A-Z2-7]+)&issuer=Krunker%20Box%20Office", uri)
         check(r[1] == 0 and r[2] == "a2FAc" and m and m.group(1) == bob, "a2FA offers an otpauth URI: %r" % r[1:])
         key = m.group(2) if m else "AAAA"
         r = await b.call("c2fa", "a2FAc", totp(key, 5))

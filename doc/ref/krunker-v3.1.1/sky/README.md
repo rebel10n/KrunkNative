@@ -1,8 +1,8 @@
-# Sky, lighting, fog and sun shadows: KrunkNative vs real Krunker v3.1.1
+# Sky, lighting, fog and sun shadows: Krunker Box Office vs real Krunker v3.1.1
 
 Captured on 2026-10-10. The "after" column was re-captured after the clear-colour and
-caster-side fixes, with the other agents' world-material, ambient-occlusion and capture-harness fixes in the tree. Each `<map>-before-after-real.jpg` has three columns: KrunkNative
-before this work, KrunkNative after it, and the real v3.1.1 client. Rows are the poses
+caster-side fixes, with the other agents' world-material, ambient-occlusion and capture-harness fixes in the tree. Each `<map>-before-after-real.jpg` has three columns: Krunker Box Office
+before this work, Krunker Box Office after it, and the real v3.1.1 client. Rows are the poses
 `horizon`, `up` and `down`. `real/` has the reference frames at full size (1280x720).
 `poses.json` lists the exact poses.
 Native captures ignore stored settings (`debug_capture.c` points `XDG_CONFIG_HOME` at an
@@ -38,7 +38,7 @@ pitch are in radians, in Krunker's YXZ order (yaw 0 looks down -Z).
   `RENDER.render` to pin `CONTROLS.object`, `pitchObj` and the camera to the pose, sets the
   fov to 90, and takes a screenshot. The server ignores a map argument, so maps are
   switched client-side.
-- KrunkNative: `tools/kref/sky/nativecap.sh <build> <repo root> <out> <maps...>` runs
+- Krunker Box Office: `tools/kref/sky/nativecap.sh <build> <repo root> <out> <maps...>` runs
   `client_bin --offline assets/maps/<map>.json` under xvfb with `KRUNKNATIVE_CAMERA`,
   `KRUNKNATIVE_FOV=90`, `KRUNKNATIVE_HIDE_UI=1` and `KRUNKNATIVE_SCREENSHOT`
   (client/src/debug_capture.c).

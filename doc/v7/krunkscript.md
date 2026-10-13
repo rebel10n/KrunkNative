@@ -1,4 +1,4 @@
-# KrunkScript (Krunker v7.1.4) — implementable specification for KrunkNative
+# KrunkScript (Krunker v7.1.4) — implementable specification for Krunker Box Office
 
 Status: spec, implemented by the work packages of 6.8 (table below). Target: Krunker **v7.1.4**,
 ported **in place**.
@@ -65,7 +65,7 @@ This document is the only input the implementation agents need. Every rule cites
    * **Accepted source corpus** (`[CORPUS]`): 15 template scripts from `TPL` (3 templates have
      empty `data`) and 7 map scripts (`kanji`, `laboratory`, `lostworld_s6`, `sanctum`,
      `subzero_new` share one script; `citadel`, `Krunk_Plaza` differ). Everything in them compiled
-     on the official compiler, so the KrunkNative (KN) front end must accept all of it.
+     on the official compiler, so the Krunker Box Office (KN) front end must accept all of it.
    * **The official changelog** (`[LOG]`, `VER`), which names every language feature as it shipped.
 3. The **runtime API**, hooks, rate limits and engine wiring are read directly from v7.1.4 code
    (`[REF]`).
@@ -1572,7 +1572,7 @@ names `stick_axis_left`, `stick_axis_right` (`REF/src/libs/gamepadInput.js:24-30
 
 ---
 
-## 6. Implementation plan for KrunkNative (C11, no JS)
+## 6. Implementation plan for Krunker Box Office (C11, no JS)
 
 ### 6.1 Architecture
 

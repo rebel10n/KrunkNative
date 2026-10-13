@@ -1,0 +1,13 @@
+# krunker.io branding files (tools/branding/fetch_branding.py).
+# name	url	sha256	size
+favicon.png	https://krunker.io/img/favicon.png	21b6a7c8f4d80ea9b74905d0b8676a08da31b3f9d58f8622cf0238b93ff0d7c1	940
+logo_6.png	https://krunker.io/img/logo_6.png	55fa852441103a64c8df3e45dbd9016224763bf2d8112472fe61a1c7aa045d01	165821
+icon32x32.png	https://krunker.io/img/pwa/icon32x32.png	3563a1d5aed0950fe0fa83f4f45e6bd38591ad97d32bd12337b6e0974e64593f	1879
+icon60x60.png	https://krunker.io/img/pwa/icon60x60.png	0548a9e2cc1de508c8aea65dd3cb9f1806c5314298f09fd5978d88c22ee79515	3667
+icon76x76.png	https://krunker.io/img/pwa/icon76x76.png	f730e48c3fed8d71854088c866779aab8d39d285a1066ee4246edd06be6a098d	4853
+icon120x120.png	https://krunker.io/img/pwa/icon120x120.png	679239e2ce2b42019fdefe7222bba8aa0f18e3c662290bde3f721361ecb99975	8401
+icon192x192.png	https://krunker.io/img/pwa/icon192x192.png	c83126548644bfb519a0aaad11c069cca00c8ae5f320da095c46c5326ba1ab57	16124
+icon196x196.png	https://krunker.io/img/pwa/icon196x196.png	68e83d16c72ce13cfd32559cc9def67545b70a4cae793996440d0dd80fab6c49	16598
+icon256x256.png	https://krunker.io/img/pwa/icon256x256.png	99341041d65ba061eafb94b4238ba8c691396f5807cc59752be0a49b5418700c	24956
+icon512x512.png	https://krunker.io/img/pwa/icon512x512.png	566933eb669d0bf17847343a2c6c8ad7c3b349c9b78784cfe60fb2c0164adf24	77271
+icon1024x1024.png	https://krunker.io/img/pwa/icon1024x1024.png	0f9a50f8378e2bcfb1a2eee435ffa90852628fdfbbc737eaca4fe96846ce9b21	265734
