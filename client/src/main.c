@@ -606,6 +606,13 @@ int main(int argc, char **argv) {
     }
 #endif
 
+#ifndef __EMSCRIPTEN__
+    // The window as it was before F4 / a Settings restart (KRUNKNATIVE_RESTORE_WINDOW), else the
+    // stored mode + kept rect: created hidden at the windowed rect, then placed, switched and
+    // shown before the first frame (client_render_window_created), so it never flashes windowed.
+    if (client_render_window_prepare(&window_width, &window_height, !SCENARIO_ACTIVE() && !headless_enabled()))
+        glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+#endif
     headless_window_hints(); // headless: no GLFW context (headless_make_context_current creates it)
     INSTANCE.window = glfwCreateWindow(window_width, window_height, KN_PRODUCT_NAME, NULL, NULL);
     if (!INSTANCE.window) {
@@ -640,6 +647,9 @@ int main(int argc, char **argv) {
 
     if (!headless_make_context_current(INSTANCE.window)) return -1;
     glfwSetWindowUserPointer(INSTANCE.window, &INSTANCE);
+#ifndef __EMSCRIPTEN__
+    client_render_window_created(&INSTANCE); // mode / position / maximized, then shown
+#endif
     glfwSetFramebufferSizeCallback(INSTANCE.window, resize_viewport);
     glfwSetScrollCallback(INSTANCE.window, scroll_callback);
     glfwSetCursorPosCallback(INSTANCE.window, cursor_pos_callback);
@@ -787,6 +797,7 @@ int main(int argc, char **argv) {
         client_frame(&INSTANCE);
     }
 
+    client_render_window_exit(&INSTANCE); // keep the windowed rect + maximized flag for the next start
     INSTANCE.net_should_quit = 1;
 
     if (INSTANCE.net_thread_running) {

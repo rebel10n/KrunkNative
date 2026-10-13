@@ -155,7 +155,7 @@ network: build services ## Coordinator + N dedicated servers from one file (NETW
 	python3 -I services/scripts/kn-network up $(or $(NETWORK),services/scripts/network.example.json)
 
 .PHONY: test
-test: build ## Run the shared movement/collision test (+ the knet transport, billboard ad, lag compensation, editor bus, editor model, nav mesh, client update, meshopt and resource pack tests)
+test: build ## Run the shared movement/collision test (+ the knet transport, billboard ad, lag compensation, editor bus, editor model, nav mesh, client update, meshopt, window state and resource pack tests)
 	./$(DEBUG_DIR)/$(TEST_BIN)
 	./$(DEBUG_DIR)/update_test
 	./$(DEBUG_DIR)/knet_test
@@ -183,6 +183,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, bil
 	./$(DEBUG_DIR)/navgen_test
 	./$(DEBUG_DIR)/season_test
 	./$(DEBUG_DIR)/meshopt_test .
+	./$(DEBUG_DIR)/window_state_test
 	./$(DEBUG_DIR)/mod_pack_test .
 
 # --------------------------------------------------------------------------- html-engine

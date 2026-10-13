@@ -597,7 +597,8 @@ typedef struct {
         int y;
         int width;
         int height;
-    } windowed_rect;
+    } windowed_rect; // the rect windowed mode returns to (tracked while windowed and not maximized)
+    int windowed_maximized; // windowed mode is maximized by the window manager (window_state.h)
 
     unsigned char last_debug_key:1;
     unsigned char last_swap_key:2;

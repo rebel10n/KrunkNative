@@ -13,6 +13,8 @@
 #include <GLFW/glfw3.h>
 #include <headless.h> // headless_swap_interval
 #include <client_settings.h> // Settings > Client "Resolution" (exclusive fullscreen mode)
+#include <window_state.h>    // the window across F4 / relaunch / restarts
+#include <app_mode.h>        // app_window_has_router: page windows keep no geometry
 #include <ctype.h>
 #include <math.h>
 #include <stddef.h>
@@ -199,6 +201,20 @@ static int g_fullscreen_kind = RS_FULLSCREEN; // F11 target: the last non-window
 static int g_initialized;         // client_render_settings_init ran (not in --render-scenario runs)
 static int g_fps_log;             // KRUNKNATIVE_FPS_LOG
 
+_Static_assert(RS_WINDOWED == 0 && RS_FULLSCREEN == 1 && RS_BORDERLESS == 2, "window_state.c mode values");
+
+#ifndef __EMSCRIPTEN__
+// Window state (window_state.h): client_render_window_prepare / _created
+static WindowStartup g_ws;        // what this process opened as
+static int g_ws_enabled;          // a real window (not headless, not the scenario renderer)
+static int g_track_rect;          // pos/size callbacks keep client->windowed_rect current
+static Client *g_ws_client;
+static int g_rect_pending;        // the window moved / resized: record it once it settles
+static double g_rect_pending_at;  // glfwGetTime() of the last such event
+#define WINDOW_RECT_SETTLE_S 0.3  // window managers move a window before marking it maximized
+static int g_desktop_w, g_desktop_h; // the monitor's mode before exclusive fullscreen changed it
+#endif
+
 static void mark_dom(Client *client) { (void) client; g_dom_dirty = 1; }
 static void mark_swap(Client *client) { (void) client; g_swap_dirty = 1; }
 
@@ -212,18 +228,33 @@ static int window_is_windowed(GLFWwindow *window) {
     return !glfwGetWindowMonitor(window) && glfwGetWindowAttrib(window, GLFW_DECORATED);
 }
 
+// Wayland has no client-side window positions (GLFW reports an error and 0,0).
+static int can_position(void) {
+    return glfwGetPlatform() != GLFW_PLATFORM_WAYLAND;
+}
+
+static void track_windowed_rect(GLFWwindow *window);
+
 static void set_window_mode(Client *client, const int mode) {
     GLFWwindow *window = client ? client->window : NULL;
     if (!window) return;
 
-    if (window_is_windowed(window) && mode != RS_WINDOWED) {
+    // without the tracking callbacks (headless): the rect windowed mode returns to, from the window now
+    if (!g_track_rect && window_is_windowed(window) && mode != RS_WINDOWED) {
         glfwGetWindowPos(window, &client->windowed_rect.x, &client->windowed_rect.y);
         glfwGetWindowSize(window, &client->windowed_rect.width, &client->windowed_rect.height);
+    } else if (g_rect_pending && mode != RS_WINDOWED) {
+        track_windowed_rect(window); // F11 right after a move / resize: take it before leaving windowed
     }
+    g_window_mode_applied = mode; // first: the callbacks this switch causes see the new mode
 
     GLFWmonitor *monitor = glfwGetWindowMonitor(window);
     if (!monitor) monitor = glfwGetPrimaryMonitor();
     const GLFWvidmode *vid = monitor ? glfwGetVideoMode(monitor) : NULL;
+    if (vid && !glfwGetWindowMonitor(window)) {
+        g_desktop_w = vid->width; // client_render_window_exit: restore it if fullscreen changed it
+        g_desktop_h = vid->height;
+    }
 
     if (mode == RS_FULLSCREEN && vid) {
         // exclusive fullscreen at the monitor's current mode, or the Client tab's Resolution
@@ -244,8 +275,8 @@ static void set_window_mode(Client *client, const int mode) {
         if (w <= 0 || h <= 0) { w = 1280; h = 720; }
         glfwSetWindowMonitor(window, NULL, client->windowed_rect.x, client->windowed_rect.y, w, h, 0);
         glfwSetWindowAttrib(window, GLFW_DECORATED, GLFW_TRUE);
+        if (client->windowed_maximized) glfwMaximizeWindow(window); // maximized before fullscreen: again
     }
-    g_window_mode_applied = mode;
     g_swap_dirty = 1; // monitor changes can reset the swap interval on some drivers
     printf("[render] window mode %s\n", mode == RS_FULLSCREEN ? "fullscreen" : mode == RS_BORDERLESS ? "borderless" : "windowed");
 }
@@ -530,6 +561,273 @@ void client_render_toggle_fullscreen(Client *client) {
 #endif
 }
 
+// ---------------------------------------------------------------- window state (window_state.h)
+
+#ifndef __EMSCRIPTEN__
+static void set_env(const char *name, const char *value) {
+#ifdef _WIN32
+    _putenv_s(name, value ? value : "");
+#else
+    if (value) setenv(name, value, 1);
+    else unsetenv(name);
+#endif
+}
+
+// The stored "windowMode" (knSettings), read before the page exists: -1 when not stored.
+static int stored_window_mode(void) {
+    ui_settings_load(); // idempotent: main.c loads it again once the page is up
+    const cJSON *v = ui_setting_saved("windowMode");
+    if (!v) return -1;
+    char text[32];
+    ui_setting_to_string(v, text, sizeof(text));
+    double d;
+    return parse_number(text, &d) ? (int) d : -1;
+}
+
+// The rect windowed mode returns to: recorded while windowed and not maximized / minimized
+// (fullscreen, borderless and maximized geometry never). Pos/size events only mark it
+// pending; it is read once the window has settled for WINDOW_RECT_SETTLE_S, because a
+// window manager can move/resize a window before it sets the maximized state.
+static void track_windowed_rect(GLFWwindow *window) {
+    Client *client = g_ws_client;
+    g_rect_pending = 0;
+    if (!client || window != client->window || g_window_mode_applied != RS_WINDOWED || !window_is_windowed(window)) return;
+    if (!glfwGetWindowAttrib(window, GLFW_VISIBLE) || glfwGetWindowAttrib(window, GLFW_ICONIFIED) ||
+        glfwGetWindowAttrib(window, GLFW_MAXIMIZED))
+        return;
+    int x = client->windowed_rect.x, y = client->windowed_rect.y, w, h;
+    if (can_position()) glfwGetWindowPos(window, &x, &y);
+    glfwGetWindowSize(window, &w, &h);
+    if (w <= 0 || h <= 0) return;
+    client->windowed_rect.x = x;
+    client->windowed_rect.y = y;
+    client->windowed_rect.width = w;
+    client->windowed_rect.height = h;
+}
+
+static void mark_rect_pending(GLFWwindow *window) {
+    Client *client = g_ws_client;
+    if (!client || window != client->window || g_window_mode_applied != RS_WINDOWED) return;
+    g_rect_pending = 1;
+    g_rect_pending_at = glfwGetTime();
+}
+
+static void window_pos_cb(GLFWwindow *window, const int x, const int y) {
+    (void) x;
+    (void) y;
+    mark_rect_pending(window);
+}
+
+static void window_size_cb(GLFWwindow *window, const int w, const int h) {
+    (void) w;
+    (void) h;
+    mark_rect_pending(window);
+}
+
+static void window_maximize_cb(GLFWwindow *window, const int maximized) {
+    Client *client = g_ws_client;
+    if (!client || window != client->window || g_window_mode_applied != RS_WINDOWED || !window_is_windowed(window)) return;
+    client->windowed_maximized = maximized != 0;
+    if (maximized) g_rect_pending = 0; // the moves that came with maximizing are not the windowed rect
+    else mark_rect_pending(window);    // the window manager's restored rect
+}
+
+// Per frame (client_render_frame_end): a settled move / resize.
+static void settle_windowed_rect(Client *client) {
+    if (g_rect_pending && client && client->window && glfwGetTime() - g_rect_pending_at >= WINDOW_RECT_SETTLE_S)
+        track_windowed_rect(client->window);
+}
+
+// The state this window would reopen as now.
+static void capture_window_state(Client *client, WindowState *s) {
+    if (g_rect_pending) track_windowed_rect(client->window); // F4 right after a move: take it now
+    memset(s, 0, sizeof(*s));
+    s->mode = g_window_mode_applied;
+    s->forced = g_forced_window_mode >= 0;
+    s->x = client->windowed_rect.x;
+    s->y = client->windowed_rect.y;
+    s->w = client->windowed_rect.width;
+    s->h = client->windowed_rect.height;
+    s->maximized = client->windowed_maximized;
+    if (s->w < WINDOW_STATE_MIN_SIZE || s->h < WINDOW_STATE_MIN_SIZE) {
+        s->w = WINDOW_STATE_DEFAULT_W;
+        s->h = WINDOW_STATE_DEFAULT_H;
+    }
+}
+
+// X11 keeps a video mode exclusive fullscreen changed (Settings > Client > Resolution) after
+// the process is gone: GLFW restores it only when the window leaves the monitor, and neither
+// exec nor exit does that. Leave the monitor when the mode differs from the desktop's.
+static void release_display_mode(Client *client) {
+    GLFWmonitor *monitor = glfwGetWindowMonitor(client->window);
+    const GLFWvidmode *vid = monitor ? glfwGetVideoMode(monitor) : NULL;
+    if (!vid || !g_desktop_w || (vid->width == g_desktop_w && vid->height == g_desktop_h)) return;
+    printf("[window] restoring the desktop video mode %dx%d\n", g_desktop_w, g_desktop_h);
+    glfwSetWindowMonitor(client->window, NULL, client->windowed_rect.x, client->windowed_rect.y,
+                         client->windowed_rect.width > 0 ? client->windowed_rect.width : WINDOW_STATE_DEFAULT_W,
+                         client->windowed_rect.height > 0 ? client->windowed_rect.height : WINDOW_STATE_DEFAULT_H, 0);
+}
+
+// A kept position must still be on a monitor (one may be gone since): the middle of the
+// title bar area, so the window can be grabbed. Else the window manager places it.
+static int position_on_a_monitor(const WindowState *s) {
+    int count = 0;
+    GLFWmonitor **monitors = glfwGetMonitors(&count);
+    const int px = s->x + s->w / 2, py = s->y + 16;
+    for (int i = 0; i < count; i++) {
+        const GLFWvidmode *vid = glfwGetVideoMode(monitors[i]);
+        int mx = 0, my = 0;
+        glfwGetMonitorPos(monitors[i], &mx, &my);
+        if (vid && px >= mx && px < mx + vid->width && py >= my && py < my + vid->height) return 1;
+    }
+    return 0;
+}
+
+static void persist_window_state(const WindowState *s) {
+    if (app_window_has_router()) return; // a page window (editor/viewer/...): the main window's geometry is the one kept
+    char text[WINDOW_STATE_TEXT_MAX];
+    if (window_state_encode(s, text, sizeof(text))) html_storage_set(WINDOW_STATE_STORAGE_KEY, text);
+}
+#endif
+
+int client_render_window_prepare(int *width, int *height, const int enabled) {
+#ifndef __EMSCRIPTEN__
+    // KRUNKNATIVE_RESTORE_WINDOW is for this process only: never inherited by page windows or a later exec
+    WindowState restore;
+    const char *env = getenv(WINDOW_STATE_ENV);
+    const int has_restore = env && window_state_decode(env, &restore);
+    if (env) {
+        if (!has_restore) fprintf(stderr, "[window] ignoring malformed %s=%s\n", WINDOW_STATE_ENV, env);
+        set_env(WINDOW_STATE_ENV, NULL);
+    }
+    if (!enabled) return 0;
+
+    WindowState persisted;
+    char text[WINDOW_STATE_TEXT_MAX];
+    const int has_persisted = html_storage_get(WINDOW_STATE_STORAGE_KEY, text, sizeof(text)) >= 0 &&
+                              window_state_decode(text, &persisted);
+    int env_w = 0, env_h = 0;
+    const char *size = getenv("KRUNKNATIVE_WINDOW_SIZE");
+    if (!size || sscanf(size, "%dx%d", &env_w, &env_h) != 2) env_w = env_h = 0;
+
+    const WindowStartupIn in = {
+        .restore = has_restore ? &restore : NULL,
+        .cli_mode = g_forced_window_mode,
+        .stored_mode = stored_window_mode(),
+        .env_w = env_w,
+        .env_h = env_h,
+        .persisted = has_persisted ? &persisted : NULL,
+    };
+    window_state_resolve(&in, &g_ws);
+    g_ws_enabled = 1;
+    // the forced (CLI) mode of the previous process carries over as forced, a stored one
+    // as the store's value: apply_window_mode then already agrees with the window
+    g_forced_window_mode = g_ws.state.forced ? g_ws.state.mode : -1;
+    if (!g_ws.state.forced) g_rs.window_mode = g_ws.state.mode;
+    *width = g_ws.state.w;
+    *height = g_ws.state.h;
+    return 1;
+#else
+    (void) width;
+    (void) height;
+    (void) enabled;
+    return 0;
+#endif
+}
+
+void client_render_window_created(Client *client) {
+#ifndef __EMSCRIPTEN__
+    if (!g_ws_enabled || !client || !client->window) return;
+    GLFWwindow *window = client->window;
+    const WindowState *s = &g_ws.state;
+    g_ws_client = client;
+    client->windowed_rect.x = s->x;
+    client->windowed_rect.y = s->y;
+    client->windowed_rect.width = s->w;
+    client->windowed_rect.height = s->h;
+    client->windowed_maximized = s->maximized;
+    g_track_rect = 1; // the rect above is the windowed one: set_window_mode must not read the hidden window's
+    if (g_ws.has_pos && (!can_position() || !position_on_a_monitor(s))) g_ws.has_pos = 0;
+
+    WindowStep steps[WINDOW_STEPS_MAX];
+    const int count = window_state_steps(&g_ws, steps);
+    for (int i = 0; i < count; i++) {
+        switch (steps[i]) {
+            case WINDOW_STEP_CREATE_HIDDEN: break; // main.c: GLFW_VISIBLE false
+            case WINDOW_STEP_POSITION:
+                if (can_position()) glfwSetWindowPos(window, s->x, s->y);
+                break;
+            case WINDOW_STEP_FULLSCREEN: set_window_mode(client, RS_FULLSCREEN); break;
+            case WINDOW_STEP_BORDERLESS: set_window_mode(client, RS_BORDERLESS); break;
+            case WINDOW_STEP_MAXIMIZE: glfwMaximizeWindow(window); break;
+            case WINDOW_STEP_SHOW: glfwShowWindow(window); break;
+        }
+    }
+    if (!g_ws.has_pos && can_position()) {
+        if (s->mode == RS_WINDOWED) {
+            glfwGetWindowPos(window, &client->windowed_rect.x, &client->windowed_rect.y); // where the window manager put it
+        } else {
+            // opened fullscreen / borderless: windowed mode later returns centred on the primary monitor
+            GLFWmonitor *monitor = glfwGetPrimaryMonitor();
+            const GLFWvidmode *vid = monitor ? glfwGetVideoMode(monitor) : NULL;
+            int mx = 0, my = 0;
+            if (monitor) glfwGetMonitorPos(monitor, &mx, &my);
+            if (vid) {
+                client->windowed_rect.x = mx + (vid->width - s->w) / 2;
+                client->windowed_rect.y = my + (vid->height - s->h) / 2;
+            }
+        }
+    }
+    glfwSetWindowPosCallback(window, window_pos_cb);
+    glfwSetWindowSizeCallback(window, window_size_cb);
+    glfwSetWindowMaximizeCallback(window, window_maximize_cb);
+    printf("[window] opened %s%s, windowed %dx%d%s%s%s\n",
+           s->mode == RS_FULLSCREEN ? "fullscreen" : s->mode == RS_BORDERLESS ? "borderless" : "windowed",
+           s->forced ? " (session)" : "", s->w, s->h, s->maximized ? " maximized" : "", g_ws.has_pos ? " at a kept position" : "",
+           g_ws.restored ? " (restored after restart)" : "");
+#else
+    (void) client;
+#endif
+}
+
+int client_render_window_restored(void) {
+#ifndef __EMSCRIPTEN__
+    return g_ws_enabled && g_ws.restored;
+#else
+    return 0;
+#endif
+}
+
+void client_render_window_before_exec(Client *client) {
+#ifndef __EMSCRIPTEN__
+    if (!g_ws_enabled || !client || !client->window) return;
+    WindowState s;
+    capture_window_state(client, &s);
+    char text[WINDOW_STATE_TEXT_MAX];
+    if (window_state_encode(&s, text, sizeof(text))) {
+        set_env(WINDOW_STATE_ENV, text);
+        printf("[window] restart with %s=%s\n", WINDOW_STATE_ENV, text);
+    }
+    persist_window_state(&s);
+    release_display_mode(client);
+    fflush(stdout);
+#else
+    (void) client;
+#endif
+}
+
+void client_render_window_exit(Client *client) {
+#ifndef __EMSCRIPTEN__
+    if (!g_ws_enabled || !client || !client->window) return;
+    WindowState s;
+    capture_window_state(client, &s);
+    persist_window_state(&s);
+    release_display_mode(client);
+#else
+    (void) client;
+#endif
+}
+
 // ---------------------------------------------------------------- frame pacing
 
 #define FPS_RING 4096
@@ -605,8 +903,12 @@ int client_render_fps(void) {
 }
 
 void client_render_frame_end(Client *client) {
-    (void) client;
     count_frame();
+#ifndef __EMSCRIPTEN__
+    settle_windowed_rect(client);
+#else
+    (void) client;
+#endif
 
     const double now = now_ms();
     if (g_fps_log && now - g_last_fps_log_ms >= 1000.0) {

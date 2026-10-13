@@ -681,6 +681,12 @@ else ()
     target_link_libraries(qr_code_test PRIVATE cJSON)
     add_test(NAME qr_code_test COMMAND qr_code_test ${CMAKE_SOURCE_DIR})
 
+    # window_state_test: the window state F4 / the Settings relaunch pass to the new process
+    # (KRUNKNATIVE_RESTORE_WINDOW) and a normal restart keeps (client/src/window_state.c)
+    add_executable(window_state_test client/tests/window_state_test.c client/src/window_state.c)
+    target_include_directories(window_state_test PRIVATE client/include)
+    add_test(NAME window_state_test COMMAND window_state_test)
+
     # meshopt_test: the EXT_meshopt_compression decoder (client/lib/meshopt, client/src/gltf_meshopt.c)
     # against the meshoptimizer npm decoder's goldens (client/tests/data/meshopt_golden.json)
     add_executable(meshopt_test client/tests/meshopt_test.c client/src/gltf_meshopt.c)

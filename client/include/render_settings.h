@@ -141,6 +141,24 @@ void client_render_force_window_mode(int mode);
 // F11: windowed <-> fullscreen (or borderless when that was the chosen mode); persisted.
 void client_render_toggle_fullscreen(Client *client);
 
+// Native window state across F4 / relaunch / restarts (window_state.h). main.c, before
+// glfwCreateWindow: reads and clears KRUNKNATIVE_RESTORE_WINDOW, resolves the startup
+// window (restore > CLI flag > stored windowMode; KRUNKNATIVE_WINDOW_SIZE > the kept rect)
+// and sets the creation size. Returns 1 when the window must be created hidden
+// (GLFW_VISIBLE false) for client_render_window_created; enabled = 0 (headless, the scenario
+// renderer) only clears the variable. Web: no-ops.
+int client_render_window_prepare(int *width, int *height, int enabled);
+// Right after glfwCreateWindow: place, switch to the mode / maximize, then show the window
+// (before any frame), and start tracking the windowed rect.
+void client_render_window_created(Client *client);
+// 1 when the window came from KRUNKNATIVE_RESTORE_WINDOW (its size wins over Resolution).
+int client_render_window_restored(void);
+// Right before exec (F4 app_reload, the Settings relaunch): KRUNKNATIVE_RESTORE_WINDOW for
+// the new process, the kept rect, and the desktop video mode back.
+void client_render_window_before_exec(Client *client);
+// Normal exit: keep the windowed rect + maximized flag, the desktop video mode back.
+void client_render_window_exit(Client *client);
+
 // Frame pacing (main.c client_frame). Web: Krunker's rAF frame skipping - returns 0
 // when this animation frame must be skipped. Native: always 1.
 int client_render_frame_due(void);

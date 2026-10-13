@@ -521,7 +521,9 @@ static void apply_resolution(void) {
     if (!parse_size(value, &w, &h)) return;
     client->windowed_rect.width = w;
     client->windowed_rect.height = h;
-    if (glfwGetWindowAttrib(client->window, GLFW_DECORATED)) glfwSetWindowSize(client->window, w, h); // not borderless
+    // not borderless; maximized: the size un-maximize returns to (the rect kept above)
+    if (glfwGetWindowAttrib(client->window, GLFW_DECORATED) && !glfwGetWindowAttrib(client->window, GLFW_MAXIMIZED))
+        glfwSetWindowSize(client->window, w, h);
 #endif
 }
 
@@ -611,6 +613,7 @@ static void relaunch(void) {
     // the next process reads the settings again: drop what this one put into the environment
     if (!g_cs.brain_env_was_set) set_env("KRUNKNATIVE_BRAIN_URL", NULL);
     if (g_cs.audio_env_set) set_env("KRUNKNATIVE_AUDIO_BACKEND", NULL);
+    client_render_window_before_exec(g_cs.client ? g_cs.client : menu_ui()->client); // KRUNKNATIVE_RESTORE_WINDOW
     fflush(stdout);
     fflush(stderr);
 #if defined(_WIN32)
@@ -704,8 +707,9 @@ void client_settings_startup(Client *client, int *offline) {
     audio_set_output_device(output); // before audio_init: opened there (default when missing)
     apply_priority();
     apply_raw_input();
+    // KRUNKNATIVE_WINDOW_SIZE and the window F4 / a relaunch restored keep their size
     const char *size = getenv("KRUNKNATIVE_WINDOW_SIZE");
-    if (!(size && *size)) apply_resolution();
+    if (!(size && *size) && !client_render_window_restored()) apply_resolution();
     if (offline && cs_bool("startOffline")) {
         *offline = 1;
         printf("[client] start offline (Client tab)\n");

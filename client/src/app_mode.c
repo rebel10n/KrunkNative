@@ -315,6 +315,7 @@ void app_reload(const char *url) {
     else if (!realpath(g_exec_argv[0], path)) snprintf(path, sizeof(path), "%s", g_exec_argv[0]);
 #endif
     fprintf(stderr, "[app] reload: restarting %s\n", path);
+    client_render_window_before_exec(g_app.client); // the new process reopens the window as it is now
     fflush(NULL);
 #ifdef _WIN32
     _execv(path, (const char *const *) g_exec_argv);
