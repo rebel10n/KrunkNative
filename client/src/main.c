@@ -1385,6 +1385,16 @@ static void window_focus_callback(GLFWwindow *window, const int focused) {
 static void key_callback(GLFWwindow *window, const int key, const int scancode, const int action, const int mods) {
     Client *client = glfwGetWindowUserPointer(window);
 
+#ifndef __EMSCRIPTEN__ // the browser owns fullscreen on the web (and emscripten's GLFW has no monitors)
+    // F11: windowed <-> fullscreen, as the browser's F11 in Krunker. An event (not a per-frame poll),
+    // so a quick tap is never missed at a low frame rate, and in every state: menu, end screen,
+    // death, console and chat included. Reserved: never reaches keybinds or the page.
+    if (key == GLFW_KEY_F11) {
+        if (action == GLFW_PRESS && client) client_render_toggle_fullscreen(client); // persisted as windowMode
+        return;
+    }
+#endif
+
     ks_client_key(client, key, scancode, action, mods); // KrunkScript onKeyPress / onKeyUp / onKeyHeld (observes only)
 
     // Keybinds first (ui_controls.c): the "Press any Key" capture, typing in #chatInput
@@ -1608,23 +1618,11 @@ static void client_tick_game(Client *client, const float now, const float frame_
         client->mouse_state.last_pos.y = (float) menu_y;
     }
 
-    // KrunkNative dev hotkeys (F11; N is premiumKeys[0] in ui_controls.c) stay on fixed keys; not while typing in chat or the
-    // console. ` opens the developer console (ui_console.c); the map cycle packet it used
-    // to send is the console command `cycle_packet`.
-    const int typing = menu_open || ui_controls_chat_focused() || ui_text_input_focused();
-
+    // F11 (fullscreen) is handled in key_callback. N is premiumKeys[0] in ui_controls.c. ` opens
+    // the developer console (ui_console.c); the map cycle packet it used to send is the console
+    // command `cycle_packet`.
     double x, y;
     glfwGetCursorPos(client->window, &x, &y);
-
-    const int fullscreen_key = !typing && glfwGetKey(client->window, GLFW_KEY_F11);
-
-#ifndef __EMSCRIPTEN__ // emscripten's GLFW has no monitor support (glfwSetWindowMonitor aborts); the browser owns fullscreen
-    if (fullscreen_key && !client->last_fullscreen_key) {
-        client_render_toggle_fullscreen(client); // windowed <-> fullscreen/borderless, persisted as windowMode
-    }
-#endif
-
-    client->last_fullscreen_key = fullscreen_key;
     if (menu_open) {
         // client_set_menu_open freed the pointer; nothing to lock or enter here.
     } else if (html_menu) {

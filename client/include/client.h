@@ -594,7 +594,6 @@ typedef struct {
     } windowed_rect;
 
     unsigned char last_debug_key:1;
-    unsigned char last_fullscreen_key:1;
     unsigned char last_swap_key:2;
     unsigned char in_game:1;
     unsigned char spawn_requested:1;

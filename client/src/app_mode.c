@@ -7,6 +7,7 @@
 #include <download_ui.h> // ?download
 #include <debug_capture.h>
 #include <input_script.h>
+#include <render_settings.h> // client_render_toggle_fullscreen (F11)
 #include <html_ui.h>
 #include <html_dom.h>
 #include <ui_logic.h> // menu_close_window (Test Map) // html_storage_get/set (knTestMap)
@@ -463,6 +464,12 @@ static void page_scroll_cb(GLFWwindow *window, const double dx, const double dy)
 
 static void page_key_cb(GLFWwindow *window, const int key, const int scancode, const int action, const int mods) {
     (void) window;
+#ifndef __EMSCRIPTEN__
+    if (key == GLFW_KEY_F11) { // fullscreen on the editor / viewer pages too (main.c key_callback)
+        if (action == GLFW_PRESS && g_app.client) client_render_toggle_fullscreen(g_app.client);
+        return;
+    }
+#endif
     const AppPage *page = input_page();
     if (page && page->key && page->key(g_app.client, key, scancode, action, mods)) return;
     html_ui_key(key, scancode, action, mods);
