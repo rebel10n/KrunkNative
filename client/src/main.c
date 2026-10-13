@@ -1483,8 +1483,13 @@ void client_enter_game(Client *client) {
 
     // setClass(classIndex, selectedSecondaryIndex): the Select Secondary pick (ui_loadout.c)
     NetEntPacket packet = {.class_index = client->menu_class_index, .secondary_index = ui_loadout_secondary(client->menu_class_index)};
+    // NetEntPacket is #pragma pack(1) (shared.h): its PlayerSkins sits at an odd offset, so the
+    // look is built in aligned locals and copied in; never hand out pointers to its members.
+    PlayerCosmetics cosmetics;
+    PlayerSkins skins;
+    PlayerCosmeticsV7 cosmetics_v7;
     // skin colour + cosmetic items (echoed back in SPAWN) and ent[2] / ent[9] weapon + melee skins (SKINS)
-    ui_loadout_ent_look(client->menu_class_index, &packet.cosmetics, &packet.skins);
+    ui_loadout_ent_look(client->menu_class_index, &cosmetics, &skins);
     // ent[6] = toggleSpect and ent[15] = slidCont ride after the cosmetics (NET_ENT_PACKET_V4_SIZE).
     packet.spectate = (uint8_t) spectate_requested();
     packet.slid_cont = (uint8_t) (ui_controls_settings()->slid_cont ? 1 : 0); // ent[15] settings.tmp.slidCont ("Requires respawn")
@@ -1497,8 +1502,11 @@ void client_enter_game(Client *client) {
     packet.anon_mode = (uint8_t) (client_render_settings()->anon_mode ? 1 : 0);
     // WP-F ENT V9: ent[15] shoeIndex, [21] petIndex, [26] wristIndex, [30] charms, [31] backIndex,
     // [32] headIndex, [33] playerCardIndex and ent[22..25] showBadges (cosmetics.c)
-    ui_loadout_cosmetics_v7(client->menu_class_index, &packet.cosmetics_v7, 1); // the Customize picks, Random resolved
-    cosmetics_route(&packet.cosmetics, &packet.cosmetics_v7);                 // v3.1.1 placements to their v7 slots
+    ui_loadout_cosmetics_v7(client->menu_class_index, &cosmetics_v7, 1); // the Customize picks, Random resolved
+    cosmetics_route(&cosmetics, &cosmetics_v7);                          // v3.1.1 placements to their v7 slots
+    packet.cosmetics = cosmetics;
+    packet.skins = skins;
+    packet.cosmetics_v7 = cosmetics_v7;
     packet.show_badges = client_show_badges();
     // A 1.0 server (INIT minor 0) drops anything longer than V4 without a spawn (no spray / skins),
     // a 1.1 server anything longer than V6 (no lagComp), a 1.3.0 server anything longer than V7

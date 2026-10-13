@@ -193,9 +193,11 @@ void scene_remove_mesh(Scene *scene, Mesh *mesh) {
 
 const Scene *sort_scene;
 
-int scene_depth_sort(const size_t *p_a_idx, const size_t *p_b_idx) {
-    const Mesh *a = sort_scene->meshes[*p_a_idx];
-    const Mesh *b = sort_scene->meshes[*p_b_idx];
+// qsort comparator over mesh indices: the exact `int (*)(const void *, const void *)` type
+// (calling it through a cast function pointer is UB, -fsanitize=function).
+int scene_depth_sort(const void *p_a_idx, const void *p_b_idx) {
+    const Mesh *a = sort_scene->meshes[*(const size_t *) p_a_idx];
+    const Mesh *b = sort_scene->meshes[*(const size_t *) p_b_idx];
 
     if (!a->visible) return 1;
     if (!b->visible) return -1;
@@ -343,7 +345,9 @@ void scene_render(const Scene *scene, Camera *camera) {
     mat4x4(camera->projection_matrix, camera->world_inverse_matrix, view_projection);
     scene_frustum_planes(view_projection, frustum);
 
-    size_t indices[scene->mesh_count];
+    // A VLA must have a positive size (C11 6.7.6.2p5): an empty scene (a fresh map, a cleared
+    // preview) still runs the camera / GL state setup and teardown around the draw loop.
+    size_t indices[scene->mesh_count ? scene->mesh_count : 1];
 
     for (size_t i = 0; i < scene->mesh_count; i++) {
         Mesh *mesh = scene->meshes[i];
@@ -357,7 +361,7 @@ void scene_render(const Scene *scene, Camera *camera) {
     }
 
     sort_scene = scene;
-    qsort(indices, scene->mesh_count, sizeof(size_t), (void *) scene_depth_sort);
+    qsort(indices, scene->mesh_count, sizeof(size_t), scene_depth_sort);
 
     int last_transparent = -1; // GL_BLEND as the last visible mesh leaves it, culled or not
 

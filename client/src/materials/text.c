@@ -4,7 +4,8 @@
 
 static unsigned int shader_program = 0;
 
-void text_material_update_uniforms(TextMaterial *material) {
+void text_material_update_uniforms(Material *base) {
+    TextMaterial *material = (TextMaterial *) base;
     const int color = glGetUniformLocation(material->base.program, "color");
     const int texture = glGetUniformLocation(material->base.program, "tex");
 
@@ -32,7 +33,7 @@ void text_material_update_uniforms(TextMaterial *material) {
     }
 }
 
-static MaterialVTable text_material_vtable = { (void *) text_material_update_uniforms };
+static MaterialVTable text_material_vtable = { text_material_update_uniforms };
 
 TextMaterial *text_material_init() {
     TextMaterial *material = calloc(1, sizeof(TextMaterial));

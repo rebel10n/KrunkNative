@@ -259,7 +259,8 @@ U(u_channel2, "iChannel2");
 U(u_channel3, "iChannel3");
 #undef U
 
-static void shadertoy_update_uniforms(ShaderToyMaterial *material) {
+static void shadertoy_update_uniforms(Material *base) {
+    ShaderToyMaterial *material = (ShaderToyMaterial *) base;
     const unsigned int program = material->base.program;
     scene_draw_state(!material->double_sided, 0, 1);
 
@@ -292,7 +293,7 @@ static void shadertoy_update_uniforms(ShaderToyMaterial *material) {
     gl_uniform_1i(&u_channel3, program, 0);
 }
 
-static const MaterialVTable shadertoy_material_vtable = {(void *) shadertoy_update_uniforms};
+static const MaterialVTable shadertoy_material_vtable = {shadertoy_update_uniforms};
 
 // getMat: shaderNum != null && shaders[shaderNum]: a ShaderToyMaterial instead of the item's own
 static void fx_use_shadertoy(Mesh *mesh, const ViewerSkin *skin) {

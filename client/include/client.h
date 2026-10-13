@@ -114,16 +114,21 @@ typedef struct {
     vec2 tex_coord;
 } vertex;
 
+typedef struct Material Material;
+
+// Each material's update_uniforms takes the Material base exactly and downcasts inside (every
+// material struct starts with `Material base`): calling through a mismatched function type is UB
+// (-fsanitize=function), so the vtable entries are never cast.
 typedef struct {
-    void (*update_uniforms)(void*);
+    void (*update_uniforms)(Material*);
 } MaterialVTable;
 
-typedef struct {
+struct Material {
     const MaterialVTable *vtable;
     unsigned char wireframe:1;
     unsigned char transparent:1;
     unsigned int program;
-} Material;
+};
 
 unsigned int shader_compile(const char*, const char*);
 void material_update_uniforms(Material*);

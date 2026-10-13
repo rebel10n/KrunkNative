@@ -4,7 +4,8 @@
 
 static unsigned int shader_program = 0;
 
-void quad_material_update_uniforms(QuadMaterial *material) {
+void quad_material_update_uniforms(Material *base) {
+    QuadMaterial *material = (QuadMaterial *) base;
     const int color = glGetUniformLocation(material->base.program, "color");
     const int aspect = glGetUniformLocation(material->base.program, "aspect");
     const int r_clip = glGetUniformLocation(material->base.program, "r_clip");
@@ -49,7 +50,7 @@ void quad_material_update_uniforms(QuadMaterial *material) {
     }
 }
 
-static MaterialVTable quad_material_vtable = { (void *) quad_material_update_uniforms };
+static MaterialVTable quad_material_vtable = { quad_material_update_uniforms };
 
 QuadMaterial *quad_material_init() {
     QuadMaterial *material = calloc(1, sizeof(QuadMaterial));

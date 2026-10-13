@@ -211,7 +211,8 @@ static void basic_upload_lights(const unsigned int program, const int lighting) 
     gl_uniform_1i(&u_point_light_count, program, count);
 }
 
-void basic_material_update_uniforms(BasicMaterial *material) {
+void basic_material_update_uniforms(Material *base) {
+    BasicMaterial *material = (BasicMaterial *) base;
     const unsigned int program = material->base.program;
     const ClientRenderSettings *render_settings = client_render_settings();
 
@@ -339,7 +340,7 @@ void basic_material_update_uniforms(BasicMaterial *material) {
     }
 }
 
-const MaterialVTable basic_material_vtable = { (void *) basic_material_update_uniforms };
+const MaterialVTable basic_material_vtable = { basic_material_update_uniforms };
 
 BasicMaterial *basic_material_init() {
     BasicMaterial *material = calloc(1, sizeof(BasicMaterial));

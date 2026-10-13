@@ -60,7 +60,8 @@ static GlUniform u_fog_enabled = GL_UNIFORM_INIT("fog_enabled");
 static GlUniform u_tone_mapping = GL_UNIFORM_INIT("tone_mapping");
 static GlUniform u_tone_mapping_exposure = GL_UNIFORM_INIT("tone_mapping_exposure");
 
-static void ocean_material_update_uniforms(OceanMaterial *material) {
+static void ocean_material_update_uniforms(Material *base) {
+    OceanMaterial *material = (OceanMaterial *) base;
     const unsigned int program = material->base.program;
     // Water: FrontSide (the plane faces up), normal blending when transparent, depth writes
     scene_draw_state(1, 0, 1);
@@ -91,7 +92,7 @@ static void ocean_material_update_uniforms(OceanMaterial *material) {
     gl_uniform_1f(&u_tone_mapping_exposure, program, l->tone_mapping_exposure);
 }
 
-static const MaterialVTable ocean_material_vtable = {(void *) ocean_material_update_uniforms};
+static const MaterialVTable ocean_material_vtable = {ocean_material_update_uniforms};
 
 static float ocean_clamp(const float v, const float lo, const float hi) {
     return v < lo ? lo : v > hi ? hi : v;

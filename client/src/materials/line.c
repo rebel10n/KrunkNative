@@ -13,7 +13,8 @@ static GlUniform u_fog_near = GL_UNIFORM_INIT("fog_near");
 static GlUniform u_fog_far = GL_UNIFORM_INIT("fog_far");
 static GlUniform u_fog_enabled = GL_UNIFORM_INIT("fog_enabled");
 
-static void line_material_update_uniforms(LineMaterial *material) {
+static void line_material_update_uniforms(Material *base) {
+    LineMaterial *material = (LineMaterial *) base;
     const unsigned int program = material->base.program;
     const RenderLighting *l = &g_render_lighting;
     gl_uniform_4f(&u_color, program, material->color.x, material->color.y, material->color.z, material->color.w);
@@ -25,7 +26,7 @@ static void line_material_update_uniforms(LineMaterial *material) {
     if (!material->depth_test) scene_draw_no_depth_test();
 }
 
-static const MaterialVTable line_material_vtable = {(void *) line_material_update_uniforms};
+static const MaterialVTable line_material_vtable = {line_material_update_uniforms};
 
 LineMaterial *line_material_init(void) {
     if (!g_line_program) {
