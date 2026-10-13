@@ -918,6 +918,7 @@ typedef struct PbImage {
     float w, h;
     uint8_t premultiplied;
     const void *vector;       /* SVG entry: rasterised at device size by the backend */
+    const void *lazy;         /* lazy raster entry (image.h): decoded when drawn, tex 0 */
 } PbImage;
 
 static int lookup_image(PaintCtx *ctx, const char *url, const char *base, int nearest, PbImage *out)
@@ -925,12 +926,18 @@ static int lookup_image(PaintCtx *ctx, const char *url, const char *base, int ne
     if (!url || !ctx->images) return 0;
     const ImageEntry *e = image_get(ctx->images, url, base);
     if (!e || e->failed || e->w <= 0 || e->h <= 0) return 0;
-    out->tex = image_texture(e, nearest);
-    if (!out->tex) out->tex = e->tex;
     out->w = (float) e->w;
     out->h = (float) e->h;
     out->premultiplied = 1;   /* image.h: textures hold premultiplied pixels */
     out->vector = e->vector ? (const void *) e : NULL;
+    out->lazy = NULL;
+    if (image_entry_lazy(e)) {
+        out->tex = 0;         /* evictable: the backend resolves the texture per draw */
+        out->lazy = e;
+        return 1;
+    }
+    out->tex = image_texture(e, nearest);
+    if (!out->tex) out->tex = e->tex;
     return out->tex != 0;
 }
 
@@ -1047,6 +1054,7 @@ static void paint_bg_layer(Painter *p, const CssComputed *s, const CssBgLayer *L
                 it.u.image.nearest = (uint8_t) nearest;
                 it.u.image.premultiplied = img.premultiplied;
                 it.u.image.vector = img.vector;
+                it.u.image.lazy = img.lazy;
                 emit(p, &it);
             }
         }
@@ -1389,6 +1397,7 @@ static void paint_replaced_content(Painter *p, const Box *b)
     it.u.image.nearest = (uint8_t) nearest;
     it.u.image.premultiplied = img.premultiplied;
     it.u.image.vector = img.vector;
+    it.u.image.lazy = img.lazy;
     emit(p, &it);
     if (clip) emit_simple(p, DL_POP_CLIP);
 }

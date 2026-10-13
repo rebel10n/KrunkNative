@@ -16,6 +16,7 @@
 // offline mode every skin. v7's new slots (head, back, shoes, pet, wrist, charm, player card)
 // have no items in that table yet, so their pickers show Krunker's None / Random cards.
 #include <ui_logic.h>
+#include <ui_vgrid.h> // the pickers' card lists are virtual grids
 #include <audio.h>
 #include <backend_ui.h>
 #include <online_mode.h> // offline mode: every skin unlocked
@@ -375,7 +376,8 @@ static int rarity_anim(const ViewerSkin *s) {
 // creator, blackM, limT, limited, itemShop, noSpin), read once.
 static const cJSON *skin_json(const int index) {
     static cJSON *skins;
-    static int loaded;
+    static const cJSON **items; // skins.json entries by index (cJSON_GetArrayItem walks the list)
+    static int loaded, count;
     if (!loaded) {
         loaded = 1;
         char *path = concat(assets_path(), "skins.json");
@@ -384,8 +386,12 @@ static const cJSON *skin_json(const int index) {
         if (path && ensure_asset_file(path) && !read_file(path, &buf, &len)) skins = cJSON_ParseWithLength((const char *) buf, len);
         free(buf);
         free(path);
+        const int n = cJSON_GetArraySize(skins);
+        items = n > 0 ? calloc((size_t) n, sizeof(*items)) : NULL;
+        const cJSON *e;
+        if (items) cJSON_ArrayForEach(e, skins) items[count++] = e;
     }
-    return cJSON_GetArrayItem(skins, index);
+    return index >= 0 && index < count ? items[index] : NULL;
 }
 
 // skin.creator || "Krunker.io"
@@ -910,6 +916,62 @@ char *ui_loadout_gen(void) {
 #define ITEM_SEARCH_HEAD(back, cls) \
     "<div id='itemSearchH'><div class='custBack' onclick='playSelect(0.1);goBackWindow(" back ")' onmouseenter='playTick();'><span class='material-icons custBackArr'>arrow_back</span></div><input id='itemSearch' type='text' placeholder='Search Item' onkeyup='searchItems(this" cls ")'><div class='winClose' onclick='playSelect(0.1);closWind()' onmouseenter='playTick();'><span class='material-icons winCloseArr'>close</span></div></div>"
 
+// ---- the open picker's card list: Select Skin (windows[14]), f1828 (hat, body, melee, ...)
+// and Select Spray. v7.1.4 writes every owned card into #skinList at once (a staff account owns
+// all 6448 store items; a weapon or type has up to ~550); here #skinList is a virtual grid
+// (ui_vgrid.h) over g_pick.view, the searched entries: the same cards in the same places, only
+// the rows near the scroll position exist in the DOM.
+typedef enum { PICK_OWNED, PICK_NONE, PICK_RANDOM, PICK_FREE_SPRAY } PickEntryKind;
+typedef struct { PickEntryKind kind; int ind, cnt; } PickEntry; // ind: store index (owned) / free spray
+typedef enum { PICKER_ITEMS, PICKER_SKIN, PICKER_SPRAY } PickerKind;
+static struct {
+    PickerKind kind;
+    char fn[32];            // select function (f1828's funcName, selectSkin, selectSpray)
+    const char *img_class;  // skinImg / skinImgC / skinImgD / skinImgP
+    char default_img[256];  // None / Random preview
+    int type, with_season;
+    PickEntry *all;
+    int n_all;
+    int *view, n_view;      // positions -> all[]: the cards searchItems keeps
+    VGrid grid;
+} g_pick;
+
+static void pick_add(const PickEntryKind kind, const int ind, const int cnt) {
+    PickEntry *grown = realloc(g_pick.all, (size_t) (g_pick.n_all + 1) * sizeof(*grown));
+    if (!grown) return;
+    g_pick.all = grown;
+    g_pick.all[g_pick.n_all++] = (PickEntry) {kind, ind, cnt};
+}
+
+static void pick_card(StrBuf *out, int pos, void *user);
+
+// New picker: entries are added with pick_add(), then pick_list() writes #skinList.
+static void pick_begin(const PickerKind kind, const char *fn, const char *img_class, const int type) {
+    free(g_pick.all);
+    free(g_pick.view);
+    g_pick.all = NULL;
+    g_pick.view = NULL;
+    g_pick.n_all = g_pick.n_view = 0;
+    g_pick.kind = kind;
+    snprintf(g_pick.fn, sizeof(g_pick.fn), "%s", fn);
+    g_pick.img_class = img_class;
+    g_pick.type = type;
+    g_pick.with_season = 1;
+}
+
+static void pick_view_all(void) {
+    free(g_pick.view);
+    g_pick.view = g_pick.n_all ? malloc((size_t) g_pick.n_all * sizeof(int)) : NULL;
+    g_pick.n_view = 0;
+    for (int i = 0; g_pick.view && i < g_pick.n_all; i++) g_pick.view[g_pick.n_view++] = i;
+}
+
+static void pick_list(StrBuf *out) {
+    pick_view_all();
+    vgrid_begin(&g_pick.grid, "skinList", g_pick.n_view, pick_card, NULL);
+    vgrid_html(&g_pick.grid, out);
+}
+
 // One owned item card of f1828 / Select Skin (weapon: the selectSkin weapon, -1 = fn(ind)).
 static void owned_card(StrBuf *out, const OwnedSkin *o, const ViewerSkin *s, const char *fn, const char *img_class, const int with_season, const int weapon) {
     const char *col = rarity_color(s);
@@ -928,24 +990,79 @@ static void owned_card(StrBuf *out, const OwnedSkin *o, const ViewerSkin *s, con
                weapon >= 0 ? "draggable='false' " : "", img_class, (s->flags & VS_RGB) ? " rgbHue" : "", img, o->ind, o->ind);
 }
 
+// One store spray card of Select Spray.
+static void spray_card(StrBuf *out, const PickEntry *e, const ViewerSkin *s) {
+    const char *col = rarity_color(s);
+    char img[256], anim[96] = "";
+    skin_thumb(e->ind, img, sizeof(img));
+    if (s->frames) snprintf(anim, sizeof(anim), "animation: sprayAnm%d %gs steps(%d) infinite;", s->frames, 1 + s->frame_t / 1000.0, s->frames);
+    sb_appendf(out, "<div class='noBtnCard%s%s' style='height:158px;color:%s;border: 5px solid %s'onclick='selectSpray(%d);cancelTip()' data-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'><div class='sprayCnt'>x%d</div>",
+               s->rarity == 5 ? "" : " blackShad", rarity_anim(s) ? " rainbow" : "", col, col, e->ind, e->ind, e->cnt);
+    sb_append_esc(out, s->name ? s->name : "");
+    sb_appendf(out, "<div class='itemOwn'>Spray</div><div draggable='false' class='sprayImg' onmouseenter='playTick()' style='background: url(&quot;%s&quot;) -1px;%s'></div></div>", img, anim);
+}
+
+static void pick_card(StrBuf *out, const int pos, void *user) {
+    (void) user;
+    if (pos < 0 || pos >= g_pick.n_view) return;
+    const PickEntry *e = &g_pick.all[g_pick.view[pos]];
+    const char *fn = g_pick.fn, *img_class = g_pick.img_class, *img = g_pick.default_img;
+    const int type = g_pick.type;
+    if (g_pick.kind == PICKER_SPRAY) {
+        if (e->kind == PICK_RANDOM) {
+            sb_append(out, "<div class='noBtnCard blackShad' onclick='selectSpray(-2)' style='height:158px;border: 5px solid lightgrey'>Random<div class='itemOwn' style='opacity:0;''>by \?\?\?</div><img draggable='false' style='margin-top:10px;width:110px;' class='noBtnImgC skinSil' src='textures/sprays/0.png' onmouseenter='playTick()'><div class='skinRandom blackShad' style='top: 80px;'>?</div></div>");
+        } else if (e->kind == PICK_FREE_SPRAY) {
+            const int i = e->ind, frames = BASE_SPRAYS[i].id == 88 ? 4 : 0; // Verb: 4 frames x 250 ms
+            sb_appendf(out, "<div class='noBtnCard blackShad' style='height:158px;border: 5px solid lightgrey'onclick='selectSpray(%d);cancelTip()' data-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'>%s<div class='itemOwn'>Free Spray</div><div draggable='false' class='sprayImg' onmouseenter='playTick()' style='background: url(&quot;textures/sprays/%d.png&quot;) -1px;%s'></div></div>",
+                       i, i, BASE_SPRAYS[i].name, BASE_SPRAYS[i].id, frames ? "animation: sprayAnm4 1.25s steps(4) infinite;" : "");
+        } else {
+            const ViewerSkin *s = store_skin(e->ind);
+            if (s) spray_card(out, e, s);
+        }
+        return;
+    }
+    if (g_pick.kind == PICKER_SKIN) {
+        if (e->kind == PICK_NONE)
+            sb_appendf(out, "<div class='skinCard blackShad' style='border:5px solid lightgrey' onmouseenter='playTick()' onclick='selectSkin(-3,%d)'>None<div class='itemOwn'>Default</div><div class='itemSea' style='opacity:0;'>Season 1</div><img draggable='false' class='skinImg' src='%s'></div>", g_skin_weapon, img);
+        else if (e->kind == PICK_RANDOM)
+            sb_appendf(out, "<div class='skinCard blackShad' style='border:5px solid lightgrey' onmouseenter='playTick()' onclick='selectSkin(-2,%d)'>Random<div class='itemOwn' style='opacity:0;'>by \?\?\?</div><div class='itemSea' style='opacity:0;'>All Seasons</div><img draggable='false' class='skinImg skinSil' onmouseenter='playTick()' src='%s'><div class='skinRandom blackShad' style='top:68px'>?</div></div>", g_skin_weapon, img);
+        else {
+            const ViewerSkin *s = store_skin(e->ind);
+            const OwnedSkin o = {e->ind, e->cnt, 0};
+            if (s) owned_card(out, &o, s, "selectSkin", "skinImg", 1, s->weapon - 1);
+        }
+        return;
+    }
+    if (e->kind == PICK_NONE)
+        sb_appendf(out, "<div class='skinCard blackShad' style='border:5px solid lightgrey' onmouseenter='playTick()' onclick='%s(-3)'>%s<div class='itemOwn'>Default</div>%s<img class='%s' src='%s'></div>",
+                   fn, type == 3 ? "Combat Knife" : "None", type == 5 ? "" : "<div class='itemSea' style='opacity:0;'>Season 1</div>", img_class, img);
+    else if (e->kind == PICK_RANDOM)
+        sb_appendf(out, "<div class='skinCard blackShad' style='border:5px solid lightgrey' onmouseenter='playTick()' onclick='%s(-2)'>Random<div class='itemOwn' style='opacity:0;'>by \?\?\?</div>%s<img class='%s skinSil' src='%s'><div class='skinRandom blackShad'>?</div></div>",
+                   fn, type == 5 ? "" : "<div class='itemSea' style='opacity:0;'>All Seasons</div>", img_class, img);
+    else {
+        const ViewerSkin *s = store_skin(e->ind);
+        const OwnedSkin o = {e->ind, e->cnt, 0};
+        if (s) owned_card(out, &o, s, fn, img_class, type != 5, -1);
+    }
+}
+
 // f1828(funcName, type): None (-3) + Random (-2) + the owned items of that store type.
 static char *gen_items_list(const char *fn, const int type) {
     const char *img_class = type ? (type == 16 ? "skinImgP" : type == 5 ? "skinImgD" : "skinImgC") : "skinImg";
-    char img[64];
-    snprintf(img, sizeof(img), "textures/previews/cosmetics/%d_default.png", type);
-    StrBuf out = {0};
-    sb_append(&out, ITEM_SEARCH_HEAD("2", "") "<div id='skinList' style='overflow-y: scroll;height: calc(100% - 95px);'>");
-    sb_appendf(&out, "<div class='skinCard blackShad' style='border:5px solid lightgrey' onmouseenter='playTick()' onclick='%s(-3)'>%s<div class='itemOwn'>Default</div>%s<img class='%s' src='%s'></div>",
-               fn, type == 3 ? "Combat Knife" : "None", type == 5 ? "" : "<div class='itemSea' style='opacity:0;'>Season 1</div>", img_class, img);
-    sb_appendf(&out, "<div class='skinCard blackShad' style='border:5px solid lightgrey' onmouseenter='playTick()' onclick='%s(-2)'>Random<div class='itemOwn' style='opacity:0;'>by \?\?\?</div>%s<img class='%s skinSil' src='%s'><div class='skinRandom blackShad'>?</div></div>",
-               fn, type == 5 ? "" : "<div class='itemSea' style='opacity:0;'>All Seasons</div>", img_class, img);
+    pick_begin(PICKER_ITEMS, fn, img_class, type);
+    snprintf(g_pick.default_img, sizeof(g_pick.default_img), "textures/previews/cosmetics/%d_default.png", type);
+    pick_add(PICK_NONE, -3, 0);
+    pick_add(PICK_RANDOM, -2, 0);
     int n;
     OwnedSkin *owned = owned_skins(&n, 0);
     for (int i = 0; i < n; i++) {
         const ViewerSkin *s = store_skin(owned[i].ind);
-        if (s && s->type == type) owned_card(&out, &owned[i], s, fn, img_class, type != 5, -1);
+        if (s && s->type == type) pick_add(PICK_OWNED, owned[i].ind, owned[i].cnt);
     }
     free(owned);
+    StrBuf out = {0};
+    sb_append(&out, ITEM_SEARCH_HEAD("2", "") "<div id='skinList' style='overflow-y: scroll;height: calc(100% - 95px);'>");
+    pick_list(&out);
     sb_append(&out, "</div>");
     return sb_finish(&out);
 }
@@ -953,21 +1070,22 @@ static char *gen_items_list(const char *fn, const int type) {
 // windows[14] Select Skin for weapon activeSkinSel (back to Select Secondary for secondaries).
 static char *gen_skins(void) {
     const LoadoutWeapon *w = weapon_at(g_skin_weapon);
-    char img[64];
-    snprintf(img, sizeof(img), "textures/previews/weapons/%s.png", w && w->src ? w->src : "undefined");
-    StrBuf out = {0};
-    sb_appendf(&out, "<div id='itemSearchH'><div class='custBack' onclick='playSelect(0.1);goBackWindow(%d)' onmouseenter='playTick();'><span class='material-icons custBackArr'>arrow_back</span></div><input id='itemSearch' type='text' placeholder='Search Item' onkeyup='searchItems(this)'><div class='winClose' onclick='playSelect(0.1);closWind()' onmouseenter='playTick();'><span class='material-icons winCloseArr'>close</span></div></div>",
-               w && w->secondary ? 19 : 2);
-    sb_append(&out, "<div id='skinList' style='margin-top: 8px;overflow-y: scroll;height: calc(100% - 95px);'>");
-    sb_appendf(&out, "<div class='skinCard blackShad' style='border:5px solid lightgrey' onmouseenter='playTick()' onclick='selectSkin(-3,%d)'>None<div class='itemOwn'>Default</div><div class='itemSea' style='opacity:0;'>Season 1</div><img draggable='false' class='skinImg' src='%s'></div>", g_skin_weapon, img);
-    sb_appendf(&out, "<div class='skinCard blackShad' style='border:5px solid lightgrey' onmouseenter='playTick()' onclick='selectSkin(-2,%d)'>Random<div class='itemOwn' style='opacity:0;'>by \?\?\?</div><div class='itemSea' style='opacity:0;'>All Seasons</div><img draggable='false' class='skinImg skinSil' onmouseenter='playTick()' src='%s'><div class='skinRandom blackShad' style='top:68px'>?</div></div>", g_skin_weapon, img);
+    pick_begin(PICKER_SKIN, "selectSkin", "skinImg", 0);
+    snprintf(g_pick.default_img, sizeof(g_pick.default_img), "textures/previews/weapons/%s.png", w && w->src ? w->src : "undefined");
+    pick_add(PICK_NONE, -3, 0);
+    pick_add(PICK_RANDOM, -2, 0);
     int n;
     OwnedSkin *owned = owned_skins(&n, 0);
     for (int i = 0; i < n; i++) {
         const ViewerSkin *s = store_skin(owned[i].ind);
-        if (s && !s->type && s->weapon == g_skin_weapon + 1) owned_card(&out, &owned[i], s, "selectSkin", "skinImg", 1, s->weapon - 1);
+        if (s && !s->type && s->weapon == g_skin_weapon + 1) pick_add(PICK_OWNED, owned[i].ind, owned[i].cnt);
     }
     free(owned);
+    StrBuf out = {0};
+    sb_appendf(&out, "<div id='itemSearchH'><div class='custBack' onclick='playSelect(0.1);goBackWindow(%d)' onmouseenter='playTick();'><span class='material-icons custBackArr'>arrow_back</span></div><input id='itemSearch' type='text' placeholder='Search Item' onkeyup='searchItems(this)'><div class='winClose' onclick='playSelect(0.1);closWind()' onmouseenter='playTick();'><span class='material-icons winCloseArr'>close</span></div></div>",
+               w && w->secondary ? 19 : 2);
+    sb_append(&out, "<div id='skinList' style='margin-top: 8px;overflow-y: scroll;height: calc(100% - 95px);'>");
+    pick_list(&out);
     sb_append(&out, "</div>");
     return sb_finish(&out);
 }
@@ -1140,29 +1258,23 @@ static char *gen_streaks(void) {
 // windows[8] Select Spray: Random, then every spray the player has (free ones first: the
 // default sprays; then the owned store sprays by rarity), with their frame animations.
 static char *gen_sprays(void) {
-    StrBuf cards = {0}, style = {0};
+    StrBuf style = {0};
     int frames_seen[16], frames_n = 0;
-    sb_append(&cards, ITEM_SEARCH_HEAD("2", ", &quot;noBtnCard&quot;") "<div id='skinList' style='overflow-y: scroll;height: calc(100% - 95px);'>");
-    sb_append(&cards, "<div class='noBtnCard blackShad' onclick='selectSpray(-2)' style='height:158px;border: 5px solid lightgrey'>Random<div class='itemOwn' style='opacity:0;''>by \?\?\?</div><img draggable='false' style='margin-top:10px;width:110px;' class='noBtnImgC skinSil' src='textures/sprays/0.png' onmouseenter='playTick()'><div class='skinRandom blackShad' style='top: 80px;'>?</div></div>");
+    pick_begin(PICKER_SPRAY, "selectSpray", "", 4);
+    pick_add(PICK_RANDOM, -2, 0);
     for (int i = 0; i < SPRAYS_BASE_COUNT; i++) {
-        const int frames = BASE_SPRAYS[i].id == 88 ? 4 : 0; // Verb: 4 frames x 250 ms
-        if (frames && frames_n < 16) {
-            sb_appendf(&style, "@keyframes sprayAnm%d {100%%{background-position:-%dpx}}", frames, frames * 110);
-            frames_seen[frames_n++] = frames;
+        if (BASE_SPRAYS[i].id == 88 && frames_n < 16) { // Verb: 4 frames x 250 ms
+            sb_appendf(&style, "@keyframes sprayAnm%d {100%%{background-position:-%dpx}}", 4, 4 * 110);
+            frames_seen[frames_n++] = 4;
         }
-        sb_appendf(&cards, "<div class='noBtnCard blackShad' style='height:158px;border: 5px solid lightgrey'onclick='selectSpray(%d);cancelTip()' data-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'>%s<div class='itemOwn'>Free Spray</div><div draggable='false' class='sprayImg' onmouseenter='playTick()' style='background: url(&quot;textures/sprays/%d.png&quot;) -1px;%s'></div></div>",
-                   i, i, BASE_SPRAYS[i].name, BASE_SPRAYS[i].id, frames ? "animation: sprayAnm4 1.25s steps(4) infinite;" : "");
+        pick_add(PICK_FREE_SPRAY, i, 0);
     }
     int n;
     OwnedSkin *owned = owned_skins(&n, 1);
     for (int i = 0; i < n; i++) {
         const ViewerSkin *s = store_skin(owned[i].ind);
         if (!s || s->type != 4) continue;
-        const char *col = rarity_color(s);
-        char img[256], anim[96] = "";
-        skin_thumb(owned[i].ind, img, sizeof(img));
         if (s->frames) { // UTILS.getFrameAnim(b7, "sprayAnm") and its @keyframes
-            snprintf(anim, sizeof(anim), "animation: sprayAnm%d %gs steps(%d) infinite;", s->frames, 1 + s->frame_t / 1000.0, s->frames);
             int seen = 0;
             for (int k = 0; k < frames_n; k++) seen |= frames_seen[k] == s->frames;
             if (!seen && frames_n < 16) {
@@ -1170,19 +1282,16 @@ static char *gen_sprays(void) {
                 frames_seen[frames_n++] = s->frames;
             }
         }
-        sb_appendf(&cards, "<div class='noBtnCard%s%s' style='height:158px;color:%s;border: 5px solid %s'onclick='selectSpray(%d);cancelTip()' data-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'><div class='sprayCnt'>x%d</div>",
-                   s->rarity == 5 ? "" : " blackShad", rarity_anim(s) ? " rainbow" : "", col, col, owned[i].ind, owned[i].ind, owned[i].cnt);
-        sb_append_esc(&cards, s->name ? s->name : "");
-        sb_appendf(&cards, "<div class='itemOwn'>Spray</div><div draggable='false' class='sprayImg' onmouseenter='playTick()' style='background: url(&quot;%s&quot;) -1px;%s'></div></div>", img, anim);
+        pick_add(PICK_OWNED, owned[i].ind, owned[i].cnt);
     }
     free(owned);
-    sb_append(&cards, "</div>");
-    char *c = sb_finish(&cards), *st = sb_finish(&style);
+    char *st = sb_finish(&style);
     StrBuf out = {0};
     if (st[0]) sb_appendf(&out, "<style>%s</style>", st);
-    sb_append(&out, c);
-    free(c);
     free(st);
+    sb_append(&out, ITEM_SEARCH_HEAD("2", ", &quot;noBtnCard&quot;") "<div id='skinList' style='overflow-y: scroll;height: calc(100% - 95px);'>");
+    pick_list(&out);
+    sb_append(&out, "</div>");
     return sb_finish(&out);
 }
 
@@ -1755,23 +1864,52 @@ static const char *harg_str(const HtmlArg *args, const int argc, const int i) {
     return i < argc && args[i].kind == HTML_ARG_STR && args[i].str ? args[i].str : "";
 }
 
-// searchItems(input, cardClass): hide the cards of #skinList whose text does not contain the query.
-static void search_items(const HtmlEvent *ev, const char *card_class) {
+// UTILS.compareString(a, b): either contains the other, case-insensitively.
+static int compare_string(const char *a, const char *b) {
+    if (!a || !b) return 0;
+    char la[256], lb[256];
+    snprintf(la, sizeof(la), "%s", a);
+    snprintf(lb, sizeof(lb), "%s", b);
+    for (char *c = la; *c; c++) *c = (char) tolower((unsigned char) *c);
+    for (char *c = lb; *c; c++) *c = (char) tolower((unsigned char) *c);
+    return strstr(la, lb) != NULL || strstr(lb, la) != NULL;
+}
+
+// v7.1.4 searchItems' test of one card (data-index = store index).
+static int search_match(const PickEntry *e, const char *q) {
+    if (e->kind == PICK_FREE_SPRAY) return compare_string(q, BASE_SPRAYS[e->ind].name); // KrunkNative's free sprays: by name
+    const ViewerSkin *s = e->kind == PICK_OWNED ? store_skin(e->ind) : NULL;
+    if (!q[0] || !s) return 1;
+    const cJSON *j = skin_json(e->ind);
+    if (compare_string(q, cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(j, "keyW")))) return 1;
+    if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j, "drop")) && compare_string(q, "drops")) return 1;
+    if (compare_string(q, cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(j, "limT")))) return 1;
+    const LoadoutWeapon *w = s->weapon ? weapon_at(s->weapon - 1) : NULL;
+    if (w && compare_string(q, w->name)) return 1;
+    if (compare_string(q, s->name)) return 1;
+    const cJSON *c;
+    cJSON_ArrayForEach(c, cJSON_GetObjectItemCaseSensitive(j, "creators")) if (compare_string(q, cJSON_GetStringValue(c))) return 1;
+    return 0;
+}
+
+// searchItems(input, cardClass): v7.1.4 hides the #skinList cards past the first two that do not
+// match (keyword, "drops", limited tag, weapon, name, creators); here the grid shows the rest.
+static void search_items(const HtmlEvent *ev) {
     char q[128] = "";
     HtmlElem input = html_dom_by_id("itemSearch");
     if (input) html_dom_get_value(input, q, sizeof(q));
     else if (ev && ev->value) snprintf(q, sizeof(q), "%s", ev->value);
-    for (char *c = q; *c; c++) *c = (char) tolower((unsigned char) *c);
-    char sel_q[64];
-    snprintf(sel_q, sizeof(sel_q), "#skinList .%s", card_class && card_class[0] ? card_class : "skinCard");
-    HtmlElem cards[2048];
-    const int n = html_dom_query_all(0, sel_q, cards, 2048);
-    for (int i = 0; i < n; i++) {
-        char text[256] = "";
-        html_dom_get_text(cards[i], text, sizeof(text));
-        for (char *c = text; *c; c++) *c = (char) tolower((unsigned char) *c);
-        html_dom_set_display(cards[i], !q[0] || strstr(text, q) ? "" : "none");
+    if (!g_pick.view) return;
+    g_pick.n_view = 0;
+    for (int i = 0; i < g_pick.n_all; i++) {
+        if (i < 2 || search_match(&g_pick.all[i], q)) g_pick.view[g_pick.n_view++] = i;
     }
+    vgrid_reset(&g_pick.grid, g_pick.n_view);
+}
+
+// The open picker's grid follows the scroll position (client_menu_tick).
+void ui_loadout_tick(void) {
+    if (g_pick.view) vgrid_tick(&g_pick.grid);
 }
 
 // Inline handlers this module owns (ui_handlers.c h_fallback); -1 = not ours.
@@ -1821,7 +1959,7 @@ int ui_loadout_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     if (!strcmp(name, "removeScope")) { remove_custom_image("krk_custScps", harg_int(args, argc, 0, -1), 41); return 1; }
     if (!strcmp(name, "windows.31.newPop") || !strcmp(name, "windows.40.newPop")) { new_image_pop(name[8] == '3' ? 31 : 40); return 1; }
     if (!strcmp(name, "windows.31.addNew") || !strcmp(name, "windows.40.addNew")) { new_image_add(name[8] == '3' ? 31 : 40); return 1; }
-    if (!strcmp(name, "searchItems")) { search_items(ev, harg_str(args, argc, 1)); return 1; }
+    if (!strcmp(name, "searchItems")) { search_items(ev); return 1; }
     if (!strcmp(name, "windows.34.switchTab")) {
         g_log_tab = harg_int(args, argc, 0, g_log_tab);
         menu_rerender_if_open(35);

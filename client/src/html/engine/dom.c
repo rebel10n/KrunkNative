@@ -406,6 +406,7 @@ struct DomInvalidation {
     uint32_t cap;
     uint32_t count;
     unsigned global;
+    int structural_ctx;              /* dom_inv_add_structural_ctx entries */
 };
 
 DomInvalidation *dom_inv_create(void)
@@ -425,6 +426,7 @@ void dom_inv_clear(DomInvalidation *inv)
     inv->slots = NULL;
     inv->cap = inv->count = 0;
     inv->global = 0;
+    inv->structural_ctx = 0;
 }
 
 void dom_inv_destroy(DomInvalidation *inv)
@@ -549,9 +551,33 @@ void dom_inv_add_state(DomInvalidation *inv, uint32_t state, int key_kind, const
     inv_put(inv, key, k, flags);
 }
 
+void dom_inv_add_structural_ctx(DomInvalidation *inv, int key_kind, const char *k_name, size_t k_len,
+                                int ctx_kind, const char *ctx, size_t ctx_len)
+{
+    char name[256], key[300];
+    const char prefix[2] = { '^', (char)(key_kind != 0 ? key_kind : '*') };
+    int n = snprintf(name, sizeof(name), "%.*s|%c%.*s", key_kind != 0 ? (int)k_len : 0, key_kind != 0 ? k_name : "",
+                     ctx_kind, (int)ctx_len, ctx);
+    if (n <= 0 || (size_t)n >= sizeof(name)) {
+        dom_inv_add_structural(inv, key_kind, k_name, k_len); /* too long: unconditional */
+        return;
+    }
+    size_t k = inv_key(key, sizeof(key), prefix, 2, name, (size_t)n);
+    inv_put(inv, key, k, DOM_INV_SUBJECT);
+    inv->structural_ctx = 1;
+}
+
 void dom_inv_add_global(DomInvalidation *inv, unsigned global_flags)
 {
     inv->global |= global_flags;
+}
+
+void dom_inv_add_structural(DomInvalidation *inv, int key_kind, const char *k_name, size_t k_len)
+{
+    char key[256];
+    const char prefix[2] = { '~', (char)(key_kind != 0 ? key_kind : '*') };
+    size_t k = inv_key(key, sizeof(key), prefix, 2, key_kind != 0 ? k_name : "", key_kind != 0 ? k_len : 0);
+    inv_put(inv, key, k, DOM_INV_SUBJECT);
 }
 
 void dom_inv_merge(DomInvalidation *dst, const DomInvalidation *src)
@@ -565,6 +591,7 @@ void dom_inv_merge(DomInvalidation *dst, const DomInvalidation *src)
         }
     }
     dst->global |= src->global;
+    dst->structural_ctx |= src->structural_ctx;
 }
 
 uint32_t dom_inv_entry_count(const DomInvalidation *inv)
@@ -668,6 +695,104 @@ static void apply_inv(Dom *dom, lxb_dom_node_t *node, unsigned flags)
     }
 }
 
+static unsigned inv_structural_key(const DomInvalidation *inv, int kind, const char *name, size_t len)
+{
+    char key[256];
+    const char prefix[2] = { '~', (char)kind };
+    size_t k = inv_key(key, sizeof(key), prefix, 2, name, len);
+    return inv_get(inv, key, k);
+}
+
+static int inv_structural_ctx_key(const DomInvalidation *inv, int kind, const char *name, size_t len, int ctx_kind,
+                                  const char *ctx, size_t ctx_len)
+{
+    char buf[256], key[300];
+    const char prefix[2] = { '^', (char)kind };
+    int n = snprintf(buf, sizeof(buf), "%.*s|%c%.*s", (int)len, name, ctx_kind, (int)ctx_len, ctx);
+    if (n <= 0 || (size_t)n >= sizeof(buf)) {
+        return 0;
+    }
+    size_t k = inv_key(key, sizeof(key), prefix, 2, buf, (size_t)n);
+    return inv_get(inv, key, k) != 0;
+}
+
+/* A tag / universal structural compound under a .class / #id ancestor compound
+ * (dom_inv_add_structural_ctx): does one of `node`'s ancestors carry that key? */
+static int inv_structural_ctx(const DomInvalidation *inv, lxb_dom_node_t *node, const char *tag, size_t tag_len)
+{
+    for (lxb_dom_node_t *a = node->parent; a != NULL && a->type == LXB_DOM_NODE_TYPE_ELEMENT; a = a->parent) {
+        lxb_dom_element_t *ae = lxb_dom_interface_element(a);
+        if (ae->attr_id != NULL && ae->attr_id->value != NULL && ae->attr_id->value->length > 0) {
+            const char *id = (const char *)ae->attr_id->value->data;
+            size_t il = ae->attr_id->value->length;
+            if ((tag != NULL && inv_structural_ctx_key(inv, 't', tag, tag_len, '#', id, il))
+                || inv_structural_ctx_key(inv, '*', "", 0, '#', id, il)) {
+                return 1;
+            }
+        }
+        if (ae->attr_class != NULL && ae->attr_class->value != NULL) {
+            const char *c = (const char *)ae->attr_class->value->data;
+            size_t clen = ae->attr_class->value->length;
+            for (size_t i = 0; i < clen;) {
+                size_t st;
+                while (i < clen && is_space((unsigned char)c[i])) {
+                    i++;
+                }
+                st = i;
+                while (i < clen && !is_space((unsigned char)c[i])) {
+                    i++;
+                }
+                if (i > st && ((tag != NULL && inv_structural_ctx_key(inv, 't', tag, tag_len, '.', c + st, i - st))
+                               || inv_structural_ctx_key(inv, '*', "", 0, '.', c + st, i - st))) {
+                    return 1;
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+/* Can a structure-sensitive compound (dom_inv_add_structural) match `node`: its tag, id, a
+ * class or the universal key? */
+static int inv_structural(const DomInvalidation *inv, lxb_dom_node_t *node)
+{
+    lxb_dom_element_t *el = lxb_dom_interface_element(node);
+    size_t len = 0;
+    const char *tag;
+    if (inv_structural_key(inv, '*', "", 0)) {
+        return 1;
+    }
+    tag = (const char *)lxb_dom_element_qualified_name(el, &len);
+    if (tag != NULL && inv_structural_key(inv, 't', tag, len)) {
+        return 1;
+    }
+    if (inv->structural_ctx && inv_structural_ctx(inv, node, tag, len)) {
+        return 1;
+    }
+    if (el->attr_id != NULL && el->attr_id->value != NULL && el->attr_id->value->length > 0
+        && inv_structural_key(inv, '#', (const char *)el->attr_id->value->data, el->attr_id->value->length)) {
+        return 1;
+    }
+    if (el->attr_class != NULL && el->attr_class->value != NULL) {
+        const char *c = (const char *)el->attr_class->value->data;
+        size_t clen = el->attr_class->value->length;
+        for (size_t i = 0; i < clen;) {
+            size_t st;
+            while (i < clen && is_space((unsigned char)c[i])) {
+                i++;
+            }
+            st = i;
+            while (i < clen && !is_space((unsigned char)c[i])) {
+                i++;
+            }
+            if (i > st && inv_structural_key(inv, '.', c + st, i - st)) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
 /* Structural change among `parent`'s children (insert/remove): siblings see
  * a new :nth-child / + context.  `first` is the first node at or after the
  * change point (NULL: end). */
@@ -685,13 +810,16 @@ static void mark_structural(Dom *dom, lxb_dom_node_t *parent, lxb_dom_node_t *fi
     }
     if (g & DOM_INV_G_STRUCTURAL_BACK) {
         first = parent->first_child; /* :last-child etc. look backwards */
-        mark_node(dom, parent, DOM_DIRTY_STYLE); /* :empty */
+        if (dom->inv == NULL || inv_structural(dom->inv, parent)) {
+            mark_node(dom, parent, DOM_DIRTY_STYLE); /* :empty */
+        }
     }
     if ((g & (DOM_INV_G_SIBLING_COMBINATOR | DOM_INV_G_STRUCTURAL | DOM_INV_G_STRUCTURAL_BACK)) == 0) {
         return;
     }
     for (n = first; n != NULL; n = n->next) {
-        if (n->type == LXB_DOM_NODE_TYPE_ELEMENT) {
+        /* only siblings a structure-sensitive compound can match (inv: by key) */
+        if (n->type == LXB_DOM_NODE_TYPE_ELEMENT && (dom->inv == NULL || inv_structural(dom->inv, n))) {
             mark_node(dom, n, DOM_DIRTY_STYLE | DOM_DIRTY_DESCENDANTS);
         }
     }
@@ -1157,7 +1285,7 @@ static void remove_children(Dom *dom, lxb_dom_node_t *parent)
         lxb_dom_node_destroy_deep(c);
     }
     mark_node(dom, parent, DOM_DIRTY_CHILDREN | DOM_DIRTY_TEXT);
-    if (dom->inv == NULL || (dom->inv->global & DOM_INV_G_STRUCTURAL_BACK) != 0) {
+    if (dom->inv == NULL || ((dom->inv->global & DOM_INV_G_STRUCTURAL_BACK) != 0 && inv_structural(dom->inv, parent))) {
         mark_node(dom, parent, DOM_DIRTY_STYLE); /* :empty */
     }
 }

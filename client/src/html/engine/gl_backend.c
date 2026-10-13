@@ -130,6 +130,8 @@ typedef struct {
 struct GlBackend {
     GLuint program, vao, vbo, ibo, gamma_tex, gradient_tex;
     GlbImageResolver image_resolver;   // SVG rasters at device size (glb_set_image_resolver)
+    GlbLazyImageResolver lazy_resolver; // lazy rasters (glb_set_lazy_image_resolver)
+    void *lazy_resolver_user;
     void *image_resolver_user;
     GLint loc_viewport, loc_tex, loc_gamma, loc_cm, loc_cm_offset, loc_opacity, loc_blur_dir, loc_stencil_pass;
 
@@ -845,12 +847,15 @@ static int draw_vector_image(GlBackend *b, const DlItem *it, const uint8_t rgba[
 
 static void draw_image(GlBackend *b, const DlItem *it) {
     const float op = it->u.image.opacity * b->opacity_mul;
-    if (!it->u.image.tex || op <= 0.0f) return;
+    if (op <= 0.0f) return;
+    GLuint tex = it->u.image.tex;
+    if (it->u.image.lazy) tex = b->lazy_resolver ? b->lazy_resolver(b->lazy_resolver_user, it->u.image.lazy, it->u.image.nearest) : 0;
+    if (!tex) return;
     const CssColor white = {255, 255, 255, 255, CSS_COLOR_RGBA};
     uint8_t rgba[4];
     color_premul(white, op, rgba);
     if (draw_vector_image(b, it, rgba)) return;
-    batch_texture(b, image_draw_texture(b, it), it->u.image.nearest ? 1 : 0);
+    batch_texture(b, it->u.image.lazy ? tex : image_draw_texture(b, it), it->u.image.nearest ? 1 : 0);
     GlbVertex t = vertex_template(b, MODE_IMAGE, rgba);
     t.p0[0] = it->u.image.premultiplied ? 0.0f : 1.0f;
     const DlRect d = it->u.image.dst;
@@ -1772,6 +1777,12 @@ void glb_set_image_resolver(GlBackend *b, GlbImageResolver fn, void *user) {
     b->image_resolver_user = user;
 }
 
+void glb_set_lazy_image_resolver(GlBackend *b, GlbLazyImageResolver fn, void *user) {
+    if (!b) return;
+    b->lazy_resolver = fn;
+    b->lazy_resolver_user = user;
+}
+
 void glb_set_text_gamma(GlBackend *b, const uint8_t lut[8][256]) {
     if (!b || !lut) return;
     glActiveTexture(GL_TEXTURE1);
@@ -1846,6 +1857,58 @@ void glb_begin(GlBackend *b, int fb_w, int fb_h, float device_scale) {
     b->skip_depth = 0;
 }
 
+// Paint culling: a primitive whose target-space bounds miss the current scissor (or the
+// target) draws nothing, so it is skipped before any vertex is emitted. Scroll containers
+// clip with a scissor, so the off-screen part of a long list costs one bounds test per
+// item instead of its quads (and its lazy image decode). Conservative: bounds include the
+// AA band, shadow blur / spread / offset; unknown extents are never culled.
+#define GLB_CULL_PAD 2.0f
+
+static int glyph_bounds(const DlGlyphQuad *q, const int n, const float dx, const float dy, DlRect *out) {
+    if (!q || n <= 0) return 0;
+    float x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f;
+    for (int i = 0; i < n; i++) {
+        x0 = minf(x0, q[i].x); y0 = minf(y0, q[i].y);
+        x1 = maxf(x1, q[i].x + q[i].w); y1 = maxf(y1, q[i].y + q[i].h);
+    }
+    *out = dl_rect(x0 + dx, y0 + dy, x1 - x0, y1 - y0);
+    return 1;
+}
+
+static int item_culled(const GlBackend *b, const DlItem *it) {
+    DlRect r;
+    float pad = 0.0f; // local px beyond r
+    switch (it->op) {
+        case DL_RECT: r = it->u.rect.rect; break;
+        case DL_RRECT: r = it->u.rrect.rect; break;
+        case DL_BORDER: r = it->u.border.rect; break;
+        case DL_IMAGE: r = it->u.image.dst; break;
+        case DL_GRADIENT: r = it->u.gradient.rect; break;
+        case DL_GLYPHS:
+            if (!glyph_bounds(it->u.glyphs.quads, it->u.glyphs.n, 0.0f, 0.0f, &r)) return 0;
+            break;
+        case DL_TEXT_SHADOW:
+            if (!glyph_bounds(it->u.text_shadow.quads, it->u.text_shadow.n, it->u.text_shadow.dx, it->u.text_shadow.dy, &r)) return 0;
+            pad = it->u.text_shadow.blur * 1.5f;
+            break;
+        case DL_BOX_SHADOW:
+            r = it->u.box_shadow.rect;
+            if (!it->u.box_shadow.inset) {
+                r.x += it->u.box_shadow.dx;
+                r.y += it->u.box_shadow.dy;
+                pad = it->u.box_shadow.blur * 1.5f + fabsf(it->u.box_shadow.spread);
+            }
+            break;
+        default: return 0;
+    }
+    if (!(r.w >= 0.0f) || !(r.h >= 0.0f)) return 0; // NaN / mirrored: draw it
+    float t[4];
+    local_rect_bounds(b, dl_rect(r.x - pad, r.y - pad, r.w + 2.0f * pad, r.h + 2.0f * pad), t);
+    float lim[4] = {0.0f, 0.0f, (float) b->target.w, (float) b->target.h};
+    if (b->clip.scissor_on) memcpy(lim, b->clip.scissor, sizeof(lim));
+    return t[2] + GLB_CULL_PAD < lim[0] || t[0] - GLB_CULL_PAD > lim[2] || t[3] + GLB_CULL_PAD < lim[1] || t[1] - GLB_CULL_PAD > lim[3];
+}
+
 void glb_submit(GlBackend *b, const DisplayList *list) {
     if (!b || !b->in_frame || !list) return;
 
@@ -1855,6 +1918,11 @@ void glb_submit(GlBackend *b, const DisplayList *list) {
         if (b->skip_depth) {
             if (it->op == DL_PUSH_GROUP) b->skip_depth++;
             else if (it->op == DL_POP_GROUP && --b->skip_depth == 0) pop_group(b);
+            continue;
+        }
+
+        if (item_is_primitive(it->op) && item_culled(b, it)) {
+            b->frame_stats.culled++;
             continue;
         }
 
@@ -1952,6 +2020,6 @@ void glb_end(GlBackend *b) {
 }
 
 GlbStats glb_stats(const GlBackend *b) {
-    GlbStats s = {0, 0, 0};
+    GlbStats s = {0, 0, 0, 0};
     return b ? b->stats : s;
 }

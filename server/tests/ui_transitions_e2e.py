@@ -741,11 +741,158 @@ def sc_comp():
         stop(server)
 
 
+def skins_expected(weapon):
+    """ui_loadout.c owned_skins() in offline mode (every store skin) for Select Skin of weapon
+    index `weapon`: rarity, season, index, all descending; None / Random come first (no data-index)."""
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "assets", "skins.json")) as f:
+        skins = json.load(f)
+    rows = [(s.get("rarity", 0), s.get("seas") or 1, i) for i, s in enumerate(skins)
+            if s.get("name") and not s.get("type") and s.get("weapon") == weapon + 1]
+    rows.sort(reverse=True)
+    return ["-", "-"] + [str(i) for _, _, i in rows]
+
+
+def parse_rects(line):
+    m = re.search(r"\[input_script\] rects t=\d+ @(\S+) n=\d+(.*)", line)
+    if not m:
+        return None, []
+    cards = []
+    for cell in m.group(2).split():
+        index, box = cell.split("@", 1)
+        x, y, w, h = map(float, box.split(","))
+        cards.append((index, x, y, w, h))
+    return m.group(1), cards
+
+
+def sc_skins_grid():
+    """Select Skin with every store skin (offline mode, client/src/ui/ui_vgrid.c): only the rows
+    near the scroll position are in the DOM, every rendered card is the item of its row / column
+    in the full sorted list (top, a jump to the middle, the bottom), a click on the bottom card
+    equips it (selectSkin -> localStorage skins), the v7 search filters the grid. Frame times
+    while scrolling are logged (perf: informative, never failed)."""
+    weapon = 1  # skinSelector(1): the second weapon's skins (the largest weapon list, ~500)
+    want = skins_expected(weapon)
+    sel = "div[id=skinList] .skinCard"  # no "#": it starts an input-script comment
+    script = [f"0 menu", f"500 call skinSelector {weapon}", "1500 nodes @open .skinCard", f"1500 rects @top {sel}",
+              "1600 setscroll skinList 100", f"1700 rects @s100 {sel}", "1700 scroll @s100 skinList",
+              "1800 setscroll skinList 0", "1900 ft @scroll start"]
+    t = 1900
+    for i in range(1, 241):  # top to bottom in ~4 s of 16 ms frames
+        script.append(f"{t + i * 16} setscroll skinList {i * 100}")
+    t += 241 * 16
+    script += [f"{t} ft @scroll stop", f"{t + 100} nodes @swept .skinCard",
+               f"{t + 200} setscroll skinList 9000", f"{t + 400} rects @mid {sel}", f"{t + 400} scroll @mid skinList",
+               f"{t + 500} setscroll skinList 1000000", f"{t + 700} rects @bottom {sel}", f"{t + 700} scroll @bottom skinList",
+               f"{t + 700} nodes @bottom .skinCard", f"{t + 800} clicksel {sel}[data-index]",
+               f"{t + 1500} vis @equipped windowHolder", f"{t + 1600} call skinSelector {weapon}",
+               f"{t + 2400} clickid itemSearch", f"{t + 2500} type gold", f"{t + 2600} call searchItems",
+               f"{t + 3000} rects @search {sel}", f"{t + 3000} nodes @search .skinCard", f"{t + 3200} quit"]
+    lines = run_client("skins-grid", ["--offline", "--map", "kanji"], "\n".join(script), timeout=240,
+                       env_extra={"KRUNKNATIVE_MODE": "offline", "KRUNKNATIVE_FIXED_DELTA": "16"})
+    if lines is None:
+        return
+    rects, scrolls, nodes, clicked = {}, {}, {}, None
+    for line in lines:
+        label, cards = parse_rects(line)
+        if label:
+            rects[label] = cards
+        m = re.search(r"\[input_script\] scroll t=\d+ @(\S+) skinList=(\S+)", line)
+        if m and m.group(2) != "-":
+            scrolls[m.group(1)] = float(m.group(2))
+        m = re.search(r"\[input_script\] nodes t=\d+ @(\S+) elements=(\d+) match=(\d+)", line)
+        if m:
+            nodes[m.group(1)] = int(m.group(3))
+        m = re.search(r"\[ui\] handler selectSkin\((-?\d+),", line)
+        if m:
+            clicked = m.group(1)
+        if "[input_script] ft " in line:
+            print("perf  skins-grid " + line.split("] ", 1)[1], flush=True)
+    top = rects.get("top", [])
+    if not top:
+        record("skins-grid", "open", "#skinList cards", ">0", "none", False)
+        return
+    y0, x0 = top[0][2], top[0][1]
+    cols = sum(1 for c in top if abs(c[2] - y0) < 1)
+    pitch_y = next((c[2] - y0 for c in top if c[2] - y0 > 1), 0)
+    pitch_x = top[1][1] - x0 if cols > 1 else 1
+    moved = {c[0]: c[2] for c in rects.get("s100", []) if c[0] != "-"}
+    shift = [moved[c[0]] - c[2] for c in top if c[0] in moved]
+    k = -shift[0] / (scrolls.get("s100", 100) or 100) if shift else 0  # window px per scroll px
+    record("skins-grid", "open", "geometry", "cols>1 pitch>0", f"cols={cols} pitch={pitch_y:.1f} k={k:.3f}", cols > 1 and pitch_y > 0 and k > 0)
+
+    def check(label):
+        cards, s = rects.get(label, []), scrolls.get(label, 0.0)
+        bad, first = [], None
+        for index, x, y, w, h in cards:
+            row = round((y - y0 + k * s) / pitch_y)
+            pos = row * cols + round((x - x0) / pitch_x)
+            first = pos if first is None else min(first, pos)
+            if pos < 0 or pos >= len(want) or want[pos] != index:
+                bad.append(f"{index}@{pos}")
+        ok = bool(cards) and not bad
+        record("skins-grid", label, "cards in place", "all", f"{len(cards)} from #{first}" + (f" bad {' '.join(bad[:4])}" if bad else ""), ok)
+        return cards
+
+    check("top")
+    check("mid")
+    bottom = check("bottom")
+    last = bottom[-1][0] if bottom else "-"
+    record("skins-grid", "bottom", "last card", want[-1], last, last == want[-1])
+    for label in ("open", "swept", "bottom"):
+        n = nodes.get(label, -1)
+        record("skins-grid", label, "skinCards in DOM", f"<=120 of {len(want)}", str(n), 0 < n <= 120)
+    record("skins-grid", "equip", "selectSkin", want[-1], str(clicked), clicked == want[-1])
+    saved = read(os.path.join(WORK, "skins-grid-cfg", "krunknative", "skins.json"))
+    try:
+        equipped = str(json.loads(saved).get(str(weapon)))
+    except ValueError:
+        equipped = "-"
+    record("skins-grid", "equip", "storage skins", want[-1], equipped, equipped == want[-1])
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "assets", "skins.json")) as f:
+        skins = json.load(f)
+    found = [c[0] for c in rects.get("search", []) if c[0] != "-"]
+    misses = [i for i in found if "gold" not in json.dumps(skins[int(i)]).lower()]
+    record("skins-grid", "search", "matches", "gold items only", f"{len(found)} cards" + (f" misses {misses[:3]}" if misses else ""), bool(found) and not misses)
+
+
+def sc_hub_items():
+    """The social hub's item list (--hub p=items, every store item, client/src/ui/social_ui.c): a
+    virtual grid, so a few rows of cards exist whatever the scroll position, down to the bottom
+    (v7.1.4 appends 500-card chunks as it is scrolled; native has no scroll events, so before the
+    grid the list stopped at 500)."""
+    script = ["0 menu", "1000 nodes @open .marketCard", "1000 scroll @open itemsList", "1100 ft @scroll start"]
+    t = 1100
+    for i in range(1, 201):
+        script.append(f"{t + i * 16} setscroll itemsList {i * 1000}")
+    t += 201 * 16
+    script += [f"{t} ft @scroll stop", f"{t + 100} setscroll itemsList 100000000", f"{t + 300} nodes @bottom .marketCard",
+               f"{t + 300} scroll @bottom itemsList", f"{t + 400} quit"]
+    lines = run_client("hub-items", ["--offline", "--hub", "p=items"], "\n".join(script), timeout=180,
+                       env_extra={"KRUNKNATIVE_MODE": "offline", "KRUNKNATIVE_FIXED_DELTA": "16"})
+    if lines is None:
+        return
+    nodes, scrolls = {}, {}
+    for line in lines:
+        m = re.search(r"\[input_script\] nodes t=\d+ @(\S+) elements=\d+ match=(\d+)", line)
+        if m:
+            nodes[m.group(1)] = int(m.group(2))
+        m = re.search(r"\[input_script\] scroll t=\d+ @(\S+) itemsList=(\S+)", line)
+        if m:
+            scrolls[m.group(1)] = m.group(2)
+        if "[input_script] ft " in line:
+            print("perf  hub-items " + line.split("] ", 1)[1], flush=True)
+    for label in ("open", "bottom"):
+        n = nodes.get(label, -1)
+        record("hub-items", label, "marketCards in DOM", "1..150", str(n), 0 < n <= 150)
+    bottom = scrolls.get("bottom", "-")
+    record("hub-items", "bottom", "itemsList.scrollTop", ">20000 (thousands of rows)", bottom, bottom != "-" and float(bottom) > 20000)
+
+
 SCENARIOS = {
     "endscreen": sc_endscreen, "endscreen-tdm": sc_endscreen_team, "death": sc_death, "death-menu": sc_death_menu, "spectate": sc_spectate,
     "map-change": sc_map_change, "interact": sc_interact, "custom-gui": sc_custom_gui, "krunkscript": sc_krunkscript,
     "spray": sc_spray, "windows": sc_windows, "online": sc_online, "lost-end": sc_lost_during_end, "outdated": sc_outdated,
-    "comp": sc_comp, "om-scroll": sc_om_scroll,
+    "comp": sc_comp, "om-scroll": sc_om_scroll, "skins-grid": sc_skins_grid, "hub-items": sc_hub_items,
 }
 
 

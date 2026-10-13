@@ -515,6 +515,7 @@ void ui_loadout_skin_selector(int weapon, int secondary); // skinSelector
 void ui_loadout_select_skin(int index, int weapon); // selectSkin
 void ui_loadout_action(int action);              // windows[2].action
 void ui_loadout_toggle_log(HtmlElem obj);        // windows[34].toggleLog
+void ui_loadout_tick(void);                      // the open picker's virtual card grid follows the scroll (ui_vgrid.h)
 int  ui_loadout_secondary(int class_index);     // selected secondary weapon id (secondaryInd, default 2), -1 = class has none
 int  ui_loadout_streak(int slot);                // streakIndex1..3 (data/streaks.js index for slot 0..2), -1 none
 int  ui_loadout_skin_color(void);                // selected skin colour as 0xRRGGBB, -1 = class colour

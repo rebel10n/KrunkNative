@@ -23,6 +23,7 @@ typedef struct {
     int draw_calls;     // glDrawElements calls in the last frame (incl. stencil/blur passes)
     int vertices;       // vertices uploaded in the last frame
     int fbo_passes;     // offscreen passes (group render, blur passes, group acquire)
+    int culled;         // primitives skipped outside the scissor / target (paint culling)
 } GlbStats;
 
 // Compiles the program and creates the GL resources. NULL on failure
@@ -46,6 +47,11 @@ void glb_set_text_gamma(GlBackend *b, const uint8_t lut[8][256]);
 typedef unsigned (*GlbImageResolver)(void *user, const void *vector, int nearest, float dev_w, float dev_h, float frac_x,
                                      float frac_y, int *tex_w, int *tex_h);
 void glb_set_image_resolver(GlBackend *b, GlbImageResolver fn, void *user);
+// Lazy rasters (DL_IMAGE.lazy, image.h): the texture of `lazy` for this draw, decoding it
+// first when the caller's per-frame budget allows; 0 skips the draw this frame (it is
+// retried on the next submit). The binding of the active unit is preserved.
+typedef unsigned (*GlbLazyImageResolver)(void *user, const void *lazy, int nearest);
+void glb_set_lazy_image_resolver(GlBackend *b, GlbLazyImageResolver fn, void *user);
 
 // fb_w/fb_h: size of the currently bound framebuffer in pixels.
 // device_scale: device pixels per CSS px (list geometry is CSS px).

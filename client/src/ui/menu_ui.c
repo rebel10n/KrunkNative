@@ -1394,6 +1394,7 @@ void client_menu_tick(Client *client) {
         if (menu_state_changed(client)) menu_apply_state(client);
         menu_update_ping(client);
         download_ui_tick(); // ?download opens the Download window (download_ui.c)
+        ui_loadout_tick();  // item pickers: only the cards near the scroll position exist (ui_vgrid.h)
 
         // window.addEventListener('resize', scaleBase) fallback: poll the viewport too.
         float w, h, dpr;

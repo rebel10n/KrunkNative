@@ -145,6 +145,27 @@ int image_resolve_url(const char *url, const char *base_url, char *out, size_t c
 /* Number of entries currently in the cache (loaded or failed). */
 int image_cache_count(const ImageCache *cache);
 
+/* ---- lazy decoding and the texture budget ---------------------------------
+ * A file raster (PNG/JPEG/GIF/BMP...) is *lazy*: image_get() reads only its header (the
+ * natural size layout needs) and its pixels are decoded and uploaded by
+ * image_entry_load() when a draw first needs them (gl_backend's lazy resolver, under
+ * the engine's per-frame decode budget), so a long list of <img loading=lazy> or not,
+ * scrolled or not, decodes only what is drawn.  Lazy entries are evictable: past
+ * IMAGE_CACHE_BUDGET_BYTES of resident lazy textures, image_cache_frame() frees the
+ * least recently drawn ones not drawn for IMAGE_CACHE_IDLE_FRAMES; they keep their size
+ * and decode again on their next draw.  SVG, WebP sidecars and data: URLs load eagerly
+ * and stay.  Display lists therefore carry the ImageEntry (DlItem.image.lazy), never
+ * a lazy entry's texture id. */
+#define IMAGE_CACHE_BUDGET_BYTES ((size_t) 128u << 20)
+#define IMAGE_CACHE_IDLE_FRAMES 120u
+
+int  image_entry_lazy(const ImageEntry *entry);                     /* 1: decoded on draw, evictable */
+int  image_entry_resident(const ImageEntry *entry);                 /* 1: no decode pending */
+int  image_entry_load(ImageCache *cache, const ImageEntry *entry);  /* decode + upload now; 1 = has tex */
+void image_entry_touch(ImageCache *cache, const ImageEntry *entry);  /* drawn this frame (LRU) */
+void image_cache_frame(ImageCache *cache);                           /* once per frame: count, evict */
+void image_cache_stats(const ImageCache *cache, int *resident, size_t *bytes, int *decodes);
+
 /* ---- geometry helpers ---------------------------------------------------- */
 
 /* Concrete object size for `fit` (CssObjectFit: FILL, CONTAIN, COVER, NONE,

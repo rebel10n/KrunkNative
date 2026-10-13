@@ -49,6 +49,9 @@ typedef struct ImageSlot {
     SvgImage *svg;         /* vector source (entry.vector), else NULL           */
     ImageSvgTex sized[IMAGE_SVG_SIZES];
     unsigned use_clock;
+    uint8_t lazy;          /* raster file: pixels decoded on first draw, evictable */
+    unsigned last_frame;   /* image_cache_frame() count of its last draw (LRU)      */
+    size_t bytes;          /* GL bytes held (level 0 + mips, + the nearest twin)   */
 } ImageSlot;
 
 struct ImageCache {
@@ -57,6 +60,11 @@ struct ImageCache {
     ImageSlot **slots;     /* individually allocated: entry addresses are stable */
     int count;
     int cap;
+    int *index;            /* open-addressing hash of slot indices (-1 empty)    */
+    int index_cap;         /* power of two, > 2 * count                          */
+    unsigned frame;        /* image_cache_frame() calls                          */
+    size_t bytes;          /* GL bytes of the resident lazy entries              */
+    int decodes;           /* lazy decodes so far (profile)                      */
 };
 
 /* ------------------------------------------------------------------------- */
@@ -113,6 +121,7 @@ void image_cache_destroy(ImageCache *cache) {
     for (int i = 0; i < cache->count; i++) image_slot_free(cache->slots[i]);
 
     free(cache->slots);
+    free(cache->index);
     free(cache->root);
     free(cache);
 }
@@ -122,12 +131,33 @@ int image_cache_count(const ImageCache *cache) {
 }
 
 static ImageSlot *image_cache_find(const ImageCache *cache, const char *key, const uint32_t hash) {
-    for (int i = 0; i < cache->count; i++) {
-        ImageSlot *slot = cache->slots[i];
+    if (!cache->index_cap) return NULL;
+    const unsigned mask = (unsigned) cache->index_cap - 1;
+    for (unsigned i = hash & mask;; i = (i + 1) & mask) {
+        const int at = cache->index[i];
+        if (at < 0) return NULL;
+        ImageSlot *slot = cache->slots[at];
         if (slot->hash == hash && !strcmp(slot->key, key)) return slot;
     }
+}
 
-    return NULL;
+static void image_index_put(ImageCache *cache, const int at) {
+    const unsigned mask = (unsigned) cache->index_cap - 1;
+    unsigned i = cache->slots[at]->hash & mask;
+    while (cache->index[i] >= 0) i = (i + 1) & mask;
+    cache->index[i] = at;
+}
+
+static int image_index_grow(ImageCache *cache) {
+    const int cap = cache->index_cap ? cache->index_cap * 2 : 256;
+    int *index = malloc((size_t) cap * sizeof(*index));
+    if (!index) return 0;
+    for (int i = 0; i < cap; i++) index[i] = -1;
+    free(cache->index);
+    cache->index = index;
+    cache->index_cap = cap;
+    for (int i = 0; i < cache->count; i++) image_index_put(cache, i);
+    return 1;
 }
 
 static ImageSlot *image_cache_add(ImageCache *cache, const char *key, const uint32_t hash) {
@@ -139,6 +169,7 @@ static ImageSlot *image_cache_add(ImageCache *cache, const char *key, const uint
         cache->slots = grown;
         cache->cap = cap;
     }
+    if ((cache->count + 1) * 2 > cache->index_cap && !image_index_grow(cache)) return NULL;
 
     ImageSlot *slot = calloc(1, sizeof(*slot));
     if (!slot) return NULL;
@@ -151,6 +182,7 @@ static ImageSlot *image_cache_add(ImageCache *cache, const char *key, const uint
 
     slot->hash = hash;
     cache->slots[cache->count++] = slot;
+    image_index_put(cache, cache->count - 1);
 
     return slot;
 }
@@ -622,6 +654,99 @@ static void image_load(const ImageCache *cache, ImageSlot *slot, const char *dat
     slot->entry.vector = svg;
 }
 
+/* A file image's natural size from its header (layout needs no pixels); the pixels are
+ * decoded on its first draw (image_entry_load).  SVG and WebP (sidecar) load now. */
+static void image_probe(const ImageCache *cache, ImageSlot *slot) {
+    unsigned char *bytes = NULL;
+    size_t len = 0;
+    if (!image_read(cache, slot->key, &bytes, &len)) {
+        image_fail(slot, "file not found");
+        return;
+    }
+    int w = 0, h = 0, comp = 0;
+    const int raster = len <= (size_t) INT32_MAX && !svg_sniff(bytes, len) && !image_is_webp_key(slot->key) &&
+                       stbi_info_from_memory(bytes, (int) len, &w, &h, &comp) && w > 0 && h > 0;
+    free(bytes);
+    if (!raster) {
+        image_load(cache, slot, NULL);
+        return;
+    }
+    slot->entry.w = w;
+    slot->entry.h = h;
+    slot->entry.failed = 0;
+    slot->lazy = 1;
+}
+
+int image_entry_lazy(const ImageEntry *entry) {
+    return entry && !entry->failed && ((const ImageSlot *) entry)->lazy;
+}
+
+int image_entry_resident(const ImageEntry *entry) {
+    const ImageSlot *slot = (const ImageSlot *) entry;
+    return !entry || entry->failed || entry->tex || !slot->lazy;
+}
+
+int image_entry_load(ImageCache *cache, const ImageEntry *entry) {
+    ImageSlot *slot = (ImageSlot *) entry;
+    if (!cache || image_entry_resident(entry)) return entry && entry->tex;
+    image_load(cache, slot, NULL);
+    cache->decodes++;
+    if (slot->entry.failed) {
+        image_log_miss(cache, slot->key, slot->key, NULL);
+        return 0;
+    }
+    slot->bytes = (size_t) slot->entry.w * (size_t) slot->entry.h * 4u * 4u / 3u;
+    cache->bytes += slot->bytes;
+    slot->last_frame = cache->frame;
+    return 1;
+}
+
+void image_entry_touch(ImageCache *cache, const ImageEntry *entry) {
+    if (cache && entry) ((ImageSlot *) entry)->last_frame = cache->frame;
+}
+
+/* Frees a lazy entry's textures; it keeps its size and decodes again when drawn. */
+static void image_evict(ImageCache *cache, ImageSlot *slot) {
+    GLuint textures[2];
+    int n = 0;
+    if (slot->entry.tex) textures[n++] = slot->entry.tex;
+    if (slot->entry.tex_nearest) textures[n++] = slot->entry.tex_nearest;
+    if (n) glDeleteTextures(n, textures);
+    slot->entry.tex = slot->entry.tex_nearest = 0;
+    cache->bytes -= slot->bytes < cache->bytes ? slot->bytes : cache->bytes;
+    slot->bytes = 0;
+}
+
+static int image_slot_older(const void *a, const void *b) {
+    const unsigned fa = (*(ImageSlot *const *) a)->last_frame, fb = (*(ImageSlot *const *) b)->last_frame;
+    return fa < fb ? -1 : fa > fb;
+}
+
+void image_cache_frame(ImageCache *cache) {
+    if (!cache) return;
+    cache->frame++;
+    if (cache->bytes <= IMAGE_CACHE_BUDGET_BYTES) return;
+    /* over budget: drop the least recently drawn lazy entries not drawn for a while */
+    ImageSlot **old = malloc((size_t) cache->count * sizeof(*old));
+    if (!old) return;
+    int n = 0;
+    for (int i = 0; i < cache->count; i++) {
+        ImageSlot *slot = cache->slots[i];
+        if (slot->lazy && slot->entry.tex && slot->last_frame + IMAGE_CACHE_IDLE_FRAMES < cache->frame) old[n++] = slot;
+    }
+    qsort(old, (size_t) n, sizeof(*old), image_slot_older);
+    for (int i = 0; i < n && cache->bytes > IMAGE_CACHE_BUDGET_BYTES / 4u * 3u; i++) image_evict(cache, old[i]);
+    free(old);
+}
+
+void image_cache_stats(const ImageCache *cache, int *resident, size_t *bytes, int *decodes) {
+    int r = 0;
+    for (int i = 0; cache && i < cache->count; i++) r += cache->slots[i]->entry.tex != 0;
+    if (resident) *resident = r;
+    if (bytes) *bytes = cache ? cache->bytes : 0;
+    if (decodes) *decodes = cache ? cache->decodes : 0;
+}
+
 const ImageEntry *image_get(ImageCache *cache, const char *url, const char *base_url) {
     static const ImageEntry failed_entry = {0, 0, 0, 1, 0, 0};
     if (!cache) return &failed_entry;
@@ -645,7 +770,8 @@ const ImageEntry *image_get(ImageCache *cache, const char *url, const char *base
     if (!slot) return &failed_entry;
 
     if (!resolved) image_fail(slot, "rejected URL (scheme, empty, or escapes the ui root)");
-    else image_load(cache, slot, data_url ? url : NULL);
+    else if (data_url) image_load(cache, slot, url);
+    else image_probe(cache, slot);
 
     if (slot->entry.failed) image_log_miss(cache, key, url, base_url);
 

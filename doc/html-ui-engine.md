@@ -144,6 +144,16 @@ Every dispatch is logged to stderr as `[ui] handler name(args) type target=N` or
   (`Module.krunkNativeAssetBase` + `assets/<path>?v=<assets/version.txt>`). Images that
   ship in `ui/` keep page-relative URLs.
 
+### Long card lists: virtual grids
+
+The item pickers (Select Skin, the f1828 item windows, Select Spray; `ui_loadout.c`) and the hub's
+market / inventory / item lists (`social_ui.c`) render thousands of cards in v7.1.4 (a staff
+account owns all 6448 store items). Their C UI writes them through `client/include/ui_vgrid.h`:
+only the rows near the scroll position exist, between two sized spacers that keep the full
+scroll height, and `vgrid_tick()` (from the menu / hub tick, polling `html_dom_get_scroll`: there
+are no scroll events) adds and drops rows as it moves. Columns and row pitch are measured from
+the page, so the cards sit where the full list puts them, on both backends.
+
 ### Timers and storage
 
 - `html_timer_add(ms, fn, user)` / `html_timer_cancel(id)` replace `setTimeout`; the
@@ -249,7 +259,7 @@ in `client_menu_tick()`), and the client uses its built-in menu text and HUD.
 | Variable | Effect |
 |---|---|
 | `KRUNKNATIVE_UI_DIR=<dir>` | load the page from another directory instead of `ui/` |
-| `KRUNKNATIVE_HTML_PROFILE=1` | engine: per-stage timings (restyle/layout/paint/submit) every ~2 s |
+| `KRUNKNATIVE_HTML_PROFILE=1` | engine: per-stage timings every ~2 s: frame, restyle (elements restyled; cascade / post-restyle split), layout (box rebuilds), paint, submit, display-list size, images (resident, lazy MB, decodes, decode ms per frame), last frame's draw calls and culled primitives |
 | `KRUNKNATIVE_HTML_VERBOSE=1` | engine: log loads, failures and first-layout stats |
 | `KRUNKNATIVE_HTML_DUMP_DL=1` | engine: print the display list once per paint build |
 | `KRUNKNATIVE_HTML_IMAGE_LOG=1\|<file>` | image: one `image-miss` line (key, url as written, referencing document, file path, reason) per image that fails to resolve, read or decode, on stderr (`1`) or appended to `<file>` |

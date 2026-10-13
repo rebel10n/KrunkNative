@@ -104,6 +104,8 @@ typedef struct {
             uint8_t premultiplied;  // 1 when the texture already holds premultiplied alpha
             const void *vector;     // SVG source (const ImageEntry *) or NULL: the backend's
                                     // image resolver swaps in a raster of the drawn device size
+            const void *lazy;       // lazy raster (const ImageEntry *, image.h) or NULL: `tex` is 0
+                                    // and the backend's lazy resolver decodes / looks it up per draw
         } image;
         struct {                                                                    // DL_GRADIENT
             DlRect rect;            // area painted

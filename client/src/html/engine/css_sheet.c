@@ -482,7 +482,7 @@ static void inv_list(DomInvalidation *inv, const lxb_css_selector_list_t *list, 
 /* Records the simple selectors of the compound [first, end) with the given
  * position flags and compound key. */
 static void inv_compound(DomInvalidation *inv, const lxb_css_selector_t *first, const lxb_css_selector_t *end,
-                         unsigned flags, int key_kind, const char *key, size_t key_len)
+                         unsigned flags, int key_kind, const char *key, size_t key_len, int structural_done)
 {
     const lxb_css_selector_t *s;
     for (s = first; s != end; s = s->next) {
@@ -506,7 +506,10 @@ static void inv_compound(DomInvalidation *inv, const lxb_css_selector_t *first, 
             if (st != 0) {
                 dom_inv_add_state(inv, st, key_kind, key, key_len, flags);
             }
-            dom_inv_add_global(inv, structural_of_pseudo(s->u.pseudo.type));
+            if (structural_of_pseudo(s->u.pseudo.type) != 0) {
+                dom_inv_add_global(inv, structural_of_pseudo(s->u.pseudo.type));
+                if (!structural_done) dom_inv_add_structural(inv, key_kind, key, key_len);
+            }
             break;
         }
         case LXB_CSS_SELECTOR_TYPE_PSEUDO_CLASS_FUNCTION:
@@ -520,13 +523,16 @@ static void inv_compound(DomInvalidation *inv, const lxb_css_selector_t *first, 
                 /* descendants affect the subject: be conservative */
                 inv_list(inv, (const lxb_css_selector_list_t *)s->u.pseudo.data, DOM_INV_ALL, 0, NULL, 0);
                 dom_inv_add_global(inv, DOM_INV_G_STRUCTURAL | DOM_INV_G_STRUCTURAL_BACK | DOM_INV_G_SIBLING_COMBINATOR);
+                dom_inv_add_structural(inv, DOM_INV_KEY_ANY, NULL, 0);
                 break;
             case LXB_CSS_SELECTOR_PSEUDO_CLASS_FUNCTION_NTH_CHILD:
             case LXB_CSS_SELECTOR_PSEUDO_CLASS_FUNCTION_NTH_OF_TYPE: {
                 const lxb_css_selector_anb_of_t *anb = (const lxb_css_selector_anb_of_t *)s->u.pseudo.data;
                 dom_inv_add_global(inv, DOM_INV_G_STRUCTURAL);
+                if (!structural_done) dom_inv_add_structural(inv, key_kind, key, key_len);
                 if (anb != NULL && anb->of != NULL) {
                     inv_list(inv, anb->of, flags | DOM_INV_SIBLING | DOM_INV_SIBLING_DESC, key_kind, key, key_len);
+                    dom_inv_add_structural(inv, DOM_INV_KEY_ANY, NULL, 0); /* `of S` counts other siblings */
                 }
                 break;
             }
@@ -534,8 +540,10 @@ static void inv_compound(DomInvalidation *inv, const lxb_css_selector_t *first, 
             case LXB_CSS_SELECTOR_PSEUDO_CLASS_FUNCTION_NTH_LAST_OF_TYPE: {
                 const lxb_css_selector_anb_of_t *anb = (const lxb_css_selector_anb_of_t *)s->u.pseudo.data;
                 dom_inv_add_global(inv, DOM_INV_G_STRUCTURAL_BACK);
+                if (!structural_done) dom_inv_add_structural(inv, key_kind, key, key_len);
                 if (anb != NULL && anb->of != NULL) {
                     inv_list(inv, anb->of, DOM_INV_ALL, 0, NULL, 0);
+                    dom_inv_add_structural(inv, DOM_INV_KEY_ANY, NULL, 0);
                 }
                 break;
             }
@@ -547,6 +555,28 @@ static void inv_compound(DomInvalidation *inv, const lxb_css_selector_t *first, 
             break;
         }
     }
+}
+
+/* Does the compound [first, end) test the element's place among its siblings (a structural
+ * pseudo-class)?  Arguments of :not() / :is() are left to inv_compound (conservative). */
+static int compound_structural(const lxb_css_selector_t *first, const lxb_css_selector_t *end)
+{
+    for (const lxb_css_selector_t *s = first; s != end; s = s->next) {
+        if (s->type == LXB_CSS_SELECTOR_TYPE_PSEUDO_CLASS && structural_of_pseudo(s->u.pseudo.type) != 0) {
+            return 1;
+        }
+        if (s->type == LXB_CSS_SELECTOR_TYPE_PSEUDO_CLASS_FUNCTION
+            && (s->u.pseudo.type == LXB_CSS_SELECTOR_PSEUDO_CLASS_FUNCTION_NTH_CHILD
+                || s->u.pseudo.type == LXB_CSS_SELECTOR_PSEUDO_CLASS_FUNCTION_NTH_OF_TYPE
+                || s->u.pseudo.type == LXB_CSS_SELECTOR_PSEUDO_CLASS_FUNCTION_NTH_LAST_CHILD
+                || s->u.pseudo.type == LXB_CSS_SELECTOR_PSEUDO_CLASS_FUNCTION_NTH_LAST_OF_TYPE)) {
+            const lxb_css_selector_anb_of_t *anb = (const lxb_css_selector_anb_of_t *)s->u.pseudo.data;
+            if (anb == NULL || anb->of == NULL) {
+                return 1;
+            }
+        }
+    }
+    return 0;
 }
 
 /* Most specific key of the compound [first, end): id > class > tag > any. */
@@ -583,12 +613,15 @@ static void inv_complex(DomInvalidation *inv, const lxb_css_selector_list_t *lis
             multi = 1;
             if (t->combinator == LXB_CSS_SELECTOR_COMBINATOR_SIBLING || t->combinator == LXB_CSS_SELECTOR_COMBINATOR_FOLLOWING) {
                 dom_inv_add_global(inv, DOM_INV_G_SIBLING_COMBINATOR);
+                if (outer_flags != 0) {
+                    dom_inv_add_structural(inv, DOM_INV_KEY_ANY, NULL, 0); /* inside :is() etc.: any element */
+                }
             }
         }
     }
     if (outer_flags != 0) {
         if (!multi) {
-            inv_compound(inv, list->first, NULL, outer_flags, outer_kind, outer_key, outer_len);
+            inv_compound(inv, list->first, NULL, outer_flags, outer_kind, outer_key, outer_len, 0);
             return;
         }
         while (s != NULL) {
@@ -600,11 +633,14 @@ static void inv_complex(DomInvalidation *inv, const lxb_css_selector_list_t *lis
                 end = end->next;
             }
             compound_key(s, end, &kind, &key, &len);
-            inv_compound(inv, s, end, DOM_INV_ALL, kind, key, len);
+            inv_compound(inv, s, end, DOM_INV_ALL, kind, key, len, 0);
             s = end;
         }
         return;
     }
+    int ctx_kind = DOM_INV_KEY_ANY; /* the class / id key of the compound left of a descendant / child combinator */
+    const char *ctx_key = NULL;
+    size_t ctx_len = 0;
     while (s != NULL) {
         const lxb_css_selector_t *end = s->next;
         unsigned flags;
@@ -613,6 +649,10 @@ static void inv_complex(DomInvalidation *inv, const lxb_css_selector_list_t *lis
         size_t len;
         while (end != NULL && !is_compound_start(list, end)) {
             end = end->next;
+        }
+        if (s != list->first && s->combinator != LXB_CSS_SELECTOR_COMBINATOR_DESCENDANT
+            && s->combinator != LXB_CSS_SELECTOR_COMBINATOR_CHILD) {
+            ctx_kind = DOM_INV_KEY_ANY; /* a sibling step: no ancestor context */
         }
         if (end == NULL) {
             flags = DOM_INV_SUBJECT;
@@ -630,7 +670,25 @@ static void inv_complex(DomInvalidation *inv, const lxb_css_selector_list_t *lis
             flags = DOM_INV_ANCESTOR;
         }
         compound_key(s, end, &kind, &key, &len);
-        inv_compound(inv, s, end, flags, kind, key, len);
+        const int structural = compound_structural(s, end);
+        inv_compound(inv, s, end, flags, kind, key, len, structural);
+        if (structural) {
+            /* `.lds-ring div:nth-child(1)`: only divs under a .lds-ring care where they are */
+            if ((kind == DOM_INV_KEY_TAG || kind == DOM_INV_KEY_ANY) && ctx_kind != DOM_INV_KEY_ANY) {
+                dom_inv_add_structural_ctx(inv, kind, key, len, ctx_kind, ctx_key, ctx_len);
+            } else {
+                dom_inv_add_structural(inv, kind, key, len);
+            }
+        }
+        if (s != list->first && (s->combinator == LXB_CSS_SELECTOR_COMBINATOR_SIBLING
+                                 || s->combinator == LXB_CSS_SELECTOR_COMBINATOR_FOLLOWING)) {
+            dom_inv_add_structural(inv, kind, key, len); /* the right side of + / ~ */
+        }
+        if (kind == DOM_INV_KEY_CLASS || kind == DOM_INV_KEY_ID) {
+            ctx_kind = kind;
+            ctx_key = key;
+            ctx_len = len;
+        }
         s = end;
     }
 }

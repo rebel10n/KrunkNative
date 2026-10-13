@@ -247,6 +247,14 @@ void dom_inv_add_attr(DomInvalidation *inv, const char *name, size_t len, unsign
 /* state: one enum DomPseudoState bit; key_kind/key: the compound's key. */
 void dom_inv_add_state(DomInvalidation *inv, uint32_t state, int key_kind, const char *key, size_t key_len, unsigned flags);
 void dom_inv_add_global(DomInvalidation *inv, unsigned global_flags);
+/* A compound whose match depends on its siblings (a structural pseudo-class, or the right side
+ * of + / ~), by its key (DOM_INV_KEY_ANY: any element).  A child-list change then restyles only
+ * the following siblings that carry one of these keys, not every one of them. */
+void dom_inv_add_structural(DomInvalidation *inv, int key_kind, const char *key, size_t key_len);
+/* The same for a tag / universal compound under an ancestor compound keyed ctx (class / id):
+ * only siblings with such an ancestor count. */
+void dom_inv_add_structural_ctx(DomInvalidation *inv, int key_kind, const char *key, size_t key_len,
+                                int ctx_kind, const char *ctx, size_t ctx_len);
 /* ORs every entry of src into dst. */
 void dom_inv_merge(DomInvalidation *dst, const DomInvalidation *src);
 uint32_t dom_inv_entry_count(const DomInvalidation *inv);

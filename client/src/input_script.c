@@ -22,6 +22,8 @@
 //   100 click 640 360            cursor there, then a left press + release (e.g. a KrunkScript DIV)
 //   100 clickid specBtn          the same at the centre of a page element's box (a display:none one: its
 //                                nearest rendered ancestor, e.g. a switch's <label>)
+//   100 clicksel .skinCard[data-index]  the same at the centre of the LAST element matching a selector
+//                                (the bottom card of a scrolled list)
 //   100 look dyaw dpitch         turn the next input's look by these radians (CONTROLS rotation)
 //   5000 respawn                 Play again when dead, as soon as the death delay allows (retried
 //                                each frame; multi-life tests: server/tests/gunfight.sh)
@@ -54,6 +56,18 @@
 //                                x,y,w,h (CSS px, getBoundingClientRect) then the layout size
 //                                offsetWidth,offsetHeight (- = no such id or not rendered); the two
 //                                sizes of a scaled #uiBase give its scale
+//   100 call skinSelector 1      dispatch a page handler by name with numeric arguments, as an inline
+//                                onclick="skinSelector(1)" would (windows without a menu button)
+//   100 setscroll skinList 4000  scrollTop of a scroll container (html_dom_set_scroll, clamped)
+//   100 hit @label 640 360       log the page element at that point (window coordinates): its closest
+//                                [data-index] ancestor's data-index and box, "[input_script] hit t=100
+//                                @label index=12 rect=x,y,w,h" (index=- when there is none)
+//   100 rects @label .skinCard   log every match's data-index and box in window coordinates:
+//                                "[input_script] rects t=100 @label n=3 2482@10,20,163,197 -@..." (tests of
+//                                the virtual card grids, client/src/ui/ui_vgrid.c)
+//   100 nodes @label .skinCard   log the page's element count and how many match the selector
+//   100 ft @label start | stop   wall-clock frame times between start and stop: one line with the
+//                                frame count, avg / p50 / p95 / max ms (perf logs, never asserted here)
 //   100 type rifle               type the rest of the line through the char callback (the focused
 //                                text field; the menu or the chat must have the keyboard)
 //   1200 shot /tmp/a.png         write the frame (world + first-person layer) after this frame's input
@@ -104,6 +118,9 @@ static struct {
     float look_yaw, look_pitch;
     float fixed_delta;
     FILE *log;
+    double ft_last;   // `ft`: wall clock of the previous frame (s), 0 = not measuring
+    float *ft_ms;     // frame times collected since `ft start`
+    int ft_n, ft_cap;
 } g_script;
 
 // The page probes: log lines, the whole rest of the line is ids (and @labels).
@@ -148,7 +165,9 @@ static void script_load(void) {
             sscanf(rest, "%f %f %f %f %f", &e->v[0], &e->v[1], &e->v[2], &e->v[3], &e->v[4]);
         }
         (void) b;
-        if (!strcmp(e->cmd, "con") || script_probe(e->cmd) || !strcmp(e->cmd, "type") || !strcmp(e->cmd, "om")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
+        if (!strcmp(e->cmd, "con") || script_probe(e->cmd) || !strcmp(e->cmd, "type") || !strcmp(e->cmd, "om") ||
+            !strcmp(e->cmd, "call") || !strcmp(e->cmd, "setscroll") || !strcmp(e->cmd, "hit") || !strcmp(e->cmd, "ft") ||
+            !strcmp(e->cmd, "nodes") || !strcmp(e->cmd, "rects") || !strcmp(e->cmd, "clicksel")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
             while (*rest == ' ' || *rest == '\t') rest++;
             snprintf(e->arg, sizeof(e->arg), "%s", rest);
             for (size_t len = strlen(e->arg); len && (e->arg[len - 1] == '\n' || e->arg[len - 1] == '\r' || e->arg[len - 1] == ' '); len--) e->arg[len - 1] = 0;
@@ -218,13 +237,20 @@ static void script_run(Client *client, const ScriptEvent *e) {
         glfwSetMouseButtonCallback(client->window, cb);
         if (cb) cb(client->window, button, action, 0);
         else ui_controls_mouse_event(client, button, action, 1);
-    } else if (!strcmp(e->cmd, "cursor") || !strcmp(e->cmd, "click") || !strcmp(e->cmd, "clickid")) {
+    } else if (!strcmp(e->cmd, "cursor") || !strcmp(e->cmd, "click") || !strcmp(e->cmd, "clickid") || !strcmp(e->cmd, "clicksel")) {
         // cursor x y / click x y: move the cursor (window coordinates) through the cursor
         // callback; click also presses and releases the left button there. clickid <id>: the
         // centre of that page element's box (CSS px -> window coordinates).
         double x = e->v[0], y = e->v[1];
-        if (!strcmp(e->cmd, "clickid")) {
-            HtmlElem el = html_ui_available() ? html_dom_by_id(e->arg) : 0;
+        if (!strcmp(e->cmd, "clickid") || !strcmp(e->cmd, "clicksel")) {
+            HtmlElem el = 0;
+            if (e->cmd[5] == 's') { // clicksel: the last match
+                HtmlElem all[256];
+                const int n = html_ui_available() ? html_dom_query_all(0, e->arg, all, 256) : 0;
+                el = n > 0 ? all[(n < 256 ? n : 256) - 1] : 0;
+            } else {
+                el = html_ui_available() ? html_dom_by_id(e->arg) : 0;
+            }
             HtmlRect r = {0};
             while (el && !html_dom_get_rect(el, &r)) el = html_dom_parent(el); // a hidden checkbox: its <label>
             if (!el) {
@@ -280,6 +306,97 @@ static void script_run(Client *client, const ScriptEvent *e) {
         GLFWscrollfun cb = glfwSetScrollCallback(client->window, NULL);
         glfwSetScrollCallback(client->window, cb);
         if (cb) cb(client->window, 0.0, e->v[0]);
+    } else if (!strcmp(e->cmd, "call")) {
+        // call <handler> [n ...]: the inline handler by name, numeric arguments only
+        char name[64] = "";
+        HtmlArg args[8];
+        int argc = 0, used = 0;
+        if (sscanf(e->arg, "%63s%n", name, &used) == 1) {
+            const char *c = e->arg + used;
+            double v;
+            int len;
+            while (argc < 8 && sscanf(c, "%lf%n", &v, &len) == 1) {
+                args[argc++] = (HtmlArg) {HTML_ARG_NUM, v, NULL};
+                c += len;
+            }
+            const HtmlEvent ev = {.type = "click", .value = ""};
+            if (html_ui_available()) html_ui_dispatch(name, &ev, args, argc);
+        }
+        fprintf(stderr, "[input_script] call t=%.0f %s argc=%d\n", g_script.time, name, argc);
+    } else if (!strcmp(e->cmd, "setscroll")) {
+        char id[64] = "";
+        float top = 0.0f;
+        sscanf(e->arg, "%63s %f", id, &top);
+        const HtmlElem el = html_ui_available() ? html_dom_by_id(id) : 0;
+        if (el) html_dom_set_scroll(el, 0.0f, top);
+        fprintf(stderr, "[input_script] setscroll t=%.0f %s=%.1f%s\n", g_script.time, id, top, el ? "" : " (no such id)");
+    } else if (!strcmp(e->cmd, "hit")) {
+        // hit @label x y: the [data-index] card under a window point (CSS px through the viewport scale)
+        char label[64] = "";
+        float x = 0.0f, y = 0.0f, vw = 0.0f, vh = 0.0f;
+        int ww = 0, wh = 0;
+        sscanf(e->arg, "%63s %f %f", label, &x, &y);
+        html_dom_viewport(&vw, &vh, NULL);
+        glfwGetWindowSize(client->window, &ww, &wh);
+        const float cx = x * (vw > 0.0f && ww > 0 ? vw / (float) ww : 1.0f), cy = y * (vh > 0.0f && wh > 0 ? vh / (float) wh : 1.0f);
+        HtmlElem el = html_ui_available() ? html_dom_element_at(cx, cy) : 0;
+        el = el ? html_dom_closest(el, "[data-index]") : 0;
+        char index[32] = "-";
+        HtmlRect r = {0};
+        if (el) {
+            if (html_dom_get_attr(el, "data-index", index, sizeof(index)) < 0) snprintf(index, sizeof(index), "-");
+            html_dom_get_rect(el, &r);
+        }
+        fprintf(stderr, "[input_script] hit t=%.0f %s index=%s rect=%.0f,%.0f,%.0f,%.0f\n", g_script.time, label, index, r.x, r.y, r.w, r.h);
+    } else if (!strcmp(e->cmd, "rects")) {
+        char label[64] = "", sel[192] = "";
+        sscanf(e->arg, "%63s %191[^\n]", label, sel);
+        HtmlElem els[96];
+        const int n = html_ui_available() && sel[0] ? html_dom_query_all(0, sel, els, 96) : 0;
+        float vw = 0.0f, vh = 0.0f;
+        int ww = 0, wh = 0;
+        html_dom_viewport(&vw, &vh, NULL);
+        glfwGetWindowSize(client->window, &ww, &wh);
+        const float kx = vw > 0.0f && ww > 0 ? ww / vw : 1.0f, ky = vh > 0.0f && wh > 0 ? wh / vh : 1.0f;
+        char line[8192];
+        int len = snprintf(line, sizeof(line), "[input_script] rects t=%.0f %s n=%d", g_script.time, label, n);
+        for (int i = 0; i < n && i < 96 && len > 0 && (size_t) len < sizeof(line) - 64; i++) {
+            char index[16] = "-";
+            HtmlRect r = {0};
+            if (html_dom_get_attr(els[i], "data-index", index, sizeof(index)) < 0) snprintf(index, sizeof(index), "-");
+            html_dom_get_rect(els[i], &r);
+            len += snprintf(line + len, sizeof(line) - (size_t) len, " %s@%.1f,%.1f,%.1f,%.1f", index, r.x * kx, r.y * ky, r.w * kx, r.h * ky);
+        }
+        fprintf(stderr, "%s\n", line);
+    } else if (!strcmp(e->cmd, "nodes")) {
+        char label[64] = "", sel[192] = "";
+        sscanf(e->arg, "%63s %191[^\n]", label, sel);
+        const int all = html_ui_available() ? html_dom_query_all(0, "*", NULL, 0) : 0;
+        const int match = html_ui_available() && sel[0] ? html_dom_query_all(0, sel, NULL, 0) : 0;
+        fprintf(stderr, "[input_script] nodes t=%.0f %s elements=%d match=%d\n", g_script.time, label, all, match);
+    } else if (!strcmp(e->cmd, "ft")) {
+        // ft @label start|stop: wall-clock frame times (input_script_tick samples them)
+        char label[64] = "", what[16] = "";
+        sscanf(e->arg, "%63s %15s", label, what);
+        if (!strcmp(what, "start")) {
+            g_script.ft_last = glfwGetTime();
+            g_script.ft_n = 0;
+        } else if (g_script.ft_last > 0.0) {
+            g_script.ft_last = 0.0;
+            float sum = 0.0f;
+            for (int i = 0; i < g_script.ft_n; i++) sum += g_script.ft_ms[i];
+            // insertion sort: a few thousand samples at most
+            for (int i = 1; i < g_script.ft_n; i++) {
+                const float v = g_script.ft_ms[i];
+                int j = i - 1;
+                while (j >= 0 && g_script.ft_ms[j] > v) { g_script.ft_ms[j + 1] = g_script.ft_ms[j]; j--; }
+                g_script.ft_ms[j + 1] = v;
+            }
+            const int n = g_script.ft_n;
+            fprintf(stderr, "[input_script] ft t=%.0f %s frames=%d avg=%.2f p50=%.2f p95=%.2f max=%.2f ms\n", g_script.time, label, n,
+                    n ? sum / n : 0.0f, n ? g_script.ft_ms[n / 2] : 0.0f, n ? g_script.ft_ms[(n * 95) / 100 < n ? (n * 95) / 100 : n - 1] : 0.0f,
+                    n ? g_script.ft_ms[n - 1] : 0.0f);
+        }
     } else if (!strcmp(e->cmd, "om")) {
         char what[16] = "";
         int id = -1;
@@ -394,9 +511,24 @@ static void script_run(Client *client, const ScriptEvent *e) {
     }
 }
 
+// `ft start`: one wall-clock frame time per frame (game and page ticks)
+static void ft_sample(void) {
+    if (g_script.ft_last <= 0.0) return;
+    const double now = glfwGetTime();
+    if (g_script.ft_n == g_script.ft_cap) {
+        const int cap = g_script.ft_cap ? g_script.ft_cap * 2 : 1024;
+        float *grown = realloc(g_script.ft_ms, (size_t) cap * sizeof(float));
+        if (grown) { g_script.ft_ms = grown; g_script.ft_cap = cap; }
+    }
+    if (g_script.ft_n < g_script.ft_cap) g_script.ft_ms[g_script.ft_n++] = (float) ((now - g_script.ft_last) * 1000.0);
+    g_script.ft_last = now;
+}
+
 void input_script_tick(Client *client) {
     script_load();
     if (!g_script.active) return;
+
+    ft_sample();
 
     if (!g_script.playing && g_script.count && !strcmp(g_script.events[0].cmd, "menu")) {
         if (!client->game.ready || (html_ui_is_ready() && !menu_ui()->dom_ready)) return;
@@ -524,6 +656,12 @@ void input_script_frame_end(Client *client, const float delta, const float frame
 void input_script_page_tick(Client *client) {
     script_load();
     if (!g_script.active) return;
+    ft_sample();
+    // Offline, a page window never steps the sandbox (main.c pumps it after the game tick, which
+    // the page replaces), so the hub's requests stay unanswered and its lists empty. Scripted
+    // runs answer them (delta 0: the frozen game does not advance) so the hub's card lists can
+    // be tested (server/tests/ui_transitions_e2e.py hub-items).
+    client_offline_pump(client, 0.0f);
     if (!g_script.playing) {
         if (!app_mode_page_ready(client)) return;
         g_script.playing = 1;

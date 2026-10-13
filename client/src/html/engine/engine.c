@@ -164,8 +164,11 @@ struct Engine {
     int profile;
     int dump_dl;
     double prof_window_start, prof_frame_start;
-    ProfStat st_restyle, st_layout, st_paint, st_submit, st_frame;
-    unsigned prof_frames, prof_rebuilds;
+    ProfStat st_restyle, st_cascade, st_post, st_layout, st_paint, st_submit, st_frame;
+    unsigned prof_frames, prof_rebuilds, prof_restyled;
+    double decode_ms;                        /* lazy image decodes this frame (budget) */
+    int decodes, decodes_deferred;           /* this frame: done / over budget         */
+    ProfStat st_decode;                      /* per frame with a decode (profile)       */
     EngineStats stats;                       /* accumulated for engine_stats() */
 };
 
@@ -253,18 +256,32 @@ static void prof_report(Engine *g, double now)
     fprintf(stderr, "[html_engine profile] %.1fs: %u frames (%.1f fps)", elapsed, g->prof_frames, g->prof_frames / elapsed);
     prof_print("frame", &g->st_frame);
     prof_print("restyle", &g->st_restyle);
+    fprintf(stderr, " [%u elems]", g->prof_restyled);
+    prof_print("(cascade", &g->st_cascade);
+    prof_print("post)", &g->st_post);
     prof_print("layout", &g->st_layout);
     fprintf(stderr, " (%u rebuilds)", g->prof_rebuilds);
     prof_print("paint", &g->st_paint);
     prof_print("submit", &g->st_submit);
-    fprintf(stderr, "  dl %d items\n", g->dl.n);
+    int resident = 0, decodes = 0;
+    size_t bytes = 0;
+    image_cache_stats(g->images, &resident, &bytes, &decodes);
+    fprintf(stderr, "  dl %d items  images %d (%d resident, %.1f MB lazy, %d decodes",
+            g->dl.n, image_cache_count(g->images), resident, (double) bytes / 1048576.0, decodes);
+    prof_print("decode/frame", &g->st_decode);
+    const GlbStats gs = glb_stats(g->glb);
+    fprintf(stderr, ")  last frame %d draws %d culled\n", gs.draw_calls, gs.culled);
+    memset(&g->st_decode, 0, sizeof(ProfStat));
     memset(&g->st_restyle, 0, sizeof(ProfStat));
+    memset(&g->st_cascade, 0, sizeof(ProfStat));
+    memset(&g->st_post, 0, sizeof(ProfStat));
     memset(&g->st_layout, 0, sizeof(ProfStat));
     memset(&g->st_paint, 0, sizeof(ProfStat));
     memset(&g->st_submit, 0, sizeof(ProfStat));
     memset(&g->st_frame, 0, sizeof(ProfStat));
     g->prof_frames = 0;
     g->prof_rebuilds = 0;
+    g->prof_restyled = 0;
     g->prof_window_start = now;
 }
 
@@ -427,6 +444,31 @@ static void load_author_sheets(Engine *g)
 /* ------------------------------------------------------------------------- */
 /* Layout callbacks (image.h / cascade)                                       */
 /* ------------------------------------------------------------------------- */
+
+/* gl_backend: lazy rasters (DL_IMAGE.lazy, image.h).  Decodes run on the draw that first
+ * needs the pixels, at most ENGINE_IMAGE_DECODE_BUDGET_MS a frame (always one), so a list
+ * scrolled into view fills over a few frames instead of stalling one; deterministic
+ * captures (the clock override: --render-scenario, ui_test) decode everything at once. */
+#define ENGINE_IMAGE_DECODE_BUDGET_MS 4.0
+
+static unsigned glb_lazy_image_resolver(void *user, const void *lazy, int nearest)
+{
+    Engine *g = user;
+    const ImageEntry *e = lazy;
+    if (!g || !e) return 0;
+    if (!image_entry_resident(e)) {
+        if (g->decodes && g->decode_ms >= ENGINE_IMAGE_DECODE_BUDGET_MS && g_clock_override < 0.0) {
+            g->decodes_deferred++;
+            return 0;
+        }
+        const double t0 = wall_ms();
+        image_entry_load(g->images, e);
+        g->decode_ms += wall_ms() - t0;
+        g->decodes++;
+    }
+    image_entry_touch(g->images, e);
+    return image_texture(e, nearest);
+}
 
 /* gl_backend: SVG images (DL_IMAGE.vector = their ImageEntry) at device size. */
 static unsigned glb_image_resolver(void *user, const void *vector, int nearest, float dev_w, float dev_h, float frac_x,
@@ -930,6 +972,19 @@ static int under_rebuilt(Dom *dom, HtmlElem e, const HtmlElem *roots, int n)
     return 0;
 }
 
+/* Exact: is `e` (or an ancestor) one of the subtrees rebuilt in this pass?  0 once the
+ * list overflowed (a child-list change must not be dropped on a guess). */
+static int within_rebuilt(Dom *dom, HtmlElem e, const HtmlElem *roots, int n)
+{
+    if (n > ENGINE_MAX_PASS_REBUILDS || n <= 0) return 0;
+    for (HtmlElem a = e; a; a = dom_parent(dom, a)) {
+        for (int i = 0; i < n && i < ENGINE_MAX_PASS_REBUILDS; i++) {
+            if (roots[i] == a) return 1;
+        }
+    }
+    return 0;
+}
+
 static void post_restyle(Engine *g)
 {
     const double now = engine_now_ms();
@@ -952,7 +1007,10 @@ static void post_restyle(Engine *g)
             save_scroll_offsets(g);
             saved = 1;
         }
-        if (bits & (DOM_DIRTY_CHILDREN | DOM_DIRTY_TEXT)) {
+        /* Inside a subtree rebuilt earlier in this pass (tree order: ancestors first) its
+         * boxes were built from the current children: an innerHTML of N cards rebuilds
+         * the list once, not once per new element below it. */
+        if ((bits & (DOM_DIRTY_CHILDREN | DOM_DIRTY_TEXT)) && !within_rebuilt(g->dom, e, rebuilt, n_rebuilt)) {
             const int r = layout_children_changed(g->tree, d->node);
             account_layout_change(g, r);
             if (r == LAYOUT_RESTYLE_REBUILT && n_rebuilt <= ENGINE_MAX_PASS_REBUILDS) {
@@ -988,11 +1046,17 @@ void engine_flush_style(Engine *g)
     for (int pass = 0; pass < 3 && (dom_any_style_dirty(g->dom) || g->structure_dirty); pass++) {
         const double t0 = wall_ms();
         const uint32_t n = dom_any_style_dirty(g->dom) ? cascade_restyle(g->dom, g->ua, g->sheets, g->n_sheets) : 0;
+        const double t1 = wall_ms();
         post_restyle(g);
         const double ms = wall_ms() - t0;
+        if (g->profile) {
+            prof_add(&g->st_cascade, t1 - t0);
+            prof_add(&g->st_post, ms - (t1 - t0));
+        }
         g->stats.restyle_ms += ms;
         g->stats.restyles++;
         g->stats.restyled_elems += n;
+        g->prof_restyled += n;
         if (g->profile) prof_add(&g->st_restyle, ms);
     }
 }
@@ -1670,6 +1734,7 @@ static Engine *engine_create(const char *ui_dir, const char *page, const int wid
     text_gamma_lut(lut);
     glb_set_text_gamma(g->glb, lut);
     glb_set_image_resolver(g->glb, glb_image_resolver, NULL);
+    glb_set_lazy_image_resolver(g->glb, glb_lazy_image_resolver, g);
 
     /* first style + layout (scripts are ignored: no JS natively) */
     g->need_rebuild = 1;
@@ -1919,10 +1984,14 @@ void html_ui_backend_render(UI *ui)
     /* submit every frame: the scene under the page changes */
     const double t1 = wall_ms();
     const GLboolean depth_was_on = glIsEnabled(GL_DEPTH_TEST);
+    g->decode_ms = 0.0;
+    g->decodes = g->decodes_deferred = 0;
     glb_begin(g->glb, g->fb_w, g->fb_h, g->paint.device_scale);
     if (g->dl.n) glb_submit(g->glb, &g->dl);
     if (g->overlay.n) glb_submit(g->glb, &g->overlay);
     glb_end(g->glb);
+    image_cache_frame(g->images);
+    if (g->profile && g->decodes) prof_add(&g->st_decode, g->decode_ms);
     /* glb_end(): blend on with GL_SRC_ALPHA/GL_ONE_MINUS_SRC_ALPHA, depth off,
      * caches updated.  Put back what the client had. */
     if (depth_was_on) glEnable(GL_DEPTH_TEST);

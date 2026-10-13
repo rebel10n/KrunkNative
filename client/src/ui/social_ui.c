@@ -25,6 +25,7 @@
 #include <html_ui.h>
 #include <social.h>
 #include <ui_logic.h>
+#include <ui_vgrid.h> // the market / inventory / item lists are virtual grids
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -2187,6 +2188,11 @@ static int g_market_no_sort; // io_fr: the filtered market keeps the server's or
 static MarketRow *g_market_rows;
 static int g_market_row_count;
 static char g_market_sub[16];
+// #marketList's cards (market / inventory / sales): g_market_rows indices in list order; a
+// virtual grid (ui_vgrid.h) writes the ones near the scroll position. v7.1.4 writes every row
+// into one innerHTML (a staff inventory is all 6448 store items).
+static int *g_market_view, g_market_view_n;
+static VGrid g_market_grid;
 static const MarketRow *g_sort_rows;
 static int cmp_market_rows(const void *pa, const void *pb) {
     const MarketRow *e = pa, *a = pb; // sort(function (e, a)) ascending on (rarity, season, -index)
@@ -2299,6 +2305,42 @@ static void hub_render_trades(StrBuf *out, const cJSON *t, int *shown) {
     sb_append(out, "</div>");
 }
 
+// One market / inventory / sales card (row v of g_market_rows; showPopup reads it back).
+static void market_card(StrBuf *sb, const int pos, void *user) {
+    (void) user;
+    if (pos < 0 || pos >= g_market_view_n) return;
+    const int v = g_market_view[pos];
+    const MarketRow *m = &g_market_rows[v];
+    const ViewerSkin *pe = hub_skin(m->skin);
+    if (!pe) return;
+    const char *sub = g_market_sub;
+    const int inventory = !strcmp(sub, "inventory");
+    char prev[256];
+    skin_preview(prev, sizeof(prev), pe);
+    const char *col = rarity_color(pe);
+    sb_appendf(sb, "<div class='marketCard%s' id='itemCard%s_%d' style='color:%s;border:5px solid %s' onmouseenter='SOUND.play(&quot;tick_0&quot;,0.1)'>", rarity_animate(pe) ? " rainbow" : "", sub, m->uid, col, col);
+    sb_append_esc(sb, pe->name);
+    sb_appendf(sb, "<div class='itemOwn'>%s</div>", skin_type_label(pe));
+    append_skin_img(sb, pe, prev, "sprayMarketImg", pe->type ? (pe->type == 5 ? "marketImgD" : "marketImgC") : "marketImg");
+    if (inventory) {
+        char est_s[32];
+        comma_number(est_s, sizeof(est_s), estimate_value(m->skin));
+        sb_appendf(sb, "<div class='cardEst'>~ %s <span style='color:#fff'>KR</span></div><div class='cardCnt'>x <span id='invCnt%d' style='color:#fff'>%d</span></div>", est_s, m->uid, m->count);
+    } else {
+        char price[32];
+        comma_number(price, sizeof(price), m->funds);
+        if (m->funds) sb_appendf(sb, "<div class='marketPrice'>%s<span style='color:#fff'> KR</span></div>", price);
+        else sb_append(sb, "<div class='marketPrice'><span style='opacity:0'>s</span></div>");
+    }
+    if (skin_animated(pe)) sb_append(sb, "<div class='material-icons isAnim'>loop</div>");
+    // v3.1.1: showPopup(page, skin, preview, typeLabel, skinid, funds, count, salestart, player, uid, marketid)
+    sb_appendf(sb, "<div class='cardActions'><a class='cardAction' onmouseenter='SOUND.play(&quot;tick_0&quot;,0.1)' onclick='showPopup(&quot;%s&quot;,%d,%d)'>%s</a><div class='cardActionSep'></div>",
+               sub, m->skin, v, !strcmp(sub, "market") ? "Purchase" : inventory ? "List" : !strcmp(sub, "sales") ? "Unlist" : "");
+    if (!inventory) sb_appendf(sb, "<a class='cardAction' onmouseenter='SOUND.play(&quot;tick_0&quot;,0.1)' onclick='searchItem(%d)'>Search</a>", m->skin);
+    else sb_appendf(sb, "<a class='cardAction' onmouseenter='SOUND.play(&quot;tick_0&quot;,0.1)' onclick='quickSell(%d,%d,%d)'>Quick Sell</a>", m->skin, pe->rarity, m->uid);
+    sb_appendf(sb, "<div class='cardActionSep'></div><a class='cardAction' onmouseenter='SOUND.play(&quot;tick_0&quot;,0.1)' onclick='openLink(&quot;/social.html?p=itemsales&i=%d&quot;, &quot;_blank&quot;)'>Info</a></div></div>", m->skin);
+}
+
 // io_0("market", sub, rows): the market / inventory / sales / stats / trades lists
 static void hub_render_market(const char *a, const cJSON *t) {
     const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
@@ -2367,6 +2409,9 @@ static void hub_render_market(const char *a, const cJSON *t) {
                 const int inventory = !strcmp(sub, "inventory");
                 int te = 0;
                 double oe = 0;
+                free(g_market_view);
+                g_market_view = malloc((size_t) (n ? n : 1) * sizeof(int));
+                g_market_view_n = 0;
                 for (int v = 0; v < n; v++) {
                     const MarketRow *m = &rows[v];
                     const ViewerSkin *pe = hub_skin(m->skin);
@@ -2376,32 +2421,12 @@ static void hub_render_market(const char *a, const cJSON *t) {
                     if (inventory && (m->funds || !m->count)) continue;
                     shown++;
                     te++;
-                    const int est = estimate_value(m->skin);
-                    oe += (double) est * m->count;
-                    char prev[256];
-                    skin_preview(prev, sizeof(prev), pe);
-                    const char *col = rarity_color(pe);
-                    sb_appendf(&sb, "<div class='marketCard%s' id='itemCard%s_%d' style='color:%s;border:5px solid %s' onmouseenter='SOUND.play(&quot;tick_0&quot;,0.1)'>", rarity_animate(pe) ? " rainbow" : "", sub, m->uid, col, col);
-                    sb_append_esc(&sb, pe->name);
-                    sb_appendf(&sb, "<div class='itemOwn'>%s</div>", skin_type_label(pe));
-                    append_skin_img(&sb, pe, prev, "sprayMarketImg", pe->type ? (pe->type == 5 ? "marketImgD" : "marketImgC") : "marketImg");
-                    if (inventory) {
-                        char est_s[32];
-                        comma_number(est_s, sizeof(est_s), est);
-                        sb_appendf(&sb, "<div class='cardEst'>~ %s <span style='color:#fff'>KR</span></div><div class='cardCnt'>x <span id='invCnt%d' style='color:#fff'>%d</span></div>", est_s, m->uid, m->count);
-                    } else {
-                        char price[32];
-                        comma_number(price, sizeof(price), m->funds);
-                        if (m->funds) sb_appendf(&sb, "<div class='marketPrice'>%s<span style='color:#fff'> KR</span></div>", price);
-                        else sb_append(&sb, "<div class='marketPrice'><span style='opacity:0'>s</span></div>");
-                    }
-                    if (skin_animated(pe)) sb_append(&sb, "<div class='material-icons isAnim'>loop</div>");
-                    // v3.1.1: showPopup(page, skin, preview, typeLabel, skinid, funds, count, salestart, player, uid, marketid)
-                    sb_appendf(&sb, "<div class='cardActions'><a class='cardAction' onmouseenter='SOUND.play(&quot;tick_0&quot;,0.1)' onclick='showPopup(&quot;%s&quot;,%d,%d)'>%s</a><div class='cardActionSep'></div>",
-                               sub, m->skin, v, !strcmp(sub, "market") ? "Purchase" : inventory ? "List" : !strcmp(sub, "sales") ? "Unlist" : "");
-                    if (!inventory) sb_appendf(&sb, "<a class='cardAction' onmouseenter='SOUND.play(&quot;tick_0&quot;,0.1)' onclick='searchItem(%d)'>Search</a>", m->skin);
-                    else sb_appendf(&sb, "<a class='cardAction' onmouseenter='SOUND.play(&quot;tick_0&quot;,0.1)' onclick='quickSell(%d,%d,%d)'>Quick Sell</a>", m->skin, pe->rarity, m->uid);
-                    sb_appendf(&sb, "<div class='cardActionSep'></div><a class='cardAction' onmouseenter='SOUND.play(&quot;tick_0&quot;,0.1)' onclick='openLink(&quot;/social.html?p=itemsales&i=%d&quot;, &quot;_blank&quot;)'>Info</a></div></div>", m->skin);
+                    oe += (double) estimate_value(m->skin) * m->count;
+                    if (g_market_view) g_market_view[g_market_view_n++] = v;
+                }
+                if (shown) {
+                    vgrid_begin(&g_market_grid, "marketList", g_market_view_n, market_card, NULL);
+                    vgrid_html(&g_market_grid, &sb);
                 }
                 char track[96], value[96], v_s[32];
                 snprintf(track, sizeof(track), "%d<span style='color:#fff'> / %d Items</span>", te, g_viewer_skin_count);
@@ -2619,15 +2644,15 @@ static void hub_render_item_graph(const cJSON *days) {
 
 // ------------------------------------------------------------------ item list (io_0 "items", f494-f496, itemFilter)
 
-#define ITEMS_CHUNK 500
 typedef struct {
     int seas, rarity, weapon, type; // -1 = no filter (vO81 keys); seas 0..: Season n
     int blackm;                     // categories ViewerSkin has no field for: always empty
     int sort;                       // vLN0570: 0 normal (rarity), 1 newest, 2 oldest
     int *list;                      // vA156: skin indices
-    int count, shown;               // vLN0571 chunks rendered
+    int count, shown;               // vLN0571 chunks rendered (unused: the grid shows every item)
+    VGrid grid;                     // #itemsList: a virtual grid over list (ui_vgrid.h)
 } HubItems;
-static HubItems g_items = {-1, -1, -1, -1, 0, 0, NULL, 0, 0};
+static HubItems g_items = {-1, -1, -1, -1, 0, 0, NULL, 0, 0, {{0}}};
 
 static void items_card(StrBuf *sb, const int index) {
     const ViewerSkin *sk = hub_skin(index);
@@ -2653,17 +2678,9 @@ static void items_card(StrBuf *sb, const int index) {
                index, index, index);
 }
 
-// f496(): the next chunk of 500
-static void items_more(void) {
-    const int from = g_items.shown * ITEMS_CHUNK;
-    if (from >= g_items.count) return;
-    StrBuf sb = {0};
-    for (int i = from; i < g_items.count && i < from + ITEMS_CHUNK; i++) items_card(&sb, g_items.list[i]);
-    char *html = sb_finish(&sb);
-    const HtmlElem list = el("itemsList");
-    if (list) html_dom_insert_html(list, HTML_INSERT_BEFORE_END, html);
-    free(html);
-    g_items.shown++;
+static void items_grid_card(StrBuf *sb, const int pos, void *user) {
+    (void) user;
+    if (pos >= 0 && pos < g_items.count) items_card(sb, g_items.list[pos]);
 }
 
 static int items_rarity_cmp(const void *pa, const void *pb) { // rarity desc, then the table order
@@ -2682,9 +2699,7 @@ static void items_show(void) {
     sb_append(&sb, "<style>");
     for (int i = 0; i < 11; i++) sb_appendf(&sb, "@keyframes itemAnm%d {100%%{background-position:-%dpx}}", i, i * 200);
     sb_append(&sb, "</style>");
-    char *html = sb_finish(&sb);
-    set_html("itemsList", html);
-    free(html);
+    char *style = sb_finish(&sb);
     char cnt[32];
     snprintf(cnt, sizeof(cnt), "%d Items", g_items.count);
     const HtmlElem c = el("itemCount");
@@ -2702,7 +2717,14 @@ static void items_show(void) {
     } else {
         qsort(g_items.list, (size_t) g_items.count, sizeof(int), items_rarity_cmp);
     }
-    items_more();
+    vgrid_begin(&g_items.grid, "itemsList", g_items.count, items_grid_card, NULL);
+    vgrid_set_prefix(&g_items.grid, style); // v7 keeps the @keyframes inside #itemsList
+    free(style);
+    StrBuf list = {0};
+    vgrid_html(&g_items.grid, &list);
+    char *html = sb_finish(&list);
+    set_html("itemsList", html);
+    free(html);
 }
 
 static void items_alloc(void) {
@@ -2956,12 +2978,35 @@ static void market_popup(const MarketPop *p) {
     free(html);
 }
 
-// la(id): drop a card after a sale / unlisting
+// la(id): drop a card after a sale / unlisting (from the grid's list too: the cards after it
+// move up, as the DOM removal reflows them)
 static void remove_card(const char *page, const int uid) {
+    if (!strcmp(page, g_market_sub)) {
+        for (int p = 0; p < g_market_view_n; p++) {
+            if (g_market_rows[g_market_view[p]].uid != uid) continue;
+            memmove(&g_market_view[p], &g_market_view[p + 1], (size_t) (g_market_view_n - p - 1) * sizeof(int));
+            g_market_view_n--;
+            g_market_grid.count = g_market_view_n;
+            vgrid_refresh(&g_market_grid);
+            return;
+        }
+    }
     char id[64];
     snprintf(id, sizeof(id), "itemCard%s_%d", page, uid);
     const HtmlElem e = el(id);
     if (e) html_dom_remove(e);
+}
+
+// An inventory row's count changed (io_lir / io_qsr): the row (re-rendered cards) and its card.
+static void inventory_count(const int uid, const int cnt) {
+    for (int i = 0; i < g_market_row_count; i++) {
+        if (g_market_rows[i].uid == uid) g_market_rows[i].count = cnt;
+    }
+    char id[32], n[16];
+    snprintf(id, sizeof(id), "invCnt%d", uid);
+    snprintf(n, sizeof(n), "%d", cnt);
+    if (cnt) set_html(id, n);
+    else remove_card("inventory", uid);
 }
 
 // filterPopup / sortPopup (v7: genericPopup(..., "filterPop" | "sortPop"); the panel's state
@@ -3146,12 +3191,7 @@ static int hub_market_frame(const char *label, const cJSON *frame) {
             io_po(0, "Max Items on Sale");
         } else if (cJSON_GetObjectItemCaseSensitive(a1, "cnt")) {
             if (cJSON_GetObjectItemCaseSensitive(a1, "funds")) hub_set_funds(jnum(a1, "funds"));
-            const int uid = (int) cJSON_GetNumberValue(a2), cnt = (int) jnum(a1, "cnt");
-            char id[32], n[16];
-            snprintf(id, sizeof(id), "invCnt%d", uid);
-            snprintf(n, sizeof(n), "%d", cnt);
-            if (cnt) set_html(id, n);
-            else remove_card("inventory", uid);
+            inventory_count((int) cJSON_GetNumberValue(a2), (int) jnum(a1, "cnt"));
             io_po(1, NULL);
         } else {
             io_po(0, NULL);
@@ -3165,12 +3205,7 @@ static int hub_market_frame(const char *label, const cJSON *frame) {
     } else if (!strcmp(label, "qsr")) { // io_qsr({f, c, i})
         if (cJSON_IsObject(a1)) {
             if (cJSON_GetObjectItemCaseSensitive(a1, "f")) hub_set_funds(jnum(a1, "f"));
-            const int uid = (int) jnum(a1, "i"), cnt = (int) jnum(a1, "c");
-            char id[32], n[16];
-            snprintf(id, sizeof(id), "invCnt%d", uid);
-            snprintf(n, sizeof(n), "%d", cnt);
-            if (cnt) set_html(id, n);
-            else remove_card("inventory", uid);
+            inventory_count((int) jnum(a1, "i"), (int) jnum(a1, "c"));
             io_po(1, NULL);
         } else {
             io_po(0, "Unable to sell");
@@ -4393,7 +4428,9 @@ H(h_item_filter_search) {
     return 1;
 }
 H(h_item_filter_change) { UNUSED; items_filter_change(argc > 0 && args[0].kind == HTML_ARG_THIS ? (HtmlElem) args[0].num : ev ? ev->target : 0); return 1; }
-H(h_item_list_scroll) { UNUSED; items_more(); return 1; }
+// itemListScroll (f496 on reaching the bottom: v7.1.4's next 500 cards): the virtual grid of
+// items_show() already spans every item, so there is nothing to append.
+H(h_item_list_scroll) { UNUSED; return 1; }
 
 H(h_maps_switch_tab) { UNUSED; list_switch_tab(0, (int) arg_n(args, argc, 0, 0), 0); return 1; }
 H(h_mods_switch_tab) { UNUSED; list_switch_tab(1, (int) arg_n(args, argc, 0, 0), 0); return 1; }
@@ -4876,6 +4913,8 @@ static void social_enter(Client *client, const char *query) {
 static void social_tick(Client *client, const float now, const float delta) {
     (void) now; (void) delta;
     if (!g_hub.entered) return;
+    vgrid_tick(&g_market_grid); // the card lists follow their scroll positions (ui_vgrid.h)
+    vgrid_tick(&g_items.grid);
     if (g_hub.brain && !g_hub.connected && backend_available() == 0) {
         // a default brain URL (local config / page origin) with no kn_brain behind it: the
         // guest page over the game connection, as without a backend
