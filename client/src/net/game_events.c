@@ -10,6 +10,7 @@
 #include <ks_client.h> // KrunkScript client host: hooks and script packets
 #include <backend_ui.h>      // NET_PACKET_REDIRECT: servers_ui_redirect
 #include <online_mode.h>     // NET_PACKET_AUTH_CHALLENGE: online-mode join (net/online_mode.c)
+#include <nettspend_audio.h> // NET_EXT_KN_LACED: the Purple Drank's laced spell, its ambience (nettspend_audio.c)
 #include <client.h>
 #include <hud_modes.h>
 #include <html_ui.h>
@@ -947,6 +948,8 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             if (!net_ext_unpack(payload, length, &subtype, &body, &body_length)) return 1;
             // entities, pose, locks ... land with their features; unknown subtypes are ignored, never an error
             if (subtype == NET_EXT_KN_ACCOUNT_RIGHTS) online_mode_on_rights(client, body, body_length); // live sign-in (online_mode.c)
+            // KrunkNative Nettspend: our own laced spell's ambience (the post-effect is the VFX side's)
+            if (subtype == NET_EXT_KN_LACED && client->me) nettspend_audio_on_laced(body, body_length, client->me->uid);
             return 1;
         }
         default:

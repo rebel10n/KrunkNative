@@ -31,6 +31,7 @@
 #include <string.h>
 #include <ruleset.h>
 #include <cosmetics.h> // cosmetics_route, cosmetics_attach_index (ui_loadout_look)
+#include <game_config.h> // game_class_allowed (KrunkNative custom_only / no_comp classes)
 
 // ---------------------------------------------------------------- Krunker tables
 
@@ -38,10 +39,28 @@
 // The rest is UI-only weaponConfig data of v7.1.4 (src/data/weapons.js): `attach != null`
 // (v7 has no forceAttach), `scope`, `charm` and the secondaries' `minRec` unlock level.
 typedef struct {
+    int id;
     const char *name;
     const char *src;   // textures/previews/weapons/<src>.png; NULL = undefined (the knife)
     int attach, scope, charm, secondary, min_rec;
 } LoadoutWeapon;
+
+// KrunkNative Nettspend (doc/v7/decisions.md "Nettspend class"): the two KN weapons a class loadout
+// holds (Purple Drank, Money Spread). Every other KN weapon (Tool Gun, Piss, Physics Gun) stays out
+// of the loadout menus; these two need the Loadout tab's tiles, previews and the class preview.
+static int kn_loadout_weapon(const int id) {
+    return id == WEAPON_ID_DRANK || id == WEAPON_ID_MONEY_SPREAD;
+}
+
+// The secondary a class always carries (ClassConfig.kn_secondary: the Nettspend's Money Spread, no
+// Select Secondary for it), -1 = the player's pick (Krunker's classes). Mirrors player_spawn.
+static int class_bound_secondary(const int class_index) {
+    const Client *client = menu_ui()->client;
+    const size_t count = client->game.class_count ? client->game.class_count : rules_class_count();
+    const ClassConfig *classes = client->game.classes ? client->game.classes : rules_classes();
+    const int bound = class_index >= 0 && (size_t) class_index < count ? classes[class_index].kn_secondary - 1 : -1;
+    return bound >= 0 && rules_weapon(bound) ? bound : -1;
+}
 
 #define V7_WEAPON_COUNT 29
 static const unsigned char WEAPON_ATTACH[V7_WEAPON_COUNT] = {[1] = 1, [3] = 1, [6] = 1, [7] = 1, [13] = 1, [14] = 1, [18] = 1};
@@ -51,13 +70,14 @@ static const unsigned char WEAPON_MIN_REC[V7_WEAPON_COUNT] = {[10] = 15, [11] = 
 
 static const LoadoutWeapon *weapon_at(const int id) {
     static LoadoutWeapon w;
-    if (id < 0 || id >= rules_krunker_weapon_count() || !rules_weapon(id)) return NULL;
+    if (id < 0 || (id >= rules_krunker_weapon_count() && !kn_loadout_weapon(id)) || !rules_weapon(id)) return NULL;
+    w.id = id;
     w.name = rules_weapon(id)->name ? rules_weapon(id)->name : "";
     w.src = rules_weapon(id)->src;
     w.secondary = rules_weapon(id)->secondary;
     w.attach = id < V7_WEAPON_COUNT && WEAPON_ATTACH[id];
     w.scope = id < V7_WEAPON_COUNT && WEAPON_SCOPE[id];
-    w.charm = id >= V7_WEAPON_COUNT || !WEAPON_NO_CHARM[id];
+    w.charm = kn_loadout_weapon(id) ? 0 : id >= V7_WEAPON_COUNT || !WEAPON_NO_CHARM[id]; // KN weapons: no charm
     w.min_rec = id < V7_WEAPON_COUNT ? WEAPON_MIN_REC[id] : rules_weapon(id)->min_rec; // v10: the Compressor 45
     return &w;
 }
@@ -328,6 +348,8 @@ int ui_loadout_weapon_skin_shown(const int weapon) {
 // default 2 = Pistol) as a Krunker weapon id; -1 when the class has no secondary slot.
 int ui_loadout_secondary(const int class_index) {
     if (!class_at(class_index).secondary) return -1;
+    const int bound = class_bound_secondary(class_index); // KrunkNative Nettspend: Money Spread
+    if (bound >= 0) return bound;
     const LoadoutWeapon *w = weapon_at(sel(SEL_SECONDARY));
     return w && w->secondary ? sel(SEL_SECONDARY) : 2;
 }
@@ -608,6 +630,10 @@ static void asset(const char *path, char *out, const size_t n) {
 // from the content tree, which has every weapon (ui/textures only the v7.1.4 slice, 1..19).
 static void weapon_preview(const LoadoutWeapon *w, char *out, const size_t n) {
     char path[96];
+    if (w && kn_loadout_weapon(w->id)) { // KrunkNative Nettspend: page-relative previews (ui/img/kn)
+        snprintf(out, n, "img/kn/preview_%s.png", w->id == WEAPON_ID_DRANK ? "drank" : "money_spread");
+        return;
+    }
     snprintf(path, sizeof(path), "textures/previews/weapons/%s.png", w && w->src ? w->src : "undefined");
     asset(path, out, n);
 }
@@ -699,6 +725,18 @@ static void gen_tab_class(StrBuf *out) {
         level = level + 1 > 1 ? level + 1 : 1;
         char icon[256];
         snprintf(icon, sizeof(icon), "%s", c->icon);
+        // KrunkNative: a custom_only / no_comp class (the Nettspend) outside a custom game or in a comp
+        // lobby is greyed like a level lock (game_class_allowed, what player_spawn enforces)
+        if (!game_class_allowed(&ui->client->game, c->index)) {
+            sb_appendf(out, "<div class=\"classCard\" onmouseenter=\"playTick()\" >\n\t\t\t\t\t\t<div class=\"classImgH\">\n\t\t\t\t\t\t\t<img loading=\"lazy\" style=\"image-rendering:pixelated\" class=\"classImgC\" src=\"%s\">\n\t\t\t\t\t\t\t<div class='classHP'>%d<span style='color: #868484;font-size: 12px;'> HP</span></div>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t\t<div class=\"className\">",
+                       icon, c->hp);
+            sb_append_esc(out, c->name ? c->name : "");
+            sb_append(out, "</div>\n\t\t\t\t\t\t<div class=\"classWeap\">");
+            sb_append_esc(out, c->weapon ? c->weapon : "");
+            sb_appendf(out, "</div>\n\t\t\t\t\t\t<div class='classXPBar'>\n\t\t\t\t\t\t\t<div class='clsXPBarC' style='width:calc(%d%% - 8px)'></div>\n\t\t\t\t\t\t\t<div class='clsXPBarV'>%d / %d</div>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t\t<div class='classLvl'>Lvl %d</div>\n\t\t\t\t\t\t<div class='lockedClass'>\n\t\t\t\t\t\t\t<span class='material-icons' style='font-size: 70px;color:#fff;'>\n\t\t\t\t\t\t\tlock\n\t\t\t\t\t\t\t</span>\n\t\t\t\t\t\t\t<span class='lockedClassText'>%s</span>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t</div>",
+                       pct, (int) (xp - lo), (int) (hi - lo), level, ui->client->game.config.comp ? "Not in Competitive" : "Custom games only");
+            continue;
+        }
         const int open = class_unlocked(c->index);
         if (!open) { // v10: no onclick, the req line instead of the weapon, the lock over the card
             sb_appendf(out, "<div class=\"classCard\" onmouseenter=\"playTick()\" >\n\t\t\t\t\t\t<div class=\"classImgH\">\n\t\t\t\t\t\t\t<img loading=\"lazy\" style=\"image-rendering:pixelated\" class=\"classImgC\" src=\"%s\">\n\t\t\t\t\t\t\t<div class='classHP'>%d<span style='color: #868484;font-size: 12px;'> HP</span></div>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t\t<div class=\"className\">",
@@ -728,7 +766,8 @@ static void gen_tab_loadout(StrBuf *out, const int class_index) {
     SlotView prim = {.color = "#efefef"}, sec = {.color = lc.secondary ? "#2196F3" : "#efefef"}, mel = {.color = "#efefef"};
     snprintf(prim.name, sizeof(prim.name), "%s", knife ? "None" : pw ? pw->name : "");
     weapon_preview(pw, prim.img, sizeof(prim.img));
-    const int sec_id = sel(SEL_SECONDARY);
+    const int bound = lc.secondary ? class_bound_secondary(class_index) : -1; // KrunkNative Nettspend
+    const int sec_id = bound >= 0 ? bound : sel(SEL_SECONDARY);
     const LoadoutWeapon *sw = weapon_at(sec_id) ? (sw_copy = *weapon_at(sec_id), &sw_copy) : NULL;
     snprintf(sec.name, sizeof(sec.name), "%s", lc.secondary && sw ? sw->name : "None");
     weapon_preview(sw, sec.img, sizeof(sec.img));
@@ -773,8 +812,8 @@ static void gen_tab_loadout(StrBuf *out, const int class_index) {
         sb_append(out, "\n\t\t\t</div>");
     }
     sb_append(out, "</div> ");
-    // secondary
-    if (lc.secondary) sb_append(out, "<div class='custContainer contCanSelect' onclick='showWindow(20)' style='width: 47.5%;height: 163px;' onmouseenter='playTick()'>");
+    // secondary (a class-bound one has no Select Secondary: the tile is not a button)
+    if (lc.secondary && bound < 0) sb_append(out, "<div class='custContainer contCanSelect' onclick='showWindow(20)' style='width: 47.5%;height: 163px;' onmouseenter='playTick()'>");
     else sb_append(out, "<div class='custContainer' style='width: 47.5%;height: 163px;' onmouseenter='playTick()'>");
     sb_appendf(out, "<div class='custItNm'>%s</div>", I18N("windows.loadout.secondary", "Secondary"));
     cust_label_icon(out, &sec, ";right: unset;left: 8px;", "custIcon");

@@ -981,6 +981,17 @@ else ()
         add_test(NAME mod_pack_test COMMAND mod_pack_test ${CMAKE_SOURCE_DIR})
     endif ()
 
+    # nettspend_audio_test: the Nettspend class's clips (assets/sound/kn_*.mp3) and audio hooks
+    # (client/src/nettspend_audio.c over audio.c on miniaudio's null backend, the mix captured). GL-free. POSIX.
+    if (NOT WIN32)
+        add_executable(nettspend_audio_test client/tests/nettspend_audio_test.c client/src/nettspend_audio.c
+                       client/src/audio.c client/src/miniaudio.c ${SHARED_HEADERS} ${SHARED_SOURCES})
+        target_include_directories(nettspend_audio_test PRIVATE client/include client/lib)
+        # audio.c's voice_chat.h pulls client.h (FreeType / GLFW headers only; the test stubs voice_audio_fini)
+        target_link_libraries(nettspend_audio_test PRIVATE cJSON freetype glfw Threads::Threads m ${CMAKE_DL_LIBS})
+        add_test(NAME nettspend_audio_test COMMAND nettspend_audio_test ${CMAKE_SOURCE_DIR})
+    endif ()
+
     # KrunkScript (doc/v7/krunkscript.md 6.6): ksc (check; WP2 adds run) over the ks
     # sources only, and ks_front_test (lexer/parser/checker + shared/tests/ks suite)
     file(GLOB KS_SOURCES shared/src/ks/*.c)

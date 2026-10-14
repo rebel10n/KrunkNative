@@ -171,10 +171,22 @@ static void clip_relative_path(const char *name, char *out, const size_t size) {
     else snprintf(out, size, "sound/%s.mp3", name);
 }
 
+// KrunkNative's own clips (outside Krunker's table): the Nettspend class (client/src/nettspend_audio.c)
+// under the weapons slider, its laced drone under ambience.
+static const struct {
+    const char *name;
+    int category;
+} KN_SOUND_CATS[] = {
+    {"kn_drank_reload", 3}, {"kn_drank_pour", 3}, {"kn_drank_splash", 3}, {"kn_money_throw", 3}, {"kn_laced_ambience", 2},
+};
+
 static int sound_category(const char *name) {
     if (sound_is_asset(name)) return AUDIO_CAT_ASSET;
     for (size_t i = 0; i < sizeof(SOUND_CATS) / sizeof(SOUND_CATS[0]); i++) {
         if (!strcmp(SOUND_CATS[i].name, name)) return SOUND_CATS[i].category;
+    }
+    for (size_t i = 0; i < sizeof(KN_SOUND_CATS) / sizeof(KN_SOUND_CATS[0]); i++) {
+        if (!strcmp(KN_SOUND_CATS[i].name, name)) return KN_SOUND_CATS[i].category;
     }
     return -1;
 }

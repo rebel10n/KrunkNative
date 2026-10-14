@@ -47,6 +47,16 @@ Six GLTF remodels in the v7.1.4 reference are corrupt (invalid base64 buffers: w
 v7.1.4's `public/` is ~1.8 GB for these directories; the v7 import adds ~3500 files
 (~720 MB) to a v3.1.1 tree.
 
+## KrunkNative's own sound clips (tracked)
+
+`sound/kn_*.mp3` are not Krunker content: they are KrunkNative's own clips for the Nettspend class
+(the Purple Drank's pour-up reload, Money Spread's throw, the laced ambience; played by
+`client/src/nettspend_audio.c`), so they are committed (`.gitignore` exception) and ship with the
+rest of `sound/`. They are synthesized from scratch by `tools/audio/nettspend_clips.sh` (espeak-ng's
+formant voice reading plain text, SoX oscillators and noise, ffmpeg's LAME encoder): nothing in
+them is sampled, downloaded or transcribed from any recording. The script's header says how each
+clip is made; re-run it to regenerate them.
+
 ## Krunker live asset host content (what the v7.1.4 tree lacks)
 
 The v7.1.4 `public/` tree is incomplete: the v7 client and the catalogue maps reference ~600

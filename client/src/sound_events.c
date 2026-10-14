@@ -15,6 +15,7 @@
 #include <client_settings.h> // Settings > Client "Always Play HS Sound on Kill"
 #include <cosmetics.h>
 #include <piss.h> // KrunkNative Piss: PISS_SOUND_INTERVAL
+#include <nettspend_audio.h> // KrunkNative Nettspend: the Drank's pour up, Money Spread's throw, the laced loop
 #include "viewer/viewer_store.h"
 #include <math.h>
 #include <pcg_basic.h>
@@ -253,6 +254,7 @@ static void map_sounds_update(Client *client) {
     g_sound.map = map;
     g_sound.map_index = client->game.current_map_index;
     audio_stop_3d_loops();
+    nettspend_audio_reset(); // KrunkNative Nettspend: a laced state does not outlive its map
     if (!map) return;
 
     const int ambient = map_ambient_index(map);
@@ -337,11 +339,17 @@ static void local_shot(PlayerTrack *track, const Player *me, const float now) {
 
     if (weapon->build) return; // players.build sets the fire timer without a sound
 
+    // KrunkNative Nettspend: Money Spread's cash throw (by weapon id, it is outside Krunker's table)
+    if (me->loadout && nettspend_audio_shot(me->loadout[me->loadout_index])) return;
+
     // KrunkNative Piss (fireMustard): SOUND.play("spray", 0.12, rate 0.85-1.08) at most every 220 ms
     if (weapon->stream) {
-        if (weapon->sound && now - track->last_spray >= PISS_SOUND_INTERVAL) {
+        // KrunkNative Nettspend: the Drank's stream splashes (nettspend_audio_stream_sound), its Weapon.sound is the pour
+        const char *stream_sound = me->loadout ? nettspend_audio_stream_sound(me->loadout[me->loadout_index]) : NULL;
+        if (!stream_sound) stream_sound = weapon->sound;
+        if (stream_sound && now - track->last_spray >= PISS_SOUND_INTERVAL) {
             track->last_spray = now;
-            audio_play(weapon->sound, 0.12f, 0, rand_float(0.85f, 1.08f));
+            audio_play(stream_sound, 0.12f, 0, rand_float(0.85f, 1.08f));
         }
         return;
     }
@@ -386,10 +394,15 @@ static void local_player_events(Client *client, const float now, const float del
     }
 
     // reload(): reload_1 when it starts; endReload(): reload_2 when half of it has passed.
-    if (same_weapon && me->reload_timer > 0.0f && track->reload_timer <= 0.0f) audio_play("reload_1", 0.25f, 0, 1.0f);
+    // KrunkNative Nettspend: the Purple Drank's reload is the "pour up" (nettspend_audio.c: the
+    // pour, the scream and the line fill the whole reload), no reload_1 / reload_2.
+    const int drank = me->loadout && index >= 0 && index < me->loadout_size && nettspend_is_drank(me->loadout[index]);
+    if (same_weapon && me->reload_timer > 0.0f && track->reload_timer <= 0.0f) {
+        if (!nettspend_audio_reload_start(drank ? me->loadout[index] : -1)) audio_play("reload_1", 0.25f, 0, 1.0f);
+    }
 
     const float reload_half = me->weapon->reload_time * client->game.config.reload_speed * 0.5f;
-    if (same_weapon && track->reload_timer >= reload_half && me->reload_timer < reload_half &&
+    if (same_weapon && !drank && track->reload_timer >= reload_half && me->reload_timer < reload_half &&
         (me->reload_timer > 0.0f || (me->ammo && me->ammo[index] == me->weapon->ammo))) {
         audio_play("reload_2", 0.25f, 0, 1.0f);
     }
@@ -521,6 +534,7 @@ static void preload_common(void) {
     for (size_t i = 0; i < sizeof(COMMON) / sizeof(COMMON[0]); i++) audio_preload(COMMON[i]);
     for (size_t i = 0; i < sizeof(WEAPON_SOUNDS) / sizeof(WEAPON_SOUNDS[0]); i++) audio_preload(WEAPON_SOUNDS[i].sound);
     audio_preload("weapon_29_blast"); // the Charge Rifle's full-charge shot (shoot(..., fullCharge))
+    nettspend_audio_preload(); // KrunkNative Nettspend: kn_drank_* / kn_money_throw / kn_laced_ambience
 }
 
 void sound_events_tick(Client *client, const float now, const float delta) {
@@ -534,6 +548,7 @@ void sound_events_tick(Client *client, const float now, const float delta) {
     }
 
     map_sounds_update(client);
+    nettspend_audio_tick(now); // KrunkNative Nettspend: the laced loop's end
 
     if (client->game.ready) {
         local_player_events(client, now, delta);
@@ -579,14 +594,20 @@ void sound_events_remote_shot(Client *client, const Player *shooter, const int b
     // shoot() on the server -> "s" packet -> playerSound -> play3D(weapon.sound, 0.85, rate); a
     // full-charge shot plays weapon.sound + "_blast" (NetShotPacket.first 2).
     if (!shooter || shooter == client->me) return;
+    // KrunkNative Nettspend: Money Spread's throw (by weapon id)
+    if (shooter->loadout && shooter->loadout_index >= 0 && shooter->loadout_index < shooter->loadout_size &&
+        nettspend_audio_remote_shot(shooter->loadout[shooter->loadout_index], shooter->position)) return;
     // KrunkNative Piss (fireMustard on the server): playSound("spray", 0.22, rate 0.85-1.08) at most
     // every 220 ms per sprayer
     if (shooter->weapon && shooter->weapon->stream) {
         int fresh;
         PlayerTrack *track = remote_track(shooter, &fresh);
-        if (!shooter->weapon->sound || (track && !fresh && g_sound.now - track->last_spray < PISS_SOUND_INTERVAL)) return;
+        const char *stream_sound = shooter->loadout && shooter->loadout_index >= 0 && shooter->loadout_index < shooter->loadout_size
+            ? nettspend_audio_stream_sound(shooter->loadout[shooter->loadout_index]) : NULL; // KrunkNative Nettspend: the Drank splashes
+        if (!stream_sound) stream_sound = shooter->weapon->sound;
+        if (!stream_sound || (track && !fresh && g_sound.now - track->last_spray < PISS_SOUND_INTERVAL)) return;
         if (track) track->last_spray = g_sound.now;
-        audio_play_3d(shooter->weapon->sound, shooter->position, 0.22f, rand_float(0.85f, 1.08f), 0.0f, 0.0f);
+        audio_play_3d(stream_sound, shooter->position, 0.22f, rand_float(0.85f, 1.08f), 0.0f, 0.0f);
         return;
     }
     const int entry = weapon_entry(shooter->weapon);

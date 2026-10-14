@@ -23,7 +23,7 @@
 #define MENU_WINDOW_HOST 8
 #define MENU_WINDOW_JOIN 24
 
-#define MENU_CLASS_MAX 16
+#define MENU_CLASS_MAX 24 // Krunker's 16 classes plus KrunkNative's (Nettspend, doc/v7/decisions.md "Nettspend")
 #define MENU_MAP_MAX 64
 #define MENU_NAME_MAX 32
 

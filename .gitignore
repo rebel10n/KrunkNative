@@ -10,6 +10,8 @@ assets/*/*
 !assets/img/*
 !assets/shaders/*
 !assets/editor/*
+# KrunkNative-only sound clips (tools/audio/nettspend_clips.sh), not Krunker content
+!assets/sound/kn_*.mp3
 /AGENTS.md
 net-bridge/node_modules
 cmake-build-web/

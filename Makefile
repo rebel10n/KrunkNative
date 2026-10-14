@@ -235,6 +235,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, off
 	./$(DEBUG_DIR)/win_geom_test
 	./$(DEBUG_DIR)/pointer_lock_test
 	./$(DEBUG_DIR)/mod_pack_test .
+	./$(DEBUG_DIR)/nettspend_audio_test $(CURDIR)
 
 # --------------------------------------------------------------------------- html-engine
 # The in-house HTML/CSS engine (client/src/html/engine/README.md, doc/html-ui-engine.md).
@@ -263,6 +264,12 @@ spawn-camera-test: build ## Every spawn of ours (Play, Play again, third person,
 
 piss-hose-test: build ## The Piss's first-person hose is held in the trigger hand and its spray leaves from the hose's tip (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 300 $(PYTHON) -I client/tests/piss_hose_e2e.py $(DEBUG_DIR)
+
+nettspend-audio-test: build ## The Nettspend clips decode and the Drank reload / Money Spread / laced hooks play them (miniaudio null backend, no GL)
+	$(DEBUG_DIR)/nettspend_audio_test $(CURDIR)
+
+nettspend-loadout-test: build ## Nettspend is a class card, its Loadout tab shows Purple Drank + Money Spread, the preview wears them and the Drank reload plays the pour up (headless; EGL_DEVICE=)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/nettspend_loadout_e2e.py $(DEBUG_DIR)
 
 minimap-round-test: build ## The in-game minimap is round from its first visible frame after joining, respawning, a map change, spectating and at other sizes / minimapScale (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/minimap_round_e2e.py $(DEBUG_DIR)
