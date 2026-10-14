@@ -1,6 +1,7 @@
 #include <shared.h>
 #include <world.h> // map-logic WP-B: tris, zones, score zones, terrain, resets
 #include <ai.h>
+#include <bot_chat.h>
 #include <spawnables.h>
 #include <zombies.h> // map-logic WP-H: finiteAmmo, double points, machines, airdrops
 #include <game_config.h> // WP-E: config.classes, forceC
@@ -2757,6 +2758,7 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
     game->kill_count++;
     game_challenge(game, player, "d", 1, -1, -1); // WP-E part 2c: challenges.update(game, "d", 1)
     if (game->hooks.kill) game->hooks.kill(game, player, killer); // v10 territorialWars.onPlayerDeath
+    bot_chat_on_kill(game, player, killer); // KrunkNative bot chat: the odd kill / death comment (shared/src/bot_chat.c)
 
     const int weapon_index = killer ? (kill_info && kill_info->weapon_id >= 0 ? kill_info->weapon_id : combat_weapon_index(killer)) : -1;
     int reward = 0;

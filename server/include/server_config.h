@@ -120,6 +120,11 @@ typedef struct {
     int bot_quota;
     float bot_quota_grace;
     char bot_difficulty[16];
+    // Bot chat (shared/src/bot_chat.c): bot_chat off = the bots never chat; bot_chat_ai off = their
+    // lines are templates only (never the coordinator's AI gateway, which otherwise writes them
+    // while a signed-in player is in the lobby). Both default on.
+    int bot_chat;
+    int bot_chat_ai;
     char log_file[GS_STR_LARGE];         // append every log line here too ("" = stdout/stderr only)
     char flavor[8];                      // product flavor key (flavor.h): "strike"; "" = base game (--flavor overrides)
     char cfg_path[GS_STR_LARGE];         // server.cfg actually loaded ("" none)

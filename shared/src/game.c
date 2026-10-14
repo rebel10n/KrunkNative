@@ -6,6 +6,7 @@
 #include <ai.h>
 #include <map_ai.h>
 #include <bots.h>
+#include <bot_chat.h>
 #include <world.h>
 #include <triggers_v7.h>
 #include <ks_game.h> // KrunkScript hook points (onGameEnd, TIME.freeze)
@@ -223,6 +224,7 @@ void game_init(Game *game, int map_index, int mode_index, const unsigned char is
 
     game_ai_reset(game); // game.init: AI.reset() (clients drop their mirrored AIs too)
     game_bots_on_init(game); // v7.1.4 bots: the host freed their players; they rejoin next tick (shared/src/bots.c)
+    bot_chat_on_init(game);  // their pending chat lines are dropped
 
     if (!game->mode || !game->map) return;
 
@@ -542,6 +544,7 @@ void game_end_round(Game *game) {
     }
 
     if (game->mode) mode_send_end(game, winner, sorted, count);
+    bot_chat_on_match_end(game, &winner, sorted, count); // KrunkNative bot chat: one or two bots say gg (shared/src/bot_chat.c)
     ks_game_on_game_end(game); // KrunkScript onGameEnd(), after mode.onEnd (GJS:4665-4667)
     if (game_is_authority(game)) game_match_list_build(game); // WP-E: endData.mts + MATCH_VOTE_STATE
 
@@ -794,6 +797,7 @@ void game_tick_world(Game *game, const float now, const float delta, const float
 
     // v7.1.4 game.update: bots.update(delta * deltaMlt) before players.update (their input frames)
     if (authority && !game->end_timer) game_bots_tick(game, world_delta);
+    if (authority) bot_chat_tick(game, delta); // bot chat lines go out on the end screen too (shared/src/bot_chat.c)
 
     for (size_t i = 0; i < game->player_count; i++) {
         Player *player = game->players[i];

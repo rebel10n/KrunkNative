@@ -6,6 +6,7 @@
 #include <info_query.h>
 #include <rcon.h>
 #include <bots.h>
+#include <bot_chat.h>
 #include <ks_server.h> // KrunkScript server host
 #include <director_gate.h> // Krunker Strike director tickets
 #include <build_info.h>
@@ -157,6 +158,8 @@ static void server_send_shutdown_message(void) {
 // server.cfg bots / bot_quota / bot_difficulty: the v7.1.4 bot manager (shared/src/bots.c)
 // keeps that many bot players in the lobby. The difficulty applies like `bot_difficulty`.
 static void server_configure_bots(const GsConfig *cfg) {
+    bot_chat_set_enabled(&g_server->game, cfg->bot_chat); // bot chat (shared/src/bot_chat.c), also for bot_add bots
+    bot_chat_set_ai(&g_server->game, cfg->bot_chat_ai);
     const int quota = cfg->bot_quota > 0 ? cfg->bot_quota : cfg->bots;
     if (quota <= 0) return;
     float difficulty = BOT_DIFFICULTY_NORMAL;

@@ -229,6 +229,31 @@ max_players; `kn_gameserver_bots_enabled: false` / `kn_gameserver_instance_bot_q
   `server/tests/command_auth_e2e.py` (a guest's `/autofill` is refused and logged).
 - Bots earn nothing: stats, challenges, medals, KR and BP go to accounts only.
 
+Bot chat (`shared/src/bot_chat.c`, Krunker Box Office addition; user, 2026-10-14: "some bots
+should be able to say gg, we don't need more than one or two bots saying it and it should be at
+different intervals"): bots post chat lines like humans do (`NET_PACKET_CHAT`, kind player, the
+bot's uid and name).
+- Match end: with a 70% chance (never more than 3 chatty match ends in a row, never more than 2
+  silent ones) one or two bots speak, each on its own delay 0.8-7 s after the end and at least
+  0.7 s apart. The first says a plain "gg" variant (always a template); the second (or the lone
+  speaker half the time) comments the result in character.
+- Kills / deaths: the killer (8%) or the victim (6%) bot comments 0.6-2.5 s later, at most one
+  such line per 10 s across all bots, one per 40 s per bot, 6 lines per bot per round; nothing
+  on the end screen.
+- Personality (chill / tryhard / salty / hype / goofy / quiet), stable per bot name + uid, picks
+  the template pool and the AI's character. Every line, template or AI, passes
+  `bot_chat_filter` (first line only, quotes and a "Name:" prefix dropped, 70 characters, links,
+  markup and model refusals refused, profanity and slurs refused in plain, leetspeak, spaced-out
+  and stretched spelling); a refused AI line falls back to the template.
+- The AI path (`GameHooks.bot_banter`, `server/src/bot_banter.c`): a server linked to kn_brain
+  with a signed-in player in the game asks the brain (`bot-banter` frame, doc/backend.md 5.2;
+  `services/brain/ai.c`: one non-streamed completion with a tight prompt, `ai.banter.*` limits,
+  the answer cut to its first line) and posts the answer when it arrives, or the template 6 s
+  after the line's delay. Guests-only lobbies, standalone servers and the offline game get
+  templates only. server.cfg / config `bot_chat false` silences the bots, `bot_chat_ai false`
+  keeps them on templates. Tests: `bot_chat_test`, `server/tests/bots_chat_e2e.py` (a stubbed
+  AI gateway: `make bots-chat-e2e`).
+
 AI (`bot_type nextbot`, the default): Idle / Hunt / Attack / Hide with the BotProfile presets
 (reaction time, aim focus, dodge, chase timeout, coward / retreat), aim-down-sights and recoil
 control by skill, reloads and the secondary on an empty primary. `bot_type tfue` runs bots.js

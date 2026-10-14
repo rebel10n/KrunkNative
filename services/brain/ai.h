@@ -28,6 +28,10 @@
  *   ai.models_ttl_s         /ai/models cache lifetime
  *   ai.health_interval_s    known-prompt probe period (0 = only at start)
  *   ai.limit.rpm / ai.limit.daily / ai.limit.daily_tokens / ai.limit.concurrent
+ *   ai.banter.enabled       (bool, default 1)   bot chat lines for game servers (`bot-banter`)
+ *   ai.banter.rpm           brain-wide bot lines per minute (default 120; beyond: "rate limited")
+ *   ai.banter.max_tokens    output cap of a bot line request (default 200; the line is clipped to 70 chars anyway)
+ *   ai.banter.timeout_ms    (default 8000)
  *
  * Health: at start and every ai.health_interval_s the brain sends the default model a prompt
  * with a random token and checks the answer echoes it. "degraded" = the upstream answers but
@@ -68,6 +72,19 @@ typedef struct AiServerTools {
     void (*call)(const char *tool_name, const char *args_json, AiToolDoneFn done, void *ud); /* done runs on the loop thread, once */
 } AiServerTools;
 void ai_register_server_tools(const AiServerTools *t);
+
+/*
+ * Bot chat (shared/src/bot_chat.c, server/src/bot_banter.c): a game server's `bot-banter`
+ * frame (internal WebSocket, doc/backend.md 5.2) asks for ONE short in-character chat line of a
+ * bot player: {name, personality (chill|tryhard|salty|hype|goofy|quiet), event (win|lose|draw|
+ * kill|death), other?, mode?, map?, kills?, deaths?, place?, players?}. The request is one
+ * non-streamed completion with a tight prompt and ai.banter.max_tokens; the answer is cut to its
+ * first line and 70 characters. done(ud, err, reply) runs once on the loop thread: reply {text}
+ * on success, err otherwise ("AI unavailable" when the proxy is off / unconfigured, "rate
+ * limited" past ai.banter.rpm, the upstream's failure). The game server filters the text itself.
+ */
+typedef void (*AiBanterDoneFn)(void *ud, const char *err, const cJSON *reply);
+void ai_bot_banter(Brain *b, const cJSON *frame, AiBanterDoneFn done, void *ud);
 
 /* ai_search.c: web search (a DuckDuckGo MCP server as a stdio child; ai.search.command) */
 int ai_search_init(Brain *b);

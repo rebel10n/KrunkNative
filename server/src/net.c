@@ -6,6 +6,7 @@
 #include <server_log.h>
 #include <server_accounts.h> // backend: JOIN, PLAYER_INFO, stats, billboards (doc/backend.md section 8)
 #include <brain.h>           // brain_enabled(): the brain owns matchmaking and the hub
+#include <bot_banter.h>      // bot chat through kn_brain (GameHooks.bot_banter)
 #include <ai.h>
 #include <bots.h>            // Krunker v7.1.4 bot players (shared/src/bots.c)
 #include <ks_server.h>       // KrunkScript server host (server/src/ks_server_host.c)
@@ -1826,6 +1827,7 @@ void net_install_game_hooks(void) {
     g_server->game.hooks.give_skin = net_game_give_skin; // season-system: found skins (accounts.c)
     g_server->game.hooks.kill = net_game_kill;           // v10 Turf Wars clan kills (accounts.c)
     g_server->game.hooks.alloc_uid = net_game_alloc_uid; // bot players (shared/src/bots.c)
+    g_server->game.hooks.bot_banter = bot_banter_request;  // bot chat through kn_brain's AI (server/src/bot_banter.c)
     g_server->game.hooks.can_use_skin = net_game_can_use_skin; // players.spray canUseSkin (accounts.c)
     ks_storage_install_game_hooks(&g_server->game); // WP6: Save / Load Data, Reward KR (ks_storage.c)
 }

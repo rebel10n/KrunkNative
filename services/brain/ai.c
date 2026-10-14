@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -55,6 +56,7 @@ static struct {
     char ua[64];
     char hide[32][96];
     int nhide;
+    int banter_enabled, banter_rpm, banter_max_tokens, banter_timeout_ms;
 } C;
 
 static Brain *g_b;
@@ -1354,6 +1356,180 @@ static void h_chat(kn_http_req *req, void *ud) {
     cJSON_Delete(args);
 }
 
+/* ------------------------------------------------------------------ bot banter (internal WS)
+ *
+ * One short chat line for a bot player (ai.h "Bot chat"). A non-streamed completion on the
+ * effective default model with a tight system prompt and a small output cap; the first line of
+ * the answer, unquoted and clipped, goes back as {text}. A brain-wide per-minute limit keeps
+ * a busy fleet of game servers from spending the editor's budget (ai.banter.rpm). */
+
+#define AI_BANTER_LIVE_MAX 8
+#define AI_BANTER_RAW_MAX (64u << 10)
+#define AI_BANTER_CHARS 70 /* NET_CHAT_MAX_CHARS */
+
+typedef struct {
+    AiBanterDoneFn done;
+    void *ud;
+    AiBuf raw;
+    char model[96];
+    char name[40];
+} Banter;
+
+static struct {
+    uint64_t window_start;
+    int window_count;
+    int live;
+} BN;
+
+static const char *banter_personality_desc(const char *p) {
+    if (!strcmp(p, "tryhard")) return "competitive and cocky, loves ez and 1 tap, never cruel";
+    if (!strcmp(p, "salty")) return "grumpy, blames lag, spawns and the map, never cruel";
+    if (!strcmp(p, "hype")) return "excited and loud, caps and exclamation marks";
+    if (!strcmp(p, "goofy")) return "silly, absurd excuses, self-deprecating";
+    if (!strcmp(p, "quiet")) return "a player of very few words, one or two words at most";
+    return "relaxed, friendly, low-key";
+}
+
+/* first non-empty line, wrapping quotes / a "Name:" prefix dropped, clipped to AI_BANTER_CHARS code points */
+static void banter_clean(const char *in, const char *name, char *out, const size_t size) {
+    out[0] = 0;
+    if (!in) return;
+    const char *p = in;
+    while (*p && isspace((unsigned char) *p)) p++;
+    const char *end = p;
+    while (*end && *end != '\n' && *end != '\r') end++;
+    while (end > p && isspace((unsigned char) end[-1])) end--;
+    const size_t nl = strlen(name);
+    if (nl && (size_t) (end - p) > nl + 1 && !strncasecmp(p, name, nl) && p[nl] == ':') {
+        p += nl + 1;
+        while (p < end && isspace((unsigned char) *p)) p++;
+    }
+    while (end - p >= 2 && (*p == '"' || *p == '\'' || *p == '`') && end[-1] == *p) {
+        p++;
+        end--;
+    }
+    size_t o = 0, chars = 0;
+    for (const char *c = p; c < end && o + 4 < size; c++) {
+        const unsigned char b = (unsigned char) *c;
+        if (b < 0x20) continue;
+        if ((b & 0xc0) != 0x80 && chars++ >= AI_BANTER_CHARS) break;
+        out[o++] = (char) b;
+    }
+    while (o && out[o - 1] == ' ') o--;
+    out[o] = 0;
+}
+
+static void banter_chunk(Up *u, const char *data, const size_t n) {
+    Banter *bn = u->ud;
+    if (bn->raw.len + n <= AI_BANTER_RAW_MAX) ai_buf_add(&bn->raw, data, n);
+}
+
+static void banter_done(Up *u) {
+    Banter *bn = u->ud;
+    BN.live--;
+    char text[256] = "", err[200] = "";
+    if (!u->status) snprintf(err, sizeof(err), "unreachable (%.150s)", u->err);
+    else if (u->status >= 400) {
+        char e[160];
+        ai_error_text(bn->raw.data, bn->raw.len, e, sizeof(e));
+        snprintf(err, sizeof(err), "HTTP %d: %s", u->status, e);
+    } else {
+        AiStream s;
+        ai_stream_init(&s, NULL, NULL);
+        if (strstr(u->ctype, "event-stream")) {
+            ai_stream_feed(&s, bn->raw.data ? bn->raw.data : "", bn->raw.len);
+            ai_stream_finish(&s);
+        } else ai_parse_response(&s, bn->raw.data ? bn->raw.data : "", bn->raw.len);
+        if (s.error[0]) snprintf(err, sizeof(err), "%.190s", s.error);
+        else {
+            banter_clean(s.text.data, bn->name, text, sizeof(text));
+            if (!text[0]) snprintf(err, sizeof(err), "empty answer");
+        }
+        ai_stream_free(&s);
+    }
+    cJSON *reply = cJSON_CreateObject();
+    if (!err[0]) cJSON_AddStringToObject(reply, "text", text);
+    KN_DEBUG(MOD, "bot banter %s: %s (%lld ms)", bn->name, err[0] ? err : text, (long long) (kn_now_ms() - u->t0));
+    bn->done(bn->ud, err[0] ? err : NULL, reply);
+    cJSON_Delete(reply);
+    ai_buf_free(&bn->raw);
+    free(bn);
+    up_free(u);
+}
+
+void ai_bot_banter(Brain *b, const cJSON *frame, AiBanterDoneFn done, void *ud) {
+    (void) b;
+    if (!C.enabled || !ai_configured() || !C.banter_enabled) {
+        done(ud, "AI unavailable", NULL);
+        return;
+    }
+    const uint64_t now = kn_now_ms();
+    if (now - BN.window_start >= 60000) {
+        BN.window_start = now;
+        BN.window_count = 0;
+    }
+    if (BN.window_count >= C.banter_rpm || BN.live >= AI_BANTER_LIVE_MAX) {
+        done(ud, "rate limited", NULL);
+        return;
+    }
+    const char *name = kn_json_str(frame, "name", "Bot");
+    const char *personality = kn_json_str(frame, "personality", "chill");
+    const char *event = kn_json_str(frame, "event", "win");
+    const char *other = kn_json_str(frame, "other", "");
+    const char *mode = kn_json_str(frame, "mode", "");
+    const char *map = kn_json_str(frame, "map", "");
+    const int kills = (int) kn_json_int(frame, "kills", 0), deaths = (int) kn_json_int(frame, "deaths", 0);
+    const int place = (int) kn_json_int(frame, "place", 0), players = (int) kn_json_int(frame, "players", 0);
+
+    char sys[640], user[512], where[160] = "", score[160] = "";
+    snprintf(sys, sizeof(sys),
+             "You write one chat message for a bot player in the browser shooter Krunker. You are %s, a %s player. "
+             "Answer with the message only: one line, at most 60 characters, plain text, no quotes, no hashtags, no emoji, "
+             "no links, no names other than the ones given, no profanity, no slurs, no insults about real people, "
+             "casual gamer tone (gg, wp, lol, ez are fine).",
+             name, banter_personality_desc(personality));
+    if (mode[0] || map[0]) snprintf(where, sizeof(where), " Mode: %s%s%s.", mode[0] ? mode : "a match", map[0] ? " on " : "", map);
+    if (players > 0 && place > 0) snprintf(score, sizeof(score), " You: %d kills, %d deaths, place %d of %d.", kills, deaths, place, players);
+    else snprintf(score, sizeof(score), " You: %d kills, %d deaths.", kills, deaths);
+    if (!strcmp(event, "kill")) snprintf(user, sizeof(user), "Event: you just killed %s.%s%s", other[0] ? other : "someone", where, score);
+    else if (!strcmp(event, "death")) snprintf(user, sizeof(user), "Event: %s just killed you.%s%s", other[0] ? other : "someone", where, score);
+    else if (!strcmp(event, "draw")) snprintf(user, sizeof(user), "Event: the match just ended in a draw.%s%s", where, score);
+    else snprintf(user, sizeof(user), "Event: the match just ended and you %s.%s%s%s%s", !strcmp(event, "win") ? "won" : "lost", where,
+                  other[0] ? " Best player: " : "", other, other[0] ? "." : "");
+    cJSON *msgs = cJSON_CreateArray();
+    cJSON *m = cJSON_CreateObject();
+    cJSON_AddStringToObject(m, "role", "system");
+    cJSON_AddStringToObject(m, "content", sys);
+    cJSON_AddItemToArray(msgs, m);
+    m = cJSON_CreateObject();
+    cJSON_AddStringToObject(m, "role", "user");
+    cJSON_AddStringToObject(m, "content", user);
+    cJSON_AddItemToArray(msgs, m);
+    const char *model = effective_default();
+    const cJSON *row = model_row(model);
+    const char *effort = row && cJSON_GetArraySize(cJSON_GetObjectItem(row, "efforts")) > 0 ? "low" : NULL;
+    char *body = ai_request_body(C.api, model, msgs, NULL, effort, 0, C.banter_max_tokens);
+    cJSON_Delete(msgs);
+    Banter *bn = calloc(1, sizeof(*bn));
+    if (!body || !bn) {
+        free(body);
+        free(bn);
+        done(ud, "out of memory", NULL);
+        return;
+    }
+    bn->done = done;
+    bn->ud = ud;
+    copy_str(bn->model, sizeof(bn->model), model);
+    copy_str(bn->name, sizeof(bn->name), name);
+    if (!up_start(ai_api_path(C.api), body, 0, C.banter_timeout_ms, banter_chunk, banter_done, bn)) {
+        free(bn);
+        done(ud, "cannot start the upstream request", NULL);
+        return;
+    }
+    BN.live++;
+    BN.window_count++;
+}
+
 /* ------------------------------------------------------------------ module */
 
 static void config_load(const struct kn_config *cfg) {
@@ -1382,6 +1558,10 @@ static void config_load(const struct kn_config *cfg) {
     C.lim_daily_tokens = kn_config_int(cfg, "ai.limit.daily_tokens", 20000000);
     C.lim_concurrent = (int) kn_config_int(cfg, "ai.limit.concurrent", 3);
     snprintf(C.ua, sizeof(C.ua), "KrunkNative-brain/%s", KN_BRAIN_VERSION);
+    C.banter_enabled = kn_config_bool(cfg, "ai.banter.enabled", 1);
+    C.banter_rpm = (int) kn_config_int(cfg, "ai.banter.rpm", 120);
+    C.banter_max_tokens = (int) kn_config_int(cfg, "ai.banter.max_tokens", 200);
+    C.banter_timeout_ms = (int) kn_config_int(cfg, "ai.banter.timeout_ms", 8000);
     const char *hide[32];
     const size_t nh = kn_config_str_list(cfg, "ai.models_hide", hide, 32);
     C.nhide = 0;

@@ -213,6 +213,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, off
 	./$(DEBUG_DIR)/charge_grapple_test
 	./$(DEBUG_DIR)/piss_test
 	./$(DEBUG_DIR)/nettspend_test
+	./$(DEBUG_DIR)/bot_chat_test
 	./$(DEBUG_DIR)/ruleset_test
 	./$(DEBUG_DIR)/hitboxes_test
 	./$(DEBUG_DIR)/v10_gameplay_test
@@ -506,6 +507,10 @@ krunker-official-e2e: build ## Official krunker.io mode (krunker_net.h) against 
 .PHONY: target-select-e2e
 target-select-e2e: build ## Player target selectors on server_bin: god * / ungod * / give * over clients and bots, a guest refused, kick @bots, rcon op / kick *
 	timeout 300 $(PYTHON) -I server/tests/target_select_e2e.py $(DEBUG_DIR)
+
+.PHONY: bots-chat-e2e
+bots-chat-e2e: build ## Bot chat (shared/src/bot_chat.c): gg lines at match end, AI lines through kn_brain against a STUBBED AI gateway, filters, rate limits, fallbacks (local kn_brain on sqlite)
+	timeout 900 $(PYTHON) -I server/tests/bots_chat_e2e.py $(DEBUG_DIR)
 
 .PHONY: command-auth-e2e
 command-auth-e2e: build ## Command authorisation (doc/v7/command-auth.md): forged commands / dev packets / tickets / rcon guesses refused + logged, dev / op / rcon still work

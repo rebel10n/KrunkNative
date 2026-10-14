@@ -65,6 +65,8 @@ void gs_config_defaults(GsConfig *cfg) {
     cfg->lag_comp_scale = 1.0f;         // x each player's lagComp (ENT slider): 1 = v3.1.1
     gs_copy(cfg->bot_difficulty, sizeof(cfg->bot_difficulty), "normal"); // bots / bot_quota: 0 = no bots
     cfg->bot_quota_grace = 10.0f; // bot_quota: an empty lobby keeps its bots this long
+    cfg->bot_chat = 1;            // bots say gg / comment kills (templates, or kn_brain's AI with bot_chat_ai)
+    cfg->bot_chat_ai = 1;
 }
 
 // ------------------------------------------------------------------ file location
@@ -539,6 +541,8 @@ int gs_config_from_json(GsConfig *cfg, const cJSON *s, char *err, const size_t e
     gs_read_int(s, "bots", &cfg->bots, 0, 16);            // config.botLimit
     gs_read_int(s, "bot_quota", &cfg->bot_quota, 0, 16);
     gs_read_float(s, "bot_quota_grace", &cfg->bot_quota_grace, 0.0f, 600.0f);
+    gs_read_bool(s, "bot_chat", &cfg->bot_chat);
+    gs_read_bool(s, "bot_chat_ai", &cfg->bot_chat_ai);
     {
         const cJSON *item = gs_item(s, "bot_difficulty"); // "hard" or 1.8
         if (cJSON_IsNumber(item)) snprintf(cfg->bot_difficulty, sizeof(cfg->bot_difficulty), "%g", item->valuedouble);

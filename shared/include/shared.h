@@ -1740,6 +1740,7 @@ typedef struct {
 #define NET_TARGET_EXCEPT_UID(target) (-3 - (target)) // decode: target <= -3
 
 struct AccountInfo_t; // shared/include/account.h (GameHooks.account_info)
+struct BotChatRequest_t; // shared/include/bot_chat.h (GameHooks.bot_banter)
 typedef struct {
     void *user;
     // Send one framed packet to the connection owning player `uid`, or to every
@@ -1804,6 +1805,11 @@ typedef struct {
     // account may use store item `skin` (the server: the coordinator's inventory, accounts.c).
     // NULL = no account (guests, the client mirror): only free items (shared/src/social_v7.c).
     int (*can_use_skin)(const struct Game_t*, const Player*, int skin);
+    // Bot chat (shared/include/bot_chat.h): a bot wants an AI-written chat line. The server asks
+    // kn_brain (`bot-banter`, server/src/bot_banter.c) and the answer comes back through
+    // bot_chat_deliver. 1 = asked (an answer or a timeout follows), 0 = not available (offline,
+    // no brain, a guests-only lobby): the bot's template line goes out instead. NULL = 0.
+    int (*bot_banter)(struct Game_t*, const struct BotChatRequest_t*);
 } GameHooks;
 
 // Server projectiles (Krunker v3.1.1 src/data/projectile.js). Units per second
@@ -2034,6 +2040,7 @@ typedef struct Game_t {
     GameProjectile projectiles[GAME_MAX_PROJECTILES];
     struct GameAIs_t *ai;         // Krunker game.AI (shared/include/ai.h): NULL until the first AI
     struct GameBots_t *bots;      // Krunker v7.1.4 game.bots (shared/include/bots.h): NULL until the first bot
+    struct BotChat_t *bot_chat;   // KrunkNative bot chat (shared/include/bot_chat.h): NULL until the first use
 
     const EffectConfig *effects;  // WP-B: per-game effects.js table (custom-game prks overrides), NULL = g_effects
     // WP-E (shared/src/game_config.c): host request, weps / prks override copies, match votes,

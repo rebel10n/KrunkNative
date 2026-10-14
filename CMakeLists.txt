@@ -147,6 +147,7 @@ set(SERVER_CORE_SOURCES
     server/src/sandbox.c
     server/src/ks_server_host.c
     server/src/ks_storage.c
+    server/src/bot_banter.c       # bot chat via kn_brain (templates only without a brain link: the offline sandbox)
 )
 # What the core needs from the backend link in a build without it (the client): brain.c
 # compiled without knsvc is the standalone stub; sandbox_backend.c stands in for the
@@ -693,6 +694,13 @@ else ()
     target_link_libraries(bot_test PRIVATE m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(bot_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    # bot_chat_test: bot chat (shared/src/bot_chat.c): the filter, templates, gg at match end, the AI hook, rate limits
+    add_executable(bot_chat_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/bot_chat_test.c)
+    target_link_libraries(bot_chat_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(bot_chat_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
     # target_select_test: player target selectors (shared/src/target_select.c: *, @me, @bots, @team,

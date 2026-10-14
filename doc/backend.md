@@ -810,6 +810,7 @@ Node -> brain:
 | `host-request` | `rid`, `region`?, `config`, `hostAccountId`? | a player asked this server (game socket `custom`) to host a game; the brain finds a server with capacity -> `host-request-reply` |
 | `host-reply` | `rid`, `ok`, `lobbyId`?, `err`? | answer to the brain's `host` |
 | `ranked-result` | `rid`, `matchId`, `lobbyId`, `winner` (0, 1, -1 draw), `players`, `abandoned` | ranked match end (6.5) -> `ranked-result-reply` |
+| `bot-banter` | `rid`, `name`, `personality`, `event` (win / lose / draw / kill / death), `other`?, `mode`?, `map`?, `kills`?, `deaths`?, `place`?, `players`? | bot chat (shared/src/bot_chat.c): one short in-character chat line for a bot player, written by the AI proxy (services/brain/ai.c) -> `bot-banter-reply` |
 | `turf-kills` | `rid`, `matchId`, `mapId`, `mode`, `records` [{clan_name, player_id, map_id, kills, deaths}] | v10 Turf Wars: an eligible round's counted clan kills (6.5) -> `turf-kills-reply` {ok, recorded} |
 
 Brain -> node:
@@ -827,6 +828,7 @@ Brain -> node:
 | `host-request-reply` | `rid`, `ok`, `gameId`, `host`, `port`, `webUrl`?, `clientId` (ticket for the host player), `err`? | send the host player `cust` ("Game Created", gameId) as v3.1.1 does |
 | `drain` | `reason`, `deadlineMs`? | finish the round, accept no new players, then `lobby-down` + exit/idle |
 | `ranked-result-reply` | `rid`, `ok`, `ratings: [{accountId, name, team, key, old, new, delta, abandoned?}]`, `err`? | |
+| `bot-banter-reply` | `rid`, `ok`, `text`? (one line, <= 70 chars), `err`? ("AI unavailable", "rate limited", the upstream's failure) | the game server filters the text and falls back to a template on `ok: false` or no reply |
 
 ### 5.3 Join tickets
 

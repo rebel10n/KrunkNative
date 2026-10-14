@@ -5,6 +5,7 @@
 #include <server_log.h>
 #include <director_gate.h> // Krunker Strike director tickets
 #include <brain.h>
+#include <bot_banter.h>
 #include <build_info.h>
 #include <central_auth.h>
 #include <rcon.h>
@@ -2620,6 +2621,7 @@ static void acc_handle_frame(cJSON *frame) {
     else if (!strcmp(type, "rcon")) rcon_handle_brain_frame(frame);
     else if (!strcmp(type, "ranked-result-reply")) acc_handle_ranked_reply(frame);
     else if (!strcmp(type, "map-data")) acc_handle_map_data(frame);
+    else if (!strcmp(type, "bot-banter-reply")) bot_banter_on_brain_frame(frame); // bot chat (server/src/bot_banter.c)
     else if (!strcmp(type, "assign")) {
         // best-effort heads-up; the ticket itself is verified on JOIN
         const char *jti = cJSON_GetStringValue(cJSON_GetObjectItem(frame, "jti"));

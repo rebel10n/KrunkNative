@@ -8,6 +8,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "ai.h"
 #include "brain_internal.h"
 #include "game_presence.h"
 #include "roles.h"
@@ -479,6 +480,16 @@ static void on_ranked_result_done(void *ud, const char *err, const cJSON *reply)
     free(r);
 }
 
+/* bot-banter -> ai.c -> bot-banter-reply {rid, ok, text | err} (shared/src/bot_chat.c) */
+static void on_bot_banter_done(void *ud, const char *err, const cJSON *reply) {
+    ReplyCtx *r = ud;
+    cJSON *f = reply ? cJSON_Duplicate(reply, 1) : cJSON_CreateObject();
+    cJSON_AddBoolToObject(f, "ok", err == NULL);
+    if (err) cJSON_AddStringToObject(f, "err", err);
+    reply_send(r, f);
+    free(r);
+}
+
 /* ---- frames */
 
 static void handle_hello(NodeConn *c, const cJSON *frame) {
@@ -611,6 +622,11 @@ static void handle_frame(NodeConn *c, const cJSON *frame) {
     }
     if (!strcmp(type, "host-request")) {
         handle_host_request(c, frame);
+        return;
+    }
+    if (!strcmp(type, "bot-banter")) { /* bot chat: one AI-written line for a bot player (ai.c) */
+        ReplyCtx *r = reply_ctx(c, frame, "bot-banter-reply");
+        if (r) ai_bot_banter(b, frame, on_bot_banter_done, r);
         return;
     }
     if (!strcmp(type, "host-reply") || !strcmp(type, "reply") || !strcmp(type, "rcon-reply")) {

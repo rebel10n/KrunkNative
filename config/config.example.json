@@ -305,6 +305,8 @@
     "bots": 0,
     "bot_quota": 0,
     "bot_difficulty": "normal",
+    "bot_chat": true,
+    "bot_chat_ai": true,
     "log_file": ""
   }
 }
