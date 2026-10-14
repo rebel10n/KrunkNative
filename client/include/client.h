@@ -731,6 +731,15 @@ void client_clear_players(Client*); // drops every player (and mesh) of the curr
 void client_menu_bind(Client*);
 void client_menu_tick(Client*);
 void client_set_menu_open(Client*, int);
+// The pointer-lock owner (client/src/ui/menu_ui.c over client/include/pointer_lock.h): decides and
+// applies the lock from the menu / end screen / console / focus / KrunkScript state. Call it after
+// any of them changes (client_set_menu_open does); main.c runs it once a frame too.
+void client_pointer_update(Client*);
+int  client_pointer_look_allowed(const Client*); // the mouse may turn the camera: controls on and really locked
+int  client_pointer_click(Client*);              // a press on the game view with the lock off: lock again (1 = taken)
+void client_pointer_focus(Client*, int focused); // native window focus changes
+void client_pointer_end_free(Client*);           // the lock went during the end title: free until a click
+void client_pointer_refresh(Client*);            // the window changed monitor / size (F11): apply the lock again
 void client_window_focus_lost(Client*); // native alt-tab: resetKeys + menu, as on pointer lock loss (main.c)
 void client_hud_html_tick(Client*, float); // HTML HUD (client/src/ui/hud_ui.c)
 

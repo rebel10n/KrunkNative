@@ -194,6 +194,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, bil
 	./$(DEBUG_DIR)/meshopt_test .
 	./$(DEBUG_DIR)/window_state_test
 	./$(DEBUG_DIR)/win_geom_test
+	./$(DEBUG_DIR)/pointer_lock_test
 	./$(DEBUG_DIR)/mod_pack_test .
 
 # --------------------------------------------------------------------------- html-engine

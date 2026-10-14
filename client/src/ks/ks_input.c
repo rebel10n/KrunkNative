@@ -132,29 +132,18 @@ int ks_client_input_unlocked(void) { return g_ksc.loaded && g_in.tmp_unlock; }
 int ks_client_inputs_disabled(void) { return g_ksc.loaded && g_in.dont_send; }
 int ks_client_hide_crosshair(void) { return g_ksc.loaded && ks_ui_crosshair_hidden(); }
 
-// document.exitPointerLock() / requestPointerLock() without the menu's lock-loss flow
-static void pointer_lock(Client *client, const int on) {
-    if (!client) return;
-#ifdef __EMSCRIPTEN__
-    if (on) emscripten_request_pointerlock("#canvas", 1);
-    else emscripten_exit_pointerlock();
-#else
-    if (client->window) glfwSetInputMode(client->window, GLFW_CURSOR, on ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
-#endif
-    if (client->window) {
-        double x, y;
-        glfwGetCursorPos(client->window, &x, &y);
-        client->mouse_state.last_pos.x = (float) x; // no look jump on the next frame
-        client->mouse_state.last_pos.y = (float) y;
-    }
+// document.exitPointerLock() / requestPointerLock() without the menu's lock-loss flow: the
+// pointer-lock owner (client_pointer_update, pointer_lock.h) reads tmp_unlock / force_free
+// (ks_client_input_unlocked / ks_client_pointer_free), so after changing them it only re-runs.
+static void pointer_lock_changed(Client *client) {
+    if (client) client_pointer_update(client);
 }
 
 // lockMouse / a click on the game view: tmpUnlock off, controls.toggle(true)
 void ks_input_relock(Client *client) {
     g_in.tmp_unlock = 0;
     if (!client) return;
-    if (!g_in.force_free) pointer_lock(client, 1);
-    client->mouse_state.locked = 1;
+    pointer_lock_changed(client); // locked again unless freeMouse keeps it free (controls on)
     client->menu_lock_grace_until = glfwGetTime() + 1.0;
 }
 
@@ -201,7 +190,7 @@ static KsValue in_mouse_pos_overlay(KsScript *s, void *u, const KsValue *a, int 
 static KsValue in_free_mouse(KsScript *s, void *u, const KsValue *a, int n) {
     (void) s; (void) u; (void) a; (void) n;
     g_in.force_free = 1;
-    pointer_lock(g_ksc.client, 0);
+    pointer_lock_changed(g_ksc.client);
     return ks_undef();
 }
 
@@ -213,8 +202,7 @@ static KsValue in_unlock_mouse(KsScript *s, void *u, const KsValue *a, int n) {
     g_in.tmp_unlock = 1;
     ui_controls_reset_keys();
     ks_input_reset_keys();
-    pointer_lock(client, 0);
-    client->mouse_state.locked = 0;
+    pointer_lock_changed(client); // controls off, pointer free
     return ks_undef();
 }
 
@@ -553,12 +541,9 @@ void ks_input_frame(Client *client) {
         ks_input_reset_keys();
         return;
     }
-#ifndef __EMSCRIPTEN__
-    // freeMouse lasts for the script's life: the menu's play re-locks, free it again
-    if ((g_in.force_free || g_in.tmp_unlock) && client->window && glfwGetInputMode(client->window, GLFW_CURSOR) != GLFW_CURSOR_NORMAL) {
-        glfwSetInputMode(client->window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-    }
-#else
+    // freeMouse lasts for the script's life: natively the pointer-lock owner keeps the cursor free;
+    // on the web the menu's Play requests the lock itself (a gesture), so release it again.
+#ifdef __EMSCRIPTEN__
     if (g_in.force_free || g_in.tmp_unlock) {
         EmscriptenPointerlockChangeEvent st;
         if (emscripten_get_pointerlock_status(&st) == EMSCRIPTEN_RESULT_SUCCESS && st.isActive) emscripten_exit_pointerlock();
@@ -576,10 +561,7 @@ void ks_input_unload(Client *client) {
     const int fov_set = g_in.fov_set;
     memset(&g_in, 0, sizeof(g_in));
     if (!client) return;
-    if (was_free && !html_ui_is_menu_open() && client->in_game) {
-        pointer_lock(client, 1);
-        client->mouse_state.locked = 1;
-    }
+    if (was_free && !html_ui_is_menu_open() && client->in_game) pointer_lock_changed(client); // locked again
     if (fov_set) {
         const float fov = menu_ui()->settings.fov;
         if (fov >= 10.0f && fov <= 179.0f) client->camera.fov = fov * (float) M_PI / 180.0f;

@@ -278,6 +278,7 @@ static void set_window_mode(Client *client, const int mode) {
         if (client->windowed_maximized) glfwMaximizeWindow(window); // maximized before fullscreen: again
     }
     g_swap_dirty = 1; // monitor changes can reset the swap interval on some drivers
+    client_pointer_refresh(client); // F11 / windowMode: a locked pointer is grabbed again on the new geometry
     printf("[render] window mode %s\n", mode == RS_FULLSCREEN ? "fullscreen" : mode == RS_BORDERLESS ? "borderless" : "windowed");
 }
 #endif

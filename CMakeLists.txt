@@ -802,6 +802,13 @@ else ()
     target_link_libraries(win_geom_test PRIVATE m)
     add_test(NAME win_geom_test COMMAND win_geom_test)
 
+    # pointer_lock_test: when the pointer is locked and the mouse turns the camera (v7 controls.js
+    # CONTROLS.enabled / pointerlockchange): Esc menu, end screen, focus loss, KrunkScript
+    # unlockMouse / freeMouse (client/src/pointer_lock.c)
+    add_executable(pointer_lock_test client/tests/pointer_lock_test.c client/src/pointer_lock.c)
+    target_include_directories(pointer_lock_test PRIVATE client/include)
+    add_test(NAME pointer_lock_test COMMAND pointer_lock_test)
+
     # backend_online_test: online mode's defaults (the public finder / account service, never
     # localhost) and the native brain transport over loopback (client/src/net/online_mode.c,
     # backend_common.c, backend_native.c; on Windows backend_winhttp.c, which CI runs there too)

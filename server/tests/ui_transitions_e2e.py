@@ -252,8 +252,9 @@ def sc_endscreen():
 
 def sc_endscreen_cursor():
     """The mouse on the end screen (v7 io_endGame: CONTROLS.disable() -> exitPointerLock once the
-    results show, config.endAnim after the END): hidden during the title, shown with the results,
-    also when the round ends with the menu open or while spectating, and when Click to Play over
+    results show, config.endAnim after the END): hidden during the title (shown when the round ends
+    with the menu open: hideUI closes the menu, the lock stays lost; pointer-lock covers the look),
+    shown with the results, also when the round ends with the menu open or while spectating, and when Click to Play over
     the results only brings them back (CONTROLS.toggle(true) while locked: UI.toggleEndScreen())."""
     run_client("endscreen-cursor", ["--offline", "--map", "kanji"], f"""
         0 play
@@ -261,7 +262,7 @@ def sc_endscreen_cursor():
         1400 esc
         1800 check @menu menuHolder=1 :cursor=1
         2000 con end
-        6500 check @title endUI=1 menuHolder=0
+        6500 check @title endUI=1 menuHolder=0 :cursor=1
         12000 check @results {RESULTS} :cursor=1
         12500 esc
         13500 check @results-menu {MENU} :cursor=1
@@ -286,6 +287,215 @@ def sc_endscreen_cursor():
         17000 check @spect-results-play-click endUI=1 endInfo=1 menuHolder=0 :cursor=1
         17500 quit
     """)
+
+
+STATE_RE = re.compile(r"\[input_script\] state t=(\d+) .*? menu=(\d) locked=(\d) pos=(\S+) .*? ended=(\d) .*? "
+                      r"cursor=(\w+) yaw=(\S+) pitch=(\S+)")
+
+
+def check_states(name, lines, script, expects):
+    """`state @label` probes of the script, in order, against expects {label: {key: value}}: menu, locked
+    (CONTROLS.enabled), ended, cursor (GLFW mode: normal | disabled), look=same|moved (yaw/pitch
+    against the probe named by `since`: the mouse moved in between) and move=same|moved (the
+    player's position against `since`: a movement key was held in between). A key stays held across
+    two probes and is released after the last one: a stalled frame (a loaded host) runs every due
+    event in one frame, and a press + release there would never move the player."""
+    labels = [m.group(1) for m in re.finditer(r"^\s*\d+ state @(\S+)", script, re.M)]
+    states = [m for m in (STATE_RE.search(line) for line in lines or []) if m]
+    got = {}
+    for label, m in zip(labels, states):
+        got[label] = {"menu": m.group(2), "locked": m.group(3), "move": tuple(map(float, m.group(4).split(","))),
+                      "ended": m.group(5), "cursor": m.group(6), "look": (float(m.group(7)), float(m.group(8)))}
+    for label, want in expects.items():
+        have = got.get(label)
+        for key, value in want.items():
+            if key == "since":
+                continue
+            if have is None:
+                record(name, label, key, value, "no probe", False)
+            elif key in ("look", "move"):
+                base = got.get(want["since"])
+                if base is None:
+                    record(name, label, key, value, "no probe", False)
+                    continue
+                moved = any(abs(a - b) > (1e-3 if key == "look" else 1.0) for a, b in zip(have[key], base[key]))
+                shown = "moved" if moved else "same"
+                fmt = lambda v: ",".join(f"{c:.4f}" if key == "look" else f"{c:.1f}" for c in v)  # noqa: E731
+                record(name, label, key, value, f"{shown}({fmt(base[key])}->{fmt(have[key])})", shown == value)
+            else:
+                record(name, label, key, value, have[key], have[key] == value)
+
+
+def sc_pointer_lock():
+    """The pointer lock and mouse look (v7 controls.js: CONTROLS.enabled follows the pointer lock and the
+    mouse only turns the camera under it; pointer_lock.h): Esc open -> close locks again at once
+    (natively), the menu turns nothing, a round that ends with the Esc menu up runs its title with the
+    cursor free and inert (hideUI closes the menu, the lock stays lost) until a click on the game view
+    locks it again, the results free it (CONTROLS.disable()), the next round locks it again."""
+    locked = {"menu": "0", "locked": "1", "cursor": "disabled"}
+    free = {"locked": "0", "cursor": "normal"}
+    script = """
+        0 play
+        1000 state @alive
+        1100 cursor 700 400
+        1300 cursor 900 300
+        1500 state @alive-look
+        1600 esc
+        2000 state @menu
+        2100 cursor 300 300
+        2300 cursor 500 600
+        2500 state @menu-look
+        2600 esc
+        3000 state @menu-closed
+        3100 cursor 700 400
+        3300 cursor 900 300
+        3500 state @menu-closed-look
+        3600 esc
+        3800 con end
+        8500 check @title-free endUI=1 menuHolder=0 :cursor=1
+        8500 state @title-free
+        8600 cursor 300 300
+        8800 cursor 500 600
+        9000 state @title-free-look
+        9200 click 640 360
+        9500 state @title-click
+        9600 cursor 700 400
+        9800 cursor 900 300
+        10000 state @title-click-look
+        13500 check @results endUI=1 endInfo=1 :cursor=1
+        13500 state @results
+        13600 cursor 300 300
+        13800 cursor 500 600
+        14000 state @results-look
+        # the next round's map load stalls a frame (~1 s): probe once it settled, or every due
+        # event runs in that one frame
+        34000 state @next-round
+        34100 cursor 700 400
+        34300 cursor 900 300
+        34500 state @next-round-look
+        34600 down W
+        35100 state @next-round-walking
+        35700 state @next-round-walk
+        35800 up W
+        36000 quit
+    """
+    lines = run_client("pointer-lock", ["--offline", "--map", "kanji"], script)
+    check_states("pointer-lock", lines, script, {
+        "alive": dict(locked, ended="0"),
+        "alive-look": dict(locked, look="moved", since="alive"),
+        "menu": dict(free, menu="1"),
+        "menu-look": dict(free, menu="1", look="same", since="menu"),
+        "menu-closed": dict(locked),
+        "menu-closed-look": dict(locked, look="moved", since="menu-closed"),
+        "title-free": dict(free, menu="0", ended="1"),
+        "title-free-look": dict(free, menu="0", ended="1", look="same", since="title-free"),
+        "title-click": dict(locked, ended="1"),
+        "title-click-look": dict(locked, ended="1", look="moved", since="title-click"),
+        "results": dict(free, menu="0", ended="1"),
+        "results-look": dict(free, ended="1", look="same", since="results"),
+        "next-round": dict(locked, ended="0"),
+        "next-round-look": dict(locked, ended="0", look="moved", since="next-round"),
+        "next-round-walk": dict(locked, ended="0", move="moved", since="next-round-look"),
+    })
+
+    # Death -> CLICK TO PLAY -> respawn, then an END while playing: the title keeps the lock (the
+    # controls stay on until config.endAnim ran out), the results free it and turn nothing.
+    script = """
+        0 play
+        1000 state @alive
+        1500 con kill
+        2500 state @dead
+        7000 check @click-to-play menuHolder=1 instructionHolder=1 :cursor=1
+        7000 state @click-to-play
+        7100 cursor 300 300
+        7300 cursor 500 600
+        7500 state @click-to-play-look
+        7600 clickid instructionHolder
+        9500 state @respawned
+        9600 cursor 700 400
+        9800 cursor 900 300
+        10000 state @respawned-look
+        10100 down W
+        10600 state @respawned-walking
+        11200 state @respawned-walk
+        11300 up W
+        11500 con end
+        16500 state @title-locked
+        16600 cursor 300 300
+        16800 cursor 500 600
+        17000 state @title-locked-look
+        21500 state @results
+        21600 cursor 700 400
+        21800 cursor 900 300
+        22000 state @results-look
+        22500 quit
+    """
+    lines = run_client("pointer-lock-respawn", ["--offline", "--map", "kanji"], script)
+    check_states("pointer-lock-respawn", lines, script, {
+        "alive": dict(locked),
+        "dead": dict(locked),
+        "click-to-play": dict(free, menu="1"),
+        "click-to-play-look": dict(free, menu="1", look="same", since="click-to-play"),
+        "respawned": dict(locked, ended="0"),
+        "respawned-look": dict(locked, look="moved", since="respawned"),
+        "respawned-walk": dict(locked, move="moved", since="respawned-look"),
+        "title-locked": dict(locked, ended="1"),
+        "title-locked-look": dict(locked, ended="1", look="moved", since="title-locked"),
+        "results": dict(free, menu="0", ended="1"),
+        "results-look": dict(free, ended="1", look="same", since="results"),
+    })
+
+
+def sc_pointer_lock_chat():
+    """A chat line left open (Enter, typing, not sent) when the game takes the input back without a
+    click: the next round after the end-screen results, a spawn that closes CLICK TO PLAY (Mag Dump's
+    forceSpawn). The browser's click blurs #chatInput (v7 mousedown f2139); here the controls coming
+    back do (ui_controls_release_focus). Before, the mouse turned the camera but no key moved."""
+    locked = {"menu": "0", "locked": "1", "cursor": "disabled"}
+    script = """
+        0 play
+        1000 con end
+        13000 check @results endUI=1 endInfo=1 chatUI=1 :cursor=1
+        13200 down ENTER
+        13250 up ENTER
+        13500 type gg
+        13800 state @results-typing
+        34000 state @next-round
+        34100 down W
+        34600 state @next-round-walking
+        35200 state @next-round-walk
+        35300 up W
+        35500 quit
+    """
+    lines = run_client("pointer-lock-chat-end", ["--offline", "--map", "kanji"], script)
+    check_states("pointer-lock-chat-end", lines, script, {
+        "results-typing": {"locked": "0", "cursor": "normal", "ended": "1"},
+        "next-round": dict(locked, ended="0"),
+        "next-round-walk": dict(locked, ended="0", move="moved", since="next-round"),
+    })
+    script = """
+        0 play
+        300 con mode md
+        3000 respawn
+        5000 state @alive
+        5500 con kill
+        6500 down ENTER
+        6550 up ENTER
+        6800 type lol
+        14000 check @forced-spawn inGameUI=1 menuHolder=0 deathUIHolder=0
+        14000 state @forced-spawn
+        14100 down W
+        14600 state @forced-spawn-walking
+        15200 state @forced-spawn-walk
+        15300 up W
+        15500 quit
+    """
+    lines = run_client("pointer-lock-chat-spawn", ["--offline", "--map", "kanji"], script)
+    check_states("pointer-lock-chat-spawn", lines, script, {
+        "alive": dict(locked),
+        "forced-spawn": dict(locked),
+        "forced-spawn-walk": dict(locked, move="moved", since="forced-spawn"),
+    })
 
 
 def sc_endscreen_team():
@@ -1268,6 +1478,8 @@ SCENARIOS = {
     "loadout-images-web": sc_loadout_images_web,
 }
 SCENARIOS["endscreen-cursor"] = sc_endscreen_cursor
+SCENARIOS["pointer-lock"] = sc_pointer_lock
+SCENARIOS["pointer-lock-chat"] = sc_pointer_lock_chat
 
 
 def main():

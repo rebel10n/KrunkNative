@@ -1075,6 +1075,17 @@ static void chat_blur(void) {
     ui_controls_chat_focus(0);
 }
 
+// The game took the input back (CONTROLS.enabled false -> true: menu_ui.c client_pointer_update).
+// In the browser the click that locks the pointer again moves the focus off #chatInput or a menu
+// field (v7 mousedown f2139 also blurs the chat itself); natively the lock also comes back with no
+// click (Escape closing the menu, the next round, a spawn that closes the menu), and a field still
+// focused then kept every key (ui_text_input_focused): the mouse turned the camera, nothing moved.
+void ui_controls_release_focus(void) {
+    if (g_ctl.chat_focused) chat_blur();
+    const HtmlElem el = html_dom_active_element();
+    if (el && ui_text_input_focused()) html_dom_blur(el);
+}
+
 // client_chat_send (client.h, CLIENT_HAVE_CHAT_SEND) lives in the net layer; a weak
 // reference keeps this file linking while that side is absent from a build.
 #if defined(CLIENT_HAVE_CHAT_SEND) && (defined(__GNUC__) || defined(__clang__))

@@ -1356,6 +1356,8 @@ static void mouse_button_callback(GLFWwindow *window, const int button, const in
     Client *client = glfwGetWindowUserPointer(window);
     if (ks_client_mouse_button(client, button, action)) return; // KrunkScript onMouseClick / onMouseUp, re-lock after unlockMouse
     if (!html_pointer_input()) {
+        // CONTROLS mousedown with the controls off (a free end title): toggle(true), no shot
+        if (action == GLFW_PRESS && client_pointer_click(client)) return;
         // In game: Krunker's canvas mousedown/mouseup (left shoots, right aims, the
         // other buttons are bindable keys M2/M4/M5), sampled by client_tick_game.
         ui_controls_mouse_event(client, button, action, 1);
@@ -1400,7 +1402,10 @@ void client_window_focus_lost(Client *client) {
     if (!client->mouse_state.locked) return; // menu / end screen: the pointer is already free
     ui_controls_reset_keys();
     if (html_ui_available()) {
-        if (!html_ui_is_menu_open()) client_set_menu_open(client, 1);
+        // Over the end screen v7 shows no menu (hideUI: UI.active = false): the title goes on with
+        // the pointer free, a click on the game view locks it again (pointer_lock.h).
+        if (hud_ui_end_screen_up()) client_pointer_end_free(client);
+        else if (!html_ui_is_menu_open()) client_set_menu_open(client, 1);
     } else {
         glfwSetInputMode(client->window, GLFW_CURSOR, GLFW_CURSOR_NORMAL); // no HTML menu: just free the pointer
         client->mouse_state.locked = 0;
@@ -1408,7 +1413,11 @@ void client_window_focus_lost(Client *client) {
 }
 
 static void window_focus_callback(GLFWwindow *window, const int focused) {
-    if (!focused) client_window_focus_lost(glfwGetWindowUserPointer(window));
+    Client *client = glfwGetWindowUserPointer(window);
+    if (!focused) client_window_focus_lost(client);
+#ifndef __EMSCRIPTEN__ // the browser drops its lock itself (pointer_lock.h: `focused` is always 1 there)
+    if (client && html_ui_available()) client_pointer_focus(client, focused); // after the menu took the pointer
+#endif
 }
 
 static void key_callback(GLFWwindow *window, const int key, const int scancode, const int action, const int mods) {
@@ -1625,6 +1634,9 @@ static void client_tick_game(Client *client, const float now, const float frame_
     // before this frame's input sampling (as when the render ran first in the frame).
     const int was_locked = client->mouse_state.locked;
     if (!was_locked) client->mouse_state.scroll_delta = g_skip_scroll = 0;
+    // The pointer-lock owner (menu_ui.c): mouse_state.locked = CONTROLS.enabled from the UI state,
+    // the cursor mode / canvas lock to match, before this frame samples the mouse.
+    if (html_menu) client_pointer_update(client);
 
 
     // v3.1.1 keeps the whole game loop running behind the menu (index.js gameLoop): the
@@ -1649,9 +1661,8 @@ static void client_tick_game(Client *client, const float now, const float frame_
     if (menu_open) {
         // client_set_menu_open freed the pointer; nothing to lock or enter here.
     } else if (html_menu) {
-        // Menu closed: the game owns the mouse (client_set_menu_open locked it), unless a
-        // KrunkScript INPUTS.unlockMouse freed it until lockMouse / a click on the game view.
-        client->mouse_state.locked = !ks_client_input_unlocked();
+        // Menu closed: the game owns the mouse (client_pointer_update above), unless the end title
+        // runs free or a KrunkScript INPUTS.unlockMouse freed it until lockMouse / a click.
     } else {
         client->mouse_state.locked = glfwGetInputMode(client->window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED;
 
@@ -1684,6 +1695,9 @@ static void client_tick_game(Client *client, const float now, const float frame_
     look_x = (float) web_x;
     look_y = (float) web_y;
 #endif
+    // v7 f2137: mouse movement only reaches the camera under the pointer lock. A free cursor (the
+    // menu, the end screen, a free end title, the console, freeMouse) never turns it.
+    if (!client_pointer_look_allowed(client)) look_x = look_y = 0.0f;
 
     // WP-C v7.1.4 netRate: an input frame is sampled (predicted, sent) only once the frame time since
     // the last one reaches half a netRate period; it carries that summed delta (net/recon.c).

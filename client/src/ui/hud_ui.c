@@ -3019,13 +3019,15 @@ void hud_ui_show_end_screen(Client *client, const int result, const char *next_r
     if (!ui->ended) {
         // the END: showEndScreen + vicTitle.show; later calls only refresh the countdown.
         // hideUI(false) -> toggleMenu(false): a menu open at the END goes (UI.toggleWindow(false)
-        // first); the pointer stays as it was, like v3.1.1's CONTROLS.
+        // first); the pointer stays as it was, like v7's CONTROLS: free (and turning nothing)
+        // through the title when the menu had it, until a click or the results (pointer_lock.h).
         if (html_ui_is_menu_open()) {
             html_ui_set_menu_open(0);
             menu_apply_open(0);
         }
         ui->ended = 1;
         ui->end_phase = 1;
+        client_pointer_update(client);
         ui->end_start_ms = hud_now_ms(client);
         dom_style("endUI", "background-color", "");
         hud_end_screen_dom(1); // the title draws from this frame's HUD tick on (overlay.render after io_gameEnd)
@@ -3060,9 +3062,7 @@ int hud_ui_toggle_end_screen(Client *client) {
     if (!client || !hud_ui_end_screen_up()) return 0;
     if (!hud_ui_end_screen_interactive()) return 1; // title animation: #endInfo not shown yet, nothing toggles
     if (html_ui_is_menu_open()) {
-        client_set_menu_open(client, 0);
-        glfwSetInputMode(client->window, GLFW_CURSOR, GLFW_CURSOR_NORMAL); // CONTROLS stay disabled
-        client->mouse_state.locked = 0;
+        client_set_menu_open(client, 0); // the results keep the pointer free: CONTROLS stay disabled (pointer_lock.h)
         dom_display("endUI", "");
         const HtmlElem base = html_dom_by_id("uiBase");
         if (base) html_dom_set_class(base, "onEndScrn", 1);
@@ -3084,6 +3084,7 @@ void hud_ui_hide_end_screen(Client *client) {
     if (!ui->ended) return;
     ui->ended = 0;
     ui->end_phase = 0;
+    if (client) client_pointer_update(client); // the next round: locked again unless the menu is up
     g_end_timer[0] = 0;
     // WP-E part 2c: a new game: endData.mdls, matchRewardSummary = {} and endChals.innerHTML = ""
     memset(&g_end_medals, 0, sizeof(g_end_medals));

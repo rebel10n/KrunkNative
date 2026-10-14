@@ -64,6 +64,8 @@
 //   100 state                    log the held weapon slot, the menu / pointer lock state, position, ammo, ended,
 //                                the charge (chargeTime s, fullCharge), the reload and fire timers, the grapple / rope, the GLFW
 //                                cursor mode (cursor=normal: the mouse shows, disabled: locked to the game)
+//                                and the camera's look (yaw pitch, radians: the pointer-lock tests check that
+//                                mouse motion only turns it while the pointer is locked)
 //   100 con end                  a developer console command (the rest of the line: con bot_add 5)
 //   100 vis @dead endUI chatHolder  log what the player sees of these page elements (html_dom_is_shown):
 //                                "[input_script] vis t=100 @dead endUI=1 chatHolder=0" (- = no such id,
@@ -485,7 +487,7 @@ static void script_run(Client *client, const ScriptEvent *e) {
         const Player *me = client->me;
         const int cursor_mode = glfwGetInputMode(client->window, GLFW_CURSOR);
         fprintf(stderr, "[input_script] state t=%.0f slot=%d/%d weapon=%s menu=%d locked=%d pos=%.3f,%.3f,%.3f ammo=%d aim=%.2f ended=%d "
-                "charge=%.3f full=%d reload=%.2f fire=%.2f grapple=%d rope=%.1f cursor=%s\n",
+                "charge=%.3f full=%d reload=%.2f fire=%.2f grapple=%d rope=%.1f cursor=%s yaw=%.4f pitch=%.4f\n",
                 g_script.time, me ? me->loadout_index : -1, me ? (int) me->loadout_size : 0,
                 me && me->weapon ? me->weapon->name : "-", html_ui_available() && html_ui_is_menu_open(), client->mouse_state.locked,
                 me ? me->position.x : 0.0f, me ? me->position.y : 0.0f, me ? me->position.z : 0.0f,
@@ -494,7 +496,8 @@ static void script_run(Client *client, const ScriptEvent *e) {
                 me && me->reloads && me->loadout_index >= 0 && me->loadout_index < me->loadout_size ? me->reloads[me->loadout_index] : 0.0f,
                 me ? me->grapple.active : 0,
                 me ? me->grapple.range : 0.0f,
-                cursor_mode == GLFW_CURSOR_NORMAL ? "normal" : cursor_mode == GLFW_CURSOR_DISABLED ? "disabled" : "hidden");
+                cursor_mode == GLFW_CURSOR_NORMAL ? "normal" : cursor_mode == GLFW_CURSOR_DISABLED ? "disabled" : "hidden",
+                client->camera.rotation.y, client->camera.rotation.x); // the camera's look (mouse-look checks)
     } else if (!strcmp(e->cmd, "wsel")) {
         // wsel @label: what player_generate_meshes built on the held slot of the menu's class preview
         // (always slot 0) and of our own player (PlayerArms.selection), one line each ("-" = no model yet)
@@ -683,14 +686,16 @@ void input_script_tick(Client *client) {
         while (g_script.next < g_script.count && !strcmp(g_script.events[g_script.next].cmd, "play")) g_script.next++;
     }
 
-    // A `vis` / `scroll` / `rect` probe never shares a frame with the input before it: after a stalled frame the due
+    // A `vis` / `scroll` / `rect` / `state` probe never shares a frame with the input before it: after a stalled frame the due
     // events would otherwise run together and the probe would read the page before the UI
-    // reacted to them (the HUD / menu passes run later in the frame).
+    // reacted to them (the HUD / menu passes run later in the frame), or the look before the
+    // frame's mouse movement turned the camera (`state` yaw / pitch).
     int ran = 0;
     while (g_script.next < g_script.count && g_script.events[g_script.next].t <= g_script.time + 1e-3f) {
         const ScriptEvent *e = &g_script.events[g_script.next];
         const char *prev = ran ? g_script.events[g_script.next - 1].cmd : NULL;
-        if (prev && script_probe(e->cmd) && !script_probe(prev)) break;
+        const int probe = script_probe(e->cmd) || !strcmp(e->cmd, "state");
+        if (prev && probe && !script_probe(prev) && strcmp(prev, "state")) break;
         script_run(client, e);
         g_script.next++;
         ran = 1;

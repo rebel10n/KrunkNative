@@ -444,6 +444,7 @@ void ui_controls_fill_input(Client*, Input*, float mouse_dx, float mouse_dy);
 void ui_controls_fill_look(Client*, Input*, float mouse_dx, float mouse_dy);
 void ui_controls_end_frame(void);
 void ui_controls_reset_keys(void);               // CONTROLS.resetKeys (menu opened / lock lost)
+void ui_controls_release_focus(void);            // the game took the input back: blur #chatInput / a page text field
 int  ui_controls_scroll_dir(void);               // scrollDirM: 1 / -1
 float ui_controls_fps_fov(void);                 // fpsFOV in radians
 int  ui_controls_weapon_visible(const Client*);  // showWeapon* for the weapon in hand

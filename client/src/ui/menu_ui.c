@@ -36,6 +36,8 @@
 #include <ruleset.h>
 #include <render_settings.h> // disable_rarity_anim
 #include "../viewer/viewer_store.h" // the class box: a loadout weapon's skin name, rarity, thumbnail
+#include <app_mode.h> // the game page owns the pointer lock (not the hub / editor / viewer)
+#include <pointer_lock.h> // "should the pointer be locked" (client/src/pointer_lock.c)
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -245,6 +247,122 @@ static int menu_lock_ready(Client *client) {
     (void) client;
     return 1;
 #endif
+}
+
+// ---------------------------------------------------------------- pointer lock owner
+
+// The one place the game page's pointer lock is decided and applied (pointer_lock.h): every menu /
+// end-screen / console / focus / KrunkScript change calls client_pointer_update, and main.c once a
+// frame before it samples the mouse. Natively the GLFW cursor mode follows the wanted lock at once
+// (level: nothing else may leave it out of step); on the web the canvas lock is requested when it
+// becomes wanted (edge: a request needs a user gesture, so it is not retried every frame) and a lock
+// that is not granted brings the menu with CLICK TO PLAY back (client_menu_tick).
+static struct {
+    PointerLockTracker tracker;
+    PointerLockWant want; // the last step
+    int applied;          // want.lock as last applied (-1: not applied on this page yet)
+    int unfocused;        // the native window lost the keyboard focus (glfwSetWindowFocusCallback)
+} g_ptr = {.applied = -1};
+
+static int pointer_owner_active(void) {
+    // HTML_ENGINE=OFF keeps main.c's click-to-lock; the hub / editor / viewer pages own their cursor
+    return html_ui_available() && app_mode() == APP_MODE_GAME;
+}
+
+static void pointer_reset_last_pos(Client *client) {
+    double x, y;
+    glfwGetCursorPos(client->window, &x, &y);
+    client->mouse_state.last_pos.x = (float) x; // a cursor mode change moves the cursor: no look jump
+    client->mouse_state.last_pos.y = (float) y;
+}
+
+void client_pointer_update(Client *client) {
+    if (!client) return;
+    PointerLockInputs in = {0};
+    in.game = (unsigned char) pointer_owner_active();
+    in.menu_open = (unsigned char) html_ui_is_menu_open();
+    in.console_open = (unsigned char) ui_console_is_open();
+    in.focused = (unsigned char) !g_ptr.unfocused;
+    in.end_up = (unsigned char) hud_ui_end_screen_up();
+    in.end_results = (unsigned char) hud_ui_end_screen_interactive();
+    in.script_unlock = (unsigned char) ks_client_input_unlocked();
+    in.script_free = (unsigned char) (ks_client_pointer_free() && !ks_client_input_unlocked());
+    const int had_controls = g_ptr.want.controls;
+    g_ptr.want = pointer_lock_step(&g_ptr.tracker, &in);
+    if (!in.game) {
+        g_ptr.applied = -1;
+        return;
+    }
+    client->mouse_state.locked = g_ptr.want.controls;
+    // The controls are back (menu closed, the next round, a respawn): the keyboard is the game's
+    // again, as after the browser's click; a chat line typed on the end screen / death card kept
+    // the movement keys otherwise.
+    if (!had_controls && g_ptr.want.controls) ui_controls_release_focus();
+    // isMobile: UsePointerLock = false (CONTROLS.locklessChange); emscripten's GLFW would request one
+    if (ui_mobile_active() || !client->window) return;
+    const int lock = g_ptr.want.lock;
+#ifdef __EMSCRIPTEN__
+    const int change = lock != g_ptr.applied;
+    if (change) web_pointer_lock(lock); // relock without a gesture: allowed after exitPointerLock()
+#else
+    const int mode = lock ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL;
+    const int change = lock != g_ptr.applied || glfwGetInputMode(client->window, GLFW_CURSOR) != mode;
+    if (change) glfwSetInputMode(client->window, GLFW_CURSOR, mode);
+#endif
+    if (change) {
+        pointer_reset_last_pos(client);
+        if (lock) client->menu_lock_grace_until = glfwGetTime() + MENU_LOCK_GRACE_SECONDS;
+    }
+    g_ptr.applied = lock;
+}
+
+// main.c: this frame's mouse movement may turn the camera (v7 f2137: only while CONTROLS.enabled,
+// i.e. under the pointer lock). A free cursor never looks: menu, end screen, console, freeMouse.
+int client_pointer_look_allowed(const Client *client) {
+    if (!client) return 0;
+    if (!pointer_owner_active()) return client->mouse_state.locked; // main.c's own lock (no HTML UI)
+    return pointer_lock_look_allowed(&g_ptr.want, client_pointer_locked(client));
+}
+
+// A press on the game view (no page under the mouse). CONTROLS mousedown f2139: with the controls
+// off (the end title after a menu / alt-tab) it is toggle(true) and nothing else: the lock again;
+// on the web also while the controls are on but the browser dropped the lock (its Escape during
+// the end title, where no menu comes). Returns 1 when the press was taken for that.
+int client_pointer_click(Client *client) {
+    if (!client || !pointer_owner_active() || ui_mobile_active()) return 0;
+    if (g_ptr.want.controls && (!g_ptr.want.lock || client_pointer_locked(client))) return 0;
+    if (html_ui_is_menu_open() || hud_ui_end_screen_interactive() || ui_console_is_open()) return 0;
+    pointer_lock_resume(&g_ptr.tracker);
+#ifdef __EMSCRIPTEN__
+    g_ptr.applied = -1; // request again (inside this click: the user gesture the browser needs)
+#endif
+    client_pointer_update(client);
+    return 1;
+}
+
+// glfwSetWindowFocusCallback (main.c): no lock while another window has the keyboard.
+void client_pointer_focus(Client *client, const int focused) {
+    g_ptr.unfocused = !focused;
+    client_pointer_update(client);
+}
+
+// The window changed monitor / size (F11, Settings > windowMode: ui_render_settings.c). A disabled
+// GLFW cursor keeps its X11 pointer grab (and confinement) from before the switch on some window
+// managers; release and take it again on the new geometry when the game has the lock.
+void client_pointer_refresh(Client *client) {
+    if (!client || !client->window || !pointer_owner_active() || ui_mobile_active()) return;
+#ifndef __EMSCRIPTEN__
+    if (glfwGetInputMode(client->window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED) glfwSetInputMode(client->window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+#endif
+    g_ptr.applied = -1;
+    client_pointer_update(client);
+}
+
+// The lock went during the end title (alt-tab, main.c client_window_focus_lost). v7 shows no menu
+// there (hideUI set UI.active = false): the pointer stays free until a click on the game view.
+void client_pointer_end_free(Client *client) {
+    pointer_lock_end_free(&g_ptr.tracker);
+    client_pointer_update(client);
 }
 
 // ---------------------------------------------------------------- game data
@@ -1344,20 +1462,14 @@ void client_set_menu_open(Client *client, const int open) {
     html_ui_set_menu_open(open);
     menu_apply_open(open);
 
-    // isMobile: no pointer lock (UsePointerLock false); emscripten's GLFW would request one.
 #ifdef __EMSCRIPTEN__
-    if (!ui_mobile_active()) web_pointer_lock(!open);
     if (open) g_lock.waiting = 0;
-#else
-    if (!ui_mobile_active()) glfwSetInputMode(client->window, GLFW_CURSOR, open ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
 #endif
-    client->mouse_state.locked = !open;
+    // The pointer follows (pointer lock owner above): free with the menu; locked when it closes
+    // over the game, unless the end-screen results / a free end title / KrunkScript keep it free.
+    client_pointer_update(client);
     client->menu_lock_grace_until = open ? 0.0 : glfwGetTime() + MENU_LOCK_GRACE_SECONDS;
-
-    double x, y;
-    glfwGetCursorPos(client->window, &x, &y);
-    client->mouse_state.last_pos.x = (float) x; // avoid a camera jump on re-lock
-    client->mouse_state.last_pos.y = (float) y;
+    pointer_reset_last_pos(client); // avoid a camera jump on re-lock
 }
 
 void client_menu_bind(Client *client) {
@@ -1433,22 +1545,14 @@ void client_menu_tick(Client *client) {
     object_manager_ui_tick(client); // the Build Tool cost waiver (OM caps)
 
     // Round end: the end screen frees the pointer (Krunker exits pointer lock so its
-    // results can be clicked) and relocks when the next round starts.
+    // results can be clicked) and relocks when the next round starts (client_pointer_update).
     static int end_interactive;
     const int end_now = hud_ui_end_screen_interactive();
     if (end_now != end_interactive) {
         end_interactive = end_now;
         html_dom_set_class(html_dom_root(), "kn-end-open", end_now); // lifts the HUD's pointer-events: none (krunknative.css)
-        if (!html_ui_is_menu_open()) {
-#ifdef __EMSCRIPTEN__
-            if (!ui_mobile_active()) web_pointer_lock(!end_now); // relock without a gesture: allowed after exitPointerLock()
-#else
-            if (!ui_mobile_active()) glfwSetInputMode(client->window, GLFW_CURSOR, end_now ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
-#endif
-            client->mouse_state.locked = !end_now;
-            client->menu_lock_grace_until = glfwGetTime() + MENU_LOCK_GRACE_SECONDS;
-        }
     }
+    client_pointer_update(client); // after this frame's HUD pass (the END, the results, the next INIT)
 
     // Web: a refused request (pointerlockerror) ends the grace at once, so the game is
     // never shown with a dead mouse for the whole grace period.
@@ -1459,8 +1563,13 @@ void client_menu_tick(Client *client) {
     g_lock.denied_seen = lock_errors;
 #endif
     const double grace_left = client->menu_lock_grace_until - glfwGetTime(); // tests park it far ahead (hud_autoplay)
-    // ks_client_pointer_free: KrunkScript INPUTS.unlockMouse / freeMouse released the lock on purpose
-    if (!hud_ui_end_screen_up() && !html_ui_is_menu_open() && !ks_client_pointer_free() &&
+    // The lock is wanted (menu closed over the game: g_ptr.want.lock) but not held: the browser's
+    // Escape / a refused request, natively the cursor mode changed behind the owner's back. v7
+    // pointerlockchange -> toggleControlUI(false): the menu with CLICK TO PLAY (a click is the user
+    // gesture the browser needs to lock again). Not over the end screen (hideUI: UI.active = false;
+    // a click on the game view locks again, client_pointer_click); KrunkScript's unlockMouse /
+    // freeMouse released the lock on purpose (want.lock is 0 then).
+    if (pointer_owner_active() && g_ptr.want.lock && !hud_ui_end_screen_up() && !html_ui_is_menu_open() &&
         (grace_left <= 0.0 || (lock_denied && grace_left <= MENU_LOCK_GRACE_SECONDS)) && !client_pointer_locked(client)) {
         client_set_menu_open(client, 1);
     }
