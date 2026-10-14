@@ -2,7 +2,8 @@
 """Stub AI upstream for the editor-AI tests (services/brain/tests/ai_test.py, tools/editor/ai_e2e.py).
 
 An OpenAI-compatible server on 127.0.0.1 (never the live provider):
-  GET  /v1/models              31-model shape of the real upstream (toolCalling, pricing, reasoning)
+  GET  /v1/models              the real upstream's shape (toolCalling, pricing, reasoning): MODELS, or
+                               real_models() (its 31 models, ai_models_real.json) via Upstream(models=)
   POST /v1/chat/completions    streamed (SSE) or JSON answers chosen by the last user message:
        "KN-PROBE-<n>"          echoes the token (the brain's health probe); with drop=True it answers
                                like the broken provider ("the <user_request> block is empty")
@@ -37,9 +38,26 @@ MODELS = [
 ]
 
 
+# ai_model_rank's order of real_models() (shared/src/ai_proto.c): what /ai/models and the picker list
+REAL_SMART_ORDER = [
+    "deepseek-v4-pro-0813", "kimi-k2.7-code", "kimi-k2.6", "glm-5.3", "glm-5.2", "deepseek-v4-flash-0731", "glm-5.3-flash",
+    "gpt-oss-120b", "nemotron-3-120b", "qwen3.8-27b", "llama-3.3-70b", "gemma-4-26b", "qwen3-30b", "glm-4.7-flash",
+    "llama-4-scout-17b", "gpt-oss-20b", "qwq-32b", "deepseek-r1-distill-qwen-32b", "mistral-small-3.1-24b", "qwen2.5-coder-32b",
+    "gemma-sea-lion-v4-27b", "llama-3.2-11b-vision", "llama-3.1-8b", "granite-4.0-h-micro", "mistral-7b-instruct-v0.2-lora",
+    "gemma-7b-it-lora", "llama-2-7b-chat-hf-lora", "llama-3.2-3b", "gemma-2b-it-lora", "llama-3.2-1b", "llama-guard-3-8b"]
+
+
+def real_models():
+    """The live provider's 31-model list (ids, names, limits, flags, prices; ai_models_real.json)."""
+    import os
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "ai_models_real.json")) as f:
+        return json.load(f)
+
+
 class Upstream:
-    def __init__(self, key, port=0):
+    def __init__(self, key, port=0, models=None):
         self.key = key
+        self.models = models if models is not None else MODELS
         self.requests = []
         self.drop = False
         self.blocked = set()  # models answering HTTP 400 "Blocked for: code interpreter abuse"
@@ -73,7 +91,7 @@ class Upstream:
                 if not self._authed():
                     return
                 if self.path.endswith("/models"):
-                    self._json(200, {"object": "list", "data": MODELS})
+                    self._json(200, {"object": "list", "data": stub.models})
                 else:
                     self._json(404, {"error": {"message": "no such route"}})
 

@@ -582,8 +582,94 @@ cJSON *ai_stream_usage(const AiStream *s) {
 // ---------------------------------------------------------------------------
 // /models
 
-static int cmp_id(const void *a, const void *b) {
+// Capability ranking of the model picker: smartest first (the editor's AI panel lists the models in
+// this order). Source: a hand-maintained table of the families the provider serves, ordered by the
+// maintainers from public leaderboards (Artificial Analysis Intelligence Index and LMArena text,
+// as of 2026-10) and the provider's own tiering (pro > base > flash > mini; more parameters first
+// within a family). The longest matching prefix of the id (its last path segment, case-insensitive)
+// wins. Ids the table does not know get a score from their metadata (ai_model_rank): parameter
+// count from the id ("-70b"), price as a proxy of size, reasoning and tool support; capped below
+// the explicitly ranked frontier models. Update the table when the provider adds families.
+static const struct {
+    const char *prefix;
+    int score;
+} k_model_rank[] = {
+    {"deepseek-v4-pro", 100}, {"kimi-k2.7", 97},         {"kimi-k2", 96},          {"glm-5.3", 94},
+    {"glm-5.2", 92},          {"glm-5", 90},             {"deepseek-v4-flash", 89}, {"glm-5.3-flash", 88},
+    {"gpt-oss-120b", 86},     {"nemotron-3-120b", 84},   {"qwen3.8", 82},          {"llama-4-maverick", 80},
+    {"llama-3.3-70b", 78},    {"gemma-4", 76},           {"qwen3", 74},            {"glm-4.7", 72},
+    {"llama-4-scout", 70},    {"gpt-oss-20b", 68},       {"qwq-32b", 66},          {"deepseek-r1-distill", 64},
+    {"mistral-small", 62},    {"qwen2.5-coder", 60},     {"gemma-sea-lion", 56},   {"llama-3.2-11b", 50},
+    {"llama-3.1-8b", 46},     {"granite-4", 44},         {"mistral-7b", 40},       {"gemma-7b", 38},
+    {"llama-2-7b", 36},       {"llama-3.2-3b", 34},      {"gemma-2b", 30},         {"llama-3.2-1b", 28},
+    {"llama-guard", 10}, // a safety classifier, not a chat model
+};
+
+static int has_ci(const char *s, const char *needle) { // strcasestr is not portable (MinGW)
+    const size_t n = strlen(needle);
+    for (; *s; s++) {
+        if (!strncasecmp(s, needle, n)) return 1;
+    }
+    return 0;
+}
+
+static double log2_approx(double x) { // x >= 1; no libm in the shared core
+    double l = 0;
+    while (x >= 2) {
+        x /= 2;
+        l += 1;
+    }
+    return l + (x - 1);
+}
+
+// "-70b" / "_8b" / "-1.5b" in the id: billions of parameters (0 = none)
+static double id_params_b(const char *id) {
+    for (const char *p = id; *p; p++) {
+        if ((*p != '-' && *p != '_' && *p != ':') || !isdigit((unsigned char) p[1])) continue;
+        char *end = NULL;
+        const double v = strtod(p + 1, &end);
+        if (end && (*end == 'b' || *end == 'B') && (!end[1] || end[1] == '-' || end[1] == '_' || end[1] == ':')) return v;
+    }
+    return 0;
+}
+
+int ai_model_rank(const cJSON *row) {
+    const char *full = jstr(row, "id") ? jstr(row, "id") : "";
+    const char *id = strrchr(full, '/') ? strrchr(full, '/') + 1 : full;
+    size_t best = 0;
+    int score = -1;
+    for (size_t i = 0; i < sizeof(k_model_rank) / sizeof(k_model_rank[0]); i++) {
+        const size_t n = strlen(k_model_rank[i].prefix);
+        if (n > best && !strncasecmp(id, k_model_rank[i].prefix, n)) {
+            best = n;
+            score = k_model_rank[i].score;
+        }
+    }
+    if (score >= 0) return score;
+    // unknown: metadata
+    double s;
+    const double params = id_params_b(id), price_out = jnum(row, "price_out", -1);
+    if (params >= 1) s = 24 + 7 * log2_approx(params);       // 1B 24, 8B 45, 70B 67, 400B 84
+    else if (params > 0) s = 20;
+    else if (price_out > 0) s = 36 + 6 * log2_approx(1 + price_out * 2); // $0.3 40, $1.5 48, $4 55, $15 66
+    else s = 30;
+    const cJSON *r = jget(row, "reasoning"), *t = jget(row, "tools");
+    if (cJSON_IsTrue(r)) s += 4;
+    if (cJSON_IsTrue(t)) s += 2;
+    if (has_ci(id, "lora") || has_ci(id, "guard") || has_ci(id, "embed") || has_ci(id, "whisper") || has_ci(id, "tts"))
+        s -= 15; // adapters, classifiers, speech / embedding models
+    if (s > 89) s = 89;
+    if (s < 1) s = 1;
+    return (int) s;
+}
+
+// smartest first; ties: the dearer output (a bigger model), then the id
+static int cmp_rank(const void *a, const void *b) {
     const cJSON *x = *(const cJSON *const *) a, *y = *(const cJSON *const *) b;
+    const int rx = ai_model_rank(x), ry = ai_model_rank(y);
+    if (rx != ry) return ry - rx;
+    const double px = jnum(x, "price_out", -1), py = jnum(y, "price_out", -1);
+    if (px != py) return px < py ? 1 : -1;
     return strcmp(jstr(x, "id") ? jstr(x, "id") : "", jstr(y, "id") ? jstr(y, "id") : "");
 }
 
@@ -652,7 +738,7 @@ cJSON *ai_models_normalise(const char *json, const size_t n) {
         }
         items[k++] = r;
     }
-    qsort(items, (size_t) k, sizeof(cJSON *), cmp_id);
+    qsort(items, (size_t) k, sizeof(cJSON *), cmp_rank);
     cJSON *out = cJSON_CreateArray();
     for (int i = 0; i < k; i++) cJSON_AddItemToArray(out, items[i]);
     free(items);

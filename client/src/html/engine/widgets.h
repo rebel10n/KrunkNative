@@ -297,6 +297,11 @@ void widgets_paint_host(void *user, const struct PaintWidgetArgs *args);
 /* Paints the open popup (select list or color picker) in viewport space.
  * Call after everything else.  Returns 1 when something was emitted. */
 int widgets_paint_overlay(Widgets *w, const WidgetPaintArgs *args);
+/* WCAG 2 contrast ratio of two opaque colours (1..21); the select popup keeps option text >= 3:1. */
+double widgets_contrast_ratio(CssColor a, CssColor b);
+/* The colours the open popup uses for option `index` of `select` (not hovered): text, the option's
+ * own row background (a = 0: none) and the popup background. 0 when there is no such option. */
+int widgets_select_option_colors(Widgets *w, HtmlElem select, int index, CssColor *fg, CssColor *row_bg, CssColor *popup_bg);
 /* Viewport rect of the open popup (0 when none). */
 int widgets_overlay_rect(Widgets *w, float *x, float *y, float *out_w, float *out_h);
 /* Element that owns the open popup, 0 when none. */

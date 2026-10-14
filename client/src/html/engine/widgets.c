@@ -2464,6 +2464,90 @@ static void popup_highlight(Widgets *w, WidgetState *s, int i)
     invalidate(w, s->elem, 0);
 }
 
+/* ---- select popup colours ------------------------------------------------ */
+
+/* `c` over the opaque `under` (straight alpha). */
+static CssColor color_over(CssColor c, CssColor under)
+{
+    const int a = c.a;
+    if (a >= 255) return c;
+    return rgba((uint8_t)((c.r * a + under.r * (255 - a)) / 255), (uint8_t)((c.g * a + under.g * (255 - a)) / 255),
+                (uint8_t)((c.b * a + under.b * (255 - a)) / 255), 255);
+}
+
+static CssColor resolve_current(CssColor c, const CssComputed *st)
+{
+    if (c.kind == CSS_COLOR_CURRENT) c = st ? st->color : rgba(0, 0, 0, 255);
+    c.kind = CSS_COLOR_RGBA;
+    return c;
+}
+
+/* WCAG relative luminance (sRGB) and contrast ratio. */
+static double rel_luminance(CssColor c)
+{
+    const uint8_t v[3] = {c.r, c.g, c.b};
+    double l[3];
+    int i;
+    for (i = 0; i < 3; i++) {
+        const double s = v[i] / 255.0;
+        l[i] = s <= 0.04045 ? s / 12.92 : pow((s + 0.055) / 1.055, 2.4);
+    }
+    return 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2];
+}
+
+double widgets_contrast_ratio(CssColor a, CssColor b)
+{
+    const double la = rel_luminance(a), lb = rel_luminance(b);
+    return la > lb ? (la + 0.05) / (lb + 0.05) : (lb + 0.05) / (la + 0.05);
+}
+
+/* The popup's background: the select's background-color over white (Chrome paints the menu
+ * list with the owner's background; transparent = the theme's white). */
+static CssColor select_popup_bg(Widgets *w, const CssComputed *st)
+{
+    if (!st) return w->theme.popup_bg;
+    return color_over(resolve_current(st->background_color, st), w->theme.popup_bg);
+}
+
+/* An option row's text colour and own background (a = 0: none): the option's computed `color`
+ * (inherited from the select) and background-color, as Chrome draws them. KrunkNative deviation:
+ * when the text would be unreadable on its row (contrast < 3:1, e.g. a light select colour on the
+ * default white popup), it is drawn black or white, whichever reads better. */
+static void option_colors(Widgets *w, HtmlElem o, const CssComputed *sel, CssColor popup_bg, CssColor *fg, CssColor *row_bg)
+{
+    const CssComputed *os = computed(w, o);
+    const CssComputed *src = os ? os : sel;
+    CssColor under = popup_bg;
+    *fg = src ? resolve_current(src->color, src) : rgba(0, 0, 0, 255);
+    *row_bg = rgba(0, 0, 0, 0);
+    if (os && os->background_color.a && os->background_color.kind == CSS_COLOR_RGBA) {
+        *row_bg = os->background_color;
+        under = color_over(os->background_color, popup_bg);
+    }
+    *fg = color_over(*fg, under);
+    if (widgets_contrast_ratio(*fg, under) < 3.0) {
+        const CssColor black = rgba(0, 0, 0, 255), white = rgba(255, 255, 255, 255);
+        *fg = widgets_contrast_ratio(black, under) >= widgets_contrast_ratio(white, under) ? black : white;
+    }
+}
+
+int widgets_select_option_colors(Widgets *w, HtmlElem select, int index, CssColor *fg, CssColor *row_bg, CssColor *popup_bg)
+{
+    const CssComputed *st;
+    HtmlElem o;
+    int i = 0;
+    if (!w || !select) return 0;
+    st = computed(w, select);
+    *popup_bg = select_popup_bg(w, st);
+    for (o = option_first(w->dom, select); o; o = option_next(w->dom, o), i++) {
+        if (i == index) {
+            option_colors(w, o, st, *popup_bg, fg, row_bg);
+            return 1;
+        }
+    }
+    return 0;
+}
+
 int widgets_paint_overlay(Widgets *w, const WidgetPaintArgs *a)
 {
     PopupGeom pg;
@@ -2472,34 +2556,41 @@ int widgets_paint_overlay(Widgets *w, const WidgetPaintArgs *a)
     if (!w || !a || !a->out || !popup_geom(w, &pg)) return 0;
     s = state_find(w, w->popup);
     st = computed(w, w->popup);
-    emit_rect(a, pg.x, pg.y, pg.w, pg.h, w->theme.popup_bg);
+    /* Chrome's menu list popup takes the select's background-color (white when transparent) and
+     * each <option>'s color / background-color; select_popup_bg / option_colors below. */
+    const CssColor popup_bg = s->kind == WIDGET_SELECT ? select_popup_bg(w, st) : w->theme.popup_bg;
+    emit_rect(a, pg.x, pg.y, pg.w, pg.h, popup_bg);
     emit_border(a, pg.x, pg.y, pg.w, pg.h, dl_radii_all(0), 1, w->theme.popup_border);
     if (s->kind == WIDGET_SELECT) {
         KnStrBuf label = {0};
         int i = 0;
         HtmlElem o;
-        CssColor fg = st ? st->color : rgba(0, 0, 0, 255);
         float scroll = clampf(s->popup_scroll, 0, pg.scroll_max);
         float list_x = pg.x + 1, list_w = pg.bar_x - list_x;
         emit_clip(a, list_x, pg.list_y, list_w, pg.list_h);
         for (o = option_first(w->dom, w->popup); o; o = option_next(w->dom, o), i++) {
             float ry = pg.list_y + (float)i * pg.row_h - scroll;
             float baseline;
-            CssColor c = fg;
+            CssColor c, row_bg;
             if (ry + pg.row_h <= pg.list_y || ry >= pg.list_y + pg.list_h) continue;
             baseline = ry + (pg.row_h - w->theme.popup_row_pad_bottom - (pg.font.ascent + pg.font.descent)) / 2 + pg.font.ascent;
             if (i == s->hover_index) {
                 emit_rect(a, list_x, ry, list_w, pg.row_h, w->theme.popup_hover_bg);
                 c = w->theme.popup_hover_fg;
+            } else {
+                option_colors(w, o, st, popup_bg, &c, &row_bg);
+                if (row_bg.a) emit_rect(a, list_x, ry, list_w, pg.row_h, row_bg);
             }
             option_label(w->dom, o, &label);
             emit_text(w, a, &pg.font, sb_cstr(&label), label.len, list_x + w->theme.popup_row_pad_x, baseline, c);
         }
         emit_pop_clip(a);
         if (pg.bar_w > 0) {
-            emit_rect(a, pg.bar_x, pg.list_y, pg.bar_w, pg.list_h, w->theme.popup_track);
+            /* a dark list gets a dark scrollbar (Chrome's dark form-control scrollbar colours) */
+            const int dark = rel_luminance(popup_bg) < 0.18;
+            emit_rect(a, pg.bar_x, pg.list_y, pg.bar_w, pg.list_h, dark ? color_over(rgba(255, 255, 255, 18), popup_bg) : w->theme.popup_track);
             emit_rrect(a, pg.bar_x + 2, pg.thumb_y + 2, pg.bar_w - 4, pg.thumb_h - 4,
-                       dl_radii_all((pg.bar_w - 4) / 2), w->theme.popup_thumb);
+                       dl_radii_all((pg.bar_w - 4) / 2), dark ? rgba(0x6b, 0x6b, 0x6b, 255) : w->theme.popup_thumb);
         }
         kn_sb_free(&label);
         return 1;

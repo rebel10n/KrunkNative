@@ -235,6 +235,9 @@ static const char *k_extra =
     "<input id=\"cbz\" type=\"checkbox\" style=\"zoom:0.5\">"
     "<label class=\"switch\"><input id=\"cb\" type=\"checkbox\"><span id=\"cbs\" class=\"slider\"></span></label>"
     "<select id=\"long\" onchange=\"setSetting(&quot;long&quot;, this.value)\"><option value=\"v0\">Alpha</option><option value=\"v1\">Bravo</option><option value=\"v2\">Charlie</option><option value=\"v3\">Chess</option><option value=\"v4\">Delta</option><option value=\"v5\">Echo</option><option value=\"v6\">Foxtrot</option><option value=\"v7\">Golf</option><option value=\"v8\">Hotel</option><option value=\"v9\">India</option><option value=\"v10\">Juliet</option><option value=\"v11\">Kilo</option><option value=\"v12\">Lima</option><option value=\"v13\">Mike</option><option value=\"v14\">November</option><option value=\"v15\">Oscar</option><option value=\"v16\">Papa</option><option value=\"v17\">Quebec</option><option value=\"v18\">Romeo</option><option value=\"v19\">Sierra</option><option value=\"v20\">Tango</option><option value=\"v21\">Uniform</option><option value=\"v22\">Victor</option><option value=\"v23\">Whiskey</option><option value=\"v24\">Xray</option><option value=\"v25\" selected>Yankee</option><option value=\"v26\">Zulu</option><option value=\"v27\">Zebra</option><option value=\"v28\">Zeta</option><option value=\"v29\">Zinc</option></select>"
+    "<select id=\"dk\" style=\"background-color:#161616;color:#f2f2f2\"><option value=\"1\">One</option>"
+    "<option value=\"2\" style=\"background-color:#303030;color:#ffcc00\" selected>Two</option></select>"
+    "<select id=\"lt\" style=\"color:#f2f2f2\"><option value=\"a\" style=\"color:inherit\">Light</option><option value=\"b\">Text</option></select>"
     "</div>";
 
 static int load_document(void)
@@ -982,6 +985,76 @@ static void test_long_select(void)
     host_focus(NULL, 0);
 }
 
+/* The popup paints with the select's background-color and each option's colours (Chrome), and
+ * never leaves option text unreadable (the editor AI panel's model picker: #f2f2f2 on white). */
+static CssColor rgba_c(uint8_t r, uint8_t g, uint8_t b)
+{
+    CssColor c = {r, g, b, 255, CSS_COLOR_RGBA};
+    return c;
+}
+
+static int popup_has_rect(const DisplayList *dl, int r, int g, int b)
+{
+    int i;
+    for (i = 0; i < dl->n; i++)
+        if (dl->items[i].op == DL_RECT && dl->items[i].u.rect.color.r == r && dl->items[i].u.rect.color.g == g && dl->items[i].u.rect.color.b == b)
+            return 1;
+    return 0;
+}
+
+static void test_select_popup_colors(void)
+{
+    HtmlElem dk = by_id("dk"), lt = by_id("lt");
+    widgets_set_viewport(g_w, 1280, 720);
+    CHECK(widgets_contrast_ratio(rgba_c(0, 0, 0), rgba_c(255, 255, 255)) > 20.9, "contrast black/white = 21");
+    CHECK(widgets_contrast_ratio(rgba_c(0xf2, 0xf2, 0xf2), rgba_c(255, 255, 255)) < 1.2, "contrast #f2f2f2/white ~ 1.1");
+    set_geom(dk, 100, 100, 200, 28, 0, 0, 0, 0, 0, 0, 0, 0);
+    widgets_open_select(g_w, dk, 110, 110);
+    {
+        DisplayList dl = {0};
+        WidgetPaintArgs a = {&dl, dl_alloc, NULL, 1.0f, 0};
+        widgets_paint_overlay(g_w, &a);
+        CHECK(dl.n > 0 && dl.items[0].op == DL_RECT && dl.items[0].u.rect.color.r == 0x16 && dl.items[0].u.rect.color.a == 255,
+              "dark select: the popup background is the select's (#161616)");
+        dl_free(&dl);
+    }
+    widgets_close_popup(g_w);
+    widgets_set_value(g_w, dk, "1");
+    widgets_open_select(g_w, dk, 110, 110);
+    {
+        DisplayList dl = {0};
+        WidgetPaintArgs a = {&dl, dl_alloc, NULL, 1.0f, 0};
+        widgets_paint_overlay(g_w, &a);
+        CHECK(popup_has_rect(&dl, 0x30, 0x30, 0x30), "an option's own background-color painted");
+        dl_free(&dl);
+    }
+    widgets_close_popup(g_w);
+    set_geom(lt, 100, 200, 200, 28, 0, 0, 0, 0, 0, 0, 0, 0);
+    widgets_set_value(g_w, lt, "b");
+    widgets_open_select(g_w, lt, 110, 210);
+    {
+        DisplayList dl = {0};
+        WidgetPaintArgs a = {&dl, dl_alloc, NULL, 1.0f, 0};
+        widgets_paint_overlay(g_w, &a);
+        CHECK(dl.n > 0 && dl.items[0].u.rect.color.r == 0xff, "transparent select: white popup");
+        dl_free(&dl);
+    }
+    widgets_close_popup(g_w);
+    host_focus(NULL, 0);
+    {
+        CssColor fg, row, bg;
+        /* main.css "* {color: #353535}" reaches the option itself: dark grey on #161616 would be
+           unreadable (1.6:1), so it is drawn white */
+        CHECK(widgets_select_option_colors(g_w, dk, 0, &fg, &row, &bg) && fg.r == 0xff && bg.r == 0x16 && !row.a,
+              "dark select: unreadable option text is drawn white on #161616 (%02x on %02x)", fg.r, bg.r);
+        CHECK(widgets_contrast_ratio(fg, bg) >= 4.5, "dark select: contrast >= 4.5 (%.1f)", widgets_contrast_ratio(fg, bg));
+        CHECK(widgets_select_option_colors(g_w, dk, 1, &fg, &row, &bg) && fg.r == 0xff && fg.g == 0xcc && row.r == 0x30 && row.a,
+              "an option's own color and background-color");
+        CHECK(widgets_select_option_colors(g_w, lt, 0, &fg, &row, &bg) && bg.r == 0xff && fg.r == 0 && fg.g == 0,
+              "light text on the default white popup is drawn black (%02x on %02x)", fg.r, bg.r);
+    }
+}
+
 static void test_preset_select_and_value(void)
 {
     HtmlElem e = by_id("settingsPreset");     /* Default, Pro, Performance, Custom(selected) */
@@ -1414,6 +1487,7 @@ int main(int argc, char **argv)
     test_scaled_range();
     test_select();
     test_long_select();
+    test_select_popup_colors();
     test_preset_select_and_value();
     test_checkbox();
     test_color();

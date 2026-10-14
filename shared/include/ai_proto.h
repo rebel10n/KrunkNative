@@ -92,10 +92,13 @@ cJSON *ai_stream_message(const AiStream *s);
 cJSON *ai_stream_usage(const AiStream *s);
 
 // GET /models of an OpenAI-compatible endpoint -> [{id, name, context, max_tokens, reasoning,
-// tools, vision, efforts, price_in, price_out, currency, description}] sorted by id (unknown
-// fields omitted; price_* per million tokens).
+// tools, vision, efforts, price_in, price_out, currency, description}] sorted smartest first
+// (ai_model_rank; unknown fields omitted; price_* per million tokens).
 // NULL when the body is not a model list. Caller frees.
 cJSON *ai_models_normalise(const char *json, size_t n);
+// Capability score of a normalised model row (higher = smarter, 1..100): the ranking table of
+// ai_proto.c for the known families, else an estimate from the row's metadata.
+int ai_model_rank(const cJSON *row);
 
 // Error text of an upstream error body ({"error":{"message"}} / {"error":"..."} / {"message"} /
 // plain text), clipped to n. Returns out.

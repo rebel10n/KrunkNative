@@ -1,7 +1,10 @@
 // The map editor's AI panel (editor_ai.h): a compact chat docked over the 3D
-// view. The interaction model is abulxt's AI chat: model picker, streamed answers rendered as
+// view, styled like the editor's dark panels (ui/css/editor-ai.css). The interaction model is
+// abulxt's AI chat: model picker (smartest first, ai_model_rank), streamed answers rendered as
 // markdown, collapsed "Thought for Ns" traces, tool calls as expandable cards, Stop / Retry / Copy,
-// local history, a usage line.
+// local history, a usage line; and VS Code's chat checkpoints: every user message can be edited and
+// resent, rewound (it and everything after it leave the chat), or restored as a checkpoint (the
+// editor changes made since are undone too), with a Redo until the next message.
 //
 // Transport: kn_brain's POST /ai/chat (shared/include/ai_proto.h "kn_brain's own stream") with the
 // account's session token; the brain injects the provider key, so the client never holds one. AI is
@@ -13,6 +16,7 @@
 #include <app_mode.h>
 #include <backend.h>
 #include <backend_ui.h>
+#include <html_ui.h>
 #include <http_stream.h>
 #include <math.h>
 #include <stdio.h>
@@ -28,7 +32,7 @@
 
 static struct {
     int built, open;
-    HtmlElem root, list, live, input, model_sel, banner, usage, send, stop, account;
+    HtmlElem root, list, live, input, model_sel, banner, usage, send, stop;
     // models (GET /ai/models)
     cJSON *models;           // normalised rows
     char model[96];
@@ -78,6 +82,18 @@ static struct {
     char chat_id[32];
     int pop;                 // 0 none, 1 history, 2 settings
     HtmlElem pop_el;
+    int model_picked;        // the user chose A.model (else the service's default is used)
+    // checkpoints (see "checkpoints" below)
+    char sid[24];            // this editor session: undo depths of other sessions mean nothing here
+    int edit_idx;            // user message edited in place (-1 none)
+    int confirm_idx;         // user message whose confirmation is shown (-1 none)
+    int confirm_kind;        // 1 restore checkpoint, 2 send an edit (undo the later map edits?)
+    char *edit_text;         // the edit waiting for that confirmation (owned)
+    cJSON *redo_conv;        // messages a rewind / restore took out (Redo puts them back; owned)
+    cJSON *redo_map;         // [{p: project id, n: steps undone, undo, redo, top}] of a restore (owned)
+    int redo_kind;           // 1 rewound, 2 checkpoint restored
+    int redo_steps;          // editor changes the restore undid
+    char *redo_text;         // the text the rewind put into the composer (owned)
 } A;
 
 static void render_all(void);
@@ -87,7 +103,16 @@ static void send_turn(void);
 static void update_controls(void);
 static void process_tools(void);
 static void history_save(void);
+static void history_delete(const char *id);
 static void models_load(void);
+static void redo_clear(void);
+static void edit_end(void);
+static int g_keep_scroll; // render_all keeps the list where it is (editing an earlier message)
+static void render_user(EdBuf *b, int idx, const cJSON *m, int busy);
+static cJSON *cp_snapshot(void);
+static int cp_changes(int idx, int *ai);
+static void tool_undo_mark(int *before);
+static int tool_undo_count(int before);
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -162,7 +187,10 @@ static void settings_load(void) {
     A.tools_on = json_flag(o, "tools", 1);
     A.web_on = json_flag(o, "web", 1);
     snprintf(A.effort, sizeof(A.effort), "%s", ed_json_str(o, "effort", ""));
-    if (o && ed_json_str(o, "model", "")[0]) snprintf(A.model, sizeof(A.model), "%s", ed_json_str(o, "model", ""));
+    // the stored model counts only when the user picked it ("picked"; patch 2 stored whatever was
+    // selected, the service's fallback included): otherwise the service's default (glm-5.3-flash)
+    A.model_picked = json_flag(o, "picked", 0) && ed_json_str(o, "model", "")[0];
+    if (A.model_picked) snprintf(A.model, sizeof(A.model), "%s", ed_json_str(o, "model", ""));
     cJSON_Delete(o);
     t = storage_text("knAiEndpoint");
     o = t ? cJSON_Parse(t) : NULL;
@@ -181,7 +209,10 @@ static void settings_save(void) {
     cJSON_AddBoolToObject(o, "tools", A.tools_on);
     cJSON_AddBoolToObject(o, "web", A.web_on);
     cJSON_AddStringToObject(o, "effort", A.effort);
-    if (!A.custom) cJSON_AddStringToObject(o, "model", A.model);
+    if (!A.custom && A.model_picked) {
+        cJSON_AddStringToObject(o, "model", A.model);
+        cJSON_AddBoolToObject(o, "picked", 1);
+    }
     char *t = cJSON_PrintUnformatted(o);
     if (t) html_storage_set("knAiSettings", t);
     free(t);
@@ -212,13 +243,13 @@ static void build(void) {
     if (!center) return;
     html_dom_insert_html(center, HTML_INSERT_BEFORE_END,
         "<div id='knAi' class='knAi' style='display:none'>"
-        "<div class='knAiHead'>"
-        "<div class='knAiTitle'><i class='material-icons knAiSpark'>auto_awesome</i>AI</div>"
-        "<select id='knAiModel' class='knAiModel' onchange='KE.kn.aiModel(this.value)'></select>"
-        "<div class='knAiIcon material-icons' title='New chat' onclick='KE.kn.aiNew()'>add_comment</div>"
+        "<div id='knAiHead' class='knAiHead'>"
+        "<div id='knAiTitle' class='knAiTitle'><i class='material-icons knAiSpark'>auto_awesome</i><span>AI</span></div>"
+        "<select id='knAiModel' class='knAiModel' title='Model (smartest first)' onchange='KE.kn.aiModel(this.value)'></select>"
+        "<div id='knAiNewBtn' class='knAiIcon material-icons' title='New chat' onclick='KE.kn.aiNew()'>add_comment</div>"
         "<div id='knAiHistBtn' class='knAiIcon material-icons' title='History' onclick='KE.kn.aiPop(1)'>history</div>"
         "<div id='knAiSetBtn' class='knAiIcon material-icons' title='Settings' onclick='KE.kn.aiPop(2)'>tune</div>"
-        "<div class='knAiIcon material-icons' title='Close' onclick='KE.kn.aiToggle()'>close</div>"
+        "<div id='knAiCloseBtn' class='knAiIcon material-icons' title='Close' onclick='KE.kn.aiToggle()'>close</div>"
         "</div>"
         "<div id='knAiPop' class='knAiPop' style='display:none'></div>"
         "<div id='knAiBanner' class='knAiBanner' style='display:none'></div>"
@@ -227,11 +258,11 @@ static void build(void) {
         "<textarea id='knAiInput' class='knAiInput' rows='2' spellcheck='false' placeholder='Ask anything about this map'"
         " onkeydown='return KE.kn.aiKey()'></textarea>"
         "<div class='knAiBar'>"
-        "<div id='knAiAccount' class='knAiAccount'></div>"
-        "<div id='knAiTools' class='knAiChip' title='Let the AI read and edit the open map' onclick='KE.kn.aiChip(0)'>Tools</div>"
-        "<div id='knAiWeb' class='knAiChip' title='Let the AI search the web' onclick='KE.kn.aiChip(1)'>Web</div>"
-        "<div id='knAiSend' class='knAiSend' onclick='KE.kn.aiSend()'>Ask</div>"
-        "<div id='knAiStop' class='knAiStop' style='display:none' onclick='KE.kn.aiStop()'>&#9632; Stop</div>"
+        "<div id='knAiTools' class='knAiBtnS knAiChip' title='Let the AI read and edit the open map' onclick='KE.kn.aiChip(0)'>Tools</div>"
+        "<div id='knAiWeb' class='knAiBtnS knAiChip' title='Let the AI search the web' onclick='KE.kn.aiChip(1)'>Web</div>"
+        "<div class='knAiGrow'></div>"
+        "<div id='knAiSend' class='knAiBtnS knAiSend' title='Send (Enter)' onclick='KE.kn.aiSend()'>Ask</div>"
+        "<div id='knAiStop' class='knAiBtnS knAiStop' style='display:none' title='Stop' onclick='KE.kn.aiStop()'><span class='knAiSq'></span>Stop</div>"
         "</div>"
         "<div id='knAiUsage' class='knAiUsage'></div>"
         "</div>"
@@ -244,10 +275,11 @@ static void build(void) {
     A.usage = html_dom_by_id("knAiUsage");
     A.send = html_dom_by_id("knAiSend");
     A.stop = html_dom_by_id("knAiStop");
-    A.account = html_dom_by_id("knAiAccount");
     A.pop_el = html_dom_by_id("knAiPop");
     A.built = A.root != 0;
     A.signed_in_seen = -1;
+    A.edit_idx = A.confirm_idx = -1;
+    if (!A.sid[0]) snprintf(A.sid, sizeof(A.sid), "s%lx%04x", (unsigned long) time(NULL), (unsigned) (rand() ^ (int) (clock() & 0xffff)) & 0xffff);
     if (!A.conv) A.conv = cJSON_CreateArray();
     settings_load();
 }
@@ -297,19 +329,10 @@ static void health_banner(void) {
     }
 }
 
+// No account indicator in the panel (the hub shows who is signed in); the sign-in gating stays:
+// a guest gets the sign-in card. This only remembers whom the panel was drawn for.
 static void update_account(void) {
-    if (!A.account) return;
     const AccountInfo *acc = account_get();
-    EdBuf b;
-    edb_init(&b);
-    if (acc) {
-        edb_add(&b, "<i class='material-icons'>account_circle</i>");
-        ai_html_escape(&b, acc->alias[0] ? acc->alias : acc->name);
-    } else {
-        edb_add(&b, "<i class='material-icons'>person_outline</i>Guest");
-    }
-    html_dom_set_html(A.account, b.buf ? b.buf : "");
-    edb_free(&b);
     A.signed_in_seen = acc ? acc->id : 0;
 }
 
@@ -382,14 +405,12 @@ static void fill_models(void) {
         edb_add(&b, "<option value='");
         ai_html_escape(&b, id);
         edb_addf(&b, "'%s>", !strcmp(id, cur) ? " selected" : "");
+        // the name only (the list is already smartest first): flags and prices made the closed
+        // picker unreadable; the state of a broken model stays visible
         ai_html_escape(&b, ed_json_str(m, "name", id));
-        if (ed_json_truthy(cJSON_GetObjectItemCaseSensitive(m, "reasoning"))) edb_add(&b, " \xc2\xb7 thinks");
-        if (ed_json_truthy(cJSON_GetObjectItemCaseSensitive(m, "tools"))) edb_add(&b, " \xc2\xb7 tools");
-        const double pin = ed_json_num(m, "price_in", -1), pout = ed_json_num(m, "price_out", -1);
-        if (pin >= 0 && pout >= 0) edb_addf(&b, " \xc2\xb7 $%.2f/$%.2f", pin, pout);
         const char *st = ed_json_str(m, "status", "");
-        if (!strcmp(st, "unavailable")) edb_add(&b, " \xc2\xb7 unavailable");
-        else if (!strcmp(st, "degraded")) edb_add(&b, " \xc2\xb7 degraded");
+        if (!strcmp(st, "unavailable")) edb_add(&b, " (unavailable)");
+        else if (!strcmp(st, "degraded")) edb_add(&b, " (degraded)");
         edb_add(&b, "</option>");
     }
     html_dom_set_html(A.model_sel, b.buf ? b.buf : "");
@@ -448,6 +469,9 @@ static void models_apply(cJSON *o, const int status, const char *transport_error
         A.models_error[0] = 0;
         char *cur = A.custom ? A.ep_model : A.model;
         const size_t cn = A.custom ? sizeof(A.ep_model) : sizeof(A.model);
+        // kn_brain: the service's default (glm-5.3-flash, or what its probe falls back to) unless
+        // the user picked a model that is still listed
+        if (!A.custom && (!A.model_picked || !model_row(cur))) snprintf(cur, cn, "%s", ed_json_str(o, "default", ""));
         if (!cur[0] || (!A.custom && !model_row(cur))) snprintf(cur, cn, "%s", ed_json_str(o, "default", ""));
         if (!cur[0] || (!A.custom && !model_row(cur))) snprintf(cur, cn, "%s", ed_json_str(cJSON_GetArrayItem(A.models, 0), "id", ""));
     } else {
@@ -721,23 +745,31 @@ static void render_all(void) {
                     "<div class='knAiEmptyText'>Ask about Krunker mapping, or describe what to build: with Tools on, the AI reads and edits "
                     "the open map (every change is one undo step).</div></div>");
     }
+    const int busy = A.streaming || A.tool_step;
     for (int i = 0; i < n; i++) {
         const cJSON *m = cJSON_GetArrayItem(A.conv, i);
         const char *role = ed_json_str(m, "role", "");
         if (!strcmp(role, "user")) {
-            edb_add(&b, "<div class='knAiMsg knAiUser'><div class='knAiBubble'>");
-            ai_html_escape(&b, ed_json_str(m, "content", ""));
-            edb_add(&b, "</div></div>");
+            render_user(&b, i, m, busy);
         } else if (!strcmp(role, "assistant")) {
             render_assistant(&b, i, m);
         }
+    }
+    if (A.redo_conv && !busy) { // after a rewind / restore: Redo until the next message
+        const int k = cJSON_GetArraySize(A.redo_conv);
+        edb_add(&b, "<div id='knAiRedoBar' class='knAiRedoBar'><i class='material-icons'>restore</i><span class='knAiGrow'>");
+        if (A.redo_kind == 2) edb_addf(&b, "Checkpoint restored \xc2\xb7 %d editor change%s undone", A.redo_steps, A.redo_steps == 1 ? "" : "s");
+        else edb_addf(&b, "Rewound \xc2\xb7 %d message%s removed", k, k == 1 ? "" : "s");
+        edb_add(&b, "</span><span class='knAiBtnS knAiChip' title='Put the removed messages back");
+        if (A.redo_kind == 2) edb_add(&b, " and redo the editor changes");
+        edb_add(&b, "' onclick='KE.kn.aiRedo()'>Redo</span></div>");
     }
     edb_add(&b, "<div id='knAiLive'></div>");
     html_dom_set_html(A.list, b.buf ? b.buf : "");
     edb_free(&b);
     A.live = html_dom_by_id("knAiLive");
     render_live();
-    html_dom_scroll_to_bottom(A.list);
+    if (!g_keep_scroll) html_dom_scroll_to_bottom(A.list);
 }
 
 static void render_live(void) {
@@ -1169,9 +1201,12 @@ static void submit_text(const char *text) {
         update_controls();
         return;
     }
+    redo_clear(); // a new message ends the Redo of a rewind / restore
+    edit_end();
     cJSON *m = cJSON_CreateObject();
     cJSON_AddStringToObject(m, "role", "user");
     cJSON_AddStringToObject(m, "content", text);
+    cJSON_AddItemToObject(meta_of(m), "cp", cp_snapshot()); // this message's checkpoint
     cJSON_AddItemToArray(A.conv, m);
     A.rounds = 0;
     send_turn();
@@ -1215,7 +1250,11 @@ static void tool_run_one(cJSON *m, const cJSON *call) {
         ed_json_set_str(tm, "status", "error");
         return;
     }
+    int undo_before = 0;
+    tool_undo_mark(&undo_before);
     cJSON *res = ai_tool_run(name, ed_json_str(fn, "arguments", "{}"));
+    const int undo_steps = tool_undo_count(undo_before);
+    if (undo_steps) ed_json_set_num(tm, "undo", undo_steps); // the checkpoint's "by the AI" count
     const int is_err = ed_json_truthy(jget(res, "is_error"));
     const char *text = ed_json_str(res, "text", "");
     if (is_err) {
@@ -1304,6 +1343,363 @@ static void approve(const int idx, const int k, const int choice) {
 }
 
 // ---------------------------------------------------------------------------
+// checkpoints (after VS Code's chat checkpoints, src/vs/workbench/contrib/chat: chatEditingActions
+// RestoreCheckpointAction, the "Checkpoint Restored · Redo" bar of chatListRenderer)
+//
+// Every user message records where each open project's undo history stood when it was sent
+// (meta.cp {sid, p: [{id, n: undo entries, top: the newest entry's signature}]}, kept with the
+// local history), and every editor tool call how many undo steps it added (meta.tools[id].undo).
+//   Edit       the message becomes an editor in place; Send drops it and everything after it and
+//              sends the new text (asking first when editor changes were made after it: undo them
+//              or keep them).
+//   Rewind     it and everything after it leave the chat (the map stays), its text goes back into
+//              the composer.
+//   Restore checkpoint (shown when editor changes were made since): Rewind + the editor's undo back
+//              to that point, after a confirmation. Only when the history still leads there: the
+//              same editor session (sid) and the same entry at n (a load or the history limit
+//              moved it: that project is left alone).
+// After a rewind / restore, Redo puts the messages back (and redoes the editor changes, if nothing
+// was edited since) until the next message is sent.
+
+static void entry_sig(const EditorHistoryEntry *list, const size_t count, const size_t n, char *out, const size_t cap) {
+    if (!n || n > count) {
+        snprintf(out, cap, "-");
+        return;
+    }
+    const EditorHistoryEntry *e = &list[n - 1];
+    snprintf(out, cap, "%c:%u:%u", e->action, (unsigned) e->uuid, (unsigned) e->batch);
+}
+
+// the shown project's last second of UI edits become undo steps first (as the bus's undo does)
+static void poll_shown(void) {
+    if (!g_ed.shown) return;
+    EditorProject *prev;
+    ed_project_enter(g_ed.shown, &prev);
+    ed_history_poll();
+    ed_project_leave(prev);
+}
+
+// undo steps (an entry or a whole batch) in p's entries [from, undo_count)
+static int steps_since(const EditorProject *p, const size_t from) {
+    int steps = 0;
+    size_t i = p->undo_count;
+    while (i > from) {
+        const uint32_t batch = p->undos[--i].batch;
+        while (batch && i > from && p->undos[i - 1].batch == batch) i--;
+        steps++;
+    }
+    return steps;
+}
+
+static cJSON *cp_snapshot(void) {
+    poll_shown();
+    cJSON *cp = cJSON_CreateObject();
+    cJSON_AddStringToObject(cp, "sid", A.sid);
+    cJSON *ps = cJSON_AddArrayToObject(cp, "p");
+    for (size_t i = 0; i < g_ed.project_count; i++) {
+        const EditorProject *p = g_ed.projects[i];
+        char sig[48];
+        entry_sig(p->undos, p->undo_count, p->undo_count, sig, sizeof(sig));
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddNumberToObject(o, "id", p->id);
+        cJSON_AddNumberToObject(o, "n", (double) p->undo_count);
+        cJSON_AddStringToObject(o, "top", sig);
+        cJSON_AddItemToArray(ps, o);
+    }
+    return cp;
+}
+
+// a checkpoint's project entry whose history still leads back to it (NULL: gone or moved on)
+static EditorProject *cp_project(const cJSON *e) {
+    EditorProject *p = ed_project_find((int) ed_json_num(e, "id", -1));
+    const double n = ed_json_num(e, "n", -1);
+    if (!p || n < 0 || (size_t) n > p->undo_count) return NULL;
+    char sig[48];
+    entry_sig(p->undos, p->undo_count, (size_t) n, sig, sizeof(sig));
+    return strcmp(sig, ed_json_str(e, "top", "")) ? NULL : p;
+}
+
+static const cJSON *cp_of(const int idx) {
+    const cJSON *m = cJSON_GetArrayItem(A.conv, idx);
+    if (!m || strcmp(ed_json_str(m, "role", ""), "user")) return NULL;
+    const cJSON *cp = jget(jget(m, "meta"), "cp");
+    return cp && !strcmp(ed_json_str(cp, "sid", ""), A.sid) ? cp : NULL;
+}
+
+// Editor changes (undo steps over the projects) made since user message idx; -1 = none can be
+// undone from here (another session's chat, or the history moved on). *ai: those of the AI's tools.
+static int cp_changes(const int idx, int *ai) {
+    if (ai) *ai = 0;
+    const cJSON *cp = cp_of(idx);
+    if (!cp) return -1;
+    int total = 0, any = 0;
+    const cJSON *e;
+    cJSON_ArrayForEach(e, jget(cp, "p")) {
+        const EditorProject *p = cp_project(e);
+        if (!p) continue;
+        total += steps_since(p, (size_t) ed_json_num(e, "n", 0));
+        any = 1;
+    }
+    if (!any) return -1;
+    if (ai) {
+        int n = 0;
+        for (int i = idx + 1; i < cJSON_GetArraySize(A.conv); i++) {
+            const cJSON *tm;
+            cJSON_ArrayForEach(tm, jget(jget(cJSON_GetArrayItem(A.conv, i), "meta"), "tools")) n += (int) ed_json_num(tm, "undo", 0);
+        }
+        *ai = n < total ? n : total;
+    }
+    return total;
+}
+
+// undoes the editor back to user message idx's checkpoint; the redo record into *redo
+static int cp_undo(const int idx, cJSON **redo) {
+    poll_shown();
+    *redo = cJSON_CreateArray();
+    const cJSON *cp = cp_of(idx);
+    int steps = 0;
+    const cJSON *e;
+    cJSON_ArrayForEach(e, jget(cp, "p")) {
+        EditorProject *p = cp_project(e);
+        if (!p) continue;
+        const size_t n = (size_t) ed_json_num(e, "n", 0);
+        EditorProject *prev;
+        ed_project_enter(p, &prev);
+        int k = 0;
+        while (p->undo_count > n && ed_history_step(0)) k++;
+        ed_project_leave(prev);
+        if (!k) continue;
+        steps += k;
+        char sig[48];
+        entry_sig(p->redos, p->redo_count, p->redo_count, sig, sizeof(sig));
+        cJSON *r = cJSON_CreateObject();
+        cJSON_AddNumberToObject(r, "id", p->id);
+        cJSON_AddNumberToObject(r, "k", k);
+        cJSON_AddNumberToObject(r, "undo", (double) p->undo_count);
+        cJSON_AddNumberToObject(r, "redo", (double) p->redo_count);
+        cJSON_AddStringToObject(r, "top", sig);
+        cJSON_AddItemToArray(*redo, r);
+    }
+    if (steps) g_ed.dirty_panel = g_ed.dirty_counts = 1;
+    return steps;
+}
+
+// the editor's redo of a restore; 0 when a project's history moved on since (nothing redone)
+static int cp_redo(void) {
+    poll_shown();
+    const cJSON *r;
+    cJSON_ArrayForEach(r, A.redo_map) {
+        const EditorProject *p = ed_project_find((int) ed_json_num(r, "id", -1));
+        char sig[48];
+        if (!p || p->undo_count != (size_t) ed_json_num(r, "undo", -1) || p->redo_count != (size_t) ed_json_num(r, "redo", -1)) return 0;
+        entry_sig(p->redos, p->redo_count, p->redo_count, sig, sizeof(sig));
+        if (strcmp(sig, ed_json_str(r, "top", ""))) return 0;
+    }
+    cJSON_ArrayForEach(r, A.redo_map) {
+        EditorProject *p = ed_project_find((int) ed_json_num(r, "id", -1)), *prev;
+        ed_project_enter(p, &prev);
+        for (int k = (int) ed_json_num(r, "k", 0); k > 0 && ed_history_redo_undoable(); k--) {} // undoable again
+        ed_project_leave(prev);
+    }
+    g_ed.dirty_panel = g_ed.dirty_counts = 1;
+    return 1;
+}
+
+// undo steps over every project (a tool call's count: after - before)
+static void tool_undo_mark(int *before) {
+    poll_shown();
+    int n = 0;
+    for (size_t i = 0; i < g_ed.project_count; i++) n += steps_since(g_ed.projects[i], 0);
+    *before = n;
+}
+
+static int tool_undo_count(const int before) {
+    int after;
+    tool_undo_mark(&after);
+    return after > before ? after - before : 0;
+}
+
+static void redo_clear(void) {
+    cJSON_Delete(A.redo_conv);
+    cJSON_Delete(A.redo_map);
+    free(A.redo_text);
+    A.redo_conv = A.redo_map = NULL;
+    A.redo_text = NULL;
+    A.redo_kind = A.redo_steps = 0;
+}
+
+static void edit_end(void) {
+    A.edit_idx = A.confirm_idx = -1;
+    A.confirm_kind = 0;
+    free(A.edit_text);
+    A.edit_text = NULL;
+}
+
+static void render_keep(void) {
+    g_keep_scroll = 1;
+    render_all();
+    g_keep_scroll = 0;
+}
+
+// scrolls the list so user turn idx (its confirmation / editor) is in view
+static void turn_into_view(const int idx) {
+    char id[24];
+    snprintf(id, sizeof(id), "knAiU%d", idx);
+    const HtmlElem e = html_dom_by_id(id);
+    HtmlRect er, lr;
+    HtmlScroll sc;
+    if (!e || !A.list || !html_dom_get_rect(e, &er) || !html_dom_get_rect(A.list, &lr) || !html_dom_get_scroll(A.list, &sc) || sc.client_h <= 0) return;
+    const float k = lr.h / sc.client_h; // viewport px per CSS px (the editor page is scaled)
+    if (k <= 0) return;
+    float top = sc.top;
+    if (er.y < lr.y + 4 * k) top -= (lr.y + 8 * k - er.y) / k;
+    else if (er.y + er.h > lr.y + lr.h) top += (er.y + er.h - (lr.y + lr.h) + 8 * k) / k;
+    if (er.h > lr.h) top = sc.top + (er.y - lr.y - 8 * k) / k; // taller than the list: its top
+    if (top != sc.top) html_dom_set_scroll(A.list, sc.left, top < 0 ? 0 : top);
+}
+
+// User message idx and everything after it leave the chat (into the Redo stash); undo_map: the
+// editor changes since go too; put_text: its text into the empty composer.
+static void rewind_to(const int idx, const int undo_map, const int put_text) {
+    if (A.streaming || A.tool_step) stop_turn();
+    const cJSON *m = cJSON_GetArrayItem(A.conv, idx);
+    if (!m || strcmp(ed_json_str(m, "role", ""), "user")) return;
+    char *text = strdup(ed_json_str(m, "content", ""));
+    redo_clear();
+    edit_end();
+    cJSON *redo_map = NULL;
+    const int steps = undo_map ? cp_undo(idx, &redo_map) : 0;
+    A.redo_conv = cJSON_CreateArray();
+    while (cJSON_GetArraySize(A.conv) > idx) cJSON_AddItemToArray(A.redo_conv, cJSON_DetachItemFromArray(A.conv, idx));
+    A.redo_map = redo_map;
+    A.redo_kind = undo_map ? 2 : 1;
+    A.redo_steps = steps;
+    if (put_text && A.input && text) {
+        char cur[4] = "";
+        html_dom_get_value(A.input, cur, sizeof(cur));
+        if (!cur[0]) {
+            html_dom_set_value(A.input, text);
+            A.redo_text = text;
+            text = NULL;
+        }
+    }
+    free(text);
+    A.rounds = 0;
+    if (cJSON_GetArraySize(A.conv)) history_save();
+    else if (A.chat_id[0]) { // nothing left: the saved chat goes until Redo or a new message saves it again
+        char id[32];
+        snprintf(id, sizeof(id), "%s", A.chat_id);
+        history_delete(id);
+        snprintf(A.chat_id, sizeof(A.chat_id), "%s", id);
+    }
+    render_all();
+    update_controls();
+}
+
+static void redo_apply(void) {
+    if (!A.redo_conv || A.streaming || A.tool_step) return;
+    const int map_ok = cJSON_GetArraySize(A.redo_map) ? cp_redo() : 1;
+    cJSON *it;
+    while ((it = cJSON_DetachItemFromArray(A.redo_conv, 0))) cJSON_AddItemToArray(A.conv, it);
+    if (A.redo_text && A.input) { // the composer still holds just the rewound text: cleared
+        const int len = html_dom_get_value(A.input, NULL, 0);
+        char *cur = len >= 0 ? malloc((size_t) len + 1) : NULL;
+        if (cur) {
+            html_dom_get_value(A.input, cur, (size_t) len + 1);
+            if (!strcmp(cur, A.redo_text)) html_dom_set_value(A.input, "");
+            free(cur);
+        }
+    }
+    redo_clear();
+    edit_end();
+    if (!map_ok) set_banner(2, "The chat is back, but the editor changes were not redone: the map was edited after the restore.");
+    history_save();
+    render_all();
+    update_controls();
+}
+
+// Send an edited user message: idx and everything after it go, then the new text is sent.
+static void edit_send(const int idx, const char *text, const int undo_map) {
+    char *t = strdup(text);
+    if (!t) return;
+    rewind_to(idx, undo_map, 0);
+    redo_clear(); // a new message ends the Redo (VS Code drops the removed requests on send)
+    submit_text(t);
+    free(t);
+}
+
+static void restore_ask(const int idx) {
+    if (A.streaming || A.tool_step) return;
+    const int ch = cp_changes(idx, NULL);
+    if (ch <= 0) { // nothing to undo: a plain rewind
+        rewind_to(idx, 0, 1);
+        return;
+    }
+    edit_end();
+    A.confirm_idx = idx;
+    A.confirm_kind = 1;
+    render_keep();
+    turn_into_view(idx);
+}
+
+// the user turn: checkpoint divider (or its confirmation), the bubble (or its editor), actions
+static void render_user(EdBuf *b, const int idx, const cJSON *m, const int busy) {
+    const char *text = ed_json_str(m, "content", "");
+    edb_addf(b, "<div class='knAiUTurn' id='knAiU%d'>", idx);
+    if (A.confirm_idx == idx) {
+        int ai = 0;
+        const int ch = cp_changes(idx, &ai);
+        const int n = ch > 0 ? ch : 0;
+        edb_add(b, "<div class='knAiConfirm'>");
+        if (A.confirm_kind == 1) {
+            edb_add(b, "<div class='knAiConfirmTitle'><i class='material-icons'>restore</i>Restore this checkpoint?</div><div class='knAiConfirmText'>");
+            edb_addf(b, "This message and everything after it leave the chat, and the %d editor change%s made since %s undone", n, n == 1 ? "" : "s",
+                     n == 1 ? "is" : "are");
+            if (ai < n) edb_addf(b, " (%d by the AI, %d of your own)", ai, n - ai);
+            edb_add(b, ". Redo brings them back until you send a new message.</div><div class='knAiConfirmBar'>"
+                       "<span class='knAiBtnS knAiChip' onclick='KE.kn.aiConfirm(0)'>Cancel</span>"
+                       "<span class='knAiBtnS knAiSend' onclick='KE.kn.aiConfirm(1)'>Restore</span></div>");
+        } else {
+            edb_add(b, "<div class='knAiConfirmTitle'><i class='material-icons'>edit</i>Undo the editor changes made after this message?</div><div class='knAiConfirmText'>");
+            edb_addf(b, "%d editor change%s %s made after it", n, n == 1 ? "" : "s", n == 1 ? "was" : "were");
+            if (ai) edb_addf(b, " (%d by the AI)", ai);
+            edb_add(b, ". The later messages leave the chat either way.</div><div class='knAiConfirmBar'>"
+                       "<span class='knAiBtnS knAiChip' onclick='KE.kn.aiConfirm(0)'>Cancel</span>"
+                       "<span class='knAiBtnS knAiChip' onclick='KE.kn.aiConfirm(2)'>Keep and send</span>"
+                       "<span class='knAiBtnS knAiSend' onclick='KE.kn.aiConfirm(1)'>Undo and send</span></div>");
+        }
+        edb_add(b, "</div>");
+    } else if (!busy && A.edit_idx != idx) {
+        const int ch = cp_changes(idx, NULL);
+        if (ch > 0) {
+            edb_addf(b, "<div class='knAiCp'><span class='knAiCpLine'></span><span class='knAiCpBtn' title='Undo the %d editor change%s made since "
+                        "this message and remove it and everything after it' onclick='KE.kn.aiRestore(%d)'><i class='material-icons'>restore</i>"
+                        "Restore checkpoint</span><span class='knAiCpLine'></span></div>",
+                     ch, ch == 1 ? "" : "s", idx);
+        }
+    }
+    edb_add(b, "<div class='knAiMsg knAiUser'>");
+    if (A.edit_idx == idx) {
+        edb_add(b, "<div class='knAiEdit'><textarea id='knAiEditInput' class='knAiEditInput' rows='3' spellcheck='false' "
+                   "onkeydown='return KE.kn.aiEditKey()'>");
+        ai_html_escape(b, A.edit_text ? A.edit_text : text);
+        edb_add(b, "</textarea><div class='knAiEditBar'><span class='knAiBtnS knAiChip' onclick='KE.kn.aiEditCancel()'>Cancel</span>"
+                   "<span class='knAiBtnS knAiSend' onclick='KE.kn.aiEditSend()'>Send</span></div></div>");
+    } else {
+        edb_add(b, "<div class='knAiBubble'>");
+        ai_html_escape(b, text);
+        edb_add(b, "</div>");
+        if (!busy) {
+            edb_addf(b, "<div class='knAiActs knAiUActs'><span class='knAiAct' title='Edit this message and send it again' onclick='KE.kn.aiEdit(%d)'>Edit</span>"
+                        "<span class='knAiAct' title='Remove this message and everything after it (the map stays as it is)' "
+                        "onclick='KE.kn.aiRewind(%d)'>Rewind</span></div>",
+                     idx, idx);
+        }
+    }
+    edb_add(b, "</div></div>");
+}
+
+// ---------------------------------------------------------------------------
 // history (storage knAiChats: newest first [{id, title, model, updated, conv}])
 
 static cJSON *history_load(void) {
@@ -1371,6 +1767,8 @@ static void history_open(const char *id) {
     const cJSON *c;
     cJSON_ArrayForEach(c, h) {
         if (strcmp(ed_json_str(c, "id", ""), id)) continue;
+        redo_clear();
+        edit_end();
         cJSON_Delete(A.conv);
         A.conv = cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(c, "conv"), 1);
         if (!cJSON_IsArray(A.conv)) {
@@ -1517,6 +1915,8 @@ void ed_ai_reset(void) {
     if (A.ep_models_hs) http_stream_cancel(A.ep_models_hs);
     ai_buf_free(&A.ep_models_body);
     turn_reset();
+    redo_clear();
+    edit_end();
     cJSON_Delete(A.conv);
     cJSON_Delete(A.models);
     cJSON_Delete(A.server_tool_names);
@@ -1599,6 +1999,7 @@ H(h_model) {
         endpoint_save();
     } else {
         snprintf(A.model, sizeof(A.model), "%s", buf);
+        A.model_picked = 1;
         settings_save();
         if (!model_warning()) health_banner();
     }
@@ -1611,6 +2012,7 @@ H(h_use) {
     const char *id = arg_str(a, n, 0);
     if (!id[0] || A.custom) return 1;
     snprintf(A.model, sizeof(A.model), "%s", id);
+    A.model_picked = 1;
     settings_save();
     fill_models();
     set_banner(0, NULL);
@@ -1621,6 +2023,8 @@ H(h_use) {
 
 static void new_chat(void) {
     if (A.streaming || A.tool_step) stop_turn();
+    redo_clear();
+    edit_end();
     cJSON_Delete(A.conv);
     A.conv = cJSON_CreateArray();
     A.chat_id[0] = 0;
@@ -1782,6 +2186,141 @@ H(h_ask) {
     return 1;
 }
 
+// ---- checkpoints: Edit / Rewind / Restore checkpoint / Redo
+
+static int user_index(const HtmlArg *a, const int n) {
+    const int i = (int) arg_num(a, n, 0);
+    const cJSON *m = cJSON_GetArrayItem(A.conv, i);
+    return m && !strcmp(ed_json_str(m, "role", ""), "user") ? i : -1;
+}
+
+static void edit_open(const int i) {
+    if (i < 0 || A.streaming || A.tool_step) return;
+    edit_end();
+    A.edit_idx = i;
+    render_keep();
+    turn_into_view(i);
+    const HtmlElem e = html_dom_by_id("knAiEditInput");
+    if (e) html_dom_focus(e);
+}
+
+// the edit's text (trimmed; caller frees), NULL when empty
+static char *edit_value(void) {
+    const HtmlElem e = html_dom_by_id("knAiEditInput");
+    const int len = e ? html_dom_get_value(e, NULL, 0) : -1;
+    char *t = len > 0 ? malloc((size_t) len + 1) : NULL;
+    if (!t) return NULL;
+    html_dom_get_value(e, t, (size_t) len + 1);
+    size_t l = strlen(t), k = 0;
+    while (l && strchr(" \n\r\t", t[l - 1])) t[--l] = 0;
+    while (t[k] && strchr(" \n\r\t", t[k])) k++;
+    if (!t[k]) {
+        free(t);
+        return NULL;
+    }
+    memmove(t, t + k, strlen(t + k) + 1);
+    return t;
+}
+
+static void edit_submit(void) {
+    const int i = A.edit_idx;
+    if (i < 0 || A.streaming || A.tool_step) return;
+    char *t = edit_value();
+    if (!t) return;
+    if (cp_changes(i, NULL) > 0) { // editor changes after it: undo them or keep them?
+        free(A.edit_text);
+        A.edit_text = t;
+        A.confirm_idx = i;
+        A.confirm_kind = 2;
+        render_keep();
+        turn_into_view(i);
+        return;
+    }
+    edit_send(i, t, 0);
+    free(t);
+}
+
+static void confirm_choice(const int choice) {
+    const int i = A.confirm_idx, kind = A.confirm_kind;
+    if (i < 0) return;
+    if (kind == 1) {
+        if (choice == 1) rewind_to(i, 1, 1);
+        else {
+            edit_end();
+            render_keep();
+        }
+    } else if (kind == 2) {
+        if (choice == 0) { // back to the editor, text kept
+            A.confirm_idx = -1;
+            A.confirm_kind = 0;
+            render_keep();
+            return;
+        }
+        char *t = A.edit_text ? strdup(A.edit_text) : NULL;
+        if (t) edit_send(i, t, choice == 1);
+        free(t);
+    }
+}
+
+H(h_edit) {
+    (void) u; (void) ev;
+    edit_open(user_index(a, n));
+    return 1;
+}
+
+H(h_edit_cancel) {
+    UNUSED;
+    edit_end();
+    render_keep();
+    return 1;
+}
+
+H(h_edit_send) {
+    UNUSED;
+    edit_submit();
+    return 1;
+}
+
+H(h_edit_key) {
+    (void) u; (void) a; (void) n;
+    if (ev && html_key_is_enter(ev->key) && !(ev->mods & 1)) { // Enter sends, Shift+Enter is a new line
+        edit_submit();
+        return 0;
+    }
+    if (ev && html_key_is_escape(ev->key)) {
+        edit_end();
+        render_keep();
+        return 0;
+    }
+    return 1;
+}
+
+H(h_rewind) {
+    (void) u; (void) ev;
+    const int i = user_index(a, n);
+    if (i >= 0 && !A.streaming && !A.tool_step) rewind_to(i, 0, 1);
+    return 1;
+}
+
+H(h_restore) {
+    (void) u; (void) ev;
+    const int i = user_index(a, n);
+    if (i >= 0) restore_ask(i);
+    return 1;
+}
+
+H(h_confirm) {
+    (void) u; (void) ev;
+    confirm_choice((int) arg_num(a, n, 0));
+    return 1;
+}
+
+H(h_redo) {
+    UNUSED;
+    redo_apply();
+    return 1;
+}
+
 #undef H
 #undef UNUSED
 
@@ -1792,7 +2331,9 @@ void ed_ai_install(HtmlHandlerEntry *table, size_t *count, const size_t max) {
         {"KE.kn.aiCopy", h_copy},       {"KE.kn.aiRetry", h_retry},     {"KE.kn.aiSignIn", h_signin},   {"KE.kn.aiDismiss", h_dismiss},
         {"KE.kn.aiApprove", h_approve}, {"KE.kn.aiChip", h_chip},       {"KE.kn.aiPop", h_pop},         {"KE.kn.aiHist", h_hist},
         {"KE.kn.aiHistDel", h_hist_del}, {"KE.kn.aiSrc", h_src},        {"KE.kn.aiEffort", h_effort},   {"KE.kn.aiEpSave", h_ep_save},
-        {"KE.kn.aiAsk", h_ask},         {"KE.kn.aiUse", h_use},
+        {"KE.kn.aiAsk", h_ask},         {"KE.kn.aiUse", h_use},         {"KE.kn.aiEdit", h_edit},       {"KE.kn.aiEditCancel", h_edit_cancel},
+        {"KE.kn.aiEditSend", h_edit_send}, {"KE.kn.aiEditKey", h_edit_key}, {"KE.kn.aiRewind", h_rewind}, {"KE.kn.aiRestore", h_restore},
+        {"KE.kn.aiConfirm", h_confirm}, {"KE.kn.aiRedo", h_redo},
     };
     for (size_t i = 0; i < sizeof(entries) / sizeof(entries[0]) && *count < max; i++) table[(*count)++] = entries[i];
 }
@@ -1802,7 +2343,11 @@ void ed_ai_install(HtmlHandlerEntry *table, size_t *count, const size_t max) {
 //   ai:open / ai:close, ai:model:<id>, ai:send:<text>, ai:stop, ai:new, ai:trace:<i>, ai:tool:<i>:<k>,
 //   ai:approve:<i>:<k>:<0 deny|1 allow|2 allow all>, ai:tools:<0|1>, ai:web:<0|1>, ai:effort:<e>,
 //   ai:endpoint:<url>|<key>|<model> (own endpoint; "ai:endpoint:" = back to kn_brain),
-//   ai:history:<n> (open the nth saved chat), ai:pop:<0|1|2>, ai:dump:<path> (JSON state)
+//   ai:history:<n> (open the nth saved chat), ai:pop:<0|1|2>, ai:dump:<path> (JSON state),
+//   checkpoints: ai:edit:<i>, ai:edittext:<text>, ai:editsend, ai:rewind:<i>, ai:restore:<i>,
+//   ai:confirm:<0 cancel|1 ok / undo and send|2 keep and send>, ai:redo,
+//   ai:boxes:<path> (viewport rects of the header and composer controls), ai:openmodels (clicks the
+//   model picker: its popup is in the run's screenshot)
 
 static void dump_state(const char *path) {
     cJSON *o = cJSON_CreateObject();
@@ -1837,15 +2382,53 @@ static void dump_state(const char *path) {
     char usage[512] = "";
     if (A.usage) html_dom_get_text(A.usage, usage, sizeof(usage));
     cJSON_AddStringToObject(o, "usage", usage);
-    char acc[128] = "";
-    if (A.account) html_dom_get_text(A.account, acc, sizeof(acc));
-    cJSON_AddStringToObject(o, "account", acc);
+    cJSON_AddBoolToObject(o, "account_indicator", html_dom_by_id("knAiAccount") != 0);
     cJSON_AddBoolToObject(o, "shown", A.root && html_dom_is_shown(A.root));
+    cJSON_AddBoolToObject(o, "model_picked", A.model_picked);
+    cJSON_AddNumberToObject(o, "edit_idx", A.edit_idx);
+    cJSON_AddNumberToObject(o, "confirm_idx", A.confirm_idx);
+    cJSON_AddNumberToObject(o, "confirm_kind", A.confirm_kind);
+    cJSON_AddNumberToObject(o, "redo_kind", A.redo_kind);
+    cJSON_AddNumberToObject(o, "redo_steps", A.redo_steps);
+    cJSON_AddNumberToObject(o, "redo_messages", cJSON_GetArraySize(A.redo_conv));
+    cJSON *chg = cJSON_AddArrayToObject(o, "changes"); // per message: editor changes since (user messages), else null
+    for (int i = 0; i < cJSON_GetArraySize(A.conv); i++) {
+        int ai = 0;
+        const int c = cp_changes(i, &ai);
+        cJSON_AddItemToArray(chg, c >= 0 ? cJSON_CreateIntArray((const int[]) {c, ai}, 2) : cJSON_CreateNull());
+    }
+    char in[1024] = "";
+    if (A.input) html_dom_get_value(A.input, in, sizeof(in));
+    cJSON_AddStringToObject(o, "input", in);
+    cJSON_AddNumberToObject(o, "objects", g_ed.proj ? (double) g_ed.proj->count : -1);
     char *s = cJSON_Print(o);
     FILE *f = fopen(path, "w");
     if (f && s) fputs(s, f);
     if (f) fclose(f);
     free(s);
+    cJSON_Delete(o);
+}
+
+// viewport rects (CSS px) of the header row and the composer's buttons: the alignment and size
+// checks of tools/editor/ai_e2e.py (Stop is measured shown for a moment)
+static void dump_boxes(const char *path) {
+    static const char *const ids[] = {"knAi", "knAiHead", "knAiTitle", "knAiModel", "knAiNewBtn", "knAiHistBtn", "knAiSetBtn", "knAiCloseBtn",
+                                      "knAiTools", "knAiWeb", "knAiSend", "knAiStop"};
+    cJSON *o = cJSON_CreateObject();
+    const int stop_hidden = A.stop && !html_dom_is_shown(A.stop);
+    if (stop_hidden) html_dom_set_display(A.stop, "");
+    for (size_t i = 0; i < sizeof(ids) / sizeof(ids[0]); i++) {
+        HtmlRect r;
+        const HtmlElem e = html_dom_by_id(ids[i]);
+        if (!e || !html_dom_get_rect(e, &r)) continue;
+        cJSON_AddItemToObject(o, ids[i], cJSON_CreateDoubleArray((const double[]) {r.x, r.y, r.w, r.h}, 4));
+    }
+    if (stop_hidden) html_dom_set_display(A.stop, "none");
+    char *t = cJSON_Print(o);
+    FILE *f = fopen(path, "w");
+    if (f && t) fputs(t, f);
+    if (f) fclose(f);
+    free(t);
     cJSON_Delete(o);
 }
 
@@ -1861,7 +2444,10 @@ int ed_ai_script(const char *cmd, const char *arg) {
         if (A.open) ed_ai_toggle();
     } else if (IS("model")) {
         if (A.custom) snprintf(A.ep_model, sizeof(A.ep_model), "%s", v);
-        else snprintf(A.model, sizeof(A.model), "%s", v);
+        else {
+            snprintf(A.model, sizeof(A.model), "%s", v);
+            A.model_picked = 1;
+        }
         fill_models();
         update_controls();
     } else if (IS("send")) {
@@ -1923,6 +2509,33 @@ int ed_ai_script(const char *cmd, const char *arg) {
     } else if (IS("pop")) {
         A.pop = atoi(v);
         render_pop();
+    } else if (IS("edit")) {
+        edit_open(atoi(v));
+    } else if (IS("edittext")) {
+        const HtmlElem e = html_dom_by_id("knAiEditInput");
+        if (e) html_dom_set_value(e, v);
+    } else if (IS("editsend")) {
+        edit_submit();
+    } else if (IS("rewind")) {
+        HtmlArg x = {HTML_ARG_NUM, atof(v), NULL};
+        h_rewind(NULL, NULL, &x, 1);
+    } else if (IS("restore")) {
+        HtmlArg x = {HTML_ARG_NUM, atof(v), NULL};
+        h_restore(NULL, NULL, &x, 1);
+    } else if (IS("confirm")) {
+        confirm_choice(atoi(v));
+    } else if (IS("redo")) {
+        redo_apply();
+    } else if (IS("boxes")) {
+        dump_boxes(v);
+    } else if (IS("openmodels")) {
+        HtmlRect r;
+        if (A.model_sel && html_dom_get_rect(A.model_sel, &r)) {
+            const double k = g_ed.css_to_fb > 0 ? g_ed.css_to_fb : 1;
+            html_ui_mouse_move((r.x + r.w / 2) * k, (r.y + r.h / 2) * k);
+            html_ui_mouse_button(GLFW_MOUSE_BUTTON_LEFT, GLFW_PRESS, 0);
+            html_ui_mouse_button(GLFW_MOUSE_BUTTON_LEFT, GLFW_RELEASE, 0);
+        }
     } else if (IS("dump")) {
         dump_state(v);
     } else {

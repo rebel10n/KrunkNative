@@ -1095,6 +1095,27 @@ int ed_history_step(const int redo) {
 
 void ed_history_execute(const int redo) { ed_history_step(redo); }
 
+// One redo step that stays undoable (the AI panel's checkpoint Redo, editor_ai.c): ed_history_step(1)
+// whose entries go back onto the undo list, so the checkpoint can be restored again. The editor's own
+// redo keeps v7.1.4's executeHistory("redo"), which records nothing. 0 = nothing to redo.
+int ed_history_redo_undoable(void) {
+    EditorProject *p = g_ed.proj;
+    if (!p->redo_count) return 0;
+    const uint32_t batch = p->redos[p->redo_count - 1].batch;
+    do {
+        const EditorHistoryEntry e = p->redos[--p->redo_count];
+        EditorHistoryEntry back = {e.action, e.uuid, NULL, e.batch, e.label ? strdup(e.label) : NULL};
+        const EditorObject *o = e.action == 'u' ? ed_obj_find(e.uuid) : NULL;
+        if (e.action == 'a' || e.action == 'r') back.state = cJSON_Duplicate(e.state, 1);
+        else if (e.action == 'u') back.state = o ? cJSON_Duplicate(o->data, 1) : NULL; // the state being left
+        else back.state = map_snapshot();
+        history_execute_one(1, e);
+        if (editor_setting_bool("disableHistory")) entry_free(&back);
+        else history_push(&p->undos, &p->undo_count, &p->undo_cap, back);
+    } while (batch && p->redo_count && p->redos[p->redo_count - 1].batch == batch);
+    return 1;
+}
+
 void ed_history_poll(void) {
     if (editor_setting_bool("disableHistory") || !editor_setting_num("historyLimit", 1000)) return;
     for (size_t i = 0; i < g_ed.proj->count; i++) {

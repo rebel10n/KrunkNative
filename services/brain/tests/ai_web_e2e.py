@@ -6,8 +6,12 @@ stub upstream and stub MCP of tests/ai_stub.py (never the live provider).
   ai_web_e2e.py <native build dir> <repo root> [<web dist dir>]
 
 A signed-in session (registered over the social socket, put into the page's localStorage) opens
-editor.html, the canvas "AI" button opens the panel, a prompt streams a reply, the stub then asks for
-objects_create, which runs in the web editor against the open map, and its result goes back.
+editor.html, the canvas "AI" button opens the panel (the provider's 31 models smartest first,
+glm-5.3-flash selected, no account indicator, the header row on one centre line, Tools / Web / Ask /
+Stop one size, readable select and option colours), a prompt streams a reply, the stub then asks for
+objects_create, which runs in the web editor against the open map, and its result goes back. Then
+the checkpoints: Restore checkpoint (the object undone, Redo brings it back), Edit + resend (undo
+the later edits), Rewind (+ Redo). Frames in the work directory (KN_KEEP=1 keeps it).
 Web dist: argument, else $KN_WEB_DIST. 77 = skip (no web build, Chromium or websockets).
 Ports from kn_proto.free_ports(); the profile, database and logs live in ~/.cache.
 """
@@ -42,7 +46,7 @@ sys.path.insert(0, os.path.join(ROOT, "server", "tests"))
 if not (DIST and os.path.exists(os.path.join(DIST, "client.wasm"))) or not CHROME or not os.path.exists(BRAIN):
     print("needs a web build (KN_WEB_DIST), Chromium and kn_brain: skip")
     sys.exit(77)
-from ai_stub import Upstream  # noqa: E402
+from ai_stub import REAL_SMART_ORDER, Upstream, real_models  # noqa: E402
 from kn_proto import free_ports  # noqa: E402
 
 FAILS = []
@@ -154,8 +158,38 @@ async def scenario(http_port, cdp_port, brain_port, up, work):
     ok = await c.wait("(function(){ var p = document.getElementById('knAi'); return p && p.style.display !== 'none' && "
                       "document.querySelectorAll('#knAiModel option').length >= 3; })()", 30)
     check(ok, "the panel opens and lists the models")
-    signed = await c.wait("(document.getElementById('knAiAccount') || {}).textContent.indexOf(%s) >= 0" % json.dumps(name), 30)
-    check(signed, "the panel shows the signed-in account")
+    ids = await c.wait("(function(){ var o = document.querySelectorAll('#knAiModel option'); if (o.length < 31) return null; "
+                       "return Array.prototype.map.call(o, function(x){ return x.value; }); })()", 30)
+    check(ids == REAL_SMART_ORDER, "the models smartest first (%s)" % (ids or [])[:8])
+    sel = await c.wait("document.getElementById('knAiModel').value === 'glm-5.3-flash'", 15)
+    check(sel, "glm-5.3-flash selected by default")
+    check(await c.eval("!document.getElementById('knAiAccount') && document.getElementById('knAi').textContent.indexOf(%s) < 0" % json.dumps(name)),
+          "no account indicator in the panel")
+    geo = await c.eval("""(function(){ var r = {}; ['knAi','knAiHead','knAiTitle','knAiModel','knAiNewBtn','knAiHistBtn','knAiSetBtn','knAiCloseBtn',
+        'knAiTools','knAiWeb','knAiSend','knAiStop'].forEach(function(id){ var e = document.getElementById(id); if (!e) return;
+        var hidden = e.style.display === 'none'; if (hidden) e.style.display = ''; var b = e.getBoundingClientRect();
+        r[id] = [b.x, b.y, b.width, b.height]; if (hidden) e.style.display = 'none'; }); return r; })()""")
+    k = geo["knAi"][2] / 380.0 if geo.get("knAi") else 1.0
+    head = [geo.get(i) for i in ("knAiTitle", "knAiModel", "knAiNewBtn", "knAiHistBtn", "knAiSetBtn", "knAiCloseBtn")]
+    cy = [r[1] + r[3] / 2 for r in head if r]
+    check(len(cy) == 6 and max(cy) - min(cy) <= 0.5 and all(abs(r[3] / k - 24) < 0.6 for r in head),
+          "header: title, model picker and icons 24 px on one centre line (%s)" % [round(v, 2) for v in cy])
+    btn = [geo.get(i) for i in ("knAiTools", "knAiWeb", "knAiSend", "knAiStop")]
+    check(all(btn) and all(abs(r[3] / k - 24) < 0.6 for r in btn) and max(r[1] + r[3] / 2 for r in btn) - min(r[1] + r[3] / 2 for r in btn) <= 0.5,
+          "composer: Tools / Web / Ask / Stop one height (%s)" % [round(r[3] / k, 2) for r in btn if r])
+    cols = await c.eval("""(function(){ function rgb(s){ var m = s.match(/[\\d.]+/g); return [+m[0], +m[1], +m[2]]; }
+        var s = getComputedStyle(document.getElementById('knAiModel')), o = getComputedStyle(document.querySelector('#knAiModel option'));
+        return [rgb(s.color), rgb(s.backgroundColor), rgb(o.color), rgb(o.backgroundColor)]; })()""")
+
+    def lum(c):
+        f = [v / 255.0 for v in c]
+        f = [v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4 for v in f]
+        return 0.2126 * f[0] + 0.7152 * f[1] + 0.0722 * f[2]
+
+    def contrast(a, b):
+        return (max(lum(a), lum(b)) + 0.05) / (min(lum(a), lum(b)) + 0.05)
+    check(contrast(cols[0], cols[1]) >= 4.5 and contrast(cols[2], cols[3]) >= 4.5,
+          "model picker and its options readable (select %.1f, option %.1f)" % (contrast(cols[0], cols[1]), contrast(cols[2], cols[3])))
     await ask(c, "hello")
     got = await c.wait("(document.getElementById('knAiList') || {}).textContent.indexOf('Hello from the stub: hello') >= 0", 30)
     check(got, "a streamed reply in the browser (fetch + ReadableStream through CORS)")
@@ -171,6 +205,37 @@ async def scenario(http_port, cdp_port, brain_port, up, work):
     await c.shot(os.path.join(work, "web-ai.png"))
     hist = await c.eval("localStorage.getItem('knAiChats') || ''")
     check("call tool objects_create" in hist, "the chat is in localStorage (knAiChats)")
+
+    # checkpoints (the hover controls are clicked directly)
+    objs = "(document.getElementById('objectCount') || {}).textContent.trim()"
+    listed = "(document.getElementById('knAiList') || {}).textContent"
+    await c.eval("document.querySelector('#knAiU2 .knAiCpBtn').click()")
+    ok = await c.wait("%s.indexOf('Restore this checkpoint?') >= 0" % listed, 10)
+    await c.shot(os.path.join(work, "web-restore-confirm.png"))
+    check(ok, "restore checkpoint asks first")
+    await c.eval("document.querySelector('.knAiConfirm .knAiSend').click()")
+    ok = await c.wait("%s.indexOf('0') === 0 && !document.getElementById('knAiU2') && !!document.getElementById('knAiRedoBar')" % objs, 10)
+    await c.shot(os.path.join(work, "web-restored.png"))
+    check(ok, "restore checkpoint: the object undone, the messages out, Redo offered (%s)" % await c.eval(objs))
+    await c.eval("document.querySelector('#knAiRedoBar .knAiBtnS').click()")
+    ok = await c.wait("%s.indexOf('1') === 0 && !!document.getElementById('knAiU2')" % objs, 10)
+    check(ok, "redo: the object and the messages are back")
+    await c.eval("document.querySelector('#knAiU0 .knAiAct').click()")
+    ok = await c.wait("!!document.getElementById('knAiEditInput')", 10)
+    await c.eval("document.getElementById('knAiEditInput').value = 'hello again'; document.querySelector('.knAiEditBar .knAiSend').click(); true")
+    ok = ok and await c.wait("%s.indexOf('Undo the editor changes made after this message?') >= 0" % listed, 10)
+    await c.shot(os.path.join(work, "web-edit-confirm.png"))
+    check(ok, "edit: Send asks about the later editor changes")
+    await c.eval("document.querySelector('.knAiConfirm .knAiSend').click()")
+    ok = await c.wait("%s.indexOf('Hello from the stub: hello again') >= 0 && !document.getElementById('knAiU2') && %s.indexOf('0') === 0" % (listed, objs), 30)
+    check(ok, "edit + resend: the edited message answered, the later edit undone")
+    await c.eval("document.querySelectorAll('#knAiU0 .knAiAct')[1].click()")
+    ok = await c.wait("!document.getElementById('knAiU0') && document.getElementById('knAiInput').value === 'hello again'", 10)
+    await c.shot(os.path.join(work, "web-rewound.png"))
+    check(ok, "rewind: the chat empties, the text back in the composer")
+    await c.eval("document.querySelector('#knAiRedoBar .knAiBtnS').click()")
+    ok = await c.wait("!!document.getElementById('knAiU0') && document.getElementById('knAiInput').value === ''", 10)
+    check(ok, "rewind + redo: the messages back, the composer cleared")
     leaked = [l for l in c.logs if KEY in l or token in l]
     check(not leaked, "no key or session token in the console")
 
@@ -185,7 +250,7 @@ def main():
     handler = functools.partial(Quiet, directory=DIST)
     httpd = http.server.ThreadingHTTPServer(("127.0.0.1", http_port), handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    up = Upstream(KEY).start()
+    up = Upstream(KEY, models=real_models()).start()
     db_path = os.path.join(work, "coordinator.db")
     log = open(os.path.join(work, "brain.log"), "w")
     env = {k: v for k, v in os.environ.items() if not k.startswith("KN_AI_")}

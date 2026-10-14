@@ -353,6 +353,7 @@ void ed_history_add_map(void);                     // 'm': the map config before
 uint32_t ed_history_batch_begin(const char *label);  // following entries form one undo step (0 = nested)
 void ed_history_batch_end(uint32_t id);
 int ed_history_step(int redo);                     // one step (an entry or a whole batch); 0 = none
+int ed_history_redo_undoable(void);                // a redo step that goes back onto the undo list (AI checkpoints)
 size_t ed_history_steps(int redo);
 cJSON *ed_history_labels(int redo, int limit);     // newest first
 void ed_history_execute(int redo);
