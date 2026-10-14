@@ -50,7 +50,7 @@ static void toggle_ctrl_tp(void) {
     g_keys.ctrl_tp_enabled = !g_keys.ctrl_tp_enabled;
     html_storage_set(CTRL_TP_KEY, g_keys.ctrl_tp_enabled ? "1" : "0"); // String(+window.ctrlTpEnabled)
     const char *msg = g_keys.ctrl_tp_enabled ? "Ctrl TP - Enabled" : "Ctrl TP - Disabled";
-    ui_notify(msg);
+    ui_notify(g_keys.ctrl_tp_enabled ? I18N("kn.mods.ctrlTpOn", "Ctrl TP - Enabled") : I18N("kn.mods.ctrlTpOff", "Ctrl TP - Disabled"));
     printf("%s\n", msg);
 }
 
@@ -64,7 +64,7 @@ int ui_mod_keys_keydown(Client *client, const int key, const int input) {
             // browser), never a relaunch (that is F5 now, ui_controls.c reload_key).
             if (input) return 0;
             printf("[controls] F4: find new game\n");
-            if (!servers_ui_find_new_game()) ui_notify("Find New Game needs the matchmaker (offline or a direct server)");
+            if (!servers_ui_find_new_game()) ui_notify(I18N("kn.mods.findNewGameNeedsMm", "Find New Game needs the matchmaker (offline or a direct server)"));
             return 0;
         case GLFW_KEY_F6:
             printf("Creating editor window\n");

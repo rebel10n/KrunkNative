@@ -70,6 +70,10 @@ elements stay valid. All geometry is in CSS px from the viewport's top-left.
 - **Mutation**: `html_dom_create`, `html_dom_create_text`, `html_dom_append`,
   `html_dom_insert_html` (insertAdjacentHTML), `html_dom_remove`, `html_dom_set_html`
   (innerHTML), `html_dom_set_text`/`get_text` (textContent).
+- **Localisation** (`client/src/ui/i18n.c`, `ui/i18n/README.md`): `html_dom_map_text(root, skip_selector,
+  fn, user)` (every text node and `title` / `placeholder` / button `value` under root, with the owner
+  element and slot; fn returns the replacement), `html_dom_set_lang` (`<html lang>`; natively also the
+  text system's script fallback order), `html_dom_missing_glyphs` (characters drawn as .notdef; -1 on the web).
 - **Attributes / classes / style**: `set_attr/remove_attr/get_attr` (-1 when absent),
   `set_class(el, cls, on)` (classList.toggle), `has_class`, `set_display`,
   `set_style(el, prop, value)` (setProperty, custom properties included; "" removes),
@@ -273,6 +277,7 @@ in `client_menu_tick()`), and the client uses its built-in menu text and HUD.
 | `KRUNKNATIVE_HTML_OBLIQUE_SKEW=<k>` | text: synthetic oblique shear |
 | `KRUNKNATIVE_HTML_FAKE_BOLD_ADVANCE=0\|1` | text: add the synthetic-bold strength to the advance |
 | `KRUNKNATIVE_HTML_FALLBACK_FONT=<path>[:<path>...]` | text: fallback faces for missing glyphs |
+| `KRUNKNATIVE_LANG=<code>` | i18n: the UI language for this run (v10 codes: en ru jp zh zhtr kr hi ...), over the stored `krk_lang` (native only) |
 | `KRUNKNATIVE_AUTOPLAY=1` (web `?kn_autoplay=1`) | enter the game as soon as page and map are ready (headless HUD screenshots) |
 | `KRUNKNATIVE_HUD_DEMO=1` (web `?kn_hud_demo=1`) | loop kill-feed rows and hit markers |
 | `KRUNKNATIVE_PREVIEW_TEST=1`, `KRUNKNATIVE_PREVIEW_DUMP=<file.ppm>`, `KRUNKNATIVE_PREVIEW_LOG=1`, `KRUNKNATIVE_PREVIEW_WORLD=1` | class-preview debugging (`client/src/ui/class_preview.c`) |

@@ -129,6 +129,18 @@ static void matrix(StrBuf *sb, const GameConfigTable table, const char *title, c
     sb_append(sb, "</div>");
 }
 
+// A server setting's label: v10 writes i18n "server.config.<varN>". Its English names differ
+// from the ones these rows carry in places (v7's "Warmup" for v10's "Warmup Time"), so English
+// keeps the row's own name; other languages take the table's translation of the setting, and
+// the row's name when there is none (KrunkNative's own settings).
+static const char *config_name(const GameConfigOption *o) {
+    if (!strcmp(i18n_locale(), I18N_DEFAULT_LOCALE)) return o->name;
+    char key[96];
+    snprintf(key, sizeof(key), "server.config.%s", o->var);
+    const char *v = i18n_has(key);
+    return v ? v : o->name;
+}
+
 // Settings (serverConfig rows this host type offers), v7's "windows.host.settings" body.
 static void settings_rows(StrBuf *sb, const int host_type, const cJSON *preset) {
     const unsigned int flags = game_host_type_flags(host_type);
@@ -153,14 +165,14 @@ static void settings_rows(StrBuf *sb, const int host_type, const cJSON *preset) 
         if (o->kind == GC_BOOL) {
             const int on = given && !cJSON_IsNull(given) ? (cJSON_IsTrue(given) || (cJSON_IsNumber(given) && given->valuedouble != 0.0)) : def != 0.0f;
             sb_appendf(sb, "<div class='settNameSmall' style='%s'>%s <label class='switch'><input type='checkbox' onchange='windows[7].updateSet(0,this)' id='customS%s' %s>"
-                           "<span class='slider'></span></label></div>", hide, o->name, o->var, on ? "checked" : "");
+                           "<span class='slider'></span></label></div>", hide, config_name(o), o->var, on ? "checked" : "");
         } else if (o->kind == GC_INPUT) {
-            sb_appendf(sb, "<div class='settNameSmall' style='%s'>%s<input id='customS%s' value='", hide, o->name, o->var);
+            sb_appendf(sb, "<div class='settNameSmall' style='%s'>%s<input id='customS%s' value='", hide, config_name(o), o->var);
             sb_append_esc(sb, o->def_str ? o->def_str : "");
             sb_append(sb, "' type='text'style='border-radius:6px;border:none;background:#eee;padding:6px;padding-bottom:6px;float:right;margin-top:5px;margin-bottom:5px;' "
                           "autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false'></div>");
         } else if (o->kind == GC_SELECT) {
-            sb_appendf(sb, "<div class='settNameSmall' style='%s'>%s<select id='customS%s' class='inputGrey2'>", hide, o->name, o->var);
+            sb_appendf(sb, "<div class='settNameSmall' style='%s'>%s<select id='customS%s' class='inputGrey2'>", hide, config_name(o), o->var);
             for (int i = 0; i < o->option_count; i++) sb_appendf(sb, "<option value='%d' %s>%s</option>", i, i == (int) def ? "selected" : "", o->options[i]);
             sb_append(sb, "</select></div>");
         } else {
@@ -178,7 +190,7 @@ static void settings_rows(StrBuf *sb, const int host_type, const cJSON *preset) 
             if (class_icon >= 0) sb_appendf(sb, "<img loading='lazy' class='classLimitIcon' src='textures/classes/icon_%d.png' />", class_icon);
             sb_appendf(sb, "%s<span class='sliderVal' id='customSet%d'>%s</span><div class='slidecontainer' style='vertical-align:top;margin-top:-6px'>"
                            "<input type='range' min='%s' max='%s' step='%s' id='customS%s' value='%s' oninput='updateSliderLabel(%d,this.value)' class='sliderM'></div></div>",
-                       o->name, (int) k, value, min, top, step, o->var, value, (int) k);
+                       config_name(o), (int) k, value, min, top, step, o->var, value, (int) k);
         }
     }
     if (open) sb_append(sb, "</div>");

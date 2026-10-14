@@ -153,6 +153,10 @@ they do not show up in `getElementById` greps. v10 HUD additions:
 | new groups | - | `studios.*` (130+), `editor.entity.*` 53, `account.usernames.*` 34, `generic.auth.*` 33, `errors.exchange.*` 30, `windows.kid.*` 28, `windows.verifyEmail.*` 24, `windows.clans.settings.logo.*` 17, `generic.wildOffer.*`, `gdc.kid.*`, `shaderGraph.*`, `emailPrefs.*`, `social.*`, `friends.*`, `market.*` |
 | removed | `windows.account.recover*` (3 keys) | - |
 
+The other 16 languages are separate files v10 loads on first use (`i18n/<code>.js?v=i41Nu`, the
+language select `settings.list.lang` = `config.langNames`, stored as `krk_lang`, default `en`): shipped as
+`ui/i18n/<code>.json`, implemented by `client/src/ui/i18n.c` (`ui/i18n/README.md`).
+
 ## 7. Asset URLs
 
 The resolver is `_9254(path, keepSlash, local)`: it strips the leading `/` and returns

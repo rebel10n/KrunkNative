@@ -137,11 +137,14 @@ static void generic_popup(const char *html, const char *cls) {
 void v10_party_password_prompt(void) {
     printf("[party] the game needs a password\n");
     // window.gameCode() (Leave: v10's onclick='location=location.origin')
-    generic_popup("<div style='color:#fff;font-size:20px;position:relative;'>Enter Server Password to join</div>"
-                  "<input type='text' id='codeInput' placeholder='Password'>"
-                  "<div id='confirmBtn' onclick='submitGameCode()' onmouseover='playTick(0.1)'>Submit</div>"
-                  "<div id='declineBtn' onclick='knGameCodeLeave()' onmouseover='playTick(0.1)'>Leave</div>",
-                  "gameCodePop");
+    // i18n custom.passcode.input; the placeholder and the buttons are English in v10's markup
+    char html[640];
+    snprintf(html, sizeof(html), "<div style='color:#fff;font-size:20px;position:relative;'>%s</div>"
+                                 "<input type='text' id='codeInput' placeholder='Password'>"
+                                 "<div id='confirmBtn' onclick='submitGameCode()' onmouseover='playTick(0.1)'>Submit</div>"
+                                 "<div id='declineBtn' onclick='knGameCodeLeave()' onmouseover='playTick(0.1)'>Leave</div>",
+             I18N("custom.passcode.input", "Enter Server Password to join"));
+    generic_popup(html, "gameCodePop");
     HtmlElem input = html_dom_by_id("codeInput");
     if (input) html_dom_focus(input);
 }
@@ -152,7 +155,7 @@ static void submit_game_code(void) {
     if (input) html_dom_get_value(input, code, sizeof(code));
     if (!code[0]) return; // _72781.value && send(CODE, value)
     if (strlen(code) >= SERVER_PASSWORD_MAX) {
-        ui_alert("Password too long"); // custom.passcode.long
+        ui_alert(I18N("custom.passcode.long", "Password too long"));
         return;
     }
     ui_loadout_clear_pops(); // CODE_PASSED: clearPops (a wrong one is refused again: the popup again)

@@ -208,7 +208,9 @@ if (EMSCRIPTEN)
     #   -lwebsocket.js             emscripten/websocket.h implementation (net_web.c)
     #   EXPORTED_RUNTIME_METHODS   UTF8ToString/stringToNewUTF8 are used from EM_ASM blocks; stack* let page JS ccall() with string arguments
     #   EXPORTED_FUNCTIONS         JS -> C entry points called by ui/js/kn-shim.js (page events, ResizeObserver)
-    #   --preload-file             the window templates, read with fopen() from /ui/windows (MEMFS)
+    #   --preload-file             the window templates, read with fopen() from /ui/windows (MEMFS), and
+    #                              the English string tables (v10 has them inline; the other languages
+    #                              are fetched when picked: client/src/ui/i18n.c)
     target_link_options(client PRIVATE
         -sUSE_GLFW=3
         -sUSE_WEBGL2=1
@@ -223,6 +225,9 @@ if (EMSCRIPTEN)
         -sEXPORTED_FUNCTIONS=_main,_malloc,_free,_kn_ui_event,_kn_ui_resize_observed,_kn_ui_key_prevent
         -lwebsocket.js
         --preload-file ${CMAKE_SOURCE_DIR}/ui/windows@/ui/windows
+        # SHELL: keeps each pair together (CMake de-duplicates a repeated --preload-file option)
+        "SHELL:--preload-file ${CMAKE_SOURCE_DIR}/ui/i18n/en.json@/ui/i18n/en.json"
+        "SHELL:--preload-file ${CMAKE_SOURCE_DIR}/ui/i18n/kn/en.json@/ui/i18n/kn/en.json"
     )
 
     # Assemble the static site: the ui/ page tree (its js/loader.js pulls in

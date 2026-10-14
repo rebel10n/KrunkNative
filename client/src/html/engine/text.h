@@ -22,7 +22,8 @@
 //   KRUNKNATIVE_HTML_AUTOHINT=0|1          add FT_LOAD_FORCE_AUTOHINT
 //   KRUNKNATIVE_HTML_FALLBACK_FONT=path[:path...]   fallback faces for glyphs
 //       missing from the requested family (default: DejaVu Sans / Liberation
-//       Sans / Noto Sans, then Noto Sans CJK, whichever exist).  Always first:
+//       Sans / Noto Sans, then the bundled ui/css/fonts/kn-noto-* script faces
+//       (text_set_lang), then Noto Sans CJK, whichever exist).  Always first:
 //       the bundled ui/css/fonts/kn-symbols.ttf (arrows, shapes, dingbats...),
 //       per-glyph only.  Generic `monospace` uses Noto Sans Mono / DejaVu Sans
 //       Mono / Liberation Mono when present (Chrome's fontconfig monospace).
@@ -106,6 +107,13 @@ void text_destroy(TextSystem *ts);
 // default), style = TEXT_STYLE_*.  Faces load lazily.  Returns 0 on success.
 int text_register_face(TextSystem *ts, const char *family, const char *path, int weight, int style);
 
+// Document language (BCP 47, <html lang>): "ja", "zh-CN", "zh-TW", "ko", "hi" move the bundled
+// script face of that language (ui/css/fonts/kn-noto-*) to the front of the per-glyph fallback
+// chain; others (NULL) keep the default order.  Returns 1 when the choice changed (re-lay out).
+int text_set_lang(TextSystem *ts, const char *lang);
+// 1 when `cp` gets a real glyph (not .notdef) from the font or its fallback chain.
+int text_font_has_glyph(TextFont *font, uint32_t cp);
+
 // Current hinting mode (TEXT_HINT_*) from KRUNKNATIVE_HTML_HINTING.
 int text_hinting(const TextSystem *ts);
 // 1 when glyphs are positioned with 1/4-px x phases (and linear advances).
@@ -167,6 +175,9 @@ static inline uint8_t text_snap_origin(const TextSystem *ts, float device_x, flo
 // text-transform: uppercase for ASCII + Latin-1 (ß -> SS, ÿ -> Ÿ, µ kept).
 // Returns bytes written (excluding the NUL that is added when it fits).
 size_t text_uppercase(const char *utf8, size_t len, char *out, size_t cap);
+// Simple case mapping of one code point (Latin-1 / Extended-A / Additional, Greek, Cyrillic).
+uint32_t text_case_upper(uint32_t cp);
+uint32_t text_case_lower(uint32_t cp);
 
 // UAX#14 subset: flags[i] gets TEXT_BREAK_* for byte i (0 for continuation
 // bytes).  Break after spaces, after hyphens (not before, not before digits),

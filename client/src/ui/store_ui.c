@@ -459,12 +459,25 @@ static void prize_wheel(const int index, const int skin, const int multi, const 
     if (auto_spin) spin_button_click();
 }
 
-// UTILS.getItemDesc(item) without " Item": the type's market label, a weapon skin's weapon name
+// UTILS.getItemDesc(item) without " Item": the type's market label (i18n social.market.*), a
+// weapon skin's weapon name
 static const char *item_desc(const ViewerSkin *skin) {
-    static const char *const k_types[17] = {NULL, "Hat", "Body", "Melee", "Spray", "Dye", "Waist", "Face", "Shoe", "Pet",
-                                            "Collectible", "Wrist", "Charm", "Spin Ticket", "Back", "Head", "Player Card"};
+    static const char *const k_keys[17] = {NULL, "social.market.hat", "social.market.body", "social.market.melee",
+                                           "social.market.spray", "social.market.dye", "social.market.waist", "social.market.face",
+                                           "social.market.shoe", "social.market.pet", "social.market.collectible",
+                                           "social.market.wrist", "social.market.charm", "social.market.ticket", "social.market.back",
+                                           "social.market.head", "social.market.playerCard"};
+    static const char *const k_types[17] = {NULL, "Hat Item", "Body Item", "Melee Item", "Spray Item", "Dye Item", "Waist Item",
+                                            "Face Item", "Shoe Item", "Pet Item", "Collectible Item", "Wrist Item", "Charm Item",
+                                            "Spin Ticket Item", "Back Item", "Head Item", "Player Card"};
+    static char desc[96];
     if (!skin) return "";
-    if (skin->type > 0 && skin->type < 17) return k_types[skin->type];
+    if (skin->type > 0 && skin->type < 17) { // .replace(" Item", "")
+        snprintf(desc, sizeof(desc), "%s", i18n_tr(k_keys[skin->type], k_types[skin->type]));
+        char *item = strstr(desc, " Item");
+        if (item) memmove(item, item + 5, strlen(item + 5) + 1);
+        return desc;
+    }
     const Weapon *weapon = skin->weapon >= 1 && skin->weapon <= rules_krunker_weapon_count() ? rules_weapon(skin->weapon - 1) : NULL;
     return weapon && weapon->name ? weapon->name : "";
 }
@@ -679,7 +692,7 @@ static void spin_button_click(void) {
     else snprintf(frame, sizeof(frame), "[\"spin\",%d,null,%s]", g_spin_index, g_multi ? "true" : "false");
     backend_social_send_text(frame);
     set_html("spinHeader", "");
-    set_html("spinCost", "Purchasing...");
+    set_html("spinCost", I18N("windows.store.purchasing", "Purchasing..."));
     audio_play("buy_1", 0.1f, 0, 1.0f);
 }
 
@@ -935,7 +948,8 @@ static void store_home(StrBuf *sb, const AccountInfo *acc) {
 }
 
 static void store_wheels(StrBuf *sb, const AccountInfo *acc) {
-    sb_append(sb, "<div class='setBodH' style='padding-top:15px'><div style='color:rgba(255,255,255,0.6);margin-bottom:10px;margin-top:0px;width:100%;text-align:center'>Try your luck and spin for a chance to win some new skins!</div></div>");
+    sb_appendf(sb, "<div class='setBodH' style='padding-top:15px'><div style='color:rgba(255,255,255,0.6);margin-bottom:10px;margin-top:0px;width:100%%;text-align:center'>%s</div></div>",
+               I18N("windows.store.wheels.sub", "Try your luck and spin for a chance to win some new skins!"));
     sb_append(sb, "<div class='prizeWheelTable'>");
     char thumb[256] = "undefined", ticket[256], url[256];
     for (int i = 0; i < wheel_count(); i++) {
@@ -993,7 +1007,9 @@ static void store_wheels(StrBuf *sb, const AccountInfo *acc) {
         }
         if (ticket_only && acc)
             sb_appendf(sb, "<div class=\"ticketCount\" style=\"width: unset;top:7px;right: 10px;color:%s\">You have %d</div>", col, owned_count(w->ticket));
-        sb_appendf(sb, "<div class='spinValH'>%s Spin<div class='spinValL' style='color:%s !important;width:314px'>", w->name, col);
+        char spin_name[96];
+        I18N_F(spin_name, "windows.store.spin", "{0} Spin", w->name);
+        sb_appendf(sb, "<div class='spinValH'>%s<div class='spinValL' style='color:%s !important;width:314px'>", spin_name, col);
         if (ticket_only) sb_appendf(sb, "Redeem <img class=\"ticketImg\" src=\"%s\">", ticket);
         else {
             sb_appendf(sb, "%s%s", value, kr_suffix);
@@ -1007,12 +1023,14 @@ static void store_wheels(StrBuf *sb, const AccountInfo *acc) {
     int tickets = 0;
     tickets = owned_tickets();
     store_skin_preview(wheel_at(3) ? wheel_at(3)->ticket : -1, ticket, sizeof(ticket));
-    sb_appendf(sb, "<div class='shopCard' onmouseenter='playTick()' style='color:#fc038d;border: 4px solid;text-shadow: 0px 0px 30px rgb(0 0 0);width:293px;height: 202px;background: rgba(0, 0, 0, 0.4);' onclick='windows[13].viewTickets()'><div class='spinValH'>View Tickets<div class='spinValL' style='color:#fc038d!important;width:314px'>You have %d</div></div><div class='shopImg' style='background-image: url(%s);left:60px'></div><div class='shopImgGrad' style='background-image: linear-gradient(transparent, #fc038d30);'></div></div>", tickets, ticket);
+    sb_appendf(sb, "<div class='shopCard' onmouseenter='playTick()' style='color:#fc038d;border: 4px solid;text-shadow: 0px 0px 30px rgb(0 0 0);width:293px;height: 202px;background: rgba(0, 0, 0, 0.4);' onclick='windows[13].viewTickets()'><div class='spinValH'>%s<div class='spinValL' style='color:#fc038d!important;width:314px'>You have %d</div></div><div class='shopImg' style='background-image: url(%s);left:60px'></div><div class='shopImgGrad' style='background-image: linear-gradient(transparent, #fc038d30);'></div></div>",
+               I18N("windows.store.wheels.viewTickets", "View Tickets"), tickets, ticket);
     sb_append(sb, "</div>");
 }
 
 static void store_premium(StrBuf *sb, const AccountInfo *acc) {
-    sb_append(sb, "<div class='setBodH' style='padding-top:15px'><div style='color:rgba(255,255,255,0.5);margin-bottom:10px'>Choose a Display name &amp; more with <a href='javascript:;' onclick='showWindow(36)'>Krunker Premium</a></div></div><div id='storeList' style='margin-bottom:10px'>");
+    sb_appendf(sb, "<div class='setBodH' style='padding-top:15px'><div style='color:rgba(255,255,255,0.5);margin-bottom:10px'>%s <a href='javascript:;' onclick='showWindow(36)'>%s</a></div></div><div id='storeList' style='margin-bottom:10px'>",
+               I18N("windows.store.buyP", "Choose a Display name & more with"), I18N("windows.store.premium2", "Krunker Premium"));
     for (size_t i = 0; i < sizeof(k_premium) / sizeof(k_premium[0]); i++) {
         sb_appendf(sb, "<div class='shopCard' onmouseenter='playTick()' onclick='premiumPopup(%d)' style='color:%s;border: 4px solid;width:293px;height:212px;background-image:linear-gradient(transparent, %s30), url(&quot;img/prem_crd.png&quot;);'>%d Days<div class='spinVal' style='margin-top:119px;width: 309px;line-height: 63px;'>$%s <span style='color:#fff'>USD</span></div></div>",
                    (int) i, k_premium[i].col, k_premium[i].col, k_premium[i].days, k_premium[i].price);
@@ -1043,7 +1061,10 @@ static void store_purchase(StrBuf *sb) {
         if (k_purchases[i].tag) sb_appendf(sb, "<div class='shopSale' style='background-color:%s'>%s</div>", k_purchases[i].tag_col, k_purchases[i].tag);
         sb_appendf(sb, "%d <span style='color:#fff'>KR</span><div class='spinVal' style='color:#fff'>$%s USD</div></div>", k_purchases[i].val, k_purchases[i].price);
     }
-    sb_append(sb, "</div><div style='font-size:15px;text-align:center;margin-bottom:10px;margin-top:10px;color:#d4d4d4;'>* Prices in USD can be converted to your local currency at an exchange rate defined by the payment provider or bank</div><div><div style='color:#d4d4d4;font-size:16px;text-align:center;margin-bottom:10px;margin-top:10px;'>By purchasing you agree to the <a target='_blank' href='https://frvr.com/legal/krunker#TermsofService'>Terms &amp; Conditions</a>.</div>");
+    char agree[256];
+    I18N_F(agree, "windows.store.agree", "By purchasing you agree to the {0}Terms & Conditions", "<a target='_blank' href='https://frvr.com/legal/krunker#TermsofService'>");
+    sb_appendf(sb, "</div><div style='font-size:15px;text-align:center;margin-bottom:10px;margin-top:10px;color:#d4d4d4;'>%s</div><div><div style='color:#d4d4d4;font-size:16px;text-align:center;margin-bottom:10px;margin-top:10px;'>%s</a>.</div>",
+               I18N("windows.store.currency", "* Prices in USD can be converted to your local currency at an exchange rate defined by the payment provider or bank"), agree);
 }
 
 static void store_junkyard(StrBuf *sb, const AccountInfo *acc) {
@@ -1120,8 +1141,10 @@ static void v10_store_home(StrBuf *sb, const AccountInfo *acc) {
         sb_appendf(sb, " <div style=\"display: table-cell;\" class=\"svelte-lri212\"><div class=\"shop-action-sep svelte-lri212\" style=\"background: %s\"></div></div> <div class=\"shop-action-cell svelte-lri212\" role=\"button\" tabindex=\"0\" style=\"font-size: 34px !important;\" onclick=\"playSelect();prizeWheel(null, %d)\" onmouseenter=\"playTick()\">Redeem <div class=\"svelte-lri212\" style=\"color: %s\"><img class=\"ticket-img svelte-lri212\" alt=\"ticket\" style=\"width: 70px !important;\" src=\"%s\"></div></div> <div class=\"ticket-count svelte-lri212\" style=\"font-size: 22px !important; color: %s\">You have %d</div></div>",
                    col, hw->ticket, col, ticket, col, owned_count(hw->ticket));
     }
-    sb_appendf(sb, " <div class=\"heroic-spin-name svelte-lri212\">%s Spin <div class=\"heroic-spin-price svelte-lri212\" style=\"color: %s !important;\">%d KR <div class=\"ticket-img-sep svelte-lri212\">|</div> <img class=\"ticket-img svelte-lri212\" alt=\"ticket\" style=\"width: 56px !important;\" src=\"%s\"></div></div> <div class=\"heroic-spin-img svelte-lri212\" style=\"background-image: url(%s);\"></div> <div class=\"heroic-img-grad svelte-lri212\" style=\"margin-left: 0 !important; background-image: linear-gradient(transparent, %s30);\"></div></div> ",
-               hw->name, col, hw->price, ticket, thumb, col);
+    char spin_name[96];
+    I18N_F(spin_name, "windows.store.spin", "{0} Spin", hw->name);
+    sb_appendf(sb, " <div class=\"heroic-spin-name svelte-lri212\">%s <div class=\"heroic-spin-price svelte-lri212\" style=\"color: %s !important;\">%d KR <div class=\"ticket-img-sep svelte-lri212\">|</div> <img class=\"ticket-img svelte-lri212\" alt=\"ticket\" style=\"width: 56px !important;\" src=\"%s\"></div></div> <div class=\"heroic-spin-img svelte-lri212\" style=\"background-image: url(%s);\"></div> <div class=\"heroic-img-grad svelte-lri212\" style=\"margin-left: 0 !important; background-image: linear-gradient(transparent, %s30);\"></div></div> ",
+               spin_name, col, hw->price, ticket, thumb, col);
     // bundles (bundleData): none without the store API
     sb_append(sb, "<div class=\"bundle-holder svelte-lri212\"><div class=\"bundleSliderH svelte-lri212\"><div class=\"bundleSliderBtn disabled svelte-lri212\" role=\"button\" tabindex=\"0\" onmouseenter=\"playTick(0.1)\"><div class=\"bundleSliderArrow svelte-lri212\"></div></div></div> <div class=\"bundleCols svelte-lri212\"></div> <div class=\"bundleSliderH svelte-lri212\"><div class=\"bundleSliderBtn svelte-lri212\" role=\"button\" tabindex=\"0\" onmouseenter=\"playTick(0.1)\"><div class=\"bundleSliderArrow right svelte-lri212\"></div></div></div></div></div>");
 }
@@ -1131,8 +1154,8 @@ static void v10_store_home(StrBuf *sb, const AccountInfo *acc) {
 static void v10_store_wheels(StrBuf *sb, const AccountInfo *acc) {
     int tickets = 0;
     tickets = owned_tickets();
-    sb_appendf(sb, "<div class=\"prize-wheels-tab svelte-5s5opu\"><div class=\"prize-wheels-header svelte-5s5opu\"><div class=\"prize-wheels-sub svelte-5s5opu\">Try your luck and spin for a chance to win some new skins!</div> <div class=\"view-tickets-btn svelte-5s5opu\"><button class=\"main-button svelte-whnh40 main-button-slim\" type=\"button\" onclick=\"playSelect();windows[13].viewTickets()\">View Tickets<span class=\"ticket-count-sep svelte-5s5opu\"></span><span class=\"ticket-count-num svelte-5s5opu\">%d</span></button></div></div> <div class=\"prize-wheel-table svelte-5s5opu\">",
-               tickets);
+    sb_appendf(sb, "<div class=\"prize-wheels-tab svelte-5s5opu\"><div class=\"prize-wheels-header svelte-5s5opu\"><div class=\"prize-wheels-sub svelte-5s5opu\">%s</div> <div class=\"view-tickets-btn svelte-5s5opu\"><button class=\"main-button svelte-whnh40 main-button-slim\" type=\"button\" onclick=\"playSelect();windows[13].viewTickets()\">%s<span class=\"ticket-count-sep svelte-5s5opu\"></span><span class=\"ticket-count-num svelte-5s5opu\">%d</span></button></div></div> <div class=\"prize-wheel-table svelte-5s5opu\">",
+               I18N("windows.store.wheels.sub", "Try your luck and spin for a chance to win some new skins!"), I18N("windows.store.wheels.viewTickets", "View Tickets"), tickets);
     // v10: wheels 0 and 2, and the dated ones while they run (not hidden / locked; the Free KR
     // wheel only off mobile, which it is hidden on anyway)
     for (int i = 0; i < wheel_count(); i++) {
@@ -1194,7 +1217,9 @@ static void v10_store_wheels(StrBuf *sb, const AccountInfo *acc) {
             sb_append(sb, "</div>");
         }
         if (ticket_only && acc) sb_appendf(sb, "<div class=\"ticket-count ticket-count-corner svelte-5s5opu\" style=\"color: %s\">You have %d</div>", col, owned_count(w->ticket));
-        sb_appendf(sb, " <div class=\"spin-name svelte-5s5opu\">%s Spin <div class=\"spin-price svelte-5s5opu\" style=\"color: %s !important;\">", w->name, col);
+        char spin_name[96];
+        I18N_F(spin_name, "windows.store.spin", "{0} Spin", w->name);
+        sb_appendf(sb, " <div class=\"spin-name svelte-5s5opu\">%s <div class=\"spin-price svelte-5s5opu\" style=\"color: %s !important;\">", spin_name, col);
         if (ticket_only) sb_appendf(sb, "Redeem <img class=\"ticket-img svelte-5s5opu\" alt=\"ticket\" src=\"%s\">", ticket);
         else {
             sb_appendf(sb, "%s ", display);
@@ -1207,8 +1232,17 @@ static void v10_store_wheels(StrBuf *sb, const AccountInfo *acc) {
     sb_append(sb, "</div></div>");
 }
 
+// the price / terms lines under the Premium and Purchase KR tabs (and the tab's closing </div>)
+static void store_legal(StrBuf *sb, const char *svelte) {
+    char agree[256];
+    I18N_F(agree, "windows.store.agree", "By purchasing you agree to the {0}Terms & Conditions", "<a target=\"_blank\" href=\"https://frvr.com/legal/krunker#TermsofService\">");
+    sb_appendf(sb, "<div class=\"legal-text svelte-%s\">%s</div> <div class=\"terms-text svelte-%s\">%s</a>.</div></div>", svelte,
+               I18N("windows.store.currency", "* Prices in USD can be converted to your local currency at an exchange rate defined by the payment provider or bank"), svelte, agree);
+}
+
 static void v10_store_premium(StrBuf *sb, const AccountInfo *acc) {
-    sb_append(sb, "<div class=\"premium-tab svelte-1dbkhl\"><div class=\"premium-header svelte-1dbkhl\"><div style=\"color: rgba(255,255,255,0.5); margin-bottom: 10px;\">Choose a Display name &amp; more with <a href=\"javascript:;\" onclick=\"showPremiumBenefits()\">Krunker Premium</a></div></div> <div class=\"store-list svelte-1dbkhl\">");
+    sb_appendf(sb, "<div class=\"premium-tab svelte-1dbkhl\"><div class=\"premium-header svelte-1dbkhl\"><div style=\"color: rgba(255,255,255,0.5); margin-bottom: 10px;\">%s <a href=\"javascript:;\" onclick=\"showPremiumBenefits()\">%s</a></div></div> <div class=\"store-list svelte-1dbkhl\">",
+               I18N("windows.store.buyP", "Choose a Display name & more with"), I18N("windows.store.premium2", "Krunker Premium"));
     char crd[256];
     store_asset_url("img/prem_crd.png", crd, sizeof(crd));
     for (size_t i = 0; i < sizeof(k_premium) / sizeof(k_premium[0]); i++)
@@ -1220,7 +1254,8 @@ static void v10_store_premium(StrBuf *sb, const AccountInfo *acc) {
         readable_time(t, sizeof(t), acc->data ? cJSON_GetNumberValue(cJSON_GetArrayItem(acc->data, 27)) : 0);
         sb_appendf(sb, "<div class=\"premium-time-section svelte-1dbkhl\"><span style=\"color: #fff\">Time Remaining</span> <span class=\"premium-time svelte-1dbkhl\">%s</span></div>", t);
     }
-    sb_append(sb, " <div class=\"legal-text svelte-1dbkhl\">* Prices in USD can be converted to your local currency at an exchange rate defined by the payment provider or bank</div> <div class=\"terms-text svelte-1dbkhl\">By purchasing you agree to the <a target=\"_blank\" href=\"https://frvr.com/legal/krunker#TermsofService\">Terms &amp; Conditions</a>.</div></div>");
+    sb_append(sb, " ");
+    store_legal(sb, "1dbkhl");
 }
 
 static void v10_store_kr(StrBuf *sb) {
@@ -1236,7 +1271,8 @@ static void v10_store_kr(StrBuf *sb) {
         if (k_purchases_v10[i].tag) sb_appendf(sb, "<div class=\"shopSale\" style=\"background: %s\">%s</div>", k_purchases_v10[i].tag_col, k_purchases_v10[i].tag);
         sb_appendf(sb, " %d <span style=\"color: #fff\">KR</span> <div class=\"spinVal\" style=\"color: #fff\">$%s USD</div></div>", k_purchases_v10[i].val, k_purchases_v10[i].price);
     }
-    sb_append(sb, "</div> <div class=\"legal-text svelte-1ko99up\">* Prices in USD can be converted to your local currency at an exchange rate defined by the payment provider or bank</div> <div class=\"terms-text svelte-1ko99up\">By purchasing you agree to the <a target=\"_blank\" href=\"https://frvr.com/legal/krunker#TermsofService\">Terms &amp; Conditions</a>.</div></div>");
+    sb_append(sb, "</div> ");
+    store_legal(sb, "1ko99up");
 }
 
 // the Eterno Shop (svelte-gh77t9): its offers come from the shop API, which KrunkNative has not:
@@ -1323,7 +1359,10 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
     if (!strcmp(name, "windows.13.premium")) { g_store_tab = 2; menu_show_window(14, 1); return 1; }
     if (!strcmp(name, "windows.13.purchase")) { // purchase(1): Purchase KR; purchase(): out of funds popup
         if (argc > 0 && !a0) {
-            generic_popup("<div style='color:#fff;font-size:20px;position:relative;margin-bottom:15px;'>It appears you have run out of Krunkies.</div><div id='confirmBtn' style='width: calc(100% - 20px)' onmouseover='playTick(0.1)' onclick='windows[13].purchase(1)'>Purchase More</div>", "contPop");
+            char pop[512];
+            snprintf(pop, sizeof(pop), "<div style='color:#fff;font-size:20px;position:relative;margin-bottom:15px;'>%s</div><div id='confirmBtn' style='width: calc(100%% - 20px)' onmouseover='playTick(0.1)' onclick='windows[13].purchase(1)'>Purchase More</div>",
+                     I18N("funds.out", "It appears you have run out of Krunkies."));
+            generic_popup(pop, "contPop");
             return 1;
         }
         ui_loadout_clear_pops();
@@ -1341,7 +1380,7 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
     if (!strcmp(name, "windows.13.directPurchase") || !strcmp(name, "showPremiumBenefits")) { // payments: none
         if (!account_get()) menu_show_window(5, 1);
         else if (!strcmp(name, "showPremiumBenefits")) menu_show_window(36, 1);
-        else ui_alert("Purchases are not available in Krunker Box Office.");
+        else ui_alert(I18N("kn.store.noPurchases", "Purchases are not available in Krunker Box Office."));
         return 1;
     }
     if (!strcmp(name, "windows.13.viewTickets")) { // the account's TICKET items, each redeems its spinWheel
@@ -1374,12 +1413,15 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
             menu_show_window(5, 1);
             return 1;
         }
-        generic_popup("<div style='color:rgba(255,255,255,0.7);margin-top:-5px;font-size:19px;text-align:center;margin-bottom:5px;'>Redeem Vouchers from certain Streams &amp; Game Events</div><div><input type='text' id='redVouch' class='smlInput' placeholder='Enter KR Code' /><div class='redVouchBtn' onclick='redeemVoucher()'>Redeem</div></div><div id='vouchRes' style='display:none'></div>", "vouchPop");
+        char pop[512];
+        snprintf(pop, sizeof(pop), "<div style='color:rgba(255,255,255,0.7);margin-top:-5px;font-size:19px;text-align:center;margin-bottom:5px;'>%s</div><div><input type='text' id='redVouch' class='smlInput' placeholder='Enter KR Code' /><div class='redVouchBtn' onclick='redeemVoucher()'>Redeem</div></div><div id='vouchRes' style='display:none'></div>",
+                 I18N("windows.store.voucherinfo", "Redeem Vouchers from certain Streams & Game Events"));
+        generic_popup(pop, "vouchPop");
         return 1;
     }
     if (!strcmp(name, "showPurchase") || !strcmp(name, "premiumPopup")) { // no payments in KrunkNative
         if (!account_get()) menu_show_window(5, 1);
-        else ui_alert("Purchases are not available in Krunker Box Office.");
+        else ui_alert(I18N("kn.store.noPurchases", "Purchases are not available in Krunker Box Office."));
         return 1;
     }
     if (!strcmp(name, "creatorCodeAction")) {

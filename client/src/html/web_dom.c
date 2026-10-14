@@ -140,6 +140,64 @@ EM_JS(void, kn_js_set_text, (int id, const char *text), {
     el.textContent = s;
 });
 
+// html_dom_map_text in two steps (one call per string would cross into C thousands of times):
+// collect the text nodes / attributes under root as a JSON array of [text, owner id, slot] (the
+// nodes are kept in knI18nNodes), then apply [[index, text], ...].
+EM_JS(char *, kn_js_text_collect, (int root, const char *skip), {
+    var top = root ? knEl(root) : document.documentElement;
+    var sel = skip ? UTF8ToString(skip) : "";
+    var out = [], nodes = [];
+    if (!top) { window.knI18nNodes = nodes; return stringToNewUTF8("[]"); }
+    var SKIP = { SCRIPT: 1, STYLE: 1, TEXTAREA: 1, NOSCRIPT: 1, TEMPLATE: 1 };
+    var walk = function(el) {
+        for (var c = el.firstChild; c; c = c.nextSibling) {
+            if (c.nodeType === 3) {
+                if (c.data) {
+                    var slot = 0;
+                    for (var p = c.previousSibling; p; p = p.previousSibling) slot++;
+                    nodes.push([c, null]);
+                    out.push([c.data, knId(el), slot]);
+                }
+            } else if (c.nodeType === 1) {
+                if (SKIP[c.tagName]) continue;
+                try { if (sel && c.matches(sel)) continue; } catch (e) {}
+                visit(c);
+            }
+        }
+    };
+    var visit = function(el) {
+        var attrs = ["title", "placeholder"];
+        if (el.tagName === "INPUT" && /^(button|submit|reset)$/i.test(el.getAttribute("type") || "")) attrs.push("value");
+        for (var i = 0; i < attrs.length; i++) {
+            var v = el.getAttribute(attrs[i]);
+            if (v) { nodes.push([el, attrs[i]]); out.push([v, knId(el), -1 - i]); }
+        }
+        walk(el);
+    };
+    visit(top);
+    window.knI18nNodes = nodes;
+    return stringToNewUTF8(JSON.stringify(out));
+});
+
+EM_JS(void, kn_js_text_apply, (const char *json), {
+    var nodes = window.knI18nNodes || [];
+    var list = [];
+    try { list = JSON.parse(UTF8ToString(json)); } catch (e) {}
+    for (var i = 0; i < list.length; i++) {
+        var n = nodes[list[i][0]];
+        if (!n) continue;
+        if (n[1]) n[0].setAttribute(n[1], list[i][1]);
+        else n[0].data = list[i][1];
+    }
+    window.knI18nNodes = null;
+});
+
+EM_JS(void, kn_js_set_lang, (const char *lang), {
+    var l = UTF8ToString(lang);
+    if (l) document.documentElement.setAttribute("lang", l);
+    else document.documentElement.removeAttribute("lang");
+});
+
 EM_JS(char *, kn_js_get_text, (int id), {
     var el = knEl(id);
     return stringToNewUTF8(el ? (el.textContent || "") : "");
@@ -715,6 +773,44 @@ void html_dom_set_text(const HtmlElem e, const char *text) { if (e) kn_js_set_te
 int html_dom_get_text(const HtmlElem e, char *buf, const size_t n) {
     if (!e) return take_string(NULL, buf, n);
     return take_string(kn_js_get_text((int) e), buf, n);
+}
+
+int html_dom_map_text(const HtmlElem root, const char *skip_selector, HtmlTextMapFn fn, void *user) {
+    if (!fn) return 0;
+    char *json = kn_js_text_collect((int) root, skip_selector ? skip_selector : "");
+    cJSON *list = json ? cJSON_Parse(json) : NULL;
+    free(json);
+    cJSON *changes = cJSON_CreateArray();
+    int count = 0, index = 0;
+    const cJSON *item;
+    cJSON_ArrayForEach(item, list) {
+        const char *text = cJSON_GetStringValue(cJSON_GetArrayItem(item, 0));
+        const HtmlElem owner = (HtmlElem) cJSON_GetNumberValue(cJSON_GetArrayItem(item, 1));
+        const int slot = (int) cJSON_GetNumberValue(cJSON_GetArrayItem(item, 2));
+        const char *r = text ? fn(user, owner, slot, text) : NULL;
+        if (r && strcmp(r, text)) {
+            cJSON *pair = cJSON_CreateArray();
+            cJSON_AddItemToArray(pair, cJSON_CreateNumber(index));
+            cJSON_AddItemToArray(pair, cJSON_CreateString(r));
+            cJSON_AddItemToArray(changes, pair);
+            count++;
+        }
+        index++;
+    }
+    char *out = cJSON_PrintUnformatted(changes);
+    kn_js_text_apply(out ? out : "[]");
+    free(out);
+    cJSON_Delete(changes);
+    cJSON_Delete(list);
+    return count;
+}
+
+void html_dom_set_lang(const char *lang) { kn_js_set_lang(lang ? lang : ""); }
+
+int html_dom_missing_glyphs(const HtmlElem e, uint32_t *first_cp) {
+    (void) e;
+    if (first_cp) *first_cp = 0;
+    return -1; // the browser draws the text (its own font fallback)
 }
 
 void html_dom_set_attr(const HtmlElem e, const char *name, const char *value) {

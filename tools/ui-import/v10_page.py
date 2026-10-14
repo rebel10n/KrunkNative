@@ -17,7 +17,8 @@ made relative; external links neutralised (``data-ext-href``); ``<canvas id="can
 ``css/krunknative.css`` + ``css/hud.css`` and ``js/kn-shim.js`` + ``js/loader.js`` added. v10
 additions: the reconstructed mounts are written into their (empty) targets, ``css/svelte.css``
 (the component stylesheets, which the Svelte runtime injects as ``<style>`` at mount) is linked
-after Krunker's stylesheets, ``i18n-en.json`` holds ``translations.en``.
+after Krunker's stylesheets, ``i18n/en.json`` holds ``translations.en`` (the other languages:
+``tools/i18n-import``).
 
 Our glue files (``css/krunknative.css``, ``css/hud.css``, ``js/kn-shim.js``, ``js/loader.js``) live
 in ``ui/`` already and are kept. Window templates (``windows/``) are not reconstructed
@@ -123,13 +124,14 @@ def import_v10(ui_root, write_if_changed, log, public, client_js):
             with open(os.path.join(tmp, "svelte.css"), encoding="utf-8") as fh:
                 written += write_if_changed(os.path.join(out, "css", "svelte.css"), svelte_css(fh.read()))
             with open(os.path.join(tmp, "i18n-en.json"), "rb") as fh:
-                written += write_if_changed(os.path.join(out, "i18n-en.json"), fh.read())
+                os.makedirs(os.path.join(out, "i18n"), exist_ok=True)
+                written += write_if_changed(os.path.join(out, "i18n", "en.json"), fh.read())
             with open(os.path.join(tmp, "report.txt"), encoding="utf-8") as fh:
                 for line in fh.read().splitlines()[3:]:
                     if line.startswith(("mount #main", "render ")):
                         log("v10: " + line)
     else:
-        log("v10: no --client-js: the Svelte mounts stay empty, no css/svelte.css / i18n-en.json")
+        log("v10: no --client-js: the Svelte mounts stay empty, no css/svelte.css / i18n/en.json")
     sheets = []
     for name in PAGES:
         with open(os.path.join(public, name), encoding="utf-8") as fh:

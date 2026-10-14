@@ -121,6 +121,9 @@ void html_dom_remove(const HtmlElem e) { (void) e; }
 void html_dom_set_html(const HtmlElem e, const char *html) { (void) e; (void) html; }
 void html_dom_set_text(const HtmlElem e, const char *text) { (void) e; (void) text; }
 int html_dom_get_text(const HtmlElem e, char *buf, const size_t n) { (void) e; clear_buf(buf, n); return 0; }
+int html_dom_map_text(const HtmlElem root, const char *skip, HtmlTextMapFn fn, void *user) { (void) root; (void) skip; (void) fn; (void) user; return 0; }
+void html_dom_set_lang(const char *lang) { (void) lang; }
+int html_dom_missing_glyphs(const HtmlElem e, uint32_t *first_cp) { (void) e; if (first_cp) *first_cp = 0; return -1; }
 
 void html_dom_set_attr(const HtmlElem e, const char *name, const char *value) { (void) e; (void) name; (void) value; }
 void html_dom_canvas_put(const HtmlElem e, const unsigned char *rgba, const int w, const int h) { (void) e; (void) rgba; (void) w; (void) h; }

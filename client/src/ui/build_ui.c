@@ -187,8 +187,8 @@ static void draw_build_wheel(Canvas2D *c, const Player *me, const double h) {
     c2d_set_fill_color(c, 0xdb / 255.0f, 0xdb / 255.0f, 0xdb / 255.0f, 1);
     c2d_set_font(c, 40, "GameFont");
     c2d_fill_text(c, pick->name, -c2d_measure_text(c, pick->name) / 2, 40.0 / 2 + offset, 0, 0);
-    char cost[32];
-    if (me->build_free) snprintf(cost, sizeof(cost), "Free"); // KrunkNative: OM_CAP_SPAWN waives it
+    char cost[64];
+    if (me->build_free) snprintf(cost, sizeof(cost), "%s", I18N("kn.build.free", "Free")); // KrunkNative: OM_CAP_SPAWN waives it
     else snprintf(cost, sizeof(cost), "%d Score", pick->cost);
     if (me->build_free || me->score >= pick->cost) c2d_set_fill_color(c, 0xa3 / 255.0f, 0xa3 / 255.0f, 0xa3 / 255.0f, 1);
     else c2d_set_fill_color(c, 0xd6 / 255.0f, 0x3e / 255.0f, 0x3e / 255.0f, 1);

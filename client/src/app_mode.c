@@ -3,6 +3,7 @@
 // GLFW callbacks while a page is shown. doc/html-ui-engine.md "Pages".
 #include <gl.h> // glad natively, GLES3 on the web (before GLFW)
 #include <app_mode.h>
+#include <i18n.h> // the page markup in the chosen language
 #include <backend_ui.h>
 #include <download_ui.h> // ?download
 #include <debug_capture.h>
@@ -587,6 +588,10 @@ int app_mode_frame(Client *client, const float now, const float delta) {
         g_app.entered = 1;
         g_app.serial = html_ui_page_serial();
         g_app.page->enter(client, g_app.query);
+        // the hub / editor / viewer markup in the chosen language (the strings their own C writes
+        // are English: ui/i18n/README.md "Gaps")
+        html_dom_set_lang(i18n_lang_find(i18n_locale())->bcp47);
+        i18n_translate_tree(0);
 #ifndef __EMSCRIPTEN__
         // the window takes the page's <title> ("Krunker Hub", ...), as Electron's windows do
         const HtmlElem title = html_dom_query(0, "title");

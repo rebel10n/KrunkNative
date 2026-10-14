@@ -233,10 +233,27 @@ static int recommend(const DlDevice *d, const DlPkg **out) {
 
 // ---------------------------------------------------------------- markup
 
+// A package's description in the page's language: kn.download.<id>.desc (dynamic keys, named
+// here for tools/i18n-import/i18n_lint.py, which reads the I18N(key, english) pairs anywhere):
+//   I18N("kn.download.windows-amd64.desc", "Windows 10 and 11, 64-bit")
+//   I18N("kn.download.macos-aarch64.desc", "macOS 11 or newer, Apple silicon (M1 and later)")
+//   I18N("kn.download.macos-amd64.desc", "macOS 11 or newer, Intel")
+//   I18N("kn.download.linux-amd64-polyfilled.desc", "x86_64, any distribution (glibc 2.17+)")
+//   I18N("kn.download.linux-amd64.desc", "x86_64 for current distros (glibc 2.35+, OpenSSL 3)")
+//   I18N("kn.download.linux-aarch64-polyfilled.desc", "aarch64, any distribution (glibc 2.17+)")
+//   I18N("kn.download.linux-aarch64.desc", "aarch64 for current distros (glibc 2.35+, OpenSSL 3)")
+//   I18N("kn.download.android.desc", "Android 7.0 or newer")
+//   I18N("kn.download.ios.desc", "Add Krunker Box Office to your Home Screen")
+static const char *pkg_desc(const DlPkg *p) {
+    char key[96];
+    snprintf(key, sizeof(key), "kn.download.%s.desc", p->id);
+    return i18n_tr(key, p->desc);
+}
+
 static void ext_label(const DlPkg *p, const char *ext, char *out, const size_t n) {
     if (!strcmp(ext, "deb")) snprintf(out, n, ".deb (Debian, Ubuntu)");
     else if (!strcmp(ext, "rpm")) snprintf(out, n, ".rpm (Fedora, openSUSE)");
-    else if (!strcmp(ext, "tar.gz") && p->os == DL_OS_LINUX) snprintf(out, n, ".tar.gz (any distro)");
+    else if (!strcmp(ext, "tar.gz") && p->os == DL_OS_LINUX) snprintf(out, n, "%s", I18N("kn.download.tarAnyDistro", ".tar.gz (any distro)"));
     else snprintf(out, n, ".%s", ext);
 }
 
@@ -250,7 +267,7 @@ static void dl_link(StrBuf *sb, const char *cls, const char *url, const char *la
 
 static void rec_buttons(StrBuf *sb, const DlDevice *d, const DlPkg *p, const int several) {
     char url[256], label[96];
-    if (several) sb_appendf(sb, "<div class=\"knDlRecPkg\">%s</div>", p->desc);
+    if (several) sb_appendf(sb, "<div class=\"knDlRecPkg\">%s</div>", pkg_desc(p));
     sb_append(sb, "<div class=\"knDlBtns\">");
     // the installed package kind first (deb / rpm installs update through their package)
     int order[DL_EXT_MAX], n = 0;
@@ -263,12 +280,13 @@ static void rec_buttons(StrBuf *sb, const DlDevice *d, const DlPkg *p, const int
     for (int k = 0; k < n; k++) {
         const char *ext = p->exts[order[k]];
         pkg_url(p, ext, url, sizeof(url));
-        if (p->os == DL_OS_ANDROID) snprintf(label, sizeof(label), "%s", d->app ? "Download the latest APK" : "Install the APK");
+        if (p->os == DL_OS_ANDROID)
+            snprintf(label, sizeof(label), "%s", d->app ? I18N("kn.download.apkLatest", "Download the latest APK") : I18N("kn.download.apkInstall", "Install the APK"));
         else if (p->os == DL_OS_IOS) continue; // Add to Home Screen first; the .ipa is a footnote
         else if (k == 0) {
             char e[48];
             ext_label(p, ext, e, sizeof(e));
-            snprintf(label, sizeof(label), "Download %s", e);
+            i18n_trf(label, sizeof(label), "kn.download.button", "Download {0}", 1, I18N_ARGV(e));
         } else {
             ext_label(p, ext, label, sizeof(label));
         }
@@ -277,40 +295,56 @@ static void rec_buttons(StrBuf *sb, const DlDevice *d, const DlPkg *p, const int
     sb_append(sb, "</div>");
 }
 
+// A how-to text: {0}/{1} around the file to run (bold), the rest escaped.
+static void how(StrBuf *sb, const char *text) {
+    StrBuf esc = {0};
+    sb_append_esc(&esc, text);
+    char *e = sb_finish(&esc);
+    char out[1024];
+    i18n_replace(out, sizeof(out), e, 2, I18N_ARGV("<b>", "</b>"));
+    free(e);
+    sb_append(sb, out);
+}
+
 static void rec_howto(StrBuf *sb, const DlDevice *d, const DlOs os) {
     sb_append(sb, "<div class=\"knDlHow\">");
     switch (os) {
         case DL_OS_WINDOWS:
-            sb_append(sb, "Unzip it anywhere and run <b>KrunkNative.exe</b>. The launcher downloads the game content "
-                          "(about 1.7 GB) on the first start and keeps the client up to date.");
+            how(sb, I18N("kn.download.howWindows", "Unzip it anywhere and run {0}KrunkNative.exe{1}. The launcher downloads the game content "
+                                                   "(about 1.7 GB) on the first start and keeps the client up to date."));
             break;
         case DL_OS_MAC:
-            sb_append(sb, "Open <b>KrunkNative.app</b>. It is not notarized yet: the first time, right-click it and "
-                          "choose Open. The launcher downloads the game content (about 1.7 GB) and keeps it up to date.");
+            how(sb, I18N("kn.download.howMac", "Open {0}KrunkNative.app{1}. It is not notarized yet: the first time, right-click it and "
+                                               "choose Open. The launcher downloads the game content (about 1.7 GB) and keeps it up to date."));
             break;
         case DL_OS_LINUX:
-            sb_append(sb, "Install the .deb / .rpm and start Krunker Box Office from the applications menu, or unpack the "
-                          ".tar.gz and run <b>./krunknative</b>. The launcher downloads the game content (about 1.7 GB) "
-                          "on the first start and keeps the client up to date.");
+            how(sb, I18N("kn.download.howLinux", "Install the .deb / .rpm and start Krunker Box Office from the applications menu, or unpack the "
+                                                 ".tar.gz and run {0}./krunknative{1}. The launcher downloads the game content (about 1.7 GB) "
+                                                 "on the first start and keeps the client up to date."));
             break;
         case DL_OS_ANDROID:
-            sb_append(sb, d->app ? "You are playing in the Krunker Box Office app: it always runs the latest game from krunk.io."
-                                 : "Open the downloaded file and allow your browser to install apps when asked. The app "
-                                   "plays krunk.io fullscreen with touch controls and controllers, always up to date.");
+            how(sb, d->app ? I18N("kn.download.howAndroidApp", "You are playing in the Krunker Box Office app: it always runs the latest game from krunk.io.")
+                           : I18N("kn.download.howAndroid", "Open the downloaded file and allow your browser to install apps when asked. The app "
+                                                             "plays krunk.io fullscreen with touch controls and controllers, always up to date."));
             break;
         case DL_OS_IOS:
             if (d->standalone) {
-                sb_append(sb, "Krunker Box Office is on your Home Screen already: it always runs the latest version.");
+                how(sb, I18N("kn.download.howIosInstalled", "Krunker Box Office is on your Home Screen already: it always runs the latest version."));
             } else {
-                sb_append(sb, "In Safari, tap Share (the square with an arrow), then <b>Add to Home Screen</b>. "
-                              "Krunker Box Office then opens fullscreen like an app, always up to date.");
+                how(sb, I18N("kn.download.howIos", "In Safari, tap Share (the square with an arrow), then {0}Add to Home Screen{1}. "
+                                                   "Krunker Box Office then opens fullscreen like an app, always up to date."));
             }
             {
                 char url[256];
                 pkg_url(pkg_find("ios"), "ipa", url, sizeof(url));
-                sb_append(sb, "<div class=\"knDlNote\">Sideloading (AltStore, Sideloadly)? ");
-                dl_link(sb, "knDlLink", url, "Unsigned .ipa");
-                sb_append(sb, ", signed on install with your Apple ID.</div>");
+                // "Sideloading (AltStore, Sideloadly)? {0}, signed on install with your Apple ID." with the link
+                StrBuf link = {0};
+                dl_link(&link, "knDlLink", url, I18N("kn.download.ipa", "Unsigned .ipa"));
+                char *l = sb_finish(&link);
+                char note[1024];
+                i18n_trf(note, sizeof(note), "kn.download.sideload", "Sideloading (AltStore, Sideloadly)? {0}, signed on install with your Apple ID.", 1, I18N_ARGV(l));
+                free(l);
+                sb_appendf(sb, "<div class=\"knDlNote\">%s</div>", note);
             }
             break;
         default:
@@ -325,7 +359,7 @@ static void other_row(StrBuf *sb, const DlPkg *p, const int odd) {
                odd ? " knDlOdd" : "", os_icon(p->os), p->name);
     if (p->os == DL_OS_IOS) {
         // nothing to download on a computer: krunk.io in Safari, Share > Add to Home Screen
-        sb_append(sb, "<span class=\"knDlHint\">Safari: Add to Home Screen</span>");
+        sb_appendf(sb, "<span class=\"knDlHint\">%s</span>", I18N("kn.download.iosHint", "Safari: Add to Home Screen"));
     }
     for (int i = 0; i < DL_EXT_MAX && p->exts[i]; i++) {
         pkg_url(p, p->exts[i], url, sizeof(url));
@@ -341,16 +375,18 @@ static char *gen_list(const DlDevice *d) {
     const int nrec = recommend(d, rec);
     if (nrec > 0) {
         sb_append(&sb, "<div class=\"knDlRec\">");
-        sb_appendf(&sb, "<div class=\"knDlRecTag\">%s</div>", d->native ? "THIS CLIENT" : "RECOMMENDED FOR YOUR DEVICE");
+        sb_appendf(&sb, "<div class=\"knDlRecTag\">%s</div>", d->native ? I18N("kn.download.thisClient", "THIS CLIENT")
+                                                                        : I18N("kn.download.recommended", "RECOMMENDED FOR YOUR DEVICE"));
         sb_appendf(&sb, "<div class=\"knDlRecHead\">%s<div><div class=\"knDlRecName\">%s</div>", os_icon(rec[0]->os), os_name(rec[0]->os));
-        if (nrec == 1) sb_appendf(&sb, "<div class=\"knDlRecSub\">%s</div>", rec[0]->desc);
-        else sb_append(&sb, "<div class=\"knDlRecSub\">Pick your Mac's processor (About This Mac)</div>");
+        if (nrec == 1) sb_appendf(&sb, "<div class=\"knDlRecSub\">%s</div>", pkg_desc(rec[0]));
+        else sb_appendf(&sb, "<div class=\"knDlRecSub\">%s</div>", I18N("kn.download.pickMac", "Pick your Mac's processor (About This Mac)"));
         sb_append(&sb, "</div></div>");
         for (int i = 0; i < nrec; i++) rec_buttons(&sb, d, rec[i], nrec > 1);
         rec_howto(&sb, d, rec[0]->os);
         sb_append(&sb, "</div>");
     }
-    sb_appendf(&sb, "<div class=\"knDlOther\"><div class=\"knDlOtherHed\">%s</div>", nrec > 0 ? "Other platforms" : "All platforms");
+    sb_appendf(&sb, "<div class=\"knDlOther\"><div class=\"knDlOtherHed\">%s</div>",
+               nrec > 0 ? I18N("kn.download.otherPlatforms", "Other platforms") : I18N("kn.download.allPlatforms", "All platforms"));
     int row = 0;
     for (int i = 0; i < PKG_COUNT; i++) {
         int skip = 0;
@@ -358,7 +394,7 @@ static char *gen_list(const DlDevice *d) {
         if (!skip) other_row(&sb, &PKGS[i], row++ & 1);
     }
     sb_append(&sb, "</div><div class=\"knDlFoot\">");
-    dl_link(&sb, "knDlLink", DL_PAGE, "Release notes and SHA-256 checksums");
+    dl_link(&sb, "knDlLink", DL_PAGE, I18N("kn.download.releaseNotes", "Release notes and SHA-256 checksums"));
     sb_append(&sb, "</div>");
     return sb_finish(&sb);
 }

@@ -164,6 +164,14 @@ int dom_insert_html(Dom *dom, HtmlElem e, DomInsertWhere where, const char *html
 void dom_set_text(Dom *dom, HtmlElem e, const char *text, size_t len);
 /* textContent getter: malloc'd NUL-terminated copy, caller frees. */
 char *dom_get_text(Dom *dom, HtmlElem e);
+/* html_dom_map_text: every text node and the title / placeholder (/ button value) attributes under
+ * `root` (0 = <html>), skipping script / style / textarea / noscript / template and elements
+ * matching skip_selector with their subtrees.  fn gets the owner element and the slot (child
+ * index of a text node; -1 title, -2 placeholder, -3 value) and returns the replacement or NULL; `changed` is
+ * told each parent whose text changed.  Returns the number of strings replaced. */
+typedef const char *(*DomTextMapFn)(void *user, HtmlElem owner, int slot, const char *text);
+size_t dom_map_text(Dom *dom, HtmlElem root, const char *skip_selector, DomTextMapFn fn, void *user,
+                    void (*changed)(void *user, HtmlElem parent), void *changed_user);
 /* Appends a text node (createTextNode + appendChild). */
 void dom_append_text(Dom *dom, HtmlElem parent, const char *text, size_t len);
 

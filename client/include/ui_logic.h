@@ -15,6 +15,7 @@
 // Everything here runs on the main thread from html_ui_update()/client_menu_tick().
 #include <client.h>
 #include <html_dom.h>
+#include <i18n.h> // I18N(key, english): every user-visible string (client/src/ui/i18n.c)
 
 // Window ids: Krunker's showWindow(n) ids = windows[n - 1] + 1 (v7.1.4: 1 settings, 2 servers,
 // 3 customize, 8 host, 24 join, 48 server finder, ...).

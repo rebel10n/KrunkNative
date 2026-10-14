@@ -30,7 +30,7 @@ static struct {
     int force_offline;
     int capturing;               // devConsoleCapturingKey / cycleCommandCapturingKey / bhopModeCapturingKey
     HtmlElem pressed;            // span under the left button (click = down + up on it)
-    char shown[3][40];           // last text written into the three key spans
+    char shown[3][96];            // last text written into the three key spans
 } g_mods;
 
 // ---------------------------------------------------------------- stored values (readStored*)
@@ -144,7 +144,7 @@ int ui_mods_code_matches(const char *code, const int key) {
 // formatKeyBind(code)
 const char *ui_mods_format_key_bind(const char *code) {
     static char buf[48];
-    if (!code || !*code) return "Unbound";
+    if (!code || !*code) return I18N("kn.mods.unbound", "Unbound");
     static const char *const SPECIAL[][2] = {
         {"Backquote", "`"}, {"Minus", "-"}, {"Equal", "="}, {"BracketLeft", "["}, {"BracketRight", "]"},
         {"Backslash", "\\"}, {"Semicolon", ";"}, {"Quote", "'"}, {"Comma", ","}, {"Period", "."}, {"Slash", "/"},
@@ -209,31 +209,48 @@ static void mods_set_bind(const int which, const char *code) {
 
 // ---------------------------------------------------------------- rows (make*Row)
 
-static const char SETTING_ROWS_HTML[] =
-    "<div class=\"settName\" data-force-offline-setting=\"1\" title=\"Starts the game directly in offline test mode.\">"
-    "Force Offline Mode <label class=\"switch\" style=\"margin-left: 10px;\"><input type=\"checkbox\">"
-    "<span class=\"slider\"></span></label></div>"
-    "<div class=\"settName\" data-dev-console-setting=\"1\" title=\"Allows opening the developer console in-game\">"
-    "Enable Developer Console (`) <label class=\"switch\" style=\"margin-left: 10px;\"><input type=\"checkbox\">"
-    "<span class=\"slider\"></span></label></div>";
+// (the texts in the current language: the rows are built when inserted)
+static char *setting_rows_html(void) {
+    StrBuf sb = {0};
+    sb_append(&sb, "<div class=\"settName\" data-force-offline-setting=\"1\" title=\"");
+    sb_append_esc(&sb, I18N("kn.mods.forceOfflineInfo", "Starts the game directly in offline test mode."));
+    sb_append(&sb, "\">");
+    sb_append_esc(&sb, I18N("kn.mods.forceOffline", "Force Offline Mode"));
+    sb_append(&sb, " <label class=\"switch\" style=\"margin-left: 10px;\"><input type=\"checkbox\">"
+                   "<span class=\"slider\"></span></label></div>"
+                   "<div class=\"settName\" data-dev-console-setting=\"1\" title=\"");
+    sb_append_esc(&sb, I18N("kn.mods.devConsoleInfo", "Allows opening the developer console in-game"));
+    sb_append(&sb, "\">");
+    sb_append_esc(&sb, I18N("kn.mods.devConsoleEnable", "Enable Developer Console (`)"));
+    sb_append(&sb, " <label class=\"switch\" style=\"margin-left: 10px;\"><input type=\"checkbox\">"
+                   "<span class=\"slider\"></span></label></div>");
+    return sb_finish(&sb);
+}
 
 // mods.ts makes a plain .setHedBind heading + rows (v3.1.1 Change Controls markup); v7.1.4's
 // window has collapsible groups instead and no .setHedBind style, so the rows form a v7 group
 // of their own ("Developer Tools", collapsible like the others) with v7's key cell markup.
-#define BIND_ROW(data, label)                                                                              \
-    "<div class=\"settName\" " data "=\"1\" data-kn-pointer=\"1\">" label                                    \
-    "<div style=\"float:right\"><span class=\"unbind\" title=\"Unbind\"><i class=\"material-icons\" "           \
-    "style=\"font-size:40px;color:var(--red);\">delete_forever</i></span>"                                   \
-    "<span class=\"settText floatRNoC keyIcon\" onmouseover=\"playTick()\"></span></div></div>"
+static void bind_row(StrBuf *sb, const char *data, const char *label) {
+    sb_appendf(sb, "<div class=\"settName\" %s=\"1\" data-kn-pointer=\"1\">", data);
+    sb_append_esc(sb, label);
+    sb_append(sb, "<div style=\"float:right\"><span class=\"unbind\" title=\"");
+    sb_append_esc(sb, I18N("kn.mods.unbind", "Unbind"));
+    sb_append(sb, "\"><i class=\"material-icons\" style=\"font-size:40px;color:var(--red);\">delete_forever</i></span>"
+                  "<span class=\"settText floatRNoC keyIcon\" onmouseover=\"playTick()\"></span></div></div>");
+}
 
-static const char BIND_ROWS_HTML[] =
-    "<div class=\"setHed\" id=\"setBindHed_developer_tools\" data-dev-console-bind-head=\"1\" "
-    "onclick=\"window.windows[6].collapseFolder(this)\"><span class=\"material-icons plusOrMinus\">keyboard_arrow_down</span> "
-    "Developer Tools</div><div class=\"setBodH\" id=\"setBindBod_developer_tools\">"
-    BIND_ROW("data-dev-console-bind", "Developer Console")
-    BIND_ROW("data-bhop-mode-bind", "Bhop Mode")
-    BIND_ROW("data-cycle-command-bind", "Cycle Map (/cycle)")
-    "</div>";
+static char *bind_rows_html(void) {
+    StrBuf sb = {0};
+    sb_append(&sb, "<div class=\"setHed\" id=\"setBindHed_developer_tools\" data-dev-console-bind-head=\"1\" "
+                   "onclick=\"window.windows[6].collapseFolder(this)\"><span class=\"material-icons plusOrMinus\">keyboard_arrow_down</span> ");
+    sb_append_esc(&sb, I18N("kn.mods.devTools", "Developer Tools"));
+    sb_append(&sb, "</div><div class=\"setBodH\" id=\"setBindBod_developer_tools\">");
+    bind_row(&sb, "data-dev-console-bind", I18N("kn.mods.devConsole", "Developer Console"));
+    bind_row(&sb, "data-bhop-mode-bind", I18N("kn.mods.bhopMode", "Bhop Mode"));
+    bind_row(&sb, "data-cycle-command-bind", I18N("kn.mods.cycleMap", "Cycle Map (/cycle)"));
+    sb_append(&sb, "</div>");
+    return sb_finish(&sb);
+}
 
 static const char *const BIND_ROW_SELECTORS[3] = {
     "[data-dev-console-bind] .settText.floatRNoC.keyIcon",
@@ -258,7 +275,7 @@ static void mods_refresh_ui(void) {
     for (int i = 0; i < 3; i++) {
         const HtmlElem span = html_dom_query(0, BIND_ROW_SELECTORS[i]);
         if (!span) continue;
-        const char *text = g_mods.capturing == ROW_CAPTURE[i] ? "Press any Key" : ui_mods_format_key_bind(codes[i]);
+        const char *text = g_mods.capturing == ROW_CAPTURE[i] ? I18N("settings.controls.press", "Press any Key") : ui_mods_format_key_bind(codes[i]);
         if (strcmp(g_mods.shown[i], text) || html_dom_get_text(span, NULL, 0) <= 0) {
             html_dom_set_text(span, text);
             snprintf(g_mods.shown[i], sizeof(g_mods.shown[i]), "%s", text);
@@ -273,7 +290,9 @@ static void ensure_setting_rows(void) {
     if (!anchor_input) return;
     const HtmlElem anchor_row = html_dom_closest(anchor_input, ".settName");
     if (!anchor_row || html_dom_query(0, "[data-force-offline-setting='1']")) return;
-    html_dom_insert_html(anchor_row, HTML_INSERT_AFTER_END, SETTING_ROWS_HTML);
+    char *rows = setting_rows_html();
+    html_dom_insert_html(anchor_row, HTML_INSERT_AFTER_END, rows);
+    free(rows);
     mods_refresh_ui();
 }
 
@@ -290,7 +309,9 @@ static void ensure_bind_rows(void) {
     HtmlElem anchor_row = html_dom_closest(anchor, ".setBodH"); // after the Premium & Host group
     if (!anchor_row) anchor_row = html_dom_closest(anchor, ".settName");
     if (!anchor_row || html_dom_query(0, "[data-dev-console-bind-head='1']")) return;
-    html_dom_insert_html(anchor_row, HTML_INSERT_AFTER_END, BIND_ROWS_HTML);
+    char *rows = bind_rows_html();
+    html_dom_insert_html(anchor_row, HTML_INSERT_AFTER_END, rows);
+    free(rows);
     for (int i = 0; i < 3; i++) g_mods.shown[i][0] = 0;
     mods_refresh_ui();
 }

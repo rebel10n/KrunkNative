@@ -5,6 +5,7 @@
 // on it (doc/v10/social.md). Callbacks run on the main thread from backend_poll().
 #include <backend.h>
 #include <v10_social.h>
+#include <i18n.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -78,40 +79,40 @@ void v10_gapi_cancel(const V10GapiFn fn, void *user) {
         if (g_pending[i].fn == fn && g_pending[i].user == user) g_pending[i].fn = NULL;
 }
 
-// v10 errors.* (i18n-en.json) by code: _34580's table, the codes the Social hub, the profile and
-// the clan views can see
+// v10 errors.* (ui/i18n/en.json) by code: _34580's table (code -> key, game.deob.js:103796), the
+// codes the Social hub, the profile and the clan views can see; shown through i18n.t(key)
 static const struct {
-    const char *code, *text;
+    const char *code, *key, *text;
 } k_errors[] = {
-    {"SOCIAL_RATE_LIMITED", "You're posting too fast. Wait a moment before trying again."},
-    {"SOCIAL_INSUFFICIENT_FUNDS", "You don't have enough KR to fund this giveaway."},
-    {"SOCIAL_GIVEAWAY_TOO_SMALL", "Giveaways must be at least 10 KR."},
-    {"SOCIAL_POST_TEXT_REQUIRED", "Your post needs some text."},
-    {"SOCIAL_POST_NOT_FOUND", "This post no longer exists."},
-    {"SOCIAL_CREATE_FAILED", "Could not create your post. Please try again."},
-    {"SOCIAL_COMMENT_TEXT_REQUIRED", "Your comment needs some text."},
-    {"SOCIAL_ALREADY_VOTED", "You have already voted on this post."},
-    {"SOCIAL_LEVEL_TOO_LOW", "You must be level 10 or higher to post."},
-    {"SOCIAL_GIVEAWAY_LEVEL_TOO_LOW", "You must be level 20 or higher to post a giveaway."},
-    {"GIFT_INSUFFICIENT_FUNDS", "You don't have enough KR to send this gift."},
-    {"PLAYERS_NOT_FOUND", "That player could not be found."},
-    {"PLAYERS_SEARCH_INVALID", "Enter at least 2 characters to search."},
-    {"PLAYERS_SEARCH_LIMIT_INVALID", "Invalid search limit."},
-    {"PLAYERS_INVALID_RANGE", "Invalid sales history window."},
-    {"PLAYERS_PROFILE_FAILED", "Failed to load profile."},
-    {"PLAYERS_SALES_FAILED", "Failed to load sales history."},
-    {"PLAYERS_SEARCH_FAILED", "Search failed. Please try again."},
-    {"PLAYERS_PROXY_FAILED", "Some profile data is temporarily unavailable."},
-    {"EB_AUTH_REQUIRED", "You must be signed in to use chat."},
-    {"EB_AUTH_INVALID", "Your session expired. Please sign in again."},
-    {"EB_UNAUTHORIZED", "You must be signed in to use chat."},
-    {"EB_TARGET_OFFLINE", "That friend is offline right now."},
-    {"EB_NOT_FRIEND", "You can only message friends."},
-    {"EB_RATE_LIMITED", "You're sending messages too fast. Slow down."},
-    {"EB_MSG_INVALID", "The message could not be sent."},
-    {"EB_TEXT_TOO_LONG", "That message is too long."},
-    {"EB_UNKNOWN_TYPE", "Chat client is out of date. Please refresh."},
-    {"EB_INTERNAL", "Chat service hit an error. Try again."},
+    {"SOCIAL_RATE_LIMITED", "errors.social.rateLimited", "You're posting too fast. Wait a moment before trying again."},
+    {"SOCIAL_INSUFFICIENT_FUNDS", "errors.social.insufficientFunds", "You don't have enough KR to fund this giveaway."},
+    {"SOCIAL_GIVEAWAY_TOO_SMALL", "errors.social.giveawayTooSmall", "Giveaways must be at least 10 KR."},
+    {"SOCIAL_POST_TEXT_REQUIRED", "errors.social.postTextRequired", "Your post needs some text."},
+    {"SOCIAL_POST_NOT_FOUND", "errors.social.postNotFound", "This post no longer exists."},
+    {"SOCIAL_CREATE_FAILED", "errors.social.createFailed", "Could not create your post. Please try again."},
+    {"SOCIAL_COMMENT_TEXT_REQUIRED", "errors.social.commentTextRequired", "Your comment needs some text."},
+    {"SOCIAL_ALREADY_VOTED", "errors.social.alreadyVoted", "You have already voted on this post."},
+    {"SOCIAL_LEVEL_TOO_LOW", "errors.social.levelTooLow", "You must be level 10 or higher to post."},
+    {"SOCIAL_GIVEAWAY_LEVEL_TOO_LOW", "errors.social.giveawayLevelTooLow", "You must be level 20 or higher to post a giveaway."},
+    {"GIFT_INSUFFICIENT_FUNDS", "errors.social.giftInsufficientFunds", "You don't have enough KR to send this gift."},
+    {"PLAYERS_NOT_FOUND", "errors.profiles.notFound", "That player could not be found."},
+    {"PLAYERS_SEARCH_INVALID", "errors.profiles.searchInvalid", "Enter at least 2 characters to search."},
+    {"PLAYERS_SEARCH_LIMIT_INVALID", "errors.profiles.searchLimitInvalid", "Invalid search limit."},
+    {"PLAYERS_INVALID_RANGE", "errors.profiles.invalidRange", "Invalid sales history window."},
+    {"PLAYERS_PROFILE_FAILED", "errors.profiles.profileFailed", "Failed to load profile."},
+    {"PLAYERS_SALES_FAILED", "errors.profiles.salesFailed", "Failed to load sales history."},
+    {"PLAYERS_SEARCH_FAILED", "errors.profiles.searchFailed", "Search failed. Please try again."},
+    {"PLAYERS_PROXY_FAILED", "errors.profiles.proxyFailed", "Some profile data is temporarily unavailable."},
+    {"EB_AUTH_REQUIRED", "errors.eventBus.authRequired", "You must be signed in to use chat."},
+    {"EB_AUTH_INVALID", "errors.eventBus.authInvalid", "Your session expired. Please sign in again."},
+    {"EB_UNAUTHORIZED", "errors.eventBus.authRequired", "You must be signed in to use chat."},
+    {"EB_TARGET_OFFLINE", "errors.eventBus.targetOffline", "That friend is offline right now."},
+    {"EB_NOT_FRIEND", "errors.eventBus.notFriend", "You can only message friends."},
+    {"EB_RATE_LIMITED", "errors.eventBus.rateLimited", "You're sending messages too fast. Slow down."},
+    {"EB_MSG_INVALID", "errors.eventBus.msgInvalid", "The message could not be sent."},
+    {"EB_TEXT_TOO_LONG", "errors.eventBus.textTooLong", "That message is too long."},
+    {"EB_UNKNOWN_TYPE", "errors.eventBus.unknownType", "Chat client is out of date. Please refresh."},
+    {"EB_INTERNAL", "errors.eventBus.internal", "Chat service hit an error. Try again."},
 };
 
 const char *v10_gapi_error_text(const cJSON *error, const char *fallback) {
@@ -119,8 +120,8 @@ const char *v10_gapi_error_text(const cJSON *error, const char *fallback) {
     const char *code = cJSON_GetStringValue(cJSON_GetObjectItem(error, "code"));
     if (code)
         for (size_t i = 0; i < sizeof(k_errors) / sizeof(k_errors[0]); i++)
-            if (!strcmp(code, k_errors[i].code)) return k_errors[i].text;
+            if (!strcmp(code, k_errors[i].code)) return I18N(k_errors[i].key, k_errors[i].text);
     const char *msg = cJSON_GetStringValue(cJSON_GetObjectItem(error, "message"));
     if (msg && msg[0]) return msg;
-    return fallback ? fallback : "An unexpected error occurred. Please try again.";
+    return fallback ? fallback : I18N("errors.common.unknown", "An unexpected error occurred. Please try again.");
 }

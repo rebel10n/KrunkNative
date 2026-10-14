@@ -63,7 +63,15 @@
 #define OM_STATUS_SECONDS 4.0
 #define OM_BADGE_HTML "<div class='knOmBadge'>LOADOUT</div>" // on a weapon tile in the loadout (knOmOwned)
 
-static const char *const TAB_NAMES[OM_TAB_COUNT] = {"Objects", "Entities", "NPCs", "Weapons"};
+// the tab labels, through i18n at render time (kn.om.tab.*)
+static const char *tab_name(const int tab) {
+    switch (tab) {
+        case 0: return I18N("kn.om.tab.objects", "Objects");
+        case 1: return I18N("kn.om.tab.entities", "Entities");
+        case 2: return I18N("kn.om.tab.npcs", "NPCs");
+        default: return I18N("kn.om.tab.weapons", "Weapons");
+    }
+}
 
 static struct {
     int tab;              // ObjectManagerTab on show
@@ -197,15 +205,15 @@ static const char *om_status_text(int *error_out) {
         text = g_om.status;
         error = g_om.status_error;
     } else if (!client || !client->me) {
-        text = "Join a game to spawn things";
+        text = I18N("kn.om.status.join", "Join a game to spawn things");
     } else if (!om_server_ok(client)) {
-        text = "This server has no Object Manager";
+        text = I18N("kn.om.status.noServer", "This server has no Object Manager");
         error = 1;
     } else if (g_om.caps >= 0 && g_om.tab == OM_TAB_WEAPONS && !(g_om.caps & OM_CAP_WEAPONS)) {
-        text = "Extra weapons are off in this game";
+        text = I18N("kn.om.status.noExtras", "Extra weapons are off in this game");
         error = 1;
     } else if (g_om.caps >= 0 && g_om.tab != OM_TAB_WEAPONS && !(g_om.caps & OM_CAP_SPAWN)) {
-        text = "Only developers and the host can spawn here";
+        text = I18N("kn.om.status.hostOnly", "Only developers and the host can spawn here");
         error = 1;
     }
     *error_out = error;
@@ -260,33 +268,36 @@ static void om_grid_html(char **buf, size_t *len, size_t *cap) {
         }
     }
     if (!shown) {
-        om_append(buf, len, cap, "<div class='knOmEmpty'>%s</div>", g_om.search[0] ? "No matches" : "Nothing to spawn here yet");
+        om_append(buf, len, cap, "<div class='knOmEmpty'>%s</div>", g_om.search[0] ? I18N("kn.om.noMatches", "No matches")
+                                                                                     : I18N("kn.om.nothing", "Nothing to spawn here yet"));
     }
     om_append(buf, len, cap, "</div>");
 }
 
 static const char *om_hint(void) {
-    if (g_om.props_uid >= 0) return "Enter or leave a field to apply it: each change is one undo step (U) | Back: the grid";
+    if (g_om.props_uid >= 0) return I18N("kn.om.hint.props", "Enter or leave a field to apply it: each change is one undo step (U) | Back: the grid");
     switch (g_om.tab) {
-        case OM_TAB_WEAPONS: return "Left click: add to your loadout (again: take it out) | Right click: drop it at your crosshair";
-        case OM_TAB_OBJECTS: return "Left click: place it on the surface at your crosshair, facing you | U: undo, Delete: remove at the crosshair";
-        case OM_TAB_NPCS: return "Left click: spawn at your crosshair | U: undo, Delete: remove at the crosshair";
-        case OM_TAB_ENTITIES: return "Left click: spawn at your crosshair (power-ups despawn on their own timer)";
-        default: return "Left click: spawn at your crosshair";
+        case OM_TAB_WEAPONS: return I18N("kn.om.hint.weapons", "Left click: add to your loadout (again: take it out) | Right click: drop it at your crosshair");
+        case OM_TAB_OBJECTS: return I18N("kn.om.hint.objects", "Left click: place it on the surface at your crosshair, facing you | U: undo, Delete: remove at the crosshair");
+        case OM_TAB_NPCS: return I18N("kn.om.hint.npcs", "Left click: spawn at your crosshair | U: undo, Delete: remove at the crosshair");
+        case OM_TAB_ENTITIES: return I18N("kn.om.hint.entities", "Left click: spawn at your crosshair (power-ups despawn on their own timer)");
+        default: return I18N("kn.om.hint.spawn", "Left click: spawn at your crosshair");
     }
 }
 
 static const char *om_tool_gun_line(void) {
     const Client *client = om_client();
     const Player *me = client ? client->me : NULL;
-    if (g_om.caps >= 0 && !(g_om.caps & OM_CAP_SPAWN)) return "Only developers and the host can use the Tool Gun here";
+    if (g_om.caps >= 0 && !(g_om.caps & OM_CAP_SPAWN)) return I18N("kn.om.gun.hostOnly", "Only developers and the host can use the Tool Gun here");
     const int map = g_om.caps >= 0 && (g_om.caps & OM_CAP_MAP);
-    if (me && me->weapon && me->weapon->kn_tool) return map ? "Tool Gun in hand: works on the map too" : "Tool Gun in hand: shoot to use";
-    if (me && me->weapon && me->weapon->kn_physgun) return map ? "Physics Gun in hand: works on the map too" : "Physics Gun in hand";
+    if (me && me->weapon && me->weapon->kn_tool)
+        return map ? I18N("kn.om.gun.toolMap", "Tool Gun in hand: works on the map too") : I18N("kn.om.gun.toolHand", "Tool Gun in hand: shoot to use");
+    if (me && me->weapon && me->weapon->kn_physgun)
+        return map ? I18N("kn.om.gun.physMap", "Physics Gun in hand: works on the map too") : I18N("kn.om.gun.physHand", "Physics Gun in hand");
     for (int i = 0; me && me->loadout && i < me->loadout_size; i++) {
-        if (me->loadout[i] == WEAPON_ID_TOOL_GUN) return "Tool Gun in your loadout";
+        if (me->loadout[i] == WEAPON_ID_TOOL_GUN) return I18N("kn.om.gun.toolLoadout", "Tool Gun in your loadout");
     }
-    return "Pick a tool to equip the Tool Gun";
+    return I18N("kn.om.gun.pick", "Pick a tool to equip the Tool Gun");
 }
 
 int object_manager_ui_caps(void) { return g_om.caps > 0 ? g_om.caps : 0; }
@@ -309,7 +320,8 @@ static int om_holds(const int weapon_id) {
 // The right pane: the tools (the picked one marked), its hint, and whether the Tool Gun is in hand
 static void om_tools_html(char **buf, size_t *len, size_t *cap) {
     const int allowed = g_om.caps < 0 || (g_om.caps & OM_CAP_SPAWN);
-    om_append(buf, len, cap, "<div id='knOmTools' class='knOmTools%s'><div class='knOmToolsTitle'>Tools</div><div class='knOmGuns'>", allowed ? "" : " knOmOff");
+    om_append(buf, len, cap, "<div id='knOmTools' class='knOmTools%s'><div class='knOmToolsTitle'>%s</div><div class='knOmGuns'>", allowed ? "" : " knOmOff",
+              I18N("kn.om.tools", "Tools"));
     // not id='knOmPhys' / 'knOmGun': on the web window.<id> would be the element (named access, as knOmSearchBox)
     om_gun_tile(buf, len, cap, "knOmToolGunTile", "knOmToolGunPick()", WEAPON_ID_TOOL_GUN, om_holds(WEAPON_ID_TOOL_GUN));
     om_gun_tile(buf, len, cap, "knOmPhysRow", "knOmPhys()", WEAPON_ID_PHYS_GUN, om_holds(WEAPON_ID_PHYS_GUN));
@@ -325,20 +337,24 @@ static void om_tools_html(char **buf, size_t *len, size_t *cap) {
     om_build_snap_text(snap, sizeof(snap));
     // the grid step: any value (Enter / leaving the field applies it), Off, and PageDown / PageUp in game
     om_append(buf, len, cap,
-              "<div class='knOmOpt'><span class='knOmOptName'>Snap</span><input id='knOmSnapBox' class='knOmSnapBox' type='text' maxlength='6' "
-              "value='%s' onchange='knOmSnapSet(this.value)'/><span id='knOmSnapOff' class='knOmOptBtn%s' onclick='knOmSnapSet(0)'>Off</span></div>",
-              om_build_snap() > 0.0f ? snap : "", om_build_snap() > 0.0f ? "" : " knOmOptA");
-    om_append(buf, len, cap, "<div class='knOmOpt'><span class='knOmOptName'>Release</span>"
-                             "<span id='knOmDrop0' class='knOmOptBtn%s' onclick='knOmPhysDrop(0)'>Freeze</span>"
-                             "<span id='knOmDrop1' class='knOmOptBtn%s' onclick='knOmPhysDrop(1)'>Drop</span></div>",
-              om_build_drop() ? "" : " knOmOptA", om_build_drop() ? " knOmOptA" : "");
+              "<div class='knOmOpt'><span class='knOmOptName'>%s</span><input id='knOmSnapBox' class='knOmSnapBox' type='text' maxlength='6' "
+              "value='%s' onchange='knOmSnapSet(this.value)'/><span id='knOmSnapOff' class='knOmOptBtn%s' onclick='knOmSnapSet(0)'>%s</span></div>",
+              I18N("kn.om.snap", "Snap"), om_build_snap() > 0.0f ? snap : "", om_build_snap() > 0.0f ? "" : " knOmOptA", I18N("kn.om.off", "Off"));
+    om_append(buf, len, cap, "<div class='knOmOpt'><span class='knOmOptName'>%s</span>"
+                             "<span id='knOmDrop0' class='knOmOptBtn%s' onclick='knOmPhysDrop(0)'>%s</span>"
+                             "<span id='knOmDrop1' class='knOmOptBtn%s' onclick='knOmPhysDrop(1)'>%s</span></div>",
+              I18N("kn.om.release", "Release"), om_build_drop() ? "" : " knOmOptA", I18N("kn.om.freeze", "Freeze"),
+              om_build_drop() ? " knOmOptA" : "", I18N("kn.om.drop", "Drop"));
     const ObjectManagerToolInfo *t = object_manager_tool_info(g_om.tool);
     om_append(buf, len, cap, "<div id='knOmToolHint' class='knOmToolHint'>%s</div>", t ? t->hint : "");
     om_append(buf, len, cap, "<div id='knOmToolGun' class='knOmToolGun'>%s</div></div>", om_tool_gun_line());
 }
 
 static void om_clear_label(char *out, const size_t size, const Player *me) {
-    snprintf(out, size, "Clear Extras (%d/%d)", me ? me->extra_weapon_count : 0, PLAYER_EXTRA_WEAPONS_MAX);
+    char have[16], max[16];
+    snprintf(have, sizeof(have), "%d", me ? me->extra_weapon_count : 0);
+    snprintf(max, sizeof(max), "%d", PLAYER_EXTRA_WEAPONS_MAX);
+    i18n_trf(out, size, "kn.om.clearExtras", "Clear Extras ({0}/{1})", 2, I18N_ARGV(have, max));
 }
 
 // ---------------------------------------------------------------- the Properties panel
@@ -388,9 +404,9 @@ static void om_prop_row(char **buf, size_t *len, size_t *cap, const int index, c
         case OM_FIELD_ON:
         case OM_FIELD_OFF: {
             const int on = cJSON_IsTrue(value);
-            om_append(buf, len, cap, "<span id='knOmF%d_1' class='knOmOptBtn%s' onclick='knOmField(%d,1)'>On</span>"
-                      "<span id='knOmF%d_0' class='knOmOptBtn%s' onclick='knOmField(%d,0)'>Off</span>",
-                      index, on ? " knOmOptA" : "", index, index, on ? "" : " knOmOptA", index);
+            om_append(buf, len, cap, "<span id='knOmF%d_1' class='knOmOptBtn%s' onclick='knOmField(%d,1)'>%s</span>"
+                      "<span id='knOmF%d_0' class='knOmOptBtn%s' onclick='knOmField(%d,0)'>%s</span>",
+                      index, on ? " knOmOptA" : "", index, I18N("kn.om.on", "On"), index, on ? "" : " knOmOptA", index, I18N("kn.om.off", "Off"));
             break;
         }
         case OM_FIELD_SELECT:
@@ -432,9 +448,11 @@ static void om_prop_row(char **buf, size_t *len, size_t *cap, const int index, c
         char lo[24], hi[24];
         om_number_text(lo, sizeof(lo), mn);
         om_number_text(hi, sizeof(hi), mx);
-        om_append(buf, len, cap, "<span class='knOmPropRange'>%s to %s</span>", lo, hi);
+        char range[96];
+        I18N_F(range, "kn.om.range", "{0} to {1}", lo, hi);
+        om_append(buf, len, cap, "<span class='knOmPropRange'>%s</span>", range);
     } else if (f->kind == OM_FIELD_VEC3 && !strcmp(f->key, "r")) {
-        om_append(buf, len, cap, "<span class='knOmPropRange'>radians</span>");
+        om_append(buf, len, cap, "<span class='knOmPropRange'>%s</span>", I18N("kn.om.radians", "radians"));
     }
     om_append(buf, len, cap, "</span></div>");
 }
@@ -444,23 +462,26 @@ static void om_props_html(char **buf, size_t *len, size_t *cap) {
     const Object *o = om_props_object();
     om_append(buf, len, cap, "<div id='knOmPropsPane' class='knOmProps'><div class='knOmPropsHead'>");
     if (!o) {
-        om_append(buf, len, cap, "<span class='knOmPropsTitle'>Gone</span><span class='knOmPropsSub'>Nothing to edit: the object went or may not change</span>"
-                                 "<span id='knOmPropsBack' class='knOmOptBtn' onclick='knOmPropsClose()'>Back</span></div></div>");
+        om_append(buf, len, cap, "<span class='knOmPropsTitle'>%s</span><span class='knOmPropsSub'>%s</span>"
+                                 "<span id='knOmPropsBack' class='knOmOptBtn' onclick='knOmPropsClose()'>%s</span></div></div>",
+                  I18N("kn.om.props.gone", "Gone"), I18N("kn.om.props.goneSub", "Nothing to edit: the object went or may not change"),
+                  I18N("generic.back", "Back"));
         return;
     }
     char title[64];
     om_title_case(title, sizeof(title), prefab_name(o->prefab));
     const int map = object_manager_is_map_object(&client->game, g_om.props_uid);
-    char owner[96] = "map object";
+    char owner[96];
+    snprintf(owner, sizeof(owner), "%s", I18N("kn.om.props.mapObject", "map object"));
     if (!map) {
         const Player *who = client_find_player((Client *) client, o->spawn_owner);
         char esc[64];
         om_escape(esc, sizeof(esc), who ? who->name : "?");
-        snprintf(owner, sizeof(owner), "spawned by %s", esc);
+        I18N_F(owner, "kn.om.props.spawnedBy", "spawned by {0}", esc);
     }
     om_append(buf, len, cap, "<span class='knOmPropsTitle'>%s</span><span class='knOmPropsSub'>#%d, %s</span>"
-                             "<span id='knOmPropsBack' class='knOmOptBtn' onclick='knOmPropsClose()'>Back</span></div><div id='knOmPropsList' class='knOmPropsList'>",
-              title, g_om.props_uid, owner);
+                             "<span id='knOmPropsBack' class='knOmOptBtn' onclick='knOmPropsClose()'>%s</span></div><div id='knOmPropsList' class='knOmPropsList'>",
+              title, g_om.props_uid, owner, I18N("generic.back", "Back"));
     const char *section = NULL;
     int shown = 0;
     cJSON *record = object_manager_record(&client->game, g_om.props_uid); // (the map's palette colour resolved)
@@ -477,7 +498,7 @@ static void om_props_html(char **buf, size_t *len, size_t *cap) {
         shown++;
     }
     cJSON_Delete(record);
-    if (!shown) om_append(buf, len, cap, "<div class='knOmEmpty'>No fields to edit</div>");
+    if (!shown) om_append(buf, len, cap, "<div class='knOmEmpty'>%s</div>", I18N("kn.om.props.none", "No fields to edit"));
     om_append(buf, len, cap, "</div></div>");
 }
 
@@ -493,24 +514,25 @@ static char *om_body_html(void) {
 char *object_manager_window_gen(const int id, const char **header) {
     if (id != OBJECT_MANAGER_WINDOW) return NULL;
     om_load_tab();
-    if (header) *header = "Object Manager";
+    if (header) *header = I18N("kn.om.title", "Object Manager");
     const Player *me = om_client() ? om_client()->me : NULL;
     char *buf = NULL;
     size_t len = 0, cap = 0;
     char search[sizeof(g_om.search) * 6];
     om_escape(search, sizeof(search), g_om.search);
     // v7 hides #windowHeader: the title is part of the window
-    om_append(&buf, &len, &cap, "<div class='knOm'><div class='knOmTitle'>Object Manager</div><div class='knOmTop'><div class='bigMenTabs knOmTabs'>");
+    om_append(&buf, &len, &cap, "<div class='knOm'><div class='knOmTitle'>%s</div><div class='knOmTop'><div class='bigMenTabs knOmTabs'>",
+              I18N("kn.om.title", "Object Manager"));
     for (int i = 0; i < OM_TAB_COUNT; i++) {
         om_append(&buf, &len, &cap, "<div id='knOmTab%d' class='bigMenTab%s' onclick='knOmTab(%d)'>%s</div>", i, i == g_om.tab ? " bigMenTabA" : "", i,
-                  TAB_NAMES[i]);
+                  tab_name(i));
     }
     om_append(&buf, &len, &cap,
               // not id='knOmSearch': on the web window.knOmSearch would be the element (named access),
               // so kn-shim.js installs no knOmSearch forwarder and oninput throws
-              "</div><input id='knOmSearchBox' class='knOmSearch' type='text' maxlength='40' placeholder='Search' value='%s' "
+              "</div><input id='knOmSearchBox' class='knOmSearch' type='text' maxlength='40' placeholder='%s' value='%s' "
               "oninput='knOmSearch(this)'/></div><div class='knOmMain'><div id='knOmBody'>",
-              search);
+              I18N("generic.search", "Search"), search);
     char *body = om_body_html();
     om_append(&buf, &len, &cap, "%s</div>", body ? body : "");
     free(body);
@@ -522,8 +544,9 @@ char *object_manager_window_gen(const int id, const char **header) {
         om_clear_label(clear, sizeof(clear), me);
         om_append(&buf, &len, &cap, "<div id='knOmClearBtn' class='button small buttonR knOmBtn' onclick='knOmClear()'>%s</div>", clear);
     }
-    om_append(&buf, &len, &cap, "<div id='knOmRemoveBtn' class='button small knOmBtn' onclick='knOmRemove()'>Remove</div>"
-                                "<div id='knOmUndoBtn' class='button small knOmBtn' onclick='knOmUndo()'>Undo</div></div></div></div>");
+    om_append(&buf, &len, &cap, "<div id='knOmRemoveBtn' class='button small knOmBtn' onclick='knOmRemove()'>%s</div>"
+                                "<div id='knOmUndoBtn' class='button small knOmBtn' onclick='knOmUndo()'>%s</div></div></div></div>",
+              I18N("kn.om.remove", "Remove"), I18N("kn.om.undo", "Undo"));
     return buf;
 }
 
@@ -700,7 +723,7 @@ static void om_send_fields(const ObjectManagerField *f, cJSON *patch) {
     const size_t n = json ? strlen(json) + 1 : 0;
     if (!me || !om_server_ok(client) || !n || n > OM_FIELDS_MAX + 1) {
         free(json);
-        om_set_status(!me ? "Join a game to edit objects" : "This server has no Object Manager", 1);
+        om_set_status(!me ? I18N("kn.om.status.joinEdit", "Join a game to edit objects") : I18N("kn.om.status.noServer", "This server has no Object Manager"), 1);
         return;
     }
     uint8_t buffer[sizeof(NetSpawnEditPacket) + OM_FIELDS_MAX + 1];
@@ -748,7 +771,7 @@ static void om_field_changed(const int index, const int axis, const char *text) 
             for (int i = 1; ok && i < 7; i++) ok = (colour[i] >= '0' && colour[i] <= '9') || ((colour[i] | 32) >= 'a' && (colour[i] | 32) <= 'f');
             if (!ok) {
                 cJSON_Delete(patch);
-                om_set_status("Colours are #rrggbb", 1);
+                om_set_status(I18N("kn.om.status.colour", "Colours are #rrggbb"), 1);
                 om_props_refresh();
                 return;
             }
@@ -830,15 +853,15 @@ static void om_pick_tool(const int tool) {
     const Client *client = om_client();
     const Player *me = client ? client->me : NULL;
     if (!me) {
-        om_set_status("Join a game to use the Tool Gun", 1);
+        om_set_status(I18N("kn.om.status.joinTool", "Join a game to use the Tool Gun"), 1);
         return;
     }
     if (!om_server_ok(client)) {
-        om_set_status("This server has no Object Manager", 1);
+        om_set_status(I18N("kn.om.status.noServer", "This server has no Object Manager"), 1);
         return;
     }
     char text[96];
-    snprintf(text, sizeof(text), "Tool: %s", object_manager_tool_info(tool)->name);
+    I18N_F(text, "kn.om.toolPicked", "Tool: {0}", object_manager_tool_info(tool)->name);
     om_equip_gun(me, WEAPON_ID_TOOL_GUN, text);
 }
 
@@ -847,14 +870,14 @@ void object_manager_ui_pick_physgun(void) {
     const Client *client = om_client();
     const Player *me = client ? client->me : NULL;
     if (!me) {
-        om_set_status("Join a game to use the Physics Gun", 1);
+        om_set_status(I18N("kn.om.status.joinPhys", "Join a game to use the Physics Gun"), 1);
         return;
     }
     if (!om_server_ok(client)) {
-        om_set_status("This server has no Object Manager", 1);
+        om_set_status(I18N("kn.om.status.noServer", "This server has no Object Manager"), 1);
         return;
     }
-    om_equip_gun(me, WEAPON_ID_PHYS_GUN, "Physics Gun: hold fire on an object to carry it");
+    om_equip_gun(me, WEAPON_ID_PHYS_GUN, I18N("kn.om.physPicked", "Physics Gun: hold fire on an object to carry it"));
 }
 
 int object_manager_ui_tool(void) {
@@ -865,11 +888,11 @@ int object_manager_ui_tool(void) {
 static void om_pick(const int tab, const int item, const int alt) {
     const Client *client = om_client();
     if (!client || !client->me) {
-        om_set_status("Join a game to spawn things", 1);
+        om_set_status(I18N("kn.om.status.join", "Join a game to spawn things"), 1);
         return;
     }
     if (!om_server_ok(client)) {
-        om_set_status("This server has no Object Manager", 1);
+        om_set_status(I18N("kn.om.status.noServer", "This server has no Object Manager"), 1);
         return;
     }
     if (tab == OM_TAB_NPCS || tab == OM_TAB_ENTITIES || tab == OM_TAB_OBJECTS) {
@@ -1020,7 +1043,7 @@ static void om_on_result(const NetSpawnResultPacket *r) {
     }
     if (r->action == OM_ACTION_EDIT && r->limit == OM_FIELDS_ANSWER) { // the Properties panel's patch
         char text[160];
-        if (r->status == OM_STATUS_OK) snprintf(text, sizeof(text), "%s: saved", g_om.props_sent[0] ? g_om.props_sent : "Field");
+        if (r->status == OM_STATUS_OK) I18N_F(text, "kn.om.saved", "{0}: saved", g_om.props_sent[0] ? g_om.props_sent : I18N("kn.om.field", "Field"));
         else snprintf(text, sizeof(text), "%s", object_manager_status_text(r->status));
         om_set_status(text, r->status != OM_STATUS_OK);
         om_props_refresh(); // the values the object has now
@@ -1044,22 +1067,22 @@ static void om_on_result(const NetSpawnResultPacket *r) {
     const Weapon *w = r->item >= 0 && r->item < WEAPON_TABLE_COUNT && r->action != OM_ACTION_TOOL ? rules_weapon(r->item) : NULL;
     char text[160] = "";
     switch (r->action) {
-        case OM_ACTION_ADD_WEAPON: snprintf(text, sizeof(text), "%s added to your loadout", w ? w->name : "Weapon"); break;
-        case OM_ACTION_REMOVE_WEAPON: snprintf(text, sizeof(text), "%s taken out of your loadout", w ? w->name : "Weapon"); break;
-        case OM_ACTION_CLEAR_WEAPONS: snprintf(text, sizeof(text), "Extra weapons cleared"); break;
-        case OM_ACTION_DROP_WEAPON: snprintf(text, sizeof(text), "%s dropped at your crosshair", w ? w->name : "Weapon"); break;
-        case OM_ACTION_UNDO: snprintf(text, sizeof(text), "Undone"); break;
-        case OM_ACTION_REMOVE_AIM: snprintf(text, sizeof(text), "Removed"); break;
+        case OM_ACTION_ADD_WEAPON: I18N_F(text, "kn.om.added", "{0} added to your loadout", w ? w->name : I18N("kn.om.weapon", "Weapon")); break;
+        case OM_ACTION_REMOVE_WEAPON: I18N_F(text, "kn.om.takenOut", "{0} taken out of your loadout", w ? w->name : I18N("kn.om.weapon", "Weapon")); break;
+        case OM_ACTION_CLEAR_WEAPONS: snprintf(text, sizeof(text), "%s", I18N("kn.om.cleared", "Extra weapons cleared")); break;
+        case OM_ACTION_DROP_WEAPON: I18N_F(text, "kn.om.droppedAim", "{0} dropped at your crosshair", w ? w->name : I18N("kn.om.weapon", "Weapon")); break;
+        case OM_ACTION_UNDO: snprintf(text, sizeof(text), "%s", I18N("kn.om.undone", "Undone")); break;
+        case OM_ACTION_REMOVE_AIM: snprintf(text, sizeof(text), "%s", I18N("kn.om.removed", "Removed")); break;
         case OM_ACTION_DROP_HELD:
-            if (r->item == WEAPON_ID_TOOL_GUN) snprintf(text, sizeof(text), "Tool Gun put away");
-            else snprintf(text, sizeof(text), "%s dropped", w ? w->name : "Weapon");
+            if (r->item == WEAPON_ID_TOOL_GUN) snprintf(text, sizeof(text), "%s", I18N("kn.om.toolAway", "Tool Gun put away"));
+            else I18N_F(text, "kn.om.dropped", "{0} dropped", w ? w->name : I18N("kn.om.weapon", "Weapon"));
             break;
         case OM_ACTION_TOOL:
             if (r->limit == OM_TOOL_SHOWN) return; // Info: the NOTIFY carries the text
-            if (r->limit == OM_TOOL_COPIED) snprintf(text, sizeof(text), "Copied: shoot a surface to place the copy");
-            else if (r->limit == OM_TOOL_PASTED) snprintf(text, sizeof(text), "Copy placed");
-            else if (r->item == OM_TOOL_ROTATOR) snprintf(text, sizeof(text), "Rotated");
-            else snprintf(text, sizeof(text), "Removed");
+            if (r->limit == OM_TOOL_COPIED) snprintf(text, sizeof(text), "%s", I18N("kn.om.copied", "Copied: shoot a surface to place the copy"));
+            else if (r->limit == OM_TOOL_PASTED) snprintf(text, sizeof(text), "%s", I18N("kn.om.pasted", "Copy placed"));
+            else if (r->item == OM_TOOL_ROTATOR) snprintf(text, sizeof(text), "%s", I18N("kn.om.rotated", "Rotated"));
+            else snprintf(text, sizeof(text), "%s", I18N("kn.om.removed", "Removed"));
             break;
         case OM_ACTION_SPAWN_NPC:
         case OM_ACTION_SPAWN_ENTITY:
@@ -1067,10 +1090,11 @@ static void om_on_result(const NetSpawnResultPacket *r) {
             int count = 0;
             const int tab = r->action == OM_ACTION_SPAWN_NPC ? OM_TAB_NPCS : r->action == OM_ACTION_SPAWN_ENTITY ? OM_TAB_ENTITIES : OM_TAB_OBJECTS;
             const ObjectManagerEntry *entries = object_manager_entries(tab, &count);
-            snprintf(text, sizeof(text), "%s spawned at your crosshair", entries && r->item >= 0 && r->item < count ? entries[r->item].name : "It");
+            I18N_F(text, "kn.om.spawned", "{0} spawned at your crosshair",
+                   entries && r->item >= 0 && r->item < count ? entries[r->item].name : I18N("kn.om.it", "It"));
             break;
         }
-        default: snprintf(text, sizeof(text), "Done"); break;
+        default: snprintf(text, sizeof(text), "%s", I18N("kn.om.done", "Done")); break;
     }
     om_set_status(text, 0);
 }
@@ -1169,14 +1193,16 @@ static void om_tool_shots(Client *client, const Player *me) {
 static void om_tool_hud(const Player *me) {
     char text[sizeof(g_om.hud_text)] = "";
     if (me && me->active && me->weapon && me->weapon->kn_physgun) {
-        snprintf(text, sizeof(text), "PHYSICS GUN: %s", om_build_drop() ? "DROP" : "FREEZE");
+        I18N_F(text, "kn.om.hud.phys", "Physics Gun: {0}", om_build_drop() ? I18N("kn.om.drop", "Drop") : I18N("kn.om.freeze", "Freeze"));
     } else if (me && me->active && me->weapon && me->weapon->kn_tool) {
         om_load_tool();
         const ObjectManagerToolInfo *t = object_manager_tool_info(g_om.tool);
-        if (t && t->handles) snprintf(text, sizeof(text), "TOOL: %s (SNAP %g)", t->name, (double) om_build_snap());
-        else snprintf(text, sizeof(text), "TOOL: %s", t ? t->name : "?");
-        for (char *c = text; *c; c++) *c = (char) (*c >= 'a' && *c <= 'z' ? *c - 32 : *c);
+        char snap[24];
+        snprintf(snap, sizeof(snap), "%g", (double) om_build_snap());
+        if (t && t->handles) I18N_F(text, "kn.om.hud.toolSnap", "Tool: {0} (Snap {1})", t->name, snap);
+        else I18N_F(text, "kn.om.toolPicked", "Tool: {0}", t ? t->name : "?");
     }
+    for (char *c = text; *c; c++) *c = (char) (*c >= 'a' && *c <= 'z' ? *c - 32 : *c); // the HUD's caps (ASCII; other scripts as they are)
     HtmlElem hud = html_dom_by_id("knToolHud");
     if (!strcmp(text, g_om.hud_text) && (hud || !text[0])) return;
     if (!hud && text[0]) {
@@ -1228,9 +1254,10 @@ void object_manager_ui_chat_sent(const char *text) {
 
 // The grid step changed (the field, the snap keys, `tool_snap`): the field and a status line
 void object_manager_ui_snap_changed(void) {
-    char snap[16], text[48];
+    char snap[16], text[96];
     om_build_snap_text(snap, sizeof(snap));
-    snprintf(text, sizeof(text), om_build_snap() > 0.0f ? "Snap: %s units" : "Snap: %s", snap);
+    if (om_build_snap() > 0.0f) I18N_F(text, "kn.om.snapUnits", "Snap: {0} units", snap);
+    else snprintf(text, sizeof(text), "%s", I18N("kn.om.snapOff", "Snap: off"));
     om_set_status(text, 0);
     om_update_tools();
     const HtmlElem box = om_window_open() ? html_dom_by_id("knOmSnapBox") : 0;

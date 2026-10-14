@@ -76,7 +76,8 @@ void seek_prefs_describe(char *out, const size_t n) {
     const int mode = seek_prefs_mode();
     const GameModeConfig *m = mode >= 0 ? mode_config(mode) : NULL;
     const char *map = seek_prefs_map_name();
-    snprintf(out, n, "%s on %s", m && m->name ? m->name : "any mode", map ? map : "any map");
+    i18n_trf(out, n, "kn.quickplay.describe", "{0} on {1}", 2,
+             I18N_ARGV(m && m->name ? m->name : I18N("kn.quickplay.anyMode", "any mode"), map ? map : I18N("kn.quickplay.anyMap", "any map")));
 }
 
 static void option(StrBuf *sb, const char *value, const char *label, const int selected) {
@@ -92,28 +93,36 @@ static void option(StrBuf *sb, const char *value, const char *label, const int s
 // Find New Game (F4) seek into; the server browser lists both kinds whatever it says.
 static void server_type_html(StrBuf *sb) {
     const SeekServers servers = seek_prefs_servers();
-    sb_append(sb, "<div class=\"settName\" title=\"What Quick Match and Find New Game (F4) look for. The server browser lists both; "
-                  "official krunker.io lobbies open in your browser\">Server Type "
-                  "<select id=\"knSeekServers\" onchange=\"window.setSetting(&quot;" SEEK_SERVERS_KEY "&quot;, this.value)\" class=\"inputGrey2\">");
+    sb_append(sb, "<div class=\"settName\" title=\"");
+    sb_append_esc(sb, I18N("kn.quickplay.serverType.info", "What Quick Match and Find New Game (F4) look for. The server browser lists both; "
+                                                            "official krunker.io lobbies open in your browser"));
+    sb_append(sb, "\">");
+    sb_append_esc(sb, I18N("kn.quickplay.serverType", "Server Type"));
+    sb_append(sb, " <select id=\"knSeekServers\" onchange=\"window.setSetting(&quot;" SEEK_SERVERS_KEY "&quot;, this.value)\" class=\"inputGrey2\">");
     option(sb, "kn", "KrunkNative", servers == SEEK_SERVERS_KN);
-    option(sb, "official", "Official (krunker.io)", servers == SEEK_SERVERS_OFFICIAL);
-    option(sb, "both", "Both", servers == SEEK_SERVERS_BOTH);
-    sb_append(sb, "</select></div>"
-                  "<div class=\"settName\" style=\"color:rgba(255,255,255,0.5);font-size:15px\">Quick Match and F4 seek into these. "
-                  "Official krunker.io lobbies open in your browser: this client cannot join them. Both prefers a KrunkNative server when one matches.</div>");
+    option(sb, "official", I18N("kn.quickplay.serverType.official", "Official (krunker.io)"), servers == SEEK_SERVERS_OFFICIAL);
+    option(sb, "both", I18N("kn.quickplay.serverType.both", "Both"), servers == SEEK_SERVERS_BOTH);
+    sb_append(sb, "</select></div><div class=\"settName\" style=\"color:rgba(255,255,255,0.5);font-size:15px\">");
+    sb_append_esc(sb, I18N("kn.quickplay.serverType.note", "Quick Match and F4 seek into these. "
+                                                            "Official krunker.io lobbies open in your browser: this client cannot join them. Both prefers a KrunkNative server when one matches."));
+    sb_append(sb, "</div>");
 }
 #endif
 
 static void section_html(StrBuf *sb) {
     char value[16];
     sb_append(sb, "<div class=\"setHed\" id=\"setHed_quickplay\" onclick=\"window.windows[0].collapseFolder(this)\">"
-                  "<span class=\"material-icons plusOrMinus\">keyboard_arrow_down</span> Quickplay</div>"
-                  "<div class=\"setBodH\" id=\"setBod_quickplay\">");
+                  "<span class=\"material-icons plusOrMinus\">keyboard_arrow_down</span> ");
+    sb_append_esc(sb, I18N("kn.quickplay.header", "Quickplay"));
+    sb_append(sb, "</div><div class=\"setBodH\" id=\"setBod_quickplay\">");
     // Seek Mode
     const int mode = seek_prefs_mode();
-    sb_append(sb, "<div class=\"settName\" title=\"Quick Match, Find New Game (F4) and the server browser look for this mode\">Seek Mode "
-                  "<select id=\"knSeekMode\" onchange=\"window.setSetting(&quot;" SEEK_MODES_KEY "&quot;, this.value)\" class=\"inputGrey2\">");
-    option(sb, "", "Any", mode < 0);
+    sb_append(sb, "<div class=\"settName\" title=\"");
+    sb_append_esc(sb, I18N("kn.quickplay.seekMode.info", "Quick Match, Find New Game (F4) and the server browser look for this mode"));
+    sb_append(sb, "\">");
+    sb_append_esc(sb, I18N("kn.quickplay.seekMode", "Seek Mode"));
+    sb_append(sb, " <select id=\"knSeekMode\" onchange=\"window.setSetting(&quot;" SEEK_MODES_KEY "&quot;, this.value)\" class=\"inputGrey2\">");
+    option(sb, "", I18N("kn.quickplay.any", "Any"), mode < 0);
     int count = 0;
     const GameModeConfig *modes = mode_list(&count);
     for (int i = 0; modes && i < count; i++) {
@@ -124,9 +133,12 @@ static void section_html(StrBuf *sb) {
     sb_append(sb, "</select></div>");
     // Seek Map: the official maps (catalogue 0..31 = Krunker's mapIndex)
     const int map = seek_prefs_map();
-    sb_append(sb, "<div class=\"settName\" title=\"Quick Match, Find New Game (F4) and the server browser look for this map\">Seek Map "
-                  "<select id=\"knSeekMap\" onchange=\"window.setSetting(&quot;" SEEK_MAPS_KEY "&quot;, this.value)\" class=\"inputGrey2\">");
-    option(sb, "", "Any", map < 0);
+    sb_append(sb, "<div class=\"settName\" title=\"");
+    sb_append_esc(sb, I18N("kn.quickplay.seekMap.info", "Quick Match, Find New Game (F4) and the server browser look for this map"));
+    sb_append(sb, "\">");
+    sb_append_esc(sb, I18N("kn.quickplay.seekMap", "Seek Map"));
+    sb_append(sb, " <select id=\"knSeekMap\" onchange=\"window.setSetting(&quot;" SEEK_MAPS_KEY "&quot;, this.value)\" class=\"inputGrey2\">");
+    option(sb, "", I18N("kn.quickplay.any", "Any"), map < 0);
     for (size_t i = 0; i < map_catalog_count() && i < MAP_CATALOG_OFFICIAL_COUNT; i++) {
         const MapCatalogEntry *e = map_catalog_at(i);
         if (!e || !e->name) continue;

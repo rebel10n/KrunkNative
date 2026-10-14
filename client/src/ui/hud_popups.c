@@ -61,7 +61,7 @@ struct Popup {
     int shadow;              // strokeText lineWidth (0 = none)
     int disabled;
     // animateText / animateDiv state
-    char text[80];           // a trigger popup ("am" [tct, null]) is up to 70 characters
+    char text[192];          // a trigger popup ("am" [tct, null]) is up to 70 characters; translated texts are longer
     char text2[32];
     double font_size, scale, min_scale, scale_speed, life, fade, opacity, delay;
     int display;
@@ -84,7 +84,7 @@ static Popup *const POPUPS[] = {&g_score, &g_check, &g_medal};
 static int g_order_seq;
 static int g_score_total;            // bN: accumulated while the "+N" is up
 static struct {
-    char text[TRIGGER_TEXT_MAX + 1]; // medal names, trigger popup texts
+    char text[192];                  // medal names, trigger popup texts (TRIGGER_TEXT_MAX), translated lines
     int score;
     int index;                       // overlay.medalsList index, -1 = a text (classic banner only)
     int sound;                       // medal_<sound>
@@ -211,7 +211,7 @@ static void popup_render(Popup *p, const int visible) {
     }
     if (!popup_element(p)) return;
 
-    char style[256], left[24], top[24], font[24], opacity[24], z[16];
+    char style[512], left[24], top[24], font[24], opacity[24], z[16];
     snprintf(left, sizeof(left), "%g%%", p->left_pct);
     if (p->top_px) snprintf(top, sizeof(top), "%gpx", p->top);
     else snprintf(top, sizeof(top), "%g%%", p->top);
@@ -283,7 +283,7 @@ void hud_popups_score(const int delta) {
 
 void hud_popups_checkpoint(void) {
     if (!client_render_settings()->show_medals) return;
-    popup_animate_text(&g_check, "Checkpoint!", 75.0, 0.38, 1100.0, 100.0, 0.0, NULL); // ab.t("popup.checkpoint")
+    popup_animate_text(&g_check, I18N("popup.checkpoint", "Checkpoint!"), 75.0, 0.38, 1100.0, 100.0, 0.0, NULL);
 }
 
 // overlay.medalsList (game-overlay.js:141): the icon medals, img/medals/medal_<index>.png

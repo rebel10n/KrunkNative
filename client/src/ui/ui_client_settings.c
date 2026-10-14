@@ -182,6 +182,91 @@ static const ClientSetting SETTINGS[] = {
      NULL, 0, 0, 0, 0, "Reset", "resetClient"},
 };
 
+// ---- localisation. The tab's strings are Krunker Box Office's own: kn.client.<row>.name / .info /
+// .button, kn.client.cat.<folder>, kn.client.<row>.opt.<value> (cs_kn builds the key from the row),
+// except the labels v10's own settings share (CS_V10_NAMES, the folder and option keys below).
+// The keys are dynamic, so every one is named here for tools/i18n-import/i18n_lint.py, which
+// reads the I18N(key, english) pairs anywhere in the source and writes ui/i18n/kn/en.json:
+//   I18N("kn.client.windowMode.name", "Window Mode")  I18N("kn.client.windowMode.info", "F11 switches between windowed and the last fullscreen mode")
+//   I18N("kn.client.windowMode.opt.0", "Windowed")  I18N("kn.client.windowMode.opt.2", "Borderless")  I18N("kn.client.windowMode.opt.1", "Fullscreen")
+//   I18N("settings.quality.res", "Resolution")  I18N("kn.client.resolution.info", "Window size in windowed mode, display mode in fullscreen (borderless always covers the monitor)")
+//   I18N("kn.client.vsync.name", "V-Sync")  I18N("kn.client.vsync.info", "Wait for the display refresh (swap interval 1)")
+//   I18N("settings.quality.updRate", "Frame Cap")  I18N("kn.client.updateRate.info", "0 = uncapped (also Render > Frame Cap)")
+//   I18N("settings.interface.scale", "UI Scale")  I18N("kn.client.scaleUI.info", "Also Display > UI Scale")
+//   I18N("kn.client.rawInput.name", "Raw Input")  I18N("kn.client.rawInput.info", "Unaccelerated mouse motion while the pointer is locked")
+//   I18N("kn.client.audioBackend.name", "Audio Backend")  I18N("kn.client.audioBackend.info", "Sound output (and voice chat input); Auto tries every backend of this build in order")
+//   I18N("kn.client.audioBackend.opt.auto", "Auto")  I18N("kn.client.audioBackend.opt.null", "None (silent)")
+//   I18N("kn.client.audioOutput.name", "Audio Output")  I18N("kn.client.audioOutput.info", "Select hardware device for audio output")
+//   I18N("kn.client.audioOutput.notConnected", "{0} (not connected)")
+//   I18N("kn.client.priority.name", "Process Priority")  I18N("kn.client.priority.info", "CPU scheduling priority of the client process")
+//   I18N("kn.client.priority.opt.High", "High")  I18N("kn.client.priority.opt.AboveNormal", "Above Normal")  I18N("kn.client.priority.opt.Normal", "Normal")
+//   I18N("kn.client.priority.opt.BelowNormal", "Below Normal")  I18N("kn.client.priority.opt.Low", "Low")  I18N("kn.client.priority.opt.Idle", "Idle")
+//   I18N("kn.client.exitButton.name", "Exit Button")  I18N("kn.client.exitButton.info", "The Exit item in the menu")
+//   I18N("kn.client.discordRPC.name", "Discord Rich Presence")  I18N("kn.client.discordRPC.info", "Show the mode and map you play on your Discord profile")
+//   I18N("settings.client.resourceSwapper", "Resource Swapper")  I18N("kn.client.swapper.button", "Open folder")
+//   I18N("kn.client.swapper.info", "Files in the swapper folder replace the game's files at the same path (css/main.css, img/..., textures/..., sound/...)")
+//   I18N("kn.client.customCSS.name", "Custom CSS")  I18N("kn.client.customCSS.info", "Applies custom.css from the client folder over the menu and HUD")  I18N("kn.client.customCSS.button", "Edit")
+//   I18N("kn.client.startOffline.name", "Start Offline")  I18N("kn.client.startOffline.info", "Start in an offline game on the built-in server (like --offline)")
+//   I18N("kn.client.autoJoin.name", "Auto Join")  I18N("kn.client.autoJoin.info", "Enter the match as soon as the game has loaded")
+//   I18N("kn.client.accountMode.name", "Account Mode")  I18N("kn.client.accountMode.opt.online", "Online")  I18N("kn.client.accountMode.opt.offline", "Offline")
+//   I18N("kn.client.accountMode.info", "Online: log in at the account service, inventory and stats are saved. Offline: guest, every skin unlocked, nothing saved")
+//   I18N("kn.client.brainUrl.name", "Account Service URL")  I18N("kn.client.brainUrl.info", "Account service / community coordinator (kn_brain); empty = https://coordinator.krunk.io")
+//   I18N("kn.client.finderUrl.name", "Server Finder URL")  I18N("kn.client.finderUrl.info", "Public server list; empty = https://matchmaker.krunk.io/servers, off = none")
+//   I18N("kn.client.proxy.name", "Proxy")
+//   I18N("kn.client.proxy.info", "http://host:port, https://host:port, socks5://host:port or socks5h://host:port (user:password@ allowed). Empty = none (the HTTPS_PROXY / HTTP_PROXY / ALL_PROXY / NO_PROXY environment variables apply). Game connections never use it")
+//   I18N("kn.client.proxy.infoWin", "http://host:port (user:password@ allowed; WinHTTP takes no SOCKS). Empty = none (the HTTPS_PROXY / HTTP_PROXY / ALL_PROXY environment variables, else the system proxy). Game connections never use it")
+//   I18N("kn.client.proxyScope.name", "Proxy Scope")  I18N("kn.client.proxyScope.opt.krunker", "krunker.io only")  I18N("kn.client.proxyScope.opt.all", "All client traffic")
+//   I18N("kn.client.proxyScope.info", "krunker.io only: the official lobby list. All client traffic: also the account service, server finder, news and downloads")
+//   I18N("kn.client.autoSpec.name", "Auto Spectate")  I18N("kn.client.autoSpec.info", "Turn Spectate on when the game loads")
+//   I18N("kn.client.hsSound.name", "Always Play HS Sound on Kill")
+//   I18N("kn.client.openConfig.name", "Client Folder")  I18N("kn.client.openConfig.info", "Settings, swapper and custom.css")  I18N("kn.client.openConfig.button", "Open")
+//   I18N("kn.client.clearCache.name", "Clear Cache & Storage")  I18N("kn.client.clearCache.button", "Clear Now")
+//   I18N("kn.client.clearCache.info", "Clears the game's stored data (settings, binds, account) and restarts; client settings are kept")
+//   I18N("settings.client.resetSettings", "Reset Client Settings")  I18N("settings.reset", "Reset")
+//   I18N("kn.client.cat.display", "Display")  I18N("kn.client.cat.system", "System")  I18N("kn.client.cat.client", "Client")  I18N("kn.client.cat.startup", "Startup")
+//   I18N("settings.network.header", "Network")  I18N("kn.client.cat.game", "Game")  I18N("kn.client.cat.storage", "Storage")  I18N("kn.client.cat.sound", "Sound")
+//   I18N("generic.default", "Default")  I18N("kn.client.requiresRestart", "Requires Restart")
+static const struct { const char *row, *key; } CS_V10_NAMES[] = {
+    {"resolution", "settings.quality.res"}, {"updateRate", "settings.quality.updRate"}, {"scaleUI", "settings.interface.scale"},
+    {"swapper", "settings.client.resourceSwapper"}, {"resetClient", "settings.client.resetSettings"},
+};
+
+// i18n_tr("kn.client.<id>.<field>", english); `field` may be "opt.<value>" (non-alphanumerics dropped)
+static const char *cs_kn(const char *id, const char *field, const char *english) {
+    char key[128];
+    size_t k = (size_t) snprintf(key, sizeof(key), "kn.client.%s.", id);
+    for (const char *c = field; *c && k + 1 < sizeof(key); c++)
+        if (isalnum((unsigned char) *c) || *c == '.') key[k++] = *c;
+    key[k < sizeof(key) ? k : sizeof(key) - 1] = 0;
+    return i18n_tr(key, english);
+}
+
+static const char *cs_name(const ClientSetting *s) {
+    for (int i = 0; i < (int) (sizeof(CS_V10_NAMES) / sizeof(CS_V10_NAMES[0])); i++)
+        if (!strcmp(CS_V10_NAMES[i].row, s->key)) return i18n_tr(CS_V10_NAMES[i].key, s->name);
+    return cs_kn(s->key, "name", s->name);
+}
+
+static const char *cs_info(const ClientSetting *s) {
+#if defined(_WIN32)
+    if (!strcmp(s->key, "proxy")) return cs_kn(s->key, "infoWin", s->info);
+#endif
+    return s->info && *s->info ? cs_kn(s->key, "info", s->info) : s->info;
+}
+
+static const char *cs_button(const ClientSetting *s) {
+    return !strcmp(s->key, "resetClient") ? i18n_tr("settings.reset", s->button) : cs_kn(s->key, "button", s->button);
+}
+
+static const char *cs_cat(const char *cat) {
+    if (!strcmp(cat, "Network")) return i18n_tr("settings.network.header", cat);
+    char key[64];
+    size_t k = (size_t) snprintf(key, sizeof(key), "kn.client.cat.");
+    for (const char *c = cat; *c && k + 1 < sizeof(key); c++) key[k++] = (char) tolower((unsigned char) *c);
+    key[k] = 0;
+    return i18n_tr(key, cat);
+}
+
 static const ClientSetting *find_setting(const char *key) {
     for (int i = 0; i < COUNT(SETTINGS); i++) {
         if (key && !strcmp(SETTINGS[i].key, key)) return &SETTINGS[i];
@@ -851,8 +936,8 @@ char *ui_client_settings_head(const char *head, const int active_tab) {
     sb_append(&out, " class=\"knClientTabs\"");
     sb_append_n(&out, id_end, (size_t) (tab_end - id_end));
     // getTabs(): "<div class='settingTab " + (active ? "tabANew" : "") + "' onclick=...>" + name
-    sb_appendf(&out, "\n<div class=\"settingTab %s\" onclick=\"window.windows[0].changeTab(%d)\">Client</div>",
-               active_tab == index ? "tabANew" : "", index);
+    sb_appendf(&out, "\n<div class=\"settingTab %s\" onclick=\"window.windows[0].changeTab(%d)\">%s</div>",
+               active_tab == index ? "tabANew" : "", index, I18N("settings.client.header", "Client"));
     sb_append(&out, tab_end);
     return sb_finish(&out);
 }
@@ -874,7 +959,7 @@ static void append_option(StrBuf *sb, const char *value, const char *label, cons
 }
 
 static void resolution_options(StrBuf *sb, const char *current) {
-    append_option(sb, "", "Default", current);
+    append_option(sb, "", I18N("generic.default", "Default"), current);
     int listed_current = !current[0];
 #ifndef __EMSCRIPTEN__
     Client *client = g_cs.client;
@@ -896,7 +981,7 @@ static void resolution_options(StrBuf *sb, const char *current) {
 }
 
 static void audio_backend_options(StrBuf *sb, const char *current) {
-    append_option(sb, "", "Auto", current);
+    append_option(sb, "", cs_kn("audioBackend", "opt.auto", "Auto"), current);
 #ifndef __EMSCRIPTEN__
     static const struct { const char *value, *label; ma_backend backend; } BACKENDS[] = {
         {"pulseaudio", "PulseAudio / PipeWire", ma_backend_pulseaudio}, {"alsa", "ALSA", ma_backend_alsa},
@@ -908,7 +993,7 @@ static void audio_backend_options(StrBuf *sb, const char *current) {
     int listed_current = !current[0];
     for (int i = 0; i < COUNT(BACKENDS); i++) {
         if (!ma_is_backend_enabled(BACKENDS[i].backend)) continue;
-        append_option(sb, BACKENDS[i].value, BACKENDS[i].label, current);
+        append_option(sb, BACKENDS[i].value, !strcmp(BACKENDS[i].value, "null") ? cs_kn("audioBackend", "opt.null", BACKENDS[i].label) : BACKENDS[i].label, current);
         if (!strcmp(BACKENDS[i].value, current)) listed_current = 1;
     }
     if (!listed_current) append_option(sb, current, current, current);
@@ -918,7 +1003,7 @@ static void audio_backend_options(StrBuf *sb, const char *current) {
 // The backend's playback devices; a saved device that is not connected stays listed (audio
 // plays on the default device meanwhile, audio.c) so the choice is not lost.
 static void audio_output_options(StrBuf *sb, const char *current) {
-    append_option(sb, "", "Default", current);
+    append_option(sb, "", I18N("generic.default", "Default"), current);
 #ifndef __EMSCRIPTEN__
     AudioDeviceInfo devices[32];
     const int count = audio_output_devices(devices, COUNT(devices));
@@ -932,7 +1017,7 @@ static void audio_output_options(StrBuf *sb, const char *current) {
     }
     if (!listed_current) {
         char label[AUDIO_DEVICE_NAME_MAX + 32];
-        snprintf(label, sizeof(label), "%s (not connected)", current);
+        i18n_trf(label, sizeof(label), "kn.client.audioOutput.notConnected", "{0} (not connected)", 1, I18N_ARGV(current));
         append_option(sb, current, label, current);
     }
 #endif
@@ -941,9 +1026,9 @@ static void audio_output_options(StrBuf *sb, const char *current) {
 // "<div class='settName' title='info'>Name <span style='color: #eb5656'>*</span> " (134.js genSettings)
 static void row_begin(StrBuf *sb, const ClientSetting *s) {
     sb_append(sb, "<div class=\"settName\" title=\"");
-    append_attr_escaped(sb, (s->flags & CS_RESTART) ? (s->info && *s->info ? s->info : "Requires Restart") : s->info);
+    append_attr_escaped(sb, (s->flags & CS_RESTART) ? (s->info && *s->info ? cs_info(s) : I18N("kn.client.requiresRestart", "Requires Restart")) : cs_info(s));
     sb_append(sb, "\">");
-    sb_append_esc(sb, s->name);
+    sb_append_esc(sb, cs_name(s));
     if (s->flags & CS_RESTART) sb_append(sb, " <span style=\"color: #eb5656\">*</span>");
     sb_append(sb, " ");
 }
@@ -978,13 +1063,17 @@ static void append_row(StrBuf *sb, const ClientSetting *s) {
             sb_appendf(sb, "<label class=\"switch\" style=\"margin-left:10px\"><input type=\"checkbox\" "
                            "onclick=\"%s(&quot;%s&quot;, this.checked)\"%s><span class=\"slider\"><span class=\"grooves\"></span></span></label>",
                        row_handler(s), s->key, !strcmp(value, "true") ? " checked=\"\"" : "");
-            if (s->button) append_button(sb, s->button, s->action);
+            if (s->button) append_button(sb, cs_button(s), s->action);
             break;
         case CS_SELECT:
             sb_appendf(sb, "<select onchange=\"%s(&quot;%s&quot;, this.value)\" class=\"inputGrey2\">\n                     ",
                        row_handler(s), s->key);
             if (s->options) {
-                for (int i = 0; i < s->option_count; i++) append_option(sb, s->options[i].value, s->options[i].label, value);
+                for (int i = 0; i < s->option_count; i++) {
+                    char field[64];
+                    snprintf(field, sizeof(field), "opt.%s", s->options[i].value);
+                    append_option(sb, s->options[i].value, cs_kn(s->key, field, s->options[i].label), value);
+                }
             } else if (!strcmp(s->key, "resolution")) {
                 resolution_options(sb, value);
             } else if (!strcmp(s->key, "audioBackend")) {
@@ -998,7 +1087,7 @@ static void append_row(StrBuf *sb, const ClientSetting *s) {
             sb_appendf(sb, "<input type=\"text\" name=\"text\" id=\"knClient_%s\" class=\"inputGrey2\" placeholder=\"", s->key);
             append_attr_escaped(sb, !strcmp(s->key, "brainUrl") ? "https://coordinator.krunk.io"
                                     : !strcmp(s->key, "finderUrl") ? "https://matchmaker.krunk.io/servers"
-                                    : !strcmp(s->key, "proxy") ? "http://host:port" : s->name);
+                                    : !strcmp(s->key, "proxy") ? "http://host:port" : cs_name(s));
             sb_append(sb, "\" value=\"");
             append_attr_escaped(sb, value);
             sb_appendf(sb, "\" onchange=\"knClientSet(&quot;%s&quot;, this.value)\">", s->key);
@@ -1016,7 +1105,7 @@ static void append_row(StrBuf *sb, const ClientSetting *s) {
             break;
         }
         case CS_BUTTON:
-            append_button(sb, s->button, s->action);
+            append_button(sb, cs_button(s), s->action);
             break;
     }
     sb_append(sb, "</div>");
@@ -1037,7 +1126,7 @@ char *ui_client_settings_tab_html(const int searching) {
             snprintf(id, sizeof(id), "kn%s", cat);
             sb_appendf(&sb, "<div class=\"setHed\" id=\"setHed_%s\" onclick=\"window.windows[0].collapseFolder(this)\">"
                             "<span class=\"material-icons plusOrMinus\">keyboard_arrow_down</span> %s</div><div class=\"setBodH\" id=\"setBod_%s\">",
-                       id, cat, id);
+                       id, cs_cat(cat), id);
         }
         append_row(&sb, s);
     }
@@ -1169,7 +1258,7 @@ static void set_client_setting(const char *key, const char *value) {
         HttpProxy px;
         if (len && !http_proxy_parse(trimmed, &px)) {
             menu_log("client setting proxy: not a proxy URL: %s", trimmed);
-            ui_notify("Proxy: not a proxy URL (http://host:port, https://host:port, socks5://host:port or socks5h://host:port)");
+            ui_notify(I18N("kn.client.proxy.invalid", "Proxy: not a proxy URL (http://host:port, https://host:port, socks5://host:port or socks5h://host:port)"));
             rerender();
             return;
         }
@@ -1185,7 +1274,7 @@ static void set_client_setting(const char *key, const char *value) {
     apply_setting(s);
     // needsRestart: the v3.1.1 client alerts "App will now restart"; here the restart is offered
     if ((s->flags & CS_RESTART) && strcmp(before, after))
-        ui_confirm("This setting requires a client restart to take effect. Restart now?", restart_answered, NULL);
+        ui_confirm(I18N("kn.client.restartNow", "This setting requires a client restart to take effect. Restart now?"), restart_answered, NULL);
 }
 
 // ---- actions
@@ -1262,9 +1351,9 @@ static void clear_answered(const int accepted, const char *text, void *user) {
 static void do_action(const char *action) {
     if (!action) return;
     if (!strcmp(action, "clearCache")) {
-        ui_confirm("Are you sure you want to clear cache and local storage?", clear_answered, NULL);
+        ui_confirm(I18N("kn.client.clearCache.confirm", "Are you sure you want to clear cache and local storage?"), clear_answered, NULL);
     } else if (!strcmp(action, "resetClient")) {
-        ui_confirm("Are you sure you want to reset all your client settings?", reset_answered, NULL);
+        ui_confirm(I18N("kn.client.resetClient.confirm", "Are you sure you want to reset all your client settings?"), reset_answered, NULL);
     }
 #ifndef __EMSCRIPTEN__
     else if (!strcmp(action, "openConfig")) {
@@ -1318,7 +1407,7 @@ int ui_client_settings_handle(const char *name, const HtmlEvent *ev, const HtmlA
     if (!name) return -1;
     if (!strcmp(name, "clientExitPopup")) {
         // v7.1.4 clientExitPopup(): genericPopup "Are you sure you want to close krunker?" YES / NO
-        ui_confirm("Are you sure you want to close krunker?", exit_answered, NULL);
+        ui_confirm(I18N("kn.client.exit.confirm", "Are you sure you want to close krunker?"), exit_answered, NULL);
         return 1;
     }
     if (!strcmp(name, "closeClient") || !strcmp(name, "window.closeClient")) {

@@ -78,6 +78,9 @@ void engine_canvas_gl(Engine *g, HtmlElem e, unsigned tex, int w, int h);
 void engine_mark_paint(Engine *g, HtmlElem e); /* e = 0: everything */
 void engine_set_top_layer(Engine *g, HtmlElem e); /* html_dom_set_top_layer */
 
+/* html_dom_set_lang: <html lang> + the text system's script fallback preference. */
+void engine_set_lang(const char *lang);
+
 /* Clock used for animations, timers and the caret blink (ms).  ui_test pins
  * it for deterministic renders; ms < 0 returns to glfwGetTime(). */
 double engine_now_ms(void);

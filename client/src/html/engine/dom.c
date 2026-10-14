@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 
 /* ------------------------------------------------------------------------- */
 /* Small string helpers (kept local so dom.c links without util.c)           */
@@ -1052,6 +1053,98 @@ int dom_matches(Dom *dom, HtmlElem e, const char *selector)
     hit = node_matches_list(dom, node, list);
     lxb_css_selector_list_destroy_chain(list);
     return hit;
+}
+
+/* html_dom_map_text: pre-order walk of root's subtree (root itself included for attributes). */
+static int map_attr(Dom *dom, lxb_dom_node_t *n, const char *name, int slot, DomTextMapFn fn, void *user)
+{
+    const HtmlElem h = node_handle(n);
+    size_t len = 0;
+    const char *v = h ? dom_get_attr(dom, h, name, &len) : NULL;
+    if (v == NULL || len == 0) {
+        return 0;
+    }
+    char *copy = dup_slice(v, len);
+    if (copy == NULL) {
+        return 0;
+    }
+    const char *r = fn(user, h, slot, copy);
+    int changed = r != NULL && strcmp(r, copy) != 0;
+    if (changed) {
+        dom_set_attr(dom, h, name, r);
+    }
+    free(copy);
+    return changed;
+}
+
+size_t dom_map_text(Dom *dom, HtmlElem root, const char *skip_selector, DomTextMapFn fn, void *user,
+                    void (*changed)(void *user, HtmlElem parent), void *changed_user)
+{
+    lxb_dom_node_t *top = elem_node(dom, root != 0 ? root : dom_root(dom));
+    lxb_css_selector_list_t *skip = NULL;
+    size_t count = 0;
+    if (top == NULL || fn == NULL) {
+        return 0;
+    }
+    if (skip_selector != NULL && *skip_selector) {
+        skip = parse_selector(dom, skip_selector);
+    }
+    lxb_dom_node_t *n = top;
+    while (n != NULL) {
+        int descend = 1;
+        if (n->type == LXB_DOM_NODE_TYPE_ELEMENT) {
+            const lxb_tag_id_t tag = n->local_name;
+            if (tag == LXB_TAG_SCRIPT || tag == LXB_TAG_STYLE || tag == LXB_TAG_TEXTAREA || tag == LXB_TAG_NOSCRIPT ||
+                tag == LXB_TAG_TEMPLATE || (skip != NULL && node_matches_list(dom, n, skip))) {
+                descend = 0;
+            } else {
+                count += (size_t) map_attr(dom, n, "title", -1, fn, user);
+                count += (size_t) map_attr(dom, n, "placeholder", -2, fn, user);
+                if (tag == LXB_TAG_INPUT) {
+                    size_t tl = 0;
+                    const HtmlElem h = node_handle(n);
+                    const char *type = h ? dom_get_attr(dom, h, "type", &tl) : NULL;
+                    char t[8] = "";
+                    for (size_t i = 0; type != NULL && i < tl && i + 1 < sizeof t; i++) {
+                        t[i] = (char)tolower((unsigned char)type[i]);
+                    }
+                    if (tl < sizeof t && (!strcmp(t, "button") || !strcmp(t, "submit") || !strcmp(t, "reset"))) {
+                        count += (size_t) map_attr(dom, n, "value", -3, fn, user);
+                    }
+                }
+            }
+        } else if (n->type == LXB_DOM_NODE_TYPE_TEXT && n->parent != NULL) {
+            lxb_dom_character_data_t *cd = lxb_dom_interface_character_data(n);
+            if (cd->data.data != NULL && cd->data.length > 0 && node_handle(n->parent)) {
+                int slot = 0;
+                for (const lxb_dom_node_t *p = n->prev; p != NULL; p = p->prev) {
+                    slot++;
+                }
+                const char *r = fn(user, node_handle(n->parent), slot, (const char *)cd->data.data);
+                if (r != NULL && strcmp(r, (const char *)cd->data.data) != 0) {
+                    lxb_dom_character_data_replace(cd, (const lxb_char_t *)r, strlen(r), 0, cd->data.length);
+                    mark_node(dom, n->parent, DOM_DIRTY_CHILDREN | DOM_DIRTY_TEXT);
+                    if (changed != NULL && node_handle(n->parent)) {
+                        changed(changed_user, node_handle(n->parent));
+                    }
+                    count++;
+                }
+            }
+        }
+        /* next in pre-order, bounded by top */
+        if (descend && n->first_child != NULL) {
+            n = n->first_child;
+            continue;
+        }
+        while (n != NULL && n != top && n->next == NULL) {
+            n = n->parent;
+        }
+        n = (n == NULL || n == top) ? NULL : n->next;
+    }
+    if (skip != NULL) {
+        lxb_css_selector_list_destroy_chain(skip);
+    }
+    return count;
 }
 
 HtmlElem dom_closest(Dom *dom, HtmlElem e, const char *selector)

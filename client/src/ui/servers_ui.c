@@ -298,25 +298,49 @@ void servers_ui_join_ticket(const char *host, const int port, const char *game_i
     page_game_url(NULL, NULL); // a ranked match (gameConfig.isFromQueue): the link is "/"
 }
 
+// A matchmaker.* value as plain text (the error screen and the toast escape it): v10's
+// "<br><small>" lines become ". ", other tags go. Static buffer: one message at a time.
+static const char *mm_plain(const char *html) {
+    static char out[256];
+    size_t o = 0;
+    for (const char *p = html; *p && o + 3 < sizeof(out);) {
+        if (!strncmp(p, "<br>", 4)) {
+            out[o++] = '.';
+            out[o++] = ' ';
+            p += 4;
+        } else if (*p == '<') {
+            const char *close = strchr(p, '>');
+            p = close ? close + 1 : p + strlen(p);
+        } else {
+            out[o++] = *p++;
+        }
+    }
+    out[o] = 0;
+    return out;
+}
+
 // v3.1.1 matchmaker error names -> i18n matchmaker.* texts (the startup seek's catch)
 static const char *seek_error_text(const char *error) {
-    if (!error) return "Could not reach the matchmaker";
-    if (!strcmp(error, "InvalidGameId")) return "Game not found.";
-    if (!strcmp(error, "GameFull")) return "Game is full.";
+    if (!error) return I18N("kn.matchmaker.unreachable", "Could not reach the matchmaker");
+    if (!strcmp(error, "InvalidGameId")) return I18N("matchmaker.InvalidGameId", "Game not found.");
+    if (!strcmp(error, "GameFull")) return I18N("matchmaker.GameFull", "Game is full.");
+    // menu_ui.c recognises the Game Updating screen by this text: it stays the English sentinel
     if (!strcmp(error, "NoServersMatchQuery") || !strcmp(error, "updating")) return "GAME UPDATING";
-    if (!strcmp(error, "NoAvailableServers") || !strcmp(error, "no_lobbies")) return "Servers are at Max Capacity";
+    if (!strcmp(error, "NoAvailableServers") || !strcmp(error, "no_lobbies")) return I18N("matchmaker.NoAvailableServers", "Servers are at Max Capacity");
+    if (!strcmp(error, "Failed")) return I18N("generic.failed", "Failed");
     // KrunkNative: the brain refuses a guest only a lobby of a server_bin that still refused
     // guests (every current server admits them, as Krunker's do); the error screen adds a
     // "Log in" link (servers_ui_account_required)
-    if (!strcmp(error, "AccountRequired")) return "This game requires an account.";
+    if (!strcmp(error, "AccountRequired")) return I18N("kn.matchmaker.accountRequired", "This game requires an account.");
     // v10.0.2: the seek preferences matched nothing (matchmaker.NoMatchingServers) and the
     // validation token refusals (ClientManager ERRORS, v10.js:147687-147692)
-    if (!strcmp(error, "NoMatchingServers")) return "No Games Found. Try changing Quickplay options";
+    if (!strcmp(error, "NoMatchingServers"))
+        return mm_plain(I18N("matchmaker.NoMatchingServers", "No Games Found<br><small>Try changing Quickplay options</small>"));
     if (!strcmp(error, "InvalidClientValidationToken")) return "Socket Error";
     if (!strcmp(error, "InvalidClientIP")) return "Socket Mismatch";
     if (!strcmp(error, "ExpiredClientValidationToken")) return "Validation Error";
     if (!strcmp(error, "InvalidClientValidationTokenData")) return "Data Error";
-    if (!strcmp(error, "TooManyRequests")) return "Too many requests, try again in a minute";
+    if (!strcmp(error, "TooManyRequests")) return I18N("kn.matchmaker.tooManyRequests", "Too many requests, try again in a minute");
     return error;
 }
 
@@ -676,7 +700,7 @@ static void seek_unreachable(void) {
     }
     g_rejoin_seek = 0;
     rejoin_cancel();
-    fatal_error("Could not reach the matchmaker");
+    fatal_error(I18N("kn.matchmaker.unreachable", "Could not reach the matchmaker"));
 }
 
 // /mm/generate-token answered: plain text (Krunker's matchmaker too). A brain from before the
@@ -747,7 +771,7 @@ static void start_seek(const char *game_id) {
     if (!backend_http_get("/mm/ping-list", on_ping_list, copy)) {
         free(copy);
         g_find_seek = g_find_both = 0;
-        fatal_error("Could not reach the matchmaker");
+        fatal_error(I18N("kn.matchmaker.unreachable", "Could not reach the matchmaker"));
     }
 }
 
@@ -1200,7 +1224,10 @@ static int build_groups(ServerGroup *groups, const int max) {
                     ServerGroup *g = &groups[count];
                     snprintf(g->key, sizeof(g->key), "%s", region);
                     if (show_region()) snprintf(g->name, sizeof(g->name), "%s", region_long_name(region));
-                    else snprintf(g->name, sizeof(g->name), "%s", !strcmp(def, region) ? "Default Region" : !strcmp(g_region, region) ? "Current Region" : "Hidden Region");
+                    else snprintf(g->name, sizeof(g->name), "%s",
+                                       !strcmp(def, region) ? I18N("settings.local.region", "Default Region")
+                                       : !strcmp(g_region, region) ? I18N("kn.servers.currentRegion", "Current Region")
+                                       : I18N("kn.servers.hiddenRegion", "Hidden Region"));
                     if (!strcmp(def, region)) g->order = 1;
                     g->region_rank = count;
                     count++;
@@ -1289,8 +1316,8 @@ static void readable_time(char *out, const size_t n, const double ms) {
 static void time_left_text(char *out, const size_t n, const double seconds) {
     char t[64];
     readable_time(t, sizeof(t), seconds * 1000.0);
-    if (t[0]) snprintf(out, n, "Ends in %s", t);
-    else snprintf(out, n, "Starting");
+    if (t[0]) i18n_trf(out, n, "windows.servers.timeLeft", "Ends in {0}", 1, I18N_ARGV(t));
+    else snprintf(out, n, "%s", I18N("windows.servers.starting", "Starting"));
 }
 
 // COLORS.ping by the region's ping (/mm/ping-list values; none known -> low)
@@ -1327,7 +1354,9 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
         // Krunker's protocol is not ours: krunker.io/?game=<id> in the system browser
         sb_append(sb, "krunkerJoin(\"");
         sb_append_esc(sb, id);
-        sb_append(sb, "\")' title='Opens in your browser: krunker.io games cannot be joined in this client'>");
+        sb_append(sb, "\")' title='");
+        sb_append_esc(sb, I18N("kn.servers.kioRowTitle", "Opens in your browser: krunker.io games cannot be joined in this client"));
+        sb_append(sb, "'>");
     } else if (finder) {
         // a finder-only server: joined directly (finderJoin(host, port))
         sb_append(sb, "finderJoin(\"");
@@ -1426,7 +1455,11 @@ static char *get_servers(void) {
         sb_append_esc(&sb, g->name);
         const int kio = !strncmp(g->key, "kio:", 4); // official krunker.io lobbies: no Quick Join here
         sb_appendf(&sb, "<span style='float:right;color:rgba(255,255,255,0.9)'>%.0f <span style='color:rgba(255,255,255,0.6)'>online</span></span>", g->players);
-        if (kio) sb_append(&sb, "<div class='quickJoin' style='opacity:0.6' title='krunker.io games open in your browser'>krunker.io</div></div>");
+        if (kio) {
+            sb_append(&sb, "<div class='quickJoin' style='opacity:0.6' title='");
+            sb_append_esc(&sb, I18N("kn.servers.kioGroupTitle", "krunker.io games open in your browser"));
+            sb_append(&sb, "'>krunker.io</div></div>");
+        }
         else sb_appendf(&sb, "<div class='quickJoin' onclick='quickJoinRegion(%d,%d)'>Quick Join</div></div>", h, old ? 0 : 1);
         if (!open) continue;
         sb_append(&sb, "<div class='setBodH' style='padding-top:10px;padding-bottom:10px;'>");
@@ -1440,7 +1473,8 @@ static char *get_servers(void) {
             shown++;
             append_row(&sb, t, now);
         }
-        if (!kept || !shown) sb_append(&sb, "<div style='margin-left: 30px;margin-top: 5px;margin-bottom: 2px;'>No Joinable Games Found...</div>");
+        if (!kept || !shown)
+            sb_appendf(&sb, "<div style='margin-left: 30px;margin-top: 5px;margin-bottom: 2px;'>%s</div>", I18N("windows.servers.none", "No Joinable Games Found..."));
         sb_append(&sb, "</div>");
     }
     if (!kio_status) append_krunker_status(&sb, 0); // none listed: why, in its place
@@ -1493,8 +1527,9 @@ static void finder_refresh(void) {
 // The finder's failure as a row above the list (servers_window_gen), "" when it answered.
 static void append_finder_error(StrBuf *sb) {
     if (!g_finder_error[0] || !online_finder_url()[0]) return;
-    sb_append(sb, "<div id='finderError' class='setBodH' style='padding:10px;margin-left:0px;width:calc(100% - 40px);color:#ff6b6b'>"
-                  "Server finder unavailable: ");
+    sb_append(sb, "<div id='finderError' class='setBodH' style='padding:10px;margin-left:0px;width:calc(100% - 40px);color:#ff6b6b'>");
+    sb_append_esc(sb, I18N("kn.servers.finderUnavailable", "Server finder unavailable:"));
+    sb_append(sb, " ");
     sb_append_esc(sb, g_finder_error);
     sb_append(sb, " <span style='color:rgba(255,255,255,0.5)'>(");
     sb_append_esc(sb, online_finder_url());
@@ -1508,9 +1543,11 @@ static void append_seek_status(StrBuf *sb) {
     if (prefs_filtering()) {
         char want[128];
         seek_prefs_describe(want, sizeof(want));
-        sb_append(sb, "<div id='knSeekFilter' " STATUS_BOX "color:rgba(255,255,255,0.7)'>Showing ");
-        sb_append_esc(sb, want);
-        sb_append(sb, " (Settings &gt; General &gt; Quickplay)</div>");
+        char line[256];
+        I18N_F(line, "kn.servers.seekFilter", "Showing {0} (Settings > General > Quickplay)", want);
+        sb_append(sb, "<div id='knSeekFilter' " STATUS_BOX "color:rgba(255,255,255,0.7)'>");
+        sb_append_esc(sb, line);
+        sb_append(sb, "</div>");
     }
 }
 
@@ -1520,15 +1557,17 @@ static void append_krunker_status(StrBuf *sb, const int groups) {
     if (!krunker_lobbies_enabled()) return;
     sb_append(sb, "<div id='kioStatus' " STATUS_BOX "margin-top:20px;");
     if (!krunker_lobbies_list() && krunker_lobbies_loading()) {
-        sb_append(sb, "color:rgba(255,255,255,0.7)'><span style='color:#ce93d8'>KRUNKER.IO</span> Loading the official krunker.io lobbies...");
+        sb_append(sb, "color:rgba(255,255,255,0.7)'><span style='color:#ce93d8'>KRUNKER.IO</span> ");
+        sb_append_esc(sb, I18N("kn.servers.kioLoading", "Loading the official krunker.io lobbies..."));
     } else if (krunker_lobbies_error()[0] && !groups) {
         sb_append(sb, "color:#ff6b6b'><span style='color:#ce93d8'>KRUNKER.IO</span> ");
         sb_append_esc(sb, krunker_lobbies_error());
     } else if (!groups) {
-        sb_append(sb, "color:rgba(255,255,255,0.7)'><span style='color:#ce93d8'>KRUNKER.IO</span> No official lobby matches the search or filter.");
+        sb_append(sb, "color:rgba(255,255,255,0.7)'><span style='color:#ce93d8'>KRUNKER.IO</span> ");
+        sb_append_esc(sb, I18N("kn.servers.kioNoMatch", "No official lobby matches the search or filter."));
     } else {
-        sb_append(sb, "color:rgba(255,255,255,0.7)'><span style='color:#ce93d8'>KRUNKER.IO</span> lobbies "
-                      "open in your browser: this client can't join krunker.io games.");
+        sb_append(sb, "color:rgba(255,255,255,0.7)'><span style='color:#ce93d8'>KRUNKER.IO</span> ");
+        sb_append_esc(sb, I18N("kn.servers.kioBrowserOnly", "lobbies open in your browser: this client can't join krunker.io games."));
     }
     sb_append(sb, "</div>");
 }
@@ -1709,7 +1748,7 @@ int servers_ui_connection_lost(char *error, const size_t error_size, const char 
             // the fresh ticket was refused too: say so (the error screen's Find a Game seeks again)
             char original[96];
             snprintf(original, sizeof(original), "%s", error);
-            snprintf(error, error_size, "Could not rejoin: %s again", original);
+            i18n_trf(error, error_size, "kn.mm.rejoinFailed", "Could not rejoin: {0} again", 1, I18N_ARGV(original));
             fprintf(stderr, "[mm] rejoin failed: a fresh join ticket was refused too (%s)\n", original);
             rejoin_cancel();
             return 0;
@@ -1737,8 +1776,9 @@ int servers_ui_rejoining(void) {
 // The error screen's line while rejoining: the same lobby again after a lost connection or on a
 // direct server, else a (possibly other) game through the matchmaker.
 const char *servers_ui_rejoin_text(void) {
-    if (g_rejoin == REJOIN_DROP || g_rejoin == REJOIN_DIRECT || servers_ui_pinned() || !g_brain_mode) return "Reconnecting...";
-    return "Rejoining a game...";
+    if (g_rejoin == REJOIN_DROP || g_rejoin == REJOIN_DIRECT || servers_ui_pinned() || !g_brain_mode)
+        return I18N("kn.mm.reconnecting", "Reconnecting...");
+    return I18N("kn.mm.rejoining", "Rejoining a game...");
 }
 
 static void rejoin_tick(Client *client) {
@@ -1802,7 +1842,7 @@ static int parse_connect_address(const char *text, char *host, const size_t host
         *port = (int) strtoul(colon + 1, NULL, 10);
     }
     if (!host[0] || *port <= 0 || *port > 65535) {
-        snprintf(err, err_n, "Enter a server address: host or host:port");
+        snprintf(err, err_n, "%s", I18N("kn.connect.badAddress", "Enter a server address: host or host:port"));
         return 0;
     }
     if (!strcmp(host, "localhost") || !strcmp(host, "0.0.0.0")) snprintf(host, host_n, "127.0.0.1");
@@ -1810,7 +1850,7 @@ static int parse_connect_address(const char *text, char *host, const size_t host
     unsigned int b[4];
     char tail;
     if (sscanf(host, "%u.%u.%u.%u%c", &b[0], &b[1], &b[2], &b[3], &tail) != 4 || b[0] > 255 || b[1] > 255 || b[2] > 255 || b[3] > 255) {
-        snprintf(err, err_n, "Cannot resolve %s (IPv4 addresses only)", host);
+        i18n_trf(err, err_n, "kn.connect.ipv4Only", "Cannot resolve {0} (IPv4 addresses only)", 1, I18N_ARGV(host));
         return 0;
     }
 #endif
@@ -1819,12 +1859,16 @@ static int parse_connect_address(const char *text, char *host, const size_t host
 
 char *servers_connect_window_gen(void) {
     StrBuf sb = {0};
-    sb_append(&sb, "<input id='connectAddr' type='text' placeholder='Enter Server Address (host:port)' class='accountInput' style='margin-top:0;margin-bottom:10px;' value='");
+    sb_append(&sb, "<input id='connectAddr' type='text' placeholder='");
+    sb_append_esc(&sb, I18N("kn.connect.placeholder", "Enter Server Address (host:port)"));
+    sb_append(&sb, "' class='accountInput' style='margin-top:0;margin-bottom:10px;' value='");
     if (g_client && g_last_direct && g_client->net_address[0]) { // the last direct server, ready to reconnect
         sb_append_esc(&sb, g_client->net_address);
         if (g_client->net_port != NET_DEFAULT_PORT) sb_appendf(&sb, ":%u", (unsigned int) g_client->net_port);
     }
-    sb_append(&sb, "' onkeydown='if(event.keyCode==13)connectServer()'><div id='connectResp' style='display:none;margin-bottom:10px;font-size:18px;color:rgba(255,255,255,0.5);text-align:center'></div><div class='joinBtn' onclick='connectServer()' style='width:100%'>Connect</div>");
+    sb_append(&sb, "' onkeydown='if(event.keyCode==13)connectServer()'><div id='connectResp' style='display:none;margin-bottom:10px;font-size:18px;color:rgba(255,255,255,0.5);text-align:center'></div><div class='joinBtn' onclick='connectServer()' style='width:100%'>");
+    sb_append_esc(&sb, I18N("kn.connect.title", "Connect"));
+    sb_append(&sb, "</div>");
     return sb_finish(&sb);
 }
 
@@ -1857,8 +1901,12 @@ void servers_ui_menu_setup(void) {
     if (ui_scenario_active()) return; // uidiff compares the row with v7.1.4's
 #endif
     HtmlElem join = html_dom_by_id("menuBtnJoin");
-    if (join) html_dom_insert_html(join, HTML_INSERT_AFTER_END,
-                                   "<div class=\"button small buttonPI\" id=\"menuBtnConnect\" onmouseenter=\"playTick()\" onclick=\"playSelect(),openConnectWindow()\">Connect</div>");
+    if (join) {
+        char html[256];
+        snprintf(html, sizeof(html), "<div class=\"button small buttonPI\" id=\"menuBtnConnect\" onmouseenter=\"playTick()\" onclick=\"playSelect(),openConnectWindow()\">%s</div>",
+                 I18N("kn.connect.title", "Connect"));
+        html_dom_insert_html(join, HTML_INSERT_AFTER_END, html);
+    }
 }
 
 // The header's left slot: v7's "+ Host Game" (showWindow(42)). Hosting is the dedicated
@@ -1891,7 +1939,9 @@ static char *gen_list(void) {
     char *download = servers_ui_download_button_html(NULL); // the latest server build (ci-release)
     sb_append(&sb, download);
     free(download);
-    sb_append(&sb, "<div id='hostMenuBtn' style='display:inline-block;vertical-align:middle' onclick='windows[0].tabIndex=0;showWindow(1);'><span class='material-icons' style='color:#fff;font-size:40px;margin-bottom:-1px;'>miscellaneous_services</span></div></div><div id=\"hideFull\" style=\"display:inline-block;float:right;margin-right:20px;margin-top:3px;\"><span style='color:#fff'>Hide Full</span><label class='switch2' style='margin-top: 4px;margin-left: 11px;'><input type='checkbox' onclick='toggleHF(this.checked);windows[1].searchList()'");
+    sb_append(&sb, "<div id='hostMenuBtn' style='display:inline-block;vertical-align:middle' onclick='windows[0].tabIndex=0;showWindow(1);'><span class='material-icons' style='color:#fff;font-size:40px;margin-bottom:-1px;'>miscellaneous_services</span></div></div><div id=\"hideFull\" style=\"display:inline-block;float:right;margin-right:20px;margin-top:3px;\"><span style='color:#fff'>");
+    sb_append(&sb, I18N("windows.servers.hide", "Hide Full"));
+    sb_append(&sb, "</span><label class='switch2' style='margin-top: 4px;margin-left: 11px;'><input type='checkbox' onclick='toggleHF(this.checked);windows[1].searchList()'");
     if (hide_full()) sb_append(&sb, " checked");
     sb_append(&sb, "><span class='slider2'></span></label></div></div></div><div style='height:10px'></div>");
     append_finder_error(&sb);
@@ -1918,8 +1968,12 @@ static char *gen_list(void) {
     const double players = (brain_games() ? g_total_players : 0) + g_finder_players; // after get_servers: + finder-only
     comma_number(total, sizeof(total), players);
     comma_number(social, sizeof(social), g_social_players);
-    sb_appendf(&sb, "<div class='setBodH' style='padding-bottom:10px;margin-top:30px;padding-top:0px;margin-left:0px;width:calc(100%% - 40px);'><div style='height:10px'></div><b style='font-size:26px;color:rgba(255,255,255,0.8)'><span style='font-size:26px;color:rgba(255,255,255,0.8)' id='playerCnt'>%s In Game</span><span style='float:right;font-size:26px;color:font-size:26px;color:rgba(255,255,255,0.6);position: absolute;left: 50%%;transform: translateX(-50%%);' id='editorCnt'>0 in Editor</span><span style='float:right;font-size:26px;color:rgba(255,255,255,0.6)' id='socialCnt'>%s on Social</span></b></div>",
-               total, social);
+    char in_game[64], in_editor[64], on_social[64];
+    I18N_F(in_game, "windows.servers.online", "{0} In Game", total);
+    I18N_F(in_editor, "windows.servers.editor", "{0} in Editor", "0");
+    I18N_F(on_social, "windows.servers.social", "{0} on Social", social);
+    sb_appendf(&sb, "<div class='setBodH' style='padding-bottom:10px;margin-top:30px;padding-top:0px;margin-left:0px;width:calc(100%% - 40px);'><div style='height:10px'></div><b style='font-size:26px;color:rgba(255,255,255,0.8)'><span style='font-size:26px;color:rgba(255,255,255,0.8)' id='playerCnt'>%s</span><span style='float:right;font-size:26px;color:font-size:26px;color:rgba(255,255,255,0.6);position: absolute;left: 50%%;transform: translateX(-50%%);' id='editorCnt'>%s</span><span style='float:right;font-size:26px;color:rgba(255,255,255,0.6)' id='socialCnt'>%s</span></b></div>",
+               in_game, in_editor, on_social);
     sb_append(&sb, "</div>");
     return sb_finish(&sb);
 }
@@ -1961,7 +2015,7 @@ char *servers_window_gen(const int id, const char **header) {
     (void) header;
     if (id == 10) return games_window_gen();
     if (id == SERVERS_WINDOW_CONNECT) {
-        if (header) *header = "Connect"; // KrunkNative window
+        if (header) *header = I18N("kn.connect.title", "Connect"); // KrunkNative window
         return servers_connect_window_gen();
     }
     if (id == MENU_WINDOW_HOST) return host_window_gen();
@@ -1982,7 +2036,9 @@ char *servers_window_gen(const int id, const char **header) {
     backend_http_get("/api/player-count", on_player_count, NULL);
     // loadData()'s "<div style='padding-top:19px;>" lacks its closing quote, which swallows
     // the text in v7.1.4 (a blank window while loading): fixed
-    return strdup("<div style='padding-top:19px;'>LOADING...</div>");
+    char loading[128];
+    snprintf(loading, sizeof(loading), "<div style='padding-top:19px;'>%s</div>", I18N("generic.loading", "LOADING..."));
+    return strdup(loading);
 }
 
 // setExpandedRegion / searchList: #serverHolder = getServers()
@@ -2577,7 +2633,7 @@ static char *games_window_gen(void) {
         if (n < 0) {
             sb_append(&sb, "<div class='loadMoreW'>Loading...</div>");
         } else if (!n && !tab->home) {
-            sb_append(&sb, "No Games found!");
+            sb_append(&sb, I18N("windows.maps.none", "No Games found!"));
         } else {
             sb_append(&sb, cards.data ? cards.data : "");
             if (tab->home) games_popular_categories(&sb);
@@ -2639,7 +2695,7 @@ static void games_search(void) {
         sb_append(&res, "<div style='height:10px'></div>");
         sb_append(&res, cards);
     } else {
-        sb_append(&res, "No Games found!");
+        sb_append(&res, I18N("windows.maps.none", "No Games found!"));
     }
     free(cards);
     char *html = sb_finish(&res);
@@ -2814,14 +2870,14 @@ static void on_map_data(void *user, const int status, const char *body, const si
     cJSON *map = status == 200 ? cJSON_Parse(body) : NULL;
     if (!cJSON_IsObject(map)) {
         cJSON_Delete(map);
-        ui_alert("Game not found.");
+        ui_alert(I18N("matchmaker.InvalidGameId", "Game not found."));
         return;
     }
     // the offline game hosts the published map (like the editor's Test Map)
     if (!g_client->offline) client_net_disconnect(g_client, "Offline", "000000");
     menu_show_window(MENU_WINDOW_NONE, 0);
     if (local_game_host_custom(g_client, map)) printf("[mm] playing published map %s offline\n", g_play_name);
-    else ui_alert("Failed to load the game.");
+    else ui_alert(I18N("kn.games.loadFailed", "Failed to load the game."));
     cJSON_Delete(map);
 }
 
@@ -2915,7 +2971,7 @@ static void on_host(void *user, const int status, const char *body, const size_t
     cJSON *res = cJSON_Parse(body);
     const cJSON *host = cJSON_GetObjectItem(res, "host");
     if (status == 200 && cJSON_IsString(host)) {
-        if (msg) html_dom_set_html(msg, "Game Created"); // customRoomResponse(message, gameId)
+        if (msg) html_dom_set_text(msg, I18N("kn.host.created", "Game Created")); // customRoomResponse(message, gameId)
         g_last_load_ms = -1e18; // windows[1].lastLoadTime = 0
         cJSON_Delete(res);
         menu_show_window(MENU_WINDOW_NONE, 0);
@@ -2961,7 +3017,7 @@ int servers_ui_host_game(const char *config_json) {
         snprintf(path + len, n - (size_t) len, "&token=%s", tok);
     }
     HtmlElem msg = html_dom_by_id("hostGameMsg");
-    if (msg) html_dom_set_html(msg, "Creating Game...");
+    if (msg) html_dom_set_text(msg, I18N("kn.host.creating", "Creating Game..."));
     const int ok = backend_http_get(path, on_host, NULL);
     free(path);
     free(enc);
@@ -3208,17 +3264,24 @@ char *servers_ui_entry_badge_html(const cJSON *entry) {
     if (!proto || !proto[0]) proto = cJSON_GetStringValue(cJSON_GetObjectItem(f, "proto"));
     StrBuf sb = {0};
     if (servers_ui_entry_incompatible(entry)) {
-        sb_append(&sb, " <span class='serverBadge serverIncompatible' style='color:#fff;background:#e53935;border-radius:4px;padding:0 6px;font-size:14px;vertical-align:middle' title='Protocol ");
-        sb_append_esc(&sb, proto && proto[0] ? proto : "?");
-        sb_appendf(&sb, ": this client speaks %s'>Incompatible</span>", kn_build_protocol());
+        char title[192];
+        I18N_F(title, "kn.servers.incompatibleTitle", "Protocol {0}: this client speaks {1}", proto && proto[0] ? proto : "?", kn_build_protocol());
+        sb_append(&sb, " <span class='serverBadge serverIncompatible' style='color:#fff;background:#e53935;border-radius:4px;padding:0 6px;font-size:14px;vertical-align:middle' title='");
+        sb_append_esc(&sb, title);
+        sb_append(&sb, "'>");
+        sb_append_esc(&sb, I18N("kn.servers.incompatible", "Incompatible"));
+        sb_append(&sb, "</span>");
     } else if (servers_ui_entry_outdated(entry)) {
-        sb_append(&sb, " <span class='serverBadge serverOutdated' style='color:#fff;background:#fb8c00;border-radius:4px;padding:0 6px;font-size:14px;vertical-align:middle' title='Older than the latest server release");
+        sb_append(&sb, " <span class='serverBadge serverOutdated' style='color:#fff;background:#fb8c00;border-radius:4px;padding:0 6px;font-size:14px;vertical-align:middle' title='");
+        sb_append_esc(&sb, I18N("kn.servers.outdatedTitle", "Older than the latest server release"));
         if (version && version[0]) {
-            sb_append(&sb, " (runs ");
-            sb_append_esc(&sb, version);
-            sb_append(&sb, ")");
+            char runs[128];
+            I18N_F(runs, "kn.servers.outdatedRuns", " (runs {0})", version);
+            sb_append_esc(&sb, runs);
         }
-        sb_append(&sb, "'>Outdated</span>");
+        sb_append(&sb, "'>");
+        sb_append_esc(&sb, I18N("kn.servers.outdated", "Outdated"));
+        sb_append(&sb, "</span>");
     }
     char *s = sb_finish(&sb);
     return s ? s : strdup("");
@@ -3231,8 +3294,10 @@ char *servers_ui_download_button_html(const cJSON *list_response) {
     StrBuf sb = {0};
     // An icon button beside #hostMenuBtn (v7's header row has no room for a text link next to the
     // search box and Hide Full); the text is the tooltip.
-    sb_append(&sb, "<a class='downloadServer' onclick='downloadServer()' style='cursor:pointer;display:inline-block;vertical-align:middle;width:40px;height:40px;margin-right:8px;background-color:#2196f3;border-radius:4px;text-align:center' title='Download server: ");
-    sb_append_esc(&sb, release_url_ok(g_server_download) ? g_server_download : SERVERS_RELEASE_PAGE);
+    char title[640];
+    I18N_F(title, "kn.servers.downloadTitle", "Download server: {0}", release_url_ok(g_server_download) ? g_server_download : SERVERS_RELEASE_PAGE);
+    sb_append(&sb, "<a class='downloadServer' onclick='downloadServer()' style='cursor:pointer;display:inline-block;vertical-align:middle;width:40px;height:40px;margin-right:8px;background-color:#2196f3;border-radius:4px;text-align:center' title='");
+    sb_append_esc(&sb, title);
     sb_append(&sb, "'><span class='material-icons' style='color:#fff;font-size:34px;margin-top:3px'>file_download</span></a>");
     char *s = sb_finish(&sb);
     return s ? s : strdup("");

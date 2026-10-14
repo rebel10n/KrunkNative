@@ -156,13 +156,8 @@ static int is_zero_width(uint32_t cp) { return cp == 0x200E || cp == 0x200F || c
 
 static uint32_t transform_cp(uint32_t cp, int tt)
 {
-    if (tt == CSS_TEXT_TRANSFORM_UPPERCASE) {
-        if (cp >= 'a' && cp <= 'z') return cp - 32;
-        if (cp >= 0xE0 && cp <= 0xFE && cp != 0xF7) return cp - 32;
-    } else if (tt == CSS_TEXT_TRANSFORM_LOWERCASE) {
-        if (cp >= 'A' && cp <= 'Z') return cp + 32;
-        if (cp >= 0xC0 && cp <= 0xDE && cp != 0xD7) return cp + 32;
-    }
+    if (tt == CSS_TEXT_TRANSFORM_UPPERCASE) return text_case_upper(cp); /* text.c: Latin, Greek, Cyrillic */
+    if (tt == CSS_TEXT_TRANSFORM_LOWERCASE) return text_case_lower(cp);
     return cp;
 }
 

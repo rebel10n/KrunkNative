@@ -690,6 +690,17 @@ static void menu_apply_error_screen(const int on) {
     menu_schedule_rect(); // the class preview goes with #menuHolder
 }
 
+// The error screen's message in the page's language: the client's own texts (the idle kick is
+// v10's disconnect(t("player.inactive")), which says "Disconnected due to inactivity" where v7 and
+// the server say "Kicked for inactivity"; the connect timeout is KrunkNative's); a server's
+// error text shows as it came (v10 too).
+static const char *connect_error_text(const char *error) {
+    if (!strcmp(error, "Could not connect to the game server"))
+        return I18N("kn.error.connectFailed", "Could not connect to the game server");
+    if (!strcmp(error, "Kicked for inactivity")) return I18N("player.inactive", "Disconnected due to inactivity");
+    return error;
+}
+
 #define MENU_LOAD_SPINNER "<div style='width:100%;text-align:center;transform:scale(1.3);'><div class='lds-ring'><div></div><div></div><div></div><div></div></div></div>"
 void menu_update_instructions(void) {
     HtmlElem el = by_id("instructions");
@@ -700,9 +711,9 @@ void menu_update_instructions(void) {
         sb_append(&sb, MENU_LOAD_SPINNER);
     } else if (can_play()) {
         const int spect = spectate_requested();
-        sb_append(&sb, gamepad_active() ? (spect ? "START to SPECTATE" : "PRESS START")
-                       : ui_mobile_active() ? (spect ? "TAP TO SPECTATE" : "TAP TO PLAY")
-                       : spect ? "CLICK TO SPECTATE" : "CLICK TO PLAY");
+        sb_append(&sb, gamepad_active() ? (spect ? I18N("app.spectate.controller", "START to SPECTATE") : I18N("app.play.controller", "PRESS START"))
+                       : ui_mobile_active() ? (spect ? I18N("app.spectate.mobile", "TAP TO SPECTATE") : I18N("app.play.mobile", "TAP TO PLAY"))
+                       : spect ? I18N("app.spectate", "CLICK TO SPECTATE") : I18N("app.play", "CLICK TO PLAY"));
         // the ranked queue status under it (v10794.toUpperCase(), ranked_ui.c)
         if (ranked_ui_status()) {
             sb_append(&sb, "<div id='instructionsSubtitle'>");
@@ -729,10 +740,14 @@ void menu_update_instructions(void) {
         const int updating = !strcmp(g_ui.connect_error, "GAME UPDATING");
         sb_appendf(&eb, "<div class='instructionsHeader'>%s</div><div style='color: rgba(255, 255, 255, 0.6);margin-top: 5px;font-size: 28px;'>",
                    updating ? "Game Updating" : "Lost Connection");
-        sb_append_esc(&eb, updating && !strcmp(g_connect_code, NET_ERROR_CODE_UPDATING) ? "Restarting for an update" : g_ui.connect_error);
+        sb_append_esc(&eb, updating && !strcmp(g_connect_code, NET_ERROR_CODE_UPDATING) ? I18N("kn.error.restartingUpdate", "Restarting for an update") : connect_error_text(g_ui.connect_error));
         // KrunkNative: the matchmaker turned a guest away (AccountRequired: a node of a server_bin
         // that still refused guests): log in (the lobby is joined right after, servers_ui.c)
-        if (servers_ui_account_required()) sb_append(&eb, "<div style='font-size:20px'><a href='#' onclick='showWindow(5);return false'>Log in</a> to join it.</div>");
+        if (servers_ui_account_required()) {
+            char login[192];
+            I18N_F(login, "kn.error.loginToJoin", "{0}Log in{1} to join it.", "<a href='#' onclick='showWindow(5);return false'>", "</a>");
+            sb_appendf(&eb, "<div style='font-size:20px'>%s</div>", login);
+        }
         sb_append(&eb, "</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>ID: 0x");
         sb_append_esc(&eb, g_connect_code[0] ? g_connect_code : "000000");
         // v7.1.4 f2040: "Code: <close code> | Reason: <close reason>" of the socket's close event; here
@@ -745,18 +760,19 @@ void menu_update_instructions(void) {
         if (servers_ui_rejoining())
             sb_appendf(&eb, "</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.8)'>%s</div>", servers_ui_rejoin_text());
         else
-            sb_append(&eb, "</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>If you have any extensions, disable them</div>");
+            sb_appendf(&eb, "</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>%s</div>",
+                       I18N("error.extentions", "If you have any extensions, disable them"));
         // Find a Game: seek a new game (or retry a pinned server: console connect / Direct Connect).
         // v7's row is table-layout: fixed, four equal cells of the box's 610px; KrunkNative's fifth
         // tab (Play Offline) leaves 112px of text per cell, less than "Find a Game" / "Play
         // Offline" take at 16px, so they wrapped onto two lines. The row sizes its cells by their
         // text instead (auto layout, no wrapping); the five labels fit the box with room to spare.
         sb_appendf(&eb, "<div class=\"instructionsTabs\" style=\"table-layout:auto;white-space:nowrap\">\n\t\t\t\t<div class=\"instructionsTab\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);knRetry()\">%s</div>"
-                        "\n\t\t\t\t<div class=\"instructionsTab\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);knHostOffline()\">Play Offline</div>"
+                        "\n\t\t\t\t<div class=\"instructionsTab\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);knHostOffline()\">%s</div>"
                         "\n\t\t\t\t<div class=\"instructionsTab\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);showWindow(2)\">Servers</div>"
                         "\n\t\t\t\t<div class=\"instructionsTab\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);showWindow(1)\">Settings</div>"
                         "\n\t\t\t\t<div class=\"instructionsTab\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);showWindow(35)\">Changelog</div>\n\t\t\t</div>",
-                   servers_ui_pinned() ? "Reconnect" : "Find a Game");
+                   servers_ui_pinned() ? I18N("kn.error.reconnect", "Reconnect") : "Find a Game", I18N("kn.error.playOffline", "Play Offline"));
     }
     char *update = sb_finish(&eb);
     char key[sizeof(g_ui.last_instructions)];
@@ -1009,14 +1025,19 @@ void menu_show_window(int id, const int force) {
             html_dom_set_html(mw, html ? html : "");
             html_dom_set_class(mw, "stickyHeader", sticky);
             html_dom_set_class(mw, "dark", 1);
+            i18n_translate_tree(mw); // the captured English template in the page's language
         }
         HtmlElem holder = by_id("windowHolder");
         if (holder) html_dom_set_class(holder, "popupWin", 1);
         free(html);
         g_ui.active_window = id;
-        if (header_el) html_dom_set_html(header_el, header);
+        if (header_el) {
+            html_dom_set_html(header_el, header);
+            i18n_translate_tree(header_el);
+        }
         menu_toggle_window(1);
         ui_window_post(id);
+        if (mw) i18n_translate_tree(mw); // what post() filled in
     } else {
         menu_toggle_window(0);
     }
@@ -1075,7 +1096,7 @@ void menu_commit_account_name(void) {
 
     HtmlElem resp = by_id("accResp");
     if (!*start) {
-        if (resp) html_dom_set_text(resp, "Enter a username");
+        if (resp) html_dom_set_text(resp, I18N("kn.account.enterName", "Enter a username"));
         return;
     }
     copy_str(g_ui.client->menu_name, sizeof(g_ui.client->menu_name), start);
@@ -1448,8 +1469,30 @@ static void setup_dom(void) {
     g_ui.settings_view = html_storage_get("krk_advanced", saved, sizeof(saved)) >= 0 && atoi(saved) == 1;
 }
 
+// The language changed (Settings > Language, or its table arrived on the web): i18n.c already
+// translated the page in place; what the menu writes from i18n strings is written again.
+static void menu_on_locale(void *user) {
+    (void) user;
+    if (!g_ui.dom_ready) return;
+    g_ui.last_instructions[0] = 0;
+    menu_update_instructions();
+    menu_update_top_bar();
+    menu_update_class_box();
+    // the open window again (its gen() strings); Settings stays as it is (no scroll / tab reset:
+    // its labels are plain table strings, translated in place)
+    if (g_ui.active_window != MENU_WINDOW_NONE && g_ui.active_window != 1 && menu_window_is_open())
+        menu_show_window(g_ui.active_window, 1);
+    // the Language select follows the language (a change that did not come from it: krk_lang at
+    // start on the web, where the table arrives later)
+    HtmlElem sel = by_id("knLangSelect");
+    if (sel) html_dom_set_value(sel, i18n_locale());
+    hud_ui_relayout();
+}
+
 // init() + the `bridgeReady` handler: runs once the page's DOM exists.
 static void menu_dom_init(void) {
+    i18n_init(); // translations.en + the stored locale (krk_lang)
+    i18n_on_change(menu_on_locale, NULL);
     ui_windows_load();
     ui_settings_load();
     ui_settings_collect_defaults();
@@ -1464,6 +1507,10 @@ static void menu_dom_init(void) {
     menu_update_class_box();
     menu_update_instructions();
     g_menu_ping = -1; // a fresh page shows "0" in gray
+
+    // the page's markup (index.html, the Svelte mounts) in the stored language
+    html_dom_set_lang(i18n_lang_find(i18n_locale())->bcp47);
+    i18n_translate_tree(0);
 
     // bridgeReady
     g_ui.dom_ready = 1;

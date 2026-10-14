@@ -63,13 +63,14 @@ static const char *const k_nav_pages[] = {"leaders", "mods", "maps", "market", "
 static const char *const k_sub_pages[] = {"itemsales", "clan", "map", "mod", "search", "profile", "post", "listing"};
 static const char *const k_market_queries[] = {"market", "inventory", "sales", "stats", "trades", "blackm"}; // config.marketQueries
 
-#define STR_MAPS_NONE "No Games found..."       // social.maps.none
-#define STR_MODS_NONE "No Mods found..."        // social.mods.none
-#define STR_WIN_MAPS_NONE "No Games found!"     // windows.maps.none
-#define STR_WIN_MODS_NONE "No Mods found"       // windows.mods.none
-#define STR_MARKET_NONE "No Items Found"        // social.market.none
-#define STR_MARKET_LOGIN "You must be logged in." // social.market.login
-#define STR_MARKET_FAILED "Failed. Try Again"   // social.market.failed
+// i18n (client/include/i18n.h): looked up where they are written
+#define STR_MAPS_NONE I18N("social.maps.none", "No Games found...")
+#define STR_MODS_NONE I18N("social.mods.none", "No Mods found...")
+#define STR_WIN_MAPS_NONE I18N("windows.maps.none", "No Games found!")
+#define STR_WIN_MODS_NONE I18N("windows.mods.none", "No Mods found")
+#define STR_MARKET_NONE I18N("social.market.none", "No Items Found")
+#define STR_MARKET_LOGIN I18N("social.market.login", "You must be logged in.")
+#define STR_MARKET_FAILED I18N("social.market.failed", "Failed. Try Again")
 
 // ------------------------------------------------------------------ settings (vO78 = {...})
 
@@ -183,6 +184,13 @@ static void set_display(const char *id, const char *value) {
 static void set_html(const char *id, const char *html) {
     const HtmlElem e = el(id);
     if (e) html_dom_set_html(e, html ? html : "");
+}
+
+// "<text>..." in the market / listing holders (social.market.none / .login + "...")
+static void set_market_note(const char *id, const char *text) {
+    char html[256];
+    snprintf(html, sizeof(html), "<div style='font-size:20px;margin-top:20px;color:#fff'>%s...</div>", text);
+    set_html(id, html);
 }
 
 static void set_style(const char *id, const char *prop, const char *value) {
@@ -625,7 +633,7 @@ static void append_setting_html(StrBuf *sb, const HubSetting *s) {
             break;
         }
         case SET_URL: // generic(): type "url", placeholder settings.social.bg.paste
-            sb_appendf(sb, "<input type='url' name='url' id='slid_%s' class='inputGrey2' placeholder='Background Image URL'\n\t\t\t\t\t\t\tvalue='", s->key);
+            sb_appendf(sb, "<input type='url' name='url' id='slid_%s' class='inputGrey2' placeholder='%s'\n\t\t\t\t\t\t\tvalue='", s->key, I18N("settings.social.bg.paste", "Background Image URL"));
             sb_append_esc(sb, val);
             sb_appendf(sb, "' oninput='setSetting(\"%s\", this.value)'/>", s->key);
             break;
@@ -803,7 +811,7 @@ static void shuffle_rows(cJSON *rows) {
 
 // f544(rows, tab): map cards (tab 0 = Home: shuffled, "Popular Categories" first)
 static void append_map_cards(StrBuf *sb, const cJSON *rows_in, const int tab) {
-    if (!cJSON_IsArray(rows_in) || !cJSON_GetArraySize(rows_in)) sb_append(sb, "<span style='color:rgba(0,0,0,0.4);'>" STR_MAPS_NONE "</span>");
+    if (!cJSON_IsArray(rows_in) || !cJSON_GetArraySize(rows_in)) sb_appendf(sb, "<span style='color:rgba(0,0,0,0.4);'>%s</span>", STR_MAPS_NONE);
     if (!cJSON_IsArray(rows_in)) return;
     const HubTab *cfg = list_tab(0, tab);
     cJSON *rows = cJSON_Duplicate(rows_in, 1);
@@ -880,7 +888,7 @@ static void append_map_cards(StrBuf *sb, const cJSON *rows_in, const int tab) {
 
 // f545(rows, tab): mod cards
 static void append_mod_cards(StrBuf *sb, const cJSON *rows, const int tab) {
-    if (!cJSON_IsArray(rows) || !cJSON_GetArraySize(rows)) sb_append(sb, "<span style='color:rgba(0,0,0,0.4);'>" STR_MODS_NONE "</span>");
+    if (!cJSON_IsArray(rows) || !cJSON_GetArraySize(rows)) sb_appendf(sb, "<span style='color:rgba(0,0,0,0.4);'>%s</span>", STR_MODS_NONE);
     if (!cJSON_IsArray(rows)) return;
     const HubTab *cfg = list_tab(1, tab);
     const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
@@ -1369,10 +1377,11 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
         sb_append(&sb, "]</a>");
     }
     get_date(num, sizeof(num), jstr(t, "player_datenew"));
-    sb_appendf(&sb, "</div><div class='leftMidHolder'>Since <span style='color:rgba(255,255,255,0.6)'>%s</span></div><div class='leftBottomHolder'>", num);
+    sb_appendf(&sb, "</div><div class='leftMidHolder'>%s <span style='color:rgba(255,255,255,0.6)'>%s</span></div><div class='leftBottomHolder'>", I18N("social.since", "Since"), num);
     format_num(num, sizeof(num), g_hub.profile_followed);
     format_num(num2, sizeof(num2), g_hub.profile_following);
-    sb_appendf(&sb, "<div class='follL' id='followerC' onclick='viewFollowers()'>%s<span class='follCount'>Followers</span></div><div class='follL' id='followC' style='margin-left:10px;' onclick='viewFollowing()'>%s<span class='follCount'>following</span></div></div>", num, num2);
+    sb_appendf(&sb, "<div class='follL' id='followerC' onclick='viewFollowers()'>%s<span class='follCount'>%s</span></div><div class='follL' id='followC' style='margin-left:10px;' onclick='viewFollowing()'>%s<span class='follCount'>%s</span></div></div>",
+               num, I18N("generic.followers", "Followers"), num2, I18N("generic.following", "following"));
     sb_appendf(&sb, "<div class='rightTopHolder'><span class='material-icons canFlag%s' id='flagBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='flagPopup();'>flag</span><span class='material-icons' id='reprtBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='reportPopup();'>report</span><span class='material-icons' id='shareBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='shareProfile();'>share</span></div>",
                acc && (acc->is_dev || acc->is_mod) ? "" : " hide");
     sb_append(&sb, "<div class='rightMidHolder'>");
@@ -1387,7 +1396,8 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
     const cJSON *follow = cJSON_GetArrayItem(cJSON_GetArrayItem(extra, 6), 0);
     const int not_following = !follow || !jnum(follow, "f");
     sb_append(&sb, "<div class='rightBottomHolder'><div class='bottomBtn' id='tradeBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='tradePopup();'>Trade</div><div class='bottomBtn' id='giftBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='giftPopup();'>Send Gift</div>");
-    sb_appendf(&sb, "<div class='bottomBtn %s' id='followBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='followUser();'>%s</div>", not_following ? "follow" : "unfollow", not_following ? "Follow" : "Unfollow");
+    sb_appendf(&sb, "<div class='bottomBtn %s' id='followBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='followUser();'>%s</div>", not_following ? "follow" : "unfollow",
+               not_following ? I18N("generic.follow", "Follow") : I18N("generic.unfollow", "Unfollow"));
     sb_appendf(&sb, "<div class='bottomBtn canVerify%s' id='verifyBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='verifyPopup();'>%s</div>", acc && acc->is_dev ? "" : " hide", jnum(t, "player_featured") ? "Unverify" : "Verify");
     sb_appendf(&sb, "<div class='bottomBtn canBadge%s' id='badgeBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='badgePopup();'>Give Badge</div>", acc && acc->is_dev ? "" : " hide");
     char *html = sb_finish(&sb);
@@ -1399,7 +1409,8 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
     // pTabContent_about: Overall Stats with the four config.statTabs
     const double kills = jnum(t, "player_kills"), deaths = jnum(t, "player_deaths"), games = jnum(t, "player_games_played"), wins = jnum(t, "player_wins");
     const double lo = k > 1 ? pow(k / 0.03, 2) : 0, hi = pow((k + 1) / 0.03, 2);
-    sb_append(&sb, "<div class='scrollItemNew'><span class='scrollItemHead'>Overall Stats</span><div class='material-icons toggleView' onclick='toggleView(this)'>expand_less</div><div>");
+    sb_appendf(&sb, "<div class='scrollItemNew'><span class='scrollItemHead'>%s</span><div class='material-icons toggleView' onclick='toggleView(this)'>expand_less</div><div>",
+               I18N("social.profile.stats", "Overall Stats"));
     js_num(num, sizeof(num), (double) (long long) (score - lo) / (double) (long long) (hi - lo) * 100.0);
     sb_appendf(&sb, "<div class='xpBar'><div class='xpBarB' style='width:%s%%'></div><span class='xpBarV'>%lld / %lld</span></div>", num, (long long) (score - lo), (long long) (hi - lo));
     sb_append(&sb, "</div><div id='statHolder' style='margin-top: 0px;'><div class='bigMenTabs' style='margin-bottom: 5px;table-layout: fixed;width: calc(100% - 18px);margin-left: 9px;background-color: rgba(0, 0, 0, 0.5);'>");
@@ -1423,61 +1434,66 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
     snprintf(v, sizeof(v), " ~%s", num);
     PST("Inventory", v);
     comma_fixed(v, sizeof(v), score, -1);
-    PST("Score", v);
+    PST(I18N("generic.score", "Score"), v);
     comma_fixed(v, sizeof(v), score / (kills > 1 ? kills : 1), 2);
     PST("SPK", v);
     comma_fixed(v, sizeof(v), kills, -1);
-    PST("Kills", v);
+    PST(I18N("generic.kills", "Kills"), v);
     comma_fixed(v, sizeof(v), deaths, -1);
-    PST("Deaths", v);
+    PST(I18N("generic.deaths", "Deaths"), v);
     comma_fixed(v, sizeof(v), kills / (deaths > 1 ? deaths : 1), 4);
-    PST("KDR", v);
+    PST(I18N("generic.kdr", "KDR"), v);
     comma_fixed(v, sizeof(v), kills / (games > 1 ? games : 1), 4);
     PST("KPG", v);
     comma_fixed(v, sizeof(v), games, -1);
-    PST("Games", v);
+    PST(I18N("generic.games", "Games"), v);
     js_num(v, sizeof(v), round(wins / (games - wins > 1 ? games - wins : 1) * 1000.0) / 1000.0); // .round(3)
     PST("W/L", v);
     comma_fixed(v, sizeof(v), wins, -1);
-    PST("Wins", v);
+    PST(I18N("generic.wins", "Wins"), v);
     comma_fixed(v, sizeof(v), games - wins > 0 ? games - wins : 0, -1);
-    PST("Losses", v);
-    static const char *const stat_keys[][2] = {{"Assists", "ast"}, {"Melee", "mk"}, {"Beatdowns", "fk"}, {"Bullseyes", "tmk"}, {"Headshots", "hs"},
-                                              {"Legshots", "ls"}, {"Wallbangs", "wb"}, {"Shots", "s"}};
+    PST(I18N("generic.lose", "Losses"), v);
+    // {i18n key, en text, stats field}
+    static const char *const stat_keys[][3] = {{"stats.assists", "Assists", "ast"}, {"stats.melee", "Melee", "mk"}, {"stats.fistkills", "Beatdowns", "fk"},
+                                              {"stats.thrownkills", "Bullseyes", "tmk"}, {"stats.headshots", "Headshots", "hs"},
+                                              {"stats.legshots", "Legshots", "ls"}, {"stats.wallbangs", "Wallbangs", "wb"}, {"stats.shots", "Shots", "s"}};
     for (size_t i = 0; i < sizeof(stat_keys) / sizeof(stat_keys[0]); i++) {
-        comma_fixed(v, sizeof(v), jnum(stats, stat_keys[i][1]), -1);
-        PST(stat_keys[i][0], v);
+        comma_fixed(v, sizeof(v), jnum(stats, stat_keys[i][2]), -1);
+        PST(i18n_tr(stat_keys[i][0], stat_keys[i][1]), v);
     }
     const double shots = jnum(stats, "s"), hits = fmin(shots, jnum(stats, "h"));
     comma_fixed(v, sizeof(v), hits, -1);
-    PST("Hits", v);
+    PST(I18N("stats.hits", "Hits"), v);
     comma_fixed(v, sizeof(v), shots - hits, -1);
-    PST("Misses", v);
+    PST(I18N("stats.misses", "Misses"), v);
     comma_fixed(num, sizeof(num), round((shots ? hits / shots * 100.0 : 0.0) * 100.0) / 100.0, -1);
     snprintf(v, sizeof(v), "%s%%", num);
-    PST("Accuracy", v);
+    PST(I18N("generic.accuracy", "Accuracy"), v);
     readable_time(v, sizeof(v), jnum(t, "player_timeplayed"));
-    PST("Time Played", v);
+    PST(I18N("generic.timep", "Time Played"), v);
     sb_append(&sb, "</div><div class='statTabB1 hide'>");
-    static const char *const streak_keys[][2] = {{"Nukes", "n"}, {"Airdrops", "ad"}, {"Airdrops Stolen", "sad"}, {"Slimers", "sl"}, {"Juggernauts", "jg"}};
+    static const char *const streak_keys[][3] = {{"stats.nukes", "Nukes", "n"}, {"stats.airdrops", "Airdrops", "ad"}, {"stats.airdrops.stolen", "Airdrops Stolen", "sad"},
+                                                {"stats.slimers", "Slimers", "sl"}, {"stats.juggernauts", "Juggernauts", "jg"}};
     for (size_t i = 0; i < sizeof(streak_keys) / sizeof(streak_keys[0]); i++) {
-        comma_fixed(v, sizeof(v), jnum(stats, streak_keys[i][1]), -1);
-        PST(streak_keys[i][0], v);
+        comma_fixed(v, sizeof(v), jnum(stats, streak_keys[i][2]), -1);
+        PST(i18n_tr(streak_keys[i][0], streak_keys[i][1]), v);
     }
     comma_fixed(v, sizeof(v), jnum(stats, "kjg"), -1);
-    sb_appendf(&sb, "<div class='pSt' style='font-size: 9.5px;padding-left: 0px;padding-right: 0px;width: 140px;'>Juggernauts Killed<strong>%s</strong></div>", v);
+    sb_appendf(&sb, "<div class='pSt' style='font-size: 9.5px;padding-left: 0px;padding-right: 0px;width: 140px;'>%s<strong>%s</strong></div>", I18N("stats.juggernauts.killed", "Juggernauts Killed"), v);
     comma_fixed(v, sizeof(v), jnum(stats, "wm"), -1);
-    PST("War Machines", v);
+    PST(I18N("stats.warmachines", "War Machines"), v);
     sb_append(&sb, "</div><div class='statTabB2 hide'>");
     comma_fixed(v, sizeof(v), jnum(stats, "crc"), -1);
-    PST("Crouches", v);
+    PST(I18N("stats.crouches", "Crouches"), v);
     comma_fixed(v, sizeof(v), jnum(stats, "spry"), -1);
-    PST("Sprays Placed", v);
-    sb_appendf(&sb, "<div class='pSt' style='padding-left: 9px;padding-right: 9px;width: 122px;'>Helpful Reports<strong>%d/%d</strong></div>", (int) jnum(t, "player_jobratingpositive"), (int) jnum(t, "player_jobrating"));
+    PST(I18N("stats.sprays", "Sprays Placed"), v);
+    sb_appendf(&sb, "<div class='pSt' style='padding-left: 9px;padding-right: 9px;width: 122px;'>%s<strong>%d/%d</strong></div>", I18N("stats.kpd", "Helpful Reports"),
+               (int) jnum(t, "player_jobratingpositive"), (int) jnum(t, "player_jobrating"));
     comma_fixed(v, sizeof(v), jnum(t, "player_calls"), -1);
-    sb_appendf(&sb, "<div class='pSt' title='Amount of times you called KPD'>Total Calls<strong>%s</strong></div>", v);
+    sb_appendf(&sb, "<div class='pSt' title='%s'>%s<strong>%s</strong></div>", I18N("stats.kpd.total.tip", "Amount of times you called KPD"), I18N("stats.kpd.total", "Total Calls"), v);
     comma_fixed(v, sizeof(v), jnum(t, "player_taggedaccounts"), -1);
-    sb_appendf(&sb, "<div class='pSt' title='Amount of users banned from calls you made to KPD' style='padding-left: 8px;padding-right: 8px;width: 124px;'>Bans from calls<strong>%s</strong></div>", v);
+    sb_appendf(&sb, "<div class='pSt' title='%s' style='padding-left: 8px;padding-right: 8px;width: 124px;'>%s<strong>%s</strong></div>",
+               I18N("stats.kpd.bans.tip", "Amount of users banned from calls you made to KPD"), I18N("stats.kpd.bans", "Bans from calls"), v);
 #undef PST
     sb_append(&sb, "</div><div class='statTabB3 hide'>");
     for (size_t c = 0; c < rules_class_count(); c++) {
@@ -1504,14 +1520,17 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
         cJSON_AddItemToArray(f, cJSON_CreateString(g_hub.profile_name));
         hub_send(f);
     }
-    sb_append(&sb, "<div class='scrollItemNew'><span class='scrollItemHead'>Sales</span><div class='material-icons toggleView' onclick='toggleView(this)'>expand_less</div><div style='margin-top:10px;margin-left: 8px;'><span style='color: rgba(255,255,255,0.4);'>Data Range</span><select class='rangeSelect' onchange='changeDateRange2(this.value)'><option value='0'>1 week</option><option value='1'>2 weeks</option><option value='2'>3 weeks</option><option value='3' selected>1 month</option><option value='4'>2 months</option><option value='5'>3 months</option><option value='6'>4 months</option></select></div><div class='graphHolder'><div class='graphHeader'><span class='graphHeaderTxt'>Market Sales</span><span id='totalSalesHeader' class='graphHeaderTotal'>0</span></div><canvas id='profSales'></canvas></div></div><div></div>");
+    sb_appendf(&sb, "<div class='scrollItemNew'><span class='scrollItemHead'>%s</span><div class='material-icons toggleView' onclick='toggleView(this)'>expand_less</div><div style='margin-top:10px;margin-left: 8px;'><span style='color: rgba(255,255,255,0.4);'>Data Range</span><select class='rangeSelect' onchange='changeDateRange2(this.value)'><option value='0'>1 week</option><option value='1'>2 weeks</option><option value='2'>3 weeks</option><option value='3' selected>1 month</option><option value='4'>2 months</option><option value='5'>3 months</option><option value='6'>4 months</option></select></div><div class='graphHolder'><div class='graphHeader'><span class='graphHeaderTxt'>%s</span><span id='totalSalesHeader' class='graphHeaderTotal'>0</span></div><canvas id='profSales'></canvas></div></div><div></div>",
+               I18N("social.profile.sales", "Sales"), I18N("social.profile.sales.market", "Market Sales"));
     html = sb_finish(&sb);
     set_html("pTabContent_about", html);
     free(html);
     set_html("pTabContent_activity", "");
     set_html("pTabContent_listings", "");
     // badges (v7 data/badges.js): KrunkNative has no badge table yet: the none text
-    set_html("pTabContent_badges", "<div class='scrollItemNew'><div class='noneText'>No Badges found for this user</div></div>");
+    char badges_none[256];
+    snprintf(badges_none, sizeof(badges_none), "<div class='scrollItemNew'><div class='noneText'>%s</div></div>", I18N("social.profile.badges.none", "No Badges found for this user"));
+    set_html("pTabContent_badges", badges_none);
     // creations: skins (store skins by this creator), games r, mods l, assets f
     const cJSON *games_rows = cJSON_GetArrayItem(extra, 4), *mods_rows = cJSON_GetArrayItem(extra, 5), *assets_rows = cJSON_GetArrayItem(extra, 7);
     int skins_n = 0;
@@ -1519,8 +1538,19 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
         const char *cr = g_viewer_skins[i].creator;
         if (cr && g_hub.profile_name[0] && strstr(cr, g_hub.profile_name)) skins_n++;
     }
-    sb_appendf(&sb, "<div class='scrollItemNew'><div class=\"creationTabs\">\n\t\t\t\t<div class=\"creationTab creationTabA\" id=\"creationTab_skins\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);openCreationTab('skins')\">Skins [%d]</div>\n\t\t\t\t<div class=\"creationTab\" id=\"creationTab_games\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);openCreationTab('games')\">Games [%d]</div>\n\t\t\t\t<div class=\"creationTab\" id=\"creationTab_mods\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);openCreationTab('mods')\">Mods [%d]</div>\n\t\t\t\t<div class=\"creationTab\" id=\"creationTab_assets\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);openCreationTab('assets')\">Assets [%d]</div>\n\t\t\t</div>",
-               skins_n, cJSON_GetArraySize(games_rows), cJSON_GetArraySize(mods_rows), cJSON_GetArraySize(assets_rows));
+    {
+        char n0[16], n1[16], n2[16], n3[16], l0[64], l1[64], l2[64], l3[64];
+        snprintf(n0, sizeof(n0), "%d", skins_n);
+        snprintf(n1, sizeof(n1), "%d", cJSON_GetArraySize(games_rows));
+        snprintf(n2, sizeof(n2), "%d", cJSON_GetArraySize(mods_rows));
+        snprintf(n3, sizeof(n3), "%d", cJSON_GetArraySize(assets_rows));
+        I18N_F(l0, "social.profile.skins", "Skins [{0}]", n0);
+        I18N_F(l1, "social.profile.games", "Games [{0}]", n1);
+        I18N_F(l2, "social.profile.mods", "Mods [{0}]", n2);
+        I18N_F(l3, "social.profile.assets", "Assets [{0}]", n3);
+        sb_appendf(&sb, "<div class='scrollItemNew'><div class=\"creationTabs\">\n\t\t\t\t<div class=\"creationTab creationTabA\" id=\"creationTab_skins\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);openCreationTab('skins')\">%s</div>\n\t\t\t\t<div class=\"creationTab\" id=\"creationTab_games\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);openCreationTab('games')\">%s</div>\n\t\t\t\t<div class=\"creationTab\" id=\"creationTab_mods\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);openCreationTab('mods')\">%s</div>\n\t\t\t\t<div class=\"creationTab\" id=\"creationTab_assets\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);openCreationTab('assets')\">%s</div>\n\t\t\t</div>",
+                   l0, l1, l2, l3);
+    }
     sb_append(&sb, "<div class='creationContent selected' id='creationContent_skins'>");
     if (skins_n) {
         for (int i = g_viewer_skin_count - 1; i >= 0; i--) { // reversed
@@ -1534,11 +1564,13 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
             sb_append(&sb, "</div></div>");
         }
     } else {
-        sb_append(&sb, "<div class='noneText'>No published Skins from this user</div>");
+        sb_appendf(&sb, "<div class='noneText'>%s</div>", I18N("social.profile.skins.none", "No published Skins from this user"));
     }
     sb_append(&sb, "</div>");
     static const char *const heads[3] = {"games", "mods", "assets"};
-    static const char *const nones[3] = {"No published Games from this user", "No published Mods from this user", "No published Assets from this user"};
+    static const char *const nones[3][2] = {{"social.profile.games.none", "No published Games from this user"},
+                                            {"social.profile.mods.none", "No published Mods from this user"},
+                                            {"social.profile.assets.none", "No published Assets from this user"}};
     const cJSON *lists[3] = {games_rows, mods_rows, assets_rows};
     for (int i = 0; i < 3; i++) {
         sb_appendf(&sb, "<div class='creationContent' id='creationContent_%s'>", heads[i]);
@@ -1577,7 +1609,7 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
             sb_append_esc(&sb, by);
             sb_append(&sb, "</span></div></div>");
         }
-        if (!any) sb_appendf(&sb, "<div class='noneText'>%s</div>", nones[i]);
+        if (!any) sb_appendf(&sb, "<div class='noneText'>%s</div>", i18n_tr(nones[i][0], nones[i][1]));
         sb_append(&sb, "</div>");
     }
     sb_append(&sb, "</div>");
@@ -1808,7 +1840,7 @@ static void hub_render_search(const cJSON *t) {
     char n[32];
     comma_number(n, sizeof(n), cJSON_GetArraySize(t));
     StrBuf sb = {0};
-    sb_appendf(&sb, "<div class='scrollItem'>Search Results<div style='float:right'>%s</div></div>", n);
+    sb_appendf(&sb, "<div class='scrollItem'>%s<div style='float:right'>%s</div></div>", I18N("social.search", "Search Results"), n);
     char *html = sb_finish(&sb);
     set_html("searchInfo", html);
     free(html);
@@ -2295,11 +2327,15 @@ static void hub_render_trades(StrBuf *out, const cJSON *t, int *shown) {
         }
     }
     static const char *const ids[3] = {"in", "out", "his"};
-    static const char *const heads[3] = {"Incoming Offers", "Outgoing Offers", "Trade History"};
+    static const char *const heads[3][2] = {{"social.trades.in.head", "Incoming Offers ({0})"}, {"social.trades.out.head", "Outgoing Offers ({0})"},
+                                            {"social.trades.history.head", "Trade History ({0})"}};
     sb_append(out, "<div class='scrollItem' id='offers'><div id='tradeNav'><div class='tradeNavBtn' style='background-color: rgba(0, 0, 0, 0.5);' onclick='updateTrades(&quot;in&quot;)' id='tn_in'>Incoming</div><div class='tradeNavBtn' id='tn_out' onclick='updateTrades(&quot;out&quot;)'>Outgoing</div><div class='tradeNavBtn' id='tn_his' onclick='updateTrades(&quot;his&quot;)'>History</div></div>");
     for (int i = 0; i < 3; i++) {
-        sb_appendf(out, "<div id='o_%s'%s><div style='margin-bottom:10px;margin-top:-4px;'>%s (<span>%d</span>)%s</div>", ids[i], i ? " style='display:none'" : "", heads[i], fe[i],
-                   i == 0 ? "<div class='declineAll' onclick='declineAllTrades();'>Decline All</div>" : "");
+        char count[32], head[128], decline[128] = "";
+        snprintf(count, sizeof(count), "<span>%d</span>", fe[i]);
+        i18n_trf(head, sizeof(head), heads[i][0], heads[i][1], 1, I18N_ARGV(count));
+        if (i == 0) snprintf(decline, sizeof(decline), "<div class='declineAll' onclick='declineAllTrades();'>%s</div>", I18N("social.trades.decline", "Decline All"));
+        sb_appendf(out, "<div id='o_%s'%s><div style='margin-bottom:10px;margin-top:-4px;'>%s%s</div>", ids[i], i ? " style='display:none'" : "", head, decline);
         char *body = sb_finish(&pe[i]);
         sb_append(out, body[0] ? body : "<div style='color: rgba(0,0,0,0.6);font-size: 17px;'>None</div>");
         free(body);
@@ -2338,7 +2374,7 @@ static void market_card(StrBuf *sb, const int pos, void *user) {
     if (skin_animated(pe)) sb_append(sb, "<div class='material-icons isAnim'>loop</div>");
     // v3.1.1: showPopup(page, skin, preview, typeLabel, skinid, funds, count, salestart, player, uid, marketid)
     sb_appendf(sb, "<div class='cardActions'><a class='cardAction' onmouseenter='SOUND.play(&quot;tick_0&quot;,0.1)' onclick='showPopup(&quot;%s&quot;,%d,%d)'>%s</a><div class='cardActionSep'></div>",
-               sub, m->skin, v, !strcmp(sub, "market") ? "Purchase" : inventory ? "List" : !strcmp(sub, "sales") ? "Unlist" : "");
+               sub, m->skin, v, !strcmp(sub, "market") ? I18N("social.market.purchase", "Purchase") : inventory ? "List" : !strcmp(sub, "sales") ? I18N("social.market.unlist", "Unlist") : "");
     if (!inventory) sb_appendf(sb, "<a class='cardAction' onmouseenter='SOUND.play(&quot;tick_0&quot;,0.1)' onclick='searchItem(%d)'>Search</a>", m->skin);
     else sb_appendf(sb, "<a class='cardAction' onmouseenter='SOUND.play(&quot;tick_0&quot;,0.1)' onclick='quickSell(%d,%d,%d)'>Quick Sell</a>", m->skin, pe->rarity, m->uid);
     sb_appendf(sb, "<div class='cardActionSep'></div><a class='cardAction' onmouseenter='SOUND.play(&quot;tick_0&quot;,0.1)' onclick='openLink(&quot;/social.html?p=itemsales&i=%d&quot;, &quot;_blank&quot;)'>Info</a></div></div>", m->skin);
@@ -2353,7 +2389,7 @@ static void hub_render_market(const char *a, const cJSON *t) {
     if (cJSON_IsArray(t) || cJSON_IsObject(t)) {
         if (!strcmp(sub, "stats")) {
             side_boxes();
-            sb_append(&sb, "<div class='scrollItem' style='width:680px;padding-top:20px;padding-bottom:15px;overflow:hidden;max-height:unset;'><div style='margin-bottom:10px;'>Rarest Items<span style='float: right;'>In Circulation</span></div>");
+            sb_appendf(&sb, "<div class='scrollItem' style='width:680px;padding-top:20px;padding-bottom:15px;overflow:hidden;max-height:unset;'><div style='margin-bottom:10px;'>Rarest Items<span style='float: right;'>%s</span></div>", I18N("social.market.stats.circulation", "In Circulation"));
             const cJSON *r;
             cJSON_ArrayForEach(r, t) {
                 const int ski = row_int(r, "ski", NULL, NULL, -1);
@@ -2459,7 +2495,7 @@ static void hub_render_itemsales(const cJSON *t, const cJSON *owners) {
     set_display("itemsalesList", "none");
     const ViewerSkin *pe = cJSON_IsObject(t) ? hub_skin(row_int(t, "ind", NULL, NULL, -1)) : NULL;
     if (!pe) {
-        set_html("itemsalesHolder", "<div style='font-size:20px;margin-top:20px;color:#fff'>" STR_MARKET_NONE "...</div>");
+        set_market_note("itemsalesHolder", STR_MARKET_NONE);
         set_display("itemsalesHolder", "block");
         return;
     }
@@ -2948,14 +2984,17 @@ static void market_popup_html(StrBuf *out, const MarketPop *p) {
     if (l > 0 && !inventory) {
         char ago[48];
         readable_time(ago, sizeof(ago), h);
-        sb_appendf(&sb, "<div class='pItemTime'>listed %s ago</div>", ago);
+        char listed[96];
+        I18N_F(listed, "social.market.listed", "listed {0} ago", ago);
+        sb_appendf(&sb, "<div class='pItemTime'>%s</div>", listed);
     }
     char a[32], b[32], c[32];
     if (!strcmp(p->page, "market")) {
         const int grace = h < SALE_GRACE_MS;
-        char req[32];
-        snprintf(req, sizeof(req), "lvl %d required", MARKET_MIN_LVL); // social.market.req
-        const char *block = !acc ? "Login to Buy" : acc->level < MARKET_MIN_LVL ? req : NULL;
+        char req[64], lvl[16];
+        snprintf(lvl, sizeof(lvl), "%d", MARKET_MIN_LVL);
+        I18N_F(req, "social.market.req", "lvl {0} required", lvl);
+        const char *block = !acc ? I18N("social.login.buy", "Login to Buy") : acc->level < MARKET_MIN_LVL ? req : NULL;
         const double funds = acc ? acc->funds : 0, price = atof(p->funds), left = funds - price;
         comma_number(a, sizeof(a), funds);
         comma_number(b, sizeof(b), price);
@@ -2966,20 +3005,23 @@ static void market_popup_html(StrBuf *out, const MarketPop *p) {
         if (!block && !grace && left >= 0) sb_appendf(&sb, "onclick='buyItem(%d,%d)'onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'", p->market_id, p->uid);
         if (grace) {
             readable_time(a, sizeof(a), SALE_GRACE_MS - h);
-            sb_appendf(&sb, "><span id='graceTimer' style='color:rgba(255,255,255,0.6)';'>ready in %s</span></div>", a);
+            char ready[96];
+            I18N_F(ready, "social.market.grace", "ready in {0}", a);
+            sb_appendf(&sb, "><span id='graceTimer' style='color:rgba(255,255,255,0.6)';'>%s</span></div>", ready);
         } else {
-            sb_appendf(&sb, ">%s</div>", block ? block : left < 0 ? "Can't Afford" : "Purchase");
+            sb_appendf(&sb, ">%s</div>", block ? block : left < 0 ? I18N("social.market.cant", "Can't Afford") : I18N("social.market.purchase", "Purchase"));
         }
     } else if (inventory) {
-        char req[32];
-        snprintf(req, sizeof(req), "lvl %d required", MARKET_MIN_LVL);
-        const char *block = !acc ? "Login to Sell" : acc->level < MARKET_MIN_LVL ? req : NULL;
-        sb_appendf(&sb, "<div class='pItemPricing'><div id='sellPricFee'>No List Fee</div><input id='sellPriceIn' oninput='calcFee(this)' type='number' placeholder='List Price in KR' min='0' max='%d' step='1'></div><div id='cPostSaleBtn' class='pItemButton' style='display:none;background-color:#2b2b2b'>Not enough KR</div><div id='postSaleBtn' class='pItemButton' %s",
-                   SALE_MAX, block ? "style='background-color:#2b2b2b'" : "");
+        char req[64], lvl[16];
+        snprintf(lvl, sizeof(lvl), "%d", MARKET_MIN_LVL);
+        I18N_F(req, "social.market.req", "lvl {0} required", lvl);
+        const char *block = !acc ? I18N("social.login.sell", "Login to Sell") : acc->level < MARKET_MIN_LVL ? req : NULL;
+        sb_appendf(&sb, "<div class='pItemPricing'><div id='sellPricFee'>%s</div><input id='sellPriceIn' oninput='calcFee(this)' type='number' placeholder='%s KR' min='0' max='%d' step='1'></div><div id='cPostSaleBtn' class='pItemButton' style='display:none;background-color:#2b2b2b'>Not enough KR</div><div id='postSaleBtn' class='pItemButton' %s",
+                   I18N("social.market.fee", "No List Fee"), I18N("social.market.price.list", "List Price in"), SALE_MAX, block ? "style='background-color:#2b2b2b'" : "");
         if (!block) sb_appendf(&sb, "onclick='listItem(%d,%s,%d)'", p->skin, p->skin_id, p->uid);
-        sb_appendf(&sb, "onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>%s</div>", block ? block : "List Item");
+        sb_appendf(&sb, "onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>%s</div>", block ? block : I18N("social.market.list", "List Item"));
     } else if (blackm) {
-        const char *block = !acc ? "Login to Buy" : !il || !illicit_req_ok(il, acc) ? "Access Denied" : NULL;
+        const char *block = !acc ? I18N("social.login.buy", "Login to Buy") : !il || !illicit_req_ok(il, acc) ? "Access Denied" : NULL;
         const double funds = acc ? acc->funds : 0, price = atof(p->funds), left = funds - price;
         comma_number(a, sizeof(a), funds);
         comma_number(b, sizeof(b), price);
@@ -2990,10 +3032,11 @@ static void market_popup_html(StrBuf *out, const MarketPop *p) {
         char key[48];
         econ_new_op(key, sizeof(key), "pbm"); // one purchase per popup, however often YES is clicked
         if (!block && left >= 0) sb_appendf(&sb, "onclick='buyIllicit(%d, &quot;%s&quot;)'onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'", p->skin, key);
-        sb_appendf(&sb, ">%s</div>", block ? block : left < 0 ? "Can't Afford" : "Purchase");
+        sb_appendf(&sb, ">%s</div>", block ? block : left < 0 ? I18N("social.market.cant", "Can't Afford") : I18N("social.market.purchase", "Purchase"));
     } else if (!strcmp(p->page, "sales")) {
         comma_number(a, sizeof(a), atof(p->funds));
-        sb_appendf(&sb, "<div class='pItemPricing'>%s <span style='color:rgba(255,255,255,0.4)'>KR</span></div><div class='pItemButton' onclick='unlistItem(%d,%d,%d)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>Unlist</div>", a, p->skin, p->market_id, p->uid);
+        sb_appendf(&sb, "<div class='pItemPricing'>%s <span style='color:rgba(255,255,255,0.4)'>KR</span></div><div class='pItemButton' onclick='unlistItem(%d,%d,%d)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>%s</div>", a, p->skin, p->market_id, p->uid,
+                   I18N("social.market.unlist", "Unlist"));
     }
     sb_append(&sb, "</div>");
     char *html = sb_finish(&sb);
@@ -3074,8 +3117,9 @@ static void market_filter_popup(const int sort) {
     const char *nav = sort ? "sort" : "filter";
     StrBuf sb = {0};
     if (!sort) {
-        sb_appendf(&sb, "<div class='filterPopHeader'>Market Search</div><div class='filterName'>Sort</div><div id='orderBySel'><select id='sortFilt' onchange='retainSelected(this)'><option value='0'%s>Highest Price</option><option value='1'%s>Lowest Price</option></select></div>",
-                   !strcmp(st->order, "0") ? " selected" : "", strcmp(st->order, "0") ? " selected" : "");
+        sb_appendf(&sb, "<div class='filterPopHeader'>Market Search</div><div class='filterName'>%s</div><div id='orderBySel'><select id='sortFilt' onchange='retainSelected(this)'><option value='0'%s>%s</option><option value='1'%s>%s</option></select></div>",
+                   I18N("social.market.sort2", "Sort"), !strcmp(st->order, "0") ? " selected" : "", I18N("social.market.price.high", "Highest Price"),
+                   strcmp(st->order, "0") ? " selected" : "", I18N("social.market.price.low", "Lowest Price"));
     } else {
         sb_append(&sb, "<div class='filterPopHeader'>Sort Inventory</div>");
     }
@@ -3148,7 +3192,7 @@ static void market_run_filter(const int sort) {
     cJSON_AddItemToArray(f, cJSON_CreateString(st->season));
     if (sort) cJSON_AddItemToArray(f, cJSON_CreateBool(st->missing));
     else cJSON_AddItemToArray(f, cJSON_CreateString(st->order));
-    io_wait("Searching");
+    io_wait(I18N("social.market.searching", "Searching"));
     hub_send(f);
 }
 
@@ -3297,7 +3341,7 @@ static void io_0(const char *e, const char *a, const cJSON *t, const cJSON *extr
         set_display("invStats", a && (!strcmp(a, "inventory") || !strcmp(a, "sales")) ? "table-cell" : "none");
         // no listings / inventory for a guest: social.market.login (K is null)
         if (g_hub.brain) hub_render_market(a, has_t ? t : NULL);
-        else set_html("marketList", "<div style='font-size:20px;margin-top:20px;color:#fff'>" STR_MARKET_LOGIN "...</div>");
+        else set_market_note("marketList", STR_MARKET_LOGIN);
     } else if (!strcmp(e, "items")) {
         items_page(a, g_hub.k);
     } else if (!strcmp(e, "itemsales") && g_hub.brain) {
@@ -3305,12 +3349,12 @@ static void io_0(const char *e, const char *a, const cJSON *t, const cJSON *extr
     } else if (!strcmp(e, "itemsales")) {
         side_boxes();
         set_display("itemsalesList", "none");
-        if (!has_t) set_html("itemsalesHolder", "<div style='font-size:20px;margin-top:20px;color:#fff'>" STR_MARKET_NONE "...</div>");
+        if (!has_t) set_market_note("itemsalesHolder", STR_MARKET_NONE);
         set_display("itemsalesHolder", "block");
     } else if (!strcmp(e, "listing")) {
         side_boxes();
         if (g_hub.brain && has_t) hub_render_listing(t); // kn_brain: the open listing ("listing" page)
-        else set_html("listingHolder", "<div style='font-size:20px;margin-top:20px;color:#fff'>" STR_MARKET_NONE "...</div>");
+        else set_market_note("listingHolder", STR_MARKET_NONE);
         set_display("listingHolder", "block");
     } else if (!strcmp(e, "clan")) {
         side_boxes();
@@ -3927,7 +3971,7 @@ H(h_login_acc) {
         }
         return 1;
     }
-    login_modal_message("Please wait...");
+    login_modal_message(I18N("generic.wait", "Please wait..."));
     cJSON *creds = cJSON_CreateArray();
     cJSON_AddItemToArray(creds, cJSON_CreateString(name));
     cJSON_AddItemToArray(creds, cJSON_CreateString(pass));
@@ -4217,7 +4261,7 @@ H(h_list_confirmed) {
     char fresh[48];
     if (!key || !*key) econ_new_op(fresh, sizeof(fresh), "li");
     send_econ("li", 4, v, key && *key ? key : fresh);
-    io_wait("Posting Item...");
+    io_wait(I18N("social.market.posting", "Posting Item..."));
     return 1;
 }
 
@@ -4228,7 +4272,7 @@ H(h_unlist_item) {
     char key[48];
     snprintf(key, sizeof(key), "uli-%.0f", v[1]);
     send_econ("uli", 3, v, key);
-    io_wait("Unlisting Item...");
+    io_wait(I18N("social.market.unlisting", "Unlisting Item..."));
     return 1;
 }
 
@@ -4236,7 +4280,7 @@ H(h_unlist_item) {
 H(h_quick_sell) {
     UNUSED;
     if (!g_hub.logged_in) {
-        io_po(0, "Must be logged in"); // account.login.required
+        io_po(0, I18N("account.login.required", "Must be logged in"));
         return 1;
     }
     const int skin = (int) arg_n(args, argc, 0, 0), uid = (int) arg_n(args, argc, 2, 0);
@@ -4287,7 +4331,7 @@ H(h_calc_fee) {
         comma_number(n, sizeof(n), fee);
         sb_appendf(&sb, "<span style='color:rgba(255,255,255,0.7)'>-%s KR</span> List Fee", n);
     } else {
-        sb_append(&sb, "No List Fee");
+        sb_append(&sb, I18N("social.market.fee", "No List Fee"));
     }
     char *html = sb_finish(&sb);
     set_html("sellPricFee", html);
@@ -4368,15 +4412,20 @@ H(h_gift_popup) {
     if (!pop) return 1;
     html_dom_set_display(pop, "block");
     const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
-    char req[48] = "";
-    if (!acc) snprintf(req, sizeof(req), "Login to Gift"); // social.login.gift
-    else if (acc->level < (int) g_econ.gift_min_lvl) snprintf(req, sizeof(req), "lvl %d required", (int) g_econ.gift_min_lvl);
+    char req[64] = "";
+    if (!acc) snprintf(req, sizeof(req), "%s", I18N("social.login.gift", "Login to Gift"));
+    else if (acc->level < (int) g_econ.gift_min_lvl) {
+        char lvl[16];
+        snprintf(lvl, sizeof(lvl), "%d", (int) g_econ.gift_min_lvl);
+        I18N_F(req, "social.market.req", "lvl {0} required", lvl);
+    }
     econ_new_op(g_gift_op, sizeof(g_gift_op), "kr");
     StrBuf sb = {0};
-    sb_appendf(&sb, "<div class='popHeader'>Gift KR</div><div id='giftKRBody'><div id='giftAmntFee'>Fee: None</div><input id='giftIn' oninput='calcGiftFee(this)' type='number' placeholder='Gift Amount in KR' min='0' max='%.0f' step='1'><textarea id='giftMsg' rows='5' placeholder='Leave a message'></textarea>", g_econ.gift_max);
+    sb_appendf(&sb, "<div class='popHeader'>%s</div><div id='giftKRBody'><div id='giftAmntFee'>Fee: None</div><input id='giftIn' oninput='calcGiftFee(this)' type='number' placeholder='%s KR' min='0' max='%.0f' step='1'><textarea id='giftMsg' rows='5' placeholder='%s'></textarea>",
+               I18N("social.market.gift", "Gift KR"), I18N("social.market.gift.amount", "Gift Amount in"), g_econ.gift_max, I18N("social.market.gift.msg", "Leave a message"));
     sb_append(&sb, "<div id='cPostSaleBtn' class='pGiftButton' style='display:none;background-color:#2b2b2b'>Not enough KR</div>");
     sb_appendf(&sb, "<div id='postSaleBtn' class='pGiftButton' %s%sonmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>%s</div></div>",
-               req[0] ? "style='background-color:#2b2b2b'" : "", req[0] ? "" : "onclick='giftUser()'", req[0] ? req : "Gift KR");
+               req[0] ? "style='background-color:#2b2b2b'" : "", req[0] ? "" : "onclick='giftUser()'", req[0] ? req : I18N("social.market.gift", "Gift KR"));
     char *html = sb_finish(&sb);
     html_dom_set_html(pop, html);
     free(html);
@@ -4434,7 +4483,7 @@ H(h_gift_user) {
     cJSON_AddStringToObject(ext, "op", g_gift_op);
     cJSON_AddItemToArray(f, ext);
     hub_send(f);
-    io_wait("Please wait..."); // generic.wait
+    io_wait(I18N("generic.wait", "Please wait..."));
     return 1;
 }
 
@@ -4613,7 +4662,7 @@ H(h_trade_popup) {
     UNUSED;
     const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
     if (!acc) {
-        io_po(0, "Must be logged in"); // account.login.required
+        io_po(0, I18N("account.login.required", "Must be logged in"));
     } else if (g_hub.profile_id == acc->id) {
         io_po(0, "Cant trade with yourself");
     } else if (acc->level < TRADE_MIN_LVL) {
@@ -4765,7 +4814,7 @@ H(h_trade_kr) {
 H(h_conf_submit_offer) {
     UNUSED;
     if (!g_hub.logged_in) {
-        io_po(0, "Must be logged in");
+        io_po(0, I18N("account.login.required", "Must be logged in"));
         return 1;
     }
     if (el("tMsg")) html_dom_get_value(el("tMsg"), g_trade.msg, sizeof(g_trade.msg));
@@ -4804,7 +4853,7 @@ static cJSON *trade_list_json(const int side) {
 H(h_submit_offer) {
     UNUSED;
     if (!g_hub.logged_in) {
-        io_po(0, "Must be logged in");
+        io_po(0, I18N("account.login.required", "Must be logged in"));
         return 1;
     }
     const int mx = trade_max_items();
@@ -4821,7 +4870,7 @@ H(h_submit_offer) {
     const char *key = arg_s(ev, args, argc, 1);
     char fresh[48];
     if (!key || !*key) econ_new_op(fresh, sizeof(fresh), "ctr");
-    io_wait("Submitting Offer..."); // social.trading.submitting
+    io_wait(I18N("social.trading.submitting", "Submitting Offer..."));
     cJSON *f = cJSON_CreateArray();
     cJSON_AddItemToArray(f, cJSON_CreateString("ctr"));
     cJSON_AddItemToArray(f, cJSON_CreateNumber(arg_n(args, argc, 0, 0)));
@@ -4904,7 +4953,7 @@ static void offer_side_html(StrBuf *sb, const int *ids, const int n, const int p
 H(h_view_offer) {
     UNUSED;
     if (!g_hub.logged_in) {
-        io_po(0, "Must be logged in");
+        io_po(0, I18N("account.login.required", "Must be logged in"));
         return 1;
     }
     const HubOffer *o = offer_find((int) arg_n(args, argc, 0, -1));
@@ -4929,7 +4978,7 @@ H(h_view_offer) {
             sb_append(&sb, o->message); // html-escaped by kn_brain
             sb_append(&sb, "</textarea>");
         } else {
-            sb_append(&sb, "<div style='color: #eb5656;background-color:#ffffff;text-align:center;'>ENABLE TRADE MESSAGES IN SETTINGS</div>");
+            sb_appendf(&sb, "<div style='color: #eb5656;background-color:#ffffff;text-align:center;'>%s</div>", I18N("social.trades.message", "ENABLE TRADE MESSAGES IN SETTINGS"));
         }
     }
     if (o->we == 0) {
@@ -4948,15 +4997,15 @@ H(h_view_offer) {
 H(h_conf_offer) {
     UNUSED;
     if (!g_hub.logged_in) {
-        io_po(0, "Must be logged in");
+        io_po(0, I18N("account.login.required", "Must be logged in"));
         return 1;
     }
     const int trid = (int) arg_n(args, argc, 0, 0);
     const int empty = argc > 1 && (args[1].kind == HTML_ARG_BOOL ? args[1].num != 0 : arg_n(args, argc, 1, 0) != 0);
     StrBuf sb = {0};
-    if (empty) sb_append(&sb, "<div style='color:#fff;font-size:18px;position:relative;margin-bottom:5px;color:#FBC02D'>You get no items from this trade!</div>");
-    sb_appendf(&sb, "<div style='color:#fff;font-size:20px;position:relative;margin-bottom:15px;'>Are you sure you want to accept this offer?</div><div id='confirmBtn' onclick='offerConfirmed(%d)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>YES</div><div id='declineBtn' onclick='viewOffer(%d, 0)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>NO</div>",
-               trid, trid);
+    if (empty) sb_appendf(&sb, "<div style='color:#fff;font-size:18px;position:relative;margin-bottom:5px;color:#FBC02D'>%s</div>", I18N("social.trades.warning", "You get no items from this trade!"));
+    sb_appendf(&sb, "<div style='color:#fff;font-size:20px;position:relative;margin-bottom:15px;'>%s</div><div id='confirmBtn' onclick='offerConfirmed(%d)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>YES</div><div id='declineBtn' onclick='viewOffer(%d, 0)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>NO</div>",
+               I18N("social.trades.accept", "Are you sure you want to accept this offer?"), trid, trid);
     char *html = sb_finish(&sb);
     generic_popup(html, "confOfferPop", NULL);
     free(html);
@@ -4967,14 +5016,14 @@ H(h_conf_offer) {
 H(h_offer_action) {
     UNUSED;
     if (!g_hub.logged_in) {
-        io_po(0, "Must be logged in");
+        io_po(0, I18N("account.login.required", "Must be logged in"));
         return 1;
     }
     const int accept = !strcmp(html_ui_current_handler(), "offerConfirmed");
     const double v[1] = {arg_n(args, argc, 0, 0)};
     char key[48];
     snprintf(key, sizeof(key), "%s-%.0f", accept ? "acc" : "trc", v[0]);
-    io_wait("Please wait...");
+    io_wait(I18N("generic.wait", "Please wait..."));
     send_econ(accept ? "trA" : "trC", 1, v, key);
     return 1;
 }
@@ -5000,7 +5049,7 @@ H(h_kr_history) {
     UNUSED;
     html_ui_stop_propagation(); // #profileKR sits in #profileInfo (onclick: the own profile)
     if (!g_hub.logged_in || !g_hub.brain) return 1;
-    io_wait("Please wait...");
+    io_wait(I18N("generic.wait", "Please wait..."));
     const double v[1] = {30};
     send_ints("krh", 1, v);
     return 1;
@@ -5108,7 +5157,7 @@ static void market_popup_html(StrBuf *sb, const MarketPop *p);
 static void hub_render_listing(const cJSON *t) {
     const ViewerSkin *pe = cJSON_IsObject(t) ? hub_skin((int) jnum(t, "sk")) : NULL;
     if (!pe || (pe->flags & VS_BLOCKED)) {
-        set_html("listingHolder", "<div style='font-size:20px;margin-top:20px;color:#fff'>" STR_MARKET_NONE "...</div>");
+        set_market_note("listingHolder", STR_MARKET_NONE);
         return;
     }
     MarketRow *m = calloc(1, sizeof(MarketRow));
@@ -5219,7 +5268,7 @@ H(h_open_profile_tab) {
     if (!strcmp(tab, "listings") && g_hub.profile_name[0]) {
         // io.send("uml", id): the user's market listings (kn_brain does not answer "uml": the
         // waiting popup closes on the backdrop, the tab stays empty)
-        io_wait("Please wait...");
+        io_wait(I18N("generic.wait", "Please wait..."));
         const double v[1] = {g_hub.profile_id};
         send_ints("uml", 1, v);
     }
@@ -5354,8 +5403,8 @@ H(h_view_item) {
     else if (sk->flags & VS_BLOCKED) sb_append(&sb, "<div class='itemViewSea' style='background:#faa332;'>Limited</div>");
     if (sk->type == 16) sb_appendf(&sb, "<div class='viewItemCard' style='background-image:url(%s)'></div>", url); // PLAYER_CARD thumbnail
     else sb_appendf(&sb, "<iframe style='width: 100%%;height: 450px;border:none;margin-top:10px;' src='/viewer.html?nobg&showcase=%d'></iframe>", index);
-    if ((int) arg_n(args, argc, 1, 0) == 2) sb_appendf(&sb, "<div id='itemInfoBtn' onclick='openViewer(%d)'>Open Model Viewer</div>", index);
-    else sb_appendf(&sb, "<div id='itemInfoBtn' onclick='openSales(%d)'>More Information</div>", index);
+    if ((int) arg_n(args, argc, 1, 0) == 2) sb_appendf(&sb, "<div id='itemInfoBtn' onclick='openViewer(%d)'>%s</div>", index, I18N("item.view.open", "Open Model Viewer"));
+    else sb_appendf(&sb, "<div id='itemInfoBtn' onclick='openSales(%d)'>%s</div>", index, I18N("item.view.more", "More Information"));
     char *html = sb_finish(&sb);
     html_dom_set_html(pop, html);
     free(html);
@@ -5410,7 +5459,7 @@ H(h_copy_link) {
     if (!strcmp(html_ui_current_handler(), "copyPost")) snprintf(url, sizeof(url), "%s/social.html?p=post&q=%d", origin, (int) arg_n(args, argc, 1, 0));
     else snprintf(url, sizeof(url), "%s/social.html?p=listing&i=%d", origin, (int) arg_n(args, argc, 1, 0));
     html_clipboard_write(url);
-    html_dom_set_text(ev->target, "Copied");
+    html_dom_set_text(ev->target, I18N("menu.btn.invite.clicked", "Copied"));
     html_timer_add(1250, share_restore_text, (void *) (uintptr_t) ev->target);
     return 1;
 }
@@ -5513,13 +5562,13 @@ static void share_restore_text(void *user) { share_restore(user); }
 H(h_share_link) {
     UNUSED;
     if (!ev || !ev->target) return 1;
-    html_dom_set_text(ev->target, "Copied");
+    html_dom_set_text(ev->target, I18N("menu.btn.invite.clicked", "Copied"));
     html_timer_add(1250, share_restore, (void *) (uintptr_t) ev->target);
     return 1;
 }
 
 // Login-only actions: io_po(null, "Must be logged in") / "Please Login"
-H(h_publish_popup) { UNUSED; io_po(0, "Must be logged in"); return 1; }
+H(h_publish_popup) { UNUSED; io_po(0, I18N("account.login.required", "Must be logged in")); return 1; }
 H(h_noop) { UNUSED; return 1; }
 
 // followUser(): toggle the button, io.send("f", profile.player_name, follow)
@@ -5924,7 +5973,7 @@ static void hub_connected(void) {
         } else {
             // q && G: io.send("a", 1, [q, null, G]) is account_ui.c's restore (same socket)
             set_display("profileLogin", "none");
-            set_html("profileName", "Logging in...");
+            set_html("profileName", I18N("social.login.proccessing", "Logging in..."));
             g_hub.fe = 1;
         }
     } else {

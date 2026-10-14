@@ -210,7 +210,7 @@ void ui_confirm(const char *text, UiDialogFn fn, void *user) {
     if (fn) fn(ok, "", user);
 #else
     dialog_begin(0, fn, user);
-    dialog_show(text ? text : "", NULL, "YES", "NO");
+    dialog_show(text ? text : "", NULL, I18N("kn.dialog.yes", "YES"), I18N("kn.dialog.no", "NO"));
 #endif
 }
 
@@ -226,7 +226,7 @@ void ui_prompt(const char *text, UiDialogFn fn, void *user) {
     dialog_begin(1, fn, user);
     dialog_show(text ? text : "",
                 "<input id='knPromptInput' type='text' class='accountInput' autocomplete='off' style='margin-top:0;margin-bottom:10px;background-color:#fff;color:rgba(0,0,0,0.8)'>",
-                "OK", "Cancel");
+                I18N("generic.ok", "OK"), I18N("generic.cancel", "Cancel"));
 #endif
 }
 
@@ -236,6 +236,6 @@ void ui_alert(const char *text) {
     EM_ASM({ window.alert(UTF8ToString($0)); }, text ? text : "");
 #else
     dialog_begin(2, NULL, NULL);
-    dialog_show(text ? text : "", NULL, "OK", NULL);
+    dialog_show(text ? text : "", NULL, I18N("generic.ok", "OK"), NULL);
 #endif
 }

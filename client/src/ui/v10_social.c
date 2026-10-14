@@ -659,7 +659,7 @@ static void eb_on_game(const cJSON *o) {
 
 static void eb_on_error(const cJSON *o) {
     const char *code = jstr(o, "code");
-    const char *text = v10_gapi_error_text(o, "An unexpected error occurred. Please try again.");
+    const char *text = v10_gapi_error_text(o, I18N("errors.common.unknown", "An unexpected error occurred. Please try again."));
     if (strcmp(code, "EB_TARGET_OFFLINE") && strcmp(code, "EB_NOT_FRIEND") && strcmp(code, "EB_RATE_LIMITED") &&
         strcmp(code, "EB_TEXT_TOO_LONG") && strcmp(code, "EB_MSG_INVALID")) {
         snprintf(S.eb_error, sizeof(S.eb_error), "%s", text);

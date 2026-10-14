@@ -244,6 +244,17 @@ static int load_tabs(const char *dir, const cJSON *list, UiTabFile *out, const i
 //     (<key>_div, display:none) and its stored value stays unread.
 static char *settings_tab_fixups(char *html) {
     if (!html) return html;
+    // the Language select's options are each language's own name (langNames): never translated
+    static const char LANG_SEL[] = "<select onchange=\"window.setSetting(&quot;lang&quot;, this.value)\"";
+    char *lang = strstr(html, LANG_SEL);
+    if (lang && !strstr(html, "id=\"knLangSelect\"")) {
+        StrBuf lb = {0};
+        sb_append_n(&lb, html, (size_t) (lang - html) + strlen("<select"));
+        sb_append(&lb, " id=\"knLangSelect\" translate=\"no\"");
+        sb_append(&lb, lang + strlen("<select"));
+        free(html);
+        html = sb_finish(&lb);
+    }
     static const char ADS[] = "<div class=\"settingsBtn\" style=\"width:auto;background-color:#994cd1\" onclick=\"openOneTrust()\">Manage Ads</div>";
     char *ads = strstr(html, ADS);
     if (ads) memmove(ads, ads + strlen(ADS), strlen(ads + strlen(ADS)) + 1);
@@ -461,8 +472,8 @@ static char *gen_settings(void) {
         sb_append(&out, "</div>");
     }
     if (client_tab >= 0) // the desktop client's Client tab (ui_client_settings.c), as v7's own client adds it
-        sb_appendf(&out, "\n<div class=\"settingTab %s\" onmouseenter=\"playTick()\" onclick=\"playSelect(0.1);window.windows[0].changeTab(%d)\">Client</div>",
-                   tab == client_tab ? "tabANew" : "", client_tab);
+        sb_appendf(&out, "\n<div class=\"settingTab %s\" onmouseenter=\"playTick()\" onclick=\"playSelect(0.1);window.windows[0].changeTab(%d)\">%s</div>",
+                   tab == client_tab ? "tabANew" : "", client_tab, I18N("settings.client.header", "Client"));
     sb_append(&out, "</div></div>");
     sb_append(&out, "<div id=\"settHolder\">");
     if (tab == client_tab) {
@@ -479,7 +490,8 @@ static char *gen_settings(void) {
         // acc && tabIndex == 0: the account's settings backup row comes from the capture of a
         // guest, so it is added here (social socket uploadS / getS)
         if (account_get() && tab == 0 && !strstr(inner_s, "uploadSettings()")) {
-            sb_append(&out, "<div class='setBodH'><div class=\"settName\" style=\"margin-top:15px\">\n\t\t\t\tBackup Settings\n\t\t\t\t<div class=\"settingsBtn\" style=\"width: auto;\" onclick=\"uploadSettings()\">Upload</div>\n\t\t\t\t<div class=\"settingsBtn\" style=\"width: auto;\" onclick=\"fetchSettings()\">Download</div>\n\t\t\t</div></div>");
+            sb_appendf(&out, "<div class='setBodH'><div class=\"settName\" style=\"margin-top:15px\">\n\t\t\t\t%s\n\t\t\t\t<div class=\"settingsBtn\" style=\"width: auto;\" onclick=\"uploadSettings()\">Upload</div>\n\t\t\t\t<div class=\"settingsBtn\" style=\"width: auto;\" onclick=\"fetchSettings()\">Download</div>\n\t\t\t</div></div>",
+                       I18N("settings.backup", "Backup Settings"));
         }
         // the Sound tab gains the client's Audio Output row (ui_client_settings.c)
         char *ext = ui_client_settings_extend_tab(inner_s);

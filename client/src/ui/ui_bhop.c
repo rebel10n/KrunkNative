@@ -46,6 +46,18 @@ static const struct {
     {UI_BHOP_ALWAYS_JUMP, "Always Jump (while moving)"},
     {UI_BHOP_HOLD_JUMP, "Hold Jump"},
 };
+
+// The names the toggle notice shows (KrunkNative strings: kn.bhop.*); ui_bhop_mode_name and the
+// console log keep the English names.
+static const char *bhop_shown_name(const int mode) {
+    switch (mode) {
+        case UI_BHOP_SLIDEHOP: return I18N("kn.bhop.slidehop", "Slidehop (while moving)");
+        case UI_BHOP_HOLD_JUMP_CROUCH: return I18N("kn.bhop.holdJumpCrouch", "Hold Jump/Crouch");
+        case UI_BHOP_ALWAYS_JUMP: return I18N("kn.bhop.alwaysJump", "Always Jump (while moving)");
+        case UI_BHOP_HOLD_JUMP: return I18N("kn.bhop.holdJump", "Hold Jump");
+        default: return I18N("kn.bhop.disabled", "Disabled");
+    }
+}
 #define BHOP_MODE_COUNT ((int) (sizeof(BHOP_MODES) / sizeof(BHOP_MODES[0])))
 
 static struct {
@@ -132,9 +144,10 @@ void ui_bhop_toggle(void) {
     const int index = order_index(g_bhop.mode);
     g_bhop.mode = BHOP_MODES[((index >= 0 ? index : 0) + 1) % BHOP_MODE_COUNT].mode;
     store_mode();
-    char msg[64];
+    char msg[64], shown[192];
     snprintf(msg, sizeof(msg), "Bhop - %s", ui_bhop_mode_name(g_bhop.mode));
-    ui_notify(msg);
+    I18N_F(shown, "kn.bhop.notify", "Bhop - {0}", bhop_shown_name(g_bhop.mode));
+    ui_notify(shown);
     printf("%s\n", msg); // console.log(msg)
 }
 

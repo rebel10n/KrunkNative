@@ -501,7 +501,11 @@ static const char *item_type_label(const ViewerSkin *skin) {
     static const char *const types[] = {NULL, "Hat Item", "Body Item", "Melee Item", "Spray Item", "Dye Item", "Waist Item", "Face Item",
                                         "Shoe Item", "Pet Item", "Collectible Item", "Wrist Item", "Charm Item", "Spin Ticket Item",
                                         "Back Item", "Head Item", "Player Card"};
-    if (skin->type > 0 && skin->type < (int) (sizeof(types) / sizeof(types[0]))) return types[skin->type];
+    static const char *const keys[] = {NULL, "social.market.hat", "social.market.body", "social.market.melee", "social.market.spray",
+                                       "social.market.dye", "social.market.waist", "social.market.face", "social.market.shoe",
+                                       "social.market.pet", "social.market.collectible", "social.market.wrist", "social.market.charm",
+                                       "social.market.ticket", "social.market.back", "social.market.head", "social.market.playerCard"};
+    if (skin->type > 0 && skin->type < (int) (sizeof(types) / sizeof(types[0]))) return i18n_tr(keys[skin->type], types[skin->type]);
     const Weapon *const *w = rules_weapons();
     const int n = rules_krunker_weapon_count();
     if (w && skin->weapon >= 1 && skin->weapon <= n && w[skin->weapon - 1]) return w[skin->weapon - 1]->name;

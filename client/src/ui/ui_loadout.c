@@ -666,7 +666,8 @@ static void charm_box(StrBuf *out, const int slot) {
     const ViewerSkin *s = has_inventory() ? store_skin(pick) : NULL;
     char img[256];
     asset("textures/previews/cosmetics/12_default.png", img, sizeof(img));
-    sb_appendf(out, "<div class=\"custSubContainer\" onclick=\"charmSelector(%d)\">\n\t\t\t\t<div class=\"custItNm\" style=\"font-size: 12px;\">Charm</div>\n\t\t\t\t", slot);
+    sb_appendf(out, "<div class=\"custSubContainer\" onclick=\"charmSelector(%d)\">\n\t\t\t\t<div class=\"custItNm\" style=\"font-size: 12px;\">%s</div>\n\t\t\t\t", slot,
+               I18N("windows.loadout.charm", "Charm"));
     if (s) {
         skin_thumb(pick, img, sizeof(img));
         sb_appendf(out, "<img class=\"custIcon\" src=\"%s\"  style=\"margin-top:0;filter:drop-shadow(0 0 0.2rem %s88)\">", img, rarity_color(s));
@@ -753,13 +754,14 @@ static void gen_tab_loadout(StrBuf *out, const int class_index) {
     // primary
     if (knife) sb_append(out, "<div class='custContainer' style='width: 47.5%;height: 163px;' onmouseenter='playTick()'>");
     else sb_appendf(out, "<div class='custContainer contCanSelect' onclick='skinSelector(%d)' style='width: 47.5%%;height: 163px;' onmouseenter='playTick()'>", lc.primary);
-    sb_append(out, "<div class='custItNm'>Primary</div>");
+    sb_appendf(out, "<div class='custItNm'>%s</div>", I18N("windows.loadout.primary", "Primary"));
     cust_label_icon(out, &prim, ";right: unset;left: 8px;", "custIcon");
     const int prim_charm = pw && pw->charm;
     if (prim_charm) charm_box(out, 0);
     if (has_attach) {
         const int a = sel(SEL_ATTACH);
-        sb_appendf(out, "<div class=\"custSubContainer contCanSelect%s\" onclick=\"viewAttachments()\">\n\t\t\t\t<div class=\"custItNm\" style=\"font-size: 12px;\">Sight</div>\n\t\t\t\t", prim_charm ? " bottom" : "");
+        sb_appendf(out, "<div class=\"custSubContainer contCanSelect%s\" onclick=\"viewAttachments()\">\n\t\t\t\t<div class=\"custItNm\" style=\"font-size: 12px;\">%s</div>\n\t\t\t\t", prim_charm ? " bottom" : "",
+                   I18N("windows.loadout.primary.sight", "Sight"));
         if (a >= 0 && a < ATTACH_COUNT) {
             char img[256], path[64];
             snprintf(path, sizeof(path), "textures/previews/attach/attach_%d.png", a);
@@ -774,12 +776,13 @@ static void gen_tab_loadout(StrBuf *out, const int class_index) {
     // secondary
     if (lc.secondary) sb_append(out, "<div class='custContainer contCanSelect' onclick='showWindow(20)' style='width: 47.5%;height: 163px;' onmouseenter='playTick()'>");
     else sb_append(out, "<div class='custContainer' style='width: 47.5%;height: 163px;' onmouseenter='playTick()'>");
-    sb_append(out, "<div class='custItNm'>Secondary</div>");
+    sb_appendf(out, "<div class='custItNm'>%s</div>", I18N("windows.loadout.secondary", "Secondary"));
     cust_label_icon(out, &sec, ";right: unset;left: 8px;", "custIcon");
     if (lc.secondary && sw && sw->charm) charm_box(out, 1);
     sb_append(out, "</div> ");
     // melee
-    sb_append(out, "<div class='custContainer contCanSelect' onclick='showWindow(26)' style='width: 30.7%;height: 163px;' onmouseenter='playTick()'><div class='custItNm'>Melee Skin</div>");
+    sb_appendf(out, "<div class='custContainer contCanSelect' onclick='showWindow(26)' style='width: 30.7%%;height: 163px;' onmouseenter='playTick()'><div class='custItNm'>%s</div>",
+               I18N("windows.loadout.melee", "Melee Skin"));
     cust_label_icon(out, &mel, "", "custIcon");
     sb_append(out, "</div> ");
     // reticle (attachment weapons) or scope (scoped weapons)
@@ -814,7 +817,8 @@ static void gen_tab_loadout(StrBuf *out, const int class_index) {
     const int pickable = has_attach || has_scope;
     if (pickable) sb_appendf(out, "<div class='custContainer contCanSelect' onclick='showWindow(%d)' onmouseenter='playTick()' style='width: 30.7%%;height: 163px;'>", has_attach ? 32 : 41);
     else sb_append(out, "<div class='custContainer' onmouseenter='playTick()' style='width: 30.7%;height: 163px;'>");
-    sb_appendf(out, "<div class='custItNm'>%s</div><span class='settLabel blackShad' style='color:%s'>", has_attach ? "Reticle" : "Scope",
+    sb_appendf(out, "<div class='custItNm'>%s</div><span class='settLabel blackShad' style='color:%s'>",
+               has_attach ? I18N("windows.loadout.primary.reticle", "Reticle") : I18N("windows.loadout.primary.scope", "Scope"),
                pickable && strcmp(rname, "None") ? "#2196F3" : "#efefef");
     sb_append_esc(out, rname);
     sb_append(out, "</span>");
@@ -827,7 +831,8 @@ static void gen_tab_loadout(StrBuf *out, const int class_index) {
     }
     sb_append(out, "</div> ");
     // streaks
-    sb_append(out, "<div class='custContainer contCanSelect' onclick='showWindow(45)' onmouseenter='playTick()' style='width: 30.7%;height: 163px;'><div class='custItNm'>Streaks</div>");
+    sb_appendf(out, "<div class='custContainer contCanSelect' onclick='showWindow(45)' onmouseenter='playTick()' style='width: 30.7%%;height: 163px;'><div class='custItNm'>%s</div>",
+               I18N("windows.loadout.streaks", "Streaks"));
     StrBuf icons = {0};
     for (int k = 0; k < 3; k++) {
         const int st = sel(SEL_STREAK1 + k);
@@ -858,6 +863,13 @@ static const CustSlot CUST_SLOTS[] = {
 
 static int slot_used(const int index) { return index >= 0 || index == -2; }
 
+// i18n.t("windows.loadout." + slot key): the slot's name
+static const char *slot_label(const CustSlot *cs) {
+    char key[48];
+    snprintf(key, sizeof(key), "windows.loadout.%s", cs->key);
+    return i18n_tr(key, cs->label);
+}
+
 // Non-premium accounts may not wear hat + head or body + back together (v7 decision 9; the
 // offline sandbox player is exempt like v7's sandbox, a dev account too).
 static int premium_pair_blocked(const int i) {
@@ -872,9 +884,9 @@ static void gen_tab_customize(StrBuf *out) {
         const CustSlot *cs = &CUST_SLOTS[i];
         int pick = sel(cs->which);
         if (i > CUST_SLOTS[i].pair && premium_pair_blocked(i)) {
-            sb_appendf(out, "<div class='custContainer' onclick='windows[13].premium()' style='width: 22.5%%;height: 174px;'><div class='custItNm blackShad'>%s</div>", cs->label);
+            sb_appendf(out, "<div class='custContainer' onclick='windows[13].premium()' style='width: 22.5%%;height: 174px;'><div class='custItNm blackShad'>%s</div>", slot_label(cs));
             sb_appendf(out, "<div class=\"custPremReq blackShad\">\n\t\t\t\t\t\t<div style=\"color: var(--yellow);font-size: 15px;\">Premium Required to use Both</div>\n\t\t\t\t\t\tor\n\t\t\t\t\t\t<div style=\"color: var(--red);font-size: 15px;\">Remove %s</div>\n\t\t\t\t\t</div></div> ",
-                       CUST_SLOTS[cs->pair].label);
+                       slot_label(&CUST_SLOTS[cs->pair]));
             continue;
         }
         SlotView v = {.color = "#efefef"};
@@ -898,7 +910,7 @@ static void gen_tab_customize(StrBuf *out) {
             spray_item = s->type == 4;
         }
         sb_appendf(out, "<div class='custContainer contCanSelect' onclick='showWindow(%d)' onmouseenter='playTick()' style='width: 22.25%%;height: 174px;'><div class='custItNm blackShad'>%s</div><div class='custClear' onclick='windows[%d].clear();'><span class='material-icons'>close</span></div>",
-                   cs->window, cs->label, cs->window - 1);
+                   cs->window, slot_label(cs), cs->window - 1);
         sb_appendf(out, "<span class='custLabel %s%s' style='color:%s'>", s && s->rarity == 5 ? "greyShad" : "blackShad", v.animate ? " rainbowText" : "", v.color);
         sb_append_esc(out, v.name);
         sb_append(out, "</span>");
@@ -933,20 +945,20 @@ static void color_row_premium(StrBuf *out, const char *label) {
 }
 
 static void gen_tab_other(StrBuf *out) {
-    color_row_premium(out, "Skin Color");
+    color_row_premium(out, I18N("windows.loadout.color.skin", "Skin Color"));
     const int skin = sel(SEL_SKIN_COL);
     for (int i = SKIN_COLOR_COUNT - 1; i >= 0; i--) {
         sb_appendf(out, "<div class='skinColorItem%s' style='background-color:#%s' onmouseenter='playTick()' onclick='selectSkinColor(%d)'></div>",
                    skin == i ? " activeSkin" : "", SKIN_COLORS[i], i);
     }
     sb_append(out, "</div>");
-    color_row_premium(out, "Hair Color");
+    color_row_premium(out, I18N("windows.loadout.color.hair", "Hair Color"));
     sb_append(out, "</div>");
-    color_row_premium(out, "Chat Name Color");
+    color_row_premium(out, I18N("windows.loadout.color.chat", "Chat Name Color"));
     sb_append(out, "</div>");
     const int stat = sel(SEL_PC_STAT);
-    sb_appendf(out, "<div class='settName' style='border-bottom:unset;'>Playercard Stat<select onchange='selectStat(this.value)' class='inputGrey2' style='font-size:16px;padding:4px;margin-bottom: 5px;'><option value='-1' %s>None</option>",
-               stat == -1 ? "selected" : "");
+    sb_appendf(out, "<div class='settName' style='border-bottom:unset;'>%s<select onchange='selectStat(this.value)' class='inputGrey2' style='font-size:16px;padding:4px;margin-bottom: 5px;'><option value='-1' %s>None</option>",
+               I18N("windows.loadout.stat", "Playercard Stat"), stat == -1 ? "selected" : "");
     for (int i = 0; i < PC_STAT_COUNT; i++) sb_appendf(out, "<option value='%d' %s>%s</option>", i, stat == i ? "selected" : "", PC_STATS[i]);
     sb_append(out, "</select></div>");
 }
@@ -1097,7 +1109,7 @@ static void spray_card(StrBuf *out, const PickEntry *e, const ViewerSkin *s) {
                s->rarity == 5 ? "" : " blackShad", !is_free && rarity_anim(s) ? " rainbow" : "", style, e->ind, e->ind, count);
     sb_append_esc(out, s->name ? s->name : "");
     sb_appendf(out, "<div class='itemOwn'>%s</div><div draggable='false' class='sprayImg' onmouseenter='playTick()' style='background: url(&quot;%s&quot;) -1px;%s'></div></div>",
-               is_free ? "Free Spray" : "Spray", img, anim);
+               is_free ? I18N("windows.spray.default", "Free Spray") : I18N("windows.spray.spin", "Spray"), img, anim);
 }
 
 static void pick_card(StrBuf *out, const int pos, void *user) {
@@ -1114,8 +1126,8 @@ static void pick_card(StrBuf *out, const int pos, void *user) {
             char spray_path[64], spray_url[256];
             snprintf(spray_path, sizeof(spray_path), "textures/sprays/%d.png", BASE_SPRAYS[i].id);
             asset(spray_path, spray_url, sizeof(spray_url));
-            sb_appendf(out, "<div class='noBtnCard blackShad' style='height:158px;border: 5px solid lightgrey'onclick='selectSpray(%d);cancelTip()' data-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'>%s<div class='itemOwn'>Free Spray</div><div draggable='false' class='sprayImg' onmouseenter='playTick()' style='background: url(&quot;%s&quot;) -1px;%s'></div>",
-                       i, i, BASE_SPRAYS[i].name, spray_url, frames ? "animation: sprayAnm4 1.25s steps(4) infinite;" : "");
+            sb_appendf(out, "<div class='noBtnCard blackShad' style='height:158px;border: 5px solid lightgrey'onclick='selectSpray(%d);cancelTip()' data-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'>%s<div class='itemOwn'>%s</div><div draggable='false' class='sprayImg' onmouseenter='playTick()' style='background: url(&quot;%s&quot;) -1px;%s'></div>",
+                       i, i, BASE_SPRAYS[i].name, I18N("windows.spray.default", "Free Spray"), spray_url, frames ? "animation: sprayAnm4 1.25s steps(4) infinite;" : "");
             // the store's free spray items (2482 + i): their item / favourite buttons as on every card
             sb_appendf(out, "<div class='selctInfoBtn' onmouseenter='playTick()' onclick='viewItem(%d)'>?</div><div class='selctFavBtn material-icons' onmouseenter='playTick()' data-col='white' data-icon='star_border' onclick='favItem(this, %d)'></div></div>",
                        SPRAY_DEFAULT_INDEX + i, SPRAY_DEFAULT_INDEX + i);
@@ -1127,7 +1139,8 @@ static void pick_card(StrBuf *out, const int pos, void *user) {
     }
     if (g_pick.kind == PICKER_SKIN) {
         if (e->kind == PICK_NONE)
-            sb_appendf(out, "<div class='skinCard blackShad' style='border:5px solid lightgrey' onmouseenter='playTick()' onclick='selectSkin(-3,%d)'>None<div class='itemOwn'>Default</div><div class='itemSea' style='opacity:0;'>Season 1</div><img draggable='false' class='skinImg' src='%s'></div>", g_skin_weapon, img);
+            sb_appendf(out, "<div class='skinCard blackShad' style='border:5px solid lightgrey' onmouseenter='playTick()' onclick='selectSkin(-3,%d)'>None<div class='itemOwn'>%s</div><div class='itemSea' style='opacity:0;'>Season 1</div><img draggable='false' class='skinImg' src='%s'></div>", g_skin_weapon,
+                       I18N("generic.default", "Default"), img);
         else if (e->kind == PICK_RANDOM)
             sb_appendf(out, "<div class='skinCard blackShad' style='border:5px solid lightgrey' onmouseenter='playTick()' onclick='selectSkin(-2,%d)'>Random<div class='itemOwn' style='opacity:0;'>by \?\?\?</div><div class='itemSea' style='opacity:0;'>All Seasons</div><img draggable='false' class='skinImg skinSil' onmouseenter='playTick()' src='%s'><div class='skinRandom blackShad' style='top:68px'>?</div></div>", g_skin_weapon, img);
         else {
@@ -1138,8 +1151,8 @@ static void pick_card(StrBuf *out, const int pos, void *user) {
         return;
     }
     if (e->kind == PICK_NONE)
-        sb_appendf(out, "<div class='skinCard blackShad' style='border:5px solid lightgrey' onmouseenter='playTick()' onclick='%s(-3)'>%s<div class='itemOwn'>Default</div>%s<img class='%s' src='%s'></div>",
-                   fn, type == 3 ? "Combat Knife" : "None", type == 5 ? "" : "<div class='itemSea' style='opacity:0;'>Season 1</div>", img_class, img);
+        sb_appendf(out, "<div class='skinCard blackShad' style='border:5px solid lightgrey' onmouseenter='playTick()' onclick='%s(-3)'>%s<div class='itemOwn'>%s</div>%s<img class='%s' src='%s'></div>",
+                   fn, type == 3 ? "Combat Knife" : "None", I18N("generic.default", "Default"), type == 5 ? "" : "<div class='itemSea' style='opacity:0;'>Season 1</div>", img_class, img);
     else if (e->kind == PICK_RANDOM)
         sb_appendf(out, "<div class='skinCard blackShad' style='border:5px solid lightgrey' onmouseenter='playTick()' onclick='%s(-2)'>Random<div class='itemOwn' style='opacity:0;'>by \?\?\?</div>%s<img class='%s skinSil' src='%s'><div class='skinRandom blackShad'>?</div></div>",
                    fn, type == 5 ? "" : "<div class='itemSea' style='opacity:0;'>All Seasons</div>", img_class, img);
@@ -1214,20 +1227,22 @@ static char *gen_secondary(void) {
             if (unlocked) sb_appendf(&out, " onclick='skinSelector(%d, true)'", i);
             sb_append(&out, ">");
             sb_append_esc(&out, w->name);
-            if (w->min_rec) sb_appendf(&out, "<div class='itemOwn'>%s%d</div>", unlocked ? "Unlocked" : "Req lvl ", unlocked ? 0 : w->min_rec);
-            else sb_append(&out, "<div class='itemOwn'>Default</div>");
+            if (w->min_rec) {
+                char lvl[16], own[64];
+                snprintf(lvl, sizeof(lvl), "%d", w->min_rec);
+                if (unlocked) snprintf(own, sizeof(own), "%s", I18N("windows.secondary.unlocked", "Unlocked"));
+                else I18N_F(own, "windows.secondary.req", "Req lvl {0}", lvl);
+                sb_appendf(&out, "<div class='itemOwn'>%s</div>", own);
+            } else {
+                sb_appendf(&out, "<div class='itemOwn'>%s</div>", I18N("generic.default", "Default"));
+            }
             sb_appendf(&out, "<img loading='lazy' draggable='false' class='secImg' onmouseenter='playTick()' src='%s' />", img);
             if (!unlocked) sb_append(&out, "<div class='lockedCard'><span class='material-icons' style='font-size: 70px;color:#fff;'>lock</span></div>");
             sb_append(&out, "</div>");
         }
     }
     sb_append(&out, "</div>");
-    char *html = sb_finish(&out);
-    // "Unlocked" carries no level: drop the %d placeholder written above
-    StrBuf fix = {0};
-    sb_append_replace_all(&fix, html, "Unlocked0", "Unlocked");
-    free(html);
-    return sb_finish(&fix);
+    return sb_finish(&out);
 }
 
 static int class_primary_has_attach(void) {
@@ -1244,8 +1259,8 @@ static char *gen_attach(void) {
             char img[256], path[64];
             snprintf(path, sizeof(path), "textures/previews/attach/attach_%d.png", i);
             asset(path, img, sizeof(img));
-            sb_appendf(&out, "<div class='noBtnCard blackShad' style='height:150px;border:5px solid lightgrey' onclick='selectAttachment(%d)'>%s<div class='itemOwn'>Default</div><img loading='lazy' draggable='false' class='noBtnImgA' src='%s' /></div>",
-                       i, ATTACHMENTS[i], img);
+            sb_appendf(&out, "<div class='noBtnCard blackShad' style='height:150px;border:5px solid lightgrey' onclick='selectAttachment(%d)'>%s<div class='itemOwn'>%s</div><img loading='lazy' draggable='false' class='noBtnImgA' src='%s' /></div>",
+                       i, ATTACHMENTS[i], I18N("generic.default", "Default"), img);
         }
     }
     sb_append(&out, "</div>");
@@ -1296,8 +1311,8 @@ static char *gen_reticle(void) {
             char path[64], url[256];
             snprintf(path, sizeof(path), "textures/reticles/reticle_%d.png", i);
             asset(path, url, sizeof(url));
-            sb_appendf(&out, "<div class='noBtnCard blackShad' style='height:140px;border:5px solid lightgrey' onclick='selectReticle(%d)'>%s<div class='itemOwn' style='margin-top:1px'>Default</div><img loading='lazy' class='noBtnImgR' draggable='false' src='%s' onmouseenter='playTick()' /></div>",
-                       i, RETICLES[i], url);
+            sb_appendf(&out, "<div class='noBtnCard blackShad' style='height:140px;border:5px solid lightgrey' onclick='selectReticle(%d)'>%s<div class='itemOwn' style='margin-top:1px'>%s</div><img loading='lazy' class='noBtnImgR' draggable='false' src='%s' onmouseenter='playTick()' /></div>",
+                       i, RETICLES[i], I18N("generic.default", "Default"), url);
         }
     }
     sb_append(&out, "</div>");
@@ -1317,8 +1332,8 @@ static char *gen_scope(void) {
             char img[256], path[64];
             snprintf(path, sizeof(path), "textures/scopes/scope_%d.png", SCOPES[i].id);
             asset(path, img, sizeof(img));
-            sb_appendf(&out, "<div class='noBtnCard blackShad' style='height:140px;border:5px solid lightgrey' onclick='selectScope(%d)'>%s<div class='itemOwn' style='margin-top:1px'>Default</div><img loading='lazy' class='noBtnImgR' draggable='false' src='%s' onmouseenter='playTick()' /></div>",
-                       i, SCOPES[i].name, img);
+            sb_appendf(&out, "<div class='noBtnCard blackShad' style='height:140px;border:5px solid lightgrey' onclick='selectScope(%d)'>%s<div class='itemOwn' style='margin-top:1px'>%s</div><img loading='lazy' class='noBtnImgR' draggable='false' src='%s' onmouseenter='playTick()' /></div>",
+                       i, SCOPES[i].name, I18N("generic.default", "Default"), img);
         }
     }
     sb_append(&out, "</div>");

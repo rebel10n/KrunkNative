@@ -39,7 +39,7 @@
 #include <online_mode.h>  // auth_unreachable: offline mode
 
 #define RANK_VAR 0.03            // config.rankVar
-#define ACC_STR_WAIT "Please wait..." // generic.wait
+#define ACC_STR_WAIT I18N("generic.wait", "Please wait...") // v7 showAccountResponse(i18n.t("generic.wait"))
 #define REWARD_MIN_LVL 1             // the Free KR wheel's minLvl (v3.1.1's daily reward: config.rewardMinLvl 5)
 #define REWARD_TIME_MS 43200000.0    // config.rewardTime (12 h in v7.1.4)
 
@@ -572,8 +572,8 @@ static void on_social(void *user, const cJSON *frame) {
         popup_response(kind && !strcmp(kind, "SUCCESS") ? 1 : 0, str_at(frame, 2), str_at(frame, 3));
     } else if (!strcmp(label, "loadS")) { // loadSettings(text)
         const char *text = str_at(frame, 1);
-        if (text && text[0] && ui_settings_import_text(text)) popup_response(1, NULL, "Settings Loaded");
-        else popup_response(0, "No settings found", NULL);
+        if (text && text[0] && ui_settings_import_text(text)) popup_response(1, NULL, I18N("settings.loaded", "Settings Loaded"));
+        else popup_response(0, I18N("settings.loaded.none", "No settings found"), NULL);
         menu_rerender_if_open(1);
     } else if (!strcmp(label, "econN")) { // KrunkNative economy note (kn_brain economy.c): a toast outside the hub
         const char *text = str_at(frame, 2);
@@ -1007,20 +1007,22 @@ static void email_frame(const char *label, const cJSON *frame) {
 static void email_html(StrBuf *sb) {
     sb_append(sb, "<div class='settName' style='margin-bottom:20px;'></div><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px;margin-bottom: 10px;'>");
     if (g_email.addr[0]) {
-        sb_append(sb, "Email: <span style='color:#fff'>");
+        sb_appendf(sb, "%s: <span style='color:#fff'>", I18N("generic.email", "Email"));
         sb_append_esc(sb, g_email.addr);
         sb_appendf(sb, "</span> <span style='color:%s'>%s</span>", g_email.verified ? "#3be354" : "#e33b3b",
-                   g_email.verified ? "Verified" : "Not verified");
+                   g_email.verified ? I18N("kn.account.emailVerified", "Verified") : I18N("kn.account.emailNotVerified", "Not verified"));
         if (!g_email.verified && g_email.mail)
-            sb_append(sb, "<div class='subPassChg' onclick='resendEmail()' style='float: right;margin-top: -8px;'>Resend</div>");
+            sb_appendf(sb, "<div class='subPassChg' onclick='resendEmail()' style='float: right;margin-top: -8px;'>%s</div>", I18N("kn.account.emailResend", "Resend"));
     } else {
-        sb_append(sb, "Add an <span style='color:#fff'>Email</span> to verify your account");
+        char add[192];
+        I18N_F(add, "kn.account.emailAdd", "Add an {0}Email{1} to verify your account", "<span style='color:#fff'>", "</span>");
+        sb_append(sb, add);
     }
     sb_append(sb, "</div><input type='email' id='accEmailNew' class='smlInput' style='width:82%;margin-bottom:8px' placeholder='");
-    sb_append(sb, g_email.addr[0] ? "New Email" : "Email");
-    sb_append(sb, "' /><div class='subPassChg' onclick='changeEmail()'>Submit</div><div id='emailRes' style='color:rgba(255,255,255,0.5)'>");
-    if (!g_email.mail && g_email.known) sb_append(sb, "Verification emails are unavailable on this server");
-    else if (!g_email.verified && g_email.pending) sb_append(sb, "Check your inbox for the verification link");
+    sb_append(sb, g_email.addr[0] ? I18N("generic.newEmail", "New Email") : I18N("generic.email", "Email"));
+    sb_appendf(sb, "' /><div class='subPassChg' onclick='changeEmail()'>%s</div><div id='emailRes' style='color:rgba(255,255,255,0.5)'>", I18N("generic.submit", "Submit"));
+    if (!g_email.mail && g_email.known) sb_append(sb, I18N("kn.account.emailUnavailable", "Verification emails are unavailable on this server"));
+    else if (!g_email.verified && g_email.pending) sb_append(sb, I18N("kn.account.emailCheckInbox", "Check your inbox for the verification link"));
     sb_append(sb, "</div>");
 }
 
@@ -1069,23 +1071,23 @@ static void read_input(const char *id, char *out, const size_t n) {
 static void auth_unreachable(void) {
     const char *msg;
     if (!online_mode_online()) {
-        msg = "Accounts are off in Offline Mode. Switch Account Mode to Online in Settings &gt; Client and restart.";
+        msg = I18N("kn.account.offlineMode", "Accounts are off in Offline Mode. Switch Account Mode to Online in Settings &gt; Client and restart.");
         printf("[account] offline mode: no account service\n");
     } else if (!backend_enabled()) {
 #ifdef _WIN32
-        msg = "Accounts are not available in this build yet. Please try again after the next update.";
+        msg = I18N("kn.account.notInBuild", "Accounts are not available in this build yet. Please try again after the next update.");
 #else
-        msg = "No account server is set. Check Settings &gt; Client &gt; Matchmaker URL.";
+        msg = I18N("kn.account.noServer", "No account server is set. Check Settings &gt; Client &gt; Matchmaker URL.");
 #endif
         printf("[account] no account server configured (--brain / KRUNKNATIVE_BRAIN_URL / knBrainUrl)\n");
     } else if (backend_available() == 0) {
-        msg = "Can't reach the account server. Check your internet connection and try again.";
+        msg = I18N("kn.account.unreachable", "Can't reach the account server. Check your internet connection and try again.");
         printf("[account] no account server at %s (GET /mm/status found no kn_brain)\n", backend_url());
     } else if (!backend_social_is_open()) {
-        msg = "Can't reach the account server. Check your internet connection and try again.";
+        msg = I18N("kn.account.unreachable", "Can't reach the account server. Check your internet connection and try again.");
         printf("[account] the social socket to %s did not open\n", backend_url());
     } else {
-        msg = "The account server did not answer. Please try again.";
+        msg = I18N("kn.account.noAnswer", "The account server did not answer. Please try again.");
         printf("[account] no answer from %s within %.0f s\n", backend_url(), AUTH_TIMEOUT_SECONDS);
     }
     show_acc_resp(msg);
@@ -1124,35 +1126,54 @@ static void reset_render(void) {
     HtmlElem win = html_dom_by_id("menuWindow");
     if (!win || g_reset.step <= 0) return;
     StrBuf sb = {0};
-    sb_append(&sb, "<div style='position:relative;z-index:9'><div id='referralHeader'>Reset Password</div><div style='height:20px;'></div>");
+    sb_appendf(&sb, "<div style='position:relative;z-index:9'><div id='referralHeader'>%s</div><div style='height:20px;'></div>",
+               I18N("kn.account.reset.header", "Reset Password"));
     if (g_reset.step == 1) {
-        sb_append(&sb, "<div style='font-size:18px;color:rgba(255,255,255,0.5);margin-bottom:12px'>Enter your username or the verified "
-                       "email of your account. We'll email you a reset code.</div>"
-                       "<input id='knResetWho' type='text' placeholder='Username or Email' class='accountInput' style='margin-top:0'>");
+        sb_appendf(&sb, "<div style='font-size:18px;color:rgba(255,255,255,0.5);margin-bottom:12px'>%s</div>"
+                        "<input id='knResetWho' type='text' placeholder='%s' class='accountInput' style='margin-top:0'>",
+                   I18N("kn.account.reset.askWho", "Enter your username or the verified email of your account. We'll email you a reset code."),
+                   I18N("kn.account.reset.who", "Username or Email"));
     } else if (g_reset.step == 2) {
-        sb_append(&sb, "<div style='font-size:18px;color:rgba(255,255,255,0.5);margin-bottom:12px'>Enter the code from the email "
-                       "(XXXX-XXXX-XXXX). It works once and expires after 30 minutes.</div>"
-                       "<input id='knResetCode' type='text' placeholder='Reset Code' class='accountInput' style='margin-top:0' "
-                       "autocomplete='one-time-code'>");
+        sb_appendf(&sb, "<div style='font-size:18px;color:rgba(255,255,255,0.5);margin-bottom:12px'>%s</div>"
+                        "<input id='knResetCode' type='text' placeholder='%s' class='accountInput' style='margin-top:0' "
+                        "autocomplete='one-time-code'>",
+                   I18N("kn.account.reset.askCode", "Enter the code from the email (XXXX-XXXX-XXXX). It works once and expires after 30 minutes."),
+                   I18N("kn.account.reset.code", "Reset Code"));
     } else {
-        sb_append(&sb, "<div style='font-size:18px;color:rgba(255,255,255,0.5);margin-bottom:12px'>Choose a new password for <span style='color:#fff'>");
-        sb_append_esc(&sb, g_reset.user);
-        sb_append(&sb, "</span>.</div><input id='knResetPass' type='password' placeholder='New Password' class='accountInput' style='margin-top:0'>"
-                       "<input id='knResetPass2' type='password' placeholder='Repeat Password' class='accountInput'>");
+        StrBuf user = {0};
+        sb_append(&user, "<span style='color:#fff'>");
+        sb_append_esc(&user, g_reset.user);
+        sb_append(&user, "</span>");
+        char *u = sb_finish(&user);
+        char line[512];
+        I18N_F(line, "kn.account.reset.choose", "Choose a new password for {0}.", u);
+        free(u);
+        sb_appendf(&sb, "<div style='font-size:18px;color:rgba(255,255,255,0.5);margin-bottom:12px'>%s</div>"
+                        "<input id='knResetPass' type='password' placeholder='%s' class='accountInput' style='margin-top:0'>"
+                        "<input id='knResetPass2' type='password' placeholder='%s' class='accountInput'>",
+                   line, I18N("kn.account.reset.newPass", "New Password"), I18N("kn.account.reset.repeatPass", "Repeat Password"));
     }
     sb_appendf(&sb, "<div class='setBodH' style='margin-left:0px;width:calc(100%% - 40px)'><div id='knResetRes' style='margin-top:20px;"
                     "margin-bottom:20px;font-size:18px;color:%s;text-align:center'>",
                g_reset.note_error ? "#e33b3b" : "rgba(255,255,255,0.5)");
     sb_append_esc(&sb, g_reset.note);
-    sb_append(&sb, "</div></div><div style='width:100%;text-align:center;margin-top:10px;background-color:rgba(0,0,0,0.3);padding-top:10px;padding-bottom:20px;'>"
-                   "<div class='accBtn button buttonG' onclick='knResetBack()'>Back</div>");
+    sb_appendf(&sb, "</div></div><div style='width:100%%;text-align:center;margin-top:10px;background-color:rgba(0,0,0,0.3);padding-top:10px;padding-bottom:20px;'>"
+                    "<div class='accBtn button buttonG' onclick='knResetBack()'>%s</div>", I18N("generic.back", "Back"));
     sb_appendf(&sb, "<div class='accBtn button buttonP' id='knResetGo' onclick='knResetNext()'>%s</div>",
-               g_reset.step == 1 ? "Send Code" : g_reset.step == 2 ? "Continue" : "Set Password");
-    if (g_reset.step == 1) sb_append(&sb, "<div style='margin-top:14px;font-size:16px;color:rgba(255,255,255,0.5)'>Got a code already? "
-                                         "<span id='knResetHave' onclick='knResetHave()' style='color:rgba(255,255,255,0.8);cursor:pointer;"
-                                         "text-decoration:underline'>Enter it</span></div>");
-    if (g_reset.step == 2) sb_append(&sb, "<div style='margin-top:14px;font-size:16px;color:rgba(255,255,255,0.5)'>No email? "
-                                         "<span id='knResetResend' onclick='knResetResend()' style='color:rgba(255,255,255,0.8);cursor:pointer;text-decoration:underline'>Send another code</span></div>");
+               g_reset.step == 1 ? I18N("kn.account.reset.send", "Send Code") : g_reset.step == 2 ? I18N("kn.account.reset.continue", "Continue")
+                                 : I18N("kn.account.reset.set", "Set Password"));
+    if (g_reset.step == 1) {
+        char line[384];
+        I18N_F(line, "kn.account.reset.haveCode", "Got a code already? {0}Enter it{1}",
+               "<span id='knResetHave' onclick='knResetHave()' style='color:rgba(255,255,255,0.8);cursor:pointer;text-decoration:underline'>", "</span>");
+        sb_appendf(&sb, "<div style='margin-top:14px;font-size:16px;color:rgba(255,255,255,0.5)'>%s</div>", line);
+    }
+    if (g_reset.step == 2) {
+        char line[384];
+        I18N_F(line, "kn.account.reset.noEmail", "No email? {0}Send another code{1}",
+               "<span id='knResetResend' onclick='knResetResend()' style='color:rgba(255,255,255,0.8);cursor:pointer;text-decoration:underline'>", "</span>");
+        sb_appendf(&sb, "<div style='margin-top:14px;font-size:16px;color:rgba(255,255,255,0.5)'>%s</div>", line);
+    }
     sb_append(&sb, "</div></div>");
     html_dom_set_html(win, sb.data ? sb.data : "");
     free(sb.data);
@@ -1191,13 +1212,13 @@ static void reset_next(void) {
         HtmlElem res = html_dom_by_id("accResp");
         char text[320] = "";
         if (res) html_dom_get_text(res, text, sizeof(text));
-        reset_note(text[0] ? text : "Please try again.", 1);
+        reset_note(text[0] ? text : I18N("custom.tryagain", "Please try again."), 1);
         return;
     }
     if (g_reset.step == 1) {
         read_input("knResetWho", g_reset_who, sizeof(g_reset_who));
         if (!g_reset_who[0]) {
-            reset_note("Enter your username or email", 1);
+            reset_note(I18N("kn.account.reset.needWho", "Enter your username or email"), 1);
             return;
         }
         reset_note(ACC_STR_WAIT, 0);
@@ -1206,7 +1227,7 @@ static void reset_next(void) {
         char code[64];
         read_input("knResetCode", code, sizeof(code));
         if (!code[0]) {
-            reset_note("Enter the code from the email", 1);
+            reset_note(I18N("kn.account.reset.needCode", "Enter the code from the email"), 1);
             return;
         }
         copy_str(g_reset.code, sizeof(g_reset.code), code);
@@ -1217,7 +1238,7 @@ static void reset_next(void) {
         read_input("knResetPass", p1, sizeof(p1));
         read_input("knResetPass2", p2, sizeof(p2));
         if (!p1[0] || strcmp(p1, p2) != 0) {
-            reset_note(p1[0] ? "Passwords do not match." : "Enter a new password", 1);
+            reset_note(p1[0] ? I18N("kn.account.reset.mismatch", "Passwords do not match.") : I18N("kn.account.reset.needPass", "Enter a new password"), 1);
             return;
         }
         reset_note(ACC_STR_WAIT, 0);
@@ -1238,7 +1259,7 @@ static int reset_frame(const char *label, const cJSON *frame) {
         return 1;
     }
     if (rpr) {
-        reset_open(2, msg ? msg : "Check your inbox.", 0);
+        reset_open(2, msg ? msg : I18N("kn.account.reset.checkInbox", "Check your inbox."), 0);
     } else if (rpc) {
         copy_str(g_reset.user, sizeof(g_reset.user), msg);
         reset_open(3, "", 0);
@@ -1254,8 +1275,8 @@ static int reset_frame(const char *label, const cJSON *frame) {
             try_restore();
         }
         menu_rerender_if_open(5);
-        show_acc_resp(msg ? msg : "Password updated.");
-        ui_notify(msg ? "Password updated. You are now logged in." : "Password updated.");
+        show_acc_resp(msg ? msg : I18N("kn.account.reset.updated", "Password updated."));
+        ui_notify(msg ? I18N("kn.account.reset.updatedLoggedIn", "Password updated. You are now logged in.") : I18N("kn.account.reset.updated", "Password updated."));
     }
     return 1;
 }
@@ -1344,7 +1365,7 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
             const char *m = mail;
             while (*m == ' ') m++;
             if (!*m) {
-                show_acc_resp("Please enter your email to register.");
+                show_acc_resp(I18N("generic.auth.emailRequiredForRegister", "Please enter your email to register."));
                 memset(pass, 0, sizeof(pass));
                 return 1;
             }
@@ -1476,7 +1497,7 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     }
     if (!strcmp(name, "uploadSettings") || !strcmp(name, "fetchSettings")) {
         if (!g_logged_in) {
-            popup_response(0, "Must be logged in", NULL);
+            popup_response(0, I18N("account.login.required", "Must be logged in"), NULL);
             return 1;
         }
         if (!strcmp(name, "fetchSettings")) {
@@ -1618,12 +1639,16 @@ static char *gen_account(void) {
     sb_append(&sb, "</div>");
     if (g_tab_index == 0) {
         sb_append(&sb, "<div class='setHed' style='margin-top:10px;margin-bottom:20px;'>Your Account</div>");
-        sb_append(&sb, "<div id='profilePicM' class='blurred'><img style='width: inherit;height: inherit;border-radius: inherit;' loading='lazy' src='textures/classes/icon_0.png'><a class='pfpAction' onmouseenter='playTick(0.1)' onclick='pfpPopup();'>Change Picture</a></div>");
-        sb_append(&sb, "<div class='setBodH' style='display:inline-block;padding-top:10px;vertical-align:top;width:1004px;margin-left:15px;margin-top:0px;'><div class='settName' style='width:100%;margin-top:0px'>Name<a href='/social.html?p=profile&q=");
+        sb_append(&sb, "<div id='profilePicM' class='blurred'><img style='width: inherit;height: inherit;border-radius: inherit;' loading='lazy' src='textures/classes/icon_0.png'><a class='pfpAction' onmouseenter='playTick(0.1)' onclick='pfpPopup();'>");
+        sb_append(&sb, I18N("windows.profile.picture", "Change Picture"));
+        sb_append(&sb, "</a></div>");
+        sb_append(&sb, "<div class='setBodH' style='display:inline-block;padding-top:10px;vertical-align:top;width:1004px;margin-left:15px;margin-top:0px;'><div class='settName' style='width:100%;margin-top:0px'>");
+        sb_append(&sb, I18N("generic.name", "Name"));
+        sb_append(&sb, "<a href='/social.html?p=profile&q=");
         sb_append_esc(&sb, g_acc.name);
         sb_append(&sb, "' class='floatR' target='_blank'>");
         sb_append_esc(&sb, g_acc.name);
-        sb_append(&sb, "</a></div><div class='settName' style='width:100%'>Clan<a style='float:right'  onclick='showWindow(13)'>");
+        sb_appendf(&sb, "</a></div><div class='settName' style='width:100%%'>%s<a style='float:right'  onclick='showWindow(13)'>", I18N("generic.clan", "Clan"));
         if (g_acc.clan[0]) {
             sb_append(&sb, "[");
             sb_append_esc(&sb, g_acc.clan);
@@ -1631,7 +1656,8 @@ static char *gen_account(void) {
         } else {
             sb_append(&sb, "None");
         }
-        sb_appendf(&sb, "</a></div><div class='settName'>Level<span class='floatR' style='color:rgba(255,255,255,0.8)'>%d</span></div></div>", g_acc.level);
+        sb_appendf(&sb, "</a></div><div class='settName'>%s<span class='floatR' style='color:rgba(255,255,255,0.8)'>%d</span></div></div>",
+                   I18N("generic.level", "Level"), g_acc.level);
         sb_append(&sb, "<div class='setHed' style='margin-top:10px;margin-bottom:15px;'>Your Stats</div>");
         xp_bar_text(a, sizeof(a));
         sb_appendf(&sb, "<div class='xpBar' style='height:31px;line-height:34px;font-size:28px;'><div class='xpBarB' style='width:%.6g%%'></div><span class='xpBarV'>%s</span></div>", g_acc.level_prog, a);
@@ -1648,43 +1674,44 @@ static char *gen_account(void) {
         pst_num(&sb, "KR", g_acc.funds, 0);
         pst_num(&sb, "Junk", 0, 0);
         pst(&sb, "Inventory", " ~0");
-        pst_num(&sb, "Score", g_acc.score, 0);
+        pst_num(&sb, I18N("generic.score", "Score"), g_acc.score, 0);
         pst_num(&sb, "SPK", g_acc.score / fmax(g_acc.kills, 1), 2);
-        pst_num(&sb, "Kills", g_acc.kills, 0);
-        pst_num(&sb, "Deaths", g_acc.deaths, 0);
-        pst_num(&sb, "KDR", g_acc.kills / fmax(g_acc.deaths, 1), 4);
+        pst_num(&sb, I18N("generic.kills", "Kills"), g_acc.kills, 0);
+        pst_num(&sb, I18N("generic.deaths", "Deaths"), g_acc.deaths, 0);
+        pst_num(&sb, I18N("generic.kdr", "KDR"), g_acc.kills / fmax(g_acc.deaths, 1), 4);
         pst_num(&sb, "KPG", g_acc.kills / fmax(g_acc.games, 1), 4);
-        pst_num(&sb, "Games", g_acc.games, 0);
+        pst_num(&sb, I18N("generic.games", "Games"), g_acc.games, 0);
         snprintf(a, sizeof(a), "%g", round(g_acc.wins / fmax(losses, 1) * 1000) / 1000);
         pst(&sb, "W/L", a);
-        pst_num(&sb, "Wins", g_acc.wins, 0);
-        pst_num(&sb, "Losses", losses, 0);
-        pst_num(&sb, "Assists", stat_num("ast"), 0);
-        pst_num(&sb, "Melee", stat_num("mk"), 0);
-        pst_num(&sb, "Beatdowns", stat_num("fk"), 0);
-        pst_num(&sb, "Bullseyes", stat_num("tmk"), 0);
-        pst_num(&sb, "Headshots", stat_num("hs"), 0);
-        pst_num(&sb, "Legshots", stat_num("ls"), 0);
-        pst_num(&sb, "Wallbangs", stat_num("wb"), 0);
-        pst_num(&sb, "Shots", shots, 0);
-        pst_num(&sb, "Hits", hits, 0);
-        pst_num(&sb, "Misses", shots - hits, 0);
+        pst_num(&sb, I18N("generic.wins", "Wins"), g_acc.wins, 0);
+        pst_num(&sb, I18N("generic.lose", "Losses"), losses, 0);
+        pst_num(&sb, I18N("stats.assists", "Assists"), stat_num("ast"), 0);
+        pst_num(&sb, I18N("stats.melee", "Melee"), stat_num("mk"), 0);
+        pst_num(&sb, I18N("stats.fistkills", "Beatdowns"), stat_num("fk"), 0);
+        pst_num(&sb, I18N("stats.thrownkills", "Bullseyes"), stat_num("tmk"), 0);
+        pst_num(&sb, I18N("stats.headshots", "Headshots"), stat_num("hs"), 0);
+        pst_num(&sb, I18N("stats.legshots", "Legshots"), stat_num("ls"), 0);
+        pst_num(&sb, I18N("stats.wallbangs", "Wallbangs"), stat_num("wb"), 0);
+        pst_num(&sb, I18N("stats.shots", "Shots"), shots, 0);
+        pst_num(&sb, I18N("stats.hits", "Hits"), hits, 0);
+        pst_num(&sb, I18N("stats.misses", "Misses"), shots - hits, 0);
         snprintf(a, sizeof(a), "%g%%", shots > 0 ? round(hits / shots * 100 * 100) / 100 : 0.0);
-        pst(&sb, "Accuracy", a);
+        pst(&sb, I18N("generic.accuracy", "Accuracy"), a);
         readable_time(a, sizeof(a), g_acc.time_played);
-        pst(&sb, "Time Played", a);
+        pst(&sb, I18N("generic.timep", "Time Played"), a);
         sb_append(&sb, "</div><div class='statTabB1 hide'>");
-        pst_num(&sb, "Nukes", stat_num("n"), 0);
-        pst_num(&sb, "Airdrops", stat_num("ad"), 0);
-        pst_num(&sb, "Airdrops Stolen", stat_num("sad"), 0);
-        pst_num(&sb, "Slimers", stat_num("sl"), 0);
-        pst_num(&sb, "Juggernauts", stat_num("jg"), 0);
-        sb_appendf(&sb, "<div class='pSt' style='font-size: 12px;padding-left: 0px;padding-right: 0px;width: 174px;'>Juggernauts Killed<strong>%.0f</strong></div>", stat_num("kjg"));
-        pst_num(&sb, "War Machines", stat_num("wm"), 0);
+        pst_num(&sb, I18N("stats.nukes", "Nukes"), stat_num("n"), 0);
+        pst_num(&sb, I18N("stats.airdrops", "Airdrops"), stat_num("ad"), 0);
+        pst_num(&sb, I18N("stats.airdrops.stolen", "Airdrops Stolen"), stat_num("sad"), 0);
+        pst_num(&sb, I18N("stats.slimers", "Slimers"), stat_num("sl"), 0);
+        pst_num(&sb, I18N("stats.juggernauts", "Juggernauts"), stat_num("jg"), 0);
+        sb_appendf(&sb, "<div class='pSt' style='font-size: 12px;padding-left: 0px;padding-right: 0px;width: 174px;'>%s<strong>%.0f</strong></div>",
+                   I18N("stats.juggernauts.killed", "Juggernauts Killed"), stat_num("kjg"));
+        pst_num(&sb, I18N("stats.warmachines", "War Machines"), stat_num("wm"), 0);
         sb_append(&sb, "</div><div class='statTabB2 hide'>");
-        pst_num(&sb, "Crouches", stat_num("crc"), 0);
-        pst_num(&sb, "Sprays Placed", stat_num("spry"), 0);
-        pst(&sb, "Helpful Reports", "0/0");
+        pst_num(&sb, I18N("stats.crouches", "Crouches"), stat_num("crc"), 0);
+        pst_num(&sb, I18N("stats.sprays", "Sprays Placed"), stat_num("spry"), 0);
+        pst(&sb, I18N("stats.kpd", "Helpful Reports"), "0/0");
         sb_append(&sb, "</div><div class='statTabB3 hide'>");
         const MenuUi *ui = menu_ui();
         for (int i = 0; i < ui->class_count; i++) {
@@ -1723,10 +1750,12 @@ static char *gen_account(void) {
             sb_append(&sb, "'><div id='aliasRes'></div></div>");
         }
         const int flg = g_acc.stats && cJSON_IsNumber(cJSON_GetObjectItem(g_acc.stats, "flg")) ? (int) stat_num("flg") : -1;
-        sb_appendf(&sb, "<div class='settName'>Country Flag<select onchange='selectFlag(this.value)' class='inputGrey2' style='padding:4px;margin-top:4px'><option value='-1' %s>None</option>", flg == -1 ? "selected" : "");
+        sb_appendf(&sb, "<div class='settName'>%s<select onchange='selectFlag(this.value)' class='inputGrey2' style='padding:4px;margin-top:4px'><option value='-1' %s>None</option>",
+                   I18N("windows.loadout.flag", "Country Flag"), flg == -1 ? "selected" : "");
         for (int i = 0; i < ACCOUNT_FLAG_COUNT; i++) sb_appendf(&sb, "<option value='%d' %s>%s</option>", i, flg == i ? "selected" : "", ACCOUNT_FLAGS[i].name);
         sb_append(&sb, "</select></div>");
-        sb_append(&sb, "<div class='settName'>Custom Badge<div class='updDisN' onclick='selectBadge(-1);' style='background-color: var(--red);'>Clear</div><div class='updDisN' onclick='selectBadgePop();'>Select</div>");
+        sb_appendf(&sb, "<div class='settName'>%s<div class='updDisN' onclick='selectBadge(-1);' style='background-color: var(--red);'>Clear</div><div class='updDisN' onclick='selectBadgePop();'>Select</div>",
+                   I18N("windows.loadout.badge", "Custom Badge"));
         if (badge_get(stat_bdg())) { // v7 index.js:5651: the selected badge's image
             char url[256];
             badge_url(stat_bdg(), url, sizeof(url));
@@ -1735,18 +1764,23 @@ static char *gen_account(void) {
         sb_append(&sb, "</div>");
         sb_appendf(&sb, "<div class='settName'>Hide Detailed Online Status<label class='switch' style='margin-left:10px'><input type='checkbox' onclick='toggleStatus(this.checked)'%s><span class='slider'></span></label></div></div>", stat_num("hds") ? " checked" : "");
         if (!g_acc.hack) {
-            sb_append(&sb, "<div class='setHedS'>Account Security</div><div class='setBodH' style='padding-bottom:10px;'><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px'>You can update your password every 30 minutes. <span style='color:#fff'>Never share your password</span> with anyone and keep it in a secure place</div><input type='password' id='oldPass' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='Current Password' /><input type='password' id='newPass' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='New Password' /><input type='password' id='repNPass' class='smlInput' style='width:82%;margin-bottom:8px' placeholder='Repeat Password' /><div class='subPassChg' onclick='changePass()'>Submit</div><div id='newPRes' style='color:rgba(255,255,255,0.5)'></div>");
+            sb_append(&sb, "<div class='setHedS'>Account Security</div><div class='setBodH' style='padding-bottom:10px;'><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px'>You can update your password every 30 minutes. <span style='color:#fff'>Never share your password</span> with anyone and keep it in a secure place</div><input type='password' id='oldPass' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='Current Password' /><input type='password' id='newPass' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='New Password' /><input type='password' id='repNPass' class='smlInput' style='width:82%;margin-bottom:8px' placeholder='Repeat Password' /><div class='subPassChg' onclick='changePass()'>");
+            sb_append(&sb, I18N("generic.submit", "Submit"));
+            sb_append(&sb, "</div><div id='newPRes' style='color:rgba(255,255,255,0.5)'></div>");
             // 2FA: v7 offers it from level 20 (or dev / partner / featured); KrunkNative always does
             if (backend_enabled() || g_scenario) email_html(&sb); // KrunkNative email verification (v7.1.4 has none)
             sb_appendf(&sb, "<div class='settName' style='margin-bottom:20px;'></div><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px;margin-bottom: 10px;'>To further protect your account, you can add enable <span style='color:#fff'>2FA</span>:<div class='subPassChg' onclick='%s' style='float: right;margin-top: -8px;'>%s</div></div></div>",
                        g_acc.has_2fa ? "dact2FA()" : "act2FA()", g_acc.has_2fa ? "Disable" : "Enable");
         }
-        sb_append(&sb, "<div class='setHedS'>Account Privacy</div><div class='setBodH' style='padding-bottom:15px;'><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px'>You may request to delete your account, if the request is not cancelled within 14 days the account and all associated data will be permanently removed.</div><div style='height:10px;'></div><div style='margin-top:10px'>Delete Account <a class='menuLink' onclick='requestDeletion(1)' style='float:right;font-size:20px'>Request Deletion</a></div></div>");
+        sb_appendf(&sb, "<div class='setHedS'>Account Privacy</div><div class='setBodH' style='padding-bottom:15px;'><div style='font-size:21px;color:rgba(255,255,255,0.4);margin-top:5px'>%s</div><div style='height:10px;'></div><div style='margin-top:10px'>Delete Account <a class='menuLink' onclick='requestDeletion(1)' style='float:right;font-size:20px'>Request Deletion</a></div></div>",
+                   I18N("account.delete", "You may request to delete your account, if the request is not cancelled within 14 days the account and all associated data will be permanently removed."));
     } else {
         sb_append(&sb, "<div style='margin-bottom:10px;color:rgba(255,255,255,0.5);'>You have No Promo Codes</div>");
     }
-    sb_appendf(&sb, "<div style='height:15px;margin-top:30px;border-top:4px solid rgba(255, 255, 255, 0.8);'></div><a class='menuLink' onclick='logoutAcc()'>Logout</a>%s",
-               g_logout_sessions ? "" : "<a style='float:right' class='menuLink' onclick='logoutSessions(this)'>Logout of all Sessions</a>");
+    sb_appendf(&sb, "<div style='height:15px;margin-top:30px;border-top:4px solid rgba(255, 255, 255, 0.8);'></div><a class='menuLink' onclick='logoutAcc()'>%s</a>",
+               I18N("generic.logout", "Logout"));
+    if (!g_logout_sessions)
+        sb_appendf(&sb, "<a style='float:right' class='menuLink' onclick='logoutSessions(this)'>%s</a>", I18N("generic.logout.sessions", "Logout of all Sessions"));
     return sb_finish(&sb);
 }
 
@@ -2273,17 +2307,22 @@ void account_window_post(const int id) {
     // KrunkNative: the email Register needs (kn_brain mails a verification link); Login takes
     // it instead of the username too (v10's placeholder: generic.auth.enterEmail)
     HtmlElem pass = html_dom_by_id("accPass");
-    if (pass && !html_dom_by_id("accEmail"))
-        html_dom_insert_html(pass, HTML_INSERT_AFTER_END,
-                             "<input id='accEmail' type='email' placeholder='Enter Email' class='accountInput'>");
+    if (pass && !html_dom_by_id("accEmail")) {
+        char input[160];
+        snprintf(input, sizeof(input), "<input id='accEmail' type='email' placeholder='%s' class='accountInput'>",
+                 I18N("generic.auth.enterEmail", "Enter Email"));
+        html_dom_insert_html(pass, HTML_INSERT_AFTER_END, input);
+    }
     // KrunkNative: password reset by email (v7.1.4: "contact recovery@yendis.ch")
     HtmlElem mail = html_dom_by_id("accEmail");
-    if (mail && !html_dom_by_id("knForgot"))
-        html_dom_insert_html(mail, HTML_INSERT_AFTER_END,
-                             "<div id='knForgot' style='text-align:right;margin-top:6px;font-size:17px;color:rgba(255,255,255,0.5)'>"
-                             "<span onclick='knResetOpen()' style='cursor:pointer;color:rgba(255,255,255,0.8);text-decoration:underline'>"
-                             "Forgot password?</span></div>");
+    if (mail && !html_dom_by_id("knForgot")) {
+        char forgot[384];
+        snprintf(forgot, sizeof(forgot), "<div id='knForgot' style='text-align:right;margin-top:6px;font-size:17px;color:rgba(255,255,255,0.5)'>"
+                                         "<span onclick='knResetOpen()' style='cursor:pointer;color:rgba(255,255,255,0.8);text-decoration:underline'>"
+                                         "%s</span></div>", I18N("kn.account.forgot", "Forgot password?"));
+        html_dom_insert_html(mail, HTML_INSERT_AFTER_END, forgot);
+    }
     HtmlElem resp = html_dom_by_id("accResp");
-    if (resp) html_dom_set_html(resp, "Forgot your password? Reset it with the email on your account.");
+    if (resp) html_dom_set_html(resp, I18N("kn.account.forgotHint", "Forgot your password? Reset it with the email on your account."));
     if (g_reset.step > 0) reset_render(); // a re-render (account update) keeps the reset step
 }

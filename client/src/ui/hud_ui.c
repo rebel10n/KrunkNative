@@ -771,7 +771,8 @@ char *hud_ui_player_list_html(void) {
     for (size_t i = 0; i < count; i++) listed += client->game.players[i] != NULL;
     StrBuf sb = {0};
     if (listed) {
-        sb_appendf(&sb, "<div id='playerSearchH' class='setHed'>Player List [%zu]<div id='plySearchH'><input id='plySearch' type='text' ", listed);
+        sb_appendf(&sb, "<div id='playerSearchH' class='setHed'>%s [%zu]<div id='plySearchH'><input id='plySearch' type='text' ",
+                   I18N("windows.players.header", "Player List"), listed);
         if (g_plist_search[0]) {
             sb_append(&sb, "value='");
             sb_append_esc(&sb, g_plist_search);
@@ -779,7 +780,7 @@ char *hud_ui_player_list_html(void) {
         }
         sb_append(&sb, "placeholder='Search Player' oninput='windows[22].searchPlayers(this)'></div></div>");
     } else {
-        sb_append(&sb, "<div style='margin-top:0px;' class='setHed'><center>No players currently...<center></div>"); // windows.players.none
+        sb_appendf(&sb, "<div style='margin-top:0px;' class='setHed'><center>%s<center></div>", I18N("windows.players.none", "No players currently..."));
     }
     char *rows = hud_plist_rows();
     sb_append(&sb, "<div id='playerListH'>");
@@ -1831,19 +1832,21 @@ void hud_ui_kill_streak(Client *client, const int uid, const int streak) {
     if (!html_ui_available() || !html_ui_is_ready()) return;
     Player *player = game_find_player(&client->game, uid);
     if (!player) return;
-    char html[768];
-    size_t len = 0;
-    html[0] = 0;
+    char html[1024], who[512], num[16], line[768];
+    size_t len = 0, wlen = 0;
+    html[0] = who[0] = 0;
     hud_feed_open(html, sizeof(html), &len, 1);
     if (player == client->me) {
-        hb_append(html, sizeof(html), &len, "<span style='color:" FEED_COLOR_YOU "'>You're</span>");
+        hb_append(who, sizeof(who), &wlen, "<span style='color:" FEED_COLOR_YOU "'>You're</span>"); // v10: English in every language
     } else {
         const Player *me = client->me;
         const int ally = me && me->team && client->game.mode && client->game.mode->config.teams && me->team == player->team;
-        hud_feed_name_span(html, sizeof(html), &len, hud_player_name(client, player), 0, ally);
-        hb_append(html, sizeof(html), &len, " is");
+        hud_feed_name_span(who, sizeof(who), &wlen, hud_player_name(client, player), 0, ally);
+        hb_append(who, sizeof(who), &wlen, " is");
     }
-    hb_append(html, sizeof(html), &len, " on a %d Kill Streak</span></div><br>", streak);
+    snprintf(num, sizeof(num), "%d", streak);
+    I18N_F(line, "player.killstreak", "{0} on a {1} Kill Streak", who, num);
+    hb_append(html, sizeof(html), &len, "%s</span></div><br>", line);
     hud_feed_insert(1, html, 0.0);
 }
 
@@ -1935,7 +1938,9 @@ static void hud_switch_chat(void) {
         const int c = atoi(ch);
         html_dom_set_display(row, c == g_chat_channel || c == -1 ? "" : "none");
     }
-    if (teams) hud_add_chat_row(NULL, g_chat_channel ? "Team Text & Voice Chat" : "Global Text & Voice Chat", SERVER_MSG_COLOR);
+    if (teams)
+        hud_add_chat_row(NULL, g_chat_channel ? I18N("kn.chat.teamChannel", "Team Text & Voice Chat") : I18N("kn.chat.globalChannel", "Global Text & Voice Chat"),
+                         SERVER_MSG_COLOR);
 }
 
 int hud_ui_chat_channel(void) { return g_chat_channel; }
@@ -1999,8 +2004,8 @@ void hud_ui_skin_found(Client *client, const int uid, const int skin_index) {
         if (!skin) return;
         char thumb[256], card[1024];
         store_skin_preview(skin_index, thumb, sizeof(thumb));
-        snprintf(card, sizeof(card), "<div class='skinRewCard' onclick='openSales(%d)' onmouseenter='playTick()'><img class='skinRewImg%s' src='%s' style='border: 3px solid %s' /><div class='skinRewRight'>%s<div class='skinRewDesc'>Item Found!</div></div></div>",
-                 skin_index, rainbow ? " rainbowBorder" : "", thumb, g_viewer_rarities[rarity].color, name);
+        snprintf(card, sizeof(card), "<div class='skinRewCard' onclick='openSales(%d)' onmouseenter='playTick()'><img class='skinRewImg%s' src='%s' style='border: 3px solid %s' /><div class='skinRewRight'>%s<div class='skinRewDesc'>%s</div></div></div>",
+                 skin_index, rainbow ? " rainbowBorder" : "", thumb, g_viewer_rarities[rarity].color, name, I18N("kn.store.itemFound", "Item Found!"));
         const HtmlElem el = html_dom_by_id("skinRewards");
         if (el) {
             html_dom_set_display(el, "block");
@@ -2008,8 +2013,10 @@ void hud_ui_skin_found(Client *client, const int uid, const int skin_index) {
             if (g_skin_reward_timer) html_timer_cancel(g_skin_reward_timer);
             g_skin_reward_timer = html_timer_add(5000.0, hud_skin_reward_hide, NULL);
         }
-        snprintf(markup, sizeof(markup), "<span style='color:#fff'>You</span> found <span class='click%s' style='color:%s' onclick='viewItem(%d)'>[" LRM "%s" LRM "]</span>",
-                 rainbow ? " rainbowText" : "", g_viewer_rarities[rarity].color, skin_index, name);
+        char found[160];
+        I18N_F(found, "kn.chat.youFound", "{0}You{1} found", "<span style='color:#fff'>", "</span>");
+        snprintf(markup, sizeof(markup), "%s <span class='click%s' style='color:%s' onclick='viewItem(%d)'>[" LRM "%s" LRM "]</span>",
+                 found, rainbow ? " rainbowText" : "", g_viewer_rarities[rarity].color, skin_index, name);
         hud_add_chat_markup(markup);
         return;
     }
@@ -2020,8 +2027,11 @@ void hud_ui_skin_found(Client *client, const int uid, const int skin_index) {
     who[0] = 0;
     hb_append_escaped(who, sizeof(who), &wlen, streamer_name(hud_player_name(client, player), shown, sizeof(shown)));
     // i18n "windows.store.found" = "{0}{1} found": "<span style='color:#fff'>" + fixStr(name) + "</span> found"
-    snprintf(markup, sizeof(markup), "<span style='color:#fff'>" LRM "%s" LRM "</span> found <span class='click%s' style='color:%s' onclick='viewItem(%d)'>[" LRM "%s" LRM "]</span>",
-             who, rainbow ? " rainbowText" : "", g_viewer_rarities[rarity].color, skin_index, name);
+    char lrm_who[sizeof(who) + 8], found[sizeof(who) + 128];
+    snprintf(lrm_who, sizeof(lrm_who), LRM "%s" LRM, who);
+    I18N_F(found, "windows.store.found", "{0}{1} found", lrm_who, "</span>");
+    snprintf(markup, sizeof(markup), "<span style='color:#fff'>%s <span class='click%s' style='color:%s' onclick='viewItem(%d)'>[" LRM "%s" LRM "]</span>",
+             found, rainbow ? " rainbowText" : "", g_viewer_rarities[rarity].color, skin_index, name);
     hud_add_chat_markup(markup);
 }
 
@@ -2042,7 +2052,8 @@ void hud_ui_found_junk(const char *line) {
     value[0] = 0;
     snprintf(raw, sizeof(raw), "%.*s", (int) (end - amount), amount);
     hb_append_escaped(value, sizeof(value), &len, raw);
-    snprintf(markup, sizeof(markup), "<span style='color:#fff'>You</span> found <span style='color:#cc51f8'>[%s]</span> Junk", value);
+    I18N_F(markup, "kn.chat.foundJunk", "{0}You{1} found {2}[{3}]{4} Junk", "<span style='color:#fff'>", "</span>", "<span style='color:#cc51f8'>",
+           value, "</span>");
     hud_add_chat_markup(markup);
 }
 
@@ -2237,7 +2248,7 @@ static void hud_old_board_step(const Client *client) {
     if (!board) return;
     char html[4096];
     hud_old_board_html(client, g_hud_override.scoreboard, html, sizeof(html));
-    if (!html[0]) snprintf(html, sizeof(html), "Empty Lobby"); // i18n leaderboard.empty
+    if (!html[0]) snprintf(html, sizeof(html), "%s", I18N("leaderboard.empty", "Empty Lobby"));
     const unsigned hash = hud_hash(html);
     if (hash == ui->old_board_hash) return;
     const HtmlElem c = html_dom_by_id("leaderContainer");
@@ -2563,8 +2574,8 @@ static void hud_end_screen_dom(const int start) {
     }
     if (g_hud_ui.end_phase == 2) dom_display("endInfo", "block");
     if (g_end_timer[0]) {
-        char text[64];
-        snprintf(text, sizeof(text), "Next Round in %s", g_end_timer); // i18n timer.end
+        char text[128];
+        I18N_F(text, "timer.end", "Next Round in {0}", g_end_timer);
         dom_text("endTimer", text);
     }
     hud_hide_crosshair();
@@ -3021,8 +3032,8 @@ void hud_ui_show_end_screen(Client *client, const int result, const char *next_r
         hud_end_screen_dom(1); // the title draws from this frame's HUD tick on (overlay.render after io_gameEnd)
         return;
     }
-    char text[64];
-    snprintf(text, sizeof(text), "Next Round in %s", g_end_timer); // i18n timer.end
+    char text[128];
+    I18N_F(text, "timer.end", "Next Round in {0}", g_end_timer);
     dom_text("endTimer", text);
 }
 
@@ -3334,7 +3345,7 @@ static void hud_apply_visibility(Client *client, const int in_game, const int vi
         html_dom_set_style(el, "max-height", value);                     // chatHeight
         ui_controls_apply_chat_visibility();                             // shwChat: all / on focus / off
     }
-    dom_text("reloadMsg", "[R] Reload"); // i18n game.reload.keyboard (startBootstrapLoading)
+    dom_text("reloadMsg", I18N("game.reload.keyboard", "[R] Reload")); // startBootstrapLoading
 
     if (visible) {
         hud_ensure_crosshair();

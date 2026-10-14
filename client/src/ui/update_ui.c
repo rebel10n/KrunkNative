@@ -169,28 +169,45 @@ static void esc(char *out, const size_t n, const char *s) {
 }
 
 // The box, a youNewDiv like the menu's other notices, right before v7's "Whats new ?" (#updateAd).
+static void render(void);
+static void render_on_locale(void *user) {
+    (void) user;
+    render();
+}
+
 static void render(void) {
+    static int listening;
+    if (!listening) { // the box is written once per check: again in a newly picked language
+        listening = 1;
+        i18n_on_change(render_on_locale, NULL);
+    }
     HtmlElem old = html_dom_by_id("knUpdateAd");
     if (old) html_dom_remove(old);
     if (g_up.state == KN_UPDATE_CURRENT || !g_up.ok) return;
     HtmlElem ref = html_dom_by_id("updateAd");
     if (!ref) return;
     const int outdated = g_up.state == KN_UPDATE_OUTDATED;
-    char latest[160], mine[160], html[2048];
+    char latest[160], html[2048], title_text[256], title[512];
     esc(latest, sizeof(latest), g_up.latest);
-    esc(mine, sizeof(mine), kn_build_info()->describe);
+    i18n_trf(title_text, sizeof(title_text), "kn.update.thisClient", "This client: {0}", 1, I18N_ARGV(kn_build_info()->describe));
+    esc(title, sizeof(title), title_text);
+    char update_now[256] = "";
+    if (can_update_now())
+        snprintf(update_now, sizeof(update_now), "<a id='knUpdateNow' onclick='knUpdateNow()' style='cursor:pointer;color:#fbc02d;text-decoration:underline;margin-right:12px'>%s</a>",
+                 I18N("kn.update.now", "Update now"));
     snprintf(html, sizeof(html),
-             "<div class='youNewDiv' id='knUpdateAd' style='display:block;cursor:default' title='This client: %s'>"
+             "<div class='youNewDiv' id='knUpdateAd' style='display:block;cursor:default' title='%s'>"
              "<span class='material-icons' style='vertical-align:middle;font-size:30px;color:%s'>system_update</span>"
              "<div class='helpTxtHol' style='margin-left:6px'>"
              "<span id='knUpdateState' style='color:%s'>%s</span>"
              "<div id='knUpdateVersion' style='font-size:14px;color:rgba(255,255,255,0.7)'>%s</div>"
              "<div style='margin-top:4px;font-size:15px'>"
              "%s"
-             "<a id='knUpdateDownload' onclick='knUpdateDownload()' style='cursor:pointer;color:#fff;text-decoration:underline'>Download</a>"
+             "<a id='knUpdateDownload' onclick='knUpdateDownload()' style='cursor:pointer;color:#fff;text-decoration:underline'>%s</a>"
              "</div></div></div>",
-             mine, outdated ? "#fb8c00" : "#fbc02d", outdated ? "#fb8c00" : "#fbc02d", outdated ? "Outdated" : "Update available", latest,
-             can_update_now() ? "<a id='knUpdateNow' onclick='knUpdateNow()' style='cursor:pointer;color:#fbc02d;text-decoration:underline;margin-right:12px'>Update now</a>" : "");
+             title, outdated ? "#fb8c00" : "#fbc02d", outdated ? "#fb8c00" : "#fbc02d",
+             outdated ? I18N("kn.update.outdated", "Outdated") : I18N("kn.update.available", "Update available"), latest,
+             update_now, I18N("kn.update.download", "Download"));
     html_dom_insert_html(ref, HTML_INSERT_BEFORE_BEGIN, html);
 }
 
@@ -264,7 +281,7 @@ static int update_now(void) {
     printf("[update] restarting through %s\n", g_up.launcher);
     fflush(stdout);
     if (!kn_proc_spawn_detached(g_up.launcher, argv, NULL)) {
-        ui_alert("Could not start the launcher: download the update instead.");
+        ui_alert(I18N("kn.update.launcherFailed", "Could not start the launcher: download the update instead."));
         return 0;
     }
     if (g_up.client && g_up.client->window) glfwSetWindowShouldClose(g_up.client->window, GLFW_TRUE);

@@ -227,6 +227,32 @@ void engine_set_hide_scrollbars(int hide)
     }
 }
 
+/* html_dom_set_lang: <html lang> of every page (the base page and a loaded one) and the text
+ * system's script preference (text_set_lang); a changed preference re-lays out all text. */
+static char g_doc_lang[24];
+
+static void engine_apply_lang(Engine *e)
+{
+    if (!e) return;
+    if (e->dom && dom_root(e->dom)) {
+        if (g_doc_lang[0]) dom_set_attr(e->dom, dom_root(e->dom), "lang", g_doc_lang);
+        else dom_remove_attr(e->dom, dom_root(e->dom), "lang");
+    }
+    if (e->text && text_set_lang(e->text, g_doc_lang[0] ? g_doc_lang : NULL)) {
+        if (e->tree) layout_rebuild_all(e->tree);
+        if (e->dom) dom_mark_all_dirty(e->dom);
+        e->need_layout = 1;
+        e->need_paint = 1;
+    }
+}
+
+void engine_set_lang(const char *lang)
+{
+    snprintf(g_doc_lang, sizeof g_doc_lang, "%s", lang ? lang : "");
+    engine_apply_lang(g_engine);
+    if (g_base != g_engine) engine_apply_lang(g_base);
+}
+
 static double now_s(void)
 {
     return engine_now_ms() / 1000.0;
@@ -1903,6 +1929,7 @@ static Engine *engine_create(const char *ui_dir, const char *page, const int wid
 
     /* text, images, animation */
     g->text = text_create(g->ui_dir);
+    if (g->text && g_doc_lang[0]) text_set_lang(g->text, g_doc_lang); /* engine_set_lang before this page */
     g->images = image_cache_create(g->ui_dir);
     if (!g->text || !g->images) {
         fprintf(stderr, "[html_engine] text/image system creation failed\n");

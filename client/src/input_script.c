@@ -117,6 +117,11 @@
 //   100 nodes @label .skinCard   log the page's element count and how many match the selector
 //   100 text @label #contjump    log the first match's text, value and checked state: "[input_script]
 //                                text t=100 @label n=1 checked=0 value= text=K" (settings / binds tests)
+//   100 glyphs @label #menuWindow  log how many characters every match's rendered text draws without a glyph
+//                                (tofu, html_dom_missing_glyphs) and the first such code point: "[input_script]
+//                                glyphs t=100 @label n=1 missing=0 first=-" (localisation tests: i18n_e2e.py)
+//   100 locale @label            log the active language (i18n.h): "[input_script] locale t=100 @label code=ru
+//                                gen=3 keys=1009"
 //   100 ft @label start | stop   wall-clock frame times between start and stop: one line with the
 //                                frame count, avg / p50 / p95 / max ms (perf logs, never asserted here)
 //   100 type rifle               type the rest of the line through the char callback (the focused
@@ -232,7 +237,7 @@ static void script_load(void) {
         if (!strcmp(e->cmd, "con") || script_probe(e->cmd) || !strcmp(e->cmd, "type") || !strcmp(e->cmd, "om") ||
             !strcmp(e->cmd, "call") || !strcmp(e->cmd, "setscroll") || !strcmp(e->cmd, "hit") || !strcmp(e->cmd, "ft") ||
             !strcmp(e->cmd, "nodes") || !strcmp(e->cmd, "rects") || !strcmp(e->cmd, "clicksel") || !strcmp(e->cmd, "wsel") ||
-            !strcmp(e->cmd, "text") || !strcmp(e->cmd, "page")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
+            !strcmp(e->cmd, "text") || !strcmp(e->cmd, "glyphs") || !strcmp(e->cmd, "locale") || !strcmp(e->cmd, "page")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
             while (*rest == ' ' || *rest == '\t') rest++;
             snprintf(e->arg, sizeof(e->arg), "%s", rest);
             for (size_t len = strlen(e->arg); len && (e->arg[len - 1] == '\n' || e->arg[len - 1] == '\r' || e->arg[len - 1] == ' '); len--) e->arg[len - 1] = 0;
@@ -522,6 +527,28 @@ static void script_run(Client *client, const ScriptEvent *e) {
         folded[k] = 0;
         fprintf(stderr, "[input_script] text t=%.0f %s n=%d checked=%d value=%s text=%s\n", g_script.time, label, n,
                 el ? html_dom_get_checked(el) : 0, value, folded);
+    } else if (!strcmp(e->cmd, "glyphs")) {
+        char label[64] = "", sel[192] = "";
+        sscanf(e->arg, "%63s %191[^\n]", label, sel);
+        HtmlElem els[64];
+        const int n = html_ui_available() && sel[0] ? html_dom_query_all(0, sel, els, 64) : 0;
+        int missing = 0;
+        uint32_t first = 0;
+        for (int i = 0; i < n; i++) {
+            uint32_t f = 0;
+            const int m = html_dom_missing_glyphs(els[i], &f);
+            if (m < 0) { missing = -1; break; }
+            if (m && !first) first = f;
+            missing += m;
+        }
+        char cp[16] = "-";
+        if (first) snprintf(cp, sizeof(cp), "U+%04X", (unsigned) first);
+        fprintf(stderr, "[input_script] glyphs t=%.0f %s n=%d missing=%d first=%s\n", g_script.time, label, n, missing, cp);
+    } else if (!strcmp(e->cmd, "locale")) {
+        char label[64] = "";
+        sscanf(e->arg, "%63s", label);
+        fprintf(stderr, "[input_script] locale t=%.0f %s code=%s gen=%u keys=%d\n", g_script.time, label, i18n_locale(),
+                i18n_generation(), i18n_table_size(i18n_locale()));
     } else if (!strcmp(e->cmd, "ft")) {
         // ft @label start|stop: wall-clock frame times (input_script_tick samples them)
         char label[64] = "", what[16] = "";

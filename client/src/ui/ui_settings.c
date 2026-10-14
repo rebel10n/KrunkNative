@@ -11,6 +11,7 @@
 #include <audio.h>
 #include <voice_chat.h> // audioInput: microphone list / selection (voice.c)
 #include <client_settings.h> // the Client tab's rows in searchList (ui_client_settings.c)
+#include <i18n.h>            // lang: settings.list.lang (setLocale / the locale it shows)
 #if defined(__has_include)
 #if __has_include(<render_settings.h>)
 #include <render_settings.h> // client_apply_render_setting (ui_render_settings.c)
@@ -284,6 +285,12 @@ const cJSON *ui_setting_saved(const char *key) {
 }
 
 const cJSON *ui_setting_value(const char *key) {
+    if (key && !strcmp(key, "lang")) { // settings.list.lang.val = i18n.locale (krk_lang owns it)
+        static cJSON *lang;
+        if (!lang) lang = cJSON_CreateString("en");
+        if (lang) cJSON_SetValuestring(lang, i18n_locale());
+        return lang;
+    }
     const cJSON *v = ui_setting_saved(key);
     if (v) return v;
     return g_defaults ? cJSON_GetObjectItem(g_defaults, key) : NULL;
@@ -689,8 +696,10 @@ static void sync_preset_select(void) {
     if (!sel) return;
     if (!html_dom_query(sel, "option[value=\"4\"]")) {
         HtmlElem custom = html_dom_query(sel, "option[value=\"2\"]");
-        if (custom) html_dom_insert_html(custom, HTML_INSERT_BEFORE_BEGIN, "<option value=\"4\">Beautiful</option>");
-        else html_dom_insert_html(sel, HTML_INSERT_BEFORE_END, "<option value=\"4\">Beautiful</option>");
+        char option[128];
+        snprintf(option, sizeof(option), "<option value=\"4\">%s</option>", I18N("kn.settings.preset.beautiful", "Beautiful"));
+        if (custom) html_dom_insert_html(custom, HTML_INSERT_BEFORE_BEGIN, option);
+        else html_dom_insert_html(sel, HTML_INSERT_BEFORE_END, option);
     }
     char idx[16];
     snprintf(idx, sizeof(idx), "%d", preset_index());
@@ -707,7 +716,7 @@ static void preset_confirmed(const int accepted, const char *text, void *user) {
 void ui_settings_select_preset(const int index) {
     if (index == preset_index()) return;
     if (index == 0) {
-        ui_confirm("Are you sure you want to reset all your settings?", preset_confirmed, NULL);
+        ui_confirm(I18N("settings.reset.confirm", "Are you sure you want to reset all your settings?"), preset_confirmed, NULL);
         return;
     }
     preset_apply(index, 0, 0);
@@ -726,7 +735,7 @@ static void reset_confirmed(const int accepted, const char *text, void *user) {
 }
 
 void ui_settings_reset_confirm(void) {
-    ui_confirm("Are you sure you want to reset all your settings?", reset_confirmed, NULL);
+    ui_confirm(I18N("settings.reset.confirm", "Are you sure you want to reset all your settings?"), reset_confirmed, NULL);
 }
 
 // settings.import(text): every known setting takes the text's value or its default;
@@ -800,9 +809,11 @@ static void sync_preset_boxes(const HtmlElem root) {
     if (html_dom_query(root, ".setSugBox2[onclick=\"selectSettingPre(4)\"]")) return;
     const HtmlElem perf = html_dom_query(root, ".setSugBox2[onclick=\"selectSettingPre(3)\"]");
     if (!perf) return;
-    html_dom_insert_html(perf, HTML_INSERT_AFTER_END,
-                         "<div class=\"setSugBox2\" onclick=\"selectSettingPre(4)\">Beautiful<div class=\"segSugIH\">"
-                         "<div class=\"setSugInf\">Highest graphics quality</div></div></div>");
+    char box[512];
+    snprintf(box, sizeof(box), "<div class=\"setSugBox2\" onclick=\"selectSettingPre(4)\">%s<div class=\"segSugIH\">"
+                               "<div class=\"setSugInf\">%s</div></div></div>",
+             I18N("kn.settings.preset.beautiful", "Beautiful"), I18N("kn.settings.preset.beautifulInfo", "Highest graphics quality"));
+    html_dom_insert_html(perf, HTML_INSERT_AFTER_END, box);
 }
 
 void ui_settings_apply_values(const HtmlElem root) {
@@ -832,7 +843,7 @@ void ui_settings_apply_values(const HtmlElem root) {
         if (!control_setting_key(found[i], key, sizeof(key))) continue;
         if (!strcmp(key, "audioInput")) audio_input_options(found[i]);
         const cJSON *v = ui_setting_saved(key);
-        if (!v && !strcmp(key, "netRate")) v = ui_setting_value(key); // the device's default (mobile 60 Hz)
+        if (!v && (!strcmp(key, "netRate") || !strcmp(key, "lang"))) v = ui_setting_value(key); // the device's default (mobile 60 Hz); i18n.locale
         if (!v) continue;
         if (elem_is_checkbox(found[i])) {
             // !!settings[key]
@@ -945,8 +956,32 @@ static const char *div_end(const char *p) {
     return NULL;
 }
 
-// Lower-cased text of an HTML fragment (tags dropped, the few entities v7's labels use decoded).
+// Text of an HTML fragment (tags dropped, the few entities v7's labels use decoded), lower-cased.
+static void fragment_text_raw(const char *s, const size_t n, char *out, const size_t cap, const int lower);
 static void fragment_text(const char *s, const size_t n, char *out, const size_t cap) {
+    fragment_text_raw(s, n, out, cap, 1);
+}
+
+// v10's searchMatches compares the query with i18n.t(name), the label in the page's language;
+// the captured rows are English, so a label (and a folder header) is localised through
+// i18n_translate_tree on a detached probe element before it is lower-cased.
+static void localise_lower(char *text, const size_t cap) {
+    static HtmlElem probe;
+    if (strcmp(i18n_locale(), "en") && text[0]) {
+        if (!probe) probe = html_dom_create("span", NULL);
+        char out[256] = "";
+        if (probe) {
+            html_dom_set_text(probe, text);
+            i18n_translate_tree(probe);
+            html_dom_get_text(probe, out, sizeof(out));
+        }
+        if (out[0]) snprintf(text, cap, "%s", out);
+        else probe = 0; // a page reload dropped it: a new one next time
+    }
+    for (char *c = text; *c; c++) *c = (char) tolower((unsigned char) *c);
+}
+
+static void fragment_text_raw(const char *s, const size_t n, char *out, const size_t cap, const int lower) {
     size_t k = 0;
     int tag = 0;
     for (size_t i = 0; i < n && k + 1 < cap; i++) {
@@ -967,9 +1002,16 @@ static void fragment_text(const char *s, const size_t n, char *out, const size_t
             }
             if (e < sizeof(ENTS) / sizeof(ENTS[0])) continue;
         }
-        out[k++] = (char) tolower((unsigned char) c);
+        out[k++] = lower ? (char) tolower((unsigned char) c) : c;
     }
     out[k] = 0;
+    if (!lower) { // trimmed, for the table lookup
+        char *b = out;
+        while (*b == ' ' || *b == '\n' || *b == '\t' || *b == '\r') b++;
+        size_t l = strlen(b);
+        while (l && (b[l - 1] == ' ' || b[l - 1] == '\n' || b[l - 1] == '\t' || b[l - 1] == '\r')) b[--l] = 0;
+        memmove(out, b, l + 1);
+    }
 }
 
 // The setting's label: the row's text before its first child element (v7 writes
@@ -979,7 +1021,8 @@ static void row_label(const char *row, const char *row_end, char *out, const siz
     if (!gt || gt >= row_end) { out[0] = 0; return; }
     const char *lt = strchr(gt + 1, '<');
     if (!lt || lt > row_end) lt = row_end;
-    fragment_text(gt + 1, (size_t) (lt - gt - 1), out, cap);
+    fragment_text_raw(gt + 1, (size_t) (lt - gt - 1), out, cap, 0);
+    localise_lower(out, cap);
 }
 
 // The category header text without its arrow icon and the "* requires restart" note.
@@ -1002,7 +1045,8 @@ static void header_text(const char *hed, const char *hed_end, char *out, const s
         } while (depth > 0 && end);
         if (end) memmove(at, end + 7, strlen(end + 7) + 1);
     }
-    fragment_text(h, strlen(h), out, cap);
+    fragment_text_raw(h, strlen(h), out, cap, 0);
+    localise_lower(out, cap);
     free(h);
 }
 
@@ -1101,7 +1145,10 @@ static void search_holder(StrBuf *out, const char *body, const char *query, StrB
             continue;
         }
         if (!strncmp(p, "<div class=\"setBodH\"", 20) && strstr(p, "showWindow(7)") && strstr(p, "showWindow(7)") < end) {
-            if (!*keybinds && matches("keybinds", query)) { // searchMatches({name: "settings.controls.change"})
+            char keybinds_label[128];
+            snprintf(keybinds_label, sizeof(keybinds_label), "%s", I18N("settings.controls.change", "Keybinds"));
+            for (char *c = keybinds_label; *c; c++) *c = (char) tolower((unsigned char) *c);
+            if (!*keybinds && matches(keybinds_label, query)) { // searchMatches({name: "settings.controls.change"})
                 sb_append_n(out, p, (size_t) (end - p));
                 *keybinds = 1;
             }
@@ -1127,7 +1174,7 @@ static char *search_html(const char *query) {
     if (client_rows) search_holder(&out, client_rows, query, &seen, &keybinds);
     free(client_rows);
     sb_free(&seen);
-    if (!out.len) sb_append(&out, "<div class=\"setHed\">No settings found</div>"); // i18n settings.none
+    if (!out.len) sb_appendf(&out, "<div class=\"setHed\">%s</div>", I18N("settings.none", "No settings found"));
     return sb_finish(&out);
 }
 
@@ -1148,9 +1195,11 @@ static void search_tabs(void) {
     const int client = ui_client_settings_tab();
     if (client >= 0)
         sb_appendf(&sb, "\n<div class=\"settingTab\" style=\"border-bottom: 5px solid transparent\" onmouseenter=\"playTick()\" "
-                        "onclick=\"playSelect(0.1);window.windows[0].changeTab(%d)\">Client</div>", client);
+                        "onclick=\"playSelect(0.1);window.windows[0].changeTab(%d)\">%s</div>", client,
+                   I18N("settings.client.header", "Client"));
     html_dom_set_html(layout, sb.data ? sb.data : "");
     sb_free(&sb);
+    i18n_translate_tree(layout); // the captured (English) tab names
 }
 
 void ui_settings_search(const char *query) {
@@ -1170,6 +1219,7 @@ void ui_settings_search(const char *query) {
     char *html = search_html(q);
     html_dom_set_html(holder, html);
     free(html);
+    i18n_translate_tree(holder); // the captured (English) rows
     ui_settings_apply_values(holder);
 }
 
@@ -1280,6 +1330,10 @@ void client_apply_setting(Client *client, const char *key, const char *value) {
         ui_controls_set_speed_limit(1.0f); // q.speedLmt = 1
     }
     else if (!strcmp(key, "audioInput")) voice_set_audio_input(value); // settings.tmp.audioInput
+    // settings.list.lang.set: i18n.setLocale(v) (saved as krk_lang). v10 then closes the open window
+    // (toggleWindow(false)) so it renders in the new language next time; here the page and the
+    // open window re-render in place (i18n listeners: menu_ui.c), which needs no restart either.
+    else if (!strcmp(key, "lang")) i18n_set_locale(value);
     else if (!strcmp(key, "micQuality") || !strcmp(key, "micVolume") || !strcmp(key, "voiceChatType") || !strcmp(key, "voiceDistance") ||
              !strcmp(key, "muteSpec") || !strcmp(key, "voiceChatTrigger"))
         voice_apply_setting(key, value); // WP-E: v7 voice chat settings (voice.c)

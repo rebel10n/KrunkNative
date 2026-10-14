@@ -67,34 +67,49 @@ static void wipe(void *p, size_t n) {
 
 static int handle_click(void *user, const HtmlEvent *ev, const HtmlArg *args, int argc);
 
-static const char k_markup[] =
-    "<div id=\"knCaptchaHolder\" class=\"kn-captcha-holder\" style=\"display:none\">"
-    "<div id=\"knCaptchaModal\" class=\"kn-captcha-modal\">"
-    "<div class=\"kn-captcha-title\">Security Challenge</div>"
-    "<div id=\"knCaptchaText\" class=\"kn-captcha-text\">Please complete the security challenge to continue.</div>"
-    "<div id=\"knTurnstileHolder\" class=\"kn-captcha-widget\"></div>"
-    "<div id=\"knCaptchaStatus\" class=\"kn-captcha-status\"></div>"
-    "<div id=\"knCaptchaRetry\" class=\"kn-captcha-btn\" onclick=\"" CAPTCHA_HANDLER "(6)\" style=\"display:none\">Try again</div>"
-    "<div id=\"knCaptchaManual\" class=\"kn-captcha-manual\" style=\"display:none\">"
-    "<div id=\"knCaptchaCbRow\" class=\"kn-captcha-block\" style=\"display:none\">"
-    "<div class=\"kn-captcha-small\">Your own userscript on krunker.io can send the token here (once, 5 min):</div>"
-    "<div class=\"kn-captcha-row\">"
-    "<input id=\"knCaptchaCallback\" class=\"kn-captcha-input\" type=\"text\" readonly autocomplete=\"off\" spellcheck=\"false\">"
-    "<div id=\"knCaptchaCopy\" class=\"kn-captcha-btn kn-captcha-btn-small\" onclick=\"" CAPTCHA_HANDLER "(5)\">Copy</div>"
-    "</div></div>"
-    "<div class=\"kn-captcha-small\">Or paste a token from krunker.io:</div>"
-    "<div class=\"kn-captcha-row\">"
-    "<input id=\"knCaptchaToken\" class=\"kn-captcha-input\" type=\"text\" placeholder=\"Turnstile token\" autocomplete=\"off\""
-    " spellcheck=\"false\">"
-    "<div id=\"knCaptchaPaste\" class=\"kn-captcha-btn kn-captcha-btn-small\" onclick=\"" CAPTCHA_HANDLER "(2)\">Paste</div>"
-    "<div id=\"knCaptchaUse\" class=\"kn-captcha-btn kn-captcha-btn-small\" onclick=\"" CAPTCHA_HANDLER "(3)\">Use</div>"
-    "</div>"
-    "</div>"
-    "<div class=\"kn-captcha-row kn-captcha-actions\">"
-    "<div id=\"knCaptchaOpen\" class=\"kn-captcha-btn\" onclick=\"" CAPTCHA_HANDLER "(1)\" style=\"display:none\">Open krunker.io</div>"
-    "<div id=\"knCaptchaCancel\" class=\"kn-captcha-btn kn-captcha-cancel\" onclick=\"" CAPTCHA_HANDLER "(4)\">Cancel</div>"
-    "</div>"
-    "</div></div>";
+// The modal's markup in the page's language (kn.captcha.*: strings v10 does not have).
+static char *markup(void) {
+    StrBuf sb = {0};
+    sb_appendf(&sb,
+               "<div id=\"knCaptchaHolder\" class=\"kn-captcha-holder\" style=\"display:none\">"
+               "<div id=\"knCaptchaModal\" class=\"kn-captcha-modal\">"
+               "<div class=\"kn-captcha-title\">%s</div>"
+               "<div id=\"knCaptchaText\" class=\"kn-captcha-text\">%s</div>"
+               "<div id=\"knTurnstileHolder\" class=\"kn-captcha-widget\"></div>"
+               "<div id=\"knCaptchaStatus\" class=\"kn-captcha-status\"></div>"
+               "<div id=\"knCaptchaRetry\" class=\"kn-captcha-btn\" onclick=\"" CAPTCHA_HANDLER "(6)\" style=\"display:none\">%s</div>"
+               "<div id=\"knCaptchaManual\" class=\"kn-captcha-manual\" style=\"display:none\">"
+               "<div id=\"knCaptchaCbRow\" class=\"kn-captcha-block\" style=\"display:none\">"
+               "<div class=\"kn-captcha-small\">%s</div>"
+               "<div class=\"kn-captcha-row\">"
+               "<input id=\"knCaptchaCallback\" class=\"kn-captcha-input\" type=\"text\" readonly autocomplete=\"off\" spellcheck=\"false\">"
+               "<div id=\"knCaptchaCopy\" class=\"kn-captcha-btn kn-captcha-btn-small\" onclick=\"" CAPTCHA_HANDLER "(5)\">%s</div>"
+               "</div></div>"
+               "<div class=\"kn-captcha-small\">%s</div>"
+               "<div class=\"kn-captcha-row\">",
+               I18N("kn.captcha.title", "Security Challenge"),
+               I18N("kn.captcha.text", "Please complete the security challenge to continue."),
+               I18N("kn.captcha.retry", "Try again"),
+               I18N("kn.captcha.userscript", "Your own userscript on krunker.io can send the token here (once, 5 min):"),
+               I18N("kn.captcha.copy", "Copy"),
+               I18N("kn.captcha.pasteFrom", "Or paste a token from krunker.io:"));
+    sb_appendf(&sb,
+               "<input id=\"knCaptchaToken\" class=\"kn-captcha-input\" type=\"text\" placeholder=\"%s\" autocomplete=\"off\""
+               " spellcheck=\"false\">"
+               "<div id=\"knCaptchaPaste\" class=\"kn-captcha-btn kn-captcha-btn-small\" onclick=\"" CAPTCHA_HANDLER "(2)\">%s</div>"
+               "<div id=\"knCaptchaUse\" class=\"kn-captcha-btn kn-captcha-btn-small\" onclick=\"" CAPTCHA_HANDLER "(3)\">%s</div>"
+               "</div>"
+               "</div>"
+               "<div class=\"kn-captcha-row kn-captcha-actions\">"
+               "<div id=\"knCaptchaOpen\" class=\"kn-captcha-btn\" onclick=\"" CAPTCHA_HANDLER "(1)\" style=\"display:none\">%s</div>"
+               "<div id=\"knCaptchaCancel\" class=\"kn-captcha-btn kn-captcha-cancel\" onclick=\"" CAPTCHA_HANDLER "(4)\">%s</div>"
+               "</div>"
+               "</div></div>",
+               I18N("kn.captcha.tokenPlaceholder", "Turnstile token"), I18N("kn.captcha.paste", "Paste"),
+               I18N("kn.captcha.use", "Use"), I18N("kn.captcha.openSite", "Open krunker.io"),
+               I18N("generic.cancel", "Cancel"));
+    return sb_finish(&sb);
+}
 
 // The holder on <body>, made on first use (the page may have been rebuilt: look it up every time).
 static HtmlElem holder(void) {
@@ -103,7 +118,9 @@ static HtmlElem holder(void) {
     if (!h) {
         const HtmlElem body = html_dom_body();
         if (!body) return 0;
-        html_dom_insert_html(body, HTML_INSERT_BEFORE_END, k_markup);
+        char *html = markup();
+        html_dom_insert_html(body, HTML_INSERT_BEFORE_END, html);
+        free(html);
         h = html_dom_by_id("knCaptchaHolder");
     }
     if (!C.handler_set) {
@@ -246,7 +263,7 @@ static void widget_timeout(void *user) {
     if ((unsigned) (uintptr_t) user != C.gen || !C.asking || !C.widget) return;
     C.widget_timer = 0;
     kn_js_turnstile_remove();
-    set_text("knCaptchaStatus", "The challenge timed out.");
+    set_text("knCaptchaStatus", I18N("kn.captcha.timedOut", "The challenge timed out."));
     show("knCaptchaRetry", 1);
     show("knCaptchaManual", 1);
     show("knCaptchaOpen", 1);
@@ -256,7 +273,7 @@ static void widget_start(void) {
     C.widget = 1;
     show("knTurnstileHolder", 1);
     show("knCaptchaRetry", 0);
-    set_text("knCaptchaStatus", "Loading Cloudflare's challenge...");
+    set_text("knCaptchaStatus", I18N("kn.captcha.loading", "Loading Cloudflare's challenge..."));
     if (C.widget_timer) html_timer_cancel(C.widget_timer);
     C.widget_timer = html_timer_add(CAPTCHA_WIDGET_TIMEOUT_MS, widget_timeout, (void *) (uintptr_t) C.gen);
     kn_js_turnstile_render((int) C.gen, KRUNKER_TURNSTILE_SITE_KEY);
@@ -270,7 +287,7 @@ static void widget_event(const unsigned gen, const int kind, const char *text) {
                 printf("[krunker] captcha: Turnstile solved (%zu chars)\n", strlen(text));
                 finish(text);
             } else {
-                set_text("knCaptchaStatus", "Cloudflare answered something that is not a token.");
+                set_text("knCaptchaStatus", I18N("kn.captcha.notToken", "Cloudflare answered something that is not a token."));
                 show("knCaptchaRetry", 1);
             }
             break;
@@ -278,17 +295,19 @@ static void widget_event(const unsigned gen, const int kind, const char *text) {
             const char *code = text ? text : "unknown";
             printf("[krunker] captcha: Turnstile error %s\n", code);
             if (!strncmp(code, "1101", 4) || !strncmp(code, "1102", 4)) {
-                char origin[160], why[600];
+                char origin[160], why[900], err[17];
                 html_page_origin(origin, sizeof(origin));
-                snprintf(why, sizeof(why),
-                         "Cloudflare won't show krunker.io's challenge on %s: Turnstile keys only work on the sites they were made for"
-                         " (error %.16s). Solve it on krunker.io, then paste the token here, or play this game on krunker.io.",
-                         origin, code);
+                snprintf(err, sizeof(err), "%.16s", code);
+                I18N_F(why, "kn.captcha.wrongSite",
+                       "Cloudflare won't show krunker.io's challenge on {0}: Turnstile keys only work on the sites they were made for"
+                       " (error {1}). Solve it on krunker.io, then paste the token here, or play this game on krunker.io.",
+                       origin, err);
                 show_manual(why);
                 set_text("knCaptchaStatus", "");
             } else {
-                char status[160];
-                snprintf(status, sizeof(status), "The challenge failed (Cloudflare error %.16s).", code);
+                char status[320], err[17];
+                snprintf(err, sizeof(err), "%.16s", code);
+                I18N_F(status, "kn.captcha.failed", "The challenge failed (Cloudflare error {0}).", err);
                 kn_js_turnstile_remove();
                 set_text("knCaptchaStatus", status);
                 show("knCaptchaRetry", 1);
@@ -299,7 +318,8 @@ static void widget_event(const unsigned gen, const int kind, const char *text) {
         }
         case 3: // expired before we used it (it is used at once: rare): a fresh one
         case 4:
-            set_text("knCaptchaStatus", kind == 3 ? "The challenge expired." : "The challenge timed out.");
+            set_text("knCaptchaStatus", kind == 3 ? I18N("kn.captcha.expired", "The challenge expired.")
+                                                  : I18N("kn.captcha.timedOut", "The challenge timed out."));
             show("knCaptchaRetry", 1);
             break;
         case 5:
@@ -307,8 +327,8 @@ static void widget_event(const unsigned gen, const int kind, const char *text) {
             break;
         default: // 6: api.js did not load (blocked, offline)
             printf("[krunker] captcha: the Turnstile script did not load\n");
-            show_manual("Cloudflare's challenge could not be loaded here (blocked or offline). Solve it on krunker.io, then paste"
-                        " the token here, or play this game on krunker.io.");
+            show_manual(I18N("kn.captcha.noScript", "Cloudflare's challenge could not be loaded here (blocked or offline). Solve it on krunker.io, then paste"
+                                                    " the token here, or play this game on krunker.io."));
             set_text("knCaptchaStatus", "");
             break;
     }
@@ -357,14 +377,14 @@ static void present(void) {
     show("knCaptchaCancel", 1);
     show("knCaptchaRetry", 0);
     clear_token_box();
-    set_text("knCaptchaStatus", rejected ? "krunker.io refused that token (they work once, for 5 minutes): one more, please." : "");
+    set_text("knCaptchaStatus", rejected ? I18N("kn.captcha.refused", "krunker.io refused that token (they work once, for 5 minutes): one more, please.") : "");
 #ifdef __EMSCRIPTEN__
     show("knCaptchaManual", 0);
     show("knCaptchaOpen", 0);
-    set_text("knCaptchaText", "krunker.io's matchmaker wants this check before it finds you a game.");
+    set_text("knCaptchaText", I18N("kn.captcha.matchmaker", "krunker.io's matchmaker wants this check before it finds you a game."));
     widget_start();
 #else
-    show_manual("krunker.io wants a Cloudflare check first. It needs a web browser: solve it on krunker.io.");
+    show_manual(I18N("kn.captcha.needsBrowser", "krunker.io wants a Cloudflare check first. It needs a web browser: solve it on krunker.io."));
 #endif
 }
 
@@ -432,7 +452,7 @@ static void use_pasted(void) {
     while (n && (s[n - 1] == ' ' || s[n - 1] == '\n' || s[n - 1] == '\r' || s[n - 1] == '\t')) s[--n] = 0;
     if (!krunker_captcha_token_shape_ok(s)) {
         printf("[krunker] captcha: the pasted text is not a token (%zu chars)\n", n);
-        set_text("knCaptchaStatus", n ? "That is not a Turnstile token." : "Paste a token first.");
+        set_text("knCaptchaStatus", n ? I18N("kn.captcha.badPaste", "That is not a Turnstile token.") : I18N("kn.captcha.pasteFirst", "Paste a token first."));
         if (e) html_dom_focus(e); // back in the box, to fix it
     } else {
         printf("[krunker] captcha: a pasted token (%zu chars)\n", n);
@@ -514,15 +534,16 @@ void krunker_captcha_pow_begin(void) {
     show("knCaptchaRetry", 0);
     show("knCaptchaOpen", 0);
     show("knCaptchaCancel", 0);
-    set_text("knCaptchaText", "The game server asked for a proof of work.");
-    set_text("knCaptchaStatus", "Verifying\xe2\x80\xa6");
+    set_text("knCaptchaText", I18N("kn.captcha.pow", "The game server asked for a proof of work."));
+    set_text("knCaptchaStatus", I18N("kn.captcha.verifying", "Verifying\xe2\x80\xa6"));
 }
 
 void krunker_captcha_pow_end(const int solved) {
     if (C.asking) return;
     if (!C.pow_shown) krunker_captcha_pow_begin();
     if (!C.pow_shown) return;
-    set_text("knCaptchaStatus", solved ? "Verified \xe2\x9c\x93" : "This client could not answer it: the server may close the game.");
+    set_text("knCaptchaStatus", solved ? I18N("kn.captcha.verified", "Verified \xe2\x9c\x93")
+                                       : I18N("kn.captcha.powFailed", "This client could not answer it: the server may close the game."));
     if (C.pow_timer) html_timer_cancel(C.pow_timer);
     C.pow_timer = html_timer_add(solved ? POW_RESULT_MS : POW_RESULT_MS * 3, pow_hide, NULL);
 }

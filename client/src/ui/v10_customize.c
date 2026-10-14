@@ -140,7 +140,7 @@ static void other_container(StrBuf *out) {
     const int signed_in = acc || !online_mode_online();
     const int premium = acc && acc->premium > 0;
     sb_append(out, "<div class=\"otherContainer\" style=\"width: 100%;height: 205px;\">");
-    sb_append(out, "<div class='settName' style='border-bottom:unset;'>Skin Color");
+    sb_appendf(out, "<div class='settName' style='border-bottom:unset;'>%s", I18N("windows.loadout.color.skin", "Skin Color"));
     const int skin = ui_loadout_saved("skinColIndex");
     if (premium) sb_append(out, "<input class='skinColorItem' type='color' style='border-radius:2px;width:40px;' onmouseenter='playTick()' onchange='selectSkinColor(this.value)'>");
     else if (signed_in) sb_append(out, "<i class='material-icons premiumSkinCol' onclick='windows[13].premium()'>add_circle_outline</i>");
@@ -149,11 +149,11 @@ static void other_container(StrBuf *out) {
         sb_appendf(out, "<div class='skinColorItem%s' style='background-color:#%s' onmouseenter='playTick()' onclick='selectSkinColor(%d)'></div>",
                    skin == i ? " activeSkin" : "", ui_loadout_skin_color_hex(i), i);
     sb_append(out, "</div>");
-    sb_append(out, "<div class='settName' style='border-bottom:unset;'>Hair Color");
+    sb_appendf(out, "<div class='settName' style='border-bottom:unset;'>%s", I18N("windows.loadout.color.hair", "Hair Color"));
     if (premium) sb_append(out, "<input class='skinColorItem' type='color' style='border-radius:2px;width:40px;' onmouseenter='playTick()' onchange='selectHairColor(this.value)'>");
     else sb_append(out, "<i class='material-icons premiumSkinCol' onclick='windows[13].premium()'>add_circle_outline</i>");
     sb_append(out, "</div>");
-    sb_append(out, "<div class='settName' style='border-bottom:unset;'>Chat Name Color");
+    sb_appendf(out, "<div class='settName' style='border-bottom:unset;'>%s", I18N("windows.loadout.color.chat", "Chat Name Color"));
     if (premium) {
         char col[16] = "#ffffff";
         if (html_storage_get("chatCol", col, sizeof(col)) < 0 || col[0] != '#') snprintf(col, sizeof(col), "#ffffff");
@@ -163,13 +163,14 @@ static void other_container(StrBuf *out) {
     }
     sb_append(out, "</div>");
     const int stat = ui_loadout_saved("pcStatIndex");
-    sb_appendf(out, "<div class='settName' style='border-bottom:unset;'>Playercard Stat<select onchange='selectStat(this.value)' class='inputGrey2' style='font-size:16px;padding:4px;margin-bottom: 5px;'><option value='-1' %s>None</option>",
-               stat == -1 ? "selected" : "");
+    sb_appendf(out, "<div class='settName' style='border-bottom:unset;'>%s<select onchange='selectStat(this.value)' class='inputGrey2' style='font-size:16px;padding:4px;margin-bottom: 5px;'><option value='-1' %s>None</option>",
+               I18N("windows.loadout.stat", "Playercard Stat"), stat == -1 ? "selected" : "");
     for (int i = 0; i < ui_loadout_pc_stat_count(); i++)
         sb_appendf(out, "<option value='%d' %s>%s</option>", i, stat == i ? "selected" : "", ui_loadout_pc_stat_name(i));
     sb_append(out, "</select></div>");
     const cJSON *t = title_get(v10_customize_title());
-    sb_append(out, "<div class='settName' style='border-bottom:unset;'>Title<div class='titleSlotSelect' onmouseenter='playTick()' onclick='playSelect(0.1);showTitlesWindow()'>");
+    sb_appendf(out, "<div class='settName' style='border-bottom:unset;'>%s<div class='titleSlotSelect' onmouseenter='playTick()' onclick='playSelect(0.1);showTitlesWindow()'>",
+               I18N("windows.loadout.title", "Title"));
     if (t) {
         sb_append(out, "<span class='titleSlotTag' style='");
         title_style(out, t);
@@ -177,7 +178,7 @@ static void other_container(StrBuf *out) {
         sb_append_esc(out, cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(t, "name")));
         sb_append(out, "</span>");
     } else {
-        sb_append(out, "<span class='titleSlotNone'>None</span>");
+        sb_appendf(out, "<span class='titleSlotNone'>%s</span>", I18N("generic.none", "None"));
     }
     sb_append(out, "<span class='material-icons titleSlotArrow'>chevron_right</span></div></div>");
     sb_append(out, "</div>");
@@ -214,8 +215,10 @@ static char *gen_titles(void) {
     toolbar(&out, CUSTOMIZE_TAB);
     sb_append(&out, "<div class='wcpRow'><div id='charPreviewSlot'></div><div class='wcpItems'>");
     sb_append(&out, "<div id='itemSearchH'><div class='custBack' onclick='playSelect(0.1);goBackWindow(52)' onmouseenter='playTick();'><span class='material-icons custBackArr'>arrow_back</span></div></div><div id='skinList' class='titleListWrap' style='overflow-y: auto;height: calc(100% - 95px);'>");
-    sb_appendf(&out, "<div class='titleRow%s' style='color:#cfcfcf' onmouseenter='playTick()' onclick='playSelect(0.1);selectTitle(-1)'><div class='titleRowInfo'><div class='titleRowName'>None</div><div class='titleRowDesc'>Default</div></div>%s</div>",
-               sel < 0 ? " titleRowSel" : "", sel < 0 ? "<span class='titleRowEquipped'>Equipped</span>" : "");
+    char equipped[128];
+    snprintf(equipped, sizeof(equipped), "<span class='titleRowEquipped'>%s</span>", I18N("windows.loadout.titleEquipped", "Equipped"));
+    sb_appendf(&out, "<div class='titleRow%s' style='color:#cfcfcf' onmouseenter='playTick()' onclick='playSelect(0.1);selectTitle(-1)'><div class='titleRowInfo'><div class='titleRowName'>%s</div><div class='titleRowDesc'>%s</div></div>%s</div>",
+               sel < 0 ? " titleRowSel" : "", I18N("generic.none", "None"), I18N("generic.default", "Default"), sel < 0 ? equipped : "");
     for (int pass = 0; pass < 2; pass++) {
         const cJSON *t;
         cJSON_ArrayForEach(t, titles()) {
@@ -233,13 +236,13 @@ static char *gen_titles(void) {
                     sb_append_esc(&out, desc);
                     sb_append(&out, "</div>");
                 }
-                sb_appendf(&out, "</div>%s</div>", sel == id ? "<span class='titleRowEquipped'>Equipped</span>" : "");
+                sb_appendf(&out, "</div>%s</div>", sel == id ? equipped : "");
             } else if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(t, "active"))) {
                 const char *req = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(t, "requirements"), "text"));
                 sb_append(&out, "<div class='titleRow titleRowLocked' onmouseenter='playTick()'><div class='titleRowInfo'><div class='titleRowName'>");
                 sb_append_esc(&out, name ? name : "");
                 sb_append(&out, "</div><div class='titleRowDesc'><span class='material-icons titleLockIco'>lock</span>");
-                sb_append_esc(&out, req && req[0] ? req : "Locked");
+                sb_append_esc(&out, req && req[0] ? req : I18N("windows.loadout.titleLocked", "Locked"));
                 sb_append(&out, "</div></div></div>");
             }
         }

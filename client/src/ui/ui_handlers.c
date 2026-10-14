@@ -144,8 +144,8 @@ H(h_open_url) {
 // practice play on the embedded offline game stays (playMap / knHostOffline).
 H(h_open_host_window) {
     UNUSED;
-    ui_alert("To host a server, run the dedicated server: server_bin (see \"Hosting a server\" in the README). "
-             "Players join it from the server list or by direct connect.");
+    ui_alert(I18N("kn.host.dedicated", "To host a server, run the dedicated server: server_bin (see \"Hosting a server\" in the README). "
+                                       "Players join it from the server list or by direct connect."));
     return 1;
 }
 // v10 Invite / Join (v10_party.c): openJoinWindow(a, skipClipboard), copyInviteLink(toast)
@@ -230,7 +230,11 @@ H(h_create_private_room) {
     // then at least one mode
     HtmlElem msg = html_dom_by_id("hostGameMsg");
     if (ranked_ui_in_ranked()) { // v7: if (config.isComp) custom.host.ranked
-        if (msg) html_dom_set_html(msg, "<span class='error'>Can't host match while in ranked.</span>");
+        if (msg) {
+            char html[256];
+            snprintf(html, sizeof(html), "<span class='error'>%s</span>", I18N("custom.host.ranked", "Can't host match while in ranked."));
+            html_dom_set_html(msg, html);
+        }
         return 1;
     }
     const int catalog_index = ui_host_checked_map_index();
@@ -238,7 +242,11 @@ H(h_create_private_room) {
     HtmlElem raw_el = html_dom_by_id("rawMapData");
     if (raw_el) html_dom_get_value(raw_el, raw, sizeof(raw));
     if (catalog_index < 0 && !raw[0]) {
-        if (msg) html_dom_set_html(msg, "<span class='error'>Select at least one Game or Map</span>");
+        if (msg) {
+            char html[256];
+            snprintf(html, sizeof(html), "<span class='error'>%s</span>", I18N("custom.map.missing", "Select at least one Game or Map"));
+            html_dom_set_html(msg, html);
+        }
         return 1;
     }
     // WP-E: the Game Settings / Advanced / Server rows (ui_host_config.c): at least one mode and
@@ -249,7 +257,7 @@ H(h_create_private_room) {
         if (msg) {
             StrBuf sb = {0};
             sb_append(&sb, "<span class='error'>");
-            sb_append_esc(&sb, err[0] ? err : "Invalid game settings");
+            sb_append_esc(&sb, err[0] ? err : I18N("kn.host.invalidSettings", "Invalid game settings"));
             sb_append(&sb, "</span>");
             char *html = sb_finish(&sb);
             html_dom_set_html(msg, html);
@@ -402,7 +410,7 @@ H(h_store_tab) {
 H(h_claim_reward) {
     UNUSED;
     if (account_ui_handle("claimReward", ev, args, argc) >= 0) return 1; // signed in with a brain: ["clm"]
-    ui_alert("Ad Failed. Contact your Ad Provider");
+    ui_alert(I18N("kn.ads.failed", "Ad Failed. Contact your Ad Provider"));
     return 1;
 }
 // updateWindow(id, force): re-render the open window when it is `id` (or any with force).

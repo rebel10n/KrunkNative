@@ -306,7 +306,7 @@ static char *gen_challenges(const AccountInfo *acc) {
     const cJSON *list = account_challenges();
     if (!list) {
         account_challenges_request();
-        return strdup("Loading");
+        return strdup(I18N("generic.loading.simple", "Loading"));
     }
     if (cJSON_GetArraySize(list) == 0) return strdup("<span style=\"color: #fff;\">No active challenges.</span>");
     StrBuf sb = {0};
@@ -390,20 +390,24 @@ static char *gen_challenges(const AccountInfo *acc) {
     cards(&sb, "nightmare", NULL, 0, "Check back later for new nightmare challanges!"); // sic (v10)
     // v10: Ranked Challenges (only progress in ranked matches)
     count("ranked", NULL, 0, &done, &total);
-    header(&sb, "challRankedHeadr", "hed_3", 30, "Ranked Challenges", done, total, 0, total && done >= total, NULL);
+    header(&sb, "challRankedHeadr", "hed_3", 30, I18N("windows.chall.ranked", "Ranked Challenges"), done, total, 0, total && done >= total, NULL);
     const cJSON *rl[LIST_MAX];
     const int rn = sorted(rl, "ranked", NULL, 0);
     sb_append(&sb, "<div style=\"margin-top:10px;\">");
     for (int i = 0; i < rn; i++) chal_card(&sb, rl[i], i ? 20 : 0);
     sb_appendf(&sb, "<div class=\"challCrdMsg\" style=\"margin-top:%dpx;\">%s</div></div>", rn ? 20 : 0,
-               rn ? "Ranked challenges only progress in ranked matches." : "Check back later for new ranked challenges!");
+               rn ? I18N("windows.chall.rankedNote", "Ranked challenges only progress in ranked matches.")
+                  : I18N("windows.chall.rankedEmpty", "Check back later for new ranked challenges!"));
     return sb_finish(&sb);
 }
 
 // windows[32].gen() for a guest: _71155(null, "to complete challenges!", true)
 static char *gen_challenges_guest(void) {
-    return strdup("<div class=\"reqW login\" onclick=\"showWindow(5)\"><i class=\"material-icons reqWIcon\">clear</i>"
-                  "<div class=\"reqWLvl\">LOGIN REQUIRED</div><div class=\"reqWTxt\">to complete challenges!</div></div>");
+    StrBuf sb = {0};
+    sb_appendf(&sb, "<div class=\"reqW login\" onclick=\"showWindow(5)\"><i class=\"material-icons reqWIcon\">clear</i>"
+                    "<div class=\"reqWLvl\">LOGIN REQUIRED</div><div class=\"reqWTxt\">%s</div></div>",
+               I18N("windows.chall.login", "to complete challenges!"));
+    return sb_finish(&sb);
 }
 
 // The v10 window bodies this file writes (NULL: not ours)

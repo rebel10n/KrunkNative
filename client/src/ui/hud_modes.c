@@ -314,7 +314,7 @@ static int hud_modes_handle_v7(Client *client, const int packet_type, const void
             snprintf(g_modes.popup_title, sizeof(g_modes.popup_title), "Switching Sides");
             snprintf(g_modes.popup_text, sizeof(g_modes.popup_text), "%s", lead);
             g_modes.popup_seq++;
-            hud_popups_medal_text("Switching Sides. Prepare for the next Round"); // modes.round.switch
+            hud_popups_medal_text(I18N("modes.round.switch", "Switching Sides. Prepare for the next Round"));
             return 1;
         }
         case NET_PACKET_LOCKOUT: {
@@ -616,7 +616,7 @@ const char *hud_modes_game_message(void) {
 
 static void hud_modes_message(const Client *client, const GameModeConfig *config) {
     const char *text = g_scenario_message_set ? g_scenario_message : g_modes.message;
-    if (!strcmp(text, NET_GAME_MESSAGE_WAITING)) text = "waiting for players"; // i18n player.waiting
+    if (!strcmp(text, NET_GAME_MESSAGE_WAITING)) text = I18N("player.waiting", "waiting for players");
 
     if (config && config->flags && client->me) {
         int carrying = 0, enemy_has_ours = 0;

@@ -775,8 +775,9 @@ static void poll_closes(StrBuf *out, const double secs) {
 }
 
 static void poll_card(StrBuf *out, const cJSON *p) {
-    sb_append(out, "<div class=\"pollCard svelte-1ley7u4\"><div class=\"pollMeta svelte-1ley7u4\"><span class=\"pollBadge svelte-1ley7u4\">"
-                   "Community Poll</span> <span class=\"pollCloses svelte-1ley7u4\">Closes in ");
+    sb_appendf(out, "<div class=\"pollCard svelte-1ley7u4\"><div class=\"pollMeta svelte-1ley7u4\"><span class=\"pollBadge svelte-1ley7u4\">"
+                    "%s</span> <span class=\"pollCloses svelte-1ley7u4\">%s ",
+               I18N("windows.community.polls.badge", "Community Poll"), I18N("windows.community.polls.closesIn", "Closes in"));
     const cJSON *ends = cJSON_GetObjectItem(p, "ends_in");
     poll_closes(out, cJSON_IsNumber(ends) ? ends->valuedouble : 0.0);
     sb_append(out, "</span></div> <div class=\"pollTitle svelte-1ley7u4\">");
@@ -790,7 +791,7 @@ static void poll_card(StrBuf *out, const cJSON *p) {
     // v10: COMMUNITY_URI + "/polls/" + id (community.krunker.io); the brain gives each poll its url
     sb_append(out, " <a class=\"pollVote svelte-1ley7u4\" target=\"_blank\" rel=\"noopener noreferrer\"");
     link_attrs(out, jstr(p, "url"));
-    sb_append(out, ">Vote now</a></div>");
+    sb_appendf(out, ">%s</a></div>", I18N("windows.community.polls.vote", "Vote now"));
 }
 
 static char *community_markup(void) {
@@ -866,8 +867,15 @@ static void on_events(void *user, const int status, const char *body, const size
     community_render();
 }
 
+// the language changed: the open Community popup again (its poll cards are i18n strings)
+static void on_locale(void *user) {
+    (void) user;
+    community_render();
+}
+
 // window.openCommunityMenu(): the component fetches its events on every mount
 void v10_news_open_community(void) {
+    i18n_on_change(on_locale, NULL);
     E.serial++;
     E.loading = 0;
     if (!L.scenario) {

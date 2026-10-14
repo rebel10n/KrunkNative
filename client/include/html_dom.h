@@ -33,6 +33,22 @@ void     html_dom_remove(HtmlElem);
 void     html_dom_set_html(HtmlElem, const char *html);              // innerHTML
 void     html_dom_set_text(HtmlElem, const char *text);              // textContent
 int      html_dom_get_text(HtmlElem, char *buf, size_t n);           // returns length needed
+// Localisation (client/src/ui/i18n.c): every text node and the title / placeholder (and button
+// <input> value) attributes under `root` (0 = the document), in document order. fn returns the
+// replacement or NULL (kept). Elements matching skip_selector (NULL: none), with their subtrees,
+// and script / style / textarea / noscript / template contents are left alone. Returns the
+// number of strings replaced. The text passed is the node's data (entities decoded); `owner` is
+// the text node's parent element (slot = the node's index among the parent's child nodes) or, for
+// an attribute, the element itself (slot HTML_TEXT_SLOT_TITLE / _PLACEHOLDER / _VALUE).
+enum { HTML_TEXT_SLOT_TITLE = -1, HTML_TEXT_SLOT_PLACEHOLDER = -2, HTML_TEXT_SLOT_VALUE = -3 };
+typedef const char *(*HtmlTextMapFn)(void *user, HtmlElem owner, int slot, const char *text);
+int      html_dom_map_text(HtmlElem root, const char *skip_selector, HtmlTextMapFn fn, void *user);
+// <html lang> (BCP 47; NULL/"" removes it): the browser's font choice on the web; natively also
+// the text system's script fallback preference (CJK glyph forms, client/src/html/engine/text.h).
+void     html_dom_set_lang(const char *lang);
+// Characters of the element's rendered text (its subtree's text runs) drawn with no glyph
+// (.notdef, "tofu"); *first_cp = the first such code point. -1 = unknown (web: the browser draws).
+int      html_dom_missing_glyphs(HtmlElem, uint32_t *first_cp);
 
 // ---- attributes / classes / style
 void     html_dom_set_attr(HtmlElem, const char *name, const char *value);

@@ -287,6 +287,63 @@ int html_dom_get_text(const HtmlElem e, char *buf, const size_t n)
     return len;
 }
 
+static void map_text_changed(void *user, const HtmlElem parent)
+{
+    engine_children_changed((Engine *) user, parent);
+}
+
+int html_dom_map_text(const HtmlElem root, const char *skip_selector, HtmlTextMapFn fn, void *user)
+{
+    Engine *g = engine_get();
+    Dom *dom = engine_dom(g);
+    if (!dom || !fn || (root && !alive(dom, root))) return 0;
+    return (int) dom_map_text(dom, root, skip_selector, fn, user, map_text_changed, g);
+}
+
+void html_dom_set_lang(const char *lang)
+{
+    engine_set_lang(lang);
+}
+
+/* Text runs of the boxes under `b`: glyphs with index 0 whose character is not white space. */
+static int missing_in_box(const Box *b, uint32_t *first)
+{
+    int n = 0;
+    for (; b; b = b->next) {
+        for (int r = 0; r < b->run_count; r++) {
+            const TextRun *run = &b->runs[r];
+            for (int i = 0; i < run->glyph_count; i++) {
+                if (run->glyphs[i].glyph_index) continue;
+                const size_t at = run->glyphs[i].cluster;
+                if (at >= run->len) continue;
+                const unsigned char c = (unsigned char) run->text[at];
+                if (c == ' ' || c == '\t' || c == '\n' || c == '\r') continue;
+                uint32_t cp = c;
+                if (c >= 0xF0 && at + 3 < run->len) cp = ((c & 7u) << 18) | (((unsigned char) run->text[at + 1] & 63u) << 12) | (((unsigned char) run->text[at + 2] & 63u) << 6) | ((unsigned char) run->text[at + 3] & 63u);
+                else if (c >= 0xE0 && at + 2 < run->len) cp = ((c & 15u) << 12) | (((unsigned char) run->text[at + 1] & 63u) << 6) | ((unsigned char) run->text[at + 2] & 63u);
+                else if (c >= 0xC0 && at + 1 < run->len) cp = ((c & 31u) << 6) | ((unsigned char) run->text[at + 1] & 63u);
+                if (cp == 0xA0 || cp == 0x3000) continue;
+                if (!n && first) *first = cp;
+                n++;
+            }
+        }
+        n += missing_in_box(b->first_child, n ? NULL : first);
+    }
+    return n;
+}
+
+int html_dom_missing_glyphs(const HtmlElem e, uint32_t *first_cp)
+{
+    Engine *g = engine_get();
+    Dom *dom = engine_dom(g);
+    if (first_cp) *first_cp = 0;
+    if (!alive(dom, e)) return 0;
+    engine_flush_layout(g);
+    const Box *box = engine_elem_box(g, e);
+    if (!box) return 0;
+    return missing_in_box(box->first_child, first_cp); /* an element's box carries no runs itself */
+}
+
 /* ------------------------------------------------------------------------- */
 /* Attributes / classes / style                                               */
 /* ------------------------------------------------------------------------- */

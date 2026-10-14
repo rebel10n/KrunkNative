@@ -378,6 +378,43 @@ static const ControlRow TAB_MODES[] = {
     {"Clear Bots", "clearBots", -1, 0, "Sandbox (Test mode)"},
 };
 #define TAB(name, rows) {name, rows, (int) (sizeof(rows) / sizeof(rows[0]))}
+
+// Localisation: v10's rows are i18n windows.controls.<key> values, which the page translation
+// (i18n_translate_tree of the window) maps back to their keys; v10's tab and group names are
+// English literals there. KrunkNative's own rows and groups take kn.controls.<bind> /
+// kn.controls.group.<id> (named here for tools/i18n-import/i18n_lint.py):
+//   I18N("kn.controls.gameReload", "Reload Game")  I18N("kn.controls.reconnect", "Reconnect")
+//   I18N("kn.controls.objectManager", "Object Manager")  I18N("kn.controls.omUndo", "Object Manager Undo")
+//   I18N("kn.controls.omRemove", "Object Manager Remove")  I18N("kn.controls.omRotate", "Physics Gun Rotate (held)")
+//   I18N("kn.controls.omPhysSnap", "Physics Gun Snap (held with Crouch)")  I18N("kn.controls.omSnapDown", "Tool Gun Snap Down")
+//   I18N("kn.controls.omSnapUp", "Tool Gun Snap Up")  I18N("kn.controls.omProps", "Tool Gun Properties")
+//   I18N("kn.controls.thirdPerson", "Third Person")
+//   I18N("kn.controls.group.connection", "Connection")  I18N("kn.controls.group.sandbox", "Sandbox")  I18N("kn.controls.group.camera", "Camera")
+static const char *const KN_ROWS[] = {"gameReload", "reconnect", "objectManager", "omUndo", "omRemove", "omRotate",
+                                      "omPhysSnap", "omSnapDown", "omSnapUp", "omProps", "thirdPerson"};
+static const char *const KN_GROUPS[] = {"Connection", "Sandbox", "Camera"};
+
+static const char *row_label(const ControlRow *row) {
+    for (size_t i = 0; i < sizeof(KN_ROWS) / sizeof(KN_ROWS[0]); i++) {
+        if (strcmp(KN_ROWS[i], row->bind)) continue;
+        char key[64];
+        snprintf(key, sizeof(key), "kn.controls.%s", row->bind);
+        return i18n_tr(key, row->label);
+    }
+    return row->label;
+}
+
+static const char *group_label(const char *group) {
+    for (size_t i = 0; i < sizeof(KN_GROUPS) / sizeof(KN_GROUPS[0]); i++) {
+        if (strcmp(KN_GROUPS[i], group)) continue;
+        char key[64];
+        size_t k = (size_t) snprintf(key, sizeof(key), "kn.controls.group.");
+        for (const char *c = group; *c && k + 1 < sizeof(key); c++) key[k++] = (char) tolower((unsigned char) *c);
+        key[k] = 0;
+        return i18n_tr(key, group);
+    }
+    return group;
+}
 static const ControlTab TABS[] = {
     TAB("General", TAB_GENERAL), TAB("Chat & Toggles", TAB_CHAT), TAB("Interaction", TAB_INTERACTION),
     TAB("Spectate & Vote", TAB_SPECTATE), TAB("Modes", TAB_MODES),
@@ -877,7 +914,7 @@ char *ui_controls_window_html(void) {
             if (r) sb_append(&sb, "</div>");
             sb_appendf(&sb, "<div class=\"setHed\" id=\"setBindHed_%s\" onclick=\"window.windows[6].collapseFolder(this)\">"
                             "<span class=\"material-icons plusOrMinus\">keyboard_arrow_down</span> ", gid);
-            sb_append_esc(&sb, row->group);
+            sb_append_esc(&sb, group_label(row->group));
             sb_appendf(&sb, "</div><div class=\"setBodH\" id=\"setBindBod_%s\">", gid);
         }
         sb_append(&sb, "<div class=\"settName\">");
@@ -898,7 +935,7 @@ char *ui_controls_window_html(void) {
             sb_append_esc(&sb, g_ctl.messages[row->index]);
             sb_appendf(&sb, "\" oninput=\"changeContMsg(%d, this.value)\">", row->index);
         } else {
-            sb_append_esc(&sb, row->label);
+            sb_append_esc(&sb, row_label(row));
         }
         append_trigger(&sb, row->bind);
         const int i = v7_index(row->bind, row->index);
@@ -939,7 +976,7 @@ void ui_controls_change(const char *bind, const int alt, const int index) {
     menu_show_window(7, 1);
     g_ctl.changer = i;
     g_ctl.changer_alt = !!alt;
-    set_cont_text(i, alt, "Press any Key"); // i18n settings.controls.press
+    set_cont_text(i, alt, I18N("settings.controls.press", "Press any Key"));
 }
 
 // window.unbindCont(bind, alt, index)
@@ -1282,7 +1319,7 @@ static void press_button(Client *client, const int code) {
         om_build_step_snap(bind_is(UI_CONTROL_OM_SNAP_UP, code) ? 1 : -1);
         object_manager_ui_snap_changed();
     }
-    if (held && held->kn_tool && bind_is(UI_CONTROL_OM_PROPS, code) && !om_build_props_key(client)) ui_notify("Nothing to edit at the crosshair");
+    if (held && held->kn_tool && bind_is(UI_CONTROL_OM_PROPS, code) && !om_build_props_key(client)) ui_notify(I18N("kn.om.nothingToEdit", "Nothing to edit at the crosshair"));
     for (int i = 0; i < 5; i++) { // v7.1.4 streak loadout: slots 0-2 (callInStreak); 3-4 are v3 leftovers
         if (bind_is(UI_CONTROL_STREAK0 + i, code)) {
             if (i < STREAK_SLOTS) combat_call_in_streak(client, i);

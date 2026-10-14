@@ -469,9 +469,15 @@ static void gen_home(StrBuf *sb) {
         if (*p != '"' && *p != '\'') tag[o++] = *p;
     tag[o] = 0;
     sb_append_esc(sb, tag);
-    sb_append(sb, "&quot;)'>[");
-    sb_append_esc(sb, a ? a->clan : "");
-    sb_appendf(sb, "] Clan Page</a><a style='float:right' href='javascript:;' onclick='windows[12].delReq()' class='menuLink'>%s</a></div>", leader ? "Delete" : "Leave");
+    sb_append(sb, "&quot;)'>");
+    StrBuf esc = {0};
+    sb_append_esc(&esc, a ? a->clan : "");
+    char *etag = sb_finish(&esc);
+    char page[160];
+    I18N_F(page, "windows.clans.page", "[{0}] Clan Page", etag);
+    free(etag);
+    sb_appendf(sb, "%s</a><a style='float:right' href='javascript:;' onclick='windows[12].delReq()' class='menuLink'>%s</a></div>", page,
+               leader ? I18N("generic.delete", "Delete") : I18N("generic.leave", "Leave"));
     sb_append(sb, "<div class='setBodH'><div class='settName'>Rank<span class='floatR'>0</span></div>");
     sb_appendf(sb, "<div class='settName'>Clan Discord<a style='float:right' href='javascript:;' onclick='windows[12].discordPop()' class='menuLink'>%s</a></div>",
                leader ? "Update Link" : "Link Here");
@@ -560,7 +566,7 @@ static void gen_requests(StrBuf *sb) {
         i++;
     }
     sb_append(sb, "</div>");
-    if (!i) sb_append(sb, "<div style='margin-top:10px;color:rgba(255,255,255,0.4)'>No Requests</div>");
+    if (!i) sb_appendf(sb, "<div style='margin-top:10px;color:rgba(255,255,255,0.4)'>%s</div>", I18N("windows.clans.requests.none", "No Requests"));
 }
 
 // ------------------------------------------------------------------ tab 4 (clan-settings)
@@ -569,26 +575,35 @@ static void gen_logo(StrBuf *sb) {
     const int logo = (int) jnum(g_clan, "clan_logo"), pending = (int) jnum(g_clan, "clan_logo_pending");
     char funds[32];
     comma(funds, sizeof(funds), jnum(g_clan, "clan_funds"));
-    sb_append(sb, "<div class=\"setHed\" style=\"margin-top:20px\">Clan Logo</div> <div class=\"logo-upload-container svelte-1w0uz1r\"><div class=\"io-card\"><div class=\"io-input-container svelte-1w0uz1r\">");
+    sb_appendf(sb, "<div class=\"setHed\" style=\"margin-top:20px\">%s</div> <div class=\"logo-upload-container svelte-1w0uz1r\"><div class=\"io-card\"><div class=\"io-input-container svelte-1w0uz1r\">",
+               I18N("windows.clans.settings.logo.title", "Clan Logo"));
     if (logo || pending) {
-        sb_append(sb, "<div class=\"logo-preview-section svelte-1w0uz1r\"><div class=\"label-row\"><span class=\"input-label\">Current Logo</span></div> <div class=\"logo-preview-container svelte-1w0uz1r\">");
+        sb_appendf(sb, "<div class=\"logo-preview-section svelte-1w0uz1r\"><div class=\"label-row\"><span class=\"input-label\">%s</span></div> <div class=\"logo-preview-container svelte-1w0uz1r\">",
+                   I18N("windows.clans.settings.logo.current", "Current Logo"));
         if (logo)
-            sb_appendf(sb, "<div class=\"logo-preview svelte-1w0uz1r\"><img alt=\"Clan logo\" class=\"logo-image svelte-1w0uz1r\" src=\"https://user-assets.krunker.io/clans/%d.png?v=%d\"> <div class=\"logo-status approved svelte-1w0uz1r\">Approved</div></div>", clan_id(), logo);
+            sb_appendf(sb, "<div class=\"logo-preview svelte-1w0uz1r\"><img alt=\"Clan logo\" class=\"logo-image svelte-1w0uz1r\" src=\"https://user-assets.krunker.io/clans/%d.png?v=%d\"> <div class=\"logo-status approved svelte-1w0uz1r\">%s</div></div>", clan_id(), logo,
+                       I18N("windows.clans.settings.logo.status.approved", "Approved"));
         if (pending)
-            sb_appendf(sb, "<div class=\"logo-preview svelte-1w0uz1r\"><img alt=\"Pending logo\" class=\"logo-image svelte-1w0uz1r\" src=\"https://user-assets.krunker.io/clans/%d_pending.png?v=%d\"> <div class=\"logo-status pending svelte-1w0uz1r\">Pending Approval</div></div>", clan_id(), pending);
+            sb_appendf(sb, "<div class=\"logo-preview svelte-1w0uz1r\"><img alt=\"Pending logo\" class=\"logo-image svelte-1w0uz1r\" src=\"https://user-assets.krunker.io/clans/%d_pending.png?v=%d\"> <div class=\"logo-status pending svelte-1w0uz1r\">%s</div></div>", clan_id(), pending,
+                       I18N("windows.clans.settings.logo.status.pending", "Pending Approval"));
         sb_append(sb, "</div></div> ");
     }
     if (!pending) {
         // KrunkNative: no file picker and no logo upload pipeline (clan_v10.c refuses POST /logo),
         // so the drop target is v10's disabled state
-        sb_appendf(sb, "<div class=\"logo-upload-section svelte-1w0uz1r\"><div class=\"label-row\"><span class=\"input-label\">Upload Logo</span></div> <div class=\"logo-upload-info svelte-1w0uz1r\"><p class=\"upload-requirements svelte-1w0uz1r\">Requirements: 512x512 PNG, max 256KB. Cost: 20,000 krunkies</p> <p class=\"clan-funds svelte-1w0uz1r\">Clan Funds: %s KR</p></div> "
-                       "<div class=\"file-drop-target svelte-145grbc disabled\" role=\"button\" tabindex=\"-1\" aria-label=\"Drop PNG file here\"><input type=\"file\" style=\"display: none;\" class=\"svelte-145grbc\" accept=\".png,image/png\"> <div class=\"file-drop-content svelte-145grbc\"><div class=\"file-empty-state svelte-145grbc\"><i class=\"material-icons add-icon svelte-145grbc\">add</i> <div class=\"drop-label svelte-145grbc\">Drop PNG file here</div> <div class=\"accepted-types svelte-145grbc\">.png, image/png</div> <div class=\"size-limit svelte-145grbc\">Max: 256KB</div></div></div></div></div> ",
-                   funds);
+        sb_appendf(sb, "<div class=\"logo-upload-section svelte-1w0uz1r\"><div class=\"label-row\"><span class=\"input-label\">%s</span></div> <div class=\"logo-upload-info svelte-1w0uz1r\"><p class=\"upload-requirements svelte-1w0uz1r\">%s</p> <p class=\"clan-funds svelte-1w0uz1r\">%s: %s KR</p></div> "
+                       "<div class=\"file-drop-target svelte-145grbc disabled\" role=\"button\" tabindex=\"-1\" aria-label=\"%s\"><input type=\"file\" style=\"display: none;\" class=\"svelte-145grbc\" accept=\".png,image/png\"> <div class=\"file-drop-content svelte-145grbc\"><div class=\"file-empty-state svelte-145grbc\"><i class=\"material-icons add-icon svelte-145grbc\">add</i> <div class=\"drop-label svelte-145grbc\">%s</div> <div class=\"accepted-types svelte-145grbc\">.png, image/png</div> <div class=\"size-limit svelte-145grbc\">Max: 256KB</div></div></div></div></div> ",
+                   I18N("windows.clans.settings.logo.upload.label", "Upload Logo"),
+                   I18N("windows.clans.settings.logo.upload.requirements", "Requirements: 512x512 PNG, max 256KB. Cost: 20,000 krunkies"),
+                   I18N("windows.clans.settings.logo.clan.funds", "Clan Funds"), funds,
+                   I18N("windows.clans.settings.logo.upload.drop", "Drop PNG file here"), I18N("windows.clans.settings.logo.upload.drop", "Drop PNG file here"));
     } else {
-        sb_append(sb, "<div class=\"pending-notice svelte-1w0uz1r\"><p class=\"svelte-1w0uz1r\">A logo is pending approval. Please wait for admin review before uploading a new one.</p></div> ");
+        sb_appendf(sb, "<div class=\"pending-notice svelte-1w0uz1r\"><p class=\"svelte-1w0uz1r\">%s</p></div> ",
+                   I18N("windows.clans.settings.logo.pending.notice", "A logo is pending approval. Please wait for admin review before uploading a new one."));
     }
     if (logo && !pending)
-        sb_appendf(sb, "<button class=\"io-button io-button--danger\" onclick=\"windows[12].logoRemove()\"%s>%s</button> ", S.logo_busy ? " disabled" : "", S.logo_busy ? "Removing..." : "Remove Logo");
+        sb_appendf(sb, "<button class=\"io-button io-button--danger\" onclick=\"windows[12].logoRemove()\"%s>%s</button> ", S.logo_busy ? " disabled" : "",
+                   S.logo_busy ? I18N("windows.clans.settings.logo.removing", "Removing...") : I18N("windows.clans.settings.logo.remove.button", "Remove Logo"));
     if (S.logo_err[0]) {
         sb_append(sb, "<div class=\"io-message error-message svelte-1w0uz1r\">Error: ");
         sb_append_esc(sb, S.logo_err);
@@ -883,11 +898,15 @@ char *clan_window_gen(void) {
     StrBuf sb = {0};
     const AccountInfo *a = account_get();
     if (!a) {
-        sb_append(&sb, "<div class='reqW login' onclick='showWindow(5)'><i class='material-icons reqWIcon'>clear</i><div class='reqWLvl'>LOGIN REQUIRED</div><div class='reqWTxt'>to create and join a clan!</div></div>");
+        sb_appendf(&sb, "<div class='reqW login' onclick='showWindow(5)'><i class='material-icons reqWIcon'>clear</i><div class='reqWLvl'>LOGIN REQUIRED</div><div class='reqWTxt'>%s</div></div>",
+                   I18N("windows.clans.login", "to create and join a clan!"));
         return sb_finish(&sb);
     }
     if (!a->clan[0]) {
-        sb_append(&sb, "<div class='setHed' style='margin-top:-5px'>Create Clan</div><input id='clanInp1' type='text' class='smlInput' maxlength='4' placeholder='Clan Name' /><a class='clanSubmitBtn' style='margin-left:20px' onclick='windows[12].sendReq(1)'>Create</a><div class='setHed'>Join Clan <a href='javascript:void(0)' onclick=\"window.openLeaderboards('clans')\" class='menuLink' style='float:right'>View Clans</a></div><input id='clanInp2' type='text' class='smlInput' maxlength='5' placeholder='Clan Name' /><a class='clanSubmitBtn' style='margin-left:20px' onclick='windows[12].sendReq(2)'>Submit</a><div id='clanErr' style='margin-top:10px'></div>");
+        const char *name = I18N("windows.clans.name", "Clan Name");
+        sb_appendf(&sb, "<div class='setHed' style='margin-top:-5px'>%s</div><input id='clanInp1' type='text' class='smlInput' maxlength='4' placeholder='%s' /><a class='clanSubmitBtn' style='margin-left:20px' onclick='windows[12].sendReq(1)'>%s</a><div class='setHed'>%s <a href='javascript:void(0)' onclick=\"window.openLeaderboards('clans')\" class='menuLink' style='float:right'>%s</a></div><input id='clanInp2' type='text' class='smlInput' maxlength='5' placeholder='%s' /><a class='clanSubmitBtn' style='margin-left:20px' onclick='windows[12].sendReq(2)'>%s</a><div id='clanErr' style='margin-top:10px'></div>",
+                   I18N("windows.clans.create", "Create Clan"), name, I18N("generic.create", "Create"), I18N("windows.clans.join", "Join Clan"),
+                   I18N("windows.clans.view", "View Clans"), name, I18N("generic.submit", "Submit"));
         return sb_finish(&sb);
     }
     if (!g_scenario) backend_social_send_text("[\"vcln\"]"); // OPEN_CLAN_TAB on every render
@@ -900,7 +919,7 @@ char *clan_window_gen(void) {
     }
     sb_append(&sb, "</div><div id='clanErr' style='margin-top:0px;color:rgba(0,0,0,0.5)'>");
     if (!g_clan) {
-        sb_append(&sb, "LOADING...</div>");
+        sb_appendf(&sb, "%s</div>", I18N("generic.loading", "LOADING..."));
         if (!g_req_sent && !g_scenario) {
             g_req_sent = 1;
             send_cln(3, NULL, NULL); // this.sendReq(3)
@@ -984,7 +1003,7 @@ static void send_req(const int action, const char *value) {
     HtmlElem e = html_dom_by_id("clanErr");
     if (e) {
         html_dom_set_style(e, "color", "rgba(0,0,0,0.6)");
-        html_dom_set_html(e, "LOADING...");
+        html_dom_set_html(e, I18N("generic.loading", "LOADING..."));
     }
     send_cln(action, value && value[0] ? cJSON_CreateString(value) : cJSON_CreateNumber(1), NULL);
 }
@@ -1438,8 +1457,10 @@ int clan_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, c
     } else if (!strcmp(m, "recruitRemoveConfirmed")) {
         recruit_remove();
     } else if (!strcmp(m, "logoRemove")) {
-        io_prompt("Remove Clan Logo", "Are you sure you want to remove the clan logo? This action cannot be undone.", "The logo will be permanently removed from your clan.",
-                  "Remove Logo", "windows[12].logoRemoveConfirmed()");
+        io_prompt(I18N("windows.clans.settings.logo.remove.title", "Remove Clan Logo"),
+                  I18N("windows.clans.settings.logo.remove.description", "Are you sure you want to remove the clan logo? This action cannot be undone."),
+                  I18N("windows.clans.settings.logo.remove.warning", "The logo will be permanently removed from your clan."),
+                  I18N("windows.clans.settings.logo.remove.confirm", "Remove Logo"), "windows[12].logoRemoveConfirmed()");
     } else if (!strcmp(m, "logoRemoveConfirmed")) {
         ui_loadout_clear_pops();
         char path[64];

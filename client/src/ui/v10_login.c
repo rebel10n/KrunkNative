@@ -104,56 +104,63 @@ static void append_value(StrBuf *sb, const char *v) {
 static void render_login(StrBuf *sb, const char *ident, const char *pass) {
     sb_append(sb, "<div class=\"io-card\"><form data-priority=\"true\"><div class=\"io-input-container svelte-16z1lxi\">");
     if (L.email) { // _39202
-        sb_append(sb, "<div class=\"label-row\"><label for=\"accEmail\" class=\"input-label\">Email</label> <button type=\"button\" "
-                      "class=\"auth-toggle-btn svelte-16z1lxi\" id=\"knV10LoginMode\" onclick=\"knV10LoginMode()\">(use username instead)</button></div> "
-                      "<input id=\"accEmail\" type=\"email\" class=\"io-input-field svelte-16z1lxi\" autocomplete=\"email\" placeholder=\"Enter Email\" "
-                      "onkeydown=\"knV10LoginKey()");
+        sb_appendf(sb, "<div class=\"label-row\"><label for=\"accEmail\" class=\"input-label\">%s</label> <button type=\"button\" "
+                       "class=\"auth-toggle-btn svelte-16z1lxi\" id=\"knV10LoginMode\" onclick=\"knV10LoginMode()\">%s</button></div> "
+                       "<input id=\"accEmail\" type=\"email\" class=\"io-input-field svelte-16z1lxi\" autocomplete=\"email\" placeholder=\"%s\" "
+                       "onkeydown=\"knV10LoginKey()",
+                   I18N("generic.email", "Email"), I18N("generic.auth.useUsername", "(use username instead)"), I18N("generic.auth.enterEmail", "Enter Email"));
         append_value(sb, ident);
     } else { // _39201 (+ _39200, the email suggestion)
-        sb_append(sb, "<div class=\"label-row\"><label for=\"accName\" class=\"input-label\">Username</label> <button type=\"button\" "
-                      "class=\"auth-toggle-btn svelte-16z1lxi\" id=\"knV10LoginMode\" onclick=\"knV10LoginMode()\">(use email instead)</button></div> "
-                      "<input id=\"accName\" type=\"text\" class=\"io-input-field svelte-16z1lxi\" autocomplete=\"username\" placeholder=\"Enter Username\" "
-                      "oninput=\"knV10LoginInput()\" onkeydown=\"knV10LoginKey()");
+        sb_appendf(sb, "<div class=\"label-row\"><label for=\"accName\" class=\"input-label\">%s</label> <button type=\"button\" "
+                       "class=\"auth-toggle-btn svelte-16z1lxi\" id=\"knV10LoginMode\" onclick=\"knV10LoginMode()\">%s</button></div> "
+                       "<input id=\"accName\" type=\"text\" class=\"io-input-field svelte-16z1lxi\" autocomplete=\"username\" placeholder=\"%s\" "
+                       "oninput=\"knV10LoginInput()\" onkeydown=\"knV10LoginKey()",
+                   I18N("generic.username", "Username"), I18N("generic.auth.useEmail", "(use email instead)"), I18N("generic.auth.enterUsername", "Enter Username"));
         append_value(sb, ident);
-        sb_appendf(sb, " <div class=\"email-suggestion svelte-16z1lxi\" id=\"knV10EmailHint\" style=\"display:%s\">Looks like you're using an email. "
-                       "<button type=\"button\" class=\"suggestion-link svelte-16z1lxi\" onclick=\"knV10LoginMode()\">Switch to email login</button> instead</div>",
-                   ident && strchr(ident, '@') ? "block" : "none");
+        sb_appendf(sb, " <div class=\"email-suggestion svelte-16z1lxi\" id=\"knV10EmailHint\" style=\"display:%s\">%s "
+                       "<button type=\"button\" class=\"suggestion-link svelte-16z1lxi\" onclick=\"knV10LoginMode()\">%s</button> %s</div>",
+                   ident && strchr(ident, '@') ? "block" : "none", I18N("generic.auth.emailSuggestion", "Looks like you're using an email."),
+                   I18N("generic.auth.switchToEmail", "Switch to email login"), I18N("generic.auth.emailSuggestionEnd", "instead"));
     }
     const int shown = pass_shown(pass);
     // _39203: the label row (display toggled in place by sync_pass, so typing keeps the field)
-    sb_appendf(sb, " <div class=\"label-row\" id=\"knV10PassRow\" style=\"margin-top:15px;display:%s\"><label for=\"accPass\" class=\"input-label\">Password</label> "
-                   "<button type=\"button\" class=\"auth-toggle-btn svelte-16z1lxi\" id=\"knV10Forgot\" onclick=\"knV10LoginForgot()\">Forgot Password?</button></div> "
-                   "<input id=\"accPass\" type=\"password\" autocomplete=\"current-password\" placeholder=\"Enter Password\" class=\"io-input-field %ssvelte-16z1lxi\" "
+    sb_appendf(sb, " <div class=\"label-row\" id=\"knV10PassRow\" style=\"margin-top:15px;display:%s\"><label for=\"accPass\" class=\"input-label\">%s</label> "
+                   "<button type=\"button\" class=\"auth-toggle-btn svelte-16z1lxi\" id=\"knV10Forgot\" onclick=\"knV10LoginForgot()\">%s</button></div> "
+                   "<input id=\"accPass\" type=\"password\" autocomplete=\"current-password\" placeholder=\"%s\" class=\"io-input-field %ssvelte-16z1lxi\" "
                    "oninput=\"knV10LoginInput()\" onkeydown=\"knV10LoginKey()",
-               shown ? "flex" : "none", shown ? "" : "hidden-password ");
+               shown ? "flex" : "none", I18N("generic.password", "Password"), I18N("generic.auth.forgotPassword", "Forgot Password?"), I18N("generic.auth.enterPassword", "Enter Password"),
+               shown ? "" : "hidden-password ");
     append_value(sb, pass);
-    sb_append(sb, " <button type=\"button\" class=\"io-button io-button--accept svelte-16z1lxi\" id=\"knV10LoginSubmit\" onclick=\"knV10LoginSubmit()\">Login</button>"
-                  "</div></form></div>");
+    sb_appendf(sb, " <button type=\"button\" class=\"io-button io-button--accept svelte-16z1lxi\" id=\"knV10LoginSubmit\" onclick=\"knV10LoginSubmit()\">%s</button>"
+                   "</div></form></div>", I18N("generic.login", "Login"));
 }
 
 // The register card (_39207): v10's Email field, then KrunkNative's Username and Password, the
 // news opt-in, Register and the terms line
 static void render_register(StrBuf *sb, const char *mail, const char *name, const char *pass) {
-    sb_append(sb, "<div class=\"io-card\"><form data-priority=\"true\"><div class=\"io-input-container svelte-16z1lxi\">"
-                  "<div class=\"label-row\"><label for=\"accEmail\" class=\"input-label\">Email</label></div> "
-                  "<input id=\"accEmail\" type=\"email\" class=\"io-input-field svelte-16z1lxi\" autocomplete=\"email\" placeholder=\"Enter Email\" "
-                  "onkeydown=\"knV10LoginKey()");
+    sb_appendf(sb, "<div class=\"io-card\"><form data-priority=\"true\"><div class=\"io-input-container svelte-16z1lxi\">"
+                   "<div class=\"label-row\"><label for=\"accEmail\" class=\"input-label\">%s</label></div> "
+                   "<input id=\"accEmail\" type=\"email\" class=\"io-input-field svelte-16z1lxi\" autocomplete=\"email\" placeholder=\"%s\" "
+                   "onkeydown=\"knV10LoginKey()", I18N("generic.email", "Email"), I18N("generic.auth.enterEmail", "Enter Email"));
     append_value(sb, mail);
-    sb_append(sb, " <div class=\"label-row\" style=\"margin-top:15px\"><label for=\"accName\" class=\"input-label\">Username</label></div> "
-                  "<input id=\"accName\" type=\"text\" class=\"io-input-field svelte-16z1lxi\" autocomplete=\"username\" placeholder=\"Enter Username\" "
-                  "onkeydown=\"knV10LoginKey()");
+    sb_appendf(sb, " <div class=\"label-row\" style=\"margin-top:15px\"><label for=\"accName\" class=\"input-label\">%s</label></div> "
+                   "<input id=\"accName\" type=\"text\" class=\"io-input-field svelte-16z1lxi\" autocomplete=\"username\" placeholder=\"%s\" "
+                   "onkeydown=\"knV10LoginKey()", I18N("generic.username", "Username"), I18N("generic.auth.enterUsername", "Enter Username"));
     append_value(sb, name);
-    sb_append(sb, " <div class=\"label-row\" style=\"margin-top:15px\"><label for=\"accPass\" class=\"input-label\">Password</label></div> "
-                  "<input id=\"accPass\" type=\"password\" class=\"io-input-field svelte-16z1lxi\" autocomplete=\"new-password\" placeholder=\"Enter Password\" "
-                  "onkeydown=\"knV10LoginKey()");
+    sb_appendf(sb, " <div class=\"label-row\" style=\"margin-top:15px\"><label for=\"accPass\" class=\"input-label\">%s</label></div> "
+                   "<input id=\"accPass\" type=\"password\" class=\"io-input-field svelte-16z1lxi\" autocomplete=\"new-password\" placeholder=\"%s\" "
+                   "onkeydown=\"knV10LoginKey()", I18N("generic.password", "Password"), I18N("generic.auth.enterPassword", "Enter Password"));
     append_value(sb, pass);
-    sb_append(sb, " <label class=\"promo-optin svelte-16z1lxi\"><input type=\"checkbox\" class=\"svelte-16z1lxi\"> "
-                  "<span>Send me news about events, updates and season releases</span></label> "
-                  "<button type=\"button\" class=\"io-button io-button--accept svelte-16z1lxi\" id=\"knV10LoginSubmit\" onclick=\"knV10LoginSubmit()\">Register</button> "
-                  "<div class=\"terms-privacy-notice svelte-16z1lxi\">By registering, you agree to our "
-                  "<a class=\"svelte-16z1lxi\" onclick=\"openURL('https://frvr.com/legal/krunker#TermsofService')\">Terms of Service</a> and "
-                  "<a class=\"svelte-16z1lxi\" onclick=\"openURL('https://frvr.com/legal/krunker#PrivacyPolicy')\">Privacy Policy</a></div>"
-                  "</div></form></div>");
+    sb_appendf(sb, " <label class=\"promo-optin svelte-16z1lxi\"><input type=\"checkbox\" class=\"svelte-16z1lxi\"> "
+                   "<span>%s</span></label> "
+                   "<button type=\"button\" class=\"io-button io-button--accept svelte-16z1lxi\" id=\"knV10LoginSubmit\" onclick=\"knV10LoginSubmit()\">%s</button> "
+                   "<div class=\"terms-privacy-notice svelte-16z1lxi\">%s "
+                   "<a class=\"svelte-16z1lxi\" onclick=\"openURL('https://frvr.com/legal/krunker#TermsofService')\">%s</a> %s "
+                   "<a class=\"svelte-16z1lxi\" onclick=\"openURL('https://frvr.com/legal/krunker#PrivacyPolicy')\">%s</a></div>"
+                   "</div></form></div>",
+               I18N("emailPrefs.register.optIn", "Send me news about events, updates and season releases"), I18N("generic.register", "Register"),
+               I18N("generic.auth.termsPrivacyNotice", "By registering, you agree to our"), I18N("generic.auth.terms", "Terms of Service"),
+               I18N("generic.auth.and", "and"), I18N("generic.auth.privacy", "Privacy Policy"));
 }
 
 // name / mail / pass: what the fields hold now (Svelte keeps its $state across a re-render)
@@ -163,22 +170,25 @@ static void render_with(const char *name, const char *mail, const char *pass) {
     StrBuf sb = {0};
     sb_append(&sb, "<div class=\"popup-container svelte-1wz7ymp\"><div class=\"popup svelte-1wz7ymp\" style=\"width: 800px;\" "
                    "onclick=\"knV10LoginStay()\"><div class=\"io-popup-container\"><div class=\"io-popup-header\">");
-    sb_append(&sb, L.recover ? "Recover Account" : L.reg ? "Create Account" : "Login to Krunker");
+    sb_append(&sb, L.recover ? I18N("generic.auth.recover", "Recover Account") : L.reg ? I18N("generic.register.header", "Create Account")
+                                                                                   : I18N("generic.login.header", "Login to Krunker"));
     sb_append(&sb, "</div> <div class=\"io-popup-content\">");
     if (!L.recover) {
         sb_appendf(&sb, "<div class=\"auth-actions svelte-16z1lxi\"><span class=\"svelte-16z1lxi\">%s</span> "
                         "<button type=\"button\" class=\"login-button svelte-16z1lxi\" id=\"knV10AuthSwitch\" onclick=\"knV10LoginSwitch()\">%s</button></div> ",
-                   L.reg ? "Already have an account?" : "New to Krunker?", L.reg ? "Login here" : "Register here");
+                   L.reg ? I18N("generic.auth.alreadyHaveAccount", "Already have an account?") : I18N("generic.auth.newToKrunker", "New to Krunker?"),
+                   L.reg ? I18N("generic.auth.loginHere", "Login here") : I18N("generic.auth.registerHere", "Register here"));
         if (L.reg) sb_append(&sb, "<div class=\"sign-up-bonuses svelte-16z1lxi\"><span class=\"svelte-16z1lxi\">Sign up bonuses</span> <div>"
                                   "<li class=\"svelte-16z1lxi\"><span class=\"svelte-16z1lxi\">14 Cosmetics</span></li> "
                                   "<li class=\"svelte-16z1lxi\"><span class=\"svelte-16z1lxi\">24h of premium account</span></li></div></div>");
     }
     if (L.recover) {
-        sb_append(&sb, "<div class=\"io-card\"><div class=\"io-input-container svelte-16z1lxi\"><div class=\"label-row\"><label for=\"recoveryEmail\" "
-                       "class=\"input-label\">Email</label></div> <input id=\"recoveryEmail\" type=\"email\" class=\"io-input-field svelte-16z1lxi\" "
-                       "autocomplete=\"email\" placeholder=\"Enter Email\" onkeydown=\"knV10LoginKey()\"> <button type=\"button\" "
-                       "class=\"io-button io-button--accept svelte-16z1lxi\" id=\"knV10RecoverSubmit\" onclick=\"knV10LoginRecover()\">Submit</button></div></div> "
-                       "<button type=\"button\" class=\"io-button\" id=\"knV10RecoverBack\" onclick=\"knV10LoginForgot()\">Back</button>");
+        sb_appendf(&sb, "<div class=\"io-card\"><div class=\"io-input-container svelte-16z1lxi\"><div class=\"label-row\"><label for=\"recoveryEmail\" "
+                        "class=\"input-label\">%s</label></div> <input id=\"recoveryEmail\" type=\"email\" class=\"io-input-field svelte-16z1lxi\" "
+                        "autocomplete=\"email\" placeholder=\"%s\" onkeydown=\"knV10LoginKey()\"> <button type=\"button\" "
+                        "class=\"io-button io-button--accept svelte-16z1lxi\" id=\"knV10RecoverSubmit\" onclick=\"knV10LoginRecover()\">%s</button></div></div> "
+                        "<button type=\"button\" class=\"io-button\" id=\"knV10RecoverBack\" onclick=\"knV10LoginForgot()\">%s</button>",
+                   I18N("generic.email", "Email"), I18N("generic.auth.enterEmail", "Enter Email"), I18N("generic.submit", "Submit"), I18N("generic.back", "Back"));
     } else if (L.reg) {
         render_register(&sb, mail, name, pass);
     } else {
@@ -218,8 +228,15 @@ static void close_modal(void) {
     if (host) html_dom_remove(host);
 }
 
+// the language changed while the popup is up: render it again in the new one (fields kept)
+static void on_locale(void *user) {
+    (void) user;
+    if (L.open && by_id("knV10Login")) render();
+}
+
 // loginOrRegister(defaultToRegister)
 static void open_modal(const int reg) {
+    i18n_on_change(on_locale, NULL);
     if (account_get()) { // signed in: showWindow(5)
         menu_show_window(5, 0);
         return;
@@ -267,17 +284,17 @@ static void submit(void) {
     while (*m == ' ') m++;
     if (L.reg) {
         if (!*m) { // the register card's own check (v10 _39207 submit)
-            message("Please enter your email to register.");
+            message(I18N("generic.auth.emailRequiredForRegister", "Please enter your email to register."));
             return;
         }
         if (!name[0] || !has_pass) {
-            message("Please fill in all fields"); // generic.auth.fillAllFields
+            message(I18N("generic.auth.fillAllFields", "Please fill in all fields"));
             return;
         }
     } else {
         const char *ident = L.email ? m : name;
         if (!ident[0]) {
-            message("Please fill in all fields");
+            message(I18N("generic.auth.fillAllFields", "Please fill in all fields"));
             return;
         }
         if (!has_pass) {
@@ -290,13 +307,13 @@ static void submit(void) {
                 if (p) html_dom_focus(p);
                 return;
             }
-            message("Please fill in all fields");
+            message(I18N("generic.auth.fillAllFields", "Please fill in all fields"));
             return;
         }
     }
     // account_ui.c reads #accName or #accEmail / #accPass (/ #accEmail) and answers in #accResp
     if (account_ui_handle(L.reg ? "registerAcc" : "loginAcc", NULL, NULL, 0) < 0)
-        message("Error"); // generic.error: no account service in this build
+        message(I18N("generic.error", "Error")); // no account service in this build
 }
 
 // The recover card's Submit: the Account window's reset steps, started with this address
@@ -306,7 +323,7 @@ static void recover(void) {
     if (!who[0]) {
         HtmlElem resp = by_id("accResp");
         if (resp) {
-            html_dom_set_text(resp, "Please fill in all fields");
+            html_dom_set_text(resp, I18N("generic.auth.fillAllFields", "Please fill in all fields"));
             html_dom_set_display(resp, "block");
         }
         return;

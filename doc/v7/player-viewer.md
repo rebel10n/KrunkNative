@@ -1489,7 +1489,7 @@ How to read the table:
 | Key | Label (en) | Type | Default | Range / options | Effect | v3 -> v7 | Scope | Krunker Box Office | Ref |
 |---|---|---|---|---|---|---|---|---|---|
 | `defaultRegion` | Default Region | select | regionCache | region list | region used by matchmaking/server list | SAME | [CLIENT] | present: servers_ui.c, ui_client_settings.c | v7 src/libs/settings.js:19; v3 src/libs/settings.js:35 |
-| `lang` | Language | select | browser locale | locale list | UI locale (i18n tables) | SAME | [CLIENT] | partial: stored only; KN UI is English-only | v7 src/libs/settings.js:37; v3 src/libs/settings.js:55 |
+| `lang` | Language | select | browser locale | locale list | UI locale (i18n tables) | SAME | [CLIENT] | done (v10 rule: `en` unless `krk_lang`; 17 tables, live switch: ui/i18n/README.md) | v7 src/libs/settings.js:37; v3 src/libs/settings.js:55 |
 
 #### `network`
 

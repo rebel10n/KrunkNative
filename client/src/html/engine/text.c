@@ -46,6 +46,7 @@
 #define TEXT_ATLAS_REBUILD_FILL 0.9f
 #define TEXT_MAX_FACES 48
 #define TEXT_FAMILY_MAX 64
+#define TEXT_MAX_FALLBACKS 16
 #define TEXT_EMBOLDEN_DIVISOR 24.0f   // Skia kOutlineEmboldenDivisor
 #define TEXT_DEFAULT_OBLIQUE_SKEW 0.2f
 #ifndef TEXT_DEFAULT_HINTING
@@ -98,8 +99,12 @@ struct TextSystem {
     char *ui_dir;
     TextFace faces[TEXT_MAX_FACES];
     int face_count;
-    TextFace *fallback[8];
+    TextFace *fallback[TEXT_MAX_FALLBACKS];
     int fallback_count;
+    // bundled script faces (text_add_bundled_scripts) by TEXT_SCRIPT_*, and the one the document
+    // language prefers (text_set_lang): consulted before the rest of the chain
+    TextFace *script_face[5];
+    TextFace *lang_face;
     TextFont **fonts;
     int font_count, font_cap;
 
@@ -248,10 +253,59 @@ static void text_add_bundled_symbols(TextSystem *ts) {
     char path[1024];
     const size_t n = strlen(ts->ui_dir);
     snprintf(path, sizeof path, "%s%scss/fonts/kn-symbols.ttf", ts->ui_dir, n && ts->ui_dir[n - 1] == '/' ? "" : "/");
-    if (ts->fallback_count < 8 && file_exists(path)) {
+    if (ts->fallback_count < TEXT_MAX_FALLBACKS && file_exists(path)) {
         TextFace *f = text_add_face(ts, "fallback-symbols", path, 400, TEXT_STYLE_NORMAL, 1);
         if (f) ts->fallback[ts->fallback_count++] = f;
     }
+}
+
+/* Bundled script faces (ui/css/fonts/kn-noto-*, ui/css/fonts/kn-noto-OFL.txt): Noto Sans CJK JP /
+ * SC / TC / KR and Noto Sans Devanagari, subset to what the shipped translations write in those
+ * scripts (tools/i18n-import/i18n_import.py fonts).  Chrome draws those languages from system fonts;
+ * these make every shipped language render on a machine without them (no tofu), at the weight
+ * Chrome picks (400).  Placed after the Latin fallback and before the system CJK font; per glyph
+ * only (never a generic family's primary face).  The document language (<html lang>, set by the
+ * Language setting) moves its face to the front: Han characters take that region's forms. */
+static int face_load(TextSystem *ts, TextFace *f);
+static TextFace *text_find_glyph(TextSystem *ts, TextFace *primary, uint32_t cp, uint32_t *gi);
+enum { TEXT_SCRIPT_JA, TEXT_SCRIPT_SC, TEXT_SCRIPT_TC, TEXT_SCRIPT_KO, TEXT_SCRIPT_DEVA, TEXT_SCRIPT_COUNT };
+static const char *const k_script_files[TEXT_SCRIPT_COUNT] = {
+    "kn-noto-cjk-jp.otf", "kn-noto-cjk-sc.otf", "kn-noto-cjk-tc.otf", "kn-noto-cjk-kr.otf", "kn-noto-devanagari.ttf",
+};
+static void text_add_bundled_scripts(TextSystem *ts) {
+    const size_t n = strlen(ts->ui_dir);
+    for (int i = 0; i < TEXT_SCRIPT_COUNT && ts->fallback_count < TEXT_MAX_FALLBACKS; i++) {
+        char path[1024];
+        snprintf(path, sizeof path, "%s%scss/fonts/%s", ts->ui_dir, n && ts->ui_dir[n - 1] == '/' ? "" : "/", k_script_files[i]);
+        if (!file_exists(path)) continue;
+        TextFace *f = text_add_face(ts, "fallback-script", path, 400, TEXT_STYLE_NORMAL, 1);
+        if (!f) continue;
+        ts->fallback[ts->fallback_count++] = f;
+        ts->script_face[i] = f;
+    }
+}
+
+int text_set_lang(TextSystem *ts, const char *lang) {
+    if (!ts) return 0;
+    int script = -1;
+    char l[16] = "";
+    for (size_t i = 0; lang && lang[i] && i + 1 < sizeof l; i++) l[i] = (char) tolower((unsigned char) lang[i]);
+    if (!strncmp(l, "ja", 2)) script = TEXT_SCRIPT_JA;
+    else if (!strncmp(l, "zh", 2))
+        script = strstr(l, "tw") || strstr(l, "hk") || strstr(l, "mo") || strstr(l, "hant") ? TEXT_SCRIPT_TC : TEXT_SCRIPT_SC;
+    else if (!strncmp(l, "ko", 2)) script = TEXT_SCRIPT_KO;
+    else if (!strncmp(l, "hi", 2) || !strncmp(l, "mr", 2) || !strncmp(l, "ne", 2)) script = TEXT_SCRIPT_DEVA;
+    TextFace *f = script >= 0 ? ts->script_face[script] : NULL;
+    if (f == ts->lang_face) return 0;
+    ts->lang_face = f; // advances are cached per face: nothing to drop, the caller re-lays out
+    return 1;
+}
+
+int text_font_has_glyph(TextFont *font, uint32_t cp) {
+    if (!font || !font->face || !face_load(font->ts, font->face)) return 0;
+    uint32_t gi = 0;
+    text_find_glyph(font->ts, font->face, cp, &gi);
+    return gi != 0;
 }
 
 static void text_add_fallbacks(TextSystem *ts) {
@@ -263,14 +317,17 @@ static void text_add_fallbacks(TextSystem *ts) {
         for (char *tok = copy; tok && *tok;) {
             char *sep = strpbrk(tok, ":;");
             if (sep) *sep = 0;
-            if (*tok && ts->fallback_count < 8 && file_exists(tok)) {
+            if (*tok && ts->fallback_count < TEXT_MAX_FALLBACKS && file_exists(tok)) {
                 TextFace *f = text_add_face(ts, "fallback", tok, 400, TEXT_STYLE_NORMAL, 1);
                 if (f) ts->fallback[ts->fallback_count++] = f;
             }
             tok = sep ? sep + 1 : NULL;
         }
         free(copy);
-        if (ts->fallback_count > bundled) return;
+        if (ts->fallback_count > bundled) {
+            text_add_bundled_scripts(ts);
+            return;
+        }
     }
     static const char *const latin[] = {
         "/usr/share/fonts/dejavu-sans-fonts/DejaVuSans.ttf",
@@ -297,8 +354,9 @@ static void text_add_fallbacks(TextSystem *ts) {
             break;
         }
     }
+    text_add_bundled_scripts(ts);
     for (size_t i = 0; i < sizeof cjk / sizeof *cjk; i++) {
-        if (file_exists(cjk[i])) {
+        if (file_exists(cjk[i]) && ts->fallback_count < TEXT_MAX_FALLBACKS) {
             TextFace *f = text_add_face(ts, "fallback-cjk", cjk[i], 400, TEXT_STYLE_NORMAL, 1);
             if (f) ts->fallback[ts->fallback_count++] = f;
             break;
@@ -318,7 +376,7 @@ static void text_add_fallbacks(TextSystem *ts) {
         "/System/Library/Fonts/Menlo.ttc",
         "C:\\Windows\\Fonts\\consola.ttf",
     };
-    for (size_t i = 0; i < sizeof mono / sizeof *mono && ts->fallback_count < 8; i++) {
+    for (size_t i = 0; i < sizeof mono / sizeof *mono && ts->fallback_count < TEXT_MAX_FALLBACKS; i++) {
         if (file_exists(mono[i])) {
             TextFace *f = text_add_face(ts, "fallback-mono", mono[i], 400, TEXT_STYLE_NORMAL, 1);
             if (f) ts->fallback[ts->fallback_count++] = f;
@@ -497,7 +555,8 @@ static TextFace *text_match_family(TextSystem *ts, const char *lower, int weight
 
 static TextFace *text_primary_fallback(TextSystem *ts) {
     for (int i = 0; i < ts->fallback_count; i++) {
-        if (!strcmp(ts->fallback[i]->family, "fallback-symbols") || !strcmp(ts->fallback[i]->family, "fallback-mono"))
+        if (!strcmp(ts->fallback[i]->family, "fallback-symbols") || !strcmp(ts->fallback[i]->family, "fallback-mono") ||
+            !strcmp(ts->fallback[i]->family, "fallback-script"))
             continue; /* per-glyph / `monospace` only */
         if (face_load(ts, ts->fallback[i])) return ts->fallback[i];
     }
@@ -734,14 +793,59 @@ static TextFace *text_find_glyph(TextSystem *ts, TextFace *primary, uint32_t cp,
         *gi = FT_Get_Char_Index(primary->ft, 0x20);
         if (*gi) return primary;
     }
+    if (ts->lang_face && ts->lang_face != primary && face_load(ts, ts->lang_face)) {
+        uint32_t g = FT_Get_Char_Index(ts->lang_face->ft, cp);
+        if (g) { *gi = g; return ts->lang_face; }
+    }
     for (int i = 0; i < ts->fallback_count; i++) {
         TextFace *fb = ts->fallback[i];
-        if (fb == primary || !face_load(ts, fb)) continue;
+        if (fb == primary || fb == ts->lang_face || !face_load(ts, fb)) continue;
         uint32_t g = FT_Get_Char_Index(fb->ft, cp);
         if (g) { *gi = g; return fb; }
     }
     *gi = 0;
     return primary;
+}
+
+// Devanagari without a shaper (no HarfBuzz): glyphs come out in logical order and marks overlay
+// the previous glyph (zero advance, negative bearing), which reads correctly except for the
+// pre-base vowel sign I (U+093F), drawn left of its consonant cluster.  It is moved there:
+// consonant (+ nukta) (+ virama + consonant)* + U+093F -> U+093F first, the cluster shifted right
+// by its advance.  Conjunct, half and reph forms (the font's GSUB) are not formed: a virama stays
+// visible (ui/i18n/README.md, "Gaps").
+static int deva_consonant(uint32_t cp) {
+    return (cp >= 0x0915 && cp <= 0x0939) || (cp >= 0x0958 && cp <= 0x095F) || (cp >= 0x0978 && cp <= 0x097F);
+}
+
+static uint32_t cp_at(const char *utf8, size_t len, size_t at) {
+    return at < len ? utf8_next(utf8, len, &at) : 0;
+}
+
+static void deva_reorder(const TextSystem *ts, const char *utf8, size_t len, Glyph *g, int n) {
+    for (int k = 1; k < n; k++) {
+        if (cp_at(utf8, len, g[k].cluster) != 0x093F) continue;
+        int j = k - 1;
+        if (cp_at(utf8, len, g[j].cluster) == 0x093C && j > 0) j--; // nukta
+        if (!deva_consonant(cp_at(utf8, len, g[j].cluster))) continue;
+        for (;;) { // virama + consonant (+ nukta) before it
+            int v = j - 1;
+            if (v >= 1 && cp_at(utf8, len, g[v].cluster) == 0x094D) {
+                int c = v - 1;
+                if (c >= 1 && cp_at(utf8, len, g[c].cluster) == 0x093C) c--;
+                if (deva_consonant(cp_at(utf8, len, g[c].cluster))) { j = c; continue; }
+            }
+            break;
+        }
+        Glyph m = g[k];
+        const float x0 = g[j].x, adv = m.advance;
+        memmove(&g[j + 1], &g[j], (size_t) (k - j) * sizeof(Glyph));
+        m.x = x0;
+        g[j] = m;
+        for (int t = j; t <= k; t++) {
+            if (t > j) g[t].x += adv;
+            g[t].phase = ts->subpixel ? text_phase(g[t].x) : 0;
+        }
+    }
 }
 
 int text_shape(TextFont *font, const char *utf8, size_t len, float letter_spacing,
@@ -804,6 +908,14 @@ int text_shape(TextFont *font, const char *utf8, size_t len, float letter_spacin
         prev_face = face;
     }
     if (total_advance) *total_advance = pen;
+    if (out && count <= max && count > 1) {
+        for (size_t b = 0; b + 1 < len; b++) { // U+093F = E0 A4 BF
+            if ((unsigned char) utf8[b] == 0xE0 && (unsigned char) utf8[b + 1] == 0xA4) {
+                deva_reorder(ts, utf8, len, out, count);
+                break;
+            }
+        }
+    }
     return count;
 }
 
@@ -815,15 +927,61 @@ float text_measure(TextFont *font, const char *utf8, size_t len, float letter_sp
 
 // ---- text-transform ----------------------------------------------------------
 
+// Simple (1:1) case mapping of the scripts the shipped translations use: Latin-1, Latin
+// Extended-A / Additional, Greek, Cyrillic (Polish, Turkish, Russian, Vietnamese-style text under
+// text-transform).  Locale-specific rules (Turkish dotted / dotless i) are not applied.
+static int in_pairs(uint32_t cp, uint32_t lo, uint32_t hi) { return cp >= lo && cp <= hi; }
+
+uint32_t text_case_upper(uint32_t cp) {
+    if (cp < 0x80) return cp >= 'a' && cp <= 'z' ? cp - 0x20 : cp;
+    if (cp >= 0xE0 && cp <= 0xFE && cp != 0xF7) return cp - 0x20;
+    if (cp == 0xFF) return 0x178;
+    if (cp == 0x131) return 'I';
+    if (cp == 0x17F) return 'S';
+    if ((in_pairs(cp, 0x100, 0x137) || in_pairs(cp, 0x14A, 0x177) || in_pairs(cp, 0x1E00, 0x1E95) ||
+         in_pairs(cp, 0x1EA0, 0x1EFF) || in_pairs(cp, 0x460, 0x481) || in_pairs(cp, 0x48A, 0x4BF) ||
+         in_pairs(cp, 0x4D0, 0x52F)) && (cp & 1)) return cp - 1;
+    if ((in_pairs(cp, 0x139, 0x148) || in_pairs(cp, 0x179, 0x17E) || in_pairs(cp, 0x1CD, 0x1DC) ||
+         in_pairs(cp, 0x4C1, 0x4CE)) && !(cp & 1)) return cp - 1;
+    if (cp == 0x4CF) return 0x4C0;
+    if (cp >= 0x430 && cp <= 0x44F) return cp - 0x20;
+    if (cp >= 0x450 && cp <= 0x45F) return cp - 0x50;
+    if (cp == 0x3C2) return 0x3A3;
+    if (cp >= 0x3B1 && cp <= 0x3CB) return cp - 0x20;
+    if (cp == 0x3AC) return 0x386;
+    if (cp >= 0x3AD && cp <= 0x3AF) return cp - 0x25;
+    if (cp == 0x3CC) return 0x38C;
+    if (cp == 0x3CD || cp == 0x3CE) return cp - 0x3F;
+    return cp;
+}
+
+uint32_t text_case_lower(uint32_t cp) {
+    if (cp < 0x80) return cp >= 'A' && cp <= 'Z' ? cp + 0x20 : cp;
+    if (cp >= 0xC0 && cp <= 0xDE && cp != 0xD7) return cp + 0x20;
+    if (cp == 0x178) return 0xFF;
+    if (cp == 0x130) return 'i';
+    if ((in_pairs(cp, 0x100, 0x137) || in_pairs(cp, 0x14A, 0x177) || in_pairs(cp, 0x1E00, 0x1E95) ||
+         in_pairs(cp, 0x1EA0, 0x1EFF) || in_pairs(cp, 0x460, 0x481) || in_pairs(cp, 0x48A, 0x4BF) ||
+         in_pairs(cp, 0x4D0, 0x52F)) && !(cp & 1)) return cp + 1;
+    if ((in_pairs(cp, 0x139, 0x148) || in_pairs(cp, 0x179, 0x17E) || in_pairs(cp, 0x1CD, 0x1DC) ||
+         in_pairs(cp, 0x4C1, 0x4CE)) && (cp & 1)) return cp + 1;
+    if (cp == 0x4C0) return 0x4CF;
+    if (cp >= 0x410 && cp <= 0x42F) return cp + 0x20;
+    if (cp >= 0x400 && cp <= 0x40F) return cp + 0x50;
+    if (cp >= 0x391 && cp <= 0x3AB && cp != 0x3A2) return cp + 0x20;
+    if (cp == 0x386) return 0x3AC;
+    if (cp >= 0x388 && cp <= 0x38A) return cp + 0x25;
+    if (cp == 0x38C) return 0x3CC;
+    if (cp == 0x38E || cp == 0x38F) return cp + 0x3F;
+    return cp;
+}
+
 size_t text_uppercase(const char *utf8, size_t len, char *out, size_t cap) {
     size_t i = 0, o = 0;
     while (i < len) {
         size_t before = i;
         uint32_t cp = utf8_next(utf8, len, &i);
-        if (cp >= 'a' && cp <= 'z') cp -= 0x20;
-        else if (cp >= 0xE0 && cp <= 0xFE && cp != 0xF7) cp -= 0x20;
-        else if (cp == 0xFF) cp = 0x178;
-        else if (cp == 0xDF) {
+        if (cp == 0xDF) {
             if (o + 2 > cap) break;
             out[o++] = 'S';
             out[o++] = 'S';
@@ -835,6 +993,7 @@ size_t text_uppercase(const char *utf8, size_t len, char *out, size_t cap) {
             o += i - before;
             continue;
         }
+        cp = text_case_upper(cp);
         size_t n = utf8_put(cp, out + o, cap - o);
         if (!n) break;
         o += n;

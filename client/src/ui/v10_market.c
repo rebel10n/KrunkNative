@@ -275,8 +275,14 @@ static void thumb(char *out, const size_t n, const ViewerSkin *s) {
     html_dom_asset_url(path, out, n);
 }
 
+// their i18n keys (v10 iîìiîíí, game.deob.js:24551): i18n.get(key) is the label
+static const char *const k_type_key[19] = {
+    NULL, "social.market.hat", "social.market.body", "social.market.melee", "social.market.spray", "social.market.dye", "social.market.waist", "social.market.face", "social.market.shoe", "social.market.pet",
+    "social.market.collectible", "social.market.wrist", "social.market.charm", "social.market.ticket", "social.market.back", "social.market.head", "social.market.playerCard", "social.market.emoji", "social.market.paint",
+};
+
 static const char *type_label(const ViewerSkin *s) {
-    if (s->type >= 1 && s->type <= 18) return k_type_label[s->type];
+    if (s->type >= 1 && s->type <= 18) return i18n_tr(k_type_key[s->type], k_type_label[s->type]);
     const Weapon *w = s->weapon >= 1 ? rules_weapon(s->weapon - 1) : NULL;
     return w && w->name ? w->name : "";
 }
@@ -3400,8 +3406,15 @@ static void menu_sync(void *user) {
     g_menu_timer = html_timer_add(500, menu_sync, NULL);
 }
 
+// the language changed: the open Market shows its item type labels (social.market.*) in it
+static void market_on_locale(void *user) {
+    (void) user;
+    if (is_open()) render();
+}
+
 void v10_market_menu_setup(void) {
     if (!M.listening) M.listening = backend_social_listen(on_social, NULL);
+    i18n_on_change(market_on_locale, NULL); // registered once (i18n_on_change ignores repeats)
     if (g_menu_timer) html_timer_cancel(g_menu_timer);
     g_menu_timer = 0;
     if (!el("menuBtnMarket")) return; // not the v10 page
