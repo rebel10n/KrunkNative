@@ -504,6 +504,7 @@ int  object_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlA
 char *object_manager_window_gen(int id, const char **header); // NULL for other ids
 int  object_manager_events_handle(Client*, int type, const void *payload, uint16_t length); // packets 251-253
 void object_manager_ui_reset(void);              // a new server (INIT): its caps are unknown again
+void object_manager_ui_rights_changed(void);     // the server pushed new rights (live sign-in): caps asked again
 void object_manager_ui_tick(Client*);            // per frame: me->build_free from the caps (asks once with a Build Tool)
 void object_manager_ui_pick_weapon(int weapon_id, int drop); // a Weapons-tab left (add / take out) or right (drop) click
 void object_manager_ui_pick_tool(int tool);      // a Tools-pane pick: the Tool Gun's tool, the Tool Gun in hand

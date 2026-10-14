@@ -38,5 +38,19 @@ const char *online_default_account_url(void);
 void online_mode_on_challenge(void *client, const void *challenge); // Client *, NetAuthChallengePacket *
 // A new connection's challenge arrived (called by online_mode_on_challenge): drops the old join.
 void online_mode_on_connect(void);
-// Per frame: header bar in offline mode.
+// Per frame: header bar in offline mode; the live sign-in below.
 void online_mode_tick(void *client);
+
+// Live sign-in (KrunkNative, shared/include/net_ext.h NET_EXT_KN_ACCOUNT_AUTH): signing in,
+// switching accounts or signing out in the menu re-verifies the live connection instead of a rejoin,
+// once this connection's server pushed NET_EXT_KN_ACCOUNT_RIGHTS (it takes them). The identity
+// goes the way the JOIN's would: the session token only to a brain-handed lobby, else the
+// hasJoined handshake on an online_mode server (the challenge's server nonce, a fresh client nonce).
+// NET_EXT_KN_ACCOUNT_RIGHTS body (game_events.c, main thread): the server's view of us.
+void online_mode_on_rights(void *client, const void *body, unsigned length); // Client *
+// 1 when this connection's server takes live sign-ins (servers_ui.c keeps its rejoin otherwise).
+int online_mode_live_ok(const void *client);
+// The connection's rights as the server last said (NET_RIGHTS_*), 0 unknown / none.
+unsigned online_mode_server_rights(void);
+// The session ended (main thread, menu_ui.c): its server's answers are void.
+void online_mode_session_ended(void);

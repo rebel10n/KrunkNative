@@ -40,6 +40,7 @@
 #include "../viewer/viewer_store.h" // the class box: a loadout weapon's skin name, rarity, thumbnail
 #include <app_mode.h> // the game page owns the pointer lock (not the hub / editor / viewer)
 #include <pointer_lock.h> // "should the pointer be locked" (client/src/pointer_lock.c)
+#include <online_mode.h> // live sign-in: the session's rights end with it
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -1239,6 +1240,7 @@ static void menu_poll_connection(Client *client) {
         client->net_connected = 1;
     } else if (status == NET_STATUS_FAILED) {
         client->net_connected = 0;
+        online_mode_session_ended(); // its rights and live sign-ins went with it
 
         if (!client->offline) {
             // The session is gone: drop its players (the next INIT starts fresh) so the

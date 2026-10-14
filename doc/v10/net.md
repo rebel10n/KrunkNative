@@ -250,6 +250,8 @@ to peers whose HELLO announced 1.4, receivers ignore subtypes they don't know. S
 | 0x0600 | `NET_EXT_JOINED_RANK` | `joinedRank` | C to S |
 | 0x0700.. | `NET_EXT_BLOCK_PROTOCOL` | (KN: ruleset / version toggle) | both |
 | 0x8000.. | `NET_EXT_BLOCK_KN` | (KrunkNative-only) | both |
+| 0x8000 | `NET_EXT_KN_ACCOUNT_AUTH` | (KN live sign-in: session token / hasJoined / guest) | C to S |
+| 0x8001 | `NET_EXT_KN_ACCOUNT_RIGHTS` | (KN: account and rights, push + answer) | S to C |
 
 Each range belongs to the feature that implements it; body layouts are documented next to their
 structs. `cc` / `ccr` (CHEAT_CHECK, server-sent JS eval) are not ported and have no subtype.

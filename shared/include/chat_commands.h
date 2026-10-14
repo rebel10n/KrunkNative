@@ -105,6 +105,12 @@ void chat_command_premium_action(ChatCommandHost*, int sender_id, int index);
 // (io_tp: CHAT_PERM_DEV_CHEAT, io_cycle: CHAT_PERM_DEV): 1 = allowed, else the sender got
 // the notify. label names the action in the denial log.
 int chat_command_allowed(ChatCommandHost*, int sender_id, ChatCommandPerm, const char *label);
+// KrunkNative live sign-out / account switch (server/src/accounts.c): connection `uid` no longer has
+// the rights its cheats needed (dev: still a DEV peer, premium_host: still the custom host). Turns
+// off, on the Player and in the keep, the ones it may no longer run (CHAT_PERM_DEV_CHEAT without
+// dev, CHAT_PERM_CHEAT without dev or the host; nothing on an open-cheats server) and tells the
+// client as the commands would. Returns the PLAYER_KEEP_* bits turned off.
+unsigned int chat_command_revoke_cheats(ChatCommandHost*, int uid, Player*, PlayerKeep*, int dev, int premium_host);
 // KrunkNative third-person camera (doc/v7/decisions.md "Third person"): may this sender use it?
 // Allowed in the offline sandbox, for DEV peers, the custom game's host, everyone in a custom game
 // whose host set knTPCam, and on a server whose owner opened the cheats (perms off, cheats "all");

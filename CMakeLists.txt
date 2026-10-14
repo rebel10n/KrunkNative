@@ -888,7 +888,7 @@ else ()
     # backend_online_test: online mode's defaults (the public finder / account service, never
     # localhost) and the native brain transport over loopback (client/src/net/online_mode.c,
     # backend_common.c, backend_native.c; on Windows backend_winhttp.c, which CI runs there too)
-    add_executable(backend_online_test client/tests/backend_online_test.c client/src/net/online_mode.c
+    add_executable(backend_online_test client/tests/backend_online_test.c client/src/net/online_mode.c shared/src/net_ext.c
                    client/src/net/backend_common.c client/src/net/backend_native.c client/src/net/backend_winhttp.c
                    client/src/net/http_conn.c client/src/net/http_proxy.c)
     target_include_directories(backend_online_test PRIVATE client/include shared/include)

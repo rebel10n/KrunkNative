@@ -3180,15 +3180,19 @@ void servers_ui_tick(Client *client) {
         snprintf(path, sizeof(path), "/mm/game-info?game=%s", enc);
         backend_http_get(path, on_game_info, NULL);
     }
-    // the account changed while sitting in the menu of a lobby: rejoin it so the game
-    // server attaches (or drops) the account (v3.1.1 logs in on the game socket itself)
+    // the account changed while sitting in the menu of a lobby. A server that takes live sign-ins
+    // (it pushed NET_EXT_KN_ACCOUNT_RIGHTS on this connection) re-verifies the connection in place
+    // (online_mode.c, like v3.1.1 logging in on the game socket itself); an older one is rejoined
+    // so it attaches (or drops) the account
     static int last_account = -1;
     const AccountInfo *acc = account_get();
     const int account_id = acc ? acc->id : 0;
     if (last_account < 0) last_account = account_id;
     if (account_id != last_account) {
         last_account = account_id;
-        if (account_id && g_account_game[0] && g_pin == PIN_NONE && !client->in_game && !g_seek_inflight) {
+        if (online_mode_live_ok(client)) {
+            printf("[mm] account changed: the server re-verifies this connection (no rejoin)\n");
+        } else if (account_id && g_account_game[0] && g_pin == PIN_NONE && !client->in_game && !g_seek_inflight) {
             // logged in after the matchmaker turned a guest away (AccountRequired): join that lobby now
             char id[sizeof(g_account_game)];
             snprintf(id, sizeof(id), "%s", g_account_game);

@@ -3,6 +3,9 @@
 #include <shared.h>
 #include <online_mode.h>
 #include <auth_join.h>
+#include <net_ext.h> // NET_EXT_KN_ACCOUNT_AUTH / _RIGHTS: live sign-in
+#include <i18n.h>
+#include <ui_logic.h> // ui_notify, object_manager_ui_rights_changed
 #include <backend.h>
 #include <backend_ui.h>
 #include <html_dom.h>
@@ -157,6 +160,8 @@ static void on_join_done(void *user, const int status, const char *body, const s
     send_hj_join(g_client);
 }
 
+static void live_note_challenge(const NetAuthChallengePacket *ch);
+
 void online_mode_on_challenge(void *client_ptr, const void *challenge_in) {
     Client *client = client_ptr;
     NetAuthChallengePacket ch;
@@ -166,6 +171,7 @@ void online_mode_on_challenge(void *client_ptr, const void *challenge_in) {
     ch.auth_url[sizeof(ch.auth_url) - 1] = 0;
     g_client = client;
     online_mode_on_connect(); // one challenge per connection: late replies of the previous one are dropped
+    live_note_challenge(&ch); // a sign-in later in the session answers the same challenge
     if (!ch.online_mode) return; // offline_mode server: the guest JOIN already sent is all it needs
     const AccountInfo *acc = account_get();
     char saved[8] = "";
@@ -209,6 +215,8 @@ void online_mode_on_challenge(void *client_ptr, const void *challenge_in) {
     free(text);
 }
 
+static void live_tick(Client *client);
+
 void online_mode_tick(void *client) {
     if (g_join.has_deferred && (account_get() || glfwGetTime() - g_join.deferred_at > DEFER_SECONDS)) {
         NetAuthChallengePacket ch = g_join.deferred;
@@ -218,6 +226,7 @@ void online_mode_tick(void *client) {
         g_join.no_defer = 0;
         return;
     }
+    live_tick(client);
     if (g_online) return;
     // offline: no account, so the Login / Register bar becomes the mode notice (once)
     static int done;
@@ -228,4 +237,224 @@ void online_mode_tick(void *client) {
     html_dom_set_html(bar, "<div class=\"button buttonP lgn\" style=\"width:300px;margin-right:0px;padding-top:3px;padding-bottom:15px;\" "
                            "onmouseenter=\"playTick()\" onclick=\"showWindow(1)\" title=\"Settings > Client > Account Mode\">Offline Mode <span class=\"material-icons\" "
                            "style=\"vertical-align:bottom;color:#fff;font-size:30px;margin-bottom:-1px;\">cloud_off</span></div>");
+}
+
+// ------------------------------------------------------------------ live sign-in
+// The server's NET_EXT_KN_ACCOUNT_RIGHTS says who we are on this connection and that it takes live
+// sign-ins. Whenever the menu's identity (a session token, or a guest) differs from the one the
+// server has, it goes out once as NET_EXT_KN_ACCOUNT_AUTH; an identity the server did not take
+// (refused, not verifiable, no answer) is not sent again on this connection.
+
+#define LIVE_GUEST "guest"
+#define LIVE_ANSWER_WAIT 15.0 // s: the server answers within its own 10 s auth timeout
+#define LIVE_BUSY_RETRY 5.0   // s after a BUSY answer (rate limit, a verification running)
+#define LIVE_DOWN_RETRY 30.0  // s after UNAVAILABLE (the server's account service link is down)
+
+static struct {
+    int have;                // a RIGHTS of connection conn_id came: this server takes live sign-ins
+    int conn_id;             // NetInitPacket.client_id of that connection
+    unsigned rights, kinds;  // NET_RIGHTS_*, NET_ACCOUNT_LIVE_*
+    int account_id;          // the server's account for us, 0 guest
+    char synced[72];         // the identity the server has: LIVE_GUEST or the token it verified ("?" unknown)
+    char attempt[72];        // the last identity it did not take: never again on this connection
+    char pending_key[72];    // the identity in flight
+    char notified[72];       // the identity whose failure was shown (one toast each)
+    int pending;
+    double pending_at, retry_at;
+    uint8_t seq;
+    unsigned generation;     // /auth/join answers of an older attempt or connection are dropped
+    char server_nonce[sizeof(((NetAuthChallengePacket *) 0)->server_nonce)];
+    char public_key[sizeof(((NetAuthChallengePacket *) 0)->public_key)];
+    int nonce_ok;            // the connection's challenge named an online_mode server nonce
+    char hj_nonce[AUTH_JOIN_NONCE_LEN + 1];
+    char hj_name[32];
+} g_live;
+
+static void live_note_challenge(const NetAuthChallengePacket *ch) {
+    g_live.nonce_ok = ch->online_mode && kn_auth_is_hex(ch->server_nonce, AUTH_JOIN_NONCE_LEN);
+    snprintf(g_live.server_nonce, sizeof(g_live.server_nonce), "%s", ch->server_nonce);
+    snprintf(g_live.public_key, sizeof(g_live.public_key), "%s", ch->public_key);
+}
+
+void online_mode_session_ended(void) {
+    g_live.have = 0;
+    g_live.pending = 0;
+    g_live.rights = 0;
+    g_live.account_id = 0;
+    g_live.nonce_ok = 0;
+    g_live.generation++;
+}
+
+int online_mode_live_ok(const void *client_ptr) {
+    const Client *client = client_ptr;
+    return client && g_live.have && client->net_connected && !client->offline && g_live.conn_id == client->net_client_id;
+}
+
+unsigned online_mode_server_rights(void) { return g_live.have ? g_live.rights : 0; }
+
+// the identity the menu has now: the session token while signed in (online mode), else a guest
+static const char *live_desired(void) {
+    const char *token = account_session_token();
+    return g_online && account_get() && token && token[0] ? token : LIVE_GUEST;
+}
+
+static void live_send_auth(Client *client, const int kind, const char *name, const char *key) {
+    NetAccountAuthPacket req;
+    memset(&req, 0, sizeof(req));
+    req.kind = (uint8_t) kind;
+    req.seq = g_live.seq;
+    snprintf(req.name, sizeof(req.name), "%s", name ? name : "");
+    snprintf(req.key, sizeof(req.key), "%s", key ? key : "");
+    uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(req)];
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_ACCOUNT_AUTH, &req, sizeof(req));
+    if (n) client_net_send(client, (NetPacketType) NET_PACKET_EXT, buf, n);
+}
+
+static void on_live_join_done(void *user, const int status, const char *body, const size_t length) {
+    (void) length;
+    if ((unsigned) (uintptr_t) user != g_live.generation || !g_client || !g_live.pending) return; // another attempt / connection
+    if (status != 200) {
+        cJSON *res = cJSON_Parse(body);
+        const char *err = cJSON_GetStringValue(cJSON_GetObjectItem(res, "error"));
+        fprintf(stderr, "[auth] /auth/join failed (%d): %s\n", status, err ? err : status ? "error" : "account service unreachable");
+        cJSON_Delete(res);
+        // the server's hasJoined fails and changes nothing; it answers REFUSED
+    }
+    char key[sizeof(AUTH_JOIN_KEY_PREFIX) + AUTH_JOIN_NONCE_LEN];
+    snprintf(key, sizeof(key), AUTH_JOIN_KEY_PREFIX "%s", g_live.hj_nonce);
+    live_send_auth(g_client, NET_ACCOUNT_AUTH_HAS_JOINED, g_live.hj_name, key);
+}
+
+static void live_start(Client *client, const char *want, const double now) {
+    const int guest = !strcmp(want, LIVE_GUEST);
+    int kind = NET_ACCOUNT_AUTH_GUEST;
+    if (!guest) {
+        // as the JOIN: the token only to a lobby the brain handed out (net_join.c), hasJoined elsewhere
+        if (servers_ui_brain_mode() && (g_live.kinds & NET_ACCOUNT_LIVE_SESSION)) kind = NET_ACCOUNT_AUTH_SESSION;
+        else if ((g_live.kinds & NET_ACCOUNT_LIVE_HAS_JOINED) && g_live.nonce_ok) kind = NET_ACCOUNT_AUTH_HAS_JOINED;
+        else {
+            snprintf(g_live.attempt, sizeof(g_live.attempt), "%s", want);
+            printf("[auth] signed in; this server cannot verify accounts mid-session: playing on as before\n");
+            return;
+        }
+    }
+    if (!++g_live.seq) g_live.seq = 1; // 0 is a push's
+    g_live.pending = 1;
+    g_live.pending_at = now;
+    snprintf(g_live.pending_key, sizeof(g_live.pending_key), "%s", want);
+    g_client = client;
+    if (kind == NET_ACCOUNT_AUTH_GUEST) {
+        printf("[auth] signed out: back to a guest on this connection\n");
+        live_send_auth(client, kind, NULL, NULL);
+        return;
+    }
+    const AccountInfo *acc = account_get();
+    if (kind == NET_ACCOUNT_AUTH_SESSION) {
+        printf("[auth] signed in as %s: verifying it on this connection (session)\n", acc ? acc->name : "?");
+        live_send_auth(client, kind, NULL, want);
+        return;
+    }
+    // hasJoined: POST <account service>/auth/join {token, serverHash}, then the "hj1:" (online_mode_on_challenge)
+    snprintf(g_live.hj_name, sizeof(g_live.hj_name), "%s", acc ? acc->name : "");
+    random_nonce(g_live.hj_nonce);
+    char hash[AUTH_SERVER_HASH_LEN + 1];
+    kn_server_hash(g_live.server_nonce, g_live.public_key, g_live.hj_nonce, hash);
+    cJSON *body = cJSON_CreateObject();
+    cJSON_AddStringToObject(body, "token", want);
+    cJSON_AddStringToObject(body, "serverHash", hash);
+    char *text = cJSON_PrintUnformatted(body);
+    cJSON_Delete(body);
+    char url[320];
+    snprintf(url, sizeof(url), "%s/auth/join", backend_url());
+    printf("[auth] signed in as %s: verifying it on this connection (hasJoined %.12s...)\n", g_live.hj_name, hash);
+    g_live.generation++;
+    if (!text || !backend_http_request("POST", url, text, on_live_join_done, (void *) (uintptr_t) g_live.generation)) {
+        fprintf(stderr, "[auth] could not reach %s\n", url);
+        on_live_join_done((void *) (uintptr_t) g_live.generation, 0, NULL, 0);
+    }
+    free(text);
+}
+
+static void live_tick(Client *client) {
+    if (!online_mode_live_ok(client)) return;
+    const double now = glfwGetTime();
+    if (g_live.pending) {
+        if (now - g_live.pending_at < LIVE_ANSWER_WAIT) return;
+        g_live.pending = 0; // no answer: this identity is not sent again
+        snprintf(g_live.attempt, sizeof(g_live.attempt), "%s", g_live.pending_key);
+        fprintf(stderr, "[auth] the server did not answer the sign-in\n");
+    }
+    if (now < g_live.retry_at) return;
+    const char *want = live_desired();
+    if (!strcmp(want, g_live.synced) || !strcmp(want, g_live.attempt)) return;
+    live_start(client, want, now);
+}
+
+static void live_rights_text(const unsigned rights, char *out, const size_t size) {
+    static const char *const names[] = {"dev", "host", "op", "mod"}; // NET_RIGHTS_* bit order
+    size_t len = 0;
+    out[0] = 0;
+    for (unsigned i = 0; i < 4; i++)
+        if (rights & (1u << i)) len += (size_t) snprintf(out + len, len < size ? size - len : 0, "%s%s", len ? "+" : "", names[i]);
+    if (!len) snprintf(out, size, "none");
+}
+
+void online_mode_on_rights(void *client_ptr, const void *body, const unsigned length) {
+    Client *client = client_ptr;
+    if (!client || !body || length < 4) return;
+    NetAccountRightsPacket r;
+    memset(&r, 0, sizeof(r));
+    memcpy(&r, body, length < sizeof(r) ? length : sizeof(r));
+    r.name[sizeof(r.name) - 1] = 0;
+    r.message[sizeof(r.message) - 1] = 0;
+    const int first = !g_live.have || g_live.conn_id != r.conn_id;
+    const unsigned old_rights = first ? 0u : g_live.rights;
+    const int old_account = first ? 0 : g_live.account_id;
+    const int answer = !first && g_live.pending && r.seq == g_live.seq && r.status != NET_ACCOUNT_RIGHTS_STATE;
+    g_live.have = 1;
+    g_live.conn_id = r.conn_id;
+    g_live.kinds = r.live_kinds;
+    if (first) {
+        g_live.pending = 0;
+        g_live.attempt[0] = 0;
+        g_live.notified[0] = 0;
+        g_live.retry_at = 0.0;
+        // the join's identity: the menu's token when the server has an account for us
+        const char *want = live_desired();
+        snprintf(g_live.synced, sizeof(g_live.synced), "%s", !r.account_id ? LIVE_GUEST : strcmp(want, LIVE_GUEST) ? want : "?");
+    } else if (r.status == NET_ACCOUNT_RIGHTS_STATE && !r.account_id) {
+        snprintf(g_live.synced, sizeof(g_live.synced), "%s", LIVE_GUEST);
+    }
+    if (answer) {
+        g_live.pending = 0;
+        if (r.status == NET_ACCOUNT_RIGHTS_OK) {
+            snprintf(g_live.synced, sizeof(g_live.synced), "%s", g_live.pending_key);
+            g_live.attempt[0] = 0;
+        } else if (r.status == NET_ACCOUNT_RIGHTS_BUSY || r.status == NET_ACCOUNT_RIGHTS_UNAVAILABLE) {
+            // throttled / a verification running, or the server's account service is out of reach: later
+            const double wait = r.status == NET_ACCOUNT_RIGHTS_BUSY ? LIVE_BUSY_RETRY : LIVE_DOWN_RETRY;
+            g_live.retry_at = glfwGetTime() + wait;
+            printf("[auth] the server could not take the sign-in now (%s): again in %.0f s\n", r.message, wait);
+        } else {
+            snprintf(g_live.attempt, sizeof(g_live.attempt), "%s", g_live.pending_key);
+            printf("[auth] the server did not take the sign-in: %s\n", r.message[0] ? r.message : "refused");
+        }
+        if (r.status != NET_ACCOUNT_RIGHTS_OK && r.status != NET_ACCOUNT_RIGHTS_BUSY && strcmp(g_live.notified, g_live.pending_key)) {
+            snprintf(g_live.notified, sizeof(g_live.notified), "%s", g_live.pending_key);
+            char text[192];
+            I18N_F(text, "kn.auth.liveRefused", "This server could not verify your account: you play on as before ({0})",
+                   r.message[0] ? r.message : I18N("kn.auth.refused", "refused"));
+            ui_notify(text);
+        }
+    }
+    g_live.rights = r.rights;
+    g_live.account_id = r.account_id;
+    if (first || r.rights != old_rights || r.account_id != old_account) {
+        char was[48], now[48];
+        live_rights_text(old_rights, was, sizeof(was));
+        live_rights_text(r.rights, now, sizeof(now));
+        printf("[auth] connection %d: account %d -> %d, rights %s -> %s (%s)\n", r.conn_id, old_account, r.account_id, first ? "?" : was, now,
+               r.status == NET_ACCOUNT_RIGHTS_STATE ? "pushed" : "sign-in");
+        object_manager_ui_rights_changed(); // the spawn menu and the KN guns ask for their caps again
+    }
 }

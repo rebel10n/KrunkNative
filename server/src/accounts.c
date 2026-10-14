@@ -8,6 +8,7 @@
 #include <central_auth.h>
 #include <rcon.h>
 #include <auth_join.h>
+#include <net_ext.h>  // NET_EXT_KN_ACCOUNT_AUTH / _RIGHTS: live sign-in
 #include <map_catalog.h>
 #include <map_validate.h>
 #include <game_config.h> // WP-E: v7 host types, setupGameConfig / applyConfig per round
@@ -1344,9 +1345,11 @@ static void acc_set_ready(ClientConnection *client) {
     client->acct.auth_rid = 0;
     if (client->acct.account_id && gs_is_op(&g_gs_config, client->acct.account_id, client->acct.username)) {
         client->op = 1;
+        client->op_account = 1;
         client->acct.flags |= NET_PLAYER_INFO_DEV;
         server_log("%s is an op (config gameserver.ops)", client->name);
     }
+    accounts_push_rights(client); // the settled identity: tells the client live sign-ins work here
 
     if (g_acc.brain && (client->acct.ticket_jti[0] || client->acct.account_id)) {
         cJSON *join = cJSON_CreateObject();
@@ -1503,8 +1506,22 @@ static int acc_online_join(ClientConnection *client, const NetJoinPacket *join, 
     return 1;
 }
 
+// The account of a central hasJoined answer: its profile, the central id and username.
+static cJSON *acc_central_account(const CentralAuthResult *r, const char *claimed) {
+    const cJSON *profile = cJSON_GetObjectItem(r->reply, "profile");
+    cJSON *account = cJSON_IsObject(profile) ? cJSON_Duplicate(profile, 1) : cJSON_CreateObject();
+    cJSON_DeleteItemFromObject(account, "id");
+    cJSON_AddNumberToObject(account, "id", cJSON_GetNumberValue(cJSON_GetObjectItem(r->reply, "id")));
+    if (!cJSON_GetObjectItem(account, "username"))
+        cJSON_AddStringToObject(account, "username", acc_str(cJSON_GetObjectItem(r->reply, "username"), claimed));
+    return account;
+}
+
+static int acc_live_central_reply(const CentralAuthResult *r);
+
 // central hasJoined finished (standalone online_mode)
 static void acc_handle_central(const CentralAuthResult *r) {
+    if (acc_live_central_reply(r)) return; // a live sign-in's
     ClientConnection *client = acc_client_by_rid(r->rid);
     if (!client || client->acct.join_state != SERVER_JOIN_AUTH || !client->acct.central_pending) return;
     client->acct.central_pending = 0;
@@ -1513,12 +1530,7 @@ static void acc_handle_central(const CentralAuthResult *r) {
         acc_become_guest(client, r->status == 0 ? "failed to verify username" : "authentication servers are down");
         return;
     }
-    const cJSON *profile = cJSON_GetObjectItem(r->reply, "profile");
-    cJSON *account = cJSON_IsObject(profile) ? cJSON_Duplicate(profile, 1) : cJSON_CreateObject();
-    cJSON_DeleteItemFromObject(account, "id");
-    cJSON_AddNumberToObject(account, "id", cJSON_GetNumberValue(cJSON_GetObjectItem(r->reply, "id")));
-    if (!cJSON_GetObjectItem(account, "username"))
-        cJSON_AddStringToObject(account, "username", acc_str(cJSON_GetObjectItem(r->reply, "username"), client->acct.username));
+    cJSON *account = acc_central_account(r, client->acct.username);
     acc_apply_account(client, account);
     const int banned = acc_truthy(cJSON_GetObjectItem(account, "banned"));
     cJSON_Delete(account);
@@ -1803,7 +1815,10 @@ void accounts_player_card(const ClientConnection *client, Player *player) {
     else player->pc_stat_value[0] = 0;
 }
 
+static int acc_live_brain_reply(const cJSON *frame);
+
 static void acc_handle_auth_reply(const cJSON *frame) {
+    if (acc_live_brain_reply(frame)) return; // a live sign-in's
     const cJSON *rid = cJSON_GetObjectItem(frame, "rid");
     ClientConnection *client = cJSON_IsNumber(rid) ? acc_client_by_rid((uint32_t) rid->valuedouble) : NULL;
     if (!client || client->acct.join_state != SERVER_JOIN_AUTH) return;
@@ -1898,6 +1913,362 @@ void accounts_on_disconnect(ClientConnection *client) {
     acc_queue_push();
 }
 
+
+// ------------------------------------------------------------------ live sign-in (KrunkNative)
+// NET_EXT_KN_ACCOUNT_AUTH (shared/include/net_ext.h): a player who signs in, switches accounts or
+// signs out from the menu keeps the connection. Krunker v3.1.1 logs in on the game socket itself;
+// before this, a guest who signed in kept guest rights (no Object Manager, no dev commands) until
+// a rejoin. The claim is verified exactly as a JOIN's: a session token through the coordinator's
+// token auth (brain-linked servers), "hj1:" through hasJoined (online_mode: via the coordinator,
+// or central auth standalone). Nothing changes before the answer verifies; a refusal, a timeout or
+// a lost link change nothing either. Then the account, DEV (account flag, config op), the custom
+// host and the cheats they allowed are derived again and pushed to the client
+// (NET_EXT_KN_ACCOUNT_RIGHTS). One account per connection (a switch leaves the old one: its
+// partial stats, presence), one connection per account (the newer wins, as at join), a banned
+// account is kicked at once, a few attempts per minute, every change logged ("[rights]").
+// The new account's stats count from the next round (this round was played as someone else).
+// The name changes at the next spawn (the live Player keeps the one the others were sent).
+
+#define ACC_LIVE_WINDOW 60.0f  // s of the rate-limit window
+#define ACC_LIVE_MAX 6         // verifications per connection in a window
+#define ACC_LIVE_TIMEOUT 10.0f // s, as a JOIN's auth (brainClient.ts DB_CALL_TIMEOUT_MS)
+
+static unsigned acc_rights(const ClientConnection *client) {
+    unsigned rights = 0;
+    if (net_client_is_dev(client)) rights |= NET_RIGHTS_DEV;
+    if (accounts_is_custom_host(client)) rights |= NET_RIGHTS_HOST;
+    if (client->op) rights |= NET_RIGHTS_OP;
+    if (client->acct.flags & NET_PLAYER_INFO_MOD) rights |= NET_RIGHTS_MOD;
+    return rights;
+}
+
+// the kinds this server verifies (GUEST always)
+static unsigned acc_live_kinds(void) {
+    unsigned kinds = 0;
+    if (g_acc.brain) kinds |= NET_ACCOUNT_LIVE_SESSION;
+    if (g_gs_config.online_mode) kinds |= NET_ACCOUNT_LIVE_HAS_JOINED;
+    return kinds;
+}
+
+static void acc_send_rights(ClientConnection *client, const int status, const int seq, const char *message) {
+    if (client->peer_minor < NET_PROTOCOL_MINOR_EXT) return; // an older client keeps its rejoin
+    NetAccountRightsPacket r;
+    memset(&r, 0, sizeof(r));
+    r.status = (uint8_t) status;
+    r.seq = (uint8_t) seq;
+    r.rights = (uint8_t) acc_rights(client);
+    r.live_kinds = (uint8_t) acc_live_kinds();
+    r.conn_id = client->id;
+    r.account_id = client->acct.account_id;
+    snprintf(r.name, sizeof(r.name), "%s", client->name);
+    snprintf(r.message, sizeof(r.message), "%s", message ? message : "");
+    uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(r)];
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_ACCOUNT_RIGHTS, &r, sizeof(r));
+    if (n) net_send_packet(client->fd, NET_PACKET_EXT, buf, n);
+}
+
+void accounts_push_rights(ClientConnection *client) {
+    if (client && client->acct.join_state == SERVER_JOIN_READY) acc_send_rights(client, NET_ACCOUNT_RIGHTS_STATE, 0, NULL);
+}
+
+static void acc_rights_text(const unsigned rights, char *out, const size_t size) {
+    static const char *const names[] = {"dev", "host", "op", "mod"}; // NET_RIGHTS_* bit order
+    size_t len = 0;
+    out[0] = 0;
+    for (unsigned i = 0; i < 4; i++)
+        if (rights & (1u << i)) len += (size_t) snprintf(out + len, len < size ? size - len : 0, "%s%s", len ? "+" : "", names[i]);
+    if (!len) snprintf(out, size, "none");
+}
+
+static ClientConnection *acc_client_by_live_rid(const uint32_t rid) {
+    if (!rid) return NULL;
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        if (g_server->clients[i].acct.live_rid == rid) return &g_server->clients[i];
+    }
+    return NULL;
+}
+
+// The account the connection leaves (a switch, a sign-out): its partial stats and presence, then
+// a guest identity.
+static void acc_live_leave_account(ClientConnection *client) {
+    ServerAccount *a = &client->acct;
+    if (a->account_id) {
+        acc_commit_partial(client);
+        if (g_acc.brain) { // presence only: the seat (clientId) stays the connection's
+            cJSON *leave = cJSON_CreateObject();
+            cJSON_AddStringToObject(leave, "type", "player-leave");
+            cJSON_AddStringToObject(leave, "lobbyId", g_acc.lobby_id);
+            cJSON_AddNumberToObject(leave, "accountId", a->account_id);
+            brain_post(leave, 0);
+        }
+    }
+    a->account_id = 0;
+    a->username[0] = 0;
+    a->level = 0;
+    a->clan[0] = 0;
+    a->flags = 0;
+    a->hack = 0;
+    a->premium = 0;
+    a->funds = 0;
+    a->badge = -1;
+    a->skins_known = 0;
+    memset(a->skins_owned, 0, sizeof(a->skins_owned));
+    a->has_stats = 0;
+    memset(a->class_stats, 0, sizeof(a->class_stats));
+    memset(a->pc_stats, 0, sizeof(a->pc_stats));
+    a->central_verified = 0;
+    a->auth_session = 0;
+    a->committed = 1; // nothing of this round goes to whoever comes next
+    acc_progress_clear(a);
+    if (client->op_account) { // a config op is the account's: it goes with it
+        client->op = 0;
+        client->op_account = 0;
+    }
+}
+
+// After a change: everything that follows the identity, the log line and the answer.
+static void acc_live_settled(ClientConnection *client, const int seq, const unsigned old_rights, const int old_account, const char *via) {
+    net_comp_lobby_sync(client);
+    acc_enforce_skins(client); // the next spawn's cosmetics: what this account owns
+    const unsigned lost = old_rights & ~acc_rights(client) & (NET_RIGHTS_DEV | NET_RIGHTS_HOST);
+    const unsigned off = net_revoke_lost_cheats(client, lost != 0);
+    acc_broadcast_info(client);
+    acc_queue_push();
+    const unsigned rights = acc_rights(client);
+    char was[48], now[48];
+    acc_rights_text(old_rights, was, sizeof(was));
+    acc_rights_text(rights, now, sizeof(now));
+    server_log("[rights] %s (id %d, %s): account %d -> %d (%s), rights %s -> %s%s", client->name, client->id, client->address, old_account,
+               client->acct.account_id, via, was, now, off ? ", cheats off" : "");
+    acc_send_rights(client, NET_ACCOUNT_RIGHTS_OK, seq, NULL);
+}
+
+static void acc_live_refuse(ClientConnection *client, const int status, const int seq, const char *log_reason, const char *message) {
+    server_log("[rights] %s (id %d, %s): sign-in %s (%s), nothing changed", client->name, client->id, client->address,
+               status == NET_ACCOUNT_RIGHTS_BUSY ? "throttled" : status == NET_ACCOUNT_RIGHTS_UNAVAILABLE ? "not verifiable" : "refused",
+               log_reason);
+    acc_send_rights(client, status, seq, message);
+}
+
+static void acc_live_banned(ClientConnection *client, const char *message) {
+    server_log("[rights] %s (id %d, %s): signed in to a banned account: kicked", client->name, client->id, client->address);
+    acc_reject(client, message && message[0] ? message : "Banned", "004003");
+}
+
+// A verified account: applied to the connection (a refresh when it is the same one).
+static void acc_live_apply(ClientConnection *client, const cJSON *account, const int seq, const char *via) {
+    const cJSON *id = cJSON_GetObjectItem(account, "id");
+    const int account_id = cJSON_IsNumber(id) ? id->valueint : 0;
+    if (account_id <= 0) {
+        acc_live_refuse(client, NET_ACCOUNT_RIGHTS_REFUSED, seq, "no account id", "Could not verify the account");
+        return;
+    }
+    char username[32];
+    acc_copy_field(username, sizeof(username), cJSON_GetStringValue(cJSON_GetObjectItem(account, "username")));
+    if (acc_truthy(cJSON_GetObjectItem(account, "banned")) || acc_account_banned(account_id, username)) {
+        const char *reason = cJSON_GetStringValue(cJSON_GetObjectItem(account, "ban_reason"));
+        char message[96];
+        snprintf(message, sizeof(message), "Banned%s%s", reason && reason[0] ? ": " : "", reason ? reason : "");
+        acc_live_banned(client, message);
+        return;
+    }
+    const unsigned old_rights = acc_rights(client);
+    const int old_account = client->acct.account_id;
+    const int switched = old_account != account_id;
+    if (switched) acc_live_leave_account(client);
+    acc_apply_account(client, account); // (flags from the account: the old ones go)
+    if (client->op_account) {
+        client->op = 0;
+        client->op_account = 0;
+    }
+    if (gs_is_op(&g_gs_config, client->acct.account_id, client->acct.username)) {
+        client->op = 1;
+        client->op_account = 1;
+        client->acct.flags |= NET_PLAYER_INFO_DEV;
+    }
+    if (switched) {
+        acc_kick_duplicates(client); // one connection per account: this one, as at join
+        if (g_acc.brain) {
+            cJSON *join = cJSON_CreateObject(); // presence (game_presence_join); the seat is already counted
+            cJSON_AddStringToObject(join, "type", "player-join");
+            cJSON_AddStringToObject(join, "lobbyId", g_acc.lobby_id);
+            cJSON_AddNumberToObject(join, "accountId", client->acct.account_id);
+            brain_post(join, 0);
+        }
+    }
+    acc_live_settled(client, seq, old_rights, old_account, via);
+}
+
+// GUEST: signed out in the menu. Never verified: dropping rights is always allowed.
+static void acc_live_sign_out(ClientConnection *client, const int seq) {
+    if (!client->acct.account_id && !client->op_account) {
+        acc_send_rights(client, NET_ACCOUNT_RIGHTS_OK, seq, NULL); // a guest already
+        return;
+    }
+    if (g_acc.brain && !g_gs_config.allow_guests) { // as a guest JOIN here
+        server_log("[rights] %s (id %d, %s): signed out on a server without guests: kicked", client->name, client->id, client->address);
+        acc_reject(client, "Guests are not allowed on this server", "004001");
+        return;
+    }
+    const unsigned old_rights = acc_rights(client);
+    const int old_account = client->acct.account_id;
+    acc_live_leave_account(client);
+    net_client_guest_name(client);
+    acc_live_settled(client, seq, old_rights, old_account, "signed out");
+}
+
+void accounts_handle_live_auth(ClientConnection *client, const uint8_t *body, const uint16_t length) {
+    if (!client || !body || length < 2) return; // kind + seq at least
+    NetAccountAuthPacket req;
+    memset(&req, 0, sizeof(req));
+    memcpy(&req, body, length < sizeof(req) ? length : sizeof(req));
+    req.name[sizeof(req.name) - 1] = 0;
+    req.key[sizeof(req.key) - 1] = 0;
+    ServerAccount *a = &client->acct;
+    if (a->join_state != SERVER_JOIN_READY) {
+        acc_live_refuse(client, NET_ACCOUNT_RIGHTS_BUSY, req.seq, "still joining", "Still joining");
+        return;
+    }
+    if (a->live_rid) {
+        acc_live_refuse(client, NET_ACCOUNT_RIGHTS_BUSY, req.seq, "another one is running", "A sign-in is already being verified");
+        return;
+    }
+    if (g_rk.active) { // the roster is fixed (isFromQueue): no switch, and a sign-out would abandon the match
+        acc_live_refuse(client, NET_ACCOUNT_RIGHTS_REFUSED, req.seq, "ranked match", "Can't switch accounts in a ranked match");
+        return;
+    }
+    if (req.kind == NET_ACCOUNT_AUTH_GUEST) {
+        acc_live_sign_out(client, req.seq);
+        return;
+    }
+    if (req.kind != NET_ACCOUNT_AUTH_SESSION && req.kind != NET_ACCOUNT_AUTH_HAS_JOINED) {
+        acc_live_refuse(client, NET_ACCOUNT_RIGHTS_REFUSED, req.seq, "unknown kind", "Unknown sign-in");
+        return;
+    }
+    if (a->live_window_at <= 0.0f || g_server->now - a->live_window_at >= ACC_LIVE_WINDOW) {
+        a->live_window_at = g_server->now > 0.0f ? g_server->now : 0.001f;
+        a->live_attempts = 0;
+    }
+    if (a->live_attempts >= ACC_LIVE_MAX) {
+        acc_live_refuse(client, NET_ACCOUNT_RIGHTS_BUSY, req.seq, "rate limit", "Too many sign-in attempts, try again later");
+        return;
+    }
+    a->live_attempts++;
+
+    uint32_t rid = 0;
+    if (req.kind == NET_ACCOUNT_AUTH_SESSION) {
+        if (!g_acc.brain || !brain_linked()) {
+            acc_live_refuse(client, NET_ACCOUNT_RIGHTS_UNAVAILABLE, req.seq, "no coordinator link", "Account service unavailable");
+            return;
+        }
+        if (!req.key[0]) {
+            acc_live_refuse(client, NET_ACCOUNT_RIGHTS_REFUSED, req.seq, "empty token", "Could not verify the account");
+            return;
+        }
+        cJSON *frame = cJSON_CreateObject();
+        rid = brain_next_rid();
+        cJSON_AddStringToObject(frame, "type", "auth");
+        cJSON_AddNumberToObject(frame, "rid", rid);
+        cJSON_AddStringToObject(frame, "token", req.key);
+        brain_post(frame, 0);
+    } else {
+        if (!g_gs_config.online_mode) {
+            acc_live_refuse(client, NET_ACCOUNT_RIGHTS_UNAVAILABLE, req.seq, "not online_mode", "This server does not verify accounts");
+            return;
+        }
+        const size_t prefix = strlen(AUTH_JOIN_KEY_PREFIX);
+        char username[32];
+        acc_copy_field(username, sizeof(username), req.name);
+        if (strncmp(req.key, AUTH_JOIN_KEY_PREFIX, prefix) || !kn_auth_is_hex(req.key + prefix, AUTH_JOIN_NONCE_LEN) || !username[0]) {
+            acc_live_refuse(client, NET_ACCOUNT_RIGHTS_REFUSED, req.seq, "malformed hasJoined", "Could not verify the account");
+            return;
+        }
+        char hash[AUTH_SERVER_HASH_LEN + 1];
+        kn_server_hash(g_acc.server_nonce, "", req.key + prefix, hash);
+        snprintf(a->live_username, sizeof(a->live_username), "%s", username);
+        if (brain_linked()) {
+            cJSON *frame = cJSON_CreateObject();
+            rid = brain_next_rid();
+            cJSON_AddStringToObject(frame, "type", "auth");
+            cJSON_AddNumberToObject(frame, "rid", rid);
+            cJSON *hj = cJSON_AddObjectToObject(frame, "hasJoined");
+            cJSON_AddStringToObject(hj, "username", username);
+            cJSON_AddStringToObject(hj, "serverHash", hash);
+            cJSON_AddStringToObject(hj, "ip", client->address);
+            brain_post(frame, 0);
+        } else {
+            rid = 0x80000000u | ++g_acc.next_central_rid; // never collides with brain rids
+            if (central_auth_has_joined(g_gs_config.auth_url, rid, username, hash, client->address)) {
+                acc_live_refuse(client, NET_ACCOUNT_RIGHTS_UNAVAILABLE, req.seq, "authentication servers are down", "Account service unavailable");
+                return;
+            }
+        }
+    }
+    a->live_rid = rid;
+    a->live_seq = req.seq;
+    a->live_kind = req.kind;
+    a->live_deadline = g_server->now + ACC_LIVE_TIMEOUT;
+    server_log("[rights] %s (id %d, %s): verifying a %s sign-in", client->name, client->id, client->address,
+               req.kind == NET_ACCOUNT_AUTH_SESSION ? "session token" : "hasJoined");
+}
+
+// auth-reply of a live sign-in (brain token auth or hasJoined through the coordinator); 0 = not one
+static int acc_live_brain_reply(const cJSON *frame) {
+    const cJSON *rid = cJSON_GetObjectItem(frame, "rid");
+    ClientConnection *client = cJSON_IsNumber(rid) ? acc_client_by_live_rid((uint32_t) rid->valuedouble) : NULL;
+    if (!client) return 0;
+    const int seq = client->acct.live_seq;
+    const int kind = client->acct.live_kind;
+    client->acct.live_rid = 0;
+    const cJSON *account = cJSON_GetObjectItem(frame, "account");
+    if (!cJSON_IsTrue(cJSON_GetObjectItem(frame, "ok")) || !cJSON_IsObject(account)) {
+        const char *err = cJSON_GetStringValue(cJSON_GetObjectItem(frame, "err"));
+        if (err && !strncasecmp(err, "Banned", 6)) {
+            acc_live_banned(client, err);
+            return 1;
+        }
+        acc_live_refuse(client, NET_ACCOUNT_RIGHTS_REFUSED, seq, err && err[0] ? err : "invalid session", "Could not verify the account");
+        return 1;
+    }
+    acc_live_apply(client, account, seq, kind == NET_ACCOUNT_AUTH_HAS_JOINED ? "hasJoined via the coordinator" : "session token");
+    return 1;
+}
+
+// central hasJoined of a live sign-in (standalone online_mode); 0 = not one
+static int acc_live_central_reply(const CentralAuthResult *r) {
+    ClientConnection *client = acc_client_by_live_rid(r->rid);
+    if (!client) return 0;
+    const int seq = client->acct.live_seq;
+    client->acct.live_rid = 0;
+    if (r->status != 1) {
+        acc_live_refuse(client, r->status == 0 ? NET_ACCOUNT_RIGHTS_REFUSED : NET_ACCOUNT_RIGHTS_UNAVAILABLE, seq, r->error,
+                        r->status == 0 ? "Could not verify the account" : "Account service unavailable");
+        return 1;
+    }
+    cJSON *account = acc_central_account(r, client->acct.live_username);
+    acc_live_apply(client, account, seq, "hasJoined via central auth");
+    if (client->acct.account_id > 0 && client->acct.join_state == SERVER_JOIN_READY) client->acct.central_verified = 1;
+    cJSON_Delete(account);
+    return 1;
+}
+
+static void acc_live_fail_pending(const char *why) {
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        ClientConnection *client = &g_server->clients[i];
+        if (!client->acct.live_rid) continue;
+        client->acct.live_rid = 0;
+        acc_live_refuse(client, NET_ACCOUNT_RIGHTS_UNAVAILABLE, client->acct.live_seq, why, "Account service unavailable");
+    }
+}
+
+static void acc_live_tick(const float now) {
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        ClientConnection *client = &g_server->clients[i];
+        if (!client->acct.live_rid || now < client->acct.live_deadline) continue;
+        client->acct.live_rid = 0; // a late answer finds nobody
+        acc_live_refuse(client, NET_ACCOUNT_RIGHTS_UNAVAILABLE, client->acct.live_seq, "timed out", "Account service unavailable");
+    }
+}
 
 // ------------------------------------------------------------------ hosted custom games
 
@@ -2230,8 +2601,11 @@ static void acc_handle_frame(cJSON *frame) {
     }
 }
 
+static void acc_live_fail_pending(const char *why);
+
 static void acc_link_down(void) {
     ks_storage_link_down(); // their replies never come
+    acc_live_fail_pending("account service unavailable"); // live sign-ins: nothing changes
     // pending auths will never be answered: ticket holders keep the ticket identity,
     // session-only joins become guests (or are refused)
     for (size_t i = 0; i < g_server->client_count; i++) {
@@ -2269,6 +2643,8 @@ void accounts_init(void) {
     }
 }
 
+static void acc_live_tick(float now);
+
 void accounts_tick(const float now) {
     if (now >= g_acc.next_ban_check) {
         g_acc.next_ban_check = now + 1.0f;
@@ -2279,6 +2655,7 @@ void accounts_tick(const float now) {
         acc_handle_central(&central);
         cJSON_Delete(central.reply);
     }
+    acc_live_tick(now);
     if (!g_acc.brain) {
         // standalone online_mode / password: the same JOIN deadline
         for (size_t i = 0; i < g_server->client_count; i++) {

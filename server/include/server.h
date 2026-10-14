@@ -101,6 +101,15 @@ typedef struct {
     uint32_t stat_counts[PROGRESSION_STAT_COUNT];
     ServerChallengeTally tallies[SERVER_TALLY_MAX];
     int tally_count;
+    // KrunkNative live sign-in (NET_EXT_KN_ACCOUNT_AUTH, accounts.c): one verification in flight,
+    // a few per minute, nothing changes before it verifies
+    uint32_t live_rid;                 // the pending brain / central request, 0 none
+    float live_deadline;               // g_server->now: answered UNAVAILABLE after this
+    uint8_t live_seq;                  // the AUTH's seq, echoed by the answer
+    uint8_t live_kind;                 // NET_ACCOUNT_AUTH_* of the pending one
+    char live_username[32];            // hasJoined: the claimed name (the reply decides who it is)
+    float live_window_at;              // start of the current rate-limit window
+    int live_attempts;                 // verifications started in that window
 } ServerAccount;
 
 struct ServerTransport;
@@ -130,6 +139,7 @@ typedef struct {
     char name[SERVER_PLAYER_NAME_MAX];
     char address[CHAT_CMD_ADDRESS_SIZE]; // dotted peer address (chat /ip, /banip)
     unsigned char op:1;            // CLI `op`: passes the DEV checks of chat commands while perms are on
+    unsigned char op_account:1;    // op only for its account (config gameserver.ops): goes with the account
     // On the server's own machine: a loopback TCP peer that is not net-bridge (or a bridged
     // browser whose forwarded address is loopback too). Such a player hosts the server: DEV.
     unsigned char local:1;

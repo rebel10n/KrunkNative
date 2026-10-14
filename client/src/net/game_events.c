@@ -938,11 +938,11 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         case NET_PACKET_OBJECT_ANIM:
             return client_world_handle_event(client, type, payload, length); // map-logic WP-B (client/src/world_events.c)
         case NET_PACKET_EXT: { // v10+ envelope (shared/include/net_ext.h)
-            uint16_t subtype;
-            if (!net_ext_unpack(payload, length, &subtype, NULL, NULL)) return 1;
-            // No S -> C subtype has a handler yet (entities, pose, locks ... land with their features);
-            // unknown subtypes are ignored, never an error
-            (void) subtype;
+            uint16_t subtype, body_length;
+            const uint8_t *body;
+            if (!net_ext_unpack(payload, length, &subtype, &body, &body_length)) return 1;
+            // entities, pose, locks ... land with their features; unknown subtypes are ignored, never an error
+            if (subtype == NET_EXT_KN_ACCOUNT_RIGHTS) online_mode_on_rights(client, body, body_length); // live sign-in (online_mode.c)
             return 1;
         }
         default:

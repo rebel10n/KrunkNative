@@ -32,6 +32,12 @@ packet (`net_chat_peer_at`, server/src/net.c:907). No packet field can set any o
 The client's own state never takes part: no role or host byte, no name, no lobby meta. Ranked
 seats come from the brain's match config.
 
+A live sign-in (`NET_EXT_KN_ACCOUNT_AUTH`, doc/backend.md 8.3 item 9) changes `account_id` (and
+with it `dev`, `ops` by name and `premium_host`) only after the same verification as a JOIN's
+(session token through the brain, or hasJoined); the packet carries a credential, never a claim.
+Forged / expired: `REFUSED`, nothing changes; 6 a minute per connection; banned: kicked; logged
+as `[rights]`.
+
 ## Chat / console commands (`NET_PACKET_CHAT_SEND` 8, `NET_PACKET_CHAT_V7` 245)
 
 | Command(s) | Gate | Before | After | Evidence |

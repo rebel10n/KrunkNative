@@ -77,6 +77,16 @@ const void *account_get(void) { return NULL; }
 const char *account_session_token(void) { return ""; }
 void client_net_send(void *client, int type, const void *data, unsigned short len) { (void) client; (void) type; (void) data; (void) len; }
 int kn_auth_is_hex(const char *s, size_t max_len) { (void) s; (void) max_len; return 1; }
+// the live sign-in's (online_mode.c): the toast, the strings, the spawn menu
+const char *i18n_tr(const char *key, const char *english) { (void) key; return english; }
+const char *i18n_trf(char *out, size_t n, const char *key, const char *english, int argc, const char *const *argv) {
+    (void) key, (void) argc, (void) argv;
+    snprintf(out, n, "%s", english);
+    return out;
+}
+void ui_notify(const char *html) { (void) html; }
+void object_manager_ui_rights_changed(void) {}
+int servers_ui_brain_mode(void) { return 0; }
 void kn_server_hash(const char *a, const char *b, const char *c, char out[65]) { (void) a; (void) b; (void) c; out[0] = 0; }
 
 static void set_env(const char *k, const char *v) {

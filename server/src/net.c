@@ -335,6 +335,11 @@ static void net_assign_guest_name(ClientConnection *client) {
     snprintf(client->name, sizeof(client->name), "Guest_%d", client->player_number);
 }
 
+// A live sign-out (accounts.c): the connection's guest name again (the next spawn's)
+void net_client_guest_name(ClientConnection *client) {
+    net_assign_guest_name(client);
+}
+
 static void net_free_player(Player *player) {
     if (!player) return;
 
@@ -908,7 +913,7 @@ static ChatCommandHost g_chat_host;
 // player on the server's own machine (it hosts this server, v3.1.1's offline host). Loopback
 // alone is not enough: net-bridge connects from 127.0.0.1 for every browser, so a bridged
 // connection counts by the address it forwards (NET_PACKET_FORWARDED, net_handle_forwarded).
-static int net_client_is_dev(const ClientConnection *client) {
+int net_client_is_dev(const ClientConnection *client) {
     return client->op || client->local || (client->acct.flags & NET_PLAYER_INFO_DEV);
 }
 
@@ -1023,6 +1028,20 @@ static void net_chat_disconnect(void *user, const int id, const char *message, c
 // Close a connection after the current poll pass with NET_PACKET_ERROR (accounts.c).
 void net_kick_client(const int id, const char *message, const char *code) {
     net_chat_disconnect(NULL, id, message, code);
+}
+
+// A live sign-out / account switch (accounts.c) took rights away (lost: 1 when DEV or the host went):
+// the cheats they allowed go too, and a third-person camera they granted (silent when off)
+unsigned int net_revoke_lost_cheats(ClientConnection *client, const int lost) {
+    if (!client) return 0;
+    const unsigned int off = chat_command_revoke_cheats(&g_chat_host, client->id, client->player, &client->keep, net_client_is_dev(client),
+                                                        accounts_is_custom_host(client));
+    const char *reason = NULL;
+    if (lost && !chat_third_person_allowed(&g_chat_host, client->id, &reason)) {
+        const NetCheatPacket packet = {.flag = NET_CHEAT_THIRD_PERSON, .on = 0};
+        net_send_packet(client->fd, NET_PACKET_CHEAT, &packet, sizeof(packet));
+    }
+    return off;
 }
 
 static void net_chat_change_map(void *user, const int map_index, const int mode_index) {
@@ -1752,11 +1771,12 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             net_handle_voice_v7(client, packet);
             break;
         case NET_PACKET_EXT: {
-            // v10+ envelope (net_ext.h). No client -> server subtype is handled yet: chrsp, dlnkW and
-            // joinedRank land with their features; unknown subtypes are ignored.
-            uint16_t subtype;
-            if (client->peer_minor < NET_PROTOCOL_MINOR_EXT || !net_ext_unpack(packet->payload, packet->length, &subtype, NULL, NULL)) break;
-            (void) subtype;
+            // v10+ envelope (net_ext.h). chrsp, dlnkW and joinedRank land with their features;
+            // unknown subtypes are ignored.
+            uint16_t subtype, body_length;
+            const uint8_t *body;
+            if (client->peer_minor < NET_PROTOCOL_MINOR_EXT || !net_ext_unpack(packet->payload, packet->length, &subtype, &body, &body_length)) break;
+            if (subtype == NET_EXT_KN_ACCOUNT_AUTH) accounts_handle_live_auth(client, body, body_length); // live sign-in (accounts.c)
             break;
         }
         default:

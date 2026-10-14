@@ -469,6 +469,10 @@ target-select-e2e: build ## Player target selectors on server_bin: god * / ungod
 command-auth-e2e: build ## Command authorisation (doc/v7/command-auth.md): forged commands / dev packets / tickets / rcon guesses refused + logged, dev / op / rcon still work
 	timeout 400 $(PYTHON) -I server/tests/command_auth_e2e.py $(DEBUG_DIR)
 
+.PHONY: live-signin-e2e
+live-signin-e2e: build ## Live sign-in: sign in / switch / sign out mid-session upgrades the live connection (DEV rights, Object Manager), forged / throttled / banned refused (local kn_brain on sqlite, headless client)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I server/tests/live_signin_e2e.py $(DEBUG_DIR)
+
 .PHONY: billboard-e2e
 billboard-e2e: build ## server.cfg billboard / billboard_image: packets before INIT for late joiners and map changes, unset and URL configs send none
 	timeout 300 $(PYTHON) -I server/tests/billboard_e2e.py $(DEBUG_DIR)

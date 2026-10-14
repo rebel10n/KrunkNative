@@ -1027,6 +1027,35 @@ static void cmd_unlimitedammo(ChatCtx *c) {
     run_toggle(c, "Unlimited ammo", get_unlimitedammo, set_unlimitedammo, -1);
 }
 
+unsigned int chat_command_revoke_cheats(ChatCommandHost *host, const int uid, Player *p, PlayerKeep *k, const int dev, const int premium_host) {
+    if (!host || dev || (!host->perms && host->cheats_open)) return 0; // allowed() lets them all through
+    unsigned int lost = PLAYER_KEEP_FORCE_HIDE | PLAYER_KEEP_UNLIMITED_AMMO; // CHAT_PERM_DEV_CHEAT
+    if (!premium_host) lost |= PLAYER_KEEP_GOD | PLAYER_KEEP_NOCLIP | PLAYER_KEEP_NOTARGET | PLAYER_KEEP_SMITE; // CHAT_PERM_CHEAT
+    unsigned int off = 0;
+#define REVOKE(bit, field, cheat) \
+    if ((lost & (bit)) && KEEP_GET(p, k, bit, field)) { \
+        off |= (bit); \
+        if (k) { \
+            k->set |= (unsigned char) (bit); \
+            k->field = 0; \
+        } \
+        if (p) p->field = 0; \
+        if ((cheat) >= 0) { \
+            const NetCheatPacket packet = {.flag = (uint8_t) (cheat), .on = 0}; \
+            game_send(host->game, uid, NET_PACKET_CHEAT, &packet, sizeof(packet)); \
+        } \
+    }
+    REVOKE(PLAYER_KEEP_GOD, god_mode, -1)
+    REVOKE(PLAYER_KEEP_NOCLIP, noclip, NET_CHEAT_NOCLIP)
+    REVOKE(PLAYER_KEEP_NOTARGET, notarget, -1)
+    REVOKE(PLAYER_KEEP_SMITE, smite, -1)
+    REVOKE(PLAYER_KEEP_UNLIMITED_AMMO, unlimited_ammo, NET_CHEAT_UNLIMITED_AMMO)
+    REVOKE(PLAYER_KEEP_FORCE_HIDE, force_hide, NET_CHEAT_FORCE_HIDE)
+#undef REVOKE
+    if ((off & PLAYER_KEEP_UNLIMITED_AMMO) && p && p->active) mode_send_loadout(host->game, p);
+    return off;
+}
+
 // killTargetPlayer: players.kill(target, source) with godMode lifted for the kill.
 static void kill_player(Player *target, Player *source) {
     const int had_god = target->god_mode;

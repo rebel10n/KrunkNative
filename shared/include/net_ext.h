@@ -54,7 +54,57 @@ typedef enum {
 
     // 0x8000.. KrunkNative-only
     NET_EXT_BLOCK_KN = 0x8000,
+
+    // 0x8000 live account (KrunkNative): signing in, switching accounts or signing out from the menu
+    // during a session re-verifies the live connection, no rejoin (server/src/accounts.c "live sign-in")
+    NET_EXT_KN_ACCOUNT_AUTH = 0x8000,   // C -> S NetAccountAuthPacket
+    NET_EXT_KN_ACCOUNT_RIGHTS = 0x8001, // S -> C NetAccountRightsPacket
 } NetExtSubtype;
+
+// NET_EXT_KN_ACCOUNT_AUTH (C -> S): the identity the player now has in the menu. The server verifies
+// it exactly as a JOIN's (a session token through the coordinator's token auth, a "hj1:" through
+// hasJoined), never trusting the claim, then re-derives the connection's account, DEV, op and host
+// rights and answers with NET_EXT_KN_ACCOUNT_RIGHTS (the same seq). GUEST signs out: the
+// connection drops to a guest at once. A client only sends it after this connection's server
+// announced the kind in a RIGHTS push (live_kinds); others keep the rejoin (servers_ui.c).
+enum {
+    NET_ACCOUNT_AUTH_GUEST = 0,      // signed out: back to Guest_N
+    NET_ACCOUNT_AUTH_SESSION = 1,    // key = the coordinator session token (brain-handed lobbies only, as JOIN.session)
+    NET_ACCOUNT_AUTH_HAS_JOINED = 2, // key = "hj1:" + a fresh client nonce after POST /auth/join, name = the account
+};
+typedef struct {
+    uint8_t kind;  // NET_ACCOUNT_AUTH_*
+    uint8_t seq;   // echoed by the answer
+    char name[32]; // HAS_JOINED: the account name /auth/join was told
+    char key[64];  // SESSION: the token (NetJoinPacket.session's size); HAS_JOINED: "hj1:" + 32 hex
+} NetAccountAuthPacket;
+
+// NET_EXT_KN_ACCOUNT_RIGHTS (S -> C): the connection's identity and rights. Pushed once its join
+// is settled (status STATE: tells the client this server takes live sign-ins), and as the answer
+// to every NET_EXT_KN_ACCOUNT_AUTH. REFUSED / BUSY / UNAVAILABLE changed nothing.
+enum {
+    NET_ACCOUNT_RIGHTS_STATE = 0,       // push (join settled), seq 0
+    NET_ACCOUNT_RIGHTS_OK = 1,          // verified and applied (or signed out)
+    NET_ACCOUNT_RIGHTS_REFUSED = 2,     // the token / hasJoined did not verify, or not allowed here (ranked)
+    NET_ACCOUNT_RIGHTS_BUSY = 3,        // rate limited, or another verification is still running
+    NET_ACCOUNT_RIGHTS_UNAVAILABLE = 4, // this server cannot verify that kind (no coordinator / auth service)
+};
+#define NET_RIGHTS_DEV 1u  // passes the DEV checks (verified DEV account, op, the server's own machine)
+#define NET_RIGHTS_HOST 2u // hosts this custom lobby (premium custom host)
+#define NET_RIGHTS_OP 4u   // a config / CLI op
+#define NET_RIGHTS_MOD 8u  // a moderator account
+#define NET_ACCOUNT_LIVE_SESSION (1u << NET_ACCOUNT_AUTH_SESSION)       // live_kinds: takes session tokens
+#define NET_ACCOUNT_LIVE_HAS_JOINED (1u << NET_ACCOUNT_AUTH_HAS_JOINED) // live_kinds: takes hasJoined
+typedef struct {
+    uint8_t status;     // NET_ACCOUNT_RIGHTS_*
+    uint8_t seq;        // the AUTH answered, 0 for a push
+    uint8_t rights;     // NET_RIGHTS_*
+    uint8_t live_kinds; // NET_ACCOUNT_LIVE_* (always takes GUEST)
+    int32_t conn_id;    // the connection (NetInitPacket.client_id): the same one before and after
+    int32_t account_id; // 0 guest
+    char name[32];      // the connection's name (the next spawn's)
+    char message[64];   // why, for REFUSED / BUSY / UNAVAILABLE
+} NetAccountRightsPacket;
 
 // Bodies fit one NetPacket (NET_MAX_PAYLOAD 512) after the subtype.
 #define NET_EXT_BODY_MAX (512 - NET_EXT_HEADER_SIZE)

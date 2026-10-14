@@ -1264,6 +1264,15 @@ void object_manager_ui_snap_changed(void) {
     if (box) html_dom_set_value(box, om_build_snap() > 0.0f ? snap : "");
 }
 
+// The server pushed new rights (online_mode.c: a live sign-in / sign-out, a console op): the caps
+// are asked again, at once while the window is open (its status and tools follow the answer), else
+// when a KN gun is next in hand (object_manager_ui_tick). No reconnect involved.
+void object_manager_ui_rights_changed(void) {
+    g_om.caps = -1;
+    g_om.queried = 0;
+    if (om_window_open()) om_send(OM_ACTION_QUERY, 0);
+}
+
 // A new connection / map: the caps belong to the server we talked to.
 void object_manager_ui_reset(void) {
     om_build_reset();

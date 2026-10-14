@@ -711,9 +711,15 @@ static void cli_set_op(const char *args, const int op) {
         cli_log_no_match(args, &r);
     } else if (!r.selector) {
         clients[0]->op = (unsigned char) op;
+        clients[0]->op_account = 0; // the console's decision now, not the account's (config ops)
         server_log("%s %s (id %d)%s", op ? "Opped" : "De-opped", clients[0]->name, clients[0]->id, note);
+        accounts_push_rights(clients[0]); // the Object Manager and dev UI follow at once
     } else {
-        for (int i = 0; i < n; i++) clients[i]->op = (unsigned char) op;
+        for (int i = 0; i < n; i++) {
+            clients[i]->op = (unsigned char) op;
+            clients[i]->op_account = 0;
+            accounts_push_rights(clients[i]);
+        }
         server_log("%s: %d player%s%s", op ? "Opped" : "De-opped", n, n == 1 ? "" : "s", note);
     }
     pthread_mutex_unlock(&g_server->lock);

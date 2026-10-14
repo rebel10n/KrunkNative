@@ -25,6 +25,12 @@ void accounts_on_spawn(ClientConnection*, int first_spawn);
 void accounts_player_card(const ClientConnection*, Player*);
 void accounts_send_infos_to(ClientConnection*);           // every player's PLAYER_INFO to a joiner
 void accounts_on_disconnect(ClientConnection*);
+// KrunkNative live sign-in (NET_EXT_KN_ACCOUNT_AUTH body, shared/include/net_ext.h): sign in, switch
+// accounts or sign out on the live connection, verified as a JOIN is; answered with
+// NET_EXT_KN_ACCOUNT_RIGHTS. accounts_push_rights: the connection's rights now (STATE), e.g. after
+// a console op / deop.
+void accounts_handle_live_auth(ClientConnection*, const uint8_t *body, uint16_t length);
+void accounts_push_rights(ClientConnection*);
 void accounts_on_end_packet(int uid, const NetEndPacket*);
 void accounts_send_billboard(ClientConnection*);          // before INIT
 
@@ -89,3 +95,6 @@ int accounts_filter_skins(const ClientConnection*, PlayerSkins*);
 void net_kick_client(int id, const char *message, const char *code); // deferred close (pending kicks)
 void net_resume_ent(ClientConnection*, int spectate);              // replay a deferred ENT
 void net_comp_lobby_sync(ClientConnection*);                        // v7 syncLobbyP(player, id, 0) once the identity is known
+int net_client_is_dev(const ClientConnection*);                    // DEV checks: op, the server's machine, a DEV account
+void net_client_guest_name(ClientConnection*);                      // Guest_N again (live sign-out)
+unsigned int net_revoke_lost_cheats(ClientConnection*, int lost);    // lost DEV / host: what they allowed, off

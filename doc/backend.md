@@ -1711,6 +1711,22 @@ ticket), `session` = the social session token, `name` reserved (guests stay
    coordinator / gateway restarts). The new connection replaces the old one (`004002` to the
    old one); an account's `auth` carries `resume: true`. A ticket never admitted, or for another
    lobby, is refused as before.
+9. Live sign-in (Krunker Box Office): signing in, switching accounts or signing out in the menu
+   mid-session keeps the connection. Once its join is settled the server pushes
+   `NET_EXT_KN_ACCOUNT_RIGHTS` (`shared/include/net_ext.h`: account, rights, the kinds it verifies);
+   the client then sends `NET_EXT_KN_ACCOUNT_AUTH` whenever the menu's identity differs from the
+   server's: the session token (`auth {token}` as in 3, brain-handed lobbies only, like
+   `JOIN.session`), a fresh `"hj1:"` after `/auth/join` (hasJoined as in online_mode joins), or a
+   guest. Nothing changes until it verifies; then 5 applies (a banned account is kicked with
+   `004003`, another connection of the account with `004002`, `ops` follow the account), the old
+   account's partial stats are committed, `player-leave` / `player-join {accountId}` move the
+   presence, the new account's stats count from the next round, cheats the lost DEV / host rights
+   allowed are turned off, and the answer carries the new rights (the Object Manager asks its caps
+   again). A forged or expired token, a timeout (10 s) or a lost link change nothing (`REFUSED` /
+   `UNAVAILABLE`); 6 verifications per connection a minute, one at a time (`BUSY`); a ranked
+   match refuses switches and sign-outs; every change is logged as `[rights]`. A server without the push keeps
+   the old behaviour: the client rejoins its lobby when the account changes in the menu
+   (`servers_ui.c`). Test: `make live-signin-e2e`.
 
 Error codes (`shared.h` `NET_ERROR_CODE_*`): `004001` invalid/expired ticket or session, guests
 refused; `004002` logged in elsewhere; `004003` banned; `004004` server draining or stopping for
