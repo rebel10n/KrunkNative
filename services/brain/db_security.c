@@ -92,6 +92,12 @@ static kn_db_result *run_email_request(kn_dbconn *c, int n, const char *const *p
     if (email && same && verified) return dbx_finish(&x, kn_db_result_user_error("Email already verified"));
     if (!email && (!cur || !*cur)) return dbx_finish(&x, kn_db_result_user_error("No email on this account"));
     if (!email && verified) return dbx_finish(&x, kn_db_result_user_error("Email already verified"));
+    /* one account per address (sign-in by email; register checks it first: accounts.c) */
+    if (email && !same &&
+        dbx_exists(&x, SQL(.mysql = "SELECT 1 FROM accounts WHERE email = $2 AND id <> {int:$1}",
+                           .any = "SELECT 1 FROM accounts WHERE lower(email) = lower($2) AND id <> {int:$1}"),
+                   KN_DB_ARGS(id, email)))
+        return dbx_finish(&x, kn_db_result_user_error("Email already in use"));
     if (email && !same) {
         dbx_exec(&x, SQL(.any = "UPDATE accounts SET email = $2, email_verified_at = NULL WHERE id = {int:$1}"),
                  KN_DB_ARGS(id, email));

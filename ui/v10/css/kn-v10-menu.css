@@ -1,15 +1,21 @@
 /* KrunkNative: the v10 main menu shell (client/src/ui/v10_menu.c, v10_login.c). Only what the
  * native engine needs to draw v10's own rules (css/svelte.css, css/main.css) as Chrome does. */
 
-/* The login modal's "Forgot Password?" (.auth-toggle-btn: v10 `all: unset`, which the engine
- * does not implement, so the UA button box stayed): a plain underlined link. */
-.auth-toggle-btn.svelte-16z1lxi {
+/* The login modal's "Forgot Password?" / "(use email instead)" (.auth-toggle-btn) and "Switch to
+ * email login" (.suggestion-link): v10 `all: unset`, which the engine does not implement, so the
+ * UA button box stayed: a plain underlined link. */
+.auth-toggle-btn.svelte-16z1lxi,
+.suggestion-link.svelte-16z1lxi {
 	background: none;
 	border: none;
 	padding: 0;
 	margin: 0;
 	box-shadow: none;
 	font-family: inherit;
+}
+
+.suggestion-link.svelte-16z1lxi {
+	font-size: inherit;
 }
 
 /* The match-info bar's segments (v10 moves #mapInfoHld / #menuRegionLabel / .menuDebugInfo

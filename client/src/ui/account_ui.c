@@ -1376,13 +1376,27 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     if (ranked_ui_handle(name, ev, args, argc) >= 0) return 1;
     if (turf_ui_handle(name, ev, args, argc) >= 0) return 1;
     if (!strcmp(name, "registerAcc") || !strcmp(name, "loginAcc")) {
-        char user[64], pass[128];
+        char user[256], pass[128], mail[256];
         read_input("accName", user, sizeof(user));
         read_input("accPass", pass, sizeof(pass));
-        char mail[256] = "";
-        read_input("accEmail", mail, sizeof(mail)); // KrunkNative: optional, register only
-        if (!strcmp(name, "registerAcc")) send_account_request_email(0, user, pass, NULL, mail); // [name, pass, referralCode, email]
-        else send_account_request(1, user, pass, NULL);
+        read_input("accEmail", mail, sizeof(mail));
+        if (!strcmp(name, "registerAcc")) {
+            // Krunker v10 registers by email ("Please enter your email to register."), and the
+            // forgot-password flow mails the account's address: a new account needs one
+            const char *m = mail;
+            while (*m == ' ') m++;
+            if (!*m) {
+                show_acc_resp("Please enter your email to register.");
+                memset(pass, 0, sizeof(pass));
+                return 1;
+            }
+            send_account_request_email(0, user, pass, NULL, mail); // [name, pass, referralCode, email]
+        } else {
+            // the login field takes a username or an email (v10's "Email" / "Username" field: the
+            // brain signs in to the account holding the address)
+            send_account_request(1, user[0] ? user : mail, pass, NULL);
+        }
+        memset(pass, 0, sizeof(pass));
         g_auth_sent_at = glfwGetTime();
         return 1;
     }
@@ -2297,11 +2311,12 @@ void account_window_post(const int id) {
     storage_get("krunker_username", name, sizeof(name));
     HtmlElem input = html_dom_by_id("accName");
     if (input) html_dom_set_value(input, name);
-    // KrunkNative: an optional email for Register (kn_brain mails a verification link)
+    // KrunkNative: the email Register needs (kn_brain mails a verification link); Login takes
+    // it instead of the username too (v10's placeholder: generic.auth.enterEmail)
     HtmlElem pass = html_dom_by_id("accPass");
     if (pass && !html_dom_by_id("accEmail"))
         html_dom_insert_html(pass, HTML_INSERT_AFTER_END,
-                             "<input id='accEmail' type='email' placeholder='Enter Email (optional, Register only)' class='accountInput'>");
+                             "<input id='accEmail' type='email' placeholder='Enter Email' class='accountInput'>");
     // KrunkNative: password reset by email (v7.1.4: "contact recovery@yendis.ch")
     HtmlElem mail = html_dom_by_id("accEmail");
     if (mail && !html_dom_by_id("knForgot"))

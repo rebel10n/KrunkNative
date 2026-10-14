@@ -124,9 +124,12 @@ def scenario(brain_url, game_port, dbpath):
 1400 down TAB
 1410 up TAB
 1500 type %s
+1550 down TAB
+1560 up TAB
+1580 type %s@example.com
 1600 clicksel .accBtn.buttonP
 5000 quit
-""" % (NAME, PASS), brain_url, game_port)
+""" % (NAME, PASS, NAME), brain_url, game_port)  # Tab: name -> password -> email (v10 registers by email)
     check("register through the native form", f"[account] logged in as {NAME}" in log)
     db(dbpath, "UPDATE players SET player_funds = 2000 WHERE player_id = (SELECT id FROM accounts WHERE username = ?)", (NAME,))
     db(dbpath, "INSERT INTO inventory (account_id, skin_id, count) SELECT id, ?, 1 FROM accounts WHERE username = ?",

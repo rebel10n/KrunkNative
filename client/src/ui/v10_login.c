@@ -6,14 +6,23 @@
 // Account), the "New to Krunker? Register here" switch with the sign-up bonuses, the form card
 // and the .io-message line. Signed in, loginOrRegister() is showWindow(5).
 //
+// The login card is v10's: one field, "Email" (#accEmail, "Enter Email") or "Username" (#accName,
+// "Enter Username") with the "(use username instead)" / "(use email instead)" toggle (_39146),
+// Email first unless krunker_username is saved (_39221); an '@' typed as a username offers "Switch
+// to email login" (_39233). In Email mode the password field stays hidden (.hidden-password) and its
+// "Password / Forgot Password?" row out until a password is typed or asked for. Either field takes a
+// username or an email: kn_brain signs in to the account holding the address (accounts.c).
+//
 // It runs on KrunkNative's account service (account_ui.c: the social socket's sendAccountRequest,
 // the replies written into #accResp, the forgot-password flow). Differences from v10, because
 // that service is what it is (doc/v10/ui.md):
-//   - accounts log in by username + password: the "(use email instead)" toggle, the passwordless
-//     "Send Email Code" choice and the Twitch-link line are not offered
+//   - accounts sign in with a password: Login with an email and no password goes straight to the
+//     password (v10 offers "Send Email Code" / "Use Password" there; there is no email code), and
+//     the Twitch-link line is not offered
 //   - registering takes a username and a password besides the email (v10 registers by email and
-//     mails a code); the email stays optional as in account_ui.c, the news opt-in is shown but
-//     nothing subscribes to it (KrunkNative sends no newsletters)
+//     mails a code): the card is v10's Email field first, then Username and Password. The email is
+//     required as in v10 ("Please enter your email to register."): the forgot-password flow mails
+//     it. The news opt-in is shown but nothing subscribes to it (KrunkNative sends no newsletters)
 //   - "Forgot Password?" -> the recover card -> Submit continues in the Account window's reset
 //     steps (account_ui.c: code by email, new password) instead of v10's emailed link
 #include <v10_menu.h>
@@ -28,6 +37,8 @@ static struct {
     int open;
     int reg;      // _39220: the register card
     int recover;  // _39222: the recover card
+    int email;    // _39221: the login card's field is Email (else Username)
+    int use_pass; // _39235: Email mode, the password asked for (shown before one is typed)
 } L;
 
 static HtmlElem by_id(const char *id) { return html_dom_by_id(id); }
@@ -62,14 +73,93 @@ static void sync_ui_vars(HtmlElem stack) {
     html_dom_set_style(stack, "--ui-height", height[0] ? height : "100%");
 }
 
-static void render(void) {
+// Email mode: the password field and its label row wait until a password is typed or asked for
+static int pass_shown(const char *pass) { return L.reg || !L.email || L.use_pass || (pass && pass[0]); }
+
+static void sync_pass(void) {
+    char pass[128];
+    read_value("accPass", pass, sizeof(pass));
+    const int shown = pass_shown(pass);
+    memset(pass, 0, sizeof(pass));
+    HtmlElem el;
+    if ((el = by_id("accPass"))) html_dom_set_class(el, "hidden-password", !shown);
+    if ((el = by_id("knV10PassRow"))) html_dom_set_display(el, shown ? "flex" : "none");
+}
+
+// _39233: an '@' in the Username field offers the Email field
+static void sync_hint(void) {
+    char name[256];
+    read_value("accName", name, sizeof(name));
+    HtmlElem hint = by_id("knV10EmailHint");
+    if (hint) html_dom_set_display(hint, !L.email && strchr(name, '@') ? "block" : "none");
+}
+
+static void append_value(StrBuf *sb, const char *v) {
+    sb_append(sb, "\" value=\"");
+    sb_append_esc(sb, v ? v : "");
+    sb_append(sb, "\">");
+}
+
+// The login card (_39206): the Email or Username field, the password, Login
+static void render_login(StrBuf *sb, const char *ident, const char *pass) {
+    sb_append(sb, "<div class=\"io-card\"><form data-priority=\"true\"><div class=\"io-input-container svelte-16z1lxi\">");
+    if (L.email) { // _39202
+        sb_append(sb, "<div class=\"label-row\"><label for=\"accEmail\" class=\"input-label\">Email</label> <button type=\"button\" "
+                      "class=\"auth-toggle-btn svelte-16z1lxi\" id=\"knV10LoginMode\" onclick=\"knV10LoginMode()\">(use username instead)</button></div> "
+                      "<input id=\"accEmail\" type=\"email\" class=\"io-input-field svelte-16z1lxi\" autocomplete=\"email\" placeholder=\"Enter Email\" "
+                      "onkeydown=\"knV10LoginKey()");
+        append_value(sb, ident);
+    } else { // _39201 (+ _39200, the email suggestion)
+        sb_append(sb, "<div class=\"label-row\"><label for=\"accName\" class=\"input-label\">Username</label> <button type=\"button\" "
+                      "class=\"auth-toggle-btn svelte-16z1lxi\" id=\"knV10LoginMode\" onclick=\"knV10LoginMode()\">(use email instead)</button></div> "
+                      "<input id=\"accName\" type=\"text\" class=\"io-input-field svelte-16z1lxi\" autocomplete=\"username\" placeholder=\"Enter Username\" "
+                      "oninput=\"knV10LoginInput()\" onkeydown=\"knV10LoginKey()");
+        append_value(sb, ident);
+        sb_appendf(sb, " <div class=\"email-suggestion svelte-16z1lxi\" id=\"knV10EmailHint\" style=\"display:%s\">Looks like you're using an email. "
+                       "<button type=\"button\" class=\"suggestion-link svelte-16z1lxi\" onclick=\"knV10LoginMode()\">Switch to email login</button> instead</div>",
+                   ident && strchr(ident, '@') ? "block" : "none");
+    }
+    const int shown = pass_shown(pass);
+    // _39203: the label row (display toggled in place by sync_pass, so typing keeps the field)
+    sb_appendf(sb, " <div class=\"label-row\" id=\"knV10PassRow\" style=\"margin-top:15px;display:%s\"><label for=\"accPass\" class=\"input-label\">Password</label> "
+                   "<button type=\"button\" class=\"auth-toggle-btn svelte-16z1lxi\" id=\"knV10Forgot\" onclick=\"knV10LoginForgot()\">Forgot Password?</button></div> "
+                   "<input id=\"accPass\" type=\"password\" autocomplete=\"current-password\" placeholder=\"Enter Password\" class=\"io-input-field %ssvelte-16z1lxi\" "
+                   "oninput=\"knV10LoginInput()\" onkeydown=\"knV10LoginKey()",
+               shown ? "flex" : "none", shown ? "" : "hidden-password ");
+    append_value(sb, pass);
+    sb_append(sb, " <button type=\"button\" class=\"io-button io-button--accept svelte-16z1lxi\" id=\"knV10LoginSubmit\" onclick=\"knV10LoginSubmit()\">Login</button>"
+                  "</div></form></div>");
+}
+
+// The register card (_39207): v10's Email field, then KrunkNative's Username and Password, the
+// news opt-in, Register and the terms line
+static void render_register(StrBuf *sb, const char *mail, const char *name, const char *pass) {
+    sb_append(sb, "<div class=\"io-card\"><form data-priority=\"true\"><div class=\"io-input-container svelte-16z1lxi\">"
+                  "<div class=\"label-row\"><label for=\"accEmail\" class=\"input-label\">Email</label></div> "
+                  "<input id=\"accEmail\" type=\"email\" class=\"io-input-field svelte-16z1lxi\" autocomplete=\"email\" placeholder=\"Enter Email\" "
+                  "onkeydown=\"knV10LoginKey()");
+    append_value(sb, mail);
+    sb_append(sb, " <div class=\"label-row\" style=\"margin-top:15px\"><label for=\"accName\" class=\"input-label\">Username</label></div> "
+                  "<input id=\"accName\" type=\"text\" class=\"io-input-field svelte-16z1lxi\" autocomplete=\"username\" placeholder=\"Enter Username\" "
+                  "onkeydown=\"knV10LoginKey()");
+    append_value(sb, name);
+    sb_append(sb, " <div class=\"label-row\" style=\"margin-top:15px\"><label for=\"accPass\" class=\"input-label\">Password</label></div> "
+                  "<input id=\"accPass\" type=\"password\" class=\"io-input-field svelte-16z1lxi\" autocomplete=\"new-password\" placeholder=\"Enter Password\" "
+                  "onkeydown=\"knV10LoginKey()");
+    append_value(sb, pass);
+    sb_append(sb, " <label class=\"promo-optin svelte-16z1lxi\"><input type=\"checkbox\" class=\"svelte-16z1lxi\"> "
+                  "<span>Send me news about events, updates and season releases</span></label> "
+                  "<button type=\"button\" class=\"io-button io-button--accept svelte-16z1lxi\" id=\"knV10LoginSubmit\" onclick=\"knV10LoginSubmit()\">Register</button> "
+                  "<div class=\"terms-privacy-notice svelte-16z1lxi\">By registering, you agree to our "
+                  "<a class=\"svelte-16z1lxi\" onclick=\"openURL('https://frvr.com/legal/krunker#TermsofService')\">Terms of Service</a> and "
+                  "<a class=\"svelte-16z1lxi\" onclick=\"openURL('https://frvr.com/legal/krunker#PrivacyPolicy')\">Privacy Policy</a></div>"
+                  "</div></form></div>");
+}
+
+// name / mail / pass: what the fields hold now (Svelte keeps its $state across a re-render)
+static void render_with(const char *name, const char *mail, const char *pass) {
     HtmlElem host = by_id("knV10Login");
     if (!host) return;
-    // the inputs keep what was typed across a re-render (Svelte keeps its $state)
-    char name[64], mail[256];
-    read_value("accName", name, sizeof(name));
-    read_value("accEmail", mail, sizeof(mail));
-    if (!name[0]) html_storage_get("krunker_username", name, sizeof(name)); // getSavedVal("krunker_username")
     StrBuf sb = {0};
     sb_append(&sb, "<div class=\"popup-container svelte-1wz7ymp\"><div class=\"popup svelte-1wz7ymp\" style=\"width: 800px;\" "
                    "onclick=\"knV10LoginStay()\"><div class=\"io-popup-container\"><div class=\"io-popup-header\">");
@@ -89,41 +179,36 @@ static void render(void) {
                        "autocomplete=\"email\" placeholder=\"Enter Email\" onkeydown=\"knV10LoginKey()\"> <button type=\"button\" "
                        "class=\"io-button io-button--accept svelte-16z1lxi\" id=\"knV10RecoverSubmit\" onclick=\"knV10LoginRecover()\">Submit</button></div></div> "
                        "<button type=\"button\" class=\"io-button\" id=\"knV10RecoverBack\" onclick=\"knV10LoginForgot()\">Back</button>");
+    } else if (L.reg) {
+        render_register(&sb, mail, name, pass);
     } else {
-        sb_append(&sb, "<div class=\"io-card\"><form data-priority=\"true\"><div class=\"io-input-container svelte-16z1lxi\">"
-                       "<div class=\"label-row\"><label for=\"accName\" class=\"input-label\">Username</label></div> "
-                       "<input id=\"accName\" type=\"text\" class=\"io-input-field svelte-16z1lxi\" autocomplete=\"username\" placeholder=\"Enter Username\" "
-                       "onkeydown=\"knV10LoginKey()\" value=\"");
-        sb_append_esc(&sb, name);
-        sb_append(&sb, "\"> <div class=\"label-row\" style=\"margin-top:15px\"><label for=\"accPass\" class=\"input-label\">Password</label>");
-        if (!L.reg) sb_append(&sb, " <button type=\"button\" class=\"auth-toggle-btn svelte-16z1lxi\" id=\"knV10Forgot\" onclick=\"knV10LoginForgot()\">Forgot Password?</button>");
-        sb_appendf(&sb, "</div> <input id=\"accPass\" type=\"password\" class=\"io-input-field svelte-16z1lxi\" autocomplete=\"%s\" "
-                        "placeholder=\"Enter Password\" onkeydown=\"knV10LoginKey()\"> ", L.reg ? "new-password" : "current-password");
-        if (L.reg) {
-            sb_append(&sb, "<div class=\"label-row\" style=\"margin-top:15px\"><label for=\"accEmail\" class=\"input-label\">Email</label></div> "
-                           "<input id=\"accEmail\" type=\"email\" class=\"io-input-field svelte-16z1lxi\" autocomplete=\"email\" placeholder=\"Enter Email\" "
-                           "onkeydown=\"knV10LoginKey()\" value=\"");
-            sb_append_esc(&sb, mail);
-            sb_append(&sb, "\"> <label class=\"promo-optin svelte-16z1lxi\"><input type=\"checkbox\" class=\"svelte-16z1lxi\"> "
-                           "<span>Send me news about events, updates and season releases</span></label> "
-                           "<button type=\"button\" class=\"io-button io-button--accept svelte-16z1lxi\" id=\"knV10LoginSubmit\" onclick=\"knV10LoginSubmit()\">Register</button> "
-                           "<div class=\"terms-privacy-notice svelte-16z1lxi\">By registering, you agree to our "
-                           "<a class=\"svelte-16z1lxi\" onclick=\"openURL('https://frvr.com/legal/krunker#TermsofService')\">Terms of Service</a> and "
-                           "<a class=\"svelte-16z1lxi\" onclick=\"openURL('https://frvr.com/legal/krunker#PrivacyPolicy')\">Privacy Policy</a></div>");
-        } else {
-            sb_append(&sb, "<button type=\"button\" class=\"io-button io-button--accept svelte-16z1lxi\" id=\"knV10LoginSubmit\" onclick=\"knV10LoginSubmit()\">Login</button>");
-        }
-        sb_append(&sb, "</div></form></div>");
+        render_login(&sb, L.email ? mail : name, pass);
     }
     // {#if message !== ''} .io-message: account_ui.c's showAccResp writes #accResp
     sb_append(&sb, " <div class=\"io-message\" id=\"accResp\" style=\"display:none\"></div></div></div></div></div>");
     char *html = sb_finish(&sb);
     HtmlElem wrapper = html_dom_query(host, ".view-wrapper");
     if (wrapper) html_dom_set_html(wrapper, html);
+    memset(html, 0, strlen(html)); // it held the password
     free(html);
     sync_ui_vars(host);
-    HtmlElem focus = by_id(L.recover ? "recoveryEmail" : name[0] && !L.reg ? "accPass" : "accName");
+    const char *ident = L.email ? mail : name;
+    const char *focus_id = L.recover ? "recoveryEmail"
+                           : L.reg   ? "accEmail"
+                           : ident && ident[0] && pass_shown(pass) ? "accPass"
+                           : L.email ? "accEmail" : "accName";
+    HtmlElem focus = by_id(focus_id);
     if (focus) html_dom_focus(focus);
+}
+
+static void render(void) {
+    char name[256], mail[256], pass[128];
+    read_value("accName", name, sizeof(name));
+    read_value("accEmail", mail, sizeof(mail));
+    read_value("accPass", pass, sizeof(pass));
+    if (!name[0] && !mail[0]) html_storage_get("krunker_username", name, sizeof(name)); // getSavedVal("krunker_username")
+    render_with(name, mail, pass);
+    memset(pass, 0, sizeof(pass));
 }
 
 static void close_modal(void) {
@@ -150,6 +235,12 @@ static void open_modal(const int reg) {
     L.open = 1;
     L.reg = reg;
     L.recover = 0;
+    L.use_pass = 0;
+    char saved[64] = ""; // _39221: Email first unless a username is saved
+    if (html_storage_get("krunker_username", saved, sizeof(saved)) < 0) saved[0] = 0;
+    const char *t = saved;
+    while (*t == ' ') t++;
+    L.email = *t == 0;
     render();
 }
 
@@ -157,26 +248,55 @@ void v10_login_account_changed(void) {
     if (L.open && account_get()) close_modal(); // $account set: the modal leaves the stack
 }
 
+static void message(const char *text) {
+    HtmlElem resp = by_id("accResp");
+    if (!resp) return;
+    html_dom_set_text(resp, text);
+    html_dom_set_display(resp, "block");
+}
+
 static void submit(void) {
     if (!L.open || L.recover) return;
-    char name[64], pass[128];
+    char name[256], mail[256], pass[128];
     read_value("accName", name, sizeof(name));
+    read_value("accEmail", mail, sizeof(mail));
     read_value("accPass", pass, sizeof(pass));
-    HtmlElem resp = by_id("accResp");
-    if (!name[0] || !pass[0]) { // generic.auth.fillAllFields
-        if (resp) {
-            html_dom_set_text(resp, "Please fill in all fields");
-            html_dom_set_display(resp, "block");
-        }
-        memset(pass, 0, sizeof(pass));
-        return;
-    }
+    const int has_pass = pass[0] != 0;
     memset(pass, 0, sizeof(pass));
-    // account_ui.c reads #accName / #accPass (/ #accEmail) and answers in #accResp
-    if (account_ui_handle(L.reg ? "registerAcc" : "loginAcc", NULL, NULL, 0) < 0 && resp) {
-        html_dom_set_text(resp, "Error"); // generic.error: no account service in this build
-        html_dom_set_display(resp, "block");
+    const char *m = mail;
+    while (*m == ' ') m++;
+    if (L.reg) {
+        if (!*m) { // the register card's own check (v10 _39207 submit)
+            message("Please enter your email to register.");
+            return;
+        }
+        if (!name[0] || !has_pass) {
+            message("Please fill in all fields"); // generic.auth.fillAllFields
+            return;
+        }
+    } else {
+        const char *ident = L.email ? m : name;
+        if (!ident[0]) {
+            message("Please fill in all fields");
+            return;
+        }
+        if (!has_pass) {
+            if (L.email && !L.use_pass) {
+                // v10 (_39234) offers "Send Email Code" / "Use Password" here; KrunkNative accounts
+                // sign in with a password only: "Use Password" (_39184), the password row shows
+                L.use_pass = 1;
+                sync_pass();
+                HtmlElem p = by_id("accPass");
+                if (p) html_dom_focus(p);
+                return;
+            }
+            message("Please fill in all fields");
+            return;
+        }
     }
+    // account_ui.c reads #accName or #accEmail / #accPass (/ #accEmail) and answers in #accResp
+    if (account_ui_handle(L.reg ? "registerAcc" : "loginAcc", NULL, NULL, 0) < 0)
+        message("Error"); // generic.error: no account service in this build
 }
 
 // The recover card's Submit: the Account window's reset steps, started with this address
@@ -214,10 +334,23 @@ int v10_login_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
     }
     if (!strcmp(name, "knV10LoginSwitch")) { // _39150: the other card, fields and message cleared
         L.reg = !L.reg;
-        HtmlElem el;
-        if ((el = by_id("accPass"))) html_dom_set_value(el, "");
-        if ((el = by_id("accEmail"))) html_dom_set_value(el, "");
-        render();
+        L.use_pass = 0;
+        render_with("", "", "");
+        return 1;
+    }
+    if (!strcmp(name, "knV10LoginMode")) { // _39146: Email <-> Username, the value and password kept
+        char ident[256], pass[128];
+        read_value(L.email ? "accEmail" : "accName", ident, sizeof(ident));
+        read_value("accPass", pass, sizeof(pass));
+        L.email = !L.email;
+        L.use_pass = 0;
+        render_with(ident, ident, pass);
+        memset(pass, 0, sizeof(pass));
+        return 1;
+    }
+    if (!strcmp(name, "knV10LoginInput")) { // _39166 / _39172: the suggestion and the password row follow the typing
+        sync_hint();
+        sync_pass();
         return 1;
     }
     if (!strcmp(name, "knV10LoginForgot")) { // _39160: the recover card and back

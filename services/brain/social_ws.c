@@ -445,7 +445,8 @@ static void sh_auth(SocialSession *s, const cJSON *f) {
         send_auth_error(s, "Invalid credentials.");
         return;
     }
-    /* KrunkNative: register takes an optional email as the payload's 4th element (v7.1.4: none) */
+    /* KrunkNative: register takes an email as the payload's 4th element (v7.1.4: none; the v10 modal
+     * asks for it, accounts.email.required makes the brain insist). Login: the name may be an email. */
     const cJSON *p3 = cJSON_GetArrayItem(payload, 3);
     char email[256] = "";
     if (action == 0 && cJSON_IsString(p3) && p3->valuestring[0]) {
@@ -476,6 +477,7 @@ static void sh_auth(SocialSession *s, const cJSON *f) {
         .ref = action == 0 ? third : NULL,
         .ip = s->ip,
         .origin = "social",
+        .email = email[0] ? email : NULL, /* register: refused when another account has it */
     };
     if (action == 0 && cJSON_IsNumber(p2)) rq.ref = NULL;
     acct_auth(&rq, auth_reply, w);

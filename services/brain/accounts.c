@@ -312,7 +312,8 @@ int acct_hash_async(const char *password, const char *encoded, AcctHashFn cb, vo
 
 typedef struct AuthCtx {
     int action;
-    char name[64];
+    char name[64];      /* login: the username (an email resolves to its account's); the throttle key */
+    char email[256];    /* register: the new account's email; login: the email signed in with */
     char *pass;
     char token[80];
     char ref[64];
@@ -582,7 +583,44 @@ static void register_precheck_done(kn_db_result *res, void *ud) {
         auth_fail(c, "Too many accounts created from this IP. Please Try Later");
         return;
     }
+    /* one account per email (the login modal signs in with it); the brain stores it once the
+     * account exists (acct_email_after_register), where the same check runs again */
+    if (kn_db_get_bool(res, 0, kn_db_col(res, "email_taken"), 0)) {
+        auth_fail(c, ACCT_ERR_EMAIL_TAKEN);
+        return;
+    }
     if (acct_hash_async(c->pass, NULL, register_hashed, c) != 0) auth_fail(c, "Server busy, try again.");
+}
+
+/* Sign in with an email (Krunker v10's login modal: "Email" / "(use username instead)"): the
+ * account holding the address. Registering and "cemail" refuse an address another account has,
+ * but older rows may share one (0109's password reset mails up to 3 accounts per address): a
+ * verified holder first, then the oldest. Indexed by 0122_email_login. MySQL compares in the
+ * column's case-insensitive collation (its index is on email itself). */
+static const kn_sql SQL_LOGIN_EMAIL = {
+    .mysql = "SELECT username FROM accounts WHERE email = $1 ORDER BY (email_verified_at IS NULL), id LIMIT 1",
+    .any = "SELECT username FROM accounts WHERE lower(email) = lower($1) ORDER BY (email_verified_at IS NULL), id LIMIT 1"};
+
+static void login_lookup(AuthCtx *c) {
+    char th[24], bm[24], bd[24];
+    kn_db_call(g_acct_brain->db, &P_LOGIN_LOOKUP,
+                KN_DB_ARGS(c->name, ip_param(c), acct_itoa(th, g_acct.login_throttle_s),
+                           acct_itoa(bm, g_acct.ip_block_failures), acct_itoa(bd, g_acct.ip_block_days)),
+                login_lookup_done, c);
+}
+
+/* An unknown email goes on as its own (truncated) name: no username holds an '@'
+ * (acct_validate_name), so the lookup finds nobody, pays the dummy PBKDF2 and answers
+ * "Invalid login." like a wrong password; the (name, IP) throttle and the IP block count it. */
+static void login_email_done(kn_db_result *res, void *ud) {
+    AuthCtx *c = ud;
+    if (!kn_db_ok(res)) {
+        auth_fail(c, acct_db_error(res, "login email"));
+        return;
+    }
+    const char *user = kn_db_rows(res) > 0 && !kn_db_isnull(res, 0, 0) ? kn_db_get(res, 0, 0) : NULL;
+    if (user && *user) snprintf(c->name, sizeof c->name, "%s", user);
+    login_lookup(c);
 }
 
 /* Token resume: the hot tier's session cache first (a hit reads the account without
@@ -632,9 +670,11 @@ void acct_auth(const AcctAuthReq *rq, AcctReplyFn cb, void *ud) {
             return;
         }
         c->pass = strdup(rq->pass);
+        snprintf(c->email, sizeof c->email, "%s", rq->email ? rq->email : "");
         char lim[24];
         kn_db_call(g_acct_brain->db, &P_REGISTER_PRECHECK,
-                    KN_DB_ARGS(c->name, ip_param(c), acct_itoa(lim, g_acct.register_per_ip_hour)),
+                    KN_DB_ARGS(c->name, ip_param(c), acct_itoa(lim, g_acct.register_per_ip_hour),
+                               c->email[0] ? c->email : NULL),
                     register_precheck_done, c);
         return;
     }
@@ -649,11 +689,20 @@ void acct_auth(const AcctAuthReq *rq, AcctReplyFn cb, void *ud) {
             return;
         }
         c->pass = strdup(rq->pass);
-        char th[24], bm[24], bd[24];
-        kn_db_call(g_acct_brain->db, &P_LOGIN_LOOKUP,
-                    KN_DB_ARGS(c->name, ip_param(c), acct_itoa(th, g_acct.login_throttle_s),
-                               acct_itoa(bm, g_acct.ip_block_failures), acct_itoa(bd, g_acct.ip_block_days)),
-                    login_lookup_done, c);
+        if (strchr(rq->name, '@')) {
+            /* the login field takes a username or an email: the email, trimmed and in lower case */
+            const char *s = rq->name;
+            while (*s == ' ' || *s == '\t') s++;
+            size_t n = strlen(s);
+            while (n > 0 && (s[n - 1] == ' ' || s[n - 1] == '\t')) n--;
+            if (n >= sizeof c->email) n = sizeof c->email - 1;
+            for (size_t i = 0; i < n; i++) c->email[i] = (char) tolower((unsigned char) s[i]);
+            c->email[n] = 0;
+            snprintf(c->name, sizeof c->name, "%.*s", (int) (sizeof c->name - 1), c->email);
+            kn_db_query_sql(g_acct_brain->db, &SQL_LOGIN_EMAIL, KN_DB_ARGS(c->email), login_email_done, c);
+            return;
+        }
+        login_lookup(c);
         return;
     }
 

@@ -3826,9 +3826,10 @@ H(h_location_reload) {
 // the Login button and a message line. Markup = the component templates (index:11466-11479) in the
 // popup frame (index:8534, 800 px) of the view stack (index:12537); CSS = css/hub-svelte.css
 // (tools/ui-import/v10_hub_editor.py) + static/index.css (io-*).
-// Intentional differences: KrunkNative's account server signs in by username + password over
-// the hub socket ("a", as v7.1.4), not FRVR's REST auth: an email address is refused locally
-// with a message, and the email-code sign-in ("Send Code") is not offered.
+// Intentional differences: KrunkNative's account server signs in by password over the hub
+// socket ("a", as v7.1.4), not FRVR's REST auth: the Email or Username field goes as the name
+// (kn_brain signs in to the account holding an email), and the email-code sign-in ("Send Code")
+// is not offered.
 static struct {
     int open;
     int email;          // the email field is shown (v10: no saved krunker_username)
@@ -3934,7 +3935,7 @@ H(h_login_overlay) {
 
 H(h_login_acc) {
     UNUSED;
-    char name[128] = "", pass[128] = "";
+    char name[256] = "", pass[128] = "";
     login_modal_values(name, sizeof(name), pass, sizeof(pass));
     if (!name[0] || !pass[0]) {
         // generic.auth.fillAllFields; in email mode v10 offers the sign-in code first (not ported)
@@ -3945,10 +3946,6 @@ H(h_login_acc) {
         } else {
             login_modal_message("Please fill in all fields");
         }
-        return 1;
-    }
-    if (strchr(name, '@')) {
-        login_modal_message("Email sign-in is not available here: use your username.");
         return 1;
     }
     login_modal_message("Please wait...");

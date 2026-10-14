@@ -18,8 +18,9 @@ Headless client_bin runs (one at a time, input scripts clicking the page by elem
      Quick Match seeks again with excludeGame and joins the OTHER lobby
   2. a guest: "Login or Register" opens v10's modal; Register here -> username, password, email
      -> Register: the account exists in the brain, the modal closes and the header is the
-     signed-in bar without a restart; Logout -> the guest bar again; the modal again -> Login with
-     that account -> signed in again
+     signed-in bar without a restart; Logout -> the guest bar again; the modal again -> "(use
+     username instead)" -> Login with that account's username -> signed in again
+     (signing in with the email: v10_email_login_e2e.py)
   3. brain: /mm/seek-game?excludeGame= never returns the excluded lobby while another has room
 
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL). Exit 77 when the database is unavailable.
@@ -193,7 +194,7 @@ SIGNED_IN_SCRIPT = """0 menu
 GUEST_SCRIPT = """0 menu
 500 vis @guest signedInHeaderBar signedOutHeaderBar
 600 clickid knV10LoginBtn
-1000 vis @modal knV10Login accName accPass
+1000 vis @modal knV10Login accEmail accName
 1100 clickid knV10AuthSwitch
 1400 clickid accName
 1450 type {user}
@@ -208,6 +209,7 @@ GUEST_SCRIPT = """0 menu
 6820 up ESC
 7000 vis @loggedout signedInHeaderBar signedOutHeaderBar
 7100 clickid knV10LoginBtn
+7400 clickid knV10LoginMode
 7500 clickid accName
 7550 type {user}
 7600 clickid accPass
@@ -260,7 +262,8 @@ def guest_case(brain_port):
     g = vis(text, "guest")
     check("2: guest header bar", g.get("signedOutHeaderBar") == "1" and g.get("signedInHeaderBar") in ("-", "0"), str(g))
     m = vis(text, "modal")
-    check("2: Login or Register opens the modal", m.get("knV10Login") == "1" and m.get("accName") == "1", str(m))
+    # a guest with no saved username: v10's Email field first (the "(use username instead)" toggle -> Username)
+    check("2: Login or Register opens the modal", m.get("knV10Login") == "1" and m.get("accEmail") == "1", str(m))
     r = vis(text, "registered")
     check("2: Register signs in: modal closed, signed-in header", r.get("knV10Login") == "-" and r.get("signedInHeaderBar") == "1"
           and r.get("signedOutHeaderBar") == "0" and r.get("knV10Name") == "1", str(r))

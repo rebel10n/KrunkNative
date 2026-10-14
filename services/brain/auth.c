@@ -4,7 +4,7 @@
  * Mojang-style join handshake (doc/backend.md "Central auth"):
  *
  *   POST /auth/register {username, password}   -> {ok, token, expiresAt, account}
- *   POST /auth/login    {username, password}   -> same
+ *   POST /auth/login    {username | email, password} -> same (the username field may hold an email)
  *   POST /auth/refresh  {token} | Bearer       -> same (sliding expiry, token kept)
  *   POST /auth/logout   {token} | Bearer       -> {ok}
  *   GET  /auth/me       Bearer | ?token=       -> {ok, account}
@@ -164,6 +164,7 @@ static void password_auth(kn_http_req *req, int action) {
     if (limited(action == 0 ? &g_auth.reg : &g_auth.login, req)) return;
     cJSON *body = kn_http_body_json(req);
     const char *name = body_str(body, "username", "name");
+    if (!name && action == 1) name = body_str(body, "email", "login"); /* acct_auth: an email signs in too */
     const char *pass = body_str(body, "password", "pass");
     if (!name || !pass) {
         cJSON_Delete(body);

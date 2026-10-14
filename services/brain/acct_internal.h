@@ -91,7 +91,12 @@ typedef struct AcctAuthReq {
     int action;                     /* 0 register, 1 login (password or token) */
     const char *name, *pass, *token, *ref, *ip, *origin;
     const char *twofa;              /* the 6-digit 2FA code of a password login, NULL = none given */
+    const char *email;              /* register: the new account's (normalized) email, NULL = none;
+                                       refused when another account already has it */
 } AcctAuthReq;
+
+/* acct_auth error of a register whose email is on another account (v10 generic.auth.emailAlreadyInUse) */
+#define ACCT_ERR_EMAIL_TAKEN "Email already in use"
 
 /* acct_auth error of a password login whose account has 2FA (v7.1.4: an authenticator app)
  * and no code was given: the social socket answers ["c2fa", 0, "2fa"] and waits for

@@ -740,8 +740,10 @@ static int l_window_keydown(void *user, const HtmlEvent *ev, const HtmlArg *args
             return 0;
         }
         // Enter in the login form logs in (a real login, account_ui.c, never a fake nickname);
-        // KrunkNative: also from the password field, and the reset form submits its step
-        if (html_key_is_enter(ev->key) && !v10_menu_login_open() && (ev->target == html_dom_by_id("accName") || ev->target == html_dom_by_id("accPass")))
+        // KrunkNative: also from the password and email fields (an email signs in too), and the
+        // reset form submits its step
+        if (html_key_is_enter(ev->key) && !v10_menu_login_open() &&
+            (ev->target == html_dom_by_id("accName") || ev->target == html_dom_by_id("accPass") || ev->target == html_dom_by_id("accEmail")))
             account_ui_handle("loginAcc", ev, NULL, 0);
         if (html_key_is_enter(ev->key) && account_ui_reset_enter(ev->target)) return 0;
         return 1;

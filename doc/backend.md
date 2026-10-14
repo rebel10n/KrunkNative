@@ -1025,7 +1025,7 @@ wheel, daily reward). Private header `acct_internal.h`; public
 `accounts.h` (internal ops, used by `internal_ws.c` / `public_routes.c`) and
 `social_ws.h`. Schema: `services/db/migrations/postgres/0100_accounts.sql`,
 `0101_social.sql`, `0102_items_creations.sql`, `0103_account_functions.sql`,
-`0104_social_functions.sql`, `0105_twofa.sql`, `0106_store.sql`, `0118_store_v10.sql`, `0109_account_security.sql` (applied migrations are never edited:
+`0104_social_functions.sql`, `0105_twofa.sql`, `0106_store.sql`, `0118_store_v10.sql`, `0109_account_security.sql`, `0122_email_login.sql` (applied migrations are never edited:
 changes go into a new 01xx file in every dialect directory; `sqlite/` and `mysql/`
 hold the same tables, the SQL functions are C kn_procs in `db_accounts.c` /
 `db_social.c`, 3.6). Port of v3.1.1 `matchmaker/socialWs.ts`,
@@ -1160,8 +1160,8 @@ Auth (`socialWs.ts` handleAuth / packetHandlers io_a):
 
 | request | reply |
 | --- | --- |
-| `["a", 0, [name, pass, ref, email?], captcha]` register (email: Krunker Box Office, optional; 7.9) | `["a", null, id, username, data40, token, info]` or `["a", "error", null, null, null, null]` |
-| `["a", 1, [name, pass, null], captcha]` login | same |
+| `["a", 0, [name, pass, ref, email?], captcha]` register (email: Krunker Box Office, one account per address; the v10 modal always sends it, `accounts.email.required` makes the brain insist; 7.9) | `["a", null, id, username, data40, token, info]` or `["a", "error", null, null, null, null]` |
+| `["a", 1, [name, pass, null], captcha]` login (name: a username or an email, trimmed, any case: the account holding it, 0122_email_login) | same |
 | `["a", 1, [name, null, token]]` token resume | same (token unchanged) |
 | `["a", -1]` logout | none (session token revoked) |
 
@@ -1171,7 +1171,9 @@ Auth (`socialWs.ts` handleAuth / packetHandlers io_a):
 underscores.`, `Password must be ≥ 6 characters.`, `Password is too long.`,
 `Username already taken.`, `Invalid login.`, `Invalid credentials.`, `Please Try
 Later`, `Too many failed logins for this IP`, `Banned: <reason>` / `Account banned.`,
-`Too many accounts created from this IP. Please Try Later`, `Invalid Email`, `Email Required`.
+`Too many accounts created from this IP. Please Try Later`, `Invalid Email`, `Email Required`, `Email already in use`.
+An unknown email answers `Invalid login.` like a wrong password (no account enumeration) and counts
+in the same (name, IP) throttle and IP block.
 After every login the brain pushes `["emailS", state]` (JSON clients; 7.9).
 
 Pages: `["r", page, sub, myId, myName, s, region, item, captcha]` ->
@@ -1430,9 +1432,10 @@ It has no email flow at all: no email field, no verification, no reset by email,
   right). The reason of a repeated prompt rides as a 6th element (`"Invalid Code"`): Krunker Box Office
   shows it in the popup (v7 shows nothing). Token resumes skip 2FA (as v7). Procs
   `P_TWOFA_CONFIRM`, `P_TWOFA_DISABLE`, `P_TWOFA_LOGIN`.
-* **Email verification (Krunker Box Office)**: an optional email at register (`["a", 0, [name, pass, ref,
-  email]]`) or later in the menu (`["cemail", email]`; a new address is stored unverified and
-  voids older links) mails a link `<link_base>/auth/verify-email?token=<43 chars>` (GET, also
+* **Email verification (Krunker Box Office)**: an email at register (`["a", 0, [name, pass, ref,
+  email]]`; the clients require it, the brain with `accounts.email.required`) or later in the menu
+  (`["cemail", email]`; a new address is stored unverified and voids older links; an address another
+  account has is refused, `Email already in use`: one account per email, it signs in like the username) mails a link `<link_base>/auth/verify-email?token=<43 chars>` (GET, also
   `/api/verify-email`, an HTML page; tokens stored as sha256, 24 h, one use; the address must
   still be the account's). Verifying sets `email_verified_at` and pushes `["emailS", {email,
   verified, pending, wait, mail}]` to the account's sockets. `["emailv"]` resends; limits: one
@@ -1468,7 +1471,8 @@ It has no email flow at all: no email field, no verification, no reset by email,
   never logged or stored.
 * **Client**: `client/src/ui/account_ui.c`: v7's 2FA popup (QR code: `client/src/ui/qr_code.c`,
   an SVG data URL; six digit inputs, `onInput2FA` / `onKeyDown2FA`, also on the hub and editor
-  pages' login popups), the account window's optional email input (Register), and an Email block
+  pages' login popups), the account window's email input ("Enter Email": required by Register, Login takes it instead of
+  the username), the v10 login modal's Email / Username field (`client/src/ui/v10_login.c`), and an Email block
   in Settings > Account Security (address, Verified / Not verified, Resend, change), and
   "Forgot password?" under the login form (`knResetOpen`: name or email -> the mailed code, also
   "Got a code already?" -> the new password; Enter submits each step). Enter in the password field

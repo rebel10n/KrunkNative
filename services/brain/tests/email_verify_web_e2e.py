@@ -149,7 +149,7 @@ async def scenario(http_port, cdp_port, brain_port, smtp, db_path, work):
     await asyncio.sleep(2)
     await c.eval("document.querySelector('[onclick*=\"showWindow(5)\"]').click()")
     ok = await c.wait("!!document.getElementById('accEmail')", 30)
-    check(ok, "the account window has the optional email field")
+    check(ok, "the account window has the email field")
     await c.eval("""(() => { const set = (id, v) => { const e = document.getElementById(id); e.value = v;
         e.dispatchEvent(new Event('input', {bubbles: true})); };
         set('accName', %s); set('accPass', 'web_pass_1'); set('accEmail', %s);

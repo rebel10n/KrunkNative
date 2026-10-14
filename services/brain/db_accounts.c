@@ -80,7 +80,8 @@ static kn_db_result *run_register(kn_dbconn *c, int n, const char *const *p) {
 }
 const kn_proc P_REGISTER = {"register", "SELECT kn_register($1, $2, $3, $4, $5, $6, $7, $8, $9)", run_register};
 
-/* (name, ip, per_ip_hour) -> taken, banned, limited */
+/* (name, ip, per_ip_hour, email | NULL) -> taken, banned, limited, email_taken (another account
+ * has the email: one account per address, the login modal signs in with it; 0122_email_login) */
 static kn_db_result *run_register_precheck(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     int taken = dbx_exists(&x, SQL(.any = "SELECT 1 FROM accounts WHERE lower(username) = lower($1)"), KN_DB_ARGS(P(0)));
@@ -89,10 +90,14 @@ static kn_db_result *run_register_precheck(kn_dbconn *c, int n, const char *cons
     if (P(1) && PI(2) > 0)
         limited = dbx_int(&x, SQL(.any = "SELECT count(*) FROM accounts WHERE created_ip = $1 AND created_at > {ago:3600}"),
                           KN_DB_ARGS(P(1)), 0) >= PI(2);
-    const char *names[3] = {"taken", "banned", "limited"};
-    const kn_db_type types[3] = {KN_DB_T_BOOL, KN_DB_T_BOOL, KN_DB_T_BOOL};
-    kn_db_result *r = kn_db_result_new(3, names, types);
-    const char *row[3] = {taken ? "t" : "f", banned ? "t" : "f", limited ? "t" : "f"};
+    int email_taken = P(3) && *P(3) &&
+                      dbx_exists(&x, SQL(.mysql = "SELECT 1 FROM accounts WHERE email = $1",
+                                         .any = "SELECT 1 FROM accounts WHERE lower(email) = lower($1)"),
+                                 KN_DB_ARGS(P(3)));
+    const char *names[4] = {"taken", "banned", "limited", "email_taken"};
+    const kn_db_type types[4] = {KN_DB_T_BOOL, KN_DB_T_BOOL, KN_DB_T_BOOL, KN_DB_T_BOOL};
+    kn_db_result *r = kn_db_result_new(4, names, types);
+    const char *row[4] = {taken ? "t" : "f", banned ? "t" : "f", limited ? "t" : "f", email_taken ? "t" : "f"};
     if (r) kn_db_result_add_row(r, row);
     return dbx_finish(&x, r);
 }
@@ -101,7 +106,8 @@ const kn_proc P_REGISTER_PRECHECK = {
     "SELECT EXISTS (SELECT 1 FROM accounts WHERE lower(username) = lower($1)) AS taken, "
     "($2::text IS NOT NULL AND EXISTS (SELECT 1 FROM kn_active_ban(NULL, $2) b WHERE b.reason IS NOT NULL OR b.expires_at IS NOT NULL)) AS banned, "
     "($2::text IS NOT NULL AND $3::int > 0 AND (SELECT count(*) FROM accounts WHERE created_ip = $2 "
-    "AND created_at > now() - interval '1 hour') >= $3::int) AS limited",
+    "AND created_at > now() - interval '1 hour') >= $3::int) AS limited, "
+    "($4::text IS NOT NULL AND EXISTS (SELECT 1 FROM accounts WHERE lower(email) = lower($4))) AS email_taken",
     run_register_precheck};
 
 /* kn_login_lookup(name, ip, throttle_s, block_max, block_days): one row always */
