@@ -374,6 +374,16 @@ static void net_remove_game_player(Player *player) {
     net_free_player(player);
 }
 
+// What the server itself saw the player do this life: shots fired (hitscan rays and the stream
+// count life_shots, projectiles and thrown knives shot_count), damage dealt and damage taken.
+static int net_idle_shots(const Player *player) { return player->life_shots + (int) player->shot_count; }
+
+static void net_idle_note_actions(ClientConnection *client, const Player *player) {
+    client->idle_shots = net_idle_shots(player);
+    client->idle_damage_dealt = player->damage_dealt;
+    client->idle_health = player->health;
+}
+
 static void net_mark_client_spawned(ClientConnection *client) {
     if (!client || !client->player) return;
 
@@ -381,7 +391,8 @@ static void net_mark_client_spawned(ClientConnection *client) {
     client->last_significant_move_at = g_server->now;
     client->idle_position = client->player->position;
     client->has_idle_position = 1;
-    client->has_idle_look = 0; // the new life's first input frame is the look / keys reference
+    client->has_idle_look = 0; // the new life's first input frame is the look reference
+    net_idle_note_actions(client, client->player);
 }
 
 // The idle clock restarts: the player did something (net_check_idle_clients).
@@ -389,28 +400,27 @@ static void net_note_activity(ClientConnection *client) {
     client->last_significant_move_at = g_server->now;
 }
 
-// What the player holds in an input frame, as one comparable value: the move keys and the buttons
-// (the reset / interact bits included). Swaps, the wheel and slot picks are presses of their own.
-static int net_input_keys(const Input *input) {
-    return (input->move_dir + 1) | input->shoot << 4 | input->scope << 5 | input->jump << 6 | input->crouch << 7 |
-           input->reload << 8 | input->interact_held << 9 | input->reset << 10;
-}
-
-// An accepted input frame is activity when the player turned its view, pressed or released a
-// key, swapped or scrolled weapons: v7.1.4's own idle timer (controls.js) resets on every key
-// event and every mouse move. Empty frames with the same look (the client keeps sending them
-// while nobody touches it) are not.
+// An accepted input frame is activity when anything in it is held or pressed (a move key, fire,
+// aim, jump, crouch, reload, interact, reset, a weapon swap, the wheel, a slot pick), or when the
+// view turned away from the look of the last activity. Only empty frames with the same look (the
+// client keeps sending them while nobody touches it) are not: v7.1.4's own idle timer
+// (controls.js) resets on every key event and every mouse move.
+// 11d36be compared each frame with the one before it, so a held trigger, aim or crouch with the
+// mouse still (identical frames) never counted, and neither did a slow turn of less than 1e-4
+// rad per frame (low or aim sensitivity, fractional browser mouse deltas): players who stood still
+// and shot were kicked mid-fight. The look is now compared with the look of the last activity,
+// so a slow turn adds up.
 static void net_note_input_activity(ClientConnection *client, const Input *input) {
-    const int keys = net_input_keys(input);
-    if (!client->has_idle_look) {
+    const int held = input->move_dir >= 0 || input->shoot || input->scope || input->jump || input->crouch || input->reload ||
+                     input->interact_held || input->reset || input->swap || input->scroll || input->select_slot;
+    const int turned = client->has_idle_look && (fabsf(input->x_dir - client->idle_look[0]) > 1e-4f ||
+                                                 fabsf(input->y_dir - client->idle_look[1]) > 1e-4f);
+    if (held || turned) net_note_activity(client);
+    if (held || turned || !client->has_idle_look) {
         client->has_idle_look = 1;
-    } else if (fabsf(input->x_dir - client->idle_look[0]) > 1e-4f || fabsf(input->y_dir - client->idle_look[1]) > 1e-4f ||
-               keys != client->idle_keys || input->swap || input->scroll || input->select_slot) {
-        net_note_activity(client);
+        client->idle_look[0] = input->x_dir;
+        client->idle_look[1] = input->y_dir;
     }
-    client->idle_look[0] = input->x_dir;
-    client->idle_look[1] = input->y_dir;
-    client->idle_keys = keys;
 }
 
 // One tick's frames for one client go out in a single send(): Krunker sends its per-tick
@@ -1420,7 +1430,7 @@ void net_resume_ent(ClientConnection *client, const int spectate) {
 // Packets only a player's own action sends (a click, a key, a chat line): each one restarts the
 // idle clock, alive, dead or in the menu (the respawn click is the ENT). Not: what clients send
 // on their own (HELLO, JOIN, PONG, map / social / script traffic) and input frames, which count
-// only when they change something (net_note_input_activity).
+// only when something is held or the view turned (net_note_input_activity).
 static int net_packet_is_activity(const uint8_t type) {
     switch (type) {
         case NET_PACKET_ENT:
@@ -1736,9 +1746,10 @@ static int net_idle_exempt(const ClientConnection *client) {
 // strafing in place, was kicked; v7.1.4's idle timer (controls.js / index.js CONTROLS.idleTimer)
 // restarts on every key event and mouse move. Here the clock (last_significant_move_at)
 // restarts on the connect, every (re)spawn, a map change (markPlayerUnspawned), the death, a
-// 1-unit move, an input frame that turns the view or presses / releases a key
-// (net_note_input_activity) and every packet only a player's own action sends (ENT = the respawn
-// click, chat, votes, sprays...: net_packet_is_activity).
+// 1-unit move, every input frame with anything held or pressed or a turned view
+// (net_note_input_activity), every shot the server saw the player fire, damage dealt or taken,
+// and every packet only a player's own action sends (ENT = the respawn click, chat, votes,
+// sprays...: net_packet_is_activity).
 //   alive:                      kicked after idle_kick_seconds without any of that
 //   dead / before the spawn:    kicked after idle_menu_kick_seconds (0 = never). v7 kicks from
 //     the menu itself, on the client (menu_ui.c, config.kickTimer 120 s, public lobbies); this is
@@ -1780,6 +1791,14 @@ void net_check_idle_clients(const float now) {
             net_mark_client_spawned(client);
             continue;
         }
+
+        // the server's own record: a shot fired, damage dealt or taken (a projectile or a hit that
+        // lands after the input that caused it, a player standing still under fire)
+        if (net_idle_shots(player) != client->idle_shots || player->damage_dealt != client->idle_damage_dealt ||
+            player->health < client->idle_health) {
+            client->last_significant_move_at = now;
+        }
+        net_idle_note_actions(client, player);
 
         const float dx = player->position.x - client->idle_position.x;
         const float dy = player->position.y - client->idle_position.y;

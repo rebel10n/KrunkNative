@@ -140,8 +140,10 @@ typedef struct {
     float spawned_at;
     float last_significant_move_at; // the idle clock: connect, (re)spawn, map change, any activity (net_note_activity)
     vec3 idle_position;
-    float idle_look[2];             // the look (x_dir, y_dir) of the last input frame: a turn is activity
-    int idle_keys;                  // the last input frame's keys (net_input_keys): a press or release is activity
+    float idle_look[2];             // the look (x_dir, y_dir) at the last activity: turning away from it is activity
+    int idle_shots;                 // the player's shots (life_shots + shot_count) at the last idle check
+    float idle_damage_dealt;        // its damage_dealt at the last idle check
+    float idle_health;              // its health at the last idle check: a drop is damage taken
     unsigned char has_idle_position:1;
     unsigned char has_idle_look:1;
     unsigned char joined:1;        // spawned in the current round (respawned by the next round)
