@@ -494,6 +494,24 @@ else ()
     add_executable(server_names_test shared/include/server_names.h shared/src/server_names.c shared/tests/server_names_test.c)
     add_test(NAME server_names_test COMMAND server_names_test)
 
+    # official Krunker socket codec (shared/src/krunker_proto.c: msgpack + ahNum trailer, no I/O).
+    # Built with ASan + UBSan whenever the toolchain links them: its malformed-frame and fuzz cases
+    # are meant to run sanitized.
+    add_executable(krunker_proto_test shared/include/krunker_proto.h shared/include/krunker_build.h
+        shared/src/krunker_proto.c shared/tests/krunker_proto_test.c)
+    target_link_libraries(krunker_proto_test PRIVATE m)
+    if (NOT WIN32)
+        include(CheckCSourceCompiles)
+        set(CMAKE_REQUIRED_FLAGS "-fsanitize=address,undefined")
+        check_c_source_compiles("int main(void) { return 0; }" KRUNKNATIVE_HAVE_ASAN_UBSAN)
+        unset(CMAKE_REQUIRED_FLAGS)
+        if (KRUNKNATIVE_HAVE_ASAN_UBSAN)
+            target_compile_options(krunker_proto_test PRIVATE -fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer)
+            target_link_libraries(krunker_proto_test PRIVATE -fsanitize=address,undefined)
+        endif ()
+    endif ()
+    add_test(NAME krunker_proto_test COMMAND krunker_proto_test)
+
     # editor bus (shared/src/editor_bus.c: framing, scopes, tokens, unix socket + TCP fallback)
     add_executable(editor_bus_test shared/include/editor_bus.h shared/src/editor_bus.c shared/tests/editor_bus_test.c)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")

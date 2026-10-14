@@ -155,13 +155,14 @@ network: build services ## Coordinator + N dedicated servers from one file (NETW
 	python3 -I services/scripts/kn-network up $(or $(NETWORK),services/scripts/network.example.json)
 
 .PHONY: test
-test: build ## Run the shared movement/collision test (+ the knet transport, content fetch, billboard ad, lag compensation, editor bus, editor model, nav mesh, client update, meshopt, window state and resource pack tests)
+test: build ## Run the shared movement/collision test (+ the knet transport, official Krunker codec, content fetch, billboard ad, lag compensation, editor bus, editor model, nav mesh, client update, meshopt, window state and resource pack tests)
 	./$(DEBUG_DIR)/$(TEST_BIN)
 	./$(DEBUG_DIR)/update_test
 	./$(DEBUG_DIR)/asset_fetch_test
 	./$(DEBUG_DIR)/backend_online_test
 	./$(DEBUG_DIR)/knet_test
 	./$(DEBUG_DIR)/server_names_test
+	./$(DEBUG_DIR)/krunker_proto_test
 	./$(DEBUG_DIR)/lagcomp_test
 	./$(DEBUG_DIR)/map_v7_test
 	./$(DEBUG_DIR)/map_v10_test
