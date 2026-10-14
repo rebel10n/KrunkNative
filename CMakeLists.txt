@@ -710,6 +710,17 @@ else ()
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(bot_objective_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
+    # nav_overlay_test (KrunkNative spectate overlay): the NET_EXT_KN_BOT_PATH body
+    # (shared/src/bot_path_net.c fill / decode) and the GL-free overlay geometry
+    # (client/src/nav_overlay_geom.c: route polyline, goal / target / last-known markers)
+    add_executable(nav_overlay_test ${SHARED_HEADERS} ${SHARED_SOURCES} client/src/nav_overlay_geom.c client/include/nav_overlay_geom.h
+                   client/tests/nav_overlay_test.c)
+    target_include_directories(nav_overlay_test PRIVATE client/include)
+    target_link_libraries(nav_overlay_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(nav_overlay_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+    add_test(NAME nav_overlay_test COMMAND nav_overlay_test)
 
     # bot_move_test: bot locomotion (shared/src/bot_move.c): slide hop cadence and speed, no head
     # bumps under ceilings, no hops into walls / off ledges, a long run with the full AI

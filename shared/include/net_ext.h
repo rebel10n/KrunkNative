@@ -64,6 +64,9 @@ typedef enum {
 
     // 0x8010 KrunkNative gameplay (shared/include/drank.h): the Purple Drank's laced event
     NET_EXT_KN_LACED = 0x8010, // S -> C NetLacedPacket (everyone, the laced player included)
+
+    // 0x8011 bots (KrunkNative): what a spectator following a bot sees of its AI (0x8010 is nettspend's NET_EXT_KN_LACED)
+    NET_EXT_KN_BOT_PATH = 0x8011, // S -> C NetBotPathPacket (variable size, NET_BOT_PATH_SIZE(n))
 } NetExtSubtype;
 
 // NET_EXT_KN_ACCOUNT_AUTH (C -> S): the identity the player now has in the menu. The server verifies
@@ -138,6 +141,44 @@ typedef struct {
     char name[32]; // PLAYER_NAME_SIZE, NUL-terminated
 } NetPlayerNamePacket;
 #pragma pack(pop)
+// NET_EXT_KN_BOT_PATH (S -> C): the spectated bot's AI state for the show_navmeshes overlay
+// (client/src/nav_overlay.c) and the spectator HUD's state line (hud_spectate.c). The server
+// sends it only to a spectator following a bot (NET_PACKET_SPECTATE_TARGET), for that bot,
+// NET_BOT_PATH_INTERVAL_S apart (server/src/net.c net_broadcast_bot_paths), from
+// bot_path_current() / bot_path_goal() (shared/include/bot_path.h) and the bot's target memory.
+// The body is the struct cut after the last point: NET_BOT_PATH_SIZE(n) bytes
+// (shared/src/bot_path_net.c fills and decodes it). Positions are feet, world units.
+#define NET_BOT_PATH_POINTS_MAX 28        // 60-byte head + 28 x 16 = 508 <= NET_EXT_BODY_MAX
+#define NET_BOT_PATH_STATE_SIZE 12        // state_name: bot_state_name() ("Hunt", "Attack", ...)
+#define NET_BOT_PATH_INTERVAL_S 0.2f      // the server's send interval per spectator
+#define NET_BOT_PATH_HAS_GOAL 1u          // flags: goal[] is where the bot is heading
+#define NET_BOT_PATH_HAS_TARGET 2u        // target_sid / target[]: the bot has a target player
+#define NET_BOT_PATH_SEES_TARGET 4u       // ... and has line of sight to it right now
+#define NET_BOT_PATH_HAS_LAST_KNOWN 8u    // last_known[]: where it last saw its target
+#define NET_BOT_PATH_PARTIAL 16u          // the route does not reach the goal
+#define NET_BOT_PATH_STRANDED 32u         // the goal is unreachable: the bot waits for a new one
+#define NET_BOT_PATH_TRUNCATED 64u        // the route has more waypoints than fit (NET_BOT_PATH_POINTS_MAX)
+#define NET_BOT_PATH_ACTIVE 128u          // the bot's player is alive (dead: state only, no points)
+typedef struct {
+    float x, y, z;       // feet
+    uint8_t kind;        // BotPathKind of the segment ending here (0 for point 0)
+    uint8_t flags;       // BOT_PATH_FLAG_* of that segment
+    uint8_t reserved[2];
+} NetBotPathPoint;
+typedef struct {
+    int32_t bot_sid;     // the bot's Player uid (the spectator's target)
+    int32_t target_sid;  // its target's uid, -1 none
+    uint8_t state;       // BotState
+    uint8_t flags;       // NET_BOT_PATH_*
+    uint8_t n;           // points that follow: 0 = no route; else point 0 is the bot's feet
+    uint8_t reserved;
+    char state_name[NET_BOT_PATH_STATE_SIZE]; // bot_state_name(state), so new states need no client change
+    float goal[3];       // NET_BOT_PATH_HAS_GOAL
+    float target[3];     // NET_BOT_PATH_HAS_TARGET: the target's feet when sent (the client follows the live player)
+    float last_known[3]; // NET_BOT_PATH_HAS_LAST_KNOWN
+    NetBotPathPoint points[NET_BOT_PATH_POINTS_MAX];
+} NetBotPathPacket;
+#define NET_BOT_PATH_SIZE(n) (offsetof(NetBotPathPacket, points) + (size_t) (n) * sizeof(NetBotPathPoint))
 
 // Bodies fit one NetPacket (NET_MAX_PAYLOAD 512) after the subtype.
 #define NET_EXT_BODY_MAX (512 - NET_EXT_HEADER_SIZE)

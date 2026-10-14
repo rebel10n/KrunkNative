@@ -20,6 +20,7 @@
 #include <html_ui.h>
 #include <render_settings.h>
 #include <nettspend.h> // KN-only class icon art (ui/img/classes/)
+#include <nav_overlay.h> // KrunkNative: the followed bot's AI state line (nav_overlay_bot_status)
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -52,7 +53,9 @@ static struct {
     int cross;                  // fake crosshair shown, -1 unknown
     char keys_key[160];         // the bind labels written into #specControlHolder
     int obj_row;                // the Objective Cam row shown, -1 unknown
-} g_hs = {.shown = -1, .cross = -1, .obj_row = -1};
+    char bot[256];              // #knSpecBot's text ("" = hidden)
+    int bot_shown;              // -1 unknown
+} g_hs = {.shown = -1, .cross = -1, .obj_row = -1, .bot_shown = -1};
 
 /* ------------------------------------------------------------ helpers */
 
@@ -162,6 +165,8 @@ void hud_spectate_reset(void) {
     g_hs.dirty = 1;
     g_hs.keys_key[0] = 0;
     g_hs.obj_row = -1;
+    g_hs.bot[0] = 0;
+    g_hs.bot_shown = -1;
 }
 
 int hud_spectate_slot_uid(const int index) {
@@ -461,6 +466,34 @@ static void hs_update_view(const Client *client) {
     if (el) html_dom_set_display(el, cross ? "block" : "none");
 }
 
+// KrunkNative: with show_navmeshes on and a bot followed, #knSpecBot under the followed
+// player's stats box tells its AI state ("BOT Hunt · goal 37u · 12 waypoints · target Name
+// (visible)", nav_overlay_bot_status: the server's NET_EXT_KN_BOT_PATH). Hidden otherwise.
+static void hs_update_bot(Client *client) {
+    char text[256];
+    const int show = nav_overlay_bot_status(client, text, sizeof(text));
+    HtmlElem el = html_dom_by_id("knSpecBot");
+    if (!el && show) {
+        const HtmlElem ui = html_dom_by_id("spectateUI");
+        if (!ui || !(el = html_dom_create("div", NULL))) return;
+        html_dom_set_attr(el, "id", "knSpecBot");
+        html_dom_set_attr(el, "style", "position:absolute;left:15px;top:calc(300px * var(--mm-scale) + 150px);"
+                                       "background-color:var(--div-black);border-radius:4px;padding:6px 12px;font-size:16px;color:#fff;"
+                                       "text-align:left;white-space:nowrap;pointer-events:none;display:none");
+        html_dom_append(ui, el);
+        g_hs.bot_shown = -1;
+    }
+    if (!el) return;
+    if (show && strcmp(text, g_hs.bot) != 0) {
+        snprintf(g_hs.bot, sizeof(g_hs.bot), "%s", text);
+        html_dom_set_text(el, text);
+    }
+    if (show != g_hs.bot_shown) {
+        html_dom_set_display(el, show ? "block" : "none");
+        g_hs.bot_shown = show;
+    }
+}
+
 /* ------------------------------------------------------------ tick */
 
 void hud_spectate_tick(Client *client) {
@@ -478,6 +511,8 @@ void hud_spectate_tick(Client *client) {
             // would, and the spectator's #inGameUI / #overlay / .onGame would stay.
             hs_set_display("spectateUI", "none");
             hs_set_display("knSpecCross", "none");
+            hs_set_display("knSpecBot", "none");
+            g_hs.bot_shown = -1;
             const HtmlElem base = html_dom_by_id("uiBase");
             if (base) html_dom_set_class(base, "onSpect", 0);
             hud_ui_relayout();
@@ -498,4 +533,5 @@ void hud_spectate_tick(Client *client) {
     hs_update_stats(client);
     hs_update_info(client);
     hs_update_view(client);
+    hs_update_bot(client); // KrunkNative: the followed bot's AI state line
 }

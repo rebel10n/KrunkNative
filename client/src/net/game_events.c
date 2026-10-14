@@ -40,6 +40,7 @@
 #include <net_ext.h> // NET_PACKET_EXT (254)
 #include <nettspend.h> // Nettspend: the laced post-effect, the Money Spread's bills
 #include <drank.h>     // KrunkNative Drank: drank_apply_laced (the shared laced timer)
+#include <nav_overlay.h> // NET_EXT_KN_BOT_PATH: the spectated bot's route (show_navmeshes overlay)
 #include <object_manager.h> // KrunkNative Object Manager: NET_PACKET_SPAWN_RESULT / LOADOUT_EXTRA / SPAWNED_OBJ
 #include <math.h>
 #include <stdio.h>
@@ -987,6 +988,7 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 if (client->me) nettspend_audio_on_laced(body, body_length, client->me->uid); // our own laced ambience
             }
             else if (subtype == NET_EXT_PLAYER_SPEED_BOOST || subtype == NET_EXT_PLAYER_NAME) events_player_ext(client, subtype, body, body_length);
+            else if (subtype == NET_EXT_KN_BOT_PATH) nav_overlay_bot_path(client, body, body_length); // the spectated bot's route (nav_overlay.c)
             return 1;
         }
         default:

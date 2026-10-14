@@ -15,6 +15,9 @@
 // commands (rebuilt on the new map) and clears the overlay on any other switch; so does this.
 #include <gl.h>
 #include <nav_overlay.h>
+#include <nav_overlay_geom.h> // KrunkNative: the spectated bot's route / markers (GL-free geometry)
+#include <bot_path_net.h>     // NET_EXT_KN_BOT_PATH decode
+#include <spectate.h>         // spectate_active / spectate_target_uid, client_find_player
 #include <navgen.h>
 #include <console.h>
 #include <math.h>
@@ -79,6 +82,24 @@ static struct {
     Geometry geometry[NAV_LAYERS];
     unsigned int vbo[NAV_LAYERS];
 } g_nav;
+
+// KrunkNative spectate overlay: the followed bot's route, goal and target markers from the
+// server's NET_EXT_KN_BOT_PATH (nav_overlay_bot_path), drawn with the nav mesh layers while
+// spectating that bot. The geometry is rebuilt every frame (the bot and its target move
+// between packets) into dynamic buffers; a packet older than NAV_BOT_STALE_MS is dropped.
+#define NAV_BOT_STALE_MS 2000.0
+static struct {
+    NetBotPathPacket packet;
+    int have;
+    double at;                // nav_now_ms() of the packet
+    NavBotGeom geom;
+    Mesh *meshes[NAV_BOT_LAYERS];
+    Geometry geometry[NAV_BOT_LAYERS];
+    unsigned int vbo[NAV_BOT_LAYERS];
+    size_t vbo_floats[NAV_BOT_LAYERS]; // the VBO's capacity
+    unsigned int ibo;         // one sequential index buffer for every layer
+    size_t ibo_count;
+} g_bot;
 
 // ------------------------------------------------------------------------- geometry (CPU)
 
@@ -237,6 +258,145 @@ static void nav_meshes_free(void) {
         g_nav.vbo[i] = 0;
     }
     g_nav.shown = 0;
+}
+
+// ------------------------------------------------------------------------- the spectated bot (KrunkNative)
+
+static void nav_bot_meshes_free(void) {
+    for (int i = 0; i < NAV_BOT_LAYERS; i++) {
+        if (g_bot.meshes[i]) {
+            mesh_fini(g_bot.meshes[i]);
+            g_bot.meshes[i] = NULL;
+        }
+        if (g_bot.geometry[i].vao) glDeleteVertexArrays(1, &g_bot.geometry[i].vao);
+        if (g_bot.vbo[i]) glDeleteBuffers(1, &g_bot.vbo[i]);
+        memset(&g_bot.geometry[i], 0, sizeof(g_bot.geometry[i]));
+        g_bot.vbo[i] = 0;
+        g_bot.vbo_floats[i] = 0;
+    }
+    if (g_bot.ibo) glDeleteBuffers(1, &g_bot.ibo);
+    g_bot.ibo = 0;
+    g_bot.ibo_count = 0;
+}
+
+// 0 .. count-1 (GL_LINES over sequential vertices), grown as needed
+static int nav_bot_indices(const size_t count) {
+    if (g_bot.ibo && g_bot.ibo_count >= count) return 1;
+    size_t n = g_bot.ibo_count ? g_bot.ibo_count : 256;
+    while (n < count) n *= 2;
+    unsigned int *indices = malloc(n * sizeof(unsigned int));
+    if (!indices) return 0;
+    for (size_t k = 0; k < n; k++) indices[k] = (unsigned int) k;
+    if (!g_bot.ibo) glGenBuffers(1, &g_bot.ibo);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g_bot.ibo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr) (n * sizeof(unsigned int)), indices, GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    free(indices);
+    g_bot.ibo_count = n;
+    return 1;
+}
+
+static int nav_bot_layer_upload(const int i, const NavGeomVerts *v) {
+    const size_t count = v->n / 3;
+    Geometry *g = &g_bot.geometry[i];
+    if (!g_bot.meshes[i]) {
+        LineMaterial *material = line_material_init();
+        if (!material) return 0;
+        const int hex = nav_bot_layer_hex[i];
+        material->color = (vec4) {(float) ((hex >> 16) & 255) / 255.0f, (float) ((hex >> 8) & 255) / 255.0f, (float) (hex & 255) / 255.0f, 1.0f};
+        material->depth_test = 0;
+        g->draw_mode = GL_LINES;
+        glGenVertexArrays(1, &g->vao);
+        glGenBuffers(1, &g_bot.vbo[i]);
+        glBindVertexArray(g->vao);
+        glBindBuffer(GL_ARRAY_BUFFER, g_bot.vbo[i]);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *) 0);
+        glBindVertexArray(0);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+        g_bot.meshes[i] = mesh_init(g, &material->base);
+        if (!g_bot.meshes[i]) {
+            free(material);
+            return 0;
+        }
+    }
+    if (!count) {
+        g->index_count = 0;
+        return 1;
+    }
+    if (!nav_bot_indices(count)) return 0;
+    glBindBuffer(GL_ARRAY_BUFFER, g_bot.vbo[i]);
+    if (g_bot.vbo_floats[i] < v->n) { // grown: a new store (GLES 3.0: glBufferData, no persistent mapping)
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr) (v->cap * sizeof(float)), NULL, GL_DYNAMIC_DRAW);
+        g_bot.vbo_floats[i] = v->cap;
+    }
+    glBufferSubData(GL_ARRAY_BUFFER, 0, (GLsizeiptr) (v->n * sizeof(float)), v->v);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    g->ebo = g_bot.ibo;
+    g->index_count = (int) count;
+    return 1;
+}
+
+// The packet is for the bot we follow and still fresh
+static int nav_bot_current(const Client *client) {
+    (void) client;
+    if (!g_bot.have || !spectate_active()) return 0;
+    const int uid = spectate_target_uid();
+    if (uid < 0 || uid != g_bot.packet.bot_sid) return 0;
+    return nav_now_ms() - g_bot.at <= NAV_BOT_STALE_MS;
+}
+
+void nav_overlay_bot_path(Client *client, const uint8_t *body, const uint16_t length) {
+    (void) client;
+    NetBotPathPacket packet;
+    if (!bot_path_packet_decode(body, length, &packet)) return;
+    if (!g_bot.have || g_bot.packet.bot_sid != packet.bot_sid) // a new bot followed: one log line (server/tests/bot_overlay_e2e.py)
+        printf("[nav] bot path: sid %d state %s points %d flags 0x%x\n", packet.bot_sid, packet.state_name, packet.n, packet.flags);
+    g_bot.packet = packet;
+    g_bot.have = 1;
+    g_bot.at = nav_now_ms();
+}
+
+int nav_overlay_bot_status(Client *client, char *out, const size_t size) {
+    if (!out || !size) return 0;
+    out[0] = 0;
+    if (!nav_overlay_active() || !nav_bot_current(client)) return 0;
+    const NetBotPathPacket *p = &g_bot.packet;
+    size_t len = (size_t) snprintf(out, size, "BOT %s", p->state_name[0] ? p->state_name : "?");
+    if (!(p->flags & NET_BOT_PATH_ACTIVE)) len += (size_t) snprintf(out + len, len < size ? size - len : 0, " (dead)");
+    const Player *bot = client_find_player(client, p->bot_sid);
+    if ((p->flags & NET_BOT_PATH_HAS_GOAL) && bot) {
+        const float d = hypotf(p->goal[0] - bot->position.x, p->goal[2] - bot->position.z);
+        len += (size_t) snprintf(out + len, len < size ? size - len : 0, " \xc2\xb7 goal %.0fu%s", d,
+                                 (p->flags & NET_BOT_PATH_STRANDED) ? " (unreachable)" : (p->flags & NET_BOT_PATH_PARTIAL) ? " (partial route)" : "");
+    }
+    if (p->n >= 2) len += (size_t) snprintf(out + len, len < size ? size - len : 0, " \xc2\xb7 %d waypoint%s%s", p->n - 1, p->n == 2 ? "" : "s",
+                                           (p->flags & NET_BOT_PATH_TRUNCATED) ? "+" : "");
+    if (p->flags & NET_BOT_PATH_HAS_TARGET) {
+        const Player *target = client_find_player(client, p->target_sid);
+        len += (size_t) snprintf(out + len, len < size ? size - len : 0, " \xc2\xb7 target %s (%s)", target && target->name[0] ? target->name : "?",
+                                 (p->flags & NET_BOT_PATH_SEES_TARGET) ? "visible" : "lost, searching");
+    } else if (p->flags & NET_BOT_PATH_HAS_LAST_KNOWN) {
+        len += (size_t) snprintf(out + len, len < size ? size - len : 0, " \xc2\xb7 last seen enemy remembered");
+    }
+    return 1;
+}
+
+static void nav_bot_render(Client *client) {
+    if (!nav_bot_current(client)) return;
+    const NetBotPathPacket *p = &g_bot.packet;
+    const Player *bot = client_find_player(client, p->bot_sid);
+    const Player *target = (p->flags & NET_BOT_PATH_HAS_TARGET) ? client_find_player(client, p->target_sid) : NULL;
+    const vec3 bot_feet = bot ? bot->position : (vec3) {0};
+    const vec3 target_feet = target ? target->position : (vec3) {0};
+    if (!nav_bot_geom_build(p, bot && bot->active ? &bot_feet : NULL, target && target->active ? &target_feet : NULL, &g_bot.geom)) return;
+    for (int i = 0; i < NAV_BOT_LAYERS; i++) {
+        if (!nav_bot_layer_upload(i, &g_bot.geom.layers[i])) return;
+        if (!g_bot.geometry[i].index_count) continue;
+        Mesh *mesh = g_bot.meshes[i];
+        const Scene layer = {1, &mesh};
+        scene_render(&layer, &client->camera);
+    }
 }
 
 // mkMesh / mkLines for every non-empty layer
@@ -439,6 +599,7 @@ void nav_overlay_show(Client *client) {
 void nav_overlay_clear(const int log) {
     nav_job_cancel();
     nav_meshes_free();
+    nav_bot_meshes_free();
     g_nav.restore = 0;
     g_nav.show_pending = 0;
     if (log) ui_console_printf(COL_INFO, "nav: overlay cleared");
@@ -490,6 +651,7 @@ void nav_overlay_render(Client *client) {
         const Scene layer = {1, &mesh};
         scene_render(&layer, &client->camera);
     }
+    nav_bot_render(client); // KrunkNative: the followed bot's route / markers, over the nav layers
 }
 
 void nav_overlay_fini(void) {
@@ -498,6 +660,9 @@ void nav_overlay_fini(void) {
     nav_meshes_free();
     nav_build_free(g_nav.cache);
     g_nav.cache = NULL;
+    nav_bot_meshes_free();
+    nav_bot_geom_free(&g_bot.geom);
+    g_bot.have = 0;
 #ifdef NAV_THREADED
     if (g_nav.lock_ready) pthread_mutex_destroy(&g_nav.lock);
     g_nav.lock_ready = 0;

@@ -16,6 +16,7 @@
 #include <social_v7.h>      // WP-E part 2b: chat / voice channels, multi-spray, taunts
 #include <comp_lobby.h>     // v7 comp lobby (lobbyPlayers): ranked matches and comp hosts
 #include <net_ext.h>         // NET_PACKET_EXT (254): the v10+ envelope
+#include <bot_path_net.h>    // KrunkNative: NET_EXT_KN_BOT_PATH for a spectator following a bot (net_broadcast_bot_paths)
 #include <object_manager.h>  // KrunkNative Object Manager (spawn menu): ids 250-254
 #include <flavor.h>          // Krunker Strike: the product flavor carried in INIT / HELLO (shared.h)
 #include <errno.h>
@@ -55,6 +56,7 @@ static ClientConnection *net_client_by_id(const int id) {
 static struct {
     int id;
     int target_uid; // "fpSp": the player it follows, -1 free cam (informational, like the v3.1.1 server)
+    float bot_path_at; // KrunkNative: game time of the last NET_EXT_KN_BOT_PATH sent to it (net_broadcast_bot_paths)
 } g_spectators[NET_MAX_SPECTATORS];
 static int g_spectator_count;
 
@@ -76,6 +78,7 @@ static void net_set_spectating(const ClientConnection *client, const int on) {
     if (on && index < 0 && g_spectator_count < NET_MAX_SPECTATORS) {
         g_spectators[g_spectator_count].id = client->id;
         g_spectators[g_spectator_count].target_uid = -1;
+        g_spectators[g_spectator_count].bot_path_at = -1.0f;
         g_spectator_count++;
     } else if (!on && index >= 0) {
         g_spectators[index] = g_spectators[--g_spectator_count];
@@ -1979,11 +1982,44 @@ void net_broadcast_states() {
     server_transport_flush_all();
 }
 
+// KrunkNative spectate overlay (shared/include/net_ext.h NET_EXT_KN_BOT_PATH): a spectator who
+// follows a bot (NET_PACKET_SPECTATE_TARGET) gets that bot's route, goal and target memory every
+// NET_BOT_PATH_INTERVAL_S, nobody else gets anything (client/src/nav_overlay.c draws it with
+// show_navmeshes on, hud_spectate.c shows the state line).
+static void net_broadcast_bot_paths(void) {
+    const GameBots *bots = g_server->game.bots;
+    if (!bots || !g_spectator_count) return;
+    for (int i = 0; i < g_spectator_count; i++) {
+        const int target_uid = g_spectators[i].target_uid;
+        if (target_uid < 0) continue;
+        const float since = g_server->now - g_spectators[i].bot_path_at; // < 0: the clock restarted, send again
+        if (g_spectators[i].bot_path_at >= 0.0f && since >= 0.0f && since < NET_BOT_PATH_INTERVAL_S) continue;
+        const GameBot *bot = NULL;
+        for (int b = 0; b < bots->count && !bot; b++) {
+            if (bots->list[b].uid == target_uid && bots->list[b].player) bot = &bots->list[b];
+        }
+        if (!bot) continue;
+        ClientConnection *client = NULL;
+        for (size_t c = 0; c < g_server->client_count && !client; c++) {
+            if (g_server->clients[c].id == g_spectators[i].id) client = &g_server->clients[c];
+        }
+        if (!client || !net_peer_takes(client, NET_PACKET_EXT)) continue;
+        NetBotPathPacket packet;
+        const uint16_t body = bot_path_packet_fill(&g_server->game, bot, &packet);
+        if (!body) continue;
+        uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(packet)];
+        const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_KN_BOT_PATH, &packet, body);
+        if (n) net_send_packet(client->fd, NET_PACKET_EXT, buf, n);
+        g_spectators[i].bot_path_at = g_server->now;
+    }
+}
+
 static void net_broadcast_states_tick(void) {
     net_send_pings();
     if (g_server->game.end_timer > 0.0f) return;
     net_send_reconciliation();
     game_sync_grapples(&g_server->game, NET_TARGET_ALL); // the "k" sync's grapple slot
+    net_broadcast_bot_paths(); // KrunkNative: the spectated bot's route (throttled per spectator)
 
     static double next_state_at; // gameserver.ts K_PACKET_INTERVAL_MS
     const double state_now = net_time();
