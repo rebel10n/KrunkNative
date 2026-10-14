@@ -244,6 +244,7 @@ static cJSON *acc_lobby_tuple(void) {
     // bot players (server.cfg bot_quota): informational, never in the player count above, so a
     // bot-filled lobby neither looks full nor gets quick-joined as populated
     cJSON_AddNumberToObject(meta, "bots", game_bots_count(game));
+    cJSON_AddBoolToObject(meta, "autofill", game_bots_autofill(game, NULL)); // KrunkNative chat `autofill`
     // WP-E: a hosted game's config.hostTypes index (comp / zombies / raid) and its privacy, for the
     // custom games list; the brain passes meta through, older brains and clients ignore them
     if (game->config.host_type > 0) cJSON_AddNumberToObject(meta, "hostType", game->config.host_type);

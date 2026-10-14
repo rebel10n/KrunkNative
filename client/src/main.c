@@ -18,6 +18,7 @@
 #include <html_dom.h> // html_storage_*: the version toggle's old knRuleset entry
 #include <ruleset.h>  // the startup log: Krunker v10.0.2
 #include <object_manager.h> // object_manager_restore_map (client_unload_map)
+#include <om_interp.h>     // om_interp_frame
 #include <ui_logic.h> // keybinds, chat and input settings (client/src/ui/ui_controls.c), every build
 #include <console.h>   // developer console pointer hooks (client/src/ui/ui_console.c)
 #include <debug_capture.h>
@@ -1899,6 +1900,7 @@ static void client_tick_game(Client *client, const float now, const float frame_
         debug_capture_apply_camera(client); // KRUNKNATIVE_CAMERA pose (debug_capture.c)
         map_environment_update(client->game.map, client->camera.position); // v7 ENVIRONMENT_ZONE swaps (map_environment.c)
         map_post_frame(client->scene, &client->game, &client->camera, delta * 1000.0f); // spin, sign distance, GLTF assets, builds, zone (map_post.c)
+        om_interp_frame(client); // Object Manager: others' edits eased, our own carry where it is now (om_interp.c)
         zombies_render_frame(client, delta * 1000.0f); // WP-H: mystery box / krum weapons, beams, airdrops (zombies_render.c)
         shadow_update(); // static sun shadow map, re-rendered after a map load (shadow.c)
         ocean_update(client->scene, &client->camera, delta * 1000.0f); // v7 ocean: time + mirror reflection pass (ocean.c)

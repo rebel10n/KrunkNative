@@ -2,29 +2,40 @@
 // Resize tools). Not Krunker v7.1.4 features (doc/v7/decisions.md "Physics Gun", "Building
 // tools"). The authority validates and applies every pose (shared/src/object_manager.c
 // object_manager_edit); this file only aims, drags and sends OM_ACTION_EDIT, and draws the beam,
-// the selection box and the handles (client/src/om_gizmo.c).
+// the outline of the selection / the carried thing (client/src/om_outline.c) and the handles
+// (client/src/om_gizmo.c).
 //
-// Every object the crosshair is on can be taken (object_manager_pick: jump pads, teleporters,
+// The Tool Gun takes every object the crosshair is on (object_manager_pick: jump pads, teleporters,
 // ladders, ramps, triggers, pickups, zones, planes as well as solid ones): spawned objects (your
 // own, any for devs and the host) and, for devs and the host (OM_CAP_MAP), the map's own objects.
+// The Physics Gun takes things, not the level (object_manager_physgun_takes: spawned objects and the
+// map's props, never its cubes / planes / ramps / ladders / zones), and for devs other players.
 //
 // Physics Gun (WEAPON_ID_PHYS_GUN in hand): hold fire on an object to grab it; it follows the crosshair at its grab distance, the wheel changes the
-// distance (OM_PHYSGUN_DIST_*), the rotate key (E, cont_omRotateKey) held turns it with the mouse
-// instead of the view, a quarter turn per 90 degrees of mouse (Krunker's AABB collision only
-// follows quarter turns). Releasing fire leaves it where it is (frozen), or with "Drop" on lets it
-// down onto the surface below (OM_EDIT_DROP). Weapon swaps are off while carrying.
+// distance (OM_PHYSGUN_DIST_*), the rotate key (R, cont_omRotateKey) held turns it about y with the
+// mouse instead of the view: any angle for props and blocks (the record's yaw; the AABB collision is
+// the nearest quarter turn's), quarter turns for ramps and ladders (map.js "d"). The snap chord
+// (crouch + E, cont_omPhysSnapKey) held snaps the carry to 45 degrees and its feet to the Tool Gun's
+// grid step (tool_snap). Releasing fire leaves it where it is (frozen), or with "Drop" on lets it
+// down onto the surface below (OM_EDIT_DROP). Weapon swaps, reload and crouch are off while carrying.
+// A dev's Physics Gun on a player carries the player (OM_EDIT_PLAYER): the server holds it at the
+// carried feet until fire is let go.
+//
+// The local client shows its carry / drag where it is this frame (om_interp.c prediction) and sends
+// it every OM_EDIT_SEND_DEV (devs) / OM_EDIT_SEND (the server's pace for everyone else) while it
+// changes; other clients ease between the updates (object_manager_interp_*).
 //
 // btools (the Tool Gun with Move or Resize, the Tools pane): the pointer stays locked and the
-// crosshair is the cursor. Fire on a spawned object selects it (a yellow box); Move shows X / Y /
+// crosshair is the cursor. Fire on a spawned object selects it (an outline); Move shows X / Y /
 // Z arrows, Resize a handle on each face. Fire held on a handle drags it: the handle follows the
 // point of its axis nearest to the crosshair ray, the change snaps to the grid step (any step from
 // OB_SNAP_MIN to OB_SNAP_MAX units or off: the Tools pane's field, the snap keys PageDown / PageUp, the
 // console's `tool_snap`), Resize keeps the opposite face (crouch held: both faces move) and
 // OM_EDIT_SIZE_MIN. Fire on nothing clears the selection.
 //
-// Edits go out at most every OB_SEND_SECONDS while a grab or drag changes the pose, and once at
-// its release; the first of each opens an undo step (OM_EDIT_BEGIN), so U takes a whole grab or
-// drag back. Others see the result through SPAWNED_OBJ OM_SPAWNED_UPDATE.
+// Edits go out while a grab or drag changes the pose, and once at its release; the first of each
+// opens an undo step (OM_EDIT_BEGIN), so U takes a whole grab or drag back. Others see the result
+// through SPAWNED_OBJ OM_SPAWNED_UPDATE / MAP_EDIT.
 //
 // Properties (the Tool Gun's third btool): fire on an object selects it and opens its fields in the
 // Object Manager window (object_manager_ui_open_props); the Properties key (I, cont_omPropsKey) does
@@ -34,6 +45,8 @@
 #include <ui_logic.h>
 #include <object_manager.h>
 #include <om_gizmo.h>
+#include <om_outline.h>
+#include <om_interp.h>
 #include <weapons.h>
 #include <GLFW/glfw3.h>
 #include <math.h>
@@ -41,7 +54,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define OB_SEND_SECONDS 0.1   // edits while dragging: 10 / s (the server takes one per OM_EDIT_INTERVAL)
+#define OB_HOLD_REFRESH 0.25  // a carried player's hold is renewed this often while the pose stands still (OM_HOLD_TIMEOUT)
 #define OB_SNAP_STORAGE "kn_omSnapStep" // the step in units, "0" off (kn_omSnap held the old 1 / 2 / 5 / 10 index)
 #define OB_SNAP_OLD_STORAGE "kn_omSnap"
 #define OB_DROP_STORAGE "kn_omPhysDrop"
@@ -68,9 +81,11 @@ static struct {
     int was_shoot;
     // the Physics Gun
     int grab;             // uid + 1, 0 none
+    int grab_player;      // a carried player's uid + 1 (devs), 0 none
     float dist;
     vec3 offset;          // the object's feet from the grab point
-    float turn;           // rotate-key mouse yaw not yet turned into a quarter turn
+    float turn;           // ramps / ladders: rotate-key mouse yaw not yet turned into a quarter turn
+    ObjectManagerPose grabbed; // the pose at the grab (the free yaw's size: the nearest quarter turn's)
     int releasing;        // fire let go: the last edit waits for the server's pace
     // btools
     int sel;              // uid + 1, 0 none
@@ -78,9 +93,9 @@ static struct {
     ObHandle handle;
     ObjectManagerPose from;
     float t0;
-    // the pose being sent (both)
+    // the pose being sent (both): `pose` follows the input, `shown` is it snapped (the snap chord)
     int uid;
-    ObjectManagerPose pose, sent;
+    ObjectManagerPose pose, shown, sent;
     double sent_at;
     int begin;            // the next edit opens an undo step
 } g_ob;
@@ -178,14 +193,48 @@ static int ob_axis_param(const vec3 eye, const vec3 dir, const vec3 origin, cons
 }
 
 // The object the crosshair is on that this player may edit, -1 none; `point` where the ray met
-// it. The map's own objects only with OM_CAP_MAP (the authority checks again).
-static int ob_pick(Client *client, const Player *me, vec3 *point) {
+// it. The map's own objects only with OM_CAP_MAP (the authority checks again); the Physics Gun's
+// (`physgun`) only what it takes (object_manager_physgun_takes: no level geometry).
+static int ob_pick_object(Client *client, const Player *me, const int physgun, vec3 *point) {
     ObjectManagerAim aim;
     if (!object_manager_pick(&client->game, me, me->direction.x, me->direction.y, &aim)) return -1;
     if (aim.object < 0 || !object_manager_editable(&client->game, aim.object)) return -1;
     if (object_manager_is_map_object(&client->game, aim.object) && !(object_manager_ui_caps() & OM_CAP_MAP)) return -1;
+    if (physgun && !object_manager_physgun_takes(&client->game, aim.object)) return -1;
     *point = aim.point;
     return aim.object;
+}
+
+static int ob_pick(Client *client, const Player *me, vec3 *point) { return ob_pick_object(client, me, 0, point); }
+
+// A dev's Physics Gun: the other player (bots too) the crosshair meets first, -1 none; *t the hit's
+// fraction of OM_AIM_RANGE
+static int ob_pick_player(Client *client, const Player *me, vec3 *point, float *t_out) {
+    *t_out = 2.0f;
+    if (!(object_manager_ui_caps() & OM_CAP_DEV)) return -1;
+    const vec3 eye = ob_eye(me), segment = v_scale(ob_dir(me->direction.x, me->direction.y), OM_AIM_RANGE);
+    int best = -1;
+    for (size_t i = 0; i < client->game.player_count; i++) {
+        const Player *p = client->game.players[i];
+        if (!p || p == me || !p->active) continue;
+        const float r = p->scale > 0.0f ? p->scale : game_constants.player_scale;
+        const vec3 size = {r * 2.0f, p->height > 0.0f ? p->height : game_constants.player_height, r * 2.0f};
+        const float t = line_in_rect(eye, segment, p->position, size);
+        if (t > 0.0f && t <= 1.0f && t < *t_out) {
+            *t_out = t;
+            best = p->uid;
+            *point = v_add(eye, v_scale(segment, t));
+        }
+    }
+    return best;
+}
+
+static Player *ob_player(Client *client, const int uid) {
+    for (size_t i = 0; client && i < client->game.player_count; i++) {
+        Player *p = client->game.players[i];
+        if (p && p->uid == uid) return p;
+    }
+    return NULL;
 }
 
 static int ob_handles(const int tool, const ObjectManagerPose *p, ObHandle *out) {
@@ -228,8 +277,13 @@ static int ob_server_ok(const Client *client) {
 
 static int ob_pose_differs(const ObjectManagerPose *a, const ObjectManagerPose *b) {
     return fabsf(a->position.x - b->position.x) > 0.02f || fabsf(a->position.y - b->position.y) > 0.02f || fabsf(a->position.z - b->position.z) > 0.02f ||
-           fabsf(a->size.x - b->size.x) > 0.005f || fabsf(a->size.y - b->size.y) > 0.005f || fabsf(a->size.z - b->size.z) > 0.005f || a->quarter != b->quarter;
+           fabsf(a->size.x - b->size.x) > 0.005f || fabsf(a->size.y - b->size.y) > 0.005f || fabsf(a->size.z - b->size.z) > 0.005f || a->quarter != b->quarter ||
+           fabsf(a->yaw - b->yaw) > 0.004f;
 }
+
+// The pace edits go out at: devs are never paced by the server (60 a second, coalesced), everyone
+// else at the server's OM_EDIT_INTERVAL
+static double ob_send_every(void) { return (object_manager_ui_caps() & OM_CAP_DEV) ? OM_EDIT_SEND_DEV : OM_EDIT_SEND; }
 
 static void ob_send(Client *client, const int source, const int flags) {
     const Player *me = client->me;
@@ -238,25 +292,32 @@ static void ob_send(Client *client, const int source, const int flags) {
     memset(&e, 0, sizeof(e));
     e.req = (NetSpawnReqPacket) {.action = OM_ACTION_EDIT, .item = (int16_t) source, .pitch = me->direction.x, .yaw = me->direction.y};
     e.uid = g_ob.uid;
-    e.position[0] = g_ob.pose.position.x, e.position[1] = g_ob.pose.position.y, e.position[2] = g_ob.pose.position.z;
-    e.size[0] = g_ob.pose.size.x, e.size[1] = g_ob.pose.size.y, e.size[2] = g_ob.pose.size.z;
-    e.quarter = (uint8_t) g_ob.pose.quarter;
+    e.position[0] = g_ob.shown.position.x, e.position[1] = g_ob.shown.position.y, e.position[2] = g_ob.shown.position.z;
+    e.size[0] = g_ob.shown.size.x, e.size[1] = g_ob.shown.size.y, e.size[2] = g_ob.shown.size.z;
+    e.quarter = (uint8_t) g_ob.shown.quarter;
     e.flags = (uint8_t) (flags | (g_ob.begin ? OM_EDIT_BEGIN : 0));
+    if (source == OM_EDIT_SOURCE_PHYSGUN && !g_ob.shown.directed && !(flags & OM_EDIT_PLAYER)) { // any yaw (the carry turns freely)
+        e.flags |= OM_EDIT_YAW;
+        e.reserved = object_manager_yaw_pack(g_ob.shown.yaw);
+    }
     client_net_send(client, NET_PACKET_SPAWN_REQ, &e, sizeof(e));
     g_ob.begin = 0;
-    g_ob.sent = g_ob.pose;
+    g_ob.sent = g_ob.shown;
     g_ob.sent_at = glfwGetTime();
 }
 
-// While a grab / drag goes on: the pose when it changed, at the drag pace
-static void ob_send_live(Client *client, const int source) {
-    if (ob_pose_differs(&g_ob.pose, &g_ob.sent) && glfwGetTime() - g_ob.sent_at >= OB_SEND_SECONDS) ob_send(client, source, 0);
+// While a grab / drag goes on: the pose when it changed, at the pace
+static void ob_send_live(Client *client, const int source, const int flags) {
+    const double since = glfwGetTime() - g_ob.sent_at;
+    const int refresh = (flags & OM_EDIT_PLAYER) && since >= OB_HOLD_REFRESH; // a carried player's hold times out without updates
+    if ((ob_pose_differs(&g_ob.shown, &g_ob.sent) || refresh) && since >= ob_send_every() - 1e-4) ob_send(client, source, flags);
 }
 
 // The last edit of a grab / drag once the server's pace allows it (1 sent or nothing to send)
 static int ob_send_final(Client *client, const int source, const int flags) {
-    if (!ob_pose_differs(&g_ob.pose, &g_ob.sent) && !flags) return 1;
-    if (glfwGetTime() - g_ob.sent_at < OM_EDIT_INTERVAL + 0.02) return 0;
+    if (!ob_pose_differs(&g_ob.shown, &g_ob.sent) && !flags) return 1;
+    const double pace = (object_manager_ui_caps() & OM_CAP_DEV) ? 0.0 : OM_EDIT_INTERVAL + 0.02;
+    if (glfwGetTime() - g_ob.sent_at < pace) return 0;
     ob_send(client, source, flags);
     return 1;
 }
@@ -265,15 +326,55 @@ static int ob_send_final(Client *client, const int source, const int flags) {
 void om_build_refused(const int status) {
     if (status == OM_STATUS_RATE) return;
     g_ob.grab = 0;
+    g_ob.grab_player = 0;
     g_ob.drag = 0;
     g_ob.releasing = 0;
 }
 
 void om_build_reset(void) {
-    g_ob.grab = g_ob.sel = g_ob.drag = g_ob.releasing = 0;
+    g_ob.grab = g_ob.grab_player = g_ob.sel = g_ob.drag = g_ob.releasing = 0;
+    om_interp_reset();
+}
+
+int om_build_carry(int *uid, ObjectManagerPose *pose) {
+    if (g_ob.grab_player) {
+        *uid = g_ob.grab_player - 1;
+        *pose = g_ob.shown;
+        return 2;
+    }
+    if (g_ob.grab || (g_ob.drag && object_manager_ui_tool() == OM_TOOL_MOVE)) {
+        *uid = g_ob.uid;
+        *pose = g_ob.shown;
+        return 1;
+    }
+    return 0;
 }
 
 // ---------------------------------------------------------------- the Physics Gun
+
+// The snap chord (crouch + cont_omPhysSnapKey, Shift+E by default) is held
+static int ob_snap_chord(void) { return ui_controls_down(UI_CONTROL_OM_PHYS_SNAP) && ui_controls_down(UI_CONTROL_CROUCH); }
+
+// `pose` as shown and sent: the free yaw's size (the nearest quarter turn's, from the grab's), and
+// with the snap chord 45 degree steps and the feet on the grid
+static void ob_shape(void) {
+    ObjectManagerPose s = g_ob.pose;
+    if (!s.directed) {
+        if (ob_snap_chord()) s.yaw = roundf(s.yaw / ((float) M_PI / 4.0f)) * ((float) M_PI / 4.0f);
+        const float two_pi = 2.0f * (float) M_PI;
+        s.yaw = fmodf(fmodf(s.yaw, two_pi) + two_pi, two_pi);
+        s.quarter = object_manager_yaw_quarter(s.yaw);
+        const int odd = ((s.quarter - g_ob.grabbed.quarter) % 2 + 2) % 2;
+        s.size = odd ? (vec3) {g_ob.grabbed.size.z, g_ob.grabbed.size.y, g_ob.grabbed.size.x} : g_ob.grabbed.size;
+    }
+    const float step = om_build_snap();
+    if (ob_snap_chord() && step > 0.0f) {
+        s.position.x = object_manager_snap(s.position.x, step);
+        s.position.y = object_manager_snap(s.position.y, step);
+        s.position.z = object_manager_snap(s.position.z, step);
+    }
+    g_ob.shown = s;
+}
 
 static void ob_physgun(Client *client, Player *me, Input *input, const float prev_pitch, const float prev_yaw, const int pressed, const int shoot,
                        const int sampled) {
@@ -281,52 +382,89 @@ static void ob_physgun(Client *client, Player *me, Input *input, const float pre
         if (ob_send_final(client, OM_EDIT_SOURCE_PHYSGUN, g_ob.drop ? OM_EDIT_DROP : 0)) g_ob.releasing = 0;
         return;
     }
-    if (!g_ob.grab && pressed) {
-        vec3 point;
-        const int uid = ob_pick(client, me, &point);
-        if (uid < 0 || !object_manager_pose(&client->game, uid, &g_ob.pose)) return;
+    if (!g_ob.grab && !g_ob.grab_player && pressed) {
+        vec3 point, player_point;
+        float player_t;
+        const int uid = ob_pick_object(client, me, 1, &point);
+        const int puid = ob_pick_player(client, me, &player_point, &player_t);
         const vec3 eye = ob_eye(me);
-        const vec3 d = v_sub(point, eye);
-        g_ob.dist = fminf(OM_PHYSGUN_DIST_MAX, fmaxf(OM_PHYSGUN_DIST_MIN, sqrtf(v_dot(d, d))));
-        g_ob.offset = v_sub(g_ob.pose.position, v_add(eye, v_scale(ob_dir(me->direction.x, me->direction.y), g_ob.dist)));
-        g_ob.uid = uid;
-        g_ob.grab = uid + 1;
-        g_ob.sent = g_ob.pose;
-        g_ob.turn = 0.0f;
-        g_ob.begin = 1;
+        const float object_t = uid >= 0 ? sqrtf(v_dot(v_sub(point, eye), v_sub(point, eye))) / OM_AIM_RANGE : 2.0f;
+        const Player *target = puid >= 0 && player_t < object_t ? ob_player(client, puid) : NULL;
+        if (target) { // a dev carries a player: its feet follow the grab point
+            const vec3 d = v_sub(player_point, eye);
+            g_ob.dist = fminf(OM_PHYSGUN_DIST_MAX, fmaxf(OM_PHYSGUN_DIST_MIN, sqrtf(v_dot(d, d))));
+            g_ob.offset = v_sub(target->position, v_add(eye, v_scale(ob_dir(me->direction.x, me->direction.y), g_ob.dist)));
+            memset(&g_ob.pose, 0, sizeof(g_ob.pose));
+            g_ob.pose.position = target->position;
+            g_ob.pose.directed = 1; // (no yaw: a player turns itself)
+            g_ob.grabbed = g_ob.shown = g_ob.sent = g_ob.pose;
+            g_ob.uid = puid;
+            g_ob.grab_player = puid + 1;
+            g_ob.sent_at = 0.0;
+        } else {
+            if (uid < 0 || !object_manager_pose(&client->game, uid, &g_ob.pose)) return;
+            const vec3 d = v_sub(point, eye);
+            g_ob.dist = fminf(OM_PHYSGUN_DIST_MAX, fmaxf(OM_PHYSGUN_DIST_MIN, sqrtf(v_dot(d, d))));
+            g_ob.offset = v_sub(g_ob.pose.position, v_add(eye, v_scale(ob_dir(me->direction.x, me->direction.y), g_ob.dist)));
+            g_ob.uid = uid;
+            g_ob.grab = uid + 1;
+            g_ob.grabbed = g_ob.shown = g_ob.sent = g_ob.pose;
+            g_ob.turn = 0.0f;
+            g_ob.begin = 1;
+        }
     }
-    if (!g_ob.grab) return;
-    if (!object_manager_editable(&client->game, g_ob.uid)) { // removed meanwhile
+    if (!g_ob.grab && !g_ob.grab_player) return;
+    if (g_ob.grab && !object_manager_editable(&client->game, g_ob.uid)) { // removed meanwhile
         g_ob.grab = 0;
+        return;
+    }
+    const Player *carried = g_ob.grab_player ? ob_player(client, g_ob.grab_player - 1) : NULL;
+    if (g_ob.grab_player && (!carried || !carried->active)) { // (left or died: the server let go)
+        g_ob.grab_player = 0;
         return;
     }
     input->swap = 0; // no weapon switching while carrying: the wheel and the rotate key are the gun's
     input->select_slot = 0;
+    input->reload = 0; // (R turns the carry)
+    if (ob_snap_chord()) input->crouch = 0; // (crouch is half the snap chord)
     if (sampled && input->scroll) {
         g_ob.dist = fminf(OM_PHYSGUN_DIST_MAX, fmaxf(OM_PHYSGUN_DIST_MIN, g_ob.dist - (float) input->scroll * OB_WHEEL_STEP));
         input->scroll = 0;
     }
-    if (ui_controls_down(UI_CONTROL_OM_ROTATE)) { // the mouse turns the object, the view stays
-        g_ob.turn += input->y_dir - prev_yaw;
+    if (g_ob.grab && ui_controls_down(UI_CONTROL_OM_ROTATE)) { // the mouse turns the object, the view stays
+        const float turned = input->y_dir - prev_yaw;
         input->x_dir = prev_pitch;
         input->y_dir = prev_yaw;
-        const float quarter = (float) M_PI / 2.0f;
-        while (g_ob.turn > quarter * 0.5f || g_ob.turn < -quarter * 0.5f) {
-            const int turns = g_ob.turn > 0.0f ? 1 : -1;
-            ObjectManagerPose turned;
-            object_manager_pose_turn(&g_ob.pose, turns, &turned);
-            g_ob.pose = turned;
-            g_ob.turn -= (float) turns * quarter;
+        if (!g_ob.pose.directed) {
+            g_ob.pose.yaw += turned; // any angle (the snap chord rounds it to 45 degrees)
+        } else { // ramps / ladders: quarter turns (map.js "d")
+            g_ob.turn += turned;
+            const float quarter = (float) M_PI / 2.0f;
+            while (g_ob.turn > quarter * 0.5f || g_ob.turn < -quarter * 0.5f) {
+                const int turns = g_ob.turn > 0.0f ? 1 : -1;
+                ObjectManagerPose t;
+                object_manager_pose_turn(&g_ob.pose, turns, &t);
+                g_ob.pose = t;
+                g_ob.turn -= (float) turns * quarter;
+            }
         }
     }
     const vec3 eye = ob_eye(me);
     const vec3 point = v_add(eye, v_scale(ob_dir(input->x_dir, input->y_dir), g_ob.dist));
     g_ob.pose.position = v_add(point, g_ob.offset);
+    ob_shape();
+    const int flags = g_ob.grab_player ? OM_EDIT_PLAYER : 0;
     if (shoot) {
-        ob_send_live(client, OM_EDIT_SOURCE_PHYSGUN);
+        ob_send_live(client, OM_EDIT_SOURCE_PHYSGUN, flags);
+        return;
+    }
+    if (g_ob.grab_player) { // released: the player goes on by itself
+        g_ob.grab_player = 0;
+        ob_send(client, OM_EDIT_SOURCE_PHYSGUN, OM_EDIT_PLAYER | OM_EDIT_RELEASE);
         return;
     }
     g_ob.grab = 0; // released: frozen where it is, or dropped
+    om_interp_released(client, g_ob.uid, &g_ob.shown); // shown there until the server's last echo
     g_ob.releasing = !ob_send_final(client, OM_EDIT_SOURCE_PHYSGUN, g_ob.drop ? OM_EDIT_DROP : 0);
 }
 
@@ -357,7 +495,7 @@ static void ob_btools(Client *client, const Player *me, const int tool, const in
             g_ob.drag = hover + 1;
             g_ob.handle = handles[hover];
             g_ob.from = pose;
-            g_ob.pose = g_ob.sent = pose;
+            g_ob.pose = g_ob.shown = g_ob.sent = pose;
             g_ob.uid = g_ob.sel - 1;
             g_ob.t0 = t;
             g_ob.begin = 1;
@@ -375,10 +513,12 @@ static void ob_btools(Client *client, const Player *me, const int tool, const in
         else object_manager_pose_resize(&g_ob.from, g_ob.handle.axis, g_ob.handle.sign, delta * (float) g_ob.handle.sign, om_build_snap(),
                                         ui_controls_down(UI_CONTROL_CROUCH), &g_ob.pose);
     }
+    g_ob.shown = g_ob.pose;
     if (shoot) {
-        ob_send_live(client, OM_EDIT_SOURCE_BTOOLS);
+        ob_send_live(client, OM_EDIT_SOURCE_BTOOLS, 0);
         return;
     }
+    if (tool == OM_TOOL_MOVE) om_interp_released(client, g_ob.uid, &g_ob.shown); // the predicted move stays shown for the echo
     g_ob.drag = 0;
     g_ob.releasing = !ob_send_final(client, OM_EDIT_SOURCE_BTOOLS, 0);
 }
@@ -406,7 +546,7 @@ int om_build_selection(void) { return g_ob.sel - 1; }
 void om_build_input(Client *client, Input *input, const float prev_pitch, const float prev_yaw, const int sampled) {
     Player *me = client ? client->me : NULL;
     if (!me || !me->active || !input) {
-        g_ob.grab = g_ob.drag = g_ob.releasing = 0;
+        g_ob.grab = g_ob.grab_player = g_ob.drag = g_ob.releasing = 0; // (dead: the server lets a carried player go)
         return;
     }
     ob_load();
@@ -421,9 +561,10 @@ void om_build_input(Client *client, Input *input, const float prev_pitch, const 
         ob_physgun(client, me, input, prev_pitch, prev_yaw, pressed, shoot, sampled);
     } else if (w && w->kn_tool && info && info->handles) {
         if (g_ob.grab) g_ob.grab = 0;
+        g_ob.grab_player = 0;
         ob_btools(client, me, tool, pressed, shoot);
     } else {
-        g_ob.grab = g_ob.drag = g_ob.releasing = 0; // another weapon: the grab / drag ends where it was
+        g_ob.grab = g_ob.grab_player = g_ob.drag = g_ob.releasing = 0; // another weapon: the grab / drag ends where it was
     }
 }
 
@@ -437,20 +578,26 @@ void om_build_render(Client *client) {
     om_gizmo_clear();
     const Player *me = client ? client->me : NULL;
     const Weapon *w = me && me->active ? me->weapon : NULL;
-    if (w && w->kn_physgun && g_ob.grab) {
+    if (w && w->kn_physgun && (g_ob.grab || g_ob.grab_player)) {
         const vec3 eye = ob_eye(me), dir = ob_dir(me->direction.x, me->direction.y);
         const vec3 right = {cosf(me->direction.y), 0.0f, -sinf(me->direction.y)};
         const vec3 muzzle = v_add(v_add(eye, v_scale(dir, 3.0f)), v_add(v_scale(right, 1.2f), (vec3) {0.0f, -0.8f, 0.0f}));
         const vec3 end = v_add(eye, v_scale(dir, g_ob.dist));
         om_gizmo_line(OM_GIZMO_CYAN, muzzle, end);
-        om_gizmo_box(OM_GIZMO_CYAN, g_ob.pose.position, g_ob.pose.size);
+        if (g_ob.grab_player) { // the carried player's model, outlined
+            om_outline_add_player(ob_player(client, g_ob.grab_player - 1), OM_OUTLINE_CARRY);
+        } else if (!om_outline_add_object(client->game.map->objects[g_ob.uid], OM_OUTLINE_CARRY)) {
+            om_gizmo_box(OM_GIZMO_CYAN, g_ob.shown.position, g_ob.shown.size); // nothing drawn to outline (a zone, a trigger)
+        }
     }
     const int tool = object_manager_ui_tool();
     const ObjectManagerToolInfo *info = object_manager_tool_info(tool);
     ObjectManagerPose pose;
     if (w && w->kn_tool && info && info->handles && g_ob.sel && object_manager_pose(&client->game, g_ob.sel - 1, &pose)) {
         if (g_ob.drag) pose = g_ob.pose; // the dragged pose before the server's answer
-        om_gizmo_box(OM_GIZMO_YELLOW, pose.position, pose.size);
+        // the selection's outline; a resize drag also shows its new box (the mesh keeps the old size until the answer)
+        const int outlined = om_outline_add_object(client->game.map->objects[g_ob.sel - 1], OM_OUTLINE_SELECT);
+        if (!outlined || (g_ob.drag && tool == OM_TOOL_RESIZE)) om_gizmo_box(OM_GIZMO_YELLOW, pose.position, pose.size);
         ObHandle handles[OB_HANDLES_MAX];
         const int count = ob_handles(tool, &pose, handles);
         const int hover = g_ob.drag ? -1 : ob_hover(me, handles, count);
@@ -463,10 +610,16 @@ void om_build_render(Client *client) {
             ob_draw_handle(color, handles[i].tip);
         }
     }
-    if (client) om_gizmo_render(&client->camera);
+    if (client) {
+        om_outline_render(&client->camera);
+        om_gizmo_render(&client->camera);
+    }
 }
 
-void om_build_fini(void) { om_gizmo_fini(); }
+void om_build_fini(void) {
+    om_gizmo_fini();
+    om_outline_fini();
+}
 
 // Input scripts (`om aim <i>`): the look (pitch, yaw) from the eye to handle `index` of the
 // selection under the current tool. 1 found.

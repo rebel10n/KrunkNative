@@ -316,6 +316,35 @@ int object_manager_give_lookup(const char *query, int *id, int *matches) {
     return OM_GIVE_NONE;
 }
 
+int object_manager_spawn_lookup(const char *query, int *tab, int *index, int *matches) {
+    char q[64];
+    om_normalise(query, q, sizeof(q));
+    if (matches) *matches = 0;
+    if (!q[0]) return 0;
+    static const int k_tabs[3] = {OM_TAB_OBJECTS, OM_TAB_ENTITIES, OM_TAB_NPCS};
+    for (int pass = 0; pass < 3; pass++) {
+        int found = 0, found_tab = -1, found_index = -1;
+        for (int t = 0; t < 3; t++) {
+            int count = 0;
+            const ObjectManagerEntry *entries = object_manager_entries(k_tabs[t], &count);
+            for (int i = 0; entries && i < count; i++) {
+                if (!om_name_matches(entries[i].name, q, pass)) continue;
+                found++;
+                found_tab = k_tabs[t];
+                found_index = i;
+            }
+        }
+        if (matches) *matches = found;
+        if (found == 1) {
+            if (tab) *tab = found_tab;
+            if (index) *index = found_index;
+            return 1;
+        }
+        if (found > 1) return 0; // ambiguous
+    }
+    return 0;
+}
+
 static const ObjectManagerToolInfo k_tools[OM_TOOL_COUNT] = {
     [OM_TOOL_DELETER] = {"Deleter", "delete_forever", "Removes what you shoot (map objects too, for devs and the host)", 1},
     [OM_TOOL_DUPLICATOR] = {"Duplicator", "content_copy", "Shoot an object to copy it, shoot again to place the copy", 0},
@@ -375,6 +404,7 @@ const char *object_manager_status_text(const int status) {
         case OM_STATUS_UNSUPPORTED: return "That object can't be changed";
         case OM_STATUS_BLOCKED: return "It would end up inside a player";
         case OM_STATUS_BOUNDS: return "Out of reach or too big";
+        case OM_STATUS_GEOMETRY: return "The Physics Gun can't move the map's geometry";
         default: return "Failed";
     }
 }
@@ -741,8 +771,27 @@ static void om_pose_of(const Object *o, ObjectManagerPose *out) {
     out->directed = om_directed(o->prefab);
     const cJSON *dj = cJSON_GetObjectItem(o->raw, "d"); // only ramps / ladders have one ((int) NaN is UB)
     const int d = cJSON_IsNumber(dj) ? (int) dj->valuedouble : 0;
-    const int q = (int) lroundf(o->rotation.y / ((float) M_PI / 2.0f));
+    const cJSON *r = cJSON_GetObjectItem(o->raw, "r");
+    const float ry = cJSON_GetArraySize(r) >= 3 && cJSON_IsNumber(cJSON_GetArrayItem(r, 1)) ? (float) cJSON_GetArrayItem(r, 1)->valuedouble : o->rotation.y;
+    const int q = object_manager_yaw_quarter(ry);
     out->quarter = ((out->directed ? d : q) % 4 + 4) % 4;
+    const float two_pi = 2.0f * (float) M_PI;
+    out->yaw = out->directed ? (float) out->quarter * ((float) M_PI / 2.0f) : fmodf(fmodf(ry, two_pi) + two_pi, two_pi);
+}
+
+uint16_t object_manager_yaw_pack(const float yaw) {
+    const double two_pi = 2.0 * M_PI;
+    double y = isfinite(yaw) ? fmod((double) yaw, two_pi) : 0.0;
+    if (y < 0.0) y += two_pi;
+    return (uint16_t) ((long) llround(y / two_pi * 65536.0) & 0xffff);
+}
+
+float object_manager_yaw_unpack(const uint16_t packed) { return (float) ((double) packed / 65536.0 * 2.0 * M_PI); }
+
+int object_manager_yaw_quarter(const float yaw) {
+    // (exactly between two quarters, as a 45 degree snap is: the lower one)
+    const int q = isfinite(yaw) ? (int) floorf(yaw / ((float) M_PI / 2.0f) + 0.5f - 1e-3f) : 0;
+    return (q % 4 + 4) % 4;
 }
 
 int object_manager_pose(const Game *game, const int uid, ObjectManagerPose *out) {
@@ -783,6 +832,8 @@ void object_manager_pose_resize(const ObjectManagerPose *from, const int axis, c
 void object_manager_pose_turn(const ObjectManagerPose *from, const int turns, ObjectManagerPose *out) {
     *out = *from;
     out->quarter = ((from->quarter + turns) % 4 + 4) % 4;
+    const float two_pi = 2.0f * (float) M_PI;
+    out->yaw = fmodf(fmodf(from->yaw + (float) turns * ((float) M_PI / 2.0f), two_pi) + two_pi, two_pi);
     if (!from->directed && (turns % 2)) {
         out->size.x = from->size.z;
         out->size.z = from->size.x;
@@ -805,14 +856,18 @@ static cJSON *om_pose_record(const cJSON *raw, const ObjectManagerPose *pose) {
         cJSON_DeleteItemFromObject(record, "d");
         cJSON_AddNumberToObject(record, "d", pose->quarter);
     } else {
-        // the record's own rotation turned by the quarters it changed by: a map object's tilt (r0, r2)
-        // and an off-grid yaw stay (spawned objects only ever have quarter turns)
+        // the record's tilt (r0, r2) stays; its yaw is the pose's (any angle: a Physics Gun carry turns
+        // freely; the AABB collision follows the nearest quarter turn's size, which the pose carries)
         double r[3] = {0.0, 0.0, 0.0};
         const cJSON *rj = cJSON_GetObjectItem(raw, "r");
         for (int k = 0; k < 3 && cJSON_GetArraySize(rj) >= 3; k++) r[k] = cJSON_IsNumber(cJSON_GetArrayItem(rj, k)) ? cJSON_GetArrayItem(rj, k)->valuedouble : 0.0;
-        const int was = (((int) lround(r[1] / (M_PI / 2.0))) % 4 + 4) % 4;
-        const int turns = ((pose->quarter - was) % 4 + 4) % 4;
-        r[1] = turns ? round(fmod(r[1] + turns * (M_PI / 2.0), 2.0 * M_PI) * 100.0) / 100.0 : r[1];
+        const double was = r[1];
+        double yaw = isfinite(pose->yaw) ? fmod((double) pose->yaw, 2.0 * M_PI) : 0.0;
+        if (yaw < 0.0) yaw += 2.0 * M_PI;
+        // unchanged (within the record's 2-decimal rounding): as the record has it, so an object only
+        // moved keeps an off-grid yaw exactly
+        const double d = fmod(fabs(yaw - (was < 0.0 ? fmod(was, 2.0 * M_PI) + 2.0 * M_PI : fmod(was, 2.0 * M_PI))), 2.0 * M_PI);
+        r[1] = fmin(d, 2.0 * M_PI - d) < 0.006 ? was : round(yaw * 100.0) / 100.0;
         if (r[0] != 0.0 || r[1] != 0.0 || r[2] != 0.0) cJSON_AddItemToObject(record, "r", cJSON_CreateDoubleArray(r, 3));
     }
     return record;
@@ -1354,19 +1409,20 @@ static int om_remove_weapon(Player *player, const int id, const int all) {
     return OM_STATUS_OK;
 }
 
-// A WEAPON_PICKUP of weapon `id` spawned by `player` with its floor point at `p` (the caps checked)
-static int om_place_pickup(Game *game, Player *player, const int id, const vec3 p, NetSpawnResultPacket *out) {
+// A WEAPON_PICKUP of weapon `id` spawned by `player` with its floor point at `p` (the caps checked,
+// unless `dev`: devs have none)
+static int om_place_pickup(Game *game, Player *player, const int id, const vec3 p, const int dev, NetSpawnResultPacket *out) {
     ObjectManager *om = om_of(game);
     if (!om || !game->map) return OM_STATUS_INVALID;
-    if (things_count(game, om, player->uid, OM_KIND_OBJECT, 1) >= OM_PICKUPS_PER_PLAYER) {
+    if (dev) {
+        // (no caps)
+    } else if (things_count(game, om, player->uid, OM_KIND_OBJECT, 1) >= OM_PICKUPS_PER_PLAYER) {
         out->limit = OM_PICKUPS_PER_PLAYER;
         return OM_STATUS_LIMIT;
-    }
-    if (things_count(game, om, player->uid, OM_KIND_OBJECT, 0) >= OM_OBJECTS_PER_PLAYER) {
+    } else if (things_count(game, om, player->uid, OM_KIND_OBJECT, 0) >= OM_OBJECTS_PER_PLAYER) {
         out->limit = OM_OBJECTS_PER_PLAYER;
         return OM_STATUS_LIMIT;
-    }
-    if (things_count(game, om, -1, OM_KIND_OBJECT, 0) >= OM_OBJECTS_MAX) {
+    } else if (things_count(game, om, -1, OM_KIND_OBJECT, 0) >= OM_OBJECTS_MAX) {
         out->limit = OM_OBJECTS_MAX;
         return OM_STATUS_LIMIT;
     }
@@ -1390,12 +1446,12 @@ static int om_place_pickup(Game *game, Player *player, const int id, const vec3 
     return OM_STATUS_OK;
 }
 
-static int om_drop_weapon(Game *game, Player *player, const NetSpawnReqPacket *req, NetSpawnResultPacket *out) {
+static int om_drop_weapon(Game *game, Player *player, const NetSpawnReqPacket *req, const int dev, NetSpawnResultPacket *out) {
     const int id = req->item;
     if (!object_manager_weapon_listed(id) || !om_weapon(game, id) || !game->map) return OM_STATUS_INVALID;
     ObjectManagerAim aim;
     if (!object_manager_aim(game, player, req->pitch, req->yaw, &aim)) return OM_STATUS_NO_TARGET;
-    return om_place_pickup(game, player, id, om_floor_point(game, &aim, 3.0f), out);
+    return om_place_pickup(game, player, id, om_floor_point(game, &aim, 3.0f), dev, out);
 }
 
 int object_manager_holds_extra(const Player *player) {
@@ -1423,7 +1479,7 @@ static vec3 om_toss_point(const Game *game, const Player *player) {
 // pickup a step in front of the player and leaves the loadout. Only extra slots: the class
 // loadout and the melee stay (v7's dropWeapon takes picked-up weapons back to their pickup, never
 // a melee, never the last weapon). The Tool Gun is put away, never a pickup.
-static int om_drop_held(Game *game, Player *player, NetSpawnResultPacket *out) {
+static int om_drop_held(Game *game, Player *player, const int dev, NetSpawnResultPacket *out) {
     if (!object_manager_holds_extra(player)) return OM_STATUS_KEEP;
     const int id = player->loadout[player->loadout_index];
     out->item = (int16_t) id;
@@ -1431,7 +1487,7 @@ static int om_drop_held(Game *game, Player *player, NetSpawnResultPacket *out) {
     if (!w || w->melee) return OM_STATUS_KEEP;
     if (!object_manager_weapon_listed(id)) return om_remove_weapon(player, id, 0);
     if (!game->map || (game->mode && game->mode->config.no_pickups)) return OM_STATUS_DENIED; // dropWeapon: !mode.noPickups
-    const int status = om_place_pickup(game, player, id, om_toss_point(game, player), out);
+    const int status = om_place_pickup(game, player, id, om_toss_point(game, player), dev, out);
     return status == OM_STATUS_OK ? om_remove_weapon(player, id, 0) : status;
 }
 
@@ -1530,7 +1586,7 @@ static int om_spawn_record(Game *game, ObjectManager *om, Player *player, const 
     return uid;
 }
 
-static int om_spawn_entry(Game *game, Player *player, const NetSpawnReqPacket *req, const int tab, NetSpawnResultPacket *out) {
+static int om_spawn_entry(Game *game, Player *player, const NetSpawnReqPacket *req, const int tab, const int dev, NetSpawnResultPacket *out) {
     int count = 0;
     const ObjectManagerEntry *entries = object_manager_entries(tab, &count);
     if (!entries || req->item < 0 || req->item >= count) return OM_STATUS_INVALID;
@@ -1538,7 +1594,7 @@ static int om_spawn_entry(Game *game, Player *player, const NetSpawnReqPacket *r
     ObjectManager *om = om_of(game);
     if (!om || !game->map) return OM_STATUS_INVALID;
     const int kind = e->kind == OM_ENTRY_RECORD ? OM_KIND_OBJECT : tab == OM_TAB_NPCS ? OM_KIND_NPC : OM_KIND_ENTITY;
-    const int limit = om_limit(game, om, player, kind);
+    const int limit = dev ? 0 : om_limit(game, om, player, kind); // devs: no caps
     if (limit) {
         out->limit = (uint16_t) limit;
         return OM_STATUS_LIMIT;
@@ -1833,12 +1889,13 @@ static int tool_duplicator(Game *game, Player *player, const NetSpawnReqPacket *
         out->limit = OM_TOOL_COPIED;
         return OM_STATUS_OK;
     }
-    const int limit = om_limit(game, om, player, OM_KIND_OBJECT);
+    const int dev = (who->caps & OM_CAP_DEV) != 0; // devs: no caps
+    const int limit = dev ? 0 : om_limit(game, om, player, OM_KIND_OBJECT);
     if (limit) {
         out->limit = (uint16_t) limit;
         return OM_STATUS_LIMIT;
     }
-    if (copy->pickup && things_count(game, om, player->uid, OM_KIND_OBJECT, 1) >= OM_PICKUPS_PER_PLAYER) {
+    if (!dev && copy->pickup && things_count(game, om, player->uid, OM_KIND_OBJECT, 1) >= OM_PICKUPS_PER_PLAYER) {
         out->limit = OM_PICKUPS_PER_PLAYER;
         return OM_STATUS_LIMIT;
     }
@@ -1997,21 +2054,107 @@ static int om_edit_target(Game *game, const Player *player, const int uid, const
     return om_may_touch(t, player, who) ? OM_STATUS_OK : OM_STATUS_DENIED;
 }
 
-// The edited box `to` (from `from`) within the editor's reach and out of every player: OK, BOUNDS, BLOCKED
-static int om_pose_allowed(const Game *game, const Player *player, const Object *o, const ObjectManagerPose *from, const ObjectManagerPose *to) {
+// The edited box `to` (from `from`) within the editor's reach and out of every player (not for devs:
+// they move things into and through players): OK, BOUNDS, BLOCKED
+static int om_pose_allowed(const Game *game, const Player *player, const Object *o, const ObjectManagerPose *from, const ObjectManagerPose *to,
+                           const int dev) {
     const vec3 eye = {player->position.x, player->position.y + player->height - game_constants.camera_height, player->position.z};
     // the box's nearest point (a big map object's centre may well be far away)
     const vec3 c = {fmaxf(fabsf(to->position.x - eye.x) - to->size.x * 0.5f, 0.0f),
                     eye.y < to->position.y ? to->position.y - eye.y : fmaxf(eye.y - (to->position.y + to->size.y), 0.0f),
                     fmaxf(fabsf(to->position.z - eye.z) - to->size.z * 0.5f, 0.0f)};
     if (sqrtf(c.x * c.x + c.y * c.y + c.z * c.z) > OM_EDIT_RANGE) return OM_STATUS_BOUNDS;
-    const int solid = o->collision_type != COLLISION_TYPE_NONE && bot_object_blocks_player(o); // (pads, zones, triggers: walk-through)
+    const int solid = !dev && o->collision_type != COLLISION_TYPE_NONE && bot_object_blocks_player(o); // (pads, zones, triggers: walk-through)
     for (size_t i = 0; solid && i < game->player_count; i++) { // never into a player (one already inside may stay)
         const Player *p = game->players[i];
         if (!p || !p->active) continue;
         if (om_box_hits_player(p, to->position, to->size) && !om_box_hits_player(p, from->position, from->size)) return OM_STATUS_BLOCKED;
     }
     return OM_STATUS_OK;
+}
+
+// ---------------------------------------------------------------- the Physics Gun on players (devs)
+
+static Player *om_player_by_uid(Game *game, const int uid) {
+    for (size_t i = 0; i < game->player_count; i++) {
+        if (game->players[i] && game->players[i]->uid == uid) return game->players[i];
+    }
+    return NULL;
+}
+
+static void om_hold_send(Game *game, const Player *player, const int on) {
+    const NetCheatPacket packet = {.flag = NET_CHEAT_HELD, .on = (uint8_t) !!on};
+    game_send(game, player->uid, NET_PACKET_CHEAT, &packet, sizeof(packet));
+}
+
+void object_manager_hold_release(Game *game, Player *player) {
+    if (!game || !player || !player->om_held) return;
+    player->om_held = 0;
+    player->om_held_by = 0;
+    if (game_is_authority(game)) om_hold_send(game, player, 0); // its own client moves it again
+}
+
+// The authority's side of a carry: `target` stays at the carried feet, its own input moving nothing
+// (mode_input_locked) until the carrier lets go or stops updating
+void object_manager_hold_tick(Game *game, Player *player) {
+    if (!game || !player || !player->om_held || !game_is_authority(game)) return;
+    const Player *carrier = om_player_by_uid(game, player->om_held_by - 1);
+    if (!player->active || !carrier || !carrier->active || !carrier->weapon || !carrier->weapon->kn_physgun || game->now > player->om_held_until) {
+        object_manager_hold_release(game, player);
+        return;
+    }
+    player->position = player->om_hold_pos;
+    player->last_position = player->om_hold_pos;
+    player->velocity = (vec3) {0.0f, 0.0f, 0.0f};
+}
+
+// OM_EDIT_PLAYER: a dev's Physics Gun on another player (any spawned player or bot): held at the
+// edit's feet (server-authoritative: the carried player's own client snaps there, everyone else sees
+// its state), let go with OM_EDIT_RELEASE. God mode and the rest of the rules stay the player's.
+static int om_edit_player(Game *game, Player *player, const NetSpawnEditPacket *edit, const OmWho *who) {
+    if (!(who->caps & OM_CAP_DEV)) return OM_STATUS_DENIED; // devs only: not the host, not a guest
+    if (edit->req.item != OM_EDIT_SOURCE_PHYSGUN) return OM_STATUS_INVALID;
+    if (!player->weapon || !player->weapon->kn_physgun) return OM_STATUS_NO_TOOL;
+    Player *target = om_player_by_uid(game, edit->uid);
+    if (!target || target == player) return OM_STATUS_NOTHING;
+    if (edit->flags & OM_EDIT_RELEASE) {
+        if (target->om_held && target->om_held_by == player->uid + 1) object_manager_hold_release(game, target);
+        return OM_STATUS_OK;
+    }
+    if (!target->active) return OM_STATUS_NOTHING;
+    if (target->om_held && target->om_held_by != player->uid + 1 && game->now <= target->om_held_until) return OM_STATUS_DENIED; // another dev has them
+    const vec3 feet = {edit->position[0], edit->position[1], edit->position[2]};
+    if (!isfinite(feet.x) || !isfinite(feet.y) || !isfinite(feet.z)) return OM_STATUS_BOUNDS;
+    const vec3 eye = {player->position.x, player->position.y + player->height - game_constants.camera_height, player->position.z};
+    const vec3 d = {feet.x - eye.x, feet.y - eye.y, feet.z - eye.z};
+    if (sqrtf(d.x * d.x + d.y * d.y + d.z * d.z) > OM_EDIT_RANGE) return OM_STATUS_BOUNDS;
+    const int grab = !target->om_held;
+    const vec3 was = target->om_held ? target->om_hold_pos : target->position;
+    target->om_held = 1;
+    target->om_held_by = player->uid + 1;
+    target->om_held_until = game->now + OM_HOLD_TIMEOUT;
+    target->om_hold_pos = feet;
+    if (grab) om_hold_send(game, target, 1);
+    const float moved = fabsf(was.x - feet.x) + fabsf(was.y - feet.y) + fabsf(was.z - feet.z);
+    if (grab || moved > 0.01f) game_change_position(game, target, feet, 1, 1, 0, 0); // its own client snaps there
+    return OM_STATUS_OK;
+}
+
+// ---------------------------------------------------------------- the Physics Gun's reach
+
+static int om_level_geometry(const int prefab) {
+    const PrefabInfo *info = prefab_info(prefab);
+    return !info || (info->geometry != PREFAB_GEO_MODEL && info->geometry != PREFAB_GEO_SPECIAL);
+}
+
+int object_manager_physgun_takes(const Game *game, const int uid) {
+    if (!object_manager_editable(game, uid)) return 0;
+    if (!object_manager_is_map_object(game, uid)) return 1; // a spawned object: the spawner's to carry
+    const Object *o = game->map->objects[uid];
+    // a stand-in keeps the original's prefab; the size cap backstops big models (a whole building)
+    if (om_level_geometry(o->prefab)) return 0;
+    const vec3 s = object_box_size(o);
+    return s.x <= OM_PHYSGUN_MAP_SIZE_MAX && s.y <= OM_PHYSGUN_MAP_SIZE_MAX && s.z <= OM_PHYSGUN_MAP_SIZE_MAX;
 }
 
 void object_manager_edit(Game *game, Player *player, const NetSpawnEditPacket *edit, const ObjectManagerPerms *perms,
@@ -2035,9 +2178,16 @@ void object_manager_edit(Game *game, Player *player, const NetSpawnEditPacket *e
         out->status = OM_STATUS_INVALID;
         return;
     }
-    // its own clock: a drag sends up to 10 edits a second, the request bucket stays for the rest
+    const OmWho who = {caps, perms && perms->host};
+    const int dev = (caps & OM_CAP_DEV) != 0;
+    if (edit->flags & OM_EDIT_PLAYER) { // the Physics Gun on a player (devs): never paced, no undo step
+        out->status = (uint8_t) om_edit_player(game, player, edit, &who);
+        return;
+    }
+    // its own clock: a drag sends up to 20 edits a second, the request bucket stays for the rest;
+    // devs are never paced (their client sends up to 60 a second)
     const float now = game->now;
-    if (player->om_edit_at > 0.0f && now >= player->om_edit_at && now - player->om_edit_at < OM_EDIT_INTERVAL) {
+    if (!dev && player->om_edit_at > 0.0f && now >= player->om_edit_at && now - player->om_edit_at < OM_EDIT_INTERVAL) {
         out->status = OM_STATUS_RATE;
         return;
     }
@@ -2049,16 +2199,27 @@ void object_manager_edit(Game *game, Player *player, const NetSpawnEditPacket *e
     ObjectManager *om = om_of(game);
     const int uid = edit->uid;
     ObjectManagerPose from;
-    const OmWho who = {caps, perms && perms->host};
     const int target = om ? om_edit_target(game, player, uid, &who) : OM_STATUS_INVALID;
     if (target != OM_STATUS_OK || !object_manager_pose(game, uid, &from)) {
         out->status = (uint8_t) (target != OM_STATUS_OK ? target : OM_STATUS_INVALID);
+        return;
+    }
+    if (edit->req.item == OM_EDIT_SOURCE_PHYSGUN && !object_manager_physgun_takes(game, uid)) { // props, not the level
+        out->status = OM_STATUS_GEOMETRY;
         return;
     }
     ObjectManagerPose to = from;
     to.position = (vec3) {edit->position[0], edit->position[1], edit->position[2]};
     to.size = (vec3) {edit->size[0], edit->size[1], edit->size[2]};
     to.quarter = edit->quarter;
+    if (from.directed) to.yaw = (float) (edit->quarter % 4) * ((float) M_PI / 2.0f);
+    else if (edit->flags & OM_EDIT_YAW) { // any yaw; the quarter (the collision's size) is the nearest one's
+        to.yaw = object_manager_yaw_unpack(edit->reserved);
+        to.quarter = object_manager_yaw_quarter(to.yaw);
+    } else { // quarter turns only (the yaw turned by the quarters it changed by)
+        const float two_pi = 2.0f * (float) M_PI;
+        to.yaw = fmodf(fmodf(from.yaw + (float) ((edit->quarter - from.quarter) % 4) * ((float) M_PI / 2.0f), two_pi) + two_pi, two_pi);
+    }
     const float v[6] = {to.position.x, to.position.y, to.position.z, to.size.x, to.size.y, to.size.z};
     int ok = edit->quarter < 4;
     for (int k = 0; k < 6; k++) ok &= isfinite(v[k]) != 0;
@@ -2081,7 +2242,7 @@ void object_manager_edit(Game *game, Player *player, const NetSpawnEditPacket *e
         if (om_ray(game, (vec3) {to.position.x, to.position.y + 0.1f, to.position.z}, down, &hit, &object)) to.position.y = to.position.y + 0.1f + down.y * hit;
         o->collision_type = (unsigned char) collision;
     }
-    const int where = om_pose_allowed(game, player, o, &from, &to);
+    const int where = om_pose_allowed(game, player, o, &from, &to, dev);
     if (where != OM_STATUS_OK) {
         out->status = (uint8_t) where;
         return;
@@ -2096,7 +2257,8 @@ static int om_edit_fields(Game *game, Player *player, const NetSpawnEditPacket *
     if (edit->req.item != OM_EDIT_SOURCE_BTOOLS || !(edit->flags & OM_EDIT_FIELDS)) return OM_STATUS_INVALID;
     if (!json || length < 3 || length > OM_FIELDS_MAX + 1 || json[length - 1] != 0 || strlen(json) != length - 1) return OM_STATUS_INVALID;
     const float now = game->now;
-    if (player->om_edit_at > 0.0f && now >= player->om_edit_at && now - player->om_edit_at < OM_EDIT_INTERVAL) return OM_STATUS_RATE;
+    if (!(who->caps & OM_CAP_DEV) && player->om_edit_at > 0.0f && now >= player->om_edit_at && now - player->om_edit_at < OM_EDIT_INTERVAL)
+        return OM_STATUS_RATE;
     if (!player->weapon || !player->weapon->kn_tool) return OM_STATUS_NO_TOOL;
     ObjectManager *om = om_of(game);
     const int uid = edit->uid;
@@ -2123,7 +2285,7 @@ static int om_edit_fields(Game *game, Player *player, const NetSpawnEditPacket *
         if (cJSON_GetArraySize(p) >= 3) (&to.position.x)[k] = (float) cJSON_GetNumberValue(cJSON_GetArrayItem(p, k));
         if (cJSON_GetArraySize(s) >= 3) (&to.size.x)[k] = (float) cJSON_GetNumberValue(cJSON_GetArrayItem(s, k));
     }
-    if (status == OM_STATUS_OK) status = om_pose_allowed(game, player, o, &from, &to);
+    if (status == OM_STATUS_OK) status = om_pose_allowed(game, player, o, &from, &to, (who->caps & OM_CAP_DEV) != 0);
     const int same = cJSON_Compare(next, base, 1);
     cJSON_Delete(base);
     if (status != OM_STATUS_OK || same) { // (nothing changed: no undo step, nothing sent)
@@ -2179,7 +2341,8 @@ void object_manager_request(Game *game, Player *player, const NetSpawnReqPacket 
         return;
     }
     const OmWho who = {caps, perms && perms->host};
-    if (!om_take_token(player)) {
+    const int dev = (caps & OM_CAP_DEV) != 0;
+    if (!dev && !om_take_token(player)) { // devs: no pace
         out->status = OM_STATUS_RATE;
         return;
     }
@@ -2187,14 +2350,173 @@ void object_manager_request(Game *game, Player *player, const NetSpawnReqPacket 
         case OM_ACTION_ADD_WEAPON: out->status = (uint8_t) om_add_weapon(player, req->item, caps, out); break;
         case OM_ACTION_REMOVE_WEAPON: out->status = (uint8_t) om_remove_weapon(player, req->item, 0); break;
         case OM_ACTION_CLEAR_WEAPONS: out->status = (uint8_t) om_remove_weapon(player, -1, 1); break;
-        case OM_ACTION_DROP_WEAPON: out->status = (uint8_t) om_drop_weapon(game, player, req, out); break;
+        case OM_ACTION_DROP_WEAPON: out->status = (uint8_t) om_drop_weapon(game, player, req, dev, out); break;
         case OM_ACTION_UNDO: out->status = (uint8_t) om_undo(game, player, 0); break;
-        case OM_ACTION_SPAWN_ENTITY: out->status = (uint8_t) om_spawn_entry(game, player, req, OM_TAB_ENTITIES, out); break;
-        case OM_ACTION_SPAWN_NPC: out->status = (uint8_t) om_spawn_entry(game, player, req, OM_TAB_NPCS, out); break;
-        case OM_ACTION_SPAWN_OBJECT: out->status = (uint8_t) om_spawn_entry(game, player, req, OM_TAB_OBJECTS, out); break;
+        case OM_ACTION_SPAWN_ENTITY: out->status = (uint8_t) om_spawn_entry(game, player, req, OM_TAB_ENTITIES, dev, out); break;
+        case OM_ACTION_SPAWN_NPC: out->status = (uint8_t) om_spawn_entry(game, player, req, OM_TAB_NPCS, dev, out); break;
+        case OM_ACTION_SPAWN_OBJECT: out->status = (uint8_t) om_spawn_entry(game, player, req, OM_TAB_OBJECTS, dev, out); break;
         case OM_ACTION_REMOVE_AIM: out->status = (uint8_t) om_remove_aim(game, player, req, &who, 0); break;
-        case OM_ACTION_DROP_HELD: out->status = (uint8_t) om_drop_held(game, player, out); break;
+        case OM_ACTION_DROP_HELD: out->status = (uint8_t) om_drop_held(game, player, dev, out); break;
         case OM_ACTION_TOOL: out->status = (uint8_t) om_tool(game, player, req, &who, out); break;
         default: out->status = OM_STATUS_INVALID; break;
     }
+}
+
+// ---------------------------------------------------------------- a dev not spawned in (authority)
+
+void object_manager_menu_view(const Game *game, const Player *last, const PlayerKeep *keep, const int uid, ObjectManagerView *out) {
+    memset(out, 0, sizeof(*out));
+    out->uid = uid;
+    if (last) { // dead: where the last life ended
+        out->eye = (vec3) {last->position.x, last->position.y + (last->height > 0.0f ? last->height : game_constants.player_height) - game_constants.camera_height,
+                           last->position.z};
+        out->direction = last->direction;
+    } else if (keep && keep->has_view) {
+        out->eye = keep->view_eye;
+        out->direction = keep->view_direction;
+    } else if (game && game->map) { // the menu camera (map camPos; its pose when the map pins one)
+        out->eye = game->map->camera_position;
+        out->direction = (vec2) {game->map->camera_static ? game->map->camera_rotation.x : -0.35f, game->map->camera_rotation.y};
+    }
+}
+
+static int om_extras_find(const int *extras, const int count, const int id) {
+    for (int i = 0; i < count; i++) {
+        if (extras[i] == id) return i;
+    }
+    return -1;
+}
+
+// The connection's extra weapon list (applied at the next spawn): add / remove / clear
+static int om_view_weapons(Game *game, const NetSpawnReqPacket *req, const unsigned int caps, int *extras, int *extra_count, NetSpawnResultPacket *out) {
+    if (!extras || !extra_count) return OM_STATUS_DEAD;
+    const int id = req->item;
+    if (req->action == OM_ACTION_CLEAR_WEAPONS) {
+        *extra_count = 0;
+        return OM_STATUS_OK;
+    }
+    const int at = om_extras_find(extras, *extra_count, id);
+    if (req->action == OM_ACTION_REMOVE_WEAPON) {
+        if (at < 0) return OM_STATUS_NOTHING;
+        memmove(extras + at, extras + at + 1, (size_t) (*extra_count - at - 1) * sizeof(int));
+        (*extra_count)--;
+        return OM_STATUS_OK;
+    }
+    if (!object_manager_weapon_allowed(id) || !om_weapon(game, id)) return OM_STATUS_INVALID;
+    if ((id == WEAPON_ID_TOOL_GUN || id == WEAPON_ID_PHYS_GUN) && !(caps & OM_CAP_SPAWN)) return OM_STATUS_DENIED;
+    if (at >= 0) return OM_STATUS_OK;
+    if (*extra_count >= PLAYER_EXTRA_WEAPONS_MAX) {
+        out->limit = PLAYER_EXTRA_WEAPONS_MAX;
+        return OM_STATUS_LIMIT;
+    }
+    extras[(*extra_count)++] = id;
+    return OM_STATUS_OK;
+}
+
+void object_manager_request_view(Game *game, const ObjectManagerView *view, const NetSpawnReqPacket *req, const ObjectManagerPerms *perms,
+                                 int *extras, int *extra_count, NetSpawnResultPacket *out) {
+    memset(out, 0, sizeof(*out));
+    const unsigned int caps = object_manager_caps(game, perms);
+    out->action = req->action;
+    out->item = req->item;
+    out->caps = (uint8_t) caps;
+    out->extra_max = PLAYER_EXTRA_WEAPONS_MAX;
+    out->status = OM_STATUS_OK;
+    if (req->action == OM_ACTION_QUERY) return;
+    if (req->action >= OM_ACTION_COUNT || req->action == OM_ACTION_EDIT) {
+        out->status = OM_STATUS_INVALID;
+        return;
+    }
+    // only devs act without a live player (the host and guests: "Spawn first", as before)
+    if (!(caps & OM_CAP_DEV) || !view || !game_is_authority(game) || !game->map) {
+        out->status = OM_STATUS_DEAD;
+        return;
+    }
+    switch (req->action) {
+        case OM_ACTION_ADD_WEAPON:
+        case OM_ACTION_REMOVE_WEAPON:
+        case OM_ACTION_CLEAR_WEAPONS:
+            out->status = (uint8_t) om_view_weapons(game, req, caps, extras, extra_count, out);
+            return;
+        case OM_ACTION_DROP_WEAPON:
+        case OM_ACTION_UNDO:
+        case OM_ACTION_SPAWN_ENTITY:
+        case OM_ACTION_SPAWN_NPC:
+        case OM_ACTION_SPAWN_OBJECT:
+        case OM_ACTION_REMOVE_AIM:
+            break;
+        default: // the guns' actions need them in hand
+            out->status = OM_STATUS_DEAD;
+            return;
+    }
+    // a stand-in player at the view (never in game->players): the owner of what it spawns is the
+    // connection, so Undo / Remove take it back from the next life too
+    Player *p = player_init(game);
+    if (!p) {
+        out->status = OM_STATUS_INVALID;
+        return;
+    }
+    p->uid = view->uid;
+    p->active = 1;
+    p->height = game_constants.player_height;
+    p->position = (vec3) {view->eye.x, view->eye.y - (p->height - game_constants.camera_height), view->eye.z};
+    NetSpawnReqPacket r = *req; // (the client's camera; a non-finite look is the view's)
+    if (!isfinite(r.pitch)) r.pitch = view->direction.x;
+    if (!isfinite(r.yaw)) r.yaw = view->direction.y;
+    p->direction = (vec2) {player_clamp_pitch(r.pitch), r.yaw};
+    const OmWho who = {caps, perms && perms->host};
+    for (int attempt = 0; attempt < 2; attempt++) {
+        switch (req->action) {
+            case OM_ACTION_DROP_WEAPON: out->status = (uint8_t) om_drop_weapon(game, p, &r, 1, out); break;
+            case OM_ACTION_UNDO: out->status = (uint8_t) om_undo(game, p, 0); break;
+            case OM_ACTION_SPAWN_ENTITY: out->status = (uint8_t) om_spawn_entry(game, p, &r, OM_TAB_ENTITIES, 1, out); break;
+            case OM_ACTION_SPAWN_NPC: out->status = (uint8_t) om_spawn_entry(game, p, &r, OM_TAB_NPCS, 1, out); break;
+            case OM_ACTION_SPAWN_OBJECT: out->status = (uint8_t) om_spawn_entry(game, p, &r, OM_TAB_OBJECTS, 1, out); break;
+            case OM_ACTION_REMOVE_AIM: out->status = (uint8_t) om_remove_aim(game, p, &r, &who, 0); break;
+            default: break;
+        }
+        if (out->status != OM_STATUS_NO_TARGET) break;
+        r.pitch = -(float) M_PI / 2.0f; // the look meets nothing (a menu camera over the sky): straight down from the view
+        p->direction.x = player_clamp_pitch(r.pitch);
+    }
+    free(p); // (player_init allocates nothing else)
+}
+
+// ---------------------------------------------------------------- client interpolation (pure)
+
+void object_manager_interp_push(ObjectManagerInterp *it, const vec3 shown, const float shown_yaw, const vec3 to, const float yaw, const double now) {
+    // the gap between updates, smoothed (frames quantise each arrival: a raw gap jitters by a frame)
+    double gap = it->last_update > 0.0 ? now - it->last_update : OM_INTERP_SPAN_MAX * 0.4;
+    if (gap < OM_INTERP_SPAN_MIN) gap = OM_INTERP_SPAN_MIN;
+    if (gap > OM_INTERP_SPAN_MAX) gap = OM_INTERP_SPAN_MAX;
+    const double span = it->last_update > 0.0 && it->span > 0.0 && gap < OM_INTERP_SPAN_MAX ? it->span * 0.75 + gap * 0.25 : gap;
+    it->from = shown;
+    it->yaw_from = shown_yaw;
+    it->to = to;
+    it->yaw_to = yaw;
+    it->start = now;
+    it->span = span;
+    it->last_update = now;
+    it->active = 1;
+}
+
+int object_manager_interp_sample(ObjectManagerInterp *it, const double now, vec3 *pos, float *yaw) {
+    double t = it->active && it->span > 0.0 ? (now - it->start) / it->span : 1.0;
+    if (t < 0.0) t = 0.0;
+    if (t >= 1.0) {
+        it->active = 0;
+        if (pos) *pos = it->to;
+        if (yaw) *yaw = it->yaw_to;
+        return 0;
+    }
+    const float f = (float) t;
+    if (pos) *pos = (vec3) {it->from.x + (it->to.x - it->from.x) * f, it->from.y + (it->to.y - it->from.y) * f, it->from.z + (it->to.z - it->from.z) * f};
+    if (yaw) { // the short way round
+        const float two_pi = 2.0f * (float) M_PI;
+        float d = fmodf(it->yaw_to - it->yaw_from, two_pi);
+        if (d > (float) M_PI) d -= two_pi;
+        if (d < -(float) M_PI) d += two_pi;
+        *yaw = it->yaw_from + d * f;
+    }
+    return 1;
 }

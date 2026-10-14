@@ -13,7 +13,8 @@ stopped at the end (also on failure). Three standalone servers from generated se
      1. a guest's forged chat commands (NET_PACKET_CHAT_SEND and the v7 NET_PACKET_CHAT_V7):
         /kick <host>, /kick * (refused before the selector resolves: no count, no "no match"),
         /ban, /banip, /ip (no address leaks), /map, /end, /god *, /kill *, /bring all, /bot_add,
-        /give <weapon> <host>: each refused with the notify and a "perms denied ... account 0" line
+        /give <weapon> <host>, /autofill: each refused with the notify and a "perms denied ... account 0" line;
+        /spawn refused by the Object Manager's rules
      2. forged dev packets: prmA (noclip key), tp, cycle, clearLog: refused and logged
      3. a late NET_PACKET_FORWARDED "127.0.0.1" (claiming the server's machine) is ignored
      4. positive: the host /ip, /god and /kick of a guest work; rcon works with its password
@@ -227,6 +228,7 @@ def server_a():
         ("ban", f"/ban {host_uid}", False), ("banip", f"/banip {host_uid}", False), ("ip", f"/ip {host_uid}", False),
         ("map", "/map Burg", False), ("end", "/end", True), ("god", "/god *", False), ("kill", "/kill *", False),
         ("bring", "/bring all", False), ("bot_add", "/bot_add 3", False), ("unban", "/unban 1", False),
+        ("autofill", "/autofill off", False), ("autofill", "/autofill 8", True),
     ]
     for command, text, v7 in forged:
         before = len(log("a.log"))
@@ -240,6 +242,9 @@ def server_a():
           not guest.got_text("Kicked") and not guest.got_text("No players match"))
     give_mark = guest.say(f"/give sniper {host_uid}")
     check("A1: guest /give <weapon> <host> refused", guest.got_text("Only developers and the host", give_mark))
+    spawn_mark = guest.say("/spawn crate")
+    check("A1: guest /spawn refused (the Object Manager's rules)", guest.got_text("only developers and the host can spawn", spawn_mark) and
+          not guest.got_text("Spawned", spawn_mark))
     pump_all(peers, 0.5)
     check("A1: nobody was kicked or banned", not host.closed and not victim.closed and not guest.closed)
     check("A1: no ban was written", not os.path.exists(os.path.join(WORK, "a-bans.json")) or "203.0.113" not in open(os.path.join(WORK, "a-bans.json")).read())

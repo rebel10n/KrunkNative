@@ -361,21 +361,23 @@ static void events_cheat(Client *client, const NetCheatPacket *packet) {
     const int on = !!packet->on;
     const char *line = NULL;
     switch (packet->flag) {
+        // KrunkNative: from the menu (no player yet) the line still shows; the server sends the flag
+        // again after the spawn (net_send_kept_cheats)
         case NET_CHEAT_NOCLIP:
-            if (!client->me) return;
-            client->me->noclip = (unsigned char) on;
+            if (client->me) client->me->noclip = (unsigned char) on;
             line = on ? "Noclip - Enabled" : "Noclip - Disabled";
             break;
         case NET_CHEAT_UNLIMITED_AMMO:
-            if (!client->me) return;
-            client->me->unlimited_ammo = (unsigned char) on;
-            if (on) client->me->can_throw = 1;
+            if (client->me) client->me->unlimited_ammo = (unsigned char) on;
+            if (on && client->me) client->me->can_throw = 1;
             line = on ? "Unlimited Ammo - Enabled" : "Unlimited Ammo - Disabled";
             break;
         case NET_CHEAT_FORCE_HIDE:
-            if (!client->me) return;
-            client->me->force_hide = (unsigned char) on;
+            if (client->me) client->me->force_hide = (unsigned char) on;
             line = on ? "Hide - Enabled" : "Hide - Disabled";
+            break;
+        case NET_CHEAT_HELD: // KrunkNative: a dev's Physics Gun carries us (mode_input_locked: our input moves nothing)
+            if (client->me) client->me->om_held = (unsigned char) !!on;
             break;
         case NET_CHEAT_BORDERS:
             client->game.config.disable_borders = (unsigned int) !on; // movement prediction

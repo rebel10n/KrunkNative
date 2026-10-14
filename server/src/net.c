@@ -645,6 +645,33 @@ static void net_send_spectate_state(ClientConnection *client) {
     net_resync_live_world(client); // projectiles launched while it was in the menu
 }
 
+// KrunkNative: the life that ends leaves its eye and look for the Object Manager's menu spawns
+static void net_keep_view(ClientConnection *client, const Player *player) {
+    if (!client || !player) return;
+    client->keep.has_view = 1;
+    client->keep.view_eye = (vec3) {player->position.x, player->position.y + (player->height > 0.0f ? player->height : game_constants.player_height) -
+                                                            game_constants.camera_height, player->position.z};
+    client->keep.view_direction = player->direction;
+}
+
+// The cheats the client mirrors (its prediction and HUD lines), after its SPAWN: those on, kept from
+// the menu or an earlier map (chat_commands.c player_keep_apply put them on the Player)
+static void net_send_kept_cheats(ClientConnection *client) {
+    const Player *p = client->player;
+    if (!p) return;
+    const struct {
+        unsigned int bit;
+        int on;
+        NetCheatFlag flag;
+    } k[] = {{PLAYER_KEEP_NOCLIP, p->noclip, NET_CHEAT_NOCLIP}, {PLAYER_KEEP_UNLIMITED_AMMO, p->unlimited_ammo, NET_CHEAT_UNLIMITED_AMMO},
+             {PLAYER_KEEP_FORCE_HIDE, p->force_hide, NET_CHEAT_FORCE_HIDE}};
+    for (size_t i = 0; i < sizeof(k) / sizeof(k[0]); i++) {
+        if (!(client->keep.set & k[i].bit) || !k[i].on) continue;
+        const NetCheatPacket packet = {.flag = (uint8_t) k[i].flag, .on = 1};
+        net_send_packet(client->fd, NET_PACKET_CHEAT, &packet, sizeof(packet));
+    }
+}
+
 // ENT with spectate = 1: a live player leaves the match first (LEAVE to the others),
 // then the connection spectates until an ENT without the flag spawns it.
 static void net_start_spectating(ClientConnection *client) {
@@ -652,6 +679,7 @@ static void net_start_spectating(ClientConnection *client) {
 
     if (client->player) {
         Player *player = client->player;
+        net_keep_view(client, player); // KrunkNative: where the Object Manager places things from the menu now
         ks_server_on_leave(client); // KrunkScript onPlayerLeave: the player leaves the match
         player->active = 0;
         game_player_left(&g_server->game, player);
@@ -726,12 +754,22 @@ static void net_spawn_client(ClientConnection *client) {
         player_set_extra_weapons(client->player, client->om_extras, client->om_extra_count);
     }
     player_spawn(client->player);
+    // KrunkNative: what commands set while this connection was not spawned in (god, noclip ... from the
+    // menu, a menu `tp`), and cheats that outlive a map change's new Player
+    player_keep_apply(client->player, &client->keep);
+    if (client->keep.has_spawn) {
+        client->keep.has_spawn = 0;
+        client->player->position = client->keep.spawn_at;
+        client->player->last_position = client->keep.spawn_at;
+        client->player->velocity = (vec3) {0.0f, 0.0f, 0.0f};
+    }
     accounts_player_card(client, client->player); // WP-E: class stat of the spawned class + pcStatIndex value
     client->joined = 1;
     net_mark_client_spawned(client);
     if (first_spawn) net_send_existing_spawns(client);
     net_broadcast_spawn(client->player);
     net_resync_live_world(client); // what the live-world filter held back while dead / in the menu
+    net_send_kept_cheats(client); // the client's own copy: noclip, unlimited ammo, forcehide (after its SPAWN)
 
     if (first_spawn) {
         // io_ent first spawn: leaderboard + round clock for the joiner, then
@@ -775,6 +813,8 @@ static void net_free_players() {
     for (size_t i = 0; i < g_server->client_count; i++) {
         if (g_server->clients[i].player) g_server->clients[i].custom_values = g_server->clients[i].player->custom_values; // WP-C
         g_server->clients[i].player = NULL;
+        g_server->clients[i].keep.has_view = 0;  // KrunkNative: the old map's spots mean nothing on the next one
+        g_server->clients[i].keep.has_spawn = 0;
         g_server->clients[i].spawned_at = 0.0f;
         g_server->clients[i].last_significant_move_at = g_server->now; // markPlayerUnspawned: a new idle clock
         g_server->clients[i].has_idle_position = 0;
@@ -889,12 +929,43 @@ static void net_keep_om_extras(ClientConnection *client) {
     memcpy(client->om_extras, client->player->extra_weapons, sizeof(client->om_extras));
 }
 
+// A request of a connection without a live player (the menu, dead, spectating): devs still spawn,
+// from their view, and their extra weapons go into the connection's list for the next spawn
+static void net_om_request_view(ClientConnection *client, const NetSpawnReqPacket *req, NetSpawnResultPacket *result) {
+    const ObjectManagerPerms perms = net_om_perms(client);
+    ObjectManagerView view;
+    object_manager_menu_view(&g_server->game, client->player, &client->keep, client->id, &view);
+    object_manager_request_view(&g_server->game, &view, req, &perms, client->om_extras, &client->om_extra_count, result);
+    if (client->player) player_set_extra_weapons(client->player, client->om_extras, client->om_extra_count); // (a dead Player: the list only)
+}
+
 static void net_handle_object_manager(ClientConnection *client, const NetSpawnReqPacket *req) {
     const ObjectManagerPerms perms = net_om_perms(client);
     NetSpawnResultPacket result;
-    object_manager_request(&g_server->game, client->player, req, &perms, &result);
-    net_keep_om_extras(client);
+    if (client->player && client->player->active) {
+        object_manager_request(&g_server->game, client->player, req, &perms, &result);
+        net_keep_om_extras(client);
+    } else {
+        net_om_request_view(client, req, &result);
+    }
     net_send_packet(client->fd, NET_PACKET_SPAWN_RESULT, &result, sizeof(result));
+}
+
+static PlayerKeep *net_chat_keep(void *user, const int id) {
+    (void) user;
+    ClientConnection *client = net_client_by_id(id);
+    return client ? &client->keep : NULL;
+}
+
+static void net_chat_om_view(void *user, const int id, const NetSpawnReqPacket *req, NetSpawnResultPacket *out) {
+    (void) user;
+    ClientConnection *client = net_client_by_id(id);
+    if (!client) {
+        memset(out, 0, sizeof(*out));
+        out->status = OM_STATUS_DEAD;
+        return;
+    }
+    net_om_request_view(client, req, out);
 }
 
 // The drop key ("drpw", int action 2) on an Object Manager extra slot: v7's dropWeapon only takes
@@ -995,6 +1066,8 @@ ChatCommandHost *net_chat_host(void) {
     g_chat_host.unban_account = net_chat_unban_account;
     g_chat_host.list_account_bans = net_chat_list_account_bans;
     g_chat_host.om_extras_changed = net_chat_om_extras;
+    g_chat_host.keep = net_chat_keep;                 // KrunkNative: cheats / tp from the menu
+    g_chat_host.om_request_view = net_chat_om_view;   // KrunkNative: give / spawn from the menu
     return &g_chat_host;
 }
 
@@ -1081,6 +1154,7 @@ void net_add_client(ClientConnection *client) {
     client->voice_v7 = (SocialAssembly) {0};
     memset(&client->custom_values, 0, sizeof(client->custom_values)); // WP-C: no custVals yet
     client->om_extra_count = 0; // Object Manager: no extra weapons yet
+    memset(&client->keep, 0, sizeof(client->keep)); // KrunkNative: no kept player state yet
     client->missed_projectiles = 0;
     g_server->clients[g_server->client_count] = *client;
 

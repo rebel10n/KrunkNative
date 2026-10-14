@@ -23,7 +23,12 @@ bridged remote browser), so it is neither DEV nor host.
   6b. the Properties tool: the dev's field patch (OM_EDIT_FIELDS) changes a map object's colour and
      its fields come back in the MAP_EDIT overlay; the guest's is refused, an out-of-range value and
      a field of another prefab too; Undo restores the map
-  7. the rate limit answers a burst with "Slow down"
+  7. a dev is never paced: a burst of 30 requests all answered OK (the bucket stays for non-devs:
+     object_manager_test)
+  8. the dev's Physics Gun carries the guest (OM_EDIT_PLAYER, devs only): the guest hears it is held
+     (NET_CHEAT_HELD) and its new feet (POSITION) update after update, the guest's own carry attempt
+     on the dev is refused, the release lets it go; the Physics Gun refuses the map's floor
+     (OM_STATUS_GEOMETRY) while the Tool Gun's Move takes it
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
 import os
@@ -45,6 +50,8 @@ SPAWN, FORWARDED, PICKUP = 4, 85, 128
 SPAWN_REQ, SPAWN_RESULT, LOADOUT_EXTRA, SPAWNED_OBJ = 250, 251, 252, 253
 QUERY, ADD_WEAPON, REMOVE_WEAPON, CLEAR_WEAPONS, DROP_WEAPON, SPAWN_ENTITY, SPAWN_NPC, SPAWN_OBJECT, REMOVE_AIM, UNDO = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
 DROP_HELD, TOOL, EDIT = 10, 11, 12
+EDIT_PLAYER, EDIT_RELEASE, GEOMETRY = 8, 16, 13  # OM_EDIT_PLAYER / OM_EDIT_RELEASE, OM_STATUS_GEOMETRY
+CHEAT, POSITION, CHEAT_HELD = 60, 104, 6
 PHYS_GUN, EDIT_PHYSGUN, EDIT_BEGIN = 66, 0, 1  # WEAPON_ID_PHYS_GUN (WEAPON_ID_KN_BASE 64 + 2)
 EDIT_BTOOLS, EDIT_FIELDS, FIELDS_ANSWER = 1, 4, 1  # the Properties tool's field patch (OM_EDIT_FIELDS)
 TOOL_DELETER, TOOL_DUPLICATOR, TOOL_ROTATOR, TOOL_INFO = 0, 1, 2, 3
@@ -156,10 +163,10 @@ class Peer(kn_proto.Conn):
             self.send(INPUT, struct.pack("<iifffBBBb", self.seq, -1, 1.0 / 60.0, 0.0, 0.0, 1 if shoot and i == 15 else 0, 0, 0, scroll))
         self.pump(0.3)
 
-    def edit(self, uid, pos, size, quarter=0, flags=EDIT_BEGIN):
-        """One OM_ACTION_EDIT (the Physics Gun's); its SPAWN_RESULT as (status, caps, limit)."""
+    def edit(self, uid, pos, size, quarter=0, flags=EDIT_BEGIN, source=EDIT_PHYSGUN):
+        """One OM_ACTION_EDIT (the Physics Gun's, or the Tool Gun's Move: source EDIT_BTOOLS); its SPAWN_RESULT as (status, caps, limit)."""
         mark = len(self.packets)
-        self.send(SPAWN_REQ, struct.pack("<BBhff", EDIT, 0, EDIT_PHYSGUN, 0.0, 0.0) + struct.pack("<i3f3fBBH", uid, *pos, *size, quarter, flags, 0))
+        self.send(SPAWN_REQ, struct.pack("<BBhff", EDIT, 0, source, 0.0, 0.0) + struct.pack("<i3f3fBBH", uid, *pos, *size, quarter, flags, 0))
         end = time.time() + 3
         while time.time() < end:
             self.read(timeout=0.2)
@@ -474,9 +481,13 @@ def run():
                     phys = s
                     break
                 time.sleep(0.1)
+            check("the Physics Gun refuses the map's floor (level geometry)", phys is not None and r[0] == GEOMETRY, str(r))
+            host.hold(slot)  # the Tool Gun's Move takes it
+            gmark = len(guest.packets)
+            r = host.edit(uid, [pose["p"][0], pose["p"][1] - 0.5, pose["p"][2]], [pose["s"][2], pose["s"][1], pose["s"][0]], source=EDIT_BTOOLS)
             guest.pump(0.5)
             moved = [_json.loads(e[1]) for e in map_ops_since(guest, gmark, MAP_EDIT) if e[0] == uid]
-            check("Physics Gun edit of the map object: down 0.5, the guest hears it", phys is not None and r[0] == OK and bool(moved) and
+            check("Tool Gun Move of the map object: down 0.5, the guest hears it", r is not None and r[0] == OK and bool(moved) and
                   abs(moved[-1]["p"][1] - (pose["p"][1] - 0.5)) < 0.02, f"{r} {moved[-1:]}")
             r = guest.edit(uid, pose["p"], pose["s"])
             check("guest: no edits of the map", r is not None and r[0] == DENIED, str(r))
@@ -519,8 +530,42 @@ def run():
         host.send(SPAWN_REQ, struct.pack("<BBhff", ADD_WEAPON, 0, SHOTGUN, 0.0, 0.0))
     host.pump(1.0)
     statuses = [struct.unpack("<BBBBhH", p)[1] for p in host.of_type(SPAWN_RESULT, mark) if len(p) == 8]
-    check("a burst of 30: every request answered, the rest of the burst slowed down", len(statuses) == 30 and statuses.count(RATE) >= 18,
+    check("a dev's burst of 30: every request answered, none slowed down", len(statuses) == 30 and statuses.count(RATE) == 0 and statuses.count(OK) == 30,
           f"{len(statuses)} answers, {statuses.count(RATE)} RATE")
+    host.request(CLEAR_WEAPONS)
+
+    # part 8: the dev's Physics Gun carries the guest
+    mark = host.say('/give "physics gun"')
+    phys = None
+    for s in range(1, 7):
+        host.hold(s)
+        r = host.edit(guest.me["uid"], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], flags=EDIT_PLAYER | EDIT_RELEASE)
+        if r is not None and r[0] != NO_TOOL:
+            phys = s
+            break
+        time.sleep(0.1)
+    check("dev: the Physics Gun in hand for a player", phys is not None and r[0] == OK, str(r))
+    gmark = len(guest.packets)
+    base = [10.0, 30.0, 10.0]
+    statuses = []
+    for i in range(30):  # 30 updates back to back (60 a second: no pace for devs)
+        r = host.edit(guest.me["uid"], [base[0] + i * 0.5, base[1], base[2]], [0.0, 0.0, 0.0], flags=EDIT_PLAYER)
+        statuses.append(r[0] if r else None)
+    guest.pump(0.4)
+    held = [p for p in guest.of_type(CHEAT, gmark) if len(p) >= 2 and p[0] == CHEAT_HELD]
+    feet = [struct.unpack("<3f", p[:12]) for p in guest.of_type(POSITION, gmark) if len(p) >= 12]
+    check("the dev carries the guest: 30 updates accepted", statuses.count(OK) == 30, str(statuses))
+    check("  the guest hears it is held", bool(held) and held[0][1] == 1, str(held[:1]))
+    check("  and its new feet, update by update", len(feet) >= 20 and abs(feet[-1][0] - (base[0] + 14.5)) < 0.01 and abs(feet[-1][1] - base[1]) < 0.01,
+          f"{len(feet)} {feet[-1:] if feet else None}")
+    r = guest.edit(host.me["uid"], base, [0.0, 0.0, 0.0], flags=EDIT_PLAYER)
+    check("the guest may not carry the dev", r is not None and r[0] != OK, str(r))
+    gmark = len(guest.packets)
+    r = host.edit(guest.me["uid"], base, [0.0, 0.0, 0.0], flags=EDIT_PLAYER | EDIT_RELEASE)
+    guest.pump(0.4)
+    let_go = [p for p in guest.of_type(CHEAT, gmark) if len(p) >= 2 and p[0] == CHEAT_HELD]
+    check("released: the guest hears it is free again", r is not None and r[0] == OK and bool(let_go) and let_go[-1][1] == 0, f"{r} {let_go}")
+    host.request(CLEAR_WEAPONS)
     for c in (host, guest, late, old):
         c.close()
 

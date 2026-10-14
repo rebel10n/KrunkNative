@@ -169,6 +169,9 @@ typedef struct {
     // KrunkNative Object Manager: the extra loadout weapons, kept across map changes like custVals
     int om_extras[PLAYER_EXTRA_WEAPONS_MAX];
     int om_extra_count;
+    // KrunkNative: the player state that outlives the Player (PlayerKeep: cheats set from the menu,
+    // a menu `tp`, the last life's view), applied at each spawn (net_spawn_client)
+    PlayerKeep keep;
     // Projectile slots (GameProjectile.id) whose PROJECTILE the live-world filter held back while
     // this connection was dead or in the menu; resent from the game state when it spawns
     // (net.c net_resync_live_world)

@@ -1343,6 +1343,13 @@ typedef struct Player_t {
     float om_tokens_at;           // game->now of the last refill
     int om_copy;                  // Tool Gun Duplicator: the copied spawned object's uid + 1, a map object's -(uid + 1), 0 none (authority)
     float om_edit_at;             // game->now of the last accepted Object Manager edit (OM_EDIT_INTERVAL, authority)
+    // KrunkNative Physics Gun on a player (object_manager.h OM_EDIT_PLAYER, devs only): held by uid
+    // om_held_by - 1 until om_held_until (game->now), at om_hold_pos; its input moves nothing
+    // (mode_input_locked) on the authority and, after NET_CHEAT_HELD, on its own client
+    unsigned char om_held:1;
+    int om_held_by;
+    float om_held_until;
+    vec3 om_hold_pos;
 
     Input *input_queue;
     size_t input_queue_size;
@@ -1464,6 +1471,28 @@ typedef struct Player_t {
     // and the account's medal counts (the stats commit).
     uint16_t medal_counts[PLAYER_MEDAL_SLOTS];
 } Player;
+
+// KrunkNative: a connection's player state that outlives its Player (the menu before the first spawn,
+// death, spectating, a map change). Chat commands write it whether or not the player is spawned in
+// (god, noclip ... from the menu, chat_commands.c), the server keeps it on the connection and
+// applies it at every spawn (player_keep_apply). Only the fields in `set` hold a value.
+#define PLAYER_KEEP_GOD 1u
+#define PLAYER_KEEP_NOCLIP 2u
+#define PLAYER_KEEP_NOTARGET 4u
+#define PLAYER_KEEP_SMITE 8u
+#define PLAYER_KEEP_UNLIMITED_AMMO 16u
+#define PLAYER_KEEP_FORCE_HIDE 32u
+typedef struct {
+    unsigned char set;            // PLAYER_KEEP_* bits
+    unsigned char god_mode, noclip, notarget, smite, unlimited_ammo, force_hide;
+    unsigned char has_spawn;      // `tp` while not spawned in: the next spawn's feet (once)
+    vec3 spawn_at;
+    unsigned char has_view;       // the last life's eye and look (Object Manager spawns from the menu)
+    vec3 view_eye;
+    vec2 view_direction;          // pitch, yaw
+} PlayerKeep;
+// The kept cheats onto `player` (a spawn): returns PLAYER_KEEP_* of the ones that changed
+unsigned int player_keep_apply(Player*, const PlayerKeep*);
 
 typedef struct {
     int streak;         // v7 info.stk + 1 (STREAK_NUKE + 1: a Nuke kill), 0 = not a streak kill
@@ -2791,6 +2820,7 @@ typedef enum {
     NET_CHEAT_BORDERS = 3,         // "borders" -> !game.config.disable_borders
     NET_CHEAT_FORCE_COLLIDE = 4,   // "forcecol" -> map objects forced collidable
     NET_CHEAT_THIRD_PERSON = 5,    // KrunkNative /thirdperson: the third-person camera granted (1) / taken (0)
+    NET_CHEAT_HELD = 6,            // KrunkNative Physics Gun: a dev carries you (1: your input moves nothing) / let go (0)
 } NetCheatFlag;
 
 typedef struct {

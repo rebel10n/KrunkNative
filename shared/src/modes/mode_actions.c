@@ -60,7 +60,7 @@ void mode_unlock_move(Game *game) {
 }
 
 int mode_input_locked(const Player *player) {
-    return player && player->mode.locked;
+    return player && (player->mode.locked || player->om_held); // KrunkNative: a dev's Physics Gun carries the player
 }
 
 // waitTimers.push(timer) when `replace` is 0 and a list exists, else waitTimers = [timer].

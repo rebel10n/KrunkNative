@@ -6,6 +6,9 @@
 One standalone server_bin (max_players 4, bot_quota 4, bot_quota_grace 3), real kn_proto clients:
   1. an empty lobby stays empty (bots 0 for 3 s)
   2. one human: 3 bots come in (quota - humans)
+  2b. `autofill off` (the human is the server's own machine: a DEV peer): the bots leave and stay
+     away, the query drops its "autofill" tag; `autofill on` brings the 3 back; `autofill 2` fills to
+     2 players; `autofill 4` back to the server's quota
   3. three more humans join the bot-filled lobby: every one spawns (no "server full"), a bot
      leaves per join, the query shows players 4 / bots 0
   4. humans leave: the bots come back
@@ -63,6 +66,19 @@ def wait_counts(players, bots, timeout=8.0):
     return False, last
 
 
+def tags():
+    try:
+        return query().get("tags", [])
+    except OSError:
+        return []
+
+
+def say(conn, text):
+    time.sleep(0.4)  # the chat burst limit
+    conn.send(8, text.encode() + b"\0")  # NET_PACKET_CHAT_SEND
+    conn.read(timeout=0.3)
+
+
 def join(name):
     """A guest that sends ENT; returns (conn, spawned)."""
     c = kn_proto.Conn("127.0.0.1", PORT)
@@ -105,6 +121,23 @@ def main():
     check("first human spawns", ok)
     ok, last = wait_counts(1, 3)
     check("1 human: 3 bots fill the lobby", ok, str(last))
+    check("  the query says autofill", "autofill" in tags(), str(tags()))
+
+    # 2b. autofill off / <n> / on at run time (a DEV peer: the server's own machine)
+    say(a, "/autofill off")
+    ok, last = wait_counts(1, 0, 3.0)
+    check("autofill off: the bots leave", ok, str(last))
+    time.sleep(1.5)
+    check("  and stay away", counts() == (1, 0) and "autofill" not in tags(), f"{counts()} {tags()}")
+    say(a, "/autofill on")
+    ok, last = wait_counts(1, 3, 4.0)
+    check("autofill on: the server's quota fills the lobby again", ok and "autofill" in tags(), f"{last} {tags()}")
+    say(a, "/autofill 2")
+    ok, last = wait_counts(1, 1, 4.0)
+    check("autofill 2: fill to 2 players (1 bot)", ok, str(last))
+    say(a, "/autofill 4")
+    ok, last = wait_counts(1, 3, 4.0)
+    check("autofill 4: the 3 bots are back", ok and "autofill" in tags(), f"{last} {tags()}")
 
     # 3. the lobby is full (1 + 3 bots); every human still gets in
     others = []

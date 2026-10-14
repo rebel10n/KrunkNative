@@ -44,6 +44,7 @@
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <object_manager.h>
+#include <om_interp.h> // other players' edits eased (SPAWNED_OBJ)
 #include <spectate.h> // client_find_player
 #include <weapons.h>
 #include <GLFW/glfw3.h> // glfwGetTime: the status line's age
@@ -128,8 +129,11 @@ static void om_send(const int action, const int item) {
     }
     NetSpawnReqPacket req = {.action = (uint8_t) action, .item = (int16_t) item};
     const Player *me = client->me;
-    req.pitch = me ? me->direction.x : 0.0f; // the crosshair: the view the menu was opened over
-    req.yaw = me ? me->direction.y : 0.0f;
+    // the crosshair: the view the menu was opened over; not spawned in (a dev in the menu), the
+    // camera's look (the server places from its view of this connection, object_manager_request_view)
+    const int alive = me && me->active;
+    req.pitch = alive ? me->direction.x : client->camera.rotation.x;
+    req.yaw = alive ? me->direction.y : client->camera.rotation.y;
     client_net_send(client, NET_PACKET_SPAWN_REQ, &req, sizeof(req));
 }
 
@@ -1118,8 +1122,17 @@ int object_manager_events_handle(Client *client, const int type, const void *pay
             return 1;
         }
         case NET_PACKET_SPAWNED_OBJ: {
-            object_manager_apply_spawned(&client->game, payload, length);
             NetSpawnedObjPacket head;
+            vec3 shown = {0.0f, 0.0f, 0.0f};
+            float shown_yaw = 0.0f;
+            int moves = 0;
+            if (length >= sizeof(head)) { // an edit of an object that is there: eased to the new pose (om_interp.c)
+                memcpy(&head, payload, sizeof(head));
+                moves = head.kind == OM_KIND_OBJECT && (head.op == OM_SPAWNED_UPDATE || head.op == OM_SPAWNED_MAP_EDIT) &&
+                        om_interp_shown(client, head.id, &shown, &shown_yaw);
+            }
+            object_manager_apply_spawned(&client->game, payload, length);
+            if (moves) om_interp_moved(client, head.id, shown, shown_yaw);
             if (length < sizeof(head) || g_om.props_uid < 0) return 1;
             memcpy(&head, payload, sizeof(head));
             const HtmlElem focus = html_dom_active_element();
@@ -1188,7 +1201,8 @@ void object_manager_ui_tick(Client *client) {
     om_tool_shots(client, me);
     if (g_om.caps < 0) {
         me->build_free = 0;
-        if (!g_om.queried && me->active && me->weapon && me->weapon->build && om_server_ok(client)) {
+        // (the KN guns too: the Physics Gun's reach depends on OM_CAP_MAP / OM_CAP_DEV)
+        if (!g_om.queried && me->active && me->weapon && (me->weapon->build || me->weapon->kn_tool || me->weapon->kn_physgun) && om_server_ok(client)) {
             g_om.queried = 1;
             om_send(OM_ACTION_QUERY, 0);
         }

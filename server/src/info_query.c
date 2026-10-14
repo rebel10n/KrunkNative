@@ -83,6 +83,7 @@ void info_query_update(const float now) {
     info.port = cfg->public_port ? cfg->public_port : cfg->listen_port;
     iq_add_tag(&info, cfg->online_mode ? "online" : "offline");
     if (cfg->password[0]) iq_add_tag(&info, "password");
+    if (game_bots_autofill(game, NULL)) iq_add_tag(&info, "autofill"); // KrunkNative `autofill`: bots fill the lobby
     char dynamic[4][24];
     const int n = accounts_info_tags(dynamic, 4); // ranked / custom / draining / community
     for (int i = 0; i < n; i++) iq_add_tag(&info, dynamic[i]);

@@ -203,6 +203,10 @@ typedef struct GameBots_t {
     float nav_built_at;
     int path_budget;                // A* searches left this tick
     unsigned char stopped:1;        // bot_stop is in effect (bot_start / bot_stop off resume)
+    // KrunkNative chat `autofill` (game_bots_set_autofill): off stops the quota fill (its bots leave);
+    // forced: turned on by a command, so a hosted custom game fills too (never ranked: server_core.c)
+    unsigned char autofill_off:1;
+    unsigned char autofill_forced:1;
 } GameBots;
 
 GameBots *game_bots(Game*);                      // lazily allocated manager (NULL on OOM)
@@ -227,6 +231,12 @@ int  game_bots_set_type(Game*, BotType);
 // server.cfg bots / bot_quota (+ bot_difficulty applied with game_bots_configure).
 void game_bots_set_quota(Game*, int quota, int fill);
 void game_bots_set_quota_grace(Game*, float seconds);   // fill: empty-lobby grace (default 10 s)
+// KrunkNative chat `autofill on|off|<n>`: the quota fill at run time, for the server's lifetime. Off:
+// every quota bot leaves now and none come; on: fill to `quota` players (> 0), else the quota the
+// server had, else the lobby size. Returns how many bots left.
+int game_bots_set_autofill(Game*, int on, int quota);
+// 1 while a fill / keep quota runs (on, a quota, a lobby that takes quota bots); *quota its size
+int game_bots_autofill(const Game*, int *quota);
 // game_players_add of a human (authority): a fill quota bot over the lobby size leaves at once
 // (from the human's team in team modes), so a join never waits for the 300 ms quota tick.
 void game_bots_human_joined(Game*, const Player*);

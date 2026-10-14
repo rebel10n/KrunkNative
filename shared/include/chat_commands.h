@@ -10,6 +10,7 @@
 // ChatCommandHost with its connections. Pure game logic, no transport or GL. The command
 // table and its per-command native status are documented in doc/console.md.
 #include <shared.h>
+#include <object_manager.h> // NetSpawnReqPacket / NetSpawnResultPacket (om_request_view)
 
 #define CHAT_CMD_ADDRESS_SIZE 48
 #define CHAT_CMD_IP_BANS_MAX 64
@@ -77,6 +78,15 @@ typedef struct ChatCommandHost {
     // KrunkNative give / drop changed connection `id`'s Object Manager extra weapons (optional):
     // the server keeps them on the connection, as after a SPAWN_REQ.
     void (*om_extras_changed)(void *user, int id);
+    // KrunkNative (optional): connection `id`'s persistent player state (PlayerKeep, shared.h), NULL
+    // for none (a bot, an unknown id). The cheats (god, noclip, notarget, smite, unlimitedammo,
+    // forcehide) write it whether or not the player is spawned in, `tp` from the menu sets the next
+    // spawn's feet; the server applies it at each spawn (player_keep_apply).
+    PlayerKeep *(*keep)(void *user, int id);
+    // KrunkNative (optional): an Object Manager request of connection `id` without a live player (the
+    // menu, dead): the server runs object_manager_request_view at the connection's view, its extra
+    // weapons kept for the next spawn. `give` / `spawn` from the menu go through it.
+    void (*om_request_view)(void *user, int id, const NetSpawnReqPacket *req, NetSpawnResultPacket *out);
 
     // per-server state (pnhBannedAddresses, forceCollideState)
     char ip_bans[CHAT_CMD_IP_BANS_MAX][CHAT_CMD_ADDRESS_SIZE];

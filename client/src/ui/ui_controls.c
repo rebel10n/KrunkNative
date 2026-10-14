@@ -244,7 +244,10 @@ static const V7Bind V7_BINDS[] = {
     // KrunkNative additions: the Object Manager's Undo (U, 85) and Remove at the crosshair (Delete, 46)
     {"omUndo", -1, "omUndoKey", 85, -1, UI_CONTROL_OM_UNDO},
     {"omRemove", -1, "omRemoveKey", 46, -1, UI_CONTROL_OM_REMOVE},
-    {"omRotate", -1, "omRotateKey", 69, -1, UI_CONTROL_OM_ROTATE},
+    // the Physics Gun's rotate key: R (82) while carrying (reload is off then); its snap key E (69)
+    // held with crouch (Shift+E): 45 degrees and the grid. E stays Secondary Weapon otherwise.
+    {"omRotate", -1, "omRotateKey", 82, -1, UI_CONTROL_OM_ROTATE},
+    {"omPhysSnap", -1, "omPhysSnapKey", 69, -1, UI_CONTROL_OM_PHYS_SNAP},
     // KrunkNative additions: the Tool Gun's grid step down / up (PageDown 34 / PageUp 33: v7's ] is aim's
     // alternate key), in game with a KN building gun in hand
     {"omSnapDown", -1, "omSnapDownKey", 34, -1, UI_CONTROL_OM_SNAP_DOWN},
@@ -327,6 +330,7 @@ static const ControlRow TAB_GENERAL[] = {
     {"Object Manager Undo", "omUndo", -1, 0, "Sandbox"},
     {"Object Manager Remove", "omRemove", -1, 0, "Sandbox"},
     {"Physics Gun Rotate (held)", "omRotate", -1, 0, "Sandbox"},
+    {"Physics Gun Snap (held with Crouch)", "omPhysSnap", -1, 0, "Sandbox"},
     {"Tool Gun Snap Down", "omSnapDown", -1, 0, "Sandbox"},
     {"Tool Gun Snap Up", "omSnapUp", -1, 0, "Sandbox"},
     {"Tool Gun Properties", "omProps", -1, 0, "Sandbox"},

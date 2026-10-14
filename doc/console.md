@@ -218,6 +218,15 @@ max_players; `kn_gameserver_bots_enabled: false` / `kn_gameserver_instance_bot_q
   and the finder listing for information only.
 - Round ends and map / mode changes keep the fill (the bots rejoin the next round). Ranked
   matches and hosted custom games get no quota bots (they leave when one starts).
+- `autofill [on|off|<players>]` (Krunker Box Office, DEV peers and the custom host:
+  `CHAT_PERM_HOST_DEV`) turns the fill on and off at run time, for the server's lifetime (no file is
+  written; a restart reads server.cfg again). Off: every quota bot leaves at once and none come
+  (`bot_add` bots stay); on: the fill runs again with the server's quota, else the lobby size;
+  `autofill 6` fills to 6 players. Turned on by a command it also fills a hosted custom game, never
+  ranked ("No autofill in ranked."). No argument: "Autofill ON (fill to 4 players, 3 bots now)". The
+  info query's tags carry `autofill` while it runs, the lobby meta `autofill`, `/server` and the
+  server console's `status` a bots line. Tests: `server/tests/bot_fill_e2e.py` 2b,
+  `server/tests/command_auth_e2e.py` (a guest's `/autofill` is refused and logged).
 - Bots earn nothing: stats, challenges, medals, KR and BP go to accounts only.
 
 AI (`bot_type nextbot`, the default): Idle / Hunt / Attack / Hide with the BotProfile presets
@@ -286,6 +295,7 @@ Giving to another player: devs and the host only. The server console and rcon co
 | give | weapon\|item player | "Gave Famas to Name." |
 | give | selector weapon\|item, weapon\|item selector | "Gave Crossbow: 6 players" (every spawned match; others: devs and the host) |
 | give | – | "Usage: /give <weapon\|item> [player\|selector] (…)" |
+| spawn | object\|entity\|npc | "Spawned Crate." An Objects / Entities / NPCs entry by name (matched like `give` over the three tabs: `spawn crate`, `spawn "jump pad"`, `spawn ghost`, `spawn bot`) at your crosshair, under the Object Manager's rules (devs, the host, the sandbox) |
 | drop | – | "Dropped the Crossbow." / "Tool Gun put away." / "You can't drop your melee weapon." / "You can't drop your class weapons: only picked-up and Object Manager weapons drop." |
 
 Names match like the Object Manager search, normalised to letters and digits: exact first,
@@ -310,15 +320,32 @@ bind is needed.
 `give "physics gun"` and `give "tool gun"` hand out the Object Manager's building guns (the
 spawn right; doc/v7/decisions.md "Physics Gun", "Building tools"). They have no console commands
 of their own (`give physgun` / `give toolgun` work too): the Physics Gun's rotate key is "Physics Gun
-Rotate (held)" (E) under Sandbox in Change Controls, the grid step is the Tools pane's Snap field,
+Rotate (held)" (R) and its snap key "Physics Gun Snap (held with Crouch)" (E: Shift+E snaps the carry to
+45 degrees and the grid) under Sandbox in Change Controls, the grid step is the Tools pane's Snap field,
 PageDown / PageUp ("Tool Gun Snap Down / Up") or `tool_snap`, and the Physics Gun's Release is a
 row of the Tools pane. The Tool Gun's Properties tool (the pane's 7th tile) opens an object's map
 fields in the window; the Properties key (I, "Tool Gun Properties" under Sandbox) does the same for
 the selection, else for what the crosshair is on. Devs and the host change the map's own objects
 with both guns too (doc/v7/decisions.md "Map edits", "Building tools").
 
+Not spawned in (the menu before the first spawn, dead, spectating), the commands still act on the
+connection's player state (`PlayerKeep`, shared.h), which the server keeps on the connection and
+applies at every spawn: `god`, `ungod`, `noclip`, `notarget`, `smite`, `forcehide` and
+`unlimitedammo` without a target answer "God mode ON (you have it when you spawn)" and the next
+spawn has them (the cheats also outlive a map change's new player); `tp <x> <y> <z>` / `tp <player>`
+answers "You will spawn at …" and the next spawn is there; `give <weapon>` joins the loadout of the
+next spawn, `give <item>` and `spawn` (devs) drop at your view: where your last life ended, else the
+map's menu camera (straight down from it when the look meets nothing). The Object Manager window's
+requests from the menu work the same for devs (`object_manager_request_view`: the camera's look);
+for everyone else the menu answers "Spawn first" as before.
+
+Devs (the server's verified DEV accounts, ops, its own machine; not the host) have no Object
+Manager caps or pace: spawns past the per-player and per-game counts, requests and edits as fast as
+they come, objects moved and carried into and through players (doc/v7/decisions.md "Physics Gun").
+
 Tests: `server/tests/object_manager_test.c` (test_give_drop, test_public_refusals, test_edits, test_map_edits,
-test_fields_table, test_field_edits) and `server/tests/object_manager_e2e.py` parts 4 to 6b.
+test_fields_table, test_field_edits, test_dev_privileges, test_menu_state, test_physgun_player, test_interp) and
+`server/tests/object_manager_e2e.py` parts 4 to 8.
 
 Not chat commands, so not ported here: the `pnh`, `prmA`, `noclip`/`tp` packets,
 `clearLog`, and the `tmc` terminal message (map terminals; see the open items).

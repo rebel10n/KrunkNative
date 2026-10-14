@@ -1091,6 +1091,41 @@ void game_bots_set_quota(Game *game, const int quota, const int fill) {
     bots->quota_empty = 0.0f;
 }
 
+int game_bots_set_autofill(Game *game, const int on, const int quota) {
+    GameBots *bots = game_bots(game);
+    if (!bots) return 0;
+    int removed = 0;
+    if (!on) {
+        bots->autofill_off = 1;
+        bots->autofill_forced = 0;
+        for (int i = bots->count - 1; i >= 0; i--) {
+            if (!bots->list[i].quota) continue;
+            game_bots_remove(game, &bots->list[i]);
+            removed++;
+        }
+        return removed;
+    }
+    bots->autofill_off = 0;
+    bots->autofill_forced = 1;
+    if (quota > 0) {
+        bots->quota = quota > GAME_BOT_LIMIT ? GAME_BOT_LIMIT : quota;
+        bots->quota_fill = 1;
+    } else if (!bots->quota) { // the lobby size
+        const int slots = bots->slots > 0 ? bots->slots : game->config.max_players > 0 ? game->config.max_players : 8;
+        bots->quota = slots > GAME_BOT_LIMIT ? GAME_BOT_LIMIT : slots;
+        bots->quota_fill = 1;
+    }
+    bots->quota_timer = 0.0f;
+    bots->quota_empty = 0.0f;
+    return 0;
+}
+
+int game_bots_autofill(const Game *game, int *quota) {
+    const GameBots *bots = game ? game->bots : NULL;
+    if (quota) *quota = bots ? bots->quota : 0;
+    return bots && bots->quota > 0 && !bots->autofill_off && bots->slots >= 0;
+}
+
 void game_bots_set_quota_grace(Game *game, const float seconds) {
     GameBots *bots = game_bots(game);
     if (bots) bots->quota_grace = seconds > 0.0f ? seconds * 1000.0f : 0.0f;
@@ -2042,7 +2077,7 @@ void game_bots_human_joined(Game *game, const Player *player) {
 // Add / remove one bot every 300 ms toward the wanted count. Fill: after the last human left the
 // bots wait `quota_grace` ms (a quick rejoin keeps the match), then all of them leave at once.
 static void bot_quota_tick(Game *game, GameBots *bots, const float dt) {
-    if (!bots->quota) return;
+    if (!bots->quota || bots->autofill_off) return; // (autofill off: game_bots_set_autofill took them)
     const int humans = bot_count_humans(game);
     int quota_bots = bot_count_quota(bots);
     if (bots->quota_fill && !humans && quota_bots) {

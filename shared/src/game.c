@@ -794,6 +794,7 @@ void game_tick_world(Game *game, const float now, const float delta, const float
         Player *player = game->players[i];
 
         player_update(player, world_delta * game->config.delta_mlt);
+        if (authority && player->om_held) object_manager_hold_tick(game, player); // KrunkNative: a dev's Physics Gun holds it
 
 #ifdef KRUNKNATIVE_CLIENT
         // players.js update(): p.update(game, delta) then updateMsh(p), so the meshes

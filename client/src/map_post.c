@@ -658,7 +658,12 @@ void map_post_frame(Scene *scene, const Game *game, const Camera *camera, const 
     user_asset_frame();
     post_builds_frame(scene, game ? game->map : NULL);
     post_spawned_frame(scene, game ? game->map : NULL); // Object Manager objects (before the pickups: they add theirs)
-    if (g_map_edits_dirty && game && game->map) { // map edits: the casters and the light objects where the objects are now
+    // map edits: the casters and the light objects where the objects are now, at most 4 times a second
+    // (a carried prop sends up to 60 edits a second; the static shadow map is the whole map's)
+    static float since_rebuild = 1000.0f;
+    since_rebuild += delta_ms;
+    if (g_map_edits_dirty && game && game->map && since_rebuild >= 250.0f) {
+        since_rebuild = 0.0f;
         g_map_edits_dirty = 0;
         shadow_load_map(game->map);
         post_lights_unload();

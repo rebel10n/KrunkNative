@@ -44,6 +44,24 @@
 // are (object_manager_map_editable). The bot grid is rebuilt at most once a second after map edits
 // (bot_nav_invalidate); the client re-renders the sun's shadow map on each edit; ambient-occlusion
 // planes stay where the map built them.
+//
+// Devs (OM_CAP_DEV: the server's verified DEV accounts, ops, its own machine; never the host or a
+// guest) have no caps, no pace and no "inside a player" refusal: spawns past OM_*_PER_PLAYER /
+// OM_*_MAX (GAME_AI_LIMIT, GAME_BOTS_MAX, AIRDROP_MAX and the packet sizes still apply), requests
+// without the token bucket, edits as fast as they come (OM_EDIT_SEND_DEV), objects moved and carried
+// into and through players. Not spawned in (the menu, dead, spectating) a dev's requests still run:
+// spawns at the dev's view (object_manager_request_view: the last life's eye, else the map's menu
+// camera) and the extra weapons into the connection's list for the next spawn.
+//
+// The Physics Gun (OM_EDIT_SOURCE_PHYSGUN) carries things, not the level: of the map's own objects
+// only props (object_manager_physgun_takes: model and special prefabs no bigger than
+// OM_PHYSGUN_MAP_SIZE_MAX; never cubes, planes, ramps, ladders, cylinders, liquids, zones or terrain:
+// OM_STATUS_GEOMETRY); every spawned object; and for devs other players (OM_EDIT_PLAYER: the server
+// holds the player at the carried feet, its input suspended, until the release or OM_HOLD_TIMEOUT
+// without an update). A carry turns freely about y (OM_EDIT_YAW: the record's "r" takes any yaw, the
+// AABB collision the nearest quarter turn's), snapped to 45 degrees and the grid while the client's
+// snap chord is held. Clients interpolate other players' edits (object_manager_interp_*) and draw
+// their own carry where it is now (client-side prediction, om_build.c / om_interp.c).
 #include <shared.h>
 #include <cJSON.h>
 
@@ -92,6 +110,7 @@ typedef enum {
     OM_STATUS_UNSUPPORTED, // TOOL / EDIT: the tool does not work on that (a pickup, a mode object, an animated asset ...)
     OM_STATUS_BLOCKED,   // EDIT: the object would end up inside a player
     OM_STATUS_BOUNDS,    // EDIT: out of reach, or past the size limits (OM_EDIT_SIZE_*)
+    OM_STATUS_GEOMETRY,  // EDIT: the Physics Gun on the level's own geometry (object_manager_physgun_takes)
     OM_STATUS_COUNT
 } ObjectManagerStatus;
 
@@ -181,9 +200,16 @@ typedef enum {
 #define OM_EDIT_DROP 2         // the Physics Gun's release with "Drop": down onto the surface below
 #define OM_EDIT_FIELDS 4       // the Properties tool: a NUL-terminated JSON field patch follows the packet ({key: value},
                                // ObjectManagerField keys; the pose fields of the packet are not read); always a new undo step
+#define OM_EDIT_PLAYER 8       // the Physics Gun on a player (devs): uid is the player's, position its feet
+#define OM_EDIT_RELEASE 16     // OM_EDIT_PLAYER: let the player go
+#define OM_EDIT_YAW 32         // NetSpawnEditPacket.reserved is the exact yaw (object_manager_yaw_pack), not only `quarter`
 #define OM_FIELDS_MAX 400      // the longest field patch (JSON bytes, the NUL not counted)
 #define OM_FIELDS_ANSWER 1     // NetSpawnResultPacket.limit of a field patch's answer (a drag's edits answer 0)
-#define OM_EDIT_INTERVAL 0.05f // seconds between one player's edits (clients send at most 10 / s)
+#define OM_EDIT_INTERVAL 0.05f // seconds between one player's edits (not devs': they are never paced)
+#define OM_EDIT_SEND 0.05      // clients: a carry / drag's edits at most this often (20 / s, the pace)
+#define OM_EDIT_SEND_DEV (1.0 / 60.0) // a dev's (60 / s, coalesced: only a changed pose goes)
+#define OM_HOLD_TIMEOUT 1.0f   // a carried player is let go after this long without the carrier's update (s)
+#define OM_PHYSGUN_MAP_SIZE_MAX 60.0f // the Physics Gun takes a map prop no bigger than this on any axis
 #define OM_EDIT_SIZE_MIN 1.0f  // per axis (units)
 #define OM_EDIT_SIZE_MAX 200.0f // (a map object bigger than this may keep its size, never grow)
 #define OM_EDIT_RANGE 420.0f   // the edited box's nearest point from the editor's eye
@@ -198,6 +224,7 @@ typedef struct {
     vec3 size;
     int quarter;
     int directed;
+    float yaw;    // the record's yaw ("r" y, radians, [0, 2 pi)); a quarter turn's for ramps / ladders
 } ObjectManagerPose;
 
 // Caps and rates (server-side): one table so hosts can be tuned in one place.
@@ -238,7 +265,7 @@ typedef struct {
     float size[3];
     uint8_t quarter;
     uint8_t flags;         // OM_EDIT_*
-    uint16_t reserved;
+    uint16_t reserved;     // OM_EDIT_YAW: the yaw (object_manager_yaw_pack)
 } NetSpawnEditPacket;
 
 typedef struct {
@@ -275,6 +302,10 @@ int object_manager_entity_giveable(int index);    // `give` takes this Entities 
 typedef enum { OM_GIVE_NONE = 0, OM_GIVE_WEAPON, OM_GIVE_ENTITY } ObjectManagerGiveKind;
 int object_manager_give_lookup(const char *query, int *id, int *matches);
 const char *object_manager_give_name(int kind, int id); // the weapon / entry name, NULL unknown
+// `spawn <name>`: an Objects, Entities or NPCs entry by name, matched like `give` (exact, else a unique
+// prefix, else a unique substring, over the three tabs). 1 found (*tab OM_TAB_*, *index); 0 unknown or
+// *matches > 1 (ambiguous).
+int object_manager_spawn_lookup(const char *query, int *tab, int *index, int *matches);
 
 // ---- rules
 unsigned int object_manager_caps(const Game *game, const ObjectManagerPerms *perms); // OM_CAP_*
@@ -308,6 +339,54 @@ void object_manager_edit(Game *game, Player *player, const NetSpawnEditPacket *e
 // everyone as OM_SPAWNED_UPDATE / OM_SPAWNED_MAP_EDIT. out->limit is OM_FIELDS_ANSWER.
 void object_manager_edit_fields(Game *game, Player *player, const NetSpawnEditPacket *edit, const char *json, size_t length,
                                 const ObjectManagerPerms *perms, NetSpawnResultPacket *out);
+
+// A dev who is not spawned in (the menu, dead, spectating): where the Object Manager places things
+// from. The eye and look of the last life, else the map's menu camera; a request's own pitch / yaw
+// (the client's camera) win over `direction` when they are finite.
+typedef struct {
+    int uid;           // the connection (Player.uid of its next life): the spawns' owner
+    vec3 eye;
+    vec2 direction;    // pitch, yaw
+} ObjectManagerView;
+// The view of a connection without a live player: `last` (the inactive Player, may be NULL), else the
+// keep's last view, else game's menu camera (Map camera_position / camera_rotation)
+void object_manager_menu_view(const Game *game, const Player *last, const PlayerKeep *keep, int uid, ObjectManagerView *out);
+// object_manager_request for a dev without a live player (`perms` must pass OM_CAP_DEV, else
+// OM_STATUS_DEAD as before): the spawns, Drop, Undo and Remove from `view` (straight down from it when
+// the look meets nothing), the extra weapons into `extras` (*extra_count of PLAYER_EXTRA_WEAPONS_MAX,
+// the connection's list the next spawn applies). The guns' actions answer OM_STATUS_DEAD.
+void object_manager_request_view(Game *game, const ObjectManagerView *view, const NetSpawnReqPacket *req, const ObjectManagerPerms *perms,
+                                 int *extras, int *extra_count, NetSpawnResultPacket *out);
+// Authority, every tick for a held player (Player.om_held): kept at the carried feet, or let go
+// (NET_CHEAT_HELD off) when the carrier stopped (left, died, put the gun away, OM_HOLD_TIMEOUT)
+void object_manager_hold_tick(Game *game, Player *player);
+void object_manager_hold_release(Game *game, Player *player); // let `player` go now (authority)
+
+// The Physics Gun may take object `uid` (both sides): any spawned object it may edit, and the map's
+// own props (prefab geometry model / special, every side at most OM_PHYSGUN_MAP_SIZE_MAX); never the
+// level's geometry (cubes, planes, ramps, ladders, cylinders, spheres, liquids, zones, canvases)
+int object_manager_physgun_takes(const Game *game, int uid);
+uint16_t object_manager_yaw_pack(float yaw);     // [0, 2 pi) in 65536 steps
+float object_manager_yaw_unpack(uint16_t packed);
+int object_manager_yaw_quarter(float yaw);       // the nearest quarter turn, 0..3
+
+// ---- client interpolation (pure; client/src/om_interp.c drives it): an edited object's pose eases
+// from where it was shown to each update's pose over the time the updates come apart, so 20-60
+// updates a second show as smooth motion with one update of delay.
+typedef struct {
+    vec3 from, to;          // feet
+    float yaw_from, yaw_to; // radians
+    double start;           // when `to` arrived (s)
+    double span;            // the time it takes (s): the gap between the last two updates, clamped
+    double last_update;     // the previous update's arrival (s), 0 none
+    int active;
+} ObjectManagerInterp;
+#define OM_INTERP_SPAN_MIN (1.0 / 120.0)
+#define OM_INTERP_SPAN_MAX 0.25
+// An update of the object to (`to`, `yaw`) at `now`; `shown` / `shown_yaw`: where it shows now
+void object_manager_interp_push(ObjectManagerInterp *it, vec3 shown, float shown_yaw, vec3 to, float yaw, double now);
+// The pose to show at `now`; 1 while easing, 0 once it reached `to` (it->active cleared)
+int object_manager_interp_sample(ObjectManagerInterp *it, double now, vec3 *pos, float *yaw);
 
 // ---- edits (both sides): the pose of a spawned object the edits take (active, not a pickup or a
 // zombies machine), and the btools' handle math (pure: the client drags, the tests check)

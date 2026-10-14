@@ -376,8 +376,8 @@ enum {
     // KrunkNative additions: the Object Manager's Undo (U, cont_omUndoKey) and Remove at the
     // crosshair (Delete, cont_omRemoveKey), in game
     UI_CONTROL_OM_UNDO = 42, UI_CONTROL_OM_REMOVE = 43,
-    // KrunkNative addition: the Physics Gun's rotate key (E, cont_omRotateKey): held while carrying,
-    // the mouse turns the object instead of the view (client/src/ui/om_build.c)
+    // KrunkNative addition: the Physics Gun's rotate key (R, cont_omRotateKey; E before): held while
+    // carrying, the mouse turns the object instead of the view (client/src/ui/om_build.c)
     UI_CONTROL_OM_ROTATE = 44,
     // KrunkNative additions: the Tool Gun's grid step down / up (PageDown / PageUp, cont_omSnapDownKey / cont_omSnapUpKey)
     UI_CONTROL_OM_SNAP_DOWN = 45, UI_CONTROL_OM_SNAP_UP = 46,
@@ -389,7 +389,10 @@ enum {
     UI_CONTROL_GAME_RELOAD = 48,
     // KrunkNative addition: the Tool Gun's Properties key (I, cont_omPropsKey): the selection's fields
     UI_CONTROL_OM_PROPS = 49,
-    UI_CONTROL_COUNT = 50
+    // KrunkNative addition: the Physics Gun's snap key (E, cont_omPhysSnapKey), held with crouch (Shift):
+    // the carry snaps to 45 degrees and the grid (client/src/ui/om_build.c)
+    UI_CONTROL_OM_PHYS_SNAP = 50,
+    UI_CONTROL_COUNT = 51
 };
 
 // Input-related settings ClientSettings does not carry (written by client_apply_setting).

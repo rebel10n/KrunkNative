@@ -274,7 +274,36 @@ typedef struct {
     ChatTargets targets;
     const char *mode_arg;
     int is_self;                // the caller alone, named by no query ("god", "god on")
+    int menu_self;              // ... and not spawned in: targets.players[0] may be NULL (the keep only)
 } ToggleTarget;
+
+// ---------------------------------------------------------------- the kept player state (KrunkNative)
+// A connection's cheats outlive its Player (PlayerKeep, shared.h): run from the menu they land in the
+// keep and the next spawn applies them; run in game they go on the Player and into the keep, so a map
+// change (a new Player) keeps them too.
+
+static PlayerKeep *keep_of(const ChatCtx *c, const int uid) {
+    return c->host->keep && uid != CHAT_CMD_CONSOLE ? c->host->keep(c->host->user, uid) : NULL;
+}
+
+unsigned int player_keep_apply(Player *player, const PlayerKeep *keep) {
+    if (!player || !keep) return 0;
+    unsigned int changed = 0;
+#define KEEP_APPLY(bit, field) \
+    if ((keep->set & (bit)) && player->field != keep->field) { \
+        player->field = keep->field ? 1 : 0; \
+        changed |= (bit); \
+    }
+    KEEP_APPLY(PLAYER_KEEP_GOD, god_mode)
+    KEEP_APPLY(PLAYER_KEEP_NOCLIP, noclip)
+    KEEP_APPLY(PLAYER_KEEP_NOTARGET, notarget)
+    KEEP_APPLY(PLAYER_KEEP_SMITE, smite)
+    KEEP_APPLY(PLAYER_KEEP_UNLIMITED_AMMO, unlimited_ammo)
+    KEEP_APPLY(PLAYER_KEEP_FORCE_HIDE, force_hide)
+#undef KEEP_APPLY
+    if (player->unlimited_ammo) player->can_throw = 1;
+    return changed;
+}
 
 // The query of `parts` words, args.join(" ").trim()
 static void join_query(ChatCtx *c, const int parts, char *query, const size_t size) {
@@ -308,19 +337,30 @@ static int toggle_target(ChatCtx *c, const char *label, ToggleTarget *out) {
 
     if (!parts) {
         if (!c->player || !c->player->active) {
+            // KrunkNative: not spawned in (the menu, dead): the connection's kept state, applied at the spawn
+            if (c->has_self && keep_of(c, c->sender)) {
+                out->targets.players[0] = c->player;
+                out->targets.count = 1;
+                out->is_self = 1;
+                out->menu_self = 1;
+                return 1;
+            }
             reply(c, "%s unavailable (no active player).", label);
             return 0;
         }
         out->targets.players[0] = c->player;
         out->targets.count = 1;
         out->is_self = 1;
+        out->menu_self = 0;
         return 1;
     }
+    out->menu_self = 0;
 
     char query[NET_CHAT_TEXT_SIZE];
     join_query(c, parts, query, sizeof(query));
     if (!select_or_reply(c, query, 1, &out->targets)) return 0;
-    if (!out->targets.selector && !out->targets.players[0]->active) {
+    // (a named player who is dead keeps it on the Player and in its keep: the next life has it)
+    if (!out->targets.selector && !out->targets.players[0]->active && !keep_of(c, out->targets.players[0]->uid)) {
         reply(c, "%s unavailable (target not active).", label);
         return 0;
     }
@@ -328,8 +368,10 @@ static int toggle_target(ChatCtx *c, const char *label, ToggleTarget *out) {
     return 1;
 }
 
-typedef int (*ToggleGet)(const Player*);
-typedef void (*ToggleSet)(ChatCtx*, Player*, int on);
+// get: the Player's flag, else (no Player: the menu) the keep's; set: the Player's (when there is
+// one) and the keep's of connection `uid`
+typedef int (*ToggleGet)(const Player*, const PlayerKeep*);
+typedef void (*ToggleSet)(ChatCtx*, Player*, int uid, int on);
 
 // One on/off cheat over the targets. With no on|off a single target flips; several go ON unless
 // every one already is (then OFF), so `god *` never leaves a mixed lobby. `force` >= 0 overrides
@@ -338,14 +380,21 @@ static void run_toggle(ChatCtx *c, const char *label, const ToggleGet get, const
     ToggleTarget t;
     if (!toggle_target(c, label, &t)) return;
     int next;
+    if (t.menu_self) { // not spawned in: the keep (and the dead Player, if any)
+        const PlayerKeep *k = keep_of(c, c->sender);
+        next = force >= 0 ? force : chat_parse_toggle(t.mode_arg, get(t.targets.players[0], k));
+        set(c, t.targets.players[0], c->sender, next);
+        reply(c, "%s %s (you have it when you spawn)", label, next ? "ON" : "OFF");
+        return;
+    }
     if (force >= 0) next = force;
-    else if (t.mode_arg || t.targets.count == 1) next = chat_parse_toggle(t.mode_arg, get(t.targets.players[0]));
+    else if (t.mode_arg || t.targets.count == 1) next = chat_parse_toggle(t.mode_arg, get(t.targets.players[0], keep_of(c, t.targets.players[0]->uid)));
     else {
         int all_on = 1;
-        for (int i = 0; i < t.targets.count; i++) all_on &= !!get(t.targets.players[i]);
+        for (int i = 0; i < t.targets.count; i++) all_on &= !!get(t.targets.players[i], NULL);
         next = !all_on;
     }
-    for (int i = 0; i < t.targets.count; i++) set(c, t.targets.players[i], next);
+    for (int i = 0; i < t.targets.count; i++) set(c, t.targets.players[i], t.targets.players[i]->uid, next);
     if (t.is_self) reply(c, "%s %s", label, next ? "ON" : "OFF");
     else if (!t.targets.selector) {
         char name[PLAYER_NAME_SIZE + 16];
@@ -771,6 +820,10 @@ static void cmd_server(ChatCtx *c) {
     if (alias) snprintf(mode_label, sizeof(mode_label), "%s", alias);
     else snprintf(mode_label, sizeof(mode_label), "%d", mode_id < 0 ? 0 : mode_id);
     reply(c, "Map %s | mode %s (%d) | players %d | tick %.0f Hz (%.2f ms)", map_label, mode_label, mode_id < 0 ? 0 : mode_id, peers, hz, 1000.0f / hz);
+    int quota = 0;
+    const int autofill = game_bots_autofill(game, &quota);
+    if (autofill) reply(c, "Bots %d | autofill on (fill to %d players)", game_bots_count(game), quota); // KrunkNative `autofill`
+    else reply(c, "Bots %d | autofill off", game_bots_count(game));
 }
 
 static void cmd_modes(ChatCtx *c) {
@@ -878,10 +931,23 @@ static void cmd_cycle(ChatCtx *c) {
     if (c->host->change_map && game->map_count) c->host->change_map(c->host->user, game_pick_next_map(game), game->current_mode_index);
 }
 
-static int get_god(const Player *p) { return p->god_mode; }
-static void set_god(ChatCtx *c, Player *p, const int on) {
+// One kept flag: the Player's when there is one, else the keep's
+#define KEEP_GET(p, k, bit, field) ((p) ? (int) (p)->field : (k) && ((k)->set & (bit)) ? (int) (k)->field : 0)
+static void keep_flag(ChatCtx *c, const int uid, const unsigned int bit, const int on) {
+    PlayerKeep *k = keep_of(c, uid);
+    if (!k) return;
+    k->set |= (unsigned char) bit;
+    unsigned char *field = bit == PLAYER_KEEP_GOD ? &k->god_mode : bit == PLAYER_KEEP_NOCLIP ? &k->noclip : bit == PLAYER_KEEP_NOTARGET ? &k->notarget
+                         : bit == PLAYER_KEEP_SMITE ? &k->smite : bit == PLAYER_KEEP_UNLIMITED_AMMO ? &k->unlimited_ammo : &k->force_hide;
+    *field = (unsigned char) !!on;
+}
+
+static int get_god(const Player *p, const PlayerKeep *k) { return KEEP_GET(p, k, PLAYER_KEEP_GOD, god_mode); }
+static void set_god(ChatCtx *c, Player *p, const int uid, const int on) {
+    keep_flag(c, uid, PLAYER_KEEP_GOD, on);
+    if (!p) return;
     p->god_mode = (unsigned char) on;
-    if (on) {
+    if (on && p->active) {
         p->health = (float) p->max_health;
         mode_send_health(c->host->game, p); // ["h", hp]
     }
@@ -898,10 +964,10 @@ static void cmd_ungod(ChatCtx *c) {
     run_toggle(c, "God mode", get_god, set_god, 0);
 }
 
-static int get_smite(const Player *p) { return p->smite; }
-static void set_smite(ChatCtx *c, Player *p, const int on) {
-    (void) c;
-    p->smite = (unsigned char) on;
+static int get_smite(const Player *p, const PlayerKeep *k) { return KEEP_GET(p, k, PLAYER_KEEP_SMITE, smite); }
+static void set_smite(ChatCtx *c, Player *p, const int uid, const int on) {
+    keep_flag(c, uid, PLAYER_KEEP_SMITE, on);
+    if (p) p->smite = (unsigned char) on;
 }
 
 static void cmd_smite(ChatCtx *c) {
@@ -911,10 +977,10 @@ static void cmd_smite(ChatCtx *c) {
 
 // notarget (KrunkNative, like Source's): bots and AIs ignore the player (bots.c bot_is_enemy,
 // ai.c ai_find_target) and drop them if already targeted. Shots still hit both ways.
-static int get_notarget(const Player *p) { return p->notarget; }
-static void set_notarget(ChatCtx *c, Player *p, const int on) {
-    (void) c;
-    p->notarget = (unsigned char) on;
+static int get_notarget(const Player *p, const PlayerKeep *k) { return KEEP_GET(p, k, PLAYER_KEEP_NOTARGET, notarget); }
+static void set_notarget(ChatCtx *c, Player *p, const int uid, const int on) {
+    keep_flag(c, uid, PLAYER_KEEP_NOTARGET, on);
+    if (p) p->notarget = (unsigned char) on;
 }
 
 static void cmd_notarget(ChatCtx *c) {
@@ -922,10 +988,11 @@ static void cmd_notarget(ChatCtx *c) {
     run_toggle(c, "Notarget", get_notarget, set_notarget, -1);
 }
 
-static int get_noclip(const Player *p) { return p->noclip; }
-static void set_noclip(ChatCtx *c, Player *p, const int on) {
-    p->noclip = (unsigned char) on;
-    send_cheat(c, p->uid, NET_CHEAT_NOCLIP, on); // ["noc", next]
+static int get_noclip(const Player *p, const PlayerKeep *k) { return KEEP_GET(p, k, PLAYER_KEEP_NOCLIP, noclip); }
+static void set_noclip(ChatCtx *c, Player *p, const int uid, const int on) {
+    keep_flag(c, uid, PLAYER_KEEP_NOCLIP, on);
+    if (p) p->noclip = (unsigned char) on;
+    send_cheat(c, uid, NET_CHEAT_NOCLIP, on); // ["noc", next] (from the menu: the line; the spawn sends it again)
 }
 
 static void cmd_noclip(ChatCtx *c) {
@@ -933,10 +1000,11 @@ static void cmd_noclip(ChatCtx *c) {
     run_toggle(c, "Noclip", get_noclip, set_noclip, -1);
 }
 
-static int get_forcehide(const Player *p) { return p->force_hide; }
-static void set_forcehide(ChatCtx *c, Player *p, const int on) {
-    p->force_hide = (unsigned char) on;
-    send_cheat(c, p->uid, NET_CHEAT_FORCE_HIDE, on); // ["fh", next]
+static int get_forcehide(const Player *p, const PlayerKeep *k) { return KEEP_GET(p, k, PLAYER_KEEP_FORCE_HIDE, force_hide); }
+static void set_forcehide(ChatCtx *c, Player *p, const int uid, const int on) {
+    keep_flag(c, uid, PLAYER_KEEP_FORCE_HIDE, on);
+    if (p) p->force_hide = (unsigned char) on;
+    send_cheat(c, uid, NET_CHEAT_FORCE_HIDE, on); // ["fh", next]
 }
 
 static void cmd_forcehide(ChatCtx *c) {
@@ -944,12 +1012,14 @@ static void cmd_forcehide(ChatCtx *c) {
     run_toggle(c, "Forcehide", get_forcehide, set_forcehide, -1);
 }
 
-static int get_unlimitedammo(const Player *p) { return p->unlimited_ammo; }
-static void set_unlimitedammo(ChatCtx *c, Player *p, const int on) {
+static int get_unlimitedammo(const Player *p, const PlayerKeep *k) { return KEEP_GET(p, k, PLAYER_KEEP_UNLIMITED_AMMO, unlimited_ammo); }
+static void set_unlimitedammo(ChatCtx *c, Player *p, const int uid, const int on) {
+    keep_flag(c, uid, PLAYER_KEEP_UNLIMITED_AMMO, on);
+    send_cheat(c, uid, NET_CHEAT_UNLIMITED_AMMO, on); // ["unl", next] (+ "uamo")
+    if (!p) return;
     p->unlimited_ammo = (unsigned char) on;
     if (on) p->can_throw = 1;
-    send_cheat(c, p->uid, NET_CHEAT_UNLIMITED_AMMO, on); // ["unl", next] (+ "uamo")
-    mode_send_loadout(c->host->game, p);
+    if (p->active) mode_send_loadout(c->host->game, p);
 }
 
 static void cmd_unlimitedammo(ChatCtx *c) {
@@ -1502,12 +1572,27 @@ static void cmd_tp(ChatCtx *c) {
         return;
     }
     Player *self = c->player;
-    if (!self || !self->active) {
+    PlayerKeep *keep = c->has_self ? keep_of(c, c->sender) : NULL;
+    if ((!self || !self->active) && !keep) {
         reply(c, c->sender == CHAT_CMD_CONSOLE ? "tp moves your own player; use bring <player|all> <x> <y> <z>." : "Spawn first.");
         return;
     }
     vec3 to;
     char label[PLAYER_NAME_SIZE + 64];
+    if (!self || !self->active) { // KrunkNative: from the menu, the next spawn's feet
+        if (n == 3 && tp_coords(tokens, n, &to)) {
+            snprintf(label, sizeof(label), "%.2f %.2f %.2f", (double) to.x, (double) to.y, (double) to.z);
+        } else {
+            const Player *target = tp_spawned_target(c, c->rest);
+            if (!target) return;
+            to = target->position;
+            player_label(target, label, sizeof(label));
+        }
+        keep->has_spawn = 1;
+        keep->spawn_at = to;
+        reply(c, "You will spawn at %s.", label);
+        return;
+    }
     if (n == 3 && tp_coords(tokens, n, &to)) {
         snprintf(label, sizeof(label), "%.2f %.2f %.2f", (double) to.x, (double) to.y, (double) to.z);
     } else {
@@ -1584,6 +1669,43 @@ static void cmd_bring(ChatCtx *c) {
     reply(c, "Brought %s to %s.", player_label(target, label, sizeof(label)), where);
 }
 
+// autofill [on|off|<players>] (KrunkNative): the server.cfg bot_quota fill turned on / off at run
+// time (doc/console.md "Bots"), for this server's lifetime. Off: the fill's bots leave at once and
+// none come; on: they fill the lobby again (to <players>, else the server's quota, else the lobby
+// size; a hosted custom game too, never ranked). The KNINFO query and /server show it.
+static void cmd_autofill(ChatCtx *c) {
+    if (!allowed(c, CHAT_PERM_HOST_DEV) || !bot_manager_ready(c)) return;
+    Game *game = c->host->game;
+    int quota = 0;
+    const int on = game_bots_autofill(game, &quota);
+    const char *arg = c->argc ? c->argv[0] : NULL;
+    if (!arg || !arg[0]) {
+        reply(c, "Autofill %s (fill to %d players, %d bot%s now). Usage: autofill on|off|<players>", on ? "ON" : "OFF", quota,
+              game_bots_count(game), plural(game_bots_count(game)));
+        return;
+    }
+    char *end = NULL;
+    const long n = strtol(arg, &end, 10);
+    int next, size = -1;
+    if (end != arg && end && !*end) {
+        next = n > 0;
+        if (n > 0) size = n > GAME_BOT_LIMIT ? GAME_BOT_LIMIT : (int) n;
+    } else if (is_toggle_literal(arg)) {
+        next = chat_parse_toggle(arg, on);
+    } else {
+        reply(c, "Usage: autofill on|off|<players>");
+        return;
+    }
+    if (next && c->has_self && c->self.ranked) {
+        reply(c, "No autofill in ranked.");
+        return;
+    }
+    const int removed = game_bots_set_autofill(game, next, size);
+    game_bots_autofill(game, &quota);
+    if (next) reply(c, "Autofill ON: bots fill the lobby to %d players.", quota);
+    else reply(c, "Autofill OFF: %d bot%s left.", removed, plural(removed));
+}
+
 // v3.1.1 `cmds`, in its order; descriptions from the v3.1.1 dev console mod.
 
 // ---------------------------------------------------------------- give / drop (KrunkNative)
@@ -1658,6 +1780,27 @@ static void join_words(char **argv, const int count, char *out, const size_t n) 
     for (int i = 0; i < count && len < n; i++) len += (size_t) snprintf(out + len, n - len, "%s%s", i ? " " : "", argv[i]);
 }
 
+// One Object Manager request of the sender without a live player (the menu, dead): the server's
+// object_manager_request_view (devs only; others hear "Spawn first")
+static NetSpawnResultPacket om_run_view(ChatCtx *c, const int action, const int item, const float pitch) {
+    const NetSpawnReqPacket req = {.action = (uint8_t) action, .item = (int16_t) item, .pitch = pitch, .yaw = NAN};
+    NetSpawnResultPacket out = {.status = OM_STATUS_DEAD};
+    if (c->host->om_request_view) c->host->om_request_view(c->host->user, c->sender, &req, &out);
+    return out;
+}
+
+// give to yourself while not spawned in: a weapon joins the loadout of the next spawn, an item drops
+// at the view (the last life's spot, else the menu camera's floor)
+static void give_from_menu(ChatCtx *c, const int kind, const int id, const char *name) {
+    const int weapon = kind == OM_GIVE_WEAPON;
+    const NetSpawnResultPacket r = om_run_view(c, weapon ? OM_ACTION_ADD_WEAPON : OM_ACTION_SPAWN_ENTITY, id, weapon ? 0.0f : (float) -M_PI / 2.0f);
+    if (r.status != OM_STATUS_OK) {
+        om_reply_failure(c, &r, "Not allowed: only developers and the host can spawn here.");
+        return;
+    }
+    reply(c, weapon ? "%s added to your loadout (you have it when you spawn)." : "%s dropped (you are not spawned in: at your view).", name);
+}
+
 // give <weapon|item> [player]: an extra loadout slot (OM_ACTION_ADD_WEAPON, the Weapons tab's
 // left click) or an Entities item at the receiver's feet (OM_ACTION_SPAWN_ENTITY). Names match
 // like the Object Manager search; another player than you: devs and the host only.
@@ -1713,6 +1856,9 @@ static void cmd_give(ChatCtx *c) {
     } else if (c->player) {
         targets.players[0] = c->player;
         targets.count = 1;
+    } else if (c->has_self && c->host->om_request_view) { // KrunkNative: from the menu, for the next spawn
+        give_from_menu(c, kind, id, name);
+        return;
     } else {
         reply(c, "Name a player: /give %s <player>.", name);
         return;
@@ -1732,6 +1878,10 @@ static void cmd_give(ChatCtx *c) {
         Player *target = targets.players[0];
         char who[PLAYER_NAME_SIZE + 16];
         player_label(target, who, sizeof(who));
+        if (!target->active && target == c->player && c->host->om_request_view) { // dead: kept for the next life
+            give_from_menu(c, kind, id, name);
+            return;
+        }
         if (!target->active) {
             reply(c, "%s is not spawned.", target == c->player ? "You are" : who);
             return;
@@ -1765,6 +1915,41 @@ static void cmd_give(ChatCtx *c) {
         return;
     }
     reply(c, "Gave %s: %d %s", name, given, players_word(given));
+}
+
+// spawn <object|entity|npc> (KrunkNative): an Objects / Entities / NPCs entry of the Object Manager at
+// your crosshair, by name (matched like give). The Object Manager's rules decide (devs, the host,
+// the sandbox); from the menu (devs) at your view: the last life's spot, else the menu camera's.
+static void cmd_spawn(ChatCtx *c) {
+    if (!c->rest[0]) {
+        reply(c, "Usage: /spawn <object|entity|npc> (e.g. /spawn crate, /spawn \"jump pad\", /spawn ghost, /spawn bot)");
+        return;
+    }
+    char work[NET_CHAT_TEXT_SIZE], name[NET_CHAT_TEXT_SIZE];
+    char *argv[CHAT_ARGS_MAX];
+    const int argc = split_quoted(c->rest, work, sizeof(work), argv, CHAT_ARGS_MAX);
+    join_words(argv, argc, name, sizeof(name));
+    int tab = -1, index = -1, matches = 0;
+    if (!object_manager_spawn_lookup(name, &tab, &index, &matches)) {
+        if (matches > 1) reply(c, "'%s' matches %d objects, entities and NPCs: be more specific.", name, matches);
+        else reply(c, "Unknown object, entity or NPC '%s'.", name);
+        return;
+    }
+    int count = 0;
+    const ObjectManagerEntry *e = &object_manager_entries(tab, &count)[index];
+    const int action = tab == OM_TAB_OBJECTS ? OM_ACTION_SPAWN_OBJECT : tab == OM_TAB_NPCS ? OM_ACTION_SPAWN_NPC : OM_ACTION_SPAWN_ENTITY;
+    NetSpawnResultPacket r;
+    if (c->player && c->player->active) r = om_run(c, c->player, action, index, c->player->direction.x);
+    else if (c->has_self && c->host->om_request_view) r = om_run_view(c, action, index, NAN);
+    else {
+        reply(c, "spawn needs a player: run it in game.");
+        return;
+    }
+    if (r.status != OM_STATUS_OK) {
+        om_reply_failure(c, &r, "Not allowed: only developers and the host can spawn here.");
+        return;
+    }
+    reply(c, "Spawned %s.", e->name);
 }
 
 // drop: the weapon in hand on the ground in front of you. An Object Manager extra slot becomes a
@@ -1908,12 +2093,14 @@ static const ChatCommand COMMANDS[] = {
     {{"bot_resume", "bot_start", "", "alias for bot_start", CHAT_PERM_HOST_DEV}, cmd_bot_start},
     {{"bot_difficulty", NULL, "<value>", "set default bot difficulty", CHAT_PERM_HOST_DEV}, cmd_bot_difficulty},
     {{"bot_diff", "bot_difficulty", "<value>", "alias for bot_difficulty", CHAT_PERM_HOST_DEV}, cmd_bot_difficulty},
+    {{"autofill", NULL, "[on|off|<players>]", "bots fill the lobby (server.cfg bot_quota) on / off for this server", CHAT_PERM_HOST_DEV}, cmd_autofill},
     // KrunkNative: v7.1.4's admin teleports (handleAdminAction 4 / 5 / 9) with coordinates
     {{"tp", NULL, "<x> <y> <z> | <player>", "teleport yourself to a coordinate or to a player", CHAT_PERM_HOST_DEV}, cmd_tp},
     {{"bring", NULL, "<player|all|selector> [<x> <y> <z>]", "bring players to you or to a coordinate", CHAT_PERM_HOST_DEV}, cmd_bring},
     // KrunkNative Object Manager (its own rules: object_manager_caps)
     {{"give", NULL, "[selector] <weapon|item> [player|selector]", "give a weapon (an extra loadout slot) or an item; others: devs and the host", CHAT_PERM_ANY}, cmd_give},
     {{"drop", NULL, "", "drop the weapon in your hand in front of you", CHAT_PERM_ANY}, cmd_drop},
+    {{"spawn", NULL, "<object|entity|npc>", "spawn an Object Manager object, entity or NPC at your crosshair (devs: from the menu too)", CHAT_PERM_ANY}, cmd_spawn},
     // KrunkNative third-person camera: its own rule (third_person_allowed), not the perms gate
     {{"thirdperson", NULL, "[on|off]", "ask for the third-person camera (offline, devs, custom hosts / knTPCam)", CHAT_PERM_ANY}, cmd_third_person},
 };
@@ -2034,8 +2221,7 @@ void chat_command_premium_action(ChatCommandHost *host, const int sender_id, con
     switch (index) {
         case 0: { // io_noclip: ctx.send("noc", next)
             const int next = !player->noclip;
-            player->noclip = (unsigned char) next;
-            send_cheat(&c, player->uid, NET_CHEAT_NOCLIP, next);
+            set_noclip(&c, player, player->uid, next); // (kept for the next spawn too)
             if (host->log) {
                 char line[64];
                 snprintf(line, sizeof(line), "[gameserver] noclip %d -> %s", sender_id, next ? "true" : "false");
@@ -2045,11 +2231,7 @@ void chat_command_premium_action(ChatCommandHost *host, const int sender_id, con
         }
         case 1: { // cmd_god
             const int next = !player->god_mode;
-            player->god_mode = (unsigned char) next;
-            if (next) {
-                player->health = (float) player->max_health;
-                mode_send_health(host->game, player);
-            }
+            set_god(&c, player, player->uid, next);
             reply(&c, "God mode %s", next ? "ON" : "OFF");
             break;
         }
@@ -2059,7 +2241,7 @@ void chat_command_premium_action(ChatCommandHost *host, const int sender_id, con
             break;
         case 3: {
             const int next = !player->smite;
-            player->smite = (unsigned char) next;
+            set_smite(&c, player, player->uid, next);
             reply(&c, "Smite %s", next ? "ON" : "OFF");
             break;
         }

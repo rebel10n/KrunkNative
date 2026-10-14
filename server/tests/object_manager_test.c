@@ -126,6 +126,13 @@ static Player *player_of(const TestClient *c) {
     return cc ? cc->player : NULL;
 }
 
+// The sandbox's local players are devs (no caps, no pace); 0 makes `c` a sandbox guest, whose caps,
+// pace and "inside a player" refusal apply
+static void set_dev(const TestClient *c, const int dev) {
+    ClientConnection *cc = conn(c);
+    if (cc) cc->local = (unsigned char) !!dev;
+}
+
 static void join(TestClient *c, const int v7) {
     memset(c, 0, sizeof(*c));
     c->v7 = v7;
@@ -312,6 +319,26 @@ static void test_loadout(TestClient *a, TestClient *b) {
 
 static void test_rate(TestClient *a) {
     printf("rate limit...\n");
+    // a dev is never paced: a burst of 30 all answered OK
+    pump(200);
+    for (int i = 0; i < 30; i++) {
+        const NetSpawnReqPacket req = {.action = OM_ACTION_ADD_WEAPON, .item = 5};
+        send_to(a, NET_PACKET_SPAWN_REQ, &req, sizeof(req));
+    }
+    a->count = 0;
+    pump(2);
+    int dev_rated = 0, dev_answers = 0;
+    for (int i = 0; i < a->count; i++) {
+        if (a->packets[i].type != NET_PACKET_SPAWN_RESULT) continue;
+        NetSpawnResultPacket r;
+        memcpy(&r, a->packets[i].payload, sizeof(r));
+        dev_rated += r.status == OM_STATUS_RATE;
+        dev_answers++;
+    }
+    CHECK(dev_answers == 30 && dev_rated == 0, "a dev's burst of 30: no RATE (%d of %d)", dev_rated, dev_answers);
+    request(a, OM_ACTION_CLEAR_WEAPONS, 0, 0.0f);
+    // the bucket for everyone else (a sandbox guest)
+    set_dev(a, 0);
     pump(200);
     int rated = 0;
     for (int i = 0; i < 30; i++) {
@@ -330,6 +357,7 @@ static void test_rate(TestClient *a) {
     CHECK(count_type(a, NET_PACKET_SPAWN_RESULT) == 30, "every request answered");
     pump(200);
     request(a, OM_ACTION_CLEAR_WEAPONS, 0, 0.0f);
+    set_dev(a, 1);
     pump(10);
 }
 
@@ -361,7 +389,8 @@ static void test_pickups(TestClient *a, TestClient *b) {
     CHECK(r.status == OM_STATUS_NO_TARGET || r.status == OM_STATUS_OK, "aiming at the sky: no target (or a ceiling) (status %u)", r.status);
     if (r.status == OM_STATUS_OK) request(a, OM_ACTION_UNDO, 0, 0.0f);
 
-    // the per-player pickup cap
+    // the per-player pickup cap (a sandbox guest's; devs have none)
+    set_dev(a, 0);
     int limit = 0;
     for (int i = 0; i < OM_PICKUPS_PER_PLAYER + 2; i++) {
         pump(20);
@@ -370,6 +399,13 @@ static void test_pickups(TestClient *a, TestClient *b) {
     }
     CHECK(limit == OM_PICKUPS_PER_PLAYER, "pickup cap %d (got %d)", OM_PICKUPS_PER_PLAYER, limit);
     CHECK(spawned_count() == OM_PICKUPS_PER_PLAYER, "%d live spawned pickups", spawned_count());
+    set_dev(a, 1);
+    r = request(a, OM_ACTION_DROP_WEAPON, 1, -1.4f); // no pace either: no pump between
+    NetSpawnResultPacket r2 = request(a, OM_ACTION_DROP_WEAPON, 1, -1.4f);
+    CHECK(r.status == OM_STATUS_OK && r2.status == OM_STATUS_OK && spawned_count() == OM_PICKUPS_PER_PLAYER + 2,
+          "a dev drops past the cap, back to back (%u %u, %d live)", r.status, r2.status, spawned_count());
+    request(a, OM_ACTION_UNDO, 0, 0.0f);
+    request(a, OM_ACTION_UNDO, 0, 0.0f);
 
     // undo: the newest goes, REMOVE to everyone, its pickup off
     reset_received();
@@ -416,7 +452,8 @@ static void test_npcs_entities(TestClient *a, TestClient *b) {
     CHECK(npcs && npc_count >= 12 && entities && entity_count >= 20, "catalogues (%d NPCs, %d entities)", npc_count, entity_count);
     CHECK(object_manager_entries(OM_TAB_WEAPONS, NULL) == NULL, "the Weapons tab has no entries (rules_weapons())");
 
-    // every NPC kind spawns at the crosshair floor (the cap stops the rest)
+    // every NPC kind spawns at the crosshair floor (the cap stops the rest: a sandbox guest's)
+    set_dev(a, 0);
     pump(200);
     const int ais_before = ai_count();
     const int bots_before = game_bots_count(&g_server->game);
@@ -431,6 +468,7 @@ static void test_npcs_entities(TestClient *a, TestClient *b) {
     pump(4);
     // the cap counts live NPCs: one killed in the brawl makes room for another
     CHECK(ok >= OM_NPCS_PER_PLAYER && limited == OM_NPCS_PER_PLAYER, "%d NPCs spawned, then the per-player cap (%d)", ok, limited);
+    set_dev(a, 1);
     CHECK(game_bots_count(&g_server->game) == bots_before + 1, "the Bot entry added a bot");
     // the AIs fight each other right away: one may already be down
     CHECK(ai_count() >= ais_before + OM_NPCS_PER_PLAYER - 3 && ai_count() <= ais_before + OM_NPCS_PER_PLAYER - 1, "the AIs (%d -> %d)",
@@ -494,6 +532,7 @@ static void test_npcs_entities(TestClient *a, TestClient *b) {
         if (request(a, OM_ACTION_UNDO, 0, 0.0f).status != OM_STATUS_OK) break;
     }
     pump(200);
+    set_dev(a, 0); // a sandbox guest's cap
     int tags = 0, cap = 0;
     for (int i = 0; i < OM_ENTITIES_PER_PLAYER + 2; i++) {
         pump(16); // the bucket refills 4 per second
@@ -502,6 +541,9 @@ static void test_npcs_entities(TestClient *a, TestClient *b) {
         if (r.status == OM_STATUS_LIMIT) cap = r.limit;
     }
     CHECK(tags == OM_ENTITIES_PER_PLAYER && cap == OM_ENTITIES_PER_PLAYER, "entity cap %d (%d spawned, limit %d)", OM_ENTITIES_PER_PLAYER, tags, cap);
+    set_dev(a, 1);
+    r = request(a, OM_ACTION_SPAWN_ENTITY, tag, -0.4f);
+    CHECK(r.status == OM_STATUS_OK, "a dev spawns past the entity cap (status %u)", r.status);
     for (int i = 0; i < 40; i++) {
         pump(20);
         if (request(a, OM_ACTION_UNDO, 0, 0.0f).status != OM_STATUS_OK) break;
@@ -1189,6 +1231,45 @@ static NetSpawnResultPacket edit_at(TestClient *c, const int source, const int u
     return r;
 }
 
+// A Physics Gun edit with any yaw (OM_EDIT_YAW: the packet's reserved carries it)
+static NetSpawnResultPacket edit_yaw(TestClient *c, const int uid, const ObjectManagerPose *pose) {
+    const Player *p = player_of(c);
+    NetSpawnEditPacket e;
+    memset(&e, 0, sizeof(e));
+    e.req = (NetSpawnReqPacket) {.action = OM_ACTION_EDIT, .item = OM_EDIT_SOURCE_PHYSGUN, .pitch = p ? p->direction.x : 0.0f, .yaw = p ? p->direction.y : 0.0f};
+    e.uid = uid;
+    e.position[0] = pose->position.x, e.position[1] = pose->position.y, e.position[2] = pose->position.z;
+    e.size[0] = pose->size.x, e.size[1] = pose->size.y, e.size[2] = pose->size.z;
+    e.quarter = (uint8_t) object_manager_yaw_quarter(pose->yaw);
+    e.flags = OM_EDIT_BEGIN | OM_EDIT_YAW;
+    e.reserved = object_manager_yaw_pack(pose->yaw);
+    c->count = 0;
+    send_to(c, NET_PACKET_SPAWN_REQ, &e, sizeof(e));
+    pump(2);
+    NetSpawnResultPacket r = {.status = OM_STATUS_COUNT};
+    const NetPacket *packet = last(c, NET_PACKET_SPAWN_RESULT);
+    if (packet && packet->length == sizeof(r)) memcpy(&r, packet->payload, sizeof(r));
+    return r;
+}
+
+// The Physics Gun on a player (OM_EDIT_PLAYER): carry `target_uid` to `feet` (release: let go)
+static NetSpawnResultPacket edit_player(TestClient *c, const int target_uid, const vec3 feet, const int release) {
+    const Player *p = player_of(c);
+    NetSpawnEditPacket e;
+    memset(&e, 0, sizeof(e));
+    e.req = (NetSpawnReqPacket) {.action = OM_ACTION_EDIT, .item = OM_EDIT_SOURCE_PHYSGUN, .pitch = p ? p->direction.x : 0.0f, .yaw = p ? p->direction.y : 0.0f};
+    e.uid = target_uid;
+    e.position[0] = feet.x, e.position[1] = feet.y, e.position[2] = feet.z;
+    e.flags = (uint8_t) (OM_EDIT_PLAYER | (release ? OM_EDIT_RELEASE : 0));
+    c->count = 0;
+    send_to(c, NET_PACKET_SPAWN_REQ, &e, sizeof(e));
+    pump(2);
+    NetSpawnResultPacket r = {.status = OM_STATUS_COUNT};
+    const NetPacket *packet = last(c, NET_PACKET_SPAWN_RESULT);
+    if (packet && packet->length == sizeof(r)) memcpy(&r, packet->payload, sizeof(r));
+    return r;
+}
+
 // The last OM_SPAWNED_UPDATE `c` got for `uid`: its record's "p" (1 found)
 static int update_p(const TestClient *c, const int uid, vec3 *p) {
     int found = 0;
@@ -1368,8 +1449,14 @@ static void test_edits(TestClient *a, TestClient *b) {
     bad.position = q->position;
     bad.position.y = q->position.y - 1.0f;
     pump(6);
+    set_dev(a, 0); // a sandbox guest
     r = edit_at(a, OM_EDIT_SOURCE_BTOOLS, uid, &bad, 0);
-    CHECK(r.status == OM_STATUS_BLOCKED, "into b: refused (status %u)", r.status);
+    CHECK(r.status == OM_STATUS_BLOCKED, "a guest's box into b: refused (status %u)", r.status);
+    set_dev(a, 1); // a dev moves it into b (no pace: right away), then back
+    r = edit_at(a, OM_EDIT_SOURCE_BTOOLS, uid, &bad, 0);
+    CHECK(r.status == OM_STATUS_OK && fabsf(game->map->objects[uid]->position.x - bad.position.x) < 0.06f, "a dev's box into b: allowed (status %u)", r.status);
+    r = edit_at(a, OM_EDIT_SOURCE_BTOOLS, uid, &to, 0);
+    CHECK(r.status == OM_STATUS_OK, "and back (status %u)", r.status);
 
     // Undo: the move, the resize, then the drop, the turn and the carry, one step per grab / drag
     const vec3 home = game->map->objects[uid]->position;
@@ -1492,7 +1579,10 @@ static void test_map_edits(TestClient *a, TestClient *b, TestClient *late) {
     CHECK(object_manager_editable(game, block) && object_manager_is_map_object(game, block) && !object_manager_map_edited(game, block),
           "the block is editable, as the map has it");
 
-    // the Physics Gun moves it: a stand-in at the same uid, b hears MAP_EDIT, its mirror follows
+    // the Physics Gun takes props, not the level: the block is refused, a crate and the pad are its
+    const int crate = map_object_of(game, PREFAB_CRATE, 0);
+    CHECK(!object_manager_physgun_takes(game, block) && object_manager_physgun_takes(game, pad) && (crate < 0 || object_manager_physgun_takes(game, crate)),
+          "Physics Gun reach: no map cube, the pad and a crate (%d)", crate);
     request(a, OM_ACTION_ADD_WEAPON, WEAPON_ID_PHYS_GUN, 0.0f);
     pump(4);
     hold(a, WEAPON_ID_PHYS_GUN);
@@ -1502,8 +1592,32 @@ static void test_map_edits(TestClient *a, TestClient *b, TestClient *late) {
     object_manager_pose(game, block, &from);
     to = from;
     to.position.y += 7.0f;
-    reset_received();
     NetSpawnResultPacket r = edit_at(a, OM_EDIT_SOURCE_PHYSGUN, block, &to, OM_EDIT_BEGIN);
+    CHECK(r.status == OM_STATUS_GEOMETRY && game->map->objects[block] == original, "the Physics Gun on a map cube: refused (status %u)", r.status);
+    if (crate >= 0) {
+        const Object *c0 = game->map->objects[crate];
+        ObjectManagerPose cf, ct;
+        object_manager_pose(game, crate, &cf);
+        stand_near(p, c0);
+        ct = cf;
+        ct.position.y += 3.0f;
+        ct.yaw = (float) M_PI / 4.0f; // a 45 degree carry (OM_EDIT_YAW)
+        r = edit_yaw(a, crate, &ct);
+        const Object *c1 = game->map->objects[crate];
+        const cJSON *rr = cJSON_GetObjectItem(c1->raw, "r");
+        CHECK(r.status == OM_STATUS_OK && fabsf(c1->position.y - (cf.position.y + 3.0f)) < 0.02f && rr && fabsf((float) cJSON_GetArrayItem(rr, 1)->valuedouble - 0.79f) < 0.006f,
+              "the Physics Gun carries a map crate, turned 45 degrees (status %u, r %.2f)", r.status, rr ? cJSON_GetArrayItem(rr, 1)->valuedouble : -1.0);
+        request(a, OM_ACTION_UNDO, 0, 0.0f);
+        CHECK(game->map->objects[crate] == c0, "undo: the map's crate back");
+        stand_near(p, original);
+    }
+    // the Tool Gun's Move takes the block (the map's geometry stays the Tool Gun's): a stand-in at the
+    // same uid, b hears MAP_EDIT, its mirror follows
+    request(a, OM_ACTION_ADD_WEAPON, WEAPON_ID_TOOL_GUN, 0.0f);
+    pump(4);
+    hold(a, WEAPON_ID_TOOL_GUN);
+    reset_received();
+    r = edit_at(a, OM_EDIT_SOURCE_BTOOLS, block, &to, OM_EDIT_BEGIN);
     pump(2);
     const Object *moved = game->map->objects[block];
     CHECK(r.status == OM_STATUS_OK && moved != original && moved->map_edit && fabsf(moved->position.y - (home.y + 7.0f)) < 0.02f &&
@@ -2135,9 +2249,254 @@ static void test_permissions(TestClient *dev, TestClient *guest) {
     CHECK(r.status == OM_STATUS_DEAD, "dead: refused (status %u)", r.status);
 }
 
+// ---------------------------------------------------------------- dev privileges (KrunkNative)
+
+// A dev has no caps: crates past OM_OBJECTS_PER_PLAYER back to back, and edits / carries of an
+// object a player stands in
+static void test_dev_privileges(TestClient *a, TestClient *b) {
+    printf("dev privileges...\n");
+    Player *p = player_of(a), *q = player_of(b);
+    if (!p || !q) return;
+    clean_up(a);
+    Game *game = &g_server->game;
+    const int crate = 10; // the Crate tile (object_manager_entries(OM_TAB_OBJECTS))
+    const int before = spawned_count();
+    int ok = 0;
+    for (int i = 0; i < OM_OBJECTS_PER_PLAYER + 6; i++) ok += request(a, OM_ACTION_SPAWN_OBJECT, crate, -0.45f).status == OM_STATUS_OK; // no pump: no pace
+    CHECK(ok == OM_OBJECTS_PER_PLAYER + 6 && spawned_count() == before + ok, "a dev spawns %d crates back to back, past the cap of %d (%d live)", ok,
+          OM_OBJECTS_PER_PLAYER, spawned_count() - before);
+    set_dev(a, 0);
+    const NetSpawnResultPacket capped = request(a, OM_ACTION_SPAWN_OBJECT, crate, -0.45f);
+    CHECK(capped.status == OM_STATUS_LIMIT || capped.status == OM_STATUS_RATE, "the same as a sandbox guest: capped (status %u)", capped.status);
+    set_dev(a, 1);
+    clean_up(a);
+    // carrying a crate b stands in (a dev may; a guest's edit into b is refused: test_edits)
+    request(a, OM_ACTION_ADD_WEAPON, WEAPON_ID_PHYS_GUN, 0.0f);
+    hold(a, WEAPON_ID_PHYS_GUN);
+    NetSpawnResultPacket r = request(a, OM_ACTION_SPAWN_OBJECT, crate, -0.6f);
+    const int uid = (int) game->map->object_count - 1;
+    ObjectManagerPose from, to;
+    CHECK(r.status == OM_STATUS_OK && object_manager_pose(game, uid, &from), "a crate to carry (status %u)", r.status);
+    q->position = (vec3) {from.position.x, from.position.y, from.position.z};
+    q->velocity = (vec3) {0};
+    to = from;
+    to.position.y += 1.0f; // b is inside it before and after
+    r = edit_at(a, OM_EDIT_SOURCE_PHYSGUN, uid, &to, OM_EDIT_BEGIN);
+    CHECK(r.status == OM_STATUS_OK, "carried while b stands in it (status %u)", r.status);
+    to.position.x += 3.0f;
+    r = edit_at(a, OM_EDIT_SOURCE_PHYSGUN, uid, &to, 0); // right after: devs are not paced
+    CHECK(r.status == OM_STATUS_OK && fabsf(game->map->objects[uid]->position.x - to.position.x) < 0.06f, "and on, unpaced (status %u)", r.status);
+    clean_up(a);
+}
+
+// A connection in the menu (no Player yet): the cheats, give, spawn and tp land in its kept state and
+// the first spawn applies them; Object Manager requests run from its view (devs)
+static void join_menu(TestClient *c) {
+    memset(c, 0, sizeof(*c));
+    c->v7 = 1;
+    c->fd = sandbox_connect();
+    c->conn_id = g_server->client_count ? g_server->clients[g_server->client_count - 1].id : -1;
+    const NetHelloPacket hello = {NET_PROTOCOL_MAJOR, NET_PROTOCOL_MINOR_V7, 0};
+    send_to(c, NET_PACKET_HELLO, &hello, sizeof(hello));
+    NetJoinPacket join_packet;
+    memset(&join_packet, 0, sizeof(join_packet));
+    send_to(c, NET_PACKET_JOIN, &join_packet, (uint16_t) NET_JOIN_PACKET_V2_SIZE);
+    pump(20);
+}
+
+static void spawn_client(TestClient *c) {
+    NetEntPacket ent = {.class_index = 0, .secondary_index = -1, .cosmetics = PLAYER_COSMETICS_NONE, .slid_cont = 1, .lag_comp = 1.0f};
+    send_to(c, NET_PACKET_ENT, &ent, (uint16_t) NET_ENT_PACKET_V7_SIZE);
+    pump(30);
+}
+
+static int cheat_on(const TestClient *c, const int flag, const int from) {
+    for (int i = from; i < c->count; i++) {
+        const NetPacket *k = &c->packets[i];
+        if (k->type != NET_PACKET_CHEAT || k->length != sizeof(NetCheatPacket)) continue;
+        NetCheatPacket cheat;
+        memcpy(&cheat, k->payload, sizeof(cheat));
+        if (cheat.flag == flag) return cheat.on ? 1 : 0;
+    }
+    return -1;
+}
+
+static void test_menu_state(TestClient *m, TestClient *b) {
+    printf("commands while not spawned in...\n");
+    const Player *q = player_of(b);
+    if (!q) return;
+    if (m->fd >= NET_LOOPBACK_FD_BASE) leave(m);
+    join_menu(m);
+    ClientConnection *mc = conn(m);
+    CHECK(mc && !mc->player, "a connection in the menu (no Player)");
+    if (!mc) return;
+    say(m, "/god");
+    CHECK(strstr(server_line(m), "God mode ON") != NULL, "god from the menu: '%s'", server_line(m));
+    say(m, "/noclip");
+    CHECK(strstr(server_line(m), "Noclip ON") != NULL && cheat_on(m, NET_CHEAT_NOCLIP, 0) == 1, "noclip from the menu: '%s'", server_line(m));
+    say(m, "/give shotgun");
+    CHECK(strstr(server_line(m), "Shotgun added") != NULL && mc->om_extra_count == 1 && mc->om_extras[0] == 5, "give from the menu: '%s' (%d)",
+          server_line(m), mc->om_extra_count);
+    const int objects = spawned_count();
+    say(m, "/spawn crate");
+    const Object *spawned = last_spawned();
+    CHECK(strstr(server_line(m), "Spawned Crate") != NULL && spawned_count() == objects + 1 && spawned && spawned->spawn_owner == mc->id,
+          "spawn from the menu: '%s' (owner %d)", server_line(m), spawned ? spawned->spawn_owner : -1);
+    // the Object Manager window's request (the menu camera's look), and Undo from the menu
+    NetSpawnResultPacket r = request(m, OM_ACTION_SPAWN_OBJECT, 10, -0.8f);
+    CHECK(r.status == OM_STATUS_OK && spawned_count() == objects + 2, "an Objects tile from the menu (status %u)", r.status);
+    r = request(m, OM_ACTION_UNDO, 0, 0.0f);
+    CHECK(r.status == OM_STATUS_OK && spawned_count() == objects + 1, "Undo from the menu (status %u)", r.status);
+    char tp[96];
+    const vec3 there = {q->position.x + 4.0f, q->position.y + 2.0f, q->position.z};
+    snprintf(tp, sizeof(tp), "/tp %.2f %.2f %.2f", (double) there.x, (double) there.y, (double) there.z);
+    say(m, tp);
+    CHECK(strstr(server_line(m), "You will spawn at") != NULL, "tp from the menu: '%s'", server_line(m));
+    // a guest in the menu: the Object Manager says "Spawn first", as before
+    set_dev(m, 0);
+    r = request(m, OM_ACTION_SPAWN_OBJECT, 10, -0.8f);
+    CHECK(r.status == OM_STATUS_DEAD, "a guest's request from the menu: Spawn first (status %u)", r.status);
+    set_dev(m, 1);
+
+    m->count = 0;
+    spawn_client(m);
+    Player *p = player_of(m);
+    const int spawn_at = index_of(m, NET_PACKET_SPAWN, 0);
+    CHECK(p && p->active && p->god_mode && p->noclip, "spawned with god and noclip (god %d noclip %d)", p ? p->god_mode : -1, p ? p->noclip : -1);
+    CHECK(p && loadout_has(p, 5), "and the Shotgun given in the menu");
+    CHECK(p && fabsf(p->position.x - there.x) < 1.0f && fabsf(p->position.z - there.z) < 1.0f, "at the menu tp's spot (%.1f %.1f, want %.1f %.1f)",
+          p ? p->position.x : 0.0f, p ? p->position.z : 0.0f, there.x, there.z);
+    CHECK(spawn_at >= 0 && cheat_on(m, NET_CHEAT_NOCLIP, spawn_at) == 1, "its client hears noclip on after its SPAWN");
+    if (!p) return;
+    // dead: the kept state goes on (ungod from the death screen holds for the next life)
+    p->god_mode = 0;
+    player_kill(p, NULL, NULL, 0);
+    pump(4);
+    CHECK(!p->active, "dead");
+    say(m, "/ungod");
+    CHECK(strstr(server_line(m), "God mode OFF") != NULL && !mc->keep.god_mode, "ungod while dead: '%s'", server_line(m));
+    p->death_time = g_server->game.now - 10.0f;
+    spawn_client(m);
+    p = player_of(m);
+    CHECK(p && p->active && !p->god_mode && p->noclip, "the next life: god off, noclip still on");
+    r = request(m, OM_ACTION_UNDO, 0, 0.0f); // the crate spawned from the menu is this player's
+    CHECK(r.status == OM_STATUS_OK && spawned_count() == objects, "the menu's crate is this player's to undo (status %u)", r.status);
+    say(m, "/noclip off");
+    leave(m);
+}
+
+// The Physics Gun on a player (devs): held at the carried feet, its own input moving nothing, let go
+// on release or OM_HOLD_TIMEOUT without an update
+static void test_physgun_player(TestClient *a, TestClient *b) {
+    printf("the Physics Gun on a player...\n");
+    Player *p = player_of(a), *q = player_of(b);
+    if (!p || !q) return;
+    clean_up(a);
+    p->god_mode = q->god_mode = 1;
+    request(a, OM_ACTION_ADD_WEAPON, WEAPON_ID_PHYS_GUN, 0.0f);
+    hold(a, WEAPON_ID_PHYS_GUN);
+    q->position = (vec3) {p->position.x + 20.0f, p->position.y, p->position.z};
+    q->velocity = (vec3) {0};
+    pump(10);
+    set_dev(a, 0);
+    vec3 feet = {p->position.x + 15.0f, p->position.y + 12.0f, p->position.z};
+    NetSpawnResultPacket r = edit_player(a, q->uid, feet, 0);
+    CHECK(r.status == OM_STATUS_DENIED && !q->om_held, "a guest may not carry players (status %u)", r.status);
+    set_dev(a, 1);
+    b->count = 0;
+    r = edit_player(a, q->uid, feet, 0);
+    CHECK(r.status == OM_STATUS_OK && q->om_held && q->om_held_by == p->uid + 1, "a dev grabs b (status %u)", r.status);
+    CHECK(cheat_on(b, NET_CHEAT_HELD, 0) == 1 && count_type(b, NET_PACKET_POSITION) >= 1, "b hears it is held, and its new feet");
+    pump(20); // b's own input and gravity move nothing
+    for (int i = 0; i < 10; i++) {
+        Input in = {.seq = ++b->seq, .move_dir = 0, .delta = 1.0f / 60.0f, .x_dir = 0.0f, .y_dir = q->direction.y, .jump = 1};
+        NetInputPacket packet;
+        net_packet_from_input(&packet, &in);
+        send_to(b, NET_PACKET_INPUT, &packet, sizeof(packet));
+        pump(1);
+    }
+    CHECK(fabsf(q->position.x - feet.x) < 0.01f && fabsf(q->position.y - feet.y) < 0.01f && fabsf(q->position.z - feet.z) < 0.01f,
+          "b stays where it is carried (%.2f %.2f %.2f)", q->position.x, q->position.y, q->position.z);
+    // carried on, at 60 a second (no pace)
+    for (int i = 0; i < 30; i++) {
+        feet.z += 0.5f;
+        r = edit_player(a, q->uid, feet, 0);
+        if (r.status != OM_STATUS_OK) break;
+    }
+    CHECK(r.status == OM_STATUS_OK && fabsf(q->position.z - feet.z) < 0.01f, "carried 15 along z, update by update (status %u, z %.2f)", r.status, q->position.z);
+    feet.y += 40.0f; // up in the air, then let go
+    r = edit_player(a, q->uid, feet, 0);
+    CHECK(r.status == OM_STATUS_OK && fabsf(q->position.y - feet.y) < 0.01f, "lifted 40 (status %u)", r.status);
+    b->count = 0;
+    r = edit_player(a, q->uid, feet, 1);
+    CHECK(r.status == OM_STATUS_OK && !q->om_held && cheat_on(b, NET_CHEAT_HELD, 0) == 0, "released (status %u)", r.status);
+    for (int i = 0; i < 12; i++) input(b, -1, 0); // b's own frames move it again
+    CHECK(q->position.y < feet.y - 0.5f, "and b falls again (y %.2f, was %.2f)", q->position.y, feet.y);
+    // the carrier stops sending: let go after OM_HOLD_TIMEOUT
+    feet = (vec3) {p->position.x + 15.0f, p->position.y + 12.0f, p->position.z};
+    r = edit_player(a, q->uid, feet, 0);
+    CHECK(r.status == OM_STATUS_OK && q->om_held, "grabbed again");
+    pump((int) (OM_HOLD_TIMEOUT * 60.0f) + 10);
+    CHECK(!q->om_held, "let go after %.1f s without an update", (double) OM_HOLD_TIMEOUT);
+    p->god_mode = q->god_mode = 0;
+    clean_up(a);
+}
+
+// The client's interpolation of other players' edits: 30 updates a second shown at 144 fps move
+// smoothly (no step bigger than the speed allows), reach each target, and turn the short way
+static void test_interp(void) {
+    printf("edit interpolation...\n");
+    ObjectManagerInterp it;
+    memset(&it, 0, sizeof(it));
+    const double update = 1.0 / 30.0, frame = 1.0 / 144.0;
+    const float speed = 60.0f; // units / s: 2 per update
+    vec3 shown = {0.0f, 5.0f, 0.0f};
+    float shown_yaw = 0.0f;
+    double now = 0.0, next_update = 0.0;
+    int k = 0, monotonic = 1;
+    float max_step = 0.0f, last_x = 0.0f;
+    for (int f = 0; f < 144; f++, now += frame) {
+        if (now + 1e-9 >= next_update) {
+            const vec3 target = {speed * (float) (k * update), 5.0f, 0.0f};
+            object_manager_interp_push(&it, shown, shown_yaw, target, 0.0f, now);
+            k++;
+            next_update += update;
+        }
+        vec3 pos;
+        float yaw;
+        object_manager_interp_sample(&it, now, &pos, &yaw);
+        if (f > 10) {
+            max_step = fmaxf(max_step, pos.x - last_x);
+            monotonic &= pos.x >= last_x - 1e-4f;
+        }
+        last_x = pos.x;
+        shown = pos;
+        shown_yaw = yaw;
+    }
+    CHECK(monotonic, "it never moves back");
+    CHECK(max_step <= speed * (float) frame * 1.6f, "no stepping: the largest step %.3f (an update is %.3f)", max_step, speed * (float) update);
+    const vec3 last_target = it.to;
+    vec3 end;
+    float end_yaw;
+    CHECK(!object_manager_interp_sample(&it, now + 1.0, &end, &end_yaw) && fabsf(end.x - last_target.x) < 1e-4f, "it settles on the last update (%.2f)", end.x);
+    // a turn across 0: 6.2 -> 0.1 goes up (the short way), halfway at 2 pi + ... wrap
+    memset(&it, 0, sizeof(it));
+    object_manager_interp_push(&it, (vec3) {0}, 6.2f, (vec3) {0}, 0.1f, 0.0);
+    it.span = 0.1;
+    vec3 pos;
+    float yaw;
+    object_manager_interp_sample(&it, 0.05, &pos, &yaw);
+    CHECK(fabsf(yaw - (6.2f + (0.1f + 2.0f * (float) M_PI - 6.2f) * 0.5f)) < 1e-3f, "a turn across 0 goes the short way (%.3f)", yaw);
+    // the packed yaw round trip and the 45 degree quarter
+    CHECK(fabsf(object_manager_yaw_unpack(object_manager_yaw_pack((float) M_PI / 4.0f)) - (float) M_PI / 4.0f) < 1e-4f &&
+          object_manager_yaw_quarter((float) M_PI / 4.0f) == 0 && object_manager_yaw_quarter((float) M_PI * 0.75f) == 1 &&
+          object_manager_yaw_pack(-0.5f) == object_manager_yaw_pack(2.0f * (float) M_PI - 0.5f), "yaw packing");
+}
+
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     test_codec();
+    test_interp();
     const cJSON *burg = map_catalog_json((size_t) map_catalog_index_of_key("311_burg"));
     CHECK(burg != NULL, "map");
     if (burg && start(burg, MODE_ID_FFA)) {
@@ -2155,6 +2514,9 @@ int main(void) {
         test_join_sync(&g_clients[0], &g_clients[2], &g_clients[3]);
         test_permissions(&g_clients[0], &g_clients[1]);
         test_public_refusals(&g_clients[0], &g_clients[1]);
+        test_dev_privileges(&g_clients[0], &g_clients[1]);
+        test_physgun_player(&g_clients[0], &g_clients[1]);
+        test_menu_state(&g_clients[3], &g_clients[1]);
         test_entity_touch(&g_clients[0], &g_clients[1]); // last: power-ups change loadouts and scores
         for (int i = 0; i < CLIENTS; i++) leave(&g_clients[i]);
         sandbox_stop();

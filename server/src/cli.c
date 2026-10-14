@@ -419,6 +419,10 @@ static void cli_cmd_status(const char *args) {
         server_log("  map        (no map loaded)");
     }
     server_log("  players    %lu/%u connected, %lu in game", (unsigned long) g_server->client_count, (unsigned int) g_server->config.max_players, (unsigned long) in_game);
+    int fill_to = 0;
+    const int autofill = game_bots_autofill(game, &fill_to); // KrunkNative chat `autofill`
+    if (autofill) server_log("  bots       %d, autofill on (fill to %d players)", game_bots_count(game), fill_to);
+    else server_log("  bots       %d, autofill off", game_bots_count(game));
     server_log("  tick rate  %u Hz target, %.1f Hz measured, slowest tick %.2f ms",
                (unsigned int) g_server->config.tick_rate, g_server_tick_stats.measured_tick_rate, g_server_tick_stats.max_tick_ms);
     server_log("  idle kick  %.0f s alive, %.0f s dead / in the menu", g_server->config.idle_timeout, g_server->config.idle_menu_timeout);

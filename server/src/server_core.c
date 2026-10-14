@@ -69,8 +69,13 @@ void server_transport_flush_all(void) {
 static void server_bot_slots(void) {
     char tags[4][24];
     const int n = accounts_info_tags(tags, 4);
-    int no_bots = 0;
-    for (int i = 0; i < n; i++) no_bots |= !strcmp(tags[i], "ranked") || !strcmp(tags[i], "custom");
+    int ranked = 0, custom = 0;
+    for (int i = 0; i < n; i++) {
+        ranked |= !strcmp(tags[i], "ranked");
+        custom |= !strcmp(tags[i], "custom");
+    }
+    // a custom game fills too once its host / a dev turned `autofill on` (never ranked)
+    const int no_bots = ranked || (custom && !g_server->game.bots->autofill_forced);
     g_server->game.bots->slots = no_bots ? -1 : g_server->config.max_players;
 }
 
