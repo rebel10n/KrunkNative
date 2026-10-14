@@ -13,11 +13,16 @@ so only new content is downloaded. Out:
     <out>/_headers               CORS for any page origin, caching (README "Asset CDN")
 
 Cloudflare Pages takes at most 20,000 files of at most 25 MiB in a deployment (Free plan);
---exclude drops path prefixes (the page's kn-config.json asset_fallback then serves them from
-the own origin), anything still over the limits fails the run instead of deploying a partial tree.
+--exclude / --exclude-from drop path prefixes (the CDN answers them 404, the clients then load
+them from the own origin: README "Asset CDN"), anything still over the limits fails the run
+instead of deploying a partial tree. Over --warn-files (default 18,000) only warns.
 
 usage: assets_cdn.py <out> [--origin URL] [--objects DIR] [--jobs N] [--exclude PREFIX ...]
-                     [--max-files N] [--current URL]
+                     [--exclude-from FILE ...] [--max-files N] [--warn-files N] [--dry-run]
+                     [--current URL]
+       --exclude-from FILE: one prefix per line, '#' comments (deploy/pages/assets-cdn-exclude.txt)
+       --dry-run: read the origin's content list, print the counts per prefix and check the
+                  limits; nothing is downloaded or written (<out> is not touched).
        --current URL: print "same" and exit 0 when URL/assets/version.txt already equals the
                       origin's (nothing to deploy), else "changed".
 Standard library only.
@@ -88,6 +93,31 @@ def version_of(base):
     return v
 
 
+def read_prefixes(name):
+    """The prefixes of an exclude file: one per line, '#' starts a comment."""
+    out = []
+    with open(name) as f:
+        for n, line in enumerate(f, 1):
+            p = line.split("#", 1)[0].strip()
+            if not p:
+                continue
+            if p.startswith("/") or ".." in p.split("/") or not PATH_RE.match(p.rstrip("/")):
+                sys.exit("assets_cdn: %s:%d: not a path prefix below assets/: %r" % (name, n, p))
+            out.append(p)
+    return out
+
+
+def top_prefixes(files, packaged, limit):
+    """(prefix, files, bytes) of the biggest two-level directories left, most files first."""
+    groups = {}
+    for path, size in [(f[0], f[2]) for f in files] + [(p, 0) for p in packaged]:
+        parts = path.split("/")
+        key = "/".join(parts[:2]) + "/" if len(parts) > 2 else (parts[0] + "/" if len(parts) > 1 else path)
+        n, b = groups.get(key, (0, 0))
+        groups[key] = (n + 1, b + size)
+    return sorted(((k, n, b) for k, (n, b) in groups.items()), key=lambda g: (-g[1], g[0]))[:limit]
+
+
 def link(src, dst):
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     if os.path.lexists(dst):
@@ -120,10 +150,16 @@ def main():
     ap.add_argument("--objects", default=os.path.expanduser("~/.cache/kn-assets-objects"))
     ap.add_argument("--jobs", type=int, default=16)
     ap.add_argument("--exclude", action="append", default=[], help="path prefix below assets/ to leave out")
+    ap.add_argument("--exclude-from", action="append", default=[], help="file of prefixes, one per line, # comments")
     ap.add_argument("--max-files", type=int, default=20000)
+    ap.add_argument("--warn-files", type=int, default=18000, help="warn (not fail) over this many files")
+    ap.add_argument("--dry-run", action="store_true", help="count and check the limits only")
     ap.add_argument("--current", default="", help="the deployed CDN: exit early when it has this version")
     args = ap.parse_args()
     origin = args.origin if args.origin.endswith("/") else args.origin + "/"
+    for name in args.exclude_from:
+        args.exclude += read_prefixes(name)
+    args.exclude = list(dict.fromkeys(p for p in args.exclude if p))  # in order, once each
 
     version = version_of(origin)
     if args.current:
@@ -155,14 +191,43 @@ def main():
         if not PATH_RE.match(path) or ".." in path.split("/"):
             sys.exit("assets_cdn: bad packaged path %r" % path)
 
+    indexed = len(files)
+    total = indexed + len(packaged) + 1  # + version.txt (_headers is not a file of the site)
+    dropped = dict.fromkeys(args.exclude, 0)
+    for path in [f[0] for f in files] + packaged:
+        for x in args.exclude:
+            if path.startswith(x):
+                dropped[x] += 1
+                break
     files = [f for f in files if not excluded(f[0])]
     packaged = [p for p in packaged if not excluded(p)]
     big = [f[0] for f in files if f[2] > MAX_SIZE]
-    count = len(files) + len(packaged) + 1  # + version.txt (_headers is not a file of the site)
+    count = len(files) + len(packaged) + 1
+    log("content list %s: %d files (%d indexed + %d packaged + version.txt)" % (
+        assets.get("version", "?"), total, indexed, total - 1 - indexed))
+    for x, n in dropped.items():
+        log("  excluded %-32s %6d files%s" % (x, n, "" if n else "  (matches nothing: a typo?)"))
+    log("%d files left for the CDN (max %d): %s%s" % (
+        count, args.max_files, "%d to spare" % (args.max_files - count) if count <= args.max_files else
+        "%d too many" % (count - args.max_files), ", over 25 MiB: %s" % big[:10] if big else ""))
+    if args.dry_run:
+        for prefix, n, size in top_prefixes(files, packaged, 20):
+            log("  %6d files %8.1f MB  %s" % (n, size / 1e6, prefix))
     if count > args.max_files or big:
-        sys.exit("assets_cdn: over the Pages limits: %d files (max %d), over 25 MiB: %s. Leave prefixes out with "
-                 "--exclude (KN_ASSET_CDN_EXCLUDE; the page's asset_fallback serves them), or switch the page "
-                 "to the own origin (README \"Asset CDN\")" % (count, args.max_files, big[:10]))
+        sys.exit("assets_cdn: still over the Pages limits after the exclusions: %d files (max %d), over 25 MiB: %s. "
+                 "Leave more prefixes out in deploy/pages/assets-cdn-exclude.txt (or KN_ASSET_CDN_EXCLUDE), only ones "
+                 "the game's loaders fetch (they retry the own origin; the page's <img>/<video> do not, the file's "
+                 "header lists the prefixes that must stay). Biggest now: %s. Or switch the page to the own origin "
+                 "(README \"Asset CDN\")" % (
+                     count, args.max_files, big[:10],
+                     ", ".join("%s %d" % (p, n) for p, n, _s in top_prefixes(files, packaged, 6))))
+    if count > args.warn_files:
+        msg = "%d files on the CDN, over the %d of the headroom target (Pages max %d)" % (
+            count, args.warn_files, args.max_files)
+        print(("::warning::assets_cdn: " if os.environ.get("GITHUB_ACTIONS") else "assets_cdn: warning: ") + msg,
+              file=sys.stderr, flush=True)
+    if args.dry_run:
+        return
 
     if os.path.exists(args.out):
         shutil.rmtree(args.out)

@@ -7,7 +7,7 @@ one at run time (kn-config.json, below); services stay on the central node:
 | host | what | where |
 | --- | --- | --- |
 | `krunk.io`, `www.krunk.io` | dist/web without assets/ (index/social/editor/viewer, ui/, client.<hash>.*, kn-config.json) | GitHub Pages (`rebel10n/KrunkNative`, deploy-kru.yml job `pages`, custom domain `krunk.io`, HTTPS enforced) |
-| `krunknative-assets.pages.dev` | asset origin `cdn`: `/assets/` (the game content, 19.3k files, 1.9 GB) | Cloudflare Pages project `krunknative-assets`, its pages.dev URL only (assets-cdn.yml) |
+| `krunknative-assets.pages.dev` | asset origin `cdn`: `/assets/` (the game content but `assets-cdn-exclude.txt`, 17.1k files, 1.7 GB) | Cloudflare Pages project `krunknative-assets`, its pages.dev URL only (assets-cdn.yml) |
 | `assets.krunk.io` | asset origin `own`: `/assets/`, and `/updates/` for the launcher | kru OpenResty :8081 (abulxt edges, deploy/ansible role kn_edge_origin) |
 | `coordinator.krunk.io` | kn_brain auth + community + matchmaker | kru :8083 (abulxt edges) |
 | `matchmaker.krunk.io` | kn_brain finder (`/servers`) | kru :8082 (abulxt edges) |
@@ -134,16 +134,29 @@ The Cloudflare Pages project `krunknative-assets`, on its pages.dev URL only (no
   `Content-Length, Content-Range, ETag`, `Cache-Control: public, max-age=86400` for `/assets/*`
   (a day, not a year: `_headers` cannot tell `?v=` URLs from bare ones), `no-store` for
   `assets/version.txt`. Pages serves byte ranges (206) and ETags itself.
-- Limits (Free plan: 20,000 files a deployment, 25 MiB a file, 100 `_headers` rules). Our tree
-  (2026-10-13, asset list e9ce9c01455eec39): 19,192 indexed files + 113 packaged + version.txt =
-  **19,306 files** (694 to spare), **1.92 GB**, largest file 7.4 MB (`user-assets/md23677/mod.zip`),
-  none over 5 MiB but that one: everything fits. The biggest groups are textures/weapons (6,376) and
-  textures/previews (5,977). `assets_cdn.py` fails the run instead of deploying a partial tree
-  when the content outgrows that. Then: `KN_ASSET_CDN_EXCLUDE="textures/previews/"` (space-
-  separated prefixes) leaves directories out, which the page's `asset_fallback` (own) serves (the
-  client retries every failed download there; `<img>` previews in the UI are not retried); or the
-  Workers Paid plan (100,000 files, project setting `PAGES_WRANGLER_MAJOR_VERSION=4`); or move
-  the page to `own`.
+- Limits (Free plan: 20,000 files a deployment, 25 MiB a file, 100 `_headers` rules). The tree
+  outgrew them with the v10 content (2026-10-14, asset list 442d6fc77b68be68: 22,039 indexed files
+  + 115 packaged + version.txt = **22,155 files**, 2.7 GB; largest file 22.8 MB,
+  `videos/tutorial/basics.mp4`, under 25 MiB). Biggest groups: textures/previews (7,422),
+  textures/weapons/skins (5,015), the rest of textures/weapons (1,787), textures/hats (883),
+  textures/melee (753), textures/faces (689), textures/body (595), textures/sprays (563),
+  models/hats (536), sound (513), user-assets (397).
+  So the CDN leaves prefixes out: **`deploy/pages/assets-cdn-exclude.txt`** (one per line, read by
+  assets-cdn.sh; `KN_ASSET_CDN_EXCLUDE` adds space-separated ones, `KN_ASSET_CDN_EXCLUDE_FILE=none`
+  drops the file). Today: `textures/weapons/skins/` (5,015 files, 1 GB) -> **17,140 files** on the
+  CDN, 2,860 to spare. The CDN answers a left-out path 404 (with CORS), and every game loader then
+  takes it from the own origin: the web client's `ensure_asset_file` / prefetches (kn-config.json
+  `asset_fallback`), the native on-demand fetch (next origin on a 404) and the launcher's sync (a
+  mirror's 404 is not counted against it). The page's own `<img>` / `<video>` / CSS `url()` are
+  **not** retried (html_dom_asset_url writes the CDN URL into the page): never leave out what the
+  UI shows that way (textures/previews, sprays, playercards, emoji, paints, classes, reticles,
+  scopes, weapon / melee icons, videos, user-assets, scares); the file's header lists them.
+  `assets_cdn.py` prints the count per excluded prefix, the files left and to spare; it warns over
+  18,000 (`--warn-files`) and fails the run, naming the biggest directories left, instead of
+  deploying a partial tree over 20,000. Check a change without downloading or uploading anything:
+  `deploy/pages/assets-cdn.sh --dry-run`. Beyond that: the Workers Paid plan (100,000 files,
+  project setting `PAGES_WRANGLER_MAJOR_VERSION=4`), a second Pages project for a part of the tree,
+  or move the page to `own`.
 - The launcher's `/updates/` (manifests, 18,356 content objects, client packages of 27-33 MB) is
   not on the CDN: it would not fit next to the tree (37k files, packages over 25 MiB).
 

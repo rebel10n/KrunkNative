@@ -1,0 +1,20 @@
+# Path prefixes below assets/ that the Cloudflare Pages asset CDN (krunknative-assets.pages.dev)
+# leaves out: Pages takes at most 20,000 files a deployment (README "Asset CDN" > Limits).
+# Read by deploy/pages/assets-cdn.sh (assets_cdn.py --exclude-from); KN_ASSET_CDN_EXCLUDE adds
+# more prefixes on top. One prefix per line, '#' starts a comment. Try a change without uploading:
+#   deploy/pages/assets-cdn.sh --dry-run
+#
+# The CDN answers an excluded path 404 (with CORS), and every game loader then fetches it from the
+# own origin assets.krunk.io: web ensure_asset_file / asset_prefetch (shared/src/utils.c, the
+# page's kn-config.json asset_fallback), the native on-demand fetch (client/src/net/asset_fetch.c,
+# a 404 moves on to the next origin) and the launcher's sync (launcher/src/assets_sync.c, a 404 from
+# a mirror is not counted against it). The page's own <img>/<video>/CSS url() requests are NOT
+# retried (html_dom_asset_url writes the CDN URL into the page), so never list a prefix the UI shows
+# that way: textures/previews/, textures/sprays/, textures/playercards/, textures/emoji/,
+# textures/paints/, textures/classes/, textures/reticles/, textures/scopes/, textures/weapons/icon_*,
+# textures/melee/icon_*, videos/, user-assets/ (editor cards), scares/, img/, css/.
+
+# Weapon skin textures (5,015 files, 1.03 GB of 22,155 / 2.7 GB on 2026-10-14): loaded only as 3D
+# textures (player_mesh.c, prefab.c, viewer) through load_texture -> ensure_asset_file, one file per
+# skin a player has equipped; the store and inventory show textures/previews/ instead.
+textures/weapons/skins/

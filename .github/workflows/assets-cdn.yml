@@ -7,8 +7,12 @@ name: Asset CDN
 # and by hand; it stops after one request when the CDN already has the origin's
 # assets/version.txt. Only new objects are downloaded (actions/cache) and only new files
 # uploaded (wrangler's hash check).
+# Pages takes at most 20,000 files: the prefixes in deploy/pages/assets-cdn-exclude.txt stay off
+# the CDN (the clients load them from the own origin); the run prints the counts and fails only
+# when the tree is still over the limit (try locally: deploy/pages/assets-cdn.sh --dry-run).
 # Variables: KN_ASSET_CDN=1 (the project exists), KN_ASSET_CDN_URL (its https://<sub>.pages.dev/),
-#            optional KN_ASSET_OWN_URL, KN_ASSET_CDN_PROJECT, KN_ASSET_CDN_EXCLUDE.
+#            optional KN_ASSET_OWN_URL, KN_ASSET_CDN_PROJECT, KN_ASSET_CDN_EXCLUDE (prefixes left
+#            out on top of the file).
 # Secrets: CLOUDFLARE_API_TOKEN (Account > Cloudflare Pages > Edit), CLOUDFLARE_ACCOUNT_ID.
 on:
   workflow_run:

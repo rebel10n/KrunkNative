@@ -8,8 +8,14 @@
 # Settings (site.sh): KN_ASSET_OWN_URL (the source), KN_ASSET_CDN_URL (the CDN, to skip an
 # unchanged version), plus KN_ASSET_CDN_PROJECT (default krunknative-assets),
 # KN_ASSET_CDN_BRANCH (its production branch, default main), KN_ASSET_CDN_STAGE (dist/assets-cdn),
-# KN_ASSET_CDN_OBJECTS (object cache, ~/.cache/kn-assets-objects), KN_ASSET_CDN_EXCLUDE
-# (space-separated path prefixes left out), KN_ASSET_CDN_FORCE=1 (deploy an unchanged version).
+# KN_ASSET_CDN_OBJECTS (object cache, ~/.cache/kn-assets-objects), KN_ASSET_CDN_EXCLUDE_FILE
+# (the prefixes left out, default deploy/pages/assets-cdn-exclude.txt; "none" = none),
+# KN_ASSET_CDN_EXCLUDE (space-separated prefixes left out on top of it), KN_ASSET_CDN_FORCE=1
+# (deploy an unchanged version).
+#
+# --dry-run (or KN_ASSET_CDN_DRY_RUN=1): only read the origin's content list, print the file
+# counts (excluded per prefix, left, to spare, the biggest directories) and check the Pages limits;
+# no download, no staging, no Cloudflare credentials, no upload.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 . deploy/pages/site.sh
@@ -18,8 +24,19 @@ cd "$(dirname "$0")/../.."
 : "${KN_ASSET_CDN_BRANCH:=main}"
 : "${KN_ASSET_CDN_STAGE:=dist/assets-cdn}"
 : "${KN_ASSET_CDN_OBJECTS:=$HOME/.cache/kn-assets-objects}"
+: "${KN_ASSET_CDN_EXCLUDE_FILE:=deploy/pages/assets-cdn-exclude.txt}"
 : "${KN_ASSET_CDN_EXCLUDE:=}"
 : "${KN_ASSET_CDN_FORCE:=0}"
+: "${KN_ASSET_CDN_DRY_RUN:=0}"
+[ "${1:-}" = --dry-run ] && KN_ASSET_CDN_DRY_RUN=1
+
+excludes=()
+[ "$KN_ASSET_CDN_EXCLUDE_FILE" = none ] || excludes+=(--exclude-from "$KN_ASSET_CDN_EXCLUDE_FILE")
+for p in $KN_ASSET_CDN_EXCLUDE; do excludes+=(--exclude "$p"); done
+
+if [ "$KN_ASSET_CDN_DRY_RUN" = 1 ]; then
+    exec python3 deploy/pages/assets_cdn.py "$KN_ASSET_CDN_STAGE" --origin "$KN_ASSET_OWN_URL" --dry-run "${excludes[@]}"
+fi
 
 kn_cloudflare_credentials
 
@@ -29,8 +46,6 @@ if [ "$KN_ASSET_CDN_FORCE" != 1 ] && [ -n "$KN_ASSET_CDN_URL" ] &&
     exit 0
 fi
 
-excludes=()
-for p in $KN_ASSET_CDN_EXCLUDE; do excludes+=(--exclude "$p"); done
 python3 deploy/pages/assets_cdn.py "$KN_ASSET_CDN_STAGE" --origin "$KN_ASSET_OWN_URL" \
     --objects "$KN_ASSET_CDN_OBJECTS" "${excludes[@]}"
 

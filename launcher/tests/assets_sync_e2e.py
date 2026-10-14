@@ -17,6 +17,8 @@ the tree (the Pages CDN layout). Both log every request and connection and can i
   7  missing everywhere: 404 on both fails the sync with "missing on the update server"
   8  cancel mid-download: the sync stops with "cancelled", nothing half-written in place
   9  content update: changed files fetched, removed ones deleted, a user's own file kept
+ 10  a prefix left off the mirror (deploy/pages/assets-cdn-exclude.txt): 404 there, the objects
+     serve it, and the mirror stays in (404s are not counted as stale)
 """
 import argparse
 import gzip
@@ -369,6 +371,20 @@ def scenarios(bench, work, own, cdn):
     check(r.get("fetched") == 2 and r.get("removed") == 1, "2 fetched, 1 removed (%s, %s)" % (r.get("fetched"), r.get("removed")))
     check(not os.path.exists(os.path.join(dest, "textures/t002.png")), "the removed file is gone")
     check(os.path.exists(os.path.join(dest, "mine.txt")), "the user's own file kept")
+
+    print("10 a prefix left off the mirror")
+    shutil.rmtree(dest)
+    left_out = sorted(p for p in tree2 if p.startswith("textures/"))  # far over ASSET_ORIGIN_STALE (32)
+    cdn.missing = {"/assets/" + p for p in left_out}
+    own.reset_log(), cdn.reset_log()
+    r = run(bench, dest, url, "--threads", "2")
+    check(r.get("ok") == 1 and tree_ok(dest, tree2) == "", "sync ok, every file right (%s)" % r.get("err"))
+    own_paths = set(object_requests(own))
+    want = {"/updates/assets/objects/%s/%s" % (sha256(tree2[p])[:2], sha256(tree2[p])) for p in left_out}
+    check(want <= own_paths, "the objects served all %d left-out files (%d missing)" % (len(want), len(want - own_paths)))
+    cdn_stat = [o for o in r.get("origins", []) if o["url"].startswith("http://127.0.0.1:%d/" % cdn.port)]
+    check(cdn_stat and not cdn_stat[0]["disabled"], "the mirror is not taken out for its 404s (%s)" % cdn_stat)
+    cdn.reset_faults()
 
 
 if __name__ == "__main__":
