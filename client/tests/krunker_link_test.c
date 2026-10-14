@@ -210,6 +210,27 @@ int main(void) {
           g_events[KRUNKER_LINK_EV_ERROR] == 1, "ERROR");
     clear();
 
+    // t UPDATE_TIMER [formatted, state, rawMs] -> NET_PACKET_TIMER (seconds = floor(ms/1000), like
+    // formatTimer); state 0 is the running round clock, 1/2/3 the end-screen countdown
+    NetTimerPacket tp;
+    feed(&link, "t", (KrunkerValue[]) {KRUNKER_V_STR("2:05"), KRUNKER_V_NUM(0), KRUNKER_V_NUM(125400)}, 3);
+    p = find_in(NET_PACKET_TIMER, 0);
+    if (p) memcpy(&tp, p->payload, sizeof(tp));
+    CHECK(p && tp.seconds == 125 && tp.end == 0, "TIMER round clock (%d end %d)", p ? tp.seconds : -1, p ? tp.end : -1);
+    clear();
+    // state 1 end countdown, rawMs absent: the "M:SS" string is parsed instead
+    feed(&link, "t", (KrunkerValue[]) {KRUNKER_V_STR("0:08"), KRUNKER_V_NUM(1)}, 2);
+    p = find_in(NET_PACKET_TIMER, 0);
+    if (p) memcpy(&tp, p->payload, sizeof(tp));
+    CHECK(p && tp.seconds == 8 && tp.end == 1, "TIMER end countdown (%d end %d)", p ? tp.seconds : -1, p ? tp.end : -1);
+    clear();
+    // start [formattedTimer, ...] seeds the round clock from the string (no raw ms)
+    feed(&link, "start", (KrunkerValue[]) {KRUNKER_V_STR("4:00"), KRUNKER_V_NUM(0)}, 2);
+    p = find_in(NET_PACKET_TIMER, 0);
+    if (p) memcpy(&tp, p->payload, sizeof(tp));
+    CHECK(p && tp.seconds == 240 && tp.end == 0, "START seeds the timer (%d)", p ? tp.seconds : -1);
+    clear();
+
     // cc: answered, undefined result (empty payload still sent), garbage (no ccr)
     feed(&link, "cc", (KrunkerValue[]) {KRUNKER_V_STR("n0nce"), KRUNKER_V_NIL, KRUNKER_V_STR("Y3Q=")}, 3);
     CHECK(g_out_count == 1 && !strcmp(g_out[0].name, "ccr") && g_out[0].argc == 3 && !strcmp(krunker_str(krunker_frame_arg(&g_out[0], 0)), "n0nce") &&

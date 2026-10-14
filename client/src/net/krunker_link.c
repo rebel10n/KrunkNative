@@ -411,6 +411,40 @@ static void on_captcha(KrunkerLink *l, const KrunkerFrame *f) {
     free(payload);
 }
 
+// "t" UPDATE_TIMER [formatted, state, rawMs] (handler iìíîiïì game.deob.js:220234, server broadcast
+// :191565 broadcast('t', formatTimer(gameTimer), 0, gameTimer)). arg0 is the already-formatted clock
+// string, arg1 the state (0 normal countdown, 1 round-end "Next Round in", 2 match over, 3 abandoned),
+// arg2 the raw gameTimer in ms. The HUD shows whole seconds (MM:SS): floor rawMs/1000 like formatTimer
+// (:23893 uses ms/1000%60 with floored components) so the seconds match the string, and parse the
+// "hh:mm:ss"/"mm:ss" string when rawMs is absent (e.g. START_GAME, which carries only the string).
+static int timer_seconds(const KrunkerValue *raw, const KrunkerValue *str) {
+    if (krunker_is(raw, KRUNKER_NUM) && isfinite(raw->u.num)) return (int) (raw->u.num / 1000.0);
+    const char *s = krunker_str(str);
+    if (!s) return 0;
+    int total = 0, field = 0, digits = 0;
+    for (; *s && *s != '.'; s++) { // stop before the showMS fraction (mm:ss.t)
+        if (*s >= '0' && *s <= '9') {
+            field = field * 10 + (*s - '0');
+            digits = 1;
+        } else if (*s == ':') {
+            total = total * 60 + field;
+            field = 0;
+            digits = 0;
+        }
+    }
+    return digits || total ? total * 60 + field : 0;
+}
+
+static void on_timer(KrunkerLink *l, const KrunkerFrame *f) {
+    const int state = (int) num(arg(f, 1), 0);
+    NetTimerPacket t;
+    memset(&t, 0, sizeof(t));
+    t.seconds = timer_seconds(arg(f, 2), arg(f, 0));
+    // state 0 is the running round clock; 1/2/3 are the end-screen countdown / "match over" states
+    t.end = state != 0 ? 1 : 0;
+    emit(l, NET_PACKET_TIMER, &t, sizeof(t));
+}
+
 static void on_error(KrunkerLink *l, const KrunkerFrame *f) {
     NetErrorPacket e;
     memset(&e, 0, sizeof(e));
@@ -441,7 +475,16 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
             break;
         case KRUNKER_S2C_INIT_GAME: on_init(l, &f); break;
         case KRUNKER_S2C_ENTER_GAME: note(l, KRUNKER_LINK_EV_NOTE, "frs: the server took our en"); break;
-        case KRUNKER_S2C_START_GAME: break; // timers / team / class for the menu: our SPAWN path covers it
+        case KRUNKER_S2C_START_GAME: { // [formattedTimer, ...] (iìïìiìi :218939 -> iìíîiïì(arg0) :218948):
+            // team / class ride our SPAWN; arg0 seeds the round clock so the HUD shows it before the
+            // first "t" arrives (the string only, no raw ms, like START_GAME's own timer call).
+            const KrunkerValue *s = arg(&f, 0);
+            if (krunker_is(s, KRUNKER_STR)) {
+                const NetTimerPacket t = {.seconds = timer_seconds(NULL, s), .end = 0};
+                emit(l, NET_PACKET_TIMER, &t, sizeof(t));
+            }
+            break;
+        }
         case KRUNKER_S2C_ADD_PLAYERS: on_add_players(l, &f); break;
         case KRUNKER_S2C_UPDATE_PLAYERS: on_update_players(l, &f); break;
         case KRUNKER_S2C_SYNC_PLAYER: on_sync_player(l, &f); break;
@@ -459,6 +502,7 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         case KRUNKER_S2C_KILL_PLAYER: on_kill(l, &f); break;
         case KRUNKER_S2C_DO_DAMAGE: on_damage(l, &f); break;
         case KRUNKER_S2C_CHANGE_HEALTH: on_health(l, &f); break;
+        case KRUNKER_S2C_UPDATE_TIMER: on_timer(l, &f); break;
         case KRUNKER_S2C_ADD_CHAT: on_chat(l, &f); break;
         case KRUNKER_S2C_SOCKET_PING: send_c2s(l, KRUNKER_C2S_PING, NULL, 0); break; // iìîíîïí: "po"
         case KRUNKER_S2C_CHEAT_CHECK: on_cheat_check(l, &f); break;

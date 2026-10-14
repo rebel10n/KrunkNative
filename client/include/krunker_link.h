@@ -18,6 +18,8 @@
 //   3       [victim, deaths, killer, stats, info, hideFeed]  NET_PACKET_KILL (:220579)
 //   4       [sid, dmg, crit, kill, isAI]     NET_PACKET_HIT (:221254)
 //   h       [health, sid|null, ...]          NET_PACKET_HEALTH (:221040)
+//   t       [formatted, state, rawMs]        NET_PACKET_TIMER: the match clock (:220234, broadcast :191565)
+//   start   [formatted, ...]                 seeds the round clock from arg0 (:218939 -> :218948)
 //   ch      [team, name, text, kind, color]  NET_PACKET_CHAT (:221172)
 //   pi      []                               answered "po" (:220395)
 //   cc      [nonce, unused, ciphertext]      krunker_cheat_answer -> "ccr" (:218169)

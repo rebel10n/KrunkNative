@@ -257,6 +257,8 @@ class Stub:
         self.ws_paths = []
         self.frames = []        # (name, args, ah) from the client
         self.errors = []
+        self.proto_errors = []  # ahNum trailer / "q" sequencing violations seen on the wire
+        self.timer_sent = []    # the match-timer ms values the stub broadcast (counts down)
         self.got_en = threading.Event()
         self.closed = threading.Event()
         self.issued = []          # validation tokens handed out
@@ -343,14 +345,29 @@ class Stub:
         stop = asyncio.Event()
 
         async def ticker():
+            # the match clock: like the live server (game.deob.js:191565) it owns gameTimer in ms,
+            # decrements it, and broadcasts UPDATE_TIMER ("t", [formattedString, state0, rawMs]) only
+            # when the formatted mm:ss string changes. formatTimer (:23893) floors the components.
             x, n = 0.0, 0
+            t0 = time.monotonic()
+            base_ms = 300000  # 5:00
+            last_fmt = None
             while not stop.is_set():
                 x += 0.5
                 await send("k", [BOT_SID, x, 0, 0, 90, 0, 0, 1, 0, 0, 0, None, 30], 10, int(time.time() * 1000) & 0xffffff)
+                remain = max(0, base_ms - int((time.monotonic() - t0) * 1000))
+                fmt = "%d:%02d" % (remain // 60000, (remain // 1000) % 60)
+                if fmt != last_fmt:
+                    last_fmt = fmt
+                    self.timer_sent.append(remain)
+                    await send("t", fmt, 0, remain)
                 n += 1
                 if n % 10 == 0:
                     await send("pi")
                 await asyncio.sleep(0.1)
+
+        ah_exp = [0]
+        last_q_isn = [None]
 
         async def reader():
             async for msg in ws:
@@ -361,6 +378,25 @@ class Stub:
                 except Exception as e:  # noqa: BLE001
                     self.errors.append("undecodable client frame: %s" % e)
                     continue
+                # the server validates the auth-byte stream: every frame except "cptR" advances
+                # ahNum by AHKEY (game.deob.js:98214); a wrong trailer is a desync. Checked here on
+                # the wire so a broken rotation or a dropped/reordered frame fails the test.
+                if name != "cptR":
+                    ah_exp[0] = (ah_exp[0] + AHKEY) & 0xff
+                if trailer != ah_exp[0]:
+                    self.proto_errors.append("ahNum %s: trailer %d, expected %d (frame %d)" % (name, trailer, ah_exp[0], len(self.frames)))
+                # "q" firstIsn must strictly advance (isn increments per input frame, never resets
+                # without a respawn; the stub never kills our player) - a stall or rewind is a desync.
+                if name == "q" and len(args) > 1:
+                    try:
+                        isn = int(args[1])
+                    except (TypeError, ValueError):
+                        isn = None
+                        self.proto_errors.append("q firstIsn not an int: %r" % (args[1],))
+                    if isn is not None:
+                        if last_q_isn[0] is not None and isn <= last_q_isn[0]:
+                            self.proto_errors.append("q firstIsn %d did not advance past %d" % (isn, last_q_isn[0]))
+                        last_q_isn[0] = isn
                 self.frames.append((name, args, trailer))
                 if name == "en":
                     self.got_en.set()
@@ -534,6 +570,13 @@ def check_run(label, stub, client_lines, cheat_expected):
     check(f"{label}: \"q\" windows (isn ascending, dts, a movement key)",
           len(qs) >= 5 and isns == sorted(isns) and all(isinstance(a[2], (str, list)) for a in qs) and moved,
           f"{len(qs)} q, isn {isns[:6]}, first {qs[:1]}")
+    check(f"{label}: the server saw no ahNum / \"q\"-sequence violations across {len(frames)} frames",
+          not stub.proto_errors, stub.proto_errors[:5])
+    check(f"{label}: \"q\" stayed in order across many ticks (>= 20 windows, isn strictly ascending)",
+          len(qs) >= 20 and all(int(qs[i + 1][1]) > int(qs[i][1]) for i in range(len(qs) - 1)),
+          f"{len(qs)} q, isn {isns[:8]}")
+    check(f"{label}: the stub broadcast a counting-down match timer (\"t\")",
+          len(stub.timer_sent) >= 3 and stub.timer_sent == sorted(stub.timer_sent, reverse=True), stub.timer_sent[:5])
     ct = [f[1] for f in frames if f[0] == "ct"]
     check(f"{label}: \"ct\" [0, text]", any(len(a) == 2 and a[0] == 0 and a[1] == "hello official" for a in ct), ct)
     check(f"{label}: \"po\" answers \"pi\"", "po" in names, names.count("po"))
@@ -661,8 +704,11 @@ def run_native():
               # the stub void-kills DeadBot and an unknown sid right after we enter (on its "en");
               # the rows live 4 s, so probe #killFeed a few times inside that window.
               "10000 text @feed0 [id=killFeed]\n11000 text @feed1 [id=killFeed]\n12000 text @feed2 [id=killFeed]\n12800 text @feed3 [id=killFeed]\n"
-              "14000 players\n14100 down W\n15500 up W\n15700 players\n15900 con say hello official\n16900 players\n17000 state\n"
-              "18700 players\n18900 quit\n")
+              # the match clock on the HUD (#timerVal): probe it across the in-game window so a stuck
+              # timer (the "t" packet never translated) fails - it must count down.
+              "10500 text @timer0 [id=timerVal]\n14000 players\n14100 down W\n15500 up W\n15700 players\n"
+              "13500 text @timer1 [id=timerVal]\n15900 con say hello official\n16900 players\n17000 state\n"
+              "17500 text @timer2 [id=timerVal]\n18700 players\n18900 quit\n")
     stub, p, out, log = launch_native(label, script, {"KRUNKNATIVE_KRUNKER_CAPTCHA_TTL_MS": str(CB_TTL_MS)})
     try:
         url = cb_url_from(log.wait(r"\[input_script\] text t=\d+ @cb n=1 checked=0 value=(http://127\.0\.0\.1:\d+/[0-9a-f]{32}) ", 90, p))
@@ -706,6 +752,20 @@ def run_native():
     check("native: our own player is in the game (sid 9, marked *)", any(re.search(r" %d:[^ ]*\*" % MY_SID, r) for r in rows), rows[-1:] if rows else "")
     check("native: the stub's chat line reached the client", "hello from the stub" in text)
     check_killfeed_names("native", lines)
+    check_timer_countdown("native", lines)
+
+
+def check_timer_countdown(label, lines):
+    """The HUD match clock (#timerVal) must count down: the UPDATE_TIMER ("t") packet is translated
+    to our NET_PACKET_TIMER and drives net_round_seconds. A stuck "0:00"/unchanging value means "t"
+    was dropped (the regression this guards)."""
+    samples = []
+    for line in lines:
+        m = re.search(r"\[input_script\] text t=\d+ @timer\d+ n=\d+ checked=\d+ value=[^ ]* text=(\d+):(\d+)", line)
+        if m:
+            samples.append(int(m.group(1)) * 60 + int(m.group(2)))
+    ok = len(samples) >= 2 and samples[0] > 0 and all(samples[i] > samples[i + 1] for i in range(len(samples) - 1))
+    check(f"{label}: the HUD match timer counts down (#timerVal)", ok, "timerVal seconds over time: %s" % samples)
 
 
 def check_killfeed_names(label, lines):
@@ -1187,11 +1247,19 @@ def run_web(mode):
                 if box:
                     cdp.click(box[0], box[1])
             check("web: the page entered the game (\"en\" sent)", stub.got_en.is_set(), "\n".join(cdp.console[-25:]))
+            timer_samples = []
+
+            def sample_timer():
+                v = cdp.eval("(() => { const e = document.getElementById('timerVal'); const m = e && /^(\\d+):(\\d+)/.exec(e.textContent); return m ? (+m[1]) * 60 + (+m[2]) : null; })()")
+                if isinstance(v, int):
+                    timer_samples.append(v)
             if stub.got_en.is_set():
                 time.sleep(1.0)
+                sample_timer()
                 cdp.key("rawKeyDown", "w", "KeyW", 87)
                 time.sleep(1.5)
                 cdp.key("keyUp", "w", "KeyW", 87)
+                sample_timer()
                 time.sleep(0.5)
                 cdp.key("keyDown", "Enter", "Enter", 13, "\r")
                 cdp.key("keyUp", "Enter", "Enter", 13)
@@ -1203,6 +1271,9 @@ def run_web(mode):
                 time.sleep(2.5)
                 chat = cdp.eval("(() => { const c = document.getElementById('chatList'); return c ? c.innerText : ''; })()") or ""
                 check("web: the stub's chat line is in #chatList", "hello from the stub" in chat, chat[-300:])
+                sample_timer()
+                check("web: the HUD match timer counts down (#timerVal)",
+                      len(timer_samples) >= 2 and timer_samples[0] > 0 and timer_samples[-1] < timer_samples[0], timer_samples)
         lines = list(cdp.console)
         cdp.ws.close()
     finally:
