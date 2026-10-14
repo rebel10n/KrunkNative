@@ -109,12 +109,17 @@ BRAIN_PORT ?= 5050
 # it as KRUNKNATIVE_BRAIN_URL (5050 is the client's own probed default); an explicit
 # KRUNKNATIVE_BRAIN_URL in the environment wins
 RUN_BRAIN_ENV = $(if $(KRUNKNATIVE_BRAIN_URL),,$(if $(filter-out 5050,$(BRAIN_PORT)),KRUNKNATIVE_BRAIN_URL=http://127.0.0.1:$(BRAIN_PORT)))
-run: build ## Run the debug client (ARGS="--offline" MAP=<name>; starts the local backend unless BACKEND=0)
+# Dev runs pace the client so it doesn't peg the GPU/CPU: vsync on and a frame cap. Override with
+# VSYNC=0 FRAME_CAP=0 for an uncapped (competitive-feel) run. The shipped defaults are unchanged.
+VSYNC ?= 1
+FRAME_CAP ?= 144
+RUN_PERF = KRUNKNATIVE_VSYNC=$(VSYNC) KRUNKNATIVE_FRAME_CAP=$(FRAME_CAP)
+run: build ## Run the debug client (ARGS="--offline" MAP=<name>; VSYNC=0 FRAME_CAP=0 to uncap; BACKEND=0 skips the backend)
 	@if [ "$(BACKEND)" != 0 ] && [ -f config/config.json ] && ! curl -s -m 1 http://127.0.0.1:$(BRAIN_PORT)/mm/status 2>/dev/null | grep -q '"brain"'; then \
 	  echo "[run] no brain on 127.0.0.1:$(BRAIN_PORT): starting the local backend (make backend-up; BACKEND=0 skips)"; \
 	  $(MAKE) --no-print-directory backend-up BRAIN_PORT=$(BRAIN_PORT) || echo "[run] backend-up failed: accounts are unavailable (see make backend-status)"; \
 	fi
-	cd $(DEBUG_DIR) && $(RUN_BRAIN_ENV) ./$(CLIENT_BIN) $(ARGS) $(if $(MAP),../$(MAP_ARG),)
+	cd $(DEBUG_DIR) && $(RUN_BRAIN_ENV) $(RUN_PERF) ./$(CLIENT_BIN) $(ARGS) $(if $(MAP),../$(MAP_ARG),)
 
 # The launcher (launcher/, doc/backend.md 9.8): updates check + game content sync, then client_bin.
 # The dev build has no kn-install.json, so it never replaces the build; content syncs into ./assets.
@@ -125,7 +130,7 @@ launcher-release: release ## Run the release launcher (ARGS=...)
 	cd $(RELEASE_DIR) && KRUNKNATIVE_ASSETS_DIR=$(CURDIR)/assets/ $(if $(UPDATES_URL),KRUNKNATIVE_UPDATES_URL=$(UPDATES_URL),) ./krunknative $(ARGS)
 
 run-release: release ## Run the release client
-	cd $(RELEASE_DIR) && ./$(CLIENT_BIN) $(ARGS) $(if $(MAP),../$(MAP_ARG),)
+	cd $(RELEASE_DIR) && $(RUN_PERF) ./$(CLIENT_BIN) $(ARGS) $(if $(MAP),../$(MAP_ARG),)
 
 server: build ## Run the debug server (ARGS=...)
 	cd $(DEBUG_DIR) && ./$(SERVER_BIN) $(ARGS)

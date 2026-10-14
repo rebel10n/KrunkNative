@@ -200,6 +200,11 @@ static float g_resolution_override = 0.0f; // KRUNKNATIVE_RESOLUTION
 static int g_fullscreen_kind = RS_FULLSCREEN; // F11 target: the last non-windowed mode chosen
 static int g_initialized;         // client_render_settings_init ran (not in --render-scenario runs)
 static int g_fps_log;             // KRUNKNATIVE_FPS_LOG
+// Headless runs (tests, agents, render scenarios) have no vsync to pace them, so they would
+// render uncapped (~700 fps) and load the desktop they share. Unless KRUNKNATIVE_FRAME_CAP is set
+// (0 = uncapped), they are capped here; the updateRate setting still wins when it is lower.
+#define KN_HEADLESS_FRAME_CAP 120
+static int g_headless_cap;
 
 _Static_assert(RS_WINDOWED == 0 && RS_FULLSCREEN == 1 && RS_BORDERLESS == 2, "window_state.c mode values");
 
@@ -532,6 +537,7 @@ void client_render_settings_init(Client *client) {
     }
     const char *cap = getenv("KRUNKNATIVE_FRAME_CAP");
     if (cap && parse_number(cap, &d) && d >= 0.0) g_rs.frame_cap = (int) d;
+    else if (headless_enabled()) g_headless_cap = KN_HEADLESS_FRAME_CAP;
     const char *vsync = getenv("KRUNKNATIVE_VSYNC");
     if (vsync && *vsync) g_rs.vsync = parse_bool(vsync);
     const char *fps_log = getenv("KRUNKNATIVE_FPS_LOG"); // "[render] fps N" once a second (stderr)
@@ -914,7 +920,8 @@ void client_render_frame_end(Client *client) {
     const double now = now_ms();
     if (g_fps_log && now - g_last_fps_log_ms >= 1000.0) {
         g_last_fps_log_ms = now;
-        fprintf(stderr, "[render] fps %d (cap %d, vsync %d)\n", g_frame_count, g_rs.frame_cap, g_rs.vsync);
+        fprintf(stderr, "[render] fps %d (cap %d%s, vsync %d)\n", g_frame_count, g_rs.frame_cap,
+                g_headless_cap > 0 ? " headless" : "", g_rs.vsync);
     }
 
 #ifndef __EMSCRIPTEN__
@@ -929,8 +936,10 @@ void client_render_frame_end(Client *client) {
         g_swap_dirty = 0;
     }
 
-    if (g_rs.frame_cap > 0) {
-        const double period = 1.0 / g_rs.frame_cap;
+    int frame_cap = g_rs.frame_cap;
+    if (g_headless_cap > 0 && (frame_cap <= 0 || frame_cap > g_headless_cap)) frame_cap = g_headless_cap;
+    if (frame_cap > 0) {
+        const double period = 1.0 / frame_cap;
         const double t = glfwGetTime();
         if (g_next_frame <= 0.0 || t - g_next_frame > period) g_next_frame = t; // first frame / fell behind: resync
         else wait_until(g_next_frame);
