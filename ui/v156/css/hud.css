@@ -1,0 +1,128 @@
+/* KrunkNative in-game HUD additions (client/src/ui/hud_ui.c).
+ *
+ * Krunker's main.css already styles #inGameUI and its children; hud_ui.c only
+ * flips the same inline display/opacity values the real client sets. The rules
+ * below cover the two things Krunker draws on its <canvas id="overlay"> (default
+ * crosshair, hit marker) and the kill-feed removal fade it animates from JS. The
+ * canvas lives in #uiBase space, so these elements sit inside #inGameUI (also in
+ * #uiBase) and all sizes are the overlay's own numbers, scaled by scaleBase()
+ * exactly like the canvas is (720p: x0.627, 1080p: x0.941).
+ *
+ * html.kn-hud-visible is set by hud_ui.c while the game runs with the menu closed;
+ * the !important rule keeps the HUD visible even if the menu stylesheet hides
+ * #inGameUI/#aimRecticle for the bare menu page. */
+
+html.kn-hud-visible #inGameUI,
+html.kn-hud-visible #aimRecticle {
+  display: block !important;
+}
+
+/* The in-game HUD's top margin (#uiBase px, so x0.627 at 720p / x0.941 at 1080p), shared by
+ * everything anchored to the top edge. The corners keep v7's 15px (#topLeftHolder: minimap,
+ * timer, match info, team scores; #topRight: leaderboard, counters, kill feed). KrunkNative
+ * difference: v7's #topMidHold (#roundsDisplay, #gameMessage "next objective" / the CTF flag
+ * notices, #roundMessage) sits at top -5px scaled .8 around its centre, which puts its text
+ * on the screen's top row; here it starts at the same margin as the corners, scaled
+ * from its top edge so the margin is what it says. */
+:root {
+  --kn-hud-top: 15px;
+}
+
+#topLeftHolder,
+#topRight {
+  top: var(--kn-hud-top);
+}
+
+#topMidHold {
+  top: var(--kn-hud-top);
+  transform-origin: 50% 0;
+}
+
+/* Default Krunker crosshair (game-overlay crosshairType 1): four 4x21 bars on the
+ * edges of a square of side crosshairScale (--kn-cross-size, set per frame by
+ * hud_ui.c from the player's spread), each with a 2px 50% black shadow rect. */
+#knCrosshair {
+  --kn-cross-size: 182px;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  z-index: 5;
+  pointer-events: none;
+  display: none;
+}
+
+.knCrossArm {
+  position: absolute;
+  background-color: #fff;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.5);
+}
+
+.knCrossArm-t,
+.knCrossArm-b {
+  width: 4px;
+  height: 21px;
+  left: -2px;
+}
+
+.knCrossArm-l,
+.knCrossArm-r {
+  width: 21px;
+  height: 4px;
+  top: -2px;
+}
+
+.knCrossArm-t { top: calc(var(--kn-cross-size) / -2); }
+.knCrossArm-b { top: calc(var(--kn-cross-size) / 2 - 21px); }
+.knCrossArm-l { left: calc(var(--kn-cross-size) / -2); }
+.knCrossArm-r { left: calc(var(--kn-cross-size) / 2 - 21px); }
+
+/* Hit marker (game-overlay showHit): four bars of hitSet.thickness x length,
+ * rotated 45deg, pushed hitSet.spacing from the centre; hud_ui.c animates the
+ * spacing/opacity custom properties with the overlay's inc/fadeOut rates. */
+#knHitmarker {
+  --kn-hit-len: 25px;
+  --kn-hit-thick: 7px;
+  --kn-hit-spacing: 37px;
+  --kn-hit-color: #fff;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  z-index: 6;
+  pointer-events: none;
+  transform: rotate(45deg);
+  display: none;
+}
+
+.knHitBar {
+  position: absolute;
+  background-color: var(--kn-hit-color);
+}
+
+.knHitBar-t,
+.knHitBar-b {
+  width: var(--kn-hit-thick);
+  height: var(--kn-hit-len);
+  left: calc(var(--kn-hit-thick) / -2);
+}
+
+.knHitBar-l,
+.knHitBar-r {
+  width: var(--kn-hit-len);
+  height: var(--kn-hit-thick);
+  top: calc(var(--kn-hit-thick) / -2);
+}
+
+.knHitBar-t { top: calc(var(--kn-hit-len) / -2 - var(--kn-hit-spacing)); }
+.knHitBar-b { top: calc(var(--kn-hit-len) / -2 + var(--kn-hit-spacing)); }
+.knHitBar-l { left: calc(var(--kn-hit-len) / -2 - var(--kn-hit-spacing)); }
+.knHitBar-r { left: calc(var(--kn-hit-len) / -2 + var(--kn-hit-spacing)); }
+
+/* #hitmarker (the <img>) is only used for custom hit marker images in Krunker;
+ * the default is drawn, so it stays display:none from main.css. */
+#hitmarker {
+  pointer-events: none;
+}

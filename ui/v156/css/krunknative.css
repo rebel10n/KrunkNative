@@ -1,0 +1,659 @@
+/*
+ * KrunkNative overrides for the Krunker v7.1.4 menu.
+ *
+ * Loaded after Krunker's stylesheets (css/main.css & co., imported unchanged apart from
+ * their URLs by tools/ui-import). Only the
+ * deviations a different host forces live here; everything Krunker shows in
+ * its loaded, logged-out menu stays visible and styled by main.css. Menu
+ * open/closed is done with the same inline styles the game JS uses
+ * (client/src/ui/menu_ui.c), not with CSS.
+ */
+
+/* The 3D scene is rendered behind the page (native engine composite / WebGL
+ * canvas); Krunker's page itself is opaque black until its renderer canvas
+ * covers it. */
+html,
+body {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* Emscripten WebGL target (first body child); a transparent no-op in the
+ * native client. Takes the place of Krunker's renderer canvas. */
+#canvas {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  display: block;
+  outline: none;
+}
+
+/* The class preview: Krunker's three.js canvas, kept at its size and position
+ * (#menuClassContainer / #classPreviewCanvas in main.css). Its bitmap is the
+ * selected class's player model, rendered by client/src/ui/class_preview.c
+ * (html_dom_canvas_gl), transparent around the model: the canvas is part of the
+ * page's paint order like Krunker's, above #instructionHolder's shade. */
+#classPreviewCanvas {
+  background: transparent;
+}
+
+/* Things that literally cannot exist here: ad iframes and the captcha. */
+#aHolder iframe,
+#aMerger iframe,
+#endAHolderL iframe,
+#endAHolderR iframe,
+#twoFAGholder iframe,
+.grecaptcha-badge,
+iframe[src*="captcha"] {
+  display: none !important;
+}
+
+/* Menu closed: the page is a transparent HUD layer and must not swallow the
+ * game's pointer (menu_ui.c toggles html.kn-menu-open). The end-screen results
+ * free the pointer like the menu does (html.kn-end-open, menu_ui.c), so their
+ * tabs stay clickable. */
+html:not(.kn-menu-open):not(.kn-end-open) #uiBase,
+html:not(.kn-menu-open):not(.kn-end-open) #uiBase * {
+  pointer-events: none !important;
+}
+
+/* ?bg=1 standalone preview helper: paint a fake "3D scene" on the canvas so
+ * the page's transparency is visible in a normal browser (?bg=<colour> paints
+ * a flat colour instead, handy for screenshot comparisons). */
+html.kn-preview-bg #canvas {
+  background: radial-gradient(ellipse at 50% 40%, #6f8aa6 0%, #3c4a5c 55%, #1a2029 100%);
+}
+
+/* Desktop client chrome (client/src/ui/ui_client_settings.c).
+ *
+ * The Exit menu item: Krunker v7.1.4's #clientExit (public/index.html, hidden by
+ * its main.css until a desktop client shows it with display:flex), drawn with
+ * v3.1.1's own menu icon set: img/menu-icons/exit.png ships in the v3.1.1 site
+ * next to the other menu icons (no -white variant, so it stays red on hover).
+ * The native client shows it ("Exit Button" in the Client tab); the web build
+ * keeps it hidden, as krunker.io does in a browser. */
+#clientExit {
+  display: none;
+}
+.iconExit {
+  background-image: url(../img/menu-icons/exit.png);
+}
+
+/* The Settings window with the Client tab: seven tabs in one row, the
+ * override the v3.1.1 desktop client injects (main/preload.js) when it pushes
+ * its "Client" tab onto windows[0].tabs. Scoped to the client-tab layout so a
+ * six-tab window keeps main.css's grid. */
+#settingsTabLayout.knClientTabs {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  overflow-x: auto !important;
+  justify-content: space-around;
+}
+#settingsTabLayout.knClientTabs .settingTab {
+  width: 100%;
+}
+
+/* Settings selects whose options are this machine's devices (Sound > Audio/Mic
+ * Input, Audio Output; Client > Audio Backend): a select is as wide as its widest
+ * option, and real device names ("Monitor of ... Digital Stereo (IEC958)") make it
+ * wider than the row beside the label, so the float drops under the label (Chrome
+ * does the same). Krunker's captures only ever show "Unknown Device"; capped at
+ * the slider column's width (.slidecontainer 250px + the 70px value box) so every
+ * row stays on one line, the selected label is clipped like Chrome clips it. */
+.settName > select.inputGrey2 {
+  max-width: 320px;
+}
+
+/* KrunkNative addition: the interact progress bar (menu_ui.c's setup_dom creates
+ * #interactProg > #interProgB, client/src/ui/ui_interact.c fills it; v7.1.4 draws its interact
+ * progress on the overlay canvas). Krunker v3.1.1's main.css rules, unchanged. */
+#interactProg {
+  display: none;
+  position: absolute;
+  margin-right: -50%;
+  left: 50%;
+  transform: translate(-50%, 0);
+  bottom: 175px;
+  width: 400px;
+  height: 30px;
+  background-color: rgba(0, 0, 0, 0.6);
+  border-radius: 4px;
+}
+.interProg {
+  height: 100%;
+  background-color: #fff;
+}
+
+/* Settings > General preset boxes: v7's four .setSugBox2 (279px + 4px borders + 10px margin)
+ * fill the row; KrunkNative adds a fifth, Beautiful (ui_settings.c sync_preset_boxes), so the
+ * five share the same row width: 5 x (219 + 8 + 10) = 1185px, v7's 4 x (279 + 8 + 10) = 1188px. */
+.setSugBox2 {
+  width: 219px;
+}
+
+/* The Download window (showWindow(25), client/src/ui/download_ui.c): v7's header and
+ * description, then KrunkNative's packages: the visitor's platform first (.knDlRec,
+ * highlighted), every other platform below (.knDlRow), in the window's dark palette. */
+.knDlRec {
+  margin: 0 5px 15px 5px;
+  padding: 12px 20px 10px 20px;
+  border-radius: 6px;
+  border: 3px solid #fbc02d;
+  background-color: rgba(0, 0, 0, 0.4);
+}
+#menuWindow.dark div.knDlRecTag {
+  color: #fbc02d;
+  font-size: 15px;
+  margin-bottom: 8px;
+}
+.knDlRecHead {
+  display: flex;
+  align-items: center;
+}
+.knDlIcon {
+  width: 56px;
+  height: 56px;
+  margin-right: 16px;
+  flex-shrink: 0;
+}
+.knDlMi {
+  font-size: 56px;
+  line-height: 56px;
+}
+.knDlRecName {
+  font-size: 26px;
+}
+#menuWindow.dark div.knDlRecSub,
+#menuWindow.dark div.knDlRecPkg {
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 17px;
+}
+#menuWindow.dark div.knDlRecPkg {
+  margin-top: 10px;
+}
+.knDlBtns {
+  margin-top: 10px;
+}
+a.knDlBtn {
+  display: inline-block;
+  padding: 6px 16px;
+  margin: 0 8px 8px 0;
+  border-radius: 4px;
+  background-color: #2196f3;
+  color: #fff;
+  font-size: 19px;
+  text-decoration: none;
+}
+a.knDlBtn:hover {
+  background-color: #42a5f5;
+  text-decoration: none;
+}
+a.knDlBtn.knDlAlt {
+  background-color: rgba(255, 255, 255, 0.12);
+  font-size: 17px;
+}
+a.knDlBtn.knDlAlt:hover {
+  background-color: rgba(255, 255, 255, 0.22);
+}
+#menuWindow.dark div.knDlHow {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 16px;
+  line-height: 21px;
+}
+#menuWindow.dark div.knDlNote {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 15px;
+  margin-top: 6px;
+}
+.knDlOther {
+  margin: 0 5px;
+}
+#menuWindow.dark div.knDlOtherHed {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 17px;
+  margin: 0 0 6px 4px;
+}
+.knDlRow {
+  display: flex;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-size: 17px;
+}
+.knDlRow.knDlOdd {
+  background-color: rgba(0, 0, 0, 0.25);
+}
+.knDlRow .knDlIcon {
+  width: 26px;
+  height: 26px;
+  margin-right: 12px;
+}
+.knDlRow .knDlMi {
+  font-size: 26px;
+  line-height: 26px;
+}
+.knDlRowName {
+  flex-grow: 1;
+}
+.knDlRowLinks {
+  flex-shrink: 0;
+  text-align: right;
+}
+a.knDlLink {
+  color: #2196f3;
+  margin-left: 12px;
+  text-decoration: none;
+}
+.knDlRec a.knDlLink,
+.knDlFoot a.knDlLink {
+  margin-left: 0;
+}
+a.knDlLink:hover {
+  text-decoration: underline;
+}
+#menuWindow.dark span.knDlHint {
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 15px;
+}
+#menuWindow.dark div.knDlFoot {
+  color: rgba(255, 255, 255, 0.45);
+  font-size: 15px;
+  text-align: center;
+  margin-top: 12px;
+}
+
+/* KrunkNative Object Manager (F1, client/src/ui/object_manager_ui.c): tabs + search over a grid
+ * of icons. Not a v7 window (id 54); #menuWindow gets its width inline (ui_window_meta). */
+#menuWindow.dark div.knOmTop {
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+}
+#menuWindow.dark div.knOmTabs {
+  margin: 0 !important;
+  flex-grow: 1;
+  width: auto;
+}
+input.knOmSearch {
+  margin-left: 12px;
+  width: 190px;
+  height: 42px;
+  font-size: 18px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 5px;
+  background-color: rgba(0, 0, 0, 0.68);
+  color: #fff;
+}
+#menuWindow.dark div.knOmStatus {
+  min-height: 24px;
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 8px;
+}
+#menuWindow.dark div.knOmStatus.knOmErr {
+  color: #eb5656;
+}
+#menuWindow.dark div.knOmGrid {
+  display: grid;
+  /* as many columns as fit (5 at the default window): the tiles wrap, never a horizontal scroll */
+  grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
+  gap: 8px;
+  max-height: 404px; /* six rows: the tabs and the buttons stay in view, the grid scrolls */
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+#menuWindow.dark div.knOmItem {
+  position: relative;
+  background-color: rgba(0, 0, 0, 0.35);
+  border: 2px solid transparent;
+  border-radius: 5px;
+  padding: 8px 6px 6px;
+  text-align: center;
+  cursor: pointer;
+}
+#menuWindow.dark div.knOmItem:hover {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+#menuWindow.dark div.knOmItem.knOmOwned {
+  border-color: var(--yellow);
+}
+img.knOmIcon {
+  width: 100%;
+  max-width: 120px;
+  height: auto;
+}
+img.knOmProp {
+  width: auto;
+  max-width: 100%;
+  height: 60px;
+}
+#menuWindow.dark div.knOmGlyph {
+  height: 60px;
+  line-height: 60px;
+}
+#menuWindow.dark div.knOmGlyph span.material-icons {
+  font-size: 46px;
+  line-height: 60px;
+  color: rgba(255, 255, 255, 0.85);
+}
+#menuWindow.dark div.knOmName {
+  font-size: 14px;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#menuWindow.dark div.knOmBadge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 10px;
+  color: #000;
+  background-color: var(--yellow);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+#menuWindow.dark div.knOmEmpty {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.45);
+  padding: 40px 0;
+  font-size: 18px;
+}
+#menuWindow.dark div.knOmFoot {
+  display: flex;
+  align-items: center;
+  margin-top: 12px;
+}
+#menuWindow.dark div.knOmHint {
+  flex-grow: 1;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.45);
+}
+#menuWindow.dark div.knOmBtns {
+  display: flex;
+  flex-shrink: 0;
+}
+#menuWindow.dark div.knOmBtn {
+  margin-left: 8px;
+}
+#menuWindow.dark div.knOmTitle {
+  text-transform: uppercase;
+  font-size: 22px;
+  margin-bottom: 18px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* Object Manager: the Tools pane right of the grid (the Tool Gun's tools, object_manager_ui.c) */
+#menuWindow.dark div.knOmMain {
+  display: flex;
+  align-items: flex-start;
+}
+#menuWindow.dark div#knOmBody {
+  flex-grow: 1;
+  min-width: 0;
+}
+#menuWindow.dark div.knOmTools {
+  width: 184px;
+  max-height: 420px; /* never taller than the status line + the grid */
+  overflow: hidden;
+  flex-shrink: 0;
+  margin-left: 12px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background-color: rgba(0, 0, 0, 0.35);
+}
+#menuWindow.dark div.knOmToolsTitle {
+  font-size: 16px;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 4px;
+}
+#menuWindow.dark div.knOmTool {
+  display: flex;
+  align-items: center;
+  margin-bottom: 1px;
+  padding: 1px 6px; /* seven tools, the Snap / Release rows, the hint and the Tool Gun line in 420px */
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background-color: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  font-size: 15px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+#menuWindow.dark div.knOmTool:hover {
+  background-color: rgba(255, 255, 255, 0.12);
+}
+#menuWindow.dark div.knOmTool.knOmToolA {
+  border-color: var(--yellow);
+}
+#menuWindow.dark div.knOmTool span.material-icons {
+  font-size: 20px;
+  margin-right: 8px;
+  color: rgba(255, 255, 255, 0.85);
+}
+#menuWindow.dark div.knOmTool span.knOmToolName {
+  color: #fff; /* main.css * { color } would win on the span */
+}
+/* the Tool Gun / Physics Gun tiles: the weapons' own icons, the one in hand marked */
+#menuWindow.dark div.knOmGuns {
+  display: flex;
+  margin-bottom: 6px;
+}
+#menuWindow.dark div.knOmGun {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 0 2px;
+  padding: 3px 2px;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background-color: rgba(255, 255, 255, 0.07);
+  cursor: pointer;
+}
+#menuWindow.dark div.knOmGun:hover {
+  background-color: rgba(255, 255, 255, 0.14);
+}
+#menuWindow.dark div.knOmGun.knOmToolA {
+  border-color: var(--yellow);
+}
+#menuWindow.dark img.knOmGunIcon {
+  width: 64px;
+  height: 32px;
+  object-fit: contain;
+}
+#menuWindow.dark span.knOmGunName {
+  font-size: 12px;
+  color: #fff;
+  white-space: nowrap;
+}
+#menuWindow.dark input.knOmSnapBox {
+  width: 46px;
+  margin-left: 4px;
+  padding: 0 4px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 3px;
+  background-color: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-size: 13px;
+  text-align: right;
+}
+#menuWindow.dark div.knOmOpt {
+  display: flex;
+  align-items: center;
+  margin-top: 4px;
+  font-size: 13px;
+}
+#menuWindow.dark span.knOmOptName {
+  flex-grow: 1;
+  color: rgba(255, 255, 255, 0.6);
+}
+#menuWindow.dark span.knOmOptBtn {
+  margin-left: 2px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  cursor: pointer;
+}
+#menuWindow.dark span.knOmOptBtn.knOmOptA {
+  border-color: var(--yellow);
+  color: var(--yellow);
+}
+#menuWindow.dark div.knOmToolHint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.55);
+}
+#menuWindow.dark div.knOmToolGun {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--yellow);
+}
+#menuWindow.dark div.knOmTools.knOmOff div.knOmTool {
+  opacity: 0.45;
+}
+#menuWindow.dark div.knOmTools.knOmOff div.knOmToolGun {
+  color: #eb5656;
+}
+/* Object Manager: the Properties panel in place of the grid (the Tool Gun's Properties tool,
+ * object_manager_ui.c om_props_html): the object's map fields, grouped as the editor's inspector */
+#menuWindow.dark div.knOmPropsHead {
+  display: flex;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+#menuWindow.dark span.knOmPropsTitle {
+  font-size: 20px;
+  color: #fff;
+  margin-right: 10px;
+}
+#menuWindow.dark span.knOmPropsSub {
+  flex-grow: 1;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.5);
+}
+#menuWindow.dark div.knOmPropsList {
+  max-height: 370px; /* the status line + the head + this = the grid's height: the list scrolls */
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+#menuWindow.dark div.knOmPropSec {
+  margin: 8px 0 3px;
+  font-size: 14px;
+  text-transform: uppercase;
+  color: var(--yellow);
+}
+#menuWindow.dark div.knOmProp {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background-color: rgba(0, 0, 0, 0.3);
+  margin-bottom: 2px;
+  font-size: 14px;
+}
+#menuWindow.dark span.knOmPropName {
+  width: 190px;
+  flex-shrink: 0;
+  color: rgba(255, 255, 255, 0.75);
+}
+#menuWindow.dark span.knOmPropVal {
+  display: flex;
+  align-items: center;
+  flex-grow: 1;
+}
+#menuWindow.dark input.knOmPropIn {
+  width: 90px;
+  height: 22px;
+  margin-right: 6px;
+  padding: 0 4px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 3px;
+  background-color: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-size: 13px;
+}
+#menuWindow.dark input.knOmPropIn.knOmPropVec {
+  width: 72px;
+}
+#menuWindow.dark select.knOmPropSel {
+  min-width: 160px;
+  height: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 3px;
+  background-color: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-size: 13px;
+}
+#menuWindow.dark span.knOmPropRange {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+}
+#menuWindow.dark span.knOmSwatch {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 3px;
+}
+#menuWindow.dark div.knOmProp span.knOmOptBtn {
+  margin: 0 4px 0 0;
+  padding: 0 8px;
+}
+/* The Tool Gun's tool beside the ammo counter (made next to #ammoHolder while it is in hand) */
+#knToolHud {
+  display: none;
+}
+#knToolHud.knToolHudOn {
+  display: inline-block; /* left of the ammo box: the weapon rack sits above it */
+  vertical-align: middle;
+  margin-right: 10px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background-color: var(--div-black);
+  font-size: 20px;
+  color: var(--yellow);
+  text-shadow: 0 0 4px rgba(0, 0, 0, 0.8);
+}
+
+/* Object Manager: many loadout weapons (extra slots) make a compact rack, six per column
+ * (hud_ui.c sets knManyWeaps on #weapHolder past four slots). */
+#weapHolder.knManyWeaps {
+  grid-auto-flow: column;
+  grid-template-rows: repeat(6, auto);
+  column-gap: 5px;
+  row-gap: 3px;
+}
+#weapHolder.knManyWeaps .weapIcon {
+  width: 72px;
+  height: 36px;
+}
+#weapHolder.knManyWeaps .weapSkin {
+  max-width: 80px;
+  font-size: 9px;
+}
+#weapHolder.knManyWeaps .weapKey {
+  font-size: 11px;
+  padding: 1px 5px;
+}
+
+/* The Object Manager shows over the game, not over the pause menu: the menu around its window
+ * (title, buttons, class box, side links) is hidden while it is up (ui_window_post sets the class). */
+html.kn-bare-window #menuHolder,
+html.kn-bare-window #infoHider,
+html.kn-bare-window #aHider,
+html.kn-bare-window #instructions {
+  visibility: hidden;
+}

@@ -69,6 +69,8 @@ REFS = {
     # the live krunker.io site (Krunker v10), mirrored by fetch_live_site.py; written to <ui>/v10/
     "v10": {"public": os.path.expanduser("~/.cache/kn-v10/live/site/public"), "manifest": "menu-assets-v7.txt",
             "client_js": os.path.expanduser("~/Downloads/v10.0.2.js")},
+    # Krunker v1.5.6's menu page alone, into <ui>/v156/ (v156_page.py)
+    "v156": {"public": "/home/user/jails/kru/src/Krunker_v1.5.6/public"},
 }
 
 
@@ -388,7 +390,8 @@ def resolve_windows_source(ui_dir):
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--ui", default=os.path.join(REPO, "ui"), help="ui directory (default: <repo>/ui)")
-    ap.add_argument("--ref", choices=sorted(REFS), default="v7", help="Krunker reference to import (default v7; v10 = the live site into <ui>/v10/)")
+    ap.add_argument("--ref", choices=sorted(REFS), default="v7",
+                    help="Krunker reference to import (default v7; v10 = the live site into <ui>/v10/, v156 = v1.5.6's menu into <ui>/v156/)")
     ap.add_argument("--public", default=None, help="the reference's public/ tree (default per --ref)")
     ap.add_argument("--client-js", default=None,
                     help="v10: the live client script, parsed (never run) by v10_bundle.js for the Svelte menu")
@@ -418,6 +421,8 @@ def main(argv):
     sys.path.insert(0, HERE)
     if args.ref == "v10":
         return import_v10(args, ui_dir, public, ref)
+    if args.ref == "v156":
+        return import_v156(args, ui_dir, public)
     if v7:
         # the page first: fonts, windows and assets read what it links
         import index_page  # tools/ui-import/index_page.py
@@ -550,6 +555,25 @@ def import_v10(args, ui_dir, public, ref):
             log("v10: %d .webp.png sidecars written" % sidecars)
     return 0
 
+
+def import_v156(args, ui_dir, public):
+    """--ref v156: Krunker v1.5.6's menu page into <ui>/v156/ (v156_page.py), its fonts (+ .ttf) and
+    every file the page and its stylesheets reference. No windows, editor, social or viewer page."""
+    import menu_assets
+    import v156_page
+    out = v156_page.import_v156(ui_dir, write_if_changed, log, public)
+    if not args.no_assets:
+        v156_page.import_page_files(out, write_if_changed, log, public, menu_assets.collect_page_refs)
+    if not args.no_fonts:
+        try:
+            import fontTools  # noqa: F401
+            import brotli  # noqa: F401
+        except ImportError as exc:
+            raise SystemExit("missing dependency (%s): pip install fonttools brotli" % exc)
+        os.environ.setdefault("SOURCE_DATE_EPOCH", "0")
+        for family, woff2 in font_face_woff2s(out):
+            convert_woff2(family, woff2, args.force)  # the woff2 itself came with the page files
+    return 0
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))

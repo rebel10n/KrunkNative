@@ -83,6 +83,18 @@ v10 content for `assets/` is pinned in `live_assets_v10.lock`
 new files, root `assets-v10` (= `assets/v10/<path>`) for v10 versions of files v7.1.4 has with
 other content.
 
+## Krunker v1.5.6 menu (`--ref v156`)
+
+`make ui-import-v156` (`import.py --ui ui --ref v156`) writes `ui/v156/`, the menu page of
+Settings > General "Game version" = v1.5.6 (menu only; v1.5.6 gameplay is not ported). Provenance
+per file: `ui/v156/README.md`.
+
+| Step | Module | Output |
+|---|---|---|
+| page | `v156_page.py` | `ui/v156/index.html` from v1.5.6's `public/index.html` (scripts, comments, ad / reCAPTCHA tags, favicon + description metas removed; `?build=`/`&v=` stripped; `/` and `./` URLs relative; external links neutralised; our canvas / css / js hooks as in `ui/index.html`, plus `css/kn-v156.css` and the `#popupHolder > #confPop` host `ui_confirm()` draws into), `css/main.css` + `css/material_icons.css` (URLs rewritten), `css/kn-v156.css` (v3.1.1's popup rules, `V3_POPUP_RULES`), our glue files from `ui/`, `windows/versions.txt` |
+| files | `v156_page.py` | every local file the page and its stylesheets reference (`collect_page_refs`), from the v1.5.6 tree; what v1.5.6 itself 404s on is listed |
+| fonts | `import.py` | `material-icons.ttf` next to `micon.woff2` (its ligatures equal v7's: the headers are not regenerated) |
+
 ## Krunker v3.1.1 (`--ref v3`)
 
 ## What it produces
@@ -190,7 +202,8 @@ ignores user site-packages), i.e. installed system-wide:
 
 ```
 --ui DIR            ui directory (default <repo>/ui)
---ref v7|v3|v10     Krunker reference (default v7; v10 = the live site into <ui>/v10/)
+--ref v7|v3|v10|v156 Krunker reference (default v7; v10 = the live site into <ui>/v10/,
+                    v156 = Krunker v1.5.6's menu page into <ui>/v156/)
 --client-js FILE     v10: the live client script (parsed, never run)
 --public DIR        the reference's public/ tree (default per --ref)
 --viewer-store      also regenerate client/src/viewer/viewer_store_table.c (v7)

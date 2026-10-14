@@ -240,6 +240,8 @@ if (EMSCRIPTEN)
         # ui/v10 (the Krunker v10.0.2 page, tools/ui-import --ref v10) is not served until the
         # ruleset toggle loads it (doc/v10/version-toggle.md); keep its 15 MB out of the site
         COMMAND ${CMAKE_COMMAND} -E rm -rf ${WEB_DIST_DIR}/v10
+        # ui/v156 (Krunker v1.5.6's menu, --ref v156) is native-only: the web build serves ui/
+        COMMAND ${CMAKE_COMMAND} -E rm -rf ${WEB_DIST_DIR}/v156
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:client> ${WEB_DIST_DIR}/client.js
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE_DIR:client>/client.wasm ${WEB_DIST_DIR}/client.wasm
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE_DIR:client>/client.data ${WEB_DIST_DIR}/client.data

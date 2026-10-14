@@ -42,3 +42,15 @@ ClientRulesetResult client_ruleset_select(Client *client, const char *name);
 int client_ruleset_on_init(Client *client, const NetInitPacket *init);
 // local_game_start: the sandbox plays the saved ruleset.
 void client_ruleset_before_offline(Client *client);
+
+// Krunker v1.5.6: a menu page only (ui/v156/, client/src/ruleset_page_v156.c). knRuleset "v156"
+// keeps v7.1.4 gameplay (v1.5.6's tables are not ported; no RulesetId, nothing on the wire).
+#define CLIENT_PAGE_V156_KEY "v156"
+int client_page_v156_is_name(const char *name); // "v156" / "1.5.6" / "v1.5.6"
+int client_page_v156_saved(void);               // knRuleset is "v156"
+int client_page_v156_loaded(void);              // this process shows ui/v156/
+int client_page_v156_startup(void);             // client_ruleset_startup: 1 = v156 saved (ui/v156/ or ui/)
+void client_page_v156_env_cleanup(void);        // relaunch: drop the KRUNKNATIVE_UI_DIR it set
+int client_page_v156_pending(void);             // a restart would load or leave ui/v156/ (client_ruleset_page_pending)
+ClientRulesetResult client_page_v156_select(Client *client); // save; UNKNOWN on the web
+void client_page_v156_game_notice(const Ruleset *rules);     // first game under the v156 page: say what it plays

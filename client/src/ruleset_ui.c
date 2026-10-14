@@ -43,6 +43,7 @@ void client_ruleset_startup(void) {
     ruleset_set_current(rules->id);
     g_page_rules = ruleset_get(RULESET_DEFAULT);
     printf("[ruleset] Krunker v%s (%s)\n", rules->version, rules->key);
+    if (client_page_v156_startup()) return; // knRuleset "v156": ui/v156/ over v7.1.4 gameplay
 #ifndef __EMSCRIPTEN__
     if (!rules->ui_page_dir || !rules->ui_page_dir[0]) {
         g_page_rules = rules; // ui/ itself
@@ -78,6 +79,7 @@ void client_ruleset_env_cleanup(void) {
 #ifndef __EMSCRIPTEN__
     if (g_ui_env_set) set_env("KRUNKNATIVE_UI_DIR", NULL);
     g_ui_env_set = 0;
+    client_page_v156_env_cleanup();
 #endif
 }
 
@@ -85,6 +87,7 @@ int client_ruleset_page_pending(void) {
 #ifdef __EMSCRIPTEN__
     return 0; // one page on the web
 #else
+    if (client_page_v156_pending()) return 1; // ui/v156/ to load or to leave (ruleset_page_v156.c)
     const Ruleset *saved = client_ruleset_saved(), *page = client_ruleset_page();
     if (saved == page) return 0;
     const char *user_dir = getenv("KRUNKNATIVE_UI_DIR");
@@ -105,6 +108,7 @@ ClientRulesetResult client_ruleset_select(Client *client, const char *name) {
     if (!name) return CLIENT_RULESET_UNKNOWN;
     const char *n = name[0] == 'v' || name[0] == 'V' ? name + 1 : name;
     if (!strcmp(n, "3") || !strcmp(n, "3.1.1")) return CLIENT_RULESET_UNAVAILABLE; // TODO(v3 ruleset)
+    if (client_page_v156_is_name(name)) return client_page_v156_select(client); // menu page only
     const Ruleset *rules = ruleset_find(name);
     if (!rules) return CLIENT_RULESET_UNKNOWN;
     html_storage_set(CLIENT_RULESET_STORAGE, rules->key);
@@ -116,6 +120,7 @@ ClientRulesetResult client_ruleset_select(Client *client, const char *name) {
     (void) page;
     return CLIENT_RULESET_SAVED; // one page on the web
 #else
+    if (client_page_v156_loaded()) return CLIENT_RULESET_SAVED_RELOAD; // leaving ui/v156/
     return page != rules && (page->ui_page_dir[0] || rules->ui_page_dir[0]) ? CLIENT_RULESET_SAVED_RELOAD : CLIENT_RULESET_SAVED;
 #endif
 }
@@ -134,6 +139,7 @@ int client_ruleset_on_init(Client *client, const NetInitPacket *init) {
         printf("[ruleset] the server plays Krunker v%s: adopting it\n", rules->version);
         game_adopt_rules(&client->game, rules);
     }
+    client_page_v156_game_notice(rules);
     return 1;
 }
 

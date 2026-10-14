@@ -1023,11 +1023,15 @@ static void append_game_version_row(StrBuf *sb) {
     sb_append(sb, "<div class=\"settName\" id=\"knGameVersionRow\" title=\"The Krunker version of offline games and quick join; "
                   "a server you join plays its own. A different menu page loads after a restart\">Game version "
                   "<span style=\"color: #eb5656\">*</span> <select id=\"knGameVersion\" onchange=\"knSetRuleset(this.value)\" class=\"inputGrey2\">");
+    const int v156 = client_page_v156_saved(); // menu page only (ruleset_page_v156.c): saved reads v7
+#ifndef __EMSCRIPTEN__
+    sb_appendf(sb, "<option value=\"%s\"%s>v1.5.6 (menu only, plays v7.1.4)</option>", CLIENT_PAGE_V156_KEY, v156 ? " selected=\"\"" : "");
+#endif
     sb_append(sb, "<option value=\"v3\" disabled=\"\">v3.1.1 (coming soon)</option>");
     for (int id = RULESET_V7_1_4; id < RULESET_COUNT; id++) {
         const Ruleset *r = ruleset_get((RulesetId) id);
         if (!r) continue;
-        sb_appendf(sb, "<option value=\"%s\"%s>v%s</option>", r->key, r == saved ? " selected=\"\"" : "", r->version);
+        sb_appendf(sb, "<option value=\"%s\"%s>v%s</option>", r->key, r == saved && !v156 ? " selected=\"\"" : "", r->version);
     }
     sb_append(sb, "</select></div>");
 }
@@ -1058,11 +1062,15 @@ void ui_client_settings_select_ruleset(const char *value) {
     if (r == CLIENT_RULESET_UNAVAILABLE) {
         ui_notify("Krunker v3.1.1 is coming soon");
     } else if (r == CLIENT_RULESET_SAVED_RELOAD) {
-        ui_confirm("The menu of this Game version loads after a client restart. Restart now?", ruleset_restart_answered, NULL);
+        ui_confirm(client_page_v156_saved() ? "The Krunker v1.5.6 menu loads after a client restart. It is the menu only: v1.5.6 "
+                                              "gameplay is not ported, games play Krunker v7.1.4. Restart now?"
+                                            : "The menu of this Game version loads after a client restart. Restart now?",
+                   ruleset_restart_answered, NULL);
     } else if (r == CLIENT_RULESET_SAVED) {
         const Ruleset *saved = client_ruleset_saved();
         char text[96];
-        snprintf(text, sizeof(text), "Game version: Krunker v%s", saved->version);
+        snprintf(text, sizeof(text), client_page_v156_saved() ? "Game version: the Krunker v1.5.6 menu, games play v%s" : "Game version: Krunker v%s",
+                 saved->version);
         ui_notify(text);
     }
 }

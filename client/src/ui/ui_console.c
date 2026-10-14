@@ -1220,8 +1220,8 @@ static void cmd_ruleset(const int argc, char **argv, const char *rest) {
             append("Krunker v3.1.1 is coming soon.", COL_ERROR);
             return;
         }
-        if (!ruleset_find(argv[0])) {
-            appendf(COL_ERROR, "Unknown ruleset '%s' (v7, v10)", argv[0]);
+        if (!ruleset_find(argv[0]) && !client_page_v156_is_name(argv[0])) {
+            appendf(COL_ERROR, "Unknown ruleset '%s' (v7, v10, v156 = the v1.5.6 menu)", argv[0]);
             return;
         }
         ui_client_settings_select_ruleset(argv[0]);
@@ -1230,7 +1230,8 @@ static void cmd_ruleset(const int argc, char **argv, const char *rest) {
     const Ruleset *now = client && client->game.rules ? client->game.rules : ruleset_current();
     const Ruleset *saved = client_ruleset_saved(), *page = client_ruleset_page();
     appendf(COL_INFO, "Playing Krunker v%s (%s)%s", now->version, now->key, client && client->offline ? " offline" : "");
-    appendf(COL_INFO, "Game version setting: v%s, menu page: v%s", saved->version, page->version);
+    appendf(COL_INFO, "Game version setting: v%s%s, menu page: v%s", saved->version, client_page_v156_saved() ? " (v1.5.6 menu)" : "",
+            client_page_v156_loaded() ? "1.5.6" : page->version);
     char list[96] = "";
     for (int id = 0; id < RULESET_COUNT; id++) {
         const Ruleset *r = ruleset_get((RulesetId) id);

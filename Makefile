@@ -250,6 +250,10 @@ ui-test: ## Build ui_test (HTML_ENGINE=ON) and run it: ARGS="lexbor-probe" (defa
 ui-import: ## Regenerate ui/ from the Krunker reference (fonts, windows, icon ligatures) via tools/ui-import
 	$(PYTHON) -I tools/ui-import/import.py --ui ui
 
+.PHONY: ui-import-v156
+ui-import-v156: ## Regenerate ui/v156/ (Krunker v1.5.6's menu page, Settings > Game version) via tools/ui-import --ref v156
+	$(PYTHON) -I tools/ui-import/import.py --ui ui --ref v156
+
 assets-import: ## Copy the v3.1.1 content mod.zip lacks (textures/previews/) into assets/ (tools/ui-import/game_assets.py)
 	$(PYTHON) -I tools/ui-import/game_assets.py --assets assets
 
@@ -623,6 +627,24 @@ smoke-ui-v10: build ## Render the v10 page's menu, Settings and windows headless
 	    && [ -s /tmp/smoke-ui-v10/$$n.png ] && ! grep "windows.json missing\|missing window file" /tmp/smoke-ui-v10/$$n.log \
 	    || { echo "smoke-ui-v10: $$n failed"; tail -20 /tmp/smoke-ui-v10/$$n.log; exit 1; }; \
 	  echo "smoke-ui-v10: $$n ok"; done
+
+.PHONY: smoke-v156
+smoke-v156: build ## Krunker v1.5.6 menu page (ui/v156): an offline run with Game version v1.5.6 saved, then tools/uidiff/v156/ scenarios (headless; /tmp/smoke-v156*.png)
+	@cfg=$$(mktemp -d) && trap 'rm -rf "$$cfg"' EXIT && mkdir -p $$cfg/krunknative && printf v156 > $$cfg/krunknative/knRuleset.json && \
+	rm -f /tmp/smoke-v156*.png && \
+	env -u DISPLAY -u WAYLAND_DISPLAY KRUNKNATIVE_HEADLESS=1 $(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) XDG_CONFIG_HOME=$$cfg \
+	  KRUNKNATIVE_SCREENSHOT=/tmp/smoke-v156.png KRUNKNATIVE_CAPTURE_FRAMES=60 \
+	  timeout 120 stdbuf -oL $(DEBUG_DIR)/$(CLIENT_BIN) --offline > /tmp/smoke-v156.log 2>&1 || { tail -20 /tmp/smoke-v156.log; exit 1; }; \
+	grep -q "ui/v156 has no window templates" /tmp/smoke-v156.log && grep -q "v1.5.6 gameplay is not ported: this game plays Krunker v" /tmp/smoke-v156.log \
+	  && grep -q "^\[ui\] setting " /tmp/smoke-v156.log && [ -s /tmp/smoke-v156.png ] || { echo "smoke-v156: ui/v156 not loaded or no notice"; tail -20 /tmp/smoke-v156.log; exit 1; }; \
+	for s in tools/uidiff/v156/*.json; do n=$$(basename $$s .json); \
+	  env -u DISPLAY -u WAYLAND_DISPLAY KRUNKNATIVE_HEADLESS=1 $(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) KRUNKNATIVE_UI_DIR=$(CURDIR)/ui/v156 \
+	    timeout 120 $(DEBUG_DIR)/$(CLIENT_BIN) --render-scenario $$s /tmp/smoke-v156-$$n.png > /tmp/smoke-v156-$$n.log 2>&1 \
+	    && [ -s /tmp/smoke-v156-$$n.png ] || { echo "smoke-v156: scenario $$n failed"; tail -20 /tmp/smoke-v156-$$n.log; exit 1; }; \
+	done; \
+	grep -q "saved the Krunker v1.5.6 menu" /tmp/smoke-v156-settings-general.log \
+	  && grep -q "saved Krunker v7.1.4" /tmp/smoke-v156-settings-switch-back.log || { echo "smoke-v156: the picker did not switch"; exit 1; }; \
+	echo "smoke-v156 ok: /tmp/smoke-v156.png (offline, knRuleset v156), /tmp/smoke-v156-*.png (scenarios)"; grep -m1 "GL_RENDERER" /tmp/smoke-v156.log
 
 smoke-web: ## Load the web build offline in headless Chromium and screenshot it (/tmp/smoke-web.png)
 	@[ -f $(DIST_WEB)/client.wasm ] || { echo "no web build yet: run 'make web' first"; exit 1; }
