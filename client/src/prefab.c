@@ -1970,7 +1970,7 @@ static Mesh *prefab_build_showcase(Object *object, const cJSON *raw_obj) {
     if (!mesh) return NULL;
     BasicMaterial *material = (BasicMaterial *) mesh->material;
 
-    const Weapon *weapon = skin->weapon >= 1 && skin->weapon <= WEAPON_COUNT ? rules_weapon(skin->weapon - 1) : NULL;
+    const Weapon *weapon = skin->weapon >= 1 && skin->weapon <= rules_krunker_weapon_count() ? rules_weapon(skin->weapon - 1) : NULL;
     float ms = prefab_json_float(cJSON_GetObjectItem(raw_obj, "ms"), 0.0f);
     ms = ms != 0.0f ? fminf(fmaxf(ms, 0.01f), 100.0f) : 1.0f;
     const float item_scale = skin->m_scl != 0.0f ? skin->m_scl : weapon && weapon->scale != 0.0f ? weapon->scale : 1.0f;

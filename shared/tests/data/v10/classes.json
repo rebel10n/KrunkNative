@@ -1,0 +1,523 @@
+[
+ {
+  "name": "Triggerman",
+  "loadout": [
+   1
+  ],
+  "secondary": true,
+  "colors": [
+   10975328,
+   4013373,
+   2302755,
+   2631720,
+   7098434,
+   12566463
+  ],
+  "health": 100,
+  "segs": 6,
+  "throwChrg": 800,
+  "speed": 1.05,
+  "trnSpd": 1,
+  "regen": 0.1,
+  "wallJ": false,
+  "wallJM": 0,
+  "leap": false,
+  "bkSlid": false,
+  "slT": 1,
+  "slA": 1,
+  "face": 4544,
+  "melRate": 1
+ },
+ {
+  "name": "Hunter",
+  "loadout": [
+   0
+  ],
+  "secondary": true,
+  "colors": [
+   10975328,
+   8083261,
+   6506290,
+   2631720,
+   6506290,
+   4008733
+  ],
+  "health": 60,
+  "segs": 5,
+  "throwChrg": 800,
+  "speed": 1,
+  "trnSpd": 1,
+  "regen": 0.1,
+  "wallJ": false,
+  "wallJM": 0,
+  "leap": false,
+  "bkSlid": false,
+  "slT": 1,
+  "slA": 1,
+  "minRec": 1,
+  "req": "<expr:_34270>",
+  "face": 4545,
+  "melRate": 1
+ },
+ {
+  "name": "Run N Gun",
+  "loadout": [
+   3
+  ],
+  "secondary": false,
+  "wallJ": true,
+  "wallJM": 2,
+  "colors": [
+   10975328,
+   4088706,
+   3099491,
+   2631720,
+   6506290,
+   1715002
+  ],
+  "health": 100,
+  "segs": 6,
+  "throwChrg": 800,
+  "speed": 1.18,
+  "trnSpd": 1,
+  "regen": 0.1,
+  "leap": false,
+  "bkSlid": false,
+  "slT": 1,
+  "slA": 1,
+  "minRec": 1,
+  "req": "<expr:_34270>",
+  "face": 4546,
+  "melRate": 1
+ },
+ {
+  "name": "Spray N Pray",
+  "loadout": [
+   6
+  ],
+  "secondary": false,
+  "txts": [
+   "Calling in the Big Guns?",
+   "Remember - No Russian.",
+   "Pesky Snipers..."
+  ],
+  "colors": [
+   10975328,
+   5793865,
+   4806204,
+   2631720,
+   2631720,
+   3160103
+  ],
+  "health": 170,
+  "segs": 7,
+  "throwChrg": 800,
+  "regen": 0.05,
+  "speed": 0.9,
+  "trnSpd": 1,
+  "wallJ": false,
+  "wallJM": 0,
+  "leap": false,
+  "bkSlid": false,
+  "slT": 1,
+  "slA": 0.98,
+  "minRec": 1,
+  "req": "<expr:_34270>",
+  "face": 4547,
+  "melRate": 1
+ },
+ {
+  "name": "Vince",
+  "loadout": [
+   5
+  ],
+  "txts": [
+   "...",
+   "Don't ever call me Shotgunner",
+   "Skill issue"
+  ],
+  "secondary": true,
+  "colors": [
+   8412234,
+   5526119,
+   4144461,
+   2631720,
+   2631720,
+   2697267
+  ],
+  "health": 90,
+  "segs": 6,
+  "throwChrg": 800,
+  "speed": 1,
+  "trnSpd": 1,
+  "regen": 0.1,
+  "wallJ": false,
+  "wallJM": 0,
+  "leap": false,
+  "bkSlid": false,
+  "slT": 1,
+  "slA": 1,
+  "minRec": 1,
+  "req": "<expr:_34270>",
+  "face": 4548,
+  "melRate": 1
+ },
+ {
+  "name": "Detective",
+  "loadout": [
+   4
+  ],
+  "secondary": false,
+  "txts": [
+   "I'm onto something"
+  ],
+  "colors": [
+   10975328,
+   7360054,
+   4410462,
+   2631720,
+   6506290,
+   4140062
+  ],
+  "health": 100,
+  "segs": 6,
+  "throwChrg": 800,
+  "speed": 1,
+  "trnSpd": 1,
+  "regen": 0.1,
+  "wallJ": false,
+  "wallJM": 0,
+  "leap": false,
+  "bkSlid": false,
+  "slT": 1,
+  "slA": 1,
+  "minRec": 1,
+  "req": "<expr:_34270>",
+  "face": 4549,
+  "melRate": 1
+ },
+ {
+  "name": "Marksman",
+  "loadout": [
+   7
+  ],
+  "secondary": true,
+  "colors": [
+   10975328,
+   4605741,
+   2763291,
+   1842204,
+   2631720,
+   2763291
+  ],
+  "health": 90,
+  "segs": 6,
+  "throwChrg": 800,
+  "speed": 1,
+  "trnSpd": 1,
+  "regen": 0.1,
+  "wallJ": false,
+  "wallJM": 0,
+  "leap": false,
+  "bkSlid": false,
+  "slT": 1,
+  "slA": 1,
+  "minRec": 1,
+  "req": "<expr:_34270>",
+  "face": 4550,
+  "melRate": 1
+ },
+ {
+  "name": "Rocketeer",
+  "loadout": [
+   8
+  ],
+  "txts": [
+   "..."
+  ],
+  "secondary": true,
+  "colors": [
+   10975328,
+   5793865,
+   4806204,
+   2631720,
+   7098434,
+   2831140
+  ],
+  "health": 130,
+  "segs": 7,
+  "throwChrg": 800,
+  "speed": 0.86,
+  "trnSpd": 1,
+  "regen": 0.1,
+  "wallJ": false,
+  "wallJM": 0,
+  "leap": false,
+  "bkSlid": false,
+  "slT": 1,
+  "slA": 1,
+  "minRec": 1,
+  "req": "<expr:_34270>",
+  "face": 4551,
+  "melRate": 1
+ },
+ {
+  "name": "Agent",
+  "loadout": [
+   9
+  ],
+  "secondary": false,
+  "wallJ": true,
+  "wallJM": 3,
+  "colors": [
+   10975328,
+   4013373,
+   2302755,
+   2631720,
+   2631720,
+   12566463
+  ],
+  "health": 105,
+  "segs": 6,
+  "throwChrg": 800,
+  "speed": 1.2,
+  "trnSpd": 1,
+  "regen": 0.1,
+  "leap": false,
+  "bkSlid": false,
+  "slT": 1,
+  "slA": 1,
+  "minRec": 1,
+  "req": "<expr:_34270>",
+  "face": 4552,
+  "melRate": 1
+ },
+ {
+  "name": "Runner",
+  "txts": [
+   "You sure about this?",
+   "...",
+   "Oh boy",
+   "I don't know about this...",
+   "Not me again..."
+  ],
+  "loadout": [
+   12
+  ],
+  "secondary": false,
+  "wallJ": true,
+  "wallJM": 100,
+  "colors": [
+   10975328,
+   4013373,
+   2302755,
+   2631720,
+   2631720,
+   2302755
+  ],
+  "health": 120,
+  "segs": 6,
+  "throwChrg": 600,
+  "regen": 0.2,
+  "speed": 1,
+  "trnSpd": 1,
+  "leap": false,
+  "bkSlid": false,
+  "slT": 1,
+  "slA": 1,
+  "minRec": 1,
+  "req": "<expr:_34270>",
+  "face": 4553,
+  "melRate": 1
+ },
+ {
+  "name": "Deagler",
+  "hide": true,
+  "loadout": [
+   10
+  ],
+  "secondary": false,
+  "noMobile": true,
+  "colors": [
+   10975328,
+   4013373,
+   2302755,
+   2631720,
+   2631720,
+   2302755
+  ],
+  "health": 60,
+  "segs": 5,
+  "throwChrg": 800,
+  "speed": 1,
+  "trnSpd": 1,
+  "regen": 0.1,
+  "wallJ": false,
+  "wallJM": 0,
+  "leap": false,
+  "bkSlid": false,
+  "slT": 1,
+  "slA": 1,
+  "minRec": 1,
+  "req": "<expr:_34270>",
+  "melRate": 1
+ },
+ {
+  "name": "Bowman",
+  "loadout": [
+   13
+  ],
+  "secondary": true,
+  "noMobile": true,
+  "colors": [
+   10975328,
+   9530450,
+   6308654,
+   2631720,
+   2631720,
+   4666663
+  ],
+  "health": 100,
+  "segs": 6,
+  "throwChrg": 800,
+  "speed": 1,
+  "trnSpd": 1,
+  "regen": 0.1,
+  "wallJ": false,
+  "wallJM": 0,
+  "leap": false,
+  "bkSlid": false,
+  "slT": 1,
+  "slA": 1,
+  "minRec": 1,
+  "req": "<expr:_34270>",
+  "face": 4554,
+  "melRate": 1
+ },
+ {
+  "name": "Commando",
+  "loadout": [
+   14
+  ],
+  "secondary": true,
+  "colors": [
+   10975328,
+   4013373,
+   2302755,
+   2631720,
+   10050604,
+   1513239
+  ],
+  "health": 100,
+  "segs": 6,
+  "throwChrg": 800,
+  "speed": 1,
+  "trnSpd": 1,
+  "regen": 0.1,
+  "wallJ": false,
+  "wallJM": 0,
+  "leap": false,
+  "bkSlid": false,
+  "slT": 1,
+  "slA": 1,
+  "minRec": 1,
+  "req": "<expr:_34270>",
+  "face": 4555,
+  "melRate": 1
+ },
+ {
+  "name": "Trooper",
+  "wallJ": true,
+  "wallJM": 3,
+  "loadout": [
+   18
+  ],
+  "secondary": false,
+  "colors": [
+   10975328,
+   12436169,
+   12436169,
+   3026478,
+   2631720,
+   3026478
+  ],
+  "health": 100,
+  "segs": 6,
+  "throwChrg": 800,
+  "speed": 0.9,
+  "trnSpd": 1,
+  "regen": 0.1,
+  "leap": false,
+  "bkSlid": false,
+  "slT": 1.1,
+  "slA": 1,
+  "minRec": 1,
+  "req": "<expr:_34270>",
+  "face": 4556,
+  "melRate": 1
+ },
+ {
+  "name": "Survivor",
+  "wallJ": true,
+  "wallJM": 100,
+  "hide": true,
+  "noSleeve": true,
+  "noMobile": true,
+  "loadout": [
+   19
+  ],
+  "colors": [
+   10975328,
+   10975328,
+   10975328,
+   10975328,
+   7098434,
+   10975328
+  ],
+  "health": 150,
+  "segs": 6,
+  "throwChrg": 800,
+  "speed": 0.8,
+  "trnSpd": 1,
+  "regen": 0.1,
+  "leap": false,
+  "bkSlid": false,
+  "slT": 1,
+  "slA": 1,
+  "minRec": 1,
+  "req": "<expr:_34270>",
+  "melRate": 1
+ },
+ {
+  "name": "Infiltrator",
+  "loadout": [
+   28
+  ],
+  "secondary": true,
+  "colors": [
+   11635832,
+   14983351,
+   14983351,
+   10066329,
+   15452519,
+   10066329,
+   10066329
+  ],
+  "health": 90,
+  "segs": 5,
+  "throwChrg": 800,
+  "speed": 1,
+  "trnSpd": 1,
+  "regen": 0.1,
+  "wallJ": false,
+  "wallJM": 0,
+  "leap": false,
+  "bkSlid": false,
+  "slT": 1,
+  "slA": 1,
+  "minRec": 1,
+  "req": "<expr:_34270>",
+  "face": 5234,
+  "melRate": 1
+ }
+]

@@ -659,6 +659,87 @@ void mode_trigger_pick_stalker(Game *game, const float overflow) {
     }
 }
 
+// Krunker v10.0.2 pickStalker (v10:188459-188474): the stalker's health is floor(200 + 50 x
+// (active players - 1)) instead of v7's 400; the rest as v7 (knife only, no regen). v10 also
+// broadcasts STALKER_PICKED ("You are the Living" popup) to the others: not ported (HUD only).
+void mode_trigger_pick_stalker_v10(Game *game, const float overflow) {
+    (void) overflow;
+    const int active = mode_active_count(game);
+    Player *stalker;
+    if (pick_random(game, &stalker, 1)) {
+        mode_update_team(game, stalker, 2);
+        mode_set_role_health(game, stalker, (int) floorf(200.0f + 50.0f * (float) (active - 1)));
+        const int knife = WEAPON_ID_KNIFE;
+        mode_set_player_loadout(stalker, &knife, 1, 0);
+        mode_send_loadout(game, stalker);
+    }
+}
+
+// v10 stalk.onKill (v10:104388-104391): a kill by the stalker jump-scares the victim (send
+// JUMP_SCARE 0, v7's onMelee "scr") and heals the stalker 50.
+void mode_kill_stalk_v10(Game *game, Player *victim, Player *killer, const int weapon_id) {
+    (void) weapon_id;
+    if (!killer || killer->team != 2 || !game_is_authority(game)) return;
+    if (victim) {
+        const NetJumpScarePacket packet = {.index = 0};
+        game_send(game, victim->uid, NET_PACKET_JUMP_SCARE, &packet, sizeof(packet));
+    }
+    player_change_health(killer, NULL, -50.0f, 0);
+}
+
+// v10 stalk.update (v10:104392-104404): once the stalker is picked (no wait timer left), a Living
+// player who stays within 200 of where they settled for 20 s turns Dizzy (effect 5) until they
+// have been 2 s outside; coming back within 10 s of leaving re-applies it, and 10 s away moves the
+// camp origin to where they are. v10 times leaving with Date.now(); the game clock here.
+#define STALK_CAMP_RADIUS 200.0f
+#define STALK_CAMP_TIME 20.0f
+#define STALK_CAMP_CLEAR 2.0f
+#define STALK_CAMP_RESET 10.0f
+void mode_update_stalk_v10(Game *game, const float delta) {
+    if (!game->mode || game->mode->wait_timer_count) return;
+    for (size_t i = 0; i < game->player_count; i++) {
+        Player *p = game->players[i];
+        if (!p || !p->active || p->team != 1) continue;
+        PlayerStalkerCamp *c = &p->stalker_camp;
+        if (!c->has_origin) {
+            c->has_origin = 1;
+            c->origin = p->position;
+            c->timer = 0.0f;
+            c->has_effect = 0;
+            c->remove_timer = 0.0f;
+            c->left_at = -1.0;
+        }
+        const float dx = p->position.x - c->origin.x, dy = p->position.y - c->origin.y, dz = p->position.z - c->origin.z;
+        if (sqrtf(dx * dx + dy * dy + dz * dz) <= STALK_CAMP_RADIUS) {
+            c->timer += delta;
+            if (c->left_at >= 0.0 && game->now - c->left_at <= STALK_CAMP_RESET && c->has_effect) player_give_effect(p, EFFECT_DIZZY, 1);
+            if (c->timer >= STALK_CAMP_TIME && !c->has_effect) {
+                player_give_effect(p, EFFECT_DIZZY, 1);
+                c->has_effect = 1;
+            }
+            c->remove_timer = 0.0f;
+            c->left_at = -1.0;
+        } else {
+            if (c->left_at < 0.0) c->left_at = game->now;
+            if (c->has_effect) {
+                c->remove_timer += delta;
+                if (c->remove_timer >= STALK_CAMP_CLEAR) {
+                    // removeEffect(player, 5, 4): four stacks off, cleared at 0
+                    for (int k = 0; k < 4 && p->effects[EFFECT_DIZZY]; k++) player_remove_effect(p, EFFECT_DIZZY, p->effects[EFFECT_DIZZY] > 1);
+                    c->has_effect = 0;
+                }
+            }
+            if (game->now - c->left_at > STALK_CAMP_RESET) {
+                c->origin = p->position;
+                c->timer = 0.0f;
+                c->has_effect = 0;
+                c->remove_timer = 0.0f;
+                c->left_at = -1.0;
+            }
+        }
+    }
+}
+
 // pickTraitors: 1 traitor, 2 from 6 active players, 3 from 12.
 void mode_trigger_pick_traitors(Game *game, const float overflow) {
     (void) overflow;

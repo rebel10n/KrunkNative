@@ -817,6 +817,7 @@ static const struct {
     {"icon_15", 9}, {"icon_16", 10}, {"icon_17", -10}, {"icon_18", 9}, {"icon_19", 5}, {"icon_20", 9},
     {"icon_21", -10}, {"icon_22", -10}, {"icon_23", 10}, {"icon_24", -15}, {"icon_25", -15}, {"icon_26", 10},
     {"icon_27", 10}, {"icon_28", -4}, {"icon_29", 9},
+    {"icon_30", 9}, {"icon_31", 10}, // v10.0.2 Boulder / Compressor icnPad (v10:101851, 101940)
 };
 #define FEED_MELEE_ICON "icon_0"
 #define FEED_MELEE_PAD 5           // vA653[0]: default knife skin

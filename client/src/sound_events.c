@@ -106,6 +106,9 @@ static const struct {
     {"War Machine", "weapon_27", 0},
     {"Akimbo Pistol", "weapon_28", 1},
     {"Charge Rifle", "weapon_29", 1},
+    // v10.0.2 (only in the v10 ruleset's table): the Boulder never fires (sound ''), the Compressor
+    // has nCase (no casings) (v10:101808-101944)
+    {"Compressor", "weapon_31", 0},
 };
 
 // Krunker's amvVols: per-ambience volume, 0.12 otherwise.

@@ -104,6 +104,7 @@ typedef void (*ModeKillFn)(struct Game_t*, struct Player_t *victim, struct Playe
 typedef int (*ModeSortFn)(const struct Player_t*, const struct Player_t*); // < 0: a ranks first
 typedef void (*ModeUpdateFn)(struct Game_t*, float delta);      // mode.update (server only, delta seconds)
 typedef void (*ModeCollisionFn)(struct Game_t*, struct Player_t*); // mode.collisionCheck (player.onZone)
+typedef float (*ModeMeleeFn)(struct Game_t*, struct Player_t *dealer, struct Player_t *victim, float damage); // v10 onMelee factor
 
 // winCondition result: a team (1..5), a player, or nobody.
 typedef struct {
@@ -300,10 +301,17 @@ typedef struct {
     int prop_switches;               // propSwitches
     const int *disabled_streaks;     // disabledStreaks (streaks.js indices)
     int disabled_streak_count;
+
+    // ---- Krunker v10.0.2 mode keys (doc/v10/gameplay.md section 6; only the v10 mode table sets them)
+    ModeMeleeFn on_melee;            // onMelee as a melee damage factor (v10 Stalker); NULL = v7's rule
+    unsigned char stalker_v10:1;     // the v10 Stalker rework: the stalker's leap (input[6]), wall stick,
+                                     // coyote time and notWallJ walls; canSlide = isStalker (only it slides)
 } GameModeConfig;
 
 extern const GameModeConfig g_default_game_mode_config;
-extern const GameModeConfig g_mode_configs[MODE_COUNT];
+extern const GameModeConfig g_mode_configs[MODE_COUNT];   // v7.1.4 (shared/src/modes/modes.c)
+extern GameModeConfig g_mode_configs_v10[MODE_COUNT];     // v10.0.2 (shared/src/rules/v10/modes_v10.c, modes_v10_build)
+void modes_v10_build(void);                               // fills g_mode_configs_v10 once (ruleset_get / set_current)
 // map.js rotationModes: the public rotation (FFA, Hardpoint, CTF, Kill Confirmed, Domination).
 extern const int g_rotation_modes[5];
 
@@ -458,7 +466,7 @@ typedef struct GameMode_t {
 
 // Mode table
 int mode_count(void);                                // MODE_COUNT
-const GameModeConfig *mode_config(int id);           // NULL for an unknown id
+const GameModeConfig *mode_config(int id);           // NULL for an unknown id (the current ruleset's table)
 const GameModeConfig *mode_list(int *count);         // every mode, indexed by id
 int mode_find(const char *query);                    // id by alias/key/name/number, -1 none
 const char *mode_name(int id);                       // "unknown mode" for an unknown id

@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <ruleset.h>
+#include <hitboxes.h>
 
 void player_shoot(Player*);  // shared/src/player.c
 void player_melee(Player*);
@@ -139,6 +140,85 @@ static void test_hitbox(Game *game, Player *shooter, Player *target) {
     // (scale + 0.6 nearer) about 0.13 lower than the aim point
     CHECK(hitscan_damage(game, shooter, target, 11.6f, 0.0f) > 0.0f, "inside the top pad");
     CHECK(hitscan_damage(game, shooter, target, 11.85f, 0.0f) == 0.0f, "above the top pad");
+}
+
+// v10.0.2's shared trace: the posed hit boxes of shared/src/hitboxes.c end to end, i.e. what
+// players.shoot's server branch does with the lag-comp state (v10:172884-172906). The game runs on
+// the v10 ruleset here (its hit_model, its weapon table) with lag_comp off, so fetchState is the
+// live player and the state's pose fields come from storeState (they are 0 for a still player).
+static void test_v10_hitboxes(const cJSON **maps, const size_t map_count) {
+    printf("v10.0.2 posed hit boxes...\n");
+    CHECK(ruleset_set_current(RULESET_V10_0_2), "v10 ruleset");
+    Game game = {0};
+    game_configure(&game, NULL, maps, map_count, NULL, 0, NULL, 0, NULL, 0);
+    game_init(&game, 0, -1, 1);
+    game.hooks.send = test_send;
+    game.lag_comp = 0; // the players sit 1000 above the map, so no geometry is in the 50 unit shot path
+    Player *shooter = add_player(&game, 1, 0); // Triggerman: Assault Rifle
+    Player *target = add_player(&game, 2, 3);  // Spray N Pray: 170 HP in v10
+    place(shooter, 0.0f, 0.0f);
+    place(target, 0.0f, -50.0f);
+    equip(shooter, 1);
+    CHECK(game.rules == ruleset_get(RULESET_V10_0_2) && hitboxes_active(&game), "the v10 game uses the posed boxes");
+    CHECK(target->max_health == 170, "v10 Spray N Pray 170 HP");
+
+    // v10's torso is chestWidth 2.6 wide and chestScale 1.3 deep (v10:169467), narrower than the v7
+    // AABB's scale + hitBoxPad 0.6 = 1.6 half width: the v7 box edge hit above (1.55) misses here
+    CHECK(hitscan_damage(&game, shooter, target, 6.0f, 1.55f) == 0.0f, "the v7 box edge (1.55) is outside v10's 1.3 torso");
+    const float torso_hit = hitscan_damage(&game, shooter, target, 6.6f, 1.25f);
+    CHECK(torso_hit > 0.0f, "a ray inside the torso hits: %.1f", torso_hit);
+    // the head is a 2 unit cube on top (11 - headScale) and the torso top is 9: a ray at 10 is a headshot
+    const float head = hitscan_damage(&game, shooter, target, 10.2f, 0.4f);
+    CHECK(head > torso_hit && head > 0.0f, "a ray at the head cube is a headshot: %.1f vs %.1f", head, torso_hit);
+    // above the head (the head top is playerHeight 11) nothing hits
+    CHECK(hitscan_damage(&game, shooter, target, 12.0f, 0.0f) == 0.0f, "a ray above the head misses");
+    // between the head cube (bottom 9) and the torso top (9) there is no gap: 9.5 is still a hit
+    CHECK(hitscan_damage(&game, shooter, target, 9.5f, 0.0f) > 0.0f, "no gap between the torso and the head");
+    // the legs: legScale 1.3 -> a 1.3 wide column at +-0.65; a ray at x 1.0 y 2.0 is a legshot
+    const float leg = hitscan_damage(&game, shooter, target, 2.0f, 1.0f);
+    CHECK(leg > 0.0f, "a low ray on the leg column hits: %.1f", leg);
+    // the leg boxes span y 0 .. legHeight (4.2) at +-legScale / 2 = +-0.65: below their bottom nothing
+    CHECK(hitscan_damage(&game, shooter, target, -0.5f, 0.65f) == 0.0f, "a ray below the leg boxes misses");
+
+    // hurtboxScale 1.5 (the v10 setting x the class value, v10:169065): the torso widens to 1.95
+    game.config.hurtbox_scale = 1.5f;
+    CHECK(fabsf(player_hurtbox_scale(target) - 1.5f) < 1e-6f, "the game setting scales the hurtbox");
+    CHECK(hitscan_damage(&game, shooter, target, 6.6f, 1.9f) > 0.0f, "hurtboxScale 1.5 widens the torso");
+    game.config.hurtbox_scale = 1.0f;
+    CHECK(hitscan_damage(&game, shooter, target, 6.6f, 1.9f) == 0.0f, "...and 1.0 does not");
+
+    // A crouched target (cV 1) drops the upper body by crouchDst 3: the head sits at 7, the torso
+    // 3.6..6.6 and the crouched legs below (v10's crouchedLeg holders); a ray at 10 misses.
+    place(target, 0.0f, -50.0f);
+    target->crouch_val = 1.0f;
+    player_store_state(target);
+    CHECK(hitscan_damage(&game, shooter, target, 10.0f, 0.0f) == 0.0f, "a crouched target is shorter");
+    CHECK(hitscan_damage(&game, shooter, target, 7.0f, 0.0f) > 0.0f, "the crouched head is at 7");
+    target->crouch_val = 0.0f;
+    place(target, 0.0f, -50.0f);
+
+    // The v10 arms: a weapon gives 6 arm boxes around the weapon's hold offsets, all torsoshot
+    HitPose pose;
+    PlayerStoredState state;
+    memset(&state, 0, sizeof(state));
+    state.position = target->position;
+    state.height = target->height;
+    state.adjusted_height = target->height;
+    state.weapon_index = 1;
+    hitboxes_pose_player(target, &state, &pose);
+    HitPose no_weapon = pose;
+    no_weapon.weapon = NULL;
+    CHECK(hitboxes_build(&pose, (HitBox[64]) {0}, 64) > hitboxes_build(&pose, (HitBox[2]) {0}, 2), "arm boxes fill the cap");
+    CHECK(pose.weapon == rules_weapon(1) && !no_weapon.weapon, "the state's weapon drives the arms");
+
+    // Ranked rules on the same match: v10 turns streaks off and doubles the KR (ruleset.h)
+    game.is_ranked = 1;
+    CHECK(rules_reward_mlt(&game) == 2.0f && rules_ranked_no_streaks(&game), "ranked: x2 KR, no streaks");
+    game.is_ranked = 0;
+    free(game.weapons);
+    free(game.classes);
+    free(game.modes);
+    CHECK(ruleset_set_current(RULESET_V7_1_4), "back to v7");
 }
 
 static void test_zones(Game *game, Player *shooter, Player *target) {
@@ -669,6 +749,7 @@ int main(void) {
     Player *target = add_player(&game, 2, 3);  // Spray N Pray: 180 HP holds a close Sniper headshot (~161)
     test_hitbox(&game, shooter, target);
     test_zones(&game, shooter, target);
+    test_v10_hitboxes(maps, 1);
     test_charge(&game);
     test_effects(&game);
     test_streaks(&game);

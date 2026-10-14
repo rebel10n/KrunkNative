@@ -605,6 +605,19 @@ float player_hitbox_pad_h(const Player *player) {
     return game_hitbox_pad(player->game) + (c ? c->hitbox_pad_h : 0.0f);
 }
 
+// v10.0.2 player.hurtboxScale (v10:169065): game.config.hurtboxScale x (class config.hurtboxScale || 1).
+// Only the v10 hit boxes read it; v7 has neither setting, so both stay 0 (= 1) there.
+float player_hurtbox_scale(const Player *player) {
+    const ClassConfig *c = player_class(player);
+    const float game_scale = player->game && player->game->config.hurtbox_scale > 0.0f ? player->game->config.hurtbox_scale : 1.0f;
+    return game_scale * (c && c->hurtbox_scale > 0.0f ? c->hurtbox_scale : 1.0f);
+}
+
+int player_class_model(const Player *player) {
+    const ClassConfig *c = player_class(player);
+    return c ? class_overrides(c)->model : 0;
+}
+
 int player_hit_is_head(const Player *target, const float base_y, const float adjusted_height, const float hit_y) {
     const float head_mlt = (target->head_mlt > 0.0f ? target->head_mlt : 1.0f) * mode_head_mlt(target); // + Bighead FFA (WP-D)
     return base_y + adjusted_height - hit_y < CONFIG_HEAD_SCALE * head_mlt;

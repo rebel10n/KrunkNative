@@ -189,6 +189,13 @@ typedef struct {
     unsigned char can_upgrade:1;     // canUpgrade (krumMachine)
     unsigned char kn_tool:1;         // KrunkNative Tool Gun (object_manager.h OM_ACTION_TOOL): fires no bullet, spends no ammo
     unsigned char kn_physgun:1;      // KrunkNative Physics Gun (object_manager.h OM_ACTION_EDIT): never fires, the client grabs
+    // ---- Krunker v10.0.2 weapon fields (doc/v10/gameplay.md section 5; no v7.1.4 weapon sets them,
+    // so they are behaviour-neutral under the v7 ruleset)
+    unsigned char no_dmg:1;          // noDmg (Compressor): the bullet ray traces nothing; out of onlyWeapons
+    unsigned char phys_pull:1;       // physPull (Compressor): the physPow ray fired with the aim input pulls (sign -1)
+    unsigned char non_obj_impulse:1; // nonObjImpulse (weapon-level, v7 had it on modes only): self push, no object push
+    unsigned char r_shoot:1;         // rShoot (Compressor): the aim input fires too (procInputs lMouse || rShoot && rMouse)
+    float gravity_mlt;               // gravMlt, 0 = 1 (Boulder 1.7): player gravity x while held
     int tint;                        // KrunkNative: viewmodel / pickup colour multiplier 0xRRGGBB, 0 = none
     int effect_on_hit;          // effectOnHit + 1 (0 = none): EffectId given on hit, floor(charge * 10) stacks
     int deployable;             // deployable + 1 (0 = none): the spawnable a shot places (Slimer pads)
@@ -228,6 +235,11 @@ extern const Weapon g_minigun;
 extern const Weapon g_war_machine;
 extern const Weapon g_akimbo_pistol;
 extern const Weapon g_charge_rifle;
+// Krunker v10.0.2 (shared/src/rules/v10/): the rebalanced copies and the two new secondaries
+extern const Weapon g_ak47_v10, g_pistol_v10, g_smg_v10, g_lmg_v10, g_semi_auto_v10, g_akimbo_v10,
+    g_deagle_v10, g_famas_v10, g_blaster_v10, g_tehchy9_v10;
+extern const Weapon g_boulder;    // v10 id 29
+extern const Weapon g_compressor; // v10 id 30
 // KrunkNative-only weapons after v7's table (WEAPON_ID_TOOL_GUN...)
 extern const Weapon g_tool_gun;
 extern const Weapon g_piss; // WEAPON_ID_PISS (shared/src/weapons/kn_piss.c)
@@ -283,6 +295,9 @@ const WeaponAttachment *weapon_attachment(const Weapon *weapon, int attach_index
 #define WEAPON_ID_MINIGUN 25
 #define WEAPON_ID_WAR_MACHINE 26
 #define WEAPON_ID_CHARGE_RIFLE 28
+#define WEAPON_ID_BOULDER 29    // v10.0.2
+#define WEAPON_ID_COMPRESSOR 30 // v10.0.2
+#define WEAPON_V10_COUNT 31     // v10.0.2's weaponConfig
 // KrunkNative-only ids sit at WEAPON_ID_KN_BASE, above every Krunker ruleset's own table (v7.1.4
 // has 29 weapons, v10.0.2 31: its 29 Boulder and 30 Compressor took the ids KN used before;
 // doc/v10/version-toggle.md "Id clashes"). Ids between a ruleset's last Krunker weapon and the KN

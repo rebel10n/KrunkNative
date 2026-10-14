@@ -514,7 +514,11 @@ static int acc_reward(const ClientConnection *client, const Player *player) {
     const double mlt = (mode && mode->reward_mlt ? mode->reward_mlt : 1) * (double) g_gs_config.kr_multiplier;
     const int cap = client->acct.premium ? g_gs_config.kr_cap_premium : g_gs_config.kr_cap;
     const int reward = (int) floor((double) player->score * mlt / 100.0);
-    return reward < 0 ? 0 : reward > cap ? cap : reward;
+    const int capped = reward < 0 ? 0 : reward > cap ? cap : reward;
+    // v10 ranked: floor(2 x reward) after the cap (v10:191171 `isRanked && (reward = floor(2 * reward))`);
+    // rules_reward_mlt is 1 outside ranked and under v7, so this is the plain capped reward there
+    const float ranked_mlt = rules_reward_mlt(&g_server->game);
+    return ranked_mlt != 1.0f ? (int) floor((double) capped * ranked_mlt) : capped;
 }
 
 // GameHooks.reward (game_end_round): the END packets' reward column and the commit's "kr".
@@ -703,7 +707,9 @@ static cJSON *acc_player_stats(const ClientConnection *client, const int final) 
     cJSON_AddNumberToObject(p, "games", counts && final ? 1 : 0);
     cJSON_AddNumberToObject(p, "kr", final && player ? player->reward : 0); // game_end_round -> accounts_reward
     cJSON_AddNumberToObject(p, "xp", counts && player && player->score > 0 ? player->score : 0);
-    cJSON_AddNumberToObject(p, "classIndex", player ? player->class_index : client->class_index);
+    // v10 saveClassScores only `isPubType() && !isRanked` (v10:173631): no class index, no class XP (db "c<i>")
+    const int class_index = rules_ranked_no_class_xp(&g_server->game) ? -1 : player ? player->class_index : client->class_index;
+    cJSON_AddNumberToObject(p, "classIndex", class_index);
     if (counts) acc_add_progress(p, client, player, final, won); // WP-E part 2c (v7 updateAccounts / checkChallenges)
     return p;
 }
@@ -919,7 +925,10 @@ static void acc_ranked_setup(const cJSON *config) {
     g_rk.team_size = cJSON_IsNumber(size) && size->valueint > 0 ? size->valueint : 1;
     const cJSON *grace = cJSON_GetObjectItem(config, "startGraceS");
     // v10 rankedTimeForFirstConnect 60 s (needAllTimer when ranked)
-    g_rk.grace = cJSON_IsNumber(grace) && grace->valuedouble > 0.0 ? (float) grace->valuedouble : RANKED_TIME_FIRST_CONNECT_MS / 1000.0f;
+    // (the ruleset's ranked.need_all_ms when it sets one: v10:189820 needAllTimer 60000)
+    const int need_all_ms = game_ruleset(&g_server->game)->ranked.need_all_ms;
+    g_rk.grace = cJSON_IsNumber(grace) && grace->valuedouble > 0.0 ? (float) grace->valuedouble
+                                                                     : (need_all_ms > 0 ? need_all_ms : RANKED_TIME_FIRST_CONNECT_MS) / 1000.0f;
     const cJSON *team;
     int t = 0;
     cJSON_ArrayForEach(team, cJSON_GetObjectItem(config, "teams")) {
@@ -1178,8 +1187,11 @@ static void acc_tick_ranked(void) {
 
     if (!g_rk.ended && g_acc.round_end_seen) acc_ranked_send_result();
 
-    // infEndTimer: no next round; the lobby returns to the public rotation instead
-    if (g_rk.ended && (game->end_timer <= 1.0f || !acc_player_count())) {
+    // infEndTimer: no next round; the lobby returns to the public rotation instead (v10: at the
+    // latest shutdownTimer 120000 after the end when ranked, v10:191217, ruleset ranked.shutdown_ms)
+    const int shutdown_ms = game_ruleset(game)->ranked.shutdown_ms;
+    const int shutdown = shutdown_ms > 0 && g_server->now - g_rk.ended_at >= shutdown_ms / 1000.0f;
+    if (g_rk.ended && (game->end_timer <= 1.0f || !acc_player_count() || shutdown)) {
         g_rk.active = 0;
         acc_revert_custom("ranked match over");
     }
@@ -1807,6 +1819,7 @@ static void acc_revert_custom(const char *why) {
     server_log("[brain] custom game over (%s): back to the public rotation", why);
     if (g_rk.active && !g_rk.ended) acc_ranked_send_result(); // everyone left: the match still closes once
     g_rk.active = 0;
+    g_server->game.is_ranked = 0;
     g_acc.custom = 0;
     g_acc.host_account_id = 0;
     g_acc.published_map[0] = 0;
@@ -2023,6 +2036,7 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
 
     if (ranked) acc_ranked_setup(config);
     game_configure(&g_server->game, &game_config, maps, map_count, modes, mode_count, NULL, 0, NULL, 0);
+    g_server->game.is_ranked = (unsigned char) g_rk.active; // v10 game.isRanked: the ruleset's ranked rules (ruleset.h)
     game_config_host(&g_server->game, request, host_index); // WP-E: every round's map config + this request
     cJSON_Delete(request);
     cJSON_Delete(forced);

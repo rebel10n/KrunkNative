@@ -555,7 +555,7 @@ static void W(const int first) {
 
     options_reset();
     options_push("None", -1);
-    const Weapon *primary_weapon = primary >= 0 && primary < WEAPON_COUNT ? rules_weapon(primary) : NULL;
+    const Weapon *primary_weapon = primary >= 0 && primary < rules_krunker_weapon_count() ? rules_weapon(primary) : NULL;
     if (primary_weapon && primary_weapon->has_attach) {
         for (int i = 0; i < ATTACHMENT_COUNT; i++) options_push(g_attachments[i].name, i);
     }
@@ -563,7 +563,7 @@ static void W(const int first) {
 
     if (cls->secondary) {
         options_reset();
-        for (int i = 0; i < WEAPON_COUNT; i++) {
+        for (int i = 0; i < rules_krunker_weapon_count(); i++) {
             if (rules_weapon(i) && rules_weapon(i)->secondary) options_push(rules_weapon(i)->name, i);
         }
         PUSH_B(add_options(g_ui.weapons, &e->secondary, "Secondary", on_secondary));

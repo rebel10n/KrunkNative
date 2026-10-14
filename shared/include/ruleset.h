@@ -22,6 +22,13 @@ typedef enum {
 
 #define RULESET_DEFAULT RULESET_V7_1_4
 
+// The player hit model a ruleset uses (shared/src/hitboxes.c; doc/v10/gameplay.md section 3).
+typedef enum {
+    HIT_MODEL_V7 = 0, // one AABB per player + hitBoxPad, head band / leg line (v7.1.4 players.js)
+    HIT_MODEL_V10 = 1, // the v10 posed hit boxes: oriented boxes (head / torso / arms / legs,
+                       // hurtboxScale), ray vs OBB, amshot/legshot x lsMlt
+} HitModel;
+
 // How map JSON fields are read (doc/v10/map-format.md). Today map.c reads every map the v7 way.
 typedef enum {
     MAP_DIALECT_V3 = 0,
@@ -59,6 +66,21 @@ typedef struct Ruleset_t { // shared.h forward-declares the tag for Game.rules
     size_t rotation_map_count;
     MapDialect map_dialect;
 
+    HitModel hit_model;         // v7 AABB or v10 posed oriented boxes
+    // v10.0.2 players.shoot physPow (v10:172807-172840): weapon-level nonObjImpulse and physPull,
+    // and the nonObjImpulse self push is physPow (v7.1.4: Impulse mode only, a fixed 0.04)
+    unsigned char weapon_impulse;
+
+    // Ranked match rules (doc/v10/gameplay.md section 7, ranked.md): applied while Game.is_ranked
+    // (server/src/accounts.c acc_ranked_setup). v7.1.4 has none of them: kr_mlt 1, the rest 0.
+    struct {
+        float kr_mlt;               // endGame reward x (v10:191171 `isRanked ? 2 : 1`)
+        unsigned char no_streaks;   // no kill streak count (v10:174076 `|| isRanked`)
+        unsigned char no_class_xp;  // saveClassScores skipped (v10:173631 `isPubType() && !isRanked`)
+        int need_all_ms;            // needAllTimer when ranked (v10:189820 60000; 0 = the server's own)
+        int shutdown_ms;            // shutdown after the end (v10:191217 120000; 0 = the end timer)
+    } ranked;
+
     int trigger_action_limit;   // config.triggerActionLimit (v7 5, v10 8)
     int entity_limit;           // config.entityLimit (v10 64; 0 = no entities)
     int archetype_limit;        // config.archetypeLimit (v10 32)
@@ -84,3 +106,17 @@ int rules_krunker_weapon_count(void);
 const Weapon *rules_weapon(int id); // bounds-checked, NULL for holes / out of range
 const ClassConfig *rules_classes(void);
 size_t rules_class_count(void);
+
+// This process's hit model (ruleset_current()->hit_model).
+HitModel rules_hit_model(void);
+
+// The ruleset a game was configured with (Game.rules), else the process ruleset. Never NULL.
+const Ruleset *game_ruleset(const struct Game_t *game);
+// 1 in a ranked match (Game.is_ranked, set by the server's ranked lobby setup).
+int game_is_ranked(const struct Game_t *game);
+// The end-game KR multiplier of `game`: its ruleset's ranked.kr_mlt in a ranked match, else 1.
+float rules_reward_mlt(const struct Game_t *game);
+// The ranked kill-streak rule: 1 when `game` is ranked and its ruleset turns streaks off there.
+int rules_ranked_no_streaks(const struct Game_t *game);
+// The ranked class-XP rule: 1 when `game` is ranked and its ruleset saves no class score there.
+int rules_ranked_no_class_xp(const struct Game_t *game);

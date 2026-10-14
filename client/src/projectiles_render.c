@@ -108,7 +108,7 @@ static const Weapon *proj_weapon(const Client *client, const int index) {
     const Game *game = &client->game;
     if (index < 0) return NULL;
     if (game->weapons && (size_t) index < game->weapon_count) return game->weapons[index];
-    if (index < WEAPON_COUNT) return rules_weapon(index);
+    if (index < rules_krunker_weapon_count()) return rules_weapon(index);
     return NULL;
 }
 

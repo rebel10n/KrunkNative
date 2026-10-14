@@ -24,8 +24,12 @@ static void burst(Weapon *w, const unsigned int count, const float rate) {
 }
 
 static void build(void) {
+    // Always v7.1.4's base entries: v10.0.2's upgradeWeapons table (v10:175073) is v7's
+    // unchanged, independent of the v10 balance pass (its Zombie Assaulter keeps dmgDrop 5 and
+    // the Pistol swapTime 260), so building from the current ruleset would be wrong under v10.
+    const Weapon *const *base = ruleset_get(RULESET_V7_1_4)->weapons;
     for (int i = 0; i < WEAPON_COUNT; i++) {
-        g_upgraded[i] = *rules_weapon(i);
+        g_upgraded[i] = *base[i];
         Weapon *w = &g_upgraded[i];
         w->sound = "weapon_upgraded"; // every upgraded weapon shares one shot sound
         w->min_rec = 0;

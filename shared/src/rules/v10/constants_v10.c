@@ -9,8 +9,12 @@ static const float player_height = 11.0f;
 static const float leg_height = 4.2f;
 static const float head_scale = 2.0f;
 
-// Krunker v10.0.2 physics constants: the same values as v7.1.4 (doc/v10/gameplay.md section 1).
-// TODO(v10-gameplay): v10's differences (hurtboxScale, posed hitboxes) go in here.
+// Krunker v10.0.2 physics constants: v7.1.4's values (doc/v10/gameplay.md section 1) but for
+// crouchLean (below). Checked with a whole-config numeric diff of v10's frozen config object
+// (v10:19477-20114, resolving the `var _N = <num>` inlines) against v7 config.js: crouchLean is the
+// only gameplay constant that differs (the rest are menu / economy keys: bppCapDay, giftMinLVl,
+// marketMinLVl, tradeMinLvl, minKDFCall, rewardTime, hostTransferLimit, triggerActionLimit).
+// The hurtbox scale and the posed hit boxes are rules, not constants (ruleset.h hit_model).
 const GameConstants g_constants_v10 = {
     .billboard_count = 6,
     .mouse_sensitivity = 0.0024f,
@@ -26,7 +30,7 @@ const GameConstants g_constants_v10 = {
     .jump_push = 0.1f,
     .crouch_jump = 0.25f,
     .crouch_speed = 7.0f,
-    .crouch_lean = (float) M_PI * -0.1f,
+    .crouch_lean = 0.0f, // v10:19602 'crouchLean': 0 (v7 config.js:2164 -(PI * 0.1)): no crouch lean in the pose or the hitboxes
     .player_speed = 0.42f,
     .slipping_speed = 0.3f,
     .air_speed = 0.047f,

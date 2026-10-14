@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <ruleset.h>
+#include <hitboxes.h> // v10.0.2 posed hit boxes
 
 // Krunker combat constants (v3.1.1 / v7.1.4 src/config.js), used by the spread update and
 // the hitscan/damage code below. Head / leg zones: shared/src/effects.c (player_hit_*).
@@ -208,6 +209,11 @@ void player_spawn(Player *player) {
     player->did_wall_jump = 0;
     player->did_act = 0;
     player_end_grapple(player); // Player.reset: grapple = null
+    // v10.0.2 Player.reset (v10:169129-169130, 169259-169260)
+    player->stuck_to_wall = 0;
+    player->stuck_to_wall_dir = 0;
+    player->last_stalker_leap = 0.0f;
+    player->stalker_coyote_time = 0.0f;
 
     player->air_time = 0.0f;
     player->covered_distance = 0.0f;
@@ -620,6 +626,16 @@ typedef struct {
     int free_slide, no_sliding, no_wall_jump;      // frSlid, noSliding, noWallJ
 } MovementModeKeys;
 
+// v10.0.2 player.isStalker (v10:168997: mode.teamOptions[team - 1] == "Stalker") in a mode with the v10
+// Stalker rework (GameModeConfig.stalker_v10, only set by the v10 mode table): leap, wall stick,
+// coyote time, wall jumps off notWallJ walls, and only the stalker slides.
+static int movement_stalker(const Player *player) {
+    const Game *game = player->game;
+    if (!game || !game->mode || !game->mode->config.stalker_v10 || player->team < 1 || player->team > 2) return 0;
+    const char *option = game->mode->config.team_options[player->team - 1];
+    return option && !strcmp(option, "Stalker");
+}
+
 static MovementModeKeys movement_mode(const Player *player) {
     const Game *game = player->game;
     MovementModeKeys keys = {
@@ -799,7 +815,9 @@ void player_reset_step(Player *player, const int recon) {
     Game *game = player->game;
     const MovementModeKeys mode_keys = movement_mode(player);
     const MovementModeKeys *mode = &mode_keys;
-    const int no_sliding = mode->no_sliding && !player_has_perk(player, PERK_SLIDE) && !player_has_perk(player, PERK_SLIDE_EXPLODE);
+    int no_sliding = mode->no_sliding && !player_has_perk(player, PERK_SLIDE) && !player_has_perk(player, PERK_SLIDE_EXPLODE);
+    // v10 mode.canSlide overrides it (v10:171971): Stalker `canSlide: p => p.isStalker`
+    if (game->mode && game->mode->config.stalker_v10) no_sliding = !movement_stalker(player);
     const int slide = !movement_real(player) && player->crouch_val && player->can_slide && player->can_slide_timer <= 0.0f &&
                       game->config.can_slide && !no_sliding;
 
@@ -1001,7 +1019,7 @@ void player_do_map_collisions(Player *player, const Input *input, const float mo
             // Wall-jump surfaces: every solid but ramps and cylinders, unless notWallJ (wj)
             // (v3.1.1: only blocks built wallJumpable), higher than climbHeight above the feet.
             if (!object->ramp && object->collision_type != COLLISION_TYPE_CYLINDER && !can_jump && player->position.y < top &&
-                top - player->position.y > game_constants.climb_height && object->wall_jumpable) {
+                top - player->position.y > game_constants.climb_height && (object->wall_jumpable || movement_stalker(player))) { // v10: the stalker any wall (v10:169909)
                 if (player->last_position.x - s >= box.x + box.w - game_constants.collision_padding) {
                     player->on_wall = 1;
                 } else if (player->last_position.x + s <= box.x - box.w + game_constants.collision_padding) {
@@ -1173,6 +1191,7 @@ void player_jump(Player *player) {
     player->jump_timer = 0.0f;
     player->did_jump = 1;
     player->did_wall_jump = 1;
+    player->did_stick_to_wall = 1; // v10 jump() (v10:172016): a jump does not also stick to a wall
     player->on_terrain = 0;
 
     const float attr_jump = MOVEMENT_OR(player_attr_jump(player), 1.0f);
@@ -1560,6 +1579,30 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
         }
     }
 
+    // v10.0.2 Stalker leap (v10:169664-169685): the aim input (input[6]) while grounded, stuck to a
+    // wall or within the coyote time, 3 s apart: 0.15 along the look direction. Not in replays: the
+    // client keeps it as the input's velObj like a shot's knockback.
+    if (!recon && movement_stalker(player) && input->scope &&
+        (player->on_ground || player->stuck_to_wall || player->stalker_coyote_time > 0.0f) &&
+        player->game->now - player->last_stalker_leap >= 3.0f) {
+        player->last_stalker_leap = player->game->now;
+        player->did_jump = 1;
+        player->did_wall_jump = 1;
+        player->did_stick_to_wall = 1;
+        player->stuck_to_wall = 0;
+        player->stalker_coyote_time = 0.0f;
+        const float power = 0.15f, yaw = player->direction.y, pitch = player->direction.x;
+        const vec3 leap = {power * sinf(yaw + (float) M_PI) * cosf(pitch), power * sinf(pitch), power * cosf(yaw + (float) M_PI) * cosf(pitch)};
+        player->velocity.x += leap.x;
+        player->velocity.z += leap.z;
+        player->velocity.y += leap.y;
+        player->on_ground = 0;
+        if (!game_is_authority(player->game)) {
+            player->shot_vel_obj = (vec3) {-leap.x, -leap.y, -leap.z};
+            player->has_shot_vel_obj = 1;
+        }
+    }
+
     // v7.1.4 charge system (player.js: right after the aim update, not in replays)
     if (!recon) combat_update_charge(player, input, delta);
     // map-logic WP-B: the Build Tool pick (player.js:1109-1124: aim held with a build weapon)
@@ -1668,12 +1711,15 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
             movement_try_jump(player, input->jump, recon);
         }
 
-        if (!contact) {
+        if (!contact && !player->stuck_to_wall) { // v10: no gravity while stuck to a wall (v10:169754)
             const float wall_power = movement_wall_jump_power(player);
             const float wall_decel = mode_movement->wall_jump_decel ? mode_movement->wall_jump_decel : MOVEMENT_OR(knobs->wall_jump_decel, 0.3f);
             const float wall_mlt = player->velocity.y < 0.0f && player->wall_jump && player->on_wall && wall_power > 0.0f && player->crouch_val ? wall_decel : 1.0f;
-            player->velocity.y -= delta * (game_constants.gravity * player->game->config.gravity_mlt * MOVEMENT_OR(mode_movement->gravity_mlt, 1.0f)) * wall_mlt;
+            // v10.0.2 also x weapon.gravMlt (v10:169754, Boulder 1.7; no v7 weapon sets it, 0 = 1)
+            const float weapon_grav = player->weapon && player->weapon->gravity_mlt > 0.0f ? player->weapon->gravity_mlt : 1.0f;
+            player->velocity.y -= delta * (game_constants.gravity * player->game->config.gravity_mlt * weapon_grav * MOVEMENT_OR(mode_movement->gravity_mlt, 1.0f)) * wall_mlt;
         }
+        if (player->stuck_to_wall) player->velocity = (vec3) {0.0f, 0.0f, 0.0f}; // v10:169755
 
         // 95.js: ac *= limitMM(1 - a0[12], 0, 1) (input[12]: the controller's Gradual Speed)
         accel *= CLAMP(1.0f - input->slowdown, 0.0f, 1.0f);
@@ -1685,7 +1731,7 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
         accel *= player_has_perk(player, PERK_SPEED) ? 1.15f : 1.0f;
 
         // movement.js[0].mov (defaultMovement): diagonal movDirs get config.strafeSpd unless realMov
-        if (ks_player_allows(player, KS_PLAYER_DEFAULT_MOVEMENT) && input->move_dir >= 0) {
+        if (ks_player_allows(player, KS_PLAYER_DEFAULT_MOVEMENT) && !player->stuck_to_wall && input->move_dir >= 0) { // v10: not while stuck (v10:169764)
             const float yaw_origin = player->direction.y; // TODO: camType 1 without camRot uses the camera offset
             float strafe = 1.0f;
             if (input->move_dir % 2 && !movement_real(player)) strafe = player->game->config.strafe_speed;
@@ -1815,6 +1861,11 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
         world_player_terrain(player, recon); // WP-B: terrain ground snap (player.js:1779-1797)
 
         player->air_time = player->on_ground ? 0 : player->air_time + delta;
+        // v10 stalkerCoyoteTime (v10:170078): 150 ms to leap after leaving the ground or a wall
+        if (movement_stalker(player)) {
+            if (player->on_ground || player->stuck_to_wall) player->stalker_coyote_time = 0.15f;
+            else if (player->stalker_coyote_time > 0.0f) player->stalker_coyote_time = MAX(0.0f, player->stalker_coyote_time - delta);
+        }
     }
 
     const float delta_pos2D = hypotf(player->position.x - player->last_position.x, player->position.z - player->last_position.z);
@@ -1888,13 +1939,15 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
         }
 
         if (player->weapon && !move_lock && !player->doing_interact) {
-            int will_shoot = player->burst_count || !player->weapon->no_auto && input->shoot;
+            // v10.0.2 rShoot (Compressor): the aim input fires too (v10:170122 `lMouse || weapon.rShoot && rMouse`)
+            const int fire = input->shoot || (player->weapon->r_shoot && input->scope);
+            int will_shoot = player->burst_count || !player->weapon->no_auto && fire;
 
-            if (player->did_shoot && !input->shoot) {
+            if (player->did_shoot && !fire) {
                 player->did_shoot = 0;
             }
 
-            if (!player->did_shoot && input->shoot) {
+            if (!player->did_shoot && fire) {
                 will_shoot = 1;
             }
 
@@ -1914,6 +1967,7 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
                     player_melee(player);
                 } else {
                     if (player->ammo[player->loadout_index] > 0) {
+                        player->shot_aim = input->scope; // v10 shoot(..., rMouse) (v10:170139)
                         player_shoot(player);
                     } else if (!player->game->mode->config.no_reloads) {
                         player_reload(player);
@@ -1936,10 +1990,32 @@ weapon_done:;
     // ... and input.grapObj: the grapple this frame's Grappler shot hooked
     if (!move_lock && recon && input->has_grap_obj) player->grapple = input->grap_obj;
 
+    // v10.0.2 Stalker wall stick (v10:170153-170154): the jump key against a wall in the air sticks
+    // the stalker there (no gravity, no movement); the next jump press lets go with 0.03 off the wall.
+    if (!move_lock && movement_stalker(player)) {
+        if (player->on_wall && !player->on_ground) {
+            if (player->did_stick_to_wall && !input->jump) player->did_stick_to_wall = 0;
+            if (!player->did_stick_to_wall && input->jump && !player->stuck_to_wall) {
+                player->did_stick_to_wall = 1;
+                player->stuck_to_wall = 1;
+                player->stuck_to_wall_dir = (unsigned char) player->on_wall;
+            }
+        }
+        if (player->stuck_to_wall && input->jump && !player->did_stick_to_wall) {
+            player->did_stick_to_wall = 1;
+            player->stuck_to_wall = 0;
+            if (player->stuck_to_wall_dir == 1) player->velocity.x = 0.03f;
+            else if (player->stuck_to_wall_dir == 2) player->velocity.x = -0.03f;
+            else if (player->stuck_to_wall_dir == 3) player->velocity.z = 0.03f;
+            else if (player->stuck_to_wall_dir == 4) player->velocity.z = -0.03f;
+            player->stuck_to_wall_dir = 0;
+        }
+    }
+
     // Wall jump: at most wallJumpMax per airborne period (v3.1.1: unlimited); the class / mode
-    // wallJV, wallJYV and config.wallJP shape it.
+    // wallJV, wallJYV and config.wallJP shape it. v10: not while stuck to a wall (v10:170155).
     if (!move_lock && player->wall_jump && player->wall_jump_count < player->wall_jump_max && !player->on_ground && !player->on_ladder &&
-        player->on_wall && movement_wall_jump_power(player) > 0.0f) {
+        player->on_wall && !player->stuck_to_wall && movement_wall_jump_power(player) > 0.0f) {
         if (player->did_wall_jump && !input->jump) player->did_wall_jump = 0;
 
         if (!player->did_wall_jump && input->jump) {
@@ -2178,6 +2254,18 @@ static float combat_adjusted_height(const Player *player) {
     return player->height - COMBAT_HEAD_SCALE + COMBAT_HEAD_SCALE * head_mlt;
 }
 
+// The v10.0.2 pose fields of a live player (players.storeState, v10:170708-170722): the hit boxes
+// (shared/src/hitboxes.c) need them, so every state carries them. v7 ignores them.
+static void combat_store_pose(PlayerStoredState *out, const Player *player) {
+    const int index = player->loadout_index;
+    out->step_val = player->step_val;
+    out->step_chase = player->step_chase;
+    out->x_dir = player->direction.y; // xD: the yaw (KrunkNative direction.y)
+    out->y_dir = player->direction.x; // yD: the pitch (direction.x)
+    out->crouch_val = roundf(player->crouch_val); // v10 rounds it (v10:170718)
+    out->weapon_index = player->loadout && index >= 0 && index < player->loadout_size ? player->loadout[index] : -2;
+}
+
 // players.js storeState: unshift {time: game.now, h, ah, x, y, z}, then drop every entry at least
 // config.stateHistory old (they are the oldest ones: time only grows).
 void player_store_state(Player *player) {
@@ -2186,6 +2274,7 @@ void player_store_state(Player *player) {
     player->state_history_head = (player->state_history_head + 1) % PLAYER_STATE_HISTORY_MAX;
     player->state_history[player->state_history_head] = (PlayerStoredState) {game->state_now, player->position, player->height,
                                                                              combat_adjusted_height(player)};
+    combat_store_pose(&player->state_history[player->state_history_head], player);
     if (player->state_history_count < PLAYER_STATE_HISTORY_MAX) player->state_history_count++;
 
     while (player->state_history_count > 0 &&
@@ -2226,6 +2315,7 @@ int players_fetch_state(const Player *target, const float ping_ms, PlayerStoredS
     const Game *game = target->game;
     if (!game->lag_comp) { // offline / lag_comp 0: where the target is now
         *out = (PlayerStoredState) {game->state_now, target->position, target->height, combat_adjusted_height(target)};
+        combat_store_pose(out, target);
         return 1;
     }
     if (!target->state_history_count) return 0;
@@ -2251,6 +2341,7 @@ typedef struct {
     float t;
     GameAI *ai;         // players.js shoot / melee: game.AI.ais boxes (authority)
     PlayerStoredState state; // a player hit: the rewound box it was traced against (head / leg zones)
+    int zone;           // v10 hit boxes: 1 + HitKind of the box hit; 0 = the v7 zones by height
 } Hit;
 
 typedef struct {
@@ -2349,6 +2440,7 @@ static void combat_trace(Player *shooter, const vec3 origin, const vec3 dir, con
     if (!include_players) return;
 
     const float state_const = player_get_state_const(shooter);
+    const int posed = hitboxes_active(game); // v10 (not Prop Hunt): posed boxes instead of the padded AABB
 
     for (size_t i = 0; i < game->player_count; i++) {
         Player *other = game->players[i];
@@ -2357,6 +2449,14 @@ static void combat_trace(Player *shooter, const vec3 origin, const vec3 dir, con
         // G = fetchState(list[i], player.getStateConst()): the box where the shooter saw it
         PlayerStoredState state;
         if (!players_fetch_state(other, state_const, &state)) continue;
+
+        if (posed) { // v10.0.2: the posed hit boxes (shared/src/hitboxes.c), the zone from the box hit
+            float t;
+            int kind;
+            if (!hitboxes_trace_player(other, &state, origin, dir, 1, &t, &kind)) continue;
+            hit_list_push(hits, (Hit) {NULL, other, t, NULL, state, 1 + kind});
+            continue;
+        }
 
         const float half = other->scale + player_hitbox_pad_w(other);
         const vec3 box_scale = {half * 2.0f, state.adjusted_height + player_hitbox_pad_h(other), half * 2.0f};
@@ -2652,7 +2752,7 @@ void player_kill(Player *player, Player *killer, PlayerKillInfo *kill_info, cons
         killer->kills++;
         if (killer->active) killer->life_kills++; // WP-E: killsL
 
-        if (streaks) {
+        if (streaks && !rules_ranked_no_streaks(game)) { // v10: no kill streaks in ranked (v10:174076)
             killer->streak++;
             killer->kill_streak++;
             killer->real_kill_streak++; // v7.1.4 realKillStreak -> updateStreaks (streak loadout)
@@ -2874,8 +2974,10 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
     const int authority = game_is_authority(game);
     const float range = ray < 0 ? weapon->physical_range : weapon->range;
     if (range <= 0.0f || (!authority && ray >= 0)) return;
+    // v10.0.2 noDmg (Compressor): the rays trace nothing and the shot is no "s" stat (v10:172690, 172853)
+    const int no_damage = weapon->no_dmg;
     if (authority && ray >= 0 && player->active) player->life_shots++; // WP-E: totShotsL (the death screen's "Shots Fired")
-    if (authority && ray >= 0) game_inc_stat(game, player, "s");      // WP-E part 2c: incStat("s")
+    if (authority && ray >= 0 && !no_damage) game_inc_stat(game, player, "s"); // WP-E part 2c: incStat("s")
 
     const vec3 origin = {player->position.x, shot_height, player->position.z};
     const vec3 dir = combat_shot_vector(range, pitch, yaw);
@@ -2886,9 +2988,16 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
     const float impulse_mlt = game->config.impulse_mlt * (mode_config && mode_config->has_impulse_mlt ? mode_config->impulse_mlt : 1.0f);
     const int no_impulse_dist = mode_config && mode_config->no_impulse_dist;
 
-    // nonObjImpulse modes push the physPow ray a fixed 0.04 (x1 with noImpulseDist), hit or not
-    if (ray < 0 && mode_config && mode_config->non_obj_impulse) {
-        const float impulse = (no_impulse_dist ? 1.0f : 0.04f) * impulse_mlt;
+    // nonObjImpulse modes push the physPow ray a fixed 0.04 (x1 with noImpulseDist), hit or not.
+    // v10.0.2 (Ruleset.weapon_impulse, v10:172807-172840): also a weapon's nonObjImpulse, or its
+    // physPull with the aim input held, and the push is physPow; physPull + aim pulls (x -1).
+    // Compressor: left click pushes the shooter back, right click pulls it forward; nobody else moves.
+    const int weapon_impulse = game_ruleset(game)->weapon_impulse;
+    const int pull = weapon_impulse && weapon->phys_pull && player->shot_aim;
+    const int non_obj = (mode_config && mode_config->non_obj_impulse) || (weapon_impulse && (weapon->non_obj_impulse || pull));
+    if (ray < 0 && non_obj) {
+        const float power = weapon_impulse ? weapon->physical_power : 0.04f;
+        const float impulse = (no_impulse_dist ? 1.0f : power) * impulse_mlt * (pull ? -1.0f : 1.0f);
         const vec3 push = {impulse * sinf(yaw + (float) M_PI) * cosf(pitch), impulse * sinf(pitch),
                            impulse * cosf(yaw + (float) M_PI) * cosf(pitch)};
         player->velocity.x -= push.x;
@@ -2901,11 +3010,11 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
         }
     }
 
-    combat_trace(player, origin, dir, authority && ray >= 0, &hits);
+    if (!no_damage) combat_trace(player, origin, dir, authority && ray >= 0, &hits);
     hit_list_sort(&hits);
     // map-logic WP-B: shoot raycasts the terrain too (players.js:2982-2990; pushed first, so it wins
     // ties): nothing behind it is reached and the tracer ends on it
-    const float terrain_t = world_terrain_fraction(game, origin, dir);
+    const float terrain_t = no_damage ? 0.0f : world_terrain_fraction(game, origin, dir);
     if (terrain_t > 0.0f) {
         size_t kept = 0;
         for (size_t i = 0; i < hits.count; i++)
@@ -2913,7 +3022,7 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
         hits.count = kept;
         hit_list_push(&hits, (Hit) {NULL, NULL, terrain_t}); // the terrain: no object, player or AI
     }
-    if (authority && ray >= 0) { // map-logic WP-H: canShoot spawnables (Skull EE) before the first wall
+    if (authority && ray >= 0 && !no_damage) { // map-logic WP-H: canShoot spawnables (Skull EE) before the first wall
         float stop_t = 2.0f;
         for (size_t i = 0; i < hits.count && stop_t > 1.0f; i++)
             if (!hits.items[i].player && !hits.items[i].ai) stop_t = hits.items[i].t;
@@ -2934,7 +3043,7 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
         if (ray < 0) {
             // v7.1.4: no object push in nonObjImpulse modes, nor off noPCol / noImpulse ("ip") objects
             const Object *object = hit->object;
-            if ((mode_config && mode_config->non_obj_impulse) || (object && (object->no_player_col || object->no_impulse)) || hit->t < 0.0f) break;
+            if (non_obj || (object && (object->no_player_col || object->no_impulse)) || hit->t < 0.0f) break;
             const float impulse = (no_impulse_dist ? 1.0f : 1.0f - hit->t) * weapon->physical_power * impulse_mlt;
             const vec3 push = {impulse * sinf(yaw + (float) M_PI) * cosf(pitch), impulse * sinf(pitch),
                                impulse * cosf(yaw + (float) M_PI) * cosf(pitch)};
@@ -2965,8 +3074,10 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
             // minus the crouch drop, x weapon hsMlt (unless noHeadShot) / lsMlt (not on heads).
             // KN bug fixed: noHeadShot was ignored (Auto Pistol, 5.2). v7 bug fixed: v7 measures the
             // zones from the target's live position, not the rewound box the ray hit.
-            const int head = player_hit_is_head(victim, hit->state.position.y, hit->state.adjusted_height, hit_y);
-            const int leg = player_hit_is_leg(victim, hit->state.position.y, hit_y);
+            // v10.0.2: the box's hitType instead (headshot / legshot; arms are torsoshot, v10:172979)
+            const int head = hit->zone ? hit->zone - 1 == HIT_KIND_HEAD
+                                       : player_hit_is_head(victim, hit->state.position.y, hit->state.adjusted_height, hit_y);
+            const int leg = hit->zone ? hit->zone - 1 == HIT_KIND_LEG : player_hit_is_leg(victim, hit->state.position.y, hit_y);
             dealt = player_hit_damage(game, weapon, dealt, head, leg);
 
             // effectOnHit: floor(charge * 10) stacks (no stock hitscan weapon has one)

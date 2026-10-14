@@ -352,6 +352,50 @@ static const unsigned char k_effect_keys[] = {
     0xf, // 9 Strength
 };
 
+// Krunker v10.0.2 adds one server and one class option (v10:16931 "Hurtbox Scale", sub "Hitboxes",
+// def 1, 1..2; v10:17699 the class "Hurtbox Scale", sub "Hitbox", cat 1): the hit boxes' scale
+// (shared/src/hitboxes.c). The v10 ruleset's tables are v7's with them inserted after hitBoxPad /
+// hbH, built once; v7's tables are k_server_options / k_class_options unchanged.
+static const GameConfigOption k_server_hurtbox =
+    {"hurtboxScale", "Hurtbox Scale", "Hitboxes", NULL, GC_NUM, GC_STORE_FLOAT, GC_DONT_CHANGE, GC_HT(0) | GC_HT(1), .def = 1.0f, .min = 1.0f, .max = 2.0f, .step = 0.1f, .offset = offsetof(GameConfig, hurtbox_scale)};
+static const GameConfigOption k_class_hurtbox =
+    {"hurtboxScale", "Hurtbox Scale", NULL, NULL, GC_NUM, GC_STORE_CLS_FLOAT, GC_HAS_DEF, 0, .def = 1.0f, .min = 1.0f, .max = 2.0f, .step = 0.1f, .cat = 1, .offset = offsetof(ClassConfig, hurtbox_scale), .bit = 0, .unit = U_SAME};
+#define GC_COUNT(a) (sizeof(a) / sizeof((a)[0]))
+static GameConfigOption g_server_options_v10[GC_COUNT(k_server_options) + 1];
+static GameConfigOption g_class_options_v10[GC_COUNT(k_class_options) + 1];
+
+static void gc_insert_after(GameConfigOption *out, const GameConfigOption *in, const size_t count, const char *after, const GameConfigOption *extra) {
+    size_t n = 0;
+    for (size_t i = 0; i < count; i++) {
+        out[n++] = in[i];
+        if (!strcmp(in[i].var, after)) out[n++] = *extra;
+    }
+}
+
+static int gc_v10_tables(void) {
+    static int built;
+    if (ruleset_current()->id != RULESET_V10_0_2) return 0;
+    if (!built) {
+        gc_insert_after(g_server_options_v10, k_server_options, GC_COUNT(k_server_options), "hitBoxPad", &k_server_hurtbox);
+        gc_insert_after(g_class_options_v10, k_class_options, GC_COUNT(k_class_options), "hbH", &k_class_hurtbox);
+        built = 1;
+    }
+    return 1;
+}
+
+// The current ruleset's serverConfig / classConfig rows.
+static const GameConfigOption *gc_server_options(size_t *count) {
+    const int v10 = gc_v10_tables();
+    *count = v10 ? GC_COUNT(g_server_options_v10) : GC_COUNT(k_server_options);
+    return v10 ? g_server_options_v10 : k_server_options;
+}
+
+static const GameConfigOption *gc_class_options(size_t *count) {
+    const int v10 = gc_v10_tables();
+    *count = v10 ? GC_COUNT(g_class_options_v10) : GC_COUNT(k_class_options);
+    return v10 ? g_class_options_v10 : k_class_options;
+}
+
 static const struct {
     const GameConfigOption *table;
     size_t count;
@@ -367,8 +411,12 @@ const GameConfigOption *game_config_options(const GameConfigTable table, size_t 
         if (count) *count = 0;
         return NULL;
     }
-    if (count) *count = k_tables[table].count;
-    return k_tables[table].table;
+    size_t n = k_tables[table].count;
+    const GameConfigOption *options = k_tables[table].table;
+    if (table == GAME_CONFIG_SERVER) options = gc_server_options(&n);
+    if (table == GAME_CONFIG_CLASS) options = gc_class_options(&n);
+    if (count) *count = n;
+    return options;
 }
 
 const GameConfigOption *game_config_find_option(const GameConfigTable table, const char *var) {
@@ -616,8 +664,10 @@ void game_config_sync_teams(GameConfig *g) {
 void game_config_defaults(GameConfig *g, const int host_index) {
     if (!g) return;
     const int comp = gc_host_comp(host_index);
-    for (size_t i = 0; i < sizeof(k_server_options) / sizeof(k_server_options[0]); i++) {
-        gc_read_option(g, &k_server_options[i], NULL, GAME_CONFIG_CLAMP_DEDICATED, comp);
+    size_t option_count;
+    const GameConfigOption *options = gc_server_options(&option_count);
+    for (size_t i = 0; i < option_count; i++) {
+        gc_read_option(g, &options[i], NULL, GAME_CONFIG_CLAMP_DEDICATED, comp);
     }
     g->host_type = host_index >= 0 && host_index < GAME_HOST_TYPE_COUNT ? host_index : GAME_HOST_CUSTOM;
     g->comp = (unsigned char) comp;
@@ -634,8 +684,10 @@ void game_config_read(GameConfig *g, const cJSON *cfg, const int clamp, const in
     if (!g) return;
     const int comp = gc_host_comp(host_index);
     game_config_defaults(g, host_index);
-    for (size_t i = 0; i < sizeof(k_server_options) / sizeof(k_server_options[0]); i++) {
-        const GameConfigOption *o = &k_server_options[i];
+    size_t option_count;
+    const GameConfigOption *options = gc_server_options(&option_count);
+    for (size_t i = 0; i < option_count; i++) {
+        const GameConfigOption *o = &options[i];
         const cJSON *item = gc_item(cfg, o->var);
         gc_read_option(g, o, item, clamp, comp);
         if (item && !strcmp(o->var, "hitBoxPad")) g->hitbox_pad_set = 1;
@@ -649,8 +701,10 @@ void game_config_read(GameConfig *g, const cJSON *cfg, const int clamp, const in
 int game_config_merge(GameConfig *g, const cJSON *cfg, const int clamp) {
     if (!g || !cJSON_IsObject(cfg)) return 0;
     int applied = 0;
-    for (size_t i = 0; i < sizeof(k_server_options) / sizeof(k_server_options[0]); i++) {
-        const GameConfigOption *o = &k_server_options[i];
+    size_t option_count;
+    const GameConfigOption *options = gc_server_options(&option_count);
+    for (size_t i = 0; i < option_count; i++) {
+        const GameConfigOption *o = &options[i];
         const cJSON *item = gc_item(cfg, o->var);
         if (!item) continue;
         if (o->kind == GC_NUM && !gc_is_number(item)) continue; // a key of the wrong type keeps the value
@@ -666,8 +720,10 @@ int game_config_merge(GameConfig *g, const cJSON *cfg, const int clamp) {
 cJSON *game_config_write(const GameConfig *g) {
     cJSON *out = cJSON_CreateObject();
     if (!out || !g) return out;
-    for (size_t i = 0; i < sizeof(k_server_options) / sizeof(k_server_options[0]); i++) {
-        const GameConfigOption *o = &k_server_options[i];
+    size_t option_count;
+    const GameConfigOption *options = gc_server_options(&option_count);
+    for (size_t i = 0; i < option_count; i++) {
+        const GameConfigOption *o = &options[i];
         if (!strcmp(o->var, "hitBoxPad") && !g->hitbox_pad_set) continue; // the default (comp: defC)
         if (o->kind == GC_INPUT) {
             cJSON_AddStringToObject(out, o->var, (const char *) g + o->offset);
@@ -764,7 +820,9 @@ const char *game_config_validate(const cJSON *config) {
                 return err;
             }
         }
-        if (++count > (int) (sizeof(k_server_options) / sizeof(k_server_options[0])) + 1) return "Settings Mismatch.";
+        size_t option_count;
+        gc_server_options(&option_count);
+        if (++count > (int) option_count + 1) return "Settings Mismatch.";
     }
     const char *e = gc_validate_overrides(gc_item(config, "weps"), GAME_CONFIG_WEAPON, "weaponConfig");
     if (!e) e = gc_validate_overrides(gc_item(config, "cls"), GAME_CONFIG_CLASS, "classConfig");
@@ -815,8 +873,10 @@ cJSON *game_config_setup(const int host_index, const cJSON *requested, const cJS
         return NULL;
     }
 
-    for (size_t i = 0; i < sizeof(k_server_options) / sizeof(k_server_options[0]); i++) {
-        const GameConfigOption *o = &k_server_options[i];
+    size_t option_count;
+    const GameConfigOption *options = gc_server_options(&option_count);
+    for (size_t i = 0; i < option_count; i++) {
+        const GameConfigOption *o = &options[i];
         if (!o->host_types || (o->host_types & GC_HT(host))) {
             if ((o->host_types ? o->host_types : GC_HT(0)) & GC_HT(host)) {
                 const cJSON *item = gc_item(req, o->var);
@@ -1266,20 +1326,21 @@ static void gc_apply_class_key(ClassConfig *c, const GameConfigOption *o, const 
 // v7 bug, fixed here) and the Survivor's secondary. Every key applies here.
 static void gc_apply_classes(Game *game, const cJSON *cls) {
     if (!cls || !game->classes) return;
-    const size_t key_count = sizeof(k_class_options) / sizeof(k_class_options[0]);
+    size_t key_count;
+    const GameConfigOption *class_options = gc_class_options(&key_count);
     const cJSON *entry;
     cJSON_ArrayForEach(entry, cls) {
         const int id = gc_entry_id(entry, game->class_count);
         if (id < 0 || !cJSON_IsObject(entry)) continue;
         ClassConfig *c = &game->classes[id];
         for (size_t k = 0; k < key_count; k++) {
-            const cJSON *item = gc_item(entry, k_class_options[k].var);
+            const cJSON *item = gc_item(entry, class_options[k].var);
             if (!item) continue;
             if (!c->ext.set) {
                 c->ext = g_default_class_overrides;
                 c->ext.set = 1;
             }
-            gc_apply_class_key(c, &k_class_options[k], item);
+            gc_apply_class_key(c, &class_options[k], item);
         }
     }
 }

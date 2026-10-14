@@ -517,7 +517,9 @@ else ()
     # charge_grapple_test: the Charge Rifle charge / blast and the Grappler rope against v7.1.4
     # piss_test: the KrunkNative Piss's stream, puddles, caps and their SPAWNED_OBJ replication
     # ruleset_test: the v7 / v10 ruleset seam, KN id ranges and the NET_PACKET_EXT envelope
-    foreach (wpb_test weapons_v7_test combat_test charge_grapple_test piss_test ruleset_test)
+    # hitboxes_test: the v10.0.2 posed hit boxes (shared/src/hitboxes.c) at known poses
+    # v10_gameplay_test: the v10.0.2-only gameplay (Boulder, Compressor, Stalker rework, ranked rules)
+    foreach (wpb_test weapons_v7_test combat_test charge_grapple_test piss_test ruleset_test hitboxes_test v10_gameplay_test)
         add_executable(${wpb_test} ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/${wpb_test}.c)
         target_link_libraries(${wpb_test} PRIVATE m)
         if (CMAKE_SYSTEM_NAME STREQUAL "Windows")

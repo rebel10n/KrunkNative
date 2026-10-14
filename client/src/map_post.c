@@ -479,7 +479,7 @@ static void post_pickups_frame(const Game *game) {
             const cJSON *ntx = p->object->raw ? cJSON_GetObjectItem(p->object->raw, "ntx") : NULL;
             p->mesh = state.weapon >= 0 ? prefab_pickup_mesh(state.weapon, ntx && !cJSON_IsNull(ntx), &scale) : NULL;
             if (p->mesh) {
-                const int equipment = state.weapon < WEAPON_COUNT && rules_weapon(state.weapon) && rules_weapon(state.weapon)->equipment;
+                const int equipment = state.weapon < rules_krunker_weapon_count() && rules_weapon(state.weapon) && rules_weapon(state.weapon)->equipment;
                 const vec3 r = p->object->rotation;
                 p->mesh->transform.rotation_order = ROTATION_ORDER_YXZ;
                 p->mesh->transform.rotation = (vec3) {r.x - (equipment ? 0.0f : (float) M_PI / 2.0f), r.z, r.y - (equipment ? (float) M_PI / 2.0f : 0.0f)};

@@ -1524,7 +1524,7 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
         const double clo = lvl > 1 ? pow(lvl / 0.03, 2) : 0, chi = pow((lvl + 1) / 0.03, 2);
         lvl = lvl + 1 > 1 ? lvl + 1 : 1;
         const int w = cc->loadout ? cc->loadout[0] : -1;
-        const char *weapon = w >= 0 && w < WEAPON_COUNT && rules_weapon(w) && rules_weapon(w)->name ? rules_weapon(w)->name : "";
+        const char *weapon = w >= 0 && w < rules_krunker_weapon_count() && rules_weapon(w) && rules_weapon(w)->name ? rules_weapon(w)->name : "";
         sb_appendf(&sb, "<div class='classCard'><img class='classImg' src='./textures/classes/icon_%zu.png'/><div class='className'>%s</div><div class='classWeap'>%s</div><div class='classXPBar'><div class='clsXPBarC' style='width:%d%%'></div><div class='clsXPBarV'>%lld / %lld</div></div><div class='classLvl'>Lvl %d</div></div>",
                    c, cc->name, weapon, prog, (long long) (xp - clo), (long long) (chi - clo), lvl);
     }
@@ -2071,7 +2071,7 @@ static const char *skin_type_label(const ViewerSkin *s) {
         case 5: return "Dye Item";
         case 6: return "Waist Item";
         case 7: return "Face Item";
-        default: return s->weapon >= 1 && s->weapon <= WEAPON_COUNT && rules_weapon(s->weapon - 1) ? rules_weapon(s->weapon - 1)->name : "";
+        default: return s->weapon >= 1 && s->weapon <= rules_krunker_weapon_count() && rules_weapon(s->weapon - 1) ? rules_weapon(s->weapon - 1)->name : "";
     }
 }
 
@@ -2790,7 +2790,7 @@ static void items_search(const char *text) {
         const ViewerSkin *sk = &g_viewer_skins[i];
         int hit = !text || !*text;
         if (!hit && sk->name && contains_ci_str(sk->name, text)) hit = 1;
-        if (!hit && sk->weapon >= 1 && sk->weapon <= WEAPON_COUNT && rules_weapon(sk->weapon - 1) && contains_ci_str(rules_weapon(sk->weapon - 1)->name, text)) hit = 1;
+        if (!hit && sk->weapon >= 1 && sk->weapon <= rules_krunker_weapon_count() && rules_weapon(sk->weapon - 1) && contains_ci_str(rules_weapon(sk->weapon - 1)->name, text)) hit = 1;
         if (!hit && sk->creator && contains_ci_str(sk->creator, text)) hit = 1;
         if (sk->flags & VS_BLOCKED) hit = 0;
         if (hit) g_items.list[g_items.count++] = i;
@@ -2820,7 +2820,7 @@ static void items_filter_change(const HtmlElem sel) {
         }
     } else if (!strcmp(id, "itemWeapon")) {
         if (!strcmp(text, "All")) items_filter("weapon", "all");
-        for (int i = 0; i < WEAPON_COUNT; i++) {
+        for (int i = 0; i < rules_krunker_weapon_count(); i++) {
             if (rules_weapon(i) && rules_weapon(i)->name && !strcmp(rules_weapon(i)->name, text)) {
                 char v[8];
                 snprintf(v, sizeof(v), "%d", i + 1);
@@ -2855,7 +2855,7 @@ static void items_page(const char *a, const char *k) {
     sb_append(&sb, "<select id='itemRarity' onchange='itemFilterChange(this)'><option disabled selected>Rarity</option><option onclick='itemFilter(`rarity`,`all`)'>All</option>");
     for (int i = 0; i < g_viewer_rarity_count; i++) sb_appendf(&sb, "<option onclick='itemFilter(`rarity`,%d)'>%s</option>", i, g_viewer_rarities[i].name);
     sb_append(&sb, "</select><select id='itemWeapon' onchange='itemFilterChange(this)'><option disabled selected>Weapon</option><option onclick='itemFilter(`weapon`,`all`)'>All</option>");
-    for (int i = 0; i < WEAPON_COUNT; i++) {
+    for (int i = 0; i < rules_krunker_weapon_count(); i++) {
         if (!rules_weapon(i) || rules_weapon(i)->melee || rules_weapon(i)->equipment) continue;
         sb_appendf(&sb, "<option onclick='itemFilter(`weapon`,%d)'>%s</option>", i + 1, rules_weapon(i)->name);
     }
@@ -3024,7 +3024,7 @@ static void filter_state_save(const int sort) {
         snprintf(id, sizeof(id), "rar%s%d", pre, r);
         if (el(id)) st->checked[0][r] = html_dom_get_checked(el(id));
     }
-    for (int r = 0; r < WEAPON_COUNT && r < 40; r++) {
+    for (int r = 0; r < rules_krunker_weapon_count() && r < 40; r++) {
         snprintf(id, sizeof(id), "wep%s%d", pre, r);
         if (el(id)) st->checked[1][r] = html_dom_get_checked(el(id));
     }
@@ -3074,7 +3074,7 @@ static void market_filter_popup(const int sort) {
                    g_viewer_rarities[a].name, pre, a, st->checked[0][a] ? " checked" : "");
     }
     sb_appendf(&sb, "</div><div class='filterDiv' id='%sDiv_1' style='display:none;'>", nav);
-    for (int a = 0; a < WEAPON_COUNT && a < 40; ++a) {
+    for (int a = 0; a < rules_krunker_weapon_count() && a < 40; ++a) {
         if (!filter_weapon_shown(a)) continue;
         sb_appendf(&sb, "<div class='wepSel' style='color:#fff'>%s<label class='filterSwitch'><input type='checkbox' onchange='retainChecked(this)' id='wep%s%d'%s><span class='filterSlider'></span></label></div>",
                    rules_weapon(a)->name, pre, a, st->checked[1][a] ? " checked" : "");
@@ -3108,7 +3108,7 @@ static void market_run_filter(const int sort) {
         snprintf(key, sizeof(key), "%d", r);
         if (st->checked[0][r]) cJSON_AddNumberToObject(rar, key, 1);
     }
-    for (int r = 0; r < WEAPON_COUNT && r < 40; ++r) {
+    for (int r = 0; r < rules_krunker_weapon_count() && r < 40; ++r) {
         snprintf(key, sizeof(key), "%d", r + 1);
         if (filter_weapon_shown(r) && st->checked[1][r]) cJSON_AddNumberToObject(wep, key, 1);
     }

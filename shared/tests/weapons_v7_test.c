@@ -2,6 +2,12 @@
 // native tables carry, against the JSON fixtures tools/kref/v7-dump.js writes from the v7 source
 // (shared/tests/data/v7/*.json). Times are compared in seconds (JS ms / 1000), recoil per s
 // (JS per ms * 1000), as KrunkNative stores them. Run from the repository root.
+//
+// With the argument "v10" it checks the v10.0.2 ruleset instead: the same checks on
+// shared/tests/data/v10/{weapons,classes}.json (tools/kref/v10-fixtures.py from the statically
+// extracted v10 bundle; classConfig / weaponConfig hold the same keys in v10, so the same field
+// table applies) and the v10 ruleset's own weapons / classes. The v10 class table carries the
+// v10-only cls hurtboxScale (1.0) and the v10 weapon table the v10-only Boulder / Compressor.
 #include <shared.h>
 #include <math.h>
 #include <stddef.h>
@@ -14,10 +20,23 @@ static int checks = 0;
 
 #define CHECK(cond, ...) do { checks++; if (!(cond)) { failures++; printf("  FAIL: "); printf(__VA_ARGS__); printf("\n"); } } while (0)
 
+static const char *g_version = "v7"; // "v7" (default) or "v10": which ruleset and fixtures
+static int g_weapon_count = WEAPON_COUNT;
+
 static cJSON *load_fixture(const char *name) {
+    // v10 has its own weapons.json / classes.json; the effects, streaks, attachments, scopes and
+    // upgradeWeapons tables are the v7 ones under v10 too (the v10 extractor diff finds no change;
+    // upgrades: v10's table only renames the entries and drops their anim / funcOnHit, and
+    // weapon_upgraded() builds from v7's base table, shared/src/weapons/upgraded.c), so those
+    // fixtures come from data/v7.
+    static const char *const from_v7[] = {"effects", "streaks", "attach", "aimRecticles", "upgradeWeapons"};
+    const char *dir = g_version;
+    for (size_t i = 0; i < sizeof(from_v7) / sizeof(from_v7[0]); i++) {
+        if (!strcmp(name, from_v7[i])) dir = "v7";
+    }
     char path[256];
     for (int up = 0; up < 2; up++) {
-        snprintf(path, sizeof(path), "%sshared/tests/data/v7/%s.json", up ? "../" : "", name);
+        snprintf(path, sizeof(path), "%sshared/tests/data/%s/%s.json", up ? "../" : "", dir, name);
         size_t length;
         unsigned char *data;
         if (read_file(path, &data, &length)) continue;
@@ -25,7 +44,8 @@ static cJSON *load_fixture(const char *name) {
         free(data);
         if (parsed) return parsed;
     }
-    printf("missing fixture %s.json (run from the repository root; regenerate with node tools/kref/v7-dump.js)\n", name);
+    printf("missing fixture %s/%s.json (run from the repository root; v7: node tools/kref/v7-dump.js,"
+           " v10: tools/kref/v10-fixtures.py)\n", dir, name);
     exit(1);
 }
 
@@ -91,7 +111,10 @@ static void check_weapon_entry(const Weapon *w, const int id, const cJSON *js, c
     const char *sound = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(js, "sound"));
     CHECK((!src && !w->src) || (src && w->src && !strcmp(src, w->src)), "%s src", w->name);
     CHECK(icon && w->icon && !strcmp(icon, w->icon), "%s icon", w->name);
-    CHECK(sound && w->sound && !strcmp(sound, w->sound), "%s sound %s (v7 %s)", w->name, w->sound ? w->sound : "(null)", sound ? sound : "?");
+    // sound: no v7 weapon has an empty one; v10's Boulder ships 'sound': "" (it never fires), which
+    // KrunkNative keeps as NULL (no sound to play)
+    CHECK((sound && w->sound && !strcmp(sound, w->sound)) || (sound && !sound[0] && !w->sound), "%s sound %s (v7 %s)", w->name,
+          w->sound ? w->sound : "(null)", sound ? sound : "?");
 
     for (size_t i = 0; i < sizeof(k_weapon_floats) / sizeof(k_weapon_floats[0]); i++) {
         const FloatField *f = &k_weapon_floats[i];
@@ -111,7 +134,11 @@ static void check_weapon_entry(const Weapon *w, const int id, const cJSON *js, c
     CHECK(w->kill_score == (cJSON_IsArray(kill) ? (int) cJSON_GetArrayItem(kill, 1)->valuedouble : 0), "%s kill score %d", w->name, w->kill_score);
     CHECK(near(w->leg_mlt ? w->leg_mlt : 0.5, num(js, "lsMlt", 0.5)), "%s lsMlt %g", w->name, (double) w->leg_mlt);
     CHECK(near(w->move_spread ? w->move_spread : 1.0, num(js, "movSpread", 1.0)), "%s movSpread %g", w->name, (double) w->move_spread);
-    CHECK(near(w->charge_mlt ? w->charge_mlt : 0.9, num(js, "chrgMlt", 0.9)), "%s chrgMlt", w->name);
+    // chrgMlt: 0 in the C table means the 0.9 default. v10's Compressor ships an explicit 'chrgMlt': 0
+    // (v10:101887) but never charges (chrgTime 0), so the two encodings cannot differ there.
+    const double chrg_mlt = num(js, "chrgMlt", 0.9);
+    const int chrg_unused = chrg_mlt == 0.0 && !w->charge_mlt && !w->charge_time;
+    CHECK(chrg_unused || near(w->charge_mlt ? w->charge_mlt : 0.9, chrg_mlt), "%s chrgMlt", w->name);
     CHECK(w->effect_on_hit == (cJSON_GetObjectItemCaseSensitive(js, "effectOnHit") ? (int) num(js, "effectOnHit", 0) + 1 : 0), "%s effectOnHit", w->name);
     CHECK(w->deployable == (cJSON_GetObjectItemCaseSensitive(js, "deployable") ? (int) num(js, "deployable", 0) + 1 : 0), "%s deployable", w->name);
 
@@ -127,6 +154,10 @@ static void check_weapon_entry(const Weapon *w, const int id, const cJSON *js, c
     for (size_t i = 0; i < sizeof(flags) / sizeof(flags[0]); i++) {
         CHECK(!!have[flags[i].bit] == flag(js, flags[i].js), "%s %s = %d", w->name, flags[i].js, have[flags[i].bit]);
     }
+    // v10.0.2 weaponConfig keys (no v7 weapon has them, so these are no-ops under v7)
+    CHECK(!!w->no_dmg == flag(js, "noDmg") && !!w->phys_pull == flag(js, "physPull") && !!w->non_obj_impulse == flag(js, "nonObjImpulse") &&
+          !!w->r_shoot == flag(js, "rShoot"), "%s noDmg / physPull / nonObjImpulse / rShoot", w->name);
+    CHECK(near(w->gravity_mlt, num(js, "gravMlt", 0)), "%s gravMlt %g", w->name, (double) w->gravity_mlt);
     CHECK(w->has_attach == (cJSON_GetObjectItemCaseSensitive(js, "attach") != NULL && !cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(js, "attach"))), "%s attach", w->name);
 
     // pj_* (projectile_config): every weapon with a projectile block
@@ -189,9 +220,20 @@ static void check_class(const int id, const cJSON *js) {
     for (int k = 0; k < 6; k++) CHECK(c->colors[k] == (int) cJSON_GetArrayItem(colors, k)->valuedouble, "%s colour %d", c->name, k);
     const cJSON *txts = cJSON_GetObjectItemCaseSensitive(js, "txts");
     CHECK(c->text_count == (cJSON_IsArray(txts) ? cJSON_GetArraySize(txts) : 0), "%s txts", c->name);
+    // v10.0.2 classConfig (v10:17699): the hit boxes' scale. The v7 fixtures have no such key, so the
+    // check is a no-op there (v7's class table leaves the field 0 = 1)
+    CHECK(near(c->hurtbox_scale ? c->hurtbox_scale : 1.0, num(js, "hurtboxScale", 1)), "%s hurtboxScale %g", c->name, (double) c->hurtbox_scale);
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    if (argc > 1 && !strcmp(argv[1], "v10")) {
+        g_version = "v10";
+        CHECK(ruleset_set_current(RULESET_V10_0_2), "the v10 ruleset is built");
+        CHECK(rules_hit_model() == HIT_MODEL_V10 && ruleset_current()->ranked.kr_mlt == 2.0f, "the v10 ruleset's hit model / ranked rules");
+        g_weapon_count = rules_krunker_weapon_count(); // 31: Boulder and Compressor included
+    } else {
+        CHECK(rules_hit_model() == HIT_MODEL_V7 && ruleset_current()->ranked.kr_mlt == 1.0f, "the v7 ruleset's hit model / ranked rules");
+    }
     cJSON *weapons = load_fixture("weapons");
     cJSON *classes = load_fixture("classes");
     cJSON *effects = load_fixture("effects");
@@ -200,8 +242,8 @@ int main(void) {
     cJSON *scopes = load_fixture("aimRecticles");
     cJSON *upgrades = load_fixture("upgradeWeapons");
 
-    CHECK(cJSON_GetArraySize(weapons) == WEAPON_COUNT, "weapon count %d, v7 %d", WEAPON_COUNT, cJSON_GetArraySize(weapons));
-    for (int i = 0; i < WEAPON_COUNT && i < cJSON_GetArraySize(weapons); i++) check_weapon(i, cJSON_GetArrayItem(weapons, i));
+    CHECK(cJSON_GetArraySize(weapons) == g_weapon_count, "%s weapon count %d, %d", g_version, g_weapon_count, cJSON_GetArraySize(weapons));
+    for (int i = 0; i < g_weapon_count && i < cJSON_GetArraySize(weapons); i++) check_weapon(i, cJSON_GetArrayItem(weapons, i));
 
     // upgradeWeapons.js (krumMachine): the same checks on the upgraded table
     CHECK(cJSON_GetArraySize(upgrades) == WEAPON_COUNT, "upgraded weapon count");

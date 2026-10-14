@@ -773,6 +773,7 @@ typedef struct {
     int face;              // face: class face store item
     float hitbox_pad_w;    // hbS: added to the game's hitBoxPad sideways (player.hitboxPadW)
     float hitbox_pad_h;    // hbH: added to the game's hitBoxPad on top (player.hitboxPadH)
+    float hurtbox_scale;   // v10.0.2 cls hurtboxScale (1..2, 0 = 1): the posed hit boxes' scale (shared/src/hitboxes.c)
     ClassMovement movement; // WP-A
     ClassOverrides ext;    // WP-E: the other cls[id] keys (camera, model, vehicle, shooting), read via class_overrides()
 } ClassConfig;
@@ -1109,7 +1110,25 @@ typedef struct {
     vec3 position;     // x, y, z (feet)
     float height;      // h
     float adjusted_height; // ah (v7.1.4): height with the head scaled by headMlt, the hit box top
+    // ---- v10.0.2 stateHistory (players.storeState, v10:170708): the fields the posed hit boxes
+    // need (shared/src/hitboxes.c). v7 states leave them 0 (the v7 AABB path does not read them).
+    float step_val;    // sV (stepVal)
+    float step_chase;  // stepChase
+    float x_dir;       // xD (xDire)
+    float y_dir;       // yD (yDire)
+    float crouch_val;  // cV, rounded to 0 / 1 in v10
+    int weapon_index;  // loadout[loadoutIndex] (-2 none: v10 stores undefined)
 } PlayerStoredState;
+
+// v10.0.2 Stalker camping (stalk.update, shared/src/modes/mode_rules.c mode_update_stalk_v10)
+typedef struct {
+    unsigned char has_origin:1;   // campOriginPos set
+    unsigned char has_effect:1;   // hasCampEffect (Dizzy given)
+    vec3 origin;                  // campOriginPos
+    float timer;                  // campTimer (s)
+    float remove_timer;           // campEffectRemoveTimer (s)
+    double left_at;               // leftCampAreaTime (game time, < 0 none)
+} PlayerStalkerCamp;
 
 typedef struct Player_t {
     struct Game_t* game;
@@ -1185,6 +1204,7 @@ typedef struct Player_t {
     unsigned char recon_snap:1;
     unsigned char recon_noclip:1; // the noclip the last "l" told the owner (a flip snaps at once)
     unsigned char has_shot_vel_obj:1;
+    unsigned char shot_aim:1;       // v10 shoot(..., rMouse): the aim input held at this shot (physPull, Compressor)
     vec3 shot_vel_obj;
     unsigned char has_shot_grap_obj:1; // shot_grap_obj: this input's input.grapObj (tryGrapple, client)
     PlayerGrapple shot_grap_obj;
@@ -1264,6 +1284,15 @@ typedef struct Player_t {
     float step_val;
     float step_chase;
     unsigned char step_dir_neg:1; // Krunker stepDir: 0 = +1, 1 = -1 (flips at +-PI/2)
+
+    // ---- v10.0.2 Stalker rework (GameModeConfig.stalker_v10; v10:168968-169434, 169664-169685,
+    // 169754-169764, 170078, 170153-170154): the stalker's leap, wall stick and coyote time
+    unsigned char stuck_to_wall:1;     // stuckToWall: no gravity, no movement
+    unsigned char did_stick_to_wall:1; // didStickToWall: the jump key must be released between sticks
+    unsigned char stuck_to_wall_dir;   // stuckToWallDir: the onWall side (1..4) it stuck to
+    float stalker_coyote_time;         // stalkerCoyoteTime (s): 0.15 after leaving the ground or a wall
+    float last_stalker_leap;           // lastStalkerLeap (game time, s); leaps 3 s apart
+    PlayerStalkerCamp stalker_camp;    // stalk.update camping (Living players)
 
     PlayerTween land_tween;     // landBobY (landTween)
     PlayerTween jump_bob_tween; // jumpBobY (jumpTween, and the landing tween's jumpBobY -> 0)
@@ -1525,6 +1554,8 @@ void player_check_streak(Player*, int slot);        // checkStreak: the streak k
 int game_start_nuke(struct Game_t*, Player*);       // streaks.js Nuke.start: 0 when one is running
 float player_hitbox_pad_w(const Player*);           // hitboxPadW: game hitBoxPad + class hbS
 float player_hitbox_pad_h(const Player*);           // hitboxPadH: game hitBoxPad + class hbH
+float player_hurtbox_scale(const Player*);          // v10 hurtboxScale: game hurtboxScale x class hurtboxScale (1 under v7)
+int player_class_model(const Player*);              // the class config mdl (0 default)
 // Hit zones of a hit at world height `hit_y` on `target` (players.js shoot): head when within
 // headScale * headMlt of the top of the box `base_y + adjusted_height`, legs below legHeight
 // minus the crouch drop. Used by hitscan, melee and projectiles.
@@ -1590,6 +1621,7 @@ typedef struct {
     // chrgWeps (def true). hitbox_pad < 0 is valid (-2..2), so `hitbox_pad_set` marks a value.
     float hitbox_pad;
     unsigned int hitbox_pad_set:1;
+    float hurtbox_scale;              // v10.0.2 hurtboxScale (game setting, def 1, 1..2; 0 = 1) x the class value
     unsigned int no_charge_weapons:1; // !chrgWeps
 
     // ---- WP-E: the rest of the v7.1.4 serverConfig (doc/v7/map-logic.md §4.3.1). shared/src/
@@ -1900,6 +1932,9 @@ struct Ruleset_t;
 
 typedef struct Game_t {
     GameConfig config;
+    // 1 in a ranked match (server/src/accounts.c acc_ranked_setup; v10 game.isRanked): the
+    // ruleset's ranked rules apply (ruleset.h Ruleset.ranked, game_is_ranked); v7 has none.
+    unsigned char is_ranked;
     const struct Ruleset_t *rules; // the ruleset game_configure took the tables from (ruleset.h); NULL before
     GameMode *mode;
     Map *map;

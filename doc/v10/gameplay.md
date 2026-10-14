@@ -19,8 +19,8 @@ How it was compared (repeatable):
 Raw outputs are in `~/.cache/kn-v10/ext/` (`diff-weapons.txt`, `diff-classes.txt`, `diff-modes.txt`,
 `player-fn.txt`, `players-fn.txt`, `game-fn.txt`).
 
-Summary: v10's core movement code and physics constants are the same as v7.1.4. The gameplay changes that
-matter are:
+Summary: v10's core movement code and physics constants are the same as v7.1.4 (but `crouchLean`, 0 in
+v10). The gameplay changes that matter are:
 
 1. Server hit detection now always uses posed oriented-box hitboxes ("complex hitboxes"), with a hurtbox scale.
 2. A weapon balance pass (10 weapons).
@@ -34,7 +34,11 @@ matter are:
 ## 1. Physics constants
 
 v10 inlines most v7 `config.*` movement constants as top-level `var _N = <value>` (v10:16404-19476) and then
-re-exports them in the frozen config object (v10:19477-20114). Every movement value is unchanged:
+re-exports them in the frozen config object (v10:19477-20114). Every movement value is unchanged. A whole-object
+numeric diff of that config against v7's `config.js` finds one gameplay constant that differs: `crouchLean`
+(v10:19602 `0`, v7 config.js:2164 `-(Math.PI * 0.1)`): v10 neither leans a crouched player's model nor its hit
+boxes (`shared/src/rules/v10/constants_v10.c`). The other differing keys are menu / economy values
+(bppCapDay, giftMinLVl, marketMinLVl, tradeMinLvl, minKDFCall, rewardTime, hostTransferLimit, triggerActionLimit).
 
 | constant | v7 (config.js) | v10 | evidence |
 |---|---|---|---|
@@ -69,12 +73,12 @@ obfuscated). Numeric diff: only differences are the Stalker block below plus a c
 |---|---|---|
 | crouch bob while grounded: `bobAnimY -= 0.00112 * dt` (v7: `config.crouchAnim * 1.4 * dt` = 0.0008*1.4 = 0.00112, same value constant-folded) | v10:169705 | player.js:1141 |
 | `isStalker` getter (`mode.teamOptions[team-1] == "Stalker"`) replaces inline team checks in step/jump sounds | v10:168995 | players.js:1617, 1663 |
-| Stalker leap: sprint+jump while grounded / on wall / within 150 ms coyote time, cooldown 3000 ms, impulse 0.15 along the look vector (x,z,y) | v10:169664-169685, coyote `stalkerCoyoteTime = 150` v10:170078 | none (new) |
-| Stalker wall stick: hitting a wall in the air sticks (`stuckToWall`, `stuckToWallDir` 1-4), no gravity while stuck (`_59815 \|\| this.stuckToWall \|\| velocity.y -= ...` v10:169754); jump releases with 0.03 push off the wall | v10:170153-170154 | none |
+| Stalker leap: the aim input (`input[6]`, rMouse) while grounded / stuck to a wall / within the 150 ms coyote time, not in replays and not while attached to an entity, cooldown 3000 ms, impulse 0.15 along the look vector (x,z,y); the client keeps it as the input's `velObj` | v10:169664-169685, coyote `stalkerCoyoteTime = 150` v10:170078 | none (new) |
+| Stalker wall stick: pressing jump against a wall in the air sticks (`stuckToWall`, `stuckToWallDir` 1-4): no gravity and velocity 0 while stuck (v10:169754-169755), no movement (`defaultMovement && !stuckToWall`, v10:169764), no wall jump (v10:170155); the next jump press releases with a 0.03 push off the wall | v10:170153-170154 | none |
 | Stalker: wall-jump allowed on `notWallJ` objects (`!obj.notWallJ \|\| this.isStalker`) | v10:169909 | player.js wall-jump collision |
 | Stalker: hidden from render after 300 ms without moving (`isStalker && noMovT >= 300`) | v10:169790 | none |
 | gravity also scaled by `weapon.gravMlt` (new weapon field, used by Boulder 1.7) | v10:169754 `(this.weapon.gravMlt \|\| 1)` | player.js:1224 (no weapon term) |
-| weapon `rShoot`: primary fire also triggered by the right/aim input (used by Compressor) | v10:170122 `_59781 \|\| this.weapon.rShoot && _59782` | none |
+| weapon `rShoot`: primary fire also triggered by the right/aim input (used by Compressor); `shoot()` gets the aim input as its last argument (v10:170139) for `physPull` | v10:170122 `_59781 \|\| this.weapon.rShoot && _59782` | none |
 | `jump()` sets `didStickToWall = true`, counts a skin stat `jumps` | v10:172012-172015 | players.js:1692 |
 | player-player interact range: `getD3D(..y+5.5.., ..y+5.5..) <= 13.2` (v7 used playerHeight/2 and 2.4*scale, same values) | v10:170175 | player.js:1993 |
 | `poseData.bodyY` lowers the eye/hitbox height (emotes/poses) | v10:170861 | none |
@@ -98,16 +102,23 @@ v10 (players.shoot v10:172884-172906, melee v10:172468, projectiles v10:180106-1
 |---|---|---|
 | broad phase | lineInRect against an AABB x/z +-(scale + 5), y .. y + ah + 5 (fixed padding 5, not hitBoxPad) | v10:172895 |
 | pose | `_40376(game, player, cfg, state)` poses a per-player THREE hierarchy `complexHitboxes` from the lag-comp state (x,y,z,xD,yD,sV,cV,stepChase,weapon) | v10:117728-117831 |
-| hierarchy | `hitboxHoldObj` > `upperBodyHoldObj` at legHeight-crouchDst*cV, pitched by crouchLean*cV + 0.5*yD, containing `headHitbox` (headScale cube, scale hurtboxScale*headMlt), `torsoHitbox` (chestWidth x (playerHeight-headScale-legHeight) x chestScale, scale hurtboxScale) and weapon `arms` (upper/lower arm boxes via IK from weapon hold offsets, `_40318` v10:117609); 4 leg boxes (2 standing, 2 crouched, `userData.active` by cV) swung by step anim `sin(sV)*stepAnim*9` | v10:169443-169498, 117609-117720 |
-| narrow phase | `_40442`: ray from the eye (y + height - cameraHeight) against OBBs (`_40272`, center/halfSize/rotation). Head first, then torso, else arms (stop at first torsoshot), then active legs. If the target is moving, every OBB halfSize grows by +1 | v10:117833-117946 |
-| result | `[distance/range, hitType, hitboxName]`; hitType `headshot` / `torsoshot` / `armshot` / `legshot`; `[null, "nearmiss"]` if no box | v10:117943-117946 |
-| damage | headshot x `weapon.hsMlt \|\| 1.5` (unless `noHeadShot`); `armshot` or `legshot` x `weapon.lsMlt \|\| 0.5`; `config.headshotOnly` zeroes the rest | v10:172979 |
+| hierarchy | `hitboxHoldObj` at (x, y + \|6 sin(sV) stepAnim\|, z) (no bob for a class `mdl`), turned y by xD - 2 sin(sV) stepAnim > `upperBodyHoldObj` at legHeight-crouchDst*cV, pitched by crouchLean*cV + 0.5*yD, containing `headHitbox` (headScale cube at playerHeight - headScale/2 - legHeight + headScale(headMlt-1)/2, scale hurtboxScale*headMlt), `torsoHitbox` (chestWidth x (playerHeight-headScale-legHeight) x chestScale, scale hurtboxScale) and `armHoldObj` (pitched another 0.5*yD, at playerHeight - cameraHeight - legHeight + recoilAnimY*recoilYM*animMult) > `arms` (the viewmodel sway pose) > two arm holders (rotation order YXZ, two-bone IK to the weapon's hold offsets, `_40318` v10:117609) with upper arm / elbow connector / lower arm boxes; `legsHoldObj` with 4 holders in the order right standing, left standing, right crouched, left crouched (`userData.active` by cV), each pitched by `sin(sV)*stepAnim*(1 - cV*crouchAnimMlt) * (1, 3: +1; 0, 2: -1) * 9 (+ -0.6 crouched)`; every box mesh scaled by hurtboxScale | v10:169443-169498, 117609-117831 |
+| narrow phase | `_40442`: ray from the eye (y + height - cameraHeight) against OBBs (`_40272`, center/halfSize/rotation; a box's centre is its mesh's world position). Head first, then torso; the six arm boxes only when the torso missed (stop at the first hit); then the active leg pair (stop at the first hit); the nearest of those. If the target's live velocity is not zero, every box's half size grows by +1 before its scale | v10:117833-117946 |
+| result | `[(distance/range).toFixed(4), hitType, hitboxName]`; `[null, "nearmiss"]` if no box. Every arm box carries hitType `torsoshot`: nothing in 10.0.2 produces `armshot` (it only appears in the damage checks) | v10:117609-117663, 117943-117946 |
+| damage | headshot x `weapon.hsMlt \|\| 1.5` (unless `noHeadShot`); `legshot` (and the unused `armshot`) x `weapon.lsMlt \|\| 0.5`; `config.headshotOnly` zeroes the rest. Arms are body damage | v10:172979 |
+| projectiles | the same boxes along each tick's step (`_40442(..., true)`: from the projectile, along its xD/yD); a `hitBox` projectile first gates on its sphere around the body centre instead of the padded AABB, then still needs a box hit | v10:180115-180143 |
 | prop mode | keeps the v7 AABB path (scale+hitboxPadW / ah+hitboxPadH) | v10:172886-172892 |
 | hurtboxScale | new game setting (`sub: "Hitboxes"`, def 1, 1..2, v10:16931) times new class/player config (`sub: "Hitbox"`, cat 1, v10:17699); getter v10:169065 | none in v7 |
 
-Port note: KrunkNative's `combat_trace` (shared/src/player.c:2335) implements the v7 AABB rule. v10 parity
-needs a shared (no THREE) OBB pose + ray-vs-OBB in `shared/`, driven by the lag-comp state the server already
-keeps. Arms count as `armshot` (x lsMlt), which is new: v7 had no arm zone.
+Port: `shared/src/hitboxes.c` (`shared/include/hitboxes.h`) is the hierarchy and the ray in plain C over
+the lag-comp state (PlayerStoredState carries sV, stepChase, xD, yD, cV and the weapon, as v10's storeState),
+used by hitscan (`combat_trace`) and projectiles (`projectile_cast`) when the game's ruleset has
+`hit_model == HIT_MODEL_V10` and the mode is not Prop Hunt (`hitboxes_active`). Melee keeps the padded AABB in
+v10 too (v10:172468). Arms are torsoshot, so an arm hit is body damage. Not ported: the arms' viewmodel sway
+reads client animation values off the live player (inspect, lean, swap, jump / land / idle bob, recoil tweens):
+taken as 0, they move the arm boxes by tenths of a unit; and v10 keeps the last weapon's arm boxes per player id
+(a player whose states never held a weapon is unhittable there), KrunkNative poses the arms from the state's
+weapon only.
 
 ## 4. Classes (v10:101961-102300 vs v7 data/classes.js)
 
@@ -164,7 +175,7 @@ Weapon entry lines: v7 weapons.js 111 (AR), 225 (Pistol), 328 (SMG), 651 (LMG), 
 | id | name | key fields (v10) | role |
 |---|---|---|---|
 | 29 | Boulder (v10:101808) | `src weapon_30`, `type 3`, `secondary`, `noAim`, `canThrow false`, `transp`, `spdMlt 0.85`, `gravMlt 1.7` (new field: heavier gravity while held), `jumMlt 0.88`, `swapTime 200`, `spread 120`, no damage fields | carry object. No `req`, not referenced by any class/mode in the bundle (guess: given by map logic/KrunkScript `giveWeapon`). |
-| 30 | Compressor (v10:101859) | `src weapon_31`, `type 1`, `secondary`, `minRec 45`, `req`, `noDmg`, `noComp`, `dmg 1`, `ammo 1`, `reload 2000`, `rate 450`, `range 40`, `physRang 50`, `physPow 0.1`, `physPull` (new: impulse sign -1, pulls instead of pushes), `nonObjImpulse` (new weapon-level flag, v7 was mode-only), `rShoot` (new), `innac 110`, `spdMlt 1.05` | selectable secondary (level 45) that pulls players and objects toward the shooter (v10:172807-172840). `noDmg` keeps it out of `onlyWeapons`. |
+| 30 | Compressor (v10:101859) | `src weapon_31`, `type 1`, `secondary`, `minRec 45`, `req`, `noDmg`, `noComp`, `dmg 1`, `ammo 1`, `reload 2000`, `rate 450`, `range 40`, `physRang 50`, `physPow 0.1`, `physPull` (new: with the aim input held the impulse sign is -1), `nonObjImpulse` (new weapon-level flag, v7 was mode-only), `rShoot` (new: the aim input fires it), `innac 110`, `spdMlt 1.05` | selectable secondary (level 45), a self-impulse: `noDmg` traces nothing (no objects, players, AI or terrain, no "s" stat), and `nonObjImpulse` makes the physPow ray a fixed push of the shooter along the shot, physPow x impulseMlt (`noImpulseDist`: 1), whatever it points at; the left click pushes the shooter back, the right click (rShoot + physPull) pulls it forward. Nobody else and no object is moved (the object push is skipped under nonObjImpulse) (v10:172807-172840, 172853). `noDmg` keeps it out of `onlyWeapons`. |
 
 Table post-processing is unchanged except `onlyWeapons` also skips `noDmg` (v10:101957 vs weapons.js:2972), and a
 new `mysteryBoxRarities = [35, 30, 20, 10, 5]` (v10:101948) for zombies' mystery box tiers (the matching weapon
@@ -185,7 +196,7 @@ Same 37 modes, same order and ids (0 ffa ... 36 imp); no new mode objects. Chang
 | idx | mode | change | evidence |
 |---|---|---|---|
 | 10 | gun (Gun Game) | `weaponOrder` adds 28 (Charge Rifle) after 0 (Sniper): `[2,27,16,10,4,11,21,5,3,9,1,14,6,0,28,18,7,8,13,22,12]` | v10:105580 |
-| 15 | stalk (Stalker) | now `event: true`, `tag: Event`; `canSlide: p => p.isStalker`; `wallJ true, wallJM 100, wallJD 0.2, wallJV 0.04, wallJYV 1.2`; Stalker model `opacity 0.1`; `onKill`: killing a Living player sends JUMP_SCARE to the victim and heals the stalker 50 (changeHealth -50); `update`: a Living player who stays within 200 units of their camp origin for 20 s gets effect 5 (Dizzy) until 2 s outside, origin resets after 10 s away; pickStalker: Stalker HP = floor(200 + 50 * (players - 1)) (v7 fixed 400), packet STALKER_PICKED to others | v10:104350-104437, 188459-188474 (v7 modes/stalk.js, game.js:1537) |
+| 15 | stalk (Stalker) | now `event: true`, `tag: Event`; `canSlide: p => p.isStalker` (only the stalker slides); `wallJ true, wallJM 100, wallJD 0.2, wallJV 0.04, wallJYV 1.2`; Stalker model `opacity 0.1`; `onKill`: a kill by the stalker sends JUMP_SCARE to the victim and heals the stalker 50 (changeHealth -50); `onMelee` is now a damage factor (v10:172543): the stalker's knife on someone else heals it 10 and deals x0.6, any other knife hit x0.8 (v7: the stalker's swing took the victim's whole health and healed 40); `update`: once no wait timer is left, a Living player who stays within 200 units of their camp origin for 20 s gets effect 5 (Dizzy) until 2 s outside, coming back within 10 s re-applies it, origin resets after 10 s away; pickStalker: Stalker HP = floor(200 + 50 * (active players - 1)) (v7 fixed 400), packet STALKER_PICKED ("You are the Living" popup) to others; plus the stalker's own moves in section 2 (leap, wall stick, coyote time, any wall for wall jumps) | v10:104350-104437, 172543, 188459-188474 (v7 modes/stalk.js, game.js:1537) |
 | 23 | raid | `gameTime` 360000 -> 1500000 (25 min); `noProfileStats`; tracks `runPeakPlayers`; onEnd raid challenges (rnodmg, r1hp, rnogun, rsolo, rsolofull; map 43 needs `runProg.bthrone`); `onAIDeath` -> challenge `aik` | v10:104536-104613 |
 | 27 | krank | `party: true` and Party tag removed (now a normal mode) | v10:104640 |
 
@@ -203,10 +214,10 @@ settings dr/aDr/tL/... are the v7 Vehicle movement preset (movement.js:472), not
 |---|---|---|---|
 | players.score() | as v10 | unchanged; level-up medal uses `_7340 = 0.03 * sqrt(score)` (v7 `config.levelDiv` path, same) | v10:173662-173704 vs players.js:4085 |
 | pub score cap | 13000 | 13000 | v10:173675 |
-| end-game KR | min(premium ? 40 : 30, floor(score*rewardMlt/100)), x1.5 challenge mode | same, plus x2 when `isRanked` | v10:191170-191171 vs game.js:4584-4587 |
+| end-game KR | min(premium ? 40 : 30, floor(score*rewardMlt/100)), x1.5 challenge mode | same, plus floor(2 x reward) when `isRanked` (after the cap, not in challenge mode) | v10:191170-191171 vs game.js:4584-4587 |
 | battle-pass points | +30 if playTime >= half the game | +30 * min(1, floor(playTime/gameTime*10)/10) (proportional in 10% steps), not in raid | v10:191174-191179 vs game.js:4593-4596 |
 | team round wins | only counted for best-of games | also counted outside best-of when a team wins (`teamRoundWins[winTeam]++`) | v10:191057-191059 |
-| killstreaks | `mode.noStreaks \|\| config.noStreaks` | also off when `isRanked` | v10:174076 |
+| killstreaks | `mode.noStreaks \|\| config.noStreaks` | also off when `isRanked` (the killer's streak count only; deathStreak still counts, v10:174051) | v10:174076 |
 | class XP | saved in pub games | not saved in ranked (`isPubType() && !isRanked`) | v10:173631 |
 | kill rewards | none | event `killPools` (weighted skin drops during live events, `getKillReward`) | v10:190436-190539 |
 | end screen | — | `showRaidPromo` 50% in non-raid pubs (END_GAME extra field) | v10:191274 |
@@ -224,15 +235,22 @@ settings dr/aDr/tL/... are the v7 Vehicle movement preset (movement.js:472), not
 | vote forfeit | exists (game.js:4435, 4880) | voters = team members not bypassed and disconnected <= 30 s (`voteForfeitDisconnectGrace 30000`); `voteForfeitTimer 60000`; win = ceil(bestOf/2) rounds to the other team | v10:186459-186470, 190928-191004 |
 | `freezeOthers` | — | new `applyFreezeOthers` (guess: KrunkScript/host command) | v10:191006 |
 
-## 9. Port priorities (gameplay)
+## 9. Port status (gameplay)
 
-1. Weapon stat table (section 5) and class HP (section 4): data-only edits in `shared/src/weapons/*.c` and
-   `shared/src/classes.c`.
-2. Compressor (pull impulse, `rShoot`, weapon-level `nonObjImpulse`) and Boulder (`gravMlt`, carry). Both need
-   viewmodels `weapon_30` / `weapon_31` from assets.krunker.io.
-3. Complex hitboxes (section 3): new shared OBB pose and ray code, plus hurtboxScale settings. This is the
-   largest and most behaviour-visible change; it needs lag-comp states with sV, cV, stepChase, yD.
-4. Stalker rework, Raid 25 min, Gun Game order, Krank untagged, Bombardment enabled.
-5. Ranked rules (x2 KR, no streaks, 60 s needAll, 120 s shutdown, no class XP) and the proportional
-   battle-pass formula.
-6. Spawn spread 10 in comp warmup.
+Everything below runs under the v10.0.2 ruleset only (`shared/include/ruleset.h`); the v7.1.4 ruleset keeps
+v7's tables and rules (checked by the v7 tests: weapons_v7_test, combat_test, proc_input_test, modes_test).
+
+| item | where | tests |
+|---|---|---|
+| weapon balance (section 5), Boulder 29, Compressor 30, class HP and minRec (section 4), crouchLean 0 (section 1) | `shared/src/rules/v10/` (weapons_rebalance_v10.c, weapons_new_v10.c, classes_v10.c, constants_v10.c) | `weapons_v7_test v10` (the whole table against `shared/tests/data/v10/`, `tools/kref/v10-fixtures.py`), ruleset_test |
+| Boulder gravMlt, Compressor (noDmg, nonObjImpulse, physPull, rShoot) | `shared/src/player.c` (procInputs gravity / fire input, `combat_fire_ray`), `Ruleset.weapon_impulse` | v10_gameplay_test |
+| posed hit boxes, hurtboxScale (game + class options) | `shared/src/hitboxes.c`, `Ruleset.hit_model`, `shared/src/game_config.c` (v10 option rows) | hitboxes_test, combat_test, ruleset_test |
+| modes: Gun Game order, Stalker rework, Raid 25 min, Krank not a party mode | `shared/src/rules/v10/modes_v10.c`, `shared/src/modes/mode_rules.c` (`*_v10`), `shared/src/player.c` (`movement_stalker`) | ruleset_test, v10_gameplay_test |
+| ranked: x2 KR, no kill streaks, no class XP, needAll 60 s, shutdown 120 s | `Ruleset.ranked`, `Game.is_ranked` (`server/src/accounts.c`), `game_is_ranked`, `rules_reward_mlt` | ruleset_test, v10_gameplay_test |
+| a v10 match on server_bin | `server_bin --ruleset v10` | `server/tests/v10_match_e2e.py` |
+
+Not ported yet: Bombardment without devOnly (KrunkNative has no carpet bomb), the comp-warmup spawn spread 10,
+the proportional battle-pass points and team round wins outside best-of (section 7), raid challenges /
+`noProfileStats`, the Stalker's render-side changes (model opacity 0.1, hidden after 300 ms still), its HUD
+(leap timer, STALKER_PICKED popup, taunts), event kill pools, `poseData.bodyY`, `markPosition`, and the match-flow
+items of section 8 other than the ranked timers (their own work: doc/v10/ranked-impl.md).

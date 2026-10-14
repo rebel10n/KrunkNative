@@ -48,14 +48,14 @@ static int preset_has(const cJSON *list, const int value) {
 
 // The base entry of a table: the game's own weapon / class / effect (v7 Game.weapons / classes / effects).
 static const void *base_entry(const GameConfigTable table, const int id) {
-    if (table == GAME_CONFIG_WEAPON) return id >= 0 && id < WEAPON_COUNT ? rules_weapon(id) : NULL;
+    if (table == GAME_CONFIG_WEAPON) return id >= 0 && id < rules_krunker_weapon_count() ? rules_weapon(id) : NULL;
     if (table == GAME_CONFIG_CLASS) return id >= 0 && id < CLASS_COUNT ? &rules_classes()[id] : NULL;
     if (table == GAME_CONFIG_EFFECT) return id >= 0 && id < EFFECT_COUNT ? &g_effects[id] : NULL;
     return NULL;
 }
 
 static int table_count(const GameConfigTable table) {
-    return table == GAME_CONFIG_WEAPON ? WEAPON_COUNT : table == GAME_CONFIG_CLASS ? CLASS_COUNT : EFFECT_COUNT;
+    return table == GAME_CONFIG_WEAPON ? rules_krunker_weapon_count() : table == GAME_CONFIG_CLASS ? CLASS_COUNT : EFFECT_COUNT;
 }
 
 static const char *entry_name(const GameConfigTable table, const int id) {

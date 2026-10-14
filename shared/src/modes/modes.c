@@ -10,6 +10,7 @@
 #include <ctype.h>
 
 #include "mode_internal.h"
+#include <ruleset.h>
 
 const GameModeConfig g_default_game_mode_config = {
     .id = MODE_ID_FFA,
@@ -295,12 +296,16 @@ int mode_count(void) {
 }
 
 const GameModeConfig *mode_config(const int id) {
-    return id >= 0 && id < MODE_COUNT ? &g_mode_configs[id] : NULL;
+    // the process ruleset's table (ruleset.h; v7.1.4's is g_mode_configs itself)
+    const Ruleset *rules = ruleset_current();
+    const GameModeConfig *table = rules->modes ? rules->modes : g_mode_configs;
+    return id >= 0 && id < MODE_COUNT && (size_t) id < (rules->modes ? rules->mode_count : MODE_COUNT) ? &table[id] : NULL;
 }
 
 const GameModeConfig *mode_list(int *count) {
     if (count) *count = MODE_COUNT;
-    return g_mode_configs;
+    const Ruleset *rules = ruleset_current();
+    return rules->modes ? rules->modes : g_mode_configs;
 }
 
 const char *mode_name(const int id) {

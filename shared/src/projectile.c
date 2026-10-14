@@ -6,6 +6,7 @@
 #include <shared.h>
 #include <world.h> // map-logic WP-B: PvP filter, terrain
 #include <ai.h>
+#include <hitboxes.h> // v10.0.2 posed hit boxes
 #include <prefabs.h> // prefab_info: geometry of an object hit
 #include <math.h>
 #include <string.h>
@@ -155,6 +156,7 @@ typedef struct {
     float t;
     Object *object;     // u[0].obj of a map object hit
     PlayerStoredState state; // the player's rewound box (head / leg zones)
+    int zone;           // v10 hit boxes: 1 + HitKind of the box hit; 0 = the v7 zones by height
 } ProjectileHit;
 
 static int projectile_object_blocks(const Object *object) {
@@ -204,6 +206,7 @@ static ProjectileHit projectile_cast(Game *game, const GameProjectile *projectil
     }
 
     const float step_length = projectile->speed * dt_ms;
+    const int posed = hitboxes_active(game); // v10.0.2 posed hit boxes (shared/src/hitboxes.c)
 
     for (size_t i = 0; i < game->player_count; i++) {
         Player *player = game->players[i];
@@ -215,6 +218,24 @@ static ProjectileHit projectile_cast(Game *game, const GameProjectile *projectil
         if (!players_fetch_state(player, projectile->state_const, &state)) continue;
 
         float t;
+        if (posed) {
+            // v10.0.2 (projectiles v10:180124-180143): a hitBox projectile gates on its sphere, the
+            // rest on the AABB padded by 5; then the posed boxes along this step decide (so a
+            // hitBox projectile also has to reach a box with its step, as in v10)
+            if (projectile->config.hit_box > 0.0f) {
+                const float dx = projectile->position.x - state.position.x;
+                const float dy = projectile->position.y - (state.position.y + state.adjusted_height * 0.5f);
+                const float dz = projectile->position.z - state.position.z;
+                if (sqrtf(dx * dx + dy * dy + dz * dz) > projectile->config.hit_box) continue;
+            }
+            int kind;
+            if (!hitboxes_trace_player(player, &state, projectile->position, step, projectile->config.hit_box <= 0.0f, &t, &kind)) continue;
+            if (t < best.t) {
+                best = (ProjectileHit) {player, NULL, t, NULL, state, 1 + kind};
+                *hit_any = 1;
+            }
+            continue;
+        }
         if (projectile->config.hit_box > 0.0f) {
             const float dx = projectile->position.x - state.position.x;
             const float dy = projectile->position.y - (state.position.y + state.adjusted_height * 0.5f);
@@ -298,8 +319,9 @@ static void projectile_tick(Game *game, GameProjectile *projectile, const float 
                     ? game->weapons[projectile->weapon_index] : NULL;
                 if (weapon) {
                     const float hit_y = projectile->position.y + projectile->velocity.y * dt_ms * hit.t;
-                    head = player_hit_is_head(hit.player, hit.state.position.y, hit.state.adjusted_height, hit_y);
-                    leg = player_hit_is_leg(hit.player, hit.state.position.y, hit_y);
+                    // v10.0.2: the box's hitType (v10:180187)
+                    head = hit.zone ? hit.zone - 1 == HIT_KIND_HEAD : player_hit_is_head(hit.player, hit.state.position.y, hit.state.adjusted_height, hit_y);
+                    leg = hit.zone ? hit.zone - 1 == HIT_KIND_LEG : player_hit_is_leg(hit.player, hit.state.position.y, hit_y);
                     damage = player_hit_damage(game, weapon, damage, head, leg);
                 }
                 // effectInd (Zapper): Zapped stacks, credited to the owner, unless a teammate

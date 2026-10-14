@@ -789,10 +789,22 @@ void mode_on_score(Game *game, Player *player, const int amount, const int is_ki
 // onMelee (Stalker): the stalker's swing heals it 40 and takes the victim's whole health.
 float mode_melee_damage(Game *game, Player *dealer, Player *victim, const float damage) {
     if (!game->mode || !dealer || !victim) return damage;
+    if (game->mode->config.on_melee) return game->mode->config.on_melee(game, dealer, victim, damage); // v10 Stalker
 
     const GameModeConfig *config = &game->mode->config;
     if (!config->team_options[1] || strcmp(config->team_options[1], "Stalker") || dealer->team != 2) return damage;
 
     player_change_health(dealer, NULL, -40.0f, 0);
     return victim->health > 0.0f ? victim->health : damage;
+}
+
+// v10.0.2 stalk.onMelee (v10:104385-104387, applied as a damage factor at v10:172543-172544): the
+// stalker's swing at someone else heals it 10 and deals x0.6; any other knife hit in the mode x0.8.
+float mode_melee_stalk_v10(Game *game, Player *dealer, Player *victim, const float damage) {
+    (void) game;
+    if (dealer && dealer->team == 2 && dealer != victim) {
+        player_change_health(dealer, NULL, -10.0f, 0);
+        return damage * 0.6f;
+    }
+    return damage * 0.8f;
 }

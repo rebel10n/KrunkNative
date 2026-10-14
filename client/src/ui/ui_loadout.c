@@ -50,14 +50,14 @@ static const unsigned char WEAPON_MIN_REC[V7_WEAPON_COUNT] = {[10] = 15, [11] = 
 
 static const LoadoutWeapon *weapon_at(const int id) {
     static LoadoutWeapon w;
-    if (id < 0 || id >= WEAPON_COUNT || !rules_weapon(id)) return NULL;
+    if (id < 0 || id >= rules_krunker_weapon_count() || !rules_weapon(id)) return NULL;
     w.name = rules_weapon(id)->name ? rules_weapon(id)->name : "";
     w.src = rules_weapon(id)->src;
     w.secondary = rules_weapon(id)->secondary;
     w.attach = id < V7_WEAPON_COUNT && WEAPON_ATTACH[id];
     w.scope = id < V7_WEAPON_COUNT && WEAPON_SCOPE[id];
     w.charm = id >= V7_WEAPON_COUNT || !WEAPON_NO_CHARM[id];
-    w.min_rec = id < V7_WEAPON_COUNT ? WEAPON_MIN_REC[id] : 0;
+    w.min_rec = id < V7_WEAPON_COUNT ? WEAPON_MIN_REC[id] : rules_weapon(id)->min_rec; // v10: the Compressor 45
     return &w;
 }
 
@@ -1119,7 +1119,7 @@ static char *gen_secondary(void) {
     sb_append(&out, "<div class='winBackH'><div class='custBack' onclick='playSelect(0.1);goBackWindow(44)' onmouseenter='playTick();'><span class='material-icons custBackArr'>arrow_back</span></div><div class='winSelH'>Select Secondary</div><div class='winClose' onclick='playSelect(0.1);closWind()' onmouseenter='playTick();'><span class='material-icons winCloseArr'>close</span></div></div>");
     sb_append(&out, "<div id='skinList'>");
     for (int rec = 0; rec <= 255; rec++) { // stable sort by minRec
-        for (int i = 0; i < WEAPON_COUNT; i++) {
+        for (int i = 0; i < rules_krunker_weapon_count(); i++) {
             const LoadoutWeapon *w = weapon_at(i);
             if (!w || !w->secondary || w->min_rec != rec) continue;
             const int unlocked = !w->min_rec || all_skins_unlocked() || (acc && acc->level >= w->min_rec);
