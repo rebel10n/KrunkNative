@@ -98,6 +98,10 @@ const STATES = [
   ['settings', 'window.showWindow && window.showWindow(1), true', '#windowHolder'],
   ['customize', 'window.windows && (window.windows[2].tabIndex = 2), window.showWindow && window.showWindow(3), true', '#windowHolder'],
 ];
+// KN_V10_STATES=<file.json>: capture these [name, expression, selector] states instead (an area's own
+// references, e.g. tools/uidiff/v10/market-states.json); KN_V10_ONLY_STATES=1 skips the window sweep
+if (process.env.KN_V10_STATES) STATES.splice(0, STATES.length, ...JSON.parse(fs.readFileSync(process.env.KN_V10_STATES, 'utf8')));
+const ONLY_STATES = process.env.KN_V10_ONLY_STATES === '1';
 const CLOSE_ALL = "(() => { try { window.clearPops && window.clearPops(); } catch (e) {} try { window.closWind && window.closWind(); } catch (e) {} " +
   "document.querySelectorAll('#genericPop,#popupHolder').forEach((e) => { e.style.display = 'none'; }); return true; })()";
 const SNAP_WINDOW = `(() => ({ header: (window.windowHeader || {}).innerHTML || '', cls: (window.menuWindow && menuWindow.getAttribute('class')) || '',
@@ -218,7 +222,7 @@ class Cdp {
       log(`${name}: ${html.length} bytes`);
     }
     const windows = {};
-    const n = await c.eval('(window.windows || []).length').catch(() => 0);
+    const n = ONLY_STATES ? 0 : await c.eval('(window.windows || []).length').catch(() => 0);
     const META = (i) => `(() => { const w = windows[${i}] || {}; return { label: w.label || null, sticky: !!w.sticky, width: w.width == null ? null : w.width,
       extraCls: w.extraCls || null, popup: !!w.popup, maxH: w.maxH || null }; })()`;
     for (let id = 1; id <= n; id++) {
@@ -229,7 +233,7 @@ class Cdp {
     // Settings (windows[0]): every tab of the basic and the advanced view; Change Controls
     // (windows[6]): every tab (as capture_v7_windows.js records v7's)
     const settings = {};
-    for (const type of ['basic', 'advanced']) {
+    for (const type of ONLY_STATES ? [] : ['basic', 'advanced']) {
       const tabs = await c.eval(`windows[0].tabs.${type}.map((t) => t.name)`).catch(() => []);
       settings[type] = [];
       for (let t = 0; t < tabs.length; t++) {
@@ -244,7 +248,7 @@ class Cdp {
     }
     await c.eval("(() => { windows[0].settingType = 'basic'; windows[0].tabIndex = 0; return 1; })()").catch(() => {});
     const controls = [];
-    const ctabs = await c.eval('windows[6].tabs.map((t) => t.n)').catch(() => []);
+    const ctabs = ONLY_STATES ? [] : await c.eval('windows[6].tabs.map((t) => t.n)').catch(() => []);
     for (let t = 0; t < ctabs.length; t++) {
       await c.eval(CLOSE_ALL).catch(() => {});
       try {

@@ -403,7 +403,7 @@ async def scenario(base, internal_url, secret):
         check(r[1]["funds"] == 940, "gift sent: %r" % r[1])
         # market: list the skin, unlisted by nobody, bob buys it
         r = await a.call("0", "r", "market", "inventory", alice_id, alice, None, 0)
-        check(r[3] == [{"i": 5, "s": 5, "c": 1}], "inventory page: %r" % r[3])
+        check(r[3] == [{"i": 5, "s": 5, "c": 1, "qs": 3}], "inventory page: %r" % r[3])
         r = await a.call("lir", "li", 5, 5, 77, 500)
         check(r[1]["cnt"] == 0 and r[1]["funds"] == 915 and r[2] == 77, "listed (5%% fee): %r" % r[1])
         async with Social(ws_url) as b:
@@ -417,7 +417,7 @@ async def scenario(base, internal_url, secret):
             r = await b.call("br", "pi", listing["m"], 3)
             check(r[1] is None, "sold listing unavailable")
             r = await b.call("0", "r", "market", "inventory", bob_id, bob, None, 0)
-            check(r[3] == [{"i": 5, "s": 5, "c": 1}], "bought skin in inventory")
+            check(r[3] == [{"i": 5, "s": 5, "c": 1, "qs": 3}], "bought skin in inventory")
             r = await b.call("qsr", "qsi", 0, 5, 9, 2)  # v7.1.4: mode KR, skin, uid, all
             check(r[1] and r[1]["c"] == 0 and r[1]["i"] == 9, "quick sell: %r" % r[1])
         # alice trades with herself is refused

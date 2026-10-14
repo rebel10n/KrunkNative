@@ -53,17 +53,17 @@ v10 adds one bit, `tradable` (`SkinInfo.tradable`, never true where the v7 rule 
 | Live in-game trade (Trade mode, `windows[36]`, `strd` / `utrd` / `atrd`, `tradeCost` 10) | client only: v7.1.4's game server implements no trade frame | not ported (`hud_ui.c`) | **not done**: needs a game-server trade session + brain settlement; follow-up |
 | Premium gift (`prm`, `confPremium`) | paid premium days (store purchase, not KR); no server | not ported | not done (real-money store, out of the KR economy) |
 
-## 2. Rules (defaults = v7.1.4)
+## 2. Rules (defaults = v7.1.4, except the v10.0.2 levels and tradable bit)
 
 | Rule | Value | Config (`accounts.*`) |
 | --- | --- | --- |
-| Gift | level 30, 10 .. 1e7 KR, fee `ceil(amount * 10 / 100)` on top | `gift_min_level`, `gift_min`, `gift_max`, `gift_fee_percent` |
-| List | level 15, 1 .. 1e7 KR, fee `floor(price * 10 / 100)` (0 when `price <= bypass`), 40 open listings | `market_min_level`, `sale_max`, `market_fee_percent`, `market_fee_bypass`, `max_listings` |
-| Buy | level 15, not within 300 s of posting, not your own, seller paid in full | `market_min_level`, `sale_grace_s` |
+| Gift | level 10 (v10; v7.1.4: 30), 10 .. 1e7 KR, fee `ceil(amount * 10 / 100)` on top | `gift_min_level`, `gift_min`, `gift_max`, `gift_fee_percent` |
+| List | level 10 (v10; v7.1.4: 15), 1 .. 1e7 KR, fee `floor(price * 10 / 100)` (0 when `price <= bypass`), 40 open listings | `market_min_level`, `sale_max`, `market_fee_percent`, `market_fee_bypass`, `max_listings` |
+| Buy | level 10 (v10; v7.1.4: 15), not within 300 s of posting, not your own, seller paid in full | `market_min_level`, `sale_grace_s` |
 | Quick sell | `qsKR` else `rarities[r].sell` (1, 3, 10, 100, 500, 2500, 10000, 10), 5 for `minQuickSell`; items the game sells for KR (Black Market) only destroy (**KN**: a 100 KR cape is worth 2500 KR at rarity 5) | - |
 | Black Market | `funds` KR, `checkReq` (accAge, stats), once per account (**KN**: also after the item is gone) | - |
-| Offer | both players level 20; 5 items per side (premium sender 20); fee = sum of `rarities[r].fee` (5, 5, 5, 10, 10, 25, 200, 500) over both sides, 0 for premium; 50 open offers per sender; KR per side 10 .. 1e7 under the gift rules: the giver needs level 30 and no `gift` ban and pays the gift fee on it (the sender at submit, the receiver at accept) | `trade_min_level`, `trade_max_items`, `trade_max_items_premium`, `trade_max_open`, `trade_kr_max`, `trade_ttl_h` (+ the gift keys) |
-| Not tradable / listable | `free`, `noSale`, `blackM`, `opensea`, `itemShop == 1` | skins file |
+| Offer | both players level 10 (v10; v7.1.4: 20); 5 items per side (premium sender 20); fee = sum of `rarities[r].fee` (5, 5, 5, 10, 10, 25, 200, 500) over both sides, 0 for premium; 50 open offers per sender; KR per side 10 .. 1e7 under the gift rules: the giver needs the gift level and no `gift` ban and pays the gift fee on it (the sender at submit, the receiver at accept) | `trade_min_level`, `trade_max_items`, `trade_max_items_premium`, `trade_max_open`, `trade_kr_max`, `trade_ttl_h` (+ the gift keys) |
+| Not tradable / listable | v10's `tradable` bit of the item table (the v7.1.4 rule `free`, `noSale`, `blackM`, `opensea`, `itemShop == 1` gives the same set except 20 opensea items such as Gold Plated, which v10 trades); a skins file without the field keeps the v7.1.4 rule | skins file |
 | Rate limits (per account, per minute) | gift 10, list 30, unlist 60, buy 30, quick sell 60, offer 10, accept 30, close 60 | `economy_rate_<kind>` |
 
 Fee rounding: KR are whole numbers; fees are computed in integers. Gift fee rounds **up**
@@ -167,3 +167,15 @@ foreign key is `NOT VALID`: no scan of the existing ledger), `trades.sender_kr` 
   server trade session and a brain settlement op.
 - Premium gifting (`prm`): a real-money store item, not KR.
 - Junk (`qsi` mode 1, `jnk`): v7.1.4's second currency does not exist here.
+
+## 8. The v10 Market & Trading popup
+
+Krunker v10.0.2's exchange (`openExchange(tab, item)`, the main menu's Market & Trading) is
+`client/src/ui/v10_market.c`, over the same frames as the hub (`client/src/ui/economy_client.c`
+builds them for both). v10 calls a REST API; the mapping and what v10 has that does not exist here
+are in that file's header and in doc/v10/ui.md. KrunkNative additions to the brain for it: the
+`"r", "market", "history"` page (closed buys and sales: type, date, item, amount, other party,
+status), On Sale / Low / High in the `stats` rows, `nt` / `qs` / `nqs` on inventory rows (not
+tradable, KR per quick-sold unit, destroy only) and `player_id` in the `sp` search rows (Start a
+Trade). Test: `client/tests/v10_market_e2e.py` (list, buy, quick sell, offer, accept from the v10
+page, headless, local kn_brain on sqlite).

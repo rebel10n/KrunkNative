@@ -217,10 +217,10 @@ void sh_search(SocialSession *s, const cJSON *f) {
     char pat[160];
     like_escape(q, pat, sizeof pat);
     social_query(s,
-                 SQL(.pg = "SELECT player_name, player_premium, player_featured, player_hack, player_clan, clan_rank, player_score "
+                 SQL(.pg = "SELECT player_name, player_premium, player_featured, player_hack, player_clan, clan_rank, player_score, player_id "
                            "FROM player_rows WHERE player_name ILIKE '%' || $1 || '%' "
                            "ORDER BY (lower(player_name) = lower($2)) DESC, player_score DESC LIMIT 50",
-                     .any = "SELECT player_name, player_premium, player_featured, player_hack, player_clan, clan_rank, player_score "
+                     .any = "SELECT player_name, player_premium, player_featured, player_hack, player_clan, clan_rank, player_score, player_id "
                             "FROM player_rows WHERE player_name {ilike} '%' || $1 || '%' ESCAPE '\\' "
                             "ORDER BY (lower(player_name) = lower($2)) DESC, player_score DESC LIMIT 50"),
                  KN_DB_ARGS(pat, q), search_done, NULL);

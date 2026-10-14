@@ -609,7 +609,7 @@ static void on_social(void *user, const cJSON *frame) {
     } else if (battlepass_ui_frame(label, frame)) { // v7.1.4 Battle Pass: bpdl, bppd, bpclmr, purbp, purbpl, bpEnd
     } else if (!strcmp(label, "cln") || !strcmp(label, "clnL")) { // io_cln / io_clnL (windows[12])
         clan_ui_frame(frame);
-    } else if (!strcmp(label, "pRes")) { // uploadS reply: popupResponse(kind, error, text)
+    } else if (!strcmp(label, "pRes") && !v10_market_owns_frame(label)) { // uploadS reply: popupResponse(kind, error, text)
         const char *kind = str_at(frame, 1);
         popup_response(kind && !strcmp(kind, "SUCCESS") ? 1 : 0, str_at(frame, 2), str_at(frame, 3));
     } else if (!strcmp(label, "loadS")) { // loadSettings(text)

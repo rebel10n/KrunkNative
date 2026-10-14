@@ -1,0 +1,20 @@
+{
+  "scenario": "v10/kn-market-browse",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "popup",
+      "rect": [
+        90,
+        105,
+        1012,
+        510
+      ],
+      "kind": "mixed",
+      "note": "the exchange popup and sidebar"
+    }
+  ]
+}

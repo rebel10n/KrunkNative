@@ -234,6 +234,10 @@ preview-hole-test: build ## The menu shade covers the class preview box seamless
 preview-hole-test-web: ## The same for the web build in headless Chromium at several sizes / devicePixelRatios and a browser zoom (run `make web` first)
 	timeout 1800 $(PYTHON) -I client/tests/preview_hole_e2e.py --web $(DIST_WEB)
 
+.PHONY: v10-market-e2e
+v10-market-e2e: build ## v10 Market & Trading from the v10 page: list, buy, quick sell, trade offer, accept (local kn_brain on sqlite, headless)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/v10_market_e2e.py $(DEBUG_DIR) $(CURDIR)
+
 native-auth-test: build ## Native client accounts e2e: register with email, verify, login, forgot password -> mailed code -> reset (local kn_brain + fake SMTP, headless)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/native_auth_e2e.py $(DEBUG_DIR)
 

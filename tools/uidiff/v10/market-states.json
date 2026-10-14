@@ -1,0 +1,12 @@
+[
+ ["market-browse", "window.openExchange(0), true", "#genericPop"],
+ ["market-trading", "window.openExchange(1), true", "#genericPop"],
+ ["market-blackm", "window.openExchange(2), true", "#genericPop"],
+ ["market-junkyard", "window.openExchange(3), true", "#genericPop"],
+ ["market-catalog", "window.openExchange(4), true", "#genericPop"],
+ ["market-guide", "window.openExchange(5), true", "#genericPop"],
+ ["market-guide-trading", "(async () => { window.openExchange(5); await new Promise((r) => setTimeout(r, 800)); const t = document.querySelectorAll('.guide-nav .tab'); if (t[1]) t[1].click(); return true; })()", "#genericPop"],
+ ["market-guide-glossary", "(async () => { window.openExchange(5); await new Promise((r) => setTimeout(r, 800)); const t = document.querySelectorAll('.guide-nav .tab'); if (t[3]) t[3].click(); return true; })()", "#genericPop"],
+ ["market-catalog-item", "(async () => { window.openExchange(4); await new Promise((r) => setTimeout(r, 1500)); const c = document.querySelector('.items-view-cell .market-card'); if (c) c.click(); return true; })()", "#genericPop"],
+ ["market-menu-item", "true", "#menuItemContainer"]
+]

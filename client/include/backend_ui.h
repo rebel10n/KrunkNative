@@ -81,6 +81,12 @@ int  clan_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
 void turf_ui_scenario(const cJSON *state); // --render-scenario: state.turf
 int  turf_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 void clan_ui_frame(const cJSON *frame);     // "cln" / "clnL" replies
+// v10 Market & Trading (v10_market.c): window.openExchange(tab, itemIndex) -> the exchangeModal popup
+void v10_market_open(int tab, int item);
+int  v10_market_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
+void v10_market_menu_setup(void);           // the v10 page's #menuBtnMarket item + the social listener
+void v10_market_scenario(const cJSON *state); // --render-scenario: state.market
+int  v10_market_owns_frame(const char *label); // 1 = the open exchange answers this reply (account_ui.c skips it)
 void clan_ui_reset(void);                   // account changed: drop clanData
 void clan_ui_scenario(const cJSON *state);  // --render-scenario: state.clan {data, tab, motd, loot, recruit}
 int  account_add_skin(int skin_index);      // acc.skins += 1 of skin; returns the owned count

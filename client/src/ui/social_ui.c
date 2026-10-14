@@ -46,17 +46,11 @@
 #define HUB_KEY_MAX 128
 
 // The economy rules (doc/v7/economy.md): v7.1.4 src/config.js until kn_brain's "ecfg" reply
-// replaces them with what the server really charges (gift / list fees, levels, limits).
-typedef struct {
-    double gift_fee, gift_min, gift_max, gift_min_lvl;          // giftFee (%), giftMin, giftMax, giftMinLVl
-    double market_fee, market_fee_bypass, market_min_lvl;       // marketFee (%), marketFeeBypass, marketMinLVl
-    double sale_max, sale_grace, max_listings;                  // saleMax, saleGrace (ms), the "MAX" listings
-    double trade_min_lvl, trade_max_out, trade_max_out_p;       // tradeMinLvl, tradeMaxOut, tradeMaxOutP
-    double trade_kr_max;                                        // KrunkNative: KR per side of an offer (0 = none)
-} EconRules;
-static EconRules g_econ = {10, 10, 10000000, 30, 10, 0, 15, 10000000, 300000, 40, 20, 5, 20, 10000000};
+// replaces them with what the server really charges (gift / list fees, levels, limits); the
+// protocol half is economy_client.c (shared with the v10 Market & Trading popup, v10_market.c).
+#include <economy_client.h>
+#define g_econ g_econ_rules
 #define MARKET_MIN_LVL ((int) g_econ.market_min_lvl)
-static void econ_new_op(char *out, size_t n, const char *tag); // an action's idempotency key
 #define TRADE_MIN_LVL ((int) g_econ.trade_min_lvl)
 
 // ------------------------------------------------------------------ v3.1.1 data (src/config.js, i18n/en.js)
@@ -2015,8 +2009,6 @@ static int estimate_value(const int skin) {
 
 int social_estimate_value(const int skin) { return estimate_value(skin); }
 
-static const int k_rarity_sell[] = {1, 3, 10, 100, 500, 2500, 10000, 10}; // store.rarities[r].sell
-static const int k_rarity_trade_fee[] = {5, 5, 5, 10, 10, 25, 200, 500}; // store.rarities[r].fee (calcTradeFee)
 
 static const ViewerSkin *hub_skin(const int index) {
     return index >= 0 && index < g_viewer_skin_count ? &g_viewer_skins[index] : NULL;
@@ -2073,27 +2065,12 @@ static void append_skin_img(StrBuf *sb, const ViewerSkin *s, const char *preview
     }
 }
 
-// store.skins entries with `illicit` (src/data/store.js): the black market. The viewer skin
-// table does not carry funds / reqT / req, so they live here. req: stat key + minimum, or
-// age_ms > 0 = account age (acc.createDate, not in the account data: always denied), or
-// neither = never ("No Greenskins!").
-typedef struct { int skin, funds; const char *req_t, *stat; double min, age_ms; } IllicitSkin;
-static const IllicitSkin k_illicit[] = {
-    {1483, 100, "1 Year Account Age", NULL, 0, 31536000000.0},
-    {1484, 100, "2 Year Account Age", NULL, 0, 63072000000.0},
-    {1641, 2000, "No Greenskins!", NULL, 0, 0},
-    {1642, 3000, "Call in 1000 Nukes", "n", 1000, 0},
-    {1659, 10000, "???????", "ggr", 59961, 0},
-    {1672, 10000, "Level 50 Runner", "c9", 2667778, 0},
-    {1734, 10000, "Level 100 Hunter", "c1", 10890000, 0},
-    {1866, 10000, "10000 Thrown Melee Kills", "tmk", 10000, 0},
-};
+// store.skins entries with `illicit` (src/data/store.js): the black market, econ_black_market()
+// (economy_client.c, shared with the v10 popup). req: stat key + minimum, or age_ms > 0 = account
+// age, or neither = never ("No Greenskins!").
+typedef EconBlackMarketItem IllicitSkin;
 
-static const IllicitSkin *illicit_skin(const int skin) {
-    for (size_t i = 0; i < sizeof(k_illicit) / sizeof(k_illicit[0]); i++)
-        if (k_illicit[i].skin == skin) return &k_illicit[i];
-    return NULL;
-}
+static const IllicitSkin *illicit_skin(const int skin) { return econ_black_market_find(skin); }
 
 // store.checkReq(item, acc): accAge (account created at least age_ms ago) / stats
 static int illicit_req_ok(const IllicitSkin *s, const AccountInfo *acc) {
@@ -2398,8 +2375,10 @@ static void hub_render_market(const char *a, const cJSON *t) {
         } else if (!strcmp(sub, "blackm")) {
             // every store.skins entry with `illicit` (re = 1: never "No Items Found")
             shown = 1;
-            for (size_t i = 0; i < sizeof(k_illicit) / sizeof(k_illicit[0]); i++) {
-                const IllicitSkin *il = &k_illicit[i];
+            int n_illicit = 0;
+            const IllicitSkin *illicit = econ_black_market(&n_illicit);
+            for (int i = 0; i < n_illicit; i++) {
+                const IllicitSkin *il = &illicit[i];
                 const ViewerSkin *pe = hub_skin(il->skin);
                 if (!pe) continue;
                 char prev[256], price[32];
@@ -4176,24 +4155,13 @@ static void send_ints(const char *label, const int n, const double *v) {
     hub_send(f);
 }
 
-// An economy action's idempotency key (doc/v7/economy.md): kn_brain runs an action once per
-// key, a resent frame (double click, a retry) replays the first result. Keys of actions that can
-// only happen once (buy listing N, accept / close offer N) are derived from the target; the
-// others are made when their confirmation popup opens and travel in its YES button.
-static void econ_new_op(char *out, const size_t n, const char *tag) {
-    static unsigned counter;
-    snprintf(out, n, "%s-%.0f-%u-%d", tag, now_epoch_ms(), ++counter, rand() % 100000);
-}
-
+// An economy action's idempotency key (doc/v7/economy.md, econ_new_op): kn_brain runs an action
+// once per key, a resent frame (double click, a retry) replays the first result. Keys of actions
+// that can only happen once (buy listing N, accept / close offer N) are derived from the target;
+// the others are made when their confirmation popup opens and travel in its YES button.
 // io.send(label, numbers..., {op: key})
 static void send_econ(const char *label, const int n, const double *v, const char *key) {
-    cJSON *f = cJSON_CreateArray();
-    cJSON_AddItemToArray(f, cJSON_CreateString(label));
-    for (int i = 0; i < n; i++) cJSON_AddItemToArray(f, cJSON_CreateNumber(v[i]));
-    cJSON *ext = cJSON_CreateObject();
-    cJSON_AddStringToObject(ext, "op", key);
-    cJSON_AddItemToArray(f, ext);
-    hub_send(f);
+    hub_send(econ_frame(label, n, v, key));
 }
 
 // buyItem(marketid, uid): io.send("pi", marketid, uid)
@@ -4280,7 +4248,7 @@ H(h_quick_sell) {
     char key[48];
     econ_new_op(key, sizeof(key), "qs");
     sb_appendf(&sb, "</span>?</div><div class='quickSellText'>KR<div class='quickSellKR'><span style='color: #FBC02D'>%d</span> KR (each)</div></div><div class='quickSellText'>Amount<select id='quickSellSelect'><option value='0'>1 Item</option><option value='1'>All But 1</option><option value='2'>All</option></select></div><div id='confirmBtn' onclick='sellConfirmed(%d,%d,&quot;%s&quot;)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>YES</div><div id='declineBtn' onclick='showPopup()' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>NO</div>",
-               pa->rarity >= 0 && pa->rarity < 8 ? k_rarity_sell[pa->rarity] : 1, skin, uid, key);
+               econ_rarity_sell(pa->rarity), skin, uid, key);
     char *html = sb_finish(&sb);
     generic_popup(html, "confQSPop", NULL); // confQSPopup
     free(html);
@@ -4544,7 +4512,7 @@ static void trade_update_fee(void) {
     for (int side = 0; side < 2; side++) {
         for (int k = 0; k < g_trade.nsel[side]; k++) {
             const ViewerSkin *pa = hub_skin(g_trade.sel[side][k].i);
-            if (pa && pa->rarity >= 0 && pa->rarity < 8) fee += k_rarity_trade_fee[pa->rarity] * g_trade.sel[side][k].c;
+            if (pa) fee += econ_rarity_trade_fee(pa->rarity) * g_trade.sel[side][k].c;
         }
     }
     g_trade.fee = acc && acc->premium > 0 ? 0 : fee;
@@ -5177,14 +5145,7 @@ static void hub_render_listing(const cJSON *t) {
 static int hub_economy_frame(const char *label, const cJSON *frame) {
     const cJSON *a1 = cJSON_GetArrayItem(frame, 1), *a2 = cJSON_GetArrayItem(frame, 2), *a3 = cJSON_GetArrayItem(frame, 3);
     if (!strcmp(label, "ecfg")) { // the server's rules
-        EconRules *e = &g_econ;
-#define ECFG(field, key) if (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(a1, key))) e->field = jnum(a1, key)
-        ECFG(gift_fee, "giftFee"); ECFG(gift_min, "giftMin"); ECFG(gift_max, "giftMax"); ECFG(gift_min_lvl, "giftMinLvl");
-        ECFG(market_fee, "marketFee"); ECFG(market_fee_bypass, "marketFeeBypass"); ECFG(market_min_lvl, "marketMinLvl");
-        ECFG(sale_max, "saleMax"); ECFG(sale_grace, "saleGrace"); ECFG(max_listings, "maxListings");
-        ECFG(trade_min_lvl, "tradeMinLvl"); ECFG(trade_max_out, "tradeMaxOut"); ECFG(trade_max_out_p, "tradeMaxOutP");
-        ECFG(trade_kr_max, "tradeKRMax");
-#undef ECFG
+        econ_rules_apply(a1);
     } else if (!strcmp(label, "gir")) {
         io_gir(a1);
     } else if (!strcmp(label, "bmr")) { // io_bmr({item, kr, f} | null)

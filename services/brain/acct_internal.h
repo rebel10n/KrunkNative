@@ -32,13 +32,13 @@ typedef struct AcctConfig {
     int max_match_kr;               /* cap of one stats commit's KR (500) */
     double rank_var;                /* config.rankVar 0.03 */
     /* economy (economy.c, doc/v7/economy.md): defaults = Krunker v7.1.4 src/config.js */
-    int trade_min_level;            /* config.tradeMinLvl 20 (both players) */
-    int gift_min_level;             /* config.giftMinLVl 30 */
+    int trade_min_level;            /* config.tradeMinLvl 10 (v10; both players) */
+    int gift_min_level;             /* config.giftMinLVl 10 (v10) */
     int gift_fee_percent;           /* KR gift fee, ceil (config.giftFee 10/100) */
     int64_t gift_min, gift_max;     /* config.giftMin 10 / giftMax 1e7 */
     int market_fee_percent;         /* list fee, floor (config.marketFee 10/100) */
     int64_t market_fee_bypass;      /* prices <= this pay no fee (config.marketFeeBypass 0) */
-    int market_min_level;           /* config.marketMinLVl 15 (list + buy) */
+    int market_min_level;           /* config.marketMinLVl 10 (v10; list + buy) */
     int64_t sale_max;               /* max listing price (config.saleMax 1e7) */
     int64_t sale_grace_s;           /* a listing is buyable this long after posting (config.saleGrace 300 s) */
     int max_listings;               /* open listings per player ("MAX", 40) */

@@ -601,6 +601,7 @@ static const UiModuleHandler MODULE_HANDLERS[] = {
     v10_news_handle,           // v10_news.c: What's New (windows[34]), Guide, Community & Events
     v10_competitive_handle,    // v10_competitive.c: v10 Leaderboards, the view stack
     v10_social_handle,         // v10_social.c: v10 Social hub, player profile, clan view (openSocial, openPlayerProfile, ...)
+    v10_market_handle,         // v10_market.c: v10 Market & Trading (openExchange, v10mk.*)
     ui_settings_handle,        // ui_settings.c: Game Settings (windows[0])
     ui_controls_handle,        // ui_controls.c: Change Controls (windows[6])
     v10_customize_handle,      // v10_customize.c: the v10 page's Change Loadout tabs, Title window

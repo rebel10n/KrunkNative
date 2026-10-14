@@ -52,15 +52,31 @@ static Ctx *ctx_new(const char *label, int64_t a, int64_t b) {
 
 static const char *me_str(const SocialSession *s, char buf[24]) { return social_viewer(s, buf); }
 
-/* v7.1.4 tradable / listable: not free, noSale, blackM, opensea or an item shop item. */
+/* Tradable / listable: v10's item table carries the server's `tradable` bit for every item (the
+ * v7.1.4 rule, not free / noSale / blackM / opensea / itemShop, except 20 opensea items such as
+ * Gold Plated that v10 lets players trade). A skins file without the field (v7.1.4's) keeps the rule. */
+static int skins_have_tradable(void) {
+    static int known = -1;
+    if (known < 0) {
+        known = 0;
+        for (int i = 0; i < acct_skin_count() && !known; i++) {
+            const SkinInfo *k = acct_skin(i);
+            known = k && k->tradable;
+        }
+    }
+    return known;
+}
+
 static int skin_tradable(const SkinInfo *k) {
-    return k && !k->free_item && !k->no_sale && !k->black_m && !k->opensea && !k->item_shop;
+    if (!k) return 0;
+    if (skins_have_tradable()) return k->tradable != 0;
+    return !k->free_item && !k->no_sale && !k->black_m && !k->opensea && !k->item_shop;
 }
 
 /* Why an item cannot be listed (confListPopup strings), NULL when it can. */
 static const char *skin_unlistable(const SkinInfo *k) {
     if (!k) return "Item not found";
-    if (k->opensea) return "Item cant be sold on krunker.";
+    if (k->opensea && !skin_tradable(k)) return "Item cant be sold on krunker.";
     if (!skin_tradable(k)) return "Item cant be sold.";
     return NULL;
 }
@@ -252,6 +268,22 @@ static int item_matches(const MarketCtx *c, int64_t skin_id) {
     return 1;
 }
 
+static int64_t quick_sell_each(const SkinInfo *k);
+
+/* KrunkNative (the v10 inventory cards, v10_market.c): what the client's store table does not say
+ * about an owned item, from the server's own skins file: nt = cannot be listed / traded, qs = KR
+ * per quick-sold unit (0: none), nqs = noQuickSell (destroy only). */
+static void decorate_inventory(cJSON *rows) {
+    cJSON *it;
+    cJSON_ArrayForEach(it, rows) {
+        const SkinInfo *k = acct_skin(kn_json_int(it, "i", -1));
+        if (!k) continue;
+        if (!skin_tradable(k)) cJSON_AddNumberToObject(it, "nt", 1);
+        cJSON_AddNumberToObject(it, "qs", (double) quick_sell_each(k));
+        if (k->no_quick_sell) cJSON_AddNumberToObject(it, "nqs", 1);
+    }
+}
+
 static void market_done(SocialSession *s, kn_db_result *res, void *extra) {
     MarketCtx *c = extra;
     cJSON *data = NULL;
@@ -269,6 +301,7 @@ static void market_done(SocialSession *s, kn_db_result *res, void *extra) {
                 cJSON_AddItemToArray(data, cJSON_Duplicate(it, 1));
         }
         cJSON_Delete(rows);
+        if (!strcmp(c->sub, "inventory")) decorate_inventory(data);
     }
     if (c->kind == 1) { /* io_fr(Ne, list|null) */
         if (data && !cJSON_GetArraySize(data)) {
@@ -320,11 +353,28 @@ static void market_query(SocialSession *s, MarketCtx *c) {
         social_query(s, SQL(.any = LISTING_ROWS "WHERE l.seller_id = $1 AND l.sold_at IS NULL AND l.cancelled_at IS NULL ORDER BY l.id DESC"),
                      KN_DB_ARGS(me), market_done, c);
     } else if (!strcmp(c->sub, "stats")) {
-        social_query(s, SQL(.pg = "SELECT skin_id AS ski, sum(count)::bigint AS cnt, sum(count)::bigint AS c, sum(count)::bigint AS \"inC\" FROM inventory "
-                                  "WHERE count > 0 GROUP BY skin_id ORDER BY 2 ASC, skin_id LIMIT 50",
-                            .any = "SELECT skin_id AS ski, sum(count) AS cnt__i, sum(count) AS c__i, sum(count) AS inC__i FROM inventory "
-                                   "WHERE count > 0 GROUP BY skin_id ORDER BY 2 ASC, skin_id LIMIT 50"),
+        /* + the v10 Market Stats cards' On Sale / Low / High (onS, low, high: open listings) */
+        social_query(s, SQL(.pg = "SELECT skin_id AS ski, sum(count)::bigint AS cnt, sum(count)::bigint AS c, sum(count)::bigint AS \"inC\","
+                                  " (SELECT count(*) FROM market_listings l WHERE l.skin_id = i.skin_id AND l.sold_at IS NULL AND l.cancelled_at IS NULL) AS \"onS\","
+                                  " (SELECT min(price) FROM market_listings l WHERE l.skin_id = i.skin_id AND l.sold_at IS NULL AND l.cancelled_at IS NULL) AS low,"
+                                  " (SELECT max(price) FROM market_listings l WHERE l.skin_id = i.skin_id AND l.sold_at IS NULL AND l.cancelled_at IS NULL) AS high"
+                                  " FROM inventory i WHERE count > 0 GROUP BY skin_id ORDER BY 2 ASC, skin_id LIMIT 50",
+                            .any = "SELECT skin_id AS ski, sum(count) AS cnt__i, sum(count) AS c__i, sum(count) AS inC__i,"
+                                   " (SELECT count(*) FROM market_listings l WHERE l.skin_id = i.skin_id AND l.sold_at IS NULL AND l.cancelled_at IS NULL) AS onS__i,"
+                                   " (SELECT min(price) FROM market_listings l WHERE l.skin_id = i.skin_id AND l.sold_at IS NULL AND l.cancelled_at IS NULL) AS low__i,"
+                                   " (SELECT max(price) FROM market_listings l WHERE l.skin_id = i.skin_id AND l.sold_at IS NULL AND l.cancelled_at IS NULL) AS high__i"
+                                   " FROM inventory i WHERE count > 0 GROUP BY skin_id ORDER BY 2 ASC, skin_id LIMIT 50"),
                      0, NULL, market_done, c);
+    } else if (!strcmp(c->sub, "history")) {
+        /* KrunkNative (the v10 Market History tab): the account's closed market trades, newest first:
+         * {type buy|sell, date, skinindex, amount, who, status completed|cancelled} */
+        social_query(s, SQL(.any = "SELECT CASE WHEN l.buyer_id = $1 THEN 'buy' ELSE 'sell' END AS type,"
+                                   " {epoch_ms:coalesce(l.sold_at, l.cancelled_at)} AS date, l.skin_id AS skinindex, l.price AS amount,"
+                                   " (SELECT username FROM accounts WHERE id = CASE WHEN l.buyer_id = $1 THEN l.seller_id ELSE l.buyer_id END) AS who,"
+                                   " CASE WHEN l.sold_at IS NOT NULL THEN 'completed' ELSE 'cancelled' END AS status"
+                                   " FROM market_listings l WHERE l.buyer_id = $1 OR (l.seller_id = $1 AND (l.sold_at IS NOT NULL OR l.cancelled_at IS NOT NULL))"
+                                   " ORDER BY coalesce(l.sold_at, l.cancelled_at) DESC, l.id DESC LIMIT 500"),
+                     KN_DB_ARGS(me), market_done, c);
     } else if (!strcmp(c->sub, "trades")) {
         social_call(s, &P_TRADE_PAGE, KN_DB_ARGS(me), market_done, c);
     } else { /* market: cheapest open listing first */
@@ -355,7 +405,7 @@ void market_page(SocialSession *s, const char *page, const cJSON *f) {
         free(c);
         return;
     }
-    if (s->account_id <= 0 && (!strcmp(c->sub, "inventory") || !strcmp(c->sub, "sales") || !strcmp(c->sub, "trades"))) {
+    if (s->account_id <= 0 && (!strcmp(c->sub, "inventory") || !strcmp(c->sub, "sales") || !strcmp(c->sub, "trades") || !strcmp(c->sub, "history"))) {
         social_send_n(s, "0", 3, cJSON_CreateString(page), cJSON_CreateString(c->sub), cJSON_CreateNull());
         free(c);
         return;
@@ -579,6 +629,19 @@ static void quick_sell_done(SocialSession *s, kn_db_result *res, void *extra) {
     push_funds(s->account_id);
 }
 
+/* KR per quick-sold unit: the item's qsKR, else store.rarities[r].sell (5 for minQuickSell items).
+ * KrunkNative: an item the game sells for KR (the Black Market) never quick-sells for KR (its
+ * rarity value can be 25x its price: 100 KR capes worth 2500 KR); it can still be destroyed */
+static int64_t quick_sell_each(const SkinInfo *k) {
+    int64_t each = 0;
+    if (k->rarity >= 0 && k->rarity < RARITIES) {
+        each = k->qs_kr > 0 ? k->qs_kr : k_rarity_sell[k->rarity];
+        if (k->min_quick_sell && each > 0) each = 5; /* config.minQSKR */
+    }
+    if (k->black_m || k->funds > 0) each = 0;
+    return each;
+}
+
 /* v7.1.4 ["qsi", mode (0 KR, 1 junk, 2 destroy), skin, uid, amount (0 one, 1 all but one, 2 all), {op}]
  * or the older KrunkNative ["qsi", skin, uid, amount] -> ["qsr", {i: uid, c, f, kr, j, jnk} | null].
  * KR per item: the item's qsKR, else store.rarities[r].sell (5 for minQuickSell items). Junk
@@ -589,14 +652,7 @@ void sh_quick_sell(SocialSession *s, const cJSON *f) {
     const int64_t mode = v7 ? fa_int(f, 1, 0) : 0, id = fa_int(f, v7 ? 2 : 1, -1), uid = fa_int(f, v7 ? 3 : 2, 0);
     const int64_t sel = fa_int(f, v7 ? 4 : 3, 0);
     const SkinInfo *k = acct_skin(id);
-    int64_t each = 0;
-    if (k && k->rarity >= 0 && k->rarity < RARITIES) {
-        each = k->qs_kr > 0 ? k->qs_kr : k_rarity_sell[k->rarity];
-        if (k->min_quick_sell && each > 0) each = 5; /* config.minQSKR */
-    }
-    /* KrunkNative: an item the game sells for KR (the Black Market) never quick-sells for KR (its
-     * rarity value can be 25x its price: 100 KR capes worth 2500 KR); it can still be destroyed */
-    if (k && (k->black_m || k->funds > 0)) each = 0;
+    const int64_t each = k ? quick_sell_each(k) : 0;
     if (!k || (mode != 0 && mode != 2) || (mode == 0 && (k->no_quick_sell || each <= 0)) || sel < 0 || sel > 2) {
         social_send_n(s, "qsr", 1, cJSON_CreateNull());
         return;

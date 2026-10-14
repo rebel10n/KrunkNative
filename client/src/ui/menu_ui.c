@@ -1430,6 +1430,7 @@ static void setup_dom(void) {
     servers_ui_menu_setup(); // KrunkNative: the Connect button next to Invite / Join (servers_ui.c)
     v10_news_setup(); // the v10 menu's Guide / What's New / Community & Events items (v10_news.c)
     v10_competitive_setup(); // the v10 page: Ranked / Turf Wars / Leaderboards (v10_competitive.c)
+    v10_market_menu_setup(); // v10 Market & Trading: #menuBtnMarket (v10_market.c)
 
     HtmlElem el;
     if ((el = by_id("classPreviewCanvas"))) html_dom_observe_resize(el, on_observed_resize, NULL);

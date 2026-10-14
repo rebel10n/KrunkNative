@@ -6,8 +6,8 @@ trade offers against kn_brain on a scratch database, with concurrency tests.
 env: KN_TEST_DB_DRIVER=postgres (default: a per-run schema in config/config.json's database,
      127.0.0.1:5432 in development) | sqlite | mysql (db_scratch.py). 77 = skip.
 
-Covers the v7.1.4 rules (gift min / fee ceil / level 30, list fee floor / level 15 / MAX / sale
-grace, non-tradable items, quick sell, trade level 20 on both sides, 5 / 20 items per side, the
+Covers the v7.1.4 rules (gift min / fee ceil / level 10 (v10; v7.1.4 30), list fee floor / level 10 (v7.1.4 15) / MAX / sale
+grace, non-tradable items, quick sell, trade level 10 on both sides (v7.1.4 20), 5 / 20 items per side, the
 per-rarity trade fee, premium), KrunkNative's KR in offers + escrow, the idempotency keys (a
 replayed frame does not move anything twice), feature bans, account bans, trade locks, rate
 limits, offer expiry, a pre-0111 (non-escrowed) offer, the ledger (one kr_transactions row per
@@ -234,8 +234,8 @@ async def scenario(url, db):
         # ---- rules
         r = await a.call("ecfg", "ecfg")
         cfg = r[1]
-        check(cfg["giftFee"] == 10 and cfg["giftMin"] == 10 and cfg["giftMinLvl"] == 30 and cfg["marketFee"] == 10
-              and cfg["marketMinLvl"] == 15 and cfg["tradeMinLvl"] == 20 and cfg["tradeMaxOut"] == 5 and cfg["tradeMaxOutP"] == 20,
+        check(cfg["giftFee"] == 10 and cfg["giftMin"] == 10 and cfg["giftMinLvl"] == 10 and cfg["marketFee"] == 10
+              and cfg["marketMinLvl"] == 10 and cfg["tradeMinLvl"] == 10 and cfg["tradeMaxOut"] == 5 and cfg["tradeMaxOutP"] == 20,
               "ecfg reports the v7.1.4 rules: %r" % cfg)
 
         # ---- KR gifts
@@ -270,9 +270,9 @@ async def scenario(url, db):
         check(po_text(r) == "Player not found", "unknown receiver")
         r = await a.call(("gir", "po"), "kr", names["bob"], 100000, "", op())
         check(po_text(r) == "Not enough KR", "gift over the balance refused: %r" % (r,))
-        set_player(db, A, level=29)
+        set_player(db, A, level=9)
         r = await a.call(("gir", "po"), "kr", names["bob"], 50, "", op())
-        check(po_text(r) == "Must be level 30", "gift needs level 30: %r" % (r,))
+        check(po_text(r) == "Must be level 10", "gift needs level 10 (v10): %r" % (r,))
         set_player(db, A, level=40)
         db.q("INSERT INTO feature_bans (account_id, feature, reason) VALUES ($1, 'gift', 'test')", A)
         r = await a.call(("gir", "po"), "kr", names["bob"], 50, "", op())
@@ -294,9 +294,9 @@ async def scenario(url, db):
         # ---- market
         give(db, C, 4, 3)    # Moon Dragon, legendary
         give(db, C, 3, 1)
-        set_player(db, C, level=14)
+        set_player(db, C, level=9)
         r = await c.call(("lir", "po"), "li", 4, 4, 7, 1000, op())
-        check(po_text(r) == "Must be level 15", "listing needs marketMinLVl 15: %r" % (r,))
+        check(po_text(r) == "Must be level 10", "listing needs marketMinLVl 10 (v10): %r" % (r,))
         set_player(db, C, level=40)
         before = funds(db, C)
         r = await c.call(("lir", "po"), "li", 4, 4, 7, 1009, op())
@@ -312,6 +312,14 @@ async def scenario(url, db):
         give(db, C, nosale, 1)
         r = await c.call(("lir", "po"), "li", nosale, nosale, 7, 50, op())
         check(po_text(r) == "Item cant be sold.", "noSale item cannot be listed: %r" % (r,))
+        # v10's tradable bit wins over the v7.1.4 rule: Gold Plated (an opensea item v10 trades) lists
+        gold = next((i for i, x in enumerate(free) if x.get("opensea") and x.get("tradable")), None)
+        if gold is not None:
+            give(db, C, gold, 1)
+            r = await c.call(("lir", "po"), "li", gold, gold, 7, 5000, op())
+            check(r[0] == "lir" and r[1].get("listingId"), "a v10 tradable opensea item lists: %r" % (r,))
+            if r[0] == "lir" and r[1].get("listingId"):
+                await c.call(("ulir", "po"), "uli", gold, r[1]["listingId"], 7, op())
         r = await b.call(("br", "po"), "pi", listing, 3, op())
         check(po_text(r) == "Item not available yet", "saleGrace: not buyable right after posting: %r" % (r,))
         db.q("UPDATE market_listings SET created_at = created_at - interval '10 minutes' WHERE id = $1" if DRIVER == "postgres" else
@@ -394,9 +402,9 @@ async def scenario(url, db):
         # ---- trades
         give(db, A, 2, 2)   # epic: fee 5
         give(db, B, 4, 0)
-        set_player(db, B, level=19)
+        set_player(db, B, level=9)
         r = await a.call(("trR", "po"), "ctr", B, [{"i": 2, "c": 1}], [{"i": 4, "c": 1}], "deal?", op())
-        check(po_text(r) == "Must be level 20", "trade needs level 20 on both sides: %r" % (r,))
+        check(po_text(r) == "Must be level 10", "trade needs level 10 on both sides (v10): %r" % (r,))
         set_player(db, B, level=40)
         r = await a.call(("trR", "po"), "ctr", B, [{"i": 2, "c": 6}], [], "", op())
         check(po_text(r) == "5 items per user", "5 items per side for non-premium: %r" % (r,))
@@ -471,9 +479,9 @@ async def scenario(url, db):
         # KR in offers follows the gift rules: minimum, gift level, and the receiver pays the fee on rkr
         r = await a.call(("trR", "po"), "ctr", C, [{"i": 2, "c": 1}], [], "", dict(op(), skr=9))
         check(po_text(r) == "10 KR minimum", "offer KR below the gift minimum")
-        set_player(db, A, level=25)
+        set_player(db, A, level=9)
         r = await a.call(("trR", "po"), "ctr", C, [{"i": 2, "c": 1}], [], "", dict(op(), skr=100))
-        check(po_text(r) == "Must be level 30", "offering KR needs the gift level: %r" % (r,))
+        check(po_text(r) == "Must be level 10", "offering KR needs the gift level: %r" % (r,))
         set_player(db, A, level=40)
         r = await a.call(("trR", "po"), "ctr", C, [{"i": 2, "c": 1}], [], "", dict(op(), rkr=200))
         tk = r[1]["trid"]

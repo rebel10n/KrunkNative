@@ -59,14 +59,14 @@ void acct_config_load(Brain *b) {
     c->register_per_ip_hour = cfg_int(cfg, "register_per_ip_hour", 0);
     c->max_match_kr = cfg_int(cfg, "max_match_kr", 500);
     c->rank_var = kn_config_num(cfg, "accounts.rank_var", 0.03);
-    c->trade_min_level = cfg_int(cfg, "trade_min_level", 20);
-    c->gift_min_level = cfg_int(cfg, "gift_min_level", 30);       /* config.giftMinLVl */
+    c->trade_min_level = cfg_int(cfg, "trade_min_level", 10);   /* v10 tradeMinLvl (v7.1.4: 20) */
+    c->gift_min_level = cfg_int(cfg, "gift_min_level", 10);       /* v10 giftMinLVl (v7.1.4: 30) */
     c->gift_fee_percent = cfg_int(cfg, "gift_fee_percent", 10);   /* config.giftFee 10/100 */
     c->gift_min = kn_config_int(cfg, "accounts.gift_min", 10);     /* config.giftMin */
     c->gift_max = kn_config_int(cfg, "accounts.gift_max", 10000000); /* config.giftMax */
     c->market_fee_percent = cfg_int(cfg, "market_fee_percent", 10); /* config.marketFee 10/100 */
     c->market_fee_bypass = kn_config_int(cfg, "accounts.market_fee_bypass", 0); /* config.marketFeeBypass */
-    c->market_min_level = cfg_int(cfg, "market_min_level", 15);   /* config.marketMinLVl */
+    c->market_min_level = cfg_int(cfg, "market_min_level", 10);   /* v10 marketMinLVl (v7.1.4: 15) */
     c->sale_max = kn_config_int(cfg, "accounts.sale_max", 10000000);
     c->sale_grace_s = kn_config_int(cfg, "accounts.sale_grace_s", 300); /* config.saleGrace 300000 ms */
     c->max_listings = cfg_int(cfg, "max_listings", 40);

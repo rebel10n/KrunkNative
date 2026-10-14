@@ -264,6 +264,7 @@ static void warn_unknown_keys(void) {
         "interact",   // #interactMsg's innerHTML in game (ui_interact_scenario): the prompt without an interactable
         "charge",     // in game: the charge bar's interMProg (a number) or {prog, over} (build_ui_scenario)
         "settings",   // {key: value}: setSetting before the state applies (v10's showMinimap off by default)
+        "market",     // the v10 Market & Trading popup's state (v10_market_scenario)
     };
     const cJSON *item;
     cJSON_ArrayForEach(item, g_sc.state) {
@@ -875,6 +876,7 @@ static int ui_scenario_apply(Client *client) {
     turf_ui_scenario(st("turf"));       // the Turf Wars popup (turf_ui.c)
     v10_news_scenario(st("community")); // v10 events / polls / news (v10_news.c)
     clan_ui_scenario(st("clan"));       // the Clans window (clan_ui.c)
+    if (menu_open) v10_market_scenario(st("market")); // the v10 Market & Trading popup (v10_market.c)
     update_ui_scenario(st("update"));   // the Outdated box without a network check
     if (menu_open) apply_window(client);
     if (menu_open) v10_social_scenario(st("social")); // the v10 Social hub (v10_social.c)

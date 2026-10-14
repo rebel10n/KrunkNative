@@ -1,0 +1,82 @@
+{
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "ref": "doc/ref/krunknative/v10-market/browse.png",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Trader",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "account": {
+      "name": "Trader",
+      "score": 2000000,
+      "funds": 5000,
+      "skins": [
+        {
+          "ind": 4,
+          "cnt": 2
+        },
+        {
+          "ind": 3,
+          "cnt": 1
+        },
+        {
+          "ind": 1641,
+          "cnt": 1
+        }
+      ]
+    },
+    "market": {
+      "tab": 0,
+      "listings": [
+        {
+          "i": 4,
+          "f": 300,
+          "m": 11,
+          "ms": 1760000000000,
+          "p": "bob"
+        },
+        {
+          "i": 4,
+          "f": 350,
+          "m": 12,
+          "ms": 1760000001000,
+          "p": "amy"
+        },
+        {
+          "i": 3,
+          "f": 20,
+          "m": 13,
+          "ms": 1760000002000,
+          "p": "bob"
+        },
+        {
+          "i": 120,
+          "f": 75,
+          "m": 15,
+          "ms": 1760000004000,
+          "p": "zed"
+        },
+        {
+          "i": 800,
+          "f": 1200,
+          "m": 16,
+          "ms": 1760000005000,
+          "p": "amy"
+        }
+      ]
+    }
+  },
+  "frames": 3,
+  "note": "KrunkNative regression baseline (llvmpipe render of this scenario): the v10 Market & Trading popup logged in (browse). No v10 reference exists for logged-in states: the offline v10 sandbox cannot log in."
+}

@@ -1,0 +1,31 @@
+{
+  "scenario": "v10/market-trading",
+  "defaults": {
+    "fuzz": 10,
+    "max_pct": 4.0
+  },
+  "regions": [
+    {
+      "name": "sidebar",
+      "rect": [
+        95,
+        134,
+        88,
+        445
+      ],
+      "kind": "text",
+      "note": "Trading active"
+    },
+    {
+      "name": "lock",
+      "rect": [
+        540,
+        330,
+        200,
+        60
+      ],
+      "kind": "text",
+      "note": "lock icon + 'Must be level 10 to trade'"
+    }
+  ]
+}
