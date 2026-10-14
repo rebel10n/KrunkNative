@@ -41,7 +41,7 @@ silent (only the `] line` echo), as in the mod.
 
 | Command | v3.1.1 behaviour | Native |
 |---|---|---|
-| help [cmd] | "N commands:" + sorted list / `name args — desc` / "unknown command: x" | same (91 commands, with `give` / `drop`, `cls`, `thirdperson` / `firstperson`, `reload` and `console_reset`) |
+| help [cmd] | "N commands:" + sorted list / `name args — desc` / "unknown command: x" | same (91 commands, with `give` / `drop`, `cls`, `thirdperson` / `firstperson`, `reload`, `console_reset` and `logout`) |
 | clear | empties the log | same; Krunker Box Office alias `cls` |
 | echo / print text | prints the text | same |
 | bind [key] [cmd] | session key binds by `e.key` / `e.code` ("bound k -> cmd", "no binds", "k = (unbound)") | same; fired on keydown while hidden, not while typing |
@@ -53,6 +53,7 @@ silent (only the `] line` echo), as in the mod.
 | quit | `window.close()` | closes the window (web: `window.close()`) |
 | reconnect | `location.reload()` | reconnects to the last server or lobby, also after `disconnect` (offline, or after a `disconnect` from the offline game: restarts it on the same map). The Reconnect bind (unbound by default, Settings > Controls > General) runs it natively; on the web that key is `location.reload()`. F5's full reload (`reload`, below) ends with it |
 | reload | `location.reload()` (the mod's F5) | Krunker Box Office: the full reload F5 does (the Reload Game bind, Settings > Controls > General), see [F5: full reload](#f5-full-reload). On the web: `location.reload()`, and the address bar (`?game=<id>`, `?offline=1&map=<key>`, `?sandbox`) brings the reload back to the same game |
+| logout | – | Krunker Box Office: the menu's Logout (`logoutAcc`, account_ui.c `account_ui_logout`): the saved session token dropped and revoked in kn_brain, the social socket signed out, the guest header (v7 and v10 pages), the Account window shown, the lobby rejoined as a guest (servers_ui.c, as after any account change in the menu); "logged out". A guest gets "not logged in" and nothing else. Client-local: nothing reaches the game server or its command auth |
 | console_reset | – | Krunker Box Office: the console back at the stylesheet's place and size (top right, 744 x 280 at most) and the saved geometry (`krk_dev_console_geom`) deleted |
 | offline [map] | `playCustomMap()` + clearPingCounter | starts the embedded offline game, ping 0 (`--offline`, web `?offline=1`); a map (catalogue key, name or path under assets/maps) picks where it plays, like `--map` / `?map=` |
 | sandbox | – (v7.1.4: `?sandbox` / `?test` load `config.blankMap`) | Krunker Box Office: the offline game on the sandbox map, the catalogue's `Test` (maps/custom/Test.json, what the editor's Test plays with no map of its own); `--sandbox`, web `?sandbox` |

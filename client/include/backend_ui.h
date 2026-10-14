@@ -36,6 +36,7 @@ typedef struct {
 void account_ui_init(Client*);              // listens on the social socket; restores the saved session
 const AccountInfo *account_get(void);       // NULL = guest (Krunker `acc == null`)
 const char *account_session_token(void);    // saved social session token, "" none
+int  account_ui_logout(void);               // logoutAcc (menu Logout, console `logout`): 1 logged out, 0 guest
 void account_ui_tick(Client*);              // per frame: header bar once the page exists
 void account_send_frame(const char *label);  // one no-argument social frame ("ttl": the account's titles)
 int  account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours

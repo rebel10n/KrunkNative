@@ -561,6 +561,14 @@ static void logout(void) {
     menu_update_class_box();
 }
 
+// The menu's Logout (logoutAcc) and the developer console's `logout` (ui_console.c): 1 when an
+// account was logged out, 0 for a guest (nothing done)
+int account_ui_logout(void) {
+    if (!g_logged_in) return 0;
+    logout();
+    return 1;
+}
+
 static void reward_tick(int force);
 static void auth_unreachable(void);
 static int progress_frame(const char *label, const cJSON *frame);
@@ -1379,7 +1387,7 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         return 1;
     }
     if (!strcmp(name, "logoutAcc")) {
-        if (g_logged_in) logout();
+        account_ui_logout();
         return 1;
     }
     if (!strcmp(name, "logoutSessions")) { // io.send("las")

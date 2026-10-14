@@ -1295,6 +1295,18 @@ static void cmd_firstperson(const int argc, char **argv, const char *rest) {
     third_person_first_person(con_client());
 }
 
+// logout (KrunkNative): the menu's Logout (account_ui.c logoutAcc: the saved token dropped and
+// revoked, the social socket signed out, the guest header). Client-local: nothing goes to the
+// game server, so its command auth is not involved.
+static void cmd_logout(const int argc, char **argv, const char *rest) {
+    (void) argc; (void) argv; (void) rest;
+    if (!account_ui_logout()) {
+        append("not logged in", COL_INFO);
+        return;
+    }
+    append("logged out", COL_REPLY);
+}
+
 // update [check|now|download]: the client update (update_ui.c, doc/backend.md "Client updates")
 static void cmd_update(const int argc, char **argv, const char *rest) {
     (void) rest;
@@ -1318,6 +1330,7 @@ static void register_commands(void) {
     register_local("disconnect", NO_ARGS, "disconnect and stay in the menu", cmd_disconnect);
     register_local("quit", NO_ARGS, "close the window", cmd_quit);
     register_local("reconnect", NO_ARGS, "reconnect to the last server", cmd_reconnect);
+    register_local("logout", NO_ARGS, "log out of your account (the menu's Logout)", cmd_logout);
     register_local("reload", NO_ARGS, "full reload (F5): settings, binds, textures, models, sounds, shaders, menu; then rejoin", cmd_reload);
     register_local("console_reset", NO_ARGS, "put the console back at its default place and size", cmd_console_reset);
     register_local("offline", ARGS(A_MAP_OPT), "switch to offline mode (the in-process server), optionally on a map", cmd_offline);
