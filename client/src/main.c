@@ -441,17 +441,27 @@ static int parse_startup_args(int argc, char **argv, int *offline, int *sandbox,
 
 // The product flavor (flavor.h): --flavor base|strike wins, then KN_FLAVOR, then the compile-time
 // default (base, or Strike for a -DKRUNKNATIVE_FLAVOR=strike build). Only the display name changes.
-static void client_resolve_flavor(int argc, char **argv) {
+// Sets the flavor from KN_FLAVOR / --flavor and REMOVES --flavor[=key] (and a separate key
+// argument) from argv so the ordinary argument parser below never sees it and treats it as unknown.
+static void client_resolve_flavor(int *argc, char **argv) {
     const char *env = getenv("KN_FLAVOR");
     if (env && env[0]) flavor_set_key(env);
-    for (int i = 1; i < argc; i++) {
-        if (!strncmp(argv[i], "--flavor=", 9)) flavor_set_key(argv[i] + 9);
-        else if (!strcmp(argv[i], "--flavor") && i + 1 < argc) flavor_set_key(argv[++i]);
+    int out = 1;
+    for (int i = 1; i < *argc; i++) {
+        if (!strncmp(argv[i], "--flavor=", 9)) {
+            flavor_set_key(argv[i] + 9);
+        } else if (!strcmp(argv[i], "--flavor")) {
+            if (i + 1 < *argc) flavor_set_key(argv[++i]); // consume the key too
+        } else {
+            argv[out++] = argv[i];
+        }
     }
+    if (out < *argc) argv[out] = NULL;
+    *argc = out;
 }
 
 int main(int argc, char **argv) {
-    client_resolve_flavor(argc, argv); // branding for --version, the banner and the window title
+    client_resolve_flavor(&argc, argv); // branding for --version, the banner and the window title; strips --flavor
     // --version before anything needs assets or a GL context (build identity: build_info.h)
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--version")) {
