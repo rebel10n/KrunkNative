@@ -1181,6 +1181,8 @@ typedef struct Player_t {
     unsigned char show_badges;    // ENT showBadges (PLAYER_SHOW_BADGE_*), PLAYER_SHOW_BADGES_ALL by default
     int score;                    // Krunker player.score
     int reward;                   // Krunker player.reward: KR of the last endGame (END "reward" column)
+    int additional_reward;        // Krunker player.additionalReward: KR from claimed KR Packages, added
+                                  // to reward at endGame past the cap (airDropPackages.js / game.js:191329)
     unsigned int assists;
     unsigned int streak;          // Krunker player.streak: multi-kill counter (reset after feedTimer)
     unsigned int kill_streak;     // Krunker player.killStreak: kills since the last death

@@ -1399,9 +1399,11 @@ static void test_kill_medals(Game *game) {
 // GameHooks.reward for the round test: uid 1 has an account (v3.1.1 30 KR cap), uid 2 is a guest.
 static int test_round_reward(Game *game, const Player *player) {
     (void) game;
-    if (player->uid != 1) return 0;
+    if (player->uid != 1) return 0; // a guest earns nothing, not even claimed KR Packages
     const int reward = player->score / 100;
-    return reward > 30 ? 30 : reward;
+    const int capped = reward > 30 ? 30 : reward;
+    // claimed KR Packages (player.additionalReward) pay past the cap (accounts.c acc_reward)
+    return capped + (player->additional_reward > 0 ? player->additional_reward : 0);
 }
 
 // /endless pauses the round clock where it is and resumes from there (no reset, no drift).
@@ -1452,6 +1454,8 @@ static void test_round(Game *game) {
     Player *b = game_find_player(game, 2);
     a->score = 500;
     b->score = 100;
+    a->additional_reward = 20; // a claimed KR Packages worth 20 KR: paid past the cap
+    b->additional_reward = 10; // a guest: not credited
 
     game->round_timer = 2.5f;
     game->round_seconds_sent = -1;
@@ -1488,8 +1492,10 @@ static void test_round(Game *game) {
         CHECK(pa.result == 1 && pb.result == 0, "results %d / %d", pa.result, pb.result);
         CHECK(pa.winner_uid == 1 && pa.next_round == 25, "winner %d next %d", pa.winner_uid, pa.next_round);
         CHECK(pa.board.entries[0].uid == 1 && pa.board.entries[1].uid == 2, "end board order");
-        CHECK(pa.rewards[0] == 5 && pa.rewards[1] == 0 && pb.rewards[0] == 5, "end reward column %d / %d", pa.rewards[0], pa.rewards[1]);
-        CHECK(a->reward == 5 && b->reward == 0, "player.reward %d / %d", a->reward, b->reward);
+        // a: min(30, 500/100) + 20 claimed KR = 25; b (guest): 0 even with additionalReward
+        CHECK(pa.rewards[0] == 25 && pa.rewards[1] == 0 && pb.rewards[0] == 25, "end reward column %d / %d", pa.rewards[0], pa.rewards[1]);
+        CHECK(a->reward == 25 && b->reward == 0, "player.reward %d / %d", a->reward, b->reward);
+        CHECK(a->additional_reward == 0 && b->additional_reward == 0, "additionalReward reset at endGame %d / %d", a->additional_reward, b->additional_reward);
     }
     game->hooks.reward = NULL;
 

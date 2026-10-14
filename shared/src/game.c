@@ -507,10 +507,13 @@ void game_end_round(Game *game) {
         count = game_end_order(game, sorted, &winner);
     }
 
-    // endGame(): player.reward for every player (hooks.reward: accounts live in the server)
+    // endGame(): player.reward for every player (hooks.reward: accounts live in the server). The
+    // reward hook folds in additionalReward (claimed KR Packages), then it resets (game.js:191331).
     for (size_t i = 0; i < game->player_count; i++) {
         Player *player = game->players[i];
-        if (player) player->reward = game->hooks.reward ? game->hooks.reward(game, player) : 0;
+        if (!player) continue;
+        player->reward = game->hooks.reward ? game->hooks.reward(game, player) : 0;
+        player->additional_reward = 0;
     }
 
     NetLeaderboardPacket board;

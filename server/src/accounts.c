@@ -525,7 +525,9 @@ static int acc_reward(const ClientConnection *client, const Player *player) {
     // v10 ranked: floor(2 x reward) after the cap (v10:191171 `isRanked && (reward = floor(2 * reward))`);
     // rules_reward_mlt is 1 outside ranked and under v7, so this is the plain capped reward there
     const float ranked_mlt = rules_reward_mlt(&g_server->game);
-    return ranked_mlt != 1.0f ? (int) floor((double) capped * ranked_mlt) : capped;
+    const int ranked = ranked_mlt != 1.0f ? (int) floor((double) capped * ranked_mlt) : capped;
+    // Claimed KR Packages pay past the cap (game.js:191329 `reward += additionalReward`), accounts only
+    return ranked + (player->additional_reward > 0 ? player->additional_reward : 0);
 }
 
 // GameHooks.reward (game_end_round): the END packets' reward column and the commit's "kr".

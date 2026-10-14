@@ -607,6 +607,55 @@ static void test_airdrops(Game *game) {
         claimer->is_bot = 0;
     }
 
+    // KR Packages (airDropPackages.js:1-56, game.deob.js:178569-178633): the claim adds N KR to
+    // player.additionalReward (paid at endGame past the cap, accounts.c) and shows the claimer the
+    // "KR Claimed" / "KR Thief" popup plus a "Claimed N KR" server chat line (type 2). Shown to any
+    // human claimer, guests included; the "doesn't register" bug was the KR branch doing nothing.
+    static const struct {
+        int guest, bot, own, index, kr;
+        const char *popup;
+    } kr_claims[] = {
+        {0, 0, 0, 0, 5, "KR Thief"},      // b steals a's rarity-0 KR Package: 5 KR
+        {0, 0, 1, 6, 250, "KR Claimed"},  // a claims its own rarity-6 KR Package: 250 KR
+        {1, 0, 1, 3, 20, "KR Claimed"},   // a guest's own rarity-3 KR Package: 20 KR
+        {1, 1, 0, 0, 0, NULL},            // a bot: nothing
+    };
+    for (size_t i = 0; i < sizeof(kr_claims) / sizeof(kr_claims[0]); i++) {
+        Player *claimer = kr_claims[i].own ? a : b;
+        const int had_account = claimer->has_account;
+        claimer->has_account = (unsigned char) !kr_claims[i].guest;
+        claimer->is_bot = (unsigned char) kr_claims[i].bot;
+        claimer->additional_reward = 0;
+        const int ksid = airdrop_drop(game, a, (vec3) {-150.0f, 0.0f, 100.0f}, 0.0f, kr_claims[i].index);
+        AirDrop *kd = &game->zombies.drops[ksid - 1];
+        place(claimer, kd->position.x, kd->position.z);
+        claimer->position.y = kd->position.y;
+        claimer->interact_progress = 0.0f;
+        reset_sent();
+        for (int f = 0; f < 200 && kd->active; f++) airdrop_player_collide(claimer, &input, 0.05f);
+        NetPopupPacket popup;
+        NetChatPacket chat;
+        memcpy(&popup, g_last[NET_PACKET_POPUP], sizeof(popup));
+        memcpy(&chat, g_last[NET_PACKET_CHAT], sizeof(chat));
+        popup.text[sizeof(popup.text) - 1] = 0;
+        chat.text[sizeof(chat.text) - 1] = 0;
+        if (kr_claims[i].popup) {
+            char line[32];
+            snprintf(line, sizeof(line), "Claimed %d KR", kr_claims[i].kr);
+            CHECK(!kd->active && g_count[NET_PACKET_POPUP] == 1 && g_last_uid[NET_PACKET_POPUP] == claimer->uid && !strcmp(popup.text, kr_claims[i].popup),
+                  "KR Package %d: the \"%s\" popup to the claimer (%d \"%s\")", kr_claims[i].index, kr_claims[i].popup, g_count[NET_PACKET_POPUP], popup.text);
+            CHECK(g_count[NET_PACKET_CHAT] == 1 && g_last_uid[NET_PACKET_CHAT] == claimer->uid && chat.kind == NET_CHAT_SERVER && !strcmp(chat.text, line),
+                  "KR Package %d: \"%s\" server line (%d kind %d \"%s\")", kr_claims[i].index, line, g_count[NET_PACKET_CHAT], chat.kind, chat.text);
+            CHECK(claimer->additional_reward == kr_claims[i].kr, "KR Package %d: additionalReward += %d (got %d)", kr_claims[i].index, kr_claims[i].kr, claimer->additional_reward);
+        } else {
+            CHECK(!kd->active && g_count[NET_PACKET_AIRDROP_CLAIM] == 1 && !g_count[NET_PACKET_POPUP] && !g_count[NET_PACKET_CHAT] && claimer->additional_reward == 0,
+                  "KR Package: a bot claims it with no popup, line or reward (%d %d %d)", g_count[NET_PACKET_POPUP], g_count[NET_PACKET_CHAT], claimer->additional_reward);
+        }
+        claimer->has_account = (unsigned char) had_account;
+        claimer->is_bot = 0;
+        claimer->additional_reward = 0;
+    }
+
     // the client mirror
     Game client;
     memset(&client, 0, sizeof(client));

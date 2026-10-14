@@ -8,12 +8,15 @@
 // false too. Maps cannot place or configure them.
 //
 // KN notes:
-// - The KR / Junk / Skin packages pay into the account (additionalReward, sendUserJunk,
-//   giveSkin). KN has no backend call for that yet (decisions.md "Backend-only triggers"), so
-//   they are claimed (the "krp" line goes out) but pay nothing. A Junk Package still shows its
-//   claim to any human claimer, guests included: the "Junk Claimed" / "Junk Thief" popup and
-//   sendUserJunk's "You found [x] Junk" line (package_claim; KN has no junk wallet, decisions.md
-//   "Reward Junk").
+// - A KR Package pays its KR into player.additionalReward (5/10/15/20/30/100/250 by rarity) and
+//   shows the "KR Claimed" / "KR Thief" popup plus a "Claimed N KR" chat line to the claimer,
+//   as v7/v10 do (airDropPackages.js, game.deob.js:178569-178633). The KR is paid at endGame
+//   past the cap (accounts.c acc_reward, game.js:191329 reward += additionalReward), so it goes
+//   through the account backend (kn_brain), not the client, and credits backend accounts only.
+// - A Junk Package shows the "Junk Claimed" / "Junk Thief" popup and sendUserJunk's "You found
+//   [x] Junk" line to any human claimer, guests included, but KN has no junk wallet so nothing is
+//   credited (decisions.md "Reward Junk"). A Skin Package has no store grant in KN (nothing).
+//   All three show to any human claimer (guests included); bots get nothing to show.
 // - The trapped explosion goes through game_explosion, which hurts its source by a fifth; v7
 //   skips the source of a streak explosion (data.stk). The source is the drop's owner, who sees
 //   the real package and so normally doesn't claim it.
@@ -248,22 +251,40 @@ static void package_claim(Game *game, AirDrop *d, Player *claimer) {
             game_explosion(game, at, 50.0f, 300.0f, owner ? owner : claimer, -1);
             break;
         }
-        default: { // KR / Junk / Skin: account rewards, no backend call yet (see the header)
-            // Junk Package claim (airDropPackages.js:122-130): `if (!player.account) return false`,
-            // then send("am", [thief ? "Junk Thief" : "Junk Claimed", amount + " Junk", 0, 1]) and
-            // sendUserJunk, whose "jnk" reply prints "You found [x] Junk". Every v7.1.4 server
-            // player has an account object, guests included (server/index.ts handleEnter:
-            // `account || createGuestAccount(...)`), so a guest's claim shows both. Gating on KN's
-            // has_account (a backend account) made a guest's Junk Package claim silent. Bots get
-            // nothing to show. [KN] The medal sub "0.05 Junk" is a string, which NetPopupPacket
-            // cannot carry next to the title: the amount is in the chat line.
-            static const double k_junk[7] = {0.05, 0.1, 0.2, 0.3, 0.5, 1.0, 2.5}; // the Junk Packages by rarity
-            if (p->icon != 3 || p->rarity < 0 || p->rarity >= 7 || game_player_is_bot(game, claimer)) break;
-            NetPopupPacket popup;
-            memset(&popup, 0, sizeof(popup));
-            snprintf(popup.text, sizeof(popup.text), "%s", claimer->uid != d->owner_uid ? "Junk Thief" : "Junk Claimed");
-            game_send(game, claimer->uid, NET_PACKET_POPUP, &popup, sizeof(popup));
-            game_found_junk(game, claimer, k_junk[p->rarity]);
+        default: { // KR / Junk / Skin: account rewards (see the header)
+            // Every v7.1.4 server player has an account object, guests included (server/index.ts
+            // handleEnter: `account || createGuestAccount(...)`), so a human claimer's KR / Junk
+            // claim shows its reward; gating on KN's has_account (a backend account) made a guest's
+            // claim silent. Bots get nothing to show. [KN] The medal sub ("5 KR" / "0.05 Junk") is a
+            // string, which NetPopupPacket cannot carry next to the title: the amount is in the chat
+            // line. Skin Package (icon 2) has no store grant in KN and shows nothing (unchanged).
+            if (p->rarity < 0 || p->rarity >= 7 || game_player_is_bot(game, claimer)) break;
+            const int thief = claimer->uid != d->owner_uid;
+            if (p->icon == 0) { // KR Package (airDropPackages.js:1-56): additionalReward += N,
+                // send("am", [thief ? "KR Thief" : "KR Claimed", N + " KR", 0, 1]) and
+                // send("ch", [0, null, "Claimed N KR", 2]). The KR is paid at endGame (accounts.c),
+                // past the normal cap (game.js:191329 reward += additionalReward); nothing for guests.
+                static const int k_kr[7] = {5, 10, 15, 20, 30, 100, 250}; // the KR Packages by rarity
+                claimer->additional_reward += k_kr[p->rarity];
+                NetPopupPacket popup;
+                memset(&popup, 0, sizeof(popup));
+                snprintf(popup.text, sizeof(popup.text), "%s", thief ? "KR Thief" : "KR Claimed");
+                game_send(game, claimer->uid, NET_PACKET_POPUP, &popup, sizeof(popup));
+                NetChatPacket chat;
+                char line[32];
+                snprintf(line, sizeof(line), "Claimed %d KR", k_kr[p->rarity]);
+                net_packet_chat(&chat, 0, NET_CHAT_SERVER, NULL, line); // ADD_CHAT [0, null, text, 2]
+                game_send(game, claimer->uid, NET_PACKET_CHAT, &chat, sizeof(chat));
+            } else if (p->icon == 3) { // Junk Package (airDropPackages.js:122-130): send("am",
+                // [thief ? "Junk Thief" : "Junk Claimed", amount + " Junk", 0, 1]) and sendUserJunk,
+                // whose "jnk" reply prints "You found [x] Junk" (KN has no junk wallet: not credited).
+                static const double k_junk[7] = {0.05, 0.1, 0.2, 0.3, 0.5, 1.0, 2.5};
+                NetPopupPacket popup;
+                memset(&popup, 0, sizeof(popup));
+                snprintf(popup.text, sizeof(popup.text), "%s", thief ? "Junk Thief" : "Junk Claimed");
+                game_send(game, claimer->uid, NET_PACKET_POPUP, &popup, sizeof(popup));
+                game_found_junk(game, claimer, k_junk[p->rarity]);
+            }
             break;
         }
     }
