@@ -607,7 +607,8 @@ char *ui_window_generate(const int id, const char **header, int *sticky) {
     if (sticky) *sticky = m ? m->sticky : 0;
     // brain backend (backend_ui.h): the signed-in Account window and the live Servers
     // list replace the guest captures; NULL keeps them (no brain, guest)
-    char *live = account_window_gen(id, header);
+    char *live = v10_rewards_window_gen(id); // v10.0.2 Challenges (v10_rewards.c; NULL off the v10 page)
+    if (!live) live = account_window_gen(id, header);
     if (!live) live = battlepass_window_gen(id, header); // v7.1.4 Battle Pass (battlepass_ui.c)
     if (!live) live = servers_window_gen(id, header);
     if (!live) live = object_manager_window_gen(id, header); // KrunkNative Object Manager (F1)

@@ -100,6 +100,7 @@ void backend_frame(Client *client) {
     backend_poll();
     online_mode_tick(client);
     account_ui_tick(client);
+    v10_rewards_tick(); // v10.0.2: the sidebar's Battle Pass item (v10_rewards.c)
     servers_ui_tick(client);
     v10_social_tick(); // the v10 page's Social hub: friends event bus, menu badge (v10_social.c)
 }

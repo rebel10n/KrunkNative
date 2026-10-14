@@ -7,10 +7,17 @@
  *
  *   ["bpdl"]               -> ["bpdl", pass | null] then ["bppd", account.BP] (signed in)
  *   ["bpclm", itemId]      -> ["bpclmr", null, null, sk, null, null, {id, tier, col, sk}] +
- *                             ["bppd", account.BP] | ["po", null, err]
- *   ["xstbp", tier, code]  -> ["purbp", "kr", null, null, tier, price, "KR", txid] + "bppd" +
+ *                             ["bppd", account.BP] | ["po", null, err]   (v7.1.4 claimItemRes; the
+ *                             v10 client reads it too)
+ *   ["bpclmAll"]           -> ["bpclmr", null, funds, null, null, 0, [{id, tier, col, sk, kr, jnk}...]]
+ *                             + "bppd" + "ua" | ["po", null, err]   (v10.0.2 BP_CLAIM_ALL /
+ *                             claimItemRes(_, funds, _, _, junk, items))
+ *   ["xstbp", tier, code, null, null, channel, giftName]
+ *                          -> ["purbp", "kr", null, null, tier, price, "KR", txid] + "bppd" +
  *                             ["nbdgr", [badge...]] + "ua" (new KR) | ["purbp", "kr", {err}, "1"]
- *                             KrunkNative: the VIP tier is paid in KR (v7: Xsolla / Steam)
+ *                             KrunkNative: the VIP tier is paid in KR (v7: Xsolla / Steam). v10
+ *                             selectBPGift (giftName): [... txid, null, null, true, name] (purchaseRes
+ *                             gifted, recipient) and the recipient's sessions get "bppd" + "nbdgr"
  *   ["xstbpl", levels]     -> ["purbpl", "kr", null, null, levels, bpp, price, "KR", txid, null,
  *                             badge] + "bppd" + "ua" | ["purbpl", "kr", {err}, null, levels]
  *   ["sst", name, season?] -> ["sst", {season, name, kills, deaths, wins, games, score,
@@ -81,31 +88,73 @@ void sh_bp_data(SocialSession *s, const cJSON *f) {
 
 /* ------------------------------------------------------------------ "bpclm" */
 
+static void account_pushed(kn_db_result *res, void *ud);
+
+typedef struct {
+    int all; /* "bpclmAll": the v10 reply */
+} ClaimCtx;
+
 static void bp_claim_done(SocialSession *s, kn_db_result *res, void *extra) {
-    (void) extra;
+    ClaimCtx *cx = extra;
+    const int all = cx && cx->all;
     if (!kn_db_ok(res)) {
-        social_error(s, acct_db_error(res, "bpclm"));
+        social_error(s, acct_db_error(res, all ? "bpclmAll" : "bpclm"));
         return;
     }
     cJSON *v = acct_db_json(res);
-    const int sk = (int) kn_json_int(v, "sk", 0);
-    cJSON *item = cJSON_CreateObject();
-    cJSON_AddNumberToObject(item, "id", (double) kn_json_int(v, "id", 0));
-    cJSON_AddNumberToObject(item, "tier", (double) kn_json_int(v, "tier", 0));
-    cJSON_AddNumberToObject(item, "col", (double) kn_json_int(v, "col", 0));
-    cJSON_AddNumberToObject(item, "sk", sk);
-    /* claimItemRes(_, _, skin, _, _, {id, tier, col, sk}) */
-    social_send_n(s, "bpclmr", 6, cJSON_CreateNull(), cJSON_CreateNull(), cJSON_CreateNumber(sk), cJSON_CreateNull(), cJSON_CreateNull(), item);
+    const cJSON *items = cJSON_GetObjectItemCaseSensitive(v, "items");
+    if (all) {
+        /* v10 claimItemRes(_, funds, _, _, junk, items) */
+        social_send_n(s, "bpclmr", 6, cJSON_CreateNull(), cJSON_CreateNumber((double) kn_json_int(v, "funds", 0)), cJSON_CreateNull(),
+                      cJSON_CreateNull(), cJSON_CreateNumber(0), items ? cJSON_Duplicate(items, 1) : cJSON_CreateArray());
+    } else {
+        const int sk = (int) kn_json_int(v, "sk", 0);
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddNumberToObject(item, "id", (double) kn_json_int(v, "id", 0));
+        cJSON_AddNumberToObject(item, "tier", (double) kn_json_int(v, "tier", 0));
+        cJSON_AddNumberToObject(item, "col", (double) kn_json_int(v, "col", 0));
+        cJSON_AddNumberToObject(item, "sk", sk);
+        const cJSON *first = cJSON_GetArrayItem(items, 0);
+        if (kn_json_int(first, "kr", 0) > 0) cJSON_AddNumberToObject(item, "kr", (double) kn_json_int(first, "kr", 0));
+        /* claimItemRes(_, _, skin, _, _, {id, tier, col, sk}) */
+        social_send_n(s, "bpclmr", 6, cJSON_CreateNull(), cJSON_CreateNull(), cJSON_CreateNumber(sk), cJSON_CreateNull(), cJSON_CreateNull(), item);
+    }
     const cJSON *pr = cJSON_GetObjectItemCaseSensitive(v, "progress");
     if (pr) social_send_n(s, "bppd", 1, cJSON_Duplicate(pr, 1));
+    /* a KR card (v10 krdata) changed the wallet: the header's KR */
+    int kr = 0;
+    const cJSON *it;
+    cJSON_ArrayForEach(it, items) kr += (int) kn_json_int(it, "kr", 0);
+    if (kr > 0) {
+        char id[24];
+        kn_db_call(g_acct_brain->db, &P_ACCOUNT_JSON, KN_DB_ARGS(acct_itoa(id, s->account_id)), account_pushed, NULL);
+    }
     cJSON_Delete(v);
+}
+
+static ClaimCtx *claim_ctx(const int all) {
+    ClaimCtx *c = calloc(1, sizeof *c);
+    if (c) c->all = all;
+    return c;
 }
 
 void sh_bp_claim(SocialSession *s, const cJSON *f) {
     if (!social_require_auth(s)) return;
-    char id[24], item[24], season[24];
-    social_call(s, &P_BP_CLAIM, KN_DB_ARGS(acct_itoa(id, s->account_id), acct_itoa(item, fa_int(f, 1, -1)), season_arg(season)),
-                bp_claim_done, NULL);
+    const int64_t item = fa_int(f, 1, -1);
+    if (item <= 0) {
+        social_error(s, "Item not found");
+        return;
+    }
+    char id[24], it[24], season[24];
+    social_call(s, &P_BP_CLAIM, KN_DB_ARGS(acct_itoa(id, s->account_id), acct_itoa(it, item), season_arg(season), "0"), bp_claim_done,
+                claim_ctx(0));
+}
+
+void sh_bp_claim_all(SocialSession *s, const cJSON *f) {
+    (void) f;
+    if (!social_require_auth(s)) return;
+    char id[24], season[24];
+    social_call(s, &P_BP_CLAIM, KN_DB_ARGS(acct_itoa(id, s->account_id), "0", season_arg(season), "1"), bp_claim_done, claim_ctx(1));
 }
 
 /* ------------------------------------------------------------------ "xstbp" / "xstbpl" (KR) */
@@ -158,10 +207,35 @@ static void bp_buy_done(SocialSession *s, kn_db_result *res, void *extra) {
     cJSON *v = acct_db_json(res);
     char tx[48];
     snprintf(tx, sizeof tx, "bp-%lld-%lld", (long long) s->account_id, (long long) time(NULL));
-    /* purchaseRes(provider, error, product, tier, price, currency, transactionId, externalId) */
-    social_send_n(s, "purbp", 8, cJSON_CreateString("kr"), cJSON_CreateNull(), cJSON_CreateNull(),
-                  cJSON_CreateNumber((double) kn_json_int(v, "tier", c->arg)), cJSON_CreateNumber((double) kn_json_int(v, "price", 0)),
-                  cJSON_CreateString("KR"), cJSON_CreateString(tx), cJSON_CreateNull());
+    const cJSON *gift = cJSON_GetObjectItemCaseSensitive(v, "gift");
+    if (cJSON_IsObject(gift)) {
+        /* v10 purchaseRes(provider, error, product, tier, price, currency, transactionId,
+         * externalId, _, gifted, recipient): "Battlepass Gifted to <name>!" */
+        social_send_n(s, "purbp", 11, cJSON_CreateString("kr"), cJSON_CreateNull(), cJSON_CreateNull(),
+                      cJSON_CreateNumber((double) kn_json_int(v, "tier", c->arg)), cJSON_CreateNumber((double) kn_json_int(v, "price", 0)),
+                      cJSON_CreateString("KR"), cJSON_CreateString(tx), cJSON_CreateNull(), cJSON_CreateNull(), cJSON_CreateBool(1),
+                      cJSON_CreateString(kn_json_str(gift, "name", "")));
+        /* the recipient's open sessions: their pass and badges now, the mail count */
+        const int64_t to = kn_json_int(gift, "id", 0);
+        const cJSON *gp = cJSON_GetObjectItemCaseSensitive(gift, "progress");
+        if (to > 0 && gp) {
+            cJSON *fr = social_frame("bppd");
+            cJSON_AddItemToArray(fr, cJSON_Duplicate(gp, 1));
+            social_push_account_ex(to, fr, 1);
+        }
+        const cJSON *gb = cJSON_GetObjectItemCaseSensitive(gift, "newBadges");
+        if (to > 0 && cJSON_GetArraySize(gb) > 0) {
+            cJSON *fr = social_frame("nbdgr");
+            cJSON_AddItemToArray(fr, cJSON_Duplicate(gb, 1));
+            social_push_account_ex(to, fr, 1);
+        }
+        if (to > 0) social_push_mail_count(to);
+    } else {
+        /* purchaseRes(provider, error, product, tier, price, currency, transactionId, externalId) */
+        social_send_n(s, "purbp", 8, cJSON_CreateString("kr"), cJSON_CreateNull(), cJSON_CreateNull(),
+                      cJSON_CreateNumber((double) kn_json_int(v, "tier", c->arg)), cJSON_CreateNumber((double) kn_json_int(v, "price", 0)),
+                      cJSON_CreateString("KR"), cJSON_CreateString(tx), cJSON_CreateNull());
+    }
     after_purchase(s, v);
     cJSON_Delete(v);
 }
@@ -174,8 +248,12 @@ void sh_bp_buy(SocialSession *s, const cJSON *f) {
     }
     BuyCtx *c = buy_ctx(tier);
     if (!c) return;
-    char id[24], t[24], season[24], now[24];
-    social_call(s, &P_BP_BUY, KN_DB_ARGS(acct_itoa(id, s->account_id), acct_itoa(t, tier), season_arg(season), now_arg(now)), bp_buy_done, c);
+    char id[24], t[24], season[24], now[24], gift[64] = "";
+    /* v10 selectBPTier(el, tier, steamId, giftName): io.send("xstbp", tier, lang, null, null, channel, giftName) */
+    const char *g = fa_str(f, 6);
+    if (g && *g) snprintf(gift, sizeof gift, "%s", g);
+    social_call(s, &P_BP_BUY, KN_DB_ARGS(acct_itoa(id, s->account_id), acct_itoa(t, tier), season_arg(season), now_arg(now), gift[0] ? gift : NULL),
+                bp_buy_done, c);
 }
 
 static void bp_skip_done(SocialSession *s, kn_db_result *res, void *extra) {

@@ -1473,6 +1473,7 @@ static void menu_dom_init(void) {
     if (!g_ui.connected && !g_ui.connect_error[0]) arm_connect_timer();
     ui_settings_push_saved();
     ui_client_settings_dom_init(); // Exit button, custom CSS, auto spectate, Discord/auto-join timer
+    v10_rewards_dom_init();        // v10.0.2 rewards: the sidebar's Battle Pass item, windows[32] (v10_rewards.c)
     menu_update_instructions();
     g_ui.last_rect[0] = 0;
     menu_send_preview_rect();

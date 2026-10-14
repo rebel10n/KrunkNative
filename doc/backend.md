@@ -1403,7 +1403,8 @@ Pass window), endGame's `tmpBPData` and challenges.finalize's `REW.bpp`, with th
   Season 7 pass as it shipped (id 2, 50 levels x 300 BPP, the Krunker wiki's 100 rewards: season-7 "battlepass" skins and Season 7 tickets).
 * **BPP**: a finished public match's commit carries `bpp` = min(20, floor(score * rewardMlt *
   0.01)) + 30 when the player played half of the match (the game server); kn_brain awards it
-  under the daily cap ((days since startdate + 1) * 300, `config.bppCapDay`) and the pass total,
+  under the daily cap ((days since startdate + 1) * 500: v10.0.2's windows[5]; v7.1.4's
+  `config.bppCapDay` was 300) and the pass total,
   adds the completed challenges' `REW.bpp` on top, and pushes `bppd` + `bpEnd`. Nothing after
   `enddate`.
 * **Claims**: a card's skin goes to the inventory (`skin_transactions` source `battlepass`,
@@ -1426,6 +1427,44 @@ Migration and API summary: `0108_seasons` (postgres / sqlite / mysql) creates `s
 the season part of `P_PROGRESS`; social labels `bpdl`, `bpclm`, `xstbp`, `xstbpl`, `sst` and the
 pushes `bppd`, `bpEnd`, `purbp`, `purbpl`, `bpclmr`; commit fields `bpp` and the `prog` item
 column; leaderboard queries `season_*`.
+
+* **v10.0.2 additions** (`0116_v10_rewards`): `battlepasses.leveldata` ("level:bpp,...": a
+  level's own cost, else `bpp_perlevel`), `krdata` / `jnkdata` ("itemId:amount,...": a card's KR
+  / junk) ride in `bpdl` and `tmpBPData.lv`; a KR card pays through `db_add_funds` (source
+  `battlepass`) when claimed. `["bpclmAll"]` (v10 BP_CLAIM_ALL) claims every claimable card and
+  answers v10's `["bpclmr", null, funds, null, null, 0, [{id, tier, col, sk, kr, jnk}...]]`
+  ("No items to claim" when none); `bpclm` keeps v7's reply. `["xstbp", tier, lang, null, null,
+  channel, name]` (v10 selectBPGift) buys the VIP tier for `name` (source `battlepass-gift`,
+  counterparty = the recipient, a "Battle Pass Gift" mail, `bppd` / `nbdgr` pushed to their
+  sessions) and answers `purbp` with its 10th / 11th arguments `true, name` (purchaseRes gifted).
+
+### 7.8.1 Signup rewards (`rewards.c`, `db_rewards.c`, `0116_v10_rewards.sql`)
+
+Krunker v10.0.2's "Get Signup Rewards" popup promises "1-time signup perks: Gain 14 Cosmetics +
+1 Day premium for free!"; v10's server answers a new account with POPUP_REGISTER_REWARDS
+(`prr`, "Welcome to the Family!") right after the registration. kn_brain grants them right after a
+social-socket registration (`"a"` action 0: the menu and the web build) through
+`P_SIGNUP_REWARDS`, once per account: the `signup_rewards` row is its primary key, written first
+(`{insert_ignore}`), so nothing is granted twice; a later login, a saved-token login at startup
+or an account made elsewhere (internal ops, a central account) gets no popup, as in v10. Only accounts created at or after `signup_rewards_epoch.since` (the
+migration's time) qualify. The cosmetics go to the inventory (source `signup`) and the premium is
+`premium_ms` added to `players.player_premium` (premiumT) until `premium_until`; a sweep
+(`P_SIGNUP_PREMIUM_SWEEP`, every `sweep_s`) takes it back once. On a grant the session gets
+`["prr", [skin...], premium]` and `ua`.
+
+| key (`accounts.signup_rewards.*`) | default | |
+|---|---|---|
+| `enabled` | `true` | grant the perks |
+| `skins` | 14 common store items (`rewards.c`) | the cosmetics (store.skins indices); v10's list is server data |
+| `premium_hours` | `24` | the premium (0 = none) |
+| `sweep_s` | `600` | how often expired signup premium is taken back |
+
+Tests whose fixture accounts register through the social socket and count inventories (or
+whose client must not show the popup) pass `--accounts.signup_rewards.enabled=false`.
+Tests: `services/brain/tests/rewards_test.py` (every driver: the grant, never twice, the epoch,
+the sweep, `bpclmAll`, krdata / leveldata, gifting) and `server/tests/v10_rewards_e2e.py` (the
+client on ui/v10: Get Signup Rewards -> register -> granted once; a challenge completed on
+server_bin; a Battle Pass claim and gift).
 
 ### 7.9 Account security: 2FA, email verification, outbound mail (`account_security.c`, `db_security.c`, `0109_account_security.sql`)
 

@@ -74,6 +74,19 @@ void battlepass_ui_end_clear(void);         // a new end screen: no bpData until
 void battlepass_ui_scenario(const cJSON *state); // --render-scenario: state.account.battlepass
 int  battlepass_ui_end_html(StrBuf *sb);    // tabs.performance's #endBPLayout; 0 = none (no account / bpData)
 
+const struct BattlePass *battlepass_ui_pass(void); // windows[5].data parsed (NULL none)
+int64_t battlepass_ui_bpp(void);            // account.BP.bpp (0 without)
+void battlepass_ui_request(void);           // v10: "bpdl" once an account is signed in (no-op when asked)
+
+// ---- v10_rewards.c (Krunker v10.0.2: signup rewards, windows[32], the sidebar's Battle Pass item)
+void v10_show_signup_rewards(void);         // window.showSignupRewards
+void v10_rewards_end_screen(void);          // endScreen.init: #matchEndSignupIncentives (guests)
+int  v10_rewards_frame(const char *label, const cJSON *frame); // "prr"; 1 = handled
+char *v10_rewards_window_gen(int id);       // window 33 on the v10 page; NULL otherwise
+int  v10_rewards_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
+void v10_rewards_dom_init(void);            // page ready: resets the sidebar item / window state
+void v10_rewards_tick(void);                // per frame: the sidebar item
+
 // ---- clan_ui.c (windows[12], the menu Clans window = showWindow(13))
 char *clan_window_gen(void);                // guest: LOGIN REQUIRED; member: the clan page
 int  clan_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours

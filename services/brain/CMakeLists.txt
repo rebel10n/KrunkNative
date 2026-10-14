@@ -68,6 +68,9 @@ set(KN_BRAIN_SOURCES
     db_season.c
     season.c
     ../../shared/src/season.c
+    # v10.0.2 one-time signup perks (0116_v10_rewards)
+    db_rewards.c
+    rewards.c
     # email-verify: v7.1.4 2FA (TOTP), email verification and outbound mail (0109_account_security)
     account_security.c
     db_security.c
@@ -220,6 +223,11 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/season_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_season PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+    # v10.0.2 rewards: the signup perks, claim all, krdata / leveldata and gifting (db_rewards.c, 0116_v10_rewards)
+    add_test(NAME brain_rewards
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/rewards_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_rewards PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
     # editor-ai: the AI proxy (ai.c) against a stub upstream and a stub MCP server (tests/ai_stub.py; sqlite
     # scratch database unless KN_TEST_DB_DRIVER says otherwise; never the live provider)
     add_test(NAME brain_ai

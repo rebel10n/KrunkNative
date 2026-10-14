@@ -269,7 +269,8 @@ def main():
     with open(cfg, "w") as f:
         json.dump({"database": {"driver": "sqlite", "path": DB, "migrations_dir": os.path.join(ROOT, "services", "db", "migrations")},
                    "brain": {"host": "127.0.0.1", "port": brain_port, "federation": False, "internal_secret": "web-e2e-%d" % os.getpid()},
-                   "accounts": {"sale_grace_s": 0, "free_premium": False, "starting_kr": 0, "login_throttle_s": 0,
+                   "accounts": {"signup_rewards": {"enabled": False},  # v10 signup perks off: these count inventories
+                    "sale_grace_s": 0, "free_premium": False, "starting_kr": 0, "login_throttle_s": 0,
                                 "password_iterations": 1000, "skins_file": os.path.join(ROOT, "assets", "skins.json")}}, f)
     log = open(os.path.join(WORK, "brain.log"), "w")
     brain = subprocess.Popen([BRAIN, "--config", cfg, "--migrate"], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)

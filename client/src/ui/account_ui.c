@@ -606,6 +606,7 @@ static void on_social(void *user, const cJSON *frame) {
         v10_customize_frame(frame);
     } else if (!strcmp(label, "dsp") || !strcmp(label, "dslr")) { // v10 Daily Spin progress / claim (v10_daily_spin.c)
         v10_daily_spin_frame(label, frame);
+    } else if (v10_rewards_frame(label, frame)) { // v10.0.2 signup perks: prr (v10_rewards.c)
     } else if (battlepass_ui_frame(label, frame)) { // v7.1.4 Battle Pass: bpdl, bppd, bpclmr, purbp, purbpl, bpEnd
     } else if (!strcmp(label, "cln") || !strcmp(label, "clnL")) { // io_cln / io_clnL (windows[12])
         clan_ui_frame(frame);
@@ -2276,6 +2277,7 @@ void account_ui_scenario(const cJSON *account) {
     cJSON_Delete(g_scenario_c2fa);
     g_scenario_c2fa = cJSON_IsArray(c2fa) ? cJSON_Duplicate(c2fa, 1) : NULL;
     mark_header();
+    if (v10_menu_page()) v10_menu_account_changed(); // the v10 header and nav now: a scenario renders before account_ui_tick
     menu_update_class_box();
 }
 

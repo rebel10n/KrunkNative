@@ -385,6 +385,7 @@ static void auth_reply(void *ud, const char *err, const cJSON *account) {
     if (w->twofa) social_send_n(s, "c2fa", 1, cJSON_CreateNumber(1)); /* twoFAres(1): hide the popup */
     char reg_email[256];
     snprintf(reg_email, sizeof reg_email, "%s", !err && account && w->action == 0 ? w->email : "");
+    const int registered = !err && account && w->action == 0;
     auth_wait_free(w);
     if (err || !account) {
         send_auth_error(s, err ? err : "Invalid login.");
@@ -403,6 +404,7 @@ static void auth_reply(void *ud, const char *err, const cJSON *account) {
                   s->token[0] ? cJSON_CreateString(s->token) : cJSON_CreateNull(), info);
     KN_DEBUG(MOD, "%s logged in as %s", s->socket_id, s->username);
     social_after_login(s);
+    if (registered) rewards_after_register(s); /* v10.0.2: the signup perks right after the registration ("prr", rewards.c) */
     social_eb_after_login(s); /* v10 friends: unread:summary */
     if (reg_email[0]) acct_email_after_register(s->account_id, reg_email, s->ip); /* pushes "emailS" when done */
     else sh_email_state(s, NULL);
@@ -634,6 +636,7 @@ static const SocialRoute k_routes[] = {
     {"mdl", sh_medals},
     {"bpdl", sh_bp_data},     /* v7.1.4 seasons / Battle Pass (season.c) */
     {"bpclm", sh_bp_claim},
+    {"bpclmAll", sh_bp_claim_all}, /* v10.0.2 Claim All */
     {"xstbp", sh_bp_buy},
     {"xstbpl", sh_bp_skip},
     {"sst", sh_season_stats},

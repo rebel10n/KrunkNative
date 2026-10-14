@@ -1,0 +1,22 @@
+{
+  "scenario": "rewards-chall-weapon",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "window-body",
+      "rect": [
+        281,
+        55,
+        718,
+        260
+      ],
+      "kind": "image",
+      "fuzz": 14,
+      "max_pct": 4.0,
+      "note": "Assault Rifle Challenges"
+    }
+  ]
+}

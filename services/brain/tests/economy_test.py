@@ -628,7 +628,8 @@ def main():
     cfg = {
         "database": dict(dbcfg, pool_size=8, migrations_dir=os.path.join(ROOT, "services", "db", "migrations")),
         "brain": {"host": "127.0.0.1", "port": 0, "internal_secret": "econ-%d" % os.getpid(), "federation": False},
-        "accounts": {"password_iterations": 1000, "login_throttle_s": 0, "starting_kr": 0, "free_premium": False,
+        "accounts": {"signup_rewards": {"enabled": False},  # v10 signup perks off: these count inventories
+                    "password_iterations": 1000, "login_throttle_s": 0, "starting_kr": 0, "free_premium": False,
                      "skins_file": os.path.join(ROOT, "assets", "skins.json"), "max_listings": 2, "trade_ttl_s": 3,
                      "economy_tick_ms": 300, "economy_rate_qsell": 3, "economy_rate_gift": 1000, "economy_rate_buy": 1000,
                      "economy_rate_trade": 1000, "economy_rate_accept": 1000, "economy_rate_close": 1000,

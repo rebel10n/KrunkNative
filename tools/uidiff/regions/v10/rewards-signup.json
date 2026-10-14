@@ -1,0 +1,35 @@
+{
+  "scenario": "rewards-signup",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "popup-header",
+      "rect": [
+        318,
+        253,
+        644,
+        40
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "Join Krunker today!"
+    },
+    {
+      "name": "popup-body",
+      "rect": [
+        318,
+        293,
+        644,
+        174
+      ],
+      "kind": "image",
+      "fuzz": 14,
+      "max_pct": 4.0,
+      "note": "the perks list, the side panel, REGISTER"
+    }
+  ]
+}

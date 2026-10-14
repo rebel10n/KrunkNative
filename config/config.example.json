@@ -130,6 +130,7 @@
     "max_sessions": 20,
     "starting_kr": 0,
     "free_premium": true,
+    "signup_rewards": {"enabled": true, "premium_hours": 24, "sweep_s": 600},
     "developers": [],
     "moderators": [],
     "login_throttle_s": 5,

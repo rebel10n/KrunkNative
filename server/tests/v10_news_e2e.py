@@ -355,7 +355,7 @@ def main():
             subprocess.run(["psql", "-h", dbcfg["host"], "-p", str(dbcfg["port"]), "-U", dbcfg["user"], "-d", dbcfg["name"],
                             "-v", "ON_ERROR_STOP=1", "-qAt", "-c", "SET search_path TO %s; %s" % (dbcfg["search_path"], sql)],
                            env=penv, check=True, capture_output=True)
-        brain = subprocess.Popen([f"{BUILD}/services/brain/kn_brain", "--brain.host=127.0.0.1", "--brain.port=0",
+        brain = subprocess.Popen([f"{BUILD}/services/brain/kn_brain", "--brain.host=127.0.0.1", "--brain.port=0", "--accounts.signup_rewards.enabled=false",
                                   "--brain.region=local", "--brain.id=v10news-%d" % os.getpid(),
                                   "--brain.community.feed=" + FEED],
                                  cwd=ROOT, env=env, stdout=open(brain_log, "w"), stderr=subprocess.STDOUT,

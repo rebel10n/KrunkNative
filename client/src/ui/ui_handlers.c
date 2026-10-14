@@ -592,6 +592,7 @@ static const HtmlHandlerEntry HANDLERS[] = {
 typedef int (*UiModuleHandler)(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc);
 static const UiModuleHandler MODULE_HANDLERS[] = {
     v10_menu_handle,           // v10_menu.c / v10_login.c: the v10 page's menu shell, loginOrRegister
+    v10_rewards_handle,        // v10_rewards.c: v10.0.2 signup rewards, windows[32] (before account_ui.c's v7 ones)
     account_ui_handle,         // account_ui.c: Account window, logout, mail, profile
     servers_ui_handle,         // servers_ui.c: Servers / Server Finder / Games / Host / Join
     store_ui_handle,           // store_ui.c: Store (windows[13])

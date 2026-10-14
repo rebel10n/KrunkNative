@@ -31,6 +31,8 @@ int bp_parse_items(BattlePass *bp, const char *itemdata) {
                 it->tier = group[1];
                 it->level = group[2];
                 it->skin = group[3];
+                it->kr = 0;
+                it->jnk = 0.0;
             }
             n = 0;
         }
@@ -54,24 +56,91 @@ size_t bp_format_items(const BattlePass *bp, char *out, const size_t size) {
     return len;
 }
 
+// "a:b,a:b" pairs (v10 leveldata / krdata / jnkdata: String(x).split(",") then split(":"))
+static int next_pair(const char **pp, long *a, double *b) {
+    const char *p = *pp;
+    while (p && *p) {
+        char *end = NULL;
+        const long k = strtol(p, &end, 10);
+        int ok = end != p && *end == ':';
+        double v = 0.0;
+        if (ok) {
+            const char *q = end + 1;
+            v = strtod(q, &end);
+            ok = end != q;
+        }
+        while (*p && *p != ',') p++;
+        if (*p == ',') p++;
+        if (ok) {
+            *pp = p;
+            *a = k;
+            *b = v;
+            return 1;
+        }
+    }
+    *pp = p;
+    return 0;
+}
+
+void bp_parse_levels(BattlePass *bp, const char *leveldata) {
+    if (!bp) return;
+    memset(bp->level_bpp, 0, sizeof(bp->level_bpp));
+    const char *p = leveldata;
+    long level;
+    double need;
+    // _52102: level >= 1 && level <= itemcount && bpp >= 0
+    while (next_pair(&p, &level, &need))
+        if (level >= 1 && level <= bp->item_count && level <= BP_LEVELS_MAX && need >= 0) bp->level_bpp[level - 1] = (int) need > 0 ? (int) need : -1;
+}
+
+void bp_parse_rewards(BattlePass *bp, const char *krdata, const char *jnkdata) {
+    if (!bp) return;
+    for (int pass = 0; pass < 2; pass++) {
+        const char *p = pass ? jnkdata : krdata;
+        long id;
+        double v;
+        while (next_pair(&p, &id, &v)) {
+            for (int i = 0; i < bp->count; i++) {
+                if (bp->items[i].id != id) continue;
+                if (pass) bp->items[i].jnk = v;      // parseFloat
+                else bp->items[i].kr = (int) v;     // parseInt
+            }
+        }
+    }
+}
+
+int bp_level_need(const BattlePass *bp, const int level) {
+    if (!bp || level < 1) return 0;
+    const int own = level <= BP_LEVELS_MAX ? bp->level_bpp[level - 1] : 0;
+    return own > 0 ? own : own < 0 ? 0 : bp->bpp_per_level > 0 ? bp->bpp_per_level : 0; // -1: a free level (leveldata "n:0")
+}
+
+int bp_item_has_reward(const BattlePassItem *it) { return it && (it->skin > 0 || it->kr > 0 || it->jnk > 0.0); }
+
 int bp_level(const BattlePass *bp, int64_t bpp, int64_t *points, int *complete) {
-    const int per = bp && bp->bpp_per_level > 0 ? bp->bpp_per_level : 1;
     const int count = bp && bp->item_count > 0 ? bp->item_count : 1;
     if (bpp < 0) bpp = 0;
-    int64_t level = bpp / per + 1;
-    int64_t pts = bpp % per;
-    const int done = level > count;
-    if (done) {
-        level = count;
-        pts = per;
+    // _52111: the first level whose cost the remaining bpp does not cover; past the last: maxed
+    int64_t before = 0;
+    for (int level = 1; level <= count; level++) {
+        const int need = bp ? bp_level_need(bp, level) : 1;
+        if (bpp < before + need) {
+            if (points) *points = bpp - before;
+            if (complete) *complete = 0;
+            return level;
+        }
+        before += need;
     }
-    if (points) *points = pts;
-    if (complete) *complete = done;
-    return (int) level;
+    if (points) *points = bp ? bp_level_need(bp, count) : 1;
+    if (complete) *complete = 1;
+    return count;
 }
 
 int64_t bp_max_bpp(const BattlePass *bp) {
-    return bp && bp->item_count > 0 && bp->bpp_per_level > 0 ? (int64_t) bp->item_count * bp->bpp_per_level : 0;
+    if (!bp || bp->item_count <= 0 || bp->bpp_per_level <= 0) return 0;
+    int64_t total = 0;
+    for (int level = 1; level <= bp->item_count; level++) total += bp_level_need(bp, level);
+    return total;
 }
 
 int64_t bp_cap_total(const BattlePass *bp, const int64_t now_s) {
@@ -127,9 +196,9 @@ const BattlePassItem *bp_next_reward(const BattlePass *bp, const int64_t bpp) {
     const int level = bp_level(bp, bpp, NULL, &complete);
     if (!bp || complete || level >= bp->item_count) return NULL;
     const BattlePassItem *vip = bp_item_at(bp, 1, level);
-    if (vip && vip->skin > 0) return vip;
+    if (bp_item_has_reward(vip)) return vip;
     const BattlePassItem *free_item = bp_item_at(bp, 0, level);
-    return free_item && free_item->skin > 0 ? free_item : NULL;
+    return bp_item_has_reward(free_item) ? free_item : NULL;
 }
 
 int bp_is_claimed(const char *items_claimed, const int id) {
@@ -153,7 +222,7 @@ void bp_add_claimed(const char *items_claimed, const int id, char *out, const si
 
 BpClaimResult bp_claim_check(const BattlePass *bp, const int64_t bpp, const int tier, const char *items_claimed, const int id) {
     const BattlePassItem *it = bp_item(bp, id);
-    if (!it || it->skin <= 0) return BP_CLAIM_NOT_FOUND;
+    if (!bp_item_has_reward(it)) return BP_CLAIM_NOT_FOUND;
     if (bp_is_claimed(items_claimed, id)) return BP_CLAIM_CLAIMED;
     if (it->tier >= 1 && tier < 1) return BP_CLAIM_TIER;
     if (bp_level(bp, bpp, NULL, NULL) < it->level + 1) return BP_CLAIM_LEVEL;
@@ -179,7 +248,9 @@ int bp_skip_max(const BattlePass *bp, const int64_t bpp) {
 
 int64_t bp_skip_bpp(const BattlePass *bp, const int64_t bpp, const int levels) {
     const int64_t max = bp_max_bpp(bp);
-    int64_t next = (bpp > 0 ? bpp : 0) + (int64_t) (levels > 0 ? levels : 0) * (bp ? bp->bpp_per_level : 0);
+    int64_t next = bpp > 0 ? bpp : 0;
+    const int from = bp_level(bp, next, NULL, NULL);
+    for (int i = 0; bp && i < levels; i++) next += bp_level_need(bp, from + i <= bp->item_count ? from + i : bp->item_count);
     return next > max ? max : next;
 }
 

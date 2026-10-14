@@ -135,7 +135,7 @@ def main():
     cfg = os.path.join(WORK, "brain.json")
     json.dump({"database": {"driver": "sqlite", "path": DB, "migrations_dir": os.path.join(ROOT, "services", "db", "migrations")},
                "brain": {"host": "127.0.0.1", "port": PORT, "federation": False, "internal_secret": "v10social-%d" % os.getpid()},
-               "accounts": {"free_premium": False, "starting_kr": 0, "login_throttle_s": 0, "password_iterations": 1000,
+               "accounts": {"signup_rewards": {"enabled": False}, "free_premium": False, "starting_kr": 0, "login_throttle_s": 0, "password_iterations": 1000,
                             "news": ["<b>KN news</b>"], "giveaway_check_ms": 500,
                             "skins_file": os.path.join(ROOT, "assets", "skins.json")}}, open(cfg, "w"))
     brain = subprocess.Popen([BRAIN, "--config", cfg, "--migrate"], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)

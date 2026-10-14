@@ -1368,6 +1368,7 @@ int accounts_init(Brain *b) {
     acct_security_init(b); /* 2FA, email verification, outbound mail (account_security.c) */
     economy_init(b);       /* trade offer expiry (economy.c) */
     store_init(b);         /* v10 wheels: store_spin_data rotation (store.c) */
+    rewards_init(b);       /* v10.0.2 signup perks: the signup premium sweep (rewards.c) */
     KN_INFO(MOD, "ready (names %d-%d, sessions %lld days, password iterations %u)", g_acct.name_min,
             g_acct.name_max, (long long) (g_acct.session_ttl_s / 86400), kn_password_get_iterations());
     return 0;
@@ -1375,6 +1376,7 @@ int accounts_init(Brain *b) {
 
 void accounts_shutdown(Brain *b) {
     store_shutdown(b);
+    rewards_shutdown(b);
     economy_shutdown(b);
     acct_security_shutdown(b);
     if (s_cleanup_timer) kn_loop_cancel_timer(b->loop, s_cleanup_timer);

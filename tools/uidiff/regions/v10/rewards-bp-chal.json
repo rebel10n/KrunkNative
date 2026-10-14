@@ -1,0 +1,22 @@
+{
+  "scenario": "rewards-bp-chal",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "window-body",
+      "rect": [
+        171,
+        140,
+        938,
+        420
+      ],
+      "kind": "image",
+      "fuzz": 14,
+      "max_pct": 4.0,
+      "note": "the daily challenges tab"
+    }
+  ]
+}

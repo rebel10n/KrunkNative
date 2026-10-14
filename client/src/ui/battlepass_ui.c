@@ -106,6 +106,8 @@ static void set_data(const cJSON *bp) {
     g_bp->start_s = iso_seconds(jstr(g_bp_json, "startdate"));
     g_bp->end_s = iso_seconds(jstr(g_bp_json, "enddate"));
     bp_parse_items(g_bp, jstr(g_bp_json, "itemdata"));
+    bp_parse_levels(g_bp, jstr(g_bp_json, "leveldata"));                           // v10.0.2 (_52102)
+    bp_parse_rewards(g_bp, jstr(g_bp_json, "krdata"), jstr(g_bp_json, "jnkdata")); // v10.0.2 KR / junk cards
 }
 
 static void set_progress(const cJSON *p) {
@@ -117,11 +119,18 @@ static void set_progress(const cJSON *p) {
 }
 
 int battlepass_ui_tier(void) { return g_has_progress ? g_tier : 0; }
+const BattlePass *battlepass_ui_pass(void) { return g_bp; }
+int64_t battlepass_ui_bpp(void) { return g_has_progress ? g_bpp : 0; }
 
 static void request_data(void) {
     if (g_bp_status) return;
     g_bp_status = 1;
     backend_social_send_text("[\"bpdl\"]"); // io.send("bpdl")
+}
+
+// v10.0.2 io_accountResponse: windows[5].data || io.send("bpdl") at the login (the sidebar item)
+void battlepass_ui_request(void) {
+    if (account_get()) request_data();
 }
 
 // ------------------------------------------------------------------ windows[5].gen
@@ -204,6 +213,164 @@ static void gen_home(StrBuf *sb) {
     sb_appendf(sb, "<div class=\"bpBotH\">\n\t\t\t\t<div class=\"bpBtn claim%s\" onmouseenter=\"playTick(0.1);\" onclick=\"playSelect(0.1);windows[5].purchasePop();\">Purchase VIP Tier</div>\n\t\t\t\t<div class=\"bpBtn skip%s\" onmouseenter=\"playTick(0.1);\" onclick=\"playSelect(0.1);windows[5].skipLevelPop()\">Skip levels</div>\n\t\t\t</div>",
                vip ? " blockClick" : "", g_bpp >= max_bpp ? " blockClick" : "");
     sb_append(sb, "</div>");
+}
+
+// ------------------------------------------------------------------ Krunker v10.0.2 windows[5].gen
+// (index.js:212116; the v10 page: v10_page()). Differences from v7.1.4: the levels' own costs
+// (leveldata, _52111) with "BP XP: x / need", the season countdown (#bpCountdownTimer,
+// startBPCountdown), a 500 BPP daily cap, KR / junk cards (krdata / jnkdata), the claimed /
+// unlocked / freeCanClaim classes and the rarity label, "VIP Tier Purchased" and Gift VIP Tier.
+
+// _8991(ms, seconds): "1y 2d 3h 4m 5s"
+static void readable_v10(char *out, const size_t n, const double ms, const int seconds) {
+    int64_t s = ms > 0 ? (int64_t) (ms / 1000.0) : 0;
+    int64_t m = s / 60;
+    s %= 60;
+    int64_t h = m / 60;
+    m %= 60;
+    int64_t d = h / 24;
+    h %= 24;
+    const int64_t y = d / 365;
+    d %= 365;
+    size_t len = 0;
+    out[0] = 0;
+#define RV_ADD(...) len += (size_t) snprintf(out + len, len < n ? n - len : 0, __VA_ARGS__)
+    if (y) RV_ADD("%lldy ", (long long) y);
+    if (d) RV_ADD("%lldd ", (long long) d);
+    if (h) RV_ADD("%lldh ", (long long) h);
+    RV_ADD("%lldm ", (long long) m);
+    if (seconds) RV_ADD("%llds", (long long) s);
+#undef RV_ADD
+}
+
+static int64_t now_s(void) { return g_now_override ? g_now_override : (int64_t) time(NULL); }
+
+static int g_countdown_timer;
+
+static void countdown_tick(void *user) {
+    (void) user;
+    g_countdown_timer = 0;
+    const HtmlElem el = html_dom_by_id("bpCountdownTimer");
+    if (!el || !g_bp || !g_bp->end_s) return; // the window closed: clearInterval
+    char text[64];
+    readable_v10(text, sizeof text, (double) (g_bp->end_s - now_s()) * 1000.0, 1);
+    html_dom_set_text(el, text);
+    if (!g_now_override) g_countdown_timer = html_timer_add(1000, countdown_tick, NULL);
+}
+
+static void gen_card_v10(StrBuf *sb, const int track, const int col, const int completed, const int vip) {
+    const BattlePassItem *it = bp_item_at(g_bp, track, col);
+    if (it && !bp_item_has_reward(it)) it = NULL;
+    const int free_track = track == 0;
+    const int id = it ? it->id : -1;
+    const int claimed = it && bp_is_claimed(g_claimed, id);
+    const int claimable = (free_track || vip) && it && !claimed && completed;
+    sb_appendf(sb, "<div class=\"bpCard %s%s %s %s\">", free_track ? "free" : "vip", completed ? " completed" : "", vip ? "unlocked" : "",
+               free_track && claimed ? "claimed" : "");
+    if (it) {
+        const ViewerSkin *skin = it->skin > 0 ? viewer_skin(it->skin) : NULL;
+        const int r = skin && skin->rarity >= 0 && skin->rarity < g_viewer_rarity_count ? skin->rarity : 0;
+        char click[32] = "";
+        if (skin) snprintf(click, sizeof click, "viewItem(%d);", it->skin);
+        sb_appendf(sb, "<div class=\"bpCardSlot %s\" onmouseenter=\"playTick(0.1);\" onclick=\"playSelect(0.1);%s\">\n\t\t\t\t\t\t\t%s\n\t\t\t\t\t\t\t<div class=\"bpCardImgH\">",
+                   claimable && !vip ? " freeCanClaim" : "", click, vip || free_track ? "" : "<div class=\"bpCardLock\"></div>");
+        if (skin) {
+            char thumb[256];
+            store_skin_preview(it->skin, thumb, sizeof thumb);
+            sb_appendf(sb, "<img class=\"bpCardImg\" loading=\"lazy\" draggable=\"false\" src=\"%s\" style=\"filter:drop-shadow(0 0 0.2rem %s88)\">", thumb,
+                       g_viewer_rarities[r].color);
+        } else if (it->kr) {
+            sb_appendf(sb, "<span class=\"bpCardKR\">%d<br>KR</span>", it->kr);
+        } else {
+            sb_appendf(sb, "<span class=\"bpCardJnk\">%.15g<br><span class=\"material-icons\">plumbing</span></span>", it->jnk);
+        }
+        sb_append(sb, "</div>\n\t\t\t\t\t\t\t");
+        if (skin && it->kr) sb_appendf(sb, "<span class=\"bpCardKRBadge\">+%d KR</span>", it->kr);
+        sb_append(sb, "\n\t\t\t\t\t\t\t");
+        if (skin && it->jnk > 0) sb_appendf(sb, "<span class=\"bpCardKRBadge bpCardJnkBadge\">+%.15g <span class=\"material-icons\">plumbing</span></span>", it->jnk);
+        sb_append(sb, "\n\t\t\t\t\t\t</div>\n\n\t\t\t\t\t\t\n\t\t\t\t\t\t");
+        if (claimable) sb_appendf(sb, "<div class='bpClaimB' onclick=\"windows[5].claimItem(%d)\"> <span>Claim</span></div>", id);
+        sb_append(sb, "\n\n\t\t\t\t\t\t");
+        if (claimed) sb_append(sb, "<div class=\"bpClaimed\"><span class=\"material-icons\" style=\"font-size:32px;color:#fff;line-height:80px\">done</span></div>");
+        sb_append(sb, "\n              \n\t\t\t\t\t\t");
+        if (skin) sb_appendf(sb, "<div class=\"bpCardRarityLabel\" style=\"background: %s;\"><span>%s</span></div>", g_viewer_rarities[r].color, g_viewer_rarities[r].name);
+    }
+    sb_append(sb, "</div>");
+}
+
+static void gen_home_v10(StrBuf *sb) {
+    const int levels = g_bp->item_count;
+    int complete = 0;
+    int64_t points = 0;
+    g_lvl = bp_level(g_bp, g_bpp, &points, &complete);
+    const int need = bp_level_need(g_bp, g_lvl);
+    const int vip = g_tier >= 1;
+    const int64_t now = now_s();
+    // 500 * (floor((now - startdate) / 1 day) + 1); the BPP of levels 1 .. itemcount - 1
+    const int64_t cap = bp_cap_total(g_bp, now);
+    const int64_t avail = bp_available(g_bp, g_bpp, now);
+    int64_t skip_cap = 0;
+    for (int l = 1; l < levels; l++) skip_cap += bp_level_need(g_bp, l);
+    char ends[64] = "";
+    if (g_bp->end_s) readable_v10(ends, sizeof ends, (double) (g_bp->end_s - now) * 1000.0, 1);
+    sb_append(sb, "<div style=\"display: inline-block;position: relative;\">");
+    sb_append(sb, "<div class=\"bpTopH\">\n\t\t\t\t\t<div class=\"bpSeasonH\">\n\t\t\t\t\t\t");
+    sb_append_esc(sb, g_bp->name);
+    sb_appendf(sb, "\n\t\t\t\t\t\t<div class=\"bpSeasonTime\">\n\t\t\t\t\t\t\t<div class=\"bpSeasonTimeIcon\"></div>\n\t\t\t\t\t\t\t<span>Season ends in: </span>"
+                   "<span id=\"bpCountdownTimer\">%s</span>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t</div>", ends);
+    if (complete) {
+        sb_append(sb, "<div class=\"bpLevelH\">\n\t\t\t\t\t<div class=\"bpLevelText\">Battlepass Complete</div>\n\t\t\t\t</div>");
+    } else {
+        sb_appendf(sb, "<div class=\"bpLevelH\">\n\t\t\t\t\t<div class=\"bpLevelText\"><span>Level %d/%d</span></div>\n\t\t\t\t\t<div class=\"bpXPText\">\n\t\t\t\t\t\t"
+                       "<div style=\"color: #A8A8A8;\">BP XP: %lld / %d</div>\n\t\t\t\t\t\t<div class=\"bpXPBarH\">\n\t\t\t\t\t\t\t<div class=\"bpXPBar\" style=\"width:%.15g%%;\"></div>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t</div>",
+                   g_lvl, levels, (long long) points, need, need ? (double) points / need * 100.0 : 100.0);
+        sb_appendf(sb, "\n\t\t\t\t\t<div class=\"bpXPText\">\n            <div style=\"color: #A8A8A8;\"> Available BPP <img class=\"bpXPIcon\" onmouseenter=\"windows[5].showBalloon()\" "
+                       "onmouseleave=\"windows[5].hideBalloon()\" src=\"./img/frvr-ui/info-icon.svg\"></div>\n\t\t\t\t\t\t<div class=\"bpXPBarH\">\n\t\t\t\t\t\t\t"
+                       "<div class=\"bpXPBar\" style=\"width:%.15g%%;\"></div>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t</div>",
+                   cap > 0 ? (double) avail / (double) cap * 100.0 : 0.0);
+        sb_appendf(sb, "\n\t\t\t\t\t<div class=\"bpInfoBalloon\">\n\t\t\t\t\t\t<div>BPP has a daily cap. The amount you can earn increases every day.</div>\n\t\t\t\t\t\t"
+                       "<div style=\"margin-top: 20px\">Current available BPP: <span style='color:#00b1ff'>%lld</span></div>\n\t\t\t\t\t</div>\n\t\t\t\t</div>",
+                   (long long) avail);
+    }
+    sb_append(sb, "</div>");
+    sb_append(sb, "<div class=\"bpMidH\">");
+    sb_appendf(sb, "<div class=\"bpRowTitles\">\n\t\t\t\t<div class=\"bpCard\">\n\t\t\t\t\t<div class=\"bpRowTitleText\">Free</div>\n\t\t\t\t</div>\n\t\t\t\t"
+                   "<div class=\"bpCard vip active\">\n\t\t\t\t\t%s\n\t\t\t\t\t<div class=\"bpRowTitleText\" style=\"left: 27%%;\">VIP</div>\n\t\t\t\t</div>\n\t\t\t</div>",
+               vip ? "" : "<div class=\"bpCardLock\" style=\"top: 4%;\"></div>");
+    sb_append(sb, "<div class=\"bSliderH left\">\n\t\t\t\t<div class=\"bSliderBtn disabled\" onmouseenter=\"playTick(0.1);\" onmousedown=\"playSelect(0.1);windows[5].updateScroll(-1);\">"
+                  "\n\t\t\t\t\t<div class=\"bpSliderArrow\"></div>\n\t\t\t\t</div>\n\t\t\t</div>");
+    sb_append(sb, "<div class=\"bpCols\" onwheel=\"windows[5].updateScrollWheel();\">");
+    for (int col = 0; col < levels; col++) {
+        const int level = col + 1;
+        const int done = g_lvl >= level, active = g_lvl == level;
+        sb_appendf(sb, "<div class=\"bpCol\" style=''>\n\t\t\t\t\t<div class=\"bpLevelNum%s\"><span>%d</span></div>\n\t\t\t\t\t", active ? " active" : done ? " completed" : "", level);
+        for (int track = 0; track < BP_TRACKS; track++) gen_card_v10(sb, track, col, done, vip);
+        sb_append(sb, "\n\t\t\t\t</div>");
+    }
+    sb_append(sb, "</div>");
+    sb_append(sb, "<div class=\"bSliderH right\">\n\t\t\t\t<div class=\"bSliderBtn\" onmouseenter=\"playTick(0.1);\" onmousedown=\"playSelect(0.1);windows[5].updateScroll(1);\">"
+                  "\n\t\t\t\t\t<div class=\"bpSliderArrow right\"></div>\n\t\t\t\t</div>\n\t\t\t</div>");
+    sb_append(sb, "</div>");
+    sb_appendf(sb, "<div class=\"bpBotH\">\n        %s\n\t\t\t\t<div class=\"bpBtn claim\" style=\"background:#5865F2;\" onmouseenter=\"playTick(0.1);\" "
+                   "onclick=\"playSelect(0.1);windows[5].giftPop();\">Gift VIP Tier</div>\n\t\t\t\t<div class=\"bpBtn skip%s\" onmouseenter=\"playTick(0.1);\" "
+                   "onclick=\"playSelect(0.1);windows[5].skipLevelPop()\">Skip levels</div>\n        </div>",
+               vip ? "<div class=\"bpBtn claim blockClick\" onmouseenter=\"playTick(0.1);\">VIP Tier Purchased</div>"
+                   : "<div class=\"bpBtn claim\" onmouseenter=\"playTick(0.1);\" onclick=\"playSelect(0.1);windows[5].purchasePop();\">Purchase VIP Tier</div>",
+               g_bpp >= skip_cap ? " blockClick" : "");
+    sb_append(sb, "</div>");
+    if (!g_countdown_timer && g_bp->end_s && !g_now_override) g_countdown_timer = html_timer_add(1000, countdown_tick, NULL);
+}
+
+static void generic_popup(const char *html, const char *cls);
+
+// windows[5].giftPop() -> selectBPGift(null, 1): the "Gift Battlepass" form (_6696 genericForm)
+static void gift_pop_v10(void) {
+    generic_popup("<div class=\"io-popup-container\"><div class=\"io-popup-header\">Gift Battlepass</div><div class=\"io-popup-content\">"
+                      "<p>Enter the player name below to send them this battlepass tier. We will let them know you have gifted it to them.</p>"
+                      "<input id=\"giftPlayerName\" class=\"accountInput\" type=\"text\" placeholder=\"Player Name\" value=\"\">"
+                      "<div class=\"io-button-group\"><button class=\"io-button io-button--accept\" onmouseenter=\"playTick(0.1)\" "
+                      "onclick=\"playSelect(0.1);knBpGiftSend()\">SEND GIFT</button></div></div></div>",
+                      "genericFormPop");
 }
 
 // windows[5].genDailyCard(challenge, marginTop)
@@ -310,7 +477,8 @@ static char *gen_window(void) {
         sb_appendf(&sb, "<div style=\"font-size: 40px;text-align: center;display: inline-block;position: relative;width: 100%%;\">\n\t\t\t\t%s\n\t\t\t</div>",
                    g_bp_status == 2 && g_has_progress ? "No Battle Pass Found" : "Loading Battle Pass");
     } else if (g_tab == 0) {
-        gen_home(&sb);
+        if (v10_page()) gen_home_v10(&sb);
+        else gen_home(&sb);
     } else {
         if (!account_challenges()) account_challenges_request();
         gen_challenges(&sb);
@@ -493,6 +661,31 @@ int battlepass_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *a
     } else if (!strcmp(name, "windows.5.purchasePop")) {
         if (account_get()) purchase_pop();
         else menu_show_window(5, 1);
+    } else if (!strcmp(name, "windows.5.giftPop") || !strcmp(name, "selectBPGift")) { // v10 Gift VIP Tier
+        if (!account_get()) menu_show_window(5, 1);
+        else if (!g_bp) {
+            g_after_purchase = 2; // afterData = giftPop
+            menu_show_window(BP_WINDOW, 0);
+        } else gift_pop_v10();
+    } else if (!strcmp(name, "knBpGiftSend")) { // the form's SEND GIFT: selectBPTier(el, 1, undefined, name)
+        char who[64] = "", frame[192];
+        const HtmlElem in = html_dom_by_id("giftPlayerName");
+        if (in) html_dom_get_value(in, who, sizeof who);
+        if (!who[0] || !account_get()) return 1;
+        StrBuf sb = {0};
+        sb_append(&sb, "[\"xstbp\",1,\"en\",null,null,null,\"");
+        for (const char *p = who; *p; p++) if (*p != '"' && *p != '\\' && (unsigned char) *p >= 0x20) sb_appendf(&sb, "%c", *p);
+        sb_append(&sb, "\"]");
+        char *f = sb_finish(&sb);
+        snprintf(frame, sizeof frame, "%s", f);
+        free(f);
+        ui_loadout_clear_pops();
+        loading_popup("Please Wait...");
+        backend_social_send_text(frame);
+    } else if (!strcmp(name, "windows.5.claimAllItems")) { // v10 BP_CLAIM_ALL (no button on v10.0.2's page)
+        if (!account_get()) return 1;
+        loading_popup("Claiming...");
+        backend_social_send_text("[\"bpclmAll\"]");
     } else if (!strcmp(name, "windows.5.skipLevelPop")) {
         if (account_get()) skip_level_pop();
     } else if (!strcmp(name, "windows.5.increaseSkip")) {
@@ -529,26 +722,58 @@ int battlepass_ui_frame(const char *label, const cJSON *frame) {
         g_bp_status = 2;
         menu_rerender_if_open(BP_WINDOW);
         if (g_after_purchase && g_bp) {
+            const int gift = g_after_purchase == 2;
             g_after_purchase = 0;
-            purchase_pop();
+            if (gift) gift_pop_v10();
+            else purchase_pop();
         }
     } else if (!strcmp(label, "bppd")) { // io_syncBpProg(BP)
         set_progress(a1);
         menu_rerender_if_open(BP_WINDOW);
-    } else if (!strcmp(label, "bpclmr")) { // claimItemRes(_, _, skin, _, _, {id, tier, col, sk})
-        const cJSON *sk = cJSON_GetArrayItem(frame, 3), *item = cJSON_GetArrayItem(frame, 6);
-        if (account_get() && cJSON_IsNumber(sk) && sk->valueint > 0) account_add_skin(sk->valueint);
-        if (cJSON_IsObject(item)) {
-            char next[sizeof g_claimed];
-            bp_add_claimed(g_claimed, (int) jnum(item, "id"), next, sizeof next);
-            if (!bp_is_claimed(g_claimed, (int) jnum(item, "id"))) snprintf(g_claimed, sizeof g_claimed, "%s", next);
+    } else if (!strcmp(label, "bpclmr")) {
+        // v7.1.4 claimItemRes(_, _, skin, _, _, {id, tier, col, sk}) and v10's (_, funds, _, _,
+        // junk, [{id, tier, col, sk, kr, jnk}...]): kn_brain sends the first for "bpclm" and the
+        // second for "bpclmAll"
+        const cJSON *funds = cJSON_GetArrayItem(frame, 2), *sk = cJSON_GetArrayItem(frame, 3), *item = cJSON_GetArrayItem(frame, 6);
+        int count = 0;
+        if (cJSON_IsArray(item)) {
+            const cJSON *it;
+            cJSON_ArrayForEach(it, item) {
+                const int id = (int) jnum(it, "id");
+                if (!bp_is_claimed(g_claimed, id)) {
+                    char next[sizeof g_claimed];
+                    bp_add_claimed(g_claimed, id, next, sizeof next);
+                    snprintf(g_claimed, sizeof g_claimed, "%s", next);
+                }
+                if (account_get() && jnum(it, "sk") > 0) account_add_skin((int) jnum(it, "sk"));
+                count++;
+            }
+            if (account_get() && cJSON_IsNumber(funds)) account_set_funds(funds->valuedouble);
+        } else {
+            if (account_get() && cJSON_IsNumber(sk) && sk->valueint > 0) account_add_skin(sk->valueint);
+            if (cJSON_IsObject(item)) {
+                char next[sizeof g_claimed];
+                bp_add_claimed(g_claimed, (int) jnum(item, "id"), next, sizeof next);
+                if (!bp_is_claimed(g_claimed, (int) jnum(item, "id"))) snprintf(g_claimed, sizeof g_claimed, "%s", next);
+                count = 1;
+            }
         }
         menu_rerender_if_open(BP_WINDOW);
-        account_popup(1, NULL, "Item Claimed"); // io_showPopup("SUCCESS", null, "Item Claimed")
+        char text[48];
+        snprintf(text, sizeof text, count > 1 ? "%d Items Claimed" : "Item Claimed", count);
+        fprintf(stderr, "[battlepass] claimed %d item(s): %s\n", count, g_claimed);
+        account_popup(1, NULL, text); // io_showPopup("SUCCESS", null, n > 1 ? n + " Items Claimed" : "Item Claimed")
     } else if (!strcmp(label, "purbp")) { // purchaseRes(provider, error, product, tier, ...)
         const cJSON *err = cJSON_GetArrayItem(frame, 2);
         if (err && !cJSON_IsNull(err)) {
             purchase_error(err);
+        } else if (cJSON_IsTrue(cJSON_GetArrayItem(frame, 10))) { // v10: gifted to the 11th argument
+            char text[96];
+            const char *who = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 11));
+            if (who && who[0]) snprintf(text, sizeof text, "Battlepass Gifted to %s!", who);
+            else snprintf(text, sizeof text, "Battlepass Purchased and Gifted");
+            fprintf(stderr, "[battlepass] %s\n", text);
+            account_popup(1, NULL, text);
         } else {
             const cJSON *tier = cJSON_GetArrayItem(frame, 4);
             if (cJSON_IsNumber(tier)) g_tier = tier->valueint;

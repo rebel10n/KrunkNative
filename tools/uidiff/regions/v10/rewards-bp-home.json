@@ -1,0 +1,48 @@
+{
+  "scenario": "rewards-bp-home",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "bp-header",
+      "rect": [
+        180,
+        195,
+        920,
+        60
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "season name, countdown, Level 4/50, BP XP, Available BPP"
+    },
+    {
+      "name": "bp-levels",
+      "rect": [
+        264,
+        260,
+        800,
+        22
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "the level numbers"
+    },
+    {
+      "name": "bp-buttons",
+      "rect": [
+        380,
+        528,
+        520,
+        40
+      ],
+      "kind": "text",
+      "fuzz": 24,
+      "max_pct": 6.0,
+      "note": "Purchase VIP Tier / Gift VIP Tier / Skip levels (the translucent backdrop behind differs: the reference shows the offline sandbox page, #111, under it)"
+    }
+  ]
+}

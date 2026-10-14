@@ -24,11 +24,12 @@
 
 #define SEASON_CURRENT 7      // config.currentSeason
 #define BATTLEPASS_CURRENT 2  // config.currentBattlepass
-#define BP_CAP_DAY 300        // config.bppCapDay: the BPP cap grows by this every day of the pass
+#define BP_CAP_DAY 500        // v10.0.2 windows[5].gen 500 * days (v7.1.4 config.bppCapDay 300): the daily BPP cap
 #define BP_MATCH_SCORE_MAX 20 // endGame: min(20, floor(score * rewardMlt * 0.01))
 #define BP_MATCH_PLAY_BONUS 30 // endGame: +30 for playing at least half of the match
 #define BP_TRACKS 2           // windows[5].gen: row 0 "Free", row 1 "VIP" (tier >= 1)
 #define BP_ITEMS_MAX 512
+#define BP_LEVELS_MAX 256     // v10 leveldata: levels with their own BPP cost
 #define BP_FOUNDER_DAYS 7     // badges.js "Purchase the Battle Pass in the first week"
 #define BP_MASTER_BPP 15000   // badges.js S6 / S7 Battle Pass Master: BP.tier && bpp >= 15000
 
@@ -37,7 +38,9 @@ typedef struct {
     int id;    // claim id (bpclm)
     int tier;  // track: 0 free, 1 VIP
     int level; // column, 0-based: level = col + 1
-    int skin;  // store.skins index, 0 = none (the card stays empty)
+    int skin;  // store.skins index, 0 = none (the card stays empty unless kr / jnk)
+    int kr;    // v10 krdata "id:kr": the card's KR reward (0 none)
+    double jnk; // v10 jnkdata "id:jnk": its junk (shown; KrunkNative has no junk economy)
 } BattlePassItem;
 
 // io_dataLoaded / "bpdl": the pass (qs_battlepass + its items).
@@ -54,18 +57,29 @@ typedef struct BattlePass {
     char tier1_name[16];  // tier1name ("VIP")
     int count;
     BattlePassItem items[BP_ITEMS_MAX];
+    int level_bpp[BP_LEVELS_MAX]; // v10 leveldata: level n's BPP at [n - 1], 0 = bpp_per_level
 } BattlePass;
 
 // Parses itemdata into bp->items; returns the number of items.
 int bp_parse_items(BattlePass *bp, const char *itemdata);
 // Writes itemdata back ("id,tier,col,sk,..."); returns the length (truncated to size - 1).
 size_t bp_format_items(const BattlePass *bp, char *out, size_t size);
+// Krunker v10.0.2 (windows[5].gen, _52102 / _52111): leveldata "level:bpp,..." (the BPP a level
+// costs; others cost bpp_perlevel) and krdata / jnkdata "itemId:amount,..." (a card's KR / junk
+// reward). Parse after bp_parse_items; NULL / "" leave the v7.1.4 behaviour.
+void bp_parse_levels(BattlePass *bp, const char *leveldata);
+void bp_parse_rewards(BattlePass *bp, const char *krdata, const char *jnkdata);
+// The BPP level `level` (1-based) costs.
+int bp_level_need(const BattlePass *bp, int level);
+// A claimable card: a skin, KR or junk (v10: a card with kr / jnk and no skin shows them).
+int bp_item_has_reward(const BattlePassItem *it);
 
 // windows[5].gen: battlepassLvl = floor(bpp / bpp_perlevel) + 1, capped at itemcount once
 // complete; *points = bpp % bpp_perlevel (bpp_perlevel when complete); *complete = past the
-// last level. Any out pointer may be NULL.
+// last level. Any out pointer may be NULL. v10 (_52111): the levels' own costs (leveldata);
+// uniform levels give the same answer.
 int bp_level(const BattlePass *bp, int64_t bpp, int64_t *points, int *complete);
-// itemcount * bpp_perlevel
+// itemcount * bpp_perlevel (v10: the sum of the levels' costs)
 int64_t bp_max_bpp(const BattlePass *bp);
 // (floor((now - startdate) / 1 day) + 1) * bppCapDay: the BPP the cap allows by `now_s`.
 int64_t bp_cap_total(const BattlePass *bp, int64_t now_s);
@@ -111,7 +125,8 @@ const char *bp_claim_error(BpClaimResult r);
 
 // windows[5].increaseSkip: 1 .. max(1, itemcount - battlepassLvl) levels.
 int bp_skip_max(const BattlePass *bp, int64_t bpp);
-// The bpp after skipping `levels` (each adds bpp_perlevel, capped at the pass total).
+// The bpp after skipping `levels` (each adds bpp_perlevel, v10: the cost of the level it skips,
+// capped at the pass total).
 int64_t bp_skip_bpp(const BattlePass *bp, int64_t bpp, int levels);
 
 // store.skins[].mapReward of `season`: the skin a finished public match on official map

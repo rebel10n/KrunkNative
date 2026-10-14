@@ -1,0 +1,22 @@
+{
+  "scenario": "rewards-bp-guest",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "window",
+      "rect": [
+        171,
+        305,
+        938,
+        110
+      ],
+      "kind": "text",
+      "fuzz": 14,
+      "max_pct": 30.0,
+      "note": "tabs + Sign-in to use the Battle Pass feature (the reference has the login popup over it)"
+    }
+  ]
+}

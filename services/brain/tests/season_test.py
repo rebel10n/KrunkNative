@@ -251,26 +251,26 @@ async def scenario(port):
         print("== the match BPP (stats commit)")
         player = {"accountId": alice_id, "name": alice, "kills": 10, "deaths": 4, "score": 1500, "won": True,
                   "timePlayed": 240000, "games": 1, "kr": 0, "xp": 1500, "classIndex": 0, "stats": {},
-                  "prog": [["k", 10, -1, -1, -1]], "medals": {}, "mapIndex": 0, "ranked": False, "bpp": 45}
+                  "prog": [["k", 10, -1, -1, -1]], "medals": {}, "mapIndex": 0, "ranked": False, "bpp": 70}
         reply = await n.commit("s1", True, player)
         check(reply.get("ok"), "commit ok")
         end = await wait_push(s, "bpEnd")
-        check(end and end[1]["gn"] == 45 and end[1]["pbpp"] == 0 and end[1]["bpp"] == 45 and end[1]["mx"] == per
+        check(end and end[1]["gn"] == 70 and end[1]["pbpp"] == 0 and end[1]["bpp"] == 70 and end[1]["mx"] == per
               and end[1]["ml"] == count and end[1]["id"] == 2, "bpEnd (tmpBPData): %s" % (end and end[1]))
-        check(end and end[1]["rbpp"] == 300 - 45 and end[1]["unbpp"] == 45, "remaining daily cap: %s" % (end and end[1]))
+        check(end and end[1]["rbpp"] == 500 - 70 and end[1]["unbpp"] == 70, "remaining daily cap: %s" % (end and end[1]))
         nxt = [it for it in items if it[2] == 1 and it[3] > 0]
         nxt = sorted(nxt, key=lambda it: -it[1])[0] if nxt else None  # the VIP card first
         want = {"id": nxt[0], "sk": nxt[3], "tier": nxt[1], "col": 1} if nxt else None
         check(end and end[1].get("re") == want, "next level reward (level 2): %s" % (end and end[1].get("re")))
         pr = await wait_push(s, "bppd")
-        check(pr and pr[1]["bpp"] == 45, "bppd after the match: %s" % (pr and pr[1]))
-        for i in range(2, 9):  # the day's cap: 300 BPP
+        check(pr and pr[1]["bpp"] == 70, "bppd after the match: %s" % (pr and pr[1]))
+        for i in range(2, 9):  # the day's cap: 500 BPP (v10.0.2)
             await n.commit("s%d" % i, True, player)
         await s.drain(1.5)
         s.inbox.clear()
         r = await s.call("bpdl", "bpdl")
         pr = await s.call("bppd")
-        check(pr[1]["bpp"] == 300, "the daily cap stops at 300 BPP: %s" % pr[1]["bpp"])
+        check(pr[1]["bpp"] == 500, "the daily cap stops at 500 BPP: %s" % pr[1]["bpp"])
         await n.commit("s1", True, player)  # a duplicate commit
         await s.drain(1.0)
         check(s.take("bpEnd") is None, "no BPP for a duplicate commit")
@@ -307,11 +307,11 @@ async def scenario(port):
         check(r[2] == {"err": "Not enough KR"}, "skip without the KR: %s" % r)
         r = await s.call("purbpl", "xstbpl", count)
         check(r[2] == {"err": "Invalid amount of levels"}, "skip past the last level: %s" % r)
-        levels = max(1, count - (300 // per + 1))  # increaseSkip's limit at bpp 300
+        levels = max(1, count - (500 // per + 1))  # increaseSkip's limit at bpp 500
         skip = bp["skipprice"]
         await give_kr(n, alice_id, levels * skip)
         r = await s.call("purbpl", "xstbpl", levels)
-        check(r[2] is None and r[4] == levels and r[5] == min(300 + levels * per, count * per) and r[6] == levels * skip,
+        check(r[2] is None and r[4] == levels and r[5] == min(500 + levels * per, count * per) and r[6] == levels * skip,
               "purchaseLvlRes: %s" % r[:8])
         tx = query("SELECT amount FROM kr_transactions WHERE account_id = %d AND source = 'battlepass-skip' ORDER BY id" % alice_id)
         check(tx and tx[0] == str(-levels * skip), "kr_transactions: the 'battlepass-skip' debit: %s" % tx)

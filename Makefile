@@ -468,6 +468,10 @@ v10-settings-e2e: build ## v10 Settings on ui/v10: one setting per tab applied +
 pickup-chat-e2e: build ## Pickup feedback on server_bin: Object Manager Junk + G prints "You found [0.01] Junk" to the finder only, a weapon pickup plays pick_0
 	timeout 120 $(PYTHON) -I server/tests/pickup_chat_e2e.py $(DEBUG_DIR)
 
+.PHONY: v10-rewards-e2e
+v10-rewards-e2e: build ## v10 rewards on ui/v10: Get Signup Rewards -> register -> perks once, a challenge done on server_bin, a Battle Pass claim + gift (headless)
+	timeout 600 $(PYTHON) -I server/tests/v10_rewards_e2e.py $(DEBUG_DIR)
+
 .PHONY: reconnect-test
 reconnect-test: build ## Console reload + rejoin online + offline, F5 relaunch, console reconnect / sandbox / offline <map>, --sandbox (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I server/tests/reconnect_key_e2e.py $(DEBUG_DIR)

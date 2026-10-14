@@ -251,7 +251,7 @@ def main():
     brain_url = "http://127.0.0.1:%d" % brain_port
     brain_log = open(os.path.join(WORK, "brain.log"), "w")
     try:
-        procs.append(subprocess.Popen([BRAIN, "--brain.host=127.0.0.1", "--brain.port=%d" % brain_port, "--database.driver=sqlite",
+        procs.append(subprocess.Popen([BRAIN, "--brain.host=127.0.0.1", "--accounts.signup_rewards.enabled=false", "--brain.port=%d" % brain_port, "--database.driver=sqlite",
                                        "--database.path=" + dbpath, "--migrate", "--brain.public_url=" + brain_url],
                                       cwd=ROOT, stdout=brain_log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                                       start_new_session=True))

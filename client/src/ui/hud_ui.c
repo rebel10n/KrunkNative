@@ -2527,6 +2527,7 @@ static void hud_end_screen_dom(const int start) {
         dom_display("teamTotal0", "none");
         dom_display("teamTotal1", "none");
         dom_display("endInfo", "none");
+        dom_display("matchEndSignupIncentives", "none"); // v10.0.2 showEndScreen
     }
     dom_display("endUI", "");
     const HtmlElem base = html_dom_by_id("uiBase");
@@ -2948,6 +2949,7 @@ void hud_ui_end_screen_tab(const char *tab) {
 // f1912 + f1913 + f1915 + f1916: the results after config.endAnim.
 static void hud_end_results(const Client *client) {
     dom_display("endInfo", "block");
+    v10_rewards_end_screen(); // v10.0.2 endScreen.init: a guest's #matchEndSignupIncentives (v10_rewards.c)
     dom_style("endUI", "background-color", "transparent");
     dom_display("victorySub", "");              // f1913
     hud_end_title_hide();                       // overlay.vicTitle.show = false

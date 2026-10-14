@@ -1,0 +1,22 @@
+{
+  "scenario": "rewards-chall-guest",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "login-required",
+      "rect": [
+        143,
+        146,
+        358,
+        72
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "LOGIN REQUIRED to complete challenges!"
+    }
+  ]
+}

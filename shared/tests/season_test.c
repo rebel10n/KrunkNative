@@ -46,16 +46,40 @@ static void test_levels(void) {
     CHECK(bp_level(&g_bp, 15000, &pts, &complete) == 75 && complete && pts == 200, "bpp 15000: complete, capped at 75 with 200/200");
 }
 
+// v10.0.2 leveldata / krdata / jnkdata (_52102 / _52111)
+static void test_v10_levels(void) {
+    BattlePass bp;
+    memset(&bp, 0, sizeof bp);
+    bp.bpp_per_level = 300;
+    bp.item_count = 4;
+    bp_parse_items(&bp, "20001,0,0,0,20002,0,1,5,20003,0,2,0");
+    bp_parse_levels(&bp, "2:1000,3:0,9:5,x");
+    bp_parse_rewards(&bp, "20001:150,20009:5", "20003:2.5");
+    CHECK(bp_level_need(&bp, 1) == 300 && bp_level_need(&bp, 2) == 1000 && bp_level_need(&bp, 3) == 0 && bp_level_need(&bp, 4) == 300,
+          "level costs: 300, 1000, 0, 300");
+    int64_t xp = 0;
+    int complete = 0;
+    CHECK(bp_level(&bp, 299, &xp, &complete) == 1 && xp == 299, "299: level 1");
+    CHECK(bp_level(&bp, 1299, &xp, NULL) == 2 && xp == 999, "1299: level 2 (999/1000)");
+    CHECK(bp_level(&bp, 1300, &xp, NULL) == 4 && xp == 0, "1300: level 3 costs nothing, level 4");
+    CHECK(bp_level(&bp, 1600, &xp, &complete) == 4 && complete && xp == 300, "1600: maxed");
+    CHECK(bp_max_bpp(&bp) == 1600, "the pass total: 1600");
+    CHECK(bp_skip_bpp(&bp, 100, 1) == 400 && bp_skip_bpp(&bp, 400, 1) == 1400, "a skip adds the skipped level's cost");
+    CHECK(bp_item(&bp, 20001)->kr == 150 && bp_item(&bp, 20003)->jnk == 2.5 && bp_item(&bp, 20002)->kr == 0, "krdata / jnkdata");
+    CHECK(bp_claim_check(&bp, 0, 0, "", 20001) == BP_CLAIM_OK && bp_claim_check(&bp, 1600, 0, "", 20003) == BP_CLAIM_OK,
+          "a KR card and a junk card are claimable without a skin");
+}
+
 static void test_cap(void) {
     const int64_t day0 = g_bp.start_s + 3600, day2 = g_bp.start_s + 2 * 86400 + 5;
-    CHECK(bp_cap_total(&g_bp, day0) == BP_CAP_DAY, "day 1: 300");
-    CHECK(bp_cap_total(&g_bp, day2) == 3 * BP_CAP_DAY, "day 3: 900");
+    CHECK(BP_CAP_DAY == 500 && bp_cap_total(&g_bp, day0) == BP_CAP_DAY, "day 1: 500 (v10.0.2)");
+    CHECK(bp_cap_total(&g_bp, day2) == 3 * BP_CAP_DAY, "day 3: 1500");
     CHECK(bp_cap_total(&g_bp, g_bp.start_s - 10) == 0, "before the start: 0");
-    CHECK(bp_available(&g_bp, 250, day0) == 50 && bp_available(&g_bp, 400, day0) == 0, "Available BPP");
-    BpAward a = bp_validate_progress(&g_bp, 260, 50, day0);
-    CHECK(a.award == 40 && a.remaining == 0, "validateProgress: capped at the day's 300 (award %lld rem %lld)", (long long) a.award, (long long) a.remaining);
+    CHECK(bp_available(&g_bp, 450, day0) == 50 && bp_available(&g_bp, 600, day0) == 0, "Available BPP");
+    BpAward a = bp_validate_progress(&g_bp, 460, 50, day0);
+    CHECK(a.award == 40 && a.remaining == 0, "validateProgress: capped at the day's 500 (award %lld rem %lld)", (long long) a.award, (long long) a.remaining);
     a = bp_validate_progress(&g_bp, 100, 50, day2);
-    CHECK(a.award == 50 && a.remaining == 750, "validateProgress on day 3 (award %lld rem %lld)", (long long) a.award, (long long) a.remaining);
+    CHECK(a.award == 50 && a.remaining == 1350, "validateProgress on day 3 (award %lld rem %lld)", (long long) a.award, (long long) a.remaining);
     a = bp_validate_progress(&g_bp, 14990, 50, g_bp.start_s + 100 * 86400);
     CHECK(a.award == 10 && a.remaining == 0, "the pass total caps too");
     CHECK(bp_match_points(1500, 1, 0) == 15 && bp_match_points(1500, 1, 1) == 45, "endGame: floor(score * 0.01) + 30");
@@ -161,6 +185,7 @@ int main(void) {
     test_items();
     test_levels();
     test_cap();
+    test_v10_levels();
     test_rewards_and_claims();
     test_badges();
     test_challenge_contexts();

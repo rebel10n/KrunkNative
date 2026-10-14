@@ -1,0 +1,22 @@
+{
+  "scenario": "rewards-menu-account",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "bp-item",
+      "rect": [
+        8,
+        88,
+        300,
+        16
+      ],
+      "kind": "text",
+      "fuzz": 24,
+      "max_pct": 6.0,
+      "note": "the sidebar's Battle Pass item (.bpItem): LVL 4 + its bar (its title row is under the dev console text the v10 scenarios currently render at the top left)"
+    }
+  ]
+}

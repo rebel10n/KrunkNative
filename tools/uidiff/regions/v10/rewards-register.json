@@ -1,0 +1,22 @@
+{
+  "scenario": "rewards-register",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "popup",
+      "rect": [
+        334,
+        172,
+        612,
+        376
+      ],
+      "kind": "image",
+      "fuzz": 14,
+      "max_pct": 4.0,
+      "note": "Welcome to the Family! (the page behind is the signed-in menu here, the guest one in the reference)"
+    }
+  ]
+}

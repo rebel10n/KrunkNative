@@ -8,9 +8,13 @@
  *   P_BP_DATA      (id | 0, season)          -> {bp, progress}      "bpdl" (io_dataLoaded +
  *                    io_syncBpProg): the season's pass in v7's qs_battlepass shape and the
  *                    account's progress {id, bpp, tier, items_claimed}
- *   P_BP_CLAIM     (id, item, season)        -> {progress, sk, id, tier, col}  "bpclm"
- *   P_BP_BUY       (id, tier, season, now_s) -> {progress, tier, funds, price, newBadges}
- *                    "xstbp": the VIP tier, paid in KR (kr_transactions source 'battlepass')
+ *   P_BP_CLAIM     (id, item, season, all)   -> {progress, sk, id, tier, col, items, funds}
+ *                    "bpclm" / v10 "bpclmAll" (all = 1: every claimable card); the cards' skins and
+ *                    v10 krdata KR
+ *   P_BP_BUY       (id, tier, season, now_s, gift name | NULL) -> {progress, tier, funds, price,
+ *                    newBadges, gift {id, name, progress}}
+ *                    "xstbp": the VIP tier, paid in KR (kr_transactions source 'battlepass'); v10
+ *                    selectBPGift: for another player (the payer's own pass is unchanged)
  *   P_BP_SKIP      (id, levels, season, now_s) -> {progress, levels, funds, price, newBadges}
  *                    "xstbpl": skipped levels in KR (source 'battlepass-skip')
  *   P_SEASON_STATS (name | id, season)       -> {season, name, kills, deaths, wins, games,
@@ -54,7 +58,7 @@ BattlePass *db_bp_load(Dbx *x, const int season, cJSON **row) {
     if (row) *row = NULL;
     cJSON *r = dbx_row(x, SQL(.any = "SELECT bp_id AS id__i, season AS season__i, name, descr, bpp_perlevel AS bpp_perlevel__i,"
                                      " itemcount AS itemcount__i, tier1_name, tier1_price_kr AS tier1_price_kr__i,"
-                                     " skip_price_kr AS skip_price_kr__i, itemdata,"
+                                     " skip_price_kr AS skip_price_kr__i, itemdata, leveldata, krdata, jnkdata,"
                                      " {epoch_ms:startdate} AS start_ms__f, {epoch_ms:enddate} AS end_ms__f"
                                      " FROM battlepasses WHERE season = {int:$1} AND status = 1 ORDER BY bp_id DESC LIMIT 1"),
                        KN_DB_ARGS(I64S(season)));
@@ -75,6 +79,8 @@ BattlePass *db_bp_load(Dbx *x, const int season, cJSON **row) {
     bp->start_s = (int64_t) (jnum(r, "start_ms") / 1000.0);
     bp->end_s = (int64_t) (jnum(r, "end_ms") / 1000.0);
     bp_parse_items(bp, jstr(r, "itemdata"));
+    bp_parse_levels(bp, jstr(r, "leveldata")); /* v10.0.2 (0116_v10_rewards) */
+    bp_parse_rewards(bp, jstr(r, "krdata"), jstr(r, "jnkdata"));
     if (row) *row = r;
     else cJSON_Delete(r);
     return bp;
@@ -112,6 +118,10 @@ static cJSON *bp_payload(const BattlePass *bp, const cJSON *row) {
         cJSON_AddStringToObject(o, "itemdata", items);
         free(items);
     }
+    /* v10.0.2 windows[5].gen: per-level costs and the cards' KR / junk */
+    cJSON_AddStringToObject(o, "leveldata", jstr(row, "leveldata"));
+    cJSON_AddStringToObject(o, "krdata", jstr(row, "krdata"));
+    cJSON_AddStringToObject(o, "jnkdata", jstr(row, "jnkdata"));
     char t[40];
     iso_time(bp->end_s, t, sizeof t);
     cJSON_AddStringToObject(o, "enddate", t);
@@ -232,6 +242,8 @@ static cJSON *reward_json(const BattlePassItem *it) {
     cJSON_AddNumberToObject(o, "sk", it->skin);
     cJSON_AddNumberToObject(o, "tier", it->tier);
     cJSON_AddNumberToObject(o, "col", it->level);
+    if (it->kr > 0) cJSON_AddNumberToObject(o, "kr", it->kr);   /* v10: the end screen's krunkies icon */
+    if (it->jnk > 0) cJSON_AddNumberToObject(o, "jnk", it->jnk);
     return o;
 }
 
@@ -267,10 +279,12 @@ cJSON *db_season_match(Dbx *x, const int64_t id, const int season, const int64_t
     /* endGame's tmpBPData (only for a finished public match: "bpp" in the payload) */
     const cJSON *req = cJSON_GetObjectItemCaseSensitive(in, "bpp");
     if (!cJSON_IsNumber(req) && challenge_bpp <= 0) return NULL;
-    BattlePass *bp = dbx_failed(x) ? NULL : db_bp_load(x, season, NULL);
+    cJSON *bprow = NULL;
+    BattlePass *bp = dbx_failed(x) ? NULL : db_bp_load(x, season, &bprow);
     if (!bp) return NULL;
     cJSON *row = progress_row(x, id, bp->id, 1);
     if (!row) {
+        cJSON_Delete(bprow);
         free(bp);
         return NULL;
     }
@@ -297,6 +311,8 @@ cJSON *db_season_match(Dbx *x, const int64_t id, const int season, const int64_t
     cJSON_AddNumberToObject(t, "unbpp", (double) (requested + cbp));
     cJSON_AddNumberToObject(t, "rbpp", (double) (award.remaining - cbp > 0 ? award.remaining - cbp : 0));
     cJSON_AddItemToObject(t, "re", reward_json(bp_next_reward(bp, after)));
+    cJSON_AddStringToObject(t, "lv", jstr(bprow, "leveldata")); /* v10 endScreen: _52111({mx, ml, lv}, bpp) */
+    cJSON_Delete(bprow);
     cJSON_DeleteItemFromObjectCaseSensitive(row, "bpp");
     cJSON_AddNumberToObject(row, "bpp", (double) after);
     if (progress_out) *progress_out = progress_public(row);
@@ -347,7 +363,56 @@ static kn_db_result *run_bp_data(kn_dbconn *c, int n, const char *const *p) {
 }
 const kn_proc P_BP_DATA = {"bp_data", NULL, run_bp_data};
 
-/* (id, item id, season) -> {progress, sk, id, tier, col}: claimItemRes(.., sk, .., {id, tier, col}) */
+/* Claims `items` (ids; NULL = every claimable card, v10 claimAllItems) of the account's progress
+ * row (locked): the skins and the v10 KR of each card, items_claimed. Returns the claimed cards
+ * [{id, tier, col, sk, kr, jnk}] (empty when none) or NULL after a refusal / failure. */
+static cJSON *claim_cards(Dbx *x, const int64_t id, const BattlePass *bp, cJSON *row, const int *items, const int count) {
+    char claimed[4096];
+    snprintf(claimed, sizeof claimed, "%s", jstr(row, "items_claimed"));
+    const int64_t bpp = (int64_t) jnum(row, "bpp");
+    const int tier = (int) jnum(row, "tier");
+    cJSON *out = cJSON_CreateArray();
+    const int all = items == NULL;
+    const int n = all ? bp->count : count;
+    for (int i = 0; i < n && !dbx_failed(x); i++) {
+        const int item = all ? bp->items[i].id : items[i];
+        const BpClaimResult r = bp_claim_check(bp, bpp, tier, claimed, item);
+        if (r != BP_CLAIM_OK) {
+            if (!all) dbx_refuse(x, bp_claim_error(r));
+            continue;
+        }
+        const BattlePassItem *it = bp_item(bp, item);
+        char next[4096], ref[32];
+        bp_add_claimed(claimed, item, next, sizeof next);
+        snprintf(claimed, sizeof claimed, "%s", next);
+        snprintf(ref, sizeof ref, "bp:%d:%d", bp->id, it->id);
+        if (it->skin > 0) db_add_skin(x, id, it->skin, 1, "battlepass", ref, NULL);
+        if (it->kr > 0) db_add_funds(x, id, it->kr, "battlepass", ref, NULL);
+        cJSON *c = cJSON_CreateObject();
+        cJSON_AddNumberToObject(c, "id", it->id);
+        cJSON_AddNumberToObject(c, "tier", it->tier);
+        cJSON_AddNumberToObject(c, "col", it->level);
+        cJSON_AddNumberToObject(c, "sk", it->skin);
+        cJSON_AddNumberToObject(c, "kr", it->kr);
+        cJSON_AddNumberToObject(c, "jnk", it->jnk);
+        cJSON_AddItemToArray(out, c);
+    }
+    if (!dbx_failed(x) && cJSON_GetArraySize(out) > 0) {
+        dbx_exec(x, SQL(.any = "UPDATE battlepass_progress SET items_claimed = $3, updated_at = {now} WHERE account_id = $1 AND bp_id = {int:$2}"),
+                 KN_DB_ARGS(I64S(id), I64S(bp->id), claimed));
+        cJSON_DeleteItemFromObjectCaseSensitive(row, "items_claimed");
+        cJSON_AddStringToObject(row, "items_claimed", claimed);
+    }
+    if (dbx_failed(x)) {
+        cJSON_Delete(out);
+        return NULL;
+    }
+    return out;
+}
+
+/* (id, item id, season, all) -> {progress, sk, id, tier, col, items, funds} (all = 1: every
+ * claimable card, v10 "bpclmAll"; the item id is ignored):
+ * v7 claimItemRes(.., sk, .., {id, tier, col}) and v10's (.., funds, .., .., junk, [items]) */
 static kn_db_result *run_bp_claim(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     const int64_t id = PI(0), item = PI(1);
@@ -362,28 +427,23 @@ static kn_db_result *run_bp_claim(kn_dbconn *c, int n, const char *const *p) {
     }
     cJSON *row = progress_row(&x, id, bp->id, 1);
     cJSON *out = NULL;
-    if (row) {
-        const BpClaimResult r = bp_claim_check(bp, (int64_t) jnum(row, "bpp"), (int) jnum(row, "tier"), jstr(row, "items_claimed"), (int) item);
-        if (r != BP_CLAIM_OK) {
-            dbx_refuse(&x, bp_claim_error(r));
-        } else {
-            const BattlePassItem *it = bp_item(bp, (int) item);
-            char claimed[4096], ref[32];
-            bp_add_claimed(jstr(row, "items_claimed"), (int) item, claimed, sizeof claimed);
-            dbx_exec(&x, SQL(.any = "UPDATE battlepass_progress SET items_claimed = $3, updated_at = {now} WHERE account_id = $1 AND bp_id = {int:$2}"),
-                     KN_DB_ARGS(I64S(id), I64S(bp->id), claimed));
-            snprintf(ref, sizeof ref, "bp:%d:%d", bp->id, it->id);
-            db_add_skin(&x, id, it->skin, 1, "battlepass", ref, NULL);
-            cJSON_DeleteItemFromObjectCaseSensitive(row, "items_claimed");
-            cJSON_AddStringToObject(row, "items_claimed", claimed);
-            out = cJSON_CreateObject();
-            cJSON_AddItemToObject(out, "progress", progress_public(row));
-            cJSON_AddNumberToObject(out, "sk", it->skin);
-            cJSON_AddNumberToObject(out, "id", it->id);
-            cJSON_AddNumberToObject(out, "tier", it->tier);
-            cJSON_AddNumberToObject(out, "col", it->level);
-        }
+    const int one = (int) item, all = PI(3) == 1;
+    cJSON *cards = row ? claim_cards(&x, id, bp, row, all ? NULL : &one, 1) : NULL;
+    if (cards && all && cJSON_GetArraySize(cards) == 0) dbx_refuse(&x, "No items to claim");
+    if (cards && !dbx_failed(&x)) {
+        const cJSON *first = cJSON_GetArrayItem(cards, 0);
+        out = cJSON_CreateObject();
+        cJSON_AddItemToObject(out, "progress", progress_public(row));
+        cJSON_AddNumberToObject(out, "sk", jnum(first, "sk"));
+        cJSON_AddNumberToObject(out, "id", jnum(first, "id"));
+        cJSON_AddNumberToObject(out, "tier", jnum(first, "tier"));
+        cJSON_AddNumberToObject(out, "col", jnum(first, "col"));
+        cJSON_AddItemToObject(out, "items", cards);
+        cards = NULL;
+        cJSON_AddNumberToObject(out, "funds",
+                                (double) dbx_int(&x, SQL(.any = "SELECT player_funds FROM players WHERE player_id = $1"), KN_DB_ARGS(I64S(id)), 0));
     }
+    cJSON_Delete(cards);
     cJSON_Delete(row);
     free(bp);
     if (dbx_failed(&x)) {
@@ -394,40 +454,73 @@ static kn_db_result *run_bp_claim(kn_dbconn *c, int n, const char *const *p) {
 }
 const kn_proc P_BP_CLAIM = {"bp_claim", NULL, run_bp_claim};
 
-/* (id, tier, season, now_s) -> {progress, tier, funds, price, newBadges} */
+/* (id, tier, season, now_s, gift name | NULL) -> {progress, tier, funds, price, newBadges,
+ * gift {id, name, progress, newBadges} | absent}. A gift (v10 selectBPGift) gives `name` the
+ * tier; the payer pays and keeps their own pass. */
 static kn_db_result *run_bp_buy(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     const int64_t id = PI(0), tier = PI(1), season = PI(2), now_s = PI(3);
+    const char *gift = P(4) && *P(4) ? P(4) : NULL;
     if (!account_exists(&x, id)) {
         if (!dbx_failed(&x)) dbx_refuse(&x, "Account not found.");
         return dbx_finish(&x, NULL);
+    }
+    int64_t to = id;
+    char gift_name[64] = "";
+    if (gift) {
+        to = db_account_id(&x, gift);
+        char *name = to > 0 ? dbx_text(&x, SQL(.any = "SELECT username FROM accounts WHERE id = $1"), KN_DB_ARGS(I64S(to))) : NULL;
+        snprintf(gift_name, sizeof gift_name, "%s", name ? name : "");
+        free(name);
+        if (!dbx_failed(&x) && (to <= 0 || !account_exists(&x, to))) dbx_refuse(&x, "Player not found");
+        else if (!dbx_failed(&x) && to == id) dbx_refuse(&x, "You can't gift yourself");
+        if (dbx_failed(&x)) return dbx_finish(&x, NULL);
     }
     BattlePass *bp = tier == 1 ? db_bp_load(&x, (int) season, NULL) : NULL;
     if (!bp) {
         if (!dbx_failed(&x)) dbx_refuse(&x, tier == 1 ? "No Battle Pass Found" : "Invalid Tier");
         return dbx_finish(&x, NULL);
     }
-    cJSON *row = progress_row(&x, id, bp->id, 1);
+    cJSON *row = progress_row(&x, to, bp->id, 1);
     cJSON *out = NULL;
     int64_t funds = 0;
-    char ref[32];
-    snprintf(ref, sizeof ref, "bp:%d:tier%d", bp->id, (int) tier);
-    if (row && jnum(row, "tier") >= (double) tier) dbx_refuse(&x, "You already own this Battle Pass");
+    char ref[48];
+    if (gift) snprintf(ref, sizeof ref, "bp:%d:tier%d:gift:%lld", bp->id, (int) tier, (long long) to);
+    else snprintf(ref, sizeof ref, "bp:%d:tier%d", bp->id, (int) tier);
+    if (row && jnum(row, "tier") >= (double) tier) dbx_refuse(&x, gift ? "This player already owns this Battle Pass" : "You already own this Battle Pass");
     else if (row && bp->end_s > 0 && now_s >= bp->end_s) dbx_refuse(&x, "This Battle Pass has ended");
-    else if (row && db_add_funds(&x, id, -(int64_t) bp->tier1_price_kr, "battlepass", ref, &funds) == 0) {
+    else if (row && (gift ? db_add_funds_ex(&x, id, -(int64_t) bp->tier1_price_kr, "battlepass-gift", ref, to, 0, &funds)
+                          : db_add_funds(&x, id, -(int64_t) bp->tier1_price_kr, "battlepass", ref, &funds)) == 0) {
         dbx_exec(&x, SQL(.any = "UPDATE battlepass_progress SET tier = {int:$3}, tier_at = {from_ms:$4}, updated_at = {now}"
                                 " WHERE account_id = $1 AND bp_id = {int:$2}"),
-                 KN_DB_ARGS(I64S(id), I64S(bp->id), I64S(tier), I64S(now_s * 1000)));
+                 KN_DB_ARGS(I64S(to), I64S(bp->id), I64S(tier), I64S(now_s * 1000)));
         cJSON_DeleteItemFromObjectCaseSensitive(row, "tier");
         cJSON_AddNumberToObject(row, "tier", (double) tier);
+        cJSON *stats = player_stats(&x, to);
+        cJSON *badges = db_season_check_badges(&x, to, (int) season, now_s, stats);
+        cJSON_Delete(stats);
         out = cJSON_CreateObject();
-        cJSON_AddItemToObject(out, "progress", progress_public(row));
+        if (gift) {
+            /* "We will let them know you have gifted it to them" (selectBPGift) */
+            dbx_exec(&x, SQL(.any = "INSERT INTO mail (account_id, sender, subject, body, kr)"
+                                    " SELECT $1, a.username, 'Battle Pass Gift', $3, 0 FROM accounts a WHERE a.id = $2"),
+                     KN_DB_ARGS(I64S(to), I64S(id), bp->name));
+            cJSON *g = cJSON_AddObjectToObject(out, "gift");
+            cJSON_AddNumberToObject(g, "id", (double) to);
+            cJSON_AddStringToObject(g, "name", gift_name);
+            cJSON_AddItemToObject(g, "progress", progress_public(row));
+            cJSON_AddItemToObject(g, "newBadges", badges);
+            cJSON *mine = progress_row(&x, id, bp->id, 0);
+            cJSON_AddItemToObject(out, "progress", mine ? progress_public(mine) : cJSON_CreateNull());
+            cJSON_Delete(mine);
+            cJSON_AddItemToObject(out, "newBadges", cJSON_CreateArray());
+        } else {
+            cJSON_AddItemToObject(out, "progress", progress_public(row));
+            cJSON_AddItemToObject(out, "newBadges", badges);
+        }
         cJSON_AddNumberToObject(out, "tier", (double) tier);
         cJSON_AddNumberToObject(out, "funds", (double) funds);
         cJSON_AddNumberToObject(out, "price", bp->tier1_price_kr);
-        cJSON *stats = player_stats(&x, id);
-        cJSON_AddItemToObject(out, "newBadges", db_season_check_badges(&x, id, (int) season, now_s, stats));
-        cJSON_Delete(stats);
     }
     cJSON_Delete(row);
     free(bp);

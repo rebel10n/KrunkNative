@@ -268,7 +268,7 @@ def main():
     try:
         subprocess.run([f"{BUILD}/services/brain/kn_brain", "--migrate-only"], cwd=ROOT, env=env, check=True,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        brain = subprocess.Popen([f"{BUILD}/services/brain/kn_brain", "--brain.host=127.0.0.1", "--brain.port=0",
+        brain = subprocess.Popen([f"{BUILD}/services/brain/kn_brain", "--brain.host=127.0.0.1", "--brain.port=0", "--accounts.signup_rewards.enabled=false",
                                   "--brain.region=local", "--brain.id=v10comp-%d" % os.getpid(), "--finder.poll_interval_s=1",
                                   "--brain.ranked.min_level=0", "--brain.ranked.team_size=1", "--brain.ranked.start_grace_s=60",
                                   "--accounts.starting_kr=500"],

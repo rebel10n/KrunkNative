@@ -302,6 +302,10 @@ void sh_listings_of(SocialSession *s, const cJSON *f); /* "uml" */
 void sh_blackm_buy(SocialSession *s, const cJSON *f);  /* "pbm" */
 void economy_init(Brain *b);     /* trade offer expiry + idempotency key cleanup timer */
 void economy_shutdown(Brain *b);
+/* v10.0.2 one-time signup perks (rewards.c): the grant right after a registration ("prr"), the premium sweep */
+void rewards_after_register(SocialSession *s);
+void rewards_init(Brain *b);
+void rewards_shutdown(Brain *b);
 void sh_mail_read_all(SocialSession *s, const cJSON *f); /* "raml" */
 void sh_upload_map(SocialSession *s, const cJSON *f);    /* "uploadM" (creations.c) */
 void sh_edit_map(SocialSession *s, const cJSON *f);      /* "edMp" */
@@ -321,6 +325,7 @@ void sh_medals(SocialSession *s, const cJSON *f);        /* "mdl" */
 /* v7.1.4 seasons and the Battle Pass (season.c) */
 void sh_bp_data(SocialSession *s, const cJSON *f);       /* "bpdl" */
 void sh_bp_claim(SocialSession *s, const cJSON *f);      /* "bpclm" */
+void sh_bp_claim_all(SocialSession *s, const cJSON *f);  /* v10 "bpclmAll" */
 void sh_bp_buy(SocialSession *s, const cJSON *f);        /* "xstbp" (KR) */
 void sh_bp_skip(SocialSession *s, const cJSON *f);       /* "xstbpl" (KR) */
 void sh_season_stats(SocialSession *s, const cJSON *f);  /* "sst" */
