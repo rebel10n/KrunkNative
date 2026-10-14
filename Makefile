@@ -154,6 +154,21 @@ run-strike: build ## Run the debug client as Krunker Strike (runtime --flavor; A
 server-strike: build ## Run the debug server as Krunker Strike (runtime --flavor; ARGS=)
 	cd $(DEBUG_DIR) && ./$(SERVER_BIN) --flavor strike $(ARGS)
 
+# strike-dist builds a Release tree whose compile-time DEFAULT flavor is Strike
+# (-DKRUNKNATIVE_FLAVOR=strike via the strike-release preset) and packages it with the
+# base release tooling (tools/release/package-server.sh, package-client.sh), unchanged.
+# The binaries report "Krunker Strike" (flavor_display_name()); every file name, archive
+# name and identifier stays krunknative. The base release path is untouched.
+STRIKE_RELEASE_DIR := cmake-build-strike-release
+STRIKE_DIST        ?= dist/strike
+.PHONY: strike-release strike-dist
+strike-release: ## Build the Krunker Strike-defaulted Release client + server into cmake-build-strike-release
+	@$(call CONFIGURE,strike-release,$(STRIKE_RELEASE_DIR))
+	$(CMAKE) --build $(STRIKE_RELEASE_DIR) --parallel $(JOBS) --target server_bin client_bin
+
+strike-dist: strike-release ## Krunker Strike dedicated-server + client packages in dist/strike/ (compile-time flavor)
+	tools/release/strike-dist.sh $(STRIKE_RELEASE_DIR) $(STRIKE_DIST)
+
 SERVER_DIST ?= dist/server
 PREFIX      ?= /opt/krunknative
 server-dist: release ## Dedicated server bundle in dist/server/ (server_bin + maps + server.cfg): copy it anywhere and run ./server_bin

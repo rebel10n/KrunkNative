@@ -22,6 +22,13 @@
       "cacheVariables": { "KRUNKNATIVE_FLAVOR": "strike" }
     },
     {
+      "name": "strike-release",
+      "displayName": "Krunker Strike (Release, flavor=strike)",
+      "inherits": "release",
+      "binaryDir": "${sourceDir}/cmake-build-strike-release",
+      "cacheVariables": { "KRUNKNATIVE_FLAVOR": "strike" }
+    },
+    {
       "name": "web",
       "displayName": "Web (Emscripten, Release)",
       "binaryDir": "${sourceDir}/cmake-build-web",
@@ -40,6 +47,7 @@
     { "name": "debug", "configurePreset": "debug" },
     { "name": "release", "configurePreset": "release" },
     { "name": "strike", "configurePreset": "strike" },
+    { "name": "strike-release", "configurePreset": "strike-release" },
     { "name": "web", "configurePreset": "web" },
     { "name": "web-debug", "configurePreset": "web-debug" }
   ],
