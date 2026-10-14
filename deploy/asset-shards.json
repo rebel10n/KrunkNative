@@ -15,7 +15,7 @@
     "live: false until assets.krunk.io / assets1.krunk.io are the Pages custom domains (runbook): the page",
     "and the manifest route by shard only then; before, they use the pages.dev names for tests only."
   ],
-  "live": false,
+  "live": true,
   "max_files": 16000,
   "download": "https://dl.krunk.io/",
   "kru_only": ["/updates/"],
