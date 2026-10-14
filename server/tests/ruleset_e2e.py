@@ -1,30 +1,24 @@
 #!/usr/bin/env python3
-"""The version toggle on server_bin (doc/v10/version-toggle.md, shared/include/ruleset.h).
+"""Krunker v10.0.2 is the only version (doc/v7/decisions.md, shared/include/ruleset.h): server_bin
+and client_bin play it with no choice.
 
   python3 -I server/tests/ruleset_e2e.py BUILD_DIR      (run from the repository root)
 
 No database or coordinator: standalone server_bin processes from generated server.cfg files.
-  1. a default server (no ruleset key) plays v7: INIT is 18 bytes with ruleset 2 (RulesetId
-     V7_1_4 + 1); a HELLO without the ruleset mask (every build before the toggle) plays there.
-  2. `ruleset v10` in server.cfg (and --ruleset): INIT carries 3; the log names Krunker v10.0.2;
-     the server-info query answers "ruleset":"v10"; a peer whose HELLO has no mask (v7 only) is
-     refused with ERROR 004010; a peer announcing v10 (mask bit 2) spawns.
-  3. an unknown ruleset (`--ruleset v3`) stops server_bin with exit code 2.
-  4. client_bin (headless, Game version v7 saved) joins the v10 server: it adopts v10 for the
-     session ("[ruleset] the server plays Krunker v10.0.2"), plays, and its console `ruleset`
-     reports v10 playing / v7 saved; offline with v10 saved the sandbox plays v10.
-  5. the v3.1.1 menu page (ui/v3, client/include/ruleset_ui.h): with v7 saved the page is ui/'s
-     (v7 DOM markers); the console `ruleset v3` saves v3 (knRuleset); the next start loads
-     ui/v3/index.html (v3.1.1 markers present, v7 ones absent), says that v3.1.1 gameplay is not
-     ported (log + notice), plays offline on the v7.1.4 ruleset (console: "Playing Krunker v7.1.4
-     (v7) offline", setting and page v3.1.1), and writes a menu and an in-game frame.
+  1. a default server plays v10: the log says so, INIT is 18 bytes with ruleset 3 (the wire id the
+     version toggle gave v10.0.2), the server-info query answers "ruleset":"v10"; nothing a client
+     sends is refused for its version: a HELLO without the ruleset mask (net-bridge, old builds) and
+     one with the v7 bit only both spawn.
+  2. the version toggle's knobs are gone: server.cfg `ruleset v7` is ignored with an error line and
+     the server still plays v10; `--ruleset` is not an option (exit 2).
+  3. client_bin (headless) with a stale knRuleset "v7" saved: it logs Krunker v10.0.2, removes the
+     entry, has no `ruleset` console command, plays offline, and joins the server and plays there.
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
 import json
 import os
 import shutil
 import socket
-import struct
 import subprocess
 import sys
 import tempfile
@@ -38,7 +32,7 @@ PORTS = kn_proto.free_ports(3)
 CLIENT_TIMEOUT = 90
 WORK = tempfile.mkdtemp(prefix="kn-ruleset-e2e-", dir=os.path.expanduser("~/.cache"))
 INIT, ERROR, SPAWN = 2, 30, 4
-MASK_V7, MASK_V10 = 1 << 1, 1 << 2
+MASK_V7 = 1 << 1
 results = []
 procs = []
 
@@ -97,19 +91,18 @@ def spawned(c):
     return False
 
 
-def refused(c, code):
-    c.read(timeout=3)
-    return any(t == ERROR and kn_proto.error_info(p)[1] == code for t, p in c.packets)
+def read_log(path):
+    time.sleep(0.3)
+    with open(path, errors="replace") as f:
+        return f.read()
 
 
-def run_client(name, args, script, saved=None, cfg_name=None):
-    """client_bin headless with an input script and a private config (cfg_name: another run's,
-    to see what it saved); returns its log text."""
-    cfg = os.path.join(WORK, f"{cfg_name or name}-cfg")
+def run_client(name, args, script):
+    """client_bin headless with an input script, a private config and a stale knRuleset "v7"."""
+    cfg = os.path.join(WORK, f"{name}-cfg")
     os.makedirs(os.path.join(cfg, "krunknative"), exist_ok=True)
-    if saved:
-        with open(os.path.join(cfg, "krunknative", "knRuleset.json"), "w") as f:
-            f.write(saved)
+    with open(os.path.join(cfg, "krunknative", "knRuleset.json"), "w") as f:
+        f.write("v7")
     script_path = os.path.join(WORK, f"{name}.script")
     with open(script_path, "w") as f:
         f.write(script)
@@ -128,97 +121,52 @@ def run_client(name, args, script, saved=None, cfg_name=None):
             p.kill()
             p.wait()
             check(f"{name}: client_bin finished its script", False, log)
+    stale = os.path.exists(os.path.join(cfg, "krunknative", "knRuleset.json"))
     with open(log, errors="replace") as f:
-        return f.read()
+        return f.read(), stale
 
 
 def main():
     with open(os.path.join(WORK, "none.json"), "w") as f:
         f.write("{}")
-    # 1. default: v7
+    # 1. the default (and only) ruleset
     p, log = start_server(0, "")
-    check("v7 server up", wait_port(PORTS[0]))
-    c, init = connect(PORTS[0], [1, 3, 1])  # a HELLO from before the toggle (no mask)
-    check("v7 INIT: 18 bytes, ruleset 2 (v7.1.4)", init is not None and len(init) == 18 and init[17] == 2, repr(init and init[:18]))
-    check("v7: an old HELLO plays", spawned(c))
+    check("server up", wait_port(PORTS[0]))
+    c, init = connect(PORTS[0], [1, 3, 1])  # no ruleset mask: net-bridge, builds before the toggle
+    check("INIT: 18 bytes, ruleset 3 (v10.0.2)", init is not None and len(init) == 18 and init[17] == 3, repr(init and init[:18]))
+    check("a HELLO without the mask plays", spawned(c))
+    c.close()
+    c, init = connect(PORTS[0], [1, 4, 1, MASK_V7])  # a version-toggle build set to v7.1.4
+    check("a HELLO announcing v7.1.4 only is not refused", spawned(c) and not any(t == ERROR for t, _ in c.packets))
     c.close()
     info = query(PORTS[0])
-    check("v7 server-info ruleset", info.get("ruleset") == "v7", str(info.get("ruleset")))
+    check("server-info ruleset v10", info.get("ruleset") == "v10", str(info.get("ruleset")))
+    check("the log says Krunker v10.0.2", "Plays Krunker v10.0.2" in read_log(log))
 
-    # 2. ruleset v10 (server.cfg)
-    p, log = start_server(1, "ruleset v10\n")
-    check("v10 server up", wait_port(PORTS[1]))
-    old, init = connect(PORTS[1], [1, 3, 1])
-    check("v10 INIT ruleset 3 (v10.0.2)", init is not None and len(init) >= 18 and init[17] == 3, repr(init and init[:18]))
-    check("v10: a v7-only peer is refused (004010)", refused(old, "004010"))
-    old.close()
-    new, init = connect(PORTS[1], [1, 4, 1, MASK_V7 | MASK_V10])
-    check("v10: a peer announcing v10 spawns", spawned(new))
-    new.close()
-    info = query(PORTS[1])
-    check("v10 server-info ruleset", info.get("ruleset") == "v10", str(info.get("ruleset")))
-    time.sleep(0.3)
-    with open(log) as f:
-        text = f.read()
-    check("v10 log names the ruleset", "Ruleset Krunker v10.0.2 (v10)" in text)
-
-    # 3. --ruleset v3: not built
-    p, log = start_server(2, "", ("--ruleset", "v3"))
+    # 2. no choice: server.cfg `ruleset` is ignored, --ruleset is no option
+    p1, log1 = start_server(1, "ruleset v7\n")
+    check("server.cfg ruleset v7: up", wait_port(PORTS[1]))
+    c, init = connect(PORTS[1], [1, 4, 1, MASK_V7])
+    check("server.cfg ruleset v7: still INIT ruleset 3", init is not None and len(init) == 18 and init[17] == 3, repr(init and init[:18]))
+    c.close()
+    text = read_log(log1)
+    check("server.cfg ruleset v7: ignored with an error line", "gameserver.ruleset is ignored" in text and "Plays Krunker v10.0.2" in text)
+    p2, log2 = start_server(2, "", ("--ruleset", "v10"))
     try:
-        rc = p.wait(timeout=10)
+        rc = p2.wait(timeout=10)
     except subprocess.TimeoutExpired:
         rc = None
-    with open(log) as f:
-        text = f.read()
-    check("--ruleset v3: exit 2", rc == 2 and "Unknown ruleset" in text, f"rc {rc}")
+    check("--ruleset is not an option (exit 2)", rc == 2 and "--ruleset" not in read_log(log2).split("Usage", 1)[-1], f"rc {rc}")
 
-    # 4. the client adopts the server's ruleset; offline it plays the saved one
-    text = run_client("join-v10", ["--connect", f"127.0.0.1:{PORTS[1]}"], "0 play\n2500 state\n2600 con ruleset\n3500 quit\n", saved="v7")
-    check("client: adopts the v10 server's ruleset", "[ruleset] the server plays Krunker v10.0.2: adopting it" in text)
-    check("client: plays there", "connected to server" in text and "weapon=Assault Rifle menu=0" in text)
-    check("client: console ruleset (v10 playing, v7 saved)",
-          "Playing Krunker v10.0.2 (v10)" in text and "Game version setting: v7.1.4" in text)
-    text = run_client("offline-v10", ["--offline", "assets/maps/kanji.json"], "0 play\n1500 con ruleset\n2500 quit\n", saved="v10")
-    check("client: offline plays the saved v10", "Playing Krunker v10.0.2 (v10) offline" in text)
-
-    # 5. the v3.1.1 page: switch to it, restart, play
-    text = run_client("switch-v3", ["--offline", "assets/maps/kanji.json"],
-                      "0 play\n1000 vis @page merchHolder killCardHolder genericPop bottomLeftHealthBar\n1200 con ruleset v3\n"
-                      "1800 con ruleset\n2400 quit\n", saved="v7")
-    vis = vis_line(text, "@page")
-    check("v7 saved: ui/'s page (v7 markers, no v3.1.1 ones)",
-          vis.get("merchHolder") == "-" and vis.get("killCardHolder") == "-" and vis.get("genericPop") in ("0", "1")
-          and vis.get("bottomLeftHealthBar") in ("0", "1"), str(vis))
-    check("console `ruleset v3` saves v3.1.1", "[ruleset] saved Krunker v3.1.1 (v3)" in text
-          and "Game version setting: v3.1.1, menu page: v7.1.4" in text, "")
-    saved = os.path.join(WORK, "switch-v3-cfg", "krunknative", "knRuleset.json")
-    check("knRuleset storage holds v3", os.path.exists(saved) and "v3" in open(saved).read())
-    menu_png, game_png = os.path.join(WORK, "v3-menu.png"), os.path.join(WORK, "v3-game.png")
-    text = run_client("offline-v3", ["--offline", "assets/maps/kanji.json"],
-                      f"0 menu\n600 vis @page merchHolder killCardHolder confPop genericPop bottomLeftHealthBar menuWindow\n"
-                      f"700 shot {menu_png}\n900 play\n2000 state\n2200 shot {game_png}\n2400 con ruleset\n3000 quit\n",
-                      cfg_name="switch-v3")
-    check("v3 saved: startup loads ui/v3", "[ruleset] menu page: ui/v3 (Krunker v3.1.1)" in text)
-    vis = vis_line(text, "@page")
-    check("v3 page DOM (v3.1.1 markers present, v7 ones absent)",
-          vis.get("merchHolder") in ("0", "1") and vis.get("killCardHolder") in ("0", "1") and vis.get("confPop") in ("0", "1")
-          and vis.get("genericPop") == "-" and vis.get("bottomLeftHealthBar") == "-" and vis.get("menuWindow") in ("0", "1"), str(vis))
-    check("v3: says its gameplay is not ported (log + notice)",
-          "plays the Krunker v7.1.4 ruleset (v3.1.1 gameplay is not ported yet)" in text
-          and "[ruleset] offline: Krunker v3.1.1 gameplay is not ported yet: games play Krunker v7.1.4 rules" in text)
-    check("v3: plays offline on the v7.1.4 ruleset",
-          "Playing Krunker v7.1.4 (v7) offline" in text and "Game version setting: v3.1.1, menu page: v3.1.1" in text
-          and "weapon=Assault Rifle menu=0" in text)
-    check("v3: menu and in-game frames written", all(os.path.exists(p) and os.path.getsize(p) > 10000 for p in (menu_png, game_png)),
-          f"{menu_png} {game_png}")
-
-
-def vis_line(text, label):
-    """The ids of the first `vis <label> ...` probe line: {id: "1" | "0" | "-"}."""
-    for line in text.splitlines():
-        if line.startswith("[input_script] vis ") and f" {label} " in line + " ":
-            return dict(tok.split("=", 1) for tok in line.split()[3:] if "=" in tok)
-    return {}
+    # 3. the client: no picker, no console command, plays offline and online
+    text, stale = run_client("offline", ["--offline", "assets/maps/kanji.json"], "0 play\n1500 state\n1600 con help ruleset\n2500 quit\n")
+    check("client: logs Krunker v10.0.2", "[client] Krunker v10.0.2" in text)
+    check("client: the stale knRuleset entry is removed", not stale)
+    check("client: no `ruleset` console command", "unknown command: ruleset" in text)
+    check("client: plays offline", "weapon=Assault Rifle menu=0" in text)
+    check("client: no version notices", "[ruleset]" not in text and "Game version" not in text)
+    text, _ = run_client("join", ["--connect", f"127.0.0.1:{PORTS[0]}"], "0 play\n2500 state\n3500 quit\n")
+    check("client: joins the server and plays", "connected to server" in text and "weapon=Assault Rifle menu=0" in text)
 
 
 try:

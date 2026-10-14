@@ -49,7 +49,6 @@ typedef struct {
 } TriggerV7Action;
 
 extern const char *const g_trigger_v7_events[TRIGGER_V7_EVENT_COUNT];
-// The v10.0.2 rows follow the v7 ones (condition 12, actions 72-74): which a map may use is its
-// dialect's (map_dialect_condition_count / map_dialect_action_count, shared/include/map_dialect.h).
+// The v10.0.2 rows follow the v7 ones (condition 12, actions 72-74); maps may use them all.
 extern const TriggerV7Condition g_trigger_v7_conditions[TRIGGER_V10_CONDITION_COUNT];
 extern const TriggerV7Action g_trigger_v7_actions[TRIGGER_V10_ACTION_COUNT];

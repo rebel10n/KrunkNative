@@ -22,5 +22,5 @@
     "clientChrome": true
   },
   "frames": 3,
-  "note": "ui/v10 Settings, basic General: the Game version row (how a player switches back to v7.1.4)"
+  "note": "ui/v10 Settings, basic General (with the client chrome)"
 }

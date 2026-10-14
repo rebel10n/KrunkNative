@@ -100,8 +100,8 @@ typedef struct ImageCache ImageCache;
 /* `ui_dir` is the document root ("../ui/", "./ui/", "/ui/"); a trailing slash
  * is added when missing.  Returns NULL only on allocation failure. */
 ImageCache *image_cache_create(const char *ui_dir);
-/* Page images `ui_dir` lacks are read from `dir` (ui/ for a page tree under it: ui/v3, ui/v10, whose
- * pages show ui/'s v7.1.4 window markup); NULL / "" = none. */
+/* Page images `ui_dir` lacks are read from `dir` (ui/ for a page tree under it: ui/v10, whose pages
+ * still show C UI markup with ui/'s v7.1.4 image paths); NULL / "" = none. */
 void image_cache_set_fallback(ImageCache *cache, const char *dir);
 
 /* Deletes every GL texture (the context must be current) and frees the cache. */

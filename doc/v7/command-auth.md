@@ -81,7 +81,7 @@ seats come from the brain's match config.
 
 Every `register_local` command (client/src/ui/ui_console.c:1305-1340) changes client state only:
 help, clear, echo, bind, alias, exec, connect, disconnect, quit, reconnect, offline, sandbox,
-version, ruleset, update, say, status, pos, rot, ping, netinfo, show_navmeshes, tool_snap,
+version, update, say, status, pos, rot, ping, netinfo, show_navmeshes, tool_snap,
 editor (an unsaved local copy of the map), firstperson, and thirdperson (it asks the server,
 which grants or refuses it). `toggle` and `say` send chat lines that the server gates. Every
 command that affects the world or other players is `register_server` (ui_console.c:1342+): it

@@ -287,7 +287,7 @@ static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, co
     }
     char region[64] = "", game[MM_GAME_ID_MAX] = "", dq[512] = "", version[32] = "", proto[16] = "", ruleset[8] = "";
     kn_http_query_get(req, "region", region, sizeof(region));
-    kn_http_query_get(req, "ruleset", ruleset, sizeof(ruleset)); /* the client's Krunker version (ruleset.h), "" = v7 */
+    kn_http_query_get(req, "ruleset", ruleset, sizeof(ruleset)); /* the client's Krunker version (ruleset.h), "" = v10 */
     kn_http_query_get(req, "proto", proto, sizeof(proto)); /* the client's protocol "M.m" */
     kn_http_query_get(req, "game", game, sizeof(game));
     if (kn_http_query_get(req, "dataQuery", dq, sizeof(dq)) > 0 && mm_settings()->policy.require_version) {

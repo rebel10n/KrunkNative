@@ -1,7 +1,7 @@
 """Krunker static menu/HUD images (``make ui-import`` step, loaded by import.py).
 
-Copies every file listed in the manifest (``menu-assets-v7.txt`` for ``--ref v7``,
-``menu-assets.txt`` for v3.1.1) from the reference ``public/`` tree into ``ui/`` at the
+Copies every file listed in the manifest (``menu-assets-v7.txt``) from the reference
+``public/`` tree into ``ui/`` at the
 same relative path, byte-identical (``dest = src`` copies a file the reference serves
 elsewhere). With ``--ref v7`` every local file the imported page itself references
 (``src``/``href``/``url()`` of ``ui/index.html``, ``ui/social.html``, the stylesheets and
@@ -12,15 +12,15 @@ byte-identical site files (stylesheets, fonts, the changelog); ``{a..b[..step]}`
 ``{x,y}`` lists expand like the shell's brace expansion.
 
 A listed file missing from the reference tree is an error (the manifest must only name
-files v3.1.1 serves); a missing reference tree is logged and skipped.
+files the reference serves); a missing reference tree is logged and skipped.
 """
 
 import os
 import re
 
-KRUNKER_PUBLIC = "/home/user/jails/kru/src/Krunker_v3.1.1/public"
+KRUNKER_PUBLIC = "/home/user/jails/kru/src/Krunker_v7.1.4/public"
 HERE = os.path.dirname(os.path.abspath(__file__))
-MANIFEST = os.path.join(HERE, "menu-assets.txt")
+MANIFEST = os.path.join(HERE, "menu-assets-v7.txt")
 
 _BRACE = re.compile(r"\{([^{}]*)\}")
 

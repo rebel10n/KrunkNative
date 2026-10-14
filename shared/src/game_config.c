@@ -92,6 +92,8 @@ static const GameConfigOption k_server_options[] = {
     {"bDrop", "Bullet Drop", "World Physics", NULL, GC_BOOL, GC_STORE_BIT, GC_DONT_CHANGE, 0, .def = 0.0f, .offset = 0, .bit = GC_BIT_BULLET_DROP},
     {"healthMlt", "Health Multiplier", "Health & Lives", "Game Logic", GC_NUM, GC_STORE_FLOAT, GC_DONT_CHANGE, 0, .def = 1.0f, .min = 0.1f, .max = 3.0f, .step = 0.1f, .offset = offsetof(GameConfig, health_mlt)},
     {"hitBoxPad", "Hitbox Padding", "Collisions", NULL, GC_NUM, GC_STORE_FLOAT, GC_DONT_CHANGE | GC_HAS_DEF_C, GC_HT(0) | GC_HT(1), .def = 0.6f, .def_c = 0.1f, .min = -2.0f, .max = 2.0f, .step = 0.1f, .offset = offsetof(GameConfig, hitbox_pad)},
+    // v10.0.2 (v10:16931 "Hurtbox Scale", sub "Hitboxes", def 1, 1..2): the hit boxes' scale (shared/src/hitboxes.c)
+    {"hurtboxScale", "Hurtbox Scale", "Hitboxes", NULL, GC_NUM, GC_STORE_FLOAT, GC_DONT_CHANGE, GC_HT(0) | GC_HT(1), .def = 1.0f, .min = 1.0f, .max = 2.0f, .step = 0.1f, .offset = offsetof(GameConfig, hurtbox_scale)},
     {"fiRat", "Fire Rate", "Gameplay Logic", NULL, GC_NUM, GC_STORE_FLOAT, GC_DONT_CHANGE, 0, .def = 1.0f, .min = 0.5f, .max = 2.0f, .step = 0.1f, .offset = offsetof(GameConfig, fire_rate)},
     {"reSpd", "Reload Speed", "Gameplay Logic", NULL, GC_NUM, GC_STORE_FLOAT, GC_DONT_CHANGE, 0, .def = 1.0f, .min = 0.5f, .max = 2.0f, .step = 0.1f, .offset = offsetof(GameConfig, reload_speed)},
     {"hpRegen", "Health Regen", "Health & Lives", NULL, GC_BOOL, GC_STORE_BIT, GC_DONT_CHANGE, 0, .def = 1.0f, .offset = 0, .bit = GC_BIT_HEALTH_REGEN},
@@ -220,6 +222,8 @@ static const GameConfigOption k_class_options[] = {
     {"regenDelay", "Regen Delay", NULL, NULL, GC_NUM, GC_STORE_EXT_FLOAT, 0, 0, .def = 0.0f, .min = 0.0f, .max = 10000.0f, .step = 1.0f, .cat = -1, .offset = offsetof(ClassOverrides, regen_delay), .bit = 0, .unit = U_MS},
     {"hbS", "Hitbox Scale", NULL, NULL, GC_NUM, GC_STORE_CLS_FLOAT, GC_HAS_DEF, 0, .def = 0.0f, .min = 0.0f, .max = 20.0f, .step = 0.1f, .cat = 1, .offset = offsetof(ClassConfig, hitbox_pad_w), .bit = 0, .unit = U_SAME},
     {"hbH", "Hitbox Height", NULL, NULL, GC_NUM, GC_STORE_CLS_FLOAT, GC_HAS_DEF, 0, .def = 0.0f, .min = 0.0f, .max = 20.0f, .step = 0.1f, .cat = 1, .offset = offsetof(ClassConfig, hitbox_pad_h), .bit = 0, .unit = U_SAME},
+    // v10.0.2 (v10:17699 the class "Hurtbox Scale", sub "Hitbox", cat 1)
+    {"hurtboxScale", "Hurtbox Scale", NULL, NULL, GC_NUM, GC_STORE_CLS_FLOAT, GC_HAS_DEF, 0, .def = 1.0f, .min = 1.0f, .max = 2.0f, .step = 0.1f, .cat = 1, .offset = offsetof(ClassConfig, hurtbox_scale), .bit = 0, .unit = U_SAME},
     {"jpC", "Jump Cooldown", NULL, NULL, GC_NUM, GC_STORE_EXT_FLOAT, GC_HAS_DEF, 0, .def = 1.0f, .min = 0.1f, .max = 3.0f, .step = 0.1f, .cat = 1, .offset = offsetof(ClassOverrides, jump_cooldown), .bit = 0, .unit = U_SAME},
     {"disJump", "Disable Jump", NULL, NULL, GC_BOOL, GC_STORE_MOVE, GC_HAS_DEF, 0, .def = 0.0f, .cat = 1, .offset = 0, .bit = CM_DISABLE_JUMP, .unit = U_SAME},
     {"infJ", "Infinite Jump", NULL, NULL, GC_BOOL, GC_STORE_MOVE, GC_HAS_DEF, 0, .def = 0.0f, .cat = 1, .offset = 0, .bit = CM_INFINITE_JUMP, .unit = U_SAME},
@@ -352,48 +356,17 @@ static const unsigned char k_effect_keys[] = {
     0xf, // 9 Strength
 };
 
-// Krunker v10.0.2 adds one server and one class option (v10:16931 "Hurtbox Scale", sub "Hitboxes",
-// def 1, 1..2; v10:17699 the class "Hurtbox Scale", sub "Hitbox", cat 1): the hit boxes' scale
-// (shared/src/hitboxes.c). The v10 ruleset's tables are v7's with them inserted after hitBoxPad /
-// hbH, built once; v7's tables are k_server_options / k_class_options unchanged.
-static const GameConfigOption k_server_hurtbox =
-    {"hurtboxScale", "Hurtbox Scale", "Hitboxes", NULL, GC_NUM, GC_STORE_FLOAT, GC_DONT_CHANGE, GC_HT(0) | GC_HT(1), .def = 1.0f, .min = 1.0f, .max = 2.0f, .step = 0.1f, .offset = offsetof(GameConfig, hurtbox_scale)};
-static const GameConfigOption k_class_hurtbox =
-    {"hurtboxScale", "Hurtbox Scale", NULL, NULL, GC_NUM, GC_STORE_CLS_FLOAT, GC_HAS_DEF, 0, .def = 1.0f, .min = 1.0f, .max = 2.0f, .step = 0.1f, .cat = 1, .offset = offsetof(ClassConfig, hurtbox_scale), .bit = 0, .unit = U_SAME};
 #define GC_COUNT(a) (sizeof(a) / sizeof((a)[0]))
-static GameConfigOption g_server_options_v10[GC_COUNT(k_server_options) + 1];
-static GameConfigOption g_class_options_v10[GC_COUNT(k_class_options) + 1];
 
-static void gc_insert_after(GameConfigOption *out, const GameConfigOption *in, const size_t count, const char *after, const GameConfigOption *extra) {
-    size_t n = 0;
-    for (size_t i = 0; i < count; i++) {
-        out[n++] = in[i];
-        if (!strcmp(in[i].var, after)) out[n++] = *extra;
-    }
-}
-
-static int gc_v10_tables(void) {
-    static int built;
-    if (ruleset_current()->id != RULESET_V10_0_2) return 0;
-    if (!built) {
-        gc_insert_after(g_server_options_v10, k_server_options, GC_COUNT(k_server_options), "hitBoxPad", &k_server_hurtbox);
-        gc_insert_after(g_class_options_v10, k_class_options, GC_COUNT(k_class_options), "hbH", &k_class_hurtbox);
-        built = 1;
-    }
-    return 1;
-}
-
-// The current ruleset's serverConfig / classConfig rows.
+// The serverConfig / classConfig rows.
 static const GameConfigOption *gc_server_options(size_t *count) {
-    const int v10 = gc_v10_tables();
-    *count = v10 ? GC_COUNT(g_server_options_v10) : GC_COUNT(k_server_options);
-    return v10 ? g_server_options_v10 : k_server_options;
+    *count = GC_COUNT(k_server_options);
+    return k_server_options;
 }
 
 static const GameConfigOption *gc_class_options(size_t *count) {
-    const int v10 = gc_v10_tables();
-    *count = v10 ? GC_COUNT(g_class_options_v10) : GC_COUNT(k_class_options);
-    return v10 ? g_class_options_v10 : k_class_options;
+    *count = GC_COUNT(k_class_options);
+    return k_class_options;
 }
 
 static const struct {
@@ -411,12 +384,8 @@ const GameConfigOption *game_config_options(const GameConfigTable table, size_t 
         if (count) *count = 0;
         return NULL;
     }
-    size_t n = k_tables[table].count;
-    const GameConfigOption *options = k_tables[table].table;
-    if (table == GAME_CONFIG_SERVER) options = gc_server_options(&n);
-    if (table == GAME_CONFIG_CLASS) options = gc_class_options(&n);
-    if (count) *count = n;
-    return options;
+    if (count) *count = k_tables[table].count;
+    return k_tables[table].table;
 }
 
 const GameConfigOption *game_config_find_option(const GameConfigTable table, const char *var) {
@@ -1173,7 +1142,7 @@ static void gc_apply_weapons(Game *game, GameConfigState *st, const cJSON *weps)
     cJSON_ArrayForEach(entry, weps) {
         // a host config saved before the ruleset seam keys the KN weapons 29-31 (weapons.h)
         const int raw = gc_entry_id(entry, st->weapon_count);
-        const int id = raw < 0 ? -1 : weapon_id_from_legacy(raw, game->rules ? game->rules->krunker_weapon_count : WEAPON_COUNT);
+        const int id = raw < 0 ? -1 : weapon_id_from_legacy(raw, game_ruleset(game)->krunker_weapon_count);
         if (id < 0 || (size_t) id >= st->weapon_count || !cJSON_IsObject(entry) || !st->base_weapons[id]) continue;
         Weapon *w = &st->weapons[id];
         int touched = game->weapons[id] == w;

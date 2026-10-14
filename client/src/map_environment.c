@@ -12,7 +12,6 @@
 #include <sky.h>
 #include <shadow.h>
 #include <ocean.h>
-#include <map_dialect.h>
 #include <math.h>
 #include <string.h>
 
@@ -27,7 +26,7 @@ static void env_output(RenderLighting *l, const MapEnvironment *env) {
     l->output_encoding = env->output_encoding;
     // v10.0.2 (THREE r186) has no legacy lights: "correctLights" is still parsed but every map
     // renders with physical lights (renderer init L199044-199061), their intensities x PI (basic.c)
-    l->correct_lights = env->correct_lights || map_dialect_current() >= MAP_DIALECT_V10;
+    l->correct_lights = 1;
 }
 
 void map_environment_map_loaded(const Map *map, const GameMode *mode) {

@@ -97,6 +97,33 @@ static void check_value(const char *what, const GameConfigTable table, const voi
     }
 }
 
+// The config's own value of weps / cls entry `id`'s `key` (the request, after setupGameConfig)
+static int requested(const cJSON *cfg, const char *list, const int id, const char *key) {
+    char index[16];
+    snprintf(index, sizeof(index), "%d", id);
+    const cJSON *entry = cJSON_GetObjectItem(cJSON_GetObjectItem(cfg, list), index);
+    return entry && cJSON_GetObjectItemCaseSensitive(entry, key);
+}
+
+// A weapon / class value the config leaves alone is the base table's: v7.1.4's setupGameConfig
+// produced the expectations, and Krunker v10.0.2 (the ruleset) rebalanced some defaults
+// (doc/v10/gameplay.md sections 4-5), so those are compared with the v10 base entry instead.
+static void check_entry(const char *what, const GameConfigTable table, const void *entry, const void *base, const cJSON *cfg,
+                        const char *list, const int id, const cJSON *expect) {
+    double base_num = 0.0;
+    const char *str = NULL;
+    if (!requested(cfg, list, id, expect->string) && cJSON_IsNumber(expect) &&
+        game_config_value(table, base, expect->string, &base_num, &str) && !near(base_num, expect->valuedouble)) {
+        cJSON *v10 = cJSON_CreateNumber(base_num);
+        v10->string = expect->string;
+        check_value(what, table, entry, v10);
+        v10->string = NULL;
+        cJSON_Delete(v10);
+        return;
+    }
+    check_value(what, table, entry, expect);
+}
+
 static void check_case(const cJSON *c, const cJSON *map) {
     const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(c, "name"));
     const int host = cJSON_GetObjectItem(c, "host")->valueint;
@@ -150,12 +177,14 @@ static void check_case(const cJSON *c, const cJSON *map) {
     cJSON_ArrayForEach(entry, cJSON_GetObjectItem(c, "weps")) {
         const int id = atoi(entry->string);
         snprintf(what, sizeof(what), "%s: weapon %d", name, id);
-        cJSON_ArrayForEach(expect, entry) check_value(what, GAME_CONFIG_WEAPON, game.weapons[id], expect);
+        cJSON_ArrayForEach(expect, entry)
+            check_entry(what, GAME_CONFIG_WEAPON, game.weapons[id], rules_weapon(id), cfg, "weps", id, expect);
     }
     cJSON_ArrayForEach(entry, cJSON_GetObjectItem(c, "cls")) {
         const int id = atoi(entry->string);
         snprintf(what, sizeof(what), "%s: class %d", name, id);
-        cJSON_ArrayForEach(expect, entry) check_value(what, GAME_CONFIG_CLASS, &game.classes[id], expect);
+        cJSON_ArrayForEach(expect, entry)
+            check_entry(what, GAME_CONFIG_CLASS, &game.classes[id], &rules_classes()[id], cfg, "cls", id, expect);
     }
     cJSON_ArrayForEach(entry, cJSON_GetObjectItem(c, "prks")) {
         const int id = atoi(entry->string);
@@ -179,9 +208,9 @@ static void test_tables(void) {
     printf("option tables...\n");
     size_t n = 0;
     game_config_options(GAME_CONFIG_SERVER, &n);
-    CHECK(n == 90, "serverConfig has %zu entries, v7 85 + KrunkNative knOmWeps (Object Manager) + knTPCam (third person) + knClanWar / knClanA / knClanB", n);
+    CHECK(n == 91, "serverConfig has %zu entries, v7 85 + v10 hurtboxScale + KrunkNative knOmWeps (Object Manager) + knTPCam (third person) + knClanWar / knClanA / knClanB", n);
     game_config_options(GAME_CONFIG_CLASS, &n);
-    CHECK(n == 79, "classConfig has %zu entries, v7 79", n);
+    CHECK(n == 80, "classConfig has %zu entries, v7 79 + v10 hurtboxScale", n);
     game_config_options(GAME_CONFIG_WEAPON, &n);
     CHECK(n == 48, "weaponConfig has %zu entries, v7 48", n);
     game_config_options(GAME_CONFIG_EFFECT, &n);

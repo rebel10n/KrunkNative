@@ -90,11 +90,10 @@ void mode_trigger_pick_simon(Game*, float);
 void mode_trigger_lock_seekers(Game*, float);
 void mode_trigger_pick_boss(Game*, float);
 void mode_trigger_pick_stalker(Game*, float);
-// v10.0.2 Stalker rework (the v10 mode table, shared/src/rules/v10/modes_v10.c)
-void mode_trigger_pick_stalker_v10(Game*, float);
-void mode_kill_stalk_v10(Game*, Player *victim, Player *killer, int weapon_id);
-void mode_update_stalk_v10(Game*, float delta);
-float mode_melee_stalk_v10(Game*, Player *dealer, Player *victim, float damage);
+// v10.0.2 Stalker rework (shared/src/modes/modes.c MODE_ID_STALK)
+void mode_kill_stalk(Game*, Player *victim, Player *killer, int weapon_id);
+void mode_update_stalk(Game*, float delta);
+float mode_melee_stalk(Game*, Player *dealer, Player *victim, float damage);
 void mode_trigger_pick_traitors(Game*, float);
 void mode_trigger_def_start(Game*, float);
 void mode_trigger_lives_start(Game*, float);

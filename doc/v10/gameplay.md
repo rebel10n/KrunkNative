@@ -112,8 +112,9 @@ v10 (players.shoot v10:172884-172906, melee v10:172468, projectiles v10:180106-1
 
 Port: `shared/src/hitboxes.c` (`shared/include/hitboxes.h`) is the hierarchy and the ray in plain C over
 the lag-comp state (PlayerStoredState carries sV, stepChase, xD, yD, cV and the weapon, as v10's storeState),
-used by hitscan (`combat_trace`) and projectiles (`projectile_cast`) when the game's ruleset has
-`hit_model == HIT_MODEL_V10` and the mode is not Prop Hunt (`hitboxes_active`). Melee keeps the padded AABB in
+used by hitscan (`combat_trace`), projectiles (`projectile_cast`) and the Piss stream in every mode but
+Prop Hunt (`hitboxes_active`). The broad phase is v10's lineInRect (`!(tmax < 0) && !(tmin > tmax) && tmin`,
+then `<= 1`): a ray or step that starts within 5 of the player passes it. Melee keeps the padded AABB in
 v10 too (v10:172468). Arms are torsoshot, so an arm hit is body damage. Not ported: the arms' viewmodel sway
 reads client animation values off the live player (inspect, lean, swap, jump / land / idle bob, recoil tweens):
 taken as 0, they move the arm boxes by tenths of a unit; and v10 keeps the last weapon's arm boxes per player id
@@ -237,17 +238,17 @@ settings dr/aDr/tL/... are the v7 Vehicle movement preset (movement.js:472), not
 
 ## 9. Port status (gameplay)
 
-Everything below runs under the v10.0.2 ruleset only (`shared/include/ruleset.h`); the v7.1.4 ruleset keeps
-v7's tables and rules (checked by the v7 tests: weapons_v7_test, combat_test, proc_input_test, modes_test).
+Krunker v10.0.2 is the only version (doc/v7/decisions.md, user 2026-10-13): everything below is the
+game's one ruleset (`shared/include/ruleset.h`); the v7.1.4 tables and rules are gone.
 
 | item | where | tests |
 |---|---|---|
-| weapon balance (section 5), Boulder 29, Compressor 30, class HP and minRec (section 4), crouchLean 0 (section 1) | `shared/src/rules/v10/` (weapons_rebalance_v10.c, weapons_new_v10.c, classes_v10.c, constants_v10.c) | `weapons_v7_test v10` (the whole table against `shared/tests/data/v10/`, `tools/kref/v10-fixtures.py`), ruleset_test |
-| Boulder gravMlt, Compressor (noDmg, nonObjImpulse, physPull, rShoot) | `shared/src/player.c` (procInputs gravity / fire input, `combat_fire_ray`), `Ruleset.weapon_impulse` | v10_gameplay_test |
-| posed hit boxes, hurtboxScale (game + class options) | `shared/src/hitboxes.c`, `Ruleset.hit_model`, `shared/src/game_config.c` (v10 option rows) | hitboxes_test, combat_test, ruleset_test |
-| modes: Gun Game order, Stalker rework, Raid 25 min, Krank not a party mode | `shared/src/rules/v10/modes_v10.c`, `shared/src/modes/mode_rules.c` (`*_v10`), `shared/src/player.c` (`movement_stalker`) | ruleset_test, v10_gameplay_test |
+| weapon balance (section 5), Boulder 29, Compressor 30, class HP and minRec (section 4), crouchLean 0 (section 1) | `shared/src/rules/v10/` (weapons_rebalance_v10.c, weapons_new_v10.c, classes_v10.c, constants_v10.c) | `weapons_v7_test` (the whole table against `shared/tests/data/v10/`, `tools/kref/v10-fixtures.py`), ruleset_test |
+| Boulder gravMlt, Compressor (noDmg, nonObjImpulse, physPull, rShoot) | `shared/src/player.c` (procInputs gravity / fire input, `combat_fire_ray`) | v10_gameplay_test |
+| posed hit boxes, hurtboxScale (game + class options) | `shared/src/hitboxes.c` (every mode but Prop Hunt), `shared/src/game_config.c` (hurtboxScale rows) | hitboxes_test, combat_test, ruleset_test |
+| modes: Gun Game order, Stalker rework, Raid 25 min, Krank not a party mode | `shared/src/modes/modes.c` (the table), `shared/src/modes/mode_rules.c` / `mode_round.c` (Stalker hooks), `shared/src/player.c` (`movement_stalker`) | ruleset_test, v10_gameplay_test |
 | ranked: x2 KR, no kill streaks, no class XP, needAll 60 s, shutdown 120 s | `Ruleset.ranked`, `Game.is_ranked` (`server/src/accounts.c`), `game_is_ranked`, `rules_reward_mlt` | ruleset_test, v10_gameplay_test |
-| a v10 match on server_bin | `server_bin --ruleset v10` | `server/tests/v10_match_e2e.py` |
+| a v10 match on server_bin | `server_bin` (no version choice) | `server/tests/v10_match_e2e.py` |
 
 Not ported yet: Bombardment without devOnly (KrunkNative has no carpet bomb), the comp-warmup spawn spread 10,
 the proportional battle-pass points and team round wins outside best-of (section 7), raid challenges /

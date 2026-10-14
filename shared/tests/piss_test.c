@@ -302,6 +302,7 @@ int main(void) {
     Player *p = add_player(&game, 1);
     Player *target = add_player(&game, 2);
     Player *third = add_player(&game, 3);
+    stand(third, 40.0f, 0.0f, 0.0f); // out of the stream's line (it may spawn at [0, 0, -15], the target's spot)
     give_piss(p);
     CHECK(p->weapon == rules_weapon(WEAPON_ID_PISS), "the extra slot holds the Piss");
 

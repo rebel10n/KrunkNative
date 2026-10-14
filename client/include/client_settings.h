@@ -28,7 +28,7 @@ void client_settings_startup(Client *client, int *offline);
 // (settings marked "*", Clear Cache & Storage), starts the client again.
 void client_settings_exit(void);
 // Before this process re-executes itself (a relaunch, F5's restart fallback): the environment it
-// set from the settings (brain URL, audio backend, the Game version's page tree) is dropped, so
+// set from the settings (brain URL, audio backend) is dropped, so
 // the next process reads the saved settings again.
 void client_settings_before_exec(void);
 // F5 (game_reload.c): the Client tab's store read again and its live settings applied. Returns
@@ -47,8 +47,5 @@ char *ui_client_settings_tab_html(int searching);
 // A game settings tab with the client's rows added (the Sound tab's Audio Output); NULL =
 // unchanged (malloc'd otherwise).
 char *ui_client_settings_extend_tab(const char *tab);         // the tab body (malloc'd); searching: rows for windows[0].searchList
-// Settings > General "Game version" / console `ruleset` (ruleset_ui.h): saves it, offers a restart
-// when the menu page changes, notifies otherwise.
-void  ui_client_settings_select_ruleset(const char *value);
-// Inline handlers: clientExitPopup(), closeClient(), knClientSet(key, value), knClientAction(name), knSetRuleset(value).
+// Inline handlers: clientExitPopup(), closeClient(), knClientSet(key, value), knClientAction(name).
 int   ui_client_settings_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc);

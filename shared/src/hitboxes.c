@@ -307,17 +307,29 @@ void hitboxes_pose_player(const Player *target, const PlayerStoredState *state, 
 }
 
 int hitboxes_active(const Game *game) {
-    const Ruleset *rules = game && game->rules ? game->rules : ruleset_current();
-    return rules->hit_model == HIT_MODEL_V10 && !(game && game->mode && game->mode->config.prop);
+    return !(game && game->mode && game->mode->config.prop);
+}
+
+// v10's broad test: lineInRect (v10:24029) `!(tmax < 0) && !(tmin > tmax) && tmin` then `<= 1`
+// (v10:172895, 180125). Unlike shared/src/utils.c line_in_rect (-1 unless the entry is ahead), a
+// ray or step that starts inside the box passes (tmin < 0 is truthy): a point-blank shot, and a
+// projectile or Piss stream step that is already within 5 of the player.
+static int broad_in_rect(const vec3 o, const vec3 d, const vec3 lo, const vec3 hi) {
+    const float tx1 = (lo.x - o.x) / d.x, tx2 = (hi.x - o.x) / d.x;
+    const float ty1 = (lo.y - o.y) / d.y, ty2 = (hi.y - o.y) / d.y;
+    const float tz1 = (lo.z - o.z) / d.z, tz2 = (hi.z - o.z) / d.z;
+    const float tmin = fmaxf(fmaxf(fminf(tx1, tx2), fminf(ty1, ty2)), fminf(tz1, tz2));
+    const float tmax = fminf(fminf(fmaxf(tx1, tx2), fmaxf(ty1, ty2)), fmaxf(tz1, tz2));
+    return !(tmax < 0.0f) && !(tmin > tmax) && tmin != 0.0f && tmin <= 1.0f;
 }
 
 int hitboxes_trace_player(const Player *target, const PlayerStoredState *state, const vec3 origin, const vec3 step, const int broad,
                           float *fraction, int *kind) {
     if (broad) { // lineInRect with a fixed padding of 5 (not hitBoxPad), v10:172895 / 180125
         const float half = target->scale + 5.0f;
-        const vec3 box = {half * 2.0f, state->adjusted_height + 5.0f, half * 2.0f};
-        const float t = line_in_rect(origin, step, state->position, box);
-        if (t <= 0.0f || t > 1.0f) return 0;
+        const vec3 lo = {state->position.x - half, state->position.y, state->position.z - half};
+        const vec3 hi = {state->position.x + half, state->position.y + state->adjusted_height + 5.0f, state->position.z + half};
+        if (!broad_in_rect(origin, step, lo, hi)) return 0;
     }
 
     const float range = sqrtf(step.x * step.x + step.y * step.y + step.z * step.z);

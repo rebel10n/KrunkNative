@@ -1,7 +1,6 @@
 #include <shared.h>
 #include <map_catalog.h>
 #include <prefabs.h>
-#include <map_dialect.h> // v7 / v10 prefab ids, texture-id charset (ruleset.h)
 #include <terrain.h> // map_terrain_free (WP-B)
 #include <cJSON.h>
 #include <math.h>
@@ -37,9 +36,9 @@ const int g_rotation_maps[] = {0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
 
 // prefabs.prefabs[i || id || 0] || prefabs.prefabs[0] (v7 map.js generate): a JS array index
 // is a number or its canonical string; anything else (a prefab *name*, 5.5, true) is undefined.
-// The table is the map dialect's: v7 ends at 96 (97 / 98 fall back to CUBE like v7), v10 at 98.
+// The table is v10.0.2's: ids 0-98 (v7.1.4 ended at 96).
 static int map_prefab_index(const cJSON *item) {
-    const int count = map_dialect_prefab_count(map_dialect_current());
+    const int count = PREFAB_COUNT;
     if (cJSON_IsNumber(item)) {
         const double v = cJSON_GetNumberValue(item);
         return v >= 0.0 && v < count && v == (double) (int) v ? (int) v : -1;
@@ -210,11 +209,12 @@ static int map_asset_id(const cJSON *item) {
 }
 
 int map_texture_id(const cJSON *item) {
-    // p && !/[^\d<letters>]+/gim.test(p) ? p : 0 (v7 MapManager.js:889-891, Minimap.js:370; v10 widens the set)
+    // p && !/[^\dtlnesacdgxufqmrpbhv]+/gim.test(p) ? p : 0 (v10 L164733, L159097; v7 MapManager.js:889
+    // had /[^\dtlnesacdgxufq]+/)
     if (cJSON_IsNumber(item)) return (int) cJSON_GetNumberValue(item);
     const char *text = cJSON_GetStringValue(item);
     if (!text || !text[0]) return 0;
-    const char *letters = map_dialect_texture_id_letters(map_dialect_current());
+    static const char letters[] = "tlnesacdgxufqmrpbhv";
     for (const char *c = text; *c; c++) {
         const char lower = (char) (*c >= 'A' && *c <= 'Z' ? *c + 32 : *c);
         if (!(*c >= '0' && *c <= '9') && !strchr(letters, lower)) return 0;
@@ -480,13 +480,11 @@ static void map_parse_generic(Object *object, const cJSON *raw_obj) {
 
     // v10: "dyn" on the canDynamic prefabs (dyn !== undefined ? !!dyn : undefined, L167488 /
     // L167732 / L168320); "mp" on the custom-asset builders (CUSTOM_ASSET, asset TRIGGER: L167718,
-    // L168283). A v7 dialect reads neither.
-    if (map_dialect_current() >= MAP_DIALECT_V10) {
-        const int prefab = map_raw_object_prefab(raw_obj);
-        if (prefab_has_flag(prefab, PF_CANDYNAMIC)) object->dyn = (unsigned char) map_truthy(cJSON_GetObjectItem(raw_obj, "dyn"));
-        const cJSON *mp = cJSON_GetObjectItem(raw_obj, "mp");
-        if ((prefab == PREFAB_CUSTOM_ASSET || prefab == PREFAB_TRIGGER) && cJSON_IsObject(mp)) object->mp = mp;
-    }
+    // L168283)
+    const int prefab = map_raw_object_prefab(raw_obj);
+    if (prefab_has_flag(prefab, PF_CANDYNAMIC)) object->dyn = (unsigned char) map_truthy(cJSON_GetObjectItem(raw_obj, "dyn"));
+    const cJSON *mp = cJSON_GetObjectItem(raw_obj, "mp");
+    if ((prefab == PREFAB_CUSTOM_ASSET || prefab == PREFAB_TRIGGER) && cJSON_IsObject(mp)) object->mp = mp;
 }
 
 // Prefab-specific keys of the v7 prefabs (map.js generate, MapManager builders).
@@ -609,7 +607,7 @@ static void map_parse_environment(MapEnvironment *env, const cJSON *raw, const i
     env->correct_lights = (unsigned char) map_truthy(cJSON_GetObjectItem(raw, "correctLights"));
     // v10 sceneInit: normalBias = isNumber(shadowNB) ? limitMM(shadowNB, 0, 5) : 0 (L201758). The
     // zone data (addEnvironmentZone) has no shadowNB: 0 there.
-    env->shadow_nb = !zone && map_dialect_current() >= MAP_DIALECT_V10 && cJSON_IsNumber(cJSON_GetObjectItem(raw, "shadowNB"))
+    env->shadow_nb = !zone && cJSON_IsNumber(cJSON_GetObjectItem(raw, "shadowNB"))
                          ? map_clampf((float) cJSON_GetNumberValue(cJSON_GetObjectItem(raw, "shadowNB")), 0.0f, 5.0f) : 0.0f;
 }
 
@@ -827,11 +825,9 @@ static void map_parse_top_level(Map *map, const cJSON *raw) {
     item = cJSON_GetObjectItem(raw, "botPaths");
     map->bot_paths = cJSON_IsArray(item) ? item : NULL;
     map_parse_bot_paths(map);
-    if (map_dialect_current() >= MAP_DIALECT_V10) {
-        item = cJSON_GetObjectItem(map->scripts, "shared");
-        map->shared_script = cJSON_IsString(item) ? item : NULL;
-        map_parse_archetypes(map, cJSON_GetObjectItem(raw, "archetypes"));
-    }
+    item = cJSON_GetObjectItem(map->scripts, "shared");
+    map->shared_script = cJSON_IsString(item) ? item : NULL;
+    map_parse_archetypes(map, cJSON_GetObjectItem(raw, "archetypes"));
     item = cJSON_GetObjectItem(raw, "player");
     map->editor_player = cJSON_IsObject(item) ? item : NULL;
 }

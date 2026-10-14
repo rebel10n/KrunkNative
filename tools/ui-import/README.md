@@ -8,8 +8,9 @@ python3 -I tools/ui-import/import.py --ui ui
 ```
 
 `--ref v7` (the default) imports Krunker v7.1.4 (`/home/user/jails/kru/src/Krunker_v7.1.4/public`,
-`--public` overrides); `--ref v3` the former Krunker v3.1.1 import (the sections below marked
-v3.1.1). Outputs are committed to the tree; re-running only rewrites files whose content changed.
+`--public` overrides) into `ui/`; `--ref v10` the live Krunker v10 site into `ui/v10/`, the page
+that replaces `ui/` (Krunker v10.0.2 is the only version: doc/v7/decisions.md). Outputs are
+committed to the tree; re-running only rewrites files whose content changed.
 
 ## Krunker v7.1.4 (`--ref v7`)
 
@@ -83,38 +84,12 @@ v10 content for `assets/` is pinned in `live_assets_v10.lock`
 new files, root `assets-v10` (= `assets/v10/<path>`) for v10 versions of files v7.1.4 has with
 other content.
 
-## Krunker v1.5.6 menu (`--ref v156`)
-
-`make ui-import-v156` (`import.py --ui ui --ref v156`) writes `ui/v156/`, the menu page of
-Settings > General "Game version" = v1.5.6 (menu only; v1.5.6 gameplay is not ported). Provenance
-per file: `ui/v156/README.md`.
-
-| Step | Module | Output |
-|---|---|---|
-| page | `v156_page.py` | `ui/v156/index.html` from v1.5.6's `public/index.html` (scripts, comments, ad / reCAPTCHA tags, favicon + description metas removed; `?build=`/`&v=` stripped; `/` and `./` URLs relative; external links neutralised; our canvas / css / js hooks as in `ui/index.html`, plus `css/kn-v156.css` and the `#popupHolder > #confPop` host `ui_confirm()` draws into), `css/main.css` + `css/material_icons.css` (URLs rewritten), `css/kn-v156.css` (v3.1.1's popup rules, `V3_POPUP_RULES`), our glue files from `ui/`, `windows/versions.txt` |
-| files | `v156_page.py` | every local file the page and its stylesheets reference (`collect_page_refs`), from the v1.5.6 tree; what v1.5.6 itself 404s on is listed |
-| fonts | `import.py` | `material-icons.ttf` next to `micon.woff2` (its ligatures equal v7's: the headers are not regenerated) |
-
-## Krunker v3.1.1 menu page (`make ui-import-v3`)
-
-`make ui-import-v3` (`v3_page.py --ref v3.1.1 --ui ui`, not `import.py`) writes `ui/v3/`, the menu
-page of Settings > General "Game version" = v3.1.1 (menu only; v3.1.1 gameplay is not ported), from
-the `v3.1.1` tag's `ui/` through `git archive`: scripts and `js/` dropped, the hub / editor / viewer
-pages and v3.1.1's window templates left out (ui/'s are shown), and `css/v7-windows.css` generated
-from `ui/css/` for the v7.1.4 window markup the C UI writes. Rerun it after `make ui-import` changes
-`ui/windows/` or `ui/css/`. Details: `ui/v3/README.md`.
-
-## Krunker v3.1.1 (`--ref v3`)
-
 ## What it produces
 
 | Output | Source | Notes |
 |---|---|---|
 | `ui/css/fonts/material-icons.ttf` | every `.woff2` referenced by an `@font-face` in `ui/css/*.css` that exists (today only Material Icons; the Secular One files are missing and skipped) | file name = slug of the rule's `font-family`; an existing loadable `.ttf` is kept unless `--force` |
 | `client/src/html/engine/material_icons_liga.h` | GSUB ligature lookups of the Material Icons woff2 (Google serves the font with `rlig`) | `MaterialIconLiga material_icons_liga[MATERIAL_ICONS_LIGA_COUNT]` = `{name, codepoint, glyph_index}` sorted by name in byte order (+ `MATERIAL_ICONS_LIGA_MAX_NAME`); the format of `gen_liga.py` / what `engine/text.c` consumes |
-| `ui/windows/<id>.html`, `<id>-card.html`, `<id>-item.html`, `<id>-mapcard.html`, `settings-head.html`, `settings-tab-0..5.html` | `tools/ui-import/krunker-windows.js` (`window.KRUNKER_WINDOWS = {...}`; a `ui/js/krunker-windows.js`, if one is put back, takes precedence) | byte-identical HTML strings, UTF-8 |
-| `ui/windows/windows.json` | same | `{"windows": {"<id>": {"header", "sticky", "file", "card"?, "item"?, "mapCard"?, "itemCount"?}}, "settings": {"header", "sticky", "head", "tabs": [6]}}` |
-| `tools/ui-import/krunker-windows.js` | archived copy of the former `ui/js/krunker-windows.js` (deleted from `ui/js/` at the engine cutover) | the source of the window templates; also read by the engine tests in `client/src/html/engine/tests/` |
 
 `gen_liga.py` is the standalone ligature/TTF generator (`--font --header [--ttf]`);
 `import.py` loads it when present so both emit byte-identical headers, and
@@ -124,7 +99,7 @@ falls back to an equivalent built-in writer otherwise. Saved TTFs use
 ## Menu and HUD images
 
 `menu_assets.py` (step of `import.py`, skip with `--no-assets`) copies every file listed
-in `menu-assets.txt` from the v3.1.1 `public/` tree into `ui/` at the same path,
+in `menu-assets-v7.txt` from the v7.1.4 `public/` tree (`v3:` lines: the v3.1.1 tree) into `ui/` at the same path,
 byte-identical: every image the menu page, the window templates and the C UI logic
 (`client/src/ui/`, `client/src/nametags.c`) reference, plus the other byte-identical site
 files (`css/main.css`, `css/material-icons.css`, fonts, `windows/versions.txt =
@@ -211,8 +186,7 @@ ignores user site-packages), i.e. installed system-wide:
 
 ```
 --ui DIR            ui directory (default <repo>/ui)
---ref v7|v3|v10|v156 Krunker reference (default v7; v10 = the live site into <ui>/v10/,
-                    v156 = Krunker v1.5.6's menu page into <ui>/v156/)
+--ref v7|v10         Krunker reference (default v7; v10 = the live site into <ui>/v10/)
 --client-js FILE     v10: the live client script (parsed, never run)
 --public DIR        the reference's public/ tree (default per --ref)
 --viewer-store      also regenerate client/src/viewer/viewer_store_table.c (v7)
@@ -225,5 +199,5 @@ ignores user site-packages), i.e. installed system-wide:
 --no-editor         skip the map editor page
 --no-social         skip the social hub page
 --no-viewer         skip the model viewer page
---no-assets         skip the menu/HUD images (menu-assets.txt)
+--no-assets         skip the menu/HUD images (menu-assets-v7.txt)
 ```

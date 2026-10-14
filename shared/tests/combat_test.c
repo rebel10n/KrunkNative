@@ -1,6 +1,6 @@
 // WP-B combat maths against Krunker v7.1.4 (src/data/players.js, player.js, projectiles.js,
-// effects.js, streaks.js; doc/v7/player-viewer.md 1.2, 1.6): hitbox padding 0.6 / 0.1 + class
-// hbS / hbH, head / leg zones (headMlt, crouch, per-weapon lsMlt, noHeadShot), the charge system
+// effects.js, streaks.js; doc/v7/player-viewer.md 1.2, 1.6) as Krunker v10.0.2 keeps them: hitbox
+// padding 0.6 / 0.1 + class hbS / hbH (the padded AABB v10 traces in Prop Hunt), head / leg zones (headMlt, crouch, per-weapon lsMlt, noHeadShot), the charge system
 // (Crossbow 20 hip / 200 full / overcharge, knife throw ceil(180 d), Charge Rifle 750), status
 // effects, perks, kill streaks (slots, earning, Nuke, Slimer, Juggernaut) and Siphon.
 // Run from the repository root: ./<build>/combat_test
@@ -143,12 +143,11 @@ static void test_hitbox(Game *game, Player *shooter, Player *target) {
 }
 
 // v10.0.2's shared trace: the posed hit boxes of shared/src/hitboxes.c end to end, i.e. what
-// players.shoot's server branch does with the lag-comp state (v10:172884-172906). The game runs on
-// the v10 ruleset here (its hit_model, its weapon table) with lag_comp off, so fetchState is the
-// live player and the state's pose fields come from storeState (they are 0 for a still player).
+// players.shoot's server branch does with the lag-comp state (v10:172884-172906). The game runs
+// with lag_comp off, so fetchState is the live player and the state's pose fields come from
+// storeState (they are 0 for a still player).
 static void test_v10_hitboxes(const cJSON **maps, const size_t map_count) {
     printf("v10.0.2 posed hit boxes...\n");
-    CHECK(ruleset_set_current(RULESET_V10_0_2), "v10 ruleset");
     Game game = {0};
     game_configure(&game, NULL, maps, map_count, NULL, 0, NULL, 0, NULL, 0);
     game_init(&game, 0, -1, 1);
@@ -159,7 +158,7 @@ static void test_v10_hitboxes(const cJSON **maps, const size_t map_count) {
     place(shooter, 0.0f, 0.0f);
     place(target, 0.0f, -50.0f);
     equip(shooter, 1);
-    CHECK(game.rules == ruleset_get(RULESET_V10_0_2) && hitboxes_active(&game), "the v10 game uses the posed boxes");
+    CHECK(game.rules == ruleset_current() && hitboxes_active(&game), "the game uses the posed boxes");
     CHECK(target->max_health == 170, "v10 Spray N Pray 170 HP");
 
     // v10's torso is chestWidth 2.6 wide and chestScale 1.3 deep (v10:169467), narrower than the v7
@@ -218,7 +217,6 @@ static void test_v10_hitboxes(const cJSON **maps, const size_t map_count) {
     free(game.weapons);
     free(game.classes);
     free(game.modes);
-    CHECK(ruleset_set_current(RULESET_V7_1_4), "back to v7");
 }
 
 static void test_zones(Game *game, Player *shooter, Player *target) {
@@ -586,7 +584,7 @@ static void test_nuke(const cJSON **maps) {
 static void test_upgrades(Game *game) {
     printf("upgradeWeapons (krumMachine slots)...\n");
     Player *p = add_player(game, 50, 0); // Triggerman: AR, Pistol, Knife
-    CHECK(p->weapon == rules_weapon(1) && p->weapon->ammo == 28, "base AR");
+    CHECK(p->weapon == rules_weapon(1) && p->weapon->ammo == 30, "base AR (v10 ammo 30)");
     player_upgrade_weapon(p, 0);
     CHECK(p->weapon == weapon_upgraded(1) && !strcmp(p->weapon->name, "Zombie Assaulter") && p->ammo[0] == 35 &&
           p->weapon->damage == 28.0f && fabsf(p->weapon->rate - 0.09f) < 1e-6f, "slot 0 upgraded: Zombie Assaulter, 35 rounds");
@@ -746,9 +744,13 @@ int main(void) {
     game.lag_comp = 0;
 
     Player *shooter = add_player(&game, 1, 1); // Hunter: Sniper
-    Player *target = add_player(&game, 2, 3);  // Spray N Pray: 180 HP holds a close Sniper headshot (~161)
+    Player *target = add_player(&game, 2, 3);  // Spray N Pray: 170 HP holds a close Sniper headshot (~161)
+    // the padded AABB (hitBoxPad, head band, leg line): v10 traces it in Prop Hunt only
+    game.mode->config.prop = 1;
+    CHECK(!hitboxes_active(&game), "Prop Hunt keeps the padded AABB");
     test_hitbox(&game, shooter, target);
     test_zones(&game, shooter, target);
+    game.mode->config.prop = 0;
     test_v10_hitboxes(maps, 1);
     test_charge(&game);
     test_effects(&game);

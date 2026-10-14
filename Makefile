@@ -177,7 +177,6 @@ test: build ## Run the shared movement/collision test (+ the knet transport, con
 	./$(DEBUG_DIR)/ruleset_test
 	./$(DEBUG_DIR)/hitboxes_test
 	./$(DEBUG_DIR)/v10_gameplay_test
-	./$(DEBUG_DIR)/weapons_v7_test v10
 	./$(DEBUG_DIR)/projectiles_render_test
 	./$(DEBUG_DIR)/death_cam_test
 	./$(DEBUG_DIR)/third_person_test
@@ -203,7 +202,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, con
 # These targets use the debug directory with HTML_ENGINE=ON (the default) so they also
 # work after a `make HTML_ENGINE=OFF`.
 
-.PHONY: ui-test ui-import ui-import-v3 assets-import uidiff
+.PHONY: ui-test ui-import assets-import uidiff
 viewer-diff: build ## Viewer render scenarios vs the v7.1.4 viewer captures (doc/ref/krunker-v7.1.4/viewer, headless; EGL_DEVICE=)
 	EGL_DEVICE=$(or $(EGL_DEVICE),nvidia) tools/kref/viewer-diff.sh $(DEBUG_DIR)
 
@@ -254,13 +253,6 @@ ui-test: ## Build ui_test (HTML_ENGINE=ON) and run it: ARGS="lexbor-probe" (defa
 
 ui-import: ## Regenerate ui/ from the Krunker reference (fonts, windows, icon ligatures) via tools/ui-import
 	$(PYTHON) -I tools/ui-import/import.py --ui ui
-
-.PHONY: ui-import-v156
-ui-import-v156: ## Regenerate ui/v156/ (Krunker v1.5.6's menu page, Settings > Game version) via tools/ui-import --ref v156
-	$(PYTHON) -I tools/ui-import/import.py --ui ui --ref v156
-
-ui-import-v3: ## Regenerate ui/v3/ (the Krunker v3.1.1 page of Settings > Game version) from the v3.1.1 tag's ui/ (git archive)
-	$(PYTHON) -I tools/ui-import/v3_page.py --ref v3.1.1 --ui ui
 
 assets-import: ## Copy the v3.1.1 content mod.zip lacks (textures/previews/) into assets/ (tools/ui-import/game_assets.py)
 	$(PYTHON) -I tools/ui-import/game_assets.py --assets assets
@@ -446,7 +438,7 @@ nuke-e2e: build ## The Nuke on server_bin: a guest's 25 kills, key 3 through a h
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 300 $(PYTHON) -I server/tests/nuke_e2e.py $(DEBUG_DIR)
 
 .PHONY: ruleset-e2e
-ruleset-e2e: build ## Version toggle on server_bin: server.cfg ruleset / --ruleset v10, INIT ruleset, v7-only peers refused, server-info ruleset
+ruleset-e2e: build ## Krunker v10.0.2 is the only version: server_bin and the offline client play v10 with no choice (INIT, server-info, no --ruleset, no picker)
 	timeout 120 $(PYTHON) -I server/tests/ruleset_e2e.py $(DEBUG_DIR)
 
 .PHONY: pickup-chat-e2e
@@ -626,9 +618,9 @@ smoke-native: build ## Run the native client offline headless (no window; EGL_DE
 	  && echo "smoke-native ok (C UI logic set up the $(or $(UI_DIR),ui) page and applied its settings): /tmp/smoke-native.png" \
 	  && grep -m1 "GL_RENDERER" /tmp/smoke-native.log || { tail -20 /tmp/smoke-native.log; exit 1; }
 
-# The Krunker v10 page tree (ui/v10, the Game version picker's page) with its own window
-# templates: every tools/uidiff/scenarios/v10/*.json rendered headless (main menu, Settings with
-# the Game version row, a few windows) into /tmp/smoke-ui-v10/. Fails on a non-zero exit, an empty
+# The Krunker v10 page tree (ui/v10, being ported to become ui/) with its own window
+# templates: every tools/uidiff/scenarios/v10/*.json rendered headless (main menu, Settings, a
+# few windows) into /tmp/smoke-ui-v10/. Fails on a non-zero exit, an empty
 # frame or a window template taken from ui/ instead of ui/v10/windows/.
 smoke-ui-v10: build ## Render the v10 page's menu, Settings and windows headless (/tmp/smoke-ui-v10/*.png)
 	@rm -rf /tmp/smoke-ui-v10 && mkdir -p /tmp/smoke-ui-v10/cfg
@@ -639,24 +631,6 @@ smoke-ui-v10: build ## Render the v10 page's menu, Settings and windows headless
 	    && [ -s /tmp/smoke-ui-v10/$$n.png ] && ! grep "windows.json missing\|missing window file" /tmp/smoke-ui-v10/$$n.log \
 	    || { echo "smoke-ui-v10: $$n failed"; tail -20 /tmp/smoke-ui-v10/$$n.log; exit 1; }; \
 	  echo "smoke-ui-v10: $$n ok"; done
-
-.PHONY: smoke-v156
-smoke-v156: build ## Krunker v1.5.6 menu page (ui/v156): an offline run with Game version v1.5.6 saved, then tools/uidiff/v156/ scenarios (headless; /tmp/smoke-v156*.png)
-	@cfg=$$(mktemp -d) && trap 'rm -rf "$$cfg"' EXIT && mkdir -p $$cfg/krunknative && printf v156 > $$cfg/krunknative/knRuleset.json && \
-	rm -f /tmp/smoke-v156*.png && \
-	env -u DISPLAY -u WAYLAND_DISPLAY KRUNKNATIVE_HEADLESS=1 $(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) XDG_CONFIG_HOME=$$cfg \
-	  KRUNKNATIVE_SCREENSHOT=/tmp/smoke-v156.png KRUNKNATIVE_CAPTURE_FRAMES=60 \
-	  timeout 120 stdbuf -oL $(DEBUG_DIR)/$(CLIENT_BIN) --offline > /tmp/smoke-v156.log 2>&1 || { tail -20 /tmp/smoke-v156.log; exit 1; }; \
-	grep -q "ui/v156 has no window templates" /tmp/smoke-v156.log && grep -q "v1.5.6 gameplay is not ported: this game plays Krunker v" /tmp/smoke-v156.log \
-	  && grep -q "^\[ui\] setting " /tmp/smoke-v156.log && [ -s /tmp/smoke-v156.png ] || { echo "smoke-v156: ui/v156 not loaded or no notice"; tail -20 /tmp/smoke-v156.log; exit 1; }; \
-	for s in tools/uidiff/v156/*.json; do n=$$(basename $$s .json); \
-	  env -u DISPLAY -u WAYLAND_DISPLAY KRUNKNATIVE_HEADLESS=1 $(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) KRUNKNATIVE_UI_DIR=$(CURDIR)/ui/v156 \
-	    timeout 120 $(DEBUG_DIR)/$(CLIENT_BIN) --render-scenario $$s /tmp/smoke-v156-$$n.png > /tmp/smoke-v156-$$n.log 2>&1 \
-	    && [ -s /tmp/smoke-v156-$$n.png ] || { echo "smoke-v156: scenario $$n failed"; tail -20 /tmp/smoke-v156-$$n.log; exit 1; }; \
-	done; \
-	grep -q "saved the Krunker v1.5.6 menu" /tmp/smoke-v156-settings-general.log \
-	  && grep -q "saved Krunker v7.1.4" /tmp/smoke-v156-settings-switch-back.log || { echo "smoke-v156: the picker did not switch"; exit 1; }; \
-	echo "smoke-v156 ok: /tmp/smoke-v156.png (offline, knRuleset v156), /tmp/smoke-v156-*.png (scenarios)"; grep -m1 "GL_RENDERER" /tmp/smoke-v156.log
 
 smoke-web: ## Load the web build offline in headless Chromium and screenshot it (/tmp/smoke-web.png)
 	@[ -f $(DIST_WEB)/client.wasm ] || { echo "no web build yet: run 'make web' first"; exit 1; }

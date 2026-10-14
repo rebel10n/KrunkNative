@@ -83,11 +83,8 @@ typedef struct {
     float disk_spin;
 } GameConstants;
 
-// The current ruleset's constants (shared/include/ruleset.h: one ruleset per process, switched with
-// ruleset_set_current between games). game_constants reads through the pointer, so the v7 / v10
-// tables (shared/src/rules/<ver>/constants*.c) need no change at the call sites.
-extern const GameConstants *g_rules_constants;
-#define game_constants (*g_rules_constants)
+// Krunker v10.0.2's physics and animation constants (shared/src/rules/v10/constants_v10.c).
+extern const GameConstants game_constants;
 
 // Krunker v7.1.4 data/prefabs.js prefab ids (map object "i"; doc/v7/map-logic.md §1.4).
 // Ids 0-59 keep their v3.1.1 index; 33 and 55 were renamed (the v3 names stay as aliases);
@@ -190,10 +187,10 @@ typedef enum {
     PREFAB_KRUM_MACHINE,        // 94
     PREFAB_BOT_SPAWNER,         // 95
     PREFAB_MAP_ANCHOR,          // 96
-    PREFAB_V7_COUNT,            // 97: the v7.1.4 table ends here (the v3 / v7 map dialects stop at 96)
+    PREFAB_V7_COUNT,            // 97: the v7.1.4 table ended here
     PREFAB_SCRAPCRATE = PREFAB_V7_COUNT, // 97 (v10.0.2): a generic model prop like CRATE (scale 5)
     PREFAB_ENTITY,              // 98 (v10.0.2): an entity instance (Map.entity_instances), no map object
-    PREFAB_COUNT,               // 99: every id of the newest table; the map dialect says how many a map may use
+    PREFAB_COUNT,               // 99: every id of v10.0.2's table
     PREFAB_TERMINAL = PREFAB_BOT_PATH_NODE, // v3.1.1 / v7.1.4 name of 41
     PREFAB_SPECTATE_CAM = PREFAB_CAMERA,  // v3.1.1 name of 33
     PREFAB_BOT = PREFAB_AI_SPAWNER,       // v3.1.1 name of 55
@@ -650,9 +647,9 @@ int map_raw_object_kept(const cJSON *raw_obj);
 //   RECTAREA_LIGHT: (r2, r0, r1)
 // Old v3 maps go through the same table: rotated v3 planes look different, exactly as in v7.
 void map_object_rotation(const Object *object, float out[9]);
-// A custom texture id (skyDomeTexA, skyDomeEmisTex, mmId) as the map dialect accepts it: the
-// digits of a number or of a string made only of digits and the dialect's letters (v7
-// "tlnesacdgxufq", v10 + "mrpbhv"), else 0 (map_dialect.h).
+// A custom texture id (skyDomeTexA, skyDomeEmisTex, mmId) as v10.0.2 accepts it: the digits of a
+// number or of a string made only of digits and the letters "tlnesacdgxufqmrpbhv" (v7.1.4 lacked
+// "mrpbhv"), else 0.
 int map_texture_id(const cJSON *item);
 // The v10 archetype with that id, NULL none.
 const MapArchetype *map_archetype(const Map *map, int id);
@@ -1120,7 +1117,7 @@ typedef struct {
     int weapon_index;  // loadout[loadoutIndex] (-2 none: v10 stores undefined)
 } PlayerStoredState;
 
-// v10.0.2 Stalker camping (stalk.update, shared/src/modes/mode_rules.c mode_update_stalk_v10)
+// v10.0.2 Stalker camping (stalk.update, shared/src/modes/mode_rules.c mode_update_stalk)
 typedef struct {
     unsigned char has_origin:1;   // campOriginPos set
     unsigned char has_effect:1;   // hasCampEffect (Dizzy given)
@@ -1554,7 +1551,7 @@ void player_check_streak(Player*, int slot);        // checkStreak: the streak k
 int game_start_nuke(struct Game_t*, Player*);       // streaks.js Nuke.start: 0 when one is running
 float player_hitbox_pad_w(const Player*);           // hitboxPadW: game hitBoxPad + class hbS
 float player_hitbox_pad_h(const Player*);           // hitboxPadH: game hitBoxPad + class hbH
-float player_hurtbox_scale(const Player*);          // v10 hurtboxScale: game hurtboxScale x class hurtboxScale (1 under v7)
+float player_hurtbox_scale(const Player*);          // v10 hurtboxScale: game hurtboxScale x class hurtboxScale (0 reads as 1)
 int player_class_model(const Player*);              // the class config mdl (0 default)
 // Hit zones of a hit at world height `hit_y` on `target` (players.js shoot): head when within
 // headScale * headMlt of the top of the box `base_y + adjusted_height`, legs below legHeight
@@ -1933,7 +1930,7 @@ struct Ruleset_t;
 typedef struct Game_t {
     GameConfig config;
     // 1 in a ranked match (server/src/accounts.c acc_ranked_setup; v10 game.isRanked): the
-    // ruleset's ranked rules apply (ruleset.h Ruleset.ranked, game_is_ranked); v7 has none.
+    // ruleset's ranked rules apply (ruleset.h Ruleset.ranked, game_is_ranked).
     unsigned char is_ranked;
     const struct Ruleset_t *rules; // the ruleset game_configure took the tables from (ruleset.h); NULL before
     GameMode *mode;
@@ -2015,10 +2012,6 @@ typedef struct Game_t {
 } Game;
 
 void game_configure(Game*, const GameConfig*, const cJSON**, size_t, int*, size_t, Weapon**, size_t, ClassConfig*, size_t);
-// Version toggle (ruleset.h): makes the process ruleset `rules` current and gives the game its
-// weapon and class tables (host overrides dropped; maps, modes and config kept). Call between
-// rounds (before game_init). 0 when `rules` is NULL; 1 also when it was already the game's.
-int game_adopt_rules(Game*, const struct Ruleset_t *rules);
 void game_init(Game*, int, int, unsigned char);
 void game_tick(Game*, float, float);
 // game_tick with the world (player simulation) on its own step: the in-process offline
@@ -2307,8 +2300,9 @@ typedef struct {
     uint8_t major;
     uint8_t minor;
     uint8_t patch;
-    // version toggle (ruleset.h): bit RulesetId = a ruleset this client can play. Optional: a
-    // HELLO without it (every build before the toggle, net-bridge) reads as v7.1.4 only.
+    // the Krunker versions this client plays: NET_HELLO_RULESETS (v10.0.2 only). Kept for wire
+    // compatibility with the version toggle's servers (they refuse a peer without their bit);
+    // servers read nothing from it, and a HELLO without it is accepted.
     uint8_t rulesets;
 } NetHelloPacket;
 
@@ -2320,18 +2314,18 @@ typedef struct {
     int32_t mode_index;
     uint16_t tick_rate;
     int32_t client_id;
-    // version toggle: the server's ruleset, net_ruleset_wire (RulesetId + 1). Optional: a 17-byte
-    // INIT (a server from before the toggle) reads as 0 = v7.1.4. Older clients prefix-read INIT.
+    // NET_INIT_RULESET (v10.0.2), kept for wire compatibility with the version toggle's clients
+    // (they adopt it). Optional: a 17-byte INIT (a server from before the toggle) has none; clients
+    // read nothing from it. Older clients prefix-read INIT.
     uint8_t ruleset;
 } NetInitPacket;
 
 #define NET_INIT_PACKET_V1_SIZE (offsetof(NetInitPacket, ruleset)) // 17 bytes: before the ruleset
-#define NET_HELLO_RULESETS_DEFAULT (1u << 1)                       // RULESET_V7_1_4: a HELLO without the mask
-#define NET_ERROR_CODE_RULESET "004010"                            // NetErrorPacket: the server plays another Krunker version
-uint8_t net_ruleset_wire(int ruleset_id);   // INIT.ruleset of a RulesetId (id + 1)
-int net_ruleset_from_wire(uint8_t wire);    // RulesetId of INIT.ruleset (0 = RULESET_V7_1_4, an older server)
-uint8_t net_hello_rulesets(const NetHelloPacket *hello, uint16_t length); // the mask, NET_HELLO_RULESETS_DEFAULT when absent
-NetHelloPacket net_hello_make(void); // this build's HELLO: protocol major.minor.patch + every ruleset it can play
+// The version toggle's wire ids (doc/v7/decisions.md "Krunker v10.0.2 is the only version"): it
+// numbered v3.1.1 0, v7.1.4 1, v10.0.2 2. Only v10.0.2 is sent now: HELLO bit 2, INIT 2 + 1.
+#define NET_HELLO_RULESETS (1u << 2)
+#define NET_INIT_RULESET 3
+NetHelloPacket net_hello_make(void); // this build's HELLO: protocol major.minor.patch + NET_HELLO_RULESETS
 
 // INIT major.minor: the protocol the server speaks. 1.0 servers drop ENTs longer than V4 (38 bytes)
 // without spawning anyone, so a client only sends the longer ENT (V5 spray, V6 weapon skins) to a

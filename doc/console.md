@@ -503,12 +503,11 @@ command line, the window kept as it is), and the new process comes back to the s
 (`KRUNKNATIVE_RELOAD_RESUME`: the offline map and mode, the server address, or the lobby id
 once the matchmaker answers):
 
-- a file of the menu page tree changed (`ui/`, or `ui/v10/` for the v10 Game version; not
+- a file of the menu page tree changed (`ui/`, or the `KRUNKNATIVE_UI_DIR` tree; not
   `ui/windows`, which reloads in place) since the client started or last reloaded;
 - a shader (`assets/shaders`) or a map file (`assets/maps`) changed;
 - a startup-only Client setting (the red "*" rows: audio backend, process priority, resource
-  swapper on / off, start offline, account mode, account service / server finder URL) changed;
-- the saved Game version wants another menu page tree (v7 `ui/` vs v10 `ui/v10/`).
+  swapper on / off, start offline, account mode, account service / server finder URL) changed.
 
 The log says which (`[reload] restart: ...`). If the restart cannot exec, everything else still
 reloads in place. On the web F5 is the browser's reload: the page, its stylesheets, images and

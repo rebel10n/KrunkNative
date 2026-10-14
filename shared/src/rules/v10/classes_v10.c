@@ -1,7 +1,7 @@
 #include <shared.h>
 
 // Krunker v10.0.2 classes (doc/v10/gameplay.md section 4; v10.js classConfig v10:101961-102300):
-// the v7.1.4 table (shared/src/rules/v7/classes.c) with v10's changes, each marked "v10:N" (line N
+// the v7.1.4 table (src/data/classes.js) with v10's changes, each marked "v10:N" (line N
 // of the renamed 10.0.2 bundle ~/.cache/kn-v10/v10.js at the class entry):
 //   Run N Gun health 90 -> 100, Spray N Pray 180 -> 170, Agent 110 -> 105;
 //   minRec 1 + req (_34270, the v7 f791 gate) on every class but Triggerman (v7: only Hunter,

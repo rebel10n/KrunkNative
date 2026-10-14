@@ -91,9 +91,10 @@ typedef struct ProfStat {
 
 struct Engine {
     char ui_dir[PATH_MAX];                   /* absolute, trailing slash */
-    /* ui/ (absolute, trailing slash) when ui_dir is another page tree (ui/v3, ui/v10: the version
-     * toggle, client/include/ruleset_ui.h), else "": files the tree lacks are read from ui/, because
-     * the C UI writes ui/'s v7.1.4 window markup (and its stylesheets, images) on every page */
+    /* ui/ (absolute, trailing slash) when ui_dir is another page tree (ui/v10, being ported to
+     * become ui/; ui/README.md), else "": files the tree lacks are read from ui/, because the C UI
+     * still writes ui/'s v7.1.4 markup and image paths (props, challenges, ranks ...) there.
+     * TODO(v10 switch): drop it when ui/v10 becomes ui/ */
     char fallback_dir[PATH_MAX];
     char page[128];                          /* document file inside ui_dir ("index.html", "social.html", ...) */
 
@@ -2125,7 +2126,7 @@ int html_ui_backend_load_page(const char *page)
         html_ui_page_ready();
         return 1;
     }
-    /* A page tree that lacks this page (ui/v3 is v3.1.1's menu page only) shows ui/'s: the hub,
+    /* A page tree that lacks this page (ui/v10 has no editor / viewer page yet) shows ui/'s: the
      * editor and viewer C code is written for ui/'s markup, stylesheets included. */
     const char *dir = g_base->ui_dir;
     char path[PATH_MAX];

@@ -462,7 +462,7 @@ static void check_validation(void) {
     expect_error("shared/tests/maps/v7_limits_name.json", "Map name too long.");
     expect_error("shared/tests/maps/v7_limits_prefab.json", "Invalid Object.");
     expect_error("shared/tests/maps/v7_limits_texture.json", "Object Texture error.");
-    expect_error("shared/tests/maps/v7_limits_actions.json", "Trigger Has Too Many Actions");
+    expect_error("shared/tests/maps/v7_limits_actions.json", "Trigger Has Too Many Actions"); // 9 > v10's 8
     expect_error("shared/tests/maps/v7_limits_condition.json", "CONDITION VALUE OPTION DOESNT EXIST (Type)");
     expect_error("shared/tests/maps/v7_limits_spawn.json", "Spawn point error.");
     expect_error("shared/tests/maps/v7_limits_leaderboards.json", "Too many Leaderboards.");
@@ -483,7 +483,8 @@ static void check_validation(void) {
     expect_generated(1, "{\"i\":0,\"p\":[0,0,0],\"s\":[1,1,1],\"d\":\"x\"}", "Object direction error.", 0);
     expect_generated(1, "{\"i\":29,\"p\":[0,0,0],\"s\":[1,1,1],\"tct\":\"<b>\"}", "Illegal characters in Trigger Message", 0);
     expect_generated(1, "{\"i\":96,\"p\":[0,0,0],\"s\":[1,1,1]}", NULL, 0);
-    expect_generated(1, "{\"i\":97,\"p\":[0,0,0],\"s\":[1,1,1]}", "Invalid Object.", 0);
+    expect_generated(1, "{\"i\":97,\"p\":[0,0,0],\"s\":[1,1,1]}", NULL, 0); // v10's SCRAPCRATE
+    expect_generated(1, "{\"i\":99,\"p\":[0,0,0],\"s\":[1,1,1]}", "Invalid Object.", 0);
     expect_generated(1, "{\"i\":0,\"id\":120,\"p\":[0,0,0],\"s\":[1,1,1]}", "Object ID error.", 0);
 
     char *text = map_prepare_custom_text("{\"name\":\"a(b)\"}");

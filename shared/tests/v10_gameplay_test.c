@@ -1,9 +1,8 @@
-// v10_gameplay_test: Krunker v10.0.2's gameplay deltas that only the v10 ruleset may show
-// (doc/v10/gameplay.md): the Boulder's gravMlt, the Compressor's self impulse (left pushes the
-// shooter back, right pulls it forward, nobody else moves and nothing takes damage), the Stalker
-// rework (the leap on the aim input, its cooldown and coyote time, onKill / onMelee / camping /
-// pickStalker), and the ranked rules on a kill. Each check also runs under v7 where v7 must stay
-// as it was. Run from the repository root.
+// v10_gameplay_test: Krunker v10.0.2's gameplay deltas from v7.1.4 (doc/v10/gameplay.md): the
+// Boulder's gravMlt, the Compressor's self impulse (left pushes the shooter back, right pulls it
+// forward, nobody else moves and nothing takes damage), the Stalker rework (the leap on the aim
+// input, its cooldown and coyote time, onKill / onMelee / camping / pickStalker), and the ranked
+// rules on a kill. Run from the repository root.
 #include <shared.h>
 #include <math.h>
 #include <stdio.h>
@@ -24,8 +23,7 @@ static void test_send(Game *game, const int uid, const int type, const void *pay
 
 static const cJSON *g_test_maps[1];
 
-static void open_game(Game *game, const RulesetId rules) {
-    CHECK(ruleset_set_current(rules), "ruleset %d", (int) rules);
+static void open_game(Game *game) {
     memset(game, 0, sizeof(*game));
     game_configure(game, NULL, g_test_maps, 1, NULL, 0, NULL, 0, NULL, 0);
     game_init(game, 0, -1, 1);
@@ -87,7 +85,7 @@ static float fall_step(Player *player, const int weapon_id) {
 static void test_boulder(void) {
     printf("Boulder gravMlt...\n");
     Game game;
-    open_game(&game, RULESET_V10_0_2);
+    open_game(&game);
     Player *p = add_player(&game, 1, 0);
     const float pistol = fall_step(p, WEAPON_ID_PISTOL);
     const float boulder = fall_step(p, WEAPON_ID_BOULDER);
@@ -96,19 +94,12 @@ static void test_boulder(void) {
     CHECK(fabsf(boulder / pistol - 1.7f) < 1e-3f, "the Boulder falls 1.7x (%g / %g = %g)", (double) boulder, (double) pistol,
           (double) (boulder / pistol));
     close_game(&game);
-
-    // v7 has no Boulder (id 29 is a hole until the KN base) and its fall is the plain one
-    open_game(&game, RULESET_V7_1_4);
-    CHECK(!rules_weapon(WEAPON_ID_BOULDER) && !rules_weapon(WEAPON_ID_COMPRESSOR), "v7 has neither new weapon");
-    Player *q = add_player(&game, 1, 0);
-    CHECK(fabsf(fall_step(q, WEAPON_ID_PISTOL) - pistol) < 1e-7f, "v7 and v10 fall alike without a gravMlt weapon");
-    close_game(&game);
 }
 
 static void test_compressor(void) {
     printf("Compressor self impulse...\n");
     Game game;
-    open_game(&game, RULESET_V10_0_2);
+    open_game(&game);
     Player *shooter = add_player(&game, 1, 0);
     Player *other = add_player(&game, 2, 0);
     other->position = (vec3) {0.0f, 1000.0f, -10.0f}; // straight ahead (yaw 0 looks down -z)
@@ -150,7 +141,7 @@ static void test_compressor(void) {
 static void test_stalker(void) {
     printf("Stalker rework...\n");
     Game game;
-    open_game(&game, RULESET_V10_0_2);
+    open_game(&game);
     game.mode = mode_init(MODE_ID_STALK);
     CHECK(game.mode && game.mode->config.stalker_v10, "the v10 Stalker mode");
     Player *stalker = add_player(&game, 1, 0);
@@ -247,43 +238,24 @@ static void test_stalker(void) {
         if (game.players[i]->team == 2) picked = game.players[i];
     CHECK(picked && picked->max_health == 200 + 50 * 2, "3 players: the stalker gets 300 HP (%d)", picked ? picked->max_health : -1);
     close_game(&game);
-
-    // v7: no leap, no camping, 400 HP stalker, the old instant melee
-    open_game(&game, RULESET_V7_1_4);
-    game.mode = mode_init(MODE_ID_STALK);
-    CHECK(game.mode && !game.mode->config.stalker_v10 && !game.mode->config.on_kill && !game.mode->config.update, "the v7 Stalker mode is untouched");
-    Player *s7 = add_player(&game, 1, 0);
-    s7->team = 2;
-    hold(s7, WEAPON_ID_KNIFE);
-    s7->on_ground = 1;
-    game.now = 100.0f;
-    input = idle_input(s7);
-    input.scope = 1;
-    player_proc_input(s7, &input, 0, 0);
-    CHECK(s7->last_stalker_leap == 0.0f, "v7: the stalker has no leap");
-    close_game(&game);
 }
 
 static void test_ranked_streaks(void) {
     printf("ranked kill streaks...\n");
-    for (int pass = 0; pass < 2; pass++) {
-        const RulesetId rules = pass ? RULESET_V7_1_4 : RULESET_V10_0_2;
-        Game game;
-        open_game(&game, rules);
-        game.is_ranked = 1;
-        Player *killer = add_player(&game, 1, 0);
-        Player *victim = add_player(&game, 2, 0);
-        killer->has_account = 1;
-        const unsigned int before = killer->kill_streak;
-        player_kill(victim, killer, NULL, 1);
-        if (rules == RULESET_V10_0_2) CHECK(killer->kill_streak == before, "v10 ranked: no kill streak (v10:174076)");
-        else CHECK(killer->kill_streak == before + 1, "v7 ranked: streaks count as before");
-        game.is_ranked = 0;
-        Player *victim2 = add_player(&game, 3, 0);
-        player_kill(victim2, killer, NULL, 1);
-        CHECK(killer->kill_streak == (rules == RULESET_V10_0_2 ? before + 1 : before + 2), "unranked: streaks count");
-        close_game(&game);
-    }
+    Game game;
+    open_game(&game);
+    game.is_ranked = 1;
+    Player *killer = add_player(&game, 1, 0);
+    Player *victim = add_player(&game, 2, 0);
+    killer->has_account = 1;
+    const unsigned int before = killer->kill_streak;
+    player_kill(victim, killer, NULL, 1);
+    CHECK(killer->kill_streak == before, "ranked: no kill streak (v10:174076)");
+    game.is_ranked = 0;
+    Player *victim2 = add_player(&game, 3, 0);
+    player_kill(victim2, killer, NULL, 1);
+    CHECK(killer->kill_streak == before + 1, "unranked: streaks count");
+    close_game(&game);
 }
 
 int main(void) {
@@ -298,7 +270,6 @@ int main(void) {
     test_compressor();
     test_stalker();
     test_ranked_streaks();
-    ruleset_set_current(RULESET_V7_1_4);
 
     if (g_failures) {
         printf("v10_gameplay_test: %d of %d checks failed\n", g_failures, g_checks);

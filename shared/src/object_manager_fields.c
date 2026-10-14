@@ -17,7 +17,6 @@
 #include <object_manager.h>
 #include <prefabs.h>
 #include <triggers.h>
-#include <map_dialect.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -106,7 +105,7 @@ static const OmFieldDef k_fields[] = {
     F("te", "event", "Event", "Trigger", OM_FIELD_SELECT, 0.0f, TRIGGER_EVENT_COUNT - 1, 1.0f, 0.0f, "@events", g_trigger),
     F("tce", "constantEvent", "Event Value", "Trigger", OM_FIELD_INT, 0.0f, TRIGGER_CONSTANT_EVENT_MAX, 1.0f, 0.0f, NULL, g_trigger),
     F("cha", "chance", "Action Chance (%)", "Trigger", OM_FIELD_INT, 0.0f, 100.0f, 1.0f, 0.0f, NULL, g_trigger),
-    F("tas.0.ta", "action", "Action", "Trigger", OM_FIELD_SELECT, 0.0f, TRIGGER_V7_ACTION_COUNT - 1, 1.0f, 0.0f, "@actions", g_trigger),
+    F("tas.0.ta", "action", "Action", "Trigger", OM_FIELD_SELECT, 0.0f, TRIGGER_V10_ACTION_COUNT - 1, 1.0f, 0.0f, "@actions", g_trigger),
     F("tas.0.tc", "constant", "Action Value", "Trigger", OM_FIELD_INT, TRIGGER_CONSTANT_MIN, TRIGGER_CONSTANT_MAX, 1.0f, 0.0f, NULL, g_trigger),
     F("tas.0.tad", "delay", "Action Delay (s)", "Trigger", OM_FIELD_NUM, 0.0f, TRIGGER_V7_DELAY_MAX, 0.1f, 0.0f, NULL, g_trigger),
     // Lighting (build_type_folders, :1027-1037)
@@ -149,7 +148,7 @@ int object_manager_field_applies(const ObjectManagerField *f, const int prefab) 
 static int option_count(const ObjectManagerField *f) {
     if (!f->options || f->kind != OM_FIELD_SELECT) return 0;
     if (!strcmp(f->options, "@events")) return TRIGGER_EVENT_COUNT;
-    if (!strcmp(f->options, "@actions")) return map_dialect_action_count(map_dialect_current());
+    if (!strcmp(f->options, "@actions")) return TRIGGER_V10_ACTION_COUNT;
     int n = 1;
     for (const char *c = f->options; *c; c++) n += *c == '|';
     return n;

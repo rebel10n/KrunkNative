@@ -344,7 +344,8 @@ int gs_config_from_json(GsConfig *cfg, const cJSON *s, char *err, const size_t e
     }
 
     gs_read_str(s, "region", cfg->region, sizeof(cfg->region));
-    gs_read_str(s, "ruleset", cfg->ruleset, sizeof(cfg->ruleset)); // --ruleset / server.cfg ruleset (main.c checks it)
+    // the version toggle's key: Krunker v10.0.2 is the only version now (shared/include/ruleset.h)
+    if (cJSON_GetObjectItem(s, "ruleset")) server_log_error("config: gameserver.ruleset is ignored: the server plays Krunker v10.0.2, the only version");
     gs_read_str(s, "node_id", cfg->node_id, sizeof(cfg->node_id));
     gs_read_str(s, "name", cfg->name, sizeof(cfg->name));
     gs_read_str(s, "listen_host", cfg->listen_host, sizeof(cfg->listen_host));

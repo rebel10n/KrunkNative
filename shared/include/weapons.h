@@ -299,12 +299,12 @@ const WeaponAttachment *weapon_attachment(const Weapon *weapon, int attach_index
 #define WEAPON_ID_BOULDER 29    // v10.0.2
 #define WEAPON_ID_COMPRESSOR 30 // v10.0.2
 #define WEAPON_V10_COUNT 31     // v10.0.2's weaponConfig
-// KrunkNative-only ids sit at WEAPON_ID_KN_BASE, above every Krunker ruleset's own table (v7.1.4
-// has 29 weapons, v10.0.2 31: its 29 Boulder and 30 Compressor took the ids KN used before;
-// doc/v10/version-toggle.md "Id clashes"). Ids between a ruleset's last Krunker weapon and the KN
-// base are NULL in its table. The KN weapons are in each ruleset's table (Game.weapons), so
-// loadouts, pickups and packets take them, but outside WEAPON_COUNT, so v7's lists (loadout,
-// market, host config, challenges) never show them (doc/v7/decisions.md "Tool Gun").
+// KrunkNative-only ids sit at WEAPON_ID_KN_BASE, above Krunker's own table (v10.0.2 has 31
+// weapons: its 29 Boulder and 30 Compressor took the ids KN used before; doc/v7/decisions.md
+// "KrunkNative id ranges"). Ids between the last Krunker weapon and the KN base are NULL in the
+// table. The KN weapons are in the ruleset's table (Game.weapons), so loadouts, pickups and
+// packets take them, but outside WEAPON_COUNT, so the menu lists (loadout, market, host config,
+// challenges) never show them (doc/v7/decisions.md "Tool Gun").
 #define WEAPON_ID_KN_BASE 64
 #define WEAPON_ID_TOOL_GUN (WEAPON_ID_KN_BASE + 0)
 #define WEAPON_ID_PISS (WEAPON_ID_KN_BASE + 1) // KrunkNative Piss (doc/v7/decisions.md "Piss")

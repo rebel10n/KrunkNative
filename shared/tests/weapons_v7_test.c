@@ -1,13 +1,12 @@
-// WP-B table test: every Krunker v7.1.4 class, weapon, effect, streak and attachment field the
-// native tables carry, against the JSON fixtures tools/kref/v7-dump.js writes from the v7 source
-// (shared/tests/data/v7/*.json). Times are compared in seconds (JS ms / 1000), recoil per s
-// (JS per ms * 1000), as KrunkNative stores them. Run from the repository root.
-//
-// With the argument "v10" it checks the v10.0.2 ruleset instead: the same checks on
-// shared/tests/data/v10/{weapons,classes}.json (tools/kref/v10-fixtures.py from the statically
-// extracted v10 bundle; classConfig / weaponConfig hold the same keys in v10, so the same field
-// table applies) and the v10 ruleset's own weapons / classes. The v10 class table carries the
-// v10-only cls hurtboxScale (1.0) and the v10 weapon table the v10-only Boulder / Compressor.
+// WP-B table test: every Krunker v10.0.2 class, weapon, effect, streak and attachment field the
+// native tables carry, against JSON fixtures: shared/tests/data/v10/{weapons,classes}.json
+// (tools/kref/v10-fixtures.py from the statically extracted v10 bundle; classConfig / weaponConfig
+// hold the same keys as v7.1.4's) and the v7.1.4 effects, streaks, attachments, scopes and
+// upgradeWeapons tables v10 keeps unchanged (shared/tests/data/v7/, tools/kref/v7-dump.js). The
+// class table carries v10's cls hurtboxScale (1.0), the weapon table the Boulder / Compressor.
+// Times are compared in seconds (JS ms / 1000), recoil per s (JS per ms * 1000), as KrunkNative
+// stores them. Run from the repository root (an argument "v10", from the version toggle's
+// Makefile, changes nothing).
 #include <shared.h>
 #include <math.h>
 #include <stddef.h>
@@ -20,12 +19,12 @@ static int checks = 0;
 
 #define CHECK(cond, ...) do { checks++; if (!(cond)) { failures++; printf("  FAIL: "); printf(__VA_ARGS__); printf("\n"); } } while (0)
 
-static const char *g_version = "v7"; // "v7" (default) or "v10": which ruleset and fixtures
+static const char *g_version = "v10"; // the fixture directory of weapons.json / classes.json
 static int g_weapon_count = WEAPON_COUNT;
 
 static cJSON *load_fixture(const char *name) {
     // v10 has its own weapons.json / classes.json; the effects, streaks, attachments, scopes and
-    // upgradeWeapons tables are the v7 ones under v10 too (the v10 extractor diff finds no change;
+    // upgradeWeapons tables are v7's unchanged (the v10 extractor diff finds no change;
     // upgrades: v10's table only renames the entries and drops their anim / funcOnHit, and
     // weapon_upgraded() builds from v7's base table, shared/src/weapons/upgraded.c), so those
     // fixtures come from data/v7.
@@ -226,14 +225,10 @@ static void check_class(const int id, const cJSON *js) {
 }
 
 int main(int argc, char **argv) {
-    if (argc > 1 && !strcmp(argv[1], "v10")) {
-        g_version = "v10";
-        CHECK(ruleset_set_current(RULESET_V10_0_2), "the v10 ruleset is built");
-        CHECK(rules_hit_model() == HIT_MODEL_V10 && ruleset_current()->ranked.kr_mlt == 2.0f, "the v10 ruleset's hit model / ranked rules");
-        g_weapon_count = rules_krunker_weapon_count(); // 31: Boulder and Compressor included
-    } else {
-        CHECK(rules_hit_model() == HIT_MODEL_V7 && ruleset_current()->ranked.kr_mlt == 1.0f, "the v7 ruleset's hit model / ranked rules");
-    }
+    (void) argc;
+    (void) argv;
+    CHECK(!strcmp(ruleset_current()->version, "10.0.2") && ruleset_current()->ranked.kr_mlt == 2.0f, "the v10 ruleset's ranked rules");
+    g_weapon_count = rules_krunker_weapon_count(); // 31: Boulder and Compressor included
     cJSON *weapons = load_fixture("weapons");
     cJSON *classes = load_fixture("classes");
     cJSON *effects = load_fixture("effects");

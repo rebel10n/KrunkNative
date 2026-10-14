@@ -3,7 +3,7 @@
 #include <map_validate.h>
 #include <prefabs.h>
 #include <trigger_v7_data.h>
-#include <map_dialect.h> // the ruleset's prefab / condition counts and trigger action limit (v7, v10)
+#include <ruleset.h> // config.triggerActionLimit, entityLimit, archetypeLimit
 
 #include <ctype.h>
 #include <math.h>
@@ -153,7 +153,7 @@ static void check_text(Report *r, const cJSON *holder, const char *key, const in
 static void check_condition(Report *r, const cJSON *entry, const int object, const int action) {
     const cJSON *cd = cJSON_GetObjectItem(entry, "cd");
     if (!truthy(cd)) return;
-    const int index = js_index(cd, map_dialect_condition_count(map_dialect_current()));
+    const int index = js_index(cd, TRIGGER_V10_CONDITION_COUNT);
     if (index < 0) {
         report(r, MAP_ISSUE_ERROR, object, action, "trigger_condition", "INVALID CONDITION");
         return;
@@ -434,11 +434,10 @@ size_t map_validate(const cJSON *map, const MapValidateOptions *options, MapIssu
         }
     }
 
-    const MapDialect dialect = map_dialect_current();
-    const int prefab_count = map_dialect_prefab_count(dialect);
-    const int action_limit = map_dialect_trigger_action_limit(ruleset_current());
+    const int prefab_count = PREFAB_COUNT;
+    const int action_limit = ruleset_current()->trigger_action_limit;
     // v10: the archetype list is checked before the objects; its id flags feed the ENTITY checks
-    unsigned char *archetype_ids = dialect >= MAP_DIALECT_V10 ? calloc(2 * 10000, 1) : NULL;
+    unsigned char *archetype_ids = calloc(2 * 10000, 1);
     unsigned char *entity_ids = archetype_ids ? archetype_ids + 10000 : NULL;
     int entities = 0;
     if (archetype_ids) check_archetypes(&r, cJSON_GetObjectItem(map, "archetypes"), archetype_ids);
@@ -537,8 +536,7 @@ size_t map_validate(const cJSON *map, const MapValidateOptions *options, MapIssu
             report(&r, MAP_ISSUE_WARNING, index, -1, "anchor_limit", "more than %d MAP_ANCHORs: the rest are ignored", MAP_V7_ANCHOR_LIMIT);
         }
         if (prefab == 41 /* TERMINAL / BOT_PATH_NODE */) {
-            report(&r, MAP_ISSUE_WARNING, index, -1, "terminal",
-                   dialect >= MAP_DIALECT_V10 ? "BOT_PATH_NODE builds nothing (bots walk \"botPaths\")" : "TERMINAL builds nothing in v7");
+            report(&r, MAP_ISSUE_WARNING, index, -1, "terminal", "BOT_PATH_NODE builds nothing (bots walk \"botPaths\")");
         }
         if (prefab == 33 /* CAMERA */ && present(object, "obi") && !present(object, "obl")) {
             report(&r, MAP_ISSUE_WARNING, index, -1, "camera_obi", "v3 SPECTATE_CAM \"obi\" is not read by v7 (\"obl\"): links to objective 0");

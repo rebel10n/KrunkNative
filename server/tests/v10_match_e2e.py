@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""A v10.0.2 match smoke on server_bin --ruleset v10 (doc/v10/gameplay.md).
+"""A v10.0.2 match smoke on server_bin (Krunker v10.0.2, the only version; doc/v10/gameplay.md).
 
   python3 -I server/tests/v10_match_e2e.py BUILD_DIR [MODE...]      (run from the repository root)
 
-No database or coordinator: one standalone server_bin per mode (Sandstorm, `bot_quota 4`, started
-with `--ruleset v10`), and a raw guest that announces v10 (HELLO 1.4 + the ruleset mask) and picks
+No database or coordinator: one standalone server_bin per mode (Sandstorm, `bot_quota 4`), and a
+raw guest that announces v10 (HELLO 1.4 + the ruleset mask) and picks
 Spray N Pray with the Compressor as its secondary. Per mode:
   - the guest spawns with v10's class table (Spray N Pray 170 HP, v7 180; Gun Game and Raid force
     the Runner);
@@ -68,7 +68,7 @@ def run_mode(alias, mode_id, port):
                 "round_seconds 60\nbot_quota 4\nbot_difficulty hard\n")
     log_path = os.path.join(WORK, f"{alias}.log")
     log = open(log_path, "w")
-    proc = subprocess.Popen([f"{BUILD}/server_bin", "--headless", "--ruleset", "v10", "--cfg", cfg, "--config",
+    proc = subprocess.Popen([f"{BUILD}/server_bin", "--headless", "--cfg", cfg, "--config",
                              os.path.join(WORK, "none.json")], stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
     try:
         info = None
@@ -120,7 +120,7 @@ def run_mode(alias, mode_id, port):
         with open(log_path, errors="replace") as f:
             text = f.read()
         bad = [line for line in text.splitlines() if "AddressSanitizer" in line or "Segmentation" in line or "assert" in line.lower()]
-        check(f"{alias}: clean log", not bad and "Ruleset Krunker v10.0.2 (v10)" in text, bad[0][:200] if bad else "")
+        check(f"{alias}: clean log", not bad and "Plays Krunker v10.0.2" in text, bad[0][:200] if bad else "")
 
 
 def main():

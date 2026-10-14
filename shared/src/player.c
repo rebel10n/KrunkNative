@@ -2988,15 +2988,14 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
     const float impulse_mlt = game->config.impulse_mlt * (mode_config && mode_config->has_impulse_mlt ? mode_config->impulse_mlt : 1.0f);
     const int no_impulse_dist = mode_config && mode_config->no_impulse_dist;
 
-    // nonObjImpulse modes push the physPow ray a fixed 0.04 (x1 with noImpulseDist), hit or not.
-    // v10.0.2 (Ruleset.weapon_impulse, v10:172807-172840): also a weapon's nonObjImpulse, or its
-    // physPull with the aim input held, and the push is physPow; physPull + aim pulls (x -1).
+    // v10.0.2 (v10:172807-172840): a nonObjImpulse mode, a weapon's nonObjImpulse, or its physPull
+    // with the aim input held push the shooter by the weapon's physPow (x1 with noImpulseDist), hit
+    // or not; physPull + aim pulls (x -1). (v7.1.4: nonObjImpulse modes only, a fixed 0.04.)
     // Compressor: left click pushes the shooter back, right click pulls it forward; nobody else moves.
-    const int weapon_impulse = game_ruleset(game)->weapon_impulse;
-    const int pull = weapon_impulse && weapon->phys_pull && player->shot_aim;
-    const int non_obj = (mode_config && mode_config->non_obj_impulse) || (weapon_impulse && (weapon->non_obj_impulse || pull));
+    const int pull = weapon->phys_pull && player->shot_aim;
+    const int non_obj = (mode_config && mode_config->non_obj_impulse) || weapon->non_obj_impulse || pull;
     if (ray < 0 && non_obj) {
-        const float power = weapon_impulse ? weapon->physical_power : 0.04f;
+        const float power = weapon->physical_power;
         const float impulse = (no_impulse_dist ? 1.0f : power) * impulse_mlt * (pull ? -1.0f : 1.0f);
         const vec3 push = {impulse * sinf(yaw + (float) M_PI) * cosf(pitch), impulse * sinf(pitch),
                            impulse * cosf(yaw + (float) M_PI) * cosf(pitch)};

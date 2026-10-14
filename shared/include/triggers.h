@@ -129,7 +129,7 @@ typedef enum {
     TRIGGER_ACTION_SPAWN_BOT = 69,             // "Spawn Bot at Node" (devOnly)
     TRIGGER_ACTION_FORCE_AI_TARGET = 70,       // "Force AI Target"
     TRIGGER_ACTION_MODE_SPECIFIC = 71,         // "Mode Specific"
-    // v10.0.2 (doc/v10/map-format.md §5; v10 map dialect only, map_dialect_action_count)
+    // v10.0.2 (doc/v10/map-format.md §5)
     TRIGGER_ACTION_SPAWN_ENTITY = 72,          // "Spawn Entity": tct "archetype[|tag]" at the trigger
     TRIGGER_ACTION_DESPAWN_ENTITY = 73,        // "Despawn Entity": tct tag
     TRIGGER_ACTION_SET_ENTITY_VALUE = 74,      // "Set Entity Value": tct "tag|key", value getActionValue(tc)
@@ -181,8 +181,7 @@ int trigger_text_valid(const char *text);
 #define TRIGGER_V7_ACTION_COUNT 72      // triggers.actions
 #define TRIGGER_V7_ACTION_LIMIT 5       // config.triggerActionLimit (editor save / validation; the runtime has no cap)
 // v10.0.2 (doc/v10/map-format.md §5): + condition 12 "Custom Action", actions 72-74, and
-// triggerActionLimit 8. The tables hold the v10 rows; a v7 map dialect stops at the v7 counts
-// (shared/include/map_dialect.h), the limit is Ruleset.trigger_action_limit.
+// triggerActionLimit 8 (Ruleset.trigger_action_limit). The tables hold the v10 rows.
 #define TRIGGER_V10_CONDITION_COUNT 13
 #define TRIGGER_V10_ACTION_COUNT 75
 #define TRIGGER_V10_ACTION_LIMIT 8

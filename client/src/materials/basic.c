@@ -1,7 +1,7 @@
 #include <gl.h>
 #include <client.h>
 #include <render_settings.h>
-#include <map_dialect.h> // map_dialect_light_unit_factor: v7 1, v10 PI (THREE r186 light units)
+#include <ruleset.h> // light_unit_factor: v10 PI (THREE r186 light units)
 #include <GLFW/glfw3.h>
 #include <math.h>
 #include <string.h>
@@ -169,7 +169,7 @@ static void basic_upload_lights(const unsigned int program, const int lighting) 
     if (gl_uniform_location(&u_point_light_count, program) < 0) return;
 
     basic_light_uniforms_init();
-    const float scale = (g_render_lighting.correct_lights ? 1.0f : (float) M_PI) * map_dialect_light_unit_factor();
+    const float scale = (g_render_lighting.correct_lights ? 1.0f : (float) M_PI) * ruleset_current()->light_unit_factor;
     int count = 0;
 
     const int overridden = g_lights_override_count >= 0;
@@ -261,8 +261,8 @@ void basic_material_update_uniforms(Material *base) {
     gl_uniform_4f(&u_light_color, program, g_render_lighting.light_color.x, g_render_lighting.light_color.y, g_render_lighting.light_color.z, g_render_lighting.light_color.w);
     gl_uniform_4f(&u_fog_color, program, g_render_lighting.fog_color.x, g_render_lighting.fog_color.y, g_render_lighting.fog_color.z, g_render_lighting.fog_color.w);
     gl_uniform_3f(&u_light_direction, program, g_render_lighting.light_direction.x, g_render_lighting.light_direction.y, g_render_lighting.light_direction.z);
-    // v10 sceneInit: ambientI / lightI * lightIntensityScaling (L201738, L201743); v7: x 1
-    const float light_units = map_dialect_light_unit_factor();
+    // v10 sceneInit: ambientI / lightI * lightIntensityScaling (L201738, L201743)
+    const float light_units = ruleset_current()->light_unit_factor;
     gl_uniform_1f(&u_ambient_intensity, program, g_render_lighting.ambient_intensity * light_units);
     gl_uniform_1f(&u_light_intensity, program, g_render_lighting.light_intensity * light_units);
     gl_uniform_1f(&u_fog_near, program, g_render_lighting.fog_near);

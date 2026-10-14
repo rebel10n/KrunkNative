@@ -38,7 +38,7 @@ NON_FLAGS = {"id", "name", "src", "defaultSize", "scale", "lineCol", "opacity", 
 # (L156724) and 98 ENTITY (L156744), the canDynamic flag of CUBE / TRIGGER / CUSTOM_ASSET (editor
 # metadata for the "dyn" key), condition 12 "Custom Action" (L162580) and actions 72-74 (L163648).
 # The v7 rows keep their v7 values (id 41 stays TERMINAL; BOT_PATH_NODE is an alias in prefabs.c).
-# Which of them a map may use is the ruleset's (shared/include/map_dialect.h).
+# Maps may use every id (Krunker v10.0.2 is the only version).
 V10_PREFABS = [
     {"id": 97, "name": "SCRAPCRATE", "src": "crate_0", "scale": 5, "has_gen": True,
      "gen": 'loadObj(p, "models/crate_0.obj", "textures/crate_0.png", p.mSize || this.scale, p.color, "mesh")',

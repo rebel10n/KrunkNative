@@ -417,7 +417,8 @@ static void run_case(const int id, const int path) {
 
     // fire
     a = player_of(&g_a);
-    arena(a, b, w->melee ? 8.0f : 40.0f);
+    // pellet weapons from 15: at 40 the spread puts one pellet on v10's posed torso (+-1.3 wide)
+    arena(a, b, w->melee ? 8.0f : w->shots > 1 ? 15.0f : 40.0f);
     const int full = full_ammo(a, slot);
     a->ammo[slot] = (unsigned int) full;
     a->reload_timer = 0.0f;

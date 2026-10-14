@@ -9,7 +9,7 @@
 // Every box carries v10's hitType: headshot (head), torsoshot (torso and the six arm boxes) and
 // legshot (the leg boxes). v10 tags the arms torsoshot, so an arm hit is body damage; "armshot"
 // only appears in v10's damage checks (v10:172979, 180187) and nothing in 10.0.2 produces it.
-// Only the RULES hit_model HIT_MODEL_V10 uses this (ruleset.h); v7 keeps players.js' AABB.
+// Every mode but Prop Hunt traces them (hitboxes_active); Prop Hunt keeps players.js' padded AABB.
 #include <shared.h> // vec3, Player, PlayerStoredState, Weapon
 
 typedef enum {
@@ -74,6 +74,6 @@ void hitboxes_pose_player(const Player *target, const PlayerStoredState *state, 
 int hitboxes_trace_player(const Player *target, const PlayerStoredState *state, vec3 origin, vec3 step, int broad,
                           float *fraction, int *kind);
 
-// 1 when `game` traces players with these boxes: its ruleset's hit_model is HIT_MODEL_V10 and the
-// mode is not Prop Hunt (v10 keeps the padded AABB there, v10:172886).
+// 1 when `game` traces players with these boxes: every mode but Prop Hunt (v10 keeps the padded
+// AABB there, v10:172886).
 int hitboxes_active(const struct Game_t *game);

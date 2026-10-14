@@ -976,7 +976,7 @@ deviations and the tests are in `doc/v10/ranked-impl.md`. Summary:
   assists / damage / objective / reward / timeMs); new `turf-kills` frame (reliable) at the end of
   each eligible round.
 - Config: `brain.ranked.*` (`enabled`, `min_level` 10, `team_size` 4, `season` -1 = the calendar,
-  `ruleset` "v10", `host_regions` {"na": "<game-server region>"}, `rating_window` 150,
+  `host_regions` {"na": "<game-server region>"}, `rating_window` 150,
   `window_growth` 10, `window_max` 1000, `cooldown_s` 1800, `poll_timeout_s` 30,
   `creating_timeout_s`, `match_timeout_s`, `start_grace_s` 60) and `brain.turf.*` (`enabled`,
   `kr_per_kill` 1, `day` -1 = the clock, `settle_check_ms` 60000).

@@ -57,13 +57,16 @@
 #define MAX_CAND 512
 #define POLL_WAIT_MAX_S 20
 
+/* the Krunker version ranked matches play, recorded per match and sent in the host config: v10.0.2,
+ * the only version (shared/include/ruleset.h) */
+#define RANKED_RULESET "v10"
+
 static struct {
     Brain *b;
     int enabled;
     int min_level;
     int team_size;
     int season_override;          /* brain.ranked.season (-1 = the calendar) */
-    char ruleset[16];             /* brain.ranked.ruleset ("v10"): recorded per match, sent in the host config */
     char host_region[RANKED_REGION_COUNT][32]; /* game server region per ranked region ("" = any) */
     int poll_timeout_s, creating_timeout_s, match_timeout_s;
     double window, window_growth, window_max; /* display MMR */
@@ -847,7 +850,7 @@ static void host_match(const cJSON *m) {
     cJSON_AddBoolToObject(cfg, "ranked", 1);
     cJSON_AddStringToObject(cfg, "matchId", h->match_id);
     cJSON_AddStringToObject(cfg, "queue", "ranked");
-    cJSON_AddStringToObject(cfg, "ruleset", R.ruleset);
+    cJSON_AddStringToObject(cfg, "ruleset", RANKED_RULESET);
     cJSON_AddNumberToObject(cfg, "season", kn_json_num(m, "season", 0));
     cJSON_AddStringToObject(cfg, "rankedRegion", h->region);
     cJSON_AddNumberToObject(cfg, "teamSize", R.team_size);
@@ -941,7 +944,7 @@ static void tick(kn_loop *loop, void *ud) {
     snprintf(g, sizeof g, "%g", R.window_growth);
     snprintf(mx, sizeof mx, "%g", R.window_max);
     R.matching = 1;
-    if (kn_db_call(R.b->db, &P_RK_MATCH_RUN, KN_DB_ARGS(R.b->id, s, size, w, g, mx, list, R.ruleset), on_matches, NULL)) R.matching = 0;
+    if (kn_db_call(R.b->db, &P_RK_MATCH_RUN, KN_DB_ARGS(R.b->id, s, size, w, g, mx, list, RANKED_RULESET), on_matches, NULL)) R.matching = 0;
 }
 
 /* ================================================================ results */
@@ -1019,7 +1022,6 @@ int ranked_init(Brain *b) {
     if (R.team_size < 1) R.team_size = 1;
     if (R.team_size > RANKED_TEAM_SIZE) R.team_size = RANKED_TEAM_SIZE;
     R.season_override = (int) kn_config_int(cfg, "brain.ranked.season", -1);
-    snprintf(R.ruleset, sizeof R.ruleset, "%s", kn_config_str(cfg, "brain.ranked.ruleset", "v10"));
     /* the game-server region each ranked region hosts on: brain.ranked.host_regions {"na": "VA"} */
     const cJSON *hr = kn_config_get(cfg, "brain.ranked.host_regions");
     for (int i = 0; i < RANKED_REGION_COUNT; i++) {

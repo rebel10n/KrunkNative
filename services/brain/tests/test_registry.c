@@ -243,27 +243,33 @@ int main(void) {
         registry_free(v);
     }
 
-    /* version toggle: quick join stays within the client's ruleset (meta.ruleset, ?ruleset=);
-     * lobbies without one (servers from before the toggle) play v7; by id any ruleset joins */
+    /* Krunker v10.0.2 is the only version: quick join (?ruleset=v10 or none) skips a lobby that
+     * announces another one (a version-toggle server on v7.1.4); one that announces none is fine;
+     * by id any lobby joins */
     {
         Registry *v = registry_new();
         MmPolicy pv = {.cross_region = 1, .default_max_players = 8};
         MmNode *n1 = add_node(v, "RS1", "CH", 0);
         MmNode *n2 = add_node(v, "RS2", "CH", 0);
-        cJSON *t1 = cJSON_Parse("[\"seven\",\"CH\",2,8,{\"i\":\"Burg\",\"cs\":false}]");
-        cJSON *t2 = cJSON_Parse("[\"ten\",\"CH\",6,8,{\"i\":\"Burg\",\"cs\":false,\"ruleset\":\"v10\"}]");
+        cJSON *t1 = cJSON_Parse("[\"seven\",\"CH\",6,8,{\"i\":\"Burg\",\"cs\":false,\"ruleset\":\"v7\"}]");
+        cJSON *t2 = cJSON_Parse("[\"ten\",\"CH\",2,8,{\"i\":\"Burg\",\"cs\":false,\"ruleset\":\"v10\"}]");
         CHECK(registry_lobby_upsert(v, n1, t1) == 0 && registry_lobby_upsert(v, n2, t2) == 0);
         cJSON_Delete(t1);
         cJSON_Delete(t2);
         CHECK(!strcmp(registry_lobby(v, "RS1:seven", NULL)->ruleset, "v7") && !strcmp(registry_lobby(v, "RS2:ten", NULL)->ruleset, "v10"));
-        MmPickQuery q7 = {.region = "CH", .auto_change = 1, .now_ms = 2000};
-        CHECK(registry_pick(v, &pv, &q7, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "RS1:seven")); /* no ?ruleset= = v7 */
+        MmPickQuery qnone = {.region = "CH", .auto_change = 1, .now_ms = 2000};
+        CHECK(registry_pick(v, &pv, &qnone, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "RS2:ten")); /* no ?ruleset= = v10 */
         MmPickQuery q10 = {.region = "CH", .auto_change = 1, .now_ms = 2000, .ruleset = "v10"};
         CHECK(registry_pick(v, &pv, &q10, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "RS2:ten"));
-        MmPickQuery qid = {.region = "CH", .game_id = "RS2:ten", .auto_change = 0, .now_ms = 2000};
-        CHECK(registry_pick(v, &pv, &qid, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "RS2:ten"));
-        registry_lobby_remove(v, n1, "seven");
-        CHECK(registry_pick(v, &pv, &q7, &pick) == MM_PICK_NO_MATCH); /* only a v10 lobby left */
+        MmPickQuery qid = {.region = "CH", .game_id = "RS1:seven", .auto_change = 0, .now_ms = 2000};
+        CHECK(registry_pick(v, &pv, &qid, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "RS1:seven"));
+        registry_lobby_remove(v, n2, "ten");
+        CHECK(registry_pick(v, &pv, &q10, &pick) == MM_PICK_NO_MATCH); /* only a v7 lobby left */
+        cJSON *t3 = cJSON_Parse("[\"old\",\"CH\",1,8,{\"i\":\"Burg\",\"cs\":false}]");
+        CHECK(registry_lobby_upsert(v, n2, t3) == 0);
+        cJSON_Delete(t3);
+        CHECK(!registry_lobby(v, "RS2:old", NULL)->ruleset[0]);
+        CHECK(registry_pick(v, &pv, &q10, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "RS2:old")); /* none announced: fine */
         registry_free(v);
     }
 

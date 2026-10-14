@@ -3,8 +3,8 @@
 
 Run with ``python3 -I tools/ui-import/import.py --ui ui`` from the repository
 root (the Makefile target ``make ui-import`` does exactly that). ``--ref v7`` (the
-default) imports Krunker v7.1.4's pages; ``--ref v3`` the former Krunker v3.1.1 import
-(``ui/index.html`` hand-maintained, ``krunker-windows.js`` window templates).
+default) imports Krunker v7.1.4's pages into ``ui/``; ``--ref v10`` the live Krunker v10 site
+into ``ui/v10/``.
 
 With ``--ref v7`` the steps are: the menu page and its stylesheets (``index_page.py``),
 the window templates (``windows_v7.py``, from ``krunker-windows-v7.json.gz`` captured by
@@ -31,20 +31,10 @@ content changes):
    directory produces and ``client/src/html/engine/text.c`` consumes; when
    ``gen_liga.py`` is present its collector/writer are used directly so both
    tools emit byte-identical headers.
-3. Splits ``<ui>/js/krunker-windows.js`` (``window.KRUNKER_WINDOWS = {...}``)
-   into static files under ``<ui>/windows/``: ``<id>.html`` for each window
-   body, ``<id>-card.html`` / ``<id>-item.html`` / ``<id>-mapcard.html`` for
-   the per-item templates, ``settings-head.html`` and ``settings-tab-N.html``
-   for the settings window, and ``windows.json`` as the index. The HTML is
-   written byte-identically (UTF-8, no reformatting).
-4. Keeps a copy of the source JS at ``tools/ui-import/krunker-windows.js`` so
-   that re-runs keep working after ``<ui>/js/krunker-windows.js`` is deleted.
-
 Dependencies: ``fonttools`` and ``brotli`` (``pip install fonttools brotli``).
 """
 
 import argparse
-import json
 import os
 import re
 import sys
@@ -58,19 +48,14 @@ FONT_FACE_RE = re.compile(r"@font-face\s*\{(.*?)\}", re.S)
 FAMILY_RE = re.compile(r"font-family\s*:\s*(['\"]?)([^;'\"]+)\1\s*;", re.I)
 URL_RE = re.compile(r"url\(\s*(['\"]?)([^)'\"]+)\1\s*\)", re.I)
 
-JS_PREFIX_RE = re.compile(r"window\.KRUNKER_WINDOWS\s*=\s*", re.S)
-
 LIGA_HEADER_REL = os.path.join("client", "src", "html", "engine", "material_icons_liga.h")
 LIGA_OUTLINED_REL = os.path.join("client", "src", "html", "engine", "material_icons_outlined_liga.h")
 
 REFS = {
-    "v3": {"public": "/home/user/jails/kru/src/Krunker_v3.1.1/public", "manifest": "menu-assets.txt"},
     "v7": {"public": "/home/user/jails/kru/src/Krunker_v7.1.4/public", "manifest": "menu-assets-v7.txt"},
     # the live krunker.io site (Krunker v10), mirrored by fetch_live_site.py; written to <ui>/v10/
     "v10": {"public": os.path.expanduser("~/.cache/kn-v10/live/site/public"), "manifest": "menu-assets-v7.txt",
             "client_js": os.path.expanduser("~/Downloads/v10.0.2.js")},
-    # Krunker v1.5.6's menu page alone, into <ui>/v156/ (v156_page.py)
-    "v156": {"public": "/home/user/jails/kru/src/Krunker_v1.5.6/public"},
 }
 
 
@@ -297,106 +282,17 @@ def generate_liga_header(font_path, header_path, prefix=None):
 
 
 # ---------------------------------------------------------------------------
-# 3. krunker-windows.js -> ui/windows/
-# ---------------------------------------------------------------------------
-
-def parse_windows_js(text):
-    m = JS_PREFIX_RE.search(text)
-    if not m:
-        raise SystemExit("krunker-windows.js: `window.KRUNKER_WINDOWS =` not found")
-    body = text[m.end():].rstrip()
-    if body.endswith(";"):
-        body = body[:-1].rstrip()
-    # The object literal is strict JSON (generated); keep key order.
-    return json.loads(body)
-
-
-TEMPLATE_KEYS = (("card", "card"), ("item", "item"), ("mapCard", "mapcard"))
-
-
-def split_windows(data, out_dir):
-    index = {"windows": {}, "settings": {}}
-    written = 0
-    files = []
-
-    def emit(name, html):
-        nonlocal written
-        path = os.path.join(out_dir, name)
-        if write_if_changed(path, html):
-            written += 1
-        files.append((name, len(html.encode("utf-8"))))
-
-    for wid, win in data.get("windows", {}).items():
-        entry = {}
-        entry["header"] = win.get("header", "")
-        entry["sticky"] = bool(win.get("sticky", False))
-        html_name = "%s.html" % wid
-        emit(html_name, win.get("html", ""))
-        entry["file"] = html_name
-        for key, suffix in TEMPLATE_KEYS:
-            if key in win:
-                tname = "%s-%s.html" % (wid, suffix)
-                emit(tname, win[key])
-                entry[key] = tname
-        for key, value in win.items():
-            if key in ("header", "sticky", "html", "card", "item", "mapCard"):
-                continue
-            if isinstance(value, (int, float, bool, str)) or value is None:
-                entry[key] = value  # pass-through scalars such as itemCount
-        index["windows"][wid] = entry
-
-    settings = data.get("settings")
-    if settings is not None:
-        s = {}
-        if "header" in settings:
-            s["header"] = settings["header"]
-        if "sticky" in settings:
-            s["sticky"] = bool(settings["sticky"])
-        emit("settings-head.html", settings.get("head", ""))
-        s["head"] = "settings-head.html"
-        tabs = []
-        for i, tab in enumerate(settings.get("tabs", [])):
-            tname = "settings-tab-%d.html" % i
-            emit(tname, tab)
-            tabs.append(tname)
-        s["tabs"] = tabs
-        index["settings"] = s
-
-    index_text = json.dumps(index, indent=2, ensure_ascii=False) + "\n"
-    if write_if_changed(os.path.join(out_dir, "windows.json"), index_text):
-        written += 1
-    files.append(("windows.json", len(index_text.encode("utf-8"))))
-    return index, files, written
-
-
-def resolve_windows_source(ui_dir):
-    live = os.path.join(ui_dir, "js", "krunker-windows.js")
-    copy = os.path.join(HERE, "krunker-windows.js")
-    if os.path.exists(live):
-        with open(live, "rb") as fh:
-            data = fh.read()
-        if write_if_changed(copy, data):
-            log("copied %s -> %s" % (os.path.relpath(live, REPO), os.path.relpath(copy, REPO)))
-        return live, data
-    if os.path.exists(copy):
-        log("using archived source %s (%s is gone)" % (os.path.relpath(copy, REPO), os.path.relpath(live, REPO)))
-        with open(copy, "rb") as fh:
-            return copy, fh.read()
-    raise SystemExit("no krunker-windows.js found at %s or %s" % (live, copy))
-
-
-# ---------------------------------------------------------------------------
 
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--ui", default=os.path.join(REPO, "ui"), help="ui directory (default: <repo>/ui)")
     ap.add_argument("--ref", choices=sorted(REFS), default="v7",
-                    help="Krunker reference to import (default v7; v10 = the live site into <ui>/v10/, v156 = v1.5.6's menu into <ui>/v156/)")
+                    help="Krunker reference to import (default v7; v10 = the live site into <ui>/v10/)")
     ap.add_argument("--public", default=None, help="the reference's public/ tree (default per --ref)")
     ap.add_argument("--client-js", default=None,
                     help="v10: the live client script, parsed (never run) by v10_bundle.js for the Svelte menu")
     ap.add_argument("--viewer-store", action="store_true",
-                    help="also regenerate client/src/viewer/viewer_store_table.c (v3 always does when node is there)")
+                    help="also regenerate client/src/viewer/viewer_store_table.c")
     ap.add_argument("--windows-out", default=None, help="output dir for window files (default: <ui>/windows)")
     ap.add_argument("--liga-header", default=os.path.join(REPO, LIGA_HEADER_REL),
                     help="generated C header path (default: %s)" % LIGA_HEADER_REL)
@@ -417,17 +313,14 @@ def main(argv):
     windows_out = os.path.abspath(args.windows_out or os.path.join(ui_dir, "windows"))
     ref = REFS[args.ref]
     public = os.path.abspath(args.public or ref["public"])
-    v7 = args.ref == "v7"
     sys.path.insert(0, HERE)
     if args.ref == "v10":
         return import_v10(args, ui_dir, public, ref)
-    if args.ref == "v156":
-        return import_v156(args, ui_dir, public)
-    if v7:
-        # the page first: fonts, windows and assets read what it links
-        import index_page  # tools/ui-import/index_page.py
-        index_page.import_index(ui_dir, write_if_changed, log, public)
-        index_page.import_shared_css(ui_dir, write_if_changed, log, public)
+    v7 = True  # the page modules below still take a v7 flag (False was the removed --ref v3 import)
+    # the page first: fonts, windows and assets read what it links
+    import index_page  # tools/ui-import/index_page.py
+    index_page.import_index(ui_dir, write_if_changed, log, public)
+    index_page.import_shared_css(ui_dir, write_if_changed, log, public)
 
     if not args.no_fonts:
         try:
@@ -436,14 +329,13 @@ def main(argv):
         except ImportError as exc:
             raise SystemExit("missing dependency (%s): pip install fonttools brotli" % exc)
         os.environ.setdefault("SOURCE_DATE_EPOCH", "0")  # deterministic head.modified in saved TTFs
-        if v7:
-            # every font file an imported stylesheet names (the woff2s are converted below)
-            for family, woff2 in font_face_woff2s(ui_dir):
-                rel = os.path.relpath(woff2, ui_dir)
-                src = os.path.join(public, rel)
-                if os.path.isfile(src):
-                    with open(src, "rb") as fh:
-                        write_if_changed(woff2, fh.read())
+        # every font file an imported stylesheet names (the woff2s are converted below)
+        for family, woff2 in font_face_woff2s(ui_dir):
+            rel = os.path.relpath(woff2, ui_dir)
+            src = os.path.join(public, rel)
+            if os.path.isfile(src):
+                with open(src, "rb") as fh:
+                    write_if_changed(woff2, fh.read())
         material_woff2 = outlined_woff2 = None
         for family, woff2 in font_face_woff2s(ui_dir):
             ttf = convert_woff2(family, woff2, args.force)
@@ -462,20 +354,11 @@ def main(argv):
             count, changed = generate_liga_header(outlined_woff2, header, "material_icons_outlined")
             log("%s %s: %d ligatures" % ("wrote" if changed else "unchanged", LIGA_OUTLINED_REL, count))
 
-    if not args.no_windows and v7:
+    if not args.no_windows:
         import windows_v7  # tools/ui-import/windows_v7.py
         windows_v7.split_windows_v7(windows_out, write_if_changed, log)
         with open(os.path.join(public, "docs", "versions.txt"), "rb") as fh:  # the Changelog source
             write_if_changed(os.path.join(windows_out, "versions.txt"), fh.read())
-    elif not args.no_windows:
-        src, data = resolve_windows_source(ui_dir)
-        parsed = parse_windows_js(data.decode("utf-8"))
-        index, files, written = split_windows(parsed, windows_out)
-        total = sum(size for _, size in files)
-        log("%s -> %s: %d files (%d bytes), %d rewritten" % (
-            os.path.relpath(src, REPO), os.path.relpath(windows_out, REPO), len(files), total, written))
-        for name, size in files:
-            log("  %-24s %8d bytes" % (name, size))
 
     if not args.no_editor:
         import editor_page  # Krunker's editor.html + its stylesheets (tools/ui-import/editor_page.py)
@@ -485,9 +368,9 @@ def main(argv):
         social_page.import_social(ui_dir, write_if_changed, log, public, v7)
     if not args.no_viewer:
         import viewer_page  # Krunker's viewer.html, dat.gui's stylesheet, the viewer store tables (tools/ui-import/viewer_page.py)
-        viewer_page.import_viewer(ui_dir, write_if_changed, log, public, store_table=args.viewer_store or not v7)
+        viewer_page.import_viewer(ui_dir, write_if_changed, log, public, store_table=args.viewer_store)
     if not args.no_assets:
-        import menu_assets  # every image the pages and the C UI reference (tools/ui-import/menu-assets*.txt)
+        import menu_assets  # every image the pages and the C UI reference (tools/ui-import/menu-assets-v7.txt)
         menu_assets.import_menu_assets(ui_dir, write_if_changed, log, public, os.path.join(HERE, ref["manifest"]), auto=v7)
     return 0
 
@@ -555,25 +438,6 @@ def import_v10(args, ui_dir, public, ref):
             log("v10: %d .webp.png sidecars written" % sidecars)
     return 0
 
-
-def import_v156(args, ui_dir, public):
-    """--ref v156: Krunker v1.5.6's menu page into <ui>/v156/ (v156_page.py), its fonts (+ .ttf) and
-    every file the page and its stylesheets reference. No windows, editor, social or viewer page."""
-    import menu_assets
-    import v156_page
-    out = v156_page.import_v156(ui_dir, write_if_changed, log, public)
-    if not args.no_assets:
-        v156_page.import_page_files(out, write_if_changed, log, public, menu_assets.collect_page_refs)
-    if not args.no_fonts:
-        try:
-            import fontTools  # noqa: F401
-            import brotli  # noqa: F401
-        except ImportError as exc:
-            raise SystemExit("missing dependency (%s): pip install fonttools brotli" % exc)
-        os.environ.setdefault("SOURCE_DATE_EPOCH", "0")
-        for family, woff2 in font_face_woff2s(out):
-            convert_woff2(family, woff2, args.force)  # the woff2 itself came with the page files
-    return 0
 
 if __name__ == "__main__":
     sys.exit(main(sys.argv[1:]))

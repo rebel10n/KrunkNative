@@ -19,7 +19,6 @@
 // cheats), no idle kicks. The sandbox plays as a hosted game, so every map's embedded "config"
 // applies (WP-E, decisions.md "Embedded map config") and reaches this client as GAME_CONFIG.
 #include <client.h>
-#include <ruleset_ui.h>
 #include <server_sandbox.h>
 #include <map_catalog.h>
 #include <ks_storage.h> // WP6: the sandbox's offline GAME.STORAGE / Save Data store
@@ -203,7 +202,6 @@ int local_game_start(Client *client) {
     for (size_t i = 0; pick && i < client->game.map_count; i++) {
         if (client->game.maps[i] == pick) map_index = (int) i;
     }
-    client_ruleset_before_offline(client); // the sandbox plays the saved Krunker version (ruleset_ui.h)
     return offline_begin(client, map_index);
 }
 

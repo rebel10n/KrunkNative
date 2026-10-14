@@ -1,6 +1,8 @@
-// Krunker v7.1.4 mode table (src/data/gameModes.js -> gameModes/*.js; the readable copies are
-// src/modes/<id>.js): every entry in table order, so the index is the id the server sends in
-// "init". The function hooks (conditions, winConditions, waitTimer triggers, onKill, update,
+// Krunker v10.0.2's mode table (doc/v10/gameplay.md section 6; v10.js mode list v10:105413): the
+// same 37 modes in the same order as v7.1.4 (src/data/gameModes.js -> gameModes/*.js; the readable
+// copies are src/modes/<id>.js), with v10's changes marked "v10:N" (line N of the renamed 10.0.2
+// bundle; Gun Game, Stalker, Raid, Kranked FFA): every entry in table order, so the index is the id
+// the server sends in "init". The function hooks (conditions, winConditions, waitTimer triggers, onKill, update,
 // collisionCheck, gameStart, endSort) live in mode_rules.c, mode_objectives.c, mode_dom.c,
 // mode_deposit.c and mode_zombies.c; this file holds the data and the mode-key accessors.
 // v7 has no ranked mode: ids 37 / 38 stay reserved for ranked (modes.h, doc/v7/decisions.md "Ranked").
@@ -68,7 +70,8 @@ static const char *const k_lead_md[] = {"score", "kills", "pickups", NULL};
 static const char *const k_lead_zom[] = {"points", "zombies", "downs", "dmg", NULL};
 
 // gun.js weaponOrder (v3.1.1 [2,16,10,4,11,5,3,9,1,14,6,0,7,8,13,15,12]: adds 27, 21, 18, 22, drops 15)
-static const int k_gun_order[] = {2, 27, 16, 10, 4, 11, 21, 5, 3, 9, 1, 14, 6, 0, 18, 7, 8, 13, 22, 12};
+// v10:105580: v7.1.4's order with 28 (Charge Rifle) after 0 (Sniper)
+static const int k_gun_order[] = {2, 27, 16, 10, 4, 11, 21, 5, 3, 9, 1, 14, 6, 0, 28, 18, 7, 8, 13, 22, 12};
 static const int k_gun_start[] = {2};
 static const int k_aon_start[] = {16};
 static const int k_md_start[] = {2};
@@ -98,7 +101,7 @@ static const ModeWaitTimer k_wait_prop[] = {
 static const ModeWaitTimer k_wait_boss[] = {
     {.time = 15.0f, .msg = "picking boss in ", .trigger = mode_trigger_pick_boss},
 };
-static const ModeWaitTimer k_wait_stalk[] = {
+static const ModeWaitTimer k_wait_stalk[] = { // v10:104380-104384 (v10's pickStalker)
     {.time = 15.0f, .msg = "picking stalker in ", .trigger = mode_trigger_pick_stalker},
 };
 static const ModeWaitTimer k_wait_oinc[] = {
@@ -188,13 +191,22 @@ const GameModeConfig g_mode_configs[MODE_COUNT] = {
         .game_start = mode_start_rand_objective, .leader_sort = mode_leader_sort_depo, .end_sort = mode_sort_depo,
         .win_condition = mode_win_tag_teams, .condition = mode_cond_tag_limit, .on_kill = mode_kill_deposit,
         .update = mode_update_deposit},
+    // the v10.0.2 rework (v10:104350-104437): wall jumps (wallJ / wallJM 100 / wallJD 0.2 / wallJV 0.04 /
+    // wallJYV 1.2), canSlide = isStalker, onKill (jump scare + heal 50), update (camping turns the Living
+    // Dizzy), onMelee as a damage factor, pickStalker health floor(200 + 50 x (players - 1)) and the
+    // stalker's own moves (leap, wall stick, coyote time: shared/src/player.c, stalker_v10). Not ported:
+    // the stalk event / tag ["Event", ...] (menu lists), the Stalker model opacity 0.1 and hiding a still
+    // stalker (render), STALKER_PICKED / the leap HUD timer and stalker taunts (HUD).
     [MODE_ID_STALK] = {BASE, .id = MODE_ID_STALK, .key = "stalk", .name = "Stalker", .alias = "stalk",
         .end_stats = k_stats_stalk, .amb_ind = 5, .min_players = 2, .has_fog_dist = 1, .fog_dist = 250.0f,
         .has_fog_col = 1, .fog_col = 1842204, .has_sky_col = 1, .sky_col = 1842204,
         .has_light_col = 1, .light_col = 855309, .has_amb_col = 1, .amb_col = 1513239,
         .lives = 1, .condition = mode_cond_stalk, .win_condition = mode_win_team2_active, WAIT(k_wait_stalk),
         .hide_names = 1, .no_reward = 1, .no_kick = 1, .teams = 1, .team_options = {"Living", "Stalker"},
-        .speed_mlt = {1.0f, 0.65f, 1.0f, 1.0f, 1.0f, 1.0f}},
+        .speed_mlt = {1.0f, 0.65f, 1.0f, 1.0f, 1.0f, 1.0f},
+        .has_wall_jump = 1, .wall_jump = 1.0f, .wall_jump_max = 100.0f, .wall_jump_d = 0.2f, .wall_jump_v = 0.04f,
+        .wall_jump_yv = 1.2f, .stalker_v10 = 1, .on_kill = mode_kill_stalk, .update = mode_update_stalk,
+        .on_melee = mode_melee_stalk},
     // king.js (rewritten in v7): random hills, +objScore 10 only for a lone occupant, kill bonuses
     [MODE_ID_KING] = {BASE, .id = MODE_ID_KING, .key = "king", .name = "King of the Hill", .alias = "king",
         .end_stats = k_stats_obj, .objective = 1, .kill_mlt = 0.15f, .hill_mlt = 0.05f, .obj_score = 10,
@@ -227,12 +239,14 @@ const GameModeConfig g_mode_configs[MODE_COUNT] = {
         .team_colors = {"#37ad47", "#d13838"}, .show_team = 1, .no_regen = 1, .fake_names = 1, .no_score_k = 1,
         .dmg_team = 1, .win_condition = mode_win_lives, .condition = mode_cond_teams_alive, WAIT(k_wait_trai),
         .no_reward = 1, .min_players = 3, .on_kill = mode_kill_trai},
-    // raid.js v7: hostable again (hostType 4), new winCondition / condition, onEnd times
+    // raid.js v7: hostable again (hostType 4), new winCondition / condition, onEnd times; v10 gameTime
+    // 1500000 (25 min, v10:104536; v7.1.4 360000). Not ported: v10's noProfileStats, runPeakPlayers, the
+    // raid challenges (rnodmg, r1hp, rnogun, rsolo, rsolofull) and onAIDeath "aik" (challenge service).
     [MODE_ID_RAID] = {BASE, .id = MODE_ID_RAID, .key = "raid", .name = "Raid", .alias = "raid", .event = 0, .party = 1,
         .rand_class_scr = 0.5f, .send_rate = 5, .end_stats = k_stats_raid, .show_ms = 1, .no_regen = 1, .lives = 1,
         .min_players = 1, WAIT(k_wait_raid), .win_condition = mode_win_raid, .condition = mode_cond_raid,
         .on_end = mode_end_raid, .no_weapons = 1, .friendly = 1, .no_clan = 1, .no_free_cam = 1, .view_dis = 500.0f,
-        .game_time = 360.0f, .bots_as_ai = 1, .no_assists = 1, .bot_bypass_class = 1, .no_minimap = 1},
+        .game_time = 1500.0f, .bots_as_ai = 1, .no_assists = 1, .bot_bypass_class = 1, .no_minimap = 1},
     [MODE_ID_BLITZ] = {BASE, .id = MODE_ID_BLITZ, .key = "blitz", .name = "Blitz", .alias = "blitz",
         .end_stats = k_stats_blitz, .on_kill = mode_kill_flag, .rush = 1, .flags = 1, .teams = 1, .no_score_c = 1},
     [MODE_ID_DOM] = {BASE, .id = MODE_ID_DOM, .key = "dom", .name = "Domination", .alias = "dom",
@@ -241,7 +255,8 @@ const GameModeConfig g_mode_configs[MODE_COUNT] = {
         .collision_check = mode_collision_dom, .on_kill = mode_kill_dom},
     [MODE_ID_SDM] = {BASE, .id = MODE_ID_SDM, .key = "sdm", .name = "Squad Deathmatch", .alias = "sdm",
         .end_stats = k_stats_tdm, .teams = 1, .multi_team = 4},
-    [MODE_ID_KRANK] = {BASE, .id = MODE_ID_KRANK, .key = "krank", .name = "Kranked FFA", .alias = "krank", .party = 1,
+    // v10: party false and the Party tag removed (v10:104640)
+    [MODE_ID_KRANK] = {BASE, .id = MODE_ID_KRANK, .key = "krank", .name = "Kranked FFA", .alias = "krank",
         .end_stats = k_stats_def, .leader_stats = k_lead_skd, .force_spawn = 5.0f, .kranked_timer = 15.0f,
         .bonus_speed = 1.25f, .bonus_reload = 0.35f, .bonus_fire_rate = 0.85f,
         .update = mode_update_krank, .on_kill = mode_kill_krank},
@@ -296,16 +311,12 @@ int mode_count(void) {
 }
 
 const GameModeConfig *mode_config(const int id) {
-    // the process ruleset's table (ruleset.h; v7.1.4's is g_mode_configs itself)
-    const Ruleset *rules = ruleset_current();
-    const GameModeConfig *table = rules->modes ? rules->modes : g_mode_configs;
-    return id >= 0 && id < MODE_COUNT && (size_t) id < (rules->modes ? rules->mode_count : MODE_COUNT) ? &table[id] : NULL;
+    return id >= 0 && id < MODE_COUNT ? &g_mode_configs[id] : NULL;
 }
 
 const GameModeConfig *mode_list(int *count) {
     if (count) *count = MODE_COUNT;
-    const Ruleset *rules = ruleset_current();
-    return rules->modes ? rules->modes : g_mode_configs;
+    return g_mode_configs;
 }
 
 const char *mode_name(const int id) {

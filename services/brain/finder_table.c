@@ -320,7 +320,7 @@ cJSON *finder_list(FinderTable *t, const FinderFilter *f, uint64_t now_ms) {
         cJSON_AddNumberToObject(o, "commit_time", (double) kn_json_int(info, "commit_time", 0));
         copy_str(o, info, "build_time");
         copy_str(o, info, "protocol");
-        copy_str(o, info, "ruleset"); /* the Krunker version (ruleset.h key); absent = v7 */
+        copy_str(o, info, "ruleset"); /* the Krunker version (ruleset.h key, "v10"); absent = a server from before the version toggle */
         cJSON_AddNumberToObject(o, "ping_ms", e->ping_ms);
         cJSON_AddNumberToObject(o, "last_seen", (double) e->last_ok_wall_s);
         cJSON_AddItemToArray(arr, o);

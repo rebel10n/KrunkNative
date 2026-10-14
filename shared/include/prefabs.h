@@ -102,7 +102,7 @@ typedef struct {
     unsigned short roles;        // PREFAB_R_*
 } PrefabInfo;
 
-// NULL for ids outside 0..98 (the tables of every dialect; map_dialect_prefab_count says which a map may use).
+// NULL for ids outside 0..98 (Krunker v10.0.2's table; maps may use every id).
 const PrefabInfo *prefab_info(int id);
 const PrefabData *prefab_data(int id);
 int prefab_has_flag(int id, PrefabFlag flag);

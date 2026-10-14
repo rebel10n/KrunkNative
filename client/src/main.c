@@ -1,6 +1,5 @@
 #include <gl.h>
 #include <GLFW/glfw3.h>
-#include <ruleset_ui.h> // the Krunker version toggle
 #include <client.h>
 #include <cosmetics.h>
 #include <skin_fx.h>
@@ -16,6 +15,8 @@
 #include <input_script.h> // KRUNKNATIVE_INPUT_SCRIPT movement/feel test driver
 #include <frame_target.h>  // web: the frame draws offscreen, the canvas gets it whole
 #include <html_ui.h>
+#include <html_dom.h> // html_storage_*: the version toggle's old knRuleset entry
+#include <ruleset.h>  // the startup log: Krunker v10.0.2
 #include <object_manager.h> // object_manager_restore_map (client_unload_map)
 #include <ui_logic.h> // keybinds, chat and input settings (client/src/ui/ui_controls.c), every build
 #include <console.h>   // developer console pointer hooks (client/src/ui/ui_console.c)
@@ -714,9 +715,10 @@ int main(int argc, char **argv) {
 
     if (!SCENARIO_ACTIVE()) audio_init();
 
-    // Krunker version (Settings > General "Game version", ruleset_ui.h): the process ruleset and,
-    // natively, its page tree (KRUNKNATIVE_UI_DIR = ui/<dir> when it exists), before the page loads
-    client_ruleset_startup();
+    // Krunker v10.0.2 is the only version (shared/include/ruleset.h): the version toggle's saved
+    // choice (storage "knRuleset") means nothing any more and is removed
+    if (html_storage_get("knRuleset", NULL, 0) >= 0) html_storage_set("knRuleset", NULL);
+    printf("[client] Krunker v%s\n", ruleset_current()->version);
 
     // HTML/CSS menu (doc/html-ui-engine.md). ui/ sits next to assets/; natively the
     // in-house engine (client/src/html/engine) renders it over the scene, on the web
@@ -1177,8 +1179,6 @@ void client_send_cycle_packet(Client *client) {
 // INIT: a new session or round on map init->map_index (already resolved to the
 // client's own map list by client_map_prepare_init).
 void client_apply_init(Client *client, const NetInitPacket *init) {
-    // the server's Krunker version (INIT.ruleset): adopted for the session, refused when missing
-    if (!client_ruleset_on_init(client, init)) return;
     client->net_ent_size = net_ent_size_for(init->major, init->minor, init->patch);
     client->net_server_minor = init->major == NET_PROTOCOL_MAJOR ? init->minor : 0; // WP-B packet gate
     client->net_client_id = init->client_id;

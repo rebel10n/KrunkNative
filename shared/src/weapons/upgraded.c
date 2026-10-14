@@ -1,6 +1,5 @@
 #include <string.h>
 #include <weapons.h>
-#include <ruleset.h>
 
 // Krunker v7.1.4 src/data/upgradeWeapons.js: a second 29-entry table indexed like weapons.js
 // (`upgraded: true`), used for a loadout slot a krumMachine upgraded (player.upgrades[slot]).
@@ -23,11 +22,21 @@ static void burst(Weapon *w, const unsigned int count, const float rate) {
     w->burst_rate = rate;
 }
 
+// The base entries: v10.0.2's upgradeWeapons table (v10:175073) is v7.1.4's unchanged, independent
+// of the v10 balance pass (its Zombie Assaulter keeps dmgDrop 5 and the Pistol swapTime 260), so it
+// builds on the v7.1.4 definitions (shared/src/weapons/), not on the ruleset's rebalanced copies.
+static const Weapon *const k_base[WEAPON_COUNT] = {
+    &g_awp, &g_ak47, &g_pistol, &g_smg, &g_revolver,
+    &g_shotgun, &g_lmg, &g_semi_auto, &g_rpg,
+    &g_akimbo, &g_deagle, &g_alien_blaster, &g_knife,
+    &g_crossbow, &g_famas, &g_sawed_off, &g_auto_pistol,
+    &g_bomb, &g_blaster,
+    &g_build_tool, &g_grappler, &g_tehchy9, &g_noob_tube, &g_slimer,
+    &g_zapper, &g_minigun, &g_war_machine, &g_akimbo_pistol, &g_charge_rifle,
+};
+
 static void build(void) {
-    // Always v7.1.4's base entries: v10.0.2's upgradeWeapons table (v10:175073) is v7's
-    // unchanged, independent of the v10 balance pass (its Zombie Assaulter keeps dmgDrop 5 and
-    // the Pistol swapTime 260), so building from the current ruleset would be wrong under v10.
-    const Weapon *const *base = ruleset_get(RULESET_V7_1_4)->weapons;
+    const Weapon *const *base = k_base;
     for (int i = 0; i < WEAPON_COUNT; i++) {
         g_upgraded[i] = *base[i];
         Weapon *w = &g_upgraded[i];

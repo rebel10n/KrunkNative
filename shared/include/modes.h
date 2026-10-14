@@ -302,16 +302,14 @@ typedef struct {
     const int *disabled_streaks;     // disabledStreaks (streaks.js indices)
     int disabled_streak_count;
 
-    // ---- Krunker v10.0.2 mode keys (doc/v10/gameplay.md section 6; only the v10 mode table sets them)
-    ModeMeleeFn on_melee;            // onMelee as a melee damage factor (v10 Stalker); NULL = v7's rule
+    // ---- Krunker v10.0.2 mode keys (doc/v10/gameplay.md section 6)
+    ModeMeleeFn on_melee;            // onMelee as a melee damage factor (v10 Stalker); NULL = none
     unsigned char stalker_v10:1;     // the v10 Stalker rework: the stalker's leap (input[6]), wall stick,
                                      // coyote time and notWallJ walls; canSlide = isStalker (only it slides)
 } GameModeConfig;
 
 extern const GameModeConfig g_default_game_mode_config;
-extern const GameModeConfig g_mode_configs[MODE_COUNT];   // v7.1.4 (shared/src/modes/modes.c)
-extern GameModeConfig g_mode_configs_v10[MODE_COUNT];     // v10.0.2 (shared/src/rules/v10/modes_v10.c, modes_v10_build)
-void modes_v10_build(void);                               // fills g_mode_configs_v10 once (ruleset_get / set_current)
+extern const GameModeConfig g_mode_configs[MODE_COUNT];   // Krunker v10.0.2's (shared/src/modes/modes.c)
 // map.js rotationModes: the public rotation (FFA, Hardpoint, CTF, Kill Confirmed, Domination).
 extern const int g_rotation_modes[5];
 

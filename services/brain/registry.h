@@ -36,7 +36,7 @@ typedef struct MmLobby {
     char map[64];
     char version[32];                /* meta.v */
     int proto_major;                 /* meta.proto "M.m" major (-1 = not announced: a 1.x server) */
-    char ruleset[8];                 /* meta.ruleset "v7" / "v10" (ruleset.h; absent = "v7", a server from before the toggle) */
+    char ruleset[8];                 /* meta.ruleset "v10" (ruleset.h; "v7" a version-toggle server on v7.1.4; "" not announced) */
     int time_left;                   /* meta.timeLeft: seconds left in the round (0 = end screen, -1 unknown) */
     int no_seek;                     /* v7.1.4 meta.sk === false (AUTO_SEEK off): joined by id only */
     cJSON *tuple;                    /* owned: [gameId, region, players, max, meta] */
@@ -190,9 +190,9 @@ typedef struct MmPickQuery {
     int64_t now_ms;
     int proto_major;               /* client's protocol major (seek ?proto=): never matched to a
                                     * lobby announcing another one; 0 = any */
-    const char *ruleset;           /* seek ?ruleset= "v7" / "v10": quick join only picks lobbies playing it
-                                    * (NULL/"" = v7, what every client before the version toggle plays); a
-                                    * requested ?game= of another version is fine (the client adopts it) */
+    const char *ruleset;           /* seek ?ruleset= (NULL/"" = "v10", the only version): quick join skips
+                                    * lobbies announcing another one (meta.ruleset "v7"); a lobby that
+                                    * announces none and a requested ?game= are not filtered */
     /* outdated lobbies (releases.c, release_info.h rule) lose ties: an up-to-date lobby with
      * room is picked over any outdated one. NULL = no preference. */
     int (*outdated)(const MmLobby *l, void *ud);

@@ -15,7 +15,6 @@
 // natively ends the main loop (glfwSetWindowShouldClose) so main.c runs its normal
 // shutdown. The web build keeps the item hidden, like krunker.io in a browser.
 #include <client_settings.h>
-#include <ruleset_ui.h> // Settings > General "Game version"
 #include <ui_logic.h>
 #include <backend_ui.h> // servers_ui_region_options (Default Region)
 #include <discord_rpc.h>
@@ -613,7 +612,6 @@ static char **read_cmdline(void) {
 void client_settings_before_exec(void) {
     // the next process reads the settings again: drop what this one put into the environment
     if (!g_cs.brain_env_was_set) set_env("KRUNKNATIVE_BRAIN_URL", NULL);
-    client_ruleset_env_cleanup(); // the next process picks the page of the saved Game version
     if (g_cs.audio_env_set) set_env("KRUNKNATIVE_AUDIO_BACKEND", NULL);
 }
 
@@ -1012,93 +1010,13 @@ static char *extend_sound_tab(const char *tab) {
     return sb_finish(&sb);
 }
 
-// Version toggle (ruleset_ui.h): General > Localization's first row, "Game version". v3.1.1 is its
-// menu page over the v7.1.4 ruleset (native only; the web lists it disabled). Shown in both views
-// and in uidiff only when asked (clientChrome), so the captured v7 tabs stay pixel-identical.
 static char *ui_client_settings_extend_tab_rest(const char *tab);
-static void rerender(void);
-
-static void append_game_version_row(StrBuf *sb) {
-    const ClientGameVersion *saved = client_game_version_saved();
-    sb_append(sb, "<div class=\"settName\" id=\"knGameVersionRow\" title=\"The Krunker version of offline games and quick join; "
-                  "a server you join plays its own. A different menu page loads after a restart. "
-                  "v3.1.1 shows its own menu and plays v7.1.4 rules until its gameplay is ported\">Game version "
-                  "<span style=\"color: #eb5656\">*</span> <select id=\"knGameVersion\" onchange=\"knSetRuleset(this.value)\" class=\"inputGrey2\">");
-    const int v156 = client_page_v156_saved(); // menu page only (ruleset_page_v156.c): saved reads v7
-#ifndef __EMSCRIPTEN__
-    sb_appendf(sb, "<option value=\"%s\"%s>v1.5.6 (menu only, plays v7.1.4)</option>", CLIENT_PAGE_V156_KEY, v156 ? " selected=\"\"" : "");
-#endif
-    int count = 0;
-    const ClientGameVersion *versions = client_game_versions(&count);
-    for (int i = 0; i < count; i++) {
-        const ClientGameVersion *v = &versions[i];
-        const int available = client_game_version_available(v);
-        sb_appendf(sb, "<option value=\"%s\"%s%s>v%s%s</option>", v->key, v == saved && !v156 ? " selected=\"\"" : "",
-                   available ? "" : " disabled=\"\"", v->version,
-                   !available ? " (desktop client)" : v->stand_in ? " (menu only, plays v7.1.4)" : "");
-    }
-    sb_append(sb, "</select></div>");
-}
-
-static char *extend_general_tab(const char *tab) {
-    if (!tab || !chrome_visible()) return NULL;
-    const char *body = strstr(tab, "id=\"setBod_local\">");
-    if (!body) return NULL;
-    body += strlen("id=\"setBod_local\">");
-    StrBuf sb = {0};
-    sb_append_n(&sb, tab, (size_t) (body - tab));
-    append_game_version_row(&sb);
-    sb_append(&sb, body);
-    return sb_finish(&sb);
-}
-
-static void ruleset_restart_answered(const int accepted, const char *text, void *user) {
-    (void) text;
-    (void) user;
-    if (accepted) restart_client();
-}
-
-// knSetRuleset(value) / the console's `ruleset`: save, then offer the restart a page change needs
-void ui_client_settings_select_ruleset(const char *value) {
-    Client *client = g_cs.client ? g_cs.client : menu_ui()->client;
-    const ClientRulesetResult r = client_ruleset_select(client, value);
-    rerender(); // an open Settings window shows the new choice (the console sets it too)
-    const ClientGameVersion *saved = client_game_version_saved();
-    const char *notice = client_game_version_notice(saved); // v3.1.1: its menu, v7.1.4's rules
-    if (r == CLIENT_RULESET_UNAVAILABLE) {
-        ui_notify("Krunker v3.1.1 is available in the desktop client only");
-    } else if (r == CLIENT_RULESET_SAVED_RELOAD) {
-        char text[256];
-        if (client_page_v156_saved())
-            snprintf(text, sizeof(text), "The Krunker v1.5.6 menu loads after a client restart. It is the menu only: v1.5.6 "
-                                         "gameplay is not ported, games play Krunker v7.1.4. Restart now?");
-        else
-            snprintf(text, sizeof(text), "%s%sThe menu of this Game version loads after a client restart. Restart now?",
-                     notice ? notice : "", notice ? ". " : "");
-        ui_confirm(text, ruleset_restart_answered, NULL);
-    } else if (r == CLIENT_RULESET_SAVED) {
-        char text[192];
-        if (client_page_v156_saved()) snprintf(text, sizeof(text), "Game version: the Krunker v1.5.6 menu, games play v%s", saved->rules->version);
-        else if (notice) snprintf(text, sizeof(text), "%s", notice);
-        else snprintf(text, sizeof(text), "Game version: Krunker v%s", saved->version);
-        ui_notify(text);
-    }
-}
 
 // A settings tab as shown: Localization > Default Region lists the matchmaker's regions (the
 // static capture only has "Local"; servers_ui_region_options), the Sound tab gains the
-// client's rows, General gains "Game version". NULL = `tab` unchanged.
+// client's rows. NULL = `tab` unchanged.
 char *ui_client_settings_extend_tab(const char *tab) {
     if (!tab) return NULL;
-    char *general = extend_general_tab(tab);
-    if (general) {
-        char *more = ui_client_settings_extend_tab_rest(general);
-        if (more) {
-            free(general);
-            return more;
-        }
-        return general;
-    }
     return ui_client_settings_extend_tab_rest(tab);
 }
 
@@ -1345,10 +1263,6 @@ int ui_client_settings_handle(const char *name, const HtmlEvent *ev, const HtmlA
     }
     if (!strcmp(name, "knClientAction")) {
         do_action(arg_text(ev, args, argc, 0, kbuf, sizeof(kbuf)));
-        return 1;
-    }
-    if (!strcmp(name, "knSetRuleset")) {
-        ui_client_settings_select_ruleset(arg_text(ev, args, argc, 0, kbuf, sizeof(kbuf)));
         return 1;
     }
     return -1; // not ours: the modules after it in MODULE_HANDLERS (ui_handlers.c) get the name

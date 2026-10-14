@@ -240,13 +240,11 @@ if (EMSCRIPTEN)
         COMMAND ${CMAKE_COMMAND} -E make_directory ${WEB_DIST_DIR}
         COMMAND ${CMAKE_COMMAND} -E rm -rf ${WEB_DIST_DIR}/js
         COMMAND ${CMAKE_COMMAND} -E ${KN_WEB_COPY_UI} ${CMAKE_SOURCE_DIR}/ui ${WEB_DIST_DIR}
-        # ui/v10 (the Krunker v10.0.2 page, tools/ui-import --ref v10) is not served until the
-        # ruleset toggle loads it (doc/v10/version-toggle.md); keep its 15 MB out of the site
+        # ui/v10 (the Krunker v10.0.2 page, tools/ui-import --ref v10) is not served until it
+        # becomes ui/ (ui/README.md); keep its 15 MB out of the site
         COMMAND ${CMAKE_COMMAND} -E rm -rf ${WEB_DIST_DIR}/v10
-        # ui/v156 (Krunker v1.5.6's menu, --ref v156) is native-only: the web build serves ui/
-        COMMAND ${CMAKE_COMMAND} -E rm -rf ${WEB_DIST_DIR}/v156
-        # ui/v3 (Krunker v3.1.1's menu, make ui-import-v3) is native-only too
-        COMMAND ${CMAKE_COMMAND} -E rm -rf ${WEB_DIST_DIR}/v3
+        # page trees of the removed version picker (ui/v3, ui/v156) left in an old dist dir
+        COMMAND ${CMAKE_COMMAND} -E rm -rf ${WEB_DIST_DIR}/v156 ${WEB_DIST_DIR}/v3
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:client> ${WEB_DIST_DIR}/client.js
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE_DIR:client>/client.wasm ${WEB_DIST_DIR}/client.wasm
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE_DIR:client>/client.data ${WEB_DIST_DIR}/client.data
@@ -529,7 +527,7 @@ else ()
 
     # charge_grapple_test: the Charge Rifle charge / blast and the Grappler rope against v7.1.4
     # piss_test: the KrunkNative Piss's stream, puddles, caps and their SPAWNED_OBJ replication
-    # ruleset_test: the v7 / v10 ruleset seam, KN id ranges and the NET_PACKET_EXT envelope
+    # ruleset_test: the Krunker v10.0.2 ruleset, KN id ranges and the NET_PACKET_EXT envelope
     # hitboxes_test: the v10.0.2 posed hit boxes (shared/src/hitboxes.c) at known poses
     # v10_gameplay_test: the v10.0.2-only gameplay (Boulder, Compressor, Stalker rework, ranked rules)
     foreach (wpb_test weapons_v7_test combat_test charge_grapple_test piss_test ruleset_test hitboxes_test v10_gameplay_test)
@@ -704,7 +702,7 @@ else ()
         target_link_libraries(map_v7_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
-    # map_v10_test: the Krunker v10.0.2 map format (doc/v10/map-format.md) under the v10 ruleset, and
+    # map_v10_test: the Krunker v10.0.2 map format (doc/v10/map-format.md), and
     # the v7 dialect on the same input: prefabs 41 / 97 / 98, dyn, mp, shadowNB, archetypes,
     # entities, scripts.shared, botPaths walking, trigger condition 12 / actions 72-74 / 8 actions
     add_executable(map_v10_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/map_v10_test.c)

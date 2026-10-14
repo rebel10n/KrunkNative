@@ -22,7 +22,6 @@
 //   (only the AI's engage range), scoreOnDeath, head / pet / shoes / wrist (no such v3.1.1 slots).
 #include <bots.h>
 #include <ai.h>
-#include <map_dialect.h> // v10 setupLocal usePathing
 #include <pcg_basic.h>
 #include <ctype.h>
 #include <math.h>
@@ -1052,7 +1051,7 @@ void game_bots_setup_local(Game *game) {
         snprintf(buf[argc], sizeof(buf[argc]), "targetDistance=500"); argv[argc] = buf[argc]; argc++;
         snprintf(buf[argc], sizeof(buf[argc]), "persistent=on"); argv[argc] = buf[argc]; argc++;
         // v10 setupLocal adds usePathing: true (L174979); v7's had no such key
-        if (map_dialect_of(game) >= MAP_DIALECT_V10) { snprintf(buf[argc], sizeof(buf[argc]), "usePathing=on"); argv[argc] = buf[argc]; argc++; }
+        snprintf(buf[argc], sizeof(buf[argc]), "usePathing=on"); argv[argc] = buf[argc]; argc++;
         bot_parse_assignments(argc, argv, &a);
         game_bots_add(game, &a, NULL, 0.0f);
     }

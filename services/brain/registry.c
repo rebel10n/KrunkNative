@@ -155,8 +155,9 @@ static void lobby_from_tuple(MmLobby *l, const MmNode *n, cJSON *tuple) {
     /* meta.proto "M.m" (server_bin with build info); absent = a 1.x server */
     const char *proto = kn_json_str(meta, "proto", "");
     l->proto_major = proto[0] >= '0' && proto[0] <= '9' ? atoi(proto) : -1;
-    /* meta.ruleset (server_bin --ruleset, ruleset.h); a server from before the toggle plays v7 */
-    copy_str(l->ruleset, sizeof(l->ruleset), kn_json_str(meta, "ruleset", "v7"));
+    /* meta.ruleset ("v10", ruleset.h; "v7" from a version-toggle server playing v7.1.4); "" = not
+     * announced (a server from before the toggle, a test fixture) */
+    copy_str(l->ruleset, sizeof(l->ruleset), kn_json_str(meta, "ruleset", ""));
     const cJSON *tl = cJSON_GetObjectItemCaseSensitive(meta, "timeLeft");
     l->time_left = cJSON_IsNumber(tl) && tl->valuedouble >= 0 ? (int) tl->valuedouble : -1;
     /* v7.1.4 ServerManager.seek skips !meta.sk (AUTO_SEEK off); absent = seekable */
@@ -508,10 +509,11 @@ static int proto_ok(const MmLobby *l, const MmPickQuery *q) {
     return q->proto_major <= 0 || l->proto_major < 0 || l->proto_major == q->proto_major;
 }
 
-/* the lobby plays the client's Krunker version (ruleset.h): a client never joins another one */
+/* the lobby plays the client's Krunker version (ruleset.h, "v10"): quick join never puts a client
+ * into a lobby that announces another one (a version-toggle server playing v7.1.4) */
 static int ruleset_ok(const MmLobby *l, const MmPickQuery *q) {
-    const char *want = q->ruleset && *q->ruleset ? q->ruleset : "v7";
-    return !strcmp(l->ruleset[0] ? l->ruleset : "v7", want);
+    const char *want = q->ruleset && *q->ruleset ? q->ruleset : "v10";
+    return !l->ruleset[0] || !strcmp(l->ruleset, want);
 }
 
 static int lobby_outdated(const MmLobby *l, const MmPickQuery *q) {
@@ -586,8 +588,7 @@ MmPickError registry_pick(Registry *r, const MmPolicy *p, const MmPickQuery *q, 
         MmNode *n = NULL;
         MmLobby *l = registry_lobby_find(r, q->game_id, &n);
         if (l && lobby_joinable(n, l) && !proto_ok(l, q)) {
-            /* another protocol major: the client could not play there (another Krunker version
-             * is fine: the client adopts the server's ruleset on join) */
+            /* another protocol major: the client could not play there */
             if (!q->auto_change) return MM_PICK_INCOMPATIBLE;
         } else if (l && lobby_joinable(n, l) && !q->authed && registry_lobby_needs_account(n, l)) {
             /* a guest asking for an online_mode lobby: the server would refuse it */

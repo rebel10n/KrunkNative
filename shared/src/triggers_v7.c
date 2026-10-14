@@ -8,7 +8,6 @@
 // shared/src/triggers_conditions.c, the 72 actions in shared/src/triggers_actions.c.
 #include <shared.h>
 #include "triggers_internal.h"
-#include <map_dialect.h>
 #include <ks_storage_data.h> // WP6: Load Data values (parseFloat)
 #include <math.h>
 #include <pcg_basic.h>
@@ -367,8 +366,8 @@ static void queue_push(Game *game, Player *player, const TriggerSource *j, const
     q->timer = a->delay * 1000.0f; // (trigDelay || 0) * 1000
 }
 
-static int action_known(const Game *game, const TriggerActionData *a) { // game.triggers.actions[trigAct || 0]: v7 72, v10 75
-    return a->action >= 0 && a->action < map_dialect_action_count(map_dialect_of(game));
+static int action_known(const TriggerActionData *a) { // game.triggers.actions[trigAct || 0]: v10 75
+    return a->action >= 0 && a->action < TRIGGER_V10_ACTION_COUNT;
 }
 
 static void run_actions(Game *game, Player *player, const TriggerSource *j, const TriggerActionData *actions, const int count,
@@ -378,7 +377,7 @@ static void run_actions(Game *game, Player *player, const TriggerSource *j, cons
         const TriggerActionData *a = &actions[i];
         last = a;
         if (check_conditions && !trigger_condition_check(game, player, j, a)) continue;
-        if (!action_known(game, a)) continue;
+        if (!action_known(a)) continue;
         if (a->delay > 0.0f) queue_push(game, player, j, a, chain);
         else trigger_action_execute(game, player, j, a, chain);
     }

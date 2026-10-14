@@ -14,8 +14,8 @@ static const float head_scale = 2.0f;
 // (v10:19477-20114, resolving the `var _N = <num>` inlines) against v7 config.js: crouchLean is the
 // only gameplay constant that differs (the rest are menu / economy keys: bppCapDay, giftMinLVl,
 // marketMinLVl, tradeMinLvl, minKDFCall, rewardTime, hostTransferLimit, triggerActionLimit).
-// The hurtbox scale and the posed hit boxes are rules, not constants (ruleset.h hit_model).
-const GameConstants g_constants_v10 = {
+// The hurtbox scale and the posed hit boxes are rules, not constants (shared/src/hitboxes.c).
+const GameConstants game_constants = {
     .billboard_count = 6,
     .mouse_sensitivity = 0.0024f,
     .world_uv_scale = 60.0f,

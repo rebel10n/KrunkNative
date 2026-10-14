@@ -14,7 +14,6 @@
 #include <gltf.h>
 #include <html_ui.h>
 #include <map_catalog.h>
-#include <ruleset_ui.h>      // client_ruleset_page_pending
 #include <ui_logic.h>
 #include <ui_mods.h>
 #include <GLFW/glfw3.h>
@@ -138,12 +137,8 @@ static int newer_in(const char *dir, const int depth, const int page_root, char 
 
 // What a running process cannot load again: the reason in `out`, 0 when nothing.
 static int restart_reason(char *out, const size_t n) {
-    if (client_ruleset_page_pending()) {
-        snprintf(out, n, "the saved Game version has another menu page");
-        return 1;
-    }
     char what[1024] = "";
-    const char *ui_env = getenv("KRUNKNATIVE_UI_DIR"); // the page tree loaded (ruleset_ui.c / the user's)
+    const char *ui_env = getenv("KRUNKNATIVE_UI_DIR"); // the page tree loaded (the user's, else ui/)
     if (newer_in(ui_env && *ui_env ? ui_env : ui_default_path(), 0, 1, what, sizeof(what))) {
         snprintf(out, n, "menu page file %s changed", what);
         return 1;

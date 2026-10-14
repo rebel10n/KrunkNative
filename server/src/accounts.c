@@ -220,8 +220,8 @@ static cJSON *acc_lobby_tuple(void) {
     // build identity (build_info.h): the brain flags outdated lobbies and matches protocols
     // (services/brain/release_info.c); federated with the tuple like every meta field
     cJSON_AddStringToObject(meta, "proto", kn_build_protocol());
-    // the Krunker version this server plays (--ruleset, ruleset.h): the brain only seeks clients of
-    // the same one into it, the server browser shows it
+    // the Krunker version this server plays ("v10", ruleset.h): the brain keeps quick join from
+    // matching clients into lobbies of builds from before v10 was the only version
     cJSON_AddStringToObject(meta, "ruleset", ruleset_current()->key);
     cJSON_AddStringToObject(meta, "build", kn_build_info()->describe);
     cJSON_AddStringToObject(meta, "commit", kn_build_info()->commit);

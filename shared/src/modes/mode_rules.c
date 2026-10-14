@@ -646,23 +646,10 @@ void mode_trigger_pick_boss(Game *game, const float overflow) {
     }
 }
 
-// pickStalker: 400 health, no regen, knife only.
+// Krunker v10.0.2 pickStalker (v10:188459-188474): knife only, no regen, health floor(200 + 50 x
+// (active players - 1)) (v7.1.4: 400). v10 also broadcasts STALKER_PICKED ("You are the Living"
+// popup) to the others: not ported (HUD only).
 void mode_trigger_pick_stalker(Game *game, const float overflow) {
-    (void) overflow;
-    Player *stalker;
-    if (pick_random(game, &stalker, 1)) {
-        mode_update_team(game, stalker, 2);
-        mode_set_role_health(game, stalker, 400);
-        const int knife = WEAPON_ID_KNIFE;
-        mode_set_player_loadout(stalker, &knife, 1, 0);
-        mode_send_loadout(game, stalker);
-    }
-}
-
-// Krunker v10.0.2 pickStalker (v10:188459-188474): the stalker's health is floor(200 + 50 x
-// (active players - 1)) instead of v7's 400; the rest as v7 (knife only, no regen). v10 also
-// broadcasts STALKER_PICKED ("You are the Living" popup) to the others: not ported (HUD only).
-void mode_trigger_pick_stalker_v10(Game *game, const float overflow) {
     (void) overflow;
     const int active = mode_active_count(game);
     Player *stalker;
@@ -677,7 +664,7 @@ void mode_trigger_pick_stalker_v10(Game *game, const float overflow) {
 
 // v10 stalk.onKill (v10:104388-104391): a kill by the stalker jump-scares the victim (send
 // JUMP_SCARE 0, v7's onMelee "scr") and heals the stalker 50.
-void mode_kill_stalk_v10(Game *game, Player *victim, Player *killer, const int weapon_id) {
+void mode_kill_stalk(Game *game, Player *victim, Player *killer, const int weapon_id) {
     (void) weapon_id;
     if (!killer || killer->team != 2 || !game_is_authority(game)) return;
     if (victim) {
@@ -695,7 +682,7 @@ void mode_kill_stalk_v10(Game *game, Player *victim, Player *killer, const int w
 #define STALK_CAMP_TIME 20.0f
 #define STALK_CAMP_CLEAR 2.0f
 #define STALK_CAMP_RESET 10.0f
-void mode_update_stalk_v10(Game *game, const float delta) {
+void mode_update_stalk(Game *game, const float delta) {
     if (!game->mode || game->mode->wait_timer_count) return;
     for (size_t i = 0; i < game->player_count; i++) {
         Player *p = game->players[i];

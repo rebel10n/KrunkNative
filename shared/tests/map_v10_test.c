@@ -1,18 +1,16 @@
-// map_v10_test: the Krunker v10.0.2 map format (doc/v10/map-format.md) under the v10 ruleset, and
-// the same input under v7 to show the v7 dialect is unchanged.
+// map_v10_test: the Krunker v10.0.2 map format (doc/v10/map-format.md).
 //
 //   - parsing (shared/tests/maps/v10/v10_format.json, written for this test): prefabs 41
 //     BOT_PATH_NODE / 97 SCRAPCRATE / 98 ENTITY, "dyn", "mp", "shadowNB", the widened texture-id
 //     charset, "archetypes", ENTITY instances, "scripts.shared", "botPaths"
 //   - validation: the archetype / entity rules, prefab ids 97-98, the 8-action trigger limit
-//   - triggers: condition 12 "Custom Action" (shouldTrigger), actions 72-74, the dialect counts
+//   - triggers: condition 12 "Custom Action" (shouldTrigger), actions 72-74, the table counts
 //   - bots: usePathing walks botPaths
-//   - the light-unit factor of each ruleset
+//   - the light-unit factor
 //
 // Run from the repository root: ./<build>/map_v10_test
 #include <shared.h>
 #include <ruleset.h>
-#include <map_dialect.h>
 #include <map_validate.h>
 #include <prefabs.h>
 #include <triggers_v7.h>
@@ -63,8 +61,6 @@ static void test_tables(void) {
               !strcmp(prefab_name(41), "TERMINAL"), "names");
     CHECK(prefab_id_from_name("BOT_PATH_NODE") == 41 && prefab_id_from_name("TERMINAL") == 41 && prefab_id_from_name("ENTITY") == 98 &&
               prefab_id_from_name("SCRAPCRATE") == 97, "name lookup and the BOT_PATH_NODE alias");
-    CHECK(!strcmp(map_dialect_prefab_name(MAP_DIALECT_V10, 41), "BOT_PATH_NODE") && !strcmp(map_dialect_prefab_name(MAP_DIALECT_V7, 41), "TERMINAL") &&
-              map_dialect_prefab_name(MAP_DIALECT_V7, 97) == NULL, "dialect names");
     const PrefabData *scrap = prefab_data(PREFAB_SCRAPCRATE), *crate = prefab_data(PREFAB_CRATE);
     CHECK(scrap && scrap->scale == 5.0f && !strcmp(scrap->model, "crate_0") && prefab_has_flag(PREFAB_SCRAPCRATE, PF_HASHEALTH) &&
               prefab_has_flag(PREFAB_SCRAPCRATE, PF_CASTSHADOW) && !prefab_has_flag(PREFAB_SCRAPCRATE, PF_ISPROP) && crate->scale == 6.0f,
@@ -81,16 +77,12 @@ static void test_tables(void) {
     CHECK(!strcmp(g_trigger_v7_actions[72].name, "Spawn Entity") && (g_trigger_v7_actions[72].flags & TRIGGER_V7_ACT_TEXT) &&
               !strcmp(g_trigger_v7_actions[73].name, "Despawn Entity") && !strcmp(g_trigger_v7_actions[74].name, "Set Entity Value") &&
               (g_trigger_v7_actions[74].flags & TRIGGER_V7_ACT_BOTH), "actions 72-74");
-    CHECK(map_dialect_prefab_count(MAP_DIALECT_V7) == 97 && map_dialect_condition_count(MAP_DIALECT_V7) == 12 &&
-              map_dialect_action_count(MAP_DIALECT_V7) == 72 && map_dialect_prefab_count(MAP_DIALECT_V10) == 99 &&
-              map_dialect_condition_count(MAP_DIALECT_V10) == 13 && map_dialect_action_count(MAP_DIALECT_V10) == 75, "dialect counts");
-    CHECK(map_dialect_trigger_action_limit(ruleset_get(RULESET_V7_1_4)) == 5 && map_dialect_trigger_action_limit(ruleset_get(RULESET_V10_0_2)) == 8,
-          "triggerActionLimit 5 / 8 from the rulesets");
+    CHECK(TRIGGER_V10_CONDITION_COUNT == 13 && TRIGGER_V10_ACTION_COUNT == 75, "table counts");
+    CHECK(ruleset_current()->trigger_action_limit == 8, "triggerActionLimit 8");
 }
 
 static void test_parse_v10(void) {
-    printf("Running the v10 fixture under v10...\n");
-    ruleset_set_current(RULESET_V10_0_2);
+    printf("Running the v10 fixture...\n");
     cJSON *json = load(FIXTURE);
     CHECK(json != NULL, FIXTURE " missing");
     if (!json) return;
@@ -164,30 +156,6 @@ static void test_parse_v10(void) {
     cJSON_Delete(json);
 }
 
-// The same file under v7: 97 / 98 are unknown ids (CUBE, like v7), the v10 keys are not read.
-static void test_parse_v7(void) {
-    printf("Running the v10 fixture under v7...\n");
-    ruleset_set_current(RULESET_V7_1_4);
-    cJSON *json = load(FIXTURE);
-    if (!json) return;
-    Map *map = map_init_ex(json, 0);
-    CHECK(map != NULL, "map_init (v7)");
-    if (!map) return;
-    CHECK(map->object_count == 8 && count_prefab(map, PREFAB_CUBE) == 5, "v7: 97 and 98 fall back to CUBE (%zu objects)", map->object_count);
-    CHECK(!map->objects[1]->dyn && map->objects[1]->health == 0.0f && !first_prefab(map, PREFAB_CUSTOM_ASSET)->mp, "v7: no dyn / mp");
-    CHECK(map->env.shadow_nb == 0.0f && map->env.sky_dome_tex_asset == 0 && map->env.sky_dome_emis_tex == 0 && map->minimap_asset == 0,
-          "v7: no shadowNB, v7 texture-id charset");
-    CHECK(!map->shared_script && !map->archetype_count && !map->entity_instance_count, "v7: no shared script / archetypes / entities");
-    CHECK(map->bot_path_count == 2, "botPaths parse in every dialect (v10 bots use them)");
-    size_t errors = 0;
-    MapIssue issue;
-    const MapValidateOptions first = {.first_only = 1, .no_warnings = 1};
-    map_validate(json, &first, &issue, 1, &errors);
-    CHECK(errors == 1 && !strcmp(issue.message, "Trigger Has Too Many Actions"), "v7 validation: 8 actions > 5 (%s)", errors ? issue.message : "-");
-    free_map(map);
-    cJSON_Delete(json);
-}
-
 // ---------------------------------------------------------------- validation
 
 static size_t errors_of(const char *json_text, char *first, const size_t size) {
@@ -218,7 +186,6 @@ static void expect_valid(const char *json) {
 
 static void test_validation(void) {
     printf("Running v10 validation...\n");
-    ruleset_set_current(RULESET_V10_0_2);
     expect_valid(V_HEAD "\"objects\":[" V_CUBE ",{\"i\":97,\"p\":[0,0,0],\"s\":[5,5,5]}]}");
     expect_error(V_HEAD "\"objects\":[{\"i\":99,\"p\":[0,0,0],\"s\":[5,5,5]}]}", "Invalid Object.");
     expect_error(V_HEAD "\"archetypes\":5,\"objects\":[" V_CUBE "]}", "Archetype list error.");
@@ -263,12 +230,6 @@ static void test_validation(void) {
     expect_error(V_HEAD TAS(A1 "," A1 "," A1 "," A1 "," A1 "," A1 "," A1 "," A1 "," A1), "Trigger Has Too Many Actions");
     expect_valid(V_HEAD TAS("{\"ta\":74,\"cd\":12,\"cv0\":\"abc_123\"}"));
     expect_error(V_HEAD TAS("{\"ta\":0,\"cd\":13}"), "INVALID CONDITION");
-
-    ruleset_set_current(RULESET_V7_1_4);
-    expect_error(V_HEAD TAS(A1 "," A1 "," A1 "," A1 "," A1 "," A1), "Trigger Has Too Many Actions"); // v7: 6 > 5
-    expect_error(V_HEAD TAS("{\"ta\":0,\"cd\":12}"), "INVALID CONDITION");
-    expect_error(V_HEAD "\"objects\":[{\"i\":97,\"p\":[0,0,0],\"s\":[5,5,5]}]}", "Invalid Object.");
-    expect_valid(V_HEAD "\"archetypes\":5,\"objects\":[" V_CUBE "]}"); // v7 ignores archetypes
 }
 
 // ---------------------------------------------------------------- triggers
@@ -337,12 +298,11 @@ static Player *add_player(Game *game, const int uid) {
 
 static void test_triggers(void) {
     printf("Running v10 triggers...\n");
-    ruleset_set_current(RULESET_V10_0_2);
     Game g;
     make_game(&g, T_MAP("{\"ta\":72,\"tct\":\" lift | elevator \"},{\"ta\":73,\"tct\":\" elevator \"},"
                         "{\"ta\":74,\"tct\":\"elevator| speed\",\"tc\":4},{\"ta\":0,\"tc\":5,\"cd\":12,\"cv0\":\"open_door\"},"
                         "{\"ta\":0,\"tc\":1},{\"ta\":0,\"tc\":1},{\"ta\":0,\"tc\":1},{\"ta\":0,\"tc\":1}"));
-    CHECK(g.ready && g.rules == ruleset_get(RULESET_V10_0_2), "v10 game");
+    CHECK(g.ready && g.rules == ruleset_current(), "v10 game");
     Player *p = add_player(&g, 1);
     p->score = 0;
     Object *t = g.map->objects[0];
@@ -369,18 +329,6 @@ static void test_triggers(void) {
     // the tag of action 72 (trimmed, the second split part)
     CHECK(g_spawns == 2, "spawn again");
     triggers_set_script_hooks(&g, NULL);
-
-    // under v7 the same map: actions 72-74 and condition 12 are unknown (condition 0, action skipped)
-    ruleset_set_current(RULESET_V7_1_4);
-    Game g7;
-    make_game(&g7, T_MAP("{\"ta\":72,\"tct\":\"lift\"},{\"ta\":0,\"tc\":5,\"cd\":12}"));
-    triggers_set_script_hooks(&g7, &g_hooks);
-    Player *q = add_player(&g7, 2);
-    q->score = 0;
-    const int spawns = g_spawns, calls = g_should_calls;
-    game_on_trigger(&g7, q, g7.map->objects[0], NULL);
-    CHECK(g_spawns == spawns && g_should_calls == calls && q->score == 5, "v7: no entity action, cd 12 reads as None (%d)", q->score);
-    triggers_set_script_hooks(&g7, NULL);
 }
 
 // ---------------------------------------------------------------- bots
@@ -397,7 +345,6 @@ static void tick(Game *game, const float seconds) {
 // A tfue bot with usePathing walks the one-way bot path (z 200 -> 600) when it has no target.
 static void test_bot_paths(void) {
     printf("Running v10 bot paths...\n");
-    ruleset_set_current(RULESET_V10_0_2);
     Game g;
     make_game(&g, "{\"name\":\"paths\",\"spawns\":[[0,0,180]],\"objects\":[{\"i\":0,\"p\":[0,-10,0],\"s\":[1400,10,1400]}],"
                   "\"botPaths\":[{\"p\":[[0,0,200],[0,0,300],[0,0,400],[0,0,500],[0,0,600]]}]}");
@@ -431,29 +378,22 @@ static void test_bot_paths(void) {
     CHECK(bot && bot->player && fabsf(bot->player->position.z - 180.0f) < 20.0f, "no usePathing: stays put (z %.0f)",
           bot && bot->player ? bot->player->position.z : 0.0f);
     game_bots_remove_all(&g);
-    ruleset_set_current(RULESET_V7_1_4);
 }
 
 // ---------------------------------------------------------------- lights
 
 static void test_light_units(void) {
     printf("Running light units...\n");
-    ruleset_set_current(RULESET_V7_1_4);
-    CHECK(map_dialect_light_unit_factor() == 1.0f, "v7: x 1");
-    ruleset_set_current(RULESET_V10_0_2);
-    CHECK(feq(map_dialect_light_unit_factor(), (float) M_PI), "v10: x PI");
-    ruleset_set_current(RULESET_V7_1_4);
+    CHECK(feq(ruleset_current()->light_unit_factor, (float) M_PI), "v10: x PI");
 }
 
 int main(void) {
     test_tables();
     test_parse_v10();
-    test_parse_v7();
     test_validation();
     test_triggers();
     test_bot_paths();
     test_light_units();
-    ruleset_set_current(RULESET_V7_1_4);
     printf("map_v10_test %s: %d checks, %d failures\n", g_failures ? "FAILED" : "OK", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

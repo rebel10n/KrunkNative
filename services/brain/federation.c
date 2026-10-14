@@ -87,7 +87,7 @@ static char *lobbies_json(const MmNode *n) {
         cJSON_AddStringToObject(o, "mode", l->mode);
         cJSON_AddStringToObject(o, "map", l->map);
         cJSON_AddStringToObject(o, "v", l->version);
-        cJSON_AddStringToObject(o, "rs", l->ruleset[0] ? l->ruleset : "v7"); /* mm_lobbies.ruleset (0207) */
+        cJSON_AddStringToObject(o, "rs", l->ruleset[0] ? l->ruleset : "v7"); /* mm_lobbies.ruleset (0207): none = a pre-toggle (v7) server */
         cJSON_AddItemToObject(o, "tuple", cJSON_Duplicate(l->tuple, 1));
         cJSON_AddItemToArray(arr, o);
     }

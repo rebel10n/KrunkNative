@@ -6,7 +6,6 @@
 // min, max), anything else -> def.
 #include <shared.h>
 #include "triggers_internal.h"
-#include <map_dialect.h>
 #include <cJSON.h>
 #include <math.h>
 #include <stdio.h>
@@ -130,7 +129,7 @@ static int player_count(const Game *game, const int filter) {
 
 int trigger_condition_check(Game *game, Player *player, const TriggerSource *obj, const TriggerActionData *a) {
     int cd = a->condition;
-    if (cd < 0 || cd >= map_dialect_condition_count(map_dialect_of(game))) cd = 0; // !conditions[cd]: 0 (v7 12, v10 13)
+    if (cd < 0 || cd >= TRIGGER_V10_CONDITION_COUNT) cd = 0; // !conditions[cd]: 0 (v10 13)
     if (cd == 0) return 1;
     ConditionValues v;
     condition_values(a, cd, &v);

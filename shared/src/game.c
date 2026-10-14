@@ -62,6 +62,7 @@ const GameConfig g_default_game_config = {
     .fire_rate = 1.0f,
     .reload_speed = 1.0f,
     .hitbox_pad = 0.6f, // hitBoxPad def (hitbox_pad_set 0: Ranked keeps defC 0.1, effects.c)
+    .hurtbox_scale = 1.0f, // v10.0.2 hurtboxScale def (v10:16931)
     // WP-E: the other v7.1.4 serverConfig defaults (shared/src/game_config.c holds the full table)
     .game_rounds = 1,
     .intermission_time = 30.0f,
@@ -93,7 +94,7 @@ void game_configure(
     Weapon **weapons, const size_t weapon_count,
     ClassConfig *classes, size_t class_count
 ) {
-    // the process ruleset (ruleset.h) supplies the default tables; the game keeps its pointer
+    // the ruleset (ruleset.h, Krunker v10.0.2) supplies the default tables; the game keeps its pointer
     const Ruleset *rules = ruleset_current();
     game->rules = rules;
     if (config) game->config = *config;
@@ -174,29 +175,6 @@ void game_configure(
         if (game->classes) memcpy(game->classes, rules->classes, game->class_count * sizeof(ClassConfig));
         else game->class_count = 0;
     }
-}
-
-int game_adopt_rules(Game *game, const Ruleset *rules) {
-    if (!game || !rules || !ruleset_set_current(rules->id)) return 0;
-    if (game->rules == rules && game->weapons && game->classes) return 1;
-    game_config_free(game); // host overrides point into the old tables
-    Weapon **weapons = calloc(rules->weapon_count, sizeof(Weapon *));
-    ClassConfig *classes = calloc(rules->class_count, sizeof(ClassConfig));
-    if (!weapons || !classes) {
-        free(weapons);
-        free(classes);
-        return 0;
-    }
-    memcpy(weapons, rules->weapons, rules->weapon_count * sizeof(Weapon *));
-    memcpy(classes, rules->classes, rules->class_count * sizeof(ClassConfig));
-    free(game->weapons);
-    free(game->classes);
-    game->weapons = weapons;
-    game->weapon_count = rules->weapon_count;
-    game->classes = classes;
-    game->class_count = rules->class_count;
-    game->rules = rules;
-    return 1;
 }
 
 void game_init(Game *game, int map_index, int mode_index, const unsigned char is_local) {

@@ -1,10 +1,9 @@
 // v10.0.2 hit model test (shared/src/hitboxes.c, doc/v10/gameplay.md section 3): the posed
 // oriented boxes at known poses, the ray/zone results the v10 server trace would give, and the
-// v7.1.4 AABB the v7 ruleset keeps using. Constants are v10's own (v10:19492-20084: legHeight 4.2,
+// padded AABB Prop Hunt keeps using. Constants are v10's own (v10:19492-20084: legHeight 4.2,
 // playerHeight 11, headScale 2, chestWidth 2.6, chestScale 1.3, cameraHeight 1.5, uArmLength /
 // lArmLength 2.7, armScale 1.2, armInset -0.1, armOff -0.8, legScale 1.3, stepAnim 0.075,
-// crouchDst 3, crouchLean 0) and are the same in v7 (checked by ruleset_test). Run from the
-// repository root.
+// crouchDst 3, crouchLean 0; checked by ruleset_test). Run from the repository root.
 #include <shared.h>
 #include <hitboxes.h>
 #include <ruleset.h>
@@ -232,15 +231,12 @@ static void test_step_and_facing(void) {
     }
 }
 
-static void test_trace_and_rulesets(void) {
+static void test_trace(void) {
     // hitboxes_trace_player: the broad phase (x/z +-(scale + 5), y .. ah + 5, v10:172895) then the boxes
     Game game;
     memset(&game, 0, sizeof(game));
-    game.rules = ruleset_get(RULESET_V10_0_2);
-    CHECK(hitboxes_active(&game) == 1, "the v10 ruleset traces posed boxes");
-    game.rules = ruleset_get(RULESET_V7_1_4);
-    CHECK(hitboxes_active(&game) == 0, "the v7 ruleset keeps the AABB");
-    game.rules = ruleset_get(RULESET_V10_0_2);
+    game.rules = ruleset_current();
+    CHECK(hitboxes_active(&game) == 1 && hitboxes_active(NULL) == 1, "games trace posed boxes");
     game.mode = &(GameMode){.config = {.prop = 1}};
     CHECK(hitboxes_active(&game) == 0, "prop hunt keeps the AABB (v10:172886)");
     game.mode = NULL;
@@ -266,16 +262,9 @@ static void test_trace_and_rulesets(void) {
     // beyond the broad phase box (x +-6): a miss even though the ray is level with the torso
     const vec3 wide = {9.0f, 6.6f, 20.0f};
     CHECK(!hitboxes_trace_player(&player, &state, wide, step, 1, &fraction, &kind), "outside the broad phase box");
-
-    // The ruleset of a game decides (ruleset.h): the v10 ruleset's hit model, the v7 one's not
-    CHECK(ruleset_get(RULESET_V10_0_2)->hit_model == HIT_MODEL_V10 && ruleset_get(RULESET_V7_1_4)->hit_model == HIT_MODEL_V7,
-          "the per-ruleset hit model");
 }
 
 int main(void) {
-    // Both ruleset tables must be built (the v10 mode / weapon tables), then the tests run under v10
-    CHECK(ruleset_get(RULESET_V10_0_2) && ruleset_get(RULESET_V7_1_4), "both rulesets exist");
-    CHECK(ruleset_set_current(RULESET_V10_0_2), "the process ruleset switches to v10");
     CHECK(near(game_constants.crouch_lean, 0.0f, 1e-6f), "v10 crouchLean is 0");
 
     test_standing_shape();
@@ -283,9 +272,8 @@ int main(void) {
     test_crouch_and_hurtbox();
     test_arms();
     test_step_and_facing();
-    test_trace_and_rulesets();
+    test_trace();
 
-    CHECK(ruleset_set_current(RULESET_V7_1_4), "back to v7");
     if (failures) {
         printf("hitboxes_test: %d of %d checks failed\n", failures, checks);
         return 1;

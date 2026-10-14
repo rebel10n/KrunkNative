@@ -62,15 +62,15 @@ Keys read off the map root in `generate` (L167200-168560):
 | `shadowNB` | **new**: sky-light shadow `normalBias`, clamp 0..5, default 0 | L201758 | - (`R:2738-2772` sets only `bias = -0.0004`) | yes: `MapEnvironment.shadow_nb` 0..5, `shadow_normal_bias` in basic.frag (world units along the normal) |
 | `correctLights` | **removed as a toggle**: THREE r186 has no legacy lights, so lights are always physical. Still parsed per environment zone (L164748), with no effect seen | renderer `init` L199044-199061 has no `useLegacyLights` | `R:408` `useLegacyLights = !correctLights` | yes: the v10 dialect always renders physical lights (map_environment.c) |
 | `outputEncoding` | now maps to `renderer.outputColorSpace`; table `Default->NoColorSpace, sRGB->SRGBColorSpace, Linear->LinearSRGBColorSpace`; **index 0 is forced to 2 (Linear)** (`0 == _ && (_ = 2)`) | L17259, L199057-199058 | `config.js:948` (Default = LinearEncoding), `R:407` | no (unchanged v7 behaviour; renderer package) |
-| `ambientI`, `lightI` and all light intensities | **multiplied by `lightIntensityScaling = Math.PI`** (r155+ physical units) | `_7479 = Math.PI` L18383; L201738, L201743; point/spot/dir/rect L200274-200296; KS lights L183152-183205; lightMap L199446 | unscaled (`R:2744,2754,1718-1762`) | yes: `Ruleset.light_unit_factor` (`map_dialect_light_unit_factor()`) multiplies ambient, sun, point / spot / directional and lightMap intensities in basic.c; rect-area unscaled like v10 |
+| `ambientI`, `lightI` and all light intensities | **multiplied by `lightIntensityScaling = Math.PI`** (r155+ physical units) | `_7479 = Math.PI` L18383; L201738, L201743; point/spot/dir/rect L200274-200296; KS lights L183152-183205; lightMap L199446 | unscaled (`R:2744,2754,1718-1762`) | yes: `Ruleset.light_unit_factor` (`ruleset_current()->light_unit_factor`) multiplies ambient, sun, point / spot / directional and lightMap intensities in basic.c; rect-area unscaled like v10 |
 | everything else (`ambient light sky fog fogD lightD sunAngX/Y shadowR/D skyDome* terrain* zone* ocean oc* tris xyz colors spawns camPos dthY nAmb oldAO hasLM welMsg gui config modes`) | unchanged | | | unchanged |
 
 Lighting note for KN (implemented, verified): the x PI does not brighten v7 maps. v7 maps use legacy
 lights (`useLegacyLights = !correctLights`), which three r150 already multiplies by PI; v10 (r186) has
 only physical lights (x 1) and multiplies the intensities by `lightIntensityScaling = PI` instead, so
-ambient, sun and directional light come out the same. KN's v10 ruleset renders physical lights
-(`correct_lights` forced on) with intensities x `Ruleset.light_unit_factor` (PI): headless captures of
-Sandstorm and Kanji under the v7 and the v10 ruleset differ no more than two runs of the same build
+ambient, sun and directional light come out the same. KN renders physical lights (`correct_lights`
+forced on) with intensities x `Ruleset.light_unit_factor` (PI): headless captures of Sandstorm and
+Kanji under v7.1.4's legacy lights and v10's differed no more than two runs of the same build
 (animated content). What does change in v10: point / spot lights fall off with the physical
 inverse-square curve instead of the legacy linear one, and a map with `correctLights: true` (none under
 assets/maps) renders PI times brighter than in v7. The linear output default (`outputEncoding` 0 -> 2)
@@ -198,7 +198,7 @@ getter points to editor.krunker.io), so editor-only fields cannot be verified fr
 |---|---|---|
 | v7.1.4 maps | yes, unchanged | lights look the same (legacy x PI in v7 = physical x lightIntensityScaling PI in v10, checked on Sandstorm / Kanji, see the lighting note); point / spot falloff is physical; `outputEncoding 0` now means Linear; `correctLights` ignored |
 | v3.1.1 maps | yes (v7 already loaded them; v10 adds no removals) | id 41 builds nothing in all three versions |
-| v10 maps in KN | the v10 ruleset loads them (map_dialect.h): prefabs 97 / 98, `dyn`, `mp`, `shadowNB`, `archetypes`, entity instances, `scripts.shared`, `botPaths` and triggers are read (section tables, "implemented"); the v7 ruleset still reads them the v7 way (97 / 98 unknown -> CUBE, 6+ actions rejected) | entities do not run yet (entities package) |
+| v10 maps in KN | loaded (shared/src/map.c): prefabs 97 / 98, `dyn`, `mp`, `shadowNB`, `archetypes`, entity instances, `scripts.shared`, `botPaths` and triggers are read (section tables, "implemented"); Krunker v10.0.2 is the only version, so every map is read this way | entities do not run yet (entities package) |
 
 ## 9. Port checklist (map side, in order)
 
