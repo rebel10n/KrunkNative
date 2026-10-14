@@ -42,6 +42,7 @@ typedef struct {
 typedef struct {
     char url[KN_UPDATE_URL_MAX];
     int by_path;
+    KnPathFilter filter; // the paths it has (one Pages project of the split CDN)
     int fail_streak;   // transport failures in a row
     int64_t down_until;
 } Origin;
@@ -93,29 +94,22 @@ static uint32_t fnv1a(const char *s) {
 
 // ------------------------------------------------------------------ configuration
 
+// "[objects:][only=P+P@|skip=P+P@]URL" (kn_origin_spec_parse): a filter = the paths it has.
 static void add_origin(const char *spec) {
     if (F.origin_count >= ASSET_FETCH_MAX_ORIGINS || !spec || !*spec) return;
     Origin *o = &F.origins[F.origin_count];
     memset(o, 0, sizeof(*o));
-    o->by_path = 1;
-    if (!strncmp(spec, "objects:", 8)) {
-        o->by_path = 0;
-        spec += 8;
-    }
-    if (strncmp(spec, "http://", 7) != 0 && strncmp(spec, "https://", 8) != 0) {
-        fprintf(stderr, "[assets] ignoring asset origin %s (not http(s))\n", spec);
+    if (!kn_origin_spec_parse(spec, o->url, sizeof(o->url), &o->by_path, &o->filter)) {
+        fprintf(stderr, "[assets] ignoring asset origin %.200s (not [objects:|only=..@|skip=..@]http(s)://...)\n", spec);
         return;
     }
-    const size_t len = strlen(spec);
-    if (len + 2 >= sizeof(o->url)) return;
-    snprintf(o->url, sizeof(o->url), "%s%s", spec, spec[len - 1] == '/' ? "" : "/");
     for (int i = 0; i < F.origin_count; i++)
         if (!strcmp(F.origins[i].url, o->url) && F.origins[i].by_path == o->by_path) return; // listed twice
     F.origin_count++;
 }
 
 static void setup_origins(const char *list) {
-    char buf[2048];
+    char buf[4096];
     snprintf(buf, sizeof(buf), "%s", list && *list ? list : ASSET_FETCH_DEFAULT_ORIGINS);
     for (char *p = buf; *p;) {
         while (*p && strchr(" ,\t\r\n", *p)) p++;
@@ -559,6 +553,7 @@ static void fetch_one(KnHttp *http, size_t index, char *rel) {
             for (int g = 0; g < F.origin_count && !__atomic_load_n(&F.stop, __ATOMIC_RELAXED); g++) {
                 Origin *o = &F.origins[g];
                 if (!o->by_path && !snapshot.want) continue; // content-addressed: needs the sha256
+                if (!kn_path_filter_ok(&o->filter, rel)) continue; // not in its part of a split CDN
                 pthread_mutex_lock(&F.lock);
                 const int down = o->down_until > now_ms();
                 pthread_mutex_unlock(&F.lock);

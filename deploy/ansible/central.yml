@@ -1,4 +1,4 @@
-- name: KrunkNative central node (web + finder + coordinator + net-bridge + WebRTC gateway + edge origin)
+- name: KrunkNative central node (web + finder + coordinator + net-bridge + WebRTC gateway + edge origin + download host)
   hosts: central
   become: false
   roles:
@@ -23,6 +23,8 @@
     - { role: kn_rtc, tags: [rtc] }
     # README "Edge origin": host nginx vhost for abulxt's edges (off: removed).
     - { role: kn_edge_origin, tags: [edge_origin] }
+    # README "Download host": dl.krunk.io on the host nginx, Let's Encrypt (off: removed).
+    - { role: kn_dl_origin, tags: [dl_origin] }
   post_tasks:
     - name: Health checks on loopback
       ansible.builtin.uri:
@@ -34,7 +36,8 @@
         {{ ['http://127.0.0.1:8081/healthz', 'http://127.0.0.1:8081/', 'http://127.0.0.1:8082/servers',
             'http://127.0.0.1:8083/mm/status', 'http://127.0.0.1:8084/healthz']
            + (['http://127.0.0.1:8085/healthz'] if kn_rtc_enabled | default(false) | bool else [])
-           + (['http://127.0.0.1:' ~ kn_edge_origin_port ~ '/healthz'] if kn_edge_origin_enabled | bool else []) }}
+           + (['http://127.0.0.1:' ~ kn_edge_origin_port ~ '/healthz'] if kn_edge_origin_enabled | bool else [])
+           + (['http://127.0.0.1:' ~ kn_dl_origin_port ~ '/healthz'] if kn_dl_origin_enabled | default(false) | bool else []) }}
       register: kn_health
       retries: 5
       delay: 2

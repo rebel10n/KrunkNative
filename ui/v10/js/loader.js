@@ -22,7 +22,11 @@
 //                     "asset_origins": {"cdn": "https://<project>.pages.dev/", "own": "https://assets.krunk.io/"}}
 //                  asset_origin wins over kn-asset-base, so moving the content to another origin
 //                  is a change of that file (a redeploy of the page, no client build);
-//                  asset_fallback is where a failed download is retried (shared/src/utils.c)
+//                  asset_fallback is where a failed download is retried (shared/src/utils.c);
+//                  asset_split (deploy/asset-shards.json, stage.py): [{"base": URL, "routes":
+//                  [[prefix, URL], ...]}]: on that base, a path below assets/ with one of the
+//                  prefixes (longest first) loads from the route's URL instead (the second Pages
+//                  project); Module.krunkNativeAssetBaseFor(path) answers it for utils.c
 //   ?assets=<name> one of asset_origins for this tab (kept in sessionStorage across the site's
 //                  page loads, ?assets=default forgets it); a full URL only on a localhost page
 // deploy/pages/README.md "Asset origins". The chosen origin's assets/version.txt (deploy/ansible
@@ -42,6 +46,7 @@
   var rtc = meta('kn-rtc');
   var config = meta('kn-config');
   var assetFallback = '';
+  var assetRoutes = [];
 
   window.Module = Object.assign({
     canvas: document.getElementById('canvas'),
@@ -54,6 +59,14 @@
     krunkNativeAssetBase: assetBase, // set again by go() once kn-config / ?assets= are read
     krunkNativeAssetFallback: '',
     krunkNativeAssetVersion: '',
+    krunkNativeAssetRoutes: [],
+    // The origin of a path below assets/ ("textures/x.png"): its split route, else the base.
+    krunkNativeAssetBaseFor: function (rel) {
+      var routes = window.Module.krunkNativeAssetRoutes || [];
+      for (var i = 0; i < routes.length; i++)
+        if (rel.lastIndexOf(routes[i][0], 0) === 0) return routes[i][1];
+      return window.Module.krunkNativeAssetBase;
+    },
     locateFile: function (path, prefix) {
       return prefix + (build ? path.replace(/^client\./, 'client.' + build + '.') : path);
     },
@@ -93,6 +106,18 @@
     var fallback = named(cfg && cfg.asset_fallback);
     assetBase = base;
     assetFallback = fallback !== base ? fallback : '';
+    // the split of this base (deploy/asset-shards.json): prefix -> the other shard's origin
+    var splits = cfg && Array.isArray(cfg.asset_split) ? cfg.asset_split : [];
+    assetRoutes = [];
+    for (var i = 0; i < splits.length; i++) {
+      if (!splits[i] || url(splits[i].base) !== base || !Array.isArray(splits[i].routes)) continue;
+      for (var j = 0; j < splits[i].routes.length; j++) {
+        var r = splits[i].routes[j];
+        if (Array.isArray(r) && typeof r[0] === 'string' && /^[A-Za-z0-9._\/-]+$/.test(r[0]) && url(r[1]))
+          assetRoutes.push([r[0], url(r[1])]);
+      }
+    }
+    assetRoutes.sort(function (a, b) { return b[0].length - a[0].length; });
   }
 
   // The content version before main() runs; without one (no file, offline, slow host)
@@ -103,6 +128,7 @@
     started = true;
     window.Module.krunkNativeAssetBase = assetBase;
     window.Module.krunkNativeAssetFallback = assetFallback;
+    window.Module.krunkNativeAssetRoutes = assetRoutes;
     if (version && /^[0-9A-Za-z._-]{1,64}$/.test(version)) window.Module.krunkNativeAssetVersion = version;
     start();
   }

@@ -2287,10 +2287,13 @@ server as a guest, rcon relay, replay check).
 Native clients go outdated like servers (8.12) and update themselves through a **launcher**. The web
 client is always the latest (served by the site) and has none of this.
 
-**Updates server**: static files on kru behind OpenResty, `https://assets.krunk.io/updates/` (a
-`/updates/` location on the existing `assets.krunk.io` tunnel route: no DNS or tunnel change;
-role `kn_updates`, root `/opt/krunknative-updates/public/`). Written only by
-`tools/release/kn-updates.py`:
+**Updates server**: static files on kru behind OpenResty, `https://dl.krunk.io/updates/` (kru's
+download host, host nginx + Let's Encrypt, role `kn_dl_origin`; `assets.krunk.io/updates/` serves
+the same while that name is the edge origin and 302s there once it is the Pages CDN; role
+`kn_updates`, root `/opt/krunknative-updates/public/`). Written only by
+`tools/release/kn-updates.py`; the manifest's `assets.mirrors` come from `deploy/asset-shards.json`
+(copied to `<root>/asset-shards.json`): the Pages projects of the split asset CDN, each with the
+`only` / `skip` path prefixes of its part of the tree (deploy/pages/README.md "Asset CDN"):
 
 | path | content | cache |
 | --- | --- | --- |
@@ -2336,7 +2339,7 @@ Before the game it:
 1. reads `kn-install.json` (next to it, or `../Resources` in a `.app`: `{"format":1,"platform",
    "package":"tar.gz|zip|deb|rpm|app","channel","root"}`), rolls back an update a crash interrupted
    (journal in `<root>/.kn-update/`) and fetches the channel manifest (`--updates-url`,
-   `KRUNKNATIVE_UPDATES_URL`, default `https://assets.krunk.io/updates/client/latest.json`, `off`
+   `KRUNKNATIVE_UPDATES_URL`, default `https://dl.krunk.io/updates/client/latest.json`, `off`
    disables);
 2. when the manifest's build is newer than its own (`kn_update_compare`, 8.12's rule: same commit or
    a newer commit_time = current; an older protocol, no build info or older than latest − grace =
@@ -2354,11 +2357,13 @@ Before the game it:
    only the missing / changed objects, deletes files the previous list had and the new one does not
    (never the user's own files), records the list and the hash cache. First install = everything
    (~1.9 GB). Downloads (`launcher/src/assets_sync.c`): each unique sha256 once (duplicate paths are
-   copied), from every origin at once: the manifest's `objects` plus `assets.mirrors` (by-path copies
-   such as the Pages CDN; without the key, a manifest from `https://assets.krunk.io/` uses
-   `https://krunknative-assets.pages.dev/assets/`), 16 keep-alive connections per origin
-   (`--threads`, `KRUNKNATIVE_ASSET_THREADS`; `--asset-mirrors URLS|off`, `KRUNKNATIVE_ASSET_MIRRORS`)
-   pulling from one queue, half from the large end, half taking batches of up to 16 small files
+   copied), from every origin at once: the manifest's `objects` plus `assets.mirrors` (by-path copies:
+   the two Pages projects of the split CDN, `{"url","layout":"path","skip"|"only":[prefixes]}`, so
+   each is asked only for its own directories; without the key, a manifest from `https://dl.krunk.io/`
+   uses `https://assets.krunk.io/assets/`), 16 keep-alive connections per origin
+   (`--threads`, `KRUNKNATIVE_ASSET_THREADS`; `--asset-mirrors SPECS|off`, `KRUNKNATIVE_ASSET_MIRRORS`,
+   specs `[only=P+P@|skip=P+P@]URL`), pulling from one queue per group of objects the same origins
+   have, half from the large end, half taking batches of up to 16 small files
    HTTP/1.1-pipelined (8 in flight). DNS lookups and TLS sessions are cached per host. A failed file
    moves to another origin, then is retried with backoff (3 rounds over all origins); an origin with
    8 transport failures in a row is dropped for the run (never the last). Partial downloads stay in
@@ -2374,8 +2379,9 @@ Before the game it:
 demand anyway): a file of the content list (`<assets>/.kn-assets.json`) that is missing or has another
 size when something loads it (the sync skipped it, a user deleted or truncated it) is downloaded in
 the background: workers (2) try the origins in the sync's order (`KRUNKNATIVE_ASSET_ORIGINS`:
-`objects:<url>` = content-addressed, else by path; default `https://assets.krunk.io/assets/` then the
-Pages CDN), verify size + sha256, write `<file>.kn-fetch-N.part` and rename it into place; never into
+the mirrors first, each with its path filter (`only=P+P@<url>` / `skip=P+P@<url>`: a file goes to
+its own Pages project), then `objects:<url>` = content-addressed on kru; default
+`https://assets.krunk.io/assets/` then `https://dl.krunk.io/assets/`), verify size + sha256, write `<file>.kn-fetch-N.part` and rename it into place; never into
 a git checkout (checked per directory, symlinks resolved). 404 / wrong content on every origin gives
 the file up for the session, transport failures retry with backoff (4 rounds); one log line per file.
 While it downloads, `load_texture` hands out a (0,0,0,0) texture and `load_obj_model` an empty model
@@ -2423,8 +2429,8 @@ client's own Outdated check and `update now`).
 `ansible-playbook central.yml --tags openresty,updates` (the `kn.d/` include in nginx.conf, the store
 directories, `/usr/local/bin/kn-updates`, the `/updates/` location, the first content index) and the
 repository variable `KN_UPDATES_UPLOAD=1`.
-Optional: a Cloudflare cache rule making `assets.krunk.io/updates/client/builds/*` and
-`/updates/assets/objects/*` eligible for caching (both immutable; the manifest stays `no-cache`).
+The download host `dl.krunk.io` (role `kn_dl_origin`, deploy/ansible/README.md "Download host")
+serves the store directly from kru; the Pages CDN never holds it (packages over 25 MiB, 37k files).
 
 ## 10. Deployment
 

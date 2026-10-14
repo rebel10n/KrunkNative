@@ -12,12 +12,15 @@
     status   print what is published.
 
 Layout under --root (default /opt/krunknative-updates; openresty serves public/ as
-https://assets.krunk.io/updates/):
+https://dl.krunk.io/updates/, role kn_dl_origin; assets.krunk.io/updates/ 302s there):
     public/client/<channel>.json              channel manifest (format 1), no-cache
     public/client/builds/<commit12>/<pkg>     update packages (immutable)
     public/assets/<version>.json              asset list {"format":1,"version","files":[[path,sha256,size]]}
     public/assets/objects/<aa>/<sha256>       content-addressed files (immutable)
     state/                                    lock, hash cache, current build, history
+    asset-shards.json                         deploy/asset-shards.json (role kn_updates): the
+                                              manifest's assets.mirrors, the Pages projects of the
+                                              split CDN with their only/skip path filters
     incoming/<commit12>/                      CI uploads (build.json + packages/)
 Standard library only (Debian's python3 on kru, the GitHub runner, the e2e test).
 """
@@ -260,7 +263,40 @@ def index_assets(root, web_assets, exclude):
     }
 
 
-def write_manifest(root, build, assets, grace_h):
+def shard_mirrors(path):
+    """assets.mirrors from deploy/asset-shards.json: the default Pages project with a "skip" filter
+    (the other projects' directories and the excluded ones), each other project with "only" its
+    directories; their custom domains once the file says live, else their pages.dev names. None
+    without the file. Same as deploy/pages/asset_shards.py Shards.mirrors (its self-test compares)."""
+    try:
+        with open(path) as f:
+            cfg = json.load(f)
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as e:
+        die(f"{path}: {e}")
+    try:
+        shards = cfg["shards"]
+        default = next(s for s in shards if "prefixes" not in s)
+        key = "url" if cfg.get("live") is True else "pages_dev"
+        others = [s for s in shards if s is not default]
+        skip = sorted({p for s in others for p in s["prefixes"]} | set(cfg.get("exclude", [])))
+        out = [{"url": default[key] + "assets/", "layout": "path", "skip": skip}]
+        out += [{"url": s[key] + "assets/", "layout": "path", "only": list(s["prefixes"])} for s in others]
+    except (KeyError, TypeError, StopIteration) as e:
+        die(f"{path}: not a shard file ({e!r})")
+    return out
+
+
+def manifest_mirrors(a):
+    """KN_UPDATES_MIRRORS (by-path URLs; "" or "off" = none) over the shard file; None = no key."""
+    mirrors = os.environ.get("KN_UPDATES_MIRRORS")
+    if mirrors is not None:
+        return [] if mirrors.strip() in ("", "off") else mirrors.split()
+    return shard_mirrors(a.shards or os.path.join(a.root, "asset-shards.json"))
+
+
+def write_manifest(root, build, assets, grace_h, mirrors=None):
     c12 = build["build"]["commit"][:12]
     platforms = {}
     for plat, p in build["platforms"].items():
@@ -281,11 +317,10 @@ def write_manifest(root, build, assets, grace_h):
         "assets": dict(assets, packaged=sorted(build.get("package_assets", []))),
     }
     # Optional by-path mirrors of the content (the Pages CDN, deploy/pages/assets_cdn.py) the launcher
-    # downloads from alongside the objects (launcher/src/assets_sync.c). Unset: no "mirrors" key, and
-    # launchers use their built-in default for assets.krunk.io; "" or "off": an empty list (none).
-    mirrors = os.environ.get("KN_UPDATES_MIRRORS")
+    # downloads from alongside the objects (launcher/src/assets_sync.c; manifest_mirrors). None: no
+    # "mirrors" key, and launchers use their built-in default; []: none.
     if mirrors is not None:
-        manifest["assets"]["mirrors"] = [] if mirrors.strip() in ("", "off") else mirrors.split()
+        manifest["assets"]["mirrors"] = mirrors
     # last: a client never sees a manifest whose files are missing
     root.write_json(f"public/client/{build['channel']}.json", manifest, pretty=True)
     return manifest
@@ -367,7 +402,7 @@ def cmd_publish(a):
         elif not (os.path.exists(target) and sha256_file(target) == u["sha256"]):
             die(f"{name}: missing")
     assets = index_assets(root, a.web_assets, set(build.get("package_assets", [])))
-    manifest = write_manifest(root, build, assets, a.grace_h)
+    manifest = write_manifest(root, build, assets, a.grace_h, manifest_mirrors(a))
     root.write_json("state/current-build.json", build, pretty=True)
     history = [h for h in (root.read_json("state/history.json", []) or []) if h.get("commit12") != c12]
     history.append({"commit12": c12, "assets": assets["version"], "published": manifest["published"]})
@@ -388,10 +423,16 @@ def cmd_assets(a):
         return
     assets = index_assets(root, a.web_assets, set(build.get("package_assets", [])))
     old = root.read_json(f"public/client/{build['channel']}.json", {}) or {}
+    mirrors = manifest_mirrors(a)
     if old.get("assets", {}).get("version") == assets["version"]:
-        log(f"assets unchanged ({assets['version']})")
+        if old.get("assets", {}).get("mirrors") == mirrors:
+            log(f"assets unchanged ({assets['version']})")
+            return
+        # same content, other mirrors (the shard file changed, e.g. live): only the manifest
+        write_manifest(root, build, assets, a.grace_h, mirrors)
+        log(f"assets {assets['version']}: mirrors now {json.dumps(mirrors)}")
         return
-    manifest = write_manifest(root, build, assets, a.grace_h)
+    manifest = write_manifest(root, build, assets, a.grace_h, mirrors)
     # a new history entry (same build): the previous asset list stays for clients mid-sync
     history = root.read_json("state/history.json", []) or []
     history.append({"commit12": build["build"]["commit"][:12], "assets": assets["version"], "published": manifest["published"]})
@@ -432,6 +473,8 @@ def main():
         q.add_argument("--web-assets", default=os.environ.get("KN_UPDATES_WEB_ASSETS", DEFAULT_WEB_ASSETS))
         q.add_argument("--keep", type=int, default=3, help="builds / asset lists kept (default 3)")
         q.add_argument("--grace-h", type=int, default=48, help="outdated_grace_h in the manifest (default 48)")
+        q.add_argument("--shards", default=os.environ.get("KN_UPDATES_SHARDS", ""),
+                       help="deploy/asset-shards.json for assets.mirrors (default <root>/asset-shards.json)")
     a = p.parse_args()
     {"stage": cmd_stage, "publish": cmd_publish, "assets": cmd_assets, "status": cmd_status}[a.cmd](a)
 

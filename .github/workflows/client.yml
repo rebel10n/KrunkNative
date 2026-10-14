@@ -530,7 +530,7 @@ jobs:
           echo "### [$TAG](https://github.com/$GH_REPO/releases/tag/$TAG): $COMMIT12, protocol $PROTOCOL" >> "$GITHUB_STEP_SUMMARY"
 
   # Updates server (doc/backend.md 9.8): this run's update packages to kru, then `kn-updates publish`
-  # there writes https://assets.krunk.io/updates/client/latest.json. The game content is indexed on kru
+  # there writes https://dl.krunk.io/updates/client/latest.json. The game content is indexed on kru
   # from its web asset tree; the assets/ files the packages ship are left out of it.
   updates:
     name: Upload to the updates server
@@ -584,7 +584,7 @@ jobs:
           ssh_cmd="ssh -i $HOME/.ssh/id_kru -p ${KRU_PORT:-22} -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts"
           rsync -rt --chmod=D755,F644 -e "$ssh_cmd" "stage/$COMMIT12/" "root@$KRU_HOST:/opt/krunknative-updates/incoming/$COMMIT12/"
           $ssh_cmd "root@$KRU_HOST" /usr/local/bin/kn-updates publish "/opt/krunknative-updates/incoming/$COMMIT12"
-          echo "### updates: published $COMMIT12 to https://assets.krunk.io/updates/client/latest.json" >> "$GITHUB_STEP_SUMMARY"
+          echo "### updates: published $COMMIT12 to https://dl.krunk.io/updates/client/latest.json" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Cleanup key
         if: always()

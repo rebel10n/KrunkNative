@@ -114,14 +114,20 @@ static void web_asset_mark_missing(const char *path) {
 // "https://assets.krunk.io/"), plus "?v=<Module.krunkNativeAssetVersion>" when the
 // asset host published one (assets/version.txt, read by ui/js/loader.js): versioned
 // URLs are immutable, unversioned ones revalidate (deploy/pages/README.md "Caching").
+// The primary origin is per path once the content is split over two Pages projects
+// (deploy/asset-shards.json): loader.js's Module.krunkNativeAssetBaseFor("textures/x.png")
+// answers the shard's host for its directories, else Module.krunkNativeAssetBase.
 // fallback = 1: the same path below Module.krunkNativeAssetFallback, the second asset
-// origin a failed download is retried on (loader.js, kn-config.json "asset_fallback";
-// deploy/pages/README.md "Asset origins"); NULL when there is none.
+// origin a failed download is retried on (loader.js, kn-config.json "asset_fallback", kru's
+// dl.krunk.io with the whole tree; deploy/pages/README.md "Asset origins"); NULL when there is none.
 // Returned string is malloc'd and owned by the caller.
 EM_JS(char *, web_asset_url_at, (const char *path_ptr, int fallback), {
-    var base = fallback ? Module.krunkNativeAssetFallback : Module.krunkNativeAssetBase;
-    if (fallback && !base) return 0;
     var path = UTF8ToString(path_ptr);
+    var rel = path.charAt(0) === '/' ? path.substring(1) : path;
+    if (rel.lastIndexOf('assets/', 0) === 0) rel = rel.substring(7);
+    var base = fallback ? Module.krunkNativeAssetFallback
+                        : Module.krunkNativeAssetBaseFor ? Module.krunkNativeAssetBaseFor(rel) : Module.krunkNativeAssetBase;
+    if (fallback && !base) return 0;
     var url = (base || '') + (path.charAt(0) === '/' ? path.substring(1) : path);
     if (Module.krunkNativeAssetVersion) url += '?v=' + encodeURIComponent(Module.krunkNativeAssetVersion);
     return stringToNewUTF8(url);
@@ -209,6 +215,9 @@ EM_JS(int, web_asset_prefetch, (const char *path_ptr), {
     state.pending[path] = 1;
     var rel = path.charAt(0) === '/' ? path.substring(1) : path;
     var query = Module.krunkNativeAssetVersion ? '?v=' + encodeURIComponent(Module.krunkNativeAssetVersion) : '';
+    var below = rel.lastIndexOf('assets/', 0) === 0 ? rel.substring(7) : rel;
+    var primary = Module.krunkNativeAssetBaseFor ? Module.krunkNativeAssetBaseFor(below)
+                                                 : Module.krunkNativeAssetBase; // its shard (web_asset_url_at)
     function get(base) {
         return fetch((base || '') + rel + query).then(function (r) {
             if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -216,7 +225,7 @@ EM_JS(int, web_asset_prefetch, (const char *path_ptr), {
         });
     }
     // the second asset origin when the first fails (web_asset_url_at)
-    get(Module.krunkNativeAssetBase).catch(function (e) {
+    get(primary).catch(function (e) {
         if (!Module.krunkNativeAssetFallback) throw e;
         return get(Module.krunkNativeAssetFallback);
     }).then(function (buffer) {

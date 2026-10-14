@@ -4,15 +4,16 @@ Ansible for the Krunker Box Office central node (`kru`) and the edge game server
 
 | playbook | hosts | what |
 | --- | --- | --- |
-| `central.yml` | `kru` | user `kn`, OpenResty 127.0.0.1:8081 (static web build), kn_brain finder :8082 + auth/community :8083, PostgreSQL 127.0.0.1:5434 + Redis 127.0.0.1:6380 for kn_brain (see [Database cutover](#database-cutover-postgresql--redis-on-kru)), net-bridge :8084 (`play.krunk.io`), WebRTC gateway :8085 + udp 21100 (`play.krunk.io/rtc`), edge origin (host nginx :443 vhost + OpenResty 127.0.0.1:8086, off until `kn_edge_origin_enabled`), `/opt/krunknative` clone |
+| `central.yml` | `kru` | user `kn`, OpenResty 127.0.0.1:8081 (static web build), kn_brain finder :8082 + auth/community :8083, PostgreSQL 127.0.0.1:5434 + Redis 127.0.0.1:6380 for kn_brain (see [Database cutover](#database-cutover-postgresql--redis-on-kru)), net-bridge :8084 (`play.krunk.io`), WebRTC gateway :8085 + udp 21100 (`play.krunk.io/rtc`), edge origin (host nginx :443 vhost + OpenResty 127.0.0.1:8086, off until `kn_edge_origin_enabled`), download host `dl.krunk.io` (host nginx :80/:443 + Let's Encrypt + OpenResty 127.0.0.1:8087, off until `kn_dl_origin_enabled`), `/opt/krunknative` clone |
 | `edges.yml` | `edges` | host firewall drop-in (game ports), user `kn`, `server_bin` x (vcpus-1, min 1), `<edge>-<n>.krunk.io` DNS |
 | `firewall.yml` | `edges` | only the host firewall (vendored `edge_firewall` role), see [Edge firewall](#edge-firewall) |
 | `fail2ban.yml` | `kru`, `edges` | only fail2ban (vendored `fail2ban` role; base on kru, drop-ins on the edges), see [fail2ban](#fail2ban) |
 | `site.yml` | all | both |
 
-Tags: `user disk openresty repo release postgres redis brain cutover web updates bridge rtc edge_origin gameserver dns firewall fail2ban`.
+Tags: `user disk openresty repo release postgres redis brain cutover web updates bridge rtc edge_origin dl_origin gameserver dns firewall fail2ban`.
 
-Client updates (`kn_updates`, doc/backend.md 9.8): `https://assets.krunk.io/updates/` serves
+Client updates (`kn_updates`, doc/backend.md 9.8): `https://dl.krunk.io/updates/` (and
+`assets.krunk.io/updates/` while that name is the edge origin) serves
 `/opt/krunknative-updates/public/` (OpenResty `kn.d/updates.conf`): the channel manifest CI's
 `client.yml` job `updates` publishes with `kn-updates publish`, the update packages and the game
 content as hardlinked objects of the web asset tree. Off until `kn_updates_enabled: true`
@@ -198,6 +199,39 @@ uses the Cloudflare API for it any more (the cf_dns role and kn_bridge / kn_rtc'
 ingress tasks are gone). `edges.yml --tags dns` (role `kn_dns_check`) only checks that every
 `<edge>-<n>.krunk.io` resolves to its edge at `launch1.spaceship.net` and prints the records to add
 there (a new edge, a raised `kn_gameserver_count`).
+
+## Download host (`dl.krunk.io`)
+
+kru's own public name for the whole game content tree and the updates store, with nothing in
+front of it: the source the Pages asset CDN is mirrored from (deploy/pages/assets-cdn.sh), the
+clients' fallback (kn-config.json `dl`, the launcher's objects) and where the CDN's default
+project (`assets.krunk.io`) 302s `/updates/*` and excluded prefixes (deploy/asset-shards.json
+`download`). The launcher's default updates URL is `https://dl.krunk.io/updates/client/latest.json`.
+
+```
+client -> dl.krunk.io (A record at Spaceship: 5.188.124.56, kru's public IP; meal passes 80/443)
+       -> host nginx :443, Let's Encrypt certificate (certbot --webroot on :80, renewed by
+          certbot's timer, deploy hook reloads nginx); GET/HEAD/OPTIONS only; client in X-Real-IP
+       -> OpenResty 127.0.0.1:8087 (role openresty, the static_site with CORS): /assets/, /updates/
+```
+
+Role `kn_dl_origin` (tag `dl_origin`) renders `/etc/nginx/sites-available/krunknative-dl.conf`
+(linked as `sites-enabled/zz-krunknative-dl.conf`, after the existing sites, so the default
+servers do not change): first the :80 server (the ACME challenge from
+`/var/www/krunknative-acme`, everything else 301 to https), then `certbot certonly --webroot` once
+(`creates:` the certificate), then the same file with the :443 server; `nginx -t` before every
+reload, the previous file back if it fails. Log: `/var/log/nginx/krunknative-dl.log`.
+`kn_dl_origin_enabled: false` (`group_vars/central/main.yml`) removes the vhost and the 8087
+listener. Turn it on only after the A record resolves (the first run asks Let's Encrypt; a failure
+stops the play):
+
+```sh
+dig +short dl.krunk.io @launch1.spaceship.net   # 5.188.124.56
+ansible-playbook central.yml --tags openresty,dl_origin -e kn_dl_origin_enabled=true
+curl -fsSI https://dl.krunk.io/assets/version.txt; curl -fsSI https://dl.krunk.io/updates/client/latest.json
+```
+
+then set `kn_dl_origin_enabled: true` in group_vars (Deploy kru runs central.yml on every push).
 
 ## Database cutover (PostgreSQL + Redis on kru)
 

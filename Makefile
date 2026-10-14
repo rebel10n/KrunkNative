@@ -349,8 +349,8 @@ pages-github: ## Stage dist/web for GitHub Pages into dist/gh-pages, as CI publi
 	@[ -f $(DIST_WEB)/client.wasm ] || { echo "no web build yet: run 'make web' first"; exit 1; }
 	deploy/pages/github.sh
 
-assets-cdn: ## Mirror assets.krunk.io's game content and deploy it to the Cloudflare Pages asset CDN (deploy/pages/README.md)
-	deploy/pages/assets-cdn.sh
+assets-cdn: ## Mirror dl.krunk.io's game content and deploy it to the two Pages projects of the asset CDN (deploy/asset-shards.json; ARGS=--dry-run counts only)
+	deploy/pages/assets-cdn.sh $(ARGS)
 
 web-serve: ## Serve dist/web/ for local testing (PORT=8080); use ?offline=1 without a server
 	@[ -f $(DIST_WEB)/client.wasm ] || { echo "no web build yet: run 'make web' first"; exit 1; }
@@ -562,7 +562,12 @@ launcher-online-e2e: build ## Launcher-started client: finder + matchmaker reque
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I launcher/tests/launcher_online_e2e.py $(DEBUG_DIR)
 
 .PHONY: smoke smoke-native smoke-ui-v10 smoke-web lint check
-check: test ks-test editor-mcp-test lint bridge-check ## Everything CI runs that does not need a display
+check: test ks-test editor-mcp-test lint bridge-check deploy-test ## Everything CI runs that does not need a display
+
+.PHONY: deploy-test
+deploy-test: ## The asset CDN split (deploy/asset-shards.json): shard routing + kn-updates mirrors, assets_cdn.py against a local store
+	$(PYTHON) -I deploy/pages/asset_shards.py self-test
+	$(PYTHON) -I deploy/pages/assets_cdn_test.py
 
 lint: ## Lint workflow YAML, presets and the web glue scripts (ui/js)
 	@command -v actionlint >/dev/null && actionlint || echo "actionlint not installed, skipping"

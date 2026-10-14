@@ -1,0 +1,25 @@
+# Download host (deploy/ansible/README.md "Download host"): kru's own public name for the whole
+# game content tree and the updates store, with no edge and no CDN in front of it:
+#
+#   client -> dl.krunk.io (A record at Spaceship: kru's public IP; meal passes 80/443 to kru)
+#     host nginx :443 (this role's vhost, Let's Encrypt certificate via the :80 webroot challenge)
+#   -> OpenResty 127.0.0.1:{{ kn_dl_origin_port }} (role openresty): /assets/ (CORS, ?v= caching), /updates/
+#
+# It is the asset CDN's source (deploy/pages/assets-cdn.sh mirrors it), the clients' fallback
+# (kn-config.json asset_fallback "dl", the native fetch's objects) and where the Pages CDN's
+# default project (assets.krunk.io) 302s /updates/ and the excluded prefixes
+# (deploy/asset-shards.json "download"). The launcher's default updates URL is
+# https://dl.krunk.io/updates/client/latest.json (launcher/include/kn_update.h).
+#
+# kn_dl_origin_enabled / _port / _host live in group_vars/central/main.yml (OpenResty's template
+# reads them too). Enable it only once the A record resolves: the first run asks Let's Encrypt.
+
+# Let's Encrypt (certbot --webroot; its systemd timer renews, the deploy hook reloads nginx).
+kn_dl_origin_acme_root: /var/www/krunknative-acme
+kn_dl_origin_email: ""   # the account's mail; "" = registered without one
+kn_dl_origin_cert_dir: "/etc/letsencrypt/live/{{ kn_dl_origin_host }}"
+
+# The host nginx vhost (sites-available + a sites-enabled link that sorts last, so the existing
+# first server stays the default for :80/:443).
+kn_dl_origin_vhost: /etc/nginx/sites-available/krunknative-dl.conf
+kn_dl_origin_vhost_link: /etc/nginx/sites-enabled/zz-krunknative-dl.conf

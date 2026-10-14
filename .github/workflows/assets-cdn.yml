@@ -1,18 +1,17 @@
 name: Asset CDN
 
 # The game content on the Cloudflare Pages asset CDN (deploy/pages/README.md "Asset CDN"):
-# deploy/pages/assets-cdn.sh mirrors the own origin (https://assets.krunk.io/: the launcher's
-# content index + the packaged files, what the native client gets) and deploys it to the Pages
-# project krunknative-assets on its *.pages.dev URL. Runs after every Deploy kru, every 6 hours
-# and by hand; it stops after one request when the CDN already has the origin's
-# assets/version.txt. Only new objects are downloaded (actions/cache) and only new files
-# uploaded (wrangler's hash check).
-# Pages takes at most 20,000 files: the prefixes in deploy/pages/assets-cdn-exclude.txt stay off
-# the CDN (the clients load them from the own origin); the run prints the counts and fails only
-# when the tree is still over the limit (try locally: deploy/pages/assets-cdn.sh --dry-run).
-# Variables: KN_ASSET_CDN=1 (the project exists), KN_ASSET_CDN_URL (its https://<sub>.pages.dev/),
-#            optional KN_ASSET_OWN_URL, KN_ASSET_CDN_PROJECT, KN_ASSET_CDN_EXCLUDE (prefixes left
-#            out on top of the file).
+# deploy/pages/assets-cdn.sh mirrors kru's download host (https://dl.krunk.io/: the launcher's
+# content index + the packaged files, what the native client gets) and deploys it split by
+# directory over the Pages projects of deploy/asset-shards.json (krunknative-assets-a, served as
+# assets.krunk.io, with the _redirects old clients need; krunknative-assets-b as assets1.krunk.io).
+# Runs after every Deploy kru, every 6 hours and by hand; it stops after one request per project
+# when every project already has the source's assets/version.txt. Only new objects are downloaded
+# (actions/cache) and only new files uploaded (wrangler's hash check). The run prints the files
+# per project and fails only when one is over the Pages limit (locally: assets-cdn.sh --dry-run).
+# Variables: KN_ASSET_CDN=1 (the projects exist), optional KN_ASSET_DL_URL (the source instead of
+#            the file's download host), KN_ASSET_CDN_EXCLUDE (prefixes on no project, on top of
+#            the file's).
 # Secrets: CLOUDFLARE_API_TOKEN (Account > Cloudflare Pages > Edit), CLOUDFLARE_ACCOUNT_ID.
 on:
   workflow_run:
@@ -43,9 +42,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     env:
-      KN_ASSET_OWN_URL: ${{ vars.KN_ASSET_OWN_URL }}
-      KN_ASSET_CDN_URL: ${{ vars.KN_ASSET_CDN_URL }}
-      KN_ASSET_CDN_PROJECT: ${{ vars.KN_ASSET_CDN_PROJECT }}
+      KN_ASSET_DL_URL: ${{ vars.KN_ASSET_DL_URL }}
       KN_ASSET_CDN_EXCLUDE: ${{ vars.KN_ASSET_CDN_EXCLUDE }}
       KN_ASSET_CDN_OBJECTS: ${{ github.workspace }}/.objects
       KN_ASSET_CDN_FORCE: "1" # checked below
@@ -56,16 +53,14 @@ jobs:
         id: v
         run: |
           set -euo pipefail
-          . deploy/pages/site.sh
-          version=$(curl -fsS "${KN_ASSET_OWN_URL}assets/version.txt" | tr -d '[:space:]')
-          state=changed
-          if [ -n "$KN_ASSET_CDN_URL" ]; then
-            state=$(python3 -I deploy/pages/assets_cdn.py dist/assets-cdn --origin "$KN_ASSET_OWN_URL" --current "$KN_ASSET_CDN_URL")
-          fi
+          eval "$(python3 -I deploy/pages/asset_shards.py env)"
+          src=${KN_ASSET_DL_URL:-$KN_ASSET_DL_URL_DEFAULT}
+          version=$(curl -fsS "${src}assets/version.txt" | tr -d '[:space:]')
+          state=$(python3 -I deploy/pages/assets_cdn.py dist/assets-cdn --origin "$src" --current)
           [ "${{ inputs.force }}" = true ] && state=changed
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "state=$state" >> "$GITHUB_OUTPUT"
-          echo "own origin $version: CDN $state" >> "$GITHUB_STEP_SUMMARY"
+          echo "source $src $version: CDN $state" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Restore the object cache
         if: steps.v.outputs.state == 'changed'
@@ -94,20 +89,37 @@ jobs:
           path: .objects
           key: kn-assets-objects-${{ steps.v.outputs.version }}
 
-      # The deployed CDN answers like the page expects: the version, CORS, a byte range.
+      # Every project answers like the page expects (the version, CORS, a byte range) on its
+      # pages.dev name, and the default one redirects the other projects' directories (301) and the
+      # updates store (302 to kru) the way old clients need.
       - name: Verify
-        if: steps.v.outputs.state == 'changed' && vars.KN_ASSET_CDN_URL != ''
+        if: steps.v.outputs.state == 'changed'
         run: |
           set -euo pipefail
-          cdn="$KN_ASSET_CDN_URL"
+          eval "$(python3 -I deploy/pages/asset_shards.py env)"
           want="${{ steps.v.outputs.version }}"
-          for _ in $(seq 30); do
-            got=$(curl -fsS "${cdn}assets/version.txt" | tr -d '[:space:]') || got=
-            [ "$got" = "$want" ] && break
-            sleep 10
+          for s in $KN_SHARDS; do
+            var="KN_SHARD_${s}_PAGES_DEV"; cdn=${!var}
+            for _ in $(seq 30); do
+              got=$(curl -fsS "${cdn}assets/version.txt" | tr -d '[:space:]') || got=
+              [ "$got" = "$want" ] && break
+              sleep 10
+            done
+            [ "$got" = "$want" ] || { echo "::error::${cdn}assets/version.txt is '$got', not $want"; exit 1; }
+            echo "$s: ${cdn} has $want" >> "$GITHUB_STEP_SUMMARY"
           done
-          [ "$got" = "$want" ] || { echo "::error::${cdn}assets/version.txt is '$got', not $want"; exit 1; }
-          h=$(curl -fsS --retry 6 --retry-delay 10 --retry-all-errors -o /dev/null -D - -H 'Origin: https://krunk.io' -H 'Range: bytes=0-15' "${cdn}assets/img/icon.png?v=$want")
+          var="KN_SHARD_${KN_SHARD_DEFAULT}_PAGES_DEV"; a=${!var}
+          h=$(curl -fsS --retry 6 --retry-delay 10 --retry-all-errors -o /dev/null -D - -H 'Origin: https://krunk.io' -H 'Range: bytes=0-15' "${a}assets/img/icon.png?v=$want")
           echo "$h"
           grep -qi '^access-control-allow-origin: \*' <<< "$h" || { echo "::error::no CORS header"; exit 1; }
           grep -qi '^HTTP/[0-9.]* 206' <<< "$h" || echo "::warning::no 206 for a byte range"
+          # the default project's _redirects (deploy/pages/asset_shards.py redirects)
+          for s in $KN_SHARDS; do
+            [ "$s" = "$KN_SHARD_DEFAULT" ] && continue
+            var="KN_SHARD_${s}_URL"; b=${!var}
+            var="KN_SHARD_${s}_PREFIXES"; prefix=${!var%% *}
+            loc=$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' "${a}assets/${prefix}x.png")
+            [ "$loc" = "301 ${b}assets/${prefix}x.png" ] || { echo "::error::${a}assets/${prefix}x.png: '$loc', not a 301 to ${b}"; exit 1; }
+          done
+          loc=$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' "${a}updates/client/latest.json")
+          [ "$loc" = "302 ${KN_ASSET_DL_URL_DEFAULT}updates/client/latest.json" ] || { echo "::error::${a}updates/client/latest.json: '$loc'"; exit 1; }

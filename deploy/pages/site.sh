@@ -7,10 +7,16 @@
 # retries a failed download on KN_ASSET_FALLBACK; both are names of the origins below, written
 # to kn-config.json next to index.html, so switching is a variable + a page redeploy
 # (`gh workflow run pages.yml`), never a client build. An origin with an empty URL is left out.
-: "${KN_ASSET_OWN_URL:=${KN_ASSET_BASE:-https://assets.krunk.io/}}"   # "own": kru's OpenResty (later abulxt's edges), the native updates host
-: "${KN_ASSET_CDN_URL:=}"                           # "cdn": the Cloudflare Pages asset project, https://<project>.pages.dev/
-: "${KN_ASSET_ORIGIN:=own}"                         # own | cdn
-KN_ASSET_FALLBACK="${KN_ASSET_FALLBACK-}"           # own | cdn | "" (none)
+# deploy/asset-shards.json (KN_ASSET_SHARDS_FILE) adds "dl" (kru, KN_ASSET_DL_URL or the file's
+# download), "<shard>-dev" (the Pages projects' pages.dev names) and, once the file says live,
+# "<shard>" (their custom domains), plus the split: with the page on the default shard's URL
+# (own = assets.krunk.io), the other shards' directories load from their own hosts.
+: "${KN_ASSET_OWN_URL:=${KN_ASSET_BASE:-https://assets.krunk.io/}}"   # "own": Pages project a once the split is live (before: kru through the abulxt edges)
+: "${KN_ASSET_CDN_URL:=}"                           # "cdn": the old single Pages project (krunknative-assets.pages.dev, frozen); empty = not offered
+: "${KN_ASSET_DL_URL:=}"                            # "dl": kru's download host; empty = the shard file's (https://dl.krunk.io/)
+: "${KN_ASSET_SHARDS_FILE:=deploy/asset-shards.json}"
+: "${KN_ASSET_ORIGIN:=own}"                         # own | dl | cdn | <shard>-dev ...
+KN_ASSET_FALLBACK="${KN_ASSET_FALLBACK-}"           # dl | own | cdn | "" (none)
 KN_ASSET_ORIGINS="own=$KN_ASSET_OWN_URL,cdn=$KN_ASSET_CDN_URL"
 
 : "${KN_BRAIN_URL:=https://coordinator.krunk.io}"
@@ -23,7 +29,7 @@ KN_GA_ID="${KN_GA_ID-G-6EGYKRF020}"              # Google Analytics (deploy/page
 kn_site_args() {
     printf '%s\0' --brain "$KN_BRAIN_URL" --bridge "$KN_BRIDGE_URL" --rtc "$KN_RTC_URL" --wt "$KN_WT_URL" \
         --ga-id "$KN_GA_ID" --asset-origins "$KN_ASSET_ORIGINS" --asset-origin "$KN_ASSET_ORIGIN" \
-        --asset-fallback "$KN_ASSET_FALLBACK"
+        --asset-fallback "$KN_ASSET_FALLBACK" --asset-shards "$KN_ASSET_SHARDS_FILE" --asset-dl "$KN_ASSET_DL_URL"
 }
 
 # Cloudflare credentials: CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID (CI secrets), else

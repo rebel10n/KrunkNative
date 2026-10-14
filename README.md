@@ -202,8 +202,9 @@ CI builds the web client on every push (`KrunkNative-web` artifact).
 
 The playable deployment is **https://krunk.io**: the page on GitHub Pages (published by
 deploy-kru.yml after the services; `make pages-github` stages it locally), the game content
-from one of two asset origins the page picks at run time (`kn-config.json`: the Cloudflare
-Pages asset CDN on its pages.dev URL, or `assets.krunk.io`) and the services on the central
+from the asset origin the page picks at run time (`kn-config.json`: the Cloudflare Pages asset
+CDN, two projects split by directory as `assets.krunk.io` / `assets1.krunk.io`, with kru's
+`dl.krunk.io` as the fallback) and the services on the central
 node (`deploy/pages/README.md`, `deploy/ansible/README.md`). The old `krunker.party` site
 redirects there.
 

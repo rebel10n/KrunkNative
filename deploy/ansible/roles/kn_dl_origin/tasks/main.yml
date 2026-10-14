@@ -1,0 +1,65 @@
+# Download host vhost on the host nginx (defaults/main.yml). Off: the vhost is removed (OpenResty's
+# 127.0.0.1:kn_dl_origin_port listener goes with role openresty's template).
+- name: Download host vhost absent (kn_dl_origin_enabled is false)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ kn_dl_origin_vhost_link }}"
+    - "{{ kn_dl_origin_vhost }}"
+  notify: Reload nginx (dl origin)
+  when: not (kn_dl_origin_enabled | bool)
+
+- name: Download host
+  when: kn_dl_origin_enabled | bool
+  block:
+    - name: certbot
+      ansible.builtin.apt:
+        name: certbot
+        state: present
+        install_recommends: false
+        update_cache: true
+        cache_valid_time: 86400
+
+    - name: Webroot for Let's Encrypt's challenge
+      ansible.builtin.file:
+        path: "{{ kn_dl_origin_acme_root }}/.well-known/acme-challenge"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Certificate present?
+      ansible.builtin.stat:
+        path: "{{ kn_dl_origin_cert_dir }}/fullchain.pem"
+      register: kn_dl_origin_cert
+
+    - name: Certificate state
+      ansible.builtin.set_fact:
+        kn_dl_origin_has_cert: "{{ kn_dl_origin_cert.stat.exists }}"
+
+    - name: Vhost (:80 for the challenge; :443 once the certificate exists)
+      ansible.builtin.include_tasks: vhost.yml
+
+    # The challenge location must be live before certbot asks Let's Encrypt to fetch it.
+    - name: Reload nginx before the challenge
+      ansible.builtin.meta: flush_handlers
+
+    - name: Let's Encrypt certificate (webroot; renewed by certbot's timer)
+      ansible.builtin.command:
+        argv: "{{ ['certbot', 'certonly', '--webroot', '-w', kn_dl_origin_acme_root, '-d', kn_dl_origin_host,
+                  '--non-interactive', '--agree-tos', '--keep-until-expiring', '--deploy-hook', 'systemctl reload nginx']
+                 + (['-m', kn_dl_origin_email] if kn_dl_origin_email else ['--register-unsafely-without-email']) }}"
+        creates: "{{ kn_dl_origin_cert_dir }}/fullchain.pem"
+      register: kn_dl_origin_certbot
+      when: not kn_dl_origin_has_cert and not ansible_check_mode
+
+    - name: Vhost with :443
+      when: kn_dl_origin_certbot is changed
+      block:
+        - name: Certificate state (issued)
+          ansible.builtin.set_fact:
+            kn_dl_origin_has_cert: true
+
+        - name: Vhost (:80 + :443)
+          ansible.builtin.include_tasks: vhost.yml

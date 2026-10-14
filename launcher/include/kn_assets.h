@@ -6,8 +6,9 @@
 //
 // Downloads (doc/backend.md "Client updates"): every unique sha256 once (paths with the same
 // content are copied), largest first, from all origins at once: the manifest's objects plus its
-// assets.mirrors (the Pages CDN by default for assets.krunk.io), each with its own workers pulling
-// from one queue, so the faster origin serves more. Small files go HTTP/1.1-pipelined over
+// assets.mirrors (the Pages CDN: two projects, each with the only/skip path filter of its part of
+// the tree, deploy/asset-shards.json), each with its own workers pulling from one queue (per group
+// of objects the same origins have), so the faster origin serves more. Small files go HTTP/1.1-pipelined over
 // kept-alive connections; a file that fails on one origin is retried on the others, then again
 // with backoff. Partial downloads stay in <assets>/.kn-sync/<sha256>.part and are resumed
 // (Range) by the next attempt or run; every file is verified (size + sha256) before it is
@@ -22,7 +23,8 @@ typedef struct {
     volatile int *cancel; // non-zero stops the sync (set it with __atomic_store_n from another thread)
     int threads;      // connections per origin (default KN_ASSETS_THREADS_DEFAULT, at most 64)
     const char *mirrors; // optional: "off" = only the manifest's objects; else space-separated
-                         // by-path base URLs replacing the manifest's / built-in mirrors
+                         // origin specs ("[only=P+P@|skip=P+P@]URL", kn_origin_spec_parse)
+                         // replacing the manifest's / built-in mirrors
     // optional (assets_bench): only the entries this returns 1 for are part of the sync
     int (*select)(void *user, const KnAssetEntry *e);
 } KnAssetsSyncOpts;
@@ -30,9 +32,11 @@ typedef struct {
 #define KN_ASSETS_THREADS_DEFAULT 16
 #define KN_ASSETS_MAX_ORIGINS 5 // the objects + KN_UPDATE_MAX_MIRRORS
 // The built-in mirror of the default origin (deploy/pages/assets_cdn.py): used when a manifest
-// from https://assets.krunk.io/ names no assets.mirrors.
-#define KN_ASSETS_DEFAULT_ORIGIN "https://assets.krunk.io/"
-#define KN_ASSETS_DEFAULT_MIRROR "https://krunknative-assets.pages.dev/assets/"
+// from https://dl.krunk.io/ names no assets.mirrors (kn-updates.py publishes them). The Pages CDN's
+// default project: it 301s the other project's directories (a pipelined batch does not follow
+// that, the object's retry does, see assets_sync.c).
+#define KN_ASSETS_DEFAULT_ORIGIN "https://dl.krunk.io/"
+#define KN_ASSETS_DEFAULT_MIRROR "https://assets.krunk.io/assets/"
 
 typedef struct {
     char url[512];

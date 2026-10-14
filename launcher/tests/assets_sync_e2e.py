@@ -17,8 +17,10 @@ the tree (the Pages CDN layout). Both log every request and connection and can i
   7  missing everywhere: 404 on both fails the sync with "missing on the update server"
   8  cancel mid-download: the sync stops with "cancelled", nothing half-written in place
   9  content update: changed files fetched, removed ones deleted, a user's own file kept
- 10  a prefix left off the mirror (deploy/pages/assets-cdn-exclude.txt): 404 there, the objects
+ 10  a prefix left off the mirror (deploy/asset-shards.json "exclude"): 404 there, the objects
      serve it, and the mirror stays in (404s are not counted as stale)
+ 11  the split CDN: two by-path mirrors with "skip" / "only" path filters (the Pages projects of
+     deploy/asset-shards.json): each is asked only for its own paths (no 404s), both serve
 """
 import argparse
 import gzip
@@ -385,6 +387,25 @@ def scenarios(bench, work, own, cdn):
     cdn_stat = [o for o in r.get("origins", []) if o["url"].startswith("http://127.0.0.1:%d/" % cdn.port)]
     check(cdn_stat and not cdn_stat[0]["disabled"], "the mirror is not taken out for its 404s (%s)" % cdn_stat)
     cdn.reset_faults()
+
+    print("11 the split CDN: only / skip mirrors")
+    shutil.rmtree(dest)
+    split = ["textures/"]  # project b: textures/, project a: the rest
+    base = "http://127.0.0.1:%d/" % cdn.port
+    publish(own, cdn, tree2, "v3", [{"url": base + "a/assets/", "layout": "path", "skip": split},
+                                    {"url": base + "b/assets/", "layout": "path", "only": split}])
+    cdn.files = {("/b/assets/" if p.startswith("textures/") else "/a/assets/") + p.replace(" ", "%20"): d
+                 for p, d in tree2.items()}
+    own.reset_log(), cdn.reset_log()
+    r = run(bench, dest, url, "--threads", "4")
+    check(r.get("ok") == 1 and tree_ok(dest, tree2) == "", "sync ok, every file right (%s)" % r.get("err"))
+    wrong = [q for q in cdn.requests if q.startswith("/a/assets/textures/") or
+             (q.startswith("/b/assets/") and not q.startswith("/b/assets/textures/"))]
+    check(not wrong, "each project asked only for its own paths (%s)" % wrong[:3])
+    stats = {o["url"]: o for o in r.get("origins", [])}
+    a_stat, b_stat = stats.get(base + "a/assets/", {}), stats.get(base + "b/assets/", {})
+    check(b_stat.get("files", 0) > 0 and b_stat.get("failures", 1) == 0 and a_stat.get("failures", 1) == 0,
+          "project b served files, no failures on either (a %s, b %s)" % (a_stat, b_stat))
 
 
 if __name__ == "__main__":

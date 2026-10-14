@@ -225,6 +225,8 @@ static int parse_file(const cJSON *o, const char *base, KnUpdateFile *out) {
     return out->size > 0;
 }
 
+static int filter_add(KnPathFilter *f, const char *prefix); // origin path filters, below
+
 int kn_update_manifest_parse(const char *json, const size_t len, const char *manifest_url, KnUpdateManifest *out,
                              char *err, const size_t errn) {
     memset(out, 0, sizeof(*out));
@@ -332,6 +334,21 @@ int kn_update_manifest_parse(const char *json, const size_t len, const char *man
                 if (!murl || !murl[0] || !kn_update_resolve_url(manifest_url, murl, dst, KN_UPDATE_URL_MAX - 1)) continue;
                 const size_t dl = strlen(dst);
                 if (dst[dl - 1] != '/') strcat(dst, "/");
+                // "only" / "skip" (by path only): one part of a split CDN. Unusable = not this mirror.
+                KnPathFilter *flt = &out->assets.mirrors[out->assets.mirror_count].filter;
+                memset(flt, 0, sizeof(*flt));
+                const cJSON *only = cJSON_IsObject(me) ? cJSON_GetObjectItemCaseSensitive(me, "only") : NULL;
+                const cJSON *skip = cJSON_IsObject(me) ? cJSON_GetObjectItemCaseSensitive(me, "skip") : NULL;
+                const cJSON *list = only ? only : skip;
+                int usable = !(only && skip) && (!list || (cJSON_IsArray(list) && strcmp(layout, "objects") != 0));
+                if (usable && list) {
+                    flt->mode = only ? KN_PATH_ONLY : KN_PATH_SKIP;
+                    const cJSON *pe2;
+                    cJSON_ArrayForEach(pe2, list) usable = usable && filter_add(flt, cJSON_GetStringValue(pe2));
+                    if (only && !flt->list[0]) usable = 0; // serves nothing
+                    if (!flt->list[0]) flt->mode = KN_PATH_ALL;
+                }
+                if (!usable) continue;
                 out->assets.mirrors[out->assets.mirror_count].by_path = strcmp(layout, "objects") != 0;
                 out->assets.mirror_count++;
             }
@@ -341,6 +358,80 @@ int kn_update_manifest_parse(const char *json, const size_t len, const char *man
     }
     cJSON_Delete(root);
     return 1;
+}
+
+// ---------------------------------------------------------------- origin path filters
+
+int kn_path_filter_ok(const KnPathFilter *f, const char *path) {
+    if (!f || f->mode == KN_PATH_ALL || !path) return 1;
+    int hit = 0;
+    for (const char *t = f->list; *t && !hit;) {
+        const char *end = strchr(t, '+');
+        const size_t len = end ? (size_t) (end - t) : strlen(t);
+        hit = len && !strncmp(path, t, len);
+        t += len + (end ? 1 : 0);
+    }
+    return f->mode == KN_PATH_ONLY ? hit : !hit;
+}
+
+// A prefix of a filter: a path below assets/ with an optional trailing '/' (no '+').
+static int filter_prefix_ok(const char *p) {
+    if (!p || !*p || strchr(p, '+') || strchr(p, '@') || strchr(p, ' ') || strchr(p, ',')) return 0;
+    char tmp[400];
+    const size_t len = strlen(p);
+    if (len >= sizeof(tmp)) return 0;
+    memcpy(tmp, p, len + 1);
+    if (tmp[len - 1] == '/') tmp[len - 1] = 0;
+    return kn_update_path_ok(tmp);
+}
+
+static int filter_add(KnPathFilter *f, const char *prefix) {
+    const size_t used = strlen(f->list), len = strlen(prefix);
+    if (!filter_prefix_ok(prefix) || used + len + 2 > sizeof(f->list)) return 0;
+    snprintf(f->list + used, sizeof(f->list) - used, "%s%s", used ? "+" : "", prefix);
+    return 1;
+}
+
+int kn_origin_spec_parse(const char *spec, char *url, const size_t urln, int *by_path, KnPathFilter *f) {
+    KnPathFilter none = {0};
+    if (f) *f = none;
+    if (by_path) *by_path = 1;
+    if (!spec || !url || !urln) return 0;
+    if (!strncmp(spec, "objects:", 8)) {
+        if (by_path) *by_path = 0;
+        spec += 8;
+    } else if (!strncmp(spec, "only=", 5) || !strncmp(spec, "skip=", 5)) {
+        const char *at = strchr(spec, '@');
+        if (!at) return 0;
+        KnPathFilter got = {.mode = spec[0] == 'o' ? KN_PATH_ONLY : KN_PATH_SKIP};
+        char list[KN_PATH_FILTER_MAX];
+        const size_t len = (size_t) (at - spec - 5);
+        if (!len || len >= sizeof(list)) return 0;
+        memcpy(list, spec + 5, len);
+        list[len] = 0;
+        for (char *t = list, *end; t; t = end) {
+            end = strchr(t, '+');
+            if (end) *end++ = 0;
+            if (!filter_add(&got, t)) return 0;
+        }
+        if (f) *f = got;
+        spec = at + 1;
+    }
+    if (strncmp(spec, "http://", 7) != 0 && strncmp(spec, "https://", 8) != 0) return 0;
+    const size_t len = strlen(spec);
+    if (len + 2 > urln) return 0;
+    snprintf(url, urln, "%s%s", spec, spec[len - 1] == '/' ? "" : "/");
+    return 1;
+}
+
+int kn_origin_spec_format(char *out, const size_t n, const char *url, const int by_path, const KnPathFilter *f) {
+    if (!out || !n || !url) return 0;
+    int w;
+    if (!by_path) w = snprintf(out, n, "objects:%s", url);
+    else if (f && f->mode != KN_PATH_ALL && f->list[0])
+        w = snprintf(out, n, "%s=%s@%s", f->mode == KN_PATH_ONLY ? "only" : "skip", f->list, url);
+    else w = snprintf(out, n, "%s", url);
+    return w > 0 && (size_t) w < n;
 }
 
 void kn_update_manifest_free(KnUpdateManifest *m) {

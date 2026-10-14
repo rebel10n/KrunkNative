@@ -10,6 +10,10 @@ an SPA fallback). --ga-id puts Google Analytics into every page (ga.py).
 --asset-origins name=URL,... with --asset-origin NAME (and --asset-fallback NAME) writes
 kn-config.json, which loader.js reads before boot: the asset origin is then a run-time
 setting of the published site (no client build). Without them only kn-asset-base is set.
+--asset-shards deploy/asset-shards.json adds that file's origins (dl, <shard>-dev, <shard> once
+live) and its "asset_split" (asset_shards.py page_split): on the default shard's URL, the page
+loads the other shards' directories from their hosts (README "Asset CDN"). --asset-dl overrides
+the file's download host.
 
 --target cloudflare: _headers (immutable hashed files; Pages revalidates everything else)
   and _redirects (/assets/* -> the asset origin); Pages limits 20k files / 25 MiB each.
@@ -20,7 +24,8 @@ setting of the published site (no client build). Without them only kn-asset-base
   cached for those 10 minutes finds its client after the deploy. Limits 1 GB, 100 MB a file.
 
 usage: stage.py <dist/web> <out dir> --brain URL [--asset-base URL | --asset-origins n=URL,... --asset-origin n
-                [--asset-fallback n]] [--bridge URL] [--rtc URL|off] [--wt URL|off] [--ga-id G-...|off]
+                [--asset-fallback n] [--asset-shards FILE] [--asset-dl URL]]
+                [--bridge URL] [--rtc URL|off] [--wt URL|off] [--ga-id G-...|off]
                 [--target cloudflare|github] [--cname HOST] [--keep-from URL]
 """
 import argparse
@@ -33,6 +38,7 @@ import shutil
 import sys
 import urllib.request
 
+import asset_shards
 import ga
 
 CLIENT_FILES = ("client.js", "client.wasm", "client.data")
@@ -79,6 +85,19 @@ def asset_config(args):
         if not sep or not NAME_RE.match(name) or not URL_RE.match(url):
             sys.exit("stage.py: --asset-origins entry %r is not name=https://host/path/" % item)
         origins[name] = url
+    split = None
+    if args.asset_shards:
+        try:
+            with open(args.asset_shards) as f:
+                cfg = json.load(f)
+            if args.asset_dl:
+                cfg["download"] = args.asset_dl if args.asset_dl.endswith("/") else args.asset_dl + "/"
+            shards = asset_shards.Shards(cfg)
+        except (OSError, ValueError) as e:
+            sys.exit("stage.py: --asset-shards %s: %s" % (args.asset_shards, e))
+        for name, url in shards.page_origins().items():
+            origins.setdefault(name, url)
+        split = shards.page_split()
     if args.asset_origin not in origins:
         sys.exit("stage.py: --asset-origin %r is not one of %s" % (args.asset_origin, sorted(origins)))
     fallback = args.asset_fallback or ""
@@ -86,8 +105,10 @@ def asset_config(args):
         sys.exit("stage.py: --asset-fallback %r is not one of %s" % (fallback, sorted(origins)))
     if fallback == args.asset_origin:
         fallback = ""
-    return origins[args.asset_origin], {"asset_origin": args.asset_origin, "asset_fallback": fallback,
-                                         "asset_origins": origins}
+    config = {"asset_origin": args.asset_origin, "asset_fallback": fallback, "asset_origins": origins}
+    if split:
+        config["asset_split"] = split
+    return origins[args.asset_origin], config
 
 
 def fetch(url, timeout):
@@ -131,6 +152,8 @@ def main():
     ap.add_argument("--asset-origins", default="", help="name=URL,... the asset origins kn-config.json offers")
     ap.add_argument("--asset-origin", default="", help="the one of them the page uses")
     ap.add_argument("--asset-fallback", default="", help='the one a failed download is retried on; "" = none')
+    ap.add_argument("--asset-shards", default="", help="deploy/asset-shards.json: its origins and split")
+    ap.add_argument("--asset-dl", default="", help="the download host instead of the shard file's")
     ap.add_argument("--target", choices=("cloudflare", "github"), default="cloudflare")
     ap.add_argument("--cname", default="", help="github: custom domain written to CNAME")
     ap.add_argument("--keep-from", default="", help="github: the live site, whose client files are kept")

@@ -1,35 +1,41 @@
 # deploy/pages
 
 The krunk.io front end and the game content's hosting. The page (dist/web without assets/) is
-on **GitHub Pages**; the game content is on two interchangeable **asset origins**, the page picks
-one at run time (kn-config.json, below); services stay on the central node:
+on **GitHub Pages**; the game content is on the **asset CDN** (two Cloudflare Pages projects, split by
+directory, `deploy/asset-shards.json`) with kru's **download host** as the source and the fallback;
+the page picks its origin at run time (kn-config.json, below); services stay on the central node:
 
 | host | what | where |
 | --- | --- | --- |
 | `krunk.io`, `www.krunk.io` | dist/web without assets/ (index/social/editor/viewer, ui/, client.<hash>.*, kn-config.json) | GitHub Pages (`rebel10n/KrunkNative`, deploy-kru.yml job `pages`, custom domain `krunk.io`, HTTPS enforced) |
-| `krunknative-assets.pages.dev` | asset origin `cdn`: `/assets/` (the game content but `assets-cdn-exclude.txt`, 17.1k files, 1.7 GB) | Cloudflare Pages project `krunknative-assets`, its pages.dev URL only (assets-cdn.yml) |
-| `assets.krunk.io` | asset origin `own`: `/assets/`, and `/updates/` for the launcher | kru OpenResty :8081 (abulxt edges, deploy/ansible role kn_edge_origin) |
+| `assets.krunk.io` | asset origin `own`: `/assets/` but the directories of project b (10.9k files, 2.2 GB); `_redirects`: those 301 to `assets1.`, `/updates/*` 302 to `dl.` | Cloudflare Pages project `krunknative-assets-a` (custom domain; pages.dev: `krunknative-assets-a.pages.dev`, origin `a-dev`). Before the cutover (runbook): kru through the abulxt edges |
+| `assets1.krunk.io` | `/assets/` of project b's directories (`textures/previews/`, `hats/`, `melee/`, `faces/`, `body/`, `sprays/`, `back/`: 11.2k files, 0.5 GB) | Cloudflare Pages project `krunknative-assets-b` (origin `b-dev` on pages.dev) |
+| `dl.krunk.io` | asset origin `dl`: the whole `/assets/` tree and `/updates/` (the launcher's store); the CDN's source, the clients' fallback | kru: host nginx :443 (Let's Encrypt) -> OpenResty :8087 (deploy/ansible role kn_dl_origin) |
+| `krunknative-assets.pages.dev` | the old single project (origin `cdn`), frozen at the last tree that fit: not deployed any more, not used | Cloudflare Pages project `krunknative-assets` (left alone) |
 | `coordinator.krunk.io` | kn_brain auth + community + matchmaker | kru :8083 (abulxt edges) |
 | `matchmaker.krunk.io` | kn_brain finder (`/servers`) | kru :8082 (abulxt edges) |
 | `play.krunk.io` | net-bridge: `wss://play.krunk.io/native?target=<edge>-<n>.krunk.io:<port>` -> game server TCP | kru :8084 (abulxt edges, deploy/ansible `kn_bridge`) |
 | `<edge>-<n>.krunk.io` | game servers, DNS only | edges (A records by hand at Spaceship; deploy/ansible `kn_dns_check` checks them) |
 
-DNS: the krunk.io zone is on Spaceship (since 2026-10-13); every record is set by hand in its
-panel, nothing here calls a DNS API. Names this setup owns: the DNS records `krunk.io` (GitHub's
-A records) and `www.krunk.io` (CNAME to `rebel10n.github.io`) and the Cloudflare Pages project `krunknative-assets`. It only *uses* `assets.krunk.io` (the own origin): its DNS and server
-belong to the edge-origin work (deploy/ansible role kn_edge_origin), which must keep what the page
-relies on there (CORS `*`, `/assets/version.txt` no-store, `?v=` caching, byte ranges).
+DNS: the krunk.io zone is on Spaceship (since 2026-10-13); every record is set by hand (or
+through Spaceship's API by the runbook), nothing in CI writes DNS. Names this setup owns: the DNS
+records `krunk.io` (GitHub's A records), `www.krunk.io` (CNAME to `rebel10n.github.io`),
+`assets.krunk.io` / `assets1.krunk.io` (CNAMEs to `krunknative-assets-a` / `-b.pages.dev`, the
+projects' custom domains) and `dl.krunk.io` (A record, kru's public IP), and the Pages projects
+`krunknative-assets-a` / `-b`. What the page relies on from every asset origin: CORS `*`,
+`/assets/version.txt` no-store, `?v=` caching, byte ranges.
 
 ```sh
 make web && make pages-github  # stage dist/web for GitHub Pages into dist/gh-pages (CI publishes it)
-make assets-cdn                # mirror the own origin and deploy it to the asset CDN
+make assets-cdn                # mirror dl.krunk.io and deploy it to both Pages projects of the asset CDN
+deploy/pages/assets-cdn.sh --dry-run                          # the files per project, no upload
 deploy/pages/check.sh https://krunk.io/                       # a published site + its asset origins
-deploy/pages/check.sh --assets https://krunknative-assets.pages.dev/
+deploy/pages/check.sh --assets https://krunknative-assets-a.pages.dev/
 ```
 
 The site's settings are in `site.sh` (each one an environment variable; CI passes the repository
 variables of the same name, empty = the default): `KN_ASSET_ORIGIN KN_ASSET_FALLBACK
-KN_ASSET_OWN_URL KN_ASSET_CDN_URL KN_BRAIN_URL KN_BRIDGE_URL KN_RTC_URL KN_WT_URL KN_GA_ID`
+KN_ASSET_OWN_URL KN_ASSET_CDN_URL KN_ASSET_DL_URL KN_ASSET_SHARDS_FILE KN_BRAIN_URL KN_BRIDGE_URL KN_RTC_URL KN_WT_URL KN_GA_ID`
 (Analytics below), plus `KN_PAGES_CNAME` (github.sh). Cloudflare credentials (the asset CDN): `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`, else
 `~/.config/kn-secrets/cloudflare.env`.
 
@@ -75,58 +81,102 @@ out. Build's `web` job stages the site once as a check.
 
 ## Asset origins
 
-The page loads the game content from one of two origins, both serving `/assets/<path>` with
-`assets/version.txt` (the `?v=` of every asset URL) and CORS for any page origin:
+The page loads the game content from one origin and retries a failed download on a second one;
+every origin serves `/assets/<path>` with `assets/version.txt` (the `?v=` of every asset URL) and
+CORS for any page origin:
 
-- `own`: `KN_ASSET_OWN_URL`, default `https://assets.krunk.io/`: kru's OpenResty today, abulxt's
-  edges after the edge-origin move (a DNS change of `assets.krunk.io`, nothing here). Also the
-  native launcher's updates host.
-- `cdn`: `KN_ASSET_CDN_URL`, the Cloudflare Pages asset project's `https://<sub>.pages.dev/`
-  (Asset CDN below); empty = not offered.
+- `own`: `KN_ASSET_OWN_URL`, default `https://assets.krunk.io/`: the asset CDN's default Pages
+  project (krunknative-assets-a) once the split is live; before the cutover, kru through the
+  abulxt edges (the whole tree).
+- `dl`: `KN_ASSET_DL_URL`, default deploy/asset-shards.json's `download`, `https://dl.krunk.io/`:
+  kru's download host, the whole tree (the fallback).
+- `a-dev`, `b-dev`: the Pages projects on their pages.dev names (deploy/asset-shards.json), for
+  trying the CDN before its domains carry traffic; `a`, `b`: their custom domains, once the file
+  says `"live": true`.
+- `cdn`: `KN_ASSET_CDN_URL`, the old single Pages project (`krunknative-assets.pages.dev`, frozen);
+  empty = not offered. Unset it with the cutover.
 
 `stage.py` writes them to `kn-config.json` next to index.html, with the one in use
-(`KN_ASSET_ORIGIN`, default `own`) and the one a failed download is retried on
+(`KN_ASSET_ORIGIN`, default `own`), the one a failed download is retried on
 (`KN_ASSET_FALLBACK`, default none; shared/src/utils.c retries `ensure_asset_file` and the
-prefetches there, so a file missing from one origin, or an origin that is down, still loads):
+prefetches there, so a file missing from one origin, or an origin that is down, still loads) and
+the **split** (`asset_split`, from deploy/asset-shards.json): on the default project's URL, the
+other project's directories load straight from its host (`Module.krunkNativeAssetBaseFor` in
+loader.js; also the URLs the C UI writes into `<img>` / `<video>`, which are never retried):
 
 ```json
-{"asset_origin": "cdn", "asset_fallback": "own",
- "asset_origins": {"cdn": "https://krunknative-assets.pages.dev/", "own": "https://assets.krunk.io/"}}
+{"asset_origin": "own", "asset_fallback": "dl",
+ "asset_origins": {"own": "https://assets.krunk.io/", "dl": "https://dl.krunk.io/",
+                   "a": "https://assets.krunk.io/", "b": "https://assets1.krunk.io/",
+                   "a-dev": "https://krunknative-assets-a.pages.dev/", "b-dev": "https://krunknative-assets-b.pages.dev/"},
+ "asset_split": [{"base": "https://assets.krunk.io/", "routes": [["textures/previews/", "https://assets1.krunk.io/"], ...]},
+                 {"base": "https://krunknative-assets-a.pages.dev/", "routes": [["textures/previews/", "https://krunknative-assets-b.pages.dev/"], ...]}]}
 ```
 
-loader.js reads it before boot (no-cache; it wins over the `kn-asset-base` meta, which names the
-same origin for older loaders), so **switching is a repository variable plus a page republish, no
-client build** (GitHub serves the new file within its 10-minute cache):
+(the first split only once the file is live). loader.js reads it before boot (no-cache; it wins
+over the `kn-asset-base` meta, which names the same origin for older loaders), so **switching is a
+repository variable plus a page republish, no client build** (GitHub serves the new file within
+its 10-minute cache):
 
 ```sh
-# to the Cloudflare Pages CDN (own stays the fallback)
-gh variable set KN_ASSET_ORIGIN --body cdn && gh variable set KN_ASSET_FALLBACK --body own && gh workflow run pages.yml
-# back to our own origin (assets.krunk.io), the CDN as the fallback
-gh variable set KN_ASSET_ORIGIN --body own && gh variable set KN_ASSET_FALLBACK --body cdn && gh workflow run pages.yml
-# own origin on another name (e.g. a CNAME of our own to abulxt's edges): add the DNS record first
-gh variable set KN_ASSET_OWN_URL --body https://<name>.krunk.io/ && gh workflow run pages.yml
+# the asset CDN with kru as the fallback (the setting after the cutover)
+gh variable set KN_ASSET_ORIGIN --body own && gh variable set KN_ASSET_FALLBACK --body dl && gh workflow run pages.yml
+# everything from kru (the CDN in trouble)
+gh variable set KN_ASSET_ORIGIN --body dl && gh variable set KN_ASSET_FALLBACK --body own && gh workflow run pages.yml
 ```
 
 `deploy/pages/check.sh <site>` afterwards checks every origin kn-config.json names.
 
-Per tab, `?assets=<name>` picks one of the configured origins (`?assets=cdn`, `?assets=own`; kept
-in sessionStorage for the tab's later page loads, `?assets=default` forgets it), e.g. to try the
-CDN on the live site before switching everyone. A full URL (`?assets=http://127.0.0.1:9000/`) is
-only accepted on a localhost page, so a link cannot point players at someone else's content.
+Per tab, `?assets=<name>` picks one of the configured origins (`?assets=a-dev` tries the split
+CDN on its pages.dev names, `?assets=dl`; kept in sessionStorage for the tab's later page loads,
+`?assets=default` forgets it), e.g. to try the CDN on the live site before switching everyone. A
+full URL (`?assets=http://127.0.0.1:9000/`) is only accepted on a localhost page, so a link cannot
+point players at someone else's content.
 
 ## Asset CDN
 
-The Cloudflare Pages project `krunknative-assets`, on its pages.dev URL only (no custom domain):
-`assets-cdn.sh` / assets-cdn.yml mirror the own origin and deploy it.
+Two Cloudflare Pages projects, the tree split between them by directory (**`deploy/asset-shards.json`**,
+one file for the deploy, the page and the launcher manifest; `deploy/pages/asset_shards.py` reads
+it): `krunknative-assets-a` as `assets.krunk.io` (everything the other project does not take) and
+`krunknative-assets-b` as `assets1.krunk.io` (`textures/previews/`, `hats/`, `melee/`, `faces/`,
+`body/`, `sprays/`, `back/`). `assets-cdn.sh` / assets-cdn.yml mirror kru's download host
+(`dl.krunk.io`) and deploy each part to its project.
 
+- Why two: Pages takes at most 20,000 files a deployment (Free plan; 25 MiB a file, 100
+  `_headers` rules, 100 dynamic `_redirects`). The tree outgrew one project with the v10 content
+  (2026-10-14, asset list 442d6fc77b68be68: 22,039 indexed files + 115 packaged + version.txt =
+  **22,155 files**, 2.7 GB; largest file 22.8 MB, `videos/tutorial/basics.mp4`). By directory:
+  textures/previews 7,422, textures/weapons 6,802 (5,015 of them skins), textures/hats 883,
+  textures/melee 753, textures/faces 689, textures/body 595, textures/sprays 563, models/hats 536,
+  sound 513, user-assets 397, models/weapons 371, models/body 332, textures/back 330, textures/
+  (files) 276, models/melee 207, the rest under 200 each. `textures/` alone (19,059) is over the
+  limit, so its subdirectories are split: **a 10,920 files (2.2 GB), b 11,236 (0.5 GB)**, both
+  under the file's `max_files` 16,000 with ~5k to grow. A path goes to the project with the
+  longest matching prefix; `exclude` prefixes go to neither (kru only).
+- Old clients (cached pages, launchers and clients without the split) ask `assets.krunk.io` for
+  everything: project a's `_redirects` (generated) send b's directories there with a 301
+  (`/assets/textures/previews/* https://assets1.krunk.io/assets/textures/previews/:splat 301`),
+  `/updates/*` (the launcher's store: manifests, objects, packages over 25 MiB) and the excluded
+  prefixes to `https://dl.krunk.io/` with a 302. New clients go to the right project directly:
+  the page by kn-config.json's split, the launcher and the native on-demand fetch by the
+  manifest's `assets.mirrors` (`skip` / `only` prefixes, written by kn-updates.py from the same
+  file), with kru (`dl`, the objects) as the fallback everywhere.
 - What: exactly what the native client gets, the launcher's content index (updates manifest
   `assets.manifest`: every file of the web tree but the ones the packages ship, as
   sha256-addressed objects, verified on download) plus those packaged files, fetched by path, plus
-  the origin's `assets/version.txt`. `assets_cdn.py` hard-links the objects into the tree
-  (wrangler skips symlinks); assets-cdn.yml caches them, so only new content is downloaded.
+  the origin's `assets/version.txt` in both projects. `assets_cdn.py` hard-links the objects into
+  the trees (wrangler skips symlinks); assets-cdn.yml caches them, so only new content is downloaded.
 - When: after every Deploy kru, every 6 hours and by hand (`gh workflow run assets-cdn.yml [-f
-  force=true]`); a run stops after one request when the CDN already has the origin's
-  `version.txt`. Gated by the repository variable `KN_ASSET_CDN=1` (the project must exist).
+  force=true]`); a run stops after one request per project when both already have the source's
+  `version.txt`. Project b is deployed first, a last (its version.txt is what loader.js and the
+  next run read). Gated by the repository variable `KN_ASSET_CDN=1` (the projects must exist).
+  After a deploy the workflow checks both pages.dev names (version, CORS, a byte range) and a's
+  redirects (a 301 for a b path, a 302 for `/updates/`).
+- Limits: `assets_cdn.py` prints the files per project (and per directory with `--dry-run`); over
+  the file's `max_files` it warns, over 20,000 it fails the run (naming the biggest directories)
+  instead of deploying a partial tree. Then move a directory to the other project (or add a
+  third) in deploy/asset-shards.json. Check without downloading or uploading anything:
+  `deploy/pages/assets-cdn.sh --dry-run`; `make deploy-test` runs the split's tests.
 - Upload: `wrangler pages deploy` hashes every file, asks Cloudflare which hashes it lacks
   (`/pages/assets/check-missing`) and uploads only those (identical files once), so a content
   change uploads just the changed files; the full tree is only hashed, not resent.
@@ -134,40 +184,45 @@ The Cloudflare Pages project `krunknative-assets`, on its pages.dev URL only (no
   `Content-Length, Content-Range, ETag`, `Cache-Control: public, max-age=86400` for `/assets/*`
   (a day, not a year: `_headers` cannot tell `?v=` URLs from bare ones), `no-store` for
   `assets/version.txt`. Pages serves byte ranges (206) and ETags itself.
-- Limits (Free plan: 20,000 files a deployment, 25 MiB a file, 100 `_headers` rules). The tree
-  outgrew them with the v10 content (2026-10-14, asset list 442d6fc77b68be68: 22,039 indexed files
-  + 115 packaged + version.txt = **22,155 files**, 2.7 GB; largest file 22.8 MB,
-  `videos/tutorial/basics.mp4`, under 25 MiB). Biggest groups: textures/previews (7,422),
-  textures/weapons/skins (5,015), the rest of textures/weapons (1,787), textures/hats (883),
-  textures/melee (753), textures/faces (689), textures/body (595), textures/sprays (563),
-  models/hats (536), sound (513), user-assets (397).
-  So the CDN leaves prefixes out: **`deploy/pages/assets-cdn-exclude.txt`** (one per line, read by
-  assets-cdn.sh; `KN_ASSET_CDN_EXCLUDE` adds space-separated ones, `KN_ASSET_CDN_EXCLUDE_FILE=none`
-  drops the file). Today: `textures/weapons/skins/` (5,015 files, 1 GB) -> **17,140 files** on the
-  CDN, 2,860 to spare. The CDN answers a left-out path 404 (with CORS), and every game loader then
-  takes it from the own origin: the web client's `ensure_asset_file` / prefetches (kn-config.json
-  `asset_fallback`), the native on-demand fetch (next origin on a 404) and the launcher's sync (a
-  mirror's 404 is not counted against it). The page's own `<img>` / `<video>` / CSS `url()` are
-  **not** retried (html_dom_asset_url writes the CDN URL into the page): never leave out what the
-  UI shows that way (textures/previews, sprays, playercards, emoji, paints, classes, reticles,
-  scopes, weapon / melee icons, videos, user-assets, scares); the file's header lists them.
-  `assets_cdn.py` prints the count per excluded prefix, the files left and to spare; it warns over
-  18,000 (`--warn-files`) and fails the run, naming the biggest directories left, instead of
-  deploying a partial tree over 20,000. Check a change without downloading or uploading anything:
-  `deploy/pages/assets-cdn.sh --dry-run`. Beyond that: the Workers Paid plan (100,000 files,
-  project setting `PAGES_WRANGLER_MAJOR_VERSION=4`), a second Pages project for a part of the tree,
-  or move the page to `own`.
-- The launcher's `/updates/` (manifests, 18,356 content objects, client packages of 27-33 MB) is
-  not on the CDN: it would not fit next to the tree (37k files, packages over 25 MiB).
+- The launcher's `/updates/` (manifests, 18k content objects, client packages of 27-33 MB) is not
+  on the CDN: kru serves it as `https://dl.krunk.io/updates/` (deploy/ansible/README.md "Download
+  host"), the launcher's default updates URL.
+- `"live"` in the file: false until both custom domains serve the projects (the cutover runbook).
+  Until then the page splits only on the pages.dev names (`?assets=a-dev`) and the manifest names
+  the pages.dev mirrors; `true` (a commit; Deploy kru copies the file to kru, the next index
+  rewrites the manifest) switches both to `assets.krunk.io` / `assets1.krunk.io`.
 
 ## Native client and launcher
 
-They stay on `assets.krunk.io`: the launcher's default updates URL
-(`KN_UPDATE_DEFAULT_URL`, launcher/include/kn_update.h) is compiled into released builds and the
-client's update links are checked against that host (client/src/ui/update_ui.c), and the
-updates store does not fit on Pages (above). Their switch is the same name's DNS: when
-`assets.krunk.io` moves to abulxt's edges (or any origin of ours), the launcher follows with no
-release, and `KRUNKNATIVE_UPDATES_URL` / `--updates-url` points a single install elsewhere.
+The launcher's default updates URL (`KN_UPDATE_DEFAULT_URL`, launcher/include/kn_update.h) is
+`https://dl.krunk.io/updates/client/latest.json` (kru; the store does not fit on Pages) and the
+client's update links are checked against `dl.krunk.io` and `assets.krunk.io` (client/src/ui/
+update_ui.c). Launchers built before that ask `https://assets.krunk.io/updates/...`: project a
+302s `/updates/*` to `dl.krunk.io`, which kn_http follows (relative URLs in the manifest still
+resolve against assets.krunk.io, so their objects take the same 302; a pipelined batch does not
+follow it and the object is retried as a plain GET, which does: slower, not broken). The content
+comes from the manifest's mirrors (the two projects, each with its path filter) next to kru's
+objects; `KRUNKNATIVE_UPDATES_URL` / `--updates-url` points a single install elsewhere.
+
+## Asset CDN split cutover
+
+From one Pages project (`krunknative-assets`, over the file limit) to two plus kru's download host.
+Order (prod: each step verified before the next; the DNS of `assets.krunk.io` last):
+
+1. `dl.krunk.io`: its A record (kru's public IP), then `kn_dl_origin_enabled: true`
+   (group_vars/central/main.yml; the first Deploy kru gets the certificate). Verify
+   `curl -fsSI https://dl.krunk.io/assets/version.txt https://dl.krunk.io/updates/client/latest.json`.
+2. The projects `krunknative-assets-a` / `-b` (`wrangler pages project create <name>
+   --production-branch main`; fix `pages_dev` in deploy/asset-shards.json if Pages gave another
+   subdomain), `KN_ASSET_CDN=1`, `gh workflow run assets-cdn.yml -f force=true`; its Verify step
+   checks both pages.dev names and a's redirects. Try the page on them: `https://krunk.io/?assets=a-dev`.
+3. `assets1.krunk.io`: CNAME to `krunknative-assets-b.pages.dev`, custom domain on project b
+   (new name, no traffic yet); wait for it to be active.
+4. Custom domain `assets.krunk.io` on project a (pending until the DNS), its CNAME to
+   `krunknative-assets-a.pages.dev` instead of the edges; wait for the certificate.
+5. `"live": true` in deploy/asset-shards.json (page split + manifest mirrors on the custom
+   domains), `KN_ASSET_ORIGIN=own`, `KN_ASSET_FALLBACK=dl`, delete `KN_ASSET_CDN_URL`; rerun pages.yml.
+   Back: the old CNAME of `assets.krunk.io` (`byod.abstracteducation.loan`), `"live": false`.
 
 ## Cutover
 

@@ -1,30 +1,32 @@
 #!/usr/bin/env python3
-"""Mirror the game content of the own asset origin into a directory for the Cloudflare Pages
-asset CDN (deploy/pages/README.md "Asset CDN"; deploy/pages/assets-cdn.sh deploys it).
+"""Mirror the game content of the kru download host into one directory per Pages project of the
+asset CDN (deploy/pages/README.md "Asset CDN"; deploy/pages/assets-cdn.sh deploys them).
 
 The tree is exactly what the native client gets: the launcher's content index (the updates
 manifest <origin>updates/client/latest.json -> assets.manifest, every file of the web asset
 tree except the ones the packages ship, as sha256-addressed objects) plus those packaged
 files, fetched by path. Objects are verified and kept in --objects (CI caches the directory),
-so only new content is downloaded. Out:
+so only new content is downloaded. Pages takes at most 20,000 files of at most 25 MiB in a
+deployment (Free plan), so the tree is split by directory over the projects of
+deploy/asset-shards.json (asset_shards.py). Out, per shard <name>:
 
-    <out>/assets/<path>          the tree (hardlinks into --objects; wrangler skips symlinks)
-    <out>/assets/version.txt     the origin's assets/version.txt: the ?v= of the web client
-    <out>/_headers               CORS for any page origin, caching (README "Asset CDN")
+    <out>/<name>/assets/<path>       its part of the tree (hardlinks into --objects; wrangler
+                                     skips symlinks)
+    <out>/<name>/assets/version.txt  the origin's assets/version.txt: the ?v= of the web client
+    <out>/<name>/_headers            CORS for any page origin, caching (README "Asset CDN")
+    <out>/<default>/_redirects       the other shards' directories (301), the kru-only paths and
+                                     the excluded prefixes (302 to the download host)
 
-Cloudflare Pages takes at most 20,000 files of at most 25 MiB in a deployment (Free plan);
---exclude / --exclude-from drop path prefixes (the CDN answers them 404, the clients then load
-them from the own origin: README "Asset CDN"), anything still over the limits fails the run
-instead of deploying a partial tree. Over --warn-files (default 18,000) only warns.
+Prefixes in the file's "exclude" (and --exclude) go to no project. A shard over the Pages limits
+fails the run instead of deploying a partial tree; over the file's max_files it only warns.
 
-usage: assets_cdn.py <out> [--origin URL] [--objects DIR] [--jobs N] [--exclude PREFIX ...]
-                     [--exclude-from FILE ...] [--max-files N] [--warn-files N] [--dry-run]
-                     [--current URL]
-       --exclude-from FILE: one prefix per line, '#' comments (deploy/pages/assets-cdn-exclude.txt)
-       --dry-run: read the origin's content list, print the counts per prefix and check the
-                  limits; nothing is downloaded or written (<out> is not touched).
-       --current URL: print "same" and exit 0 when URL/assets/version.txt already equals the
-                      origin's (nothing to deploy), else "changed".
+usage: assets_cdn.py <out> [--config FILE] [--origin URL] [--objects DIR] [--jobs N]
+                     [--exclude PREFIX ...] [--max-files N] [--dry-run] [--current]
+       --origin: default the file's "download" (kru, https://dl.krunk.io/)
+       --dry-run: read the origin's content list, print the counts per shard and directory and
+                  check the limits; nothing is downloaded or written (<out> is not touched).
+       --current: print "same" and exit 0 when every shard's pages.dev assets/version.txt already
+                  equals the origin's (nothing to deploy), else "changed".
 Standard library only.
 """
 import argparse
@@ -40,6 +42,9 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # python3 -I: asset_shards next to this file
+import asset_shards  # noqa: E402
 
 MAX_SIZE = 25 * 1024 * 1024
 PATH_RE = re.compile(r"^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$")
@@ -93,20 +98,6 @@ def version_of(base):
     return v
 
 
-def read_prefixes(name):
-    """The prefixes of an exclude file: one per line, '#' starts a comment."""
-    out = []
-    with open(name) as f:
-        for n, line in enumerate(f, 1):
-            p = line.split("#", 1)[0].strip()
-            if not p:
-                continue
-            if p.startswith("/") or ".." in p.split("/") or not PATH_RE.match(p.rstrip("/")):
-                sys.exit("assets_cdn: %s:%d: not a path prefix below assets/: %r" % (name, n, p))
-            out.append(p)
-    return out
-
-
 def top_prefixes(files, packaged, limit):
     """(prefix, files, bytes) of the biggest two-level directories left, most files first."""
     groups = {}
@@ -146,30 +137,36 @@ def fetch_object(objects_url, cache, sha, size):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("out")
-    ap.add_argument("--origin", default="https://assets.krunk.io/")
+    ap.add_argument("--config", default=asset_shards.CONFIG, help="deploy/asset-shards.json")
+    ap.add_argument("--origin", default="", help="the source (default: the file's download host)")
     ap.add_argument("--objects", default=os.path.expanduser("~/.cache/kn-assets-objects"))
     ap.add_argument("--jobs", type=int, default=16)
-    ap.add_argument("--exclude", action="append", default=[], help="path prefix below assets/ to leave out")
-    ap.add_argument("--exclude-from", action="append", default=[], help="file of prefixes, one per line, # comments")
-    ap.add_argument("--max-files", type=int, default=20000)
-    ap.add_argument("--warn-files", type=int, default=18000, help="warn (not fail) over this many files")
+    ap.add_argument("--exclude", action="append", default=[], help="path prefix below assets/ on no project")
+    ap.add_argument("--max-files", type=int, default=20000, help="the Pages limit per project")
     ap.add_argument("--dry-run", action="store_true", help="count and check the limits only")
-    ap.add_argument("--current", default="", help="the deployed CDN: exit early when it has this version")
+    ap.add_argument("--current", action="store_true", help="exit early when every shard has this version")
     args = ap.parse_args()
-    origin = args.origin if args.origin.endswith("/") else args.origin + "/"
-    for name in args.exclude_from:
-        args.exclude += read_prefixes(name)
-    args.exclude = list(dict.fromkeys(p for p in args.exclude if p))  # in order, once each
+    try:
+        with open(args.config) as f:
+            cfg = json.load(f)
+        cfg["exclude"] = list(dict.fromkeys(list(cfg.get("exclude", [])) + [x for x in args.exclude if x]))
+        shards = asset_shards.Shards(cfg)
+    except (OSError, ValueError) as e:
+        sys.exit("assets_cdn: %s: %s" % (args.config, e))
+    origin = args.origin or shards.download
+    origin = origin if origin.endswith("/") else origin + "/"
 
     version = version_of(origin)
     if args.current:
-        current = args.current if args.current.endswith("/") else args.current + "/"
-        try:
-            have = version_of(current)
-        except (OSError, ValueError, SystemExit):
-            have = ""
-        print("same" if have == version else "changed")
-        log("origin %s, cdn %s" % (version, have or "none"))
+        have = {}
+        for s in shards.shards:
+            try:
+                have[s["name"]] = version_of(s["pages_dev"])
+            except (OSError, ValueError, SystemExit, urllib.error.URLError):
+                have[s["name"]] = ""
+        same = all(v == version for v in have.values())
+        print("same" if same else "changed")
+        log("origin %s %s, %s" % (origin, version, ", ".join("%s %s" % (n, v or "none") for n, v in have.items())))
         return
 
     manifest_url = origin + "updates/client/latest.json"
@@ -182,7 +179,6 @@ def main():
         sys.exit("assets_cdn: %s does not match the manifest's sha256" % list_url)
     files = json.loads(raw)["files"]
     packaged = assets.get("packaged") or []
-    excluded = lambda p: any(p.startswith(x) for x in args.exclude)
 
     for path, sha, size in files:
         if not PATH_RE.match(path) or ".." in path.split("/") or not HEX_RE.match(sha):
@@ -191,87 +187,103 @@ def main():
         if not PATH_RE.match(path) or ".." in path.split("/"):
             sys.exit("assets_cdn: bad packaged path %r" % path)
 
-    indexed = len(files)
-    total = indexed + len(packaged) + 1  # + version.txt (_headers is not a file of the site)
-    dropped = dict.fromkeys(args.exclude, 0)
-    for path in [f[0] for f in files] + packaged:
-        for x in args.exclude:
-            if path.startswith(x):
-                dropped[x] += 1
-                break
-    files = [f for f in files if not excluded(f[0])]
-    packaged = [p for p in packaged if not excluded(p)]
-    big = [f[0] for f in files if f[2] > MAX_SIZE]
-    count = len(files) + len(packaged) + 1
-    log("content list %s: %d files (%d indexed + %d packaged + version.txt)" % (
-        assets.get("version", "?"), total, indexed, total - 1 - indexed))
-    for x, n in dropped.items():
+    # every path to its shard (None: excluded, served by the download host only)
+    plan = {s["name"]: ([], []) for s in shards.shards}
+    excluded = {}
+    for f in files:
+        s = shards.route(f[0])
+        if s:
+            plan[s["name"]][0].append(f)
+        else:
+            excluded[f[0]] = 1
+    for path in packaged:
+        s = shards.route(path)
+        if s:
+            plan[s["name"]][1].append(path)
+        else:
+            excluded[path] = 1
+    total = len(files) + len(packaged) + 1  # + version.txt (_headers / _redirects are not files of the site)
+    log("content list %s from %s: %d files (%d indexed + %d packaged + version.txt)" % (
+        assets.get("version", "?"), origin, total, len(files), len(packaged)))
+    for x in shards.exclude:
+        n = sum(1 for p in excluded if p.startswith(x))
         log("  excluded %-32s %6d files%s" % (x, n, "" if n else "  (matches nothing: a typo?)"))
-    log("%d files left for the CDN (max %d): %s%s" % (
-        count, args.max_files, "%d to spare" % (args.max_files - count) if count <= args.max_files else
-        "%d too many" % (count - args.max_files), ", over 25 MiB: %s" % big[:10] if big else ""))
-    if args.dry_run:
-        for prefix, n, size in top_prefixes(files, packaged, 20):
-            log("  %6d files %8.1f MB  %s" % (n, size / 1e6, prefix))
-    if count > args.max_files or big:
-        sys.exit("assets_cdn: still over the Pages limits after the exclusions: %d files (max %d), over 25 MiB: %s. "
-                 "Leave more prefixes out in deploy/pages/assets-cdn-exclude.txt (or KN_ASSET_CDN_EXCLUDE), only ones "
-                 "the game's loaders fetch (they retry the own origin; the page's <img>/<video> do not, the file's "
-                 "header lists the prefixes that must stay). Biggest now: %s. Or switch the page to the own origin "
-                 "(README \"Asset CDN\")" % (
-                     count, args.max_files, big[:10],
-                     ", ".join("%s %d" % (p, n) for p, n, _s in top_prefixes(files, packaged, 6))))
-    if count > args.warn_files:
-        msg = "%d files on the CDN, over the %d of the headroom target (Pages max %d)" % (
-            count, args.warn_files, args.max_files)
-        print(("::warning::assets_cdn: " if os.environ.get("GITHUB_ACTIONS") else "assets_cdn: warning: ") + msg,
-              file=sys.stderr, flush=True)
+    over = []
+    for s in shards.shards:
+        sfiles, spack = plan[s["name"]]
+        count = len(sfiles) + len(spack) + 1
+        big = [f[0] for f in sfiles if f[2] > MAX_SIZE]
+        log("shard %s (%s, %s): %d files, %.2f GB, max %d: %s%s" % (
+            s["name"], s["project"], s["url"], count, sum(f[2] for f in sfiles) / 1e9, args.max_files,
+            "%d to spare" % (args.max_files - count) if count <= args.max_files else "%d too many" % (count - args.max_files),
+            ", over 25 MiB: %s" % big[:10] if big else ""))
+        if args.dry_run:
+            for prefix, n, size in top_prefixes(sfiles, spack, 12):
+                log("  %6d files %8.1f MB  %s" % (n, size / 1e6, prefix))
+        if count > args.max_files or big:
+            over.append("%s: %d files (max %d), over 25 MiB: %s; biggest: %s" % (
+                s["name"], count, args.max_files, big[:10],
+                ", ".join("%s %d" % (p, n) for p, n, _s in top_prefixes(sfiles, spack, 6))))
+        elif count > shards.max_files:
+            msg = "shard %s has %d files, over the %d of deploy/asset-shards.json (Pages max %d): move a directory " \
+                  "to another shard" % (s["name"], count, shards.max_files, args.max_files)
+            print(("::warning::assets_cdn: " if os.environ.get("GITHUB_ACTIONS") else "assets_cdn: warning: ") + msg,
+                  file=sys.stderr, flush=True)
+    if over:
+        sys.exit("assets_cdn: still over the Pages limits: %s. Move directories between the shards (or add one) in "
+                 "deploy/asset-shards.json, or exclude them there (README \"Asset CDN\")" % "; ".join(over))
     if args.dry_run:
         return
 
     if os.path.exists(args.out):
         shutil.rmtree(args.out)
-    tree = os.path.join(args.out, "assets")
-    os.makedirs(tree)
     t0 = time.time()
     fetched = 0
+    jobs_files = [(s["name"], f) for s in shards.shards for f in plan[s["name"]][0]]
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
-        jobs = {pool.submit(fetch_object, objects_url, args.objects, sha, size): path for path, sha, size in files}
+        jobs = {pool.submit(fetch_object, objects_url, args.objects, f[1], f[2]): (name, f[0]) for name, f in jobs_files}
         for n, job in enumerate(concurrent.futures.as_completed(jobs), 1):
             obj, got = job.result()
             fetched += got
-            link(obj, os.path.join(tree, jobs[job]))
+            name, path = jobs[job]
+            link(obj, os.path.join(args.out, name, "assets", path))
             if n % 2000 == 0:
-                log("%d/%d files, %.0f MB downloaded" % (n, len(files), fetched / 1e6))
+                log("%d/%d files, %.0f MB downloaded" % (n, len(jobs_files), fetched / 1e6))
     missing = []
-    for path in packaged:
-        try:
-            data = get(origin + "assets/" + path + "?v=" + version)
-        except urllib.error.HTTPError as e:
-            if e.code != 404:
-                raise
-            missing.append(path)
-            continue
-        dst = os.path.join(tree, path)
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        with open(dst, "wb") as f:
-            f.write(data)
+    for s in shards.shards:
+        for path in plan[s["name"]][1]:
+            try:
+                data = get(origin + "assets/" + path + "?v=" + version)
+            except urllib.error.HTTPError as e:
+                if e.code != 404:
+                    raise
+                missing.append(path)
+                continue
+            dst = os.path.join(args.out, s["name"], "assets", path)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            with open(dst, "wb") as f:
+                f.write(data)
     if missing:
         log("packaged files the origin does not have (left out): %s" % missing)
 
     # The origin's tree must not have moved on meanwhile: this version then names exactly it.
     if version_of(origin) != version:
         sys.exit("assets_cdn: the origin's assets/version.txt changed during the mirror; run again")
-    with open(os.path.join(tree, "version.txt"), "w") as f:
-        f.write(version + "\n")
-    with open(os.path.join(args.out, "_headers"), "w") as f:
-        f.write(HEADERS)
-
-    total = sum(os.path.getsize(os.path.join(d, n)) for d, _ds, fs in os.walk(tree) for n in fs)
-    nfiles = sum(len(fs) for _d, _ds, fs in os.walk(tree))
-    log("staged %s: version %s, %d files (%d packaged), %.2f GB, %.0f MB downloaded in %.0f s%s" % (
-        args.out, version, nfiles, len(packaged) - len(missing), total / 1e9, fetched / 1e6, time.time() - t0,
-        ", excluded " + " ".join(args.exclude) if args.exclude else ""))
+    for s in shards.shards:
+        root = os.path.join(args.out, s["name"])
+        os.makedirs(os.path.join(root, "assets"), exist_ok=True)
+        with open(os.path.join(root, "assets", "version.txt"), "w") as f:
+            f.write(version + "\n")
+        with open(os.path.join(root, "_headers"), "w") as f:
+            f.write(HEADERS)
+        if s is shards.default:
+            with open(os.path.join(root, "_redirects"), "w") as f:
+                f.write(shards.redirects())
+        tree = os.path.join(root, "assets")
+        size = sum(os.path.getsize(os.path.join(d, n)) for d, _ds, fs in os.walk(tree) for n in fs)
+        nfiles = sum(len(fs) for _d, _ds, fs in os.walk(tree))
+        log("staged %s: shard %s (%s), version %s, %d files, %.2f GB" % (root, s["name"], s["project"], version, nfiles, size / 1e9))
+    log("%.0f MB downloaded in %.0f s, %d files on no shard" % (fetched / 1e6, time.time() - t0, len(excluded)))
 
 
 if __name__ == "__main__":

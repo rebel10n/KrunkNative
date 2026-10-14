@@ -38,6 +38,33 @@ static const char *SHA_C = "cccccccccccccccccccccccccccccccccccccccccccccccccccc
 
 // ------------------------------------------------------------------ URLs, paths
 
+// KRUNKNATIVE_ASSET_ORIGINS / --asset-mirrors origin specs with path filters (the split CDN)
+static void test_origin_specs(void) {
+    char url[KN_UPDATE_URL_MAX], spec[2048];
+    int by_path = -1;
+    KnPathFilter f;
+    CHECK(kn_origin_spec_parse("https://a.example/assets", url, sizeof(url), &by_path, &f));
+    CHECK_STR(url, "https://a.example/assets/");
+    CHECK(by_path == 1 && f.mode == KN_PATH_ALL && kn_path_filter_ok(&f, "anything"));
+    CHECK(kn_origin_spec_parse("objects:https://dl.example/updates/assets/objects/", url, sizeof(url), &by_path, &f));
+    CHECK(by_path == 0 && f.mode == KN_PATH_ALL);
+    CHECK(kn_origin_spec_parse("only=textures/previews/+textures/hats/@https://b.example/assets/", url, sizeof(url), &by_path, &f));
+    CHECK_STR(url, "https://b.example/assets/");
+    CHECK(by_path == 1 && f.mode == KN_PATH_ONLY);
+    CHECK(kn_path_filter_ok(&f, "textures/hats/a.png") && !kn_path_filter_ok(&f, "textures/body/a.png"));
+    CHECK(kn_origin_spec_format(spec, sizeof(spec), url, by_path, &f));
+    CHECK_STR(spec, "only=textures/previews/+textures/hats/@https://b.example/assets/");
+    CHECK(kn_origin_spec_parse("skip=textures/hats/@https://a.example/assets/", url, sizeof(url), &by_path, &f));
+    CHECK(f.mode == KN_PATH_SKIP && !kn_path_filter_ok(&f, "textures/hats/a.png") && kn_path_filter_ok(&f, "sound/a.mp3"));
+    CHECK(kn_origin_spec_format(spec, sizeof(spec), "https://dl.example/o/", 0, NULL));
+    CHECK_STR(spec, "objects:https://dl.example/o/");
+    CHECK(!kn_origin_spec_parse("only=@https://b.example/", url, sizeof(url), &by_path, &f));     // no prefix
+    CHECK(!kn_origin_spec_parse("only=../x/@https://b.example/", url, sizeof(url), &by_path, &f)); // unsafe
+    CHECK(!kn_origin_spec_parse("only=x/https://b.example/", url, sizeof(url), &by_path, &f));     // no '@'
+    CHECK(!kn_origin_spec_parse("skip=x/@ftp://b.example/", url, sizeof(url), &by_path, &f));      // not http(s)
+    CHECK(!kn_origin_spec_format(spec, 8, "https://a.example/", 1, NULL));                        // does not fit
+}
+
 static void test_urls(void) {
     char out[KN_UPDATE_URL_MAX];
     const char *base = "https://assets.krunk.io/updates/client/latest.json";
@@ -150,6 +177,27 @@ static void test_manifest(void) {
                        "\"manifest\":\"v1.json\",\"objects\":\"o/\",\"mirrors\":[]}}";
     CHECK(kn_update_manifest_parse(none, strlen(none), url, &m, err, sizeof(err)));
     CHECK(m.assets.mirrors_set && m.assets.mirror_count == 0); // an empty list: no mirrors at all
+    kn_update_manifest_free(&m);
+
+    // the split Pages CDN (deploy/asset-shards.json): "only" / "skip" path filters; a mirror whose
+    // filter is unusable (both keys, a bad prefix, on an objects layout, only=[]) is dropped
+    const char *split =
+        "{\"format\":1,\"build\":{\"commit\":\"abcdef1\"},\"assets\":{\"version\":\"v1\",\"manifest\":\"v1.json\","
+        "\"objects\":\"o/\",\"mirrors\":["
+        "{\"url\":\"https://a.example/assets/\",\"skip\":[\"textures/previews/\",\"textures/hats/\"]},"
+        "{\"url\":\"https://b.example/assets/\",\"layout\":\"path\",\"only\":[\"textures/previews/\",\"textures/hats/\"]},"
+        "{\"url\":\"https://c.example/\",\"only\":[\"x/\"],\"skip\":[\"y/\"]},"
+        "{\"url\":\"https://d.example/\",\"only\":[\"../x/\"]},"
+        "{\"url\":\"https://e.example/\",\"layout\":\"objects\",\"only\":[\"x/\"]}]}}";
+    CHECK(kn_update_manifest_parse(split, strlen(split), url, &m, err, sizeof(err)));
+    CHECK(m.assets.mirror_count == 2);
+    CHECK(m.assets.mirrors[0].filter.mode == KN_PATH_SKIP && m.assets.mirrors[1].filter.mode == KN_PATH_ONLY);
+    CHECK_STR(m.assets.mirrors[1].filter.list, "textures/previews/+textures/hats/");
+    CHECK(kn_path_filter_ok(&m.assets.mirrors[0].filter, "textures/weapons/skins/w_1.png"));
+    CHECK(!kn_path_filter_ok(&m.assets.mirrors[0].filter, "textures/hats/hat_1.png"));
+    CHECK(kn_path_filter_ok(&m.assets.mirrors[1].filter, "textures/previews/weapons/w.png"));
+    CHECK(!kn_path_filter_ok(&m.assets.mirrors[1].filter, "textures/hatsX/a.png"));
+    CHECK(!kn_path_filter_ok(&m.assets.mirrors[1].filter, "models/hats/a.obj"));
     kn_update_manifest_free(&m);
 
     CHECK(!kn_update_manifest_parse("[]", 2, url, &m, err, sizeof(err)));
@@ -689,6 +737,7 @@ int main(int argc, char **argv) {
     kn_fs_rmtree(g_scratch);
     kn_fs_mkdirs(g_scratch);
     test_urls();
+    test_origin_specs();
     test_manifest();
     test_compare();
     test_assets();

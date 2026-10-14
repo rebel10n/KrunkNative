@@ -3,7 +3,8 @@ name: Pages
 # Republish the front end on GitHub Pages without building anything (deploy/pages/README.md
 # "Asset origins"): the web build of the last successful Deploy kru, restaged with the current
 # repository variables (deploy/pages/site.sh: KN_ASSET_ORIGIN, KN_ASSET_FALLBACK, KN_ASSET_*_URL,
-# KN_PAGES_CNAME). E.g. moving the page to the other asset origin:
+# KN_PAGES_CNAME) and deploy/asset-shards.json (its origins and split). E.g. moving the page to
+# the other asset origin:
 #   gh variable set KN_ASSET_ORIGIN --body own && gh workflow run pages.yml
 on:
   workflow_dispatch:
@@ -24,6 +25,7 @@ jobs:
       KN_ASSET_FALLBACK: ${{ vars.KN_ASSET_FALLBACK }}
       KN_ASSET_OWN_URL: ${{ vars.KN_ASSET_OWN_URL }}
       KN_ASSET_CDN_URL: ${{ vars.KN_ASSET_CDN_URL }}
+      KN_ASSET_DL_URL: ${{ vars.KN_ASSET_DL_URL }}
       KN_PAGES_CNAME: ${{ vars.KN_PAGES_CNAME }}
     steps:
       - uses: actions/checkout@v7

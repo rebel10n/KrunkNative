@@ -41,6 +41,17 @@
     group: root
     mode: "0755"
 
+# deploy/asset-shards.json: kn-updates writes the launcher manifest's assets.mirrors from it (the
+# Pages projects of the split CDN with their only/skip path filters; their pages.dev names until
+# the file says live). The index task below rewrites the manifest when they change.
+- name: The asset CDN's split (deploy/asset-shards.json) for kn-updates
+  ansible.builtin.copy:
+    src: "{{ kn_repo_root }}/deploy/asset-shards.json"
+    dest: "{{ kn_updates_root }}/asset-shards.json"
+    owner: root
+    group: root
+    mode: "0644"
+
 - name: OpenResty include directory
   ansible.builtin.file:
     path: "{{ openresty_prefix }}/nginx/conf/kn.d"

@@ -49,6 +49,7 @@ jobs:
       KN_ASSET_FALLBACK: ${{ vars.KN_ASSET_FALLBACK }}
       KN_ASSET_OWN_URL: ${{ vars.KN_ASSET_OWN_URL }}
       KN_ASSET_CDN_URL: ${{ vars.KN_ASSET_CDN_URL }}
+      KN_ASSET_DL_URL: ${{ vars.KN_ASSET_DL_URL }}
       KN_PAGES_CNAME: ${{ vars.KN_PAGES_CNAME }}
     steps:
       - uses: actions/checkout@v7

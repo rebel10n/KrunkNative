@@ -269,6 +269,7 @@ static void hash_cache_save(const char *dir, const KnAssetList *want) {
 typedef struct {
     char url[KN_UPDATE_URL_MAX];
     int by_path;                  // <url><path> (a copy of the tree) or <url><aa>/<sha256>
+    KnPathFilter filter;          // by path: the part of the tree it has (one Pages project of the split)
     int disabled;
     int transport_streak, stale_streak;
     KnAssetsOriginStat stat;
@@ -278,6 +279,7 @@ typedef struct {
     const char *sha256;
     int64_t size;
     size_t *idx, nidx;            // want entries with this content (fetch order: idx[0] is downloaded)
+    unsigned serve;               // origins that have it (bit per origin; their path filters)
     unsigned tried;               // origins tried this round (bit per origin)
     int not_found;                // every answer this round was a 404
     int round;
@@ -297,7 +299,14 @@ typedef struct {
     int origin_count;
     Obj *objs;
     size_t obj_count;
-    size_t *queue, queue_head, queue_tail; // objects by size, largest first; open: [head, tail)
+    // objects grouped by the origins that serve them (lanes), each lane largest first; a lane's
+    // open part is [head, tail) of queue. One lane unless mirrors have path filters.
+    size_t *queue;
+    struct {
+        unsigned serve;
+        size_t head, tail;
+    } lanes[1u << KN_ASSETS_MAX_ORIGINS];
+    int lane_count;
     size_t in_flight;             // objects a worker is fetching
     size_t *idx_storage;          // the objects' idx arrays
     size_t *retry, retry_count;   // objects waiting for another origin / the next round
@@ -349,7 +358,13 @@ static void obj_url(const Pool *p, const int origin, const Obj *o, char *out, co
     }
     size_t k = (size_t) snprintf(out, n, "%s", g->url);
     static const char HEX[] = "0123456789ABCDEF";
-    for (const unsigned char *c = (const unsigned char *) p->want->files[o->idx[0]].path; *c && k + 4 < n; c++) {
+    const char *path = p->want->files[o->idx[0]].path; // a path with this content the origin has
+    for (size_t i = 0; i < o->nidx; i++)
+        if (kn_path_filter_ok(&g->filter, p->want->files[o->idx[i]].path)) {
+            path = p->want->files[o->idx[i]].path;
+            break;
+        }
+    for (const unsigned char *c = (const unsigned char *) path; *c && k + 4 < n; c++) {
         if ((*c >= 'A' && *c <= 'Z') || (*c >= 'a' && *c <= 'z') || (*c >= '0' && *c <= '9') || strchr("-._~/", *c)) {
             out[k++] = (char) *c;
         } else {
@@ -544,8 +559,10 @@ static void obj_done_locked(Pool *p, const int g, Obj *o, const int ok, const in
     if (status == 0) og->transport_streak++;
     else og->transport_streak = 0;
     // a mirror serving other content (checksum mismatches, error statuses) is stale; a 404 is
-    // not counted: the Pages CDN may leave prefixes out (assets_cdn.py --exclude) on purpose
-    if (status != 0 && status != 404) og->stale_streak++;
+    // not counted (the Pages CDN may leave prefixes out on purpose), nor a redirect a pipelined
+    // batch does not follow (assets.krunk.io 301s the other Pages project's directories; the
+    // retry is a plain GET, which follows it)
+    if (status != 0 && status != 404 && !(status >= 300 && status < 400)) og->stale_streak++;
     // An origin that keeps failing is taken out, never the last one (its errors end the sync).
     if (origins_up(p) > 1 && (og->transport_streak >= ASSET_ORIGIN_DOWN || (g > 0 && og->stale_streak >= ASSET_ORIGIN_STALE))) {
         og->disabled = 1;
@@ -559,6 +576,7 @@ static void obj_done_locked(Pool *p, const int g, Obj *o, const int ok, const in
     unsigned up = 0;
     for (int k = 0; k < p->origin_count; k++)
         if (!p->origins[k].disabled) up |= 1u << k;
+    if (o->serve & up) up &= o->serve; // the origins that have it (filters), unless all are gone
     if ((o->tried & up) == up) { // every origin had it this round
         // 404 from all of them (o->not_found survives only 404s): no retry will find it
         if (o->not_found || ++o->round >= ASSET_RETRIES) {
@@ -593,7 +611,9 @@ static size_t pick_locked(Pool *p, const Worker *w, size_t *out, const size_t ma
     const int64_t t = now_us();
     for (size_t r = 0; r < p->retry_count; r++) { // retries first: one at a time
         Obj *o = &p->objs[p->retry[r]];
-        if ((o->tried & up) == up) o->tried = 0; // the origins that had it are gone: a fresh round
+        const unsigned has = o->serve & up ? o->serve & up : up; // up and have it (path filters)
+        if ((o->tried & has) == has) o->tried = 0; // the origins that had it are gone: a fresh round
+        if (!(has & bit)) continue; // not on this origin (a part of a split CDN)
         if ((o->tried & bit) || o->not_before_us > t) {
             *wait = 1;
             continue;
@@ -602,19 +622,33 @@ static size_t pick_locked(Pool *p, const Worker *w, size_t *out, const size_t ma
         p->retry[r] = p->retry[--p->retry_count];
         return 1;
     }
-    // the open part of the queue (largest first) is [queue_head, queue_tail): large-end workers
-    // take one object from the head, small-end workers a pipelined batch from the tail
+    // The lane (objects with the same serving origins) with the most open objects this origin
+    // has (a lane none of whose origins is up any more: anyone's). Its open part, largest first,
+    // is [head, tail): large-end workers take one object from the head, small-end workers a
+    // pipelined batch from the tail.
+    int lane = -1;
+    size_t most = 0;
+    for (int l = 0; l < p->lane_count; l++) {
+        const unsigned has = p->lanes[l].serve & up;
+        const size_t open = p->lanes[l].tail - p->lanes[l].head;
+        if ((!has || (has & bit)) && open > most) {
+            lane = l;
+            most = open;
+        }
+    }
     size_t n = 0;
     int64_t bytes = 0;
-    if (!w->small_first) {
-        if (p->queue_head < p->queue_tail) out[n++] = p->queue[p->queue_head++];
+    if (lane < 0) {
+        // nothing open for this origin
+    } else if (!w->small_first) {
+        out[n++] = p->queue[p->lanes[lane].head++];
     } else {
-        while (n < max && p->queue_head < p->queue_tail) {
-            const size_t last = p->queue[p->queue_tail - 1];
+        while (n < max && p->lanes[lane].head < p->lanes[lane].tail) {
+            const size_t last = p->queue[p->lanes[lane].tail - 1];
             const int64_t size = p->objs[last].size;
             if (n > 0 && (size > ASSET_SMALL_MAX || bytes + size > ASSET_BATCH_BYTES)) break;
             out[n++] = last;
-            p->queue_tail--;
+            p->lanes[lane].tail--;
             bytes += size;
             if (size > ASSET_SMALL_MAX) break;
         }
@@ -730,6 +764,7 @@ out:
 static const Obj *g_sort_objs; // qsort has no context argument in C11
 static int queue_cmp(const void *a, const void *b) {
     const Obj *x = &g_sort_objs[*(const size_t *) a], *y = &g_sort_objs[*(const size_t *) b];
+    if (x->serve != y->serve) return x->serve < y->serve ? -1 : 1; // by lane, then largest first
     if (x->size != y->size) return x->size > y->size ? -1 : 1;
     return strcmp(x->sha256, y->sha256);
 }
@@ -770,6 +805,13 @@ static int build_objects(Pool *p, const KnAssetDiff *diff) {
         o->idx = &idx[i];
         o->nidx = j - i;
         o->not_found = 1;
+        // the origins that have it: no filter, or one of its paths passes the origin's
+        for (int g = 0; g < p->origin_count; g++)
+            for (size_t k = 0; k < o->nidx; k++)
+                if (!p->origins[g].by_path || kn_path_filter_ok(&p->origins[g].filter, p->want->files[o->idx[k]].path)) {
+                    o->serve |= 1u << g;
+                    break;
+                }
         p->queue[p->obj_count] = p->obj_count;
         p->obj_count++;
         i = j;
@@ -778,12 +820,21 @@ static int build_objects(Pool *p, const KnAssetDiff *diff) {
     g_sort_objs = p->objs;
     qsort(p->queue, p->obj_count, sizeof(*p->queue), queue_cmp);
     pthread_mutex_unlock(&g_sort_lock);
-    p->queue_tail = p->obj_count;
+    p->lane_count = 0;
+    for (size_t i = 0; i < p->obj_count; i++) {
+        const unsigned serve = p->objs[p->queue[i]].serve;
+        if (!p->lane_count || p->lanes[p->lane_count - 1].serve != serve) {
+            p->lanes[p->lane_count].serve = serve;
+            p->lanes[p->lane_count].head = i;
+            p->lane_count++;
+        }
+        p->lanes[p->lane_count - 1].tail = i + 1;
+    }
     p->idx_storage = idx;
     return 1;
 }
 
-static void add_origin(Pool *p, const char *url, const int by_path) {
+static void add_origin(Pool *p, const char *url, const int by_path, const KnPathFilter *filter) {
     if (p->origin_count >= KN_ASSETS_MAX_ORIGINS || !url[0] || strlen(url) + 2 >= KN_UPDATE_URL_MAX) return;
     if (strncmp(url, "http://", 7) != 0 && strncmp(url, "https://", 8) != 0) return;
     Origin *g = &p->origins[p->origin_count];
@@ -792,28 +843,37 @@ static void add_origin(Pool *p, const char *url, const int by_path) {
     for (int k = 0; k < p->origin_count; k++)
         if (!strcmp(p->origins[k].url, g->url)) return; // listed twice
     g->by_path = by_path;
+    if (by_path && filter) g->filter = *filter;
     snprintf(g->stat.url, sizeof(g->stat.url), "%s", g->url);
     p->origin_count++;
 }
 
-// Origin 0 is the manifest's objects; then opts->mirrors, else the manifest's assets.mirrors,
-// else (a manifest from the default origin that has no "mirrors" key) the built-in CDN.
+// Origin 0 is the manifest's objects; then opts->mirrors (origin specs, kn_origin_spec_parse:
+// "[only=P+P@|skip=P+P@]URL"), else the manifest's assets.mirrors (with their only/skip path
+// filters: the Pages projects of deploy/asset-shards.json), else (a manifest from the default
+// origin that has no "mirrors" key) the built-in CDN.
 static void setup_origins(Pool *p, const KnUpdateManifest *m, const KnAssetsSyncOpts *opts) {
-    add_origin(p, m->assets.objects, 0);
+    add_origin(p, m->assets.objects, 0, NULL);
     const char *env = opts ? opts->mirrors : NULL;
     if (env && !strcmp(env, "off")) return;
     if (env && *env) {
-        char buf[2048];
+        char buf[4096];
         snprintf(buf, sizeof(buf), "%s", env);
-        for (char *t = strtok(buf, " ,"); t; t = strtok(NULL, " ,")) add_origin(p, t, 1);
+        for (char *t = strtok(buf, " ,"); t; t = strtok(NULL, " ,")) {
+            char url[KN_UPDATE_URL_MAX];
+            int by_path;
+            KnPathFilter f;
+            if (kn_origin_spec_parse(t, url, sizeof(url), &by_path, &f)) add_origin(p, url, by_path, &f);
+        }
         return;
     }
     if (m->assets.mirrors_set) {
-        for (int i = 0; i < m->assets.mirror_count; i++) add_origin(p, m->assets.mirrors[i].url, m->assets.mirrors[i].by_path);
+        for (int i = 0; i < m->assets.mirror_count; i++)
+            add_origin(p, m->assets.mirrors[i].url, m->assets.mirrors[i].by_path, &m->assets.mirrors[i].filter);
         return;
     }
     if (!strncmp(m->assets.objects, KN_ASSETS_DEFAULT_ORIGIN, strlen(KN_ASSETS_DEFAULT_ORIGIN)))
-        add_origin(p, KN_ASSETS_DEFAULT_MIRROR, 1);
+        add_origin(p, KN_ASSETS_DEFAULT_MIRROR, 1, NULL);
 }
 
 // Downloads every object of the diff. 1 ok.

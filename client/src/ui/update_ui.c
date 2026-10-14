@@ -237,7 +237,9 @@ void update_ui_tick(Client *client) {
 // ------------------------------------------------------------------ actions
 
 static int download_url_ok(const char *url) {
-    return !strncmp(url, "https://github.com/rebel10n/KrunkNative/", 39) || !strncmp(url, "https://assets.krunk.io/updates/", 32) ||
+    // the updates store: dl.krunk.io (kru), formerly assets.krunk.io (now the Pages CDN, which 302s /updates/ there)
+    return !strncmp(url, "https://github.com/rebel10n/KrunkNative/", 39) || !strncmp(url, "https://dl.krunk.io/updates/", 28) ||
+           !strncmp(url, "https://assets.krunk.io/updates/", 32) ||
            (getenv("KRUNKNATIVE_UPDATES_URL") && !strncmp(url, "http", 4));
 }
 

@@ -1,0 +1,48 @@
+# {{ ansible_managed }} (deploy/ansible role kn_dl_origin)
+# Download host (README "Download host"): {{ kn_dl_origin_host }} straight to kru, the whole game
+# content tree and the updates store from OpenResty 127.0.0.1:{{ kn_dl_origin_port }}. Read only:
+# GET / HEAD / OPTIONS. The rest of this nginx (krunker.zip, the edge origin vhost) is not this.
+
+# :80 answers Let's Encrypt's webroot challenge and sends everything else to https.
+server {
+    listen 80;
+    server_name {{ kn_dl_origin_host }};
+
+    location /.well-known/acme-challenge/ {
+        root {{ kn_dl_origin_acme_root }};
+        default_type text/plain;
+    }
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+{% if kn_dl_origin_has_cert %}
+
+server {
+    listen 443 ssl;
+    server_name {{ kn_dl_origin_host }};
+
+    ssl_certificate     {{ kn_dl_origin_cert_dir }}/fullchain.pem;
+    ssl_certificate_key {{ kn_dl_origin_cert_dir }}/privkey.pem;
+
+    access_log /var/log/nginx/krunknative-dl.log;
+    client_max_body_size 1k;
+
+    location / {
+        limit_except GET HEAD OPTIONS {
+            deny all;
+        }
+        proxy_pass http://127.0.0.1:{{ kn_dl_origin_port }};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header Connection "";
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        # update packages (27-33 MB) and the content stream through: no temp files (kru's disk)
+        proxy_buffering off;
+        proxy_max_temp_file_size 0;
+        proxy_read_timeout 300s;
+    }
+}
+{% endif %}

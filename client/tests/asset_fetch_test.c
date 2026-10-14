@@ -3,7 +3,7 @@
 // (a mismatch is refused, nothing written), atomic writes, 404 everywhere given up once, transport
 // failures retried with backoff, de-duplication, the concurrency cap, content-addressed origins, a
 // size mismatch of a present file refetched, the git checkout guard (root and per directory) and
-// stopping with a transfer in flight.
+// stopping with a transfer in flight, and the split CDN's only=/skip= origins.
 #include <asset_fetch.h>
 #include <kn_fs.h>
 #include <kn_update.h>
@@ -411,6 +411,48 @@ static void test_objects_and_guard(void) {
     CHECK(!has_part_files(dir), "no partial file after the abort");
 }
 
+// the split Pages CDN (deploy/asset-shards.json, as the launcher hands it down): each file from
+// its own project only, kru's objects as the fallback
+static void test_split(void) {
+    printf("split CDN: only= / skip= origins, objects fallback...\n");
+    char dir[1100], why[1400], p_a[1200], p_b[1200], p_down[1200];
+    make_dir(dir, sizeof(dir), "split");
+    const ManifestFile files[] = {
+        {"models/hats/hat_1.obj", "hat model"},
+        {"textures/hats/hat_1.png", "hat texture"},
+        {"textures/hatsX/odd.png", "not a hats dir"},
+    };
+    write_manifest(dir, files, 3);
+    char hex[65], obj[600];
+    sha_hex(files[2].content, hex);
+    snprintf(obj, sizeof(obj), "https://o.test/objects/%.2s/%s", hex, hex);
+    routes_reset();
+    route(A "models/hats/hat_1.obj", 200, files[0].content, 0);
+    route(B "textures/hats/hat_1.png", 200, files[1].content, 0);
+    route(A "textures/hatsX/odd.png", 0, NULL, 0); // project a is down for it: the objects serve it
+    route(obj, 200, files[2].content, 0);
+    AssetFetchConfig cfg = config(dir);
+    cfg.origins = "skip=textures/hats/+textures/previews/@" A " only=textures/hats/+textures/previews/@" B
+                  " objects:https://o.test/objects/";
+    CHECK(asset_fetch_start(&cfg, why, sizeof(why)), "start (%s)", why);
+    snprintf(p_a, sizeof(p_a), "%s/%s", dir, files[0].path);
+    snprintf(p_b, sizeof(p_b), "%s/%s", dir, files[1].path);
+    snprintf(p_down, sizeof(p_down), "%s/%s", dir, files[2].path);
+    asset_fetch_request(p_a, 1);
+    CHECK(settle(p_a) == 1, "a's file fetched");
+    CHECK(T.requests == 1 && !strcmp(T.last_urls[0], A "models/hats/hat_1.obj"), "from a only (%s)", T.url_count ? T.last_urls[0] : "-");
+    asset_fetch_request(p_b, 1);
+    CHECK(settle(p_b) == 1, "b's file fetched");
+    CHECK(T.requests == 2 && !strcmp(T.last_urls[1], B "textures/hats/hat_1.png"), "from b directly, a not asked (%s)",
+          T.url_count > 1 ? T.last_urls[1] : "-");
+    asset_fetch_request(p_down, 1);
+    CHECK(settle(p_down) == 1, "a prefix that only looks like b's: a, then the objects");
+    int asked_b = 0;
+    for (int i = 0; i < T.url_count; i++) asked_b += !strncmp(T.last_urls[i], B, strlen(B));
+    CHECK(T.requests >= 4 && asked_b == 1, "b never asked for a's paths (%d requests, %d to b)", T.requests, asked_b);
+    asset_fetch_stop();
+}
+
 int main(void) {
     const char *base = getenv("XDG_CACHE_HOME");
     char tmpl[900];
@@ -424,6 +466,7 @@ int main(void) {
     test_fetch();
     test_retry_and_cap();
     test_objects_and_guard();
+    test_split();
     kn_fs_rmtree(g_root);
     printf("asset_fetch_test: %d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;

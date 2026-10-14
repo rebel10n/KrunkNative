@@ -73,7 +73,7 @@ typedef struct {
     int download_started;
     int threads;       // --threads / KRUNKNATIVE_ASSET_THREADS (0 = default)
     char mirrors[1024]; // --asset-mirrors / KRUNKNATIVE_ASSET_MIRRORS ("off" = none)
-    char origins[2048]; // the sync's origins for the client's on-demand fetch (KRUNKNATIVE_ASSET_ORIGINS)
+    char origins[4096]; // the sync's origins for the client's on-demand fetch (KRUNKNATIVE_ASSET_ORIGINS)
 } Launcher;
 
 static Launcher L;
@@ -334,25 +334,29 @@ static void origins_add(const char *prefix, const char *url) {
 }
 
 // The client's on-demand fetch of a file the sync missed or a user deleted (client/include/
-// asset_fetch.h) uses the same origins in the same order as the sync (assets_sync.c
-// setup_origins): the manifest's objects, then --asset-mirrors, the manifest's mirrors or the
-// built-in CDN.
+// asset_fetch.h) uses the sync's origins (assets_sync.c setup_origins): --asset-mirrors, the
+// manifest's mirrors (each Pages project with its path filter, so a file comes from its own
+// project) or the built-in CDN first, then the manifest's objects on kru as the fallback.
 static void note_origins(const KnUpdateManifest *m) {
     L.origins[0] = 0;
     if (!m->assets.version[0]) return;
-    origins_add("objects:", m->assets.objects);
     if (L.mirrors[0]) {
         if (strcmp(L.mirrors, "off") != 0) {
-            char buf[1024];
+            char buf[sizeof(L.mirrors)];
             snprintf(buf, sizeof(buf), "%s", L.mirrors);
             for (char *t = strtok(buf, " ,"); t; t = strtok(NULL, " ,")) origins_add("", t);
         }
     } else if (m->assets.mirrors_set) {
-        for (int i = 0; i < m->assets.mirror_count; i++)
-            origins_add(m->assets.mirrors[i].by_path ? "" : "objects:", m->assets.mirrors[i].url);
+        for (int i = 0; i < m->assets.mirror_count; i++) {
+            char spec[KN_UPDATE_URL_MAX + KN_PATH_FILTER_MAX + 16];
+            if (kn_origin_spec_format(spec, sizeof(spec), m->assets.mirrors[i].url, m->assets.mirrors[i].by_path,
+                                      &m->assets.mirrors[i].filter))
+                origins_add("", spec);
+        }
     } else if (!strncmp(m->assets.objects, KN_ASSETS_DEFAULT_ORIGIN, strlen(KN_ASSETS_DEFAULT_ORIGIN))) {
         origins_add("", KN_ASSETS_DEFAULT_MIRROR);
     }
+    origins_add("objects:", m->assets.objects);
 }
 
 static int sync_assets(const KnUpdateManifest *m) {

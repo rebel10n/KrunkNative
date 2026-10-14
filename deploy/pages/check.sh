@@ -3,7 +3,7 @@
 #   deploy/pages/check.sh <site URL> [curl args...]
 #     e.g. deploy/pages/check.sh https://rebel10n.github.io/KrunkNative/
 #          deploy/pages/check.sh https://krunk.io/ --resolve krunk.io:443:185.199.108.153 -k
-#   deploy/pages/check.sh --assets <asset origin URL>     e.g. https://krunknative-assets.pages.dev/
+#   deploy/pages/check.sh --assets <asset origin URL>     e.g. https://krunknative-assets-a.pages.dev/
 # Site: the page, its kn-config.json, the hashed client files (wasm MIME), 404s; then every asset
 # origin kn-config.json names. Asset origin: version.txt (no-store), CORS for a page origin, a
 # byte range (206), the caching of a ?v= URL. Exits non-zero on the first hard failure.

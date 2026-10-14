@@ -138,6 +138,20 @@ http {
         server_name {{ kn_domain }} _;
 {{ static_site(false) }}
     }
+{% if kn_dl_origin_enabled | default(false) | bool %}
+
+    # ---- Download host (role kn_dl_origin, README "Download host") ---------------------------
+    # dl.krunk.io: the host nginx :443 (Let's Encrypt) -> here, the whole asset tree and the
+    # updates store with CORS (the asset CDN's source, the clients' fallback). The host nginx
+    # passes the client in X-Real-IP.
+    server {
+        listen 127.0.0.1:{{ kn_dl_origin_port }};
+        server_name {{ kn_dl_origin_host }} _;
+        set_real_ip_from 127.0.0.1;
+        real_ip_header X-Real-IP;
+{{ static_site(true) }}
+    }
+{% endif %}
 {% if kn_edge_origin_enabled | default(false) | bool %}
 
     # ---- Edge ingress (role kn_edge_origin, README "Edge origin") ----------------------

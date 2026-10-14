@@ -1,5 +1,6 @@
 # Client updates store (doc/backend.md "Client updates", tools/release/kn-updates.py), served by
-# OpenResty as https://assets.krunk.io/updates/ (the assets.krunk.io tunnel route: no DNS change):
+# OpenResty as https://dl.krunk.io/updates/ (role kn_dl_origin; also on the edge origin's
+# assets.krunk.io until that name moves to the Pages CDN, which then 302s /updates/ to dl.):
 #   /opt/krunknative-updates/public/client/latest.json             channel manifest (CI publishes it)
 #   /opt/krunknative-updates/public/client/builds/<commit12>/...   executable-only update packages
 #   /opt/krunknative-updates/public/assets/<version>.json          game content list

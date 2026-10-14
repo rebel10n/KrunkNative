@@ -1,0 +1,49 @@
+# The vhost for the current certificate state (kn_dl_origin_has_cert), checked with nginx -t; a
+# failing config is put back and the play stops. Included twice by main.yml (before and after
+# the certificate is issued).
+- name: Download host vhost
+  block:
+    - name: Download host vhost (sites-available)
+      ansible.builtin.template:
+        src: dl.nginx.conf.j2
+        dest: "{{ kn_dl_origin_vhost }}"
+        owner: root
+        group: root
+        mode: "0644"
+        backup: true
+      register: kn_dl_origin_vhost_file
+      notify: Reload nginx (dl origin)
+
+    - name: Download host vhost enabled (sorts after the existing sites)
+      ansible.builtin.file:
+        src: "{{ kn_dl_origin_vhost }}"
+        dest: "{{ kn_dl_origin_vhost_link }}"
+        state: link
+      register: kn_dl_origin_vhost_link_file
+      notify: Reload nginx (dl origin)
+
+    - name: Host nginx accepts the configuration
+      ansible.builtin.command: nginx -t -q
+      changed_when: false
+      when: (kn_dl_origin_vhost_file.changed or kn_dl_origin_vhost_link_file.changed) and not ansible_check_mode
+  rescue:
+    - name: Put the previous vhost back
+      ansible.builtin.copy:
+        src: "{{ kn_dl_origin_vhost_file.backup_file }}"
+        dest: "{{ kn_dl_origin_vhost }}"
+        remote_src: true
+        mode: "0644"
+      when: kn_dl_origin_vhost_file.backup_file is defined
+
+    - name: Remove the new vhost (there was none before)
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ kn_dl_origin_vhost_link }}"
+        - "{{ kn_dl_origin_vhost }}"
+      when: kn_dl_origin_vhost_file.backup_file is not defined
+
+    - name: Stop here
+      ansible.builtin.fail:
+        msg: "nginx -t rejected the download host vhost; the previous state is back and nginx was not reloaded."

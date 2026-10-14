@@ -17,7 +17,10 @@
 // resolved) unless allow_checkout.
 //
 // Origins (by path: <url><rel>; "objects:<url>" = content-addressed <url><aa>/<sha256>, manifest
-// files only), tried in order per file; a 404 / checksum mismatch moves on to the next one, a
+// files only; "only=P+P@<url>" / "skip=P+P@<url>" = by path, only the paths below the prefixes P /
+// all others: one Pages project of the split CDN, deploy/asset-shards.json, as the launcher hands
+// them down), tried in order per file, skipping origins whose filter does not have the path;
+// a 404 / checksum mismatch moves on to the next one, a
 // transport failure also takes the origin out for a while. A file every origin answered with 404
 // or wrong content is given up for the session; transport failures are retried with backoff up to
 // ASSET_FETCH_ATTEMPTS times. One log line per path: when it arrived or when it was given up.
@@ -33,9 +36,10 @@
 #define ASSET_FETCH_MAX_ORIGINS 6
 #define ASSET_FETCH_MAX_ENTRIES 8192   // distinct paths per session
 #define ASSET_FETCH_MAX_BYTES ((int64_t) 512 << 20) // a file without a manifest size
-// The launcher's hosts (launcher/include/kn_assets.h KN_ASSETS_DEFAULT_ORIGIN, _MIRROR; the web's
-// kn-config.json asset_origin / asset_fallback): the asset tree by path.
-#define ASSET_FETCH_DEFAULT_ORIGINS "https://assets.krunk.io/assets/ https://krunknative-assets.pages.dev/assets/"
+// Without the launcher's list (KRUNKNATIVE_ASSET_ORIGINS): the Pages CDN's default project (it
+// 301s the other project's directories, kn_http follows that), then kru's whole tree
+// (launcher/include/kn_assets.h KN_ASSETS_DEFAULT_MIRROR, _ORIGIN; the web's kn-config.json).
+#define ASSET_FETCH_DEFAULT_ORIGINS "https://assets.krunk.io/assets/ https://dl.krunk.io/assets/"
 
 // The transport (tests): kn_http_get's contract. NULL = kn_http (POSIX sockets + OpenSSL, WinHTTP).
 typedef int (*AssetFetchGetFn)(void *user, const char *url, KnHttpSink *sink, char *err, size_t errn);

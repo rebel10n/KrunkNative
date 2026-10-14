@@ -3,7 +3,8 @@
 // launcher (launcher/src), the client's Outdated check (client/src/ui/update_ui.c) and the unit
 // test (launcher/tests/update_test.c). No I/O and no clocks.
 //
-// The updates server (tools/release/kn-updates.py, https://assets.krunk.io/updates/) serves:
+// The updates server (tools/release/kn-updates.py, https://dl.krunk.io/updates/: kru, the host
+// nginx role kn_dl_origin; assets.krunk.io/updates/ 302s there for older launchers) serves:
 //   client/<channel>.json         the channel manifest (KnUpdateManifest), written last
 //   client/builds/<commit12>/...  executable-only packages (exes, libs, ui/, kn-install.json)
 //   assets/<version>.json         asset file list: path -> sha256, size (KnAssetList)
@@ -13,13 +14,32 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define KN_UPDATE_DEFAULT_URL "https://assets.krunk.io/updates/client/latest.json"
+#define KN_UPDATE_DEFAULT_URL "https://dl.krunk.io/updates/client/latest.json"
 #define KN_UPDATE_FORMAT 1
 #define KN_UPDATE_GRACE_DEFAULT_S (48 * 3600) // servers.outdated_grace_h (doc/backend.md 8.12)
 #define KN_UPDATE_URL_MAX 512
 #define KN_INSTALL_MARKER "kn-install.json"
 #define KN_ASSETS_STATE ".kn-assets.json"     // the asset list a sync last completed, in the assets dir
 #define KN_UPDATE_MAX_MIRRORS 4
+#define KN_PATH_FILTER_MAX 1024
+
+// Which paths below assets/ an origin serves (deploy/asset-shards.json: the content is split by
+// directory over two Pages projects). mode KN_PATH_ALL: every path; KN_PATH_ONLY: the ones starting
+// with a prefix of list; KN_PATH_SKIP: all the others. list: the prefixes joined by '+' (paths have
+// no '+', kn_update_path_ok / deploy/pages/asset_shards.py).
+enum { KN_PATH_ALL = 0, KN_PATH_ONLY = 1, KN_PATH_SKIP = 2 };
+typedef struct {
+    int mode;
+    char list[KN_PATH_FILTER_MAX];
+} KnPathFilter;
+// 1 when an origin with filter f serves path (NULL f: every path).
+int kn_path_filter_ok(const KnPathFilter *f, const char *path);
+// An origin spec of KRUNKNATIVE_ASSET_ORIGINS / --asset-mirrors: "[objects:][only=P+P@|skip=P+P@]URL"
+// (URL http(s); objects: = content-addressed <url><aa>/<sha256>, no filter). url gets a trailing '/'.
+// 1 on success.
+int kn_origin_spec_parse(const char *spec, char *url, size_t urln, int *by_path, KnPathFilter *f);
+// The spec of an origin (the launcher hands its sync's origins to the client). 1 when it fits.
+int kn_origin_spec_format(char *out, size_t n, const char *url, int by_path, const KnPathFilter *f);
 
 // Build identity: the kn-build metadata (tools/release/version-meta.sh) or kn_build_info().
 typedef struct {
@@ -68,12 +88,15 @@ typedef struct {
         char **packaged;
         size_t packaged_count;
         // "mirrors": more places with the same content, tried alongside objects (launcher/src/
-        // assets_sync.c): strings or {"url","layout"}; layout "path" (default: <url><path>, a copy
-        // of the asset tree such as the Pages CDN) or "objects" (<url><aa>/<sha256>).
+        // assets_sync.c): strings or {"url","layout","only"|"skip"}; layout "path" (default:
+        // <url><path>, a copy of the asset tree such as the Pages CDN) or "objects"
+        // (<url><aa>/<sha256>); "only" / "skip": the path prefixes it has / lacks (one Pages
+        // project of the split, deploy/asset-shards.json). A filter that does not fit drops the mirror.
         // mirrors_set = the manifest had the key (an empty list turns the built-in default off).
         struct {
             char url[KN_UPDATE_URL_MAX];
             int by_path;
+            KnPathFilter filter;
         } mirrors[KN_UPDATE_MAX_MIRRORS];
         int mirror_count, mirrors_set;
     } assets;

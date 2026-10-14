@@ -1,0 +1,31 @@
+{
+  "_doc": [
+    "The game content on Cloudflare Pages, split by directory over two projects (deploy/pages/README.md",
+    "'Asset CDN'): Pages takes at most 20,000 files a deployment and the tree has more. One file for the",
+    "deploy (deploy/pages/assets_cdn.py, assets-cdn.sh, stage.py -> the page's kn-config.json) and the",
+    "updates store on kru (tools/release/kn-updates.py -> the launcher manifest's assets.mirrors, which the",
+    "launcher and the native client's on-demand fetch route by). Paths are below assets/.",
+    "shards: the first one without 'prefixes' takes everything the others do not ('default'); a path goes",
+    "to the shard with the longest matching prefix. Keep every shard under max_files (assets_cdn.py",
+    "fails over the Pages limit, warns over max_files): check with deploy/pages/assets-cdn.sh --dry-run.",
+    "download: kru (host nginx + OpenResty, role kn_dl_origin): the full tree, /updates/ and everything in",
+    "exclude; the mirror's source and the clients' fallback. The default shard's _redirects send the other",
+    "shards' prefixes there with a 301 (old clients ask assets.krunk.io for everything), kru_only and",
+    "exclude to download with a 302.",
+    "live: false until assets.krunk.io / assets1.krunk.io are the Pages custom domains (runbook): the page",
+    "and the manifest route by shard only then; before, they use the pages.dev names for tests only."
+  ],
+  "live": false,
+  "max_files": 16000,
+  "download": "https://dl.krunk.io/",
+  "kru_only": ["/updates/"],
+  "exclude": [],
+  "shards": [
+    {"name": "a", "project": "krunknative-assets-a", "url": "https://assets.krunk.io/",
+     "pages_dev": "https://krunknative-assets-a.pages.dev/"},
+    {"name": "b", "project": "krunknative-assets-b", "url": "https://assets1.krunk.io/",
+     "pages_dev": "https://krunknative-assets-b.pages.dev/",
+     "prefixes": ["textures/previews/", "textures/hats/", "textures/melee/", "textures/faces/",
+                  "textures/body/", "textures/sprays/", "textures/back/"]}
+  ]
+}
