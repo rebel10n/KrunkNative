@@ -172,6 +172,10 @@ static int iq_heartbeat(const int shutdown) {
     cJSON_AddNumberToObject(body, "commit_time", (double) build->commit_time);
     cJSON_AddStringToObject(body, "build_time", build->build_time);
     cJSON_AddStringToObject(body, "protocol", kn_build_protocol());
+    // The product flavor (flavor.h); base leaves the field absent so base heartbeats are unchanged.
+    // The listing filters on the verified KNINFO reply's flavor; this is the same value, advertised
+    // to the finder on registration so a Strike server's flavor is known before the first poll.
+    if (flavor_get() != FLAVOR_BASE) cJSON_AddStringToObject(body, "flavor", flavor_current()->key);
     if (shutdown) cJSON_AddBoolToObject(body, "shutdown", 1);
     char *text = cJSON_PrintUnformatted(body);
     cJSON_Delete(body);

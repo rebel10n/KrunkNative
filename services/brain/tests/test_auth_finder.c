@@ -186,11 +186,72 @@ static void test_finder(void) {
     finder_table_free(t);
 }
 
+/* A KNINFO reply carrying a product flavor (flavor.h): flavor_key NULL = the base game (the field
+ * is absent, exactly like a base server). */
+static cJSON *reply_flavor(const char *nonce, const char *name, const char *flavor_key) {
+    char json[512], flav[64] = "";
+    if (flavor_key && *flavor_key) snprintf(flav, sizeof(flav), ",\"flavor\":\"%s\"", flavor_key);
+    snprintf(json, sizeof(json),
+             "{\"v\":1,\"game\":\"krunknative\",\"name\":\"%s\",\"map\":\"Sandstorm\",\"mode\":\"ffa\",\"modeId\":0,"
+             "\"players\":1,\"max\":8,\"tags\":[],\"community\":\"X\",\"online_mode\":false,"
+             "\"password\":false,\"region\":\"eu\",\"version\":\"1\",\"port\":21015%s,\"nonce\":\"%s\"}",
+             name, flav, nonce);
+    uint8_t buf[700];
+    memcpy(buf, "\xff\xff\xff\xffKNinfo", 10);
+    buf[10] = 0;
+    memcpy(buf + 11, json, strlen(json));
+    return finder_parse_reply(buf, 11 + strlen(json));
+}
+
+/* Strike lobbies list in their own flavor pool: a base listing never shows a Strike server and is
+ * byte-identical to before Krunker Strike; a Strike listing shows only Strike servers. */
+static void test_finder_flavor(void) {
+    FinderTable *t = finder_table_new(NULL);
+    int created = 0;
+    const char *err = NULL;
+    FinderEntry *base = finder_heartbeat(t, "10.1.0.1", 21015, 0, "Base Srv", "", 0, "10.1.0.1", 0, &created, &err);
+    FinderEntry *strike = finder_heartbeat(t, "10.1.0.2", 21016, 0, "Strike Srv", "", 0, "10.1.0.2", 0, &created, &err);
+    CHECK(base && strike);
+    finder_poll_stamp(t, base, "nb", 0);
+    finder_poll_stamp(t, strike, "ns", 0);
+    CHECK(finder_poll_reply(t, base, reply_flavor("nb", "Base Srv", NULL), 1, 1));
+    CHECK(finder_poll_reply(t, strike, reply_flavor("ns", "Strike Srv", "strike"), 1, 1));
+
+    /* base view (no flavor, or "base"): only the base server, and no "flavor" key on it */
+    const char *base_views[] = {NULL, "", "base"};
+    for (size_t i = 0; i < 3; i++) {
+        FinderFilter f = {.online_mode = -1, .flavor = base_views[i]};
+        cJSON *list = finder_list(t, &f, 2);
+        CHECK(cJSON_GetArraySize(list) == 1);
+        const cJSON *s = cJSON_GetArrayItem(list, 0);
+        CHECK(s && !strcmp(kn_json_str(s, "name", ""), "Base Srv"));
+        CHECK(cJSON_GetObjectItemCaseSensitive(s, "flavor") == NULL); /* base listing unchanged */
+        cJSON_Delete(list);
+    }
+
+    /* strike view: only the Strike server, carrying flavor:"strike" */
+    FinderFilter fs = {.online_mode = -1, .flavor = "strike"};
+    cJSON *list = finder_list(t, &fs, 2);
+    CHECK(cJSON_GetArraySize(list) == 1);
+    const cJSON *s = cJSON_GetArrayItem(list, 0);
+    CHECK(s && !strcmp(kn_json_str(s, "name", ""), "Strike Srv"));
+    CHECK(!strcmp(kn_json_str(s, "flavor", ""), "strike"));
+    cJSON_Delete(list);
+
+    /* "all": both */
+    FinderFilter fa = {.online_mode = -1, .flavor = "all"};
+    list = finder_list(t, &fa, 2);
+    CHECK(cJSON_GetArraySize(list) == 2);
+    cJSON_Delete(list);
+    finder_table_free(t);
+}
+
 int main(void) {
     test_sha_and_hash();
     test_joins();
     test_limiter();
     test_finder();
+    test_finder_flavor();
     if (g_fail) return 1;
     printf("auth/finder tests OK\n");
     return 0;

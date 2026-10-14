@@ -255,8 +255,20 @@ static int has_tag(const cJSON *info, const char *tag) {
     return 0;
 }
 
+/* The flavor pool a listing is for: a base client (no flavor, or "base") must never see Strike
+ * lobbies, and a Strike client sees only Strike lobbies. A server advertises its flavor in the
+ * KNINFO reply; absent = the base game. "all"/"*" lifts the filter (dashboards). */
+static int flavor_ok(const cJSON *info, const char *want) {
+    if (want && (!strcasecmp(want, "all") || !strcmp(want, "*"))) return 1;
+    const char *have = kn_json_str(info, "flavor", "");
+    if (!have[0]) have = "base"; /* absent = base */
+    if (!want || !*want) want = "base";
+    return !strcasecmp(have, want);
+}
+
 static int matches(const FinderEntry *e, const FinderFilter *f) {
     const cJSON *info = e->info;
+    if (!flavor_ok(info, f->flavor)) return 0;
     if (f->map && *f->map && !ieq(kn_json_str(info, "map", NULL), f->map)) return 0;
     if (f->mode && *f->mode) {
         char id[16];
@@ -321,6 +333,9 @@ cJSON *finder_list(FinderTable *t, const FinderFilter *f, uint64_t now_ms) {
         copy_str(o, info, "build_time");
         copy_str(o, info, "protocol");
         copy_str(o, info, "ruleset"); /* the Krunker version (ruleset.h key, "v10"); absent = a server from before the version toggle */
+        /* product flavor (flavor.h key, "strike"); absent = the base game, so base listings are
+         * byte-identical to before Krunker Strike */
+        if (kn_json_str(info, "flavor", "")[0]) copy_str(o, info, "flavor");
         cJSON_AddNumberToObject(o, "ping_ms", e->ping_ms);
         cJSON_AddNumberToObject(o, "last_seen", (double) e->last_ok_wall_s);
         cJSON_AddItemToArray(arr, o);

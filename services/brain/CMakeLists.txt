@@ -142,6 +142,13 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/social_ws_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_social_ws PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+
+    # flavor-matchmaking: the Krunker Strike flavor pool in the finder (finder.c, finder_table.c).
+    # No database (kn_brain --role finder --no-db); fake UDP KNINFO responders stand in for the game
+    # servers, so nothing links libpq and no server_bin is needed.
+    add_test(NAME brain_finder_flavor_e2e
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/finder_flavor_e2e.py ${CMAKE_BINARY_DIR})
+    set_tests_properties(brain_finder_flavor_e2e PROPERTIES TIMEOUT 120 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;e2e")
 endif ()
 
 # Two brains sharing one database, fake game servers in two regions, failover.

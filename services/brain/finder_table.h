@@ -78,6 +78,10 @@ size_t finder_sweep(FinderTable *t, uint64_t now_ms, void (*free_addr)(void *));
 
 typedef struct FinderFilter {
     const char *map, *mode, *tag, *community, *region, *q;
+    const char *flavor;            /* product flavor pool (flavor.h key): NULL/"" or "base" = the base
+                                    * game (hides Strike lobbies); "strike" = only Strike lobbies;
+                                    * "all"/"*" = every flavor (dashboards). A server advertises its
+                                    * flavor in the KNINFO reply; absent = base. */
     int space;                     /* 1 = players < max */
     int online_mode;               /* -1 any, 0, 1 */
     int limit;                     /* 0 = 500 */

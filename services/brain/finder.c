@@ -229,15 +229,18 @@ static void h_list(kn_http_req *req, void *ud) {
         reply_err(req, 503, "Shutting down");
         return;
     }
-    char map[64] = "", mode[32] = "", tag[32] = "", community[64] = "", region[32] = "", q[64] = "", tmp[16];
+    char map[64] = "", mode[32] = "", tag[32] = "", community[64] = "", region[32] = "", q[64] = "", flavor[16] = "", tmp[16];
     kn_http_query_get(req, "map", map, sizeof(map));
     kn_http_query_get(req, "mode", mode, sizeof(mode));
     kn_http_query_get(req, "tag", tag, sizeof(tag));
     kn_http_query_get(req, "community", community, sizeof(community));
     kn_http_query_get(req, "region", region, sizeof(region));
     kn_http_query_get(req, "q", q, sizeof(q));
+    /* the asking client's product flavor (flavor.h): base clients omit it and never see Strike
+     * lobbies; a Strike client sends ?flavor=strike and sees only Strike lobbies */
+    kn_http_query_get(req, "flavor", flavor, sizeof(flavor));
     FinderFilter f = {.map = map, .mode = mode, .tag = tag, .community = community, .region = region, .q = q,
-                      .online_mode = -1};
+                      .flavor = flavor, .online_mode = -1};
     if (kn_http_query_get(req, "space", tmp, sizeof(tmp)) > 0) f.space = strcmp(tmp, "0") && strcmp(tmp, "false");
     if (kn_http_query_get(req, "online_mode", tmp, sizeof(tmp)) > 0)
         f.online_mode = (!strcmp(tmp, "1") || !strcmp(tmp, "true")) ? 1 : 0;
