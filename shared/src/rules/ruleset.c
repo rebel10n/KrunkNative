@@ -8,7 +8,7 @@
 // The ruleset (shared/include/ruleset.h): Krunker v10.0.2, the only version. Its tables are in
 // rules/v10/ (doc/v10/*.md). TODO(v10-maps): the map catalogue is v7.1.4's 32 official maps.
 extern const Weapon *const g_weapons_v10[WEAPON_TABLE_COUNT];
-extern const ClassConfig g_classes_v10[CLASS_COUNT];
+extern const ClassConfig g_classes_v10[CLASS_TABLE_COUNT];
 
 static const Ruleset k_v10 = {
     .key = "v10",
@@ -18,7 +18,7 @@ static const Ruleset k_v10 = {
     .weapon_count = WEAPON_TABLE_COUNT,
     .krunker_weapon_count = WEAPON_V10_COUNT, // 29 Boulder, 30 Compressor (weapons_v10.c)
     .classes = g_classes_v10,
-    .class_count = CLASS_COUNT,
+    .class_count = CLASS_TABLE_COUNT, // Krunker's 16 + the KrunkNative Nettspend (classes_v10.c)
     .modes = g_mode_configs,
     .mode_count = MODE_COUNT,
     .maps = g_maps,

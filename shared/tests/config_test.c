@@ -166,7 +166,8 @@ static void check_case(const cJSON *c, const cJSON *map) {
     // config.classes (KN: 0 entries = every class, what resetClasses gives a custom game)
     const cJSON *classes = cJSON_GetObjectItem(c, "classes");
     if (!game.config.class_list_count) {
-        CHECK(cJSON_GetArraySize(classes) == (int) game.class_count, "%s: classes reset, v7 has %d", name, cJSON_GetArraySize(classes));
+        // (v7's 16; the game's table also holds the KrunkNative Nettspend, CLASS_TABLE_COUNT)
+        CHECK(cJSON_GetArraySize(classes) == CLASS_COUNT && game.class_count == CLASS_TABLE_COUNT, "%s: classes reset, v7 has %d", name, cJSON_GetArraySize(classes));
     } else {
         int ok = cJSON_GetArraySize(classes) == game.config.class_list_count;
         for (int i = 0; ok && i < game.config.class_list_count; i++) ok = cJSON_GetArrayItem(classes, i)->valueint == game.config.class_list[i];
@@ -229,7 +230,8 @@ static void test_validate(void) {
         {"{}", NULL},
         {"{\"modes\":[0,4]}", NULL},
         {"{\"modes\":[99]}", "Invalid Mode in Config."},
-        {"{\"classes\":[16]}", "Invalid Class in Config."},
+        {"{\"classes\":[16]}", NULL}, // KrunkNative: 16 is the Nettspend (CLASS_TABLE_COUNT 17; v7's 16 classes end at 15)
+        {"{\"classes\":[17]}", "Invalid Class in Config."},
         {"{\"settings\":{\"foo\":1}}", "Invalid Setting in Config."},
         {"{\"settings\":{\"gravMlt\":\"x\"}}", "Invalid Config Value. (Set: Gravity)"},
         {"{\"settings\":{\"maxPlayers\":51}}", "Config Value out of Range. (Set: Players)"},

@@ -11,6 +11,7 @@
 #include <piss.h> // KrunkNative Piss: the stream and its puddles
 #include <math.h>
 #include <pcg_basic.h>
+#include <drank.h> // KrunkNative Drank: puddle slow, the laced pour-up
 #include <stdio.h>
 #include <string.h>
 #include <ruleset.h>
@@ -128,6 +129,9 @@ void player_spawn(Player *player) {
     if (player->class_index < 0 || player->class_index >= (int) class_count) {
         player->class_index = 0;
     }
+    // KrunkNative classes (the Nettspend, shared.h ClassConfig.custom_only / no_comp): the gate
+    // of a customOnly / noComp weapon on the class (game_class_allowed); elsewhere the Triggerman
+    if (!game_class_allowed(player->game, player->class_index)) player->class_index = 0;
 
     const ClassConfig *class_config = &classes[player->class_index];
     int loadout[3] = {1, WEAPON_ID_KNIFE, WEAPON_ID_KNIFE};
@@ -136,7 +140,9 @@ void player_spawn(Player *player) {
     const int fallback_weapon = weapon_count > 1 ? 1 : 0;
     const int primary_index = primary >= 0 && primary < (int) weapon_count && weapons[primary] ? primary : fallback_weapon;
     // setClass(game, classIndex, secIndex): the picked secondary when it is a secondary weapon, else the Pistol.
-    const int picked_secondary = player->secondary_index;
+    // KrunkNative: a class with kn_secondary (the Nettspend's Money Spread) always carries that one.
+    const int fixed_secondary = class_config->kn_secondary > 0 ? class_config->kn_secondary - 1 : -1;
+    const int picked_secondary = fixed_secondary >= 0 && fixed_secondary < (int) weapon_count && weapons[fixed_secondary] ? fixed_secondary : player->secondary_index;
     // v7.1.4 weapons.js req: customOnly secondaries (Grappler) only in a custom game that is not
     // comp (`game.isCustom && !game.isComp`; KN's hosted games and the offline sandbox are custom,
     // game_config_is_custom; official restrictSecs has no KN equivalent, the isDev bypass is
@@ -224,6 +230,7 @@ void player_spawn(Player *player) {
     player->slide_timer = 0.0f;
     player->jump_timer = 0.0f;
     player->reload_timer = 0.0f;
+    player->laced_timer = player->laced_duration = 0.0f; // KrunkNative Drank: a new life is sober
 
     player_update_height(player);
     player_movement_spawn(player); // WP-A: wall-jump limits and v7 movement state
@@ -1323,6 +1330,9 @@ void player_reload(Player *player) {
     player->burst_count = 0;
 
     player_cancel_inspect(player);
+
+    // KrunkNative Drank: the pour-up may lace the pourer (authority-rolled, shared/include/drank.h)
+    if (player->weapon->stream && player->weapon->stream->laced_chance > 0.0f) drank_pour(player);
 }
 
 // cancelInspect: stop inspectTween, inspecting off, inspectX and the inspectAn pose back to 0.
@@ -1730,6 +1740,7 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
         // speedBoost (admin) is not in KrunkNative yet
         accel *= player_attr_speed(player);
         accel *= player_attr_rooted(player);
+        accel *= drank_puddle_slow(player->game, player); // KrunkNative Drank puddles (shared/include/drank.h)
         accel *= mode_speed_mlt(player->game, player); // Kranked bonuses.speed (player.js:1236, WP-D)
         accel *= player_has_perk(player, PERK_SPEED) ? 1.15f : 1.0f;
 

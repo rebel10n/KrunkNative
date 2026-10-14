@@ -1,5 +1,6 @@
 #include <object_manager.h>
 #include <piss.h> // KrunkNative Piss puddles
+#include <drank.h> // KrunkNative Drank: laced timers
 #include <shared.h>
 #include <ruleset.h>
 #include <ai.h>
@@ -827,6 +828,7 @@ void game_tick_world(Game *game, const float now, const float delta, const float
     if (authority && !game->end_timer) spawnables_update(game, delta); // #19 (WP-D)
     if (authority && !game->end_timer) piss_tick(game, delta); // KrunkNative Piss: puddle lifetimes and damage
     if (!authority) piss_client_tick(game, delta);
+    drank_tick(game, delta); // KrunkNative Drank: laced timers (both sides)
     if (authority && !game->end_timer && game->mode) mode_tick(game, delta); // objectives, flags, tags, conversions, forceSpawn
     if (!authority && !game->end_timer && game->mode) mode_dom_client_tick(game, delta); // v7 dom captureT interpolation (WP-D)
     if (authority && !game->end_timer) zone_update(game, delta); // #24 (WP-B)

@@ -755,6 +755,11 @@ typedef struct {
     unsigned char no_sleeve:1;  // noSleeve: no arm sleeves on the viewmodel
     unsigned char leap:1;       // leap: melee lunge
     unsigned char back_slide:1; // bkSlid
+    // KrunkNative classes (doc/v7/decisions.md "Nettspend class"): gated like a customOnly / noComp
+    // weapon (player_spawn falls back to class 0), never a bot's pick
+    unsigned char custom_only:1; // custom games only (game_config_is_custom, not comp)
+    unsigned char no_comp:1;     // not in comp / ranked lobbies
+    int kn_secondary;           // KrunkNative: weapon id + 1 the class always carries as its secondary (0 = the Select Secondary pick)
     int colors[6];
     int health;
     int health_segments;
@@ -775,9 +780,14 @@ typedef struct {
     ClassOverrides ext;    // WP-E: the other cls[id] keys (camera, model, vehicle, shooting), read via class_overrides()
 } ClassConfig;
 
-#define CLASS_COUNT 16
+#define CLASS_COUNT 16 // Krunker v10.0.2's classConfig: what the menus, challenges and class stats list
 #define CLASS_ID_SURVIVOR 14
 #define CLASS_ID_INFILTRATOR 15
+// KrunkNative-only classes sit after Krunker's (doc/v7/decisions.md "Nettspend class"): in the
+// ruleset's class table (Game.classes, rules_class_count() = CLASS_TABLE_COUNT), so spawns,
+// packets and the picker take them, but outside CLASS_COUNT.
+#define CLASS_ID_NETTSPEND 16
+#define CLASS_TABLE_COUNT 17
 // The class tables are the rulesets' (shared/include/ruleset.h; rules_classes() / Game.classes).
 
 // ---- WP-B: Krunker v7.1.4 status effects, perks and killstreaks (shared/src/effects.c) ----
@@ -1239,6 +1249,8 @@ typedef struct Player_t {
 
     float swap_timer;
     float reload_timer;
+    float laced_timer;            // KrunkNative Drank (shared/include/drank.h): s of "laced" left, 0 sober (both sides)
+    float laced_duration;         // ... the whole spell (s), for the effect's ramp
     float slide_timer;
     float jump_timer;
     float interact_progress;
@@ -1537,6 +1549,7 @@ float player_lerp_angle(float a, float b, float t); // index.js Math.lerpAngle (
 void player_reset_feel(Player*); // spawn: step/bob/lean/recoil animation state back to rest
 void player_inspect_weapon(Player*); // wInspect: toggle the weapon inspect (local player, inspKey)
 void player_cancel_inspect(Player*);
+void player_reload(Player*); // players.js reload: starts the reload timer (the authority rolls the KrunkNative Drank's laced pour-up, drank.h)
 void player_end_grapple(Player*); // manager.endGrapple: grapple = null (Grappler)
 void game_sync_grapples(struct Game_t*, int uid); // NET_PACKET_GRAPPLE: NET_TARGET_ALL the changes, a uid every hook (joiner)
 void player_melee_anim_reset(Player*); // resetMeleeAnim (stop meleeAnim.anim first with player_melee_anim_stop)

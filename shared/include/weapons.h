@@ -41,6 +41,10 @@ typedef struct {
     float hose_length;      // hoseLength
     vec3 hose_view;         // first-person centre from the trigger hand's centre, weapon anchor axes, x mirrored left-handed (KN; the branch: hoseViewX, hoseViewY - 1.5, hoseViewZ in the weapon anchor)
     vec3 hose_view_rot;     // first-person rotation x / y / z (hoseViewRotX / Y / Z), y and z mirrored left-handed
+    // KrunkNative Purple Drank (shared/include/drank.h; doc/v7/decisions.md "Purple Drank"): 0 on the Piss
+    float puddle_slow;      // move accel x of a player standing in the puddle (victims only), 0 = no slow
+    float laced_chance;     // chance per reload (the pour-up) that the pourer gets laced, 0 = never
+    float laced_ms;         // how long the laced state lasts (ms)
 } WeaponStream;
 
 typedef struct {
@@ -245,6 +249,8 @@ extern const Weapon g_compressor; // v10 id 30
 extern const Weapon g_tool_gun;
 extern const Weapon g_piss; // WEAPON_ID_PISS (shared/src/weapons/kn_piss.c)
 extern const Weapon g_phys_gun;
+extern const Weapon g_drank;        // WEAPON_ID_DRANK (shared/src/weapons/kn_drank.c)
+extern const Weapon g_money_spread; // WEAPON_ID_MONEY_SPREAD (shared/src/weapons/kn_money_spread.c)
 
 // Krunker v7.1.4 weapon attachments (src/data/attach.js). `dotSrc` is never read by the client.
 typedef struct {
@@ -309,11 +315,14 @@ const WeaponAttachment *weapon_attachment(const Weapon *weapon, int attach_index
 #define WEAPON_ID_TOOL_GUN (WEAPON_ID_KN_BASE + 0)
 #define WEAPON_ID_PISS (WEAPON_ID_KN_BASE + 1) // KrunkNative Piss (doc/v7/decisions.md "Piss")
 #define WEAPON_ID_PHYS_GUN (WEAPON_ID_KN_BASE + 2)
-#define WEAPON_TABLE_COUNT (WEAPON_ID_KN_BASE + 3)
+#define WEAPON_ID_DRANK (WEAPON_ID_KN_BASE + 3)        // KrunkNative Purple Drank (doc/v7/decisions.md "Purple Drank")
+#define WEAPON_ID_MONEY_SPREAD (WEAPON_ID_KN_BASE + 4) // KrunkNative Money Spread (doc/v7/decisions.md "Money Spread")
+#define WEAPON_TABLE_COUNT (WEAPON_ID_KN_BASE + 5)
 // The ids builds before the ruleset seam gave the KN weapons (29 Tool Gun, 30 Piss, 31 Physics
 // Gun, right after v7's table). weapon_id_from_legacy maps a stored or typed id of that era (host
 // config "weps" keys, `give <id>`) to today's, for rulesets whose Krunker table ends before 29.
 #define WEAPON_ID_LEGACY_KN_BASE 29
+#define WEAPON_LEGACY_KN_COUNT 3 // the KN weapons of that era (29 Tool Gun, 30 Piss, 31 Physics Gun); later ones never had a legacy id
 int weapon_id_from_legacy(int id, int krunker_weapon_count);
 
 // The weapon tables live in the rulesets (shared/include/ruleset.h; shared/src/rules/<ver>/):

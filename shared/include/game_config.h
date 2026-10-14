@@ -127,6 +127,10 @@ void game_config_free(Game*);            // drops the state, the game back on th
 
 // setClass: config.classes (classes[0] when not listed), then the mode's classes when forceC.
 int game_config_class_for(const Game*, int class_index);
+// KrunkNative classes (ClassConfig.custom_only / no_comp: the Nettspend): 1 when `class_index` may
+// spawn in this game (custom and not comp); 0 out of range. player_spawn falls back to class 0;
+// the class picker greys such a class out with this.
+int game_class_allowed(const Game*, int class_index);
 // The class's ClassOverrides, or the v7 defaults when no cls[id] touched it.
 const ClassOverrides *class_overrides(const ClassConfig*);
 extern const ClassOverrides g_default_class_overrides;

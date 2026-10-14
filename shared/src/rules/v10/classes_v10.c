@@ -303,7 +303,35 @@ static const ClassConfig infiltrator = {
     .face = 5234,
 };
 
-const ClassConfig g_classes_v10[CLASS_COUNT] = {
+// KrunkNative Nettspend (CLASS_ID_NETTSPEND 16, doc/v7/decisions.md "Nettspend class"; shared/include/
+// drank.h): not a Krunker class. Purple Drank (WEAPON_ID_DRANK) as the primary, Money Spread
+// (WEAPON_ID_MONEY_SPREAD) always as the secondary (kn_secondary: no Select Secondary pick), the
+// knife. A Triggerman baseline (100 health in 6 segments, regen 0.1, speed 1.05, no wall jump,
+// throwChrg 0.8) with the Triggerman's colours in purple and cash green. custom_only / no_comp:
+// custom games only, never comp (player_spawn falls back to the Triggerman), never a bot's pick.
+// icon_index 16 = textures/classes/icon_16.png (client asset); no face store item, no speech lines.
+static const ClassConfig nettspend = {
+    .name = "Nettspend",
+    .icon_index = 16,
+    .texts = (const char*[]) {"Drank drank drank", "Pour up"},
+    .text_count = 2,
+    .loadout = (int[]) {WEAPON_ID_DRANK},
+    .kn_secondary = WEAPON_ID_MONEY_SPREAD + 1,
+    .secondary = 1,
+    .wall_jump = 0,
+    .custom_only = 1,
+    .no_comp = 1,
+    .colors = {0xA77860, 0x7B2CBF, 0x4A1A7A, 0x282828, 0x3FAF5A, 0x2E1047},
+    .health = 100,
+    .health_segments = 6,
+    .regen = 0.1f,
+    .speed = 1.05f,
+    .throw_charge = 0.8f,
+};
+
+// Krunker's 16 (CLASS_COUNT), then KrunkNative's (CLASS_TABLE_COUNT)
+const ClassConfig g_classes_v10[CLASS_TABLE_COUNT] = {
     triggerman, hunter, run_n_gun, spray_n_pray, vince, detective, marksman, rocketeer, agent,
     runner, deagler, bowman, commando, trooper, survivor, infiltrator,
+    [CLASS_ID_NETTSPEND] = nettspend,
 };

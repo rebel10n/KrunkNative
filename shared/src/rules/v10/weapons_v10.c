@@ -20,4 +20,6 @@ const Weapon *const g_weapons_v10[WEAPON_TABLE_COUNT] = {
     [WEAPON_ID_TOOL_GUN] = &g_tool_gun, // KrunkNative (decisions.md "Tool Gun")
     [WEAPON_ID_PISS] = &g_piss,         // KrunkNative (decisions.md "Piss")
     [WEAPON_ID_PHYS_GUN] = &g_phys_gun, // KrunkNative (object_manager.h OM_ACTION_EDIT)
+    [WEAPON_ID_DRANK] = &g_drank,               // KrunkNative (decisions.md "Purple Drank")
+    [WEAPON_ID_MONEY_SPREAD] = &g_money_spread, // KrunkNative (decisions.md "Money Spread")
 };

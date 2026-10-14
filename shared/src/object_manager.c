@@ -86,7 +86,8 @@ static const Weapon *om_weapon(const Game *game, const int id) {
 
 int object_manager_weapon_listed(const int weapon_id) {
     if (weapon_id < 0 || weapon_id >= WEAPON_TABLE_COUNT || !rules_weapon(weapon_id)) return 0;
-    if (weapon_id >= WEAPON_COUNT) return weapon_id == WEAPON_ID_PISS; // KrunkNative-only weapons: the Piss is a Weapons tile
+    // KrunkNative-only weapons: the Piss, Drank and Money Spread are Weapons tiles (the guns are the Tools pane's)
+    if (weapon_id >= WEAPON_COUNT) return weapon_id == WEAPON_ID_PISS || weapon_id == WEAPON_ID_DRANK || weapon_id == WEAPON_ID_MONEY_SPREAD;
     return weapon_id != WEAPON_ID_KNIFE && !rules_weapon(weapon_id)->bomb; // every class has the knife; bombs are site-mode only
 }
 
@@ -279,7 +280,8 @@ int object_manager_give_lookup(const char *query, int *id, int *matches) {
     static const struct {
         const char *alias;
         int weapon;
-    } k_aliases[] = {{"physgun", WEAPON_ID_PHYS_GUN}, {"toolgun", WEAPON_ID_TOOL_GUN}, {"tool", WEAPON_ID_TOOL_GUN}}; // Garry's Mod names
+    } k_aliases[] = {{"physgun", WEAPON_ID_PHYS_GUN}, {"toolgun", WEAPON_ID_TOOL_GUN}, {"tool", WEAPON_ID_TOOL_GUN}, // Garry's Mod names
+                     {"drank", WEAPON_ID_DRANK}, {"lean", WEAPON_ID_DRANK}, {"money", WEAPON_ID_MONEY_SPREAD}, {"cash", WEAPON_ID_MONEY_SPREAD}}; // the Nettspend's
     for (size_t i = 0; i < sizeof(k_aliases) / sizeof(k_aliases[0]); i++) {
         if (strcmp(q, k_aliases[i].alias) != 0 || !object_manager_weapon_allowed(k_aliases[i].weapon)) continue;
         if (id) *id = k_aliases[i].weapon;

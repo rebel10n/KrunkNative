@@ -373,11 +373,13 @@ int main(void) {
         game_configure(&game, NULL, &map, 1, NULL, 0, NULL, 0, NULL, 0);
         game_init(&game, 0, -1, 1);
 
-        CHECK(game.class_count == sizeof(expected_classes) / sizeof(expected_classes[0]), "class count %zu", game.class_count);
+        // Krunker's 16 classes, then the KrunkNative Nettspend (CLASS_TABLE_COUNT; custom games only,
+        // so a public game like this one spawns it as the Triggerman: shared/tests/nettspend_test.c)
+        CHECK(sizeof(expected_classes) / sizeof(expected_classes[0]) == CLASS_COUNT && game.class_count == CLASS_TABLE_COUNT, "class count %zu", game.class_count);
         CHECK(game.weapon_count == WEAPON_TABLE_COUNT, "weapon count %zu", game.weapon_count);
 
-        printf("Spawning %zu classes on %s...\n", game.class_count, maps[m]);
-        for (int c = 0; c < (int) game.class_count; c++) check_class(&game, c, maps[m]);
+        printf("Spawning %d classes on %s...\n", CLASS_COUNT, maps[m]);
+        for (int c = 0; c < CLASS_COUNT; c++) check_class(&game, c, maps[m]);
     }
 
     if (failures) {

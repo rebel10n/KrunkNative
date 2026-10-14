@@ -4,9 +4,10 @@
 // The weapon tables are the rulesets' (shared/src/rules/<ver>/weapons_<ver>.c, ruleset.h).
 
 int weapon_id_from_legacy(const int id, const int krunker_weapon_count) {
-    // ids 29-31 were the KN weapons until the ruleset seam; a ruleset whose Krunker table reaches
-    // 29 (v10: Boulder, Compressor) means its own weapon by them
-    if (id >= WEAPON_ID_LEGACY_KN_BASE && id < WEAPON_ID_LEGACY_KN_BASE + (WEAPON_TABLE_COUNT - WEAPON_ID_KN_BASE) &&
+    // ids 29-31 were the KN weapons of that era (Tool Gun, Piss, Physics Gun) until the ruleset
+    // seam; a ruleset whose Krunker table reaches 29 (v10: Boulder, Compressor) means its own
+    // weapon by them. Later KN weapons (the Drank, the Money Spread) never had a legacy id.
+    if (id >= WEAPON_ID_LEGACY_KN_BASE && id < WEAPON_ID_LEGACY_KN_BASE + WEAPON_LEGACY_KN_COUNT &&
         id >= krunker_weapon_count) return WEAPON_ID_KN_BASE + (id - WEAPON_ID_LEGACY_KN_BASE);
     return id;
 }

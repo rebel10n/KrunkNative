@@ -44,18 +44,21 @@ static void test_wire(void) {
 
 static void test_weapon_ids(void) {
     const Ruleset *rs = ruleset_current();
-    CHECK(WEAPON_ID_KN_BASE == 64 && WEAPON_ID_TOOL_GUN == 64 && WEAPON_ID_PISS == 65 && WEAPON_ID_PHYS_GUN == 66 && WEAPON_TABLE_COUNT == 67, "KN weapon ids");
+    CHECK(WEAPON_ID_KN_BASE == 64 && WEAPON_ID_TOOL_GUN == 64 && WEAPON_ID_PISS == 65 && WEAPON_ID_PHYS_GUN == 66 && WEAPON_ID_DRANK == 67 &&
+          WEAPON_ID_MONEY_SPREAD == 68 && WEAPON_TABLE_COUNT == 69, "KN weapon ids");
     CHECK(rs->krunker_weapon_count == 31 && rs->weapon_count == WEAPON_TABLE_COUNT, "Krunker's 31 ids below the KN base");
     for (int i = rs->krunker_weapon_count; i < WEAPON_ID_KN_BASE; i++) CHECK(!rs->weapons[i], "id %d is a hole", i);
-    CHECK(rs->weapons[WEAPON_ID_TOOL_GUN] == &g_tool_gun && rs->weapons[WEAPON_ID_PISS] == &g_piss && rs->weapons[WEAPON_ID_PHYS_GUN] == &g_phys_gun,
-          "the KN weapons");
+    CHECK(rs->weapons[WEAPON_ID_TOOL_GUN] == &g_tool_gun && rs->weapons[WEAPON_ID_PISS] == &g_piss && rs->weapons[WEAPON_ID_PHYS_GUN] == &g_phys_gun &&
+          rs->weapons[WEAPON_ID_DRANK] == &g_drank && rs->weapons[WEAPON_ID_MONEY_SPREAD] == &g_money_spread, "the KN weapons");
+    CHECK(CLASS_COUNT == 16 && CLASS_ID_NETTSPEND == 16 && CLASS_TABLE_COUNT == 17 && rs->class_count == CLASS_TABLE_COUNT &&
+          !strcmp(rs->classes[CLASS_ID_NETTSPEND].name, "Nettspend"), "Krunker's 16 classes, then the KN Nettspend");
     CHECK(rules_weapon(-1) == NULL && rules_weapon(WEAPON_TABLE_COUNT) == NULL && rules_weapon(40) == NULL && rules_weapon(1) == rs->weapons[1], "rules_weapon bounds");
     // the remap of ids stored before the seam
     CHECK(weapon_id_from_legacy(29, 29) == WEAPON_ID_TOOL_GUN && weapon_id_from_legacy(30, 29) == WEAPON_ID_PISS && weapon_id_from_legacy(31, 29) == WEAPON_ID_PHYS_GUN,
           "29-31 of a 29-weapon table are the KN weapons");
     CHECK(weapon_id_from_legacy(29, 31) == 29 && weapon_id_from_legacy(30, 31) == 30 && weapon_id_from_legacy(31, 31) == WEAPON_ID_PHYS_GUN,
           "a 31-weapon table (v10) keeps its own 29 / 30");
-    CHECK(weapon_id_from_legacy(5, 29) == 5 && weapon_id_from_legacy(32, 29) == 32 && weapon_id_from_legacy(64, 29) == 64, "other ids unchanged");
+    CHECK(weapon_id_from_legacy(5, 29) == 5 && weapon_id_from_legacy(32, 29) == 32 && weapon_id_from_legacy(64, 29) == 64, "other ids unchanged (32: never a legacy id, the Drank is 67)");
     int id = -1;
     const int give29 = object_manager_give_lookup("29", &id, NULL);
     CHECK(give29 == OM_GIVE_NONE || (give29 == OM_GIVE_WEAPON && id == WEAPON_ID_BOULDER), "`give 29` is v10's Boulder, never the Tool Gun (%d)", id);

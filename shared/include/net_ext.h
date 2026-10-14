@@ -59,6 +59,9 @@ typedef enum {
     // during a session re-verifies the live connection, no rejoin (server/src/accounts.c "live sign-in")
     NET_EXT_KN_ACCOUNT_AUTH = 0x8000,   // C -> S NetAccountAuthPacket
     NET_EXT_KN_ACCOUNT_RIGHTS = 0x8001, // S -> C NetAccountRightsPacket
+
+    // 0x8010 KrunkNative gameplay (shared/include/drank.h): the Purple Drank's laced event
+    NET_EXT_KN_LACED = 0x8010, // S -> C NetLacedPacket (everyone, the laced player included)
 } NetExtSubtype;
 
 // NET_EXT_KN_ACCOUNT_AUTH (C -> S): the identity the player now has in the menu. The server verifies
@@ -105,6 +108,17 @@ typedef struct {
     char name[32];      // the connection's name (the next spawn's)
     char message[64];   // why, for REFUSED / BUSY / UNAVAILABLE
 } NetAccountRightsPacket;
+
+// NET_EXT_KN_LACED (S -> C, to everyone): the authority rolled a Purple Drank pour-up (reload) as
+// laced (shared/src/drank.c drank_pour): `uid` is high for `duration_ms` from now. The client's
+// own player gets the distortion post-effect; others may show an indicator. Replaces any spell
+// still running (the timer restarts). drank_apply_laced reads it into Player.laced_timer.
+#pragma pack(push, 1)
+typedef struct {
+    int32_t uid;          // the laced player (Player.uid / NetInitPacket client id)
+    uint32_t duration_ms; // the spell from now (DRANK: WeaponStream.laced_ms, 8000)
+} NetLacedPacket;
+#pragma pack(pop)
 
 // Bodies fit one NetPacket (NET_MAX_PAYLOAD 512) after the subtype.
 #define NET_EXT_BODY_MAX (512 - NET_EXT_HEADER_SIZE)
