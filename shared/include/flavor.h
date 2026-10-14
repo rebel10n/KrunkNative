@@ -28,8 +28,10 @@ typedef struct {
     GameFlavor flavor;
     const char *key;          // wire / config token, lowercase: "base", "strike"
     const char *display_name; // player-facing brand: "Krunker Box Office", "Krunker Strike"
-    float damage_mult;        // global outgoing-damage multiplier; 1.0 = neutral (base, and the
-                              // Strike seed until flavor-gameplay lands)
+    float damage_mult;        // global outgoing-damage multiplier (dealer-dealt combat damage only);
+                              // 1.0 = neutral (base). Strike: 1.25 (a harder-hitting, hardcore feel).
+    float regen_mult;         // passive health-regen multiplier, composed with the mode regenMlt;
+                              // 1.0 = neutral (base). Strike: 0.0 (no passive regen).
 } FlavorConfig;
 
 // ---- the process flavor (set once at startup; never NULL) --------------------------------------

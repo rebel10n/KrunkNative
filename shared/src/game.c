@@ -14,6 +14,7 @@
 #include <comp_lobby.h> // v7 comp lobby (lobbyPlayers)
 #include <account.h>     // WP-E part 2c: incMedal (accounts and the sandbox)
 #include <progression.h> // WP-E part 2c: overlay.medalsList
+#include <flavor_rules.h> // product-flavor gameplay deltas (Strike: no passive regen)
 #include <pcg_basic.h>
 #include <stdio.h>
 #include <string.h>
@@ -703,7 +704,7 @@ static void game_tick_regen(Game *game, Player *player, const float delta) {
         const int regen_on = player->hit_timer <= 0.0f && !player->chall_mode && !player->is_juggernaut && game->config.health_regen &&
                              !(game->mode && game->mode->config.no_regen) && !player->mode.no_regen &&
                              game->classes && player->class_index >= 0 && player->class_index < (int) game->class_count;
-        const float regen = regen_on ? game->classes[player->class_index].regen : 0.0f;
+        const float regen = flavor_scale_regen(regen_on ? game->classes[player->class_index].regen : 0.0f); // Strike: 0 (base: no-op)
         if (regen > 0.0f) player_change_health(player, NULL, -(float) player->max_health * regen, 0);
         player_effects_regen_tick(player); // v7.1.4 Poisoned every 8th tick, Zapped every 2nd (shared/src/effects.c)
     }
