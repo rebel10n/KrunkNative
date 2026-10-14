@@ -85,11 +85,12 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             NetHelloPacket packet = {0};
             memcpy(&packet, payload, length < sizeof(packet) ? length : sizeof(packet));
 
-            printf("{\"type\":\"hello\",\"id\":%u,\"major\":%u,\"minor\":%u,\"patch\":%u}",
+            printf("{\"type\":\"hello\",\"id\":%u,\"major\":%u,\"minor\":%u,\"patch\":%u,\"flavor\":%u}",
                    (unsigned int) type,
                    (unsigned int) packet.major,
                    (unsigned int) packet.minor,
-                   (unsigned int) packet.patch);
+                   (unsigned int) packet.patch,
+                   (unsigned int) NET_WIRE_FLAVOR(packet.rulesets));
             break;
         }
         case NET_PACKET_INIT: {
@@ -101,7 +102,7 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
             NetInitPacket packet = {0};
             memcpy(&packet, payload, length < sizeof(packet) ? length : sizeof(packet));
 
-            printf("{\"type\":\"init\",\"id\":%u,\"major\":%u,\"minor\":%u,\"patch\":%u,\"map_index\":%d,\"mode_index\":%d,\"tick_rate\":%u,\"client_id\":%d,\"ruleset\":%u}",
+            printf("{\"type\":\"init\",\"id\":%u,\"major\":%u,\"minor\":%u,\"patch\":%u,\"map_index\":%d,\"mode_index\":%d,\"tick_rate\":%u,\"client_id\":%d,\"ruleset\":%u,\"flavor\":%u}",
                    (unsigned int) type,
                    (unsigned int) packet.major,
                    (unsigned int) packet.minor,
@@ -110,7 +111,8 @@ void client_net_log_packet(const char *direction, const NetPacketType type, cons
                    packet.mode_index,
                    (unsigned int) packet.tick_rate,
                    packet.client_id,
-                   (unsigned int) packet.ruleset);
+                   (unsigned int) (packet.ruleset & 0x0Fu),
+                   (unsigned int) NET_WIRE_FLAVOR(packet.ruleset));
             break;
         }
         case NET_PACKET_ENT: {

@@ -1246,6 +1246,25 @@ void client_send_cycle_packet(Client *client) {
     client_net_send(client, NET_PACKET_CYCLE, NULL, 0); // io_cycle (offline: the sandbox server's)
 }
 
+// Krunker Strike: a direct native server advertises its product flavor in INIT (shared.h); a client
+// of a different flavor refuses the server with a clear message instead of silently mixing, the
+// mirror of the server's HELLO refusal. Returns 1 (and disconnects) when refused. The official
+// krunker.io bridge and offline play are never refused: their INIT carries our own flavor by
+// construction (krunker_link emits base; offline is this same process).
+static int client_refuse_wrong_flavor(Client *client, const NetInitPacket *init) {
+    if (client->offline || krunker_net_active()) return 0;
+    const GameFlavor server_flavor = (GameFlavor) NET_WIRE_FLAVOR(init->ruleset);
+    if (server_flavor == flavor_get()) return 0;
+    char msg[sizeof(((NetErrorPacket *) 0)->message)];
+    snprintf(msg, sizeof(msg), "This server runs %s, not %s", flavor_display_name(server_flavor),
+             flavor_display_name(flavor_get()));
+    printf("[client] refusing server: flavor mismatch (server %u, client %s)\n",
+           (unsigned int) server_flavor, flavor_key(flavor_get()));
+    fflush(stdout);
+    client_net_disconnect(client, msg, NET_ERROR_CODE_FLAVOR);
+    return 1;
+}
+
 // INIT: a new session or round on map init->map_index (already resolved to the
 // client's own map list by client_map_prepare_init).
 void client_apply_init(Client *client, const NetInitPacket *init) {
@@ -1281,6 +1300,7 @@ static void client_handle_net_packet(Client *client, const NetPacket *packet) {
         case NET_PACKET_INIT: {
             NetInitPacket init;
             if (!net_packet_read_init(&init, packet)) break;
+            if (client_refuse_wrong_flavor(client, &init)) break; // Krunker Strike: a cross-flavor server
             menu_idle_reset(); // v7 io_init: CONTROLS.idleTimer = 0 (a map change restarts the menu idle kick)
             if (client_map_prepare_init(client, &init)) client_apply_init(client, &init);
             break;

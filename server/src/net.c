@@ -16,6 +16,7 @@
 #include <comp_lobby.h>     // v7 comp lobby (lobbyPlayers): ranked matches and comp hosts
 #include <net_ext.h>         // NET_PACKET_EXT (254): the v10+ envelope
 #include <object_manager.h>  // KrunkNative Object Manager (spawn menu): ids 250-254
+#include <flavor.h>          // Krunker Strike: the product flavor carried in INIT / HELLO (shared.h)
 #include <errno.h>
 #include <math.h>
 #include <stdio.h>
@@ -565,7 +566,10 @@ static void net_send_init(ClientConnection *client) {
         .major = NET_PROTOCOL_MAJOR,
         .minor = NET_PROTOCOL_MINOR, // 1.1: accepts ENT V5 / V6, 1.2: V7 (client_enter_game sends them only then)
         .patch = NET_PROTOCOL_PATCH, // 1.3.1: ENT V8 (WP-C)
-        .ruleset = NET_INIT_RULESET, // Krunker v10.0.2 (wire compatibility; shared.h)
+        // Krunker v10.0.2 in the low nibble (wire compatibility), this server's product flavor in
+        // the high nibble (shared.h). A base server's byte stays 3; a client of a different flavor
+        // refuses us from this (client_apply_init path).
+        .ruleset = NET_WIRE_RULESET_BYTE(NET_INIT_RULESET, flavor_get()),
         .map_index = g_server->game.current_map_index,
         .mode_index = game_mode_id(&g_server->game), // Krunker "init" modeIndex: the mode id
         .tick_rate = g_server->config.tick_rate,
@@ -1567,7 +1571,20 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
                 client->peer_minor = hello.major == NET_PROTOCOL_MAJOR ? hello.minor : 0;
                 client->peer_patch = hello.major == NET_PROTOCOL_MAJOR ? hello.patch : 0;
                 // its ruleset mask (shared.h NET_HELLO_RULESETS) is not read: there is one Krunker
-                // version, and no HELLO is refused for it (net-bridge sends none)
+                // version, and no HELLO is refused for it (net-bridge sends none).
+                // Krunker Strike: the high nibble carries the peer's product flavor. A peer that
+                // announces a non-base flavor different from ours is refused (never silently mixed);
+                // a base / absent nibble is accepted (net-bridge, the server-list probe, a base
+                // client — a non-base client refuses us from our own INIT instead).
+                const GameFlavor peer_flavor = (GameFlavor) NET_WIRE_FLAVOR(hello.rulesets);
+                if (peer_flavor != FLAVOR_BASE && peer_flavor != flavor_get()) {
+                    char msg[sizeof(((NetErrorPacket *) 0)->message)];
+                    snprintf(msg, sizeof(msg), "This is a %s server", flavor_display_name(flavor_get()));
+                    server_log("Refusing client %d: peer flavor %u, server is %s", client->id,
+                               (unsigned int) peer_flavor, flavor_key(flavor_get()));
+                    net_kick_client(client->id, msg, NET_ERROR_CODE_FLAVOR);
+                    break;
+                }
             }
             ks_server_on_hello(client, packet); // the peer's protocol minor (KrunkScript packet gate)
             if (client->peer_minor >= NET_PROTOCOL_MINOR_V7 && g_server->game.ready) { // WP-E: its INIT went out before the HELLO

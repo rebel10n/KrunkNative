@@ -2335,9 +2335,10 @@ typedef struct {
     uint8_t major;
     uint8_t minor;
     uint8_t patch;
-    // the Krunker versions this client plays: NET_HELLO_RULESETS (v10.0.2 only). Kept for wire
-    // compatibility with the version toggle's servers (they refuse a peer without their bit);
-    // servers read nothing from it, and a HELLO without it is accepted.
+    // low nibble: the Krunker versions this client plays (NET_HELLO_RULESETS, v10.0.2 only; kept for
+    // wire compatibility with the version toggle's servers). High nibble: the client's product
+    // flavor (NET_WIRE_FLAVOR; 0 = base / a HELLO without it). The server refuses a peer whose
+    // flavor is non-base and differs from its own; a base / absent nibble is accepted.
     uint8_t rulesets;
 } NetHelloPacket;
 
@@ -2349,9 +2350,10 @@ typedef struct {
     int32_t mode_index;
     uint16_t tick_rate;
     int32_t client_id;
-    // NET_INIT_RULESET (v10.0.2), kept for wire compatibility with the version toggle's clients
-    // (they adopt it). Optional: a 17-byte INIT (a server from before the toggle) has none; clients
-    // read nothing from it. Older clients prefix-read INIT.
+    // low nibble: NET_INIT_RULESET (v10.0.2), kept for wire compatibility with the version toggle's
+    // clients. High nibble: the server's product flavor (NET_WIRE_FLAVOR; 0 = base). Optional: a
+    // 17-byte INIT (a server from before the toggle) has no byte here; clients prefix-read it as 0
+    // (base). A client whose flavor differs from this adopted server flavor refuses the server.
     uint8_t ruleset;
 } NetInitPacket;
 
@@ -2360,7 +2362,20 @@ typedef struct {
 // numbered v3.1.1 0, v7.1.4 1, v10.0.2 2. Only v10.0.2 is sent now: HELLO bit 2, INIT 2 + 1.
 #define NET_HELLO_RULESETS (1u << 2)
 #define NET_INIT_RULESET 3
-NetHelloPacket net_hello_make(void); // this build's HELLO: protocol major.minor.patch + NET_HELLO_RULESETS
+// Krunker Strike: the product flavor (shared/include/flavor.h) rides beside the ruleset id, in the
+// high nibble (bits 4-7) of the HELLO `rulesets` byte and the INIT `ruleset` byte; the low nibble
+// stays the ruleset wire id. Flavor 0 (FLAVOR_BASE) is a zero nibble, so a base build is
+// byte-identical on the wire (HELLO 0x04, INIT 3) and net-bridge / the server-list probe / an old
+// peer (nibble 0) read as base. The server advertises its flavor in INIT and refuses a peer whose
+// HELLO announces a non-base flavor different from its own (net_send_init / server net.c HELLO);
+// the client refuses a server whose INIT advertises a different flavor (client_apply_init path).
+// So every cross-flavor pair is turned away by whichever side is non-base, never silently mixed.
+#define NET_FLAVOR_WIRE_SHIFT 4
+#define NET_FLAVOR_WIRE_MASK 0xF0u
+#define NET_WIRE_FLAVOR(byte) (((unsigned) (byte) & NET_FLAVOR_WIRE_MASK) >> NET_FLAVOR_WIRE_SHIFT)
+#define NET_WIRE_RULESET_BYTE(id, flavor) \
+    ((uint8_t) (((unsigned) (id) & 0x0Fu) | (((unsigned) (flavor) << NET_FLAVOR_WIRE_SHIFT) & NET_FLAVOR_WIRE_MASK)))
+NetHelloPacket net_hello_make(void); // this build's HELLO: protocol major.minor.patch + NET_HELLO_RULESETS + the flavor nibble
 
 // INIT major.minor: the protocol the server speaks. 1.0 servers drop ENTs longer than V4 (38 bytes)
 // without spawning anyone, so a client only sends the longer ENT (V5 spray, V6 weapon skins) to a
@@ -2724,6 +2739,7 @@ typedef struct {
 #define NET_ERROR_CODE_UPDATING "004004" // "GAME UPDATING": draining, or stopping for an update
 #define NET_ERROR_CODE_SHUTDOWN "004006" // the server stopped (restart / shutdown / console quit)
 #define NET_ERROR_CODE_PASSWORD "004005" // the server password (gameserver.password) is missing / wrong / locked out
+#define NET_ERROR_CODE_FLAVOR "004007"   // a cross-flavor peer (Krunker Strike vs Krunker Box Office); shown, not acted on
 
 // NET_PACKET_BILLBOARD: the server's billboard ad (server.cfg billboard, the v3.1.1 init "bill":
 // txt, txtCol, bgCol). While a server sends one, every BILLBOARD map object of every map shows

@@ -1,4 +1,5 @@
 #include <shared.h>
+#include <flavor.h> // the process product flavor: carried in the HELLO rulesets byte (shared.h)
 #include <knet.h> // virtual (UDP) descriptors
 #include <math.h>
 #include <stddef.h>
@@ -505,7 +506,10 @@ int net_packet_read_init(NetInitPacket *init, const NetPacket *packet) {
 }
 
 NetHelloPacket net_hello_make(void) {
-    return (NetHelloPacket) {NET_PROTOCOL_MAJOR, NET_PROTOCOL_MINOR, NET_PROTOCOL_PATCH, NET_HELLO_RULESETS};
+    // The low nibble is the ruleset mask (v10.0.2); the high nibble is this process's product flavor
+    // (shared.h). FLAVOR_BASE is a zero nibble, so a base build's HELLO is byte-identical (0x04).
+    return (NetHelloPacket) {NET_PROTOCOL_MAJOR, NET_PROTOCOL_MINOR, NET_PROTOCOL_PATCH,
+                             NET_WIRE_RULESET_BYTE(NET_HELLO_RULESETS, flavor_get())};
 }
 
 int net_packet_read_recon(NetReconPacket *recon, const NetPacket *packet, const Player *keep) {
