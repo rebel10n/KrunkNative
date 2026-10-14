@@ -747,6 +747,7 @@ void client_hud_html_tick(Client*, float); // HTML HUD (client/src/ui/hud_ui.c)
 void client_class_preview_set_rect(Client*, int, float, float, float, float, float);
 void client_class_preview_render(Client*); // renders the canvas's frame; before html_ui_render()
 void client_class_preview_fini(Client*);
+void client_class_preview_turn(Client*, float dx); // v10 #charPreviewSlot drag: xDire += 0.008 * dx (CSS px)
 
 void on_client_socket_connect(Client*);
 void on_client_socket_disconnect(Client*);

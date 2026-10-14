@@ -578,6 +578,9 @@ static const SocialRoute k_routes[] = {
     {"kr", sh_gift},
     {"cln", sh_clan},
     {"clnR", sh_clan_request},
+    {"ttl", sh_titles},                 /* v10: the account's titles (v10_customize.c) */
+    {"dsp", sh_daily_spin},             /* v10 Daily Spin progress (daily_spin.c) */
+    {"dsl", sh_daily_spin_claim},       /* v10 DAILY_SPIN_CLAIM -> "dslr" */
     {"uploadS", sh_settings_up},
     {"getS", sh_settings_get},
     {"nme", sh_alias},

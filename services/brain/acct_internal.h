@@ -239,6 +239,10 @@ void sh_clan(SocialSession *s, const cJSON *f);        /* "cln" */
 void sh_clan_request(SocialSession *s, const cJSON *f);/* "clnR" */
 void sh_settings_up(SocialSession *s, const cJSON *f); /* "uploadS" */
 void sh_settings_get(SocialSession *s, const cJSON *f);/* "getS" */
+void sh_titles(SocialSession *s, const cJSON *f);      /* "ttl" (v10 account titles) */
+void sh_daily_spin(SocialSession *s, const cJSON *f);  /* "dsp" (v10 Daily Spin progress, daily_spin.c) */
+void sh_daily_spin_claim(SocialSession *s, const cJSON *f); /* "dsl" (v10 DAILY_SPIN_CLAIM) */
+int store_wheel_ticket(const char *name);              /* a store wheel's ticketIndex, -1 none (store.c) */
 void sh_alias(SocialSession *s, const cJSON *f);       /* "nme" */
 void sh_password(SocialSession *s, const cJSON *f);    /* "upp" */
 void sh_mail_list(SocialSession *s, const cJSON *f);   /* "kml" */

@@ -601,6 +601,7 @@ char *ui_window_generate(const int id, const char **header, int *sticky) {
     if (!live) live = battlepass_window_gen(id, header); // v7.1.4 Battle Pass (battlepass_ui.c)
     if (!live) live = servers_window_gen(id, header);
     if (!live) live = object_manager_window_gen(id, header); // KrunkNative Object Manager (F1)
+    if (!live) live = v10_customize_window_gen(id); // v10 page: the Change Loadout shell (v10_customize.c)
     if (live) return live;
     const WindowDef *w = find_window(id);
     return w ? w->gen() : gen_static(key);
@@ -624,5 +625,7 @@ void ui_window_post(const int id) {
         if (input) html_dom_set_value(input, ui->name_set ? ui->client->menu_name : "");
     }
     account_window_post(id); // brain: the saved krunker_username instead of the nickname
+    v10_customize_window_post(id); // v10 page: the class preview into #charPreviewSlot
+    store_ui_window_post(id);      // v10 page: the Eterno Shop's #menuWindow.eterno
     battlepass_window_post(id); // windows[5].post(): the window width, scroll to the current level
 }

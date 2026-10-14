@@ -120,7 +120,7 @@ H(h_set_setting) {
 }
 
 
-H(h_show_window) { UNUSED; menu_show_window(arg_int(args, argc, 0, 0), 0); return 1; }
+H(h_show_window) { UNUSED; menu_show_window(arg_int(args, argc, 0, 0), arg_bool(ev, args, argc, 1, 0)); return 1; } // showWindow(id, force)
 H(h_close_window) { UNUSED; menu_close_window(); return 1; }
 H(h_select_class) { UNUSED; menu_select_class(arg_int(args, argc, 0, 0)); return 1; }
 // WP-E voteOnMatch("mode,map"): the end screen's match vote cards (client/src/net/lobby_events.c)
@@ -601,6 +601,8 @@ static const UiModuleHandler MODULE_HANDLERS[] = {
     v10_competitive_handle,    // v10_competitive.c: v10 Leaderboards, the view stack
     ui_settings_handle,        // ui_settings.c: Game Settings (windows[0])
     ui_controls_handle,        // ui_controls.c: Change Controls (windows[6])
+    v10_customize_handle,      // v10_customize.c: the v10 page's Change Loadout tabs, Title window
+    v10_daily_spin_handle,     // v10_daily_spin.c: the sidebar's Daily Spin
     ui_loadout_handle,         // ui_loadout.c: Change Loadout (windows[2]) and the pickers
     hud_ui_handle,             // hud_ui.c: chat, player list, end screen, death screen
     ui_client_settings_handle, // ui_client_settings.c: Settings > Client, the Exit item

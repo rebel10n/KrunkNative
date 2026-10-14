@@ -964,7 +964,8 @@ static void close_window_state(void) { g_ui.active_window = MENU_WINDOW_NONE; }
 
 // window.showWindow(id). Note: like the JS, closeWindowState() runs before the
 // "same window" test, so re-selecting the active window re-renders it.
-void menu_show_window(const int id, const int force) {
+void menu_show_window(int id, const int force) {
+    id = v10_customize_window_alias(id); // v10 page: showWindow(53) is window 3's Customize tab
     if (id != MENU_WINDOW_NONE) menu_idle_reset(); // showWindow(id >= 0): CONTROLS.idleTimer = 0
     if (id == MENU_WINDOW_NONE) {
         menu_toggle_window(0);
@@ -990,6 +991,7 @@ void menu_show_window(const int id, const int force) {
             // class and inline style of that window)
             const char *cls = "dark", *style = "overflow-y: auto;";
             ui_window_meta(id, &cls, &style);
+            v10_customize_before_render(); // the class preview canvas leaves the old window first
             html_dom_set_attr(mw, "class", cls);
             html_dom_set_attr(mw, "style", style);
             html_dom_set_html(mw, html ? html : "");
@@ -1023,6 +1025,7 @@ void menu_close_window(void) {
     close_window_state();
     html_dom_set_class(html_dom_root(), "kn-bare-window", 0); // ui_window_post: the Object Manager's bare window
     set_display("windowHolder", "none");
+    v10_customize_before_render(); // the class preview canvas goes home (toggleWindowCharPreview(null))
     HtmlElem mw = by_id("menuWindow");
     if (mw) html_dom_set_html(mw, "");
 }

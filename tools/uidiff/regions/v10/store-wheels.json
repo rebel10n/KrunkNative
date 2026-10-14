@@ -1,0 +1,21 @@
+{
+  "scenario": "v10/store-wheels",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 3.0
+  },
+  "regions": [
+    {
+      "name": "window",
+      "rect": [
+        252,
+        197,
+        776,
+        325
+      ],
+      "kind": "text",
+      "note": "#menuWindow: the store tabs and the tab body; the mirror had no ticket thumbnails (13_0_20 / 13_0_19), the reference shows broken-image marks where KN draws the tickets",
+      "max_pct": 4.5
+    }
+  ]
+}

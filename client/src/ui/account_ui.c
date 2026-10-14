@@ -143,6 +143,14 @@ void account_readable_time(char *out, const size_t n, const double ms) { readabl
 
 const AccountInfo *account_get(void) { return g_logged_in ? &g_acc : NULL; }
 
+// One no-argument social frame (v10 "ttl": the account's titles; v10_customize.c). The frame
+// goes through the same queue as the mail frames (backend_social_send_text).
+void account_send_frame(const char *label) {
+    char frame[64];
+    snprintf(frame, sizeof(frame), "[\"%s\"]", label);
+    backend_social_send_text(frame);
+}
+
 static void mark_header(void);
 static void rerender_windows(void);
 
@@ -585,6 +593,10 @@ static void on_social(void *user, const cJSON *frame) {
         rerender_windows();
     } else if (!strcmp(label, "spin") || !strcmp(label, "spinKR") || !strcmp(label, "spinH")) {
         store_ui_frame(frame);
+    } else if (!strcmp(label, "ttl")) { // v10: the account's titles (v10_customize.c)
+        v10_customize_frame(frame);
+    } else if (!strcmp(label, "dsp") || !strcmp(label, "dslr")) { // v10 Daily Spin progress / claim (v10_daily_spin.c)
+        v10_daily_spin_frame(label, frame);
     } else if (battlepass_ui_frame(label, frame)) { // v7.1.4 Battle Pass: bpdl, bppd, bpclmr, purbp, purbpl, bpEnd
     } else if (!strcmp(label, "cln") || !strcmp(label, "clnL")) { // io_cln / io_clnL (windows[12])
         clan_ui_frame(frame);

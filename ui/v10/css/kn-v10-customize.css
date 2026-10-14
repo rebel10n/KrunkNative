@@ -1,0 +1,16 @@
+/* KrunkNative: the v10 Change Loadout / Customize / Store (client/src/ui/v10_customize.c, v10_store.c).
+ * Only what the in-house engine needs to draw v10's own rules (main.css, svelte.css). */
+
+/* main.css `#charPreviewSlot canvas { width: 100%; height: auto; aspect-ratio: 3 / 4 }`: the engine
+ * has no aspect-ratio, so the 600px column's 3:4 height is spelled out (object-fit: cover crops
+ * the 5:4 preview bitmap into it, as in v10) */
+#charPreviewSlot canvas {
+	height: 800px !important;
+	flex-shrink: 0;
+}
+
+/* svelte-gh77t9 `#shop-header-desc { width: 45ch }`: no ch unit in the engine; 45ch of the 14px
+ * font as measured in v10's Eterno Shop */
+#shop-header-desc {
+	width: 560px !important;
+}

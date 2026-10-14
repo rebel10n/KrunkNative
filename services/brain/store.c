@@ -255,6 +255,14 @@ static int pool_items(const StoreWheel *w, int slice, int *out, int max) {
     return n;
 }
 
+/* a wheel's ticketIndex by name ("Starter" / "Elite" / "Heroic": the Daily Spin's tiers,
+ * daily_spin.c), -1 none */
+int store_wheel_ticket(const char *name) {
+    const StoreSpins *sp = spins();
+    const int i = store_spins_find(sp, name);
+    return i >= 0 ? sp->wheels[i].ticket : -1;
+}
+
 /* ------------------------------------------------------------------ "spin" */
 
 #define SPIN_MAX 16

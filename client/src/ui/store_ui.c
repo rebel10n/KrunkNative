@@ -27,6 +27,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ruleset.h>
+#include <store_spins.h> // v10 store.wheels / itemPools
+#include <time.h>
 
 // data/store.js wheels / a TICKET item's spinWheel (skins.json)
 typedef struct {
@@ -40,28 +42,89 @@ typedef struct {
     int big_rar;     // bigRar: the previews (and rolls of this rarity and up) draw from every rarity >= it
     int season;      // 0 = config.currentSeason
     double rarities[7];
-} StoreWheel;
+    // v10 (shared/include/store_spins.h): the store.wheels entry this was made from, NULL for the
+    // TICKET items' spinWheel table below. A pool wheel's slices are its pools; their weights sit
+    // in rarities[] by the pool's rarity, so the slices, odds and reveal keep working per rarity.
+    const StoreWheel *src;
+    int hide, locked;
+} UiWheel;
 
-// The primary wheels of v10's store.wheels (gapi /data/spins, shared/include/store_spins.h; index =
-// the spin index the server knows, services/brain/store.c) and the Free KR wheel (its index is
-// v10's 5; it spins through "fkr"). v10's Starter / Elite / Heroic draw from the s10Pool item
-// pools (the previews here still list the season's items by rarity); Elite and Ultra are ticket
-// only (Universal Elite Ticket 8068, Season 9 Ultra Ticket 7510), Starter and Heroic also take
-// the Universal Starter (8067) / Spin (7993) Ticket.
-static const StoreWheel k_wheels[] = {
-    {"Starter", "#b2f252", NULL, 50, 10, 2, 0, 0, 0, 8067, 0, 0, 0, {75, 22, 3, 0, 0, 0}},
-    {"Elite", "#2196F3", NULL, 100, 10, 3, 0, 0, 0, 8068, 1, 0, 0, {50, 30, 15, 5, 0, 0}},
-    {"Heroic", "#fc9803", NULL, 500, 10, 4, 0, 0, 0, 7993, 0, 0, 0, {0, 48, 35, 14, 2.49, 0.5, 0.01}},
-    {"Ultra", "#ed4242", NULL, 0, 0, 4, 0, 0, 0, 7510, 1, 5, 0, {0, 28, 53, 13.5, 4.46, 1, 0.04}},
-    {"Free KR", "#00bcd4", "Claim", 0, 0, 0, 1, 1, 1, -1, 0, 0, 0, {50, 39, 10, 1, 0, 0}},
-};
-#define WHEEL_COUNT ((int) (sizeof(k_wheels) / sizeof(k_wheels[0])))
-#define FREE_KR_WHEEL 4
+// store.wheels (v10 gapi /data/spins: shared/include/store_spins.h store_spins_builtin(), the
+// data kn_brain spins; index = the "spin" frame's wheel index). Built once from that data, so a
+// data change (new wheels, pools, prices, tickets) is all it takes.
+#define UI_WHEELS_MAX 32
+static UiWheel g_ui_wheels[UI_WHEELS_MAX];
+static int g_ui_wheel_count = -1;
+
+// a pool's rarity: its items' (a pool holds one rarity; the first item tells)
+static int pool_rarity(const StorePool *p) {
+    for (int i = 0; p && i < p->count; i++) {
+        const ViewerSkin *k = viewer_skin(p->items[i]);
+        if (k) return k->rarity;
+    }
+    return -1;
+}
+
+static void wheels_load(void) {
+    if (g_ui_wheel_count >= 0) return;
+    const StoreSpins *sp = store_spins_builtin();
+    g_ui_wheel_count = 0;
+    for (int i = 0; i < sp->wheel_count && g_ui_wheel_count < UI_WHEELS_MAX; i++) {
+        const StoreWheel *w = &sp->wheels[i];
+        UiWheel *u = &g_ui_wheels[g_ui_wheel_count++];
+        memset(u, 0, sizeof(*u));
+        u->src = w;
+        u->name = w->name;
+        u->head_col = w->head_col[0] ? w->head_col : "#fff";
+        u->price_t = w->price_t[0] ? w->price_t : NULL;
+        u->price = w->price;
+        u->multi = w->multi;
+        u->icons = w->icons;
+        u->free = w->free;
+        u->kr = w->kr;
+        u->min_lvl = w->min_lvl;
+        u->ticket = w->ticket;
+        u->ticket_only = w->ticket_only;
+        u->big_rar = w->big_rar;
+        u->season = w->season;
+        u->hide = w->hide;
+        u->locked = !store_wheel_open(w, (int64_t) time(NULL) * 1000);
+        if (w->pool_count > 0) {
+            for (int k = 0; k < w->pool_count && k < w->slices; k++) {
+                const int r = pool_rarity(store_spins_pool(sp, w->pools[k]));
+                if (r >= 0 && r < 7) u->rarities[r] += w->weights[k];
+            }
+        } else {
+            for (int k = 0; k < w->slices && k < 7; k++) u->rarities[k] = w->weights[k];
+        }
+    }
+}
+
+static int wheel_count(void) {
+    wheels_load();
+    return g_ui_wheel_count;
+}
+
+static const UiWheel *wheel_at(const int i) { return i >= 0 && i < wheel_count() ? &g_ui_wheels[i] : NULL; }
+
+// the Free KR wheel's index (claimReward -> prizeWheel(it))
+static int free_kr_wheel(void) {
+    for (int i = 0; i < wheel_count(); i++)
+        if (g_ui_wheels[i].kr) return i;
+    return -1;
+}
+
+// the wheel whose ticketIndex this item is (the Universal tickets pay a store wheel), -1 none
+static int wheel_of_ticket(const int skin) {
+    for (int i = 0; skin >= 0 && i < wheel_count(); i++)
+        if (g_ui_wheels[i].ticket == skin) return i;
+    return -1;
+}
 
 // TICKET items with a spinWheel (skins.json; the brain reads the same objects). The Twitch
 // Drops ticket's wheel (limGroup "S7 Playercard Drops") shows no previews: the client's store
 // table marks every limGroup item VS_NOT_IN_WHEEL.
-static const struct { int skin; StoreWheel w; } k_ticket_wheels[] = {
+static const struct { int skin; UiWheel w; } k_ticket_wheels[] = {
     {5321, {"Starter", "#b2f252", NULL, 0, 0, 2, 0, 0, 0, -1, 0, 0, 6, {75, 22, 3, 0, 0, 0}}},
     {5322, {"Elite", "#2196F3", NULL, 0, 0, 3, 0, 0, 0, -1, 0, 0, 6, {50, 30, 15, 5, 0, 0}}},
     {5323, {"Heroic", "#fc9803", NULL, 0, 0, 4, 0, 0, 0, -1, 0, 5, 6, {0, 48, 35, 14, 2.49, 0.5, 0.01}}},
@@ -88,7 +151,7 @@ static const struct { int skin; StoreWheel w; } k_ticket_wheels[] = {
 // store.freeKR[rarity].kr[0]: the Free KR wheel's prizes
 static const int k_free_kr[] = {5, 10, 20, 500};
 
-static const StoreWheel *ticket_wheel(const int skin) {
+static const UiWheel *ticket_wheel(const int skin) {
     for (size_t i = 0; i < sizeof(k_ticket_wheels) / sizeof(k_ticket_wheels[0]); i++)
         if (k_ticket_wheels[i].skin == skin) return &k_ticket_wheels[i].w;
     return NULL;
@@ -98,7 +161,7 @@ static int store_window_handle(const char *name, const HtmlArg *args, int argc);
 static void generic_popup(const char *html, const char *cls);
 static void history_add(int item, int kr);
 void store_ui_sub_tab_tick(double delta_ms);
-static const StoreWheel *g_cur;   // v11667: the wheel on screen
+static const UiWheel *g_cur;   // v11667: the wheel on screen
 static int g_spin_index = -1;     // vLN01914: its store.wheels index (-1: a ticket's wheel)
 static int g_spin_ticket = -1;    // v11656: the TICKET item a spin redeems, -1 none
 static int g_multi;               // v11658: wheel.multi for an Nx spin, 0 single
@@ -185,6 +248,20 @@ static int owned_count(const int skin) {
     return 0;
 }
 
+// the account's spin tickets (acc.skins of type TICKET, v10 windows[13] viewTickets / the
+// Prize Wheels header's count)
+static int owned_tickets(void) {
+    const AccountInfo *acc = account_get();
+    int n = 0;
+    const cJSON *e;
+    cJSON_ArrayForEach(e, (acc && acc->data ? cJSON_GetArrayItem(acc->data, 10) : NULL)) {
+        const ViewerSkin *k = viewer_skin((int) cJSON_GetNumberValue(cJSON_GetObjectItem(e, "ind")));
+        const cJSON *cnt = cJSON_GetObjectItem(e, "cnt");
+        if (k && k->type == 13) n += cJSON_IsNumber(cnt) ? cnt->valueint : 1;
+    }
+    return n;
+}
+
 // store.rarities[r]: confetti count and colours (confC / confCols)
 static const int k_conf_count[] = {30, 30, 30, 40, 50, 70, 100};
 static const char *const k_conf_rainbow[] = {"#ff0000", "#ffa500", "#ffff00", "#008000", "#0000ff", "#4b0082", "#ee82ee"};
@@ -203,10 +280,10 @@ static void toggle_menu_hider(const int on) {
     }
 }
 
-static const StoreWheel *current_wheel(void) { return g_cur; }
+static const UiWheel *current_wheel(void) { return g_cur; }
 
 // wheel.rarities[r] (0 past the wheel's list)
-static double wheel_rarity(const StoreWheel *w, const int r) {
+static double wheel_rarity(const UiWheel *w, const int r) {
     return w && r >= 0 && r < 7 ? w->rarities[r] : 0.0;
 }
 
@@ -222,8 +299,18 @@ static void hex_rgb(const char *hex, float *rgb) {
 // store.getSpnItems(wheel, rarity, acc, wheel.season || config.currentSeason, wheel.bigRar)
 // for the previews: limited / blackM / opensea / limT / limG items never qualify (the store
 // wheels have no limType / itemTypes / weaponType)
-static int spin_pool(const StoreWheel *w, const int rarity, int *pool, const int max) {
+static int spin_pool(const UiWheel *w, const int rarity, int *pool, const int max) {
     int count = 0;
+    if (w && w->src && w->src->pool_count > 0) { // v10 pool wheels: the pools of that rarity (store.getSpnItems)
+        const StoreSpins *sp = store_spins_builtin();
+        for (int k = 0; k < w->src->pool_count && count < max; k++) {
+            const StorePool *p = store_spins_pool(sp, w->src->pools[k]);
+            if (pool_rarity(p) != rarity) continue;
+            for (int i = 0; i < p->count && count < max; i++)
+                if (viewer_skin(p->items[i])) pool[count++] = p->items[i];
+        }
+        return count;
+    }
     const int season = w && w->season ? w->season : g_viewer_current_season;
     const int big = w ? w->big_rar : 0;
     for (int s = 0; s < g_viewer_skin_count && count < max; s++) {
@@ -236,7 +323,7 @@ static int spin_pool(const StoreWheel *w, const int rarity, int *pool, const int
 }
 
 // the wheel's top rarity (rarities.indexOf(rarities.filter(r > 0).slice(-1).pop()))
-static int top_rarity(const StoreWheel *w) {
+static int top_rarity(const UiWheel *w) {
     int last = 0;
     for (int r = 0; r < 7; r++)
         if (wheel_rarity(w, r) > 0) last = r;
@@ -257,15 +344,19 @@ static void spin_button_click(void);
 // TICKET item `skin`'s spinWheel; multi = wheel.multi rolls at once; noAnim shows the wheel at
 // its full size at once (spinWhlMlt = 1: the respin, and the uidiff win-spin scenarios)
 static void prize_wheel(const int index, const int skin, const int multi, const int auto_spin, const int no_anim) {
-    const StoreWheel *w = skin >= 0 ? ticket_wheel(skin) : index >= 0 && index < WHEEL_COUNT ? &k_wheels[index] : NULL;
+    // a store wheel (paid with its ticketIndex when skin is that ticket), else the TICKET item's
+    // own spinWheel (v10 prizeWheel(index, ticketIndex) / prizeWheel(null, ticket))
+    int wheel = index >= 0 ? index : wheel_of_ticket(skin);
+    const UiWheel *w = wheel >= 0 ? wheel_at(wheel) : skin >= 0 ? ticket_wheel(skin) : NULL;
     if (!w) return;
+    if (!wheel_at(wheel)) wheel = -1;
     g_cur = w;
     g_multi = multi && w->multi ? w->multi : 0;
     set_display("spinAgainBtn", w->free ? "none" : "");
     set_display("spinInfoBtn", w->free ? "none" : "");
     set_display("spinEquipBtn", "");
     set_display("spinNextBtn", g_multi ? "" : "none");
-    g_spin_index = skin >= 0 ? -1 : index;
+    g_spin_index = wheel;
     g_spin_ticket = skin >= 0 ? skin : -1;
     menu_show_window(MENU_WINDOW_NONE, 0); // showWindow(0)
     g_wheel.whl_mlt = no_anim ? 1 : 0;
@@ -323,7 +414,8 @@ static void prize_wheel(const int index, const int skin, const int multi, const 
     for (char *p = upper; *p; p++) if (*p >= 'a' && *p <= 'z') *p -= 32;
     sb_appendf(&sb, "<div style='font-size:50px;color:#fff'>%s</div>", upper);
     for (int r = 0; r < g_viewer_rarity_count && r < 7; r++) {
-        if (w->kr && !wheel_rarity(w, r)) continue;
+        // the Free KR wheel skips its empty rarities; a v10 pool wheel lists its pools only
+        if ((w->kr || (w->src && w->src->pool_count > 0)) && !wheel_rarity(w, r)) continue;
         const int anim = r == 6; // RENDER.rarityAnim && rarity.animate (Unobtainable)
         if (anim) sb_append(&sb, "<div style='margin-top:5px;color:#fff'><div class='colCub rainbowBG'></div>");
         else sb_appendf(&sb, "<div style='margin-top:5px;color:#fff'><div class='colCub' style='background-color:%s'></div>", g_viewer_rarities[r].color);
@@ -336,6 +428,9 @@ static void prize_wheel(const int index, const int skin, const int multi, const 
         }
     }
     if (!w->kr) sb_append(&sb, "<div id=\"spinHistoryBtn\" onclick=\"spinHistoryPopup()\">Spin History</div>");
+    // v10 (v10.js 217254): the 1x / Nx switch under Spin History; toggleSpinMulti re-opens the wheel
+    if (v10_page() && !w->kr && w->multi)
+        sb_appendf(&sb, "<div id=\"spinMultiToggleBtn\" onclick=\"toggleSpinMulti();event.stopPropagation();\">Switch to %dx Spin</div>", g_multi ? 1 : w->multi);
     char *html = sb_finish(&sb);
     set_html("spinInfo", html);
     free(html);
@@ -548,7 +643,7 @@ static int pointers_done(void) {
 static void spin_finished(const int next) {
     if (!pointers_done()) return;
     if (next) load_next_item();
-    const StoreWheel *w = current_wheel();
+    const UiWheel *w = current_wheel();
     const int rarity = g_wheel.win_rarity;
     g_wheel.end_val = 0;
     g_wheel.end_target = 100 - wheel_rarity(w, rarity);
@@ -578,6 +673,8 @@ static void spin_button_click(void) {
     g_can_spin = 0;
     char frame[96];
     if (g_cur->kr) snprintf(frame, sizeof(frame), "[\"fkr\"]");
+    else if (g_spin_ticket >= 0 && g_spin_index >= 0) // a store wheel paid with its ticket (v10 Universal tickets)
+        snprintf(frame, sizeof(frame), "[\"spin\",%d,%d,%s]", g_spin_index, g_spin_ticket, g_multi ? "true" : "false");
     else if (g_spin_ticket >= 0) snprintf(frame, sizeof(frame), "[\"spin\",null,%d,false]", g_spin_ticket);
     else snprintf(frame, sizeof(frame), "[\"spin\",%d,null,%s]", g_spin_index, g_multi ? "true" : "false");
     backend_social_send_text(frame);
@@ -789,7 +886,7 @@ static void store_sub_btns(StrBuf *sb) {
 }
 
 // A random thumbnail of the wheel's top rarity (getSpnItems + yateShuffle), "" if none.
-static void wheel_thumb(const StoreWheel *w, char *out, const size_t n) {
+static void wheel_thumb(const UiWheel *w, char *out, const size_t n) {
     int pool[1024];
     const int count = spin_pool(w, top_rarity(w), pool, 1024);
     out[0] = 0;
@@ -813,7 +910,8 @@ static void store_home(StrBuf *sb, const AccountInfo *acc) {
     sb_appendf(sb, "<div id='shopMainSellB' class='windowSubTabs' onclick='windows[13].craftMenu();'  style='background: linear-gradient(rgb(10 10 10 / 37%%), #0000003b),url(%s);background-size:cover;background-position-x: -600px;%s'><div class='shopMainSellTbs'>%s</div><div id='shopMainNav'>Craft new Items!</div><div id='shopJnkDsp'>0.00<span class='material-icons' style='color:#cc51f8;font-size:38px;margin-left:8px;vertical-align:top;margin-right:-9px;'>plumbing</span></div><div id='shopMainHedr'><div id='shopMainSubT'>Enter the</div>Junkyard</div></div>",
                url, g_store_sub == 1 ? "" : "display:none;", sub);
     // the Heroic spin card (Game.store.wheels[2]): 1x / Nx spins, Redeem with its ticket
-    const StoreWheel *hw = &k_wheels[2];
+    const UiWheel *hw = wheel_at(2);
+    if (!hw) return;
     const char *col = hw->head_col;
     char thumb[256], ticket[256];
     wheel_thumb(hw, thumb, sizeof(thumb));
@@ -840,8 +938,9 @@ static void store_wheels(StrBuf *sb, const AccountInfo *acc) {
     sb_append(sb, "<div class='setBodH' style='padding-top:15px'><div style='color:rgba(255,255,255,0.6);margin-bottom:10px;margin-top:0px;width:100%;text-align:center'>Try your luck and spin for a chance to win some new skins!</div></div>");
     sb_append(sb, "<div class='prizeWheelTable'>");
     char thumb[256] = "undefined", ticket[256], url[256];
-    for (int i = 0; i < WHEEL_COUNT; i++) {
-        const StoreWheel *w = &k_wheels[i];
+    for (int i = 0; i < wheel_count(); i++) {
+        const UiWheel *w = wheel_at(i);
+        if (w->hide || w->locked) continue; // v7's list: the open store wheels
         const char *col = w->head_col;
         int sold = !acc || (w->free && acc->level < w->min_lvl);
         int show_kr = 1; // v11318: " KR" after the value
@@ -906,8 +1005,8 @@ static void store_wheels(StrBuf *sb, const AccountInfo *acc) {
     }
     // View Tickets: the account's TICKET items (Game.store.wheels[3]'s ticket as the picture)
     int tickets = 0;
-    for (size_t t = 0; t < sizeof(k_ticket_wheels) / sizeof(k_ticket_wheels[0]); t++) tickets += owned_count(k_ticket_wheels[t].skin);
-    store_skin_preview(k_wheels[3].ticket, ticket, sizeof(ticket));
+    tickets = owned_tickets();
+    store_skin_preview(wheel_at(3) ? wheel_at(3)->ticket : -1, ticket, sizeof(ticket));
     sb_appendf(sb, "<div class='shopCard' onmouseenter='playTick()' style='color:#fc038d;border: 4px solid;text-shadow: 0px 0px 30px rgb(0 0 0);width:293px;height: 202px;background: rgba(0, 0, 0, 0.4);' onclick='windows[13].viewTickets()'><div class='spinValH'>View Tickets<div class='spinValL' style='color:#fc038d!important;width:314px'>You have %d</div></div><div class='shopImg' style='background-image: url(%s);left:60px'></div><div class='shopImgGrad' style='background-image: linear-gradient(transparent, #fc038d30);'></div></div>", tickets, ticket);
     sb_append(sb, "</div>");
 }
@@ -957,8 +1056,244 @@ static void store_junkyard(StrBuf *sb, const AccountInfo *acc) {
     sb_append(sb, "</div>");
 }
 
+// ---------------------------------------------------------------- the v10 page's Store
+// v10.js windows[13].gen() mounts the Svelte store _44131 (store-window-mount): the store-tabs row
+// (config.shopTabs: home, Prize Wheels, Premium, Purchase KR, Redeem Keys, Eterno Shop) over the
+// tab's component: home _44082 (the Battle Pass / 600 KR / Junkyard panels rotating every 3 s, the
+// Heroic spin card = wheels[2], the bundle slider), Prize Wheels (svelte-5s5opu: wheels 0 and 2
+// plus the dated ones, each tile's hover overlay: 1x / Nx spin, Redeem with the wheel's ticket),
+// Premium (svelte-1dbkhl), Purchase KR (svelte-1ko99up) and the Eterno Shop (svelte-gh77t9, its
+// own music). The markup is the components' rendered DOM; the handlers are this file's.
+
+// v10 config.purchases (_7299): KR packages
+static const struct { int val; const char *price, *col, *tag, *tag_col; } k_purchases_v10[] = {
+    {400, "1.29", "#888888", NULL, NULL}, {1250, "2.89", "#b2f251", NULL, NULL}, {3500, "9.99", "#3696f3", NULL, NULL},
+    {8500, "18.99", "#e040fb", NULL, NULL}, {20000, "34.99", "#fa9704", "Popular!", "#ed4242"},
+    {60000, "99.99", "#ee5356", "Best Value!", "#E040FB"},
+};
+
+static const char *const k_shop_tabs_v10[] = {
+    "<span class=\"material-icons\" style=\"color:#fbc02d;font-size:42px;vertical-align:bottom\">home</span>", "Prize Wheels", "Premium",
+    "Purchase <span style=\"color:#fbc02d\">KR</span>", "Redeem Keys", "Eterno Shop",
+};
+#define V10_SHOP_TABS ((int) (sizeof(k_shop_tabs_v10) / sizeof(k_shop_tabs_v10[0])))
+
+// the tab body ("windows.store.wheels.sub" & co.) is written by these, after the tab row
+static void v10_store_home(StrBuf *sb, const AccountInfo *acc) {
+    static const struct { const char *nav, *sub, *sub_style, *head, *bg, *bg_style, *click; } PANELS[3] = {
+        {"Unlock new Items!", "Checkout the", "color: #dd90f9 !important;", "Battle Pass", "img/battlepass/bg_window_5.png", "background-size: 100%;", NULL},
+        {"Unlock new skins!", "Purchase", "color: var(--yellow) !important;", "600 KR", "img/prem_bg.png", "background-size: 120%;", "windows[13].directPurchase(1)"},
+        {"Craft new Items!", "Enter the", NULL, "Junkyard", "img/backgrounds/junkyrd_0.png", "background-size: cover; background-position-x: -600px;", "windows[13].craftMenu()"},
+    };
+    sb_append(sb, "<div class=\"home-tab svelte-lri212\">");
+    for (int i = 0; i < 3; i++) {
+        char bg[256];
+        store_asset_url(PANELS[i].bg, bg, sizeof(bg));
+        const char *grad = i == 2 ? "linear-gradient(rgb(10 10 10 / 37%), #0000003b)" : "linear-gradient(rgb(0 0 0 / 38%), #00000000, rgb(10 10 10 / 41%))";
+        sb_appendf(sb, "<div class=\"sub-tab-panel svelte-lri212\" role=\"button\" tabindex=\"0\" onclick=\"playSelect();%s\" style=\"display: %s; background: %s, url(%s); %s\"><div class=\"sub-tab-dots svelte-lri212\">",
+                   i == 0 ? (acc ? "showWindow(6)" : "showWindow(5)") : PANELS[i].click, g_store_sub == i ? "" : "none", grad, bg, PANELS[i].bg_style);
+        for (int d = 0; d < 3; d++)
+            sb_appendf(sb, "<div class=\"sub-tab-dot svelte-lri212\" role=\"button\" tabindex=\"0\" onclick=\"event.stopPropagation();windows[13].subTabT=5000;windows[13].subTab=%d;updateWindow(14);\" style=\"background: %s\"></div>",
+                       d, d == g_store_sub ? "#fff" : "rgba(255,255,255,0.4)");
+        sb_appendf(sb, "</div> <div class=\"sub-tab-nav svelte-lri212\">%s</div> ", PANELS[i].nav);
+        if (i == 2) // acc.junk: KrunkNative has no crafting (doc/v7/decisions.md), so no Junk either
+            sb_append(sb, "<div class=\"junkyard-display svelte-lri212\">0.00 <span class=\"material-icons svelte-lri212\" style=\"color: #cc51f8; font-size: 38px; margin-left: 8px; vertical-align: top; margin-right: -9px;\">plumbing</span></div> ");
+        sb_appendf(sb, "<div class=\"sub-tab-header svelte-lri212\"><div class=\"sub-tab-subtitle svelte-lri212\"%s%s%s>%s</div> %s</div></div> ",
+                   PANELS[i].sub_style ? " style=\"" : "", PANELS[i].sub_style ? PANELS[i].sub_style : "", PANELS[i].sub_style ? "\"" : "", PANELS[i].sub, PANELS[i].head);
+    }
+    // the Heroic spin card (wheels[2])
+    const UiWheel *hw = wheel_at(2);
+    if (!hw) return;
+    const char *col = hw->head_col;
+    char thumb[256], ticket[256];
+    wheel_thumb(hw, thumb, sizeof(thumb));
+    store_skin_preview(hw->ticket, ticket, sizeof(ticket));
+    sb_appendf(sb, "<div class=\"heroic-spin-card svelte-lri212%s\" role=\"button\" tabindex=\"0\" style=\"color: %s;\"%s onmouseenter=\"playTick()\">",
+               acc ? "" : " no-account", col, acc ? "" : " onclick=\"showWindow(5)\"");
+    if (acc) {
+        sb_append(sb, "<div class=\"shop-action-overlay svelte-lri212\">");
+        if (hw->multi)
+            sb_appendf(sb, "<div class=\"shop-actions-cell svelte-lri212\"><div class=\"shop-sub-action svelte-lri212\" role=\"button\" tabindex=\"0\" style=\"font-size: 34px !important;\" onclick=\"playSelect();prizeWheel(2)\" onmouseenter=\"playTick()\">1x Spin <div class=\"svelte-lri212\" style=\"color: %s\">%d KR</div></div> <div class=\"shop-sub-action-sep svelte-lri212\" style=\"background: %s\"></div> <div class=\"shop-sub-action svelte-lri212\" role=\"button\" tabindex=\"0\" style=\"font-size: 34px !important;\" onclick=\"playSelect();prizeWheel(2, null, %d)\" onmouseenter=\"playTick()\">%dx Spin <div class=\"svelte-lri212\" style=\"color: %s\">%d KR</div></div></div>",
+                       col, hw->price, col, hw->multi, hw->multi, col, hw->price * hw->multi);
+        else
+            sb_appendf(sb, "<div class=\"shop-action-cell svelte-lri212\" role=\"button\" tabindex=\"0\" onclick=\"playSelect();prizeWheel(2)\">Spend <div class=\"svelte-lri212\" style=\"color: %s\">%d KR</div></div>", col, hw->price);
+        sb_appendf(sb, " <div style=\"display: table-cell;\" class=\"svelte-lri212\"><div class=\"shop-action-sep svelte-lri212\" style=\"background: %s\"></div></div> <div class=\"shop-action-cell svelte-lri212\" role=\"button\" tabindex=\"0\" style=\"font-size: 34px !important;\" onclick=\"playSelect();prizeWheel(null, %d)\" onmouseenter=\"playTick()\">Redeem <div class=\"svelte-lri212\" style=\"color: %s\"><img class=\"ticket-img svelte-lri212\" alt=\"ticket\" style=\"width: 70px !important;\" src=\"%s\"></div></div> <div class=\"ticket-count svelte-lri212\" style=\"font-size: 22px !important; color: %s\">You have %d</div></div>",
+                   col, hw->ticket, col, ticket, col, owned_count(hw->ticket));
+    }
+    sb_appendf(sb, " <div class=\"heroic-spin-name svelte-lri212\">%s Spin <div class=\"heroic-spin-price svelte-lri212\" style=\"color: %s !important;\">%d KR <div class=\"ticket-img-sep svelte-lri212\">|</div> <img class=\"ticket-img svelte-lri212\" alt=\"ticket\" style=\"width: 56px !important;\" src=\"%s\"></div></div> <div class=\"heroic-spin-img svelte-lri212\" style=\"background-image: url(%s);\"></div> <div class=\"heroic-img-grad svelte-lri212\" style=\"margin-left: 0 !important; background-image: linear-gradient(transparent, %s30);\"></div></div> ",
+               hw->name, col, hw->price, ticket, thumb, col);
+    // bundles (bundleData): none without the store API
+    sb_append(sb, "<div class=\"bundle-holder svelte-lri212\"><div class=\"bundleSliderH svelte-lri212\"><div class=\"bundleSliderBtn disabled svelte-lri212\" role=\"button\" tabindex=\"0\" onmouseenter=\"playTick(0.1)\"><div class=\"bundleSliderArrow svelte-lri212\"></div></div></div> <div class=\"bundleCols svelte-lri212\"></div> <div class=\"bundleSliderH svelte-lri212\"><div class=\"bundleSliderBtn svelte-lri212\" role=\"button\" tabindex=\"0\" onmouseenter=\"playTick(0.1)\"><div class=\"bundleSliderArrow right svelte-lri212\"></div></div></div></div></div>");
+}
+
+// Prize Wheels: wheels 0 (Starter) and 2 (Heroic), not hidden, not locked (store.js data; the
+// dated wheels of v10's gapi /data/spins are hidden or over)
+static void v10_store_wheels(StrBuf *sb, const AccountInfo *acc) {
+    int tickets = 0;
+    tickets = owned_tickets();
+    sb_appendf(sb, "<div class=\"prize-wheels-tab svelte-5s5opu\"><div class=\"prize-wheels-header svelte-5s5opu\"><div class=\"prize-wheels-sub svelte-5s5opu\">Try your luck and spin for a chance to win some new skins!</div> <div class=\"view-tickets-btn svelte-5s5opu\"><button class=\"main-button svelte-whnh40 main-button-slim\" type=\"button\" onclick=\"playSelect();windows[13].viewTickets()\">View Tickets<span class=\"ticket-count-sep svelte-5s5opu\"></span><span class=\"ticket-count-num svelte-5s5opu\">%d</span></button></div></div> <div class=\"prize-wheel-table svelte-5s5opu\">",
+               tickets);
+    // v10: wheels 0 and 2, and the dated ones while they run (not hidden / locked; the Free KR
+    // wheel only off mobile, which it is hidden on anyway)
+    for (int i = 0; i < wheel_count(); i++) {
+        const UiWheel *w = wheel_at(i);
+        const int dated = w->src && (w->src->start_ms || w->src->end_ms);
+        if (!(i == 0 || i == 2 || (dated && !w->hide && !w->locked))) continue;
+        const char *col = w->head_col;
+        int locked = !acc || (w->free && acc->level < w->min_lvl);
+        int sho_kr = 1;
+        char price[32];
+        if (w->kr) {
+            const double ms = account_reward_ms();
+            const long long t = ms > 0 ? (long long) ms / 1000 : 0;
+            if (t > 0) snprintf(price, sizeof(price), "%02lld:%02lld:%02lld", t / 3600, (t / 60) % 60, t % 60);
+            else snprintf(price, sizeof(price), "%s", w->price_t);
+            locked = t > 0;
+            sho_kr = 0;
+        } else if (locked) {
+            snprintf(price, sizeof(price), "Sold Out");
+        } else if (w->price_t) {
+            snprintf(price, sizeof(price), "%s", w->price_t);
+        } else {
+            snprintf(price, sizeof(price), "%d", w->price);
+        }
+        char display[48];
+        snprintf(display, sizeof(display), "%s%s", price, w->price_t || !sho_kr ? "" : " KR");
+        const int has_ticket = w->ticket >= 0, ticket_only = w->ticket_only;
+        char thumb[256] = "", ticket[256] = "";
+        if (!w->kr && acc) wheel_thumb(w, thumb, sizeof(thumb));
+        if (has_ticket) store_skin_preview(w->ticket, ticket, sizeof(ticket));
+        sb_appendf(sb, "<div class=\"shopCard prize-tile svelte-5s5opu%s\" role=\"button\" tabindex=\"0\" style=\"color: %s; --tile-glow: %s47; --tile-shadow: %s73; ", locked ? " makeGray" : "", col, col, col);
+        if (w->kr) {
+            char vig[256], spin[64], spin_url[256];
+            store_asset_url("img/shop/filter/vignette.png", vig, sizeof(vig));
+            snprintf(spin, sizeof(spin), "img/shop/spins/%d_0.png", i);
+            store_asset_url(spin, spin_url, sizeof(spin_url));
+            sb_appendf(sb, "background-image: url(%s), url(%s)", vig, spin_url);
+        }
+        sb_append(sb, "\" onmouseenter=\"playTick()\"");
+        if (!locked && !(has_ticket && !ticket_only)) {
+            if (w->kr) sb_append(sb, " onclick=\"claimReward()\"");
+            else if (ticket_only) sb_appendf(sb, " onclick=\"prizeWheel(%d, %d)\"", i, w->ticket);
+        }
+        sb_append(sb, ">");
+        if ((has_ticket || w->multi) && !ticket_only && acc) {
+            sb_append(sb, "<div class=\"shop-action-overlay svelte-5s5opu\">");
+            if (w->multi) {
+                char multi[48];
+                if (locked) snprintf(multi, sizeof(multi), "NaN%s", sho_kr && !w->price_t ? " KR" : "");
+                else snprintf(multi, sizeof(multi), "%d%s", w->price * w->multi, sho_kr && !w->price_t ? " KR" : "");
+                sb_appendf(sb, "<div class=\"shop-actions-cell svelte-5s5opu\"><div class=\"shop-sub-action svelte-5s5opu\" role=\"button\" tabindex=\"0\" onclick=\"playSelect();prizeWheel(%d)\" onmouseenter=\"playTick()\">1x Spin <div style=\"color: %s\">%s</div></div> <div class=\"shop-sub-action-sep svelte-5s5opu\" style=\"background: %s\"></div> <div class=\"shop-sub-action svelte-5s5opu\" role=\"button\" tabindex=\"0\" onclick=\"playSelect();prizeWheel(%d, null, %d)\" onmouseenter=\"playTick()\">%dx Spin <div style=\"color: %s\">%s</div></div></div>",
+                           i, col, display, col, i, w->multi, w->multi, col, multi);
+            } else {
+                sb_appendf(sb, "<div class=\"shop-action-cell svelte-5s5opu\" role=\"button\" tabindex=\"0\" onclick=\"playSelect();prizeWheel(%d)\" onmouseenter=\"playTick()\">Spend <div style=\"color: %s\">%s</div></div>", i, col, display);
+            }
+            if (has_ticket)
+                sb_appendf(sb, " <div style=\"display: table-cell;\"><div class=\"shop-action-sep svelte-5s5opu\" style=\"background: %s\"></div></div> <div class=\"shop-action-cell svelte-5s5opu\" role=\"button\" tabindex=\"0\" onclick=\"playSelect();prizeWheel(%d, %d)\" onmouseenter=\"playTick()\">Redeem <div style=\"color: %s\"><img class=\"ticket-img svelte-5s5opu\" alt=\"ticket\" src=\"%s\"></div></div> <div class=\"ticket-count svelte-5s5opu\" style=\"color: %s\">You have %d</div>",
+                           col, i, w->ticket, col, ticket, col, owned_count(w->ticket));
+            sb_append(sb, "</div>");
+        }
+        if (ticket_only && acc) sb_appendf(sb, "<div class=\"ticket-count ticket-count-corner svelte-5s5opu\" style=\"color: %s\">You have %d</div>", col, owned_count(w->ticket));
+        sb_appendf(sb, " <div class=\"spin-name svelte-5s5opu\">%s Spin <div class=\"spin-price svelte-5s5opu\" style=\"color: %s !important;\">", w->name, col);
+        if (ticket_only) sb_appendf(sb, "Redeem <img class=\"ticket-img svelte-5s5opu\" alt=\"ticket\" src=\"%s\">", ticket);
+        else {
+            sb_appendf(sb, "%s ", display);
+            if (has_ticket) sb_appendf(sb, "<div class=\"ticket-img-sep svelte-5s5opu\">|</div> <img class=\"ticket-img svelte-5s5opu\" alt=\"ticket\" src=\"%s\">", ticket);
+        }
+        sb_append(sb, "</div></div> ");
+        if (!w->kr) sb_appendf(sb, "<div class=\"shop-img svelte-5s5opu\" style=\"background-image: url(%s);\"></div>", thumb);
+        sb_appendf(sb, " <div class=\"shop-img-grad svelte-5s5opu\" style=\"background-image: linear-gradient(transparent, %s30);\"></div> </div>", col);
+    }
+    sb_append(sb, "</div></div>");
+}
+
+static void v10_store_premium(StrBuf *sb, const AccountInfo *acc) {
+    sb_append(sb, "<div class=\"premium-tab svelte-1dbkhl\"><div class=\"premium-header svelte-1dbkhl\"><div style=\"color: rgba(255,255,255,0.5); margin-bottom: 10px;\">Choose a Display name &amp; more with <a href=\"javascript:;\" onclick=\"showPremiumBenefits()\">Krunker Premium</a></div></div> <div class=\"store-list svelte-1dbkhl\">");
+    char crd[256];
+    store_asset_url("img/prem_crd.png", crd, sizeof(crd));
+    for (size_t i = 0; i < sizeof(k_premium) / sizeof(k_premium[0]); i++)
+        sb_appendf(sb, "<div class=\"shopCard\" role=\"button\" tabindex=\"0\" onmouseenter=\"playTick()\" onclick=\"premiumPopup(%d)\" style=\"color: %s; border: 4px solid; width: 293px; height: 212px; background-image: linear-gradient(transparent, %s30), url(%s);\">%d Days <div class=\"spinVal\" style=\"margin-top: 119px; width: 309px; line-height: 63px;\">$%s <span style=\"color: #fff\">USD</span></div></div>",
+                   (int) i, k_premium[i].col, k_premium[i].col, crd, k_premium[i].days, k_premium[i].price);
+    sb_append(sb, "</div> <div class=\"premium-res svelte-1dbkhl\"></div> ");
+    if (acc && acc->premium > 0) {
+        char t[32];
+        readable_time(t, sizeof(t), acc->data ? cJSON_GetNumberValue(cJSON_GetArrayItem(acc->data, 27)) : 0);
+        sb_appendf(sb, "<div class=\"premium-time-section svelte-1dbkhl\"><span style=\"color: #fff\">Time Remaining</span> <span class=\"premium-time svelte-1dbkhl\">%s</span></div>", t);
+    }
+    sb_append(sb, " <div class=\"legal-text svelte-1dbkhl\">* Prices in USD can be converted to your local currency at an exchange rate defined by the payment provider or bank</div> <div class=\"terms-text svelte-1dbkhl\">By purchasing you agree to the <a target=\"_blank\" href=\"https://frvr.com/legal/krunker#TermsofService\">Terms &amp; Conditions</a>.</div></div>");
+}
+
+static void v10_store_kr(StrBuf *sb) {
+    char vig[256];
+    store_asset_url("img/shop/filter/vignette.png", vig, sizeof(vig));
+    sb_append(sb, "<div class=\"purchase-kr-tab svelte-1ko99up\"><div class=\"purchase-info-table svelte-1ko99up\">");
+    for (size_t i = 0; i < sizeof(k_purchases_v10) / sizeof(k_purchases_v10[0]); i++) {
+        char img[48], url[256];
+        snprintf(img, sizeof(img), "img/shop/%d.png", (int) i);
+        store_asset_url(img, url, sizeof(url));
+        sb_appendf(sb, "<div class=\"shopCard\" role=\"button\" tabindex=\"0\" onmouseenter=\"playTick()\" onclick=\"showPurchase(%d)\" style=\"background-image: url(%s), url(%s); border: 4px solid; color: %s\">",
+                   (int) i, vig, url, k_purchases_v10[i].col);
+        if (k_purchases_v10[i].tag) sb_appendf(sb, "<div class=\"shopSale\" style=\"background: %s\">%s</div>", k_purchases_v10[i].tag_col, k_purchases_v10[i].tag);
+        sb_appendf(sb, " %d <span style=\"color: #fff\">KR</span> <div class=\"spinVal\" style=\"color: #fff\">$%s USD</div></div>", k_purchases_v10[i].val, k_purchases_v10[i].price);
+    }
+    sb_append(sb, "</div> <div class=\"legal-text svelte-1ko99up\">* Prices in USD can be converted to your local currency at an exchange rate defined by the payment provider or bank</div> <div class=\"terms-text svelte-1ko99up\">By purchasing you agree to the <a target=\"_blank\" href=\"https://frvr.com/legal/krunker#TermsofService\">Terms &amp; Conditions</a>.</div></div>");
+}
+
+// the Eterno Shop (svelte-gh77t9): its offers come from the shop API, which KrunkNative has not:
+// the header and the component's empty state
+static void v10_store_eterno(StrBuf *sb) {
+    char vid[256];
+    store_asset_url("videos/limited_shop_banner.webm", vid, sizeof(vid));
+    sb_appendf(sb, "<div id=\"shop-header\" class=\"svelte-gh77t9\"><video autoplay=\"\" loop=\"\" playsinline=\"\" class=\"shop-background-video svelte-gh77t9\"><source src=\"%s\" type=\"video/webm\" class=\"svelte-gh77t9\"></video> <div id=\"shop-header-name\" class=\"svelte-gh77t9\">Eterno Shop</div> <div id=\"shop-header-desc\" class=\"svelte-gh77t9\">Limited-time offers—grab them before they're gone! Check back often so you don't miss out on rare deals.</div></div> <div class=\"error-container svelte-gh77t9\"><div class=\"error-text svelte-gh77t9\">No offers right now</div> <button class=\"retry-button svelte-gh77t9\" onclick=\"updateWindow(14)\">Retry</button></div>",
+               vid);
+}
+
+static char *v10_store_window_gen(void) {
+    const AccountInfo *acc = account_get();
+    if (g_store_tab < 0 || g_store_tab >= V10_SHOP_TABS || g_store_tab == 4) g_store_tab = 0;
+    StrBuf sb = {0};
+    sb_append(&sb, "<div id=\"store-window-mount\"><div class=\"store-window svelte-v85byk\"><div class=\"store-header svelte-v85byk\"><div style=\"height: 15px;\"></div> <div class=\"store-tabs svelte-v85byk\" role=\"tablist\">");
+    for (int i = 0; i < V10_SHOP_TABS; i++)
+        sb_appendf(&sb, "<div class=\"store-tab svelte-v85byk%s\" role=\"tab\" tabindex=\"0\" style=\"font-size: 16px\" aria-selected=\"%s\" onclick=\"playSelect();windows[13].switchTab(%d)\" onmouseenter=\"SOUND.play('tick_0',0.1)\">%s</div>",
+                   g_store_tab == i ? " store-tab-active" : "", g_store_tab == i ? "true" : "false", i, k_shop_tabs_v10[i]);
+    sb_append(&sb, "</div></div> ");
+    switch (g_store_tab) {
+        case 0: v10_store_home(&sb, acc); break;
+        case 1: v10_store_wheels(&sb, acc); break;
+        case 2: v10_store_premium(&sb, acc); break;
+        case 3: v10_store_kr(&sb); break;
+        case 5: v10_store_eterno(&sb); break;
+        default: break;
+    }
+    sb_append(&sb, "</div></div>");
+    return sb_finish(&sb);
+}
+
+// windows[13].eterno / musicPlayer: #menuWindow.eterno on the Eterno tab and its music, "Eterno
+// Rules the World" (eterno_lofi, looped) with the player (svelte-1ei19qi) in #menuWindowMusic;
+// any other window or tab stops it (showWindow: musicPlayer)
+static int g_eterno_music;
+
+static void eterno_music(const int on) {
+    HtmlElem holder = html_dom_by_id("menuWindowMusic");
+    if (on && !g_eterno_music) audio_play("eterno_lofi", 0.1f, 1, 1.0f);
+    if (!on && g_eterno_music) audio_stop("eterno_lofi");
+    g_eterno_music = on;
+    if (holder)
+        html_dom_set_html(holder, on ? "<div class=\"music-player svelte-1ei19qi\"><span class=\"music-title svelte-1ei19qi\">Eterno Rules the World</span> <button class=\"music-btn svelte-1ei19qi\" title=\"Stop\" aria-label=\"Stop\" onclick=\"knStoreMusicStop()\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 20 20\" fill=\"none\" aria-hidden=\"true\" xmlns=\"http://www.w3.org/2000/svg\" class=\"svelte-1ei19qi\"><rect x=\"4\" y=\"4\" width=\"12\" height=\"12\" rx=\"2\" fill=\"currentColor\" class=\"svelte-1ei19qi\"></rect></svg></button></div>" : "");
+}
+
+void store_ui_window_post(const int id) {
+    if (!v10_page()) return;
+    eterno_music(id == 14 && g_store_tab == 5);
+    if (id != 14) return;
+    HtmlElem mw = html_dom_by_id("menuWindow");
+    if (mw) html_dom_set_class(mw, "eterno", g_store_tab == 5);
+}
+
 // windows[13].gen()
 char *store_window_gen(void) {
+    if (v10_page()) return v10_store_window_gen();
     const AccountInfo *acc = account_get();
     StrBuf sb = {0};
     sb_append(&sb, "<div id='shopHeader'><div style='height:15px;'></div><div class='bigMenTabs'>");
@@ -995,7 +1330,10 @@ static void generic_popup(const char *html, const char *cls) {
 static int store_window_handle(const char *name, const HtmlArg *args, const int argc) {
     const int a0 = argc > 0 && (args[0].kind == HTML_ARG_NUM || args[0].kind == HTML_ARG_BOOL) ? (int) args[0].num : 0;
     if (!strcmp(name, "windows.13.switchTab")) { // 5 Marketplace -> the hub, 4 Redeem -> voucherPopup()
-        if (a0 == 5) {
+        if (v10_page() && a0 != 4) { // v10: 5 is the Eterno Shop tab, the Marketplace is openExchange()
+            g_store_tab = a0 >= 0 && a0 < V10_SHOP_TABS ? a0 : 0;
+            menu_rerender_if_open(14);
+        } else if (a0 == 5) {
             if (!app_route_url_target("/social.html?p=market", 1)) ui_open_external("/social.html?p=market");
         } else if (a0 == 4) {
             store_window_handle("voucherPopup", NULL, 0);
@@ -1018,20 +1356,37 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
     }
     if (!strcmp(name, "windows.13.subTab=")) { g_store_sub = a0 >= 0 && a0 < 3 ? a0 : 0; return 1; }
     if (!strcmp(name, "windows.13.subTabT=")) { g_store_sub_t = a0; return 1; }
-    if (!strcmp(name, "windows.13.craftMenu")) { g_store_tab = 6; menu_show_window(14, 1); return 1; }
+    if (!strcmp(name, "windows.13.craftMenu")) {
+        if (v10_page()) { // v10: window.openExchange(3), the exchange's Junkyard
+            const HtmlArg tab = {.kind = HTML_ARG_NUM, .num = 3};
+            html_ui_dispatch("openExchange", NULL, &tab, 1);
+            return 1;
+        }
+        g_store_tab = 6;
+        menu_show_window(14, 1);
+        return 1;
+    }
+    if (!strcmp(name, "windows.13.directPurchase") || !strcmp(name, "showPremiumBenefits")) { // payments: none
+        if (!account_get()) menu_show_window(5, 1);
+        else if (!strcmp(name, "showPremiumBenefits")) menu_show_window(36, 1);
+        else ui_alert("Purchases are not available in Krunker Box Office.");
+        return 1;
+    }
     if (!strcmp(name, "windows.13.viewTickets")) { // the account's TICKET items, each redeems its spinWheel
         StrBuf sb = {0};
         int n = 0;
         sb_append(&sb, "<div><div class=\"popHeader\" style=\"margin-bottom: 30px;\">Spin Tickets</div>");
-        for (size_t t = 0; t < sizeof(k_ticket_wheels) / sizeof(k_ticket_wheels[0]); t++) {
-            const int skin = k_ticket_wheels[t].skin, cnt = owned_count(skin);
+        const AccountInfo *acc = account_get();
+        const cJSON *e;
+        cJSON_ArrayForEach(e, (acc && acc->data ? cJSON_GetArrayItem(acc->data, 10) : NULL)) { // acc.skins of type TICKET
+            const int skin = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(e, "ind")), cnt = owned_count(skin);
             const ViewerSkin *k = viewer_skin(skin);
-            if (!cnt || !k) continue;
+            if (!cnt || !k || k->type != 13 || (wheel_of_ticket(skin) < 0 && !ticket_wheel(skin))) continue;
             char thumb[256];
             store_skin_preview(skin, thumb, sizeof(thumb));
             const char *col = k->rarity >= 0 && k->rarity < g_viewer_rarity_count ? g_viewer_rarities[k->rarity].color : "#fff";
-            sb_appendf(&sb, "<div class=\"ticketCard\" onmouseenter=\"playTick()\" onclick=\"playSelect();prizeWheel(null, %d);cancelTip()\"\n\t\t\t\tdata-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'\n\t\t\t\tstyle=\"background-image:url(%s);border-color:%s!important\">\n\t\t\t\t<div class=\"ticketCount\" style=\"width: unset;top:2px;right: 2px;color:%s\">x%d</div>\n\t\t\t\t<div class=\"ticketText\" style=\"color:%s!important\">Redeem</div>\n\t\t\t</div>",
-                       skin, skin, thumb, col, col, cnt, col);
+            sb_appendf(&sb, "<div class=\"ticketCard\" onmouseenter=\"playTick()\" onclick=\"playSelect();prizeWheel(%d, %d);cancelTip()\"\n\t\t\t\tdata-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'\n\t\t\t\tstyle=\"background-image:url(%s);border-color:%s!important\">\n\t\t\t\t<div class=\"ticketCount\" style=\"width: unset;top:2px;right: 2px;color:%s\">x%d</div>\n\t\t\t\t<div class=\"ticketText\" style=\"color:%s!important\">Redeem</div>\n\t\t\t</div>",
+                       wheel_of_ticket(skin), skin, skin, thumb, col, col, cnt, col);
             n++;
         }
         sb_append(&sb, "</div>");
@@ -1073,6 +1428,16 @@ void store_ui_sub_tab_tick(const double delta_ms) {
     g_store_sub_t = 3000.0;
     g_store_sub = (g_store_sub + 1) % 3;
     HtmlElem tabs[8];
+    if (v10_page()) { // the home tab's setInterval: the panel shows, its dots follow
+        const int n = html_dom_query_all(0, "#menuWindow .sub-tab-panel", tabs, 8);
+        for (int i = 0; i < n; i++) {
+            html_dom_set_display(tabs[i], i == g_store_sub ? "" : "none");
+            HtmlElem dots[3];
+            const int nd = html_dom_query_all(tabs[i], ".sub-tab-dot", dots, 3);
+            for (int d = 0; d < nd; d++) html_dom_set_style(dots[d], "background", d == g_store_sub ? "#fff" : "rgba(255,255,255,0.4)");
+        }
+        return;
+    }
     const int n = html_dom_query_all(0, ".windowSubTabs", tabs, 8);
     for (int i = 0; i < n; i++) {
         html_dom_set_display(tabs[i], i == g_store_sub ? "" : "none");
@@ -1092,6 +1457,15 @@ int store_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
     const int r = store_window_handle(name, args, argc);
     if (r >= 0) return r;
     if (!backend_enabled() || !account_get()) return -1;
+    if (!strcmp(name, "knStoreMusicStop")) { // the music player's Stop
+        eterno_music(0);
+        return 1;
+    }
+    if (!strcmp(name, "toggleSpinMulti")) { // v10: _72136 (spinning) || prizeWheel(index, ticket, !multi)
+        html_ui_stop_propagation();
+        if (!g_spinning && g_cur) prize_wheel(g_spin_index, g_spin_ticket, !g_multi, 0, 0);
+        return 1;
+    }
     if (!strcmp(name, "prizeWheel")) { // prizeWheel(index|null, skin|null, multi, autoSpin, noAnim)
         const int index = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : -1;
         const int skin = argc > 1 && args[1].kind == HTML_ARG_NUM ? (int) args[1].num : -1;
@@ -1263,6 +1637,7 @@ static void spin_hole(const int on, const float cx, const float cy, const float 
 // (spinRotation -> spinVal, a tick_0 every PI / 1.5), the button/text sizes, the canvas
 // (handed to spin_wheel.c as g_wheel_draw) and the item + name card fly-in.
 void store_ui_tick(void) {
+    if (g_eterno_music && (!menu_window_is_open() || menu_ui()->active_window != 14 || g_store_tab != 5)) eterno_music(0);
     const double now = glfwGetTime();
     double delta_ms = g_wheel.last_time > 0 ? (now - g_wheel.last_time) * 1000.0 : 0.0;
     g_wheel.last_time = now;
@@ -1276,7 +1651,7 @@ void store_ui_tick(void) {
         spin_hole(0, 0, 0, 0);
         return;
     }
-    const StoreWheel *wheel = current_wheel();
+    const UiWheel *wheel = current_wheel();
     HtmlElem canvas = html_dom_by_id("spinWindow");
     const float w = canvas ? html_dom_offset_width(canvas) : 0.0f;
     // v7.1.4 doubled #spinWindow (620px -> 1240px in main.css) and halved what is drawn on it:
@@ -1440,4 +1815,4 @@ void store_ui_frame(const cJSON *frame) {
 }
 
 // claimReward(): the Free KR wheel once its timer ran out (v7.1.4 shows an ad first)
-void store_ui_free_kr_wheel(void) { prize_wheel(FREE_KR_WHEEL, -1, 0, 0, 0); }
+void store_ui_free_kr_wheel(void) { prize_wheel(free_kr_wheel(), -1, 0, 0, 0); }

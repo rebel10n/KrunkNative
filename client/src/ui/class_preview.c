@@ -57,6 +57,25 @@
 // - KRUNKNATIVE_PREVIEW_WORLD=1 also keeps a copy of the third-person model in the
 //   world scene in front of the idle menu camera, animated like an in-game player
 //   (player_update_meshes(.., 0), map lighting), to compare with other players.
+// Krunker v10.0.2 (v10.js _70434 / _70440): the camera keeps aspect 1.25 (the 750x600 canvas) and
+// two poses: the menu (-30, 17, -35) looking at (0, 8.8, 0), and the Change Loadout window's preview
+// column (#charPreviewSlot, toggleWindowCharPreview) (-44, 11, -51) looking at (0, 5.5, 0), where
+// the player turns to xDire 55 degrees and follows a drag (xDire += 0.008 * dx). The column shows
+// the 5:4 bitmap with object-fit: cover (main.css #charPreviewSlot canvas). v10's object-position
+// 40% is centred here (the engine has no object-position): a 4% horizontal shift.
+#define PREVIEW_V10_ASPECT 1.25f
+#define PREVIEW_V10_MENU_X (-30.0f)
+#define PREVIEW_V10_MENU_Y 17.0f
+#define PREVIEW_V10_MENU_Z (-35.0f)
+#define PREVIEW_V10_MENU_LOOK_Y 8.8f
+#define PREVIEW_V10_SLOT_X (-44.0f)
+#define PREVIEW_V10_SLOT_Y 11.0f
+#define PREVIEW_V10_SLOT_Z (-51.0f)
+#define PREVIEW_V10_SLOT_LOOK_Y 5.5f
+#define PREVIEW_V10_SLOT_YAW ((float) M_PI * 55.0f / 180.0f)
+#define PREVIEW_V10_DRAG_TURN 0.008f
+static int g_v10_mode;            // 0 v7 page, 1 v10 menu, 2 v10 window column (preview_mode)
+static float g_v10_xdire = PREVIEW_V10_SLOT_YAW; // _70439: kept between windows
 #define PREVIEW_DUMP_FRAME 60
 #define PREVIEW_MAX_SIZE 4096 // render target edge limit (device px)
 #define PREVIEW_WORLD_DISTANCE 30.0f
@@ -214,8 +233,16 @@ static void preview_frame(Client *client) {
     camera->near = PREVIEW_NEAR;
     camera->far = PREVIEW_FAR;
     camera->position = (vec3) {PREVIEW_CAMERA_X, PREVIEW_CAMERA_Y, PREVIEW_CAMERA_Z};
+    vec3 look = target;
+    if (g_v10_mode == 1) {
+        camera->position = (vec3) {PREVIEW_V10_MENU_X, PREVIEW_V10_MENU_Y, PREVIEW_V10_MENU_Z};
+        look = (vec3) {0.0f, PREVIEW_V10_MENU_LOOK_Y, 0.0f};
+    } else if (g_v10_mode == 2) {
+        camera->position = (vec3) {PREVIEW_V10_SLOT_X, PREVIEW_V10_SLOT_Y, PREVIEW_V10_SLOT_Z};
+        look = (vec3) {0.0f, PREVIEW_V10_SLOT_LOOK_Y, 0.0f};
+    }
 
-    vec3 dir = {target.x - camera->position.x, target.y - camera->position.y, target.z - camera->position.z};
+    vec3 dir = {look.x - camera->position.x, look.y - camera->position.y, look.z - camera->position.z};
     const float length = sqrtf(dir.x * dir.x + dir.y * dir.y + dir.z * dir.z);
     dir.x /= length;
     dir.y /= length;
@@ -228,7 +255,21 @@ static void preview_frame(Client *client) {
 
     Player *player = preview->player;
     player->direction.x = 0.0f;
-    player->direction.y = PREVIEW_YAW;
+    player->direction.y = g_v10_mode == 2 ? g_v10_xdire : PREVIEW_YAW;
+}
+
+// The v10 page's pose for this frame: its window column when the canvas sits in #charPreviewSlot.
+static int preview_mode(const HtmlElem canvas) {
+    if (!v10_page()) return 0;
+    char id[32] = "";
+    const HtmlElem parent = canvas ? html_dom_parent(canvas) : 0;
+    return parent && html_dom_get_attr(parent, "id", id, sizeof(id)) >= 0 && !strcmp(id, "charPreviewSlot") ? 2 : 1;
+}
+
+// v10 #charPreviewSlot pointermove while dragged: xDire += 0.008 * dx (CSS px)
+void client_class_preview_turn(Client *client, const float dx) {
+    (void) client;
+    g_v10_xdire += PREVIEW_V10_DRAG_TURN * dx;
 }
 
 // Swap g_render_lighting for Krunker's preview scene lights around the draw.
@@ -412,8 +453,11 @@ void client_class_preview_render(Client *client) {
     // menu_send_preview_rect hands over whole device px / dpr (natively the page is laid out in
     // framebuffer px, dpr 1; on the web dpr = devicePixelRatio), so the page draws the bitmap
     // 1:1 over the canvas box.
-    const int width = (int) lroundf(preview->width * preview->dpr);
+    const HtmlElem page_canvas = html_dom_by_id("classPreviewCanvas");
+    g_v10_mode = preview_mode(page_canvas);
     const int height = (int) lroundf(preview->height * preview->dpr);
+    // v10: a 5:4 bitmap whatever the box (renderer.setSize(750, 600)); the page covers the box with it
+    const int width = g_v10_mode ? (int) lroundf((float) height * PREVIEW_V10_ASPECT) : (int) lroundf(preview->width * preview->dpr);
     if (width <= 0 || height <= 0 || width > PREVIEW_MAX_SIZE || height > PREVIEW_MAX_SIZE) return;
     if (rect_log) { // KRUNKNATIVE_PREVIEW_LOG: the canvas box in device px whenever it changes
         static int last[4];

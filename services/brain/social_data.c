@@ -343,6 +343,15 @@ static void settings_up_done(SocialSession *s, kn_db_result *res, void *extra) {
     social_send_n(s, "pRes", 3, cJSON_CreateString("SUCCESS"), cJSON_CreateNull(), cJSON_CreateString("Settings Uploaded"));
 }
 
+/* ["ttl"] -> ["ttl", [id, ...]]: the account's titles (v10 challenges / ranked / Black Market
+ * rewards). KrunkNative tracks no title grants yet, so the list is empty: the client shows
+ * every title locked with its requirement. */
+void sh_titles(SocialSession *s, const cJSON *f) {
+    (void) f;
+    if (!social_require_auth(s)) return;
+    social_send_n(s, "ttl", 1, cJSON_CreateArray());
+}
+
 /* ["uploadS", settings] -> ["pRes", "SUCCESS", null, msg] | ["pRes", null, err] (popupResponse) */
 void sh_settings_up(SocialSession *s, const cJSON *f) {
     if (s->account_id <= 0) {

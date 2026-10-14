@@ -56,6 +56,8 @@
 //                                cam=x,y,z eye=x,y,z wall=0" (own: the local model went into the world pass,
 //                                viewmodel: the first-person pass drew, wall: the camera sits in a solid box or
 //                                solid geometry lies between the eye and it)
+//   100 cosm @game               log the store items the menu's class preview and our own player wear
+//                                (hat, body, face, head, back, primary skin, melee: store indices, -1 none)
 //   100 wsel @menu               log what the model build picked on the held slot (weapon, store skin, model /
 //                                texture keys or the hose, tint, sight, charm, wrist) for the menu's class
 //                                preview (who=preview) and our own player (who=me): "[input_script] wsel t=100
@@ -522,6 +524,21 @@ static void script_run(Client *client, const ScriptEvent *e) {
                 me ? me->grapple.range : 0.0f,
                 cursor_mode == GLFW_CURSOR_NORMAL ? "normal" : cursor_mode == GLFW_CURSOR_DISABLED ? "disabled" : "hidden",
                 client->camera.rotation.y, client->camera.rotation.x); // the camera's look (mouse-look checks)
+    } else if (!strcmp(e->cmd, "cosm")) {
+        // cosm @label: the store items the menu's class preview and our own (spawned) player wear:
+        // "[input_script] cosm t=100 @game who=me hat=111 body=-1 ... primary=-1" ("-" = no such player)
+        const Player *who[2] = {client->class_preview.player, client->me};
+        static const char *const names[2] = {"preview", "me"};
+        for (int k = 0; k < 2; k++) {
+            const Player *p = who[k];
+            if (!p) {
+                fprintf(stderr, "[input_script] cosm t=%.0f %s who=%s -\n", g_script.time, e->arg, names[k]);
+                continue;
+            }
+            fprintf(stderr, "[input_script] cosm t=%.0f %s who=%s hat=%d body=%d face=%d head=%d back=%d primary=%d melee=%d\n",
+                    g_script.time, e->arg, names[k], (int) p->cosmetics.hat, (int) p->cosmetics.body, (int) p->cosmetics.face,
+                    (int) p->cosmetics_v7.head, (int) p->cosmetics_v7.back, (int) p->skins.primary, (int) p->skins.melee);
+        }
     } else if (!strcmp(e->cmd, "wsel")) {
         // wsel @label: what player_generate_meshes built on the held slot of the menu's class preview
         // (always slot 0) and of our own player (PlayerArms.selection), one line each ("-" = no model yet)

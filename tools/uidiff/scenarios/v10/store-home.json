@@ -1,0 +1,30 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/customize/store-home.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "window": 14,
+    "windowActions": [
+      [
+        "windows.13.switchTab",
+        0
+      ]
+    ]
+  },
+  "frames": 3,
+  "note": "ui/v10 Store, home tab; reference captured from the offline v10 sandbox (tools/ui-import/capture_v10_live.js states)"
+}

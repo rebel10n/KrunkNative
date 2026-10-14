@@ -613,7 +613,35 @@ void ui_settings_reset_confirm(void);            // resetSettings(): confirm, De
 void ui_settings_select_preset(int index);       // selectSettingPre(index)
 void ui_settings_import_prompt(void);            // importSettings(): prompt + settings.import
 int  ui_settings_import_text(const char *text);  // settings.import(text): 1 on success
+// the pieces of windows[2] the v10 page's Change Loadout shell reuses (v10_customize.c)
+void ui_loadout_tab_html(StrBuf *out, int tab);  // a tab's body: 0 class cards, 1 loadout, 2 Customize slots, 3 v7 Other
+int  ui_loadout_tab(void);                       // windows[2].tabIndex
+void ui_loadout_set_tab(int tab);                // windows[2].tabIndex = tab (no re-render)
+int  ui_loadout_saved(const char *key);          // a selected* value by its localStorage key (hairCol, pcStatIndex, ...)
+int  ui_loadout_skin_color_count(void);          // config.skinColors
+const char *ui_loadout_skin_color_hex(int i);    // its col.toString(16)
+int  ui_loadout_pc_stat_count(void);             // config.playerCardStats
+const char *ui_loadout_pc_stat_name(int i);
+void ui_loadout_refresh_preview(void);           // updateClassPreview (dJ)
 // END ui_loadout block
+
+// BEGIN v10_customize block (client/src/ui/v10_customize.c): the Krunker v10.0.2 page's Change
+// Loadout shell (windows[2] with the Class / Loadout / Customize toolbar and the live preview
+// column, windows[52] Customize, windows[53] Title, the picker windows wrapped in the shell)
+int   v10_page(void);                            // the v10 page tree is loaded (its windows.json has title_selection)
+char *v10_customize_window_gen(int id);          // NULL: not a v10 shell window (the generic path renders it)
+int   v10_customize_window_alias(int id);        // showWindow(53) is window 3 on the Customize tab
+void  v10_customize_before_render(void);         // #classPreviewCanvas back home before #menuWindow is rewritten
+void  v10_customize_window_post(int id);         // toggleWindowCharPreview(#charPreviewSlot)
+int   v10_customize_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 not ours
+int   v10_customize_title(void);                 // titleIndex (ENT[35]); -1 none
+void  v10_customize_frame(const cJSON *frame);   // brain "ttl" (the account's titles)
+void  v10_customize_tick(void);                  // per frame (ui_loadout_tick): the preview column's drag
+// v10_daily_spin.c: the sidebar's Daily Spin (#dailySpinDiv; kn_brain "dsp" progress / "dsl" claim)
+void  v10_daily_spin_frame(const char *label, const cJSON *frame);
+void  v10_daily_spin_tick(void);                 // per frame: the item follows the account and the day
+int   v10_daily_spin_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 not ours
+// END v10_customize block
 
 // BEGIN ui_bhop block (client/src/ui/ui_bhop.c, ui_notify.c): the v3.1.1 offline build's
 // client mod (Krunker_v3.1.1/mod/mods.ts bhop + notify.ts), ported 1:1. The "Developer

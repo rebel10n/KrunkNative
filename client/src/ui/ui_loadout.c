@@ -68,6 +68,26 @@ typedef struct {
     int secondary;
 } LoadoutClass;
 
+// v10 classes req (_34270): a dev, any class in a custom (non-official) game, else minRec <=
+// the account's level; a guest has level 0. KrunkNative's offline sandbox counts as v10's
+// isSandbox (every class), as before.
+static int class_min_rec(const int index) {
+    const Client *client = menu_ui()->client;
+    const size_t count = client->game.class_count ? client->game.class_count : rules_class_count();
+    const ClassConfig *classes = client->game.classes ? client->game.classes : rules_classes();
+    return index >= 0 && (size_t) index < count ? classes[index].min_rec : 0;
+}
+
+static int class_unlocked(const int index) {
+    const Client *client = menu_ui()->client;
+    const size_t count = client->game.class_count ? client->game.class_count : rules_class_count();
+    const ClassConfig *classes = client->game.classes ? client->game.classes : rules_classes();
+    const ClassConfig *c = index >= 0 && (size_t) index < count ? &classes[index] : NULL;
+    const AccountInfo *acc = account_get();
+    if (!c || !c->min_rec || !online_mode_online() || client->offline || (acc && acc->is_dev)) return 1;
+    return acc && acc->level >= c->min_rec;
+}
+
 static LoadoutClass class_at(const int index) {
     const Client *client = menu_ui()->client;
     const size_t count = client->game.class_count ? client->game.class_count : rules_class_count();
@@ -88,9 +108,10 @@ static const char *CLASS_TXTS[][5] = {
 };
 #define CLASS_TXTS_COUNT ((int) (sizeof(CLASS_TXTS) / sizeof(CLASS_TXTS[0])))
 
-// config.skinColors (col as hex, Krunker prints col.toString(16)): Bronze .. Pale, Infected.
-static const char *SKIN_COLORS[] = {"805c4a", "a77860", "d38d6f", "cc997e", "edbfa6", "819481"};
-#define SKIN_COLOR_COUNT 6
+// config.skinColors (col as hex, Krunker prints col.toString(16)): Bronze .. Pale, Infected, and
+// v10.0.2's Yellowish and Darker Color (v10 _7524, every one req: account).
+static const char *SKIN_COLORS[] = {"805c4a", "a77860", "d38d6f", "cc997e", "edbfa6", "819481", "e3a857", "260701"};
+#define SKIN_COLOR_COUNT 8
 
 // data/reticles.js (id == index)
 static const char *RETICLES[] = {"Red Dot", "Green Dot", "Pyramid", "Tau", "Ray", "Spread",
@@ -650,6 +671,15 @@ static void gen_tab_class(StrBuf *out) {
         level = level + 1 > 1 ? level + 1 : 1;
         char icon[256];
         snprintf(icon, sizeof(icon), "%s", c->icon);
+        const int open = class_unlocked(c->index);
+        if (!open) { // v10: no onclick, the req line instead of the weapon, the lock over the card
+            sb_appendf(out, "<div class=\"classCard\" onmouseenter=\"playTick()\" >\n\t\t\t\t\t\t<div class=\"classImgH\">\n\t\t\t\t\t\t\t<img loading=\"lazy\" style=\"image-rendering:pixelated\" class=\"classImgC\" src=\"%s\">\n\t\t\t\t\t\t\t<div class='classHP'>%d<span style='color: #868484;font-size: 12px;'> HP</span></div>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t\t<div class=\"className\">",
+                       icon, c->hp);
+            sb_append_esc(out, c->name ? c->name : "");
+            sb_appendf(out, "</div>\n\t\t\t\t\t\t<div class=\"classWeap\">Req lvl %d</div>\n\t\t\t\t\t\t<div class='classXPBar'>\n\t\t\t\t\t\t\t<div class='clsXPBarC' style='width:calc(%d%% - 8px)'></div>\n\t\t\t\t\t\t\t<div class='clsXPBarV'>%d / %d</div>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t\t<div class='classLvl'>Lvl %d</div>\n\t\t\t\t\t\t<div class='lockedClass'>\n\t\t\t\t\t\t\t<span class='material-icons' style='font-size: 70px;color:#fff;'>\n\t\t\t\t\t\t\tlock\n\t\t\t\t\t\t\t</span>\n\t\t\t\t\t\t\t<span class='lockedClassText'>Register to unlock</span>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t</div>",
+                       class_min_rec(c->index), pct, (int) (xp - lo), (int) (hi - lo), level);
+            continue;
+        }
         sb_appendf(out, "<div class=\"classCard\" onmouseenter=\"playTick()\" onclick=\"selectClass(%d)\">\n\t\t\t\t\t\t<div class=\"classImgH\">\n\t\t\t\t\t\t\t<img loading=\"lazy\" style=\"image-rendering:pixelated\" class=\"classImgC\" src=\"%s\">\n\t\t\t\t\t\t\t<div class='classHP'>%d<span style='color: #868484;font-size: 12px;'> HP</span></div>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t\t<div class=\"className\">",
                    c->index, icon, c->hp);
         sb_append_esc(out, c->name ? c->name : "");
@@ -893,6 +923,31 @@ static void gen_tab_other(StrBuf *out) {
     sb_append(out, "</select></div>");
 }
 
+// ---- the pieces the v10 page's Change Loadout shell reuses (v10_customize.c)
+void ui_loadout_tab_html(StrBuf *out, const int tab) {
+    switch (tab) {
+        case 0: gen_tab_class(out); break;
+        case 1: gen_tab_loadout(out, menu_ui()->client->menu_class_index); break;
+        case 2: gen_tab_customize(out); break;
+        default: gen_tab_other(out); break;
+    }
+}
+
+int ui_loadout_tab(void) { return g_tab; }
+void ui_loadout_set_tab(const int tab) { g_tab = tab >= 0 && tab <= 3 ? tab : 1; }
+
+int ui_loadout_saved(const char *key) {
+    for (int i = 0; i < SEL_COUNT; i++)
+        if (!strcmp(g_sel[i].key, key)) return sel(i);
+    return -1;
+}
+
+int ui_loadout_skin_color_count(void) { return SKIN_COLOR_COUNT; }
+const char *ui_loadout_skin_color_hex(const int i) { return i >= 0 && i < SKIN_COLOR_COUNT ? SKIN_COLORS[i] : ""; }
+int ui_loadout_pc_stat_count(void) { return PC_STAT_COUNT; }
+const char *ui_loadout_pc_stat_name(const int i) { return i >= 0 && i < PC_STAT_COUNT ? PC_STATS[i] : ""; }
+void ui_loadout_refresh_preview(void) { refresh_class_box(); }
+
 // windows[2].gen()
 char *ui_loadout_gen(void) {
     const int class_index = menu_ui()->client->menu_class_index;
@@ -1025,8 +1080,11 @@ static void pick_card(StrBuf *out, const int pos, void *user) {
             char spray_path[64], spray_url[256];
             snprintf(spray_path, sizeof(spray_path), "textures/sprays/%d.png", BASE_SPRAYS[i].id);
             asset(spray_path, spray_url, sizeof(spray_url));
-            sb_appendf(out, "<div class='noBtnCard blackShad' style='height:158px;border: 5px solid lightgrey'onclick='selectSpray(%d);cancelTip()' data-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'>%s<div class='itemOwn'>Free Spray</div><div draggable='false' class='sprayImg' onmouseenter='playTick()' style='background: url(&quot;%s&quot;) -1px;%s'></div></div>",
+            sb_appendf(out, "<div class='noBtnCard blackShad' style='height:158px;border: 5px solid lightgrey'onclick='selectSpray(%d);cancelTip()' data-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'>%s<div class='itemOwn'>Free Spray</div><div draggable='false' class='sprayImg' onmouseenter='playTick()' style='background: url(&quot;%s&quot;) -1px;%s'></div>",
                        i, i, BASE_SPRAYS[i].name, spray_url, frames ? "animation: sprayAnm4 1.25s steps(4) infinite;" : "");
+            // the store's free spray items (2482 + i): their item / favourite buttons as on every card
+            sb_appendf(out, "<div class='selctInfoBtn' onmouseenter='playTick()' onclick='viewItem(%d)'>?</div><div class='selctFavBtn material-icons' onmouseenter='playTick()' data-col='white' data-icon='star_border' onclick='favItem(this, %d)'></div></div>",
+                       SPRAY_DEFAULT_INDEX + i, SPRAY_DEFAULT_INDEX + i);
         } else {
             const ViewerSkin *s = store_skin(e->ind);
             if (s) spray_card(out, e, s);
@@ -1165,6 +1223,8 @@ static char *gen_attach(void) {
 // rendering (ui_window_post -> ui_settings_apply_values).
 static void template_head(StrBuf *out, const char *key) {
     const char *tpl = ui_windows_html(key);
+    const char *items = strstr(tpl, "<div class=\"wcpItems\">"); // the v10 page's capture is wrapped in the shell
+    if (items) tpl = items + strlen("<div class=\"wcpItems\">");
     const char *list = strstr(tpl, "<div id=\"skinList\"");
     if (list) sb_append_n(out, tpl, (size_t) (list - tpl));
 }
@@ -1725,6 +1785,7 @@ static void search_items(const HtmlEvent *ev) {
 
 // The open picker's grid follows the scroll position (client_menu_tick).
 void ui_loadout_tick(void) {
+    v10_customize_tick(); // the v10 page's preview column follows a drag
     if (g_pick.view) vgrid_tick(&g_pick.grid);
 }
 

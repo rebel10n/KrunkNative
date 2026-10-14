@@ -37,6 +37,7 @@ void account_ui_init(Client*);              // listens on the social socket; res
 const AccountInfo *account_get(void);       // NULL = guest (Krunker `acc == null`)
 const char *account_session_token(void);    // saved social session token, "" none
 void account_ui_tick(Client*);              // per frame: header bar once the page exists
+void account_send_frame(const char *label);  // one no-argument social frame ("ttl": the account's titles)
 int  account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 int  account_ui_reset_enter(HtmlElem target); // KrunkNative forgot password: Enter in a reset field submits its step (1 = handled)
 int  account_ui_twofa_handler(const char *name); // 1 for the 2FA popup's handlers (sub2FA, onInput2FA, onKeyDown2FA): every page has #twoFAPop
@@ -86,7 +87,8 @@ void account_set_last_reward(double ms);    // acc.lastReward (the Free KR wheel
 
 // ---- store_ui.c (windows[13] prize wheels, prizeWheel / spinResponse)
 void store_skin_preview(int skin_index, char *out, size_t n); // UTILS.getPreview(skin): its asset-host URL (html_dom_asset_url)
-char *store_window_gen(void);               // windows[13].gen(): the v7.1.4 Store (guest and signed in), malloc'd
+char *store_window_gen(void);               // windows[13].gen(): the v7.1.4 Store (guest and signed in), malloc'd; v10 page: the Svelte store
+void store_ui_window_post(int id);          // v10 page: #menuWindow.eterno on the Eterno Shop tab
 int  store_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 void store_ui_frame(const cJSON *frame);    // "spin" / "spinKR" / "spinH" replies
 void store_ui_free_kr_wheel(void);          // claimReward(): the Free KR wheel
