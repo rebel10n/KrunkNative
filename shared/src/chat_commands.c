@@ -384,7 +384,7 @@ static void run_toggle(ChatCtx *c, const char *label, const ToggleGet get, const
         const PlayerKeep *k = keep_of(c, c->sender);
         next = force >= 0 ? force : chat_parse_toggle(t.mode_arg, get(t.targets.players[0], k));
         set(c, t.targets.players[0], c->sender, next);
-        reply(c, "%s %s (you have it when you spawn)", label, next ? "ON" : "OFF");
+        reply(c, "%s %s", label, next ? "ON" : "OFF");
         return;
     }
     if (force >= 0) next = force;
@@ -1827,7 +1827,7 @@ static void give_from_menu(ChatCtx *c, const int kind, const int id, const char 
         om_reply_failure(c, &r, "Not allowed: only developers and the host can spawn here.");
         return;
     }
-    reply(c, weapon ? "%s added to your loadout (you have it when you spawn)." : "%s dropped (you are not spawned in: at your view).", name);
+    reply(c, weapon ? "%s added to your loadout." : "%s dropped.", name);
 }
 
 // give <weapon|item> [player]: an extra loadout slot (OM_ACTION_ADD_WEAPON, the Weapons tab's

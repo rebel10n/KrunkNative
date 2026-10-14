@@ -331,7 +331,7 @@ with both guns too (doc/v7/decisions.md "Map edits", "Building tools").
 Not spawned in (the menu before the first spawn, dead, spectating), the commands still act on the
 connection's player state (`PlayerKeep`, shared.h), which the server keeps on the connection and
 applies at every spawn: `god`, `ungod`, `noclip`, `notarget`, `smite`, `forcehide` and
-`unlimitedammo` without a target answer "God mode ON (you have it when you spawn)" and the next
+`unlimitedammo` without a target answer "God mode ON" and the next
 spawn has them (the cheats also outlive a map change's new player); `tp <x> <y> <z>` / `tp <player>`
 answers "You will spawn at …" and the next spawn is there; `give <weapon>` joins the loadout of the
 next spawn, `give <item>` and `spawn` (devs) drop at your view: where your last life ended, else the
