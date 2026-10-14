@@ -155,11 +155,3 @@ html.kn-hud-visible #aimRecticle {
 .knCrossArm-b { top: calc(var(--kn-cross-size) / 2 - 22px); }
 .knCrossArm-l { left: calc(var(--kn-cross-size) / -2 - 1px); }
 .knCrossArm-r { left: calc(var(--kn-cross-size) / 2 - 22px); }
-
-/* #topRight: v10 always shows the float:right #leaderboardHolder (hud_v10.c). In Chrome the
- * empty block after .topRightCounters ends the float's line in the shrink-to-fit width, so the
- * kill feed (inline-grid) starts under the leaderboard; the engine would set it beside the float,
- * over it. Clearing that empty block puts the feed where Chrome does. */
-#topRight > .topRightCounters + div {
-  clear: right;
-}

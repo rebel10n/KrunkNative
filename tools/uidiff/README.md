@@ -8,7 +8,9 @@ scenarios are gone (Krunker v10.0.2 is the only version); the sections below tha
 `capture-v7.js` and the v7 scenario names are history, and `doc/ref/krunker-v7.1.4/` /
 `doc/ref/krunker-v3.1.1/` stay as references. A scenario without a regions file is a render
 smoke (`make smoke-ui`), not a diff. KrunkNative-only
-UI with no Krunker counterpart (the `kn-*` scenarios: the Object Manager window and its HUD rack)
+UI with no Krunker counterpart (the `kn-*` scenarios: the Object Manager window and its HUD rack,
+the populated top-right HUD stack `kn-ingame-topright[-old]`: leaderboard, every stat counter and
+the kill feed stacked, which no v10 capture shows since the counters are off by default)
 diffs against KN's own renders in `doc/ref/krunknative/` (llvmpipe, made with `--render-scenario`
 from the same scenario): a regression baseline, not a parity reference. `make uidiff` builds `client_bin`
 with the in-house engine (`HTML_ENGINE=ON`) and renders every scenario through the

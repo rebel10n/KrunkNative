@@ -717,6 +717,35 @@ static int abs_is_block_level(const Box *ab)
     }
 }
 
+/* CSS 2.1 9.5 (Blink NGInlineLayoutAlgorithm: the next layout opportunity): a line
+ * box shortened by floats that cannot hold its first piece of content (`need_w`
+ * more than the pen and the pending inline edges) moves down past the next float
+ * bottom, its edges recomputed, until the content fits or no float shortens it any
+ * more; a line that already holds content wraps instead (run_lines). Containers that
+ * never wrap keep the line where it is (Blink: Style().AutoWrap()). The HUD's
+ * #topRight: the stat counters and the kill feed stack under the float:right
+ * leaderboard instead of landing on it. */
+static void line_make_room(Lines *L, float need_w)
+{
+    if (L->line_has_content) return;
+    float full_l = L->content_x, full_r = L->content_x + L->content_w;
+    for (int guard = 0; guard < 1000; guard++) {
+        int shortened = L->line_left > full_l + 0.001f || L->line_right < full_r - 0.001f;
+        if (!shortened) return;
+        if (L->pen + L->pending_open_w + need_w <= avail_w(L) + 0.001f) return;
+        float yy = L->bfc_y + L->content_y + L->y;
+        float ny = floats_next_y(L->floats, yy);
+        if (ny <= yy + 0.001f) return;
+        L->y += ny - yy;
+        float l = L->bfc_x + L->content_x, r = l + L->content_w;
+        float est_h = L->strut_A + L->strut_D + L->strut_lt + L->strut_lb;
+        float fl, fr;
+        floats_avail(L->floats, ny, kn_maxf(est_h, 1.0f), l, r, &fl, &fr);
+        L->line_left = fl - L->bfc_x;
+        L->line_right = fr - L->bfc_x;
+    }
+}
+
 static void run_lines(Lines *L, InNodeVec *nodes)
 {
     begin_line(L);
@@ -787,6 +816,7 @@ static void run_lines(Lines *L, InNodeVec *nodes)
             IState *ts = &L->states.data[top_state(L)];
             if (ts->box) nowrap = ts->box->style->white_space == CSS_WHITE_SPACE_NOWRAP;
             if (L->line_has_content && !nowrap && L->pen + L->pending_open_w + mw > avail_w(L) + 0.001f) break_line(L);
+            if (!nowrap) line_make_room(L, mw);
             L->pen += L->pending_open_w; L->pending_open_w = 0;
             LItem it; memset(&it, 0, sizeof(it));
             fill_atomic_item(L, &it, ab);
@@ -827,6 +857,16 @@ static void run_lines(Lines *L, InNodeVec *nodes)
                     while (e > start && is_space_byte(tb->text[e - 1])) e--;
                     w_trim = (e == end) ? w : layout_text_width(L->t, tb->font, tb->text + start, e - start, ls);
                 }
+            }
+            if (!nowrap && !L->line_has_content && end > start) {
+                /* a word that breaks inside (break_word) only needs its first character */
+                float first_w = w_trim;
+                if (break_word) {
+                    uint32_t ne = start + 1;
+                    while (ne < end && ((unsigned char)tb->text[ne] & 0xC0) == 0x80) ne++;
+                    first_w = layout_text_width(L->t, tb->font, tb->text + start, ne - start, ls);
+                }
+                line_make_room(L, first_w);
             }
             /* a piece wider than the line on its own: break inside the word */
             while (!nowrap && break_word && L->pen + L->pending_open_w + w_trim > avail_w(L) + 0.001f && end > start) {

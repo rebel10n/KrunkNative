@@ -3897,8 +3897,10 @@ void client_hud_html_tick(Client *client, const float now_f) {
         dom_text("kdVal", kd);
     }
     if (fps_changed || force) dom_text_int("ingameFPS", hud->fps);
-    if (force || (int) me->kill_streak != ui->streak) { // streakVal = currentKillStreak
-        ui->streak = (int) me->kill_streak;
+    int streak = (int) me->kill_streak;
+    if (ov) streak = hud_json_int(g_hud_override.hud, "streak", streak); // scenario hud.streak (kn-ingame-topright)
+    if (force || streak != ui->streak) { // streakVal = currentKillStreak
+        ui->streak = streak;
         dom_text_int("streakVal", ui->streak);
     }
     static int shown_team = -1; // io_updateTeam (isYou): the card's team name follows a team change too

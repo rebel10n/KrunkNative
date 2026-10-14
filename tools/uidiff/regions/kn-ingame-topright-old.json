@@ -1,0 +1,61 @@
+{
+  "scenario": "kn-ingame-topright-old",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "top-right-stack",
+      "rect": [
+        1034,
+        5,
+        242,
+        100
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#topRight (400px wide): leaderboard then the counters; no kill feed (Old Scoreboard)"
+    },
+    {
+      "name": "leaderboard",
+      "rect": [
+        1066,
+        7,
+        207,
+        62
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#leaderboardHolder at the right edge of the 400px .topRightCounters"
+    },
+    {
+      "name": "counters",
+      "rect": [
+        1066,
+        69,
+        207,
+        34
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": ".topRightCounters row under the board's margin box"
+    },
+    {
+      "name": "board-rows-clear",
+      "rect": [
+        1070,
+        20,
+        100,
+        40
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "the board's name column: no counter icon over the rows (the regression)"
+    }
+  ]
+}

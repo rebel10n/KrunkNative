@@ -1,0 +1,74 @@
+{
+  "scenario": "kn-ingame-topright",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "top-right-stack",
+      "rect": [
+        1062,
+        5,
+        214,
+        128
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#topRight: leaderboard, counters, kill feed stacked; nothing over the board"
+    },
+    {
+      "name": "leaderboard",
+      "rect": [
+        1066,
+        7,
+        207,
+        62
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#leaderboardHolder: 1. Local User 225 / 2. Bot 0 / 3. Bot 2 0"
+    },
+    {
+      "name": "counters",
+      "rect": [
+        1066,
+        69,
+        207,
+        34
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": ".topRightCounters: skull 3 | skull 1 | streak 3 | K/D 3 | star 225, right-aligned under the board's margin box (y = board bottom + 10px scaled)"
+    },
+    {
+      "name": "killfeed",
+      "rect": [
+        1163,
+        100,
+        112,
+        32
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#killFeed row You [AR] Bot under the counters"
+    },
+    {
+      "name": "board-rows-clear",
+      "rect": [
+        1070,
+        20,
+        100,
+        40
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "the board's name column: no counter icon over the rows (the regression)"
+    }
+  ]
+}

@@ -270,6 +270,49 @@ static void t_floats(void)
     fx_free(fx);
 }
 
+static void t_line_below_floats(void)
+{
+    /* CSS 2.1 9.5: a line box shortened by floats that cannot hold its first piece of
+     * content moves below them (Blink: the next layout opportunity). The HUD's #topRight:
+     * the stat counters and the kill feed stack under the float:right leaderboard. */
+    Fx *fx = fx_html(
+        "<div id=tr style='position:absolute;right:0;top:0;text-align:right'>"
+        "<div id=lb style='float:right;width:350px;height:100px;margin-bottom:10px'></div>"
+        "<div></div>"
+        "<div id=cnt><div id=k1 style='display:inline-block;vertical-align:top;width:60px;height:40px'></div>"
+        "<div id=k2 style='display:inline-block;vertical-align:top;width:60px;height:40px'></div></div>"
+        "<div></div>"
+        "<div id=feed style='display:inline-block;vertical-align:top;width:120px;height:30px'></div></div>"
+        "<div id=w3 style='width:200px'><div style='float:left;width:200px;height:20px'></div><span id=t3>word</span></div>"
+        "<div id=w4 style='width:200px;white-space:nowrap'><div style='float:left;width:200px;height:20px'></div><span id=t4>word</span></div>"
+        "<div id=w5 style='width:300px'><div style='float:left;width:100px;height:20px'></div>"
+        "<div id=ib5 style='display:inline-block;vertical-align:top;width:150px;height:10px'></div></div>"
+        "<div id=w6 style='width:300px'><div style='float:left;width:100px;height:20px'></div>"
+        "<div id=ib6 style='display:inline-block;vertical-align:top;width:250px;height:10px'></div></div>", NULL);
+    HtmlRect tr = rc(fx, "tr"), lb = rc(fx, "lb"), k1 = rc(fx, "k1"), k2 = rc(fx, "k2"), feed = rc(fx, "feed");
+    CHECK_NEAR(tr.w, 350, 0.01, "shrink-to-fit width: the float");
+    CHECK_NEAR(lb.x, 450, 0.01, "float right at the container's right edge");
+    CHECK_NEAR(lb.y, 0, 0.01, "float at the top");
+    CHECK_NEAR(k1.y, 110, 0.01, "first inline-block line moves under the float's margin box");
+    CHECK_NEAR(k2.y, 110, 0.01, "second inline-block on the same line");
+    CHECK_NEAR(k2.x, 740, 0.01, "line right-aligned on the full width under the float");
+    CHECK_NEAR(k1.x, 680, 0.01, "first inline-block before the second");
+    CHECK_NEAR(feed.y, 150, 0.01, "next line under the counters");
+    CHECK_NEAR(feed.x, 680, 0.01, "next line right-aligned");
+    CHECK_NEAR(tr.h, 180, 0.01, "container height covers the stacked lines");
+    Box *w3 = bx(fx, "w3"), *w4 = bx(fx, "w4");
+    CHECK(w3 && w3->line_count == 1, "text after a full-width float: one line");
+    if (w3 && w3->line_count) CHECK_NEAR(w3->lines[0].y - w3->y, 20, 0.01, "text line moves below a full-width float");
+    CHECK(w4 && w4->line_count == 1, "nowrap text after a full-width float: one line");
+    if (w4 && w4->line_count) CHECK_NEAR(w4->lines[0].y - w4->y, 0, 0.01, "white-space: nowrap keeps the line beside the float");
+    HtmlRect w5 = rc(fx, "w5"), ib5 = rc(fx, "ib5"), w6 = rc(fx, "w6"), ib6 = rc(fx, "ib6");
+    CHECK_NEAR(ib5.x, 100, 0.01, "an item that fits beside the float stays there");
+    CHECK_NEAR(ib5.y, w5.y, 0.01, "an item that fits beside the float keeps the line's top");
+    CHECK_NEAR(ib6.y, w6.y + 20, 0.01, "an item wider than the room beside the float moves below it");
+    CHECK_NEAR(ib6.x, w6.x, 0.01, "the moved line starts at the content edge");
+    fx_free(fx);
+}
+
 static void t_inline_block_baseline(void)
 {
     Fx *fx = fx_html(
@@ -1629,6 +1672,7 @@ int main(int argc, char **argv)
 
     t_margin_collapse();
     t_floats();
+    t_line_below_floats();
     t_inline_block_baseline();
     t_flex();
     t_flex_pct_basis_align_content();
