@@ -29,6 +29,7 @@
 #include <lobby_ui.h> // the comp menu (comp_ui.c)
 #include <math.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <update_ui.h>
 #include <download_ui.h> // showWindow(25) / ?download (client/src/ui/download_ui.c)
@@ -42,6 +43,7 @@
 #include <app_mode.h> // the game page owns the pointer lock (not the hub / editor / viewer)
 #include <pointer_lock.h> // "should the pointer be locked" (client/src/pointer_lock.c)
 #include <online_mode.h> // live sign-in: the session's rights end with it
+#include <audio.h> // the auto-respawn countdown's tick_0
 #include <nettspend.h>   // KN-only class icon art (ui/img/classes/)
 
 #ifdef __EMSCRIPTEN__
@@ -595,6 +597,7 @@ void menu_scale_base(void) {
 
 // UI.toggleMenu(j) + UI.toggleMenuHider(j), inline styles included.
 static void menu_update_info_holder(void);
+static void menu_respawn_stop(void);
 
 // The menu chrome of toggleMenu(j) + toggleMenuHider(j); the Lost Connection screen keeps it
 // hidden (menu_apply_error_screen).
@@ -636,6 +639,7 @@ void menu_apply_open(const int open) {
         set_display("centerLeaderDisplay", "none");
     } else {
         // entering the game: toggleControlUI(true) hides the overlay (hud_ui.c shows #inGameUI)
+        menu_respawn_stop(); // enterGame(): the auto-respawn countdown ends
         set_display("instructionHolder", "none");
         menu_close_window();
     }
@@ -688,6 +692,10 @@ int menu_error_screen_shown(void) {
 static void menu_apply_error_screen(const int on) {
     if (on == g_error_screen) return;
     g_error_screen = on;
+    // v10: both go above the menu layer while the box shows (main.css .onError)
+    HtmlElem holder = by_id("instructionHolder"), update_bg = by_id("instructionsUpdateBG");
+    if (holder) html_dom_set_class(holder, "onError", on);
+    if (update_bg) html_dom_set_class(update_bg, "onError", on);
     if (on) set_display("purchaseHolder", "none");
     set_display("chatHolder", on ? "none" : "");
     menu_apply_chrome();
@@ -705,25 +713,260 @@ static const char *connect_error_text(const char *error) {
     return error;
 }
 
+// ---- the boot curtain, #loadGamNm and the Game Updating art (Krunker v10.0.2)
+// The page boots with #instructionsFadeBG (main.css: #222, opacity 1, `transition: opacity 0.7s
+// ease-in-out`) over the menu and #instructions holding index.html's own loading ring (scale
+// 1.4) and #loadGamNm. v10 leaves both until the game's INIT, which sets the curtain's opacity
+// to 0 (g:219640, the 0.7 s fade) and hides #loadingBg (g:219397); INIT's updatePlayInstructions()
+// replaces the ring and #loadGamNm with CLICK TO PLAY. Nothing raises the curtain again: every
+// later join is a page load in v10 (switchGame / backToOrigin navigate), so KrunkNative, which
+// switches games in place, raises it again (at once, like a fresh page) when it leaves for
+// another game: menu_show_connecting, menu_host_offline. The web build reloads anyway.
+static int g_boot_curtain = 1; // #instructionsFadeBG is up, waiting for an INIT
+static int g_boot_settled;     // ... and has been drawn once at opacity 1 (the fade's start value)
+// The game it waits past: an in-place switch (menu_show_connecting, menu_host_offline) lifts the
+// curtain only on a later INIT, not on the game still loaded. Every INIT's game_init swaps
+// Game.mode for a fresh allocation (made while the old one is still alive, and nothing else frees
+// it), so "the mode is not the one we armed on" is "an INIT ran since"; NULL = any ready game (the
+// page's boot, scenarios).
+static int g_boot_any = 1;
+static const void *g_boot_mode;
+// #loadGamNm under the boot ring: v10 writes "Loading <play || host> ..." for ?play= / ?host=
+// (g:197836), then autoHostMap(host, true) "No Games found" until the map preset is fetched and
+// "Hosting <map> ..." (g:218512-14). KrunkNative's matching boots: a startup map to seek
+// (web ?map=, a map argument online) is ?play=, an offline / Host Game start on the in-process
+// server is ?host=. v10 shows "No Games found" while it fetches the map preset; KrunkNative's
+// preset is local (no wait), so it goes straight to "Hosting"; only a scenario renders "No Games
+// found" (state.boot.loadGamNm).
+enum { LOAD_GAM_NONE, LOAD_GAM_LOADING, LOAD_GAM_HOSTING, LOAD_GAM_NO_GAMES };
+static int g_load_gam = -1;    // -1: from the client's start (menu_load_gam_auto)
+static char g_load_gam_map[96];
+
+static int scenario_on(void);
+
+static const char *cjson_map_name(const cJSON *map) {
+    const cJSON *name = map ? cJSON_GetObjectItem(map, "name") : NULL;
+    return cJSON_IsString(name) ? cJSON_GetStringValue(name) : "";
+}
+
+static void menu_load_gam_set(const int kind, const char *map) {
+    g_load_gam = kind;
+    snprintf(g_load_gam_map, sizeof(g_load_gam_map), "%s", map ? map : "");
+}
+
+// The page's own boot: what the client was started with.
+static void menu_load_gam_auto(void) {
+    const Client *client = g_ui.client;
+    const char *map = client ? cjson_map_name(client->startup_map) : "";
+    if (!client || !map[0]) menu_load_gam_set(LOAD_GAM_NONE, "");
+    else menu_load_gam_set(client->offline || client->game.is_local ? LOAD_GAM_HOSTING : LOAD_GAM_LOADING, map);
+}
+
+static void menu_load_gam_text(StrBuf *sb) {
+    if (g_load_gam < 0) menu_load_gam_auto();
+    char text[160];
+    switch (g_load_gam) {
+    case LOAD_GAM_LOADING:
+    case LOAD_GAM_HOSTING:
+        snprintf(text, sizeof(text), "%s %s ...", g_load_gam == LOAD_GAM_LOADING ? I18N("generic.loading.simple", "Loading") : I18N("generic.hosting", "Hosting"), g_load_gam_map);
+        sb_append_esc(sb, text);
+        break;
+    case LOAD_GAM_NO_GAMES:
+        sb_append_esc(sb, I18N("generic.hosting.noGames", "No Games found"));
+        break;
+    default:
+        break;
+    }
+}
+
+// Raise the curtain at once (a fresh page): an inline 1 ms transition until the fade. Not
+// `none` or 0 s: the engine keeps the before-change value a transition starts from only while
+// the element declares a transition of some length (anim.c has_transition_decl; Chrome keeps
+// it always), and the fade must start from this opacity 1.
+static void menu_boot_arm(const int any) {
+    g_boot_curtain = 1;
+    g_boot_settled = 0;
+    g_boot_any = any;
+    g_boot_mode = !any && g_ui.client ? (const void *) g_ui.client->game.mode : NULL;
+    set_style("instructionsFadeBG", "transition", "opacity 0.001s");
+    set_style("instructionsFadeBG", "opacity", "1");
+    set_display("loadingBg", "");
+    g_ui.last_instructions[0] = 0;
+}
+
+// The curtain is up and its INIT has not come: the page is still loading its game.
+static int menu_boot_waiting(void) {
+    if (!g_boot_curtain) return 0;
+    if (!g_ui.ready) return 1;
+    return !g_boot_any && g_ui.client && (const void *) g_ui.client->game.mode == g_boot_mode;
+}
+
+// Per frame: the first INIT after the curtain went up (and was drawn once) starts the fade.
+static void menu_boot_tick(void) {
+    if (!g_boot_curtain) return;
+    if (!g_boot_settled) {
+        g_boot_settled = 1;
+        return;
+    }
+    if (menu_boot_waiting()) return;
+    g_boot_curtain = 0;
+    set_style("instructionsFadeBG", "transition", ""); // main.css: opacity 0.7s ease-in-out
+    set_style("instructionsFadeBG", "opacity", "0");
+    set_display("loadingBg", "none");
+    menu_update_instructions();
+}
+
+// ui_scenario.c state.boot: the page before its first INIT (true, or {loadGamNm: "play" | "host" |
+// "noGames" | ""}, the map from state.mapName / the scenario's map). With ready:true (+ after_ms)
+// the fade starts with the state, so after_ms picks a frame of it.
+void menu_boot_scenario(const cJSON *boot) {
+    if (!boot || cJSON_IsFalse(boot)) return;
+    const cJSON *kind = cJSON_IsObject(boot) ? cJSON_GetObjectItem(boot, "loadGamNm") : NULL;
+    const cJSON *map = cJSON_IsObject(boot) ? cJSON_GetObjectItem(boot, "map") : NULL;
+    const char *name = cJSON_IsString(map) ? map->valuestring : g_ui.map_name;
+    if (cJSON_IsString(kind)) {
+        const char *k = kind->valuestring;
+        menu_load_gam_set(!strcmp(k, "play") ? LOAD_GAM_LOADING : !strcmp(k, "host") ? LOAD_GAM_HOSTING : !strcmp(k, "noGames") ? LOAD_GAM_NO_GAMES : LOAD_GAM_NONE, name);
+    }
+    menu_boot_arm(1);
+}
+
+// The Game Updating screen's art (g:222104-222112): a random entry of v10's menu-bg list
+// (g:19437) as #instructionsUpdateBG's background, "Art By <creator>" in
+// #instructionsUpdateCredit opening the artist's page. ui/img/menu-bg/ (live_assets_v10.lock).
+static const struct {
+    int id;
+    const char *creator, *link;
+} k_menu_bg_art[] = {
+    {0, "@EmpoTheDon", "https://twitter.com/EmpoTheDon"},
+    {1, "@EmpoTheDon", "https://twitter.com/EmpoTheDon"},
+    {2, "@14julink", "https://twitter.com/14julink"},
+    {3, "@14julink", "https://twitter.com/14julink"},
+    {4, "@14julink", "https://twitter.com/14julink"},
+    {8, "@Flair741", "https://twitter.com/Flair741"},
+    {9, "@polluxvisuals", "https://twitter.com/polluxvisuals"},
+};
+#define MENU_BG_ART_COUNT ((int) (sizeof(k_menu_bg_art) / sizeof(k_menu_bg_art[0])))
+static int g_update_art = -1; // the shown entry while Game Updating is up
+
+static void menu_apply_update_art(const int updating) {
+    if (updating == (g_update_art >= 0)) return;
+    HtmlElem credit = by_id("instructionsUpdateCredit");
+    if (updating) {
+        g_update_art = scenario_on() ? 0 : rand() % MENU_BG_ART_COUNT; // randInt(0, length - 1); pinned in renders
+        char buf[160];
+        snprintf(buf, sizeof(buf), "url(\"img/menu-bg/%d.png\")", k_menu_bg_art[g_update_art].id);
+        set_style("instructionsUpdateBG", "background-image", buf);
+        set_display("instructionsUpdateBG", "block");
+        if (credit) {
+            snprintf(buf, sizeof(buf), "Art By %s", k_menu_bg_art[g_update_art].creator);
+            html_dom_set_html(credit, buf);
+            snprintf(buf, sizeof(buf), "openURL('%s')", k_menu_bg_art[g_update_art].link);
+            html_dom_set_attr(credit, "onclick", buf);
+            html_dom_set_display(credit, "block");
+        }
+    } else {
+        g_update_art = -1;
+        set_display("instructionsUpdateBG", "none");
+        if (credit) html_dom_set_display(credit, "none");
+    }
+}
+
+// ---- the auto-respawn countdown (v10 g:197900-197906, g:209976)
+// A death in a forceSpawn mode runs autoRespawn(forceSpawn + 1) when the death delay ends:
+// tick_0 at 0.2 and the play prompt's subtitle "Auto Respawning in {0}" (respawn.auto), again
+// every second down to 1, then cleared; enterGame() stops it. The subtitle setter keeps it null
+// while the player is still in the game (the death delay has not shown the menu yet), the pointer
+// is locked or the end screen's #endMidHolder shows, and the chain stops at a null subtitle, so
+// as in v10 the countdown only runs when the menu was already up at that moment (ESC during the
+// death screen); otherwise it is one tick_0.
+static char g_respawn_sub[96]; // the subtitle (v10's iìíííìi), "" none
+static int g_respawn_timer;
+
+static void menu_respawn_subtitle(const char *text) {
+    const char *now = g_respawn_sub[0] ? g_respawn_sub : NULL;
+    if (!g_ui.connected) return;
+    if ((!text && !now) || (text && now && !strcmp(text, now))) return;
+    HtmlElem end_mid = by_id("endMidHolder");
+    const int hidden = !g_ui.menu_open || (g_ui.client && client_pointer_locked(g_ui.client)) || inline_style_is(end_mid, "display", "inline-block");
+    snprintf(g_respawn_sub, sizeof(g_respawn_sub), "%s", text && !hidden ? text : "");
+    menu_update_instructions();
+}
+
+static void menu_respawn_step(int seconds);
+
+static void menu_respawn_timer_fire(void *user) {
+    g_respawn_timer = 0;
+    const int seconds = (int) (intptr_t) user;
+    if (g_respawn_sub[0]) menu_respawn_step(seconds);
+    else menu_respawn_subtitle(NULL);
+}
+
+static void menu_respawn_step(const int seconds) {
+    audio_play("tick_0", 0.2f, 0, 1.0f);
+    char text[96], n[16];
+    snprintf(n, sizeof(n), "%d", seconds - 1);
+    menu_respawn_subtitle(I18N_F(text, "respawn.auto", "Auto Respawning in {0}", n));
+    if (seconds > 1 && g_respawn_sub[0]) g_respawn_timer = html_timer_add(1000.0, menu_respawn_timer_fire, (void *) (intptr_t) (seconds - 1));
+    else menu_respawn_subtitle(NULL);
+}
+
+static void menu_respawn_stop(void) {
+    if (!g_respawn_timer) return;
+    html_timer_cancel(g_respawn_timer);
+    g_respawn_timer = 0;
+    menu_respawn_subtitle(NULL);
+}
+
+// game_events.c, as the death delay ends (before the menu opens): Game.forceSpawn is
+// config.forceSpawn || mode.forceSpawn (g:189942).
+void menu_auto_respawn_begin(const Client *client) {
+    if (!client || !client->game.mode) return;
+    const int force = client->game.config.auto_respawn > 0 ? client->game.config.auto_respawn : (int) client->game.mode->config.force_spawn;
+    if (force <= 0 || !g_ui.dom_ready) return;
+    if (g_respawn_timer) html_timer_cancel(g_respawn_timer);
+    g_respawn_timer = 0;
+    menu_respawn_step(force + 1);
+}
+
+// ui_scenario.c state.autoRespawn: the subtitle as the countdown shows it with N seconds left
+// (no sound, no timer).
+void menu_auto_respawn_scenario(const cJSON *seconds) {
+    if (!cJSON_IsNumber(seconds)) return;
+    char text[96], n[16];
+    snprintf(n, sizeof(n), "%d", seconds->valueint);
+    snprintf(g_respawn_sub, sizeof(g_respawn_sub), "%s", I18N_F(text, "respawn.auto", "Auto Respawning in {0}", n));
+    g_ui.last_instructions[0] = 0;
+    menu_update_instructions();
+}
+
 #define MENU_LOAD_SPINNER "<div style='width:100%;text-align:center;transform:scale(1.3);'><div class='lds-ring'><div></div><div></div><div></div><div></div></div></div>"
+// index.html's #instructions as the page boots (the ring at scale 1.4 and #loadGamNm)
+#define MENU_BOOT_RING "<div style=\"width:100%;text-align:center;transform:scale(1.4)\"><div class=\"lds-ring\"><div></div><div></div><div></div><div></div></div></div><div style=\"color:#fff;width:50vw\" id=\"loadGamNm\">"
+#define MENU_ERROR_TAB(handler, label) "\n\t\t\t\t<div class=\"instructionsTab\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);" handler "\">" label "</div>"
 void menu_update_instructions(void) {
     HtmlElem el = by_id("instructions");
     if (!el) return;
     StrBuf sb = {0};
     const int error = g_ui.dom_ready && !can_play() && g_ui.connect_error[0] && !g_ui.connected;
-    if (!g_ui.dom_ready) {
-        sb_append(&sb, MENU_LOAD_SPINNER);
+    const int updating = error && !strcmp(g_ui.connect_error, "GAME UPDATING");
+    if (!g_ui.dom_ready || (menu_boot_waiting() && !error)) {
+        sb_append(&sb, MENU_BOOT_RING);
+        menu_load_gam_text(&sb);
+        sb_append(&sb, "</div>");
     } else if (can_play()) {
         const int spect = spectate_requested();
         sb_append(&sb, gamepad_active() ? (spect ? I18N("app.spectate.controller", "START to SPECTATE") : I18N("app.play.controller", "PRESS START"))
                        : ui_mobile_active() ? (spect ? I18N("app.spectate.mobile", "TAP TO SPECTATE") : I18N("app.play.mobile", "TAP TO PLAY"))
                        : spect ? I18N("app.spectate", "CLICK TO SPECTATE") : I18N("app.play", "CLICK TO PLAY"));
-        // the ranked queue status under it (v10794.toUpperCase(), ranked_ui.c)
-        if (ranked_ui_status()) {
+        // v10's subtitle is the auto-respawn countdown; KrunkNative's ranked queue status (v7's,
+        // ranked_ui.c: NULL on the v10 page, whose banner shows it) takes the same place
+        const char *sub = g_respawn_sub[0] ? g_respawn_sub : ranked_ui_status();
+        if (sub) {
             sb_append(&sb, "<div id='instructionsSubtitle'>");
-            for (const char *p = ranked_ui_status(); *p; p++) sb_appendf(&sb, "%c", *p >= 'a' && *p <= 'z' ? *p - 32 : *p);
+            for (const char *p = sub; *p; p++) sb_appendf(&sb, "%c", *p >= 'a' && *p <= 'z' ? *p - 32 : *p);
             sb_append(&sb, "</div>");
-            if (ranked_ui_ready() && ranked_ui_ready()[0]) {
+            if (!g_respawn_sub[0] && ranked_ui_ready() && ranked_ui_ready()[0]) {
                 sb_append(&sb, "<div id='instructionsSubtitle'>");
                 sb_append_esc(&sb, ranked_ui_ready());
                 sb_append(&sb, "</div>");
@@ -733,50 +976,65 @@ void menu_update_instructions(void) {
         sb_append(&sb, MENU_LOAD_SPINNER);
     }
     char *html = sb_finish(&sb);
-    // the error screen: #instructionsUpdate
+    // the error screen: #instructionsUpdate (v10 g:222098-222120)
     StrBuf eb = {0};
-    if (error) {
-        eb.len = 0;
-        // v7.1.4 f2040: "GAME UPDATING" (a server stopping for an update, or the matchmaker's
-        // NoServersMatchQuery) is the Game Updating screen. KrunkNative keeps the error screen's
-        // layout for it (no update art / Twitch embeds), says what happened for the server's
-        // ERROR and, while servers_ui.c rejoins with a fresh ticket, "Rejoining..."
-        const int updating = !strcmp(g_ui.connect_error, "GAME UPDATING");
-        sb_appendf(&eb, "<div class='instructionsHeader'>%s</div><div style='color: rgba(255, 255, 255, 0.6);margin-top: 5px;font-size: 28px;'>",
-                   updating ? "Game Updating" : "Lost Connection");
-        sb_append_esc(&eb, updating && !strcmp(g_connect_code, NET_ERROR_CODE_UPDATING) ? I18N("kn.error.restartingUpdate", "Restarting for an update") : connect_error_text(g_ui.connect_error));
-        // KrunkNative: the matchmaker turned a guest away (AccountRequired: a node of a server_bin
-        // that still refused guests): log in (the lobby is joined right after, servers_ui.c)
+    const char *find = servers_ui_pinned() ? I18N("kn.error.reconnect", "Reconnect") : NULL;
+    if (updating) {
+        // Game Updating ("GAME UPDATING": a server stopping for an update, or the matchmaker's
+        // NoServersMatchQuery): v10's header, the Twitch line and Find a Game / Settings /
+        // Changelog over the menu-bg art. Its two Twitch iframes stay display:none in v10 and are
+        // left out. KrunkNative: while servers_ui.c rejoins with a fresh ticket its status takes
+        // the Twitch line's place, and Play Offline joins the tabs (as on Lost Connection).
+        sb_append(&eb, "<div class='instructionsHeader'>Game Updating</div>");
+        if (servers_ui_rejoining())
+            sb_appendf(&eb, "<div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.8)'>%s</div>", servers_ui_rejoin_text());
+        else
+            sb_append(&eb, "<div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>While you wait <a target='_blank' href='https://www.twitch.tv/directory/game/Krunker'>go chat</a> with some Krunker Streamers</a></div>");
+        sb_appendf(&eb, "<div class=\"instructionsTabs\">" MENU_ERROR_TAB("knRetry()", "%s") MENU_ERROR_TAB("knHostOffline()", "%s")
+                        MENU_ERROR_TAB("showWindow(1)", "Settings") MENU_ERROR_TAB("showWindow(35)", "Changelog") "\n\t\t\t</div>",
+                   find ? find : "Find a Game", I18N("kn.error.playOffline", "Play Offline"));
+    } else if (error) {
+        // Lost Connection. v10: an inactivity kick drops the ID / region lines and every tab but
+        // Find Game (and leaves its message div open, so the tabs sit inside it), a ban names the
+        // appeal address. KrunkNative: the server's text is escaped; the transport's close code
+        // and cause stand for the socket's; Play Offline is its own tab (knHostOffline); "Log in"
+        // under the message when the matchmaker turned a guest away (servers_ui.c).
+        const char *text = connect_error_text(g_ui.connect_error);
+        char lower[256];
+        size_t i = 0;
+        for (; text[i] && i + 1 < sizeof(lower); i++) lower[i] = (char) (text[i] >= 'A' && text[i] <= 'Z' ? text[i] + 32 : text[i]);
+        lower[i] = 0;
+        const int inactive = !strcmp(g_ui.connect_error, "Kicked for inactivity") || strstr(lower, "disconnected due to inactivity") != NULL;
+        sb_appendf(&eb, "<div class='instructionsHeader'>Lost Connection</div><div style='color: rgba(255, 255, 255, 0.6);margin-top: 5px;font-size: 28px;'>"
+                        "<div style=\"font-size: 28px;color: rgba(255, 255, 255, 0.6);%s\"> ",
+                   inactive ? "margin-top: 50px;margin-bottom: 55px;" : "");
+        sb_append_esc(&eb, text);
+        sb_append(&eb, " </div>");
         if (servers_ui_account_required()) {
             char login[192];
             I18N_F(login, "kn.error.loginToJoin", "{0}Log in{1} to join it.", "<a href='#' onclick='showWindow(5);return false'>", "</a>");
             sb_appendf(&eb, "<div style='font-size:20px'>%s</div>", login);
         }
-        sb_append(&eb, "</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>ID: 0x");
-        sb_append_esc(&eb, g_connect_code[0] ? g_connect_code : "000000");
-        // v7.1.4 f2040: "Code: <close code> | Reason: <close reason>" of the socket's close event; here
-        // the transport's (events.c: the WebSocket close code, a short cause such as timeout / ice)
-        sb_appendf(&eb, " | Code: %d | Reason: ", g_connect_close_code);
-        sb_append_esc(&eb, g_connect_close_reason[0] ? g_connect_close_reason : "0");
-        sb_append(&eb, "</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>Region: ");
-        sb_append_esc(&eb, g_region_label[0] ? g_region_label : MENU_REGION_NAME);
-        // while servers_ui.c rejoins with a fresh ticket, its status replaces the extensions hint
-        if (servers_ui_rejoining())
-            sb_appendf(&eb, "</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.8)'>%s</div>", servers_ui_rejoin_text());
-        else
-            sb_appendf(&eb, "</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>%s</div>",
-                       I18N("error.extentions", "If you have any extensions, disable them"));
-        // Find a Game: seek a new game (or retry a pinned server: console connect / Direct Connect).
-        // v7's row is table-layout: fixed, four equal cells of the box's 610px; KrunkNative's fifth
-        // tab (Play Offline) leaves 112px of text per cell, less than "Find a Game" / "Play
-        // Offline" take at 16px, so they wrapped onto two lines. The row sizes its cells by their
-        // text instead (auto layout, no wrapping); the five labels fit the box with room to spare.
-        sb_appendf(&eb, "<div class=\"instructionsTabs\" style=\"table-layout:auto;white-space:nowrap\">\n\t\t\t\t<div class=\"instructionsTab\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);knRetry()\">%s</div>"
-                        "\n\t\t\t\t<div class=\"instructionsTab\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);knHostOffline()\">%s</div>"
-                        "\n\t\t\t\t<div class=\"instructionsTab\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);showWindow(2)\">Servers</div>"
-                        "\n\t\t\t\t<div class=\"instructionsTab\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);showWindow(1)\">Settings</div>"
-                        "\n\t\t\t\t<div class=\"instructionsTab\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);showWindow(35)\">Changelog</div>\n\t\t\t</div>",
-                   servers_ui_pinned() ? I18N("kn.error.reconnect", "Reconnect") : "Find a Game", I18N("kn.error.playOffline", "Play Offline"));
+        if (!inactive) {
+            sb_append(&eb, "</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>ID: 0x");
+            sb_append_esc(&eb, g_connect_code[0] ? g_connect_code : "000000");
+            sb_appendf(&eb, " | Code: %d | Reason: ", g_connect_close_code);
+            sb_append_esc(&eb, g_connect_close_reason[0] ? g_connect_close_reason : "0");
+            sb_append(&eb, "</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>Region: ");
+            sb_append_esc(&eb, g_region_label[0] ? g_region_label : MENU_REGION_NAME);
+            sb_append(&eb, "</div>");
+            if (servers_ui_rejoining())
+                sb_appendf(&eb, "<div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.8)'>%s</div>", servers_ui_rejoin_text());
+            else if (strstr(lower, "connection banned"))
+                sb_append(&eb, "<div style='margin-top:10px;font-size:13px;color:rgba(255,255,255,0.4)'>Contact <span style='color:#fff'>krunker+banappeal@frvr.com</span> to Appeal the Ban</div><div></div>");
+            else
+                sb_appendf(&eb, "<div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>%s</div>", I18N("error.extentions", "If you have any extensions, disable them"));
+        }
+        sb_appendf(&eb, "<div class=\"instructionsTabs\">" MENU_ERROR_TAB("knRetry()", "%s"), find ? find : "Find Game");
+        if (!inactive)
+            sb_appendf(&eb, MENU_ERROR_TAB("knHostOffline()", "%s") MENU_ERROR_TAB("showWindow(2)", "Servers") MENU_ERROR_TAB("showWindow(1)", "Settings"),
+                       I18N("kn.error.playOffline", "Play Offline"));
+        sb_append(&eb, "\n\t\t\t</div>");
     }
     char *update = sb_finish(&eb);
     char key[sizeof(g_ui.last_instructions)];
@@ -795,12 +1053,12 @@ void menu_update_instructions(void) {
     free(html);
     free(update);
     menu_apply_error_screen(error);
+    menu_apply_update_art(updating);
     set_style("instructionHolder", "pointer-events", "all");
     // Krunker Strike: the spinner states (page loading, connecting) are the brand's loading
     // screen (the Strike curtains over #instructionHolder, flavor_ui.c); no-op for base
     flavor_ui_set_loading(!error && (!g_ui.dom_ready || !can_play()));
 }
-
 
 void menu_set_region_label(const char *name) {
     snprintf(g_region_label, sizeof(g_region_label), "%s", name ? name : "");
@@ -1203,6 +1461,14 @@ void menu_play(void) {
 // the page shows CONNECTING... in between.
 void menu_host_offline(void) {
     menu_close_window();
+    // v10 hosts on a fresh page: the curtain and "Hosting <map> ..." until the game's INIT
+    // (only when the in-process server starts: on a live connection play just starts)
+    if (!client_is_connected(g_ui.client)) {
+        const char *map = cjson_map_name(g_ui.client->offline_start_map);
+        menu_load_gam_set(LOAD_GAM_HOSTING, map[0] ? map : cjson_map_name(g_ui.client->startup_map));
+        if (!g_load_gam_map[0]) g_load_gam = LOAD_GAM_NONE;
+        menu_boot_arm(0);
+    }
     g_ui.connect_error[0] = 0;
     arm_connect_timer();
     menu_update_instructions();
@@ -1212,6 +1478,9 @@ void menu_host_offline(void) {
 
 // CONNECTING... (the error screen goes) until the server answers or the timer fires.
 void menu_show_connecting(void) {
+    // v10 joins every game on a fresh page (switchGame / backToOrigin): the curtain until its INIT
+    menu_load_gam_set(LOAD_GAM_NONE, "");
+    if (g_ui.dom_ready) menu_boot_arm(0);
     g_ui.connect_error[0] = 0;
     arm_connect_timer();
     menu_update_instructions();
@@ -1222,7 +1491,10 @@ void menu_show_connecting(void) {
 // (servers_ui.c) it retries that server; otherwise with a brain it seeks a new game.
 void menu_retry_connect(void) {
     menu_show_connecting();
-    if (client_is_connected(g_ui.client)) return;
+    if (client_is_connected(g_ui.client)) {
+        g_boot_any = 1; // nothing is left: the game still loaded lifts the curtain again
+        return;
+    }
     if (servers_ui_retry()) return; // brain matchmaker: seek a new game (servers_ui.c)
     client_net_request_reconnect(g_ui.client);
 }
@@ -1370,7 +1642,8 @@ static int scenario_on(void) {
 // The inline state v7.1.4's client leaves on its static page once loaded, connected and
 // on the menu (DOM of the real page, tools/uidiff/capture-v7.js), minus the HUD's (hud_ui.c).
 static void setup_dom(void) {
-    set_display("loadingBg", "none");
+    // #loadingBg and #instructionsFadeBG stay as the page boots them until the first INIT
+    // (menu_boot_tick); v10 never touches #loadingBg1 (empty, like #loadingBg)
     set_display("loadingBg1", "none");
     set_display("consentBlock", "none");
     set_display("aHider", "none");            // ads: none in KrunkNative
@@ -1383,7 +1656,6 @@ static void setup_dom(void) {
     set_display("infoHider", "block");
     set_display("mMenuHolDef", "block");
     set_display("instructionHider", "block");
-    set_style("instructionsFadeBG", "opacity", "0");
     set_style("spectButton", "opacity", "1");
     set_display("vsHolder", "none");
     set_style("menuRegionLabel", "display", "flex");
@@ -1502,6 +1774,11 @@ static void menu_on_locale(void *user) {
 
 // init() + the `bridgeReady` handler: runs once the page's DOM exists.
 static void menu_dom_init(void) {
+    // a fresh page: the curtain is up (main.css) until an INIT, no update art yet
+    g_boot_curtain = 1;
+    g_boot_settled = 0;
+    g_boot_any = 1;
+    g_update_art = -1;
     i18n_init(); // translations.en + the stored locale (krk_lang)
     i18n_on_change(menu_on_locale, NULL);
     ui_windows_load();
@@ -1604,6 +1881,7 @@ void client_menu_tick(Client *client) {
     if (g_ui.dom_ready) {
         menu_refresh_tables(client);
         if (menu_state_changed(client)) menu_apply_state(client);
+        menu_boot_tick();
         menu_update_ping(client);
         download_ui_tick(); // ?download opens the Download window (download_ui.c)
         v10_news_tick();    // the v10 menu's What's New item (v10_news.c)

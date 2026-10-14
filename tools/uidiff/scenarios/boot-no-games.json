@@ -1,0 +1,26 @@
+{
+  "ref": "doc/ref/krunknative/boot-no-games.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "ui/img/menu-bg/4.png",
+  "state": {
+    "menu": true,
+    "connected": false,
+    "ready": false,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.8,
+    "boot": {
+      "loadGamNm": "noGames"
+    }
+  },
+  "frames": 3,
+  "note": "v10 autoHostMap(host, true) before the map preset arrives (g:218512): 'No Games found' under the boot ring (menu_ui.c). Reference: KN's own llvmpipe render (doc/ref/krunknative/), a regression baseline until the harness module captures v10's (UI-PARITY-AUDIT section 3). The 3D view behind the menu is a stand-in image (ui/img/menu-bg/4.png) so the curtain (which sits under #uiBase and only hides the scene) shows."
+}

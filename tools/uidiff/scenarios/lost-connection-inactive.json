@@ -1,0 +1,24 @@
+{
+  "ref": "doc/ref/krunknative/lost-connection-inactive.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": false,
+    "ready": false,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.8,
+    "connectError": "Kicked for inactivity"
+  },
+  "frames": 3,
+  "note": "v10 Lost Connection after the idle kick (g:222118): 'Disconnected due to inactivity' with 50/55 px margins, no ID / region lines, Find Game only (menu_ui.c). Reference: KN's own llvmpipe render (doc/ref/krunknative/), a regression baseline until the harness module captures v10's (UI-PARITY-AUDIT section 3)."
+}

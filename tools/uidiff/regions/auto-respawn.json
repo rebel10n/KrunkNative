@@ -1,0 +1,19 @@
+{
+  "scenario": "auto-respawn",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "instructions",
+      "rect": [
+        440,
+        250,
+        400,
+        140
+      ],
+      "note": "CLICK TO PLAY + #instructionsSubtitle AUTO RESPAWNING IN 3"
+    }
+  ]
+}

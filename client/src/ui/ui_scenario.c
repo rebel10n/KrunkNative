@@ -269,6 +269,8 @@ static void warn_unknown_keys(void) {
         "settings",   // {key: value}: setSetting before the state applies (v10's showMinimap off by default)
         "market",     // the v10 Market & Trading popup's state (v10_market_scenario)
         "windowScroll", // {id: scrollTop}: a scroll container of the window after windowActions (clamped: 1e6 = the end)
+        "boot",       // S1: true | {loadGamNm: "play" | "host" | "noGames", map}: the boot curtain before the first INIT
+        "autoRespawn", // S1: N: the play prompt's "Auto Respawning in N" subtitle
     };
     const cJSON *item;
     cJSON_ArrayForEach(item, g_sc.state) {
@@ -927,6 +929,8 @@ static int ui_scenario_apply(Client *client) {
     apply_killcard(client);
     apply_endscreen(client);
     apply_chat_input();
+    menu_boot_scenario(st("boot"));                 // S1: the page before its first INIT (menu_ui.c)
+    menu_auto_respawn_scenario(st("autoRespawn"));  // S1: "Auto Respawning in N" (menu_ui.c)
     apply_net_state();
     return 1;
 }

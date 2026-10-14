@@ -1,0 +1,19 @@
+{
+  "scenario": "click-to-play-grow-00",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "instructions",
+      "rect": [
+        440,
+        250,
+        400,
+        100
+      ],
+      "note": "CLICK TO PLAY in its grow keyframes"
+    }
+  ]
+}

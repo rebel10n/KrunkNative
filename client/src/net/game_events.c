@@ -1052,5 +1052,6 @@ void client_game_events_tick(Client *client) {
     // f1771 runs UI.toggleMenu(true) also when the menu is up already (ESC before the death or
     // during it): toggleMenuHider(true) drops .onDeathScrn, so the chat leaves the death
     // screen's place (main.css #uiBase.onDeathScrn #chatHolder) for the menu's.
+    menu_auto_respawn_begin(client); // v10: forceSpawn && autoRespawn(forceSpawn + 1), before the menu (menu_ui.c)
     if (html_ui_available()) client_set_menu_open(client, 1);
 }

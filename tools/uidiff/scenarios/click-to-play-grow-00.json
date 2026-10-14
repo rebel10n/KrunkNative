@@ -1,0 +1,23 @@
+{
+  "ref": "doc/ref/krunknative/click-to-play-grow-00.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.0
+  },
+  "frames": 3,
+  "note": "CLICK TO PLAY's `grow 0.8s infinite alternate` (main.css:2067-2083: from opacity 0.3 / 44px to 36px) at 0.0 s of its 1.6 s cycle (main-menu.json is the 0.8 s frame). Reference: KN's own llvmpipe render (doc/ref/krunknative/), a regression baseline until the harness module captures v10's (UI-PARITY-AUDIT section 3)."
+}

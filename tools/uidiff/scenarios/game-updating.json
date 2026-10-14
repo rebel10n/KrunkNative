@@ -1,0 +1,24 @@
+{
+  "ref": "doc/ref/krunknative/game-updating.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": false,
+    "ready": false,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.8,
+    "connectError": "GAME UPDATING"
+  },
+  "frames": 3,
+  "note": "v10 Game Updating (g:222104-222113): the menu-bg art (img/menu-bg/0.png pinned in renders; v10 picks randInt over g:19437's list) in #instructionsUpdateBG, 'Art By @EmpoTheDon' in #instructionsUpdateCredit, the header, the Twitch line and Find a Game / Play Offline / Settings / Changelog (menu_ui.c). Reference: KN's own llvmpipe render (doc/ref/krunknative/), a regression baseline until the harness module captures v10's (UI-PARITY-AUDIT section 3)."
+}

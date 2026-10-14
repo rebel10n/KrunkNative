@@ -1,0 +1,29 @@
+{
+  "scenario": "boot-curtain-350",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "scene",
+      "rect": [
+        250,
+        300,
+        200,
+        200
+      ],
+      "note": "#instructionsFadeBG over the 3D view's stand-in: #222 at opacity 1 / mid fade / 0"
+    },
+    {
+      "name": "instructions",
+      "rect": [
+        440,
+        250,
+        400,
+        140
+      ],
+      "note": "#instructions: the boot ring (scale 1.4) and #loadGamNm, or CLICK TO PLAY"
+    }
+  ]
+}

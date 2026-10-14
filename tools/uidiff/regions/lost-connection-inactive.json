@@ -1,0 +1,19 @@
+{
+  "scenario": "lost-connection-inactive",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "error-box",
+      "rect": [
+        440,
+        250,
+        400,
+        210
+      ],
+      "note": "#instructionsUpdate: the Lost Connection box"
+    }
+  ]
+}

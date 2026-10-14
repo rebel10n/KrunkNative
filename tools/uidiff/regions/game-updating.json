@@ -1,0 +1,39 @@
+{
+  "scenario": "game-updating",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "error-box",
+      "rect": [
+        455,
+        300,
+        370,
+        115
+      ],
+      "note": "#instructionsUpdate: Game Updating, the Twitch line, the tabs"
+    },
+    {
+      "name": "art",
+      "rect": [
+        880,
+        0,
+        400,
+        260
+      ],
+      "note": "#instructionsUpdateBG: img/menu-bg/0.png"
+    },
+    {
+      "name": "credit",
+      "rect": [
+        0,
+        688,
+        220,
+        32
+      ],
+      "note": "#instructionsUpdateCredit: Art By @EmpoTheDon"
+    }
+  ]
+}

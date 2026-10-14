@@ -1,0 +1,25 @@
+{
+  "ref": "doc/ref/krunknative/boot-curtain-350.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "ui/img/menu-bg/4.png",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.8,
+    "boot": true,
+    "after_ms": 383.33
+  },
+  "frames": 3,
+  "note": "The first INIT's 0.7 s ease-in-out fade of #instructionsFadeBG (v10 g:219640, main.css:2115), 350 ms in: boot:true re-arms the curtain, ready:true starts the fade two frames later (after_ms = 350 + 2 frames), CLICK TO PLAY already written (INIT's updatePlayInstructions). Reference: KN's own llvmpipe render (doc/ref/krunknative/), a regression baseline until the harness module captures v10's (UI-PARITY-AUDIT section 3). The 3D view behind the menu is a stand-in image (ui/img/menu-bg/4.png) so the curtain (which sits under #uiBase and only hides the scene) shows."
+}

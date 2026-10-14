@@ -130,6 +130,11 @@ void menu_play(void);                            // play
 void menu_host_offline(void);                    // hostOffline
 void menu_retry_connect(void);                   // retryConnect
 void menu_show_connecting(void);                 // CONNECTING... + the connect timeout, no reconnect / seek
+// v10.0.2 boot curtain (#instructionsFadeBG until the first INIT, then its 0.7 s fade), #loadGamNm
+// and the auto-respawn countdown (menu_ui.c)
+void menu_auto_respawn_begin(const Client *client); // the death delay ended: autoRespawn(forceSpawn + 1)
+void menu_boot_scenario(const cJSON *boot);      // --render-scenario state.boot
+void menu_auto_respawn_scenario(const cJSON *seconds); // --render-scenario state.autoRespawn
 void menu_set_class_index(int index, int silent);// setClassIndex
 void menu_select_class(int index);               // selectClass
 void menu_select_map(int index);                 // knSelectMap

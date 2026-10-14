@@ -1,0 +1,25 @@
+{
+  "ref": "doc/ref/krunknative/boot-curtain-700.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "ui/img/menu-bg/4.png",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.8,
+    "boot": true,
+    "after_ms": 733.33
+  },
+  "frames": 3,
+  "note": "The boot fade's end, 700 ms after the first INIT: #instructionsFadeBG at opacity 0, the main menu as main-menu.json shows it (menu_ui.c). Reference: KN's own llvmpipe render (doc/ref/krunknative/), a regression baseline until the harness module captures v10's (UI-PARITY-AUDIT section 3). The 3D view behind the menu is a stand-in image (ui/img/menu-bg/4.png) so the curtain (which sits under #uiBase and only hides the scene) shows."
+}

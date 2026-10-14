@@ -1,0 +1,24 @@
+{
+  "ref": "doc/ref/krunknative/lost-connection.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": false,
+    "ready": false,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.8,
+    "connectError": "Disconnected"
+  },
+  "frames": 3,
+  "note": "v10 Lost Connection (g:222118): the message in its nested div, ID / Code / Reason, Region, the extensions hint and Find Game / Play Offline (KrunkNative's knHostOffline) / Servers / Settings (menu_ui.c). Reference: KN's own llvmpipe render (doc/ref/krunknative/), a regression baseline until the harness module captures v10's (UI-PARITY-AUDIT section 3)."
+}
