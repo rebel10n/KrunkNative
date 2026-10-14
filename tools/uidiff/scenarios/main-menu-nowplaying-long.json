@@ -1,0 +1,23 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/main-menu-nowplaying-long.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "Frankfurt",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "Capture the Flag on Hardpoint Overgrowth Winter Edition",
+    "anim_time": 0.8
+  },
+  "frames": 3,
+  "note": "Krunker v10.0.2 main menu, guest, with a long \"Now Playing: <mode> on <map>\" and a region: the match-info bar's segments are content-sized (svelte.css .match-seg: flex, nowrap), so the bar widens and Now Playing never runs into the region or INVITE - JOIN. Reference: main-menu.png's capture DOM with v10's two texts changed, laid out by Chromium with v10's CSS and no script (tools/uidiff/capture-v10-nowplaying.js)"
+}

@@ -201,7 +201,10 @@ static void match_info_setup(void) {
         html_dom_set_text(el, text);
     }
     if ((el = html_dom_query(0, "#menuServerInfoContainer .menuDebugInfo"))) html_dom_append(segs[3], el);
-    if ((el = by_id("mapVote"))) html_dom_append(segs[3], el);
+    if ((el = by_id("mapVote"))) { // shown even while empty: the segment's gap before it is part of the bar's width
+        html_dom_set_display(el, "");
+        html_dom_append(segs[3], el);
+    }
     wire(by_id("inviteButton"), "playSelect(0.1),copyInviteLink()");
     wire(by_id("menuBtnJoin"), "playSelect(0.1),openJoinWindow()");
 }

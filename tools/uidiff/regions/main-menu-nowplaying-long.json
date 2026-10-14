@@ -1,0 +1,61 @@
+{
+  "scenario": "main-menu-nowplaying-long",
+  "defaults": {
+    "fuzz": 20,
+    "max_pct": 3.0
+  },
+  "regions": [
+    {
+      "name": "match-info-bar",
+      "rect": [
+        311,
+        606,
+        658,
+        32
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 3.0,
+      "note": "#matchInfoHolder (Chromium 315,610 650x24): Now Playing + the long name, the region, INVITE - JOIN, the ping and the empty #mapVote (its 8px gap counts), each in its own content-sized segment"
+    },
+    {
+      "name": "now-playing",
+      "rect": [
+        320,
+        612,
+        427,
+        20
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 3.0,
+      "note": "#mapInfoHld: the whole name, with nothing else drawn over it"
+    },
+    {
+      "name": "region-invite-join",
+      "rect": [
+        748,
+        612,
+        220,
+        20
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 3.0,
+      "note": "the region label (Frankfurt), INVITE - JOIN and the ping after the name, not under it"
+    },
+    {
+      "name": "class-card",
+      "rect": [
+        512,
+        564,
+        256,
+        42
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 12.0,
+      "note": "the class card above the bar (its weapon thumbnail is an assets.krunker.io image the reference cannot load)"
+    }
+  ]
+}
