@@ -2,7 +2,7 @@
 """KN_KRUNKER_OFFICIAL end to end against a local stub of krunker.io (client/include/krunker_net.h):
 nothing leaves the machine.
 
-  python3 -I server/tests/krunker_official_e2e.py BUILD_DIR [WEB_DIST_DIR] [--native|--web]   (repo root)
+  python3 -I server/tests/krunker_official_e2e.py BUILD_DIR [WEB_DIST_DIR] [--native|--web|--webview]   (repo root)
 
 Stubs (Python, ports from kn_proto.free_ports()):
   - Krunker's matchmaker: GET /generate-token (a token) and GET /seek-game (checks the exact query
@@ -25,8 +25,13 @@ Security Challenge modal first ends the join saying so, a second click + a paste
 "native-optout" (KRUNKNATIVE_KRUNKER_JOIN=browser) checks the click opens krunker.io in the browser instead.
 Captcha runs (krunker_captcha.h): native "callback" (the one-time 127.0.0.1 callback: a wrong secret,
 a foreign Origin, a body that is not a token, an expired listener, then the token, then a second
-token), native "paste" (a bad paste refused in the modal, then a good one), web "widget" (the stub
-widget's token) and web "domain" (110200: the modal says why and falls back to the paste box). Each
+token), native "paste" (a bad paste refused in the modal, then a good one), native "webview" (the
+challenge window of kn_webview.h, WebKitGTK under the run's own xvfb-run: it loads the test's stub
+krunker.io page, KRUNKNATIVE_KRUNKER_CAPTCHA_URL, whose stub `turnstile` widget "is solved" by firing
+its own callback; the first token is refused by the matchmaker, the window opens again, the second
+joins; a frame of another origin tries to post a forged token), web "widget" (the stub widget's
+token) and web "domain" (110200: the modal says why and falls back to the paste box). Those native
+runs without a display (callback, paste) also cover a webview build falling back. Each
 checks the live client's order: seek-game (no validationToken), CaptchaRequired, generate-token,
 seek-game with validationToken + captchaToken, and that no token reaches the log.
 Checks: the seek query, the WebSocket URL, every client frame's ahNum trailer ((prev + AHKEY) & 0xff,
@@ -40,8 +45,9 @@ The native run is one headless client_bin (--krunker, KRUNKNATIVE_KRUNKER_MATCHM
 script: play, W, `say`, `players`); the web run is the web build in headless Chromium (?krunker=1,
 ?krunkerMM=, clicks and keys over the DevTools protocol). The native cheat check answers only when
 client_bin's QuickJS sandbox (krunker_cheat_qjs.c) answers natively, the page's eval on the web.
-Exit 0 when every check passed, 77 when nothing could run; logs stay in ~/.cache/kn-krunker-official-e2e-*
-on failure.
+Exit 0 when every check passed, 77 when nothing could run (--webview: when this build has no webview,
+WebKitGTK / xvfb-run are missing; a full run then only says the webview run was skipped); logs stay in
+~/.cache/kn-krunker-official-e2e-* on failure.
 """
 import asyncio
 import base64
@@ -75,7 +81,7 @@ except ImportError:  # pragma: no cover
 ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
 BUILD = os.path.abspath(ARGS[0] if ARGS else "cmake-build-debug")
 DIST = os.path.abspath(ARGS[1]) if len(ARGS) > 1 else None
-ONLY = {"--native": "native", "--web": "web"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+ONLY = {"--native": "native", "--web": "web", "--webview": "webview"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -548,7 +554,7 @@ def post(url, body, origin="https://krunker.io", ctype="text/plain"):
         return "refused"
 
 
-def launch_native(label, script_text, extra_env, args=("--krunker",)):
+def launch_native(label, script_text, extra_env, args=("--krunker",), wrap=()):
     mm, wsp = kn_proto.free_ports(2)
     stub = Stub(mm, wsp)
     stub.start_http()
@@ -564,7 +570,7 @@ def launch_native(label, script_text, extra_env, args=("--krunker",)):
                 "KRUNKNATIVE_KRUNKER_TRACE": "1", "KRUNKNATIVE_ASSETS_DIR": ASSETS, "KRUNKNATIVE_ASSET_FETCH": "off"})
     env.update(extra_env)
     out = open(log, "w")
-    p = subprocess.Popen(["stdbuf", "-oL", "-eL", f"{BUILD}/client_bin", *args], stdout=out, stderr=subprocess.STDOUT,
+    p = subprocess.Popen([*wrap, "stdbuf", "-oL", "-eL", f"{BUILD}/client_bin", *args], stdout=out, stderr=subprocess.STDOUT,
                          stdin=subprocess.DEVNULL, env=env, start_new_session=True, cwd=ROOT)
     return stub, p, out, Log(log)
 
@@ -736,6 +742,187 @@ def run_native_optout():
           text[-400:])
     check(f"{label}: nothing is sought in-client", not any(pth == "/seek-game" for pth, _, _ in stub.http_log) and not stub.ws_paths and
           "joining official game" not in text, [pth for pth, _, _ in stub.http_log])
+
+
+# ---------------------------------------------------------------- native: the challenge window (kn_webview.h)
+
+WEBVIEW_SOLVE_MS = 1500  # the stub widget's "player" solves it this long after it is shown
+
+
+def webview_token(n):  # the token the stub page's widget gives on its n-th load (1-based)
+    return "0.e2eWebviewToken_%d_%s.sig-WvW_789" % (n, "w" * 250)
+
+
+FORGED_TOKEN = "0.e2eForgedByAnotherOrigin_" + "f" * 120 + ".sig-FoR_000"
+
+# The stand-in for the krunker.io page: a stub of Cloudflare api.js's `turnstile` (render(el, opts) /
+# remove(id)), which reports how it was called and then fires the widget's own callback, like a player
+# solving it; and a frame of another origin trying to hand the client a forged token.
+WEBVIEW_PAGE = """<!doctype html>
+<html><head><meta charset="utf-8"><title>krunker.io (e2e stub)</title>
+<script>
+(function () {
+  var probe = function (q) { var i = new Image(); i.src = '/probe?' + q; };
+  var h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.knCaptcha;
+  probe('page=1&main_handler=' + (h ? 1 : 0));
+  window.turnstile = {
+    render: function (el, o) {
+      var box = document.createElement('div');
+      box.style.cssText = 'border:1px solid #888;padding:14px 18px;background:#f4f4f4;color:#222';
+      box.textContent = 'stub challenge: the player is solving it';
+      el.appendChild(box);
+      probe('render=1&sitekey=' + encodeURIComponent(o.sitekey) + '&appearance=' + encodeURIComponent(o.appearance) +
+            '&callback=' + (typeof o.callback));
+      setTimeout(function () { box.textContent = 'stub challenge: solved'; o.callback(%(token)s); }, %(delay)d);
+      return 'stub-widget';
+    },
+    remove: function () {}
+  };
+})();
+</script></head>
+<body><pre>User-agent: *
+Allow: /</pre>
+<iframe src="%(forge)s" style="width:40px;height:20px;border:0"></iframe>
+</body></html>
+"""
+
+FORGE_PAGE = """<!doctype html><html><body><script>
+(function () {
+  var probe = function (q) { var i = new Image(); i.src = '/probe?' + q; };
+  var t = %(token)s;
+  var h = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.knCaptcha;
+  probe('forge=1&handler=' + (h ? 1 : 0));
+  try { if (h) h.postMessage('token:' + t); } catch (e) {}
+  try {
+    top.document.documentElement.setAttribute('data-kn-captcha', 'token:' + t);
+    top.document.dispatchEvent(new Event('kn-captcha'));
+    probe('forge=1&top=reached');
+  } catch (e) { probe('forge=1&top=blocked'); }
+})();
+</script></body></html>
+"""
+
+
+class ChallengePage:
+    """The test's krunker.io page (KRUNKNATIVE_KRUNKER_CAPTCHA_URL=http://127.0.0.1:<port>/robots.txt) and,
+    on the same port as http://localhost:<port>, the frame of another origin."""
+
+    def __init__(self, port):
+        self.port, self.loads, self.probes, self.paths = port, [], [], []
+        self.httpd = None
+
+    def start(self):
+        page = self
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                u = urllib.parse.urlsplit(self.path)
+                page.paths.append(self.path)
+                if u.path == "/robots.txt":
+                    page.loads.append(self.headers.get("User-Agent", ""))
+                    body = WEBVIEW_PAGE % {"token": json.dumps(webview_token(len(page.loads))), "delay": WEBVIEW_SOLVE_MS,
+                                           "forge": "http://localhost:%d/forge" % page.port}
+                    ctype = "text/html; charset=utf-8"
+                elif u.path == "/forge":
+                    body, ctype = FORGE_PAGE % {"token": json.dumps(FORGED_TOKEN)}, "text/html; charset=utf-8"
+                elif u.path == "/probe":
+                    page.probes.append(dict(urllib.parse.parse_qsl(u.query)))
+                    body, ctype = "", "text/plain"
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                data = body.encode()
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(data)
+
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", self.port), H)
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def stop(self):
+        if self.httpd:
+            self.httpd.shutdown()
+            self.httpd.server_close()
+
+
+def webview_skip_reason():
+    if not os.path.isfile(os.path.join(BUILD, "libkn_webview.a")):
+        return "this client_bin was built without a webview (KN_WEBVIEW off, or webkit2gtk-4.1 not found)"
+    if not shutil.which("xvfb-run"):
+        return "xvfb-run is missing (the challenge window needs an X display of its own)"
+    return None
+
+
+def session_alive(pgid):
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def run_native_webview():
+    """The challenge window: a refused first token re-opens it, the second joins."""
+    label = "native-webview"
+    (page_port,) = kn_proto.free_ports(1)
+    page = ChallengePage(page_port)
+    page.start()
+    script = ("0 boot\n1200 vis @modal knCaptchaHolder knCaptchaSolve knCaptchaManual knCaptchaOpen knCaptchaCbRow\n"
+              "16000 play\n21000 players\n21200 quit\n")
+    url = "http://127.0.0.1:%d/robots.txt" % page_port
+    stub, p, out, log = launch_native(label, script, {"KRUNKNATIVE_KRUNKER_CAPTCHA_URL": url},
+                                      wrap=("xvfb-run", "-a", "-s", "-screen 0 1280x800x24 -nolisten tcp"))
+    stub.used_captchas.add(webview_token(1))  # the matchmaker refuses the first one (used / expired)
+    try:
+        lines = finish_native(label, stub, p, out, log, timeout=180)
+        left = session_alive(p.pid)
+        if left:
+            time.sleep(3)
+            left = session_alive(p.pid)
+    finally:
+        if session_alive(p.pid):
+            os.killpg(p.pid, signal.SIGKILL)
+        page.stop()
+    text = "\n".join(lines)
+    client_text = "\n".join(l for l in lines if "[input_script] type" not in l)
+    check(f"{label}: WebKitGTK came up on the run's own X display", "[webview] WebKitGTK " in text,
+          next((l for l in lines if "[webview]" in l), log.path))
+    vis = re.search(r"\[input_script\] vis t=\d+ @modal (.*)", text)
+    check(f"{label}: the webview is the only path on screen: \"Solve the challenge\", no paste box / userscript / open-site",
+          vis and all(f"{k}=1" in vis.group(1) for k in ("knCaptchaHolder", "knCaptchaSolve")) and
+          all(f"{k}=0" in vis.group(1) for k in ("knCaptchaManual", "knCaptchaOpen", "knCaptchaCbRow")), vis.group(1) if vis else None)
+    check(f"{label}: the window loaded the challenge page twice (once per attempt), as WebKit",
+          len(page.loads) == 2 and all("AppleWebKit" in ua for ua in page.loads), page.loads)
+    renders = [q for q in page.probes if q.get("render")]
+    check(f"{label}: the widget was rendered with krunker.io's sitekey and the widget's own callback",
+          len(renders) == 2 and all(q.get("sitekey") == header_value("KRUNKER_TURNSTILE_SITE_KEY") and q.get("callback") == "function"
+                                    for q in renders), renders)
+    pages = [q for q in page.probes if q.get("page")]
+    check(f"{label}: the page's own scripts cannot reach the client's message handler",
+          pages and all(q.get("main_handler") == "0" for q in pages), pages)
+    forges = [q for q in page.probes if q.get("forge")]
+    refused = "/forge" not in page.paths and re.search(r"\[webview\] a navigation to http://localhost:%d was refused" % page_port, text)
+    check(f"{label}: a frame of another origin is refused (or, loaded, reaches neither the handler nor the bridge)",
+          refused or (forges and not any(q.get("handler") == "1" or q.get("top") == "reached" for q in forges)),
+          "refused by the window" if refused else forges)
+    check(f"{label}: the forged token never reached the matchmaker", not any(FORGED_TOKEN in r for _, _, r in stub.http_log))
+    check(f"{label}: a token per attempt, solved in the window, then the window closed",
+          text.count("[krunker] captcha: solved in the challenge window") == 2 and text.count("[webview] challenge window closed") >= 2,
+          [l for l in lines if "[webview]" in l or "captcha:" in l][:16])
+    check(f"{label}: the refused token brought the window back (attempt 2)", "attempt 2, the last token was refused" in text)
+    check(f"{label}: the challenge page never saw a token", not any("e2eWebviewToken" in pth or "e2eForged" in pth for pth in page.paths))
+    check_matchmaker(label, stub, [webview_token(1), webview_token(2)], client_text)
+    check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+    check(f"{label}: nothing of the run is left (client_bin, WebKit's processes, Xvfb)", not left)
 
 
 class Cdp:
@@ -974,13 +1161,22 @@ def main():
         run_native_lobby()
         run_native_optout()
         ran = True
+    webview_skipped = None
+    if ONLY in ("", "native", "webview") and os.path.isfile(f"{BUILD}/client_bin"):
+        webview_skipped = webview_skip_reason()
+        if webview_skipped:
+            print(f"krunker_official_e2e: the native challenge-window run is SKIPPED: {webview_skipped}")
+        else:
+            run_native_webview()
+            ran = True
     if ONLY in ("", "web") and DIST and CHROME and os.path.isfile(os.path.join(DIST, "client.wasm")):
         run_web("ok")
         run_web("110200")
         ran = True
     elif ONLY == "web":
         print("krunker_official_e2e: the web run needs Chromium and a web build (WEB_DIST_DIR): skipped")
-    if not ran:
+    if not ran or (ONLY == "webview" and webview_skipped):
+        shutil.rmtree(WORK, ignore_errors=True)
         return 77
     if all(results):
         shutil.rmtree(WORK, ignore_errors=True)

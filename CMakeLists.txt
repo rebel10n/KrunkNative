@@ -84,6 +84,38 @@ if (EMSCRIPTEN)
     list(FILTER CLIENT_SOURCES EXCLUDE REGEX "/client/src/net/krunker_cheat_qjs\\.c$")
 endif ()
 
+# Native captcha webview (client/include/kn_webview.h, client/src/ui/kn_webview.c): krunker.io's
+# Cloudflare Turnstile shown in a WebKitGTK window for the player to solve (doc/v10/official-captcha.md).
+# KN_WEBVIEW = AUTO (default: on when pkg-config finds webkit2gtk-4.1), ON (required) or OFF. Linux
+# only; client_bin only (never server/ or shared/). kn_webview.c is then built as its own library so
+# GTK's include paths stay out of the rest of the client; without it (macOS, Windows, the web build,
+# OFF, not found) the same file compiles to its stub inside the client and the captcha keeps the
+# system-browser / paste-box paths.
+set(KN_WEBVIEW AUTO CACHE STRING "Native captcha webview (WebKitGTK): AUTO = on when webkit2gtk-4.1 is found, ON, OFF")
+set(KN_WEBVIEW_GTK OFF)
+string(TOUPPER "${KN_WEBVIEW}" KN_WEBVIEW_MODE)
+if (KN_WEBVIEW_MODE MATCHES "^(OFF|0|FALSE|NO|N)$")
+    message(STATUS "Webview: KN_WEBVIEW is OFF; the captcha uses the system browser / paste box")
+elseif (EMSCRIPTEN OR NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    if (NOT EMSCRIPTEN)
+        message(STATUS "Webview: no backend on ${CMAKE_SYSTEM_NAME} yet; the captcha uses the system browser / paste box")
+    endif ()
+else ()
+    find_package(PkgConfig QUIET)
+    if (PKG_CONFIG_FOUND)
+        pkg_check_modules(KN_WEBKITGTK QUIET IMPORTED_TARGET webkit2gtk-4.1)
+    endif ()
+    if (KN_WEBKITGTK_FOUND)
+        set(KN_WEBVIEW_GTK ON)
+        list(FILTER CLIENT_SOURCES EXCLUDE REGEX "/client/src/ui/kn_webview\\.c$")
+        message(STATUS "Webview: WebKitGTK ${KN_WEBKITGTK_VERSION} (KN_WEBVIEW): krunker.io's captcha in a window")
+    elseif (KN_WEBVIEW_MODE MATCHES "^(ON|1|TRUE|YES|Y)$")
+        message(FATAL_ERROR "KN_WEBVIEW=ON needs webkit2gtk-4.1 (pkg-config webkit2gtk-4.1)")
+    else ()
+        message(STATUS "Webview: webkit2gtk-4.1 not found; the captcha uses the system browser / paste box")
+    endif ()
+endif ()
+
 set(SERVER_BINARY server_bin)
 file(GLOB_RECURSE SERVER_SOURCES server/src/*.c)
 file(GLOB_RECURSE SERVER_HEADERS server/include/*.h)
@@ -401,6 +433,13 @@ else ()
     target_sources(${CLIENT_BINARY} PRIVATE ${SERVER_CORE_STANDALONE_SOURCES})
     target_link_libraries(${CLIENT_BINARY} PRIVATE kn_server_core)
     target_link_libraries(${CLIENT_BINARY} PRIVATE kn_quickjs) # krunker_cheat_qjs.c
+    if (KN_WEBVIEW_GTK) # the captcha webview (KN_WEBVIEW above); PRIVATE: GTK's includes stay in kn_webview
+        add_library(kn_webview STATIC client/src/ui/kn_webview.c client/include/kn_webview.h)
+        target_include_directories(kn_webview PRIVATE client/include)
+        target_compile_definitions(kn_webview PRIVATE KN_WEBVIEW=1)
+        target_link_libraries(kn_webview PRIVATE PkgConfig::KN_WEBKITGTK)
+        target_link_libraries(${CLIENT_BINARY} PRIVATE kn_webview)
+    endif ()
     krunknative_link_gl(${CLIENT_BINARY})
     # miniaudio (client/src/miniaudio.c) loads its audio backends with dlopen().
     target_link_libraries(${CLIENT_BINARY} PRIVATE ${CMAKE_DL_LIBS})

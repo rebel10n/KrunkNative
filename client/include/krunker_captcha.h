@@ -9,7 +9,11 @@
 //      web     the real widget in a "Security Challenge" modal (the live socket captcha's look, :98251).
 //              Turnstile keys are bound to their domains: on any other origin than krunker.io the
 //              widget refuses (error 110200 and friends), which the modal says, falling back to:
-//      native  (no browser engine) the modal explains, opens krunker.io in the system browser, and
+//      native  with a webview (kn_webview.h, KN_WEBVIEW: WebKitGTK on Linux) the modal opens a window
+//              on a real krunker.io page with Cloudflare's widget, the player solves it there and the
+//              widget's token comes back once; the paths below stay as "Open in your browser
+//              instead" and the paste box, and take over when the window cannot start or load.
+//              Without one the modal explains, opens krunker.io in the system browser, and
 //              takes the token either pasted by the player (2a) or POSTed by the player's own
 //              userscript on krunker.io to a one-shot 127.0.0.1 callback (2b, krunker_captcha_cb.h).
 //    Tokens are single-use, live ~300 s, are handed to krunker_net once, never logged or stored.
@@ -27,7 +31,7 @@ void krunker_captcha_ask(int attempt, int rejected, KrunkerCaptchaDone done, voi
 // The request is over (left the game / switched): close the modal and the callback, done not called.
 void krunker_captcha_close(void);
 int krunker_captcha_asking(void);
-// Main thread, once per frame (krunker_net_tick): the callback listener, timeouts.
+// Main thread, once per frame (krunker_net_tick): the callback listener, the challenge window, timeouts.
 void krunker_captcha_tick(void);
 
 // The socket "cpt": the modal in its passive state. begin = "verifying…", end = the result (shown a

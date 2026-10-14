@@ -2,11 +2,13 @@
 
 How Krunker Box Office deals with the Cloudflare Turnstile check that `matchmaker.krunker.io`
 asks for before it seeks a game (`client/include/krunker_captcha.h`, `client/src/ui/krunker_captcha_ui.c`,
-`client/src/net/krunker_captcha_cb.c`, the join flow in `client/include/krunker_net.h`).
+`client/src/net/krunker_captcha_cb.c`, the challenge window `client/include/kn_webview.h` /
+`client/src/ui/kn_webview.c`, the join flow in `client/include/krunker_net.h`).
 
 **A human solves it.** This client never solves, farms, proxies or bypasses Turnstile, does not
-spoof origins and uses no solver services. It shows the challenge (web) or sends the player to
-krunker.io to solve it (native), and hands the token the player got to the matchmaker once.
+spoof origins and uses no solver services. It shows the challenge (web; native in a window on
+krunker.io itself) or sends the player to krunker.io to solve it, and hands the token the player got
+to the matchmaker once.
 
 The in-game socket captcha `cpt` is a different thing: an ALTCHA proof of work that
 `krunker_altcha.c` computes (that is how it is meant to be passed). The same modal shows it in a
@@ -44,9 +46,68 @@ with or without the `accept-language` header. Skipping the early token does not 
    path. Nothing works around the binding.
 4. Other errors, the widget's own timeout and our 120 s limit show "Try again" plus the manual path.
 
-## Native client
+## Native client: the challenge window (KN_WEBVIEW)
 
-There is no browser engine in the client, so the modal explains the check and offers:
+Built with a webview (CMake `-DKN_WEBVIEW=AUTO|ON|OFF`; AUTO, the default, is on when pkg-config finds
+`webkit2gtk-4.1`; Linux only for now), `CaptchaRequired` makes the modal say "Solve it in the window that
+opened" and opens a separate OS window (a GTK window with a WebKitGTK view; never drawn into the GL
+scene) on a **real krunker.io page**:
+
+- **URL: `https://krunker.io/robots.txt`** (`KN_WEBVIEW_CAPTCHA_URL`). The live client has no dedicated
+  challenge page: `getCaptchaToken` (game.deob.js :115623) loads
+  `https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit` into whatever krunker.io page
+  it runs in and renders the widget into a `#turnstileHolder` on `<body>`; the only thing the widget
+  needs from the page is its origin. `robots.txt` is the smallest document krunker.io serves (150 bytes
+  of text/plain, no scripts, checked 2026-10-14), so krunker.io's game does not boot in the window: no
+  WebGL, no second seek, no second challenge of its own. `/` would work the same, at the cost of the
+  whole game starting in the window. The window really navigates there: no HTML is loaded under a
+  borrowed base URI, no Origin / Referer is rewritten, and an `https://` URL is required (plain
+  `http://` only to a loopback host: `KRUNKNATIVE_KRUNKER_CAPTCHA_URL`, the tests' stub page).
+- **How the token is read:** two WebKit user scripts, top frame only, doing nothing unless
+  `location.origin` is the URL's. One (the page's own world) draws a card over the page and renders
+  Cloudflare's widget the live client's way (the same api.js, krunker.io's sitekey
+  `KRUNKER_TURNSTILE_SITE_KEY`, `appearance: "always"` so the player sees it in the window); a page that
+  already has `window.turnstile` keeps its own. The widget's own `callback(token)` puts
+  `token:<token>` on `<html data-kn-captcha>` and fires a `kn-captcha` event; the other script, in an
+  isolated script world, is the only one with the `knCaptcha` script-message handler
+  (`webkit_user_content_manager_register_script_message_handler_in_world`): it reads the attribute,
+  removes it and posts it. So neither the page's own scripts nor any frame of another origin can talk
+  to the client. The C side takes **one** token per window, only while the main frame is still on the
+  URL's origin, never logs it (`a token (N chars)`), hands it to `krunker_net.c`'s retry and closes
+  the window at once. Errors (`error:<code>`, `expired`, `timeout`) are shown in the window (with a
+  "Try again" button the player clicks) and in the modal; 1101xx / 1102xx (the key refused the
+  domain: should not happen on krunker.io) closes the window and falls back to the manual path.
+- **The window's rules:** an ephemeral web context (no cookies, cache or storage on disk); main-frame
+  and frame navigations only to the URL's origin and `https://challenges.cloudflare.com` (others, and
+  every new window such as Cloudflare's "Privacy" link, are refused); TLS errors are never bypassed;
+  krunker.io's own interstitial ("Just a moment…", `window._cf_chl_opt`) is never covered: the card
+  waits for the real page. An HTTP error page from krunker.io ("ACCESS DENIED" 403 to blocked
+  networks) is said in the modal (Settings > Client > Network > Proxy). The window's traffic takes
+  the same proxy as the matchmaker requests (`http_proxy_for("matchmaker.krunker.io")`: the client
+  setting or the environment; `http://` and `socks5://` proxies; loopback direct), so the challenge is
+  solved from the network the seek comes from.
+- **The modal, when the window works, shows only "Solve the challenge"** (opens / raises the window)
+  **and Cancel.** The paste box, the userscript callback and the "open krunker.io in the browser" path
+  stay hidden: the webview is the one path the player sees (the user asked not to be shown the
+  paste / userscript route when the window works). Closing the window says so ("Solve the challenge"
+  opens it again); Cancel ends the join. A refused token (used or expired) brings the modal back and
+  opens a fresh window, at most twice like the live client.
+- **Fallbacks only when the window can't be the path:** no webview in the build (macOS, Windows,
+  `KN_WEBVIEW=OFF`, the release packages), `KRUNKNATIVE_WEBVIEW=0`, no display for GTK, or the window
+  failing to start / load / returning a non-token — then the modal shows the manual path below (open
+  krunker.io, the paste box, the userscript callback), with "Solve the challenge" still there to try
+  the window again.
+  GTK is started on first use with `gtk_disable_setlocale()` (the game's "C" number formatting stays)
+  and pumped from `krunker_captcha_tick` once per frame on the main thread.
+- **Checked against the live site once (2026-10-14, the scratch harness of this change, through the
+  proxy):** the window loaded `https://krunker.io/robots.txt`, Cloudflare's real widget rendered there
+  with krunker.io's sitekey, no 1102xx domain error, and Cloudflare itself answered with a token
+  (688 characters, no interaction asked of that browser). It was discarded, never sent anywhere; no
+  matchmaker request was made.
+
+## Native client: the manual path
+
+Without the challenge window (or when it cannot start), the modal explains the check and offers:
 
 - **Open krunker.io**: the system browser (`ui_open_browser`). With the callback below running, the
   link is `https://krunker.io/#kn-captcha=<port>-<secret>` (a fragment never reaches krunker.io's
@@ -165,6 +226,17 @@ challenge); the client side of the exchange is covered by the tests below.
   the whole game as before;
 - native `native-paste`: a bad paste refused in the modal, a token the matchmaker refuses brings the
   modal back saying so, the next one joins; the box is cleared;
+- native `native-webview` (alone: `--webview`; skipped with a message, exit 77 alone, when the build
+  has no webview or `xvfb-run` is missing): client_bin under its own `xvfb-run` (GLFW headless, GTK on
+  the private Xvfb), `KRUNKNATIVE_KRUNKER_CAPTCHA_URL` pointing at the test's stub page, which defines a
+  stub `window.turnstile` that reports how it was rendered and "is solved" 1.5 s later by firing the
+  widget's own callback. The matchmaker refuses the first token; the window opens again, the second
+  token joins and the game runs. Also: the modal shows "Solve the challenge" + "Open in your browser
+  instead" + the paste box with no callback armed; the page's own scripts see no `knCaptcha` handler;
+  a frame of another origin is refused and its forged token never reaches the matchmaker; the window
+  closes after each token; the stub page never sees a token; nothing of the run (WebKit's processes,
+  Xvfb) is left. The `native` / `native-paste` runs have no display, so in a webview build they also
+  cover GTK failing to start and the fallback;
 - web `web`: the page's request for `api.js` is answered over the DevTools protocol (in the test's own
   browser only) by a stub widget that calls back with a fake token; the game runs as before and the
   `cpt` modal shows "Verified ✓";
@@ -175,6 +247,18 @@ that no Turnstile token reaches the log. `input_script.c`'s `0 boot` starts a sc
 any map exists, for these runs.
 
 ## Gaps
+
+- The challenge window is Linux (WebKitGTK) only. macOS (WKWebView) and Windows (WebView2) are not
+  wired: they keep the browser / paste-box path. `kn_webview.h` is the seam for them.
+- The release packages are built with `KN_WEBVIEW=OFF` (tools/release/build-client-linux.sh): linking
+  WebKitGTK would make it a hard dependency of the portable client. Loading it at run time (dlopen)
+  would lift that.
+- The window's own texts (card, statuses from the widget) are English; the modal's are localised.
+- No window manager under the tests' Xvfb: the window's placement, `keep_above` over a fullscreen
+  game and focus were not checked on a real desktop (Wayland / X11, NVIDIA). WebKitGTK on some NVIDIA
+  setups needs `WEBKIT_DISABLE_DMABUF_RENDERER=1` (a WebKitGTK issue, not set here).
+- The window is used only through the HTML UI's modal: an `HTML_ENGINE=OFF` client still gives up on
+  the captcha.
 
 - Not tried against the live matchmaker with a real token: that needs a human-solved Turnstile on
   krunker.io, and joining would open a WebSocket to a live game server.

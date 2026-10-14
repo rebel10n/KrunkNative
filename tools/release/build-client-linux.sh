@@ -93,6 +93,9 @@ flags=(-DCMAKE_BUILD_TYPE=Release -DKRUNKNATIVE_HTML_ENGINE=ON
 # versions Fedora's lacks; public servers use the server packages), libgcc/libstdc++ (replxx) and
 # crypt(3) static (libxcrypt's libcrypt.a: libcrypt.so.1 is a compat package on Fedora/Arch)
 flags+=(-DCMAKE_DISABLE_FIND_PACKAGE_CURL=TRUE "-DCMAKE_EXE_LINKER_FLAGS=-static-libgcc -static-libstdc++")
+# no captcha webview (client/include/kn_webview.h) in packages: it links WebKitGTK, which players'
+# systems need not have (the packaged client keeps the system-browser / paste-box captcha paths)
+flags+=(-DKN_WEBVIEW=OFF)
 libcrypt_a="$(gcc -print-file-name=libcrypt.a)"
 if [ -f "$libcrypt_a" ]; then flags+=("-DKN_LIBCRYPT=$libcrypt_a"); else flags+=(-DKN_LIBCRYPT=KN_LIBCRYPT-NOTFOUND); fi
 if [ "$variant" = polyfilled ]; then

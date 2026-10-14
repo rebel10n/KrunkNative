@@ -11,14 +11,22 @@
 // Web: the real Turnstile widget (the script loads on demand, like the live getCaptchaToken, :115623,
 // with KRUNKER_TURNSTILE_SITE_KEY and appearance "interaction-only"). Its sitekey only works on the
 // domains Cloudflare has for it: elsewhere (krunk.io) it answers 110200 (or another 1101xx / 1102xx
-// code), which the modal says plainly before offering the manual path. Native: the manual path at once
-// (open krunker.io; paste a token; the localhost callback of krunker_captcha_cb.h).
+// code), which the modal says plainly before offering the manual path. Native with a webview
+// (kn_webview.h, KN_WEBVIEW): "Solve the challenge" opens a window on a real krunker.io page with
+// Cloudflare's widget in it, the player solves it there and its token comes back here; the modal keeps
+// "Open in your browser instead" and the paste box. Native without one (or when the window cannot
+// start / load): the manual path at once (open krunker.io; paste a token; the localhost callback of
+// krunker_captcha_cb.h).
 //
-// Tokens: read from the paste box / the callback / the widget, checked for shape, handed to the
-// requester once, then wiped; never logged, never stored.
+// Tokens: read from the paste box / the callback / the widget / the webview, checked for shape, handed
+// to the requester once, then wiped; never logged, never stored.
 #include <krunker_captcha.h>
 #include <krunker_captcha_cb.h>
 #include <krunker_build.h>
+#include <kn_webview.h>
+#ifndef __EMSCRIPTEN__
+#include <http_proxy.h>
+#endif
 #include <html_dom.h>
 #include <html_ui.h>
 #include <ui_logic.h>
@@ -42,6 +50,7 @@ enum { // knCaptcha(n)
     ACT_CANCEL = 4,
     ACT_COPY = 5,   // the callback URL to the clipboard
     ACT_RETRY = 6,  // web: render the widget again
+    ACT_SOLVE = 7,  // native: open (or raise) the webview with krunker.io's challenge
 };
 
 static struct {
@@ -51,6 +60,7 @@ static struct {
     void *user;
     unsigned gen;      // per request: late widget events of an older one are ignored
     int widget;        // web: the Turnstile widget is the path (not fallen back)
+    int webview;       // native: the challenge window (kn_webview.h) is the path
     int widget_timer;  // html_timer id of the widget's 120 s limit
     int handler_set;
     int present_pending; // asked before the page was up: shown once it is (krunker_captcha_tick)
@@ -101,12 +111,14 @@ static char *markup(void) {
                "</div>"
                "</div>"
                "<div class=\"kn-captcha-row kn-captcha-actions\">"
+               "<div id=\"knCaptchaSolve\" class=\"kn-captcha-btn\" onclick=\"" CAPTCHA_HANDLER "(7)\" style=\"display:none\">%s</div>"
                "<div id=\"knCaptchaOpen\" class=\"kn-captcha-btn\" onclick=\"" CAPTCHA_HANDLER "(1)\" style=\"display:none\">%s</div>"
                "<div id=\"knCaptchaCancel\" class=\"kn-captcha-btn kn-captcha-cancel\" onclick=\"" CAPTCHA_HANDLER "(4)\">%s</div>"
                "</div>"
                "</div></div>",
                I18N("kn.captcha.tokenPlaceholder", "Turnstile token"), I18N("kn.captcha.paste", "Paste"),
-               I18N("kn.captcha.use", "Use"), I18N("kn.captcha.openSite", "Open krunker.io"),
+               I18N("kn.captcha.use", "Use"),
+               I18N("kn.captcha.solve", "Solve the challenge"), I18N("kn.captcha.openSite", "Open krunker.io"),
                I18N("generic.cancel", "Cancel"));
     return sb_finish(&sb);
 }
@@ -215,6 +227,8 @@ static void widget_remove(void) {
 #ifdef __EMSCRIPTEN__
     kn_js_turnstile_remove();
 #endif
+    C.webview = 0;
+    kn_webview_captcha_close(); // the challenge window, natively (no-op elsewhere)
 }
 
 // ---------------------------------------------------------------- the request
@@ -250,6 +264,7 @@ static void show_manual(const char *why) {
     show("knTurnstileHolder", 0);
     show("knCaptchaManual", 1);
     show("knCaptchaOpen", 1);
+    show("knCaptchaSolve", 0);
     const HtmlElem m = html_dom_by_id("knCaptchaModal");
     if (m) html_dom_set_class(m, "kn-captcha-wide", 1);
     set_text("knCaptchaText", why);
@@ -257,6 +272,108 @@ static void show_manual(const char *why) {
     if (!krunker_captcha_cb_listening()) start_callback();
 #endif
 }
+
+#ifndef __EMSCRIPTEN__
+// The proxy the matchmaker's requests take (http_proxy.h: the client setting, else the environment) as
+// a URI for the challenge window, so the player solves it from the network the seek comes from.
+// "" = direct. Has the credentials: never logged, wiped by the caller.
+static void webview_proxy(char *out, const size_t n) {
+    out[0] = 0;
+    HttpProxy px;
+    if (!http_proxy_for("matchmaker.krunker.io", 1, &px)) return;
+    const char *scheme = px.kind == HTTP_PROXY_HTTP ? "http" : px.kind == HTTP_PROXY_SOCKS5 || px.kind == HTTP_PROXY_SOCKS5H ? "socks5" : NULL;
+    char label[200];
+    http_proxy_label(&px, label, sizeof(label));
+    if (!scheme) {
+        printf("[krunker] captcha: the challenge window cannot use the proxy %s (https:// proxies): it goes direct\n", label);
+    } else {
+        char user[3 * sizeof(px.user)] = "", pass[3 * sizeof(px.pass)] = "";
+        for (int k = 0; k < 2; k++) { // percent-encode the credentials
+            const unsigned char *in = (const unsigned char *) (k ? px.pass : px.user);
+            char *o = k ? pass : user;
+            for (; *in; in++) {
+                if ((*in >= 'A' && *in <= 'Z') || (*in >= 'a' && *in <= 'z') || (*in >= '0' && *in <= '9') || strchr("-._~", *in) != NULL) *o++ = (char) *in;
+                else o += sprintf(o, "%%%02X", *in);
+            }
+            *o = 0;
+        }
+        const int v6 = strchr(px.host, ':') != NULL; // an IPv6 literal goes in brackets
+        snprintf(out, n, "%s://%s%s%s%s%s%s%s:%s", scheme, user, pass[0] ? ":" : "", pass, user[0] ? "@" : "", v6 ? "[" : "", px.host,
+                 v6 ? "]" : "", px.port);
+        printf("[krunker] captcha: the challenge window goes through the proxy %s\n", label);
+        wipe(user, sizeof(user));
+        wipe(pass, sizeof(pass));
+    }
+    wipe(&px, sizeof(px));
+}
+
+// Native: krunker.io's challenge in its own window (kn_webview.h). 1 = the window is up (or raised); 0 =
+// no webview here or it could not start (logged), the caller shows the manual path.
+static int webview_start(void) {
+    if (!kn_webview_available()) return 0;
+    char err[200], proxy[1024];
+    webview_proxy(proxy, sizeof(proxy));
+    const int up = kn_webview_captcha_open(NULL, KRUNKER_TURNSTILE_SITE_KEY, I18N("kn.captcha.title", "Security Challenge"), proxy, err, sizeof(err));
+    wipe(proxy, sizeof(proxy));
+    if (!up) {
+        printf("[krunker] captcha: no challenge window (%s): the browser / paste path\n", err);
+        C.webview = 0;
+        return 0;
+    }
+    C.webview = 1;
+    printf("[krunker] captcha: krunker.io's challenge is in its own window\n");
+    show("knTurnstileHolder", 0);
+    // the webview is the path: the paste box and the userscript callback stay hidden (the user does not
+    // want them when the window works); only "Solve the challenge" (raise the window) and Cancel show.
+    // The fallbacks come up only when the window fails to start / load (show_manual, below).
+    krunker_captcha_cb_stop();
+    show("knCaptchaManual", 0);
+    show("knCaptchaCbRow", 0);
+    show("knCaptchaOpen", 0);
+    show("knCaptchaSolve", 1);
+    const HtmlElem m = html_dom_by_id("knCaptchaModal");
+    if (m) html_dom_set_class(m, "kn-captcha-wide", 0);
+    set_text("knCaptchaText", I18N("kn.captcha.inWindow", "krunker.io wants a Cloudflare check first. Solve it in the window that opened:"
+                                                          " it shows krunker.io's own challenge."));
+    return 1;
+}
+
+// One event of the challenge window per frame.
+static void webview_tick(void) {
+    char token[KRUNKER_CAPTCHA_TOKEN_MAX + 1], msg[320];
+    const int rc = kn_webview_captcha_poll(token, sizeof(token), msg, sizeof(msg));
+    switch (rc) {
+        case KN_WEBVIEW_TOKEN:
+            if (krunker_captcha_token_shape_ok(token)) {
+                printf("[krunker] captcha: solved in the challenge window (%zu chars)\n", strlen(token));
+                finish(token);
+            } else {
+                printf("[krunker] captcha: the challenge window answered something that is not a token\n");
+                C.webview = 0;
+                set_text("knCaptchaStatus", I18N("kn.captcha.notToken", "Cloudflare answered something that is not a token."));
+            }
+            break;
+        case KN_WEBVIEW_FAILED: { // did not load / refused: the manual path, the window can be tried again
+            printf("[krunker] captcha: the challenge window failed: %s\n", msg);
+            char why[600];
+            I18N_F(why, "kn.captcha.windowFailed", "{0} Solve it on krunker.io in your browser, then paste the token here.", msg);
+            show_manual(why);
+            show("knCaptchaSolve", 1);
+            set_text("knCaptchaStatus", "");
+            break;
+        }
+        case KN_WEBVIEW_CLOSED:
+            C.webview = 0;
+            set_text("knCaptchaStatus", I18N("kn.captcha.windowClosed", "The challenge window was closed: \"Solve the challenge\" opens it again."));
+            break;
+        case KN_WEBVIEW_STATUS:
+            set_text("knCaptchaStatus", msg);
+            break;
+        default: break;
+    }
+    wipe(token, sizeof(token));
+}
+#endif
 
 #ifdef __EMSCRIPTEN__
 static void widget_timeout(void *user) {
@@ -384,7 +501,11 @@ static void present(void) {
     set_text("knCaptchaText", I18N("kn.captcha.matchmaker", "krunker.io's matchmaker wants this check before it finds you a game."));
     widget_start();
 #else
-    show_manual(I18N("kn.captcha.needsBrowser", "krunker.io wants a Cloudflare check first. It needs a web browser: solve it on krunker.io."));
+    if (webview_start()) {
+        if (!rejected) set_text("knCaptchaStatus", I18N("kn.captcha.waitingWindow", "Waiting for the challenge window..."));
+    } else {
+        show_manual(I18N("kn.captcha.needsBrowser", "krunker.io wants a Cloudflare check first. It needs a web browser: solve it on krunker.io."));
+    }
 #endif
 }
 
@@ -407,11 +528,16 @@ void krunker_captcha_close(void) {
 int krunker_captcha_asking(void) { return C.asking; }
 
 void krunker_captcha_tick(void) {
+    kn_webview_pump(); // the challenge window's toolkit (a closed one finishes its teardown)
     if (!C.asking) return;
     if (C.present_pending) {
         if (holder()) present();
         return;
     }
+#ifndef __EMSCRIPTEN__
+    if (C.webview) webview_tick();
+    if (!C.asking) return; // the window's token finished the request
+#endif
     char token[KRUNKER_CAPTCHA_TOKEN_MAX + 1];
     const int rc = krunker_captcha_cb_poll(token, sizeof(token));
     if (rc > 0) {
@@ -501,6 +627,17 @@ static int handle_click(void *user, const HtmlEvent *ev, const HtmlArg *args, co
         case ACT_RETRY:
 #ifdef __EMSCRIPTEN__
             widget_start();
+#endif
+            break;
+        case ACT_SOLVE:
+#ifndef __EMSCRIPTEN__
+            if (!webview_start()) {
+                char err[200];
+                snprintf(err, sizeof(err), "%s", I18N("kn.captcha.noWindow", "The challenge window could not open here."));
+                show_manual(err);
+            } else {
+                set_text("knCaptchaStatus", "");
+            }
 #endif
             break;
         default: break;
