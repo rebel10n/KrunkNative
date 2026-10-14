@@ -22,6 +22,7 @@
 #include <gamepad.h> // Gamepad.active: "PRESS START" (client/src/gamepad.c)
 #include <spectate.h> // the Spectate switch: "CLICK TO SPECTATE" (client/src/spectate.c)
 #include <console.h> // developer console overlay (client/src/ui/ui_console.c)
+#include <flavor_ui.h> // Krunker Strike menu branding (client/src/ui/flavor_ui.c)
 #include <ui_interact.h> // the interact prompt (client/src/ui/ui_interact.c)
 #include <game_config.h> // Game.config.classes / isCustom (the class list)
 #include <client_settings.h> // Exit menu item + Settings > Client (client/src/ui/ui_client_settings.c)
@@ -793,6 +794,9 @@ void menu_update_instructions(void) {
     free(update);
     menu_apply_error_screen(error);
     set_style("instructionHolder", "pointer-events", "all");
+    // Krunker Strike: the spinner states (page loading, connecting) are the brand's loading
+    // screen (the Strike curtains over #instructionHolder, flavor_ui.c); no-op for base
+    flavor_ui_set_loading(!error && (!g_ui.dom_ready || !can_play()));
 }
 
 
@@ -1452,6 +1456,8 @@ static void setup_dom(void) {
     v10_news_setup(); // the v10 menu's Guide / What's New / Community & Events items (v10_news.c)
     v10_competitive_setup(); // the v10 page: Ranked / Turf Wars / Leaderboards (v10_competitive.c)
     v10_market_menu_setup(); // v10 Market & Trading: #menuBtnMarket (v10_market.c)
+
+    flavor_ui_apply(); // Krunker Strike: brand the wordmark + theming hooks (no-op for base)
 
     HtmlElem el;
     if ((el = by_id("classPreviewCanvas"))) html_dom_observe_resize(el, on_observed_resize, NULL);

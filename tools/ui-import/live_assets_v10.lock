@@ -2,6 +2,11 @@
 # root assets = new in v10 (not in v7.1.4); assets-v10 = v10 version of a v7.1.4 file with other content (assets/v10/<path>).
 # root ui = page images v10 loads from assets.krunker.io/img/ (ui/img/<path>: the guide popup's img/guide/*, client/src/ui/v10_news.c).
 # Installed by `make assets-import-live`; the store items of assets/skins.json index 6448+ are covered here (see v10_store_assets.js).
+# Krunker Strike brand (doc/v10/krunker-strike.md, flavor-ui): from the live Krunker Strike FRVR site (krunkerstrike.frvr.com,
+# frvr.com/play/krunkerstrike/) -- the logo (ui/img/kn-strike-logo.png, 1024x348) and the ChakraPetch 700 face it uses
+# (ui/css/fonts/ChakraPetch-Bold.ttf, the same bytes Krunker v10 serves). Its stylesheet is a provenance note only (the
+# palette / curtain colours in ui/css/krunknative.css come from it): assets/index-ANyEo1zZ.css
+# https://krunkerstrike.frvr.com/assets/index-ANyEo1zZ.css sha256 874fc89ce2a3a4b9998429b77e304398da6416885c1a721022ed2a58a4172a8d size 591463.
 # root	path	url	sha256	size
 assets	models/body/body_265.glb	https://assets.krunker.io/models/body/body_265.glb	e343d6da219de4bb18b04a11cb5f821a994ffe7b51ec6be22e54e9ab922fb71c	596344
 assets	models/body/body_267.glb	https://assets.krunker.io/models/body/body_267.glb	64258be58f40a6582bd3012cb7354498973b8e439e4c6af2ec1628745d364e11	114052
@@ -2791,6 +2796,7 @@ assets-v10	textures/weapons/weapon_6_12.png	https://assets.krunker.io/textures/w
 assets-v10	textures/weapons/weapon_6_13.png	https://assets.krunker.io/textures/weapons/weapon_6_13.png	725f627447d671e5538a97323658e0efb9f83292044fc8fa93f6f3a161ce9fde	829112
 assets-v10	textures/weapons/weapon_8_6.png	https://assets.krunker.io/textures/weapons/weapon_8_6.png	907ab5237f0a32a472de38496f7d24ed3a23c398380e58534a9f27eb5bc26542	906386
 assets-v10	textures/weapons/weapon_8_7.png	https://assets.krunker.io/textures/weapons/weapon_8_7.png	f179d493f9066388a7045db733b90c22f019261d292613139078556814d64b59	710471
+ui	css/fonts/ChakraPetch-Bold.ttf	https://krunkerstrike.frvr.com/css/fonts/ChakraPetch-Bold.ttf	fb428d38d46b0a9ccb72165157d320c784d9c2e3e84148a06fd5eee325ba1798	71436
 ui	img/guide/challenge_mode_off.png	https://assets.krunker.io/img/guide/challenge_mode_off.png	92922698d460af4a3178e2bb98ccf645656c34b3dd888c65510ab1da4ccf7477	1568
 ui	img/guide/challenge_mode_on.png	https://assets.krunker.io/img/guide/challenge_mode_on.png	c973d49f554c2953b27a51ae484d98b35768f8a96913474dbd2146143365f5ce	1887
 ui	img/guide/challenge_mode.png	https://assets.krunker.io/img/guide/challenge_mode.png	11350cdd7566691385597a99e2c1a8a5870a8d9fe85eb174d22024a91f684485	8007
@@ -2818,6 +2824,7 @@ ui	img/guide/streaks_find.png	https://assets.krunker.io/img/guide/streaks_find.p
 ui	img/guide/trading_ui.png	https://assets.krunker.io/img/guide/trading_ui.png	921c5d561bc037cbd18c4efaade24e84d9b3cf3dca286bba3be781e851589415	81180
 ui	img/guide/weapon_challenges.png	https://assets.krunker.io/img/guide/weapon_challenges.png	7d8dd4d9c7ea6685ecc315e6090cdcabbf27f2f46c818b47e5e2386b85109d13	82705
 ui	img/guide/weapons.png	https://assets.krunker.io/img/guide/weapons.png	86c240fb33720b112b509e0e0e48de372cda85418909b1b717b6fb0245714ae9	81095
+ui	img/kn-strike-logo.png	https://krunkerstrike.frvr.com/img/krunker_logo.png	6b1aaec4ed930c7a0dfc5b8da707d9d13e7963f98a10a3fe8fd59300f717ca90	12546
 ui	img/menu/free_spin.png	https://krunker.io/img/menu/free_spin.png	f94de6b76c10eb9fc534fffcac82da3b6b5ac653da3a034e667f8ccb42696f5c	37752
 ui	img/snowy_bg.webp	https://krunker.io/img/snowy_bg.webp	23c717b7ee2c0363ddb1811e29f5594bc55d78f3d79d4e39c06820885b43363b	70278
 ui	img/social/twitter.png	https://krunker.io/img/social/twitter.png	376d2c0268300470ae445a67f7808ea5a34433b0a38cb68bcad97f9768768620	864

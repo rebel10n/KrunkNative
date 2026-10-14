@@ -29,6 +29,7 @@
 #include <ui_interact.h> // state.interact
 #include <backend_ui.h> // WP-E part 2c: state.account
 #include <app_mode.h> // state.page: hub / editor / viewer pages
+#include <flavor.h> // top-level "flavor": render the Strike brand (flavor-ui)
 #include <debug_capture.h> // state.pageActions calls with arguments
 #include <html_ui.h>
 #include <html_dom.h>
@@ -312,6 +313,13 @@ int ui_scenario_begin(const char *scenario_path, const char *out_png) {
     }
     g_sc.frames = (int) obj_num(g_sc.root, "frames", 3);
     if (g_sc.frames < 1) g_sc.frames = 1;
+
+    // optional top-level "flavor" ("base"/"strike"): render the menu with that product flavor's
+    // branding (flavor-ui, client/src/ui/flavor_ui.c). Absent = the process flavor (base unless
+    // --flavor/KN_FLAVOR set it). This runs before the DOM is built, so `make uidiff` renders the
+    // Strike brand from the scenario file alone, with no per-scenario env.
+    const char *flavor = obj_str(g_sc.root, "flavor");
+    if (flavor && flavor[0]) flavor_set_key(flavor);
 
     static cJSON empty_state = {.type = cJSON_Object};
     const cJSON *state = cJSON_GetObjectItemCaseSensitive(g_sc.root, "state");

@@ -1,0 +1,24 @@
+{
+  "ref": "doc/ref/krunknative/strike-menu.png",
+  "flavor": "strike",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8
+  },
+  "frames": 3,
+  "note": "Krunker Strike brand on the v10 main menu (flavor-ui, client/src/ui/flavor_ui.c): top-level flavor:\"strike\" makes ui_scenario.c set the Strike flavor, so flavor_ui_apply() shows the real Krunker Strike FRVR logo (#knFlavorLogo, ui/img/kn-strike-logo.png) in place of #mainLogo and CLICK TO PLAY in ChakraPetch 700 / the Strike gold. A KrunkNative-own brand (no krunker.io reference): the reference is KN's own llvmpipe render (doc/ref/krunknative/, a regression baseline like the kn-* scenarios)."
+}
