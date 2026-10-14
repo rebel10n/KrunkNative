@@ -173,6 +173,9 @@ void v10_menu_account_changed(void) {
     const AccountInfo *acc = account_get();
     header_update(acc);
     nav_update(acc);
+    // hideSpectateIfGuestUser (v10:208579-208581, after a login v10:209811 and a logout v10:209874):
+    // the menu's Spectate switch is for accounts only (main.css hides #spectButtonHolder)
+    set_display(by_id("spectButtonHolder"), acc ? "block" : "none");
     V.signed_in = acc != NULL;
     V.level = acc ? acc->level : 0;
     v10_login_account_changed(); // a login closes the modal (v10: $account set -> the modal leaves the stack)

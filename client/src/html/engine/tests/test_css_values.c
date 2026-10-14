@@ -5,7 +5,7 @@
  *   test_css_values [repo_root]
  *
  * repo_root defaults to "." and is used to find the ui/css sheets, ui/index.html,
- * ui/social.html and the window templates in ui/windows/ (the Krunker v7.1.4 page).
+ * ui/social.html and the window templates in ui/windows/ (Krunker v10.0.2's page).
  * Exit status is non-zero when any unit case fails or any shipped declaration fails
  * to parse (declarations Chrome drops and the listed known gaps are reported apart).
  *
@@ -862,24 +862,58 @@ static int chrome_drops(const char *name, size_t nl, const char *val, size_t vl)
 }
 
 /* Declarations Chrome accepts (CSS.supports true) that the engine does not implement yet:
- * known gaps of the v7.1.4 page, counted apart from failures (a new unparsed declaration
+ * known gaps of the page, counted apart from failures (a new unparsed declaration
  * still fails the test). None changes the menu's layout: they are visual extras
  * (backdrop blur, 3D, smooth scrolling, thin scrollbars, tap highlight, SVG fill, underline
  * colour, scrollbar gutter, textarea resize), the store's clip-path polygon
  * with calc(), image `content:` on elements, `align-content` of single-line flex
  * containers, and #menuWindow.forceFill's -webkit-fill-available (its height: 100%
- * fallback applies). */
+ * fallback applies). Krunker v10.0.2's sheets add the gaps ui/README.md lists: aspect-ratio
+ * (thumbnails size from their content), object-position, content-visibility /
+ * contain-intrinsic-size (render hints), text-wrap, and color-mix() values (the tint drops). */
 static int known_gap(const char *name, size_t nl, const char *val, size_t vl)
 {
     static const char *props[] = { "backdrop-filter", "transform-style", "scroll-behavior", "scrollbar-width",
                                    "background-origin", "align-content", "-webkit-tap-highlight-color", "fill",
-                                   "text-decoration-color", "scrollbar-gutter", "resize" };
+                                   "text-decoration-color", "scrollbar-gutter", "resize", "aspect-ratio",
+                                   "object-position", "content-visibility", "contain-intrinsic-size", "text-wrap",
+                                   /* the v10 Svelte / hub / editor sheets: SVG presentation properties of
+                                    * inline icons, @property descriptors, masks, form-control tints,
+                                    * text stroke, line clamping and other visual extras */
+                                   "stroke", "stroke-width", "stroke-dasharray", "stroke-dashoffset", "stroke-opacity",
+                                   "stroke-linecap", "r", "cx", "cy", "all", "accent-color", "font-variant-numeric",
+                                   "color-scheme", "outline-offset", "syntax", "initial-value", "inherits",
+                                   "-webkit-text-stroke-width", "-webkit-text-stroke-color", "-webkit-text-fill-color",
+                                   "-webkit-line-clamp", "-webkit-box-orient", "-webkit-backdrop-filter", "scrollbar-color",
+                                   "mask", "mask-size", "mask-repeat", "mask-position", "mask-mode", "mask-image",
+                                   "-webkit-mask", "-webkit-mask-size", "-webkit-mask-repeat", "-webkit-mask-position",
+                                   "-webkit-mask-mode", "-webkit-mask-image", "font-variant-ligatures",
+                                   "-webkit-font-variant-ligatures", "-webkit-background-clip", "touch-action", "tab-size",
+                                   "container-type", "caret-color", "border-image", "backface-visibility" };
     for (size_t i = 0; i < sizeof(props) / sizeof(props[0]); i++)
         if (kn_str_ieq(name, nl, props[i])) return 1;
     size_t tl = vl;
     const char *tv = kn_str_trim(val, &tl);
     if (kn_str_ieq(name, nl, "height") && kn_str_ieq(tv, tl, "-webkit-fill-available")) return 1;
     if (kn_str_ieq(name, nl, "content") && tl > 4 && kn_str_ieq(tv, 4, "url(")) return 1;
+    for (size_t k = 0; k + 10 <= tl; k++) if (kn_str_ieq(tv + k, 10, "color-mix(")) return 1;
+    /* v10's Svelte sheets, not parsed yet. Visual only: SVG pointer-events keywords, background-clip:
+     * text, elliptical border-radius (`/`), -webkit-grab. LAYOUT-AFFECTING (TODO engine: the box
+     * keeps its other width / height rule): min() / max() / clamp() sizes, ch and container-query
+     * (cq*) units, as in the Svelte popups' widths. */
+    if (kn_str_ieq(name, nl, "pointer-events") || (kn_str_ieq(name, nl, "background-clip") && kn_str_ieq(tv, tl, "text")) ||
+        (kn_str_ieq(name, nl, "cursor") && tl > 8 && kn_str_ieq(tv, 8, "-webkit-")) ||
+        (kn_str_ieq(name, nl, "border-radius") && memchr(tv, '/', tl)))
+        return 1;
+    if (kn_str_ieq(name, nl, "width") || kn_str_ieq(name, nl, "height") || kn_str_ieq(name, nl, "min-width") ||
+        kn_str_ieq(name, nl, "max-width") || kn_str_ieq(name, nl, "min-height") || kn_str_ieq(name, nl, "max-height")) {
+        if ((tl > 4 && (kn_str_ieq(tv, 4, "min(") || kn_str_ieq(tv, 4, "max("))) || (tl > 6 && kn_str_ieq(tv, 6, "clamp("))) return 1;
+        if (tl > 2 && kn_str_ieq(tv + tl - 2, 2, "ch")) return 1;
+    }
+    if (kn_str_ieq(name, nl, "background-image") || kn_str_ieq(name, nl, "background")) {
+        /* a gradient with two-position colour stops (`#hex 0 11px`) */
+        for (size_t k = 0; k + 9 <= tl; k++) if (kn_str_ieq(tv + k, 9, "gradient(")) return 1;
+    }
     /* var() of custom properties no sheet defines (bundledStyles' FRVR overlay sets
      * --overlay-image / --prompt-filter from its script): valid at parse time in Chrome */
     for (size_t k = 0; k + 6 <= tl; k++) {
@@ -1068,14 +1102,46 @@ int main(int argc, char **argv)
     test_computed();
     printf("unit: %d passed, %d failed\n", g_pass, g_fail);
 
-    /* every stylesheet the v7.1.4 page links (ui/index.html), the hub's, and ours */
-    static const char *sheets[] = { "ui/css/main.css", "ui/css/bundled/bundledStyles.min.css", "ui/css/main_custom.css",
-                                    "ui/css/flag.css", "ui/css/material-icons.css", "ui/css/material-icons-outlined.css",
-                                    "ui/css/material-symbols-outlined.css", "ui/css/google-play.css",
-                                    "ui/css/google-secular-one.css", "ui/css/social.css", "ui/css/social_custom.css",
-                                    "ui/css/hud.css", "ui/css/krunknative.css", "ui/css/ranked-kn.css",
-                                    "ui/css/devconsole.css" };
-    const size_t nsheets = sizeof(sheets) / sizeof(sheets[0]);
+    /* every stylesheet the pages link (ui/index.html: Krunker v10.0.2's menu, the hub, the editor),
+     * then the ones the C UI adds at run time */
+    static const char *pages_linking[] = { "ui/index.html", "ui/social.html", "ui/editor.html" };
+    static const char *runtime_sheets[] = { "ui/css/devconsole.css", "ui/css/ranked-kn.css" };
+    static char sheet_names[64][192];
+    const char *sheets[64];
+    size_t nsheets = 0;
+    for (size_t i = 0; i < sizeof(pages_linking) / sizeof(pages_linking[0]); i++) {
+        char p[1024];
+        size_t len;
+        snprintf(p, sizeof(p), "%s/%s", root, pages_linking[i]);
+        char *html = read_file(p, &len);
+        if (!html) { fprintf(stderr, "missing %s\n", p); g_fail++; continue; }
+        for (const char *q = html; (q = strstr(q, "rel=\"stylesheet\"")) != NULL; q++) {
+            const char *tag = q;
+            while (tag > html && *tag != '<') tag--;
+            const char *h = strstr(tag, "href=\"");
+            const char *end = h ? strchr(h + 6, '"') : NULL;
+            const char *close = strchr(tag, '>');
+            if (!h || !end || !close || h > close) continue;
+            char rel[192];
+            snprintf(rel, sizeof(rel), "ui/%.*s", (int)(end - h - 6), h + 6);
+            char *qm = strchr(rel, '?');
+            if (qm) *qm = 0;
+            if (strstr(rel, "://")) continue;
+            int dup = 0;
+            for (size_t k = 0; k < nsheets; k++) dup |= !strcmp(sheets[k], rel);
+            if (dup || nsheets >= 62) continue;
+            snprintf(sheet_names[nsheets], sizeof(sheet_names[nsheets]), "%s", rel);
+            sheets[nsheets] = sheet_names[nsheets];
+            nsheets++;
+        }
+        free(html);
+    }
+    for (size_t i = 0; i < sizeof(runtime_sheets) / sizeof(runtime_sheets[0]) && nsheets < 64; i++) {
+        int dup = 0;
+        for (size_t k = 0; k < nsheets; k++) dup |= !strcmp(sheets[k], runtime_sheets[i]);
+        if (!dup) sheets[nsheets++] = runtime_sheets[i];
+    }
+    if (nsheets < 10) { fprintf(stderr, "only %zu stylesheets found in the pages\n", nsheets); g_fail++; }
     Coverage total = { 0, 0, 0, 0 };
     char path[1024];
     for (size_t i = 0; i < nsheets; i++) {
@@ -1095,7 +1161,7 @@ int main(int argc, char **argv)
         total.dropped += cv.dropped;
         total.gaps += cv.gaps;
     }
-    /* inline style="" of the page and of every captured v7.1.4 window template (ui/windows) */
+    /* inline style="" of the pages and of every window template (ui/windows) */
     static const char *pages[] = { "ui/index.html", "ui/social.html" };
     for (size_t i = 0; i < sizeof(pages) / sizeof(pages[0]); i++) {
         Coverage cv = { 0, 0, 0, 0 };

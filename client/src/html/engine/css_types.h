@@ -43,7 +43,7 @@ extern "C" {
 #define CSS_MAX_TRANSITIONS     2
 #define CSS_MAX_BOX_SHADOWS     4
 #define CSS_MAX_GRID_TRACKS     12  /* v7.1.4 editor.css #_toolbar: 10 columns */
-#define CSS_MAX_CUSTOM_PROPS    96  /* v7.1.4: main.css 21 + bundledStyles.min.css 34 :root properties, + hud.css / social.css */
+#define CSS_MAX_CUSTOM_PROPS    96  /* the v10 page: 55 distinct across main.css, bundledStyles.css, svelte.css, hud.css, krunknative.css */
 #define CSS_MAX_CLIP_POINTS     8
 #define CSS_MAX_FONT_FAMILIES   4
 

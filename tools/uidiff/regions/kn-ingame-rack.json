@@ -8,10 +8,10 @@
     {
       "name": "weapon-rack",
       "rect": [
-        1150,
-        484,
-        124,
-        186
+        1154,
+        485,
+        117,
+        183
       ],
       "kind": "image",
       "fuzz": 8,
@@ -21,15 +21,15 @@
     {
       "name": "ammo",
       "rect": [
-        1146,
-        674,
-        128,
-        40
+        1126,
+        676,
+        146,
+        36
       ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#ammoDisplay 250 | 250"
+      "note": "#ammoHolder (v10): 250 | 250"
     }
   ]
 }

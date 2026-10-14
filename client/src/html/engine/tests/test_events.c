@@ -7,8 +7,8 @@
  * (KN_EVENTS_TRACE=1 prints every dispatch as it happens).
  *
  * Part 1 scans every inline on* attribute in ui/index.html and every ui/windows HTML file
- * (Krunker v7.1.4's page), entity-decodes it like the HTML parser and asserts the handler
- * parser accepts all 2184, then compares the distinct callee set with the inventory.
+ * (Krunker v10.0.2's page), entity-decodes it like the HTML parser and asserts the handler
+ * parser accepts all 2307, then compares the distinct callee set with the inventory.
  * Part 2 drives events.c against a stub Dom (the dom.h subset events.c uses) and
  * a stub EventsHost (rect hit testing, scroll geometry) and checks hover chains,
  * click synthesis and bubbling, label->checkbox forwarding, prevent-default,
@@ -356,29 +356,28 @@ static int scan_file(const char *path, int *total, int *failed)
 }
 
 static const char *k_inventory[] = {
-    /* every callee of the Krunker v7.1.4 page (ui/index.html) and its captured windows (ui/windows) */
-    "kn.hideErrorNotification", "sub2FA", "checkTerms", "windows.20.tabIndex=", "showWindow", "SOUND.play",
-    "abTestsPopup", "openTab", "purchaseCancel", "XsollaPopup", "playTick", "playSelect", "logBtnFRVR",
-    "copyInviteLink", "openJoinWindow", "shoPolicePop", "openGuide", "windows.13.purchase", "dropsPopup",
-    "claimReward", "toggleTeam", "setSpect", "windows.13.craftMenu", "openURL", "openDiscord",
-    "windows.32.openHome", "window.open", "showGames", "clientExitPopup", "expertMode", "toggleSpect",
-    "clearPops", "closWind", "switchChat", "focusChat", "closeTwitch", "resetSettings", "exportSettings",
-    "importSettingsPopup", "selectSettingPre", "windows.0.searchList", "windows.0.toggleType",
-    "windows.0.changeTab", "windows.0.collapseFolder", "window.setSetting", "windows.2.switchTab",
-    "windows.2.action", "skinSelector", "charmSelector", "viewAttachments", "windows.3.switchTab",
+    /* every callee of the page (ui/index.html, Krunker v10.0.2) and its window templates (ui/windows) */
+    "checkTerms", "windows.20.tabIndex=", "showWindow", "StripePopup", "XsollaPopup", "playTick",
+    "playSelect", "windows.2.tabIndex=", "setSpect", "toggleSpect", "copyInviteLink", "openJoinWindow",
+    "clearPops", "closWind", "switchChat", "focusChat", "windows.13.switchTab", "SOUND.play",
+    "windows.13.subTabT=", "windows.13.subTab=", "updateWindow", "windows.13.premium",
+    "windows.13.craftMenu", "windows.13.updateScroll", "windows.13.updateScrollWheel", "loadMod",
+    "loadModURL", "joinGame", "windows.29.readAll", "windows.29.switchTab", "openServerWindow",
     "registerAcc", "loginAcc", "windows.5.switchTab", "windows.6.switchTab", "windows.6.collapseFolder",
-    "resetCont", "unbindCont", "changeCont", "windows.7.switchTab", "createPrivateRoom", "windows.7.toggle",
-    "windows.7.changeEffects", "windows.7.toggleEffects", "updateSliderLabel2", "updateSliderLabel",
-    "windows.7.updateSet", "windows.7.presetAction", "goBackWindow", "searchItems", "selectSpray",
-    "cancelTip", "createTip", "windows.9.switchTab", "windows.13.switchTab", "windows.13.subTabT=",
-    "windows.13.subTab=", "updateWindow", "windows.13.premium", "windows.13.updateScroll",
-    "windows.13.updateScrollWheel", "selectSkin", "selectHat", "selectBody", "loadMod", "loadModURL",
-    "windows.20.switchTab", "joinGame", "selectMelee", "windows.29.readAll", "windows.29.switchTab",
-    "selectAttachment", "window.delayExecute", "selectReticle", "windows.31.newPop", "selectDye",
-    "windows.34.viewAll", "selectWaist", "selectFace", "selectShoe", "selectScope", "openHostWindow",
-    "selectPet", "selectWrist", "selectStreak", "createStreakTip", "selectCharm", "openServerWindow",
-    "selectBack", "selectHead", "selectPlayerCard", "aspectSelect", "imagePopup", "changeContMsg",
-    "changeContSet",
+    "resetCont", "unbindCont", "changeCont", "openOneTrust", "resetSettings", "exportSettings",
+    "importSettingsPopup", "selectSettingPre", "windows.0.searchList", "windows.0.toggleType",
+    "windows.0.changeTab", "windows.0.collapseFolder", "window.setSetting", "windows.9.switchTab", "openURL",
+    "goBackWindow", "searchItems", "selectSkin", "selectHat", "selectBody", "skinSelector", "selectMelee",
+    "windows.15.clear", "windows.50.clear", "windows.38.clear", "windows.16.clear", "windows.49.clear",
+    "windows.33.clear", "windows.37.clear", "windows.39.clear", "windows.42.clear", "windows.43.clear",
+    "windows.8.clear", "windows.51.clear", "selectStat", "showTitlesWindow", "selectAttachment",
+    "window.delayExecute", "selectReticle", "windows.31.newPop", "selectDye", "windows.34.viewAll",
+    "selectWaist", "selectFace", "windows.3.switchTab", "selectShoe", "selectScope", "openHostWindow",
+    "showGames", "selectPet", "selectWrist", "selectStreak", "cancelTip", "createStreakTip", "selectCharm",
+    "selectBack", "selectHead", "selectPlayerCard", "selectTitle", "windows.7.switchTab",
+    "createPrivateRoom", "windows.7.toggle", "windows.7.changeEffects", "windows.7.toggleEffects",
+    "updateSliderLabel2", "updateSliderLabel", "windows.7.updateSet", "windows.7.presetAction",
+    "selectSpray", "changeContMsg", "changeContSet", "imagePopup", "aspectSelect",
 };
 
 static void test_parser_corpus(const char *repo)
@@ -401,13 +400,13 @@ static void test_parser_corpus(const char *repo)
         closedir(d);
     }
     printf("corpus: %d inline handlers, %d parse failures, %d distinct callees\n", total, failed, g_callee_n);
-    CHECK(total == 2184);
+    CHECK(total == 2307);
     CHECK(failed == 0);
     printf("callees:");
     for (int i = 0; i < g_callee_n; i++) printf(" %s(%d)", g_callees[i].name, g_callees[i].count);
     printf("\n");
     const int inv_n = (int)(sizeof(k_inventory) / sizeof(k_inventory[0]));
-    CHECK(inv_n == 115);
+    CHECK(inv_n == 109);
     for (int i = 0; i < inv_n; i++) {
         int found = 0;
         for (int j = 0; j < g_callee_n; j++) if (!strcmp(g_callees[j].name, k_inventory[i])) found = 1;

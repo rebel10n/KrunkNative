@@ -24,7 +24,7 @@
  *   cmake --build $B/build
  *   LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a $B/build/test_image $R/ui/
  *
- * Expected sizes come from `identify` over ui/ (the v7.1.4 page); reference pixels from `convert <png> -crop 1x1+X+Y txt:`
+ * Expected sizes come from `identify` over ui/ (Krunker v10.0.2's page; rechecked at the switch); reference pixels from `convert <png> -crop 1x1+X+Y txt:`
  * (straight alpha, converted to premultiplied here).
  */
 #include <math.h>
@@ -60,7 +60,7 @@ typedef struct Expected {
     int w, h;
 } Expected;
 
-/* <img src> references of the v7.1.4 page (ui/index.html, PNGs) plus the images the C UI
+/* <img src> references of the page (ui/index.html, PNGs) plus the images the C UI
  * writes into it (class / weapon icons, map cards, the Client window's installers), resolved
  * from the document root; sizes from `identify` over ui/. */
 static const Expected k_img_src[] = {
@@ -102,7 +102,7 @@ static const Expected k_img_src[] = {
     {"textures/recticle.png", "index.html", 1024, 1024},
     {"textures/reticles/reticle_0.png", "index.html", 32, 32},
     {"img/favicon.png", "index.html", 16, 16},
-    {"img/noimg.png", "index.html", 110, 50},
+    {"img/noimg.png", "index.html", 440, 200}, /* v10's (v7.1.4: 110 x 50) */
     {"img/maps/map_0.png", "index.html", 200, 80},
     {"img/maps/map_1.png", "index.html", 200, 80},
     {"img/maps/map_10.png", "index.html", 200, 80},
@@ -173,7 +173,7 @@ static const Expected k_css_url[] = {
     {"../textures/weapons/icon_1.png", "css/main.css", 256, 128},
 };
 
-/* Referenced by v7.1.4 (index.js: the rarity 6 drop card) but served by neither its public/ tree
+/* Referenced by v7.1.4 / v10 (the rarity 6 drop card) but served by neither the reference trees
  * nor Krunker's live asset host (and so absent from ui/): must fail. */
 static const Expected k_missing[] = {
     {"../img/drops/drop_6.png", "css/main.css", 0, 0},

@@ -8,15 +8,15 @@
     {
       "name": "picker",
       "rect": [
-        374,
-        82,
-        532,
-        556
+        559,
+        176,
+        510,
+        451
       ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "the card grid: v10 items' previews, names, rarity borders"
+      "note": "#skinList, the card grid of the v10 Change Loadout's Customize picker (previews, names, rarity borders)"
     }
   ]
 }

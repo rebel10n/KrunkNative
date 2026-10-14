@@ -39,6 +39,9 @@ KRUNKNATIVE_HTML_FALLBACK_FONT); all listed in doc/html-ui-engine.md.
 
 Rules: C11 only, follow AGENTS.md style (small structs/functions); must build on Linux,
 Windows (MinGW) and macOS. Every module has a standalone test in `tests/`, built from a
-throwaway /tmp CMake project.
+throwaway /tmp CMake project. They read Krunker v10.0.2's page in `ui/`; the cascade's
+(test_cascade.c: the v7.1.4 menu DOM against Chrome's computed styles, tests/data/v7-menu-1280.*)
+and layout's Part 2 (the same menu against Chrome's rects) were retired with the v7.1.4 page;
+`html_runtime_sheet_test` (a CMake test) runs the cascade over the v10 page's sheets.
 Lexbor is used only through dom.c/css_sheet.c (parsing, DOM, selector matching).
 GL goes through `client/include/gl.h` (GL 4.5 core natively, GLES3 on the web).

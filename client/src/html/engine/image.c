@@ -790,6 +790,9 @@ void image_cache_stats(const ImageCache *cache, int *resident, size_t *bytes, in
 const ImageEntry *image_get(ImageCache *cache, const char *url, const char *base_url) {
     static const ImageEntry failed_entry = {0, 0, 0, 1, 0};
     if (!cache) return &failed_entry;
+    /* An empty URL (`url()`, `src=""`) names no image: browsers fetch nothing for it, so it is
+     * not a missing file either (v10's prize wheel tiles write url() for a guest, v10:127937). */
+    if (!url || !url[strspn(url, " \t\r\n")]) return &failed_entry;
 
     char key[IMAGE_KEY_MAX];
     const int data_url = image_is_data_url(url);

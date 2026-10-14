@@ -1449,7 +1449,7 @@ int main(int argc, char **argv)
         g_text = text_create(ui_dir);
         CHECK(g_text != NULL, "text_create");
         if (g_text) {
-            text_register_face(g_text, "gamefont", "css/fonts/FrVrKrunkerBold2.ttf", 400, TEXT_STYLE_NORMAL); /* v7.1.4 main.css gamefont */
+            text_register_face(g_text, "gamefont", "css/fonts/FrVrKrunkerBold2.ttf", 400, TEXT_STYLE_NORMAL); /* main.css gamefont */
             text_register_face(g_text, "headerfont", "css/fonts/header.ttf", 400, TEXT_STYLE_NORMAL);
         }
     }

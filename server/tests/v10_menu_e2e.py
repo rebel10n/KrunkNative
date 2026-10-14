@@ -164,7 +164,7 @@ def nodes(text, label):
 FIND_GAME_MAX_FRAME_MS = 500
 
 SIGNED_IN_SCRIPT = """0 menu
-500 vis @header signedInHeaderBar signedOutHeaderBar knV10Name menuKRCount menuBtnConnect menuBtnHost menuBtnQuickMatch :preview
+500 vis @header signedInHeaderBar signedOutHeaderBar knV10Name menuKRCount menuBtnConnect menuBtnHost menuBtnQuickMatch :preview spectButtonHolder chatUIHolder
 500 vis @nav menuBtnGuide knV10GuideItem menuBtnTurfWars menuBtnMarket menuBtnLeaderboards menuBtnShop menuBtnChall menuBtnSocial menuBtnSideCommunity
 600 clickid knV10Settings
 1500 vis @settings windowHolder settHolder
@@ -199,7 +199,7 @@ SIGNED_IN_SCRIPT = """0 menu
 """
 
 GUEST_SCRIPT = """0 menu
-500 vis @guest signedInHeaderBar signedOutHeaderBar
+500 vis @guest signedInHeaderBar signedOutHeaderBar spectButtonHolder chatUIHolder
 600 clickid knV10LoginBtn
 1000 vis @modal knV10Login accEmail accName
 1100 clickid knV10AuthSwitch
@@ -210,11 +210,11 @@ GUEST_SCRIPT = """0 menu
 1600 clickid accEmail
 1650 type {user}@example.com
 1700 clickid knV10LoginSubmit
-6000 vis @registered knV10Login signedInHeaderBar signedOutHeaderBar knV10Name
+6000 vis @registered knV10Login signedInHeaderBar signedOutHeaderBar knV10Name spectButtonHolder chatUIHolder
 6100 call logoutAcc
 6800 down ESC
 6820 up ESC
-7000 vis @loggedout signedInHeaderBar signedOutHeaderBar
+7000 vis @loggedout signedInHeaderBar signedOutHeaderBar spectButtonHolder chatUIHolder
 7100 clickid knV10LoginBtn
 7400 clickid knV10LoginMode
 7500 clickid accName
@@ -240,6 +240,9 @@ def signed_in_case(brain_port, games):
     check("1: no Connect button, Host Game and Quick Match shown", h.get("menuBtnConnect") == "-" and h.get("menuBtnHost") == "1"
           and h.get("menuBtnQuickMatch") == "1", str(h))
     check("1: the class preview is drawn", h.get(":preview") == "1", str(h))
+    # an account keeps the chat and gets the Spectate switch on the menu (v10 hideChatIfGuestUser
+    # v10:208576, hideSpectateIfGuestUser v10:208579)
+    check("1: chat and Spectate switch on the menu for an account", h.get("chatUIHolder") == "1" and h.get("spectButtonHolder") == "1", str(h))
     n = vis(text, "nav")
     check("1: signed-in nav (Turf Wars, Market, Leaderboards, small Guide; no Guide card)",
           n.get("menuBtnTurfWars") == "1" and n.get("menuBtnMarket") == "1" and n.get("menuBtnLeaderboards") == "1"
@@ -271,16 +274,20 @@ def guest_case(brain_port):
     text = client("guest", brain_port, GUEST_SCRIPT.format(user=user, pw=pw))
     g = vis(text, "guest")
     check("2: guest header bar", g.get("signedOutHeaderBar") == "1" and g.get("signedInHeaderBar") in ("-", "0"), str(g))
+    check("2: a guest has no chat and no Spectate switch on the menu (v10:208576, 208579)",
+          g.get("chatUIHolder") == "0" and g.get("spectButtonHolder") == "0", str(g))
     m = vis(text, "modal")
     # a guest with no saved username: v10's Email field first (the "(use username instead)" toggle -> Username)
     check("2: Login or Register opens the modal", m.get("knV10Login") == "1" and m.get("accEmail") == "1", str(m))
     r = vis(text, "registered")
     check("2: Register signs in: modal closed, signed-in header", r.get("knV10Login") == "-" and r.get("signedInHeaderBar") == "1"
           and r.get("signedOutHeaderBar") == "0" and r.get("knV10Name") == "1", str(r))
+    check("2: signed in: chat and Spectate switch on the menu", r.get("chatUIHolder") == "1" and r.get("spectButtonHolder") == "1", str(r))
     st, body = http(brain_port, "/auth/login", {"username": user, "password": pw})
     check("2: the account exists in the brain", st == 200 and isinstance(body, dict) and body.get("token"), str(body)[:200])
     o = vis(text, "loggedout")
     check("2: Logout: the guest header again", o.get("signedOutHeaderBar") == "1" and o.get("signedInHeaderBar") == "0", str(o))
+    check("2: Logout: no chat and no Spectate switch on the menu", o.get("chatUIHolder") == "0" and o.get("spectButtonHolder") == "0", str(o))
     li = vis(text, "loggedin")
     check("2: Login from the modal: signed in again", li.get("knV10Login") == "-" and li.get("signedInHeaderBar") == "1", str(li))
 

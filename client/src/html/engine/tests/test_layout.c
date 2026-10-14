@@ -9,11 +9,8 @@
  *         transform, sticky, rtl scrollbar, custom scrollbar width, ellipsis,
  *         text-transform, min-content, hit testing, <br>/nowrap, inline
  *         fragments, select intrinsic width, incremental boundary relayout).
- * Part 2: the v7.1.4 menu from tests/data/v7-menu-1280.html (Chrome's live DOM
- *         incl. its inline styles) with the shipped sheets, at 1280x720,
- *         compared against Chrome's getBoundingClientRect of every visible
- *         element with an id (tests/data/v7-menu-1280.rects).  Prints the
- *         expected/measured/delta table.
+ * (Part 2, the Krunker v7.1.4 menu against Chrome's rects, was retired with the v7
+ *  page: ui/ is Krunker v10.0.2's page since ee90bd70.)
  *
  * Usage: test_layout [repo root]      exit code = number of failures
  */
@@ -1512,72 +1509,6 @@ static void report(const char *what, const char *source, HtmlRect got, float x, 
 
 static HtmlRect rect_of(Box *b) { HtmlRect r = { 0, 0, 0, 0 }; if (b) layout_box_rect_in_viewport(b, &r); return r; }
 
-/* Part 2: Krunker v7.1.4's live menu DOM (tests/data/v7-menu-1280.html: Chrome's DOM with its
- * inline styles, scripts/canvases removed, animations off; tools: see the .rects header) laid
- * out with the shipped v7 sheets at 1280x720 and compared against Chrome's
- * getBoundingClientRect of every visible element with an id (tests/data/v7-menu-1280.rects). */
-#define MENU_TOL 2.0f
-static void t_menu(void)
-{
-    Fx *fx = calloc(1, sizeof(Fx));
-    fx->vw = 1280; fx->vh = 720;
-    fx->dom = dom_create();
-    size_t len;
-    char *html = read_file("client/src/html/engine/tests/data/v7-menu-1280.html", &len);
-    dom_load_html(fx->dom, html, len);
-    static const char *sheets[] = { "ui/css/main.css", "ui/css/bundled/bundledStyles.min.css", "ui/css/main_custom.css",
-                                    "ui/css/flag.css", "ui/css/material-icons.css", "ui/css/material-icons-outlined.css",
-                                    "ui/css/material-symbols-outlined.css", "ui/css/google-play.css" };
-    for (int i = 0; i < 8; i++) {
-        char *css = read_file(sheets[i], &len);
-        fx->sheets[fx->ns++] = css_sheet_load(css, len, sheets[i]);
-        free(css);
-    }
-    /* the page's own <style> blocks (index.html's #aHolder rules, the capture's animation-off rule) */
-    for (const char *p = html; (p = strstr(p, "<style>")) != NULL && fx->ns < 8;) {
-        p += 7;
-        const char *e = strstr(p, "</style>");
-        if (!e) break;
-        fx->sheets[fx->ns++] = css_sheet_load(p, (size_t)(e - p), "inline");
-        p = e;
-    }
-    free(html);
-    struct timespec t0, t1;
-    clock_gettime(CLOCK_MONOTONIC, &t0);
-    fx_layout(fx);
-    clock_gettime(CLOCK_MONOTONIC, &t1);
-    double ms = (t1.tv_sec - t0.tv_sec) * 1e3 + (t1.tv_nsec - t0.tv_nsec) / 1e6;
-    printf("menu: restyle+build+layout %.2f ms\n", ms);
-
-    printf("\n| %-28s | %-9s | %-30s | %-30s | %-23s |\n", "element", "source", "expected x y w h (viewport px)", "measured x y w h", "delta x y w h");
-    printf("|------------------------------|-----------|--------------------------------|--------------------------------|-------------------------|\n");
-    char *rects = read_file("client/src/html/engine/tests/data/v7-menu-1280.rects", &len);
-    int rows = 0;
-    char seen[2048] = " ";
-    for (char *line = strtok(rects, "\n"); line; line = strtok(NULL, "\n")) {
-        char id[64], key[70];
-        float x, y, w, h;
-        if (line[0] == '#' || sscanf(line, "%63s %f %f %f %f", id, &x, &y, &w, &h) != 5) continue;
-        /* a duplicated id (two #editorBtnM): only the first element is addressable */
-        snprintf(key, sizeof(key), " %s ", id);
-        if (strstr(seen, key)) continue;
-        if (strlen(seen) + strlen(key) < sizeof(seen)) strcat(seen, key + 1);
-        HtmlElem e = dom_by_id(fx->dom, id);
-        /* form controls get their natural size from widgets.c, which this test does not run */
-        char tag[16] = "";
-        if (e) { const char *tn = dom_tag(fx->dom, e); if (tn) snprintf(tag, sizeof(tag), "%s", tn); }
-        if (!strcmp(tag, "input") || !strcmp(tag, "select") || !strcmp(tag, "textarea")) continue;
-        ElemData *ed = e ? dom_elem_data(fx->dom, e) : NULL;
-        char what[40];
-        snprintf(what, sizeof(what), "#%s", id);
-        report(what, "chrome", rect_of(ed ? (Box *)ed->box : NULL), x, y, w, h, MENU_TOL);
-        rows++;
-    }
-    free(rects);
-    CHECK(rows > 60, "v7 menu rects compared (%d)", rows);
-    fx_free(fx);
-}
-
 /* ------------------------------------------------------------------------- */
 
 int main(int argc, char **argv)
@@ -1587,7 +1518,7 @@ int main(int argc, char **argv)
     snprintf(ui, sizeof(ui), "%s/ui", g_root);
     g_ts = text_create(ui);
     if (!g_ts) { fprintf(stderr, "text_create failed\n"); return 99; }
-    /* v7.1.4 main.css: gamefont = FrVrKrunkerBold2.ttf (v3.1.1 used font2.ttf) */
+    /* main.css: gamefont = FrVrKrunkerBold2.ttf (v3.1.1 used font2.ttf) */
     text_register_face(g_ts, "gamefont", "css/fonts/FrVrKrunkerBold2.ttf", 400, TEXT_STYLE_NORMAL);
     text_register_face(g_ts, "headerfont", "css/fonts/header.ttf", 400, TEXT_STYLE_NORMAL);
     text_register_face(g_ts, "material icons", "css/fonts/material-icons.ttf", 400, TEXT_STYLE_NORMAL);
@@ -1634,7 +1565,6 @@ int main(int argc, char **argv)
     t_flex_text_content();
     t_innerhtml_detach();
     t_intrinsic_font_restyle();
-    t_menu();
 
     css_sheet_destroy(g_ua);
     cascade_shutdown();

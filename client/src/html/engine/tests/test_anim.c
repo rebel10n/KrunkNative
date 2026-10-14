@@ -7,7 +7,7 @@
  *      client/src/html/engine/tests/test_anim.c -lm -o test_anim
  *   ./test_anim [path/to/ui/css]
  *
- * The 30 @keyframes blocks are read from ui/css/main.css + hud.css + krunknative.css with a
+ * The 38 @keyframes blocks of ui/css/main.css (+ hud.css, krunknative.css) and two fixture ones are read with a
  * small scanner (css_sheet.c / css_values.c are not required), turned into
  * AnimKeyframeSets, and sampled at known times.  Expected values are either
  * exact (linear/steps) or derived from an independent bisection bezier
@@ -619,9 +619,9 @@ static void test_zoom_and_shadow_lists(void)
     HtmlElem e = 91;
     CHECK(anim_update_elem(&g_sys, e, &base, 1000) == 1);
     CHECK(sample(e, &base, &out, 1000, &r));
-    CHECK_NEAR(r->font_size, 15, 1e-4);         /* `from { font-size: 30px }` * 0.5 */
+    CHECK_NEAR(r->font_size, 22, 1e-4);         /* `from { font-size: 44px }` * 0.5 (v10 main.css) */
     CHECK(sample(e, &base, &out, 1400, &r));
-    CHECK_NEAR(r->font_size, 15.5, 1e-4);       /* halfway to the zoomed base 16 */
+    CHECK_NEAR(r->font_size, 19, 1e-4);         /* halfway to the zoomed base 16 */
     anim_remove_elem(&g_sys, e);
 
     AnimValue a, b, o;
@@ -665,12 +665,12 @@ static void test_grow(void)
 
     CHECK(sample(e, &base, &out, t0, &r));
     CHECK_NEAR(r->opacity, 0.3, 1e-6);
-    CHECK_NEAR(r->font_size, 30, 1e-5);
+    CHECK_NEAR(r->font_size, 44, 1e-5);         /* v10 main.css `grow` from 44px */
 
     double e05 = ref_ease(0.5);
     CHECK(sample(e, &base, &out, t0 + 400, &r));
     CHECK_NEAR(r->opacity, 0.3 + 0.7 * e05, 1e-4);
-    CHECK_NEAR(r->font_size, 30 + 2 * e05, 1e-4);
+    CHECK_NEAR(r->font_size, 44 - 12 * e05, 1e-4);
 
     /* t = 0.8s: second iteration, alternate -> reversed, progress 0 -> base */
     CHECK(sample(e, &base, &out, t0 + 800, &r));
@@ -680,7 +680,7 @@ static void test_grow(void)
     /* t = 1.2s: reversed iteration at 0.5 -> same as 0.4s */
     CHECK(sample(e, &base, &out, t0 + 1200, &r));
     CHECK_NEAR(r->opacity, 0.3 + 0.7 * e05, 1e-4);
-    CHECK_NEAR(r->font_size, 30 + 2 * e05, 1e-4);
+    CHECK_NEAR(r->font_size, 44 - 12 * e05, 1e-4);
 
     /* t = 1.6s: back at the from frame */
     CHECK(sample(e, &base, &out, t0 + 1600, &r));
@@ -1199,8 +1199,12 @@ int main(int argc, char **argv)
     test_value_lerp();
 
     int loaded = 0;
-    /* v7.1.4: main.css has 28 @keyframes; typewriter / blinkTextCursor (the map terminal,
-     * a KrunkNative addition since v7 dropped it) live in krunknative.css */
+    /* the page's sheets (Krunker v10.0.2's main.css has 38 @keyframes; hud.css and krunknative.css
+     * none today), then typewriter / blinkTextCursor, the old map terminal's (gone from the page
+     * since the v7.1.4 import), kept here as a fixture for steps() / fill-mode / negative delays */
+    static const char k_terminal_keyframes[] =
+        "@keyframes typewriter { from { width: 0; } to { width: 25.25em; } }\n"
+        "@keyframes blinkTextCursor { from { border-right-color: #33d011; } to { border-right-color: transparent; } }\n";
     const char *files[] = { "main.css", "hud.css", "krunknative.css" };
     for (size_t i = 0; i < 3; i++) {
         char path[512];
@@ -1213,8 +1217,10 @@ int main(int argc, char **argv)
         loaded += load_keyframes_text(&g_sys, text);
         free(text);
     }
-    CHECK(loaded == 30);
-    CHECK(g_sys.set_count == 30);
+    loaded += load_keyframes_text(&g_sys, k_terminal_keyframes);
+    printf("keyframes loaded: %d (%d sets)\n", loaded, g_sys.set_count);
+    CHECK(loaded == 40);
+    CHECK(g_sys.set_count == 40);
     static const struct { const char *name; uint32_t frames; } expect[] = {
         { "blinkTextCursor", 2 }, { "typewriter", 2 }, { "grow", 1 }, { "lds-ring", 2 }, { "spin", 2 },
         { "scaleBob", 2 }, { "rainbow", 6 }, { "rainbowT", 6 }, { "rainbowB", 6 }, { "rainbowBG", 6 },
