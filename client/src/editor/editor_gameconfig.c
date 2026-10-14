@@ -478,6 +478,14 @@ void ed_panel_left_show(void) {
     build_classes(&b);
     build_entries(&b, LIST_CLASS);
     build_entries(&b, LIST_EFFECT);
+    // v10: a closed "History" folder with the Recent Actions list (IDX:15111-15122, 14362)
+    ed_gui_folder_begin(&b, "History", 0, 1, 0, "history");
+    char *list = ed_history_html();
+    edb_addf(&b.html, "<div class=\"history-display\">\n\t\t\t\t\t\t\t<div class=\"history-display-header\">Recent Actions:</div>\n"
+                      "\t\t\t\t\t\t\t<div id=\"historyList\" class=\"history-list\">\n\t\t\t\t\t\t\t\t%s\n\t\t\t\t\t\t\t</div>\n\t\t\t\t\t\t</div>",
+             list ? list : "");
+    free(list);
+    ed_gui_folder_end(&b, 0);
     ed_gui_end(&b, g_ed.el_left_list);
 }
 

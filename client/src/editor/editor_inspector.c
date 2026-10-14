@@ -435,7 +435,7 @@ static void build_header(const EditorPrefab *pf) {
     if (HAS(EP_CANIMPULSE)) sw("Can Impulse", "canImpulse", 0, NULL);
     if (HAS(EP_BOOSTABLE)) sl("Boost", "boost", -BOOST_RANGE, BOOST_RANGE, 0.01, 0, NULL);
     if (HAS(EP_BOUNCE)) {
-        sl("Bounce", "bounce", -3, 3, 0.1, 0, NULL);
+        sl("Bounce", "bounce", -10, 10, 0.1, 0, NULL); // v10 -10..10 (IDX:15348; v7.1.4 -3..3)
         sw("Crouch Reduces", "crouch", 0, NULL);
     }
     if (HAS(EP_EDGENOISE)) sl("Edge Noise", "edgeNoise", -5, 5, 0.1, 0, NULL);
@@ -448,8 +448,8 @@ static void build_header(const EditorPrefab *pf) {
     if (IS("KR_ZONE")) sl("Minimum Amount", "minimum", 0, 10000000, 100, 0, NULL);
     if (HAS(EP_GEN) || HAS(EP_HASSPIN)) {
         sl("Spin", "spin", -20, 20, 0.1, 0, NULL);
-        static const EdOption a[] = {{"Y", 0, NULL}, {"X", 1, NULL}};
-        if (HAS(EP_GEN) || HAS(EP_HASSPINDIR)) sel("Spin Axis", "spinAxis", a, 2, 0, NULL);
+        static const EdOption a[] = {{"Y", 0, NULL}, {"X", 1, NULL}, {"Z", 2, NULL}}; // v10 + Z (IDX:15442)
+        if (HAS(EP_GEN) || HAS(EP_HASSPINDIR)) sel("Spin Axis", "spinAxis", a, 3, 0, NULL);
     }
     if (IS("CYLINDER")) {
         sw("Open Ended", "openEnded", 0, NULL);
@@ -524,6 +524,7 @@ static void build_header(const EditorPrefab *pf) {
         const EdOption *s = names_options(data_list("stepSounds"), 0, &n);
         sel("Step Sound", "stepSrc", s, n, 0, NULL);
     }
+    if (HAS(EP_CANDYNAMIC)) sw("Dynamic", "dyn", 0, NULL); // v10 (IDX:15953-15962): CUBE, TRIGGER, CUSTOM_ASSET
 #undef HAS
 #undef IS
 }
@@ -674,6 +675,7 @@ static void build_ai(void) {
     sw("Friendly", "friendly", 1, NULL);
     sw("Target Players", "targPlr", 1, NULL);
     sw("Target other AI", "targAI", 1, NULL);
+    sw("Boss", "isBoss", 1, NULL); // v10 (IDX:17040)
     sl("Behavior Type", "behaviorType", 0, 20, 1, 1, NULL);
     sl("Chase Distance", "aiChasd", 0, 2000, 1, 1, NULL);
     sl("Roam Radius", "roamRad", 0, 500, 1, 1, NULL);
@@ -708,6 +710,7 @@ static void build_ai(void) {
 
     fold("Melee", 1, 1, 0, "technical.meleeing");
     sw("Can Melee", "canHit", 1, NULL);
+    sw("Can Contact Hit", "canContactHit", 1, NULL); // v10 (IDX:17226)
     sl("Melee Dmg", "meldmg", 1, 200, 1, 1, NULL);
     sl("Melee Rate", "hrate", 200, 10000, 50, 1, NULL);
     sl("Melee Range", "melrng", 10, 100, 1, 1, NULL);
@@ -843,6 +846,14 @@ static void build_technical(const EditorPrefab *pf, const int group) {
     }
     if (HAS(EP_INTERACTMSG) || (IS("TRIGGER") && (event_is(O, "onInteractKey") || event_is(O, "onHoldMouse"))))
         txt("Custom Message", "interactM", "", 0, NULL, 0);
+    if (IS("WEAPONBOX")) { // v10 Crate Type (IDX:16786-16807)
+        static const EdOption ct[] = {{"Random", 0, NULL}, {"Weapons & Ammo", 1, NULL}, {"Consumables", 2, NULL}, {"Power-ups", 3, NULL}};
+        sel("Crate Type", "crateType", ct, 4, 0, NULL);
+    }
+    if (IS("SCRAPCRATE")) { // v10 (IDX:16808-16829)
+        static const EdOption ct[] = {{"Common", 0, NULL}, {"Uncommon", 1, NULL}, {"Rare", 2, NULL}, {"Epic", 3, NULL}, {"Legendary", 4, NULL}};
+        sel("Crate Type", "crateType", ct, 5, 0, NULL);
+    }
     if (HAS(EP_HASHEALTH)) {
         sw("Destructible", "canDest", 0, NULL);
         if (!IS("GATE")) {
@@ -981,6 +992,7 @@ static void build_environment(void) {
     sel("Sound", "ambInd", s, n, 0, NULL);
     num("Custom Sound ID", "ambIndC", "Sound Asset ID", 0, NULL);
     select_button(B, "Select Sound", SEL_AMB_EN);
+    sl("Fade Time", "ambFadeTime", 0, 10, 0.1, 0, NULL); // v10 (IDX:18990-18997)
     sl("Intensity", "ambientI", 0.1, 3, 0.1, 0, NULL);
     col("Color", "ambientC", 0, NULL);
     fend(0);

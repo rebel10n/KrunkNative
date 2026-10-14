@@ -1,5 +1,5 @@
 {
-  "ref": "doc/ref/krunker-v7.1.4/hub/hub-settings.png",
+  "ref": "doc/ref/krunker-v10/hub/hub-settings.png",
   "size": [
     1280,
     720
@@ -14,5 +14,5 @@
     ]
   },
   "frames": 3,
-  "note": "Social hub (ui/social.html), guest, p=maps + openSettings."
+  "note": "Social hub (ui/social.html, Krunker v10), guest, p=maps + openSettings."
 }

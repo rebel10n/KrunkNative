@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Editor WP4 parity test: the logic UI (triggers), the Custom GUI panel and the left panel's game
-config against Krunker v7.1.4 (doc/v7/editor.md WP4).
+config against Krunker v7.1.4 (doc/v7/editor.md WP4), with the Krunker v10 deltas (doc/v10/editor-social.md):
+the trigger action / condition lists gained v10's entries (72-74 Spawn/Despawn/Set Entity Value,
+condition 12 Custom Action) and their last option is no longer v7's "Mode Specific" / "Player
+Inventory Value", and the Essential panel gained the closed "History" folder.
 
     python3 -I tools/editor/logic_parity.py --bin <build>/client_bin [--case NAME]... [--keep]
 
@@ -19,6 +22,7 @@ Plus the left panel of a new map against left-essential.dump.txt.
 """
 import argparse
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -96,6 +100,38 @@ def run_editor(binary, script, work, egl):
     return r.returncode
 
 
+V10_NOTE = 'v10 delta'
+
+
+def v10_normalize(lines):
+    """v7.1.4 dump lines that Krunker v10 changed (doc/v10/editor-social.md): the action /
+    condition selects' option count and last option, and the Essential panel's History folder."""
+    out = []
+    for ln in lines:
+        if ln == 'B Add Action':
+            # v10's triggerActionLimit is 8 (v7.1.4: 5), so the button is still there at v7's limit
+            continue
+        if ln.startswith('L[subsection] Action : select#') or ln.startswith('L[] Condition : select#'):
+            # v10: the triggers' action / condition options (editor_data.c regenerated)
+            ln = re.sub(r'select#\d+\[([^\]]*)\]', lambda m: 'select#v10', ln)
+        out.append(ln)
+    return out
+
+
+def drop_v10_only(lines):
+    """The lines v10 added to a v7.1.4 panel dump: the Essential panel's "History" folder."""
+    out, skip = [], 0
+    for ln in lines:
+        if ln == 'F History closed':
+            skip = 3  # the folder, its rule and its trailing rule
+            continue
+        if skip:
+            skip -= 1
+            continue
+        out.append(ln)
+    return out
+
+
 def trigger_block(lines):
     """The lines of the "Trigger Event" / "Trigger Actions" folders (v7 UI:4080-4500)."""
     out, inside = [], False
@@ -138,7 +174,7 @@ def main():
             run_editor(binary, 'closewindow;dump:left:' + out, d, args.egl)
             want = open(os.path.join(REF, 'left-essential.dump.txt')).read()
             got = open(out).read() if os.path.exists(out) else ''
-            ok = got == want
+            ok = drop_v10_only(got.splitlines()) == want.splitlines()
             failed += not ok
             print('%-28s %s' % ('left-essential', 'PASS' if ok else 'FAIL (left panel dump differs)'))
         for case in cases:
@@ -175,14 +211,16 @@ def main():
                 want_block, got_block = trigger_block(ref_dump), trigger_block(got_dump)
                 if not got_block:
                     notes.append('panel dump skipped (the inspector does not show the logic folders yet)')
-                elif got_block != want_block:
-                    problems.append('panel dump differs:\n' + '\n'.join('    ' + x for x in difflines(want_block, got_block)))
+                elif v10_normalize(drop_v10_only(got_block)) != v10_normalize(drop_v10_only(want_block)):
+                    w, g = v10_normalize(want_block), v10_normalize(got_block)
+                    problems.append('panel dump differs:\n' + '\n'.join('    ' + x for x in difflines(w, g)))
             else:
                 exp = json.load(open(out['export'])) if os.path.exists(out['export']) else {}
                 got = {'config': exp.get('config'), 'gui': exp.get('gui')}
                 if ordered(got) != ordered(golden):
                     problems.append('export differs:\n    native %s\n    v7     %s' % (json.dumps(got), json.dumps(golden)))
-                if got_dump != ref_dump:
+                got_key, ref_key = [v10_normalize(drop_v10_only(x)) for x in (got_dump, ref_dump)]
+                if got_key != ref_key:
                     problems.append('panel dump differs:\n' + '\n'.join('    ' + x for x in difflines(ref_dump, got_dump)))
             if problems:
                 failed += 1

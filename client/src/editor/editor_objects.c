@@ -950,6 +950,40 @@ static EditorHistoryEntry new_entry(const int action, const uint32_t uuid, cJSON
     return e;
 }
 
+static void history_item(EdBuf *b, const EditorHistoryEntry *e, const int redo) {
+    if (e->action != 'a' && e->action != 'r' && e->action != 'u') return; // v10 lists add / remove / update
+    const EditorObject *o = e->action == 'u' ? ed_obj_find(e->uuid) : NULL;
+    const cJSON *data = e->state ? e->state : o ? o->data : NULL;
+    const int prefab = data ? ed_model_prefab(data) : -1;
+    const cJSON *nm = data ? cJSON_GetObjectItemCaseSensitive(data, "n") : NULL; // obj.name || obj.objType || "Object"
+    const char *name = cJSON_IsString(nm) && nm->valuestring[0] ? nm->valuestring
+                     : prefab >= 0 && prefab < EDITOR_PREFAB_COUNT ? editor_prefabs[prefab].name : "Object";
+    const char *verb = e->action == 'a' ? "Added" : e->action == 'r' ? "Removed" : "Updated";
+    edb_addf(b, "<div class=\"history-item history-item-%s\">\n\t\t\t<span class=\"history-item-indicator\">\u25cf</span> %s ", redo ? "redo" : "undo", verb);
+    edb_add_escaped(b, name);
+    edb_add(b, redo ? " (redo)\n\t\t</div>" : "\n\t\t</div>");
+}
+
+char *ed_history_html(void) {
+    EditorProject *p = g_ed.proj;
+    EdBuf b;
+    edb_init(&b);
+    if (p) {
+        for (size_t i = 0; i < p->redo_count; i++) history_item(&b, &p->redos[i], 1);
+        for (size_t i = p->undo_count; i-- > 0;) history_item(&b, &p->undos[i], 0);
+    }
+    if (!b.len) edb_add(&b, "<div class=\"history-empty\">No recent actions</div>");
+    return b.buf; // the caller frees (edb_free)
+}
+
+void ed_history_display(void) {
+    const HtmlElem list = html_dom_by_id("historyList");
+    if (!list) return;
+    char *html = ed_history_html();
+    html_dom_set_html(list, html ? html : "");
+    free(html);
+}
+
 void ed_history_add(const int action, EditorObject *o, cJSON *state) {
     if (editor_setting_bool("disableHistory")) {
         if (action == 'r') ed_obj_free(o);
@@ -961,7 +995,11 @@ void ed_history_add(const int action, EditorObject *o, cJSON *state) {
     else e.state = state;
     if (action == 'r') graveyard_add(o); // removed objects can come back with their uuid
     history_push(&g_ed.proj->undos, &g_ed.proj->undo_count, &g_ed.proj->undo_cap, e);
-    // a new action invalidates the redo list only implicitly in Krunker (it keeps it); keep parity
+    // Krunker v10 addToHistory (E10:15319-15338): a new action clears the redo list (v7.1.4 kept it)
+    EditorProject *p = g_ed.proj;
+    for (size_t i = 0; i < p->redo_count; i++) entry_free(&p->redos[i]);
+    p->redo_count = 0;
+    ed_history_display();
 }
 
 // map config snapshot for 'm' entries (bus map_set / map_unset)
@@ -1078,7 +1116,9 @@ static void history_execute_one(const int redo, EditorHistoryEntry e) {
 }
 
 int ed_history_step(const int redo) {
-    // one step: a single entry, or every entry of the newest batch
+    // one step: a single entry, or every entry of the newest batch. Krunker v10 executeHistory
+    // ("redo") puts the redone step back on the undo list (E10:15344-15450; v7.1.4 recorded nothing)
+    if (redo) return ed_history_redo_undoable();
     EditorProject *p = g_ed.proj;
     EditorHistoryEntry *list = redo ? p->redos : p->undos;
     size_t *count = redo ? &p->redo_count : &p->undo_count;
@@ -1090,14 +1130,15 @@ int ed_history_step(const int redo) {
         const EditorHistoryEntry e = list[--(*count)];
         history_execute_one(redo, e);
     } while (batch && *count && (redo ? p->redos : p->undos)[*count - 1].batch == batch);
+    ed_history_display();
     return 1;
 }
 
 void ed_history_execute(const int redo) { ed_history_step(redo); }
 
-// One redo step that stays undoable (the AI panel's checkpoint Redo, editor_ai.c): ed_history_step(1)
-// whose entries go back onto the undo list, so the checkpoint can be restored again. The editor's own
-// redo keeps v7.1.4's executeHistory("redo"), which records nothing. 0 = nothing to redo.
+// One redo step that stays undoable: its entries go back onto the undo list, as Krunker v10's
+// executeHistory("redo") does (the editor's Redo, ed_history_step(1), and the AI panel's checkpoint
+// Redo, editor_ai.c, so a checkpoint can be restored again). 0 = nothing to redo.
 int ed_history_redo_undoable(void) {
     EditorProject *p = g_ed.proj;
     if (!p->redo_count) return 0;
@@ -1113,6 +1154,7 @@ int ed_history_redo_undoable(void) {
         if (editor_setting_bool("disableHistory")) entry_free(&back);
         else history_push(&p->undos, &p->undo_count, &p->undo_cap, back);
     } while (batch && p->redo_count && p->redos[p->redo_count - 1].batch == batch);
+    ed_history_display();
     return 1;
 }
 

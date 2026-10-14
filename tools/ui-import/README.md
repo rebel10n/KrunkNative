@@ -19,8 +19,7 @@ committed to the tree; re-running only rewrites files whose content changed.
 | menu page | `index_page.py` | `ui/index.html` from `public/index.html` (every `<script>`, comments, og/PWA links removed; `?build=`/`?v=` stripped; `https://assets.krunker.io/` and root-relative URLs made relative; external `<a href>` -> `href="#" data-ext-href`; `<canvas id="canvas">`, `css/krunknative.css` + `css/hud.css`, `js/kn-shim.js` + `js/loader.js` added) and its stylesheets (`main.css`, `bundled/bundledStyles.min.css`, `main_custom.css`, `flag.css`, `material-icons*.css`, `material-symbols-outlined.css`, `google-play.css`, plus `google-secular-one.css`) with the same URL rewriting, nothing else changed |
 | fonts | `import.py` | every font file the stylesheets name is copied; each `.woff2` gets a `.ttf` next to it (material icon fonts named after their family: `material-icons.ttf`, `material-icons-outlined.ttf`; other faces after the woff2), and the ligature tables `client/src/html/engine/material_icons_liga.h` + `material_icons_outlined_liga.h` |
 | windows | `windows_v7.py` | `ui/windows/` from `krunker-windows-v7.json.gz` (below): `<n>.html` = showWindow(n), `settings-{basic,advanced}-<t>.html`, `controls-<t>.html`, `windows.json` (header, sticky, class, inline style per window), `versions.txt` (= `public/docs/versions.txt`, the Changelog) |
-| hub / viewer | `social_page.py`, `viewer_page.py` | `ui/social.html` (+ `social.css`, `social_custom.css`), `ui/viewer.html` (+ `dat-gui.css`); `--viewer-store` also regenerates `client/src/viewer/viewer_store_table.c` |
-| editor | `editor_page.py` | only with `--editor-page`: v7's `editor.html` + editor CSS + CodeMirror CSS (`ui/libs/codemirror/`). Off by default while `client/src/editor/` drives the v3.1.1 editor page |
+| hub / editor / viewer | `v10_hub_editor.py`, `viewer_page.py` | `ui/social.html` and `ui/editor.html` from the live Krunker v10 pages (below), `ui/viewer.html` (+ `dat-gui.css`); `--viewer-store` also regenerates `client/src/viewer/viewer_store_table.c` |
 | images | `menu_assets.py` | every local file the pages, stylesheets and window templates reference (`collect_page_refs`), plus `menu-assets-v7.txt` (what C generates; `dest = v3:src` / `pattern = v3:` take files the v7.1.4 reconstruction lacks from v3.1.1). References v7 itself 404s on are listed, grouped by directory |
 
 ### Window captures (`capture_v7_windows.js`)
@@ -163,17 +162,21 @@ every v7.1.4 `store.skins` entry (6448, by index), rarities (incl. NFT), the 17 
 previews, skin colours, `currentSeason` 7, and the viewer's dropdown option lists computed like v7
 `src/viewer.js` (f460 / f459 / melee, "[Free]" labels). `GEN_CHECK=1` only reports drift.
 
-## Social hub page
+## Social hub and editor pages (Krunker v10)
 
-`social_page.py` (step of `import.py`, skip with `--no-social`) writes `ui/social.html`
-(Krunker's `public/social.html`: scripts, comments and description/og metas removed,
-`?build=` stripped, root-relative URLs made relative, the asset-server profile icon
-pointed at `textures/classes/icon_0.png`, plus the web build's hidden `#canvas` and
-`js/kn-shim.js` / `js/loader.js` like `index.html`), copies `css/social.css` and
-`css/social_custom.css` byte-identical, the images the page and `client/src/ui/social_ui.c`
-use (`img/{steam,android,ios,editor,black_m,favicon,noimg}.png`,
-`img/{crossed_swords_0,shaking_hands}.svg`, `img/backgrounds/bg_test.png`) and the eight
-Clan Wars region reward previews under `textures/previews/`.
+`v10_hub_editor.py` (step of `import.py` for `--ref v7`, the default; `--no-social` / `--no-editor`
+skip a page; also runs alone: `python3 -I tools/ui-import/v10_hub_editor.py --ui ui [--public <mirror>]`)
+writes `ui/social.html` and `ui/editor.html` from the live krunker.io pages of the
+`fetch_live_site.py` mirror (`~/.cache/kn-v10/live/site/public`), their stylesheets
+(`social.css`, `social_custom.css`, `editor.css`, `editor_dark.css`, `editor_custom.css`,
+`pickr.css`, the shared Vite `static/index-<hash>.css` as `static/index.css`) and the images they
+reference that `ui/` lacks. KrunkNative additions are re-applied on every run (module docstring):
+the web glue, the editor's `css/editor-kn.css` / `editor-script.css` / `editor-ai.css` and
+`#knAiOption`, the hub's Download badge, v7.1.4's `#twoFAPop` with `css/kn-twofa.css` (generated
+from v7's editor.css), and `css/hub-svelte.css` (the view stack / popup / LoginModal component
+blocks of `v10_bundle.js`'s `svelte.css`). The v10 bundles (`static/social-*.js`,
+`static/editor-*.js`) are never fetched by the mirror nor run; the C ports read them through
+webcrack (`doc/v10/editor-social.md`). `social_page.py` / `editor_page.py` (v7.1.4 / v3.1.1 pages) are only used when the v7 step is skipped.
 
 ## Dependencies
 

@@ -29,20 +29,20 @@
       "kind": "image",
       "fuzz": 8,
       "max_pct": 1.5,
-      "note": "#playbar: test / host / teleport icons"
+      "note": "#playbar: test / host / teleport / multiplayer icons"
     },
     {
       "name": "version",
       "rect": [
-        1613,
+        1719,
         0,
-        307,
+        201,
         26
       ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#versionTxt: Krunker Editor v2.0.0 - Yendis Entertainment"
+      "note": "#versionTxt: Krunker Editor v2.0.0 - FRVR"
     },
     {
       "name": "canvas-buttons",

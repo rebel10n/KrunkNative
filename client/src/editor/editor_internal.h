@@ -299,7 +299,7 @@ void editor_teleport_popup(void);
 void editor_teleport(int reset, float x, float y, float z);
 void editor_script_popup(void);          // scriptPopup (key 0, Scripting menu): the KrunkScript window (editor_script.c)
 void editor_texture_list(void);          // textureKey (T): viewModelList / viewTextureList (WP3 pickers)
-#define ED_WINDOW_COUNT 15                // window.windows[] (showWindow 1..15)
+#define ED_WINDOW_COUNT 17                // window.windows[] (showWindow 1..15, v10: 16 Multiplayer, 17 Players)
 void editor_message(const char *text);   // chatList info line (Krunker uses alert())
 double editor_setting_num(const char *key, double fallback);
 int editor_setting_bool(const char *key);
@@ -348,6 +348,10 @@ cJSON *ed_prop_get(const EditorObject *o, const char *prop);        // new cJSON
 void ed_prop_set(EditorObject *o, const char *prop, const cJSON *value);
 int ed_prop_needs_rebuild(const char *prop);
 
+// v10 generateHistoryHTML (E10:15451-15497): the History folder's list, newest first (redos, then
+// undos); ed_history_display() refreshes #historyList (updateHistoryDisplay). Caller frees.
+char *ed_history_html(void);
+void ed_history_display(void);
 void ed_history_add(int action, EditorObject *o, cJSON *state);
 void ed_history_add_map(void);                     // 'm': the map config before a bus map_set
 uint32_t ed_history_batch_begin(const char *label);  // following entries form one undo step (0 = nested)

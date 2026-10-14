@@ -140,19 +140,22 @@ imports are C: `client/src/viewer/` (the store tables in
 
 ## Map editor page (`editor.html`)
 
-Krunker v7.1.4's `public/editor.html` ("Krunker Editor", since editor WP2 of
-doc/v7/editor.md), imported by `tools/ui-import/editor_page.py` (`make ui-import`): scripts
-removed (hook.js, mithril, CodeMirror, quicksettings.js, pickr.min.js, jszip, editor.js, the
-captcha loaders), `og:` metas dropped, `?build=` stripped, root-relative URLs made relative,
-`<canvas id="canvas">` added as the first body child and `js/kn-shim.js` + `js/loader.js`
-before `</body>` (web glue, as in `index.html`). `css/editor.css`, `css/editor_dark.css`,
-`css/editor_custom.css`, `css/pickr.css` and `libs/codemirror/5.61.0/` (codemirror.min.css,
-theme/monokai.min.css) are v7's files (the CSS through the importer's v7 URL rewrite);
-`css/editor-kn.css` is ours (transparent page over the GL view, the web build's `#canvas`,
-pointer-events so clicks on the 3D area reach it, and the `#knPrompt` prompt/confirm dialog).
+Krunker v10's live `editor.html` (krunker.io, mirrored 2026-10-13 by `fetch_live_site.py`), imported
+by `tools/ui-import/v10_hub_editor.py` (`make ui-import`): every script removed (FRVR SDK, the inline
+FRVR config, gtag, ld+json, the Vite module entry, altcha, CodeMirror, Tween, howler,
+quicksettings, pickr, jszip, fflate), comments, preload links and description / og / twitter metas
+dropped, `?build=` stripped, URLs made relative, the cdnjs CodeMirror 5.61.0 CSS pointed at
+`libs/codemirror/5.61.0/`, the shared Vite stylesheet `static/index-<hash>.css` written as
+`static/index.css`. `css/editor.css`, `css/editor_dark.css`, `css/editor_custom.css`,
+`css/pickr.css` are v10's (URL rewrite of the v7 import). KrunkNative additions kept on every
+import: `<canvas id="canvas">` (first body child), `js/kn-shim.js` + `js/loader.js`,
+`css/editor-kn.css` (transparent page over the GL view, pointer-events, the `#knPrompt`
+dialog), `css/editor-script.css` (the KrunkScript window), `css/editor-ai.css` and the AI
+button `#knAiOption`, and v7.1.4's 2-Factor popup `#twoFAPop` + `css/kn-twofa.css` (v10 dropped
+it; KrunkNative keeps 2FA logins). Parity notes: `doc/v10/editor-social.md`.
 Everything editor.js and libs/ObjectInstance.js / TransformControls.js / EditorOverlay.js /
 ui/editor.js did is C: `client/src/editor/` (the prefab and config tables in
-`client/src/editor/editor_data.c` are generated from v7's `src/` by
+`client/src/editor/editor_data.c` are generated from v7's `src/` plus the v10 appendix by
 `tools/editor/gen_editor_data.py`). The panels (QuickSettings-style blueprints) and the Pickr
 colour picker are rebuilt as Krunker's own markup by `client/src/editor/editor_gui.c`; the
 `#editor-overlay` canvas (FPS counter) is drawn with Canvas2D (`editor_overlay.c`). Shown by
@@ -164,21 +167,21 @@ URL), and links to `/editor.html` (`client/include/app_mode.h`). Reference captu
 
 ## Social hub page (`social.html`)
 
-Krunker v7.1.4's `public/social.html` ("Krunker Hub"), imported by
-`tools/ui-import/social_page.py` (`make ui-import`): scripts (hook.js, mithril, frvr,
-social.js, recaptcha, hcaptcha, howler, Chart.js, the inline callbacks), comments and
-description/og metas removed, `?build=` stripped, asset-host and root-relative URLs made
-relative, and the web build's hidden `<canvas id="canvas">` + `js/kn-shim.js` /
-`js/loader.js` added as on `index.html`. `css/social.css` and `css/social_custom.css` get the
-menu's URL rewriting; `css/flag.css`, `css/material-icons*.css` are the menu's. Images: the
-page's own references plus the hub images C writes (`menu-assets-v7.txt`).
+Krunker v10's live `social.html` ("Krunker Hub - Gaming Community, Trading & Social Features"),
+imported by `tools/ui-import/v10_hub_editor.py` (`make ui-import`), with the editor page's rules:
+scripts, comments, preload links and description / og / twitter metas removed, `?build=`
+stripped, URLs made relative, `static/index.css` linked, the web build's hidden
+`<canvas id="canvas">` + `js/kn-shim.js` / `js/loader.js` added, the app badge pointed at our
+Download window, `#twoFAPop` + `css/kn-twofa.css` kept, and `css/hub-svelte.css` (v10's view
+stack / popup / LoginModal component CSS, from `svelte.css` of `v10_bundle.js`) linked.
+`css/social.css` and `css/social_custom.css` are v10's (URL rewrite).
 
-Its behaviour (src/social.js + src/ui/social.js of the v7.1.4 tree) is
+Its behaviour (v10's `static/social-*.js`, read through webcrack; v7.1.4's src/social.js) is
 `client/src/ui/social_ui.c`; the data comes from the game server over the social frames
 of `shared/include/social.h`. Shown by `client_bin --hub "<query>"`, web
 `social.html?<query>` (its own URL), the menu's Hub item and every `/social.html` link
 (`client/include/app_mode.h`). v7 removed the Clan Wars and Tournament pages. Reference
-captures: `doc/ref/krunker-v7.1.4/hub/`.
+captures: `doc/ref/krunker-v10/hub/` (reconstructed, `tools/uidiff/capture-v10-static.js`).
 
 ## Krunker v10 page tree (`v10/`)
 

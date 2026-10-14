@@ -96,6 +96,13 @@ static void apply_documented(cJSON *want, const cJSON *in, const cJSON *got) {
     // ENVIRONMENT_ZONE skyDomeEmis keeps the zone's colour
     const cJSON *ge = cJSON_GetObjectItemCaseSensitive(got, "skyDomeEmis");
     if (ge && cJSON_GetObjectItemCaseSensitive(want, "skyDomeEmis")) cJSON_ReplaceItemInObjectCaseSensitive(want, "skyDomeEmis", cJSON_Duplicate(ge, 1));
+    // Krunker v10's object keys (v7.1.4 ignores them): every v10 key the native editor wrote is
+    // taken from it (v10_checks() tests their values), e.g. dyn, ambFadeTime, crt, eid, pn, sfz
+    static const char *const v10_keys[] = {"dyn", "boss", "cnch", "ambFadeTime", "crt", "eid", "ar", "tag", "pn", "sfz"};
+    for (size_t k = 0; k < sizeof(v10_keys) / sizeof(v10_keys[0]); k++) {
+        const cJSON *g = cJSON_GetObjectItemCaseSensitive(got, v10_keys[k]);
+        if (g && !cJSON_GetObjectItemCaseSensitive(want, v10_keys[k])) cJSON_AddItemToObject(want, v10_keys[k], cJSON_Duplicate(g, 1));
+    }
     // keys ObjectInstance does not know are kept
     const cJSON *it;
     cJSON_ArrayForEach(it, in) {
@@ -111,6 +118,8 @@ static int prefab_size_from_model(const int prefab, const cJSON *obj) {
 
 static int compare_object(const char *where, const cJSON *in, const cJSON *want_in) {
     if (cJSON_GetObjectItemCaseSensitive(want_in, "error")) return 1; // v7 itself fails on it
+    // id 41 is Krunker v10's BOT_PATH_NODE (v7's TERMINAL): checked by v10_checks(), not v7's golden
+    if (ed_model_prefab(in) == 41) return 1;
     cJSON *got = ed_model_object(in, 0);
     cJSON *want = cJSON_Duplicate(want_in, 1);
     apply_documented(want, in, got);
@@ -337,10 +346,11 @@ static void unit_checks(void) {
     const cJSON *a0 = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(o, "tas"), 0);
     CHECK(num(o, "te") == 3 && num(a0, "ta") == 5 && num(a0, "tc") == 7 && !strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(a0, "tct")), "hi") &&
           !has_key(o, "ta") && !has_key(o, "tc"), "legacy single action -> tas[0]");
-    // the multi-action list: at most 5, action 0 stays
-    for (int i = 0; i < 6; i++) ed_model_action_add(&o);
-    CHECK(ed_model_action_count(o) == 5, "trigger actions are limited to 5 (%d)", ed_model_action_count(o));
-    CHECK(!ed_model_action_remove(&o, 0) && ed_model_action_remove(&o, 4) && ed_model_action_count(o) == 4, "action 0 cannot be removed");
+    // the multi-action list: at most 8 (v10 triggerActionLimit; v7.1.4: 5), action 0 stays
+    for (int i = 0; i < 9; i++) ed_model_action_add(&o);
+    CHECK(ed_model_action_count(o) == 8, "trigger actions are limited to 8 (%d)", ed_model_action_count(o));
+    CHECK(!ed_model_action_remove(&o, 0) && ed_model_action_remove(&o, 7) && ed_model_action_count(o) == 7, "action 0 cannot be removed");
+    while (ed_model_action_count(o) > 4) ed_model_action_remove(&o, ed_model_action_count(o) - 1);
     cJSON *v = cJSON_CreateNumber(14);
     CHECK(ed_model_action_set(&o, 29, 1, "ta", v), "action set");
     cJSON_Delete(v);
@@ -703,6 +713,44 @@ static void script_checks(void) {
     }
 }
 
+// Krunker v10 map data the editor keeps (doc/v10/editor-social.md): BOT_PATH_NODE and botPaths,
+// the ENTITY / crate / AI / zone keys, scripts.shared. Expected values derived from the webcracked
+// v10 editor (E10 = ~/.cache/kn-v10/webcrack/editor/renamed.js; v10's JS is never run).
+static void v10_checks(void) {
+    cJSON *o = obj_of("{\"i\":41,\"p\":[1,2,3]}");
+    CHECK(o && num(o, "bng") == 0 && num(o, "bn") == 0 && num(o, "bnn") == 1 && num(o, "bnr") == 0 && num(o, "l") == 1,
+          "BOT_PATH_NODE defaults bng 0, bn 0, bnn 1, bnr 0, not collidable (E10:7409, 8038)");
+    cJSON_Delete(o);
+    o = obj_of("{\"i\":98,\"p\":[0,0,0],\"eid\":3,\"ar\":7,\"tag\":\"boss-1\",\"as\":0,\"sp\":{\"pt0\":[1,2,3]}}");
+    CHECK(o && num(o, "eid") == 3 && num(o, "ar") == 7 && has_key(o, "tag") && num(o, "as") == 0 && cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(o, "sp")),
+          "ENTITY eid / ar / tag / as / sp kept (E10:7451-7457, 8770-8781)");
+    cJSON_Delete(o);
+    o = obj_of("{\"i\":98,\"p\":[0,0,0],\"tag\":\"bad tag!\"}");
+    CHECK(o && !has_key(o, "tag") && !has_key(o, "as"), "ENTITY: an invalid tag is dropped, autoSpawn on writes no as");
+    cJSON_Delete(o);
+    o = obj_of("{\"i\":97,\"p\":[0,0,0],\"crt\":3}");
+    CHECK(o && num(o, "crt") == 3, "SCRAPCRATE crt kept (E10:8766)");
+    cJSON_Delete(o);
+    o = obj_of("{\"i\":0,\"p\":[0,0,0],\"dyn\":true,\"pn\":\"door\",\"sfz\":1}");
+    CHECK(o && num(o, "dyn") == 1 && has_key(o, "pn") && num(o, "sfz") == 1, "CUBE dyn / pn / sfz (E10:7814, 8783-8787)");
+    cJSON_Delete(o);
+    // botPaths: import -> BOT_PATH_NODEs -> export (E10:17046-17064, 16405-16420)
+    cJSON *doc = cJSON_Parse("{\"name\":\"bp\",\"objects\":[],\"spawns\":[],\"botPaths\":[{\"p\":[[0,0,0],[10,0,0]],\"r\":0},{\"p\":[[5,5,5]],\"r\":1}],"
+                             "\"scripts\":{\"shared\":\"c2hhcmVk\"}}");
+    int n = 0;
+    cJSON *out = export_of(doc, NULL, &n);
+    const cJSON *bp = cJSON_GetObjectItemCaseSensitive(out, "botPaths");
+    const cJSON *g0 = cJSON_GetArrayItem(bp, 0), *g1 = cJSON_GetArrayItem(bp, 1);
+    CHECK(n == 3 && cJSON_GetArraySize(bp) == 2 && cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(g0, "p")) == 2 &&
+          num(g0, "r") == 0 && num(g1, "r") == 1 && cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(out, "objects")) == 0,
+          "botPaths round trip (3 nodes, 2 groups, r kept, no node in objects)");
+    const cJSON *sc = cJSON_GetObjectItemCaseSensitive(out, "scripts");
+    const cJSON *sh = cJSON_GetObjectItemCaseSensitive(sc, "shared");
+    CHECK(cJSON_IsString(sh) && !strcmp(sh->valuestring, "c2hhcmVk"), "scripts.shared round trip");
+    cJSON_Delete(out);
+    cJSON_Delete(doc);
+}
+
 int main(int argc, char **argv) {
     const char *repo = argc > 1 ? argv[1] : ".";
     char path[1024];
@@ -711,6 +759,7 @@ int main(int argc, char **argv) {
     check_golden(path);
     for (int i = 2; i + 1 < argc; i++) if (!strcmp(argv[i], "--golden")) check_golden(argv[++i]);
     unit_checks();
+    v10_checks();
     logic_cases(repo);
     template_tas(repo);
     script_checks();

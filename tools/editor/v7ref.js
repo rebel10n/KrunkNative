@@ -11,6 +11,7 @@
 //   <state>.dump.txt     a structural dump (format below; identical to the native editor's
 //                        KRUNKNATIVE_EDITOR_SCRIPT="dump:<which>:<file>", client/src/editor/editor.c)
 //   editor-1920.{png,html.gz,rects.json}   the editor with the Welcome window closed (uidiff ref)
+//   <state>.html.gz      with KN_V7REF_HTML=1, every shot's DOM (input of tools/uidiff/capture-v10-static.js)
 //   prefabs/<id>.json, prefabs/<id>.right.dump.txt   KE.createObjects[id]()'s serialize() and
 //                        right (object) panel, for every prefab the menus can create (captured
 //                        without public/js/hook.js, as `logic`: see reloadPage)
@@ -246,6 +247,9 @@ async function shot(c, name) {
   await sleep(150);
   fs.mkdirSync(path.dirname(path.join(OUT, name)), { recursive: true });
   await c.shot(path.join(OUT, name + '.png'));
+  // KN_V7REF_HTML=1: also the DOM of the shot (<name>.html.gz), the input of the reconstructed v10
+  // references (tools/uidiff/capture-v10-static.js)
+  if (process.env.KN_V7REF_HTML === '1') write(name + '.html.gz', zlib.gzipSync(Buffer.from(await c.eval('document.documentElement.outerHTML'), 'utf8'), { level: 9 }));
 }
 
 // reset between states: no window, no popup, no open menu, pointer parked over the version text

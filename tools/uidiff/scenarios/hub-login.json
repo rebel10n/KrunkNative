@@ -1,5 +1,5 @@
 {
-  "ref": "doc/ref/krunker-v7.1.4/hub/hub-login.png",
+  "ref": "doc/ref/krunker-v10/hub/hub-login.png",
   "size": [
     1280,
     720
@@ -14,5 +14,5 @@
     ]
   },
   "frames": 3,
-  "note": "Social hub (ui/social.html), guest, p=maps + loginPopup."
+  "note": "Social hub (ui/social.html, Krunker v10), guest, p=maps + loginPopup."
 }

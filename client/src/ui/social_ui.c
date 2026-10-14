@@ -61,24 +61,6 @@ static void econ_new_op(char *out, size_t n, const char *tag); // an action's id
 
 // ------------------------------------------------------------------ v3.1.1 data (src/config.js, i18n/en.js)
 
-typedef struct {
-    const char *name;
-    const char *alias;
-    const char *tag;
-    int id;
-} HubFollow;
-
-// config.whoToFol (v7.1.4)
-static const HubFollow k_who_to_follow[] = {
-    {"Sidney", NULL, "Developer", 201211}, {"Vince", NULL, "Developer", 105683},
-    {"MoonJuiceAlt", "MoonJuice", "Streamer", 2968503}, {"ImWaspy", NULL, "Streamer", 2593871},
-    {"cimota", NULL, "Skin Maker", 7516049}, {"Kilfy", NULL, "Skin Maker", 8871318}, {"iSpy", NULL, "Skin Maker", 177694},
-    {"Nxbulah", NULL, "Skin Maker", 5739887}, {"Skriller33", NULL, "Skin Maker", 5068654}, {"Andrii", NULL, "Map Maker", 163429},
-    {"JavieBhop", NULL, "Map Maker", 1517556}, {"Keybi", NULL, "Map Maker", 310968}, {"siktis", NULL, "Mod Maker", 5746131},
-    {"DukeV", NULL, "Map Maker", 943615}, {"Chwoubaka", NULL, "Mod Maker", 4927907}, {"Swixie", NULL, "Streamer", 5720620},
-    {"QuackyTTV", "Quacky", "Streamer", 3742667}, {"Highnoon", NULL, "Support", 361086}, {"eskrr", NULL, "Map Maker", 383703},
-};
-#define WHO_TO_FOLLOW_COUNT (sizeof(k_who_to_follow) / sizeof(k_who_to_follow[0]))
 
 static const char *const k_social_regions[] = {"All Regions", "Oceania", "Asia", "Europe", "North America", "South America"};
 
@@ -679,32 +661,11 @@ static void open_settings(void) {
     free(html);
 }
 
-// ------------------------------------------------------------------ side boxes (f492)
-
+// ------------------------------------------------------------------ side boxes
+// v10 (social/renamed.js:2389-2391): only the ad box; v7.1.4's f492 also filled Krunk TV
+// (#leftBox) and Who to Follow (#rightFollBox), which v10's page no longer has.
 static void side_boxes(void) {
     set_display("aBox", "block");
-    int picks[WHO_TO_FOLLOW_COUNT];
-    int count = (int) WHO_TO_FOLLOW_COUNT;
-    for (int i = 0; i < count; i++) picks[i] = i;
-    StrBuf sb = {0};
-    for (int n = 0; n < 3; ++n) {
-        const int e = rand_int(0, count - 1);
-        const HubFollow *f = &k_who_to_follow[picks[e]];
-        // src: user-assets.krunker.io/p<id>/profile.png has no picture for these accounts, so
-        // the real page always ends on its onerror fallback, player_pfp.png (the native engine
-        // runs no onerror): the fallback is the src here.
-        (void) f->id;
-        sb_appendf(&sb, "<div class='sideBarItem'><img class='replyPfp pfpOutlW' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";'src='./img/player_pfp.png' /><div class='reqFollH'><a class='menuLink blueLink reqFollN' href='/social.html?p=profile&q=%s'>%s</a><div style='color:rgba(255,255,255,0.4);font-size:12px'>%s</div></div><div class='reqFollB' onclick='instaFollo(&quot;%s&quot;,this)'>Follow</div></div>",
-                   f->name, f->alias ? f->alias : f->name, f->tag, f->name);
-        memmove(&picks[e], &picks[e + 1], (size_t) (count - e - 1) * sizeof(int)); // splice(e, 1)
-        count--;
-    }
-    char *html = sb_finish(&sb);
-    set_html("whoToFolL", html);
-    free(html);
-    set_style("leftBox", "display", "");
-    // recEmbed.src stays empty: no live stream is listed (v3490 null), the box hides
-    set_style("leftBox", "display", "none");
 }
 
 // ------------------------------------------------------------------ maps / mods lists (windows[0], windows[1])
@@ -1650,6 +1611,7 @@ static void append_leader_cal(StrBuf *sb, const char *a, const double h) {
     else if (!strcmp(a, "player_followed")) sb_appendf(sb, "%s <span class='lName'>followers</span>", n);
     else if (!strcmp(a, "player_eventcount")) { js_num(n, sizeof(n), h); sb_appendf(sb, "<span class='lName'>found</span> %s/187", n); } // config.easterEggs
     else if (!strcmp(a, "player_eventtime")) { js_num(n, sizeof(n), h); sb_appendf(sb, "Round %s", n); }
+    else if (!strcmp(a, "player_ranked_matches")) { js_num(n, sizeof(n), h); sb_appendf(sb, "%s <span class='lName'>matches</span>", n); } // v10 config:9535
     else if (!strcmp(a, "season_score")) sb_appendf(sb, "%s <span class='lName'>score</span>", n);
     else if (!strcmp(a, "season_kills")) { js_num(n, sizeof(n), h); sb_appendf(sb, "%s<span class='lName'> kills</span>", n); }
     else if (!strcmp(a, "season_wins")) { js_num(n, sizeof(n), h); sb_appendf(sb, "%s<span class='lName'> wins</span>", n); }
@@ -3517,6 +3479,9 @@ static void io_chf(const int ok, const char *err) {
     g_chat_pending = 0;
 }
 
+static void login_modal_close(void);
+static int login_modal_message(const char *msg);
+
 // io_a(error, id, username, data, token): the login reply (account_ui.c keeps the account
 // itself: storage keys, level, KR). A guest game server refuses every login.
 static void io_a(const char *error) {
@@ -3527,6 +3492,7 @@ static void io_a(const char *error) {
         if (!g_hub.fe) io_po(1, NULL);
         g_hub.fe = 0;
         g_hub.logged_in = 1;
+        login_modal_close(); // v10: the LoginModal pops on success
         set_display("profileLogin", "none");
         const HtmlElem img = el("profileImg");
         if (img) {
@@ -3556,11 +3522,20 @@ static void io_a(const char *error) {
     set_display("profileLogin", "inline-block");
     set_display("chatHolder", "none");
     if (!strcmp(g_hub.v, "feed")) request_page(); // Qa()
-    if (!g_hub.fe) io_po(0, error);
+    if (!g_hub.fe && !login_modal_message(error)) io_po(0, error); // v10: the modal's message line
     g_hub.fe = 0;
 }
 
 static void handle_reply_frame(const cJSON *frame);
+
+// followers / following (v10 viewFollowers / viewFollowing): the popup's rows and state
+static struct FollowState {
+    int open, following;
+    char title[128];
+    double count;
+    cJSON *rows;      // the current popup's rows (the list deleteFollower indexes)
+} g_follows;
+static void follows_reply(const cJSON *rows, const char *name, int following);
 
 // The "api" stand-in as the brain's real HTTP route: /api/maps|mods?index=&pos=,
 // /api/search?type=&val= (publicRoutes.ts); the answer is fed back as an "api" frame.
@@ -3671,6 +3646,8 @@ static void handle_reply_frame(const cJSON *frame) {
         } else {
             io_po(0, STR_MARKET_NONE);
         }
+    } else if (!strcmp(label, "fwsr") || !strcmp(label, "fwr")) {
+        follows_reply(cJSON_GetArrayItem(frame, 1), cJSON_GetStringValue(cJSON_GetArrayItem(frame, 2)), !strcmp(label, "fwr"));
     } else if (!strcmp(label, "chtb")) {
         io_xhtb(cJSON_GetArrayItem(frame, 1));
     } else if (!strcmp(label, "chtl")) {
@@ -3841,29 +3818,140 @@ H(h_location_reload) {
     return 1;
 }
 
-// loginPopup(): genericPopup(..., "loginPop") when no account
+// ------------------------------------------------------------------ login (v10's LoginModal)
+// Krunker v10's hub loginPopup() pushes the Svelte LoginModal ({canRegister: false}) on the view
+// stack (#viewStack; webcrack social/renamed.js:4375, shared/index/renamed.js:11493-11870): an
+// Email / Username field with a "(use ... instead)" toggle (email first unless krunker_username is
+// saved), the password field (hidden in email mode until typed; v10 then offers a sign-in code),
+// the Login button and a message line. Markup = the component templates (index:11466-11479) in the
+// popup frame (index:8534, 800 px) of the view stack (index:12537); CSS = css/hub-svelte.css
+// (tools/ui-import/v10_hub_editor.py) + static/index.css (io-*).
+// Intentional differences: KrunkNative's account server signs in by username + password over
+// the hub socket ("a", as v7.1.4), not FRVR's REST auth: an email address is refused locally
+// with a message, and the email-code sign-in ("Send Code") is not offered.
+static struct {
+    int open;
+    int email;          // the email field is shown (v10: no saved krunker_username)
+    char msg[160];
+} g_login;
+
+static void login_modal_values(char *name, size_t nsz, char *pass, size_t psz) {
+    const HtmlElem n = el(g_login.email ? "accEmail" : "accName"), p = el("accPass");
+    if (name && nsz) name[0] = 0;
+    if (pass && psz) pass[0] = 0;
+    if (n && name) html_dom_get_value(n, name, nsz);
+    if (p && pass) html_dom_get_value(p, pass, psz);
+}
+
+static void login_modal_render(const char *name, const char *pass) {
+    StrBuf sb = {0};
+    sb_append(&sb, "<div class=\"view-stack svelte-sdh4ve\"><div class=\"view-stack-overlay svelte-sdh4ve\" onclick=\"knLoginOverlay()\">"
+                   "<div class=\"view-wrapper svelte-sdh4ve\" style=\"display: block\"><div class=\"popup-container svelte-1wz7ymp\">"
+                   "<div class=\"popup svelte-1wz7ymp\" style=\"width: 800px;\"><div class=\"io-popup-container\"><div class=\"io-popup-header\">Login to Krunker</div> "
+                   "<div class=\"io-popup-content\"><div class=\"io-card\"><form data-priority=\"true\"><div class=\"io-input-container svelte-16z1lxi\">");
+    const int pass_typed = pass && *pass;
+    if (g_login.email) {
+        sb_append(&sb, "<div class=\"label-row\"><label for=\"accEmail\" class=\"input-label\">Email</label> <button type=\"button\" class=\"auth-toggle-btn svelte-16z1lxi\" onclick=\"knLoginToggle()\">(use username instead)</button></div> "
+                       "<input id=\"accEmail\" type=\"email\" class=\"io-input-field svelte-16z1lxi\" autocomplete=\"email\" placeholder=\"Enter Email\" onkeyup=\"knLoginKey()\" value=\"");
+    } else {
+        sb_append(&sb, "<div class=\"label-row\"><label for=\"accName\" class=\"input-label\">Username</label> <button type=\"button\" class=\"auth-toggle-btn svelte-16z1lxi\" onclick=\"knLoginToggle()\">(use email instead)</button></div> "
+                       "<input id=\"accName\" type=\"text\" class=\"io-input-field svelte-16z1lxi\" autocomplete=\"username\" placeholder=\"Enter Username\" onkeyup=\"knLoginKey()\" value=\"");
+    }
+    sb_append_esc(&sb, name ? name : "");
+    sb_append(&sb, "\"> ");
+    // the password label row: username mode, or once a password is typed (index:11752)
+    if (!g_login.email || pass_typed)
+        sb_append(&sb, "<div class=\"label-row\" style=\"margin-top:15px\"><label for=\"accPass\" class=\"input-label\">Password</label> <button type=\"button\" class=\"auth-toggle-btn svelte-16z1lxi\" onclick=\"knLoginForgot()\">Forgot Password?</button></div>");
+    sb_appendf(&sb, "<input id=\"accPass\" type=\"password\" autocomplete=\"current-password\" placeholder=\"Enter Password\" class=\"io-input-field %ssvelte-16z1lxi\" onkeyup=\"knLoginKey()\" value=\"",
+               g_login.email && !pass_typed ? "hidden-password " : "");
+    sb_append_esc(&sb, pass ? pass : "");
+    sb_append(&sb, "\"> <button type=\"submit\" class=\"io-button io-button--accept svelte-16z1lxi\" onclick=\"loginAcc()\">Login</button></div></form></div>    ");
+    if (g_login.msg[0]) {
+        sb_append(&sb, "<div class=\"io-message\">");
+        sb_append_esc(&sb, g_login.msg);
+        sb_append(&sb, "</div>");
+    }
+    sb_append(&sb, "</div></div></div></div></div></div></div>");
+    char *html = sb_finish(&sb);
+    set_html("viewStack", html);
+    free(html);
+}
+
+static void login_modal_close(void) {
+    if (!g_login.open) return;
+    g_login.open = 0;
+    g_login.msg[0] = 0;
+    set_html("viewStack", "");
+}
+
+// 0 when the modal is not open
+static int login_modal_message(const char *msg) {
+    if (!g_login.open) return 0;
+    char name[128], pass[128];
+    login_modal_values(name, sizeof(name), pass, sizeof(pass));
+    snprintf(g_login.msg, sizeof(g_login.msg), "%s", msg ? msg : "");
+    login_modal_render(name, pass);
+    return 1;
+}
+
+// loginPopup(): the LoginModal when no account
 H(h_login_popup) {
     UNUSED;
     if (g_hub.logged_in) return 1;
     char saved[128] = "";
     if (html_storage_get("krunker_username", saved, sizeof(saved)) < 0) saved[0] = 0;
-    StrBuf sb = {0};
-    sb_append(&sb, "<div style='position:relative;z-index:9'><div id='referralHeader'>Login</div><div style='height:20px;'></div><input id='accName' type='text' placeholder='Enter Username' class='accountInput' style='margin-top:0' value='");
-    sb_append_esc(&sb, saved);
-    sb_append(&sb, "'></input><input id='accPass' type='password' placeholder='Enter Password' class='accountInput'></input><div class='setBodH' style='margin-left:0px;width:calc(100% - 40px)'><div id='accResp' style='margin-top:20px;margin-bottom:20px;font-size:18px;color:rgba(255,255,255,0.5);text-align:center'>For lost Passwords/Accounts contact <span style='color:rgba(255,255,255,0.8)'>recovery@yendis.ch</span></div></div><div style='width:100%;text-align:center;margin-top:10px;background-color:rgba(0,0,0,0.3);padding-top:10px;padding-bottom:20px;'><div class='accBtn button buttonG' style='width: calc(100% - 30px);'onclick='loginAcc()'>Login</div></div>");
-    char *html = sb_finish(&sb);
-    generic_popup(html, "loginPop", NULL);
-    free(html);
+    clear_pops();
+    g_login.open = 1;
+    g_login.msg[0] = 0;
+    g_login.email = saved[0] == 0; // index:11506: email first for a player with no saved name
+    login_modal_render(saved, "");
+    return 1;
+}
+
+H(h_login_toggle) {
+    UNUSED;
+    char name[128], pass[128];
+    login_modal_values(name, sizeof(name), pass, sizeof(pass));
+    g_login.email = !g_login.email;
+    g_login.msg[0] = 0;
+    login_modal_render(strchr(name, '@') && !g_login.email ? "" : name, pass);
+    return 1;
+}
+
+H(h_login_forgot) {
+    UNUSED;
+    login_modal_message("For a lost password, contact the server's support team.");
+    return 1;
+}
+
+// a click on the dimmed overlay (not inside the popup) dismisses the view (index:12531)
+H(h_login_overlay) {
+    (void) user; (void) args; (void) argc;
+    const HtmlElem hit = ev ? html_dom_element_at(ev->x, ev->y) : 0;
+    if (hit && html_dom_has_class(hit, "view-stack-overlay")) login_modal_close();
     return 1;
 }
 
 H(h_login_acc) {
     UNUSED;
     char name[128] = "", pass[128] = "";
-    const HtmlElem n = el("accName"), p = el("accPass");
-    if (n) html_dom_get_value(n, name, sizeof(name));
-    if (p) html_dom_get_value(p, pass, sizeof(pass));
-    io_wait("Please wait...");
+    login_modal_values(name, sizeof(name), pass, sizeof(pass));
+    if (!name[0] || !pass[0]) {
+        // generic.auth.fillAllFields; in email mode v10 offers the sign-in code first (not ported)
+        if (g_login.email && name[0] && !pass[0]) {
+            login_modal_message("Enter your password.");
+            HtmlElem p = el("accPass");
+            if (p) html_dom_focus(p);
+        } else {
+            login_modal_message("Please fill in all fields");
+        }
+        return 1;
+    }
+    if (strchr(name, '@')) {
+        login_modal_message("Email sign-in is not available here: use your username.");
+        return 1;
+    }
+    login_modal_message("Please wait...");
     cJSON *creds = cJSON_CreateArray();
     cJSON_AddItemToArray(creds, cJSON_CreateString(name));
     cJSON_AddItemToArray(creds, cJSON_CreateString(pass));
@@ -3874,6 +3962,12 @@ H(h_login_acc) {
     cJSON_AddItemToArray(f, creds);
     cJSON_AddItemToArray(f, cJSON_CreateTrue()); // captcha token
     hub_send(f);
+    memset(pass, 0, sizeof(pass));
+    return 1;
+}
+
+H(h_login_key) {
+    if (ev && html_key_is_enter(ev->key)) return h_login_acc(user, ev, args, argc);
     return 1;
 }
 
@@ -5491,6 +5585,8 @@ H(h_follow_user) {
 H(h_view_follows) {
     UNUSED;
     if (!g_hub.brain) return 1;
+    cJSON_Delete(g_follows.rows);
+    g_follows.rows = NULL;
     const int following = !strcmp(html_ui_current_handler(), "viewFollowing");
     io_wait("Loading...");
     cJSON *f = cJSON_CreateArray();
@@ -5500,6 +5596,95 @@ H(h_view_follows) {
     cJSON_AddItemToArray(f, cJSON_CreateNumber(following ? g_hub.profile_following : g_hub.profile_followed));
     cJSON_AddItemToArray(f, cJSON_CreateTrue());
     hub_send(f);
+    return 1;
+}
+
+// ------------------------------------------------------------------ followers / following (v10)
+// viewFollowers / viewFollowing ask the brain ("gfs" / "gfg"), fwsr / fwr come back with the rows
+// (services/brain/profiles.c) and the popup renders them (social/renamed.js:5346-5399, _1394/_1403).
+
+static void follows_popup(void) {
+    const int self = g_hub.profile_id != 0 && g_follows.title[0] == 0;
+    (void) self;
+    StrBuf sb = {0};
+    char num[32];
+    comma_number(num, sizeof(num), g_follows.count);
+    sb_append(&sb, "<div style='margin-top:-8px;font-size: 22px;margin-bottom:10px;color:#fff;'>");
+    if (g_follows.following) sb_appendf(&sb, "You follow<div style='float: right;color:rgba(255,255,255,0.8)' id='followCP'>%s People</div></div>", num);
+    else {
+        sb_append_esc(&sb, g_follows.title);
+        sb_appendf(&sb, "'s followers<div style='float: right;color:rgba(255,255,255,0.8);' id='followerCP'>%s People</div></div>", num);
+    }
+    if (cJSON_GetArraySize(g_follows.rows)) {
+        const cJSON *r;
+        cJSON_ArrayForEach(r, g_follows.rows) {
+            const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(r, "friendname"));
+            const int premium = (int) jnum(r, "subscription");
+            const int featured = (int) jnum(r, "featured");
+            sb_append(&sb, "<div class='friendBHold'><div class='leaderText'><img class='folPfp' onerror='this.onerror=null;this.src=\"./img/player_pfp.png\";' src='./img/player_pfp.png'/><div class='folInfHldr'>");
+            if (premium) sb_append(&sb, "<i class='material-icons' style='color:#FBC02D;margin-top:-8px;font-size:28px;vertical-align:middle;'>beenhere</i>");
+            if (featured) sb_append(&sb, "<i class='material-icons' style='color:#40C4FF;margin-top:-8px;margin-right: 4px;font-size:28px;vertical-align:middle;'>check_circle</i>");
+            sb_append(&sb, "<a target='_blank' href='/social.html?p=profile&q=");
+            sb_append_esc(&sb, name ? name : "");
+            sb_append(&sb, "' class='lName' style='color:rgba(255,255,255,0.9)'>");
+            sb_append_esc(&sb, name ? name : "");
+            sb_append(&sb, "</a><div style='color:rgba(255,255,255,0.4);font-size:14px;'>Since <span style='color:rgba(255,255,255,0.6)'>");
+            get_date(num, sizeof(num), (char *) cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(r, "date")));
+            sb_append_esc(&sb, num);
+            sb_append(&sb, "</span></div></div></div>");
+            if (g_hub.logged_in) {
+                sb_append(&sb, "<div class='reqFollB' style='float:right;' onclick='instaFollo(&quot;");
+                sb_append_esc(&sb, name ? name : "");
+                sb_append(&sb, "&quot;,this)'>Follow</div>");
+            }
+            sb_append(&sb, "</div>");
+        }
+    } else {
+        sb_append(&sb, "None");
+    }
+    char *html = sb_finish(&sb);
+    generic_popup(html, "followPop", NULL);
+    free(html);
+}
+
+// fwsr(rows, name) / fwr(rows, name)
+static void follows_reply(const cJSON *rows, const char *name, const int following) {
+    cJSON_Delete(g_follows.rows);
+    g_follows.rows = cJSON_IsArray(rows) ? cJSON_Duplicate(rows, 1) : cJSON_CreateArray();
+    g_follows.open = 1;
+    g_follows.following = following;
+    snprintf(g_follows.title, sizeof(g_follows.title), "%s", name ? name : "");
+    g_follows.count = following ? g_hub.profile_following : g_hub.profile_followed;
+    follows_popup();
+}
+
+H(h_insta_follo) {
+    (void) user;
+    const char *name = arg_s(ev, args, argc, 0);
+    if (!name || !g_hub.logged_in || !g_hub.brain) return 1;
+    cJSON *f = cJSON_CreateArray();
+    cJSON_AddItemToArray(f, cJSON_CreateString("f"));
+    cJSON_AddItemToArray(f, cJSON_CreateString(name));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(1));
+    hub_send(f);
+    return 1;
+}
+
+H(h_delete_follower) {
+    (void) user;
+    const char *name = arg_s(ev, args, argc, 0);
+    const HtmlElem btn = argc >= 2 && args[1].kind == HTML_ARG_THIS ? ev->target : 0;
+    if (!name || !g_hub.brain) return 1;
+    cJSON *f = cJSON_CreateArray();
+    cJSON_AddItemToArray(f, cJSON_CreateString("f"));
+    cJSON_AddItemToArray(f, cJSON_CreateString(name));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(0));
+    hub_send(f);
+    if (btn) {
+        const HtmlElem row = html_dom_closest(btn, ".friendBHold");
+        if (row) html_dom_remove(row);
+    }
+    g_hub.profile_following -= 1; // v10 removes the row and decrements locally
     return 1;
 }
 
@@ -5623,6 +5808,10 @@ static const HtmlHandlerEntry k_handlers[] = {
     {"location.reload", h_location_reload},
     {"loginPopup", h_login_popup},
     {"loginAcc", h_login_acc},
+    {"knLoginToggle", h_login_toggle},
+    {"knLoginForgot", h_login_forgot},
+    {"knLoginOverlay", h_login_overlay},
+    {"knLoginKey", h_login_key},
     {"searchProfile", h_search_profile},
     {"openSettings", h_open_settings},
     {"setSetting", h_set_setting},
@@ -5653,7 +5842,8 @@ static const HtmlHandlerEntry k_handlers[] = {
     {"switchFeedTab", h_switch_feed_tab},
     {"toggleView", h_toggle_view},
     {"favoriteM", h_noop},
-    {"instaFollo", h_noop},
+    {"instaFollo", h_insta_follo},
+    {"deleteFollower", h_delete_follower},
     {"followUser", h_follow_user},
     {"viewFollowers", h_view_follows},
     {"viewFollowing", h_view_follows},
@@ -5868,16 +6058,11 @@ static void social_enter(Client *client, const char *query) {
 
     settings_load(); // re[...].set(saved) at load: B, D, j, F, volume + onResize()
     on_resize();
-    // the app badges: iosDB / androidDB when window.canShowExternalLinks (always true in
-    // KrunkNative, as in ui_handlers.c), steamDB always. KrunkNative: both app badges open the
-    // menu's Download window (/?download: the Android APK, Add to Home Screen on iOS;
-    // tools/ui-import/social_page.py APP_BADGES) and steamDB (Krunker on Steam) stays hidden:
-    // KrunkNative is not on Steam (--render-scenario keeps it: uidiff compares the badges with v7.1.4's).
-    set_display("iosDB", "block");
+    // the app badge: v10 shows #androidDB when window.canShowExternalLinks (always true in
+    // KrunkNative, as in ui_handlers.c; social/renamed.js:1514-1518); #iosDB stays hidden and v10's
+    // page has no #steamDB. KrunkNative: the badge opens the menu's Download window (/?download: the
+    // Android APK; tools/ui-import/social_page.py APP_BADGES).
     set_display("androidDB", "block");
-#ifdef UI_SCENARIO_SUPPORTED
-    if (ui_scenario_active()) set_display("steamDB", "block");
-#endif
 
     // updateWindow(de("p"), de("q"), de("s"), de("i")) (?games opens the maps)
     char p[64], q[HUB_KEY_MAX], s[HUB_KEY_MAX], i[HUB_KEY_MAX], tmp[8];

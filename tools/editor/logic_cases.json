@@ -11,7 +11,7 @@
       {"set": "constantEvent", "value": 3, "kind": "slider"},
       {"set": "constant@0", "value": 25, "kind": "slider"},
       {"set": "delay@0", "value": 1.5, "kind": "slider"},
-      {"add": 1}, {"add": 1}, {"add": 1}, {"add": 1}, {"add": 1},
+      {"add": 1}, {"add": 1}, {"add": 1}, {"add": 1},
       {"set": "action@1", "value": 14, "kind": "select"},
       {"set": "snd@1", "value": 5, "kind": "select"},
       {"set": "vol@1", "value": 0.5, "kind": "slider"},

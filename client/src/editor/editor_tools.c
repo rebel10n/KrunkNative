@@ -1149,6 +1149,51 @@ static void optimize_faces(void) {
 
 static void act_optimize_faces(EdCtl *c) { (void) c; optimize_faces(); }
 
+// Krunker v10 Editor.turnOnAllFaces (E10:20159-20188, Tools > Deoptimizations): every face of each
+// visible CUBE on; alerts "N% Face Increase" (UTILS.getPercentDiff(after, before)). One undo step.
+static void turn_on_all_faces(void) {
+    const size_t n = g_ed.proj->count;
+    ed_obj_select(NULL); // hideTransform
+    int before = 0, after = 0;
+    ed_history_poll();
+    const uint32_t batch = ed_history_batch_begin("turn on all faces");
+    for (size_t i = 0; i < n; i++) {
+        EditorObject *o = g_ed.proj->objects[i];
+        if (strcmp(editor_prefabs[o->prefab].name, "CUBE")) continue;
+        cJSON *fa = ed_prop_get(o, "faces");
+        int on = 0;
+        for (int k = 0; k < 6; k++) on += ed_json_truthy(cJSON_GetArrayItem(fa, k));
+        before += on;
+        if (prop_truthy(o, "visible") && on < 6 && cJSON_GetArraySize(fa) >= 6) {
+            cJSON *all = cJSON_CreateArray();
+            for (int k = 0; k < 6; k++) cJSON_AddItemToArray(all, cJSON_CreateBool(1));
+            ed_prop_set(o, "faces", all);
+            cJSON_Delete(all);
+            apply_object_change(o);
+            on = 6;
+        }
+        after += on;
+        cJSON_Delete(fa);
+    }
+    ed_history_poll();
+    ed_history_batch_end(batch);
+    char pct[32], msg[64];
+    percent_diff(after, before, pct, sizeof(pct));
+    snprintf(msg, sizeof(msg), "%s%% Face Increase", pct);
+    editor_message(msg);
+}
+
+static void do_turn_on_all_faces(void *user, const char *value) {
+    (void) user;
+    if (value) turn_on_all_faces();
+}
+
+static void act_turn_on_all_faces(EdCtl *c) {
+    (void) c;
+    ed_confirm("Are you sure you want to turn on all faces? This will increase the number of faces and will also turn on faces that were manually turned off.",
+               do_turn_on_all_faces, NULL);
+}
+
 // a colour value as mergeColors reads it: a number is stringified (UTILS.stringifyColor), then
 // upper-cased; 0 = null / not a colour
 static int color_upper(const cJSON *v, char *out, const size_t n) {
@@ -1254,6 +1299,10 @@ static void panel_tools(void) {
     with(&b, ed_gui_slider(&b, "Color Range", 500, 50000, 100, 0), g_ed.advanced, "colorRange", NULL);
     ed_gui_button(&b, "Merge Colors", act_merge_colors);
     ed_gui_folder_end(&b, 0);
+    ed_gui_folder_end(&b, 0);
+    ed_gui_folder_begin(&b, "Deoptimizations", 0, 0, 0, "tools.deoptimizations"); // v10 (IDX:20250-20252)
+    ed_gui_button_line(&b, "Turn On All Faces", "Execute", act_turn_on_all_faces, 0);
+    ed_gui_rule(&b);
     ed_gui_folder_end(&b, 0);
     ed_gui_folder_begin(&b, "Text Generator", 0, 1, 0, "tools.textGenerator");
     ed_gui_button_line(&b, "Enter Text", "Open", act_text_gen, 0);
@@ -1471,7 +1520,7 @@ int ed_tools_panel_show(const char *name) {
 }
 
 // KRUNKNATIVE_EDITOR_SCRIPT "tool:..." (tools/editor/tools_check.py): tool:import:<file> (importMap
-// of a JSON file), tool:optimizeFaces, tool:mergeColors[:<range>] (no confirm). 1 = handled.
+// of a JSON file), tool:optimizeFaces, tool:turnOnAllFaces, tool:mergeColors[:<range>] (no confirm). 1 = handled.
 int ed_tools_script(const char *cmd, const char *arg) {
     if (strcmp(cmd, "tool") || !arg) return 0;
     if (!strncmp(arg, "import:", 7)) {
@@ -1480,6 +1529,8 @@ int ed_tools_script(const char *cmd, const char *arg) {
         free(text);
     } else if (!strcmp(arg, "optimizeFaces")) {
         optimize_faces();
+    } else if (!strcmp(arg, "turnOnAllFaces")) {
+        turn_on_all_faces();
     } else if (!strncmp(arg, "mergeColors", 11)) {
         advanced_defaults();
         if (arg[11] == ':') ed_json_set_num(g_ed.advanced, "colorRange", atof(arg + 12));

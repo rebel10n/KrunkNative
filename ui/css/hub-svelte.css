@@ -1,0 +1,22 @@
+/* KrunkNative: Krunker v10's Svelte component stylesheets for the hub's view stack and LoginModal
+   (svelte.css of tools/ui-import/v10_bundle.js; tools/ui-import/v10_hub_editor.py HUB_SVELTE) */
+/* svelte-sdh4ve */
+.view-stack.svelte-sdh4ve {position:fixed;top:0;left:0;width:100%;height:100%;z-index:2147483646;pointer-events:none;}.view-stack-overlay.svelte-sdh4ve {position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:auto;background-color:rgba(0, 0, 0, 0.3);}.view-wrapper.svelte-sdh4ve {position:absolute;top:0;left:0;
+    width:var(--ui-width, 100%);height:var(--ui-height, 100%);transform:scale(var(--ui-scale, 1));transform-origin:0 0;pointer-events:none;overflow:auto;}.view-wrapper.svelte-sdh4ve > * {pointer-events:auto;}
+/* svelte-1wz7ymp */
+.popup-container.svelte-1wz7ymp {display:flex;align-items:center;justify-content:center;width:100%;height:100%;pointer-events:none !important;}.popup.svelte-1wz7ymp {background-color:#353535;-webkit-box-shadow:none;-moz-box-shadow:none;box-shadow:2px 2px 8px rgb(0 0 0 / 50%);border-radius:6px;padding:16px;font-size:20px;pointer-events:auto;max-height:calc(100% - 100px);overflow:auto;}.popup.fullscreen.svelte-1wz7ymp {width:calc(100% - 32px);height:calc(100% - 32px);max-height:none;display:flex;flex-direction:column;}.popup.translucent.svelte-1wz7ymp {background-color:#353535bf;}.popup.slim-border.svelte-1wz7ymp {border:2px solid #2f2f2f;padding:2px;border-radius:0;}
+/* svelte-16z1lxi */
+.auth-toggle-btn.svelte-16z1lxi {all:unset;color:var(--highlight-color);font-size:14px;cursor:pointer;text-decoration:underline;}.auth-toggle-btn.svelte-16z1lxi:hover {color:var(--highlight-hover-color);text-decoration:none;}.email-suggestion.svelte-16z1lxi {color:var(--highlight-color);font-size:14px;margin-top:4px;text-align:center;}.suggestion-link.svelte-16z1lxi {all:unset;color:var(--highlight-color);cursor:pointer;text-decoration:underline;}.suggestion-link.svelte-16z1lxi:hover {color:var(--highlight-hover-color);text-decoration:none;}
+
+  .auth-actions.svelte-16z1lxi {background:linear-gradient(to bottom, rgb(153, 226, 43), rgb(127, 189, 35));width:100%;position:relative;display:flex;justify-content:space-between;align-items:center;padding:15px 30px;box-sizing:border-box;}.auth-actions--twitch.svelte-16z1lxi {background:#8956fb;}.auth-actions.svelte-16z1lxi span.svelte-16z1lxi {color:#ffffff;font-size:24px;font-weight:500;text-shadow:1px 1px 0 rgba(0, 0, 0, 0.2);}.login-button.svelte-16z1lxi {background-color:rgb(20, 20, 20);border:2px solid rgb(255, 255, 255);color:#ffffff;padding:8px 40px;font-size:20px;cursor:pointer;transition:all 0.2s ease;text-shadow:1px 1px 0 rgba(0, 0, 0, 0.2);}.login-button.svelte-16z1lxi:hover {background-color:rgb(0, 0, 0);transform:scale(0.95);}
+
+  .io-input-container.svelte-16z1lxi {gap:15px;}.io-button--accept.svelte-16z1lxi,
+  .io-button--accept-secondary.svelte-16z1lxi {margin-top:20px;width:100%;max-width:300px;}.io-input-field.svelte-16z1lxi {margin:8px 0;}
+
+  
+  @media (max-width: 600px) {.auth-actions.svelte-16z1lxi {flex-direction:column;height:auto;padding:15px;gap:10px;}.auth-actions.svelte-16z1lxi span.svelte-16z1lxi {font-size:18px;text-align:center;}
+  }.promo-optin.svelte-16z1lxi {display:flex;align-items:center;gap:8px;margin-top:12px;font-size:14px;line-height:1.8;color:#888;cursor:pointer;text-align:left;}.promo-optin.svelte-16z1lxi input.svelte-16z1lxi {width:16px;height:16px;flex-shrink:0;cursor:pointer;}.terms-privacy-notice.svelte-16z1lxi {margin-top:15px;font-size:12px;text-align:center;color:#666;}.terms-privacy-notice.svelte-16z1lxi a.svelte-16z1lxi {color:#2196f3;text-decoration:none;}.terms-privacy-notice.svelte-16z1lxi a.svelte-16z1lxi:hover {text-decoration:underline;}.sign-up-bonuses.svelte-16z1lxi {position:relative;display:flex;width:100%;flex-direction:row;align-items:center;justify-content:space-around;background-color:#6441a5;padding:15px 30px;box-sizing:border-box;span.svelte-16z1lxi {color:white;max-width:150px;font-size:24px;font-weight:500;text-shadow:1px 1px 0 rgba(0, 0, 0, 0.2);}li.svelte-16z1lxi {text-align:left;color:white;
+      }}
+  .hidden-password.svelte-16z1lxi {position:absolute;left:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;}
+
+  .password-choice.svelte-16z1lxi {margin:16px 0;text-align:center;}.choice-buttons.svelte-16z1lxi {display:flex;gap:15px;justify-content:center;flex-wrap:wrap;}.choice-buttons.svelte-16z1lxi .io-button.svelte-16z1lxi {min-width:120px;}

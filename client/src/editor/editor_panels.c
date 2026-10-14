@@ -876,15 +876,45 @@ static EdCtl *div_switch(EdBuild *b, const char *name, const char *key, const ch
     return c;
 }
 
+// v10's multiplayer settings (E10:9416-9468: localStorage "mp_settings", read by KE.multiplayer;
+// the Settings window's Multiplayer tab, IDX:21705-21760). Kept for parity; there is no editor room
+// server (window_multiplayer).
+static cJSON *g_mp_settings;
+
+static cJSON *mp_settings(void) {
+    if (g_mp_settings) return g_mp_settings;
+    g_mp_settings = cJSON_Parse("{\"name\":\"Player\",\"renderOutlines\":true,\"playerOpacity\":0.6,\"streamerMode\":false,\"autoChatScroll\":true}");
+    const int n = html_storage_get("mp_settings", NULL, 0);
+    char *buf = n > 0 ? malloc((size_t) n + 1) : NULL;
+    if (buf && html_storage_get("mp_settings", buf, (size_t) n + 1) >= 0) {
+        cJSON *saved = cJSON_Parse(buf);
+        const cJSON *it;
+        cJSON_ArrayForEach(it, saved) {
+            if (cJSON_GetObjectItemCaseSensitive(g_mp_settings, it->string))
+                cJSON_ReplaceItemInObjectCaseSensitive(g_mp_settings, it->string, cJSON_Duplicate(it, 1));
+        }
+        cJSON_Delete(saved);
+    }
+    free(buf);
+    return g_mp_settings;
+}
+
+static void on_mp_setting(EdCtl *c, const cJSON *v) {
+    (void) c; (void) v;
+    char *text = cJSON_PrintUnformatted(mp_settings());
+    if (text) html_storage_set("mp_settings", text);
+    free(text);
+}
+
 static void window_settings(EdBuild *b) {
-    // windows[2]: tabs General / Display / Object / Quick GUI (GUI._window.settings.*)
-    static const char *tabs[4] = {"General", "Display", "Object", "Quick GUI"};
+    // windows[2]: tabs General / Display / Object / Quick GUI (GUI._window.settings.*), v10: + Multiplayer (E10:13035)
+    static const char *tabs[5] = {"General", "Display", "Object", "Quick GUI", "Multiplayer"};
     EdCtl *reset = ed_gui_ctl(b->panel, EG_BUTTON);
     reset->action = reset_all;
     edb_addf(&b->html, "<div style='margin-bottom:15px'><div class=\"windowHeader\"><div>Settings</div>\n"
                        "\t\t\t<div style=\"cursor:pointer;margin-top:5px;font-size:14px;float:right;color:#FFF;user-select:none\" onclick=\"GUI.action(%d, this)\">Reset All</div>\n"
                        "\t\t\t</div><div class='menuTabsNew'>\n\t\t\t", reset->id);
-    for (int i = 0; i < 4; i++) edb_addf(&b->html, "<div class=\"menuShortTabNew %s\" onclick=\"windows[2].switchTab(%d)\">%s</div>", g_settings_tab == i ? " tabANew" : "", i, tabs[i]);
+    for (int i = 0; i < 5; i++) edb_addf(&b->html, "<div class=\"menuShortTabNew %s\" onclick=\"windows[2].switchTab(%d)\">%s</div>", g_settings_tab == i ? " tabANew" : "", i, tabs[i]);
     edb_add(&b->html, "</div></div>\n\t\t\t<div class=\"windowBody\">");
     cJSON *s = g_ed.settings;
     if (g_settings_tab == 0) {
@@ -955,6 +985,13 @@ static void window_settings(EdBuild *b) {
         edp_json_slider(b, "Scale", s, "scaleSnapping", 0.001, 25, 0.001, 0, on_setting);
         ed_gui_button_line(b, "Reset Snapping", "Reset", snapping_reset, 0);
         ed_gui_folder_end(b, 0);
+    } else if (g_settings_tab == 4) {
+        cJSON *m = mp_settings();
+        edp_json_text(b, "Player Name", m, "name", "", 0, on_mp_setting);
+        edp_json_switch(b, "Render Coop Outlines", m, "renderOutlines", 0, on_mp_setting);
+        edp_json_slider(b, "Player Opacity", m, "playerOpacity", 0, 1, 0.1, 0, on_mp_setting);
+        edp_json_switch(b, "Streamer Mode (hide room ID)", m, "streamerMode", 0, on_mp_setting);
+        edp_json_switch(b, "Auto Chat Scroll", m, "autoChatScroll", 0, on_mp_setting);
     } else {
         static const EdOption open_on[] = {{"Middle Click", 0, NULL}, {"Right Click", 1, NULL}};
         div_switch(b, "Enabled", "quickGUI", "quickgui", 0);
@@ -1173,10 +1210,13 @@ static int h_quick(void *user, const HtmlEvent *ev, const HtmlArg *args, const i
 // windows[7] "Welcome": the animated counters (vA499) run in ed_window_tick
 static struct { const char *id; double max, t, val; } g_counters[3];
 
+// windows[7] "Welcome", Krunker v10's (E10:13296-13323): v7.1.4's "and earn real money", the
+// "$X+ paid to developers" item, "or worrying about monetization" and the Scripting Community
+// link are gone (animVl2 is still counted, as in v10, with no element to show it)
 static void window_welcome(EdBuild *b) {
     EdBuf *h = &b->html;
     edb_add(h, "<div id='welcomeVideoHolder'>\n\t\t\t<div id='welcomeHeader'>\n\t\t\t\t<div id='welcomeTitle'>Welcome to the Krunker Editor</div>\n"
-               "\t\t\t\t<div id='welcomeSubTitle'>Design, Create & Publish for multiple platforms and earn real money!</div>\n"
+               "\t\t\t\t<div id='welcomeSubTitle'>Design, Create & Publish for multiple platforms!</div>\n"
                "\t\t\t\t<div id='welcomeButtons'>\n\t\t\t\t\t<div class='welcomeButton' onclick='KE.quickStart()'>Quick Start</div>\n"
                "\t\t\t\t\t<div class='welcomeButton' onclick='showWindow(14)'>My Games</div>\n"
                "\t\t\t\t\t<div class='welcomeButton' onclick='showWindow(10)'>Templates</div>\n"
@@ -1194,10 +1234,7 @@ static void window_welcome(EdBuild *b) {
                "\t\t\t\t\tmillions of players</b> without prior knowledge on Game Development</div>\n\t\t\t\t</div>\n"
                "\t\t\t\t<div class='editInfoItem'>\n\t\t\t\t\t<div class='editInHedr'><span id='animVl1' class='editInAvl'></span> Dedicated Server Regions</div>\n"
                "\t\t\t\t\t<div>Using Krunker as a Platform to Create &amp; Publish your game, allows you to <b>bypass the hassle\n"
-               "\t\t\t\t\tof hosting servers</b> or worrying about monetization.</div>\n\t\t\t\t</div>\n"
-               "\t\t\t\t<div class='editInfoItem'>\n\t\t\t\t\t<div class='editInHedr'>$<span id='animVl2' class='editInAvl'></span>+ paid to developers *</div>\n"
-               "\t\t\t\t\t<div>Publishing your Game is the first step to becoming a Krunker Partner and <b>earning money</b> from\n"
-               "\t\t\t\t\tyour game. Partners may also receive direct funding from Yendis.</div>\n\t\t\t\t</div>\n\t\t\t</div>\n\t\t</div>");
+               "\t\t\t\t\tof hosting servers</b>.</div>\n\t\t\t\t</div>\n\t\t\t</div>\n\t\t</div>");
     edb_add(h, "<div id='welcomeVideoHolder' class='welcomeBG2'>\n\t\t\t<div id='welcomeHeader' style='height:100%;'>\n"
                "\t\t\t\t<div id='welcomeTitle' style='position:absolute;top:20px;left:50px;'>\n\t\t\t\t\tKrunker in the Classroom\n\t\t\t\t</div>\n"
                "\t\t\t\t<div id='welcomeSubTitle' style='position:absolute;\n\t\t\t\t\tleft:50px;text-align:left;top:120px;width:800px;'>\n"
@@ -1219,10 +1256,7 @@ static void window_welcome(EdBuild *b) {
                "\t\t\t\t\ttransform:translate(-50%,-50%);width:100%;'>\n\t\t\t\t\t<div style='display:inline-block;'>\n"
                "\t\t\t\t\t\t<div id='communityIcon'></div>\n\t\t\t\t\t\t<div id='communityInfo'>Mapping Community<div></div>\n"
                "\t\t\t\t\t\t<a target='_blank' href='https://discord.gg/Kfypyp5' class='popupLink'>Join Now!</a></div>\n\t\t\t\t\t</div>\n"
-               "\t\t\t\t\t<div style='display:inline-block;margin-left:50px;'>\n\t\t\t\t\t\t<div id='communityIcon'></div>\n"
-               "\t\t\t\t\t\t<div id='communityInfo'>Scripting Community<div></div>\n"
-               "\t\t\t\t\t\t<a target='_blank' href='https://discord.gg/gjZUdgTA6K' class='popupLink'>Join Now!</a></div>\n"
-               "\t\t\t\t\t</div>\n\t\t\t\t</div>\n\t\t\t</div>\n\t\t</div>");
+               "\t\t\t\t</div>\n\t\t\t</div>\n\t\t</div>");
 }
 
 // UTILS.commaFormatNum
@@ -1375,6 +1409,29 @@ static void window_backups(EdBuild *b) {
     edb_add(h, "</div>");
 }
 
+// windows[15] / [16] (v10 KE.multiplayer, E10:9595-9646): collaborative editing rooms on Krunker's
+// editor socket (mpHost / mpJoin ... on editor.krunker.io/ws). Intentional difference: Krunker Box
+// Office has no editor room server, so the window is v10's "no room" form and Host / Join say so.
+static const char *const k_mp_unavailable = "Multiplayer editing needs an editor room server, which Krunker Box Office does not have yet.";
+
+static void window_multiplayer(EdBuild *b) {
+    edb_add(&b->html, "<div style=\"padding:10px\">\n\t\t\t<div style=\"margin-bottom:15px;padding:10px;background:rgba(255,200,0,0.1);border:1px solid rgba(255,200,0,0.3);border-radius:4px;color:#ffd700;font-size:12px\">\n\t\t\t\tOnly invite people you trust - they have full control over the map\n\t\t\t</div>"
+                      "\n\t\t\t<div style=\"margin-bottom:10px\">\n\t\t\t\t<label style=\"display:block;margin-bottom:4px;color:#aaa;font-size:12px\">Max Players</label>\n\t\t\t\t<input type=\"range\" id=\"mpMaxPlayers\" min=\"2\" max=\"20\" value=\"5\" style=\"width:100%\" />\n\t\t\t\t<span id=\"mpMaxPlayersVal\" style=\"color:#fff\">5</span>\n\t\t\t</div>"
+                      "\n\t\t\t<div style=\"margin-bottom:10px\">\n\t\t\t\t<label style=\"display:block;margin-bottom:4px;color:#aaa;font-size:12px\">Room Password (optional)</label>\n\t\t\t\t<input type=\"text\" id=\"mpPassword\" placeholder=\"Leave empty for no password\"\n\t\t\t\t\tstyle=\"width:100%;box-sizing:border-box;padding:6px;background:#333;color:#fff;border:1px solid #555;border-radius:3px\" />\n\t\t\t</div>"
+                      "\n\t\t\t<div style=\"margin-bottom:10px\">\n\t\t\t\t<label style=\"color:#aaa;font-size:12px\">\n\t\t\t\t\t<input type=\"checkbox\" id=\"mpCloseOnDisconnect\" checked /> Close room when host disconnects\n\t\t\t\t</label>\n\t\t\t</div>"
+                      "\n\t\t\t<div style=\"display:flex;gap:8px\">\n\t\t\t\t<button class=\"mpBtnPrimary\" onclick=\"KE.multiplayer.hostFromUI()\" style=\"flex:1\">Host Room</button>\n\t\t\t\t<button class=\"mpBtnPrimary\" onclick=\"KE.multiplayer.joinPrompt()\" style=\"flex:1\">Join Room</button>\n\t\t\t</div>\n\t\t</div>");
+}
+
+static void window_mp_players(EdBuild *b) {
+    edb_add(&b->html, "<div class=\"windowHeader\"><div>Players [0/?]</div></div><div style=\"padding:10px\"></div>");
+}
+
+static int h_mp_unavailable(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
+    (void) user; (void) ev; (void) args; (void) argc;
+    editor_message(k_mp_unavailable);
+    return 1;
+}
+
 void ed_window_show(const int index) {
     EdBuild b;
     ed_gui_begin(&b, PANEL_WINDOW);
@@ -1390,6 +1447,8 @@ void ed_window_show(const int index) {
         case 12: window_videos(&b, 0); break;
         case 13: window_videos(&b, 1); break;
         case 15: window_backups(&b); break;
+        case 16: window_multiplayer(&b); break;
+        case 17: window_mp_players(&b); break;
         case 2: case 5: case 7: case 9: case 14: ed_net_window_gen(index, &b.html); break; // editor_net.c (Assets, Mods, Textures, Sounds, Maps)
         default: break;
     }
@@ -1471,6 +1530,8 @@ void ed_panels_install(HtmlHandlerEntry *table, size_t *count, const size_t max)
         {"GUI.panel.state.lock", h_lock},
         {"windows.0.switchTab", h_switch_tab},
         {"windows.2.switchTab", h_settings_tab},
+        {"KE.multiplayer.hostFromUI", h_mp_unavailable},
+        {"KE.multiplayer.joinPrompt", h_mp_unavailable},
         {"windows.3.toggleEditMode", h_quick},
         {"windows.3.clickButton", h_quick},
         {"windows.3.deleteButton", h_quick},

@@ -302,6 +302,8 @@ static const char *const K_OBJECT_KEYS[] = {
     "pht", "bng", "bn", "bnn", "bnr", "vdg", "vad", "vts", "vtl", "vmp", "vpf", "vmr", "vrf", "vr", "sty", "krs", "ldt",
     "ldc", "ldo", "ldr", "sci", "fcr", "cstc", "inm", "fp", "camt", "frc", "msp", "sat", "cpx", "bbS", "bbD", "pmv", "nt",
     "ntx", "tas",
+    // Krunker v10
+    "dyn", "boss", "cnch", "ambFadeTime", "crt", "eid", "ar", "tag", "pn", "sfz",
     // ENVIRONMENT_ZONE
     "ambInd", "ambIndC", "skyDome", "skyDomeCol0", "skyDomeCol1", "skyDomeCol2", "skyDomeEmis", "skyDomeEmisTex",
     "skyDomeTex", "skyDomeTexA", "skyDomeMovD", "skyDomeMovT", "shadowR", "shadowD", "ambientC", "ambientI", "light",
@@ -484,6 +486,7 @@ cJSON *ed_model_object(const cJSON *p, const int flags) {
     const int collidable = HAS(EP_NOCOLLISION) ? 0 : HAS(EP_FORCECOLLISION) ? 1 : js_undef(p, "col") && js_undef(p, "l"); // (the setter applies noCollision last)
     if (!collidable) put_one(out, "l");
     if (!js_undef(p, "pl")) put_one(out, "pl");
+    if (js_truthy(G(p, "dyn"))) put_one(out, "dyn"); // v10 (E10:7236, 7814): this.dyn = !!p.dyn
     if (!js_undef(p, "ns")) put_one(out, "ns");
     if (!js_undef(p, "nai")) put_one(out, "nai");
     if (HAS(EP_CANWALLJUMP) && !js_undef(p, "wj")) put_one(out, "wj");
@@ -661,6 +664,12 @@ cJSON *ed_model_object(const cJSON *p, const int flags) {
     {
         const double node_id = pi_or(p, "nid", 0);
         if (IS("PATH_NODE") && num_truthy(node_id)) put_num(out, "nid", node_id);
+    }
+    if (IS("BOT_PATH_NODE")) { // v10 (E10:7409-7412, 8038-8043)
+        put_nz(out, "bng", pi_or(p, "bng", 0));
+        put_nz(out, "bn", pi_or(p, "bn", 0));
+        put_nz(out, "bnn", js_null(p, "bnn") ? 1 : pi_or(p, "bnn", 0));
+        put_num(out, "bnr", pi_or(p, "bnr", 0) == 1 ? 1 : 0);
     }
     // the object-level (legacy single-action) action, used for the sound block below
     const double obj_action = pi_or(p, "ta", 0);
@@ -897,12 +906,14 @@ cJSON *ed_model_object(const cJSON *p, const int flags) {
         if (!js_null(p, "xv")) put_one(out, "xv");
         if (!js_null(p, "tAi")) put_one(out, "tAi");
         if (!js_null(p, "tPl")) put_one(out, "tPl");
+        if (ai && pi_or(p, "boss", 0) == 1) put_one(out, "boss"); // v10 isBoss (E10:7350, 8459)
         if (js_truthy(G(p, "aif"))) put_one(out, "aif");
         if (!js_null(p, "cs")) put_one(out, "cs");
         if (!js_null(p, "igos")) put_one(out, "igos");
         if (!js_null(p, "dos")) put_one(out, "dos");
         if (!js_null(p, "ivos")) put_one(out, "ivos");
         if (!js_null(p, "cnh")) put_one(out, "cnh");
+        if (ai && !js_null(p, "cnch")) put_one(out, "cnch"); // v10 canContactHit (E10:7320, 8480)
         const cJSON *ain = G(p, "ain");
         if (cJSON_IsString(ain) && ain->valuestring[0] && text_valid(ain->valuestring, K_TEXT_OK)) put_dup(out, "ain", ain);
         const char *pra = id_string(G(p, "pra"), K_ASSET_ID_V);
@@ -1021,6 +1032,7 @@ cJSON *ed_model_object(const cJSON *p, const int flags) {
         static const char *const dome[3] = {"skyDomeCol0", "skyDomeCol1", "skyDomeCol2"};
         put_nz(out, "ambInd", js_null(p, "ambInd") ? 1 : pi_or(p, "ambInd", 0));
         put_nz(out, "ambIndC", pi_or(p, "ambIndC", 0));
+        put_nz(out, "ambFadeTime", pi_or(p, "ambFadeTime", 0)); // v10 (E10:7472, 8720)
         put(out, "skyDome", cJSON_CreateBool(js_truthy(G(p, "skyDome"))));
         for (int k = 0; k < 3; k++) {
             const cJSON *c = G(p, dome[k]);
@@ -1060,6 +1072,37 @@ cJSON *ed_model_object(const cJSON *p, const int flags) {
     if (IS("SERVER_NODE")) {
         const cJSON *nt = G(p, "nt");
         if (cJSON_IsString(nt) && nt->valuestring[0] && text_valid(nt->valuestring, K_TEXT_OK)) put_dup(out, "nt", nt);
+    }
+    // Krunker v10 (E10:7443-7457 constructor, 8750-8788 serialize): crate types, entities, archetype parts
+    if (IS("WEAPONBOX") || IS("SCRAPCRATE")) {
+        const double crt = pi_or(p, "crt", 0);
+        if (num_truthy(crt)) put_num(out, "crt", crt);
+    }
+    if (IS("ENTITY")) {
+        put_nz(out, "eid", pi_or(p, "eid", 0));
+        put_nz(out, "ar", pi_or(p, "ar", 0));
+        const cJSON *tag = G(p, "tag");
+        char tbuf[64];
+        const char *t = tag ? js_str(tag, tbuf, sizeof(tbuf)) : NULL;
+        int tag_ok = t && *t;
+        for (const char *c = t; tag_ok && *c; c++) tag_ok = isalnum((unsigned char) *c) || *c == '_' || *c == '-';
+        if (tag_ok) {
+            char cut[33];
+            snprintf(cut, sizeof(cut), "%s", t);
+            put(out, "tag", cJSON_CreateString(cut));
+        }
+        if (!js_null(p, "as") && !num_truthy(pi_or(p, "as", 0))) put_num(out, "as", 0); // autoSpawn off
+        const cJSON *sp = G(p, "sp");
+        if (cJSON_IsObject(sp) && sp->child) put_dup(out, "sp", sp);
+    }
+    {
+        const cJSON *pn = G(p, "pn");
+        char pbuf[32];
+        const char *n = pn ? js_str(pn, pbuf, sizeof(pbuf)) : NULL;
+        int ok = n && *n && strlen(n) <= 12;
+        for (const char *c = n; ok && *c; c++) ok = isalnum((unsigned char) *c) || *c == '_';
+        if (ok) put(out, "pn", cJSON_CreateString(n));
+        if (!js_null(p, "sfz")) put_one(out, "sfz");
     }
 
     // KrunkNative: keys ObjectInstance does not know are kept (see the header)
@@ -1533,6 +1576,7 @@ void ed_model_map_init(EdMapState *s) {
     cJSON_AddStringToObject(m, "name", "New Krunker Map");
     cJSON_AddNumberToObject(m, "ambInd", 1);
     cJSON_AddNumberToObject(m, "ambIndC", 0);
+    cJSON_AddNumberToObject(m, "ambFadeTime", 0); // v10 (E10:14071)
     cJSON_AddStringToObject(m, "modURL", "");
     cJSON_AddStringToObject(m, "welMsg", "");
     cJSON_AddStringToObject(m, "mmId", "");
@@ -1651,6 +1695,7 @@ static int map_key_exported(const cJSON *mc, const char *k, const cJSON *v) {
     if (!strcmp(k, "shadowD") && n == data_num("defaults", "shadowDst", 1200)) return 0;
     if (!strcmp(k, "ambInd") && n == 1) return 0;
     if (!strcmp(k, "ambIndC") && !js_truthy(v)) return 0;
+    if (!strcmp(k, "ambFadeTime") && n == 0) return 0; // v10 (E10:16568)
     if (!strcmp(k, "dthY") && n == -100) return 0;
     if (!strcmp(k, "oldAO") && !js_truthy(v)) return 0;
     if (!strcmp(k, "lightD") && n == data_num("defaults", "lightDistance", 500)) return 0;
@@ -1799,6 +1844,64 @@ static cJSON *export_config(const cJSON *server) {
     return cfg;
 }
 
+// Krunker v10 botPaths: [{p: [[x, y, z]...], r: 0|1}] per botNodeGroup (bng) in first-seen
+// order of the nodes sorted by botNode (bn, a stable sort like Array.sort); r = the bnr of the
+// group's node 0 (default 1). NULL when the map has no BOT_PATH_NODE.
+typedef struct { int group, node; size_t index; } BotNodeRef;
+
+static int bot_node_cmp(const void *a, const void *b) {
+    const BotNodeRef *x = a, *y = b;
+    if (x->node != y->node) return x->node < y->node ? -1 : 1;
+    return x->index < y->index ? -1 : x->index > y->index;
+}
+
+static cJSON *bot_paths_export(const EdModelObj *objs, const size_t n) {
+    BotNodeRef *refs = NULL;
+    size_t count = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (objs[i].prefab < 0 || objs[i].prefab >= EDITOR_PREFAB_COUNT || !objs[i].data) continue;
+        if (strcmp(editor_prefabs[objs[i].prefab].name, "BOT_PATH_NODE")) continue;
+        BotNodeRef *grown = realloc(refs, (count + 1) * sizeof(*refs));
+        if (!grown) break;
+        refs = grown;
+        const double g = pi_or(objs[i].data, "bng", 0), b = pi_or(objs[i].data, "bn", 0);
+        refs[count++] = (BotNodeRef) {isfinite(g) ? (int) g : 0, isfinite(b) ? (int) b : 0, i};
+    }
+    if (!count) {
+        free(refs);
+        return NULL;
+    }
+    qsort(refs, count, sizeof(*refs), bot_node_cmp);
+    cJSON *groups = cJSON_CreateObject(); // keyed by group, in insertion order (Object.values)
+    for (size_t k = 0; k < count; k++) {
+        char key[16];
+        snprintf(key, sizeof(key), "%d", refs[k].group);
+        cJSON *g = cJSON_GetObjectItemCaseSensitive(groups, key);
+        if (!g) {
+            g = cJSON_AddObjectToObject(groups, key);
+            cJSON_AddArrayToObject(g, "p");
+            cJSON_AddNumberToObject(g, "r", 1);
+        }
+        const cJSON *data = objs[refs[k].index].data, *p = G(data, "p");
+        cJSON *pos = cJSON_CreateArray();
+        for (int c = 0; c < 3; c++) cJSON_AddItemToArray(pos, cJSON_CreateNumber(vec_at(p, c, 0)));
+        cJSON_AddItemToArray(cJSON_GetObjectItemCaseSensitive(g, "p"), pos);
+        if (refs[k].node == 0) cJSON_SetNumberValue(cJSON_GetObjectItemCaseSensitive(g, "r"), pi_or(data, "bnr", 0) == 1 ? 1 : 0);
+    }
+    free(refs);
+    // Object.values: integer-like keys enumerate in ascending order, like JS
+    cJSON *out = cJSON_CreateArray();
+    for (;;) {
+        cJSON *best = NULL;
+        for (cJSON *g = groups->child; g; g = g->next)
+            if (!best || atoi(g->string) < atoi(best->string)) best = g;
+        if (!best) break;
+        cJSON_AddItemToArray(out, cJSON_DetachItemViaPointer(groups, best));
+    }
+    cJSON_Delete(groups);
+    return out;
+}
+
 cJSON *ed_model_export(const EdMapState *st, const EdModelObj *objs, const size_t n, const int flags) {
     const int raw = flags & ED_EXPORT_RAW;
     cJSON *objects = cJSON_CreateArray(), *colors = cJSON_CreateArray(), *xyz = cJSON_CreateArray(), *sizes = cJSON_CreateArray();
@@ -1823,6 +1926,7 @@ cJSON *ed_model_export(const EdMapState *st, const EdModelObj *objs, const size_
             cJSON_AddItemToArray(spawns, sp);
             continue;
         }
+        if (!raw && !strcmp(name, "BOT_PATH_NODE")) continue; // botPaths below (v10 getMapExport, E10:16374)
         if (!raw && !strcmp(name, "CAMERA_POSITION")) {
             // [x, y, z, static, rx, ry, rz]
             const cJSON *p = G(o->data, "p"), *r = G(o->data, "r");
@@ -1904,10 +2008,11 @@ cJSON *ed_model_export(const EdMapState *st, const EdModelObj *objs, const size_
     else cJSON_Delete(gui);
     // scripts: base64, omitted when empty or the template
     cJSON *scripts = cJSON_CreateObject();
-    static const char *const keys[2] = {"client", "server"};
-    for (int k = 0; k < 2; k++) {
+    static const char *const keys[3] = {"client", "server", "shared"};
+    for (int k = 0; k < 3; k++) {
         const cJSON *code = G(st->scripts, keys[k]);
-        if (!cJSON_IsString(code) || !code->valuestring[0] || !strcmp(code->valuestring, ed_model_script_template(keys[k]))) continue;
+        const char *tpl = k < 2 ? ed_model_script_template(keys[k]) : NULL;
+        if (!cJSON_IsString(code) || !code->valuestring[0] || (tpl && !strcmp(code->valuestring, tpl))) continue;
         char *b64 = ed_model_b64_encode(code->valuestring);
         if (b64) cJSON_AddStringToObject(scripts, keys[k], b64);
         free(b64);
@@ -1918,6 +2023,10 @@ cJSON *ed_model_export(const EdMapState *st, const EdModelObj *objs, const size_
     else cJSON_Delete(cam);
     if (!raw) cJSON_AddItemToObject(out, "spawns", spawns);
     else cJSON_Delete(spawns);
+    if (!raw) { // v10 botPaths (E10:16405-16420): BOT_PATH_NODEs by botNodeGroup, sorted by botNode
+        cJSON *paths = bot_paths_export(objs, n);
+        if (paths) cJSON_AddItemToObject(out, "botPaths", paths);
+    }
     if (!raw && cJSON_GetArraySize(tris)) cJSON_AddItemToObject(out, "tris", tris);
     else cJSON_Delete(tris);
     // name / welMsg through sanitizeHTML
@@ -2189,7 +2298,34 @@ int ed_model_import(const cJSON *doc, EdMapState *st, cJSON **objects_out, const
         cJSON_Delete(c);
         if (obj) cJSON_AddItemToArray(objects, obj);
     }
-    // botPaths: v7 has no BOT_PATH_NODE prefab (its import turns them into cubes); dropped
+    // botPaths: v10 importMap (E10:17046-17064): a BOT_PATH_NODE per point, {bnr: path.r, bn: k,
+    // bnn: k + 1, bng: path index} (v7 had no such prefab and made cubes of them)
+    const cJSON *paths = G(map, "botPaths");
+    if (cJSON_IsArray(paths)) {
+        int group = 0;
+        const cJSON *path;
+        cJSON_ArrayForEach(path, paths) {
+            const cJSON *pts = G(path, "p");
+            int k = 0;
+            const cJSON *pt;
+            cJSON_ArrayForEach(pt, pts) {
+                cJSON *c = cJSON_CreateObject();
+                cJSON_AddNumberToObject(c, "id", 41);
+                cJSON *pp = cJSON_AddArrayToObject(c, "p");
+                for (int a = 0; a < 3; a++) cJSON_AddItemToArray(pp, cJSON_CreateNumber(vec_at(pt, a, 0)));
+                const cJSON *r = G(path, "r");
+                if (r) cJSON_AddItemToObject(c, "bnr", cJSON_Duplicate(r, 1));
+                cJSON_AddNumberToObject(c, "bn", k);
+                cJSON_AddNumberToObject(c, "bnn", k + 1);
+                cJSON_AddNumberToObject(c, "bng", group);
+                cJSON *obj = ed_model_object(c, ED_MODEL_EXACT_TRANSFORM);
+                cJSON_Delete(c);
+                if (obj) cJSON_AddItemToArray(objects, obj);
+                k++;
+            }
+            group++;
+        }
+    }
     const cJSON *config = G(map, "config");
     if (js_truthy(config)) import_config(st, config);
     const cJSON *game = G(map, "game");
@@ -2201,9 +2337,11 @@ int ed_model_import(const cJSON *doc, EdMapState *st, cJSON **objects_out, const
     }
     const cJSON *scripts = G(map, "scripts");
     if (js_truthy(scripts)) {
-        static const char *const keys[2] = {"client", "server"};
-        for (int k = 0; k < 2; k++) {
+        // + v10's "shared" (E10:10253): kept and exported; the script window has no Shared tab yet
+        static const char *const keys[3] = {"client", "server", "shared"};
+        for (int k = 0; k < 3; k++) {
             const cJSON *code = G(scripts, keys[k]);
+            if (k == 2 && !cJSON_IsString(code)) continue;
             const char *text = cJSON_IsString(code) ? code->valuestring : "";
             char *decoded = ed_model_b64_decode(text);
             put(st->scripts, keys[k], cJSON_CreateString(decoded ? decoded : text));
@@ -2321,6 +2459,9 @@ static const PropDef K_PROPS[] = {
     P("ignoreOnStuck", "igos", PK_PRESENT, 0), P("driftOnStuck", "dos", PK_PRESENT, 0), P("invincibleOnStuck", "ivos", PK_PRESENT, 0),
     P("canShoot", "cs", PK_PRESENT, 0), P("canHit", "cnh", PK_PRESENT, 0), P("xrayVis", "xv", PK_PRESENT, 0),
     P("targAI", "tAi", PK_PRESENT, 0), P("targPlr", "tPl", PK_ABSENT, 0), P("friendly", "aif", PK_TRUTHY, 0),
+    // Krunker v10 (E10:7236, 7320, 7350, 7443)
+    P("dyn", "dyn", PK_TRUTHY, 0), P("isBoss", "boss", PK_TRUTHY, 0), P("canContactHit", "cnch", PK_PRESENT, 0),
+    P("crateType", "crt", PK_INT, 0),
     P("explode", "exp", PK_PRESENT, 0), P("speed", "spd", PK_NUMN, 1), P("frate", "fr", PK_INT, 2000), P("aicur", "aac", PK_NUM, 0),
     P("hrate", "hr", PK_INT, 800), P("shoBrk", "shb", PK_INT, 400), P("shoArY", "sha", PK_INT, 0), P("shoOffH", "shof", PK_ABSENT, 0),
     P("shoDel", "shdy", PK_INT, 0), P("melDel", "mldy", PK_INT, 400), P("melShake", "mls", PK_NUM, 0), P("shoShake", "ss", PK_NUM, 0),
@@ -2349,7 +2490,7 @@ static const PropDef K_PROPS[] = {
     P("botWrist", "btcwr", PK_INTN, -1), P("botShoes", "btcs", PK_INTN, -1), P("botPet", "btcp", PK_INTN, -1),
     P("botMelee", "btcm", PK_INTN, -1),
     // ENVIRONMENT_ZONE (every key is written; the defaults are the map's)
-    P("ambInd", "ambInd", PK_INTN, 1), P("ambIndC", "ambIndC", PK_INT, 0), P("skyDome", "skyDome", PK_BOOL, 0),
+    P("ambInd", "ambInd", PK_INTN, 1), P("ambIndC", "ambIndC", PK_INT, 0), P("ambFadeTime", "ambFadeTime", PK_INT, 0), P("skyDome", "skyDome", PK_BOOL, 0),
     PC("skyDomeCol0", "skyDomeCol0", "#74a4b9"), PC("skyDomeCol1", "skyDomeCol1", "#dce8ed"), PC("skyDomeCol2", "skyDomeCol2", "#dce8ed"),
     PC("skyDomeEmis", "skyDomeEmis", "#000000"), P("skyDomeEmisTex", "skyDomeEmisTex", PK_RAW, 0), P("skyDomeTex", "skyDomeTex", PK_BOOL, 0),
     P("skyDomeTexA", "skyDomeTexA", PK_RAW, 0), P("skyDomeMovD", "skyDomeMovD", PK_NUM, 0), P("skyDomeMovT", "skyDomeMovT", PK_NUM, 0),

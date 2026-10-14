@@ -10,7 +10,7 @@
       "rect": [
         4,
         4,
-        294,
+        284,
         60
       ],
       "kind": "text",
@@ -21,9 +21,9 @@
     {
       "name": "nav-buttons",
       "rect": [
-        490,
+        499,
         0,
-        300,
+        282,
         50
       ],
       "kind": "image",
@@ -34,9 +34,9 @@
     {
       "name": "nav-title",
       "rect": [
-        984,
+        1023,
         5,
-        286,
+        247,
         40
       ],
       "kind": "text",
@@ -55,7 +55,7 @@
       "kind": "image",
       "fuzz": 8,
       "max_pct": 1.5,
-      "note": "Steam / App Store / Google Play badges"
+      "note": "store badges: Google Play only on v10 (no Steam / App Store)"
     },
     {
       "name": "editor-badge",
@@ -71,17 +71,17 @@
       "note": "#editrDB"
     },
     {
-      "name": "popup",
+      "name": "login",
       "rect": [
-        395,
-        206,
-        490,
-        263
+        238,
+        160,
+        804,
+        400
       ],
       "kind": "text",
       "fuzz": 12,
-      "max_pct": 3.0,
-      "note": "#genericPop"
+      "max_pct": 4.0,
+      "note": "#viewStack: v10's login modal (email field, Login)"
     }
   ]
 }

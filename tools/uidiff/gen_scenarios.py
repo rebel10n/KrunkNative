@@ -19,6 +19,9 @@ sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 REF = "doc/ref/krunker-v7.1.4"
+# the hub and editor scenarios diff against Krunker v10 (the live krunker.io pages), references
+# reconstructed without running v10's JS: tools/uidiff/capture-v10-static.js, doc/ref/krunker-v10/README.md
+REF10 = "doc/ref/krunker-v10"
 
 KIND = {  # default fuzz (%), max differing pixels (%)
     "text": (12, 3.0),
@@ -42,8 +45,8 @@ def R(name, rect, kind="text", note=None, skip=False, max_pct=None, fuzz=None, *
     return r
 
 
-def rects(path):
-    with open(os.path.join(REPO, REF, path + ".rects.json")) as fh:
+def rects(path, ref=REF):
+    with open(os.path.join(REPO, ref, path + ".rects.json")) as fh:
         return json.load(fh)
 
 
@@ -701,19 +704,23 @@ add("ingame-spectate-menu", {"ref": REF + "/ingame/ingame-spectate-menu.png", "s
     chat_regions(rc, 1280, 720))
 
 # --------------------------------------------------------------------------- hub
-# social.html with a socket that opens and never answers: the guest chrome with every view
-# loading. Only the navigation bar, the store badges and the popups are compared.
+# Krunker v10's social.html as a guest with every view loading (no social server), references
+# doc/ref/krunker-v10/hub/ (tools/uidiff/capture-v10-static.js: v7.1.4's capture moved onto v10's
+# page and stylesheets). Only the navigation bar, the store badges and the popups are compared.
 HUB = [("hub-maps", "p=maps", []), ("hub-feed", "p=feed", []), ("hub-leaders", "p=leaders", []),
        ("hub-market", "p=market", []), ("hub-mods", "p=mods", []),
        ("hub-login", "p=maps", ["loginPopup"]), ("hub-settings", "p=maps", ["openSettings"])]
 for name, query, actions in HUB:
-    rc = rects("hub/" + name)
+    rc = rects("hub/" + name, REF10)
     regs = [R("profile", pad(rc["profileInfo"], 2), "text", "#profileInfo: Login + Search User"),
             R("nav-buttons", pad(rc["navButtons"], 2), "image", "#navButtons icons"),
             R("nav-title", pad(rc["navTitle"], 2), "text", "#navTitle: Terms | settings, KRUNKER .io"),
-            R("badges", [830, 640, 450, 72], "image", "Steam / App Store / Google Play badges"),
+            R("badges", [830, 640, 450, 72], "image", "store badges: Google Play only on v10 (no Steam / App Store)"),
             R("editor-badge", pad(rc["editrDB"], 2), "image", "#editrDB")]
-    if "genericPop" in rc:
+    if name == "hub-login":
+        # v10's LoginModal in #viewStack (the popup frame: .popup.svelte-1wz7ymp, 800 px at scale 1)
+        regs.append(R("login", [238, 160, 804, 400], "text", "#viewStack: v10's login modal (email field, Login)", max_pct=4.0))
+    elif "genericPop" in rc:
         regs.append(R("popup", pad(rc["genericPop"], 2), "text", "#genericPop"))
     else:
         regs.append(R("loading", pad(rc["loadMessage"], 0), "text", "#loadMessage LOADING (no social server)",
@@ -721,14 +728,14 @@ for name, query, actions in HUB:
     st = {"page": "hub", "pageQuery": query, "anim_time": ANIM}
     if actions:
         st["pageActions"] = actions
-    add(name, {"ref": "%s/hub/%s.png" % (REF, name), "size": [1280, 720], "background": "#000000", "state": st,
-               "frames": 3, "note": "Social hub (ui/social.html), guest, %s%s." % (query, " + " + ", ".join(actions) if actions else "")},
+    add(name, {"ref": "%s/hub/%s.png" % (REF10, name), "size": [1280, 720], "background": "#000000", "state": st,
+               "frames": 3, "note": "Social hub (ui/social.html, Krunker v10), guest, %s%s." % (query, " + " + ", ".join(actions) if actions else "")},
         regs)
 
 
 # --------------------------------------------------------------------------- editor
-# v7's editor.html at 1920x937 (#uiBase scale 1), captured by tools/editor/v7ref.js
-# (doc/ref/krunker-v7.1.4/editor/). The 3D view (three.js grid and sky vs the native GL view)
+# v10's editor.html at 1920x937 (#uiBase scale 1): doc/ref/krunker-v10/editor/ (tools/uidiff/
+# capture-v10-static.js over tools/editor/v7ref.js's v7.1.4 captures). The 3D view (three.js grid and sky vs the native GL view)
 # is skipped; the chrome over it (canvas buttons, stats box) is compared with a loose budget.
 EW, EH = 1920, 937
 
@@ -742,8 +749,8 @@ def editor_chrome(rc, dimmed=False):
             regs.append(R(name, pad(rc[key], 2, EW, EH), kind, k + note, **kw))
 
     opt("toolbar", "_toolbar", "text", "#_toolbar: File .. Documentation")
-    opt("playbar", "playbar", "image", "#playbar: test / host / teleport icons")
-    opt("version", "versionTxt", "text", "#versionTxt: Krunker Editor v2.0.0 - Yendis Entertainment")
+    opt("playbar", "playbar", "image", "#playbar: test / host / teleport / multiplayer icons")
+    opt("version", "versionTxt", "text", "#versionTxt: Krunker Editor v2.0.0 - FRVR")
     if "transform" in rc and "wireframeOption" in rc:
         x0, y0 = rc["transform"][0], rc["transform"][1]
         x1 = rc["wireframeOption"][0] + rc["wireframeOption"][2]
@@ -763,24 +770,24 @@ def editor_chrome(rc, dimmed=False):
     return regs
 
 
-rc = rects("editor/editor-1920")
-add("editor-1920", {"ref": REF + "/editor/editor-1920.png", "size": [EW, EH], "background": "#000000",
+rc = rects("editor/editor-1920", REF10)
+add("editor-1920", {"ref": REF10 + "/editor/editor-1920.png", "size": [EW, EH], "background": "#000000",
                     "state": {"page": "editor", "pageQuery": "new", "pageActions": ["closeWindow"], "anim_time": ANIM},
                     "frames": 3, "note": "Map editor (ui/editor.html), new map, Welcome window closed."},
     editor_chrome(rc))
 # editor WP6 (editor_net.c): the API windows. v7's capture has no API, so its lists show "Loading..."
 # forever; the render has no brain either: net:pending puts the list in that state (else the native
 # list shows its empty text, an intentional difference checked by tools/editor/windows_check.py)
-for name, ref, action, note in (("editor-win-settings", "window3", "showWindow(3)", "Settings window, General tab"),
+for name, ref, action, note in (("editor-win-settings", "window3", "showWindow(3)", "Settings window, General tab (v10: + Multiplayer tab)"),
                                 ("editor-win-controls", "window1", "showWindow(1)", "Controls window, Default tab"),
                                 ("editor-win-assets", "window2", ["showWindow(2)", "KE.kn.script('net:pending:2')"], "Assets window, New tab, request pending"),
                                 ("editor-win-sounds", "window9", ["showWindow(9)", "KE.kn.script('net:pending:9')"], "Sounds window, New tab, request pending")):
-    rc = rects("editor/" + ref)
+    rc = rects("editor/" + ref, REF10)
     regs = [r for r in editor_chrome(rc, True) if r["name"] in ("toolbar", "version", "left-panel")]
     # Secular One rasterises about 1 px higher natively (FreeType vs Chromium): 4 %
     regs.append(R("window", pad(rc["menuWindow"], 2, EW, EH), "text", "#menuWindow: " + note, max_pct=4.0))
     actions = action if isinstance(action, list) else [action]
-    add(name, {"ref": "%s/editor/%s.png" % (REF, ref), "size": [EW, EH], "background": "#000000",
+    add(name, {"ref": "%s/editor/%s.png" % (REF10, ref), "size": [EW, EH], "background": "#000000",
                "state": {"page": "editor", "pageQuery": "new", "pageActions": actions, "anim_time": ANIM},
                "frames": 3, "note": "Map editor, new map, %s (%s)." % (note, actions[0])},
         regs)
@@ -789,13 +796,13 @@ for name, ref, action, note in (("editor-win-settings", "window3", "showWindow(3
 # the object inspector (editor WP3, editor_inspector.c): a new cube's panel with Transform and Style
 # open (v7ref.js state right-object-cube). The 3D view and the stats box show the cube differently
 # (three.js vs the native view): only the toolbar, the version text and the right panel are compared.
-rc = rects("editor/right-object-cube")
+rc = rects("editor/right-object-cube", REF10)
 # The left panel is not compared here (editor-1920 compares the Essential panel).
 regs = [R(r["name"], r["rect"], r["kind"], r.get("note"), skip=True, max_pct=r["max_pct"], fuzz=r["fuzz"])
         if r["name"] == "left-panel" else r
         for r in editor_chrome(rc) if r["name"] in ("toolbar", "version", "left-panel")]
-regs.append(R("right-panel", pad(rc["right-panel"], 0, EW, EH), "text", "right panel: the Cube's object panel (Transform, Style open)", max_pct=4.0))
-add("editor-inspector", {"ref": REF + "/editor/right-object-cube.png", "size": [EW, EH], "background": "#000000",
+regs.append(R("right-panel", pad(rc["right-panel"], 0, EW, EH), "text", "right panel: the Cube's object panel (Transform, Style open; v10: + Dynamic)", max_pct=4.0))
+add("editor-inspector", {"ref": REF10 + "/editor/right-object-cube.png", "size": [EW, EH], "background": "#000000",
                          "state": {"page": "editor", "pageQuery": "new",
                                    "pageActions": ["closeWindow"] + ["KE.kn.script('%s')" % c for c in  # one command per call
                                                                      ("clear", "add:0", "select:0", "open:transformH", "open:styleH")],
@@ -806,10 +813,11 @@ add("editor-inspector", {"ref": REF + "/editor/right-object-cube.png", "size": [
 # the KrunkScript window (editor WP5, editor_script.c). v7.1.4 opens scripting.html as a browser
 # window, so there is no rects capture: the reference is v7's own page (recovered,
 # tools/editor/fetch_scripting_ref.sh) in an iframe at that window's place (tools/editor/v7ref.js
-# scripting), and the script-* rects are measured on scripting.png. The toolbar and version rects
-# are the editor-1920 chrome's.
+# scripting), and the script-* rects are measured on scripting.png. The toolbar rect is the
+# editor-1920 chrome's. v10's scripting.html and css/scripting.css are v7's (the live page, 2026-10-13),
+# so this reference stays v7.1.4's; the version text (v10: "- FRVR") is compared by editor-1920 only.
 regs = [{k: v for k, v in r.items() if r["name"] == "toolbar" or k != "note"}
-        for r in editor_chrome(rects("editor/editor-1920")) if r["name"] in ("toolbar", "version")]
+        for r in editor_chrome(rects("editor/editor-1920")) if r["name"] == "toolbar"]
 regs += [
     R("script-tabs", [192, 94, 400, 36], "text", "#tabHolder: Client (selected) / Server, GameFont 12px"),
     {"name": "script-strip", "rect": [600, 94, 940, 36], "kind": "flat",  # the file defaults (fuzz 6, max 0.5%)

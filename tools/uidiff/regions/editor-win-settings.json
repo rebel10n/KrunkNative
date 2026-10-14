@@ -21,15 +21,15 @@
     {
       "name": "version",
       "rect": [
-        1613,
+        1719,
         0,
-        307,
+        201,
         26
       ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "dimmed under the window backdrop; #versionTxt: Krunker Editor v2.0.0 - Yendis Entertainment"
+      "note": "dimmed under the window backdrop; #versionTxt: Krunker Editor v2.0.0 - FRVR"
     },
     {
       "name": "left-panel",
@@ -48,14 +48,14 @@
       "name": "window",
       "rect": [
         638,
-        132,
+        128,
         644,
-        673
+        681
       ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 4.0,
-      "note": "#menuWindow: Settings window, General tab"
+      "note": "#menuWindow: Settings window, General tab (v10: + Multiplayer tab)"
     }
   ]
 }

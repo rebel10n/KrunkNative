@@ -115,6 +115,7 @@ void ed_panel_right_environment(void) {
     ed_ctl_bind_json(amb, mc, "ambIndC");
     edp_finish(&b, amb, NULL);
     ed_gui_button(&b, "Select Sound", ed_net_select)->arg = ENV_SEL_AMB;
+    edp_json_slider(&b, "Fade Time", mc, "ambFadeTime", 0, 10, 0.1, 0, NULL); // v10 (IDX:20052)
     edp_json_slider(&b, "Intensity", mc, "ambientI", 0.1, 3, 0.1, 0, env_changed);
     env_color(&b, "Color", "ambient", 0);
     ed_gui_folder_end(&b, 0);

@@ -14,13 +14,6 @@
       "note": "#_toolbar: File .. Documentation"
     },
     {
-      "name": "version",
-      "rect": [1613, 0, 307, 26],
-      "kind": "text",
-      "fuzz": 12,
-      "max_pct": 3.0
-    },
-    {
       "name": "script-tabs",
       "rect": [192, 94, 400, 36],
       "kind": "text",

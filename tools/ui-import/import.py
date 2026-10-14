@@ -360,12 +360,19 @@ def main(argv):
         with open(os.path.join(public, "docs", "versions.txt"), "rb") as fh:  # the Changelog source
             write_if_changed(os.path.join(windows_out, "versions.txt"), fh.read())
 
-    if not args.no_editor:
-        import editor_page  # Krunker's editor.html + its stylesheets (tools/ui-import/editor_page.py)
-        editor_page.import_editor(ui_dir, write_if_changed, log, public, v7)
-    if not args.no_social:
-        import social_page  # Krunker's social.html + its stylesheets/images (tools/ui-import/social_page.py)
-        social_page.import_social(ui_dir, write_if_changed, log, public, v7)
+    if v7 and not (args.no_editor and args.no_social):
+        # the hub and editor pages are Krunker v10's (the live site mirror), not v7.1.4's:
+        # tools/ui-import/v10_hub_editor.py, doc/v10/editor-social.md
+        import v10_hub_editor
+        pages = tuple(p for p, skip in (("social.html", args.no_social), ("editor.html", args.no_editor)) if not skip)
+        v10_hub_editor.import_pages(ui_dir, write_if_changed, log, REFS["v10"]["public"], pages)
+    elif not args.no_editor or not args.no_social:
+        if not args.no_editor:
+            import editor_page  # Krunker's editor.html + its stylesheets (tools/ui-import/editor_page.py)
+            editor_page.import_editor(ui_dir, write_if_changed, log, public, v7)
+        if not args.no_social:
+            import social_page  # Krunker's social.html + its stylesheets/images (tools/ui-import/social_page.py)
+            social_page.import_social(ui_dir, write_if_changed, log, public, v7)
     if not args.no_viewer:
         import viewer_page  # Krunker's viewer.html, dat.gui's stylesheet, the viewer store tables (tools/ui-import/viewer_page.py)
         viewer_page.import_viewer(ui_dir, write_if_changed, log, public, store_table=args.viewer_store)

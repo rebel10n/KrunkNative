@@ -290,6 +290,20 @@ void editor_update_object_count(void) {
     html_dom_set_text(html_dom_by_id("spawnCount"), buf);
     snprintf(buf, sizeof(buf), "%d", c.obj[5]);
     html_dom_set_text(html_dom_by_id("serverNodeCount"), buf);
+    // v10 (E10:19940-19960): Entities n / entityLimit and Archetypes n / archetypeLimit, shown
+    // only when the map has either (the archetypes are the imported top-level "archetypes" list)
+    int entities = 0;
+    for (size_t i = 0; i < g_ed.proj->count; i++) entities += prefab_named(g_ed.proj->objects[i]->prefab, "ENTITY");
+    const int archetypes = cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(g_ed.proj->extra_map, "archetypes"));
+    const char *show = entities > 0 || archetypes > 0 ? "block" : "none";
+    static const char *const ids[4] = {"entityHolder", "entityCount", "archetypeHolder", "archetypeCount"};
+    for (int i = 0; i < 4; i++) html_dom_set_display(html_dom_by_id(ids[i]), show);
+    if (entities > 0 || archetypes > 0) {
+        snprintf(buf, sizeof(buf), "%d / %d", entities, limit_of("entityLimit", 64));
+        html_dom_set_text(html_dom_by_id("entityCount"), buf);
+        snprintf(buf, sizeof(buf), "%d / %d", archetypes, limit_of("archetypeLimit", 32));
+        html_dom_set_text(html_dom_by_id("archetypeCount"), buf);
+    }
 }
 
 void editor_set_transform_type(const int type) {
@@ -358,6 +372,9 @@ static const struct { const char *header, *width, *padding, *max_height; } k_win
     {"Tips & Tricks", NULL, NULL, "80%"},
     {"Maps", NULL, NULL, NULL},
     {"Load Backup", "400px", NULL, NULL},
+    // Krunker v10: KE.multiplayer's windows (E10:9686-9696), editor_panels.c window_multiplayer
+    {"Multiplayer", NULL, NULL, NULL},
+    {"Players", NULL, NULL, NULL},
 };
 
 void editor_show_window(const int index) {
@@ -952,8 +969,13 @@ static void page_enter(Client *client, const char *query) {
     install_handlers();
     wire_canvas_buttons();
 
-    // new Editor("2.0.0"): versionTxt
-    html_dom_set_html(html_dom_by_id("versionTxt"), "Krunker Editor v2.0.0 - <span style='color:rgba(255,255,255,0.5)'> Yendis Entertainment</span>");
+    // new Editor("2.0.0"): versionTxt (v10: "- FRVR", E10:13908; v7.1.4: Yendis Entertainment)
+    html_dom_set_html(html_dom_by_id("versionTxt"), "Krunker Editor v2.0.0 - <span style='color:rgba(255,255,255,0.5)'> FRVR</span>");
+    // v10's multiplayer button, 4th in #playbar (E10:9700-9714): opens window 16
+    const HtmlElem playbar = html_dom_by_id("playbar");
+    if (playbar && !html_dom_by_id("mpToolbarBtn"))
+        html_dom_insert_html(playbar, HTML_INSERT_BEFORE_END,
+                             "<div id=\"mpToolbarBtn\" class=\"playbarItemR\" title=\"Multiplayer Editing\" onclick=\"showWindow(16)\"><i id=\"multiplayerIcon\" class=\"material-icons\">group_add</i></div>");
     editor_toggle_menu(0);
 
     // the Welcome window opens at boot unless a map comes with the page (checkEdit's
