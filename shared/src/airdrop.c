@@ -10,9 +10,10 @@
 // KN notes:
 // - The KR / Junk / Skin packages pay into the account (additionalReward, sendUserJunk,
 //   giveSkin). KN has no backend call for that yet (decisions.md "Backend-only triggers"), so
-//   they are claimed (the "krp" line goes out) but pay nothing. A Junk Package still prints
-//   sendUserJunk's "You found [x] Junk" for a claimer with an account (game_found_junk; KN has no
-//   junk wallet, decisions.md "Reward Junk").
+//   they are claimed (the "krp" line goes out) but pay nothing. A Junk Package still shows its
+//   claim to any human claimer, guests included: the "Junk Claimed" / "Junk Thief" popup and
+//   sendUserJunk's "You found [x] Junk" line (package_claim; KN has no junk wallet, decisions.md
+//   "Reward Junk").
 // - The trapped explosion goes through game_explosion, which hurts its source by a fifth; v7
 //   skips the source of a streak explosion (data.stk). The source is the drop's owner, who sees
 //   the real package and so normally doesn't claim it.
@@ -23,8 +24,10 @@
 #include <ai.h>
 #include <world.h>
 #include <game_config.h>
+#include <bots.h>
 #include "modes/mode_internal.h"
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 
 const AirDropPackage g_airdrop_packages[AIRDROP_PACKAGE_COUNT] = {
@@ -246,8 +249,21 @@ static void package_claim(Game *game, AirDrop *d, Player *claimer) {
             break;
         }
         default: { // KR / Junk / Skin: account rewards, no backend call yet (see the header)
+            // Junk Package claim (airDropPackages.js:122-130): `if (!player.account) return false`,
+            // then send("am", [thief ? "Junk Thief" : "Junk Claimed", amount + " Junk", 0, 1]) and
+            // sendUserJunk, whose "jnk" reply prints "You found [x] Junk". Every v7.1.4 server
+            // player has an account object, guests included (server/index.ts handleEnter:
+            // `account || createGuestAccount(...)`), so a guest's claim shows both. Gating on KN's
+            // has_account (a backend account) made a guest's Junk Package claim silent. Bots get
+            // nothing to show. [KN] The medal sub "0.05 Junk" is a string, which NetPopupPacket
+            // cannot carry next to the title: the amount is in the chat line.
             static const double k_junk[7] = {0.05, 0.1, 0.2, 0.3, 0.5, 1.0, 2.5}; // the Junk Packages by rarity
-            if (p->icon == 3 && claimer->has_account && p->rarity >= 0 && p->rarity < 7) game_found_junk(game, claimer, k_junk[p->rarity]);
+            if (p->icon != 3 || p->rarity < 0 || p->rarity >= 7 || game_player_is_bot(game, claimer)) break;
+            NetPopupPacket popup;
+            memset(&popup, 0, sizeof(popup));
+            snprintf(popup.text, sizeof(popup.text), "%s", claimer->uid != d->owner_uid ? "Junk Thief" : "Junk Claimed");
+            game_send(game, claimer->uid, NET_PACKET_POPUP, &popup, sizeof(popup));
+            game_found_junk(game, claimer, k_junk[p->rarity]);
             break;
         }
     }

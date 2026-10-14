@@ -560,6 +560,53 @@ static void test_airdrops(Game *game) {
     tick(game, 0.1f, 0.1f);
     CHECK(!game->zombies.drops[lost - 1].active, "a drop below deathY is removed");
 
+    // Junk Packages (airDropPackages.js:122-130): v7.1.4 gives every server player an account
+    // object (guests: createGuestAccount), so any human claimer gets "Junk Claimed" / "Junk Thief"
+    // and sendUserJunk's "You found [x] Junk"; a guest's claim was silent while KN gated it on a
+    // backend account. Bots: nothing to show.
+    static const struct {
+        int guest, bot, own, index;
+        const char *popup, *line;
+    } junk_claims[] = {
+        {1, 0, 0, 7, "Junk Thief", "You found [0.05] Junk"},    // a guest takes a's Uncommon Junk Package
+        {0, 0, 1, 13, "Junk Claimed", "You found [2.50] Junk"}, // an account claims its own Unobtainable one
+        {1, 0, 1, 8, "Junk Claimed", "You found [0.10] Junk"},  // a guest's own package
+        {1, 1, 0, 9, NULL, NULL},                               // a bot: nothing
+    };
+    for (size_t i = 0; i < sizeof(junk_claims) / sizeof(junk_claims[0]); i++) {
+        Player *claimer = junk_claims[i].own ? a : b;
+        const int had_account = claimer->has_account;
+        claimer->has_account = (unsigned char) !junk_claims[i].guest;
+        claimer->is_bot = (unsigned char) junk_claims[i].bot;
+        const int jsid = airdrop_drop(game, a, (vec3) {-150.0f, 0.0f, 100.0f}, 0.0f, junk_claims[i].index);
+        AirDrop *jd = &game->zombies.drops[jsid - 1];
+        place(claimer, jd->position.x, jd->position.z);
+        claimer->position.y = jd->position.y;
+        claimer->interact_progress = 0.0f;
+        reset_sent();
+        for (int f = 0; f < 200 && jd->active; f++) airdrop_player_collide(claimer, &input, 0.05f);
+        NetPopupPacket popup;
+        NetChatPacket chat;
+        memcpy(&popup, g_last[NET_PACKET_POPUP], sizeof(popup));
+        memcpy(&chat, g_last[NET_PACKET_CHAT], sizeof(chat));
+        popup.text[sizeof(popup.text) - 1] = 0;
+        chat.text[sizeof(chat.text) - 1] = 0;
+        if (junk_claims[i].popup) {
+            CHECK(!jd->active && g_count[NET_PACKET_POPUP] == 1 && g_last_uid[NET_PACKET_POPUP] == claimer->uid && !strcmp(popup.text, junk_claims[i].popup),
+                  "Junk Package %d (guest %d): the \"%s\" popup to the claimer (%d \"%s\")", junk_claims[i].index, junk_claims[i].guest,
+                  junk_claims[i].popup, g_count[NET_PACKET_POPUP], popup.text);
+            CHECK(g_count[NET_PACKET_CHAT] == 1 && g_last_uid[NET_PACKET_CHAT] == claimer->uid && chat.kind == NET_CHAT_FOUND_JUNK &&
+                  !strcmp(chat.text, junk_claims[i].line),
+                  "Junk Package %d (guest %d): \"%s\" (%d \"%s\")", junk_claims[i].index, junk_claims[i].guest, junk_claims[i].line,
+                  g_count[NET_PACKET_CHAT], chat.text);
+        } else {
+            CHECK(!jd->active && g_count[NET_PACKET_AIRDROP_CLAIM] == 1 && !g_count[NET_PACKET_POPUP] && !g_count[NET_PACKET_CHAT],
+                  "Junk Package: a bot claims it with no popup or line (%d %d)", g_count[NET_PACKET_POPUP], g_count[NET_PACKET_CHAT]);
+        }
+        claimer->has_account = (unsigned char) had_account;
+        claimer->is_bot = 0;
+    }
+
     // the client mirror
     Game client;
     memset(&client, 0, sizeof(client));
