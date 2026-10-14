@@ -40,6 +40,7 @@ int  account_ui_logout(void);               // logoutAcc (menu Logout, console `
 void account_ui_tick(Client*);              // per frame: header bar once the page exists
 void account_send_frame(const char *label);  // one no-argument social frame ("ttl": the account's titles)
 int  account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
+int  account_ui_reset_active(void);           // KrunkNative forgot password: a reset step is up in window 5
 int  account_ui_reset_enter(HtmlElem target); // KrunkNative forgot password: Enter in a reset field submits its step (1 = handled)
 int  account_ui_twofa_handler(const char *name); // 1 for the 2FA popup's handlers (sub2FA, onInput2FA, onKeyDown2FA): every page has #twoFAPop
 // Window markup when the account changes what v3.1.1 shows; NULL = keep the static capture.

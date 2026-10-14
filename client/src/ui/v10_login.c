@@ -39,6 +39,7 @@ static struct {
     int recover;  // _39222: the recover card
     int email;    // _39221: the login card's field is Email (else Username)
     int use_pass; // _39235: Email mode, the password asked for (shown before one is typed)
+    int to_reset; // recover(): showWindow(5) is the frame of the reset steps, not the modal
 } L;
 
 static HtmlElem by_id(const char *id) { return html_dom_by_id(id); }
@@ -261,6 +262,19 @@ static void open_modal(const int reg) {
     render();
 }
 
+// windows[4].gen (v10:10399794): showWindow(5) for a guest pushes this modal (_5217(_39035)) and
+// returns autoWindowClose, so the window closes. Every guest showWindow(5) (the comp menu, Store /
+// Market "Register to craft!", LOGIN REQUIRED cards, Battle Pass, a logout with the window up)
+// lands here. KrunkNative keeps the window only as the frame of its password-reset steps
+// (account_ui.c): v7's guest form under it (ui/windows/5.html) is not v10's, and its .accBtn
+// Register / Login buttons were text-sized on the v10 page, which has no CSS for them.
+int v10_login_guest_window(void) {
+    if (account_get() || L.to_reset || account_ui_reset_active() || !v10_menu_page()) return 0;
+    if (menu_window_is_open()) menu_toggle_window(0); // closWind()
+    open_modal(0);
+    return 1;
+}
+
 void v10_login_account_changed(void) {
     if (L.open && account_get()) close_modal(); // $account set: the modal leaves the stack
 }
@@ -329,7 +343,9 @@ static void recover(void) {
         return;
     }
     close_modal();
+    L.to_reset = 1;
     menu_show_window(5, 0);
+    L.to_reset = 0;
     account_ui_handle("knResetOpen", NULL, NULL, 0);
     HtmlElem in = by_id("knResetWho");
     if (in) html_dom_set_value(in, who);

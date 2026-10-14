@@ -460,12 +460,31 @@ static int tok_lit(const char *lit, CssToken *out, int max)
 /* Declaration blocks                                                        */
 /* ========================================================================= */
 
+/* `all` (CSS Cascade 4 3.2): only a CSS-wide keyword (inherit / initial / unset / revert), which
+ * stands for every longhand except direction and unicode-bidi; custom properties are untouched.
+ * v10's .io-button { all: unset; ... } relies on it to drop the UA button style (box-sizing:
+ * border-box, Arial 13.33px, outset border, display inline-block). */
+static int parse_all(const char *value, size_t value_len, int important, CssDeclCb cb, void *user)
+{
+    value = kn_str_trim(value, &value_len);
+    CssToken tokens[8];
+    int n = css_tokens_strip_ws(tokens, css_tokenize(value, value_len, tokens, 8));
+    if (n != 1 || !tok_is_global_kw(&tokens[0])) return 0;
+    for (int id = 0; id < CSS_PROP_LONGHAND_COUNT; id++)
+        if (id != CSS_PROP_DIRECTION) cb(user, id, tokens, 1, important);
+    return 1;
+}
+
 int css_parse_declaration(const char *name, size_t name_len,
                           const char *value, size_t value_len,
                           int important, CssDeclCb cb, void *user)
 {
     int id = css_prop_lookup(name, name_len);
-    if (id == CSS_PROP_INVALID) return 0;
+    if (id == CSS_PROP_INVALID) {
+        size_t nl = name_len;
+        const char *nm = kn_str_trim(name, &nl);
+        return kn_str_ieq(nm, nl, "all") ? parse_all(value, value_len, important, cb, user) : 0;
+    }
     value = kn_str_trim(value, &value_len);
     CssToken tokens[CSS_MAX_TOKENS];
     int n = css_tokenize(value, value_len, tokens, CSS_MAX_TOKENS);

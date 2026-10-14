@@ -377,6 +377,13 @@ static int display_is_inline_level(int d)
         || d == CSS_DISPLAY_INLINE_GRID || d == CSS_DISPLAY_INLINE_TABLE;
 }
 
+/* HTML 15.5.3 (button layout): a <button> with display: inline lays out as inline-block, like
+ * Chrome. Its UA display is inline-block; `all: unset` (v10's .io-button) makes it inline. */
+static int button_display(int d, int tag)
+{
+    return d == CSS_DISPLAY_INLINE && tag == LXB_TAG_BUTTON ? CSS_DISPLAY_INLINE_BLOCK : d;
+}
+
 /* Blockified display for floats / out-of-flow / flex & grid items. */
 static int blockify(int d)
 {
@@ -423,7 +430,7 @@ static void set_dynamic_flags(LayoutTree *t, Box *b, int parent_is_flex_or_grid)
 static void set_flags_from_style(LayoutTree *t, Box *b, int parent_is_flex_or_grid)
 {
     const CssComputed *s = b->style;
-    int d = s->display;
+    int d = button_display(s->display, b->node && !b->pseudo ? node_tag(b->node) : 0);
     int positioned = s->position != CSS_POSITION_STATIC;
     int oof = s->position == CSS_POSITION_ABSOLUTE || s->position == CSS_POSITION_FIXED;
     int floated = !oof && s->float_ != CSS_FLOAT_NONE;
@@ -558,7 +565,7 @@ static Box *build_element(LayoutTree *t, Box *parent, lxb_dom_node_t *node, cons
     if (replaced && tag == LXB_TAG_INPUT && input_type_is_hidden(node)) return NULL;
 
     int parent_fg = parent && (parent->type == BOX_FLEX || parent->type == BOX_GRID);
-    int d = style->display;
+    int d = button_display(style->display, tag);
     int oof = style->position == CSS_POSITION_ABSOLUTE || style->position == CSS_POSITION_FIXED;
     if (oof || style->float_ != CSS_FLOAT_NONE || parent_fg) d = blockify(d);
     if (d == CSS_DISPLAY_CONTENTS) d = CSS_DISPLAY_INLINE;

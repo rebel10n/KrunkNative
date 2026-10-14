@@ -1,0 +1,53 @@
+{
+  "note": "the header's Login or Register: v10's loginOrRegister() modal (v10_login.c) against v10's own capture of it (ranked-guest.png). The Email field is left out: the client focuses it, the capture did not",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 3.0
+  },
+  "regions": [
+    {
+      "name": "login-button",
+      "rect": [
+        540,
+        437,
+        200,
+        38
+      ],
+      "max_pct": 10.0,
+      "note": "the green Login submit: full size (193 x 32 at 1280x720); a text-sized one leaves most of this dark. The rest is glyph rasterisation"
+    },
+    {
+      "name": "register-here",
+      "rect": [
+        689,
+        283,
+        160,
+        34
+      ],
+      "max_pct": 4.0,
+      "note": "the black Register here switch"
+    },
+    {
+      "name": "header-bar",
+      "rect": [
+        408,
+        225,
+        464,
+        46
+      ],
+      "kind": "text",
+      "max_pct": 8.0
+    },
+    {
+      "name": "auth-actions",
+      "rect": [
+        417,
+        277,
+        446,
+        47
+      ],
+      "kind": "text",
+      "max_pct": 6.0
+    }
+  ]
+}

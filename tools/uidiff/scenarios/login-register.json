@@ -1,0 +1,29 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/login-register.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.8,
+    "windowActions": [
+      [
+        "loginOrRegister",
+        true
+      ]
+    ]
+  },
+  "frames": 3,
+  "note": "Krunker v10.0.2: loginOrRegister(true) (Get Signup Rewards -> REGISTER, the Login card's Register here), v10_login.c's Register card. Reference: the same markup laid out by headless Chromium with v10's CSS (tools/uidiff/v10_login_ref.py on the web build; no v10 capture of this card exists). Guards the full-size Register button and the Login here switch"
+}

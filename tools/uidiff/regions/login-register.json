@@ -1,0 +1,80 @@
+{
+  "note": "loginOrRegister(true): v10_login.c's Register card against the same markup in Chromium with v10's CSS (tools/uidiff/v10_login_ref.py). Chromium's popup is 6 px taller (the sign-up bonuses wrap, see that region), so the regions above it read the reference 3 px higher and those below 3 px lower. The input fields are left out (focus ring / caret). The text regions differ by glyph rasterisation (FreeType vs Skia, 1 px advances); a text-sized button would differ by far more",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 8.0
+  },
+  "regions": [
+    {
+      "name": "register-button",
+      "rect": [
+        540,
+        559,
+        200,
+        38
+      ],
+      "ref_offset": [
+        0,
+        3
+      ],
+      "max_pct": 10.0,
+      "note": "the green Register submit: full size (193 x 32 at 1280x720); a text-sized one leaves most of this dark"
+    },
+    {
+      "name": "login-here",
+      "rect": [
+        714,
+        134,
+        134,
+        34
+      ],
+      "ref_offset": [
+        0,
+        -3
+      ],
+      "max_pct": 16.0,
+      "note": "the black Login here switch (.login-button, padding 8px 40px)"
+    },
+    {
+      "name": "auth-actions",
+      "rect": [
+        417,
+        129,
+        446,
+        44
+      ],
+      "ref_offset": [
+        0,
+        -3
+      ],
+      "kind": "text",
+      "max_pct": 14.0
+    },
+    {
+      "name": "terms",
+      "rect": [
+        417,
+        600,
+        445,
+        26
+      ],
+      "ref_offset": [
+        0,
+        3
+      ],
+      "kind": "text",
+      "max_pct": 12.0
+    },
+    {
+      "name": "sign-up-bonuses",
+      "rect": [
+        417,
+        185,
+        445,
+        56
+      ],
+      "skip": true,
+      "note": "engine gaps, not buttons: svelte.css nests `span.svelte-16z1lxi {max-width:150px;font-size:24px}` inside .sign-up-bonuses (CSS nesting is not parsed) and the bare <li>s get no list markers"
+    }
+  ]
+}

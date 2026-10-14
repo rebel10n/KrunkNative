@@ -11,3 +11,4 @@ void v10_menu_account_changed(void);     // account_ui: login / logout / funds /
 int  v10_menu_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 int  v10_menu_login_open(void);          // the login / register modal is up (Enter in its fields is its own)
 int  v10_menu_login_escape(void);        // Escape: closes the modal; 1 = it was up
+int  v10_login_guest_window(void);       // showWindow(5) for a guest: the modal instead (1 = taken over)

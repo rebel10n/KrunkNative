@@ -11,7 +11,7 @@ One headless client_bin run (input script clicking the page by element id), a fr
     ("Enter Email"), then Username and Password
   - Register without an email: "Please enter your email to register."; with a mixed-case email:
     signed in, the brain stores it in lower case
-  - Logout (the Account window's guest form says "Enter Email" too) -> Login with the email: the
+  - Logout (showWindow(5) as a guest: v10's login modal with "Enter Email", the window closed) -> Login with the email: the
     password row shows on Login, then signed in; again with the email in other letter cases; with the
     username ("(use email instead)" toggle); with the email typed into the Username field (the
     "Switch to email login" hint shows, the login still works)
@@ -168,11 +168,14 @@ SIGNED = "signedInHeaderBar signedOutHeaderBar knV10Login"
 
 
 def logout(t, label):
-    """logoutAcc (the Account window opens as a guest), then ESC closes it"""
+    """logoutAcc (showWindow(5) as a guest: the login modal, the window closed), then ESC twice:
+    the first blurs the modal's focused Email field, the second closes the modal"""
     return (f"{t} call logoutAcc\n"
-            f"{t + 600} nodes @{label}w5 [id=menuWindow] [id=accEmail][placeholder=\"Enter Email\"]\n"
+            f"{t + 600} nodes @{label}w5 [id=knV10Login] [id=accEmail][placeholder=\"Enter Email\"]\n"
+            f"{t + 600} nodes @{label}w5old [id=menuWindow] [id=referralHeader]\n"
             f"{t + 600} nodes @{label}w5opt [placeholder*=\"optional\"]\n"
             f"{t + 700} down ESC\n{t + 720} up ESC\n"
+            f"{t + 800} down ESC\n{t + 820} up ESC\n"
             f"{t + 1000} vis @{label} {SIGNED}\n")
 
 
@@ -296,8 +299,9 @@ def ui_case(brain_port, db_path):
     for out in ("out1", "out2", "out3", "out4", "out5"):
         o = vis(text, out)
         check(f"{out}: logged out", o.get("signedOutHeaderBar") == "1" and o.get("signedInHeaderBar") == "0", str(o))
-    check('the Account window\'s guest form: "Enter Email", no "(optional, ...)"',
-          nodes(text, "out1w5") == 1 and nodes(text, "out1w5opt") == 0, "%d %d" % (nodes(text, "out1w5"), nodes(text, "out1w5opt")))
+    check('logout -> showWindow(5) as a guest: v10\'s login modal, "Enter Email", no "(optional, ...)", no v7 guest form',
+          nodes(text, "out1w5") == 1 and nodes(text, "out1w5opt") == 0 and nodes(text, "out1w5old") == 0,
+          "%d %d %d" % (nodes(text, "out1w5"), nodes(text, "out1w5opt"), nodes(text, "out1w5old")))
     c = vis(text, "mailcard")
     check("after logout: the login card is the Email field again", c.get("accEmail") == "1" and c.get("accName") == "-", str(c))
     p = vis(text, "mailpass")

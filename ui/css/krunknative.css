@@ -785,3 +785,17 @@ html.kn-bare-window #instructions {
 .kn-captcha-cancel {
   background-color: #9e9e9e;
 }
+
+/* KrunkNative's password-reset steps (client/src/ui/account_ui.c reset_render) fill the Account
+ * window with v7.1.4's guest-form markup: its Back / Send Code buttons are .accBtn, a rule of
+ * v7's css/main.css (line 2658) the v10 page lacks. Without it they shrank to their text. */
+.accBtn {
+  margin-top: 10px;
+  margin-bottom: 0 !important;
+  width: 440px;
+  height: 50px !important;
+  line-height: 45px !important;
+  font-size: 23px !important;
+  margin-left: 10px;
+  margin-right: 10px;
+}

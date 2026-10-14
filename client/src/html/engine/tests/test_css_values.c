@@ -740,6 +740,16 @@ static void test_text_props(void)
     CHECK(apply(&c, NULL, "list-style", "none") && c.list_style_type == CSS_LIST_STYLE_NONE);
     CHECK(!apply(&c, NULL, "display", "blockish"));
     CHECK(!apply(&c, NULL, "position", "absolute relative"));
+    /* `all`: a CSS-wide keyword for every longhand but direction (v10's .io-button { all: unset }) */
+    {
+        CssComputed p = fresh(), a = fresh();
+        p.color.r = 200; p.direction = CSS_DIRECTION_LTR;
+        a.box_sizing = CSS_BOX_SIZING_BORDER_BOX; a.display = CSS_DISPLAY_INLINE_BLOCK; a.direction = CSS_DIRECTION_RTL;
+        CHECK(apply(&a, &p, "all", "unset") && a.box_sizing == CSS_BOX_SIZING_CONTENT_BOX && a.display == CSS_DISPLAY_INLINE
+              && a.color.r == 200 && a.direction == CSS_DIRECTION_RTL);
+        CHECK(apply(&a, &p, "ALL", " initial ") && a.color.r == 0);
+        CHECK(!apply(&a, &p, "all", "none") && !apply(&a, &p, "all", "unset unset"));
+    }
 }
 
 /* the block test needs a plain C callback */
@@ -881,7 +891,7 @@ static int known_gap(const char *name, size_t nl, const char *val, size_t vl)
                                     * inline icons, @property descriptors, masks, form-control tints,
                                     * text stroke, line clamping and other visual extras */
                                    "stroke", "stroke-width", "stroke-dasharray", "stroke-dashoffset", "stroke-opacity",
-                                   "stroke-linecap", "r", "cx", "cy", "all", "accent-color", "font-variant-numeric",
+                                   "stroke-linecap", "r", "cx", "cy", "accent-color", "font-variant-numeric",
                                    "color-scheme", "outline-offset", "syntax", "initial-value", "inherits",
                                    "-webkit-text-stroke-width", "-webkit-text-stroke-color", "-webkit-text-fill-color",
                                    "-webkit-line-clamp", "-webkit-box-orient", "-webkit-backdrop-filter", "scrollbar-color",

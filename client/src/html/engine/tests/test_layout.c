@@ -1511,6 +1511,39 @@ static HtmlRect rect_of(Box *b) { HtmlRect r = { 0, 0, 0, 0 }; if (b) layout_box
 
 /* ------------------------------------------------------------------------- */
 
+/* `all: unset` (v10's .io-button { all: unset; padding: 8px 15px; ... }): it drops the UA button
+ * style, so box-sizing is content-box again, the font inherits, and a later declaration of the
+ * same rule wins. Values from Chrome 152 (the v10 login modal's Login button: 334 px wide in a
+ * 724 px column flex box, width: 100% capped by max-width: 300px). A <button> it makes
+ * display: inline still lays out as inline-block (HTML button layout). */
+static void t_all_unset(void)
+{
+    Fx *fx = fx_html(
+        "<div id=col style='display:flex;flex-direction:column;align-items:center;width:724px;font-family:headerfont'>"
+        "<button id=acc class=iob style='width:100%;max-width:300px'>Login</button>"
+        "<button id=ua style='width:100%;max-width:300px;padding:8px 15px'>Login</button></div>"
+        "<div id=flow style='width:400px;line-height:20px;direction:rtl;color:#ff0000'>"
+        "<button id=inl class=iob2>x</button><span id=all0 class=ini>y</span><span id=bad class=bogus>z</span></div>",
+        ".iob { all: unset; cursor: pointer; padding: 8px 15px; border: 2px solid #494949; }\n"
+        ".iob2 { all: unset; width: 100px; height: 30px; padding: 0 10px; }\n"
+        ".ini { all: initial; }\n"
+        ".bogus { all: bogus; }\n");
+    const CssComputed *a = bx(fx, "acc")->style;
+    CHECK(a->box_sizing == CSS_BOX_SIZING_CONTENT_BOX, "all: unset: box-sizing back to content-box (UA button: border-box)");
+    CHECK(a->font_family_count > 0 && a->font_families[0] && strcmp(a->font_families[0], "headerfont") == 0,
+          "all: unset: font-family inherits (not the UA's Arial): %s", a->font_family_count ? a->font_families[0] : "-");
+    CHECK_NEAR(a->padding[CSS_LEFT].px, 15, 0.01, "all: unset then padding: the later declaration wins");
+    CHECK_NEAR(rc(fx, "acc").w, 334, 0.01, "all: unset button in a column flex box: 300 content + 2*15 + 2*2");
+    CHECK_NEAR(rc(fx, "ua").w, 300, 0.01, "UA button (no all): border-box, max-width 300");
+    CHECK_NEAR(rc(fx, "inl").w, 120, 0.01, "all: unset button in a line: inline-block, content-box width 100 + 2*10");
+    CHECK_NEAR(rc(fx, "inl").h, 30, 0.01, "all: unset button in a line: its height applies (atomic inline)");
+    const CssComputed *i = bx(fx, "all0")->style;
+    CHECK(i->color.r == 0 && i->color.g == 0, "all: initial: color back to its initial value");
+    CHECK(i->direction == CSS_DIRECTION_RTL, "all: initial leaves direction alone");
+    CHECK(bx(fx, "bad")->style->color.r == 255, "all: <not a CSS-wide keyword> is dropped");
+    fx_free(fx);
+}
+
 int main(int argc, char **argv)
 {
     if (argc > 1) g_root = argv[1];
@@ -1546,6 +1579,7 @@ int main(int argc, char **argv)
     t_zoom();
     t_half_leading_floor();
     t_ua_defaults();
+    t_all_unset();
     t_table();
     t_positioned();
     t_sticky_scroll();

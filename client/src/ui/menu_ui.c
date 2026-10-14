@@ -1004,6 +1004,7 @@ void menu_show_window(int id, const int force) {
         menu_log("window %d is not available in Krunker Box Office", id);
         return;
     }
+    if (id == 5 && v10_login_guest_window()) return; // v10 windows[4].gen: a guest gets loginOrRegister's modal
     const int was_open = menu_window_is_open();
     const int previous = g_ui.active_window;
     close_window_state();

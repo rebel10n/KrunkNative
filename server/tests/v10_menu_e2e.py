@@ -214,6 +214,8 @@ GUEST_SCRIPT = """0 menu
 6100 call logoutAcc
 6800 down ESC
 6820 up ESC
+6900 down ESC
+6920 up ESC
 7000 vis @loggedout signedInHeaderBar signedOutHeaderBar spectButtonHolder chatUIHolder
 7100 clickid knV10LoginBtn
 7400 clickid knV10LoginMode

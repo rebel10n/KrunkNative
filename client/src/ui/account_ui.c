@@ -1182,6 +1182,8 @@ static void reset_render(void) {
     if (f) html_dom_focus(f);
 }
 
+int account_ui_reset_active(void) { return g_reset.step > 0; }
+
 static void reset_open(const int step, const char *note, const int error) {
     g_reset.step = step;
     copy_str(g_reset.note, sizeof(g_reset.note), note);
