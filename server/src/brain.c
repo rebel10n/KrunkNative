@@ -305,8 +305,27 @@ static void brain_start_task(kn_loop *loop, void *ud) {
     brain_connect();
 }
 
+// The coordinator URL's host is this machine (localhost / 127.x / [::1]).
+static int brain_url_is_loopback(const char *url) {
+    const char *host = strstr(url, "://");
+    host = host ? host + 3 : url;
+    return !strncmp(host, "localhost", 9) || !strncmp(host, "127.", 4) || !strncmp(host, "[::1]", 5);
+}
+
 int brain_start(const GsConfig *cfg) {
     if (!cfg->brain_url[0]) return 0;
+
+    // Security (doc/v7/command-auth.md): the join secret signs the tickets that say which account
+    // (and so which DEV / op / custom host) a connection is. The built-in "kn-dev-secret" (or a
+    // blank one) is public: anyone could sign a ticket for any account. It is only accepted for a
+    // coordinator on this machine (development); otherwise the server refuses to link and runs
+    // standalone (guests only, no ticket is ever trusted).
+    const char *join_secret = cfg->join_secret[0] ? cfg->join_secret : cfg->brain_secret;
+    if ((!join_secret[0] || !strcmp(join_secret, "kn-dev-secret")) && !brain_url_is_loopback(cfg->brain_url)) {
+        server_log_error("[brain] not linking to %s: the coordinator/join secret is %s; set gameserver.brain_secret "
+                         "(= brain.internal_secret). Running standalone", cfg->brain_url, join_secret[0] ? "the public development default" : "blank");
+        return 0;
+    }
 
     snprintf(g_brain.url, sizeof(g_brain.url), "%s", cfg->brain_url);
     if (cfg->brain_secret[0]) snprintf(g_brain.auth_header, sizeof(g_brain.auth_header), "Authorization: Bearer %s", cfg->brain_secret);

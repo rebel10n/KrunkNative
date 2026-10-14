@@ -15,8 +15,10 @@
 #define CHAT_CMD_IP_BANS_MAX 64
 #define CHAT_CMD_CONSOLE (-1000)   // sender id of the server console: every permission, replies go to host->log
 
-// Who may run a command when the host has perms on (v3.1.1 PERMS, --perms): requireDev /
-// requirePremiumCheatPerm. With perms off (the default, like the v3.1.1 server) everyone may.
+// Who may run a command (v3.1.1 PERMS, --perms): requireDev / requirePremiumCheatPerm.
+// KrunkNative (security, doc/v7/command-auth.md): unlike v3.1.1, perms off alone opens nothing;
+// only perms off + cheats_open (gameserver.cheats "all", --open-cheats, the offline sandbox)
+// lets everyone run every command but the CHAT_PERM_HOST_DEV ones.
 typedef enum {
     CHAT_PERM_ANY = 0,
     CHAT_PERM_DEV = 1,       // requireDev: DEV accounts
@@ -50,11 +52,11 @@ typedef struct {
 typedef struct ChatCommandHost {
     Game *game;
     void *user;
-    int perms;               // v3.1.1 PERMS: 0 = everyone may run every command
-    // KrunkNative (deliberate difference): with perms off, v3.1.1 lets everyone use the cheat
-    // commands (/god /noclip /tp ...). 0 (server_bin default, gameserver.cheats "auth") keeps
-    // them for DEV peers / the custom host even then; 1 ("all") = v3.1.1. Moderation commands
-    // still follow perms alone.
+    int perms;               // v3.1.1 PERMS: 1 = DEV commands for DEV peers even with cheats_open
+    // KrunkNative (deliberate difference): with perms off, v3.1.1 lets everyone use every command
+    // (/kick /ban /ip /god /noclip ...). 0 (server_bin default, gameserver.cheats "auth") keeps
+    // moderation for DEV peers and the cheats for DEV peers / the custom host even then; 1 ("all")
+    // with perms off = v3.1.1's open server.
     int cheats_open;
     const char *lobby;       // /server line 1 ("Lobby X | region Y | socket Z")
     const char *region;

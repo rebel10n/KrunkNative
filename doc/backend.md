@@ -118,7 +118,7 @@ All keys are optional; env `KN_BRAIN_<KEY>` / CLI `--brain.<key>=` override.
 | `brain.id` | `<hostname>-<port>` | unique brain id (registry owner column) |
 | `brain.region` | `local` | default region of this brain (nodes that send none) |
 | `brain.public_url` | `http://<host>:<port>` | advertised URL (logs, `/mm/brains`) |
-| `brain.internal_secret` | `kn-dev-secret` | Bearer secret game servers must present on `/mm/internal/ws`; must equal `gameserver.brain_secret` |
+| `brain.internal_secret` | `kn-dev-secret` | Bearer secret game servers must present on `/mm/internal/ws` (and admins on `/mm/admin/*`); must equal `gameserver.brain_secret`. Rate-limited (30 tries/min per address); the dev default (or a secret under 16 characters) only admits direct local connections, never through a proxy ([v7/command-auth.md](v7/command-auth.md)) |
 | `brain.join_secret` | = `internal_secret` | HMAC key of join tickets (must equal the game servers' `gameserver.join_secret`, default their `brain_secret`) |
 | `brain.join_ttl_s` | `30` | ticket lifetime / slot reservation time |
 | `brain.cors_origins` | `["*"]` | allowed CORS origins for the web build |
@@ -1504,7 +1504,7 @@ Precedence: **CLI flags > environment > config file > defaults**.
 | `brain_http_url` | `""` (= `http://<brain_url host:port>`) | brain HTTP base for published maps (`GET /api/map-data?name=`) |
 | `web_url` | `""` | optional ws(s) URL web clients use (net-bridge `/native?...`), lobby meta `webUrl` |
 | `brain_url` | `""` | `ws://<brain>/mm/internal/ws`; empty = standalone; `"auto"` = this config's brain (`ws://<brain.host>:<brain.port>/mm/internal/ws`, `0.0.0.0` dialled as `127.0.0.1`, honours `--set brain.host/port=` and `KN_BRAIN_HOST/PORT`). `KN_GAMESERVER_BRAIN_URL_FALLBACK` (backend-up sets `auto`) applies only when no `brain_url` was configured anywhere |
-| `brain_secret` | `kn-dev-secret` | Bearer secret (= `brain.internal_secret`, same dev default); never logged. Set a real one in deployment |
+| `brain_secret` | `kn-dev-secret` | Bearer secret (= `brain.internal_secret`, same dev default); never logged. Set a real one in deployment: with the dev default (or a blank one) server_bin refuses to link to a coordinator that is not on this machine and runs standalone |
 | `join_secret` | `""` (= `brain_secret`) | HMAC key of seek-game join tickets (= `brain.join_secret`) |
 | `require_ticket` | `false` | brain-linked: refuse connections without a ticket or session token |
 | `allow_guests` | `true` | brain-linked: allow players without an account (ticket `acc` 0 / no JOIN) |
@@ -1527,7 +1527,7 @@ Precedence: **CLI flags > environment > config file > defaults**.
 | `idle_kick_seconds` | `60` | seconds an alive player may do nothing before the kick (v3.1.1 `SERVER_IDLE_TIMEOUT_MS`), 0 = never. Activity is v7.1.4's (controls.js idleTimer: any key, any mouse move): an input frame that turns the view or presses / releases a key, a move of `idle_move_threshold`, the respawn click (ENT), chat, votes, sprays, interacts. The clock also restarts on connect, (re)spawn, death and every map change. Never kicked: spectators, the end screen, DEV peers (ops, DEV accounts, the server's own machine), the custom lobby's host and `noKick` modes |
 | `idle_menu_kick_seconds` | `300` | the same for a dead player or one in the menu (before the spawn, after a death), 0 = never. v7.1.4 kicks from the menu on the client (config.kickTimer 120 s, public lobbies only); this is the server's backstop |
 | `idle_move_threshold` | `1` | units a player must move to count as active (input frames that change something count anyway) |
-| `perms` | `false` | v3.1.1 `PERMS`: DEV chat commands only for ops and loopback |
+| `perms` | `false` | v3.1.1 `PERMS`. KrunkNative: DEV chat commands are for DEV accounts, ops and loopback whatever `perms` says, unless `perms` is off **and** `cheats` is `"all"` (v3.1.1's open server) ([v7/command-auth.md](v7/command-auth.md)) |
 | `ops` | `[]` | account ids (numbers) or account usernames that are op (DEV) when they join; names only match accounts, never guests |
 | `bans_file` | `""` | JSON `{"ips":[...],"accounts":[ids],"names":[usernames]}`; loaded at start, `/banip` / `/unbanip` changes saved back (atomic rename) |
 | `earn_kr` | `true` | KR rewards at match end (lobby meta `earnKR`) |
@@ -1748,7 +1748,7 @@ New keys (also in config.example.json):
 | key | default | meaning |
 | --- | --- | --- |
 | `password` (`sv_password`) | `""` | JOIN.password must match; wrong/missing -> `ERROR 004005` |
-| `rcon_password` / `rcon_port` / `rcon_host` | `""` / `0` / `127.0.0.1` | local TCP rcon (off unless both set) |
+| `rcon_password` / `rcon_port` / `rcon_host` | `""` / `0` / `127.0.0.1` | local TCP rcon (off unless both set; off loopback the password needs 12+ characters) |
 | `query_port` | `0` (= game port) | UDP server-info query (8.8) |
 | `online_mode` | `false` | verify every player with central auth (8.9); guests refused |
 | `auth_url` | `https://coordinator.krunk.io` | central auth base (`/auth/hasJoined`) |
@@ -1778,7 +1778,10 @@ players are told, 8.5), `help`, and every Krunker chat command without the slash
 **rcon**: the same commands, their output captured per command
 (`cli_run_command`). Local TCP: line 1 = password (`OK` / `ERR bad password`, 1 s delay),
 then one command per line, output lines, then a line `.`; bound to 127.0.0.1 unless
-`rcon_host` says otherwise (no TLS: tunnel it). Through the coordinator: internal-WS
+`rcon_host` says otherwise (no TLS: tunnel it; off loopback rcon refuses passwords under 12
+characters). The password is compared in constant time; at most 4 connections wait for their
+password at once (`ERR busy`) and 5 bad passwords within 60 s lock rcon for 60 s (`ERR locked`),
+both logged. Through the coordinator: internal-WS
 frame `{"type":"rcon","rid","command"}` -> `{"type":"rcon-reply","rid","ok","output"}`
 (the coordinator authenticates its admin; no brain route sends it yet).
 

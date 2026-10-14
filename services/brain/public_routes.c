@@ -481,11 +481,7 @@ static void h_brains(kn_http_req *req, void *ud) {
 
 static void h_admin_drain(kn_http_req *req, void *ud) {
     Brain *b = ud;
-    const char *bearer = kn_http_bearer(req);
-    if (!bearer || !kn_ct_streq(bearer, mm_settings()->internal_secret)) {
-        reply_error(req, 401, "unauthorized");
-        return;
-    }
+    if (!mm_internal_authorized(req, "admin drain")) return; /* rate limit, secret, dev default (brain_util.c) */
     char node[MM_ID_MAX] = "", reason[128] = "admin";
     kn_http_query_get(req, "node", node, sizeof(node));
     kn_http_query_get(req, "reason", reason, sizeof(reason));
@@ -534,11 +530,7 @@ static void on_rcon_reply(void *ud, const cJSON *reply, const char *err) {
 
 static void h_admin_rcon(kn_http_req *req, void *ud) {
     Brain *b = ud;
-    const char *bearer = kn_http_bearer(req);
-    if (!bearer || !kn_ct_streq(bearer, mm_settings()->internal_secret)) {
-        reply_error(req, 401, "unauthorized");
-        return;
-    }
+    if (!mm_internal_authorized(req, "admin rcon")) return; /* rate limit, secret, dev default (brain_util.c) */
     char node[MM_ID_MAX] = "", command[512] = "";
     kn_http_query_get(req, "node", node, sizeof(node));
     cJSON *body = kn_http_body_json(req);

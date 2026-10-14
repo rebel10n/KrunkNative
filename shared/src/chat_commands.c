@@ -117,18 +117,25 @@ static int peer_by_id(const ChatCommandHost *host, const int id, ChatPeer *out) 
 }
 
 // requireDev / requirePremiumCheatPerm: a denial answers ["notify", "DEV only"].
-// KrunkNative: cheats (CHAT_PERM_CHEAT / CHAT_PERM_DEV_CHEAT) stay gated with perms off unless
-// the host opened them (ChatCommandHost.cheats_open), so a public server is never a free-for-all.
+// KrunkNative (security, doc/v7/command-auth.md): v3.1.1 lets everyone run every command while
+// PERMS is off, and server_bin's default config (prod included) has perms off. That made /kick,
+// /ban, /banip, /ip (every player's address), /map, /end ... open to any guest on a public
+// server. Like v7.1.4 (requireHostOrDev / requireAuth, never a free-for-all), moderation
+// (CHAT_PERM_DEV) and the cheats now stay with DEV peers (ChatPeer.dev: a brain-verified DEV
+// account, a config op, the server's own machine) and, for the cheats, the custom host, unless
+// the owner opened every command (perms off + gameserver.cheats "all" / --open-cheats: v3.1.1's
+// perms-off server; the offline sandbox does). The identity is the server's ChatPeer for the
+// connection id, never anything in the packet.
 static int allowed(ChatCtx *c, const ChatCommandPerm perm) {
-    const int cheat = perm == CHAT_PERM_CHEAT || perm == CHAT_PERM_DEV_CHEAT;
     if (perm == CHAT_PERM_ANY || c->sender == CHAT_CMD_CONSOLE) return 1;
-    if (perm != CHAT_PERM_HOST_DEV && !c->host->perms && (!cheat || c->host->cheats_open)) return 1;
+    if (perm != CHAT_PERM_HOST_DEV && !c->host->perms && c->host->cheats_open) return 1;
     if (c->has_self && c->self.dev) return 1;
     if ((perm == CHAT_PERM_CHEAT || perm == CHAT_PERM_HOST_DEV) && c->has_self && c->self.premium_host) return 1;
     if (c->host->log) {
         char line[160];
-        snprintf(line, sizeof(line), "[gameserver] %sperms denied: %s from %d (%s)", perm == CHAT_PERM_CHEAT ? "premium cheat " : "",
-                 c->command ? c->command : "?", c->sender, c->has_self && c->self.name ? c->self.name : "?");
+        snprintf(line, sizeof(line), "[gameserver] %sperms denied: %s from %d (%s, account %d)", perm == CHAT_PERM_CHEAT ? "premium cheat " : "",
+                 c->command ? c->command : "?", c->sender, c->has_self && c->self.name ? c->self.name : "?",
+                 c->has_self ? c->self.account_id : 0);
         c->host->log(c->host->user, line);
     }
     // ctx.send("notify", text): the client's mod shows it as a toast (ui_notify)
@@ -1964,6 +1971,11 @@ int chat_command_handle(ChatCommandHost *host, const int sender_id, const char *
         c.has_self = 1;
         c.player = c.self.player;
     }
+    // KrunkNative (security, doc/v7/command-auth.md): the table's permission is checked here,
+    // before the arguments are parsed or any target / selector (kick *, god @bots) is resolved,
+    // so a command whose own gate were missing still cannot run for the wrong peer. Each cmd_*
+    // keeps its own check (an allowed peer passes both; a denial notifies and logs once).
+    if (!allowed(&c, command->info.perm)) return 1;
 
     // split(" ") keeps empty parts ("a  b" -> ["a", "", "b"])
     if (space) {

@@ -7,6 +7,8 @@
 #include <string.h>
 
 #include "brain_internal.h"
+#include "auth_state.h" /* AuthLimiter */
+#include "hot.h"        /* hot_limit */
 #include "knsvc/config.h"
 #include "knsvc/crypto.h"
 #include "knsvc/http.h"
@@ -188,4 +190,44 @@ __attribute__((weak)) int accounts_internal_call(Brain *b, const char *op, const
     (void) args;
     if (cb) cb(ud, "accounts unavailable", NULL);
     return 0;
+}
+
+/* ---- the internal secret gate (mm_internal_authorized, brain_internal.h) */
+
+#define MM_INTERNAL_TRIES_PER_MIN 30 /* per address: game servers connect once, admins rarely */
+#define MM_INTERNAL_MIN_SECRET 16
+
+static int mm_addr_is_loopback(const char *a) {
+    return a && (!strncmp(a, "127.", 4) || !strcmp(a, "::1") || !strncmp(a, "::ffff:127.", 11));
+}
+
+int mm_internal_authorized(kn_http_req *req, const char *what) {
+    static AuthLimiter *tries;
+    if (!tries) tries = auth_limiter_new(MM_INTERNAL_TRIES_PER_MIN, 60000);
+    const char *ip = req->remote_addr ? req->remote_addr : "";
+    /* every attempt counts (the per-process limiter, then the cross-brain one in Redis): the
+     * secret can't be guessed at network speed, and refusals stay cheap */
+    if (!hot_limit("internal_auth", ip, MM_INTERNAL_TRIES_PER_MIN, 60, auth_limiter_hit(tries, ip, kn_now_ms()))) {
+        KN_WARN("internal", "%s: too many attempts from %s", what, ip);
+        kn_http_respond_error(req, 429, "too many requests");
+        return 0;
+    }
+    const char *secret = g_mm.internal_secret;
+    const char *bearer = kn_http_bearer(req);
+    if (!secret[0] || !bearer || !kn_ct_streq(bearer, secret)) {
+        KN_WARN("internal", "%s: rejected bad/missing auth from %s", what, ip);
+        kn_http_set_header(req, "WWW-Authenticate", "Bearer realm=\"mm-internal\"");
+        kn_http_respond_error(req, 401, "unauthorized");
+        return 0;
+    }
+    /* The development default is public (it is in the repository): it only admits a direct
+     * connection from this machine (no proxy in between: a proxied request carries X-Real-IP /
+     * X-Forwarded-For, and with trust_proxy remote_addr is the header's address). */
+    const int weak = !strcmp(secret, "kn-dev-secret") || strlen(secret) < MM_INTERNAL_MIN_SECRET;
+    if (weak && (!mm_addr_is_loopback(ip) || kn_http_header_get(req, "X-Real-IP") || kn_http_header_get(req, "X-Forwarded-For"))) {
+        KN_WARN("internal", "%s: refused %s: brain.internal_secret is the development default / short, local connections only", what, ip);
+        kn_http_respond_error(req, 403, "forbidden");
+        return 0;
+    }
+    return 1;
 }

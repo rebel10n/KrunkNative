@@ -3,6 +3,7 @@
 #include <brain.h>
 #include <server_cli.h>
 #include <server_config.h>
+#include <auth_join.h> // kn_secret_equal
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,16 +13,71 @@
 #define RCON_LINE_MAX 512
 
 #ifndef WIN32
+#include <arpa/inet.h>
 #include <netdb.h>
+#include <netinet/in.h>
 #include <poll.h>
+#include <time.h>
 #include <unistd.h>
+
+// KrunkNative (security, doc/v7/command-auth.md): the password check is constant time
+// (kn_secret_equal), at most RCON_PENDING_MAX connections wait for their password line at once
+// (each used to get a thread, unbounded, so a guesser could run thousands of tries in parallel
+// past the 1 s delay), and RCON_FAILS_MAX bad passwords within RCON_FAIL_WINDOW seconds lock rcon
+// for RCON_LOCK_SECONDS (every connection refused before reading a password, logged).
+#define RCON_PENDING_MAX 4
+#define RCON_FAILS_MAX 5
+#define RCON_FAIL_WINDOW 60
+#define RCON_LOCK_SECONDS 60
+#define RCON_MIN_REMOTE_PASSWORD 12 // rcon_host off loopback needs a password at least this long
 
 static struct {
     int fd;
     pthread_t thread;
     int started;
     volatile int stopping;
-} g_rcon = {.fd = -1};
+    pthread_mutex_t lock; // pending, fails, window_start, locked_until
+    int pending;
+    int fails;
+    time_t window_start;
+    time_t locked_until;
+} g_rcon = {.fd = -1, .lock = PTHREAD_MUTEX_INITIALIZER};
+
+// 1 = this connection may try a password (and counts as pending until rcon_auth_done)
+static int rcon_auth_begin(const char **why) {
+    int ok = 1;
+    pthread_mutex_lock(&g_rcon.lock);
+    const time_t now = time(NULL);
+    if (now < g_rcon.locked_until) {
+        ok = 0;
+        *why = "ERR locked: too many bad passwords\n";
+    } else if (g_rcon.pending >= RCON_PENDING_MAX) {
+        ok = 0;
+        *why = "ERR busy\n";
+    } else {
+        g_rcon.pending++;
+    }
+    pthread_mutex_unlock(&g_rcon.lock);
+    return ok;
+}
+
+static void rcon_auth_done(const int good) {
+    pthread_mutex_lock(&g_rcon.lock);
+    g_rcon.pending--;
+    const time_t now = time(NULL);
+    if (!good) {
+        if (now - g_rcon.window_start > RCON_FAIL_WINDOW) {
+            g_rcon.window_start = now;
+            g_rcon.fails = 0;
+        }
+        if (++g_rcon.fails >= RCON_FAILS_MAX) {
+            g_rcon.locked_until = now + RCON_LOCK_SECONDS;
+            g_rcon.fails = 0;
+            server_log_error("[rcon] %d bad passwords: locked for %d s", RCON_FAILS_MAX, RCON_LOCK_SECONDS);
+        }
+    }
+    pthread_mutex_unlock(&g_rcon.lock);
+}
 
 static int rcon_send_all(const int fd, const char *text, const size_t len) {
     size_t sent = 0;
@@ -49,26 +105,29 @@ static int rcon_read_line(const int fd, char *line, const size_t size) {
     return 1;
 }
 
-// constant time compare (the password)
-static int rcon_streq(const char *a, const char *b) {
-    const size_t la = strlen(a), lb = strlen(b);
-    unsigned char diff = (unsigned char) (la != lb);
-    for (size_t i = 0; i < la; i++) diff |= (unsigned char) (a[i] ^ b[i % (lb ? lb : 1)]);
-    return diff == 0;
-}
-
 static void *rcon_session(void *arg) {
     const int fd = (int) (intptr_t) arg;
-    const struct timeval tv = {300, 0}; // idle sessions close after 5 minutes
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    char line[RCON_LINE_MAX];
-    if (!rcon_read_line(fd, line, sizeof(line)) || !rcon_streq(line, g_gs_config.rcon_password)) {
-        rcon_send_all(fd, "ERR bad password\n", 17);
-        server_log_error("[rcon] rejected a connection (bad password)");
-        sleep(1); // slows down guessing
+    const char *why = NULL;
+    if (!rcon_auth_begin(&why)) {
+        rcon_send_all(fd, why, strlen(why));
+        server_log_error("[rcon] refused a connection (%.*s)", (int) strlen(why) - 5, why + 4);
         close(fd);
         return NULL;
     }
+    const struct timeval login = {10, 0}; // the password line comes first, within 10 s
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &login, sizeof(login));
+    char line[RCON_LINE_MAX];
+    if (!rcon_read_line(fd, line, sizeof(line)) || !kn_secret_equal(line, g_gs_config.rcon_password)) {
+        rcon_send_all(fd, "ERR bad password\n", 17);
+        server_log_error("[rcon] rejected a connection (bad password)");
+        sleep(1); // slows down guessing (the connection stays pending meanwhile)
+        rcon_auth_done(0);
+        close(fd);
+        return NULL;
+    }
+    rcon_auth_done(1);
+    const struct timeval tv = {300, 0}; // idle sessions close after 5 minutes
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     rcon_send_all(fd, "OK\n", 3);
     server_log("[rcon] session opened");
     char *out = malloc(RCON_OUTPUT_MAX);
@@ -105,6 +164,16 @@ int rcon_start(void) {
     snprintf(port, sizeof(port), "%u", (unsigned int) cfg->rcon_port);
     if (getaddrinfo(cfg->rcon_host[0] ? cfg->rcon_host : "127.0.0.1", port, &hints, &res) || !res) {
         server_log_error("[rcon] cannot resolve rcon_host '%s'", cfg->rcon_host);
+        return -1;
+    }
+    // Security (doc/v7/command-auth.md): rcon is the whole server console. Off loopback, a short
+    // password is refused instead of listening (the default rcon_host is 127.0.0.1).
+    const int loopback = (res->ai_family == AF_INET && (ntohl(((const struct sockaddr_in *) res->ai_addr)->sin_addr.s_addr) >> 24) == 127) ||
+                         (res->ai_family == AF_INET6 && IN6_IS_ADDR_LOOPBACK(&((const struct sockaddr_in6 *) res->ai_addr)->sin6_addr));
+    if (!loopback && strlen(cfg->rcon_password) < RCON_MIN_REMOTE_PASSWORD) {
+        server_log_error("[rcon] not listening: rcon_host %s is not loopback and rcon_password is shorter than %d characters",
+                         cfg->rcon_host, RCON_MIN_REMOTE_PASSWORD);
+        freeaddrinfo(res);
         return -1;
     }
     const int fd = (int) socket(res->ai_family, res->ai_socktype, res->ai_protocol);

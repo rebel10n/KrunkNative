@@ -23,11 +23,15 @@ line raw ("ct"). They come from the reconstruction in the jail tree:
 | Wiring | `server/src/net.c` (`net_chat_host`, deferred kicks, IP-ban check on accept), `server/src/cli.c` (CLI runs them as the console, `op`/`deop`), `client/src/net/local_game.c` (1-peer host), `client/src/net/game_events.c` (`NET_PACKET_CHEAT`: noc/unl/fh/borders/forcecol) |
 | Runtime stylesheets | `html_ui_add_stylesheet()` (`client/include/html_ui.h`; engine.c, web_dom.c, stub.c), test `client/src/html/engine/tests/test_runtime_sheet.c` |
 
-Permissions match v3.1.1 PERMS: off by default, so everyone may run every command.
-`server_bin --perms` (or `PERMS=1`) restricts DEV commands to clients from 127.0.0.1 and
-clients `op`'d on the server CLI. The cheat commands (god/smite/noclip/kill) use the
-same rule, since Krunker Box Office has no premium accounts. A denial answers `notify` ("DEV
-only" / "DEV or premium custom host only"), as v3.1.1 does; the mod's toast shows it.
+Permissions (KrunkNative, deliberate difference from v3.1.1 PERMS, see
+[v7/command-auth.md](v7/command-auth.md)): DEV commands (/kick, /ban, /ip, /map, ...) are for
+DEV peers only: brain-verified DEV accounts, `ops`, clients `op`'d on the server CLI and clients on
+the server's own machine. The cheat commands (god/smite/noclip/kill/tp ...) also admit the custom
+game's host. Only `perms` off **and** `gameserver.cheats "all"` (`--open-cheats`; the offline
+sandbox) gives everyone every command, as v3.1.1's perms-off server did. The gate runs on the
+server for the connection's own identity before any target or selector resolves. A denial answers
+`notify` ("DEV only" / "DEV or premium custom host only" / "Host or developer required"), as
+v3.1.1 does, and the server logs `perms denied: <cmd> from <id> (<name>, account <id>)`.
 
 ## Local console commands (devConsole.ts `registerLocal`)
 

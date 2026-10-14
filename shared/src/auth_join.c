@@ -128,3 +128,16 @@ int kn_auth_is_hex(const char *s, size_t max_len) {
     }
     return 1;
 }
+
+// Both strings are hashed first, so the comparison runs over two fixed 32-byte digests: its
+// time depends on neither the content nor the length of the secret (strcmp stops at the first
+// wrong byte, which lets a remote guesser recover a password byte by byte).
+int kn_secret_equal(const char *given, const char *secret) {
+    if (!secret || !secret[0]) return 0; // a blank secret never matches (refuse, don't open)
+    uint8_t a[32], b[32];
+    kn_sha256_bytes(given ? given : "", given ? strlen(given) : 0, a);
+    kn_sha256_bytes(secret, strlen(secret), b);
+    volatile uint8_t diff = 0;
+    for (size_t i = 0; i < sizeof(a); i++) diff |= (uint8_t) (a[i] ^ b[i]);
+    return diff == 0;
+}

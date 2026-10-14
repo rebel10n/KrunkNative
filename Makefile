@@ -421,6 +421,10 @@ test-net: build ## knet transport unit test (loss/dup/reorder), v7 chat/voice ch
 target-select-e2e: build ## Player target selectors on server_bin: god * / ungod * / give * over clients and bots, a guest refused, kick @bots, rcon op / kick *
 	timeout 300 $(PYTHON) -I server/tests/target_select_e2e.py $(DEBUG_DIR)
 
+.PHONY: command-auth-e2e
+command-auth-e2e: build ## Command authorisation (doc/v7/command-auth.md): forged commands / dev packets / tickets / rcon guesses refused + logged, dev / op / rcon still work
+	timeout 400 $(PYTHON) -I server/tests/command_auth_e2e.py $(DEBUG_DIR)
+
 .PHONY: billboard-e2e
 billboard-e2e: build ## server.cfg billboard / billboard_image: packets before INIT for late joiners and map changes, unset and URL configs send none
 	timeout 300 $(PYTHON) -I server/tests/billboard_e2e.py $(DEBUG_DIR)

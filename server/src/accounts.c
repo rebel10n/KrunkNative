@@ -1571,6 +1571,51 @@ static void acc_resume_replace(const ClientConnection *client) {
     }
 }
 
+// KrunkNative (security, doc/v7/command-auth.md): the server password (gameserver.password) is
+// checked in constant time (kn_secret_equal) and guessing is throttled per address: after
+// ACC_PW_FAILS_MAX wrong passwords an address is refused for ACC_PW_LOCK_SECONDS without a
+// comparison. A web player's address is the bridge's unless it forwards one (net_handle_forwarded).
+#define ACC_PW_SLOTS 64
+#define ACC_PW_FAILS_MAX 5
+#define ACC_PW_LOCK_SECONDS 60.0f
+
+static struct {
+    char address[48];
+    int fails;
+    float until; // g_server->now the lock ends (fails reset then)
+} g_pw_fails[ACC_PW_SLOTS];
+
+static int acc_pw_slot(const char *address, const int create) {
+    int free_slot = -1, oldest = 0;
+    for (int i = 0; i < ACC_PW_SLOTS; i++) {
+        if (g_pw_fails[i].address[0] && !strcmp(g_pw_fails[i].address, address)) return i;
+        if (!g_pw_fails[i].address[0] && free_slot < 0) free_slot = i;
+        if (g_pw_fails[i].until < g_pw_fails[oldest].until) oldest = i;
+    }
+    if (!create) return -1;
+    const int slot = free_slot >= 0 ? free_slot : oldest;
+    memset(&g_pw_fails[slot], 0, sizeof(g_pw_fails[slot]));
+    snprintf(g_pw_fails[slot].address, sizeof(g_pw_fails[slot].address), "%s", address);
+    return slot;
+}
+
+static int acc_pw_locked(const char *address) {
+    const int slot = acc_pw_slot(address, 0);
+    if (slot < 0 || g_pw_fails[slot].fails < ACC_PW_FAILS_MAX) return 0;
+    if (g_server->now < g_pw_fails[slot].until) return 1;
+    g_pw_fails[slot].address[0] = 0; // the lock ran out: a fresh count
+    return 0;
+}
+
+static void acc_pw_failed(const char *address) {
+    const int slot = acc_pw_slot(address, 1);
+    if (++g_pw_fails[slot].fails >= ACC_PW_FAILS_MAX) {
+        g_pw_fails[slot].until = g_server->now + ACC_PW_LOCK_SECONDS;
+        server_log("[gameserver] %s: %d wrong server passwords, refused for %.0f s", address, g_pw_fails[slot].fails,
+                   (double) ACC_PW_LOCK_SECONDS);
+    }
+}
+
 void accounts_handle_join(ClientConnection *client, const NetPacket *packet) {
     if (client->acct.join_state != SERVER_JOIN_AWAIT) return; // standalone without password: guests, as always
     if (packet->length != sizeof(NetJoinPacket) && packet->length != NET_JOIN_PACKET_V1_SIZE &&
@@ -1586,7 +1631,12 @@ void accounts_handle_join(ClientConnection *client, const NetPacket *packet) {
     join.password[sizeof(join.password) - 1] = 0;
 
     if (g_gs_config.password[0]) {
-        if (strcmp(join.password, g_gs_config.password)) {
+        if (acc_pw_locked(client->address)) {
+            acc_reject(client, "Too many wrong passwords, try again later", "004005");
+            return;
+        }
+        if (!kn_secret_equal(join.password, g_gs_config.password)) { // constant time (was strcmp)
+            if (join.password[0]) acc_pw_failed(client->address);
             acc_reject(client, join.password[0] ? "Wrong server password" : "This server needs a password", "004005");
             return;
         }

@@ -31,3 +31,6 @@ void kn_sha256_hex(const uint8_t digest[32], char out_hex[65]);
 void kn_server_hash(const char *server_nonce, const char *public_key, const char *client_nonce, char out_hex[65]);
 // 1 when s is 1..64 lowercase hex chars (nonce / hash validation).
 int kn_auth_is_hex(const char *s, size_t max_len);
+// Constant-time secret check (server password, rcon password): 1 when given == secret. A NULL or
+// blank secret never matches, so an unset password can't be "guessed" with an empty one.
+int kn_secret_equal(const char *given, const char *secret);

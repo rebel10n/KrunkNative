@@ -700,8 +700,9 @@ static void cli_set_op(const char *args, const int op) {
     ClientConnection *clients[SERVER_CLI_TARGETS_MAX];
     TargetResult r;
     const int n = cli_select_clients(args, clients, SERVER_CLI_TARGETS_MAX, &r);
-    const char *note = g_server->config.perms ? "" : g_server->config.cheats_open ? " (perms are off: everyone may run every command)"
-                                                                                   : " (perms are off: ops only add the cheats)";
+    // perms off + cheats "all" is v3.1.1's open server; otherwise ops are what grants commands
+    // (shared/src/chat_commands.c allowed())
+    const char *note = !g_server->config.perms && g_server->config.cheats_open ? " (perms are off, cheats \"all\": everyone may run every command)" : "";
     if (!n) {
         cli_log_no_match(args, &r);
     } else if (!r.selector) {

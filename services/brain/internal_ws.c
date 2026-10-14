@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "brain_internal.h"
 #include "roles.h"
@@ -15,6 +16,8 @@
 #include "knsvc/log.h"
 #include "knsvc/loop.h"
 #include "knsvc/ws.h"
+
+#define MM_TICKET_RESUME_S (24 * 3600) /* a resumed ticket expired at most this long ago (auth "resume") */
 
 #define HELLO_TIMEOUT_MS 10000
 
@@ -308,9 +311,19 @@ static void handle_auth(NodeConn *c, const cJSON *frame) {
         /* "resume": the node admitted this ticket before and a reconnect of that session sent it
          * again after its expiry (server/src/accounts.c acc_resume_allowed): signature only */
         const int resume = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(frame, "resume"));
-        a->claims = kn_signed_token_verify(mm_settings()->join_secret, ticket, resume ? 1 : 0, err, sizeof(err));
+        /* Security (doc/v7/command-auth.md): a resume skips the expiry only within
+         * MM_TICKET_RESUME_S of it (it used to pass "now" = 1 s: any ticket ever issued) */
+        const int64_t now_s = resume ? (int64_t) time(NULL) - MM_TICKET_RESUME_S : 0;
+        a->claims = kn_signed_token_verify(mm_settings()->join_secret, ticket, now_s, err, sizeof(err));
         if (!a->claims) {
             auth_finish(a, err[0] ? err : "invalid ticket", NULL);
+            return;
+        }
+        /* ... and a ticket only admits a player on the node it was issued for: a node holding the
+         * shared secret can't turn another server's ticket into its account */
+        if (strcmp(kn_json_str(a->claims, "nid", ""), c->node_id)) {
+            KN_WARN("internal", "node \"%s\" sent a ticket for node \"%s\"", c->node_id, kn_json_str(a->claims, "nid", ""));
+            auth_finish(a, "ticket is for another server", NULL);
             return;
         }
         /* the node counts the player from its READY (player-join) on: the seat stays until then,
@@ -645,13 +658,7 @@ static void internal_ws_handler(kn_http_req *req, void *ud) {
         kn_http_respond_error(req, 426, "upgrade required");
         return;
     }
-    const char *bearer = kn_http_bearer(req);
-    if (!bearer || !kn_ct_streq(bearer, mm_settings()->internal_secret)) {
-        KN_WARN("internal", "rejecting upgrade - bad/missing auth header from %s", req->remote_addr);
-        kn_http_set_header(req, "WWW-Authenticate", "Bearer realm=\"mm-internal\"");
-        kn_http_respond_error(req, 401, "unauthorized");
-        return;
-    }
+    if (!mm_internal_authorized(req, "internal ws upgrade")) return; /* rate limit, secret, dev default (brain_util.c) */
     if (b->draining) {
         kn_http_respond_error(req, 503, "updating");
         return;

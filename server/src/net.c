@@ -1140,6 +1140,21 @@ static int net_teammates(const ClientConnection *a, const ClientConnection *b) {
     return a->player && b->player && a->player->team == b->player->team;
 }
 
+// KrunkNative (security, doc/v7/command-auth.md): on a gated server (brain tickets, online_mode,
+// a password) a connection whose JOIN is not settled yet has no identity. Its chat, "/" commands
+// and dev packets (tp, cycle, prmA, clearLog) are refused and logged instead of running as a
+// guest's; join_timeout closes it. The log is throttled (one line a second) against floods.
+static int net_client_admitted(const ClientConnection *client, const char *what) {
+    if (client->acct.join_state == SERVER_JOIN_READY) return 1;
+    static double last_log;
+    const double now = net_time();
+    if (now - last_log >= 1.0) {
+        last_log = now;
+        server_log("[gameserver] refused %s from %d (%s): join not verified", what, client->id, client->address);
+    }
+    return 0;
+}
+
 // One player chat line to `to`: v7 peers get NET_PACKET_CHAT_V7 ("ch", channel, ..., accountId),
 // older peers the v3 NET_PACKET_CHAT.
 static void net_send_player_chat(ClientConnection *to, const ClientConnection *from, const int channel, const char *text) {
@@ -1159,6 +1174,7 @@ static int net_handle_chat(ClientConnection *client, const char *payload, const 
         net_remove_client(client);
         return 0;
     }
+    if (!net_client_admitted(client, "chat")) return 1;
 
     char text[NET_CHAT_TEXT_SIZE];
     if (!net_chat_sanitize(text, sizeof(text), payload, length)) return 1;
@@ -1283,7 +1299,7 @@ static void net_handle_voice_v7(ClientConnection *client, const NetPacket *packe
 // (chat_command_allowed: perms, cheats_open, ChatPeer.dev / premium_host); a denial answers
 // ["notify", "DEV only"] (the mod's notify toast).
 static int net_require_dev(ClientConnection *client, const ChatCommandPerm perm, const char *label) {
-    return chat_command_allowed(net_chat_host(), client->id, perm, label);
+    return net_client_admitted(client, label) && chat_command_allowed(net_chat_host(), client->id, perm, label);
 }
 
 // net-bridge's first frame: the browser's real address. Only a loopback peer (the bridge on
@@ -1310,7 +1326,7 @@ static int net_handle_forwarded(ClientConnection *client, const NetPacket *packe
 
 // io_prmA(index): premiumKeys / the N key (index 0 = noclip), gated like /noclip.
 static void net_handle_premium_action(ClientConnection *client, const NetPacket *packet) {
-    if (packet->length != 1) return;
+    if (packet->length != 1 || !net_client_admitted(client, "prmA")) return;
     chat_command_premium_action(net_chat_host(), client->id, packet->payload[0]);
 }
 
@@ -1434,7 +1450,6 @@ static int net_packet_is_activity(const uint8_t type) {
 
 // Returns 0 when the client was removed.
 int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
-    const int first_packet = !client->first_packet_seen;
     if (packet->type != NET_PACKET_FORWARDED) client->first_packet_seen = 1;
     if (net_packet_is_activity(packet->type)) net_note_activity(client);
     switch (packet->type) {
@@ -1484,7 +1499,8 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             ks_server_on_script_msg(client, packet);
             break;
         case NET_PACKET_FORWARDED: // net-bridge: the browser's address, before its HELLO
-            if (first_packet) net_handle_forwarded(client, packet);
+            // net_handle_forwarded refuses (and logs) a late or non-loopback claim itself
+            net_handle_forwarded(client, packet);
             client->first_packet_seen = 1;
             break;
         case NET_PACKET_PREMIUM_ACTION: // "prmA"
@@ -1640,8 +1656,11 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
         case NET_PACKET_TELEPORT: // "tp" (the mod's Ctrl TP)
             net_handle_teleport(client, packet);
             break;
-        case NET_PACKET_CLEAR_LOG: // "clearLog" (the mod's F1): io_clearLog, no permission check
-            if (!packet->length) server_log_clear();
+        case NET_PACKET_CLEAR_LOG: // "clearLog" (the mod's F1): io_clearLog
+            // KrunkNative (security, doc/v7/command-auth.md): v3.1.1 has no permission check, so any
+            // guest could clear the operator's console (terminal escapes into stdout / the journal).
+            // DEV only, like the mod's other dev keys.
+            if (!packet->length && net_require_dev(client, CHAT_PERM_DEV, "clearLog")) server_log_clear();
             break;
         case NET_PACKET_SOCIAL_REQUEST:
             net_handle_social(client, packet);

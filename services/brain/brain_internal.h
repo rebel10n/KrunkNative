@@ -30,6 +30,12 @@ typedef struct MmSettings {
 
 int mm_settings_load(Brain *b);
 const MmSettings *mm_settings(void);
+/* Security (doc/v7/command-auth.md): the Bearer brain.internal_secret gate of /mm/internal/ws and
+ * /mm/admin/*. Rate-limited per address; a blank secret refuses everyone; the development default
+ * (or a secret under 16 characters) only admits direct connections from this machine. 1 = authorised,
+ * else the request was answered (401 / 403 / 429) and the refusal logged. */
+struct kn_http_req;
+int mm_internal_authorized(struct kn_http_req *req, const char *what);
 
 /* ---- accounts bridge (svc-accounts services/brain/accounts.c; weak fallback
  * in accounts_bridge.c answers "accounts unavailable"). */
