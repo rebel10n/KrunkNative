@@ -52,6 +52,7 @@ typedef struct ImageSlot {
     uint8_t lazy;          /* raster file: pixels decoded on first draw, evictable */
     unsigned last_frame;   /* image_cache_frame() count of its last draw (LRU)      */
     size_t bytes;          /* GL bytes held (level 0 + mips)   */
+    uint8_t missing;       /* failed with "file not found" (image_cache_retry_missing) */
 } ImageSlot;
 
 struct ImageCache {
@@ -66,6 +67,7 @@ struct ImageCache {
     unsigned frame;        /* image_cache_frame() calls                          */
     size_t bytes;          /* GL bytes of the resident lazy entries              */
     int decodes;           /* lazy decodes so far (profile)                      */
+    unsigned arrivals;     /* asset_arrival_generation() last seen               */
 };
 
 /* ------------------------------------------------------------------------- */
@@ -689,8 +691,10 @@ static void image_probe(const ImageCache *cache, ImageSlot *slot) {
     size_t len = 0;
     if (!image_read(cache, slot->key, &bytes, &len)) {
         image_fail(slot, "file not found");
+        slot->missing = 1;
         return;
     }
+    slot->missing = 0;
     int w = 0, h = 0, comp = 0;
     const int raster = len <= (size_t) INT32_MAX && !svg_sniff(bytes, len) && !image_is_webp_key(slot->key) &&
                        stbi_info_from_memory(bytes, (int) len, &w, &h, &comp) && w > 0 && h > 0;
@@ -761,6 +765,31 @@ void image_cache_frame(ImageCache *cache) {
     qsort(old, (size_t) n, sizeof(*old), image_slot_older);
     for (int i = 0; i < n && cache->bytes > IMAGE_CACHE_BUDGET_BYTES / 4u * 3u; i++) image_evict(cache, old[i]);
     free(old);
+}
+
+int image_cache_retry_missing(ImageCache *cache) {
+    const unsigned generation = asset_arrival_generation();
+    if (!cache || generation == cache->arrivals) return 0;
+    cache->arrivals = generation;
+    const char *assets = assets_path();
+    int loaded = 0;
+    for (int i = 0; assets && i < cache->count; i++) {
+        ImageSlot *slot = cache->slots[i];
+        if (!slot->entry.failed || !slot->missing) continue;
+        const char *rel = slot->key;
+        if (!strncmp(rel, IMAGE_ASSETS_PREFIX, sizeof(IMAGE_ASSETS_PREFIX) - 1)) rel += sizeof(IMAGE_ASSETS_PREFIX) - 1;
+        char *path = concat(assets, rel);
+        FILE *f = path ? fopen(path, "rb") : NULL; /* only files that are there now: no new misses logged */
+        free(path);
+        if (!f) continue;
+        fclose(f);
+        image_probe(cache, slot);
+        if (!slot->entry.failed) {
+            fprintf(stderr, "[image] %s: arrived\n", slot->key);
+            loaded++;
+        }
+    }
+    return loaded;
 }
 
 void image_cache_stats(const ImageCache *cache, int *resident, size_t *bytes, int *decodes) {

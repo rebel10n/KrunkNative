@@ -39,6 +39,7 @@ typedef enum {
 typedef struct {
     const char *name;
     const char *model;          // models/<model>.obj (client)
+    const char *texture;        // texSrc: textures/<texture>.png (client; NULL = the model's name)
     float scale;
     float pad_mlt;              // padMlt (0 = 1)
     float y_off;

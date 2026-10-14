@@ -2226,6 +2226,13 @@ void html_ui_backend_render(UI *ui)
     Engine *g = g_engine;
     if (!g || !g->glb) return;
 
+    /* game content fetched in the background (asset_fetch.h): page images it brought pop in */
+    if (image_cache_retry_missing(g->images) > 0) {
+        dom_mark_all_dirty(g->dom);
+        g->need_layout = 1;
+        g->need_paint = 1;
+    }
+
     /* restyle -> layout -> observers/hover -> paint (only when dirty) */
     engine_flush_layout(g);
     run_after_layout(g);

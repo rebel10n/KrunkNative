@@ -338,7 +338,7 @@ static void mode_world_tick_tags(Client *client, const float delta_ms) {
         if (tag->mesh && tag->type != type) mode_world_drop_tag(tag);
 
         if (!tag->mesh) {
-            tag->mesh = mode_world_mesh(mode_world_spawnable_geometry(type), mode_world_texture(info->model));
+            tag->mesh = mode_world_mesh(mode_world_spawnable_geometry(type), mode_world_texture(info->texture ? info->texture : info->model)); // medals.js texSrc
             if (!tag->mesh) continue;
             tag->mesh->no_shadow_receive = 1;
             tag->type = type;

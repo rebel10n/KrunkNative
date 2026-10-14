@@ -226,8 +226,14 @@ static int clip_load(AudioClip *clip) {
     unsigned char *data = NULL;
     size_t size = 0;
     const int read_error = !path || read_file(path, &data, &size);
+    // natively a missing file may be downloading (asset_fetch.h): not failed, the next play reads it
+    const int downloading = (read_error || !data || !size) && path && asset_prefetch(path) == 0;
     free(path);
 
+    if (downloading) {
+        free(data);
+        return 0;
+    }
     if (read_error || !data || !size) {
         free(data);
         fprintf(stderr, "[audio] missing sound %s\n", clip->name);

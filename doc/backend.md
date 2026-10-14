@@ -2244,8 +2244,23 @@ Before the game it:
    Oct 2026 (19,194 files, 1.9 GB): 462 s with 4 connections to `assets.krunk.io`, 41-50 s now;
 4. copies the package's own `assets/` files into the content dir when that is another directory;
 5. starts `client_bin` (cwd = the directory with `ui/`; `KRUNKNATIVE_ASSETS_DIR=<content dir>`,
-   `KRUNKNATIVE_LAUNCHER=<launcher>`; POSIX `exec`, Windows a new process). Unknown arguments and
-   everything after `--` go to the client.
+   `KRUNKNATIVE_LAUNCHER=<launcher>`, `KRUNKNATIVE_ASSET_ORIGINS=<the sync's origins>`; POSIX `exec`,
+   Windows a new process). Unknown arguments and everything after `--` go to the client.
+
+**On-demand fetch** (`client/include/asset_fetch.h`, native only; the web build fetches every file on
+demand anyway): a file of the content list (`<assets>/.kn-assets.json`) that is missing or has another
+size when something loads it (the sync skipped it, a user deleted or truncated it) is downloaded in
+the background: workers (2) try the origins in the sync's order (`KRUNKNATIVE_ASSET_ORIGINS`:
+`objects:<url>` = content-addressed, else by path; default `https://assets.krunk.io/assets/` then the
+Pages CDN), verify size + sha256, write `<file>.kn-fetch-N.part` and rename it into place; never into
+a git checkout (checked per directory, symlinks resolved). 404 / wrong content on every origin gives
+the file up for the session, transport failures retry with backoff (4 rounds); one log line per file.
+While it downloads, `load_texture` hands out a (0,0,0,0) texture and `load_obj_model` an empty model
+(three.js before a load completes); both are filled in place when it arrives, sounds play from their
+next use, page images are probed again. Off without a content list (dev trees, test fixtures) unless
+`KRUNKNATIVE_ASSET_FETCH=1`; `KRUNKNATIVE_ASSET_FETCH=0` turns it off;
+`KRUNKNATIVE_ASSET_FETCH_CHECKOUT=1` allows a git checkout. Tests: `asset_fetch_test`,
+`make asset-fetch-test`.
 
 Content dir: `<root>/assets` when writable (portable tar.gz/zip), else the user data dir
 (`${XDG_DATA_HOME:-~/.local/share}/krunknative/assets`, `~/Library/Application Support/KrunkNative/assets`

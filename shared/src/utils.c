@@ -17,9 +17,24 @@
 #endif
 
 static void (*g_asset_yield_hook)(const char *path);
+static int (*g_asset_fetch_hook)(const char *path, int enqueue);
 
 void asset_set_yield_hook(void (*hook)(const char *path)) {
     g_asset_yield_hook = hook;
+}
+
+void asset_set_fetch_hook(int (*hook)(const char *path, int enqueue)) {
+    g_asset_fetch_hook = hook;
+}
+
+static volatile unsigned g_asset_arrivals;
+
+unsigned asset_arrival_generation(void) {
+    return __atomic_load_n(&g_asset_arrivals, __ATOMIC_RELAXED);
+}
+
+void asset_arrival_bump(void) {
+    __atomic_add_fetch(&g_asset_arrivals, 1, __ATOMIC_RELAXED);
 }
 
 char *concat(const char *a, const char *b) {
@@ -243,9 +258,18 @@ void asset_prefetch_wait(const char *const *paths, const size_t count) {
 
 #else
 
+// The fetch hook (client/src/asset_fetch_client.c) for a path no resource pack / swapper
+// redirects: 1 read it, 0 a download is queued, -1 gave up. 1 without a hook.
+static int native_fetch_state(const char *path) {
+    if (!g_asset_fetch_hook || !path || !*path) return 1;
+    char redirected[1024];
+    if (file_redirect(path, redirected, sizeof(redirected)) != path) return 1;
+    return g_asset_fetch_hook(path, 1);
+}
+
 int ensure_asset_file(const char *path) {
     if (g_asset_yield_hook && path && *path) g_asset_yield_hook(path); // where the web build may block
-    return 1;
+    return native_fetch_state(path) > 0;
 }
 
 char *asset_url(const char *path) {
@@ -253,8 +277,7 @@ char *asset_url(const char *path) {
 }
 
 int asset_prefetch(const char *path) {
-    (void) path;
-    return 1;
+    return native_fetch_state(path);
 }
 
 void asset_prefetch_wait(const char *const *paths, const size_t count) {

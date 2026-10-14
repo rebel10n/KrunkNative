@@ -76,6 +76,9 @@
 // `--render-scenario` (tools/uidiff, client/src/ui/ui_scenario.c): native engine builds only.
 #if defined(KRUNKNATIVE_HTML_ENGINE) && !defined(__EMSCRIPTEN__)
 #include <ui_logic.h>
+#ifndef __EMSCRIPTEN__
+#include <asset_fetch.h>
+#endif
 #define SCENARIO_ACTIVE() ui_scenario_active()
 #define SCENARIO_PREVIEW() ui_scenario_draws_preview()
 #else
@@ -442,6 +445,9 @@ int main(int argc, char **argv) {
     const ModPackHooks mod_hooks = {texture_cache_reload, geometry_cache_reload, gltf_model_forget, audio_reload};
     mod_pack_set_hooks(&mod_hooks);
     vt_init(&g_glyph_cache);
+#ifndef __EMSCRIPTEN__
+    asset_fetch_client_init(); // missing game content is downloaded in the background (asset_fetch.h)
+#endif
 
     char *game_font_path = concat(assets_path(), "css/fonts/font2.ttf");
     ensure_asset_file(game_font_path);
@@ -819,6 +825,7 @@ int main(int argc, char **argv) {
     }
 
     local_game_stop(&INSTANCE);
+    asset_fetch_client_shutdown(); // stops the content downloads before the caches go
     mod_pack_shutdown(); // the extracted resource pack files
     ks_client_unload(&INSTANCE); // KrunkScript: script objects / DIVs / sounds
     ks_game_free(&INSTANCE.game);
@@ -867,6 +874,9 @@ void client_frame(Client *client) {
     web_sync_canvas_size(client); // a browser resize since the last frame (startup included)
 #endif
     client_sync_window_size(client); // before anything draws: viewport, HTML layout, pbuffer
+#ifndef __EMSCRIPTEN__
+    asset_fetch_client_frame(); // fetched game content pops in (placeholders filled in place)
+#endif
     gamepad_frame_begin(); // updateMouseInp's gamepad.active reset leads the game frame (gamepad.c)
     // Web: asset fetches inside the frame yield to the browser, which then composites the
     // canvas; the frame draws offscreen and reaches the canvas whole (frame_target.h).

@@ -322,6 +322,8 @@ static void zr_drops_frame(const Client *client, const float delta_ms) {
             v->mesh->transform.scale = (vec3) {ZR_AIRDROP_SCALE, ZR_AIRDROP_SCALE, ZR_AIRDROP_SCALE};
             zr_add(v->mesh);
             v->look = -1;
+            // AirDrop init: secMat = getMat("./adrp_1") loads with the drop, not at its landing
+            if (!client_render_settings()->no_textures) (void) prefab_asset_texture("adrp_1");
         }
         if (fresh) { // AirDrop.init: a new drop in this slot
             v->bob = 0.0f;

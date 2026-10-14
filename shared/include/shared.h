@@ -3511,13 +3511,13 @@ const char *assets_path();         // the game content: KRUNKNATIVE_ASSETS_DIR, 
 // KRUNKNATIVE_ASSETS_DIR override.
 const char *assets_default_path();
 const char *ui_default_path();     // "./ui/" or "../ui/": the menu page beside assets_default_path()
-int ensure_asset_file(const char*); // web: fetch into MEMFS on demand, native: no-op returning 1
+int ensure_asset_file(const char*); // web: fetch into MEMFS on demand; native: 1 unless the fetch hook says missing
 // The URL an asset path ("/assets/textures/x.png") is downloaded from, malloc'd (caller frees):
 // web: web_asset_url (asset host + ?v=<version>), native: a copy of the path. NULL on OOM.
 char *asset_url(const char*);
 // web: starts a background download of the asset into MEMFS so a later ensure_asset_file()
 // does not block the frame on the network; 1 = present, 0 = still downloading, -1 = the
-// download failed (ensure_asset_file() reports it). Native: always 1.
+// download failed (ensure_asset_file() reports it). Native: the fetch hook's answer (1 without one).
 int asset_prefetch(const char*);
 // web: asset_prefetch() every path (full paths under assets_path()) and wait until all have
 // arrived or failed, so a load step pays one round trip instead of one per file. Native: no-op.
@@ -3527,6 +3527,18 @@ void asset_prefetch_wait(const char *const *paths, size_t count);
 // ensure_asset_file() / asset_prefetch_wait() call, so tests can emulate those yields
 // (client/src/frame_target.c, KRUNKNATIVE_YIELD_CHECK). NULL (the default) turns it off.
 void asset_set_yield_hook(void (*hook)(const char *path));
+// Native on-demand game content fetch (client/include/asset_fetch.h): consulted by
+// ensure_asset_file() (enqueue 1) and asset_prefetch() (enqueue 1) with every path that is not
+// redirected by a resource pack / swapper. Answers 1 = read it (present, or not a managed file),
+// 0 = missing or failed its manifest size check: a background download is queued / running,
+// -1 = missing and the download gave up. ensure_asset_file() then returns 1 only for 1, so a
+// loader can show its placeholder (asset_prefetch() == 0: it pops in later). NULL = off (server,
+// tools, tests, the web build).
+void asset_set_fetch_hook(int (*hook)(const char *path, int enqueue));
+// Bumped by the client when fetched files arrived (asset_fetch_client.c): the HTML engine probes
+// its page images that were missing again (html/engine/image.c).
+unsigned asset_arrival_generation(void);
+void asset_arrival_bump(void);
 int read_file(const char*, unsigned char**, size_t*);
 // Path redirect consulted by read_file() (and the client's texture loader): the client's
 // resource swapper (client/src/ui/ui_client_settings.c) maps a file to its swapped copy.

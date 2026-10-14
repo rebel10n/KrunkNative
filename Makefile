@@ -155,9 +155,10 @@ network: build services ## Coordinator + N dedicated servers from one file (NETW
 	python3 -I services/scripts/kn-network up $(or $(NETWORK),services/scripts/network.example.json)
 
 .PHONY: test
-test: build ## Run the shared movement/collision test (+ the knet transport, billboard ad, lag compensation, editor bus, editor model, nav mesh, client update, meshopt, window state and resource pack tests)
+test: build ## Run the shared movement/collision test (+ the knet transport, content fetch, billboard ad, lag compensation, editor bus, editor model, nav mesh, client update, meshopt, window state and resource pack tests)
 	./$(DEBUG_DIR)/$(TEST_BIN)
 	./$(DEBUG_DIR)/update_test
+	./$(DEBUG_DIR)/asset_fetch_test
 	./$(DEBUG_DIR)/backend_online_test
 	./$(DEBUG_DIR)/knet_test
 	./$(DEBUG_DIR)/server_names_test
@@ -237,6 +238,9 @@ native-auth-test: build ## Native client accounts e2e: register with email, veri
 resize-early-test: build ## Window resizes during startup / stale resize events reach the viewport and HTML layout (private Xvfb + xfwm4 + xdotool)
 	timeout 600 $(PYTHON) -I client/tests/resize_early_e2e.py $(DEBUG_DIR)
 
+asset-fetch-test: build ## Native on-demand content fetch: deleted airdrop files are downloaded from stub origins, verified and pop in; mismatch refused, 404 given up once (headless; EGL_DEVICE=)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/asset_fetch_e2e.py $(DEBUG_DIR)
+
 console-settings-test: build ## Dev console switch survives Settings opens / restarts, console clear / cls, chat /clear (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/console_settings_e2e.py $(DEBUG_DIR)
 
@@ -261,7 +265,7 @@ ui-import-v3: ## Regenerate ui/v3/ (the Krunker v3.1.1 page of Settings > Game v
 assets-import: ## Copy the v3.1.1 content mod.zip lacks (textures/previews/) into assets/ (tools/ui-import/game_assets.py)
 	$(PYTHON) -I tools/ui-import/game_assets.py --assets assets
 
-.PHONY: assets-import-v7 assets-check-v7 assets-import-live assets-check-live gltf-test viewer-diff frame-yield-test offline-dead-test resize-early-test native-auth-test console-settings-test slowmo-arms-test piss-hose-test selection-test minimap-round-test preview-hole-test preview-hole-test-web
+.PHONY: assets-import-v7 assets-check-v7 assets-import-live assets-check-live gltf-test viewer-diff frame-yield-test offline-dead-test resize-early-test native-auth-test asset-fetch-test console-settings-test slowmo-arms-test piss-hose-test selection-test minimap-round-test preview-hole-test preview-hole-test-web
 assets-import-v7: ## Import Krunker v7.1.4 content into assets/ (models, textures, sounds, skins.json...) and regenerate client/src/viewer/viewer_store_table.c
 	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --assets assets
 	node tools/ui-import/gen_viewer_store.js

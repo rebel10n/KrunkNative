@@ -754,6 +754,21 @@ else ()
     target_link_libraries(update_test PRIVATE cJSON m)
     add_test(NAME update_test COMMAND update_test)
 
+    # asset_fetch_test (client/include/asset_fetch.h): the native on-demand content fetch's queue over
+    # an in-memory transport (verification, fallback, backoff, cap, checkout guard). POSIX.
+    if (NOT WIN32)
+        add_executable(asset_fetch_test client/tests/asset_fetch_test.c client/src/net/asset_fetch.c
+                       launcher/src/update_core.c launcher/src/http_fetch.c launcher/src/fs.c launcher/src/install.c
+                       launcher/src/archive.c client/src/net/http_conn.c client/src/stb_image.c shared/src/auth_join.c)
+        target_include_directories(asset_fetch_test PRIVATE launcher/include client/include shared/include)
+        target_link_libraries(asset_fetch_test PRIVATE cJSON Threads::Threads m)
+        if (OpenSSL_FOUND)
+            target_link_libraries(asset_fetch_test PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+            target_compile_definitions(asset_fetch_test PRIVATE KRUNKNATIVE_HAVE_TLS=1)
+        endif ()
+        add_test(NAME asset_fetch_test COMMAND asset_fetch_test)
+    endif ()
+
     # assets_bench (launcher/tests/assets_bench.c): the content sync into a directory with timings,
     # against the live origins by hand or a local server in assets_sync_e2e (keep-alive, pipelining,
     # parallel origins, resume, hash mismatch, fallback, cancel). POSIX (the e2e is Python + sockets).

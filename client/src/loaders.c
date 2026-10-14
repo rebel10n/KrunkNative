@@ -6,11 +6,37 @@
 #include <stb_image.h>
 #include <pcg_basic.h>
 
+static void cache_texture(const char *path, const unsigned int texture_id) {
+    char *cache_path = strdup(path);
+    if (cache_path) vt_insert(&g_texture_cache, cache_path, texture_id);
+}
+
+// A file still downloading (natively asset_fetch.h, asset_prefetch() == 0): a 1x1 (0, 0, 0, 0)
+// texture cached under its path, what three.js binds for a texture whose image has not loaded yet
+// (WebGLState emptyTextures: black for opaque materials, nothing for transparent ones);
+// texture_cache_reload() fills it in place when the file arrives (asset_fetch_client.c).
+static unsigned int texture_placeholder(const char *path) {
+    static const unsigned char black[4] = {0, 0, 0, 0};
+    unsigned int texture_id;
+    glGenTextures(1, &texture_id);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texture_id);
+    g_active_texture = texture_id;
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, black);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    cache_texture(path, texture_id);
+    return texture_id;
+}
+
 unsigned int load_texture(char *path) {
     texture_cache_map_itr cached = vt_get(&g_texture_cache, path);
     if (!vt_is_end(cached)) return cached.data->val;
 
-    ensure_asset_file(path);
+    const int available = ensure_asset_file(path);
 
     // GL wants the bottom row first. The HTML engine (html/engine/image.c) sets stb's
     // thread-local flip flag to 0 on this thread, which overrides the global flag, so the
@@ -23,6 +49,7 @@ unsigned int load_texture(char *path) {
     stbi_set_flip_vertically_on_load_thread(0);
 
     if (!texture) {
+        if (!available && asset_prefetch(path) == 0) return texture_placeholder(path); // downloading
         fprintf(stderr, "failed to load texture %s: %s\n", path, stbi_failure_reason());
         return 0;
     }
@@ -42,17 +69,7 @@ unsigned int load_texture(char *path) {
     glGenerateMipmap(GL_TEXTURE_2D);
 
     stbi_image_free(texture);
-
-    const size_t path_length = strlen(path);
-    char *cache_path = malloc(path_length + 1);
-
-    if (cache_path) {
-        memcpy(cache_path, path, path_length);
-        cache_path[path_length] = 0;
-
-        vt_insert(&g_texture_cache, cache_path, texture_id);
-    }
-
+    cache_texture(path, texture_id);
     return texture_id;
 }
 
@@ -225,11 +242,24 @@ Geometry *load_obj_model(char *path, const int transform_y) {
     Geometry *geometry = calloc(1, sizeof(Geometry));
     if (!geometry) return NULL;
 
-    ensure_asset_file(path);
+    const int available = ensure_asset_file(path);
     char swapped[1024];
     fastObjMesh *mesh = fast_obj_read(file_redirect(path, swapped, sizeof(swapped))); // resource pack / swapper
 
     if (!mesh) {
+        if (!available && asset_prefetch(path) == 0) {
+            // still downloading (asset_fetch.h): an empty model cached under the path, drawn as
+            // nothing like v7's loadMesh before its OBJ arrives; geometry_cache_reload() rebuilds
+            // it in place when the file is there, so the meshes holding it pop in
+            glGenVertexArrays(1, &geometry->vao);
+            glGenBuffers(1, &geometry->ebo);
+            glBindVertexArray(geometry->vao);
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, geometry->ebo);
+            glBindVertexArray(0);
+            char *cache_path = strdup(path);
+            if (cache_path) vt_insert(&g_geometry_cache, cache_path, geometry);
+            return geometry;
+        }
         fprintf(stderr, "failed to load model %s\n", path);
         free(geometry);
         return NULL;

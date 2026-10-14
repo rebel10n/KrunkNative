@@ -73,6 +73,7 @@ typedef struct {
     int download_started;
     int threads;       // --threads / KRUNKNATIVE_ASSET_THREADS (0 = default)
     char mirrors[1024]; // --asset-mirrors / KRUNKNATIVE_ASSET_MIRRORS ("off" = none)
+    char origins[2048]; // the sync's origins for the client's on-demand fetch (KRUNKNATIVE_ASSET_ORIGINS)
 } Launcher;
 
 static Launcher L;
@@ -326,6 +327,34 @@ static int assets_present(const char *dir) {
     return kn_fs_exists(p);
 }
 
+static void origins_add(const char *prefix, const char *url) {
+    const size_t used = strlen(L.origins);
+    if (url && *url && used + strlen(prefix) + strlen(url) + 2 < sizeof(L.origins))
+        snprintf(L.origins + used, sizeof(L.origins) - used, "%s%s%s", used ? " " : "", prefix, url);
+}
+
+// The client's on-demand fetch of a file the sync missed or a user deleted (client/include/
+// asset_fetch.h) uses the same origins in the same order as the sync (assets_sync.c
+// setup_origins): the manifest's objects, then --asset-mirrors, the manifest's mirrors or the
+// built-in CDN.
+static void note_origins(const KnUpdateManifest *m) {
+    L.origins[0] = 0;
+    if (!m->assets.version[0]) return;
+    origins_add("objects:", m->assets.objects);
+    if (L.mirrors[0]) {
+        if (strcmp(L.mirrors, "off") != 0) {
+            char buf[1024];
+            snprintf(buf, sizeof(buf), "%s", L.mirrors);
+            for (char *t = strtok(buf, " ,"); t; t = strtok(NULL, " ,")) origins_add("", t);
+        }
+    } else if (m->assets.mirrors_set) {
+        for (int i = 0; i < m->assets.mirror_count; i++)
+            origins_add(m->assets.mirrors[i].by_path ? "" : "objects:", m->assets.mirrors[i].url);
+    } else if (!strncmp(m->assets.objects, KN_ASSETS_DEFAULT_ORIGIN, strlen(KN_ASSETS_DEFAULT_ORIGIN))) {
+        origins_add("", KN_ASSETS_DEFAULT_MIRROR);
+    }
+}
+
 static int sync_assets(const KnUpdateManifest *m) {
     char local[64];
     kn_assets_local_version(L.assets_dir, local, sizeof(local));
@@ -411,6 +440,7 @@ static void *work(void *arg) {
         }
     }
     if (L.assets_dir[0]) {
+        if (L.manifest_ok) note_origins(&m);
         if (L.manifest_ok && !sync_assets(&m)) goto out_m;
         // the package's code-coupled files (shaders, maps, ...) over the content: they match the binary
         char err[512] = "";
@@ -599,12 +629,17 @@ int main(int argc, char **argv) {
     if (!cargv) return 2;
     cargv[0] = L.in.client;
     for (int i = 0; i < L.client_argc; i++) cargv[i + 1] = L.client_args[i];
-    static char env_assets[KN_PATH_MAX + 32], env_launcher[KN_PATH_MAX + 32];
-    const char *env[3] = {NULL, NULL, NULL};
+    static char env_assets[KN_PATH_MAX + 32], env_launcher[KN_PATH_MAX + 32], env_origins[sizeof(L.origins) + 32];
+    const char *env[4] = {NULL, NULL, NULL, NULL};
     int ne = 0;
     if (L.assets_dir[0]) {
         snprintf(env_assets, sizeof(env_assets), "KRUNKNATIVE_ASSETS_DIR=%s", L.assets_dir);
         env[ne++] = env_assets;
+        const char *own = getenv("KRUNKNATIVE_ASSET_ORIGINS"); // the user's choice wins
+        if (L.origins[0] && !(own && *own)) {
+            snprintf(env_origins, sizeof(env_origins), "KRUNKNATIVE_ASSET_ORIGINS=%s", L.origins);
+            env[ne++] = env_origins;
+        }
     }
     snprintf(env_launcher, sizeof(env_launcher), "KRUNKNATIVE_LAUNCHER=%s", L.in.exe);
     env[ne++] = env_launcher;
