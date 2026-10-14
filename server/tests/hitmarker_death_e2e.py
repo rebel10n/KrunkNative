@@ -12,6 +12,9 @@ NET_PACKET_HITs through the client's event handler (input script `nethit`):
   2. `kill` right after it: dead, no marker (not visible, no magenta pixel in the frames)
   3. a hit while dead: still no marker, also a second later
   4. respawned: a hit shows the marker again
+  5. the end screen (`end`): a hit that lands during the end animation or on the results (the player
+     is still active then) shows no marker: v7's showEndScreen -> hideUI hides the overlay canvas the
+     marker is drawn on; here #inGameUI, which holds #knHitmarker, is down for the whole end screen
 Prints PASS/FAIL lines; exit code 0 only when everything passed. Needs a headless GL device
 (KRUNKNATIVE_HEADLESS=1: EGL; KRUNKNATIVE_EGL_DEVICE picks it).
 """
@@ -64,7 +67,9 @@ def main():
                 f"2000 nethit 1\n2032 vis @deadhit knHitmarker\n2032 frames {WORK}/deadhit 3\n"
                 f"3000 vis @dead2 knHitmarker\n3000 frames {WORK}/later 1\n"
                 f"3100 respawn\n9000 state\n9000 nethit 0\n9016 vis @again knHitmarker\n9016 frames {WORK}/again 1\n"
-                "9500 quit\n")
+                f"9500 con end\n13500 nethit 1\n13516 vis @endanim knHitmarker endUI\n13516 frames {WORK}/endanim 3\n"
+                f"20000 vis @end endUI\n20000 state\n20100 nethit 1\n20116 vis @endhit knHitmarker\n"
+                f"20116 frames {WORK}/endhit 3\n21000 vis @endlater knHitmarker\n21100 quit\n")
     log = os.path.join(WORK, "client.log")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
     env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": os.path.join(WORK, "cfg"), "KRUNKNATIVE_NO_BROWSER": "1",
@@ -98,6 +103,18 @@ def main():
     count = magenta_count(again[0], CENTRE) if again else -1
     check("respawned: a hit shows the marker again", st and "menu=0" in st[0] and vis(lines, "again") == "1" and count > 30,
           f"visible {vis(lines, 'again')}, magenta px {count}, {st[:1]}")
+
+    ended = [l for l in lines if "[input_script] state t=20" in l]
+    check("the end screen is up (`end`)", any(re.search(r"@end endUI=1", l) for l in lines) and ended and "ended=1" in ended[0],
+          f"{ended[:1]}")
+    for label, prefix, what in (("endanim", "endanim", "during the end animation"), ("endhit", "endhit", "on the results")):
+        shots = frames(prefix)
+        counts = [magenta_count(s, CENTRE) for s in shots]
+        later = vis(lines, "endlater") if label == "endhit" else "0"
+        check(f"end screen: no marker (a hit that lands {what})",
+              vis(lines, label) == "0" and later == "0" and shots and all(c == 0 for c in counts) and
+              (label != "endanim" or any(re.search(r"@endanim knHitmarker=\S+ endUI=1", l) for l in lines)),
+              f"visible {vis(lines, label)}, magenta px per frame {counts}")
 
     if all(results) and results:
         shutil.rmtree(WORK, ignore_errors=True)
