@@ -98,7 +98,42 @@ typedef struct {
     char error[96];                 // the first error ("" = ok), v7 wording
 } BotAssignments;
 
-typedef enum { BOT_STATE_IDLE, BOT_STATE_HUNT, BOT_STATE_ATTACK, BOT_STATE_HIDE } BotState;
+typedef enum { BOT_STATE_IDLE, BOT_STATE_HUNT, BOT_STATE_ATTACK, BOT_STATE_HIDE, BOT_STATE_OBJECTIVE } BotState; // OBJECTIVE: Hunt toward the mode's objective (bot_objective.c)
+
+// shared/src/bot_objective.c: the mode objective a bot plays (its Hunt goal, the combat weighting)
+typedef enum { BOT_ROLE_NONE, BOT_ROLE_ATTACK, BOT_ROLE_DEFEND, BOT_ROLE_SUPPORT } BotRole;
+typedef enum {
+    BOT_GOAL_NONE,
+    BOT_GOAL_FLAG,      // a flag to take (the enemy's, the neutral one) or return (ours, dropped)
+    BOT_GOAL_HOME,      // carrying a flag: our base
+    BOT_GOAL_CARRIER,   // the enemy carrier (its flag ping)
+    BOT_GOAL_ESCORT,    // a teammate carrier
+    BOT_GOAL_GUARD,     // a spot by our base
+    BOT_GOAL_KITE,      // carrying the neutral flag: away from the enemy
+    BOT_GOAL_HILL,      // the active objective (Hardpoint / KOTH)
+    BOT_GOAL_ZONE,      // a Domination zone
+    BOT_GOAL_TAG,       // a tag / KR Tag spawnable
+    BOT_GOAL_DEPOSIT,   // the active objective with KR Tags to deposit
+    BOT_GOAL_SITE,      // a bomb site
+    BOT_GOAL_HUNT,      // elimination: the nearest enemy
+    BOT_GOAL_REGROUP,   // elimination, outnumbered: the nearest teammate
+} BotGoalKind;
+typedef struct {
+    BotRole role;
+    BotGoalKind kind;
+    int index;                      // the flag / objective uid / zone / spawnable sid / site the goal is about, -1
+    vec3 goal;                      // feet position to walk to
+    vec3 look;                      // the threat direction to face while holding (has_look)
+    vec3 zone_center, zone_half;    // the volume the goal is in (has_zone): arrived = inside it
+    unsigned char hold:1, arrived:1, has_look:1, has_zone:1, alt:1;
+    float think_timer;              // ms until the next decision
+    float fail_timer;               // ms left roaming instead of an unreachable goal
+    float hold_time;                // ms spent holding at the goal
+    float stalemate_ms;             // CTF: ms carrying while the enemy holds our flag (then hunt their carrier)
+    float look_timer, look_offset;  // the hold look sweep
+    int rank, team_bots;            // this bot among its team's bots (list order), their count
+    int last_flag, last_tags;       // a change re-thinks at once
+} BotObjective;
 
 #define BOT_PATH_RADIUS 10.0f       // v10 BotManager.config.pathRadius: a path node counts as reached within it
 
@@ -177,6 +212,7 @@ typedef struct {
     int route_dir;                  // pathDirection +1 / -1
     unsigned char has_route_target; // pathTarget != null
     vec3 route_target;
+    BotObjective objective;         // the mode objective it plays (shared/src/bot_objective.c)
 } GameBot;
 
 typedef struct GameBots_t {

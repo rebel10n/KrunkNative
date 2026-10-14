@@ -703,6 +703,14 @@ else ()
         target_link_libraries(bot_chat_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # bot_objective_test: bots play the mode (shared/src/bot_objective.c) on Sandstorm: CTF, Hardpoint,
+    # Domination, King of the Hill, Team Defender, Last Man Standing
+    add_executable(bot_objective_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/bot_objective_test.c)
+    target_link_libraries(bot_objective_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(bot_objective_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # target_select_test: player target selectors (shared/src/target_select.c: *, @me, @bots, @team,
     # Joel* ...) and the chat commands over them (god * / ungod * / give * / kick *, permissions)
     add_executable(target_select_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/target_select_test.c)

@@ -18,9 +18,13 @@
 //   Hide, profile reaction / aim focus / dodge / chase timeout / retreat) steers straight at its
 //   goal with obstacle probes (jump low walls, side-step high ones, no walking off ledges) and
 //   stuck recovery; Hunt roams between spawn points and the last known enemy positions.
+// - Objectives (KrunkNative addition, shared/src/bot_objective.c): v7's NextBot only roams and
+//   fights; here Hunt walks the mode's objective (flags, hills, zones, tags, sites: state
+//   Objective) with team roles by rank, and a carrier / a holder keeps to it while fighting.
 // - Parsed but without effect natively: voiceChat (no clip), noRecoil, spreadMlt, rangeMlt
 //   (only the AI's engage range), scoreOnDeath, head / pet / shoes / wrist (no such v3.1.1 slots).
 #include <bots.h>
+#include <bot_objective.h>
 #include <ai.h>
 #include <pcg_basic.h>
 #include <ctype.h>
@@ -612,6 +616,7 @@ const char *bot_state_name(const BotState state) {
         case BOT_STATE_HUNT: return "Hunt";
         case BOT_STATE_ATTACK: return "Attack";
         case BOT_STATE_HIDE: return "Hide";
+        case BOT_STATE_OBJECTIVE: return "Objective";
         default: return "Idle";
     }
 }
@@ -1752,8 +1757,12 @@ static void bot_update_nextbot(Game *game, GameBot *bot, Player *self, const flo
             const Weapon *w = self->weapon;
             const int melee = w && w->melee;
 
-            // movement: close in to combat range, then hold / dodge (AttackState::ApplyDodge)
-            if (cfg->follow_target) {
+            // movement: close in to combat range, then hold / dodge (AttackState::ApplyDodge);
+            // the objective comes first for a flag carrier / a bot holding its point (bot_objective.c)
+            vec3 objective_goal;
+            if (cfg->roam && bot_objective_over_combat(game, bot, self, target, dt, &objective_goal)) {
+                bot_walk(game, bot, self, objective_goal, dt, f);
+            } else if (cfg->follow_target) {
                 const float want_range = melee ? 4.0f : MIN(NB_COMBAT_RANGE, bot_engage_range(bot, self) * 0.6f);
                 if (!bot->sees_target || range > want_range + NB_HYSTERESIS_RANGE * 0.5f) {
                     bot_walk(game, bot, self, bot->sees_target ? target->position : bot->last_known, dt, f);
@@ -1804,32 +1813,50 @@ static void bot_update_nextbot(Game *game, GameBot *bot, Player *self, const flo
             break;
     }
 
-    // Hunt: roam toward the goal, looking where we walk
-    bot_set_state(bot, BOT_STATE_HUNT);
+    // Hunt: the mode's objective (bot_objective.c: flags, hills, zones, tags, sites) when it has a
+    // goal for this bot (state Objective), else roam toward a goal; looking where we walk
+    const int objective = cfg->roam && bot_objective_update(game, bot, self, dt);
+    bot_set_state(bot, objective ? BOT_STATE_OBJECTIVE : BOT_STATE_HUNT);
     if (cfg->roam) {
+        const BotObjective *o = &bot->objective;
         bot->roam_timer -= dt;
-        // KrunkNative: usePathing on a NextBot walks the v10 botPaths node by node as its roam goal
-        // (v10 has only the tfue-style Bot; this keeps the key meaningful for both managers)
-        const float reached = bot->has_route_target ? BOT_PATH_RADIUS : NB_TARGET_REACHED_DISTANCE;
-        if (!bot->has_roam || bot->roam_timer <= 0.0f || bot_d2d(bot->roam_target, self->position) < reached) {
+        if (objective) {
             bot->has_route_target = 0;
-            if (cfg->use_pathing && bot_next_path_node(bot, game->map, self->position, &bot->roam_target)) {
-                bot->has_roam = bot->has_route_target = 1;
-                bot->roam_timer = bot_rand_float(7000.0f, 14000.0f);
-            } else {
-                bot_pick_roam(game, bot, self);
+            if (!bot->has_roam || bot_d3d(bot->roam_target, o->goal) > 0.01f) {
+                bot->roam_target = o->goal;
+                bot->has_roam = 1;
+                bot->roam_timer = 5000.0f;
+            }
+        } else {
+            // KrunkNative: usePathing on a NextBot walks the v10 botPaths node by node as its roam goal
+            // (v10 has only the tfue-style Bot; this keeps the key meaningful for both managers)
+            const float reached = bot->has_route_target ? BOT_PATH_RADIUS : NB_TARGET_REACHED_DISTANCE;
+            if (!bot->has_roam || bot->roam_timer <= 0.0f || bot_d2d(bot->roam_target, self->position) < reached) {
+                bot->has_route_target = 0;
+                if (cfg->use_pathing && bot_next_path_node(bot, game->map, self->position, &bot->roam_target)) {
+                    bot->has_roam = bot->has_route_target = 1;
+                    bot->roam_timer = bot_rand_float(7000.0f, 14000.0f);
+                } else {
+                    bot_pick_roam(game, bot, self);
+                }
             }
         }
-        int on_path;
-        const vec3 point = bot_route(game, bot, self, bot->roam_target, dt, &on_path, &f->jump);
-        float want_yaw, want_pitch;
-        bot_drs(point, self->position, 0.0f, &want_yaw, &want_pitch);
-        if (aims || cfg->roam) {
-            f->yaw = bot->yaw = bot_turn_yaw(bot->yaw, want_yaw, path_rate * dt);
+        if (objective && o->hold && o->arrived) {
+            // on the point: stand there and look out (a sweep around the threat direction)
+            f->yaw = bot->yaw = bot_turn_yaw(bot->yaw, bot_objective_hold_yaw(bot, self, dt), path_rate * dt);
             f->pitch = bot->pitch = bot_turn_pitch(bot->pitch, 0.0f, path_rate * dt);
+        } else {
+            int on_path;
+            const vec3 point = bot_route(game, bot, self, bot->roam_target, dt, &on_path, &f->jump);
+            float want_yaw, want_pitch;
+            bot_drs(point, self->position, 0.0f, &want_yaw, &want_pitch);
+            if (aims || cfg->roam) {
+                f->yaw = bot->yaw = bot_turn_yaw(bot->yaw, want_yaw, path_rate * dt);
+                f->pitch = bot->pitch = bot_turn_pitch(bot->pitch, 0.0f, path_rate * dt);
+            }
+            // walk once roughly facing the next point (NAV_WALK_YAW_TOLERANCE ~100 degrees)
+            if (fabsf(bot_angle_delta(bot->yaw, want_yaw)) < 1.75f) bot_move_toward(game, bot, self, point, on_path, dt, f);
         }
-        // walk once roughly facing the next point (NAV_WALK_YAW_TOLERANCE ~100 degrees)
-        if (fabsf(bot_angle_delta(bot->yaw, want_yaw)) < 1.75f) bot_move_toward(game, bot, self, point, on_path, dt, f);
     }
     if (cfg->random_jump && self->on_ground && bot->tick % 100 == 0 && bot_rand_int(0, 100) >= 25) f->jump = 1;
     bot_weapon_upkeep(bot, self, f, 0, 0.0f);
