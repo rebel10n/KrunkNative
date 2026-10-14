@@ -95,6 +95,15 @@ per file: `ui/v156/README.md`.
 | files | `v156_page.py` | every local file the page and its stylesheets reference (`collect_page_refs`), from the v1.5.6 tree; what v1.5.6 itself 404s on is listed |
 | fonts | `import.py` | `material-icons.ttf` next to `micon.woff2` (its ligatures equal v7's: the headers are not regenerated) |
 
+## Krunker v3.1.1 menu page (`make ui-import-v3`)
+
+`make ui-import-v3` (`v3_page.py --ref v3.1.1 --ui ui`, not `import.py`) writes `ui/v3/`, the menu
+page of Settings > General "Game version" = v3.1.1 (menu only; v3.1.1 gameplay is not ported), from
+the `v3.1.1` tag's `ui/` through `git archive`: scripts and `js/` dropped, the hub / editor / viewer
+pages and v3.1.1's window templates left out (ui/'s are shown), and `css/v7-windows.css` generated
+from `ui/css/` for the v7.1.4 window markup the C UI writes. Rerun it after `make ui-import` changes
+`ui/windows/` or `ui/css/`. Details: `ui/v3/README.md`.
+
 ## Krunker v3.1.1 (`--ref v3`)
 
 ## What it produces

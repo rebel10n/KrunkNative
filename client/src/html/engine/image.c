@@ -57,6 +57,7 @@ typedef struct ImageSlot {
 struct ImageCache {
     char *root;            /* ui dir with a trailing slash                     */
     size_t root_len;
+    char *fallback;        /* another page root for files `root` lacks (NULL: none)   */
     ImageSlot **slots;     /* individually allocated: entry addresses are stable */
     int count;
     int cap;
@@ -118,6 +119,7 @@ void image_cache_destroy(ImageCache *cache) {
     free(cache->slots);
     free(cache->index);
     free(cache->root);
+    free(cache->fallback);
     free(cache);
 }
 
@@ -329,7 +331,13 @@ static int image_read_assets(const char *rel, unsigned char **bytes, size_t *len
     return ok;
 }
 
-/* Reads `key` from the page root (ui/). */
+void image_cache_set_fallback(ImageCache *cache, const char *dir) {
+    if (!cache) return;
+    free(cache->fallback);
+    cache->fallback = dir && *dir ? concat(dir, "") : NULL;
+}
+
+/* Reads `key` from the page root (ui/), else from the fallback root (image_cache_set_fallback). */
 static int image_read_page(const ImageCache *cache, const char *key, unsigned char **bytes, size_t *len) {
     char *path = concat(cache->root, key);
     if (!path) return 0;
@@ -344,6 +352,11 @@ static int image_read_page(const ImageCache *cache, const char *key, unsigned ch
 #endif
 
     free(path);
+    if (!ok && cache->fallback) {
+        path = concat(cache->fallback, key);
+        ok = path && read_file(path, bytes, len) == 0;
+        free(path);
+    }
     return ok;
 }
 

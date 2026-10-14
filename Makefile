@@ -201,7 +201,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, bil
 # These targets use the debug directory with HTML_ENGINE=ON (the default) so they also
 # work after a `make HTML_ENGINE=OFF`.
 
-.PHONY: ui-test ui-import assets-import uidiff
+.PHONY: ui-test ui-import ui-import-v3 assets-import uidiff
 viewer-diff: build ## Viewer render scenarios vs the v7.1.4 viewer captures (doc/ref/krunker-v7.1.4/viewer, headless; EGL_DEVICE=)
 	EGL_DEVICE=$(or $(EGL_DEVICE),nvidia) tools/kref/viewer-diff.sh $(DEBUG_DIR)
 
@@ -253,6 +253,9 @@ ui-import: ## Regenerate ui/ from the Krunker reference (fonts, windows, icon li
 .PHONY: ui-import-v156
 ui-import-v156: ## Regenerate ui/v156/ (Krunker v1.5.6's menu page, Settings > Game version) via tools/ui-import --ref v156
 	$(PYTHON) -I tools/ui-import/import.py --ui ui --ref v156
+
+ui-import-v3: ## Regenerate ui/v3/ (the Krunker v3.1.1 page of Settings > Game version) from the v3.1.1 tag's ui/ (git archive)
+	$(PYTHON) -I tools/ui-import/v3_page.py --ref v3.1.1 --ui ui
 
 assets-import: ## Copy the v3.1.1 content mod.zip lacks (textures/previews/) into assets/ (tools/ui-import/game_assets.py)
 	$(PYTHON) -I tools/ui-import/game_assets.py --assets assets

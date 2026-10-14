@@ -331,7 +331,7 @@ static const ConArg A_CMD[] = {{"cmd", ARG_STRING, 1}};
 static const ConArg A_TEXT[] = {{"text", ARG_STRING, 0}};
 static const ConArg A_SNAP[] = {{"units|off", ARG_STRING, 0}};
 static const ConArg A_UPDATE[] = {{"check|now|download", ARG_STRING, 0}};
-static const ConArg A_RULESET[] = {{"v7|v10", ARG_STRING, 1}};
+static const ConArg A_RULESET[] = {{"v7|v10|v3|v156", ARG_STRING, 1}};
 static const ConArg A_BIND[] = {{"key", ARG_STRING, 1}, {"command", ARG_STRING, 1}};
 static const ConArg A_KEY[] = {{"key", ARG_STRING, 0}};
 static const ConArg A_ALIAS[] = {{"name", ARG_STRING, 1}, {"command", ARG_STRING, 1}};
@@ -1210,36 +1210,42 @@ static void cmd_version(const int argc, char **argv, const char *rest) {
     appendf(COL_INFO, "Version: %s", CON_VERSION);
 }
 
-// ruleset [v7|v10]: the Krunker version of this session, the saved one (Settings > General
-// "Game version"), and the ones this build has; with an argument, save it (ruleset_ui.h)
+// ruleset [v156|v3|v7|v10]: the Krunker version of this session, the saved one (Settings > General
+// "Game version"), and the ones this build has; with an argument, save it (ruleset_ui.h). v156 and v3
+// are v1.5.6's / v3.1.1's menu page over the v7.1.4 ruleset until their gameplay is ported.
 static void cmd_ruleset(const int argc, char **argv, const char *rest) {
     (void) rest;
     if (argc && argv[0][0]) {
-        const char *n = argv[0][0] == 'v' || argv[0][0] == 'V' ? argv[0] + 1 : argv[0];
-        if (!strcmp(n, "3") || !strcmp(n, "3.1.1")) {
-            append("Krunker v3.1.1 is coming soon.", COL_ERROR);
+        const ClientGameVersion *v = client_game_version_find(argv[0]);
+        if (!v && !client_page_v156_is_name(argv[0])) {
+            appendf(COL_ERROR, "Unknown ruleset '%s' (v7, v10, v3 = the v3.1.1 menu, v156 = the v1.5.6 menu)", argv[0]);
             return;
         }
-        if (!ruleset_find(argv[0]) && !client_page_v156_is_name(argv[0])) {
-            appendf(COL_ERROR, "Unknown ruleset '%s' (v7, v10, v156 = the v1.5.6 menu)", argv[0]);
+        if (v && !client_game_version_available(v)) {
+            appendf(COL_ERROR, "Krunker v%s is available in the desktop client only.", v->version);
             return;
         }
         ui_client_settings_select_ruleset(argv[0]);
     }
     const Client *client = con_client();
     const Ruleset *now = client && client->game.rules ? client->game.rules : ruleset_current();
-    const Ruleset *saved = client_ruleset_saved(), *page = client_ruleset_page();
+    const ClientGameVersion *saved = client_game_version_saved(), *page = client_game_version_page();
     appendf(COL_INFO, "Playing Krunker v%s (%s)%s", now->version, now->key, client && client->offline ? " offline" : "");
     appendf(COL_INFO, "Game version setting: v%s%s, menu page: v%s", saved->version, client_page_v156_saved() ? " (v1.5.6 menu)" : "",
             client_page_v156_loaded() ? "1.5.6" : page->version);
-    char list[96] = "";
-    for (int id = 0; id < RULESET_COUNT; id++) {
-        const Ruleset *r = ruleset_get((RulesetId) id);
-        if (!r) continue;
+    if (saved->stand_in) appendf(COL_INFO, "v%s gameplay is not ported yet: its games play the v%s ruleset", saved->version, saved->rules->version);
+    char list[128] = "";
+#ifndef __EMSCRIPTEN__
+    snprintf(list, sizeof(list), "%s (menu only)", CLIENT_PAGE_V156_KEY);
+#endif
+    int count = 0;
+    const ClientGameVersion *versions = client_game_versions(&count);
+    for (int i = 0; i < count; i++) {
+        if (!client_game_version_available(&versions[i])) continue;
         const size_t len = strlen(list);
-        snprintf(list + len, sizeof(list) - len, "%s%s", len ? ", " : "", r->key);
+        snprintf(list + len, sizeof(list) - len, "%s%s%s", len ? ", " : "", versions[i].key, versions[i].stand_in ? " (menu only)" : "");
     }
-    appendf(COL_INFO, "Available: %s (v3 coming soon)", list);
+    appendf(COL_INFO, "Available: %s", list);
 }
 
 static void cmd_toggle(const int argc, char **argv, const char *rest) {
@@ -1359,7 +1365,7 @@ static void register_commands(void) {
     register_local("sandbox", NO_ARGS, "play offline on the sandbox (editor test) map", cmd_sandbox);
     register_local("ahk", NO_ARGS, "show current antihack key", cmd_ahk);
     register_local("version", NO_ARGS, "show current client version", cmd_version);
-    register_local("ruleset", ARGS(A_RULESET), "show or set the Krunker version (v7, v10): offline games and quick join", cmd_ruleset);
+    register_local("ruleset", ARGS(A_RULESET), "show or set the Krunker version (v7, v10, v3 / v156 menus): offline games, quick join and the menu page", cmd_ruleset);
     register_local("build", NO_ARGS, "alias for version", cmd_version);
     register_local("verison", NO_ARGS, "alias for version", cmd_version);
     register_local("update", ARGS(A_UPDATE), "check for a newer client (update check), install it through the launcher (update now) or download it", cmd_update);

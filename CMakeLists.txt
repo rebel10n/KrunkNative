@@ -245,6 +245,8 @@ if (EMSCRIPTEN)
         COMMAND ${CMAKE_COMMAND} -E rm -rf ${WEB_DIST_DIR}/v10
         # ui/v156 (Krunker v1.5.6's menu, --ref v156) is native-only: the web build serves ui/
         COMMAND ${CMAKE_COMMAND} -E rm -rf ${WEB_DIST_DIR}/v156
+        # ui/v3 (Krunker v3.1.1's menu, make ui-import-v3) is native-only too
+        COMMAND ${CMAKE_COMMAND} -E rm -rf ${WEB_DIST_DIR}/v3
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:client> ${WEB_DIST_DIR}/client.js
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE_DIR:client>/client.wasm ${WEB_DIST_DIR}/client.wasm
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE_DIR:client>/client.data ${WEB_DIST_DIR}/client.data

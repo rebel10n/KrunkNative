@@ -13,6 +13,11 @@ No database or coordinator: standalone server_bin processes from generated serve
   4. client_bin (headless, Game version v7 saved) joins the v10 server: it adopts v10 for the
      session ("[ruleset] the server plays Krunker v10.0.2"), plays, and its console `ruleset`
      reports v10 playing / v7 saved; offline with v10 saved the sandbox plays v10.
+  5. the v3.1.1 menu page (ui/v3, client/include/ruleset_ui.h): with v7 saved the page is ui/'s
+     (v7 DOM markers); the console `ruleset v3` saves v3 (knRuleset); the next start loads
+     ui/v3/index.html (v3.1.1 markers present, v7 ones absent), says that v3.1.1 gameplay is not
+     ported (log + notice), plays offline on the v7.1.4 ruleset (console: "Playing Krunker v7.1.4
+     (v7) offline", setting and page v3.1.1), and writes a menu and an in-game frame.
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
 import json
@@ -97,9 +102,10 @@ def refused(c, code):
     return any(t == ERROR and kn_proto.error_info(p)[1] == code for t, p in c.packets)
 
 
-def run_client(name, args, script, saved=None):
-    """client_bin headless with an input script and a private config; returns its log text."""
-    cfg = os.path.join(WORK, f"{name}-cfg")
+def run_client(name, args, script, saved=None, cfg_name=None):
+    """client_bin headless with an input script and a private config (cfg_name: another run's,
+    to see what it saved); returns its log text."""
+    cfg = os.path.join(WORK, f"{cfg_name or name}-cfg")
     os.makedirs(os.path.join(cfg, "krunknative"), exist_ok=True)
     if saved:
         with open(os.path.join(cfg, "krunknative", "knRuleset.json"), "w") as f:
@@ -174,6 +180,45 @@ def main():
           "Playing Krunker v10.0.2 (v10)" in text and "Game version setting: v7.1.4" in text)
     text = run_client("offline-v10", ["--offline", "assets/maps/kanji.json"], "0 play\n1500 con ruleset\n2500 quit\n", saved="v10")
     check("client: offline plays the saved v10", "Playing Krunker v10.0.2 (v10) offline" in text)
+
+    # 5. the v3.1.1 page: switch to it, restart, play
+    text = run_client("switch-v3", ["--offline", "assets/maps/kanji.json"],
+                      "0 play\n1000 vis @page merchHolder killCardHolder genericPop bottomLeftHealthBar\n1200 con ruleset v3\n"
+                      "1800 con ruleset\n2400 quit\n", saved="v7")
+    vis = vis_line(text, "@page")
+    check("v7 saved: ui/'s page (v7 markers, no v3.1.1 ones)",
+          vis.get("merchHolder") == "-" and vis.get("killCardHolder") == "-" and vis.get("genericPop") in ("0", "1")
+          and vis.get("bottomLeftHealthBar") in ("0", "1"), str(vis))
+    check("console `ruleset v3` saves v3.1.1", "[ruleset] saved Krunker v3.1.1 (v3)" in text
+          and "Game version setting: v3.1.1, menu page: v7.1.4" in text, "")
+    saved = os.path.join(WORK, "switch-v3-cfg", "krunknative", "knRuleset.json")
+    check("knRuleset storage holds v3", os.path.exists(saved) and "v3" in open(saved).read())
+    menu_png, game_png = os.path.join(WORK, "v3-menu.png"), os.path.join(WORK, "v3-game.png")
+    text = run_client("offline-v3", ["--offline", "assets/maps/kanji.json"],
+                      f"0 menu\n600 vis @page merchHolder killCardHolder confPop genericPop bottomLeftHealthBar menuWindow\n"
+                      f"700 shot {menu_png}\n900 play\n2000 state\n2200 shot {game_png}\n2400 con ruleset\n3000 quit\n",
+                      cfg_name="switch-v3")
+    check("v3 saved: startup loads ui/v3", "[ruleset] menu page: ui/v3 (Krunker v3.1.1)" in text)
+    vis = vis_line(text, "@page")
+    check("v3 page DOM (v3.1.1 markers present, v7 ones absent)",
+          vis.get("merchHolder") in ("0", "1") and vis.get("killCardHolder") in ("0", "1") and vis.get("confPop") in ("0", "1")
+          and vis.get("genericPop") == "-" and vis.get("bottomLeftHealthBar") == "-" and vis.get("menuWindow") in ("0", "1"), str(vis))
+    check("v3: says its gameplay is not ported (log + notice)",
+          "plays the Krunker v7.1.4 ruleset (v3.1.1 gameplay is not ported yet)" in text
+          and "[ruleset] offline: Krunker v3.1.1 gameplay is not ported yet: games play Krunker v7.1.4 rules" in text)
+    check("v3: plays offline on the v7.1.4 ruleset",
+          "Playing Krunker v7.1.4 (v7) offline" in text and "Game version setting: v3.1.1, menu page: v3.1.1" in text
+          and "weapon=Assault Rifle menu=0" in text)
+    check("v3: menu and in-game frames written", all(os.path.exists(p) and os.path.getsize(p) > 10000 for p in (menu_png, game_png)),
+          f"{menu_png} {game_png}")
+
+
+def vis_line(text, label):
+    """The ids of the first `vis <label> ...` probe line: {id: "1" | "0" | "-"}."""
+    for line in text.splitlines():
+        if line.startswith("[input_script] vis ") and f" {label} " in line + " ":
+            return dict(tok.split("=", 1) for tok in line.split()[3:] if "=" in tok)
+    return {}
 
 
 try:

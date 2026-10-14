@@ -1012,26 +1012,30 @@ static char *extend_sound_tab(const char *tab) {
     return sb_finish(&sb);
 }
 
-// Version toggle (ruleset_ui.h): General > Localization's first row, "Game version". v3.1.1 is
-// listed but disabled until its ruleset exists. Shown in both views and in uidiff only when asked
-// (clientChrome), so the captured v7 tabs stay pixel-identical.
+// Version toggle (ruleset_ui.h): General > Localization's first row, "Game version". v3.1.1 is its
+// menu page over the v7.1.4 ruleset (native only; the web lists it disabled). Shown in both views
+// and in uidiff only when asked (clientChrome), so the captured v7 tabs stay pixel-identical.
 static char *ui_client_settings_extend_tab_rest(const char *tab);
 static void rerender(void);
 
 static void append_game_version_row(StrBuf *sb) {
-    const Ruleset *saved = client_ruleset_saved();
+    const ClientGameVersion *saved = client_game_version_saved();
     sb_append(sb, "<div class=\"settName\" id=\"knGameVersionRow\" title=\"The Krunker version of offline games and quick join; "
-                  "a server you join plays its own. A different menu page loads after a restart\">Game version "
+                  "a server you join plays its own. A different menu page loads after a restart. "
+                  "v3.1.1 shows its own menu and plays v7.1.4 rules until its gameplay is ported\">Game version "
                   "<span style=\"color: #eb5656\">*</span> <select id=\"knGameVersion\" onchange=\"knSetRuleset(this.value)\" class=\"inputGrey2\">");
     const int v156 = client_page_v156_saved(); // menu page only (ruleset_page_v156.c): saved reads v7
 #ifndef __EMSCRIPTEN__
     sb_appendf(sb, "<option value=\"%s\"%s>v1.5.6 (menu only, plays v7.1.4)</option>", CLIENT_PAGE_V156_KEY, v156 ? " selected=\"\"" : "");
 #endif
-    sb_append(sb, "<option value=\"v3\" disabled=\"\">v3.1.1 (coming soon)</option>");
-    for (int id = RULESET_V7_1_4; id < RULESET_COUNT; id++) {
-        const Ruleset *r = ruleset_get((RulesetId) id);
-        if (!r) continue;
-        sb_appendf(sb, "<option value=\"%s\"%s>v%s</option>", r->key, r == saved && !v156 ? " selected=\"\"" : "", r->version);
+    int count = 0;
+    const ClientGameVersion *versions = client_game_versions(&count);
+    for (int i = 0; i < count; i++) {
+        const ClientGameVersion *v = &versions[i];
+        const int available = client_game_version_available(v);
+        sb_appendf(sb, "<option value=\"%s\"%s%s>v%s%s</option>", v->key, v == saved && !v156 ? " selected=\"\"" : "",
+                   available ? "" : " disabled=\"\"", v->version,
+                   !available ? " (desktop client)" : v->stand_in ? " (menu only, plays v7.1.4)" : "");
     }
     sb_append(sb, "</select></div>");
 }
@@ -1059,18 +1063,24 @@ void ui_client_settings_select_ruleset(const char *value) {
     Client *client = g_cs.client ? g_cs.client : menu_ui()->client;
     const ClientRulesetResult r = client_ruleset_select(client, value);
     rerender(); // an open Settings window shows the new choice (the console sets it too)
+    const ClientGameVersion *saved = client_game_version_saved();
+    const char *notice = client_game_version_notice(saved); // v3.1.1: its menu, v7.1.4's rules
     if (r == CLIENT_RULESET_UNAVAILABLE) {
-        ui_notify("Krunker v3.1.1 is coming soon");
+        ui_notify("Krunker v3.1.1 is available in the desktop client only");
     } else if (r == CLIENT_RULESET_SAVED_RELOAD) {
-        ui_confirm(client_page_v156_saved() ? "The Krunker v1.5.6 menu loads after a client restart. It is the menu only: v1.5.6 "
-                                              "gameplay is not ported, games play Krunker v7.1.4. Restart now?"
-                                            : "The menu of this Game version loads after a client restart. Restart now?",
-                   ruleset_restart_answered, NULL);
+        char text[256];
+        if (client_page_v156_saved())
+            snprintf(text, sizeof(text), "The Krunker v1.5.6 menu loads after a client restart. It is the menu only: v1.5.6 "
+                                         "gameplay is not ported, games play Krunker v7.1.4. Restart now?");
+        else
+            snprintf(text, sizeof(text), "%s%sThe menu of this Game version loads after a client restart. Restart now?",
+                     notice ? notice : "", notice ? ". " : "");
+        ui_confirm(text, ruleset_restart_answered, NULL);
     } else if (r == CLIENT_RULESET_SAVED) {
-        const Ruleset *saved = client_ruleset_saved();
-        char text[96];
-        snprintf(text, sizeof(text), client_page_v156_saved() ? "Game version: the Krunker v1.5.6 menu, games play v%s" : "Game version: Krunker v%s",
-                 saved->version);
+        char text[192];
+        if (client_page_v156_saved()) snprintf(text, sizeof(text), "Game version: the Krunker v1.5.6 menu, games play v%s", saved->rules->version);
+        else if (notice) snprintf(text, sizeof(text), "%s", notice);
+        else snprintf(text, sizeof(text), "Game version: Krunker v%s", saved->version);
         ui_notify(text);
     }
 }

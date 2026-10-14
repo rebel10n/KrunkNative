@@ -70,7 +70,8 @@ static const Ruleset k_v10 = {
     .ui_page_dir = "v10",
 };
 
-// TODO(v3 ruleset): RULESET_V3_1_1 (tables from branch v3.1.1, MAP_DIALECT_V3, ui page from the branch).
+// TODO(v3 ruleset): RULESET_V3_1_1 (tables from branch v3.1.1, MAP_DIALECT_V3). Its page is ui/v3 already:
+// the client's v3.1.1 Game version shows it over the v7.1.4 ruleset until then (client/include/ruleset_ui.h).
 static const Ruleset *const k_rulesets[RULESET_COUNT] = {
     [RULESET_V3_1_1] = NULL,
     [RULESET_V7_1_4] = &k_v7,
