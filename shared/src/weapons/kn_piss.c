@@ -26,9 +26,12 @@ static const WeaponStream k_piss_stream = {
     .puddles_max = 64,
     .hose_radius = 0.18f,
     .hose_length = 1.25f,
-    // KN: the branch's hoseViewX 0, hoseViewY - 1.5 (-2.15), hoseViewZ -0.95 sits under KN's
-    // viewmodel frame (not on screen); here beside the right hand, pointing ahead
-    .hose_view = {0.15f, -1.45f, -1.0f},
+    // KN: the branch's hoseViewX 0, hoseViewY - 1.5 (-2.15), hoseViewZ -0.95 (from the weapon anchor)
+    // sits under KN's viewmodel frame (not on screen). Here the hose is held in the trigger hand: its
+    // centre from the hand's centre, tilted nose-up (hoseViewRotX; the branch's default 0) so the
+    // back end sits in the fist and the nozzle shows above the knuckles from the first-person camera
+    .hose_view = {0.0f, 0.15f, -0.7f},
+    .hose_view_rot = {0.35f, 0.0f, 0.0f},
 };
 
 const Weapon g_piss = {

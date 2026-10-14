@@ -409,6 +409,8 @@ typedef struct {
     Mesh *weapon_left;
     Mesh *weapon_right;
     Mesh *attachment; // sight attachment (Weapon.has_attach), first-person / preview models only
+    Mesh *hose;        // KrunkNative Piss: the hose (= weapon_right, player_hose_mesh), NULL for every other weapon
+    float hose_length; // its length (WeaponStream.hose_length): the tip is (0, 0, -hose_length / 2) in it
     // v7 hasAnim weapon / melee skins: the GLTF remodel (gltf.h) of weapon_right [0] / weapon_left [1],
     // parented to that mesh, which is then an empty carrier (its pose and visibility drive the model)
     struct GltfInstance *weapon_models[2];
@@ -471,9 +473,16 @@ void player_generate_meshes(Player*, int);
 void player_update_meshes(Player*, int);
 void player_meshes_fini(Player*);
 void player_mesh_debug_log(Player*, double now); // KRUNKNATIVE_PLAYER_LOG (player_mesh.c)
+// KrunkNative Piss: world points of the held weapon's hose (the first-person one in the trigger hand,
+// else the pelvis one): its tip (hoseTip, where the spray leaves), its back end and the trigger hand's
+// centre; any may be NULL. 0 when the held weapon has no hose.
+int player_hose_points(const Player*, vec3 *tip, vec3 *back, vec3 *hand);
 
 Mesh *mesh_init(Geometry*, Material*);
 void mesh_update_transform_matrix(Mesh*);
+// `local` in `node`'s frame, carried up `node`'s parent chain into `root`'s frame (`root` an ancestor of
+// `node`, excluded; NULL: up to the world)
+vec3 transform_point_to(const MeshTransform *node, vec3 local, const MeshTransform *root);
 void mesh_fini(Mesh*); // CAUTION: does NOT free underlying vertex/element buffers in case of re-use!
 
 typedef struct {

@@ -39,7 +39,8 @@ typedef struct {
     int puddles_max;        // mustardMaxPuddles: live puddles in the game (the oldest goes)
     float hose_radius;      // hoseRadius (genHose)
     float hose_length;      // hoseLength
-    vec3 hose_view;         // first-person centre in the weapon anchor (the branch: hoseViewX, hoseViewY - 1.5, hoseViewZ)
+    vec3 hose_view;         // first-person centre from the trigger hand's centre, weapon anchor axes, x mirrored left-handed (KN; the branch: hoseViewX, hoseViewY - 1.5, hoseViewZ in the weapon anchor)
+    vec3 hose_view_rot;     // first-person rotation x / y / z (hoseViewRotX / Y / Z), y and z mirrored left-handed
 } WeaponStream;
 
 typedef struct {

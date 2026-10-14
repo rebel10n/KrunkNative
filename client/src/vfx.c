@@ -867,9 +867,10 @@ static void local_stream_shot(Client *client, Player *me) {
     PissStream trace;
     if (!player_stream_trace(me, pitch, yaw, 0, &trace)) return;
     vec3 source = trace.source;
-    const vec3 tip = {stream->hose_view.x, stream->hose_view.y, stream->hose_view.z - stream->hose_length * 0.5f};
     const int sprite_model = client->game.map && client->game.map->config.model == MODEL_TYPE_SPRITE;
-    if (me->render_you && !sprite_model && !camera_offset_active(client) && ui_controls_weapon_visible(client)) arms_point(me, tip, &source);
+    // the drawn hose's own tip, so the stream starts where the cylinder ends wherever the hose sits
+    if (me->render_you && !sprite_model && !camera_offset_active(client) && ui_controls_weapon_visible(client)) player_hose_points(me, &source, NULL, NULL);
+    if (vfx.log) fprintf(stderr, "[vfx] stream source %.4f %.4f %.4f\n", source.x, source.y, source.z);
     spawn_stream_spray(stream, source, pitch, yaw, trace.time);
 }
 

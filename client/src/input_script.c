@@ -45,6 +45,10 @@
 //                                `om npc 1` an NPCs tile (1 the Ghost),
 //                                `om entity 14` an Entities tile (spawned at the crosshair floor point),
 //                                `om aim 1` turns the look onto handle 1 of the btools selection
+//   100 hose                     log the held hose (KrunkNative Piss) as drawn, world points: "[input_script] hose
+//                                t=100 tip=x,y,z back=x,y,z hand=x,y,z cam=x,y,z screen_tip=u,v screen_hand=u,v"
+//                                (hand: the trigger hand's centre; screen_*: window fraction, y down, -1 behind
+//                                the camera; "none" without a hose)
 //   100 flags                    log each mirrored CTF flag (position, carrier, team), its crystal / stand meshes and
 //                                its #tScoreM text: "[input_script] flag t=100 i=0 team=1 carrier=-1 pos=..."
 //   100 tpstate                  log the KrunkNative third-person camera of the last frame (third_person.h):
@@ -238,6 +242,27 @@ static int script_key(const char *name) {
         if (f >= 1 && f <= 12) return GLFW_KEY_F1 + f - 1;
     }
     return GLFW_KEY_UNKNOWN;
+}
+
+// window fraction (0..1, y down) of a world point through the client camera, as drawn (vfx.c project_to_screen)
+static vec2 script_project(Client *client, const vec3 p) {
+    int viewport[4];
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    Camera *camera = &client->camera;
+    camera_update_projection_matrix(camera, viewport[3] > 0 ? (float) viewport[2] / (float) viewport[3] : 1.0f);
+    camera_update_world_inverse_matrix(camera);
+    const float in[4] = {p.x, p.y, p.z, 1.0f};
+    float view[4], clip[4];
+    for (int r = 0; r < 4; r++) {
+        view[r] = 0.0f;
+        for (int c = 0; c < 4; c++) view[r] += camera->world_inverse_matrix[r * 4 + c] * in[c];
+    }
+    for (int r = 0; r < 4; r++) {
+        clip[r] = 0.0f;
+        for (int c = 0; c < 4; c++) clip[r] += camera->projection_matrix[r * 4 + c] * view[c];
+    }
+    if (clip[3] <= 0.0f) return (vec2) {-1.0f, -1.0f}; // behind the camera
+    return (vec2) {(clip[0] / clip[3] + 1.0f) * 0.5f, 1.0f - (clip[1] / clip[3] + 1.0f) * 0.5f};
 }
 
 static void script_run(Client *client, const ScriptEvent *e) {
@@ -483,6 +508,20 @@ static void script_run(Client *client, const ScriptEvent *e) {
         if (!wall && (seg.x != 0.0f || seg.y != 0.0f || seg.z != 0.0f)) wall = world_solid_fraction(&client->game, eye, seg) < 1.0f;
         fprintf(stderr, "[input_script] tpstate t=%.0f view=%d model=%d own=%d viewmodel=%d keep=%.2f cam=%.2f,%.2f,%.2f eye=%.2f,%.2f,%.2f wall=%d\n",
                 g_script.time, f.view, f.model, f.own_model, f.viewmodel, f.keep, cam.x, cam.y, cam.z, eye.x, eye.y, eye.z, wall);
+    } else if (!strcmp(e->cmd, "hose")) {
+        // hose: the held weapon's hose (KrunkNative Piss) as drawn: tip, back end and the trigger hand's
+        // centre (world), plus the camera and where the tip / hand land in the window (0..1, y down;
+        // piss_hose_e2e.py)
+        vec3 tip, back, hand;
+        const vec3 cam = client->camera.position;
+        if (client->me && player_hose_points(client->me, &tip, &back, &hand)) {
+            const vec2 st = script_project(client, tip), sh = script_project(client, hand);
+            fprintf(stderr, "[input_script] hose t=%.0f tip=%.4f,%.4f,%.4f back=%.4f,%.4f,%.4f hand=%.4f,%.4f,%.4f cam=%.4f,%.4f,%.4f "
+                    "screen_tip=%.4f,%.4f screen_hand=%.4f,%.4f\n",
+                    g_script.time, tip.x, tip.y, tip.z, back.x, back.y, back.z, hand.x, hand.y, hand.z, cam.x, cam.y, cam.z, st.x, st.y, sh.x, sh.y);
+        } else {
+            fprintf(stderr, "[input_script] hose t=%.0f none\n", g_script.time);
+        }
     } else if (!strcmp(e->cmd, "flags")) {
         // flags: one log line per mirrored flag (hud_modes: position, carrier, team) with its
         // crystal / stand meshes as drawn (mode_world) and the HUD text (CTF flag-cycle checks)

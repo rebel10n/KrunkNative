@@ -485,6 +485,30 @@ static const ViewerSkin *player_slot_skin(const Player *player, const int slot, 
     return skin && skin->type == 0 && skin->weapon - 1 == player->loadout[slot] ? skin : NULL;
 }
 
+// KrunkNative Piss: the centre of the trigger hand (the arm generate_arms gives the right hold:
+// arms->right, arms->left when left-handed), i.e. of its lower arm's last (skin) segment, in the
+// arms anchor's frame. Static there (the per-arm pivots only move for melee), so the first-person
+// hose is placed from it once.
+static vec3 player_trigger_hand(const PlayerArms *arms, const int left_handed) {
+    const PlayerArmMesh *arm = left_handed ? arms->left : arms->right;
+    if (!arm || !arm->lower || !arm->lower->mesh_count) return (vec3) {0.0f, 0.0f, 0.0f};
+    const Mesh *skin = arm->lower->meshes[arm->lower->mesh_count - 1];
+    return transform_point_to(&skin->transform, (vec3) {0.0f, 0.5f, 0.0f}, &arms->anchor); // the unit cube spans y 0..1
+}
+
+int player_hose_points(const Player *player, vec3 *tip, vec3 *back, vec3 *hand) {
+    const PlayerMesh *mesh = player ? player->mesh : NULL;
+    if (!mesh || !mesh->arms || player->loadout_index < 0 || player->loadout_index >= player->loadout_size) return 0;
+    const PlayerArms *arms = mesh->arms[player->loadout_index];
+    if (!arms || !arms->hose) return 0;
+    const float half = arms->hose_length * 0.5f;
+    // hoseTip: genObj3D(0, 0, -hoseLength / 2) inside the hose mesh
+    if (tip) *tip = transform_point_to(&arms->hose->transform, (vec3) {0.0f, 0.0f, -half}, NULL);
+    if (back) *back = transform_point_to(&arms->hose->transform, (vec3) {0.0f, 0.0f, half}, NULL);
+    if (hand) *hand = transform_point_to(&arms->anchor, player_trigger_hand(arms, player->left_handed), NULL);
+    return 1;
+}
+
 Mesh *player_hose_mesh(const WeaponStream *stream, const int color) {
     if (!stream || stream->hose_radius <= 0.0f || stream->hose_length <= 0.0f) return NULL;
     Geometry *geometry = create_hose_geo(stream->hose_radius, stream->hose_length, 18); // hoseSides ?? 18
@@ -1154,9 +1178,10 @@ void player_generate_meshes(Player *player, const int render_you) {
                 }
 
                 // KrunkNative Piss (e1624e4 hoseViewModel): the model-less weapon's hose in the skin colour
-                // (genHose color: skinCol). First person in the weapon anchor (hoseView*); third person
-                // on the lower body at the pelvis (hosePelvisHeight - legHeight up, -(hosePelvisForward -
-                // hoseLength / 2) forward). Shown and hidden with the slot like any weapon mesh.
+                // (genHose color: skinCol). First person in the weapon anchor, held in the trigger hand
+                // (KN: hose_view from the hand, see player_trigger_hand); third person on the lower body at
+                // the pelvis (hosePelvisHeight - legHeight up, -(hosePelvisForward - hoseLength / 2)
+                // forward). Shown and hidden with the slot like any weapon mesh.
                 if (weapon->stream && !weapon->src) {
                     const WeaponStream *stream = weapon->stream;
                     Mesh *hose = player_hose_mesh(stream, colors[0]);
@@ -1166,10 +1191,18 @@ void player_generate_meshes(Player *player, const int render_you) {
                             hose->transform.position = (vec3) {0.0f, stream->pelvis_height - game_constants.leg_height,
                                                                -(stream->pelvis_forward - stream->hose_length * 0.5f)};
                         } else {
+                            const float mirror = player->left_handed ? -1.0f : 1.0f;
+                            const vec3 hand = player_trigger_hand(arms, player->left_handed);
                             hose->transform.parent = &arms->anchor;
-                            hose->transform.position = stream->hose_view;
+                            hose->transform.position = (vec3) {hand.x + stream->hose_view.x * mirror, hand.y + stream->hose_view.y,
+                                                               hand.z + stream->hose_view.z};
+                            // rotateMesh(hoseMesh, hoseViewRotY, hoseViewRotX, hoseViewRotZ), mirrored left-handed
+                            hose->transform.rotation = (vec3) {stream->hose_view_rot.x, stream->hose_view_rot.y * mirror,
+                                                               stream->hose_view_rot.z * mirror};
                         }
                         arms->weapon_right = hose;
+                        arms->hose = hose;
+                        arms->hose_length = stream->hose_length;
                     }
                 }
 
