@@ -4,6 +4,7 @@
 #include <bots.h>
 #include <build_info.h>
 #include <info_query.h>
+#include <director_gate.h>
 #include <http_client.h>
 #include <server_cli.h>
 #include <server_config.h>
@@ -89,6 +90,7 @@ void info_query_update(const float now) {
     if (flavor_get() != FLAVOR_BASE) snprintf(info.flavor, sizeof(info.flavor), "%s", flavor_current()->key);
     info.port = cfg->public_port ? cfg->public_port : cfg->listen_port;
     if (cfg->password[0]) iq_add_tag(&info, "password");
+    if (director_gate_private(info.players)) iq_add_tag(&info, "private"); // a Strike director private lobby: never handed out publicly
     if (game_bots_autofill(game, NULL)) iq_add_tag(&info, "autofill"); // KrunkNative `autofill`: bots fill the lobby
     char dynamic[4][24];
     const int n = accounts_info_tags(dynamic, 4); // ranked / custom / draining / community

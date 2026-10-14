@@ -36,6 +36,7 @@ typedef struct {
     char brain_url[GS_STR_LARGE];   // ws://host:port/path of kn_brain's internal socket, "" = standalone
     char brain_secret[GS_STR_SMALL * 2]; // bearer secret (never logged)
     char join_secret[GS_STR_SMALL * 2];  // HMAC key of the brain's join tickets ("" = brain_secret)
+    char director_secret[GS_STR_SMALL * 2]; // Krunker Strike director tickets (director_gate.h), "" = not checked
     char web_url[GS_STR_LARGE];          // ws(s) URL web clients use (net-bridge /native), "" none
     char brain_http_url[GS_STR_LARGE];   // brain HTTP base for /api/map-data ("" = from brain_url)
     unsigned short tick_rate;
@@ -83,6 +84,7 @@ typedef struct {
     char bans_file[GS_STR_LARGE];        // persisted IP / name / account bans, "" = memory only
     int allow_guests;                    // with a brain: players without an account may join
     int require_ticket;                  // with a brain: every join needs a ticket or session token
+    int director_require_ticket;         // with director_secret: every join needs a director ticket
     float join_timeout;                  // seconds a brain-linked server waits for JOIN
 
     // ---- rewards (v3.1.1 endGame: min(premium ? 40 : 30, floor(score * rewardMlt / 100)))

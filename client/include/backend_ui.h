@@ -121,6 +121,7 @@ void store_ui_scenario_result(const cJSON *result); // state.spinResult {rand, i
 
 // ---- servers_ui.c (ClientManager + windows[1])
 void servers_ui_init(Client*, int brain_mode); // brain_mode: matchmake at startup instead of the default server
+void servers_ui_set_director_mode(int on);    // Krunker Strike: the director matchmakes at startup (strike_director.h)
 int  servers_ui_brain_mode(void);            // matchmaking on and the session is a brain lobby (not pinned)
 int  servers_ui_pinned(void);               // 1 = pinned to a direct server (console connect, Direct Connect)
 void servers_ui_connect_direct(const char *host, int port); // console `connect`: a pinned direct session

@@ -4,6 +4,7 @@
 #include <v10_social.h>
 #include <backend.h>
 #include <backend_ui.h>
+#include <strike_director.h> // Krunker Strike: the director matchmakes
 #include <online_mode.h>
 #include <krunker_net.h>
 #include <krunker_lobbies.h>
@@ -97,7 +98,11 @@ int backend_startup(Client *client, const int offline, const int scenario) {
     const int brain_mode = backend_enabled() && !offline && !direct && !g_hub_page;
     servers_ui_init(client, brain_mode);
     if (brain_mode) printf("[mm] matchmaking through %s\n", backend_url());
-    return brain_mode;
+    // Krunker Strike with a director (strike_director.h): it matchmakes, also without a brain; like
+    // brain_mode, the transport starts once it answers
+    const int director_mode = strike_director_enabled() && !offline && !direct && !g_hub_page;
+    servers_ui_set_director_mode(director_mode);
+    return brain_mode || director_mode;
 }
 
 void backend_frame(Client *client) {

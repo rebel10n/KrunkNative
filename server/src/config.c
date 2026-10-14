@@ -363,6 +363,7 @@ int gs_config_from_json(GsConfig *cfg, const cJSON *s, char *err, const size_t e
     gs_read_str(s, "brain_url", cfg->brain_url, sizeof(cfg->brain_url));
     gs_read_str(s, "brain_secret", cfg->brain_secret, sizeof(cfg->brain_secret));
     gs_read_str(s, "join_secret", cfg->join_secret, sizeof(cfg->join_secret));
+    gs_read_str(s, "director_secret", cfg->director_secret, sizeof(cfg->director_secret)); // Krunker Strike director (director_gate.h)
     gs_read_str(s, "web_url", cfg->web_url, sizeof(cfg->web_url));
     gs_read_str(s, "brain_http_url", cfg->brain_http_url, sizeof(cfg->brain_http_url));
     {
@@ -487,6 +488,7 @@ int gs_config_from_json(GsConfig *cfg, const cJSON *s, char *err, const size_t e
     }
     gs_read_bool(s, "allow_guests", &cfg->allow_guests);
     gs_read_bool(s, "require_ticket", &cfg->require_ticket);
+    gs_read_bool(s, "director_require_ticket", &cfg->director_require_ticket);
     gs_read_float(s, "join_timeout", &cfg->join_timeout, 0.5f, 120.0f);
 
     // rewards

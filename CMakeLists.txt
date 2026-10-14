@@ -153,6 +153,7 @@ set(SERVER_CORE_SOURCES
 # central auth and rcon hooks.
 set(SERVER_CORE_STANDALONE_SOURCES
     server/src/brain.c
+    server/src/director_gate.c  # Krunker Strike director tickets: the stub (disabled) without knsvc
     server/src/sandbox_backend.c
 )
 list(REMOVE_ITEM SERVER_SOURCES ${CMAKE_SOURCE_DIR}/server/src/sandbox_backend.c)
@@ -1175,5 +1176,9 @@ else ()
     if (TARGET knsvc)
         target_link_libraries(${SERVER_BINARY} PRIVATE knsvc)
         target_compile_definitions(${SERVER_BINARY} PRIVATE KRUNKNATIVE_HAVE_KNSVC=1)
+        # Krunker Strike director tickets (server/src/director_gate.c): the director's own ticket
+        # code (services/strike/director_ticket.c), so both sides sign / verify the same way
+        target_sources(${SERVER_BINARY} PRIVATE services/strike/director_ticket.c)
+        target_include_directories(${SERVER_BINARY} PRIVATE services/strike)
     endif ()
 endif ()

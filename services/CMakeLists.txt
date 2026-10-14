@@ -105,9 +105,15 @@ if (KNSVC_DB_AVAILABLE AND EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/brain/CMakeLists.t
     add_subdirectory(brain)
 endif ()
 
+# Krunker Strike director (services/strike, doc/v10/strike-director.md): standalone matchmaker,
+# knsvc only (no database), so it builds wherever OpenSSL is.
+if (EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/strike/CMakeLists.txt)
+    add_subdirectory(strike)
+endif ()
+
 # `make services`: every backend library, tool, test and the brain.
 add_custom_target(services_all)
-foreach (t IN ITEMS knsvc knsvc_db knsvc_redis kn_migrate kn_dbcopy kn_brain kn_loadgen)
+foreach (t IN ITEMS knsvc knsvc_db knsvc_redis kn_migrate kn_dbcopy kn_brain kn_loadgen kn_strike_director)
     if (TARGET ${t})
         add_dependencies(services_all ${t})
     endif ()

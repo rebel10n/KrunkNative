@@ -7,6 +7,7 @@
 #include <rcon.h>
 #include <bots.h>
 #include <ks_server.h> // KrunkScript server host
+#include <director_gate.h> // Krunker Strike director tickets
 #include <build_info.h>
 #include <map_catalog.h> // map_catalog_load_file
 #include <pthread.h>
@@ -812,6 +813,7 @@ int main(int argc, char **argv) {
         server_log_error("No playable map loaded");
     }
 
+    director_gate_init(cfg); // Krunker Strike director tickets (gameserver.director_secret)
     // backend: lobby id, bans file, per-mode lobby size / round length, brain thread
     pthread_mutex_lock(&g_server->lock);
     ks_server_round_init(); // KrunkScript: the startup map's server script, start()

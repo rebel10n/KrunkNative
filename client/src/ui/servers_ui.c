@@ -28,6 +28,8 @@
 #include <krunker_lobbies.h> // official krunker.io lobbies (native only, mm-token)
 #include <krunker_net.h>     // krunker_net_in_client: official lobbies join here unless the browser opt-out
 #include <v10_party.h>     // the server password popup (ERROR 004005)
+#include <strike_director.h> // Krunker Strike: seek through the director, else the finder's Strike pool
+#include <flavor.h>
 #include <strings.h>
 #include <ctype.h>
 #include <math.h>
@@ -64,6 +66,8 @@ static char g_exclude_game[160]; // v10 Quick Match: the next seek's excludeGame
 static char g_game_id[160];      // gameId: the lobby this client is in (or joining), canonical (CHITOWN2:kz862)
 static char g_game_region[32];   // its region (the seek answer's), for the short link form ("" = unknown)
 static int g_seek_inflight;
+static int g_director_mode;      // Krunker Strike: the director matchmakes at startup (no brain needed)
+static char g_strike_code[16];   // the private lobby code of this session ("" = public)
 static char g_seek_game[160];    // the game id the running seek asked for ("" = any)
 static char g_account_game[160]; // AccountRequired: the lobby a guest was refused (joined after login)
 // Find New Game (F4) / Quick Match (servers_ui_find_new_game): the seek in flight is one, made
@@ -642,6 +646,99 @@ static void on_seek(void *user, const int status, const char *body, const size_t
     cJSON_Delete(res);
 }
 
+// ---- Krunker Strike (strike_director.h): the director allocates a game server and a ticket; when
+// it cannot (unreachable, no capacity), the finder's Strike pool (?flavor=strike) is the fallback.
+
+static void strike_seek_failed(const char *error) {
+    if (g_find_seek && g_client->net_connected) { // Find New Game found nothing: stay in this lobby
+        snprintf(g_game_id, sizeof(g_game_id), "%s", g_find_prev_game);
+        ui_notify(seek_error_text(error));
+    } else {
+        fatal_error(seek_error_text(error));
+    }
+    g_find_seek = g_find_both = 0;
+}
+
+// The fullest Strike server with room from the finder: a matchmade session without a ticket.
+static void on_strike_finder(void *user, const int status, const char *body, const size_t length) {
+    (void) length;
+    char *error = user;
+    g_seek_inflight = 0;
+    cJSON *res = status == 200 ? cJSON_Parse(body) : NULL;
+    const cJSON *best = NULL, *srv;
+    int best_players = -1;
+    cJSON_ArrayForEach(srv, cJSON_GetObjectItem(res, "servers")) {
+        const int players = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(srv, "players"));
+        const int max = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(srv, "max"));
+        const char *flavor = cJSON_GetStringValue(cJSON_GetObjectItem(srv, "flavor"));
+        if (!flavor || strcmp(flavor, "strike") || cJSON_IsTrue(cJSON_GetObjectItem(srv, "password")) || players >= max) continue;
+        if (!cJSON_IsString(cJSON_GetObjectItem(srv, "host")) || players <= best_players) continue;
+        best = srv;
+        best_players = players;
+    }
+    if (g_pin != PIN_NONE) {
+        printf("[strike] finder answer ignored: %s\n", g_pin == PIN_DIRECT ? "pinned to a direct server" : "disconnected by the user");
+    } else if (best) {
+        const char *host = cJSON_GetStringValue(cJSON_GetObjectItem(best, "host"));
+        const int port = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(best, "port"));
+        printf("[strike] finder pool: %s:%d (%d players)\n", host, port, best_players);
+        g_find_seek = g_find_both = 0;
+        g_strike_code[0] = 0;
+        join_server(host, port, "", NULL, NULL, cJSON_GetStringValue(cJSON_GetObjectItem(best, "region")));
+    } else {
+        fprintf(stderr, "[strike] finder pool: no Strike server with room (HTTP %d)\n", status);
+        strike_seek_failed(error && error[0] ? error : "NoAvailableServers");
+    }
+    cJSON_Delete(res);
+    free(error);
+}
+
+static int strike_finder_seek(const char *error) {
+    const char *finder = online_finder_url();
+    if (!finder[0]) return 0;
+    char url[384];
+    snprintf(url, sizeof(url), "%s%cflavor=strike&space=1", finder, strchr(finder, '?') ? '&' : '?');
+    char *copy = strdup(error ? error : "");
+    g_seek_inflight = backend_http_request("GET", url, NULL, on_strike_finder, copy);
+    if (!g_seek_inflight) free(copy);
+    else printf("[strike] falling back to the finder's Strike pool: GET %s\n", url);
+    return g_seek_inflight;
+}
+
+static void on_strike_allocation(void *user, const StrikeAllocation *a) {
+    (void) user;
+    g_seek_inflight = 0;
+    g_rejoin_seek = 0;
+    if (g_pin != PIN_NONE) {
+        printf("[strike] allocation ignored: %s\n", g_pin == PIN_DIRECT ? "pinned to a direct server" : "disconnected by the user");
+        return;
+    }
+    if (a->ok) {
+        g_find_seek = g_find_both = 0;
+        snprintf(g_strike_code, sizeof(g_strike_code), "%s", a->code);
+        join_server(a->host, a->port, a->game_id, a->ticket, NULL, a->region);
+        return;
+    }
+    // an outdated client cannot play anywhere this director serves: no fallback
+    if (!strcmp(a->error, "GameVersionTooOld")) {
+        strike_seek_failed("GAME UPDATING");
+        return;
+    }
+    // a private code that does not exist (any more) or is full: that is the answer
+    if (!strcmp(a->error, "LobbyNotFound") || !strcmp(a->error, "GameFull")) {
+        strike_seek_failed(!strcmp(a->error, "GameFull") ? "GameFull" : "InvalidGameId");
+        return;
+    }
+    if (!strike_finder_seek(a->error)) strike_seek_failed(a->status ? a->error : NULL);
+}
+
+// priv: a private lobby (code = join it, "" = open one).
+static int strike_seek(const int priv, const char *code) {
+    g_seek_inflight = strike_director_allocate(priv, g_region, NULL, NULL, code, on_strike_allocation, NULL);
+    if (!g_seek_inflight && !strike_finder_seek(NULL)) return 0;
+    return 1;
+}
+
 // ClientManager.matchmakerSeek(region, gameId, dataQuery, autoChangeGame)
 // Every caller is an explicit matchmaking action (the automatic ones check g_pin first):
 // it unpins.
@@ -653,6 +750,16 @@ static void seek(const char *game_id, const int auto_change, void *quiet) {
     if (!g_rejoin_seek) rejoin_cancel(); // any other matchmaking action replaces a pending rejoin
     snprintf(g_seek_game, sizeof(g_seek_game), "%s", game_id ? game_id : "");
     g_account_game[0] = 0;
+    if (strike_director_enabled()) {
+        // Krunker Strike: director game ids are not brain lobbies; the session's own private
+        // lobby (a rejoin, a reconnect) is sought again by its code, anything else is a public seek
+        const int same_private = g_strike_code[0] && game_id && game_id[0] && !strcmp(game_id, g_game_id);
+        (void) auto_change;
+        (void) quiet;
+        g_exclude_game[0] = 0;
+        if (!strike_seek(same_private, same_private ? g_strike_code : NULL)) seek_unreachable();
+        return;
+    }
     backend_url_encode(enc, sizeof(enc), g_region);
     int n = snprintf(path, sizeof(path), "/mm/seek-game?hostname=krunknative&region=%s&autoChangeGame=%s", enc, auto_change ? "true" : "false");
     // the protocol this client speaks: the brain never matches it to a node of another major
@@ -768,6 +875,10 @@ static void on_ping_list(void *user, const int status, const char *body, const s
 
 static void start_seek(const char *game_id) {
     if (g_seek_inflight) return;
+    if (strike_director_enabled() && !g_brain_mode) { // Krunker Strike without a brain: the director only
+        seek(game_id, !game_id, NULL);
+        return;
+    }
     char *copy = game_id && game_id[0] ? strdup(game_id) : NULL;
     if (!backend_http_get("/mm/ping-list", on_ping_list, copy)) {
         free(copy);
@@ -808,7 +919,28 @@ static void switch_server(const char *id) {
 // or a bare lobby id "NODE:lobby" (either form: CH2:kz862 or CHITOWN2:kz862) switches to that
 // game; anything else (re)opens the Join window (showWindow(24)). Party links are not ported
 // (no parties): the window again. Parsing: shared/src/server_names.c kn_game_link_parse.
+// Krunker Strike: a private lobby code (4-12 letters / digits, the director's allocate/private
+// customMatchId). 1 = it looked like one and the seek started.
+static int strike_join_code(const char *text) {
+    char code[16];
+    size_t n = 0;
+    while (*text == ' ') text++;
+    for (; *text && *text != ' ' && n + 1 < sizeof(code); text++) {
+        if (!isalnum((unsigned char) *text)) return 0;
+        code[n++] = (char) toupper((unsigned char) *text);
+    }
+    code[n] = 0;
+    while (*text == ' ') text++;
+    if (*text || n < 4 || n > 12 || !strike_director_enabled() || g_seek_inflight) return 0;
+    printf("[strike] joining private lobby %s\n", code);
+    menu_show_window(MENU_WINDOW_NONE, 0);
+    g_pin = PIN_NONE;
+    if (!strike_seek(1, code)) seek_unreachable();
+    return 1;
+}
+
 int servers_ui_join_link(const char *text) {
+    if (text && strike_join_code(text)) return 1;
     char id[160];
     kn_game_link_parse(text, id, sizeof(id));
     if (!id[0] || !g_brain_mode || backend_available() != 1) {
@@ -1519,6 +1651,8 @@ static void finder_refresh(void) {
     if (!online_finder_url()[0] || g_finder_loading || now_ms() - g_finder_loaded_ms < SERVER_BROWSER_RATE_MS) return;
     char url[320];
     snprintf(url, sizeof(url), "%s", online_finder_url()); // every server takes guests: no online_mode filter
+    // the product flavor's pool (finder_table.c): a Strike client lists only Strike lobbies
+    if (flavor_get() == FLAVOR_STRIKE) snprintf(url + strlen(url), sizeof(url) - strlen(url), "%cflavor=strike", strchr(url, '?') ? '&' : '?');
     g_finder_loading = backend_http_request("GET", url, NULL, on_finder, NULL);
     if (!g_finder_loading) {
         snprintf(g_finder_error, sizeof(g_finder_error), "the request could not be sent");
@@ -3047,11 +3181,13 @@ void servers_ui_init(Client *client, const int brain_mode) {
     g_start_time = glfwGetTime();
 }
 
+void servers_ui_set_director_mode(const int on) { g_director_mode = on != 0; }
+
 int servers_ui_retry(void) {
     // pinned: the link retries that server (menu_retry_connect -> client_net_request_reconnect)
     if (g_pin == PIN_DIRECT) return 0;
-    if (g_pin == PIN_IDLE && !g_brain_mode) return servers_ui_reconnect(); // the transport is stopped
-    if (!g_brain_mode) return 0;
+    if (g_pin == PIN_IDLE && !g_brain_mode && !g_director_mode) return servers_ui_reconnect(); // the transport is stopped
+    if (!g_brain_mode && !g_director_mode) return 0;
     // "Try seeking a new game": a fresh seek in the same region (v3.1.1 reloads the page)
     g_pin = PIN_NONE; // the user asked for matchmaking (also after a console `disconnect`)
     g_game_id[0] = 0;
@@ -3086,7 +3222,7 @@ int servers_ui_quick_match(void) {
 int servers_ui_find_new_game(void) {
     const SeekServers type = seek_prefs_servers();
     if (type == SEEK_SERVERS_OFFICIAL) return krunker_lobbies_seek();
-    if (!g_brain_mode || g_pin == PIN_DIRECT || g_seek_inflight) {
+    if ((!g_brain_mode && !g_director_mode) || g_pin == PIN_DIRECT || g_seek_inflight) {
         return type == SEEK_SERVERS_BOTH && !g_seek_inflight ? krunker_lobbies_seek() : g_seek_inflight;
     }
     g_find_seek = 1;
@@ -3134,6 +3270,14 @@ void servers_ui_tick(Client *client) {
         g_brain_mode = 0;
         client->net_ws_url[0] = 0;
         client_net_switch_server(client); // the default transport target
+        return;
+    }
+    if (g_director_mode && !g_brain_mode) { // Krunker Strike: the director's startup seek
+        if (!g_started && g_pin == PIN_NONE) {
+            g_started = 1;
+            printf("[strike] matchmaking through the director %s\n", strike_director_url());
+            seek(NULL, 1, NULL);
+        }
         return;
     }
     if (!g_brain_mode) return;

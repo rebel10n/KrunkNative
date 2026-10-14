@@ -3,6 +3,7 @@
 #include <ruleset.h> // meta.ruleset
 #include <server_accounts.h>
 #include <server_log.h>
+#include <director_gate.h> // Krunker Strike director tickets
 #include <brain.h>
 #include <build_info.h>
 #include <central_auth.h>
@@ -1374,7 +1375,7 @@ void accounts_on_connect(ClientConnection *client) {
     memset(&client->acct, 0, sizeof(client->acct));
     client->acct.badge = -1;
     client->acct.round_result = -1;
-    const int gated = g_acc.brain || g_gs_config.online_mode || g_gs_config.password[0];
+    const int gated = g_acc.brain || g_gs_config.online_mode || g_gs_config.password[0] || director_gate_enabled();
     client->acct.join_state = gated ? SERVER_JOIN_AWAIT : SERVER_JOIN_READY;
     client->acct.join_deadline = g_server->now + g_gs_config.join_timeout;
     if (g_gs_config.online_mode) {
@@ -1403,6 +1404,13 @@ static void acc_become_guest(ClientConnection *client, const char *why) {
     // a verified account plays as a guest (Guest_N, nothing saved), never under a claimed name
     client->acct.central_pending = 0;
     client->acct.username[0] = 0;
+    if (director_gate_enabled()) { // Krunker Strike: required tickets, private lobbies (director_gate.h)
+        char msg[96] = "";
+        if (director_gate_check(NULL, acc_player_count() == 0, msg, sizeof(msg)) != DIRECTOR_GATE_PASS) {
+            acc_reject(client, msg, "004001");
+            return;
+        }
+    }
     if (g_gs_config.password[0] && !client->acct.password_ok) {
         acc_reject(client, "This server needs a password", "004005");
         return;
@@ -1420,6 +1428,27 @@ static void acc_become_guest(ClientConnection *client, const char *why) {
     if (why) server_log("%s joins as a guest (%s)", client->name, why);
     client->acct.account_id = 0;
     acc_set_ready(client);
+}
+
+// Krunker Strike director tickets (director_gate.h): 1 = handled (admitted or refused). A ticket
+// that does not verify is refused, unless a brain links this server (then it may be a brain join
+// ticket: the brain path below decides). No ticket: refused when required or into a private lobby
+// with players, else the usual paths.
+static int acc_director_join(ClientConnection *client, const NetJoinPacket *join) {
+    const int ticket = join->client_key[0] && strncmp(join->client_key, "hj1:", 4) != 0;
+    char msg[96] = "";
+    const DirectorGateResult r = director_gate_check(ticket ? join->client_key : NULL, acc_player_count() == 0, msg, sizeof(msg));
+    if (r == DIRECTOR_GATE_PASS || (r == DIRECTOR_GATE_INVALID && g_acc.brain)) return 0;
+    if (r != DIRECTOR_GATE_OK) {
+        acc_reject(client, msg, "004001");
+        return 1;
+    }
+    // the director's guest: no account (Strike accounts are not kn accounts)
+    client->acct.central_pending = 0;
+    client->acct.username[0] = 0;
+    client->acct.account_id = 0;
+    acc_set_ready(client);
+    return 1;
 }
 
 static void acc_send_auth(ClientConnection *client, const char *key, const char *value) {
@@ -1684,6 +1713,7 @@ void accounts_handle_join(ClientConnection *client, const NetPacket *packet) {
         client->acct.password_ok = 1;
     }
 
+    if (director_gate_enabled() && acc_director_join(client, &join)) return;
     if (g_gs_config.online_mode && acc_online_join(client, &join, guest_ack)) return;
 
     if (!g_acc.brain) {
