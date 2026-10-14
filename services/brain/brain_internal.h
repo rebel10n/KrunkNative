@@ -103,6 +103,8 @@ void ranked_result(Brain *b, const cJSON *frame, RankedResultCb cb, void *ud);
 
 /* ---- v10 Turf Wars (turf.c, 0206_turf_wars) */
 int turf_init(Brain *b);
+/* v10's HTTP leaderboards (leaderboards.c: /api/leaderboards/..., the v10 Leaderboards popup) */
+int leaderboards_http_init(Brain *b);
 void turf_shutdown(Brain *b);
 /* internal WS "turf-kills" {mapId, records}: cb once (same callback shape as ranked_result) */
 void turf_record(Brain *b, const cJSON *frame, RankedResultCb cb, void *ud);

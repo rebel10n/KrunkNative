@@ -515,7 +515,7 @@ static char *gen_23(void) { return hud_ui_player_list_html(); } // Player List (
 static char *gen_13(void) { return clan_window_gen(); }
 static char *gen_14(void) { return store_window_gen(); } // Store (windows[13], store_ui.c)
 static char *gen_25(void) { return download_window_gen(); } // Download Client: KrunkNative's packages (download_ui.c)
-static char *gen_27(void) { return ranked_ui_window_gen(); } // Ranked (kept by KrunkNative, ranked_ui.c) // Clans (windows[12], clan_ui.c): guest LOGIN REQUIRED
+static char *gen_27(void) { return ranked_ui_window_gen(); } // Ranked: '' like v10 (the popup is ranked_ui.c) // Clans (windows[12], clan_ui.c): guest LOGIN REQUIRED
 // Change Loadout and the windows it opens, Changelog: ui_loadout.c
 static char *gen_loadout(void) { return ui_loadout_gen(); }
 #define LOADOUT_GEN(n) static char *gen_##n(void) { char *h = ui_loadout_generate(n, NULL); return h ? h : gen_static(#n); }
@@ -530,7 +530,6 @@ static char *gen_object_manager(void) { return object_manager_window_gen(OBJECT_
 static const WindowDef WINDOWS[] = {
     {SERVERS_WINDOW_CONNECT, servers_connect_window_gen}, // KrunkNative: the menu's Connect button (servers_ui.c)
     {OBJECT_MANAGER_WINDOW, gen_object_manager},          // KrunkNative: the Object Manager (object_manager_ui.c)
-    {TURF_WINDOW, turf_window_gen},                       // v10 Turf Wars (turf_ui.c)
     {1, gen_settings},
     {3, gen_loadout},
     {7, gen_7},
@@ -585,7 +584,7 @@ void ui_window_meta(const int id, const char **cls, const char **style) {
     const UiWindowMeta *m = ui_windows_meta(key);
     if (cls) *cls = m ? m->cls : "dark";
     if (style) *style = m ? m->style : id == OBJECT_MANAGER_WINDOW ? "overflow-y: auto; width: 1120px;"
-                                     : id == TURF_WINDOW ? "overflow-y: auto; width: 1400px; max-height: calc(100% - 250px);" : "overflow-y: auto;";
+                                     : "overflow-y: auto;";
 }
 
 char *ui_window_generate(const int id, const char **header, int *sticky) {
@@ -594,7 +593,7 @@ char *ui_window_generate(const int id, const char **header, int *sticky) {
     char key[8];
     snprintf(key, sizeof(key), "%d", id);
     const UiWindowMeta *m = ui_windows_meta(key);
-    if (header) *header = m ? m->header : id == TURF_WINDOW ? "Turf Wars" : "";
+    if (header) *header = m ? m->header : "";
     if (sticky) *sticky = m ? m->sticky : 0;
     // brain backend (backend_ui.h): the signed-in Account window and the live Servers
     // list replace the guest captures; NULL keeps them (no brain, guest)

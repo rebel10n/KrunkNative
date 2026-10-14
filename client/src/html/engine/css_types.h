@@ -67,6 +67,9 @@ typedef struct CssLength {
     float pct;             /* 50% -> 50.0f                                   */
     float em;              /* unresolved em component (0 once computed)      */
     uint8_t kind;          /* CssLengthKind                                   */
+    uint8_t pct_term;      /* 1: written as a percentage, also 0% (flex: 1's  */
+                           /* flex-basis 0% is content-sized in an indefinite */
+                           /* container, 0px is not; pct alone can't tell)    */
 } CssLength;
 
 /* ------------------------------------------------------------------------- */
@@ -497,7 +500,7 @@ typedef struct CssComputed {
     uint8_t flex_direction;           /* CssFlexDirection                      */
     uint8_t flex_wrap;                /* CssFlexWrap                           */
     uint8_t justify_content;          /* CssJustifyContent                     */
-    uint8_t align_content;            /* CssJustifyContent (grid rows; flex: normal only) */
+    uint8_t align_content;            /* CssJustifyContent (grid rows; wrapped flex lines) */
     uint8_t align_items;              /* CssAlignItems                         */
     float flex_grow, flex_shrink;
     CssLength flex_basis;             /* AUTO by default                       */

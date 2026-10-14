@@ -4,7 +4,8 @@
  * space-between/space-around/space-evenly), align-items (stretch/start/end/
  * center; baseline treated as start), flex-grow/flex-shrink/flex-basis,
  * automatic minimum size (min-content), auto margins on the main axis,
- * align-content stretch for wrapped lines with a definite cross size,
+ * align-content (normal/stretch, start, end, center, space-*) for wrapped lines
+ * with a definite cross size,
  * align-self overriding align-items per item, row-gap / column-gap (the
  * main-axis gap between items of a line, the cross-axis gap between lines).
  */
@@ -140,7 +141,8 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
         const CssLength *msize = row ? &cs->width : &cs->height;
         int have = 0;
         float base = 0;
-        if (basis->kind == CSS_LEN_VALUE && !(basis->pct != 0 && main_avail < 0)) {
+        /* a percentage basis (also flex: 1's 0%) in an indefinite container is content-sized */
+        if (basis->kind == CSS_LEN_VALUE && !((basis->pct != 0 || basis->pct_term) && main_avail < 0)) {
             float v = layout_resolve_len(basis, main_avail, 0);
             base = row ? layout_box_sizing_w(c, v) : layout_box_sizing_h(c, v);
             have = 1;
@@ -299,6 +301,7 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
         ln->cross = mx;
         total_cross += mx + (l ? gap_cross : 0);
     }
+    float lines_lead = 0, lines_between = 0;      /* align-content of a multi-line container */
     if (nl == 1 && cross_avail >= 0) { total_cross = cross_avail; lines[0].cross = cross_avail; }
     else if (nl == 1 && row) {
         /* single-line with an indefinite cross size: the line's cross size is clamped to the
@@ -309,8 +312,19 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
         total_cross = lines[0].cross = kn_maxf(0, bh - box_border_padding_h(b));
     }
     else if (cross_avail >= 0 && total_cross < cross_avail && nl > 1) {
-        float extra = (cross_avail - total_cross) / (float)nl;   /* align-content: normal (stretch); gaps stay */
-        for (int l = 0; l < nl; l++) lines[l].cross += extra;
+        const float free_c = cross_avail - total_cross;
+        switch (s->align_content) {
+        case CSS_JUSTIFY_CONTENT_FLEX_START: break;
+        case CSS_JUSTIFY_CONTENT_FLEX_END: lines_lead = free_c; break;
+        case CSS_JUSTIFY_CONTENT_CENTER: lines_lead = free_c * 0.5f; break;
+        case CSS_JUSTIFY_CONTENT_SPACE_BETWEEN: lines_between = free_c / (float)(nl - 1); break;
+        case CSS_JUSTIFY_CONTENT_SPACE_AROUND: lines_between = free_c / (float)nl; lines_lead = lines_between * 0.5f; break;
+        case CSS_JUSTIFY_CONTENT_SPACE_EVENLY: lines_between = lines_lead = free_c / (float)(nl + 1); break;
+        default: { /* normal (stretch): the lines share the free space; gaps stay */
+            float extra = free_c / (float)nl;
+            for (int l = 0; l < nl; l++) lines[l].cross += extra;
+        } break;
+        }
         total_cross = cross_avail;
     }
     /* stretch (row: heights) */
@@ -381,7 +395,7 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
     }
 
     /* ---- cross axis positions ---- */
-    float cpos = 0;
+    float cpos = lines_lead;
     for (int l = 0; l < nl; l++) {
         FLine *ln = &lines[l];
         ln->pos = cpos;
@@ -400,7 +414,7 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
             }
             it->pos_cross = cpos + off + it->cm0;
         }
-        cpos += ln->cross + gap_cross;
+        cpos += ln->cross + gap_cross + lines_between;
     }
     if (s->flex_wrap == CSS_FLEX_WRAP_WRAP_REVERSE) {
         for (int i = 0; i < n; i++) items[i].pos_cross = total_cross - items[i].pos_cross - items[i].cross;

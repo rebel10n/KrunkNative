@@ -492,7 +492,7 @@ void hud_objectives_fini(void);                   // its canvas (GL)
 // 54 title_selection; doc/v10/ui.md). Builds before the ruleset seam had it at 54.
 #define KN_WINDOW_BASE 100
 #define OBJECT_MANAGER_WINDOW (KN_WINDOW_BASE + 0)
-#define TURF_WINDOW (KN_WINDOW_BASE + 1)    // v10 Turf Wars (turf_ui.c; v10 shows it in a popup)
+// KN_WINDOW_BASE + 1: free (it was the Turf Wars window; Turf Wars is v10's popup now, turf_ui.c)
 // KN_WINDOW_BASE + 2: SERVERS_WINDOW_CONNECT (backend_ui.h), the menu's Connect window
 void object_manager_ui_toggle(Client*);          // the F1 bind: open (pointer freed) / close (pointer back)
 int  object_manager_ui_escape(void);             // Escape on the window: 1 = back to the game

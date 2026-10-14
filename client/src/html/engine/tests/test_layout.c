@@ -335,6 +335,31 @@ static void t_flex(void)
     fx_free(fx);
 }
 
+/* flex: 1 (flex-basis 0%) in an auto-height column is content-sized (v10's generic table in a
+ * block .table-section); align-content on wrapped lines (v10's leaderboard category grid) */
+static void t_flex_pct_basis_align_content(void)
+{
+    Fx *fx = fx_html(
+        "<div id=sec><div id=tw style='display:flex;flex-direction:column'>"
+        "<div id=tc style='flex:1;min-height:0'><div style='height:70px'></div></div></div></div>"
+        "<div id=tz style='display:flex;flex-direction:column'>"
+        "<div id=tzc style='flex:1 1 0px;min-height:0'><div style='height:70px'></div></div></div>"
+        "<div id=ac style='display:flex;flex-wrap:wrap;align-content:center;width:100px;height:200px'>"
+        "<div id=c1 style='width:60px;height:30px'></div><div id=c2 style='width:60px;height:30px'></div></div>"
+        "<div id=ab style='display:flex;flex-wrap:wrap;align-content:space-between;width:100px;height:200px'>"
+        "<div id=d1 style='width:60px;height:30px'></div><div id=d2 style='width:60px;height:30px'></div></div>", NULL);
+    CHECK_NEAR(rc(fx, "tc").h, 70, 0.01, "flex: 1 in an auto-height column: content height (0% basis is indefinite)");
+    CHECK_NEAR(rc(fx, "tw").h, 70, 0.01, "its column container: content height");
+    CHECK_NEAR(rc(fx, "tzc").h, 0, 0.01, "flex-basis 0px stays definite");
+    HtmlRect ac = rc(fx, "ac");
+    CHECK_NEAR(rc(fx, "c1").y - ac.y, 70, 0.01, "align-content center: first line");
+    CHECK_NEAR(rc(fx, "c2").y - ac.y, 100, 0.01, "align-content center: second line");
+    CHECK_NEAR(rc(fx, "c1").h, 30, 0.01, "align-content center: lines not stretched");
+    HtmlRect ab = rc(fx, "ab");
+    CHECK_NEAR(rc(fx, "d2").y - ab.y, 170, 0.01, "align-content space-between: last line at the end");
+    fx_free(fx);
+}
+
 static void t_grid(void)
 {
     char html[4096];
@@ -1546,6 +1571,7 @@ int main(int argc, char **argv)
     t_floats();
     t_inline_block_baseline();
     t_flex();
+    t_flex_pct_basis_align_content();
     t_grid();
     t_grid_tracks();
     t_grid_placement();

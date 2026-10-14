@@ -232,6 +232,511 @@ static kn_db_result *run_turf_loot_set(kn_dbconn *c, int n, const char *const *p
     cJSON_AddNumberToObject(o, "top_player_pct", l.top_player_pct);
     cJSON_AddNumberToObject(o, "remainder_pct", l.remainder_pct);
     cJSON_AddNumberToObject(o, "min_games_required", l.min_games);
+    /* v10's PUT answer: who saved it and when */
+    char *by = dbx_text(&x, SQL(.any = "SELECT updated_by FROM turf_loot_config WHERE clan_id = {int:$1}"), KN_DB_ARGS(I64S(clan)));
+    cJSON_AddStringToObject(o, "updated_by_name", by ? by : "");
+    free(by);
+    cJSON_AddNumberToObject(o, "updated_ms", (double) dbx_int(&x, SQL(.any = "SELECT {epoch_ms:updated_at} FROM turf_loot_config WHERE clan_id = {int:$1}"),
+                                                             KN_DB_ARGS(I64S(clan)), 0));
     return dbx_json(&x, "loot", o);
 }
 const kn_proc P_TURF_LOOT_SET = {"turf_loot_set", NULL, run_turf_loot_set};
+
+/* ================================================================ v10's views (P_TURF_VIEW)
+ *
+ * The payloads of v10's gapi territorialWars / clans clients (v10:26670-26860), built in C on every
+ * driver: (view, current_day, a, b, c, d) -> one JSON column, the route's `data`. */
+
+/* a clan by id / tag (case-insensitive) */
+#define CLAN_OF(n) "(SELECT clan_id FROM clans WHERE {text:clan_id} = $" #n " OR lower(clan_name) = lower($" #n ") LIMIT 1)"
+/* a player by id / name */
+#define PLAYER_OF(n) "(SELECT id FROM accounts WHERE {text:id} = $" #n " OR lower(username) = lower($" #n ") LIMIT 1)"
+
+static const char *map_label(int64_t map) {
+    const char *name = turf_map_name((int) map);
+    return name ? name : "";
+}
+
+static double kd_of(double kills, double deaths) { return deaths > 0 ? kills / deaths : kills; }
+
+/* per (day, map, clan) totals of [from, to] ordered day, map, kills desc: the rankings */
+static cJSON *clan_day_rows(Dbx *x, int64_t from, int64_t to) {
+    return dbx_rows(x, SQL(.any = "SELECT tk.day AS day__i, tk.map_id AS map_id__i, tk.clan_id AS clan_id__i, c.clan_name, sum(tk.kills) AS kills__i,"
+                                  " sum(tk.deaths) AS deaths__i, sum(tk.games) AS games__i FROM turf_kills tk JOIN clans c ON c.clan_id = tk.clan_id"
+                                  " WHERE tk.day >= {int:$1} AND tk.day <= {int:$2} GROUP BY tk.day, tk.map_id, tk.clan_id, c.clan_name"
+                                  " ORDER BY tk.day, tk.map_id, sum(tk.kills) DESC, tk.clan_id"),
+                    KN_DB_ARGS(I64S(from), I64S(to)));
+}
+
+/* the clan's row of (day, map) in rows, its position, and the comparison clan (the leader, or the
+ * runner-up when the clan leads) */
+static const cJSON *rank_on(const cJSON *rows, int64_t day, int64_t map, int64_t clan, int *pos, const cJSON **cmp, int *cmp_pos) {
+    const cJSON *r, *mine = NULL, *first = NULL, *second = NULL;
+    int i = 0;
+    *pos = 0;
+    cJSON_ArrayForEach(r, rows) {
+        if ((int64_t) jnum(r, "day") != day || (int64_t) jnum(r, "map_id") != map) continue;
+        i++;
+        if (i == 1) first = r;
+        if (i == 2) second = r;
+        if ((int64_t) jnum(r, "clan_id") == clan) {
+            mine = r;
+            *pos = i;
+        }
+    }
+    *cmp = NULL;
+    *cmp_pos = 0;
+    if (mine && *pos == 1 && second) *cmp = second, *cmp_pos = 2;
+    else if (mine && *pos > 1 && first) *cmp = first, *cmp_pos = 1;
+    return mine;
+}
+
+static void add_comparison(cJSON *o, const cJSON *cmp, int cmp_pos, int full) {
+    if (cmp) {
+        cJSON_AddNumberToObject(o, "comparison_kills", jnum(cmp, "kills"));
+        cJSON_AddStringToObject(o, "comparison_clan_name", jstr(cmp, "clan_name"));
+        cJSON_AddNumberToObject(o, "comparison_clan_id", jnum(cmp, "clan_id"));
+        cJSON_AddNullToObject(o, "comparison_clan_logo");
+        if (full) {
+            cJSON_AddNumberToObject(o, "comparison_deaths", jnum(cmp, "deaths"));
+            cJSON_AddNumberToObject(o, "comparison_position", cmp_pos);
+        }
+    } else {
+        cJSON_AddNullToObject(o, "comparison_kills");
+        cJSON_AddNullToObject(o, "comparison_clan_name");
+        cJSON_AddNullToObject(o, "comparison_clan_id");
+    }
+}
+
+static cJSON *view_status(Dbx *x, int64_t cur, int64_t per_kill, int64_t elapsed_s) {
+    cJSON *control = dbx_rows(x, SQL(.any = "SELECT d.map_id AS map_id__i, d.clan_id AS clan_id__i, c.clan_name, d.kills AS kills__i FROM turf_days d"
+                                            " LEFT JOIN clans c ON c.clan_id = d.clan_id WHERE d.day = {int:$1}"),
+                              KN_DB_ARGS(I64S(cur - 1)));
+    cJSON *today = clan_day_rows(x, cur, cur);
+    cJSON *out = cJSON_CreateArray();
+    for (int i = 0; i < TURF_MAP_COUNT; i++) {
+        const int64_t map = g_turf_maps[i];
+        cJSON *m = cJSON_CreateObject();
+        cJSON_AddNumberToObject(m, "map_id", (double) map);
+        cJSON_AddStringToObject(m, "map_name", map_label(map));
+        const cJSON *r, *hit = NULL;
+        cJSON_ArrayForEach(r, control) if ((int64_t) jnum(r, "map_id") == map) hit = r;
+        if (hit && cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(hit, "clan_id"))) {
+            cJSON_AddNumberToObject(m, "clan_id", jnum(hit, "clan_id"));
+            cJSON_AddStringToObject(m, "clan_name", jstr(hit, "clan_name"));
+            cJSON_AddNumberToObject(m, "kills", jnum(hit, "kills"));
+        } else {
+            cJSON_AddNullToObject(m, "clan_id");
+            cJSON_AddNullToObject(m, "clan_name");
+            cJSON_AddNumberToObject(m, "kills", 0);
+        }
+        cJSON_AddNullToObject(m, "clan_logo"); /* KrunkNative clans have no uploaded logos */
+        cJSON *lb = cJSON_AddArrayToObject(m, "leaderboard");
+        int64_t total = 0;
+        int pos = 0;
+        cJSON_ArrayForEach(r, today) {
+            if ((int64_t) jnum(r, "map_id") != map) continue;
+            total += (int64_t) jnum(r, "kills");
+            if (pos >= 10) continue;
+            cJSON *e = cJSON_CreateObject();
+            cJSON_AddNumberToObject(e, "position", ++pos);
+            cJSON_AddNumberToObject(e, "clan_id", jnum(r, "clan_id"));
+            cJSON_AddStringToObject(e, "clan_name", jstr(r, "clan_name"));
+            cJSON_AddNullToObject(e, "clan_logo");
+            cJSON_AddNumberToObject(e, "kills", jnum(r, "kills"));
+            cJSON_AddItemToArray(lb, e);
+        }
+        /* guaranteed: the pool of today's kills so far; estimated: that pace to the end of the
+         * UTC day (KrunkNative's projection, at least one hour in) */
+        const int64_t pool = total * per_kill;
+        const double frac = (double) (elapsed_s < 3600 ? 3600 : elapsed_s > 86400 ? 86400 : elapsed_s) / 86400.0;
+        cJSON_AddNumberToObject(m, "total_kills_today", (double) total);
+        cJSON_AddNumberToObject(m, "guaranteed_reward", (double) pool);
+        cJSON_AddNumberToObject(m, "estimated_reward", floor((double) pool / frac));
+        cJSON_AddItemToArray(out, m);
+    }
+    cJSON_Delete(control);
+    cJSON_Delete(today);
+    return out;
+}
+
+static cJSON *view_clan(Dbx *x, int64_t cur, const char *id) {
+    cJSON *clan = dbx_row(x, SQL(.any = "SELECT clan_id AS clan_id__i, clan_name FROM clans WHERE clan_id = " CLAN_OF(1)), KN_DB_ARGS(id));
+    if (!clan) return NULL;
+    const int64_t cid = (int64_t) jnum(clan, "clan_id");
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "clan_id", (double) cid);
+    cJSON_AddStringToObject(o, "clan_name", jstr(clan, "clan_name"));
+    cJSON_AddNullToObject(o, "clan_logo");
+    cJSON_AddNumberToObject(o, "current_day", (double) cur);
+    cJSON_Delete(clan);
+    cJSON *rows = clan_day_rows(x, cur - 3, cur);
+    /* today's performance per map */
+    cJSON *maps = cJSON_AddArrayToObject(o, "maps");
+    for (int i = 0; i < TURF_MAP_COUNT; i++) {
+        int pos, cpos;
+        const cJSON *cmp;
+        const cJSON *mine = rank_on(rows, cur, g_turf_maps[i], cid, &pos, &cmp, &cpos);
+        if (!mine) continue;
+        cJSON *m = cJSON_CreateObject();
+        cJSON_AddNumberToObject(m, "day", (double) cur);
+        cJSON_AddNumberToObject(m, "map_id", g_turf_maps[i]);
+        cJSON_AddStringToObject(m, "map_name", map_label(g_turf_maps[i]));
+        cJSON_AddNumberToObject(m, "position", pos);
+        cJSON_AddNumberToObject(m, "kills", jnum(mine, "kills"));
+        cJSON_AddNumberToObject(m, "deaths", jnum(mine, "deaths"));
+        cJSON_AddNumberToObject(m, "games", jnum(mine, "games"));
+        add_comparison(m, cmp, cpos, 0);
+        cJSON_AddItemToArray(maps, m);
+    }
+    /* the previous 3 days: the clan's top map each day */
+    cJSON *hist = cJSON_AddArrayToObject(o, "historical_days");
+    for (int64_t day = cur - 1; day >= cur - 3 && day >= 0; day--) {
+        const cJSON *best = NULL, *r;
+        cJSON_ArrayForEach(r, rows) {
+            if ((int64_t) jnum(r, "day") != day || (int64_t) jnum(r, "clan_id") != cid) continue;
+            if (!best || jnum(r, "kills") > jnum(best, "kills")) best = r;
+        }
+        if (!best) continue;
+        int pos, cpos;
+        const cJSON *cmp;
+        rank_on(rows, day, (int64_t) jnum(best, "map_id"), cid, &pos, &cmp, &cpos);
+        cJSON *h = cJSON_CreateObject();
+        cJSON_AddNumberToObject(h, "day", (double) day);
+        cJSON_AddStringToObject(h, "map_name", map_label((int64_t) jnum(best, "map_id")));
+        cJSON_AddNumberToObject(h, "kills", jnum(best, "kills"));
+        cJSON_AddNumberToObject(h, "deaths", jnum(best, "deaths"));
+        cJSON_AddNumberToObject(h, "position", pos);
+        add_comparison(h, cmp, cpos, 1);
+        cJSON_AddItemToArray(hist, h);
+    }
+    cJSON_Delete(rows);
+    return o;
+}
+
+static cJSON *with_kd_positions(cJSON *rows, int positions) {
+    int i = 0;
+    cJSON *r;
+    cJSON_ArrayForEach(r, rows) {
+        if (positions) cJSON_AddNumberToObject(r, "position", ++i);
+        if (cJSON_HasObjectItem(r, "kills")) cJSON_AddNumberToObject(r, "kd", kd_of(jnum(r, "kills"), jnum(r, "deaths")));
+        if (cJSON_HasObjectItem(r, "map_id") && !cJSON_HasObjectItem(r, "map_name")) cJSON_AddStringToObject(r, "map_name", map_label((int64_t) jnum(r, "map_id")));
+        if (cJSON_HasObjectItem(r, "clan_name") && !cJSON_HasObjectItem(r, "clan_logo") && cJSON_HasObjectItem(r, "clan_id")) cJSON_AddNullToObject(r, "clan_logo");
+    }
+    return rows;
+}
+
+static cJSON *view_payouts(Dbx *x, const char *id, int64_t day) {
+    cJSON *o = cJSON_CreateObject();
+    cJSON *rows;
+    if (day < 0) { /* all-time totals per player */
+        rows = dbx_rows(x, SQL(.any = "SELECT p.account_id AS player_id__i, coalesce(a.username, '') AS player_name, sum(p.kr) AS total_kr__i FROM turf_payouts p"
+                                      " LEFT JOIN accounts a ON a.id = p.account_id WHERE p.clan_id = " CLAN_OF(1) " AND p.account_id IS NOT NULL"
+                                      " GROUP BY p.account_id, a.username ORDER BY sum(p.kr) DESC, p.account_id"),
+                        KN_DB_ARGS(id));
+    } else {
+        rows = dbx_rows(x, SQL(.any = "SELECT p.account_id AS player_id__i, coalesce(a.username, '') AS player_name, p.map_id AS map_id__i, p.kr AS total_kr__i"
+                                      " FROM turf_payouts p LEFT JOIN accounts a ON a.id = p.account_id WHERE p.clan_id = " CLAN_OF(1)
+                                      " AND p.day = {int:$2} AND p.account_id IS NOT NULL ORDER BY p.kr DESC, p.id"),
+                        KN_DB_ARGS(id, I64S(day)));
+        cJSON_AddNumberToObject(o, "day", (double) day);
+    }
+    if (!rows) rows = cJSON_CreateArray();
+    double total = 0;
+    cJSON *r;
+    cJSON_ArrayForEach(r, rows) {
+        total += jnum(r, "total_kr");
+        if (cJSON_HasObjectItem(r, "map_id")) cJSON_AddStringToObject(r, "map_name", map_label((int64_t) jnum(r, "map_id")));
+    }
+    cJSON_AddNumberToObject(o, "total", total);
+    cJSON_AddItemToObject(o, "payouts", rows);
+    return o;
+}
+
+static cJSON *view_player(Dbx *x, const char *id) {
+    cJSON *p = dbx_row(x, SQL(.any = "SELECT a.id AS player_id__i, a.username AS player_name, c.clan_id AS current_clan_id__i, c.clan_name AS current_clan,"
+                                     " (SELECT coalesce(sum(kills), 0) FROM turf_kills WHERE account_id = a.id) AS total_kills__i,"
+                                     " (SELECT coalesce(sum(deaths), 0) FROM turf_kills WHERE account_id = a.id) AS total_deaths__i,"
+                                     " (SELECT coalesce(sum(games), 0) FROM turf_kills WHERE account_id = a.id) AS total_games__i,"
+                                     " (SELECT coalesce(sum(kr), 0) FROM turf_payouts WHERE account_id = a.id) AS total_kr__i"
+                                     " FROM accounts a LEFT JOIN clan_members m ON m.account_id = a.id LEFT JOIN clans c ON c.clan_id = m.clan_id"
+                                     " WHERE a.id = " PLAYER_OF(1)),
+                       KN_DB_ARGS(id));
+    if (!p) return NULL;
+    cJSON_AddNullToObject(p, "current_clan_logo");
+    cJSON_AddNumberToObject(p, "kd", kd_of(jnum(p, "total_kills"), jnum(p, "total_deaths")));
+    return p;
+}
+
+static cJSON *view_recruitment(Dbx *x, int64_t page, int64_t limit, const char *region, const char *lang) {
+    if (page < 1) page = 1;
+    if (limit < 1 || limit > 50) limit = 20;
+    const int64_t total = dbx_int(x, SQL(.any = "SELECT count(*) FROM clan_recruitment r JOIN clans c ON c.clan_id = r.clan_id"
+                                               " WHERE r.is_active = {true} AND ($1 = '' OR r.region = $1) AND ($2 = '' OR r.language = $2)"),
+                                  KN_DB_ARGS(region, lang), 0);
+    cJSON *posts = dbx_rows(x, SQL(.any = "SELECT r.clan_id AS recruitment_id__i, r.clan_id AS clan_id__i, c.clan_name, r.region, r.language, r.description,"
+                                          " r.looking_for, r.min_level AS min_level__i, r.min_kd AS min_kd__f, coalesce(l.distribution_mode, 'clan_bank') AS loot_mode,"
+                                          " coalesce(l.clan_pct, 0) AS loot_clan_pct__i, coalesce(l.top_player_count, 20) AS loot_top_player_count__i,"
+                                          " coalesce(l.top_player_pct, 80) AS loot_top_player_pct__i, coalesce(l.min_games_required, 1) AS loot_min_games__i"
+                                          " FROM clan_recruitment r JOIN clans c ON c.clan_id = r.clan_id LEFT JOIN turf_loot_config l ON l.clan_id = r.clan_id"
+                                          " WHERE r.is_active = {true} AND ($1 = '' OR r.region = $1) AND ($2 = '' OR r.language = $2)"
+                                          " ORDER BY r.updated_at DESC, r.clan_id LIMIT {int:$3} OFFSET {int:$4}"),
+                            KN_DB_ARGS(region, lang, I64S(limit), I64S((page - 1) * limit)));
+    if (!posts) posts = cJSON_CreateArray();
+    cJSON *p;
+    cJSON_ArrayForEach(p, posts) {
+        cJSON_AddNullToObject(p, "clan_logo");
+        cJSON_AddBoolToObject(p, "is_active", 1);
+    }
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddItemToObject(o, "posts", posts);
+    cJSON_AddNumberToObject(o, "total", (double) total);
+    cJSON_AddNumberToObject(o, "page", (double) page);
+    cJSON_AddNumberToObject(o, "limit", (double) limit);
+    return o;
+}
+
+/* a clan's post (active or removed), NULL without one */
+static cJSON *recruitment_row(Dbx *x, const char *clan) {
+    cJSON *r = dbx_row(x, SQL(.any = "SELECT r.clan_id AS recruitment_id__i, r.clan_id AS clan_id__i, c.clan_name, r.region, r.language, r.description, r.looking_for,"
+                                     " r.min_level AS min_level__i, r.min_kd AS min_kd__f, r.is_active AS is_active__b, {epoch_ms:r.updated_at} AS updated_ms__i"
+                                     " FROM clan_recruitment r JOIN clans c ON c.clan_id = r.clan_id WHERE r.clan_id = " CLAN_OF(1)),
+                       KN_DB_ARGS(clan));
+    if (r) cJSON_AddNullToObject(r, "clan_logo");
+    return r;
+}
+
+/* (view, current_day, a, b, c, d) */
+static kn_db_result *run_turf_view(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    const char *view = nz(P(0)), *a = nz(P(2)), *b = nz(P(3)), *cc = nz(P(4)), *d = nz(P(5));
+    const int64_t cur = PI(1);
+    cJSON *out = NULL;
+    if (!strcmp(view, "status")) {
+        out = view_status(&x, cur, pint(a) > 0 ? pint(a) : TURF_KR_PER_KILL, pint(b));
+    } else if (!strcmp(view, "clan")) {
+        out = view_clan(&x, cur, a);
+    } else if (!strcmp(view, "players")) { /* (id, day, map) */
+        out = dbx_rows(&x, SQL(.any = "SELECT tk.account_id AS player_id__i, a.username AS player_name, sum(tk.kills) AS kills__i, sum(tk.deaths) AS deaths__i,"
+                                      " sum(tk.games) AS games__i FROM turf_kills tk JOIN accounts a ON a.id = tk.account_id"
+                                      " WHERE tk.clan_id = " CLAN_OF(1) " AND tk.day = {int:$2} AND ({int:$3} < 0 OR tk.map_id = {int:$3})"
+                                      " GROUP BY tk.account_id, a.username ORDER BY sum(tk.kills) DESC, tk.account_id LIMIT 100"),
+                       KN_DB_ARGS(a, I64S(pint(b) >= 0 && b[0] ? pint(b) : cur), I64S(cc[0] ? pint(cc) : -1)));
+        if (out) with_kd_positions(out, 0);
+    } else if (!strcmp(view, "earnings")) { /* (id) */
+        out = dbx_rows(&x, SQL(.any = "SELECT day AS day__i, map_id AS map_id__i, kr AS reward__i FROM turf_clan_days WHERE clan_id = " CLAN_OF(1)
+                                      " AND kr > 0 ORDER BY day DESC, map_id LIMIT 1000"),
+                       KN_DB_ARGS(a));
+        if (out) with_kd_positions(out, 0);
+    } else if (!strcmp(view, "payouts")) { /* (id, day | "") */
+        out = view_payouts(&x, a, b[0] ? pint(b) : -1);
+    } else if (!strcmp(view, "top_clans")) { /* (day, map, name) */
+        out = dbx_rows(&x, SQL(.any = "SELECT tk.clan_id AS clan_id__i, c.clan_name, sum(tk.kills) AS kills__i, sum(tk.deaths) AS deaths__i, sum(tk.games) AS games__i"
+                                      " FROM turf_kills tk JOIN clans c ON c.clan_id = tk.clan_id"
+                                      " WHERE tk.day = {int:$1} AND ({int:$2} < 0 OR tk.map_id = {int:$2}) AND ($3 = '' OR lower(c.clan_name) = lower($3))"
+                                      " GROUP BY tk.clan_id, c.clan_name ORDER BY sum(tk.kills) DESC, tk.clan_id LIMIT 100"),
+                       KN_DB_ARGS(I64S(a[0] ? pint(a) : cur), I64S(b[0] ? pint(b) : -1), cc));
+        if (out) with_kd_positions(out, 1);
+    } else if (!strcmp(view, "top_grossing")) { /* (name) */
+        out = dbx_rows(&x, SQL(.any = "SELECT cd.clan_id AS clan_id__i, c.clan_name, sum(cd.kr) AS total_kr__i,"
+                                      " (SELECT coalesce(sum(p.kr), 0) FROM turf_payouts p WHERE p.clan_id = cd.clan_id AND p.account_id IS NOT NULL) AS distributed__i"
+                                      " FROM turf_clan_days cd JOIN clans c ON c.clan_id = cd.clan_id WHERE ($1 = '' OR lower(c.clan_name) = lower($1))"
+                                      " GROUP BY cd.clan_id, c.clan_name HAVING sum(cd.kr) > 0 ORDER BY sum(cd.kr) DESC, cd.clan_id LIMIT 100"),
+                       KN_DB_ARGS(a));
+        cJSON *r;
+        cJSON_ArrayForEach(r, out) cJSON_AddNumberToObject(r, "bank", jnum(r, "total_kr") - jnum(r, "distributed"));
+        if (out) with_kd_positions(out, 1);
+    } else if (!strcmp(view, "top_players")) { /* (map, name) */
+        out = dbx_rows(&x, SQL(.any = "SELECT tk.account_id AS player_id__i, a.username AS player_name, coalesce(c.clan_name, '') AS clan_name, sum(tk.kills) AS kills__i,"
+                                      " sum(tk.deaths) AS deaths__i, sum(tk.games) AS games__i,"
+                                      " (SELECT coalesce(sum(p.kr), 0) FROM turf_payouts p WHERE p.account_id = tk.account_id) AS earnings__i"
+                                      " FROM turf_kills tk JOIN accounts a ON a.id = tk.account_id LEFT JOIN clan_members m ON m.account_id = tk.account_id"
+                                      " LEFT JOIN clans c ON c.clan_id = m.clan_id"
+                                      " WHERE ({int:$1} < 0 OR tk.map_id = {int:$1}) AND ($2 = '' OR lower(a.username) = lower($2))"
+                                      " GROUP BY tk.account_id, a.username, c.clan_name ORDER BY sum(tk.kills) DESC, tk.account_id LIMIT 100"),
+                       KN_DB_ARGS(I64S(a[0] ? pint(a) : -1), b));
+        if (out) with_kd_positions(out, 1);
+    } else if (!strcmp(view, "player")) {
+        out = view_player(&x, a);
+    } else if (!strcmp(view, "contributions")) { /* (id, day | "") */
+        out = dbx_rows(&x, SQL(.any = "SELECT tk.day AS day__i, tk.map_id AS map_id__i, tk.clan_id AS clan_id__i, c.clan_name, tk.kills AS kills__i,"
+                                      " tk.deaths AS deaths__i, tk.games AS games__i FROM turf_kills tk JOIN clans c ON c.clan_id = tk.clan_id"
+                                      " WHERE tk.account_id = " PLAYER_OF(1) " AND ({int:$3} = 1 OR tk.day = {int:$2})"
+                                      " ORDER BY tk.day DESC, tk.map_id LIMIT 500"),
+                       KN_DB_ARGS(a, I64S(b[0] ? pint(b) : 0), I64S(b[0] ? 0 : 1)));
+        if (out) with_kd_positions(out, 0);
+    } else if (!strcmp(view, "player_earnings")) {
+        out = dbx_rows(&x, SQL(.any = "SELECT p.day AS day__i, p.map_id AS map_id__i, p.clan_id AS clan_id__i, c.clan_name, p.kr AS amount__i FROM turf_payouts p"
+                                      " JOIN clans c ON c.clan_id = p.clan_id WHERE p.account_id = " PLAYER_OF(1) " ORDER BY p.day DESC, p.id DESC LIMIT 500"),
+                       KN_DB_ARGS(a));
+        if (out) with_kd_positions(out, 0);
+    } else if (!strcmp(view, "recruitment")) { /* (page, limit, region, language) */
+        out = view_recruitment(&x, pint(a), pint(b), cc, d);
+    } else if (!strcmp(view, "recruitment_of")) { /* (clan) */
+        out = recruitment_row(&x, a);
+        if (!out && !dbx_failed(&x)) out = cJSON_CreateNull();
+    } else if (!strcmp(view, "my_applications")) { /* (account) */
+        cJSON *rows = dbx_rows(&x, SQL(.any = "SELECT clan_id AS clan_id__i FROM clan_requests WHERE account_id = {int:$1}"), KN_DB_ARGS(a));
+        out = cJSON_CreateObject();
+        cJSON *ids = cJSON_AddArrayToObject(out, "clan_ids");
+        cJSON *r;
+        cJSON_ArrayForEach(r, rows) cJSON_AddItemToArray(ids, cJSON_CreateNumber(jnum(r, "clan_id")));
+        cJSON_Delete(rows);
+    } else {
+        dbx_refuse(&x, "unknown view");
+        return dbx_finish(&x, NULL);
+    }
+    if (dbx_failed(&x)) {
+        cJSON_Delete(out);
+        return dbx_finish(&x, NULL);
+    }
+    if (!out) { /* a clan / player that does not exist */
+        dbx_refuse(&x, "Not found");
+        return dbx_finish(&x, NULL);
+    }
+    return dbx_json(&x, "data", out);
+}
+const kn_proc P_TURF_VIEW = {"turf_view", NULL, run_turf_view};
+
+/* ================================================================ recruitment posts (0208_clan_recruitment) */
+
+static const char *const k_rec_regions[] = {"NA", "EU", "AS", "OCE", "SA", "ME"};
+static const char *const k_rec_langs[] = {"en", "es", "pt", "fr", "de", "ru", "zh", "ja", "ko", "ar", "tr", "pl", "it", "nl", "sv",
+                                          "th", "vi", "id", "hi", "fil", "cs", "ro", "hu", "uk", "fi", "no", "da", "el", "he", "ms"};
+
+static int in_list(const char *v, const char *const *list, size_t n) {
+    for (size_t i = 0; i < n; i++)
+        if (!strcmp(v, list[i])) return 1;
+    return 0;
+}
+
+static int clan_leader(Dbx *x, int64_t clan, int64_t acc) {
+    return dbx_exists(x, SQL(.any = "SELECT 1 FROM clans WHERE clan_id = {int:$1} AND clan_playerid = {int:$2}"), KN_DB_ARGS(I64S(clan), I64S(acc))) ||
+           dbx_exists(x, SQL(.any = "SELECT 1 FROM clan_members WHERE clan_id = {int:$1} AND account_id = {int:$2} AND rank >= 2"), KN_DB_ARGS(I64S(clan), I64S(acc)));
+}
+
+#define RECRUIT_COST 1000 /* v10: "Creating a recruitment post costs 1,000 KR from clan bank." */
+
+/* (clan, account, json): create / update the clan's post (owner or rank >= 2; once per 30 s).
+ * Creating it (no post, or a removed one) costs RECRUIT_COST from the clan bank, in this
+ * transaction, with a clan_funds_ledger row. */
+static kn_db_result *run_recruit_set(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    const int64_t acc = PI(1);
+    const int64_t clan = dbx_int(&x, SQL(.any = "SELECT clan_id FROM clans WHERE clan_id = " CLAN_OF(1)), KN_DB_ARGS(nz(P(0))), 0);
+    if (clan <= 0) {
+        if (!dbx_failed(&x)) dbx_refuse(&x, "Clan not found");
+        return dbx_finish(&x, NULL);
+    }
+    if (!clan_leader(&x, clan, acc)) {
+        if (!dbx_failed(&x)) dbx_refuse(&x, "Only the clan owner or a Captain or higher can post recruitment");
+        return dbx_finish(&x, NULL);
+    }
+    if (dbx_exists(&x, SQL(.any = "SELECT 1 FROM clan_recruitment WHERE clan_id = {int:$1} AND is_active = {true} AND updated_at > {ago:30}"),
+                   KN_DB_ARGS(I64S(clan)))) {
+        dbx_refuse(&x, "You can update your recruitment post again in a moment");
+        return dbx_finish(&x, NULL);
+    }
+    cJSON *in = cJSON_Parse(nz(P(2)));
+    const char *region = jstr(in, "region"), *lang = jstr(in, "language");
+    const double min_level = jnum(in, "min_level"), min_kd = jnum(in, "min_kd");
+    const char *err = NULL;
+    if (region[0] && !in_list(region, k_rec_regions, sizeof k_rec_regions / sizeof *k_rec_regions)) err = "Unknown region";
+    else if (lang[0] && !in_list(lang, k_rec_langs, sizeof k_rec_langs / sizeof *k_rec_langs)) err = "Unknown language";
+    else if (strlen(jstr(in, "description")) > 2000) err = "Description is too long (2000 characters max)";
+    else if (strlen(jstr(in, "looking_for")) > 200) err = "\"Looking for\" is too long (200 characters max)";
+    else if (min_level < 0 || min_level > 200) err = "Minimum level must be between 0 and 200";
+    else if (min_kd < 0 || min_kd > 20) err = "Minimum K/D must be between 0 and 20";
+    char reg[8], lg[8], kd[32];
+    char *desc = strdup(jstr(in, "description")), *looking = strdup(jstr(in, "looking_for"));
+    snprintf(reg, sizeof reg, "%s", region);
+    snprintf(lg, sizeof lg, "%s", lang);
+    snprintf(kd, sizeof kd, "%.2f", min_kd);
+    cJSON_Delete(in);
+    if (!err && (!desc || !looking)) err = "Out of memory";
+    if (err) {
+        free(desc);
+        free(looking);
+        dbx_refuse(&x, err);
+        return dbx_finish(&x, NULL);
+    }
+    const int active = dbx_exists(&x, SQL(.any = "SELECT 1 FROM clan_recruitment WHERE clan_id = {int:$1} AND is_active = {true}"), KN_DB_ARGS(I64S(clan)));
+    if (!active) { /* a new post: the clan bank pays */
+        if (dbx_exec(&x, SQL(.any = "UPDATE clans SET clan_funds = clan_funds - {int:$2} WHERE clan_id = {int:$1} AND clan_funds >= {int:$2}"),
+                     KN_DB_ARGS(I64S(clan), I64S(RECRUIT_COST))) != 1) {
+            free(desc);
+            free(looking);
+            if (!dbx_failed(&x)) dbx_refuse(&x, "Not enough clan funds: a recruitment post costs 1,000 KR from the clan bank");
+            return dbx_finish(&x, NULL);
+        }
+        dbx_exec(&x, SQL(.any = "INSERT INTO clan_funds_ledger (clan_id, account_id, amount, source, ref) VALUES ({int:$1}, {int:$2}, {int:$3}, 'recruitment', NULL)"),
+                 KN_DB_ARGS(I64S(clan), I64S(acc), I64S(-RECRUIT_COST)));
+    }
+    dbx_exec(&x, SQL(.any = "DELETE FROM clan_recruitment WHERE clan_id = {int:$1}"), KN_DB_ARGS(I64S(clan)));
+    dbx_exec(&x, SQL(.any = "INSERT INTO clan_recruitment (clan_id, region, language, description, looking_for, min_level, min_kd, created_by, is_active)"
+                            " VALUES ({int:$1}, $2, $3, $4, $5, {int:$6}, {float:$7}, {int:$8}, {true})"),
+             8, (const char *const[]){I64S(clan), reg, lg, desc, looking, I64S((int64_t) min_level), kd, I64S(acc)});
+    free(desc);
+    free(looking);
+    char id[24];
+    snprintf(id, sizeof id, "%lld", (long long) clan);
+    cJSON *post = recruitment_row(&x, id);
+    if (post) {
+        cJSON_AddBoolToObject(post, "charged", !active);
+        cJSON_AddNumberToObject(post, "clan_funds", (double) dbx_int(&x, SQL(.any = "SELECT clan_funds FROM clans WHERE clan_id = {int:$1}"), KN_DB_ARGS(I64S(clan)), 0));
+    }
+    return dbx_json(&x, "data", post ? post : cJSON_CreateObject());
+}
+const kn_proc P_TURF_RECRUIT_SET = {"turf_recruit_set", NULL, run_recruit_set};
+
+/* (clan, account, staff): remove the post (owner / Commander, or staff taking it down) */
+static kn_db_result *run_recruit_del(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    const int64_t acc = PI(1), staff = PI(2);
+    const int64_t clan = dbx_int(&x, SQL(.any = "SELECT clan_id FROM clans WHERE clan_id = " CLAN_OF(1)), KN_DB_ARGS(nz(P(0))), 0);
+    if (clan <= 0) {
+        if (!dbx_failed(&x)) dbx_refuse(&x, "Clan not found");
+        return dbx_finish(&x, NULL);
+    }
+    if (!staff && !clan_leader(&x, clan, acc)) {
+        if (!dbx_failed(&x)) dbx_refuse(&x, "Only the clan owner or a Commander can remove the recruitment post");
+        return dbx_finish(&x, NULL);
+    }
+    /* the row stays inactive: re-posting costs again (v10's "You can re-post later (costs 1,000 KR)") */
+    const int64_t removed = dbx_exec(&x, SQL(.any = "UPDATE clan_recruitment SET is_active = {false}, updated_at = {now} WHERE clan_id = {int:$1} AND is_active = {true}"),
+                                     KN_DB_ARGS(I64S(clan)));
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddBoolToObject(o, "success", removed > 0);
+    return dbx_json(&x, "data", o);
+}
+const kn_proc P_TURF_RECRUIT_DEL = {"turf_recruit_del", NULL, run_recruit_del};
+
+/* (clan, account, level): a join request (clan_requests, the clan's Requests list) */
+static kn_db_result *run_apply(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    const int64_t acc = PI(1), level = PI(2);
+    const int64_t clan = dbx_int(&x, SQL(.any = "SELECT clan_id FROM clans WHERE clan_id = " CLAN_OF(1)), KN_DB_ARGS(nz(P(0))), 0);
+    if (clan <= 0) {
+        if (!dbx_failed(&x)) dbx_refuse(&x, "Clan not found");
+        return dbx_finish(&x, NULL);
+    }
+    if (dbx_exists(&x, SQL(.any = "SELECT 1 FROM clan_members WHERE account_id = {int:$1}"), KN_DB_ARGS(I64S(acc)))) {
+        dbx_refuse(&x, "You are already in a clan");
+        return dbx_finish(&x, NULL);
+    }
+    const int64_t min_level = dbx_int(&x, SQL(.any = "SELECT min_level FROM clan_recruitment WHERE clan_id = {int:$1} AND is_active = {true}"), KN_DB_ARGS(I64S(clan)), 0);
+    if (min_level > 0 && level < min_level) {
+        dbx_refuse(&x, "Requirements Not Met");
+        return dbx_finish(&x, NULL);
+    }
+    if (dbx_int(&x, SQL(.any = "SELECT count(*) FROM clan_requests WHERE account_id = {int:$1} AND created_at > {ago:60}"), KN_DB_ARGS(I64S(acc)), 0) >= 10) {
+        dbx_refuse(&x, "Too many applications. Try again later.");
+        return dbx_finish(&x, NULL);
+    }
+    dbx_exec(&x, SQL(.any = "{insert_ignore} INTO clan_requests (clan_id, account_id) VALUES ({int:$1}, {int:$2}) {ignore_conflicts}"),
+             KN_DB_ARGS(I64S(clan), I64S(acc)));
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "message", "Application sent!");
+    return dbx_json(&x, "data", o);
+}
+const kn_proc P_TURF_APPLY = {"turf_apply", NULL, run_apply};

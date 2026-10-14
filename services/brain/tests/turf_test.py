@@ -9,7 +9,9 @@ Covers: "turf-kills" frames (reliable: acknowledged with turf-kills-reply), unkn
 dropped, the top-20 cap per clan and map, the daily settlement on the next day (brain.turf.day)
 once (a second brain does not pay again), the controller in /api/territorial-wars/status, the
 60 / 30 / 10 split, the loot configs (clan_bank -> the clan's funds; even / performance -> the
-members' KR), the clan / player / leaderboard routes, PUT loot-config permissions, and clean logs.
+members' KR), the clan / player / leaderboard routes in v10's {data: ...} shapes, PUT loot-config
+permissions, recruitment posts (1,000 KR from the clan bank on create, owner / Captain+ only,
+validation, the 30 s cooldown, apply, my-applications, delete), and clean logs.
 """
 import asyncio
 import json
@@ -182,6 +184,63 @@ async def kr_of(port, acc):
                 return (m.get("data") or {}).get("funds")
 
 
+async def deposit(port, acc, amount):
+    """the clan bank deposit of the clan menu (["cln", 7, amount, {wd: 0}]): the clan gets 90%"""
+    async with Social("ws://127.0.0.1:%d/social/ws" % port) as s:
+        await s.call("a", "a", 1, [acc["name"], None, acc["token"]])
+        return await s.call("cln", "cln", 7, amount, {"wd": 0})
+
+
+def recruitment(port, accs, clan_a, clan_c):
+    """v10's recruitment posts (0208_clan_recruitment): CCC's bank holds 125 KR after the settlement"""
+    auth = lambda a: {"Authorization": "Bearer " + a["token"]}
+    url = "/api/clans/%d/recruitment" % clan_c
+    post = {"region": "EU", "language": "en", "description": "Daily Turf Wars on Sandstorm", "looking_for": "active players",
+            "min_level": 0, "min_kd": 1.5}
+    code, r = http(port, url)
+    check(code == 200 and r["data"] is None, "no post yet: data null (%s %s)" % (code, r))
+    code, r = http(port, url, method="POST", body=post)
+    check(code == 401, "posting needs a login (%s)" % code)
+    code, r = http(port, url, method="POST", headers=auth(accs[7]), body=post)
+    check(code == 400 and "owner" in str(r.get("message", r)), "a Recruit cannot post (%s %s)" % (code, r))
+    code, r = http(port, url, method="POST", headers=auth(accs[6]), body=dict(post, region="XX"))
+    check(code == 400 and "region" in str(r.get("message", r)), "unknown region refused (%s)" % r)
+    code, r = http(port, url, method="POST", headers=auth(accs[6]), body=dict(post, min_kd=50))
+    check(code == 400 and "K/D" in str(r.get("message", r)), "min K/D out of range refused (%s)" % r)
+    code, r = http(port, url, method="POST", headers=auth(accs[6]), body=post)
+    check(code == 400 and "clan funds" in str(r.get("message", r)), "125 KR in the bank: not enough for 1,000 (%s)" % r)
+    d = asyncio.run(deposit(port, accs[6], 1000))
+    check(d[1] is None, "the owner deposits 1,000 KR (the bank gets 900) (%s)" % (d,))
+    code, r = http(port, url, method="POST", headers=auth(accs[6]), body=post)
+    data = r.get("data") or {} if code == 200 else {}
+    check(code == 200 and data.get("charged") is True and data.get("clan_funds") == 125 + 900 - 1000 and data.get("region") == "EU"
+          and data.get("clan_name") == "CCC" and abs(data.get("min_kd", 0) - 1.5) < 1e-6 and data.get("is_active") is True,
+          "the post is created: 1,000 KR from the clan bank (%s %s)" % (code, r))
+    code, r = http(port, url, method="PUT", headers=auth(accs[6]), body=dict(post, description="again"))
+    check(code == 400 and "moment" in str(r.get("message", r)), "a second update within 30 s is refused (%s)" % r)
+    code, r = http(port, url)
+    check(code == 200 and (r.get("data") or {}).get("description") == post["description"], "GET the clan's post")
+    code, r = http(port, "/api/clans/recruitment", page=1, limit=10)
+    posts = (r.get("data") or {}).get("posts", []) if code == 200 else []
+    check([p["clan_name"] for p in posts] == ["CCC"] and r["data"]["total"] == 1, "the recruitment list (%s)" % posts)
+    code, r = http(port, "/api/clans/recruitment", region="NA")
+    check(code == 200 and r["data"]["posts"] == [], "the list filtered by region")
+    code, r = http(port, "/api/clans/%d/apply" % clan_c, method="POST", headers=auth(accs[0]))
+    check(code == 400 and "already in a clan" in str(r.get("message", r)), "a clan member cannot apply (%s)" % r)
+    code, r = http(port, "/api/clans/%d/apply" % clan_c, method="POST", headers=auth(accs[9]))
+    check(code == 200 and r["data"]["message"] == "Application sent!", "a clanless player applies (%s %s)" % (code, r))
+    code, r = http(port, "/api/clans/my-applications", headers=auth(accs[9]))
+    check(code == 200 and r["data"]["clan_ids"] == [clan_c], "my-applications lists CCC (%s)" % r)
+    code, r = http(port, "/api/clans/%d/recruitment" % clan_a, method="DELETE", headers=auth(accs[6]))
+    check(code == 400, "another clan's owner cannot remove AAA's post (%s)" % code)
+    code, r = http(port, url, method="DELETE", headers=auth(accs[6]))
+    check(code == 200 and r["data"]["success"] is True, "the owner removes the post (%s)" % r)
+    code, r = http(port, url)
+    check(code == 200 and (r.get("data") is None or r["data"].get("is_active") is False), "removed: no active post (%s)" % r)
+    code, r = http(port, "/api/clans/recruitment")
+    check(code == 200 and r["data"]["posts"] == [], "removed: not listed")
+
+
 def main():
     if DRIVER == "postgres":
         pg = [sys.executable, "-I", os.path.join(ROOT, "services", "brain", "tests", "pg_schema.py"), ROOT, DB]
@@ -204,13 +263,13 @@ def main():
     try:
         subprocess.run([BRAIN, "--migrate-only", "--database.migrations_dir=" + os.path.join(ROOT, "services", "db", "migrations")],
                        cwd=ROOT, env=env, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        p, path, port = start(work, env, "turf-a-%d" % os.getpid(), ["--brain.turf.day=%d" % DAY])
+        p, path, port = start(work, env, "turf-a-%d" % os.getpid(), ["--brain.turf.day=%d" % DAY, "--accounts.starting_kr=2000"])
         procs.append(p)
         logs.append(path)
         stamp = str(int(time.time()) % 100000)
 
         async def setup():
-            accs = [await register(port, "t%d%s" % (i, stamp)) for i in range(9)]
+            accs = [await register(port, "t%d%s" % (i, stamp)) for i in range(10)]  # accs[9]: no clan
             await make_clan(port, accs[0], "AAA", accs[1:3])
             await make_clan(port, accs[3], "BBB", accs[4:6])
             await make_clan(port, accs[6], "CCC", accs[7:9])
@@ -240,32 +299,47 @@ def main():
 
         code, st = http(port, "/api/territorial-wars/status")
         burg = [m for m in st.get("data", []) if m["map_id"] == 0][0] if code == 200 else {}
-        check(code == 200 and len(st["data"]) == 3 and burg.get("total_kills_today") == 65 and burg.get("estimated_reward") == 650
-              and burg["leaderboard"][0]["clan_name"] == "AAA" and burg["leaderboard"][0]["kills"] == 35 and burg.get("clan_id") is None,
-              "status today: Burg 65 kills, AAA leads 35, nobody controls it yet (%s)" % {k: burg.get(k) for k in ("total_kills_today", "clan_id")})
+        check(code == 200 and len(st["data"]) == 3 and burg.get("total_kills_today") == 65 and burg.get("guaranteed_reward") == 650
+              and burg.get("estimated_reward", 0) >= 650 and burg.get("map_name") == "Burg"
+              and burg["leaderboard"][0]["clan_name"] == "AAA" and burg["leaderboard"][0]["kills"] == 35 and burg["leaderboard"][0]["position"] == 1
+              and burg.get("clan_id") is None,
+              "status today: Burg 65 kills (650 KR guaranteed), AAA leads 35, nobody controls it yet (%s)"
+              % {k: burg.get(k) for k in ("total_kills_today", "guaranteed_reward", "estimated_reward", "clan_id")})
         code, lb = http(port, "/api/territorial-wars/leaderboards/top-performing-clans", day=DAY, map_id=0)
-        check(code == 200 and [r["clan_name"] for r in lb["data"]["leaderboard"]] == ["AAA", "BBB", "CCC"], "top performing clans today")
+        check(code == 200 and [r["clan_name"] for r in lb["data"]] == ["AAA", "BBB", "CCC"] and lb["data"][0]["position"] == 1,
+              "top performing clans today")
+        code, lb = http(port, "/api/territorial-wars/leaderboards/top-performing-clans", day=DAY, clan_name="bbb")
+        check(code == 200 and [r["clan_name"] for r in lb["data"]] == ["BBB"], "top performing clans: search by name")
         code, pl = http(port, "/api/territorial-wars/clan/AAA/players", day=DAY, map_id=0)
-        check(code == 200 and pl["data"]["players"][0]["kills"] == 25 and pl["data"]["players"][0]["games"] == 2, "clan players (by tag)")
+        check(code == 200 and pl["data"][0]["kills"] == 25 and pl["data"][0]["games"] == 2 and pl["data"][0]["kd"] == 25.0,
+              "clan players (by tag) (%s)" % (pl.get("data") or [None])[0])
+        code, cl = http(port, "/api/territorial-wars/clan/AAA")
+        maps = {m["map_name"]: m for m in (cl.get("data") or {}).get("maps", [])}
+        check(code == 200 and cl["data"]["clan_name"] == "AAA" and cl["data"]["current_day"] == DAY and maps.get("Burg", {}).get("position") == 1
+              and maps["Burg"].get("comparison_clan_name") == "BBB", "clan view: today's Burg, #1 ahead of BBB (%s)" % maps.get("Burg"))
+        code, nf = http(port, "/api/territorial-wars/clan/NOPE")
+        check(code == 404, "unknown clan: 404 (%s)" % code)
 
         # loot configs: AAA even split with a 20% treasury cut, BBB performance, CCC the bank (default)
-        clan_a = http(port, "/api/territorial-wars/clan/AAA")[1]["data"]["clan"]["clan_id"]
-        clan_b = http(port, "/api/territorial-wars/clan/BBB")[1]["data"]["clan"]["clan_id"]
-        clan_c = http(port, "/api/territorial-wars/clan/CCC")[1]["data"]["clan"]["clan_id"]
+        clan_a = http(port, "/api/territorial-wars/clan/AAA")[1]["data"]["clan_id"]
+        clan_b = http(port, "/api/territorial-wars/clan/BBB")[1]["data"]["clan_id"]
+        clan_c = http(port, "/api/territorial-wars/clan/CCC")[1]["data"]["clan_id"]
         auth = lambda a: {"Authorization": "Bearer " + a["token"]}
         code, r = http(port, "/api/clans/%d/loot-config" % clan_a, method="PUT", headers=auth(accs[1]),
                        body={"distribution_mode": "even", "clan_pct": 20})
         check(code == 403, "a Recruit cannot change the loot config")
         code, r = http(port, "/api/clans/%d/loot-config" % clan_a, method="PUT", headers=auth(accs[0]),
                        body={"distribution_mode": "even", "clan_pct": 20, "min_games_required": 1})
-        check(code == 200 and r["data"]["distribution_mode"] == "even" and r["data"]["clan_pct"] == 20, "owner sets AAA: even, 20% bank")
+        check(code == 200 and r["data"]["distribution_mode"] == "even" and r["data"]["clan_pct"] == 20
+              and r["data"].get("updated_by_name") == accs[0]["name"] and str(r["data"].get("updated_at", "")).endswith("Z"),
+              "owner sets AAA: even, 20%% bank; v10's updated_by_name / updated_at (%s)" % r.get("data"))
         code, r = http(port, "/api/clans/%d/loot-config" % clan_b, method="PUT", headers=auth(accs[3]),
                        body={"distribution_mode": "performance", "clan_pct": 150})
         check(code == 200 and r["data"]["clan_pct"] == 100, "values are clamped (clan_pct 150 -> 100)")
         http(port, "/api/clans/%d/loot-config" % clan_b, method="PUT", headers=auth(accs[3]), body={"distribution_mode": "performance", "clan_pct": 0})
         code, r = http(port, "/api/clans/%d/loot-config" % clan_c)
-        check(code == 200 and r["data"]["config"][0]["distribution_mode"] == "clan_bank" and r["data"]["config"][0]["top_player_count"] == 20,
-              "CCC: the default config")
+        check(code == 200 and r["data"]["distribution_mode"] == "clan_bank" and r["data"]["top_player_count"] == 20
+              and r["data"]["config"][0]["distribution_mode"] == "clan_bank", "CCC: the default config (v10's flat shape + config[0])")
 
         before = {a["name"]: asyncio.run(kr_of(port, a)) for a in accs}
         # the next day: brain A (and a second brain) settle DAY once
@@ -284,38 +358,60 @@ def main():
         sub = [m for m in st.get("data", []) if m["map_id"] == 3][0] if code == 200 else {}
         check(burg.get("clan_name") == "AAA" and burg.get("kills") == 35 and sand.get("clan_name") == "CCC" and sub.get("clan_id") is None
               and burg.get("total_kills_today") == 0, "next day: AAA controls Burg, CCC Sandstorm, Subzero nobody")
+        total = lambda e: sum(r["reward"] for r in (e.get("data") or [])) if isinstance(e, dict) else None
         code, earn = http(port, "/api/territorial-wars/clan/%d/earnings" % clan_a)
-        check(code == 200 and earn["data"]["total_kr"] == 390, "AAA earned 60%% of 650 = 390 (%s)" % earn.get("data"))
+        check(code == 200 and total(earn) == 390 and earn["data"][0]["day"] == DAY and earn["data"][0]["map_name"] == "Burg",
+              "AAA earned 60%% of 650 = 390 (%s)" % earn.get("data"))
         code, earn = http(port, "/api/territorial-wars/clan/CCC/earnings")
-        check(code == 200 and earn["data"]["total_kr"] == 65 + 60, "CCC: 10%% of Burg + 60%% of Sandstorm's 100 (alone: the 2nd / 3rd shares stay unpaid) (%s)" % earn.get("data"))
+        check(code == 200 and total(earn) == 65 + 60, "CCC: 10%% of Burg + 60%% of Sandstorm's 100 (alone: the 2nd / 3rd shares stay unpaid) (%s)" % earn.get("data"))
         code, pay = http(port, "/api/territorial-wars/clan/%d/payouts" % clan_a, day=DAY)
         rows = pay["data"]["payouts"] if code == 200 else []
-        bank = [r for r in rows if r["player_id"] is None]
-        players = sorted(r["kr"] for r in rows if r["player_id"] is not None)
-        # AAA: 390 - 78 (20%) = 312 over its 2 eligible members (25 and 10 kills) -> 156 each; the bank 78
-        check(players == [156, 156] and bank and bank[0]["kr"] == 78, "AAA even split: 156 + 156, bank 78 (%s)" % rows)
+        # AAA: 390 - 78 (20%) = 312 over its 2 eligible members (25 and 10 kills) -> 156 each; the bank 78 (top grossing below)
+        check(sorted(r["total_kr"] for r in rows) == [156, 156] and pay["data"]["total"] == 312 and all(r["map_name"] == "Burg" for r in rows),
+              "AAA even split: 156 + 156 (%s)" % rows)
+        code, pay = http(port, "/api/territorial-wars/clan/%d/payouts" % clan_a)
+        check(code == 200 and sorted(r["total_kr"] for r in pay["data"]["payouts"]) == [156, 156] and "day" not in pay["data"],
+              "AAA payouts, all time (%s)" % pay.get("data"))
         code, pay = http(port, "/api/territorial-wars/clan/%d/payouts" % clan_b, day=DAY)
         rows = pay["data"]["payouts"] if code == 200 else []
-        check([r["kr"] for r in rows] == [195], "BBB performance: its one contributor gets the whole 30%% (195) (%s)" % rows)
+        check([r["total_kr"] for r in rows] == [195], "BBB performance: its one contributor gets the whole 30%% (195) (%s)" % rows)
         code, pay = http(port, "/api/territorial-wars/clan/%d/payouts" % clan_c, day=DAY)
-        rows = pay["data"]["payouts"] if code == 200 else []
-        check(sorted(r["kr"] for r in rows) == [60, 65] and all(r["player_id"] is None for r in rows), "CCC clan bank: 65 + 60 (%s)" % rows)
+        rows = pay["data"]["payouts"] if code == 200 else None
+        check(rows == [], "CCC clan bank: no player payouts (%s)" % rows)
         after = {a["name"]: asyncio.run(kr_of(port, a)) for a in accs}
         gain = lambda a: after[a["name"]] - before[a["name"]] if after[a["name"]] is not None and before[a["name"]] is not None else None
         check(gain(accs[0]) == 156 and gain(accs[1]) == 156 and gain(accs[3]) == 195 and gain(accs[6]) == 0,
               "the members' KR (%s)" % [gain(a) for a in (accs[0], accs[1], accs[3], accs[6])])
         code, top = http(port, "/api/territorial-wars/leaderboards/top-grossing-clans")
-        check(code == 200 and [r["clan_name"] for r in top["data"]["leaderboard"]] == ["AAA", "BBB", "CCC"], "top grossing clans")
+        rows = top.get("data") or [] if code == 200 else []
+        check([r["clan_name"] for r in rows] == ["AAA", "BBB", "CCC"] and [r["total_kr"] for r in rows] == [390, 195, 125]
+              and [r["bank"] for r in rows] == [78, 0, 125], "top grossing clans: totals and what stayed in the bank (%s)" % rows)
         code, tp = http(port, "/api/territorial-wars/leaderboards/top-performing-players", map_id=0)
-        check(code == 200 and tp["data"]["leaderboard"][0]["player_name"] == accs[0]["name"], "top performing players")
+        check(code == 200 and tp["data"][0]["player_name"] == accs[0]["name"] and tp["data"][0]["clan_name"] == "AAA" and tp["data"][0]["earnings"] == 156,
+              "top performing players (%s)" % (tp.get("data") or [None])[0])
         code, pp = http(port, "/api/territorial-wars/player/%s" % accs[0]["name"])
-        check(code == 200 and pp["data"]["player"][0]["kills"] == 25 and pp["data"]["player"][0]["total_kr"] == 156 and pp["data"]["player"][0]["clan_name"] == "AAA",
-              "player profile by name")
+        check(code == 200 and pp["data"]["total_kills"] == 25 and pp["data"]["total_kr"] == 156 and pp["data"]["current_clan"] == "AAA",
+              "player profile by name (%s)" % pp.get("data"))
         code, pc = http(port, "/api/territorial-wars/player/%d/contributions" % accs[0]["id"], day=DAY)
-        check(code == 200 and len(pc["data"]["contributions"]) == 1, "player contributions of the day")
+        check(code == 200 and len(pc["data"]) == 1 and pc["data"][0]["kills"] == 25, "player contributions of the day")
+        code, pe = http(port, "/api/territorial-wars/player/%d/earnings" % accs[0]["id"])
+        check(code == 200 and [r["amount"] for r in pe["data"]] == [156], "player earnings")
+        recruitment(port, accs, clan_a, clan_c)
+        # v10's HTTP leaderboards (leaderboards.c): {data: [rows with position]}
+        code, lb = http(port, "/api/leaderboards/player_funds")
+        vals = [r["value"] for r in lb.get("data", [])] if code == 200 else []
+        check(len(vals) >= 10 and vals == sorted(vals, reverse=True) and lb["data"][0]["position"] == 1
+              and all(isinstance(r["player_clan"], str) for r in lb["data"]), "leaderboard player_funds (%d rows)" % len(vals))
+        code, lb = http(port, "/api/leaderboards/player_clan", sort="members")
+        mine = {r["clan_name"]: r["member_count"] for r in lb.get("data", [])} if code == 200 else {}
+        check(mine.get("AAA") == 3 and mine.get("BBB") == 3 and mine.get("CCC") == 3, "leaderboard clans by members (%s)" % mine)
+        code, lb = http(port, "/api/leaderboards/raids/0")
+        check(code == 200 and lb["data"] == [], "raids: no data yet")
+        code, lb = http(port, "/api/leaderboards/player_skinvalue")
+        check(code == 200 and lb["data"] == [], "inventory value: nothing to rank")
         time.sleep(1.0)
         code, earn = http(port, "/api/territorial-wars/clan/%d/earnings" % clan_a)
-        check(code == 200 and earn["data"]["total_kr"] == 390, "two brains settled the day once")
+        check(code == 200 and total(earn) == 390, "two brains settled the day once")
     finally:
         for p in procs:
             if p.poll() is None:

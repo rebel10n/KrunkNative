@@ -31,6 +31,7 @@
 #include <stdio.h>
 #include <update_ui.h>
 #include <download_ui.h> // showWindow(25) / ?download (client/src/ui/download_ui.c)
+#include <v10_ui.h> // the v10 page's Ranked / Turf Wars / Leaderboards entries
 #include <stdlib.h>
 #include <string.h>
 #include <ruleset.h>
@@ -1398,7 +1399,7 @@ static void setup_dom(void) {
         HtmlElem finder = by_id("menuBtnBrowser");
         if (finder) html_dom_insert_html(finder, HTML_INSERT_AFTER_END,
             "<div class=\"button small buttonO\" id=\"menuBtnRanked\" onmouseenter=\"playTick()\" "
-            "onclick=\"playSelect(),showWindow(27)\">Ranked</div>");
+            "onclick=\"playSelect(),openRankedMenu()\">Ranked</div>");
     }
     // v10's #menuBtnTurfWars (icon flag): the Turf Wars window, after Ranked
     if (!scenario_on() && !by_id("menuBtnTurfWars")) {
@@ -1413,6 +1414,7 @@ static void setup_dom(void) {
     if (!scenario_on() && !v10_menu_page()) set_display("menuBtnHost", "none");
     servers_ui_menu_setup(); // KrunkNative: the Connect button next to Invite / Join (servers_ui.c)
     v10_news_setup(); // the v10 menu's Guide / What's New / Community & Events items (v10_news.c)
+    v10_competitive_setup(); // the v10 page: Ranked / Turf Wars / Leaderboards (v10_competitive.c)
 
     HtmlElem el;
     if ((el = by_id("classPreviewCanvas"))) html_dom_observe_resize(el, on_observed_resize, NULL);

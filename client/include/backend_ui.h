@@ -75,8 +75,7 @@ int  battlepass_ui_end_html(StrBuf *sb);    // tabs.performance's #endBPLayout; 
 // ---- clan_ui.c (windows[12], the menu Clans window = showWindow(13))
 char *clan_window_gen(void);                // guest: LOGIN REQUIRED; member: the clan page
 int  clan_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
-// v10 Turf Wars window (turf_ui.c): TURF_WINDOW
-char *turf_window_gen(void);
+// v10 Turf Wars popup (turf_ui.c: openTurfWars, genericPopup(_51011, 'defaultModal'))
 void turf_ui_scenario(const cJSON *state); // --render-scenario: state.turf
 int  turf_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 void clan_ui_frame(const cJSON *frame);     // "cln" / "clnL" replies
@@ -149,15 +148,15 @@ void servers_ui_query(const char *query);   // the game page's ?play= / ?game= (
 void servers_ui_redirect(const char *game_id, const char *host, int port, const char *reason); // NET_PACKET_REDIRECT
 void servers_ui_join_ticket(const char *host, int port, const char *game_id, const char *ticket, const char *web_url);
 
-// ---- ranked_ui.c (windows[26] + the queue session, Krunker v7.1.4 ranked)
-char *ranked_ui_window_gen(void);           // showWindow(27) for guests too (LOGIN REQUIRED card)
+// ---- ranked_ui.c (v10's rankedMenuModal popup, openRankedMenu, + the queue session)
+char *ranked_ui_window_gen(void);           // windows[26].gen(): '' (v10 only has the popup)
 int  ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 const char *ranked_ui_status(void);   // queueStatusMessage, NULL none (play instructions subtitle)
 const char *ranked_ui_ready(void);    // queueReadyMessage
 void ranked_ui_class_changed(int index);
 int  ranked_ui_in_ranked(void);       // queued or in a ranked match (v7 config.isComp: custom.host.ranked)
 void ranked_ui_left_match(void);      // the ranked match's lobby was left
-// --render-scenario: state.ranked {rating, party, tab} stands in for the brain (with state.account)
+// --render-scenario: state.ranked {open, tab, profile, board, history, shop, ...} stands in for the brain
 void ranked_ui_scenario(const cJSON *state);
 // Custom Games window (windows[9]) rows from GET /api/maps?index=<tab>&pos=<n>&accountId=:
 // -1 = no brain (use the local catalogue), 0 = loading (requested; the window re-renders),

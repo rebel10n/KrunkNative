@@ -752,6 +752,7 @@ int css_parse_length_item(const CssToken *tokens, int n, unsigned flags, CssLeng
         int i = 0;
         if (!calc_primary(tokens, 1, &i, &v, 0)) return 0;
         if (!length_from_calcval(&v, flags, 0, &r)) return 0;
+        r.pct_term = t->type == CSS_TOK_PERCENTAGE;
         *out = r;
         if (consumed) *consumed = 1;
         return 1;

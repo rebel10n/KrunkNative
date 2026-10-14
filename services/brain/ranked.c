@@ -376,6 +376,8 @@ typedef struct ReqCtx {
     char region[8];
     cJSON *out;
     char shop_id[16];
+    char name[64];
+    int global;        /* leaderboard over every region (v10 "Global"): each player's best profile */
 } ReqCtx;
 
 static ReqCtx *req_ctx(kn_http_req *req) {
@@ -392,6 +394,13 @@ static ReqCtx *req_ctx(kn_http_req *req) {
     if (c->limit > 100) c->limit = 100;
     c->offset = query_int(req, "offset", 0);
     if (c->offset < 0) c->offset = 0;
+    char raw[16] = "";
+    if (kn_http_query_get(req, "region", raw, sizeof raw) > 0 && (!strcmp(raw, "global") || !strcmp(raw, "0"))) {
+        c->global = 1; /* the leaderboard's Global tab */
+        snprintf(c->region, sizeof c->region, "global");
+        c->region_index = 0;
+        return c;
+    }
     const char *region = query_region(req, "eu");
     snprintf(c->region, sizeof c->region, "%s", region ? region : "");
     c->region_index = ranked_region_index(c->region);
@@ -450,7 +459,9 @@ static void on_profile_row(kn_db_result *res, void *ud) {
     ReqCtx *c = ud;
     if (!kn_db_ok(res)) return db_fail(c, "ranked profile", res);
     cJSON *row = kn_db_rows(res) > 0 ? kn_db_row_to_json(res, 0) : NULL;
-    cJSON_AddItemToObject(c->out, "profile", profile_json(row));
+    cJSON *profile = profile_json(row);
+    cJSON_AddStringToObject(profile, "player_name", c->name); /* v10 profile.player_name */
+    cJSON_AddItemToObject(c->out, "profile", profile);
     cJSON_Delete(row);
     static const kn_sql q = {.any = "SELECT balance FROM ranked_points WHERE account_id = $1"};
     char acc[24];
@@ -461,8 +472,8 @@ static void on_profile_row(kn_db_result *res, void *ud) {
 static void profile_account(void *ud, kn_http_req *req, const int64_t id, const int level, const char *name) {
     ReqCtx *c = ud;
     (void) req;
-    (void) name;
     c->id = id;
+    snprintf(c->name, sizeof c->name, "%s", name ? name : "");
     c->out = cJSON_CreateObject();
     cJSON_AddNumberToObject(c->out, "season", c->season);
     cJSON_AddNumberToObject(c->out, "currentSeason", current_season());
@@ -515,15 +526,19 @@ static void on_board(kn_db_result *res, void *ud) {
         cJSON_AddNumberToObject(e, "position", c->offset + i + 1);
         cJSON_AddStringToObject(e, "player_name", kn_json_str(row, "player_name", ""));
         cJSON_AddStringToObject(e, "clan", kn_json_str(row, "clan", ""));
-        cJSON_AddItemToObject(e, "profile", profile_json(row));
+        cJSON *profile = profile_json(row);
+        cJSON_AddStringToObject(profile, "player_name", kn_json_str(row, "player_name", "")); /* v10 reads profile.player_name */
+        cJSON_AddItemToObject(e, "profile", profile);
         cJSON_AddItemToArray(a, e);
         cJSON_Delete(row);
     }
     static const kn_sql q = {.any = "SELECT count(*) FROM ranked_profiles WHERE season = {int:$1} AND region = $2"
                                     " AND wins + losses + draws >= " "6"};
+    static const kn_sql qg = {.any = "SELECT count(DISTINCT account_id) FROM ranked_profiles WHERE season = {int:$1} AND $2 = $2"
+                                     " AND wins + losses + draws >= " "6"};
     char season[16];
     snprintf(season, sizeof season, "%d", c->season);
-    kn_db_query_sql(R.b->db, &q, KN_DB_ARGS(season, c->region), on_board_count, c);
+    kn_db_query_sql(R.b->db, c->global ? &qg : &q, KN_DB_ARGS(season, c->region), on_board_count, c);
 }
 
 /* placed players only (Unranked has no position), best conservative rating first */
@@ -544,12 +559,20 @@ static void h_leaderboard(kn_http_req *req, void *ud) {
                                     " LEFT JOIN clan_members cm ON cm.account_id = rp.account_id LEFT JOIN clans c ON c.clan_id = cm.clan_id"
                                     " WHERE rp.season = {int:$1} AND rp.region = $2 AND rp.wins + rp.losses + rp.draws >= 6"
                                     " ORDER BY rp.cr DESC, rp.account_id LIMIT {int:$3} OFFSET {int:$4}"};
+    /* Global: every placed player once, with the profile of the region where the rating is best */
+    static const kn_sql qg = {.any = "SELECT a.username AS player_name, coalesce(c.clan_name, '') AS clan, " PROFILE_COLS
+                                     " FROM ranked_profiles rp JOIN accounts a ON a.id = rp.account_id"
+                                     " LEFT JOIN clan_members cm ON cm.account_id = rp.account_id LEFT JOIN clans c ON c.clan_id = cm.clan_id"
+                                     " WHERE rp.season = {int:$1} AND $2 = $2 AND rp.wins + rp.losses + rp.draws >= 6"
+                                     " AND NOT EXISTS (SELECT 1 FROM ranked_profiles r2 WHERE r2.account_id = rp.account_id AND r2.season = rp.season"
+                                     " AND r2.wins + r2.losses + r2.draws >= 6 AND (r2.cr > rp.cr OR (r2.cr = rp.cr AND r2.region < rp.region)))"
+                                     " ORDER BY rp.cr DESC, rp.account_id LIMIT {int:$3} OFFSET {int:$4}"};
     char season[16], limit[16], offset[16];
     snprintf(season, sizeof season, "%d", c->season);
     snprintf(limit, sizeof limit, "%d", c->limit);
     snprintf(offset, sizeof offset, "%d", c->offset * c->limit); /* v10: offset = page - 1 */
     c->offset *= c->limit;
-    kn_db_query_sql(R.b->db, &q, KN_DB_ARGS(season, c->region, limit, offset), on_board, c);
+    kn_db_query_sql(R.b->db, c->global ? &qg : &q, KN_DB_ARGS(season, c->region, limit, offset), on_board, c);
 }
 
 static void on_history_count(kn_db_result *res, void *ud) {
@@ -558,6 +581,72 @@ static void on_history_count(kn_db_result *res, void *ud) {
     cJSON *mh = cJSON_GetObjectItemCaseSensitive(c->out, "matchHistory");
     cJSON_AddNumberToObject(mh, "totalPages", (double) ((total + c->limit - 1) / c->limit));
     done_ctx(c, 200);
+}
+
+static void history_count(ReqCtx *c) {
+    static const kn_sql q = {.any = "SELECT count(*) FROM mm_ranked_match_players mp JOIN mm_ranked_matches m ON m.match_id = mp.match_id"
+                                    " WHERE mp.account_id = $1 AND m.season = {int:$2} AND m.region = $3 AND m.status = 'done'"};
+    char acc[24], season[16];
+    snprintf(acc, sizeof acc, "%lld", (long long) c->id);
+    snprintf(season, sizeof season, "%d", c->season);
+    kn_db_query_sql(R.b->db, &q, KN_DB_ARGS(acc, season, c->region), on_history_count, c);
+}
+
+/* v10's match entry: historyEntries (every player of the match: player_name, team 1 Alpha / 2
+ * Bravo, score, kills, assists, deaths, objective_score, damage_done, mmr_change, rank) */
+static void on_history_entries(kn_db_result *res, void *ud) {
+    ReqCtx *c = ud;
+    if (!kn_db_ok(res)) return db_fail(c, "ranked history players", res);
+    cJSON *players = kn_db_result_to_json(res);
+    cJSON *matches = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(c->out, "matchHistory"), "matches");
+    cJSON *m;
+    cJSON_ArrayForEach(m, matches) {
+        const char *id = kn_json_str(m, "match_id", "");
+        cJSON *result = cJSON_Parse(kn_json_str(m, "result", "{}"));
+        cJSON_DeleteItemFromObjectCaseSensitive(m, "result");
+        cJSON *entries = cJSON_AddArrayToObject(m, "historyEntries");
+        const cJSON *p;
+        cJSON_ArrayForEach(p, players) {
+            if (strcmp(kn_json_str(p, "match_id", ""), id)) continue;
+            const int64_t acc = kn_json_int(p, "account_id", 0);
+            cJSON *e = cJSON_CreateObject();
+            cJSON_AddNumberToObject(e, "player_id", (double) acc);
+            cJSON_AddStringToObject(e, "player_name", kn_json_str(p, "player_name", ""));
+            cJSON_AddNumberToObject(e, "team", (double) (kn_json_int(p, "team", 0) + 1));
+            cJSON_AddNumberToObject(e, "score", kn_json_num(p, "score", 0));
+            cJSON_AddNumberToObject(e, "kills", kn_json_num(p, "kills", 0));
+            cJSON_AddNumberToObject(e, "assists", kn_json_num(p, "assists", 0));
+            cJSON_AddNumberToObject(e, "deaths", kn_json_num(p, "deaths", 0));
+            double objective = 0;
+            const cJSON *rp;
+            cJSON_ArrayForEach(rp, cJSON_GetObjectItemCaseSensitive(result, "players")) {
+                if (kn_json_int(rp, "accountId", -1) == acc) objective = kn_json_num(rp, "objective", 0);
+            }
+            cJSON_AddNumberToObject(e, "objective_score", objective);
+            cJSON_AddNumberToObject(e, "damage_done", kn_json_num(p, "damage_done", 0));
+            const double before = kn_json_num(p, "rating_before", 0), after = kn_json_num(p, "rating_after", before);
+            cJSON_AddNumberToObject(e, "mmr_change", after - before);
+            cJSON_AddNumberToObject(e, "rank", ranked_rank_of(kn_json_num(p, "cr", 0), (int) kn_json_num(p, "matches", 0)));
+            if (acc == c->id) cJSON_AddNumberToObject(m, "rank", kn_json_num(e, "rank", 0));
+            cJSON_AddItemToArray(entries, e);
+        }
+        /* the teams' scores (the game server's teamScores; older results: the winner 1 - 0) */
+        const cJSON *ts = cJSON_GetObjectItemCaseSensitive(result, "teamScores");
+        const int winner = (int) kn_json_int(result, "winner", -1);
+        double alpha = winner == 0 ? 1 : 0, bravo = winner == 1 ? 1 : 0;
+        if (cJSON_GetArraySize(ts) == 2) {
+            alpha = cJSON_GetArrayItem(ts, 0)->valuedouble;
+            bravo = cJSON_GetArrayItem(ts, 1)->valuedouble;
+            /* a forfeit / abandon decides the match whatever the scores */
+            if (winner == 0 && alpha <= bravo) alpha = bravo + 1;
+            if (winner == 1 && bravo <= alpha) bravo = alpha + 1;
+        }
+        cJSON_AddNumberToObject(m, "score_alpha", alpha);
+        cJSON_AddNumberToObject(m, "score_bravo", bravo);
+        cJSON_Delete(result);
+    }
+    cJSON_Delete(players);
+    history_count(c);
 }
 
 static void on_history(kn_db_result *res, void *ud) {
@@ -576,12 +665,23 @@ static void on_history(kn_db_result *res, void *ud) {
         cJSON_AddBoolToObject(row, "is_ranked", 1);
         cJSON_AddItemToArray(a, row);
     }
-    static const kn_sql q = {.any = "SELECT count(*) FROM mm_ranked_match_players mp JOIN mm_ranked_matches m ON m.match_id = mp.match_id"
-                                    " WHERE mp.account_id = $1 AND m.season = {int:$2} AND m.region = $3 AND m.status = 'done'"};
-    char acc[24], season[16];
+    if (!kn_db_rows(res)) return history_count(c);
+    /* every player of this page's matches (a derived table: MySQL takes no LIMIT in IN) */
+    static const kn_sql q = {.any = "SELECT mp.match_id, mp.account_id AS account_id__i, mp.username AS player_name, mp.team AS team__i, mp.kills AS kills__i,"
+                                    " mp.deaths AS deaths__i, mp.assists AS assists__i, mp.score AS score__i, mp.damage_done AS damage_done__i,"
+                                    " mp.rating_before AS rating_before__i, mp.rating_after AS rating_after__i, coalesce(rp.cr, 0) AS cr__f,"
+                                    " coalesce(rp.wins + rp.losses + rp.draws, 0) AS matches__i"
+                                    " FROM mm_ranked_match_players mp JOIN (SELECT m.match_id FROM mm_ranked_match_players me"
+                                    " JOIN mm_ranked_matches m ON m.match_id = me.match_id WHERE me.account_id = $1 AND m.season = {int:$2} AND m.region = $3"
+                                    " AND m.status = 'done' ORDER BY m.finished_at DESC LIMIT {int:$4} OFFSET {int:$5}) pg ON pg.match_id = mp.match_id"
+                                    " LEFT JOIN ranked_profiles rp ON rp.account_id = mp.account_id AND rp.season = {int:$2} AND rp.region = $3"
+                                    " ORDER BY mp.match_id, mp.team, mp.score DESC"};
+    char acc[24], season[16], limit[16], offset[16];
     snprintf(acc, sizeof acc, "%lld", (long long) c->id);
     snprintf(season, sizeof season, "%d", c->season);
-    kn_db_query_sql(R.b->db, &q, KN_DB_ARGS(acc, season, c->region), on_history_count, c);
+    snprintf(limit, sizeof limit, "%d", c->limit);
+    snprintf(offset, sizeof offset, "%d", c->offset * c->limit);
+    kn_db_query_sql(R.b->db, &q, KN_DB_ARGS(acc, season, c->region, limit, offset), on_history_entries, c);
 }
 
 static void history_account(void *ud, kn_http_req *req, const int64_t id, const int level, const char *name) {
@@ -595,7 +695,7 @@ static void history_account(void *ud, kn_http_req *req, const int64_t id, const 
                                     " m.region, m.season AS season__i, mp.team AS team__i, mp.victory AS victory__i, mp.kills AS kills__i,"
                                     " mp.deaths AS deaths__i, mp.assists AS assists__i, mp.score AS score__i, mp.damage_done AS damage_done__i,"
                                     " mp.rating_before AS rating_before__i, mp.rating_after AS rating_after__i, mp.abandoned AS abandoned__b,"
-                                    " mp.rp AS rp__i"
+                                    " mp.rp AS rp__i, coalesce({text:m.result}, '{}') AS result"
                                     " FROM mm_ranked_match_players mp JOIN mm_ranked_matches m ON m.match_id = mp.match_id"
                                     " WHERE mp.account_id = $1 AND m.season = {int:$2} AND m.region = $3 AND m.status = 'done'"
                                     " ORDER BY m.finished_at DESC LIMIT {int:$4} OFFSET {int:$5}"};

@@ -1,0 +1,11 @@
+{
+  "note": "a guest's Ranked click: no rankedMenuModal (ranked_ui.c), v10's loginOrRegister() modal instead; the modal's own markup is v10_login.c's (skipped here)",
+  "defaults": {"fuzz": 6, "max_pct": 0.5},
+  "regions": [
+    {"name": "no-popup-left", "rect": [263, 117, 130, 440], "max_pct": 1.0},
+    {"name": "no-popup-right", "rect": [886, 117, 200, 330], "max_pct": 1.0},
+    {"name": "no-popup-top", "rect": [400, 110, 480, 55], "max_pct": 1.0},
+    {"name": "action-cards", "rect": [1085, 450, 195, 225], "fuzz": 20, "max_pct": 6.0},
+    {"name": "login-modal", "rect": [398, 170, 484, 380], "skip": true}
+  ]
+}

@@ -106,7 +106,7 @@ extern const kn_proc P_RK_JOIN, P_RK_POLL, P_RK_EXPIRE, P_RK_MATCH_RUN, P_RK_MAT
     P_RK_MATCH_FAILED, P_RK_MATCH_FINISH, P_RK_CLAIM, P_RK_SEASON_CLOSE, P_RK_PURCHASE;
 
 /* ---- Krunker v10.0.2 Turf Wars (db_turf.c, 0206_turf_wars) */
-extern const kn_proc P_TURF_RECORD, P_TURF_SETTLE, P_TURF_LOOT_SET;
+extern const kn_proc P_TURF_RECORD, P_TURF_SETTLE, P_TURF_LOOT_SET, P_TURF_VIEW, P_TURF_RECRUIT_SET, P_TURF_RECRUIT_DEL, P_TURF_APPLY;
 
 /* ---- Krunker v7.1.4 seasons and the Battle Pass (db_season.c, 0108_seasons) */
 extern const kn_proc P_SEASON_ENSURE, P_BP_DATA, P_BP_CLAIM, P_BP_BUY, P_BP_SKIP, P_SEASON_STATS;

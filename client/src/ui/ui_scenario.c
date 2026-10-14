@@ -52,6 +52,7 @@
 #endif
 #include "../html/engine/engine.h"
 #include <gltf.h> // gltf_set_clock_override: animated GLTF items follow the pinned clock
+#include <v10_ui.h> // state.leaderboards / state.v10responses
 #include <spectate.h> // state.spectate
 #include <hud_map.h>  // state.customMap (the minimap of custom-map games)
 #include <backend_ui.h> // store_skin_preview: killcard player card banners
@@ -246,7 +247,9 @@ static void warn_unknown_keys(void) {
         "account", // WP-E part 2c: a stand-in logged-in account (account_ui_scenario)
         "community", // v10 Community & Events / news without a brain (v10_news_scenario)
         "ranked",  // the Ranked window's state: {tab, info, profile, board, history, shop, status, searching}
-        "turf",    // the Turf Wars window's state: {tab, status, clan, players, board}
+        "turf",    // the Turf Wars popup's state: {open, tab, ...} (turf_ui.c)
+        "leaderboards", // the v10 Leaderboards popup: {category, tab, region, season} (v10_competitive.c)
+        "v10responses", // {path: answer}: the brain's answers for the v10 popups (v10_competitive.c)
         "update",  // the menu's Outdated / Update now box (update_ui_scenario)
         "connectError", // with connected:false, the Lost Connection screen's error text (menu_ui.c)
         "spin",    // the store's prize wheel screen: prizeWheel(spin) without the backend (store_ui.c)
@@ -851,8 +854,9 @@ static int ui_scenario_apply(Client *client) {
     if (in_game) client->menu_lock_grace_until = 1e18;
     if (st_has("gameName")) menu_set_game_name(st_str("gameName"));
     account_ui_scenario(st("account")); // WP-E part 2c: a stand-in logged-in account (badges, challenges)
-    ranked_ui_scenario(st("ranked"));   // the Ranked window (ranked_ui.c)
-    turf_ui_scenario(st("turf"));       // the Turf Wars window (turf_ui.c)
+    v10_competitive_scenario(g_sc.state); // the v10 popups' brain answers + Leaderboards (v10_competitive.c)
+    ranked_ui_scenario(st("ranked"));   // the Ranked popup (ranked_ui.c)
+    turf_ui_scenario(st("turf"));       // the Turf Wars popup (turf_ui.c)
     v10_news_scenario(st("community")); // v10 events / polls / news (v10_news.c)
     update_ui_scenario(st("update"));   // the Outdated box without a network check
     if (menu_open) apply_window(client);

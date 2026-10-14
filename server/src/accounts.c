@@ -16,6 +16,7 @@
 #include <ks_storage.h>    // WP6: GAME.STORAGE / KR reward replies ("acct-r")
 #include <season.h>       // v7 endGame BPP of the commit (bp_match_points), map rewards
 #include <bots.h>         // game_bots_count (lobby meta "bots")
+#include <modes.h>        // mode_team_score: the ranked result's teamScores
 #include <pcg_basic.h>
 #include <math.h>
 #include <stdio.h>
@@ -1092,6 +1093,10 @@ static void acc_ranked_send_result(void) {
     cJSON_AddStringToObject(frame, "matchId", g_rk.match_id);
     cJSON_AddStringToObject(frame, "lobbyId", g_acc.lobby_id);
     cJSON_AddNumberToObject(frame, "winner", winner);
+    // the teams' final scores (Alpha = game team 1 = queue team 0): v10's score_alpha / score_bravo
+    cJSON *team_scores = cJSON_AddArrayToObject(frame, "teamScores");
+    cJSON_AddItemToArray(team_scores, cJSON_CreateNumber(mode_team_score(&g_server->game, 1)));
+    cJSON_AddItemToArray(team_scores, cJSON_CreateNumber(mode_team_score(&g_server->game, 2)));
     cJSON *players = cJSON_AddArrayToObject(frame, "players");
     cJSON *abandoned = cJSON_AddArrayToObject(frame, "abandoned");
     for (int i = 0; i < g_rk.count; i++) {

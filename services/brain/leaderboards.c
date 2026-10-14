@@ -12,6 +12,7 @@
  * rows carry the value under the query's name.
  */
 #include "acct_internal.h"
+#include "brain_internal.h"
 #include "hot.h"
 
 #include <stdio.h>
@@ -19,6 +20,7 @@
 #include <string.h>
 
 #include "knsvc/config.h"
+#include "knsvc/http.h"
 #include "knsvc/log.h"
 #include "knsvc/loop.h"
 
@@ -262,4 +264,183 @@ static void player_page(SocialSession *s, const LeaderQuery *q, int64_t region, 
              q->column, q->column);
     const kn_sql text = {.pg = sql, .any = any};
     social_query(s, &text, KN_DB_ARGS(reg, lim), leaders_done, c);
+}
+
+/* ================================================================ v10's HTTP leaderboards
+ *
+ * Krunker v10.0.2 reads its Leaderboards popup (_49281, the menu's #menuBtnLeaderboards) from gapi
+ * (v10:26987-27036) instead of the social socket:
+ *   GET /api/leaderboards/<type>?sort&season   {data: [{position, player_name, player_clan, value}]}
+ *        type: player_score kills wins timeplayed funds followed nukes skinvalue eventcount
+ *        ranked_matches (?season), player_clan (?sort=score|members: {position, clan_name,
+ *        clan_score, member_count})
+ *   GET /api/leaderboards/raids/<map>[?sort=completions], /raids/<map>/monthly?month=YYYY-MM
+ *   GET /api/leaderboards/krunkcup/teams, /krunkcup/teams/<id>/contributors, /krunkcup/players
+ * KrunkNative keeps no raid clear times, inventory values, event finds or KrunkCup teams: those
+ * answer an empty list (the popup then says "No data available."). Pages are cached
+ * accounts.leaderboard_cache_s per path, like the socket's. */
+
+typedef struct HttpBoard {
+    kn_http_req *req;
+    char key[96];
+    int clans;
+} HttpBoard;
+
+#define HTTP_CACHE_SLOTS 32
+static int s_http_ttl_ms = 30000; /* accounts.leaderboard_cache_s */
+static int s_http_limit = 100;    /* accounts.page_size */
+static struct {
+    char key[96];
+    uint64_t at_ms;
+    cJSON *data;
+} s_http_cache[HTTP_CACHE_SLOTS];
+
+static void http_reply(kn_http_req *req, const cJSON *data) {
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddItemToObject(o, "data", data ? cJSON_Duplicate(data, 1) : cJSON_CreateArray());
+    kn_http_set_header(req, "Cache-Control", "no-cache, no-store, must-revalidate");
+    brain_reply_json(req, 200, o);
+    cJSON_Delete(o);
+}
+
+static const cJSON *http_cached(const char *key) {
+    for (int i = 0; i < HTTP_CACHE_SLOTS; i++)
+        if (s_http_cache[i].data && !strcmp(s_http_cache[i].key, key) && kn_now_ms() - s_http_cache[i].at_ms < (uint64_t) s_http_ttl_ms)
+            return s_http_cache[i].data;
+    return NULL;
+}
+
+static void http_store(const char *key, const cJSON *data) {
+    int slot = 0;
+    for (int i = 0; i < HTTP_CACHE_SLOTS; i++) {
+        if (!s_http_cache[i].data || !strcmp(s_http_cache[i].key, key)) {
+            slot = i;
+            break;
+        }
+        if (s_http_cache[i].at_ms < s_http_cache[slot].at_ms) slot = i;
+    }
+    cJSON_Delete(s_http_cache[slot].data);
+    snprintf(s_http_cache[slot].key, sizeof s_http_cache[slot].key, "%s", key);
+    s_http_cache[slot].at_ms = kn_now_ms();
+    s_http_cache[slot].data = cJSON_Duplicate(data, 1);
+}
+
+static void on_http_board(kn_db_result *res, void *ud) {
+    HttpBoard *h = ud;
+    if (!kn_db_ok(res)) {
+        acct_db_error(res, "leaderboards http");
+        cJSON *o = cJSON_CreateObject();
+        cJSON *e = cJSON_AddObjectToObject(o, "error");
+        cJSON_AddStringToObject(e, "message", "Failed to fetch leaderboard");
+        brain_reply_json(h->req, 500, o);
+        cJSON_Delete(o);
+        free(h);
+        return;
+    }
+    cJSON *rows = kn_db_result_to_json(res);
+    if (!rows) rows = cJSON_CreateArray();
+    int pos = 0;
+    cJSON *r;
+    cJSON_ArrayForEach(r, rows) {
+        cJSON_AddNumberToObject(r, "position", ++pos);
+        if (!h->clans && !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(r, "player_clan"))) {
+            cJSON_DeleteItemFromObjectCaseSensitive(r, "player_clan");
+            cJSON_AddStringToObject(r, "player_clan", "");
+        }
+    }
+    http_store(h->key, rows);
+    http_reply(h->req, rows);
+    cJSON_Delete(rows);
+    free(h);
+}
+
+/* player_rows columns behind v10's player types (the request never names a column itself) */
+static const struct {
+    const char *type, *column;
+} k_http_player[] = {
+    {"player_score", "player_score"}, {"player_kills", "player_kills"},   {"player_wins", "player_wins"},
+    {"player_timeplayed", "player_timeplayed"}, {"player_funds", "player_funds"}, {"player_followed", "player_followed"},
+};
+
+static void h_http_board(kn_http_req *req, void *ud) {
+    Brain *b = ud;
+    const char *type = kn_http_param(req, "type");
+    char sort[16] = "", season[16] = "";
+    kn_http_query_get(req, "sort", sort, sizeof sort);
+    kn_http_query_get(req, "season", season, sizeof season);
+    char key[96];
+    snprintf(key, sizeof key, "%s|%s|%s", type ? type : "", sort, season);
+    const cJSON *hit = http_cached(key);
+    if (hit) return http_reply(req, hit);
+    if (!b->db || !type) return http_reply(req, NULL);
+    HttpBoard *h = calloc(1, sizeof *h);
+    if (!h) return http_reply(req, NULL);
+    h->req = req;
+    snprintf(h->key, sizeof h->key, "%s", key);
+    char lim[16];
+    snprintf(lim, sizeof lim, "%d", s_http_limit);
+    for (size_t i = 0; i < sizeof k_http_player / sizeof k_http_player[0]; i++) {
+        if (strcmp(type, k_http_player[i].type)) continue;
+        char any[512];
+        snprintf(any, sizeof any,
+                 "SELECT player_name, player_clan, %s AS value FROM player_rows WHERE %s > 0 AND player_hack = 0"
+                 " ORDER BY %s DESC, player_id LIMIT {int:$1}",
+                 k_http_player[i].column, k_http_player[i].column, k_http_player[i].column);
+        const kn_sql q = {.any = any};
+        kn_db_query_sql(b->db, &q, KN_DB_ARGS(lim), on_http_board, h);
+        return;
+    }
+    if (!strcmp(type, "player_nukes")) { /* player_stats "n": Nukes called in */
+        static const kn_sql q = {
+            .pg = "SELECT r.player_name, r.player_clan, (p.player_stats->>'n')::bigint AS value FROM players p JOIN player_rows r ON r.player_id = p.player_id"
+                  " WHERE (p.player_stats->>'n') IS NOT NULL AND (p.player_stats->>'n')::numeric > 0 AND r.player_hack = 0"
+                  " ORDER BY (p.player_stats->>'n')::numeric DESC, p.player_id LIMIT $1::int",
+            .sqlite = "SELECT r.player_name, r.player_clan, CAST(json_extract(p.player_stats, '$.n') AS INTEGER) AS value FROM players p"
+                      " JOIN player_rows r ON r.player_id = p.player_id WHERE json_extract(p.player_stats, '$.n') > 0 AND r.player_hack = 0"
+                      " ORDER BY json_extract(p.player_stats, '$.n') DESC, p.player_id LIMIT CAST($1 AS INTEGER)",
+            .mysql = "SELECT r.player_name, r.player_clan, CAST(JSON_EXTRACT(p.player_stats, '$.n') AS SIGNED) AS value FROM players p"
+                     " JOIN player_rows r ON r.player_id = p.player_id WHERE CAST(JSON_EXTRACT(p.player_stats, '$.n') AS DECIMAL(20,2)) > 0 AND r.player_hack = 0"
+                     " ORDER BY CAST(JSON_EXTRACT(p.player_stats, '$.n') AS DECIMAL(20,2)) DESC, p.player_id LIMIT $1"};
+        kn_db_query_sql(b->db, &q, KN_DB_ARGS(lim), on_http_board, h);
+        return;
+    }
+    if (!strcmp(type, "player_ranked_matches")) { /* v10 leaderQueries: ranked matches (a season or all) */
+        static const kn_sql q = {.any = "SELECT r.player_name, r.player_clan, sum(rp.wins + rp.losses + rp.draws) AS value FROM ranked_profiles rp"
+                                        " JOIN player_rows r ON r.player_id = rp.account_id WHERE ($1 = '' OR rp.season = {int:$2})"
+                                        " GROUP BY rp.account_id, r.player_name, r.player_clan HAVING sum(rp.wins + rp.losses + rp.draws) > 0"
+                                        " ORDER BY sum(rp.wins + rp.losses + rp.draws) DESC, rp.account_id LIMIT {int:$3}"};
+        kn_db_query_sql(b->db, &q, KN_DB_ARGS(season, season[0] ? season : "0", lim), on_http_board, h);
+        return;
+    }
+    if (!strcmp(type, "player_clan") || !strcmp(type, "clans")) {
+        h->clans = 1;
+        static const kn_sql by_score = {.any = "SELECT c.clan_name, c.clan_score, (SELECT count(*) FROM clan_members m WHERE m.clan_id = c.clan_id) AS member_count"
+                                               " FROM clans c ORDER BY c.clan_score DESC, c.clan_id LIMIT {int:$1}"};
+        static const kn_sql by_members = {.any = "SELECT c.clan_name, c.clan_score, (SELECT count(*) FROM clan_members m WHERE m.clan_id = c.clan_id) AS member_count"
+                                                 " FROM clans c ORDER BY (SELECT count(*) FROM clan_members m WHERE m.clan_id = c.clan_id) DESC, c.clan_score DESC, c.clan_id"
+                                                 " LIMIT {int:$1}"};
+        kn_db_query_sql(b->db, !strcmp(sort, "members") ? &by_members : &by_score, KN_DB_ARGS(lim), on_http_board, h);
+        return;
+    }
+    free(h); /* player_skinvalue, player_eventcount, unknown types: nothing to rank */
+    http_reply(req, NULL);
+}
+
+static void h_http_empty(kn_http_req *req, void *ud) {
+    (void) ud;
+    http_reply(req, NULL);
+}
+
+int leaderboards_http_init(Brain *b) {
+    if (!b->http) return 0;
+    s_http_ttl_ms = (int) kn_config_int(b->cfg, "accounts.leaderboard_cache_s", 30) * 1000;
+    s_http_limit = (int) kn_config_int(b->cfg, "accounts.page_size", 100);
+    if (s_http_limit <= 0 || s_http_limit > 500) s_http_limit = 100;
+    kn_http_route(b->http, "GET", "/api/leaderboards/raids/:map", h_http_empty, b);
+    kn_http_route(b->http, "GET", "/api/leaderboards/raids/:map/monthly", h_http_empty, b);
+    kn_http_route(b->http, "GET", "/api/leaderboards/krunkcup/teams", h_http_empty, b);
+    kn_http_route(b->http, "GET", "/api/leaderboards/krunkcup/teams/:id/contributors", h_http_empty, b);
+    kn_http_route(b->http, "GET", "/api/leaderboards/krunkcup/players", h_http_empty, b);
+    kn_http_route(b->http, "GET", "/api/leaderboards/:type", h_http_board, b);
+    return 0;
 }

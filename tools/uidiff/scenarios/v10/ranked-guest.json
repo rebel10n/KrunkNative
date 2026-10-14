@@ -1,0 +1,28 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/ranked-guest.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.8,
+    "windowActions": [
+      [
+        "openRankedMenu"
+      ]
+    ]
+  },
+  "frames": 3,
+  "note": "Krunker v10.0.2: a guest clicks Ranked (openRankedMenu: no rankedMenuModal for guests, v10's loginOrRegister() modal instead) (doc/ref/krunker-v10.0.2/ranked-guest.png: captured from the offline v10 sandbox, ~/.cache/kn-wt/v10-stage/v10-capture states/ranked): ranked_ui.c + v10_login.c on ui/v10"
+}

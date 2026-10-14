@@ -1321,7 +1321,7 @@ void layout_nodes_removed(LayoutTree *t, lxb_dom_node_t *root, int include_root)
 
 static int len_eq(const CssLength *a, const CssLength *b)
 {
-    return a->kind == b->kind && a->px == b->px && a->pct == b->pct;
+    return a->kind == b->kind && a->px == b->px && a->pct == b->pct && a->pct_term == b->pct_term;
 }
 
 static float used_border(const CssComputed *s, int i)

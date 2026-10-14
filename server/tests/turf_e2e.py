@@ -205,7 +205,7 @@ def run():
           burg.get("total_kills_today") == 3 and burg["leaderboard"][0]["clan_name"] == "AAA" and burg["leaderboard"][0]["kills"] == 3,
           json.dumps(burg)[:300])
     code, pl = http("/api/territorial-wars/clan/BBB/players", map_id=0)
-    b0 = (pl.get("data", {}).get("players") or [{}])[0]
+    b0 = ((pl or {}).get("data") or [{}])[0]  # v10's {data: [player rows]}
     check("BBB: b0's 2 deaths by another clan, no kills", b0.get("deaths") == 2 and b0.get("kills") == 0, json.dumps(pl)[:300])
     for c, _ in conns.values():
         c.close()

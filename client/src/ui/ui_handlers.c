@@ -16,6 +16,7 @@
 #include <console.h>      // #knConsoleInput keys (developer console, ui_console.c)
 #include <ui_mobile.h>    // isMobile: Escape resumes without a pointer lock (ui_mobile.c)
 #include <backend_ui.h>   // brain backend: account (account_ui.c) + matchmaker (servers_ui.c)
+#include <v10_ui.h> // v10 Leaderboards / view stack (v10_competitive.c)
 #include <client_settings.h> // Settings > Client tab + the Exit menu item (ui_client_settings.c)
 #include <math.h>
 #include <stdio.h>
@@ -597,6 +598,7 @@ static const UiModuleHandler MODULE_HANDLERS[] = {
     ranked_ui_handle,          // ranked_ui.c: Ranked (windows[26])
     turf_ui_handle,            // turf_ui.c: v10 Turf Wars
     v10_news_handle,           // v10_news.c: What's New (windows[34]), Guide, Community & Events
+    v10_competitive_handle,    // v10_competitive.c: v10 Leaderboards, the view stack
     ui_settings_handle,        // ui_settings.c: Game Settings (windows[0])
     ui_controls_handle,        // ui_controls.c: Change Controls (windows[6])
     ui_loadout_handle,         // ui_loadout.c: Change Loadout (windows[2]) and the pickers
