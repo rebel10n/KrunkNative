@@ -172,8 +172,8 @@ static char *windows_dir(void) {
 #else
     const char *dir = getenv("KRUNKNATIVE_UI_DIR"); // main.c's ui dir override
     if (dir && *dir) {
-        // a page tree without window templates (ui/v10 for now, ruleset_ui.h) borrows ui/'s, so
-        // Settings (and its Game version row) still opens there
+        // a page tree without window templates (an incomplete import, ruleset_ui.h) borrows ui/'s,
+        // so Settings (and its Game version row) still opens there
         char *own = concat(dir, "/windows/");
         char *index = concat(own, "windows.json");
         FILE *f = fopen(index, "rb");

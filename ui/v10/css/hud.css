@@ -17,6 +17,27 @@ html.kn-hud-visible #aimRecticle {
   display: block !important;
 }
 
+/* The in-game HUD's top margin (#uiBase px, so x0.627 at 720p / x0.941 at 1080p), shared by
+ * everything anchored to the top edge. The corners keep v7's 15px (#topLeftHolder: minimap,
+ * timer, match info, team scores; #topRight: leaderboard, counters, kill feed). KrunkNative
+ * difference: v7's #topMidHold (#roundsDisplay, #gameMessage "next objective" / the CTF flag
+ * notices, #roundMessage) sits at top -5px scaled .8 around its centre, which puts its text
+ * on the screen's top row; here it starts at the same margin as the corners, scaled
+ * from its top edge so the margin is what it says. */
+:root {
+  --kn-hud-top: 15px;
+}
+
+#topLeftHolder,
+#topRight {
+  top: var(--kn-hud-top);
+}
+
+#topMidHold {
+  top: var(--kn-hud-top);
+  transform-origin: 50% 0;
+}
+
 /* Default Krunker crosshair (game-overlay crosshairType 1): four 4x21 bars on the
  * edges of a square of side crosshairScale (--kn-cross-size, set per frame by
  * hud_ui.c from the player's spread), each with a 2px 50% black shadow rect. */

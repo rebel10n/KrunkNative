@@ -125,7 +125,9 @@ int  servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *arg
 char *servers_window_gen(int id, const char **header); // windows 2 (Servers), 8 (Host), 10 (Custom Games)
 void servers_ui_set_games(const cJSON *list);    // fixed /mm/game-list answer (scenarios, KRUNKNATIVE_SERVER_LIST); NULL = the brain's
 // KrunkNative addition: the menu's Connect button (next to Invite / Join) and its window
-#define SERVERS_WINDOW_CONNECT 53                // showWindow id (v7's windows[] end at 52)
+// showWindow id of KrunkNative's Connect window: above every Krunker page's windows[] (it was 53,
+// past v7's 52, which is v10's second Change Loadout entry; ui_logic.h KN_WINDOW_BASE)
+#define SERVERS_WINDOW_CONNECT (KN_WINDOW_BASE + 2)
 void servers_ui_menu_setup(void);                // inject #menuBtnConnect into #subLogoButtons
 char *servers_connect_window_gen(void);          // the Connect window (host[:port], console `connect` semantics)
 // Build versions (ci-release; brain fields: doc/backend.md "Build version"). entry = a game-list

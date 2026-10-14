@@ -57,13 +57,28 @@ python3 -I tools/ui-import/import.py --ui ui --ref v10 [--public <stage>/public]
 | site mirror | `fetch_live_site.py` | `<stage>/public/` (krunker.io + assets.krunker.io in one tree, each path asked of the host the reference names and then the other) + `<stage>/site.lock` (url, path, status, sha256, size, UTC date; resumable). Same politeness as `fetch_live_assets.py` (`KN_FETCH_JOBS` <= 4, delay, retries with backoff). `.js` is never downloaded |
 | Svelte menu | `v10_bundle.js` | `mounts.json` (the HTML each boot `mount(Component, {target})` produces in the initial state), `svelte.css` (all `{hash, code}` component stylesheets), `i18n-en.json`, `report.txt`. acorn AST plus a whitelist interpreter over a toy DOM: Svelte runtime helpers are recognised by shape (template, sibling, if/each blocks, set_text, set_attribute, ...), unknown runtime calls are skipped, there is no host access and no `eval`. acorn: `net-bridge/node_modules` (`KN_NODE_MODULES=` from a worktree) |
 | pages | `v10_page.py` | `ui/v10/{index,social}.html` (v7 rules + the mounts filled in + `css/svelte.css` linked), their stylesheets, our glue files, `windows/versions.txt` |
+| windows | `windows_v10.py` | `ui/v10/windows/` from `krunker-windows-v10.json.gz` (the capture below): the layout and rules of `windows_v7.py`; windows 5 and 14 from v7's capture (`"from": "v7.1.4"`), the loadout windows' `#classPreviewCanvas` dropped (module docstring) |
 | fonts, files | `import.py` | every font (`.ttf` next to each `.woff2`) and every file the pages, stylesheets and `menu-assets-v7.txt` name, from the mirror (`ui/` for what the hosts 404 on); `.webp.png` sidecars |
 
 `capture_v10_live.js <stage>` is the rendered-DOM capture, which RUNS the live client. Run it
 only with the user's approval. It uses sandboxed headless Chromium with a temporary profile,
 `KN_FETCH_PROXY`, an allow-list of krunker.io / *.krunker.io / font+cdnjs hosts (GET/HEAD
 only), no WebSocket and no sendBeacon. Blocked requests go to `blocked.tsv`. Output:
-`<stage>/v10-capture/`. v10 content for `assets/` is pinned in `live_assets_v10.lock`
+`<stage>/v10-capture/` (`windows.json` = every `showWindow(n)` plus the settings and Change
+Controls tabs). Offline mode, used when krunker.io refuses the machine (Cloudflare 403, as on
+2026-10-13): `KN_V10_PUBLIC=<stage>/public` answers every krunker.io request from the mirror
+(`KN_V10_CLIENT_JS`, default `~/.cache/kn-v10/v10.js`, for `static/index-*.js`; `KN_V10_LIBS`,
+default v7.1.4's `public/libs`, for the libs the mirror never fetched; an inert FRVR SDK
+stand-in), with a dead proxy so nothing leaves the machine. Then:
+
+```sh
+KN_NODE_MODULES=<checkout>/net-bridge/node_modules KN_V10_PUBLIC=~/.cache/kn-v10/live/site/public \
+    node tools/ui-import/capture_v10_live.js <stage>
+python3 -I tools/ui-import/windows_v10.py pack <stage>/v10-capture/windows.json   # -> krunker-windows-v10.json.gz
+python3 -I tools/ui-import/import.py --ui ui --ref v10                             # -> ui/v10/windows/
+```
+
+v10 content for `assets/` is pinned in `live_assets_v10.lock`
 (`fetch_live_assets.py install --lock tools/ui-import/live_assets_v10.lock`): root `assets` for
 new files, root `assets-v10` (= `assets/v10/<path>`) for v10 versions of files v7.1.4 has with
 other content.

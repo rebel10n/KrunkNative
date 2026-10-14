@@ -518,7 +518,7 @@ launcher-e2e: build ## Launcher + updates server end to end: executable update, 
 launcher-online-e2e: build ## Launcher-started client: finder + matchmaker requests, browser rows, finder errors shown
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I launcher/tests/launcher_online_e2e.py $(DEBUG_DIR)
 
-.PHONY: smoke smoke-native smoke-web lint check
+.PHONY: smoke smoke-native smoke-ui-v10 smoke-web lint check
 check: test ks-test editor-mcp-test lint bridge-check ## Everything CI runs that does not need a display
 
 lint: ## Lint workflow YAML, presets and the web glue scripts (ui/js)
@@ -595,15 +595,34 @@ smoke: smoke-native smoke-web ## Headless render checks for both clients (screen
 # rendered, exits the client and keeps the run's settings in a private XDG_CONFIG_HOME.
 # Runs from the repo root: assets_path() is ./assets/.
 EGL_DEVICE ?=
+# UI_DIR=ui/v10 runs it on another page tree (KRUNKNATIVE_UI_DIR); it then also fails when that
+# tree's window templates are missing (ui_windows.c falling back to ui/windows/)
+UI_DIR ?=
 
-smoke-native: build ## Run the native client offline headless (no window; EGL_DEVICE=nvidia|mesa) and screenshot the menu (/tmp/smoke-native.png)
+smoke-native: build ## Run the native client offline headless (no window; EGL_DEVICE=nvidia|mesa, UI_DIR=ui/v10) and screenshot the menu (/tmp/smoke-native.png)
 	@rm -f /tmp/smoke-native.png
 	@env -u DISPLAY -u WAYLAND_DISPLAY KRUNKNATIVE_HEADLESS=1 $(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) \
+	  $(if $(UI_DIR),KRUNKNATIVE_UI_DIR=$(UI_DIR),) \
 	  KRUNKNATIVE_SCREENSHOT=/tmp/smoke-native.png KRUNKNATIVE_CAPTURE_FRAMES=60 \
 	  timeout 120 stdbuf -oL $(DEBUG_DIR)/$(CLIENT_BIN) --offline > /tmp/smoke-native.log 2>&1 || { tail -20 /tmp/smoke-native.log; exit 1; }
 	@grep -q "^\[ui\] setting " /tmp/smoke-native.log && [ -s /tmp/smoke-native.png ] \
-	  && echo "smoke-native ok (C UI logic set up the page and applied its settings): /tmp/smoke-native.png" \
+	  && ! grep "windows.json missing\|missing window file" /tmp/smoke-native.log \
+	  && echo "smoke-native ok (C UI logic set up the $(or $(UI_DIR),ui) page and applied its settings): /tmp/smoke-native.png" \
 	  && grep -m1 "GL_RENDERER" /tmp/smoke-native.log || { tail -20 /tmp/smoke-native.log; exit 1; }
+
+# The Krunker v10 page tree (ui/v10, the Game version picker's page) with its own window
+# templates: every tools/uidiff/scenarios/v10/*.json rendered headless (main menu, Settings with
+# the Game version row, a few windows) into /tmp/smoke-ui-v10/. Fails on a non-zero exit, an empty
+# frame or a window template taken from ui/ instead of ui/v10/windows/.
+smoke-ui-v10: build ## Render the v10 page's menu, Settings and windows headless (/tmp/smoke-ui-v10/*.png)
+	@rm -rf /tmp/smoke-ui-v10 && mkdir -p /tmp/smoke-ui-v10/cfg
+	@for f in tools/uidiff/scenarios/v10/*.json; do n=$$(basename $$f .json); \
+	  env -u DISPLAY -u WAYLAND_DISPLAY KRUNKNATIVE_HEADLESS=1 $(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) \
+	    XDG_CONFIG_HOME=/tmp/smoke-ui-v10/cfg KRUNKNATIVE_UI_DIR=ui/v10 \
+	    timeout 120 $(DEBUG_DIR)/$(CLIENT_BIN) --render-scenario $$f /tmp/smoke-ui-v10/$$n.png > /tmp/smoke-ui-v10/$$n.log 2>&1 \
+	    && [ -s /tmp/smoke-ui-v10/$$n.png ] && ! grep "windows.json missing\|missing window file" /tmp/smoke-ui-v10/$$n.log \
+	    || { echo "smoke-ui-v10: $$n failed"; tail -20 /tmp/smoke-ui-v10/$$n.log; exit 1; }; \
+	  echo "smoke-ui-v10: $$n ok"; done
 
 smoke-web: ## Load the web build offline in headless Chromium and screenshot it (/tmp/smoke-web.png)
 	@[ -f $(DIST_WEB)/client.wasm ] || { echo "no web build yet: run 'make web' first"; exit 1; }

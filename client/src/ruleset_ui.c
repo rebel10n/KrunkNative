@@ -57,9 +57,8 @@ void client_ruleset_startup(void) {
         fprintf(stderr, "[ruleset] warning: %s missing, the v%s page is not available: showing ui/\n", index, rules->version);
         return;
     }
-    // ui/v10 is the live krunker.io page without window templates yet (ui/README.md "Krunker v10
-    // page tree"): it loads, and its windows are ui/'s v7 ones (ui_windows.c) until the live-v10
-    // work adds its own. Dev-facing until then.
+    // a page tree has its own window templates (ui/v10/windows/, tools/ui-import/windows_v10.py);
+    // without them ui_windows.c falls back to ui/'s v7.1.4 ones, which this warns about
     snprintf(index, sizeof(index), "%s/windows/windows.json", dir);
     if (!file_exists(index))
         fprintf(stderr, "[ruleset] warning: %s has no window templates: its menu windows are ui/'s (v7.1.4)\n", dir);

@@ -13,13 +13,24 @@
 // queue, social): window.WebSocket throws, set before any page script. No cookies or tokens of
 // ours: empty profile, Network.setBlockedURLs for analytics/ads, storage holds only the guest flags below.
 //
+// Offline mode (KN_V10_PUBLIC=<mirror public/ dir>, the fetch_live_site.py stage): the same page
+// and the same pinned client script, but no request leaves the machine. Every krunker.io /
+// *.krunker.io request is answered from the mirror by Fetch.fulfillRequest (the page keeps its
+// https://krunker.io/ origin, so the client's host checks behave as live); the page's module
+// script (static/index-*.js) is KN_V10_CLIENT_JS (default ~/.cache/kn-v10/v10.js), and libs/
+// files the mirror lacks (it never downloads .js) come from KN_V10_LIBS (default v7.1.4's
+// public/libs). Everything else is refused as above, and the proxy is a dead port. Used when the
+// live site refuses this machine (Cloudflare "ACCESS DENIED", 2026-10-13).
+//
 // Output (idempotent: every file rewritten each run; <stage>/v10-capture/ is replaced):
 //   <stage>/v10-capture/index.html          document.documentElement.outerHTML after boot (main menu)
 //   <stage>/v10-capture/states/<name>.html  outerHTML of the changed container per state
 //   <stage>/v10-capture/states/<name>.png   screenshot (1280x720) per state
 //   <stage>/v10-capture/styles.css          every <style> element and adopted / constructed sheet
 //                                           (CSSOM cssText), in document order, deduplicated
-//   <stage>/v10-capture/windows.json        {id: {header, cls, style, html}} for showWindow(1..54)
+//   <stage>/v10-capture/windows.json        {windows: {id: {label, sticky, header, cls, style, html, open}} for
+//                                           showWindow(1..54), settings: {basic|advanced: [{name, ...}]} (every tab
+//                                           of windows[0]), controls: [{name, ...}] (windows[6]'s tabs)}
 //   <stage>/v10-capture/blocked.tsv         method  url  reason   (every request refused)
 //   <stage>/v10-capture/allowed.tsv         method  url  status   (every request let through)
 //   <stage>/v10-capture/capture.json        version, date, viewport, page errors, state list
@@ -33,7 +44,38 @@ const STAGE = process.argv[2];
 if (!STAGE) { process.stderr.write('usage: capture_v10_live.js <stage dir>\n'); process.exit(2); }
 const NM = process.env.KN_NODE_MODULES || path.join(__dirname, '../../net-bridge/node_modules');
 const WebSocket = require(path.join(NM, 'ws'));
-const PROXY = process.env.KN_FETCH_PROXY || 'http://127.0.0.1:8888';
+const OFFLINE = process.env.KN_V10_PUBLIC ? path.resolve(process.env.KN_V10_PUBLIC) : '';
+const CLIENT_JS = process.env.KN_V10_CLIENT_JS || path.join(require('os').homedir(), '.cache/kn-v10/v10.js');
+const LIBS = process.env.KN_V10_LIBS || '/home/user/jails/kru/src/Krunker_v7.1.4/public/libs';
+// offline: a closed port, so anything not fulfilled from disk fails instead of leaving the machine
+const PROXY = OFFLINE ? 'http://127.0.0.1:9' : (process.env.KN_FETCH_PROXY || 'http://127.0.0.1:8888');
+const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg',
+  '.wav': 'audio/wav', '.mp4': 'video/mp4', '.webm': 'video/webm', '.txt': 'text/plain', '.obj': 'text/plain', '.glb': 'model/gltf-binary' };
+// offline: FRVR's SDK (libs/frvr-sdk.min.js, a .js the mirror never fetched) as an inert stand-in:
+// logged out, no ads, no purchases, no tracking; every other member is a no-op function
+const FRVR_STUB = `(() => { const noop = () => Promise.resolve(); const deep = (fixed) => new Proxy(fixed, { get: (t, k) => (k in t ? t[k] : (t[k] = deep(Object.assign(noop.bind(), {})))) });
+  const none = () => Promise.resolve(null);
+  window.FRVR = deep({ config: Object.assign({ abTests: {} }, window.FRVR && window.FRVR.config), init: () => Promise.resolve(), lifecycle: {},
+    channel: deep({ getId: () => 'web' }), channelCharacteristics: { allowNavigation: true },
+    auth: deep({ isLoggedIn: () => false, isLoggingIn: false, getFreshAccessToken: none, getCurrentPlatform: () => 'web', logout: none, tokenHandler: null }),
+    iap: deep({ getUnconsumedPurchases: () => Promise.resolve([]), purchase: () => Promise.reject(new Error('offline')), consumePurchase: none }),
+    ads: deep({ AdType: { Interstitial: 0, Reward: 1, Banner: 2 }, AdShowResult: { Shown: 0, Skipped: 1, Failed: 2 }, show: () => Promise.resolve(2) }),
+    tracker: deep({}), bootstrapper: deep({}), abTests: { abTestCohorts: {} } }); })();`;
+// the file (or [content]) an offline request is answered with ('' = 404)
+function offlineFile(u) {
+  let p = decodeURIComponent(u.pathname).replace(/^\/+/, '');
+  if (p === '' || p.endsWith('/')) p += 'index.html';
+  if (p.split('/').includes('..')) return '';
+  if (p === 'libs/frvr-sdk.min.js') return [FRVR_STUB, '.js'];
+  if (p === 'libs/frvr-channel-web.min.js') return ['', '.js'];
+  if (/^static\/index-[^/]*\.js$/.test(p)) return CLIENT_JS;
+  const f = path.join(OFFLINE, p);
+  if (fs.existsSync(f) && fs.statSync(f).isFile()) return f;
+  if (p.startsWith('libs/')) { const l = path.join(LIBS, p.slice(5)); if (fs.existsSync(l) && fs.statSync(l).isFile()) return l; }
+  return '';
+}
 const PORT = Number(process.env.CDP_PORT || 9477);
 const W = 1280, H = 720;
 const OUT = path.join(path.resolve(STAGE), 'v10-capture');
@@ -110,6 +152,7 @@ class Cdp {
     fs.rmSync(PROFILE, { recursive: true, force: true });
   };
   process.on('SIGINT', () => { cleanup(); process.exit(130); });
+  process.on('SIGTERM', () => { cleanup(); process.exit(143); });
   try {
     let targets = [];
     for (let i = 0; i < 60 && !targets.length; i++) { try { targets = (await getJSON(`http://127.0.0.1:${PORT}/json/list`)).filter((t) => t.type === 'page'); } catch (e) { /* starting */ } if (!targets.length) await sleep(500); }
@@ -122,11 +165,22 @@ class Cdp {
         const p = m.params; const u = new URL(p.request.url); const meth = p.request.method;
         const why = !['http:', 'https:'].includes(u.protocol) ? 'scheme' : !ALLOW_HOST(u.hostname) ? 'host' : !['GET', 'HEAD'].includes(meth) ? 'method' : '';
         if (why) { blocked.push([meth, p.request.url, why]); c.send('Fetch.failRequest', { requestId: p.requestId, errorReason: 'BlockedByClient' }).catch(() => {}); }
-        else c.send('Fetch.continueRequest', { requestId: p.requestId }).catch(() => {});
+        else if (OFFLINE) {
+          const f = offlineFile(u);
+          const stub = Array.isArray(f);
+          const body = stub ? Buffer.from(f[0]) : f ? fs.readFileSync(f) : Buffer.from('');
+          const ext = stub ? f[1] : f ? path.extname(f).toLowerCase() : '';
+          const status = f ? 200 : 404;
+          allowed.push([meth, p.request.url, status, stub ? 'stub' : f ? path.relative(OFFLINE, f).startsWith('..') ? f : 'mirror' : '']);
+          c.send('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: status,
+            responseHeaders: [{ name: 'Content-Type', value: MIME[ext] || 'application/octet-stream' },
+              { name: 'Access-Control-Allow-Origin', value: '*' }],
+            body: meth === 'HEAD' ? '' : body.toString('base64') }).catch(() => {});
+        } else c.send('Fetch.continueRequest', { requestId: p.requestId }).catch(() => {});
       } else if (m.method === 'Network.webSocketCreated') {
         blocked.push(['WS', m.params.url, 'websocket']); // Fetch cannot pause ws: the page's socket is closed below
       } else if (m.method === 'Network.responseReceived') {
-        allowed.push(['GET', m.params.response.url, m.params.response.status]);
+        if (!OFFLINE) allowed.push(['GET', m.params.response.url, m.params.response.status]);
       } else if (m.method === 'Runtime.exceptionThrown') {
         errors.push(((m.params.exceptionDetails || {}).exception || {}).description || (m.params.exceptionDetails || {}).text);
       }
@@ -165,14 +219,47 @@ class Cdp {
     }
     const windows = {};
     const n = await c.eval('(window.windows || []).length').catch(() => 0);
+    const META = (i) => `(() => { const w = windows[${i}] || {}; return { label: w.label || null, sticky: !!w.sticky, width: w.width == null ? null : w.width,
+      extraCls: w.extraCls || null, popup: !!w.popup, maxH: w.maxH || null }; })()`;
     for (let id = 1; id <= n; id++) {
       await c.eval(CLOSE_ALL).catch(() => {});
-      try { await c.eval(`window.showWindow(${id}, true)`); await sleep(400); windows[id] = await c.eval(SNAP_WINDOW); } catch (e) { windows[id] = { error: e.message }; }
+      const meta = await c.eval(META(id - 1)).catch(() => ({}));
+      try { await c.eval(`window.showWindow(${id}, true)`); await sleep(400); windows[id] = Object.assign(meta, await c.eval(SNAP_WINDOW)); } catch (e) { windows[id] = Object.assign(meta, { error: e.message }); }
     }
-    fs.writeFileSync(path.join(OUT, 'windows.json'), JSON.stringify(windows, null, 1));
+    // Settings (windows[0]): every tab of the basic and the advanced view; Change Controls
+    // (windows[6]): every tab (as capture_v7_windows.js records v7's)
+    const settings = {};
+    for (const type of ['basic', 'advanced']) {
+      const tabs = await c.eval(`windows[0].tabs.${type}.map((t) => t.name)`).catch(() => []);
+      settings[type] = [];
+      for (let t = 0; t < tabs.length; t++) {
+        await c.eval(CLOSE_ALL).catch(() => {});
+        try {
+          await c.eval(`(() => { windows[0].settingType = '${type}'; windows[0].tabIndex = ${t}; windows[0].settingSearch = null; showWindow(1, true); return 1; })()`);
+          await sleep(400);
+          settings[type].push(Object.assign({ name: tabs[t] }, await c.eval(SNAP_WINDOW)));
+        } catch (e) { settings[type].push({ name: tabs[t], error: e.message }); }
+        log(`settings ${type}/${tabs[t]}: ${(settings[type][t].html || '').length} bytes`);
+      }
+    }
+    await c.eval("(() => { windows[0].settingType = 'basic'; windows[0].tabIndex = 0; return 1; })()").catch(() => {});
+    const controls = [];
+    const ctabs = await c.eval('windows[6].tabs.map((t) => t.n)').catch(() => []);
+    for (let t = 0; t < ctabs.length; t++) {
+      await c.eval(CLOSE_ALL).catch(() => {});
+      try {
+        await c.eval(`(() => { windows[6].tabIndex = ${t}; showWindow(7, true); return 1; })()`);
+        await sleep(400);
+        controls.push(Object.assign({ name: ctabs[t] }, await c.eval(SNAP_WINDOW)));
+      } catch (e) { controls.push({ name: ctabs[t], error: e.message }); }
+      log(`controls ${ctabs[t]}: ${(controls[t].html || '').length} bytes`);
+    }
+    await c.eval('(() => { windows[6].tabIndex = 0; return 1; })()').catch(() => {});
+    fs.writeFileSync(path.join(OUT, 'windows.json'), JSON.stringify({ windows, settings, controls }, null, 1));
     // the extra styles windows/popups injected after boot
     fs.writeFileSync(path.join(OUT, 'styles.css'), await c.eval(STYLES));
     fs.writeFileSync(path.join(OUT, 'capture.json'), JSON.stringify({ url: 'https://krunker.io/', date: new Date().toISOString(),
+      mode: OFFLINE ? 'offline' : 'live', mirror: OFFLINE || null, clientJs: OFFLINE ? CLIENT_JS : null,
       gameVersion: await c.eval('window.gameVersion || (window.GAME && GAME.version) || null').catch(() => null),
       viewport: [W, H], states: done, windows: n, pageErrors: errors.slice(0, 200) }, null, 1));
   } finally {

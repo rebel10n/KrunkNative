@@ -498,6 +498,9 @@ def import_v10(args, ui_dir, public, ref):
         log("v10: %s not found, the Svelte mounts stay empty" % client_js)
         client_js = None
     out = v10_page.import_v10(ui_dir, write_if_changed, log, public, client_js)
+    if not args.no_windows:
+        import windows_v10  # tools/ui-import/windows_v10.py (krunker-windows-v10.json.gz)
+        windows_v10.split_windows_v10(os.path.join(out, "windows"), write_if_changed, log)
     if not args.no_fonts:
         try:
             import fontTools  # noqa: F401
