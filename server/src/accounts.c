@@ -301,9 +301,10 @@ static cJSON *acc_hello(void) {
     cJSON_AddNumberToObject(hello, "maxPlayers", g_server->config.max_players);
     cJSON_AddBoolToObject(hello, "custom", g_gs_config.custom_games);
     cJSON_AddNumberToObject(hello, "maxLobbies", 1);
-    // Matchmaking eligibility: the brain sends only signed-in players to online_mode nodes
-    // and never quick-joins password protected ones (services/brain/registry.c).
-    cJSON_AddNumberToObject(hello, "onlineMode", g_gs_config.online_mode ? 1 : 0);
+    // Matchmaking eligibility: the brain never quick-joins password protected nodes
+    // (services/brain/registry.c). No "onlineMode": like Krunker's, every lobby takes guests and
+    // accounts alike (online_mode only adds hasJoined verification), and that hello field
+    // means "signed-in players only" to the brain (server_bin builds that refused guests).
     cJSON_AddBoolToObject(hello, "password", g_gs_config.password[0] != 0);
     cJSON *modes = cJSON_AddArrayToObject(hello, "modes");
     for (size_t i = 0; i < g_server->game.mode_count; i++) cJSON_AddItemToArray(modes, cJSON_CreateNumber(g_server->game.modes[i]));
@@ -1370,7 +1371,7 @@ void accounts_on_connect(ClientConnection *client) {
     client->acct.join_deadline = g_server->now + g_gs_config.join_timeout;
     if (g_gs_config.online_mode) {
         // Mojang-style join: the client tells central "joining <serverHash>", then JOINs with
-        // client_key "hj1:<client nonce>" (shared/include/auth_join.h)
+        // client_key "hj1:<client nonce>", or AUTH_JOIN_GUEST_KEY as a guest (shared/include/auth_join.h)
         NetAuthChallengePacket challenge;
         memset(&challenge, 0, sizeof(challenge));
         snprintf(challenge.server_nonce, sizeof(challenge.server_nonce), "%s", g_acc.server_nonce);
@@ -1390,10 +1391,10 @@ static void acc_reject(ClientConnection *client, const char *message, const char
 }
 
 static void acc_become_guest(ClientConnection *client, const char *why) {
-    if (g_gs_config.online_mode) { // online-mode=true: every player is a verified account
-        acc_reject(client, client->acct.central_pending ? "Authentication servers are down" : "Failed to verify username", "004001");
-        return;
-    }
+    // online_mode verifies accounts but admits guests, like every Krunker lobby: whoever is not
+    // a verified account plays as a guest (Guest_N, nothing saved), never under a claimed name
+    client->acct.central_pending = 0;
+    client->acct.username[0] = 0;
     if (g_gs_config.password[0] && !client->acct.password_ok) {
         acc_reject(client, "This server needs a password", "004005");
         return;
@@ -1449,20 +1450,27 @@ static void acc_copy_field(char *dst, const size_t size, const char *src) {
 
 // online_mode JOIN (contract-auth): "hj1:<client nonce>" -> serverHash -> hasJoined, through
 // the coordinator when linked (it creates the community account, returns skins/stats),
-// else straight to central auth (session-only stats). Seek-game tickets of the coordinator
-// are trusted as before. Returns 1 when the JOIN was consumed (or must be ignored).
-static int acc_online_join(ClientConnection *client, const NetJoinPacket *join) {
+// else straight to central auth (session-only stats). Seek-game tickets and session tokens
+// of the coordinator are verified as on any linked server. Guests are welcome (Krunker: every
+// public lobby admits them, v10 /ws "at=" only when a token exists): the client answers the
+// challenge with AUTH_JOIN_GUEST_KEY, and an older client that never answers it joins as a
+// guest at its join_timeout. A join that fails verification (a forged or replayed "hj1:", a
+// serverHash nobody announced) is never the account it claims: it plays as a guest, as
+// Krunker's client falls back to a guest when its token does not refresh (v10:27589). Returns
+// 1 when the JOIN was consumed (or must be ignored).
+static int acc_online_join(ClientConnection *client, const NetJoinPacket *join, const int guest_ack) {
     const size_t prefix = strlen(AUTH_JOIN_KEY_PREFIX);
     if (strncmp(join->client_key, AUTH_JOIN_KEY_PREFIX, prefix)) {
-        if (g_acc.brain && join->client_key[0]) return 0; // a coordinator ticket: verified below
-        // the client's first JOIN goes out before it saw the challenge: wait for the "hj1:" one
+        if (g_acc.brain && (join->client_key[0] || join->session[0])) return 0; // ticket / session: verified below
+        if (guest_ack) return 0; // the client saw the challenge and is a guest
+        // the client's first JOIN goes out before it saw the challenge: wait for its answer
         return 1;
     }
     const char *client_nonce = join->client_key + prefix;
     char username[32];
     acc_copy_field(username, sizeof(username), join->name);
     if (!kn_auth_is_hex(client_nonce, AUTH_JOIN_NONCE_LEN) || !username[0]) {
-        acc_reject(client, "Failed to verify username", "004001");
+        acc_become_guest(client, "malformed hasJoined JOIN");
         return 1;
     }
     char hash[AUTH_SERVER_HASH_LEN + 1];
@@ -1487,7 +1495,7 @@ static int acc_online_join(ClientConnection *client, const NetJoinPacket *join) 
     const uint32_t rid = 0x80000000u | ++g_acc.next_central_rid; // never collides with brain rids
     client->acct.auth_rid = rid;
     if (central_auth_has_joined(g_gs_config.auth_url, rid, username, hash, client->address)) {
-        acc_reject(client, "Authentication servers are down", "004001");
+        acc_become_guest(client, "authentication servers are down");
     }
     return 1;
 }
@@ -1499,7 +1507,7 @@ static void acc_handle_central(const CentralAuthResult *r) {
     client->acct.central_pending = 0;
     if (r->status != 1) {
         server_log("%s (%s): %s", client->acct.username, client->address, r->error);
-        acc_reject(client, r->status == 0 ? "Failed to verify username" : "Authentication servers are down", "004001");
+        acc_become_guest(client, r->status == 0 ? "failed to verify username" : "authentication servers are down");
         return;
     }
     const cJSON *profile = cJSON_GetObjectItem(r->reply, "profile");
@@ -1640,8 +1648,13 @@ void accounts_handle_join(ClientConnection *client, const NetPacket *packet) {
     join.session[sizeof(join.session) - 1] = 0;
     join.name[sizeof(join.name) - 1] = 0;
     join.password[sizeof(join.password) - 1] = 0;
+    // the client's answer to an online_mode challenge without an account (online_mode.c)
+    const int guest_ack = !strcmp(join.client_key, AUTH_JOIN_GUEST_KEY);
+    if (guest_ack) join.client_key[0] = 0;
 
-    if (g_gs_config.password[0]) {
+    // the password is checked once per connection: an online_mode client's second JOIN (its
+    // "hj1:" / AUTH_JOIN_GUEST_KEY answer to the challenge) does not repeat it
+    if (g_gs_config.password[0] && !client->acct.password_ok) {
         if (acc_pw_locked(client->address)) {
             acc_reject(client, "Too many wrong passwords, try again later", "004005");
             return;
@@ -1654,7 +1667,7 @@ void accounts_handle_join(ClientConnection *client, const NetPacket *packet) {
         client->acct.password_ok = 1;
     }
 
-    if (g_gs_config.online_mode && acc_online_join(client, &join)) return;
+    if (g_gs_config.online_mode && acc_online_join(client, &join, guest_ack)) return;
 
     if (!g_acc.brain) {
         acc_become_guest(client, NULL); // standalone: a password-checked guest
@@ -1720,6 +1733,7 @@ void accounts_handle_join(ClientConnection *client, const NetPacket *packet) {
             return;
         }
         acc_send_auth(client, "token", join.session);
+        client->acct.auth_session = 1;
         return;
     }
 
@@ -1727,7 +1741,7 @@ void accounts_handle_join(ClientConnection *client, const NetPacket *packet) {
         acc_reject(client, "Join through the server list", "004001");
         return;
     }
-    acc_become_guest(client, NULL);
+    acc_become_guest(client, guest_ack ? "no account" : NULL);
 }
 
 static void acc_apply_account(ClientConnection *client, const cJSON *account) {
@@ -1800,7 +1814,15 @@ static void acc_handle_auth_reply(const cJSON *frame) {
             acc_set_ready(client);
             return;
         }
-        acc_reject(client, err && err[0] ? err : "Invalid session", err && !strncasecmp(err, "Banned", 6) ? "004003" : "004001");
+        const int banned = err && !strncasecmp(err, "Banned", 6);
+        if (!banned && (client->acct.central_pending || client->acct.auth_session)) {
+            // a hasJoined or session token that does not verify is nobody's account: a guest
+            // (Krunker: a token that fails to refresh connects without "at=", v10:27589)
+            server_log("%s: %s", client->address, err && err[0] ? err : "Invalid session");
+            acc_become_guest(client, client->acct.central_pending ? "failed to verify username" : "invalid session");
+            return;
+        }
+        acc_reject(client, err && err[0] ? err : "Invalid session", banned ? "004003" : "004001");
         return;
     }
 
@@ -2230,7 +2252,7 @@ void accounts_init(void) {
     g_acc.lobby_id[5] = 0;
     brain_random_hex(g_acc.server_nonce, sizeof(g_acc.server_nonce), AUTH_JOIN_NONCE_LEN / 2);
     if (g_gs_config.online_mode)
-        server_log("Online mode: players are verified by %s%s", g_gs_config.brain_url[0] ? "the coordinator + " : "", g_gs_config.auth_url);
+        server_log("Online mode: accounts are verified by %s%s, guests welcome", g_gs_config.brain_url[0] ? "the coordinator + " : "", g_gs_config.auth_url);
 
     acc_load_bans();
     g_acc.brain = brain_start(&g_gs_config);

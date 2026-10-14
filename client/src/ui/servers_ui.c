@@ -61,7 +61,7 @@ static char g_game_id[160];      // gameId: the lobby this client is in (or join
 static char g_game_region[32];   // its region (the seek answer's), for the short link form ("" = unknown)
 static int g_seek_inflight;
 static char g_seek_game[160];    // the game id the running seek asked for ("" = any)
-static char g_account_game[160]; // AccountRequired: the online-mode lobby a guest asked for (joined after login)
+static char g_account_game[160]; // AccountRequired: the lobby a guest was refused (joined after login)
 static void page_game_url(const char *id, const char *region);
 // Source-console style pinning: a server the user picked by hand (console `connect`, Direct
 // Connect, the finder list) or a console `disconnect` is never overridden by automatic
@@ -292,13 +292,14 @@ static const char *seek_error_text(const char *error) {
     if (!strcmp(error, "GameFull")) return "Game is full.";
     if (!strcmp(error, "NoServersMatchQuery") || !strcmp(error, "updating")) return "GAME UPDATING";
     if (!strcmp(error, "NoAvailableServers") || !strcmp(error, "no_lobbies")) return "Servers are at Max Capacity";
-    // KrunkNative: the requested lobby runs online_mode (verified accounts) and we seek as a
-    // guest; the error screen adds a "Log in" link (servers_ui_account_required)
+    // KrunkNative: the brain refuses a guest only a lobby of a server_bin that still refused
+    // guests (every current server admits them, as Krunker's do); the error screen adds a
+    // "Log in" link (servers_ui_account_required)
     if (!strcmp(error, "AccountRequired")) return "This game requires an account.";
     return error;
 }
 
-// The error screen of a failed seek for an online-mode lobby offers "Log in" (menu_ui.c).
+// The error screen of an AccountRequired seek offers "Log in" (menu_ui.c).
 int servers_ui_account_required(void) { return g_account_game[0] && !account_get(); }
 
 // ------------------------------------------------------------------ game links
@@ -695,7 +696,7 @@ static void on_game_info(void *user, const int status, const char *body, const s
 // servers it verified with the KNINFO query. Its entries join the brain's lobbies in the same
 // region groups (one list, v3.1.1's markup): a finder entry for a host:port the brain already
 // lists is the same server and is dropped; the rest become game-list style tuples
-//   ["host:port", region, players, max, {i: map, n: name, host, port, onlineMode, finder: true}]
+//   ["host:port", region, players, max, {i: map, n: name, host, port, finder: true}]
 // Their row joins the host directly (finderJoin): no lobby, no ticket.
 static cJSON *g_finder_servers;   // GET <finder> "servers" (owned)
 static cJSON *g_finder_rows;      // the finder-only entries as tuples (owned, rebuilt by build_groups)
@@ -704,12 +705,12 @@ static int g_finder_loading;
 static double g_finder_loaded_ms = -1e18;
 static char g_finder_error[256];  // the last finder request's failure ("" = ok), shown in the browser
 
-static int logged_in(void) { return account_get() && account_session_token()[0]; }
-
 // ---- v7.1.4 windows[1].getServers / searchMatches (src/index.js), over KrunkNative's
 // tuples [id, region, players, max, meta, timeLeft?]. KrunkNative lobby meta (server_bin
 // accounts.c): i (map, "alias_map" for customs), cs (custom), pr (password), earnKR, mode,
-// map, name, host, port, timeLeft, onlineMode; finder rows (rebuild_finder_rows): finder, n.
+// map, name, host, port, timeLeft; finder rows (rebuild_finder_rows): finder, n. Like
+// Krunker's list (v10 row badges: OFFICIAL, 24/7, 2XP, KR, star, lock) no row is marked
+// account-only: every server admits guests and accounts alike.
 // The v7 fields they stand for: c = cs, pw = pr (lock icon), kr = earnKR, g = mode,
 // ds (24/7 dedicated) = a finder-listed server, h (the row's name) = its server name,
 // tuple[5] (seconds left) = meta.timeLeft. KrunkNative has no official customs (oc) and no
@@ -872,8 +873,6 @@ static void rebuild_finder_rows(void) {
         const char *host = cJSON_GetStringValue(cJSON_GetObjectItem(e, "host"));
         const cJSON *port = cJSON_GetObjectItem(e, "port");
         if (!host || !host[0] || !cJSON_IsNumber(port)) continue;
-        const int online = cJSON_IsTrue(cJSON_GetObjectItem(e, "online_mode"));
-        if (online && !online_mode_online()) continue; // offline mode cannot join online_mode servers
         if (brain_lists(host, port->valueint)) continue;  // the same server as a brain lobby
         const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(e, "name"));
         const char *map = cJSON_GetStringValue(cJSON_GetObjectItem(e, "map"));
@@ -894,7 +893,6 @@ static void rebuild_finder_rows(void) {
         cJSON_AddNumberToObject(meta, "port", port->valueint);
         const cJSON *mode = cJSON_GetObjectItem(e, "mode");
         if (cJSON_IsNumber(mode)) cJSON_AddNumberToObject(meta, "mode", mode->valuedouble);
-        if (online) cJSON_AddTrueToObject(meta, "onlineMode");
         cJSON_AddTrueToObject(meta, "finder");
         // build version flags for the row badge (servers_ui_entry_badge_html)
         cJSON_AddBoolToObject(meta, "outdated", servers_ui_entry_outdated(e));
@@ -1136,11 +1134,6 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
     sb_free(&name);
     if (meta_flag(t, "kr") || meta_flag(t, "earnKR")) sb_append(sb, " <div class='krIcon' style='margin-top:-6px;vertical-align:middle'>KR</div> ");
     if (meta_flag(t, "pw") || meta_flag(t, "pr")) sb_append(sb, " <span class='material-icons' style='margin-top:-6px;color:#FBC02D;vertical-align:middle'>lock</span> ");
-    // KrunkNative: online-mode lobbies verify accounts; a guest is told before trying
-    if (meta_flag(t, "onlineMode")) {
-        sb_append(sb, " <span class='material-icons' style='margin-top:-6px;color:rgba(255,255,255,0.5);vertical-align:middle' title='Online mode: verified accounts'>verified_user</span> ");
-        if (!logged_in()) sb_append(sb, "<span style='font-size:16px;color:rgba(255,255,255,0.5)'>Account required </span>");
-    }
     char *badge = servers_ui_entry_badge_html(t); // Outdated / Incompatible (build versions)
     sb_append(sb, badge);
     free(badge);
@@ -1222,8 +1215,8 @@ static char *get_servers(void) {
 
 // ------------------------------------------------------------------ server finder + direct connect
 // Any server is also reachable directly by host:port. Finder rows and Direct Connect join
-// without the brain: plain connect, the server's AUTH_CHALLENGE decides between the
-// online-mode handshake and a guest join.
+// without the brain: plain connect; a server's AUTH_CHALLENGE runs the hasJoined handshake
+// for a signed-in player, everyone else joins as a guest (online_mode.c).
 
 static void on_finder(void *user, const int status, const char *body, const size_t length) {
     (void) user;
@@ -1253,7 +1246,7 @@ static void on_finder(void *user, const int status, const char *body, const size
 static void finder_refresh(void) {
     if (!online_finder_url()[0] || g_finder_loading || now_ms() - g_finder_loaded_ms < SERVER_BROWSER_RATE_MS) return;
     char url[320];
-    snprintf(url, sizeof(url), "%s%s", online_finder_url(), online_mode_online() ? "" : "?online_mode=0");
+    snprintf(url, sizeof(url), "%s", online_finder_url()); // every server takes guests: no online_mode filter
     g_finder_loading = backend_http_request("GET", url, NULL, on_finder, NULL);
     if (!g_finder_loading) {
         snprintf(g_finder_error, sizeof(g_finder_error), "the request could not be sent");
@@ -1272,25 +1265,6 @@ static void append_finder_error(StrBuf *sb) {
     sb_append(sb, " <span style='color:rgba(255,255,255,0.5)'>(");
     sb_append_esc(sb, online_finder_url());
     sb_append(sb, ")</span></div>");
-}
-
-// The finder entry for host:port is an online-mode server.
-static int finder_online_mode(const char *host, const int port) {
-    const cJSON *e;
-    cJSON_ArrayForEach(e, g_finder_servers) {
-        const char *h = cJSON_GetStringValue(cJSON_GetObjectItem(e, "host"));
-        const cJSON *p = cJSON_GetObjectItem(e, "port");
-        if (h && host && cJSON_IsNumber(p) && p->valueint == port && !strcasecmp(h, host)) return cJSON_IsTrue(cJSON_GetObjectItem(e, "online_mode"));
-    }
-    return 0;
-}
-
-// A guest picked an online-mode server: say so in its count cell and open Login (v3.1.1
-// showWindow(5)); the lobby is joined once the account is in (servers_ui_tick).
-static void need_account(const HtmlElem cell, const char *game_id) {
-    if (cell) html_dom_set_text(cell, "LOG IN");
-    snprintf(g_account_game, sizeof(g_account_game), "%s", game_id ? game_id : "");
-    menu_show_window(5, 0);
 }
 
 // Leave the brain's lobby (if any) and connect straight to host:port.
@@ -1802,7 +1776,6 @@ static void quick_join_region(const int index) {
         const int players = row_players(t), max_players = tuple_int(t, 3);
         if (g_search[0] && !search_matches(t)) continue;
         if (!meta_flag(t, "finder")) brain_rows++;
-        if (meta_flag(t, "onlineMode") && !logged_in()) continue; // AccountRequired for a guest
         if (meta_flag(t, "finder")) {
             if (!finder_pick && players < max_players) finder_pick = t;
             continue;
@@ -1866,10 +1839,6 @@ static void on_checked_info(void *user, const int status, const char *body, cons
         snprintf(g_checked_count, sizeof(g_checked_count), "%d/%d", row_players(t), tuple_int(t, 3));
         if (tuple_int(t, 2) >= tuple_int(t, 3)) {
             if (cell) html_dom_set_text(cell, "FULL");
-        } else if (meta_flag(t, "onlineMode") && !logged_in()) {
-            need_account(cell, g_checked_id); // the seek would answer AccountRequired
-            cJSON_Delete(t);
-            return;
         } else {
             menu_show_window(MENU_WINDOW_NONE, 0);
             switch_server(g_checked_id);
@@ -1929,11 +1898,7 @@ int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     }
     if (!strcmp(name, "finderJoin")) {
         if (argc > 1 && args[0].kind == HTML_ARG_STR && args[1].kind == HTML_ARG_NUM) {
-            if (finder_online_mode(args[0].str, (int) args[1].num) && !logged_in()) {
-                need_account(ev && ev->target ? html_dom_query(ev->target, ".serverPCount") : 0, NULL);
-            } else {
-                direct_join(args[0].str, (int) args[1].num);
-            }
+            direct_join(args[0].str, (int) args[1].num);
         }
         return 1;
     }
@@ -2863,7 +2828,7 @@ void servers_ui_tick(Client *client) {
     if (account_id != last_account) {
         last_account = account_id;
         if (account_id && g_account_game[0] && g_pin == PIN_NONE && !client->in_game && !g_seek_inflight) {
-            // logged in after an online-mode lobby turned a guest away: join that lobby now
+            // logged in after the matchmaker turned a guest away (AccountRequired): join that lobby now
             char id[sizeof(g_account_game)];
             snprintf(id, sizeof(id), "%s", g_account_game);
             printf("[mm] logged in: joining %s\n", id);

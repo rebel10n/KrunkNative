@@ -47,9 +47,13 @@ kn_gameserver_stop_reason_file: /run/krunknative-deploy/gameserver-stop-reason
 kn_gameserver_drain_timeout: 240
 # Billboard text on every map billboard (server.cfg billboard); empty = the maps keep their own posters.
 kn_gameserver_billboard: ""
-# online_mode 1 (accounts verified via auth_url hasJoined) on these instances; the
-# rest are offline-mode (guests welcome, nothing saved).
-kn_gameserver_online_instances: [1]
+# online_mode 1 on every instance: signed-in players are verified (coordinator ticket /
+# session, or auth_url hasJoined for finder and direct joins) and their progress is saved;
+# guests join every instance too and play unsaved, as in Krunker (no account-only lobbies;
+# ranked needs an account through the ranked queue). Escape hatch: false = no hasJoined
+# (coordinator tickets and sessions still identify accounts). Needs a server_bin with
+# guest-welcome online_mode: an older one refuses guests on online_mode instances.
+kn_gameserver_online_mode: true
 kn_gameserver_finder_url: "{{ kn_matchmaker_url }}"
 kn_gameserver_auth_url: "{{ kn_coordinator_url }}"
 # Address the game sockets bind to (= the A record of <edge>-<n>).
@@ -64,9 +68,3 @@ kn_gameserver_coordinator_url: "wss://coordinator.{{ kn_domain }}/mm/internal/ws
 # {{ kn_etc_dir }}/secrets.env (role kn_brain) at deploy time, written only into the 0640
 # server-<n>.cfg. Never in git.
 kn_gameserver_secret_host: "{{ groups['central'] | first }}"
-# Online-mode instances join the coordinator pool too: server_bin sends onlineMode in its
-# hello and kn_brain sends only signed-in players there (guests go to the offline-mode
-# instances, services/brain/registry.c). Escape hatch: false keeps them standalone +
-# finder-listed, e.g. when rolling an edge back to a server_bin from before the hello
-# field (the brain would treat it as offline-mode and send guests to it).
-kn_gameserver_coordinator_online_instances: true

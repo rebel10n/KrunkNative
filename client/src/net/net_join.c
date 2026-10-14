@@ -15,7 +15,7 @@ void client_net_send_join(Client *client, const int socket) {
     pthread_mutex_unlock(&client->net_lock);
     // The session token never goes to a server the brain did not hand out (finder list,
     // direct connect): online_mode servers verify accounts through the auth service's
-    // join / hasJoined handshake instead (online_mode.c), offline ones take guests.
+    // join / hasJoined handshake instead (online_mode.c); every server takes guests.
     if (!servers_ui_brain_mode()) memset(join.session, 0, sizeof(join.session));
     // the menu nickname, unless it is the default or the account's (accounts ignore it)
     if (!join.session[0] && strcmp(client->menu_name, "Guest") != 0) snprintf(join.name, sizeof(join.name), "%s", client->menu_name);

@@ -1085,7 +1085,7 @@ void gs_config_log_summary(const GsConfig *cfg) {
                cfg->brain_url[0] ? cfg->brain_url : "none (standalone)");
     server_log("Server: %s%s | %s | query udp %u | rcon %s | finder %s%s%s",
                cfg->cfg_path[0] ? "server.cfg " : "no server.cfg", cfg->cfg_path,
-               cfg->online_mode ? "online mode (accounts verified)" : "offline mode (guests)",
+               cfg->online_mode ? "online mode (accounts verified, guests welcome)" : "offline mode (coordinator accounts, guests)",
                (unsigned int) (cfg->query_port ? cfg->query_port : cfg->listen_port),
                cfg->rcon_port && cfg->rcon_password[0] ? "local tcp" : cfg->brain_url[0] ? "coordinator only" : "off",
                cfg->finder_url[0] ? cfg->finder_url : "off (unlisted)", cfg->password[0] ? " | password protected" : "",

@@ -1046,6 +1046,65 @@ def sc_outdated():
         httpd.shutdown()
 
 
+def sc_server_list():
+    """The server list has no account-only rows (Krunker's has none: v10 row badges OFFICIAL, 24/7,
+    2XP, KR, star, lock): a signed-out offline-mode client lists a matchmaker lobby whose meta still
+    says onlineMode (a server_bin that refused guests) and a finder server announcing online_mode
+    (legacy "guests refused") like any other row: no verified_user icon, no "Account required",
+    the finder row not hidden, and the finder is asked without the ?online_mode=0 filter."""
+    (port,) = free_ports(1)
+    asked = []
+
+    class Finder(Manifest):
+        def do_GET(self):  # noqa: N802
+            asked.append(self.path)
+            super().do_GET()
+
+    Finder.body = json.dumps({"ok": True, "servers": [
+        {"host": "127.0.0.1", "port": 1, "query_port": 1, "name": "Finder Online", "map": "Kanji", "mode": "Free for All",
+         "modeId": 0, "players": 2, "max": 8, "tags": [], "community": "", "online_mode": True, "password": False,
+         "region": "local"}]}).encode()
+    listing = os.path.join(WORK, "server-list.json")
+    with open(listing, "w") as f:
+        json.dump({"games": [["LEGACY1:abcde", "local", 3, 8, {"i": "Burg", "v": "1.0.0", "cs": False, "pr": False, "earnKR": True,
+                                                               "mode": 0, "map": "Burg", "name": "Legacy Online", "host": "127.0.0.1",
+                                                               "port": 2, "onlineMode": True}, 120]]}, f)
+    httpd = http.server.HTTPServer(("127.0.0.1", port), Finder)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        lines = run_client("server-list", ["--offline", "--map", "kanji"], """
+            0 menu
+            800 call showWindow 2
+            2500 call setExpandedRegion 0
+            3500 nodes @rows .settNameIn
+            3500 text @first .setBodH .settNameIn
+            3500 text @last .setBodH .settNameIn:last-child
+            3500 nodes @marker .settNameIn span[title]
+            3800 quit
+        """, timeout=90, env_extra={"KRUNKNATIVE_MODE": "offline", "KRUNKNATIVE_SERVER_LIST": listing,
+                                    "KRUNKNATIVE_FINDER_URL": f"http://127.0.0.1:{port}/servers"})
+    finally:
+        httpd.shutdown()
+    if lines is None:
+        return
+    nodes, texts = {}, {}
+    for line in lines:
+        m = re.search(r"\[input_script\] nodes t=\d+ @(\S+) elements=\d+ match=(\d+)", line)
+        if m:
+            nodes[m.group(1)] = int(m.group(2))
+        m = re.search(r"\[input_script\] text t=\d+ @(\S+) n=\d+ checked=\d+ value=.*? text=(.*)$", line)
+        if m:
+            texts[m.group(1)] = m.group(2)
+    rows = " | ".join(texts.get(k, "") for k in ("first", "last"))
+    record("server-list", "rows", "count", "2", str(nodes.get("rows")), nodes.get("rows") == 2)
+    record("server-list", "rows", "both", "Burg+Finder", rows, "Burg" in rows and "Finder Online" in rows)
+    marked = "verified_user" in rows or "Account required" in rows or "LOG IN" in rows
+    record("server-list", "rows", "account-only", "none", rows if marked else "none", not marked)
+    record("server-list", "rows", "marker-spans", "0", str(nodes.get("marker")), nodes.get("marker") == 0)
+    record("server-list", "finder", "query", "no online_mode filter", " ".join(asked) or "not asked",
+           bool(asked) and not any("online_mode" in a for a in asked))
+
+
 def sc_comp():
     """A comp lobby (server_bin gameserver.host_type comp): its menu (#mMenuHolComp, v7 f1904 at
     every INIT) instead of the default one, then offline (no comp: the default menu again)."""
@@ -1521,6 +1580,7 @@ SCENARIOS = {
     "loadout-images-web": sc_loadout_images_web,
 }
 SCENARIOS["endscreen-cursor"] = sc_endscreen_cursor
+SCENARIOS["server-list"] = sc_server_list
 SCENARIOS["pointer-lock"] = sc_pointer_lock
 SCENARIOS["pointer-lock-chat"] = sc_pointer_lock_chat
 SCENARIOS["pointer-lock-next-map"] = sc_pointer_lock_next_map

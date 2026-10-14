@@ -14,10 +14,10 @@ coordinator (kn_brain) and two server_bin processes from generated server.cfg fi
      the V7 ENT lagComp (ent[11] slider) per player, 0 clamped to 0.1 (rcon `lagcomp`)
   4. password-protected server refuses a wrong password
   5. rcon (local TCP): status, say, kick; `send` redirects a player to the other lobby
-  6. online_mode server linked to the coordinator: guests are never matched to it (nor to
-     the password one), a guest asking for it by id is moved / refused (AccountRequired);
-     a signed-in player is matched to it and spawns as the account (ticket JOIN, then the
-     client's hasJoined "hj1:" JOIN like client/src/net/online_mode.c)
+  6. online_mode server linked to the coordinator: not account-only (no onlineMode flag), guests
+     are matched to it (never to the password one) and get it by id; a signed-in player is
+     matched to it and spawns as the account (ticket JOIN, then the client's hasJoined "hj1:"
+     JOIN like client/src/net/online_mode.c); a guest connecting directly plays as Guest_N
   7. SIGTERM on the server: drain, partial stats commit lands in match_results
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
@@ -315,10 +315,10 @@ def read_spawn(conn):
 def online_mode_matchmaking():
     # 6. online_mode node (E2E2) in the coordinator pool
     st, status = http("/mm/status")
-    check("coordinator knows the online_mode node", st == 200 and status.get("onlineModeNodes") == 1, json.dumps(status))
+    check("the online_mode node is not account-only (onlineModeNodes 0)", st == 200 and status.get("onlineModeNodes") == 0, json.dumps(status))
     online = wait_for(lambda: [g for g in http("/mm/game-list?hostname=krunknative")[1]["games"] if g[0].startswith("E2E2:")])
     online_id = online[0][0] if online else "E2E2:x"
-    check("online_mode lobby flagged in the game list", bool(online) and online[0][4].get("onlineMode") is True,
+    check("online_mode lobby listed without an onlineMode marker", bool(online) and "onlineMode" not in online[0][4],
           json.dumps(online)[:300])
     pw = [g for g in http("/mm/game-list?hostname=krunknative")[1]["games"] if g[0].startswith("E2E1:")]
     check("password lobby flagged pr", bool(pw) and pw[0][4].get("pr") is True, json.dumps(pw)[:300])
@@ -326,14 +326,11 @@ def online_mode_matchmaking():
     for _ in range(3):
         st, seek = http("/mm/seek-game?hostname=krunknative&region=local")
         picked.append(seek.get("gameId", f"HTTP {st}"))
-    check("guest seek-game never picks the online_mode or password node",
-          all(g.startswith("E2E0:") for g in picked), " ".join(picked))
+    check("guest seek-game never picks the password node",
+          all(g.startswith(("E2E0:", "E2E2:")) for g in picked), " ".join(picked))
     st, seek = http(f"/mm/seek-game?hostname=krunknative&region=local&game={online_id}&autoChangeGame=false")
-    check("guest asking for the online_mode lobby: AccountRequired", st == 403 and seek.get("error") == "AccountRequired",
-          f"{st} {json.dumps(seek)}")
-    st, seek = http(f"/mm/seek-game?hostname=krunknative&region=local&game={online_id}&autoChangeGame=true")
-    check("guest asking for it with autoChangeGame is moved", st == 200 and seek.get("gameId", "").startswith("E2E0:")
-          and seek.get("changeReason") == "game_changed", json.dumps(seek)[:200])
+    check("guest asking for the online_mode lobby gets it (no AccountRequired)", st == 200 and seek.get("gameId") == online_id,
+          f"{st} {json.dumps(seek)[:200]}")
 
     tc = secrets.token_hex(16)  # a 32-char (maximum) username: the ticket must still fit client_key
     psql(f"SELECT kn_register('{CAROL}', 'x', '127.0.0.1', '', 0, 0, '{tc}', 3600, 'e2e')")
@@ -371,11 +368,14 @@ def online_mode_matchmaking():
     sp = read_spawn(d)
     check("hasJoined through the coordinator spawns as the account", bool(sp) and sp["name"] == "ds_dave", str(sp))
 
-    g = kn_proto.Conn("127.0.0.1", PORTS[2])  # a guest that connects anyway
+    g = kn_proto.Conn("127.0.0.1", PORTS[2])  # a guest connecting directly (answers the challenge with hj0)
     g.hello()
     g.join(name="Guest")
-    err = g.read(until=kn_proto.ERROR, timeout=8)
-    check("guest refused by the online_mode node", err is not None, str(err and kn_proto.error_info(err)))
+    g.read(until=kn_proto.AUTH_CHALLENGE, timeout=5)
+    g.join(client_key="hj0")
+    g.ent()
+    sp = read_spawn(g)
+    check("guest admitted by the online_mode node as Guest_N", bool(sp) and sp["name"].startswith("Guest_"), str(sp))
     for x in (c, d, g):
         x.close()
 

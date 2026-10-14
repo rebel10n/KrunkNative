@@ -427,7 +427,7 @@ static void cli_cmd_status(const char *args) {
                (unsigned int) g_server->config.tick_rate, g_server_tick_stats.measured_tick_rate, g_server_tick_stats.max_tick_ms);
     server_log("  idle kick  %.0f s alive, %.0f s dead / in the menu", g_server->config.idle_timeout, g_server->config.idle_menu_timeout);
     server_log("  hostname   %s%s", g_gs_config.name, g_gs_config.password[0] ? " (password)" : "");
-    server_log("  auth       %s", g_gs_config.online_mode ? "online mode (accounts verified)" : "offline mode (guests)");
+    server_log("  auth       %s", g_gs_config.online_mode ? "online mode (accounts verified by hasJoined, guests welcome)" : "offline mode (coordinator accounts, guests)");
     server_log("  network    %s%s%s", g_gs_config.brain_url[0] ? "coordinator " : "standalone",
                g_gs_config.brain_url[0] ? (brain_linked() ? "linked" : "not linked") : "",
                accounts_community_name()[0] ? ", community set" : "");

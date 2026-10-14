@@ -303,7 +303,7 @@ static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, co
         .auto_change = query_bool(req, "autoChangeGame", 1),
         .force = has_force_enter(req) || query_bool(req, "force", 0),
         .version = version[0] ? version : NULL,
-        .authed = account_id > 0, /* a valid session: online_mode lobbies verify accounts */
+        .authed = account_id > 0, /* a valid session: also legacy onlineMode lobbies (registry.h) */
         .now_ms = kn_wall_ms(),
         /* never a lobby of another protocol major; up-to-date lobbies first (releases.h).
          * Clients from before ?proto= are 1.x like every server so far. */

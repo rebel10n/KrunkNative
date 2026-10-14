@@ -1,6 +1,6 @@
 // {{ ansible_managed }} (deploy/ansible role kn_gameserver)
 // KrunkNative dedicated server instance {{ n }} of {{ kn_gameserver_count }} on {{ inventory_hostname }}.
-hostname        "{{ kn_gameserver_name_prefix }} #{{ n }}{{ ' (online)' if n in kn_gameserver_online_instances else '' }}"
+hostname        "{{ kn_gameserver_name_prefix }} #{{ n }}"
 region          "{{ kn_gameserver_region }}"
 node_id         "{{ kn_edge_name | upper }}{{ n }}"
 port            {{ kn_gameserver_first_port + n - 1 }}
@@ -29,7 +29,8 @@ bot_difficulty  {{ kn_gameserver_bot_difficulty }}
 // Shown on every billboard of every map instead of its poster (doc/backend.md "Billboards").
 billboard       "{{ kn_gameserver_billboard }}"
 {% endif %}
-online_mode     {{ 1 if n in kn_gameserver_online_instances else 0 }}
+// Accounts verified (hasJoined for finder / direct joins), guests welcome: every instance alike.
+online_mode     {{ 1 if kn_gameserver_online_mode | bool else 0 }}
 auth_url        "{{ kn_gameserver_auth_url }}"
 // Public listing (opt-in): heartbeat to the finder with host = public_host.
 finder_url      "{{ kn_gameserver_finder_url }}"
@@ -42,7 +43,7 @@ shutdown_reason_file "{{ kn_gameserver_stop_reason_file }}"
 shutdown_grace  {{ kn_gameserver_drain_timeout }}
 // Coordinator link (matchmaking): wss:// through the edges, certificate verified against
 // the system CA store; the brain hands clients public_host/port, not the TCP peer.
-{% set kn_gs_link = kn_gameserver_coordinator_url if (n not in kn_gameserver_online_instances or kn_gameserver_coordinator_online_instances | bool) else '' %}
+{% set kn_gs_link = kn_gameserver_coordinator_url %}
 coordinator_url "{{ kn_gs_link }}"
 {% if kn_gs_link %}
 coordinator_secret "{{ kn_gs_internal_secret }}"

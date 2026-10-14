@@ -29,7 +29,7 @@ typedef struct MmLobby {
     int reserved_remote;             /* live reservations made by other brains (from DB) */
     int custom;                      /* meta.cs */
     int protect;                     /* meta.pr / meta.private: password protected or private, never quick-joined */
-    int online_mode;                 /* node online_mode (meta.onlineMode): signed-in players only */
+    int online_mode;                 /* meta.onlineMode: signed-in players only (legacy, see MmNode) */
     int draining;                    /* meta.draining or node draining */
     int mode_index;                  /* meta.mode (-1 unknown) */
     char mode[32];                   /* meta.modeName */
@@ -56,7 +56,9 @@ typedef struct MmNode {
     int max_players;
     int max_lobbies;
     int custom;                      /* can host custom games */
-    int online_mode;                 /* hello.onlineMode: verified accounts only (missing = 0) */
+    int online_mode;                 /* hello.onlineMode: the node refuses guests (missing = 0). Legacy:
+                                      * server_bin builds before guest-welcome online_mode sent it; current
+                                      * ones admit guests and accounts alike (Krunker's lobbies) and never do */
     int password;                    /* hello.password: joining needs the server password */
     int draining;
     int local;                       /* connected to this brain */
@@ -176,7 +178,7 @@ typedef enum MmPickError {
     MM_PICK_GAME_FULL,             /* requested id full and autoChangeGame off */
     MM_PICK_NO_MATCH,              /* lobbies exist but none matches the version query */
     MM_PICK_NONE,                  /* nothing with room */
-    MM_PICK_ACCOUNT_REQUIRED,      /* requested lobby is online_mode, the player a guest, autoChangeGame off */
+    MM_PICK_ACCOUNT_REQUIRED,      /* requested lobby refuses guests (legacy onlineMode), the player a guest, autoChangeGame off */
     MM_PICK_INCOMPATIBLE           /* requested lobby speaks another protocol major, autoChangeGame off */
 } MmPickError;
 
@@ -186,7 +188,7 @@ typedef struct MmPickQuery {
     int auto_change;               /* autoChangeGame (default 1) */
     int force;                     /* FORCE_ENTER */
     const char *version;           /* dataQuery.v (NULL = any) */
-    int authed;                    /* signed-in account: may be sent to online_mode lobbies */
+    int authed;                    /* signed-in account: may be sent to (legacy) onlineMode lobbies */
     int64_t now_ms;
     int proto_major;               /* client's protocol major (seek ?proto=): never matched to a
                                     * lobby announcing another one; 0 = any */
@@ -210,7 +212,7 @@ typedef struct MmPick {
 
 /* Quick join (doc/backend.md 6.2): a requested ?game= with room, else the public pool (not
  * custom, private, password protected, v7 sk:false, draining, wrong version / protocol, or
- * online_mode for a guest), in the requested region first, then (cross_region) anywhere:
+ * a legacy onlineMode node for a guest), in the requested region first, then (cross_region) anywhere:
  *   1. up-to-date before outdated (releases.c)
  *   2. the most taken seats (players + live reservations): populated lobbies fill up before an
  *      empty one is used (v3.1.1 pickBestLobby, v7.1.4 ServerManager.seek "fuller-but-not-full")
@@ -219,15 +221,16 @@ typedef struct MmPick {
  * With soft_cap set, a first pass treats lobbies at the soft cap as full. */
 MmPickError registry_pick(Registry *r, const MmPolicy *p, const MmPickQuery *q, MmPick *out);
 
-/* Matchmaking eligibility of a lobby: online_mode lobbies take signed-in players
- * only (a guest would be refused with "Failed to verify username"); password
- * protected ones are never picked automatically. */
+/* Matchmaking eligibility of a lobby: lobbies of a legacy onlineMode node take signed-in
+ * players only (that server_bin refuses a guest with "Failed to verify username"; current
+ * ones never announce onlineMode, so every lobby takes guests); password protected ones
+ * are never picked automatically. */
 int registry_lobby_needs_account(const MmNode *n, const MmLobby *l);
 int registry_lobby_protected(const MmNode *n, const MmLobby *l);
 
 /* Host target: custom-capable, non-draining, not password protected node with spare
  * capacity in region (then anywhere when cross_region), preferring brain_id's own
- * nodes; online_mode nodes only when authed. */
+ * nodes; legacy onlineMode nodes only when authed. */
 MmNode *registry_pick_host_node(Registry *r, const char *region, const char *brain_id, int cross_region,
                                 int authed, int64_t now_ms);
 

@@ -2802,11 +2802,12 @@ typedef struct {
 // offline ones may). Mojang-style join (shared/include/auth_join.h): the client picks a
 // client nonce, POSTs <auth>/auth/join {token, serverHash = kn_server_hash(server_nonce,
 // public_key, client_nonce)} and then sends JOIN with name = account username and
-// client_key = "hj1:" + client nonce; the server asks <auth>/auth/hasJoined.
+// client_key = "hj1:" + client nonce; the server asks <auth>/auth/hasJoined. A client without
+// an account answers with client_key = AUTH_JOIN_GUEST_KEY and plays as a guest.
 // Strings NUL-terminated; public_key "" while the transport has no key.
 typedef struct {
     char server_nonce[33];  // 32 lowercase hex, random per server boot
-    uint8_t online_mode;    // 1 = accounts verified through the auth service; 0 = guests
+    uint8_t online_mode;    // 1 = accounts verified through the auth service (guests answer AUTH_JOIN_GUEST_KEY); 0 = no handshake
     char public_key[65];    // lowercase hex of the transport public key, "" = none
     char auth_url[128];     // auth service base the server verifies against ("" = its default)
 } NetAuthChallengePacket;   // 227 bytes

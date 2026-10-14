@@ -86,6 +86,7 @@ typedef struct {
     // dedicated server (doc/backend.md 8.7-8.9)
     unsigned char central_pending:1;   // online_mode: waiting for central hasJoined
     unsigned char central_verified:1;  // online_mode: identity confirmed by central auth
+    unsigned char auth_session:1;      // the pending brain auth is a session token (a refusal = guest)
     unsigned char skins_known:1;       // skins_owned holds the coordinator's inventory
     unsigned char password_ok:1;       // a JOIN carried the right server password
     uint8_t skins_owned[1024];         // bitset of owned store.skins indices (8192: v10.0.2 has 8069), enforced on ENT

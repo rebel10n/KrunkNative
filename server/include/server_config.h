@@ -97,7 +97,7 @@ typedef struct {
     char rcon_host[GS_STR_SMALL];        // local rcon bind address (default 127.0.0.1)
     unsigned short rcon_port;            // local rcon TCP port, 0 = off
     unsigned short query_port;           // UDP server-info query port, 0 = the game port
-    int online_mode;                     // 1: every player verified by the central auth service (hasJoined)
+    int online_mode;                     // 1: accounts verified by the central auth service (hasJoined); guests still welcome
     char auth_url[GS_STR_LARGE];         // central auth base (https://coordinator.krunk.io)
     char finder_url[GS_STR_LARGE];       // server finder base, "" = not listed (opt-in heartbeat)
     char community[GS_STR_SMALL];        // community / network name shown in server lists

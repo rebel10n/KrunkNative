@@ -703,9 +703,11 @@ seek-game details:
   picked (`autoChangeGame`), else `null`. With `autoChangeGame=false` and a full or
   unknown requested game the error is `GameFull` / `InvalidGameId`.
 * `token` (optional) = a svc-accounts session token; when valid the ticket carries
-  the account id + name so the game server can attach the account. Only such
-  signed-in players are matched to `onlineMode` nodes (6.2); a guest asking for one
-  by id with `autoChangeGame=false` gets 403 `AccountRequired`.
+  the account id + name so the game server can attach the account (its progress is
+  saved); without it the player is a guest (unsaved). Every lobby takes both, as in
+  Krunker. Only a legacy `onlineMode` node (a server_bin that still refused guests,
+  6.2) is for signed-in players only; a guest asking for one by id with
+  `autoChangeGame=false` gets 403 `AccountRequired`.
 * `FORCE_ENTER=1` cookie (or `&force=1`) bypasses the capacity check on the requested
   game (v3.1.1 `hasForceEnterCookie`).
 
@@ -781,7 +783,7 @@ Node -> brain:
 
 | type | fields | notes |
 | --- | --- | --- |
-| `hello` | `nodeId` (no `:`), `region`, `name`, `publicHost`, `publicPort`, `webUrl`?, `version` (game version, `"1.0.0"`), `build`?, `commit`?, `commitTime`?, `buildTime`?, `protocol`? (build identity, 8.12), `maxPlayers`, `custom` (bool: can host custom games), `maxLobbies`? (default 1), `onlineMode`? (0/1, default 0: only signed-in players are matched to it), `password`? (bool: never quick-joined), `modes`?, `maps`? | first frame |
+| `hello` | `nodeId` (no `:`), `region`, `name`, `publicHost`, `publicPort`, `webUrl`?, `version` (game version, `"1.0.0"`), `build`?, `commit`?, `commitTime`?, `buildTime`?, `protocol`? (build identity, 8.12), `maxPlayers`, `custom` (bool: can host custom games), `maxLobbies`? (default 1), `onlineMode`? (0/1, default 0; legacy: 1 = the node refuses guests, only signed-in players are matched to it. Current server_bins admit guests and never send it), `password`? (bool: never quick-joined), `modes`?, `maps`? | first frame |
 | `snapshot` | `lobbies: [tuple...]` | full lobby set, every 5 s (replaces the node's set) |
 | `lobby-up` | `lobby: tuple` | upsert one lobby (joins/leaves, 250 ms debounce) |
 | `lobby-down` | `lobbyId` | lobby removed (local or namespaced id) |
@@ -908,13 +910,14 @@ live reservations of every brain; cap = min(maxPlayers, mode cap)
 1. `game=ID` requested: if it exists and has room (or `FORCE_ENTER`/`force=1`) -> it.
    Otherwise `autoChangeGame=false` -> `GameFull` / `InvalidGameId`; with
    `autoChangeGame` (default) continue and answer `changeReason: "game_changed"`.
-   Krunker Box Office: a guest (no valid `token`) asking for an `onlineMode` lobby is
-   treated like a full one, but with `AccountRequired` (403).
+   Krunker Box Office: a guest (no valid `token`) asking for a lobby of a legacy
+   `onlineMode` node is treated like a full one, but with `AccountRequired` (403).
 2. Public pool = non-custom lobbies (custom lobbies are only reachable by id),
    minus password protected ones (hello `password` or meta `pr`) and, for guests,
-   lobbies of `onlineMode` nodes (hello `onlineMode`, persisted for other brains as
-   meta `onlineMode: true` in the lobby tuple): the server would refuse them
-   ("Failed to verify username").
+   lobbies of legacy `onlineMode` nodes (hello `onlineMode`, persisted for other brains
+   as meta `onlineMode: true` in the lobby tuple): only server_bin builds that refused
+   guests send it ("Failed to verify username"). Current ones admit guests and accounts
+   alike, like every Krunker lobby, so for them guests and accounts share one pool.
    Also skipped: v7.1.4 `meta.sk === false` (AUTO_SEEK off: by id only).
    In the requested region, the best lobby with room (first pass below `soft_cap`, if set):
    up-to-date before outdated, then the most taken seats (players + live reservations, so
@@ -941,7 +944,7 @@ Admin / tooling only: the clients no longer call `/mm/host-game` (hosting = runn
 `/mm/host-game`, a node's `host-request` (game-socket `custom`), or the social WS
 via `brain_host_game()` (`registry.h`): pick, in the requested region (then any
 region when `cross_region`), a non-draining `custom`-capable node (not password
-protected; `onlineMode` only for a signed-in host or ranked) with spare
+protected; a legacy `onlineMode` node only for a signed-in host or ranked) with spare
 capacity (fewer lobbies than `maxLobbies`, or a non-custom lobby with no players and
 no seat reserved), preferring this brain's own nodes, then the least loaded. Own
 node -> `host` frame; another brain's node -> `mm_host_requests` row +
@@ -1799,7 +1802,7 @@ New keys (also in config.example.json):
 | `password` (`sv_password`) | `""` | JOIN.password must match; wrong/missing -> `ERROR 004005` |
 | `rcon_password` / `rcon_port` / `rcon_host` | `""` / `0` / `127.0.0.1` | local TCP rcon (off unless both set; off loopback the password needs 12+ characters) |
 | `query_port` | `0` (= game port) | UDP server-info query (8.8) |
-| `online_mode` | `false` | verify every player with central auth (8.9); guests refused |
+| `online_mode` | `false` | verify signed-in players with central auth `hasJoined` (8.9); guests still join, unsaved |
 | `auth_url` | `https://coordinator.krunk.io` | central auth base (`/auth/hasJoined`) |
 | `finder_url` | `""` | opt-in public listing heartbeat (8.8), e.g. `https://matchmaker.krunk.io` |
 | `community` | `""` | community name in lists (`""` = the coordinator's welcome `community`, else its brainId) |
@@ -1852,8 +1855,9 @@ demuxes the `FF FF FF FF` prefix, which no game datagram starts with).
   `{"v":1,"game":"krunknative","name","map","mode","modeId","players","max","bots",
   "tags":[...],"community","online_mode","password","region","version","port","nonce",
   "commit","commit_time","build_time","protocol"}` (`version` = the build's git describe; 8.12).
-  Tags: `online`/`offline`, `password`, `ranked`, `custom`, `draining`, `community`
-  (linked to a coordinator), then `tags`. Snapshot refreshed 4x a second by the tick.
+  Tags: `password`, `ranked`, `custom`, `draining`, `community` (linked to a
+  coordinator), then `tags`. `online_mode` is legacy ("guests refused"): always `false`
+  now, every server admits guests (older clients hide or label `true` servers). Snapshot refreshed 4x a second by the tick.
 * `services/scripts/kn-query.py HOST[:PORT] ...` prints it.
 * Finder (opt-in, `finder_url`): `POST <finder_url>/servers/heartbeat`
   `{"v":1,"host","port","query_port","name","community","online_mode","version","commit",
@@ -1870,19 +1874,31 @@ demuxes the `FF FF FF FF` prefix, which no game datagram starts with).
   applies (a JOIN with the password, then the ENT).
 * **Online mode** (`online_mode 1`, Mojang-style, contract with the auth role): after
   HELLO the server sends `NET_PACKET_AUTH_CHALLENGE` `{server_nonce (per boot),
-  online_mode 1, public_key "", auth_url}`. The client posts `/auth/join {token,
+  online_mode 1, public_key "", auth_url}`. A signed-in client posts `/auth/join {token,
   serverHash}` to central and JOINs with `client_key = "hj1:<client nonce>"`, `name` =
-  username (a JOIN without `hj1:` is ignored: the client's first JOIN goes out before it
-  saw the challenge). `serverHash = hex(SHA-256("kn-join-v1" 0 server_nonce 0 public_key 0
+  username; a client without an account answers `client_key = "hj0"`
+  (`AUTH_JOIN_GUEST_KEY`) and plays as a guest. A plain JOIN (no `hj1:`/`hj0`, no
+  ticket or session) waits for that answer: the client's first JOIN goes out before it
+  saw the challenge; a client that never answers (builds before `hj0`) is a guest at
+  `join_timeout`. **Guests are welcome on every server**, as on every Krunker lobby
+  (v10 `/ws?` sends `at=<token>` only when there is one, v10.js:222125; unnamed players
+  are `Guest_<sid>`, game.leak players.js:1492): accounts are verified and their
+  progress saved, guests play unsaved. Ranked alone needs an account (the ranked queue
+  takes a session token; the ranked lobby admits its roster only, 6.5). `serverHash = hex(SHA-256("kn-join-v1" 0 server_nonce 0 public_key 0
   client_nonce))` (`shared/include/auth_join.h`). Without a coordinator server_bin calls
   `GET <auth_url>/auth/hasJoined?username=&serverHash=&ip=` itself on a worker thread
   (`server/src/central_auth.c`): 200 -> that account id/profile (stats are session-only:
-  nothing is committed without a coordinator); 204 -> `ERROR "Failed to verify username"`;
-  unreachable -> `"Authentication servers are down"`. Guests are refused.
+  nothing is committed without a coordinator); 204 (a forged, replayed or unannounced
+  join), a malformed `hj1:`, an unreachable auth service or a timeout -> a **guest**
+  (`Guest_N`, never the claimed name, nothing saved), as Krunker's client connects as a
+  guest when its token does not refresh (v10.js:27589). Banned accounts are refused.
 * **Linked to a coordinator**: joins as 8.3 (seek-game ticket and/or session token). In
   online mode the `hj1:` JOIN goes to the coordinator as `{"type":"auth","rid",
   "hasJoined":{"username","serverHash","ip"}}`; it verifies with central, creates the
-  community account on first join and answers the normal `auth-reply`.
+  community account on first join and answers the normal `auth-reply`. A failed
+  `hasJoined` or an invalid session token is a guest too (a `Banned` reply is refused);
+  an invalid join ticket is refused (`Invalid join key`, a seat reservation, not an
+  account claim).
 * **Skins**: the `auth-reply` account's `data[10]` (`Account.getData` skins,
   `[{ind,cnt}]` from `inventory`) is loaded into a per-connection bitset
   (`ServerAccount.skins_owned`, 4096 store indices). With `enforce_skins` on (auto: linked)
@@ -1895,8 +1911,12 @@ demuxes the `FF FF FF FF` prefix, which no game datagram starts with).
   query, ticket + session joins, `kn_add_skin` -> owned hat kept / unowned stripped /
   another account's hat stripped, password, rcon status/say/players/kick/changelevel,
   `send` redirect, SIGTERM drain + partial commit in `match_results`) and
-  `server/tests/online_mode_e2e.py BUILD` (auth role + standalone online server:
-  challenge, `/auth/join` + `hj1:` join, unannounced hash and guests refused).
+  `server/tests/online_mode_e2e.py BUILD` (auth role, a standalone online server and one
+  linked to a coordinator: challenge, `/auth/join` + `hj1:` join, the `hj0` guest answer
+  and a silent old-client guest admitted as `Guest_N`, a forged `hj1:` and a forged
+  session token admitted as guests, never the account; on the linked one a guest and an
+  account play the same round: the account's `match_results` / KR are saved, the
+  guest's are not; no `online` tag / `online_mode` in the info query).
 
 ### 8.10 A network of servers
 
@@ -1922,7 +1942,7 @@ drains the servers (stats commit) before stopping the coordinators. `backend-up.
 sends `NET_PACKET_REDIRECT {game_id[48], host[128], port, reason[64]}`. A coordinator
 lobby id (`NODE:lobby`) makes the client seek it through its matchmaker
 (`/mm/seek-game?game=`: a new ticket and seat reservation, same account), a `host:port`
-is a direct connect (guest, or online-mode join again). The client
+is a direct connect (a guest, or a signed-in player verified by `hasJoined` again). The client
 (`servers_ui_redirect`, `game_events.c`) shows `reason` as a toast and switches; the
 web build reloads with `?game=`. Lobby-to-lobby moves therefore always go through a
 fresh seek-game ticket; there is no server-to-server state hand-off (the stats of the
@@ -2156,7 +2176,9 @@ server_nonce 00 public_key 00 client_nonce))`. An online_mode `server_bin` sends
 `NET_PACKET_AUTH_CHALLENGE` (73, `NetAuthChallengePacket {server_nonce[33], online_mode,
 public_key[65], auth_url[128]}`) after HELLO; the client POSTs `/auth/join` to its own account
 service, then sends JOIN `{name = username, client_key = "hj1:" + client_nonce}` (no session
-token: tokens never reach game servers outside brain matchmaking). The server verifies with
+token: tokens never reach game servers outside brain matchmaking); signed out it sends
+`client_key = "hj0"` and plays as a guest (8.9: every server admits guests; a join that fails
+`hasJoined` is a guest, never the claimed account). The server verifies with
 `hasJoined` itself (standalone) or through its coordinator: internal WS `{"type":"auth","rid",
 "hasJoined":{username, serverHash, ip}}` -> the community brain calls hasJoined (in process when
 it also has the auth role, else `GET <community.auth_url>/auth/hasJoined`, libcurl for https) and
@@ -2190,7 +2212,7 @@ Mode), default online. Online: the account service is `--brain` / `KRUNKNATIVE_B
 service at all; the header shows "Offline Mode", the loadout owns every store skin, nothing is
 saved. The Servers window lists the finder (`--finder`, `KRUNKNATIVE_FINDER_URL`, web `?finder=`,
 `knFinderUrl`, default `https://matchmaker.krunk.io/servers`; `off` disables) as "Community
-Servers" (offline mode hides online_mode servers) and has a Direct Connect `host[:port]` field in
+Servers" (every server takes guests: no account-only rows, as in Krunker's list) and has a Direct Connect `host[:port]` field in
 place of "+ Host Game". Native https/wss use OpenSSL libssl when CMake finds it
 (`KRUNKNATIVE_HAVE_TLS`, system CA store, host name verified); web uses `fetch()`
 (`backend_http_request`).
@@ -2199,7 +2221,8 @@ place of "+ Host Game". Native https/wss use OpenSSL libssl when CMake finds it
 user / hash / IP checks, limiter windows, finder nonce verification, filters, per-IP cap, poll
 failures and heartbeat expiry); `brain_auth_e2e` = `services/brain/tests/federation_auth_e2e.sh
 <build>` (auth+community, finder, a third-party community coordinator, an online_mode server linked
-to it and an offline standalone one, headless clients in both modes, rcon relay, replay check).
+to it and an offline standalone one, headless clients in both modes: a guest joins the online_mode
+server as a guest, rcon relay, replay check).
 
 ### 9.8 Client updates: launcher, updates server, Outdated (client-updates)
 

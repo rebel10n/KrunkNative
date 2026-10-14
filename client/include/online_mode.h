@@ -8,10 +8,12 @@
 //            online_mode server runs the Mojang-style handshake: the server's
 //            NET_PACKET_AUTH_CHALLENGE -> POST <account service>/auth/join {token,
 //            serverHash} -> JOIN {name = username, client_key = "hj1:" + client nonce}.
+//            Signed out, the answer is JOIN {client_key = AUTH_JOIN_GUEST_KEY}: every
+//            server admits guests (unsaved), as every Krunker lobby does.
 //            The session token only ever goes to the account service that issued it,
 //            never to a game server.
 //   OFFLINE  no account service at all: guest, every skin unlocked, nothing saved.
-//            Works with offline_mode servers, direct connects and practice (--offline).
+//            Joins every server as a guest, direct connects and practice (--offline).
 //
 // Mode, first match wins: --mode online|offline, KRUNKNATIVE_MODE, web ?mode=, storage
 // `knMode` (Settings > Client > Account Mode), else online. The server finder list

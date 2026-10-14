@@ -115,6 +115,19 @@ static void random_nonce(char out[AUTH_JOIN_NONCE_LEN + 1]) {
     out[AUTH_JOIN_NONCE_LEN] = 0;
 }
 
+// No account (signed out, offline mode): tell an online_mode server no hasJoined is coming, so it
+// admits us as a guest at once instead of after its join_timeout (servers before guest-welcome
+// online_mode refused guests either way).
+static void send_guest_join(Client *client) {
+    NetJoinPacket join;
+    memset(&join, 0, sizeof(join));
+    pthread_mutex_lock(&client->net_lock);
+    snprintf(join.game_id, sizeof(join.game_id), "%s", client->net_join.game_id);
+    pthread_mutex_unlock(&client->net_lock);
+    snprintf(join.client_key, sizeof(join.client_key), "%s", AUTH_JOIN_GUEST_KEY);
+    client_net_send(client, NET_PACKET_JOIN, &join, NET_JOIN_PACKET_V2_SIZE);
+}
+
 static void send_hj_join(Client *client) {
     NetJoinPacket join;
     memset(&join, 0, sizeof(join));
@@ -138,8 +151,8 @@ static void on_join_done(void *user, const int status, const char *body, const s
         const char *err = cJSON_GetStringValue(cJSON_GetObjectItem(res, "error"));
         fprintf(stderr, "[auth] /auth/join failed (%d): %s\n", status, err ? err : status ? "error" : "account service unreachable");
         cJSON_Delete(res);
-        // the server refuses the join after its timeout; still tell it who we are so its
-        // message ("Failed to verify username") comes back instead of a silent guest
+        // the hasJoined will fail and the server admits us as a guest (Krunker connects without
+        // "at=" when its token does not refresh); the JOIN still goes out so that happens now
     }
     send_hj_join(g_client);
 }
@@ -165,11 +178,13 @@ void online_mode_on_challenge(void *client_ptr, const void *challenge_in) {
     }
     g_join.has_deferred = 0;
     if (!g_online || !acc || !account_session_token()[0]) {
-        printf("[auth] %s requires an account (online mode, signed in): joining as a guest\n", "this server");
+        printf("[auth] the server verifies accounts; not signed in: joining as a guest\n");
+        send_guest_join(client);
         return;
     }
     if (!kn_auth_is_hex(ch.server_nonce, AUTH_JOIN_NONCE_LEN)) {
-        fprintf(stderr, "[auth] bad server nonce in the challenge\n");
+        fprintf(stderr, "[auth] bad server nonce in the challenge: joining as a guest\n");
+        send_guest_join(client);
         return;
     }
     snprintf(g_join.server_nonce, sizeof(g_join.server_nonce), "%s", ch.server_nonce);

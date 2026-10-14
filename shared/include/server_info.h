@@ -13,6 +13,9 @@
 // UTC) and protocol ("major.minor") come from shared/include/build_info.h. The finder compares them
 // with the latest server release (services/brain/release_info.c, doc/backend.md "Build version").
 //
+// online_mode = the server refuses guests (server_bin builds before every lobby admitted guests
+// and accounts alike; current ones always send false). Readers treat it as legacy.
+//
 // The 0xFFFFFFFF prefix never starts a game packet, so a UDP game transport can demux
 // queries on its own socket. Pure byte buffers here: no sockets, no server state.
 #include <stddef.h>

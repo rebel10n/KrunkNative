@@ -101,8 +101,8 @@ MmNode *registry_node_hello(Registry *r, const char *node_id, const cJSON *hello
     n->max_lobbies = (int) kn_json_int(hello, "maxLobbies", 1);
     if (n->max_lobbies <= 0) n->max_lobbies = 1;
     n->custom = kn_json_bool(hello, "custom", 0);
-    /* server_bin builds before the field: 0 (edges link their online_mode instances only
-     * with a server_bin that sends it, deploy/ansible role kn_gameserver) */
+    /* "the node refuses guests": only server_bin builds before guest-welcome online_mode
+     * send it (1 with online_mode on); current ones admit everyone and omit it (0) */
     n->online_mode = kn_json_bool(hello, "onlineMode", 0);
     n->password = kn_json_bool(hello, "password", 0);
     /* lobbies kept from before a reconnect follow the node's current mode */
@@ -207,7 +207,7 @@ static cJSON *namespace_tuple(const MmNode *n, const cJSON *tuple) {
     if (cJSON_IsObject(meta)) {
         set_meta_str(meta, "lobbyId", ns);
         set_meta_str(meta, "nodeId", n->node_id);
-        /* KrunkNative: online_mode nodes take signed-in players only; the flag travels
+        /* KrunkNative: legacy onlineMode nodes take signed-in players only; the flag travels
          * with the tuple so other brains (federation, mm_lobbies.tuple) see it too */
         if (n->online_mode && !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(meta, "onlineMode"))) {
             cJSON_DeleteItemFromObjectCaseSensitive(meta, "onlineMode");
@@ -592,7 +592,7 @@ MmPickError registry_pick(Registry *r, const MmPolicy *p, const MmPickQuery *q, 
             /* another protocol major: the client could not play there */
             if (!q->auto_change) return MM_PICK_INCOMPATIBLE;
         } else if (l && lobby_joinable(n, l) && !q->authed && registry_lobby_needs_account(n, l)) {
-            /* a guest asking for an online_mode lobby: the server would refuse it */
+            /* a guest asking for a legacy onlineMode lobby: that server would refuse it */
             if (!q->auto_change) return MM_PICK_ACCOUNT_REQUIRED;
         } else if (l && lobby_joinable(n, l)) {
             int taken = registry_lobby_taken(r, l, q->now_ms);

@@ -68,7 +68,11 @@ void info_query_update(const float now) {
     info.players = accounts_player_count();
     info.max_players = g_server->config.max_players;
     info.bots = game_bots_count(game); // v7.1.4 bot players: not in `players` (connections only)
-    info.online_mode = cfg->online_mode;
+    // online_mode on the wire (finder listing, KNINFO) is "signed-in players only": what server_bin
+    // builds that refused guests sent, and what older clients label "Account required" (or hide
+    // in their offline mode). Every server admits guests now, so it is always false; online_mode
+    // in server.cfg only adds hasJoined account verification (accounts.c acc_online_join).
+    info.online_mode = 0;
     info.password = cfg->password[0] != 0;
     snprintf(info.community, sizeof(info.community), "%s", accounts_community_name());
     snprintf(info.region, sizeof(info.region), "%s", cfg->region);
@@ -81,7 +85,6 @@ void info_query_update(const float now) {
     snprintf(info.protocol, sizeof(info.protocol), "%s", kn_build_protocol());
     snprintf(info.ruleset, sizeof(info.ruleset), "%s", ruleset_current()->key);
     info.port = cfg->public_port ? cfg->public_port : cfg->listen_port;
-    iq_add_tag(&info, cfg->online_mode ? "online" : "offline");
     if (cfg->password[0]) iq_add_tag(&info, "password");
     if (game_bots_autofill(game, NULL)) iq_add_tag(&info, "autofill"); // KrunkNative `autofill`: bots fill the lobby
     char dynamic[4][24];
@@ -159,7 +162,7 @@ static int iq_heartbeat(const int shutdown) {
     cJSON_AddNumberToObject(body, "query_port", cfg->query_port ? cfg->query_port : cfg->listen_port);
     cJSON_AddStringToObject(body, "name", cfg->name);
     cJSON_AddStringToObject(body, "community", accounts_community_name());
-    cJSON_AddBoolToObject(body, "online_mode", cfg->online_mode);
+    cJSON_AddBoolToObject(body, "online_mode", 0); // "guests refused", never (iq_update)
     const KnBuildInfo *build = kn_build_info(); // informational: the listing uses the verified KNINFO reply
     cJSON_AddStringToObject(body, "version", build->describe);
     cJSON_AddStringToObject(body, "commit", build->commit);

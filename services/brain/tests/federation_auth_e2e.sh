@@ -5,7 +5,8 @@
 #   kn_brain --role finder --no-db     matchmaker.krunk.io: the server list
 #   kn_brain --role community          a third-party community coordinator (verifies hasJoined
 #                                      against central over HTTP; same database here)
-#   server_bin A  online_mode, linked to the community coordinator, listed in the finder
+#   server_bin A  online_mode (accounts verified, guests welcome), linked to the community
+#                 coordinator, listed in the finder
 #   server_bin B  offline mode, standalone, listed in the finder
 #   client_bin (headless) ONLINE: signs in, joins A through the AUTH_CHALLENGE ->
 #              /auth/join -> hasJoined (via the coordinator) handshake, A loads its inventory
@@ -133,7 +134,9 @@ pids+=($!)
 listed() { curl -s "$FINDER/servers$1" | python3 -I -c 'import json,sys; print(len(json.load(sys.stdin)["servers"]))'; }
 for _ in $(seq 1 100); do [ "$(listed '')" = 2 ] && break; sleep 0.2; done
 check "finder verified both servers" test "$(listed '')" = 2
-check "finder filter online_mode=1" test "$(listed '?online_mode=1')" = 1
+# online_mode on the wire is legacy "guests refused": no current server is account-only
+check "finder: no account-only server (online_mode=1 lists none)" test "$(listed '?online_mode=1')" = 0
+check "finder filter online_mode=0 lists both" test "$(listed '?online_mode=0')" = 2
 check "finder filter q=offline" test "$(listed '?q=offline')" = 1
 
 # ---- online client joins A
@@ -165,9 +168,11 @@ check "client: no account service in offline mode" bash -c "! grep -q 'logged in
 check "server B: guest joined" grep -qiE "joined|guest" "$WORK/b.log"
 check "offline client: nothing saved (no token)" bash -c "! test -s '$WORK/cfg-offline/krunknative/krunker_token.json'"
 
-# ---- an offline-mode client cannot pass A's verification
+# ---- an offline-mode client joins A as a guest (every Krunker lobby admits guests)
 run_client offline2 offline "$PA" ""
-check "server A refuses an unverified guest" grep -qE "Failed to verify|Rejecting" "$WORK/a.log"
+check "client: answers A's challenge as a guest" grep -q "not signed in: joining as a guest" "$WORK/client-offline2.log"
+check "server A admits the guest" grep -q "joins as a guest (no account)" "$WORK/a.log"
+check "server A refused nobody" bash -c "! grep -q 'Rejecting' '$WORK/a.log'"
 
 # ---- admin rcon relayed by the coordinator to server A (internal WS "rcon")
 RC=$(curl -s -X POST "http://127.0.0.1:$MP/mm/admin/rcon?node=E2EA" -H "Authorization: Bearer $KN_BRAIN_INTERNAL_SECRET" \

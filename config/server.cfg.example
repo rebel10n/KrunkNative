@@ -36,7 +36,7 @@ motd            "Welcome to $'s new home"
 // billboard_image textures/pubs/b_3.png  // optional image ad: an asset path under assets/ (.png/.jpg, no URL); wins over the text when it loads
 
 // ---- accounts
-online_mode     0                  // 1: every player is verified by the central auth service (hasJoined)
+online_mode     0                  // 1: signed-in players are verified by the central auth service (hasJoined); guests still join, unsaved
 auth_url        https://coordinator.krunk.io
 
 // ---- coordinator (accounts, skins, stats, matchmaking of a community network)

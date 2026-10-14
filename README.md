@@ -111,7 +111,8 @@ $EDITOR cfg/server.cfg           # hostname, port, mapcycle, mode, maxplayers, s
 Players join through the server list, or directly with `client_bin --connect HOST:PORT`.
 Useful keys in `server.cfg` (see `config/server.cfg.example`):
 
-- `online_mode 1`: every player must be signed in to an account.
+- `online_mode 1`: verify signed-in players' accounts with the central auth service, so their
+  progress is saved; guests still join and play unsaved, as on every Krunker server.
 - `coordinator_url`: join a community network that keeps accounts, skins and stats.
 - `finder_url`: opt in to the public server list.
 

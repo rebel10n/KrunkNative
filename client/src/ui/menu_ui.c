@@ -730,8 +730,8 @@ void menu_update_instructions(void) {
         sb_appendf(&eb, "<div class='instructionsHeader'>%s</div><div style='color: rgba(255, 255, 255, 0.6);margin-top: 5px;font-size: 28px;'>",
                    updating ? "Game Updating" : "Lost Connection");
         sb_append_esc(&eb, updating && !strcmp(g_connect_code, NET_ERROR_CODE_UPDATING) ? "Restarting for an update" : g_ui.connect_error);
-        // KrunkNative: an online-mode lobby turned a guest away (AccountRequired): log in (the
-        // lobby is joined right after, servers_ui.c)
+        // KrunkNative: the matchmaker turned a guest away (AccountRequired: a node of a server_bin
+        // that still refused guests): log in (the lobby is joined right after, servers_ui.c)
         if (servers_ui_account_required()) sb_append(&eb, "<div style='font-size:20px'><a href='#' onclick='showWindow(5);return false'>Log in</a> to join it.</div>");
         sb_append(&eb, "</div><div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>ID: 0x");
         sb_append_esc(&eb, g_connect_code[0] ? g_connect_code : "000000");

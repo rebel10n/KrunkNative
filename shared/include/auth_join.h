@@ -7,11 +7,16 @@
 //
 // server_nonce: NetAuthChallengePacket.server_nonce (per boot), public_key: its public_key
 // ("" without a transport key), client_nonce: 32 hex chars the client picks per connection.
-// JOIN.client_key of such a join is AUTH_JOIN_KEY_PREFIX + client_nonce.
+// JOIN.client_key of such a join is AUTH_JOIN_KEY_PREFIX + client_nonce. The server verifies
+// accounts this way and admits guests too (Krunker: every public lobby takes both).
 #include <stddef.h>
 #include <stdint.h>
 
 #define AUTH_JOIN_KEY_PREFIX "hj1:"
+// JOIN.client_key of a client without an account answering the challenge: "no hasJoined is
+// coming, I play as a guest" (online_mode servers admit guests; without it they wait out
+// join_timeout for an "hj1:" JOIN first).
+#define AUTH_JOIN_GUEST_KEY "hj0"
 #define AUTH_JOIN_NONCE_LEN 32       // hex chars of server/client nonces
 #define AUTH_SERVER_HASH_LEN 64      // hex chars of a serverHash
 
