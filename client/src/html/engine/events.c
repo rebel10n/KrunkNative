@@ -891,6 +891,8 @@ static void update_hover(EventSystem *es)
     update_cursor(es);
 }
 
+static void scrollbar_drag(EventSystem *es); /* below, with the scrollbar press */
+
 void events_mouse_move(EventSystem *es, float x, float y)
 {
     es->mouse_x = x;
@@ -900,6 +902,7 @@ void events_mouse_move(EventSystem *es, float x, float y)
         if (alive(es, es->capture)) es->widgets.mouse_move(es->widgets.user, es->capture, x, y, (int)es->buttons);
         else es->capture = 0;
     }
+    if (es->bar_elem) scrollbar_drag(es);
     update_hover(es);
 }
 
@@ -993,6 +996,70 @@ static HtmlElem common_ancestor(EventSystem *es, HtmlElem a, HtmlElem b)
     return 0;
 }
 
+/* ------------------------------------------------------------------------- */
+/* Scrollbars: thumb drag, track paging                                       */
+/* ------------------------------------------------------------------------- */
+
+static void scroll_axis_to(EventSystem *es, Box *box, const EvScrollInfo *si, int vertical, float to)
+{
+    const float max = vertical ? si->scroll_h - si->client_h : si->scroll_w - si->client_w;
+    to = to < 0.0f ? 0.0f : to > max ? (max > 0.0f ? max : 0.0f) : to;
+    const float x = vertical ? si->scroll_x : to, y = vertical ? to : si->scroll_y;
+    if (x != si->scroll_x || y != si->scroll_y) es->host.set_scroll(es->host.user, box, x, y);
+}
+
+/* A left press on a scrollbar of the target or a scrolling ancestor (Chrome hit-tests the bar
+ * before the content): on its thumb a drag starts, on its track the box scrolls a page towards
+ * the point.  Returns 1 when the press was on a scrollbar: no mousedown default (focus, text
+ * selection) and no click. */
+static int scrollbar_press(EventSystem *es, HtmlElem target)
+{
+    if (!es->host.scrollbar || !es->host.elem_box || !es->host.scroll_info || !es->host.set_scroll || !target) return 0;
+    HtmlElem chain[EV_MAX_CHAIN];
+    const int n = build_chain(es, target, chain);
+    for (int i = 0; i < n; i++) {
+        Box *box = es->host.elem_box(es->host.user, chain[i]);
+        EvScrollInfo si;
+        if (!box || !es->host.scroll_info(es->host.user, box, &si)) continue;
+        for (int vertical = 1; vertical >= 0; vertical--) {
+            EvScrollbar sb;
+            if (!es->host.scrollbar(es->host.user, box, vertical, es->mouse_x, es->mouse_y, &sb) || !sb.inside) continue;
+            if (sb.pos >= sb.thumb_pos && sb.pos < sb.thumb_pos + sb.thumb_len) {
+                es->bar_elem = chain[i];
+                es->bar_vertical = (uint8_t)vertical;
+                es->bar_grab = sb.pos - sb.thumb_pos;
+            } else if (vertical ? si.can_y : si.can_x) {
+                const float client = vertical ? si.client_h : si.client_w;
+                const float page = fmaxf(client * EV_SCROLL_PAGE_FRACTION, 1.0f);
+                const float at = vertical ? si.scroll_y : si.scroll_x;
+                scroll_axis_to(es, box, &si, vertical, sb.pos < sb.thumb_pos ? at - page : at + page);
+            }
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* The pointer moved during a thumb drag: the thumb follows it (the grab point stays under it). */
+static void scrollbar_drag(EventSystem *es)
+{
+    Box *box = alive(es, es->bar_elem) ? es->host.elem_box(es->host.user, es->bar_elem) : NULL;
+    EvScrollInfo si;
+    EvScrollbar sb;
+    if (!box || !es->host.scroll_info(es->host.user, box, &si)
+        || !es->host.scrollbar(es->host.user, box, es->bar_vertical, es->mouse_x, es->mouse_y, &sb)) {
+        es->bar_elem = 0;
+        return;
+    }
+    const int v = es->bar_vertical;
+    const float room = sb.track_len - sb.thumb_len;
+    const float range = v ? si.scroll_h - si.client_h : si.scroll_w - si.client_w;
+    if (room <= 0.0f || range <= 0.0f) return;
+    scroll_axis_to(es, box, &si, v, (sb.pos - es->bar_grab) / room * range);
+}
+
+int events_scrollbar_dragging(const EventSystem *es) { return es->bar_elem != 0; }
+
 static void mouse_press(EventSystem *es, int button, int mods)
 {
     es->buttons |= 1u << button;
@@ -1004,6 +1071,7 @@ static void mouse_press(EventSystem *es, int button, int mods)
         if ((bits & EV_WIDGET_CAPTURE) && target) es->capture = target;
         if (bits & EV_WIDGET_CONSUMED) return;
     }
+    if (button == EV_BUTTON_LEFT && !es->capture && scrollbar_press(es, target)) return; /* down_prevented stays 1 */
     if (button == EV_BUTTON_LEFT) {
         set_active_chain(es, target);
         es->down_target = target;
@@ -1037,6 +1105,7 @@ static void mouse_release(EventSystem *es, int button, int mods)
     es->mods = mods;
     HtmlElem target = es->capture ? es->capture : hit_elem(es, es->mouse_x, es->mouse_y);
     if (target && !alive(es, target)) target = 0;
+    if (button == EV_BUTTON_LEFT) es->bar_elem = 0;
     if (es->widgets.mouse_up) es->widgets.mouse_up(es->widgets.user, target, es->mouse_x, es->mouse_y, button);
     if (es->buttons == 0) es->capture = 0;
     if (!(target && is_disabled(es, target))) fire_ex(es, target, "mouseup", 0, button, 1);
@@ -1388,6 +1457,22 @@ static void lh_set_scroll(void *user, Box *box, float x, float y)
     if (l->tree && *l->tree) layout_set_scroll(*l->tree, box, x, y);
 }
 
+/* layout_scrollbar (the painted geometry) in the box's layout space */
+static int lh_scrollbar(void *user, Box *box, int vertical, float x, float y, EvScrollbar *out)
+{
+    EventsLayoutLink *l = user;
+    LayoutScrollbar sb;
+    if (!box || !layout_scrollbar(l->tree ? *l->tree : NULL, box, vertical, &sb)) return 0;
+    float lx, ly;
+    layout_point_to_box(box, x, y, &lx, &ly);
+    out->inside = lx >= sb.track_x && lx < sb.track_x + sb.track_w && ly >= sb.track_y && ly < sb.track_y + sb.track_h;
+    out->pos = vertical ? ly - sb.track_y : lx - sb.track_x;
+    out->track_len = vertical ? sb.track_h : sb.track_w;
+    out->thumb_pos = vertical ? sb.thumb_y - sb.track_y : sb.thumb_x - sb.track_x;
+    out->thumb_len = vertical ? sb.thumb_h : sb.thumb_w;
+    return 1;
+}
+
 void events_host_layout(EventsHost *out, EventsLayoutLink *link)
 {
     memset(out, 0, sizeof(*out));
@@ -1398,6 +1483,7 @@ void events_host_layout(EventsHost *out, EventsLayoutLink *link)
     out->elem_rect = lh_elem_rect;
     out->scroll_info = lh_scroll_info;
     out->set_scroll = lh_set_scroll;
+    out->scrollbar = lh_scrollbar;
 }
 
 #endif /* KN_EVENTS_STANDALONE */

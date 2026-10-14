@@ -211,11 +211,12 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
             for (int j = 0; j < lines[l].count; j++) { FItem *it = &items[lines[l].first + j]; sum += it->hypo + it->mm0 + it->mm1; }
             if (sum > mx) mx = sum;
         }
-        /* max-height of the container gives a definite upper bound for shrinking */
+        /* max-height of the container gives a definite upper bound for shrinking (css-flexbox
+           9.2 step 4: the auto main size clamped by min/max), a percentage one against the
+           container's own containing block like layout_box applies it (#menuWindow's
+           max-height: calc(100% - 230px) over the Object Manager's flex column) */
         float bh = mx + layout_vertical_extras(b);
-        float cbh = in->cb_h;
-        (void)cbh;
-        layout_apply_min_max_h(b, LAYOUT_INDEFINITE, &bh);
+        layout_apply_min_max_h(b, in->self_cb_h, &bh);
         container_main = kn_maxf(0, bh - layout_vertical_extras(b));
     }
     for (int l = 0; l < nl; l++) {

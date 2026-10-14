@@ -57,6 +57,8 @@ typedef struct LayoutInput {
     float override_h;           /* border-box height imposed (<0: none)        */
     int definite_h;             /* 1: override_h / own height is definite for children */
     int is_flex_item;           /* percentage heights resolve against flexed size */
+    float self_cb_h;            /* layout_box -> its contents: the box's own containing block
+                                   height (its % min/max-height base), LAYOUT_INDEFINITE */
 } LayoutInput;
 
 typedef struct LayoutOutput {

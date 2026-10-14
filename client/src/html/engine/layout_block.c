@@ -661,6 +661,7 @@ void layout_box(LayoutTree *t, Box *b, const LayoutInput *in_, LayoutOutput *out
     for (int pass = 0; pass < 3; pass++) {
         float content_h = 0;
         LayoutInput cin = in;
+        cin.self_cb_h = in.cb_h;
         if (tentative_h >= 0 && h_definite) { cin.cb_h = tentative_h - layout_vertical_extras(b); cin.definite_h = 1; }
         else { cin.cb_h = LAYOUT_INDEFINITE; cin.definite_h = 0; }
         if (b->flags & BOXF_BFC_ROOT) { cin.floats = NULL; }

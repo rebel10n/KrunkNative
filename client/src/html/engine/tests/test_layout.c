@@ -1290,6 +1290,70 @@ static void t_container_scrollbars(void)
     fx_free(fx);
 }
 
+/* The Object Manager's window (ui/css/krunknative.css .knOm*): an abs-pos flex column under
+ * max-height: calc(100% - 230px) whose middle row shrinks (min-height:0) and whose panes scroll:
+ * the grid (flex 0 1 auto, max-height) beside the Tools pane, an abs-pos inset:0 flex column in a
+ * stretched row item (no height of its own) holding a fixed title and a scrolling list. */
+static void t_flex_column_scroll_panes(void)
+{
+    static const char *css =
+        "#cb { position:absolute; left:0; top:0; width:1200px; height:900px; }"
+        "#win { position:absolute; left:20px; top:10px; width:1000px; padding:20px; max-height:calc(100% - 230px);"
+        "  overflow-y:auto; display:flex; flex-direction:column; }"
+        ".om { display:flex; flex-direction:column; flex:1 1 auto; min-height:0; }"
+        "#title { height:31px; flex:none; } #top { height:75px; flex:none; } #foot { height:72px; flex:none; }"
+        "#main { display:flex; align-items:stretch; flex:1 1 auto; min-height:0; }"
+        "#body { display:flex; flex-direction:column; flex-grow:1; min-width:0; min-height:0; }"
+        "#status { height:24px; flex:none; }"
+        "#grid { flex:0 1 auto; min-height:0; max-height:404px; overflow-y:auto; }"
+        "#tools { position:relative; width:216px; flex-shrink:0; }"
+        "#tin { position:absolute; top:0; right:0; bottom:0; left:0; display:flex; flex-direction:column; padding:6px; }"
+        "#ttitle { height:22px; flex:none; }"
+        "#list { flex:1 1 auto; min-height:0; overflow-y:auto; }"
+        ".row { height:30px; }";
+    char rows[2048] = "", tiles[2048] = "";
+    for (int i = 0; i < 16; i++) strcat(rows, "<div class=row></div>");     /* 480px of tools */
+    for (int i = 0; i < 12; i++) strcat(tiles, "<div class=row style='height:100px'></div>"); /* 1200px of grid */
+    char html[8192];
+    snprintf(html, sizeof(html),
+             "<div id=cb><div id=win><div class=om><div id=title></div><div id=top></div><div id=main>"
+             "<div id=body><div id=status></div><div id=grid>%s</div></div>"
+             "<div id=tools><div id=tin><div id=ttitle></div><div id=list>%s<div id=last class=row></div></div></div></div>"
+             "</div><div id=foot></div></div></div></div>", tiles, rows);
+    Fx *fx = fx_html(html, css);
+    Box *win = bx(fx, "win"), *grid = bx(fx, "grid"), *list = bx(fx, "list"), *mainb = bx(fx, "main"), *tools = bx(fx, "tools");
+    if (!win || !grid || !list || !mainb || !tools) { fx_free(fx); return; }
+    /* max-height 900 - 230 = 670 (content box): the natural 31 + 75 + 428 + 72 = 606 fits */
+    CHECK_NEAR(win->h, 606 + 40, 0.5, "om window: its natural height under max-height calc(100% - 230px)");
+    CHECK_NEAR(mainb->h, 428, 0.5, "om window: the row is the status line + the grid's max-height");
+    CHECK_NEAR(tools->h, mainb->h, 0.5, "om window: the Tools pane stretches to the row (its content is abs-pos)");
+    CHECK_NEAR(list->h, mainb->h - 12 - 22, 0.5, "om window: the Tools list fills the pane below its title");
+    CHECK(list->flags & BOXF_SCROLL_CONTAINER, "om window: the Tools list is a scroll container");
+    CHECK_NEAR(list->scroll_h, 17 * 30, 0.5, "om window: the Tools list's scrollHeight is all its rows");
+    CHECK(list->scrollbar_w > 0, "om window: the Tools list shows a bar (scrollbar_w %.1f)", list->scrollbar_w);
+    CHECK_NEAR(grid->h, 404, 0.5, "om window: the grid keeps its max-height");
+    CHECK(win->scroll_h <= win->h - win->border[0] - win->border[2] + 0.5f, "om window: the window itself does not overflow (scrollHeight %.1f)", win->scroll_h);
+    fx_free(fx);
+
+    /* a short window (a 700 px cb: max-height 470, the content box): the row shrinks, the header
+     * and footer stay (it used to keep its natural 428 px and the footer overflowed the window) */
+    char css2[2048];
+    snprintf(css2, sizeof(css2), "%s #cb { height:700px; }", css);
+    fx = fx_html(html, css2);
+    win = bx(fx, "win"); grid = bx(fx, "grid"); list = bx(fx, "list"); mainb = bx(fx, "main");
+    Box *foot = bx(fx, "foot"), *title = bx(fx, "title");
+    if (win && grid && list && mainb && foot && title) {
+        CHECK_NEAR(win->h, 470 + 40, 0.5, "short om window: max-height");
+        CHECK_NEAR(mainb->h, 470 - 31 - 75 - 72, 0.5, "short om window: the row shrinks to what is left");
+        CHECK_NEAR(grid->h, mainb->h - 24, 0.5, "short om window: the grid shrinks under its max-height");
+        CHECK_NEAR(list->h, mainb->h - 12 - 22, 0.5, "short om window: the Tools list shrinks with the row");
+        CHECK_NEAR(foot->y + foot->h, win->y + win->h - 20, 0.5, "short om window: the footer is at the bottom, in view");
+        CHECK(win->scroll_h <= win->h - win->border[0] - win->border[2] + 0.5f, "short om window: nothing overflows the window (scrollHeight %.1f)", win->scroll_h);
+        CHECK(title->y >= win->y, "short om window: the title stays");
+    }
+    fx_free(fx);
+}
+
 /* A restyled block's new font must be used when a shrink-to-fit ancestor measures it:
  * layout_box() resolves the font later, and measuring with the stale one made the
  * abs-pos card narrower than its text (the spin result's "by <creator>" wrapped). */
@@ -1599,6 +1663,7 @@ int main(int argc, char **argv)
     t_flex_text_content();
     t_innerhtml_detach();
     t_intrinsic_font_restyle();
+    t_flex_column_scroll_panes();
 
     css_sheet_destroy(g_ua);
     cascade_shutdown();

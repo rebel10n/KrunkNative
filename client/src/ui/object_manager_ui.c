@@ -34,7 +34,9 @@
 // Console: `give` / `drop` are server commands (shared/src/chat_commands.c); a `give` of a weapon
 // to yourself equips it like the Weapons tab's left click (object_manager_ui_chat_sent).
 //
-// Scroll: #knOmGrid is the scroll container (max-height). Picks, server results and LOADOUT_EXTRA
+// Scroll: #knOmGrid, #knOmPropsList and the Tools pane's #knOmToolsList are the scroll containers;
+// the window is a flex column (krunknative.css), so on a short window they shrink and the title,
+// tabs and buttons stay in view. Picks, server results and LOADOUT_EXTRA
 // update the page in place (om_update_*: the status line's text, the tiles' knOmOwned class and
 // badge, the Clear Extras count) so the grid keeps its scrollTop. Only new results rebuild it and
 // start at the top: a tab switch (v7's own tabbed windows set menuWindow.scrollTop = 0 on
@@ -317,11 +319,14 @@ static int om_holds(const int weapon_id) {
     return me && me->active && me->loadout && me->loadout_index >= 0 && me->loadout_index < me->loadout_size && me->loadout[me->loadout_index] == weapon_id;
 }
 
-// The right pane: the tools (the picked one marked), its hint, and whether the Tool Gun is in hand
+// The right pane: the tools (the picked one marked), its hint, and whether the Tool Gun is in hand.
+// #knOmTools is as tall as the grid beside it (krunknative.css): its title stays, the rest is
+// #knOmToolsList, a scroll container (long hints and languages, a short window).
 static void om_tools_html(char **buf, size_t *len, size_t *cap) {
     const int allowed = g_om.caps < 0 || (g_om.caps & OM_CAP_SPAWN);
-    om_append(buf, len, cap, "<div id='knOmTools' class='knOmTools%s'><div class='knOmToolsTitle'>%s</div><div class='knOmGuns'>", allowed ? "" : " knOmOff",
-              I18N("kn.om.tools", "Tools"));
+    om_append(buf, len, cap, "<div id='knOmTools' class='knOmTools%s'><div class='knOmToolsIn'><div class='knOmToolsTitle'>%s</div>"
+                             "<div id='knOmToolsList' class='knOmToolsList'><div class='knOmGuns'>",
+              allowed ? "" : " knOmOff", I18N("kn.om.tools", "Tools"));
     // not id='knOmPhys' / 'knOmGun': on the web window.<id> would be the element (named access, as knOmSearchBox)
     om_gun_tile(buf, len, cap, "knOmToolGunTile", "knOmToolGunPick()", WEAPON_ID_TOOL_GUN, om_holds(WEAPON_ID_TOOL_GUN));
     om_gun_tile(buf, len, cap, "knOmPhysRow", "knOmPhys()", WEAPON_ID_PHYS_GUN, om_holds(WEAPON_ID_PHYS_GUN));
@@ -347,7 +352,7 @@ static void om_tools_html(char **buf, size_t *len, size_t *cap) {
               om_build_drop() ? " knOmOptA" : "", I18N("kn.om.drop", "Drop"));
     const ObjectManagerToolInfo *t = object_manager_tool_info(g_om.tool);
     om_append(buf, len, cap, "<div id='knOmToolHint' class='knOmToolHint'>%s</div>", t ? t->hint : "");
-    om_append(buf, len, cap, "<div id='knOmToolGun' class='knOmToolGun'>%s</div></div>", om_tool_gun_line());
+    om_append(buf, len, cap, "<div id='knOmToolGun' class='knOmToolGun'>%s</div></div></div></div>", om_tool_gun_line());
 }
 
 static void om_clear_label(char *out, const size_t size, const Player *me) {
@@ -656,6 +661,17 @@ static void om_set_status(const char *text, const int error) {
     }
 }
 
+// The window again (a tab, the Properties panel, a typed-in search): new results start at the top,
+// the Tools pane beside them keeps its scroll position (it shows the same tools).
+static void om_rerender(void) {
+    const HtmlElem list = html_dom_by_id("knOmToolsList");
+    HtmlScroll scroll = {0};
+    const int had = list && om_window_open() && html_dom_get_scroll(list, &scroll);
+    menu_show_window(OBJECT_MANAGER_WINDOW, 1);
+    const HtmlElem again = had ? html_dom_by_id("knOmToolsList") : 0;
+    if (again) html_dom_set_scroll(again, scroll.left, scroll.top);
+}
+
 // ---------------------------------------------------------------- open / close
 
 static void om_show(void *user) {
@@ -701,7 +717,7 @@ void object_manager_ui_open_props(Client *client, const int uid) {
     g_om.props_uid = uid;
     g_om.props_sent[0] = 0;
     if (om_window_open()) {
-        menu_show_window(OBJECT_MANAGER_WINDOW, 1);
+        om_rerender();
         return;
     }
     g_om.from_game = ui_controls_enabled(client);
@@ -935,7 +951,7 @@ int object_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlAr
         const int tab = arg_num(args, argc, 0, g_om.tab);
         if (g_om.props_uid >= 0 && tab == g_om.tab) { // the Properties panel: back to the tab's grid
             g_om.props_uid = -1;
-            menu_show_window(OBJECT_MANAGER_WINDOW, 1);
+            om_rerender();
         }
         if (tab >= 0 && tab < OM_TAB_COUNT && tab != g_om.tab) {
             g_om.props_uid = -1;
@@ -943,7 +959,7 @@ int object_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlAr
             char value[8];
             snprintf(value, sizeof(value), "%d", tab);
             html_storage_set(OM_TAB_STORAGE, value);
-            menu_show_window(OBJECT_MANAGER_WINDOW, 1); // another grid: it starts at the top (v7 switchTab)
+            om_rerender(); // another grid: it starts at the top (v7 switchTab)
         }
         return 0;
     }
@@ -954,7 +970,7 @@ int object_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlAr
         else if (ev && ev->target) html_dom_get_value(ev->target, value, sizeof(value));
         else if (ev && ev->value) snprintf(value, sizeof(value), "%s", ev->value);
         snprintf(g_om.search, sizeof(g_om.search), "%s", value);
-        if (text) menu_show_window(OBJECT_MANAGER_WINDOW, 1); // the box shows it too
+        if (text) om_rerender();  // the box shows it too
         else om_refresh_body();                               // typing: keep the box (focus, caret)
         return 1;
     }
@@ -1018,13 +1034,13 @@ int object_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlAr
         const int uid = arg_num(args, argc, 0, -1);
         if (uid >= 0) {
             g_om.props_uid = uid;
-            menu_show_window(OBJECT_MANAGER_WINDOW, 1);
+            om_rerender();
         }
         return 0;
     }
     if (!strcmp(name, "knOmPropsClose")) {
         g_om.props_uid = -1;
-        menu_show_window(OBJECT_MANAGER_WINDOW, 1);
+        om_rerender();
         return 0;
     }
     return -1;

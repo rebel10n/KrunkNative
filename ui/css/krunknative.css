@@ -266,7 +266,55 @@ a.knDlLink:hover {
 }
 
 /* KrunkNative Object Manager (F1, client/src/ui/object_manager_ui.c): tabs + search over a grid
- * of icons. Not a v7 window (id 54); #menuWindow gets its width inline (ui_window_meta). */
+ * of icons. Not a v7 window (id 54); #menuWindow gets its width inline (ui_window_meta).
+ * The window is a flex column inside #menuWindow's max-height: the title, the tabs and the
+ * buttons keep their height, .knOmMain gets the rest, and its panes (the grid, the Properties
+ * list, the Tools list) scroll in it. So nothing is cut off on a short window or a big UI scale. */
+html.kn-bare-window #menuWindow.dark {
+  display: flex;
+  flex-direction: column;
+}
+#menuWindow.dark div.knOm {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+#menuWindow.dark div.knOmTitle,
+#menuWindow.dark div.knOmTop,
+#menuWindow.dark div.knOmFoot,
+#menuWindow.dark div.knOmStatus,
+#menuWindow.dark div.knOmPropsHead,
+#menuWindow.dark div.knOmToolsTitle {
+  flex: none;
+}
+/* the panes' scrollbars: v10's dark-panel bar (svelte.css .automatic-attributes-content) */
+#menuWindow.dark div.knOmGrid::-webkit-scrollbar,
+#menuWindow.dark div.knOmPropsList::-webkit-scrollbar,
+#menuWindow.dark div.knOmToolsList::-webkit-scrollbar {
+  width: 8px;
+}
+#menuWindow.dark div.knOmGrid::-webkit-scrollbar-track,
+#menuWindow.dark div.knOmPropsList::-webkit-scrollbar-track,
+#menuWindow.dark div.knOmToolsList::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  -webkit-box-shadow: none;
+  box-shadow: none;
+}
+#menuWindow.dark div.knOmGrid::-webkit-scrollbar-thumb,
+#menuWindow.dark div.knOmPropsList::-webkit-scrollbar-thumb,
+#menuWindow.dark div.knOmToolsList::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  -webkit-box-shadow: none;
+  box-shadow: none;
+}
+#menuWindow.dark div.knOmGrid::-webkit-scrollbar-thumb:hover,
+#menuWindow.dark div.knOmPropsList::-webkit-scrollbar-thumb:hover,
+#menuWindow.dark div.knOmToolsList::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
 #menuWindow.dark div.knOmTop {
   display: flex;
   align-items: center;
@@ -302,7 +350,9 @@ input.knOmSearch {
   /* as many columns as fit (5 at the default window): the tiles wrap, never a horizontal scroll */
   grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
   gap: 8px;
-  max-height: 404px; /* six rows: the tabs and the buttons stay in view, the grid scrolls */
+  max-height: 404px; /* four rows: the tabs and the buttons stay in view, the grid scrolls */
+  flex: 0 1 auto; /* in #knOmBody's column: shorter on a short window */
+  min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
   padding-right: 4px;
@@ -392,21 +442,41 @@ img.knOmProp {
 /* Object Manager: the Tools pane right of the grid (the Tool Gun's tools, object_manager_ui.c) */
 #menuWindow.dark div.knOmMain {
   display: flex;
-  align-items: flex-start;
+  align-items: stretch; /* the Tools pane is as tall as the status line + the grid */
+  flex: 1 1 auto;
+  min-height: 0;
 }
 #menuWindow.dark div#knOmBody {
+  display: flex;
+  flex-direction: column;
   flex-grow: 1;
   min-width: 0;
+  min-height: 0;
 }
 #menuWindow.dark div.knOmTools {
-  width: 184px;
-  max-height: 420px; /* never taller than the status line + the grid */
-  overflow: hidden;
+  position: relative; /* .knOmToolsIn fills it: the pane adds no height of its own to the row */
+  width: 216px; /* 192px of rows beside the list's scrollbar: Release, Freeze and Drop on one line */
   flex-shrink: 0;
   margin-left: 12px;
-  padding: 6px 8px;
   border-radius: 5px;
   background-color: rgba(0, 0, 0, 0.35);
+}
+#menuWindow.dark div.knOmToolsIn {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 4px 6px 8px;
+}
+#menuWindow.dark div.knOmToolsList {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 4px;
 }
 #menuWindow.dark div.knOmToolsTitle {
   font-size: 16px;
@@ -418,7 +488,7 @@ img.knOmProp {
   display: flex;
   align-items: center;
   margin-bottom: 1px;
-  padding: 1px 6px; /* seven tools, the Snap / Release rows, the hint and the Tool Gun line in 420px */
+  padding: 1px 6px;
   border: 2px solid transparent;
   border-radius: 4px;
   background-color: rgba(255, 255, 255, 0.05);
@@ -487,6 +557,7 @@ img.knOmProp {
 }
 #menuWindow.dark div.knOmOpt {
   display: flex;
+  flex-wrap: wrap; /* long labels (de, ru): the buttons go to the next line, never past the pane */
   align-items: center;
   margin-top: 4px;
   font-size: 13px;
@@ -541,8 +612,16 @@ img.knOmProp {
   font-size: 14px;
   color: rgba(255, 255, 255, 0.5);
 }
+#menuWindow.dark div.knOmProps {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 0;
+}
 #menuWindow.dark div.knOmPropsList {
   max-height: 370px; /* the status line + the head + this = the grid's height: the list scrolls */
+  flex: 0 1 auto;
+  min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
   padding-right: 4px;

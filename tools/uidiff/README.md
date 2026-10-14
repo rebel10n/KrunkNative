@@ -183,6 +183,7 @@ client_bin --render-scenario <scenario.json> <out.png>
 | `settingsTab` | int | `windows[0].changeTab(N)` when `window` is 0 |
 | `settingsView` | `"basic"` / `"advanced"` | `windows[0].settingType` (v7's default is basic) |
 | `windowActions` | array of `[name, args...]` | inline-handler calls dispatched once the window is open, by the names v7's markup uses: `["windows.2.switchTab", 0]` (Change Loadout's Class tab), `["windows.6.switchTab", 2]` (a controls tab) |
+| `windowScroll` | object `{id: top}` | scrollTop of the window's scroll containers once `windowActions` ran (clamped, so `1000000` is the end): `{"knOmToolsList": 1000000}` (kn-om-tools-short) |
 | `connected`, `ready` | bool | net state for `#instructions` (CLICK TO PLAY when both true) |
 | `inGame` | bool | HUD visible when `inGame && !menu`; with `menu` also true = ESC pause |
 | `mapName`, `modeName`, `region`, `name`, `gameName`, `classIndex` | string / int | state glue (`#curGameInfo`, `#menuRegionLabel`, `#menuClassNameTag`, `#gameNameHolder`, class box) |

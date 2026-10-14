@@ -81,6 +81,9 @@ extern "C" {
 
 /* Pixels scrolled per wheel click (Chrome on Linux/Windows). */
 #define EV_SCROLL_PIXELS_PER_CLICK 53.0f
+/* A press on a scrollbar's track scrolls this fraction of the visible size towards the point
+ * (Blink ScrollableArea::PageStep, kMinFractionToStepWhenPaging). */
+#define EV_SCROLL_PAGE_FRACTION 0.875f
 
 /* ---- inline handler parsing ---------------------------------------------- */
 
@@ -147,6 +150,16 @@ typedef struct EvScrollInfo {
     uint8_t can_x, can_y;       /* overflow-x/-y is auto|scroll                */
 } EvScrollInfo;
 
+/* One scrollbar of a scroll container, along its track: offsets from the track's start (top /
+ * left), px.  `pos` is the queried point's offset (any point: a drag goes past the track),
+ * `inside` whether the point is on the track. */
+typedef struct EvScrollbar {
+    float pos;
+    float track_len;
+    float thumb_pos, thumb_len;
+    uint8_t inside;
+} EvScrollbar;
+
 typedef struct EventsHost {
     void *user;
     /* layout_hit_test(root, x, y): deepest box under the point, honouring
@@ -166,6 +179,10 @@ typedef struct EventsHost {
      * changes so computed `cursor` is current; may be NULL when the frame
      * loop restyles anyway. */
     void (*restyle)(void *user);
+    /* Optional: the box's vertical (vertical=1) or horizontal scrollbar against the viewport
+     * point (x, y); 0 when it has none on that axis (none painted: hidden scrollbars).  A left
+     * press on the thumb drags it, on the track pages towards the point. */
+    int (*scrollbar)(void *user, Box *box, int vertical, float x, float y, EvScrollbar *out);
 } EventsHost;
 
 /* Ready-made host over layout.h (hit test, boxes, scroll state).  `tree`
@@ -241,6 +258,9 @@ typedef struct EventSystem {
     uint8_t down_prevented;        /* last press: mousedown default prevented (a listener
                                       returned 0, a widget took it): no text selection starts */
     uint8_t cursor;                /* CssCursor of the hovered element           */
+    HtmlElem bar_elem;             /* scrollbar thumb drag: the scroll container, 0 none */
+    uint8_t bar_vertical;          /* its axis                                   */
+    float bar_grab;                /* where the thumb was grabbed (px from its start) */
 
     EvResizeObserver *observers;
     int observer_count, observer_cap;
@@ -273,6 +293,8 @@ void events_mouse_leave(EventSystem *es);
 /* ---- state ----------------------------------------------------------------- */
 
 HtmlElem events_focused(const EventSystem *es);
+/* 1 while the left button drags a scrollbar thumb (scrollbar_press). */
+int events_scrollbar_dragging(const EventSystem *es);
 HtmlElem events_hovered(const EventSystem *es);
 HtmlElem events_captured(const EventSystem *es);
 /* Programmatic focus()/blur() (html_dom_focus/blur).  focus on 0 == blur. */

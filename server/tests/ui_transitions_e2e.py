@@ -945,6 +945,90 @@ def sc_om_scroll():
     record("om-scroll", "clicks", "actions", " ".join(map(str, want)), " ".join(map(str, actions)), actions == want)
 
 
+def sc_om_tools():
+    """The Object Manager's Tools pane at a short window (1280x600): its list (#knOmToolsList, a scroll
+    container under the fixed TOOLS title) does not cut the lines under "Pick a tool to equip the Tool
+    Gun" off any more, it scrolls: the wheel over it, and a drag of its scrollbar's thumb (mdown on the
+    thumb, the cursor down the bar, mup) to the bottom, where the last line (#knOmToolGun) shows whole;
+    then the last tool (Properties) and the last control (Release: Drop) are clicked there, and the
+    list keeps its scroll position through the picks and a tab switch (object_manager_ui.c om_rerender).
+    `scroll` / `rect` probes (input_script.c) give scrollTop and the boxes; the `[ui] handler` lines
+    show the clicks landed."""
+    lines = run_client("om-tools", ["--offline", "--map", "kanji"], """
+        0 play
+        1000 down F1
+        1050 up F1
+        2000 check @t-open windowHolder=1 knOmToolsList=1 knOmToolGun=1
+        2000 scroll @t-open knOmToolsList
+        2000 rect @t-open knOmToolsList knOmToolGun
+        2100 cursorid knOmToolsList 0.5 0.5
+        2200 wheel -1
+        2700 scroll @t-wheel knOmToolsList
+        2800 wheel 1
+        2800 wheel 1
+        3300 scroll @t-wheel-up knOmToolsList
+        3400 cursorid knOmToolsList 0.985 0.04
+        3450 mdown left
+        3500 cursorid knOmToolsList 0.985 0.4
+        3550 cursorid knOmToolsList 0.985 0.98
+        3600 mup left
+        4100 scroll @t-drag knOmToolsList
+        4100 rect @t-drag knOmToolsList knOmToolGun
+        4200 clickid knOmTool6
+        5200 scroll @t-pick knOmToolsList
+        5300 clickid knOmDrop1
+        6300 scroll @t-drop knOmToolsList
+        6400 clickid knOmTab1
+        7100 scroll @t-tab knOmToolsList
+        7200 quit
+    """, env_extra={"KRUNKNATIVE_WINDOW_SIZE": "1280x600"})
+    if lines is None:
+        return
+    tops, rects = {}, {}
+    for line in lines:
+        m = re.search(r"\[input_script\] scroll t=\d+ @(\S+) knOmToolsList=(\S+)", line)
+        if m:
+            tops[m.group(1)] = m.group(2)
+        m = re.search(r"\[input_script\] rect t=\d+ @(\S+)(.*)", line)
+        if m:
+            rects[m.group(1)] = dict(kv.split("=", 1) for kv in m.group(2).split())
+
+    def top(label):
+        try:
+            return float(tops.get(label, "-"))
+        except ValueError:
+            return None
+
+    def bottoms(label):
+        """(the list's visible bottom, #knOmToolGun's bottom) in viewport px, None when missing"""
+        try:
+            lst = [float(v) for v in rects[label]["knOmToolsList"].split(",")]
+            gun = [float(v) for v in rects[label]["knOmToolGun"].split(",")]
+            return lst[1] + lst[3], gun[1] + gun[3]
+        except (KeyError, ValueError, IndexError):
+            return None
+
+    opened, dragged = bottoms("t-open"), bottoms("t-drag")
+    record("om-tools", "t-open", "knOmToolGun", "below the list's bottom (needs a scroll)",
+           opened, opened is not None and opened[1] > opened[0] + 1.0)
+    record("om-tools", "t-open", "knOmToolsList.scrollTop", "0", tops.get("t-open", "no probe"), top("t-open") == 0.0)
+    record("om-tools", "t-wheel", "knOmToolsList.scrollTop", ">0", tops.get("t-wheel", "no probe"), (top("t-wheel") or 0.0) > 0.0)
+    record("om-tools", "t-wheel-up", "knOmToolsList.scrollTop", "0", tops.get("t-wheel-up", "no probe"), top("t-wheel-up") == 0.0)
+    record("om-tools", "t-drag", "knOmToolsList.scrollTop", ">0 (thumb dragged to the end)", tops.get("t-drag", "no probe"),
+           (top("t-drag") or 0.0) > 0.0)
+    record("om-tools", "t-drag", "knOmToolGun", "inside the list (the last line shows whole)",
+           dragged, dragged is not None and dragged[1] <= dragged[0] + 1.0)
+    # the wheel reached the end too when one step was enough: never further than the drag
+    record("om-tools", "t-wheel", "knOmToolsList.scrollTop", "<= the dragged end", tops.get("t-wheel", "no probe"),
+           top("t-wheel") is not None and top("t-drag") is not None and top("t-wheel") <= top("t-drag") + 0.01)
+    for label in ("t-pick", "t-drop", "t-tab"):
+        record("om-tools", label, "knOmToolsList.scrollTop", "=t-drag", tops.get(label, "no probe"),
+               top(label) is not None and top(label) == top("t-drag"))
+    handlers = [m.group(1) for m in (re.search(r"\[ui\] handler (knOm(?:Tool|PhysDrop|Tab)\(\d+\)) click", line) for line in lines) if m]
+    want = ["knOmTool(6)", "knOmPhysDrop(1)", "knOmTab(1)"]
+    record("om-tools", "clicks", "handlers", " ".join(want), " ".join(handlers), handlers == want)
+
+
 def sc_online():
     """Online: ESC / death on a server, offline and back online, disconnect / reconnect, then the
     server goes away (Lost Connection): ESC keeps the error box (v7 f2040 is terminal), and
@@ -1588,7 +1672,7 @@ SCENARIOS = {
     "endscreen": sc_endscreen, "endscreen-tdm": sc_endscreen_team, "death": sc_death, "death-menu": sc_death_menu, "forced-spawn": sc_forced_spawn, "spectate": sc_spectate,
     "map-change": sc_map_change, "interact": sc_interact, "custom-gui": sc_custom_gui, "krunkscript": sc_krunkscript,
     "spray": sc_spray, "windows": sc_windows, "online": sc_online, "lost-end": sc_lost_during_end, "outdated": sc_outdated,
-    "comp": sc_comp, "om-scroll": sc_om_scroll, "skins-grid": sc_skins_grid, "hub-items": sc_hub_items,
+    "comp": sc_comp, "om-scroll": sc_om_scroll, "om-tools": sc_om_tools, "skins-grid": sc_skins_grid, "hub-items": sc_hub_items,
     "loadout-images": sc_loadout_images, "loadout-preview": sc_loadout_preview,
     "loadout-images-web": sc_loadout_images_web,
 }

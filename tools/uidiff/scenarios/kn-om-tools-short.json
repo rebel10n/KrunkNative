@@ -1,0 +1,38 @@
+{
+  "size": [
+    1280,
+    600
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "window": 100,
+    "connected": true,
+    "ready": true,
+    "inGame": true,
+    "name": "Local User",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "windowActions": [
+      [
+        "knOmTab",
+        0
+      ],
+      [
+        "knOmSearch",
+        ""
+      ]
+    ],
+    "scrollbars": true,
+    "windowScroll": {
+      "knOmToolsList": 1000000
+    }
+  },
+  "frames": 10,
+  "ref": "doc/ref/krunknative/kn-om-tools-short.png",
+  "note": "KrunkNative Object Manager at a short window (1280x600) with scrollbars on: the Objects tab, no tool picked yet, the Tools pane's list (#knOmToolsList) scrolled to its end under the fixed TOOLS title, so the hint and the 'Pick a tool to equip the Tool Gun' line show whole above the bar's thumb (they were cut off before the pane scrolled; a KN baseline)."
+}

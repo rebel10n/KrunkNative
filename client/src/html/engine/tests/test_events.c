@@ -12,7 +12,7 @@
  * Part 2 drives events.c against a stub Dom (the dom.h subset events.c uses) and
  * a stub EventsHost (rect hit testing, scroll geometry) and checks hover chains,
  * click synthesis and bubbling, label->checkbox forwarding, prevent-default,
- * focus/Escape, scroll clamping and resize observers.
+ * focus/Escape, scroll clamping, scrollbar thumb drags / track paging and resize observers.
  */
 #include <dirent.h>
 #include <stdarg.h>
@@ -52,6 +52,7 @@ struct Box {
     HtmlRect rect;
     int scrollable;
     EvScrollInfo scroll;
+    float bar_w; /* a vertical scrollbar down the rect's right edge (h_scrollbar), 0 none */
 };
 
 struct Dom {
@@ -186,6 +187,20 @@ static int h_scroll_info(void *u, Box *b, EvScrollInfo *out) { (void)u; if (!b->
 static void h_set_scroll(void *u, Box *b, float x, float y) { (void)u; b->scroll.scroll_x = x; b->scroll.scroll_y = y; }
 static int g_restyles;
 static void h_restyle(void *u) { (void)u; g_restyles++; }
+/* the bar_w px vertical bar down the rect's right edge, Chrome's thumb geometry (layout_scrollbar) */
+static int h_scrollbar(void *u, Box *b, int vertical, float x, float y, EvScrollbar *out)
+{
+    (void)u;
+    if (!b->scrollable || !vertical || b->bar_w <= 0) return 0;
+    const EvScrollInfo *s = &b->scroll;
+    const float tx = b->rect.x + b->rect.w - b->bar_w, len = b->rect.h;
+    out->track_len = len;
+    out->thumb_len = len * s->client_h / s->scroll_h;
+    out->thumb_pos = (len - out->thumb_len) * s->scroll_y / (s->scroll_h - s->client_h);
+    out->pos = y - b->rect.y;
+    out->inside = x >= tx && x < tx + b->bar_w && y >= b->rect.y && y < b->rect.y + len;
+    return 1;
+}
 
 /* ---- html_dom_core stubs: record every dispatch in order ---- */
 
@@ -947,6 +962,56 @@ static int g_resize_calls;
 static HtmlElem g_resize_last;
 static void on_resize(HtmlElem e, void *user) { (void)user; g_resize_calls++; g_resize_last = e; }
 
+/* A press on a scroll container's scrollbar (here under its child #chatMsg, which covers it):
+ * the thumb follows the pointer while the button is held, the track pages towards the point;
+ * neither is a mousedown / click of the content.  (The Object Manager's Tools list.) */
+static void test_scrollbar(void)
+{
+    struct Box *sc = &g_dom.elems[scroller_], *outer = &g_dom.elems[outer_scroller_];
+    sc->bar_w = 12; /* track x 488..500, y 0..200; thumb 200 * 200 / 1000 = 40 px, 160 px of room for 800 px */
+    sc->scroll.scroll_y = 0;
+    outer->scroll.scroll_y = 0;
+    log_clear();
+    events_mouse_move(&g_es, 494, 20); /* on the thumb */
+    events_mouse_button(&g_es, EV_BUTTON_LEFT, EV_PRESS, 0);
+    CHECK(events_scrollbar_dragging(&g_es) && g_es.down_prevented);
+    CHECK(!log_has("mousedown"));
+    events_mouse_move(&g_es, 494, 100); /* 80 px down: 80 / 160 * 800 */
+    CHECK(sc->scroll.scroll_y == 400.0f);
+    events_mouse_move(&g_es, 650, 400); /* past the end and off the bar: still the drag, clamped */
+    CHECK(sc->scroll.scroll_y == 800.0f && outer->scroll.scroll_y == 0.0f);
+    events_mouse_move(&g_es, 494, -50);
+    CHECK(sc->scroll.scroll_y == 0.0f);
+    events_mouse_move(&g_es, 494, 60);  /* 40 px: 200 */
+    events_mouse_button(&g_es, EV_BUTTON_LEFT, EV_RELEASE, 0);
+    CHECK(!events_scrollbar_dragging(&g_es) && sc->scroll.scroll_y == 200.0f);
+    CHECK(!log_has("click"));
+    events_mouse_move(&g_es, 494, 150); /* released: moving does not scroll */
+    CHECK(sc->scroll.scroll_y == 200.0f);
+    /* the track (thumb at 40..80): a page, 0.875 * 200, towards the point; no drag, no click */
+    log_clear();
+    click_at(494, 150);
+    CHECK(sc->scroll.scroll_y == 375.0f && !events_scrollbar_dragging(&g_es));
+    click_at(494, 5);
+    CHECK(sc->scroll.scroll_y == 200.0f);
+    click_at(494, 199);
+    click_at(494, 199);
+    CHECK(sc->scroll.scroll_y == 550.0f);
+    for (int i = 0; i < 3; i++) click_at(494, 199);
+    CHECK(sc->scroll.scroll_y == 800.0f); /* clamped */
+    CHECK(!log_has("mousedown") && !log_has("click"));
+    /* left of the bar: the content's own press */
+    log_clear();
+    click_at(400, 100);
+    CHECK(!events_scrollbar_dragging(&g_es) && log_has("mousedown") && sc->scroll.scroll_y == 800.0f);
+    /* no bar painted (hidden scrollbars): a press there is the content's */
+    sc->bar_w = 0;
+    log_clear();
+    click_at(494, 20);
+    CHECK(!events_scrollbar_dragging(&g_es) && log_has("mousedown"));
+    sc->scroll.scroll_y = 0;
+}
+
 static void test_resize_observer(void)
 {
     events_observe_resize(&g_es, btn_, on_resize, NULL);
@@ -1033,7 +1098,7 @@ int main(int argc, char **argv)
     test_parser_corpus(repo);
 
     build_page();
-    EventsHost host = {NULL, h_hit_test, h_box_elem, h_elem_box, h_elem_rect, h_scroll_info, h_set_scroll, h_restyle};
+    EventsHost host = {NULL, h_hit_test, h_box_elem, h_elem_box, h_elem_rect, h_scroll_info, h_set_scroll, h_restyle, h_scrollbar};
     EventsWidgetHooks hooks = {NULL, w_mouse_down, w_mouse_move, w_mouse_up, w_key, w_chr, w_focus, w_blur, w_open_select};
     events_init(&g_es, (Dom *)&g_dom, &host);
     events_set_widget_hooks(&g_es, &hooks);
@@ -1046,6 +1111,7 @@ int main(int argc, char **argv)
     test_tab_focus();
     test_select();
     test_scroll();
+    test_scrollbar();
     test_resize_observer();
     test_removal_and_cache();
 

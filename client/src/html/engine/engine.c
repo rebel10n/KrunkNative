@@ -1192,6 +1192,12 @@ static int eh_scroll_info(void *user, Box *box, EvScrollInfo *out)
     return g->ev_base.scroll_info(g->ev_base.user, box, out);
 }
 
+static int eh_scrollbar(void *user, Box *box, int vertical, float x, float y, EvScrollbar *out)
+{
+    Engine *g = user;
+    return g->ev_base.scrollbar(g->ev_base.user, box, vertical, x, y, out);
+}
+
 static void eh_set_scroll(void *user, Box *box, float x, float y)
 {
     Engine *g = user;
@@ -1954,6 +1960,7 @@ static Engine *engine_create(const char *ui_dir, const char *page, const int wid
     host.elem_rect = eh_elem_rect;
     host.scroll_info = eh_scroll_info;
     host.set_scroll = eh_set_scroll;
+    host.scrollbar = eh_scrollbar;
     host.restyle = eh_restyle;
     events_init(&g->events, g->dom, &host);
 

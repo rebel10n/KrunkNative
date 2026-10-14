@@ -267,6 +267,7 @@ static void warn_unknown_keys(void) {
         "charge",     // in game: the charge bar's interMProg (a number) or {prog, over} (build_ui_scenario)
         "settings",   // {key: value}: setSetting before the state applies (v10's showMinimap off by default)
         "market",     // the v10 Market & Trading popup's state (v10_market_scenario)
+        "windowScroll", // {id: scrollTop}: a scroll container of the window after windowActions (clamped: 1e6 = the end)
     };
     const cJSON *item;
     cJSON_ArrayForEach(item, g_sc.state) {
@@ -625,10 +626,22 @@ static void apply_window_actions(Client *client) {
     }
 }
 
+// state.windowScroll {id: top}: scrollTop of the window's scroll containers once its actions ran
+// (html_dom_set_scroll clamps it: a big value is the end, the Object Manager's #knOmToolsList)
+static void apply_window_scroll(void) {
+    const cJSON *item;
+    cJSON_ArrayForEach(item, st("windowScroll")) {
+        const HtmlElem e = item->string ? html_dom_by_id(item->string) : 0;
+        if (e && cJSON_IsNumber(item)) html_dom_set_scroll(e, 0.0f, (float) item->valuedouble);
+        else fprintf(stderr, "[scenario] windowScroll: no #%s\n", item->string ? item->string : "?");
+    }
+}
+
 static void apply_window(Client *client) {
     int id;
     if (!scenario_window_id(st("window"), &id)) {
         apply_window_actions(client); // no window: the actions open a popup (openGuide, openCommunityMenu)
+        apply_window_scroll();
         return;
     }
     if (id == 1) {
@@ -650,6 +663,7 @@ static void apply_window(Client *client) {
         menu_show_window(id, 1);
     }
     apply_window_actions(client);
+    apply_window_scroll();
 }
 
 // connected/ready: the `connect` + `state` net fields that drive #instructions and the
@@ -978,6 +992,10 @@ int ui_scenario_run(Client *client) {
     apply_timed(client, capture_ms);
     for (int i = 0; i < g_sc.frames; i++) {
         const int last = i == g_sc.frames - 1;
+        // windowScroll clamps against the scroll range, which is only final once the window has
+        // settled (a short window overflows only at its final height): re-apply it against the
+        // settled layout, right before the capturing frame (the Object Manager's #knOmToolsList).
+        if (last) apply_window_scroll();
         scenario_frame(client, first_ms + (double) i * SCENARIO_FRAME_MS, !last);
     }
     // Debug: KRUNKNATIVE_SCENARIO_DUMP=<selector> prints the captured frame's box tree of
