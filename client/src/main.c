@@ -58,6 +58,7 @@
 #include <spin_wheel.h> // the Store's prize wheel canvas + confetti (ui/spin_wheel.c, ui/store_ui.c)
 #include <ks_overlay.h> // KrunkScript GAME.OVERLAY canvas (ks/ks_overlay.c, ks/canvas2d.c)
 #include <lobby_ui.h> // WP-E: lobby packets, match vote cards (net/lobby_events.c)
+#include <krunker_net.h> // KN_KRUNKER_OFFICIAL: --krunker / ?krunker= joins an official krunker.io game (net/krunker_net.c)
 #include <game_config.h> // WP-E: GAME_CONFIG on INIT, the round's networkData
 #include <map_catalog.h> // startup map lookup (--map, --sandbox, ?map=, ?sandbox)
 #include <game_reload.h> // F5: the full reload (game_reload.c)
@@ -265,6 +266,8 @@ static void print_usage_to(FILE *out, const char *program) {
                  "                  unless --map / map.json (console `offline`, web ?offline=1)\n"
                  "  --sandbox       --offline on the sandbox map, v7's blank Test map (console `sandbox`, web ?sandbox)\n"
                  "  --map <name>    start on a catalogue map: key, name or path under assets/maps (web ?map=)\n"
+                 "  --krunker [id]  join an official krunker.io game (that game id, else any) over Krunker's own\n"
+                 "                  protocol (web ?krunker=<id|1>; client/include/krunker_net.h)\n"
                  "       %s --editor [query] [editor flags] [map.json ...]   (map editor, one project per map)\n"
                  "       %s --render-scenario <scenario.json> <out.png>   (tools/uidiff; HTML_ENGINE=ON builds)\n"
                  "       %s --help | --version\n", program, program, program, program);
@@ -389,6 +392,10 @@ static int file_exists(const char *path) {
     return file != NULL;
 }
 
+// --krunker [gameId] / ?krunker=<gameId|1>: start in an official krunker.io game (krunker_net.h)
+static int g_krunker_start;
+static const char *g_krunker_game;
+
 static int parse_startup_args(int argc, char **argv, int *offline, int *sandbox, const char **map_name, const char **map_path, const char **scenario, const char **scenario_out) {
     *offline = 0;
     *sandbox = 0;
@@ -408,6 +415,9 @@ static int parse_startup_args(int argc, char **argv, int *offline, int *sandbox,
             *offline = *sandbox = 1;
         } else if (!strcmp(argv[i], "--map") && i + 1 < argc) {
             *map_name = argv[++i];
+        } else if (!strcmp(argv[i], "--krunker")) {
+            g_krunker_start = 1;
+            if (i + 1 < argc && argv[i + 1][0] != '-' && !strstr(argv[i + 1], ".json")) g_krunker_game = argv[++i];
         } else if (!strcmp(argv[i], "--windowed") || !strcmp(argv[i], "--fullscreen") || !strcmp(argv[i], "--borderless")) {
             // window mode for this session (render_settings.h); overrides the stored windowMode
             client_render_force_window_mode(argv[i][2] == 'w' ? RS_WINDOWED : argv[i][2] == 'f' ? RS_FULLSCREEN : RS_BORDERLESS);
@@ -509,7 +519,13 @@ int main(int argc, char **argv) {
     if (web_query_flag("sandbox") || web_query_flag("test")) offline = sandbox = 1;
     char *web_map_name = web_query_string("map");
     if (web_map_name && web_map_name[0]) startup_map_name = web_map_name;
+    char *web_krunker = web_query_string("krunker");
+    if (web_krunker) {
+        g_krunker_start = 1;
+        if (web_krunker[0] && strcmp(web_krunker, "1") != 0) g_krunker_game = web_krunker;
+    }
 #endif
+    if (offline || scenario_path) g_krunker_start = 0; // an offline / scenario run stays local
 
     // --sandbox / ?sandbox without a map: v7.1.4 loadSandbox(config.blankMap)
     if (sandbox && !startup_map_name && !startup_map_path) startup_map_name = LOCAL_GAME_SANDBOX_MAP;
@@ -777,9 +793,13 @@ int main(int argc, char **argv) {
 
     // brain backend (backend_ui.h): with a brain URL the matchmaker picks the game
     // server (servers_ui.c starts the transport); offline / --connect / no brain: as before
-    const int brain_mode = backend_startup(&INSTANCE, offline, SCENARIO_ACTIVE());
+    // an official krunker.io start skips the brain's matchmaking like an offline one
+    const int brain_mode = backend_startup(&INSTANCE, offline || g_krunker_start, SCENARIO_ACTIVE());
 
-    if (offline) {
+    if (g_krunker_start) {
+        (void) net_args;
+        krunker_net_join(&INSTANCE, g_krunker_game, NULL); // matchmaker, then Krunker's WebSocket (krunker_net.c)
+    } else if (offline) {
         if (!local_game_start(&INSTANCE)) return -1; // the in-process sandbox server, joined like any server (net/offline.c)
     } else {
 #ifdef __EMSCRIPTEN__

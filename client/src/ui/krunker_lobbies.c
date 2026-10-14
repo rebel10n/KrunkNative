@@ -2,6 +2,7 @@
 // "Official lobbies"). Native only: platform behaviour, so the web build compiles the stubs at
 // the end (#ifndef __EMSCRIPTEN__) and never lists or requests anything from krunker.io.
 #include <krunker_lobbies.h>
+#include <krunker_net.h>
 #include <seek_prefs.h>
 #include <ui_logic.h>
 #include <backend.h>
@@ -53,6 +54,10 @@ static struct {
 } K = {.fetched_ms = -1e18, .answered_ms = -1e18};
 
 static double now_ms(void) { return glfwGetTime() * 1000.0; }
+
+static Client *g_lobbies_client; // the in-client join's client (krunker_lobbies_attach)
+
+void krunker_lobbies_attach(Client *client) { g_lobbies_client = client; }
 
 static const char *matchmaker_url(void) {
     const char *url = getenv("KRUNKNATIVE_KRUNKER_MATCHMAKER");
@@ -290,8 +295,26 @@ int krunker_lobbies_seek(void) {
     return 1;
 }
 
+// The lobby's region (tuple [1]) from the current list, "" when it is not listed.
+static const char *lobby_region(const char *id) {
+    const cJSON *t;
+    cJSON_ArrayForEach(t, K.list) {
+        const char *tid = cJSON_GetStringValue(cJSON_GetArrayItem(t, 0));
+        if (tid && !strcmp(tid, id)) return cJSON_GetStringValue(cJSON_GetArrayItem(t, 1));
+    }
+    return "";
+}
+
 void krunker_lobbies_open(const char *id) {
     if (!id_ok(id)) return;
+    // KN_KRUNKER_OFFICIAL (krunker_net.h): join in-client when switched on, else the browser
+    if (krunker_net_in_client() && g_lobbies_client) {
+        char text[200];
+        printf("[krunker] official lobby %s: joining in-client\n", id);
+        snprintf(text, sizeof(text), "Joining the official krunker.io game %s...", id);
+        ui_notify(text);
+        if (krunker_net_join(g_lobbies_client, id, lobby_region(id))) return;
+    }
     const char *site = getenv("KRUNKNATIVE_KRUNKER_URL");
     char url[256], text[256];
     snprintf(url, sizeof(url), "%s/?game=%s", site && site[0] ? site : KRUNKER_DEFAULT_SITE, id);
@@ -319,5 +342,6 @@ int krunker_lobbies_pick(char *id, const size_t n) {
 }
 int krunker_lobbies_seek(void) { return 0; }
 void krunker_lobbies_open(const char *id) { (void) id; }
+void krunker_lobbies_attach(Client *client) { (void) client; }
 
 #endif

@@ -5,6 +5,8 @@
 #include <backend.h>
 #include <backend_ui.h>
 #include <online_mode.h>
+#include <krunker_net.h>
+#include <krunker_lobbies.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,6 +42,8 @@ void backend_parse_args(int *argc, char **argv) {
 }
 
 int backend_startup(Client *client, const int offline, const int scenario) {
+    krunker_net_attach(client); // KN_KRUNKER_OFFICIAL (official krunker.io games, krunker_net.h)
+    krunker_lobbies_attach(client);
     // --connect host[:port]: a direct server, no matchmaking (the brain still serves
     // the account and the hub when configured)
     int direct = 0;
@@ -102,5 +106,6 @@ void backend_frame(Client *client) {
     account_ui_tick(client);
     v10_rewards_tick(); // v10.0.2: the sidebar's Battle Pass item (v10_rewards.c)
     servers_ui_tick(client);
+    krunker_net_tick(client); // official krunker.io games: notices, captcha
     v10_social_tick(); // the v10 page's Social hub: friends event bus, menu badge (v10_social.c)
 }

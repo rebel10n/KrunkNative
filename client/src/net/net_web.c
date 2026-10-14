@@ -15,6 +15,7 @@
 // The brain matchmaker (servers_ui.c) overrides all of them with Client.net_ws_url, built
 // by net_web_target_url() from the same chain plus `?target=host:port`.
 #include <client.h>
+#include <krunker_net.h>
 #include <emscripten.h>
 #include <emscripten/websocket.h>
 #include <stdio.h>
@@ -196,10 +197,16 @@ static bool net_web_on_close(int event_type, const EmscriptenWebSocketCloseEvent
     (void) event_type;
 
     Client *client = user_data;
+    if (krunker_net_active()) { // closed by client_net_release: the session was reported then, an official one may be up now
+        if (g_web_socket == event->socket) g_web_socket = 0;
+        emscripten_websocket_delete(event->socket);
+        g_web_read_buffer.length = 0;
+        return true;
+    }
     if (client->net_session_connected && !g_web_switching && !client->net_should_quit) net_web_explain_close(client, event->code, event->reason);
 
     pthread_mutex_lock(&client->net_lock);
-    client->net_socket = -1;
+    if (client->net_socket == NET_WEB_FAKE_FD) client->net_socket = -1; // (an official krunker.io socket may own it now)
     pthread_mutex_unlock(&client->net_lock);
 
     g_web_read_buffer.length = 0;
@@ -237,6 +244,7 @@ static bool net_web_on_close(int event_type, const EmscriptenWebSocketCloseEvent
 // retried every NET_WEB_RETRY_MILLIS until the client quits or goes offline.
 // Returns 0 only when the socket could not even be created.
 int net_web_connect(Client *client) {
+    if (krunker_net_active()) return 1; // an official krunker.io game owns the connection (krunker_net.c)
     if (g_web_socket) return 1; // already connecting/connected
     if (net_wt_connect(client)) return 1; // UDP-style transport first: knet over WebTransport (net_wt.c)
 
@@ -296,6 +304,7 @@ void net_web_request_reconnect(Client *client) {
 }
 
 void client_net_stop(Client *client, const char *reason) {
+    krunker_net_leave(client, reason ? reason : "Disconnected"); // an official krunker.io game ends too
     const int had_session = client->net_session_connected;
     pthread_mutex_lock(&client->net_lock);
     if (client->net_socket >= 0) { // net_web_on_close -> on_client_socket_disconnect shows it
@@ -316,6 +325,7 @@ void client_net_stop(Client *client, const char *reason) {
 int client_net_send_packet(const int socket, const NetPacketType type, const void *payload, const uint16_t length) {
     (void) socket;
 
+    if (krunker_net_active()) return krunker_net_send_packet(type, payload, length); // an official krunker.io game
     if (net_wt_active()) return net_wt_send(type, payload, length);
     if (!g_web_socket || length > NET_MAX_PAYLOAD) return 0;
 
@@ -335,6 +345,7 @@ int client_net_send_packet(const int socket, const NetPacketType type, const voi
 // socket is closed and the new one opened from its close callback; an idle transport
 // (the brain startup seek) connects now.
 void client_net_switch_server(Client *client) {
+    krunker_net_leave(client, NULL); // from an official krunker.io game back to ours
     if (client->offline) local_game_stop(client); // leave the in-process game
     if (client->game.player_count) client_clear_players(client);
     client->in_game = 0;
@@ -353,4 +364,23 @@ void client_net_switch_server(Client *client) {
         return;
     }
     net_web_connect(client);
+}
+
+// KN_KRUNKER_OFFICIAL takes the connection (krunker_net.c): close ours as an intended switch and
+// keep it closed (net_should_quit) until client_net_switch_server brings it back.
+void client_net_release(Client *client) {
+    if (client->offline) local_game_stop(client);
+    client->net_should_quit = 1;
+    g_web_failures = 0;
+    if (net_wt_busy()) net_wt_close(0);
+    if (g_web_socket) {
+        pthread_mutex_lock(&client->net_lock);
+        if (client->net_socket == NET_WEB_FAKE_FD) client->net_socket = -1;
+        pthread_mutex_unlock(&client->net_lock);
+        if (client->net_session_connected) { // reported now: the close callback lands when krunker.io may own the session
+            client->net_close_intended = 1;
+            on_client_socket_disconnect(client);
+        }
+        emscripten_websocket_close(g_web_socket, 1000, "krunker.io");
+    }
 }

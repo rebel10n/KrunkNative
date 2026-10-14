@@ -4,6 +4,7 @@
 // NetStatus under net_lock and client_menu_tick() (main thread) turns it into
 // net_connected updates and the page's connection state (menu_ui.c).
 #include <client.h>
+#include <krunker_net.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -149,6 +150,12 @@ void on_client_socket_event(Client *client) {
 
 void client_net_disconnect(Client *client, const char *reason, const char *code) {
     if (client->offline) return;
+    if (krunker_net_active()) { // an official krunker.io game (idle kick, going offline)
+        (void) code;
+        krunker_net_leave(client, reason && reason[0] ? reason : "Disconnected");
+        client->net_hold_retry = 1;
+        return;
+    }
 
     pthread_mutex_lock(&client->net_lock);
     const int socket = client->net_socket;
@@ -169,6 +176,10 @@ void client_net_disconnect(Client *client, const char *reason, const char *code)
 
 void client_net_request_reconnect(Client *client) {
     client->net_hold_retry = 0;
+    if (krunker_net_active()) { // official krunker.io: seek the same game again
+        krunker_net_reconnect(client);
+        return;
+    }
 #ifdef __EMSCRIPTEN__
     net_web_request_reconnect(client);
 #else

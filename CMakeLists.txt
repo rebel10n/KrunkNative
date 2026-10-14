@@ -785,6 +785,14 @@ else ()
     endif ()
     add_test(NAME editor_export_test COMMAND editor_export_test ${CMAKE_SOURCE_DIR})
 
+    # krunker_link_test (client/include/krunker_net.h, KN_KRUNKER_OFFICIAL): the official-Krunker
+    # packet translation (client/src/net/krunker_link.c) over the codec, no sockets
+    add_executable(krunker_link_test client/tests/krunker_link_test.c client/src/net/krunker_link.c client/src/net/krunker_altcha.c
+                   shared/src/krunker_proto.c shared/src/auth_join.c)
+    target_include_directories(krunker_link_test PRIVATE client/include shared/include)
+    target_link_libraries(krunker_link_test PRIVATE cJSON m)
+    add_test(NAME krunker_link_test COMMAND krunker_link_test)
+
     # update_test (launcher/, doc/backend.md "Client updates"): manifest parsing, version
     # comparison, asset diffing, URL resolution, package extraction and the journaled swap
     add_executable(update_test launcher/tests/update_test.c launcher/src/update_core.c launcher/src/archive.c

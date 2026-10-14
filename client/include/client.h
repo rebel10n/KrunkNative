@@ -786,6 +786,9 @@ void net_udp_client_info(char *out, size_t size); // netinfo: the knet session's
 // with client->net_join, replacing the current session (starts the transport when idle,
 // leaves an offline game). net.c natively, net_web.c on the web.
 void client_net_switch_server(Client*);
+// KN_KRUNKER_OFFICIAL (krunker_net.h) takes the connection: our transport stops (an intended
+// switch: no error screen, no reconnect) and an offline game is left. net.c / net_web.c.
+void client_net_release(Client*);
 void client_net_send_join(Client*, int socket); // NET_PACKET_JOIN right after HELLO (net_join.c)
 #ifdef __EMSCRIPTEN__
 int net_web_connect(Client*); // WebSocket transport (net_web.c)

@@ -155,7 +155,7 @@ network: build services ## Coordinator + N dedicated servers from one file (NETW
 	python3 -I services/scripts/kn-network up $(or $(NETWORK),services/scripts/network.example.json)
 
 .PHONY: test
-test: build ## Run the shared movement/collision test (+ the knet transport, official Krunker codec, content fetch, billboard ad, lag compensation, editor bus, editor model, nav mesh, client update, meshopt, window state and resource pack tests)
+test: build ## Run the shared movement/collision test (+ the knet transport, official Krunker codec and session translation, content fetch, billboard ad, lag compensation, editor bus, editor model, nav mesh, client update, meshopt, window state and resource pack tests)
 	./$(DEBUG_DIR)/$(TEST_BIN)
 	./$(DEBUG_DIR)/update_test
 	./$(DEBUG_DIR)/asset_fetch_test
@@ -163,6 +163,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, off
 	./$(DEBUG_DIR)/knet_test
 	./$(DEBUG_DIR)/server_names_test
 	./$(DEBUG_DIR)/krunker_proto_test
+	./$(DEBUG_DIR)/krunker_link_test
 	./$(DEBUG_DIR)/lagcomp_test
 	./$(DEBUG_DIR)/map_v7_test
 	./$(DEBUG_DIR)/map_v10_test
@@ -450,6 +451,10 @@ test-net: build ## knet transport unit test (loss/dup/reorder), v7 chat/voice ch
 	./$(DEBUG_DIR)/social_test
 	server/tests/udp_e2e.sh $(DEBUG_DIR)
 	KN_UDP_LOSS="15 5 5" server/tests/udp_e2e.sh $(DEBUG_DIR)
+
+.PHONY: krunker-official-e2e
+krunker-official-e2e: build ## Official krunker.io mode (krunker_net.h) against a local matchmaker + game server stub: native, and the web build when dist/web has one
+	timeout 900 $(PYTHON) -I server/tests/krunker_official_e2e.py $(DEBUG_DIR) $(DIST_WEB)
 
 .PHONY: target-select-e2e
 target-select-e2e: build ## Player target selectors on server_bin: god * / ungod * / give * over clients and bots, a guest refused, kick @bots, rcon op / kick *

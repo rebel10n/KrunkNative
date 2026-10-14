@@ -27,6 +27,7 @@
 #endif
 
 #include <client.h>
+#include <krunker_net.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -37,6 +38,7 @@
 static pthread_mutex_t g_net_send_lock = PTHREAD_MUTEX_INITIALIZER;
 
 int client_net_send_packet(const int socket, const NetPacketType type, const void *payload, const uint16_t length) {
+    if (krunker_net_active()) return krunker_net_send_packet(type, payload, length); // an official krunker.io game
     client_net_log_packet("=>", type, payload, length);
     pthread_mutex_lock(&g_net_send_lock);
     const int sent = net_send_packet(socket, type, payload, length);
@@ -366,6 +368,7 @@ void *net_main(void *user_data) {
 }
 
 void client_net_stop(Client *client, const char *reason) {
+    krunker_net_leave(client, reason ? reason : "Disconnected"); // an official krunker.io game ends too
     const int had_session = client->net_session_connected;
     if (client->net_thread_running) {
         pthread_mutex_lock(&client->net_lock);
@@ -394,6 +397,7 @@ void client_net_stop(Client *client, const char *reason) {
 void client_net_switch_server(Client *client) {
     static NetMainArgs args;
 
+    krunker_net_leave(client, NULL); // from an official krunker.io game back to ours
     if (client->offline) local_game_stop(client); // leave the in-process game
     if (client->game.player_count) client_clear_players(client);
     client->in_game = 0;
@@ -423,4 +427,22 @@ void client_net_switch_server(Client *client) {
         return;
     }
     client->net_thread_running = 1;
+}
+
+void client_net_release(Client *client) {
+    if (client->offline) local_game_stop(client);
+    if (!client->net_thread_running) return;
+    pthread_mutex_lock(&client->net_lock);
+    const int socket = client->net_socket;
+    if (socket >= 0) client->net_close_intended = 1; // a switch, not a drop (events.c)
+    pthread_mutex_unlock(&client->net_lock);
+    client->net_should_quit = 1;
+    client->net_retry_now = 1;
+    if (socket >= 0) net_socket_shutdown(socket);
+    pthread_join(client->net_thread, NULL);
+    client->net_thread_running = 0;
+    client->net_should_quit = 0;
+    client->net_hold_retry = 0;
+    client->net_retry_now = 0;
+    client->net_connected = 0;
 }

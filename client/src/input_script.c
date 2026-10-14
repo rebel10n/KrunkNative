@@ -71,6 +71,8 @@
 //                                so far; eye: where the first-person camera sits; chase: the death chase camera has a
 //                                killer; keep: the third-person camera's distance). The first 5 finished frames after
 //                                each of our own spawns log the same as "@spawn0".."@spawn4" (client/tests/spawn_camera_e2e.py)
+//   100 players                  log every player of the session: "[input_script] players t=100 n=2 5:Name@x,y,z
+//                                9:Guest@x,y,z*" (* us, - inactive)
 //   100 state                    log the held weapon slot, the menu / pointer lock state, position, ammo, ended,
 //                                the charge (chargeTime s, fullCharge), the reload and fire timers, the grapple / rope, the GLFW
 //                                cursor mode (cursor=normal: the mouse shows, disabled: locked to the game)
@@ -563,6 +565,18 @@ static void script_run(Client *client, const ScriptEvent *e) {
         fprintf(stderr, "[input_script] om t=%.0f %s %d\n", g_script.time, what, id);
     } else if (!strcmp(e->cmd, "cam")) {
         script_log_cam(client, e->arg[0] ? e->arg : "-");
+    } else if (!strcmp(e->cmd, "players")) {
+        // players: every player of the session, "uid:name@x,y,z" (+ "*" for us, "-" inactive)
+        char line[2048];
+        size_t o = 0;
+        for (size_t i = 0; i < client->game.player_count && o + 128 < sizeof(line); i++) {
+            const Player *p = client->game.players[i];
+            if (!p) continue;
+            o += (size_t) snprintf(line + o, sizeof(line) - o, " %d:%s@%.2f,%.2f,%.2f%s%s", p->uid, p->name, p->position.x, p->position.y,
+                                   p->position.z, p == client->me ? "*" : "", p->active ? "" : "-");
+        }
+        line[o] = 0;
+        fprintf(stderr, "[input_script] players t=%.0f n=%zu%s\n", g_script.time, client->game.player_count, line);
     } else if (!strcmp(e->cmd, "state")) {
         // state: one log line with the held slot and the menu/lock state (scripted checks); cursor =
         // the window's GLFW cursor mode (normal: the player sees the mouse, disabled: the game has it)
