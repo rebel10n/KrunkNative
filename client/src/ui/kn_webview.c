@@ -367,6 +367,11 @@ static int toolkit_up(void) {
     if (W.gtk) return W.gtk > 0;
     // GTK must not touch the process locale (the game parses and prints "C" numbers)
     gtk_disable_setlocale();
+    // The challenge page needs no GPU. WebKit's web process (Skia GPU raster, DMA-BUF renderer)
+    // segfaulted in libnvidia-eglcore while tearing its GL context down (GrDirectContext dtor),
+    // so render it on the CPU. Inherited by the web processes; an explicit user value wins.
+    setenv("WEBKIT_SKIA_ENABLE_CPU_RENDERING", "1", 0);
+    setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1", 0);
     if (!gtk_init_check(NULL, NULL)) {
         W.gtk = -1;
         snprintf(W.gtk_err, sizeof(W.gtk_err), "GTK found no display for the challenge window");
@@ -441,6 +446,7 @@ int kn_webview_captcha_open(const char *url, const char *sitekey, const char *ti
     WebKitSettings *settings = webkit_web_view_get_settings(W.view);
     webkit_settings_set_javascript_can_open_windows_automatically(settings, FALSE);
     webkit_settings_set_enable_developer_extras(settings, FALSE);
+    webkit_settings_set_hardware_acceleration_policy(settings, WEBKIT_HARDWARE_ACCELERATION_POLICY_NEVER); // see toolkit_up
     g_signal_connect(W.view, "decide-policy", G_CALLBACK(on_policy), NULL);
     g_signal_connect(W.view, "load-failed", G_CALLBACK(on_load_failed), NULL);
     g_signal_connect(W.view, "load-changed", G_CALLBACK(on_load_changed), NULL);
