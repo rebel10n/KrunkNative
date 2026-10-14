@@ -78,6 +78,11 @@ if (EMSCRIPTEN)
 else ()
     list(FILTER CLIENT_SOURCES EXCLUDE REGEX "/client/src/net/net_web\\.c$")
 endif ()
+# Official-server CHEAT_CHECK eval (client/src/net/krunker_cheat.c): the page's own eval on
+# the web, the vendored QuickJS sandbox (krunker_cheat_qjs.c + kn_quickjs below) natively.
+if (EMSCRIPTEN)
+    list(FILTER CLIENT_SOURCES EXCLUDE REGEX "/client/src/net/krunker_cheat_qjs\\.c$")
+endif ()
 
 set(SERVER_BINARY server_bin)
 file(GLOB_RECURSE SERVER_SOURCES server/src/*.c)
@@ -333,6 +338,25 @@ else ()
     add_subdirectory(shared/lib/cJSON)
     add_subdirectory(shared/lib/pcg_basic)
 
+    # QuickJS (client/lib/quickjs: Fabrice Bellard's release pinned in its VERSION, MIT
+    # LICENSE; https://bellard.org/quickjs/quickjs-2026-06-04.tar.xz, sha256
+    # b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a, the engine's sources
+    # copied unmodified; to bump, replace them and VERSION together): the native client's sandbox for the official Krunker servers' CHEAT_CHECK
+    # scripts (client/src/net/krunker_cheat_qjs.c). The engine only, without quickjs-libc
+    # (no std/os modules). Client-side only: never link it into server/ or shared/
+    # targets; the web build evals in the page and does not compile it.
+    add_library(kn_quickjs STATIC
+        client/lib/quickjs/quickjs.c client/lib/quickjs/dtoa.c client/lib/quickjs/libregexp.c
+        client/lib/quickjs/libunicode.c client/lib/quickjs/cutils.c)
+    file(STRINGS client/lib/quickjs/VERSION KN_QUICKJS_VERSION LIMIT_COUNT 1)
+    target_compile_definitions(kn_quickjs PRIVATE _GNU_SOURCE CONFIG_VERSION="${KN_QUICKJS_VERSION}")
+    target_link_libraries(kn_quickjs PUBLIC Threads::Threads m)
+    if (NOT MSVC)
+        # upstream's flags: signed overflow wraps; -O2 like opus (unoptimised it is several times
+        # slower, which eats into the per-challenge time limit); vendored code, warnings off
+        target_compile_options(kn_quickjs PRIVATE -fwrapv -O2 -w)
+    endif ()
+
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         set(CMAKE_C_FLAGS --static)
 
@@ -371,6 +395,7 @@ else ()
     # the offline sandbox server (server_sandbox.h): the server core + its no-network backend
     target_sources(${CLIENT_BINARY} PRIVATE ${SERVER_CORE_STANDALONE_SOURCES})
     target_link_libraries(${CLIENT_BINARY} PRIVATE kn_server_core)
+    target_link_libraries(${CLIENT_BINARY} PRIVATE kn_quickjs) # krunker_cheat_qjs.c
     krunknative_link_gl(${CLIENT_BINARY})
     # miniaudio (client/src/miniaudio.c) loads its audio backends with dlopen().
     target_link_libraries(${CLIENT_BINARY} PRIVATE ${CMAKE_DL_LIBS})
@@ -803,6 +828,15 @@ else ()
             set_tests_properties(assets_sync_e2e PROPERTIES TIMEOUT 300)
         endif ()
     endif ()
+
+    # krunker_cheat_test: the official servers' CHEAT_CHECK crypto (keystream, XOR, base64, the
+    # double-rounded FNV-1a) against hand-derived vectors, cc -> ccr round trips through the
+    # QuickJS sandbox, and the sandbox limits (client/src/net/krunker_cheat*.c)
+    add_executable(krunker_cheat_test client/tests/krunker_cheat_test.c client/src/net/krunker_cheat.c
+                   client/src/net/krunker_cheat_qjs.c)
+    target_include_directories(krunker_cheat_test PRIVATE client/include client/src/net)
+    target_link_libraries(krunker_cheat_test PRIVATE kn_quickjs)
+    add_test(NAME krunker_cheat_test COMMAND krunker_cheat_test)
 
     # qr_code_test (email-verify): the v7.1.4 2FA popup's QR code encoder (client/src/ui/qr_code.c)
     # against python-qrcode goldens (client/tests/data/qr_golden.json)
