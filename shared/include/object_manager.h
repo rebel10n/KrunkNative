@@ -23,17 +23,20 @@
 // each shot as OM_ACTION_TOOL with the tool picked there. The Physics Gun (WEAPON_ID_PHYS_GUN) and
 // the Move / Resize tools (btools) send OM_ACTION_EDIT: a NetSpawnEditPacket (the request with a
 // pose) that moves, resizes or turns a spawned object in place, replicated as SPAWNED_OBJ
-// OM_SPAWNED_UPDATE; Undo takes edits back too (the previous pose is kept).
+// OM_SPAWNED_UPDATE; Undo takes edits back too (the previous pose is kept). The Properties tool
+// sends the same packet with OM_EDIT_FIELDS and a JSON field patch after it (object_manager_edit_fields,
+// the field table below): one undo step per patch, the same rules.
 //
 // Spawned map objects live in Map.objects after the map's own (uid = index, like the builds),
 // flagged Object.spawned, and go at the next round start with the builds (world_remove_builds).
 //
-// Map edits: devs and the host (OM_CAP_MAP) also delete, duplicate, turn, move, resize and carry
-// the map's own objects with the Tool Gun and the Physics Gun. The map's Object leaves its uid for a
-// stand-in (Object.map_edit): one built from the map record with the edited "p" / "s" / "r" / "d",
-// or an inactive placeholder for a delete; the original waits detached and comes back with Undo, at
+// Map edits: devs and the host (OM_CAP_MAP) also delete, duplicate, turn, move, resize, carry and
+// edit the properties of the map's own objects with the Tool Gun and the Physics Gun. The map's
+// Object leaves its uid for a stand-in (Object.map_edit): one built from the map record with the
+// edited keys (the overlay: "p" / "s" / "r" / "d" and any property key the Properties tool set), or
+// an inactive placeholder for a delete; the original waits detached and comes back with Undo, at
 // the next round start and before a map change (object_manager_restore_map). Everyone hears
-// SPAWNED_OBJ OM_SPAWNED_MAP_EDIT (the pose keys only: every client has the map's record) /
+// SPAWNED_OBJ OM_SPAWNED_MAP_EDIT (the overlay only: every client has the map's record) /
 // MAP_DELETE / MAP_RESTORE, replayed to joiners. Triggers and KrunkScript keep addressing the uid:
 // a moved object's trigger fires where it went (its trigger state starts over), a deleted one's
 // stops and actions aimed at it find the inactive placeholder. Pickups, zombies machines, flags,
@@ -42,6 +45,7 @@
 // (bot_nav_invalidate); the client re-renders the sun's shadow map on each edit; ambient-occlusion
 // planes stay where the map built them.
 #include <shared.h>
+#include <cJSON.h>
 
 #define NET_PACKET_SPAWN_REQ (NET_PACKET_BLOCK_SANDBOX + 0)
 #define NET_PACKET_SPAWN_RESULT (NET_PACKET_BLOCK_SANDBOX + 1)
@@ -137,6 +141,7 @@ typedef enum {
     OM_TOOL_INFO,        // what is at the crosshair: kind, owner, uid (a NOTIFY to the shooter)
     OM_TOOL_MOVE,        // btools: select a spawned object, drag its X / Y / Z arrows (OM_ACTION_EDIT, the client's handles)
     OM_TOOL_RESIZE,      // btools: drag a face handle to resize along its axis (shift: both faces)
+    OM_TOOL_PROPERTIES,  // select an object, its map fields in the window's Properties panel (OM_EDIT_FIELDS)
     OM_TOOL_COUNT
 } ObjectManagerTool;
 
@@ -162,7 +167,7 @@ const ObjectManagerToolInfo *object_manager_tool_info(int tool); // NULL out of 
 #define OM_SPAWNED_UPDATE 3 // an edited object: the record (JSON) follows, it replaces the object at its uid
 // a map object (id = its uid, owner = the editor): MAP_EDIT carries the edited keys of its record
 // ({"p", "s", "r" / "d"}, JSON) applied to the map's own record; MAP_DELETE / MAP_RESTORE nothing
-#define OM_SPAWNED_MAP_EDIT 4
+#define OM_SPAWNED_MAP_EDIT 4 // (null: the key removed; a pose key the overlay lacks is removed too, as patch 1 sent them)
 #define OM_SPAWNED_MAP_DELETE 5
 #define OM_SPAWNED_MAP_RESTORE 6
 
@@ -174,6 +179,10 @@ typedef enum {
 
 #define OM_EDIT_BEGIN 1        // a new undo step: a grab or a drag starts (its first edit)
 #define OM_EDIT_DROP 2         // the Physics Gun's release with "Drop": down onto the surface below
+#define OM_EDIT_FIELDS 4       // the Properties tool: a NUL-terminated JSON field patch follows the packet ({key: value},
+                               // ObjectManagerField keys; the pose fields of the packet are not read); always a new undo step
+#define OM_FIELDS_MAX 400      // the longest field patch (JSON bytes, the NUL not counted)
+#define OM_FIELDS_ANSWER 1     // NetSpawnResultPacket.limit of a field patch's answer (a drag's edits answer 0)
 #define OM_EDIT_INTERVAL 0.05f // seconds between one player's edits (clients send at most 10 / s)
 #define OM_EDIT_SIZE_MIN 1.0f  // per axis (units)
 #define OM_EDIT_SIZE_MAX 200.0f // (a map object bigger than this may keep its size, never grow)
@@ -292,6 +301,13 @@ int object_manager_filter_extras(const Game *game, const ObjectManagerPerms *per
 // player; applied in place and sent to everyone as OM_SPAWNED_UPDATE.
 void object_manager_edit(Game *game, Player *player, const NetSpawnEditPacket *edit, const ObjectManagerPerms *perms,
                          NetSpawnResultPacket *out);
+// OM_ACTION_EDIT with OM_EDIT_FIELDS (the Properties tool): `json` (`length` bytes, NUL-terminated,
+// at most OM_FIELDS_MAX + 1) is the field patch, applied by the same rules as object_manager_edit
+// (OM_CAP_SPAWN, ownership, OM_CAP_MAP for the map's own, the Tool Gun in hand, the edit pace, reach,
+// size limits, no box into a player) as one undo step, the record within OM_RECORD_MAX; sent to
+// everyone as OM_SPAWNED_UPDATE / OM_SPAWNED_MAP_EDIT. out->limit is OM_FIELDS_ANSWER.
+void object_manager_edit_fields(Game *game, Player *player, const NetSpawnEditPacket *edit, const char *json, size_t length,
+                                const ObjectManagerPerms *perms, NetSpawnResultPacket *out);
 
 // ---- edits (both sides): the pose of a spawned object the edits take (active, not a pickup or a
 // zombies machine), and the btools' handle math (pure: the client drags, the tests check)
@@ -313,6 +329,51 @@ void object_manager_pose_resize(const ObjectManagerPose *from, int axis, int sig
                                 ObjectManagerPose *out);
 // `turns` quarter turns: w and l swap on odd ones (the AABB follows the model), not for ramps / ladders
 void object_manager_pose_turn(const ObjectManagerPose *from, int turns, ObjectManagerPose *out);
+
+// ---- the Properties tool's fields (both sides): the map editor's object inspector, cut to what the
+// game rebuilds from a record. Names, keys, ranges and load rules are the editor's (client/src/editor:
+// editor_model.c K_PROPS, editor_inspector.c's sliders and gates, editor_objects.c's special props);
+// object_manager_test checks the keys and read rules against editor_model.c.
+typedef enum {
+    OM_FIELD_NUM = 0,  // a number: p.k || def (K_PROPS PK_NUM: absent / 0 read as def)
+    OM_FIELD_NUMN,     // a number: p.k == null ? def : p.k (PK_NUMN)
+    OM_FIELD_INT,      // an integer: parseInt(p.k || def) (PK_INT)
+    OM_FIELD_SELECT,   // an integer index into the options (PK_INT)
+    OM_FIELD_ON,       // a switch: the key present is on (PK_PRESENT, written as 1)
+    OM_FIELD_OFF,      // a switch: the key present is off (PK_ABSENT: "v", "l", "wj" ...)
+    OM_FIELD_COLOR,    // "#rrggbb" (PK_COLOR)
+    OM_FIELD_VEC3,     // "p" / "s" / "r": three numbers ("r" in radians, as the map has it)
+    OM_FIELD_TEXTURE,  // "t": a g_prefab_textures index; "tv" / "at" go with a change (editor_objects.c)
+} ObjectManagerFieldKind;
+
+typedef struct {
+    const char *key;     // the map JSON key; "tas.0.<key>": the first trigger action's (prop_holder)
+    const char *prop;    // the editor's ObjectInstance property ("bounce")
+    const char *label;   // the inspector's label ("Bounce")
+    const char *section; // the panel's group ("Transform", "Style", "Collision", ...)
+    unsigned char kind;  // ObjectManagerFieldKind
+    float min, max, step;
+    float def;           // what an absent key reads as
+    const char *options; // OM_FIELD_SELECT: "Sending|Receiving|Both", or "@events" / "@actions" (g_trigger_*)
+} ObjectManagerField;
+
+int object_manager_field_count(void);
+const ObjectManagerField *object_manager_field(int index); // NULL out of range
+int object_manager_field_find(const char *key);            // its index, -1 none
+int object_manager_field_applies(const ObjectManagerField *f, int prefab); // the inspector shows it for that prefab
+// The range of `f` on `prefab` (the direction's top depends on the prefab, the size on the object)
+void object_manager_field_range(const ObjectManagerField *f, int prefab, float *min, float *max);
+const char *object_manager_field_option(const ObjectManagerField *f, int index); // a select's label, NULL past the end
+// The value as the game reads it from `record` (caller frees): a number, a bool (switches), a string
+// (colours) or an array of three numbers; NULL for a field that does not apply
+cJSON *object_manager_field_value(const cJSON *record, int prefab, const ObjectManagerField *f);
+// Applies a field patch ({key: value}: numbers, bools for switches, "#rrggbb", [x, y, z]) to `record`
+// in place, as the editor writes those keys. OM_STATUS_OK, INVALID (unknown key, wrong type, not
+// this prefab's), BOUNDS (out of the field's range). *pose: a "p" / "s" / "r" / "d" changed.
+int object_manager_fields_patch(cJSON *record, int prefab, const cJSON *patch, int *pose);
+// Object `uid`'s record as the edits see it (a duplicate, the map's palette colour "ci" resolved into
+// "c"; caller frees), NULL when object_manager_editable says no
+cJSON *object_manager_record(const Game *game, int uid);
 
 // ---- both sides
 // Replace the extra weapon list (invalid / duplicate / over-cap ids dropped) and rebuild the

@@ -1,0 +1,74 @@
+{
+  "scenario": "kn-om-props",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "om-header",
+      "rect": [
+        308,
+        160,
+        660,
+        86
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "title, tabs (Weapons active), search box, the status line ('Tool Gun added to your loadout')"
+    },
+    {
+      "name": "om-props-head",
+      "rect": [
+        312,
+        250,
+        530,
+        40
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#knOmPropsHead: the prefab title ('Boost Pad'), the uid and 'map object', Back"
+    },
+    {
+      "name": "om-props-list",
+      "rect": [
+        312,
+        290,
+        530,
+        150
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#knOmPropsList: the Transform (Position / Rotation / Size / Direction) and Collision (Visible, Bounce 1, Crouch Reduces) rows with the editor's labels, values and ranges"
+    },
+    {
+      "name": "om-footer",
+      "rect": [
+        308,
+        504,
+        660,
+        56
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "the panel's hint + Remove + Undo"
+    },
+    {
+      "name": "om-tools",
+      "rect": [
+        848,
+        246,
+        118,
+        250
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#knOmTools: the Properties tool picked, the Tool Gun line"
+    }
+  ]
+}

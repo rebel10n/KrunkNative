@@ -25,6 +25,10 @@
 // Edits go out at most every OB_SEND_SECONDS while a grab or drag changes the pose, and once at
 // its release; the first of each opens an undo step (OM_EDIT_BEGIN), so U takes a whole grab or
 // drag back. Others see the result through SPAWNED_OBJ OM_SPAWNED_UPDATE.
+//
+// Properties (the Tool Gun's third btool): fire on an object selects it and opens its fields in the
+// Object Manager window (object_manager_ui_open_props); the Properties key (I, cont_omPropsKey) does
+// the same for the Move / Resize selection, else for the object at the crosshair.
 #include <client.h>
 #include <html_dom.h>
 #include <ui_logic.h>
@@ -187,6 +191,7 @@ static int ob_pick(Client *client, const Player *me, vec3 *point) {
 static int ob_handles(const int tool, const ObjectManagerPose *p, ObHandle *out) {
     const vec3 c = ob_centre(p);
     int n = 0;
+    if (tool == OM_TOOL_PROPERTIES) return 0; // a selection box only
     for (int axis = 0; axis < 3; axis++) {
         const float half = fmaxf(v_get(p->size, axis), 1.0f) * 0.5f; // (flat things: pads, planes)
         if (tool == OM_TOOL_MOVE) {
@@ -338,6 +343,13 @@ static void ob_btools(Client *client, const Player *me, const int tool, const in
     ObHandle handles[OB_HANDLES_MAX];
     const int count = g_ob.sel && object_manager_pose(game, g_ob.sel - 1, &pose) ? ob_handles(tool, &pose, handles) : 0;
     const vec3 eye = ob_eye(me), dir = ob_dir(me->direction.x, me->direction.y);
+    if (pressed && !g_ob.drag && tool == OM_TOOL_PROPERTIES) { // the selection's fields in the window
+        vec3 point;
+        const int uid = ob_pick(client, me, &point);
+        g_ob.sel = uid >= 0 ? uid + 1 : 0;
+        if (uid >= 0) object_manager_ui_open_props(client, uid);
+        return;
+    }
     if (pressed && !g_ob.drag) {
         const int hover = ob_hover(me, handles, count);
         float t;
@@ -370,6 +382,24 @@ static void ob_btools(Client *client, const Player *me, const int tool, const in
     g_ob.drag = 0;
     g_ob.releasing = !ob_send_final(client, OM_EDIT_SOURCE_BTOOLS, 0);
 }
+
+// The Properties key with the Tool Gun in hand: the btools selection's fields, else the object's at
+// the crosshair. 1 the window opened.
+int om_build_props_key(Client *client) {
+    const Player *me = client ? client->me : NULL;
+    if (!me || !me->active || !me->weapon || !me->weapon->kn_tool) return 0;
+    int uid = g_ob.sel && object_manager_editable(&client->game, g_ob.sel - 1) ? g_ob.sel - 1 : -1;
+    if (uid < 0) {
+        vec3 point;
+        uid = ob_pick(client, me, &point);
+    }
+    if (uid < 0) return 0;
+    g_ob.sel = uid + 1;
+    object_manager_ui_open_props(client, uid);
+    return 1;
+}
+
+int om_build_selection(void) { return g_ob.sel - 1; }
 
 // Per frame while the game has the pointer (main.c, after the look and the input sample): the
 // Physics Gun and the btools take the fire button, the wheel and the rotate key from the input.

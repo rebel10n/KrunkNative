@@ -417,8 +417,8 @@ img.knOmProp {
 #menuWindow.dark div.knOmTool {
   display: flex;
   align-items: center;
-  margin-bottom: 2px;
-  padding: 2px 6px;
+  margin-bottom: 1px;
+  padding: 1px 6px; /* seven tools, the Snap / Release rows, the hint and the Tool Gun line in 420px */
   border: 2px solid transparent;
   border-radius: 4px;
   background-color: rgba(255, 255, 255, 0.05);
@@ -434,7 +434,7 @@ img.knOmProp {
   border-color: var(--yellow);
 }
 #menuWindow.dark div.knOmTool span.material-icons {
-  font-size: 22px;
+  font-size: 20px;
   margin-right: 8px;
   color: rgba(255, 255, 255, 0.85);
 }
@@ -523,6 +523,94 @@ img.knOmProp {
 }
 #menuWindow.dark div.knOmTools.knOmOff div.knOmToolGun {
   color: #eb5656;
+}
+/* Object Manager: the Properties panel in place of the grid (the Tool Gun's Properties tool,
+ * object_manager_ui.c om_props_html): the object's map fields, grouped as the editor's inspector */
+#menuWindow.dark div.knOmPropsHead {
+  display: flex;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+#menuWindow.dark span.knOmPropsTitle {
+  font-size: 20px;
+  color: #fff;
+  margin-right: 10px;
+}
+#menuWindow.dark span.knOmPropsSub {
+  flex-grow: 1;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.5);
+}
+#menuWindow.dark div.knOmPropsList {
+  max-height: 370px; /* the status line + the head + this = the grid's height: the list scrolls */
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+#menuWindow.dark div.knOmPropSec {
+  margin: 8px 0 3px;
+  font-size: 14px;
+  text-transform: uppercase;
+  color: var(--yellow);
+}
+#menuWindow.dark div.knOmProp {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background-color: rgba(0, 0, 0, 0.3);
+  margin-bottom: 2px;
+  font-size: 14px;
+}
+#menuWindow.dark span.knOmPropName {
+  width: 190px;
+  flex-shrink: 0;
+  color: rgba(255, 255, 255, 0.75);
+}
+#menuWindow.dark span.knOmPropVal {
+  display: flex;
+  align-items: center;
+  flex-grow: 1;
+}
+#menuWindow.dark input.knOmPropIn {
+  width: 90px;
+  height: 22px;
+  margin-right: 6px;
+  padding: 0 4px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 3px;
+  background-color: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-size: 13px;
+}
+#menuWindow.dark input.knOmPropIn.knOmPropVec {
+  width: 72px;
+}
+#menuWindow.dark select.knOmPropSel {
+  min-width: 160px;
+  height: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 3px;
+  background-color: rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font-size: 13px;
+}
+#menuWindow.dark span.knOmPropRange {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+}
+#menuWindow.dark span.knOmSwatch {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 3px;
+}
+#menuWindow.dark div.knOmProp span.knOmOptBtn {
+  margin: 0 4px 0 0;
+  padding: 0 8px;
 }
 /* The Tool Gun's tool beside the ammo counter (made next to #ammoHolder while it is in hand) */
 #knToolHud {

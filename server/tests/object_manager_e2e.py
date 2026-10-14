@@ -20,6 +20,9 @@ bridged remote browser), so it is neither DEV nor host.
   6. map edits: the dev's Deleter takes a map object (the guest hears OM_SPAWNED_MAP_DELETE, a late
      joiner gets it replayed), Undo brings it back (MAP_RESTORE), the Rotator and a Physics Gun edit
      change one in place (MAP_EDIT with the new pose); the guest may not touch the map
+  6b. the Properties tool: the dev's field patch (OM_EDIT_FIELDS) changes a map object's colour and
+     its fields come back in the MAP_EDIT overlay; the guest's is refused, an out-of-range value and
+     a field of another prefab too; Undo restores the map
   7. the rate limit answers a burst with "Slow down"
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
@@ -43,6 +46,7 @@ SPAWN_REQ, SPAWN_RESULT, LOADOUT_EXTRA, SPAWNED_OBJ = 250, 251, 252, 253
 QUERY, ADD_WEAPON, REMOVE_WEAPON, CLEAR_WEAPONS, DROP_WEAPON, SPAWN_ENTITY, SPAWN_NPC, SPAWN_OBJECT, REMOVE_AIM, UNDO = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
 DROP_HELD, TOOL, EDIT = 10, 11, 12
 PHYS_GUN, EDIT_PHYSGUN, EDIT_BEGIN = 66, 0, 1  # WEAPON_ID_PHYS_GUN (WEAPON_ID_KN_BASE 64 + 2)
+EDIT_BTOOLS, EDIT_FIELDS, FIELDS_ANSWER = 1, 4, 1  # the Properties tool's field patch (OM_EDIT_FIELDS)
 TOOL_DELETER, TOOL_DUPLICATOR, TOOL_ROTATOR, TOOL_INFO = 0, 1, 2, 3
 TOOL_COPIED, TOOL_PASTED, TOOL_SHOWN = 1, 2, 3
 NO_TOOL = 9
@@ -156,6 +160,22 @@ class Peer(kn_proto.Conn):
         """One OM_ACTION_EDIT (the Physics Gun's); its SPAWN_RESULT as (status, caps, limit)."""
         mark = len(self.packets)
         self.send(SPAWN_REQ, struct.pack("<BBhff", EDIT, 0, EDIT_PHYSGUN, 0.0, 0.0) + struct.pack("<i3f3fBBH", uid, *pos, *size, quarter, flags, 0))
+        end = time.time() + 3
+        while time.time() < end:
+            self.read(timeout=0.2)
+            for t, p in self.packets[mark:]:
+                if t == SPAWN_RESULT and len(p) == 8:
+                    a, status, caps, _extra, _it, limit = struct.unpack("<BBBBhH", p)
+                    if a == EDIT:
+                        return status, caps, limit
+        return None
+
+    def fields(self, uid, patch):
+        """One field patch (the Properties tool: OM_ACTION_EDIT + OM_EDIT_FIELDS + JSON); its SPAWN_RESULT."""
+        time.sleep(0.08)  # the edit pace (OM_EDIT_INTERVAL)
+        mark = len(self.packets)
+        head = struct.pack("<BBhff", EDIT, 0, EDIT_BTOOLS, 0.0, 0.0) + struct.pack("<i3f3fBBH", uid, 0, 0, 0, 0, 0, 0, 0, EDIT_FIELDS, 0)
+        self.send(SPAWN_REQ, head + patch.encode() + b"\0")
         end = time.time() + 3
         while time.time() < end:
             self.read(timeout=0.2)
@@ -466,6 +486,31 @@ def run():
             check("Undo: the map's own object again", [u for u, _ in map_ops_since(guest, gmark, MAP_RESTORE)] == [uid],
                   str(map_ops_since(guest, gmark, MAP_RESTORE)))
         late2.close()
+        # part 6b: the Properties tool (OM_EDIT_FIELDS): the map object's fields, devs and the host only
+        time.sleep(3)  # the request bucket refills
+        print("the Properties tool...")
+        host.hold(slot)  # the Properties tool is the Tool Gun's: it must be in hand
+        r = host.request(TOOL, TOOL_INFO, -1.5)
+        check("dev: the Tool Gun in hand again", r is not None and r[0] != NO_TOOL, str(r))
+        gmark = len(guest.packets)
+        r = host.fields(uid, '{"c":"#ff0000"}')
+        check("dev: the map object's colour set", r is not None and r[0] == OK and r[2] == FIELDS_ANSWER, str(r))
+        guest.pump(0.4)
+        edits = [e for e in map_ops_since(guest, gmark, MAP_EDIT) if e[0] == uid]
+        check("the guest hears the MAP_EDIT overlay with the colour", bool(edits) and _json.loads(edits[-1][1]).get("c") == "#ff0000", str(edits[-1:]))
+        r = guest.fields(uid, '{"c":"#00ff00"}')
+        check("guest: no field edits of the map", r is not None and r[0] == DENIED, str(r))
+        r = host.fields(uid, '{"c":"red"}')
+        check("a colour that is not #rrggbb: refused", r is not None and r[0] != OK, str(r))
+        r = host.fields(uid, '{"li":3}')
+        check("a light's Intensity on this object: refused", r is not None and r[0] != OK, str(r))
+        r = host.fields(uid, '{"o":9}')
+        check("an opacity past 0..1: refused", r is not None and r[0] != OK, str(r))
+        gmark = len(guest.packets)
+        r = host.request(UNDO)
+        guest.pump(0.4)
+        check("Undo: the map's own object again (MAP_RESTORE)", r is not None and r[0] == OK and [u for u, _ in map_ops_since(guest, gmark, MAP_RESTORE)] == [uid],
+              str(map_ops_since(guest, gmark, MAP_RESTORE)))
     host.request(CLEAR_WEAPONS)
 
     time.sleep(3)  # the bucket refills

@@ -32,6 +32,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ruleset.h>
+#include <strings.h> // strcasecmp
+#include <editor_model.h> // the editor's property table (the Properties tool's fields)
 
 static int g_failures;
 static int g_checks;
@@ -1509,6 +1511,9 @@ static void test_map_edits(TestClient *a, TestClient *b, TestClient *late) {
     CHECK(map_ops_since(b, OM_SPAWNED_MAP_EDIT, block) == 1, "b hears OM_SPAWNED_MAP_EDIT");
     mirror_apply(&mirror, b);
     CHECK(same_box(mirror.map->objects[block], moved), "b's client moves the map block (same uid, same box)");
+    if (cJSON_IsNumber(cJSON_GetObjectItem(original->raw, "ci"))) // the palette colour goes with it (stand-ins have no palette)
+        CHECK(cJSON_IsString(cJSON_GetObjectItem(moved->raw, "c")) && cJSON_IsString(cJSON_GetObjectItem(mirror.map->objects[block]->raw, "c")),
+              "the carried block keeps its palette colour (server and client)");
     const vec3 top = {moved->position.x, moved->position.y + 60.0f, moved->position.z};
     const float hit = line_in_rect(top, (vec3) {0.0f, -100.0f, 0.0f}, moved->position, moved->scale);
     CHECK(hit > 0.0f && fabsf(top.y - 100.0f * hit - (moved->position.y + moved->scale.y)) < 0.05f, "its collision box went with it");
@@ -1629,6 +1634,335 @@ static void test_map_edits(TestClient *a, TestClient *b, TestClient *late) {
     clean_up(a);
     clean_up(b);
     object_manager_restore_map(&mirror); // (the mirrors' maps are freed: their own Objects back first)
+    object_manager_restore_map(&joined);
+}
+
+// ---------------------------------------------------------------- the Properties tool (field patches)
+
+// The editor's own read of a field (editor_model.c ed_model_prop_get) equals the game's
+static int same_value(const cJSON *a, const cJSON *b) {
+    if (!a || !b) return 0;
+    if (cJSON_IsNumber(a) && cJSON_IsNumber(b)) return fabs(a->valuedouble - b->valuedouble) < 1e-6;
+    if (cJSON_IsBool(a) && cJSON_IsBool(b)) return cJSON_IsTrue(a) == cJSON_IsTrue(b);
+    if (cJSON_IsString(a) && cJSON_IsString(b)) return !strcasecmp(a->valuestring, b->valuestring);
+    return cJSON_Compare(a, b, 1);
+}
+
+static int first_prefab_of(const ObjectManagerField *f) {
+    for (int prefab = 0; prefab < PREFAB_V7_COUNT; prefab++) {
+        if (object_manager_field_applies(f, prefab)) return prefab;
+    }
+    return -1;
+}
+
+static void test_fields_table(void) {
+    printf("the Properties tool's fields against the editor...\n");
+    // pos / rot / size / texture / collidable / health: editor_objects.c's special props (not in K_PROPS)
+    static const char *const special[] = {"pos", "rot", "size", "texture", "collidable", "health", NULL};
+    const int n = object_manager_field_count();
+    CHECK(n >= 30, "fields (%d)", n);
+    for (int i = 0; i < n; i++) {
+        const ObjectManagerField *f = object_manager_field(i);
+        int skip = 0;
+        for (int k = 0; special[k]; k++) skip |= !strcmp(special[k], f->prop);
+        const int prefab = first_prefab_of(f);
+        CHECK(prefab >= 0, "field %s applies to some prefab", f->key);
+        CHECK(object_manager_field_find(f->key) == i, "field %s found by key", f->key);
+        if (skip || prefab < 0) continue;
+        const int action = !strncmp(f->key, "tas.0.", 6);
+        const char *key = action ? f->key + 6 : f->key;
+        const char *ed_key = ed_model_prop_key(f->prop);
+        CHECK(ed_key && !strcmp(ed_key, key), "%s: the editor's key of '%s' is '%s'", f->key, f->prop, ed_key ? ed_key : "(none)");
+        // "bounce": the runtime's read (map.c: bm == null ? 1 : parseFloat(bm || 0)), K_PROPS has an OR-default
+        const int runtime_read = !strcmp(f->prop, "bounce");
+        // the read rule: absent, 0 and a value in range (written by the game, read back by the editor)
+        float mn, mx;
+        object_manager_field_range(f, prefab, &mn, &mx);
+        const double mid = f->kind == OM_FIELD_COLOR ? 0.0 : (f->kind == OM_FIELD_INT || f->kind == OM_FIELD_SELECT) ? floor((mn + mx) * 0.5 + 0.7) : mn + (mx - mn) * 0.37;
+        for (int pass = 0; pass < 3; pass++) {
+            cJSON *rec = cJSON_CreateObject();
+            cJSON_AddNumberToObject(rec, "i", prefab);
+            cJSON *holder = rec;
+            if (action) {
+                cJSON *tas = cJSON_AddArrayToObject(rec, "tas");
+                holder = cJSON_CreateObject();
+                cJSON_AddItemToArray(tas, holder);
+            }
+            if (pass == 1) cJSON_AddNumberToObject(holder, key, 0);
+            if (pass == 2) { // through the game's write
+                cJSON *patch = cJSON_CreateObject();
+                if (f->kind == OM_FIELD_ON || f->kind == OM_FIELD_OFF) cJSON_AddBoolToObject(patch, f->key, 0);
+                else if (f->kind == OM_FIELD_COLOR) cJSON_AddStringToObject(patch, f->key, "#12ab34");
+                else cJSON_AddNumberToObject(patch, f->key, mid);
+                const int status = object_manager_fields_patch(rec, prefab, patch, NULL);
+                CHECK(status == OM_STATUS_OK, "%s: the patch writes (status %d)", f->key, status);
+                cJSON_Delete(patch);
+            }
+            cJSON *ours = object_manager_field_value(rec, prefab, f);
+            cJSON *theirs = ed_model_prop_get(rec, prefab, f->prop);
+            if (!(runtime_read && pass == 1))
+                CHECK(same_value(ours, theirs), "%s (%s) pass %d: the game reads %s, the editor %s", f->key, f->prop, pass,
+                      ours ? cJSON_PrintUnformatted(ours) : "-", theirs ? cJSON_PrintUnformatted(theirs) : "-");
+            else CHECK(cJSON_IsNumber(ours) && ours->valuedouble == 0.0, "bm 0 reads as 0 (the runtime's rule)");
+            cJSON_Delete(ours);
+            cJSON_Delete(theirs);
+            cJSON_Delete(rec);
+        }
+    }
+    // the gates follow the prefabs: a jump pad's force, a teleporter's channel, a light's intensity
+    CHECK(object_manager_field_applies(object_manager_field(object_manager_field_find("bm")), PREFAB_BOOST_PAD), "BOOST_PAD: Bounce");
+    CHECK(!object_manager_field_applies(object_manager_field(object_manager_field_find("bm")), PREFAB_CUBE), "CUBE: no Bounce");
+    CHECK(object_manager_field_applies(object_manager_field(object_manager_field_find("ch")), PREFAB_TELEPORTER), "TELEPORTER: Channel");
+    CHECK(object_manager_field_applies(object_manager_field(object_manager_field_find("li")), PREFAB_POINT_LIGHT), "POINT_LIGHT: Intensity");
+    CHECK(object_manager_field_applies(object_manager_field(object_manager_field_find("c")), PREFAB_POINT_LIGHT), "POINT_LIGHT: Color");
+    CHECK(object_manager_field_applies(object_manager_field(object_manager_field_find("t")), PREFAB_CUBE) &&
+          object_manager_field_applies(object_manager_field(object_manager_field_find("c")), PREFAB_CUBE), "CUBE: Texture, Color");
+    CHECK(!strcmp(object_manager_field_option(object_manager_field(object_manager_field_find("n")), 2), "Both"), "Node options");
+    CHECK(!strcmp(object_manager_field_option(object_manager_field(object_manager_field_find("te")), 3), "onEnterObject"), "Event options");
+    // patches the authority refuses before anything moves
+    cJSON *rec = cJSON_Parse("{\"i\":0,\"p\":[0,0,0],\"s\":[10,10,10]}");
+    static const char *const bad[][2] = {
+        {"{\"nope\":1}", "an unknown key"}, {"{\"bm\":1}", "a field of another prefab"}, {"{\"c\":\"red\"}", "a colour not #rrggbb"},
+        {"{\"o\":3}", "out of range"}, {"{\"s\":[10,500,10]}", "a size past the limit"}, {"{\"t\":1.5}", "a fractional texture"},
+        {"{\"p\":[0,0]}", "a short vector"}, {"{\"v\":\"yes\"}", "a switch as a string"}, {"[]", "not an object"},
+    };
+    static const int want[] = {OM_STATUS_INVALID, OM_STATUS_UNSUPPORTED, OM_STATUS_INVALID, OM_STATUS_BOUNDS, OM_STATUS_BOUNDS,
+                               OM_STATUS_INVALID, OM_STATUS_INVALID, OM_STATUS_INVALID, OM_STATUS_INVALID};
+    for (size_t i = 0; i < sizeof(want) / sizeof(want[0]); i++) {
+        cJSON *patch = cJSON_Parse(bad[i][0]);
+        const int status = object_manager_fields_patch(rec, PREFAB_CUBE, patch, NULL);
+        CHECK(status == want[i], "refused: %s (status %d)", bad[i][1], status);
+        cJSON_Delete(patch);
+    }
+    cJSON *patch = cJSON_Parse("{\"t\":4,\"c\":\"#FF0000\",\"v\":false,\"p\":[1,2,3]}");
+    int pose = 0;
+    CHECK(object_manager_fields_patch(rec, PREFAB_CUBE, patch, &pose) == OM_STATUS_OK && pose, "a cube's texture, colour, visibility and spot");
+    char *printed = cJSON_PrintUnformatted(rec);
+    CHECK(printed && strstr(printed, "\"t\":4") && strstr(printed, "\"c\":\"#ff0000\"") && strstr(printed, "\"v\":1") && strstr(printed, "\"p\":[1,2,3]"),
+          "written as the editor writes them: %s", printed ? printed : "");
+    free(printed);
+    cJSON_Delete(patch);
+    // a legacy trigger: its action keys move into tas[0] with the first action edit, the Event Value stays
+    cJSON *legacy = cJSON_Parse("{\"i\":29,\"ta\":3,\"tc\":5,\"tce\":2}");
+    patch = cJSON_Parse("{\"tas.0.tc\":9}");
+    CHECK(object_manager_fields_patch(legacy, PREFAB_TRIGGER, patch, NULL) == OM_STATUS_OK, "a legacy trigger's action value");
+    printed = cJSON_PrintUnformatted(legacy);
+    CHECK(printed && !strcmp(printed, "{\"i\":29,\"tce\":2,\"tas\":[{\"ta\":3,\"tc\":9}]}"), "legacy action keys in tas[0]: %s", printed ? printed : "");
+    free(printed);
+    cJSON_Delete(patch);
+    cJSON_Delete(legacy);
+    cJSON_Delete(rec);
+}
+
+// One field patch (the Properties tool: OM_ACTION_EDIT + OM_EDIT_FIELDS + the JSON); its SPAWN_RESULT
+static NetSpawnResultPacket fields_at(TestClient *c, const int uid, const char *json) {
+    const Player *p = player_of(c);
+    uint8_t buffer[sizeof(NetSpawnEditPacket) + OM_FIELDS_MAX + 1];
+    NetSpawnEditPacket e;
+    memset(&e, 0, sizeof(e));
+    e.req = (NetSpawnReqPacket) {.action = OM_ACTION_EDIT, .item = OM_EDIT_SOURCE_BTOOLS, .pitch = p ? p->direction.x : 0.0f, .yaw = p ? p->direction.y : 0.0f};
+    e.uid = uid;
+    e.flags = OM_EDIT_FIELDS;
+    const size_t n = strlen(json) + 1;
+    memcpy(buffer, &e, sizeof(e));
+    memcpy(buffer + sizeof(e), json, n);
+    c->count = 0;
+    pump(20); // (the edit pace)
+    send_to(c, NET_PACKET_SPAWN_REQ, buffer, (uint16_t) (sizeof(e) + n));
+    pump(2);
+    NetSpawnResultPacket r = {.status = OM_STATUS_COUNT};
+    const NetPacket *packet = last(c, NET_PACKET_SPAWN_RESULT);
+    if (packet && packet->length == sizeof(r)) memcpy(&r, packet->payload, sizeof(r));
+    return r;
+}
+
+// The last MAP_EDIT overlay `c` got for `uid` (caller frees), NULL none
+static cJSON *map_edit_overlay(const TestClient *c, const int uid) {
+    cJSON *found = NULL;
+    for (int i = 0; i < c->count; i++) {
+        const NetPacket *k = &c->packets[i];
+        if (k->type != NET_PACKET_SPAWNED_OBJ || k->length <= sizeof(NetSpawnedObjPacket)) continue;
+        NetSpawnedObjPacket head;
+        memcpy(&head, k->payload, sizeof(head));
+        if (head.op != OM_SPAWNED_MAP_EDIT || head.id != uid) continue;
+        cJSON_Delete(found);
+        found = cJSON_Parse((const char *) k->payload + sizeof(head));
+    }
+    return found;
+}
+
+static int map_uid_of(const Game *game, const int prefab) {
+    for (size_t i = 0; game->map && i < game->map->object_count; i++) {
+        if (game->map->objects[i]->prefab == prefab && object_manager_map_editable(game, (int) i)) return (int) i;
+    }
+    return -1;
+}
+
+// a: a dev (local), b: a sandbox guest (OM_CAP_SPAWN, not OM_CAP_MAP); late: joins mid-way. The map
+// is Kanji with a trigger appended (start_with_trigger)
+static void test_field_edits(TestClient *a, TestClient *b, TestClient *late) {
+    printf("field edits (the Properties tool)...\n");
+    Player *p = player_of(a), *q = player_of(b);
+    ClientConnection *bc = conn(b);
+    if (!p || !q || !bc) return;
+    Game *game = &g_server->game;
+    p->god_mode = q->god_mode = 1;
+    pump(200);
+    Game mirror;
+    memset(&mirror, 0, sizeof(mirror));
+    const cJSON *maps[1] = {game->map->raw_data};
+    int modes[1] = {MODE_ID_FFA};
+    game_configure(&mirror, NULL, maps, 1, modes, 1, NULL, 0, NULL, 0);
+    game_init(&mirror, 0, 0, 0);
+
+    const int pad = map_object_of(game, PREFAB_BOOST_PAD, 0), block = map_object_of(game, PREFAB_CUBE, 1), trig = map_uid_of(game, PREFAB_TRIGGER);
+    CHECK(pad >= 0 && block >= 0 && trig >= 0, "a jump pad, a block and the trigger (%d, %d, %d)", pad, block, trig);
+    if (pad < 0 || block < 0 || trig < 0) return;
+    Object *const pad0 = game->map->objects[pad], *const block0 = game->map->objects[block], *const trig0 = game->map->objects[trig];
+    request(a, OM_ACTION_ADD_WEAPON, WEAPON_ID_TOOL_GUN, 0.0f);
+    pump(4);
+    hold(a, WEAPON_ID_TOOL_GUN);
+
+    // the jump pad's force (Bounce, "bm"): applied, heard, mirrored
+    stand_near(p, pad0);
+    const float bounce0 = pad0->bounce;
+    reset_received();
+    NetSpawnResultPacket r = fields_at(a, pad, "{\"bm\":2.5}");
+    pump(2);
+    const Object *pad1 = game->map->objects[pad];
+    CHECK(r.status == OM_STATUS_OK && r.action == OM_ACTION_EDIT && r.limit == OM_FIELDS_ANSWER && pad1 != pad0 && pad1->jump_pad &&
+          fabsf(pad1->bounce - 2.5f) < 1e-4f && object_manager_map_edited(game, pad) == 1,
+          "the pad's Bounce 2.5 (status %u, bounce %.2f, was %.2f)", r.status, pad1->bounce, bounce0);
+    cJSON *overlay = map_edit_overlay(b, pad);
+    CHECK(overlay && cJSON_GetNumberValue(cJSON_GetObjectItem(overlay, "bm")) == 2.5 && cJSON_GetObjectItem(overlay, "p"),
+          "b hears MAP_EDIT with \"bm\" (and the pose keys)");
+    CHECK(overlay && !cJSON_GetObjectItem(overlay, "ci") && !cJSON_IsNull(cJSON_GetObjectItem(overlay, "c")) && !cJSON_GetObjectItem(overlay, "r"),
+          "the overlay keeps the palette colour and names no absent pose key");
+    if (cJSON_IsNumber(cJSON_GetObjectItem(pad0->raw, "ci")))
+        CHECK(cJSON_IsString(cJSON_GetObjectItem(pad1->raw, "c")) && !cJSON_GetObjectItem(pad1->raw, "ci"), "the stand-in has the palette's colour in \"c\"");
+    cJSON_Delete(overlay);
+    mirror_apply(&mirror, b);
+    CHECK(mirror.map->objects[pad]->map_edit && fabsf(mirror.map->objects[pad]->bounce - 2.5f) < 1e-4f, "b's client: the pad bounces 2.5");
+    q->position = (vec3) {pad1->position.x, pad1->position.y + 0.5f, pad1->position.z};
+    q->velocity = (vec3) {0};
+    for (int i = 0; i < 6; i++) input(b, -1, 0);
+    CHECK(q->velocity.y > 0.05f || q->position.y > pad1->position.y + 1.5f, "the stronger pad still launches (vy %.3f)", q->velocity.y);
+    r = fields_at(a, pad, "{\"bm\":9}");
+    CHECK(r.status == OM_STATUS_BOUNDS && fabsf(game->map->objects[pad]->bounce - 2.5f) < 1e-4f, "Bounce 9: past the editor's -3..3 (status %u)", r.status);
+    r = fields_at(a, pad, "{\"ch\":3}");
+    CHECK(r.status == OM_STATUS_UNSUPPORTED, "a teleporter's Channel on a pad: not its field (status %u)", r.status);
+    reset_received();
+    r = fields_at(a, pad, "{\"bm\":2.5}");
+    CHECK(r.status == OM_STATUS_OK && map_ops_since(b, OM_SPAWNED_MAP_EDIT, pad) == 0, "the same value again: nothing sent (status %u)", r.status);
+
+    // a guest: refused (no OM_CAP_MAP), nothing changes
+    bc->local = 0;
+    request(b, OM_ACTION_ADD_WEAPON, WEAPON_ID_TOOL_GUN, 0.0f);
+    pump(4);
+    hold(b, WEAPON_ID_TOOL_GUN);
+    stand_near(q, pad1);
+    r = fields_at(b, pad, "{\"bm\":-1}");
+    CHECK(r.status == OM_STATUS_DENIED && fabsf(game->map->objects[pad]->bounce - 2.5f) < 1e-4f, "a guest's Bounce: refused (status %u)", r.status);
+
+    // a block's texture and colour, then a move: the colour stays with it
+    stand_near(p, block0);
+    reset_received();
+    r = fields_at(a, block, "{\"t\":5,\"c\":\"#FF2200\"}");
+    const Object *block1 = game->map->objects[block];
+    const cJSON *rt = block1->raw ? cJSON_GetObjectItem(block1->raw, "t") : NULL, *rc = block1->raw ? cJSON_GetObjectItem(block1->raw, "c") : NULL;
+    CHECK(r.status == OM_STATUS_OK && block1 != block0 && cJSON_GetNumberValue(rt) == 5 && rc && !strcmp(cJSON_GetStringValue(rc), "#ff2200") &&
+          !cJSON_GetObjectItem(block1->raw, "ci"), "the block's texture 5 and colour #ff2200 (status %u)", r.status);
+    CHECK(same_box(block1, block0), "its box stays");
+    r = fields_at(b, block, "{\"c\":\"#00ff00\"}");
+    CHECK(r.status == OM_STATUS_DENIED, "a guest's colour: refused (status %u)", r.status);
+    ObjectManagerPose from, to;
+    object_manager_pose(game, block, &from);
+    to = from;
+    to.position.y += 3.0f;
+    pump(20);
+    r = edit_at(a, OM_EDIT_SOURCE_BTOOLS, block, &to, OM_EDIT_BEGIN);
+    const Object *block2 = game->map->objects[block];
+    CHECK(r.status == OM_STATUS_OK && fabsf(block2->position.y - to.position.y) < 0.02f && cJSON_GetObjectItem(block2->raw, "c") &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(block2->raw, "c")), "#ff2200"), "moved up 3, still #ff2200");
+    mirror_apply(&mirror, b);
+    const Object *mb = mirror.map->objects[block];
+    CHECK(same_box(mb, block2) && mb->raw && cJSON_GetNumberValue(cJSON_GetObjectItem(mb->raw, "t")) == 5 &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(mb->raw, "c")), "#ff2200"), "b's client: the moved block keeps its texture and colour");
+
+    // a trigger setting: the chance, single use and the first action's value
+    stand_near(p, trig0);
+    r = fields_at(a, trig, "{\"cha\":40,\"su\":true,\"tas.0.tc\":7}");
+    const Object *trig1 = game->map->objects[trig];
+    CHECK(r.status == OM_STATUS_OK && trig1->trig && trig1->trig->chance == 40 && trig1->trig->single_use && trig1->trig->action_count == 1 &&
+          trig1->trig->actions[0].constant == 7 && trig1->trig->actions[0].action == 1, "the trigger: chance 40, single use, action value 7 (status %u)", r.status);
+    r = fields_at(b, trig, "{\"cha\":0}");
+    CHECK(r.status == OM_STATUS_DENIED && game->map->objects[trig]->trig->chance == 40, "a guest's trigger edit: refused (status %u)", r.status);
+    r = fields_at(a, trig, "{\"tas.0.ta\":200}");
+    CHECK(r.status == OM_STATUS_BOUNDS, "an action past the table (status %u)", r.status);
+
+    // a joiner gets every edited object replayed
+    join(late, 1);
+    pump(10);
+    Game joined;
+    memset(&joined, 0, sizeof(joined));
+    game_configure(&joined, NULL, maps, 1, modes, 1, NULL, 0, NULL, 0);
+    game_init(&joined, 0, 0, 0);
+    mirror_apply(&joined, late);
+    CHECK(fabsf(joined.map->objects[pad]->bounce - 2.5f) < 1e-4f && joined.map->objects[trig]->trig && joined.map->objects[trig]->trig->chance == 40 &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(joined.map->objects[block]->raw, "c")), "#ff2200"),
+          "the joiner gets the pad's Bounce, the block's colour and the trigger's chance");
+
+    // Undo, newest first: the trigger, the move, the colour, the Bounce -> the map's own objects
+    reset_received();
+    pump(20);
+    r = request(a, OM_ACTION_UNDO, 0, 0.0f);
+    CHECK(r.status == OM_STATUS_OK && game->map->objects[trig] == trig0 && trig0->trig->chance == 0, "undo the trigger edit: the map's trigger back");
+    pump(20);
+    r = request(a, OM_ACTION_UNDO, 0, 0.0f);
+    const Object *block3 = game->map->objects[block];
+    CHECK(r.status == OM_STATUS_OK && same_box(block3, block0) && cJSON_GetObjectItem(block3->raw, "c") &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(block3->raw, "c")), "#ff2200"), "undo the move: back down, still red");
+    pump(20);
+    r = request(a, OM_ACTION_UNDO, 0, 0.0f);
+    CHECK(r.status == OM_STATUS_OK && game->map->objects[block] == block0, "undo the colour: the map's block back");
+    pump(20);
+    r = request(a, OM_ACTION_UNDO, 0, 0.0f);
+    CHECK(r.status == OM_STATUS_OK && game->map->objects[pad] == pad0 && fabsf(pad0->bounce - bounce0) < 1e-4f, "undo the Bounce: the map's pad back");
+    pump(2);
+    mirror_apply(&mirror, b);
+    CHECK(!mirror.map->objects[pad]->map_edit && fabsf(mirror.map->objects[pad]->bounce - bounce0) < 1e-4f && !mirror.map->objects[block]->map_edit &&
+          !mirror.map->objects[trig]->map_edit, "b's client has the map's own objects back");
+
+    // a spawned object: its owner's colour edit (OM_SPAWNED_UPDATE), undone
+    bc->local = 1;
+    stand_near(p, block0);
+    pump(20);
+    r = request_at(a, OM_ACTION_SPAWN_OBJECT, entry_index(OM_TAB_OBJECTS, "Crate"), -0.5f, p->direction.y + 1.2f);
+    const Object *crate = last_spawned();
+    const int crate_uid = crate ? (int) (game->map->object_count - 1) : -1;
+    CHECK(r.status == OM_STATUS_OK && crate && crate->prefab == PREFAB_CRATE, "a crate spawned (status %u)", r.status);
+    if (crate) {
+        reset_received();
+        r = fields_at(a, crate_uid, "{\"v\":false}");
+        CHECK(r.status == OM_STATUS_OK && cJSON_GetObjectItem(game->map->objects[crate_uid]->raw, "v"), "the crate hidden (v: 1) (status %u)", r.status);
+        CHECK(update_p(b, crate_uid, &to.position), "b hears OM_SPAWNED_UPDATE");
+        pump(20);
+        r = request(a, OM_ACTION_UNDO, 0, 0.0f);
+        CHECK(r.status == OM_STATUS_OK && !cJSON_GetObjectItem(game->map->objects[crate_uid]->raw, "v"), "undo: visible again");
+        request(a, OM_ACTION_UNDO, 0, 0.0f); // the crate
+    }
+    // the round start restores what Undo did not
+    pump(20);
+    r = fields_at(a, block, "{\"o\":0.5}");
+    CHECK(r.status == OM_STATUS_OK && game->map->objects[block] != block0, "the block's opacity 0.5");
+    world_round_start(game);
+    CHECK(game->map->objects[block] == block0 && !object_manager_map_edited(game, block), "round start: the map's block back");
+
+    p->god_mode = q->god_mode = 0;
+    leave(late);
+    clean_up(a);
+    clean_up(b);
+    object_manager_restore_map(&mirror);
     object_manager_restore_map(&joined);
 }
 
@@ -1835,6 +2169,31 @@ int main(void) {
         for (int i = 0; i < CLIENTS; i++) leave(&g_clients[i]);
         sandbox_stop();
     } else CHECK(0, "sandbox (kanji)");
+    // the Properties tool: Kanji with a trigger appended above its first jump pad
+    test_fields_table();
+    cJSON *with_trigger = kanji ? cJSON_Duplicate(kanji, 1) : NULL;
+    cJSON *objects = with_trigger ? cJSON_GetObjectItem(with_trigger, "objects") : NULL;
+    const cJSON *first_pad = NULL, *it;
+    cJSON_ArrayForEach(it, objects) {
+        if (!first_pad && map_raw_object_prefab(it) == PREFAB_BOOST_PAD) first_pad = it;
+    }
+    const cJSON *fp = first_pad ? cJSON_GetObjectItem(first_pad, "p") : NULL;
+    if (fp && cJSON_GetArraySize(fp) >= 3) {
+        char json[256];
+        snprintf(json, sizeof(json), "{\"i\":%d,\"p\":[%g,%g,%g],\"s\":[10,10,10],\"te\":3,\"tas\":[{\"ta\":1,\"tc\":5}]}", PREFAB_TRIGGER,
+                 cJSON_GetNumberValue(cJSON_GetArrayItem(fp, 0)) + 30.0, cJSON_GetNumberValue(cJSON_GetArrayItem(fp, 1)) + 20.0,
+                 cJSON_GetNumberValue(cJSON_GetArrayItem(fp, 2)));
+        cJSON_AddItemToArray(objects, cJSON_Parse(json));
+    }
+    CHECK(fp != NULL, "kanji has a jump pad to hang the trigger by");
+    if (fp && start(with_trigger, MODE_ID_FFA)) {
+        join(&g_clients[0], 1);
+        join(&g_clients[1], 1);
+        test_field_edits(&g_clients[0], &g_clients[1], &g_clients[2]);
+        for (int i = 0; i < CLIENTS; i++) leave(&g_clients[i]);
+        sandbox_stop();
+    } else CHECK(0, "sandbox (kanji + trigger)");
+    cJSON_Delete(with_trigger);
     printf("%d checks, %d failures\n", g_checks, g_failures);
     printf(g_failures ? "Test FAILED\n" : "Test OK\n");
     return g_failures ? 1 : 0;

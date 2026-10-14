@@ -39,7 +39,7 @@
 //                                extra loadout slot, in hand when it lands; again: take it out) / right
 //                                (a pickup at the crosshair)
 //   100 om tool 1                a Tools-pane pick (0 Deleter, 1 Duplicator, 2 Rotator, 3 Info, 4 Move,
-//                                5 Resize): sets the Tool Gun's tool and puts the Tool Gun in hand (fire it
+//                                5 Resize, 6 Properties): sets the Tool Gun's tool and puts the Tool Gun in hand (fire it
 //                                with `mdown left`); `om physgun 0` the Physics Gun tile, `om snap 2.5` (the step, 0 off) /
 //                                `om release 0|1` the pane's Snap / Release, `om object 10` an Objects tile,
 //                                `om npc 1` an NPCs tile (1 the Ghost),

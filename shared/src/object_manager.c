@@ -37,13 +37,15 @@ typedef struct {
     unsigned seq;    // ObjectManager.seq at the spawn (undo takes the newest spawn or edit)
 } OmThing;
 
-// An edit's undo step: the object's pose before a grab / drag / turn ({"p", "s", "r", "d"} of its record)
+// An edit's undo step: the object's record keys before a grab / drag / turn / field patch. A spawned
+// object's: the keys the step changed ({"p", "s", "r", "d"} always for a pose edit), null for a key
+// it did not have; a map object's: the whole overlay it had (om_overlay_of), or `original`.
 typedef struct {
     unsigned seq;
     int uid;     // the object
     int editor;  // the player who edited it (their undo)
     cJSON *pose;
-    unsigned char map;      // a map object's step (a pose change or a delete)
+    unsigned char map;      // a map object's step (a pose change, a field patch or a delete)
     unsigned char original; // map: it was as the map has it before this step (undo puts the map's Object back)
 } OmEdit;
 
@@ -52,6 +54,7 @@ typedef struct {
     int uid;
     Object *original;
     cJSON *record;      // the stand-in's record (its raw), NULL for a delete's placeholder
+    cJSON *overlay;     // the keys the stand-in has in place of the map record's (om_overlay_of), NULL for a delete
     unsigned char deleted;
 } OmMapEdit;
 
@@ -320,6 +323,7 @@ static const ObjectManagerToolInfo k_tools[OM_TOOL_COUNT] = {
     [OM_TOOL_INFO] = {"Info", "info", "Shows what you shoot: type, owner and uid", 0},
     [OM_TOOL_MOVE] = {"Move", "open_with", "Shoot an object to select it, drag an arrow to move it", 1, 1},
     [OM_TOOL_RESIZE] = {"Resize", "aspect_ratio", "Shoot an object to select it, drag a face (crouch: both)", 1, 1},
+    [OM_TOOL_PROPERTIES] = {"Properties", "tune", "Shoot an object to edit its map fields (I: the selection's)", 1, 1},
 };
 
 const ObjectManagerToolInfo *object_manager_tool_info(const int tool) {
@@ -845,6 +849,48 @@ static int om_replace(Game *game, ObjectManager *om, const int uid, cJSON *recor
 
 static const char *const k_pose_keys[4] = {"p", "s", "r", "d"};
 
+static int om_pose_key(const char *key) {
+    for (int k = 0; k < 4; k++) {
+        if (!strcmp(key, k_pose_keys[k])) return 1;
+    }
+    return 0;
+}
+
+// The overlay's keys on `record` in place: a value replaces the key, null removes it. `pose_rule`: a
+// pose key the overlay lacks goes too (a map edit overlay; patch 1 sent the pose keys a record had)
+static void om_record_overlay(cJSON *record, const cJSON *overlay, const int pose_rule) {
+    for (int k = 0; pose_rule && k < 4; k++) {
+        if (!cJSON_GetObjectItemCaseSensitive(overlay, k_pose_keys[k])) cJSON_DeleteItemFromObjectCaseSensitive(record, k_pose_keys[k]);
+    }
+    const cJSON *item;
+    cJSON_ArrayForEach(item, overlay) {
+        cJSON_DeleteItemFromObjectCaseSensitive(record, item->string);
+        if (!cJSON_IsNull(item)) cJSON_AddItemToObject(record, item->string, cJSON_Duplicate(item, 1));
+    }
+}
+
+// The keys of `from` that `to` has otherwise: to's value, null for a key `to` lacks; with `pose`
+// every pose key (to's, or null)
+static cJSON *om_keys_changed(const cJSON *from, const cJSON *to, const int pose) {
+    cJSON *out = cJSON_CreateObject();
+    if (!out) return NULL;
+    for (int k = 0; pose && k < 4; k++) {
+        const cJSON *v = cJSON_GetObjectItemCaseSensitive(to, k_pose_keys[k]);
+        cJSON_AddItemToObject(out, k_pose_keys[k], v ? cJSON_Duplicate(v, 1) : cJSON_CreateNull());
+    }
+    const cJSON *item;
+    cJSON_ArrayForEach(item, to) {
+        if (cJSON_GetObjectItemCaseSensitive(out, item->string)) continue;
+        const cJSON *was = cJSON_GetObjectItemCaseSensitive(from, item->string);
+        if (!was || !cJSON_Compare(was, item, 1)) cJSON_AddItemToObject(out, item->string, cJSON_Duplicate(item, 1));
+    }
+    cJSON_ArrayForEach(item, from) {
+        if (!cJSON_GetObjectItemCaseSensitive(to, item->string) && !cJSON_GetObjectItemCaseSensitive(out, item->string))
+            cJSON_AddItemToObject(out, item->string, cJSON_CreateNull());
+    }
+    return out;
+}
+
 // {"p", "s", "r", "d"} of a record (those it has)
 static cJSON *om_pose_keys(const cJSON *raw) {
     cJSON *pose = cJSON_CreateObject();
@@ -879,17 +925,39 @@ static void om_resolve_palette(const Map *map, cJSON *record) {
     cJSON_DeleteItemFromObject(record, "ci");
 }
 
-// The map's record of `original` with `pose` ({"p", "s", "r", "d"}) in place of its own
-static cJSON *om_map_record(const Map *map, const Object *original, const cJSON *pose) {
-    cJSON *record = cJSON_Duplicate(original->raw, 1);
-    if (!record) return NULL;
-    for (int k = 0; k < 4; k++) {
-        cJSON_DeleteItemFromObject(record, k_pose_keys[k]);
-        const cJSON *v = cJSON_GetObjectItem(pose, k_pose_keys[k]);
-        if (v) cJSON_AddItemToObject(record, k_pose_keys[k], cJSON_Duplicate(v, 1));
-    }
-    om_resolve_palette(map, record);
+cJSON *object_manager_record(const Game *game, const int uid) {
+    if (!object_manager_editable(game, uid)) return NULL;
+    cJSON *record = cJSON_Duplicate(game->map->objects[uid]->raw, 1);
+    if (record) om_resolve_palette(game->map, record);
     return record;
+}
+
+// The map's record of `original`, its palette colour resolved (what overlays apply to)
+static cJSON *om_map_base(const Map *map, const Object *original) {
+    cJSON *record = cJSON_Duplicate(original->raw, 1);
+    if (record) om_resolve_palette(map, record);
+    return record;
+}
+
+// The map's record of `original` with `overlay` ({"p", "s", "r", "d"} and edited keys) in place of its own
+static cJSON *om_map_record(const Map *map, const Object *original, const cJSON *overlay) {
+    cJSON *record = om_map_base(map, original);
+    if (record) om_record_overlay(record, overlay, 1);
+    return record;
+}
+
+// The overlay that makes the map's record of `original` into `next` (its palette colour resolved in
+// place first): the pose keys it has and each other key that differs (null: gone). A pose key the
+// overlay lacks goes (om_record_overlay's pose rule), so a pose edit's overlay is patch 1's.
+static cJSON *om_overlay_of(const Map *map, const Object *original, cJSON *next) {
+    om_resolve_palette(map, next);
+    cJSON *base = om_map_base(map, original);
+    cJSON *overlay = base ? om_keys_changed(base, next, 1) : NULL;
+    cJSON_Delete(base);
+    for (int k = 0; overlay && k < 4; k++) {
+        if (cJSON_IsNull(cJSON_GetObjectItemCaseSensitive(overlay, k_pose_keys[k]))) cJSON_DeleteItemFromObjectCaseSensitive(overlay, k_pose_keys[k]);
+    }
+    return overlay;
 }
 
 static Object *om_placeholder(const Object *original) {
@@ -937,16 +1005,18 @@ static void om_map_swap(Game *game, OmMapEdit *e, Object *next) {
     om_bots_replan(game);
 }
 
-// The edited pose `pose` (NULL: deleted) on map object `uid`. 1 done.
+// The overlay `pose` (NULL: deleted) on map object `uid`. 1 done.
 static int om_map_apply(Game *game, ObjectManager *om, const int uid, const cJSON *pose) {
     if (!object_manager_is_map_object(game, uid)) return 0;
     OmMapEdit *e = om_map_entry(om, uid);
     Object *original = e ? e->original : game->map->objects[uid];
     if (!original->raw) return 0;
     cJSON *record = pose ? om_map_record(game->map, original, pose) : NULL;
-    Object *next = pose ? (record ? map_object_from_json(game->map, record, !game->server) : NULL) : om_placeholder(original);
+    cJSON *overlay = pose ? cJSON_Duplicate(pose, 1) : NULL;
+    Object *next = pose ? (record && overlay ? map_object_from_json(game->map, record, !game->server) : NULL) : om_placeholder(original);
     if (!next) {
         cJSON_Delete(record);
+        cJSON_Delete(overlay);
         return 0;
     }
     next->map_edit = 1;
@@ -958,18 +1028,21 @@ static int om_map_apply(Game *game, ObjectManager *om, const int uid, const cJSO
             if (!grown) {
                 map_object_free(next);
                 cJSON_Delete(record);
+                cJSON_Delete(overlay);
                 return 0;
             }
             om->map_edits = grown;
             om->map_edit_capacity = cap;
         }
         e = &om->map_edits[om->map_edit_count++];
-        *e = (OmMapEdit) {uid, original, NULL, 0};
+        *e = (OmMapEdit) {uid, original, NULL, NULL, 0};
     }
     cJSON *old_record = e->record;
     om_map_swap(game, e, next); // (frees the previous stand-in, which pointed into old_record)
     cJSON_Delete(old_record);
+    cJSON_Delete(e->overlay);
     e->record = record;
+    e->overlay = overlay;
     e->deleted = !pose;
     return 1;
 }
@@ -980,6 +1053,7 @@ static int om_map_restore(Game *game, ObjectManager *om, const int uid) {
     if (!e) return 0;
     om_map_swap(game, e, e->original);
     cJSON_Delete(e->record);
+    cJSON_Delete(e->overlay);
     *e = om->map_edits[--om->map_edit_count];
     return 1;
 }
@@ -990,7 +1064,7 @@ void object_manager_restore_map(Game *game) {
     if (om) om->map_edit_count = 0;
 }
 
-// SPAWNED_OBJ of a map edit (authority): MAP_EDIT with the stand-in's pose keys, MAP_DELETE, MAP_RESTORE
+// SPAWNED_OBJ of a map edit (authority): MAP_EDIT with the stand-in's overlay, MAP_DELETE, MAP_RESTORE
 static void om_map_send(Game *game, const int target, const int uid, const int editor) {
     ObjectManager *om = game->object_manager;
     const OmMapEdit *e = om_map_entry(om, uid);
@@ -1000,9 +1074,7 @@ static void om_map_send(Game *game, const int target, const int uid, const int e
     memcpy(buffer, &head, sizeof(head));
     uint16_t length = sizeof(head);
     if (op == OM_SPAWNED_MAP_EDIT) {
-        cJSON *pose = om_pose_keys(e->record);
-        char *json = pose ? cJSON_PrintUnformatted(pose) : NULL;
-        cJSON_Delete(pose);
+        char *json = e->overlay ? cJSON_PrintUnformatted(e->overlay) : NULL;
         const size_t n = json ? strlen(json) : 0;
         if (!json || n > OM_RECORD_MAX) {
             free(json);
@@ -1071,26 +1143,11 @@ int object_manager_pick(const Game *game, const Player *player, const float pitc
     return 1;
 }
 
-// The object's pose `pose` in place, sent to everyone as OM_SPAWNED_UPDATE, or a map object's
-// stand-in as OM_SPAWNED_MAP_EDIT (authority)
-static int om_apply_pose(Game *game, ObjectManager *om, const int uid, const ObjectManagerPose *pose, const int editor) {
-    if (object_manager_is_map_object(game, uid)) {
-        cJSON *record = om_pose_record(game->map->objects[uid]->raw, pose);
-        cJSON *keys = record ? om_pose_keys(record) : NULL;
-        cJSON_Delete(record);
-        const int ok = keys && om_map_apply(game, om, uid, keys);
-        cJSON_Delete(keys);
-        if (ok) om_map_send(game, NET_TARGET_ALL, uid, editor);
-        return ok;
-    }
-    const Object *o = spawned_object(game, uid);
-    if (!o || !o->raw || !om_replace(game, om, uid, om_pose_record(o->raw, pose))) return 0;
-    spawned_send(game, NET_TARGET_ALL, OM_SPAWNED_UPDATE, uid, game->map->objects[uid]);
-    return 1;
-}
-
-// An undo step for `editor`'s edit of `uid`: the pose before it (a map object: or that it was the map's own)
-static void om_edit_push(const Game *game, ObjectManager *om, const int uid, const int editor, const cJSON *raw) {
+// An undo step for `editor`'s edit of `uid` (its record `raw` becoming `next`): a spawned object's
+// keys the edit changes as they are (`pose`: every pose key), a map object's overlay (or that it
+// was the map's own)
+static void om_edit_push(const Game *game, ObjectManager *om, const int uid, const int editor, const cJSON *raw, const cJSON *next,
+                         const int pose) {
     if (om->edit_count == OM_EDITS_MAX) { // the oldest goes
         cJSON_Delete(om->edits[0].pose);
         memmove(om->edits, om->edits + 1, (om->edit_count - 1) * sizeof(OmEdit));
@@ -1104,8 +1161,54 @@ static void om_edit_push(const Game *game, ObjectManager *om, const int uid, con
         om->edit_capacity = cap;
     }
     const int map = object_manager_is_map_object(game, uid);
-    om->edits[om->edit_count++] = (OmEdit) {++om->seq, uid, editor, om_pose_keys(raw), (unsigned char) map,
-                                            (unsigned char) (map && !object_manager_map_edited(game, uid))};
+    const OmMapEdit *e = map ? om_map_entry(om, uid) : NULL;
+    cJSON *before = map ? (e && e->overlay ? cJSON_Duplicate(e->overlay, 1) : NULL) : next ? om_keys_changed(next, raw, pose) : om_pose_keys(raw);
+    om->edits[om->edit_count++] = (OmEdit) {++om->seq, uid, editor, before, (unsigned char) map, (unsigned char) (map && !e)};
+}
+
+// `next` (a record; this call owns it) in place of object `uid`'s (authority): a spawned object
+// rebuilt and sent as OM_SPAWNED_UPDATE, a map object's stand-in as OM_SPAWNED_MAP_EDIT (the
+// overlay). With `step` an undo step of `editor` first (`pose`: a pose edit). OK, BOUNDS (the
+// record or overlay past OM_RECORD_MAX: SPAWNED_OBJ could not carry it), INVALID.
+static int om_apply_record(Game *game, ObjectManager *om, const int uid, cJSON *next, const int editor, const int step, const int pose) {
+    const Object *o = next ? game->map->objects[uid] : NULL;
+    if (!o || !o->raw) {
+        cJSON_Delete(next);
+        return OM_STATUS_INVALID;
+    }
+    const int map = object_manager_is_map_object(game, uid);
+    cJSON *overlay = NULL;
+    if (map) {
+        const OmMapEdit *e = om_map_entry(om, uid);
+        overlay = om_overlay_of(game->map, e ? e->original : o, next);
+    }
+    char *json = cJSON_PrintUnformatted(map ? overlay : next);
+    const int fits = json && strlen(json) <= OM_RECORD_MAX;
+    free(json);
+    if (!fits) {
+        cJSON_Delete(next);
+        cJSON_Delete(overlay);
+        return OM_STATUS_BOUNDS;
+    }
+    if (step) om_edit_push(game, om, uid, editor, o->raw, next, pose);
+    int ok;
+    if (map) {
+        cJSON_Delete(next);
+        ok = om_map_apply(game, om, uid, overlay);
+        cJSON_Delete(overlay);
+        if (ok) om_map_send(game, NET_TARGET_ALL, uid, editor);
+    } else {
+        ok = om_replace(game, om, uid, next);
+        if (ok) spawned_send(game, NET_TARGET_ALL, OM_SPAWNED_UPDATE, uid, game->map->objects[uid]);
+    }
+    if (!ok && step) cJSON_Delete(om->edits[--om->edit_count].pose);
+    return ok ? OM_STATUS_OK : OM_STATUS_INVALID;
+}
+
+// The object's pose `pose` in place (om_apply_record)
+static int om_apply_pose(Game *game, ObjectManager *om, const int uid, const ObjectManagerPose *pose, const int editor, const int step) {
+    const Object *o = game->map->objects[uid];
+    return om_apply_record(game, om, uid, o->raw ? om_pose_record(o->raw, pose) : NULL, editor, step, 1);
 }
 
 // The newest undo step of `editor` is an edit of `uid` (a drag's later edits add none)
@@ -1124,13 +1227,13 @@ static const OmThing *om_object_thing(const ObjectManager *om, const int uid) {
     return NULL;
 }
 
-// Undo of an edit: the saved "p" / "s" / "r" / "d" back on the object
+// Undo of an edit: the saved keys back on the object
 static int om_edit_undo(Game *game, ObjectManager *om, const size_t index) {
     const OmEdit e = om->edits[index];
     memmove(om->edits + index, om->edits + index + 1, (om->edit_count - index - 1) * sizeof(OmEdit));
     om->edit_count--;
-    if (e.map) { // the map's own Object back (nothing to do when someone's undo did already), or the pose before the step
-        const int changed = e.original ? om_map_restore(game, om, e.uid) : om_map_apply(game, om, e.uid, e.pose);
+    if (e.map) { // the map's own Object back (nothing to do when someone's undo did already), or the overlay before the step
+        const int changed = e.original ? om_map_restore(game, om, e.uid) : e.pose && om_map_apply(game, om, e.uid, e.pose);
         if (changed) om_map_send(game, NET_TARGET_ALL, e.uid, e.editor);
         cJSON_Delete(e.pose);
         return changed || e.original;
@@ -1139,12 +1242,7 @@ static int om_edit_undo(Game *game, ObjectManager *om, const size_t index) {
     int ok = 0;
     cJSON *record = o && o->raw && e.pose ? cJSON_Duplicate(o->raw, 1) : NULL;
     if (record) {
-        static const char *const keys[] = {"p", "s", "r", "d"};
-        for (int k = 0; k < 4; k++) {
-            cJSON_DeleteItemFromObject(record, keys[k]);
-            const cJSON *v = cJSON_GetObjectItem(e.pose, keys[k]);
-            if (v) cJSON_AddItemToObject(record, keys[k], cJSON_Duplicate(v, 1));
-        }
+        om_record_overlay(record, e.pose, 0);
         ok = om_replace(game, om, e.uid, record);
         if (ok) spawned_send(game, NET_TARGET_ALL, OM_SPAWNED_UPDATE, e.uid, game->map->objects[e.uid]);
     }
@@ -1616,7 +1714,7 @@ static int om_map_target(const Game *game, const int uid, const OmWho *who) {
 
 // Deletes map object `uid` as an undo step of `editor` (authority)
 static int om_map_delete(Game *game, ObjectManager *om, const int uid, const int editor) {
-    om_edit_push(game, om, uid, editor, game->map->objects[uid]->raw);
+    om_edit_push(game, om, uid, editor, game->map->objects[uid]->raw, NULL, 0);
     if (!om_map_apply(game, om, uid, NULL)) {
         cJSON_Delete(om->edits[--om->edit_count].pose);
         return OM_STATUS_INVALID;
@@ -1678,10 +1776,7 @@ static int tool_rotator(Game *game, Player *player, const NetSpawnReqPacket *req
     ObjectManagerPose pose, turned;
     if (object_manager_pose(game, old, &pose)) { // in place, an undo step (zombies machines below: a new uid)
         object_manager_pose_turn(&pose, 1, &turned);
-        om_edit_push(game, om, old, player->uid, game->map->objects[old]->raw);
-        if (om_apply_pose(game, om, old, &turned, player->uid)) return OM_STATUS_OK;
-        cJSON_Delete(om->edits[--om->edit_count].pose);
-        return OM_STATUS_INVALID;
+        return om_apply_pose(game, om, old, &turned, player->uid, 1);
     }
     if (map_uid >= 0) return OM_STATUS_UNSUPPORTED;
     cJSON *record = cJSON_Duplicate(spawned_object(game, old)->raw, 1);
@@ -1889,6 +1984,36 @@ static int om_undo(Game *game, Player *player, const int any) {
 
 // ---------------------------------------------------------------- edits (authority)
 
+// May `player` edit object `uid` (OM_CAP_SPAWN checked): a map object with OM_CAP_MAP (devs and the
+// host), a spawned one of theirs (any for devs and the host, Remove's rule). OK or the refusal.
+static int om_edit_target(Game *game, const Player *player, const int uid, const OmWho *who) {
+    const ObjectManager *om = game->object_manager;
+    if (object_manager_is_map_object(game, uid)) {
+        const int status = om_map_target(game, uid, who);
+        return status != OM_STATUS_OK ? status : object_manager_editable(game, uid) ? OM_STATUS_OK : OM_STATUS_INVALID;
+    }
+    const OmThing *t = om ? om_object_thing(om, uid) : NULL;
+    if (!t || !object_manager_editable(game, uid)) return spawned_object(game, uid) ? OM_STATUS_UNSUPPORTED : OM_STATUS_NOTHING;
+    return om_may_touch(t, player, who) ? OM_STATUS_OK : OM_STATUS_DENIED;
+}
+
+// The edited box `to` (from `from`) within the editor's reach and out of every player: OK, BOUNDS, BLOCKED
+static int om_pose_allowed(const Game *game, const Player *player, const Object *o, const ObjectManagerPose *from, const ObjectManagerPose *to) {
+    const vec3 eye = {player->position.x, player->position.y + player->height - game_constants.camera_height, player->position.z};
+    // the box's nearest point (a big map object's centre may well be far away)
+    const vec3 c = {fmaxf(fabsf(to->position.x - eye.x) - to->size.x * 0.5f, 0.0f),
+                    eye.y < to->position.y ? to->position.y - eye.y : fmaxf(eye.y - (to->position.y + to->size.y), 0.0f),
+                    fmaxf(fabsf(to->position.z - eye.z) - to->size.z * 0.5f, 0.0f)};
+    if (sqrtf(c.x * c.x + c.y * c.y + c.z * c.z) > OM_EDIT_RANGE) return OM_STATUS_BOUNDS;
+    const int solid = o->collision_type != COLLISION_TYPE_NONE && bot_object_blocks_player(o); // (pads, zones, triggers: walk-through)
+    for (size_t i = 0; solid && i < game->player_count; i++) { // never into a player (one already inside may stay)
+        const Player *p = game->players[i];
+        if (!p || !p->active) continue;
+        if (om_box_hits_player(p, to->position, to->size) && !om_box_hits_player(p, from->position, from->size)) return OM_STATUS_BLOCKED;
+    }
+    return OM_STATUS_OK;
+}
+
 void object_manager_edit(Game *game, Player *player, const NetSpawnEditPacket *edit, const ObjectManagerPerms *perms,
                          NetSpawnResultPacket *out) {
     memset(out, 0, sizeof(*out));
@@ -1906,6 +2031,10 @@ void object_manager_edit(Game *game, Player *player, const NetSpawnEditPacket *e
         out->status = OM_STATUS_DENIED;
         return;
     }
+    if (edit->flags & OM_EDIT_FIELDS) { // a field patch comes with its JSON (object_manager_edit_fields)
+        out->status = OM_STATUS_INVALID;
+        return;
+    }
     // its own clock: a drag sends up to 10 edits a second, the request bucket stays for the rest
     const float now = game->now;
     if (player->om_edit_at > 0.0f && now >= player->om_edit_at && now - player->om_edit_at < OM_EDIT_INTERVAL) {
@@ -1921,23 +2050,10 @@ void object_manager_edit(Game *game, Player *player, const NetSpawnEditPacket *e
     const int uid = edit->uid;
     ObjectManagerPose from;
     const OmWho who = {caps, perms && perms->host};
-    const int map = object_manager_is_map_object(game, uid);
-    if (map) { // one of the map's own: devs and the host only
-        const int status = om_map_target(game, uid, &who);
-        if (status != OM_STATUS_OK || !om || !object_manager_pose(game, uid, &from)) {
-            out->status = (uint8_t) (status != OM_STATUS_OK ? status : OM_STATUS_INVALID);
-            return;
-        }
-    } else {
-        const OmThing *t = om ? om_object_thing(om, uid) : NULL;
-        if (!om || !t || !object_manager_pose(game, uid, &from)) {
-            out->status = spawned_object(game, uid) ? OM_STATUS_UNSUPPORTED : OM_STATUS_NOTHING;
-            return;
-        }
-        if (!om_may_touch(t, player, &who)) {
-            out->status = OM_STATUS_DENIED;
-            return;
-        }
+    const int target = om ? om_edit_target(game, player, uid, &who) : OM_STATUS_INVALID;
+    if (target != OM_STATUS_OK || !object_manager_pose(game, uid, &from)) {
+        out->status = (uint8_t) (target != OM_STATUS_OK ? target : OM_STATUS_INVALID);
+        return;
     }
     ObjectManagerPose to = from;
     to.position = (vec3) {edit->position[0], edit->position[1], edit->position[2]};
@@ -1965,27 +2081,74 @@ void object_manager_edit(Game *game, Player *player, const NetSpawnEditPacket *e
         if (om_ray(game, (vec3) {to.position.x, to.position.y + 0.1f, to.position.z}, down, &hit, &object)) to.position.y = to.position.y + 0.1f + down.y * hit;
         o->collision_type = (unsigned char) collision;
     }
-    const vec3 eye = {player->position.x, player->position.y + player->height - game_constants.camera_height, player->position.z};
-    // the box's nearest point (a big map object's centre may well be far away)
-    const vec3 c = {fmaxf(fabsf(to.position.x - eye.x) - to.size.x * 0.5f, 0.0f),
-                    eye.y < to.position.y ? to.position.y - eye.y : fmaxf(eye.y - (to.position.y + to.size.y), 0.0f),
-                    fmaxf(fabsf(to.position.z - eye.z) - to.size.z * 0.5f, 0.0f)};
-    if (sqrtf(c.x * c.x + c.y * c.y + c.z * c.z) > OM_EDIT_RANGE) {
-        out->status = OM_STATUS_BOUNDS;
+    const int where = om_pose_allowed(game, player, o, &from, &to);
+    if (where != OM_STATUS_OK) {
+        out->status = (uint8_t) where;
         return;
     }
-    const int solid = o->collision_type != COLLISION_TYPE_NONE && bot_object_blocks_player(o); // (pads, zones, triggers: walk-through)
-    for (size_t i = 0; solid && i < game->player_count; i++) { // never into a player (one already inside may stay)
-        const Player *p = game->players[i];
-        if (!p || !p->active) continue;
-        if (om_box_hits_player(p, to.position, to.size) && !om_box_hits_player(p, from.position, from.size)) {
-            out->status = OM_STATUS_BLOCKED;
-            return;
-        }
+    player->om_edit_at = now > 0.0f ? now : 1e-6f;
+    const int step = (edit->flags & OM_EDIT_BEGIN) || !om_edit_open(om, uid, player->uid);
+    out->status = (uint8_t) om_apply_pose(game, om, uid, &to, player->uid, step);
+}
+
+// The Properties tool's field patch (OM_EDIT_FIELDS)
+static int om_edit_fields(Game *game, Player *player, const NetSpawnEditPacket *edit, const char *json, const size_t length, const OmWho *who) {
+    if (edit->req.item != OM_EDIT_SOURCE_BTOOLS || !(edit->flags & OM_EDIT_FIELDS)) return OM_STATUS_INVALID;
+    if (!json || length < 3 || length > OM_FIELDS_MAX + 1 || json[length - 1] != 0 || strlen(json) != length - 1) return OM_STATUS_INVALID;
+    const float now = game->now;
+    if (player->om_edit_at > 0.0f && now >= player->om_edit_at && now - player->om_edit_at < OM_EDIT_INTERVAL) return OM_STATUS_RATE;
+    if (!player->weapon || !player->weapon->kn_tool) return OM_STATUS_NO_TOOL;
+    ObjectManager *om = om_of(game);
+    const int uid = edit->uid;
+    const int target = om ? om_edit_target(game, player, uid, who) : OM_STATUS_INVALID;
+    if (target != OM_STATUS_OK) return target;
+    const Object *o = game->map->objects[uid];
+    ObjectManagerPose from, to;
+    om_pose_of(o, &from);
+    cJSON *patch = cJSON_Parse(json);
+    cJSON *base = patch ? object_manager_record(game, uid) : NULL; // (a map object's "ci" resolved: a colour edit replaces it)
+    cJSON *next = base ? cJSON_Duplicate(base, 1) : NULL;
+    if (!next) {
+        cJSON_Delete(patch);
+        cJSON_Delete(base);
+        return OM_STATUS_INVALID;
+    }
+    int pose = 0;
+    int status = object_manager_fields_patch(next, o->prefab, patch, &pose);
+    cJSON_Delete(patch);
+    // the pose the patch leaves: the reach (the box as it is when the patch moves nothing) and no box into a player
+    to = from;
+    const cJSON *p = cJSON_GetObjectItem(next, "p"), *s = cJSON_GetObjectItem(next, "s");
+    for (int k = 0; pose && k < 3; k++) {
+        if (cJSON_GetArraySize(p) >= 3) (&to.position.x)[k] = (float) cJSON_GetNumberValue(cJSON_GetArrayItem(p, k));
+        if (cJSON_GetArraySize(s) >= 3) (&to.size.x)[k] = (float) cJSON_GetNumberValue(cJSON_GetArrayItem(s, k));
+    }
+    if (status == OM_STATUS_OK) status = om_pose_allowed(game, player, o, &from, &to);
+    const int same = cJSON_Compare(next, base, 1);
+    cJSON_Delete(base);
+    if (status != OM_STATUS_OK || same) { // (nothing changed: no undo step, nothing sent)
+        cJSON_Delete(next);
+        return status;
     }
     player->om_edit_at = now > 0.0f ? now : 1e-6f;
-    if ((edit->flags & OM_EDIT_BEGIN) || !om_edit_open(om, uid, player->uid)) om_edit_push(game, om, uid, player->uid, o->raw);
-    if (!om_apply_pose(game, om, uid, &to, player->uid)) out->status = OM_STATUS_INVALID;
+    return om_apply_record(game, om, uid, next, player->uid, 1, pose);
+}
+
+void object_manager_edit_fields(Game *game, Player *player, const NetSpawnEditPacket *edit, const char *json, const size_t length,
+                                const ObjectManagerPerms *perms, NetSpawnResultPacket *out) {
+    memset(out, 0, sizeof(*out));
+    const unsigned int caps = object_manager_caps(game, perms);
+    out->action = OM_ACTION_EDIT;
+    out->item = edit->req.item;
+    out->caps = (uint8_t) caps;
+    out->extra_max = PLAYER_EXTRA_WEAPONS_MAX;
+    out->limit = OM_FIELDS_ANSWER;
+    if (!player || !player->active || !game_is_authority(game) || !game->map) out->status = OM_STATUS_DEAD;
+    else if (!(caps & OM_CAP_SPAWN)) out->status = OM_STATUS_DENIED;
+    else {
+        const OmWho who = {caps, perms && perms->host};
+        out->status = (uint8_t) om_edit_fields(game, player, edit, json, length, &who);
+    }
 }
 
 void object_manager_request(Game *game, Player *player, const NetSpawnReqPacket *req, const ObjectManagerPerms *perms,

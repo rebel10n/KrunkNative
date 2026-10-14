@@ -242,6 +242,8 @@ static const V7Bind V7_BINDS[] = {
     {"omSnapUp", -1, "omSnapUpKey", 33, -1, UI_CONTROL_OM_SNAP_UP},
     // KrunkNative addition: Third Person, unbound (no free v7 key; bind one or use the console)
     {"thirdPerson", -1, "thirdPersonKey", -1, -1, UI_CONTROL_THIRD_PERSON},
+    // KrunkNative addition: the Tool Gun's Properties key (I, 73): the selection's fields in the window
+    {"omProps", -1, "omPropsKey", 73, -1, UI_CONTROL_OM_PROPS},
     {"streak", 0, "18", 49, -1, UI_CONTROL_STREAK0},
     {"streak", 1, "19", 50, -1, UI_CONTROL_STREAK0 + 1},
     {"streak", 2, "20", 51, -1, UI_CONTROL_STREAK0 + 2},
@@ -310,6 +312,7 @@ static const ControlRow TAB_GENERAL[] = {
     {"Physics Gun Rotate (held)", "omRotate", -1, 0, "Sandbox"},
     {"Tool Gun Snap Down", "omSnapDown", -1, 0, "Sandbox"},
     {"Tool Gun Snap Up", "omSnapUp", -1, 0, "Sandbox"},
+    {"Tool Gun Properties", "omProps", -1, 0, "Sandbox"},
     {"Third Person", "thirdPerson", -1, 0, "Camera"},
 };
 static const ControlRow TAB_CHAT[] = {
@@ -1241,6 +1244,7 @@ static void press_button(Client *client, const int code) {
         om_build_step_snap(bind_is(UI_CONTROL_OM_SNAP_UP, code) ? 1 : -1);
         object_manager_ui_snap_changed();
     }
+    if (held && held->kn_tool && bind_is(UI_CONTROL_OM_PROPS, code) && !om_build_props_key(client)) ui_notify("Nothing to edit at the crosshair");
     for (int i = 0; i < 5; i++) { // v7.1.4 streak loadout: slots 0-2 (callInStreak); 3-4 are v3 leftovers
         if (bind_is(UI_CONTROL_STREAK0 + i, code)) {
             if (i < STREAK_SLOTS) combat_call_in_streak(client, i);

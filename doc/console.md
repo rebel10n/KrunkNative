@@ -307,11 +307,13 @@ spawn right; doc/v7/decisions.md "Physics Gun", "Building tools"). They have no 
 of their own (`give physgun` / `give toolgun` work too): the Physics Gun's rotate key is "Physics Gun
 Rotate (held)" (E) under Sandbox in Change Controls, the grid step is the Tools pane's Snap field,
 PageDown / PageUp ("Tool Gun Snap Down / Up") or `tool_snap`, and the Physics Gun's Release is a
-row of the Tools pane. Devs and the host change the map's own objects with both guns too
-(doc/v7/decisions.md "Map edits").
+row of the Tools pane. The Tool Gun's Properties tool (the pane's 7th tile) opens an object's map
+fields in the window; the Properties key (I, "Tool Gun Properties" under Sandbox) does the same for
+the selection, else for what the crosshair is on. Devs and the host change the map's own objects
+with both guns too (doc/v7/decisions.md "Map edits", "Building tools").
 
-Tests: `server/tests/object_manager_test.c` (test_give_drop, test_public_refusals, test_edits, test_map_edits) and
-`server/tests/object_manager_e2e.py` parts 4 to 6.
+Tests: `server/tests/object_manager_test.c` (test_give_drop, test_public_refusals, test_edits, test_map_edits,
+test_fields_table, test_field_edits) and `server/tests/object_manager_e2e.py` parts 4 to 6b.
 
 Not chat commands, so not ported here: the `pnh`, `prmA`, `noclip`/`tp` packets,
 `clearLog`, and the `tmc` terminal message (map terminals; see the open items).

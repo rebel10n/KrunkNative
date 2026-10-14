@@ -386,7 +386,9 @@ enum {
     // KrunkNative addition: Reload Game (F5, cont_gameReloadKey): the full reload (game_reload.h),
     // the console's `reload`
     UI_CONTROL_GAME_RELOAD = 48,
-    UI_CONTROL_COUNT = 49
+    // KrunkNative addition: the Tool Gun's Properties key (I, cont_omPropsKey): the selection's fields
+    UI_CONTROL_OM_PROPS = 49,
+    UI_CONTROL_COUNT = 50
 };
 
 // Input-related settings ClientSettings does not carry (written by client_apply_setting).
@@ -524,6 +526,10 @@ int  om_build_grabbing(void);
 void om_build_refused(int status);               // a refused edit: the grab / drag ends
 void om_build_reset(void);                       // a new map / connection
 int  om_build_handle_look(Client*, int index, float *pitch, float *yaw); // input scripts: the look onto a handle
+int  om_build_props_key(Client*);                // the Properties key: the selection's (or the crosshair's) fields; 1 opened
+int  om_build_selection(void);                   // the btools selection's uid, -1 none
+void object_manager_ui_open_props(Client*, int uid); // the window's Properties panel on object `uid` (opened over the game)
+int  object_manager_ui_props_uid(void);          // the object the Properties panel shows, -1 none
 void object_manager_ui_pick_entry(int tab, int item); // an Objects / Entities / NPCs tile click without the window
 // END object_manager_ui block
 

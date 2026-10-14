@@ -23,6 +23,14 @@
 // the Physics Gun's let-go (Freeze / Drop). Devs and the host (OM_CAP_MAP) change the map's own
 // objects with both guns as well; the pane says so.
 //
+// Properties (the Tool Gun's Properties tool, or its key on the selection: om_build.c): the window
+// opens over the game with the object's map fields in place of the grid (#knOmPropsPane): the
+// fields of object_manager_field that apply to its prefab, grouped as the map editor's inspector,
+// with the values the game reads from the client's copy of its record. A change (Enter / leaving a
+// field, a switch, a select) goes out at once as one field patch (OM_EDIT_FIELDS, one undo step);
+// the authority's answer and every SPAWNED_OBJ of that object redraw the values. Back or a tab goes
+// back to the grid.
+//
 // Console: `give` / `drop` are server commands (shared/src/chat_commands.c); a `give` of a weapon
 // to yourself equips it like the Weapons tab's left click (object_manager_ui_chat_sent).
 //
@@ -39,6 +47,8 @@
 #include <spectate.h> // client_find_player
 #include <weapons.h>
 #include <GLFW/glfw3.h> // glfwGetTime: the status line's age
+#include <prefabs.h> // g_prefab_textures, prefab_name (the Properties panel)
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -74,7 +84,9 @@ static struct {
     int shot_slot;
     float shot_reload;
     char hud_text[48];    // what #knToolHud shows, "" hidden
-} g_om = {.tab = OM_TAB_WEAPONS, .caps = -1, .pending_equip = -1};
+    int props_uid;        // the object the Properties panel shows, -1 none (the grid)
+    char props_sent[48];  // the label of the field patch on its way
+} g_om = {.tab = OM_TAB_WEAPONS, .caps = -1, .pending_equip = -1, .props_uid = -1};
 
 static Client *om_client(void) { return menu_ui()->client; }
 
@@ -250,6 +262,7 @@ static void om_grid_html(char **buf, size_t *len, size_t *cap) {
 }
 
 static const char *om_hint(void) {
+    if (g_om.props_uid >= 0) return "Enter or leave a field to apply it: each change is one undo step (U) | Back: the grid";
     switch (g_om.tab) {
         case OM_TAB_WEAPONS: return "Left click: add to your loadout (again: take it out) | Right click: drop it at your crosshair";
         case OM_TAB_OBJECTS: return "Left click: place it on the surface at your crosshair, facing you | U: undo, Delete: remove at the crosshair";
@@ -324,11 +337,152 @@ static void om_clear_label(char *out, const size_t size, const Player *me) {
     snprintf(out, size, "Clear Extras (%d/%d)", me ? me->extra_weapon_count : 0, PLAYER_EXTRA_WEAPONS_MAX);
 }
 
+// ---------------------------------------------------------------- the Properties panel
+
+// The object the panel shows (the client's copy), NULL when it is gone
+static const Object *om_props_object(void) {
+    const Client *client = om_client();
+    const Game *game = client ? &client->game : NULL;
+    if (!game || !game->map || g_om.props_uid < 0 || (size_t) g_om.props_uid >= game->map->object_count) return NULL;
+    const Object *o = game->map->objects[g_om.props_uid];
+    return o->raw && object_manager_editable(game, g_om.props_uid) ? o : NULL;
+}
+
+static void om_title_case(char *out, const size_t size, const char *name) {
+    size_t n = 0;
+    int start = 1;
+    for (const char *c = name ? name : "?"; *c && n + 1 < size; c++) {
+        const char ch = *c == '_' ? ' ' : *c;
+        out[n++] = (char) (start ? ch : (ch >= 'A' && ch <= 'Z' ? ch + 32 : ch));
+        start = ch == ' ';
+    }
+    out[n] = 0;
+}
+
+static void om_number_text(char *out, const size_t size, const double v) {
+    snprintf(out, size, "%.10g", round(v * 1000.0) / 1000.0);
+}
+
+static void om_prop_input(char **buf, size_t *len, size_t *cap, const int index, const int axis, const char *value) {
+    char esc[64];
+    om_escape(esc, sizeof(esc), value);
+    if (axis < 0)
+        om_append(buf, len, cap, "<input id='knOmF%d' class='knOmPropIn' type='text' maxlength='12' value='%s' onchange='knOmField(%d,this.value)'/>",
+                  index, esc, index);
+    else
+        om_append(buf, len, cap, "<input id='knOmF%d_%d' class='knOmPropIn knOmPropVec' type='text' maxlength='10' value='%s' "
+                  "onchange='knOmFieldVec(%d,%d,this.value)'/>", index, axis, esc, index, axis);
+}
+
+// One field's row: the inspector's label, the control, the range
+static void om_prop_row(char **buf, size_t *len, size_t *cap, const int index, const ObjectManagerField *f, const int prefab, const cJSON *value) {
+    om_append(buf, len, cap, "<div class='knOmProp'><span class='knOmPropName'>%s</span><span class='knOmPropVal'>", f->label);
+    float mn, mx;
+    object_manager_field_range(f, prefab, &mn, &mx);
+    char text[48];
+    switch (f->kind) {
+        case OM_FIELD_ON:
+        case OM_FIELD_OFF: {
+            const int on = cJSON_IsTrue(value);
+            om_append(buf, len, cap, "<span id='knOmF%d_1' class='knOmOptBtn%s' onclick='knOmField(%d,1)'>On</span>"
+                      "<span id='knOmF%d_0' class='knOmOptBtn%s' onclick='knOmField(%d,0)'>Off</span>",
+                      index, on ? " knOmOptA" : "", index, index, on ? "" : " knOmOptA", index);
+            break;
+        }
+        case OM_FIELD_SELECT:
+        case OM_FIELD_TEXTURE: {
+            const int current = (int) cJSON_GetNumberValue(value);
+            om_append(buf, len, cap, "<select id='knOmF%d' class='knOmPropSel' onchange='knOmField(%d,this.value)'>", index, index);
+            for (int i = (int) mn; i <= (int) mx; i++) {
+                const char *label = f->kind == OM_FIELD_TEXTURE ? (g_prefab_textures[i].alias ? g_prefab_textures[i].alias : g_prefab_textures[i].name)
+                                                                : object_manager_field_option(f, i);
+                char name[64], esc[96];
+                if (f->kind == OM_FIELD_TEXTURE) om_title_case(name, sizeof(name), label);
+                else snprintf(name, sizeof(name), "%s", label ? label : "?");
+                om_escape(esc, sizeof(esc), name);
+                om_append(buf, len, cap, "<option value='%d'%s>%s</option>", i, i == current ? " selected" : "", esc);
+            }
+            om_append(buf, len, cap, "</select>");
+            break;
+        }
+        case OM_FIELD_COLOR: {
+            const char *c = cJSON_GetStringValue(value);
+            char esc[32];
+            om_escape(esc, sizeof(esc), c ? c : "#ffffff");
+            om_append(buf, len, cap, "<span class='knOmSwatch' style='background:%s'></span>", esc);
+            om_prop_input(buf, len, cap, index, -1, esc);
+            break;
+        }
+        case OM_FIELD_VEC3:
+            for (int k = 0; k < 3; k++) {
+                om_number_text(text, sizeof(text), cJSON_GetNumberValue(cJSON_GetArrayItem(value, k)));
+                om_prop_input(buf, len, cap, index, k, text);
+            }
+            break;
+        default:
+            om_number_text(text, sizeof(text), cJSON_GetNumberValue(value));
+            om_prop_input(buf, len, cap, index, -1, text);
+            break;
+    }
+    if (f->kind == OM_FIELD_NUM || f->kind == OM_FIELD_NUMN || f->kind == OM_FIELD_INT) {
+        char lo[24], hi[24];
+        om_number_text(lo, sizeof(lo), mn);
+        om_number_text(hi, sizeof(hi), mx);
+        om_append(buf, len, cap, "<span class='knOmPropRange'>%s to %s</span>", lo, hi);
+    } else if (f->kind == OM_FIELD_VEC3 && !strcmp(f->key, "r")) {
+        om_append(buf, len, cap, "<span class='knOmPropRange'>radians</span>");
+    }
+    om_append(buf, len, cap, "</span></div>");
+}
+
+static void om_props_html(char **buf, size_t *len, size_t *cap) {
+    const Client *client = om_client();
+    const Object *o = om_props_object();
+    om_append(buf, len, cap, "<div id='knOmPropsPane' class='knOmProps'><div class='knOmPropsHead'>");
+    if (!o) {
+        om_append(buf, len, cap, "<span class='knOmPropsTitle'>Gone</span><span class='knOmPropsSub'>Nothing to edit: the object went or may not change</span>"
+                                 "<span id='knOmPropsBack' class='knOmOptBtn' onclick='knOmPropsClose()'>Back</span></div></div>");
+        return;
+    }
+    char title[64];
+    om_title_case(title, sizeof(title), prefab_name(o->prefab));
+    const int map = object_manager_is_map_object(&client->game, g_om.props_uid);
+    char owner[96] = "map object";
+    if (!map) {
+        const Player *who = client_find_player((Client *) client, o->spawn_owner);
+        char esc[64];
+        om_escape(esc, sizeof(esc), who ? who->name : "?");
+        snprintf(owner, sizeof(owner), "spawned by %s", esc);
+    }
+    om_append(buf, len, cap, "<span class='knOmPropsTitle'>%s</span><span class='knOmPropsSub'>#%d, %s</span>"
+                             "<span id='knOmPropsBack' class='knOmOptBtn' onclick='knOmPropsClose()'>Back</span></div><div id='knOmPropsList' class='knOmPropsList'>",
+              title, g_om.props_uid, owner);
+    const char *section = NULL;
+    int shown = 0;
+    cJSON *record = object_manager_record(&client->game, g_om.props_uid); // (the map's palette colour resolved)
+    for (int i = 0; record && i < object_manager_field_count(); i++) {
+        const ObjectManagerField *f = object_manager_field(i);
+        cJSON *value = object_manager_field_value(record, o->prefab, f);
+        if (!value) continue;
+        if (!section || strcmp(section, f->section)) {
+            section = f->section;
+            om_append(buf, len, cap, "<div class='knOmPropSec'>%s</div>", section);
+        }
+        om_prop_row(buf, len, cap, i, f, o->prefab, value);
+        cJSON_Delete(value);
+        shown++;
+    }
+    cJSON_Delete(record);
+    if (!shown) om_append(buf, len, cap, "<div class='knOmEmpty'>No fields to edit</div>");
+    om_append(buf, len, cap, "</div></div>");
+}
+
 static char *om_body_html(void) {
     char *buf = NULL;
     size_t len = 0, cap = 0;
     om_status_html(&buf, &len, &cap);
-    om_grid_html(&buf, &len, &cap);
+    if (g_om.props_uid >= 0) om_props_html(&buf, &len, &cap);
+    else om_grid_html(&buf, &len, &cap);
     return buf;
 }
 
@@ -380,6 +534,20 @@ static void om_refresh_body(void) {
     free(html);
     const HtmlElem grid = html_dom_by_id("knOmGrid");
     if (grid) html_dom_set_scroll(grid, 0.0f, 0.0f);
+}
+
+// The Properties panel's values again (an answer, an edit of that object): its list keeps the scroll
+static void om_props_refresh(void) {
+    if (!om_window_open() || g_om.props_uid < 0) return;
+    const HtmlElem body = html_dom_by_id("knOmBody"), list = html_dom_by_id("knOmPropsList");
+    if (!body) return;
+    HtmlScroll scroll = {0};
+    const int had = list && html_dom_get_scroll(list, &scroll);
+    char *html = om_body_html();
+    html_dom_set_html(body, html ? html : "");
+    free(html);
+    const HtmlElem again = html_dom_by_id("knOmPropsList");
+    if (had && again) html_dom_set_scroll(again, scroll.left, scroll.top);
 }
 
 // The status line in place (a result, the caps): the grid keeps its scroll position.
@@ -471,6 +639,7 @@ static void om_show(void *user) {
 
 void object_manager_ui_toggle(Client *client) {
     if (om_window_open()) {
+        g_om.props_uid = -1; // (F1 again: the grid)
         if (g_om.from_game && client && client->me) menu_request_open(0); // back to the game: pointer locked again
         else menu_show_window(MENU_WINDOW_NONE, 0);
         g_om.from_game = 0;
@@ -492,12 +661,123 @@ int object_manager_ui_escape(void) {
     return 0;
 #endif
     Client *client = om_client();
+    g_om.props_uid = -1;
     if (g_om.from_game && client && client->me) {
         g_om.from_game = 0;
         menu_request_open(0);
         return 1;
     }
     return 0;
+}
+
+void object_manager_ui_open_props(Client *client, const int uid) {
+    g_om.props_uid = uid;
+    g_om.props_sent[0] = 0;
+    if (om_window_open()) {
+        menu_show_window(OBJECT_MANAGER_WINDOW, 1);
+        return;
+    }
+    g_om.from_game = ui_controls_enabled(client);
+    if (g_om.from_game) { // over the game: the pointer freed, as F1
+        ui_controls_reset_keys();
+        client_set_menu_open(client, 1);
+    }
+    html_timer_add(0.0, om_show, NULL);
+}
+
+int object_manager_ui_props_uid(void) { return g_om.props_uid; }
+
+// A field patch for the panel's object (OM_ACTION_EDIT + OM_EDIT_FIELDS): the Tool Gun's
+static void om_send_fields(const ObjectManagerField *f, cJSON *patch) {
+    Client *client = om_client();
+    const Player *me = client ? client->me : NULL;
+    char *json = patch ? cJSON_PrintUnformatted(patch) : NULL;
+    cJSON_Delete(patch);
+    const size_t n = json ? strlen(json) + 1 : 0;
+    if (!me || !om_server_ok(client) || !n || n > OM_FIELDS_MAX + 1) {
+        free(json);
+        om_set_status(!me ? "Join a game to edit objects" : "This server has no Object Manager", 1);
+        return;
+    }
+    uint8_t buffer[sizeof(NetSpawnEditPacket) + OM_FIELDS_MAX + 1];
+    NetSpawnEditPacket e;
+    memset(&e, 0, sizeof(e));
+    e.req = (NetSpawnReqPacket) {.action = OM_ACTION_EDIT, .item = OM_EDIT_SOURCE_BTOOLS, .pitch = me->direction.x, .yaw = me->direction.y};
+    e.uid = g_om.props_uid;
+    e.flags = OM_EDIT_FIELDS;
+    memcpy(buffer, &e, sizeof(e));
+    memcpy(buffer + sizeof(e), json, n);
+    free(json);
+    client_net_send(client, NET_PACKET_SPAWN_REQ, buffer, (uint16_t) (sizeof(e) + n));
+    snprintf(g_om.props_sent, sizeof(g_om.props_sent), "%s", f->label);
+}
+
+static const char *arg_text(const HtmlEvent *ev, const HtmlArg *args, const int argc, const int i, char *buf, const size_t size) {
+    buf[0] = 0;
+    if (i < argc && args[i].kind == HTML_ARG_NUM) snprintf(buf, size, "%.10g", args[i].num);
+    else if (i < argc && (args[i].kind == HTML_ARG_STR || args[i].kind == HTML_ARG_THIS_VALUE) && args[i].str) snprintf(buf, size, "%s", args[i].str);
+    else if (ev && ev->target) html_dom_get_value(ev->target, buf, size);
+    return buf;
+}
+
+// knOmField(index, value) / knOmFieldVec(index, axis, value): one field of the panel changed
+static void om_field_changed(const int index, const int axis, const char *text) {
+    const ObjectManagerField *f = object_manager_field(index);
+    const Object *o = om_props_object();
+    if (!f || !o || !object_manager_field_applies(f, o->prefab)) return;
+    float mn, mx;
+    object_manager_field_range(f, o->prefab, &mn, &mx);
+    while (*text == ' ') text++;
+    cJSON *patch = cJSON_CreateObject();
+    char *end = NULL;
+    const double v = strtod(text, &end);
+    const int number = end != text && isfinite(v);
+    switch (f->kind) {
+        case OM_FIELD_ON:
+        case OM_FIELD_OFF:
+            cJSON_AddBoolToObject(patch, f->key, number && v != 0.0);
+            break;
+        case OM_FIELD_COLOR: {
+            char colour[8];
+            snprintf(colour, sizeof(colour), "%s%.6s", text[0] == '#' ? "" : "#", text);
+            int ok = strlen(colour) == 7;
+            for (int i = 1; ok && i < 7; i++) ok = (colour[i] >= '0' && colour[i] <= '9') || ((colour[i] | 32) >= 'a' && (colour[i] | 32) <= 'f');
+            if (!ok) {
+                cJSON_Delete(patch);
+                om_set_status("Colours are #rrggbb", 1);
+                om_props_refresh();
+                return;
+            }
+            cJSON_AddStringToObject(patch, f->key, colour);
+            break;
+        }
+        case OM_FIELD_VEC3: {
+            cJSON *record = object_manager_record(&om_client()->game, g_om.props_uid);
+            cJSON *now = object_manager_field_value(record, o->prefab, f);
+            cJSON_Delete(record);
+            if (!number || axis < 0 || axis > 2 || !now) {
+                cJSON_Delete(now);
+                cJSON_Delete(patch);
+                om_props_refresh();
+                return;
+            }
+            cJSON_ReplaceItemInArray(now, axis, cJSON_CreateNumber(!strcmp(f->key, "s") ? fmax(v, OM_EDIT_SIZE_MIN) : v));
+            cJSON_AddItemToObject(patch, f->key, now);
+            break;
+        }
+        default: {
+            if (!number) {
+                cJSON_Delete(patch);
+                om_props_refresh();
+                return;
+            }
+            double clamped = fmin(fmax(v, mn), mx); // the editor's slider range
+            if (f->kind != OM_FIELD_NUM && f->kind != OM_FIELD_NUMN) clamped = round(clamped);
+            cJSON_AddNumberToObject(patch, f->key, clamped);
+            break;
+        }
+    }
+    om_send_fields(f, patch);
 }
 
 int object_manager_ui_search_focused(void) {
@@ -626,7 +906,12 @@ int object_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlAr
     if (!name || strncmp(name, "knOm", 4) != 0) return -1;
     if (!strcmp(name, "knOmTab")) {
         const int tab = arg_num(args, argc, 0, g_om.tab);
+        if (g_om.props_uid >= 0 && tab == g_om.tab) { // the Properties panel: back to the tab's grid
+            g_om.props_uid = -1;
+            menu_show_window(OBJECT_MANAGER_WINDOW, 1);
+        }
         if (tab >= 0 && tab < OM_TAB_COUNT && tab != g_om.tab) {
+            g_om.props_uid = -1;
             g_om.tab = tab;
             char value[8];
             snprintf(value, sizeof(value), "%d", tab);
@@ -696,6 +981,25 @@ int object_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlAr
         om_send(OM_ACTION_CLEAR_WEAPONS, 0);
         return 0;
     }
+    if (!strcmp(name, "knOmField") || !strcmp(name, "knOmFieldVec")) {
+        const int vec = name[9] == 'V';
+        char text[64];
+        om_field_changed(arg_num(args, argc, 0, -1), vec ? arg_num(args, argc, 1, -1) : -1, arg_text(ev, args, argc, vec ? 2 : 1, text, sizeof(text)));
+        return 0;
+    }
+    if (!strcmp(name, "knOmPropsOpen")) { // knOmPropsOpen(uid): scenarios, the console
+        const int uid = arg_num(args, argc, 0, -1);
+        if (uid >= 0) {
+            g_om.props_uid = uid;
+            menu_show_window(OBJECT_MANAGER_WINDOW, 1);
+        }
+        return 0;
+    }
+    if (!strcmp(name, "knOmPropsClose")) {
+        g_om.props_uid = -1;
+        menu_show_window(OBJECT_MANAGER_WINDOW, 1);
+        return 0;
+    }
     return -1;
 }
 
@@ -708,6 +1012,14 @@ static void om_on_result(const NetSpawnResultPacket *r) {
     if (r->action == OM_ACTION_QUERY) {
         om_update_status();
         om_update_tools();
+        return;
+    }
+    if (r->action == OM_ACTION_EDIT && r->limit == OM_FIELDS_ANSWER) { // the Properties panel's patch
+        char text[160];
+        if (r->status == OM_STATUS_OK) snprintf(text, sizeof(text), "%s: saved", g_om.props_sent[0] ? g_om.props_sent : "Field");
+        else snprintf(text, sizeof(text), "%s", object_manager_status_text(r->status));
+        om_set_status(text, r->status != OM_STATUS_OK);
+        om_props_refresh(); // the values the object has now
         return;
     }
     if (r->action == OM_ACTION_EDIT) { // a drag's edits: only refusals speak (a rate answer is the pace)
@@ -805,9 +1117,16 @@ int object_manager_events_handle(Client *client, const int type, const void *pay
             om_on_extras(client, &packet);
             return 1;
         }
-        case NET_PACKET_SPAWNED_OBJ:
+        case NET_PACKET_SPAWNED_OBJ: {
             object_manager_apply_spawned(&client->game, payload, length);
+            NetSpawnedObjPacket head;
+            if (length < sizeof(head) || g_om.props_uid < 0) return 1;
+            memcpy(&head, payload, sizeof(head));
+            const HtmlElem focus = html_dom_active_element();
+            // someone's edit of the panel's object: its values again (not under a field being typed in)
+            if (head.kind == OM_KIND_OBJECT && head.id == g_om.props_uid && !(focus && html_dom_has_class(focus, "knOmPropIn"))) om_props_refresh();
             return 1;
+        }
         default:
             return 0;
     }
@@ -907,6 +1226,7 @@ void object_manager_ui_snap_changed(void) {
 // A new connection / map: the caps belong to the server we talked to.
 void object_manager_ui_reset(void) {
     om_build_reset();
+    g_om.props_uid = -1;
     g_om.caps = -1;
     g_om.queried = 0;
     g_om.pending_equip = -1;
