@@ -128,6 +128,7 @@ typedef struct {
 typedef struct {
     Client *client;
     int built;                   // the overlay exists in the current page
+    int building;                // inside build(): update() must not recurse into build() again
     unsigned serial;             // html_ui_page_serial() of the document it was built / found in
     int sheet;                   // devconsole.css was added to that document
     HtmlElem overlay, modal, header, close_btn, logs, hints, input, submit, grip;
@@ -178,6 +179,7 @@ static ConState g_con = {.history_idx = -1, .mode_override = -1};
 
 static void con_exec(const char *line);
 static void reset_geom(void);
+static void build(void);
 
 // ---------------------------------------------------------------- helpers
 
@@ -2019,12 +2021,33 @@ static int con_game_page(void) {
     return app_mode() == APP_MODE_GAME;
 }
 
-// update(goToGame)
+// The console is actually on screen (ui_console_shown): visible intent and a live overlay in the
+// ready document shown now. update() sets the overlay's display to "block" whenever this holds, so
+// it is the one truth both the pointer lock (menu_ui.c) and the probe agree on.
+int ui_console_shown(void) {
+    return g_con.visible && con_live();
+}
+
+// update(goToGame): show or hide the overlay and, on the game page, free or relock the pointer to
+// match. The side effects that free the mouse (opening the menu for exitPointerLock) run only once
+// the overlay is actually shown, so the mouse is never released for a console that is not on screen:
+// if the page is not live yet the toggle is deferred here and ui_console_tick's build() runs update()
+// again the moment the overlay is built, freeing the mouse and showing the console in the same frame.
 static void update(const int go_to_game) {
-    if (con_live()) html_dom_set_display(g_con.overlay, g_con.visible ? "block" : "none");
+    // Toggled visible while the overlay is stale (a page re-render replaced it) but the document is
+    // ready: rebuild it now so it shows this frame instead of waiting for the next tick. build() ends
+    // with its own update(0); the guard stops that from recursing back here.
+    if (g_con.visible && !g_con.building && !con_live() && html_ui_available() && html_ui_is_ready()) {
+        build();
+        if (con_live()) return; // build()'s update(0) showed it and ran the side effects
+    }
+    const int live = con_live();
+    if (live) html_dom_set_display(g_con.overlay, g_con.visible ? "block" : "none");
     if (g_con.visible) {
         g_con.focus_pending = 1;                            // setTimeout(() => input.focus(), 0)
-        if (!con_game_page()) return;
+        // Not on screen yet (the game page's document is still loading): keep the pointer and the
+        // menu as they are and let the tick's build() run update() again once the overlay is live.
+        if (!con_game_page() || !live) return;
         if (!html_ui_is_menu_open()) menu_request_open(1);  // document.exitPointerLock()
         ui_controls_reset_keys();
         const HtmlElem chat = html_dom_by_id("chatInput");
@@ -2446,6 +2469,7 @@ void ui_console_probe(char *out, const size_t n) {
 static void build(void) {
     const HtmlElem body = html_dom_body();
     if (!body) return;
+    g_con.building = 1; // update() (called at the end) must not recurse back into build()
     // the sheet per document: the game page keeps its sheets, a page switch starts without it
     g_con.sheet = html_ui_add_stylesheet("css/devconsole.css");
     if (!g_con.sheet) {
@@ -2458,7 +2482,7 @@ static void build(void) {
         html_dom_insert_html(body, HTML_INSERT_BEFORE_END, OVERLAY_HTML);
         g_con.overlay = html_dom_by_id("devConsoleOverlay");
     }
-    if (!g_con.overlay) return;
+    if (!g_con.overlay) { g_con.building = 0; return; }
     g_con.modal = html_dom_query(g_con.overlay, ".modal");
     g_con.header = html_dom_query(g_con.overlay, ".titlebar");
     g_con.close_btn = html_dom_query(g_con.overlay, ".titlebar .x");
@@ -2467,7 +2491,7 @@ static void build(void) {
     g_con.input = html_dom_query(g_con.overlay, ".row input");
     g_con.submit = html_dom_query(g_con.overlay, ".row button");
     g_con.grip = html_dom_query(g_con.overlay, ".grip");
-    if (!g_con.modal || !g_con.logs || !g_con.input) return;
+    if (!g_con.modal || !g_con.logs || !g_con.input) { g_con.building = 0; return; }
     g_con.built = 1;
     g_con.serial = html_ui_page_serial();
     g_con.dragging = g_con.resizing = 0;
@@ -2486,7 +2510,8 @@ static void build(void) {
             g_con.visible = 1;
         }
     }
-    update(0);
+    update(0);          // the overlay is live now, so this shows it (and frees the pointer) at once
+    g_con.building = 0; // guard held across update(0) so its build-on-demand cannot recurse
 }
 
 // KrunkNative: the console stays above the whole page. devconsole.css gives it z-index 999999,

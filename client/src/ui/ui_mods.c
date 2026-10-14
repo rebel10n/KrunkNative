@@ -398,10 +398,10 @@ static int capture_key(const int key) {
 
 static void toggle_developer_console(void) {
     if (!g_mods.dev_enabled) return;
-    if (app_mode() == APP_MODE_GAME) {           // the editor / hub / viewer pages have no menu or game
-        if (ui_console_is_open()) menu_play();   // instructionHolder?.click?.()
-        else menu_request_open(1);               // document.exitPointerLock?.()
-    }
+    // The game page's exitPointerLock (opening the menu) / instructionHolder.click (relocking) live in
+    // ui_console.c update(), which runs them only once the overlay is actually on screen. Doing them
+    // here too would free the mouse before the console could show when the page is still loading (the
+    // reported "mouse unlocks but no console"); update() owns them so the two always move together.
     ui_console_toggle(1);
 }
 

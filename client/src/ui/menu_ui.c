@@ -284,7 +284,7 @@ void client_pointer_update(Client *client) {
     PointerLockInputs in = {0};
     in.game = (unsigned char) pointer_owner_active();
     in.menu_open = (unsigned char) html_ui_is_menu_open();
-    in.console_open = (unsigned char) ui_console_is_open();
+    in.console_open = (unsigned char) ui_console_shown(); // only once the overlay is on screen: never a freed mouse with no console
     in.focused = (unsigned char) !g_ptr.unfocused;
     in.end_up = (unsigned char) hud_ui_end_screen_up();
     in.end_results = (unsigned char) hud_ui_end_screen_interactive();

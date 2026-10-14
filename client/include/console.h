@@ -12,7 +12,12 @@
 // in every document (or finds it again), keeps it on top and polls the input line (hints, the
 // toggle character).
 void ui_console_tick(Client*);
-int  ui_console_is_open(void);              // devConsole.visible
+int  ui_console_is_open(void);              // devConsole.visible (the intent: the player asked for it)
+// The overlay is actually presented to the player on the current page this frame (visible and live:
+// built in the ready document shown now). The pointer lock frees the mouse "for the console" only
+// when this is true, so the mouse is never released for a console that is not on screen yet (a page
+// still loading, or the overlay just replaced by a page re-render): menu_ui.c client_pointer_update.
+int  ui_console_shown(void);
 void ui_console_toggle(int go_to_game);     // toggleConsole(goToGame): update() frees / relocks the pointer
 // GLFW keys, first thing in ui_controls_key_event() after the controls capture: mods.ts'
 // keydown (toggle key, F8 cycle, bhop key), handleConsoleKeydown, typing into the input
