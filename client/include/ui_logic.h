@@ -611,6 +611,7 @@ void ui_dialog_cancel(void);                     // clearPops / #popupBack
 int  ui_dialog_prompt_focused(HtmlElem el);      // el is the open prompt's text field
 int  ui_resolve_external_url(const char *url, char *out, size_t n); // 0 = not http(s)
 void ui_open_external(const char *url);          // openURL / openTab / window.open
+void ui_open_browser(const char *url);           // the system browser only (no in-client page routing)
 // ui_settings.c: settings window header actions
 void ui_settings_reset_confirm(void);            // resetSettings(): confirm, Default preset, binds, re-render
 void ui_settings_select_preset(int index);       // selectSettingPre(index)

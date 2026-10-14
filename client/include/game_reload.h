@@ -15,6 +15,10 @@
 // Asks for a reload at the start of the next frame (safe from key callbacks and handlers);
 // `why` is logged ("F5", "console").
 void game_reload_request(const char *why);
+// F5 (mm-token): relaunch the client process (app_reload: the same command line, the window as it
+// is) and re-enter this session in the new one (KRUNKNATIVE_RELOAD_RESUME); the in-place reload
+// above only if the exec fails. The web reloads the page, as for game_reload_request.
+void game_reload_relaunch_request(const char *why);
 // Per frame (client_menu_tick): runs a requested reload; after a restart, re-enters the game the
 // previous process was in.
 void game_reload_tick(Client *client);

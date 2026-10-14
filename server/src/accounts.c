@@ -235,6 +235,9 @@ static cJSON *acc_lobby_tuple(void) {
     cJSON_AddNumberToObject(meta, "mode", mode_id);
     cJSON_AddStringToObject(meta, "modeName", mode_name(mode_id));
     cJSON_AddStringToObject(meta, "map", map);
+    // the map catalogue index (map_catalog.h; 0..31 = Krunker's mapIndex): the matchmaker's
+    // seek_maps filter (v10 dataQuery dsma, doc/v10/matchmaker-token.md)
+    if (catalogue >= 0) cJSON_AddNumberToObject(meta, "mapIndex", catalogue);
     cJSON_AddStringToObject(meta, "name", g_gs_config.name);
     cJSON_AddStringToObject(meta, "host", g_gs_config.public_host);
     cJSON_AddNumberToObject(meta, "port", g_gs_config.public_port ? g_gs_config.public_port : g_server->config.listen_port);
@@ -1703,10 +1706,11 @@ void accounts_handle_join(ClientConnection *client, const NetPacket *packet) {
         const char *jti = cJSON_GetStringValue(cJSON_GetObjectItem(claims, "jti"));
         snprintf(client->acct.ticket_jti, sizeof(client->acct.ticket_jti), "%s", jti ? jti : "");
         client->acct.resumed = (unsigned char) resumed;
-        if (resumed) {
-            server_log("%s resumes join ticket %.8s... (expired, admitted by this lobby before)", client->address, client->acct.ticket_jti);
-            acc_resume_replace(client);
-        }
+        if (resumed) server_log("%s resumes join ticket %.8s... (expired, admitted by this lobby before)", client->address, client->acct.ticket_jti);
+        // mm-token (doc/v10/matchmaker-token.md "Replay"): a join ticket is one seat. A second
+        // connection with it (a fresh one too, not only a resume) replaces the first, so one
+        // seek can never put several players into the lobby.
+        if (client->acct.ticket_jti[0]) acc_resume_replace(client);
         const cJSON *acc = cJSON_GetObjectItem(claims, "acc");
         const int account_id = cJSON_IsNumber(acc) ? acc->valueint : 0;
         if (account_id > 0) {

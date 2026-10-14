@@ -52,7 +52,7 @@ silent (only the `] line` echo), as in the mod.
 | disconnect | resets the endpoints and goes back to "/" | leaves the session/offline game, back to the default server, menu open. On the web: `location.href = '/'` |
 | quit | `window.close()` | closes the window (web: `window.close()`) |
 | reconnect | `location.reload()` | reconnects to the last server or lobby, also after `disconnect` (offline, or after a `disconnect` from the offline game: restarts it on the same map). The Reconnect bind (unbound by default, Settings > Controls > General) runs it natively; on the web that key is `location.reload()`. F5's full reload (`reload`, below) ends with it |
-| reload | `location.reload()` (the mod's F5) | Krunker Box Office: the full reload F5 does (the Reload Game bind, Settings > Controls > General), see [F5: full reload](#f5-full-reload). On the web: `location.reload()`, and the address bar (`?game=<id>`, `?offline=1&map=<key>`, `?sandbox`) brings the reload back to the same game |
+| reload | `location.reload()` (the mod's F5) | Krunker Box Office: the full reload in place, see [F5: full reload](#f5-full-reload) (F5 itself relaunches the client). On the web: `location.reload()`, and the address bar (`?game=<id>`, `?offline=1&map=<key>`, `?sandbox`) brings the reload back to the same game |
 | logout | – | Krunker Box Office: the menu's Logout (`logoutAcc`, account_ui.c `account_ui_logout`): the saved session token dropped and revoked in kn_brain, the social socket signed out, the guest header (v7 and v10 pages), the Account window shown, the lobby rejoined as a guest (servers_ui.c, as after any account change in the menu); "logged out". A guest gets "not logged in" and nothing else. Client-local: nothing reaches the game server or its command auth |
 | console_reset | – | Krunker Box Office: the console back at the stylesheet's place and size (top right, 744 x 280 at most) and the saved geometry (`krk_dev_console_geom`) deleted |
 | offline [map] | `playCustomMap()` + clearPingCounter | starts the embedded offline game, ping 0 (`--offline`, web `?offline=1`); a map (catalogue key, name or path under assets/maps) picks where it plays, like `--map` / `?map=` |
@@ -531,9 +531,15 @@ Developer Tools, default `) is the way back, and it now always works. The checks
 
 ## F5: full reload
 
-F5 (the Reload Game bind, `cont_gameReloadKey`, Settings > Controls > General; the console's
-`reload`) reloads the client the way the browser's F5 reloads Krunker: settings, binds and every
-asset come from disk again, then the player is back in the same game. It works in game and in
+F5 (the Reload Game bind, `cont_gameReloadKey`, Settings > Controls > General) relaunches the
+client natively (mm-token, doc/v10/matchmaker-token.md "Keys"): the process re-executes itself as
+F4 used to (the same command line, the window kept as it is) and the new process comes back to
+the same session (`KRUNKNATIVE_RELOAD_RESUME` below; a lobby is the new process's startup seek).
+F4 is Find New Game now (Krunker's client: a new seek per Settings > General > Quickplay, no
+restart). The console's `reload` is the full reload in place described here.
+
+The console's `reload` reloads the client the way the browser's F5 reloads Krunker: settings,
+binds and every asset come from disk again, then the player is back in the same game. It works in game and in
 the menu (also with the console open or a text field focused, as a function key), and keeps the
 stored settings, the account and the session. The Reconnect bind, which had F5 before, is unbound
 by default now (`reconnect` in the console).
@@ -556,7 +562,7 @@ Natively, in place, in this order (`client/src/game_reload.c`):
    the same server (a matchmade lobby is sought again for a fresh ticket). In the menu with no game,
    it stays there; when nothing can be rejoined it returns to the menu. A notice says what happened.
 
-What a running process cannot load again makes F5 restart the client instead, like F4 (the same
+What a running process cannot load again makes `reload` restart the client instead, like F5 (the same
 command line, the window kept as it is), and the new process comes back to the same session
 (`KRUNKNATIVE_RELOAD_RESUME`: the offline map and mode, the server address, or the lobby id
 once the matchmaker answers):

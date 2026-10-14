@@ -316,6 +316,18 @@ void app_reload(const char *url) {
     else if (!realpath(g_exec_argv[0], path)) snprintf(path, sizeof(path), "%s", g_exec_argv[0]);
 #endif
     fprintf(stderr, "[app] reload: restarting %s\n", path);
+    // input-script tests (client/src/input_script.c): the relaunched process plays this script
+    // instead of starting the current one (which pressed the key) over
+    const char *next_script = getenv("KRUNKNATIVE_INPUT_SCRIPT_RELAUNCH");
+    if (next_script && next_script[0]) {
+#ifdef _WIN32
+        _putenv_s("KRUNKNATIVE_INPUT_SCRIPT", next_script);
+        _putenv_s("KRUNKNATIVE_INPUT_SCRIPT_RELAUNCH", "");
+#else
+        setenv("KRUNKNATIVE_INPUT_SCRIPT", next_script, 1);
+        unsetenv("KRUNKNATIVE_INPUT_SCRIPT_RELAUNCH");
+#endif
+    }
     client_render_window_before_exec(g_app.client); // the new process reopens the window as it is now
     fflush(NULL);
 #ifdef _WIN32

@@ -85,6 +85,7 @@ typedef struct HttpJob {
     void *user;
     int status;
     size_t length;
+    int timeout_ms; // connect / receive timeout
     char err[192];  // status 0: why (handed to the callback as the body, backend.h)
 } HttpJob;
 
@@ -95,9 +96,12 @@ typedef struct WsMsg {
 } WsMsg;
 
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t g_http_cond = PTHREAD_COND_INITIALIZER;
-static HttpJob *g_http_pending, *g_http_done;
-static int g_http_thread_up;
+// Two lanes, one worker each: the brain's requests, and other hosts' (backend_http_get_external:
+// krunker.io's game list) so a slow or unreachable outside host never delays a seek.
+enum { HTTP_LANE_BRAIN, HTTP_LANE_EXTERNAL, HTTP_LANES };
+static pthread_cond_t g_http_cond[HTTP_LANES] = {PTHREAD_COND_INITIALIZER, PTHREAD_COND_INITIALIZER};
+static HttpJob *g_http_pending[HTTP_LANES], *g_http_done;
+static int g_http_thread_up[HTTP_LANES];
 static WsMsg *g_ws_out, *g_ws_in;
 static int g_ws_thread_up;
 static int g_ws_open;          // the socket is open (written by the thread, under g_lock)
@@ -188,7 +192,7 @@ static void http_run(HttpJob *job) {
     job->status = 0;
     char *resp = NULL;
     size_t len = 0;
-    const int status = kn_winhttp_request(job->method, job->url, req_body, HTTP_TIMEOUT_MS, &resp, &len, job->err, sizeof(job->err));
+    const int status = kn_winhttp_request(job->method, job->url, req_body, job->timeout_ms, &resp, &len, job->err, sizeof(job->err));
     free(req_body);
     job->body = resp;
     job->length = len;
@@ -206,7 +210,7 @@ static void http_run(HttpJob *job) {
         return;
     }
     HttpConn c;
-    if (!http_conn_open(&c, &a, HTTP_TIMEOUT_MS)) {
+    if (!http_conn_open(&c, &a, job->timeout_ms)) {
         snprintf(job->err, sizeof(job->err), "cannot connect to %s:%s%s", a.host, a.port, a.tls ? " (TLS)" : "");
         free(req_body);
         return;
@@ -279,12 +283,12 @@ static void http_run(HttpJob *job) {
 #endif
 
 static void *http_thread(void *arg) {
-    (void) arg;
+    const int lane = (int) (intptr_t) arg;
     for (;;) {
         pthread_mutex_lock(&g_lock);
-        while (!g_http_pending) pthread_cond_wait(&g_http_cond, &g_lock);
-        HttpJob *job = g_http_pending;
-        g_http_pending = job->next;
+        while (!g_http_pending[lane]) pthread_cond_wait(&g_http_cond[lane], &g_lock);
+        HttpJob *job = g_http_pending[lane];
+        g_http_pending[lane] = job->next;
         job->next = NULL;
         pthread_mutex_unlock(&g_lock);
 
@@ -297,10 +301,12 @@ static void *http_thread(void *arg) {
     return NULL;
 }
 
-static int http_queue(const char *method, const char *url, const char *body, const BackendHttpFn fn, void *user) {
+static int http_queue_lane(const int lane, const int timeout_ms, const char *method, const char *url, const char *body,
+                           const BackendHttpFn fn, void *user) {
     if (!url || !url[0]) return 0;
     HttpJob *job = calloc(1, sizeof(*job));
     if (!job) return 0;
+    job->timeout_ms = timeout_ms > 0 ? timeout_ms : HTTP_TIMEOUT_MS;
     snprintf(job->method, sizeof(job->method), "%s", method);
     job->url = strdup(url);
     job->body = body ? strdup(body) : NULL;
@@ -313,17 +319,26 @@ static int http_queue(const char *method, const char *url, const char *body, con
         return 0;
     }
     pthread_mutex_lock(&g_lock);
-    if (!g_http_thread_up) {
+    if (!g_http_thread_up[lane]) {
         pthread_t t;
-        if (pthread_create(&t, NULL, http_thread, NULL) == 0) {
+        if (pthread_create(&t, NULL, http_thread, (void *) (intptr_t) lane) == 0) {
             pthread_detach(t);
-            g_http_thread_up = 1;
+            g_http_thread_up[lane] = 1;
         }
     }
-    QUEUE_PUSH(g_http_pending, job);
-    pthread_cond_signal(&g_http_cond);
+    QUEUE_PUSH(g_http_pending[lane], job);
+    pthread_cond_signal(&g_http_cond[lane]);
+    const int up = g_http_thread_up[lane];
     pthread_mutex_unlock(&g_lock);
-    return g_http_thread_up;
+    return up;
+}
+
+static int http_queue(const char *method, const char *url, const char *body, const BackendHttpFn fn, void *user) {
+    return http_queue_lane(HTTP_LANE_BRAIN, HTTP_TIMEOUT_MS, method, url, body, fn, user);
+}
+
+int backend_http_get_external(const char *url, const int timeout_ms, const BackendHttpFn fn, void *user) {
+    return http_queue_lane(HTTP_LANE_EXTERNAL, timeout_ms, "GET", url, NULL, fn, user);
 }
 
 int backend_http_get(const char *path, const BackendHttpFn fn, void *user) {

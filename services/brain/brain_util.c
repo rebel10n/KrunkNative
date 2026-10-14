@@ -9,6 +9,7 @@
 #include "brain_internal.h"
 #include "auth_state.h" /* AuthLimiter */
 #include "hot.h"        /* hot_limit */
+#include "mm_token.h"   /* seek-game validation tokens */
 #include "knsvc/config.h"
 #include "knsvc/crypto.h"
 #include "knsvc/http.h"
@@ -35,6 +36,16 @@ int mm_settings_load(Brain *b) {
     if (!strcmp(g_mm.internal_secret, "kn-dev-secret"))
         KN_WARN("brain", "brain.internal_secret is the development default; set it for deployments");
     g_mm.join_ttl_s = clamp_int(kn_config_int(cfg, "brain.join_ttl_s", 30), 5, 3600);
+    /* the seek-game validation token (mm_token.h, doc/v10/matchmaker-token.md) */
+    const MmTokenSettings token = {
+        .secret = kn_config_str(cfg, "brain.validation_secret", ""),
+        .join_secret = g_mm.join_secret,
+        .ttl_s = (int) kn_config_int(cfg, "brain.matchmaking.validation_ttl_s", 60),
+        .bind_ip = kn_config_bool(cfg, "brain.matchmaking.validation_bind_ip", 0),
+        .require = kn_config_bool(cfg, "brain.matchmaking.require_validation_token", 0),
+    };
+    if (mm_token_init(&token) != 0) KN_WARN("brain", "no key for seek-game validation tokens (brain.join_secret is blank)");
+    else if (!token.require) KN_INFO("brain", "seek-game validation tokens: optional (brain.matchmaking.require_validation_token off)");
     g_mm.node_ttl_s = clamp_int(kn_config_int(cfg, "brain.node_ttl_s", 30), 3, 3600);
     g_mm.heartbeat_s = clamp_int(kn_config_int(cfg, "brain.heartbeat_s", 5), 1, 600);
     if (g_mm.heartbeat_s * 2 > g_mm.node_ttl_s) g_mm.heartbeat_s = g_mm.node_ttl_s / 2 > 0 ? g_mm.node_ttl_s / 2 : 1;

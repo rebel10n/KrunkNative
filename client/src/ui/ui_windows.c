@@ -8,6 +8,7 @@
 #include <ui_mobile.h>
 #include <client_settings.h>
 #include <download_ui.h>
+#include <seek_prefs.h> // General > Quickplay rows (mm-token)
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -482,6 +483,15 @@ static char *gen_settings(void) {
         }
         // the Sound tab gains the client's Audio Output row (ui_client_settings.c)
         char *ext = ui_client_settings_extend_tab(inner_s);
+        // mm-token: General > Quickplay (seek mode / map / server type, seek_prefs.c), in the advanced
+        // view (every setting) only: the basic view stays v10's curated General tab, row for row
+        if (tab == 0 && view == 1) {
+            char *quickplay = seek_prefs_extend_tab(ext ? ext : inner_s);
+            if (quickplay) {
+                free(ext);
+                ext = quickplay;
+            }
+        }
         sb_append(&out, ext ? ext : inner_s);
         free(ext);
         free(inner_s);

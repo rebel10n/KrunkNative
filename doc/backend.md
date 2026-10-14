@@ -121,6 +121,10 @@ All keys are optional; env `KN_BRAIN_<KEY>` / CLI `--brain.<key>=` override.
 | `brain.internal_secret` | `kn-dev-secret` | Bearer secret game servers must present on `/mm/internal/ws` (and admins on `/mm/admin/*`); must equal `gameserver.brain_secret`. Rate-limited (30 tries/min per address); the dev default (or a secret under 16 characters) only admits direct local connections, never through a proxy ([v7/command-auth.md](v7/command-auth.md)) |
 | `brain.join_secret` | = `internal_secret` | HMAC key of join tickets (must equal the game servers' `gameserver.join_secret`, default their `brain_secret`) |
 | `brain.join_ttl_s` | `30` | ticket lifetime / slot reservation time |
+| `brain.validation_secret` | `""` (= derived from `join_secret`) | key of the seek-game validation tokens (`GET /mm/generate-token`, [v10/matchmaker-token.md](v10/matchmaker-token.md)); the same on every brain of a network. Unset: `HMAC-SHA256(join_secret, "kn-mm-validation-v1")` |
+| `brain.matchmaking.validation_ttl_s` | `60` | validation token lifetime (5..3600) |
+| `brain.matchmaking.require_validation_token` | `false` | refuse a seek-game without a `validationToken` (403 `InvalidClientValidationToken`); off during the rollout so older clients keep working |
+| `brain.matchmaking.validation_bind_ip` | `false` | a token is only good from the address it was issued to (`InvalidClientIP`; needs `trust_proxy` behind nginx) |
 | `brain.cors_origins` | `["*"]` | allowed CORS origins for the web build |
 | `brain.trust_proxy` | `false` | take client IP from X-Forwarded-For (behind nginx) |
 | `brain.node_ttl_s` | `30` | node/lobby row TTL (v3.1.1 `STALE_AFTER_MS`) |
@@ -676,6 +680,7 @@ brain draining).
 | `draining` | bool | the server is shutting down (not joinable) |
 | `proto`, `build`, `commit`, `commitTime` | string, string, string, int | build identity of the server (`proto` "M.m", git describe, 12-hex commit, unix s): see 8.12 |
 | `outdated`, `incompatible` | bool | added by `/mm/game-list` (8.12); not sent by servers |
+| `mapIndex` | int | the map catalogue index (`shared/include/map_catalog.h`; 0..31 = Krunker's mapIndex): seek-game `dataQuery.dsma` ([v10/matchmaker-token.md](v10/matchmaker-token.md)) |
 
 ### Routes
 
@@ -686,7 +691,8 @@ brain draining).
 | `GET /mm/regions` | (Krunker Box Office) | `[{"id","name","players","games","nodes"}]` known + live regions |
 | `GET /mm/game-list[?hostname=]` | `/mm/game-list` | `{"success":true,"totalPlayerCount":N,"games":[tuple,...]}` all live lobbies of every region |
 | `GET /mm/game-info?game=ID` | `/mm/game-info` | the tuple; unknown id -> best quick-join pick (v3.1.1), `InvalidGameId` if none |
-| `GET /mm/seek-game?region=R[&game=ID][&autoChangeGame=true][&dataQuery=JSON][&token=SESSION]` | `/mm/seek-game` | `{"gameId","lobbyId","host","port","clientId","changeReason","region","webUrl"}` |
+| `GET /mm/generate-token` | Krunker `matchmaker/generate-token` | `text/plain` validation token for the next seek-game (rate-limited: 120/min per address, then 429 `TooManyRequests`) |
+| `GET /mm/seek-game?region=R[&game=ID][&autoChangeGame=true][&dataQuery=JSON][&token=SESSION][&validationToken=T]` | `/mm/seek-game` | `{"gameId","lobbyId","host","port","clientId","changeReason","region","webUrl"}` |
 | `GET /mm/host-game?region=R&config=JSON[&token=SESSION]` (also `POST`, JSON body `{region, config}`) | (game socket `custom` in v3.1.1) | same as seek-game, for a freshly hosted custom lobby |
 | `GET /mm/brains` | (Krunker Box Office) | `[{"id","region","publicUrl","nodes","lastSeen"}]` live brains (federation debug) |
 | `GET /mm/status` | (Krunker Box Office) | `{"brain","region","version","nodes","lobbies","players","draining"}` |
@@ -710,6 +716,14 @@ seek-game details:
   `autoChangeGame=false` gets 403 `AccountRequired`.
 * `FORCE_ENTER=1` cookie (or `&force=1`) bypasses the capacity check on the requested
   game (v3.1.1 `hasForceEnterCookie`).
+* `validationToken` (mm-token, [v10/matchmaker-token.md](v10/matchmaker-token.md)): Krunker's
+  `/generate-token` -> `?validationToken=` step. Checked and spent before a seat is reserved;
+  refusals are 403 `InvalidClientValidationToken` (bad, spent, or missing while
+  `require_validation_token`), `ExpiredClientValidationToken`, `InvalidClientValidationTokenData`,
+  `InvalidClientIP`. Without one (older clients) the seek is served unless required.
+* `dataQuery` `dsmo` / `dsma` (v10's saved `seek_modes` / `seek_maps`): quick join only takes
+  lobbies with `meta.mode` / `meta.mapIndex` in the lists; lobbies with room that match neither
+  answer 503 `NoMatchingServers`. A requested `game` is never filtered.
 
 The `/api/maps`, `/api/mods`, `/api/assets`, `/api/search`, `/api/streams`,
 `/api/prices` hub routes belong to svc-accounts / maps (section 7).
@@ -1649,7 +1663,9 @@ ticket), `session` = the social session token, `name` reserved (guests stay
    ticket holders keep the ticket identity, session-only joins become guests.
 6. `player-join {lobbyId, clientId: jti, accountId}` releases the ticket's slot
    reservation; `player-leave` on disconnect.
-7. Resume (Krunker Box Office): an expired ticket whose `jti` this lobby admitted (READY) is accepted
+7. One seat per ticket (mm-token): a second connection with the same ticket, fresh or resumed,
+   replaces the first one (`004002`), so a seek's ticket never seats two players.
+8. Resume (Krunker Box Office): an expired ticket whose `jti` this lobby admitted (READY) is accepted
    again until 30 min after that session's last connection ended (`accounts.c`
    `acc_resume_allowed`, at most 256 remembered): the transport reconnects of 5.3 used to end in
    `"Join key expired"` a few minutes into a match (the edges' logs: kn-rtc sessions failing,
@@ -2066,8 +2082,11 @@ menu re-seeks the same lobby so the server attaches (or drops) the account.
 
 1. `GET /mm/ping-list` -> region = saved `defaultRegion` / `pingRegion7` if listed,
    else the first (no per-region ping).
-2. `GET /mm/seek-game?hostname=krunknative&region=R&autoChangeGame=true[&game=ID][&token=T]`
-   (web: `?game=` of the page; native: `KRUNKNATIVE_GAME`). Errors -> the v3.1.1
+2. `GET /mm/generate-token`, then
+   `GET /mm/seek-game?hostname=krunknative&region=R&autoChangeGame=true[&game=ID][&token=T][&dataQuery={dsmo,dsma}]&validationToken=V`
+   (web: `?game=` of the page; native: `KRUNKNATIVE_GAME`; the token step and the Quickplay
+   preferences: [v10/matchmaker-token.md](v10/matchmaker-token.md)). A refused token is replaced once;
+   a brain without the route (404) is sought without one. Errors -> the v3.1.1 / v10
    `matchmaker.*` texts on the connection error screen; its retry link seeks again.
 3. Connect: native TCP to `host:port` (names resolved per attempt); web
    `webUrl` if set, else `ws(s)://<origin>/native?target=host:port`. Right after HELLO

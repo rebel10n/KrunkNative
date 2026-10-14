@@ -234,8 +234,9 @@ static const V7Bind V7_BINDS[] = {
     // v10.0.2: Ping Position (ranked / comp only; M2 = the middle button)
     {"markPosition", -1, "markPositionKey", 10002, -1, -1},
     // KrunkNative additions (not v7.1.4 ControlBinds): Reload Game, F5 (keyCode 116) by default: v7
-    // has no such bind, the browser's F5 reloads the page; natively it is the full in-place reload
-    // (game_reload.h, console `reload`), the web build still reloads the page (reload_key).
+    // has no such bind, the browser's F5 reloads the page; natively the client relaunches into the
+    // same game (game_reload.h; the console's `reload` is the in-place reload), the web build still
+    // reloads the page (reload_key).
     // Reconnect (console `reconnect`) had F5 before and is unbound by default now.
     {"gameReload", -1, "gameReloadKey", 116, -1, UI_CONTROL_GAME_RELOAD},
     {"reconnect", -1, "reconnectKey", -1, -1, UI_CONTROL_RECONNECT},
@@ -1350,17 +1351,18 @@ static void release_code(Client *client, const int code) {
 
 // ---------------------------------------------------------------- GLFW events
 
-// The Reload Game bind (F5): the full reload natively (game_reload.h: settings, binds, assets,
-// then back into the same game). On the web it is the page reload (mods.ts F5:
-// location.reload()); the address bar keeps ?game=<id> / ?offline=1&map= / ?sandbox
-// (servers_ui.c), so the reload lands back in the same game.
+// The Reload Game bind (F5): natively the client relaunches, as F4 used to (game_reload.h
+// game_reload_relaunch_request: the same command line and window), and the new process comes back
+// into the same game; the console's `reload` keeps the in-place reload. On the web it is the page
+// reload (mods.ts F5: location.reload()); the address bar keeps ?game=<id> / ?offline=1&map= /
+// ?sandbox (servers_ui.c), so the reload lands back in the same game.
 static void reload_key(void) {
 #ifdef __EMSCRIPTEN__
     g_ctl.game_key = 0; // no preventDefault: the browser's own F5 reloads too
     app_reload(NULL);
 #else
-    printf("[controls] reload key\n");
-    game_reload_request("F5");
+    printf("[controls] reload key: relaunch\n");
+    game_reload_relaunch_request("F5");
 #endif
 }
 

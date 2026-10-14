@@ -11,6 +11,9 @@
 
 #include "brain_internal.h"
 #include "releases.h"
+#include "auth_state.h" /* AuthLimiter: the generate-token rate limit */
+#include "hot.h"        /* hot_limit */
+#include "mm_token.h"   /* seek-game validation tokens (doc/v10/matchmaker-token.md) */
 #include "knsvc/crypto.h"
 #include "knsvc/http.h"
 #include "knsvc/json.h"
@@ -33,6 +36,9 @@ static int error_status(const char *name) {
     if (!strcmp(name, "BadRequest")) return 400;
     if (!strcmp(name, "AccountRequired")) return 403;
     if (!strcmp(name, "IncompatibleVersion")) return 409;
+    if (!strcmp(name, "TooManyRequests")) return 429;
+    /* the validation token refusals (mm_token.h): Krunker's names */
+    if (!strncmp(name, "InvalidClient", 13) || !strcmp(name, "ExpiredClientValidationToken")) return 403;
     return 503;
 }
 
@@ -279,6 +285,34 @@ static void with_account(kn_http_req *req, Brain *b, AccountCb cb, void *ctx) {
 
 /* ---- /mm/seek-game */
 
+#define MM_SEEK_PREFS_MAX 32
+
+/* dataQuery dsmo / dsma: v10 sends the saved list as numbers ([1,3]); a "1,3" string or numeric
+ * strings are accepted too. Returns the count (<= cap). */
+static int int_list(const cJSON *v, int *out, int cap) {
+    int n = 0;
+    if (cJSON_IsArray(v)) {
+        const cJSON *e;
+        cJSON_ArrayForEach(e, v) {
+            if (n >= cap) break;
+            if (cJSON_IsNumber(e)) out[n++] = (int) e->valuedouble;
+            else if (cJSON_IsString(e) && e->valuestring[0] >= '0' && e->valuestring[0] <= '9') out[n++] = atoi(e->valuestring);
+        }
+    } else if (cJSON_IsString(v)) {
+        for (const char *p = v->valuestring; *p && n < cap;) {
+            if (*p >= '0' && *p <= '9') {
+                out[n++] = atoi(p);
+                while (*p >= '0' && *p <= '9') p++;
+            } else {
+                p++;
+            }
+        }
+    } else if (cJSON_IsNumber(v)) {
+        out[n++] = (int) v->valuedouble;
+    }
+    return n;
+}
+
 static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, const char *name, void *ctx) {
     (void) ctx;
     if (!kn_http_req_alive(req)) {
@@ -292,10 +326,14 @@ static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, co
     kn_http_query_get(req, "proto", proto, sizeof(proto)); /* the client's protocol "M.m" */
     kn_http_query_get(req, "game", game, sizeof(game));
     kn_http_query_get(req, "excludeGame", exclude, sizeof(exclude)); /* v10 Quick Match: the lobby it leaves */
-    if (kn_http_query_get(req, "dataQuery", dq, sizeof(dq)) > 0 && mm_settings()->policy.require_version) {
-        cJSON *q = kn_json_parse(dq, strlen(dq));
-        snprintf(version, sizeof(version), "%s", kn_json_str(q, "v", ""));
-        cJSON_Delete(q);
+    /* v10 dataQuery: {v} (require_version) and the saved seek_modes / seek_maps as dsmo / dsma */
+    int modes[MM_SEEK_PREFS_MAX], maps[MM_SEEK_PREFS_MAX], mode_count = 0, map_count = 0;
+    if (kn_http_query_get(req, "dataQuery", dq, sizeof(dq)) > 0) {
+        cJSON *jq = kn_json_parse(dq, strlen(dq));
+        if (mm_settings()->policy.require_version) snprintf(version, sizeof(version), "%s", kn_json_str(jq, "v", ""));
+        mode_count = int_list(cJSON_GetObjectItemCaseSensitive(jq, "dsmo"), modes, MM_SEEK_PREFS_MAX);
+        map_count = int_list(cJSON_GetObjectItemCaseSensitive(jq, "dsma"), maps, MM_SEEK_PREFS_MAX);
+        cJSON_Delete(jq);
     }
     MmPickQuery q = {
         .region = region,
@@ -311,12 +349,16 @@ static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, co
         .ruleset = ruleset,
         .outdated = releases_lobby_outdated,
         .exclude_game = exclude,
+        .modes = modes,
+        .mode_count = mode_count,
+        .maps = maps,
+        .map_count = map_count,
     };
     MmPick pick;
     MmPickError e = registry_pick(b->registry, &mm_settings()->policy, &q, &pick);
     if (e != MM_PICK_OK) {
         static const char *names[] = {"", "InvalidGameId", "GameFull", "NoServersMatchQuery", "NoAvailableServers",
-                                      "AccountRequired", "IncompatibleVersion"};
+                                      "AccountRequired", "IncompatibleVersion", "NoMatchingServers"};
         reply_error(req, error_status(names[e]), names[e]);
         return;
     }
@@ -348,7 +390,47 @@ static void h_seek_game(kn_http_req *req, void *ud) {
         reply_error(req, 503, "updating");
         return;
     }
+    /* Krunker's ?validationToken= (GET /generate-token): checked and spent before a seat is
+     * handed out. Clients from before it send none: accepted until
+     * brain.matchmaking.require_validation_token is on (doc/v10/matchmaker-token.md "Rollout"). */
+    char token[1024] = "";
+    kn_http_query_get(req, "validationToken", token, sizeof(token));
+    const MmTokenResult tr = mm_token_check(token, req->remote_addr, 0);
+    const char *refusal = mm_token_error_name(tr);
+    if (refusal) {
+        KN_INFO("routes", "seek-game refused for %s: %s", req->remote_addr ? req->remote_addr : "?", refusal);
+        reply_error(req, error_status(refusal), refusal);
+        return;
+    }
+    if (tr == MM_TOKEN_MISSING) KN_DEBUG("routes", "seek-game without a validation token from %s (optional)", req->remote_addr ? req->remote_addr : "?");
     with_account(req, b, seek_with_account, NULL);
+}
+
+/* ---- /mm/generate-token (Krunker: GET matchmaker.krunker.io/generate-token, plain text) */
+
+#define MM_TOKEN_PER_MIN 120 /* per address: one per seek, a rejoin loop seeks every 3 s */
+
+static void h_generate_token(kn_http_req *req, void *ud) {
+    (void) ud;
+    if (preflight(req)) return;
+    static AuthLimiter *limit;
+    if (!limit) limit = auth_limiter_new(MM_TOKEN_PER_MIN, 60000);
+    const char *ip = req->remote_addr ? req->remote_addr : "";
+    if (!hot_limit("mm_token", ip, MM_TOKEN_PER_MIN, 60, auth_limiter_hit(limit, ip, kn_now_ms()))) {
+        reply_error(req, 429, "TooManyRequests");
+        return;
+    }
+    char *token = mm_token_issue(ip);
+    if (!token) {
+        reply_error(req, 503, "NoValidationKey");
+        return;
+    }
+    brain_cors_headers(req);
+    kn_http_set_header(req, "Cache-Control", "no-cache, no-store, must-revalidate");
+    kn_http_set_header(req, "Pragma", "no-cache");
+    kn_http_set_header(req, "Expires", "0");
+    kn_http_respond(req, 200, "text/plain; charset=utf-8", token, strlen(token));
+    free(token);
 }
 
 /* ---- /mm/host-game */
@@ -583,6 +665,7 @@ int public_routes_init(Brain *b) {
     route2(b, NULL, "game-list", h_game_list);
     route2(b, NULL, "game-info", h_game_info);
     route2(b, NULL, "seek-game", h_seek_game);
+    route2(b, NULL, "generate-token", h_generate_token); /* mm-token: seek-game ?validationToken= */
     route2(b, NULL, "host-game", h_host_game); /* GET ?config= or POST {region, config} */
     route2(b, NULL, "status", h_status);
     route2(b, NULL, "brains", h_brains);

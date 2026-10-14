@@ -469,11 +469,15 @@ pickup-chat-e2e: build ## Pickup feedback on server_bin: Object Manager Junk + G
 	timeout 120 $(PYTHON) -I server/tests/pickup_chat_e2e.py $(DEBUG_DIR)
 
 .PHONY: reconnect-test
-reconnect-test: build ## F5 (reload + rejoin) online + offline, console reconnect / sandbox / offline <map>, --sandbox (headless; EGL_DEVICE=...)
+reconnect-test: build ## Console reload + rejoin online + offline, F5 relaunch, console reconnect / sandbox / offline <map>, --sandbox (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I server/tests/reconnect_key_e2e.py $(DEBUG_DIR)
 
+.PHONY: mm-token-e2e
+mm-token-e2e: build ## Matchmaker token (generate-token -> seek-game -> join ticket), Quickplay seek prefs, official krunker.io lobbies (stub), F4 / F5 (kn_brain + 2 server_bin + headless client; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I server/tests/mm_token_e2e.py $(DEBUG_DIR)
+
 .PHONY: console-reload-test
-console-reload-test: build ## Dev console kept in the window (off-screen save, resize, F11, drag, console_reset) + F5 full reload in place and its restart fallback (headless; EGL_DEVICE=...)
+console-reload-test: build ## Dev console kept in the window (off-screen save, resize, F11, drag, console_reset) + the console's full reload in place and its restart fallback (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I server/tests/console_reload_e2e.py $(DEBUG_DIR)
 
 .PHONY: console-visible-test

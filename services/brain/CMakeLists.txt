@@ -10,6 +10,7 @@ set(KN_BRAIN_SOURCES
     federation.c
     internal_ws.c
     public_routes.c
+    mm_token.c                      # mm-token: seek-game validation tokens (/generate-token)
     host.c
     ranked.c
     # svc-accounts sources
@@ -106,6 +107,12 @@ add_executable(kn_brain_registry_test tests/test_registry.c registry.c ${CMAKE_S
 target_include_directories(kn_brain_registry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/shared/include)
 target_link_libraries(kn_brain_registry_test PRIVATE knsvc)
 add_test(NAME brain_registry COMMAND kn_brain_registry_test)
+# mm-token: seek-game validation tokens (pure, no DB)
+add_executable(kn_brain_mm_token_test tests/test_mm_token.c mm_token.c)
+target_include_directories(kn_brain_mm_token_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(kn_brain_mm_token_test PRIVATE knsvc)
+add_test(NAME brain_mm_token COMMAND kn_brain_mm_token_test)
+set_tests_properties(brain_mm_token PROPERTIES LABELS "knsvc;brain")
 
 # coord-auth: auth join records / limiters and the finder table (pure, no DB).
 add_executable(kn_brain_auth_test tests/test_auth_finder.c auth_state.c finder_table.c)
@@ -165,6 +172,13 @@ if (TARGET ${SERVER_BINARY} OR TARGET server_bin)
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/restart_rejoin_e2e.py ${CMAKE_BINARY_DIR}
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_restart_rejoin_e2e PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
+        # mm-token: /mm/generate-token -> seek-game ?validationToken= -> the join ticket, the v10 seek
+        # preferences (dsmo / dsma), official krunker.io lobbies (a stub), F4 / F5 (headless client_bin;
+        # skips 77 without a database or client_bin)
+        add_test(NAME brain_mm_token_e2e
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/mm_token_e2e.py ${CMAKE_BINARY_DIR}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_mm_token_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
         # editor WP6: the map editor's publishing, My Games and asset windows (headless client_bin
         # --editor against kn_brain; skips 77 without a database, websockets or client_bin)
         add_test(NAME brain_editor_publish_e2e

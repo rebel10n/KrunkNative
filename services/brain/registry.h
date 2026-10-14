@@ -34,6 +34,7 @@ typedef struct MmLobby {
     int mode_index;                  /* meta.mode (-1 unknown) */
     char mode[32];                   /* meta.modeName */
     char map[64];
+    int map_index;                   /* meta.mapIndex: the map catalogue index (v10 seek_maps), -1 unknown */
     char version[32];                /* meta.v */
     int proto_major;                 /* meta.proto "M.m" major (-1 = not announced: a 1.x server) */
     char ruleset[8];                 /* meta.ruleset "v10" (ruleset.h; "v7" a version-toggle server on v7.1.4; "" not announced) */
@@ -179,7 +180,9 @@ typedef enum MmPickError {
     MM_PICK_NO_MATCH,              /* lobbies exist but none matches the version query */
     MM_PICK_NONE,                  /* nothing with room */
     MM_PICK_ACCOUNT_REQUIRED,      /* requested lobby refuses guests (legacy onlineMode), the player a guest, autoChangeGame off */
-    MM_PICK_INCOMPATIBLE           /* requested lobby speaks another protocol major, autoChangeGame off */
+    MM_PICK_INCOMPATIBLE,          /* requested lobby speaks another protocol major, autoChangeGame off */
+    MM_PICK_NO_PREF_MATCH          /* lobbies have room but none plays the seek modes / maps (v10
+                                    * dataQuery dsmo / dsma): NoMatchingServers */
 } MmPickError;
 
 typedef struct MmPickQuery {
@@ -202,6 +205,13 @@ typedef struct MmPickQuery {
     const char *exclude_game;      /* seek ?excludeGame= (v10 Quick Match: the lobby the player leaves):
                                     * quick join picks another lobby when one has room, else this one
                                     * (NULL/"" = none) */
+    /* v10 dataQuery dsmo / dsma (the saved seek_modes / seek_maps): quick join only takes lobbies
+     * playing one of these mode indices (meta.mode) / map indices (meta.mapIndex); none = any.
+     * A requested ?game= is not filtered. */
+    const int *modes;
+    int mode_count;
+    const int *maps;
+    int map_count;
 } MmPickQuery;
 
 typedef struct MmPick {

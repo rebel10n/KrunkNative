@@ -35,6 +35,7 @@ typedef enum { RESUME_NONE, RESUME_START, RESUME_MODE } ResumeStage;
 
 static struct {
     int requested;
+    int relaunch; // F5 (mm-token): the restart itself, not the in-place reload
     char why[32];
     double epoch; // wall clock (s): files modified later are new to this process
     // restart fallback, the new process side: "offline <map key> <mode>", "connect <host:port>",
@@ -83,11 +84,24 @@ void game_reload_startup(void) {
     g_rl.stage = RESUME_START;
     g_rl.since = -1.0;
     printf("[reload] resume after the restart: %s %s%s%s\n", kind, target, mode ? " mode " : "", mode ? mode : "");
+    if (!strcmp(kind, "game")) {
+        // a lobby: the startup seek takes it, like the web reload's ?game= (servers_ui_query), so
+        // no second seek races it (both landed in the lobby: two joins, one dropped)
+        char query[220];
+        snprintf(query, sizeof(query), "game=%s", target);
+        servers_ui_query(query);
+        g_rl.stage = RESUME_NONE;
+    }
 }
 
 void game_reload_request(const char *why) {
     g_rl.requested = 1;
     snprintf(g_rl.why, sizeof(g_rl.why), "%s", why && *why ? why : "reload");
+}
+
+void game_reload_relaunch_request(const char *why) {
+    game_reload_request(why);
+    g_rl.relaunch = 1;
 }
 
 #ifndef __EMSCRIPTEN__
@@ -296,8 +310,17 @@ void game_reload_tick(Client *client) {
     if (g_rl.requested) {
         g_rl.requested = 0;
 #ifdef __EMSCRIPTEN__
+        g_rl.relaunch = 0;
         app_reload(NULL); // location.reload(): the browser reloads everything, the address bar keeps the game
 #else
+        if (g_rl.relaunch) {
+            // F5: the client relaunches (the same command line and window, like F4 did) and the
+            // new process comes back into this session, as the web's reload keeps ?game=
+            g_rl.relaunch = 0;
+            char why[64];
+            snprintf(why, sizeof(why), "%s: relaunch", g_rl.why);
+            restart(client, why); // returns only when the exec failed: then the in-place reload
+        }
         reload_now(client);
 #endif
     }

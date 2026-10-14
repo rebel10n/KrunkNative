@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Developer console geometry and F5 full reload end-to-end test (client/src/ui/ui_console.c
+"""Developer console geometry and the console's full reload (`reload`) end-to-end test (client/src/ui/ui_console.c
 con_fit / restore_geom / console_reset, client/include/win_geom.h, client/src/game_reload.c).
 
   python3 -I server/tests/console_reload_e2e.py BUILD_DIR      (run from the repository root)
@@ -17,10 +17,11 @@ Console (headless client_bin --sandbox in the menu, input scripts, private XDG_C
 Reload (headless client_bin --offline --map kanji on a private assets tree: textures/ holds
 symlinks to the real files, shaders/ is a copy):
   4. in place: while the game runs, knSettings gets another scaleUI and every texture file turns
-     into a magenta PNG; F5: no restart, the setting applies (#uiBase scale), the world is magenta,
-     the offline game restarts on Kanji and the player moves
-  5. restart fallback: `offline Burg`, then a shader changes; F5 re-executes the client, which
+     into a magenta PNG; console `reload`: no restart, the setting applies (#uiBase scale), the world
+     is magenta, the offline game restarts on Kanji and the player moves
+  5. restart fallback: `offline Burg`, then a shader changes; `reload` re-executes the client, which
      comes back offline on Burg and plays
+(F5 relaunches the client since mm-token: server/tests/reconnect_key_e2e.py, mm_token_e2e.py.)
 Prints PASS/FAIL lines; exit code 0 only when everything passed. Needs a headless GL device
 (KRUNKNATIVE_HEADLESS=1: EGL; KRUNKNATIVE_EGL_DEVICE picks it).
 """
@@ -290,7 +291,7 @@ def reload_in_place():
 
     lines = run_client("inplace", ["--offline", "--map", "kanji"],
                        f"0 play\n1500 rect @before uiBase\n1500 shot {before_shot}\n2100 rect @mark uiBase\n"
-                       "9000 down F5\n9050 up F5\n"
+                       "9000 con reload\n"
                        f"14000 state\n14100 down W\n15100 up W\n15200 state\n15300 rect @after uiBase\n15300 shot {after_shot}\n"
                        "16000 quit\n",
                        env_extra={"KRUNKNATIVE_ASSETS_DIR": assets}, actions=[(r"\[input_script\] rect t=\d+ @mark ", change_files)])
@@ -298,7 +299,7 @@ def reload_in_place():
     check("reload: the offline game runs on Kanji", any("[sandbox] Loaded map Kanji" in l for l in lines) and st and in_game(st[0]),
           f"states {st[:1]}")
     after = [l for l in lines if "[reload]" in l]
-    check("reload: F5 reloads in place (no restart)", any("[controls] reload key" in l for l in lines) and
+    check("reload: `reload` reloads in place (no restart)", any("[reload] console: full reload" in l for l in lines) and
           any("full reload" in l for l in after) and not any("[reload] restart" in l for l in after), "; ".join(after))
     m = next((re.search(r"textures: (\d+), OBJ models: (\d+)", l) for l in after if "textures:" in l), None)
     check("reload: the cached textures and models were read again", m and int(m.group(1)) > 0, "; ".join(after))
@@ -327,12 +328,12 @@ def reload_restart():
 
     lines = run_client("restart", ["--offline", "--map", "kanji"],
                        "0 play\n1000 con offline Burg\n4000 state\n4100 rect @mark uiBase\n"
-                       "8000 down F5\n8050 up F5\n"
+                       "8000 con reload\n"
                        "12000 state\n13000 quit\n",
                        env_extra={"KRUNKNATIVE_ASSETS_DIR": assets}, actions=[(r"\[input_script\] rect t=\d+ @mark ", change_shader)],
                        timeout=240)
     restart = [l for l in lines if "[reload]" in l]
-    check("restart: a changed shader makes F5 restart the client", any(re.search(r"restart: shader .*basic\.frag changed", l) for l in restart),
+    check("restart: a changed shader makes `reload` restart the client", any(re.search(r"restart: shader .*basic\.frag changed", l) for l in restart),
           "; ".join(restart))
     check("restart: the new process comes back to the offline game on Burg",
           any(re.search(r"resume after the restart: offline \S+", l) for l in restart) and any("resume: offline" in l for l in restart),
@@ -343,7 +344,7 @@ def reload_restart():
     check("restart: Burg loaded again after the restart", burg and re.search(r"\[sandbox\] Loaded map %s mode" % burg[0],
           second.split("resume: offline")[-1]) is not None, f"Burg is map {burg}")
     st = states(second.splitlines())
-    check("restart: in game after the restart (the script's F5 there reloads in place)",
+    check("restart: in game after the restart (the script's `reload` there reloads in place)",
           any(in_game(s) for s in st) and "reload] restart" not in second.split("full reload")[-1], f"states {st}")
 
 

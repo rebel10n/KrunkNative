@@ -151,6 +151,7 @@ static void lobby_from_tuple(MmLobby *l, const MmNode *n, cJSON *tuple) {
                   : (int) kn_json_int(meta, "modeIndex", -1);
     copy_str(l->mode, sizeof(l->mode), kn_json_str(meta, "modeName", cJSON_IsString(mode) ? mode->valuestring : ""));
     copy_str(l->map, sizeof(l->map), kn_json_str(meta, "map", kn_json_str(meta, "mapName", kn_json_str(meta, "i", ""))));
+    l->map_index = (int) kn_json_int(meta, "mapIndex", -1);
     copy_str(l->version, sizeof(l->version), kn_json_str(meta, "v", ""));
     /* meta.proto "M.m" (server_bin with build info); absent = a 1.x server */
     const char *proto = kn_json_str(meta, "proto", "");
@@ -516,6 +517,20 @@ static int ruleset_ok(const MmLobby *l, const MmPickQuery *q) {
     return !l->ruleset[0] || !strcmp(l->ruleset, want);
 }
 
+/* v10 seek_modes / seek_maps (dataQuery dsmo / dsma): the lobby plays a wanted mode and map */
+static int int_in(const int *list, int count, int v) {
+    for (int i = 0; i < count; i++) {
+        if (list[i] == v) return 1;
+    }
+    return 0;
+}
+
+static int prefs_ok(const MmLobby *l, const MmPickQuery *q) {
+    if (q->mode_count > 0 && !int_in(q->modes, q->mode_count, l->mode_index)) return 0;
+    if (q->map_count > 0 && !int_in(q->maps, q->map_count, l->map_index)) return 0;
+    return 1;
+}
+
 static int lobby_outdated(const MmLobby *l, const MmPickQuery *q) {
     return q->outdated ? q->outdated(l, q->outdated_ud) != 0 : 0;
 }
@@ -559,7 +574,7 @@ static int pick_public(Registry *r, const MmPolicy *p, const MmPickQuery *q, con
         for (size_t j = 0; j < n->lobby_count; j++) {
             MmLobby *l = &n->lobbies[j];
             if (l->custom || l->no_seek || !lobby_joinable(n, l) || !lobby_auto_ok(n, l, q) ||
-                !version_ok(l, q->version) || !proto_ok(l, q) || !ruleset_ok(l, q) ||
+                !version_ok(l, q->version) || !proto_ok(l, q) || !ruleset_ok(l, q) || !prefs_ok(l, q) ||
                 (exclude && !strcmp(l->game_id, exclude)))
                 continue;
             int taken = registry_lobby_taken(r, l, q->now_ms);
@@ -622,17 +637,21 @@ MmPickError registry_pick(Registry *r, const MmPolicy *p, const MmPickQuery *q, 
     }
     /* 4. nothing with room (the v3.1.1 overflow pick would put a player into a
      *    full lobby; the game server would refuse it, so report it instead). */
-    int any = 0, any_version = 0;
+    int any = 0, any_version = 0, any_room = 0;
     for (size_t i = 0; i < r->node_count; i++) {
         for (size_t j = 0; j < r->nodes[i]->lobby_count; j++) {
             const MmLobby *l = &r->nodes[i]->lobbies[j];
             if (l->custom || l->no_seek || !lobby_auto_ok(r->nodes[i], l, q)) continue;
             any = 1;
-            if (version_ok(l, q->version) && proto_ok(l, q) && ruleset_ok(l, q)) any_version = 1;
+            if (!version_ok(l, q->version) || !proto_ok(l, q) || !ruleset_ok(l, q)) continue;
+            any_version = 1;
+            /* a seat for this client, only not in a wanted mode / map */
+            if (lobby_joinable(r->nodes[i], l) && registry_lobby_taken(r, l, q->now_ms) < registry_lobby_cap(l, p)) any_room = 1;
         }
     }
     out->changed = 0;
-    return any && !any_version ? MM_PICK_NO_MATCH : MM_PICK_NONE;
+    if (any && !any_version) return MM_PICK_NO_MATCH;
+    return any_room && (q->mode_count > 0 || q->map_count > 0) ? MM_PICK_NO_PREF_MATCH : MM_PICK_NONE;
 }
 
 static int node_host_free(const Registry *r, const MmNode *n, int authed, int64_t now_ms) {

@@ -1366,7 +1366,7 @@ static void register_commands(void) {
     register_local("quit", NO_ARGS, "close the window", cmd_quit);
     register_local("reconnect", NO_ARGS, "reconnect to the last server", cmd_reconnect);
     register_local("logout", NO_ARGS, "log out of your account (the menu's Logout)", cmd_logout);
-    register_local("reload", NO_ARGS, "full reload (F5): settings, binds, textures, models, sounds, shaders, menu; then rejoin", cmd_reload);
+    register_local("reload", NO_ARGS, "full reload in place (F5 relaunches): settings, binds, textures, models, sounds, shaders, menu; then rejoin", cmd_reload);
     register_local("console_reset", NO_ARGS, "put the console back at its default place and size", cmd_console_reset);
     register_local("offline", ARGS(A_MAP_OPT), "switch to offline mode (the in-process server), optionally on a map", cmd_offline);
     register_local("sandbox", NO_ARGS, "play offline on the sandbox (editor test) map", cmd_sandbox);

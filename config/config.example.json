@@ -44,6 +44,7 @@
     "internal_secret": "kn-dev-secret",
     "join_secret": "",
     "join_ttl_s": 30,
+    "validation_secret": "",
     "cors_origins": [
       "*"
     ],
@@ -76,7 +77,10 @@
       "max_players": 8,
       "soft_cap": 0,
       "require_version": false,
-      "mode_caps": {}
+      "mode_caps": {},
+      "require_validation_token": false,
+      "validation_ttl_s": 60,
+      "validation_bind_ip": false
     },
     "ranked": {
       "enabled": true,

@@ -1,7 +1,8 @@
 // The rest of the v3.1.1 offline build's client mod keys
 // (/home/user/jails/kru/src/Krunker_v3.1.1/mod/mods.ts), ported 1:1:
 //   - the document keydown switch: F1 io.send("clearLog") + console.clear(), F4
-//     location.href = "/", F6 window.open("editor.html"),
+//     location.href = "/" (KrunkNative: Find New Game, a seek without a reload: Krunker's own
+//     client's F4; servers_ui_find_new_game), F6 window.open("editor.html"),
 //     T toggles Ctrl TP (localStorage "ctrlTp", notify "Ctrl TP - Enabled/Disabled");
 //     F1/F4/T are ignored while an INPUT/TEXTAREA has focus, F6 never is. Its F5
 //     location.reload() is the Reconnect bind now (ui_controls.c reconnect_key: rebindable,
@@ -14,6 +15,7 @@
 // its bind matching; ui_controls_mouse_event calls ui_mod_keys_ctrl_tp_mouse.
 #include <ui_logic.h>
 #include <app_mode.h>
+#include <backend_ui.h> // servers_ui_find_new_game (F4)
 #include <html_ui.h>
 #include <GLFW/glfw3.h>
 #include <math.h>
@@ -57,8 +59,12 @@ int ui_mod_keys_keydown(Client *client, const int key, const int input) {
     switch (key) {
         // F1 (mods.ts: clearLog + console.clear()) is the Game Settings bind now (ui_controls.c)
         case GLFW_KEY_F4:
+            // Krunker's client: F4 = Find New Game. A new seek per Settings > Quickplay
+            // (servers_ui_find_new_game: excludes this lobby; official lobbies open in the
+            // browser), never a relaunch (that is F5 now, ui_controls.c reload_key).
             if (input) return 0;
-            app_reload("/"); // location.href = "/"
+            printf("[controls] F4: find new game\n");
+            if (!servers_ui_find_new_game()) ui_notify("Find New Game needs the matchmaker (offline or a direct server)");
             return 0;
         case GLFW_KEY_F6:
             printf("Creating editor window\n");

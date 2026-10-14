@@ -485,6 +485,43 @@ int main(void) {
         registry_free(f);
     }
 
+    /* mm-token: v10 seek_modes / seek_maps (dataQuery dsmo / dsma) */
+    {
+        Registry *m = registry_new();
+        MmPolicy pm = {.cross_region = 1, .default_max_players = 8};
+        MmNode *a = add_node(m, "MA", "eu", 0), *b = add_node(m, "MB", "eu", 0);
+        cJSON *ta = cJSON_Parse("[\"x\",\"eu\",3,8,{\"i\":\"Burg\",\"mode\":0,\"mapIndex\":0}]");
+        cJSON *tb = cJSON_Parse("[\"y\",\"eu\",1,8,{\"i\":\"Sandstorm\",\"mode\":1,\"mapIndex\":5}]");
+        CHECK(registry_lobby_upsert(m, a, ta) == 0 && registry_lobby_upsert(m, b, tb) == 0);
+        cJSON_Delete(ta);
+        cJSON_Delete(tb);
+        CHECK(registry_lobby(m, "MB:y", NULL)->map_index == 5);
+        const int tdm[] = {1}, burg[] = {0}, none[] = {7}, either[] = {9, 0};
+        MmPickQuery qm = {.region = "eu", .auto_change = 1, .now_ms = 2000};
+        CHECK(registry_pick(m, &pm, &qm, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "MA:x")); /* fuller */
+        qm.modes = tdm, qm.mode_count = 1;
+        CHECK(registry_pick(m, &pm, &qm, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "MB:y"));
+        qm.maps = burg, qm.map_count = 1; /* mode 1 and map 0: nothing plays both */
+        CHECK(registry_pick(m, &pm, &qm, &pick) == MM_PICK_NO_PREF_MATCH);
+        qm.modes = NULL, qm.mode_count = 0;
+        CHECK(registry_pick(m, &pm, &qm, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "MA:x"));
+        qm.maps = either, qm.map_count = 2;
+        CHECK(registry_pick(m, &pm, &qm, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "MA:x"));
+        qm.maps = none, qm.map_count = 1;
+        CHECK(registry_pick(m, &pm, &qm, &pick) == MM_PICK_NO_PREF_MATCH);
+        MmPickQuery qid = qm; /* a requested game is never filtered */
+        qid.game_id = "MB:y";
+        CHECK(registry_pick(m, &pm, &qid, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "MB:y") && !pick.changed);
+        /* every lobby full: no seat at all, whatever the prefs (Servers are at Max Capacity) */
+        cJSON *fa = cJSON_Parse("[\"x\",\"eu\",8,8,{\"i\":\"Burg\",\"mode\":0,\"mapIndex\":0}]");
+        cJSON *fb = cJSON_Parse("[\"y\",\"eu\",8,8,{\"i\":\"Sandstorm\",\"mode\":1,\"mapIndex\":5}]");
+        CHECK(registry_lobby_upsert(m, a, fa) == 0 && registry_lobby_upsert(m, b, fb) == 0);
+        cJSON_Delete(fa);
+        cJSON_Delete(fb);
+        CHECK(registry_pick(m, &pm, &qm, &pick) == MM_PICK_NONE);
+        registry_free(m);
+    }
+
     /* remote refresh */
     registry_remote_begin(r);
     MmNode *rm = registry_remote_node(r, "SGP");

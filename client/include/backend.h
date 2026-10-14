@@ -53,6 +53,12 @@ int backend_http_get(const char *path, BackendHttpFn fn, void *user);
 // with OpenSSL (KRUNKNATIVE_HAVE_TLS); web uses fetch(). Same callback rules as above;
 // status is the HTTP status (204 has an empty body), 0 = transport error.
 int backend_http_request(const char *method, const char *url, const char *json_body, BackendHttpFn fn, void *user);
+#ifndef __EMSCRIPTEN__
+// Native: GET of a URL on another host (krunker.io's game list, krunker_lobbies.c) on its own
+// worker, with its own connect / receive timeout, so it never queues behind (or delays) the
+// brain's requests. Same callback rules as backend_http_get.
+int backend_http_get_external(const char *url, int timeout_ms, BackendHttpFn fn, void *user);
+#endif
 
 // Main thread, once per frame: delivers HTTP completions and social frames.
 void backend_poll(void);

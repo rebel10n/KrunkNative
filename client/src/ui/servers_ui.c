@@ -24,6 +24,8 @@
 #include <game_config.h> // WP-E host types (GAME_HOST_CUSTOM, hostTypes titles)
 #include <ui_host_config.h> // WP-E: the Host Game window's mode / advanced / server bodies
 #include <server_names.h>  // short ?game= ids (CH2:kz862 for CHITOWN2:kz862)
+#include <seek_prefs.h>    // Settings > Quickplay: seek mode / map / server type (mm-token)
+#include <krunker_lobbies.h> // official krunker.io lobbies (native only, mm-token)
 #include <strings.h>
 #include <ctype.h>
 #include <math.h>
@@ -62,6 +64,11 @@ static char g_game_region[32];   // its region (the seek answer's), for the shor
 static int g_seek_inflight;
 static char g_seek_game[160];    // the game id the running seek asked for ("" = any)
 static char g_account_game[160]; // AccountRequired: the lobby a guest was refused (joined after login)
+// Find New Game (F4) / Quick Match (servers_ui_find_new_game): the seek in flight is one, made
+// from this lobby (restored when it finds nothing: the player stays in the game, told by a toast),
+// and with server type Both an official krunker.io lobby is the fallback
+static int g_find_seek, g_find_both;
+static char g_find_prev_game[160];
 static void page_game_url(const char *id, const char *region);
 // Source-console style pinning: a server the user picked by hand (console `connect`, Direct
 // Connect, the finder list) or a console `disconnect` is never overridden by automatic
@@ -296,7 +303,20 @@ static const char *seek_error_text(const char *error) {
     // guests (every current server admits them, as Krunker's do); the error screen adds a
     // "Log in" link (servers_ui_account_required)
     if (!strcmp(error, "AccountRequired")) return "This game requires an account.";
+    // v10.0.2: the seek preferences matched nothing (matchmaker.NoMatchingServers) and the
+    // validation token refusals (ClientManager ERRORS, v10.js:147687-147692)
+    if (!strcmp(error, "NoMatchingServers")) return "No Games Found. Try changing Quickplay options";
+    if (!strcmp(error, "InvalidClientValidationToken")) return "Socket Error";
+    if (!strcmp(error, "InvalidClientIP")) return "Socket Mismatch";
+    if (!strcmp(error, "ExpiredClientValidationToken")) return "Validation Error";
+    if (!strcmp(error, "InvalidClientValidationTokenData")) return "Data Error";
+    if (!strcmp(error, "TooManyRequests")) return "Too many requests, try again in a minute";
     return error;
+}
+
+static int token_refusal(const char *error) {
+    return error && (!strcmp(error, "InvalidClientValidationToken") || !strcmp(error, "ExpiredClientValidationToken") ||
+                     !strcmp(error, "InvalidClientValidationTokenData") || !strcmp(error, "InvalidClientIP"));
 }
 
 // The error screen of an AccountRequired seek offers "Log in" (menu_ui.c).
@@ -484,18 +504,61 @@ static void fatal_error(const char *message) {
     on_client_socket_failed(g_client, message);
 }
 
+// A seek in flight (mm-token, doc/v10/matchmaker-token.md): GET /mm/generate-token, then
+// /mm/seek-game with that ?validationToken= (Krunker's WP_MMToken / fetchValidationToken).
+typedef struct SeekReq {
+    char *path;   // /mm/seek-game?... without the token
+    void *quiet;  // quick join: try the next candidate instead of failing
+    int retried;  // a refused token was replaced once
+} SeekReq;
+
+static void seek_req_free(SeekReq *r) {
+    if (!r) return;
+    free(r->path);
+    free(r);
+}
+
+static void seek_unreachable(void);
+static void on_token(void *user, int status, const char *body, size_t length);
+
+static int seek_request_token(SeekReq *r) {
+    return backend_http_get("/mm/generate-token", on_token, r);
+}
+
 static void on_seek(void *user, const int status, const char *body, const size_t length) {
     (void) length;
-    const int quiet = user != NULL; // quick join: try the next candidate instead of failing
+    SeekReq *req = user;
+    const int quiet = req && req->quiet != NULL;
     const int rejoin = g_rejoin_seek;
+    const int find = g_find_seek, find_both = g_find_both;
     g_seek_inflight = 0;
     g_rejoin_seek = 0;
+    g_find_seek = g_find_both = 0;
     if (g_pin != PIN_NONE) {
         // the user connected to / disconnected from a server by hand while this seek ran
         printf("[mm] seek answer ignored: %s\n", g_pin == PIN_DIRECT ? "pinned to a direct server" : "disconnected by the user");
+        seek_req_free(req);
         return;
     }
     cJSON *res = cJSON_Parse(body);
+    const char *refused = cJSON_GetStringValue(cJSON_GetObjectItem(res, "error"));
+    if (status == 403 && token_refusal(refused) && req && !req->retried) {
+        // a token spent or expired on the way (a slow link, a brain restart): once more with a
+        // fresh one, keeping the seek's state
+        printf("[mm] validation token refused (%s): seeking again with a fresh one\n", refused);
+        req->retried = 1;
+        g_seek_inflight = 1;
+        g_rejoin_seek = rejoin;
+        g_find_seek = find;
+        g_find_both = find_both;
+        cJSON_Delete(res);
+        if (!seek_request_token(req)) {
+            seek_req_free(req);
+            seek_unreachable();
+        }
+        return;
+    }
+    seek_req_free(req);
     const cJSON *host = cJSON_GetObjectItem(res, "host");
     const cJSON *port = cJSON_GetObjectItem(res, "port");
     if (status == 200 && cJSON_IsString(host) && cJSON_IsNumber(port)) {
@@ -524,6 +587,22 @@ static void on_seek(void *user, const int status, const char *body, const size_t
             return;
         }
         if (rejoin) rejoin_cancel(); // gave up: the seek's error below
+        const int nothing = cJSON_IsString(err) && (!strcmp(err->valuestring, "NoMatchingServers") ||
+                                                    !strcmp(err->valuestring, "NoAvailableServers") ||
+                                                    !strcmp(err->valuestring, "NoServersMatchQuery"));
+        if (find && (nothing || g_client->net_connected)) {
+            // Find New Game / Quick Match found nothing here: the player stays in this lobby
+            snprintf(g_game_id, sizeof(g_game_id), "%s", g_find_prev_game);
+            if (find_both && nothing && krunker_lobbies_seek()) { // Both: an official lobby instead
+                printf("[mm] find new game: no KrunkNative server matches, trying krunker.io\n");
+            } else {
+                printf("[mm] find new game failed: %s\n", cJSON_IsString(err) ? err->valuestring : "no response");
+                ui_notify(seek_error_text(cJSON_IsString(err) ? err->valuestring : status ? "GameFull" : NULL));
+                if (!g_client->net_connected) fatal_error(seek_error_text(cJSON_IsString(err) ? err->valuestring : status ? "GameFull" : NULL));
+            }
+            cJSON_Delete(res);
+            return;
+        }
         if (cJSON_IsString(err) && !strcmp(err->valuestring, "AccountRequired") && g_seek_game[0]) {
             snprintf(g_account_game, sizeof(g_account_game), "%s", g_seek_game); // log in -> join it
         }
@@ -557,22 +636,70 @@ static void seek(const char *game_id, const int auto_change, void *quiet) {
         n += snprintf(path + n, sizeof(path) - (size_t) n, "&excludeGame=%s", enc);
     }
     g_exclude_game[0] = 0;
+    // v10 dataQuery: the saved seek_modes / seek_maps (Settings > Quickplay) as dsmo / dsma; a
+    // requested game is never filtered (the brain ignores them for it anyway)
+    char data_query[128];
+    seek_prefs_data_query(data_query, sizeof(data_query));
+    if (data_query[0] && !(game_id && game_id[0])) {
+        backend_url_encode(enc, sizeof(enc), data_query);
+        n += snprintf(path + n, sizeof(path) - (size_t) n, "&dataQuery=%s", enc);
+    }
     if (account_get() && account_session_token()[0]) {
         backend_url_encode(enc, sizeof(enc), account_session_token());
         snprintf(path + n, sizeof(path) - (size_t) n, "&token=%s", enc);
     }
     g_seek_inflight = 1;
-    if (!backend_http_get(path, on_seek, quiet)) {
-        g_seek_inflight = 0;
-        if (g_rejoin_seek && (g_rejoin == REJOIN_RESTART || g_rejoin == REJOIN_DROP) && glfwGetTime() + REJOIN_RETRY_DELAY < g_rejoin_until) {
-            g_rejoin_seek = 0;
-            g_rejoin_at = glfwGetTime() + REJOIN_RETRY_DELAY; // the restart rejoin tries again
-            return;
-        }
-        g_rejoin_seek = 0;
-        rejoin_cancel();
-        fatal_error("Could not reach the matchmaker");
+    SeekReq *req = calloc(1, sizeof(*req));
+    if (req) req->path = strdup(path);
+    if (req) req->quiet = quiet;
+    if (!req || !req->path || !seek_request_token(req)) {
+        seek_req_free(req);
+        seek_unreachable();
     }
+}
+
+// The matchmaker cannot be asked (no brain URL, out of memory): a restart rejoin tries again,
+// anything else shows the error.
+static void seek_unreachable(void) {
+    g_seek_inflight = 0;
+    g_find_seek = g_find_both = 0;
+    if (g_rejoin_seek && (g_rejoin == REJOIN_RESTART || g_rejoin == REJOIN_DROP) && glfwGetTime() + REJOIN_RETRY_DELAY < g_rejoin_until) {
+        g_rejoin_seek = 0;
+        g_rejoin_at = glfwGetTime() + REJOIN_RETRY_DELAY; // the restart rejoin tries again
+        return;
+    }
+    g_rejoin_seek = 0;
+    rejoin_cancel();
+    fatal_error("Could not reach the matchmaker");
+}
+
+// /mm/generate-token answered: plain text (Krunker's matchmaker too). A brain from before the
+// token (404), one without a key (503) or a rate limit (429): the seek goes without one, which
+// such a brain accepts (a brain requiring tokens refuses it with the error shown). A transport
+// error: the seek itself reports the unreachable matchmaker the same way.
+static void on_token(void *user, const int status, const char *body, const size_t length) {
+    SeekReq *req = user;
+    char *path = req->path;
+    char *full = NULL;
+    if (status == 200 && body && length > 0 && length < 1024) {
+        char token[1024];
+        size_t len = length;
+        while (len && (body[len - 1] == '\n' || body[len - 1] == '\r' || body[len - 1] == ' ')) len--; // .trim()
+        snprintf(token, sizeof(token), "%.*s", (int) len, body);
+        char enc[3 * 1024];
+        backend_url_encode(enc, sizeof(enc), token);
+        const size_t cap = strlen(path) + strlen(enc) + 32;
+        full = malloc(cap);
+        if (full) snprintf(full, cap, "%s&validationToken=%s", path, enc);
+        printf("[mm] validation token (%zu chars)%s\n", len, req->retried ? ", fresh after a refusal" : "");
+    } else {
+        printf("[mm] no validation token (generate-token HTTP %d): seeking without one\n", status);
+    }
+    if (!backend_http_get(full ? full : path, on_seek, req)) {
+        seek_req_free(req);
+        seek_unreachable();
+    }
+    free(full);
 }
 
 // ClientManager.getRegion(): the cached region when the brain still lists it, else
@@ -613,6 +740,7 @@ static void start_seek(const char *game_id) {
     char *copy = game_id && game_id[0] ? strdup(game_id) : NULL;
     if (!backend_http_get("/mm/ping-list", on_ping_list, copy)) {
         free(copy);
+        g_find_seek = g_find_both = 0;
         fatal_error("Could not reach the matchmaker");
     }
 }
@@ -814,8 +942,24 @@ static int search_matches(const cJSON *t) {
     server_display_name(node, tuple_str(t, 1), proper, sizeof(proper));
     return str_has_ci(h, g_search) || str_has_ci(node, g_search) || str_has_ci(label, g_search) || str_has_ci(alias, g_search) ||
            str_has_ci(label2, g_search) || str_has_ci(tuple_str(t, 1), g_search) || str_has_ci(region_full_name(tuple_str(t, 1)), g_search) ||
-           str_has_ci(short_node, g_search) || str_has_ci(proper, g_search);
+           str_has_ci(short_node, g_search) || str_has_ci(proper, g_search) ||
+           (meta_flag(t, "krunker") && (str_has_ci("krunker.io", g_search) || str_has_ci(krunker_region_name(tuple_str(t, 1)), g_search)));
 }
+
+// mm-token: an official krunker.io lobby (krunker_lobbies.c), joined in the browser
+static int row_krunker(const cJSON *t) { return meta_flag(t, "krunker"); }
+
+// Settings > Quickplay: the browser shows the server type's lists, rows of the seek mode / map
+static int row_prefs_match(const cJSON *t) {
+    const GameModeConfig *mode = row_mode(t);
+    int id = -1;
+    int count = 0;
+    const GameModeConfig *list = mode_list(&count);
+    if (mode && list) id = (int) (mode - list);
+    const char *map = meta_str(t, "map")[0] ? meta_str(t, "map") : row_i(t);
+    return seek_prefs_match(id, map);
+}
+static int prefs_filtering(void) { return seek_prefs_mode() >= 0 || seek_prefs_map() >= 0; }
 
 typedef struct {
     char key[32];       // "official", "custom", a region id or a mode alias
@@ -826,6 +970,7 @@ typedef struct {
     const cJSON *games[256];
     int game_count;
 } ServerGroup;
+#define SERVER_GROUPS_MAX 48 // ours + the official krunker.io regions (mm-token)
 
 // A fixed game list instead of the brain's (servers_ui_set_games: --render-scenario
 // `state.servers`, KRUNKNATIVE_SERVER_LIST=<file.json> {"games": [...], "totalPlayerCount": n}).
@@ -949,6 +1094,8 @@ static int cmp_groups_order(const void *a, const void *b) {
 }
 static int cmp_groups_players(const void *a, const void *b) {
     const ServerGroup *x = a, *y = b;
+    const int kx = !strncmp(x->key, "kio:", 4), ky = !strncmp(y->key, "kio:", 4);
+    if (kx != ky) return kx - ky; // krunker.io's groups after ours (mm-token)
     if (y->players != x->players) return y->players > x->players ? 1 : -1;
     return x->region_rank - y->region_rank;
 }
@@ -981,7 +1128,13 @@ static int build_groups(ServerGroup *groups, const int max) {
     memset(groups, 0, sizeof(*groups) * (size_t) max);
     int count = 0;
     rebuild_finder_rows();
-    const cJSON *lists[2] = {brain_games(), g_finder_rows};
+    // mm-token: Settings > Quickplay's server type picks the lists (the official krunker.io
+    // lobbies natively only, krunker_lobbies.c: their own groups after ours)
+    const SeekServers type = seek_prefs_servers();
+    const int ours = type != SEEK_SERVERS_OFFICIAL;
+    const cJSON *lists[3] = {ours ? brain_games() : NULL, ours ? g_finder_rows : NULL,
+                             type != SEEK_SERVERS_KN ? krunker_lobbies_list() : NULL};
+    const int filter = prefs_filtering();
     if (old_browser()) {
         snprintf(groups[0].key, sizeof(groups[0].key), "official");
         snprintf(groups[0].name, sizeof(groups[0].name), "Official Customs");
@@ -991,11 +1144,26 @@ static int build_groups(ServerGroup *groups, const int max) {
         groups[1].order = 1;
         groups[1].region_rank = 1;
         count = 2;
-        for (int l = 0; l < 2; l++) {
+        for (int l = 0; l < 3; l++) {
             const cJSON *t;
             cJSON_ArrayForEach(t, lists[l]) {
                 const char *region = tuple_str(t, 1);
-                if (!meta_of(t) || (only_default && strcmp(def, region))) continue;
+                if (!meta_of(t) || (filter && !row_prefs_match(t))) continue;
+                if (row_krunker(t)) { // official lobbies: one group per Krunker region, after ours
+                    char key[32];
+                    snprintf(key, sizeof(key), "kio:%s", region);
+                    int gi = find_group(groups, count, key);
+                    if (gi < 0 && count < max) {
+                        ServerGroup *g = &groups[count];
+                        snprintf(g->key, sizeof(g->key), "%s", key);
+                        snprintf(g->name, sizeof(g->name), "krunker.io - %s", krunker_region_name(region));
+                        g->region_rank = 1000 + count;
+                        gi = count++;
+                    }
+                    if (gi >= 0) group_push(&groups[gi], t);
+                    continue;
+                }
+                if (only_default && strcmp(def, region)) continue;
                 if (find_group(groups, count, region) < 0 && count < max) {
                     ServerGroup *g = &groups[count];
                     snprintf(g->key, sizeof(g->key), "%s", region);
@@ -1031,13 +1199,28 @@ static int build_groups(ServerGroup *groups, const int max) {
         groups[count].region_rank = count;
         count++;
     }
-    for (int l = 0; l < 2; l++) {
+    for (int l = 0; l < 3; l++) {
         const cJSON *t;
         cJSON_ArrayForEach(t, lists[l]) {
             const int custom = row_custom(t) && !row_official(t);
-            if (!meta_of(t) || (only_default && strcmp(def, tuple_str(t, 1)))) continue;
+            if (!meta_of(t) || (filter && !row_prefs_match(t))) continue;
+            if (!row_krunker(t) && only_default && strcmp(def, tuple_str(t, 1))) continue;
             if ((g_server_tab == 0 && custom) || (g_server_tab == 1 && !custom)) continue;
-            const int gi = find_group(groups, count, row_alias(t));
+            int gi;
+            if (row_krunker(t)) { // official lobbies: their own mode groups
+                char key[32];
+                snprintf(key, sizeof(key), "kio:%s", row_alias(t));
+                gi = find_group(groups, count, key);
+                if (gi < 0 && count < max && row_mode(t)) {
+                    ServerGroup *g = &groups[count];
+                    snprintf(g->key, sizeof(g->key), "%s", key);
+                    snprintf(g->name, sizeof(g->name), "krunker.io - %s", row_mode(t)->name ? row_mode(t)->name : row_alias(t));
+                    g->region_rank = 1000 + count;
+                    gi = count++;
+                }
+            } else {
+                gi = find_group(groups, count, row_alias(t));
+            }
             if (gi >= 0) group_push(&groups[gi], t);
         }
     }
@@ -1092,7 +1275,8 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
     const char *alias = row_alias(t);
     const int custom = row_custom(t), official = row_official(t), dedicated = row_dedicated(t);
     const int finder = meta_flag(t, "finder");
-    const int current = !finder && g_game_id[0] && !strcmp(g_game_id, id);
+    const int krunker = row_krunker(t); // mm-token: an official krunker.io lobby
+    const int current = !finder && !krunker && g_game_id[0] && !strcmp(g_game_id, id);
     char def[32] = "";
     default_region(def, sizeof(def));
     StrBuf name = {0};
@@ -1107,7 +1291,12 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
     sb_append(sb, "<div class='settName settNameIn' onmouseenter='playTick()'style='");
     if (current) sb_append(sb, "color:#fff !important;");
     sb_append(sb, "padding-top:10px;margin-top:0px;' onclick='playSelect(0.1);");
-    if (finder) {
+    if (krunker) {
+        // Krunker's protocol is not ours: krunker.io/?game=<id> in the system browser
+        sb_append(sb, "krunkerJoin(\"");
+        sb_append_esc(sb, id);
+        sb_append(sb, "\")' title='Opens in your browser: krunker.io games cannot be joined in this client'>");
+    } else if (finder) {
         // a finder-only server: joined directly (finderJoin(host, port))
         sb_append(sb, "finderJoin(\"");
         sb_append_esc(sb, meta_str(t, "host"));
@@ -1128,6 +1317,7 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
     } else {
         sb_append(sb, "[YEND] ");
     }
+    if (krunker) sb_append(sb, " <div class='krIcon kioTag' style='margin-top:-14px;vertical-align:middle;background-color:#7b1fa2;'>KRUNKER.IO</div> ");
     if (official) sb_append(sb, " <div class='krIcon' style='margin-top:-14px;vertical-align:middle;background-color: var(--green);'>OFFICIAL</div> ");
     if (official || dedicated) sb_append(sb, " <div class='krIcon' style='margin-top:-14px;vertical-align:middle;background-color: var(--blue);'>24/7</div> ");
     sb_append_esc(sb, name.data ? name.data : "");
@@ -1152,6 +1342,7 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
             char *colon = strchr(node, ':');
             if (colon) *colon = 0;
             if (finder) snprintf(proper, sizeof(proper), "%s", node);
+            else if (krunker) snprintf(proper, sizeof(proper), "%s", krunker_region_name(tuple_str(t, 1)));
             else server_display_name(node, tuple_str(t, 1), proper, sizeof(proper));
             sb_append(sb, " title='");
             sb_append_esc(sb, node);
@@ -1174,8 +1365,8 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
 }
 
 static char *get_servers(void) {
-    static ServerGroup groups[32];
-    const int count = build_groups(groups, 32);
+    static ServerGroup groups[SERVER_GROUPS_MAX];
+    const int count = build_groups(groups, SERVER_GROUPS_MAX);
     const int old = old_browser();
     const int hide = hide_full();
     const double now = now_ms();
@@ -1193,8 +1384,10 @@ static char *get_servers(void) {
         }
         sb_appendf(&sb, "><span class='material-icons plusOrMinus'>%s</span> ", open ? "expand_more" : "navigate_next");
         sb_append_esc(&sb, g->name);
-        sb_appendf(&sb, "<span style='float:right;color:rgba(255,255,255,0.9)'>%.0f <span style='color:rgba(255,255,255,0.6)'>online</span></span><div class='quickJoin' onclick='quickJoinRegion(%d,%d)'>Quick Join</div></div>",
-                   g->players, h, old ? 0 : 1);
+        const int kio = !strncmp(g->key, "kio:", 4); // official krunker.io lobbies: no Quick Join here
+        sb_appendf(&sb, "<span style='float:right;color:rgba(255,255,255,0.9)'>%.0f <span style='color:rgba(255,255,255,0.6)'>online</span></span>", g->players);
+        if (kio) sb_append(&sb, "<div class='quickJoin' style='opacity:0.6' title='krunker.io games open in your browser'>krunker.io</div></div>");
+        else sb_appendf(&sb, "<div class='quickJoin' onclick='quickJoinRegion(%d,%d)'>Quick Join</div></div>", h, old ? 0 : 1);
         if (!open) continue;
         sb_append(&sb, "<div class='setBodH' style='padding-top:10px;padding-bottom:10px;'>");
         int shown = 0, kept = 0;
@@ -1265,6 +1458,30 @@ static void append_finder_error(StrBuf *sb) {
     sb_append(sb, " <span style='color:rgba(255,255,255,0.5)'>(");
     sb_append_esc(sb, online_finder_url());
     sb_append(sb, ")</span></div>");
+}
+
+// mm-token: what Settings > Quickplay does to the list (the seek mode / map filter) and the
+// official krunker.io lobbies' state (native, server type Official / Both).
+static void append_seek_status(StrBuf *sb) {
+    static const char *const box = "class='setBodH' style='padding:10px;margin-left:0px;width:calc(100% - 40px);";
+    if (prefs_filtering()) {
+        char want[128];
+        seek_prefs_describe(want, sizeof(want));
+        sb_appendf(sb, "<div id='knSeekFilter' %scolor:rgba(255,255,255,0.7)'>Showing ", box);
+        sb_append_esc(sb, want);
+        sb_append(sb, " (Settings &gt; General &gt; Quickplay)</div>");
+    }
+    if (seek_prefs_servers() == SEEK_SERVERS_KN || !krunker_lobbies_enabled()) return;
+    if (!krunker_lobbies_list() && krunker_lobbies_loading()) {
+        sb_appendf(sb, "<div id='kioStatus' %scolor:rgba(255,255,255,0.7)'>Loading the official krunker.io lobbies...</div>", box);
+    } else if (krunker_lobbies_error()[0]) {
+        sb_appendf(sb, "<div id='kioStatus' %scolor:#ff6b6b'>Official lobbies unavailable: ", box);
+        sb_append_esc(sb, krunker_lobbies_error());
+        sb_append(sb, "</div>");
+    } else {
+        sb_appendf(sb, "<div id='kioStatus' %scolor:rgba(255,255,255,0.7)'><span style='color:#ce93d8'>KRUNKER.IO</span> lobbies "
+                       "open in your browser: this client can't join krunker.io games.</div>", box);
+    }
 }
 
 // Leave the brain's lobby (if any) and connect straight to host:port.
@@ -1622,6 +1839,7 @@ static char *gen_list(void) {
     if (hide_full()) sb_append(&sb, " checked");
     sb_append(&sb, "><span class='slider2'></span></label></div></div></div><div style='height:10px'></div>");
     append_finder_error(&sb);
+    append_seek_status(&sb);
     char *servers = get_servers();
     if (old) {
         // the custom-games carousel (customsInfo.length >= 3) needs user-assets thumbnails: not shown
@@ -1693,6 +1911,7 @@ char *servers_window_gen(const int id, const char **header) {
     if (id == MENU_WINDOW_HOST) return host_window_gen();
     if (id != 2) return NULL;
     finder_refresh(); // the server finder (both modes), then the brain's own lobbies when there is one
+    if (seek_prefs_servers() != SEEK_SERVERS_KN) krunker_lobbies_refresh(0); // official lobbies (native, cached)
     if (backend_available() != 1 || g_games_override) {
         // no brain: the finder's servers when there is a finder, else the empty list (what
         // v7 shows when client.fetchGameList() has no game)
@@ -1760,13 +1979,13 @@ void servers_quick_join_next(void) {
 }
 
 static void quick_join_region(const int index) {
-    static ServerGroup groups[32];
-    const int count = build_groups(groups, 32);
+    static ServerGroup groups[SERVER_GROUPS_MAX];
+    const int count = build_groups(groups, SERVER_GROUPS_MAX);
     for (int i = 0; i < g_quick_join_count; i++) free(g_quick_join[i]);
     free(g_quick_join);
     g_quick_join = NULL;
     g_quick_join_count = g_quick_join_next = 0;
-    if (index < 0 || index >= count) return;
+    if (index < 0 || index >= count || !strncmp(groups[index].key, "kio:", 4)) return; // krunker.io: browser only
     const ServerGroup *g = &groups[index];
     g_quick_join = calloc((size_t) g->game_count + 1, sizeof(char *));
     int brain_rows = 0;
@@ -1894,6 +2113,10 @@ int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         if (argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str) snprintf(text, sizeof(text), "%s", args[0].str);
         else if (input) html_dom_get_value(input, text, sizeof(text));
         connect_server(text);
+        return 1;
+    }
+    if (!strcmp(name, "krunkerJoin")) { // an official krunker.io lobby: the system browser
+        if (argc > 0 && args[0].kind == HTML_ARG_STR) krunker_lobbies_open(args[0].str); // the list stays open
         return 1;
     }
     if (!strcmp(name, "finderJoin")) {
@@ -2724,14 +2947,34 @@ int servers_ui_retry(void) {
 // a fresh public lobby other than this one ("If you quickly want to move away from your current
 // game mode, press the Quick Match button", the guide). Natively the seek runs in place, like
 // servers_ui_retry. 0 = no matchmaking in this session (offline, no brain, direct server).
-int servers_ui_quick_match(void) {
-    if (!g_brain_mode || g_pin == PIN_DIRECT) return 0;
+static int quick_match_seek(void) {
     snprintf(g_exclude_game, sizeof(g_exclude_game), "%s", g_game_id);
     printf("[mm] quick match: seeking a lobby other than %s\n", g_exclude_game[0] ? g_exclude_game : "(none)");
     g_pin = PIN_NONE;
     g_game_id[0] = 0;
     start_seek(NULL); // /mm/ping-list, then the seek with excludeGame
     return 1;
+}
+
+int servers_ui_quick_match(void) {
+    return servers_ui_find_new_game();
+}
+
+// Find New Game (F4, Krunker's client) and Quick Match: Settings > Quickplay decides where
+// (seek_prefs.h): KrunkNative = a new seek here excluding this lobby (with the seek mode / map);
+// Official = an official krunker.io lobby opened in the browser (native); Both = ours when one
+// matches, else an official one. A seek that finds nothing leaves the player in this game with a
+// toast. 0 = nothing to do (offline / direct server with KrunkNative only).
+int servers_ui_find_new_game(void) {
+    const SeekServers type = seek_prefs_servers();
+    if (type == SEEK_SERVERS_OFFICIAL) return krunker_lobbies_seek();
+    if (!g_brain_mode || g_pin == PIN_DIRECT || g_seek_inflight) {
+        return type == SEEK_SERVERS_BOTH && !g_seek_inflight ? krunker_lobbies_seek() : g_seek_inflight;
+    }
+    g_find_seek = 1;
+    g_find_both = type == SEEK_SERVERS_BOTH;
+    snprintf(g_find_prev_game, sizeof(g_find_prev_game), "%s", g_game_id);
+    return quick_match_seek();
 }
 
 // --connect with a brain: the session reaches the direct server through JOIN, so an

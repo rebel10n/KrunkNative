@@ -64,6 +64,12 @@ void ui_open_external(const char *url) {
     // Krunker's own pages that are ported into the client (social hub, editor, viewer)
     // open in place instead of a browser tab (app_mode.c).
     if (app_route_url(url)) return;
+    ui_open_browser(url);
+}
+
+// The system browser, never the client's own pages: a krunker.io/?game= link is an official
+// lobby (krunker_lobbies.c), which app_route_url would take for this client's game page.
+void ui_open_browser(const char *url) {
     char resolved[UI_URL_MAX];
     if (!ui_resolve_external_url(url, resolved, sizeof(resolved))) {
         menu_log("link not opened (not http/https): %s", url ? url : "");

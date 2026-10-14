@@ -99,8 +99,9 @@
 //                                x,y,w,h (CSS px, getBoundingClientRect) then the layout size
 //                                offsetWidth,offsetHeight (- = no such id or not rendered); the two
 //                                sizes of a scaled #uiBase give its scale
-//   100 call skinSelector 1      dispatch a page handler by name with numeric arguments, as an inline
-//                                onclick="skinSelector(1)" would (windows without a menu button)
+//   100 call skinSelector 1      dispatch a page handler by name with numeric (or "quoted" string) arguments,
+//                                as an inline onclick="skinSelector(1)" would (windows without a menu button;
+//                                call setSetting "seek_modes" "1")
 //   100 setscroll skinList 4000  scrollTop of a scroll container (html_dom_set_scroll, clamped)
 //   100 hit @label 640 360       log the page element at that point (window coordinates): its closest
 //                                [data-index] ancestor's data-index and box, "[input_script] hit t=100
@@ -411,17 +412,32 @@ static void script_run(Client *client, const ScriptEvent *e) {
         glfwSetScrollCallback(client->window, cb);
         if (cb) cb(client->window, 0.0, e->v[0]);
     } else if (!strcmp(e->cmd, "call")) {
-        // call <handler> [n ...]: the inline handler by name, numeric arguments only
+        // call <handler> [n | "text" ...]: the inline handler by name, numeric or double-quoted
+        // string arguments (call setSetting "seek_modes" "1")
         char name[64] = "";
         HtmlArg args[8];
+        char strs[8][128];
         int argc = 0, used = 0;
         if (sscanf(e->arg, "%63s%n", name, &used) == 1) {
             const char *c = e->arg + used;
             double v;
             int len;
-            while (argc < 8 && sscanf(c, "%lf%n", &v, &len) == 1) {
-                args[argc++] = (HtmlArg) {HTML_ARG_NUM, v, NULL};
-                c += len;
+            for (;;) {
+                while (*c == ' ' || *c == '\t') c++;
+                if (argc >= 8 || !*c) break;
+                if (*c == '"') {
+                    const char *end = strchr(c + 1, '"');
+                    if (!end) break;
+                    snprintf(strs[argc], sizeof(strs[argc]), "%.*s", (int) (end - c - 1), c + 1);
+                    args[argc] = (HtmlArg) {HTML_ARG_STR, 0, strs[argc]};
+                    argc++;
+                    c = end + 1;
+                } else if (sscanf(c, "%lf%n", &v, &len) == 1) {
+                    args[argc++] = (HtmlArg) {HTML_ARG_NUM, v, NULL};
+                    c += len;
+                } else {
+                    break;
+                }
             }
             const HtmlEvent ev = {.type = "click", .value = ""};
             if (html_ui_available()) html_ui_dispatch(name, &ev, args, argc);
