@@ -81,6 +81,7 @@ void turf_ui_scenario(const cJSON *state); // --render-scenario: state.turf
 int  turf_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 void clan_ui_frame(const cJSON *frame);     // "cln" / "clnL" replies
 void clan_ui_reset(void);                   // account changed: drop clanData
+void clan_ui_scenario(const cJSON *state);  // --render-scenario: state.clan {data, tab, motd, loot, recruit}
 int  account_add_skin(int skin_index);      // acc.skins += 1 of skin; returns the owned count
 void account_remove_skin(int skin_index);   // acc.removeSkin: -1 of skin (a redeemed spin ticket)
 void account_set_last_reward(double ms);    // acc.lastReward (the Free KR wheel's clock)

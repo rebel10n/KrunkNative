@@ -35,6 +35,7 @@
 #include "../viewer/viewer_store.h" // WP-E part 2c: challenge reward skins (store.skins)
 #include "qr_code.h"                // v7.1.4 2FA: the otpauth:// QR code (QrCode.toDataURL)
 #include <ruleset.h>
+#include <v10_social.h> // the window's Friends tab (v10_social.c)
 #include <online_mode.h>  // auth_unreachable: offline mode
 
 #define RANK_VAR 0.03            // config.rankVar
@@ -1727,8 +1728,11 @@ static char *gen_account(void) {
         if (!g_medal_counts) backend_social_send_text("[\"mdl\"]");
         sb_append(&sb, "</div></div>");
     } else if (g_tab_index == 1) {
-        // friends (follows) come from the hub; KrunkNative's account service has no friend list
-        sb_append(&sb, "<div class='setBodH' style='padding-top:10px;padding-bottom:10px;margin-bottom:20px;'>Friends can send private messages and see eachothers online status.<div style='height:10px;'></div>You can add new friends by following eachother.</div><div id='friendList'><span style='color:#9a9a9a'>You don't have any friends yet.</span></div>");
+        // v10's friends tab: mutual follows from the friends event bus (v10_social.c)
+        sb_append(&sb, "<div class='setBodH' style='padding-top:10px;padding-bottom:10px;margin-bottom:20px;'>Friends can send private messages and see eachothers online status.<div style='height:10px;'></div>You can add new friends by following eachother.</div>");
+        char *friends = v10_social_window_friends_html();
+        sb_append(&sb, friends ? friends : "<div id='friendList'>Loading Friends...</div>");
+        free(friends);
     } else if (g_tab_index == 2) {
         sb_append(&sb, "<div class='setHed' style='margin-top:10px;'>Krunker Partner Benefits</div><div class='setBodH'><div class='settName' style='font-size:17px;'>You get <span style='color:#fff !important'>20-40% of Revenue</span> from KR Sales on your Partner Code in the Shop</div><div class='settName' style='font-size:17px;'>You <span style='color:#fff !important;'>earn money</span> when someone Plays your Custom Games/Maps</div><div class='settName' style='font-size:17px;'>Every time a referred player plays the game, you get a <span style='color:#fff !important;'>cut of the Ad Revenue</span></div></div></div><div class='setHed' style='padding-bottom:10px'>Partner Application</div><div class='setBodH' style='padding-top:10px;padding-bottom:10px;'><div style='font-size:19px;color:rgba(255,255,255,0.4);margin-top:5px;margin-bottom:10px;'>By submitting an Application you agree to the <a href='https://frvr.com/legal/krunker#TermsofService'>Partner Terms</a></div><input type='text' id='crtrCode' class='smlInput' style='width:100%;margin-bottom:8px' placeholder='Partner Code Name' /><input type='text' id='crtrEmail' class='smlInput' style='width:86%;margin-bottom:8px' placeholder='PayPal Email for Payouts' /><a class='menuLink' style='margin-left:20px;vertical-align:middle' onclick='submitCrtrCod()'>Submit</a></div><div id='ctrtRes' style='color:rgba(255,255,255,0.5)'></div></div>");
     } else if (g_tab_index == 3) {

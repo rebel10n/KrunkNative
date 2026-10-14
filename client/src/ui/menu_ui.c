@@ -555,6 +555,18 @@ void menu_scale_base(void) {
     const double dw = custom * 1700.0, dh = custom * 900.0;
     const double sx = w / dw, sy = h / dh;
     char value[64], num[32];
+    // v10 scaleBase also publishes the scale on <body> (--ui-scale / --ui-width / --ui-height):
+    // the Svelte view stack (.view-wrapper) scales with it (v10_social.c)
+    const HtmlElem body = html_dom_body();
+    if (body) {
+        const double s = sy < sx ? sy : sx;
+        snprintf(value, sizeof(value), "%.3f", s);
+        html_dom_set_style(body, "--ui-scale", value);
+        snprintf(value, sizeof(value), "%.3fpx", sy < sx ? w / sy : dw);
+        html_dom_set_style(body, "--ui-width", value);
+        snprintf(value, sizeof(value), "%.3fpx", sy < sx ? dh : h / sx);
+        html_dom_set_style(body, "--ui-height", value);
+    }
     if (sy < sx) {
         snprintf(value, sizeof(value), "scale(%.3f)", sy);
         html_dom_set_style(base, "transform", value);

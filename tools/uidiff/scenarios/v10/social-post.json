@@ -1,0 +1,135 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/social-post.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "account": {
+      "name": "KnAlice",
+      "score": 2000000,
+      "funds": 2500,
+      "premium": 0,
+      "badges": [],
+      "stats": {},
+      "clan": ""
+    },
+    "social": {
+      "tab": 0,
+      "sub": 0,
+      "feed": [
+        {
+          "pid": 12,
+          "pli": 2,
+          "pln": "KnBob",
+          "prm": 0,
+          "ftr": 0,
+          "cln": "AAA",
+          "clr": 0,
+          "flw": 1234,
+          "tim": 3720000,
+          "typ": 0,
+          "txt": "Anyone up for some Kanji FFA tonight?",
+          "lnk": "",
+          "lnk2": "",
+          "vot": 5,
+          "dlk": 1,
+          "cnt": 2,
+          "exp": 0,
+          "fds": 0
+        },
+        {
+          "pid": 11,
+          "pli": 3,
+          "pln": "Carlos_K",
+          "prm": 1,
+          "ftr": 1,
+          "cln": "",
+          "clr": 0,
+          "flw": 87,
+          "tim": 90061000,
+          "typ": 9,
+          "txt": "Giveaway time! Follow me and like this post.",
+          "lnk": "",
+          "lnk2": "",
+          "vot": 12,
+          "dlk": 0,
+          "cnt": 0,
+          "exp": 43200000,
+          "fds": 5000
+        },
+        {
+          "pid": 10,
+          "pli": 4,
+          "pln": "dana",
+          "prm": 0,
+          "ftr": 0,
+          "cln": "KPD",
+          "clr": 0,
+          "flw": 0,
+          "tim": 0,
+          "typ": 0,
+          "txt": "hello world",
+          "lnk": "",
+          "lnk2": "",
+          "vot": 0,
+          "dlk": 0,
+          "cnt": 0,
+          "exp": 0,
+          "fds": 0
+        }
+      ],
+      "view": {
+        "type": "post",
+        "data": {
+          "post": {
+            "pid": 12,
+            "pli": 2,
+            "pln": "KnBob",
+            "prm": 0,
+            "ftr": 0,
+            "cln": "AAA",
+            "clr": 0,
+            "flw": 1234,
+            "tim": 3720000,
+            "typ": 0,
+            "txt": "Anyone up for some Kanji FFA tonight?",
+            "lnk": "",
+            "lnk2": "",
+            "vot": 5,
+            "dlk": 1,
+            "cnt": 2,
+            "exp": 0,
+            "fds": 0
+          },
+          "comments": [
+            {
+              "pid": 1,
+              "pli": 4,
+              "pln": "dana",
+              "prm": 0,
+              "ftr": 0,
+              "cln": "KPD",
+              "tim": 600000,
+              "txt": "count me in"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "frames": 3,
+  "note": "ui/v10 post detail (openPost, v10_social.c)"
+}

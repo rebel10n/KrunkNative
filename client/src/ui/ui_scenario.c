@@ -32,6 +32,7 @@
 #include <debug_capture.h> // state.pageActions calls with arguments
 #include <html_ui.h>
 #include <html_dom.h>
+#include <v10_social.h> // state.social
 #include <png_write.h>
 #include <pcg_basic.h>
 #include <stb_image.h>
@@ -250,6 +251,8 @@ static void warn_unknown_keys(void) {
         "turf",    // the Turf Wars popup's state: {open, tab, ...} (turf_ui.c)
         "leaderboards", // the v10 Leaderboards popup: {category, tab, region, season} (v10_competitive.c)
         "v10responses", // {path: answer}: the brain's answers for the v10 popups (v10_competitive.c)
+        "social",  // the v10 Social hub popup / views: {tab, sub, feed, friends, selected, messages, search, view} (v10_social.c)
+        "clan",    // the Clans window (13): {data: clanData, tab, motd, loot, recruit} (clan_ui.c)
         "update",  // the menu's Outdated / Update now box (update_ui_scenario)
         "connectError", // with connected:false, the Lost Connection screen's error text (menu_ui.c)
         "spin",    // the store's prize wheel screen: prizeWheel(spin) without the backend (store_ui.c)
@@ -858,8 +861,10 @@ static int ui_scenario_apply(Client *client) {
     ranked_ui_scenario(st("ranked"));   // the Ranked popup (ranked_ui.c)
     turf_ui_scenario(st("turf"));       // the Turf Wars popup (turf_ui.c)
     v10_news_scenario(st("community")); // v10 events / polls / news (v10_news.c)
+    clan_ui_scenario(st("clan"));       // the Clans window (clan_ui.c)
     update_ui_scenario(st("update"));   // the Outdated box without a network check
     if (menu_open) apply_window(client);
+    if (menu_open) v10_social_scenario(st("social")); // the v10 Social hub (v10_social.c)
     account_ui_scenario_post(); // account.c2fa: v7.1.4's 2FA popup over the window
     if (menu_open && st_has("spin")) {
         store_ui_scenario_wheel(st_int("spin", 0), st_bool("spinMulti", 0));

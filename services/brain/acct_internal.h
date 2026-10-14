@@ -234,9 +234,41 @@ void sh_delete_post(SocialSession *s, const cJSON *f); /* "dps" */
 void sh_chat_blobs(SocialSession *s, const cJSON *f);  /* "chtb" */
 void sh_chat_thread(SocialSession *s, const cJSON *f); /* "ctd" */
 void sh_chat_send(SocialSession *s, const cJSON *f);   /* "ict" */
+/* v10 friends event bus (social_eb.c): ["eb", {type, ...}] */
+void sh_eb(SocialSession *s, const cJSON *f);
+void social_eb_after_login(SocialSession *s);          /* unread:summary */
+void social_eb_presence(int64_t account_id, int online); /* first socket here signed in / last one closed */
+void social_eb_follow_changed(int64_t a, const char *name); /* a (un)followed the player name */
+int social_account_online(int64_t account_id);         /* a signed-in social socket on this brain */
+/* cb(ud, online[], n): signed in anywhere (this brain + Redis presence); cb may run before it returns */
+void social_online_lookup(const int64_t *ids, size_t n, void (*cb)(void *ud, const int *online, size_t n), void *ud);
+
+/* ---- v10 gapi over the social socket (social_gapi.c). v10 calls https://gapi.svc.krunker.io
+ * (/social/*, /players/*, /clans/*); KrunkNative tunnels the same requests through the social
+ * socket: ["gapi", rid, method, path?query, body] -> ["gapi", rid, status, {data} | {error: {code,
+ * message}}], authenticated by the socket's session. Path segments are URL-decoded. */
+#define GAPI_MAX_SEG 8
+typedef struct GapiReq {
+    int64_t rid;
+    char method[8];
+    char *seg[GAPI_MAX_SEG];   /* "players", "<name>", "follow" */
+    int nseg;
+    char query[512];           /* raw, after '?' */
+    const cJSON *body;         /* request JSON (may be NULL) */
+} GapiReq;
+void sh_gapi(SocialSession *s, const cJSON *f);
+void social_gapi_init(Brain *b);  /* the giveaway draw timer (social_ws_init) */
+void gapi_reply(SocialSession *s, int64_t rid, cJSON *data);  /* 200 {data} (data consumed; NULL = null) */
+void gapi_error(SocialSession *s, int64_t rid, int status, const char *code, const char *message);
+int gapi_query(const GapiReq *r, const char *key, char *out, size_t n); /* 1 = present (URL-decoded) */
+int gapi_is(const GapiReq *r, const char *method, const char *pattern); /* "/players/:x/follow" */
+/* Modules: 1 = the request was theirs (answered now or later). */
+int clan_v10_gapi(SocialSession *s, const GapiReq *r); /* /clans/... (clan_v10.c) */
 void sh_gift(SocialSession *s, const cJSON *f);        /* "kr" */
 void sh_clan(SocialSession *s, const cJSON *f);        /* "cln" */
 void sh_clan_request(SocialSession *s, const cJSON *f);/* "clnR" */
+void sh_clan_decline_all(SocialSession *s, const cJSON *f); /* "clnRA" (v10 clan window) */
+void sh_clan_viewed(SocialSession *s, const cJSON *f);      /* "vcln" (v10 OPEN_CLAN_TAB) */
 void sh_settings_up(SocialSession *s, const cJSON *f); /* "uploadS" */
 void sh_settings_get(SocialSession *s, const cJSON *f);/* "getS" */
 void sh_titles(SocialSession *s, const cJSON *f);      /* "ttl" (v10 account titles) */

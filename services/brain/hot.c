@@ -47,6 +47,7 @@ void hot_presence_source(HotPresenceSource fn) { (void) fn; }
 void hot_presence_add(int64_t account_id) { (void) account_id; }
 void hot_presence_remove(int64_t account_id) { (void) account_id; }
 int hot_presence_count(HotCountFn cb, void *ud) { (void) cb; (void) ud; return -1; }
+int hot_presence_online(const int64_t *ids, size_t n, HotOnlineFn cb, void *ud) { (void) ids; (void) n; (void) cb; (void) ud; return -1; }
 void hot_push_handler(HotPushHandler fn) { (void) fn; }
 void hot_push(int64_t account_id, const cJSON *frame, int json_only) { (void) account_id; (void) frame; (void) json_only; }
 
@@ -160,6 +161,16 @@ static const char LUA_PRES_REMOVE[] =
 static const char LUA_PRES_COUNT[] =
     "redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', '(' .. ARGV[1])\n"
     "return redis.call('ZCARD', KEYS[1])";
+
+/* KEYS online; ARGV now_ms, id...: 1 per id whose presence has not expired */
+static const char LUA_PRES_ONLINE[] =
+    "local now = tonumber(ARGV[1])\n"
+    "local out = {}\n"
+    "for i = 2, #ARGV do\n"
+    "  local s = redis.call('ZSCORE', KEYS[1], ARGV[i])\n"
+    "  out[#out + 1] = (s and tonumber(s) > now) and 1 or 0\n"
+    "end\n"
+    "return out";
 
 /* KEYS pres:<id>; ARGV self brain, now_ms, "<prefix>push:", payload: publish to the other brains */
 static const char LUA_PUSH[] =
@@ -517,6 +528,57 @@ int hot_presence_count(HotCountFn cb, void *ud) {
     snprintf(now, sizeof now, "%lld", (long long) kn_wall_ms());
     const char *args[2] = {online, now};
     if (eval(LUA_PRES_COUNT, count_done, c, 1, 2, args) != 0) {
+        free(c);
+        return -1;
+    }
+    return 0;
+}
+
+typedef struct OnlineCtx {
+    HotOnlineFn cb;
+    void *ud;
+    size_t n;
+} OnlineCtx;
+
+static void online_done(kn_redis *r, const kn_redis_reply *rp, const char *err, void *ud) {
+    (void) r;
+    OnlineCtx *c = ud;
+    int *flags = err ? NULL : calloc(c->n ? c->n : 1, sizeof *flags);
+    if (flags)
+        for (size_t i = 0; i < c->n && i < kn_redis_reply_count(rp); i++) flags[i] = kn_redis_reply_int(kn_redis_reply_at(rp, i)) == 1;
+    c->cb(c->ud, flags, c->n);
+    free(flags);
+    free(c);
+}
+
+int hot_presence_online(const int64_t *ids, size_t n, HotOnlineFn cb, void *ud) {
+    if (!g_hot.presence || !cb || !hot_up() || n > PRESENCE_BATCH) return -1;
+    OnlineCtx *c = calloc(1, sizeof *c);
+    if (!c) return -1;
+    c->cb = cb;
+    c->ud = ud;
+    c->n = n;
+    char online[160], now[24];
+    char (*idbuf)[24] = calloc(n ? n : 1, sizeof *idbuf);
+    const char **args = calloc(n + 2, sizeof *args);
+    if (!idbuf || !args) {
+        free(idbuf);
+        free(args);
+        free(c);
+        return -1;
+    }
+    key(online, sizeof online, "online");
+    snprintf(now, sizeof now, "%lld", (long long) kn_wall_ms());
+    args[0] = online;
+    args[1] = now;
+    for (size_t i = 0; i < n; i++) {
+        snprintf(idbuf[i], sizeof idbuf[i], "%lld", (long long) ids[i]);
+        args[2 + i] = idbuf[i];
+    }
+    const int rc = eval(LUA_PRES_ONLINE, online_done, c, 1, (int) n + 2, args);
+    free(idbuf);
+    free(args);
+    if (rc != 0) {
         free(c);
         return -1;
     }

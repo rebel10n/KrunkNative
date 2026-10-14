@@ -1229,6 +1229,8 @@ Other labels (request -> reply):
 | password login of a 2FA account | `["c2fa", 0, "2fa"]` (the code popup); then `["2fa", code]` -> `["c2fa", 1]` + the `a` reply, or `["c2fa", 0, "2fa", null, null, "Invalid Code"]`. Token resumes skip 2FA; internal `login` answers `2FA required.` |
 | `["cemail", email]` / `["emailv"]` / `["emailS"]` | Krunker Box Office email verification (7.9): `["cemail" \| "emailv", error, message, state]`, `["emailS", state]` |
 | `["las"]` | log out every other session of the account |
+| `["eb", {type, ...}]` | v10 friends event bus (doc/v10/social.md, `social_eb.c`): `friends:list` / `msg:send` / `msg:history` / `msg:read` / `presence:ping` -> `friends:list`, `msg:sent` + the peer's `msg:recv`, `msg:history:result`, `presence:pong`; pushes `unread:summary` (login), `presence:online/offline`, `friends:list` (a follow made or broke a friendship); errors `{type:"error", code: EB_*}` |
+| `["gapi", rid, method, path, body]` | `["gapi", rid, status, {data} \| {error:{code, message}}]`: v10's gapi `/social/*`, `/players/*`, `/clans/*` (social_gapi.c, clan_v10.c; doc/v10/social.md) |
 | `["uploadM", mapJson, thumbDataUrl, description, videoId, category]` | `["pubMR", "Map Published!" \| "Map Updated!"]` / `["upMp", err]`: publishes the map under its JSON `name` (3-30 chars; v3.1.1 catalogue names reserved; republishing your own map bumps `map_updatecounter`); a PNG data URL thumbnail (<= 200 KB) becomes `map_image` |
 | `["edMp", name]` | `["edMp", mapJson \| null]` (own maps; devs / creation mods any) |
 | `["fvM", id, kind, 1\|0]`, `["ftC", id, 1\|0, kind]`, `["delC", id, kind]` | favourite; feature (devs); delete (creator, devs, creation mods) -> `["po", "SUCCESS", null, "Deleted"]` (kind 0 map, 1 mod, 2 asset) |

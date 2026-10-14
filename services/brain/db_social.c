@@ -157,20 +157,41 @@ static int clan_officer(Dbx *x, const char *player, int64_t clan) {
                       KN_DB_ARGS(I64S(clan), player));
 }
 
-/* kn_clan_data: menu clan window */
+/* kn_clan_data: menu clan window. v10.0.2 fields too (clan_ui.c): members' s7 (score of their
+ * matches in the last 7 days while in the clan), clan_link4 (the Discord invite code), the logo
+ * versions, the banner colour and a pending ownership transfer (0113_clan_v10). The pg function
+ * kn_clan_data of 0104 has none of these, so every clan proc runs this C version on all drivers. */
 static cJSON *clan_data(Dbx *x, int64_t clan) {
     if (clan <= 0) return NULL;
     cJSON *o = dbx_row(x,
         SQL(.any = "SELECT c.clan_id, c.clan_name, c.clan_playerid, c.clan_funds, c.clan_score, c.clan_rank, c.clan_motd,"
-                   " 0 AS clan_contracts, (SELECT username FROM accounts WHERE id = c.clan_playerid) AS creatorname"
+                   " 0 AS clan_contracts, (SELECT username FROM accounts WHERE id = c.clan_playerid) AS creatorname,"
+                   " c.clan_discord AS clan_link4, c.clan_logo, c.clan_logo_pending, c.clan_banner_color,"
+                   " c.clan_transfer_to, (SELECT username FROM accounts WHERE id = c.clan_transfer_to) AS transfer_name"
                    " FROM clans c WHERE c.clan_id = $1"),
         KN_DB_ARGS(I64S(clan)));
     if (!o) return NULL;
     html_field(o, "clan_motd");
+    cJSON *to = cJSON_DetachItemFromObjectCaseSensitive(o, "clan_transfer_to");
+    cJSON *to_name = cJSON_DetachItemFromObjectCaseSensitive(o, "transfer_name");
+    if (cJSON_IsNumber(to) && to->valuedouble > 0) {
+        cJSON *t = cJSON_CreateObject();
+        cJSON_AddNumberToObject(t, "to_player_id", to->valuedouble);
+        cJSON_AddStringToObject(t, "to_player_name", cJSON_IsString(to_name) ? to_name->valuestring : "");
+        const cJSON *from = cJSON_GetObjectItemCaseSensitive(o, "creatorname");
+        cJSON_AddStringToObject(t, "from_player_name", cJSON_IsString(from) ? from->valuestring : "");
+        const cJSON *cn = cJSON_GetObjectItemCaseSensitive(o, "clan_name");
+        cJSON_AddStringToObject(t, "clan_name", cJSON_IsString(cn) ? cn->valuestring : "");
+        cJSON_AddItemToObject(o, "ownership_transfer", t);
+    }
+    cJSON_Delete(to);
+    cJSON_Delete(to_name);
     cJSON *m = dbx_rows(x,
         SQL(.any = "SELECT m.account_id AS i, r.player_name AS p, m.rank AS r, m.score AS s,"
                    " CASE WHEN r.player_premium > 0 THEN 1 ELSE 0 END AS su, r.player_featured AS ve, r.player_hack AS h,"
-                   " m.kills AS k, m.deaths AS de"
+                   " m.kills AS k, m.deaths AS de,"
+                   " (SELECT coalesce(sum(mr.score), 0) FROM match_results mr WHERE mr.account_id = m.account_id"
+                   "   AND mr.at > {ago:604800} AND mr.at >= m.joined_at) AS s7"
                    " FROM clan_members m JOIN player_rows r ON r.player_id = m.account_id"
                    " WHERE m.clan_id = $1 ORDER BY m.score DESC"),
         KN_DB_ARGS(I64S(clan)));
@@ -181,6 +202,11 @@ static cJSON *clan_data(Dbx *x, int64_t clan) {
     cJSON_AddItemToObject(o, "members", m ? m : cJSON_CreateArray());
     cJSON_AddItemToObject(o, "requests", q ? q : cJSON_CreateArray());
     return o;
+}
+
+/* clan_members.rank of player in clan, -1 when not a member */
+static int64_t clan_rank_of(Dbx *x, const char *player, int64_t clan) {
+    return dbx_int(x, SQL(.any = "SELECT rank FROM clan_members WHERE clan_id = $1 AND account_id = $2"), KN_DB_ARGS(I64S(clan), player), -1);
 }
 
 static int valid_tag(const char *t, int64_t max) {
@@ -215,7 +241,9 @@ static kn_db_result *run_clan_create(kn_dbconn *c, int n, const char *const *p) 
     if (clan_of(&x, P(0)) > 0) dbx_refuse(&x, "Already in a Clan");
     else if (dbx_exists(&x, SQL(.any = "SELECT 1 FROM clans WHERE lower(clan_name) = lower($1)"), KN_DB_ARGS(tag)))
         dbx_refuse(&x, "Clan Name Taken");
-    int64_t clan = dbx_insert_id(&x, SQL(.any = "INSERT INTO clans (clan_name, clan_playerid) VALUES ($1, $2)"),
+    int64_t clan = dbx_insert_id(&x, SQL(.pg = "INSERT INTO clans (clan_name, clan_playerid) VALUES ($1, $2) RETURNING clan_id",
+                                         .sqlite = "INSERT INTO clans (clan_name, clan_playerid) VALUES ($1, $2) RETURNING clan_id",
+                                         .mysql = "INSERT INTO clans (clan_name, clan_playerid) VALUES ($1, $2)"),
                                  KN_DB_ARGS(tag, P(0)));
     free(tag);
     dbx_exec(&x, SQL(.any = "INSERT INTO clan_members (account_id, clan_id, rank) VALUES ($1, $2, 3)"),
@@ -223,7 +251,7 @@ static kn_db_result *run_clan_create(kn_dbconn *c, int n, const char *const *p) 
     dbx_exec(&x, SQL(.any = "DELETE FROM clan_requests WHERE account_id = $1"), KN_DB_ARGS(P(0)));
     return dbx_json(&x, "kn_clan_create", dbx_failed(&x) ? NULL : clan_data(&x, clan));
 }
-const kn_proc P_CLAN_CREATE = {"clan_create", "SELECT kn_clan_create($1, $2, $3)", run_clan_create};
+const kn_proc P_CLAN_CREATE = {"clan_create", NULL /* C on every driver: v10.0.2 fields and captain rights (0113_clan_v10) */, run_clan_create};
 
 /* (player, tag) -> {clan_id, leader} */
 static kn_db_result *run_clan_request(kn_dbconn *c, int n, const char *const *p) {
@@ -248,13 +276,13 @@ static kn_db_result *run_clan_request(kn_dbconn *c, int n, const char *const *p)
              KN_DB_ARGS(I64S(clan), P(0)));
     return dbx_json(&x, "kn_clan_request", o);
 }
-const kn_proc P_CLAN_REQUEST = {"clan_request", "SELECT kn_clan_request($1, $2)", run_clan_request};
+const kn_proc P_CLAN_REQUEST = {"clan_request", NULL /* C on every driver: v10.0.2 fields and captain rights (0113_clan_v10) */, run_clan_request};
 
 static kn_db_result *run_clan_data_of(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     return dbx_json(&x, "kn_clan_data", clan_data(&x, clan_of(&x, P(0))));
 }
-const kn_proc P_CLAN_DATA_OF = {"clan_data", "SELECT kn_clan_data(kn_clan_of($1))", run_clan_data_of};
+const kn_proc P_CLAN_DATA_OF = {"clan_data", NULL /* C on every driver: v10.0.2 fields and captain rights (0113_clan_v10) */, run_clan_data_of};
 
 static kn_db_result *run_clan_leave(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
@@ -270,23 +298,31 @@ static kn_db_result *run_clan_leave(kn_dbconn *c, int n, const char *const *p) {
     }
     return dbx_json(&x, "kn_clan_leave", o);
 }
-const kn_proc P_CLAN_LEAVE = {"clan_leave", "SELECT kn_clan_leave($1)", run_clan_leave};
+const kn_proc P_CLAN_LEAVE = {"clan_leave", NULL /* C on every driver: v10.0.2 fields and captain rights (0113_clan_v10) */, run_clan_leave};
 
 static kn_db_result *run_clan_kick(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     int64_t clan = clan_of(&x, P(0));
     if (clan <= 0 || !clan_officer(&x, P(0), clan)) return dbx_finish(&x, kn_db_result_user_error("No Permission"));
     if (PI(1) == PI(0) || clan_leader(&x, P(1), clan)) return dbx_finish(&x, kn_db_result_user_error("Cant kick this member"));
+    /* v10: a Captain (not the owner) cannot kick another Captain */
+    if (!clan_leader(&x, P(0), clan) && clan_rank_of(&x, P(1), clan) >= 2)
+        return dbx_finish(&x, kn_db_result_user_error("No Permission"));
     dbx_exec(&x, SQL(.any = "DELETE FROM clan_members WHERE account_id = $1 AND clan_id = $2"), KN_DB_ARGS(P(1), I64S(clan)));
     return dbx_json(&x, "kn_clan_kick", clan_data(&x, clan));
 }
-const kn_proc P_CLAN_KICK = {"clan_kick", "SELECT kn_clan_kick($1, $2)", run_clan_kick};
+const kn_proc P_CLAN_KICK = {"clan_kick", NULL /* C on every driver: v10.0.2 fields and captain rights (0113_clan_v10) */, run_clan_kick};
 
 static kn_db_result *run_clan_role(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     int64_t clan = clan_of(&x, P(0));
-    if (clan <= 0 || !clan_leader(&x, P(0), clan)) return dbx_finish(&x, kn_db_result_user_error("No Permission"));
-    if (PI(2) < 0 || PI(2) > 3) return dbx_finish(&x, kn_db_result_user_error("Invalid Role"));
+    /* v10 (windows[12].gen): the owner and Captains manage roles; nobody is made Commander (the
+     * owner is), a Captain cannot make Captains nor change another Captain or the owner */
+    if (clan <= 0 || !clan_officer(&x, P(0), clan)) return dbx_finish(&x, kn_db_result_user_error("No Permission"));
+    if (PI(2) < 0 || PI(2) > 2) return dbx_finish(&x, kn_db_result_user_error("Invalid Role"));
+    if (PI(1) == PI(0) || clan_leader(&x, P(1), clan)) return dbx_finish(&x, kn_db_result_user_error("No Permission"));
+    if (!clan_leader(&x, P(0), clan) && (PI(2) >= 2 || clan_rank_of(&x, P(1), clan) >= 2))
+        return dbx_finish(&x, kn_db_result_user_error("No Permission"));
     if (dbx_exec(&x, SQL(.any = "UPDATE clan_members SET rank = $3 WHERE account_id = $1 AND clan_id = $2"),
                  KN_DB_ARGS(P(1), I64S(clan), P(2))) == 0)
         dbx_refuse(&x, "Member not found");
@@ -295,7 +331,7 @@ static kn_db_result *run_clan_role(kn_dbconn *c, int n, const char *const *p) {
     cJSON_AddNumberToObject(o, "r", (double)PI(2));
     return dbx_json(&x, "kn_clan_role", o);
 }
-const kn_proc P_CLAN_ROLE = {"clan_role", "SELECT kn_clan_role($1, $2, $3)", run_clan_role};
+const kn_proc P_CLAN_ROLE = {"clan_role", NULL /* C on every driver: v10.0.2 fields and captain rights (0113_clan_v10) */, run_clan_role};
 
 /* (actor, amount, withdraw) -> {pf, cf} */
 static kn_db_result *run_clan_funds(kn_dbconn *c, int n, const char *const *p) {
@@ -304,7 +340,7 @@ static kn_db_result *run_clan_funds(kn_dbconn *c, int n, const char *const *p) {
     if (clan <= 0) return dbx_finish(&x, kn_db_result_user_error("Not in a Clan"));
     if (amount <= 0) return dbx_finish(&x, kn_db_result_user_error("Invalid amount"));
     if (kn_store_parse_bool(P(2), 0)) {
-        if (!clan_leader(&x, P(0), clan)) return dbx_finish(&x, kn_db_result_user_error("No Permission"));
+        if (!clan_officer(&x, P(0), clan)) return dbx_finish(&x, kn_db_result_user_error("No Permission")); /* v10: Captains withdraw */
         if (dbx_exec(&x, SQL(.any = "UPDATE clans SET clan_funds = clan_funds - {int:$2} WHERE clan_id = $1 AND clan_funds >= {int:$2}"),
                      KN_DB_ARGS(I64S(clan), I64S(amount))) == 0)
             return dbx_finish(&x, kn_db_result_user_error("Not enough Clan Funds"));
@@ -320,7 +356,7 @@ static kn_db_result *run_clan_funds(kn_dbconn *c, int n, const char *const *p) {
                                                      KN_DB_ARGS(I64S(clan)), 0));
     return dbx_json(&x, "kn_clan_funds", o);
 }
-const kn_proc P_CLAN_FUNDS = {"clan_funds", "SELECT kn_clan_funds($1, $2, $3)", run_clan_funds};
+const kn_proc P_CLAN_FUNDS = {"clan_funds", NULL /* C on every driver: v10.0.2 fields and captain rights (0113_clan_v10) */, run_clan_funds};
 
 /* (actor, player, accept, max members) */
 static kn_db_result *run_clan_answer(kn_dbconn *c, int n, const char *const *p) {
@@ -341,7 +377,29 @@ static kn_db_result *run_clan_answer(kn_dbconn *c, int n, const char *const *p) 
     }
     return dbx_json(&x, "kn_clan_answer", clan_data(&x, clan));
 }
-const kn_proc P_CLAN_ANSWER = {"clan_answer", "SELECT kn_clan_answer($1, $2, $3, $4)", run_clan_answer};
+const kn_proc P_CLAN_ANSWER = {"clan_answer", NULL /* C on every driver: v10.0.2 fields and captain rights (0113_clan_v10) */, run_clan_answer};
+
+/* (actor): v10 decline-all ("clnRA", windows[12].decAll) -> {declined} */
+static kn_db_result *run_clan_decline_all(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    int64_t clan = clan_of(&x, P(0));
+    if (clan <= 0 || !clan_officer(&x, P(0), clan)) return dbx_finish(&x, kn_db_result_user_error("No Permission"));
+    const int64_t gone = dbx_exec(&x, SQL(.any = "DELETE FROM clan_requests WHERE clan_id = $1"), KN_DB_ARGS(I64S(clan)));
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "declined", (double) (gone > 0 ? gone : 0));
+    return dbx_json(&x, "kn_clan_decline_all", o);
+}
+const kn_proc P_CLAN_DECLINE_ALL = {"clan_decline_all", NULL, run_clan_decline_all};
+
+/* (actor, invite code or ""): v10 cln 9 (windows[12].updateDis, owner only) -> clanData */
+static kn_db_result *run_clan_discord(kn_dbconn *c, int n, const char *const *p) {
+    Dbx x = {c, NULL};
+    int64_t clan = clan_of(&x, P(0));
+    if (clan <= 0 || !clan_leader(&x, P(0), clan)) return dbx_finish(&x, kn_db_result_user_error("No Permission"));
+    dbx_exec(&x, SQL(.any = "UPDATE clans SET clan_discord = nullif($2, '') WHERE clan_id = $1"), KN_DB_ARGS(I64S(clan), nz(P(1))));
+    return dbx_json(&x, "kn_clan_discord", clan_data(&x, clan));
+}
+const kn_proc P_CLAN_DISCORD = {"clan_discord", NULL, run_clan_discord};
 
 /* social page "clan" */
 static kn_db_result *run_clan_page(kn_dbconn *c, int n, const char *const *p) {

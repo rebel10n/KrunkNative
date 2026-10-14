@@ -1,6 +1,7 @@
 // Startup glue between main.c and the brain client (client/include/backend_ui.h):
 // command line (--brain, --connect), the brain-or-direct decision and the per-frame
 // pump. Kept out of main.c so the backend stays one include + three calls there.
+#include <v10_social.h>
 #include <backend.h>
 #include <backend_ui.h>
 #include <online_mode.h>
@@ -100,4 +101,5 @@ void backend_frame(Client *client) {
     online_mode_tick(client);
     account_ui_tick(client);
     servers_ui_tick(client);
+    v10_social_tick(); // the v10 page's Social hub: friends event bus, menu badge (v10_social.c)
 }

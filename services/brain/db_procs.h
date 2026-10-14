@@ -87,8 +87,11 @@ extern const kn_proc P_LOGIN_SUCCESS, P_LOGIN_FAILED, P_REGISTER, P_REGISTER_PRE
 
 /* ---- social (db_social.c) */
 extern const kn_proc P_POST_FULL, P_FEED, P_CLAN_CREATE, P_CLAN_REQUEST, P_CLAN_DATA_OF, P_CLAN_LEAVE,
-    P_CLAN_KICK, P_CLAN_ROLE, P_CLAN_FUNDS, P_CLAN_ANSWER, P_CLAN_PAGE, P_MAIL_READ, P_CHAT_THREAD, P_PROFILE, P_MAP_PAGE, P_MOD_PAGE, P_PUBLISH_MAP, P_SET_HACK,
+    P_CLAN_KICK, P_CLAN_ROLE, P_CLAN_FUNDS, P_CLAN_ANSWER, P_CLAN_DECLINE_ALL, P_CLAN_DISCORD, P_CLAN_PAGE, P_MAIL_READ, P_CHAT_THREAD, P_PROFILE, P_MAP_PAGE, P_MOD_PAGE, P_PUBLISH_MAP, P_SET_HACK,
     P_SET_FEATURED;
+
+/* ---- the v10 Social hub (db_social_v10.c): POST /social/post, giveaway draws */
+extern const kn_proc P_POST_CREATE_V10, P_GIVEAWAY_SETTLE;
 
 /* ---- the economy (db_economy.c, 0111_economy): KR gifts, the market, trade offers, KR history */
 extern const kn_proc P_GIFT, P_MARKET_LIST, P_MARKET_UNLIST, P_MARKET_BUY, P_QUICK_SELL, P_MARKET_ITEM, P_TRADE_PAGE,

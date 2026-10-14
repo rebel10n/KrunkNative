@@ -15,6 +15,10 @@ set(KN_BRAIN_SOURCES
     # svc-accounts sources
     accounts.c
     social_ws.c
+    social_eb.c
+    social_gapi.c
+    db_social_v10.c
+    clan_v10.c
     profiles.c
     leaderboards.c
     social_data.c
@@ -223,6 +227,19 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/economy_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_economy PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;economy")
+    # v10.0.2 clan window backend: cln 6/9, clnRA, s7, MOTD / banner / logo / transfer (clan_v10.c, 0113)
+    add_test(NAME brain_clan_v10
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/clan_v10_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_clan_v10 PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+    # v10.0.2 Social hub on the v10 page through two headless clients (v10_social.c, social_gapi.c, social_eb.c)
+    add_test(NAME brain_v10_social_e2e
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/v10_social_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_v10_social_e2e PROPERTIES TIMEOUT 480 SKIP_RETURN_CODE 77 LABELS "brain;db;social;e2e")
+    # v10.0.2 Social hub backend: friends event bus + gapi tunnel (social_eb.c, social_gapi.c, 0112)
+    add_test(NAME brain_social_v10
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/social_v10_test.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_social_v10 PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
     # the same through the clients' hub: headless client_bin (KRUNKNATIVE_UI_CMDS) and the web build
     # in headless Chromium (needs KN_WEB_DIST = a `make web` dist dir; else skips 77)
     add_test(NAME brain_economy_hub_e2e

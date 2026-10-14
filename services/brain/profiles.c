@@ -229,8 +229,8 @@ void sh_search(SocialSession *s, const cJSON *f) {
 /* ------------------------------------------------------------------ follows */
 
 static void follow_done(SocialSession *s, kn_db_result *res, void *extra) {
-    (void) extra;
     if (!kn_db_ok(res)) social_error(s, acct_db_error(res, "follow"));
+    else if (kn_db_affected(res) > 0) social_eb_follow_changed(s->account_id, extra); /* v10 friends (social_eb.c) */
 }
 
 /* ["f", name, action]: action 1 follow, 0 unfollow (social.js followUser / instaFollo). No reply. */
@@ -246,12 +246,12 @@ void sh_follow(SocialSession *s, const cJSON *f) {
                                "SELECT $1, id FROM accounts WHERE lower(username) = lower($2) AND id <> $1 ON CONFLICT DO NOTHING",
                          .any = "{insert_ignore} INTO follows (follower_id, followee_id) "
                                 "SELECT $1, id FROM accounts WHERE lower(username) = lower($2) AND id <> $1 {ignore_conflicts}"),
-                     KN_DB_ARGS(me, name), follow_done, NULL);
+                     KN_DB_ARGS(me, name), follow_done, strdup(name));
     } else {
         social_query(s, SQL(.pg = "DELETE FROM follows WHERE follower_id = $1 AND followee_id = kn_account_id($2)",
                             .any = "DELETE FROM follows WHERE follower_id = $1 AND followee_id = "
                                    "(SELECT id FROM accounts WHERE lower(username) = lower($2))"),
-                     KN_DB_ARGS(me, name), follow_done, NULL);
+                     KN_DB_ARGS(me, name), follow_done, strdup(name));
     }
 }
 

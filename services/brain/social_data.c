@@ -9,9 +9,11 @@
  */
 #include "acct_internal.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "knsvc/config.h"
 #include "knsvc/json.h"
@@ -269,9 +271,31 @@ static void clan_social_done(SocialSession *s, kn_db_result *res, void *extra) {
     else social_send_n(s, "cln", 2, cJSON_CreateString("Request Sent"), cJSON_CreateTrue());
 }
 
+/* v10 updateDis: /discord(?:\.com|app\.com|\.gg)\/(?:invite\/)?([a-zA-Z0-9\-]{2,32})/i -> the code */
+static int discord_code(const char *v, char *out, size_t n) {
+    if (!v || n < 33) return 0;
+    for (const char *p = v; *p; p++) {
+        if (strncasecmp(p, "discord", 7)) continue;
+        const char *q = p + 7;
+        if (!strncasecmp(q, ".com/", 5)) q += 5;
+        else if (!strncasecmp(q, "app.com/", 8)) q += 8;
+        else if (!strncasecmp(q, ".gg/", 4)) q += 4;
+        else continue;
+        if (!strncasecmp(q, "invite/", 7)) q += 7;
+        size_t len = 0;
+        while (len < 32 && (isalnum((unsigned char) q[len]) || q[len] == '-')) len++;
+        if (len < 2) continue;
+        memcpy(out, q, len);
+        out[len] = 0;
+        return 1;
+    }
+    return 0;
+}
+
 /* Social page: ["cln", tag] join request -> ["cln", msg, ok].
  * Menu clan window: ["cln", action, value, extra] -> ["cln", msg, data, ok, action]:
- *   1 create(tag) 2 request(tag) 3 my clan 4 leave 5 kick(id) 6 role(id,{r}) 7 funds(kr,{wd}) 8 contract */
+ *   1 create(tag) 2 request(tag) 3 my clan 4 leave 5 kick(id) 6 role(id,{r}) 7 funds(kr,{wd}) 8 contract
+ *   9 Discord link (v10: the invite URL; the brain keeps its code, clanData.clan_link4) */
 void sh_clan(SocialSession *s, const cJSON *f) {
     char me[24], v1[24], v2[24], v3[24];
     if (cJSON_IsString(fa(f, 1))) {
@@ -314,12 +338,42 @@ void sh_clan(SocialSession *s, const cJSON *f) {
                      KN_DB_ARGS(me, acct_itoa(v1, fa_int(f, 2, 0)), kn_json_int(fa(f, 3), "wd", 0) ? "true" : "false"),
                      clan_menu_done, c);
         return;
+    case 9: { /* v10 updateDis: the Discord invite (owner) */
+        char code[40];
+        if (!discord_code(fa_str(f, 2), code, sizeof code)) {
+            free(c);
+            clan_menu_reply(s, "Invalid Discord", NULL, 0, action);
+            return;
+        }
+        social_call(s, &P_CLAN_DISCORD, KN_DB_ARGS(me, code), clan_menu_done, c);
+        return;
+    }
     default:
         free(c);
         clan_menu_reply(s, "Coming Soon", NULL, 0, action);
         (void) v3;
         return;
     }
+}
+
+static void clan_decline_all_done(SocialSession *s, kn_db_result *res, void *extra) {
+    (void) extra;
+    if (!kn_db_ok(res)) clan_menu_reply(s, acct_db_error(res, "clnRA"), NULL, 0, 0);
+}
+
+/* ["clnRA"] v10 / v7 windows[12].decAll(): decline every join request (owner, Captains); no reply */
+void sh_clan_decline_all(SocialSession *s, const cJSON *f) {
+    (void) f;
+    if (s->account_id <= 0) return;
+    char me[24];
+    social_call(s, &P_CLAN_DECLINE_ALL, KN_DB_ARGS(me_str(s, me)), clan_decline_all_done, NULL);
+}
+
+/* ["vcln"] v10 OPEN_CLAN_TAB: sent on every clan window render; v10's server reaction is not in
+ * the client bundle (doc/v10/clans.md), so the brain accepts it without a reply */
+void sh_clan_viewed(SocialSession *s, const cJSON *f) {
+    (void) s;
+    (void) f;
 }
 
 /* ["clnR", playerId, 1 accept | 0 decline] (menu); errors -> ["cln", msg, null, 0, 0] */

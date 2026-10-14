@@ -6,6 +6,7 @@
 // payment hooks (logBtnFRVR, XsollaPopup, ...) are no-ops. Also installs the non-inline
 // listeners (setupDom's addEventListener calls).
 #include <v10_menu.h>
+#include <v10_social.h>
 #include <ui_logic.h>
 #include <lobby_ui.h> // WP-E voteOnMatch
 #include <ui_host_config.h> // WP-E createPrivateRoom: the host config request
@@ -599,6 +600,7 @@ static const UiModuleHandler MODULE_HANDLERS[] = {
     turf_ui_handle,            // turf_ui.c: v10 Turf Wars
     v10_news_handle,           // v10_news.c: What's New (windows[34]), Guide, Community & Events
     v10_competitive_handle,    // v10_competitive.c: v10 Leaderboards, the view stack
+    v10_social_handle,         // v10_social.c: v10 Social hub, player profile, clan view (openSocial, openPlayerProfile, ...)
     ui_settings_handle,        // ui_settings.c: Game Settings (windows[0])
     ui_controls_handle,        // ui_controls.c: Change Controls (windows[6])
     v10_customize_handle,      // v10_customize.c: the v10 page's Change Loadout tabs, Title window
@@ -746,6 +748,7 @@ static int l_window_keydown(void *user, const HtmlEvent *ev, const HtmlArg *args
     }
     if (html_key_is_escape(ev->key)) {
         if (v10_menu_login_escape()) return 0; // the v10 login / register modal goes first
+        if (v10_social_key(ev->key)) return 0; // v10's view stack (profile, clan view, post): Escape pops it
         if (ui->menu_open && menu_window_is_open()) {
             if (object_manager_ui_escape()) return 0; // the Object Manager opened in game: straight back to it
             menu_toggle_window(0);

@@ -1,0 +1,22 @@
+{
+  "scenario": "v10/social-profile",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 9.0
+  },
+  "regions": [
+    {
+      "name": "social",
+      "rect": [
+        321,
+        164,
+        637,
+        392
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 9.0,
+      "note": "the v10 Social hub popup / view (v10_social.c markup, Chromium + v10 CSS)"
+    }
+  ]
+}

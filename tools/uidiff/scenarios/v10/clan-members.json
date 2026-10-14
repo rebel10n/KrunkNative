@@ -1,0 +1,133 @@
+{
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "window": 13,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Player",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "account": {
+      "name": "Player",
+      "score": 200000,
+      "funds": 2500,
+      "premium": 0,
+      "badges": [],
+      "stats": {},
+      "clan": "AAA",
+      "skins": [
+        {
+          "ind": 7776,
+          "cnt": 2
+        },
+        {
+          "ind": 7795,
+          "cnt": 1
+        },
+        {
+          "ind": 7831,
+          "cnt": 1
+        }
+      ]
+    },
+    "clan": {
+      "tab": 1,
+      "data": {
+        "clan_id": 7,
+        "clan_name": "AAA",
+        "clan_playerid": 1,
+        "clan_funds": 45000,
+        "clan_score": 2400000,
+        "clan_rank": 0,
+        "creatorname": "Player",
+        "clan_link4": "abcDEF",
+        "clan_logo": 0,
+        "clan_logo_pending": 0,
+        "clan_banner_color": "#dc3c3c",
+        "members": [
+          {
+            "i": 1,
+            "p": "Player",
+            "r": 3,
+            "s": 52000,
+            "s7": 4100,
+            "su": 1,
+            "ve": 0,
+            "h": 0
+          },
+          {
+            "i": 2,
+            "p": "Sidekick",
+            "r": 2,
+            "s": 31000,
+            "s7": 2900,
+            "su": 0,
+            "ve": 1,
+            "h": 0
+          },
+          {
+            "i": 3,
+            "p": "Rookie",
+            "r": 0,
+            "s": 1200,
+            "s7": 300,
+            "su": 0,
+            "ve": 0,
+            "h": 0
+          },
+          {
+            "i": 4,
+            "p": "Gunner",
+            "r": 1,
+            "s": 9000,
+            "s7": 5100,
+            "su": 0,
+            "ve": 0,
+            "h": 0
+          }
+        ],
+        "requests": [
+          {
+            "player_name": "Newbie",
+            "cr_playerid": 9
+          }
+        ]
+      },
+      "loot": {
+        "distribution_mode": "top_weighted",
+        "clan_pct": 10,
+        "top_player_count": 5,
+        "top_player_pct": 70,
+        "remainder_pct": 30,
+        "min_games_required": 3,
+        "updated_by_name": "Player"
+      },
+      "motd": {
+        "message": "Scrims at 8pm UTC",
+        "set_by_name": "Player",
+        "set_at": 1760300000000
+      },
+      "recruit": {
+        "description": "Chill clan, daily turf wars.",
+        "looking_for": "Active players",
+        "min_level": 20,
+        "min_kd": 1.5,
+        "region": "EU",
+        "language": "en",
+        "is_active": true
+      }
+    }
+  },
+  "frames": 3,
+  "note": "v10 Clans window, Members tab (owner controls)"
+}

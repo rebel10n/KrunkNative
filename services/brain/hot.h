@@ -64,6 +64,10 @@ void hot_presence_add(int64_t account_id);
 void hot_presence_remove(int64_t account_id);   /* the account's last local socket closed */
 typedef void (*HotCountFn)(void *ud, int64_t count); /* -1 = unknown */
 int hot_presence_count(HotCountFn cb, void *ud);  /* -1 = not available */
+/* online[i] = 1 when ids[i] has a live social socket on any brain (social_eb.c, v10 friends);
+ * online NULL = the lookup failed. Returns -1 (cb not called) when Redis is not available. */
+typedef void (*HotOnlineFn)(void *ud, const int *online, size_t n);
+int hot_presence_online(const int64_t *ids, size_t n, HotOnlineFn cb, void *ud);
 
 /* ---- social pushes to accounts connected to other brains */
 typedef void (*HotPushHandler)(int64_t account_id, cJSON *frame, int json_only); /* frame consumed */

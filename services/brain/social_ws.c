@@ -115,12 +115,20 @@ static void presence_remove(SocialSession *s) {
     s->prev = s->next = NULL;
 }
 
+int social_account_online(int64_t account_id) {
+    for (SocialSession *o = s_online; o; o = o->next)
+        if (o->account_id == account_id && account_id > 0) return 1;
+    return 0;
+}
+
 static void presence_add(SocialSession *s) {
     presence_remove(s);
+    const int first = !social_account_online(s->account_id);
     s->next = s_online;
     if (s_online) s_online->prev = s;
     s_online = s;
     hot_presence_add(s->account_id);
+    if (first) social_eb_presence(s->account_id, 1); /* v10 friends: presence:online (social_eb.c) */
 }
 
 /* Unlink and, when it was the account's last socket here, drop this brain from its presence. */
@@ -132,6 +140,7 @@ static void presence_leave(SocialSession *s) {
     for (SocialSession *o = s_online; o; o = o->next)
         if (o->account_id == id) return;
     hot_presence_remove(id);
+    social_eb_presence(id, 0); /* v10 friends: presence:offline unless online on another brain */
 }
 
 /* hot.h presence refresh: this brain's online account ids */
@@ -394,6 +403,7 @@ static void auth_reply(void *ud, const char *err, const cJSON *account) {
                   s->token[0] ? cJSON_CreateString(s->token) : cJSON_CreateNull(), info);
     KN_DEBUG(MOD, "%s logged in as %s", s->socket_id, s->username);
     social_after_login(s);
+    social_eb_after_login(s); /* v10 friends: unread:summary */
     if (reg_email[0]) acct_email_after_register(s->account_id, reg_email, s->ip); /* pushes "emailS" when done */
     else sh_email_state(s, NULL);
     social_unhold(s);
@@ -581,6 +591,8 @@ static const SocialRoute k_routes[] = {
     {"ttl", sh_titles},                 /* v10: the account's titles (v10_customize.c) */
     {"dsp", sh_daily_spin},             /* v10 Daily Spin progress (daily_spin.c) */
     {"dsl", sh_daily_spin_claim},       /* v10 DAILY_SPIN_CLAIM -> "dslr" */
+    {"clnRA", sh_clan_decline_all},     /* v10 clan window: Decline All */
+    {"vcln", sh_clan_viewed},           /* v10 OPEN_CLAN_TAB */
     {"uploadS", sh_settings_up},
     {"getS", sh_settings_get},
     {"nme", sh_alias},
@@ -602,6 +614,8 @@ static const SocialRoute k_routes[] = {
     {"trCA", sh_trade_clear},
     {"ecfg", sh_economy_config},        /* KrunkNative: the economy rules (economy.c) */
     {"krh", sh_kr_history},             /* KrunkNative: the account's KR ledger */
+    {"eb", sh_eb},                      /* v10 friends event bus (social_eb.c) */
+    {"gapi", sh_gapi},                  /* v10 gapi requests (social_gapi.c, clan_v10.c) */
     {"uml", sh_listings_of},            /* v7.1.4 profile "Listings" tab -> "ul" */
     {"pbm", sh_blackm_buy},             /* v7.1.4 Black Market purchase -> "bmr" */
     {"uploadM", sh_upload_map},
@@ -792,6 +806,7 @@ int social_ws_init(Brain *b) {
     kn_http_route(b->http, "GET", "/mm/presence", h_presence, NULL);
     hot_presence_source(presence_ids);
     hot_push_handler(push_local);
+    social_gapi_init(b); /* v10 Social hub: giveaway draws (social_gapi.c) */
     KN_INFO(MOD, "social socket on /api/ws and /social/ws%s", b->db ? "" : " (no database: guests only)");
     return 0;
 }

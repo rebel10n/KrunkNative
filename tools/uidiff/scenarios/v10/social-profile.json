@@ -1,0 +1,76 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/social-profile.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "account": {
+      "name": "KnAlice",
+      "score": 2000000,
+      "funds": 2500,
+      "premium": 0,
+      "badges": [],
+      "stats": {},
+      "clan": ""
+    },
+    "social": {
+      "tab": 1,
+      "selected": 0,
+      "friends": [],
+      "view": {
+        "type": "profile",
+        "data": {
+          "player_id": 2,
+          "player_name": "KnBob",
+          "online": 1,
+          "player_premium": 0,
+          "player_hack": 0,
+          "player_featured": 0,
+          "player_clan": "AAA",
+          "player_datenew": "2026-03-04T10:00:00Z",
+          "player_score": 2000000,
+          "player_kills": 4521,
+          "player_deaths": 3010,
+          "player_games_played": 420,
+          "player_wins": 150,
+          "player_funds": 2500,
+          "player_elo4": 0,
+          "player_skinvalue": 0,
+          "player_timeplayed": 360000000,
+          "player_stats": {
+            "hs": 800,
+            "s": 50000,
+            "h": 21000,
+            "mk": 30,
+            "n": 2,
+            "c0": 120000,
+            "c1": 5000
+          },
+          "player_followed": 12,
+          "player_following": 3,
+          "follow_state": 1,
+          "maps": [],
+          "mods": [],
+          "assets": [],
+          "raid_stats": [],
+          "match_history": []
+        }
+      }
+    }
+  },
+  "frames": 3,
+  "note": "ui/v10 player profile view (openPlayerProfile, v10_social.c)"
+}

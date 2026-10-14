@@ -1,0 +1,60 @@
+# v10.0.2 Social hub on the v10 page (v10-social)
+
+Krunker v10's in-game Social hub (`window.openSocial(tab)`, Svelte `_49999` in a `socialModal`
+generic popup), its view stack (player profile, clan view, post detail, compose, follow list,
+gift, report) and the friends event bus, ported to C (`client/src/ui/v10_social.c`) over kn_brain.
+The clan window (13) is `client/src/ui/clan_ui.c` (see clans.md). Line numbers `v10:N` refer to
+`~/.cache/kn-v10/v10.js`.
+
+## Client
+
+| piece | v10 | KrunkNative |
+| --- | --- | --- |
+| Social menu item | `_50477`, `#menuBtnSocial`, `counterBadge` = unread total | `v10_social_tick` sets `onclick="openSocial()"` on the item and keeps the badge |
+| hub | `_49999` (v10:140481): sidebar tabs Social / Friends / Search | `open_hub` / `render` into `#genericPop.socialModal` |
+| Social tab | feeds global / following / hot / giveaways / clan + News (v10:140540), New post (level 10), player search | `sb_social_tab`, gapi `/social/feed?tab=`, `/social/news`, `/social/post` |
+| post card / detail / compose | `_35330`, `_35483`, `_49624` | `sb_post`, `sb_post_detail`, `sb_compose`; votes optimistic like v10 |
+| Friends tab | `svelte-u33r8v` / `e2g8p2` / `128yn5i` / `jj9ljg`, event bus (v10:139770-140300) | `sb_friends_tab`, `sb_friend_list`, `sb_conversation` |
+| Search tab | `svelte-fo44ss`, 300 ms debounce, `/players/search?q&limit=20` | `sb_search_tab` |
+| player profile | `_34510` (v10:109702) | `sb_profile` (Stats, Feed, Sales, Badges, Titles, Creations, Match History, Reports) |
+| clan view | `_34484` (v10:103555), Request to Join | `sb_clan`, gapi `/clans/by-name/<tag>`, `/clans/<id>/apply` |
+| view stack | `.view-stack > .view-stack-overlay > .view-wrapper` scaled by `--ui-scale` | the page's one stack (`v10_view_push` / `v10_view_set` / `v10_view_pop`, client/include/v10_ui.h); `menu_scale_base` publishes `--ui-scale/--ui-width/--ui-height` on `<body>` |
+| window 5 Friends tab | `#friendList` rows, Join (`openURL('/?game=..',1)`), Remove Friend (`deleteFollower`) | `v10_social_window_friends_html` |
+| in-game DM lines | `[DM from <name>]: <text>`, `[DM] N new messages from <name>` in `#chatList` | `dm_chat_line` (only in game) |
+
+KrunkNative adds `v10s*` element ids (no style) for focus/scroll restoration and tests.
+
+## Transport (deviation)
+
+v10 calls gapi over HTTPS with a FRVR bearer token and opens a second WebSocket for the friends
+event bus (`wss://event-bus.svc.krunker.io/ws?at=<token>`). KrunkNative's client already holds the
+authenticated social socket, so both ride on it:
+
+* gapi: `["gapi", rid, method, path, body]` -> `["gapi", rid, status, {data} | {error: {code, message}}]`
+  (`services/brain/social_gapi.c`, `client/src/ui/v10_gapi.c`). Writes are rate limited per account.
+* event bus: `["eb", {type, ...}]` both ways, v10's objects verbatim (`services/brain/social_eb.c`):
+  `friends:list`, `presence:ping/pong/online/offline/game`, `msg:send/sent/recv/read/history`,
+  `msg:history:result`, `unread:summary`, `error` (EB_* codes). Friends are mutual follows (v10's
+  rule); a follow that makes or breaks a friendship pushes both friends lists. Messages are
+  `chat_messages` rows (the hub chat's), online only like v10 (EB_TARGET_OFFLINE). Online = a
+  signed-in social socket on any brain (Redis presence, `hot_presence_online`).
+* gift / report / sales / listings use the existing socket ops (`kr`, `rpt`, `pst`, `uml`).
+
+## Giveaways (0112_social_v10)
+
+`POST /social/post {type: 9, text, funds}`: level 20, at least 10 KR, the author pays funds +
+ceil(10 %). The draw is not in the bundle: KrunkNative draws one entrant (liked the post and follows
+the author) uniformly at random when it ends (`accounts.giveaway_hours`, default 24; checked every
+`accounts.giveaway_check_ms`), pays the prize and mails the winner; without entrants the prize goes
+back to the author. News: `accounts.news` (HTML strings).
+
+## Known differences from v10
+
+* No profile pictures, clan logos or emoji skins are hosted: avatars use v10's fallback picture,
+  the clan view its shield placeholder, and the DM emoji panel never has candidates (`:` is inserted).
+* Profile: raid stats, match history, badges / titles tabs and ranked rank chip show v10's empty
+  states; the sales chart is a bar strip instead of v10's canvas line chart; listings show the skin
+  index instead of its name / thumbnail; Trade dispatches `openTrade` (the economy's flow).
+* Post types 5 (unboxed item) and 8 (match result) are rendered by the brain only if such posts exist
+  (KrunkNative creates none yet).
+* Join in the conversation header calls `v10_party_join_game` (v10-party); without it, nothing.
