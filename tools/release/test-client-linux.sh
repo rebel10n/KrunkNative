@@ -44,9 +44,10 @@ if [ -n "$content" ]; then
     done
 fi
 
-# shellcheck disable=SC2016 # expanded inside the container
-"${DOCKER:-docker}" run --rm "${mounts[@]}" -e PKG="$pkgfile" -e BRAIN="$brain" -e HAVE_CONTENT="${content:+1}" -e HOST_UID="$(id -u)" \
-    "$image" bash -c '
+# The script run in the container. A quoted heredoc, so quotes in it are just quotes: in the
+# single-quoted bash -c '...' it used to be, the '^opus=libopus ' of f75b57b ended the script at
+# that grep (no RESULT line, so every CI compat run failed without saying why).
+read -r -d '' inner << 'EOF' || true
 set -uo pipefail
 log=/out/test.log
 exec 3>&1 > "$log" 2>&1
@@ -106,7 +107,7 @@ fi
 echo "$v"
 if [ -z "$HAVE_CONTENT" ]; then result install=ok version=ok render=skipped "($v)"; fi
 
-# the content next to the package'"'"'s own (git-tracked) assets/
+# the content next to the package's own (git-tracked) assets/
 for d in /content/*; do [ -e "$root/assets/$(basename "$d")" ] || ln -s "$d" "$root/assets/"; done
 mkdir -p /tmp/cfg
 cd / # client_bin must find its install root by itself (install_root.c); the launcher would
@@ -123,5 +124,21 @@ if grep -q "^\[ui\] setting " /out/client.log && [ -s /out/menu.png ]; then
 fi
 tail -5 /out/client.log
 RC=1 result install=ok version=ok render=fail "(exit $rc; ${renderer:-no GL context}: $(grep -m1 -iE "error|failed|unsupported|cannot" /out/client.log | cut -c1-120))"
-' || { rc=$?; echo "log: $out/test.log" >&2; exit "$rc"; }
+EOF
+
+rc=0
+"${DOCKER:-docker}" run --rm "${mounts[@]}" -e PKG="$pkgfile" -e BRAIN="$brain" -e HAVE_CONTENT="${content:+1}" -e HOST_UID="$(id -u)" \
+    "$image" bash -c "$inner" || rc=$?
+if ! grep -q '^RESULT ' "$out/test.log" 2> /dev/null; then
+    [ "$rc" != 0 ] || rc=1
+    echo "RESULT $image $pkgfile install=? version=fail (the test script ended early: exit $rc, no RESULT)"
+fi
+if [ "$rc" != 0 ]; then
+    # why, in the CI job log too (test.log lives in the runner's temp dir and is not uploaded)
+    {
+        echo "== FAILED: $image $pkgfile (exit $rc), last lines of $out/test.log:"
+        tail -n 40 "$out/test.log" 2> /dev/null | sed "s|^|[$image $pkgfile] |"
+    } >&2
+    exit "$rc"
+fi
 echo "log: $out" >&2

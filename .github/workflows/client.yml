@@ -132,10 +132,14 @@ jobs:
             echo "debian:trixie out/linux-$a/krunknative-client-linux-$a.deb"
             echo "fedora:latest out/linux-$a/krunknative-client-linux-$a.rpm"
           } > compat.txt
-          # xargs runs them 4 at a time; any failed install or --version fails the job
-          xargs -P 4 -L 1 tools/release/test-client-linux.sh < compat.txt | tee compat-results.txt
-          [ "$(grep -c 'version=ok' compat-results.txt)" = "$(wc -l < compat.txt)" ]
+          # xargs runs them 4 at a time; any failed install or --version fails the job. A failing
+          # distro prints its RESULT line and the tail of its test.log (prefixed "[<image> <package>]")
+          # into this log, and gets an error annotation.
+          rc=0
+          xargs -P 4 -L 1 tools/release/test-client-linux.sh < compat.txt | tee compat-results.txt || rc=$?
           { echo "### Linux ${{ matrix.arch }} packages"; echo '```'; cat "$RUNNER_TEMP"/bin/*/build-info.txt compat-results.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          grep -v 'version=ok' compat-results.txt | sed 's/^/::error title=Distro compatibility::/' || true
+          [ "$rc" = 0 ] && [ "$(grep -c 'version=ok' compat-results.txt)" = "$(wc -l < compat.txt)" ]
 
       - uses: actions/upload-artifact@v7
         with:
