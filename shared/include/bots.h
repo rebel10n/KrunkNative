@@ -19,6 +19,7 @@
 // the commands are in shared/src/chat_commands.c (server console, rcon, chat, dev console).
 // Intentional differences are documented in bots.c and doc/console.md.
 #include <shared.h>
+#include <bot_move.h>
 
 #define GAME_BOTS_MAX 32            // parseBotConfigAssignments: Math.min(32, count) per bot_add
 #define GAME_BOT_LIMIT 16           // config.botLimit: the server.cfg quota cap
@@ -170,7 +171,7 @@ typedef struct {
     int reached;                   // 0: the goal was unreachable, the route ends closest to it
 } BotPath;
 
-typedef struct {
+typedef struct GameBot_t {
     int id;                         // NextBot id (manager counter from 1): bot_list / bot_kick index
     char socket_id[13];             // UTILS.randomString(12)
     char name[PLAYER_NAME_SIZE];
@@ -237,6 +238,7 @@ typedef struct {
     unsigned char has_route_target; // pathTarget != null
     vec3 route_target;
     BotObjective objective;         // the mode objective it plays (shared/src/bot_objective.c)
+    BotMove move;                   // locomotion: slide hopping, jump / crouch gating (shared/src/bot_move.c)
 } GameBot;
 
 typedef struct GameBots_t {

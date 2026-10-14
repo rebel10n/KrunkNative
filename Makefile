@@ -230,6 +230,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, off
 	./$(DEBUG_DIR)/ks_storage_test
 	./$(DEBUG_DIR)/navgen_test
 	./$(DEBUG_DIR)/bot_objective_test
+	./$(DEBUG_DIR)/bot_move_test
 	./$(DEBUG_DIR)/season_test
 	./$(DEBUG_DIR)/target_select_test
 	./$(DEBUG_DIR)/meshopt_test .

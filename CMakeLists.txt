@@ -711,6 +711,14 @@ else ()
         target_link_libraries(bot_objective_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # bot_move_test: bot locomotion (shared/src/bot_move.c): slide hop cadence and speed, no head
+    # bumps under ceilings, no hops into walls / off ledges, a long run with the full AI
+    add_executable(bot_move_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/bot_move_test.c)
+    target_link_libraries(bot_move_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(bot_move_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # target_select_test: player target selectors (shared/src/target_select.c: *, @me, @bots, @team,
     # Joel* ...) and the chat commands over them (god * / ungod * / give * / kick *, permissions)
     add_executable(target_select_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/target_select_test.c)

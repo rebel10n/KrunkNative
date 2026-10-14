@@ -173,8 +173,8 @@ custom host; the console and rcon always; offline always), with perms on **or** 
 | bot, bot_add | [count] [tfue\|autoRespawn\|key=value] | "Spawned N nextbot bots." (count capped at 32; `tfue` = dmgMlt 0.01 like the sandbox Spawn Bot key; errors "Expected key=value, got 'x'", "Unknown bot option 'k'", "Invalid boolean for 'k'") |
 | bot_place | [tfue\|autoRespawn\|key=value] | at the caller's feet: "Spawned 1 nextbot bot at your position." (v7's server ignores the position; the console: at a spawn) |
 | bot_type | [nextbot\|tfue] | "Bot type: nextbot (use bot_type nextbot\|tfue)" / "Bot type set to tfue; removed N nextbot bots." |
-| bot_list | – | "Bots (N): nextbot:1:Name#uid, …" / "No bots." |
-| bot_nav | – | Krunker Box Office: "Bot nav: stuck N, replans N (forced N), goals N, unreachable N, falls N; grid N nodes." + "Routes (id:state:waypoint/count): …" (`id:dead` while a bot respawns) (`shared/src/bot_path.c` counters since the manager was created; `server/tests/bot_nav_e2e.py`) |
+| bot_list | – | "Bots (N): nextbot:1:Name#uid bhop:clean, …" / "No bots." (bhop: the bot's hop skill none / learning / clean, off without slideHop) |
+| bot_nav | – | Krunker Box Office: "Bot nav: stuck N, replans N (forced N), goals N, unreachable N, falls N; grid N nodes." + "Routes (id:state:waypoint/count): 1:Hunt:3/12 bhop:clean, …" (bhop as in bot_list) (`id:dead` while a bot respawns) (`shared/src/bot_path.c` counters since the manager was created; `server/tests/bot_nav_e2e.py`) |
 | bot_kick | [all\|index\|name] | "Removing N bots." / "No bots matched 'x'." / "No bots." (LEAVE to everyone) |
 | bot_kill | [all\|index\|name] | "Killed N bots." / "Matched bots are not spawned yet." (players.kill, skipRewards) |
 | bot_config | [key=value …] | "Bot config: accuracy=100 attackTarget=true …" / "Bot config updated (k=v); N live bots updated." |
@@ -286,6 +286,21 @@ given (v7 bot_add bots are level 0); cosmetics per slot with a chance; a bot kee
 (10% switch per respawn); class= implies forceClass; voiceChat, noRecoil, spreadMlt and
 scoreOnDeath are parsed but have no native effect; the sandbox Spawn Bot / Clear Bots keys
 (numpad + / -) are not bound.
+
+Slide hopping (`slideHop` / `bhop`, `shared/src/bot_move.c`) is on by default for nextbot bots
+(v7 tfue default off): instead of v10's "jump on every grounded frame once the slide has 50 ms
+left" a bot hops on the first frame that can jump after a landing, lets the crouch go while
+rising and holds it while falling (every landing slides), and simulates the jump first,
+sweeping its box along the arc against the map: no hop into a ceiling or wall, off a ledge,
+onto a jump pad / kill volume or past a corner of its route, and no AI jump (ledge, dodge,
+randomJump) under a ceiling it would hit; in the air it re-checks the rest of the flight every
+frame and lets the key (or the air strafe) go when its aim turns the flight toward a solid.
+Hopping is a per-bot skill, rolled from the bot's personality seed (name + uid) and correlated
+with difficulty: `none` (never hops), `learning` (waits on the ground and loses speed,
+sometimes forgets the crouch so the landing does not slide, hesitates, skips landings) or
+`clean` (hops on the next frame after every clear landing). Mix: easy 75% none / 25% learning;
+normal 30% none / 35% learning / 35% clean; hard 15% learning / 85% clean; max all clean. The
+safety checks apply to every skill.
 
 ## Teleports (Krunker Box Office `tp` / `bring`)
 

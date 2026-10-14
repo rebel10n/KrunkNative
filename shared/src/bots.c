@@ -23,6 +23,11 @@
 // - Objectives (KrunkNative addition, shared/src/bot_objective.c): v7's NextBot only roams and
 //   fights; here Hunt walks the mode's objective (flags, hills, zones, tags, sites: state
 //   Objective) with team roles by rank, and a carrier / a holder keeps to it while fighting.
+// - Slide hopping (shared/src/bot_move.c): NextBots slideHop by default; the hop is simulated and
+//   swept against the map first (no hops into ceilings / walls, off ledges or past route corners),
+//   fired on the first frame after a landing that can jump, and every landing slides. AI jumps
+//   (ledges, dodges, randomJump) are refused under a ceiling they would hit. Hopping is a per-bot
+//   skill (none / learning / clean) from the personality seed, correlated with difficulty.
 // - Parsed but without effect natively: voiceChat (no clip), noRecoil, spreadMlt, rangeMlt
 //   (only the AI's engage range), scoreOnDeath, head / pet / shoes / wrist (no such v3.1.1 slots).
 #include <bots.h>
@@ -592,6 +597,7 @@ void bot_config_defaults(const BotType type, BotConfig *c) {
         c->difficulty = BOT_DIFFICULTY_MAX;
         c->accuracy = 100.0f;
         c->target_distance = NB_MAX_AWARENESS_DISTANCE;
+        c->slide_hop = 1; // KrunkNative: NextBots slide hop like players (bot_move.c; v7 tfue default off)
     }
 }
 
@@ -853,6 +859,7 @@ static void bot_reset_ai(GameBot *bot, const Player *p) {
     bot->has_route_target = 0;
     memset(&bot->mimic, 0, sizeof(bot->mimic));
     bot->mimic.move_dir = MOVE_NONE;
+    bot_move_reset(&bot->move);
 }
 
 // Bot.spawn(skipSync): players.add on the first spawn, the loadout / outfit, the multipliers,
@@ -1239,6 +1246,7 @@ static int bot_line_of_sight(const Game *game, const Player *self, const Player 
 typedef struct {
     int move;
     unsigned char jump, crouch, shoot, scope, reload;
+    unsigned char jump_late;        // press jump on the tick's second frame (the first releases it after a landing)
     int swap;
     float yaw, pitch;
 } BotFrame;
@@ -1819,10 +1827,7 @@ static void bot_update_tfue(Game *game, GameBot *bot, Player *self, const float 
     if (on_route && dist <= BOT_PATH_RADIUS) bot->has_route_target = 0;
     if (cfg->follow_target && (on_route ? dist > BOT_PATH_RADIUS : dist >= 10.0f)) { // followDistance 10
         bot_walk(game, bot, self, goal, dt, f);
-        if (cfg->slide_hop) {
-            f->jump = self->on_ground && self->slide_timer <= 0.05f;
-            if (self->velocity.y < 0.0f && self->can_slide) f->crouch = 1;
-        }
+        // slideHop: bot_move_apply (bot_update) hops where the way is clear
     }
     if (cfg->random_jump && bot->tick % 100 == 0 && bot_rand_int(0, 100) >= 25) f->jump = 1;
     const float range = bot_engage_range(bot, self);
@@ -1848,7 +1853,7 @@ static void bot_queue_frames(GameBot *bot, Player *self, const BotFrame *f, cons
         in.delta = each;
         in.x_dir = CLAMP(f->pitch, -BOT_HALF_PI, BOT_HALF_PI);
         in.y_dir = player_wrap_yaw(f->yaw);
-        in.jump = (unsigned char) (i == 0 && f->jump);
+        in.jump = (unsigned char) (f->jump && i == (f->jump_late && frames > 1 ? 1 : 0));
         in.crouch = f->crouch;
         in.reload = (unsigned char) (i == 0 && f->reload);
         in.swap = (unsigned char) (i == 0 ? f->swap : 0);
@@ -1903,6 +1908,9 @@ static void bot_update(Game *game, GameBot *bot, const float dt, const float del
     f.pitch = bot->pitch;
     if (bot->type == BOT_TYPE_TFUE) bot_update_tfue(game, bot, self, dt, &f);
     else bot_update_nextbot(game, bot, self, dt, &f);
+    // locomotion (shared/src/bot_move.c): slide hops where the way is clear, no jumps into
+    // ceilings, the crouch for the landing slide
+    bot_move_apply(game, bot, self, dt, f.yaw, &f.move, &f.jump, &f.crouch, &f.jump_late);
 
     if (bot->config.nod_yes) f.pitch = (bot->tick & 1) ? BOT_HALF_PI / 4.0f : -(BOT_HALF_PI / 4.0f);
     if (bot->config.force_crouch) f.crouch = 1;

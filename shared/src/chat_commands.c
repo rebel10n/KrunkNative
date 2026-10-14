@@ -1388,6 +1388,12 @@ static int bot_matches(const GameBot *bot, const int position, const char *query
     return 0;
 }
 
+// KrunkNative: a bot's bunny hop skill for bot_list / bot_nav (shared/src/bot_move.c: none /
+// learning / clean, "off" when slideHop is off)
+static const char *bot_hop_label(const GameBot *bot) {
+    return bot->config.slide_hop ? bot_move_skill_name(bot_move_skill(bot)) : "off";
+}
+
 static void cmd_bot_list(ChatCtx *c) {
     if (!allowed(c, CHAT_PERM_HOST_DEV) || !bot_manager_ready(c)) return;
     const GameBots *bots = c->host->game->bots;
@@ -1402,7 +1408,8 @@ static void cmd_bot_list(ChatCtx *c) {
         char sid[24];
         if (bot->player) snprintf(sid, sizeof(sid), "#%d", bot->uid);
         else snprintf(sid, sizeof(sid), "(unspawned)");
-        len += (size_t) snprintf(label + len, sizeof(label) - len, "%s%s:%d:%s%s", i ? ", " : "", bot_type_name(bot->type), bot->id, bot->name, sid);
+        len += (size_t) snprintf(label + len, sizeof(label) - len, "%s%s:%d:%s%s bhop:%s", i ? ", " : "", bot_type_name(bot->type), bot->id, bot->name, sid,
+                                 bot_hop_label(bot));
     }
     reply(c, "Bots (%d): %s", bots->count, label);
 }
@@ -1428,8 +1435,8 @@ static void cmd_bot_nav(ChatCtx *c) {
         }
         vec3 goal;
         const int has_goal = bot_path_goal(bot, &goal);
-        len += (size_t) snprintf(label + len, sizeof(label) - len, "%s%d:%s:%d/%d%s", len ? ", " : "", bot->id, bot_state_name(bot->state),
-                                 bot->path_index, bot->path.count, has_goal ? "" : ":nogoal");
+        len += (size_t) snprintf(label + len, sizeof(label) - len, "%s%d:%s:%d/%d%s bhop:%s", len ? ", " : "", bot->id, bot_state_name(bot->state),
+                                 bot->path_index, bot->path.count, has_goal ? "" : ":nogoal", bot_hop_label(bot));
     }
     if (label[0]) reply(c, "Routes (id:state:waypoint/count): %s", label);
 }
