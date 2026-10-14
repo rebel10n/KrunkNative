@@ -10,10 +10,12 @@
 #include <string.h>
 #include <ruleset.h>
 #include <hitboxes.h>
+#include <prefabs.h>
 
 void player_shoot(Player*);  // shared/src/player.c
 void player_melee(Player*);
 void player_reload(Player*);
+int game_object_shootable(const Object*); // shared/src/player.c (the hitscan object filter)
 
 static int g_failures, g_checks;
 
@@ -728,6 +730,107 @@ static void test_knife_ends(void) {
     CHECK(end.id >= 0 && !end.impact, "a wall the knife broke: no impact (impact %d)", end.impact);
 }
 
+// KN bug fixed (shared/src/projectile.c): a thrown knife used its own copy of the shot filter and
+// stopped (and stuck, as on a wall) at the zones v7 / v10 keep out of map.manager.objects: every
+// map's hardpoint OBJECTIVE (a hidden ~100 x 50 x 100 box) and the BOMB_SITEs. v10 projectiles
+// trace the same objects as a shot (v10:180099-180110), so the knife flies through them.
+static const char *const KNIFE_ZONE_MAP = "{\"name\": \"knife_zones\", \"spawns\": [[0, 0, 0]], \"objects\": ["
+    "{\"p\": [0, -10, 0], \"s\": [400, 10, 400]},"               // floor
+    "{\"p\": [0, 0, -60], \"s\": [100, 100, 2]},"                // wall, -z
+    "{\"i\": 14, \"p\": [0, 0, -20], \"s\": [60, 50, 10]},"    // OBJECTIVE (hardpoint zone)
+    "{\"i\": 45, \"p\": [0, 0, -40], \"s\": [60, 30, 10]}]}";  // BOMB_SITE
+
+static NetProjectileEndPacket throw_knife_from(Game *game, Player *owner, const vec3 origin, const float yaw, const float pitch, const float d) {
+    const int before = g_end_count;
+    const ProjectileShot shot = {.speed_mlt = fmaxf(0.3f, d), .damage_d = d, .effect = -1};
+    game_spawn_projectile_ex(game, owner, WEAPON_ID_KNIFE, projectile_config_for(owner->weapon, 1), origin, yaw, pitch, 1, &shot);
+    for (int i = 0; i < 2400 && g_end_count == before; i++) game_tick_projectiles(game, 1.0f / 60.0f);
+    if (g_end_count == before) return (NetProjectileEndPacket) {.id = -1};
+    return g_last_end;
+}
+
+static Game *knife_game(Game *game, const cJSON *map) {
+    static const cJSON *maps[1];
+    maps[0] = map;
+    memset(game, 0, sizeof(*game));
+    game_configure(game, NULL, maps, 1, NULL, 0, NULL, 0, NULL, 0);
+    game_init(game, 0, -1, 1);
+    game->hooks.send = test_send;
+    game->lag_comp = 0;
+    return game;
+}
+
+static float box_distance(const vec3 p, const Object *o) {
+    const vec3 size = object_box_size(o);
+    const float dx = fmaxf(fabsf(p.x - o->position.x) - size.x * 0.5f, 0.0f);
+    const float dz = fmaxf(fabsf(p.z - o->position.z) - size.z * 0.5f, 0.0f);
+    const float dy = fmaxf(fmaxf(o->position.y - p.y, p.y - (o->position.y + size.y)), 0.0f);
+    return sqrtf(dx * dx + dy * dy + dz * dz);
+}
+
+static int is_hidden_zone(const Object *o) { return o->prefab == PREFAB_OBJECTIVE || o->prefab == PREFAB_BOMB_SITE; }
+
+static void test_knife_zones(void) {
+    printf("thrown knife: hardpoint and bomb site zones are not walls...\n");
+    cJSON *json = cJSON_Parse(KNIFE_ZONE_MAP);
+    static Game game;
+    knife_game(&game, json);
+    Player *thrower = add_player(&game, 1, 0);
+    thrower->position = (vec3) {0.0f, 0.0f, 0.0f};
+    int zones = 0;
+    for (size_t i = 0; i < game.map->object_count; i++) zones += is_hidden_zone(game.map->objects[i]);
+    CHECK(zones == 2, "the map has its OBJECTIVE and BOMB_SITE (%d)", zones);
+
+    const NetProjectileEndPacket end = throw_knife_from(&game, thrower, (vec3) {0.0f, 10.0f, 0.0f}, 0.0f, 0.0f, 1.0f);
+    CHECK(end.id >= 0 && end.impact && end.position[2] > -60.0f && end.position[2] < -57.0f,
+          "through both zones into the wall behind them (impact %d, z %.2f)", end.impact, end.position[2]);
+}
+
+// Kanji and Sandstorm, knives from the spawns in every direction: none may end on a hidden zone
+// (an end within 0.5 of an OBJECTIVE / BOMB_SITE box and of nothing a knife can hit).
+static void test_knife_map_zones(const char *path) {
+    cJSON *json = NULL;
+    if (load_json_file(path, &json)) {
+        CHECK(0, "load %s", path);
+        return;
+    }
+    static Game game;
+    knife_game(&game, json);
+    Player *thrower = add_player(&game, 1, 0);
+    thrower->position.y += 100000.0f; // the knife's owner never blocks it; keep the spawns clear anyway
+    const Map *map = game.map;
+    int throws = 0, ends = 0, zone_ends = 0, zone_count = 0;
+    for (size_t k = 0; k < map->object_count; k++) zone_count += is_hidden_zone(map->objects[k]);
+    const int spawns = map->spawn_count < 6 ? (int) map->spawn_count : 6;
+    for (int s = 0; s < spawns; s++) {
+        vec3 eye = map->spawns[s]->position;
+        eye.y += game_constants.player_height - game_constants.camera_height;
+        for (int yi = 0; yi < 24; yi++) {
+            for (int pi = 0; pi < 6; pi++) {
+                const NetProjectileEndPacket end = throw_knife_from(&game, thrower, eye, (float) yi * (float) M_PI / 12.0f, -0.4f + (float) pi * 0.2f, 1.0f);
+                throws++;
+                if (end.id < 0) continue;
+                ends++;
+                const vec3 p = {end.position[0], end.position[1], end.position[2]};
+                int on_zone = 0, on_solid = 0;
+                for (size_t k = 0; k < map->object_count; k++) {
+                    const Object *o = map->objects[k];
+                    if (box_distance(p, o) > 0.5f) continue;
+                    if (is_hidden_zone(o)) on_zone = 1;
+                    else if (game_object_shootable(o)) on_solid = 1;
+                }
+                if (on_zone && !on_solid) {
+                    if (zone_ends++ < 3) printf("  %s: a knife ended on a hidden zone at %.1f %.1f %.1f (impact %d)\n", path, p.x, p.y, p.z, end.impact);
+                }
+            }
+        }
+    }
+    printf("  %s: %d throws, %d ends, %d hidden zones, %d ends on a zone\n", path, throws, ends, zone_count, zone_ends);
+    CHECK(zone_count > 0, "%s has hardpoint / bomb site zones", path);
+    CHECK(ends == throws, "%s: every knife ends (%d of %d)", path, ends, throws);
+    CHECK(zone_ends == 0, "%s: no knife stops on a hidden zone (%d)", path, zone_ends);
+}
+
 int main(void) {
     cJSON *sandstorm = NULL;
     if (load_json_file("assets/maps/311_sandstorm.json", &sandstorm) && load_json_file("../assets/maps/311_sandstorm.json", &sandstorm)) {
@@ -760,6 +863,9 @@ int main(void) {
     test_mode_multipliers(&game);
     test_chall_mode(&game);
     test_knife_ends();
+    test_knife_zones();
+    test_knife_map_zones("assets/maps/kanji.json");
+    test_knife_map_zones("assets/maps/sandstorm_v3.json");
 
     if (g_failures) {
         printf("combat_test: %d of %d checks failed\n", g_failures, g_checks);

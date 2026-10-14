@@ -159,13 +159,16 @@ typedef struct {
     int zone;           // v10 hit boxes: 1 + HitKind of the box hit; 0 = the v7 zones by height
 } ProjectileHit;
 
+int game_object_shootable(const Object*); // shared/src/player.c (the hitscan object filter)
+
+// v10.0.2 projectiles (v10:180099-180110) trace map.manager.objects (rayCandidates) that are
+// active and not noShoot: the same objects as a shot (v10:172856), so this is the hitscan's filter
+// itself. KN bug fixed (thrown knives stuck in mid-air): this used to be a copy of that filter and
+// missed the zones v7 / v10 keep out of manager.objects (addObjective -> objectives, addBombSite ->
+// sites, v10:164383-164470). Every map's hardpoint OBJECTIVE (a box about 100 x 50 x 100 whose mesh
+// is hidden) and the BOMB_SITEs stopped knives and rockets in the air, and the knife stuck there.
 static int projectile_object_blocks(const Object *object) {
-    // Same filter as the hitscan (player.c combat_object_shootable): Krunker noShoot zones/helpers.
-    if (!object->active || object->no_shoot || object->collision_type == COLLISION_TYPE_NONE) return 0;
-    return !(object->kill || object->score_zone || object->team_zone || object->teleporter || object->checkpoint ||
-             object->pickup || object->flag || object->premium || object->verified ||
-             object->ladder || object->ramp || object->prefab == PREFAB_TEAM_ZONE || object->prefab == PREFAB_SPAWN_POINT ||
-             object->prefab == PREFAB_CAMERA_POSITION || object->prefab == PREFAB_SPECTATE_CAM);
+    return game_object_shootable(object);
 }
 
 // v7 bug fixed (thrown knives frozen in the air): projectiles.js sends "pre" with impact 1 for
