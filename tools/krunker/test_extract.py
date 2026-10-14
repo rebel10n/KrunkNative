@@ -10,7 +10,9 @@
    string-array obfuscated into one line, and one fixture per anchor with that anchor broken,
    which must fail naming the anchor and write nothing.
 3. The committed shared/include/krunker_build.h matches tools/krunker/build.json and compiles
-   as C11 with -Wall -Wextra -Werror (when a C compiler is installed).
+   as C11 with -Wall -Wextra -Werror (when a C compiler is installed); the current bundle (the
+   one build.json names by sha256: the URL cache or a local copy) regenerates it identically
+   and yields the known per-player layouts (ADD_PLAYERS 53/player, UPDATE_PLAYERS 13, ...).
 
 usage: python3 -I tools/krunker/test_extract.py [-v]
 """
@@ -41,6 +43,26 @@ LIVE = {"ahkey": 0x17153, "client_version": "10.0.2r1", "build_version": "Def6ph
         "salt": "KRUNK3R_AC", "c2s": 138, "s2c": 262}
 OLD_V10 = {"ahkey": 1597, "client_version": "10.0.1r1", "build_version": "FArgZqd2pNs7O8lWk4TblHSdDWfMUfD2",
            "salt": "KRUNK3R_AC", "c2s": 138, "s2c": 262}
+
+# Per-player layouts and argument positions (krunker_link.c relies on them). The same in the
+# 10.0.1 (v10.js), 10.0.2 (game.deob.js) and 10.0.3 (live, 2026-10-14) builds. attachIndex is
+# [22], not the [23] packet-audit.md section 1 lists: players.add takes a[i + 0x16] as its
+# attachIndex parameter and the server's getPlayerAddData packs attachIndex at [22], pcStatIndex
+# at [23].
+KNOWN_ADD = {"id": 0, "sid": 1, "x": 2, "y": 3, "z": 4, "name": 5, "classIndex": 6, "health": 7, "maxHealth": 8,
+             "team": 9, "level": 10, "clan": 11, "secIndex": 15, "xDire": 18, "attachIndex": 22, "pcStatIndex": 23,
+             "alias": 28, "busy": 45}
+KNOWN_K = {"sid": 0, "x": 1, "y": 2, "z": 3, "xDire": 4, "yDire": 5, "stepVal": 6, "onGround": 7, "crouchVal": 8,
+           "weapon": 9, "aimVal": 10, "grapple": 11, "ping": 12}
+KNOWN_SYNC = {n: i for i, n in enumerate(E.SYNC_REQUIRED)}  # inputSN 0 .. canSlideT 0x18, _protected 0x19
+KNOWN_ARGS = {
+    "kill_player": {"victim": 0, "deaths": 1, "killer": 2, "stats": 3, "info": 4, "hideFeed": 5},
+    "do_damage": {"target": 0, "damage": 1, "crit": 2, "kill": 3, "ai": 4, "silent": 5},
+    "change_health": {"health": 0, "sid": 1, "srcX": 2, "srcZ": 3, "noHitMarker": 4, "resetMax": 5},
+    "get_score": {"delta": 0, "relay": 1, "absolute": 2, "classIndex": 3},
+}
+KNOWN_LAYOUTS = {"add_stride": 53, "add": KNOWN_ADD, "k_stride": 13, "k": KNOWN_K, "send_vals": 0x1a,
+                 "sync": KNOWN_SYNC, "args": KNOWN_ARGS}
 
 VERBOSE = "-v" in sys.argv
 failures = []
@@ -81,6 +103,38 @@ def check_values(label, doc, exp):
     check(doc["cheat"]["fnv_multiply"] == "double", "%s: FNV step in doubles" % label)
 
 
+def check_layouts(label, doc, exp):
+    lay = doc["layouts"]
+    offs = lambda k: {f["name"]: f["offset"] for f in lay[k]["fields"]}  # noqa: E731
+    add, k, sync = offs("add_players"), offs("update_players"), offs("sync_player")
+    check(lay["add_players"]["stride"] == exp["add_stride"], "%s: ADD_PLAYERS stride %s" % (label, lay["add_players"]["stride"]))
+    check(lay["add_players"]["server_stride"] in (None, exp["add_stride"]), "%s: getPlayerAddData packs the stride" % label)
+    bad = {n: add.get(n) for n, o in exp["add"].items() if add.get(n) != o}
+    check(not bad, "%s: ADD_PLAYERS offsets (wrong: %r)" % (label, bad))
+    check(lay["update_players"]["stride"] == exp["k_stride"], "%s: UPDATE_PLAYERS stride %s" % (label, lay["update_players"]["stride"]))
+    check(k == exp["k"], "%s: UPDATE_PLAYERS offsets %r" % (label, k))
+    check(lay["sync_player"]["send_vals"] == exp["send_vals"], "%s: SYNC_PLAYER sendVals at %s" % (label, lay["sync_player"]["send_vals"]))
+    check(sync == exp["sync"], "%s: SYNC_PLAYER layout (wrong: %r)" % (label, {n: o for n, o in sync.items() if exp["sync"].get(n) != o}))
+    for key_, args in exp["args"].items():
+        check(lay[key_]["args"] == args and lay[key_]["argc"] == len(args), "%s: %s args %r" % (label, key_, lay[key_]))
+
+
+def current_bundle():
+    """A local copy of the bundle build.json was generated from (the URL cache first), or None."""
+    with open(E.OUT_JSON, encoding="utf8") as f:
+        src = json.load(f)["source"]
+    want, url = src["sha256"], src.get("url") or E.DEFAULT_URL
+    cands = [os.path.join(E.cache_dir(), hashlib.sha256(url.encode()).hexdigest()[:16] + ".js")]
+    if os.path.isdir(OFFICIAL):
+        cands += [os.path.join(OFFICIAL, n) for n in sorted(os.listdir(OFFICIAL)) if n.endswith(".js")]
+    for c in cands:
+        if os.path.isfile(c):
+            with open(c, "rb") as f:
+                if hashlib.sha256(f.read()).hexdigest() == want:
+                    return c
+    return None
+
+
 def comparable(doc):
     """The values that must not depend on the bundle's form (deob vs debug vs min)."""
     d = dict(doc)
@@ -118,6 +172,7 @@ def test_real_bundles(tmp):
         if not doc:
             continue
         check_values(label, doc, LIVE)
+        check_layouts(label, doc, KNOWN_LAYOUTS)
         if label == "game.deob.js":
             ref = doc
             check(doc["deobfuscation"] is None, "game.deob.js needs no string-array decoding")
@@ -135,10 +190,22 @@ def test_real_bundles(tmp):
         check(err is None, "v10.js extracts (%s)" % err)
         if doc:
             check_values("v10.js", doc, OLD_V10)
+            check_layouts("v10.js", doc, KNOWN_LAYOUTS)
             print("  %-19s %s" % ("v10.js", E.summary(E.build_doc(doc, prov)).split("\n")[0]))
     else:
         print("  SKIP v10.js (not on this machine)")
         check(not required, "v10.js present")
+    cur = current_bundle()
+    if cur:
+        text, prov = E.load_source(cur)
+        doc, err = run_extract(text)
+        check(err is None, "current bundle %s extracts (%s)" % (os.path.basename(cur), err))
+        if doc:
+            check_layouts("current bundle", doc, KNOWN_LAYOUTS)
+            print("  %-19s %s" % ("current bundle", E.summary(E.build_doc(doc, prov)).split("\n")[1].strip()))
+    else:
+        print("  SKIP current bundle (build.json's sha256 is not on this machine)")
+        check(not required, "current bundle present")
 
 
 # --------------------------------------------------------------- 2. synthetic bundles
@@ -147,7 +214,8 @@ def fixture_tables():
     c2s = [("PING", "po"), ("ENTER_GAME", "en"), ("INPUT", "q"), ("CHAT_MESSAGE", "ct"), ("cptR", "cptR"),
            ("CHEAT_CHECK_RESPONSE", "ccr")] + [("C2S_X%d" % i, "x%d" % i) for i in range(20)]
     s2c = [("RPC_SUCCESS", "_0"), ("cpt", "cpt"), ("cptR", "cptR"), ("IO_INIT", "io-init"), ("ADD_PLAYERS", "0"),
-           ("CHEAT_CHECK", "cc"), ("ENTER_GAME", "frs"), ("ERROR", "error")] + [("S2C_Y%d" % i, "y%d" % i) for i in range(20)]
+           ("CHEAT_CHECK", "cc"), ("ENTER_GAME", "frs"), ("ERROR", "error"), ("UPDATE_PLAYERS", "k"),
+           ("SYNC_PLAYER", "l"), ("KILL_PLAYER", "3"), ("DO_DAMAGE", "4"), ("CHANGE_HEALTH", "h"), ("GET_SCORE", "5")] + [("S2C_Y%d" % i, "y%d" % i) for i in range(20)]
     return c2s, s2c
 
 
@@ -236,11 +304,163 @@ FIXTURE = r"""!function () {
       sock["send"](tc2s["CHEAT_CHECK_RESPONSE"], h1, h6, h7);
     } catch (e2) {}
   }
+  var Plr = function (c0, c1) {
+    this["id"] = c0;
+    this["init"] = function (n0, n1, n2, n3) {
+      this["z"] = n0;
+      this["x"] = n1;
+      this["y"] = n2;
+      this["name"] = n3 || "unknown";
+    };
+    this["setClass"] = function (s0, s1, s2) {
+      this["classIndex"] = s1;
+    };
+  };
+  function PlayerMgr() {
+    this["add"] = function (a0, a1, a2, a3, a4, a5, a6, a7, a8) {
+      for (var f1, f2 = 0x0; f2 < this["list"]["length"]; ++f2) {
+        if (this["list"][f2]["id"] == a0) {
+          f1 = this["list"][f2];
+          break;
+        }
+      }
+      f1 || ((f1 = new Plr(a0, this))["sid"] = a1 || ++this["currentSid"], this["list"]["push"](f1));
+      a5 || (a5 = "Guest_" + f1["sid"]);
+      f1["init"](a4, a2, a3, a5);
+      f1["attachIndex"] = a8;
+      f1["secIndex"] = a7;
+      f1["setClass"](gm, a6, a7);
+      return f1;
+    };
+  }
+  function hAdd(l1, l2) {
+    for (var i1 = 0x0; i1 < l1["length"];) {
+      var me = l1[i1] == conn["socketId"];
+      (pl = gm["players"]["add"](l1[i1], l1[i1 + 0x1], l1[i1 + 0x2], l1[i1 + 0x3], l1[i1 + 0x4], l1[i1 + 0x5], l1[i1 + 0x6], l1[i1 + 0xb], l1[i1 + 0xc]))["health"] = null == l1[i1 + 0x7] ? pl["maxHealth"] : l1[i1 + 0x7];
+      pl["maxHealth"] = l1[i1 + 0x8];
+      pl["team"] = l1[i1 + 0x9];
+      pl["xDire"] = l1[i1 + 0xa];
+      pl["flagIndex"] = parseInt(l1[i1 + 0xd]);
+      gm["setBusy"](pl, l1[i1 + 0xe]);
+      i1 += 0x10;
+    }
+  }
+  function hK(k1, k2, k3) {
+    if (k1) {
+      for (var j1 = 0x0; j1 < k1["length"];) {
+        if ((pk = gm["players"]["findBySid"](k1[j1])) && pk != you) {
+          pk["x"] = k1[j1 + 0x1];
+          pk["y"] = k1[j1 + 0x2];
+          pk["z"] = k1[j1 + 0x3];
+          pk["xDire"] = rad(k1[j1 + 0x4]);
+          pk["yDire"] = rad(k1[j1 + 0x5]);
+          pk["onGround"] = k1[j1 + 0x6];
+          pk["crouchVal"] = k1[j1 + 0x7];
+          pk["aimVal"] = k1[j1 + 0x9];
+          pk["ping"] = k1[j1 + 0xb];
+          var gr = k1[j1 + 0xa];
+          gr ? pk["grapple"] = {"x": gr[0x0]} : pk["grapple"] = null;
+          gm["players"]["swapWeapon"](pk, 0x0, !0x1, k1[j1 + 0x8]);
+        }
+        j1 += 0xc;
+      }
+    }
+  }
+  function hL(s1) {
+    conn["send"](tc2s["PONG"]);
+    if (you && s1) {
+      you["x"] = s1[0x2];
+      you["y"] = s1[0x3];
+      you["z"] = s1[0x4];
+      you["onGround"] = s1[0x9];
+      you["didJump"] = s1[0xa];
+      you["didJumpW"] = s1[0xb];
+      you["wallJumpC"] = s1[0xc];
+      you["onWall"] = s1[0xd];
+      you["onLadder"] = s1[0xe];
+      you["aimVal"] = s1[0xf];
+      you["crouchVal"] = s1[0x10];
+      you["velocity"]["set"](s1[0x6], s1[0x5], s1[0x7]);
+      you["xVelC"] = s1[0x15];
+      you["zVelC"] = s1[0x16];
+      you["xDire"] = s1[0x8];
+      gm["players"]["swapWeapon"](you, 0x0, !0x1, s1[0x11], void 0x0, !0x0);
+      you["slideTimer"] = s1[0x12];
+      you["canSlide"] = s1[0x13];
+      you["onTerrain"] = s1[0x14];
+      you["grapple"] = s1[0x17] || null;
+      you["canSlideT"] = s1[0x18];
+      var pr = s1[0x19];
+      if (pr && you["_protected"]) {
+        you["_protected"][pr[0x0]] = pr[0x1];
+      }
+      var ms = gm["movement"][0x0];
+      for (var m1 = 0x0; m1 < ms["sendVals"]["length"]; ++m1) {
+        you[ms["sendVals"][m1]] = s1[0x1a + m1];
+      }
+      for (var t1 = 0x0; t1 < cam["tmpInpts"]["length"];) {
+        cam["tmpInpts"][t1][0x0] <= s1[0x0] ? cam["tmpInpts"]["splice"](t1, 0x1) : t1++;
+      }
+    }
+    if (you && s1 && s1[0x1]) {
+      pg = s1[0x1];
+      pingText["textContent"] = pg;
+    }
+  }
+  function hKill(v1, v2, v3, v4, v5, v6) {
+    vp = gm["players"]["findBySid"](v1);
+    kp = gm["players"]["findBySid"](v3);
+    if (vp) {
+      kp && vp != kp && gm["players"]["countSkinKill"](kp, v5);
+      gm["players"]["kill"](vp);
+      vp["isYou"] && (deathsVal["textContent"] = v2 || 0x0, function (w1, w2, w3) {
+        w3 = w3 || [];
+      }(vp, kp, v4, !0x1));
+      if (!v6 && opts["tmp"]["showKills"]) {
+        feed(kp, v5);
+      }
+    }
+  }
+  function hDmg(d1, d2, d3, d4, d5, d6) {
+    you && (d5 ? d4 && stat(you, "aikills") : d2 > 0x0 && stat(you, "hits"));
+    d6 || snd["play"](d3 ? "crit_0" : "hit_0", 2.1);
+    d2 = Math["ceil"](d2);
+    d2 && null != d1 && (d5 ? tg = gm["AI"]["findBySid"](d1) : tg = gm["players"]["findBySid"](d1));
+  }
+  function hHp(e1, e2, e3, e4, e5, e6) {
+    if (you && (hp = null == e2 ? you : gm["players"]["findBySid"](e2))) {
+      hp["health"] = e1;
+      (hp["health"] > hp["maxHealth"] || e6) && (hp["maxHealth"] = hp["health"]);
+      e1 < lastHp && !e5 && (null != e3 && null != e3 && function (u1, u2) {
+        hits["x"] = u1;
+        hits["z"] = u2;
+      }(e3, e4));
+    }
+  }
+  function hScore(g1, g2, g3, g4) {
+    g1 = g1 || 0x0;
+    if (!g2 && you && (you["score"] = g1 + (g3 ? 0x0 : you["score"]), null != g4)) {
+      you["classScores"][g4 || 0x0] += g1;
+    }
+  }
+  function df(o1, o2, o3) {
+    o1[o2] = o3;
+    return o1;
+  }
+  var hmap = df(df(df(df(df(df(df({}, ts2c["ADD_PLAYERS"], hAdd), ts2c["UPDATE_PLAYERS"], hK), ts2c["SYNC_PLAYER"], hL), ts2c["KILL_PLAYER"], hKill), ts2c["DO_DAMAGE"], hDmg), ts2c["CHANGE_HEALTH"], hHp), ts2c["GET_SCORE"], hScore);
 }();
 """
 
 FIX_EXP = {"ahkey": 0x2A5F1, "client_version": "9.8.7r3", "build_version": "AbCdEfGhIjKlMnOpQrStUvWxYz012345",
-           "salt": "S4LT-x", "c2s": 26, "s2c": 28}
+           "salt": "S4LT-x", "c2s": 26, "s2c": 34}
+# The fixture's handlers use their own strides / orders, so nothing can pass by being hard-coded.
+FIX_LAYOUTS = {
+    "add_stride": 16, "k_stride": 12, "send_vals": 0x1a, "sync": KNOWN_SYNC, "args": KNOWN_ARGS,
+    "add": {"id": 0, "sid": 1, "x": 2, "y": 3, "z": 4, "name": 5, "classIndex": 6, "health": 7, "maxHealth": 8,
+            "team": 9, "xDire": 10, "secIndex": 11, "attachIndex": 12, "flagIndex": 13, "busy": 14},
+    "k": {"sid": 0, "x": 1, "y": 2, "z": 3, "xDire": 4, "yDire": 5, "onGround": 6, "crouchVal": 7, "weapon": 8,
+          "aimVal": 9, "grapple": 10, "ping": 11},
+}
 
 
 def make_fixture(ahkey="0x2a5f1", salt="S4LT-x"):
@@ -311,6 +531,7 @@ def test_synthetic(tmp):
         check(ex["client_revision"] == "7", "fixture: clientRevision")
         check(ex["custom_build_version"] == {"value": None, "env": "CUSTOM_VERSION"}, "fixture: customBuildVersion")
         check(doc["warnings"] == [], "fixture: no warnings")
+        check_layouts("fixture", doc, FIX_LAYOUTS)
     ob = obfuscate(fx)
     check("\n" not in ob and "'buildVersion'" in ob and "dA(0x" in ob, "obfuscated fixture is one line with decoder calls")
     odoc, err = run_extract(ob)
@@ -341,6 +562,17 @@ def test_synthetic(tmp):
         ("cheat salt", lambda s: s.replace("var salt1 = [", "var salt1 = [0x1, ")),
         ("cheat keystream", lambda s: s.replace(") + k3 & 0xff", ") + 0x1 & 0xff")),
         ("cheat handler", lambda s: s.replace("'_eval': e1", "'_evil': e1")),
+        ("ADD_PLAYERS layout", lambda s: s.replace("i1 += 0x10;", "i1++;")),
+        ("ADD_PLAYERS layout", lambda s: s.replace('f1["attachIndex"] = a8;', "")),
+        ("ADD_PLAYERS handler", lambda s: s.replace('ts2c["ADD_PLAYERS"], hAdd)', 'ts2c["ADD_PLAYERS"], hAdd2)')),
+        ("UPDATE_PLAYERS layout", lambda s: s.replace('pk["ping"] =', 'pk["pong"] =')),
+        ("SYNC_PLAYER layout", lambda s: s.replace('you["onLadder"] = s1[0xe];', 'you["onLadder"] = s1[0x1f];')),
+        ("SYNC_PLAYER layout", lambda s: s.replace("s1[0x1a + m1]", "s1[m1]")),
+        ("KILL_PLAYER arguments", lambda s: s.replace("!v6 &&", "v6 &&")),
+        ("KILL_PLAYER handler", lambda s: s.replace('ts2c["KILL_PLAYER"], hKill)', 'ts2c["KILL_PLAYER"], hKillX)')),
+        ("DO_DAMAGE arguments", lambda s: s.replace('"aikills"', '"aikils"')),
+        ("CHANGE_HEALTH arguments", lambda s: s.replace("|| e6)", "|| e7)")),
+        ("GET_SCORE arguments", lambda s: s.replace("[g4 || 0x0]", "[g4]")),
     ]
     for anchor, brk in breaks:
         broken = brk(fx)
@@ -368,27 +600,40 @@ def test_committed(tmp):
     check(doc["generator_rev"] == E.GENERATOR_REV, "build.json generator rev current")
     check(re.fullmatch(r"[0-9a-f]{64}", doc["source"]["sha256"]) is not None, "build.json records the source sha256")
     check("KRUNKER_BUILD_SOURCE_SHA256 \"%s\"" % doc["source"]["sha256"] in hdr, "header records the source sha256")
-    deob = os.path.join(OFFICIAL, "game.deob.js")
-    if os.path.exists(deob):
-        with open(deob, "rb") as f:
-            sha = hashlib.sha256(f.read()).hexdigest()
-        if sha == doc["source"]["sha256"]:
-            # the CLI, as `make krunker-build-check` runs it, offline on the local copy
-            r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "extract_build.py"), deob, "--check"],
-                               capture_output=True, text=True, timeout=300)
-            check(r.returncode == 0, "--check on the committed files: rc %d %s" % (r.returncode, r.stderr.strip()[:200]))
-            # regenerate into a temp dir: identical except provenance (url vs local file)
-            hdr2, js2 = os.path.join(tmp, "k.h"), os.path.join(tmp, "k.json")
-            r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "extract_build.py"), deob,
-                                "--header", hdr2, "--json", js2], capture_output=True, text=True, timeout=300)
-            check(r.returncode == 0, "CLI regenerate rc %d" % r.returncode)
-            if r.returncode == 0:
-                with open(js2, encoding="utf8") as f:
-                    d2 = json.load(f)
-                d1 = dict(doc)
-                d1.pop("source")
-                d2.pop("source")
-                check(d1 == d2, "regenerated build.json values == committed")
+    deob = current_bundle()
+    if not deob:
+        print("  SKIP --check / regenerate (build.json's bundle is not on this machine)")
+    else:
+        # the CLI, as `make krunker-build-check` runs it, offline on the local copy
+        r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "extract_build.py"), deob, "--check"],
+                           capture_output=True, text=True, timeout=300)
+        check(r.returncode == 0 and "regenerated header identical" in r.stderr,
+              "--check regenerates the committed header identically: rc %d %s" % (r.returncode, r.stderr.strip()[:300]))
+        # --check catches a header that no longer matches what the extractor generates
+        stale_h, stale_j = os.path.join(tmp, "stale.h"), os.path.join(tmp, "stale.json")
+        with open(stale_h, "w", encoding="utf8") as f:
+            f.write(hdr.replace("#define KRUNKER_ADD_STRIDE %d" % doc["layouts"]["add_players"]["stride"],
+                                "#define KRUNKER_ADD_STRIDE 52"))
+        stale_doc = json.loads(json.dumps(doc))
+        stale_doc["layouts"]["add_players"]["stride"] = 52
+        with open(stale_j, "w", encoding="utf8") as f:
+            f.write(E.render_json(stale_doc))
+        r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "extract_build.py"), deob, "--check",
+                            "--header", stale_h, "--json", stale_j], capture_output=True, text=True, timeout=300)
+        check(r.returncode == 1 and "KRUNKER_ADD_STRIDE 53" in r.stderr,
+              "--check fails on a drifted stride: rc %d %s" % (r.returncode, r.stderr.strip()[:200]))
+        # regenerate into a temp dir: identical except provenance (url vs local file)
+        hdr2, js2 = os.path.join(tmp, "k.h"), os.path.join(tmp, "k.json")
+        r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "extract_build.py"), deob,
+                            "--header", hdr2, "--json", js2], capture_output=True, text=True, timeout=300)
+        check(r.returncode == 0, "CLI regenerate rc %d" % r.returncode)
+        if r.returncode == 0:
+            with open(js2, encoding="utf8") as f:
+                d2 = json.load(f)
+            d1 = dict(doc)
+            d1.pop("source")
+            d2.pop("source")
+            check(d1 == d2, "regenerated build.json values == committed")
     cc = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
     if not cc:
         print("  SKIP C compile (no compiler)")
@@ -403,7 +648,16 @@ def test_committed(tmp):
 #define WIRE(id, wire, name) wire,
 static const char *const c2s[KRUNKER_C2S_COUNT] = { KRUNKER_C2S_PACKETS(WIRE) };
 static const char *const s2c[KRUNKER_S2C_COUNT] = { KRUNKER_S2C_PACKETS(WIRE) };
+#define OFF(c, off, name) off,
+static const int add_offs[] = { KRUNKER_ADD_FIELDS(OFF) };
+static const int k_offs[] = { KRUNKER_K_FIELDS(OFF) };
+static const int sync_offs[] = { KRUNKER_SYNC_FIELDS(OFF) };
+_Static_assert(KRUNKER_ADD_ATTACH_INDEX < KRUNKER_ADD_STRIDE && KRUNKER_K_PING < KRUNKER_K_STRIDE, "layout");
+_Static_assert(KRUNKER_SYNC_PROTECTED < KRUNKER_SYNC_SEND_VALS && KRUNKER_KILL_ARG_INFO < KRUNKER_KILL_ARGC &&
+               KRUNKER_DAMAGE_ARG_AI < KRUNKER_DAMAGE_ARGC && KRUNKER_HEALTH_ARG_RESET_MAX < KRUNKER_HEALTH_ARGC &&
+               KRUNKER_SCORE_ARG_CLASS_INDEX < KRUNKER_SCORE_ARGC, "args");
 int main(void) {
+    if (add_offs[1] != KRUNKER_ADD_SID || k_offs[0] != KRUNKER_K_SID || sync_offs[0] != KRUNKER_SYNC_INPUT_SN) return 2;
     unsigned ah = 0;
     ah = (ah + KRUNKER_AHKEY) & 0xffu;
     return !(ah == KRUNKER_AHNUM_STEP && !strcmp(c2s[KRUNKER_C2S_ENTER_GAME], "en") &&

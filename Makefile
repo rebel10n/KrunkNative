@@ -356,10 +356,10 @@ branding-check: ## The verbatim krunker.io icons in the tree match tools/brandin
 krunker-build: ## Regenerate shared/include/krunker_build.h from Krunker's bundle (default https://kru.eli.gift/game.deob.js, cached by ETag; SRC=, FORCE=1)
 	$(PYTHON) -I tools/krunker/extract_build.py $(SRC) $(if $(FORCE),--force,)
 
-krunker-build-check: ## krunker_build.h matches build.json and the current Krunker bundle (exit 1 when stale; bundle unreachable: header <-> build.json only, STRICT=1 fails)
+krunker-build-check: ## Regenerate krunker_build.h from the current Krunker bundle into a temp file; exit 1 when the committed header / build.json differ (bundle unreachable: header <-> build.json only, STRICT=1 fails)
 	$(PYTHON) -I tools/krunker/extract_build.py $(SRC) --check $(if $(STRICT),--strict,)
 
-krunker-build-test: ## Extractor regression test: every local Krunker bundle (deob / debug / min / v10.js), synthetic broken anchors, the header compiles
+krunker-build-test: ## Extractor regression test: every local Krunker bundle (deob / debug / min / v10.js / the current one) incl. the per-player layouts, synthetic broken anchors, the header compiles
 	$(PYTHON) -I tools/krunker/test_extract.py
 
 .PHONY: maps-import-v7 maps-check-v7

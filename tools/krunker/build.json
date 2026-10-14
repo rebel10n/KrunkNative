@@ -1,5 +1,5 @@
 {
- "generator_rev": 1,
+ "generator_rev": 2,
  "schema": 1,
  "source": {
   "url": "https://kru.eli.gift/game.deob.js",
@@ -1648,6 +1648,525 @@
    "count": 3,
    "nonce": 0,
    "ciphertext": 2
+  }
+ },
+ "layouts": {
+  "add_players": {
+   "stride": 53,
+   "server_stride": 53,
+   "fields": [
+    {
+     "offset": 0,
+     "name": "id",
+     "via": "socketId"
+    },
+    {
+     "offset": 1,
+     "name": "sid",
+     "via": "players.add"
+    },
+    {
+     "offset": 2,
+     "name": "x",
+     "via": "player.init"
+    },
+    {
+     "offset": 3,
+     "name": "y",
+     "via": "player.init"
+    },
+    {
+     "offset": 4,
+     "name": "z",
+     "via": "player.init"
+    },
+    {
+     "offset": 5,
+     "name": "name",
+     "via": "player.init"
+    },
+    {
+     "offset": 6,
+     "name": "classIndex",
+     "via": "player.setClass"
+    },
+    {
+     "offset": 7,
+     "name": "health",
+     "via": "assign"
+    },
+    {
+     "offset": 8,
+     "name": "maxHealth",
+     "via": "assign"
+    },
+    {
+     "offset": 9,
+     "name": "team",
+     "via": "assign"
+    },
+    {
+     "offset": 10,
+     "name": "level",
+     "via": "assign"
+    },
+    {
+     "offset": 11,
+     "name": "clan",
+     "via": "assign"
+    },
+    {
+     "offset": 12,
+     "name": "skins",
+     "via": "players.add"
+    },
+    {
+     "offset": 13,
+     "name": "hatIndex",
+     "via": "players.add"
+    },
+    {
+     "offset": 14,
+     "name": "bodyIndex",
+     "via": "players.add"
+    },
+    {
+     "offset": 15,
+     "name": "secIndex",
+     "via": "players.add"
+    },
+    {
+     "offset": 16,
+     "name": "isHacker",
+     "via": "player.init"
+    },
+    {
+     "offset": 18,
+     "name": "xDire",
+     "via": "assign"
+    },
+    {
+     "offset": 19,
+     "name": "meleeIndex",
+     "via": "players.add"
+    },
+    {
+     "offset": 20,
+     "name": "skinColIndex",
+     "via": "players.add"
+    },
+    {
+     "offset": 22,
+     "name": "attachIndex",
+     "via": "players.add"
+    },
+    {
+     "offset": 23,
+     "name": "pcStatIndex",
+     "via": "players.add"
+    },
+    {
+     "offset": 24,
+     "name": "dyeIndex",
+     "via": "players.add"
+    },
+    {
+     "offset": 25,
+     "name": "featured",
+     "via": "assign"
+    },
+    {
+     "offset": 26,
+     "name": "flagIndex",
+     "via": "assign"
+    },
+    {
+     "offset": 27,
+     "name": "premiumT",
+     "via": "assign"
+    },
+    {
+     "offset": 28,
+     "name": "alias",
+     "via": "players.add"
+    },
+    {
+     "offset": 29,
+     "name": "shoeIndex",
+     "via": "players.add"
+    },
+    {
+     "offset": 30,
+     "name": "waistIndex",
+     "via": "players.add"
+    },
+    {
+     "offset": 31,
+     "name": "accid",
+     "via": "assign"
+    },
+    {
+     "offset": 32,
+     "name": "hairCol",
+     "via": "players.add"
+    },
+    {
+     "offset": 33,
+     "name": "faceIndex",
+     "via": "players.add"
+    },
+    {
+     "offset": 34,
+     "name": "petIndex",
+     "via": "players.add"
+    },
+    {
+     "offset": 35,
+     "name": "badgeIndex",
+     "via": "assign"
+    },
+    {
+     "offset": 36,
+     "name": "wristIndex",
+     "via": "players.add"
+    },
+    {
+     "offset": 37,
+     "name": "isJuggernaut",
+     "via": "players.add"
+    },
+    {
+     "offset": 38,
+     "name": "headMlt",
+     "via": "players.add"
+    },
+    {
+     "offset": 39,
+     "name": "charms",
+     "via": "players.add"
+    },
+    {
+     "offset": 40,
+     "name": "upgrades",
+     "via": "players.add"
+    },
+    {
+     "offset": 41,
+     "name": "backIndex",
+     "via": "players.add"
+    },
+    {
+     "offset": 42,
+     "name": "headIndex",
+     "via": "players.add"
+    },
+    {
+     "offset": 43,
+     "name": "playerCardIndex",
+     "via": "assign"
+    },
+    {
+     "offset": 44,
+     "name": "isBot",
+     "via": "players.add"
+    },
+    {
+     "offset": 45,
+     "name": "busy",
+     "via": "setBusy"
+    },
+    {
+     "offset": 46,
+     "name": "rankedRank",
+     "via": "players.add"
+    },
+    {
+     "offset": 47,
+     "name": "clanId",
+     "via": "players.add"
+    },
+    {
+     "offset": 48,
+     "name": "clanLogo",
+     "via": "players.add"
+    },
+    {
+     "offset": 50,
+     "name": "clanBannerColor",
+     "via": "players.add"
+    },
+    {
+     "offset": 51,
+     "name": "creatorBadge",
+     "via": "assign"
+    },
+    {
+     "offset": 52,
+     "name": "titleIndex",
+     "via": "assign"
+    }
+   ],
+   "shadowed": [
+    {
+     "offset": 49,
+     "name": "clan",
+     "via": "players.add"
+    }
+   ]
+  },
+  "update_players": {
+   "stride": 13,
+   "args": {
+    "list": 0,
+    "sendRate": 1,
+    "serverTime": 2
+   },
+   "fields": [
+    {
+     "offset": 0,
+     "name": "sid",
+     "via": "findBySid"
+    },
+    {
+     "offset": 1,
+     "name": "x",
+     "via": "assign"
+    },
+    {
+     "offset": 2,
+     "name": "y",
+     "via": "assign"
+    },
+    {
+     "offset": 3,
+     "name": "z",
+     "via": "assign"
+    },
+    {
+     "offset": 4,
+     "name": "xDire",
+     "via": "assign"
+    },
+    {
+     "offset": 5,
+     "name": "yDire",
+     "via": "assign"
+    },
+    {
+     "offset": 6,
+     "name": "stepVal",
+     "via": "assign"
+    },
+    {
+     "offset": 7,
+     "name": "onGround",
+     "via": "assign"
+    },
+    {
+     "offset": 8,
+     "name": "crouchVal",
+     "via": "assign"
+    },
+    {
+     "offset": 9,
+     "name": "weapon",
+     "via": "swapWeapon"
+    },
+    {
+     "offset": 10,
+     "name": "aimVal",
+     "via": "assign"
+    },
+    {
+     "offset": 11,
+     "name": "grapple",
+     "via": "local"
+    },
+    {
+     "offset": 12,
+     "name": "ping",
+     "via": "assign"
+    }
+   ],
+   "shadowed": []
+  },
+  "sync_player": {
+   "send_vals": 26,
+   "fields": [
+    {
+     "offset": 0,
+     "name": "inputSN",
+     "via": "tmpInpts"
+    },
+    {
+     "offset": 1,
+     "name": "ping",
+     "via": "pingText"
+    },
+    {
+     "offset": 2,
+     "name": "x",
+     "via": "assign"
+    },
+    {
+     "offset": 3,
+     "name": "y",
+     "via": "assign"
+    },
+    {
+     "offset": 4,
+     "name": "z",
+     "via": "assign"
+    },
+    {
+     "offset": 5,
+     "name": "velY",
+     "via": "velocity.set"
+    },
+    {
+     "offset": 6,
+     "name": "velX",
+     "via": "velocity.set"
+    },
+    {
+     "offset": 7,
+     "name": "velZ",
+     "via": "velocity.set"
+    },
+    {
+     "offset": 8,
+     "name": "xDire",
+     "via": "assign"
+    },
+    {
+     "offset": 9,
+     "name": "onGround",
+     "via": "assign"
+    },
+    {
+     "offset": 10,
+     "name": "didJump",
+     "via": "assign"
+    },
+    {
+     "offset": 11,
+     "name": "didJumpW",
+     "via": "assign"
+    },
+    {
+     "offset": 12,
+     "name": "wallJumpC",
+     "via": "assign"
+    },
+    {
+     "offset": 13,
+     "name": "onWall",
+     "via": "assign"
+    },
+    {
+     "offset": 14,
+     "name": "onLadder",
+     "via": "assign"
+    },
+    {
+     "offset": 15,
+     "name": "aimVal",
+     "via": "assign"
+    },
+    {
+     "offset": 16,
+     "name": "crouchVal",
+     "via": "assign"
+    },
+    {
+     "offset": 17,
+     "name": "weapon",
+     "via": "swapWeapon"
+    },
+    {
+     "offset": 18,
+     "name": "slideTimer",
+     "via": "assign"
+    },
+    {
+     "offset": 19,
+     "name": "canSlide",
+     "via": "assign"
+    },
+    {
+     "offset": 20,
+     "name": "onTerrain",
+     "via": "assign"
+    },
+    {
+     "offset": 21,
+     "name": "xVelC",
+     "via": "assign"
+    },
+    {
+     "offset": 22,
+     "name": "zVelC",
+     "via": "assign"
+    },
+    {
+     "offset": 23,
+     "name": "grapple",
+     "via": "assign"
+    },
+    {
+     "offset": 24,
+     "name": "canSlideT",
+     "via": "assign"
+    },
+    {
+     "offset": 25,
+     "name": "_protected",
+     "via": "local"
+    }
+   ],
+   "shadowed": []
+  },
+  "kill_player": {
+   "argc": 6,
+   "args": {
+    "victim": 0,
+    "deaths": 1,
+    "killer": 2,
+    "stats": 3,
+    "info": 4,
+    "hideFeed": 5
+   }
+  },
+  "do_damage": {
+   "argc": 6,
+   "args": {
+    "target": 0,
+    "damage": 1,
+    "crit": 2,
+    "kill": 3,
+    "ai": 4,
+    "silent": 5
+   }
+  },
+  "change_health": {
+   "argc": 6,
+   "args": {
+    "health": 0,
+    "sid": 1,
+    "srcX": 2,
+    "srcZ": 3,
+    "noHitMarker": 4,
+    "resetMax": 5
+   }
+  },
+  "get_score": {
+   "argc": 4,
+   "args": {
+    "delta": 0,
+    "relay": 1,
+    "absolute": 2,
+    "classIndex": 3
+   }
   }
  },
  "cheat_keystream_js": "function iiìììïì(iîÌîíìí, iíÌíììì) {\n    for (var iîIìîîi = iîiïíîî, iíÍîiîì = new Uint8Array(iíÌíììì), iiÍìïîî = 0x0; iiÍìïîî < iíÌíììì; iiÍìïîî++) {\n      iíÍîiîì[iiÍìïîî] = (iîÌîíìí[\"charCodeAt\"](iiÍìïîî % iîÌîíìí['length']) ^ iîIìîîi[iiÍìïîî % iîIìîîi[\"length\"]]) + iiÍìïîî & 0xff;\n    }\n    return iíÍîiîì;\n  }",

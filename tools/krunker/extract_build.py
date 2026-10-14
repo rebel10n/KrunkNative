@@ -11,6 +11,10 @@ that changes per Krunker build, by pure static parsing (no Krunker JS is ever ex
   packet tables  client->server and server->client `{'NAME': 'wire', ...}` objects
   cheat check    the CHEAT_CHECK keystream function (verbatim source), its salt, its formula
                  shape, and the FNV-1a parameters of the ccr hash
+  layouts        per-player strides and field offsets of ADD_PLAYERS ("0") and UPDATE_PLAYERS
+                 ("k"), the SYNC_PLAYER ("l") state layout, and the argument positions of
+                 KILL_PLAYER, DO_DAMAGE, CHANGE_HEALTH and GET_SCORE, read from the client's
+                 handlers (fields named by the Krunker property each value is stored in)
   extras         matchmaker / api URLs, Turnstile site key, regions, clientRevision,
                  customBuildVersion (reported; validated when present, not required)
 
@@ -42,6 +46,7 @@ environment: KN_FETCH_PROXY (e.g. http://127.0.0.1:8888), KN_FETCH_UA, KRUNKER_B
 """
 
 import argparse
+import difflib
 import hashlib
 import json
 import math
@@ -52,7 +57,7 @@ import tempfile
 import urllib.error
 import urllib.request
 
-GENERATOR_REV = 1  # bump when the output format or the extraction rules change
+GENERATOR_REV = 2  # bump when the output format or the extraction rules change
 SCHEMA = 1         # KRUNKER_BUILD_SCHEMA: bump when the header's C interface changes
 
 DEFAULT_URL = os.environ.get("KRUNKER_BUILD_URL", "https://kru.eli.gift/game.deob.js")
@@ -789,6 +794,401 @@ def extract_cheat(src):
     return r
 
 
+# ------------------------------------------------- per-player layouts and argument positions
+#
+# The S2C handlers are found through the client's handler map, `define(map, NAMES['ADD_PLAYERS'],
+# handler)` (the only place a packet name is followed by a bare identifier and `)`), and their
+# bodies are read as text. Field and argument names are Krunker's own property names, taken from
+# what the handler does with each value (`player['xDire'] = a[i + 0x12]`), so a reordering moves
+# the generated constant instead of silently desynchronising krunker_link.c.
+
+ANYPROP = r"""(?:\[\s*(?:'([\w$]+)'|"([\w$]+)")\s*\]|\.\s*([A-Za-z_$][\w$]*))"""
+ANYPROP_RE = re.compile(ANYPROP)
+ZERO = r"(?:0x0|0)"
+
+
+def _pname(m, base=1):
+    return m.group(base) or m.group(base + 1) or m.group(base + 2)
+
+
+def _word(name):
+    return r"(?<![\w$.])" + re.escape(name) + r"(?![\w$])"
+
+
+def _alt(names):
+    return r"(?<![\w$.])(" + "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True)) + r")(?![\w$])"
+
+
+def split_args(src, open_pos):
+    """Top-level comma-separated texts of the call / array whose bracket is at src[open_pos],
+    and the index of its closing bracket."""
+    close = {"(": ")", "[": "]", "{": "}"}[src[open_pos]]
+    end = matching_close(src, open_pos, src[open_pos], close)
+    if end < 0:
+        return None, -1
+    out, depth, start, i = [], 0, open_pos + 1, open_pos + 1
+    while i < end:
+        c = src[i]
+        if c in "'\"`":
+            q = c
+            i += 1
+            while i < end and src[i] != q:
+                i += 2 if src[i] == "\\" else 1
+        elif c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        elif c == "," and depth == 0:
+            out.append(src[start:i].strip())
+            start = i + 1
+        i += 1
+    last = src[start:end].strip()
+    if last or out:
+        out.append(last)
+    return out, end
+
+
+def s2c_handler(src, tables, name, want):
+    """(params, body) of the client handler of S2C packet `name`; `want(body)` must hold."""
+    if name not in dict(tables["s2c"]):
+        fail("%s handler" % name, "no packet %s in the server -> client table" % name)
+    found = {}
+    for m in re.finditer(prop(name) + r"\s*,\s*(" + IDENT + r")\s*\)", src):
+        for start, ob, end in find_function(src, m.group(1), m.start()):
+            pm = re.match(r"[^(]*\(([^)]*)\)\s*\{", src[start:ob + 1])
+            body = src[ob:end]
+            if pm and want(body):
+                found[body] = [p.strip() for p in pm.group(1).split(",") if p.strip()]
+                break
+    if len(found) != 1:
+        fail("%s handler" % name, "expected one handler registered as `%s, fn)` whose body matches, "
+             "found %d" % (name, len(found)))
+    (body, params), = found.items()
+    return params, body
+
+
+def _snake(name):
+    s = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", name.strip("_$"))
+    return re.sub(r"[^A-Za-z0-9]+", "_", s).upper()
+
+
+class _Fields:
+    """offset -> Krunker property name, first writer wins; a name read from two offsets keeps the
+    first (the handler's own assignments are collected first: they run after players.add)."""
+
+    def __init__(self, label):
+        self.label, self.by_off, self.by_name, self.shadowed = label, {}, {}, []
+
+    def add(self, off, name, via):
+        if name in ("length",):
+            return
+        if off in self.by_off:
+            if self.by_off[off]["name"] != name:
+                self.shadowed.append({"offset": off, "name": name, "via": via})
+            return
+        if name in self.by_name:
+            self.shadowed.append({"offset": off, "name": name, "via": via})
+            return
+        self.by_off[off] = {"offset": off, "name": name, "via": via}
+        self.by_name[name] = off
+
+    def require(self, names, anchor):
+        missing = [n for n in names if n not in self.by_name]
+        if missing:
+            fail(anchor, "fields not found: %s (found %s)" % (", ".join(missing), ", ".join(
+                "%s@%d" % (f["name"], f["offset"]) for f in self.list())))
+
+    def list(self):
+        return [self.by_off[k] for k in sorted(self.by_off)]
+
+
+def _elem_fields(body, elem, fields, groups=1):
+    """Read-site rules shared by the "0" / "k" / "l" handlers. `elem` matches one element read
+    with its offset in group 1 (or `groups` offset groups). Records into `fields`."""
+    num = lambda m, k=1: js_num(m.group(k))  # noqa: E731
+    # player['prop'] = [wrap(] [null == E ? .. :] E   (wrap: parseInt, a deg->rad helper, ...)
+    for m in re.finditer(ANYPROP + r"\s*=\s*(?:" + IDENT + r"\s*\(\s*|null\s*==\s*)?" + elem, body):
+        fields.add(num(m, 4), _pname(m), "assign")
+    # players.swapWeapon(p, .., E) / setBusy(p, E): the method's noun
+    for m in re.finditer(ANYPROP + r"\s*\(", body):
+        meth = _pname(m)
+        vm = re.fullmatch(r"(?:set|swap|update)([A-Z][\w$]*)", meth or "")
+        if not vm:
+            continue
+        args, _ = split_args(body, m.end() - 1)
+        for a in args or ():
+            em = re.fullmatch(elem, a)
+            if em:
+                fields.add(num(em), vm.group(1)[0].lower() + vm.group(1)[1:], meth)
+    # players.findBySid(E) / findById(E)
+    for m in re.finditer(prop("findBySid") + r"\s*\(\s*" + elem + r"\s*\)", body):
+        fields.add(num(m), "sid", "findBySid")
+    for m in re.finditer(prop("findById") + r"\s*\(\s*" + elem + r"\s*\)", body):
+        fields.add(num(m), "id", "findById")
+    # E == SOCKET['socketId']: the socket id of "you"
+    for m in re.finditer(elem + r"\s*==\s*" + IDENT + r"\s*" + prop("socketId"), body):
+        fields.add(num(m), "id", "socketId")
+    # var v = E; ... v ? / v && player['prop']
+    for m in re.finditer(r"(?<![\w$.\]])(" + IDENT + r")\s*=\s*" + elem + r"\s*[;,]", body):
+        v = m.group(1)
+        um = re.compile(_word(v) + r"\s*(?:\?|&&)\s*" + IDENT + r"\s*" + ANYPROP).search(body, m.end())
+        if um:
+            fields.add(js_num(m.group(2)), _pname(um, 1), "local")
+
+
+def extract_add_players(src, tables):
+    anchor = "ADD_PLAYERS layout"
+    params, body = s2c_handler(src, tables, "ADD_PLAYERS",
+                               lambda b: re.search(prop("players") + r"\s*" + prop("add") + r"\s*\(", b))
+    arr = params[0] if params else None
+    lm = arr and re.search(r"for\s*\(\s*(?:var|let)\s+(" + IDENT + r")\s*=\s*" + ZERO + r"\s*;\s*\1\s*<\s*" +
+                           re.escape(arr) + r"\s*" + prop("length") + r"\s*;", body)
+    if not lm:
+        fail(anchor, "no `for (var i = 0; i < list.length;)` over the handler's first argument")
+    idx = lm.group(1)
+    strides = set(js_num(x) for x in re.findall(_word(idx) + r"\s*\+=\s*(" + NUM + r")\s*[;,)]", body))
+    if len(strides) != 1:
+        fail(anchor, "expected one `i += STRIDE`, got %r" % sorted(strides))
+    stride = strides.pop()
+    f = _Fields(anchor)
+    body0 = re.sub(re.escape(arr) + r"\s*\[\s*" + re.escape(idx) + r"\s*\]", arr + "[" + idx + " + 0x0]", body)
+    elem = re.escape(arr) + r"\s*\[\s*" + re.escape(idx) + r"\s*\+\s*(" + NUM + r")\s*\]"
+    _elem_fields(body0, elem, f)
+    # players.add(a[i], a[i + 1], ...): argument j -> players.add's parameter j
+    am = re.search(prop("players") + r"\s*" + prop("add") + r"\s*\(", body0)
+    args, _ = split_args(body0, am.end() - 1)
+    pos = {}
+    for j, a in enumerate(args or ()):
+        em = re.fullmatch(elem, a)
+        if em:
+            pos[j] = js_num(em.group(1))
+    defs = []
+    for dm in re.finditer(r"this\s*" + prop("add") + r"\s*=\s*function\s*\(([^)]*)\)\s*\{", src):
+        ps = [p.strip() for p in dm.group(1).split(",") if p.strip()]
+        if len(ps) < len(args):
+            continue
+        cb = matching_close(src, dm.end() - 1)
+        b = src[dm.end() - 1:cb + 1]
+        if re.search(prop("sid") + r"\s*=", b):
+            defs.append((ps, b, dm.start()))
+    if len(defs) != 1:
+        fail(anchor, "expected one `this.add = function (<%d+ params>)` assigning .sid, found %d" % (len(args), len(defs)))
+    ps, abody, apos = defs[0]
+    pmap = {ps[j]: off for j, off in pos.items()}
+    pr = _alt(pmap)
+    # obj['prop'] = PARAM [|| ..] / obj['id'] == PARAM
+    for m in re.finditer(ANYPROP + r"\s*=\s*" + pr + r"(?=\s*(?:\|\||[;,)]))", abody):
+        f.add(pmap[m.group(4)], _pname(m), "players.add")
+    for m in re.finditer(ANYPROP + r"\s*===?\s*" + pr, abody):
+        f.add(pmap[m.group(4)], _pname(m), "players.add")
+    # player.init(z, x, y, name, ..) / player.setClass(game, classIndex, ..): the player class's methods
+    cm = re.search(r"\(\s*(" + IDENT + r")\s*=\s*new\s+(" + IDENT + r")\s*\(", abody)
+    if cm:
+        pv, cls = cm.group(1), cm.group(2)
+        cdef = re.search(r"(?:function\s+" + re.escape(cls) + r"|(?<![\w$.])" + re.escape(cls) + r"\s*=\s*function)\s*\(", src)
+        for mm in re.finditer(_word(pv) + r"\s*" + ANYPROP + r"\s*\(", abody):
+            meth = _pname(mm)
+            margs, _ = split_args(abody, mm.end() - 1)
+            if not cdef or not margs or not any(a in pmap for a in margs):
+                continue
+            md = re.compile(r"this\s*" + prop(meth) + r"\s*=\s*function\s*\(([^)]*)\)\s*\{").search(src, cdef.start())
+            if not md:
+                continue
+            qs = [q.strip() for q in md.group(1).split(",") if q.strip()]
+            mb = src[md.end() - 1:matching_close(src, md.end() - 1) + 1]
+            for j, a in enumerate(margs):
+                if a in pmap and j < len(qs):
+                    am2 = re.search(r"this\s*" + ANYPROP + r"\s*=\s*" + _word(qs[j]) + r"(?=\s*(?:\|\||[;,)]))", mb)
+                    if am2:
+                        f.add(pmap[a], _pname(am2), "player." + meth)
+    f.require(("id", "sid", "x", "y", "z", "name", "classIndex", "health", "maxHealth", "team", "secIndex",
+               "xDire", "attachIndex"), anchor)
+    bad = [x for x in f.list() if not 0 <= x["offset"] < stride]
+    if bad:
+        fail(anchor, "offsets outside the %d stride: %r" % (stride, bad))
+    # the server half of the bundle packs the same list: getPlayerAddData returns one array per player
+    server = None
+    gm = re.search(prop("getPlayerAddData") + r"\s*=\s*function\s*\([^)]*\)\s*\{\s*return\s*\[", src)
+    if gm:
+        items, _ = split_args(src, gm.end() - 1)
+        server = len(items or ())
+        if server != stride:
+            fail(anchor, "the client reads %d values per player but getPlayerAddData packs %d" % (stride, server))
+    return {"stride": stride, "server_stride": server, "fields": f.list(), "shadowed": f.shadowed}
+
+
+def extract_update_players(src, tables):
+    anchor = "UPDATE_PLAYERS layout"
+    params, body = s2c_handler(src, tables, "UPDATE_PLAYERS",
+                               lambda b: re.search(prop("findBySid") + r"\s*\(", b) and re.search(r"\+=\s*" + NUM, b))
+    arr = params[0] if params else None
+    lm = arr and re.search(r"for\s*\(\s*(?:var|let)\s+(" + IDENT + r")\s*=\s*" + ZERO + r"\s*;\s*\1\s*<\s*" +
+                           re.escape(arr) + r"\s*" + prop("length") + r"\s*;", body)
+    if not lm:
+        fail(anchor, "no `for (var i = 0; i < list.length;)` over the handler's first argument")
+    idx = lm.group(1)
+    strides = set(js_num(x) for x in re.findall(_word(idx) + r"\s*\+=\s*(" + NUM + r")\s*[;,)]", body))
+    if len(strides) != 1:
+        fail(anchor, "expected one `i += STRIDE`, got %r" % sorted(strides))
+    stride = strides.pop()
+    body0 = re.sub(re.escape(arr) + r"\s*\[\s*" + re.escape(idx) + r"\s*\]", arr + "[" + idx + " + 0x0]", body)
+    elem = re.escape(arr) + r"\s*\[\s*" + re.escape(idx) + r"\s*\+\s*(" + NUM + r")\s*\]"
+    f = _Fields(anchor)
+    _elem_fields(body0, elem, f)
+    f.require(("sid", "x", "y", "z", "xDire", "yDire", "onGround", "crouchVal", "weapon", "aimVal", "grapple", "ping"),
+              anchor)
+    bad = [x for x in f.list() if not 0 <= x["offset"] < stride]
+    if bad:
+        fail(anchor, "offsets outside the %d stride: %r" % (stride, bad))
+    return {"stride": stride, "args": {"list": 0, "sendRate": 1, "serverTime": 2} if len(params) >= 3 else None,
+            "fields": f.list(), "shadowed": f.shadowed}
+
+
+SYNC_REQUIRED = ("inputSN", "ping", "x", "y", "z", "velY", "velX", "velZ", "xDire", "onGround", "didJump", "didJumpW",
+                 "wallJumpC", "onWall", "onLadder", "aimVal", "crouchVal", "weapon", "slideTimer", "canSlide",
+                 "onTerrain", "xVelC", "zVelC", "grapple", "canSlideT", "_protected")
+
+
+def extract_sync_player(src, tables):
+    anchor = "SYNC_PLAYER layout"
+    params, body = s2c_handler(src, tables, "SYNC_PLAYER", lambda b: re.search(prop("PONG"), b))
+    if not params:
+        fail(anchor, "the handler takes no argument")
+    st = params[0]
+    elem = re.escape(st) + r"\s*\[\s*(" + NUM + r")\s*\]"
+    f = _Fields(anchor)
+    # the input sequence: pending inputs up to it are dropped (`tmpInpts[k][0] <= s[0]`)
+    im = re.search(prop("tmpInpts") + r"[^;]{0,120}?<=\s*" + elem, body)
+    if im:
+        f.add(js_num(im.group(1)), "inputSN", "tmpInpts")
+    # the ping: `p = s[1]` shown in pingText
+    for m in re.finditer(r"(?<![\w$.\]])(" + IDENT + r")\s*=\s*" + elem + r"\s*[;,]", body):
+        if re.search(r"pingText", body[m.end():m.end() + 600]) and re.search(
+                r"pingText\s*" + prop("textContent") + r"\s*=[^;]*?" + _word(m.group(1)), body[m.end():m.end() + 900]):
+            f.add(js_num(m.group(2)), "ping", "pingText")
+    # velocity.set(s[x], s[y], s[z])
+    vm = re.search(prop("velocity") + r"\s*" + prop("set") + r"\s*\(", body)
+    if vm:
+        vargs, _ = split_args(body, vm.end() - 1)
+        for axis, a in zip("XYZ", vargs or ()):
+            em = re.fullmatch(elem, a)
+            if em:
+                f.add(js_num(em.group(1)), "vel" + axis, "velocity.set")
+    _elem_fields(body, elem, f)
+    # grapple = s[k] || null
+    for m in re.finditer(ANYPROP + r"\s*=\s*" + elem + r"\s*\|\|\s*null", body):
+        f.add(js_num(m.group(4)), _pname(m), "assign")
+    # movement-schema values from s[BASE + k] (BASE + count: the controlled-entity sync)
+    bases = set(js_num(x) for x in re.findall(re.escape(st) + r"\s*\[\s*(" + NUM + r")\s*\+\s*" + IDENT + r"\s*\]", body))
+    if len(bases) != 1 or not re.search(prop("sendVals"), body):
+        fail(anchor, "expected one `s[BASE + k]` read of the movement schema's sendVals, got %r" % sorted(bases))
+    base = bases.pop()
+    f.require(SYNC_REQUIRED, anchor)
+    offs = sorted(f.by_off)
+    if offs != list(range(base)):
+        fail(anchor, "fields do not cover 0..%d exactly once before sendVals at %d: %r" % (base - 1, base, offs))
+    return {"send_vals": base, "fields": f.list(), "shadowed": f.shadowed}
+
+
+def _roles(anchor, params, found, required):
+    """found: role -> param name. Validates and returns role -> argument index."""
+    out = {}
+    for role, p in found.items():
+        if p is None:
+            continue
+        if p not in params:
+            fail(anchor, "role %s resolved to %r, not a handler parameter" % (role, p))
+        out[role] = params.index(p)
+    missing = [r for r in required if r not in out]
+    if missing:
+        fail(anchor, "arguments not found: %s (found %r)" % (", ".join(missing), out))
+    if len(set(out.values())) != len(out):
+        fail(anchor, "two roles share one argument: %r" % out)
+    return {"argc": len(params), "args": dict(sorted(out.items(), key=lambda kv: kv[1]))}
+
+
+def _first(pattern, body, group=1):
+    m = re.search(pattern, body)
+    return m.group(group) if m else None
+
+
+def extract_kill_player(src, tables):
+    anchor = "KILL_PLAYER arguments"
+    params, body = s2c_handler(src, tables, "KILL_PLAYER", lambda b: re.search(r"deathsVal", b))
+    P = _alt(params)
+    found = {}
+    sids = [(m.group(1), m.group(2)) for m in re.finditer(
+        r"(?<![\w$.\]])(" + IDENT + r")\s*=\s*[^;=]*?" + prop("findBySid") + r"\s*\(\s*" + P + r"\s*\)", body)]
+    victim = killer = None
+    for v, p in sids:
+        if victim is None and re.search(prop("players") + r"\s*" + prop("kill") + r"\s*\(\s*" + _word(v) + r"\s*\)", body):
+            victim = v
+            found["victim"] = p
+        km = re.search(prop("countSkinKill") + r"\s*\(\s*" + _word(v) + r"\s*,\s*" + P + r"\s*\)", body)
+        if killer is None and km:
+            killer = v
+            found["killer"] = p
+            found["info"] = km.group(1)
+    found["deaths"] = _first(r"deathsVal\s*" + prop("textContent") + r"\s*=\s*" + P, body)
+    found["hideFeed"] = _first(r"!\s*" + P + r"\s*&&[^;]{0,80}?" + prop("showKills"), body)
+    if victim and killer:
+        found["stats"] = _first(r"\}\s*\(\s*" + _word(victim) + r"\s*,\s*" + _word(killer) + r"\s*,\s*" + P + r"\s*,", body)
+    return _roles(anchor, params, found, ("victim", "deaths", "killer", "stats", "info", "hideFeed"))
+
+
+def extract_do_damage(src, tables):
+    anchor = "DO_DAMAGE arguments"
+    params, body = s2c_handler(src, tables, "DO_DAMAGE", lambda b: re.search(r"""['"]crit_0['"]""", b))
+    P = _alt(params)
+    found = {"target": _first(prop("findBySid") + r"\s*\(\s*" + P + r"\s*\)", body),
+             "damage": _first(P + r"\s*=\s*Math\s*" + prop("ceil") + r"\s*\(\s*\1\s*\)", body),
+             "crit": _first(P + r"\s*\?\s*['\"]crit_0['\"]", body),
+             "silent": _first(P + r"\s*\|\|\s*" + IDENT + r"\s*" + prop("play") + r"\s*\(\s*" + P + r"\s*\?\s*['\"]crit_0", body)}
+    m = re.search(P + r"\s*\?\s*" + P + r"\s*&&[^;]{0,200}?['\"]aikills['\"]", body)
+    if m:
+        found["ai"], found["kill"] = m.group(1), m.group(2)
+    return _roles(anchor, params, found, ("target", "damage", "crit", "kill", "ai", "silent"))
+
+
+def extract_change_health(src, tables):
+    anchor = "CHANGE_HEALTH arguments"
+    params, body = s2c_handler(src, tables, "CHANGE_HEALTH", lambda b: re.search(prop("maxHealth"), b) and
+                               re.search(prop("findBySid"), b))
+    P = _alt(params)
+    found = {"health": _first(prop("health") + r"\s*=\s*" + P + r"\s*[;,]", body),
+             "sid": _first(prop("findBySid") + r"\s*\(\s*" + P + r"\s*\)", body),
+             "srcX": _first(r"null\s*!=\s*" + P + r"\s*&&\s*null\s*!=\s*\1\s*&&\s*function", body),
+             "noHitMarker": _first(r"<\s*" + IDENT + r"\s*&&\s*!\s*" + P + r"\s*&&\s*\(\s*null\s*!=", body),
+             "resetMax": _first(r"\|\|\s*" + P + r"\s*\)\s*&&\s*\(\s*" + IDENT + r"\s*" + prop("maxHealth") + r"\s*=", body)}
+    if found["srcX"]:
+        found["srcZ"] = _first(r"\}\s*\(\s*" + _word(found["srcX"]) + r"\s*,\s*" + P + r"\s*\)", body)
+    return _roles(anchor, params, found, ("health", "sid", "srcX", "srcZ", "noHitMarker", "resetMax"))
+
+
+def extract_get_score(src, tables):
+    anchor = "GET_SCORE arguments"
+    params, body = s2c_handler(src, tables, "GET_SCORE", lambda b: re.search(prop("classScores"), b))
+    P = _alt(params)
+    found = {"classIndex": _first(prop("classScores") + r"\s*\[\s*" + P + r"\s*\|\|", body),
+             "relay": _first(r"!\s*" + P + r"\s*&&\s*" + IDENT + r"\s*&&\s*\(\s*" + IDENT + r"\s*" + prop("score") + r"\s*=", body)}
+    m = re.search(prop("score") + r"\s*=\s*" + P + r"\s*\+\s*\(\s*" + P + r"\s*\?\s*" + ZERO + r"\s*:", body)
+    if m:
+        found["delta"], found["absolute"] = m.group(1), m.group(2)
+    return _roles(anchor, params, found, ("delta", "relay", "absolute", "classIndex"))
+
+
+def extract_layouts(src, tables):
+    return {
+        "add_players": extract_add_players(src, tables),
+        "update_players": extract_update_players(src, tables),
+        "sync_player": extract_sync_player(src, tables),
+        "kill_player": extract_kill_player(src, tables),
+        "do_damage": extract_do_damage(src, tables),
+        "change_health": extract_change_health(src, tables),
+        "get_score": extract_get_score(src, tables),
+    }
+
+
 def _opt(name, fn, src, warnings):
     try:
         return fn(src)
@@ -907,6 +1307,7 @@ def extract(src):
     # the AHKEY anchor is the `!= C2S['cptR']` guard, so the exempt packet is C2S cptR
     out["ahnum_exempt"] = {"name": "cptR", "wire": dict(tables["c2s"])["cptR"]}
     cheat = extract_cheat(norm)
+    layouts = extract_layouts(norm, tables)
     warnings = []
     for side, ent in tables.items():
         seen = {}
@@ -936,6 +1337,7 @@ def extract(src):
             "handler": "v1",
             "cc_args": {"count": 3, "nonce": 0, "ciphertext": 2},
         },
+        "layouts": layouts,
         "cheat_keystream_js": cheat["keystream_js"],
         "cheat_salt_js": cheat["salt_js"],
         "cheat_keystream_standalone_js": cheat["standalone_js"],
@@ -1147,6 +1549,7 @@ def render_header(b):
     w("#define KRUNKER_CHEAT_FNV_PRIME %su" % ch["fnv_prime"])
     w("#define KRUNKER_CHEAT_FNV_DOUBLE_MUL %d" % (1 if ch["fnv_multiply"] == "double" else 0))
     w("")
+    render_layouts(w, b["layouts"])
     for side, title, pre in (("packets_c2s", "client -> server", "KRUNKER_C2S"),
                              ("packets_s2c", "server -> client", "KRUNKER_S2C")):
         ents = b[side]
@@ -1166,6 +1569,69 @@ def render_header(b):
     return "\n".join(L) + "\n"
 
 
+LAYOUT_DOCS = (
+    ("add_players", "ADD", "KrunkerAddField",
+     "ADD_PLAYERS (\"0\" [list, ...]): a flat list, KRUNKER_ADD_STRIDE values per player. The offsets the\n"
+     " * client reads (its handler and players.add), named by the Krunker property each lands in; [id]\n"
+     " * is the socket id (\"you\" when it equals io-init's), health null means maxHealth."),
+    ("update_players", "K", "KrunkerKField",
+     "UPDATE_PLAYERS (\"k\" [list, sendRate, serverTime]): KRUNKER_K_STRIDE values per player; xDire /\n"
+     " * yDire in degrees, weapon a loadout index, grapple [x, y, z] or null."),
+    ("sync_player", "SYNC", "KrunkerSyncField",
+     "SYNC_PLAYER (\"l\" [state]): your authoritative state, answered with PONG. velocity.set(velX, velY,\n"
+     " * velZ); slideTimer / canSlideT in ms; _protected a flat [key, value, ...] list. From\n"
+     " * KRUNKER_SYNC_SEND_VALS on: the movement schema's sendVals, then the controlled-entity sync."),
+)
+ARG_DOCS = (
+    ("kill_player", "KILL", "KILL_PLAYER (\"3\"): info is {wId, fs, hs, ...} or a weapon index"),
+    ("do_damage", "DAMAGE", "DO_DAMAGE (\"4\"): a hit you dealt; ai: the target is an AI sid"),
+    ("change_health", "HEALTH", "CHANGE_HEALTH (\"h\"): sid null means you; srcX / srcZ the hit's source"),
+    ("get_score", "SCORE", "GET_SCORE (\"5\"): relay = a spectated player's score, not yours"),
+)
+
+
+def _c_names(prefix, names, anchor):
+    out = {}
+    for n in names:
+        ci = "KRUNKER_%s_%s" % (prefix, _snake(n))
+        if ci in out.values() or _snake(n) in ("STRIDE", "FIELDS", "SEND_VALS", "ARGC"):
+            fail(anchor, "field %r gives the C name %s twice / a reserved name" % (n, ci))
+        out[n] = ci
+    return out
+
+
+def render_layouts(w, lay):
+    for key_, prefix, enum, doc in LAYOUT_DOCS:
+        L_ = lay[key_]
+        fields = L_["fields"]
+        names = _c_names(prefix, [f["name"] for f in fields], key_)
+        w("/* %s" % doc)
+        w(" * X(C_SUFFIX, offset, \"krunkerName\") */")
+        if "stride" in L_:
+            w("#define KRUNKER_%s_STRIDE %d" % (prefix, L_["stride"]))
+        if "send_vals" in L_:
+            w("#define KRUNKER_%s_SEND_VALS %d" % (prefix, L_["send_vals"]))
+        w("#define KRUNKER_%s_FIELDS(X) \\" % prefix)
+        for i, f in enumerate(fields):
+            w("    X(%s, %d, %s)%s" % (names[f["name"]][len("KRUNKER_%s_" % prefix):], f["offset"], c_str(f["name"]),
+                                    " \\" if i + 1 < len(fields) else ""))
+        w("")
+        w("typedef enum {")
+        for f in fields:
+            w("    %s = %d," % (names[f["name"]], f["offset"]))
+        w("} %s;" % enum)
+        w("")
+    w("/* Argument positions of the per-event packets (the handler's parameters, by role). */")
+    for key_, prefix, doc in ARG_DOCS:
+        A_ = lay[key_]
+        names = _c_names(prefix + "_ARG", list(A_["args"]), key_)
+        w("/* %s */" % doc)
+        w("#define KRUNKER_%s_ARGC %d" % (prefix, A_["argc"]))
+        for role, i in A_["args"].items():
+            w("#define %s %d" % (names[role], i))
+        w("")
+
+
 def render_json(b):
     return json.dumps(b, indent=1, ensure_ascii=False, sort_keys=False) + "\n"
 
@@ -1183,10 +1649,14 @@ def build_doc(values, prov):
 
 def summary(doc):
     ex = doc["extras"]
+    lay = doc.get("layouts") or {}
     return ("AHKEY %s (step 0x%02x)  clientVersion %s  buildVersion %s  c2s %d  s2c %d  salt %r  fnv %s\n"
+            "  layouts: \"0\" %s/player  \"k\" %s/player  \"l\" sendVals at %s\n"
             "  matchmaker %s  turnstile %s  regions %s" % (
                 doc["ahkey_hex"], doc["ahnum_step"], doc["client_version"], doc["build_version"],
                 len(doc["packets_c2s"]), len(doc["packets_s2c"]), doc["cheat"]["salt"], doc["cheat"]["fnv_multiply"],
+                (lay.get("add_players") or {}).get("stride"), (lay.get("update_players") or {}).get("stride"),
+                (lay.get("sync_player") or {}).get("send_vals"),
                 ex.get("matchmaker_url"), ex.get("turnstile_site_key"),
                 ",".join(ex["regions"]["regions"]) if ex.get("regions") else None))
 
@@ -1236,18 +1706,40 @@ def main(argv=None):
         except (ExtractError, OSError) as e:
             log("cannot read the bundle (%s): checked header <-> build.json only" % e)
             return 2 if a.strict else rc
-        if prov["sha256"] == old["source"]["sha256"] and old.get("generator_rev") == GENERATOR_REV:
-            if rc == 0:
-                log("up to date (bundle sha256 %s)" % prov["sha256"][:16])
-            return rc
         try:
             doc = build_doc(extract(text), prov)
         except ExtractError as e:
             log("the current bundle does not extract: %s" % e)
             return 1
-        log("STALE: the bundle changed (sha256 %s -> %s); run `make krunker-build`\n  committed: %s\n  current:   %s"
-            % (old["source"]["sha256"][:16], prov["sha256"][:16], summary(old), summary(doc)))
-        return 1
+        if prov["sha256"] != old["source"]["sha256"]:
+            log("STALE: the bundle changed (sha256 %s -> %s); run `make krunker-build`\n  committed: %s\n  current:   %s"
+                % (old["source"]["sha256"][:16], prov["sha256"][:16], summary(old), summary(doc)))
+            return 1
+        # same bundle: regenerate into a temp file (with the committed provenance, so a local copy of
+        # the bundle compares equal to the URL it was generated from) and diff it with the header
+        doc["source"] = old["source"]
+        fd, tmp = tempfile.mkstemp(prefix="krunker_build-", suffix=".h")
+        try:
+            with os.fdopen(fd, "w", encoding="utf8") as f:
+                f.write(render_header(doc))
+            fresh = read_text(tmp)
+        finally:
+            os.unlink(tmp)
+        cur = read_text(a.header)
+        if fresh != cur:
+            diff = list(difflib.unified_diff((cur or "").splitlines(), fresh.splitlines(), "committed", "regenerated",
+                                             n=0, lineterm=""))
+            log("STALE: regenerating %s from the same bundle differs (generator rev %s -> %d); run "
+                "`make krunker-build FORCE=1`\n  %s" % (os.path.relpath(a.header, ROOT), old.get("generator_rev"),
+                                                        GENERATOR_REV, "\n  ".join(diff[:40])))
+            return 1
+        if json.loads(render_json(doc)) != old:
+            log("STALE: %s differs from a regeneration from the same bundle; run `make krunker-build FORCE=1`" %
+                os.path.relpath(a.json, ROOT))
+            return 1
+        if rc == 0:
+            log("up to date (bundle sha256 %s, regenerated header identical)" % prov["sha256"][:16])
+        return rc
 
     try:
         text, prov = load_source(a.source)
