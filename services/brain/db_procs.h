@@ -44,7 +44,8 @@ int64_t dbx_int(Dbx *x, const kn_sql *q, int n, const char *const *p, int64_t de
 char *dbx_text(Dbx *x, const kn_sql *q, int n, const char *const *p);
 /* 1 when the query returns at least one row. */
 int dbx_exists(Dbx *x, const kn_sql *q, int n, const char *const *p);
-/* Last auto-increment id of an INSERT (sqlite / mysql). */
+/* Id of an INSERT: the first cell of its RETURNING row when it has one (the .pg / .sqlite text
+ * ends in RETURNING id), else the auto-increment id (sqlite / mysql). */
 int64_t dbx_insert_id(Dbx *x, const kn_sql *q, int n, const char *const *p);
 /* Record a user-facing refusal (SQLSTATE P0001); returns -1. */
 int dbx_refuse(Dbx *x, const char *msg);
@@ -67,6 +68,10 @@ int db_active_ban(Dbx *x, int64_t account_id, const char *ip, char *reason, size
 /* kn_add_funds / kn_add_skin; -1 (refusal recorded) when not enough / not owned / no account */
 int db_add_funds(Dbx *x, int64_t id, int64_t amount, const char *source, const char *ref, int64_t *funds);
 int db_add_skin(Dbx *x, int64_t id, int64_t skin, int64_t delta, const char *source, const char *ref, int64_t *count);
+/* Same, with the counterparty of the movement (gift / market / trade) and the fee charged on
+ * top of it: the ledger row then records who moved the KR and what it cost. */
+int db_add_funds_ex(Dbx *x, int64_t id, int64_t amount, const char *source, const char *ref,
+                    int64_t counterparty, int64_t fee, int64_t *funds);
 /* kn_account_json (NULL when the account does not exist) */
 cJSON *db_account_json(Dbx *x, int64_t id);
 /* kn_account_id(name): 0 when unknown */
@@ -81,11 +86,14 @@ extern const kn_proc P_LOGIN_SUCCESS, P_LOGIN_FAILED, P_REGISTER, P_REGISTER_PRE
     P_ENSURE_CENTRAL, P_SPIN_MULTI, P_DAILY_KR, P_CLAIM_DAILY;
 
 /* ---- social (db_social.c) */
-extern const kn_proc P_POST_FULL, P_FEED, P_GIFT, P_CLAN_CREATE, P_CLAN_REQUEST, P_CLAN_DATA_OF, P_CLAN_LEAVE,
-    P_CLAN_KICK, P_CLAN_ROLE, P_CLAN_FUNDS, P_CLAN_ANSWER, P_CLAN_PAGE, P_MAIL_READ, P_MARKET_ITEM,
-    P_TRADE_PAGE, P_MARKET_LIST, P_MARKET_UNLIST, P_MARKET_BUY, P_QUICK_SELL, P_TRADE_INVENTORIES, P_TRADE_CREATE,
-    P_TRADE_ACCEPT, P_TRADE_CLOSE, P_CHAT_THREAD, P_PROFILE, P_MAP_PAGE, P_MOD_PAGE, P_PUBLISH_MAP, P_SET_HACK,
+extern const kn_proc P_POST_FULL, P_FEED, P_CLAN_CREATE, P_CLAN_REQUEST, P_CLAN_DATA_OF, P_CLAN_LEAVE,
+    P_CLAN_KICK, P_CLAN_ROLE, P_CLAN_FUNDS, P_CLAN_ANSWER, P_CLAN_PAGE, P_MAIL_READ, P_CHAT_THREAD, P_PROFILE, P_MAP_PAGE, P_MOD_PAGE, P_PUBLISH_MAP, P_SET_HACK,
     P_SET_FEATURED;
+
+/* ---- the economy (db_economy.c, 0111_economy): KR gifts, the market, trade offers, KR history */
+extern const kn_proc P_GIFT, P_MARKET_LIST, P_MARKET_UNLIST, P_MARKET_BUY, P_QUICK_SELL, P_MARKET_ITEM, P_TRADE_PAGE,
+    P_TRADE_INVENTORIES, P_TRADE_CREATE, P_TRADE_ACCEPT, P_TRADE_CLOSE, P_TRADE_CLEAR, P_TRADE_EXPIRE, P_KR_HISTORY,
+    P_LISTINGS_OF, P_LISTING, P_BLACKM_BUY;
 
 /* ---- KrunkScript storage and map KR rewards for game servers (db_storage.c) */
 extern const kn_proc P_STORAGE_UPDATE, P_STORAGE_LOAD, P_MAP_REWARD;

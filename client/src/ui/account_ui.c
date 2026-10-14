@@ -591,6 +591,15 @@ static void on_social(void *user, const cJSON *frame) {
         if (text && text[0] && ui_settings_import_text(text)) popup_response(1, NULL, "Settings Loaded");
         else popup_response(0, "No settings found", NULL);
         menu_rerender_if_open(1);
+    } else if (!strcmp(label, "econN")) { // KrunkNative economy note (kn_brain economy.c): a toast outside the hub
+        const char *text = str_at(frame, 2);
+        if (text && app_mode() != APP_MODE_HUB) {
+            StrBuf sb = {0};
+            sb_append_esc(&sb, text);
+            char *html = sb_finish(&sb);
+            ui_notify(html);
+            free(html);
+        }
     } else if (!strcmp(label, "gmc")) { // updateMailCount(count)
         mail_count((int) num_at(frame, 1));
     } else if (!strcmp(label, "kml")) { // mailListResponse(tab, rows)

@@ -1018,9 +1018,13 @@ shapes are what the real client (`src/social.js`, `src/index.js`) sends and read
 | `max_match_kr` | `500` | cap of one stats commit's / reward's KR (bounds a compromised game server) |
 | `region_index` | `{}` | game region id -> `config.socialRegions` index (leaderboard region filter) |
 | `rank_var` | `0.03` | `config.rankVar`: level = max(1, floor(rank_var * sqrt(score))) |
-| `trade_min_level` / `trade_max_items` | `20` / `10` | `config.tradeMinLvl` / `tradeMaxOutP` |
-| `gift_min_level` / `gift_fee_percent` | `30` / `10` | KR gift rules (v3.1.1 `giftMinLVl`, `giftFee` 0.1; the sender pays amount + fee) |
-| `market_fee_percent` / `market_fee_bypass` / `sale_max` / `max_listings` | `5` / `0` / `1e7` / `50` | market listing fee (social.js calcFee), fee-free prices up to (`marketFeeBypass`), price cap (`saleMax`), open listings ("MAX") |
+| `trade_min_level` / `trade_max_items` / `trade_max_items_premium` | `20` / `5` / `20` | v7.1.4 `config.tradeMinLvl` (both players) / `tradeMaxOut` / `tradeMaxOutP` (items per side) |
+| `trade_max_open` / `trade_kr_max` / `trade_ttl_h` | `50` / `1e7` / `0` | open offers per sender, KR per side of an offer (0 = KR not tradable), offer lifetime in hours (0 = never, like v7.1.4) |
+| `gift_min_level` / `gift_fee_percent` / `gift_min` / `gift_max` | `30` / `10` / `10` / `1e7` | KR gift rules (v7.1.4 `giftMinLVl`, `giftFee` 10/100 rounded up, `giftMin`, `giftMax`; the sender pays amount + fee) |
+| `market_fee_percent` / `market_fee_bypass` / `market_min_level` | `10` / `0` / `15` | listing fee, floor(price * fee %) (v7.1.4 `marketFee` 10/100, `calcFee`), fee-free prices up to (`marketFeeBypass`), level to list or buy (`marketMinLVl`) |
+| `sale_max` / `sale_grace_s` / `max_listings` | `1e7` / `300` / `40` | price cap (`saleMax`), a listing is buyable this long after posting (`saleGrace`), open listings ("MAX") |
+| `economy_rate_<kind>` | gift `10`, list `30`, unlist `60`, buy `30`, qsell `60`, trade `10`, accept `30`, close `60` | economy actions per account and minute (`Slow down`); 0 = unlimited. Rules and integrity: [doc/v7/economy.md](v7/economy.md) |
+| `economy_tick_ms` | `60000` | trade offer expiry + idempotency key cleanup timer |
 | `clan_tag_max` / `clan_max_members` | `4` / `0` | clan tag length (create input maxlength) / members (0 = unlimited) |
 | `post_max_len` / `comment_max_len` / `chat_max_len` | `1024` / `500` / `300` | text limits |
 | `page_size` / `leaderboard_cache_s` | `100` / `30` | leaderboard rows / per (query, region) cache |
@@ -1166,7 +1170,7 @@ Other labels (request -> reply):
 | `["chtb"]` | `["chtb", [{fid, fna, cht: unread}]]` |
 | `["ctd", peerId]` | `["chtl", [{fid, fna, txt, tim}]]` newest first; marks read |
 | `["ict", peerId, text]` | `["chf", true]` / `["chf", false, err]`; recipient gets `["chtb", [{fid, fna, cht:1}]]` |
-| `["kr", name, amount, msg, captcha]` | `["gir", {funds}]`; receiver gets a mail + `gmc` |
+| `["kr", name, amount, msg, captcha?, {op}]` | `["gir", {funds, amount, fee}]`; receiver gets the "KR Gift" mail + `gmc`, `["econN", "gift", text]` and `ua` (economy: [doc/v7/economy.md](v7/economy.md)) |
 | `["cln", tag]` (social page) | `["cln", msg, ok]` join request |
 | `["cln", action, value, extra]` (menu) | `["cln", msg, data, ok, action]`: 1 create(tag) -> clanData, 2 request(tag), 3 my clan, 4 leave -> `["clnL"]`, 5 kick(id), 6 role(id, {r}) -> `{i, r}`, 7 funds(kr, {wd}) -> `{pf, cf}` |
 | `["clnR", playerId, 1\|0]` | accept / decline a request (errors as `cln`) |
@@ -1174,15 +1178,18 @@ Other labels (request -> reply):
 | `["nme", alias]` | `["nmeR", null, alias]` / `["nmeR", err]` |
 | `["upp", old, new, repeat]` | `["upp", "Password updated.", newToken]` / `["upp", err]` (other sessions revoked) |
 | `["kml", tab]` / `["rml", id]` / `["raml"]` | `["kml", tab, rows{km_id, km_datesent, km_playerfrom, km_subject, km_text, km_archive}]` / `["rml", [row]]` (credits attached KR once) / mark all read |
-| `["li", skin, skinid, uid, price]` | `["lir", {cnt, funds} \| {response:"MAX"}, uid]` |
-| `["uli", skin, listingId, uid]` | `["ulir", "SUCCESS"\|"SOLD"\|null, uid, err]` |
-| `["pi", listingId, uid]` | `["br", {f, i, m} \| null, uid]` (client -> server `pi` is the purchase) |
-| `["fil", n, text, rarities, ...]` / `["srt", n, text, rarities, ...]` | `["fr", n, listings\|null]` / `["str", n, inventory]` |
-| `["qsi", skin, uid, count]` | `["qsr", {f, c, i: uid} \| null]` (KR = `store.rarities[r].sell`) |
-| `["st", skin, days, captcha]` | `["gd", [{d, f: avg price, t: sales}]]` |
-| `["ri", name, id, captcha]` | `["trD", name, id, [myInventory, theirInventory]]` |
-| `["ctr", receiverId, giveIds, takeIds, msg, captcha]` / `["trA", tradeId]` / `["trC", tradeId]` | `["trR", result, tradeId\|null, msg]`; the other party gets `["pRes", "SUCCESS", null, msg]` |
-| `["trCA"]` | decline every open incoming offer |
+| `["li", skin, skinid, uid, price, {op}]` | `["lir", {cnt, funds, listingId, fee} \| {response:"MAX"}, uid]` |
+| `["uli", skin, listingId, uid, {op}]` | `["ulir", "SUCCESS"\|"SOLD"\|null, uid, err]` |
+| `["pi", listingId, uid, {op}]` | `["br", {f, i, sid, m, price} \| null, uid]` (client -> server `pi` is the purchase); the seller gets the "Item sold" mail, `econN` and `ua` |
+| `["fil", n, text, rarities, weapons, types, season, order]` / `["srt", n, text, rarities, ...]` | `["fr", n, listings\|null]` / `["str", n, inventory]` |
+| `["qsi", mode, skin, uid, amount, {op}]` (v7.1.4) / `["qsi", skin, uid, amount]` | `["qsr", {f, c, kr, j, jnk, i: uid} \| null]` (KR = the item's `qsKR`, else `store.rarities[r].sell`; mode 0 KR, 2 destroy; amount 0 one, 1 all but one, 2 all) |
+| `["st", skin, range, captcha]` | `["gd", [{d, f: KR total, t: sales}]]` (range: `config.dataDateRanges` index or days) |
+| `["uml", playerId]` | `["ul", [{sk, skid, kr, c, ms, id}]]` (profile Listings tab) |
+| `["ri", name, id, captcha]` | `["trD", name, id, [myInventory, theirInventory]]` (items `{i, c, nt?}`, `nt` = not tradable) |
+| `["ctr", receiverId, give, take, msg, captcha?, {op, skr, rkr}]` / `["trA", tradeId, {op}]` / `["trC", tradeId, fast?, {op}]` | `["trR", result, tradeId\|null, msg]`; the other party gets `["econN", "trade", msg]` (give / take: `[{i, c}]`) |
+| `["trCA", {op}]` | decline every open incoming offer -> `["pRes", "SUCCESS", null, "Declined All"]` |
+| `["ecfg"]` | `["ecfg", {giftFee, giftMin, giftMax, giftMinLvl, marketFee, marketFeeBypass, marketMinLvl, saleMax, saleGrace, maxListings, tradeMinLvl, tradeMaxOut, tradeMaxOutP, tradeKRMax, tradeTTL}]`: the rules this server applies |
+| `["krh", days]` | `["krh", [{id, amount, source, ref, cp, fee, tim}]]`: the account's own KR ledger, newest first |
 | `["a2FA"]` / `["a2FAc", code]` / `["d2FA"]` / `["d2FAc", code]` | v7.1.4 2FA (authenticator app, 7.9): `["c2fa", 0, "a2FAc", otpauthUri]` -> `["c2fa", 2, null, null, true]`; `["c2fa", 0, "d2FAc"]` -> `["c2fa", 2, null, null, false]`; a wrong code: `["c2fa", 0, label, null, null, "Invalid Code"]` |
 | password login of a 2FA account | `["c2fa", 0, "2fa"]` (the code popup); then `["2fa", code]` -> `["c2fa", 1]` + the `a` reply, or `["c2fa", 0, "2fa", null, null, "Invalid Code"]`. Token resumes skip 2FA; internal `login` answers `2FA required.` |
 | `["cemail", email]` / `["emailv"]` / `["emailS"]` | Krunker Box Office email verification (7.9): `["cemail" \| "emailv", error, message, state]`, `["emailS", state]` |

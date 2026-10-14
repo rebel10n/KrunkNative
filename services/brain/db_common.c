@@ -38,7 +38,8 @@ int64_t dbx_exec(Dbx *x, const kn_sql *q, int n, const char *const *p) {
 int64_t dbx_insert_id(Dbx *x, const kn_sql *q, int n, const char *const *p) {
     kn_db_result *r = dbx_q(x, q, n, p);
     if (!r) return -1;
-    int64_t id = kn_db_last_id(r);
+    /* INSERT .. RETURNING id (postgres / sqlite texts) gives a row; mysql the auto-increment id */
+    int64_t id = kn_db_rows(r) > 0 ? kn_db_get_int64(r, 0, 0, 0) : kn_db_last_id(r);
     kn_db_result_free(r);
     return id;
 }
@@ -170,6 +171,14 @@ int db_active_ban(Dbx *x, int64_t account_id, const char *ip, char *reason, size
 }
 
 int db_add_funds(Dbx *x, int64_t id, int64_t amount, const char *source, const char *ref, int64_t *funds) {
+    return db_add_funds_ex(x, id, amount, source, ref, 0, 0, funds);
+}
+
+/* One KR movement: the balance, bounded below by 0, and its ledger row (reason, reference,
+ * counterparty, fee). The row is written in the same transaction as the balance, so a rollback
+ * takes both back and the ledger can never disagree with player_funds. */
+int db_add_funds_ex(Dbx *x, int64_t id, int64_t amount, const char *source, const char *ref,
+                    int64_t counterparty, int64_t fee, int64_t *funds) {
     int64_t n = dbx_exec(x,
         SQL(.any = "UPDATE players SET player_funds = player_funds + {int:$2}, updated_at = {now}"
                    " WHERE player_id = $1 AND player_funds + {int:$2} >= 0"),
@@ -179,9 +188,17 @@ int db_add_funds(Dbx *x, int64_t id, int64_t amount, const char *source, const c
         int exists = dbx_exists(x, SQL(.any = "SELECT 1 FROM players WHERE player_id = $1"), KN_DB_ARGS(I64S(id)));
         return dbx_refuse(x, exists ? "Not enough KR" : "Account not found.");
     }
-    if (amount != 0 &&
+    /* Movements without a counterparty or fee (rewards, turf, challenges, ...) write the pre-0111
+     * row, so they never depend on 0111's columns (a brain started before its migration keeps
+     * paying them). */
+    if (amount != 0 && !counterparty && !fee &&
         dbx_exec(x, SQL(.any = "INSERT INTO kr_transactions (account_id, amount, source, ref) VALUES ($1, $2, $3, $4)"),
                  KN_DB_ARGS(I64S(id), I64S(amount), source, ref)) < 0)
+        return -1;
+    if (amount != 0 && (counterparty || fee) &&
+        dbx_exec(x, SQL(.any = "INSERT INTO kr_transactions (account_id, amount, source, ref, counterparty_id, fee)"
+                              " VALUES ($1, $2, $3, $4, NULLIF($5, 0), {int:$6})"),
+                 KN_DB_ARGS(I64S(id), I64S(amount), source, ref, I64S(counterparty), I64S(fee))) < 0)
         return -1;
     if (funds)
         *funds = dbx_int(x, SQL(.any = "SELECT player_funds FROM players WHERE player_id = $1"), KN_DB_ARGS(I64S(id)), 0);

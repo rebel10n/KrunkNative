@@ -44,8 +44,20 @@
 #include <ruleset.h>
 
 #define HUB_KEY_MAX 128
-#define MARKET_MIN_LVL 15       // config.marketMinLVl (v7.1.4)
-#define TRADE_MIN_LVL 20        // config.tradeMinLvl
+
+// The economy rules (doc/v7/economy.md): v7.1.4 src/config.js until kn_brain's "ecfg" reply
+// replaces them with what the server really charges (gift / list fees, levels, limits).
+typedef struct {
+    double gift_fee, gift_min, gift_max, gift_min_lvl;          // giftFee (%), giftMin, giftMax, giftMinLVl
+    double market_fee, market_fee_bypass, market_min_lvl;       // marketFee (%), marketFeeBypass, marketMinLVl
+    double sale_max, sale_grace, max_listings;                  // saleMax, saleGrace (ms), the "MAX" listings
+    double trade_min_lvl, trade_max_out, trade_max_out_p;       // tradeMinLvl, tradeMaxOut, tradeMaxOutP
+    double trade_kr_max;                                        // KrunkNative: KR per side of an offer (0 = none)
+} EconRules;
+static EconRules g_econ = {10, 10, 10000000, 30, 10, 0, 15, 10000000, 300000, 40, 20, 5, 20, 10000000};
+#define MARKET_MIN_LVL ((int) g_econ.market_min_lvl)
+static void econ_new_op(char *out, size_t n, const char *tag); // an action's idempotency key
+#define TRADE_MIN_LVL ((int) g_econ.trade_min_lvl)
 
 // ------------------------------------------------------------------ v3.1.1 data (src/config.js, i18n/en.js)
 
@@ -1200,6 +1212,7 @@ static void request_page(void) {
 }
 
 static void io_0(const char *e, const char *a, const cJSON *t, const cJSON *extra);
+static void hub_render_listing(const cJSON *t);
 
 // updateWindow(e, a, t, n, r, s)
 static void update_window(const char *e, const char *a, const char *t, const char *n, const char *r, const int s) {
@@ -1960,8 +1973,8 @@ static void hub_render_feed(const cJSON *t) {
 // ------------------------------------------------------------------ brain: market, item sales, clan (social.js io_0)
 
 
-#define SALE_GRACE_MS 300000.0  // config.saleGrace
-#define SALE_MAX 10000000       // config.saleMax
+#define SALE_GRACE_MS g_econ.sale_grace // config.saleGrace
+#define SALE_MAX ((int) g_econ.sale_max) // config.saleMax
 
 // data/prices.js: prices.estimateValue(skin) (the bundled snapshot; 0 = unknown)
 static const int k_prices[] = {
@@ -2040,7 +2053,8 @@ static int estimate_value(const int skin) {
 
 int social_estimate_value(const int skin) { return estimate_value(skin); }
 
-static const int k_rarity_sell[] = {1, 3, 10, 100, 500, 2500, 10000}; // store.rarities[r].sell
+static const int k_rarity_sell[] = {1, 3, 10, 100, 500, 2500, 10000, 10}; // store.rarities[r].sell
+static const int k_rarity_trade_fee[] = {5, 5, 5, 10, 10, 25, 200, 500}; // store.rarities[r].fee (calcTradeFee)
 
 static const ViewerSkin *hub_skin(const int index) {
     return index >= 0 && index < g_viewer_skin_count ? &g_viewer_skins[index] : NULL;
@@ -2119,8 +2133,12 @@ static const IllicitSkin *illicit_skin(const int skin) {
     return NULL;
 }
 
-// g.req(acc)
+// store.checkReq(item, acc): accAge (account created at least age_ms ago) / stats
 static int illicit_req_ok(const IllicitSkin *s, const AccountInfo *acc) {
+    if (s->age_ms > 0) {
+        const double made = acc && acc->data ? parse_time_ms(cJSON_GetArrayItem(acc->data, 30)) : 0; // player_datenew
+        return made > 0 && now_epoch_ms() - made >= s->age_ms;
+    }
     if (!s->stat) return 0;
     const cJSON *v = acc && acc->stats ? cJSON_GetObjectItemCaseSensitive(acc->stats, s->stat) : NULL;
     return cJSON_IsNumber(v) && v->valuedouble >= s->min;
@@ -2225,11 +2243,24 @@ static void hub_set_funds(const double funds) {
     comma_number(kr, sizeof(kr), funds);
     StrBuf sb = {0};
     sb_append_esc(&sb, acc->name);
-    sb_appendf(&sb, "<div style='height:4px'></div><div id='profileKR'>%s<span style='color:#fff'> KR</span></div>", kr);
+    sb_appendf(&sb, "<div style='height:4px'></div><div id='profileKR' style='cursor:pointer' title='KR History' onclick='krHistory()'>%s<span style='color:#fff'> KR</span></div>", kr);
     char *html = sb_finish(&sb);
     set_html("profileName", html);
     free(html);
+    account_set_funds(funds); // acc.funds: the gift / trade / market affordability checks
 }
+
+// The Trades tab's offers (viewOffer reads them back): the economy section below.
+typedef struct HubOffer {
+    int trid, we;            // we: 0 incoming, 1 outgoing, 2 history
+    char name[64];
+    int give[64], ngive, take[64], ntake; // skin ids, one per item (UTILS.splitIds)
+    double kr_give, kr_take; // KrunkNative: KR in the offer, from this side's point of view
+    char *message;
+} HubOffer;
+static void offers_clear(void);
+static HubOffer *g_offers;
+static int g_offer_count;
 
 static void hub_render_trades(StrBuf *out, const cJSON *t, int *shown) {
     const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
@@ -2241,6 +2272,8 @@ static void hub_render_trades(StrBuf *out, const cJSON *t, int *shown) {
     *shown = 1;
     StrBuf pe[3] = {{0}, {0}, {0}};
     int fe[3] = {0, 0, 0};
+    offers_clear(); // the rows viewOffer reads back
+    g_offers = calloc((size_t) (cJSON_GetArraySize(cJSON_GetArrayItem(t, 0)) + cJSON_GetArraySize(cJSON_GetArrayItem(t, 1)) + 1), sizeof(HubOffer));
     for (int ge = 0; ge < 2; ge++) {
         const cJSON *ue = cJSON_GetArrayItem(t, ge);
         const cJSON *o;
@@ -2263,12 +2296,36 @@ static void hub_render_trades(StrBuf *out, const cJSON *t, int *shown) {
             fe[we]++;
             StrBuf *b = &pe[we];
             const int trid = (int) jnum(o, "trid");
+            const double kr_give = jnum(o, he ? "krsell" : "krbuy"), kr_take = jnum(o, he ? "krbuy" : "krsell");
+            if (g_offers) {
+                HubOffer *of = &g_offers[g_offer_count++];
+                of->trid = trid;
+                of->we = we;
+                snprintf(of->name, sizeof(of->name), "%s", name);
+                // UTILS.splitIds: every id (counts[] stop at 16 for the row's thumbnails)
+                for (int k = 0; k < 2; k++) {
+                    int *dst = k ? of->take : of->give, *nd = k ? &of->ntake : &of->ngive;
+                    for (const char *q = lists[k]; q && *q && *nd < 64;) {
+                        if (*q != ',') dst[(*nd)++] = atoi(q);
+                        q = strchr(q, ',');
+                        if (q) q++;
+                    }
+                }
+                of->kr_give = kr_give;
+                of->kr_take = kr_take;
+                const char *m = jstr(o, "message");
+                of->message = m && *m ? strdup(m) : NULL;
+            }
             sb_appendf(b, "<div class='offerHolder' %s id='of_%d' onclick='viewOffer(%d,%d)'>",
                        we == 0 && counts[1] == 0 ? "style='background-color:#ffb2b2'" : we == 0 && counts[0] == 0 ? "style='background-color:#C4F399'" : "", trid, trid, we);
             if (we != 2) sb_appendf(b, "<div class='material-icons offerCancel' onclick='fastDeclOffer(%d)'>clear</div>", trid);
             char ago[48] = "just now";
-            const char *dte = jstr(o, "dte");
-            (void) dte;
+            const double dte = jnum(o, "dte"); // kn_brain: epoch ms (sent / closed)
+            if (dte > 0 && now_epoch_ms() - dte > 60000) {
+                char rt[40];
+                readable_time(rt, sizeof(rt), now_epoch_ms() - dte);
+                snprintf(ago, sizeof(ago), "%s ago", rt);
+            }
             sb_appendf(b, "<div class='offerDate'%s>%s</div><div class='offerFrom'>Offer %s <span id='oProf' onclick='openLink(&quot;/social.html?p=profile&q=", we == 2 ? " style='right:11px;'" : "", ago, he ? "to" : "from");
             sb_append_esc(b, name);
             sb_append(b, "&quot;, &quot;_blank&quot;)'>");
@@ -2286,6 +2343,12 @@ static void hub_render_trades(StrBuf *out, const cJSON *t, int *shown) {
                     sb_append(b, "</div>");
                 }
                 for (int i = 0; i < (be > 5 ? 10 : 5) - counts[k]; i++) sb_append(b, "<div class='oItemHolder' style='border: 2px solid rgba(0,0,0,0);'><div draggable='false' class='oItemImg'></div></div>");
+                const double kr = k ? kr_take : kr_give; // KrunkNative: KR in the offer
+                if (kr > 0) {
+                    char v[32];
+                    comma_number(v, sizeof(v), kr);
+                    sb_appendf(b, "<div style='font-size:14px;color:#FBC02D'>+ %s KR</div>", v);
+                }
                 sb_append(b, "</div>");
                 if (k == 0) sb_append(b, "<div class='oSwapHolder'><div class='material-icons oSwapIcon'>swap_horiz</div></div>");
             }
@@ -2891,15 +2954,27 @@ typedef struct {
 } MarketPop;
 static MarketPop g_last_pop; // lastPop (refreshPopup)
 
+static void market_popup_html(StrBuf *out, const MarketPop *p);
+
 static void market_popup(const MarketPop *p) {
-    const ViewerSkin *g = hub_skin(p->skin);
     reset_pops();
     set_display("popupHolder", "block");
     set_style("popupContent", "width", "618px");
     set_display("popupContent", "block");
-    if (!g) return;
+    if (!hub_skin(p->skin)) return;
     g_last_pop = *p;
     g_last_pop.valid = 1;
+    StrBuf sb = {0};
+    market_popup_html(&sb, p);
+    char *html = sb_finish(&sb);
+    set_html("popupContent", html);
+    free(html);
+}
+
+// The popup's content (also the listing page's, hub_render_listing).
+static void market_popup_html(StrBuf *out, const MarketPop *p) {
+    const ViewerSkin *g = hub_skin(p->skin);
+    if (!g) return;
     const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
     const double l = atof(p->salestart);
     const double h = now_epoch_ms() - l > 0 ? now_epoch_ms() - l : 0;
@@ -2937,7 +3012,9 @@ static void market_popup(const MarketPop *p) {
     char a[32], b[32], c[32];
     if (!strcmp(p->page, "market")) {
         const int grace = h < SALE_GRACE_MS;
-        const char *block = !acc ? "Login to Buy" : acc->level < MARKET_MIN_LVL ? "lvl 20 required" : NULL;
+        char req[32];
+        snprintf(req, sizeof(req), "lvl %d required", MARKET_MIN_LVL); // social.market.req
+        const char *block = !acc ? "Login to Buy" : acc->level < MARKET_MIN_LVL ? req : NULL;
         const double funds = acc ? acc->funds : 0, price = atof(p->funds), left = funds - price;
         comma_number(a, sizeof(a), funds);
         comma_number(b, sizeof(b), price);
@@ -2953,7 +3030,9 @@ static void market_popup(const MarketPop *p) {
             sb_appendf(&sb, ">%s</div>", block ? block : left < 0 ? "Can't Afford" : "Purchase");
         }
     } else if (inventory) {
-        const char *block = !acc ? "Login to Sell" : acc->level < MARKET_MIN_LVL ? "lvl 20 required" : NULL;
+        char req[32];
+        snprintf(req, sizeof(req), "lvl %d required", MARKET_MIN_LVL);
+        const char *block = !acc ? "Login to Sell" : acc->level < MARKET_MIN_LVL ? req : NULL;
         sb_appendf(&sb, "<div class='pItemPricing'><div id='sellPricFee'>No List Fee</div><input id='sellPriceIn' oninput='calcFee(this)' type='number' placeholder='List Price in KR' min='0' max='%d' step='1'></div><div id='cPostSaleBtn' class='pItemButton' style='display:none;background-color:#2b2b2b'>Not enough KR</div><div id='postSaleBtn' class='pItemButton' %s",
                    SALE_MAX, block ? "style='background-color:#2b2b2b'" : "");
         if (!block) sb_appendf(&sb, "onclick='listItem(%d,%s,%d)'", p->skin, p->skin_id, p->uid);
@@ -2967,7 +3046,9 @@ static void market_popup(const MarketPop *p) {
         sb_appendf(&sb, "<div class='pItemPricing'><div class='priceP'>%s <span style='color:#fff'>KR</span></div><div class='priceP'>-%s <span style='color:#fff'>KR</span></div><div class='pricePF' style='%s'>%s <span style='color:#fff'>KR</span></div></div>",
                    a, b, left < 0 ? "color:#ed4242" : "", c);
         sb_appendf(&sb, "<div class='pItemButton' style='%s' ", block ? "background-color:#2b2b2b" : left < 0 ? "background-color:#ed4242" : "");
-        if (!block && left >= 0) sb_appendf(&sb, "onclick='buyIllicit(%d)'onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'", p->skin);
+        char key[48];
+        econ_new_op(key, sizeof(key), "pbm"); // one purchase per popup, however often YES is clicked
+        if (!block && left >= 0) sb_appendf(&sb, "onclick='buyIllicit(%d, &quot;%s&quot;)'onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'", p->skin, key);
         sb_appendf(&sb, ">%s</div>", block ? block : left < 0 ? "Can't Afford" : "Purchase");
     } else if (!strcmp(p->page, "sales")) {
         comma_number(a, sizeof(a), atof(p->funds));
@@ -2975,7 +3056,7 @@ static void market_popup(const MarketPop *p) {
     }
     sb_append(&sb, "</div>");
     char *html = sb_finish(&sb);
-    set_html("popupContent", html);
+    sb_append(out, html);
     free(html);
 }
 
@@ -3166,8 +3247,11 @@ static void market_toggle_filters(const int sort) {
     for (int i = 0; i < n; i++) html_dom_set_checked(found[i], !html_dom_get_checked(found[i]));
 }
 
+static int hub_economy_frame(const char *label, const cJSON *frame);
+
 // The market / clan / activity reply frames (handle_reply_frame); 1 = handled
 static int hub_market_frame(const char *label, const cJSON *frame) {
+    if (hub_economy_frame(label, frame)) return 1;
     const cJSON *a1 = cJSON_GetArrayItem(frame, 1), *a2 = cJSON_GetArrayItem(frame, 2), *a3 = cJSON_GetArrayItem(frame, 3);
     if (!strcmp(label, "po")) { // io_po(kind, error, text): the brain's generic result popup
         const char *kind = cJSON_GetStringValue(a1);
@@ -3284,8 +3368,8 @@ static void io_0(const char *e, const char *a, const cJSON *t, const cJSON *extr
         set_display("itemsalesHolder", "block");
     } else if (!strcmp(e, "listing")) {
         side_boxes();
-        // a listing row needs the v7 skin table and the brain market: the none text
-        set_html("listingHolder", "<div style='font-size:20px;margin-top:20px;color:#fff'>" STR_MARKET_NONE "...</div>");
+        if (g_hub.brain && has_t) hub_render_listing(t); // kn_brain: the open listing ("listing" page)
+        else set_html("listingHolder", "<div style='font-size:20px;margin-top:20px;color:#fff'>" STR_MARKET_NONE "...</div>");
         set_display("listingHolder", "block");
     } else if (!strcmp(e, "clan")) {
         side_boxes();
@@ -3456,7 +3540,7 @@ static void io_a(const char *error) {
         comma_number(kr, sizeof(kr), acc->funds);
         StrBuf sb = {0};
         sb_append_esc(&sb, acc->name);
-        sb_appendf(&sb, "<div style='height:4px'></div><div id='profileKR'>%s<span style='color:#fff'> KR</span></div>", kr);
+        sb_appendf(&sb, "<div style='height:4px'></div><div id='profileKR' style='cursor:pointer' title='KR History' onclick='krHistory()'>%s<span style='color:#fff'> KR</span></div>", kr);
         char *html = sb_finish(&sb);
         set_html("profileName", html);
         free(html);
@@ -4001,20 +4085,45 @@ static void send_ints(const char *label, const int n, const double *v) {
     hub_send(f);
 }
 
-// buyItem(marketid, uid): io.send("pi", ...)
+// An economy action's idempotency key (doc/v7/economy.md): kn_brain runs an action once per
+// key, a resent frame (double click, a retry) replays the first result. Keys of actions that can
+// only happen once (buy listing N, accept / close offer N) are derived from the target; the
+// others are made when their confirmation popup opens and travel in its YES button.
+static void econ_new_op(char *out, const size_t n, const char *tag) {
+    static unsigned counter;
+    snprintf(out, n, "%s-%.0f-%u-%d", tag, now_epoch_ms(), ++counter, rand() % 100000);
+}
+
+// io.send(label, numbers..., {op: key})
+static void send_econ(const char *label, const int n, const double *v, const char *key) {
+    cJSON *f = cJSON_CreateArray();
+    cJSON_AddItemToArray(f, cJSON_CreateString(label));
+    for (int i = 0; i < n; i++) cJSON_AddItemToArray(f, cJSON_CreateNumber(v[i]));
+    cJSON *ext = cJSON_CreateObject();
+    cJSON_AddStringToObject(ext, "op", key);
+    cJSON_AddItemToArray(f, ext);
+    hub_send(f);
+}
+
+// buyItem(marketid, uid): io.send("pi", marketid, uid)
 H(h_buy_item) {
     UNUSED;
     const double v[2] = {arg_n(args, argc, 0, 0), arg_n(args, argc, 1, 0)};
-    send_ints("pi", 2, v);
+    char key[48];
+    snprintf(key, sizeof(key), "buy-%.0f", v[0]);
+    send_econ("pi", 2, v, key);
     io_wait("Buying Item...");
     return 1;
 }
 
-// buyIllicit(skin): io.send("pbm", skin) (kn_brain does not answer "pbm" yet)
+// buyIllicit(skin, key): io.send("pbm", skin) -> io_bmr
 H(h_buy_illicit) {
     UNUSED;
     const double v[1] = {arg_n(args, argc, 0, 0)};
-    send_ints("pbm", 1, v);
+    const char *key = arg_s(ev, args, argc, 1);
+    char fresh[48];
+    if (!key || !*key) econ_new_op(fresh, sizeof(fresh), "pbm");
+    send_econ("pbm", 1, v, key && *key ? key : fresh);
     io_wait("Buying Item...");
     return 1;
 }
@@ -4032,8 +4141,10 @@ H(h_list_item) {
     StrBuf sb = {0};
     sb_appendf(&sb, "<div style='color:#fff;font-size:20px;position:relative;margin-bottom:15px;'>Are you sure you want to list <span style='color:%s'>", rarity_color(pa));
     sb_append_esc(&sb, pa->name);
-    sb_appendf(&sb, "</span> for %dKR ?</div><div id='confirmBtn' onclick='listConfirmed(%d, %d,%d, %d)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>YES</div><div id='declineBtn' onclick='refreshPopup()' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>NO</div>",
-               atoi(price), skin, (int) arg_n(args, argc, 1, 0), (int) arg_n(args, argc, 2, 0), atoi(price));
+    char key[48];
+    econ_new_op(key, sizeof(key), "li");
+    sb_appendf(&sb, "</span> for %dKR ?</div><div id='confirmBtn' onclick='listConfirmed(%d, %d,%d, %d, &quot;%s&quot;)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>YES</div><div id='declineBtn' onclick='refreshPopup()' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>NO</div>",
+               atoi(price), skin, (int) arg_n(args, argc, 1, 0), (int) arg_n(args, argc, 2, 0), atoi(price), key);
     char *html = sb_finish(&sb);
     generic_popup(html, "confListPop", NULL); // confListPopup
     free(html);
@@ -4043,7 +4154,10 @@ H(h_list_item) {
 H(h_list_confirmed) {
     UNUSED;
     const double v[4] = {arg_n(args, argc, 0, 0), arg_n(args, argc, 1, 0), arg_n(args, argc, 2, 0), arg_n(args, argc, 3, 0)};
-    send_ints("li", 4, v);
+    const char *key = arg_s(ev, args, argc, 4);
+    char fresh[48];
+    if (!key || !*key) econ_new_op(fresh, sizeof(fresh), "li");
+    send_econ("li", 4, v, key && *key ? key : fresh);
     io_wait("Posting Item...");
     return 1;
 }
@@ -4052,7 +4166,9 @@ H(h_list_confirmed) {
 H(h_unlist_item) {
     UNUSED;
     const double v[3] = {arg_n(args, argc, 0, 0), arg_n(args, argc, 1, 0), arg_n(args, argc, 2, 0)};
-    send_ints("uli", 3, v);
+    char key[48];
+    snprintf(key, sizeof(key), "uli-%.0f", v[1]);
+    send_econ("uli", 3, v, key);
     io_wait("Unlisting Item...");
     return 1;
 }
@@ -4070,8 +4186,10 @@ H(h_quick_sell) {
     StrBuf sb = {0};
     sb_appendf(&sb, "<div style='color:#fff;font-size:19px;position:relative;margin-bottom:15px;'>Are you sure you want to Quick Sell <span style='color:%s'>", rarity_color(pa));
     sb_append_esc(&sb, pa->name);
-    sb_appendf(&sb, "</span>?</div><div class='quickSellText'>KR<div class='quickSellKR'><span style='color: #FBC02D'>%d</span> KR (each)</div></div><div class='quickSellText'>Amount<select id='quickSellSelect'><option value='0'>1 Item</option><option value='1'>All But 1</option><option value='2'>All</option></select></div><div id='confirmBtn' onclick='sellConfirmed(%d,%d)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>YES</div><div id='declineBtn' onclick='showPopup()' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>NO</div>",
-               pa->rarity >= 0 && pa->rarity < 7 ? k_rarity_sell[pa->rarity] : 1, skin, uid);
+    char key[48];
+    econ_new_op(key, sizeof(key), "qs");
+    sb_appendf(&sb, "</span>?</div><div class='quickSellText'>KR<div class='quickSellKR'><span style='color: #FBC02D'>%d</span> KR (each)</div></div><div class='quickSellText'>Amount<select id='quickSellSelect'><option value='0'>1 Item</option><option value='1'>All But 1</option><option value='2'>All</option></select></div><div id='confirmBtn' onclick='sellConfirmed(%d,%d,&quot;%s&quot;)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>YES</div><div id='declineBtn' onclick='showPopup()' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>NO</div>",
+               pa->rarity >= 0 && pa->rarity < 8 ? k_rarity_sell[pa->rarity] : 1, skin, uid, key);
     char *html = sb_finish(&sb);
     generic_popup(html, "confQSPop", NULL); // confQSPopup
     free(html);
@@ -4083,13 +4201,17 @@ H(h_sell_confirmed) {
     char amount[8] = "0";
     const HtmlElem sel = el("quickSellSelect");
     if (sel) html_dom_get_value(sel, amount, sizeof(amount));
-    const double v[3] = {arg_n(args, argc, 0, 0), arg_n(args, argc, 1, 0), atoi(amount)};
+    // v7.1.4 io.send("qsi", mode 0 = KR, skin, uid, amount)
+    const double v[4] = {0, arg_n(args, argc, 0, 0), arg_n(args, argc, 1, 0), atoi(amount)};
+    const char *key = arg_s(ev, args, argc, 2);
+    char fresh[48];
+    if (!key || !*key) econ_new_op(fresh, sizeof(fresh), "qs");
     io_wait("Please Wait...");
-    send_ints("qsi", 3, v);
+    send_econ("qsi", 4, v, key && *key ? key : fresh);
     return 1;
 }
 
-// calcFee(input): the 5 % list fee line (config.marketFeeBypass 0)
+// calcFee(input): the list fee line, floor(price * marketFee) unless price <= marketFeeBypass
 H(h_calc_fee) {
     (void) user; (void) args; (void) argc;
     const HtmlElem in = ev ? ev->target : 0;
@@ -4099,7 +4221,7 @@ H(h_calc_fee) {
     double a = atof(text);
     if (a < 0) a = 0;
     if (a > SALE_MAX) a = SALE_MAX;
-    const double fee = floor(a * 0.05);
+    const double fee = a <= g_econ.market_fee_bypass ? 0 : floor(a * g_econ.market_fee / 100.0);
     StrBuf sb = {0};
     if (fee > 0) {
         char n[32];
@@ -4148,18 +4270,857 @@ H(h_update_trades) {
 H(h_decline_offer) {
     UNUSED;
     if (!strcmp(html_ui_current_handler(), "declineAllTrades")) {
-        cJSON *f = cJSON_CreateArray();
-        cJSON_AddItemToArray(f, cJSON_CreateString("trCA"));
-        hub_send(f);
+        char key[48];
+        econ_new_op(key, sizeof(key), "trca");
+        send_econ("trCA", 0, NULL, key);
         set_html("o_in", "<div style='margin-bottom:10px;margin-top:-4px;'>Incoming Offers (<span>0</span>)</div><div style='color: rgba(0,0,0,0.6);font-size: 17px;'>None</div>");
         return 0;
     }
-    const double v[1] = {arg_n(args, argc, 0, 0)};
-    send_ints("trC", 1, v);
+    html_ui_stop_propagation(); // f486(window.event): not the row's viewOffer
+    const double v[2] = {arg_n(args, argc, 0, 0), 1}; // trC(id, 1): the fast decline
+    char key[48];
+    snprintf(key, sizeof(key), "trc-%.0f", v[0]);
+    send_econ("trC", 2, v, key);
     char id[32];
     snprintf(id, sizeof(id), "of_%d", (int) v[0]);
     if (el(id)) html_dom_remove(el(id));
     return 0;
+}
+
+// ---- economy: KR gifts, the trade window, offers, KR history (social.js giftPopup / calcGiftFee /
+// giftUser, tradePopup / io_trD / addItem / removeItem / searchItems / showMissingItems /
+// confSubmitOffer / submitOffer / io_trR, viewOffer / confOffer / offerConfirmed / declOffer;
+// KrunkNative: KR in offers, "krh"). doc/v7/economy.md
+
+static char g_gift_op[48]; // the open gift popup's key (a new one after each sent gift)
+
+// calcGiftFee: ceil(amount * giftFee), on top of the amount. Integer maths: v7's float version
+// (Math.ceil(10 * 1.1) = 12) disagrees with what the server charges by 1 KR at some amounts.
+static double gift_fee_of(const double amount) {
+    const long long a = (long long) amount, pct = (long long) g_econ.gift_fee;
+    return (double) ((a * pct + 99) / 100);
+}
+
+// giftPopup(auto): #giftPop for the profile on screen
+H(h_gift_popup) {
+    UNUSED;
+    reset_pops();
+    const HtmlElem pop = el("giftPop");
+    if (!pop) return 1;
+    html_dom_set_display(pop, "block");
+    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    char req[48] = "";
+    if (!acc) snprintf(req, sizeof(req), "Login to Gift"); // social.login.gift
+    else if (acc->level < (int) g_econ.gift_min_lvl) snprintf(req, sizeof(req), "lvl %d required", (int) g_econ.gift_min_lvl);
+    econ_new_op(g_gift_op, sizeof(g_gift_op), "kr");
+    StrBuf sb = {0};
+    sb_appendf(&sb, "<div class='popHeader'>Gift KR</div><div id='giftKRBody'><div id='giftAmntFee'>Fee: None</div><input id='giftIn' oninput='calcGiftFee(this)' type='number' placeholder='Gift Amount in KR' min='0' max='%.0f' step='1'><textarea id='giftMsg' rows='5' placeholder='Leave a message'></textarea>", g_econ.gift_max);
+    sb_append(&sb, "<div id='cPostSaleBtn' class='pGiftButton' style='display:none;background-color:#2b2b2b'>Not enough KR</div>");
+    sb_appendf(&sb, "<div id='postSaleBtn' class='pGiftButton' %s%sonmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>%s</div></div>",
+               req[0] ? "style='background-color:#2b2b2b'" : "", req[0] ? "" : "onclick='giftUser()'", req[0] ? req : "Gift KR");
+    char *html = sb_finish(&sb);
+    html_dom_set_html(pop, html);
+    free(html);
+    return 1;
+}
+
+H(h_calc_gift_fee) {
+    (void) user; (void) args; (void) argc;
+    const HtmlElem in = ev ? ev->target : el("giftIn");
+    if (!in) return 1;
+    char text[32] = "";
+    html_dom_get_value(in, text, sizeof(text));
+    double a = floor(atof(text));
+    if (a < 0) a = 0;
+    if (a > g_econ.gift_max) a = g_econ.gift_max;
+    if (a && a != atof(text)) {
+        js_num(text, sizeof(text), a);
+        html_dom_set_value(in, text);
+    }
+    const double fee = gift_fee_of(a);
+    if (fee > 0) {
+        char n[32], html[160];
+        comma_number(n, sizeof(n), fee);
+        snprintf(html, sizeof(html), "Fee: <span style='color:var(--red);'>%s KR</span>", n);
+        set_html("giftAmntFee", html);
+    } else {
+        set_html("giftAmntFee", "Fee: None");
+    }
+    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    if (acc && el("postSaleBtn") && el("cPostSaleBtn")) {
+        const int afford = a + fee <= acc->funds, small = a < g_econ.gift_min;
+        set_display("postSaleBtn", afford && !small ? "block" : "none");
+        set_display("cPostSaleBtn", afford && !small ? "none" : "block");
+        char t[48];
+        snprintf(t, sizeof(t), small ? "%.0f KR minimum" : "Not enough KR", g_econ.gift_min);
+        set_html("cPostSaleBtn", t);
+    }
+    return 1;
+}
+
+// giftUser(): io.send("kr", name, amount, message)
+H(h_gift_user) {
+    UNUSED;
+    char amount[32] = "", msg[512] = "";
+    if (el("giftIn")) html_dom_get_value(el("giftIn"), amount, sizeof(amount));
+    if (el("giftMsg")) html_dom_get_value(el("giftMsg"), msg, sizeof(msg));
+    if (!amount[0] || !strcmp(amount, "0") || !g_hub.profile_name[0]) return 1;
+    if (!g_gift_op[0]) econ_new_op(g_gift_op, sizeof(g_gift_op), "kr");
+    cJSON *f = cJSON_CreateArray();
+    cJSON_AddItemToArray(f, cJSON_CreateString("kr"));
+    cJSON_AddItemToArray(f, cJSON_CreateString(g_hub.profile_name));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(floor(atof(amount))));
+    cJSON_AddItemToArray(f, cJSON_CreateString(msg));
+    cJSON *ext = cJSON_CreateObject();
+    cJSON_AddStringToObject(ext, "op", g_gift_op);
+    cJSON_AddItemToArray(f, ext);
+    hub_send(f);
+    io_wait("Please wait..."); // generic.wait
+    return 1;
+}
+
+// io_gir(result): funds, the success popup, the page again (f557)
+static void io_gir(const cJSON *r) {
+    if (!cJSON_IsObject(r)) {
+        io_po(0, NULL);
+        return;
+    }
+    if (cJSON_GetObjectItemCaseSensitive(r, "funds")) hub_set_funds(jnum(r, "funds"));
+    g_gift_op[0] = 0; // the next gift is a new action
+    io_po(1, NULL);
+    send_page_request();
+}
+
+// ---- the trade window (tradePopup -> "ri" -> io_trD)
+
+typedef struct {
+    int i, c, nt; // skin, count, not tradable (kn_brain's nt)
+} TradeItem;
+#define TRADE_SEL_MAX 64
+
+static struct {
+    int target_id;
+    char target[64];
+    TradeItem *inv[2];    // vA169: [mine, theirs]
+    int ninv[2];
+    TradeItem sel[2][TRADE_SEL_MAX]; // vA170: the trade lists
+    int nsel[2];
+    int fee;              // vLN0611
+    int missing;          // v3758
+    double kr[2];         // KrunkNative: KR each side puts in
+    char msg[512];        // v3782
+} g_trade;
+
+static int trade_max_items(void) {
+    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    return (int) (acc && acc->premium > 0 ? g_econ.trade_max_out_p : g_econ.trade_max_out);
+}
+
+static int cmp_trade_items(const void *pa, const void *pb) {
+    const TradeItem *e = pa, *a = pb; // UTILS.sortItems
+    const ViewerSkin *se = hub_skin(e->i), *sa = hub_skin(a->i);
+    const int t = sa ? sa->rarity : 0, n = se ? se->rarity : 0;
+    const int i = sa ? (sa->seas ? sa->seas : 1) : 0, r = se ? (se->seas ? se->seas : 1) : 0;
+    if (t > n) return 1;
+    if (t < n) return -1;
+    if (i > r) return 1;
+    if (i < r) return -1;
+    return a->i - e->i;
+}
+
+static TradeItem *trade_sel_find(const int side, const int skin) {
+    for (int k = 0; k < g_trade.nsel[side]; k++)
+        if (g_trade.sel[side][k].i == skin) return &g_trade.sel[side][k];
+    return NULL;
+}
+
+static const TradeItem *trade_inv_find(const int side, const int skin) {
+    for (int k = 0; k < g_trade.ninv[side]; k++)
+        if (g_trade.inv[side][k].i == skin) return &g_trade.inv[side][k];
+    return NULL;
+}
+
+static int trade_side_total(const int side) {
+    int t = 0;
+    for (int k = 0; k < g_trade.nsel[side]; k++) t += g_trade.sel[side][k].c;
+    return t;
+}
+
+// f531: store.calcTradeFee of every item on both lists; premium pays none
+static void trade_update_fee(void) {
+    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    int fee = 0;
+    for (int side = 0; side < 2; side++) {
+        for (int k = 0; k < g_trade.nsel[side]; k++) {
+            const ViewerSkin *pa = hub_skin(g_trade.sel[side][k].i);
+            if (pa && pa->rarity >= 0 && pa->rarity < 8) fee += k_rarity_trade_fee[pa->rarity] * g_trade.sel[side][k].c;
+        }
+    }
+    g_trade.fee = acc && acc->premium > 0 ? 0 : fee;
+    // KrunkNative: KR you add to an offer pays the gift fee (rounded up), premium or not
+    if (g_trade.kr[0] > 0) g_trade.fee += (int) gift_fee_of(g_trade.kr[0]);
+    char t[64];
+    if (g_trade.fee) snprintf(t, sizeof(t), "Submit Offer - %d KR", g_trade.fee);
+    else snprintf(t, sizeof(t), "Submit Offer");
+    set_html("trdSubBt", t);
+}
+
+static void trade_item_html(StrBuf *sb, const int side, const TradeItem *it, const int in_list) {
+    const ViewerSkin *pa = hub_skin(it->i);
+    if (!pa) return;
+    char prev[256];
+    skin_preview(prev, sizeof(prev), pa);
+    if (in_list) sb_appendf(sb, "<div id='trd_%d_%d' class='tItemHolder%s' onclick='removeItem(%d,%d)' data-index='%d' style='border: 2px solid %s;'>",
+                            side, it->i, g_hub.rarity_anim && rarity_animate(pa) ? " rainbowBorder" : "", it->i, side, it->i, rarity_color(pa));
+    else sb_appendf(sb, "<div id='trd_inv_%d_%d' class='tItemHolder%s' onclick='addItem(%d, %d)' data-index='%d' style='border: 2px solid %s;'>",
+                    side, it->i, g_hub.rarity_anim && rarity_animate(pa) ? " rainbowBorder" : "", it->i, side, it->i, rarity_color(pa));
+    append_skin_img(sb, pa, prev, "tItemSprayImg", "tItemImg");
+    sb_append(sb, "<div class='tItemN'>");
+    sb_append_esc(sb, pa->name);
+    sb_appendf(sb, "</div><div class='tItemCnt' id='%s_%d_%d'>x%d</div>", in_list ? "trd_cnt" : "trd_inv_cnt", side, it->i, it->c);
+    if (!in_list && it->nt) sb_append(sb, "<div class='tItemBound'><span class='material-icons' style='font-size:30px;color:#fff;'>lock</span></div>");
+    sb_append(sb, "</div>");
+}
+
+// io_trD(name, id, [mine, theirs])
+static void io_trd(const char *name, const int id, const cJSON *invs) {
+    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    if (!acc) return;
+    if (name && !strcmp(name, acc->name)) {
+        io_po(0, "Cant trade with yourself");
+        return;
+    }
+    for (int side = 0; side < 2; side++) {
+        free(g_trade.inv[side]);
+        g_trade.inv[side] = NULL;
+        g_trade.ninv[side] = 0;
+        g_trade.nsel[side] = 0;
+        g_trade.kr[side] = 0;
+        const cJSON *list = cJSON_GetArrayItem(invs, side);
+        const int n = cJSON_GetArraySize(list);
+        g_trade.inv[side] = n ? calloc((size_t) n, sizeof(TradeItem)) : NULL;
+        const cJSON *r;
+        cJSON_ArrayForEach(r, list) {
+            if (!g_trade.inv[side]) break;
+            TradeItem *t = &g_trade.inv[side][g_trade.ninv[side]];
+            t->i = (int) jnum(r, "i");
+            t->c = (int) jnum(r, "c");
+            t->nt = jnum(r, "nt") != 0;
+            if (t->c > 0 && hub_skin(t->i)) g_trade.ninv[side]++;
+        }
+        if (g_trade.ninv[side]) qsort(g_trade.inv[side], (size_t) g_trade.ninv[side], sizeof(TradeItem), cmp_trade_items);
+    }
+    g_trade.target_id = id;
+    snprintf(g_trade.target, sizeof(g_trade.target), "%s", name ? name : "");
+    g_trade.fee = 0;
+    g_trade.missing = 0;
+    g_trade.msg[0] = 0;
+    const int mx = trade_max_items();
+    StrBuf sb = {0};
+    for (int side = 0; side < 2; side++) {
+        sb_appendf(&sb, "<div class='%s'><div class='tListN inv'>", side ? "tHolderR" : "tHolderL");
+        if (side) {
+            sb_append_esc(&sb, g_trade.target);
+            sb_append(&sb, "'s Inventory");
+        } else {
+            sb_append(&sb, "Your Inventory");
+        }
+        sb_appendf(&sb, "</div><div id='invList%d' class='tList' style='height: 225px;'>", side);
+        for (int k = 0; k < g_trade.ninv[side]; k++) {
+            if (g_trade.inv[side][k].nt && g_hub.hide_non_trade) continue; // hideNonTrade
+            trade_item_html(&sb, side, &g_trade.inv[side][k], 0);
+        }
+        sb_appendf(&sb, "</div><input class='tSearch' type='text' placeholder='Search Item' onkeyup='searchItems(this, %d)'>", side);
+        sb_appendf(&sb, "<div class='tListN trade' id='tradeTotal%d'>Trade List 0/%d</div><div id='tradeList%d' class='tList' style='height:120px'></div>", side, mx, side);
+        sb_appendf(&sb, "<div class='estOfferVal' id='offerVal%d'>Est. Value <span style='color:#fff'>0</span> KR</div>", side);
+        // KrunkNative: KR in the offer (kn_brain escrows the sender's, takes the receiver's on accept)
+        if (g_econ.trade_kr_max > 0)
+            sb_appendf(&sb, "<input class='tSearch' id='tradeKR%d' type='number' min='0' max='%.0f' step='1' placeholder='%s' oninput='tradeKR(this, %d)'>",
+                       side, g_econ.trade_kr_max, side ? "KR you ask for" : "KR you add", side);
+        sb_append(&sb, "</div>");
+    }
+    // clear the two floated holders (a browser wraps the 829px textarea below them anyway; the
+    // native engine needs the clearance to put it there)
+    sb_append(&sb, "<div style='clear:both'></div><textarea id='tMsg' placeholder='Add a message to the offer'></textarea>");
+    sb_appendf(&sb, "<div class='tSubOffer' id='trdSubBt' onclick='confSubmitOffer(%d)'>Submit Offer</div>", id);
+    sb_append(&sb, "<div class='material-icons tradeSwap' title='Toggle Missing Items' onclick='showMissingItems(this)'>rule</div>");
+    char *html = sb_finish(&sb);
+    generic_popup(html, "tradePop", NULL);
+    free(html);
+}
+
+// tradePopup(): io.send("ri", name, id)
+H(h_trade_popup) {
+    UNUSED;
+    const AccountInfo *acc = g_hub.logged_in ? account_get() : NULL;
+    if (!acc) {
+        io_po(0, "Must be logged in"); // account.login.required
+    } else if (g_hub.profile_id == acc->id) {
+        io_po(0, "Cant trade with yourself");
+    } else if (acc->level < TRADE_MIN_LVL) {
+        char t[32];
+        snprintf(t, sizeof(t), "Must be level %d", TRADE_MIN_LVL);
+        io_po(0, t);
+    } else {
+        io_wait("Fetching Inventories");
+        cJSON *f = cJSON_CreateArray();
+        cJSON_AddItemToArray(f, cJSON_CreateString("ri"));
+        cJSON_AddItemToArray(f, cJSON_CreateString(g_hub.profile_name));
+        cJSON_AddItemToArray(f, cJSON_CreateNumber(g_hub.profile_id));
+        hub_send(f);
+    }
+    return 1;
+}
+
+// The counts, totals and value after a change of side's list.
+static void trade_refresh_side(const int side, const int skin) {
+    const TradeItem *have = trade_inv_find(side, skin);
+    const TradeItem *sel = trade_sel_find(side, skin);
+    char id[48], t[64];
+    snprintf(id, sizeof(id), "trd_inv_cnt_%d_%d", side, skin);
+    snprintf(t, sizeof(t), "x%d", have ? have->c - (sel ? sel->c : 0) : 0);
+    if (el(id)) html_dom_set_text(el(id), t);
+    snprintf(id, sizeof(id), "tradeTotal%d", side);
+    snprintf(t, sizeof(t), "Trade List %d/%d", trade_side_total(side), trade_max_items());
+    set_html(id, t);
+    long long value = 0;
+    for (int k = 0; k < g_trade.nsel[side]; k++) value += (long long) estimate_value(g_trade.sel[side][k].i) * g_trade.sel[side][k].c;
+    char v[32], html[96];
+    comma_number(v, sizeof(v), (double) value);
+    snprintf(html, sizeof(html), "Est. Value <span style='color:#fff'>%s</span> KR", v);
+    snprintf(id, sizeof(id), "offerVal%d", side);
+    set_html(id, html);
+    trade_update_fee();
+}
+
+// addItem(skin, side)
+H(h_add_item) {
+    UNUSED;
+    const int skin = (int) arg_n(args, argc, 0, -1), side = (int) arg_n(args, argc, 1, 0) ? 1 : 0;
+    const TradeItem *have = trade_inv_find(side, skin);
+    TradeItem *sel = trade_sel_find(side, skin);
+    if (!have || have->nt || (sel ? sel->c : 0) + 1 > have->c) return 1; // hasEnough, tradable
+    if (trade_side_total(side) >= trade_max_items()) return 1;
+    char id[48];
+    if (sel) {
+        sel->c++;
+        snprintf(id, sizeof(id), "trd_cnt_%d_%d", side, skin);
+        char t[16];
+        snprintf(t, sizeof(t), "x%d", sel->c);
+        if (el(id)) html_dom_set_html(el(id), t);
+    } else {
+        if (g_trade.nsel[side] >= TRADE_SEL_MAX) return 1;
+        sel = &g_trade.sel[side][g_trade.nsel[side]++];
+        sel->i = skin;
+        sel->c = 1;
+        sel->nt = 0;
+        StrBuf sb = {0};
+        trade_item_html(&sb, side, sel, 1);
+        char *html = sb_finish(&sb);
+        snprintf(id, sizeof(id), "tradeList%d", side);
+        if (el(id)) html_dom_insert_html(el(id), HTML_INSERT_BEFORE_END, html);
+        free(html);
+    }
+    trade_refresh_side(side, skin);
+    return 1;
+}
+
+// removeItem(skin, side)
+H(h_remove_item) {
+    UNUSED;
+    const int skin = (int) arg_n(args, argc, 0, -1), side = (int) arg_n(args, argc, 1, 0) ? 1 : 0;
+    TradeItem *sel = trade_sel_find(side, skin);
+    if (!sel) return 1;
+    char id[48];
+    if (--sel->c <= 0) {
+        const int k = (int) (sel - g_trade.sel[side]);
+        memmove(&g_trade.sel[side][k], &g_trade.sel[side][k + 1], (size_t) (g_trade.nsel[side] - k - 1) * sizeof(TradeItem));
+        g_trade.nsel[side]--;
+        snprintf(id, sizeof(id), "trd_%d_%d", side, skin);
+        if (el(id)) html_dom_remove(el(id));
+    } else {
+        snprintf(id, sizeof(id), "trd_cnt_%d_%d", side, skin);
+        char t[16];
+        snprintf(t, sizeof(t), "x%d", sel->c);
+        if (el(id)) html_dom_set_html(el(id), t);
+    }
+    trade_refresh_side(side, skin);
+    return 1;
+}
+
+// searchItems(input, side): name / weapon / "drops" / limT
+H(h_search_items) {
+    (void) user;
+    const int side = (int) arg_n(args, argc, 1, 0) ? 1 : 0;
+    const HtmlElem in = ev ? ev->target : 0;
+    char text[128] = "";
+    if (in) html_dom_get_value(in, text, sizeof(text));
+    for (int k = 0; k < g_trade.ninv[side]; k++) {
+        const ViewerSkin *sk = hub_skin(g_trade.inv[side][k].i);
+        int hit = !text[0];
+        if (!hit && sk) {
+            hit = contains_ci_str(sk->name, text) ||
+                  (sk->weapon >= 1 && sk->weapon <= WEAPON_COUNT && rules_weapon(sk->weapon - 1) && contains_ci_str(rules_weapon(sk->weapon - 1)->name, text));
+        }
+        char id[48];
+        snprintf(id, sizeof(id), "trd_inv_%d_%d", side, g_trade.inv[side][k].i);
+        if (el(id)) html_dom_set_display(el(id), hit ? "inline-block" : "none");
+    }
+    return 1;
+}
+
+// showMissingItems(btn): hide what both sides own
+H(h_show_missing) {
+    (void) user; (void) args; (void) argc;
+    g_trade.missing = !g_trade.missing;
+    if (ev && ev->target) html_dom_set_style(ev->target, "color", g_trade.missing ? "#eb5656" : "#fff");
+    for (int side = 0; side < 2; side++) {
+        for (int k = 0; k < g_trade.ninv[side]; k++) {
+            const int skin = g_trade.inv[side][k].i;
+            char id[48];
+            snprintf(id, sizeof(id), "trd_inv_%d_%d", side, skin);
+            if (!el(id)) continue;
+            const int both = trade_inv_find(!side, skin) != NULL;
+            html_dom_set_display(el(id), g_trade.missing && both ? "none" : "inline-block");
+        }
+    }
+    return 1;
+}
+
+// tradeKR(input, side) (KrunkNative)
+H(h_trade_kr) {
+    (void) user;
+    const int side = (int) arg_n(args, argc, 1, 0) ? 1 : 0;
+    const HtmlElem in = ev ? ev->target : 0;
+    char text[32] = "";
+    if (in) html_dom_get_value(in, text, sizeof(text));
+    double v = floor(atof(text));
+    if (v < 0) v = 0;
+    if (v > g_econ.trade_kr_max) v = g_econ.trade_kr_max;
+    g_trade.kr[side] = v;
+    trade_update_fee();
+    return 1;
+}
+
+// confSubmitOffer(id)
+H(h_conf_submit_offer) {
+    UNUSED;
+    if (!g_hub.logged_in) {
+        io_po(0, "Must be logged in");
+        return 1;
+    }
+    if (el("tMsg")) html_dom_get_value(el("tMsg"), g_trade.msg, sizeof(g_trade.msg));
+    const int id = (int) arg_n(args, argc, 0, 0);
+    char key[48];
+    econ_new_op(key, sizeof(key), "ctr");
+    StrBuf sb = {0};
+    if (!g_trade.nsel[1] && !g_trade.kr[1])
+        sb_append(&sb, "<div style='color:#fff;font-size:18px;position:relative;margin-bottom:5px;color:#FBC02D'>You get no items from this offer!</div>");
+    if (g_trade.kr[0] || g_trade.kr[1]) {
+        char a[32], b[32];
+        comma_number(a, sizeof(a), g_trade.kr[0]);
+        comma_number(b, sizeof(b), g_trade.kr[1]);
+        sb_appendf(&sb, "<div style='color:#fff;font-size:17px;position:relative;margin-bottom:8px;'>You give <span style='color:#FBC02D'>%s KR</span>, you get <span style='color:#FBC02D'>%s KR</span></div>", a, b);
+    }
+    sb_appendf(&sb, "<div style='color:#fff;font-size:19px;position:relative;margin-bottom:15px;'>Are you sure you want to submit this offer? (Cost %dKR)</div><div id='confirmBtn' onclick='submitOffer(%d, &quot;%s&quot;)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>YES</div><div id='declineBtn' onclick='showPopup()' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>NO</div>",
+               g_trade.fee, id, key);
+    char *html = sb_finish(&sb);
+    generic_popup(html, "confSubmitPop", NULL);
+    free(html);
+    return 1;
+}
+
+static cJSON *trade_list_json(const int side) {
+    cJSON *a = cJSON_CreateArray();
+    for (int k = 0; k < g_trade.nsel[side]; k++) {
+        cJSON *o = cJSON_CreateObject();
+        cJSON_AddNumberToObject(o, "i", g_trade.sel[side][k].i);
+        cJSON_AddNumberToObject(o, "c", g_trade.sel[side][k].c);
+        cJSON_AddItemToArray(a, o);
+    }
+    return a;
+}
+
+// submitOffer(id, key): io.send("ctr", id, mine, theirs, message, {op, skr, rkr})
+H(h_submit_offer) {
+    UNUSED;
+    if (!g_hub.logged_in) {
+        io_po(0, "Must be logged in");
+        return 1;
+    }
+    const int mx = trade_max_items();
+    if (!g_trade.nsel[0] && !g_trade.nsel[1] && !g_trade.kr[0] && !g_trade.kr[1]) {
+        io_po(0, "No Items Selected");
+        return 1;
+    }
+    if (g_trade.nsel[0] > mx || g_trade.nsel[1] > mx) {
+        char t[48];
+        snprintf(t, sizeof(t), "%d items per user", mx);
+        io_po(0, t);
+        return 1;
+    }
+    const char *key = arg_s(ev, args, argc, 1);
+    char fresh[48];
+    if (!key || !*key) econ_new_op(fresh, sizeof(fresh), "ctr");
+    io_wait("Submitting Offer..."); // social.trading.submitting
+    cJSON *f = cJSON_CreateArray();
+    cJSON_AddItemToArray(f, cJSON_CreateString("ctr"));
+    cJSON_AddItemToArray(f, cJSON_CreateNumber(arg_n(args, argc, 0, 0)));
+    cJSON_AddItemToArray(f, trade_list_json(0));
+    cJSON_AddItemToArray(f, trade_list_json(1));
+    cJSON_AddItemToArray(f, cJSON_CreateString(g_trade.msg));
+    cJSON *ext = cJSON_CreateObject();
+    cJSON_AddStringToObject(ext, "op", key && *key ? key : fresh);
+    if (g_trade.kr[0] > 0) cJSON_AddNumberToObject(ext, "skr", g_trade.kr[0]);
+    if (g_trade.kr[1] > 0) cJSON_AddNumberToObject(ext, "rkr", g_trade.kr[1]);
+    cJSON_AddItemToArray(f, ext);
+    hub_send(f);
+    return 1;
+}
+
+// io_trR(result, tradeId, msg)
+static void io_trr(const cJSON *res, const cJSON *tid, const char *msg) {
+    if (!cJSON_IsObject(res)) {
+        io_po(0, NULL);
+        return;
+    }
+    if (cJSON_GetObjectItemCaseSensitive(res, "funds")) hub_set_funds(jnum(res, "funds"));
+    if (cJSON_IsNumber(tid)) { // f533: drop the offer card
+        char id[32];
+        snprintf(id, sizeof(id), "of_%d", tid->valueint);
+        if (el(id)) html_dom_remove(el(id));
+    }
+    io_po(1, msg);
+}
+
+// ---- offers (the Trades tab rows; viewOffer / confOffer / offerConfirmed / declOffer)
+
+
+static void offers_clear(void) {
+    for (int i = 0; i < g_offer_count; i++) free(g_offers[i].message);
+    free(g_offers);
+    g_offers = NULL;
+    g_offer_count = 0;
+}
+
+static const HubOffer *offer_find(const int trid) {
+    for (int i = 0; i < g_offer_count; i++)
+        if (g_offers[i].trid == trid) return &g_offers[i];
+    return NULL;
+}
+
+static int cmp_offer_ids(const void *pa, const void *pb) {
+    const TradeItem a = {*(const int *) pa, 1, 0}, b = {*(const int *) pb, 1, 0};
+    return cmp_trade_items(&a, &b);
+}
+
+static void offer_side_html(StrBuf *sb, const int *ids, const int n, const int pad_to, const double kr) {
+    long long value = 0;
+    sb_append(sb, "<div class='tList' style='height:unset;overflow-y: auto;text-align: center;'>");
+    for (int k = 0; k < n; k++) {
+        const ViewerSkin *pa = hub_skin(ids[k]);
+        if (!pa) continue;
+        char prev[256];
+        skin_preview(prev, sizeof(prev), pa);
+        sb_appendf(sb, "<div class='tItemHolder%s' style='border: 2px solid %s;' onclick='openSales(%d)' data-index='%d'>",
+                   g_hub.rarity_anim && rarity_animate(pa) ? " rainbowBorder" : "", rarity_color(pa), ids[k], ids[k]);
+        append_skin_img(sb, pa, prev, "tItemSprayImg", "tItemImg");
+        sb_append(sb, "<div class='tItemN' style='text-align: left;'>");
+        sb_append_esc(sb, pa->name);
+        sb_append(sb, "</div></div>");
+        value += estimate_value(ids[k]);
+    }
+    for (int k = 0; k < pad_to - n; k++)
+        sb_append(sb, "<div class='tItemHolder' style='border: 2px solid rgba(0,0,0,0);pointer-events: none;'><div draggable='false' class='tItemImg'></div></div>");
+    char v[32];
+    comma_number(v, sizeof(v), (double) value);
+    sb_appendf(sb, "</div><div class='estOfferVal'>Est. Value <span style='color:#fff'>%s</span> KR</div>", v);
+    if (kr > 0) {
+        comma_number(v, sizeof(v), kr);
+        sb_appendf(sb, "<div class='estOfferVal'>+ <span style='color:#FBC02D'>%s</span> KR</div>", v);
+    }
+}
+
+// viewOffer(trid, we)
+H(h_view_offer) {
+    UNUSED;
+    if (!g_hub.logged_in) {
+        io_po(0, "Must be logged in");
+        return 1;
+    }
+    const HubOffer *o = offer_find((int) arg_n(args, argc, 0, -1));
+    if (!o) return 1;
+    int give[64], take[64];
+    memcpy(give, o->give, sizeof(give));
+    memcpy(take, o->take, sizeof(take));
+    qsort(give, (size_t) o->ngive, sizeof(int), cmp_offer_ids);
+    qsort(take, (size_t) o->ntake, sizeof(int), cmp_offer_ids);
+    const int most = o->ngive > o->ntake ? o->ngive : o->ntake, pad = (most + 4) / 5 * 5;
+    StrBuf sb = {0};
+    sb_appendf(&sb, "<div style='display: block;height:unset'><div class='tHolderL'><div class='tListN inv'>Your Items [%d]</div>", o->ngive);
+    offer_side_html(&sb, give, o->ngive, pad, o->kr_give);
+    sb_append(&sb, "</div><div class='tHolderR'><div class='tListN inv'>");
+    sb_append_esc(&sb, o->name);
+    sb_appendf(&sb, "'s Items [%d]</div>", o->ntake);
+    offer_side_html(&sb, take, o->ntake, pad, o->kr_take);
+    sb_append(&sb, "</div><div style='clear:both'></div></div>");
+    if (o->message && o->message[0]) {
+        if (g_hub.show_trade_msg) {
+            sb_append(&sb, "<textarea id='tMsg' style='cursor: none;' readonly>");
+            sb_append(&sb, o->message); // html-escaped by kn_brain
+            sb_append(&sb, "</textarea>");
+        } else {
+            sb_append(&sb, "<div style='color: #eb5656;background-color:#ffffff;text-align:center;'>ENABLE TRADE MESSAGES IN SETTINGS</div>");
+        }
+    }
+    if (o->we == 0) {
+        sb_appendf(&sb, "<div class='tOfferBtn accept' onclick='confOffer(%d, %s)'>Accept Offer</div>", o->trid, o->ntake || o->kr_take > 0 ? "false" : "true");
+        sb_appendf(&sb, "<div class='tOfferBtn decline' onclick='declOffer(%d)'>Decline Offer</div>", o->trid);
+    } else if (o->we == 1) {
+        sb_appendf(&sb, "<div class='tOfferBtn remove' onclick='declOffer(%d)'>Remove Offer</div>", o->trid);
+    }
+    char *html = sb_finish(&sb);
+    generic_popup(html, "offerPop", NULL);
+    free(html);
+    return 1;
+}
+
+// confOffer(trid, nothingForMe)
+H(h_conf_offer) {
+    UNUSED;
+    if (!g_hub.logged_in) {
+        io_po(0, "Must be logged in");
+        return 1;
+    }
+    const int trid = (int) arg_n(args, argc, 0, 0);
+    const int empty = argc > 1 && (args[1].kind == HTML_ARG_BOOL ? args[1].num != 0 : arg_n(args, argc, 1, 0) != 0);
+    StrBuf sb = {0};
+    if (empty) sb_append(&sb, "<div style='color:#fff;font-size:18px;position:relative;margin-bottom:5px;color:#FBC02D'>You get no items from this trade!</div>");
+    sb_appendf(&sb, "<div style='color:#fff;font-size:20px;position:relative;margin-bottom:15px;'>Are you sure you want to accept this offer?</div><div id='confirmBtn' onclick='offerConfirmed(%d)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>YES</div><div id='declineBtn' onclick='viewOffer(%d, 0)' onmouseover='SOUND.play(&quot;tick_0&quot;,0.1)'>NO</div>",
+               trid, trid);
+    char *html = sb_finish(&sb);
+    generic_popup(html, "confOfferPop", NULL);
+    free(html);
+    return 1;
+}
+
+// offerConfirmed(trid): io.send("trA", trid) / declOffer(trid): io.send("trC", trid)
+H(h_offer_action) {
+    UNUSED;
+    if (!g_hub.logged_in) {
+        io_po(0, "Must be logged in");
+        return 1;
+    }
+    const int accept = !strcmp(html_ui_current_handler(), "offerConfirmed");
+    const double v[1] = {arg_n(args, argc, 0, 0)};
+    char key[48];
+    snprintf(key, sizeof(key), "%s-%.0f", accept ? "acc" : "trc", v[0]);
+    io_wait("Please wait...");
+    send_econ(accept ? "trA" : "trC", 1, v, key);
+    return 1;
+}
+
+// ---- KR history (KrunkNative "krh": the account's KR ledger)
+
+static const char *kr_source_label(const char *src) {
+    static const char *const map[][2] = {
+        {"gift-out", "Gift sent"}, {"gift-in", "Gift received"}, {"market-buy", "Market purchase"},
+        {"market-sale", "Market sale"}, {"market-fee", "Listing fee"}, {"quicksell", "Quick sell"},
+        {"trade-fee", "Trade fee"}, {"trade-escrow", "Trade offer (held)"}, {"trade-return", "Trade offer returned"},
+        {"trade-in", "Trade"}, {"trade-out", "Trade"}, {"reward", "Match reward"}, {"challenge", "Challenge"},
+        {"spin", "Spin"}, {"turf", "Turf Wars"}, {"starting", "Starting KR"}, {"admin", "Adjustment"},
+        {"mail", "Mail"}, {"clan-deposit", "Clan deposit"}, {"clan-withdraw", "Clan withdrawal"},
+        {"battlepass", "Battle Pass"}, {"battlepass-skip", "Battle Pass tiers"}, {"map_reward", "Map reward"},
+    };
+    for (size_t i = 0; src && i < sizeof(map) / sizeof(map[0]); i++)
+        if (!strcmp(src, map[i][0])) return map[i][1];
+    return src ? src : "";
+}
+
+H(h_kr_history) {
+    UNUSED;
+    html_ui_stop_propagation(); // #profileKR sits in #profileInfo (onclick: the own profile)
+    if (!g_hub.logged_in || !g_hub.brain) return 1;
+    io_wait("Please wait...");
+    const double v[1] = {30};
+    send_ints("krh", 1, v);
+    return 1;
+}
+
+static void io_krh(const cJSON *rows) {
+    StrBuf sb = {0};
+    sb_append(&sb, "<div class='popHeader'>KR History</div><div style='max-height:430px;overflow-y:auto;font-size:15px;'>"
+                   "<table style='width:100%;border-collapse:collapse;text-align:left'>");
+    int n = 0;
+    const cJSON *r;
+    cJSON_ArrayForEach(r, rows) {
+        const double amount = jnum(r, "amount"), fee = jnum(r, "fee");
+        char amt[32], when[48] = "", feetxt[48] = "";
+        comma_number(amt, sizeof(amt), fabs(amount));
+        const time_t t = (time_t) (jnum(r, "tim") / 1000.0);
+        struct tm tm;
+#ifdef _WIN32
+        localtime_s(&tm, &t);
+#else
+        localtime_r(&t, &tm);
+#endif
+        strftime(when, sizeof(when), "%m-%d %H:%M", &tm);
+        if (fee > 0) {
+            char f[32];
+            comma_number(f, sizeof(f), fee);
+            snprintf(feetxt, sizeof(feetxt), "fee %s", f);
+        }
+        const char *cp = jstr(r, "cp");
+        sb_appendf(&sb, "<tr style='border-bottom:1px solid rgba(255,255,255,0.08)'><td style='padding:5px 4px;color:rgba(255,255,255,0.4)'>%s</td><td style='padding:5px 4px;color:#fff'>%s</td><td style='padding:5px 4px;color:rgba(255,255,255,0.6)'>",
+                   when, kr_source_label(jstr(r, "source")));
+        if (cp) sb_append_esc(&sb, cp);
+        sb_appendf(&sb, "</td><td style='padding:5px 4px;color:rgba(255,255,255,0.4)'>%s</td><td style='padding:5px 4px;text-align:right;color:%s'>%s%s KR</td></tr>",
+                   feetxt, amount < 0 ? "#eb5656" : "#5ce05a", amount < 0 ? "-" : "+", amt);
+        n++;
+    }
+    sb_append(&sb, "</table>");
+    if (!n) sb_append(&sb, "<div style='color:rgba(255,255,255,0.5);text-align:center;padding:20px'>No KR movements in the last 30 days</div>");
+    sb_append(&sb, "</div>");
+    char *html = sb_finish(&sb);
+    generic_popup(html, "offerPop", "width:680px"); // v7's offer box, narrower
+    free(html);
+}
+
+// ---- the profile's Listings tab (io_ul) and the listing page
+
+// The rows the Purchase buttons read back (showPopup(page, skin, row)).
+static void set_market_rows(MarketRow *rows, const int n, const char *sub) {
+    free(g_market_rows);
+    g_market_rows = rows;
+    g_market_row_count = n;
+    snprintf(g_market_sub, sizeof(g_market_sub), "%s", sub);
+}
+
+static void io_ul(const cJSON *rows) {
+    clear_pops();
+    const int n = cJSON_GetArraySize(rows);
+    StrBuf sb = {0};
+    if (n > 0) {
+        MarketRow *m = calloc((size_t) n, sizeof(MarketRow));
+        int k = 0;
+        const cJSON *r;
+        cJSON_ArrayForEach(r, rows) {
+            if (!m) break;
+            MarketRow *row = &m[k];
+            row->uid = k;
+            row->skin = (int) jnum(r, "sk");
+            row->skin_id = (int) jnum(r, "skid");
+            row->count = (int) jnum(r, "c");
+            row->funds = jnum(r, "kr");
+            row->salestart = jnum(r, "ms");
+            row->market_id = (int) jnum(r, "id");
+            snprintf(row->player, sizeof(row->player), "%s", g_hub.profile_name);
+            k++;
+        }
+        set_market_rows(m, k, "market");
+        sb_appendf(&sb, "<div class='scrollItemNew' style='width:%dpx'>", k > 3 ? 1000 : 900);
+        for (int i = 0; i < k; i++) {
+            const ViewerSkin *pe = hub_skin(m[i].skin);
+            if (!pe || (pe->flags & (VS_FREE | VS_BLOCKED))) continue;
+            char prev[256], price[32];
+            skin_preview(prev, sizeof(prev), pe);
+            const char *col = rarity_color(pe);
+            sb_appendf(&sb, "<div class='marketCard%s' id='itemCardmarket_%d' style='color:%s;border:5px solid %s' onmouseenter='SOUND.play(`tick_0`,0.1)'>", g_hub.rarity_anim && rarity_animate(pe) ? " rainbow" : "", i, col, col);
+            sb_append_esc(&sb, pe->name);
+            sb_appendf(&sb, "<div class='itemOwn'>%s</div>", skin_type_label(pe));
+            append_skin_img(&sb, pe, prev, "sprayMarketImg", pe->type ? (pe->type == 5 ? "marketImgD" : "marketImgC") : "marketImg");
+            comma_number(price, sizeof(price), m[i].funds);
+            sb_appendf(&sb, "<div class='marketPrice'>%s<span style='color:#fff'> KR</span></div>", price);
+            sb_appendf(&sb, "<div class='cardActions'><a class='cardAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='showPopup(&quot;market&quot;,%d,%d)'>Purchase</a><div class='cardActionSep'></div>", m[i].skin, i);
+            sb_appendf(&sb, "<a class='cardAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='searchItem(%d)'>Search</a><div class='cardActionSep'></div><a class='cardAction' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='openSales(%d)'>Info</a></div></div>", m[i].skin, m[i].skin);
+        }
+        sb_append(&sb, "</div>");
+    } else {
+        sb_append(&sb, "<div class='scrollItemNew'><div class='noneText'>No Market Listings!</div></div>");
+    }
+    char *html = sb_finish(&sb);
+    set_html("pTabContent_listings", html);
+    free(html);
+}
+
+static void market_popup_html(StrBuf *sb, const MarketPop *p);
+
+// io_0("listing", q, row): one listing on its own page (?p=listing&i=<marketId>)
+static void hub_render_listing(const cJSON *t) {
+    const ViewerSkin *pe = cJSON_IsObject(t) ? hub_skin((int) jnum(t, "sk")) : NULL;
+    if (!pe || (pe->flags & VS_BLOCKED)) {
+        set_html("listingHolder", "<div style='font-size:20px;margin-top:20px;color:#fff'>" STR_MARKET_NONE "...</div>");
+        return;
+    }
+    MarketRow *m = calloc(1, sizeof(MarketRow));
+    if (!m) return;
+    m->skin = (int) jnum(t, "sk");
+    m->skin_id = m->skin;
+    m->count = 1;
+    m->funds = jnum(t, "kr");
+    m->salestart = jnum(t, "ms");
+    m->market_id = (int) jnum(t, "id");
+    snprintf(m->player, sizeof(m->player), "%s", jstr(t, "p") ? jstr(t, "p") : "");
+    set_market_rows(m, 1, "market");
+    MarketPop p = {0};
+    snprintf(p.page, sizeof(p.page), "market");
+    p.skin = m->skin;
+    skin_preview(p.preview, sizeof(p.preview), pe);
+    snprintf(p.label, sizeof(p.label), "%s", skin_type_label(pe));
+    snprintf(p.skin_id, sizeof(p.skin_id), "%d", m->skin_id);
+    snprintf(p.funds, sizeof(p.funds), "%.0f", m->funds);
+    p.count = 1;
+    snprintf(p.salestart, sizeof(p.salestart), "%.0f", m->salestart);
+    snprintf(p.player, sizeof(p.player), "%s", m->player);
+    p.market_id = m->market_id;
+    StrBuf sb = {0};
+    sb_append(&sb, "<div class='scrollView'><div class='scrollItem' style='position:relative;overflow-y:auto;padding-top: 20px;padding: 15px;'>");
+    market_popup_html(&sb, &p);
+    sb_append(&sb, "</div></div>");
+    char *html = sb_finish(&sb);
+    set_html("listingHolder", html);
+    free(html);
+}
+
+// ---- economy frames (handle_reply_frame -> hub_market_frame); 1 = handled
+static int hub_economy_frame(const char *label, const cJSON *frame) {
+    const cJSON *a1 = cJSON_GetArrayItem(frame, 1), *a2 = cJSON_GetArrayItem(frame, 2), *a3 = cJSON_GetArrayItem(frame, 3);
+    if (!strcmp(label, "ecfg")) { // the server's rules
+        EconRules *e = &g_econ;
+#define ECFG(field, key) if (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(a1, key))) e->field = jnum(a1, key)
+        ECFG(gift_fee, "giftFee"); ECFG(gift_min, "giftMin"); ECFG(gift_max, "giftMax"); ECFG(gift_min_lvl, "giftMinLvl");
+        ECFG(market_fee, "marketFee"); ECFG(market_fee_bypass, "marketFeeBypass"); ECFG(market_min_lvl, "marketMinLvl");
+        ECFG(sale_max, "saleMax"); ECFG(sale_grace, "saleGrace"); ECFG(max_listings, "maxListings");
+        ECFG(trade_min_lvl, "tradeMinLvl"); ECFG(trade_max_out, "tradeMaxOut"); ECFG(trade_max_out_p, "tradeMaxOutP");
+        ECFG(trade_kr_max, "tradeKRMax");
+#undef ECFG
+    } else if (!strcmp(label, "gir")) {
+        io_gir(a1);
+    } else if (!strcmp(label, "bmr")) { // io_bmr({item, kr, f} | null)
+        io_po(cJSON_IsObject(a1), cJSON_IsObject(a1) ? NULL : "Item Unavailable");
+        if (cJSON_IsObject(a1)) hub_set_funds(jnum(a1, "f"));
+    } else if (!strcmp(label, "trD")) {
+        io_trd(cJSON_GetStringValue(a1), (int) cJSON_GetNumberValue(a2), a3);
+    } else if (!strcmp(label, "trR")) {
+        io_trr(a1, a2, cJSON_GetStringValue(a3));
+    } else if (!strcmp(label, "krh")) {
+        io_krh(a1);
+    } else if (!strcmp(label, "ul")) {
+        io_ul(a1);
+    } else if (!strcmp(label, "pRes")) { // "Declined All" (trCA)
+        const char *kind = cJSON_GetStringValue(a1);
+        io_po(kind && !strcmp(kind, "SUCCESS"), kind && !strcmp(kind, "SUCCESS") ? cJSON_GetStringValue(a3) : cJSON_GetStringValue(a2));
+    } else if (!strcmp(label, "econN")) { // a trade / sale / gift of someone else touched this account
+        const HtmlElem holder = el("popupHolder");
+        if (!strcmp(g_hub.v, "market") && !strcmp(g_hub.b, "trades")) request_page();
+        if (!holder || !html_dom_is_shown(holder)) io_po(1, cJSON_GetStringValue(a2));
+    } else if (!strcmp(label, "ua")) { // the header's KR after a server-side change
+        const cJSON *info = a2;
+        if (cJSON_IsObject(info) && cJSON_GetObjectItemCaseSensitive(info, "funds")) hub_set_funds(jnum(info, "funds"));
+    } else {
+        return 0;
+    }
+    return 1;
 }
 
 // clanRS(1): Clan Discord ("Coming Soon"); clanRS(0, tag): io.send("cln", tag)
@@ -4721,6 +5682,22 @@ static const HtmlHandlerEntry k_handlers[] = {
     {"toggleFilters", h_toggle_filters},
     {"toggleSorts", h_toggle_filters},
     {"updateTrades", h_update_trades},
+    {"giftPopup", h_gift_popup},          // economy (doc/v7/economy.md)
+    {"calcGiftFee", h_calc_gift_fee},
+    {"giftUser", h_gift_user},
+    {"tradePopup", h_trade_popup},
+    {"addItem", h_add_item},
+    {"removeItem", h_remove_item},
+    {"searchItems", h_search_items},
+    {"showMissingItems", h_show_missing},
+    {"tradeKR", h_trade_kr},
+    {"confSubmitOffer", h_conf_submit_offer},
+    {"submitOffer", h_submit_offer},
+    {"viewOffer", h_view_offer},
+    {"confOffer", h_conf_offer},
+    {"offerConfirmed", h_offer_action},
+    {"declOffer", h_offer_action},
+    {"krHistory", h_kr_history},
     {"fastDeclOffer", h_decline_offer},
     {"declineAllTrades", h_decline_offer},
     {"clanRS", h_clan_rs},
@@ -4805,6 +5782,11 @@ static void hub_connected(void) {
     } else {
         set_display("profileLogin", "inline-block");
         set_html("profileName", "");
+    }
+    if (g_hub.brain) { // the server's economy rules (fees, levels, limits): "ecfg"
+        cJSON *f = cJSON_CreateArray();
+        cJSON_AddItemToArray(f, cJSON_CreateString("ecfg"));
+        hub_send(f);
     }
     // API_CLIENT.listMaps(2, 0): the featured games of the maps Home card (v3540); KN's /maps
     // index 1 is Featured

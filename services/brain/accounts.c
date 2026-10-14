@@ -61,12 +61,32 @@ void acct_config_load(Brain *b) {
     c->rank_var = kn_config_num(cfg, "accounts.rank_var", 0.03);
     c->trade_min_level = cfg_int(cfg, "trade_min_level", 20);
     c->gift_min_level = cfg_int(cfg, "gift_min_level", 30);       /* config.giftMinLVl */
-    c->gift_fee_percent = cfg_int(cfg, "gift_fee_percent", 10);   /* config.giftFee 0.1 */
-    c->market_fee_percent = cfg_int(cfg, "market_fee_percent", 5); /* social.js calcFee 0.05 */
+    c->gift_fee_percent = cfg_int(cfg, "gift_fee_percent", 10);   /* config.giftFee 10/100 */
+    c->gift_min = kn_config_int(cfg, "accounts.gift_min", 10);     /* config.giftMin */
+    c->gift_max = kn_config_int(cfg, "accounts.gift_max", 10000000); /* config.giftMax */
+    c->market_fee_percent = cfg_int(cfg, "market_fee_percent", 10); /* config.marketFee 10/100 */
     c->market_fee_bypass = kn_config_int(cfg, "accounts.market_fee_bypass", 0); /* config.marketFeeBypass */
+    c->market_min_level = cfg_int(cfg, "market_min_level", 15);   /* config.marketMinLVl */
     c->sale_max = kn_config_int(cfg, "accounts.sale_max", 10000000);
-    c->max_listings = cfg_int(cfg, "max_listings", 50);
-    c->trade_max_items = cfg_int(cfg, "trade_max_items", 10);
+    c->sale_grace_s = kn_config_int(cfg, "accounts.sale_grace_s", 300); /* config.saleGrace 300000 ms */
+    c->max_listings = cfg_int(cfg, "max_listings", 40);
+    c->trade_max_items = cfg_int(cfg, "trade_max_items", 5);     /* config.tradeMaxOut */
+    c->trade_max_items_premium = cfg_int(cfg, "trade_max_items_premium", 20); /* config.tradeMaxOutP */
+    c->trade_max_open = cfg_int(cfg, "trade_max_open", 50);
+    c->trade_kr_max = kn_config_int(cfg, "accounts.trade_kr_max", 10000000);
+    c->trade_ttl_s = kn_config_int(cfg, "accounts.trade_ttl_s", kn_config_int(cfg, "accounts.trade_ttl_h", 0) * 3600);
+    c->rate_gift = cfg_int(cfg, "economy_rate_gift", 10);
+    c->rate_list = cfg_int(cfg, "economy_rate_list", 30);
+    c->rate_unlist = cfg_int(cfg, "economy_rate_unlist", 60);
+    c->rate_buy = cfg_int(cfg, "economy_rate_buy", 30);
+    c->rate_qsell = cfg_int(cfg, "economy_rate_qsell", 60);
+    c->rate_trade = cfg_int(cfg, "economy_rate_trade", 10);
+    c->rate_accept = cfg_int(cfg, "economy_rate_accept", 30);
+    c->rate_close = cfg_int(cfg, "economy_rate_close", 60);
+    if (c->gift_fee_percent < 0) c->gift_fee_percent = 0;
+    if (c->market_fee_percent < 0) c->market_fee_percent = 0;
+    if (c->gift_max <= 0) c->gift_max = 10000000;
+    if (c->trade_kr_max < 0) c->trade_kr_max = 0;
     c->clan_tag_max = cfg_int(cfg, "clan_tag_max", 4);
     c->clan_max_members = cfg_int(cfg, "clan_max_members", 0);
     c->post_max_len = cfg_int(cfg, "post_max_len", 1024);
@@ -1297,12 +1317,14 @@ int accounts_init(Brain *b) {
     staff_flags_apply();
     season_init(); /* v7.1.4 seasons: the accounts.current_season row (season.c) */
     acct_security_init(b); /* 2FA, email verification, outbound mail (account_security.c) */
+    economy_init(b);       /* trade offer expiry (economy.c) */
     KN_INFO(MOD, "ready (names %d-%d, sessions %lld days, password iterations %u)", g_acct.name_min,
             g_acct.name_max, (long long) (g_acct.session_ttl_s / 86400), kn_password_get_iterations());
     return 0;
 }
 
 void accounts_shutdown(Brain *b) {
+    economy_shutdown(b);
     acct_security_shutdown(b);
     if (s_cleanup_timer) kn_loop_cancel_timer(b->loop, s_cleanup_timer);
     s_cleanup_timer = 0;

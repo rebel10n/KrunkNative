@@ -18,6 +18,7 @@ set(KN_BRAIN_SOURCES
     profiles.c
     leaderboards.c
     social_data.c
+    economy.c
     creations.c
     store.c
     shared_shim.c
@@ -34,6 +35,7 @@ set(KN_BRAIN_SOURCES
     db_common.c
     db_accounts.c
     db_social.c
+    db_economy.c
     db_mm.c
     db_ranked.c
     db_turf.c                       # v10 Turf Wars (0206_turf_wars); rules shared/src/turf_wars.c
@@ -211,6 +213,20 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/account_security_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_account_security PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;smtp")
+    # the economy (doc/v7/economy.md): gifts, market, trade offers, idempotency, bans, rate limits,
+    # the ledger and parallel gifts / buys / offers / accepts at the same balance and items
+    add_test(NAME brain_economy
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/economy_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_economy PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;economy")
+    # the same through the clients' hub: headless client_bin (KRUNKNATIVE_UI_CMDS) and the web build
+    # in headless Chromium (needs KN_WEB_DIST = a `make web` dist dir; else skips 77)
+    add_test(NAME brain_economy_hub_e2e
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/economy_hub_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_economy_hub_e2e PROPERTIES TIMEOUT 480 SKIP_RETURN_CODE 77 LABELS "brain;db;economy;e2e")
+    add_test(NAME brain_economy_web_e2e
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/economy_web_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_economy_web_e2e PROPERTIES TIMEOUT 480 SKIP_RETURN_CODE 77 LABELS "brain;db;economy;e2e;web")
     # the same through the web client in headless Chromium (needs KN_WEB_DIST = a `make web` dist dir; else skips 77)
     add_test(NAME brain_email_web_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/email_verify_web_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
@@ -248,8 +264,11 @@ foreach (drv IN ITEMS sqlite mysql)
         add_test(NAME brain_account_security_${drv}
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/account_security_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+        add_test(NAME brain_economy_${drv}
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/economy_test.py
+                    $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_social_ws_${drv} brain_ranked_${drv} brain_turf_${drv} brain_storage_${drv} brain_progress_${drv} brain_season_${drv}
-            brain_account_security_${drv}
+            brain_account_security_${drv} brain_economy_${drv}
             PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
             ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;${drv}")
         set_tests_properties(brain_ranked_${drv} PROPERTIES TIMEOUT 420)

@@ -399,7 +399,7 @@ async def scenario(base, internal_url, secret):
             check(r[1] is None, "sold listing unavailable")
             r = await b.call("0", "r", "market", "inventory", bob_id, bob, None, 0)
             check(r[3] == [{"i": 5, "s": 5, "c": 1}], "bought skin in inventory")
-            r = await b.call("qsr", "qsi", 5, 9, 1)
+            r = await b.call("qsr", "qsi", 0, 5, 9, 2)  # v7.1.4: mode KR, skin, uid, all
             check(r[1] and r[1]["c"] == 0 and r[1]["i"] == 9, "quick sell: %r" % r[1])
         # alice trades with herself is refused
         r = await a.call("po", "ctr", alice_id, [1], [], "", "c")
@@ -621,7 +621,8 @@ def main():
         "database": dict(dbcfg, migrations_dir=os.path.join(root, "services", "db", "migrations")),
         "brain": {"host": "127.0.0.1", "port": 0, "internal_secret": secret, "federation": False},
         "accounts": {"password_iterations": 10000, "login_throttle_s": 1, "starting_kr": 1000,
-                     "gift_fee_percent": 0, "gift_min_level": 0, "market_fee_bypass": 100, "skins_file": os.path.join(root, "assets", "skins.json"),
+                     "gift_fee_percent": 0, "gift_min_level": 0, "market_fee_bypass": 100,
+                     "market_fee_percent": 5, "market_min_level": 0, "sale_grace_s": 0, "trade_min_level": 0, "skins_file": os.path.join(root, "assets", "skins.json"),
                      "leaderboard_cache_s": 0},
     }
     tmp = tempfile.mkdtemp(prefix="kn-svcacc-test-")

@@ -597,6 +597,10 @@ static const SocialRoute k_routes[] = {
     {"trA", sh_trade_accept},
     {"trC", sh_trade_cancel},
     {"trCA", sh_trade_clear},
+    {"ecfg", sh_economy_config},        /* KrunkNative: the economy rules (economy.c) */
+    {"krh", sh_kr_history},             /* KrunkNative: the account's KR ledger */
+    {"uml", sh_listings_of},            /* v7.1.4 profile "Listings" tab -> "ul" */
+    {"pbm", sh_blackm_buy},             /* v7.1.4 Black Market purchase -> "bmr" */
     {"uploadM", sh_upload_map},
     {"spin", sh_spin},
     {"fkr", sh_free_kr},

@@ -141,7 +141,7 @@ void sh_page(SocialSession *s, const cJSON *f) {
         social_call(s, &P_CLAN_PAGE, KN_DB_ARGS(c->sub), page_json_done, c);
         return;
     }
-    if (!strcmp(page, "market") || !strcmp(page, "itemsales")) {
+    if (!strcmp(page, "market") || !strcmp(page, "itemsales") || !strcmp(page, "listing")) {
         free(c);
         market_page(s, page, f);
         return;

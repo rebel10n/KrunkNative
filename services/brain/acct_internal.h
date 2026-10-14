@@ -31,14 +31,23 @@ typedef struct AcctConfig {
     int register_per_ip_hour;       /* 0 = unlimited */
     int max_match_kr;               /* cap of one stats commit's KR (500) */
     double rank_var;                /* config.rankVar 0.03 */
-    int trade_min_level;            /* config.tradeMinLvl 20 */
+    /* economy (economy.c, doc/v7/economy.md): defaults = Krunker v7.1.4 src/config.js */
+    int trade_min_level;            /* config.tradeMinLvl 20 (both players) */
     int gift_min_level;             /* config.giftMinLVl 30 */
-    int gift_fee_percent;           /* KR gift fee (config.giftFee 0.1 -> 10) */
-    int market_fee_percent;         /* list fee (5, v3.1.1 sale fee 0.05) */
-    int64_t market_fee_bypass;      /* prices <= this pay no fee (config.marketFeeBypass) */
-    int64_t sale_max;               /* max listing price */
-    int max_listings;               /* open listings per player ("MAX") */
-    int trade_max_items;            /* per side (config.tradeMaxOutP 10) */
+    int gift_fee_percent;           /* KR gift fee, ceil (config.giftFee 10/100) */
+    int64_t gift_min, gift_max;     /* config.giftMin 10 / giftMax 1e7 */
+    int market_fee_percent;         /* list fee, floor (config.marketFee 10/100) */
+    int64_t market_fee_bypass;      /* prices <= this pay no fee (config.marketFeeBypass 0) */
+    int market_min_level;           /* config.marketMinLVl 15 (list + buy) */
+    int64_t sale_max;               /* max listing price (config.saleMax 1e7) */
+    int64_t sale_grace_s;           /* a listing is buyable this long after posting (config.saleGrace 300 s) */
+    int max_listings;               /* open listings per player ("MAX", 40) */
+    int trade_max_items;            /* items per side (config.tradeMaxOut 5) */
+    int trade_max_items_premium;    /* ... for premium senders (config.tradeMaxOutP 20) */
+    int trade_max_open;             /* open offers per sender (KrunkNative, 50; 0 = unlimited) */
+    int64_t trade_kr_max;           /* KR per side of an offer (KrunkNative, 1e7; 0 = KR not tradable) */
+    int64_t trade_ttl_s;            /* offers expire after this (KrunkNative, 0 = never, like v7.1.4) */
+    int rate_gift, rate_list, rate_unlist, rate_buy, rate_qsell, rate_trade, rate_accept, rate_close; /* per minute */
     int clan_tag_max;               /* 4 (create input maxlength) */
     int clan_max_members;           /* 0 = unlimited */
     int post_max_len, comment_max_len, chat_max_len;
@@ -109,6 +118,11 @@ typedef struct SkinInfo {
     int rarity, weapon, type, seas, min_rec;
     unsigned char limited, blocked, no_spin, illicit, no_sale, no_quick_sell;
     unsigned char black_m, opensea, m_seas, req; /* v7.1.4 getSpnItems filters (req: has a checkReq requirement) */
+    unsigned char free_item, item_shop, min_quick_sell; /* free, itemShop == 1, minQuickSell (economy.c) */
+    int qs_kr;                                   /* qsKR: quick sell KR override (0 none) */
+    int64_t funds;                               /* funds: the Black Market price (blackM items) */
+    char req_kind[12], req_var[16];              /* req ("accAge" | "stats" | "accVar" | "disabled") / reqVar */
+    double req_amount;                           /* reqAmount */
     int spin_wheel;                              /* TICKET items: index of its spinWheel (store.c), -1 none */
     char lim_t[24];
     char lim_g[32];                              /* limG */
@@ -234,6 +248,12 @@ void sh_trade_create(SocialSession *s, const cJSON *f);/* "ctr" */
 void sh_trade_accept(SocialSession *s, const cJSON *f);/* "trA" */
 void sh_trade_cancel(SocialSession *s, const cJSON *f);/* "trC" */
 void sh_trade_clear(SocialSession *s, const cJSON *f); /* "trCA" */
+void sh_economy_config(SocialSession *s, const cJSON *f); /* "ecfg" (economy.c) */
+void sh_kr_history(SocialSession *s, const cJSON *f);  /* "krh" */
+void sh_listings_of(SocialSession *s, const cJSON *f); /* "uml" */
+void sh_blackm_buy(SocialSession *s, const cJSON *f);  /* "pbm" */
+void economy_init(Brain *b);     /* trade offer expiry + idempotency key cleanup timer */
+void economy_shutdown(Brain *b);
 void sh_mail_read_all(SocialSession *s, const cJSON *f); /* "raml" */
 void sh_upload_map(SocialSession *s, const cJSON *f);    /* "uploadM" (creations.c) */
 void sh_edit_map(SocialSession *s, const cJSON *f);      /* "edMp" */

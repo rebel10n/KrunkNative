@@ -125,6 +125,15 @@ static void skins_load(void) {
                 k->opensea = (unsigned char) json_truthy(cJSON_GetObjectItemCaseSensitive(it, "opensea"));
                 k->m_seas = (unsigned char) json_truthy(cJSON_GetObjectItemCaseSensitive(it, "mSeas"));
                 k->req = (unsigned char) json_truthy(cJSON_GetObjectItemCaseSensitive(it, "req"));
+                k->free_item = (unsigned char) json_truthy(cJSON_GetObjectItemCaseSensitive(it, "free"));
+                k->item_shop = (unsigned char) (kn_json_int(it, "itemShop", 0) == 1);
+                k->min_quick_sell = (unsigned char) json_truthy(cJSON_GetObjectItemCaseSensitive(it, "minQuickSell"));
+                k->qs_kr = (int) kn_json_int(it, "qsKR", 0);
+                k->funds = kn_json_int(it, "funds", 0);
+                const cJSON *rq = cJSON_GetObjectItemCaseSensitive(it, "req"), *ra = cJSON_GetObjectItemCaseSensitive(it, "reqAmount");
+                if (cJSON_IsString(rq)) snprintf(k->req_kind, sizeof k->req_kind, "%s", rq->valuestring);
+                snprintf(k->req_var, sizeof k->req_var, "%s", kn_json_str(it, "reqVar", ""));
+                k->req_amount = cJSON_IsNumber(ra) ? ra->valuedouble : cJSON_IsString(ra) ? strtod(ra->valuestring, NULL) : 0;
                 k->spin_wheel = ticket_wheel_load(cJSON_GetObjectItemCaseSensitive(it, "spinWheel"), count);
                 const cJSON *lim = cJSON_GetObjectItemCaseSensitive(it, "limT");
                 if (cJSON_IsString(lim)) snprintf(k->lim_t, sizeof k->lim_t, "%s", lim->valuestring);
