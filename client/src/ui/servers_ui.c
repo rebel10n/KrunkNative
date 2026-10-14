@@ -56,6 +56,7 @@ static int g_brain_mode;
 static int g_started;            // the startup seek ran
 static double g_start_time;
 static char g_region[32];        // region id the client seeks in
+static char g_exclude_game[160]; // v10 Quick Match: the next seek's excludeGame (the lobby it leaves)
 static char g_game_id[160];      // gameId: the lobby this client is in (or joining), canonical (CHITOWN2:kz862)
 static char g_game_region[32];   // its region (the seek answer's), for the short link form ("" = unknown)
 static int g_seek_inflight;
@@ -550,7 +551,11 @@ static void seek(const char *game_id, const int auto_change, void *quiet) {
     if (game_id && game_id[0]) {
         backend_url_encode(enc, sizeof(enc), game_id);
         n += snprintf(path + n, sizeof(path) - (size_t) n, "&game=%s", enc);
+    } else if (g_exclude_game[0]) { // v10 matchmakerSeek(..., excludeGame, ...): any lobby but that one
+        backend_url_encode(enc, sizeof(enc), g_exclude_game);
+        n += snprintf(path + n, sizeof(path) - (size_t) n, "&excludeGame=%s", enc);
     }
+    g_exclude_game[0] = 0;
     if (account_get() && account_session_token()[0]) {
         backend_url_encode(enc, sizeof(enc), account_session_token());
         snprintf(path + n, sizeof(path) - (size_t) n, "&token=%s", enc);
@@ -1598,6 +1603,9 @@ static void connect_server(const char *text) {
 // The menu's Connect button, injected once after Join (#menuBtnJoin).
 void servers_ui_menu_setup(void) {
     if (html_dom_by_id("menuBtnConnect")) return;
+    // Krunker v10's menu has no such button (doc/v10/ui.md 2): direct connects there are the
+    // console's `connect host[:port]` and the Join window's links / ids
+    if (html_dom_by_id("menuBtnQuickMatch")) return;
 #ifdef UI_SCENARIO_SUPPORTED
     if (ui_scenario_active()) return; // uidiff compares the row with v7.1.4's
 #endif
@@ -2743,6 +2751,21 @@ int servers_ui_retry(void) {
     g_pin = PIN_NONE; // the user asked for matchmaking (also after a console `disconnect`)
     g_game_id[0] = 0;
     start_seek(NULL);
+    return 1;
+}
+
+// Krunker v10.0.2 Quick Match (#menuBtnQuickMatch, v10_menu.c): backToOrigin(false, {exclude: ?game})
+// reloads the page with ?exclude=<this lobby>, whose seek sends excludeGame (v10:222060, 147608):
+// a fresh public lobby other than this one ("If you quickly want to move away from your current
+// game mode, press the Quick Match button", the guide). Natively the seek runs in place, like
+// servers_ui_retry. 0 = no matchmaking in this session (offline, no brain, direct server).
+int servers_ui_quick_match(void) {
+    if (!g_brain_mode || g_pin == PIN_DIRECT) return 0;
+    snprintf(g_exclude_game, sizeof(g_exclude_game), "%s", g_game_id);
+    printf("[mm] quick match: seeking a lobby other than %s\n", g_exclude_game[0] ? g_exclude_game : "(none)");
+    g_pin = PIN_NONE;
+    g_game_id[0] = 0;
+    start_seek(NULL); // /mm/ping-list, then the seek with excludeGame
     return 1;
 }
 

@@ -548,7 +548,7 @@ static int rank_better(const PickRank *a, const PickRank *b) {
 
 /* Steps 2-4 of pickBestLobby over the public pool (optionally one region). */
 static int pick_public(Registry *r, const MmPolicy *p, const MmPickQuery *q, const char *region,
-                       int use_soft_cap, MmPick *out) {
+                       int use_soft_cap, const char *exclude, MmPick *out) {
     MmNode *best_n = NULL;
     MmLobby *best = NULL;
     PickRank best_rank = {0};
@@ -559,7 +559,8 @@ static int pick_public(Registry *r, const MmPolicy *p, const MmPickQuery *q, con
         for (size_t j = 0; j < n->lobby_count; j++) {
             MmLobby *l = &n->lobbies[j];
             if (l->custom || l->no_seek || !lobby_joinable(n, l) || !lobby_auto_ok(n, l, q) ||
-                !version_ok(l, q->version) || !proto_ok(l, q) || !ruleset_ok(l, q))
+                !version_ok(l, q->version) || !proto_ok(l, q) || !ruleset_ok(l, q) ||
+                (exclude && !strcmp(l->game_id, exclude)))
                 continue;
             int taken = registry_lobby_taken(r, l, q->now_ms);
             int cap = registry_lobby_cap(l, p);
@@ -606,13 +607,18 @@ MmPickError registry_pick(Registry *r, const MmPolicy *p, const MmPickQuery *q, 
         }
         out->changed = 1;
     }
-    /* 2./3. the best public lobby with room (registry.h): region first, then all */
+    /* 2./3. the best public lobby with room (registry.h): region first, then all; with
+     * excludeGame (v10 Quick Match) every other lobby first, the excluded one last */
     int soft = p->soft_cap > 0;
-    for (int pass = soft ? 0 : 1; pass < 2; pass++) {
-        int use_soft = pass == 0;
-        if (pick_public(r, p, q, q->region, use_soft, out)) return MM_PICK_OK;
-        if (p->cross_region && q->region && *q->region && pick_public(r, p, q, NULL, use_soft, out))
-            return MM_PICK_OK;
+    const char *exclude = q->exclude_game && *q->exclude_game ? q->exclude_game : NULL;
+    for (int ex = exclude ? 0 : 1; ex < 2; ex++) {
+        const char *skip = ex == 0 ? exclude : NULL;
+        for (int pass = soft ? 0 : 1; pass < 2; pass++) {
+            int use_soft = pass == 0;
+            if (pick_public(r, p, q, q->region, use_soft, skip, out)) return MM_PICK_OK;
+            if (p->cross_region && q->region && *q->region && pick_public(r, p, q, NULL, use_soft, skip, out))
+                return MM_PICK_OK;
+        }
     }
     /* 4. nothing with room (the v3.1.1 overflow pick would put a player into a
      *    full lobby; the game server would refuse it, so report it instead). */

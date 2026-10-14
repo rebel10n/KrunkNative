@@ -12,6 +12,7 @@
 //
 // Storage keys are v3.1.1's (krunker_id, krunker_username, krunker_token); the
 // social hub (social_ui.c) reads the same ones.
+#include <v10_menu.h> // the v10 page's header bar (v10_menu.c)
 #include <backend.h>
 #include <backend_ui.h>
 #include <app_mode.h>
@@ -273,6 +274,10 @@ static void apply_menu_name(void) {
 // box) for an account, #signedOutHeaderBar ("Login or Register") for a guest.
 static void update_header(void) {
     g_header_dirty = 0;
+    if (v10_menu_page()) { // Krunker v10's header bar (v10_menu.c)
+        v10_menu_account_changed();
+        return;
+    }
     if (!html_ui_available() || !html_dom_by_id("signedInHeaderBar")) {
         g_header_dirty = 1;
         return;

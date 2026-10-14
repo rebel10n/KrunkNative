@@ -73,6 +73,18 @@ int main(void) {
     MmPickQuery qf2 = {.region = "de-fra", .auto_change = 1, .now_ms = 6000};
     CHECK(registry_pick(r, &p, &qf2, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "FRA:ccccc"));
 
+    /* excludeGame (v10 Quick Match): another lobby with room first (cross region included), the
+     * excluded one only when nothing else has room */
+    MmPickQuery qx = {.region = "us-nj", .auto_change = 1, .now_ms = 6000, .exclude_game = "NY2:bbbbb"};
+    CHECK(registry_pick(r, &p, &qx, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "NY:aaaaa"));
+    qx.exclude_game = "NY:aaaaa";
+    CHECK(registry_pick(r, &p, &qx, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "NY2:bbbbb"));
+    MmPickQuery qxf = {.region = "de-fra", .auto_change = 1, .now_ms = 6000, .exclude_game = "FRA:ccccc"};
+    CHECK(registry_pick(r, &p, &qxf, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "NY2:bbbbb"));
+    p.cross_region = 0;
+    CHECK(registry_pick(r, &p, &qxf, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "FRA:ccccc")); /* the only one */
+    p.cross_region = 1;
+
     /* requested game */
     MmPickQuery qg = {.region = "us-nj", .game_id = "FRA:custm", .auto_change = 0, .now_ms = 2000};
     CHECK(registry_pick(r, &p, &qg, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "FRA:custm") && !pick.changed);

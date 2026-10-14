@@ -1,0 +1,24 @@
+/* KrunkNative: the v10 main menu shell (client/src/ui/v10_menu.c, v10_login.c). Only what the
+ * native engine needs to draw v10's own rules (css/svelte.css, css/main.css) as Chrome does. */
+
+/* The login modal's "Forgot Password?" (.auth-toggle-btn: v10 `all: unset`, which the engine
+ * does not implement, so the UA button box stayed): a plain underlined link. */
+.auth-toggle-btn.svelte-16z1lxi {
+	background: none;
+	border: none;
+	padding: 0;
+	margin: 0;
+	box-shadow: none;
+	font-family: inherit;
+}
+
+/* The match-info bar's segments (v10 moves #mapInfoHld / #menuRegionLabel / .menuDebugInfo
+ * into them after mount): the segment's box keeps its place in the bar (the render must line
+ * up with v10's) while the moved content is drawn over it. */
+#matchInfoHolder .match-seg:has(> #mapInfoHld) {
+	width: 247px;
+}
+
+#matchInfoHolder .match-seg:has(.menuDebugInfo) {
+	width: 42px;
+}

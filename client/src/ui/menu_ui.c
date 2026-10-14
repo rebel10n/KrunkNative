@@ -34,6 +34,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ruleset.h>
+#include <v10_menu.h> // the v10 page's menu shell (client/src/ui/v10_menu.c)
 #include <render_settings.h> // disable_rarity_anim
 #include "../viewer/viewer_store.h" // the class box: a loadout weapon's skin name, rarity, thumbnail
 #include <app_mode.h> // the game page owns the pointer lock (not the hub / editor / viewer)
@@ -1408,7 +1409,8 @@ static void setup_dom(void) {
     }
     // Hosting is the dedicated server (server_bin, doc/backend.md 8.7): no Host Game button.
     // Hidden, not removed, so v7's #subLogoButtons markup stays; --render-scenario keeps it.
-    if (!scenario_on()) set_display("menuBtnHost", "none");
+    // Krunker v10 keeps Host Game in its action cards (its chooser, window 42: v10_menu.c)
+    if (!scenario_on() && !v10_menu_page()) set_display("menuBtnHost", "none");
     servers_ui_menu_setup(); // KrunkNative: the Connect button next to Invite / Join (servers_ui.c)
 
     HtmlElem el;
@@ -1436,6 +1438,7 @@ static void menu_dom_init(void) {
     ui_settings_load();
     ui_settings_collect_defaults();
     setup_dom();
+    v10_menu_dom_init(); // Krunker v10's Svelte menu markup (ui/v10): its handlers, nav, header (v10_menu.c)
     menu_build_classes();
     menu_build_maps();
     g_ui.last_instructions[0] = 0;

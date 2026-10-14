@@ -197,6 +197,9 @@ typedef struct MmPickQuery {
      * room is picked over any outdated one. NULL = no preference. */
     int (*outdated)(const MmLobby *l, void *ud);
     void *outdated_ud;
+    const char *exclude_game;      /* seek ?excludeGame= (v10 Quick Match: the lobby the player leaves):
+                                    * quick join picks another lobby when one has room, else this one
+                                    * (NULL/"" = none) */
 } MmPickQuery;
 
 typedef struct MmPick {

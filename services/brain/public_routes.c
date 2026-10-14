@@ -285,11 +285,13 @@ static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, co
         kn_http_respond_error(req, 499, "gone");
         return;
     }
-    char region[64] = "", game[MM_GAME_ID_MAX] = "", dq[512] = "", version[32] = "", proto[16] = "", ruleset[8] = "";
+    char region[64] = "", game[MM_GAME_ID_MAX] = "", dq[512] = "", version[32] = "", proto[16] = "", ruleset[8] = "",
+         exclude[MM_GAME_ID_MAX] = "";
     kn_http_query_get(req, "region", region, sizeof(region));
     kn_http_query_get(req, "ruleset", ruleset, sizeof(ruleset)); /* the client's Krunker version (ruleset.h), "" = v10 */
     kn_http_query_get(req, "proto", proto, sizeof(proto)); /* the client's protocol "M.m" */
     kn_http_query_get(req, "game", game, sizeof(game));
+    kn_http_query_get(req, "excludeGame", exclude, sizeof(exclude)); /* v10 Quick Match: the lobby it leaves */
     if (kn_http_query_get(req, "dataQuery", dq, sizeof(dq)) > 0 && mm_settings()->policy.require_version) {
         cJSON *q = kn_json_parse(dq, strlen(dq));
         snprintf(version, sizeof(version), "%s", kn_json_str(q, "v", ""));
@@ -308,6 +310,7 @@ static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, co
         .proto_major = proto[0] ? releases_client_major(proto) : 1,
         .ruleset = ruleset,
         .outdated = releases_lobby_outdated,
+        .exclude_game = exclude,
     };
     MmPick pick;
     MmPickError e = registry_pick(b->registry, &mm_settings()->policy, &q, &pick);

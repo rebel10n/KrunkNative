@@ -109,6 +109,7 @@ int  servers_ui_reconnect_offline(void);    // console `reconnect`: 1 = `disconn
 int  servers_ui_session_target(char *out, size_t n);
 void servers_ui_tick(Client*);
 int  servers_ui_retry(void);                 // the error screen's "seek a new game" link; 1 = handled
+int  servers_ui_quick_match(void);           // v10 Quick Match: a new seek excluding this lobby; 0 = no matchmaking
 // A lost session (every NET_STATUS_FAILED, main thread): a server shutdown ERROR (004004 / 004006),
 // a refused join key (004001) or a session the transport lost without a server ERROR (dropped: not
 // a kick / ban) starts a rejoin through the matchmaker with a fresh ticket (direct servers: the

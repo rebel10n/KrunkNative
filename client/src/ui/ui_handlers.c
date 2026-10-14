@@ -5,6 +5,7 @@
 // clans) are answered by that module's *_handle() through h_fallback. Analytics / ad /
 // payment hooks (logBtnFRVR, XsollaPopup, ...) are no-ops. Also installs the non-inline
 // listeners (setupDom's addEventListener calls).
+#include <v10_menu.h>
 #include <ui_logic.h>
 #include <lobby_ui.h> // WP-E voteOnMatch
 #include <ui_host_config.h> // WP-E createPrivateRoom: the host config request
@@ -581,6 +582,7 @@ static const HtmlHandlerEntry HANDLERS[] = {
 // handler result (0 = `return false` cancels the default action).
 typedef int (*UiModuleHandler)(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc);
 static const UiModuleHandler MODULE_HANDLERS[] = {
+    v10_menu_handle,           // v10_menu.c / v10_login.c: the v10 page's menu shell, loginOrRegister
     account_ui_handle,         // account_ui.c: Account window, logout, mail, profile
     servers_ui_handle,         // servers_ui.c: Servers / Server Finder / Games / Host / Join
     store_ui_handle,           // store_ui.c: Store (windows[13])
@@ -725,12 +727,13 @@ static int l_window_keydown(void *user, const HtmlEvent *ev, const HtmlArg *args
         }
         // Enter in the login form logs in (a real login, account_ui.c, never a fake nickname);
         // KrunkNative: also from the password field, and the reset form submits its step
-        if (html_key_is_enter(ev->key) && (ev->target == html_dom_by_id("accName") || ev->target == html_dom_by_id("accPass")))
+        if (html_key_is_enter(ev->key) && !v10_menu_login_open() && (ev->target == html_dom_by_id("accName") || ev->target == html_dom_by_id("accPass")))
             account_ui_handle("loginAcc", ev, NULL, 0);
         if (html_key_is_enter(ev->key) && account_ui_reset_enter(ev->target)) return 0;
         return 1;
     }
     if (html_key_is_escape(ev->key)) {
+        if (v10_menu_login_escape()) return 0; // the v10 login / register modal goes first
         if (ui->menu_open && menu_window_is_open()) {
             if (object_manager_ui_escape()) return 0; // the Object Manager opened in game: straight back to it
             menu_toggle_window(0);
