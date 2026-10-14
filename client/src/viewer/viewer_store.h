@@ -1,6 +1,6 @@
 #pragma once
-// Krunker v7.1.4 store data (src/data/store.js after load, src/config.js): every store.skins entry
-// (6448, the indices of assets/skins.json), rarities, types, previews, generated into
+// Krunker v10.0.2 store data (the v10 store module after load, v10 config): every store.skins entry
+// (8069, the indices of assets/skins.json; 0-6447 are v7.1.4's, same items), rarities, types, previews, generated into
 // viewer_store_table.c by tools/ui-import/gen_viewer_store.js. Read by the viewer page and the
 // store / inventory / loadout / market UI. Client-only (the shared code and cosmetics_table.c keep
 // their own subsets).
@@ -30,10 +30,11 @@ enum {
 
 typedef struct ViewerSkin {
     const char *name;
-    int type;            // v7 itemTypes: 0 weapon skin, 1 hat, 2 body, 3 melee, 4 spray, 5 dye, 6 waist, 7 face,
-                         // 8 shoe, 9 pet, 10 collectible, 11 wrist, 12 charm, 13 ticket, 14 back, 15 head, 16 player card
+    int type;            // itemTypes: 0 weapon skin, 1 hat, 2 body, 3 melee, 4 spray, 5 dye, 6 waist, 7 face,
+                         // 8 shoe, 9 pet, 10 collectible, 11 wrist, 12 charm, 13 ticket, 14 back, 15 head, 16 player card,
+                         // v10: 17 emoji, 18 paint
     int weapon;          // weapon skins: 1-based weapon index (game.weapons[weapon - 1]), else 0
-    int id;              // model / skin id, -1 when absent
+    int id;              // model / skin id, -1 when absent (or not a number: id_name)
     int rarity;          // store.rarities index
     int seas;            // season, 0 = absent (season 1)
     const char *tex;     // tex as text (number or path), NULL when absent
@@ -54,7 +55,8 @@ typedef struct ViewerSkin {
     float mov_t, puls_t;
     const char *creator; // skin.creator, NULL = "Krunker.io"
     int asset_type;      // assetType: the type whose model / preview directory it uses (BACK 14 -> 2, HEAD 15 -> 1), 0 = type
-    const char *tex_ext; // texExt (player cards: "webp"), NULL = "png"
+    const char *tex_ext; // texExt (player cards, emoji: "webp"), NULL = "png"
+    const char *prev_ext; // prevExt: the preview's own extension (v10), NULL = tex_ext
     const char *file_ext; // fileExt of a hasAnim model, NULL = "gltf"
     float anim_s;        // animS (hasAnim)
     float env;           // env map intensity (env || sameEnv), 0 = none
@@ -75,6 +77,13 @@ typedef struct ViewerSkin {
     float mov_d, mov_e, rot_t; // movD (scroll direction), movE, rotT (texture rotation)
     float spd;           // pets: follow speed (spd || 0.12)
     float left_hold[3], right_hold[3]; // weapon skins: left/rightHoldX/Y/Z (genArm), 0 = the weapon's
+    // ---- v10.0.2
+    const char *id_name; // a non-numeric id (paints: "red"), NULL = id
+    const char *desc;    // desc (paints, consumables)
+    const char *paint_color; // paints: paintColor "#rrggbb", NULL none
+    int title;           // the title id the item grants (0 none)
+    const char *set;     // item set ("vcore"), NULL none
+    int set_min;         // setMin: items of the set to own for its bonus
 } ViewerSkin;
 
 enum {
@@ -99,6 +108,11 @@ enum {
     VS2_EXPLODE = 1 << 18,       // kill VFX
     VS2_SAME_ENV = 1 << 19,      // env map from the texture itself
     VS2_FORCE_ATTACH = 1 << 20,  // weapon skin: forceAttach, the Reflex Sight (attachIndex 0) whatever the pick
+    VS2_TRADABLE = 1 << 21,      // v10: the server's tradable bit (market / trades)
+    VS2_LIMITED_SPIN = 1 << 22,  // v10 limitedSpin: a noSpin item a wheel may still draw (getSpnItems)
+    VS2_PREMIUM_SPIN = 1 << 23,  // v10 premiumSpin: Premium wheel exclusive
+    VS2_PAINTABLE = 1 << 24,     // v10 paintTargets: a paint consumable applies to it
+    VS2_NO_COMP = 1 << 25,       // noComp (noLegs / noBody / noHead): not in competitive
 };
 
 // A dye's colour overrides (players.js generateMeshes): per part up to 4 colours, one picked at
@@ -117,6 +131,7 @@ typedef struct { int set; float mount[3], mount_scl, offset[3], scl; } ViewerCha
 
 typedef struct { const char *name; const char *color; } ViewerRarity;
 typedef struct { int set; float x_off, y_off, z_rota, scl, x_rot; } ViewerPreview;
+typedef struct { int weapon, mid; ViewerPreview preview; } ViewerPreviewRemodel; // store.previews["<weapon>_<mid>"]
 typedef struct { int id; int col; const char *name; } ViewerSkinColor;
 
 typedef enum { VIEWER_LIST_TYPE, VIEWER_LIST_MELEE, VIEWER_LIST_WEAPON } ViewerListKind;
@@ -138,6 +153,8 @@ extern const int g_viewer_rarity_count;
 extern const char *const g_viewer_types[];
 extern const int g_viewer_type_count;
 extern const ViewerPreview g_viewer_previews[VIEWER_PREVIEW_SLOTS];
+extern const ViewerPreviewRemodel g_viewer_preview_remodels[];
+extern const int g_viewer_preview_remodel_count;
 extern const ViewerSkinColor g_viewer_skin_colors[];
 extern const int g_viewer_skin_color_count;
 extern const int g_viewer_current_season;
@@ -164,8 +181,9 @@ const ViewerOptionList *viewer_option_list(ViewerListKind kind, int key, int sea
 // "Name [Rarity]" (or "Default") of option i into buf.
 void viewer_option_label(const ViewerOptionList *list, int i, char *buf, size_t n);
 int viewer_option_value(const ViewerOptionList *list, int i);
-// store.previews[weapon] (or an all-zero entry)
-const ViewerPreview *viewer_preview(int weapon);
+// store.getPreview(skin): store.previews["<weapon>_<mid>"] for a remodel, else store.previews[weapon]
+// (or an all-zero entry)
+const ViewerPreview *viewer_preview(const ViewerSkin *skin);
 // UTILS.getPreview(skin, store) as an asset-relative path ("textures/previews/....png",
 // "textures/sprays/<id>.png"); the page URL is html_dom_asset_url() of it.
 void viewer_skin_preview_path(const ViewerSkin *skin, char *path, size_t n);

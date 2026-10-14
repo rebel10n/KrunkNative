@@ -10,9 +10,9 @@ kn_release_bins: [kn_brain, kn_migrate, kn_dbcopy]
 kn_updates_enabled: true
 kn_release_migrations: true
 
-# config.currentSeason (roles/kn_brain/defaults: kn_brain_current_season). Krunker v7.1.4 is
-# season 7; raising it rolls the season over when kn_brain restarts.
-kn_brain_current_season: 7
+# config.currentSeason (roles/kn_brain/defaults: kn_brain_current_season). Krunker v10.0.2 is
+# season 10; raising it rolls the season over when kn_brain restarts.
+kn_brain_current_season: 10
 
 # Staff accounts: highest privilege (developer, which also sets moderator).
 kn_brain_developers: [ading2210, ASA_z3db0y, Joelmatic, butterfly, Krunker, synaptic, "123"]

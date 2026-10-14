@@ -11,14 +11,17 @@ v7.1.4 mode (``--v7``, ``make assets-import-v7``): the in-place v7 upgrade
 (doc/v7/decisions.md "GLTF and assets"). Copies every directory the v7 client loads game
 content from (``V7_ASSET_DIRS``: OBJ/GLTF/GLB models of props, weapons and the 17 cosmetic
 item types, their textures and previews, sounds, video textures, user-assets, scares) from the
-v7.1.4 ``public/`` tree, writes ``assets/skins.json`` (the v7 store table, 6448 skins, unpacked
-from ``public/skins.jspck`` by ``v7_skins.js`` exactly as the v7 client does) and
-``assets/previews.json`` (v7's item type enum, ``src/viewer.js``). The table is ``store.skins``
-after v7's ``store.js`` loaded (templates and load-time flags applied), so kn_brain, the bots
-and the client read v7's own noSpin / noSale / limited / limT values. The skin table write is
-refused when it would move an existing store index (the array position is the inventory
-``skin_id``): every index of the current ``assets/skins.json`` must keep its ``id``, ``weapon``
-and item type (v7 retyped HAT 1 -> HEAD 15 and BODY 2 -> BACK 14; those keep their slot).
+v7.1.4 ``public/`` tree, writes ``assets/skins.json`` and ``assets/previews.json`` (v7's item
+type enum, ``src/viewer.js``). ``assets/skins.json`` is the Krunker v10.0.2 store table (8069
+items; its first 6448 are v7.1.4's, same indices), unpacked from v10's gapi ``/data/skins``
+response by ``v10_skins.js`` exactly as the v10 client does; the files of the items v7.1.4 never
+had come from ``live_assets_v10.lock`` (``fetch_live_assets.py``). The table is ``store.skins``
+after v10's store module loaded (templates and applyShopMutations flags applied), so kn_brain,
+the bots and the client read v10's own noSpin / noSale / limited / limT values. The skin table
+write is refused when it would move an existing store index (the array position is the
+inventory ``skin_id``): every index of the current ``assets/skins.json`` must keep its ``id``,
+``weapon`` and item type (v7 retyped HAT 1 -> HEAD 15 and BODY 2 -> BACK 14; those keep their
+slot). ``v7_skins.js`` still prints the v7.1.4 table.
 
 v7 serves the player card banners (``textures/playercards/card_<id>.webp``) as WebP, which
 the native HTML engine can't decode (stb_image has none; client/src/html/engine/image.c): the
@@ -32,7 +35,7 @@ replace the v3 files of the same name. The client builds asset URLs with
 ``ensure_asset_file()``; deploy/ansible role kn_web syncs ``assets/`` to the asset host and
 rehashes ``assets/version.txt``, so the ``?v=`` URLs pick the new files up.
 
-usage: python3 -I tools/ui-import/game_assets.py [--v7] [--assets DIR] [--src PUBLIC] [--check] [--size]
+usage: python3 -I tools/ui-import/game_assets.py [--v7 [--tables]] [--assets DIR] [--src PUBLIC] [--check] [--size]
 """
 
 import argparse
@@ -180,28 +183,15 @@ def webp_sidecars(assets, dirs, check, quiet=False):
     return count, differ
 
 
-# ---------------------------------------------------------------- v7 skin table
+# ---------------------------------------------------------------- store skin table (v10)
 
-def v7_skins(v7_root):
+def v10_skins():
+    """The v10.0.2 store table (tools/ui-import/v10_skins.js: the pinned gapi /data/skins response)."""
     node = shutil.which("node")
     if not node:
-        sys.exit("game_assets.py: node is required to unpack skins.jspck (tools/ui-import/v7_skins.js)")
-    out = subprocess.run([node, os.path.join(HERE, "v7_skins.js"), v7_root], check=True, stdout=subprocess.PIPE).stdout
-    skins = json.loads(out)
-    # Cross-check against the reference's readable dump (skins.json = the same table after
-    # store.js loaded, plus `thumbnail`): every entry must be identical.
-    ref_path = os.path.join(v7_root, "skins.json")
-    if os.path.exists(ref_path):
-        with open(ref_path, encoding="utf-8") as fh:
-            ref = json.load(fh)
-        if len(ref) != len(skins):
-            sys.exit("game_assets.py: skins.jspck has %d skins, skins.json %d" % (len(skins), len(ref)))
-        for i, (a, b) in enumerate(zip(skins, ref)):
-            b = dict(b)
-            b.pop("thumbnail", None)
-            if a != b:
-                sys.exit("game_assets.py: skins.jspck (store.js applied) and skins.json disagree at index %d" % i)
-    return out, skins
+        sys.exit("game_assets.py: node is required to unpack the v10 skin table (tools/ui-import/v10_skins.js)")
+    out = subprocess.run([node, os.path.join(HERE, "v10_skins.js")], check=True, stdout=subprocess.PIPE).stdout
+    return out, json.loads(out)
 
 
 def base_type(t):
@@ -230,8 +220,8 @@ def skin_index_report(old, new):
 
 
 def import_v7_tables(v7_root, assets, check):
-    """assets/skins.json + assets/previews.json. Returns the number of differing files."""
-    raw, skins = v7_skins(v7_root)
+    """assets/skins.json (v10's table) + assets/previews.json. Returns the number of differing files."""
+    raw, skins = v10_skins()
     differ = 0
     dest = os.path.join(assets, "skins.json")
     old = []
@@ -274,6 +264,7 @@ def main():
     ap.add_argument("--assets", default=os.path.join(REPO, "assets"), help="asset tree (default <repo>/assets)")
     ap.add_argument("--src", default=None, help="Krunker public/ tree (default: v3.1.1, or v7.1.4 with --v7)")
     ap.add_argument("--v7", action="store_true", help="import the Krunker v7.1.4 content set (models, textures, sounds, skins.json, ...)")
+    ap.add_argument("--tables", action="store_true", help="with --v7: only skins.json and previews.json (make store-import)")
     ap.add_argument("--check", action="store_true", help="only report missing/different files (exit 1 if any)")
     ap.add_argument("--size", action="store_true", help="with --check: only print the size summary, not every file")
     args = ap.parse_args()
@@ -282,6 +273,12 @@ def main():
     if not os.path.isdir(src):
         sys.exit("game_assets.py: %s not found" % src)
     dirs = V7_ASSET_DIRS if args.v7 else GAME_ASSET_DIRS
+    if args.v7 and args.tables:
+        tables = import_v7_tables(os.path.dirname(src.rstrip("/")), args.assets, args.check)
+        print("tables: %d %s (skins.json, previews.json)" % (tables, "differ" if args.check else "written"))
+        if args.check and tables:
+            sys.exit(1)
+        return
 
     total, total_bytes, written, written_bytes, new = sync_dirs(src, args.assets, dirs, args.check, quiet=args.size)
     tables = import_v7_tables(os.path.dirname(src.rstrip("/")), args.assets, args.check) if args.v7 else 0

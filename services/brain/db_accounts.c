@@ -517,17 +517,20 @@ const kn_proc P_ENSURE_CENTRAL = {"ensure_central", NULL, run_ensure_central};
 
 /* ------------------------------------------------------------------ store (postgres/0106 for the KR wheel / daily reward) */
 
-/* v7.1.4 prize wheel spin (store.c), C on every driver (one transaction):
- * (id, ref, price_each, skins "a,b,c", ticket) -> {funds}. A ticket >= 0 is consumed first
- * (a TICKET item's spinWheel: no KR); else every roll is charged price_each with its own
- * kr_transactions row. Each won skin is granted with a skin_transactions row (source "spin",
- * ref "<wheel>:<price_each>" or "t<ticket>:0": the spin history reads them back). */
+/* v7.1.4 / v10.0.2 prize wheel spin (store.c), C on every driver (one transaction):
+ * (id, ref, price_each, skins "a,b,c", ticket) -> {funds}. A ticket >= 0 is consumed first, one
+ * per roll (a TICKET item's wheel or a wheel's ticketIndex: no KR; v10 multi-spins take `multi`
+ * tickets); else every roll is charged price_each with its own kr_transactions row. Each won skin
+ * is granted with a skin_transactions row (source "spin", ref "<wheel>:<price_each>" or
+ * "t<ticket>:0": the spin history reads them back). */
 static kn_db_result *run_spin_multi(kn_dbconn *c, int n, const char *const *p) {
     Dbx x = {c, NULL};
     const int64_t id = PI(0), price = PI(2), ticket = P(4) ? PI(4) : -1;
     const char *ref = P(1), *list = P(3);
     if (!list || !*list) return kn_db_result_user_error("Error generating item");
-    if (ticket >= 0) db_add_skin(&x, id, ticket, -1, "ticket", ref, NULL);
+    int64_t rolls = 1;
+    for (const char *q = list; *q; q++) rolls += *q == ',';
+    if (ticket >= 0) db_add_skin(&x, id, ticket, -rolls, "ticket", ref, NULL);
     for (const char *q = list; *q && !dbx_failed(&x);) {
         char *end = NULL;
         const long long skin = strtoll(q, &end, 10);

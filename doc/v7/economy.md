@@ -13,6 +13,10 @@ the hub UI in `client/src/ui/social_ui.c` (native and web), the toast in `accoun
 Tests: `services/brain/tests/economy_test.py`, `economy_hub_e2e.py` (native), `economy_web_e2e.py`
 (web).
 
+The store table these rules read is Krunker v10.0.2's (8069 items, `assets/skins.json`): v10's
+rarities are v7.1.4's unchanged, and indices 0-6447 keep their items, so no rule below changes;
+v10 adds one bit, `tradable` (`SkinInfo.tradable`, never true where the v7 rule already refuses).
+
 ## 1. Audit
 
 "Before" is origin/main at f75b57b (the v3.1.1-era social port: `social_data.c` handlers, the

@@ -1,35 +1,41 @@
 #!/usr/bin/env node
-// Generates client/src/viewer/viewer_store_table.c: the Krunker v7.1.4 store data the client
+// Generates client/src/viewer/viewer_store_table.c: the Krunker v10.0.2 store data the client
 // reads (viewer page, store / inventory / spin wheel / market / loadout UI, weapon and cosmetic
-// skins): every store.skins entry, rarities, types, previews (src/data/store.js) and
-// currentSeason / skinColors (src/config.js), plus the viewer's dropdown option lists computed
-// with src/viewer.js's own sorting (f460 / f459 / the melee list).
+// skins): every store.skins entry, rarities, types, previews (the v10 store module) and
+// currentSeason / skinColors (v10 config), plus the viewer's dropdown option lists computed
+// with v7 src/viewer.js's own sorting (f460 / f459 / the melee list); and
+// shared/src/store_spins_table.c: v10's prize wheels and item pools (gapi /data/spins), which
+// kn_brain (services/brain/store.c) and the client parse (shared/include/store_spins.h).
 //
 // The skins are assets/skins.json (the table kn_brain and the bots use, written by
-// game_assets.py --v7), run through v7's store.js again (idempotent) so the table is exactly
-// v7's store.skins; everything else is evaluated from the v7.1.4 reference sources (v7_store.js).
-//   node tools/ui-import/gen_viewer_store.js [assets/skins.json] [out.c] [Krunker_v7.1.4 root]
-// (The v3.1.1 table came from the v3 viewer.js.map; see git history before the v7 upgrade.)
+// game_assets.py from v10_skins.js), run through v10's applyShopMutations again (idempotent) so
+// the table is exactly v10's store.skins; everything else is v10's store module (v10_store.js).
+//   node tools/ui-import/gen_viewer_store.js [assets/skins.json] [out.c] [spins out.c]
+// (The v7.1.4 table came from v7_store.js, the v3.1.1 one from the v3 viewer.js.map; see git history.)
 'use strict';
 const fs = require('fs');
 const path = require('path');
-const { V7_ROOT, loadStore, loadConfig } = require('./v7_store.js');
+const { loadStore, loadConfig, loadSpins } = require('./v10_store.js');
 
 const REPO = path.resolve(__dirname, '..', '..');
 // viewer_page.py (tools/ui-import/import.py) still passes the v3.1.1 viewer.js.map: ignore a .map
-// argument and use the v7 sources.
+// argument.
 const args = process.argv.slice(2).filter((a) => !a.endsWith('.map'));
 const SKINS = args[0] || path.join(REPO, 'assets/skins.json');
 const OUT = args[1] || path.join(REPO, 'client/src/viewer/viewer_store_table.c');
-const ROOT = args[2] || V7_ROOT;
+const SPINS_OUT = args[2] || path.join(REPO, 'shared/src/store_spins_table.c');
 
-const { store } = loadStore(ROOT, JSON.parse(fs.readFileSync(SKINS, 'utf8')));
-const config = loadConfig(ROOT);
+const { store } = loadStore(JSON.parse(fs.readFileSync(SKINS, 'utf8')));
+const config = loadConfig();
+const spins = loadSpins();
 
 const cstr = (s) => s == null ? 'NULL' : '"' + String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/[^\x20-\x7e]/g, (c) => {
   return Array.from(Buffer.from(c, 'utf8')).map((b) => '\\' + b.toString(8).padStart(3, '0')).join('');
 }) + '"';
-const num = (v, d) => (typeof v === 'number' && isFinite(v)) ? v : d;
+// v10's table has a few numbers as strings ("mScl": "0.0005", P90 7371); JS arithmetic takes them
+const num = (v, d) => (typeof v === 'number' && isFinite(v)) ? v
+  : (typeof v === 'string' && v.trim() !== '' && isFinite(Number(v))) ? Number(v) : d;
+const truthy = (v) => !!v && v !== 'false';
 const f = (v) => { const s = String(v); return (s.includes('.') || s.includes('e') ? s : s + '.0') + 'f'; };
 const col = (v) => typeof v === 'number' ? v : (typeof v === 'string' && /^#?[0-9a-f]{6}$/i.test(v) ? parseInt(v.replace('#', ''), 16) : -1);
 
@@ -45,19 +51,21 @@ const rows = store.skins.map((s, i) => {
   flag(s.pat != null, 'VS_PAT'); flag(typeof s.tex === 'number', 'VS_TEX_NUM'); flag(s.rgb, 'VS_RGB');
   flag(s.noSpin, 'VS_NO_SPIN');
   // store.getSpnItems: limited / blackM / opensea / limT (limType) / limG items are never in the
-  // pool of a wheel without limType / limGroup (illicit is v3.1.1's)
+  // pool of a wheel without limType / limGroup / tag (illicit is v3.1.1's)
   flag(s.limited || s.illicit || s.limT || s.blackM || s.opensea || s.limG, 'VS_NOT_IN_WHEEL');
   flag(s.free, 'VS_FREE'); flag(s.hasAnim, 'VS_HAS_ANIM');
   const fields = [
     `.name = ${cstr(s.name)}`,
-    `.type = ${num(s.type, 0)}`, `.weapon = ${num(s.weapon, 0)}`, `.id = ${num(s.id, -1)}`,
+    `.type = ${num(s.type, 0)}`, `.weapon = ${num(s.weapon, 0)}`, `.id = ${typeof s.id === 'string' && num(s.id, null) === null ? -1 : num(s.id, -1)}`,
     `.rarity = ${num(s.rarity, 0)}`, `.seas = ${num(s.seas, 0)}`,
     `.tex = ${cstr(tex)}`, `.pat = ${num(s.pat, -1)}`, `.mid = ${num(s.mid, -1)}`, `.mid_t = ${num(s.midT, -1)}`,
     `.flags = ${flags.length ? flags.join(' | ') : '0'}`,
   ];
+  if (typeof s.id === 'string' && num(s.id, null) === null) fields.push(`.id_name = ${cstr(s.id)}`); // paints: "red"
   if (s.creator) fields.push(`.creator = ${cstr(s.creator)}`);
   if (s.assetType != null) fields.push(`.asset_type = ${s.assetType}`);
   if (s.texExt) fields.push(`.tex_ext = ${cstr(s.texExt)}`);
+  if (s.prevExt) fields.push(`.prev_ext = ${cstr(s.prevExt)}`);
   if (s.fileExt) fields.push(`.file_ext = ${cstr(s.fileExt)}`);
   if (s.hasAnim) fields.push(`.anim_s = ${f(num(s.animS, 1))}`);
   if (s.env || s.sameEnv) fields.push(`.env = ${f(num(s.env, 3))}`);
@@ -86,12 +94,20 @@ const rows = store.skins.map((s, i) => {
   flag2(s.shaderNum != null, 'VS2_SHADER'); flag2(s.video != null, 'VS2_VIDEO'); flag2(s.particle != null, 'VS2_PARTICLE');
   flag2(s.snd, 'VS2_SND'); flag2(s.killSnd, 'VS2_KILL_SND'); flag2(s.stepSnd, 'VS2_STEP_SND'); flag2(s.jumpSnd, 'VS2_JUMP_SND');
   flag2(s.reloadSnd, 'VS2_RELOAD_SND'); flag2(s.spraySnd != null, 'VS2_SPRAY_SND'); flag2(s.explode, 'VS2_EXPLODE');
-  flag2(s.sameEnv, 'VS2_SAME_ENV'); flag2(s.forceAttach, 'VS2_FORCE_ATTACH');
+  flag2(s.sameEnv, 'VS2_SAME_ENV'); flag2(truthy(s.forceAttach), 'VS2_FORCE_ATTACH');
+  // v10.0.2: the server's tradable bit, limitedSpin (a noSpin item a wheel may still draw),
+  // premiumSpin, paint consumables / paintable items, item sets
+  flag2(s.tradable, 'VS2_TRADABLE'); flag2(s.limitedSpin, 'VS2_LIMITED_SPIN'); flag2(s.premiumSpin, 'VS2_PREMIUM_SPIN');
+  flag2(s.paintTargets, 'VS2_PAINTABLE'); flag2(s.noComp, 'VS2_NO_COMP');
   if (flags2.length) fields.push(`.flags2 = ${flags2.join(' | ')}`);
   if (s.shaderNum != null) fields.push(`.shader_num = ${s.shaderNum}`);
   if (s.video != null) fields.push(`.video = ${s.video}`);
   if (s.particle != null) fields.push(`.particle = ${s.particle}`);
   if (s.spraySnd != null) fields.push(`.spray_snd = ${num(s.spraySnd, 0)}`);
+  if (s.desc) fields.push(`.desc = ${cstr(s.desc)}`);
+  if (s.paintColor) fields.push(`.paint_color = ${cstr(s.paintColor)}`);
+  if (s.title != null) fields.push(`.title = ${num(s.title, 0)}`);
+  if (s.set) fields.push(`.set = ${cstr(s.set)}`, `.set_min = ${num(s.setMin, 0)}`);
   opt('legLen', 'leg_len', 0); opt('sitOffX', 'sit_off_x', 0); opt('syRot', 'sy_rot', 0); opt('szRot', 'sz_rot', 0);
   opt('glowInt', 'glow_int', 0); opt('minGlo', 'min_glo', 0); opt('rgbS', 'rgb_s', 0); opt('rgbT', 'rgb_t', 0);
   opt('rAnimT', 'r_anim_t', 0); opt('rAnimM', 'r_anim_m', 0); opt('movD', 'mov_d', 0); opt('movE', 'mov_e', 0);
@@ -116,14 +132,17 @@ const dyeRows = store.skins.filter((s) => s.type === 5).map((s) => {
   return `    {${s.index}, {${parts.join(', ')}}},`;
 });
 
-// The weapons' charm mounts (v7 src/data/weapons.js charm, charmM{X,Y,Z}Off, charmMScl,
-// charm{X,Y,Z}Off, charmScl) from the WP-B dump shared/tests/data/v7/weapons.json, by weapon id.
-const weaponsJson = JSON.parse(fs.readFileSync(path.join(REPO, 'shared/tests/data/v7/weapons.json'), 'utf8'));
+// The weapons' charm mounts (weapons.js charm, charmM{X,Y,Z}Off, charmMScl, charm{X,Y,Z}Off,
+// charmScl) from the v10 weapon dump shared/tests/data/v10/weapons.json, by weapon id.
+const weaponsJson = JSON.parse(fs.readFileSync(path.join(REPO, 'shared/tests/data/v10/weapons.json'), 'utf8'));
 const charmRows = weaponsJson.map((w, id) => w && w.charm ? `    [${id}] = {.set = 1, .mount = {${f(num(w.charmMXOff, 0))}, ${f(num(w.charmMYOff, 0))}, ${f(num(w.charmMZOff, 0))}}, .mount_scl = ${f(num(w.charmMScl, 1))}, .offset = {${f(num(w.charmXOff, 0))}, ${f(num(w.charmYOff, 0))}, ${f(num(w.charmZOff, 0))}}, .scl = ${f(num(w.charmScl, 1))}},` : null).filter(Boolean);
 
-const previews = Object.keys(store.previews).map((w) => {
-  const p = store.previews[w];
-  return `    [${w}] = {.set = 1, .x_off = ${f(num(p.xOff, 0))}, .y_off = ${f(num(p.yOff, 0))}, .z_rota = ${f(num(p.zRota, 0))}, .scl = ${f(num(p.scl, 0))}, .x_rot = ${f(num(p.xRot, 0))}},`;
+const previewInit = (p) => `.set = 1, .x_off = ${f(num(p.xOff, 0))}, .y_off = ${f(num(p.yOff, 0))}, .z_rota = ${f(num(p.zRota, 0))}, .scl = ${f(num(p.scl, 0))}, .x_rot = ${f(num(p.xRot, 0))}`;
+const previews = Object.keys(store.previews).filter((w) => /^\d+$/.test(w)).map((w) => `    [${w}] = {${previewInit(store.previews[w])}},`);
+// v10 getPreview: store.previews["<weapon>_<mid>"] for a remodel first
+const remodelPreviews = Object.keys(store.previews).filter((w) => /^\d+_\d+$/.test(w)).map((w) => {
+  const [weapon, mid] = w.split('_');
+  return `    {${weapon}, ${mid}, {${previewInit(store.previews[w])}}},`;
 });
 
 // The option lists of the viewer's dat.gui dropdowns, computed like v7 src/viewer.js (f460(type),
@@ -164,8 +183,8 @@ for (const w of weaponIds) for (const season of seasons) {
 const listData = lists.map((l, i) => `static const short list_${i}[] = {${l.opts.map((o) => o[0] + ', ' + o[1]).join(', ')}};`);
 const listIndex = lists.map((l, i) => `    {${l.kind}, ${l.key}, ${l.season}, ${l.opts.length}, list_${i}},`);
 
-const out = `// Generated by tools/ui-import/gen_viewer_store.js from assets/skins.json and the Krunker v7.1.4
-// sources (src/data/store.js, src/config.js, src/viewer.js). Do not edit: re-run the generator.
+const out = `// Generated by tools/ui-import/gen_viewer_store.js from assets/skins.json and the Krunker v10.0.2
+// store module (tools/ui-import/v10_store.js; viewer lists: v7 src/viewer.js). Do not edit: re-run the generator.
 #include "viewer_store.h"
 
 const ViewerSkin g_viewer_skins[] = {
@@ -187,6 +206,12 @@ const int g_viewer_type_count = ${store.types.length};
 const ViewerPreview g_viewer_previews[VIEWER_PREVIEW_SLOTS] = {
 ${previews.join('\n')}
 };
+
+// store.previews["<weapon>_<mid>"]: a remodel's own offsets (v10 getPreview)
+const ViewerPreviewRemodel g_viewer_preview_remodels[] = {
+${remodelPreviews.join('\n')}
+};
+const int g_viewer_preview_remodel_count = ${remodelPreviews.length};
 
 // config.skinColors
 const ViewerSkinColor g_viewer_skin_colors[] = {
@@ -215,11 +240,30 @@ ${listIndex.join('\n')}
 };
 const int g_viewer_list_count = ${lists.length};
 `;
+// shared/src/store_spins_table.c: gapi /data/spins as one JSON text (store_spins.c parses it), the
+// wheels in store.wheels order (the index the "spin" frame and a ticket's spinWheelId name) and
+// the item pools (store indices). Season: the wheels without one roll config.currentSeason.
+const spinsJson = JSON.stringify({ season: config.currentSeason, wheels: spins.wheels, itemPools: spins.itemPools });
+const spinsOut = `// Generated by tools/ui-import/gen_viewer_store.js from tools/ui-import/v10_spins.jspck (Krunker
+// v10.0.2 gapi /data/spins: prize wheels and item pools) and v10's config.currentSeason.
+// Do not edit: re-run the generator. Parsed by shared/src/store_spins.c.
+#include "store_spins.h"
+
+const char g_store_spins_json[] =
+${spinsJson.match(/.{1,100}/g).map((c) => '    ' + cstr(c)).join('\n')};
+`;
+
+const outputs = [[OUT, out, rows.length + ' skins'], [SPINS_OUT, spinsOut, spins.wheels.length + ' wheels, ' + Object.keys(spins.itemPools).length + ' pools']];
 if (process.env.GEN_CHECK) {
-  const cur = fs.existsSync(OUT) ? fs.readFileSync(OUT, 'utf8') : '';
-  if (cur !== out) { console.log('[gen_viewer_store] ' + path.relative(REPO, OUT) + ' is out of date'); process.exit(1); }
-  console.log('[gen_viewer_store] ' + path.relative(REPO, OUT) + ' up to date (' + rows.length + ' skins)');
-  process.exit(0);
+  let stale = 0;
+  for (const [file, text, what] of outputs) {
+    const cur = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+    if (cur !== text) { console.log('[gen_viewer_store] ' + path.relative(REPO, file) + ' is out of date'); stale++; }
+    else console.log('[gen_viewer_store] ' + path.relative(REPO, file) + ' up to date (' + what + ')');
+  }
+  process.exit(stale ? 1 : 0);
 }
-fs.writeFileSync(OUT, out);
-console.log('[gen_viewer_store] wrote ' + path.relative(REPO, OUT) + ' (' + rows.length + ' skins)');
+for (const [file, text, what] of outputs) {
+  fs.writeFileSync(file, text);
+  console.log('[gen_viewer_store] wrote ' + path.relative(REPO, file) + ' (' + what + ')');
+}

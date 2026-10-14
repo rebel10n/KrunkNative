@@ -21,6 +21,8 @@ set(KN_BRAIN_SOURCES
     economy.c
     creations.c
     store.c
+    ../../shared/src/store_spins.c        # v10 wheels and item pools (shared/include/store_spins.h)
+    ../../shared/src/store_spins_table.c  # generated: gapi /data/spins (tools/ui-import/gen_viewer_store.js)
     shared_shim.c
     # coord-auth: roles, central auth, server finder
     roles.c

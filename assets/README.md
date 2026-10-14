@@ -26,8 +26,13 @@ file of the same name when v7 changed it:
 | `videos/` | `public/videos/` | skin `video` textures |
 | `user-assets/` | `public/user-assets/` | map/AI user assets (`model.gltf`/`.glb`, `sound.mp3`, ...) |
 | `scares/` | `public/scares/` | jump-scare trigger media |
-| `skins.json` | `public/skins.jspck` | the v7 store table (6448 skins, 17 item types): unpacked with v7's own `src/shim/jspck.js` and run through v7's `store.js` load loop (templates, noSpin / noSale / limited / limT fixups) by `tools/ui-import/v7_skins.js`; identical to the reference's `skins.json` minus `thumbnail` |
+| `skins.json` | gapi `/data/skins` | the v10.0.2 store table (8069 skins, 19 item types): unpacked with v7.1.4's `src/shim/jspck.js` and run through v10's `applyShopMutations` (templates, noSpin / noSale / limited / limT / tradable fixups) by `tools/ui-import/v10_skins.js`; the pinned live response is `~/.cache/kn-v10/live/api/skins.jspck` (sha256 in `tools/ui-import/v10_store.js`, override with `KN_V10_SKINS`), refreshed by `make store-import` |
 | `previews.json` | `previews.json` | v7's item type enum (`src/viewer.js`) |
+
+The store items v7.1.4 never had (index 6448+) come from `tools/ui-import/live_assets_v10.lock`
+(`fetch_live_assets.py install --lock tools/ui-import/live_assets_v10.lock`): models, textures and
+previews from the live asset host. `make store-check` lists any still missing
+(`tools/ui-import/v10_store_assets.js`).
 
 `skins.json` is the store table every component indexes by **array position**
 (`services/brain/store.c`, `shared/src/bots.c`, inventory `skin_id`): the importer refuses to

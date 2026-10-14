@@ -221,6 +221,25 @@ class Internal:
                 return msg.get("err"), msg.get("data")
 
 
+def c_string_literal(path, name):
+    """The text of a generated `const char name[] = "..." "...";` (C escapes: \\ooo bytes, \\" \\\\)."""
+    src = open(path, encoding="utf8").read().split(name + "[] =", 1)[1].split(";\n", 1)[0]
+    out = bytearray()
+    for piece in re.findall(r'"((?:[^"\\]|\\.)*)"', src):
+        i = 0
+        while i < len(piece):
+            if piece[i] == "\\" and piece[i + 1] in "01234567":
+                out.append(int(piece[i + 1:i + 4], 8))
+                i += 4
+            elif piece[i] == "\\":
+                out += piece[i + 1].encode()
+                i += 2
+            else:
+                out += piece[i].encode()
+                i += 1
+    return out.decode("utf8")
+
+
 # ---------------------------------------------------------------- the test
 
 FAILS = []
@@ -462,77 +481,124 @@ async def scenario(base, internal_url, secret):
         r = await a.call("po", "delC", r[4][0]["map_id"], 0)
         check(r[1] == "SUCCESS", "creator deletes the map")
 
-    # store: v7.1.4 prize wheels (single, 10x multi, tickets), spin history, Free KR wheel,
-    # daily reward; ranked elo deltas
+    # store: v10.0.2 prize wheels (store.wheels + item pools of gapi /data/spins: single, 10x
+    # multi, ticket-only wheels, Universal tickets, a v7 ticket's own wheel), spin history, Free KR
+    # wheel, daily reward; ranked elo deltas
     carol = "carol" + stamp
     with open(os.path.join(ROOT, "assets", "skins.json")) as fp:
         skins = json.load(fp)
-    season = 7  # accounts.current_season (default): store wheels roll this season's items
+    spins = json.loads(c_string_literal(os.path.join(ROOT, "shared", "src", "store_spins_table.c"), "g_store_spins_json"))
+    wheels, pools = spins["wheels"], spins["itemPools"]
 
-    def slice_of(rarities, roll):  # the wheel slice a roll in [0, 100) lands on
-        for i, share in enumerate(rarities):
+    def slice_of(odds, roll):  # the wheel slice a roll in [0, 100) lands on
+        for i, share in enumerate(odds):
             if roll < share:
                 return i
             roll -= share
-        return max(i for i, share in enumerate(rarities) if share > 0)
+        return max(i for i, share in enumerate(odds) if share > 0)
 
-    def check_rolls(rolls, items, rarities, big_rar, what):
+    def check_rolls(rolls, items, rarities, big_rar, what, season):
         ok = len(rolls) == len(items) and all(0 <= n < 100 for n in rolls)
         for n, i in zip(rolls, items):
             k, r = skins[i], slice_of(rarities, n)
             ok = ok and (k.get("rarity", 0) == r or (big_rar and r >= big_rar and k.get("rarity", 0) >= big_rar))
-            ok = ok and (k.get("mSeas") or k.get("seas", 1) == season) and not k.get("noSpin") and not k.get("limT")
-        check(ok, what + ": every item has the rarity of its roll's slice, this season's pool: %r" % list(zip(rolls, items)))
+            ok = ok and (k.get("mSeas") or k.get("seas", 1) == season) and (not k.get("noSpin") or k.get("limitedSpin")) \
+                and not k.get("limT")
+        check(ok, what + ": every item has the rarity of its roll's slice, the season's pool: %r" % list(zip(rolls, items)))
 
-    starter, heroic = [75, 22, 3, 0, 0, 0], [0, 48, 35, 14, 2.49, 0.5, 0.01]
+    def check_pools(rolls, items, wheel, what):  # v10 pool wheels: slice i draws from itemPools[pools[i]]
+        w = wheels[wheel]
+        ok = len(rolls) == len(items) and all(0 <= n < 100 for n in rolls)
+        for n, i in zip(rolls, items):
+            ok = ok and i in pools[w["pools"][slice_of(w["poolWeights"], n)]]["items"]
+        check(ok, what + ": every item is in its slice's item pool: %r" % list(zip(rolls, items)))
+
+    check([w["name"] for w in wheels[:4]] == ["Starter", "Elite", "Heroic", "Ultra"] and wheels[5]["name"] == "Free KR",
+          "v10 wheel order: %r" % [w["name"] for w in wheels])
     async with Social(ws_url, json_mode=True) as c:
         r = await c.call("a", "a", 0, [carol, "carol_pw1", None])
         carol_id = r[2]
         r = await c.call("spin", "spin", 0, None, False)
         check(r[1] is None and isinstance(r[3], int) and r[4] == 950 and r[5] is None, "Starter wheel spin: %r" % r)
-        check_rolls([r[2]], [r[3]], starter, 0, "Starter spin")
+        check_pools([r[2]], [r[3]], 0, "Starter spin")
+        check(r[3] >= 6448 and r[3] in pools["s10PoolUncommon"]["items"] + pools["s10PoolRare"]["items"] + pools["s10PoolEpic"]["items"],
+              "the Starter wheel awards an s10Pool item (a v10 item): %r" % r[3])
         won = [r[3]]
         r = await c.call("spin", "spin", 0, None, True)
         check(r[1] is None and len(r[2]) == 10 and len(r[3]) == 10 and r[4] == 450, "Starter 10x spin costs 10 x 50 KR: %r" % r)
-        check_rolls(r[2], r[3], starter, 0, "Starter 10x")
+        check_pools(r[2], r[3], 0, "Starter 10x")
         won += r[3]
         r = await c.call("0", "r", "market", "inventory", carol_id, carol, None, 0)
         inv = {x["i"]: x.get("c", 1) for x in r[3]}
         check(all(i in inv for i in won), "won skins in the inventory")
         r = await c.call("spin", "spin", 2, None, True)
         check(r[1] == "Not enough KR", "Heroic 10x needs 5000 KR: %r" % r)
-        for wheel, err in ((3, "Wheel unavailable"), (4, "Wheel unavailable"), (9, "Invalid spin")):
+        # Elite and Ultra: ticket only; 4 Xmas Comm. and 9 Remix 9: locked (ended); 99: no wheel
+        for wheel, err in ((1, "Wheel unavailable"), (3, "Wheel unavailable"), (4, "Wheel unavailable"),
+                           (9, "Wheel unavailable"), (99, "Invalid spin")):
             r = await c.call("spin", "spin", wheel, None, False)
             check(r[1] == err, "wheel %d refused (%s): %r" % (wheel, err, r))
         r = await c.call("spin", "spin", None, 5, False)
         check(r[1] == "Invalid spin", "only TICKET items redeem: %r" % r)
+        hat = next(i for i, k in enumerate(skins[:6448]) if k.get("type") == 1 and i > 0)  # a v7.1.4 hat
         async with Internal(internal_url, secret) as g:
-            err, _ = await g.op("give_skin", id=carol_id, skin=6426, source="test")  # Season 7 Ultra Ticket
-            check(err is None, "give an Ultra ticket")
+            for skin in (6426, 8067, 8067, 8068, 7993, hat):  # S7 Ultra, 2 Universal Starter, Universal Elite / Spin, a v7 hat
+                err, _ = await g.op("give_skin", id=carol_id, skin=skin, source="test")
+                check(err is None, "give skin %d" % skin)
             for _ in range(12):  # 6000 KR (one reward is capped at 500)
                 err, _ = await g.op("rewards", items=[[carol_id, 500]])
+            err, acc = await g.op("get", id=carol_id)
+            owned = {e["ind"]: e["cnt"] for e in ((acc or {}).get("data") or [None] * 11)[10] or []} if acc else {}
+            check(err is None and owned.get(hat) == 1 and owned.get(8067) == 2,
+                  "the game server's account view lists a v7 item and the v10 tickets: %r" % [(k, v) for k, v in owned.items() if k in (hat, 8067)])
+        # a v7.1.4 ticket's own spinWheel (season 7 Ultra odds)
         r = await c.call("spin", "spin", None, 6426, False)
-        check(r[1] is None and isinstance(r[3], int) and r[4] == 6450 and r[5] == 6426, "Ultra ticket redeemed, no KR: %r" % r)
-        check_rolls([r[2]], [r[3]], [0, 28, 53, 13.5, 4.46, 1, 0.04], 5, "Ultra ticket")
+        check(r[1] is None and isinstance(r[3], int) and r[4] == 6450 and r[5] == 6426, "S7 Ultra ticket redeemed, no KR: %r" % r)
+        check_rolls([r[2]], [r[3]], [0, 28, 53, 13.5, 4.46, 1, 0.04], 5, "S7 Ultra ticket", 7)
         r = await c.call("spin", "spin", None, 6426, False)
         check(r[1] == "Item not owned", "a ticket redeems once: %r" % r)
+        # v10 Universal tickets: store.wheels[spinWheelId], paid with the ticket (no KR)
+        r = await c.call("spin", "spin", None, 8067, False)
+        check(r[1] is None and r[4] == 6450 and r[5] == 8067, "Universal Starter Ticket: %r" % r)
+        check_pools([r[2]], [r[3]], 0, "Universal Starter Ticket")
+        r = await c.call("spin", "spin", 0, 8067, False)  # the Starter wheel's ticketIndex, from the shop
+        check(r[1] is None and r[4] == 6450 and r[5] == 8067, "Starter wheel with its ticket: %r" % r)
+        check_pools([r[2]], [r[3]], 0, "Starter wheel with its ticket")
+        r = await c.call("spin", "spin", 1, 8068, False)  # Elite: ticket only
+        check(r[1] is None and r[4] == 6450 and r[5] == 8068, "Elite wheel with the Universal Elite Ticket: %r" % r)
+        check_pools([r[2]], [r[3]], 1, "Elite")
+        r = await c.call("spin", "spin", None, 7993, False)
+        check(r[1] is None and r[5] == 7993, "Universal Spin Ticket -> Heroic: %r" % r)
+        check_pools([r[2]], [r[3]], 2, "Universal Spin Ticket")
+        r = await c.call("spin", "spin", 0, 8067, True)
+        check(r[1] == "Item not owned", "a 10x ticket spin takes 10 tickets: %r" % r)
         r = await c.call("spin", "spin", 2, None, True)
         check(r[1] is None and len(r[3]) == 10 and r[4] == 1450, "Heroic 10x: %r" % r[1:])
-        check_rolls(r[2], r[3], heroic, 5, "Heroic 10x")
+        check_pools(r[2], r[3], 2, "Heroic 10x")
         r = await c.call("spinH", "spinH", 0)
         h = r[1]
-        check(isinstance(h, list) and len(h) == 22 and all(isinstance(x["dte"], (int, float)) and x["dte"] > 0 for x in h),
-              "spin history: 22 won items: %r" % (h and h[:2]))
+        check(isinstance(h, list) and len(h) == 26 and all(isinstance(x["dte"], (int, float)) and x["dte"] > 0 for x in h),
+              "spin history: 26 won items: %r" % (h and h[:2]))
         check(sum(x["fds"] for x in h) == 50 * 11 + 500 * 10 and h[0]["fds"] == 500, "spin history KR spent per item")
-        check(h[10]["fds"] == 0 and h[11]["fds"] == 50, "the ticket's item cost no KR: %r" % h[10])
+        check(all(x["fds"] == 0 for x in h[10:15]) and h[15]["fds"] == 50, "the tickets' items cost no KR: %r" % h[10:16])
         r = await c.call("spinH", "spinH", 20)
-        check(len(r[1]) == 2, "spin history paging (offset 20)")
+        check(len(r[1]) == 6, "spin history paging (offset 20)")
         r = await c.call("spinKR", "fkr")
         check(r[1] > 0 and 0 <= r[3] <= 3 and r[4] - 1450 == [5, 10, 20, 500][r[3]], "Free KR wheel: %r" % r)
         r = await c.call("spinKR", "fkr")
         check(r[5] == "Reward not ready yet", "Free KR once per rewardTime")
         r = await c.call("pRes", "clm")
         check(r[2] == "Must be level 5", "daily reward needs level 5: %r" % r)
+        r = await c.call("0", "r", "market", "inventory", carol_id, carol, None, 0)
+        inv = {x["i"]: x.get("c", 1) for x in r[3]}
+        check(inv.get(hat) == 1 and 8067 not in inv and 8068 not in inv, "the v7 hat stays, the used tickets are gone")
+    try:  # GET /api/data/spins: the wheels this brain spins
+        with urllib.request.urlopen(base.replace("ws://", "http://") + "/api/data/spins", timeout=10) as resp:
+            served = json.loads(resp.read())
+        check([w["name"] for w in served["wheels"]] == [w["name"] for w in wheels] and "s10PoolEpic" in served["itemPools"],
+              "GET /api/data/spins serves the v10 wheels")
+    except (OSError, ValueError) as e:
+        check(False, "GET /api/data/spins: %r" % e)
     async with Internal(internal_url, secret) as g:
         err, data = await g.op("elo", id=carol_id, mode=2, delta=25)
         check(err is None and data["elo"] == 25, "elo delta")

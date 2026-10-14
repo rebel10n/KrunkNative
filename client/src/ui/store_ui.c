@@ -42,12 +42,17 @@ typedef struct {
     double rarities[7];
 } StoreWheel;
 
-// store.js wheels (index = the spin index the server knows, services/brain/store.c)
+// The primary wheels of v10's store.wheels (gapi /data/spins, shared/include/store_spins.h; index =
+// the spin index the server knows, services/brain/store.c) and the Free KR wheel (its index is
+// v10's 5; it spins through "fkr"). v10's Starter / Elite / Heroic draw from the s10Pool item
+// pools (the previews here still list the season's items by rarity); Elite and Ultra are ticket
+// only (Universal Elite Ticket 8068, Season 9 Ultra Ticket 7510), Starter and Heroic also take
+// the Universal Starter (8067) / Spin (7993) Ticket.
 static const StoreWheel k_wheels[] = {
-    {"Starter", "#b2f252", NULL, 50, 10, 2, 0, 0, 0, 6423, 0, 0, 0, {75, 22, 3, 0, 0, 0}},
-    {"Elite", "#2196F3", NULL, 100, 10, 3, 0, 0, 0, 6424, 0, 0, 0, {50, 30, 15, 5, 0, 0}},
-    {"Heroic", "#fc9803", NULL, 500, 10, 4, 0, 0, 0, 6425, 0, 5, 0, {0, 48, 35, 14, 2.49, 0.5, 0.01}},
-    {"Ultra", "#ed4242", NULL, 0, 0, 4, 0, 0, 0, 6426, 1, 5, 0, {0, 28, 53, 13.5, 4.45, 1, 0.05}},
+    {"Starter", "#b2f252", NULL, 50, 10, 2, 0, 0, 0, 8067, 0, 0, 0, {75, 22, 3, 0, 0, 0}},
+    {"Elite", "#2196F3", NULL, 100, 10, 3, 0, 0, 0, 8068, 1, 0, 0, {50, 30, 15, 5, 0, 0}},
+    {"Heroic", "#fc9803", NULL, 500, 10, 4, 0, 0, 0, 7993, 0, 0, 0, {0, 48, 35, 14, 2.49, 0.5, 0.01}},
+    {"Ultra", "#ed4242", NULL, 0, 0, 4, 0, 0, 0, 7510, 1, 5, 0, {0, 28, 53, 13.5, 4.46, 1, 0.04}},
     {"Free KR", "#00bcd4", "Claim", 0, 0, 0, 1, 1, 1, -1, 0, 0, 0, {50, 39, 10, 1, 0, 0}},
 };
 #define WHEEL_COUNT ((int) (sizeof(k_wheels) / sizeof(k_wheels[0])))
@@ -66,6 +71,18 @@ static const struct { int skin; StoreWheel w; } k_ticket_wheels[] = {
     {6424, {"Elite", "#2196F3", NULL, 0, 0, 3, 0, 0, 0, -1, 0, 0, 7, {50, 30, 15, 5, 0, 0}}},
     {6425, {"Heroic", "#fc9803", NULL, 0, 0, 4, 0, 0, 0, -1, 0, 5, 7, {0, 48, 35, 14, 2.49, 0.5, 0.01}}},
     {6426, {"Ultra", "#ed4242", NULL, 0, 0, 4, 0, 0, 0, -1, 0, 5, 7, {0, 28, 53, 13.5, 4.46, 1, 0.04}}},
+    {6909, {"Starter", "#b2f252", NULL, 0, 0, 2, 0, 0, 0, -1, 0, 0, 8, {75, 22, 3, 0, 0, 0}}},
+    {6910, {"Elite", "#2196F3", NULL, 0, 0, 3, 0, 0, 0, -1, 0, 0, 8, {50, 30, 15, 5, 0, 0}}},
+    {6911, {"Heroic", "#fc9803", NULL, 0, 0, 4, 0, 0, 0, -1, 0, 5, 8, {0, 48, 35, 14, 2.49, 0.5, 0.01}}},
+    {6912, {"Ultra", "#ed4242", NULL, 0, 0, 4, 0, 0, 0, -1, 0, 5, 8, {0, 28, 53, 13.5, 4.46, 1, 0.04}}},
+    {7507, {"Starter", "#b2f252", NULL, 0, 0, 2, 0, 0, 0, -1, 0, 0, 9, {75, 22, 3, 0, 0, 0}}},
+    {7508, {"Elite", "#2196F3", NULL, 0, 0, 3, 0, 0, 0, -1, 0, 0, 9, {50, 30, 15, 5, 0, 0}}},
+    {7509, {"Heroic", "#fc9803", NULL, 0, 0, 4, 0, 0, 0, -1, 0, 5, 9, {0, 48, 35, 14, 2.49, 0.5, 0.01}}},
+    {7510, {"Ultra", "#ed4242", NULL, 0, 0, 4, 0, 0, 0, -1, 0, 5, 9, {0, 28, 53, 13.5, 4.46, 1, 0.04}}},
+    // v10 Universal tickets: store.wheels[spinWheelId] (the brain rolls that wheel's item pools)
+    {8067, {"Starter", "#b2f252", NULL, 0, 0, 2, 0, 0, 0, -1, 0, 0, 0, {75, 22, 3, 0, 0, 0}}},
+    {8068, {"Elite", "#2196F3", NULL, 0, 0, 3, 0, 0, 0, -1, 0, 0, 0, {50, 30, 15, 5, 0, 0}}},
+    {7993, {"Heroic", "#fc9803", NULL, 0, 0, 4, 0, 0, 0, -1, 0, 0, 0, {0, 48, 35, 14, 2.49, 0.5, 0.01}}},
 };
 
 // store.freeKR[rarity].kr[0]: the Free KR wheel's prizes

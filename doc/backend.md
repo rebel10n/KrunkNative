@@ -988,11 +988,13 @@ ops, password hashing worker), `social_ws.c` (socket, sessions, dispatch, presen
 `profiles.c` (pages, profile, search, follows, reports), `leaderboards.c`,
 `social_data.c` (feed, chat, gifts, clans, settings, mail, market, trades),
 `creations.c` (hub HTTP catalogue, map publishing), `store.c` (store skins, prize
-wheels, Free KR wheel, daily reward). Private header `acct_internal.h`; public
+wheels and their item pools — `shared/include/store_spins.h`, served on
+`GET /api/data/spins` like gapi, rotated by the `store_spin_data` row — Free KR
+wheel, daily reward). Private header `acct_internal.h`; public
 `accounts.h` (internal ops, used by `internal_ws.c` / `public_routes.c`) and
 `social_ws.h`. Schema: `services/db/migrations/postgres/0100_accounts.sql`,
 `0101_social.sql`, `0102_items_creations.sql`, `0103_account_functions.sql`,
-`0104_social_functions.sql`, `0105_twofa.sql`, `0106_store.sql`, `0109_account_security.sql` (applied migrations are never edited:
+`0104_social_functions.sql`, `0105_twofa.sql`, `0106_store.sql`, `0118_store_v10.sql`, `0109_account_security.sql` (applied migrations are never edited:
 changes go into a new 01xx file in every dialect directory; `sqlite/` and `mysql/`
 hold the same tables, the SQL functions are C kn_procs in `db_accounts.c` /
 `db_social.c`, 3.6). Port of v3.1.1 `matchmaker/socialWs.ts`,
@@ -1028,8 +1030,10 @@ shapes are what the real client (`src/social.js`, `src/index.js`) sends and read
 | `clan_tag_max` / `clan_max_members` | `4` / `0` | clan tag length (create input maxlength) / members (0 = unlimited) |
 | `post_max_len` / `comment_max_len` / `chat_max_len` | `1024` / `500` / `300` | text limits |
 | `page_size` / `leaderboard_cache_s` | `100` / `30` | leaderboard rows / per (query, region) cache |
-| `skins_file` / `assets_dir` | `assets/skins.json` / `assets` | store skins in `store.skins` index order (wheels, quick sell, market filters) / map catalogue JSON |
-| `current_season` | `7` | `config.currentSeason`: the Battle Pass, season stats / leaderboards and season badges of this season, and wheels only roll skins of it; raising it rolls the season over at the next start (7.8) |
+| `skins_file` / `assets_dir` | `assets/skins.json` / `assets` | store skins in `store.skins` index order (wheels, quick sell, market filters) / map catalogue JSON. The table is Krunker v10.0.2's (8069 items; 0-6447 keep v7.1.4's meaning, so inventory `skin_id`s stay valid): `make store-import` |
+| `store_season` | 10 | `config.currentSeason` of the store table / prize wheels (`store.c`): a wheel without a `season` rolls its items. Kept apart from `current_season` (bumping the season does not move the wheels) |
+| `store_reload_ms` | `60000` | how often `store_spin_data` (0118_store_v10: the gapi `/data/spins` JSON of a wheel rotation) is re-read; with no row the compiled-in v10 set is served |
+| `current_season` | `10` | `config.currentSeason`: the Battle Pass, season stats / leaderboards and season badges of this season; raising it rolls the season over at the next start (7.8) |
 | `reward_time_s` / `reward_min_level` / `daily_reward_kr` | `43200` / `5` / `50` | `config.rewardTime` between Free KR spins / daily rewards (shared `lastReward`), `config.rewardMinLvl`, KR of `clm` |
 
 ### 7.2 Schema (PostgreSQL names; same tables on sqlite / mysql)
@@ -1295,7 +1299,8 @@ and `kills` / `deaths` / `won` / `games` / `score` / `timePlayed` into `season_s
   profile, follows, search, feed, settings, display name, clans, chat + push,
   leaderboards, gift + mail, market list/buy/quick sell, trades, stats commit
   idempotency + `ua` push, password change revocation, map publishing + `/api/*`
-  catalogue, 2FA, prize wheels / Free KR / daily reward, elo deltas. One schema per run (`kn_test_accounts_<pid>`, dropped after),
+  catalogue, 2FA, v10 prize wheels (the s10Pool wheels, Universal / v7 tickets, the
+  served `/api/data/spins`) / Free KR / daily reward, elo deltas. One schema per run (`kn_test_accounts_<pid>`, dropped after),
   brain on an ephemeral port (read from its "listening on" log line), no sleeps
   except the login throttle window: 50/50 sequential and concurrent runs pass.
   Skips (77) without PostgreSQL or python `websockets`.

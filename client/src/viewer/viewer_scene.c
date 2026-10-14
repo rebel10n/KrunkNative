@@ -866,7 +866,7 @@ void vscene_build_cosmetic(const int index) {
     if (!vscene_cosmetic_shown(index)) return;
 
     // r = game.weapons[(weapon || 1) - 1] (expScale), i = type ? the item : store.previews[weapon]
-    const ViewerPreview *preview = viewer_preview(n->weapon);
+    const ViewerPreview *preview = viewer_preview(n);
     float y_off = n->type ? n->y_off : preview->y_off;
     float x_off = n->type ? n->x_off : preview->x_off;
     float z_rota = n->type ? n->z_rota : preview->z_rota;
@@ -985,7 +985,7 @@ void vscene_build_showcase(int index) {
 
     const ViewerSkin *t = viewer_skin(index > 0 ? index : 0);
     if (!t) return;
-    const ViewerPreview *preview = viewer_preview(t->weapon);
+    const ViewerPreview *preview = viewer_preview(t);
     const float y_off = t->type ? t->y_off : preview->y_off;
     const float x_off = t->type ? t->x_off : preview->x_off;
     const float z_rota = t->type ? t->z_rota : preview->z_rota;

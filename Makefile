@@ -257,21 +257,33 @@ ui-import: ## Regenerate ui/ from the Krunker reference (fonts, windows, icon li
 assets-import: ## Copy the v3.1.1 content mod.zip lacks (textures/previews/) into assets/ (tools/ui-import/game_assets.py)
 	$(PYTHON) -I tools/ui-import/game_assets.py --assets assets
 
-.PHONY: assets-import-v7 assets-check-v7 assets-import-live assets-check-live gltf-test viewer-diff frame-yield-test offline-dead-test resize-early-test native-auth-test asset-fetch-test console-settings-test slowmo-arms-test piss-hose-test selection-test minimap-round-test preview-hole-test preview-hole-test-web
-assets-import-v7: ## Import Krunker v7.1.4 content into assets/ (models, textures, sounds, skins.json...) and regenerate client/src/viewer/viewer_store_table.c
+.PHONY: store-import store-check assets-import-v7 assets-check-v7 assets-import-live assets-check-live gltf-test viewer-diff frame-yield-test offline-dead-test resize-early-test native-auth-test asset-fetch-test console-settings-test slowmo-arms-test piss-hose-test selection-test minimap-round-test preview-hole-test preview-hole-test-web
+assets-import-v7: ## Import the Krunker content set into assets/ (models, textures, sounds, the v10 store table) and regenerate the store tables
 	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --assets assets
 	node tools/ui-import/gen_viewer_store.js
 
-assets-check-v7: ## Drift check of assets/ and viewer_store_table.c against Krunker v7.1.4 (exit 1 on any difference)
+assets-check-v7: ## Drift check of assets/ and the generated store tables against the Krunker content set (exit 1 on any difference)
 	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --check --assets assets
 	GEN_CHECK=1 node tools/ui-import/gen_viewer_store.js
 	node tools/ui-import/test_gen_viewer_store.js
 
-assets-import-live: ## Add the files the v7.1.4 tree lacks from Krunker's live asset hosts (tools/ui-import/live_assets.lock; KN_FETCH_PROXY=, never overwrites)
-	$(PYTHON) -I tools/ui-import/fetch_live_assets.py install --assets assets --ui ui
+store-import: ## The store table: assets/skins.json from Krunker v10.0.2 (tools/ui-import/v10_skins.js), viewer_store_table.c, store_spins_table.c
+	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --tables --assets assets
+	node tools/ui-import/gen_viewer_store.js
 
-assets-check-live: ## List live_assets.lock files missing from (exit 1) or differing in assets/ and ui/img
+store-check: ## Drift check of the v10 store table, its generated C tables and test, and the store items' asset files
+	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --tables --check --assets assets
+	GEN_CHECK=1 node tools/ui-import/gen_viewer_store.js
+	node tools/ui-import/test_gen_viewer_store.js
+	node tools/ui-import/v10_store_assets.js
+
+assets-import-live: ## Add the files the Krunker content set lacks from the live asset hosts (tools/ui-import/live_assets.lock, then live_assets_v10.lock: the v10 items' files; KN_FETCH_PROXY=, never overwrites)
+	$(PYTHON) -I tools/ui-import/fetch_live_assets.py install --assets assets --ui ui
+	$(PYTHON) -I tools/ui-import/fetch_live_assets.py install --lock tools/ui-import/live_assets_v10.lock --roots assets --assets assets --ui ui
+
+assets-check-live: ## List both locks' files missing from (exit 1) or differing in assets/ and ui/img
 	$(PYTHON) -I tools/ui-import/fetch_live_assets.py check --assets assets --ui ui
+	$(PYTHON) -I tools/ui-import/fetch_live_assets.py check --lock tools/ui-import/live_assets_v10.lock --assets assets --ui ui
 
 .PHONY: branding branding-check
 branding: ## Fetch krunker.io's app icons (tools/branding/branding.lock, sha256-pinned; KN_FETCH_PROXY=) and write the PWA / window / Windows / Android / iOS icons

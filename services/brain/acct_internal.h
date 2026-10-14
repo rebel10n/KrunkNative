@@ -124,12 +124,19 @@ typedef struct SkinInfo {
     char req_kind[12], req_var[16];              /* req ("accAge" | "stats" | "accVar" | "disabled") / reqVar */
     double req_amount;                           /* reqAmount */
     int spin_wheel;                              /* TICKET items: index of its spinWheel (store.c), -1 none */
+    int spin_wheel_id;                           /* v10 TICKET items: store.wheels[spinWheelId], -1 none */
+    char spin_wheel_name[32];                    /* v10 TICKET items: the wheel of that name ("Premium") */
+    char spin_tag[24];                           /* v10 spinTag: a wheel with this tag draws it whatever its season / limT */
+    unsigned char limited_spin, tradable, premium_spin; /* v10 limitedSpin (noSpin, still in wheels), tradable, premiumSpin */
     char lim_t[24];
     char lim_g[32];                              /* limG */
     char name[48];
 } SkinInfo;
 const SkinInfo *acct_skin(int64_t index);   /* NULL when unknown / no skins file */
 int acct_skin_count(void);
+/* v10 wheels (store.c): GET /api/data/spins, the store_spin_data reload timer */
+void store_init(Brain *b);
+void store_shutdown(Brain *b);
 
 /* ---- social socket sessions (social_ws.c) */
 struct kn_ws;

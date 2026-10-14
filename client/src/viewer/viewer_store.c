@@ -98,31 +98,38 @@ int viewer_option_value(const ViewerOptionList *list, const int i) {
     return list && i >= 0 && i < list->count ? list->pairs[i * 2 + 1] : -1;
 }
 
-const ViewerPreview *viewer_preview(const int weapon) {
+const ViewerPreview *viewer_preview(const ViewerSkin *skin) {
     static const ViewerPreview none;
-    return weapon >= 0 && weapon < VIEWER_PREVIEW_SLOTS ? &g_viewer_previews[weapon] : &none;
+    if (!skin) return &none;
+    if (skin->mid >= 0)
+        for (int i = 0; i < g_viewer_preview_remodel_count; i++)
+            if (g_viewer_preview_remodels[i].weapon == skin->weapon && g_viewer_preview_remodels[i].mid == skin->mid)
+                return &g_viewer_preview_remodels[i].preview;
+    return skin->weapon >= 0 && skin->weapon < VIEWER_PREVIEW_SLOTS ? &g_viewer_previews[skin->weapon] : &none;
 }
 
 int viewer_skin_tex_truthy(const ViewerSkin *skin) {
     return skin->tex && skin->tex[0] && !((skin->flags & VS_TEX_NUM) && !strcmp(skin->tex, "0"));
 }
 
-// v7 utils.js getPreview(skin, store) without assetsUrl(): the asset-relative path
-//   textures/<types[type]><id>.<ext>                                     sprays (4), player cards (16)
-//   textures/previews/cosmetics/<assetType || type>_<id>[_<tex>].<ext>   other cosmetics
+// v10 getPreview(skin, store.types) (v10.js:24328) without assetsUrl(): the asset-relative path
+//   textures/<types[type]><id>.<ext>                                     sprays (4), player cards (16), emoji (17), paints (18)
+//   textures/previews/cosmetics/<assetType || type>_<id>[_c<pat> | _<tex>].<ext>   other cosmetics
 //   textures/previews/melee/melee_<id>[_c<pat> | _<tex>].<ext>           melee (3)
 //   textures/previews/weapons/weapon_<weapon>_<m<mid>[_<midT>] | c<pat> | <tex> | <id>>.<ext>
-// with ext = texExt || "png". (v3.1.1 kept 3D sprays under previews/cosmetics; v7 has none.)
+// with ext = prevExt || texExt || "png". (v3.1.1 kept 3D sprays under previews/cosmetics; v7 has none.)
 void viewer_skin_preview_path(const ViewerSkin *skin, char *path, const size_t n) {
     const int type = skin->type;
     const char *types = type >= 0 && type < g_viewer_type_count ? g_viewer_types[type] : "";
-    const char *ext = skin->tex_ext ? skin->tex_ext : "png";
+    const char *ext = skin->prev_ext ? skin->prev_ext : skin->tex_ext ? skin->tex_ext : "png";
 
-    if (type == 4 || type == 16) {
-        snprintf(path, n, "textures/%s%d.%s", types, skin->id, ext);
+    if (type == 4 || type == 16 || type == 17 || type == 18) {
+        if (skin->id_name) snprintf(path, n, "textures/%s%s.%s", types, skin->id_name, ext);
+        else snprintf(path, n, "textures/%s%d.%s", types, skin->id, ext);
     } else if (type && type != 3) {
         const int dir = skin->asset_type ? skin->asset_type : type;
-        if (viewer_skin_tex_truthy(skin)) snprintf(path, n, "textures/previews/cosmetics/%d_%d_%s.%s", dir, skin->id, skin->tex, ext);
+        if (skin->pat >= 0) snprintf(path, n, "textures/previews/cosmetics/%d_%d_c%d.%s", dir, skin->id, skin->pat, ext);
+        else if (viewer_skin_tex_truthy(skin)) snprintf(path, n, "textures/previews/cosmetics/%d_%d_%s.%s", dir, skin->id, skin->tex, ext);
         else snprintf(path, n, "textures/previews/cosmetics/%d_%d.%s", dir, skin->id, ext);
     } else if (type == 3) {
         if (skin->pat >= 0) snprintf(path, n, "textures/previews/%s%d_c%d.%s", types, skin->id, skin->pat, ext);

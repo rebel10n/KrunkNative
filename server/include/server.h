@@ -88,7 +88,7 @@ typedef struct {
     unsigned char central_verified:1;  // online_mode: identity confirmed by central auth
     unsigned char skins_known:1;       // skins_owned holds the coordinator's inventory
     unsigned char password_ok:1;       // a JOIN carried the right server password
-    uint8_t skins_owned[1024];         // bitset of owned store.skins indices (8192: v7.1.4 has 6448), enforced on ENT
+    uint8_t skins_owned[1024];         // bitset of owned store.skins indices (8192: v10.0.2 has 8069), enforced on ENT
     int badge;                         // badgeIndex (v7 account stats.bdg, badges.js), -1 none
     // player-viewer WP-E part 2a: the death screen's account values (players.js:4860), read from the
     // brain account at auth: stats["c" + classIndex] and every config.playerCardStats value

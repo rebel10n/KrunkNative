@@ -12,6 +12,8 @@
     "developers": {{ kn_brain_developers | to_json }},
     "moderators": {{ kn_brain_moderators | to_json }},
     "current_season": {{ kn_brain_current_season | int }},
+    "store_season": {{ kn_brain_store_season | default(kn_brain_current_season) | int }},
+    "_comment_store_season": "config.currentSeason of the store table / prize wheels (accounts.store_season, services/brain/store.c): the season their unseasoned items roll. 10 for Krunker v10.0.2.",
     "email": { "require_verified": {{ kn_brain_email_require_verified | to_json }} }
   },
   "ai": {

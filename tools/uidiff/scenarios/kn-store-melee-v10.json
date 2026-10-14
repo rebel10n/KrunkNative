@@ -1,0 +1,106 @@
+{
+ "size": [
+  1280,
+  720
+ ],
+ "background": "#d6c6c6",
+ "state": {
+  "menu": true,
+  "window": 26,
+  "connected": true,
+  "ready": true,
+  "inGame": false,
+  "name": "Player",
+  "classIndex": 0,
+  "region": "...",
+  "mapName": "Kanji",
+  "mapFile": "maps/311_kanji.json",
+  "gameName": "ffa on Kanji",
+  "anim_time": 0.8,
+  "account": {
+   "name": "Player",
+   "score": 200000,
+   "funds": 2500,
+   "premium": 1,
+   "badges": [],
+   "stats": {},
+   "skins": [
+    {
+     "ind": 6823,
+     "cnt": 1
+    },
+    {
+     "ind": 6833,
+     "cnt": 1
+    },
+    {
+     "ind": 6844,
+     "cnt": 1
+    },
+    {
+     "ind": 6845,
+     "cnt": 1
+    },
+    {
+     "ind": 6850,
+     "cnt": 1
+    },
+    {
+     "ind": 6851,
+     "cnt": 1
+    },
+    {
+     "ind": 6852,
+     "cnt": 1
+    },
+    {
+     "ind": 6853,
+     "cnt": 1
+    },
+    {
+     "ind": 6854,
+     "cnt": 1
+    },
+    {
+     "ind": 6855,
+     "cnt": 1
+    },
+    {
+     "ind": 6856,
+     "cnt": 1
+    },
+    {
+     "ind": 6857,
+     "cnt": 1
+    },
+    {
+     "ind": 6863,
+     "cnt": 1
+    },
+    {
+     "ind": 6894,
+     "cnt": 1
+    },
+    {
+     "ind": 412,
+     "cnt": 1
+    },
+    {
+     "ind": 418,
+     "cnt": 1
+    },
+    {
+     "ind": 419,
+     "cnt": 1
+    },
+    {
+     "ind": 447,
+     "cnt": 1
+    }
+   ]
+  }
+ },
+ "frames": 3,
+ "note": "Select Melee (windows[26]) with 14 v10 melee items and 4 v7.1.4 ones",
+ "ref": "doc/ref/krunknative/kn-store-melee-v10.png"
+}

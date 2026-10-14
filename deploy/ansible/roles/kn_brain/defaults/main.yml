@@ -27,8 +27,8 @@ kn_brain_developers: []
 kn_brain_moderators: []
 # config.currentSeason (accounts.current_season): the season of the Battle Pass, the season
 # stats / leaderboards and the prize wheels. Raising it rolls the season over at the next
-# kn_brain start (a new `seasons` row; the older open one gets ends_at). Krunker v7.1.4: 7.
-kn_brain_current_season: 7
+# kn_brain start (a new `seasons` row; the older open one gets ends_at). Krunker v10.0.2: 10.
+kn_brain_current_season: 10
 # Secrets: put them in an ansible-vault file (group_vars/central/vault.yml, see
 # README) or pass -e; generated once on the host when unset, then kept.
 kn_brain_internal_secret: ""
