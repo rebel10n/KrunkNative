@@ -90,42 +90,46 @@ static void preview_player_destroy(Client *client) {
     preview->map = NULL;
 }
 
-// dJ(): the preview wears the player's own skin colour and picks; the K.P.D popup's dI (Officer Buddy)
-// overrides hat / back / dye / face with the police outfit (shoPolicePop: back 1487, hat 1890, dye 1891, face 1842).
-static PlayerCosmetics preview_cosmetics(void) {
-    PlayerCosmetics cosmetics;
-    ui_loadout_cosmetics(&cosmetics);
+// dJ() / updateClassPreview: the preview wears the player's own Change Loadout look, the very one
+// the ENT sends (ui_loadout_look: skins, sight, charms, wrist, cosmetics, the secondary), except that
+// Random shows none (v7's `== -2 ? -1`) where the ENT rolls an owned item. The K.P.D popup's dI
+// (Officer Buddy) overrides hat / back / dye / face with the police outfit (shoPolicePop: back 1487,
+// hat 1890, dye 1891, face 1842) and wears none of the v7 slots.
+static LoadoutLook preview_look(const int class_index) {
+    LoadoutLook look;
+    ui_loadout_look(class_index, 0, &look);
 
     if (ui_police_active()) {
-        cosmetics.body = 1487;
-        cosmetics.hat = 1890;
-        cosmetics.dye = 1891;
-        cosmetics.face = 1842;
+        look.cosmetics.body = 1487;
+        look.cosmetics.hat = 1890;
+        look.cosmetics.dye = 1891;
+        look.cosmetics.face = 1842;
+        look.cosmetics_v7 = PLAYER_COSMETICS_V7_NONE;
     }
 
-    return cosmetics;
+    return look;
 }
 
-// dJ's hq / meleeIndex: the saved weapon skins of the class's slots and the melee pick (Random shows none).
-static PlayerSkins preview_skins(const int class_index) {
-    PlayerSkins skins;
-    ui_loadout_preview_skins(class_index, &skins);
-    return skins;
+// updateHeadSize(classPreviewPlayer, tmpPlayer ? tmpPlayer.headMlt : 1): our own head size
+static float preview_head_mlt(const Client *client) {
+    return client->me && client->me->head_mlt > 0.0f ? client->me->head_mlt : 1.0f;
 }
 
-// WP-F: the v7 slots (head, back, shoes, pet, wrist, charms; Random shows none); none for Officer Buddy
-static PlayerCosmeticsV7 preview_cosmetics_v7(const int class_index) {
-    PlayerCosmeticsV7 v7 = PLAYER_COSMETICS_V7_NONE;
-    if (!ui_police_active()) ui_loadout_cosmetics_v7(class_index, &v7, 0);
-    return v7;
+// Everything of the look that player_generate_meshes reads: a change rebuilds the model.
+static void preview_look_apply(Player *player, const LoadoutLook *look, const float head_mlt) {
+    player->cosmetics = look->cosmetics;
+    player->cosmetics_v7 = look->cosmetics_v7;
+    player->skins = look->skins;
+    player->secondary_index = look->secondary_index;
+    player->attach_index = look->attach_index;
+    player->head_mlt = head_mlt;
 }
 
-static int preview_cosmetics_changed(const Player *player) {
-    const PlayerCosmetics want = preview_cosmetics();
-    const PlayerCosmeticsV7 want_v7 = preview_cosmetics_v7(player->class_index);
-    const PlayerSkins want_skins = preview_skins(player->class_index);
-    return memcmp(&player->cosmetics, &want, sizeof(want)) != 0 || memcmp(&player->skins, &want_skins, sizeof(want_skins)) != 0 ||
-           memcmp(&player->cosmetics_v7, &want_v7, sizeof(want_v7)) != 0;
+static int preview_cosmetics_changed(const Client *client, const Player *player) {
+    const LoadoutLook want = preview_look(player->class_index);
+    return memcmp(&player->cosmetics, &want.cosmetics, sizeof(want.cosmetics)) != 0 || memcmp(&player->skins, &want.skins, sizeof(want.skins)) != 0 ||
+           memcmp(&player->cosmetics_v7, &want.cosmetics_v7, sizeof(want.cosmetics_v7)) != 0 || player->secondary_index != want.secondary_index ||
+           player->attach_index != want.attach_index || player->head_mlt != preview_head_mlt(client);
 }
 
 // A private third-person player of the menu class, like Krunker's preview `dF`
@@ -136,9 +140,8 @@ static Player *preview_player_new(Client *client, Scene *scene) {
 
     player->uid = -1; // player_update_meshes() anchors uid -1 (Krunker's preview sid) at player->position
     player->class_index = client->menu_class_index;
-    player->cosmetics = preview_cosmetics();
-    player->cosmetics_v7 = preview_cosmetics_v7(player->class_index);
-    player->skins = preview_skins(player->class_index);
+    const LoadoutLook look = preview_look(player->class_index);
+    preview_look_apply(player, &look, preview_head_mlt(client));
     player_spawn(player); // loadout, ammo and weapon for the class (also picks a map spawn: reset below)
 
     if (!player->loadout_size || !player->weapon) {
@@ -269,7 +272,7 @@ static void preview_world_dummy_tick(Client *client, const float delta) {
 
     if (!html_ui_is_menu_open() || !client->game.ready || !client->game.map) return;
 
-    if (dummy && (class_index != client->menu_class_index || map != client->game.map || preview_cosmetics_changed(dummy))) {
+    if (dummy && (class_index != client->menu_class_index || map != client->game.map || preview_cosmetics_changed(client, dummy))) {
         preview_player_free(client->scene, dummy);
         dummy = NULL;
     }
@@ -429,7 +432,7 @@ void client_class_preview_render(Client *client) {
         return;
     }
 
-    if (preview->player && (preview->class_index != client->menu_class_index || preview->map != client->game.map || preview_cosmetics_changed(preview->player))) {
+    if (preview->player && (preview->class_index != client->menu_class_index || preview->map != client->game.map || preview_cosmetics_changed(client, preview->player))) {
         preview_player_destroy(client);
     }
 

@@ -16,6 +16,11 @@ void cosmetic_asset_keys(const ViewerSkin *item, char *model, const size_t model
     else snprintf(texture, texture_n, "%s", model);
 }
 
+int cosmetics_attach_index(const int primary_skin, const int attach_pick) {
+    const ViewerSkin *skin = cosmetic_item(primary_skin, ITEM_WEAPON);
+    return skin && (skin->flags2 & VS2_FORCE_ATTACH) ? 0 : attach_pick;
+}
+
 // The slot (field) of each item type, NULL for types not worn on the model.
 static int32_t *slot_of(PlayerCosmetics *c, PlayerCosmeticsV7 *v7, const int type) {
     switch (type) {

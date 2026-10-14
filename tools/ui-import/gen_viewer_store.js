@@ -86,7 +86,7 @@ const rows = store.skins.map((s, i) => {
   flag2(s.shaderNum != null, 'VS2_SHADER'); flag2(s.video != null, 'VS2_VIDEO'); flag2(s.particle != null, 'VS2_PARTICLE');
   flag2(s.snd, 'VS2_SND'); flag2(s.killSnd, 'VS2_KILL_SND'); flag2(s.stepSnd, 'VS2_STEP_SND'); flag2(s.jumpSnd, 'VS2_JUMP_SND');
   flag2(s.reloadSnd, 'VS2_RELOAD_SND'); flag2(s.spraySnd != null, 'VS2_SPRAY_SND'); flag2(s.explode, 'VS2_EXPLODE');
-  flag2(s.sameEnv, 'VS2_SAME_ENV');
+  flag2(s.sameEnv, 'VS2_SAME_ENV'); flag2(s.forceAttach, 'VS2_FORCE_ATTACH');
   if (flags2.length) fields.push(`.flags2 = ${flags2.join(' | ')}`);
   if (s.shaderNum != null) fields.push(`.shader_num = ${s.shaderNum}`);
   if (s.video != null) fields.push(`.video = ${s.video}`);

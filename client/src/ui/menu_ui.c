@@ -34,6 +34,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ruleset.h>
+#include <render_settings.h> // disable_rarity_anim
+#include "../viewer/viewer_store.h" // the class box: a loadout weapon's skin name, rarity, thumbnail
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -312,6 +314,7 @@ static void menu_build_classes(void) {
         for (int k = 0; classes[i].loadout && k < 1 && c->loadout_count < MENU_CLASS_LOADOUT_MAX; k++) {
             const int w = classes[i].loadout[k];
             if (w < 0 || (size_t) w >= weapon_count || !weapons[w]) continue;
+            c->loadout_ids[c->loadout_count] = w;
             c->loadout_names[c->loadout_count++] = weapons[w]->name ? weapons[w]->name : "";
             if (w == 12) snprintf(c->preview, sizeof(c->preview), "textures/previews/cosmetics/3_default.png");
             else if (weapons[w]->src) snprintf(c->preview, sizeof(c->preview), "textures/previews/weapons/%s.png", weapons[w]->src);
@@ -722,31 +725,34 @@ static void menu_update_info_holder(void) {
 }
 
 // The class box (v7 updateClassPreview): #menuClassName = the class, #menuClassSubtext =
-// its loadout weapons (" - " separated, skinned ones in their rarity colour), #menuClassIcn =
-// the last loadout weapon's preview, #menuClassNameTag = the player tag (level box, name,
-// [clan], badges) or "Guest".
+// its loadout weapons (" - " separated), #menuClassIcn = the last loadout weapon's preview,
+// #menuClassNameTag = the player tag (level box, name, [clan], badges) or "Guest". f1802: a weapon
+// wearing a store skin (skinsLoadout[weapon], as the Loadout tab shows it) is named after the skin
+// in its rarity colour (rainbowText for animated rarities) and pictured by the skin's thumbnail,
+// so the box shows what the Loadout tab, the class preview and the viewmodel show.
 void menu_update_class_box(void) {
     const MenuClass *c = menu_class_at(g_ui.client->menu_class_index);
     HtmlElem name_el = by_id("menuClassName"), sub_el = by_id("menuClassSubtext"), tag_el = by_id("menuClassNameTag");
     if (name_el) html_dom_set_text(name_el, ui_police_active() ? "Officer" : c ? c->name : ""); // vO349.classN (K.P.D)
-    if (sub_el) {
-        StrBuf sb = {0};
-        for (int i = 0; c && i < c->loadout_count; i++) {
-            if (sb.len) sb_append(&sb, " - ");
-            sb_append(&sb, "<span style='color:inherit'>");
-            sb_append_esc(&sb, c->loadout_names[i]);
-            sb_append(&sb, "</span>");
-        }
-        char *html = sb_finish(&sb);
-        html_dom_set_html(sub_el, html);
-        free(html);
+    char icon[256] = "";
+    if (c && c->preview[0]) html_dom_asset_url(c->preview, icon, sizeof(icon));
+    StrBuf sb = {0};
+    for (int i = 0; c && i < c->loadout_count; i++) {
+        if (sb.len) sb_append(&sb, " - ");
+        const int skin_index = ui_police_active() ? -1 : ui_loadout_weapon_skin_shown(c->loadout_ids[i]);
+        const ViewerSkin *skin = viewer_skin(skin_index);
+        const int rarity = skin && skin->rarity >= 0 && skin->rarity < g_viewer_rarity_count ? skin->rarity : -1;
+        const int animate = rarity == 6 && !client_render_settings()->disable_rarity_anim; // rarities[r].animate (ui_loadout.c rarity_anim)
+        sb_appendf(&sb, "<span %sstyle='color:%s'>", animate ? "class='rainbowText' " : "", rarity >= 0 && g_viewer_rarities[rarity].color ? g_viewer_rarities[rarity].color : "inherit");
+        sb_append_esc(&sb, skin && skin->name ? skin->name : c->loadout_names[i]);
+        sb_append(&sb, "</span>");
+        if (skin) store_skin_preview(skin_index, icon, sizeof(icon)); // v10874 = skin.thumbnail
     }
+    char *html = sb_finish(&sb);
+    if (sub_el) html_dom_set_html(sub_el, html);
+    free(html);
     HtmlElem icn = by_id("menuClassIcn");
-    if (icn && c && c->preview[0]) {
-        char url[256];
-        html_dom_asset_url(c->preview, url, sizeof(url));
-        html_dom_set_attr(icn, "src", url);
-    }
+    if (icn && icon[0]) html_dom_set_attr(icn, "src", icon);
     set_style("menuClassContainer", "z-index", "99999");
     if (tag_el && ui_police_active()) {
         html_dom_set_html(tag_el, "Officer Buddy <i class='material-icons menuClassPlayerPremium'>beenhere</i>"); // vO349: no lvl / clan

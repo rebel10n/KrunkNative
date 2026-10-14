@@ -29,6 +29,11 @@ void cosmetic_asset_keys(const struct ViewerSkin *item, char *model, size_t mode
 // An explicit pick in the right slot wins over a moved one.
 void cosmetics_route(PlayerCosmetics *cosmetics, PlayerCosmeticsV7 *v7);
 
+// The sight a loadout mounts (v7.1.4 enterGame ent[12] and updateClassPreview's attachIndex): the
+// pick, but 0 (the Reflex Sight) when the primary's skin has forceAttach. A weapon's own forceAttach
+// is weapon_attachment()'s. One rule for the ENT, the menu preview and our own viewmodel.
+int cosmetics_attach_index(int primary_skin, int attach_pick);
+
 // players.js generateMeshes overrides: game.config.noCosm clears every slot and the skin colour;
 // the Juggernaut wears items 4908-4911 (body, head, shoes, waist).
 #define COSMETIC_JUGGERNAUT_BODY 4908

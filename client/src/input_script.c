@@ -56,6 +56,11 @@
 //                                cam=x,y,z eye=x,y,z wall=0" (own: the local model went into the world pass,
 //                                viewmodel: the first-person pass drew, wall: the camera sits in a solid box or
 //                                solid geometry lies between the eye and it)
+//   100 wsel @menu               log what the model build picked on the held slot (weapon, store skin, model /
+//                                texture keys or the hose, tint, sight, charm, wrist) for the menu's class
+//                                preview (who=preview) and our own player (who=me): "[input_script] wsel t=100
+//                                @menu who=me slot=0 tp=0 w=1 skin=2592 model=weapons/weapon_2 ... attach=attach_1 ..."
+//                                (tp: the third-person model set, the preview's)
 //   100 state                    log the held weapon slot, the menu / pointer lock state, position, ammo, ended,
 //                                the charge (chargeTime s, fullCharge), the reload and fire timers, the grapple / rope, the GLFW
 //                                cursor mode (cursor=normal: the mouse shows, disabled: locked to the game)
@@ -191,7 +196,7 @@ static void script_load(void) {
         (void) b;
         if (!strcmp(e->cmd, "con") || script_probe(e->cmd) || !strcmp(e->cmd, "type") || !strcmp(e->cmd, "om") ||
             !strcmp(e->cmd, "call") || !strcmp(e->cmd, "setscroll") || !strcmp(e->cmd, "hit") || !strcmp(e->cmd, "ft") ||
-            !strcmp(e->cmd, "nodes") || !strcmp(e->cmd, "rects") || !strcmp(e->cmd, "clicksel")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
+            !strcmp(e->cmd, "nodes") || !strcmp(e->cmd, "rects") || !strcmp(e->cmd, "clicksel") || !strcmp(e->cmd, "wsel")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
             while (*rest == ' ' || *rest == '\t') rest++;
             snprintf(e->arg, sizeof(e->arg), "%s", rest);
             for (size_t len = strlen(e->arg); len && (e->arg[len - 1] == '\n' || e->arg[len - 1] == '\r' || e->arg[len - 1] == ' '); len--) e->arg[len - 1] = 0;
@@ -490,6 +495,18 @@ static void script_run(Client *client, const ScriptEvent *e) {
                 me ? me->grapple.active : 0,
                 me ? me->grapple.range : 0.0f,
                 cursor_mode == GLFW_CURSOR_NORMAL ? "normal" : cursor_mode == GLFW_CURSOR_DISABLED ? "disabled" : "hidden");
+    } else if (!strcmp(e->cmd, "wsel")) {
+        // wsel @label: what player_generate_meshes built on the held slot of the menu's class preview
+        // (always slot 0) and of our own player (PlayerArms.selection), one line each ("-" = no model yet)
+        const Player *who[2] = {client->class_preview.player, client->me};
+        static const char *const names[2] = {"preview", "me"};
+        for (int k = 0; k < 2; k++) {
+            const PlayerMesh *mesh = who[k] ? who[k]->mesh : NULL;
+            const int slot = who[k] ? who[k]->loadout_index : -1;
+            const PlayerArms *arms = mesh && mesh->arms && slot >= 0 && slot < who[k]->loadout_size ? mesh->arms[slot] : NULL;
+            fprintf(stderr, "[input_script] wsel t=%.0f %s who=%s slot=%d tp=%d %s\n", g_script.time, e->arg, names[k], slot,
+                    mesh ? !mesh->render_you || mesh->kn_third_person : -1, arms && arms->selection[0] ? arms->selection : "-");
+        }
     } else if (!strcmp(e->cmd, "tpstate")) {
         const Player *me = client->me;
         const ThirdPersonFrame f = third_person_last_frame(client);

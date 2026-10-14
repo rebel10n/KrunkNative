@@ -1521,32 +1521,29 @@ void client_enter_game(Client *client) {
 
     client->in_game = 1;
 
-    // setClass(classIndex, selectedSecondaryIndex): the Select Secondary pick (ui_loadout.c)
-    NetEntPacket packet = {.class_index = client->menu_class_index, .secondary_index = ui_loadout_secondary(client->menu_class_index)};
+    // The Change Loadout look (ui_loadout_look, the same one the menu's class preview wears; Random
+    // resolved to owned items): setClass(classIndex, selectedSecondaryIndex), skin colour + cosmetic
+    // items (echoed back in SPAWN), ent[2] / ent[9] weapon + melee skins (SKINS), ent[12] attachIndex
+    // (forceAttach ? 0 : the pick) and WP-F ENT V9's ent[15] shoeIndex, [21] petIndex, [26] wristIndex,
+    // [30] charms, [31] backIndex, [32] headIndex, [33] playerCardIndex, routed to their v7 slots.
     // NetEntPacket is #pragma pack(1) (shared.h): its PlayerSkins sits at an odd offset, so the
-    // look is built in aligned locals and copied in; never hand out pointers to its members.
-    PlayerCosmetics cosmetics;
-    PlayerSkins skins;
-    PlayerCosmeticsV7 cosmetics_v7;
-    // skin colour + cosmetic items (echoed back in SPAWN) and ent[2] / ent[9] weapon + melee skins (SKINS)
-    ui_loadout_ent_look(client->menu_class_index, &cosmetics, &skins);
+    // look is built in an aligned local and copied in; never hand out pointers to its members.
+    LoadoutLook look;
+    ui_loadout_look(client->menu_class_index, 1, &look);
+    NetEntPacket packet = {.class_index = client->menu_class_index, .secondary_index = look.secondary_index};
     // ent[6] = toggleSpect and ent[15] = slidCont ride after the cosmetics (NET_ENT_PACKET_V4_SIZE).
     packet.spectate = (uint8_t) spectate_requested();
     packet.slid_cont = (uint8_t) (ui_controls_settings()->slid_cont ? 1 : 0); // ent[15] settings.tmp.slidCont ("Requires respawn")
     packet.spray_index = ui_loadout_spray(); // ent[1] selectedSprayIndex
     packet.lag_comp = client_render_settings()->lag_comp; // ent[11] parseFloat(settings.tmp.lagCompensation)
-    // WP-C ENT V8 (v7.1.4 io.send("en")): ent[12] parseInt(attachIndex), ent[7] challengeModeEnabled,
-    // ent[19] SETTINGS.tmp.anonMode
-    packet.attach_index = client_saved_attach_index();
+    // WP-C ENT V8 (v7.1.4 io.send("en")): ent[12] attachIndex, ent[7] challengeModeEnabled,
+    // ent[19] SETTINGS.tmp.anonMode; ent[22..25] showBadges (cosmetics.c)
+    packet.attach_index = look.attach_index;
     packet.chall_mode = (uint8_t) (ui_controls_settings()->chall_mode ? 1 : 0);
     packet.anon_mode = (uint8_t) (client_render_settings()->anon_mode ? 1 : 0);
-    // WP-F ENT V9: ent[15] shoeIndex, [21] petIndex, [26] wristIndex, [30] charms, [31] backIndex,
-    // [32] headIndex, [33] playerCardIndex and ent[22..25] showBadges (cosmetics.c)
-    ui_loadout_cosmetics_v7(client->menu_class_index, &cosmetics_v7, 1); // the Customize picks, Random resolved
-    cosmetics_route(&cosmetics, &cosmetics_v7);                          // v3.1.1 placements to their v7 slots
-    packet.cosmetics = cosmetics;
-    packet.skins = skins;
-    packet.cosmetics_v7 = cosmetics_v7;
+    packet.cosmetics = look.cosmetics;
+    packet.skins = look.skins;
+    packet.cosmetics_v7 = look.cosmetics_v7;
     packet.show_badges = client_show_badges();
     // A 1.0 server (INIT minor 0) drops anything longer than V4 without a spawn (no spray / skins),
     // a 1.1 server anything longer than V6 (no lagComp), a 1.3.0 server anything longer than V7

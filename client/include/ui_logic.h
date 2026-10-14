@@ -38,6 +38,7 @@ typedef struct {
     int hp;
     char icon[48];       // textures/classes/icon_N.png
     const char *loadout_names[MENU_CLASS_LOADOUT_MAX]; // weaponConfig names of the class loadout
+    int loadout_ids[MENU_CLASS_LOADOUT_MAX];           // their weapon ids (the skin each one wears)
     int loadout_count;
     char preview[96];    // textures/previews/weapons/<src>.png of the last loadout weapon ("" none)
 } MenuClass;
@@ -549,10 +550,25 @@ void ui_loadout_tick(void);                      // the open picker's virtual ca
 int  ui_loadout_secondary(int class_index);     // selected secondary weapon id (secondaryInd, default 2), -1 = class has none
 int  ui_loadout_streak(int slot);                // streakIndex1..3 (data/streaks.js index for slot 0..2), -1 none
 int  ui_loadout_skin_color(void);                // selected skin colour as 0xRRGGBB, -1 = class colour
-void ui_loadout_cosmetics(PlayerCosmetics *out); // skin colour + hat/body/waist/face/dye picks for ENT and the preview
-void ui_loadout_ent_look(int class_index, PlayerCosmetics *cosmetics, PlayerSkins *skins); // ENT: cosmetics + weapon/melee skins, Random resolved to owned items
-void ui_loadout_preview_skins(int class_index, PlayerSkins *out); // the class preview's weapon/melee skins (Random shows none)
-void ui_loadout_cosmetics_v7(int class_index, PlayerCosmeticsV7 *out, int resolve_random); // WP-F: head/back/shoe/pet/wrist/charms/card picks (ENT V9, preview)
+// What a player of `class_index` wears, from the Change Loadout picks: the one source of the ENT
+// (main.c, for_ent 1) and the menu's class preview (class_preview.c, for_ent 0), so the preview
+// shows what the first-person viewmodel and the other players will. The two differ only where
+// v7.1.4 does: the ENT resolves Random (-2) to an owned item (getRandomOwnedSkin), the preview shows
+// none for it (updateClassPreview's `== -2 ? -1`). Store items show only with an inventory (signed
+// in, or offline: every skin), like the Loadout / Customize tabs draw them (a guest's saved picks
+// are stripped by the server anyway). cosmetics are routed (cosmetics_route); attach_index is v7's
+// `forceAttach ? 0 : attachIndex` (cosmetics_attach_index).
+typedef struct {
+    PlayerCosmetics cosmetics;     // skin colour + hat / body / waist / face / dye
+    PlayerCosmeticsV7 cosmetics_v7; // head / back / shoe / pet / wrist / charms / card (badge: the server's)
+    PlayerSkins skins;             // primary / secondary weapon skins, melee
+    int secondary_index;           // setClass's selectedSecondaryIndex (ui_loadout_secondary)
+    int attach_index;              // the sight: 0 Reflex, 1 Acog, -1 none
+} LoadoutLook;
+void ui_loadout_look(int class_index, int for_ent, LoadoutLook *out);
+// The store skin the Loadout tab and the menu class box show on `weapon` (skinsLoadout[weapon] with an
+// inventory), -1 for none / Random.
+int  ui_loadout_weapon_skin_shown(int weapon);
 int  ui_loadout_spray(void);                    // ENT ent[1]: the selected spray as a v7 store index, Random resolved, unowned -> 2482
 int  ui_loadout_spray_wheel(int *out, int max); // WP-E: the spray wheel's store indices (owned sprays, then the equipped one)
 void ui_loadout_class_bubble(int index);         // selectClass speech line

@@ -30,6 +30,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ruleset.h>
+#include <cosmetics.h> // cosmetics_route, cosmetics_attach_index (ui_loadout_look)
 
 // ---------------------------------------------------------------- Krunker tables
 
@@ -238,78 +239,68 @@ int ui_loadout_skin_color(void) {
     return i >= 0 && i < SKIN_COLOR_COUNT ? (int) strtol(SKIN_COLORS[i], NULL, 16) : -1;
 }
 
-// The look sent with the spawn request (ENT): skin colour and the cosmetic picks. "Random" (-2) resolves to
-// one of the owned items, and a guest owns none, so it is none (-1) like the preview's `dw == -2 ? -1 : dw`;
-// v7's explicit None (-3) is none too. hairCol stays the class colour (-1): Krunker only takes a hex string
-// there, which the picker never sets. PlayerCosmetics.body is the type-2 body item (v7 Body, bodyIndex).
-void ui_loadout_cosmetics(PlayerCosmetics *out) {
-    const int pick[5] = {sel(SEL_HAT), sel(SEL_BODY), sel(SEL_WAIST), sel(SEL_FACE), sel(SEL_DYE)};
-    int32_t *slot[5] = {&out->hat, &out->body, &out->waist, &out->face, &out->dye};
-    out->skin_color = ui_loadout_skin_color();
-    out->hair_color = -1;
-    for (int i = 0; i < 5; i++) *slot[i] = pick[i] >= 0 ? pick[i] : -1;
-}
-
 static int random_owned_skin(int weapon, int type);
 static int weapon_skin(int weapon);
+static int has_inventory(void);
 
-// enterGame's ent[3]/[4]/[14]/[17]/[21]: the same picks, but "Random" (-2) is getRandomOwnedSkin(null, type)
-// for every ENT (none for a guest, who owns nothing).
-static void ent_cosmetics(PlayerCosmetics *out) {
-    ui_loadout_cosmetics(out);
+// A store item pick as worn: -1 none (also v7's explicit None, -3); Random (-2) is getRandomOwnedSkin
+// (`weapon` 1-based for a weapon skin, else store `type`) when resolve_random (the ENT), none for the
+// preview (`== -2 ? -1`). Nothing without an inventory, as the tabs show it.
+static int32_t worn(const int pick, const int resolve_random, const int weapon, const int type) {
+    if (!has_inventory()) return -1;
+    if (pick == -2) return resolve_random ? random_owned_skin(weapon, type) : -1;
+    return pick >= 0 ? pick : -1;
+}
+
+// skin colour and hat / body / waist / face / dye (enterGame ent[3]/[4]/[14]/[17]/[21], dJ's
+// hatIndex & co). hairCol stays the class colour (-1): Krunker only takes a hex string there, which the
+// picker never sets. PlayerCosmetics.body is the type-2 body item (v7 Body, bodyIndex).
+static void look_cosmetics(PlayerCosmetics *out, const int resolve_random) {
     static const struct { int which, type; } SLOTS[5] = {
         {SEL_HAT, 1}, {SEL_BODY, 2}, {SEL_WAIST, 6}, {SEL_FACE, 7}, {SEL_DYE, 5},
     };
     int32_t *slot[5] = {&out->hat, &out->body, &out->waist, &out->face, &out->dye};
-    for (int i = 0; i < 5; i++) {
-        if (sel(SLOTS[i].which) == -2) *slot[i] = random_owned_skin(0, SLOTS[i].type);
-    }
-}
-
-// selectedSkinsByWeapon[weapon] for a loadout slot: -1 none; Random (-2) resolves to an owned skin of
-// that weapon (getRandomOwnedSkin(weapon + 1)) for the ENT, and to none for the preview (dJ's hq).
-static int32_t slot_weapon_skin(const int weapon, const int resolve_random) {
-    if (weapon < 0) return -1;
-    const int pick = weapon_skin(weapon);
-    if (pick == -2) return resolve_random ? random_owned_skin(weapon + 1, -1) : -1;
-    return pick >= 0 ? pick : -1;
-}
-
-static void loadout_skins(const int class_index, PlayerSkins *out, const int resolve_random) {
-    const int secondary = ui_loadout_secondary(class_index);
-    out->primary = slot_weapon_skin(class_at(class_index).primary, resolve_random);
-    out->secondary = secondary >= 0 ? slot_weapon_skin(secondary, resolve_random) : -1;
-    const int melee = sel(SEL_MELEE);
-    out->melee = melee == -2 ? (resolve_random ? random_owned_skin(0, 3) : -1) : melee >= 0 ? melee : -1;
-}
-
-void ui_loadout_ent_look(const int class_index, PlayerCosmetics *cosmetics, PlayerSkins *skins) {
-    ent_cosmetics(cosmetics);
-    loadout_skins(class_index, skins, 1);
+    out->skin_color = ui_loadout_skin_color();
+    out->hair_color = -1;
+    for (int i = 0; i < 5; i++) *slot[i] = worn(sel(SLOTS[i].which), resolve_random, 0, SLOTS[i].type);
 }
 
 // WP-F: the v7.1.4 slots of enterGame's "en" (ent[15] shoeIndex, [21] petIndex, [26] wristIndex,
-// [30] selectedLoadoutCharms, [31] backIndex, [32] headIndex, [33] playerCardIndex). Random (-2)
-// is getRandomOwnedSkin(null, type) when resolve_random (the ENT), none for the preview; the
-// secondary's charm only for a class with a secondary slot. The badge is the server's (-1 here).
-void ui_loadout_cosmetics_v7(const int class_index, PlayerCosmeticsV7 *out, const int resolve_random) {
+// [30] selectedLoadoutCharms, [31] backIndex, [32] headIndex, [33] playerCardIndex); the secondary's
+// charm only for a class with a secondary slot. The badge is the server's (-1 here).
+static void look_cosmetics_v7(const int class_index, PlayerCosmeticsV7 *out, const int resolve_random) {
     static const struct { int which, type; } SLOTS[6] = {
         {SEL_HEAD, 15}, {SEL_BACK, 14}, {SEL_SHOE, 8}, {SEL_PET, 9}, {SEL_WRIST, 11}, {SEL_CARD, 16},
     };
     *out = PLAYER_COSMETICS_V7_NONE;
     int32_t *slot[6] = {&out->head, &out->back, &out->shoe, &out->pet, &out->wrist, &out->player_card};
-    for (int i = 0; i < 6; i++) {
-        const int pick = sel(SLOTS[i].which);
-        *slot[i] = pick == -2 ? (resolve_random ? random_owned_skin(0, SLOTS[i].type) : -1) : pick >= 0 ? pick : -1;
-    }
-    for (int k = 0; k < 2; k++) {
-        const int pick = k == 1 && !class_at(class_index).secondary ? -1 : charm_at(k);
-        out->charms[k] = pick == -2 ? (resolve_random ? random_owned_skin(0, 12) : -1) : pick >= 0 ? pick : -1;
-    }
+    for (int i = 0; i < 6; i++) *slot[i] = worn(sel(SLOTS[i].which), resolve_random, 0, SLOTS[i].type);
+    for (int k = 0; k < 2; k++) out->charms[k] = k == 1 && !class_at(class_index).secondary ? -1 : worn(charm_at(k), resolve_random, 0, 12);
 }
 
-void ui_loadout_preview_skins(const int class_index, PlayerSkins *out) {
-    loadout_skins(class_index, out, 0);
+// selectedSkinsByWeapon[weapon] of a loadout slot (ent[2]) and meleeIndex (ent[9]).
+static void look_skins(const int class_index, PlayerSkins *out, const int resolve_random) {
+    const int primary = class_at(class_index).primary, secondary = ui_loadout_secondary(class_index);
+    out->primary = primary >= 0 ? worn(weapon_skin(primary), resolve_random, primary + 1, -1) : -1;
+    out->secondary = secondary >= 0 ? worn(weapon_skin(secondary), resolve_random, secondary + 1, -1) : -1;
+    out->melee = worn(sel(SEL_MELEE), resolve_random, 0, 3);
+}
+
+void ui_loadout_look(const int class_index, const int for_ent, LoadoutLook *out) {
+    look_cosmetics(&out->cosmetics, for_ent);
+    look_cosmetics_v7(class_index, &out->cosmetics_v7, for_ent);
+    cosmetics_route(&out->cosmetics, &out->cosmetics_v7); // v3.1.1 placements to their v7 slots
+    look_skins(class_index, &out->skins, for_ent);
+    out->secondary_index = ui_loadout_secondary(class_index);
+    // forceAttach ? 0 : parseInt(attachIndex): the primary weapon's (also weapon_attachment()'s) or its skin's
+    const int primary = class_at(class_index).primary;
+    const Weapon *pw = rules_weapon(primary);
+    out->attach_index = pw && pw->force_attach ? 0 : cosmetics_attach_index(out->skins.primary, sel(SEL_ATTACH));
+}
+
+int ui_loadout_weapon_skin_shown(const int weapon) {
+    const int pick = weapon >= 0 && has_inventory() ? weapon_skin(weapon) : -1;
+    return pick >= 0 && viewer_skin(pick) ? pick : -1;
 }
 
 // The secondary the player picked (selectedSecondaryIndex, localStorage "secondaryInd",

@@ -9,6 +9,7 @@
 #include <spectate.h>
 #include <ui_logic.h>
 #include <html_dom.h>
+#include <cosmetics.h> // cosmetics_attach_index
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -75,7 +76,9 @@ int client_saved_attach_index(void) {
 
 int player_attach_index(const Player *player) {
     if (!player) return DEFAULT_ATTACHMENT_INDEX;
-    if (player->is_you) return client_saved_attach_index();
+    // our own pick as saved now (a SPAWN from before WP-C carries none), with the primary skin's
+    // forceAttach like the ENT and the menu preview (cosmetics_attach_index)
+    if (player->is_you) return cosmetics_attach_index(player->skins.primary, client_saved_attach_index());
     return player->attach_index;
 }
 

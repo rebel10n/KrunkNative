@@ -1055,6 +1055,8 @@ void player_generate_meshes(Player *player, const int render_you) {
 
                 arms->anchor.parent = player_mesh->upper_body_anchor;
                 player_mesh->arms[i] = arms;
+                int sel_skin = -1;                        // arms->selection: the store skin worn,
+                char sel_model[128] = "", sel_tex[192] = ""; // the model / texture keys built
 
                 // MELEE MESH (the meleeIndex store item, else melee_0)
                 if (weapon->melee) {
@@ -1075,6 +1077,9 @@ void player_generate_meshes(Player *player, const int render_you) {
                     }
 
                     if (melee_carrier || (melee_geo && melee_texture)) {
+                        sel_skin = skin ? player->skins.melee : -1;
+                        snprintf(sel_model, sizeof(sel_model), "%s", model);
+                        snprintf(sel_tex, sizeof(sel_tex), "%s", melee_carrier ? "gltf" : texture);
                         Mesh *melee = melee_carrier;
                         if (!melee) {
                             BasicMaterial *melee_mat = basic_material_init();
@@ -1134,6 +1139,11 @@ void player_generate_meshes(Player *player, const int render_you) {
                     unsigned int skin_tex = skin_geo && skin_geo != gltf_empty_geometry() ? skin_texture(texture) : 0;
                     if (!skin_tex && skin_geo && skin_geo != gltf_empty_geometry() && strcmp(texture, model) != 0) skin_tex = skin_texture(model);
                     const int glow = skin && (skin->flags & (VS_GLOW | VS_SAME_GLOW));
+                    if (skin_geo) {
+                        sel_skin = skin ? (i == 0 ? player->skins.primary : player->skins.secondary) : -1;
+                        snprintf(sel_model, sizeof(sel_model), "%s", model);
+                        snprintf(sel_tex, sizeof(sel_tex), "%s", skin_geo == gltf_empty_geometry() ? "gltf" : skin_tex ? texture : "-");
+                    }
 
                     for (int j = 0; j < 2; j++) {
                         Geometry *weapon_geo = skin_geo;
@@ -1186,6 +1196,8 @@ void player_generate_meshes(Player *player, const int render_you) {
                     const WeaponStream *stream = weapon->stream;
                     Mesh *hose = player_hose_mesh(stream, colors[0]);
                     if (hose) {
+                        snprintf(sel_model, sizeof(sel_model), "hose");
+                        snprintf(sel_tex, sizeof(sel_tex), "#%06x", (unsigned) colors[0] & 0xffffffu);
                         if (third_person) {
                             hose->transform.parent = player_mesh->body_anchor;
                             hose->transform.position = (vec3) {0.0f, stream->pelvis_height - game_constants.leg_height,
@@ -1225,6 +1237,11 @@ void player_generate_meshes(Player *player, const int render_you) {
                         arms->attachment->transform.position.z -= attachment->z_offset;
                     }
                 }
+
+                const int charm_index = !weapon->melee && i < 2 && arms->charm ? player->cosmetics_v7.charms[i] : -1;
+                snprintf(arms->selection, sizeof(arms->selection), "w=%d skin=%d model=%s tex=%s tint=%06x attach=%s charm=%d wrist_id=%d",
+                         player->loadout[i], sel_skin, sel_model[0] ? sel_model : "-", sel_tex[0] ? sel_tex : "-", (unsigned) weapon->tint,
+                         arms->attachment && attachment ? attachment->src : "-", charm_index, (arms->wrist || arms->wrist_model) && look.wrist ? look.wrist->id : -1);
 
                 // TODO: flaps
             }

@@ -959,29 +959,304 @@ def sc_hub_items():
     record("hub-items", "bottom", "itemsList.scrollTop", ">20000 (thousands of rows)", bottom, bottom != "-" and float(bottom) > 20000)
 
 
-def sc_loadout_images():
-    """Every image the Change Loadout tabs and the Store's Prize Wheels draw resolves to a file
-    (KRUNKNATIVE_HTML_IMAGE_LOG lists none missing). The loadout is a user's: Grappler secondary
-    (weapon 20, a preview only the content tree has: ui/textures stops at weapon_19), equipped
-    skins. Before, its preview, and natively every pixelated icon whose nearest-filter twin could
-    not be made (class / tab icons), rendered as nothing; the store's spin cards lost their
-    vignette (img/ is the page's tree, the asset form missed it)."""
-    miss_log = os.path.join(WORK, "loadout-images.misses")
-    script = ["0 menu", "300 call showWindow 3", "400 call windows.2.switchTab 1", "1200 vis @loadout windowHolder",
-              "1300 call windows.2.switchTab 0", "2000 vis @class windowHolder", "2100 call showWindow 14",
-              "2200 call windows.13.switchTab 1", "3000 vis @wheels windowHolder", "3100 quit"]
-    lines = run_client("loadout-images", ["--offline", "--map", "kanji"], "\n".join(script), timeout=120,
-                       env_extra={"KRUNKNATIVE_MODE": "offline", "KRUNKNATIVE_FIXED_DELTA": "16",
-                                  "KRUNKNATIVE_HTML_IMAGE_LOG": miss_log},
-                       storage={"secondaryInd": "20", "classindex": "4", "skins": '{"3":-2,"0":1405,"5":5501,"1":2592}'})
+# A loadout with something in every slot the Change Loadout window pictures (store indices of
+# assets/skins.json): Triggerman (Assault Rifle: charm + sight slots) with the Grinchmas skin and the
+# Acog, the Grappler secondary (weapon 20: its preview is only in the content tree, ui/textures stops at
+# weapon_19), a melee skin, both charms, and one item per Customize slot (offline every skin is owned).
+FULL_LOADOUT = {
+    "classindex": "0", "secondaryInd": "20", "skins": '{"1":2592,"0":1405,"5":5501,"3":-2}', "attachIndex": "1", "meleeIndex": "6436",
+    "charms": "[5577,6269]", "hatIndex": "6435", "headIndex": "6401", "faceIndex": "6447", "bodyIndex": "6413",
+    "backIndex": "6400", "dyeIndex": "6437", "waistIndex": "6416", "shoeIndex": "6432", "petIndex": "6409",
+    "wristIndex": "4249", "sprayIndex": "6418", "playerCardIndex": "6431", "streakIndex1": "-1", "streakIndex2": "-1",
+}
+# Loadout tab icons: primary, its charm and sight, secondary, its charm, melee (custIcon), the
+# reticle (custIconScope), the streak (custStreakIcon); Customize: one per slot; Class: every card.
+# (Selectors without '#': the input script reads it as a comment.) want: the boxes a full loadout
+# shows / a guest's (charms, Customize slots: "X" without an item; the default spray is a picture).
+ICON_SELECTORS = {"loadout": ("img.custIcon, img.custIconScope, img.custStreakIcon", 8, 6),
+                  "custom": ("img.custIcon, img.custIconCard, div.custIconSpray", 12, 1), "class": ("img.classImgC", 16, 16),
+                  "box": ("img[id=menuClassIcn]", 1, 1)}
+BLANK_STDDEV = 6.0  # luminance stddev (0-255) inside an image box below which it shows nothing
+
+
+def blank_boxes(png, rects):
+    """The `rects` boxes ("idx@x,y,w,h") of `png` that show no picture: the pixels inside (2 px
+    inset) are flat, i.e. only the container's background shows through. -> [(box, stddev)]."""
+    from PIL import Image, ImageStat
+    img = Image.open(png).convert("L")
+    out = []
+    for item in rects:
+        x, y, w, h = (float(v) for v in item.split("@", 1)[1].split(","))
+        if w < 6 or h < 6:
+            out.append((item, 0.0))
+            continue
+        box = (int(x) + 2, int(y) + 2, int(x + w) - 2, int(y + h) - 2)
+        sd = ImageStat.Stat(img.crop(box)).stddev[0]
+        if sd < BLANK_STDDEV:
+            out.append((item, sd))
+    return out
+
+
+def frame_png(prefix):
+    """The PNG an input script `frames <prefix> 1` wrote (its global frame number appended)."""
+    import glob
+    found = sorted(glob.glob(prefix + "_[0-9][0-9][0-9][0-9].png"))
+    return found[-1] if found else None
+
+
+def loadout_images_run(name, storage, size, guest=False):
+    """One client on the menu with `storage` (offline mode: every skin owned; a guest: online mode
+    without an account, so no store items), through the Change Loadout tabs and the Prize Wheels:
+    every image resolves to a file (KRUNKNATIVE_HTML_IMAGE_LOG) and every picture box of the Loadout /
+    Customize / Class tabs and the menu's class box (#menuClassIcn) shows a picture in the frame."""
+    miss_log = os.path.join(WORK, f"{name}.misses")
+    shot = lambda label: os.path.join(WORK, f"{name}-{label}")  # noqa: E731
+    sel = {k: v[0] for k, v in ICON_SELECTORS.items()}
+    script = ["0 menu", f"250 rects @box {sel['box']}", f"260 frames {shot('box')} 1",
+              "300 call showWindow 3", "400 call windows.2.switchTab 1", "1200 vis @loadout windowHolder",
+              f"1210 rects @loadout {sel['loadout']}", f"1220 frames {shot('loadout')} 1",
+              "1300 call windows.2.switchTab 2", f"2000 rects @custom {sel['custom']}", f"2010 frames {shot('custom')} 1",
+              "2100 call windows.2.switchTab 0", "2800 vis @class windowHolder", f"2810 rects @class {sel['class']}",
+              f"2820 frames {shot('class')} 1", "2900 call showWindow 14", "3000 call windows.13.switchTab 1",
+              "3800 vis @wheels windowHolder", "3900 quit"]
+    lines = run_client(name, ["--offline", "--map", "kanji"], "\n".join(script), timeout=120,
+                       env_extra={"KRUNKNATIVE_MODE": "online" if guest else "offline", "KRUNKNATIVE_FIXED_DELTA": "16",
+                                  "KRUNKNATIVE_HTML_IMAGE_LOG": miss_log, "KRUNKNATIVE_WINDOW_SIZE": size},
+                       storage=storage)
     if lines is None:
         return
     shown = {m.group(1): m.group(2) for m in (re.search(r"\[input_script\] vis t=\d+ @(\S+) windowHolder=(\S+)", l) for l in lines) if m}
     for label in ("loadout", "class", "wheels"):
-        record("loadout-images", label, "windowHolder", "1", shown.get(label, "-"), shown.get(label) == "1")
+        record(name, label, "windowHolder", "1", shown.get(label, "-"), shown.get(label) == "1")
+    rects = {}
+    for line in lines:
+        m = re.search(r"\[input_script\] rects t=\d+ @(\S+) n=(\d+)(.*)", line)
+        if m:
+            rects[m.group(1)] = m.group(3).split()
+    for label, (_, want_full, want_guest) in ICON_SELECTORS.items():
+        want = want_guest if guest else want_full
+        boxes, png = rects.get(label, []), frame_png(shot(label))
+        record(name, label, "picture boxes", f">={want}", str(len(boxes)), len(boxes) >= want)
+        blank = blank_boxes(png, boxes) if png else [("no frame", 0.0)]
+        record(name, label, "blank pictures", "none", " ".join(f"{b}(sd {sd:.1f})" for b, sd in blank[:3]) or "none", not blank)
     # "undefined" is v7's own knife preview URL (textures/previews/weapons/undefined.png 404s on the real site too)
     misses = sorted({l.split("\t")[1] for l in read(miss_log).splitlines() if l.startswith("image-miss\t")} - {"undefined"})
-    record("loadout-images", "all", "missing images", "none", " ".join(misses[:4]) or "none", not misses)
+    record(name, "all", "missing images", "none", " ".join(misses[:4]) or "none", not misses)
+
+
+def sc_loadout_images():
+    """Blank-image sweep of the loadout / class / skins surface (the user's "the primary skin in the
+    loadout is invisible"): a fully equipped loadout at 1280x720 and 1920x1080, and a fresh guest
+    (online mode, no account, no saved picks: every default preview). Before f75b57b the pixelated icons (class / tab icons,
+    class cards) whose nearest-filter twin could not be made and the previews only the content tree
+    has (the Grappler, every weapon past 19) drew nothing; the store's spin cards lost their vignette.
+    Before ui_loadout_look the class box showed the default weapon icon under an equipped skin."""
+    loadout_images_run("loadout-images", FULL_LOADOUT, "1280x720")
+    loadout_images_run("loadout-images-1080", FULL_LOADOUT, "1920x1080")
+    loadout_images_run("loadout-images-guest", {}, "1280x720", guest=True)
+
+
+def loadout_images_web(name, storage, size, guest=False):
+    """loadout_images_run in the web build (KN_WEB_DIST = its dist dir), where the browser loads every
+    <img> itself from the asset host URL html_dom_asset_url built: headless Chromium (DevTools
+    protocol), the same Loadout / Customize / Class tabs and class box. Every image request that
+    fails (HTTP status >= 400 or a network error) is reported with its URL, every <img> that loaded
+    no picture (complete, naturalWidth 0) with its src, and every picture box must show a picture in
+    the page screenshot (blank_boxes)."""
+    import asyncio
+    import base64
+    import urllib.request
+    try:
+        import websockets
+    except ImportError:
+        print(f"SKIP  {name}: needs python websockets", flush=True)
+        return
+    import shutil as _shutil
+    chrome = _shutil.which("chromium-browser") or _shutil.which("chromium") or _shutil.which("google-chrome")
+    dist = os.environ.get("KN_WEB_DIST", "")
+    if not chrome or not os.path.isfile(os.path.join(dist, "client.wasm")):
+        print(f"SKIP  {name}: needs chromium and KN_WEB_DIST (a web build's dist dir)", flush=True)
+        return
+    width, height = size.split("x")
+    http_port, cdp_port = free_ports(2)
+    own = [subprocess.Popen([sys.executable, "-m", "http.server", "--bind", "127.0.0.1", str(http_port)], cwd=dist,
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True),
+           subprocess.Popen([chrome, "--headless=new", "--no-sandbox", "--use-gl=angle", "--use-angle=swiftshader",
+                             "--enable-unsafe-swiftshader", "--hide-scrollbars", f"--remote-debugging-port={cdp_port}",
+                             f"--user-data-dir={os.path.join(WORK, name + '-chrome')}", f"--window-size={width},{height}",
+                             "about:blank"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)]
+    with LOCK:
+        procs.extend(own)
+    origin = f"http://127.0.0.1:{http_port}"
+    sel = {k: v[0] for k, v in ICON_SELECTORS.items()}
+    boxes_js = ("(sel => Array.from(document.querySelectorAll(sel)).map(e => { const b = e.getBoundingClientRect();"
+                " return '-@' + [b.left, b.top, b.width, b.height].map(v => v.toFixed(1)).join(','); }))(%s)")
+    broken_js = ("Array.from(document.images).filter(i => i.complete && i.naturalWidth === 0 && i.getAttribute('src')"
+                 " && i.getClientRects().length).map(i => i.getAttribute('src'))")
+    failed, requests = [], {}
+    result = {}
+
+    async def session():
+        target = None
+        for _ in range(200):
+            try:
+                with urllib.request.urlopen(f"http://127.0.0.1:{cdp_port}/json/list", timeout=2) as r:
+                    target = next((t for t in json.load(r) if t.get("type") == "page"), None)
+                if target:
+                    break
+            except OSError:
+                pass
+            await asyncio.sleep(0.1)
+        if not target:
+            return
+        async with websockets.connect(target["webSocketDebuggerUrl"], max_size=1 << 28) as ws:
+            ids, replies = iter(range(1, 1 << 30)), {}
+
+            async def reader():
+                async for raw in ws:
+                    msg = json.loads(raw)
+                    method, params = msg.get("method"), msg.get("params", {})
+                    if method == "Network.requestWillBeSent":
+                        requests[params["requestId"]] = params["request"]["url"]
+                    elif method == "Network.responseReceived" and params["response"]["status"] >= 400:
+                        failed.append((params["response"]["url"], params["response"]["status"]))
+                    elif method == "Network.loadingFailed" and not params.get("canceled"):
+                        failed.append((requests.get(params["requestId"], "?"), params.get("errorText", "")))
+                    elif "id" in msg:
+                        replies[msg["id"]] = msg
+
+            task = asyncio.create_task(reader())
+
+            async def call(method, **params):
+                i = next(ids)
+                await ws.send(json.dumps({"id": i, "method": method, "params": params}))
+                for _ in range(1200):
+                    if i in replies:
+                        return replies.pop(i).get("result", {})
+                    await asyncio.sleep(0.05)
+                return {}
+
+            async def evaluate(expr):
+                r = await call("Runtime.evaluate", returnByValue=True, expression=expr)
+                return r.get("result", {}).get("value")
+
+            async def until(expr, seconds):
+                for _ in range(int(seconds * 4)):
+                    if await evaluate(expr):
+                        return True
+                    await asyncio.sleep(0.25)
+                return False
+
+            await call("Network.enable")
+            await call("Page.enable")
+            await call("Page.navigate", url=origin + "/favicon.png")  # the origin, for localStorage
+            await asyncio.sleep(0.5)
+            await evaluate("localStorage.clear(), %s.forEach(([k, v]) => localStorage.setItem(k, v)), 1" % json.dumps(list(storage.items())))
+            # ?offline=1: the embedded sandbox server; mode=offline: offline mode (every skin owned), else a
+            # guest in online mode (no account: no store items)
+            await call("Page.navigate", url=origin + "/?offline=1&map=kanji" + ("" if guest else "&mode=offline"))
+            ready = await until("!!(window.windows && document.getElementById('menuClassIcn')"
+                                " && document.getElementById('menuClassIcn').getAttribute('src'))", 90)
+            result["ready"] = ready
+            if ready:
+                await asyncio.sleep(3.0)
+                steps = [("box", None), ("loadout", "showWindow(3), windows[2].switchTab(1)"),
+                         ("custom", "windows[2].switchTab(2)"), ("class", "windows[2].switchTab(0)")]
+                for label, action in steps:
+                    if action:
+                        await evaluate(action + ", 1")
+                        await asyncio.sleep(2.5)
+                    boxes = await evaluate(boxes_js % json.dumps(sel[label])) or []
+                    shot = await call("Page.captureScreenshot", format="png")
+                    png = os.path.join(WORK, f"{name}-{label}.png")
+                    with open(png, "wb") as f:
+                        f.write(base64.b64decode(shot.get("data", "")))
+                    result[label] = (boxes, png, await evaluate(broken_js) or [])
+            task.cancel()
+
+    try:
+        asyncio.run(asyncio.wait_for(session(), 240))
+    except Exception as e:  # noqa: BLE001 - a dead browser is a failed probe, not a crash of the run
+        result.setdefault("error", repr(e))
+    finally:
+        for p in own:
+            if p.poll() is None:
+                os.killpg(p.pid, signal.SIGKILL)
+                p.wait()
+    record(name, "page", "menu ready", "1", "1" if result.get("ready") else result.get("error", "0"), result.get("ready"))
+    broken = set()
+    for label, (_, want_full, want_guest) in ICON_SELECTORS.items():
+        if label not in result:
+            continue
+        boxes, png, broken_imgs = result[label]
+        broken.update(broken_imgs)
+        want = want_guest if guest else want_full
+        record(name, label, "picture boxes", f">={want}", str(len(boxes)), len(boxes) >= want)
+        blank = blank_boxes(png, boxes)
+        record(name, label, "blank pictures", "none", " ".join(f"{b}(sd {sd:.1f})" for b, sd in blank[:3]) or "none", not blank)
+    # the knife's v7 "undefined" preview 404s on the real site too
+    images = sorted({f"{u} ({st})" for u, st in failed if re.search(r"\.(png|jpe?g|gif|webp|svg)(\?|$)", u) and "/undefined.png" not in u})
+    record(name, "all", "failed image requests", "none", " ".join(images[:4]) or "none", not images)
+    broken = sorted(b for b in broken if "undefined.png" not in b)
+    record(name, "all", "broken <img>", "none", " ".join(broken[:4]) or "none", not broken)
+
+
+def sc_loadout_images_web():
+    """loadout-images on the web build (KN_WEB_DIST): the browser fetches the images itself."""
+    loadout_images_web("loadout-images-web", FULL_LOADOUT, "1280x720")
+    loadout_images_web("loadout-images-web-1080", FULL_LOADOUT, "1920x1080")
+    loadout_images_web("loadout-images-web-guest", {}, "1280x720", guest=True)
+
+
+def wsel_lines(lines, label):
+    """{who: selection} of the `wsel @label` probe (PlayerArms.selection; who = preview / me)."""
+    out = {}
+    for line in lines:
+        m = re.search(r"\[input_script\] wsel t=\d+ @" + re.escape(label) + r" who=(\S+) slot=(-?\d+) tp=(-?\d+) (.*)", line)
+        if m:
+            out[m.group(1)] = (int(m.group(2)), int(m.group(3)), m.group(4).strip())
+    return out
+
+
+def sc_loadout_preview():
+    """The menu's class preview (class_preview.c, third-person model set) and our first-person
+    viewmodel in game pick the same weapon, skin (model / texture keys), tint, sight, charm and wrist
+    item for the same loadout (ui_loadout_look feeds both; `wsel` reads PlayerArms.selection):
+      - Grinchmas + Acog + charm + wrist: before, the preview always mounted the Reflex Sight
+        (attach_0: its Player never got the attachIndex) while the viewmodel had the Acog;
+      - AJ47 (a forceAttach skin) with the Acog picked: v7 mounts the Reflex Sight on both;
+      - the Piss (Object Manager): no model, the procedural hose on the first-person and the
+        third-person (preview) model sets alike, in the skin colour.
+    Menu and in-game frames are kept next to the logs (WORK) for review."""
+    cases = {
+        "acog": ({"classindex": "0", "skins": '{"1":2592}', "attachIndex": "1", "charms": "[5577]", "wristIndex": "4249",
+                  "secondaryInd": "20"}, "attach=attach_1"),
+        "force-attach": ({"classindex": "0", "skins": '{"1":4596}', "attachIndex": "1"}, "attach=attach_0"),
+    }
+    for case, (storage, want_attach) in cases.items():
+        name = f"loadout-preview-{case}"
+        shot = lambda label: os.path.join(WORK, f"{name}-{label}")  # noqa: E731
+        script = ["0 menu", "1500 wsel @menu", f"1600 frames {shot('menu')} 1", "2000 play", "4500 wsel @game",
+                  f"4600 frames {shot('game')} 1"]
+        if case == "acog":
+            script += ["5000 om add 65", "6000 wsel @piss", f"6100 frames {shot('piss')} 1", "6500 con thirdperson",
+                       "7500 wsel @piss3", f"7600 frames {shot('piss3')} 1"]
+        script.append("8000 quit")
+        lines = run_client(name, ["--offline", "--map", "kanji"], "\n".join(script), timeout=120,
+                           env_extra={"KRUNKNATIVE_MODE": "offline", "KRUNKNATIVE_FIXED_DELTA": "16"}, storage=storage)
+        if lines is None:
+            continue
+        menu, game = wsel_lines(lines, "menu"), wsel_lines(lines, "game")
+        preview = menu.get("preview", (-1, -1, "-"))
+        me = game.get("me", (-1, -1, "-"))
+        record(name, "menu", "preview model set", "third person", "third person" if preview[1] == 1 else str(preview[1]), preview[1] == 1)
+        record(name, "menu", "preview sight", want_attach, preview[2], want_attach in preview[2].split())
+        record(name, "game", "viewmodel model set", "first person", "first person" if me[1] == 0 else str(me[1]), me[1] == 0)
+        record(name, "game", "viewmodel == preview", preview[2], me[2], me[2] != "-" and me[2] == preview[2])
+        if case == "acog":
+            first, third = wsel_lines(lines, "piss").get("me", (-1, -1, "-")), wsel_lines(lines, "piss3").get("me", (-1, -1, "-"))
+            record(name, "piss", "first-person hose", "w=65 model=hose", first[2], "w=65" in first[2].split() and "model=hose" in first[2].split())
+            record(name, "piss3", "third-person == first-person", first[2], third[2], third[1] == 1 and third[2] == first[2])
 
 
 SCENARIOS = {
@@ -989,7 +1264,8 @@ SCENARIOS = {
     "map-change": sc_map_change, "interact": sc_interact, "custom-gui": sc_custom_gui, "krunkscript": sc_krunkscript,
     "spray": sc_spray, "windows": sc_windows, "online": sc_online, "lost-end": sc_lost_during_end, "outdated": sc_outdated,
     "comp": sc_comp, "om-scroll": sc_om_scroll, "skins-grid": sc_skins_grid, "hub-items": sc_hub_items,
-    "loadout-images": sc_loadout_images,
+    "loadout-images": sc_loadout_images, "loadout-preview": sc_loadout_preview,
+    "loadout-images-web": sc_loadout_images_web,
 }
 SCENARIOS["endscreen-cursor"] = sc_endscreen_cursor
 

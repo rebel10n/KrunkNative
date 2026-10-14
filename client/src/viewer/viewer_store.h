@@ -98,6 +98,7 @@ enum {
     VS2_SPRAY_SND = 1 << 17,
     VS2_EXPLODE = 1 << 18,       // kill VFX
     VS2_SAME_ENV = 1 << 19,      // env map from the texture itself
+    VS2_FORCE_ATTACH = 1 << 20,  // weapon skin: forceAttach, the Reflex Sight (attachIndex 0) whatever the pick
 };
 
 // A dye's colour overrides (players.js generateMeshes): per part up to 4 colours, one picked at

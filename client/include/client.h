@@ -430,6 +430,11 @@ typedef struct {
     MeshTransform wrist_holder;
     Mesh *wrist;
     struct GltfInstance *wrist_model;
+    // What player_generate_meshes picked for this slot, model-set independent (the weapon, its store
+    // skin as worn after fallbacks, model / texture keys or the procedural hose, the tint, the sight,
+    // the charm, the wrist item): equal for the menu preview and the viewmodel of the same loadout
+    // (the input script's `wsel` probe, server/tests/ui_transitions_e2e.py loadout-images)
+    char selection[256];
 } PlayerArms;
 
 typedef struct {
