@@ -119,6 +119,7 @@ typedef struct {
     float bot_quota_grace;
     char bot_difficulty[16];
     char log_file[GS_STR_LARGE];         // append every log line here too ("" = stdout/stderr only)
+    char flavor[8];                      // product flavor key (flavor.h): "strike"; "" = base game (--flavor overrides)
     char cfg_path[GS_STR_LARGE];         // server.cfg actually loaded ("" none)
 
     // ---- bookkeeping

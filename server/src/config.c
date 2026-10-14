@@ -11,6 +11,7 @@
 //          (main.c), applied last.
 #include <server_config.h>
 #include <build_info.h> // KN_PRODUCT_NAME
+#include <flavor.h> // gameserver.flavor: the product flavor (Krunker Strike)
 #include <server.h> // g_server (effective lobby size in the summary)
 #include <server_log.h>
 #include <map_catalog.h>
@@ -346,6 +347,12 @@ int gs_config_from_json(GsConfig *cfg, const cJSON *s, char *err, const size_t e
     gs_read_str(s, "region", cfg->region, sizeof(cfg->region));
     // the version toggle's key: Krunker v10.0.2 is the only version now (shared/include/ruleset.h)
     if (cJSON_GetObjectItem(s, "ruleset")) server_log_error("config: gameserver.ruleset is ignored: the server plays Krunker v10.0.2, the only version");
+    // product flavor (flavor.h): "base" (default) or "strike"; --flavor overrides it (server/src/main.c)
+    gs_read_str(s, "flavor", cfg->flavor, sizeof(cfg->flavor));
+    if (cfg->flavor[0] && flavor_from_key(cfg->flavor, FLAVOR_COUNT) == FLAVOR_COUNT) {
+        server_log_error("config: gameserver.flavor '%s' is unknown (base|strike): ignored", cfg->flavor);
+        cfg->flavor[0] = 0;
+    }
     gs_read_str(s, "node_id", cfg->node_id, sizeof(cfg->node_id));
     gs_read_str(s, "name", cfg->name, sizeof(cfg->name));
     gs_read_str(s, "listen_host", cfg->listen_host, sizeof(cfg->listen_host));

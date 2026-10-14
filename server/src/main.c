@@ -1,5 +1,6 @@
 #include <server_cli.h>
 #include <ruleset.h> // the startup log: Krunker v10.0.2
+#include <flavor.h>   // --flavor / server.cfg `flavor`: the product flavor (Krunker Strike)
 #include <server_accounts.h>
 #include <brain.h>
 #include <info_query.h>
@@ -224,6 +225,7 @@ typedef struct {
     float round_seconds; // --round-seconds: round length override (debug: quick end screen / rotation tests)
     int perms;          // --perms (or PERMS=1): v3.1.1 PERMS, DEV-only chat commands
     int open_cheats;    // --open-cheats: v3.1.1's perms-off cheats for everyone
+    const char *flavor; // --flavor base|strike (flavor.h); NULL = server.cfg `flavor`, else base
     // backend / config (doc/backend.md section 8); NULL / 0 = not given on the command line
     const char *config_path; // --config FILE
     const char *brain_url;   // --brain URL
@@ -355,6 +357,11 @@ static int parse_args(const int argc, char **argv, ServerArgs *args) {
 
         if (!strcmp(arg, "--open-cheats")) {
             args->open_cheats = 1;
+            continue;
+        }
+
+        if (arg_value(argc, argv, &i, "--flavor", &args->flavor)) {
+            if (!args->flavor || flavor_from_key(args->flavor, FLAVOR_COUNT) == FLAVOR_COUNT) return 0;
             continue;
         }
 
@@ -666,8 +673,10 @@ int main(int argc, char **argv) {
         print_usage(stdout, argv[0]);
         return 0;
     }
+    if (args.flavor) flavor_set_key(args.flavor); // --flavor wins over server.cfg; before --version
     if (args.version) {
         printf(KN_PRODUCT_NAME " server_bin %d.%d.%d (Krunker v3.1.1 port)\n", g_server_version.major, g_server_version.minor, g_server_version.patch);
+        if (flavor_get() != FLAVOR_BASE) printf("flavor %s (%s)\n", flavor_current()->key, flavor_current()->display_name);
         // build identity (shared/include/build_info.h): what the finder / coordinator compare
         printf("build %s\n", kn_build_string());
         return 0;
@@ -694,6 +703,9 @@ int main(int argc, char **argv) {
     if (args.online_mode >= 0) cfg->online_mode = args.online_mode;
     if (args.public_host) snprintf(cfg->public_host, sizeof(cfg->public_host), "%s", args.public_host);
     if (args.public_port) cfg->public_port = args.public_port;
+    // The product flavor (flavor.h): --flavor (applied above) wins; else server.cfg `flavor`; else
+    // the compile-time default (base, or Strike for a -DKRUNKNATIVE_FLAVOR=strike build).
+    if (!args.flavor && cfg->flavor[0]) flavor_set_key(cfg->flavor);
     if (args.max_players) {
         cfg->max_players = args.max_players;
         memset(cfg->mode_max_players, 0, sizeof(cfg->mode_max_players));
@@ -790,6 +802,7 @@ int main(int argc, char **argv) {
                interactive ? "" : " (headless)");
     server_log("Build %s", kn_build_string());
     server_log("Plays Krunker v%s", ruleset_current()->version);
+    if (flavor_get() != FLAVOR_BASE) server_log("Flavor: %s (%s)", flavor_current()->display_name, flavor_current()->key);
 
     if (g_server->game.ready) {
         const cJSON *name = cJSON_GetObjectItem(g_server->game.maps[g_server->game.current_map_index], "name");

@@ -78,6 +78,8 @@ size_t server_info_build_reply(uint8_t *out, const size_t cap, const ServerInfo 
     cJSON_AddStringToObject(o, "build_time", info->build_time);
     cJSON_AddStringToObject(o, "protocol", info->protocol);
     if (info->ruleset[0]) cJSON_AddStringToObject(o, "ruleset", info->ruleset);
+    if (info->flavor[0]) cJSON_AddStringToObject(o, "flavor", info->flavor); // absent = the base game
+
     char *json = cJSON_PrintUnformatted(o);
     cJSON_Delete(o);
     if (!json) return 0;
@@ -141,6 +143,7 @@ int server_info_parse_reply(const uint8_t *in, const size_t len, ServerInfo *inf
     copy_str(info->build_time, sizeof(info->build_time), o, "build_time");
     copy_str(info->protocol, sizeof(info->protocol), o, "protocol");
     copy_str(info->ruleset, sizeof(info->ruleset), o, "ruleset");
+    copy_str(info->flavor, sizeof(info->flavor), o, "flavor");
     cJSON_Delete(o);
     return 1;
 }

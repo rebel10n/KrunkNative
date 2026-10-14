@@ -16,6 +16,18 @@ endif ()
 # browser renders the same page and client/src/html/web_dom.c implements the DOM ops.
 option(KRUNKNATIVE_HTML_ENGINE "Build the in-house HTML/CSS UI engine (OFF: no HTML UI)" ON)
 
+# Product flavor (shared/include/flavor.h): the compile-time DEFAULT flavor of server_bin / client_bin.
+# base (the default) builds the base game unchanged and defines nothing extra; strike makes the
+# binaries default to Krunker Strike branding. Either way the runtime flag (server --flavor /
+# client --flavor / KN_FLAVOR) overrides it. Used by shared/src/flavor.c (KN_FLAVOR_DEFAULT).
+set(KRUNKNATIVE_FLAVOR base CACHE STRING "Default product flavor: base | strike")
+set_property(CACHE KRUNKNATIVE_FLAVOR PROPERTY STRINGS base strike)
+if (KRUNKNATIVE_FLAVOR STREQUAL "strike")
+    add_compile_definitions(KN_FLAVOR_DEFAULT=1)
+elseif (NOT KRUNKNATIVE_FLAVOR STREQUAL "base")
+    message(FATAL_ERROR "KRUNKNATIVE_FLAVOR must be 'base' or 'strike', got '${KRUNKNATIVE_FLAVOR}'")
+endif ()
+
 # Adds client/src/html/<file> sources to a target together with the include paths they
 # need. With ENGINE, KRUNKNATIVE_HTML_ENGINE=1 is defined for the whole target: the
 # engine backend (or web_dom.c on the web) is compiled in instead of stub.c.

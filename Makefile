@@ -34,6 +34,7 @@ KN_GA_ID    ?=
 
 DEBUG_DIR     := cmake-build-debug
 RELEASE_DIR   := cmake-build-release
+STRIKE_DIR    := cmake-build-strike
 WEB_DIR       := cmake-build-web
 WEB_DEBUG_DIR := cmake-build-web-debug
 DIST_WEB      := dist/web
@@ -137,6 +138,21 @@ server: build ## Run the debug server (ARGS=...)
 
 server-release: release ## Run the release server
 	cd $(RELEASE_DIR) && ./$(SERVER_BIN) $(ARGS)
+
+# --------------------------------------------------------------------------- Krunker Strike (flavor)
+# Krunker Strike is a product flavor of Krunker Box Office (doc/v10/krunker-strike.md, flavor.h). The
+# flavor is a runtime flag (--flavor strike / KN_FLAVOR); `make strike` also builds a binary whose
+# compile-time DEFAULT is Strike, for dedicated Strike packages. Default builds are unchanged.
+.PHONY: strike run-strike server-strike
+strike: ## Build a Krunker Strike-branded client + server into cmake-build-strike (compile-time flavor)
+	@$(call CONFIGURE,strike,$(STRIKE_DIR))
+	$(call BUILD,$(STRIKE_DIR))
+
+run-strike: build ## Run the debug client as Krunker Strike (runtime --flavor; ARGS=, MAP=)
+	cd $(DEBUG_DIR) && $(RUN_BRAIN_ENV) $(RUN_PERF) ./$(CLIENT_BIN) --flavor strike $(ARGS) $(if $(MAP),../$(MAP_ARG),)
+
+server-strike: build ## Run the debug server as Krunker Strike (runtime --flavor; ARGS=)
+	cd $(DEBUG_DIR) && ./$(SERVER_BIN) --flavor strike $(ARGS)
 
 SERVER_DIST ?= dist/server
 PREFIX      ?= /opt/krunknative

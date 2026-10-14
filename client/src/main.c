@@ -17,6 +17,7 @@
 #include <html_ui.h>
 #include <html_dom.h> // html_storage_*: the version toggle's old knRuleset entry
 #include <ruleset.h>  // the startup log: Krunker v10.0.2
+#include <flavor.h>   // --flavor / KN_FLAVOR: the product flavor (Krunker Strike branding)
 #include <object_manager.h> // object_manager_restore_map (client_unload_map)
 #include <om_interp.h>     // om_interp_frame
 #include <ui_logic.h> // keybinds, chat and input settings (client/src/ui/ui_controls.c), every build
@@ -438,13 +439,25 @@ static int parse_startup_args(int argc, char **argv, int *offline, int *sandbox,
     return 1;
 }
 
+// The product flavor (flavor.h): --flavor base|strike wins, then KN_FLAVOR, then the compile-time
+// default (base, or Strike for a -DKRUNKNATIVE_FLAVOR=strike build). Only the display name changes.
+static void client_resolve_flavor(int argc, char **argv) {
+    const char *env = getenv("KN_FLAVOR");
+    if (env && env[0]) flavor_set_key(env);
+    for (int i = 1; i < argc; i++) {
+        if (!strncmp(argv[i], "--flavor=", 9)) flavor_set_key(argv[i] + 9);
+        else if (!strcmp(argv[i], "--flavor") && i + 1 < argc) flavor_set_key(argv[++i]);
+    }
+}
+
 int main(int argc, char **argv) {
+    client_resolve_flavor(argc, argv); // branding for --version, the banner and the window title
     // --version before anything needs assets or a GL context (build identity: build_info.h)
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--version")) {
             // "KrunkNative client" stays in the line: launchers check it before installing a
             // staged update (launcher.c staged_client_runs), the installed ones included
-            printf(KN_PRODUCT_NAME " (KrunkNative client) %s\n", kn_build_string());
+            printf("%s (KrunkNative client) %s\n", flavor_display_name(flavor_get()), kn_build_string());
             return 0;
         }
         if (!strcmp(argv[i], "--voice-info")) { // packaging checks: the voice codec is linked in
@@ -452,7 +465,7 @@ int main(int argc, char **argv) {
             return 0;
         }
     }
-    printf(KN_PRODUCT_NAME " (KrunkNative client) %s\n", kn_build_string());
+    printf("%s (KrunkNative client) %s\n", flavor_display_name(flavor_get()), kn_build_string());
     install_root_chdir(); // packaged installs started from elsewhere: ui/ + assets/ (install_root.h)
     debug_capture_startup(); // KRUNKNATIVE_CAMERA/SCREENSHOT runs ignore stored settings (debug_capture.c)
     game_reload_startup();   // F5: files changed from now on are new; the session an F5 restart hands over
@@ -657,7 +670,7 @@ int main(int argc, char **argv) {
         glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
 #endif
     headless_window_hints(); // headless: no GLFW context (headless_make_context_current creates it)
-    INSTANCE.window = glfwCreateWindow(window_width, window_height, KN_PRODUCT_NAME, NULL, NULL);
+    INSTANCE.window = glfwCreateWindow(window_width, window_height, flavor_display_name(flavor_get()), NULL, NULL);
     if (!INSTANCE.window) {
         const char *reason = NULL;
 #ifndef __EMSCRIPTEN__ // emscripten's GLFW port has no glfwGetError

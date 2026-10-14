@@ -1,5 +1,6 @@
 // Server-info query responder and finder heartbeat (server/include/info_query.h).
 #include <ruleset.h>
+#include <flavor.h>
 #include <bots.h>
 #include <build_info.h>
 #include <info_query.h>
@@ -84,6 +85,8 @@ void info_query_update(const float now) {
     snprintf(info.build_time, sizeof(info.build_time), "%s", build->build_time);
     snprintf(info.protocol, sizeof(info.protocol), "%s", kn_build_protocol());
     snprintf(info.ruleset, sizeof(info.ruleset), "%s", ruleset_current()->key);
+    // The product flavor (flavor.h); base leaves the field empty so base servers answer as before.
+    if (flavor_get() != FLAVOR_BASE) snprintf(info.flavor, sizeof(info.flavor), "%s", flavor_current()->key);
     info.port = cfg->public_port ? cfg->public_port : cfg->listen_port;
     if (cfg->password[0]) iq_add_tag(&info, "password");
     if (game_bots_autofill(game, NULL)) iq_add_tag(&info, "autofill"); // KrunkNative `autofill`: bots fill the lobby

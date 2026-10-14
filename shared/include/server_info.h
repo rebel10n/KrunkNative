@@ -48,6 +48,7 @@ typedef struct {
     char build_time[24];            // ISO-8601 UTC
     char protocol[8];               // NET_PROTOCOL_MAJOR.MINOR, "1.3"
     char ruleset[8];                // the Krunker version it plays (ruleset.h key): "v7", "v10"; "" = v7 (older servers)
+    char flavor[8];                 // the product flavor it runs (flavor.h key): "strike"; "" = base game (the default)
     char nonce[SERVER_INFO_NONCE_MAX + 1];
 } ServerInfo;
 
