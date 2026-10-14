@@ -1,0 +1,1689 @@
+{
+ "generator_rev": 1,
+ "schema": 1,
+ "source": {
+  "url": "https://kru.eli.gift/game.deob.js",
+  "sha256": "e21ede6ade4aa9e66a10c9b439adff24f9324f5fbb179f38e7600d86c49bd390",
+  "bytes": 13601540
+ },
+ "ahkey": 94547,
+ "ahkey_hex": "0x17153",
+ "ahnum_step": 83,
+ "ahkey_form": "helper",
+ "ahnum_trailer": "nibbles",
+ "client_version": "10.0.2r1",
+ "build_version": "Def6phpLKsJTIw2XpAeEicZWURGypSce",
+ "ahnum_exempt": {
+  "name": "cptR",
+  "wire": "cptR"
+ },
+ "packets_c2s": [
+  {
+   "name": "PING",
+   "wire": "po"
+  },
+  {
+   "name": "CODE",
+   "wire": "code"
+  },
+  {
+   "name": "dsrvl",
+   "wire": "dsrvl"
+  },
+  {
+   "name": "rdsrv",
+   "wire": "rdsrv"
+  },
+  {
+   "name": "ENTER_GAME",
+   "wire": "en"
+  },
+  {
+   "name": "edMp",
+   "wire": "edMp"
+  },
+  {
+   "name": "ADD_FUNDS_TO_MAP",
+   "wire": "mfnds"
+  },
+  {
+   "name": "rqdxp",
+   "wire": "rqdxp"
+  },
+  {
+   "name": "CRAFT_DATA_REQUEST",
+   "wire": "recps"
+  },
+  {
+   "name": "CRAFT_REQUEST",
+   "wire": "crft"
+  },
+  {
+   "name": "UNBOX",
+   "wire": "unbx"
+  },
+  {
+   "name": "SPIN",
+   "wire": "spin"
+  },
+  {
+   "name": "SPIN_HISTORY",
+   "wire": "spinH"
+  },
+  {
+   "name": "SHARE_MATCH_RESULT",
+   "wire": "smr"
+  },
+  {
+   "name": "ALIAS_REQUEST",
+   "wire": "nme"
+  },
+  {
+   "name": "OPEN_CLAN_TAB",
+   "wire": "vcln"
+  },
+  {
+   "name": "REDEEM_VOUCHER",
+   "wire": "vo"
+  },
+  {
+   "name": "FOLLOW_PLAYER",
+   "wire": "fo"
+  },
+  {
+   "name": "CHANGE_COUNTRY_FLAG",
+   "wire": "flg"
+  },
+  {
+   "name": "SAVE_BADGE",
+   "wire": "bdg"
+  },
+  {
+   "name": "CLAIM_BADGE",
+   "wire": "cbdg"
+  },
+  {
+   "name": "HIDE_DETAILS",
+   "wire": "hds"
+  },
+  {
+   "name": "grp",
+   "wire": "grp"
+  },
+  {
+   "name": "ctd",
+   "wire": "ctd"
+  },
+  {
+   "name": "UPLOAD_PROFILE_PICTURE",
+   "wire": "uploadP"
+  },
+  {
+   "name": "chtb",
+   "wire": "chtb"
+  },
+  {
+   "name": "FETCH_SETTINGS",
+   "wire": "getS"
+  },
+  {
+   "name": "UPLOAD_SETTINGS",
+   "wire": "uploadS"
+  },
+  {
+   "name": "FAVORITE_MAPMOD",
+   "wire": "fvM"
+  },
+  {
+   "name": "MATCH_VOTE",
+   "wire": "maVote"
+  },
+  {
+   "name": "MAP_VOTE",
+   "wire": "vote"
+  },
+  {
+   "name": "CUSTOM_SERVER",
+   "wire": "custom"
+  },
+  {
+   "name": "ict",
+   "wire": "ict"
+  },
+  {
+   "name": "rcY",
+   "wire": "rcY"
+  },
+  {
+   "name": "krK",
+   "wire": "krK"
+  },
+  {
+   "name": "rt",
+   "wire": "rt"
+  },
+  {
+   "name": "hc",
+   "wire": "hc"
+  },
+  {
+   "name": "SYNC_CONNECTION_DATA",
+   "wire": "cd"
+  },
+  {
+   "name": "CUSTOM_NETWORK_DATA",
+   "wire": "sd"
+  },
+  {
+   "name": "fpSp",
+   "wire": "fpSp"
+  },
+  {
+   "name": "KILL_STREAK_OLD",
+   "wire": "k"
+  },
+  {
+   "name": "KILL_STREAK_0",
+   "wire": "k0"
+  },
+  {
+   "name": "KILL_STREAK_1",
+   "wire": "k1"
+  },
+  {
+   "name": "KILL_STREAK_2",
+   "wire": "k2"
+  },
+  {
+   "name": "PROP_HUNT_TAUNT",
+   "wire": "prpt"
+  },
+  {
+   "name": "STALKER_TAUNT",
+   "wire": "stlkrt"
+  },
+  {
+   "name": "INPUT",
+   "wire": "q"
+  },
+  {
+   "name": "PONG",
+   "wire": "v"
+  },
+  {
+   "name": "CUSTOM_TRIGGER_INTERACTION",
+   "wire": "cnfm"
+  },
+  {
+   "name": "INTERACT",
+   "wire": "int"
+  },
+  {
+   "name": "SECONDARY_INTERACT",
+   "wire": "intSec"
+  },
+  {
+   "name": "DROP_WEAPON",
+   "wire": "drpw"
+  },
+  {
+   "name": "SPRAY",
+   "wire": "spry"
+  },
+  {
+   "name": "SEND_TRADE_REQUEST",
+   "wire": "strd"
+  },
+  {
+   "name": "PICK_PROP",
+   "wire": "prp"
+  },
+  {
+   "name": "PROP_ROTATION",
+   "wire": "prpR"
+  },
+  {
+   "name": "KPD",
+   "wire": "kpd"
+  },
+  {
+   "name": "RATE_KPD",
+   "wire": "rkpd"
+  },
+  {
+   "name": "KPD_APPLICATION",
+   "wire": "kpdA"
+  },
+  {
+   "name": "PREMIUM_ACTION",
+   "wire": "prmA"
+  },
+  {
+   "name": "VOTE_KICK",
+   "wire": "v2k"
+  },
+  {
+   "name": "CHAT_MESSAGE",
+   "wire": "ct"
+  },
+  {
+   "name": "BOTS",
+   "wire": "bots"
+  },
+  {
+   "name": "BOT_CONFIG",
+   "wire": "bcfg"
+  },
+  {
+   "name": "ADMIN_ACTIONS",
+   "wire": "pnh"
+  },
+  {
+   "name": "VOICE_CHAT",
+   "wire": "vc"
+  },
+  {
+   "name": "INIT_TRADE",
+   "wire": "trd"
+  },
+  {
+   "name": "TRADE_ACCEPT",
+   "wire": "atrd"
+  },
+  {
+   "name": "TRADE_UPDATE",
+   "wire": "utrd"
+  },
+  {
+   "name": "TRADE_CURRENCY_UPDATE",
+   "wire": "utrdc"
+  },
+  {
+   "name": "TRADE_DECLINE",
+   "wire": "dtrd"
+  },
+  {
+   "name": "TRADE_CANCEL",
+   "wire": "ctrd"
+  },
+  {
+   "name": "TRADE_CHAT",
+   "wire": "tct"
+  },
+  {
+   "name": "GET_MAIL",
+   "wire": "rml"
+  },
+  {
+   "name": "READ_MAIL",
+   "wire": "raml"
+  },
+  {
+   "name": "kml",
+   "wire": "kml"
+  },
+  {
+   "name": "gmc",
+   "wire": "gmc"
+  },
+  {
+   "name": "CUSTOM_VIDEO_AD",
+   "wire": "vad"
+  },
+  {
+   "name": "AD_STARTED",
+   "wire": "sfkr"
+  },
+  {
+   "name": "AD_LOADED",
+   "wire": "lfkr"
+  },
+  {
+   "name": "AD_FAILED",
+   "wire": "fkrf"
+  },
+  {
+   "name": "AD_FINISHED",
+   "wire": "fkr"
+  },
+  {
+   "name": "CLAN",
+   "wire": "cln"
+  },
+  {
+   "name": "SPEECH_BUBBLE",
+   "wire": "sb"
+  },
+  {
+   "name": "CLAN_REQUEST",
+   "wire": "clnR"
+  },
+  {
+   "name": "clnRA",
+   "wire": "clnRA"
+  },
+  {
+   "name": "twofa",
+   "wire": "2fa"
+  },
+  {
+   "name": "a2FA",
+   "wire": "a2FA"
+  },
+  {
+   "name": "a2FAc",
+   "wire": "a2FAc"
+  },
+  {
+   "name": "d2FA",
+   "wire": "d2FA"
+  },
+  {
+   "name": "d2FAc",
+   "wire": "d2FAc"
+  },
+  {
+   "name": "las",
+   "wire": "las"
+  },
+  {
+   "name": "rqd",
+   "wire": "rqd"
+  },
+  {
+   "name": "cemail",
+   "wire": "cemail"
+  },
+  {
+   "name": "emailv",
+   "wire": "emailv"
+  },
+  {
+   "name": "a",
+   "wire": "a"
+  },
+  {
+   "name": "upp",
+   "wire": "upp"
+  },
+  {
+   "name": "vmm",
+   "wire": "vmm"
+  },
+  {
+   "name": "rmm",
+   "wire": "rmm"
+  },
+  {
+   "name": "vmms",
+   "wire": "vmms"
+  },
+  {
+   "name": "cnft",
+   "wire": "cnft"
+  },
+  {
+   "name": "stpA",
+   "wire": "stpA"
+  },
+  {
+   "name": "stpV",
+   "wire": "stpV"
+  },
+  {
+   "name": "stppV",
+   "wire": "stppV"
+  },
+  {
+   "name": "stpbV",
+   "wire": "stpbV"
+  },
+  {
+   "name": "stpbpV",
+   "wire": "stpbpV"
+  },
+  {
+   "name": "stpbplV",
+   "wire": "stpbplV"
+  },
+  {
+   "name": "bpdl",
+   "wire": "bpdl"
+  },
+  {
+   "name": "bpclm",
+   "wire": "bpclm"
+  },
+  {
+   "name": "flgu",
+   "wire": "flgu"
+  },
+  {
+   "name": "xstbpl",
+   "wire": "xstbpl"
+  },
+  {
+   "name": "xstbp",
+   "wire": "xstbp"
+  },
+  {
+   "name": "xst",
+   "wire": "xst"
+  },
+  {
+   "name": "xstp",
+   "wire": "xstp"
+  },
+  {
+   "name": "xstb",
+   "wire": "xstb"
+  },
+  {
+   "name": "xsin",
+   "wire": "xsin"
+  },
+  {
+   "name": "svyb",
+   "wire": "svyb"
+  },
+  {
+   "name": "FORCE_PING",
+   "wire": "fp"
+  },
+  {
+   "name": "LOAD",
+   "wire": "load"
+  },
+  {
+   "name": "RPC",
+   "wire": "_0"
+  },
+  {
+   "name": "cptR",
+   "wire": "cptR"
+  },
+  {
+   "name": "bCpt",
+   "wire": "bCpt"
+  },
+  {
+   "name": "UPDATE_ACC_BUNDLES",
+   "wire": "uab"
+  },
+  {
+   "name": "BP_CLAIM_ALL",
+   "wire": "bpclmAll"
+  },
+  {
+   "name": "MARK_POSITION",
+   "wire": "mpos"
+  },
+  {
+   "name": "GET_TWITCH_DROPS",
+   "wire": "getTwitchDrops"
+  },
+  {
+   "name": "VERIFY_TWITCH",
+   "wire": "verifyTwitch"
+  },
+  {
+   "name": "REMOVE_TWITCH",
+   "wire": "removeTwitchLink"
+  },
+  {
+   "name": "DISCORD_LINK_WAIT",
+   "wire": "dlnkW"
+  },
+  {
+   "name": "PURCHASE_PRODUCT_XSOLLA",
+   "wire": "xpurchase"
+  },
+  {
+   "name": "PURCHASE_PRODUCT_STEAM",
+   "wire": "spurchase"
+  },
+  {
+   "name": "LOGIN",
+   "wire": "login"
+  },
+  {
+   "name": "DAILY_SPIN_CLAIM",
+   "wire": "dsl"
+  },
+  {
+   "name": "SURVEY_ANSWER",
+   "wire": "surveyAnswer"
+  },
+  {
+   "name": "JOINED_RANK",
+   "wire": "joinedRank"
+  },
+  {
+   "name": "PAT_REFRESH",
+   "wire": "patR"
+  },
+  {
+   "name": "CHEAT_CHECK_RESPONSE",
+   "wire": "ccr"
+  },
+  {
+   "name": "CHARGE_CONSENT_RESPONSE",
+   "wire": "chrsp"
+  }
+ ],
+ "packets_s2c": [
+  {
+   "name": "RPC_SUCCESS",
+   "wire": "_0"
+  },
+  {
+   "name": "RPC_ERROR",
+   "wire": "_1"
+  },
+  {
+   "name": "cpt",
+   "wire": "cpt"
+  },
+  {
+   "name": "cptR",
+   "wire": "cptR"
+  },
+  {
+   "name": "FORCE_PING",
+   "wire": "fp"
+  },
+  {
+   "name": "NUKE_UPDATE",
+   "wire": "n"
+  },
+  {
+   "name": "BOMBARDMENT_UPDATE",
+   "wire": "bbm"
+  },
+  {
+   "name": "ADD_PLAYERS",
+   "wire": "0"
+  },
+  {
+   "name": "UPDATE_NAMES",
+   "wire": "00"
+  },
+  {
+   "name": "UPDATE_PLAYERS",
+   "wire": "k"
+  },
+  {
+   "name": "ENTER_CODE",
+   "wire": "code"
+  },
+  {
+   "name": "UPDATE_CODE_TIMER",
+   "wire": "codeT"
+  },
+  {
+   "name": "CODE_PASSED",
+   "wire": "codeP"
+  },
+  {
+   "name": "INIT_GAME",
+   "wire": "init"
+  },
+  {
+   "name": "IO_INIT",
+   "wire": "io-init"
+  },
+  {
+   "name": "GAME_INSTANCE_ID",
+   "wire": "inst-id"
+  },
+  {
+   "name": "INIT_LOAD",
+   "wire": "load"
+  },
+  {
+   "name": "REDEEM_VOUCHER_RESPONSE",
+   "wire": "vr"
+  },
+  {
+   "name": "ADD_MAIL",
+   "wire": "kml"
+  },
+  {
+   "name": "CUSTOM_RESPONSE",
+   "wire": "cust"
+  },
+  {
+   "name": "READY",
+   "wire": "ready"
+  },
+  {
+   "name": "CLAN_RESPONSE",
+   "wire": "cln"
+  },
+  {
+   "name": "START_GAME",
+   "wire": "start"
+  },
+  {
+   "name": "NEW_TOKEN",
+   "wire": "nwT"
+  },
+  {
+   "name": "PURCHASE_RESPONSE",
+   "wire": "pur"
+  },
+  {
+   "name": "PURCHASE_PRODUCT_RESPONSE",
+   "wire": "ppr"
+  },
+  {
+   "name": "PURCHASE_PREMIUM_RESPONSE",
+   "wire": "purprm"
+  },
+  {
+   "name": "PURCHASE_BUNDLE_RESPONSE",
+   "wire": "purb"
+  },
+  {
+   "name": "UPDATE_PREMIUM_AMOUNT",
+   "wire": "uprm"
+  },
+  {
+   "name": "PURCHASE_RESPONSE_2",
+   "wire": "purbp"
+  },
+  {
+   "name": "PURCHASE_LEVEL_RESPONSE",
+   "wire": "purbpl"
+  },
+  {
+   "name": "CLAIM_ITEM_RESPONSE",
+   "wire": "bpclmr"
+  },
+  {
+   "name": "UPDATE_GAME_MESSAGE",
+   "wire": "gmsg"
+  },
+  {
+   "name": "UPDATE_LOCKOUT_TIM",
+   "wire": "lkt"
+  },
+  {
+   "name": "PLAYER_INTERACTIONS",
+   "wire": "inat"
+  },
+  {
+   "name": "ALL_PLAYER_INTERACTIONS",
+   "wire": "inatA"
+  },
+  {
+   "name": "SHOW_SPEECH_BUBBLE",
+   "wire": "sb"
+  },
+  {
+   "name": "CLAN_LEAVE_RESPONSE",
+   "wire": "clnL"
+  },
+  {
+   "name": "WARS_CLAN",
+   "wire": "warsClan"
+  },
+  {
+   "name": "UPLOAD_RESPONSE",
+   "wire": "upR"
+  },
+  {
+   "name": "UPLOAD_PROFILE_RESPONSE",
+   "wire": "upPR"
+  },
+  {
+   "name": "LOCK_PLAYER",
+   "wire": "lock"
+  },
+  {
+   "name": "END_GAME",
+   "wire": "end"
+  },
+  {
+   "name": "SPIN_RESPONSE",
+   "wire": "spin"
+  },
+  {
+   "name": "SAVE_SPIN_HISTORY",
+   "wire": "spinH"
+  },
+  {
+   "name": "SPIN_WHEEL_RESPONSE",
+   "wire": "spinW"
+  },
+  {
+   "name": "SKIN_REWARD",
+   "wire": "skin"
+  },
+  {
+   "name": "SKIN_FOUND_MESSAGE",
+   "wire": "skinF"
+  },
+  {
+   "name": "SPIN_KR",
+   "wire": "spinKR"
+  },
+  {
+   "name": "TEAM_SCORE",
+   "wire": "ts"
+  },
+  {
+   "name": "UPDATE_TIMER",
+   "wire": "t"
+  },
+  {
+   "name": "PURCHASE_ERROR",
+   "wire": "pErr"
+  },
+  {
+   "name": "ERROR",
+   "wire": "error"
+  },
+  {
+   "name": "DISCONNECT",
+   "wire": "dc"
+  },
+  {
+   "name": "UNBOX_MESSAGE",
+   "wire": "unb"
+  },
+  {
+   "name": "UNBOX_MESSSAGE_S",
+   "wire": "unbS"
+  },
+  {
+   "name": "UPDATE_ZONE",
+   "wire": "zn"
+  },
+  {
+   "name": "UPDATE_FUNDS",
+   "wire": "uf"
+  },
+  {
+   "name": "UPDATE_CHALLENGE_REWARDS",
+   "wire": "chlR"
+  },
+  {
+   "name": "SYNC_PLAYER",
+   "wire": "l"
+  },
+  {
+   "name": "SYNC_FAILED",
+   "wire": "f"
+  },
+  {
+   "name": "UPDATE_FLAG_INFO",
+   "wire": "ufi"
+  },
+  {
+   "name": "SET_DEBUG",
+   "wire": "debug"
+  },
+  {
+   "name": "SET_EXPERIMENTAL",
+   "wire": "exf"
+  },
+  {
+   "name": "SET_NOCLIP",
+   "wire": "noc"
+  },
+  {
+   "name": "SET_FROZEN",
+   "wire": "frz"
+  },
+  {
+   "name": "SET_SPEED_BOOST",
+   "wire": "spb"
+  },
+  {
+   "name": "SET_UNLIMITED",
+   "wire": "unl"
+  },
+  {
+   "name": "SET_SHARING_IS_CARING",
+   "wire": "sic"
+  },
+  {
+   "name": "PLAYER_SOUND",
+   "wire": "s"
+  },
+  {
+   "name": "PLAYER_ANIM",
+   "wire": "c"
+  },
+  {
+   "name": "UPDATE_LEADERS",
+   "wire": "7"
+  },
+  {
+   "name": "ADD_SPRAY",
+   "wire": "sp"
+  },
+  {
+   "name": "ADD_CHAT",
+   "wire": "ch"
+  },
+  {
+   "name": "ADD_CHATI18N",
+   "wire": "chi"
+  },
+  {
+   "name": "ADD_TRADE_CHAT",
+   "wire": "tch"
+  },
+  {
+   "name": "SHOW_TRACER",
+   "wire": "9"
+  },
+  {
+   "name": "GET_ASSIST",
+   "wire": "10"
+  },
+  {
+   "name": "CHANGE_HEALTH",
+   "wire": "h"
+  },
+  {
+   "name": "PLAY_SOUND",
+   "wire": "so"
+  },
+  {
+   "name": "STOP_SOUND",
+   "wire": "sso"
+  },
+  {
+   "name": "GET_KILL",
+   "wire": "6"
+  },
+  {
+   "name": "INTER_PROG",
+   "wire": "p"
+  },
+  {
+   "name": "INTER_M_PROG",
+   "wire": "mp"
+  },
+  {
+   "name": "UPDATE_LIVES",
+   "wire": "lv"
+  },
+  {
+   "name": "UPDATE_ACCOUNT",
+   "wire": "ua"
+  },
+  {
+   "name": "EXPLOSION",
+   "wire": "ex"
+  },
+  {
+   "name": "ACTION_FEED",
+   "wire": "ac"
+  },
+  {
+   "name": "VOICE_CHAT",
+   "wire": "vc"
+  },
+  {
+   "name": "ACCOUNT_RESPONSE",
+   "wire": "a"
+  },
+  {
+   "name": "DO_DAMAGE",
+   "wire": "4"
+  },
+  {
+   "name": "GET_SCORE",
+   "wire": "5"
+  },
+  {
+   "name": "UPDATE_FLAG_PING",
+   "wire": "ufp"
+  },
+  {
+   "name": "SET_HIDDEN",
+   "wire": "fh"
+  },
+  {
+   "name": "UPDATE_BANK",
+   "wire": "bnk"
+  },
+  {
+   "name": "UPDATE_AMMO",
+   "wire": "uamo"
+  },
+  {
+   "name": "NEW_PASS_RESPONSE",
+   "wire": "upp"
+  },
+  {
+   "name": "RESPAWN_OBJ",
+   "wire": "ro"
+  },
+  {
+   "name": "KILL_STREAK",
+   "wire": "st"
+  },
+  {
+   "name": "EFFECT",
+   "wire": "pk"
+  },
+  {
+   "name": "UPDATE_ZOMBIE_PERKS",
+   "wire": "upk"
+  },
+  {
+   "name": "REMOVE_PLAYER",
+   "wire": "2"
+  },
+  {
+   "name": "ADD_DEBUG_POING",
+   "wire": "dbgp"
+  },
+  {
+   "name": "CRAFT_DATA_RESPONSE",
+   "wire": "recps"
+  },
+  {
+   "name": "CRAFT_RESPONSE",
+   "wire": "crftr"
+  },
+  {
+   "name": "CUSTOM_NETWORK_MESSAGE",
+   "wire": "sd"
+  },
+  {
+   "name": "KPD_RESET",
+   "wire": "kpdf"
+  },
+  {
+   "name": "KPD_RESPONSE",
+   "wire": "kpd"
+  },
+  {
+   "name": "CONSOLE_LOG",
+   "wire": "clog"
+  },
+  {
+   "name": "KILL_PLAYER",
+   "wire": "3"
+  },
+  {
+   "name": "UPDATE_WEAPON_STREAK",
+   "wire": "wstk"
+  },
+  {
+   "name": "KR_PACKAGE",
+   "wire": "krp"
+  },
+  {
+   "name": "UPDATE_FLAG",
+   "wire": "ufl"
+  },
+  {
+   "name": "KILL_STREAK_M",
+   "wire": "kst"
+  },
+  {
+   "name": "ADD_MEDAL",
+   "wire": "am"
+  },
+  {
+   "name": "LOG_TIME",
+   "wire": "gt"
+  },
+  {
+   "name": "UPDATE_GATE",
+   "wire": "gte"
+  },
+  {
+   "name": "UPDATE_MYSTERY_BOX",
+   "wire": "mybx"
+  },
+  {
+   "name": "SWITCH_MYSTERY_BOX",
+   "wire": "smybx"
+  },
+  {
+   "name": "UPDATE_KRUM_MACHINE",
+   "wire": "krm"
+  },
+  {
+   "name": "UPDATE_POWER_UP",
+   "wire": "pwup"
+  },
+  {
+   "name": "LOCK_MOVE",
+   "wire": "lm"
+  },
+  {
+   "name": "OPEN_MAIL",
+   "wire": "rml"
+  },
+  {
+   "name": "UPDATE_MAIL",
+   "wire": "gmc"
+  },
+  {
+   "name": "CHECK_POINT_SET",
+   "wire": "chp"
+  },
+  {
+   "name": "CHANGE_POSITION",
+   "wire": "chgp"
+  },
+  {
+   "name": "UNLOCK_MOVE",
+   "wire": "ulm"
+  },
+  {
+   "name": "TRIGGER_IMG_SOUND",
+   "wire": "is"
+  },
+  {
+   "name": "SOCKET_PING",
+   "wire": "pi"
+  },
+  {
+   "name": "UPD_MATCH_VOTE",
+   "wire": "mv"
+  },
+  {
+   "name": "ENTER_GAME",
+   "wire": "frs"
+  },
+  {
+   "name": "UPDATE_CHALLENGES",
+   "wire": "chg"
+  },
+  {
+   "name": "UPDATE_CHALLENGES_PROGRESS",
+   "wire": "uchp"
+  },
+  {
+   "name": "VOTE_KICK",
+   "wire": "vk"
+  },
+  {
+   "name": "VOTE_FORFEIT",
+   "wire": "vf"
+  },
+  {
+   "name": "SOCKET_PING_RESULT",
+   "wire": "pir"
+  },
+  {
+   "name": "JUMP_SCARE",
+   "wire": "scr"
+  },
+  {
+   "name": "UPDATE_PROP",
+   "wire": "up"
+  },
+  {
+   "name": "UPDATE_PROP_ROT",
+   "wire": "prpR"
+  },
+  {
+   "name": "SHOW_PROJECTILE",
+   "wire": "pr"
+  },
+  {
+   "name": "SHOW_BOMBARDMENT",
+   "wire": "bmb"
+  },
+  {
+   "name": "CHALLENGE_COMPLETED",
+   "wire": "chgC"
+  },
+  {
+   "name": "COUNTRY_FLAG_UPDATE",
+   "wire": "flgr"
+  },
+  {
+   "name": "BADGE_UPDATE",
+   "wire": "bdgr"
+  },
+  {
+   "name": "BADGE_CLAIM_RESPONSE",
+   "wire": "cbdgr"
+  },
+  {
+   "name": "BADGE_CLAIM_MULTI_RES",
+   "wire": "nbdgr"
+  },
+  {
+   "name": "HIDE_STATUS",
+   "wire": "hdsr"
+  },
+  {
+   "name": "UPDATE_TEAM",
+   "wire": "tm"
+  },
+  {
+   "name": "END_PROJECTILE",
+   "wire": "pre"
+  },
+  {
+   "name": "SET_WEAPON",
+   "wire": "wep"
+  },
+  {
+   "name": "DESTROY_GAMEOBJECT",
+   "wire": "do"
+  },
+  {
+   "name": "TELEPORT_TO_NODE",
+   "wire": "mo"
+  },
+  {
+   "name": "TELEPORT_FROM_NODE",
+   "wire": "mf"
+  },
+  {
+   "name": "SET_OBJECTIVE",
+   "wire": "obj"
+  },
+  {
+   "name": "UPDATE_OBJECTIVE",
+   "wire": "uobj"
+  },
+  {
+   "name": "PREMIUM_RESPONSE",
+   "wire": "prmR"
+  },
+  {
+   "name": "ALIAS_RESPONSE",
+   "wire": "nmeR"
+  },
+  {
+   "name": "TRADE_RESPONSE",
+   "wire": "trd"
+  },
+  {
+   "name": "SHOW_POPUP",
+   "wire": "pRes"
+  },
+  {
+   "name": "LOADING_POPUP",
+   "wire": "lmsg"
+  },
+  {
+   "name": "ANNOUNCEMENT",
+   "wire": "ann"
+  },
+  {
+   "name": "UPDATE_TRADE_RESPONSE",
+   "wire": "utrd"
+  },
+  {
+   "name": "UPDATE_TRADE_CURRENCY_RESPONSE",
+   "wire": "utrdc"
+  },
+  {
+   "name": "TRADE_A_RESPONSE",
+   "wire": "atrd"
+  },
+  {
+   "name": "TWITCH_DROPS_RESPONSE",
+   "wire": "twitchDropsResponse"
+  },
+  {
+   "name": "TWITCH_REMOVE_RESPONSE",
+   "wire": "twitchRemoveResponse"
+  },
+  {
+   "name": "TWITCH_VERIFY_RESPONSE",
+   "wire": "twitchVerifyResponse"
+  },
+  {
+   "name": "DISCORD_LINK_RESULT",
+   "wire": "dlnkR"
+  },
+  {
+   "name": "NFT_RESPONSE",
+   "wire": "nftR"
+  },
+  {
+   "name": "PROMOS_RESPONSE",
+   "wire": "pdR"
+  },
+  {
+   "name": "DEDI_BUY_RESPONSE",
+   "wire": "dsrvl"
+  },
+  {
+   "name": "FRIENDS_LIST_RESPONSE",
+   "wire": "gfrnd"
+  },
+  {
+   "name": "VOTE_MAP",
+   "wire": "vm"
+  },
+  {
+   "name": "UPDATE_SETTINGS",
+   "wire": "loadS"
+  },
+  {
+   "name": "CREATE_SPAWNABLE",
+   "wire": "crsp"
+  },
+  {
+   "name": "DISPOSE_SPAWNABLE",
+   "wire": "dsp"
+  },
+  {
+   "name": "BUILD_OBJECT",
+   "wire": "bo"
+  },
+  {
+   "name": "C_SPAWN",
+   "wire": "aai"
+  },
+  {
+   "name": "REMOVE_BY_SID",
+   "wire": "rai"
+  },
+  {
+   "name": "SYNC_ALL_AI",
+   "wire": "ai"
+  },
+  {
+   "name": "SYNC_AIRDROP",
+   "wire": "ad"
+  },
+  {
+   "name": "REMOVE_AIRDROP_BY_SID",
+   "wire": "rad"
+  },
+  {
+   "name": "SERV_ANIM",
+   "wire": "ana"
+  },
+  {
+   "name": "SET_PLAYER_KEY",
+   "wire": "spk"
+  },
+  {
+   "name": "REFILL_KNIFE",
+   "wire": "rfl"
+  },
+  {
+   "name": "CUSTOM_VAL",
+   "wire": "cv"
+  },
+  {
+   "name": "CONFIRM_INTERACTION",
+   "wire": "cnfm"
+  },
+  {
+   "name": "EDIT_MAP",
+   "wire": "edMp"
+  },
+  {
+   "name": "LOAD_XSOLLA",
+   "wire": "xst"
+  },
+  {
+   "name": "REGEN_PLAYER",
+   "wire": "rg"
+  },
+  {
+   "name": "UPDATE_LEADER_BOARD",
+   "wire": "ulb"
+  },
+  {
+   "name": "UPDATE_ROUNDS_DIS",
+   "wire": "rds"
+  },
+  {
+   "name": "UPDATE_GLOBAL_VALUE",
+   "wire": "gv"
+  },
+  {
+   "name": "SYNC_P_CON_DATA",
+   "wire": "cd"
+  },
+  {
+   "name": "SYNC_P_CON_OBJ",
+   "wire": "cda"
+  },
+  {
+   "name": "TOGGLE_ELEMENT",
+   "wire": "tgui"
+  },
+  {
+   "name": "FAILED_TO_ENDER",
+   "wire": "fe"
+  },
+  {
+   "name": "TEXT_POPUP",
+   "wire": "tx"
+  },
+  {
+   "name": "UPDATE_ZOMBIE_ROUND",
+   "wire": "upz"
+  },
+  {
+   "name": "CON_UID",
+   "wire": "uid"
+  },
+  {
+   "name": "ADD_HELPER_C",
+   "wire": "hlpr"
+  },
+  {
+   "name": "DEBUG_COMPLEX_HITBOX",
+   "wire": "dch"
+  },
+  {
+   "name": "ADD_HITBOX_HELPER",
+   "wire": "hbdb"
+  },
+  {
+   "name": "SHAKE",
+   "wire": "shk"
+  },
+  {
+   "name": "SCRIPT_LOG",
+   "wire": "ksL"
+  },
+  {
+   "name": "CAPTURE_CONTROL",
+   "wire": "cct"
+  },
+  {
+   "name": "UPDATE_DOM_ZONE",
+   "wire": "uct"
+  },
+  {
+   "name": "SET_PLAYER_CHARGED",
+   "wire": "chrg"
+  },
+  {
+   "name": "UPDATE_ASSET_ID",
+   "wire": "uai"
+  },
+  {
+   "name": "UPDATE_HOST",
+   "wire": "uh"
+  },
+  {
+   "name": "CHANGE_AMBIENT",
+   "wire": "camb"
+  },
+  {
+   "name": "FOUND_JUNK",
+   "wire": "jnk"
+  },
+  {
+   "name": "AVAILABLE_BUNDLE_DATA",
+   "wire": "gbdr"
+  },
+  {
+   "name": "ALL_BUNDLE_DATA",
+   "wire": "abd"
+  },
+  {
+   "name": "FORCE_VIDEO_AD",
+   "wire": "vad"
+  },
+  {
+   "name": "OPEN_METAMASK_AUTH",
+   "wire": "vmm"
+  },
+  {
+   "name": "METAMASK_LINK_RESPONSE",
+   "wire": "vmms"
+  },
+  {
+   "name": "METAMASK_UNLINK_RESPONSE",
+   "wire": "rmm"
+  },
+  {
+   "name": "UPDATE_KR_TAGS",
+   "wire": "krt"
+  },
+  {
+   "name": "BOTS_POPUP",
+   "wire": "bcfg"
+  },
+  {
+   "name": "SET_JUGGERNAUT",
+   "wire": "jg"
+  },
+  {
+   "name": "SET_BUSY",
+   "wire": "busy"
+  },
+  {
+   "name": "ADD_PLAYER_SOUND",
+   "wire": "asnd"
+  },
+  {
+   "name": "REMOVE_PLAYER_SOUND",
+   "wire": "rsnd"
+  },
+  {
+   "name": "UPDATE_COUNTRY",
+   "wire": "cntry"
+  },
+  {
+   "name": "UPDATE_HEAD_SIZE",
+   "wire": "bh"
+  },
+  {
+   "name": "DATA_LOADED",
+   "wire": "bpdl"
+  },
+  {
+   "name": "RECIEVE_DOUBLE_XP",
+   "wire": "rrqdxp"
+  },
+  {
+   "name": "SYNC_BP_PROG",
+   "wire": "bppd"
+  },
+  {
+   "name": "SURVEY_BUNDLE_RESPONSE",
+   "wire": "svybRes"
+  },
+  {
+   "name": "GAME_ANNOUNCEMENT",
+   "wire": "gameAnnouncement"
+  },
+  {
+   "name": "GAME_SURVEY",
+   "wire": "gameSurvey"
+  },
+  {
+   "name": "SKIN_DEFINITION_CHANGED",
+   "wire": "sdc"
+  },
+  {
+   "name": "SPIN_WHEELS_UPDATED",
+   "wire": "swu"
+  },
+  {
+   "name": "SYNC_NEW_OBJECTS",
+   "wire": "lo"
+  },
+  {
+   "name": "SYNC_LIVE_OBJECTS",
+   "wire": "slo"
+  },
+  {
+   "name": "PLAYER_RECONNECTED",
+   "wire": "prc"
+  },
+  {
+   "name": "GAME_STATE_CHANGED",
+   "wire": "gsc"
+  },
+  {
+   "name": "DEBUG_RAYCAST",
+   "wire": "debug_rc"
+  },
+  {
+   "name": "MARK_POSITION",
+   "wire": "mpos"
+  },
+  {
+   "name": "POPUP_REGISTER_REWARDS",
+   "wire": "prr"
+  },
+  {
+   "name": "LATEST_RANKED_MMR_CHANGE",
+   "wire": "lrmr"
+  },
+  {
+   "name": "GUEST_EARNED_REWARDS",
+   "wire": "ger"
+  },
+  {
+   "name": "DAILY_SPIN_CLAIM_RESPONSE",
+   "wire": "dslr"
+  },
+  {
+   "name": "UPDATE_BALANCES",
+   "wire": "ub"
+  },
+  {
+   "name": "STALKER_PICKED",
+   "wire": "stlkpd"
+  },
+  {
+   "name": "OBJECT_MOVED",
+   "wire": "objmv"
+  },
+  {
+   "name": "UPDATE_LOTTERY_ENTRIES",
+   "wire": "lotEnt"
+  },
+  {
+   "name": "LOTTERY_PRIZE_WON",
+   "wire": "lotWin"
+  },
+  {
+   "name": "LOTTERY_PRIZE_WON_PLAYER",
+   "wire": "lotWinP"
+  },
+  {
+   "name": "LOTTERY_STARTED",
+   "wire": "lotStart"
+  },
+  {
+   "name": "LOTTERY_ENDED",
+   "wire": "lotEnd"
+  },
+  {
+   "name": "CHEAT_CHECK",
+   "wire": "cc"
+  },
+  {
+   "name": "CHARGE_CONSENT_REQUEST",
+   "wire": "chreq"
+  },
+  {
+   "name": "ENTITY_SPAWN",
+   "wire": "e+"
+  },
+  {
+   "name": "ENTITY_REMOVE",
+   "wire": "e-"
+  },
+  {
+   "name": "ENTITY_STATE",
+   "wire": "es"
+  },
+  {
+   "name": "ENTITY_EVENT",
+   "wire": "ee"
+  },
+  {
+   "name": "ENTITY_ATTACH",
+   "wire": "ea+"
+  },
+  {
+   "name": "ENTITY_DETACH",
+   "wire": "ea-"
+  },
+  {
+   "name": "PLAYER_POSE",
+   "wire": "pz"
+  },
+  {
+   "name": "PLAYER_LOCKS",
+   "wire": "plk"
+  }
+ ],
+ "cheat": {
+  "keystream_formula": "v1",
+  "salt": "KRUNK3R_AC",
+  "salt_bytes": [
+   75,
+   82,
+   85,
+   78,
+   75,
+   51,
+   82,
+   95,
+   65,
+   67
+  ],
+  "fnv_offset": "0x811c9dc5",
+  "fnv_prime": "0x1000193",
+  "fnv_multiply": "double",
+  "handler": "v1",
+  "cc_args": {
+   "count": 3,
+   "nonce": 0,
+   "ciphertext": 2
+  }
+ },
+ "cheat_keystream_js": "function iïìiîïì(iíÍïiîî, iiÍiïíì) {\n    for (var iìÎiiïî = iïiîïiî, iìÌïiiï = new Uint8Array(iiÍiïíì), iîÍiiíî = 0x0; iîÍiiíî < iiÍiïíì; iîÍiiíî++) {\n      iìÌïiiï[iîÍiiíî] = (iíÍïiîî['charCodeAt'](iîÍiiíî % iíÍïiîî['length']) ^ iìÎiiïî[iîÍiiíî % iìÎiiïî[\"length\"]]) + iîÍiiíî & 0xff;\n    }\n    return iìÌïiiï;\n  }",
+ "cheat_salt_js": "var iïiîïiî = [0x4b, 0x52, 0x55, 0x4e, 0x4b, 0x33, 0x52, 0x5f, 0x41, 0x43];",
+ "cheat_keystream_standalone_js": "(function () {\n  var iïiîïiî = [0x4b, 0x52, 0x55, 0x4e, 0x4b, 0x33, 0x52, 0x5f, 0x41, 0x43];\n  return function iïìiîïì(iíÍïiîî, iiÍiïíì) {\n    for (var iìÎiiïî = iïiîïiî, iìÌïiiï = new Uint8Array(iiÍiïíì), iîÍiiíî = 0x0; iîÍiiíî < iiÍiïíì; iîÍiiíî++) {\n      iìÌïiiï[iîÍiiíî] = (iíÍïiîî['charCodeAt'](iîÍiiíî % iíÍïiîî['length']) ^ iìÎiiïî[iîÍiiíî % iìÎiiïî[\"length\"]]) + iîÍiiíî & 0xff;\n    }\n    return iìÌïiiï;\n  };\n})()",
+ "cheat_handler_js": "function iiiïíìì(iíÏîiïi, iïIiiîí, iiÎiììî) {\n    try {\n      var iiÏiiií;\n      var iîÏïïíî = function (iìÏïììì, iîÌiîií) {\n        var iïIìíìi;\n        iïIìíìi = \"undefined\" != typeof Buffer ? new Uint8Array(Buffer['from'](iìÏïììì, \"base64\")) : new Uint8Array(atob(iìÏïììì)[\"split\"]('')[\"map\"](function (iîÍïiìì) {\n          return iîÍïiìì[\"charCodeAt\"](0x0);\n        }));\n        for (var iîIíïií = iïìiîïì(iîÌiîií, iïIìíìi[\"length\"]), iîÏîiií = new Uint8Array(iïIìíìi['length']), iiÎîíìì = 0x0; iiÎîíìì < iïIìíìi[\"length\"]; iiÎîíìì++) {\n          iîÏîiií[iiÎîíìì] = iïIìíìi[iiÎîíìì] ^ iîIíïií[iiÎîíìì];\n        }\n        var iiÎîììì = new TextDecoder()[\"decode\"](iîÏîiií);\n        return JSON[\"parse\"](iiÎîììì);\n      }(iiÎiììî, iíÏîiïi);\n      try {\n        iiÏiiií = (0x0, eval)(iîÏïïíî);\n      } catch (iîIîìií) {\n        iiÏiiií = {\n          'r': null,\n          'e': {\n            '_eval': iîIîìií[\"message\"] || \"eval_error\"\n          }\n        };\n      }\n      var iïIïïìi = function (iìÏïîìî, iïÌiíîí) {\n        for (var iïIìíii = JSON[\"stringify\"](iìÏïîìî), iïÏíìîî = new TextEncoder()[\"encode\"](iïIìíii), iiÎíiîì = iïìiîïì(iïÌiíîí, iïÏíìîî[\"length\"]), iîÌiïiï = new Uint8Array(iïÏíìîî[\"length\"]), iìÏìíìí = 0x0; iìÏìíìí < iïÏíìîî[\"length\"]; iìÏìíìí++) {\n          iîÌiïiï[iìÏìíìí] = iïÏíìîî[iìÏìíìí] ^ iiÎíiîì[iìÏìíìí];\n        }\n        return \"undefined\" != typeof Buffer ? Buffer[\"from\"](iîÌiïiï)[\"toString\"](\"base64\") : btoa(String[\"fromCharCode\"][\"apply\"](String, iiïîííì(iîÌiïiï)));\n      }(iiÏiiií, iíÏîiïi);\n      var iìÎììii = function (iiÌìiìï, iiÍíiii) {\n        for (var iìÌîiìî = iiÍíiii + JSON[\"stringify\"](iiÌìiìï), iìÎíïïí = 0x811c9dc5, iíIìíii = 0x0; iíIìíii < iìÌîiìî['length']; iíIìíii++) {\n          iìÎíïïí = 0x1000193 * (iìÎíïïí ^= iìÌîiìî[\"charCodeAt\"](iíIìíii)) | 0x0;\n        }\n        return (iìÎíïïí >>> 0x0)[\"toString\"](0x10)['padStart'](0x8, '0');\n      }(iiÏiiií, iíÏîiïi);\n      iïïïiíì[\"send\"](iïìíiíí[\"CHEAT_CHECK_RESPONSE\"], iíÏîiïi, iïIïïìi, iìÎììii);\n    } catch (iïÌìiíi) {}\n  }",
+ "extras": {
+  "matchmaker_url": "https://matchmaker.krunker.io",
+  "api_url": "https://api.krunker.io",
+  "turnstile_site_key": "0x4AAAAAAD19NTFH3Itq7QOn",
+  "regions": {
+   "regions": [
+    "de-fra",
+    "us-ca-sv",
+    "au-syd",
+    "jb-hnd",
+    "sgp",
+    "us-nj",
+    "as-mb",
+    "us-tx",
+    "brz",
+    "me-bhn"
+   ],
+   "conditional": [
+    "sss"
+   ]
+  },
+  "dedicated_only_regions": [
+   "us-wa",
+   "us-il",
+   "gb-lon",
+   "mx-cmx",
+   "as-seoul"
+  ],
+  "client_revision": "1",
+  "custom_build_version": {
+   "value": null,
+   "env": "CUSTOM_VERSION"
+  }
+ },
+ "warnings": [],
+ "deobfuscation": null
+}

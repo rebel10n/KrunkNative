@@ -299,6 +299,20 @@ branding: ## Fetch krunker.io's app icons (tools/branding/branding.lock, sha256-
 branding-check: ## The verbatim krunker.io icons in the tree match tools/branding/branding.lock (exit 1 otherwise)
 	$(PYTHON) -I tools/branding/fetch_branding.py check
 
+# Official Krunker servers: the build constants (AHKEY, clientVersion, buildVersion, packet name
+# tables, cheat-check keystream) are extracted statically from Krunker's client bundle into the
+# committed shared/include/krunker_build.h + tools/krunker/build.json (tools/krunker/extract_build.py).
+# SRC=<path|url> reads another bundle (game.deob.js / game.debug.js / game.min.js / manifest).
+.PHONY: krunker-build krunker-build-check krunker-build-test
+krunker-build: ## Regenerate shared/include/krunker_build.h from Krunker's bundle (default https://kru.eli.gift/game.deob.js, cached by ETag; SRC=, FORCE=1)
+	$(PYTHON) -I tools/krunker/extract_build.py $(SRC) $(if $(FORCE),--force,)
+
+krunker-build-check: ## krunker_build.h matches build.json and the current Krunker bundle (exit 1 when stale; bundle unreachable: header <-> build.json only, STRICT=1 fails)
+	$(PYTHON) -I tools/krunker/extract_build.py $(SRC) --check $(if $(STRICT),--strict,)
+
+krunker-build-test: ## Extractor regression test: every local Krunker bundle (deob / debug / min / v10.js), synthetic broken anchors, the header compiles
+	$(PYTHON) -I tools/krunker/test_extract.py
+
 .PHONY: maps-import-v7 maps-check-v7
 maps-import-v7: ## Import Krunker v7.1.4's 32 official maps into assets/maps/ (+ ui/img/maps thumbnails; tools/maps/import_v7_maps.py)
 	$(PYTHON) -I tools/maps/import_v7_maps.py
@@ -566,7 +580,7 @@ launcher-online-e2e: build ## Launcher-started client: finder + matchmaker reque
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I launcher/tests/launcher_online_e2e.py $(DEBUG_DIR)
 
 .PHONY: smoke smoke-native smoke-ui smoke-web lint check
-check: test ks-test editor-mcp-test lint bridge-check deploy-test ## Everything CI runs that does not need a display
+check: test ks-test editor-mcp-test lint bridge-check deploy-test krunker-build-test ## Everything CI runs that does not need a display
 
 .PHONY: deploy-test
 deploy-test: ## The asset CDN split (deploy/asset-shards.json): shard routing + kn-updates mirrors, assets_cdn.py against a local store
