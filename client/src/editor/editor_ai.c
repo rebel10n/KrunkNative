@@ -15,6 +15,7 @@
 #include <ai_proto.h>
 #include <app_mode.h>
 #include <backend.h>
+#include <ctype.h>
 #include <backend_ui.h>
 #include <html_ui.h>
 #include <http_stream.h>
@@ -26,13 +27,15 @@
 
 #define AI_RENDER_EVERY_S 0.066  // live message re-render while streaming (~15 Hz)
 #define AI_MAX_CONV_BYTES (640u * 1024u) // older turns are dropped from a request beyond this (brain body limit 1 MiB)
-#define AI_MAX_TOOL_ROUNDS 25    // automatic model <-> tool rounds after one user message
+#define AI_MAX_TOOL_ROUNDS 25    // automatic model <-> tool rounds after one user message (Default / Allow all pause here)
+#define AI_MAX_AUTOPILOT_ROUNDS 60 // Autopilot keeps going without prompting up to this hard safety cap
 #define AI_HISTORY_MAX 40        // chats kept in storage (knAiChats)
 #define AI_HISTORY_BYTES (1536u * 1024u)
 
 static struct {
     int built, open;
     HtmlElem root, list, live, input, model_sel, banner, usage, send, stop;
+    HtmlElem model_pop_el, ring, perm_sel, mode_sel; // model dropdown overlay, usage ring, perm/mode pickers
     // models (GET /ai/models)
     cJSON *models;           // normalised rows
     char model[96];
@@ -67,8 +70,16 @@ static struct {
     // tools
     int tools_on;            // offer the editor tools to the model (knAiSettings.tools, default on)
     int web_on;              // brain web search (knAiSettings.web, default on)
-    int allow_all;           // approvals: every tool allowed for this session
+    int perm;                // tool approvals: 0 ask (default), 1 allow all this session, 2 autopilot
+    int mode;                // agent mode: 0 Agent (tools + web, acts), 1 Ask (answer only), 2 Plan (read-only, plan first)
     int rounds;              // automatic tool rounds since the user's last message
+    // context-window usage ring (VS Code's chat gauge)
+    int64_t ctx_used;        // tokens the conversation would send next (exact when known, else estimated)
+    int ctx_est;             // 1 when ctx_used is an estimate (no exact prompt_tokens yet)
+    // model dropdown (custom picker with a per-model flyout; replaces the old <select>)
+    int model_pop;           // the model list is open
+    int fly_left;            // the hover flyout opens to the left (panel right-docked: the side with room)
+    int fly_idx;             // the model whose flyout is shown (-1 none)
     int tool_step;           // a tool call waits to run on the next tick
     char effort[16];         // "" = the model's default, low / medium / high
     cJSON *server_tool_names; // the brain's server tools (names)
@@ -105,6 +116,9 @@ static void process_tools(void);
 static void history_save(void);
 static void history_delete(const char *id);
 static void models_load(void);
+static void render_model_pop(void);
+static void update_ring(void);
+static void render_pop(void);
 static void redo_clear(void);
 static void edit_end(void);
 static int g_keep_scroll; // render_all keeps the list where it is (editing an earlier message)
@@ -186,6 +200,10 @@ static void settings_load(void) {
     free(t);
     A.tools_on = json_flag(o, "tools", 1);
     A.web_on = json_flag(o, "web", 1);
+    A.mode = (int) ed_json_num(o, "mode", 0);
+    if (A.mode < 0 || A.mode > 2) A.mode = 0;
+    A.perm = (int) ed_json_num(o, "perm", 0);
+    if (A.perm < 0 || A.perm > 2) A.perm = 0;
     snprintf(A.effort, sizeof(A.effort), "%s", ed_json_str(o, "effort", ""));
     // the stored model counts only when the user picked it ("picked"; patch 2 stored whatever was
     // selected, the service's fallback included): otherwise the service's default (glm-5.3-flash)
@@ -208,6 +226,8 @@ static void settings_save(void) {
     cJSON *o = cJSON_CreateObject();
     cJSON_AddBoolToObject(o, "tools", A.tools_on);
     cJSON_AddBoolToObject(o, "web", A.web_on);
+    cJSON_AddNumberToObject(o, "mode", A.mode);
+    cJSON_AddNumberToObject(o, "perm", A.perm);
     cJSON_AddStringToObject(o, "effort", A.effort);
     if (!A.custom && A.model_picked) {
         cJSON_AddStringToObject(o, "model", A.model);
@@ -245,7 +265,8 @@ static void build(void) {
         "<div id='knAi' class='knAi' style='display:none'>"
         "<div id='knAiHead' class='knAiHead'>"
         "<div id='knAiTitle' class='knAiTitle'><i class='material-icons knAiSpark'>auto_awesome</i><span>AI</span></div>"
-        "<select id='knAiModel' class='knAiModel' title='Model (smartest first)' onchange='KE.kn.aiModel(this.value)'></select>"
+        "<div id='knAiModel' class='knAiModel' title='Model (smartest first \xe2\x80\x93 hover a model for its reasoning level)' onclick='KE.kn.aiModelMenu()'>"
+        "<span id='knAiModelName' class='knAiModelName'></span><i class='material-icons knAiModelCaret'>arrow_drop_down</i></div>"
         "<div id='knAiNewBtn' class='knAiIcon material-icons' title='New chat' onclick='KE.kn.aiNew()'>add_comment</div>"
         "<div id='knAiHistBtn' class='knAiIcon material-icons' title='History' onclick='KE.kn.aiPop(1)'>history</div>"
         "<div id='knAiSetBtn' class='knAiIcon material-icons' title='Settings' onclick='KE.kn.aiPop(2)'>tune</div>"
@@ -257,6 +278,16 @@ static void build(void) {
         "<div class='knAiComposer'>"
         "<textarea id='knAiInput' class='knAiInput' rows='2' spellcheck='false' placeholder='Ask anything about this map'"
         " onkeydown='return KE.kn.aiKey()'></textarea>"
+        "<div class='knAiBar knAiBar2'>"
+        "<i class='material-icons knAiBarIcon' title='Agent mode'>tune</i>"
+        "<select id='knAiMode' class='knAiMini' title='What the AI may do' onchange='KE.kn.aiMode(this.value)'>"
+        "<option value='0'>Agent</option><option value='1'>Ask</option><option value='2'>Plan</option></select>"
+        "<i class='material-icons knAiBarIcon knAiShield' title='Tool permissions'>verified_user</i>"
+        "<select id='knAiPerm' class='knAiMini' title='When the AI may run tools' onchange='KE.kn.aiPerm(this.value)'>"
+        "<option value='0'>Ask first</option><option value='1'>Allow all</option><option value='2'>Autopilot</option></select>"
+        "<div class='knAiGrow'></div>"
+        "<div id='knAiRing' class='knAiRing' title='Context window usage'></div>"
+        "</div>"
         "<div class='knAiBar'>"
         "<div id='knAiTools' class='knAiBtnS knAiChip' title='Let the AI read and edit the open map' onclick='KE.kn.aiChip(0)'>Tools</div>"
         "<div id='knAiWeb' class='knAiBtnS knAiChip' title='Let the AI search the web' onclick='KE.kn.aiChip(1)'>Web</div>"
@@ -267,10 +298,18 @@ static void build(void) {
         "<div id='knAiUsage' class='knAiUsage'></div>"
         "</div>"
         "</div>");
+    // the model picker's dropdown lives outside the panel (the panel clips overflow; its per-model
+    // flyout must reach the empty side of the screen), as a sibling overlay in #center
+    html_dom_insert_html(center, HTML_INSERT_BEFORE_END,
+        "<div id='knAiModelPop' class='knAiModelPop' style='display:none'></div>");
     A.root = html_dom_by_id("knAi");
     A.list = html_dom_by_id("knAiList");
     A.input = html_dom_by_id("knAiInput");
     A.model_sel = html_dom_by_id("knAiModel");
+    A.model_pop_el = html_dom_by_id("knAiModelPop");
+    A.ring = html_dom_by_id("knAiRing");
+    A.mode_sel = html_dom_by_id("knAiMode");
+    A.perm_sel = html_dom_by_id("knAiPerm");
     A.banner = html_dom_by_id("knAiBanner");
     A.usage = html_dom_by_id("knAiUsage");
     A.send = html_dom_by_id("knAiSend");
@@ -370,49 +409,289 @@ static void update_controls(void) {
     html_dom_set_class(A.send, "knAiOff", !can);
     if (can) html_dom_remove_attr(A.input, "disabled");
     else html_dom_set_attr(A.input, "disabled", "");
+    // mode / permission pickers reflect the state (and drive tool exposure below)
+    char v[2] = {0};
+    if (A.mode_sel) { v[0] = (char) ('0' + A.mode); html_dom_set_value(A.mode_sel, v); }
+    if (A.perm_sel) { v[0] = (char) ('0' + A.perm); html_dom_set_value(A.perm_sel, v); }
+    // Ask mode offers no tools at all; Agent / Plan do (Plan only the read-only ones, enforced in
+    // ai_tools_defs' filtering). Hide the Tools / Web chips when they cannot apply.
+    const int tools_apply = A.mode != 1 && ai_tools_available();
+    const int web_apply = A.mode != 1 && web_available();
     HtmlElem tools = html_dom_by_id("knAiTools"), web = html_dom_by_id("knAiWeb");
-    html_dom_set_display(tools, ai_tools_available() ? "" : "none");
+    html_dom_set_display(tools, tools_apply ? "" : "none");
     html_dom_set_class(tools, "knAiOn", A.tools_on && model_has_tools());
-    html_dom_set_attr(tools, "title", !model_has_tools() ? "This model cannot use tools" : A.tools_on ? "Editor tools on: the AI can read and edit the open map"
-                                                                                                        : "Editor tools off");
-    html_dom_set_display(web, web_available() ? "" : "none");
+    html_dom_set_attr(tools, "title", A.mode == 2 ? "Plan mode: the AI may read the map (read-only tools)"
+                                      : !model_has_tools() ? "This model cannot use tools"
+                                      : A.tools_on ? "Editor tools on: the AI can read and edit the open map" : "Editor tools off");
+    html_dom_set_display(web, web_apply ? "" : "none");
     html_dom_set_class(web, "knAiOn", A.web_on && model_has_tools());
     html_dom_set_class(html_dom_by_id("knAiSetBtn"), "knAiOn", A.custom);
     update_account();
     update_usage();
+    update_ring();
 }
 
+// The closed picker now shows just the selected model's name (the list is smartest first); the
+// per-model detail moved into the dropdown's hover flyout (render_model_pop).
 static void fill_models(void) {
     if (!A.model_sel) return;
+    const char *cur = A.custom ? A.ep_model : A.model;
+    HtmlElem name = html_dom_by_id("knAiModelName");
+    if (name) {
+        const char *lbl = cur[0] ? model_label(cur) : (A.models_state == 1 ? "Loading\xe2\x80\xa6" : "No models");
+        html_dom_set_text(name, lbl);
+    }
+    if (A.model_pop) render_model_pop();
+}
+
+// ---------------------------------------------------------------------------
+// the model dropdown: a custom picker (the panel clips overflow, so the list and its per-model
+// flyout live in the #knAiModelPop overlay in #center) with the models smartest first and, on hover,
+// a flyout to the side of the screen that has room showing the model's reasoning level and detail
+
+static double model_ctx_size(void) {
+    const cJSON *row = model_row(A.custom ? A.ep_model : A.model);
+    return row ? ed_json_num(row, "context", 0) : 0;
+}
+
+// the model's reasoning summary ("levels low, medium, high" / "yes" / "none") into out
+static void model_reasoning_text(const cJSON *row, char *out, const size_t n) {
+    const cJSON *eff = cJSON_GetObjectItemCaseSensitive(row, "efforts");
+    if (cJSON_IsArray(eff) && cJSON_GetArraySize(eff) > 0) { // "low / medium / high"
+        size_t o = 0;
+        out[0] = 0;
+        const cJSON *it;
+        cJSON_ArrayForEach(it, eff) {
+            if (!cJSON_IsString(it)) continue;
+            o += (size_t) snprintf(out + o, o < n ? n - o : 0, "%s%s", o ? " / " : "", it->valuestring);
+        }
+        return;
+    }
+    const cJSON *r = cJSON_GetObjectItemCaseSensitive(row, "reasoning");
+    snprintf(out, n, "%s", ed_json_truthy(r) ? "yes (model default)" : "none");
+}
+
+static void model_flyout(EdBuf *b, const cJSON *row) {
+    char reason[96];
+    model_reasoning_text(row, reason, sizeof(reason));
+    edb_add(b, "<div class='knAiFly'><div class='knAiFlyName'>");
+    ai_html_escape(b, ed_json_str(row, "name", ed_json_str(row, "id", "")));
+    edb_add(b, "</div><div class='knAiFlyRow'><span class='knAiFlyK'>Reasoning</span><span class='knAiFlyV'>");
+    ai_html_escape(b, reason);
+    edb_add(b, "</span></div>");
+    const double ctx = ed_json_num(row, "context", 0);
+    if (ctx > 0) {
+        char c[32];
+        fmt_int(c, sizeof(c), (int64_t) ctx);
+        edb_addf(b, "<div class='knAiFlyRow'><span class='knAiFlyK'>Context</span><span class='knAiFlyV'>%s tokens</span></div>", c);
+    }
+    const cJSON *tl = cJSON_GetObjectItemCaseSensitive(row, "tools");
+    edb_addf(b, "<div class='knAiFlyRow'><span class='knAiFlyK'>Tools</span><span class='knAiFlyV'>%s</span></div>", (!tl || ed_json_truthy(tl)) ? "yes" : "no");
+    if (ed_json_truthy(cJSON_GetObjectItemCaseSensitive(row, "vision")))
+        edb_add(b, "<div class='knAiFlyRow'><span class='knAiFlyK'>Vision</span><span class='knAiFlyV'>yes</span></div>");
+    const double pin = ed_json_num(row, "price_in", -1), pout = ed_json_num(row, "price_out", -1);
+    if (pin >= 0 || pout >= 0)
+        edb_addf(b, "<div class='knAiFlyRow'><span class='knAiFlyK'>Price</span><span class='knAiFlyV'>$%.2f in, $%.2f out /Mtok</span></div>",
+                 pin < 0 ? 0 : pin, pout < 0 ? 0 : pout);
+    const char *desc = ed_json_str(row, "description", "");
+    if (desc[0]) {
+        edb_add(b, "<div class='knAiFlyDesc'>");
+        ai_html_escape(b, desc);
+        edb_add(b, "</div>");
+    }
+    edb_add(b, "</div>");
+}
+
+static void render_model_pop(void) {
+    if (!A.model_pop_el) return;
+    if (!A.model_pop) {
+        html_dom_set_display(A.model_pop_el, "none");
+        html_dom_set_html(A.model_pop_el, "");
+        return;
+    }
+    const char *cur = A.custom ? A.ep_model : A.model;
     EdBuf b;
     edb_init(&b);
-    const char *cur = A.custom ? A.ep_model : A.model;
-    int found = 0;
+    // a flex row: the hover flyout (#knAiModelFly, h_model_hover; hidden by visibility so it keeps its
+    // slot) on the side with room, and the scrolling list (its max height is set at open time,
+    // model_menu_toggle); the flyout is outside the scroll box, so nothing clips it
+    static const char *const fly_html = "<div id='knAiModelFly' class='knAiFly knAiFlyHidden'></div>";
+    if (A.fly_left) edb_add(&b, fly_html);
+    edb_add(&b, "<div id='knAiModelList' class='knAiModelList'>");
+    if (!cJSON_GetArraySize(A.models)) edb_addf(&b, "<div class='knAiNote'>%s</div>", A.models_state == 1 ? "Loading models\xe2\x80\xa6" : "No models.");
     const cJSON *m;
-    cJSON_ArrayForEach(m, A.models) found |= !strcmp(ed_json_str(m, "id", ""), cur);
-    if (!cJSON_GetArraySize(A.models) || (A.custom && cur[0] && !found)) {
-        edb_add(&b, "<option value='");
-        ai_html_escape(&b, cur);
-        edb_add(&b, "'>");
-        if (A.custom && cur[0]) ai_html_escape(&b, cur);
-        else edb_add(&b, A.models_state == 1 ? "Loading models..." : "No models");
-        edb_add(&b, "</option>");
-    }
+    int i = 0;
     cJSON_ArrayForEach(m, A.models) {
         const char *id = ed_json_str(m, "id", "");
-        edb_add(&b, "<option value='");
-        ai_html_escape(&b, id);
-        edb_addf(&b, "'%s>", !strcmp(id, cur) ? " selected" : "");
-        // the name only (the list is already smartest first): flags and prices made the closed
-        // picker unreadable; the state of a broken model stays visible
-        ai_html_escape(&b, ed_json_str(m, "name", id));
         const char *st = ed_json_str(m, "status", "");
-        if (!strcmp(st, "unavailable")) edb_add(&b, " (unavailable)");
-        else if (!strcmp(st, "degraded")) edb_add(&b, " (degraded)");
-        edb_add(&b, "</option>");
+        const int sel = !strcmp(id, cur);
+        edb_addf(&b, "<div id='knAiMRow%d' class='knAiModelRow%s' onmouseenter='KE.kn.aiModelHover(%d)' onclick=\"KE.kn.aiModel('", i, sel ? " knAiModelSel" : "", i);
+        ai_html_escape(&b, id);
+        edb_add(&b, "')\"><span class='knAiModelRowName'>");
+        ai_html_escape(&b, ed_json_str(m, "name", id));
+        edb_add(&b, "</span>");
+        if (!strcmp(st, "unavailable")) edb_add(&b, "<span class='knAiModelBad'>unavailable</span>");
+        else if (!strcmp(st, "degraded")) edb_add(&b, "<span class='knAiModelWarn'>degraded</span>");
+        else if (cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(m, "efforts")) || ed_json_truthy(cJSON_GetObjectItemCaseSensitive(m, "reasoning")))
+            edb_add(&b, "<i class='material-icons knAiModelReason' title='reasoning model'>psychology</i>");
+        if (sel) edb_add(&b, "<i class='material-icons knAiModelCheck'>check</i>");
+        edb_add(&b, "</div>");
+        i++;
     }
-    html_dom_set_html(A.model_sel, b.buf ? b.buf : "");
-    if (cur[0]) html_dom_set_value(A.model_sel, cur);
+    edb_add(&b, "</div>");
+    if (!A.fly_left) edb_add(&b, fly_html);
+    A.fly_idx = -1;
+    html_dom_set_html(A.model_pop_el, b.buf ? b.buf : "");
+    html_dom_set_class(A.model_pop_el, "knAiMLeft", A.fly_left);
+    html_dom_set_class(A.model_pop_el, "knAiMRight", !A.fly_left);
+    html_dom_set_display(A.model_pop_el, "");
+    edb_free(&b);
+}
+
+// the hovered model's flyout beside the list (idx -1 hides it): its top follows the row
+static void model_hover(const int idx) {
+    const HtmlElem fly = html_dom_by_id("knAiModelFly");
+    if (!fly || !A.model_pop) return;
+    const cJSON *row = cJSON_GetArrayItem(A.models, idx);
+    if (idx < 0 || !row) {
+        A.fly_idx = -1;
+        html_dom_set_class(fly, "knAiFlyHidden", 1);
+        return;
+    }
+    EdBuf b;
+    edb_init(&b);
+    model_flyout(&b, row);
+    html_dom_set_html(fly, b.buf ? b.buf : "");
+    edb_free(&b);
+    char rid[32], s[32];
+    snprintf(rid, sizeof(rid), "knAiMRow%d", idx);
+    HtmlRect rr, pr, panel;
+    const double k = A.root && html_dom_get_rect(A.root, &panel) && panel.w > 0 ? panel.w / 380.0 : 1.0;
+    if (html_dom_get_rect(html_dom_by_id(rid), &rr) && html_dom_get_rect(A.model_pop_el, &pr)) {
+        const double top = (rr.y - pr.y) / k - 4;
+        snprintf(s, sizeof(s), "%.0fpx", top < 0 ? 0 : top);
+        html_dom_set_style(fly, "margin-top", s);
+    }
+    A.fly_idx = idx;
+    html_dom_set_class(fly, "knAiFlyHidden", 0);
+}
+
+static void model_menu_toggle(void) {
+    A.model_pop = !A.model_pop;
+    if (A.model_pop) {
+        if (A.pop) {
+            A.pop = 0;
+            render_pop();
+        }
+        HtmlRect btn, center, panel;
+        float vw = 0, vh = 0, dpr = 1;
+        html_dom_viewport(&vw, &vh, &dpr);
+        HtmlElem c = html_dom_by_id("center");
+        const int have_panel = A.root && html_dom_get_rect(A.root, &panel);
+        // the editor page is zoomed: rects are viewport px, styles are layout px (k = px per CSS px,
+        // from the panel's known 380 px width, as turn_into_view measures it)
+        const double k = have_panel && panel.w > 0 ? panel.w / 380.0 : 1.0;
+        // the panel is normally right-docked: the flyout opens to whichever screen side has room
+        if (have_panel && vw > 0) A.fly_left = panel.x >= (vw - (panel.x + panel.w));
+        else A.fly_left = 1;
+        if (A.model_sel && c && html_dom_get_rect(A.model_sel, &btn) && html_dom_get_rect(c, &center)) {
+            char s[48];
+            // the list under the picker; a left flyout takes its 248 px slot before the list
+            const double left = (btn.x - center.x) / k - (A.fly_left ? 248 : 0), top = (btn.y + btn.h - center.y) / k + 2;
+            snprintf(s, sizeof(s), "%.0fpx", left < 0 ? 0 : left);
+            html_dom_set_style(A.model_pop_el, "left", s);
+            snprintf(s, sizeof(s), "%.0fpx", top < 0 ? 0 : top);
+            html_dom_set_style(A.model_pop_el, "top", s);
+        }
+        render_model_pop();
+        // the list scrolls within the room below the picker (layout px); the flyout beside it does not
+        HtmlRect pr;
+        const HtmlElem list = html_dom_by_id("knAiModelList");
+        if (list && vh > 0 && html_dom_get_rect(A.model_pop_el, &pr)) {
+            char s[32];
+            const double room = (vh - pr.y) / k - 24;
+            snprintf(s, sizeof(s), "%.0fpx", room < 120 ? 120 : room);
+            html_dom_set_style(list, "max-height", s);
+        }
+        return;
+    }
+    render_model_pop();
+}
+
+// ---------------------------------------------------------------------------
+// context-window usage ring (VS Code's chat gauge): the conversation's token count over the model's
+// context size. Exact prompt_tokens of the newest turn when known, else ~4 bytes/token.
+
+static int64_t estimate_tokens(void) {
+    int64_t bytes = 400; // the system prompt
+    const cJSON *m;
+    cJSON_ArrayForEach(m, A.conv) {
+        if (ed_json_truthy(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(m, "meta"), "failed"))) continue;
+        bytes += (int64_t) strlen(ed_json_str(m, "content", ""));
+        const cJSON *call;
+        cJSON_ArrayForEach(call, cJSON_GetObjectItemCaseSensitive(m, "tool_calls"))
+            bytes += (int64_t) strlen(ed_json_str(cJSON_GetObjectItemCaseSensitive(call, "function"), "arguments", ""));
+    }
+    return bytes / 4;
+}
+
+static void update_ctx(void) {
+    int64_t exact = 0;
+    const int n = cJSON_GetArraySize(A.conv);
+    for (int i = n - 1; i >= 0; i--) {
+        const cJSON *mm = cJSON_GetArrayItem(A.conv, i);
+        if (strcmp(ed_json_str(mm, "role", ""), "assistant")) continue;
+        exact = (int64_t) ed_json_num(cJSON_GetObjectItemCaseSensitive(mm, "meta"), "tokens_in", 0);
+        break;
+    }
+    const int64_t est = estimate_tokens();
+    A.ctx_used = exact > est ? exact : est;
+    A.ctx_est = exact <= est;
+}
+
+// data:image/svg+xml of a VS Code-style progress ring (r=15.915 -> circumference ~100, so the
+// dash length is the percentage directly); percent-encoded text (image.c decodes it)
+static void ring_svg_uri(EdBuf *out, double frac, const char *color) {
+    double pct = frac * 100;
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+    char svg[512];
+    snprintf(svg, sizeof(svg),
+             "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 36 36'>"
+             "<circle cx='18' cy='18' r='15.915' fill='none' stroke='#3a3a3a' stroke-width='4'/>"
+             "<circle cx='18' cy='18' r='15.915' fill='none' stroke='%s' stroke-width='4' stroke-linecap='round' "
+             "stroke-dasharray='%.2f 100' transform='rotate(-90 18 18)'/></svg>",
+             color, pct);
+    edb_add(out, "data:image/svg+xml,");
+    for (const char *p = svg; *p; p++) {
+        const unsigned char ch = (unsigned char) *p;
+        if (isalnum(ch) || ch == '-' || ch == '_' || ch == '.' || ch == '~') edb_addf(out, "%c", ch);
+        else edb_addf(out, "%%%02X", ch);
+    }
+}
+
+static void update_ring(void) {
+    if (!A.ring) return;
+    update_ctx();
+    const double max = model_ctx_size();
+    const double frac = max > 0 ? (double) A.ctx_used / max : 0;
+    const char *color = frac < 0.6 ? "#1d8eb9" : frac < 0.85 ? "#d6a63a" : "#d9534f";
+    char used[32], title[192];
+    fmt_int(used, sizeof(used), A.ctx_used);
+    if (max > 0) {
+        char cap[32];
+        fmt_int(cap, sizeof(cap), (int64_t) max);
+        snprintf(title, sizeof(title), "Context: %s / %s tokens (%d%%)%s", used, cap, (int) (frac * 100 + 0.5), A.ctx_est ? " est." : "");
+    } else {
+        snprintf(title, sizeof(title), "Context: ~%s tokens (est.)", used);
+    }
+    EdBuf b;
+    edb_init(&b);
+    edb_add(&b, "<img class='knAiRingImg' src='");
+    ring_svg_uri(&b, max > 0 ? frac : 0, color);
+    edb_add(&b, "'>");
+    html_dom_set_html(A.ring, b.buf ? b.buf : "");
+    html_dom_set_attr(A.ring, "title", title); // always shown (empty until the model's size is known), like VS Code's
     edb_free(&b);
 }
 
@@ -1037,12 +1316,21 @@ static cJSON *system_message(void) {
         edb_addf(&b, "Open map: \"%s\", %zu objects (%d collidable, %d spawn points).\n", name[0] ? name : "untitled", g_ed.proj->count,
                  g_ed.proj->obj_count[1], g_ed.proj->obj_count[2]);
     }
-    if (A.tools_on && ai_tools_available() && model_has_tools())
-        edb_add(&b, "You can inspect and change the map open in the editor with the editor tools (they act on the shown map unless you "
-                    "pass project). Look before you edit (map_info, objects_query, prefabs); batch edits in one call; every edit is one "
-                    "undo step the user can revert; render_view / render_topdown let you see the result, map_validate and playtest "
+    const int tools_shown = A.tools_on && ai_tools_available() && model_has_tools();
+    if (A.mode == 1) { // Ask
+        edb_add(&b, "Mode: Ask. Answer the user's question directly. Do not call tools or edit the map; if a change is needed, explain "
+                    "how the user (or Agent mode) would do it.\n");
+    } else if (A.mode == 2) { // Plan
+        edb_add(&b, "Mode: Plan. Investigate with the read-only tools if they help (map_info, objects_query, prefabs, render_view), then "
+                    "present a clear, numbered plan of the edits you would make. Do NOT modify the map: editing tools are withheld until the "
+                    "user approves and switches to Agent mode.\n");
+    } else if (tools_shown) { // Agent
+        edb_add(&b, "Mode: Agent. You can inspect and change the map open in the editor with the editor tools (they act on the shown map "
+                    "unless you pass project). Look before you edit (map_info, objects_query, prefabs); batch edits in one call; every edit "
+                    "is one undo step the user can revert; render_view / render_topdown let you see the result, map_validate and playtest "
                     "check it. Destructive tools (deletes, saves, scripts) wait for the user's approval. Say what you changed.\n");
-    if (A.web_on && web_available() && model_has_tools())
+    }
+    if (A.mode != 1 && A.web_on && web_available() && model_has_tools())
         edb_add(&b, "web_search and web_fetch look things up on the web.\n");
     const AccountInfo *acc = account_get();
     if (acc) edb_addf(&b, "The user is signed in as %s.\n", acc->name);
@@ -1083,6 +1371,19 @@ static cJSON *request_messages(void) {
     return out;
 }
 
+// the tool definitions the current mode exposes: Agent all, Plan read-only, Ask none
+static cJSON *mode_tools_defs(void) {
+    if (A.mode == 1) return NULL;
+    cJSON *defs = ai_tools_defs();
+    if (!defs || A.mode != 2) return defs;
+    for (int i = cJSON_GetArraySize(defs) - 1; i >= 0; i--) {
+        const cJSON *d = cJSON_GetArrayItem(defs, i);
+        const char *nm = ed_json_str(cJSON_GetObjectItemCaseSensitive(d, "function"), "name", "");
+        if (!ai_tool_read_only(nm)) cJSON_DeleteItemFromArray(defs, i);
+    }
+    return defs;
+}
+
 static void send_turn(void) {
     if (A.streaming) return;
     if (!signed_in()) {
@@ -1107,7 +1408,11 @@ static void send_turn(void) {
     snprintf(A.live_model, sizeof(A.live_model), "%s", model);
     cJSON *messages = request_messages();
     const int tools_ok = model_has_tools();
-    cJSON *tools = A.tools_on && tools_ok ? ai_tools_defs() : NULL;
+    cJSON *tools = (A.tools_on && tools_ok && A.mode != 1) ? mode_tools_defs() : NULL; // Ask: none; Plan: read-only; Agent: all
+    if (tools && !cJSON_GetArraySize(tools)) {
+        cJSON_Delete(tools);
+        tools = NULL;
+    }
     char *json = NULL, *url = NULL;
     char headers[700] = "";
     if (A.custom) {
@@ -1124,7 +1429,7 @@ static void send_turn(void) {
             tools = NULL;
         }
         if (A.effort[0]) cJSON_AddStringToObject(body, "effort", A.effort);
-        if (A.web_on && web_available() && tools_ok) cJSON_AddBoolToObject(body, "web_search", 1);
+        if (A.mode != 1 && A.web_on && web_available() && tools_ok) cJSON_AddBoolToObject(body, "web_search", 1);
         cJSON_AddBoolToObject(body, "stream", 1);
         json = cJSON_PrintUnformatted(body);
         cJSON_Delete(body);
@@ -1279,8 +1584,13 @@ static void process_tools(void) {
     cJSON *m = pending_tool_message();
     if (!m) {
         A.tool_step = 0;
-        if (A.rounds >= AI_MAX_TOOL_ROUNDS) {
-            set_banner(2, "Stopped after 25 tool rounds: ask again to continue.");
+        // Autopilot runs to a higher hard cap without pausing; the other levels pause at 25 and ask
+        // the user to continue. Neither escapes the editor tool scopes (enforced by kn_editor_mcp).
+        const int cap = A.perm == 2 ? AI_MAX_AUTOPILOT_ROUNDS : AI_MAX_TOOL_ROUNDS;
+        if (A.rounds >= cap) {
+            char t[96];
+            snprintf(t, sizeof(t), "Stopped after %d tool rounds: ask again to continue.", cap);
+            set_banner(2, t);
             history_save();
             render_all();
             update_controls();
@@ -1302,7 +1612,18 @@ static void process_tools(void) {
             A.tool_step = 0; // waits for KE.kn.aiApprove
             return;
         }
-        if (ai_tool_needs_approval(name) && !A.allow_all && !ed_json_truthy(jget(tm, "approved"))) {
+        // the mode is the hard limit: Ask runs no tools, Plan only read-only ones (no edits)
+        if (A.mode == 1) {
+            tool_answer(m, id, "Error: Ask mode is read-only: answer directly instead of calling tools.");
+            ed_json_set_str(tm, "status", "denied");
+            continue;
+        }
+        if (A.mode == 2 && !ai_tool_read_only(name)) {
+            tool_answer(m, id, "Error: Plan mode makes no edits: present a numbered plan for the user to approve, then they switch to Agent mode.");
+            ed_json_set_str(tm, "status", "denied");
+            continue;
+        }
+        if (ai_tool_needs_approval(name) && A.perm == 0 && !ed_json_truthy(jget(tm, "approved"))) {
             ed_json_set_str(tm, "status", "approval");
             A.tool_step = 0;
             render_all();
@@ -1331,7 +1652,10 @@ static void approve(const int idx, const int k, const int choice) {
         tool_answer(m, id, "Error: the user denied this tool call");
         ed_json_set_str(tm, "status", "denied");
     } else {
-        if (choice == 2) A.allow_all = 1;
+        if (choice == 2 && A.perm < 1) { // "Allow all this session": raise the permission level
+            A.perm = 1;
+            settings_save();
+        }
         ed_json_set_bool(tm, "approved", 1);
         ed_json_set_str(tm, "status", "pending");
     }
@@ -1842,9 +2166,11 @@ static void render_pop(void) {
                      "<option value='high'%s>High</option></select></div>",
                  !A.effort[0] ? " selected" : "", !strcmp(A.effort, "low") ? " selected" : "", !strcmp(A.effort, "medium") ? " selected" : "",
                  !strcmp(A.effort, "high") ? " selected" : "");
-        edb_addf(&b, "<div class='knAiNote'>Editor tools: %s. Destructive tools ask first%s.</div>",
-                 ai_tools_available() ? "the AI can read and edit the open map" : ai_tools_unavailable_reason(),
-                 A.allow_all ? " (allowed for this session: <span class='knAiLink' onclick='KE.kn.aiAsk()'>ask again</span>)" : "");
+        static const char *const perm_note[] = {"destructive tools ask first",
+                                                 "every tool is allowed this session (<span class='knAiLink' onclick='KE.kn.aiAsk()'>ask again</span>)",
+                                                 "Autopilot: tools run and continue without prompting (<span class='knAiLink' onclick='KE.kn.aiAsk()'>ask again</span>)"};
+        edb_addf(&b, "<div class='knAiNote'>Editor tools: %s. %s.</div>",
+                 ai_tools_available() ? "the AI can read and edit the open map" : ai_tools_unavailable_reason(), perm_note[A.perm < 0 || A.perm > 2 ? 0 : A.perm]);
         edb_add(&b, "<div class='knAiBtnRow'>");
         if (A.custom) edb_add(&b, "<div class='knAiBtn' onclick='KE.kn.aiEpSave(1)'>Load models</div>");
         edb_add(&b, "<div class='knAiBtn knAiPrimary' onclick='KE.kn.aiEpSave(0)'>Done</div></div>");
@@ -1882,7 +2208,13 @@ void ed_ai_toggle(void) {
     if (!A.built) return;
     A.open = !A.open;
     html_dom_set_display(A.root, A.open ? "" : "none");
-    if (!A.open) return;
+    if (!A.open) {
+        if (A.model_pop) {
+            A.model_pop = 0;
+            render_model_pop();
+        }
+        return;
+    }
     if (A.models_state != 1 && (A.models_state != 2 || g_ed.now - A.models_at > 300)) models_load();
     fill_models();
     if (!signed_in()) set_banner(4, "AI in the editor is free for Krunker Box Office accounts.");
@@ -1923,9 +2255,11 @@ void ed_ai_reset(void) {
 }
 
 int ed_ai_keydown(const HtmlEvent *ev) {
-    if (A.pop && ev && html_key_is_escape(ev->key)) {
+    if ((A.pop || A.model_pop) && ev && html_key_is_escape(ev->key)) {
         A.pop = 0;
+        A.model_pop = 0;
         render_pop();
+        render_model_pop();
         return 1;
     }
     return 0;
@@ -1987,11 +2321,14 @@ H(h_stop) {
 }
 
 H(h_model) {
-    (void) u; (void) a; (void) n;
+    (void) u; (void) n;
     char buf[96] = "";
-    if (ev && ev->value && ev->value[0]) snprintf(buf, sizeof(buf), "%s", ev->value);
-    else if (A.model_sel) html_dom_get_value(A.model_sel, buf, sizeof(buf));
+    const char *id = arg_str(a, n, 0); // from a dropdown row
+    if (id[0]) snprintf(buf, sizeof(buf), "%s", id);
+    else if (ev && ev->value && ev->value[0]) snprintf(buf, sizeof(buf), "%s", ev->value);
     if (!buf[0]) return 1;
+    A.model_pop = 0; // a pick closes the dropdown
+    render_model_pop();
     if (A.custom) {
         snprintf(A.ep_model, sizeof(A.ep_model), "%s", buf);
         endpoint_save();
@@ -2001,6 +2338,7 @@ H(h_model) {
         settings_save();
         if (!model_warning()) health_banner();
     }
+    fill_models();
     update_controls();
     return 1;
 }
@@ -2117,6 +2455,10 @@ H(h_pop) {
     (void) u; (void) ev;
     const int which = (int) arg_num(a, n, 0);
     A.pop = A.pop == which ? 0 : which;
+    if (A.pop && A.model_pop) {
+        A.model_pop = 0;
+        render_model_pop();
+    }
     render_pop();
     return 1;
 }
@@ -2179,8 +2521,40 @@ H(h_ep_save) {
 
 H(h_ask) {
     UNUSED;
-    A.allow_all = 0;
+    A.perm = 0;
+    settings_save();
     render_pop();
+    update_controls();
+    return 1;
+}
+
+H(h_model_menu) {
+    UNUSED;
+    model_menu_toggle();
+    return 1;
+}
+
+H(h_model_hover) {
+    (void) u; (void) ev;
+    model_hover(n > 0 ? (int) arg_num(a, n, 0) : -1);
+    return 1;
+}
+
+H(h_mode) {
+    (void) u; (void) a; (void) n;
+    const char *v = ev && ev->value ? ev->value : "";
+    A.mode = v[0] >= '0' && v[0] <= '2' ? v[0] - '0' : 0;
+    settings_save();
+    update_controls();
+    return 1;
+}
+
+H(h_perm) {
+    (void) u; (void) a; (void) n;
+    const char *v = ev && ev->value ? ev->value : "";
+    A.perm = v[0] >= '0' && v[0] <= '2' ? v[0] - '0' : 0;
+    settings_save();
+    update_controls();
     return 1;
 }
 
@@ -2332,6 +2706,7 @@ void ed_ai_install(HtmlHandlerEntry *table, size_t *count, const size_t max) {
         {"KE.kn.aiAsk", h_ask},         {"KE.kn.aiUse", h_use},         {"KE.kn.aiEdit", h_edit},       {"KE.kn.aiEditCancel", h_edit_cancel},
         {"KE.kn.aiEditSend", h_edit_send}, {"KE.kn.aiEditKey", h_edit_key}, {"KE.kn.aiRewind", h_rewind}, {"KE.kn.aiRestore", h_restore},
         {"KE.kn.aiConfirm", h_confirm}, {"KE.kn.aiRedo", h_redo},
+        {"KE.kn.aiModelMenu", h_model_menu}, {"KE.kn.aiMode", h_mode},    {"KE.kn.aiPerm", h_perm},       {"KE.kn.aiModelHover", h_model_hover},
     };
     for (size_t i = 0; i < sizeof(entries) / sizeof(entries[0]) && *count < max; i++) table[(*count)++] = entries[i];
 }
@@ -2340,12 +2715,14 @@ void ed_ai_install(HtmlHandlerEntry *table, size_t *count, const size_t max) {
 // KRUNKNATIVE_EDITOR_SCRIPT "ai:..." (tools/editor/ai_e2e.py)
 //   ai:open / ai:close, ai:model:<id>, ai:send:<text>, ai:stop, ai:new, ai:trace:<i>, ai:tool:<i>:<k>,
 //   ai:approve:<i>:<k>:<0 deny|1 allow|2 allow all>, ai:tools:<0|1>, ai:web:<0|1>, ai:effort:<e>,
+//   ai:mode:<0 Agent|1 Ask|2 Plan>, ai:perm:<0 ask|1 allow all|2 autopilot>,
 //   ai:endpoint:<url>|<key>|<model> (own endpoint; "ai:endpoint:" = back to kn_brain),
 //   ai:history:<n> (open the nth saved chat), ai:pop:<0|1|2>, ai:dump:<path> (JSON state),
 //   checkpoints: ai:edit:<i>, ai:edittext:<text>, ai:editsend, ai:rewind:<i>, ai:restore:<i>,
 //   ai:confirm:<0 cancel|1 ok / undo and send|2 keep and send>, ai:redo,
-//   ai:boxes:<path> (viewport rects of the header and composer controls), ai:openmodels (clicks the
-//   model picker: its popup is in the run's screenshot)
+//   ai:boxes:<path> (viewport rects of the header and composer controls), ai:openmodels (opens the
+//   model dropdown), ai:hovermodel:<i> (a frame later: the mouse onto row i, its flyout shows in the
+//   run's screenshot), ai:closemodels
 
 static void dump_state(const char *path) {
     cJSON *o = cJSON_CreateObject();
@@ -2358,7 +2735,35 @@ static void dump_state(const char *path) {
     cJSON_AddBoolToObject(o, "tools_on", A.tools_on);
     cJSON_AddBoolToObject(o, "tools_available", ai_tools_available());
     cJSON_AddBoolToObject(o, "web", A.web_on && web_available());
-    cJSON_AddBoolToObject(o, "allow_all", A.allow_all);
+    cJSON_AddBoolToObject(o, "allow_all", A.perm >= 1); // kept for compatibility
+    cJSON_AddNumberToObject(o, "perm", A.perm);
+    cJSON_AddNumberToObject(o, "mode", A.mode);
+    cJSON_AddBoolToObject(o, "model_pop", A.model_pop);
+    cJSON_AddBoolToObject(o, "fly_left", A.fly_left);
+    update_ctx();
+    cJSON_AddNumberToObject(o, "ctx_used", (double) A.ctx_used);
+    cJSON_AddNumberToObject(o, "ctx_max", model_ctx_size());
+    cJSON_AddBoolToObject(o, "ctx_est", A.ctx_est);
+    cJSON *td = (A.tools_on && model_has_tools() && A.mode != 1) ? mode_tools_defs() : NULL;
+    cJSON_AddNumberToObject(o, "tools_offered", td ? cJSON_GetArraySize(td) : 0); // Ask 0, Plan read-only only, Agent all
+    cJSON_Delete(td);
+    if (A.model_pop_el && A.model_pop) {
+        char *mt = malloc(16384);
+        const HtmlElem fly = html_dom_by_id("knAiModelFly"), list = html_dom_by_id("knAiModelList");
+        if (mt) {
+            mt[0] = 0;
+            if (list) html_dom_get_text(list, mt, 16384);
+            cJSON_AddStringToObject(o, "model_pop_text", mt);
+            mt[0] = 0;
+            if (fly && A.fly_idx >= 0) html_dom_get_text(fly, mt, 16384);
+            cJSON_AddStringToObject(o, "fly_text", mt);
+            free(mt);
+        }
+        HtmlRect r;
+        cJSON_AddBoolToObject(o, "fly_shown", fly && A.fly_idx >= 0);
+        if (fly && html_dom_get_rect(fly, &r)) cJSON_AddItemToObject(o, "fly_rect", cJSON_CreateDoubleArray((const double[]) {r.x, r.y, r.w, r.h}, 4));
+        if (list && html_dom_get_rect(list, &r)) cJSON_AddItemToObject(o, "list_rect", cJSON_CreateDoubleArray((const double[]) {r.x, r.y, r.w, r.h}, 4));
+    }
     cJSON_AddStringToObject(o, "health", A.health);
     cJSON_AddNumberToObject(o, "banner_kind", A.banner_kind);
     cJSON_AddStringToObject(o, "banner", A.banner_text);
@@ -2411,7 +2816,8 @@ static void dump_state(const char *path) {
 // checks of tools/editor/ai_e2e.py (Stop is measured shown for a moment)
 static void dump_boxes(const char *path) {
     static const char *const ids[] = {"knAi", "knAiHead", "knAiTitle", "knAiModel", "knAiNewBtn", "knAiHistBtn", "knAiSetBtn", "knAiCloseBtn",
-                                      "knAiTools", "knAiWeb", "knAiSend", "knAiStop"};
+                                      "knAiTools", "knAiWeb", "knAiSend", "knAiStop", "knAiMode", "knAiPerm", "knAiRing", "knAiBanner",
+                                      "knAiList", "knAiInput", "knAiUsage"};
     cJSON *o = cJSON_CreateObject();
     const int stop_hidden = A.stop && !html_dom_is_shown(A.stop);
     if (stop_hidden) html_dom_set_display(A.stop, "");
@@ -2472,6 +2878,14 @@ int ed_ai_script(const char *cmd, const char *arg) {
     } else if (IS("web")) {
         A.web_on = atoi(v) != 0;
         update_controls();
+    } else if (IS("mode")) {
+        A.mode = atoi(v) >= 0 && atoi(v) <= 2 ? atoi(v) : 0;
+        settings_save();
+        update_controls();
+    } else if (IS("perm")) {
+        A.perm = atoi(v) >= 0 && atoi(v) <= 2 ? atoi(v) : 0;
+        settings_save();
+        update_controls();
     } else if (IS("effort")) {
         snprintf(A.effort, sizeof(A.effort), "%s", v);
     } else if (IS("endpoint")) {
@@ -2527,13 +2941,19 @@ int ed_ai_script(const char *cmd, const char *arg) {
     } else if (IS("boxes")) {
         dump_boxes(v);
     } else if (IS("openmodels")) {
+        if (!A.model_pop) model_menu_toggle();
+    } else if (IS("hovermodel")) {
+        // moves the mouse onto model row <i> of the open dropdown (a frame after openmodels, once it
+        // is laid out): the engine's mouseenter runs the row's handler, the flyout shows
+        char rid[32];
         HtmlRect r;
-        if (A.model_sel && html_dom_get_rect(A.model_sel, &r)) {
+        snprintf(rid, sizeof(rid), "knAiMRow%d", atoi(v));
+        if (A.model_pop && html_dom_get_rect(html_dom_by_id(rid), &r)) {
             const double k = g_ed.css_to_fb > 0 ? g_ed.css_to_fb : 1;
             html_ui_mouse_move((r.x + r.w / 2) * k, (r.y + r.h / 2) * k);
-            html_ui_mouse_button(GLFW_MOUSE_BUTTON_LEFT, GLFW_PRESS, 0);
-            html_ui_mouse_button(GLFW_MOUSE_BUTTON_LEFT, GLFW_RELEASE, 0);
         }
+    } else if (IS("closemodels")) {
+        if (A.model_pop) model_menu_toggle();
     } else if (IS("dump")) {
         dump_state(v);
     } else {

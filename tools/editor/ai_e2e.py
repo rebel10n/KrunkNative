@@ -379,6 +379,63 @@ def main():
         check("rewind + redo: the messages are back, the composer cleared", len(c8.get("conv", [])) == 2 and c8.get("input") == "", (len(c8.get("conv", [])), c8.get("input")))
         for f in frames:
             check("frame " + f, os.path.exists(D(f + ".png")), D(f + ".png"))
+
+        # ---- 7. the panel UX overhaul: permission levels, agent modes, the model flyout, the ring
+        cfgx = D("cfg-ux")
+        os.makedirs(os.path.join(cfgx, "krunknative"), exist_ok=True)
+        for k in ("krunker_username", "krunker_token", "krunker_id"):
+            shutil.copy(os.path.join(cfg, "krunknative", k + ".json"), os.path.join(cfgx, "krunknative", k + ".json"))
+        longmsg = "please describe the map in detail " * 60  # grows the context noticeably (no ';')
+        sx = ["closewindow", "wait:2", "ai:open", "wait:1.5",
+              # usage ring grows with the conversation (Ask mode: plain replies, no tool rounds)
+              "ai:perm:2", "ai:mode:1", "ai:send:hi", "wait:3", "ai:dump:" + D("ux-ring1.json"),
+              "ai:send:" + longmsg, "wait:3", "ai:dump:" + D("ux-ring2.json"),
+              # each mode exposes a different tool set
+              "ai:mode:0", "ai:dump:" + D("ux-agent.json"),
+              "ai:mode:2", "ai:dump:" + D("ux-plan.json"),
+              "ai:mode:1", "ai:dump:" + D("ux-ask.json"),
+              # the model dropdown + its per-model flyout (restore Agent, open the picker)
+              "ai:mode:0", "ai:boxes:" + D("ux-boxes.json"), "ai:openmodels", "wait:0.5", "ai:hovermodel:0", "wait:0.5",
+              "ai:dump:" + D("ux-models.json")]
+        editor(port, cfgx, sx, "ux", {"XDG_DATA_HOME": data})
+        r1, r2 = load(D("ux-ring1.json")), load(D("ux-ring2.json"))
+        ag, pl, ak = load(D("ux-agent.json")), load(D("ux-plan.json")), load(D("ux-ask.json"))
+        mp = load(D("ux-models.json"))
+        # permissions
+        check("permissions: Autopilot level set and shown as allow_all", r1.get("perm") == 2 and r1.get("allow_all") is True, (r1.get("perm"), r1.get("allow_all")))
+        # agent modes change tool exposure: Agent all, Plan read-only subset, Ask none
+        na, npl, nak = ag.get("tools_offered", -1), pl.get("tools_offered", -1), ak.get("tools_offered", -1)
+        check("modes: Agent exposes the full tool set", na >= 50, na)
+        check("modes: Plan exposes only read-only tools (fewer, more than zero)", 0 < npl < na, (npl, na))
+        check("modes: Ask exposes no tools", nak == 0, nak)
+        check("modes: the mode is recorded per dump", (ag.get("mode"), pl.get("mode"), ak.get("mode")) == (0, 2, 1),
+              (ag.get("mode"), pl.get("mode"), ak.get("mode")))
+        # the context-usage ring grows as the chat grows, against the model's real context size
+        check("usage ring: the model's context size is known (>0)", r1.get("ctx_max", 0) > 0, r1.get("ctx_max"))
+        check("usage ring: context usage grows with the conversation", r2.get("ctx_used", 0) > r1.get("ctx_used", 0),
+              (r1.get("ctx_used"), r2.get("ctx_used")))
+        # the model flyout: the dropdown opens and each model's flyout shows its reasoning level
+        check("model dropdown: opens, lists models", mp.get("model_pop") and mp.get("models") == SMART_ORDER, mp.get("models"))
+        fr, lr = mp.get("fly_rect"), mp.get("list_rect")
+        check("model flyout: shown beside the hovered row, outside the list (not clipped)", mp.get("fly_shown") and fr and lr and fr[2] > 100
+              and abs(fr[1] - lr[1]) < 40, (mp.get("fly_shown"), fr, lr))
+        check("model flyout: opens on the side of the screen with room (left, panel right-docked)",
+              mp.get("fly_left") is True and fr and lr and fr[0] + fr[2] <= lr[0] + 1, (mp.get("fly_left"), fr, lr))
+        pt = mp.get("fly_text", "")
+        check("model flyout: shows the hovered model's reasoning level (deepseek-v4-pro: low / medium / high)",
+              "Reasoning" in pt and "low / medium / high" in pt and "Context" in pt, pt[:400])
+        bx = load(D("ux-boxes.json"))
+        k = bx["knAi"][2] / 380.0 if bx.get("knAi") else 1.0
+        head = [bx.get(k2) for k2 in ("knAiTitle", "knAiModel", "knAiNewBtn", "knAiCloseBtn")]
+        cy = [centre_y(r) for r in head] if all(head) else []
+        check("model picker: the button is centred with the AI label and the header icons (+-0.5 px)", bool(cy) and max(cy) - min(cy) <= 0.5, cy)
+        bg, best = popup_colours(D("ux.png"), bx.get("knAiModel", [0, 0, 0, 0]))
+        check("model dropdown: dark list, not white (%s)" % (bg,), bg is not None and lum(bg) < 0.1, bg)
+        check("model dropdown: option text readable (contrast %.1f >= 4.5)" % best, best >= 4.5, best)
+        # the choice persists into a fresh editor on the same machine
+        editor(port, cfgx, ["closewindow", "wait:1", "ai:open", "wait:1", "ai:dump:" + D("ux-persist.json")], "ux-persist", {"XDG_DATA_HOME": data})
+        pp = load(D("ux-persist.json"))
+        check("permissions + mode persist across editor sessions", pp.get("perm") == 2 and pp.get("mode") == 0, (pp.get("perm"), pp.get("mode")))
         return 0
     finally:
         if brain:

@@ -1,0 +1,19 @@
+{
+  "ref": "doc/ref/krunknative/kn-editor-ai.png",
+  "size": [
+    1920,
+    937
+  ],
+  "background": "#000000",
+  "state": {
+    "page": "editor",
+    "pageQuery": "new",
+    "pageActions": [
+      "closeWindow",
+      "KE.kn.aiToggle()"
+    ],
+    "anim_time": 0.8
+  },
+  "frames": 3,
+  "note": "KrunkNative regression baseline (llvmpipe render of this scenario): the map editor's AI panel (client/src/editor/editor_ai.c) open on a new map, offline and as a guest: header (AI label, the model picker button, New / History / Settings / Close icons on one centre line), the sign-in card, the empty-chat text, the composer with the agent-controls row (mode picker, permissions picker, the context-usage ring) and the Tools / Ask row. No Krunker counterpart exists."
+}

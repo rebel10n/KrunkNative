@@ -1,0 +1,74 @@
+{
+  "scenario": "kn-editor-ai",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "ai-header",
+      "rect": [
+        1231,
+        39,
+        380,
+        38
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#knAiHead: the AI label, the model picker button (No models offline), New / History / Settings / Close on one centre line"
+    },
+    {
+      "name": "ai-signin",
+      "rect": [
+        1231,
+        77,
+        380,
+        117
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#knAiBanner: the guest's Sign in to use AI card"
+    },
+    {
+      "name": "ai-empty",
+      "rect": [
+        1231,
+        194,
+        380,
+        180
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#knAiList top: the Map editor AI empty-chat title and text"
+    },
+    {
+      "name": "ai-composer",
+      "rect": [
+        1231,
+        765,
+        380,
+        160
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "the composer: placeholder, the agent-controls row (mode + permissions pickers, the context ring), Tools / Ask, the usage line"
+    },
+    {
+      "name": "ai-ring",
+      "rect": [
+        1572,
+        834,
+        30,
+        30
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 4.0,
+      "note": "#knAiRing: the context-usage ring (an SVG data URL; empty offline, no model context size known)"
+    }
+  ]
+}

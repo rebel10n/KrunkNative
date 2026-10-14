@@ -85,13 +85,256 @@
 .knAiTitle .knAiSpark {
 	font-size: 17px;
 }
+/* the model picker: a button (the list and its hover flyout are the #knAiModelPop overlay, outside
+ * the panel's clipped box) */
 .knAiModel {
+	display: flex;
+	align-items: center;
 	flex: 1;
 	min-width: 0;
 	height: 24px;
 	margin: 0;
-	padding: 0 4px 0 6px;
+	padding: 0 2px 0 7px;
+	background-color: #333;
+	border: 1px solid #444;
+	border-radius: 4px;
+	cursor: pointer;
+	font-size: 12px;
+	color: #f0f0f0;
 	line-height: normal;
+}
+.knAiModel:hover {
+	border-color: #1d8eb9;
+}
+.knAiModelName {
+	flex: 1;
+	min-width: 0;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.knAiModelCaret {
+	font-size: 18px;
+	color: #b4b4b4;
+	flex-shrink: 0;
+}
+
+/* the model dropdown overlay (a sibling of the panel in #center, so it is not clipped): the list
+ * scrolls (its max-height is set at open time, model_menu_toggle), the flyout sits beside it outside
+ * the scroll box, so nothing clips it */
+.knAiModelPop {
+	position: absolute;
+	display: flex;
+	align-items: flex-start;
+	width: 478px; /* flyout 240 + 8 + list 230: a flex row, [flyout][list] or [list][flyout] (render_model_pop) */
+	z-index: 40;
+	pointer-events: auto; /* #center passes the pointer to the 3D view; the dropdown must take it (hover, clicks) */
+	color: #f0f0f0;
+	font-family: Helvetica, Arial, sans-serif;
+	font-size: 12px;
+}
+.knAiModelList {
+	width: 230px;
+	flex-shrink: 0;
+	overflow-y: auto;
+	background-color: #2b2b2b;
+	border: 1px solid #454545;
+	border-radius: 4px;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.55);
+	padding: 4px;
+}
+.knAiModelPop .material-icons {
+	font-family: 'Material Icons';
+}
+.knAiModelRow {
+	position: relative;
+	display: flex;
+	align-items: center;
+	height: 26px;
+	padding: 0 6px;
+	border-radius: 4px;
+	cursor: pointer;
+	color: #e8e8e8;
+}
+.knAiModelRow:hover {
+	background-color: #13677f;
+	color: #fff;
+}
+.knAiModelRowName {
+	flex: 1;
+	min-width: 0;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.knAiModelSel {
+	background-color: rgba(29, 142, 185, 0.18);
+}
+.knAiModelCheck {
+	font-size: 15px;
+	color: #4fc3ea;
+	margin-left: 4px;
+}
+.knAiModelRow:hover .knAiModelCheck {
+	color: #fff;
+}
+.knAiModelReason {
+	font-size: 14px;
+	color: #9a86d8;
+	margin-left: 4px;
+}
+.knAiModelBad {
+	font-size: 10px;
+	color: #ff9a9a;
+	margin-left: 6px;
+}
+.knAiModelWarn {
+	font-size: 10px;
+	color: #ffd08a;
+	margin-left: 6px;
+}
+/* the per-model flyout (#knAiModelFly, shown by the hovered row's handler): a flex sibling of the
+ * list on the side of the screen that has room (never absolutely positioned: the engine paints
+ * absolute boxes with a negative left off their rect); its margin-top follows the hovered row and
+ * visibility keeps its slot, so the list never shifts */
+.knAiFly {
+	flex-shrink: 0;
+	width: 240px;
+	background-color: #1e1e1e;
+	border: 1px solid #4a4a4a;
+	border-radius: 4px;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+	padding: 8px 10px;
+	color: #e0e0e0;
+	z-index: 41;
+	cursor: default;
+}
+.knAiMLeft .knAiFly {
+	margin-right: 8px;
+}
+.knAiMRight .knAiFly {
+	margin-left: 8px;
+}
+.knAiFlyHidden {
+	visibility: hidden;
+}
+/* the editor's own #center rules (canvas buttons: GameFont, grey, text shadow) outrank single-class
+ * selectors on the overlay's descendants; restate the overlay's typography at #center specificity */
+#center .knAiModelPop, #center .knAiModelPop * {
+	font-family: Helvetica, Arial, sans-serif;
+	text-shadow: none;
+	text-transform: none;
+	letter-spacing: 0;
+	box-sizing: border-box; /* .knAi * sets it inside the panel; the overlay is outside */
+}
+/* editor.css's `* { color: #353535 }` hits every span directly (the row names, the flyout values):
+ * inherit instead, as .knAi * does inside the panel; the coloured spans below restate theirs */
+#center .knAiModelPop * {
+	color: inherit;
+}
+#center .knAiModelPop .material-icons {
+	font-family: 'Material Icons';
+}
+#center .knAiModelPop {
+	color: #f0f0f0;
+}
+#center .knAiModelRow {
+	color: #e8e8e8;
+	font-size: 12px;
+}
+#center .knAiModelRow:hover {
+	color: #fff;
+}
+#center .knAiModelBad {
+	color: #ff9a9a;
+}
+#center .knAiModelWarn {
+	color: #ffd08a;
+}
+#center .knAiModelReason {
+	color: #9a86d8;
+}
+#center .knAiModelCheck {
+	color: #4fc3ea;
+}
+#center .knAiModelRow:hover .knAiModelCheck {
+	color: #fff;
+}
+#center .knAiFly {
+	color: #e0e0e0;
+	font-size: 12px;
+}
+#center .knAiFlyName {
+	color: #fff;
+}
+#center .knAiFlyK {
+	color: #8c8c8c;
+}
+#center .knAiFlyV {
+	color: #e0e0e0;
+}
+#center .knAiFlyDesc {
+	color: #b0b0b0;
+}
+.knAiFlyName {
+	font-weight: bold;
+	color: #fff;
+	margin-bottom: 5px;
+	white-space: normal;
+}
+.knAiFlyRow {
+	display: flex;
+	justify-content: space-between;
+	font-size: 11px;
+	margin: 2px 0;
+}
+.knAiFlyK {
+	color: #8c8c8c;
+}
+.knAiFlyV {
+	color: #e0e0e0;
+	text-align: right;
+}
+.knAiFlyDesc {
+	margin-top: 6px;
+	padding-top: 6px;
+	border-top: 1px solid #353535;
+	font-size: 11px;
+	color: #b0b0b0;
+	white-space: normal;
+}
+
+/* the agent-controls row: mode + permission pickers, and the context-usage ring */
+.knAiBar2 {
+	margin-top: 2px;
+	margin-bottom: 2px;
+}
+.knAiBarIcon {
+	font-size: 15px;
+	color: #8c8c8c;
+	margin-right: 3px;
+	flex-shrink: 0;
+}
+.knAiShield {
+	margin-left: 8px;
+	color: #7fb98f;
+}
+.knAiMini {
+	height: 24px;
+	min-width: 0;
+	padding: 0 2px 0 5px;
+	font-size: 12px;
+	flex-shrink: 0;
+}
+.knAiRing {
+	width: 18px;
+	height: 18px;
+	flex-shrink: 0;
+}
+.knAiRingImg {
+	display: block;
+	width: 18px;
+	height: 18px;
 }
 .knAiIcon {
 	width: 24px;
