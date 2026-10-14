@@ -147,7 +147,9 @@ The nav grid misses these unrotated invisible ramps and that step.
 SkyTemple's bot falls come from the bot AI, not the map. Spawns 0 and 1 sit on a grass ledge between the
 front house and the island edge, and bots walk off it: one bot alone falls 6 times in 10 s. v7's
 `skytemple_v2` also loses bots off ledges (17 falls in 30 s). This belongs with the bot-nav owner
-(edge/drop awareness on sky maps).
+(edge/drop awareness on sky maps). Fixed there (`shared/src/bot_path.c`: no lane or hop over the
+void, `bot_path_guard`): `bot_test` and `server/tests/bot_nav_e2e.py` run 8 bots on both
+SkyTemples, roaming and fighting, with 0 falls.
 
 `strike_maps_test` (run from the repo root) checks:
 

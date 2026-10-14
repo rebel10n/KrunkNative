@@ -177,9 +177,13 @@ static void test_dom(Game *game, const int mode_index) {
         }
         CHECK(a >= 0 && b >= 0 && a != b, "team %d goes for two zones (%d, %d)", team, a, b);
     }
-    for (int s = 0; s < 90 * 30 && g_dom_captures < 2; s++) tick(game, 1.0f / 30.0f, 30.0f);
+    // until two zones are owned at once (a capture can be a recapture: both teams play the zones)
     int owned = 0;
-    for (int z = 0; z < game->mode->dom_zone_count; z++) owned += game->mode->dom_zones[z].captured_by != 0;
+    for (int s = 0; s < 90 * 30 && owned < 2; s++) {
+        tick(game, 1.0f / 30.0f, 30.0f);
+        owned = 0;
+        for (int z = 0; z < game->mode->dom_zone_count; z++) owned += game->mode->dom_zones[z].captured_by != 0;
+    }
     printf("  %d captures, %d zones owned, team scores %d / %d, %d kills\n", g_dom_captures, owned, game->mode->team_scores[1], game->mode->team_scores[2], g_kills);
     CHECK(g_dom_captures >= 2, "zones get captured (%d)", g_dom_captures);
     CHECK(owned >= 2, "zones stay owned (%d)", owned);

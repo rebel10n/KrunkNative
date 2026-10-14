@@ -174,6 +174,7 @@ custom host; the console and rcon always; offline always), with perms on **or** 
 | bot_place | [tfue\|autoRespawn\|key=value] | at the caller's feet: "Spawned 1 nextbot bot at your position." (v7's server ignores the position; the console: at a spawn) |
 | bot_type | [nextbot\|tfue] | "Bot type: nextbot (use bot_type nextbot\|tfue)" / "Bot type set to tfue; removed N nextbot bots." |
 | bot_list | – | "Bots (N): nextbot:1:Name#uid, …" / "No bots." |
+| bot_nav | – | Krunker Box Office: "Bot nav: stuck N, replans N (forced N), goals N, unreachable N, falls N; grid N nodes." + "Routes (id:state:waypoint/count): …" (`id:dead` while a bot respawns) (`shared/src/bot_path.c` counters since the manager was created; `server/tests/bot_nav_e2e.py`) |
 | bot_kick | [all\|index\|name] | "Removing N bots." / "No bots matched 'x'." / "No bots." (LEAVE to everyone) |
 | bot_kill | [all\|index\|name] | "Killed N bots." / "Matched bots are not spawned yet." (players.kill, skipRewards) |
 | bot_config | [key=value …] | "Bot config: accuracy=100 attackTarget=true …" / "Bot config updated (k=v); N live bots updated." |
@@ -258,8 +259,26 @@ AI (`bot_type nextbot`, the default): Idle / Hunt / Attack / Hide with the BotPr
 (reaction time, aim focus, dodge, chase timeout, coward / retreat), aim-down-sights and recoil
 control by skill, reloads and the secondary on an empty primary. `bot_type tfue` runs bots.js
 Bot.update (turnSpd, roam circle, 2 s re-target, fire inside half the range). Both walk over a
-nav grid built from the map (`bot_nav.c`, v7 navmesh.ts idea: walkable tops, headroom, walk /
-jump / drop links, A*, no edges / jump pads / kill volumes).
+nav grid built from the map (`bot_nav.c`, v7 navmesh.ts idea: walkable tops at the body's
+width, headroom, walk / jump / drop links checked for parapets and floors in the way, A* with a
+closest-reachable fallback, no edges / jump pads / kill volumes) through the follower of
+`bot_path.c`: waypoints consumed when reached or passed, corner cutting onto the next one when
+the straight walk is clear, every move code swept against the map before it is pressed (a
+ground-following body sweep: walls and overhangs refused, low obstacles hopped only onto the
+route's own level, no stepping off an edge the route does not drop from, players side-stepped),
+a replan that routes around the spot after 0.8 s without progress and a stuck recovery (back
+off, hop, new goal) after a second one. The grid and the sweeps model Krunker's movement: the
+climb height (3), low obstacles standing on a floor (a hop lands on top), ramps that lift a
+walker onto their surface from the side as well as up the slope, ladders that are walked past,
+seams between floor tiles that the body bridges; hops at a jump link wait until the run-up heads
+at the ledge. Whatever chose the move (walking, Attack's dodges, mimic), `bot_path_guard` drops a
+move or a hop that would carry the body off a void edge (nothing above deathY to land on) and
+brakes a drift toward one; a one-way drop into a pit with no way back out costs A* extra.
+`bot_nav` prints the counters ("falls": bots that died under deathY); `bot_test` runs 8 roaming
+bots on Kanji, Sandstorm, Industry, v7's SkyTemple and FRVR Strike's SkyTemple (and fighting on
+both islands) and fails on stuck recoveries, bots pressing into walls or bots falling off.
+`shared/include/bot_path.h` is the read-only view of a bot's route (`bot_path_current`) for the
+spectate overlay and bot movement.
 
 Intentional differences: bots survive round and map changes (v7 game.init removes
 non-persistent ones); every bot rolls a realistic identity unless level= / clan= / … are

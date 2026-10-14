@@ -135,7 +135,30 @@ typedef struct {
     int last_flag, last_tags;       // a change re-thinks at once
 } BotObjective;
 
+// Navigation counters since the manager was created (shared/include/bot_path.h bot_path_stats,
+// the `bot_nav` console command): stuck recoveries, A* searches, searches forced by a stuck or
+// blocked follow, goals reached, goals given up as unreachable.
+typedef struct {
+    int stuck, replans, forced_replans, goals_reached, unreachable;
+} BotNavStats;
+
 #define BOT_PATH_RADIUS 10.0f       // v10 BotManager.config.pathRadius: a path node counts as reached within it
+
+// Route following state (shared/src/bot_path.c): progress toward the pursued point, the
+// blocked / stuck escalation, the recovery in progress.
+typedef struct {
+    vec3 goal;                     // the goal of the last bot_path_route
+    unsigned char has_goal, moving, force_replan, goal_counted;
+    float move_yaw;                // the world yaw walked last
+    float best_dist;               // the closest we got to the pursued point
+    float no_progress;             // ms without getting closer while walking
+    int block_count;               // no-progress events in a row toward this waypoint
+    int boxed;                     // frames every lane was refused (debug / tests)
+    unsigned char lanes[7];        // the last frame's lane results (wanted heading, then +-45, +-90, +-135 degrees)
+    float recover_timer;           // ms of stuck recovery left
+    int recover_code;              // the move code of the recovery
+    vec3 stuck_pos, route_start, prev_waypoint;
+} BotPathFollow;
 
 // Navigation (shared/src/bot_nav.c): a smoothed A* route over the map's walkable grid.
 #define BOT_PATH_MAX 64
@@ -206,6 +229,7 @@ typedef struct {
     vec3 path_goal;
     float path_timer;               // ms until the route may be recomputed
     int path_stranded;              // the goal is unreachable and we are as close as it gets
+    BotPathFollow follow;           // shared/src/bot_path.c
     // v10.0.2 botPaths walking (Bot.pathInfo / pathTarget, usePathing; shared/src/bots.c bot_next_path_node)
     int route_path;                 // pathIndex: Map.bot_path_list index, -1 = null
     int route_node;                 // pathNodeIndex
@@ -238,6 +262,8 @@ typedef struct GameBots_t {
     unsigned char nav_dirty:1;
     float nav_built_at;
     int path_budget;                // A* searches left this tick
+    BotNavStats nav_stats;          // bot_path_stats
+    int nav_falls;                  // bots that died falling under deathY since the manager was created (bot_nav)
     unsigned char stopped:1;        // bot_stop is in effect (bot_start / bot_stop off resume)
     // KrunkNative chat `autofill` (game_bots_set_autofill): off stops the quota fill (its bots leave);
     // forced: turned on by a command, so a hosted custom game fills too (never ranked: server_core.c)
@@ -311,6 +337,17 @@ int  bot_nav_random_point(Game*, vec3 *out);      // a walkable point of the lar
 int  bot_nav_random_point_from(Game*, const vec3 *from, vec3 *out); // ... of the area under `from`
 int  bot_object_blocks_player(const Object*);     // player_do_map_collisions' solid objects
 int  bot_hazard_at(const Game*, vec3 feet);       // inside a jump pad / kill volume
+// Local queries over the grid's solid boxes (shared/src/bot_path.c's follower; the map scan
+// of bots.c is the fallback without a grid). See bot_nav.c for the exact semantics.
+void bot_nav_penalize(Game*, vec3 at, float radius, float ms); // route around a stuck spot for a while
+int  bot_nav_sweep(Game*, vec3 feet, vec3 dir, float reach, float max_drop, float *low_top, float *end_y); // 0 clear, 1 low obstacle, 2 blocked, 3 edge
+int  bot_nav_ground(Game*, vec3 p, float max_drop, float *ground_y);     // the floor under a point
+float bot_nav_headroom(Game*, vec3 feet, float cap);                      // free height over the feet
+int  bot_nav_on_grid(Game*, vec3 p);                                      // a node of this floor is within a cell
+// The last word on a bot's move this frame, whatever chose it (walking, Attack's dodges, mimic;
+// shared/src/bot_path.c): a move or a hop that would carry the body off a void edge (nothing to
+// land on above deathY) is dropped, and a drift toward one (airborne or sliding) brakes.
+void bot_path_guard(Game*, GameBot*, const Player *self, float look_yaw, int *move, unsigned char *jump);
 
 // shared/src/bot_names.c
 extern const char *const g_bot_name_colors[];

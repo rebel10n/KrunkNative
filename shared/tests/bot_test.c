@@ -6,6 +6,8 @@
 // Run from the repository root: ./<build>/bot_test
 #include <shared.h>
 #include <bots.h>
+#include <bot_path.h>
+#include <pcg_basic.h>
 #include <map_ai.h>
 #include <ai.h>
 #include <chat_commands.h>
@@ -522,7 +524,9 @@ static void test_quota_fill(Game *game, const int tdm_index) {
     game_init(game, 0, tdm_index, 1);
     add_human(game, 803, "R");
     tick(game, 4.0f, 30.0f);
-    CHECK(count_bots(game, 1) == 7, "TDM next round: 7 bots back (%d)", count_bots(game, 1));
+    // bot players, not only live ones: 4 s into a round with real pathing a bot may already be
+    // dead and waiting out its respawn delay (it has rejoined all the same)
+    CHECK(count_bots(game, 0) == 7, "TDM next round: 7 bots back (%d)", count_bots(game, 0));
     int diff = team_count(game, 1) - team_count(game, 2);
     CHECK(diff >= -1 && diff <= 1, "TDM teams balanced with bots (%d / %d)", team_count(game, 1), team_count(game, 2));
     for (int i = 0; i < 3; i++) {
@@ -569,6 +573,110 @@ static void test_nav(Game *game, const int sandstorm) {
     CHECK(bot_nav_find_path(game, under, b, &path) && path.count && path.points[0].y < 50.0f, "no roof on a noCol objective (%.1f)", path.count ? path.points[0].y : -1.0f);
     vec3 roam;
     CHECK(bot_nav_random_point(game, &roam), "a roam point");
+}
+
+// Navigation (shared/src/bot_path.c): 8 roaming bots on a real map for a while must keep
+// reaching their goals without getting stuck against walls: counts stuck recoveries, A*
+// searches, goals reached and "blocked" ticks (a bot meant to walk but did not move).
+#define BOT_RECOVER_MS_DEBUG 600.0f
+// fight: the bots attack each other too (Attack's strafes / dodges / retreats must keep to the
+// ground as well); max_falls: bots that may fall out of the map (y <= deathY) over the run.
+static void test_nav_follow(Game *game, const int map_index, const char *name, const float seconds, const int fight, const int max_falls) {
+    printf("Running bot nav follow test (%s%s)...\n", name, fight ? ", fighting" : "");
+    free_players(game);
+    game_init(game, map_index, 0, 1);
+    CHECK(game->ready, "%s loaded", name);
+    if (!game->ready) return;
+    const clock_t built = clock();
+    const BotNav *nav = bot_nav_for(game); // built on first use: time it
+    const double build_ms = (double) (clock() - built) * 1000.0 / CLOCKS_PER_SEC;
+    printf("  %s: grid of %d nodes in %.1f ms\n", name, bot_nav_node_count(nav), build_ms);
+    CHECK(nav && build_ms < 1000.0, "%s: the grid builds (%.1f ms)", name, build_ms);
+    game->bots->nav_stats = (BotNavStats) {0};
+    run(fight ? "/bot_add 8 difficulty=normal" : "/bot_add 8 difficulty=normal attackTarget=false watchTarget=false followTarget=false");
+    tick(game, 1.0f, 30.0f);
+    GameBots *bots = game->bots;
+    int blocked = 0, walking = 0, segments = 0, with_path = 0, checks = 0, falls = 0;
+    int alive[GAME_BOTS_MAX];
+    for (int i = 0; i < GAME_BOTS_MAX; i++) alive[i] = i < bots->count && bots->list[i].player && bots->list[i].player->active;
+    vec3 before[GAME_BOTS_MAX];
+    const int ticks = (int) (seconds * 30.0f);
+    for (int t = 0; t < ticks; t++) {
+        int intend[GAME_BOTS_MAX];
+        for (int i = 0; i < bots->count; i++) {
+            const GameBot *bot = &bots->list[i];
+            const Player *p = bot->player;
+            before[i] = p ? p->position : (vec3) {0, 0, 0};
+            vec3 goal;
+            intend[i] = p && p->active && p->on_ground && bot->state != BOT_STATE_ATTACK && bot->follow.moving && bot->follow.recover_timer <= 0.0f && bot_path_goal(bot, &goal) && hypotf(goal.x - p->position.x, goal.z - p->position.z) > 12.0f;
+        }
+        const int stuck_before = bots->nav_stats.stuck;
+        tick(game, 1.0f / 30.0f, 30.0f);
+        { // KN_BOT_TRACE=<map>:<bot index>:<from s>:<to s>: one bot's follower state every tick (debugging)
+            const char *tr = getenv("KN_BOT_TRACE");
+            char tm[64]; int tb; float t0, t1;
+            if (tr && sscanf(tr, "%63[^:]:%d:%f:%f", tm, &tb, &t0, &t1) == 4 && !strcmp(tm, name) && t >= t0 * 30 && t <= t1 * 30 && tb < bots->count) {
+                const GameBot *bot = &bots->list[tb];
+                const Player *p = bot->player;
+                const vec3 wp = bot->path_index < bot->path.count ? bot->path.points[bot->path_index] : bot->roam_target;
+                printf("  T %.2f pos (%.2f %.2f %.2f) vel (%.3f %.3f %.3f) gr %d st %d wp %d/%d k%d (%.1f %.1f %.1f) myaw %.2f lanes %d%d%d%d%d np %.0f bc %d rec %.0f\n", t / 30.0f,
+                       p->position.x, p->position.y, p->position.z, p->velocity.x, p->velocity.y, p->velocity.z, p->on_ground, bot->state, bot->path_index, bot->path.count,
+                       bot->path_index < bot->path.count ? bot->path.kinds[bot->path_index] : -1, wp.x, wp.y, wp.z, bot->follow.move_yaw,
+                       bot->follow.lanes[0], bot->follow.lanes[1], bot->follow.lanes[2], bot->follow.lanes[3], bot->follow.lanes[4], bot->follow.no_progress, bot->follow.block_count, bot->follow.recover_timer);
+            }
+        }
+        if (getenv("KN_BOT_NAV_DEBUG") && bots->nav_stats.stuck != stuck_before) {
+            for (int i = 0; i < bots->count; i++) {
+                const GameBot *bot = &bots->list[i];
+                const Player *p = bot->player;
+                if (!p || bot->follow.recover_timer < BOT_RECOVER_MS_DEBUG) continue;
+                const int k = bot->path_index < bot->path.count ? bot->path.kinds[bot->path_index] : -1;
+                const vec3 wp = bot->path_index < bot->path.count ? bot->path.points[bot->path_index] : bot->roam_target;
+                printf("  STUCK t=%.1f bot %d at (%.1f %.1f %.1f) ground %d ladder %d vel (%.3f %.3f %.3f) wp %d/%d kind %d (%.1f %.1f %.1f) goal (%.1f %.1f %.1f) stranded %d lanes %d%d%d%d%d%d%d boxed %d\n",
+                       (float) t / 30.0f, i, p->position.x, p->position.y, p->position.z, p->on_ground, p->on_ladder, p->velocity.x, p->velocity.y, p->velocity.z,
+                       bot->path_index, bot->path.count, k, wp.x, wp.y, wp.z, bot->roam_target.x, bot->roam_target.y, bot->roam_target.z, bot->path_stranded,
+                       bot->follow.lanes[0], bot->follow.lanes[1], bot->follow.lanes[2], bot->follow.lanes[3], bot->follow.lanes[4], bot->follow.lanes[5], bot->follow.lanes[6], bot->follow.boxed);
+            }
+        }
+        for (int i = 0; i < bots->count; i++) { // a fall: alive before the tick, dead at or under deathY after it
+            const Player *p = bots->list[i].player;
+            const int now_alive = p && p->active;
+            if (alive[i] && !now_alive && p && p->position.y <= game->map->death_y + 0.5f) {
+                falls++;
+                if (getenv("KN_BOT_NAV_DEBUG")) printf("  FALL t=%.1f bot %d from (%.1f %.1f %.1f)\n", (float) t / 30.0f, i, before[i].x, before[i].y, before[i].z);
+            }
+            alive[i] = now_alive;
+        }
+        for (int i = 0; i < bots->count; i++) {
+            const GameBot *bot = &bots->list[i];
+            const Player *p = bot->player;
+            if (!intend[i] || !p || !p->active) continue;
+            walking++;
+            if (hypotf(p->position.x - before[i].x, p->position.z - before[i].z) < 0.15f) blocked++;
+            if (t % 30 == 0) {
+                BotPathSegment segs[BOT_PATH_SEGMENTS_MAX];
+                const int n = bot_path_current(bot, segs, BOT_PATH_SEGMENTS_MAX);
+                checks++;
+                if (n) {
+                    with_path++;
+                    segments += n;
+                    CHECK(fabsf(segs[0].from.x - p->position.x) < 0.01f && fabsf(segs[0].from.z - p->position.z) < 0.01f, "segment 0 starts at the feet");
+                    CHECK(segs[n - 1].flags & BOT_PATH_FLAG_LAST, "the last segment is flagged");
+                }
+            }
+        }
+    }
+    BotNavStats st;
+    bot_path_stats(game, &st);
+    const double blocked_pct = walking ? 100.0 * blocked / walking : 0.0;
+    printf("  %s: %d bots x %.0f s: stuck %d, replans %d (forced %d), goals reached %d, unreachable %d, falls %d, blocked %.1f%% of %d walking ticks, path %d/%d samples (%.1f segs)\n",
+           name, bots->count, seconds, st.stuck, st.replans, st.forced_replans, st.goals_reached, st.unreachable, falls, blocked_pct, walking, with_path, checks,
+           with_path ? (double) segments / with_path : 0.0);
+    CHECK(falls <= max_falls, "%s: %d bots fell out of the map (at most %d)", name, falls, max_falls);
+    CHECK(walking > ticks * (fight ? 1 : 2), "%s: the bots walked (%d walking ticks)", name, walking);
+    CHECK(blocked_pct < 6.0, "%s: blocked %.1f%% of walking ticks (walls)", name, blocked_pct);
+    CHECK(st.stuck <= 2, "%s: %d stuck recoveries", name, st.stuck);
+    run("/bot_kick all");
 }
 
 // 10 bots on Sandstorm at a 30 Hz tick: CPU per tick.
@@ -678,6 +786,7 @@ static void test_map_bots(void) {
 }
 
 int main(void) {
+    if (getenv("KN_BOT_SEED")) pcg32_srandom((uint64_t) atoll(getenv("KN_BOT_SEED")), 54u); // another run of the same tests
     test_parse();
 
     cJSON *arena = cJSON_Parse(k_arena);
@@ -687,15 +796,34 @@ int main(void) {
         printf("Failed to load the maps (run from the repository root)\n");
         return 1;
     }
-    static const cJSON *maps[2];
+    // the v10 official ones, then v7's SkyTemple and FRVR Strike's (a floating island: falls)
+    static const char *const k_nav_maps[] = {"kanji", "sandstorm_v3", "industry", "skytemple_v2", "strike/skytemple"};
+    enum { NAV_MAPS = 5 };
+    static const cJSON *maps[2 + NAV_MAPS];
     maps[0] = arena;
     maps[1] = sandstorm;
-    static int modes[2];
+    cJSON *strike_skytemple = load_json("assets/maps/strike/skytemple.json"); // not in the base catalogue
+    if (strike_skytemple) map_sanitize_json(strike_skytemple);
+    maps[2 + 4] = strike_skytemple;
+    for (int i = 0; i < 4; i++) {
+        const int key = map_catalog_index_of_key(k_nav_maps[i]);
+        maps[2 + i] = key >= 0 ? map_catalog_json((size_t) key) : NULL;
+        if (!maps[2 + i]) {
+            printf("Failed to load %s\n", k_nav_maps[i]);
+            return 1;
+        }
+    }
+    if (!strike_skytemple) {
+        printf("Failed to load assets/maps/strike/skytemple.json\n");
+        return 1;
+    }
+    static int modes[2 + NAV_MAPS];
     modes[0] = MODE_ID_FFA;
     modes[1] = mode_find("tdm");
+    for (int i = 0; i < NAV_MAPS; i++) modes[2 + i] = MODE_ID_FFA;
     Game game = {0};
     g_game = &game;
-    game_configure(&game, NULL, maps, 2, modes, 2, NULL, 0, NULL, 0);
+    game_configure(&game, NULL, maps, 2 + NAV_MAPS, modes, 2 + NAV_MAPS, NULL, 0, NULL, 0);
     game.hooks.send = test_send;
     game.round_length = 100000.0f;
     game_init(&game, 0, 0, 1);
@@ -712,8 +840,14 @@ int main(void) {
     test_quota(&game);
     test_quota_fill(&game, 1);
     test_nav(&game, 1);
+    const float nav_seconds = getenv("KN_BOT_NAV_SECONDS") ? (float) atof(getenv("KN_BOT_NAV_SECONDS")) : 45.0f;
+    for (int i = 0; i < NAV_MAPS; i++) test_nav_follow(&game, 2 + i, k_nav_maps[i], nav_seconds, 0, 0);
+    // fighting on the islands: Attack's movement keeps to the ground too (main had 227 falls in
+    // 30 s with 6 bots on FRVR's SkyTemple, 17 on skytemple_v2)
+    for (int i = 3; i < NAV_MAPS; i++) test_nav_follow(&game, 2 + i, k_nav_maps[i], nav_seconds, 1, 1);
     test_cost(&game, 1);
     test_map_bots();
+    cJSON_Delete(strike_skytemple);
 
     if (g_failures) {
         printf("%d check(s) failed\n", g_failures);

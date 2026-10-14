@@ -14,10 +14,12 @@
 //   switches with a 10% chance per respawn. class= implies forceClass.
 // - Bots survive round / map changes (v7 game.init runs bots.reset(), which removes every
 //   non-persistent bot); bot_kick removes them.
-// - Navigation: KrunkNative has no nav mesh. The NextBot state machine (Idle / Hunt / Attack /
-//   Hide, profile reaction / aim focus / dodge / chase timeout / retreat) steers straight at its
-//   goal with obstacle probes (jump low walls, side-step high ones, no walking off ledges) and
-//   stuck recovery; Hunt roams between spawn points and the last known enemy positions.
+// - Navigation: v7's generated nav areas are replaced by KrunkNative's own walkable grid
+//   (shared/src/bot_nav.c: A* with jump / drop links) and follower (shared/src/bot_path.c:
+//   lookahead, body sweeps against the map, ledge and player avoidance, replan-on-block stuck
+//   handling, the void-edge guard). The NextBot state machine (Idle / Hunt / Attack / Hide,
+//   profile reaction / aim focus / dodge / chase timeout / retreat) is the same; Hunt roams
+//   between random walkable points, spawn points and the last known enemy positions.
 // - Objectives (KrunkNative addition, shared/src/bot_objective.c): v7's NextBot only roams and
 //   fights; here Hunt walks the mode's objective (flags, hills, zones, tags, sites: state
 //   Objective) with team roles by rank, and a carrier / a holder keeps to it while fighting.
@@ -25,6 +27,7 @@
 //   (only the AI's engage range), scoreOnDeath, head / pet / shoes / wrist (no such v3.1.1 slots).
 #include <bots.h>
 #include <bot_objective.h>
+#include <bot_path.h>
 #include <ai.h>
 #include <pcg_basic.h>
 #include <ctype.h>
@@ -64,15 +67,11 @@
 #define NB_TURN_RATE 0.012f
 #define NB_PATH_TURN_RATE 0.004f
 
-// Movement probes (KrunkNative: no nav mesh)
-#define BOT_PROBE_MS 100.0f
+// bot_probe (Attack's dodge / back-off checks; the walking itself is shared/src/bot_path.c's)
 #define BOT_PROBE_LENGTH 16.0f
 #define BOT_KNEE 2.5f
 #define BOT_JUMP_CLEAR 9.5f
 #define BOT_GROUND_DROP 45.0f
-#define BOT_STUCK_CHECK_MS 500.0f
-#define BOT_STUCK_MS 1200.0f
-#define BOT_RECOVER_MS 700.0f
 
 // KrunkNative move codes (Input.move_dir, ui_controls.c): 0 forward, 2 right, 4 back, 6 left
 #define MOVE_NONE (-1)
@@ -847,10 +846,7 @@ static void bot_reset_ai(GameBot *bot, const Player *p) {
     bot->probe_jump = 0;
     bot->start = p->position;
     bot->last_health = p->health;
-    bot->path.count = 0;
-    bot->path_index = 0;
-    bot->path_timer = 0.0f;
-    bot->path_stranded = 0;
+    bot_path_reset(bot, p); // the route and the follower (path, path_index, path_timer, path_stranded)
     bot->route_path = -1; // resetTargeting -> resetPathInfo
     bot->route_node = 0;
     bot->route_dir = 1;
@@ -1199,10 +1195,19 @@ static int bot_has_ground(const Game *game, const vec3 p) {
     return bot_segment_hits(game, (vec3) {p.x, p.y + 3.0f, p.z}, (vec3) {0.0f, -(3.0f + BOT_GROUND_DROP), 0.0f}, 1);
 }
 
-// 0 clear, 1 low obstacle (jump), 2 blocked (wall or no ground)
+// 0 clear, 1 low obstacle (jump), 2 blocked (wall or no ground). Over the nav grid's boxes
+// when the map has one (a body-wide sweep), else a centre-line scan of the map.
 static int bot_probe(const Game *game, const Player *self, const float yaw) {
     const vec3 f = bot_forward(yaw);
     const vec3 p = self->position;
+    if (game->bots && game->bots->nav) {
+        float low_top, end_y;
+        const int sweep = bot_nav_sweep((Game *) game, p, f, BOT_PROBE_LENGTH, self->on_terrain ? 1e9f : BOT_GROUND_DROP, &low_top, &end_y);
+        if (sweep >= 2) return 2;
+        const vec3 ahead = {p.x + f.x * BOT_PROBE_LENGTH, p.y, p.z + f.z * BOT_PROBE_LENGTH};
+        if (bot_hazard_at(game, ahead)) return 2;
+        return sweep;
+    }
     const vec3 d = {f.x * BOT_PROBE_LENGTH, 0.0f, f.z * BOT_PROBE_LENGTH};
     if (bot_segment_hits(game, (vec3) {p.x, p.y + BOT_KNEE, p.z}, d, 0)) {
         return bot_segment_hits(game, (vec3) {p.x, p.y + BOT_JUMP_CLEAR, p.z}, d, 0) ? 2 : 1;
@@ -1276,49 +1281,7 @@ static float bot_engage_range(const GameBot *bot, const Player *self) {
     return range * (bot->config.range_mlt > 0.0f ? bot->config.range_mlt : 1.0f);
 }
 
-// Steering with the obstacle probes: the world yaw to walk along, *jump on a low obstacle;
-// -1000 when every direction is blocked. Probes are cached for BOT_PROBE_MS.
-static float bot_steer(Game *game, GameBot *bot, const Player *self, const float want_yaw, const float dt, unsigned char *jump) {
-    bot->probe_timer -= dt;
-    if (bot->probe_timer <= 0.0f) {
-        bot->probe_timer = BOT_PROBE_MS;
-        bot->probe_move = -99;
-        bot->probe_jump = 0;
-        static const int k_offsets[] = {0, 1, -1, 2, -2, 3, -3};
-        for (size_t i = 0; i < sizeof(k_offsets) / sizeof(k_offsets[0]); i++) {
-            const int probe = bot_probe(game, self, want_yaw + (float) k_offsets[i] * (BOT_PI / 4.0f));
-            if (probe == 2) continue;
-            bot->probe_move = k_offsets[i];
-            bot->probe_jump = probe == 1;
-            break;
-        }
-    }
-    if (bot->probe_move == -99) return -1000.0f;
-    if (bot->probe_jump && self->on_ground) *jump = 1;
-    return want_yaw + (float) bot->probe_move * (BOT_PI / 4.0f);
-}
-
-// Stuck monitor (locomotion updateStuckRecovery): no progress while walking -> side-step + jump
-// for a moment and a new roam goal.
-static int bot_stuck_update(GameBot *bot, const Player *self, const float dt, const int moving) {
-    if (bot->recover_timer > 0.0f) {
-        bot->recover_timer -= dt;
-        return 1;
-    }
-    bot->stuck_check += dt;
-    if (bot->stuck_check < BOT_STUCK_CHECK_MS) return 0;
-    const float moved = bot_d2d(self->position, bot->stuck_pos);
-    bot->stuck_pos = self->position;
-    if (moving && moved < 3.0f * bot->stuck_check / BOT_STUCK_CHECK_MS) bot->stuck_timer += bot->stuck_check;
-    else bot->stuck_timer = 0.0f;
-    bot->stuck_check = 0.0f;
-    if (bot->stuck_timer < BOT_STUCK_MS) return 0;
-    bot->stuck_timer = 0.0f;
-    bot->recover_timer = BOT_RECOVER_MS;
-    bot->recover_dir = bot_chance(0.5) ? MOVE_LEFT : MOVE_RIGHT;
-    bot->has_roam = 0;
-    return 1;
-}
+// (bot_steer / bot_stuck_update of the probe-only locomotion are gone: shared/src/bot_path.c)
 
 // Hunt's roam goal: a spawn point away from us, or where an enemy is now (KrunkNative: no
 // nav areas; CS bots head for the enemy too). NextBot ROAM_* radii are too small to find
@@ -1356,102 +1319,28 @@ static void bot_pick_roam(Game *game, GameBot *bot, const Player *self) {
     bot->roam_timer = bot_rand_float(7000.0f, 14000.0f);
 }
 
-// The point to head for on the way to `goal`: the next waypoint of an A* route over the nav
-// grid (bot_nav.c; recomputed every ~1.5 s, when the goal moves or after being stuck, at most
-// a few searches per tick), else the goal itself. *on_path: a route is being followed.
-static vec3 bot_route(Game *game, GameBot *bot, const Player *self, const vec3 goal, const float dt, int *on_path, unsigned char *jump) {
-    GameBots *bots = game->bots;
-    *on_path = 0;
-    bot->path_timer -= dt;
-    const int stale = !bot->path.count || bot->path_index >= bot->path.count || bot_d3d(goal, bot->path_goal) > 40.0f || bot->path_timer <= 0.0f;
-    if (stale && bots->path_budget > 0) {
-        bots->path_budget--;
-        bot->path_timer = bot_rand_float(1300.0f, 1900.0f);
-        bot->path_index = 0;
-        bot->path_goal = goal;
-        if (!bot_nav_find_path(game, self->position, goal, &bot->path)) bot->path.count = 0;
-        else if (!bot->path.count && !bot->path.reached) bot->path_stranded = 1; // nothing closer to it from here
-        else bot->path_stranded = 0;
-    }
-    if (bot->path_stranded && bot_d3d(goal, bot->path_goal) <= 40.0f) { // stay put, try another goal
-        bot->has_roam = 0;
-        return self->position;
-    }
-    while (bot->path_index < bot->path.count) {
-        const vec3 wp = bot->path.points[bot->path_index];
-        if (bot_d2d(wp, self->position) < 4.5f && fabsf(wp.y - self->position.y) < 6.0f) bot->path_index++;
-        else break;
-    }
-    if (bot->path_index >= bot->path.count) return goal;
-    const vec3 wp = bot->path.points[bot->path_index];
-    const float d = bot_d2d(wp, self->position);
-    if (d > 90.0f) { // drifted off the route (knocked back, fell): recompute
-        bot->path_timer = 0.0f;
-        return goal;
-    }
-    if (bot->path.kinds[bot->path_index] == 1 && d < 14.0f && self->on_ground && wp.y > self->position.y + 2.0f) *jump = 1;
-    *on_path = 1;
-    return wp;
+// The point to head for on the way to `goal`: the follower's pursued waypoint of an A* route
+// over the nav grid (shared/src/bot_path.c), else the goal itself. *on_path: a route is being
+// followed. A goal that cannot be reached from here is given up (another roam goal).
+static vec3 bot_route(Game *game, GameBot *bot, Player *self, const vec3 goal, const float dt, int *on_path, unsigned char *jump) {
+    int give_up = 0;
+    (void) jump; // the hop at a jump link is bot_path_move's
+    const vec3 point = bot_path_route(game, bot, self, goal, dt, on_path, &give_up);
+    if (give_up) bot->has_roam = 0;
+    return point;
 }
 
-// Walk toward `point` (look stays where the caller put it): move code, obstacle probes off
-// the route, stuck recovery.
-static void bot_move_toward(Game *game, GameBot *bot, const Player *self, const vec3 point, const int on_path, const float dt, BotFrame *f) {
-    if (bot_d2d(point, self->position) < 3.0f) {
-        bot_stuck_update(bot, self, dt, 0);
-        return;
-    }
-    if (bot_stuck_update(bot, self, dt, 1)) {
-        f->move = self->on_ladder ? MOVE_BACK : bot->recover_dir; // a ladder: let go of it
-        bot->path_timer = 0.0f;
-        if (self->on_ground && bot->recover_timer > BOT_RECOVER_MS - 120.0f) f->jump = 1;
-        return;
-    }
-    float want, pitch;
-    bot_drs(point, self->position, 0.0f, &want, &pitch);
-    float yaw = want;
-    if (self->on_ladder) { // the nav grid has no ladder links: step back off (Krunker climbs whatever you walk into)
-        f->move = MOVE_BACK;
-        return;
-    }
-    if (on_path) {
-        // the route avoids walls and ledges; still hop a low obstacle in the way
-        bot->probe_timer -= dt;
-        if (bot->probe_timer <= 0.0f) {
-            bot->probe_timer = BOT_PROBE_MS;
-            bot->probe_jump = bot_probe(game, self, want) == 1;
-        }
-        if (bot->probe_jump && self->on_ground) f->jump = 1;
-    } else {
-        yaw = bot_steer(game, bot, self, want, dt, &f->jump);
-        if (yaw <= -999.0f) {
-            bot->has_roam = 0; // boxed in: pick another goal
-            return;
-        }
-    }
-    int code = bot_move_code(f->yaw, yaw);
-    // An 8-way move code walks up to 22.5 degrees off the wanted heading while the bot looks
-    // elsewhere (aiming): on a walkway that drifts off the edge. Keep feet over ground.
-    if (!self->on_terrain && self->on_ground) {
-        static const int k_try[] = {0, 1, -1};
-        int chosen = -1;
-        for (int i = 0; i < 3 && chosen < 0; i++) {
-            const int c = ((code + k_try[i]) % 8 + 8) % 8;
-            const vec3 dir = bot_forward(f->yaw - (float) c * (BOT_PI / 4.0f));
-            const float reach = 7.0f + hypotf(self->velocity.x, self->velocity.z) * 120.0f; // + the stopping distance at this speed
-            const vec3 ahead = {self->position.x + dir.x * reach, self->position.y, self->position.z + dir.z * reach};
-            if (bot_has_ground(game, ahead) && !bot_hazard_at(game, ahead)) chosen = c;
-        }
-        if (chosen < 0) {
-            bot->path_timer = 0.0f;
-            return; // nothing safe under that step: stop, repath
-        }
-        code = chosen;
-    }
-    f->move = code;
+// Walk toward `point` (look stays where the caller put it): the follower's move code with
+// local avoidance (walls, ledges, players), hops and stuck recovery.
+static void bot_move_toward(Game *game, GameBot *bot, Player *self, const vec3 point, const int on_path, const float dt, BotFrame *f) {
+    BotPathMove move;
+    bot_path_move(game, bot, self, point, on_path, f->yaw, dt, &move);
+    f->move = move.move;
+    if (move.jump) f->jump = 1;
+    if (move.give_up) bot->has_roam = 0;
 }
 
-static void bot_walk(Game *game, GameBot *bot, const Player *self, const vec3 goal, const float dt, BotFrame *f) {
+static void bot_walk(Game *game, GameBot *bot, Player *self, const vec3 goal, const float dt, BotFrame *f) {
     int on_path;
     const vec3 point = bot_route(game, bot, self, goal, dt, &on_path, &f->jump);
     bot_move_toward(game, bot, self, point, on_path, dt, f);
@@ -1994,6 +1883,7 @@ static void bot_update(Game *game, GameBot *bot, const float dt, const float del
     if (!self->active) {
         if (bot->was_active) {
             bot->was_active = 0;
+            if (game->map && self->position.y <= game->map->death_y && game->bots) game->bots->nav_falls++; // fell out (bot_nav)
             bot_on_death(game, bot);
         }
         if (bot->spawn_delay > 0.0f) {
@@ -2029,6 +1919,7 @@ static void bot_update(Game *game, GameBot *bot, const float dt, const float del
         f.yaw = bot->yaw = target->direction.y;
         f.pitch = bot->pitch = target->direction.x;
     }
+    bot_path_guard(game, bot, self, f.yaw, &f.move, &f.jump); // never off a void edge, whatever chose the move
     bot_queue_frames(bot, self, &f, delta_s);
 }
 

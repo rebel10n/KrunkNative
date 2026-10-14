@@ -5,6 +5,7 @@
 #include <game_config.h> // game_config_is_custom (third person)
 #include <ai.h>
 #include <bots.h>
+#include <bot_path.h>
 #include "modes/mode_internal.h"
 #include "triggers_internal.h" // trigger_send_change_position ("chgp")
 #include <map_catalog.h>
@@ -1406,6 +1407,33 @@ static void cmd_bot_list(ChatCtx *c) {
     reply(c, "Bots (%d): %s", bots->count, label);
 }
 
+// KrunkNative: the navigation counters and every bot's route (shared/src/bot_path.c), for the
+// nav e2e (server/tests/bot_nav_e2e.py) and for a look at what the bots are doing.
+static void cmd_bot_nav(ChatCtx *c) {
+    if (!allowed(c, CHAT_PERM_HOST_DEV) || !bot_manager_ready(c)) return;
+    Game *game = c->host->game;
+    const GameBots *bots = game->bots;
+    BotNavStats st;
+    bot_path_stats(game, &st);
+    const BotNav *nav = bot_nav_for(game);
+    reply(c, "Bot nav: stuck %d, replans %d (forced %d), goals %d, unreachable %d, falls %d; grid %d nodes.", st.stuck, st.replans, st.forced_replans,
+          st.goals_reached, st.unreachable, bots->nav_falls, bot_nav_node_count(nav));
+    char label[CHAT_TEXT_MAX] = "";
+    size_t len = 0;
+    for (int i = 0; i < bots->count && len < sizeof(label); i++) {
+        const GameBot *bot = &bots->list[i];
+        if (!bot->player || !bot->player->active) { // dead (respawning) or not spawned yet
+            len += (size_t) snprintf(label + len, sizeof(label) - len, "%s%d:dead", len ? ", " : "", bot->id);
+            continue;
+        }
+        vec3 goal;
+        const int has_goal = bot_path_goal(bot, &goal);
+        len += (size_t) snprintf(label + len, sizeof(label) - len, "%s%d:%s:%d/%d%s", len ? ", " : "", bot->id, bot_state_name(bot->state),
+                                 bot->path_index, bot->path.count, has_goal ? "" : ":nogoal");
+    }
+    if (label[0]) reply(c, "Routes (id:state:waypoint/count): %s", label);
+}
+
 static void cmd_bot_kick(ChatCtx *c) {
     if (!allowed(c, CHAT_PERM_HOST_DEV) || !bot_manager_ready(c)) return;
     Game *game = c->host->game;
@@ -2115,6 +2143,7 @@ static const ChatCommand COMMANDS[] = {
     {{"bot_kick", NULL, "[all|index|name]", "remove bots by name/index or all bots", CHAT_PERM_HOST_DEV}, cmd_bot_kick},
     {{"bot_kill", NULL, "[all|index|name]", "kill bots by name/index or all bots", CHAT_PERM_HOST_DEV}, cmd_bot_kill},
     {{"bot_list", NULL, "", "list spawned bots", CHAT_PERM_HOST_DEV}, cmd_bot_list},
+    {{"bot_nav", NULL, "", "bot navigation counters and routes", CHAT_PERM_HOST_DEV}, cmd_bot_nav},
     {{"bot_config", NULL, "[key=value]", "show or update default bot options", CHAT_PERM_HOST_DEV}, cmd_bot_config},
     {{"bot_mimic", NULL, "[on|off]", "toggle bots mimicking their target inputs", CHAT_PERM_HOST_DEV}, cmd_bot_mimic},
     {{"bot_stop", NULL, "[on|off]", "toggle bot movement and attacking", CHAT_PERM_HOST_DEV}, cmd_bot_stop},

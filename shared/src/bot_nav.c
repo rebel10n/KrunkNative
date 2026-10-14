@@ -23,9 +23,14 @@
 #include <string.h>
 
 #define NAV_CELL 8.0f            // world units per cell (v7 cellSize 12: v3.1.1 doorways need finer)
-#define NAV_RADIUS 3.6f          // playerScale 2.45 + collPad 1.1
+#define NAV_RADIUS 3.6f          // playerScale 2.45 + collPad 1.1: the grid's (conservative) body
+#define NAV_BODY 2.7f            // the solid body the collisions use (playerScale 2.45 + a margin): the sweeps
+#define NAV_FOOT 1.5f            // the sweeps' ground probe half size: the body (2.45) bridges a seam
+                                 // between floor tiles narrower than this; past a real lip the centre
+                                 // is at most this far out with most of the body still on the floor
 #define NAV_HEIGHT 11.0f         // config.playerHeight
 #define NAV_STEP 3.5f            // config.climbHeight 3 (+ tolerance)
+#define NAV_CLIMB 3.05f          // what a walk really steps up (climbHeight 3): the sweeps
 #define NAV_JUMP 8.5f            // the highest ledge a standing jump reaches
 #define NAV_DROP 64.0f           // the deepest drop a link takes
 #define NAV_LAYERS 6             // surfaces per cell
@@ -35,6 +40,9 @@
 #define NAV_DROP_COST 6.0f
 #define NAV_VOID_COST 40.0f      // per step on a node beside a fall out of the map
 #define NAV_EDGE_MARGIN 2.0f     // a node needs ground this far around it (no standing on the lip)
+#define NAV_SUB_OFFSET 2.5f      // a cell whose centre is no good tries these offsets (narrow walkways, lips)
+#define NAV_BLOCK_COST 60.0f     // per step through a node a bot got stuck at lately (bot_nav_penalize)
+#define NAV_TRAP_COST 400.0f     // a drop into an area with no walk or jump back out (a pit, a pool): only when the goal is in it
 
 typedef struct {
     float x0, x1, y0, y1, z0, z1;
@@ -43,11 +51,12 @@ typedef struct {
 } NavBox;
 
 typedef struct {
-    float y;
+    float x, y, z;               // the sample point (feet): the cell centre, or an offset inside the cell
     int32_t link[8];             // node per direction, -1 none
     uint8_t kind[8];             // 0 walk, 1 jump, 2 drop
     int32_t component;
     uint8_t void_edge;           // an orthogonal neighbour cell has nothing to land on
+    float penalty_until;         // game time (ms) until which the node costs NAV_BLOCK_COST extra (0 none)
 } NavNode;
 
 struct BotNav_t {
@@ -132,6 +141,27 @@ static int nav_bucket_index(const BotNav *nav, const float x, const float z) {
     } \
 } while (0)
 
+#define NAV_RAMP_SNAP 24.0f      // the highest a ramp's side lifts a walker onto its surface (a link up)
+
+// Krunker's ramps lift whoever walks into them onto their surface, from the side as well as up
+// the slope (player_do_map_collisions: below the top and touching the box, the feet snap to the
+// surface height): the highest ramp surface above `y` at (x, z) whose box the body (feet at y)
+// touches; 1 and *out when there is one.
+static int nav_ramp_snap(const BotNav *nav, const float x, const float y, const float z, float *out) {
+    int found = 0;
+    float best = y;
+    NAV_FOR_BOXES(nav, x, x, z, z, {
+        if (!box->ramp || x < box->x0 || x > box->x1 || z < box->z0 || z > box->z1) continue;
+        const float top = nav_ramp_y(box, x, z);
+        if (top > best + 0.01f && box->y0 < y + NAV_HEIGHT && top <= y + NAV_RAMP_SNAP) {
+            best = top;
+            found = 1;
+        }
+    });
+    if (found) *out = best;
+    return found;
+}
+
 // A standing body at (x, y, z): nothing solid between y + NAV_STEP and y + NAV_HEIGHT.
 static int nav_clear(const BotNav *nav, const float x, const float y, const float z) {
     const float r = NAV_RADIUS;
@@ -186,16 +216,20 @@ static int nav_segment_clear(const BotNav *nav, const vec3 a, const vec3 b, cons
     return 1;
 }
 
+// The segment at the body's width: the centre line and both shoulders (a player is a box
+// 2 * NAV_RADIUS wide; a zero-width line between two nodes clips corners it cannot pass).
+static int nav_body_clear(const BotNav *nav, const vec3 a, const vec3 b, const float lift) {
+    const float dx = b.x - a.x, dz = b.z - a.z, len = hypotf(dx, dz);
+    if (len < 1e-4f) return nav_segment_clear(nav, a, b, lift);
+    const float ox = -dz / len * (NAV_RADIUS - 0.4f), oz = dx / len * (NAV_RADIUS - 0.4f);
+    const vec3 a1 = {a.x + ox, a.y, a.z + oz}, b1 = {b.x + ox, b.y, b.z + oz};
+    const vec3 a2 = {a.x - ox, a.y, a.z - oz}, b2 = {b.x - ox, b.y, b.z - oz};
+    return nav_segment_clear(nav, a, b, lift) && nav_segment_clear(nav, a1, b1, lift) && nav_segment_clear(nav, a2, b2, lift);
+}
+
 static vec3 nav_node_pos(const BotNav *nav, const int index) {
-    // node index -> cell by binary search of cell_first
-    int lo = 0, hi = nav->w * nav->h;
-    while (lo + 1 < hi) {
-        const int mid = (lo + hi) / 2;
-        if (nav->cell_first[mid] <= index) lo = mid;
-        else hi = mid;
-    }
-    const int cx = lo % nav->w, cz = lo / nav->w;
-    return (vec3) {nav->x0 + ((float) cx + 0.5f) * NAV_CELL, nav->nodes[index].y, nav->z0 + ((float) cz + 0.5f) * NAV_CELL};
+    const NavNode *n = &nav->nodes[index];
+    return (vec3) {n->x, n->y, n->z};
 }
 
 void bot_nav_free(BotNav *nav) {
@@ -238,6 +272,29 @@ static int nav_hazard(const Map *map, const float x, const float y, const float 
 }
 
 int bot_hazard_at(const Game *game, const vec3 p) { return game->map && nav_hazard(game->map, p.x, p.y, p.z); }
+
+static int nav_ground_at(const BotNav *nav, float x, float y, float z, float max_drop, float up, float half, float *top_out);
+static int nav_sweep(const BotNav *nav, vec3 feet, vec3 dir, float reach, float max_drop, float *low_top, float *end_y);
+
+// A walk from a to b over ground that changes height gradually (a ramp, fine stairs): every unit
+// along the line has ground within a step of the last one (or a ramp lifts the body onto its
+// surface) and the walk ends at b's height. Two nodes on a ramp are more than a step apart in
+// height (14 over 26 units on Kanji), which is still a walk and not a jump.
+static int nav_slope_walk(const BotNav *nav, const vec3 a, const vec3 b) {
+    const float len = hypotf(b.x - a.x, b.z - a.z);
+    const int steps = (int) ceilf(len) + 1;
+    float y = a.y;
+    for (int i = 1; i <= steps; i++) {
+        const float t = (float) i / (float) steps;
+        const float x = a.x + (b.x - a.x) * t, z = a.z + (b.z - a.z) * t;
+        float ground;
+        const int floor = nav_ground_at(nav, x, y, z, NAV_STEP, NAV_STEP, 0.0f, &ground);
+        if (floor) y = ground;
+        if (nav_ramp_snap(nav, x, y, z, &ground)) y = ground; // walked up a ramp (or into its side)
+        else if (!floor) return 0;
+    }
+    return fabsf(y - b.y) <= 1.0f;
+}
 
 static BotNav *nav_build(const Map *map) {
     BotNav *nav = calloc(1, sizeof(BotNav));
@@ -357,9 +414,21 @@ static BotNav *nav_build(const Map *map) {
         for (; c < count && cands[c].cell == cell; c++) {
             const float y = cands[c].y;
             if (y - last < 1.0f || layers >= NAV_LAYERS || y < map->death_y + 2.0f) continue;
-            if (!nav_clear(nav, x, y, z) || nav_hazard(map, x, y, z) || !nav_supported(nav, x, y, z)) continue;
+            // the cell centre, else a point a little off it (a walkway narrower than a cell, a
+            // floor whose edge runs through the centre): the node keeps the point it stands on
+            static const float k_sub[5][2] = {{0.0f, 0.0f}, {NAV_SUB_OFFSET, 0.0f}, {-NAV_SUB_OFFSET, 0.0f}, {0.0f, NAV_SUB_OFFSET}, {0.0f, -NAV_SUB_OFFSET}};
+            float nx = x, nz = z;
+            int ok = 0;
+            for (int k = 0; k < 5 && !ok; k++) {
+                nx = x + k_sub[k][0];
+                nz = z + k_sub[k][1];
+                ok = nav_clear(nav, nx, y, nz) && !nav_hazard(map, nx, y, nz) && nav_supported(nav, nx, y, nz);
+            }
+            if (!ok) continue;
             NavNode *node = &nav->nodes[nav->node_count++];
+            node->x = nx;
             node->y = y;
+            node->z = nz;
             node->component = -1;
             for (int d = 0; d < 8; d++) node->link[d] = -1;
             last = y;
@@ -375,7 +444,7 @@ static BotNav *nav_build(const Map *map) {
         const int cx = cell % nav->w, cz = cell / nav->w;
         for (int a = nav->cell_first[cell]; a < nav->cell_first[cell + 1]; a++) {
             NavNode *na = &nav->nodes[a];
-            const vec3 pa = {nav->x0 + ((float) cx + 0.5f) * NAV_CELL, na->y, nav->z0 + ((float) cz + 0.5f) * NAV_CELL};
+            const vec3 pa = {na->x, na->y, na->z};
             for (int d = 0; d < 8; d++) {
                 const int nx = cx + k_dx[d], nz = cz + k_dz[d];
                 if (nx < 0 || nz < 0 || nx >= nav->w || nz >= nav->h) continue;
@@ -394,14 +463,41 @@ static BotNav *nav_build(const Map *map) {
                     const float dy = nav->nodes[b].y - na->y;
                     int k;
                     if (fabsf(dy) <= NAV_STEP) k = 0;
+                    else if ((fabsf(dy) <= NAV_JUMP || (dy > 0.0f && dy <= NAV_RAMP_SNAP)) &&
+                             nav_slope_walk(nav, pa, (vec3) {nav->nodes[b].x, nav->nodes[b].y, nav->nodes[b].z})) k = 0; // up or down a slope, onto a ramp
                     else if (dy > 0.0f && dy <= NAV_JUMP) k = 1;
                     else if (dy < 0.0f && dy >= -NAV_DROP) k = 2;
                     else continue;
                     // walk beats jump beats drop; among drops the shallowest
                     if (k < kind || (k == kind && fabsf(dy) < fabsf(best_dy))) {
-                        const vec3 pb = {nav->x0 + ((float) nx + 0.5f) * NAV_CELL, nav->nodes[b].y, nav->z0 + ((float) nz + 0.5f) * NAV_CELL};
+                        const vec3 pb = {nav->nodes[b].x, nav->nodes[b].y, nav->nodes[b].z};
                         const float lift = k == 1 ? dy + NAV_STEP + 0.5f : NAV_STEP + 0.5f; // a jump clears the ledge
-                        if (!nav_segment_clear(nav, pa, pb, k == 2 ? NAV_HEIGHT - 2.0f : lift)) continue;
+                        if (k == 2) {
+                            // a drop: walk to the edge at this level (no parapet at the knee or the head), then
+                            // fall straight onto the lower node (not through the floor we stand on)
+                            const vec3 edge = {pb.x, pa.y, pb.z};
+                            if (!nav_body_clear(nav, pa, edge, NAV_STEP + 0.5f) || !nav_body_clear(nav, pa, edge, NAV_HEIGHT - 2.0f)) continue;
+                            if (!nav_segment_clear(nav, edge, pb, 1.0f)) continue;
+                        } else {
+                            if (!nav_body_clear(nav, pa, pb, lift)) continue;
+                            if (!nav_body_clear(nav, pa, pb, k == 1 ? dy + NAV_HEIGHT - 2.0f : NAV_HEIGHT - 2.0f)) continue; // head height too
+                            if (k == 0) {
+                                // the walk as a body walks it (the follower's own sweep): a step up past the
+                                // climb height or a wall top the line from knee to knee skims over is no
+                                // walk; a low obstacle in the way makes it a hop
+                                const float len = hypotf(pb.x - pa.x, pb.z - pa.z);
+                                float low_top = 0.0f, end_y = pa.y;
+                                const int sw = len > 0.01f ? nav_sweep(nav, pa, (vec3) {(pb.x - pa.x) / len, 0.0f, (pb.z - pa.z) / len}, len, NAV_STEP + 0.5f, &low_top, &end_y) : 0;
+                                if (sw >= 2 || fabsf(end_y - pb.y) > NAV_STEP) continue;
+                                if (sw == 1) {
+                                    if (dy < -NAV_STEP || kind < 1 || (kind == 1 && fabsf(dy) >= fabsf(best_dy))) continue;
+                                    best = b;
+                                    kind = 1; // hop the obstacle on the way
+                                    best_dy = dy;
+                                    continue;
+                                }
+                            }
+                        }
                         best = b;
                         kind = k;
                         best_dy = dy;
@@ -496,13 +592,29 @@ void bot_nav_invalidate(Game *game) {
 
 int bot_nav_node_count(const BotNav *nav) { return nav ? nav->node_count : 0; }
 
-// The node a player at `p` stands on: its cell (else the nearest cells around it), the
-// highest surface at or below the feet (+ a step).
+// A straight walk from a to b at one height: the body line is clear and every 2 units has
+// ground within a step (a gap, a parapet or a wall between them fails).
+static int nav_walk_line(const BotNav *nav, const vec3 a, const vec3 b) {
+    if (!nav_body_clear(nav, a, b, NAV_STEP + 0.5f) || !nav_body_clear(nav, a, b, NAV_HEIGHT - 2.0f)) return 0;
+    const float len = hypotf(b.x - a.x, b.z - a.z);
+    const int steps = (int) (len / 2.0f) + 1;
+    for (int i = 1; i < steps; i++) {
+        const float t = (float) i / (float) steps;
+        if (!nav_supported_point(nav, a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t)) return 0;
+    }
+    return 1;
+}
+
+// The node a player at `p` stands on, else the nearest one it can get to: on this floor
+// (within a step) nearby first, else one a short drop below (an unsampled lip, mid-air), else
+// one a jump above (a low obstacle the grid skipped); never a floor far overhead or far below
+// (a route from a roof node for a bot in the street walked it into the wall under the roof).
 static int nav_nearest(const BotNav *nav, const vec3 p, const int search) {
     const int cx = (int) floorf((p.x - nav->x0) / NAV_CELL), cz = (int) floorf((p.z - nav->z0) / NAV_CELL);
     int best = -1;
     float best_score = 1e9f;
-    for (int r = 0; r <= search && best < 0; r++) {
+    for (int r = 0; r <= search; r++) {
+        if (best >= 0 && best_score < (float) r * NAV_CELL) break; // nothing farther out can beat it
         for (int dz = -r; dz <= r; dz++) {
             for (int dx = -r; dx <= r; dx++) {
                 if (MAX(abs(dx), abs(dz)) != r) continue;
@@ -510,13 +622,24 @@ static int nav_nearest(const BotNav *nav, const vec3 p, const int search) {
                 if (x < 0 || z < 0 || x >= nav->w || z >= nav->h) continue;
                 const int cell = z * nav->w + x;
                 for (int n = nav->cell_first[cell]; n < nav->cell_first[cell + 1]; n++) {
-                    const float dy = p.y - nav->nodes[n].y;
-                    // a surface under the feet (mid-jump, on a ladder) beats one overhead by far
-                    const float score = (dy >= -NAV_STEP ? dy : 40.0f - dy * 20.0f) + (float) (abs(dx) + abs(dz)) * NAV_CELL;
-                    if (score < best_score) {
-                        best_score = score;
-                        best = n;
+                    const NavNode *node = &nav->nodes[n];
+                    const float dy = p.y - node->y; // > 0: the node is below the feet
+                    const float planar = hypotf(p.x - node->x, p.z - node->z);
+                    float score = planar;
+                    if (fabsf(dy) <= NAV_STEP + 0.5f) score += 0.0f;
+                    else if (dy > 0.0f && dy <= NAV_JUMP + NAV_STEP) score += dy * 2.0f; // a lip the grid skipped
+                    else if (dy > 0.0f && dy <= NAV_DROP) score += 30.0f + dy;             // mid-air / on a ledge: the floor below
+                    else if (dy < 0.0f && -dy <= NAV_JUMP) score += 40.0f - dy * 4.0f;     // a low obstacle above
+                    else continue;
+                    if (score >= best_score) continue;
+                    // a node on this floor some way off must be walkable to (not across a gap or a wall:
+                    // standing on a barrel beside a wall top, the floor below is the way, not the wall)
+                    if (fabsf(dy) <= NAV_STEP + 0.5f && planar > NAV_CELL * 0.5f) {
+                        const vec3 a = {p.x, node->y, p.z}, b = {node->x, node->y, node->z};
+                        if (!nav_walk_line(nav, a, b)) continue;
                     }
+                    best_score = score;
+                    best = n;
                 }
             }
         }
@@ -573,14 +696,16 @@ static int nav_ground_line(const BotNav *nav, const vec3 a, const vec3 b) {
         for (int n = nav->cell_first[cell]; n < nav->cell_first[cell + 1] && !ok; n++) ok = fabsf(nav->nodes[n].y - p.y) <= 1.5f;
         if (!ok) return 0;
     }
-    return nav_segment_clear(nav, a, b, NAV_STEP + 0.5f) && nav_segment_clear(nav, a, b, NAV_HEIGHT - 2.0f);
+    return nav_body_clear(nav, a, b, NAV_STEP + 0.5f) && nav_body_clear(nav, a, b, NAV_HEIGHT * 0.5f) && nav_body_clear(nav, a, b, NAV_HEIGHT - 2.0f);
 }
 
 int bot_nav_find_path(Game *game, const vec3 from, const vec3 to, BotPath *out) {
     out->count = 0;
+    out->reached = 0;
     BotNav *nav = bot_nav_for(game);
     if (!nav) return 0;
-    const int start = nav_nearest(nav, from, 3), goal = nav_nearest(nav, to, 4);
+    const float now_ms = game->now * 1000.0f;
+    const int start = nav_nearest(nav, from, 5), goal = nav_nearest(nav, to, 4);
     if (start < 0 || goal < 0) return 0;
     const vec3 goal_pos = nav_node_pos(nav, goal);
 
@@ -616,12 +741,13 @@ int bot_nav_find_path(Game *game, const vec3 from, const vec3 to, BotPath *out) 
             if (m < 0) continue;
             const float step = d < 4 ? NAV_CELL : NAV_CELL * 1.41421356f;
             const float cost = nav->g[n] + step + (nav->nodes[n].kind[d] == 1 ? NAV_JUMP_COST : nav->nodes[n].kind[d] == 2 ? NAV_DROP_COST : 0.0f) +
-                               (nav->nodes[m].void_edge ? NAV_VOID_COST : 0.0f);
+                               (nav->nodes[m].void_edge ? NAV_VOID_COST : 0.0f) + (nav->nodes[m].penalty_until > now_ms ? NAV_BLOCK_COST : 0.0f) +
+                               (nav->nodes[n].kind[d] == 2 && nav->nodes[m].component != nav->nodes[n].component ? NAV_TRAP_COST : 0.0f);
             if (nav->stamp[m] == gen && nav->g[m] <= cost) continue;
             nav->stamp[m] = gen;
             nav->g[m] = cost;
             nav->parent[m] = n;
-            const vec3 pm = {pn.x + (float) k_dx[d] * NAV_CELL, nav->nodes[m].y, pn.z + (float) k_dz[d] * NAV_CELL};
+            const vec3 pm = {nav->nodes[m].x, nav->nodes[m].y, nav->nodes[m].z};
             heap_push(nav, &size, m, cost + hypotf(goal_pos.x - pm.x, goal_pos.z - pm.z));
             if (size >= nav->node_count * 8 - 8) break;
         }
@@ -652,8 +778,19 @@ int bot_nav_find_path(Game *game, const vec3 from, const vec3 to, BotPath *out) 
         raw_kind[i] = raw_kind[n - 1 - i];
         raw_kind[n - 1 - i] = k;
     }
+    // off the grid (a lip, a narrow walkway, mid-air): the start node is the first waypoint,
+    // reached by a step, a jump up or a drop like any other link
+    {
+        const vec3 s0 = raw[0];
+        const float dy = s0.y - from.y, planar = hypotf(s0.x - from.x, s0.z - from.z);
+        if (planar > NAV_CELL * 0.5f || fabsf(dy) > NAV_STEP) {
+            out->points[0] = s0;
+            out->kinds[0] = dy > NAV_STEP ? 1 : dy < -NAV_STEP ? 2 : 0;
+            out->count = 1;
+        }
+    }
     // smoothing: from each kept point, the farthest later point reachable in a straight
-    // walkable line (never across a jump or a drop)
+    // walkable line at the body's width (never across a jump or a drop)
     int i = 0;
     while (i < n && out->count < BOT_PATH_MAX) {
         int j = i + 1;
@@ -689,3 +826,158 @@ int bot_nav_random_point_from(Game *game, const vec3 *from, vec3 *out) {
 }
 
 int bot_nav_random_point(Game *game, vec3 *out) { return bot_nav_random_point_from(game, NULL, out); }
+
+// A bot got stuck around `at`: the nodes within `radius` cost NAV_BLOCK_COST extra per step for
+// `ms`, so its replans (and everyone else's) route around the spot for a while.
+void bot_nav_penalize(Game *game, const vec3 at, const float radius, const float ms) {
+    BotNav *nav = bot_nav_for(game);
+    if (!nav) return;
+    const float until = game->now * 1000.0f + ms;
+    const int cx0 = MAX(0, (int) floorf((at.x - radius - nav->x0) / NAV_CELL)), cx1 = MIN(nav->w - 1, (int) floorf((at.x + radius - nav->x0) / NAV_CELL));
+    const int cz0 = MAX(0, (int) floorf((at.z - radius - nav->z0) / NAV_CELL)), cz1 = MIN(nav->h - 1, (int) floorf((at.z + radius - nav->z0) / NAV_CELL));
+    for (int cz = cz0; cz <= cz1; cz++) {
+        for (int cx = cx0; cx <= cx1; cx++) {
+            const int cell = cz * nav->w + cx;
+            for (int n = nav->cell_first[cell]; n < nav->cell_first[cell + 1]; n++) {
+                NavNode *node = &nav->nodes[n];
+                if (fabsf(node->y - at.y) > NAV_JUMP || hypotf(node->x - at.x, node->z - at.z) > radius) continue;
+                node->penalty_until = until;
+            }
+        }
+    }
+}
+
+// The ground under (x, z) for a body whose feet are at `y`: the highest solid top (ramp
+// surface) between y - max_drop and y + up over the square of half size `half` around the
+// point; 1 and *top when there is one.
+static int nav_ground_at(const BotNav *nav, const float x, const float y, const float z, const float max_drop, const float up, const float half, float *top_out) {
+    float best = -1e9f;
+    int found = 0;
+    NAV_FOR_BOXES(nav, x - half, x + half, z - half, z + half, {
+        if (x + half < box->x0 || x - half > box->x1 || z + half < box->z0 || z - half > box->z1) continue;
+        const float top = nav_box_top(box, CLAMP(x, box->x0, box->x1), CLAMP(z, box->z0, box->z1));
+        if (top > y + up || top < y - max_drop) continue;
+        if (top > best) {
+            best = top;
+            found = 1;
+        }
+    });
+    if (found) *top_out = best;
+    return found;
+}
+
+// Sweep a standing body from `feet` along `dir` (unit, horizontal) for `reach` units, following
+// the ground like a walk does (steps within the climb height, ramps, stairs): 0 clear, 1 a low
+// obstacle in the way (*low_top: its top; a hop clears it), 2 blocked (a wall, an overhang or a
+// ceiling too low for the body), 3 an edge (nothing to stand on within max_drop). *end_y: the
+// ground height where the sweep ended.
+static int nav_sweep(const BotNav *nav, const vec3 feet, const vec3 dir, const float reach, const float max_drop, float *low_top, float *end_y) {
+    const float r = NAV_BODY;
+    float y = feet.y, prev_y = feet.y;
+    int result = 0;
+    const int steps = (int) (reach / 2.0f) + 1;
+    for (int i = 1; i <= steps; i++) {
+        const float t = MIN(reach, (float) i * 2.0f);
+        const float x = feet.x + dir.x * t, z = feet.z + dir.z * t;
+        // the ground here: a step down / up, a ramp, else a low obstacle to hop onto, else a wall
+        float ground;
+        if (nav_ramp_snap(nav, x, y, z, &ground)) {
+            y = ground; // a ramp lifts the body onto its surface (up the slope or from its side)
+        } else if (nav_ground_at(nav, x, y, z, max_drop, NAV_CLIMB, NAV_FOOT, &ground)) {
+            y = ground;
+        } else if (nav_ground_at(nav, x, y, z, 0.0f, NAV_JUMP, 0.0f, &ground)) {
+            if (low_top) *low_top = ground;
+            result = 1;
+            y = ground;
+        } else {
+            float wall;
+            if (nav_ground_at(nav, x, y, z, 0.0f, NAV_HEIGHT, 0.0f, &wall)) return 2; // a wall face
+            if (end_y) *end_y = y;
+            return 3; // an edge
+        }
+        // the body at this point: nothing solid between the knee and the head over the footprint
+        // (the floor just stepped down from still touches the body: a top within a step of the
+        // previous ground is not a wall). Something the body meets whose top a jump reaches, with
+        // room for the body above it, is a low obstacle (a crate, a kerb, a low wall standing on
+        // the floor that carries on under it): the hop lands on its top.
+        const float knee = y + NAV_CLIMB, head = y + NAV_HEIGHT;
+        int blocked = 0, hard = 0;
+        float block_top = -1e9f;
+        NAV_FOR_BOXES(nav, x - r, x + r, z - r, z + r, {
+            if (hard || box->x1 <= x - r || box->x0 >= x + r || box->z1 <= z - r || box->z0 >= z + r) continue;
+            const float top = box->ramp ? nav_ramp_y(box, CLAMP(x, box->x0, box->x1), CLAMP(z, box->z0, box->z1)) : box->y1;
+            if (box->ramp && top <= y + NAV_RAMP_SNAP) continue; // the slope we walk, or a ramp side that lifts us onto it
+            if (box->y0 < head && top > knee && top > prev_y + NAV_CLIMB) {
+                blocked = 1;
+                if (top > y + NAV_JUMP || box->y0 > y + NAV_CLIMB) hard = 1; // too high, or an overhang at the head
+                block_top = MAX(block_top, top);
+            }
+        });
+        if (hard) return 2;
+        if (blocked) {
+            // room over the obstacle for the body (no beam or ceiling right above it)
+            const float top0 = block_top, top1 = block_top + NAV_HEIGHT;
+            NAV_FOR_BOXES(nav, x - r, x + r, z - r, z + r, {
+                if (hard || box->x1 <= x - r || box->x0 >= x + r || box->z1 <= z - r || box->z0 >= z + r) continue;
+                if (box->y0 < top1 && box->y1 > top0 + 0.01f) hard = 1;
+            });
+            if (hard) return 2;
+            if (low_top) *low_top = block_top;
+            result = 1;
+            y = block_top;
+        }
+        prev_y = y;
+    }
+    if (end_y) *end_y = y;
+    return result;
+}
+
+int bot_nav_sweep(Game *game, const vec3 feet, const vec3 dir, const float reach, const float max_drop, float *low_top, float *end_y) {
+    const BotNav *nav = bot_nav_for(game);
+    if (!nav) return 0;
+    return nav_sweep(nav, feet, dir, reach, max_drop, low_top, end_y);
+}
+
+// Ground under `p` (feet): the highest solid top within max_drop below p.y + NAV_STEP; 1 and
+// *ground_y when there is one.
+int bot_nav_ground(Game *game, const vec3 p, const float max_drop, float *ground_y) {
+    const BotNav *nav = bot_nav_for(game);
+    if (!nav) return 1;
+    float best = -1e9f;
+    int found = 0;
+    const float x0 = p.x - 0.5f, x1 = p.x + 0.5f, z0 = p.z - 0.5f, z1 = p.z + 0.5f;
+    NAV_FOR_BOXES(nav, x0, x1, z0, z1, {
+        if (p.x < box->x0 - 0.5f || p.x > box->x1 + 0.5f || p.z < box->z0 - 0.5f || p.z > box->z1 + 0.5f) continue;
+        const float top = nav_box_top(box, CLAMP(p.x, box->x0, box->x1), CLAMP(p.z, box->z0, box->z1));
+        if (top > p.y + NAV_STEP || top < p.y - max_drop) continue;
+        if (top > best) {
+            best = top;
+            found = 1;
+        }
+    });
+    if (found && ground_y) *ground_y = best;
+    return found;
+}
+
+// Free height above the feet at `p` (the lowest solid bottom over the body's footprint),
+// capped at `cap`.
+float bot_nav_headroom(Game *game, const vec3 p, const float cap) {
+    const BotNav *nav = bot_nav_for(game);
+    if (!nav) return cap;
+    const float r = NAV_BODY;
+    float room = cap;
+    NAV_FOR_BOXES(nav, p.x - r, p.x + r, p.z - r, p.z + r, {
+        if (box->x1 < p.x - r || box->x0 > p.x + r || box->z1 < p.z - r || box->z0 > p.z + r) continue;
+        if (box->y0 <= p.y + NAV_STEP) continue; // the floor / a step
+        room = MIN(room, box->y0 - p.y);
+    });
+    return room;
+}
+
+// A point is walkable here: a node of the grid stands within a step of it, on this floor.
+int bot_nav_on_grid(Game *game, const vec3 p) {
+    BotNav *nav = bot_nav_for(game);
+    if (!nav) return 0;
+    const int n = nav_nearest(nav, p, 1);
+    return n >= 0 && fabsf(nav->nodes[n].y - p.y) <= NAV_STEP + 0.5f && hypotf(nav->nodes[n].x - p.x, nav->nodes[n].z - p.z) <= NAV_CELL;
+}

@@ -1436,6 +1436,7 @@ static void register_commands(void) {
     register_server("bot_kick", ARGS(A_BOT_QUERY), "remove bots by name/index or all bots");
     register_server("bot_kill", ARGS(A_BOT_QUERY), "kill bots by name/index or all bots");
     register_server("bot_list", NO_ARGS, "list spawned bots");
+    register_server("bot_nav", NO_ARGS, "bot navigation counters and routes");
     register_server("bot_config", ARGS(A_BOT_CONFIG), "show or update default bot options");
     register_server("bot_mimic", ARGS(A_ON_OFF), "toggle bots mimicking their target inputs");
     register_server("bot_stop", ARGS(A_ON_OFF), "toggle bot movement and attacking");
