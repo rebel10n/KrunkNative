@@ -68,6 +68,7 @@ void hud_ui_hit(Client*, int kill);
 #include <stdlib.h>
 #include <string.h>
 #include <ruleset.h>
+#include <hud_v10.h>
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #endif
@@ -659,6 +660,7 @@ static void hud_scoreboard_html(const Client *client, const cJSON *rows, char *o
     const char *const *keys = hud_board_keys(client, &columns);
     size_t len = 0;
     out[0] = 0;
+    const int v10 = hud_v10_page(); // v10 (v10:220499): the header rows in <thead>, the players in <tbody>
     for (int group = 0; group < (teams ? 2 : 1); group++) {
         int rank = 1;
         for (int i = 0; i < n; i++) {
@@ -672,14 +674,14 @@ static void hud_scoreboard_html(const Client *client, const cJSON *rows, char *o
                     hb_append_escaped(out, size, &len, team_name);
                     hb_append(out, size, &len, "<div class='newLeaderTeamScore'>%d</div></div>", client->game.mode->team_scores[group + 1]);
                 }
-                hb_append(out, size, &len, "<table id='ingameTable'><tr><th>Name</th>");
+                hb_append(out, size, &len, "<table id='ingameTable'>%s<tr><th>Name</th>", v10 ? "<thead>" : "");
                 for (int k = 0; k < columns; k++) // UTILS.capFirst(key)
                     hb_append(out, size, &len, "<th>%c%s</th>", toupper((unsigned char) keys[k][0]), keys[k] + 1);
-                hb_append(out, size, &len, "</tr><tr height='10px;'></tr>");
+                hb_append(out, size, &len, "</tr><tr height='10px;'></tr>%s", v10 ? "</thead><tbody>" : "");
             }
             hud_center_board_row_html(out, size, &len, rank++, &board[i], columns);
         }
-        if (rank > 1) hb_append(out, size, &len, "</table></div></div>");
+        if (rank > 1) hb_append(out, size, &len, "%s</table></div></div>", v10 ? "</tbody>" : "");
     }
 }
 
@@ -1172,10 +1174,13 @@ static void hud_crosshair_build(const ClientRenderSettings *rs) {
     // default bars (type 1, and under the custom layer for type 3)
     hb_append(html, sizeof(html), &len, "<div id='knCrossDef' style='position:absolute;left:0;top:0'>");
     if (type == 1 || type == 3) {
+        // crosshairDot (default on): the 6x6 centre square, no shadow stroke (render.js type 1 / 3)
+        if (rs->crosshair_dot) hb_append(html, sizeof(html), &len, "<div class='knCrossDot' style='background-color:%s'></div>", color);
         static const char *const sides[4] = {"t", "r", "b", "l"};
         for (int i = 0; i < 4; i++) {
             hb_append(html, sizeof(html), &len, "<div class='knCrossArm knCrossArm-%s' style='background-color:%s;box-shadow:", sides[i], color);
-            if (shadow_on) hb_append(html, sizeof(html), &len, "0 0 0 2px %s'></div>", shadow);
+            // v10 strokes its 6x23 bars 1px (ui/v10/css/hud.css); v7's are 4x21 on a 2px shadow rect
+            if (shadow_on) hb_append(html, sizeof(html), &len, "0 0 0 %dpx %s'></div>", hud_v10_page() ? 1 : 2, shadow);
             else hb_append(html, sizeof(html), &len, "none'></div>");
         }
     }
@@ -2219,15 +2224,17 @@ static void hud_old_board_step(const Client *client) {
     HudUi *ui = &g_hud_ui;
     const ClientRenderSettings *rs = client_render_settings();
     const int old = rs->old_scoreboard;
+    // v10 shows and fills #leaderboardHolder whatever the leaderType (hud_v10.c)
+    const int board = old || hud_v10_page();
     if (old != ui->old_board) {
         const HtmlElem counters = html_dom_query(0, ".topRightCounters"); // getElementsByClassName(..)[0]
         if (counters) html_dom_set_style(counters, "width", old ? "400px" : "auto");
-        dom_display("leaderboardHolder", old ? "block" : "none");
+        dom_display("leaderboardHolder", board ? "block" : "none");
         dom_display("killFeed", !old && rs->show_kills ? "inline-grid" : "none");
         ui->old_board = old;
         ui->old_board_hash = 0;
     }
-    if (!old) return;
+    if (!board) return;
     char html[4096];
     hud_old_board_html(client, g_hud_override.scoreboard, html, sizeof(html));
     if (!html[0]) snprintf(html, sizeof(html), "Empty Lobby"); // i18n leaderboard.empty
@@ -2763,6 +2770,11 @@ static void hud_end_performance_html(const Client *client, char *out, const size
     } else {
         sb_free(&bp);
     }
+    if (hud_v10_page()) { // v10: Account Level, Combat Earnings + Combat Record (hud_v10.c)
+        char kr[96];
+        hud_v10_end_performance_html(out, size, len, hud_reward_html(me ? me->reward : 0, kr, sizeof(kr)), score, kills, deaths, rank);
+        return;
+    }
     hb_append(out, size, len, "<div id='endLayout'><div><div id='gameFundsLayout'><div class='gfSection' style='margin-bottom: 0px;padding: 16px 0px;'>");
     hb_append(out, size, len, "<div class=\"endTitle\" style=\"text-align:center\">");
     hb_append_escaped(out, size, len, mode);
@@ -2979,6 +2991,7 @@ static void hud_end_results(const Client *client) {
     // GUI.endScreen.init(): changeTab(spectating || isCustom ? "leaderboard" : "performance")
     g_end_tab = spectate_active() || !client->me ? 0 : 1;
     hud_end_card_render(client);
+    hud_v10_end_signup(1); // v10: a guest's signup incentive under the results (init's last callback)
 }
 
 // Per frame (overlay.render runs every frame): the results once config.endAnim ran out (f1912 ->
@@ -3029,6 +3042,7 @@ void hud_ui_show_end_screen(Client *client, const int result, const char *next_r
         ui->ended = 1;
         ui->end_phase = 1;
         client_pointer_update(client);
+        hud_v10_end_signup(0); // showEndScreen: matchEndSignupIncentives hidden until the results
         ui->end_start_ms = hud_now_ms(client);
         dom_style("endUI", "background-color", "");
         hud_end_screen_dom(1); // the title draws from this frame's HUD tick on (overlay.render after io_gameEnd)
@@ -3099,6 +3113,7 @@ void hud_ui_hide_end_screen(Client *client) {
     dom_display("endInfo", "none");
     dom_display("endMidHolder", "none");
     dom_display("victorySub", "none");
+    hud_v10_end_signup(0);
     const HtmlElem base = html_dom_by_id("uiBase");
     if (base) html_dom_set_class(base, "onEndScrn", 0); // toggleMenu(true)
     hud_end_title_hide();
@@ -3314,7 +3329,7 @@ static void hud_apply_visibility(Client *client, const int in_game, const int vi
     // Pieces the Display settings own (settings.js `set`s; ui_render_settings.c applies live
     // changes) are written from the same values, so this pass never undoes a setting.
     const ClientRenderSettings *rs = client_render_settings();
-    dom_display("leaderboardHolder", rs->old_scoreboard ? "block" : "none");   // oldScoreboard -> switchLeaderboard
+    dom_display("leaderboardHolder", rs->old_scoreboard || hud_v10_page() ? "block" : "none"); // oldScoreboard -> switchLeaderboard
     dom_display("killCount", rs->show_kill_c ? "inline-block" : "none");       // showKillC
     dom_display("deathCount", rs->show_deaths ? "inline-block" : "none");      // showDeaths
     dom_display("streakCount", rs->show_streak ? "inline-block" : "none");     // showStreak
@@ -3708,6 +3723,7 @@ static void hud_reset_page(Client *client) {
 // groups that changed since the last write.
 void client_hud_html_tick(Client *client, const float now_f) {
     if (!html_ui_available()) return;
+    hud_v10_tick(); // every frame, also on the menu / while spectating (#chatUIHolder)
 
     HudUi *ui = &g_hud_ui;
     HtmlHudState *hud = &client->hud_html;
@@ -3958,5 +3974,5 @@ int hud_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
         return 1;
     }
     if (!strcmp(name, "clearFocus")) return 1; // spectator focus: not in KrunkNative's spectate.c yet
-    return -1;
+    return hud_v10_handle(name); // the v10 page's own HUD handlers (hud_v10.c), -1 when not one
 }

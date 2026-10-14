@@ -59,7 +59,7 @@ static ClientRenderSettings g_rs = {
     .chat_filter = 0, .show_messages = 1, .show_unboxings = 1, .chat_text_outline = 0,
     .chat_opacity = 1.0f, .chat_bg_opacity = 0.2f, .chat_height = 2.5f, .chat_timer = 0.0f,
     .crosshair_type = 1, .crosshair_style = 0, .crosshair_opacity = 1.0f,
-    .crosshair_use_opacity = 0, .crosshair_always = 0, .crosshair_dot = 0,
+    .crosshair_use_opacity = 0, .crosshair_always = 0, .crosshair_dot = 1, // crosshairDot val true (v7.1.4 and v10)
     .crosshair_color = "#ffffff", .crosshair_shadow = "#000000",
     .crosshair_shadow_thickness = 1.0f, .crosshair_thick = 2.0f, .crosshair_len = 16.0f, .crosshair_gap = 0.0f,
     .hitmarker = 1, .hitmarker_color = "#FFFFFF", .hitmarker_kill_color = "#FF0000",

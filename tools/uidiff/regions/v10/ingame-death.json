@@ -1,0 +1,69 @@
+{
+  "scenario": "v10/ingame-death",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "chat",
+      "rect": [35, 655, 243, 59],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#chatHolder (moves right while dead)"
+    },
+    {
+      "name": "death-weapons",
+      "rect": [380, 570, 470, 75],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#deathUIHolder top row: [Semi Auto] icon, kills 1 - 0, [Assault Rifle] icon"
+    },
+    {
+      "name": "death-cards",
+      "rect": [380, 650, 460, 50],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "class images + lvl, Bot VS Local User (KrunkNative's offline sandbox names us Guest_1, v10's Local User)",
+      "skip": true
+    },
+    {
+      "name": "death-time",
+      "rect": [950, 570, 160, 25],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true,
+      "note": "Time Survived: differs per run"
+    },
+    {
+      "name": "death-stats",
+      "rect": [950, 595, 160, 90],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "Shots Fired / Accuracy / Kills / Score rows"
+    },
+    {
+      "name": "empty-top-left",
+      "rect": [0, 0, 300, 100],
+      "kind": "flat",
+      "fuzz": 6,
+      "max_pct": 0.5,
+      "expect": "background",
+      "note": "HUD hidden on the death screen"
+    },
+    {
+      "name": "empty-bottom-right",
+      "rect": [1100, 520, 180, 200],
+      "kind": "flat",
+      "fuzz": 6,
+      "max_pct": 0.5,
+      "expect": "background",
+      "note": "weapon rack / ammo hidden"
+    }
+  ]
+}

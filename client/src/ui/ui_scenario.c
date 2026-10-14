@@ -263,6 +263,7 @@ static void warn_unknown_keys(void) {
         "matchVotes", // [{mode, map, name, votes}]: the end screen's vote cards (a MATCH_VOTE_STATE packet)
         "interact",   // #interactMsg's innerHTML in game (ui_interact_scenario): the prompt without an interactable
         "charge",     // in game: the charge bar's interMProg (a number) or {prog, over} (build_ui_scenario)
+        "settings",   // {key: value}: setSetting before the state applies (v10's showMinimap off by default)
     };
     const cJSON *item;
     cJSON_ArrayForEach(item, g_sc.state) {
@@ -823,6 +824,18 @@ static int ui_scenario_apply(Client *client) {
     if (st_has("classIndex")) menu_set_class_index(st_int("classIndex", 0), 1);
     menu_set_region_label(st_str("region"));
 
+    // state.settings {key: value}: setSetting(key, value) first (a capture that changed a setting,
+    // e.g. v10's showMinimap, off by default there)
+    const cJSON *sets = st("settings");
+    const cJSON *set;
+    cJSON_ArrayForEach(set, sets) {
+        if (!set->string) continue;
+        HtmlArg v = {HTML_ARG_NUM, 0, NULL};
+        if (cJSON_IsBool(set)) v = (HtmlArg) {HTML_ARG_BOOL, cJSON_IsTrue(set) ? 1 : 0, NULL};
+        else if (cJSON_IsNumber(set)) v.num = set->valuedouble;
+        else if (cJSON_IsString(set)) v = (HtmlArg) {HTML_ARG_STR, 0, set->valuestring};
+        ui_settings_set(set->string, &v);
+    }
     // HUD values before the first HUD write
     const cJSON *hud = st("hud");
     if (cJSON_IsObject(hud)) hud_ui_set_override(hud);

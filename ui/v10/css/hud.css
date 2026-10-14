@@ -73,6 +73,15 @@ html.kn-hud-visible #aimRecticle {
   top: -2px;
 }
 
+/* crosshairDot (default on): the 6x6 centre square of type 1 / 3, no shadow stroke. */
+.knCrossDot {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  left: -3px;
+  top: -3px;
+}
+
 .knCrossArm-t { top: calc(var(--kn-cross-size) / -2); }
 .knCrossArm-b { top: calc(var(--kn-cross-size) / 2 - 21px); }
 .knCrossArm-l { left: calc(var(--kn-cross-size) / -2); }
@@ -125,4 +134,32 @@ html.kn-hud-visible #aimRecticle {
  * the default is drawn, so it stays display:none from main.css. */
 #hitmarker {
   pointer-events: none;
+}
+
+/* v10.0.2's default crosshair bars (v10:160546, _57065(ctx, 6, 23, crosshairScale / 2 - 2, 1, angle)):
+ * 6x23 rects whose outer edge is crosshairScale / 2 + 1 from the centre, stroked 1px with
+ * crosshairShadow (a centred canvas stroke: half of it outside, drawn here as a 50% ring). */
+.knCrossArm-t,
+.knCrossArm-b {
+  width: 6px;
+  height: 23px;
+  left: -3px;
+}
+.knCrossArm-l,
+.knCrossArm-r {
+  width: 23px;
+  height: 6px;
+  top: -3px;
+}
+.knCrossArm-t { top: calc(var(--kn-cross-size) / -2 - 1px); }
+.knCrossArm-b { top: calc(var(--kn-cross-size) / 2 - 22px); }
+.knCrossArm-l { left: calc(var(--kn-cross-size) / -2 - 1px); }
+.knCrossArm-r { left: calc(var(--kn-cross-size) / 2 - 22px); }
+
+/* #topRight: v10 always shows the float:right #leaderboardHolder (hud_v10.c). In Chrome the
+ * empty block after .topRightCounters ends the float's line in the shrink-to-fit width, so the
+ * kill feed (inline-grid) starts under the leaderboard; the engine would set it beside the float,
+ * over it. Clearing that empty block puts the feed where Chrome does. */
+#topRight > .topRightCounters + div {
+  clear: right;
 }

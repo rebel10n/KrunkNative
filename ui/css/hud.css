@@ -73,6 +73,15 @@ html.kn-hud-visible #aimRecticle {
   top: -2px;
 }
 
+/* crosshairDot (default on): the 6x6 centre square of type 1 / 3, no shadow stroke. */
+.knCrossDot {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  left: -3px;
+  top: -3px;
+}
+
 .knCrossArm-t { top: calc(var(--kn-cross-size) / -2); }
 .knCrossArm-b { top: calc(var(--kn-cross-size) / 2 - 21px); }
 .knCrossArm-l { left: calc(var(--kn-cross-size) / -2); }
