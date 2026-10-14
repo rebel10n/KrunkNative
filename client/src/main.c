@@ -1652,6 +1652,7 @@ void client_tick(Client *client, const float now, const float delta) {
     client_game_events_tick(client); // death delay -> menu (net/game_events.c)
 
     if (client->game.ready) client_tick_game(client, now, delta);
+    else input_script_idle_frame(client, delta); // a `boot` script before any map (input_script.h)
     // SOUND.rate = deltaMlt * endAnimationTimeLeft / endAnim (menu_view.c); 1 without a game
     audio_set_rate(client->game.ready ? menu_view_time_scale() : 1.0f);
     sound_events_tick(client, now, delta); // after the game tick: diffs player state into sounds

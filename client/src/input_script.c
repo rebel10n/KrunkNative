@@ -12,6 +12,9 @@
 //   0 menu                       as the first event instead of play: the clock starts on the menu once
 //                                the map is ready (menu clicks before any spawn, e.g. a comp lobby's
 //                                team / class picks); a later `play` then enters the game
+//   0 boot                       as the first event: the clock starts as soon as the menu page is set up, map
+//                                or not (an official krunker.io join waits for its matchmaker's captcha
+//                                before any map exists); a later `play` enters the game once a map is in
 //   0 pose x y z yaw pitch       place the local player at rest (like tools/kref/movement-rec.js); offline
 //                                the sandbox server's player too (the dev "tp")
 //   0 tp x y z yaw pitch         online: the dev "tp" packet to feet x/y/z, then face yaw/pitch
@@ -165,6 +168,8 @@ static struct {
     int count, next;
     int playing;      // `play` ran and the player is active: time runs (dead or alive)
     int menu_mode;    // the first event is `menu`: time runs from the menu, `play` just enters the game
+    int boot_mode;    // the first event is `boot`: time runs from the page, before any map
+    int play_pending; // boot mode's `play`: enter the game once the map is ready (retried per frame)
     int respawn_pending; // `respawn` ran while dead: Play again as soon as the death delay allows
     int page_wait;    // `page`: 1 until that page is shown and ready, -1 one more frame (its UI ticks), 0 none
     AppMode page_mode;
@@ -760,6 +765,8 @@ static void script_run(Client *client, const ScriptEvent *e) {
         if (e->v[0] >= 1.0f && e->v[1] >= 1.0f) glfwSetWindowSize(client->window, (int) e->v[0], (int) e->v[1]);
     } else if (!strcmp(e->cmd, "blur")) {
         client_window_focus_lost(client); // alt-tab (the GLFW focus callback)
+    } else if (!strcmp(e->cmd, "play") && g_script.boot_mode) {
+        g_script.play_pending = 1; // input_script_tick enters once the map is ready
     } else if (!strcmp(e->cmd, "play") && g_script.menu_mode) {
         if (html_ui_available() && html_ui_is_menu_open()) client_set_menu_open(client, 0);
         client_enter_game(client);
@@ -808,6 +815,12 @@ void input_script_tick(Client *client) {
 
     ft_sample();
 
+    if (!g_script.playing && g_script.count && !strcmp(g_script.events[0].cmd, "boot")) {
+        if (html_ui_available() && (!html_ui_is_ready() || !menu_ui()->dom_ready)) return;
+        g_script.playing = g_script.menu_mode = g_script.boot_mode = 1;
+        g_script.time = 0.0f;
+        g_script.next = 1;
+    }
     if (!g_script.playing && g_script.count && !strcmp(g_script.events[0].cmd, "menu")) {
         if (!client->game.ready || (html_ui_is_ready() && !menu_ui()->dom_ready)) return;
         g_script.playing = g_script.menu_mode = 1;
@@ -846,6 +859,15 @@ void input_script_tick(Client *client) {
         g_script.next++;
         ran = 1;
         if (g_script.page_wait) break; // `page`: the rest waits for that page
+    }
+
+    if (g_script.play_pending) {
+        if (client->me && client->me->active) {
+            g_script.play_pending = 0;
+        } else if (client->game.ready && !client->spawn_requested && (!html_ui_is_ready() || menu_ui()->dom_ready)) {
+            if (html_ui_available() && html_ui_is_menu_open()) client_set_menu_open(client, 0);
+            client_enter_game(client);
+        }
     }
 
     if (g_script.respawn_pending) {
@@ -947,6 +969,16 @@ void input_script_frame_end(Client *client, const float delta, const float frame
     // The frame time, not the world's: the end-of-round slow motion scales the world delta
     // down to 0 for the whole results screen, which would hold every later event back.
     if (!g_script.page_wait) g_script.time += frame_delta * 1000.0f;
+}
+
+void input_script_idle_frame(Client *client, const float frame_delta) {
+    script_load();
+    if (!g_script.active || !g_script.count || strcmp(g_script.events[0].cmd, "boot") != 0) return;
+    input_script_tick(client);
+    if (g_script.playing) {
+        write_pending_shot(client);
+        if (!g_script.page_wait) g_script.time += frame_delta * 1000.0f;
+    }
 }
 
 // Page windows (app_mode.c): the clock starts once the page is ready; game-only commands

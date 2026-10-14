@@ -78,13 +78,16 @@ void ui_open_browser(const char *url) {
 #ifdef __EMSCRIPTEN__
     EM_ASM({ try { (window.knRealOpen || window.open)(UTF8ToString($0), '_blank'); } catch (e) {} }, resolved);
 #else
-    // KRUNKNATIVE_NO_BROWSER=1 (headless test runs): log only.
+    // KRUNKNATIVE_NO_BROWSER=1 (headless test runs): log only. The log stops at a fragment: it may
+    // carry a one-time secret (the captcha callback's #kn-captcha=, krunker_captcha_ui.c).
+    const int shown = (int) strcspn(resolved, "#");
+    const char *frag = resolved[shown] ? "#(not logged)" : "";
     const char *off = getenv("KRUNKNATIVE_NO_BROWSER");
     if (off && *off && strcmp(off, "0")) {
-        menu_log("open (disabled by KRUNKNATIVE_NO_BROWSER): %s", resolved);
+        menu_log("open (disabled by KRUNKNATIVE_NO_BROWSER): %.*s%s", shown, resolved, frag);
         return;
     }
-    menu_log("open in browser: %s", resolved);
+    menu_log("open in browser: %.*s%s", shown, resolved, frag);
 #if defined(_WIN32)
     ShellExecuteA(NULL, "open", resolved, NULL, NULL, SW_SHOWNORMAL);
 #else

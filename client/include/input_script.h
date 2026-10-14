@@ -8,6 +8,9 @@ void input_script_tick(Client*);                  // frame start: run due script
 void input_script_adjust_input(Client*, Input*);  // after the look/move sampling: scripted look deltas
 void input_script_frame_end(Client*, float delta, float frame_delta);// after game_tick + camera: per-frame log row
 void input_script_frame_presented(Client*);       // the finished frame (page included): `frames` captures
+// A frame without a map (game.ready 0: client_tick_game does not run): a `boot` script's events and
+// clock still run (the official krunker.io matchmaker's captcha comes before any map).
+void input_script_idle_frame(Client*, float frame_delta);
 // Page windows (hub / editor / viewer, app_mode.c): the script starts when the page is
 // ready (app_mode_page_ready; `play`, `pose`, `tp`, `look` and `respawn` do nothing there),
 // keys / mouse / wheel go through the page's callbacks, `shot` writes the page frame.

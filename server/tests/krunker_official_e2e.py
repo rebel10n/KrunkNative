@@ -6,13 +6,25 @@ nothing leaves the machine.
 
 Stubs (Python, ports from kn_proto.free_ports()):
   - Krunker's matchmaker: GET /generate-token (a token) and GET /seek-game (checks the exact query
-    of game.deob.js's matchmakerSeek, answers {host, port, gameId, clientId, data})
+    of game.deob.js's matchmakerSeek, answers {host, port, gameId, clientId, data}). Like the live
+    one it answers the first seek 400 {"error":"CaptchaRequired"}; a seek with an unused captchaToken
+    (+ a validationToken from /generate-token) is let through, a used one is refused again.
+  - Cloudflare Turnstile (web runs only): the page's request for challenges.cloudflare.com's api.js is
+    answered over the DevTools protocol (Fetch) with a stub that calls the widget's callback with a
+    fake token ("ok") or its error-callback with 110200 ("domain", what the real widget answers on a
+    domain the sitekey is not for). Nothing is injected outside the test's own browser.
   - a Krunker game server: a WebSocket at /ws?gameId=&clientKey= speaking the official framing,
     msgpack([name, ...args]) + the 2 ahNum trailer bytes, with the stub's own msgpack codec (the
     @msgpack/msgpack number rules). It sends io-init, load, init (map 10, mode 0), "0" (a stub
     player), three "cc" (a script, garbage, an undefined result), a "cpt" ALTCHA challenge, "k"
     moving the stub player every 100 ms, "pi" every second; after the client's "en" its own "0",
     "l" and a "ch" line.
+Captcha runs (krunker_captcha.h): native "callback" (the one-time 127.0.0.1 callback: a wrong secret,
+a foreign Origin, a body that is not a token, an expired listener, then the token, then a second
+token), native "paste" (a bad paste refused in the modal, then a good one), web "widget" (the stub
+widget's token) and web "domain" (110200: the modal says why and falls back to the paste box). Each
+checks the live client's order: seek-game (no validationToken), CaptchaRequired, generate-token,
+seek-game with validationToken + captchaToken, and that no token reaches the log.
 Checks: the seek query, the WebSocket URL, every client frame's ahNum trailer ((prev + AHKEY) & 0xff,
 "cptR" without the step), "load" answered, "en" (35-value enter array + 11 flags), "q" windows
 (isn ascending, a movement key in the changes), "ct" with the chat text, "po" for "pi", "v" for
@@ -41,6 +53,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -232,6 +245,9 @@ class Stub:
         self.errors = []
         self.got_en = threading.Event()
         self.closed = threading.Event()
+        self.issued = []          # validation tokens handed out
+        self.used_captchas = set()
+        self.captcha_ok = threading.Event()
         self.loop = None
         self.httpd = None
 
@@ -247,17 +263,29 @@ class Stub:
                 u = urllib.parse.urlsplit(self.path)
                 q = urllib.parse.parse_qsl(u.query, keep_blank_values=True)
                 stub.http_log.append((u.path, q, u.query))
+                status = 200
                 if u.path == "/generate-token":
-                    body, ctype = b"tok_e2e_0123456789abcdefghijklmnopqrstuvwxyz0123456789ABCD", "text/plain"
+                    tok = "tok_e2e_%d_0123456789abcdefghijklmnopqrstuvwxyz0123456789" % len(stub.issued)
+                    stub.issued.append(tok)
+                    body, ctype = tok.encode(), "text/plain"
                 elif u.path == "/seek-game":
-                    body = json.dumps({"host": "127.0.0.1", "port": stub.ws_port, "gameId": GAME_ID, "clientId": CLIENT_ID,
-                                       "data": {"i": "Kanji", "g": 0}}).encode()
+                    qd = dict(q)
+                    cap, val = qd.get("captchaToken"), qd.get("validationToken")
+                    if not cap or cap in stub.used_captchas or val not in stub.issued:
+                        status, body = 400, json.dumps({"error": "CaptchaRequired"}).encode()  # the live answer
+                        if cap:
+                            stub.used_captchas.add(cap)
+                    else:
+                        stub.used_captchas.add(cap)
+                        stub.captcha_ok.set()
+                        body = json.dumps({"host": "127.0.0.1", "port": stub.ws_port, "gameId": GAME_ID, "clientId": CLIENT_ID,
+                                           "data": {"i": "Kanji", "g": 0}}).encode()
                     ctype = "application/json"
                 else:
                     self.send_response(404)
                     self.end_headers()
                     return
-                self.send_response(200)
+                self.send_response(status)
                 self.send_header("Content-Type", ctype)
                 self.send_header("Content-Length", str(len(body)))
                 self.send_header("Access-Control-Allow-Origin", "*")
@@ -382,18 +410,33 @@ class Stub:
 
 # ---------------------------------------------------------------- checks of one run
 
-def check_run(label, stub, client_lines, cheat_expected):
-    # matchmaker
+def check_matchmaker(label, stub, tokens, client_text):
+    """The live client's order (game.deob.js seek, :147445): seek-game without a validation token,
+    CaptchaRequired, the player's Turnstile token, generate-token, seek-game with both; once more for
+    each token the matchmaker refused (tokens: the player's, in order; the last one is let through)."""
     paths = [p for p, _, _ in stub.http_log]
-    check(f"{label}: generate-token, then seek-game", paths[:2] == ["/generate-token", "/seek-game"], paths)
-    seek = next((q for p, q, _ in stub.http_log if p == "/seek-game"), [])
-    raw = next((r for p, _, r in stub.http_log if p == "/seek-game"), "")
-    want_keys = ["hostname", "region", "autoChangeGame", "validationToken", "dataQuery"]
-    keys = [k for k, _ in seek]
-    q = dict(seek)
-    check(f"{label}: seek-game query is matchmakerSeek's", keys == want_keys and q.get("hostname") == "krunker.io" and
-          q.get("autoChangeGame") == "false" and q.get("validationToken", "").startswith("tok_e2e_") and
-          q.get("dataQuery") == json.dumps({"v": BUILD_VERSION}, separators=(",", ":")) and q.get("region"), raw)
+    want = ["/seek-game"] + ["/generate-token", "/seek-game"] * len(tokens)
+    check(f"{label}: seek-game, CaptchaRequired, generate-token, seek-game (the live order)", paths == want, paths)
+    seeks = [q for p, q, _ in stub.http_log if p == "/seek-game"]
+    raws = [r for p, _, r in stub.http_log if p == "/seek-game"]
+    dq = json.dumps({"v": BUILD_VERSION}, separators=(",", ":"))
+    first = seeks[0] if seeks else []
+    q = dict(first)
+    check(f"{label}: the first seek-game is matchmakerSeek's, without a validationToken",
+          [k for k, _ in first] == ["hostname", "region", "autoChangeGame", "dataQuery"] and q.get("hostname") == "krunker.io" and
+          q.get("autoChangeGame") == "false" and q.get("dataQuery") == dq and q.get("region"), raws[:1])
+    for i, token in enumerate(tokens):
+        retry = seeks[i + 1] if len(seeks) > i + 1 else []
+        q2 = dict(retry)
+        check(f"{label}: retry {i + 1} has a fresh validationToken and the player's captchaToken",
+              [k for k, _ in retry] == ["hostname", "region", "autoChangeGame", "validationToken", "dataQuery", "captchaToken"] and
+              q2.get("validationToken") == (stub.issued[i] if len(stub.issued) > i else None) and q2.get("captchaToken") == token and
+              q2.get("dataQuery") == dq, [k for k, _ in retry])
+    check(f"{label}: the matchmaker let the last retry through", stub.captcha_ok.is_set())
+    check(f"{label}: no Turnstile token reaches the log", not any(t in client_text for t in tokens))
+
+
+def check_run(label, stub, client_lines, cheat_expected):
     check(f"{label}: WebSocket /ws?gameId=&clientKey=", stub.ws_paths[:1] == [f"/ws?gameId={GAME_ID}&clientKey={CLIENT_ID}"], stub.ws_paths)
     check(f"{label}: no undecodable frames", not stub.errors, stub.errors[:3])
 
@@ -451,37 +494,133 @@ def check_run(label, stub, client_lines, cheat_expected):
 
 # ---------------------------------------------------------------- native
 
-def run_native():
+NATIVE_TOKEN = "0.e2eNativeCallbackToken_" + "x" * 300 + ".sig-AbC_123"
+PASTE_TOKEN = "0.e2ePastedToken_" + "y" * 200 + ".sig-DeF_456"
+BURNT_TOKEN = "0.e2eAlreadyUsedToken_" + "u" * 120 + ".sig-MnO_345"  # the stub refuses it (used / expired)
+CB_TTL_MS = 4000  # KRUNKNATIVE_KRUNKER_CAPTCHA_TTL_MS: the callback's lifetime in the callback run
+
+
+class Log:
+    """Tails a client's log file while it runs."""
+
+    def __init__(self, path):
+        self.path, self.text = path, ""
+
+    def read(self):
+        try:
+            with open(self.path, errors="replace") as f:
+                self.text = f.read()
+        except OSError:
+            pass
+        return self.text
+
+    def wait(self, pattern, timeout, proc=None):
+        end = time.time() + timeout
+        while time.time() < end:
+            m = re.search(pattern, self.read())
+            if m:
+                return m
+            if proc is not None and proc.poll() is not None:
+                return None
+            time.sleep(0.1)
+        return None
+
+
+def post(url, body, origin="https://krunker.io", ctype="text/plain"):
+    """POST to the captcha callback: the HTTP status, or "refused" when nothing listens."""
+    headers = {"Content-Type": ctype}
+    if origin:
+        headers["Origin"] = origin
+    req = urllib.request.Request(url, data=body.encode() if isinstance(body, str) else body, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+    except (urllib.error.URLError, ConnectionError, OSError):
+        return "refused"
+
+
+def launch_native(label, script_text, extra_env):
     mm, wsp = kn_proto.free_ports(2)
     stub = Stub(mm, wsp)
     stub.start_http()
     stub.start_ws()
-    script = os.path.join(WORK, "native.script")
+    script = os.path.join(WORK, f"{label}.script")
     with open(script, "w") as f:
-        f.write("0 play\n300 players\n400 down W\n1800 up W\n2000 players\n2200 con say hello official\n3200 players\n3300 state\n"
-                "5000 players\n5200 quit\n")
-    log = os.path.join(WORK, "native.log")
+        f.write(script_text)
+    log = os.path.join(WORK, f"{label}.log")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
-    env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": os.path.join(WORK, "cfg"), "XDG_STATE_HOME": os.path.join(WORK, "state"),
+    env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": os.path.join(WORK, label + "-cfg"), "XDG_STATE_HOME": os.path.join(WORK, label + "-state"),
                 "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "KRUNKNATIVE_INPUT_SCRIPT": script,
                 "KRUNKNATIVE_WINDOW_SIZE": "960x540", "KRUNKNATIVE_KRUNKER_MATCHMAKER": "http://127.0.0.1:%d" % mm,
                 "KRUNKNATIVE_KRUNKER_TRACE": "1", "KRUNKNATIVE_ASSETS_DIR": ASSETS, "KRUNKNATIVE_ASSET_FETCH": "off"})
-    with open(log, "w") as out:
-        p = subprocess.Popen(["stdbuf", "-oL", "-eL", f"{BUILD}/client_bin", "--krunker"], stdout=out, stderr=subprocess.STDOUT,
-                             stdin=subprocess.DEVNULL, env=env, start_new_session=True, cwd=ROOT)
-        try:
-            p.wait(timeout=240)
-        except subprocess.TimeoutExpired:
-            check("native: client_bin finished its script", False, f"timeout, log {log}")
-        finally:
-            if p.poll() is None:
-                os.killpg(p.pid, signal.SIGKILL)
-                p.wait()
+    env.update(extra_env)
+    out = open(log, "w")
+    p = subprocess.Popen(["stdbuf", "-oL", "-eL", f"{BUILD}/client_bin", "--krunker"], stdout=out, stderr=subprocess.STDOUT,
+                         stdin=subprocess.DEVNULL, env=env, start_new_session=True, cwd=ROOT)
+    return stub, p, out, Log(log)
+
+
+def finish_native(label, stub, p, out, log, timeout=240):
+    try:
+        p.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        check(f"{label}: client_bin finished its script", False, f"timeout, log {log.path}")
+    finally:
+        if p.poll() is None:
+            os.killpg(p.pid, signal.SIGKILL)
+            p.wait()
+        out.close()
     stub.closed.wait(5)
     stub.stop()
-    with open(log, errors="replace") as f:
-        lines = f.read().splitlines()
-    text = check_run("native", stub, lines, True) # client_bin evaluates cc with QuickJS (krunker_cheat_qjs.c)
+    return log.read().splitlines()
+
+
+def cb_url_from(m):
+    return m.group(1) if m else None
+
+
+def run_native():
+    """The callback path, then the whole game (the original native run)."""
+    label = "native"
+    script = ("0 boot\n1500 text @cb [id=knCaptchaCallback]\n1600 vis @modal knCaptchaHolder knCaptchaManual knCaptchaCbRow\n"
+              "8000 clickid knCaptchaOpen\n8300 text @cb2 [id=knCaptchaCallback]\n9000 play\n"
+              "14000 players\n14100 down W\n15500 up W\n15700 players\n15900 con say hello official\n16900 players\n17000 state\n"
+              "18700 players\n18900 quit\n")
+    stub, p, out, log = launch_native(label, script, {"KRUNKNATIVE_KRUNKER_CAPTCHA_TTL_MS": str(CB_TTL_MS)})
+    try:
+        url = cb_url_from(log.wait(r"\[input_script\] text t=\d+ @cb n=1 checked=0 value=(http://127\.0\.0\.1:\d+/[0-9a-f]{32}) ", 90, p))
+        check(f"{label}: the modal shows a one-time 127.0.0.1 callback", url, log.path)
+        vis = log.wait(r"\[input_script\] vis t=\d+ @modal (.*)", 10, p)
+        check(f"{label}: the Security Challenge modal is shown (manual path)",
+              vis and "knCaptchaHolder=1" in vis.group(1) and "knCaptchaManual=1" in vis.group(1) and "knCaptchaCbRow=1" in vis.group(1),
+              vis.group(1) if vis else None)
+        if url:
+            base, secret = url.rsplit("/", 1)
+            wrong = "%s/%s" % (base, ("0" if secret[0] != "0" else "1") + secret[1:])
+            check(f"{label}: callback: a wrong secret gets 404", post(wrong, NATIVE_TOKEN) == 404)
+            check(f"{label}: callback: a foreign Origin gets 403", post(url, NATIVE_TOKEN, origin="https://evil.example") == 403)
+            check(f"{label}: callback: a body that is not a token gets 400", post(url, "not a token!") == 400)
+            check(f"{label}: callback: the preflight from krunker.io is answered",
+                  post_options(url) == 204)
+            expired = log.wait(r"\[krunker\] captcha callback expired", CB_TTL_MS / 1000 + 8, p)
+            r = post(url, NATIVE_TOKEN)
+            check(f"{label}: callback: after its TTL the token is refused", expired and r in ("refused", 410), r)
+        url2 = cb_url_from(log.wait(r"\[input_script\] text t=\d+ @cb2 n=1 checked=0 value=(http://127\.0\.0\.1:\d+/[0-9a-f]{32}) ", 30, p))
+        check(f"{label}: \"Open krunker.io\" re-arms a new callback (new secret)", url2 and url2 != url, url2)
+        if url2:
+            r1 = post(url2, json.dumps({"token": NATIVE_TOKEN}), ctype="application/json")
+            r2 = post(url2, NATIVE_TOKEN + "z")
+            check(f"{label}: callback: the token is taken (200)", r1 == 200, r1)
+            check(f"{label}: callback: a second token is refused", r2 in (410, "refused"), r2)
+    finally:
+        lines = finish_native(label, stub, p, out, log)
+    text = "\n".join(lines)
+    check(f"{label}: the browser link carried the callback in its fragment, not in the log",
+          "https://krunker.io/#(not logged)" in text and (not url or url.rsplit("/", 1)[1] not in re.sub(r"value=http://127\.0\.0\.1:\d+/[0-9a-f]{32}", "", text)))
+    check_matchmaker(label, stub, [NATIVE_TOKEN], text)
+    text = check_run(label, stub, lines, True)  # client_bin evaluates cc with QuickJS (krunker_cheat_qjs.c)
     rows = [l for l in lines if "[input_script] players" in l]
     xs = []
     for row in rows:
@@ -493,7 +632,49 @@ def run_native():
     check("native: the stub's chat line reached the client", "hello from the stub" in text)
 
 
-# ---------------------------------------------------------------- web (headless Chromium over CDP)
+def post_options(url):
+    req = urllib.request.Request(url, method="OPTIONS", headers={"Origin": "https://krunker.io", "Access-Control-Request-Method": "POST",
+                                                                  "Access-Control-Request-Private-Network": "true"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            ok = r.headers.get("Access-Control-Allow-Private-Network") == "true" and r.headers.get("Access-Control-Allow-Origin") == "https://krunker.io"
+            return r.status if ok else "headers %s" % dict(r.headers)
+    except urllib.error.HTTPError as e:
+        return e.code
+    except (urllib.error.URLError, OSError):
+        return "refused"
+
+
+def run_native_paste():
+    """The paste box: a bad paste is refused in the modal; a token the matchmaker refuses (used or
+    expired) brings the modal back saying so; the next one is used once."""
+    label = "native-paste"
+    script = ("0 boot\n1400 rect @r knCaptchaToken knCaptchaUse knCaptchaModal\n1450 frames %s 1\n"
+              "1500 clickid knCaptchaToken\n1600 type not a token!\n1700 clickid knCaptchaUse\n1800 text @bad [id=knCaptchaStatus]\n"
+              "1900 vis @bad knCaptchaHolder\n1950 clickid knCaptchaToken\n2000 down CTRL+A\n2050 up CTRL+A\n2100 down DELETE\n2150 up DELETE\n"
+              "2300 type %s\n2400 clickid knCaptchaUse\n2900 text @again [id=knCaptchaStatus]\n2950 vis @again knCaptchaManual\n"
+              "3000 clickid knCaptchaToken\n3100 type %s\n3200 clickid knCaptchaUse\n3400 vis @used knCaptchaManual knCaptchaCancel\n"
+              "3500 text @box [id=knCaptchaToken]\n3800 play\n8000 players\n8200 quit\n"
+              % (os.path.join(WORK, "native-modal"), BURNT_TOKEN, PASTE_TOKEN))
+    stub, p, out, log = launch_native(label, script, {})
+    stub.used_captchas.add(BURNT_TOKEN)
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    bad = re.search(r"\[input_script\] text t=\d+ @bad n=1 checked=0 value= text=(.*)", text)
+    check(f"{label}: a paste that is not a token is refused in the modal", bad and "not a Turnstile token" in bad.group(1), bad.group(1) if bad else None)
+    check(f"{label}: the modal stays up after the bad paste", "@bad knCaptchaHolder=1" in text)
+    again = re.search(r"\[input_script\] text t=\d+ @again n=1 checked=0 value= text=(.*)", text)
+    check(f"{label}: a refused token brings the modal back, saying so", again and "refused that token" in again.group(1) and
+          "@again knCaptchaManual=1" in text and "attempt 2, the last token was refused" in text, again.group(1) if again else None)
+    # (the "cpt" proof-of-work state may already show the passive modal: the request's parts are gone)
+    check(f"{label}: the good paste closes the modal", "@used knCaptchaManual=0 knCaptchaCancel=0" in text)
+    box = re.search(r"\[input_script\] text t=\d+ @box n=1 checked=0 value=(\S*) ", text)
+    check(f"{label}: the paste box is emptied", box is not None and box.group(1) == "", box.group(0) if box else None)
+    check(f"{label}: the bad paste never reached the matchmaker", not any("not a token" in r for _, _, r in stub.http_log))
+    # (the `type` lines of the input script are the test's echo of what it typed: not the client's)
+    check_matchmaker(label, stub, [BURNT_TOKEN, PASTE_TOKEN], "\n".join(l for l in lines if "[input_script]" not in l))
+    check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+
 
 class Cdp:
     def __init__(self, port):
@@ -513,13 +694,25 @@ class Cdp:
         self.lock = threading.Lock()
         self.replies = {}
         self.cond = threading.Condition()
+        self.intercept = None  # (url prefix, JS body): Fetch.requestPaused answers
+        self.intercepted = []
         threading.Thread(target=self._read, daemon=True).start()
 
     def _read(self):
         try:
             for raw in self.ws:
                 m = json.loads(raw)
-                if m.get("method") == "Runtime.consoleAPICalled":
+                if m.get("method") == "Fetch.requestPaused":
+                    url = m["params"]["request"]["url"]
+                    self.intercepted.append(url)
+                    rid = m["params"]["requestId"]
+                    if self.intercept and url.startswith(self.intercept[0]):
+                        self.post("Fetch.fulfillRequest", {"requestId": rid, "responseCode": 200, "responseHeaders": [
+                            {"name": "Content-Type", "value": "application/javascript"}, {"name": "Access-Control-Allow-Origin", "value": "*"}],
+                            "body": base64.b64encode(self.intercept[1].encode()).decode()})
+                    else:
+                        self.post("Fetch.continueRequest", {"requestId": rid})
+                elif m.get("method") == "Runtime.consoleAPICalled":
                     self.console.append(" ".join(str(a.get("value", a.get("description", ""))) for a in m["params"]["args"]))
                 elif "id" in m:
                     with self.cond:
@@ -527,6 +720,12 @@ class Cdp:
                         self.cond.notify_all()
         except Exception:  # noqa: BLE001 (closed)
             pass
+
+    def post(self, method, params=None):  # no reply awaited (from the reader thread)
+        with self.lock:
+            self.id += 1
+            i = self.id
+        self.ws.send(json.dumps({"id": i, "method": method, "params": params or {}}))
 
     def send(self, method, params=None, timeout=15):
         with self.lock:
@@ -567,49 +766,113 @@ class StaticHandler(SimpleHTTPRequestHandler):
         return os.path.join(DIST, os.path.normpath(p).lstrip("/"))
 
 
-def run_web():
+WEB_TOKEN = "0.e2eWidgetToken_" + "w" * 300 + ".sig-GhI_789"
+WEB_PASTE_TOKEN = "0.e2eWebPastedToken_" + "v" * 250 + ".sig-JkL_012"
+TURNSTILE_URL = "https://challenges.cloudflare.com/turnstile/"
+
+
+def turnstile_stub(mode):
+    """api.js for the test's browser only: "ok" calls the widget's callback with WEB_TOKEN, else
+    the error-callback with that code (110200: the sitekey is not for this domain)."""
+    return ("(function(){var mode=%s,tok=%s;window.turnstile={render:function(el,o){var d=document.createElement('div');"
+            "d.className='kn-e2e-turnstile';d.textContent='stub turnstile';el.appendChild(d);setTimeout(function(){"
+            "if(mode==='ok')o.callback(tok);else o['error-callback'](mode);},400);return 'stub-w1';},"
+            "remove:function(){},reset:function(){},getResponse:function(){return tok;}};})();") % (json.dumps(mode), json.dumps(WEB_TOKEN))
+
+
+def run_web(mode):
+    """mode "ok": the widget's token, then the whole game (the original web run); "110200": the
+    domain error, the fallback text, a pasted token."""
+    label = "web" if mode == "ok" else "web-domain"
     mm, wsp, web, cdpp = kn_proto.free_ports(4)
     stub = Stub(mm, wsp)
     stub.start_http()
     stub.start_ws()
     httpd = ThreadingHTTPServer(("127.0.0.1", web), StaticHandler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    chrome_log = open(os.path.join(WORK, "chrome.log"), "w")
+    chrome_log = open(os.path.join(WORK, f"{label}-chrome.log"), "w")
     chrome = subprocess.Popen([CHROME, "--headless=new", "--no-sandbox", "--use-gl=angle", "--use-angle=swiftshader", "--enable-unsafe-swiftshader",
-                               "--user-data-dir=" + os.path.join(WORK, "chrome"), "--remote-debugging-port=%d" % cdpp, "--window-size=1280,720",
+                               "--user-data-dir=" + os.path.join(WORK, label + "-chrome"), "--remote-debugging-port=%d" % cdpp, "--window-size=1280,720",
                                "about:blank"], stdout=chrome_log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
     lines = []
+    token = WEB_TOKEN if mode == "ok" else WEB_PASTE_TOKEN
+    statuses = set()
     try:
         cdp = Cdp(cdpp)
         cdp.send("Runtime.enable")
         cdp.send("Page.enable")
+        cdp.intercept = (TURNSTILE_URL, turnstile_stub(mode))
+        cdp.send("Fetch.enable", {"patterns": [{"urlPattern": TURNSTILE_URL + "*"}]})
         url = "http://127.0.0.1:%d/?krunker=1&krunkerMM=%s&krunkerTrace=1" % (web, urllib.parse.quote("http://127.0.0.1:%d" % mm, safe=""))
         cdp.send("Page.navigate", {"url": url})
-        # CLICK TO PLAY once the map is in (menu_ui.c needs a trusted click), until the client's "en"
-        end = time.time() + 150
-        while time.time() < end and not stub.got_en.is_set():
-            time.sleep(0.5)
-            box = cdp.eval("(() => { const e = document.getElementById('instructions'); if (!e || !/CLICK TO PLAY/.test(e.textContent)) return null;"
-                           " const b = e.getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2]; })()")
+        modal_js = ("(() => { const h = document.getElementById('knCaptchaHolder'); if (!h) return null;"
+                    " const t = id => { const e = document.getElementById(id); return e ? e.textContent : null; };"
+                    " const vis = id => { const e = document.getElementById(id); return !!(e && e.offsetParent !== null && getComputedStyle(e).display !== 'none'); };"
+                    " return {shown: getComputedStyle(h).display !== 'none', text: t('knCaptchaText'), status: t('knCaptchaStatus'),"
+                    " manual: vis('knCaptchaManual'), widget: !!document.querySelector('#knTurnstileHolder .kn-e2e-turnstile'),"
+                    " passive: h.classList.contains('kn-captcha-passive')}; })()")
+        seen_modal = None
+        end = time.time() + 120
+        while time.time() < end and not stub.captcha_ok.is_set():
+            time.sleep(0.25)
+            st = cdp.eval(modal_js)
+            if st and st.get("shown") and not st.get("passive"):
+                seen_modal = seen_modal or dict(st)
+                if mode != "ok" and st.get("manual"):
+                    seen_modal = dict(st)
+                    break
+        check(f"{label}: the Security Challenge modal showed for CaptchaRequired", seen_modal is not None, "\n".join(cdp.console[-25:]))
+        check(f"{label}: Turnstile's api.js was requested (and stubbed)", any(u.startswith(TURNSTILE_URL + "v0/api.js") for u in cdp.intercepted),
+              cdp.intercepted[:3])
+        if mode != "ok":
+            text = (seen_modal or {}).get("text") or ""
+            check(f"{label}: 110200 is explained (Turnstile keys are bound to their sites) and the paste box offered",
+                  bool(seen_modal) and seen_modal.get("manual") and "110200" in text and "only work on the sites" in text, text)
+            box = cdp.eval("(() => { const e = document.getElementById('knCaptchaToken'); const b = e.getBoundingClientRect();"
+                           " return [b.x + b.width / 2, b.y + b.height / 2]; })()")
             if box:
                 cdp.click(box[0], box[1])
-        check("web: the page entered the game (\"en\" sent)", stub.got_en.is_set(), "\n".join(cdp.console[-25:]))
-        if stub.got_en.is_set():
+                time.sleep(0.3)
+                cdp.send("Input.insertText", {"text": token})
+                time.sleep(0.3)
+                use = cdp.eval("(() => { const b = document.getElementById('knCaptchaUse').getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2]; })()")
+                cdp.click(use[0], use[1])
+            stub.captcha_ok.wait(30)
             time.sleep(1.0)
-            cdp.key("rawKeyDown", "w", "KeyW", 87)
-            time.sleep(1.5)
-            cdp.key("keyUp", "w", "KeyW", 87)
-            time.sleep(0.5)
-            cdp.key("keyDown", "Enter", "Enter", 13, "\r")
-            cdp.key("keyUp", "Enter", "Enter", 13)
-            time.sleep(0.4)
-            cdp.send("Input.insertText", {"text": "hello official"})
-            time.sleep(0.2)
-            cdp.key("keyDown", "Enter", "Enter", 13, "\r")
-            cdp.key("keyUp", "Enter", "Enter", 13)
-            time.sleep(2.5)
-            chat = cdp.eval("(() => { const c = document.getElementById('chatList'); return c ? c.innerText : ''; })()") or ""
-            check("web: the stub's chat line is in #chatList", "hello from the stub" in chat, chat[-300:])
+            st = cdp.eval(modal_js) or {}
+            # (the "cpt" proof of work may show the passive state by now: no input parts left)
+            check(f"{label}: the modal closed after the pasted token", not st.get("shown") or (st.get("passive") and not st.get("manual")), st)
+        else:
+            check(f"{label}: the stub widget rendered inside the modal", bool(seen_modal) and seen_modal.get("widget"), seen_modal)
+            # CLICK TO PLAY once the map is in (menu_ui.c needs a trusted click), until the client's "en";
+            # meanwhile the "cpt" proof-of-work modal is watched (passive, "Verifying…" then the result)
+            end = time.time() + 150
+            while time.time() < end and not stub.got_en.is_set():
+                time.sleep(0.3)
+                st = cdp.eval(modal_js)
+                if st and st.get("shown") and st.get("passive"):
+                    statuses.add(st.get("status"))
+                box = cdp.eval("(() => { const e = document.getElementById('instructions'); if (!e || !/CLICK TO PLAY/.test(e.textContent)) return null;"
+                               " const b = e.getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2]; })()")
+                if box:
+                    cdp.click(box[0], box[1])
+            check("web: the page entered the game (\"en\" sent)", stub.got_en.is_set(), "\n".join(cdp.console[-25:]))
+            if stub.got_en.is_set():
+                time.sleep(1.0)
+                cdp.key("rawKeyDown", "w", "KeyW", 87)
+                time.sleep(1.5)
+                cdp.key("keyUp", "w", "KeyW", 87)
+                time.sleep(0.5)
+                cdp.key("keyDown", "Enter", "Enter", 13, "\r")
+                cdp.key("keyUp", "Enter", "Enter", 13)
+                time.sleep(0.4)
+                cdp.send("Input.insertText", {"text": "hello official"})
+                time.sleep(0.2)
+                cdp.key("keyDown", "Enter", "Enter", 13, "\r")
+                cdp.key("keyUp", "Enter", "Enter", 13)
+                time.sleep(2.5)
+                chat = cdp.eval("(() => { const c = document.getElementById('chatList'); return c ? c.innerText : ''; })()") or ""
+                check("web: the stub's chat line is in #chatList", "hello from the stub" in chat, chat[-300:])
         lines = list(cdp.console)
         cdp.ws.close()
     finally:
@@ -620,12 +883,19 @@ def run_web():
             except subprocess.TimeoutExpired:
                 os.killpg(chrome.pid, signal.SIGKILL)
                 chrome.wait()
+        chrome_log.close()
         httpd.shutdown()
         httpd.server_close()
     stub.closed.wait(5)
     stub.stop()
-    with open(os.path.join(WORK, "web-console.log"), "w") as f:
+    with open(os.path.join(WORK, f"{label}-console.log"), "w") as f:
         f.write("\n".join(lines))
+    text = "\n".join(lines)
+    check_matchmaker(label, stub, [token], text)
+    if mode != "ok":
+        check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text or stub.ws_paths, stub.ws_paths)
+        return
+    check("web: the \"cpt\" modal showed the proof of work and its result", any(s_ and s_.startswith("Verif") for s_ in statuses), statuses)
     check_run("web", stub, lines, True)
     k = [l for l in lines if "[krunker] <= k " in l]
     check("web: the stub player's \"k\" updates arrived", len(k) >= 5, len(k))
@@ -638,9 +908,11 @@ def main():
     ran = False
     if ONLY in ("", "native") and os.path.isfile(f"{BUILD}/client_bin"):
         run_native()
+        run_native_paste()
         ran = True
     if ONLY in ("", "web") and DIST and CHROME and os.path.isfile(os.path.join(DIST, "client.wasm")):
-        run_web()
+        run_web("ok")
+        run_web("110200")
         ran = True
     elif ONLY == "web":
         print("krunker_official_e2e: the web run needs Chromium and a web build (WEB_DIST_DIR): skipped")

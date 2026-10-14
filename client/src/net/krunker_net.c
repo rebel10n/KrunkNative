@@ -9,6 +9,7 @@
 #include <krunker_net.h>
 #include <krunker_link.h>
 #include <krunker_altcha.h>
+#include <krunker_captcha.h>
 #include <backend.h>
 #include <ui_logic.h>
 #include <cJSON.h>
@@ -45,8 +46,9 @@ static const char *const k_regions[] = {KRUNKER_REGIONS};
 
 typedef enum {
     KS_OFF = 0,    // not in an official game
-    KS_TOKEN,      // GET /generate-token
+    KS_TOKEN,      // GET /generate-token (after a captcha: the retry's fresh validation token)
     KS_SEEK,       // GET /seek-game
+    KS_CAPTCHA,    // seek-game said CaptchaRequired: the player is solving Turnstile (krunker_captcha.h)
     KS_CONNECTING, // WebSocket opening
     KS_OPEN,
     KS_CLOSED,     // dropped / refused: the error screen; reconnect seeks again
@@ -72,6 +74,13 @@ static struct {
     int notice_pending, captcha_pending;
     KrunkerAltcha altcha; // web: the "cpt" being solved in slices
     int altcha_pending;
+    int pow_shown;           // the "cpt" modal shows "verifying…" (krunker_captcha_pow_begin)
+    volatile int pow_result; // native: the socket thread's "cpt" outcome for the modal (1 solved, 2 not)
+    // the matchmaker's Turnstile (game.deob.js seek, :147445-147467): prompts so far this join (the live
+    // client gives up after 2), the player's token until the retry's seek-game takes it (then wiped),
+    // and whether the last seek carried one (a CaptchaRequired after it = the token was refused)
+    int captcha_attempts, captcha_sent;
+    char captcha[KRUNKER_CAPTCHA_TOKEN_MAX + 1];
 #ifdef __EMSCRIPTEN__
     EMSCRIPTEN_WEBSOCKET_T ws;
 #elif defined(KRUNKER_NATIVE_WS)
@@ -215,6 +224,7 @@ static int link_altcha(void *user, const char *alg, const char *challenge, const
     pthread_mutex_unlock(&K.lock);
     const int rc = krunker_altcha_solve(alg, challenge, salt, signature, max, payload);
     pthread_mutex_lock(&K.lock);
+    K.pow_result = rc == 0 ? 1 : 2; // shown by krunker_net_tick (the UI is the main thread's)
     return rc;
 #endif
 }
@@ -663,10 +673,15 @@ static void form_encode(char *out, const size_t n, const char *s) {
 }
 
 static void append_param(char *url, const size_t n, const char *key, const char *value) {
-    char enc[1024];
+    char enc[KRUNKER_CAPTCHA_TOKEN_MAX * 3 + 1];
     form_encode(enc, sizeof(enc), value);
     const size_t len = strlen(url);
     snprintf(url + len, n - len, "%s%s=%s", strchr(url, '?') ? "&" : "?", key, enc);
+}
+
+static void wipe(void *p, size_t n) {
+    volatile unsigned char *v = p;
+    while (n--) *v++ = 0;
 }
 
 static int http_get(const char *url, BackendHttpFn fn) {
@@ -685,7 +700,9 @@ static void on_seek(void *user, int status, const char *body, size_t length);
 static void seek(void) {
     // matchmakerSeek (game.deob.js:147610-147631): hostname, region, autoChangeGame,
     // validationToken, then game / excludeGame / dataQuery / captchaToken / accessToken when set
-    char url[2048];
+    // (null ones are dropped, matchmakerRequest :147647). The first seek has no validationToken
+    // (iïîìîíì passes undefined for a guest); only the captcha retry fetches one (:147466).
+    static char url[16384];
     snprintf(url, sizeof(url), "%s/seek-game", K.matchmaker);
     append_param(url, sizeof(url), "hostname", "krunker.io");
     append_param(url, sizeof(url), "region", K.region);
@@ -693,9 +710,35 @@ static void seek(void) {
     if (K.token[0]) append_param(url, sizeof(url), "validationToken", K.token);
     if (K.game_id[0]) append_param(url, sizeof(url), "game", K.game_id);
     append_param(url, sizeof(url), "dataQuery", "{\"v\":\"" KRUNKER_BUILD_VERSION "\"}"); // iïîìîíì: {v: buildVersion}
+    const size_t logged = strlen(url); // the log stops before the captcha token: never logged
+    K.captcha_sent = K.captcha[0] != 0;
+    if (K.captcha_sent) append_param(url, sizeof(url), "captchaToken", K.captcha);
     K.state = KS_SEEK;
-    printf("[krunker] seek-game: %s\n", url);
-    if (!http_get(url, on_seek)) fail("Could not reach the krunker.io matchmaker");
+    printf("[krunker] seek-game: %.*s%s\n", (int) logged, url, K.captcha_sent ? "&captchaToken=(the player's Turnstile token)" : "");
+    const int queued = http_get(url, on_seek); // (the request keeps its own copy)
+    wipe(K.captcha, sizeof(K.captcha));          // single-use: never sent twice
+    wipe(url, sizeof(url));
+    if (!queued) fail("Could not reach the krunker.io matchmaker");
+}
+
+// The player solved (or gave up on) the matchmaker's Turnstile: a fresh validation token, then the
+// same seek with captchaToken (game.deob.js:147459-147466).
+static void on_token(void *user, int status, const char *body, size_t length);
+
+static void captcha_done(void *user, const char *token) {
+    if (stale(user) || K.state != KS_CAPTCHA) return;
+    if (!token) {
+        fail("Matchmaking stopped: krunker.io's security challenge was not completed");
+        return;
+    }
+    snprintf(K.captcha, sizeof(K.captcha), "%s", token);
+    K.state = KS_TOKEN;
+    char url[600];
+    snprintf(url, sizeof(url), "%s/generate-token", K.matchmaker); // fetchValidationToken (game.deob.js:147576)
+    if (!http_get(url, on_token)) {
+        wipe(K.captcha, sizeof(K.captcha));
+        fail("Could not reach the krunker.io matchmaker");
+    }
 }
 
 static void on_token(void *user, const int status, const char *body, const size_t length) {
@@ -727,9 +770,17 @@ static void on_seek(void *user, const int status, const char *body, const size_t
     if (cJSON_IsNumber(port)) snprintf(port_s, sizeof(port_s), "%d", port->valueint);
     else if (cJSON_IsString(port)) snprintf(port_s, sizeof(port_s), "%s", port->valuestring);
     if (error && !strcmp(error, "CaptchaRequired")) {
-        K.state = KS_CLOSED;
-        set_notice(1, "krunker.io asks for a captcha before matchmaking");
-        if (K.client) on_client_socket_failed(K.client, "krunker.io requires a captcha (CaptchaRequired)");
+        // the live client asks getCaptchaToken at most twice per seek, then gives up (:147454)
+        const int refused = K.captcha_sent;
+        K.captcha_sent = 0;
+        if (K.captcha_attempts >= 2) {
+            fail("krunker.io still asks for a security challenge after %d tries: try again later, or play on krunker.io", K.captcha_attempts);
+        } else {
+            K.captcha_attempts++;
+            K.state = KS_CAPTCHA;
+            printf("[krunker] seek-game: CaptchaRequired%s: the player solves Turnstile\n", refused ? " again (the token was refused)" : "");
+            krunker_captcha_ask(K.captcha_attempts, refused, captcha_done, user);
+        }
     } else if (status != 200 || error || !host || !game || !client_id) {
         char text[200];
         snprintf(text, sizeof(text), "%.180s", error ? error : body ? body : "");
@@ -787,16 +838,15 @@ int krunker_net_join(Client *client, const char *game_id, const char *region) {
     K.token[0] = 0;
     K.connected = 0;
     K.altcha_pending = 0;
+    K.captcha_attempts = K.captcha_sent = 0;
+    K.pow_shown = 0;
+    wipe(K.captcha, sizeof(K.captcha));
     matchmaker();
     printf("[krunker] joining official game %s (region %s) through %s\n", K.game_id[0] ? K.game_id : "(any)", K.region, K.matchmaker);
-    K.state = KS_TOKEN;
-    char url[600];
-    snprintf(url, sizeof(url), "%s/generate-token", K.matchmaker); // fetchValidationToken (game.deob.js:147576)
-    if (!http_get(url, on_token)) {
-        fail("Could not reach the krunker.io matchmaker");
-        return 0;
-    }
-    return 1;
+    // the live client's order: seek-game at once, no validation token; generate-token only before a
+    // captcha retry (captcha_done)
+    seek();
+    return K.state != KS_CLOSED;
 }
 
 void krunker_net_leave(Client *client, const char *reason) {
@@ -813,7 +863,9 @@ void krunker_net_leave(Client *client, const char *reason) {
     }
     printf("[krunker] leaving the official game%s%s\n", reason ? ": " : "", reason ? reason : "");
     K.state = KS_OFF;
-    K.altcha_pending = 0;
+    K.altcha_pending = K.pow_shown = 0;
+    krunker_captcha_close(); // a pending Turnstile request ends with the session
+    wipe(K.captcha, sizeof(K.captcha));
     stop_socket(); // native: joins the thread, which reports the disconnect; web: the close callback does
 }
 
@@ -836,10 +888,23 @@ int krunker_net_send_packet(const NetPacketType type, const void *payload, const
 
 void krunker_net_tick(Client *client) {
     (void) client;
+    krunker_captcha_tick(); // the matchmaker's Turnstile modal (the localhost callback natively)
+    if (K.pow_result) { // native: the socket thread answered a "cpt"
+        const int solved = K.pow_result == 1;
+        K.pow_result = 0;
+        krunker_captcha_pow_end(solved);
+    }
+    if (K.altcha_pending && !K.pow_shown) { // web: "verifying…" while the slices run
+        K.pow_shown = 1;
+        krunker_captcha_pow_begin();
+    }
     if (K.altcha_pending) {
         char *payload = NULL;
         const int rc = K.state == KS_OPEN ? krunker_altcha_step(&K.altcha, KRUNKER_ALTCHA_SLICE, &payload) : -1;
-        if (rc != 0) K.altcha_pending = 0;
+        if (rc != 0) {
+            K.altcha_pending = K.pow_shown = 0;
+            krunker_captcha_pow_end(rc == 1);
+        }
         if (rc == 1) {
             const KrunkerValue args[] = {KRUNKER_V_STR(payload)};
             pthread_mutex_lock(&K.lock);
@@ -859,16 +924,16 @@ void krunker_net_tick(Client *client) {
     K.notice_pending = K.captcha_pending = 0;
     pthread_mutex_unlock(&K.lock);
     if (captcha) {
+        // a "cpt" this client cannot answer (not SHA-256 ALTCHA, or too big): the modal says so
+        krunker_captcha_pow_end(0);
 #ifdef __EMSCRIPTEN__
-        // TODO(official): show Cloudflare Turnstile (site key in krunker_build.h) and send its token
-        // as "cptR" (no ahNum advance) / seek-game captchaToken; until then the game can't continue.
-        ui_notify("krunker.io asks for a captcha: not supported in this client yet");
+        ui_notify("krunker.io asked for a security challenge this client cannot answer");
 #else
-        // Turnstile needs a browser: the game opens on krunker.io, where the captcha can be solved
+        // the game opens on krunker.io, where the page answers it
         char url[256];
         snprintf(url, sizeof(url), "https://krunker.io/%s%s", K.game_id[0] ? "?game=" : "", K.game_id);
         ui_open_browser(url);
-        ui_notify("krunker.io asks for a captcha: the game opened in your browser instead");
+        ui_notify("krunker.io asked for a security challenge this client cannot answer: the game opened in your browser instead");
 #endif
         return;
     }

@@ -8,21 +8,25 @@
 // Krunker's packets into NetPackets for the normal inbound queue (client_net_queue_packet), so the
 // game, HUD and menu run unchanged.
 //
-// Join flow (game.deob.js; matchmaker client at :147380-147690):
-//   1. GET <matchmaker>/generate-token                  -> an opaque validation token (text)
-//   2. GET <matchmaker>/seek-game?hostname=krunker.io&region=<r>&autoChangeGame=false
-//          &validationToken=<token>[&game=<gameId>]&dataQuery={"v":"<buildVersion>"}
-//      (matchmakerSeek's parameter order; accessToken / captchaToken are omitted: guest, no captcha)
-//      -> {host, port, gameId, clientId, data}
+// Join flow (game.deob.js; matchmaker client at :147380-147690), the live client's order:
+//   1. GET <matchmaker>/seek-game?hostname=krunker.io&region=<r>&autoChangeGame=false[&game=<gameId>]
+//          &dataQuery={"v":"<buildVersion>"}
+//      (matchmakerSeek's parameter order; no validationToken: iïîìîíì passes undefined for a guest)
+//      -> {host, port, gameId, clientId, data}, or 400 {"error":"CaptchaRequired"}:
+//   1b. CaptchaRequired: the player solves Cloudflare Turnstile (krunker_captcha.h: the widget on the
+//      web, krunker.io in the system browser + a pasted token / a localhost callback natively), then
+//      GET <matchmaker>/generate-token (a fresh validation token) and seek-game again with
+//      validationToken=<token> after autoChangeGame and captchaToken=<turnstile> after dataQuery
+//      (:147445-147467; at most 2 captcha prompts per join, like the live client). Turnstile tokens
+//      are single-use: sent once, wiped, never logged.
 //   3. WebSocket <scheme>://<host>[:port]/ws?gameId=<gameId>&clientKey=<clientId>   (:222369-222371)
 //      production (the default matchmaker): wss:// and no port; a matchmaker given explicitly
 //      (tests, mirrors): its own scheme (http -> ws, https -> wss) and the port seek-game returned
 //   4. io-init, load / init (map + mode), our "en" when the player presses Play, then the game.
-// Krunker's own client only fetches the token after a CaptchaRequired answer (seek() retries with
-// captchaToken + validationToken); this one always sends a fresh token on the first seek, as the
-// brief asks. Two captchas exist: the matchmaker's CaptchaRequired is Cloudflare Turnstile (needs a
-// browser: reported, not solved; web: TODO show the widget, native: krunker.io opens in the system
-// browser); the socket's "cpt" is an ALTCHA proof of work, answered in C (krunker_altcha.h).
+// Two captchas exist: the matchmaker's CaptchaRequired is Cloudflare Turnstile (a human solves it),
+// the socket's "cpt" is an ALTCHA proof of work, answered in C (krunker_altcha.h) with the modal's
+// "verifying…" state. The live client also sends `accept-language: en-US,en;q=0.6;` on matchmaker
+// requests; this one does not (a browser adds its own on the web).
 //
 // Transport: the browser WebSocket on the web (emscripten/websocket.h, like net_web.c, which stays
 // as it is for our protocol); natively a small RFC 6455 client on http_conn.c (TLS, the client
@@ -49,7 +53,8 @@
 //     maps the API serves by index), the mode's own rules for the Krunker mode id
 //   - cosmetics, skins, accounts: everyone is shown with default cosmetics, we join as a guest
 //     (no FRVR access token: `at=` and accessToken omitted)
-//   - CHEAT_CHECK natively (QuickJS, the CHEAT_CHECK agent's), Turnstile captchas, Windows
+//   - CHEAT_CHECK natively (QuickJS, the CHEAT_CHECK agent's), Windows; on the web a Turnstile token
+//     from krunker.io can only be pasted (a page cannot take the localhost callback)
 //   - the "cpt" answer's payload shape is ALTCHA's widget format, not readable in the bundle: unverified
 //     against a live server
 //   - a dropped official session does not reconnect by itself (the page's reconnect seeks anew)
