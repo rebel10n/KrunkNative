@@ -29,6 +29,7 @@
  * the v10-party module; its presence:game pushes are its own). Messages are online-only like
  * v10 ("Messages are online-only in v1"): an offline friend answers EB_TARGET_OFFLINE.
  */
+#include "game_presence.h" /* game_presence_get: a friend's game (v10-party) */
 #include "acct_internal.h"
 
 #include <stdio.h>
@@ -47,8 +48,6 @@
 #define EB_HISTORY_MAX 50   /* msg:history limit cap (v10 asks 15) */
 #define EB_RATE_PER_MIN 30  /* messages per sender and minute (the hub chat's limit) */
 
-/* game presence (game_presence.c, v10-party): 1 = in a game, its id in game_id. Weak until it lands. */
-int game_presence_get(int64_t account_id, char *game_id, size_t n, int *password_protected) __attribute__((weak));
 
 /* mutual follows of $1 */
 #define FRIENDS_OF_1 \
@@ -166,7 +165,7 @@ void social_online_lookup(const int64_t *ids, size_t n, void (*cb)(void *ud, con
 static void add_game(cJSON *row, int64_t id) {
     char game[96] = "";
     int locked = 0;
-    if (game_presence_get && game_presence_get(id, game, sizeof game, &locked) == 1 && game[0]) {
+    if (game_presence_get(id, game, sizeof game, &locked) == 1 && game[0]) {
         cJSON_AddStringToObject(row, "gameInstanceId", game);
         cJSON_AddBoolToObject(row, "gamePasswordProtected", locked);
     }

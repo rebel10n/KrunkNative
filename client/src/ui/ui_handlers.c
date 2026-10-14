@@ -18,6 +18,7 @@
 #include <ui_mobile.h>    // isMobile: Escape resumes without a pointer lock (ui_mobile.c)
 #include <backend_ui.h>   // brain backend: account (account_ui.c) + matchmaker (servers_ui.c)
 #include <v10_ui.h> // v10 Leaderboards / view stack (v10_competitive.c)
+#include <v10_party.h>    // v10 Invite / Join (v10_party.c)
 #include <client_settings.h> // Settings > Client tab + the Exit menu item (ui_client_settings.c)
 #include <math.h>
 #include <stdio.h>
@@ -130,7 +131,13 @@ H(h_toggle_team) { (void) user; return comp_ui_toggle_team(menu_ui()->client, ev
 
 // openURL(url) / openTab(url) / window.open(url, "_blank"): a new browser tab in Krunker;
 // the system browser natively, window.open on the web (ui_dialog.c, http(s) only).
-H(h_open_url) { UNUSED; ui_open_external(arg_str(ev, args, argc, 0, "")); return 1; }
+// A same-site game link (v10's Friends tab Join: openURL('/?game=<gid>', 1)) joins it in place.
+H(h_open_url) {
+    UNUSED;
+    const char *url = arg_str(ev, args, argc, 0, "");
+    if (!v10_party_open_url(url)) ui_open_external(url);
+    return 1;
+}
 
 // Hosting is the dedicated server's job (doc/backend.md 8.7): the client no longer creates
 // servers or custom lobbies. Host Game (hidden outside --render-scenario) points there;
@@ -141,30 +148,9 @@ H(h_open_host_window) {
              "Players join it from the server list or by direct connect.");
     return 1;
 }
-H(h_open_join_window) { UNUSED; menu_show_window(MENU_WINDOW_JOIN, 0); return 1; }
-
-static void invite_reset(void *user) {
-    (void) user;
-    menu_ui()->invite_timer = 0;
-    HtmlElem b = html_dom_by_id("inviteButton");
-    if (b) html_dom_set_text(b, "Invite");
-}
-
-H(h_copy_invite_link) {
-    UNUSED;
-    HtmlElem b = html_dom_by_id("inviteButton");
-    if (!b) return 1;
-    char link[512];
-    servers_ui_invite_link(link, sizeof(link)); // location.protocol + "//" + location.host + "/?game=" + gameId
-    html_clipboard_write(link);
-    html_dom_set_text(b, "Copied");
-    // copyInviteLink(1) (the competitive menu's link button): io_addChat(-1, null, ..., 2)
-    if (arg_bool(ev, args, argc, 0, 0)) hud_ui_add_chat(NULL, "Link Copied. Send it to someone to invite them", "#fc03ec");
-    MenuUi *ui = menu_ui();
-    if (ui->invite_timer) html_timer_cancel(ui->invite_timer);
-    ui->invite_timer = html_timer_add(1250, invite_reset, NULL); // copyInviteLink: setTimeout 1250
-    return 1;
-}
+// v10 Invite / Join (v10_party.c): openJoinWindow(a, skipClipboard), copyInviteLink(toast)
+H(h_open_join_window) { UNUSED; v10_party_open_join_window(arg_bool(ev, args, argc, 1, 0)); return 1; }
+H(h_copy_invite_link) { UNUSED; v10_party_copy_invite_link(arg_bool(ev, args, argc, 0, 0)); return 1; }
 
 // onclick="errorNotification.style.display = 'none'" (bare expression the handler
 // parser names kn.hideErrorNotification)
@@ -193,13 +179,13 @@ H(h_check_terms) {
 }
 
 H(h_play) { UNUSED; menu_play(); return 1; }                       // quickJoinRegion
-// joinGame(): f9(gameURL.value || "") - a game link or lobby id (servers_ui.c)
+// joinGame(): _72569(gameURL.value || "") - a game link or code (v10_party.c)
 H(h_join_game) {
     UNUSED;
     char text[512] = "";
     HtmlElem input = html_dom_by_id("gameURL");
     if (input) html_dom_get_value(input, text, sizeof(text));
-    servers_ui_join_link(text);
+    v10_party_join_text(text);
     return 1;
 }
 // Host a map of the catalogue (shared/src/map_catalog.c) on the embedded local server:
@@ -612,6 +598,7 @@ static const UiModuleHandler MODULE_HANDLERS[] = {
     ui_client_settings_handle, // ui_client_settings.c: Settings > Client, the Exit item
     update_ui_handle,          // update_ui.c: knUpdateNow / knUpdateDownload (the Outdated box)
     object_manager_ui_handle,  // object_manager_ui.c: the KrunkNative Object Manager (knOm*)
+    v10_party_ui_handle,       // v10_party.c: the server password popup (submitGameCode)
 };
 
 static int h_fallback(void *user, const HtmlEvent *ev, const HtmlArg *args, const int argc) {

@@ -184,6 +184,11 @@ int  html_page_query(char *buf, size_t n);              // location.search witho
 void html_page_set_url(const char *href, int push);     // history.replaceState / pushState(document.title, document.title, href)
 void html_page_origin(char *buf, size_t n);             // location.protocol + "//" + location.host; native: the public site (KN_PUBLIC_ORIGIN)
 void html_clipboard_write(const char *text);            // UTILS.copyToClipboard: web navigator.clipboard, native the OS clipboard
+// navigator.clipboard.readText() (v10 openJoinWindow): fn gets the text, NULL when it cannot be read
+// (no clipboard, permission refused). Native: the OS clipboard, fn runs before this returns; web:
+// the promise settles later (fn runs from the browser's event loop, outside any dispatch).
+typedef void (*HtmlClipboardFn)(void *user, const char *text);
+void html_clipboard_read(HtmlClipboardFn fn, void *user);
 
 // ---- cross-window channel: web, a BroadcastChannel between same-origin tabs (the editor's
 // tabs share their clipboard and project lists over it); natively unavailable (0 / NULL):

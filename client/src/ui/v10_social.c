@@ -22,13 +22,12 @@
 #include <weapons.h>
 #include <math.h>
 #include <stdint.h>
+#include <v10_party.h> // v10_party_join_game: a friend's "Join" (v10_party.c)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-// v10-party: joins a friend's game (client/include/v10_party.h); weak until that module links
-int v10_party_join_game(const char *game_id) __attribute__((weak));
 
 #define EB_PING_MS 25000.0
 #define EB_TEXT_MAX 512
@@ -2876,8 +2875,7 @@ int v10_social_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         }
     } else if (!strcmp(op, "join")) {
         const char *game = arg_str(args, argc, 1);
-        if (game[0] && v10_party_join_game) v10_party_join_game(game);
-        else if (game[0]) menu_log("v10 social: join %s (v10_party_join_game not linked)", game);
+        if (game[0]) v10_party_join_game(game); // switchServer(friend.gameInstanceId) (v10_party.c)
     } else if (!strcmp(op, "back")) {
         view_pop();
     } else if (!strcmp(op, "backdrop")) {

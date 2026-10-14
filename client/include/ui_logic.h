@@ -80,7 +80,6 @@ typedef struct {
     int connect_timer;       // CONNECT_TIMEOUT_MS watchdog (html_timer id, 0 = none)
     int bubble_timer;        // speech bubble hide timer
     int rect_timer;          // coalesced sendPreviewRect (setTimeout 0)
-    int invite_timer;        // copyInviteLink "Copied" -> "Invite"
 
     int active_window;       // MENU_WINDOW_* / Krunker id currently in #menuWindow
     int settings_tab;

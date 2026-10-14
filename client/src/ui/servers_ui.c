@@ -26,6 +26,7 @@
 #include <server_names.h>  // short ?game= ids (CH2:kz862 for CHITOWN2:kz862)
 #include <seek_prefs.h>    // Settings > Quickplay: seek mode / map / server type (mm-token)
 #include <krunker_lobbies.h> // official krunker.io lobbies (native only, mm-token)
+#include <v10_party.h>     // the server password popup (ERROR 004005)
 #include <strings.h>
 #include <ctype.h>
 #include <math.h>
@@ -69,6 +70,7 @@ static char g_account_game[160]; // AccountRequired: the lobby a guest was refus
 // and with server type Both an official krunker.io lobby is the fallback
 static int g_find_seek, g_find_both;
 static char g_find_prev_game[160];
+static char g_password_game[160]; // the game (lobby id, or "host:port" direct) net_join.password was typed for
 static void page_game_url(const char *id, const char *region);
 // Source-console style pinning: a server the user picked by hand (console `connect`, Direct
 // Connect, the finder list) or a console `disconnect` is never overridden by automatic
@@ -252,6 +254,10 @@ static void join_server(const char *host, const int port, const char *game_id, c
 #endif
 
     pthread_mutex_lock(&client->net_lock);
+    if (strcmp(g_game_id, g_password_game) != 0) { // a server password is only sent to its game
+        memset(client->net_join.password, 0, sizeof(client->net_join.password));
+        g_password_game[0] = 0;
+    }
     snprintf(client->net_join.game_id, sizeof(client->net_join.game_id), "%s", g_game_id);
     snprintf(client->net_join.client_key, sizeof(client->net_join.client_key), "%s", client_key ? client_key : "");
     snprintf(client->net_join.session, sizeof(client->net_join.session), "%s", account_get() ? account_session_token() : "");
@@ -799,6 +805,34 @@ int servers_ui_connect_game(const char *text) {
     printf("[mm] connect: game %s\n", id);
     menu_show_window(MENU_WINDOW_NONE, 0);
     switch_server(id);
+    return 1;
+}
+
+// v10 switchServer(friend.gameInstanceId) (the social panel's "Join <name>'s match", the profile
+// window's Friends tab): that game through the matchmaker, like a pasted code. 0 = no matchmaker.
+int servers_ui_join_game(const char *id) {
+    if (!id || !id[0] || !g_brain_mode || backend_available() != 1) return 0;
+    printf("[mm] join game %s\n", id);
+    menu_show_window(MENU_WINDOW_NONE, 0);
+    switch_server(id);
+    return 1;
+}
+
+// v10 submitGameCode(): the server refused the join for its password (ERROR 004005,
+// v10_party_password_prompt); the same game again with the password in the JOIN packet. A
+// matchmade lobby is sought again (a fresh ticket, no page reload on the web), a direct server
+// reconnected.
+int servers_ui_join_password(const char *password) {
+    if (!g_client || !password) return 0;
+    const int lobby = g_brain_mode && g_pin == PIN_NONE && g_game_id[0] && backend_available() == 1;
+    pthread_mutex_lock(&g_client->net_lock);
+    snprintf(g_client->net_join.password, sizeof(g_client->net_join.password), "%s", password);
+    if (lobby) snprintf(g_password_game, sizeof(g_password_game), "%s", g_game_id);
+    else snprintf(g_password_game, sizeof(g_password_game), "%s:%u", g_client->net_address, (unsigned int) g_client->net_port);
+    pthread_mutex_unlock(&g_client->net_lock);
+    printf("[mm] joining %s again with the server password\n", g_password_game);
+    if (lobby) seek(g_game_id, 0, NULL);
+    else client_net_switch_server(g_client);
     return 1;
 }
 
@@ -1494,8 +1528,13 @@ static void direct_join(const char *host, const int port) {
     g_game_id[0] = 0;
     g_account_game[0] = 0;
     page_game_url(NULL, NULL); // the lobby id (if a brain lists host:port) follows once connected
+    char password[sizeof(g_client->net_join.password)] = "", target[160];
+    snprintf(target, sizeof(target), "%s:%d", host, port);
     pthread_mutex_lock(&g_client->net_lock);
+    if (!strcmp(target, g_password_game)) memcpy(password, g_client->net_join.password, sizeof(password));
     memset(&g_client->net_join, 0, sizeof(g_client->net_join));
+    memcpy(g_client->net_join.password, password, sizeof(password)); // the server password of this server
+    if (!password[0]) g_password_game[0] = 0;
     snprintf(g_client->net_address, sizeof(g_client->net_address), "%s", host);
     g_client->net_port = (unsigned short) port;
 #ifdef __EMSCRIPTEN__
@@ -1631,6 +1670,8 @@ static int connection_dropped(char *error, const size_t error_size) {
 // without a server ERROR (events.c). 1 = a rejoin is under way.
 int servers_ui_connection_lost(char *error, const size_t error_size, const char *code, const int dropped) {
     if (!g_client || g_client->offline || !code) return servers_ui_rejoining();
+    // the game needs its server password (v10 ENTER_CODE -> gameCode()): ask; Submit joins again
+    if (!dropped && !strcmp(code, NET_ERROR_CODE_PASSWORD) && !ci_contains(error, "too many")) v10_party_password_prompt();
     if (dropped) return g_pin == PIN_IDLE ? servers_ui_rejoining() : connection_dropped(error, error_size);
     const int restart = !strcmp(code, NET_ERROR_CODE_UPDATING) || !strcmp(code, NET_ERROR_CODE_SHUTDOWN);
     const int key = !strcmp(code, NET_ERROR_CODE_TICKET) && ci_contains(error, "join key");

@@ -12,6 +12,7 @@
 
 #ifndef __EMSCRIPTEN__
 #include <GLFW/glfw3.h>
+#include <headless.h> // headless_current_window: the clipboard's window
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <errno.h>
@@ -453,9 +454,15 @@ void html_page_origin(char *buf, const size_t n) {
     if (buf && n) snprintf(buf, n, "%s", KN_PUBLIC_ORIGIN);
 }
 
+// the window the UI renders on (headless: glfwGetCurrentContext() is NULL, the context is EGL's)
 void html_clipboard_write(const char *text) {
-    GLFWwindow *window = glfwGetCurrentContext();
+    GLFWwindow *window = headless_current_window();
     if (window && text) glfwSetClipboardString(window, text);
+}
+
+void html_clipboard_read(const HtmlClipboardFn fn, void *user) {
+    GLFWwindow *window = headless_current_window();
+    if (fn) fn(user, window ? glfwGetClipboardString(window) : NULL);
 }
 
 #endif // !__EMSCRIPTEN__

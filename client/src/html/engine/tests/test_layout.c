@@ -1406,6 +1406,38 @@ static void t_incremental(void)
     fx_free(fx);
 }
 
+/* textContent of a flex container whose text sat in a child element (v10's #inviteButton:
+ * <div class=match-action-btn style=display:flex><span>Invite</span></div> -> "Copied URL"):
+ * the bare text becomes an anonymous flex item, laid out and sized like the span was. */
+static void t_flex_text_content(void)
+{
+    /* #subLogoButtons (absolute flex column) > #matchInfoHolder (fixed, translateX(-50%), flex row) */
+    /* #uiBase (transformed: the fixed box's containing block) > a sized absolute layer (a layout
+     * boundary) > #subLogoButtons: the dirty item's boundary must reach the fixed box's container */
+    Fx *fx = fx_html("<div style='position:absolute;left:0;top:0;width:800px;height:600px;transform:scale(1)'>"
+                     "<div style='position:absolute;left:0;top:0;width:800px;height:600px'>"
+                     "<div style='position:absolute;right:21px;bottom:80px;display:flex;flex-direction:column;align-items:flex-end'>"
+                     "<div style='position:fixed;bottom:148px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:14px;padding:8px 16px'>"
+                     "<div style='display:flex'>a</div><div id=row style='display:flex;gap:6px;align-items:center'>"
+                     "<div id=btn style='display:flex;align-items:center;gap:4px;font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;opacity:0.7;cursor:pointer;white-space:nowrap'><span style=\"color:#fff\">Invite</span></div>"
+                     "<span id=sep>-</span></div></div><div style='width:50px;height:20px'></div></div></div></div>", NULL);
+    const HtmlRect before = rc(fx, "btn"), sep0 = rc(fx, "sep");
+    HtmlElem btn = dom_by_id(fx->dom, "btn");
+    layout_nodes_removed(fx->tree, dom_elem_node(fx->dom, btn), 0); /* engine_before_remove(btn, 0) */
+    dom_set_text(fx->dom, btn, "Copied URL", 10);
+    cascade_restyle(fx->dom, g_ua, fx->sheets, fx->ns);
+    layout_children_changed(fx->tree, dom_elem_node(fx->dom, btn));
+    layout_run(fx->tree, fx->vw, fx->vh);
+    const HtmlRect after = rc(fx, "btn"), sep1 = rc(fx, "sep");
+    CHECK(after.w > before.w + 20.0f, "flex textContent: the item grows with its new text (%.1f, was %.1f)", after.w, before.w);
+    CHECK_NEAR(sep1.x - sep0.x, (after.w - before.w) / 2, 0.01, "flex textContent: the next item moved (the centred row grew both ways)");
+    Box *b = bx(fx, "btn");
+    const TextRun *tr = NULL;
+    for (Box *c = b ? b->first_child : NULL; c && !tr; c = c->next) tr = first_run(c);
+    CHECK(tr && tr->len == 10, "flex textContent: the text is laid out");
+    fx_free(fx);
+}
+
 /* innerHTML replacement under a restyled ancestor, in the engine's order
  * (engine_before_remove -> dom_set_html -> restyle -> post_restyle walks the
  * tree: the ancestor's layout_restyled() before the host's
@@ -1599,6 +1631,7 @@ int main(int argc, char **argv)
     t_root_overflow();
     t_container_scrollbars();
     t_incremental();
+    t_flex_text_content();
     t_innerhtml_detach();
     t_intrinsic_font_restyle();
     t_menu();

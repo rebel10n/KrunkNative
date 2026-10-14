@@ -1148,6 +1148,39 @@ void html_clipboard_write(const char *text) {
     if (text) kn_js_clipboard_write(text);
 }
 
+typedef struct {
+    HtmlClipboardFn fn;
+    void *user;
+} ClipboardRead;
+
+// navigator.clipboard.readText()'s answer (text malloc'd by stringToNewUTF8, 0 = refused)
+EMSCRIPTEN_KEEPALIVE void kn_ui_clipboard_read_done(ClipboardRead *req, char *text) {
+    if (req && req->fn) req->fn(req->user, text);
+    free(text);
+    free(req);
+}
+
+EM_JS(void, kn_js_clipboard_read, (void *req), {
+    if (!navigator.clipboard || !navigator.clipboard.readText) {
+        _kn_ui_clipboard_read_done(req, 0);
+        return;
+    }
+    navigator.clipboard.readText().then(function (t) {
+        _kn_ui_clipboard_read_done(req, stringToNewUTF8(t || ""));
+    }).catch(function () { _kn_ui_clipboard_read_done(req, 0); });
+});
+
+void html_clipboard_read(const HtmlClipboardFn fn, void *user) {
+    ClipboardRead *req = calloc(1, sizeof(*req));
+    if (!req) {
+        if (fn) fn(user, NULL);
+        return;
+    }
+    req->fn = fn;
+    req->user = user;
+    kn_js_clipboard_read(req);
+}
+
 // ---- cross-tab channel
 
 int html_channel_open(const char *name) { return name && *name ? kn_js_channel_open(name) : 0; }

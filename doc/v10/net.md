@@ -187,6 +187,25 @@ states: see ranked.md.
 | S to C | `presence:pong`, `presence:online`, `presence:offline`, `presence:game` (`gameInstanceId`, password flag) | presence |
 | S to C | `error` | `code` in `EB_AUTH_REQUIRED, EB_AUTH_INVALID, EB_TARGET_OFFLINE, EB_NOT_FRIEND, EB_RATE_LIMITED, EB_MSG_INVALID, EB_TEXT_TOO_LONG, EB_UNKNOWN_TYPE` (103791-103798) |
 
+KrunkNative: these objects travel over kn_brain's social socket as `["eb", {...}]`. `presence:game`
+(`{"type":"presence:game","id":<accountId>,"gameInstanceId":"<nodeId>:<lobby>"|null,
+"gamePasswordProtected":bool}`) comes from `services/brain/game_presence.c`: the game servers'
+`player-join` / `player-leave` (internal socket, accountId + lobbyId) and a node's disconnect set the
+account's game; each change goes to its friends (mutual follows); `game_presence_get()` fills the
+same two fields of each `friends:list` entry. In memory, this brain's nodes only. The client's
+"Join <name>'s match" calls `v10_party_join_game(gameInstanceId)` (client/src/ui/v10_party.c:
+v10's switchServer, through `/mm/seek-game?game=`).
+
+### Invite / Join
+
+v10 has no party system. `copyInviteLink` copies `https://<host>/?game=<gameId>` (#inviteButton
+"Copied URL" for 1250 ms); `openJoinWindow` joins a game link / code read from the clipboard, else
+opens windows[23] (#gameURL + `joinGame()`); its parser takes `/?game=` / `/?party=` links and
+`/^([A-Z]+):(\w+)$/` codes. The profile window's Friends tab joins with `openURL('/?game=<gid>', 1)`.
+A game that needs a password: v10's server sends `ENTER_CODE` (popup `gameCode()`, `code` packet,
+`UPDATE_CODE_TIMER`, `CODE_PASSED`); server_bin refuses the join (ERROR 004005) and the client shows
+the same popup, then joins the same game again with the password in its JOIN packet (no countdown).
+
 ## 6. Port notes
 
 - Implement: entity packets (with KrunkScript entities), `PLAYER_POSE`, `PLAYER_LOCKS`, the

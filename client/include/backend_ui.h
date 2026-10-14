@@ -142,6 +142,8 @@ int  servers_ui_rejoining(void);             // 1 = a rejoin is due / seeking (t
 const char *servers_ui_rejoin_text(void);    // "Reconnecting..." / "Rejoining a game..." for that line
 int  servers_ui_join_link(const char *text);  // Join window / pasted link or "NODE:lobby" id (v3.1.1 f9); 1 = joining
 int  servers_ui_connect_game(const char *text); // Connect window / console connect given a game link or id (CH2:kz862); 1 = joining, 0 = an address
+int  servers_ui_join_game(const char *game_id); // v10 switchServer(id) (a friend's game): seek it; 1 = joining, 0 = no matchmaker
+int  servers_ui_join_password(const char *password); // v10 submitGameCode: the same game again with the server password
 void servers_ui_invite_link(char *out, size_t n); // copyInviteLink: <origin>/?game=<id>, the id unescaped, short (CH2:kz862)
 int  servers_ui_account_required(void);     // 1 = the last seek answered AccountRequired to a guest (error screen: Log in)
 char *servers_ui_region_options(const char *selected); // region <option>s (2-letter codes, place name as title); malloc'd

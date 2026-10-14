@@ -20,6 +20,7 @@ set(KN_BRAIN_SOURCES
     social_gapi.c
     db_social_v10.c
     clan_v10.c
+    game_presence.c                 # v10 presence:game (account -> its game, pushed to friends)
     profiles.c
     leaderboards.c
     social_data.c
@@ -182,6 +183,12 @@ if (TARGET ${SERVER_BINARY} OR TARGET server_bin)
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/mm_token_e2e.py ${CMAKE_BINARY_DIR}
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_mm_token_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
+        # v10 Invite / Join: presence:game to friends, Invite link, Join from the clipboard / window /
+        # a friend's game, the server password popup (3 nodes, headless client_bin on ui/v10)
+        add_test(NAME brain_v10_party_e2e
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/v10_party_e2e.py ${CMAKE_BINARY_DIR}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_v10_party_e2e PROPERTIES TIMEOUT 400 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
         # editor WP6: the map editor's publishing, My Games and asset windows (headless client_bin
         # --editor against kn_brain; skips 77 without a database, websockets or client_bin)
         add_test(NAME brain_editor_publish_e2e

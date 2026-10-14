@@ -9,6 +9,7 @@
 #include <time.h>
 
 #include "brain_internal.h"
+#include "game_presence.h"
 #include "roles.h"
 #include "knsvc/crypto.h"
 #include "knsvc/http.h"
@@ -573,9 +574,14 @@ static void handle_frame(NodeConn *c, const cJSON *frame) {
             else if (federation_active() && *lobby) snprintf(game_id, sizeof(game_id), "%s:%s", n->node_id, lobby);
             registry_arrive(b->registry, jti, game_id[0] ? game_id : NULL, kn_wall_ms(), MM_ARRIVE_GRACE_MS);
         }
+        /* v10 presence:game: the account's friends see the game it plays in (game_presence.c) */
+        game_presence_join(b, n->node_id, kn_json_str(frame, "lobbyId", ""), kn_json_int(frame, "accountId", 0));
         return;
     }
-    if (!strcmp(type, "player-leave")) return;
+    if (!strcmp(type, "player-leave")) {
+        game_presence_leave(b, n->node_id, kn_json_str(frame, "lobbyId", ""), kn_json_int(frame, "accountId", 0));
+        return;
+    }
     if (!strcmp(type, "acct") || !strcmp(type, "db-call")) {
         ReplyCtx *r = reply_ctx(c, frame, !strcmp(type, "acct") ? "acct-r" : "db-reply");
         if (!r) return;
@@ -646,6 +652,7 @@ static void ws_on_close(kn_ws *ws, int code, const char *reason, void *ud) {
         if (n && n->conn == (struct NodeConn *) c) {
             KN_INFO("internal", "node \"%s\" disconnected (%d %s)", c->node_id, code, reason ? reason : "");
             registry_node_remove(b->registry, c->node_id);
+            game_presence_node_gone(b, c->node_id); /* its players are in no game any more */
             if (!g_shutdown) federation_node_gone(b, c->node_id);
         }
     }

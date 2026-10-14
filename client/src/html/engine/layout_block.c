@@ -1225,14 +1225,35 @@ void layout_invalidate_node(LayoutTree *t, lxb_dom_node_t *node, int geometry_on
 
 typedef struct BoxVec { Box **data; size_t len, cap; } BoxVec;
 
+/* anc is a tree ancestor of b */
+static int box_has_ancestor(const Box *b, const Box *anc)
+{
+    for (const Box *p = b->parent; p; p = p->parent) if (p == anc) return 1;
+    return 0;
+}
+
+/* b itself when it is a layout boundary (or the root), else its nearest boundary ancestor */
+static Box *boundary_at(Box *b)
+{
+    return (b->flags & BOXF_LAYOUT_BOUNDARY) || !b->parent ? b : layout_find_boundary(b);
+}
+
 static void collect_boundaries(Box *b, Box *enclosing, BoxVec *out)
 {
+    if (!(b->dirty & (BOX_DIRTY_SELF | BOX_DIRTY_CHILD))) return;
+    /* An absolute / fixed box is laid out by its containing block (its abs list), not by its
+     * tree parent: when that container lies outside the enclosing boundary (v10's fixed
+     * #matchInfoHolder, whose containing block is the transformed #uiBase above a sized layer),
+     * relaying out the boundary skipped it and a changed item kept its old size (no lines for
+     * its new text). Its changes relayout the boundary around its container instead. */
+    if (!(b->flags & BOXF_LAYOUT_BOUNDARY) && (b->flags & BOXF_OUT_OF_FLOW) && b->container
+        && b->container != enclosing && !box_has_ancestor(b->container, enclosing))
+        enclosing = boundary_at(b->container);
     if (b->dirty & BOX_DIRTY_SELF) {
         for (size_t i = 0; i < out->len; i++) if (out->data[i] == enclosing) return;
         KN_VEC_PUSH(out, enclosing);
         return;
     }
-    if (!(b->dirty & BOX_DIRTY_CHILD)) return;
     Box *enc = (b->flags & BOXF_LAYOUT_BOUNDARY) ? b : enclosing;
     for (Box *c = b->first_child; c; c = c->next) collect_boundaries(c, enc, out);
 }

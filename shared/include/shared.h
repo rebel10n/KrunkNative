@@ -2721,6 +2721,7 @@ typedef struct {
 #define NET_ERROR_CODE_TICKET "004001"   // invalid / expired join key or session, guests refused
 #define NET_ERROR_CODE_UPDATING "004004" // "GAME UPDATING": draining, or stopping for an update
 #define NET_ERROR_CODE_SHUTDOWN "004006" // the server stopped (restart / shutdown / console quit)
+#define NET_ERROR_CODE_PASSWORD "004005" // the server password (gameserver.password) is missing / wrong / locked out
 
 // NET_PACKET_BILLBOARD: the server's billboard ad (server.cfg billboard, the v3.1.1 init "bill":
 // txt, txtCol, bgCol). While a server sends one, every BILLBOARD map object of every map shows

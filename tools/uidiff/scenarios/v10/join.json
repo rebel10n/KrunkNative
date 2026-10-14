@@ -1,0 +1,23 @@
+{
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "window": 24
+  },
+  "frames": 3,
+  "note": "ui/v10 Join window (openJoinWindow with nothing joinable on the clipboard -> showWindow(24): #gameURL + joinGame())"
+}

@@ -59,6 +59,7 @@
 #include <backend_ui.h> // store_skin_preview: killcard player card banners
 #include <update_ui.h> // state.update: the Outdated box
 #include <lobby_ui.h> // state.matchVotes: the end screen's vote cards
+#include <v10_party.h> // state.gameCode: the server password popup
 
 // Portable temp dir / env helpers (MinGW has no mkdtemp, setenv or lstat).
 static int scenario_make_storage_dir(char *out, const size_t n) {
@@ -253,6 +254,7 @@ static void warn_unknown_keys(void) {
         "v10responses", // {path: answer}: the brain's answers for the v10 popups (v10_competitive.c)
         "social",  // the v10 Social hub popup / views: {tab, sub, feed, friends, selected, messages, search, view} (v10_social.c)
         "clan",    // the Clans window (13): {data: clanData, tab, motd, loot, recruit} (clan_ui.c)
+        "gameCode", // v10 gameCode(): the server password popup (v10_party.c)
         "update",  // the menu's Outdated / Update now box (update_ui_scenario)
         "connectError", // with connected:false, the Lost Connection screen's error text (menu_ui.c)
         "spin",    // the store's prize wheel screen: prizeWheel(spin) without the backend (store_ui.c)
@@ -881,6 +883,7 @@ static int ui_scenario_apply(Client *client) {
     if (menu_open) apply_window(client);
     if (menu_open) v10_social_scenario(st("social")); // the v10 Social hub (v10_social.c)
     account_ui_scenario_post(); // account.c2fa: v7.1.4's 2FA popup over the window
+    if (st_bool("gameCode", 0)) v10_party_password_prompt(); // v10 gameCode(): the server password popup
     if (menu_open && st_has("spin")) {
         store_ui_scenario_wheel(st_int("spin", 0), st_bool("spinMulti", 0));
         const cJSON *result = st("spinResult");
