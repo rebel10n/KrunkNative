@@ -631,7 +631,6 @@ void ui_loadout_refresh_preview(void);           // updateClassPreview (dJ)
 // BEGIN v10_customize block (client/src/ui/v10_customize.c): the Krunker v10.0.2 page's Change
 // Loadout shell (windows[2] with the Class / Loadout / Customize toolbar and the live preview
 // column, windows[52] Customize, windows[53] Title, the picker windows wrapped in the shell)
-int   v10_page(void);                            // the v10 page tree is loaded (its windows.json has title_selection)
 char *v10_customize_window_gen(int id);          // NULL: not a v10 shell window (the generic path renders it)
 int   v10_customize_window_alias(int id);        // showWindow(53) is window 3 on the Customize tab
 void  v10_customize_before_render(void);         // #classPreviewCanvas back home before #menuWindow is rewritten

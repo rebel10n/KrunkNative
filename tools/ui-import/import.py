@@ -2,15 +2,14 @@
 """KrunkNative UI import tool.
 
 Run with ``python3 -I tools/ui-import/import.py --ui ui`` from the repository
-root (the Makefile target ``make ui-import`` does exactly that). ``--ref v7`` (the
-default) imports Krunker v7.1.4's pages into ``ui/``; ``--ref v10`` the live Krunker v10 site
-into ``ui/v10/``.
-
-With ``--ref v7`` the steps are: the menu page and its stylesheets (``index_page.py``),
-the window templates (``windows_v7.py``, from ``krunker-windows-v7.json.gz`` captured by
-``capture_v7_windows.js``), the social hub, editor and viewer pages, the fonts and
-ligature tables below, and every file the pages reference plus the C UI's own image
-list (``menu_assets.py``, ``menu-assets-v7.txt``).
+root (the Makefile target ``make ui-import`` does exactly that). It imports Krunker v10.0.2, the only
+version (doc/v7/decisions.md), from the live site mirror (``fetch_live_site.py``) into ``ui/``: the
+menu page (``v10_page.py``, the Svelte mounts reconstructed by ``v10_bundle.js``), its window
+templates (``windows_v10.py``), the hub and editor pages (``v10_hub_editor.py``), Krunker v7.1.4's
+model viewer page (``viewer_page.py``), the fonts and ligature tables below, and every file the pages
+reference plus the C UI's own image list (``menu_assets.py``, ``menu-assets-v7.txt``).
+The page in ``ui/`` has been edited by hand since its import (the v10 parity work): rerunning this
+overwrites those edits, so diff and merge, never commit a blind re-import.
 
 What it does (all steps are idempotent; files are rewritten only when their
 content changes):
@@ -52,8 +51,9 @@ LIGA_HEADER_REL = os.path.join("client", "src", "html", "engine", "material_icon
 LIGA_OUTLINED_REL = os.path.join("client", "src", "html", "engine", "material_icons_outlined_liga.h")
 
 REFS = {
+    # Krunker v7.1.4: only its model viewer page is imported (the mirror has no v10 viewer)
     "v7": {"public": "/home/user/jails/kru/src/Krunker_v7.1.4/public", "manifest": "menu-assets-v7.txt"},
-    # the live krunker.io site (Krunker v10), mirrored by fetch_live_site.py; written to <ui>/v10/
+    # the live krunker.io site (Krunker v10), mirrored by fetch_live_site.py; written to <ui>/
     "v10": {"public": os.path.expanduser("~/.cache/kn-v10/live/site/public"), "manifest": "menu-assets-v7.txt",
             "client_js": os.path.expanduser("~/Downloads/v10.0.2.js")},
 }
@@ -286,62 +286,45 @@ def generate_liga_header(font_path, header_path, prefix=None):
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--ui", default=os.path.join(REPO, "ui"), help="ui directory (default: <repo>/ui)")
-    ap.add_argument("--ref", choices=sorted(REFS), default="v7",
-                    help="Krunker reference to import (default v7; v10 = the live site into <ui>/v10/)")
-    ap.add_argument("--public", default=None, help="the reference's public/ tree (default per --ref)")
+    ap.add_argument("--public", default=None, help="the live site mirror's public/ tree (default: %s)" % REFS["v10"]["public"])
     ap.add_argument("--client-js", default=None,
-                    help="v10: the live client script, parsed (never run) by v10_bundle.js for the Svelte menu")
+                    help="the live client script, parsed (never run) by v10_bundle.js for the Svelte menu")
     ap.add_argument("--viewer-store", action="store_true",
                     help="also regenerate client/src/viewer/viewer_store_table.c")
-    ap.add_argument("--windows-out", default=None, help="output dir for window files (default: <ui>/windows)")
     ap.add_argument("--liga-header", default=os.path.join(REPO, LIGA_HEADER_REL),
                     help="generated C header path (default: %s)" % LIGA_HEADER_REL)
     ap.add_argument("--force", action="store_true", help="regenerate .ttf files even if present")
     ap.add_argument("--no-fonts", action="store_true", help="skip font conversion and the liga table")
     ap.add_argument("--no-windows", action="store_true", help="skip the window split")
-    ap.add_argument("--no-editor", action="store_true", help="skip the map editor page (editor_page.py)")
-    ap.add_argument("--editor-page", action="store_true",
-                    help="(no-op, kept for old scripts: the v7 editor page is imported by default since editor WP2)")
-    ap.add_argument("--no-social", action="store_true", help="skip the social hub page (social_page.py)")
-    ap.add_argument("--no-viewer", action="store_true", help="skip the model viewer page (viewer_page.py)")
-    ap.add_argument("--no-assets", action="store_true", help="skip the menu/HUD images (menu_assets.py, menu-assets.txt)")
+    ap.add_argument("--no-editor", action="store_true", help="skip the map editor page (v10_hub_editor.py)")
+    ap.add_argument("--no-social", action="store_true", help="skip the social hub page (v10_hub_editor.py)")
+    ap.add_argument("--no-viewer", action="store_true", help="skip the model viewer page (viewer_page.py, Krunker v7.1.4's)")
+    ap.add_argument("--no-assets", action="store_true", help="skip the page / C UI images (menu-assets-v7.txt)")
     args = ap.parse_args(argv)
 
     ui_dir = os.path.abspath(args.ui)
     if not os.path.isdir(ui_dir):
         raise SystemExit("ui dir not found: " + ui_dir)
-    windows_out = os.path.abspath(args.windows_out or os.path.join(ui_dir, "windows"))
-    ref = REFS[args.ref]
+    ref = REFS["v10"]
     public = os.path.abspath(args.public or ref["public"])
     sys.path.insert(0, HERE)
-    if args.ref == "v10":
-        return import_v10(args, ui_dir, public, ref)
-    v7 = True  # the page modules below still take a v7 flag (False was the removed --ref v3 import)
-    # the page first: fonts, windows and assets read what it links
-    import index_page  # tools/ui-import/index_page.py
-    index_page.import_index(ui_dir, write_if_changed, log, public)
-    index_page.import_shared_css(ui_dir, write_if_changed, log, public)
-
+    import_v10(args, ui_dir, public, ref)
+    if not (args.no_editor and args.no_social):
+        # the hub and editor pages are Krunker v10's (the live site mirror): v10_hub_editor.py,
+        # doc/v10/editor-social.md
+        import v10_hub_editor
+        pages = tuple(p for p, skip in (("social.html", args.no_social), ("editor.html", args.no_editor)) if not skip)
+        v10_hub_editor.import_pages(ui_dir, write_if_changed, log, public, pages)
+    if not args.no_viewer:
+        # the model viewer page has no v10 counterpart in the mirror: Krunker v7.1.4's
+        import viewer_page  # tools/ui-import/viewer_page.py
+        viewer_page.import_viewer(ui_dir, write_if_changed, log, REFS["v7"]["public"], store_table=args.viewer_store)
     if not args.no_fonts:
-        try:
-            import fontTools  # noqa: F401
-            import brotli  # noqa: F401
-        except ImportError as exc:
-            raise SystemExit("missing dependency (%s): pip install fonttools brotli" % exc)
-        os.environ.setdefault("SOURCE_DATE_EPOCH", "0")  # deterministic head.modified in saved TTFs
-        # every font file an imported stylesheet names (the woff2s are converted below)
-        for family, woff2 in font_face_woff2s(ui_dir):
-            rel = os.path.relpath(woff2, ui_dir)
-            src = os.path.join(public, rel)
-            if os.path.isfile(src):
-                with open(src, "rb") as fh:
-                    write_if_changed(woff2, fh.read())
         material_woff2 = outlined_woff2 = None
         for family, woff2 in font_face_woff2s(ui_dir):
-            ttf = convert_woff2(family, woff2, args.force)
-            if ttf and slug(family) == "material-icons":
+            if slug(family) == "material-icons":
                 material_woff2 = woff2
-            if ttf and slug(family) == "material-icons-outlined":
+            if slug(family) == "material-icons-outlined":
                 outlined_woff2 = woff2
         if material_woff2 is None:
             log("warning: no Material Icons font found; liga header not generated")
@@ -353,39 +336,12 @@ def main(argv):
             header = os.path.join(REPO, LIGA_OUTLINED_REL)
             count, changed = generate_liga_header(outlined_woff2, header, "material_icons_outlined")
             log("%s %s: %d ligatures" % ("wrote" if changed else "unchanged", LIGA_OUTLINED_REL, count))
-
-    if not args.no_windows:
-        import windows_v7  # tools/ui-import/windows_v7.py
-        windows_v7.split_windows_v7(windows_out, write_if_changed, log)
-        with open(os.path.join(public, "docs", "versions.txt"), "rb") as fh:  # the Changelog source
-            write_if_changed(os.path.join(windows_out, "versions.txt"), fh.read())
-
-    if v7 and not (args.no_editor and args.no_social):
-        # the hub and editor pages are Krunker v10's (the live site mirror), not v7.1.4's:
-        # tools/ui-import/v10_hub_editor.py, doc/v10/editor-social.md
-        import v10_hub_editor
-        pages = tuple(p for p, skip in (("social.html", args.no_social), ("editor.html", args.no_editor)) if not skip)
-        v10_hub_editor.import_pages(ui_dir, write_if_changed, log, REFS["v10"]["public"], pages)
-    elif not args.no_editor or not args.no_social:
-        if not args.no_editor:
-            import editor_page  # Krunker's editor.html + its stylesheets (tools/ui-import/editor_page.py)
-            editor_page.import_editor(ui_dir, write_if_changed, log, public, v7)
-        if not args.no_social:
-            import social_page  # Krunker's social.html + its stylesheets/images (tools/ui-import/social_page.py)
-            social_page.import_social(ui_dir, write_if_changed, log, public, v7)
-    if not args.no_viewer:
-        import viewer_page  # Krunker's viewer.html, dat.gui's stylesheet, the viewer store tables (tools/ui-import/viewer_page.py)
-        viewer_page.import_viewer(ui_dir, write_if_changed, log, public, store_table=args.viewer_store)
-    if not args.no_assets:
-        import menu_assets  # every image the pages and the C UI reference (tools/ui-import/menu-assets-v7.txt)
-        menu_assets.import_menu_assets(ui_dir, write_if_changed, log, public, os.path.join(HERE, ref["manifest"]), auto=v7)
     return 0
 
 
 def import_v10(args, ui_dir, public, ref):
-    """--ref v10: the live page into <ui>/v10/ (v10_page.py), its fonts (+ .ttf) and every file the
-    page, its stylesheets and the C UI's image list reference, from the mirror. The material icon
-    fonts are byte-identical to v7's, so the ligature headers are not regenerated."""
+    """The live page into <ui>/ (v10_page.py), its window templates, its fonts (+ .ttf) and every
+    file the page, its stylesheets and the C UI's image list reference, from the mirror."""
     import menu_assets
     import v10_page
     client_js = args.client_js or ref.get("client_js")
@@ -407,7 +363,7 @@ def import_v10(args, ui_dir, public, ref):
             rel = os.path.relpath(woff2, out)
             src = os.path.join(public, rel)
             if not os.path.isfile(src):
-                src = os.path.join(ui_dir, rel)  # the live site 404s on it (e.g. Play subsets): v7's copy
+                src = os.path.join(ui_dir, rel)  # the live site 404s on it (e.g. Play subsets): the copy in ui/
             if os.path.isfile(src):
                 with open(src, "rb") as fh:
                     write_if_changed(woff2, fh.read())
@@ -426,7 +382,7 @@ def import_v10(args, ui_dir, public, ref):
             seen.add(dest)
             path = os.path.join(public, src)
             if not os.path.isfile(path):
-                fallback = os.path.join(ui_dir, src)  # the live hosts no longer serve it: v7's copy
+                fallback = os.path.join(ui_dir, src)  # the live hosts no longer serve it: the copy in ui/
                 if not os.path.isfile(fallback):
                     missing += 1
                     continue

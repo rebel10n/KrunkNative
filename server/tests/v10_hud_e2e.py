@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""The in-game HUD on the Krunker v10.0.2 page (ui/v10, client/src/ui/hud_v10.c), end to end.
+"""The in-game HUD on the Krunker v10.0.2 page (ui/, client/src/ui/hud_v10.c), end to end.
 
   python3 -I server/tests/v10_hud_e2e.py BUILD_DIR      (run from the repository root)
 
-One headless client_bin --offline (Kanji, a sandbox bot) on the v10 page (KRUNKNATIVE_UI_DIR=ui/v10)
+One headless client_bin --offline (Kanji, a sandbox bot) on the v10 page (ui/)
 plays a match through the menu, spectating (setSpect: v10 shows the Spectate switch to accounts
 only, hideSpectateIfGuestUser), spawn, the scoreboard (Tab), a death, respawn, ESC,
 playing again and the end of the match, and checks what the player sees at each step against what
@@ -148,8 +148,7 @@ def run(attempt):
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
     env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": os.path.join(WORK, "cfg"),
                 "XDG_STATE_HOME": os.path.join(WORK, "state"), "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UPDATES_URL": "off",
-                "KRUNKNATIVE_INPUT_SCRIPT": script, "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
-                "KRUNKNATIVE_UI_DIR": os.path.join(REPO, "ui", "v10")})
+                "KRUNKNATIVE_INPUT_SCRIPT": script, "KRUNKNATIVE_WINDOW_SIZE": "1280x720"})
     with open(log, "w") as out:
         p = subprocess.Popen(["stdbuf", "-oL", f"{BUILD}/client_bin", "--offline", "--map", "kanji"], stdout=out,
                              stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)

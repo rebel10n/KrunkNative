@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Krunker v10.0.2 What's New, Guide and Community & Events end to end (client/src/ui/v10_news.c,
-services/brain/community.c) on the v10 page (ui/v10) against a real kn_brain and a brain-linked
+services/brain/community.c) on the v10 page (ui/) against a real kn_brain and a brain-linked
 server_bin node.
 
   python3 -I server/tests/v10_news_e2e.py BUILD_DIR      (run from the repository root)
@@ -157,8 +157,7 @@ def client(name, brain_port, script, storage, secs=150):
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
     env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": cfg,
                 "XDG_STATE_HOME": os.path.join(WORK, name + "-state"), "KRUNKNATIVE_NO_BROWSER": "1",
-                "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
-                "KRUNKNATIVE_UI_DIR": "ui/v10", "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port,
+                "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port,
                 "KRUNKNATIVE_NET_TRANSPORT": "tcp", "KRUNKNATIVE_UPDATES_URL": "off"})
     p = subprocess.Popen(["stdbuf", "-oL", "-eL", f"{BUILD}/client_bin"], cwd=ROOT, stdout=open(log, "w"),
                          stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)
@@ -330,7 +329,7 @@ def main():
     if not os.access(f"{BUILD}/client_bin", os.X_OK):
         print("v10_news_e2e: no client_bin in %s: skipped" % BUILD)
         return 77
-    with open(os.path.join(ROOT, "ui", "v10", "windows", "kn-versions.txt")) as f:
+    with open(os.path.join(ROOT, "ui", "windows", "kn-versions.txt")) as f:
         version = re.search(r"== (?:UPDATE|INITIAL RELEASE V?)\s*([\d.]+)", f.read()).group(1)
     scratch = [sys.executable, "-I", os.path.join(ROOT, "services", "brain", "tests", "db_scratch.py"), ROOT]
     r = subprocess.run(scratch + ["create", DRIVER, NAME], capture_output=True)

@@ -3,11 +3,10 @@
 Captured from the offline v10 sandbox (`tools/uidiff/capture-v10-rewards.js`: the v10.0.2 client
 served from the local mirror of krunker.io, no network, no WebSocket, no login), 1280x720.
 The signed-in states use `tools/uidiff/season_fixture.json`'s account and Season 7 pass, handed to
-v10's own handlers. The uidiff scenarios are `tools/uidiff/scenarios/v10/rewards-*.json` with their
-regions in `tools/uidiff/regions/v10/`:
+v10's own handlers. The uidiff scenarios are `tools/uidiff/scenarios/rewards-*.json` with their
+regions in `tools/uidiff/regions/`:
 
-    UIDIFF_SCENARIO_DIR=tools/uidiff/scenarios/v10 UIDIFF_REGION_DIR=tools/uidiff/regions/v10 \
-      KRUNKNATIVE_UI_DIR=ui/v10 UIDIFF_HEADLESS=1 tools/uidiff/uidiff.sh cmake-build-debug/client_bin \
+    UIDIFF_HEADLESS=1 tools/uidiff/uidiff.sh cmake-build-debug/client_bin \
       rewards-signup rewards-register rewards-chall-guest rewards-chall-home rewards-chall-map \
       rewards-chall-weapon rewards-bp-guest rewards-bp-home rewards-bp-vip rewards-bp-chal rewards-menu-account
 

@@ -1,0 +1,22 @@
+{
+  "scenario": "social-clan",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 6.0
+  },
+  "regions": [
+    {
+      "name": "social",
+      "rect": [
+        362,
+        164,
+        556,
+        392
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 6.0,
+      "note": "the v10 Social hub popup / view (v10_social.c markup, Chromium + v10 CSS)"
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "scenario": "market-catalog",
+  "defaults": {
+    "fuzz": 10,
+    "max_pct": 4.0
+  },
+  "regions": [
+    {
+      "name": "sidebar",
+      "rect": [
+        95,
+        134,
+        88,
+        445
+      ],
+      "kind": "text",
+      "note": "Catalog active"
+    },
+    {
+      "name": "filter",
+      "rect": [
+        191,
+        120,
+        897,
+        142
+      ],
+      "kind": "text",
+      "note": "Items header, search, selects, filter tabs, rarities"
+    }
+  ]
+}

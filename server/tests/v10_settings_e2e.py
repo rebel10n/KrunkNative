@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Krunker v10.0.2 Settings window end-to-end on the v10 page (ui/v10): open Settings, change a setting in
+"""Krunker v10.0.2 Settings window end-to-end on the v10 page (ui/): open Settings, change a setting in
 every tab of both views (basic and advanced) and the Client tab, check the game applied it (the client's
 "[ui] setting" / "[render] setting" lines) and that it persisted (knSettings / knClient storage), then read
 it back in a second run. Also: no "Game version" row and no "Manage Ads" button, search, the Pro preset
@@ -9,7 +9,7 @@ Unlimited Ammo), and Reset (settings and binds back to their defaults).
 
   python3 -I server/tests/v10_settings_e2e.py BUILD_DIR   (from the repository root)
 
-Each run is one headless offline client_bin (KRUNKNATIVE_HEADLESS=1, KRUNKNATIVE_UI_DIR=ui/v10) driven by
+Each run is one headless offline client_bin (KRUNKNATIVE_HEADLESS=1) driven by
 an input script (client/src/input_script.c: call / clickid / clicksel / type / down / up and the text /
 nodes / state probes). No server, no ports. Exit code 0 when every check passed; logs are kept in
 ~/.cache/kn-v10-settings-* on failure.
@@ -29,7 +29,7 @@ CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-v10-settings-", dir=CACHE if os.path.isdir(CACHE) else None)
 CFG = os.path.join(WORK, "cfg")
 DOWNLOADS = os.path.join(WORK, "downloads")
-UI_DIR = os.environ.get("KN_V10_UI_DIR", "ui/v10" if os.path.isfile("ui/v10/index.html") else "ui")
+UI_DIR = os.environ.get("KN_V10_UI_DIR", "ui")
 failures = []
 os.makedirs(DOWNLOADS, exist_ok=True)
 

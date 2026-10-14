@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Krunker v10.0.2 Ranked / Leaderboards / Turf Wars end to end from the v10 page (ui/v10;
+"""Krunker v10.0.2 Ranked / Leaderboards / Turf Wars end to end from the v10 page (ui/;
 client/src/ui/ranked_ui.c, v10_competitive.c, turf_ui.c) against a real kn_brain and server_bin.
 
   python3 -I server/tests/v10_competitive_e2e.py BUILD_DIR      (run from the repository root)
@@ -220,8 +220,7 @@ def client(name, brain_port, storage):
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
     env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": cfg,
                 "XDG_STATE_HOME": os.path.join(WORK, name + "-state"), "KRUNKNATIVE_NO_BROWSER": "1",
-                "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
-                "KRUNKNATIVE_UI_DIR": "ui/v10", "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port,
+                "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port,
                 "KRUNKNATIVE_NET_TRANSPORT": "tcp", "KRUNKNATIVE_FINDER_URL": "http://127.0.0.1:%d/servers" % brain_port})
     p = subprocess.Popen(["stdbuf", "-oL", "-eL", f"{BUILD}/client_bin"], cwd=ROOT, stdout=open(log, "w"),
                          stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)

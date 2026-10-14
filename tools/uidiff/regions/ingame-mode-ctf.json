@@ -7,12 +7,7 @@
   "regions": [
     {
       "name": "timer",
-      "rect": [
-        7,
-        7,
-        121,
-        50
-      ],
+      "rect": [7, 7, 121, 50],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
@@ -20,12 +15,7 @@
     },
     {
       "name": "match-info",
-      "rect": [
-        7,
-        58,
-        99,
-        28
-      ],
+      "rect": [7, 58, 99, 28],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
@@ -33,12 +23,7 @@
     },
     {
       "name": "ping",
-      "rect": [
-        133,
-        7,
-        38,
-        16
-      ],
+      "rect": [129, 7, 38, 16],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
@@ -46,12 +31,7 @@
     },
     {
       "name": "chat-input",
-      "rect": [
-        7,
-        611,
-        243,
-        36
-      ],
+      "rect": [7, 611, 243, 36],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
@@ -59,12 +39,7 @@
     },
     {
       "name": "player-card",
-      "rect": [
-        7,
-        653,
-        243,
-        60
-      ],
+      "rect": [7, 653, 243, 60],
       "kind": "image",
       "fuzz": 8,
       "max_pct": 1.5,
@@ -72,12 +47,7 @@
     },
     {
       "name": "weapons",
-      "rect": [
-        1190,
-        540,
-        83,
-        130
-      ],
+      "rect": [1190, 540, 83, 130],
       "kind": "image",
       "fuzz": 8,
       "max_pct": 1.5,
@@ -85,12 +55,7 @@
     },
     {
       "name": "ammo",
-      "rect": [
-        1146,
-        675,
-        127,
-        38
-      ],
+      "rect": [1151, 675, 122, 38],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
@@ -98,12 +63,7 @@
     },
     {
       "name": "crosshair",
-      "rect": [
-        590,
-        310,
-        100,
-        100
-      ],
+      "rect": [590, 310, 100, 100],
       "kind": "image",
       "fuzz": 8,
       "max_pct": 4.0,
@@ -112,16 +72,11 @@
     },
     {
       "name": "game-message",
-      "rect": [
-        400,
-        8,
-        480,
-        30
-      ],
+      "rect": [400, 8, 480, 30],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#gameMessage band (#topMidHold top -5px, scale .8): the gmsg / CTF flag notice, or empty; KN: #topMidHold at --kn-hud-top (hud.css), 8px lower than v7 at 720p (intentional margin), compared against v7's band",
+      "note": "#gameMessage band (#topMidHold top -5px, scale .8): the gmsg / CTF flag notice, or empty; KrunkNative starts #topMidHold at the corners' 15px margin (hud.css), 8 px lower",
       "ref_offset": [
         0,
         -8
@@ -129,12 +84,7 @@
     },
     {
       "name": "team-scores",
-      "rect": [
-        9,
-        84,
-        200,
-        30
-      ],
+      "rect": [9, 84, 200, 30],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,

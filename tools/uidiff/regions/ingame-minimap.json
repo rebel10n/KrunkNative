@@ -7,12 +7,7 @@
   "regions": [
     {
       "name": "timer",
-      "rect": [
-        7,
-        183,
-        178,
-        17
-      ],
+      "rect": [7, 183, 178, 17],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
@@ -20,12 +15,7 @@
     },
     {
       "name": "match-info",
-      "rect": [
-        7,
-        198,
-        178,
-        24
-      ],
+      "rect": [7, 198, 178, 24],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
@@ -33,12 +23,7 @@
     },
     {
       "name": "ping",
-      "rect": [
-        184,
-        7,
-        38,
-        16
-      ],
+      "rect": [180, 7, 38, 16],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
@@ -46,12 +31,7 @@
     },
     {
       "name": "chat-input",
-      "rect": [
-        7,
-        611,
-        243,
-        36
-      ],
+      "rect": [7, 611, 243, 36],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
@@ -59,12 +39,7 @@
     },
     {
       "name": "player-card",
-      "rect": [
-        7,
-        653,
-        243,
-        60
-      ],
+      "rect": [7, 653, 243, 60],
       "kind": "image",
       "fuzz": 8,
       "max_pct": 1.5,
@@ -72,12 +47,7 @@
     },
     {
       "name": "weapons",
-      "rect": [
-        1190,
-        540,
-        83,
-        130
-      ],
+      "rect": [1190, 540, 83, 130],
       "kind": "image",
       "fuzz": 8,
       "max_pct": 1.5,
@@ -85,25 +55,15 @@
     },
     {
       "name": "ammo",
-      "rect": [
-        1146,
-        675,
-        127,
-        38
-      ],
+      "rect": [1151, 675, 122, 38],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#ammoHolder: 28 | 28 + ammo icon"
+      "note": "#ammoHolder: 30 | 30 + ammo icon"
     },
     {
       "name": "crosshair",
-      "rect": [
-        590,
-        310,
-        100,
-        100
-      ],
+      "rect": [590, 310, 100, 100],
       "kind": "image",
       "fuzz": 8,
       "max_pct": 4.0,
@@ -111,16 +71,28 @@
     },
     {
       "name": "minimap",
-      "rect": [
-        7,
-        7,
-        178,
-        178
-      ],
+      "rect": [7, 7, 178, 178],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#miniMapCanvas: Kanji's mmId image turned with the view, the N/E/S/W ring, our arrow"
+      "skip": true,
+      "note": "#miniMapOverlay: round (.roundMap) from the first frame, the timer under it. The offline v10 sandbox draws no map in it (Kanji's mmId image is not in the mirror); KrunkNative draws Kanji's blocks"
+    },
+    {
+      "name": "minimap-ring",
+      "rect": [10, 6, 130, 22],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "the ring's top edge and the N letter"
+    },
+    {
+      "name": "leaderboard",
+      "rect": [1066, 7, 207, 34],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#leaderboardHolder: v10 always shows it (switchLeaderboard sets display = true, which CSS ignores)"
     }
   ]
 }

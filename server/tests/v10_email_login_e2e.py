@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Sign in with an email, end to end: Krunker v10.0.2's login / register modal (client/src/ui/v10_login.c,
-account_ui.c) on the v10 page (ui/v10) against a real kn_brain (accounts.c SQL_LOGIN_EMAIL, migration
+account_ui.c) on the v10 page (ui/) against a real kn_brain (accounts.c SQL_LOGIN_EMAIL, migration
 0122_email_login) and one brain-linked server_bin for the menu's map.
 
   python3 -I server/tests/v10_email_login_e2e.py BUILD_DIR      (run from the repository root)
@@ -118,14 +118,11 @@ def client(name, brain_port, script, secs=240):
         f.write(script)
     cfg = os.path.join(WORK, name + "-cfg")
     os.makedirs(os.path.join(cfg, "krunknative"), exist_ok=True)
-    with open(os.path.join(cfg, "krunknative", "knRuleset.json"), "w") as f:
-        f.write("v10")
     log = os.path.join(WORK, name + ".log")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
     env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": cfg,
                 "XDG_STATE_HOME": os.path.join(WORK, name + "-state"), "KRUNKNATIVE_NO_BROWSER": "1",
-                "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
-                "KRUNKNATIVE_UI_DIR": "ui/v10", "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port,
+                "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port,
                 "KRUNKNATIVE_NET_TRANSPORT": "tcp", "KRUNKNATIVE_UPDATES_URL": "off",
                 "KRUNKNATIVE_FINDER_URL": "http://127.0.0.1:%d/servers" % brain_port})
     p = subprocess.Popen(["stdbuf", "-oL", "-eL", f"{BUILD}/client_bin"], cwd=ROOT, stdout=open(log, "w"),

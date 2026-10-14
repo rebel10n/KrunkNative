@@ -47,7 +47,6 @@ static Client *g_client;
 static AccountInfo g_acc;
 static int g_logged_in;
 static int g_header_dirty = 1;   // cK() pending (page not up yet / offsetWidth not laid out)
-static int g_header_tries;
 static int g_restore_sent;       // a token restore is in flight
 static int g_tab_index;          // windows[4].tabIndex
 static int g_logout_sessions;    // d1: "Logout of all Sessions" clicked
@@ -279,61 +278,19 @@ static void apply_menu_name(void) {
 
 // ------------------------------------------------------------------ cK(): header bar
 
-// updateMenuAccountData() (v7.1.4): #signedInHeaderBar (name, KR, junk, level bar and
-// box) for an account, #signedOutHeaderBar ("Login or Register") for a guest.
+// updateMenuAccountData(): Krunker v10's header bar and nav (v10_menu.c). Not the main page yet
+// (loading, or the hub / editor page): again on a later tick.
 static void update_header(void) {
     g_header_dirty = 0;
-    if (v10_menu_page()) { // Krunker v10's header bar (v10_menu.c)
-        v10_menu_account_changed();
-        return;
-    }
-    if (!html_ui_available() || !html_dom_by_id("signedInHeaderBar")) {
+    if (!v10_menu_page()) {
         g_header_dirty = 1;
         return;
     }
-    if (g_logged_in) {
-        set_display("signedOutHeaderBar", "none");
-        set_display("signedInHeaderBar", "");
-        HtmlElem el;
-        // premiumT && SETTINGS.tmp.premiumBadge ? alias : name (v7 privacy setting, WP-E part 2c)
-        if ((el = html_dom_by_id("menuAccountUsername"))) html_dom_set_text(el, g_acc.premium && !ui_setting_is_false("premiumBadge") ? g_acc.alias : g_acc.name);
-        if ((el = html_dom_by_id("menuKRCount"))) {
-            char funds[32], html[128];
-            comma_number(funds, sizeof(funds), g_acc.funds);
-            snprintf(html, sizeof(html), "%s <span style='color:#fbc02d'>KR</span>", funds);
-            html_dom_set_html(el, html);
-        }
-        // junk (crafting material): KrunkNative's accounts have none (the store economy is out of scope)
-        if ((el = html_dom_by_id("menuJNKCount"))) html_dom_set_html(el, "0.00<span class='material-icons' style='color:#cc51f8;font-size:27px;margin-left:5px;vertical-align:top;margin-right:-5px;'>plumbing</span>");
-        if ((el = html_dom_by_id("menuLevelBar"))) {
-            char w[16];
-            snprintf(w, sizeof(w), "%.6g%%", g_acc.level_prog); // menuLevelBar.style.width = levelProg + "%"
-            html_dom_set_style(el, "width", w);
-        }
-        if ((el = html_dom_by_id("mLevelContV"))) {
-            char lvl[16];
-            snprintf(lvl, sizeof(lvl), "%d", g_acc.level ? g_acc.level : 1);
-            html_dom_set_text(el, lvl);
-        }
-        if ((el = html_dom_by_id("mailCount"))) { // windows[29].mailCount(count)
-            char count[16] = "";
-            if (g_acc.mail_unread > 99) snprintf(count, sizeof(count), "99+");
-            else if (g_acc.mail_unread > 0) snprintf(count, sizeof(count), "%d", g_acc.mail_unread);
-            html_dom_set_html(el, count[0] ? count : "0");
-            html_dom_set_display(el, g_acc.mail_unread > 0 ? "block" : "none");
-        }
-        HtmlElem bar = html_dom_by_id("signedInHeaderBar");
-        if (bar && html_dom_offset_width(bar) > 0.0f) html_dom_set_style(bar, "border-radius", "0px");
-        else if (g_header_tries++ < 30) g_header_dirty = 1; // laid out on a later frame
-    } else {
-        set_display("signedOutHeaderBar", "");
-        set_display("signedInHeaderBar", "none");
-    }
+    v10_menu_account_changed();
 }
 
 static void mark_header(void) {
     g_header_dirty = 1;
-    g_header_tries = 0;
 }
 
 // showAccResp(html)
@@ -2277,7 +2234,7 @@ void account_ui_scenario(const cJSON *account) {
     cJSON_Delete(g_scenario_c2fa);
     g_scenario_c2fa = cJSON_IsArray(c2fa) ? cJSON_Duplicate(c2fa, 1) : NULL;
     mark_header();
-    if (v10_menu_page()) v10_menu_account_changed(); // the v10 header and nav now: a scenario renders before account_ui_tick
+    v10_menu_account_changed(); // the header and nav now: a scenario renders before account_ui_tick
     menu_update_class_box();
 }
 

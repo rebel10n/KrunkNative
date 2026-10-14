@@ -2,7 +2,7 @@
 // window.openExchange(tab, itemIndex) from the main menu's #menuBtnMarket (genericPopup({component:
 // _46780}, 'exchangeModal'), v10.js 132601-136984), ported from its Svelte components to C over
 // html_dom.h. The markup is v10's templates verbatim (class names with their svelte-* hashes, so
-// ui/v10/css/svelte.css styles them), rebuilt into #genericPop as the state changes:
+// ui/css/svelte.css styles them), rebuilt into #genericPop as the state changes:
 //
 //   sidebar   Market / Trading / Black Mkt / Junkyard / Catalog / Guide (_44583, svelte-berov0)
 //   Market    Browse / My Inventory / My Sales / History / Stats (_46437, svelte-1ugt6n9), the filter

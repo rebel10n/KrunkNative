@@ -74,7 +74,7 @@ static const char *const KEYBOARD_MAP[256] = {
     NULL, NULL, NULL, NULL,
 };
 // The `toggle: true` settings of v10.0.2's SETTINGS.list (settings order) offered by the
-// Toggle rows: value, "name [category header]" (windows[6].gen; ui/v10/windows/controls-1.html).
+// Toggle rows: value, "name [category header]" (windows[6].gen; ui/windows/controls-1.html).
 // v10 also lists the hidden per-weapon clones (scrollDir_0, ...); KrunkNative has no per-weapon
 // settings yet, so they are left out.
 static const char *const TOGGLE_SETTINGS[][2] = {

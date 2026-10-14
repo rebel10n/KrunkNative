@@ -12,7 +12,6 @@
 //     drawn in the same shell: _70483(loadoutTab) + .wcpRow(#charPreviewSlot, .wcpItems(gen())).
 //     Their gen() is v7's (ui_loadout.c) without the close button, the cosmetics going back to
 //     the Customize tab (goBackWindow(52))
-// The v7 page keeps ui_loadout.c's own markup: everything here is gated on v10_page().
 #include <ui_logic.h>
 #include <backend_ui.h>
 #include <online_mode.h>
@@ -28,10 +27,6 @@
 
 // ---------------------------------------------------------------- page
 
-int v10_page(void) {
-    const UiWindowMeta *m = ui_windows_meta("54");
-    return m && m->label && !strcmp(m->label, "title_selection");
-}
 
 // ---------------------------------------------------------------- titles (gapi /titles)
 
@@ -294,7 +289,6 @@ static char *gen_shell(const int id) {
 }
 
 char *v10_customize_window_gen(const int id) {
-    if (!v10_page()) return NULL;
     if (id == 3) return gen_loadout();
     if (id == TITLE_WINDOW) return gen_titles();
     if (shell_tab(id) >= 0) return gen_shell(id);
@@ -302,7 +296,7 @@ char *v10_customize_window_gen(const int id) {
 }
 
 int v10_customize_window_alias(const int id) {
-    if (id == 53 && v10_page()) { // showWindow: 53 == id && (windows[2].tabIndex = 2, id = 3)
+    if (id == 53) { // showWindow: 53 == id && (windows[2].tabIndex = 2, id = 3)
         ui_loadout_set_tab(CUSTOMIZE_TAB);
         return 3;
     }
@@ -355,7 +349,7 @@ static int l_slot_mousedown(void *user, const HtmlEvent *ev, const HtmlArg *args
 void v10_customize_tick(void) {
     v10_daily_spin_tick(); // the sidebar's Daily Spin follows the account (v10_daily_spin.c)
     static int listening;
-    if (!listening && v10_page()) {
+    if (!listening && html_dom_by_id("charPreviewSlot")) {
         listening = 1;
         html_ui_set_listener("charPreviewSlot", "mousedown", l_slot_mousedown);
     }
@@ -382,7 +376,7 @@ static int arg_int(const HtmlArg *args, const int argc, const int i, const int d
 
 int v10_customize_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) ev;
-    if (!name || !v10_page()) return -1;
+    if (!name) return -1;
     if (!strcmp(name, "windows.2.tabIndex=")) { // the toolbar: windows[2].tabIndex = n; showWindow(3, true, true)
         ui_loadout_set_tab(arg_int(args, argc, 0, 1));
         return 1;

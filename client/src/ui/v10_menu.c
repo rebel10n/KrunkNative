@@ -1,7 +1,7 @@
-// Krunker v10.0.2 main menu shell on the v10 page (ui/v10, doc/v10/ui.md 2).
+// Krunker v10.0.2 main menu shell on the v10 page (ui/, doc/v10/ui.md 2).
 //
 // v10 mounts its menu as Svelte components (_52533 into #mainMenuUIMount, v10:222882): the page
-// (ui/v10/index.html) keeps the markup those components render for a guest, without their
+// (ui/index.html) keeps the markup those components render for a guest, without their
 // listeners. This file gives that markup v10's behaviour through the page's own inline-handler
 // contract (onclick names C answers, doc/html-ui-engine.md), so the native engine and web_dom.c
 // behave the same:

@@ -12,7 +12,7 @@
 //   * the menu entries: #menuBtnRanked (openRankedMenu, ranked_ui.c), #menuBtnTurfWars (turf_ui.c),
 //     #menuBtnLeaderboards (openLeaderboards).
 //
-// The markup is v10's templates (_4461 strings) with the same classes, so ui/v10/css/svelte.css
+// The markup is v10's templates (_4461 strings) with the same classes, so ui/css/svelte.css
 // styles it; the events that Svelte binds with __click are inline handlers here. Data comes from
 // kn_brain: /api/leaderboards/* (services/brain/leaderboards.c), /mm/ranked/* (ranked.c) and
 // /api/territorial-wars/* (turf.c).

@@ -169,54 +169,8 @@ static void gen_card(StrBuf *sb, const int track, const int col, const int compl
     sb_append(sb, "</div>");
 }
 
-static void gen_home(StrBuf *sb) {
-    const int levels = g_bp->item_count;
-    const int64_t max_bpp = bp_max_bpp(g_bp);
-    int complete = 0;
-    int64_t points = 0;
-    g_lvl = bp_level(g_bp, g_bpp, &points, &complete);
-    const int vip = g_tier >= 1;
-    const int64_t now = g_now_override ? g_now_override : (int64_t) time(NULL);
-    const int64_t cap = bp_cap_total(g_bp, now);
-    const int64_t avail = bp_available(g_bp, g_bpp, now);
-    sb_append(sb, "<div style=\"display: inline-block;position: relative;\">");
-    sb_append(sb, "<div class=\"bpTopH\">\n\t\t\t\t<div class=\"bpSeasonH\">\n\t\t\t\t\t");
-    sb_append_esc(sb, g_bp->name);
-    sb_append(sb, "\n\t\t\t\t</div>");
-    if (complete) {
-        sb_append(sb, "<div class=\"bpLevelH\">\n\t\t\t\t\t<div class=\"bpLevelText\">Battlepass Complete</div>\n\t\t\t\t</div>");
-    } else {
-        sb_appendf(sb, "<div class=\"bpLevelH\">\n\t\t\t\t\t<div class=\"bpLevelText\">Level %d/%d</div>\n\t\t\t\t\t<div class=\"bpXPText\">\n\t\t\t\t\t\t<span style='color:#fbc02d'>BPP</span> %lld/%d\n\t\t\t\t\t\t<div class=\"bpXPBarH\">\n\t\t\t\t\t\t\t<div class=\"bpXPBar\" style=\"width:%.15g%%;\"></div>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t</div>",
-                   g_lvl, levels, (long long) points, g_bp->bpp_per_level, (double) points / g_bp->bpp_per_level * 100.0);
-        sb_appendf(sb, "\n\t\t\t\t\t<div class=\"bpXPText\">\n\t\t\t\t\t\tAvailable BPP <img class=\"bpXPIcon\" onmouseenter=\"windows[5].showBalloon()\" onmouseleave=\"windows[5].hideBalloon()\" src=\"./img/frvr-ui/info-icon.svg\">\n\t\t\t\t\t\t<div class=\"bpXPBarH\">\n\t\t\t\t\t\t\t<div class=\"bpXPBar\" style=\"width:%.15g%%;\"></div>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t</div>",
-                   cap > 0 ? (double) avail / (double) cap * 100.0 : 0.0);
-        sb_appendf(sb, "\n\t\t\t\t\t<div class=\"bpInfoBalloon\">\n\t\t\t\t\t\t<div>BPP has a daily cap. The amount you can earn increases every day.</div>\n\t\t\t\t\t\t<div style=\"margin-top: 20px\">Current available BPP: <span style='color:#00b1ff'>%lld</span></div>\n\t\t\t\t\t</div>\n\t\t\t\t</div>",
-                   (long long) avail);
-    }
-    sb_append(sb, "</div>");
-    sb_append(sb, "<div class=\"bpMidH\">");
-    sb_appendf(sb, "<div class=\"bpRowTitles\">\n\t\t\t\t<div class=\"bpCard free\">\n\t\t\t\t\t<div class=\"bpRowTitleText\">Free</div>\n\t\t\t\t</div>\n\t\t\t\t<div class=\"bpCard vip active\">\n\t\t\t\t\t%s\n\t\t\t\t\t<div class=\"bpRowTitleText\" style=\"left: 19%%;\">VIP</div>\n\t\t\t\t</div>\n\t\t\t</div>",
-               vip ? "" : "<div class=\"bpCardLock\"></div>");
-    sb_append(sb, "<div class=\"bSliderH\">\n\t\t\t\t<div class=\"bSliderBtn disabled\" onmouseenter=\"playTick(0.1);\" onmousedown=\"playSelect(0.1);windows[5].updateScroll(-1);\">\n\t\t\t\t\t<div class=\"bpSliderArrow\"></div>\n\t\t\t\t</div>\n\t\t\t</div>");
-    sb_append(sb, "<div class=\"bpCols\" onwheel=\"windows[5].updateScrollWheel();\">");
-    for (int col = 0; col < levels; col++) {
-        const int level = col + 1;
-        const int done = g_lvl >= level, active = g_lvl == level;
-        sb_appendf(sb, "<div class=\"bpCol\" style='%s'>\n\t\t\t\t\t<div class=\"bpLevelNum%s\">%d</div>\n\t\t\t\t\t", done ? "" : "filter:grayscale(100%)",
-                   active ? " active" : done ? " completed" : "", level);
-        for (int track = 0; track < BP_TRACKS; track++) gen_card(sb, track, col, done, vip);
-        sb_append(sb, "\n\t\t\t\t</div>");
-    }
-    sb_append(sb, "</div>");
-    sb_append(sb, "<div class=\"bSliderH\">\n\t\t\t\t<div class=\"bSliderBtn\" onmouseenter=\"playTick(0.1);\" onmousedown=\"playSelect(0.1);windows[5].updateScroll(1);\">\n\t\t\t\t\t<div class=\"bpSliderArrow right\"></div>\n\t\t\t\t</div>\n\t\t\t</div>");
-    sb_append(sb, "</div>");
-    sb_appendf(sb, "<div class=\"bpBotH\">\n\t\t\t\t<div class=\"bpBtn claim%s\" onmouseenter=\"playTick(0.1);\" onclick=\"playSelect(0.1);windows[5].purchasePop();\">Purchase VIP Tier</div>\n\t\t\t\t<div class=\"bpBtn skip%s\" onmouseenter=\"playTick(0.1);\" onclick=\"playSelect(0.1);windows[5].skipLevelPop()\">Skip levels</div>\n\t\t\t</div>",
-               vip ? " blockClick" : "", g_bpp >= max_bpp ? " blockClick" : "");
-    sb_append(sb, "</div>");
-}
-
 // ------------------------------------------------------------------ Krunker v10.0.2 windows[5].gen
-// (index.js:212116; the v10 page: v10_page()). Differences from v7.1.4: the levels' own costs
+// (index.js:212116). Differences from v7.1.4: the levels' own costs
 // (leveldata, _52111) with "BP XP: x / need", the season countdown (#bpCountdownTimer,
 // startBPCountdown), a 500 BPP daily cap, KR / junk cards (krdata / jnkdata), the claimed /
 // unlocked / freeCanClaim classes and the rarity label, "VIP Tier Purchased" and Gift VIP Tier.
@@ -477,8 +431,7 @@ static char *gen_window(void) {
         sb_appendf(&sb, "<div style=\"font-size: 40px;text-align: center;display: inline-block;position: relative;width: 100%%;\">\n\t\t\t\t%s\n\t\t\t</div>",
                    g_bp_status == 2 && g_has_progress ? "No Battle Pass Found" : "Loading Battle Pass");
     } else if (g_tab == 0) {
-        if (v10_page()) gen_home_v10(&sb);
-        else gen_home(&sb);
+        gen_home_v10(&sb);
     } else {
         if (!account_challenges()) account_challenges_request();
         gen_challenges(&sb);

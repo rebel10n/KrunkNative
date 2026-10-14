@@ -20,5 +20,5 @@ int update_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
 // The console's `update [check|now|download]`.
 void update_ui_console(int argc, char **argv);
 // --render-scenario: state.update {"state":"outdated"|"available","latest":"…","launcher":bool}
-// shows the box without a network check (tools/uidiff/scenarios/menu-outdated.json).
+// shows the box without a network check (a scenario state, tools/uidiff/README.md).
 void update_ui_scenario(const cJSON *update);

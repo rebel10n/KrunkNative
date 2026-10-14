@@ -8,7 +8,7 @@
 //     detail (_35483, window.openPost), the compose popup (_49624), the follow list (_34637) and the
 //     gift / report popups;
 //   - the Social menu item's unread badge and the in-game "[DM from ...]" chat lines.
-// Markup is v10's (the svelte-<hash> classes of ui/v10/css/svelte.css); data comes from kn_brain:
+// Markup is v10's (the svelte-<hash> classes of ui/css/svelte.css); data comes from kn_brain:
 // gapi calls through v10_gapi() (services/brain/social_gapi.c) and the friends event bus as
 // ["eb", {...}] frames on the social socket (services/brain/social_eb.c). KrunkNative adds element
 // ids (v10s*) for focus / scroll restoration and tests; they carry no style.

@@ -1,5 +1,5 @@
 {
-  "ref": "doc/ref/krunker-v7.1.4/ingame/ingame-minimap.png",
+  "ref": "doc/ref/krunker-v10/ingame/ingame-minimap.png",
   "size": [
     1280,
     720
@@ -21,8 +21,8 @@
       "health": 100,
       "maxHealth": 100,
       "healthSegments": 6,
-      "ammo": 28,
-      "ammoMax": 28,
+      "ammo": 30,
+      "ammoMax": 30,
       "ammoLimit": false,
       "melee": false,
       "reloading": false,
@@ -67,8 +67,18 @@
       -182,
       -1.5707963267948966,
       0
-    ]
+    ],
+    "scoreboard": [
+      {
+        "rank": 1,
+        "name": "Local User",
+        "score": 0
+      }
+    ],
+    "settings": {
+      "showMinimap": true
+    }
   },
   "frames": 3,
-  "note": "The minimap on Kanji (an official map in KrunkNative; the reference clears v7's customsData) at a fixed pose."
+  "note": "The minimap on Kanji (v10's showMinimap is off by default: the capture turned it on) at the pose v10's sandbox spawned at. Reference: the offline v10 sandbox (capture-v10.js)."
 }

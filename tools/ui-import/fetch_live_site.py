@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Mirror the live krunker.io site (the Krunker v10 menu) into a staging ``public/`` tree.
 
-``import.py --ref v10 --public <stage>/public`` turns it into ``ui/v10/``. The live site is split
+``import.py --public <stage>/public`` turns it into ``ui/``. The live site is split
 over two hosts: ``https://krunker.io/`` serves the pages, stylesheets, fonts and part of
 ``img/``; ``https://assets.krunker.io/`` (v10's ``assetsUrl``, also the bulk of ``img/``) the rest.
 The page rewrites asset-host URLs to the same relative paths, so both land in one tree:

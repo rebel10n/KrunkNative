@@ -1,5 +1,5 @@
 {
-  "ref": "doc/ref/krunker-v7.1.4/ingame/ingame-mode-point.png",
+  "ref": "doc/ref/krunker-v10/ingame/ingame-mode-point.png",
   "size": [
     1280,
     720
@@ -21,8 +21,8 @@
       "health": 100,
       "maxHealth": 100,
       "healthSegments": 6,
-      "ammo": 28,
-      "ammoMax": 28,
+      "ammo": 30,
+      "ammoMax": 30,
       "ammoLimit": false,
       "melee": false,
       "reloading": false,
@@ -63,8 +63,15 @@
     "modeHud": {
       "team": 1,
       "gameMessage": "next objective 00:45"
-    }
+    },
+    "scoreboard": [
+      {
+        "rank": 1,
+        "name": "Local User",
+        "score": 0
+      }
+    ]
   },
   "frames": 3,
-  "note": "Hardpoint at spawn: no team has scored (no #teamScores), gmsg next objective 00:45 (pinned)."
+  "note": "Hardpoint on Kanji: the team card and #gameMessage. Reference: the offline v10 sandbox (capture-v10.js)."
 }

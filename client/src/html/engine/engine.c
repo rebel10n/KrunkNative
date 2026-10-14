@@ -32,7 +32,6 @@
 #include "html_ui_backend.h"
 #include <GLFW/glfw3.h>
 #include <headless.h> /* headless_current_window: the UI window, also without a GLFW context */
-#include <shared.h>   /* ui_default_path: the fallback root of a page tree under ui/ */
 
 #include <math.h>
 #include <stdarg.h>
@@ -91,11 +90,6 @@ typedef struct ProfStat {
 
 struct Engine {
     char ui_dir[PATH_MAX];                   /* absolute, trailing slash */
-    /* ui/ (absolute, trailing slash) when ui_dir is another page tree (ui/v10, being ported to
-     * become ui/; ui/README.md), else "": files the tree lacks are read from ui/, because the C UI
-     * still writes ui/'s v7.1.4 markup and image paths (props, challenges, ranks ...) there.
-     * TODO(v10 switch): drop it when ui/v10 becomes ui/ */
-    char fallback_dir[PATH_MAX];
     char page[128];                          /* document file inside ui_dir ("index.html", "social.html", ...) */
 
     Dom *dom;
@@ -325,22 +319,14 @@ static void make_ui_dir(const char *ui_dir, char *out, size_t cap)
     snprintf(out, cap, "%s", tmp);
 }
 
-/* Reads <ui_dir><rel> (else <fallback_dir><rel>) into a malloc'd NUL-terminated buffer. */
+/* Reads <ui_dir><rel> into a malloc'd NUL-terminated buffer. */
 static char *read_ui_file(Engine *g, const char *rel, size_t *len_out)
 {
     char path[PATH_MAX];
     snprintf(path, sizeof(path), "%s%s", g->ui_dir, rel);
     unsigned char *buf = NULL;
     size_t len = 0;
-    int ok = read_file(path, &buf, &len) == 0 && buf;
-    if (!ok && g->fallback_dir[0]) {
-        free(buf);
-        buf = NULL;
-        snprintf(path, sizeof(path), "%s%s", g->fallback_dir, rel);
-        ok = read_file(path, &buf, &len) == 0 && buf;
-    }
-    if (!ok) {
-        free(buf);
+    if (read_file(path, &buf, &len) != 0 || !buf) {
         fprintf(stderr, "[html_engine] cannot read %s\n", path);
         return NULL;
     }
@@ -1896,8 +1882,6 @@ static Engine *engine_create(const char *ui_dir, const char *page, const int wid
         fprintf(stderr, "[html_engine] ui dir %s not found\n", g->ui_dir);
         goto fail;
     }
-    make_ui_dir(ui_default_path(), g->fallback_dir, sizeof(g->fallback_dir));
-    if (!strcmp(g->fallback_dir, g->ui_dir) || !dir_exists(g->fallback_dir)) g->fallback_dir[0] = 0;
     vlog("ui dir %s, viewport %dx%d, display %.0f Hz", g->ui_dir, g->fb_w, g->fb_h, g->display_hz);
 
     /* document */
@@ -1920,7 +1904,6 @@ static Engine *engine_create(const char *ui_dir, const char *page, const int wid
     /* text, images, animation */
     g->text = text_create(g->ui_dir);
     g->images = image_cache_create(g->ui_dir);
-    if (g->images && g->fallback_dir[0]) image_cache_set_fallback(g->images, g->fallback_dir);
     if (!g->text || !g->images) {
         fprintf(stderr, "[html_engine] text/image system creation failed\n");
         goto fail;
@@ -2129,17 +2112,7 @@ int html_ui_backend_load_page(const char *page)
         html_ui_page_ready();
         return 1;
     }
-    /* A page tree that lacks this page (ui/v10 has no editor / viewer page yet) shows ui/'s: the
-     * editor and viewer C code is written for ui/'s markup, stylesheets included. */
-    const char *dir = g_base->ui_dir;
-    char path[PATH_MAX];
-    snprintf(path, sizeof(path), "%s%s", g_base->ui_dir, page);
-    struct stat st;
-    if (g_base->fallback_dir[0] && stat(path, &st) != 0) {
-        dir = g_base->fallback_dir;
-        fprintf(stderr, "[html_engine] %s has no %s: showing %s%s\n", g_base->ui_dir, page, dir, page);
-    }
-    Engine *g = engine_create(dir, page, fb_w, fb_h);
+    Engine *g = engine_create(g_base->ui_dir, page, fb_w, fb_h);
     if (!g) {
         fprintf(stderr, "[html_engine] page %s failed to load, staying on %s\n", page, g_base->page);
         g_engine = g_base;

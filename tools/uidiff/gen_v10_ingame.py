@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Generates the v10 in-game uidiff scenarios: tools/uidiff/scenarios/v10/ingame-*.json and
-tools/uidiff/regions/v10/ingame-*.json.
+"""Generates the v10 in-game uidiff scenarios: tools/uidiff/scenarios/ingame-*.json and
+tools/uidiff/regions/ingame-*.json.
 
     python3 -I tools/uidiff/gen_v10_ingame.py
 
@@ -8,7 +8,7 @@ References: doc/ref/krunker-v10/ingame/, captured from the OFFLINE v10 sandbox (
 client on the mirrored page, nothing leaving the machine: tools/uidiff/capture-v10.js). The states
 are the v7.1.4 scenarios' (gen_scenarios.py, imported: same names, same sandbox moves), with v10's
 values where v10 differs (the Assault Rifle's 30 rounds); the region rects come from the v10
-captures' own layout (<name>.rects.json). Render on the v10 page: KRUNKNATIVE_UI_DIR=ui/v10.
+captures' own layout (<name>.rects.json). Rendered on the page (ui/).
 The JSON files are committed; edit this script and re-run instead of editing them by hand.
 """
 import copy
@@ -125,7 +125,7 @@ def main():
         rc = rects(name)
         regs = g.mode_regions(rc)
         for r in regs:
-            if r["name"] == "game-message":  # KrunkNative's top margin for #topMidHold (ui/v10/css/hud.css)
+            if r["name"] == "game-message":  # KrunkNative's top margin for #topMidHold (ui/css/hud.css)
                 r.update(rect=[400, 8, 480, 30], ref_offset=[0, -8],
                          note=r["note"] + "; KrunkNative starts #topMidHold at the corners' 15px margin (hud.css), 8 px lower")
         add(name, state_of(name), regs,
@@ -148,18 +148,16 @@ def main():
                   "overflows it). The engine's synthetic oblique antialiases the slanted stems differently", max_pct=15.0))
     add("ingame-endscreen-late", st, regs, "The results after the end animation (Performance tab, a guest).")
 
-    for d in ("scenarios", "regions"):
-        os.makedirs(os.path.join(HERE, d, "v10"), exist_ok=True)
     for name in sorted(scen):
-        with open(os.path.join(HERE, "scenarios", "v10", name + ".json"), "w") as fh:
+        with open(os.path.join(HERE, "scenarios", name + ".json"), "w") as fh:
             json.dump(scen[name], fh, indent=2)
             fh.write("\n")
         regs = [r for r in regions[name] if r["rect"][2] > 1 and r["rect"][3] > 1]
-        text = json.dumps({"scenario": "v10/" + name, "defaults": {"fuzz": 6, "max_pct": 0.5}, "regions": regs}, indent=2)
+        text = json.dumps({"scenario": name, "defaults": {"fuzz": 6, "max_pct": 0.5}, "regions": regs}, indent=2)
         text = re.sub(r'"rect": \[\s*(-?\d+),\s*(-?\d+),\s*(-?\d+),\s*(-?\d+)\s*\]', r'"rect": [\1, \2, \3, \4]', text)
-        with open(os.path.join(HERE, "regions", "v10", name + ".json"), "w") as fh:
+        with open(os.path.join(HERE, "regions", name + ".json"), "w") as fh:
             fh.write(text + "\n")
-        print("v10/%-22s %2d regions" % (name, len(regs)))
+        print("%-22s %2d regions" % (name, len(regs)))
 
 
 if __name__ == "__main__":

@@ -7,12 +7,7 @@
   "regions": [
     {
       "name": "chat-input",
-      "rect": [
-        7,
-        611,
-        243,
-        36
-      ],
+      "rect": [7, 611, 243, 36],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
@@ -20,12 +15,7 @@
     },
     {
       "name": "chat-rows",
-      "rect": [
-        7,
-        466,
-        243,
-        149
-      ],
+      "rect": [7, 466, 243, 149],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,

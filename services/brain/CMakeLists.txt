@@ -184,7 +184,7 @@ if (TARGET ${SERVER_BINARY} OR TARGET server_bin)
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_mm_token_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
         # v10 Invite / Join: presence:game to friends, Invite link, Join from the clipboard / window /
-        # a friend's game, the server password popup (3 nodes, headless client_bin on ui/v10)
+        # a friend's game, the server password popup (3 nodes, headless client_bin on ui/)
         add_test(NAME brain_v10_party_e2e
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/v10_party_e2e.py ${CMAKE_BINARY_DIR}
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

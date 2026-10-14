@@ -15,7 +15,7 @@
 // tabs 3 / 4, member controls, requests, Decline All, withdraw, the Discord popup, logo,
 // recruitment. mgr2 = owner or role >= 2: MOTD, banner colour, loot config.
 // v10's Svelte views are rendered as HTML strings with the same markup and svelte-* classes
-// (ui/v10/css/svelte.css); the confirm prompts it pushes on its view stack use #genericPop.
+// (ui/css/svelte.css); the confirm prompts it pushes on its view stack use #genericPop.
 #include <backend.h>
 #include <backend_ui.h>
 #include <html_ui.h>

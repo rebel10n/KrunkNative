@@ -7,57 +7,34 @@ inputs the native HTML engine consumes. The Makefile target `make ui-import` run
 python3 -I tools/ui-import/import.py --ui ui
 ```
 
-`--ref v7` (the default) imports Krunker v7.1.4 (`/home/user/jails/kru/src/Krunker_v7.1.4/public`,
-`--public` overrides) into `ui/`; `--ref v10` the live Krunker v10 site into `ui/v10/`, the page
-that replaces `ui/` (Krunker v10.0.2 is the only version: doc/v7/decisions.md). Outputs are
-committed to the tree; re-running only rewrites files whose content changed.
+It imports Krunker v10.0.2, the only version (doc/v7/decisions.md), from the live site mirror
+into `ui/` (until 2026-10-14 the v10 page was the tree `ui/v10/` and `ui/` was imported from
+Krunker v7.1.4: git history has that importer's steps). The page has been edited by hand since
+(the v10 parity work), so a re-import overwrites those edits: run it into a scratch copy
+(`--ui <dir>`) and merge. Outputs are committed to the tree; re-running only rewrites files whose
+content changed.
 
-## Krunker v7.1.4 (`--ref v7`)
+`windows_v7.py`, `index_page.py`, `social_page.py` and `menu-assets-v7.txt` stay as helpers of the
+v10 steps (the v7 capture `krunker-windows-v7.json.gz` supplies windows 5 and 14).
 
-| Step | Module | Output |
-|---|---|---|
-| menu page | `index_page.py` | `ui/index.html` from `public/index.html` (every `<script>`, comments, og/PWA links removed; `?build=`/`?v=` stripped; `https://assets.krunker.io/` and root-relative URLs made relative; external `<a href>` -> `href="#" data-ext-href`; `<canvas id="canvas">`, `css/krunknative.css` + `css/hud.css`, `js/kn-shim.js` + `js/loader.js` added) and its stylesheets (`main.css`, `bundled/bundledStyles.min.css`, `main_custom.css`, `flag.css`, `material-icons*.css`, `material-symbols-outlined.css`, `google-play.css`, plus `google-secular-one.css`) with the same URL rewriting, nothing else changed |
-| fonts | `import.py` | every font file the stylesheets name is copied; each `.woff2` gets a `.ttf` next to it (material icon fonts named after their family: `material-icons.ttf`, `material-icons-outlined.ttf`; other faces after the woff2), and the ligature tables `client/src/html/engine/material_icons_liga.h` + `material_icons_outlined_liga.h` |
-| windows | `windows_v7.py` | `ui/windows/` from `krunker-windows-v7.json.gz` (below): `<n>.html` = showWindow(n), `settings-{basic,advanced}-<t>.html`, `controls-<t>.html`, `windows.json` (header, sticky, class, inline style per window), `versions.txt` (= `public/docs/versions.txt`, the Changelog) |
-| hub / editor / viewer | `v10_hub_editor.py`, `viewer_page.py` | `ui/social.html` and `ui/editor.html` from the live Krunker v10 pages (below), `ui/viewer.html` (+ `dat-gui.css`); `--viewer-store` also regenerates `client/src/viewer/viewer_store_table.c` |
-| images | `menu_assets.py` | every local file the pages, stylesheets and window templates reference (`collect_page_refs`), plus `menu-assets-v7.txt` (what C generates; `dest = v3:src` / `pattern = v3:` take files the v7.1.4 reconstruction lacks from v3.1.1). References v7 itself 404s on are listed, grouped by directory |
+## Krunker v10, the live krunker.io
 
-### Window captures (`capture_v7_windows.js`)
-
-`node tools/ui-import/capture_v7_windows.js [out.json.gz]` loads v7's own client (`public/index.html`
-with `js/index.js`) in headless Chromium against a read-only static serve of v7's `public/`
-(`v7_page.js`; v7's npm server is never run: it writes into the reference tree). With no
-matchmaker the page starts its offline sandbox; the capture sets a returning guest
-(`krunker_haslogin`), undoes the sandbox's menu chrome (`CONNECTED_MENU`: `fullMenu()` plus the
-elements `f2064` hides), then calls `showWindow(n, true)` for every `windows[]` entry and records
-`#windowHeader`, `#menuWindow`'s class, inline style and markup, every settings tab of both views
-(`windows[0].settingType` / `tabIndex`) and the five Change Controls tabs. The result is
-committed as `krunker-windows-v7.json.gz` (gzipped JSON) so `make ui-import` needs no browser.
-Needs `chromium-browser` (`KN_CHROME=`) and `net-bridge/node_modules` (`ws`, `tools/kref/cdp.js`).
-
-`windows_v7.py` keeps the captured markup unchanged except: `?build=` stripped, the cosmetic
-pickers' `#skinList` cut to their first 4 cards (templates; C lists the items), the host window's
-Advanced tab bodies over 32 KB emptied (per-weapon/class matrices), and the hidden per-weapon
-clones of the settings rows (`<key>_<weapon>_div`) dropped (no per-weapon settings storage yet).
-
-## Krunker v10, the live krunker.io (`--ref v10`)
-
-Writes a separate tree, `ui/v10/` (`ui/` stays v7.1.4). Provenance per file: `ui/README.md`.
+Writes `ui/`. Provenance per file: `ui/README.md`.
 
 ```sh
 # 1. mirror the live site (pages, stylesheets, fonts, every image they and the client script name)
 KN_FETCH_PROXY=http://127.0.0.1:8888 python3 -I tools/ui-import/fetch_live_site.py --stage ~/.cache/kn-v10/live/site \
     --client-js ~/Downloads/v10.0.2.js --manifest tools/ui-import/menu-assets-v7.txt
 # 2. the page tree (the client script is parsed by v10_bundle.js, never run)
-python3 -I tools/ui-import/import.py --ui ui --ref v10 [--public <stage>/public] [--client-js v10.js]
+python3 -I tools/ui-import/import.py --ui ui [--public <stage>/public] [--client-js v10.js]
 ```
 
 | Step | Module | Output |
 |---|---|---|
 | site mirror | `fetch_live_site.py` | `<stage>/public/` (krunker.io + assets.krunker.io in one tree, each path asked of the host the reference names and then the other) + `<stage>/site.lock` (url, path, status, sha256, size, UTC date; resumable). Same politeness as `fetch_live_assets.py` (`KN_FETCH_JOBS` <= 4, delay, retries with backoff). `.js` is never downloaded |
 | Svelte menu | `v10_bundle.js` | `mounts.json` (the HTML each boot `mount(Component, {target})` produces in the initial state), `svelte.css` (all `{hash, code}` component stylesheets), `i18n-en.json`, `report.txt`. acorn AST plus a whitelist interpreter over a toy DOM: Svelte runtime helpers are recognised by shape (template, sibling, if/each blocks, set_text, set_attribute, ...), unknown runtime calls are skipped, there is no host access and no `eval`. acorn: `net-bridge/node_modules` (`KN_NODE_MODULES=` from a worktree) |
-| pages | `v10_page.py` | `ui/v10/{index,social}.html` (v7 rules + the mounts filled in + `css/svelte.css` linked), their stylesheets, our glue files, `windows/versions.txt` |
-| windows | `windows_v10.py` | `ui/v10/windows/` from `krunker-windows-v10.json.gz` (the capture below): the layout and rules of `windows_v7.py`; windows 5 and 14 from v7's capture (`"from": "v7.1.4"`), the loadout windows' `#classPreviewCanvas` dropped (module docstring) |
+| page | `v10_page.py` | `ui/index.html` (v7 rules + the mounts filled in + `css/svelte.css` linked), its stylesheets, `windows/versions.txt` |
+| windows | `windows_v10.py` | `ui/windows/` from `krunker-windows-v10.json.gz` (the capture below): the layout and rules of `windows_v7.py`; windows 5 and 14 from v7's capture (`"from": "v7.1.4"`), the loadout windows' `#classPreviewCanvas` dropped (module docstring) |
 | fonts, files | `import.py` | every font (`.ttf` next to each `.woff2`) and every file the pages, stylesheets and `menu-assets-v7.txt` name, from the mirror (`ui/` for what the hosts 404 on); `.webp.png` sidecars |
 
 `capture_v10_live.js <stage>` is the rendered-DOM capture, which RUNS the live client. Run it
@@ -75,7 +52,7 @@ stand-in), with a dead proxy so nothing leaves the machine. Then:
 KN_NODE_MODULES=<checkout>/net-bridge/node_modules KN_V10_PUBLIC=~/.cache/kn-v10/live/site/public \
     node tools/ui-import/capture_v10_live.js <stage>
 python3 -I tools/ui-import/windows_v10.py pack <stage>/v10-capture/windows.json   # -> krunker-windows-v10.json.gz
-python3 -I tools/ui-import/import.py --ui ui --ref v10                             # -> ui/v10/windows/
+python3 -I tools/ui-import/import.py --ui ui                                       # -> ui/windows/
 ```
 
 v10 content for `assets/` is pinned in `live_assets_v10.lock`
@@ -164,7 +141,7 @@ previews, skin colours, `currentSeason` 7, and the viewer's dropdown option list
 
 ## Social hub and editor pages (Krunker v10)
 
-`v10_hub_editor.py` (step of `import.py` for `--ref v7`, the default; `--no-social` / `--no-editor`
+`v10_hub_editor.py` (step of `import.py`; `--no-social` / `--no-editor`
 skip a page; also runs alone: `python3 -I tools/ui-import/v10_hub_editor.py --ui ui [--public <mirror>]`)
 writes `ui/social.html` and `ui/editor.html` from the live krunker.io pages of the
 `fetch_live_site.py` mirror (`~/.cache/kn-v10/live/site/public`), their stylesheets
@@ -189,18 +166,15 @@ ignores user site-packages), i.e. installed system-wide:
 
 ```
 --ui DIR            ui directory (default <repo>/ui)
---ref v7|v10         Krunker reference (default v7; v10 = the live site into <ui>/v10/)
---client-js FILE     v10: the live client script (parsed, never run)
---public DIR        the reference's public/ tree (default per --ref)
---viewer-store      also regenerate client/src/viewer/viewer_store_table.c (v7)
---editor-page       v7: also import editor.html + its CSS
---windows-out DIR   window output dir (default <ui>/windows)
+--public DIR        the live site mirror's public/ tree (default ~/.cache/kn-v10/live/site/public)
+--client-js FILE    the live client script (parsed by v10_bundle.js, never run)
+--viewer-store      also regenerate client/src/viewer/viewer_store_table.c
 --liga-header PATH  generated header (default client/src/html/engine/material_icons_liga.h)
 --force             regenerate .ttf files even if present
 --no-fonts          skip font conversion and the liga table
 --no-windows        skip the window split
---no-editor         skip the map editor page
---no-social         skip the social hub page
---no-viewer         skip the model viewer page
---no-assets         skip the menu/HUD images (menu-assets-v7.txt)
+--no-editor         skip the map editor page (v10_hub_editor.py)
+--no-social         skip the social hub page (v10_hub_editor.py)
+--no-viewer         skip the model viewer page (Krunker v7.1.4's)
+--no-assets         skip the page / C UI images (menu-assets-v7.txt)
 ```

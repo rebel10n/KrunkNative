@@ -242,8 +242,7 @@ def client(name, brain_port, script, storage):
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
     env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": cfg,
                 "XDG_STATE_HOME": os.path.join(WORK, name + "-state"), "KRUNKNATIVE_NO_BROWSER": "1",
-                "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "640x360", "KRUNKNATIVE_PACKET_LOG": "1",
-                "KRUNKNATIVE_UI_DIR": "ui/v10", "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port})
+                "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "640x360", "KRUNKNATIVE_PACKET_LOG": "1", "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port})
     if os.environ.get("KN_SPRAYS_TRANSPORT"):
         env["KRUNKNATIVE_NET_TRANSPORT"] = os.environ["KN_SPRAYS_TRANSPORT"]
     p = subprocess.Popen(["stdbuf", "-oL", "-eL", f"{BUILD}/client_bin"], cwd=ROOT, stdout=open(log, "w"),

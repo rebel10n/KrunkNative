@@ -429,7 +429,7 @@ static void prize_wheel(const int index, const int skin, const int multi, const 
     }
     if (!w->kr) sb_append(&sb, "<div id=\"spinHistoryBtn\" onclick=\"spinHistoryPopup()\">Spin History</div>");
     // v10 (v10.js 217254): the 1x / Nx switch under Spin History; toggleSpinMulti re-opens the wheel
-    if (v10_page() && !w->kr && w->multi)
+    if (!w->kr && w->multi)
         sb_appendf(&sb, "<div id=\"spinMultiToggleBtn\" onclick=\"toggleSpinMulti();event.stopPropagation();\">Switch to %dx Spin</div>", g_multi ? 1 : w->multi);
     char *html = sb_finish(&sb);
     set_html("spinInfo", html);
@@ -1284,7 +1284,6 @@ static void eterno_music(const int on) {
 }
 
 void store_ui_window_post(const int id) {
-    if (!v10_page()) return;
     eterno_music(id == 14 && g_store_tab == 5);
     if (id != 14) return;
     HtmlElem mw = html_dom_by_id("menuWindow");
@@ -1293,24 +1292,7 @@ void store_ui_window_post(const int id) {
 
 // windows[13].gen()
 char *store_window_gen(void) {
-    if (v10_page()) return v10_store_window_gen();
-    const AccountInfo *acc = account_get();
-    StrBuf sb = {0};
-    sb_append(&sb, "<div id='shopHeader'><div style='height:15px;'></div><div class='bigMenTabs'>");
-    for (int i = 0; i < (int) (sizeof(k_shop_tabs) / sizeof(k_shop_tabs[0])); i++) {
-        sb_appendf(&sb, "<div class='bigMenTab%s' onclick='playSelect();windows[13].switchTab(%d)'  onmouseenter='SOUND.play(`tick_0`,0.1)'  style='font-size:16px'>%s</div>",
-                   g_store_tab == i ? " bigMenTabA" : "", i, k_shop_tabs[i]);
-    }
-    sb_append(&sb, "</div></div>");
-    switch (g_store_tab) {
-        case 0: store_home(&sb, acc); break;
-        case 1: store_wheels(&sb, acc); break;
-        case 2: store_premium(&sb, acc); break;
-        case 3: store_purchase(&sb); break;
-        case 6: store_junkyard(&sb, acc); break;
-        default: break;
-    }
-    return sb_finish(&sb);
+    return v10_store_window_gen();
 }
 
 // genericPopup(html, cls): #genericPop over #popupBack
@@ -1330,16 +1312,11 @@ static void generic_popup(const char *html, const char *cls) {
 static int store_window_handle(const char *name, const HtmlArg *args, const int argc) {
     const int a0 = argc > 0 && (args[0].kind == HTML_ARG_NUM || args[0].kind == HTML_ARG_BOOL) ? (int) args[0].num : 0;
     if (!strcmp(name, "windows.13.switchTab")) { // 5 Marketplace -> the hub, 4 Redeem -> voucherPopup()
-        if (v10_page() && a0 != 4) { // v10: 5 is the Eterno Shop tab, the Marketplace is openExchange()
+        if (a0 != 4) { // v10: 5 is the Eterno Shop tab, the Marketplace is openExchange()
             g_store_tab = a0 >= 0 && a0 < V10_SHOP_TABS ? a0 : 0;
             menu_rerender_if_open(14);
-        } else if (a0 == 5) {
-            if (!app_route_url_target("/social.html?p=market", 1)) ui_open_external("/social.html?p=market");
-        } else if (a0 == 4) {
-            store_window_handle("voucherPopup", NULL, 0);
         } else {
-            g_store_tab = a0;
-            menu_rerender_if_open(14);
+            store_window_handle("voucherPopup", NULL, 0);
         }
         return 1;
     }
@@ -1357,13 +1334,8 @@ static int store_window_handle(const char *name, const HtmlArg *args, const int 
     if (!strcmp(name, "windows.13.subTab=")) { g_store_sub = a0 >= 0 && a0 < 3 ? a0 : 0; return 1; }
     if (!strcmp(name, "windows.13.subTabT=")) { g_store_sub_t = a0; return 1; }
     if (!strcmp(name, "windows.13.craftMenu")) {
-        if (v10_page()) { // v10: window.openExchange(3), the exchange's Junkyard
-            const HtmlArg tab = {.kind = HTML_ARG_NUM, .num = 3};
-            html_ui_dispatch("openExchange", NULL, &tab, 1);
-            return 1;
-        }
-        g_store_tab = 6;
-        menu_show_window(14, 1);
+        const HtmlArg tab = {.kind = HTML_ARG_NUM, .num = 3}; // v10: window.openExchange(3), the exchange's Junkyard
+        html_ui_dispatch("openExchange", NULL, &tab, 1);
         return 1;
     }
     if (!strcmp(name, "windows.13.directPurchase") || !strcmp(name, "showPremiumBenefits")) { // payments: none
@@ -1428,26 +1400,13 @@ void store_ui_sub_tab_tick(const double delta_ms) {
     g_store_sub_t = 3000.0;
     g_store_sub = (g_store_sub + 1) % 3;
     HtmlElem tabs[8];
-    if (v10_page()) { // the home tab's setInterval: the panel shows, its dots follow
-        const int n = html_dom_query_all(0, "#menuWindow .sub-tab-panel", tabs, 8);
-        for (int i = 0; i < n; i++) {
-            html_dom_set_display(tabs[i], i == g_store_sub ? "" : "none");
-            HtmlElem dots[3];
-            const int nd = html_dom_query_all(tabs[i], ".sub-tab-dot", dots, 3);
-            for (int d = 0; d < nd; d++) html_dom_set_style(dots[d], "background", d == g_store_sub ? "#fff" : "rgba(255,255,255,0.4)");
-        }
-        return;
-    }
-    const int n = html_dom_query_all(0, ".windowSubTabs", tabs, 8);
+    // the home tab's setInterval: the panel shows, its dots follow
+    const int n = html_dom_query_all(0, "#menuWindow .sub-tab-panel", tabs, 8);
     for (int i = 0; i < n; i++) {
         html_dom_set_display(tabs[i], i == g_store_sub ? "" : "none");
-        if (i != g_store_sub) continue;
-        HtmlElem btns = html_dom_query(tabs[i], ".shopMainSellTbs");
-        StrBuf sb = {0};
-        store_sub_btns(&sb);
-        char *html = sb_finish(&sb);
-        if (btns) html_dom_set_html(btns, html);
-        free(html);
+        HtmlElem dots[3];
+        const int nd = html_dom_query_all(tabs[i], ".sub-tab-dot", dots, 3);
+        for (int d = 0; d < nd; d++) html_dom_set_style(dots[d], "background", d == g_store_sub ? "#fff" : "rgba(255,255,255,0.4)");
     }
 }
 

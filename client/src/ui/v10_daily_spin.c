@@ -69,7 +69,7 @@ static void render_item(HtmlElem item) {
 // the item (and v10's divider after it) exists only for an account, in #menuItemContainer
 static void sync_item(void) {
     HtmlElem item = html_dom_by_id("dailySpinDiv");
-    const int want = v10_page() && account_get() != NULL;
+    const int want = account_get() != NULL;
     if (!want) {
         if (item) {
             HtmlElem div = html_dom_by_id("knDailySpinDivider");
@@ -105,12 +105,12 @@ void v10_daily_spin_tick(void) {
         memset(&g_ds, 0, sizeof(g_ds));
         g_ds.max_score = 5000;
         g_ds.account_id = id;
-        if (id && v10_page()) ask();
+        if (id) ask();
         sync_item();
         return;
     }
-    if (id && v10_page() && html_ui_is_menu_open() && t - g_ds.asked_at > DS_REFRESH_MS) ask();
-    if (v10_page() && (id != 0) != (html_dom_by_id("dailySpinDiv") != 0)) sync_item(); // the page was rebuilt
+    if (id && html_ui_is_menu_open() && t - g_ds.asked_at > DS_REFRESH_MS) ask();
+    if ((id != 0) != (html_dom_by_id("dailySpinDiv") != 0)) sync_item(); // the page was rebuilt
 }
 
 void v10_daily_spin_frame(const char *label, const cJSON *frame) {

@@ -79,7 +79,7 @@ class Client:
         env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_UI_DIR")}
         env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": cfg, "XDG_STATE_HOME": os.path.join(WORK, tag + "-state"),
                     "KRUNKNATIVE_AUDIO_BACKEND": "null", "KRUNKNATIVE_UI_CMDS": self.cmds, "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
-                    "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % PORT, "KRUNKNATIVE_UI_DIR": os.path.join(ROOT, "ui", "v10")})
+                    "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % PORT})
         self.out = open(self.log, "w")
         self.proc = subprocess.Popen(["stdbuf", "-oL", "-eL", CLIENT, "--offline"], stdout=self.out, stderr=subprocess.STDOUT,
                                      stdin=subprocess.DEVNULL, env=env, cwd=ROOT, start_new_session=True)

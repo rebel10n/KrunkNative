@@ -1,11 +1,11 @@
-"""Krunker v10 window templates (step of import.py --ref v10).
+"""Krunker v10 window templates (step of import.py).
 
 Splits ``tools/ui-import/krunker-windows-v10.json.gz`` -- the ``windows.json`` of
 ``capture_v10_live.js`` (every ``showWindow(n)`` of the v10 client: header, ``#menuWindow``
 class / inline style / markup, every settings tab of both views and the Change Controls tabs) --
-into ``ui/v10/windows/``, with the layout and rules of ``windows_v7.py`` (``<n>.html``,
+into ``ui/windows/``, with the layout and rules of ``windows_v7.py`` (``<n>.html``,
 ``settings-{basic,advanced}-<t>.html``, ``controls-<t>.html``, ``windows.json``), so
-``client/src/ui/ui_windows.c`` reads them like ui/'s.
+``client/src/ui/ui_windows.c`` reads them.
 
 ``pack <capture>/windows.json`` rewrites the .gz from a new capture (gzip mtime 0, sorted keys).
 

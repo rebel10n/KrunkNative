@@ -14,6 +14,1163 @@
  - Here is some info on how to enable WebGL https://superuser.com/questions/836832/how-can-i-enable-webgl-in-my-browser
  - If you have connection issues at school or work, Try using browserfps.com
 
+ == UPDATE 10.0.2 ==
+ * General
+ - Added a Show Only Paintable filter to the Items catalog
+ - Painted items now show their paint in the Customize skin lists
+ - Items on a creator's profile now open in the profile view
+ - The Universal Starter Ticket no longer drops from Starter and Elite spins
+ - Bundles and Premium packs can now be bought with the new payment option, including as gifts
+ - Renewing a username you already own now costs $4.99 (new usernames stay $9.99)
+ - Fixed some reflective skins rendering dark in game
+ - Fixed thrown melee weapons not exploding or showing
+ - Fixed profile links for players with an apostrophe in their name
+ - Fixed a new premium profile picture not showing right away
+ - Fixed unfavoriting some older favorites
+ - Other minor UI fixes
+ * Market
+ - Fixed collectibles price floor showing incorrectly for listing
+ - Fixed the Black Market's helpful reports requirement
+ * Ranked
+ - Eterno Simulator left the ranked pool
+ - Retired the Bureau ranked challenges; completions and rewards already earned stay
+ * Bastion
+ - Taller hitboxes for the Catacombs twins
+ - Keys are easier to pick up
+ - Some breakable objects can now be shot, not just hit with melee
+ - Moved an archer tower, plus more small layout and collision tweaks
+ * Studios & Editor
+ - Triggers can now have up to 8 actions
+ - Fixed uploading mods from the game, and Premium players get the larger mod (50 MB) and thumbnail (500 KB) limits
+ - Map storage saves made quickly one after another are no longer lost
+ * Developer API
+ - Added GET /api/events with map featured and unfeatured events
+ - Added webhooks for those events, set up in the partner portal
+ - Added GET /api/maps/featured
+
+ == UPDATE 10.0.1 ==
+ * General
+ - Added Discord account linking in Account > Connections, with an optional Join Server button
+ - Added a Show Findings chat setting: "found" item messages no longer follow Show Unboxings
+ - Improved performance when textures, new skins and weapons load in
+ - Fixed first-time visitors getting stuck on the loading screen
+ - Fixed see-through walls
+ - Fixed rainbow wireframe skins turning black
+ - Fixed the muzzle flash drifting off the barrel
+ - Fixed projectile orbs vanishing behind the map
+ - Fixed scrolling and rotating textures not animating on still objects
+ * Studios & Editor
+ - Studio members are now invited and can accept or decline, and owners can transfer ownership
+ - Studios can apply for monetization from the Games tab
+ - Scripts use the skin id shown on the studio Skins tab, and studio maps load all of the studio's active skins
+ - Republishing a map without a preset now keeps its saved preset
+ - Fixed the Editor freezing when adding an AI spawner
+ - Fixed duplicated objects losing their texture
+ - Fixed obj.texture throwing before the texture loads
+ - Fixed dyes not applying or showing their Shader Studio graph when tested in the Skin Manager
+ * Ranked
+ - The ranked pool now rotates Undergrowth, Industry, Site, Bureau, Eterno Simulator and Frontier, with Sandstorm always in
+ - Burg, Shipment, Lumber, Atomic and Lush left the ranked pool
+ * Bastion
+ - Smaller Hydra head hitboxes, and the heads were moved so fireballs no longer hit the wrong spot
+ - The King's shot is slower and smaller, with a bigger visual
+ - Archer skeletons have a longer melee range, and Archer and melee skeletons have taller hitboxes
+ - Fixed getting out of bounds when entering the Throne
+ - Added a safety floor below the Catacombs and Throne arenas
+ - Fixed a missing face at the Basin and z-fighting on the throne sword and rugs
+ - Lowered some dirt in the Catacombs, and a Throne block no longer blocks enemies
+ - Letters and other random pickups now spawn in solo and duo runs
+ - Hosted raids now count end-of-run challenges and roll random pickups
+ - Beating the raid without taking damage, on 1 HP or without firing a gun now requires reaching the Throne
+
+ == UPDATE 10.0.0 ==
+ * General
+ - Added 166 new items across Spins, Battlepass, Ranked, Eterno Shop, Black Market, Twitch drops and the Bastion raid
+ - Added 55 new spin items, including the V-CORE set: equip 2 of its pieces for a shock effect
+ - Added new Season 10 Battlepass with 80 levels and 30 new items
+ - Added 5 new Twitch drops
+ - Added new Season 10 Eterno Shop with 10 new items, including the new Eterno sniper
+ - The Season 9 Eterno AK is now tradable
+ - Added the Krunkuku Tamer to the Black Market (requires all 7 Krunkuku charms)
+ - Added Universal Starter, Elite and Spin Tickets: they always spin the current season's wheels
+ - Added Season 10 badges, including the Season 10 Contributor badge in the store
+ - Redesigned the main menu slightly
+ - Merged Class, Loadout and Customize into a single window with a live character preview as before
+ - Added Titles: equip a title to show on the scoreboards and your profile
+ - Added Kounters: weapon and melee skins with a built-in counter that tracks kills, headshots, shots and more for that exact item
+ - Added ability to buy extra usernames and switch between them once every 7 days
+ - Owned usernames last a year and can be renewed from the usernames popup
+ - Added opt-in for news and promotional emails in Account Settings
+ - Added gifting: send Eterno shop items (KR or real money) and the one-off premium packs to other players
+ - Added new payment option for KR, store items, gifts
+ - Emperor's Blade can now be claimed from Kracked in the Black Market in any ranked season, and grants the No-Life title
+ - Added the reflective Gold, Silver and Prism paints and the Codefall paint
+ - Added Gold Paint to the Paint Wheel
+ - Item details can now preview a paint together with wear
+ - Prize Wheels: Starter and Heroic get bigger tiles, tickets still possible to use from View Tickets button
+ - Added a popular custom games row to the main menu
+ - Added Studios: a team that shares your games, with up to 20 members
+ - Added version history to maps, with the ability to revert and to restore deleted games
+ - Added custom currencies and a scripted economy for Studios
+ - Added custom skins to games, equippable while playing that game
+ - Added economy analytics for Studio owners
+ - Studios keep 90% of the KR players spend in their games
+ - Added a confirmation prompt before spending KR in a custom game
+ - Skin makers can now author shaders as node graphs in the Skin Manager (replaces custom GLSL)
+ - Changed the Skin Manager to full screen, with a paged list and item thumbnails
+ - Added shader graph rendering to the skin Test button
+ - Added a charm placement tool and custom swap and inspect sounds to the Skin Manager
+ - Added a new "WebGPU rendering" setting
+ - Updated three.js and moved the game, viewer, editor and menu previews to the new renderer
+ - Improved performance for players, their cosmetics and particles
+ - Improved performance on large maps
+ - Various server stability and security fixes
+ * KrunkScript & Editor
+ - Added Entities: replicated objects with drivable vehicles, seats, animated model parts and triggers (WIP)
+ - Added an archetype browser and isolated part editing to the Editor
+ - Added entity counters and undo to entity authoring
+ - Added GAME.ENTITIES, player.pose, setSkin, getSkin, TIME.freeze, TIME.unfreeze, player.aiKills and player.godMode
+ - Added GAME.SCENE.addParticles, RAYCAST.from, RAYCAST.fromPlayer, player.pose.hold with a "hands" attach point, player.speed and CONFIG.getMatch()
+ - Added AI damage and death hooks, script control of AI (target, moveTo, team) and a hideTag spawn option
+ - Added damage and destroyed hooks for destructible map objects
+ - Script lights can now change intensity, distance and color live, and SCENE.setFog takes a near distance
+ - Added a Player Damage game setting for co-op maps
+ - Model materials can opt out of fog, and maps can set a shadow bias to remove shadow stripes on large floors
+ - Added KrunkScript samples (3D Pong, 2D Car Game, Basic Collisions and more) and brought the default maps back to Templates
+ - Updated the KrunkScript docs with examples and a what's new guide
+ * Maps
+ - Added Bastion, a new raid with 39 items to collect from its bosses and secrets
+ - Bastion's Contraband and Unobtainable drops are tradable, apart from Aureon's Armour set
+ - Added Piazza and Barnyard to public matches
+ * Challenges
+ - Reworked the Nightmare challenges into lifetime ladders for nukes, kills and wins
+ - Added challenges for Erupt, HQ, Vivo, Eterno Simulator, Tropicano and Frontier, plus a "Complete all" challenge for every map and raid
+ - Added boss and enemy challenges to every raid, and new secrets to find on Soul Sanctum, Laboratory, Khepri and Bastion
+ - Challenges can now reward titles and ranked points, and challenges you already completed grant their new title automatically
+ * Ranked
+ - Added 19 new items to the Ranked shop
+ - Added Prism Paint to the Ranked shop
+ - Changed the ranked map pool to rotate every season (Sandstorm plus 4 maps from the competitive pool)
+ - Added Ranked Challenges that refresh every season, in the challenges window and the ranked menu
+ - Fixed a match failing right after being found and counting you as a no-show
+ * Bug Fixes
+ - Fixed moved objects knocking another object out of the collision grid
+ - Fixed dynamic objects with collision turned off still blocking shots
+ - Fixed Turf Wars banners not being replaced or removed on update
+ - Fixed trade previews not showing the exact copy's wear, serial and pattern, and added paint and mint badges to trades
+ - Fixed item tooltips showing behind trade windows
+ - Fixed map leaderboards only showing one board on maps with both a score and a time leaderboard
+ - Fixed asset thumbnails and sound previews in the profile Assets tab
+ - Fixed the lost connection message showing behind the menu
+ - Fixed the daily spin wheel showing 0 tickets until you reloaded
+ - Fixed gifting an item the player already owns not saying why it failed
+
+ == UPDATE 9.2.18 ==
+ * Ranked
+ - Fixed being pulled out of a live match into a new one and being counted as a leaver for it
+ * Maps
+ - Frontier: more bug fixes
+ - Reintroduced the Laboratory, Tortuga, Khepri and Soul Sanctum changes from 9.2.16
+
+ == UPDATE 9.2.17 ==
+ * General
+ - Server stability and security fixes
+ - Ranked forfeit votes no longer wait on teammates who disconnected
+ - Reverted the Laboratory, Tortuga, Khepri and Soul Sanctum changes from 9.2.16
+
+ == UPDATE 9.2.16 ==
+ * General
+ - Fixed a long freeze on spawn when using Random skins with a large inventory
+ - Fixed 2x Raid Drops and 2x Class XP staying active after the weekend
+ - Fixed small security checks
+ * Ranked
+ - Leaving a match now counts as a loss and costs rating
+ - Teammates of a leaver lose less rating
+ - Leaver cooldowns now escalate: 30m, 2h, 8h, 24h
+ * Maps
+ - Frontier: multiple bug fixes and face rendering fixes
+ - Laboratory: fixed ceiling on the way to C1, fixed ramp phasing after C3, bot can now be jump knifed, Sentry projectile speed 2.4 -> 2.8, Sentry shot break 300ms -> 250ms, fixed getting on top of the zombie spawners in the Dr Krunk room
+ - Tortuga: replaced the SMG room chest with a small wooden chest, added more TNT to the Loot room
+ - Khepri: fixed the death barrier stretching into the map (Red Light, Green Light)
+ - Soul Sanctum: small trigger fixes, Fermenter water damage 100 -> 60
+
+ == UPDATE 9.2.15 ==
+ * General
+ - Added a new map: Frontier (Pubs, Ranked and Comp)
+ - Fixed Wear not rendering on animated items such as Wrym Crest
+ - Various server stability and security fixes
+
+ == UPDATE 9.2.14 ==
+ * General
+ - Added 29 new items for September drop
+ - Added the Summer Finale spin with the new September items (Riptide has ended)
+ - Added 4 new Twitch Items
+ - Added Community Polls: vote on the future of Krunker at community.krunker.io or from the Community and Events window
+ - Added a public Roadmap to the community site, driven by poll results
+ - The purple checkmark badge now identifies Verified Creators
+ - World KrunkCup 2026 winners have received their trophies and prizes
+ - Improved Ranked matchmaking team balancing
+ - Fixed pinned items not counting against the trade offer item limit
+ - Fixed trade fees not matching the preview (fees now scale with item rarity)
+ - Fixed part of the Turf Wars reward pool going unawarded on some days
+ - Fixed daily spins being miscounted on the day reset
+ - Fixed timers showing negative durations
+ - Fixed Premium accounts not getting the increased map object limit when publishing from the Editor
+
+ == UPDATE 9.2.13 ==
+ * General
+ - Fixed Melee skins not rendering their Wear in-game and in the menu
+ * Weapon Balance
+ - Famas: Burst delay reverted to 85ms
+ - Semi Auto: Damage dropoff reverted to 0
+ - Shotgun: Damage dropoff reverted to 50
+
+ == UPDATE 9.2.12 ==
+ * General
+ - Added 30 new items (August drop)
+ - Added the Riptide spin with the new August items (Genesis is ending at midnight)
+ - Added 3 new Paints to the Paint Wheel: Terracota, Orange and Electric Purple
+ - Reduced the Paint Wheel Contraband odds from 10% to 1%
+ - Improved paint rendering: painted items now keep the detail of the skin underneath
+ - Skin makers can now author custom Wear maps in the Skin Manager
+ - Fixed Shotgun skins not rendering in item previews and showcases
+ * Weapon Balance
+ - Assault Rifle: Fire rate 120ms -> 115ms, damage dropoff 5 -> 8
+ - Famas: Burst delay 85ms -> 95ms
+ - Semi Auto: Damage dropoff 0 -> 8
+ - Shotgun: Damage dropoff 50 -> 40
+ - Akimbo Uzi: Damage 15 -> 16
+
+ == UPDATE 9.2.11 ==
+ * General
+ - End KrunkCup (rewards will be given soonTM)
+ - Add KPD demo links
+ - Fix sales graphs having incorrect X axis
+
+ == UPDATE 9.2.10 ==
+ * General
+ - Added a Paint badge and an "Only Painted" filter to the inventory and market
+ - Skin makers can now author new Paints (colors and shader paints) in the Skin Manager
+ - Added a "Disable Animated Paints" setting
+ - Added emoji to Friends DM chat
+ - Added in-game replay review for KPD demos
+ - Fixed gifting KR not showing an error when you don't have enough funds
+ - Fixed the end screen Combat Rewards showing KR reward
+ - Updated the trading guide
+ - Fixed some server instability (will continue to monitor for more)
+ - Verified nL clan (tournament winners)
+ - Changed public matchmaking to attempt to find better matches
+ * Soul Sanctum
+ - Nerfed Soul Feind's damage in the first boss area from -100HP to -50HP
+ - Nerfed water damage from -50HP to -30HP
+ - Nerfed Soul Feind's damage at the dropper area from -100HP to -60HP
+ - Nerfed the Dropper from an instant kill to -50HP
+ - Changed the door price from 150 score to 100 score
+ - Nerfed Angered Soul damage from -100HP to -50HP
+ - Nerfed Soul Feind's damage in the final boss area from -100HP to -75HP
+ - Added a knife throw indicator for Button 3 platforms
+ * Tortuga
+ - Changed Krab King rewards to [Player Active+Damage = Drops]
+ - Turned wall jump off on the back wall next to the AK parkour
+ - Changed King Krum rewards to [Player Active+Damage = Drops]
+ - Fixed Captain Krunk getting stuck on the boat
+ - Changed Captain Krunk rewards to [Player Active+Damage = Drops]
+ * Laboratory
+ - Added Akimbo Uzi, replacing the Crossbow (missed in the previous patch notes)
+ - Changed the first boss arena and added Sentry Gunners
+ - Moved the bot up to make it harder to group melee
+ - Buffed Card 3 water damage from -40HP to -50HP
+ - Added a Sentry Gunner watching over the water/Card 3 area
+ - Nerfed Manic Zombies' movement speed from 3MS to 2.3MS
+ - Buffed Manic Zombies' damage from -10HP to -30HP
+ - Changed first boss rewards to [Player Active+Damage = Drops]
+ * Khepri
+ - Added death walls in areas where needed
+ - Fixed more bugs
+
+ == UPDATE 9.2.9 ==
+ * General
+ - Added support for shader paints in clan banners and skins
+ - Added a trading guide (Thanks to Harambay)
+ - Fixed Contraband unboxings not appearing in the social feed
+ - Fixed unboxing messages sometimes appearing twice in chat
+ - Fixed the Random slot option not equipping the exact favorited skin
+ - Added KPD experimental demo recordings (WIP)
+ * Laboratory (Thanks to OnlyTrickzZ for all raid changes)
+ - Re-scaled Zombie HP from 1500 to 650 
+ - Re-sized Parkour from Card 2 to Card 3 (Enlarged the platforms to jump onto)
+ - Changed Card 3 water parkour to no longer instakill, you now take -40hp upon entry
+ - Changed Card 5 water parkour to no longer instakill, you now take -70hp upon entry
+ - Added Manic zombies to Card 4 room  
+ - Added SMG and Removed RPG 
+ - Added Respawnable Zombies to Dr Krunk fight 
+ - Added 2x Manic Zombies to Dr Krunk fight
+ - Added a Score zone to give 300 score once going to end the raid 
+ - Changed the End raid button from 15 seconds to 2 seconds (Matches Tortuga) 
+ * Khepri
+ - Fixed bugs (getting out the map to exploit skipping the map areas)
+ - Changed HP scaling per player from x5000 per player to x1250 per player on Pharaoh 
+ - Changed HP on Small Osiris to 2500 + Every Extra Player = x1250
+ - Changed HP on Big Osiris to 2500 + Every Extra Player = x1250
+ * Tortuga
+ - Added a Score zone to give 300 score once you go into the loot room 
+ - Added SMG (Cost 50 score to buy the door) 
+
+ == UPDATE 9.2.8 ==
+ * General
+ - Added followers and following lists on new social profiles
+ - Fixed quick-sell sometimes not working correctly
+
+ == UPDATE 9.2.7 ==
+ * General
+ - Added Mints and Wear tabs to item pages, ranking the top owners by mint number and float
+ - Fixed some spin rewards briefly showing as separate items right after a spin
+ - Fixed the item image shifting on inventory cards that show a wear name
+ - Improved premium profile pictures not updating right away after being changed
+ - Added missing sound effects
+
+ == UPDATE 9.2.6 ==
+ * General
+ - Added the Genesis spin with 27 new items
+ - Added new Paint colors: Lavender, Pastel Green, Pastel Blue, and Pink
+ - Added a 10x multi-spin for ticket spins
+ - Added unique serial numbers to non-stackable items
+ - Added rewards to top 3 clans per map for Turf Wars
+ - Increased total reward of Turf Wars to be 1:1 with kills
+ - Added a Wear filter and Group by Wear to your inventory
+ - Added "Show Only Paintable" and "Only Show Missing" filters
+ - Added an Owners tab and details link to item pages
+ - Added Paint and Style actions to the market inventory
+ - Added search & sort to the Junkyard craft grid
+ - Refreshed the catalog and market item cards
+ - Fixed the paint preview not showing wear
+ - Fixed waist cosmetics not showing in the item viewer
+ - Fixed direct trades sometimes offering the wrong copy
+ - Fixed quick-sell and trades failing on some clients
+ - Fixed the round display showing the wrong scores
+ - Fixed clan and social pages failing to load for some names
+
+ == UPDATE 9.2.5 ==
+ * KrunkCup
+ - Added KrunkCup Participation Band to allow all players to join the competition
+ * General
+ - Fixed direct trading issue where items with wear/paint were not correctly tradable
+ - Fixed issue when purchasing Paint Tickets from the Eterno Shop
+
+ == UPDATE 9.2.4 ==
+ * KrunkCup
+ - Added the World KrunkCup 2026 event: wear a KrunkCup jersey with your team's style and your kills & score count toward that team
+ - Added KrunkCup standings to the main menu and a KrunkCup tab in Leaderboards with team standings and top players
+ - Added the World KrunkCup 2026 bundle: team jerseys, boots, ball head, trophy melee, fan faces, and a spray
+ - Added a claimable KrunkCup Badge for jersey owners
+ * Paints & Styles
+ - Added animated shader Paints: Spectrum and Synth
+ - Added Styles: styleable cosmetics can switch between their styles for free from the Wallet or item showcase
+ - Skin makers can now mark submissions as paintable (with a paint mask) and create new Paint colors
+ * General
+ - Fixed the default spray keybind ignoring your equipped spray
+ - Fixed Paints not showing on melee items
+ - Fixed Paint previews not showing on hat and head items in the item viewer
+ - Rolled back the 9.2.3 menu saturation fix
+
+ == UPDATE 9.2.3 ==
+ * General
+ - Fixed switching classes in a Ranked match dropping your secondary weapon for one life
+ - Fixed the menu hanging on startup for players on some connections
+ - Fixed equipped sprays sometimes showing as the default spray
+ - Fixed system messages showing your real name instead of your premium alias on drops, unboxes, and lottery wins
+ - Fixed Battle Pass claims briefly appearing to grant double the items
+ - Fixed pre-match Ranked team chat being visible to the opposing team
+ - Fixed "Return to Krunker" opening a new window after a Ranked match on the Client
+ - Fixed "My Games" and "My Mods" tabs capping at 44 and not loading more (in-game and on the social hub)
+ - Fixed the 3D model viewer not opening for charms
+ - Fixed the leaderboard display-data option missing from the new map UI
+ - Fixed the Settings button missing in Sandbox mode
+ - Fixed the saturation setting not applying to the new menu windows
+ - Fixed a broken image on the social posts when hosting an official rotation map
+ - Fixed your own account appearing in your friends list
+ - Fixed friends showing as "unknown" and phantom unread indicators in in-game DMs
+ - Fixed the trade history count not updating when loading more trades
+ - Fixed being unable to list low-value collectibles under 100 KR on the market
+ - Fixed the in-game item sales chart to default to 1 month, matching the social hub
+ - Fixed a Ranked reward not being purchasable at the exact required rank
+ - Fixed the in-game giveaway minimum amount not matching the social hub
+ - Fixed custom maps and mods failing to upload, and added upload status feedback
+ - Fixed an overly broad chat filter that triggered false warnings (on some words)
+ - Fixed docs.krunker.io failing to load with a "request header too large" error
+ - Disabled map ambient 15 sound
+ - Fixed hosted competitive match webhooks not showing all players
+ * Developer API
+ - The /player endpoint now returns alias, class stats, Twitch name, and the player's published maps & mods
+ - Clan member responses now include each member's score
+ - Skin responses now include a "tradable" flag, along with other properties
+
+ == UPDATE 9.2.2 ==
+ * General
+ - Fixed Quick Match sending you back into the same lobby
+ - Fixed item tooltips lingering on screen longer than expected
+ - Fixed aliases showing from players who are no longer premium
+ - Fixed several errors when creating trade offers
+ - Removed the 10-second delay when accepting trade offers
+ - Fixed several broken pop-ups across the new social windows
+ - Fixed item rarity colors when doing multiple Remix spins
+ - Fixed being unable to destroy items via quick sell in the new UI
+ - Fixed ads displaying oversized on the main menu
+ - Adjusted menu items to prevent clipping
+ - Added a Shop badge for active promotions
+ 
+ == UPDATE 9.2.1 ==
+ * General
+ - Fixed chat clipping in the main menu
+ - Fixed class level display in the new profile window
+ - Fixed several inconsistencies in social posts
+ - Fixed Hide Online Details so it now works with the new friends system
+ - Fixed skin creators missing some of their skins on their profile
+ - Fixed map rewards (dioramas) showing in your rewards when another player won them
+ - Fixed profile pages failing to open for players with special characters in their name
+ - Fixed match history in the new player profile
+ - Fixed DMs occasionally not displaying correctly in the friends window
+ - Fixed incorrect names appearing in trade history
+ - Fixed the new trade window to respect Hide Non-Tradable when making offers
+ - Improved friends DM system
+
+ == UPDATE 9.2.0 ==
+ * General
+ - Added 17 new items
+ - Added Remix S1/S2 spin
+ - Added 4 new Twitch drops
+ - Added Anniversary Raffle giving away items from hacked accounts
+ - Redesigned main menu (may break some mods, sorry)
+ * Paint
+ - Added Paint consumable to color Skins
+ - Added Paint support for Clan Banners and Clan items
+ * Crafting
+ - Added craftable recipe for "K-35 B" paintable Unobtainable
+ - Added end-of-match drops for crafting ingredients, paint tickets, and raffle tickets
+ * Social
+ - Migrated Social Hub functionality in-game (Social Hub to be deprecated)
+ - Added friend DMs with offline message support
+ * Hosted Games
+ - Added /freezeothers command (premium hosts only)
+ - Added config to disable auto host transfer
+ * KrunkScript
+ - Renamed `GAME.AI.remove` → `GAME.AI.removeBySid` (breaking change)
+ - Renamed `GAME.COOKIES.remove` → `GAME.COOKIES.removeByKey` (breaking change)
+
+ == UPDATE 9.1.8 ==
+ * General
+ - Verified MMOK clan
+ - Made hosted games auto transfer the host to another player
+ - Fixed teleporting issue when running the game at low frame rate
+ - Fixed players getting kicked for WRONG ACCOUNT when joining Comp
+ - Added 2 new fields to "match_hosted" webhook event (id, hosted_by)
+
+ == UPDATE 9.1.7 == 
+ * General
+ - Improved server tick processing
+ - Added support for texture map channels in uploaded game assets
+ - Fixed KPD observers counting towards votekick and ranked forfeit
+ - Fixed multiple exploits
+ * Comp
+ - Added new "match_hosted" webhook event when game is setup
+ - Added new settings for restricting players to certain teams
+ - Added ping markers similar to Ranked
+ - Fixed team names in the lobby screen
+ * Turf Wars
+ - Added new distribution mode for "Top N participants based on performance"
+ * Ranked
+ - Fixed head clipping
+
+ == UPDATE 9.1.6 ==
+ * General
+ - Added 13 new items
+ - Added Easter Raffle
+ - Added Easter item drops at the end of matches
+ - Added 1 craftable pet
+ - Started Phase 4 of Eterno
+
+ == UPDATE 9.1.5 ==
+ * General
+ - Fixed sound for 1 weapon
+ - Fixed several server/database issues
+ - Fixed player.currentSkinIndex in KrunkScript to return melee index
+ * Turf Wars
+ - Added player profiles (WIP)
+ - Added individual payouts list
+ - Added earnings to Top Players leaderboard, and KR distributed to Clan leaderboard
+
+ == UPDATE 9.1.4 ==
+ * General
+ - Added item wear float value across tooltips, showcases, and market listings
+ - Added battlepass gifting
+ * Turf Wars
+ - Added reward distribution system for clans
+ * Clans
+ - Added Message of the Day (MOTD) for clans
+ - Added Clan Recruitment Board for browsing and applying to clans
+ * Market
+ - Added listing price and age inside item display on sales tab
+
+ == UPDATE 9.1.3 ==
+ * General
+ - Fixed issue with market trades getting stuck
+ * Turf Wars
+ - Added date selector to browse historical daily contributions
+ - Fixed Burg banner rotations for Turf Wars
+ - Added reward estimates (guaranteed + projected) to map overview panel
+
+ == UPDATE 9.1.2 ==
+ * General
+ - Fixed Trade History being wrong
+ - Fixed Burg to include the Turf Wars banners correctly
+ - Fixed Premium users not being able to list more than 20 items in new Market
+ * Turf Wars
+ - Increased Reward for Turf Wars slightly
+
+ == UPDATE 9.1.1 ==
+ * General
+ - Fixed several server side issues
+ - Changed Remix 9 spin to include more contras & relics and adjust odds
+
+ == UPDATE 9.1.0 ==
+ * General
+ - Added Turf Wars: A new clan-based mode where clans fight for control of official maps
+ - Added Market to buy and sell items directly in-game with improved functionality and fixes
+ - Added 185 new items across Spins, Battlepass, Ranked, Eterno Shop, Black Market and Parkour map rewards.
+ - Added leaderboards in-game
+ - Added Ranked top rated players per ranked season leaderboard
+ - Added new 9.1 Battlepass
+ - Added Eterno Jump and Weapons Factory parkour maps
+ - Added weapon Wear system for some of the skins
+ - Added Ranked soft resets
+ - Reworked Eterno Simulator map
+ - Improved viewer to allow skin decal configuration
+ - Fixed some textures for previous season 9 items
+ - Fixed trade history not showing KR exchanged
+ * Turf Wars
+ - Added in-game announcements when entering a territory controlled by a clan
+ - Added clan banners placed on controlled maps (Burg, Sandstorm, Subzero)
+ - Added daily rewards for the clans controlling the maps
+ - Added leaderboards for top performing clans, top grossing clans, and top players
+ - Added clan profile view with historical comparison data
+ * Clans
+ - Added Clan Logos
+ - Added 4 new Clan cosmetic items obtainable in Eterno shop: Clan Tabard, Clan Banner, Clan Cape, Clan Pole Banner
+ - Clan skins dynamically display your clan's logo or name
+ - Captains can now access Clan Settings
+ * Raids
+ - Added raid run tracking with completions, best time, AI kills, boss kills, and deaths
+ - Added Raids tab to player profiles
+ - Added raid-specific daily challenges (available randomly through the Battlepass screen)
+ - Added monthly raid leaderboards with best completion times per map
+ - Raid games no longer affect general profile stats (kills, deaths, wins)
+ - Fixed raid winner logic for empty lobby detection
+ * Editor
+ - Added Boss flag for AI spawners
+
+ == UPDATE 9.0.14 ==
+ * Skin Manager
+ - Added Shader Studio to Appearance tab in Skin Manager
+
+ == UPDATE 9.0.13 ==
+ * General
+ - Added community events to menu
+ - Updated community page
+ - Added event tags to livestreams
+ - Stream that have ongoing events now get highlighted
+ - Added ability for KPD to chat ban users
+ - Added creator dashboard for creators and community partners
+ * Balance & Gameplay
+ - Deagle, Pistol, Tech9: Swap Time (between primary and secondary) - 200 ms -> 350 ms
+ - SMG: Fire rate - 100 -> 95
+ - LMG: Fire rate - 130 -> 125
+ - Semi: Reload Time - 1200 -> 1350
+ - Famas: Reload time - 1200 -> 1500
+ - Akimbo Uzi: Headshot multiplier - 1 -> 1.5
+ - Akimbo Uzi: Reload time - 1300 -> 1200
+ - Akimbo Uzi: HP - 110 -> 105
+ - Blaster: Damage - 35 -> 45
+ * Fixes
+ - Various exploits with krunkscript
+
+ == UPDATE 9.0.12 ==
+ * General
+ - Fixed multiple server crashes causing random disconnects
+ - Fixed hosting map from editor not having correct settings
+ - Fixed lag related to triggers destruction
+ - Improved performance slightly for objects that move (dynamic & teleports)
+ - Added kill events to webhook
+ * Editor 
+ - Added multiplayer editor support
+ - Fixed map sync/import issues
+ - Fixed requiring password for rooms without password
+ - Removed Scripting Community Discord link
+
+ == UPDATE 9.0.11 ==
+ * General
+ - Removed Dedicated Servers (allocated servers will be refunded)
+ - Fixed KrunkScript template to correctly show in Editor
+ - Fixed hosting to allow playing maps regardless of them having KrunkScript errors
+
+ == UPDATE 9.0.10 ==
+ * General
+ - Added 32 new items
+ - Added Christmas Spin (a mix of old and new items)
+ - Added bundle gifting
+ - Added Christmas Raffle
+ - Added Christmas item drops at the end of matches
+ - Added a way to see which items are in the spin (press "+ More")
+ - Added new Wild Offers for Christmas
+ - Added drop chances for map dioramas
+ - Made dynamic objects able to push players instead of phasing through
+ * Fixes
+ - Fixed bullet impact holes
+ - Fixed store crash at end of round
+ - Fixed support links throughout the game
+ - Fixed some skins not glowing correctly when animated
+ - Fixed other client issues
+
+ == UPDATE 9.0.9 ==
+ * General
+ - Decreased KPD call level to 5
+ - Decreased Trade level to 10
+ - Decreased Gift KR level to 10
+ - Decreased Market level to 10
+ - Changed Skin Manager to be available for all (Available in Sandbox -> Skin Manager)
+ * Editor & KrunkScript
+ - Added "Dynamic" property to Cube, Custom Asset & Trigger to allow these to be moved dynamically via KrunkScript (eg. `obj.position.x = 1`) - EXPERIMENTAL!
+ - Added `TRIGGERS.getByInterface` and `OBJECTS.getByInterface`
+
+ == UPDATE 9.0.8 ==
+ * General
+ - Re-designed battlepass display in main menu
+ - Reduced frequency of bundle popups when opening the game
+ - Added wild offers for Eterno Shop
+ * Clans
+ - Added ability for Captains to promote Recruits to Soldiers
+ - Added ability for Captains to accept and decline clan join requests
+ - Added ability for Captains to manage clan funds (withdraw)
+ - Added ability for Captains to update Discord link
+ - Added ability for Captains to kick members with lower roles (Recruits and Soldiers)
+ - Fixed Requests tab visibility (now only visible to Commanders and Captains)
+ - Re-enabled clan ownership transfers
+
+ == UPDATE 9.0.7 ==
+ * General
+ - Changed Famas burst rate from 90 to 85
+ - Fixed loadout name self-XSS
+ - Re-enable clan ownership transfer
+ * Ranked
+ - Removed Eterno Sim from Ranked (until rework is done)
+ - Changed rating algorithm to guarantee minimum wins/losses of rating
+
+ == UPDATE 9.0.6 ==
+ * General
+ - Eased chat profanity filter (will continue tuning)
+ * Ranked
+ - Changed 2x KR for ranked matches (RP stay the same)
+ - Fixed gaining rating on ranked loss
+
+ == UPDATE 9.0.5 ==
+ * General
+ - Started Phase 3 of Eterno
+ - Added permanent chat bans
+ - Added new system messages when players queue for Ranked (was already live)
+ - Reverted light setting from the event (was already live)
+ - REVERTED - Fixed font style (mods might need to scale font by 1.8x)
+ * Skin Manager (for Skin Makers)
+ - Added option to copy the attributes from other skins
+ - Added new defaults for most of the skins types
+ - Added search by name/ID
+ - Added support for selecting dye colors
+ - Improved deletion and replace of model/textures/sounds
+
+ == UPDATE 9.0.4 ==
+ * General
+ - Added Halloween Event
+ - Changed crates theming for Halloween
+ - Fixed hosting map from editor being closed automatically
+ - Temporarily removed KR in trades
+ * Stalker Mode
+ - Added Stalker 10 HP regen per hit
+ - Added Stalker leap ability every 3 seconds
+ - Added Stalker stick to walls ability
+ - Added Stalker taunts
+ - Changed Stalker initial HP to scale with number of enemies
+ - Made Living become dizzy if staying in same area for too long
+ - Forced higher light setting during the event for fairness
+ - Living can no longer slide
+ - Living have improved wall jump regardless of class
+ * Editor
+ - Improved undo/redo history
+
+ == UPDATE 9.0.3 ==
+ * General
+ - Fixed Eterno Simulator collision
+ - Added Ranked matches leaderboard to social
+
+ == UPDATE 9.0.2 ==
+ * General
+ - Started Phase 2 of Eterno
+ - Fixed Eterno Simulator not counting in Ranked matches
+
+ == UPDATE 9.0.1 ==
+ * General
+ - Fixed zombies being invisible
+ - Fixed some skin previews, positions, and creator attributions
+ - Made some of the Eterno Shop items tradable
+ * KrunkScript
+ - Added `onDepositBoxChange` server action
+ - Fixed `getBone`
+ - Changed `GAME.changeGame` to add a second parameter with options `{ host: bool, private: bool }`
+
+ == UPDATE 9.0.0 ==
+ * General
+ - Started Phase 1 of Eterno
+ - Added 263 new items
+ - Added new item type: Emoji
+ - Added Eterno Shop
+ - Added new Battlepass
+ - Added new map Eterno Simulator to public lobbies, comp and ranked
+ - Added ability to add KR in direct trades
+ - Added 1 new crafting recipe
+ - Added item showcase for multiple places around the game (eg. Ranked Shop & Inventory)
+ - Added ability to get match results from hosted comp games via webhook
+ - Constructed new buildings in Krunker Plaza
+ - Improved player name sync when login in while in match
+ - Fixed skins owner list order in Social
+ - Fixed showcase for certain items
+ - Fixed a couple items from previous seasons having incorrect texture and other properties
+ - Fixed multiple issues in client and servers
+ * Ranked
+ - Added rating boost based on performance
+ - Added new items to Ranked shop
+ - Increased rating changes for first matches of each ranked season
+ - Doubled the amount of Ranked Points earned (matches the KR now)
+ - Fixed ranked/rating incorrectly showing for first matches of the season
+ - Fixed not being able to change cosmetics while in ranked game
+ * Balance changes
+ - Buffed Famas: Damage increased from 26 to 28
+ - Nerfed Semi: Fire rate slowed from 140ms to 145ms
+ * Special Thanks
+ - DEVILisOP, Blitz-., galstie, kapkhan, jonschmiddy, tpercss, Whippii, Godtrader, SS_QUACKY, gaelgamer123, TeacherUs and AltionZ for skin making items for Season 9
+ - BqzzMito, Asokra, RT3126, Zxngi, Ceaff, tjwysk, ZXCDemolisher2 for help with the Eterno Simulator Map testing and help
+ - Koa1a for help with the Eterno plans
+
+ == UPDATE 8.1.5 ==
+ * General
+ - Verified KPD clan
+ - Fixed cat hiboxes in Sandstorm and Industry
+ - Improved delete account option in profile
+ - Fixed creator attribution for skins
+
+ == UPDATE 8.1.4 ==
+ * General
+ - Added 21 new items
+ - Added new Remix spin
+ - Changed KPD reward for calls to 50 KR
+
+ == UPDATE 8.1.3 ==
+ * General
+ - Added new pirate bundle
+ - Fixed some weapons not showing correctly in viewer
+ - Verified 4 clans (Arae, Lain, SCTE and Fame)
+ - Enabled loading screen test
+ * Ranked
+ - Added option to queue into all regions
+
+ == UPDATE 8.1.2 ==
+ * General
+ - Improved guides for new players
+ * Ranked
+ - Increased parameters for detection of AFK players
+ - Increased penalty for AFK players
+ * Balance changes
+ - Nerfed Submachine Gun fire rate from 95ms to 100ms
+ - Decreased Submachine Gun ammo from 30 to 24 bullets
+ - Decreased Machine Gun damage from 18 to 17
+ - Decreased Machine Gun ammo from 60 to 50
+ - Decreased Spray N Pray Health from 180 to 170
+
+ == UPDATE 8.1.1 ==
+ * General
+ - Fixed multiple Vivo and Lush issues
+ - Fixed profile picture not updating correctly
+ - Fixed some skin errors
+ - Fixed "Hide non-tradable skins" filter in new inventory
+
+ == UPDATE 8.1.0 ==
+ * Ranked
+ - Added Ranked Shop
+ - Added 5 exclusive Ranked items
+ - Added monthly ranked seasons (season 1 starting August 1st)
+ * General
+ - Added 44 new spin items
+ - Added 6 new Twitch exclusive items
+ - Added ability to verify clans
+ - Added new map Lush to comp
+ - Added new map Vivo to rotation
+ - Disabled survey bundle
+ - Disabled remix spin
+ - Disabled premium spin
+ - Re-balanced KR offers in shop
+ * Battlepass
+ - Added new Battlepass with 31 new exclusive items
+
+ == UPDATE 8.0.11 ==
+ * Ranked
+ - Added ranked badge in-game and Social
+ - Added match history to profiles in Social (last 5 matches)
+ * General
+ - Fixed animated models loading in incorrect color space
+ * Battlepass
+ - Extended the duration
+
+ == UPDATE 8.0.10 ==
+ * Ranked
+ - Added Ranked Points (Shop coming soon)
+ * General
+ - Added new Wallet & Inventory (WIP)
+ - Fixed texture encoding for animated items in viewers
+ - Fixed hitbox of cat in Undergrowth
+
+ == UPDATE 8.0.9 ==
+ * General
+ - Added new animated Cat bundle
+ - Added daily spins
+ - Fixed pets rotation in viewer
+ - Fixed access to mods with new UI updates
+ - Rabbits have all been caught and are no longer causing issues
+ - Lazy kats have been spotted lounging around
+
+ == UPDATE 8.0.8 ==
+ * General
+ - Added ability for guests to redeem their progress on registration
+ - Removed idol billboards
+ - Disabled minimap by default
+ - Separated Loadouts and Customization
+ - Swapped class and gun name on menu
+ - Merged customization menus into 1
+ - Removed chat when logged out
+ - Removed spectate button when logged out
+ - Updated match performance section on end game screen
+ - Modals that require being logged in now correctly prompt to login
+ - Updated contact information across the UI
+ - Updated lost connection modal for faster rejoins
+ - Updated 'matchmaking bar'
+ - Updated KPD information
+ - Updated left side menu
+ - Added visual indicator for clicking usernames
+ - Added 'Community' side menu button
+ - Added 'More Krunker' side menu button (moved mods, sandbox, editor and kpd here)
+ - All top left banners are now hidden for guests, except for 'new to krunker' guide
+ - Improved information on 'New to Krunker' guide
+ - Fixed various exploits and bugs across services
+
+ == UPDATE 8.0.7 ==
+ * Ranked
+ - Added new top rank
+ - Added ranked divisions
+ - Added rating decay
+ - Added rating gain/loss on end of game screen
+ - Reduced rating gain and loss per game
+ - Increased shutdown timer for ranked lobbies
+
+ * General
+ - Added missing season 7.1 gun sounds
+ - Added new adventure bundles
+ - Updated contact information across the UI
+ - Removed s8 survey ad
+ - Reverted trade map
+ - Added 2FA to be free for all users
+ - Added new email code auth strategy
+ - Fixed bundle popup logic being too aggressive
+ - Fixed various exploits and bugs across services
+
+ * Balance
+ - Famas damage 28 -> 26
+ - Famas dropoff 5 -> 8
+ - Famas firerate 280 -> 330
+ - Desert Eagle Headshot Multiplier 1.2 -> 1.4
+
+ == UPDATE 8.0.6 ==
+ * Ranked
+ - Reduced level requirement to 10
+ - Updated leaderboard to not show banned/tagged users
+ - Updated match history to show rank gain/loss goin forwards
+ - Increased the skill range for matchmaking
+ * General
+ - Added premium tickets to the shop
+ - Added remix spins and spin pools
+ - Added Contract Killer bundle
+ - Added signup bonuses and rewards for existing players
+ - Removed battlepass points from raids & non public matches
+ - Updated creators of some items
+ - Fixed various exploits and bugs across services
+
+ == UPDATE 8.0.5 ==
+ * Event
+ - Added SuQi show to Trade Plaza (show times every 2h between 11am and 11pm UTC)
+ * General
+ - Added Twitch Drops (available soon on Twitch)
+ - Fixed Aetaella SMG having double scope
+
+ == UPDATE 8.0.4 ==
+ * Ranked
+ - Fixed bug that prevented KPD calls in ranked games
+ - Removed 4 sprays from ranked games
+ - Improved matchmaking quality
+ - Hide player flags from start of ranked games
+ - Lowered the initial default rating
+ * General
+ - Fixed various exploits and bugs across services
+
+ == UPDATE 8.0.3 ==
+  * Ranked
+  - Added timeouts for players that dodge or afk ranked games (WIP)
+  - Player names are now hidden during warmup and class selection (WIP)
+  - Fixed bug where players could sometimes spawn inside walls or objects in ranked matches
+  - Fixed bug where some matches could be registered twice in ranked match history
+  - Fixed performance issue with ranked match timer
+  * General
+  - Added capes for accounts that are 5, 6 and 7 years old
+ 
+ == UPDATE 8.0.2 ==
+  * Ranked
+  - Hidden 167 cosmetic items from ranked matches
+  - Increased dynamic skill cap in matchmaking
+  - Fixed bug where players had to select specific regions to see stats
+  - Fixed matches sometimes not recording in match history
+  * General
+  - Show stream language in twitch featuring
+ 
+ == UPDATE 8.0.1 ==
+  * Ranked
+  - Removed Compressor from ranked games
+  - Updated leaderboards to show 50 entries per page
+  - Updated matchmaking to expand your search based on queue time
+  - Updated matchmaking to be more accurate based on skill level
+  - Added platinum rank between gold and diamond 
+  - Leaderboard names now link to social pages
+  * General
+  - Added featured twitch streams to home page
+  - Fixed scroll keybinds
+  - Fixed crash when joining trade lobbies with wrist items
+  - Fixed environment deaths crashing the client
+  - Fixed animations and sounds across a variety of items
+  - Fixed reload sounds sometimes not triggering
+  - Added back death zone to Krunk_Plaza
+
+ == UPDATE 8.0.0 ==
+ * Ranked
+ - Added new ranked modal / UI
+ - Added ranked game mode
+ - Added regional ranked solo queue
+ - Added regional ranked leaderboards
+ - Added regional ranked match history
+ - Added ranked profile
+ - Added ranked level requirement (15 and above)
+ - Implemented rejoin/reconnect strategies for ranked games
+ - Added 'ping' system for ranked (default mouse 3, you can change this in settings)
+ * Battlepass
+ - Added 34 items
+ - Added 10 premium spin items
+ - Small updates to battlepass UI
+ - Rebalanced battlepass challenges
+ * General & Gameplay
+ - Updated relevant assets to be Season 8 themed
+ - Added 185 new items
+ - Added idol bundles to the shop
+ - Added premium spins
+ - Implemented new 'fixed' hitboxes
+ - Increased animation speed of bullet tracers
+ - Decreased visual size of bullets
+ - Added ability for animations and shaders on weapons
+ - Added player death particle effect (can be disabled)
+ - Changed enemy player name colour to health bar colour in team based game modes
+ - Fixed lumber saw related deaths crashing client
+ - Fixed client side bullet prediction
+ - Fixed crouch angle offset
+ - Updated trade map
+ - New players now default to normal 'expert mode' instead of no menu view
+ * Misc
+ - General bug fixes to client
+ - General bug fixes to game servers
+ - Improved server resource usage
+
+ == UPDATE 7.5.1 ==
+ * Easter Event is over
+ - The new limited time event has ended. Hope you all had fun! See you next year!
+ - We tried removing all the Easter themed visual changes from the maps, but the bunnies have gone rogue and refuse to leave
+ - The "Deposit free for all" game mode has been re-enabled and "Egg Deposit" game mode has been disabled
+ - The Easter themed bundle "Cyber Bunny" has been removed from the shop
+ * Battle Pass expiration date
+ - The current Battle Pass has been set to expire on May 13, 23:59 UTC in preparation for the next season start
+
+ == UPDATE 7.5.0 ==
+ * Easter Event
+ - A new limited time event has started! Play the Easter themed game mode until 24/04/2025 11:59 PM UTC
+ - Easter themed visual changes have been added to multiple maps
+ - The "Deposit free for all" game mode has been temporarily replaced with the "Egg Deposit" game mode
+ - Collect Easter Eggs that drop from dead players, and deposit them to earn rewards!
+ - Double XP will be active for the duration of the event
+ * Bug Fixes
+ - Fixed skin previews not showing the items properly
+ - Fixed bug that caused long emails to be rejected during account registry
+ - Fixed bug that prevented players from registering or logging in by pressing the Enter key
+
+ == UPDATE 7.4.2 ==
+ * Balance changes
+ - Famas ammo count decreased from 30 to 24
+ - Assault Rifle ammo count increased from 28 to 30
+ - Submachine Gun HP increased from 90 to 100
+ - Submachine Gun damage drop off decreased from 12 to 9 (minimum damage increased from 6 to 9)
+ - Semi Auto time between shots decreased from 150ms to 140ms
+ - Semi Auto reload time decreased from 1.5 seconds to 1.2 seconds
+
+ == UPDATE 7.4.1 ==
+ * General
+ - Equipment trucks have arrived in the Plaza on schedule
+
+ == UPDATE 7.4.0 ==
+ * General
+ - Added new authentication system
+ - Added self-service password recovery (only for migrated accounts)
+ - Fixed minor UI issues
+
+ == UPDATE 7.3.2 ==
+ * Raid - Khepri
+ - Fixed Boss teleporter
+ - Fixed Krum juice HP values
+ - Reverted drop changes to original values
+ - Fixed other minor issues
+
+ == UPDATE 7.3.1 ==
+ * Raid - Khepri
+ - Fixed map skips
+ - Added 2 new Relic items
+ - Increased drop chances for Unobtainables & Contraband
+
+ == UPDATE 7.3.0 ==
+ * Raids
+ - Added new Raid: Khepri
+ * General
+ - Added ambient sounds fade time
+ - Added AI Contact Hit
+ - Increased game time for Raid mode to 25 minutes
+ * KrunkScript & Editor
+ - Added projectile options to KrunkScript AI.spawn
+ - Added rewards system to AI.spawn (for official maps)
+ - Added live objects system
+ - Added Spin Axis Z support
+ - Fixed KrunkScript TRIGGERS.execute
+ * New Content
+ - Added new maps: Erupt & HQ
+ - Added many Egyptian-themed Cosmetics
+ - Added new Weapons & Skins to extend season 7
+ * Fixes
+ - Fixed custom ambient sounds not stopping when re-hosting maps
+ - Resolved multiple server-side crashes across game servers and other services
+
+ == UPDATE 7.2.7 ==
+ * General
+ - Blocked trades with banned players to prevent a known exploit
+ - Temporarily disabled ambient sound 3 in maps to avoid getting flagged on streaming services
+ - Added email validation requirement for new account registration
+ - Increased captcha complexity to mitigate bots
+
+ == UPDATE 7.2.6 ==
+ * General
+ - Re-added Captcha
+ - Fixed minor server crash
+
+ == UPDATE 7.2.5 ==
+ * General
+ - Disabled FTUE Arena
+ - Temporarily disabled elevator music in Social
+ * Bug Fixes
+ - Fixed Free KR spin
+ - Fixed scripting window in Editor
+ - Fixed Battlepass exploit
+ - Fixed XSS in Social
+
+ == UPDATE 7.2.4 ==
+ * General
+ - Added New Bundle
+ - Added 300+ skins to spins
+
+ == UPDATE 7.2.3 ==
+ * General
+ - Removed region grouping
+ - Fixed server browser
+
+ == UPDATE 7.2.2 ==
+ * General
+ - Removed Partner system
+
+ == UPDATE 7.2.1 ==
+ * Gameplay
+ - Added new Killstreak: Bombardment (Carpet bomb the map)
+ - Added new Secondary: Compressor (Impulse forward(right click) & backwards(left click))
+ * Settings
+ - Added new Nametag Style: Simple
+ * Bug Fixes
+ - Fixed double raid drops to be every weekend instead of every other
+ - Fixed Death Markers
+
+ == UPDATE 7.2.0 ==
+ * General
+ - Combat Banana now uses Karambit animations
+ - Added back 0 ads multiplier settings
+ - Added yellow outline when youve completed a challenge category
+ - Increased transfer host limit to 5
+ * Gameplay
+ - Added new Secondary: Boulder (increased weight while holding)
+ * Maps & Modes
+ - Added back Bazaar for a limited time
+ - Removed bighead ffa
+ - Made mid walls on site jumpable
+ - Windows & Tree on Freight are now wallbangable
+ - Added Charge Rifle to Gun Game
+ - Added Kranked to more maps
+ - Kranked is now a regular mode and not a party mode
+ - Removed bighead from party modes
+ - Added more Junk & Craftables to Soul Sanctum
+ - Added new Weapons around Soul Sanctum
+ - Small changes to Soul Sanctum
+ - Raid Mode drop rates doubled on weekends
+ - Added TDM back to Pubs
+
+ == UPDATE 7.1.9 ==
+ * Bug Fixes
+ - Fixed registering
+
+ == UPDATE 7.1.8 ==
+ * General
+ - Register to earn KR
+ - More changes to ongoing FTUE experiments
+ - Added setting to enable / disable grouped regions
+ * Bug Fixes
+ - Fixed ui issue after login
+
+ == UPDATE 7.1.7 ==
+ * General
+ - Merged regions into 5 bigger regions
+ - More changes to ongoing FTUE experiments
+
+ == UPDATE 7.1.6 ==
+ * General
+ - More changes to ongoing FTUE experiments
+
+ == UPDATE 7.1.5 ==
+ * General
+ - More changes to ongoing FTUE experiments
+ - Removed youtube embeds on social
+ - Small server optimization
+ * Bug Fixes
+ - Fixed expertmode button
+ - Fixed error on login
+
  == UPDATE 7.1.4 ==
  * General
  - Added Voicechat Type setting (Default or spacial/proximity)
@@ -6873,7 +8030,7 @@
  - Adjusted Spawn Rotations on all Maps
  - Cached Mod List for faster loading
  - Added Account Age to Profile
- - Fixed FlÃ¶ating objects bug
+ - Fixed Flöating objects bug
  - Optimized Model Loader
  - Increased Hitmarker Sound Volume
  - Fixed Nuke Stat not saving

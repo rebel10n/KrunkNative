@@ -1423,10 +1423,7 @@ static void setup_dom(void) {
             "<div class=\"button small buttonG\" id=\"menuBtnTurfWars\" onmouseenter=\"playTick()\" "
             "onclick=\"playSelect(),openTurfWars()\">Turf Wars</div>");
     }
-    // Hosting is the dedicated server (server_bin, doc/backend.md 8.7): no Host Game button.
-    // Hidden, not removed, so v7's #subLogoButtons markup stays; --render-scenario keeps it.
     // Krunker v10 keeps Host Game in its action cards (its chooser, window 42: v10_menu.c)
-    if (!scenario_on() && !v10_menu_page()) set_display("menuBtnHost", "none");
     servers_ui_menu_setup(); // KrunkNative: the Connect button next to Invite / Join (servers_ui.c)
     v10_news_setup(); // the v10 menu's Guide / What's New / Community & Events items (v10_news.c)
     v10_competitive_setup(); // the v10 page: Ranked / Turf Wars / Leaderboards (v10_competitive.c)
@@ -1457,7 +1454,7 @@ static void menu_dom_init(void) {
     ui_settings_load();
     ui_settings_collect_defaults();
     setup_dom();
-    v10_menu_dom_init(); // Krunker v10's Svelte menu markup (ui/v10): its handlers, nav, header (v10_menu.c)
+    v10_menu_dom_init(); // Krunker v10's Svelte menu markup (ui/): its handlers, nav, header (v10_menu.c)
     menu_build_classes();
     menu_build_maps();
     g_ui.last_instructions[0] = 0;

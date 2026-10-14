@@ -1,0 +1,74 @@
+{
+  "scenario": "settings-advanced",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "search-switch",
+      "rect": [
+        291,
+        70,
+        245,
+        30
+      ],
+      "kind": "text",
+      "note": "search box and the Basic / Advanced switch (1 px of text rounding)",
+      "fuzz": 12,
+      "max_pct": 6.0,
+      "ref_offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "preset-buttons",
+      "rect": [
+        726,
+        70,
+        262,
+        30
+      ],
+      "kind": "text",
+      "note": "preset select, Import / Export / Reset (their text 1 px lower: the engine line-height normal rounding): 93 px further right, since v10 writes Manage Ads only with window.canShowAds (KN shows no ads, so no button)",
+      "fuzz": 12,
+      "max_pct": 16.0,
+      "ref_offset": [
+        -93,
+        0
+      ]
+    },
+    {
+      "name": "tabs",
+      "rect": [
+        291,
+        104,
+        698,
+        38
+      ],
+      "kind": "text",
+      "note": "settingsTabLayout (1 px of text rounding)",
+      "fuzz": 12,
+      "max_pct": 6.0,
+      "ref_offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "name": "body",
+      "rect": [
+        291,
+        144,
+        698,
+        507
+      ],
+      "kind": "text",
+      "note": "settHolder rows",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": false
+    }
+  ]
+}

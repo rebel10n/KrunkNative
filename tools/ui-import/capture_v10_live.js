@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Rendered-DOM capture of the LIVE krunker.io (Krunker v10) menu in sandboxed headless Chromium.
 // RUNS KRUNKER'S LIVE CLIENT (the page's own JS): only with the user's explicit approval. The
-// static fallback, which runs nothing, is v10_bundle.js (import.py --ref v10).
+// static fallback, which runs nothing, is v10_bundle.js (import.py).
 //
 //   node tools/ui-import/capture_v10_live.js <stage dir>
 //

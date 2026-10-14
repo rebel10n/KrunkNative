@@ -83,7 +83,7 @@ V7_EDITOR_CSS = "/home/user/jails/kru/src/Krunker_v7.1.4/public/css/editor.css"
 HUB_SVELTE = ("sdh4ve", "1wz7ymp", "16z1lxi")  # view stack, popup frame, LoginModal
 HUB_SVELTE_CSS = "css/hub-svelte.css"
 # v10_bundle.js output, first that exists: the page tree's copy, then the bundle cache
-SVELTE_CSS = ("css/svelte.css", "v10/css/svelte.css", os.path.expanduser("~/.cache/kn-v10/bundle/svelte.css"))
+SVELTE_CSS = ("css/svelte.css", os.path.expanduser("~/.cache/kn-v10/bundle/svelte.css"))
 DROP_META_RE = re.compile(r"<meta (?:property=\"og:|name=\"(?:twitter:|description|keywords))[^>]*>\s*")
 DROP_LINK_RE = re.compile(r"<link rel=\"(?:modulepreload|preload|dns-prefetch|preconnect)\"[^>]*>\s*")
 
@@ -145,7 +145,7 @@ def hub_svelte_css(ui_dir):
         if os.path.isfile(path):
             break
     else:
-        raise SystemExit("v10 hub: no svelte.css (%s): run import.py --ref v10 (v10_bundle.js) first" % ", ".join(SVELTE_CSS))
+        raise SystemExit("v10 hub: no svelte.css (%s): run import.py (v10_bundle.js) first" % ", ".join(SVELTE_CSS))
     with open(path, encoding="utf-8") as fh:
         text = fh.read()
     blocks = re.split(r"(?m)^/\* (svelte-[a-z0-9]+) \*/\n", text)

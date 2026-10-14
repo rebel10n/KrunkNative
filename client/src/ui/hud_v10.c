@@ -1,14 +1,14 @@
-// The in-game HUD on the Krunker v10.0.2 page (ui/v10, client/include/hud_v10.h).
+// The in-game HUD on the Krunker v10.0.2 page (ui/, client/include/hud_v10.h).
 //
 // v10's in-game HUD is still the legacy DOM of v7.1.4 (#inGameUI and its ids, doc/v10/ui.md
-// section 5), so hud_ui.c drives both pages; this file holds what v10 does differently, read
+// section 5), which hud_ui.c drives; this file holds what v10 does differently, read
 // from the v10.0.2 client (~/.cache/kn-v10/v10.js, `v10:N` = its line) and checked against the
 // offline v10 sandbox captures (doc/ref/krunker-v10/ingame/, tools/uidiff/capture-v10.js):
 //   - #chatUIHolder (new in v10, markup display:none) wraps the chat: toggleMenuHider(on) runs
 //     hideChatIfGuestUser(on) (v10:161017, 208576): on the menu a guest has no chat, an account
 //     has it; out of the menu (the game, the death and end screens) it is always up;
 //   - the Old Scoreboard holder #leaderboardHolder is always shown (switchLeaderboard writes
-//     style.display = true, v10:207925, which CSS ignores; hud_ui.c asks hud_v10_page());
+//     style.display = true, v10:207925, which CSS ignores; hud_ui.c shows it);
 //   - the end screen's Performance tab is Combat Earnings + Combat Record (v10:203117) and a
 //     guest gets the signup incentive under the results (v10:219663, origin match_end).
 #include <hud_v10.h>
@@ -104,7 +104,7 @@ void hud_v10_end_performance_html(char *out, const size_t size, size_t *len, con
 }
 
 // The signup rewards component (v10:115204, _39408) with origin "match_end": its markup with the
-// svelte-1v6b0qm classes (ui/v10/css/svelte.css), REGISTER -> loginOrRegister (knEndRegister).
+// svelte-1v6b0qm classes (ui/css/svelte.css), REGISTER -> loginOrRegister (knEndRegister).
 static const char SIGNUP_HTML[] =
     "<div class=\"signup-rewards-container signup-rewards-container--match-end svelte-1v6b0qm\">"
     "<div class=\"signup-rewards-header svelte-1v6b0qm\">Join Krunker today!</div> "

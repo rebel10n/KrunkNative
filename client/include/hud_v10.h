@@ -1,6 +1,6 @@
-// The in-game HUD on the Krunker v10.0.2 page (ui/v10): what v10 does differently from the v7.1.4
-// page with the same legacy HUD DOM (client/src/ui/hud_v10.c). hud_ui.c asks hud_v10_page() at the
-// few places the two pages differ, so one HUD drives both until the v7 page is retired.
+// The in-game HUD on the Krunker v10.0.2 page (ui/): what v10 does differently from v7.1.4's legacy
+// HUD DOM, which it keeps (client/src/ui/hud_v10.c). hud_v10_page(): the main page is loaded and
+// ready (not the hub / editor page).
 #ifndef HUD_V10_H
 #define HUD_V10_H
 

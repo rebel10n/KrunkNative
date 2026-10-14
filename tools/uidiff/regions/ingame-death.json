@@ -7,12 +7,7 @@
   "regions": [
     {
       "name": "chat",
-      "rect": [
-        35,
-        655,
-        243,
-        59
-      ],
+      "rect": [35, 655, 243, 59],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
@@ -20,38 +15,24 @@
     },
     {
       "name": "death-weapons",
-      "rect": [
-        380,
-        570,
-        470,
-        75
-      ],
+      "rect": [380, 570, 470, 75],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#deathUIHolder top row: [Desert Eagle] icon, kills 1 - 0, [Assault Rifle] icon"
+      "note": "#deathUIHolder top row: [Semi Auto] icon, kills 1 - 0, [Assault Rifle] icon"
     },
     {
       "name": "death-cards",
-      "rect": [
-        380,
-        650,
-        460,
-        50
-      ],
+      "rect": [380, 650, 460, 50],
       "kind": "image",
       "fuzz": 8,
       "max_pct": 1.5,
-      "note": "class images + lvl, Bot VS Local User"
+      "note": "class images + lvl, Bot VS Local User (KrunkNative's offline sandbox names us Guest_1, v10's Local User)",
+      "skip": true
     },
     {
       "name": "death-time",
-      "rect": [
-        950,
-        570,
-        160,
-        25
-      ],
+      "rect": [950, 570, 160, 25],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
@@ -60,12 +41,7 @@
     },
     {
       "name": "death-stats",
-      "rect": [
-        950,
-        595,
-        160,
-        90
-      ],
+      "rect": [950, 595, 160, 90],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
@@ -73,12 +49,7 @@
     },
     {
       "name": "empty-top-left",
-      "rect": [
-        0,
-        0,
-        300,
-        100
-      ],
+      "rect": [0, 0, 300, 100],
       "kind": "flat",
       "fuzz": 6,
       "max_pct": 0.5,
@@ -87,12 +58,7 @@
     },
     {
       "name": "empty-bottom-right",
-      "rect": [
-        1100,
-        520,
-        180,
-        200
-      ],
+      "rect": [1100, 520, 180, 200],
       "kind": "flat",
       "fuzz": 6,
       "max_pct": 0.5,

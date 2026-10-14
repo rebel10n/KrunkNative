@@ -1,0 +1,32 @@
+{
+  "scenario": "customize-streaks",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 3.0
+  },
+  "regions": [
+    {
+      "name": "toolbar",
+      "rect": [
+        198,
+        70,
+        883,
+        53
+      ],
+      "kind": "text",
+      "note": "#loadoutToolbar: name, Class / Loadout / Customize tabs"
+    },
+    {
+      "name": "content",
+      "rect": [
+        546,
+        123,
+        535,
+        527
+      ],
+      "kind": "text",
+      "note": "skip: the offline mirror has no img/streaks/*.png, so the reference cards are empty",
+      "skip": true
+    }
+  ]
+}

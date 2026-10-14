@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # uidiff.sh - per-region pixel diff of the native HTML UI against the Krunker
-# v3.1.1 reference captures (doc/ref/krunker-v3.1.1/).
+# v10.0.2 reference captures (doc/ref/krunker-v10.0.2/, doc/ref/krunker-v10/) and
+# KrunkNative's own (doc/ref/krunknative/).
 #
 #   tools/uidiff/uidiff.sh <client_bin> [scenario-name...]
 #
@@ -196,16 +197,14 @@ scenarios=()
 if [ $# -gt 0 ]; then
     for n in "$@"; do
         n=${n%.json}
-        # the Krunker v10 page's scenarios keep their directory: v10/<name>
-        case $n in v10/*|*/v10/*) n=v10/${n##*/} ;; *) n=${n##*/} ;; esac
-        scenarios+=("$n")
+        scenarios+=("${n##*/}")
     done
 else
-    for f in "$here"/scenarios/*.json "$here"/scenarios/v10/*.json; do
+    for f in "$here"/scenarios/*.json; do
         [ -e "$f" ] || continue
         n=${f##*/}
-        # v10/: only the scenarios with a reference and regions (the others are smoke-ui-v10 renders)
-        case $f in */scenarios/v10/*) n=v10/$n; [ -f "$here/regions/$n" ] || continue ;; esac
+        # only the scenarios with a reference and regions (the others are smoke-ui renders)
+        [ -f "$here/regions/$n" ] || continue
         scenarios+=("${n%.json}")
     done
 fi
@@ -246,9 +245,7 @@ for name in "${scenarios[@]}"; do
     scenario_abs=$(cd "$(dirname "$scenario")" && pwd)/$(basename "$scenario")
     render_abs=$(cd "$(dirname "$render")" && pwd)/$(basename "$render")
     scenario_failed=0
-    # v10/<name>: rendered on the v10 page tree (ui/v10)
-    if ! ( [[ $name != v10/* ]] || export KRUNKNATIVE_UI_DIR="$(cd "$here/../.." && pwd)/ui/v10"
-           render_scenario "$name" "$scenario_abs" "$ref" "$w" "$h" "$render_abs" ) >"$out_dir/$name.log" 2>&1 \
+    if ! ( render_scenario "$name" "$scenario_abs" "$ref" "$w" "$h" "$render_abs" ) >"$out_dir/$name.log" 2>&1 \
         || [ ! -s "$render" ]; then
         printf '%-22s %-20s %9s %9s %6s %s\n' "$name" '(render)' - - - "FAIL (no render, see $out_dir/$name.log)"
         tail -n 5 "$out_dir/$name.log" >&2 || true

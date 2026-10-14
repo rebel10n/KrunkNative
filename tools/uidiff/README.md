@@ -1,8 +1,13 @@
 # tools/uidiff
 
-Per-region pixel diff of the native HTML/CSS UI against the Krunker v7.1.4
-reference captures in `doc/ref/krunker-v7.1.4/` (made by `capture-v7.js`, see
-[References](#references); the v3.1.1 captures stay in `doc/ref/krunker-v3.1.1/`). KrunkNative-only
+Per-region pixel diff of the native HTML/CSS UI (the Krunker v10.0.2 page, `ui/`) against the
+Krunker v10.0.2 reference captures in `doc/ref/krunker-v10.0.2/` and `doc/ref/krunker-v10/`
+(captured from the offline v10 sandbox: `capture-v10.js`, `capture-v10-static.js`,
+`capture-v10-rewards.js`, `gen_v10_ingame.py`, `v10_social_ref.py`). The v7.1.4 page and its
+scenarios are gone (Krunker v10.0.2 is the only version); the sections below that describe
+`capture-v7.js` and the v7 scenario names are history, and `doc/ref/krunker-v7.1.4/` /
+`doc/ref/krunker-v3.1.1/` stay as references. A scenario without a regions file is a render
+smoke (`make smoke-ui`), not a diff. KrunkNative-only
 UI with no Krunker counterpart (the `kn-*` scenarios: the Object Manager window and its HUD rack)
 diffs against KN's own renders in `doc/ref/krunknative/` (llvmpipe, made with `--render-scenario`
 from the same scenario): a regression baseline, not a parity reference. `make uidiff` builds `client_bin`
@@ -11,7 +16,7 @@ real client and its C UI logic (see [Rendering with client_bin](#rendering-with-
 
 ```sh
 make uidiff                                  # all scenarios
-make uidiff SCENARIOS="menu-1280 win-classes" # a subset
+make uidiff SCENARIOS="main-menu customize-class" # a subset
 ```
 
 `tools/uidiff/uidiff.sh <client_bin> [scenario-name...]` is the pipeline underneath;

@@ -1,5 +1,5 @@
 {
-  "ref": "doc/ref/krunker-v7.1.4/ingame/ingame-chat-lines.png",
+  "ref": "doc/ref/krunker-v10/ingame/ingame-chat-lines.png",
   "size": [
     1280,
     720
@@ -21,8 +21,8 @@
       "health": 100,
       "maxHealth": 100,
       "healthSegments": 6,
-      "ammo": 28,
-      "ammoMax": 28,
+      "ammo": 30,
+      "ammoMax": 30,
       "ammoLimit": false,
       "melee": false,
       "reloading": false,
@@ -108,8 +108,15 @@
         "text": "Cleared Bots",
         "color": "#fc03ec"
       }
+    ],
+    "scoreboard": [
+      {
+        "rank": 1,
+        "name": "Local User",
+        "score": 0
+      }
     ]
   },
   "frames": 3,
-  "note": "12 sandbox lines: #chatList at its 250 px max-height, scrolled to the newest."
+  "note": "12 sandbox lines: #chatList at its 250 px max-height, scrolled to the newest. Reference: the offline v10 sandbox (capture-v10.js)."
 }

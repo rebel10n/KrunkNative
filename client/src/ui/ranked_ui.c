@@ -7,7 +7,7 @@
 // the matchmaking status, "All regions" and the start button; svelte-17kea4i home: rank card,
 // svelte-6hxhl0 Ranked Progression with milestones, Ranked Challenges link, map carousel;
 // svelte-18dbnt3 profile; svelte-1enb567 leaderboard; svelte-1irqx9a match history; svelte-1gtpoav
-// shop with svelte-1q06uv7 items; svelte-jxc66d message overlay), styled by ui/v10/css/svelte.css.
+// shop with svelte-1q06uv7 items; svelte-jxc66d message overlay), styled by ui/css/svelte.css.
 // While searching, the .ranked-matchmaking-status banner (svelte-3k0h7w) shows in
 // #matchmakingStatusEl like v10's matchmakingStatusEl mount.
 //
@@ -612,7 +612,7 @@ int ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
     const int arg0 = arg_num(args, argc, 0, 0);
     if (!strcmp(name, "openRankedMenu")) { // v10: guests get loginOrRegister()
         if (acc() || R.scenario) open_popup();
-        else if (!v10_menu_page() || v10_menu_handle("loginOrRegister", NULL, NULL, 0) < 0) menu_show_window(5, 1);
+        else if (v10_menu_handle("loginOrRegister", NULL, NULL, 0) < 0) menu_show_window(5, 1);
         return 1;
     }
     if (strncmp(name, "knRk", 4)) return -1;

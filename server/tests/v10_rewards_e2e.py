@@ -6,7 +6,7 @@ services/brain/rewards.c, db_rewards.c, season.c; migration 0116_v10_rewards).
 
 Creates its own PostgreSQL database (sudo -n -u postgres createdb; KN_TEST_DB to reuse one), starts
 one kn_brain and one server_bin (ports from kn_proto.free_ports(), cheats "all"), and drives a
-headless client_bin on ui/v10 (KRUNKNATIVE_UI_CMDS: clicks, typed text, page calls, screenshots):
+headless client_bin on ui/ (KRUNKNATIVE_UI_CMDS: clicks, typed text, page calls, screenshots):
   1. as a guest: Get Signup Rewards -> the "Join Krunker today!" popup -> REGISTER -> the login
      popup's Register card (v10_login.c) -> registered: kn_brain grants the 14 cosmetics + 24 h of premium once and the client
      shows "Welcome to the Family!" ("prr")
@@ -99,15 +99,14 @@ def wait_for(fn, timeout=15.0):
 
 
 class Client:
-    """One headless client_bin on ui/v10 with a private config dir, driven through KRUNKNATIVE_UI_CMDS."""
+    """One headless client_bin on ui/ with a private config dir, driven through KRUNKNATIVE_UI_CMDS."""
 
     def __init__(self, name, xdg):
         self.name, self.log_name = name, f"client-{name}.log"
         self.cmds = os.path.join(WORK, f"cmds-{name}.txt")
         open(self.cmds, "w").close()
         env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
-        env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": xdg,
-                    "KRUNKNATIVE_UI_DIR": "ui/v10", "KRUNKNATIVE_BRAIN_URL": f"http://127.0.0.1:{BRAIN_PORT}",
+        env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": xdg, "KRUNKNATIVE_BRAIN_URL": f"http://127.0.0.1:{BRAIN_PORT}",
                     "KRUNKNATIVE_UI_CMDS": self.cmds, "KRUNKNATIVE_UPDATES_URL": "off", "KRUNKNATIVE_NO_BROWSER": "1",
                     "KRUNKNATIVE_WINDOW_SIZE": "1280x720"})
         self.proc = subprocess.Popen([os.path.join(BUILD, "client_bin"), "--offline"], env=env,

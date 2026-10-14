@@ -116,7 +116,7 @@ static double file_mtime(const struct stat *st) {
 }
 
 // The first file under `dir` modified after the epoch (its path in `what`). At the page tree's
-// root the window templates (read again in place) and other page trees (ui/v10: a directory
+// root the window templates (read again in place) and other page trees (ui/: a directory
 // with its own index.html) are skipped.
 static int newer_in(const char *dir, const int depth, const int page_root, char *what, const size_t n) {
     if (depth > SCAN_DEPTH_MAX) return 0;

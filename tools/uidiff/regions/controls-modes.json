@@ -1,0 +1,34 @@
+{
+  "scenario": "controls-modes",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "tabs",
+      "rect": [
+        262,
+        80,
+        756,
+        44
+      ],
+      "kind": "text",
+      "note": "windows[6] tabs"
+    },
+    {
+      "name": "body",
+      "rect": [
+        262,
+        128,
+        746,
+        523
+      ],
+      "kind": "text",
+      "note": "bind rows",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": false
+    }
+  ]
+}

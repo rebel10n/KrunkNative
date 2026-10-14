@@ -1,0 +1,20 @@
+{
+  "scenario": "spin-heroic",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 3.0
+  },
+  "regions": [
+    {
+      "name": "info",
+      "rect": [
+        1033,
+        13,
+        236,
+        270
+      ],
+      "kind": "text",
+      "note": "#spinInfo: the wheel's name, its pools' odds, Spin History, Switch to 10x Spin (the capture's WebGL wheel and item previews are blank)"
+    }
+  ]
+}

@@ -1,0 +1,74 @@
+{
+  "scenario": "settings-game",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "search-switch",
+      "rect": [
+        291,
+        76,
+        245,
+        30
+      ],
+      "kind": "text",
+      "note": "search box and the Basic / Advanced switch (1 px of text rounding)",
+      "fuzz": 12,
+      "max_pct": 6.0,
+      "ref_offset": [
+        0,
+        -1
+      ]
+    },
+    {
+      "name": "preset-buttons",
+      "rect": [
+        726,
+        76,
+        262,
+        30
+      ],
+      "kind": "text",
+      "note": "preset select, Import / Export / Reset (their text 1 px lower: the engine line-height normal rounding): 93 px further right, since v10 writes Manage Ads only with window.canShowAds (KN shows no ads, so no button)",
+      "fuzz": 12,
+      "max_pct": 16.0,
+      "ref_offset": [
+        -93,
+        -1
+      ]
+    },
+    {
+      "name": "tabs",
+      "rect": [
+        291,
+        110,
+        697,
+        38
+      ],
+      "kind": "text",
+      "note": "settingsTabLayout (1 px of text rounding)",
+      "fuzz": 12,
+      "max_pct": 6.0,
+      "ref_offset": [
+        0,
+        -1
+      ]
+    },
+    {
+      "name": "body",
+      "rect": [
+        291,
+        149,
+        697,
+        498
+      ],
+      "kind": "text",
+      "note": "settHolder rows (the Gameplay rows sit 1-2 px lower: the window is 3 px shorter)",
+      "fuzz": 12,
+      "max_pct": 6.0,
+      "skip": false
+    }
+  ]
+}

@@ -660,7 +660,7 @@ static void hud_scoreboard_html(const Client *client, const cJSON *rows, char *o
     const char *const *keys = hud_board_keys(client, &columns);
     size_t len = 0;
     out[0] = 0;
-    const int v10 = hud_v10_page(); // v10 (v10:220499): the header rows in <thead>, the players in <tbody>
+    // v10 (v10:220499): the header rows in <thead>, the players in <tbody>
     for (int group = 0; group < (teams ? 2 : 1); group++) {
         int rank = 1;
         for (int i = 0; i < n; i++) {
@@ -674,14 +674,14 @@ static void hud_scoreboard_html(const Client *client, const cJSON *rows, char *o
                     hb_append_escaped(out, size, &len, team_name);
                     hb_append(out, size, &len, "<div class='newLeaderTeamScore'>%d</div></div>", client->game.mode->team_scores[group + 1]);
                 }
-                hb_append(out, size, &len, "<table id='ingameTable'>%s<tr><th>Name</th>", v10 ? "<thead>" : "");
+                hb_append(out, size, &len, "<table id='ingameTable'><thead><tr><th>Name</th>");
                 for (int k = 0; k < columns; k++) // UTILS.capFirst(key)
                     hb_append(out, size, &len, "<th>%c%s</th>", toupper((unsigned char) keys[k][0]), keys[k] + 1);
-                hb_append(out, size, &len, "</tr><tr height='10px;'></tr>%s", v10 ? "</thead><tbody>" : "");
+                hb_append(out, size, &len, "</tr><tr height='10px;'></tr></thead><tbody>");
             }
             hud_center_board_row_html(out, size, &len, rank++, &board[i], columns);
         }
-        if (rank > 1) hb_append(out, size, &len, "%s</table></div></div>", v10 ? "</tbody>" : "");
+        if (rank > 1) hb_append(out, size, &len, "</tbody></table></div></div>");
     }
 }
 
@@ -1179,8 +1179,8 @@ static void hud_crosshair_build(const ClientRenderSettings *rs) {
         static const char *const sides[4] = {"t", "r", "b", "l"};
         for (int i = 0; i < 4; i++) {
             hb_append(html, sizeof(html), &len, "<div class='knCrossArm knCrossArm-%s' style='background-color:%s;box-shadow:", sides[i], color);
-            // v10 strokes its 6x23 bars 1px (ui/v10/css/hud.css); v7's are 4x21 on a 2px shadow rect
-            if (shadow_on) hb_append(html, sizeof(html), &len, "0 0 0 %dpx %s'></div>", hud_v10_page() ? 1 : 2, shadow);
+            // v10 strokes its 6x23 bars 1px (ui/css/hud.css)
+            if (shadow_on) hb_append(html, sizeof(html), &len, "0 0 0 1px %s'></div>", shadow);
             else hb_append(html, sizeof(html), &len, "none'></div>");
         }
     }
@@ -2225,7 +2225,7 @@ static void hud_old_board_step(const Client *client) {
     const ClientRenderSettings *rs = client_render_settings();
     const int old = rs->old_scoreboard;
     // v10 shows and fills #leaderboardHolder whatever the leaderType (hud_v10.c)
-    const int board = old || hud_v10_page();
+    const int board = 1;
     if (old != ui->old_board) {
         const HtmlElem counters = html_dom_query(0, ".topRightCounters"); // getElementsByClassName(..)[0]
         if (counters) html_dom_set_style(counters, "width", old ? "400px" : "auto");
@@ -2757,11 +2757,6 @@ static void hud_end_performance_html(const Client *client, char *out, const size
     const int score = me ? me->score : 0;
     const int kills = me ? (int) me->kills : 0;
     const int deaths = me ? (int) me->deaths : 0;
-    const int q = g_end_result;
-    const char *mode = hud_mode_name(client)[0] ? hud_mode_name(client) : "Free for All";
-    const char *alias = client->game.mode && client->game.mode->config.alias ? client->game.mode->config.alias : "ffa";
-    static const char *const icons[] = {"ffa", "tdm", "ctf", "kc", "point"}; // mode.getIcon ids
-
     // v7.1.4 Battle Pass: #endBPLayout (account && !isCustom && bpData; battlepass_ui.c)
     StrBuf bp = {0};
     if (battlepass_ui_end_html(&bp)) {
@@ -2771,33 +2766,9 @@ static void hud_end_performance_html(const Client *client, char *out, const size
     } else {
         sb_free(&bp);
     }
-    if (hud_v10_page()) { // v10: Account Level, Combat Earnings + Combat Record (hud_v10.c)
-        char kr[96];
-        hud_v10_end_performance_html(out, size, len, hud_reward_html(me ? me->reward : 0, kr, sizeof(kr)), score, kills, deaths, rank);
-        return;
-    }
-    hb_append(out, size, len, "<div id='endLayout'><div><div id='gameFundsLayout'><div class='gfSection' style='margin-bottom: 0px;padding: 16px 0px;'>");
-    hb_append(out, size, len, "<div class=\"endTitle\" style=\"text-align:center\">");
-    hb_append_escaped(out, size, len, mode);
-    hb_append(out, size, len, "</div>\n\t\t\t\t\t\t\t<div id=\"modeLayout\">");
-    int known = 0;
-    for (size_t i = 0; i < sizeof(icons) / sizeof(icons[0]); i++) known |= !strcmp(icons[i], alias);
-    if (known) hb_append(out, size, len, "<img src=\"img/modes/%s.png\" class=\"modeIcon\">", alias);
-    else hb_append(out, size, len, "<div class=\"unknownModeIcon\">?</div>");
-    hb_append(out, size, len, "\n\t\t\t\t\t\t\t<div class=\"modeStatus\" style=\"margin-top: -5px;%s\">\n\t\t\t\t\t\t\t%s</div></div>",
-              q == -1 ? "color:var(--yellow)" : q ? "" : "color:var(--red)", q == -1 ? "DRAW" : q ? "VICTORY" : "DEFEAT");
-    char funds[96];
-    hud_reward_html(me ? me->reward : 0, funds, sizeof(funds)); // f1914: funds = the reward cell
-    hb_append(out, size, len, "</div><div class='gfSection'><div id=\"fundsLayout\" style=\"\">\n\t\t\t\t\t\t\t<div class=\"fundsVal\">%s</div></div></div></div></div>", funds);
-    hb_append(out, size, len, "<div class='endSection'><div class='endTitle'>Combat Record</div><div id='combatRecordLayout'>");
-    hb_append(out, size, len, "<div class='crStat'><div class='crLabel'>Score</div><div class='crVal'>%d</div></div>", score);
-    hb_append(out, size, len, "<div id='kdLayout'><div class='crStat'><div class='crLabel'>Kills</div><div class='crVal'>%d</div></div>", kills);
-    hb_append(out, size, len, "<div class='crStat'><div class='crLabel'>Deaths</div><div class='crVal'>%d</div></div></div>", deaths);
-    hb_append(out, size, len, "<div class='crStat'><div class='crLabel'>Rank</div><div class='crVal'>#%d</div></div>", rank);
-    hb_append(out, size, len, "<div class='crStat'><div class='crLabel'>SPK</div><div class='crVal'>%.2f</div></div>", (double) score / (kills ? kills : 1));
-    hb_append(out, size, len, "<div class='crStat'><div class='crLabel'>KDR</div><div class='crVal'>%.2f</div></div>", (double) kills / (deaths ? deaths : 1));
-    hb_append(out, size, len, "<div class='crStat'><div class='crLabel'>W/L</div><div class='crVal'>%.2f</div></div>", q == -1 ? 0.0 : q ? 1.0 : 0.0);
-    hb_append(out, size, len, "</div></div></div>");
+    // v10: Account Level, Combat Earnings + Combat Record (hud_v10.c)
+    char kr[96];
+    hud_v10_end_performance_html(out, size, len, hud_reward_html(me ? me->reward : 0, kr, sizeof(kr)), score, kills, deaths, rank);
 }
 
 // ---- WP-E part 2c: the Medals and Rewards tabs, the completed challenge cards
@@ -3331,7 +3302,7 @@ static void hud_apply_visibility(Client *client, const int in_game, const int vi
     // Pieces the Display settings own (settings.js `set`s; ui_render_settings.c applies live
     // changes) are written from the same values, so this pass never undoes a setting.
     const ClientRenderSettings *rs = client_render_settings();
-    dom_display("leaderboardHolder", rs->old_scoreboard || hud_v10_page() ? "block" : "none"); // oldScoreboard -> switchLeaderboard
+    dom_display("leaderboardHolder", "block"); // v10: always shown (switchLeaderboard, hud_v10.c)
     dom_display("killCount", rs->show_kill_c ? "inline-block" : "none");       // showKillC
     dom_display("deathCount", rs->show_deaths ? "inline-block" : "none");      // showDeaths
     dom_display("streakCount", rs->show_streak ? "inline-block" : "none");     // showStreak

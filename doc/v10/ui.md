@@ -231,7 +231,7 @@ grep -o -E "[\"'](\./|/)?(img|textures|videos|sound|models|scares|promo|css|font
 - **What's New** = windows[34] (`showWindow(35)`: the nav item `#updateAd`, the footer's Changelog
   link) with v10's `gen` (line-height 1.8 notes, `img/backgrounds/whatsnew.png` header),
   `toggleLog`, `switchTab`, `viewAll`, over Krunker Box Office's own changelog
-  `ui/v10/windows/kn-versions.txt` (v10's `docs/versions.txt` format; `versions.txt`, Krunker's,
+  `ui/windows/kn-versions.txt` (v10's `docs/versions.txt` format; `versions.txt`, Krunker's,
   only when a page tree has no `kn-versions.txt`). The newest update is the version
   (`config.gameVersion`), and `lastViewedUpdate` stores it alone (v10: `<version>_<build>`, which
   would bring What's New back with every deploy). `#updateAd` shows for a signed-in player who has
@@ -251,6 +251,6 @@ grep -o -E "[\"'](\./|/)?(img|textures|videos|sound|models|scares|promo|css|font
   link plays the map here (`playMap`), the rest open like every external link
   (`ui_open_external`: the hub for `/social.html?...`, the browser for http(s)).
 - Native-only differences: no `aspect-ratio` (the event banner gets v10's 1170:150 height in px,
-  `ui/v10/css/kn-v10-news.css`), no `-webkit-line-clamp` (descriptions are not cut), remote
+  `ui/css/kn-v10-news.css`), no `-webkit-line-clamp` (descriptions are not cut), remote
   `banner_url` images are not loaded (no banner box then), Twitch's inline `<svg>` icon is drawn
   as an SVG image, and the event date has a plain space before AM/PM (Chrome: U+202F).

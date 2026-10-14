@@ -1,7 +1,7 @@
 /*
  * test_runtime_sheet.c - a stylesheet added after the page was styled
  * (html_ui_add_stylesheet -> html_ui_backend_add_stylesheet in engine.c): the
- * v7.1.4 page (ui/index.html) is loaded with its ten <link> sheets and its <style>
+ * page (ui/index.html, Krunker v10.0.2) is loaded with its <link> sheets and its <style>
  * block and restyled, the developer console's markup (client/src/ui/ui_console.c,
  * from Krunker v3.1.1 mod/devConsole.ts) is appended to <body>, then
  * ui/css/devconsole.css is appended as the last sheet and the whole document
@@ -23,7 +23,7 @@
  *   target_compile_definitions(test_runtime_sheet PRIVATE KN_REPO_ROOT="${R}")
  *   target_link_libraries(test_runtime_sheet lexbor m)
  *
- * Second part (regression): the v10 page (ui/v10/index.html) with every <link> / <style> sheet it has
+ * Second part (regression): the v10 page (ui/index.html) with every <link> / <style> sheet it has
  * plus enough empty sheets for 20 author sheets, then devconsole.css and a page-module sheet (like
  * html_ui_add_stylesheet("css/kn-v10-news.css")) appended at runtime. The cascade's sheet index was a
  * 4-bit field (UA + 14 author sheets): every sheet past the 14th was silently dropped, so one extra
@@ -54,13 +54,6 @@ static CssSheet *g_ua;
 static CssSheet *g_sheets[40];
 static int g_n_sheets;
 
-/* ui/index.html's <link> sheets, in order (relative to ui/: the url() bases) */
-static const char *k_page_sheets[] = {
-    "css/main.css", "css/bundled/bundledStyles.min.css", "css/main_custom.css", "css/flag.css",
-    "css/material-icons.css", "css/material-icons-outlined.css", "css/material-symbols-outlined.css",
-    "css/google-play.css", "css/krunknative.css", "css/hud.css",
-};
-#define N_PAGE_SHEETS ((int)(sizeof(k_page_sheets) / sizeof(k_page_sheets[0])))
 static const char *const k_display[] = {"inline", "block", "none", "inline-block", "flex", "inline-flex", "grid",
                                         "inline-grid", "table", "inline-table", "table-row", "table-cell",
                                         "table-row-group", "list-item", "contents"};
@@ -143,11 +136,29 @@ static void restyle(void)
     cascade_restyle(g_dom, g_ua, g_sheets, g_n_sheets);
 }
 
+/* ui/index.html's <link rel="stylesheet"> sheets in order (relative to ui/: the url() bases) */
+static void load_page_sheets(const char *html)
+{
+    for (const char *p = html; (p = strstr(p, "<link rel=\"stylesheet\" href=\"")) != NULL;) {
+        p += strlen("<link rel=\"stylesheet\" href=\"");
+        const char *q = strchr(p, '"');
+        if (!q || g_n_sheets >= 30) break;
+        char href[128], rel[192];
+        snprintf(href, sizeof(href), "%.*s", (int)(q - p), p);
+        snprintf(rel, sizeof(rel), "ui/%s", href);
+        size_t clen;
+        char *css = read_file(rel, &clen);
+        g_sheets[g_n_sheets++] = css_sheet_load(css, clen, href);
+        free(css);
+        p = q;
+    }
+}
+
 /* the v10 page with 20 author sheets, then two runtime sheets past the old 15-sheet cap */
 static void many_sheets(void)
 {
     size_t len;
-    char *html = read_file("ui/v10/index.html", &len);
+    char *html = read_file("ui/index.html", &len);
     dom_destroy(g_dom);
     g_dom = dom_create();
     if (dom_load_html(g_dom, html, len) != 0) {
@@ -157,19 +168,7 @@ static void many_sheets(void)
         return;
     }
     g_n_sheets = 0;
-    for (const char *p = html; (p = strstr(p, "<link rel=\"stylesheet\" href=\"")) != NULL;) {
-        p += strlen("<link rel=\"stylesheet\" href=\"");
-        const char *q = strchr(p, '"');
-        if (!q || g_n_sheets >= 30) break;
-        char href[128], rel[192];
-        snprintf(href, sizeof(href), "%.*s", (int)(q - p), p);
-        snprintf(rel, sizeof(rel), "ui/v10/%s", href);
-        size_t clen;
-        char *css = read_file(rel, &clen);
-        g_sheets[g_n_sheets++] = css_sheet_load(css, clen, href);
-        free(css);
-        p = q;
-    }
+    load_page_sheets(html);
     const char *st = strstr(html, "<style>");
     const char *st_end = st ? strstr(st, "</style>") : NULL;
     if (st_end) g_sheets[g_n_sheets++] = css_sheet_load(st + 7, (size_t)(st_end - st - 7), "index.html");
@@ -179,7 +178,7 @@ static void many_sheets(void)
     dom_insert_html(g_dom, dom_body(g_dom), DOM_INSERT_BEFORE_END, k_console_html, strlen(k_console_html));
     static const char news_html[] = "<div id=\"knRtNews\" class=\"knRtCard\"></div>";
     dom_insert_html(g_dom, dom_body(g_dom), DOM_INSERT_BEFORE_END, news_html, strlen(news_html));
-    char *css = read_file("ui/v10/css/devconsole.css", &len);
+    char *css = read_file("ui/css/devconsole.css", &len);
     g_sheets[g_n_sheets++] = css_sheet_load(css, len, "css/devconsole.css");
     free(css);
     static const char news_css[] = ".knRtCard{display:flex;position:relative}";
@@ -208,14 +207,7 @@ int main(int argc, char **argv)
         return 1;
     }
     g_ua = css_sheet_load(KN_UA_CSS, strlen(KN_UA_CSS), "ua.css");
-    for (int i = 0; i < N_PAGE_SHEETS; i++) {
-        char rel[256];
-        size_t clen;
-        snprintf(rel, sizeof(rel), "ui/%s", k_page_sheets[i]);
-        char *css = read_file(rel, &clen);
-        g_sheets[g_n_sheets++] = css_sheet_load(css, clen, k_page_sheets[i]);
-        free(css);
-    }
+    load_page_sheets(html);
     /* the page's <style> block (the ad rules) */
     const char *st = strstr(html, "<style>");
     const char *st_end = st ? strstr(st, "</style>") : NULL;

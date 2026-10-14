@@ -1,0 +1,54 @@
+{
+  "scenario": "market-guide",
+  "defaults": {
+    "fuzz": 10,
+    "max_pct": 4.0
+  },
+  "regions": [
+    {
+      "name": "sidebar",
+      "rect": [
+        95,
+        134,
+        88,
+        445
+      ],
+      "kind": "text",
+      "note": "Guide active"
+    },
+    {
+      "name": "header",
+      "rect": [
+        195,
+        123,
+        890,
+        133
+      ],
+      "kind": "image",
+      "note": "Trading Guide banner; skipped: the offline sandbox capture shows another picture behind the same server_trade.png URL",
+      "skip": true
+    },
+    {
+      "name": "nav",
+      "rect": [
+        195,
+        262,
+        890,
+        44
+      ],
+      "kind": "text",
+      "note": "Basics ... Tips"
+    },
+    {
+      "name": "sections",
+      "rect": [
+        195,
+        310,
+        890,
+        290
+      ],
+      "kind": "text",
+      "note": "Basics sections"
+    }
+  ]
+}

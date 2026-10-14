@@ -1,0 +1,31 @@
+{
+  "scenario": "market-guide-trading",
+  "defaults": {
+    "fuzz": 10,
+    "max_pct": 4.0
+  },
+  "regions": [
+    {
+      "name": "nav",
+      "rect": [
+        195,
+        262,
+        890,
+        44
+      ],
+      "kind": "text",
+      "note": "Trading active"
+    },
+    {
+      "name": "sections",
+      "rect": [
+        195,
+        310,
+        890,
+        290
+      ],
+      "kind": "text",
+      "note": "Trading sections"
+    }
+  ]
+}

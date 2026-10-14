@@ -1463,7 +1463,7 @@ Tests whose fixture accounts register through the social socket and count invent
 whose client must not show the popup) pass `--accounts.signup_rewards.enabled=false`.
 Tests: `services/brain/tests/rewards_test.py` (every driver: the grant, never twice, the epoch,
 the sweep, `bpclmAll`, krdata / leveldata, gifting) and `server/tests/v10_rewards_e2e.py` (the
-client on ui/v10: Get Signup Rewards -> register -> granted once; a challenge completed on
+client on ui/: Get Signup Rewards -> register -> granted once; a challenge completed on
 server_bin; a Battle Pass claim and gift).
 
 ### 7.9 Account security: 2FA, email verification, outbound mail (`account_security.c`, `db_security.c`, `0109_account_security.sql`)

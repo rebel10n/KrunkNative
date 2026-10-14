@@ -21,8 +21,8 @@
       "sticky": false,
       "file": "3.html",
       "label": "customize",
-      "cls": "dark",
-      "style": "overflow-y: auto; width: 850px;"
+      "cls": "loadoutWin dark",
+      "style": "overflow-y: hidden; width: 1525px; height: 1000px;"
     },
     "4": {
       "header": "Mod Manager",
@@ -38,7 +38,8 @@
       "file": "5.html",
       "label": "profile",
       "cls": "dark",
-      "style": "overflow-y: auto; width: 955px;"
+      "style": "overflow-y: auto; width: 955px;",
+      "from": "v7.1.4"
     },
     "6": {
       "header": "UNLOCALIZED STRING",
@@ -69,9 +70,8 @@
       "sticky": true,
       "file": "9.html",
       "label": "spray_selection",
-      "cls": "stickyHeader dark",
-      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
-      "trimmed": 2263
+      "cls": "loadoutWin stickyHeader dark",
+      "style": "overflow-y: hidden; width: 1525px; height: 1000px;"
     },
     "10": {
       "header": "Custom Games",
@@ -95,34 +95,35 @@
       "file": "14.html",
       "label": "shop_crafting",
       "cls": "dark",
-      "style": "overflow-y: auto; width: 1300px;"
+      "style": "overflow-y: auto; width: 1300px;",
+      "from": "v7.1.4"
     },
     "15": {
       "header": "Select Skin",
       "sticky": true,
       "file": "15.html",
       "label": "skin_selection",
-      "cls": "stickyHeader dark",
-      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
-      "trimmed": 2937
+      "cls": "loadoutWin stickyHeader dark",
+      "style": "overflow-y: hidden; width: 1525px; height: 1000px;",
+      "trimmed": 3
     },
     "16": {
       "header": "Select Hat",
       "sticky": true,
       "file": "16.html",
       "label": "hat_selection",
-      "cls": "stickyHeader dark",
-      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
-      "trimmed": 1623
+      "cls": "loadoutWin stickyHeader dark",
+      "style": "overflow-y: hidden; width: 1525px; height: 1000px;",
+      "trimmed": 3
     },
     "17": {
       "header": "Select Body",
       "sticky": true,
       "file": "17.html",
       "label": "body_selection",
-      "cls": "stickyHeader dark",
-      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
-      "trimmed": 789
+      "cls": "loadoutWin stickyHeader dark",
+      "style": "overflow-y: hidden; width: 1525px; height: 1000px;",
+      "trimmed": 3
     },
     "18": {
       "header": "Load Mods",
@@ -132,20 +133,28 @@
       "cls": "dark",
       "style": "overflow-y: auto;"
     },
+    "19": {
+      "header": "Publish Mod",
+      "sticky": false,
+      "file": "19.html",
+      "label": "mods_pub",
+      "cls": "dark",
+      "style": "overflow-y: auto; width: 640px;"
+    },
     "20": {
       "header": "Select Secondary",
       "sticky": false,
       "file": "20.html",
       "label": "secondary_selection",
-      "cls": "dark",
-      "style": "overflow-y: auto;",
-      "trimmed": 16
+      "cls": "loadoutWin dark",
+      "style": "overflow-y: hidden; width: 1525px; height: 1000px;",
+      "trimmed": 30
     },
     "21": {
       "header": "Advertise",
       "sticky": false,
       "file": "21.html",
-      "label": "advertise",
+      "label": "contact",
       "cls": "dark",
       "style": "overflow-y: auto; width: 1000px;"
     },
@@ -178,9 +187,9 @@
       "sticky": true,
       "file": "26.html",
       "label": "melee_selection",
-      "cls": "stickyHeader dark",
-      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
-      "trimmed": 1683
+      "cls": "loadoutWin stickyHeader dark",
+      "style": "overflow-y: hidden; width: 1525px; height: 1000px;",
+      "trimmed": 3
     },
     "27": {
       "header": "Ranked",
@@ -189,14 +198,6 @@
       "label": "ranked",
       "cls": "menuWindowF dark",
       "style": "overflow-y: auto; width: 1800px;"
-    },
-    "28": {
-      "header": "Partner Dashboard",
-      "sticky": false,
-      "file": "28.html",
-      "label": "partner_dashboard",
-      "cls": "dark",
-      "style": "overflow-y: auto; width: 1200px;"
     },
     "30": {
       "header": "Krunker Mail",
@@ -211,17 +212,17 @@
       "sticky": false,
       "file": "31.html",
       "label": "attachment_selection",
-      "cls": "dark",
-      "style": "overflow-y: auto;",
-      "trimmed": 1
+      "cls": "loadoutWin dark",
+      "style": "overflow-y: hidden; width: 1525px; height: 1000px;",
+      "trimmed": 2
     },
     "32": {
       "header": "Select Reticle",
       "sticky": false,
       "file": "32.html",
       "label": "reticle_selection",
-      "cls": "dark",
-      "style": "overflow-y: auto; width: 900px;",
+      "cls": "loadoutWin dark",
+      "style": "overflow-y: hidden; width: 1525px; height: 1000px;",
       "trimmed": 22
     },
     "33": {
@@ -237,9 +238,9 @@
       "sticky": true,
       "file": "34.html",
       "label": "dye_selection",
-      "cls": "stickyHeader dark",
-      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
-      "trimmed": 151
+      "cls": "loadoutWin stickyHeader dark",
+      "style": "overflow-y: hidden; width: 1525px; height: 1000px;",
+      "trimmed": 1
     },
     "35": {
       "header": "Changelog",
@@ -270,35 +271,35 @@
       "sticky": true,
       "file": "38.html",
       "label": "waist_selection",
-      "cls": "stickyHeader dark",
-      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
-      "trimmed": 429
+      "cls": "loadoutWin stickyHeader dark",
+      "style": "overflow-y: hidden; width: 1525px; height: 1000px;",
+      "trimmed": 3
     },
     "39": {
       "header": "Select Face",
       "sticky": true,
       "file": "39.html",
       "label": "face_selection",
-      "cls": "stickyHeader dark",
-      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
-      "trimmed": 3239
+      "cls": "loadoutWin stickyHeader dark",
+      "style": "overflow-y: hidden; width: 1525px; height: 1000px;",
+      "trimmed": 3
     },
     "40": {
       "header": "Select Shoes",
       "sticky": true,
       "file": "40.html",
       "label": "shoe_selection",
-      "cls": "stickyHeader dark",
-      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
-      "trimmed": 357
+      "cls": "loadoutWin stickyHeader dark",
+      "style": "overflow-y: hidden; width: 1525px; height: 1000px;",
+      "trimmed": 3
     },
     "41": {
       "header": "Select Scope",
       "sticky": false,
       "file": "41.html",
       "label": "scope_selection",
-      "cls": "dark",
-      "style": "overflow-y: auto; width: 900px;"
+      "cls": "loadoutWin dark",
+      "style": "overflow-y: hidden; width: 1525px; height: 1000px;"
     },
     "42": {
       "header": "Custom Games",
@@ -313,35 +314,35 @@
       "sticky": true,
       "file": "43.html",
       "label": "pet_selection",
-      "cls": "stickyHeader dark",
-      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
-      "trimmed": 81
+      "cls": "loadoutWin stickyHeader dark",
+      "style": "overflow-y: hidden; width: 1525px; height: 1000px;",
+      "trimmed": 3
     },
     "44": {
       "header": "Select Wrist",
       "sticky": true,
       "file": "44.html",
       "label": "wrist_selection",
-      "cls": "stickyHeader dark",
-      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
-      "trimmed": 9
+      "cls": "loadoutWin stickyHeader dark",
+      "style": "overflow-y: hidden; width: 1525px; height: 1000px;",
+      "trimmed": 3
     },
     "45": {
       "header": "Select Streaks",
       "sticky": false,
       "file": "45.html",
       "label": "streak_selection",
-      "cls": "dark",
-      "style": "overflow-y: auto; width: 877px;"
+      "cls": "loadoutWin dark",
+      "style": "overflow-y: hidden; width: 1525px; height: 1000px;"
     },
     "46": {
       "header": "Select Charm",
       "sticky": true,
       "file": "46.html",
       "label": "charm_selection",
-      "cls": "stickyHeader dark",
-      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
-      "trimmed": 45
+      "cls": "loadoutWin stickyHeader dark",
+      "style": "overflow-y: hidden; width: 1525px; height: 1000px;",
+      "trimmed": 3
     },
     "47": {
       "header": "undefined",
@@ -372,27 +373,43 @@
       "sticky": true,
       "file": "50.html",
       "label": "back_selection",
-      "cls": "stickyHeader dark",
-      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
-      "trimmed": 1377
+      "cls": "loadoutWin stickyHeader dark",
+      "style": "overflow-y: hidden; width: 1525px; height: 1000px;",
+      "trimmed": 3
     },
     "51": {
       "header": "Select Head",
       "sticky": true,
       "file": "51.html",
       "label": "head_selection",
-      "cls": "stickyHeader dark",
-      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
-      "trimmed": 2175
+      "cls": "loadoutWin stickyHeader dark",
+      "style": "overflow-y: hidden; width: 1525px; height: 1000px;",
+      "trimmed": 3
     },
     "52": {
       "header": "Select Player Card",
       "sticky": true,
       "file": "52.html",
       "label": "playercard_selection",
-      "cls": "stickyHeader dark",
-      "style": "overflow-y: hidden; width: 877px; height: calc(100% - 300px);",
-      "trimmed": 271
+      "cls": "loadoutWin stickyHeader dark",
+      "style": "overflow-y: hidden; width: 1525px; height: 1000px;",
+      "trimmed": 3
+    },
+    "53": {
+      "header": "Change Loadout",
+      "sticky": false,
+      "file": "53.html",
+      "label": "customize",
+      "cls": "loadoutWin dark",
+      "style": "overflow-y: hidden; width: 1525px; height: 1000px;"
+    },
+    "54": {
+      "header": "Title",
+      "sticky": false,
+      "file": "54.html",
+      "label": "title_selection",
+      "cls": "loadoutWin dark",
+      "style": "overflow-y: hidden; width: 1525px; height: 1000px;"
     }
   },
   "settings": {

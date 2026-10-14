@@ -1,10 +1,10 @@
 """Krunker v10 (the live krunker.io client) menu page import: ``import.py --ref v10`` (loaded by import.py).
 
-Writes a separate page tree, ``ui/v10/`` (the v7.1.4 page in ``ui/`` is left alone: every Krunker
-version keeps its own page for the runtime version toggle), from two inputs:
+Writes the menu page into ``ui/`` (Krunker v10.0.2 is the only version; the hub and editor pages
+are ``v10_hub_editor.py``'s), from two inputs:
 
 - the live site mirror (``fetch_live_site.py --stage S``; ``--public S/public``): ``index.html``,
-  ``social.html``, their stylesheets, fonts and images, byte copies of what krunker.io /
+  its stylesheets, fonts and images, byte copies of what krunker.io /
   assets.krunker.io serve;
 - the live client script (``--client-js``; v10.0.2): v10's menu is a Svelte 5 app, so the live
   ``index.html`` is a shell with empty mount points (``#mainMenuUIMount``, ``#notificationCenter``,
@@ -19,9 +19,8 @@ additions: the reconstructed mounts are written into their (empty) targets, ``cs
 (the component stylesheets, which the Svelte runtime injects as ``<style>`` at mount) is linked
 after Krunker's stylesheets, ``i18n-en.json`` holds ``translations.en``.
 
-Our glue files (``css/krunknative.css``, ``css/hud.css``, ``js/kn-shim.js``, ``js/loader.js``) are
-copied from ``ui/`` (their source of truth): the engine resolves page URLs inside the page root,
-so ``ui/v10/`` cannot link ``../css/``. Window templates (``windows/``) are not reconstructed
+Our glue files (``css/krunknative.css``, ``css/hud.css``, ``js/kn-shim.js``, ``js/loader.js``) live
+in ``ui/`` already and are kept. Window templates (``windows/``) are not reconstructed
 statically (``window.windows[n].gen()`` builds them at run time): only ``windows/versions.txt``
 (the changelog) is written; the rendered windows come from the Chromium capture
 (``capture_v10_live.js``), once it has been run.
@@ -39,7 +38,7 @@ import social_page
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-PAGES = ("index.html", "social.html")
+PAGES = ("index.html",)  # social.html / editor.html: v10_hub_editor.py
 # ours: linked by the page (krunknative/hud), added at run time by the C UI (devconsole: ui_console.c,
 # ranked-kn: ranked_ui.c) and the web glue
 KN_GLUE = ("css/krunknative.css", "css/hud.css", "css/devconsole.css", "css/ranked-kn.css", "js/kn-shim.js", "js/loader.js")
@@ -111,8 +110,8 @@ def transform_page(name, html, mounts):
 
 
 def import_v10(ui_root, write_if_changed, log, public, client_js):
-    """ui_root = ui/ (the v7 tree, source of our glue files); writes ui/v10/. Returns the page dir."""
-    out = os.path.join(ui_root, "v10")
+    """Writes the page into ui_root (ui/). Returns the page dir."""
+    out = ui_root
     if not os.path.isfile(os.path.join(public, "index.html")):
         raise SystemExit("v10: %s/index.html missing (run fetch_live_site.py --stage <dir> first)" % public)
     mounts, written = {}, 0
@@ -154,8 +153,8 @@ def import_v10(ui_root, write_if_changed, log, public, client_js):
         css = re.sub(r"url\((['\"]?)https?://assets\.krunker\.io/", r"url(\1" + "../" * rel.count("/"), css)
         written += write_if_changed(os.path.join(out, rel), css)
     for rel in KN_GLUE:
-        with open(os.path.join(ui_root, rel), "rb") as fh:
-            written += write_if_changed(os.path.join(out, rel), fh.read())
+        if not os.path.isfile(os.path.join(out, rel)):
+            log("v10: glue file %s missing in %s" % (rel, os.path.relpath(out, REPO)))
     with open(os.path.join(public, "docs", "versions.txt"), "rb") as fh:
         written += write_if_changed(os.path.join(out, "windows", "versions.txt"), fh.read())
     log("v10: %s: %d pages, %d stylesheets, %d glue files, %d rewritten" % (

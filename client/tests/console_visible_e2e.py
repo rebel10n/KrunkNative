@@ -18,7 +18,7 @@ if the console is really on top) opens the console with ` in the menu, then goes
 Customize, Market, the v10 login view stack (appended to <body> after the console), the item view
 (the console is placed over the middle, where its GL showcase draws the item: the frame's pixels
 there must be the console's), the game,
-death (`kill`), respawn, the match end (`end`), F5 (full reload), the window at 800x600 and at
+death (`kill`), respawn, the match end (`end`), the console `reload` (full reload), the window at 800x600 and at
 2560x1440, the editor page and back to the game page. After every step the console probe
 (input_script `console`) must say: open, shown, its sheet applied, <body>'s last element, painted
 topmost at 5 points of its box and the whole box inside the viewport. Then the close button hides
@@ -155,7 +155,9 @@ def main():
         ("dead", ["con kill"], 1500),
         ("respawn", ["respawn"], 6000),
         ("end", ["con end"], 4000),
-        ("reload", ["down F5", "up F5"], 3000),
+        # the console `reload`: the in-place full reload (F5 relaunches the process natively since
+        # 10ad7501, which would run this script again from its start)
+        ("reload", ["con reload"], 3000),
         ("w800", ["resize 800 600"], 1000),
         ("w2560", ["resize 2560 1440"], 1000),
         ("editor", ["resize 1280 720", "page editor"], 5000),
@@ -199,7 +201,7 @@ def main():
     check("respawn: the probe ran alive again", alive and alive.groups() == ("1", "0"), alive.group(0) if alive else "no vis line")
     end = re.search(r"\[input_script\] vis t=\d+ @endscreen endUI=(\S+)", text)
     check("end: the probe ran on the end screen", end and end.group(1) == "1", end.group(0) if end else "no vis line")
-    check("reload: F5 ran the full reload", "[reload] F5: full reload" in text)
+    check("reload: the full reload ran", re.search(r"\[reload\] [^\n]*: full reload", text) is not None)
 
     logs, frame = rects(text, "logs"), rects(text, "frame")
     png = f"{shot}_0000.png"

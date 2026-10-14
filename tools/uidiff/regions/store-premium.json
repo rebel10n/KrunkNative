@@ -1,0 +1,20 @@
+{
+  "scenario": "store-premium",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 3.0
+  },
+  "regions": [
+    {
+      "name": "window",
+      "rect": [
+        252,
+        208,
+        776,
+        304
+      ],
+      "kind": "text",
+      "note": "#menuWindow: the store tabs and the tab body"
+    }
+  ]
+}

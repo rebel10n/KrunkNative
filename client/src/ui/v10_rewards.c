@@ -1,4 +1,4 @@
-// Krunker v10.0.2 rewards on the v10 page (ui/v10, soon ui/): the signup rewards, the
+// Krunker v10.0.2 rewards on the v10 page (ui/, soon ui/): the signup rewards, the
 // Challenges window and the Battle Pass entry points, driven by kn_brain's real data.
 //
 // Sources (the bundle, ~/.cache/kn-v10/v10.js; references "captured from the offline v10 sandbox"):
@@ -406,15 +406,15 @@ static char *gen_challenges_guest(void) {
                   "<div class=\"reqWLvl\">LOGIN REQUIRED</div><div class=\"reqWTxt\">to complete challenges!</div></div>");
 }
 
-// The v10 window bodies this file writes (NULL: not ours, or the v7 page)
+// The v10 window bodies this file writes (NULL: not ours)
 char *v10_rewards_window_gen(const int id) {
-    if (id != CHAL_WINDOW || !v10_page()) return NULL;
+    if (id != CHAL_WINDOW) return NULL;
     const AccountInfo *acc = account_get();
     return acc ? gen_challenges(acc) : gen_challenges_guest();
 }
 
 void v10_rewards_challenges_changed(void) {
-    if (v10_page()) menu_rerender_if_open(CHAL_WINDOW);
+    menu_rerender_if_open(CHAL_WINDOW);
 }
 
 /* ------------------------------------------------------------------ the sidebar's Battle Pass item */
@@ -467,7 +467,6 @@ static void bp_item_update(void) {
 
 int v10_rewards_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     (void) ev;
-    if (!v10_page()) return -1;
     if (!strcmp(name, "showSignupRewards")) {
         v10_show_signup_rewards();
         return 1;
@@ -517,6 +516,6 @@ void v10_rewards_dom_init(void) {
 }
 
 void v10_rewards_tick(void) {
-    if (!html_ui_available() || !v10_page()) return;
+    if (!html_ui_available()) return;
     bp_item_update();
 }

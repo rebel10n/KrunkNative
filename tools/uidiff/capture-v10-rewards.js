@@ -10,7 +10,7 @@
 //   window (home, Burg, Assault Rifle), the Battle Pass (home, Challenges tab, a claim, VIP).
 // Mirror additions: gapi /data/skins = ~/.cache/kn-v10/live/api/skins.jspck, api /maps = the
 // official map list (v10 fetches it with FRVR auth), assets.krunker.io = the live assets mirror
-// then ui/v10 and ui/ (the images KrunkNative fetched).
+// then ui/ (the images KrunkNative fetched).
 //   KN_V10_PUBLIC=~/.cache/kn-v10/live/site/public node tools/uidiff/capture-v10-rewards.js <stage dir>
 // Then copy <stage>/v10-capture/states/<name>.png to doc/ref/krunker-v10.0.2/rewards/.
 'use strict';
@@ -53,10 +53,8 @@ function offlineFile(u) {
   if (u.hostname === 'assets.krunker.io') {
     const a = path.join(HOME, '.cache/kn-v10/live/web/assets.krunker.io', decodeURIComponent(u.pathname));
     if (!a.includes('..') && fs.existsSync(a) && fs.statSync(a).isFile()) return a;
-    const k = path.join(__dirname, '../../ui/v10', decodeURIComponent(u.pathname));
+    const k = path.join(__dirname, '../../ui', decodeURIComponent(u.pathname));
     if (!k.includes('..') && fs.existsSync(k) && fs.statSync(k).isFile()) return k;
-    const k7 = path.join(__dirname, '../../ui', decodeURIComponent(u.pathname));
-    if (!k7.includes('..') && fs.existsSync(k7) && fs.statSync(k7).isFile()) return k7;
   }
   let p = decodeURIComponent(u.pathname).replace(/^\/+/, '');
   if (p === '' || p.endsWith('/')) p += 'index.html';

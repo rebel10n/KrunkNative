@@ -13,7 +13,7 @@
 //     generic table (svelte-69sryq), the currency display (svelte-1r6bdx8), the market card
 //     (svelte-r5taai), the error / success io-popups.
 // Inline handlers it writes: knViewPop(accepted), knViewBackdrop(). The markup classes match v10's
-// templates, so ui/v10/css/svelte.css styles them.
+// templates, so ui/css/svelte.css styles them.
 #include <cJSON.h>
 #include <html_dom.h>
 #include <ui_logic.h>

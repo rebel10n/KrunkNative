@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Krunker v10.0.2 main menu shell end to end (client/src/ui/v10_menu.c, v10_login.c) on the v10
-page (ui/v10) against a real kn_brain and two brain-linked server_bin nodes.
+page (ui/) against a real kn_brain and two brain-linked server_bin nodes.
 
   python3 -I server/tests/v10_menu_e2e.py BUILD_DIR      (run from the repository root)
 
@@ -126,8 +126,7 @@ def client(name, brain_port, script, storage=None, secs=120):
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
     env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": cfg,
                 "XDG_STATE_HOME": os.path.join(WORK, name + "-state"), "KRUNKNATIVE_NO_BROWSER": "1",
-                "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
-                "KRUNKNATIVE_UI_DIR": "ui/v10", "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port,
+                "KRUNKNATIVE_INPUT_SCRIPT": path, "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % brain_port,
                 "KRUNKNATIVE_NET_TRANSPORT": "tcp",
                 # the server finder is this brain's (finder role): the nodes heartbeat to it
                 "KRUNKNATIVE_FINDER_URL": "http://127.0.0.1:%d/servers" % brain_port})

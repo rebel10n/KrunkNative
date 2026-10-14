@@ -1,0 +1,46 @@
+{
+  "scenario": "community",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "header",
+      "rect": [
+        292,
+        86,
+        695,
+        55
+      ],
+      "kind": "text",
+      "note": "Community and Events"
+    },
+    {
+      "name": "empty",
+      "rect": [
+        292,
+        145,
+        695,
+        60
+      ],
+      "kind": "text",
+      "note": "No upcoming events",
+      "fuzz": 12,
+      "max_pct": 3.0
+    },
+    {
+      "name": "socials",
+      "rect": [
+        292,
+        558,
+        695,
+        76
+      ],
+      "kind": "text",
+      "note": "socials footer",
+      "fuzz": 12,
+      "max_pct": 3.0
+    }
+  ]
+}

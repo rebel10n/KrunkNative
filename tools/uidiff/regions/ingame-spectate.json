@@ -7,12 +7,7 @@
   "regions": [
     {
       "name": "spec-names",
-      "rect": [
-        10,
-        10,
-        131,
-        35
-      ],
+      "rect": [10, 10, 131, 35],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
@@ -20,65 +15,39 @@
     },
     {
       "name": "spec-info",
-      "rect": [
-        589,
-        10,
-        102,
-        56
-      ],
+      "rect": [589, 10, 102, 56],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#specTimer 03:44 + #specGameInfo Free For All"
-    },
-    {
-      "name": "spec-team",
-      "rect": [
-        401,
-        10,
-        183,
-        56
-      ],
-      "kind": "image",
-      "fuzz": 8,
-      "max_pct": 1.5,
-      "skip": true,
-      "note": "#specTeam0: the sandbox bot's row (class / name differ)"
+      "note": "#specTimer 03:45 + #specGameInfo Free For All"
     },
     {
       "name": "spec-controls",
-      "rect": [
-        1125,
-        589,
-        145,
-        121
-      ],
+      "rect": [1125, 589, 145, 121],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#specControlHolder: Prev / Next / Free Cam [F] / Player/Cam / First Person [R] / Focus [.] / Force Nametags [M] / Minimap [-] (no Objective Cam row in FFA)"
+      "note": "#specControlHolder rows"
     },
     {
       "name": "chat",
-      "rect": [
-        10,
-        651,
-        243,
-        59
-      ],
+      "rect": [10, 647, 243, 64],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
       "note": "#chatHolder"
     },
     {
+      "name": "leaderboard",
+      "rect": [1066, 7, 207, 19],
+      "kind": "flat",
+      "fuzz": 6,
+      "max_pct": 0.5,
+      "note": "#leaderboardHolder (empty while spectating)"
+    },
+    {
       "name": "empty-bottom-left",
-      "rect": [
-        300,
-        600,
-        700,
-        100
-      ],
+      "rect": [300, 600, 700, 100],
       "kind": "flat",
       "fuzz": 6,
       "max_pct": 0.5,

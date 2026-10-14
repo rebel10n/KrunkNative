@@ -7,12 +7,7 @@
   "regions": [
     {
       "name": "timer",
-      "rect": [
-        7,
-        7,
-        121,
-        50
-      ],
+      "rect": [7, 7, 121, 50],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
@@ -20,12 +15,7 @@
     },
     {
       "name": "match-info",
-      "rect": [
-        7,
-        58,
-        68,
-        28
-      ],
+      "rect": [7, 58, 68, 28],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
@@ -33,12 +23,7 @@
     },
     {
       "name": "ping",
-      "rect": [
-        133,
-        7,
-        38,
-        16
-      ],
+      "rect": [129, 7, 38, 16],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
@@ -46,12 +31,7 @@
     },
     {
       "name": "chat-input",
-      "rect": [
-        7,
-        611,
-        243,
-        36
-      ],
+      "rect": [7, 611, 243, 36],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
@@ -59,12 +39,7 @@
     },
     {
       "name": "player-card",
-      "rect": [
-        7,
-        653,
-        243,
-        60
-      ],
+      "rect": [7, 653, 243, 60],
       "kind": "image",
       "fuzz": 8,
       "max_pct": 1.5,
@@ -72,12 +47,7 @@
     },
     {
       "name": "weapons",
-      "rect": [
-        1190,
-        540,
-        83,
-        130
-      ],
+      "rect": [1190, 540, 83, 130],
       "kind": "image",
       "fuzz": 8,
       "max_pct": 1.5,
@@ -85,29 +55,19 @@
     },
     {
       "name": "ammo",
-      "rect": [
-        1146,
-        675,
-        127,
-        38
-      ],
+      "rect": [1151, 675, 122, 38],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#ammoHolder: 28 | 28 + ammo icon"
+      "note": "#ammoHolder: 30 | 30 + ammo icon"
     },
     {
-      "name": "aim-dot",
-      "rect": [
-        610,
-        330,
-        60,
-        60
-      ],
-      "kind": "image",
-      "fuzz": 8,
-      "max_pct": 1.5,
-      "note": "aiming the Assault Rifle: the overlay's red aim dot, no crosshair"
+      "name": "leaderboard",
+      "rect": [1066, 7, 207, 34],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#leaderboardHolder: v10 always shows it (switchLeaderboard sets display = true, which CSS ignores)"
     }
   ]
 }

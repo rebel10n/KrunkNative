@@ -1,5 +1,5 @@
 {
-  "ref": "doc/ref/krunker-v7.1.4/ingame/ingame-reloading.png",
+  "ref": "doc/ref/krunker-v10/ingame/ingame-reloading.png",
   "size": [
     1280,
     720
@@ -22,7 +22,7 @@
       "maxHealth": 100,
       "healthSegments": 6,
       "ammo": 27,
-      "ammoMax": 28,
+      "ammoMax": 30,
       "ammoLimit": false,
       "melee": false,
       "reloading": true,
@@ -59,8 +59,15 @@
       ],
       "loadoutIndex": 0
     },
-    "chat": []
+    "chat": [],
+    "scoreboard": [
+      {
+        "rank": 1,
+        "name": "Local User",
+        "score": 0
+      }
+    ]
   },
   "frames": 3,
-  "note": "3 shots fired, R pressed: 27 | 28 while reloading."
+  "note": "Three shots then R: reloading. Reference: the offline v10 sandbox (capture-v10.js)."
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Krunker v10's Market & Trading popup (client/src/ui/v10_market.c) end to end against a local
-kn_brain (sqlite, temp dir) and one headless client_bin at a time, from the v10 page (ui/v10, KRUNKNATIVE_UI_DIR):
+kn_brain (sqlite, temp dir) and one headless client_bin at a time, from the v10 page (ui/):
 
   1. alice opens #menuBtnMarket: the exchange popup, the Market tab, an empty Browse
   2. alice's inventory (My Inventory): the item's card, List -> 300 KR -> confirm: the listing is in
@@ -105,7 +105,7 @@ class Client:
         env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL", "KRUNKNATIVE_UI_DIR")}
         env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": cfg, "XDG_STATE_HOME": os.path.join(WORK, tag + "-state"),
                     "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "KRUNKNATIVE_UI_CMDS": self.cmds,
-                    "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_UI_DIR": os.path.join(ROOT, "ui", "v10"),
+                    "KRUNKNATIVE_WINDOW_SIZE": "1280x720",
                     "KRUNKNATIVE_BRAIN_URL": "http://127.0.0.1:%d" % port})
         self.out = open(self.log, "w")
         self.proc = subprocess.Popen(["stdbuf", "-oL", "-eL", CLIENT, "--offline"], stdout=self.out, stderr=subprocess.STDOUT,

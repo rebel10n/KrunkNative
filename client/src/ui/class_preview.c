@@ -260,7 +260,6 @@ static void preview_frame(Client *client) {
 
 // The v10 page's pose for this frame: its window column when the canvas sits in #charPreviewSlot.
 static int preview_mode(const HtmlElem canvas) {
-    if (!v10_page()) return 0;
     char id[32] = "";
     const HtmlElem parent = canvas ? html_dom_parent(canvas) : 0;
     return parent && html_dom_get_attr(parent, "id", id, sizeof(id)) >= 0 && !strcmp(id, "charPreviewSlot") ? 2 : 1;
