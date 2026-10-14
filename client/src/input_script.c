@@ -63,6 +63,12 @@
 //                                preview (who=preview) and our own player (who=me): "[input_script] wsel t=100
 //                                @menu who=me slot=0 tp=0 w=1 skin=2592 model=weapons/weapon_2 ... attach=attach_1 ..."
 //                                (tp: the third-person model set, the preview's)
+//   100 cam @label               log the camera and our look: "[input_script] cam t=100 @label spawns=1 active=1
+//                                rot=pitch,yaw,roll pos=x,y,z eye=x,y,z dir=pitch,yaw zoom=1 recoil=anim_y,anim land=bob_y
+//                                lean=x,y,z aim=0 crouch=0 shake=pitch,yaw chase=0 spect=0 tp=0 keep=0" (spawns: our spawns
+//                                so far; eye: where the first-person camera sits; chase: the death chase camera has a
+//                                killer; keep: the third-person camera's distance). The first 5 finished frames after
+//                                each of our own spawns log the same as "@spawn0".."@spawn4" (client/tests/spawn_camera_e2e.py)
 //   100 state                    log the held weapon slot, the menu / pointer lock state, position, ammo, ended,
 //                                the charge (chargeTime s, fullCharge), the reload and fire timers, the grapple / rope, the GLFW
 //                                cursor mode (cursor=normal: the mouse shows, disabled: locked to the game)
@@ -122,6 +128,8 @@
 #include <third_person.h> // `tpstate`
 #include <world.h>        // `tpstate`: world_solid_fraction
 #include <bots.h>         // `tpstate`: bot_object_blocks_player
+#include <menu_view.h>    // `cam`: menu_view_killer_uid (the death chase)
+#include <spectate.h>     // `cam`: spectate_active
 #include <GLFW/glfw3.h>
 #include <png_write.h>
 #include <frame_target.h>
@@ -153,6 +161,8 @@ static struct {
     float look_yaw, look_pitch;
     float fixed_delta;
     FILE *log;
+    const Player *spawn_me; // `cam`: our player as of the last finished frame (NULL / dead: none)
+    int spawn_frame, spawns; // frames logged since our last spawn (-1 none pending), spawns seen
     double ft_last;   // `ft`: wall clock of the previous frame (s), 0 = not measuring
     float *ft_ms;     // frame times collected since `ft start`
     int ft_n, ft_cap;
@@ -275,6 +285,23 @@ static vec2 script_project(Client *client, const vec3 p) {
     }
     if (clip[3] <= 0.0f) return (vec2) {-1.0f, -1.0f}; // behind the camera
     return (vec2) {(clip[0] / clip[3] + 1.0f) * 0.5f, 1.0f - (clip[1] / clip[3] + 1.0f) * 0.5f};
+}
+
+// `cam` and the frames after our spawns: the camera as posed this frame and our player's look feel.
+static void script_log_cam(const Client *client, const char *label) {
+    const Player *me = client->me;
+    const Camera *c = &client->camera;
+    float shake_pitch, shake_yaw;
+    camera_feel_shake_offset(&shake_pitch, &shake_yaw);
+    const vec3 eye = me ? (vec3) {me->position.x, me->position.y + me->height - game_constants.camera_height, me->position.z} : c->position;
+    fprintf(stderr, "[input_script] cam t=%.0f %s spawns=%d active=%d rot=%.5f,%.5f,%.5f pos=%.3f,%.3f,%.3f eye=%.3f,%.3f,%.3f dir=%.5f,%.5f "
+            "zoom=%.4f recoil=%.5f,%.5f land=%.5f lean=%.5f,%.5f,%.5f aim=%.4f crouch=%.4f shake=%.5f,%.5f chase=%d spect=%d tp=%d keep=%.3f\n",
+            g_script.time, label, g_script.spawns, me ? me->active : 0, c->rotation.x, c->rotation.y, c->rotation.z, c->position.x, c->position.y,
+            c->position.z, eye.x, eye.y, eye.z, me ? me->direction.x : 0.0f, me ? me->direction.y : 0.0f, c->zoom,
+            me ? me->recoil_anim_y : 0.0f, me ? me->recoil_anim : 0.0f, me ? me->land_bob_y : 0.0f, me ? me->lean_anim.x : 0.0f,
+            me ? me->lean_anim.y : 0.0f, me ? me->lean_anim.z : 0.0f, me ? me->aim_val : 0.0f, me ? me->crouch_val : 0.0f,
+            shake_pitch, shake_yaw, menu_view_killer_uid() >= 0, spectate_active(), third_person_view(client),
+            third_person_last_frame(client).keep);
 }
 
 static void script_run(Client *client, const ScriptEvent *e) {
@@ -507,6 +534,8 @@ static void script_run(Client *client, const ScriptEvent *e) {
             } else object_manager_ui_pick_weapon(id, !strcmp(what, "drop"));
         }
         fprintf(stderr, "[input_script] om t=%.0f %s %d\n", g_script.time, what, id);
+    } else if (!strcmp(e->cmd, "cam")) {
+        script_log_cam(client, e->arg[0] ? e->arg : "-");
     } else if (!strcmp(e->cmd, "state")) {
         // state: one log line with the held slot and the menu/lock state (scripted checks); cursor =
         // the window's GLFW cursor mode (normal: the player sees the mouse, disabled: the game has it)
@@ -819,6 +848,21 @@ void input_script_frame_end(Client *client, const float delta, const float frame
             c->fov, vm ? vm->position.x : 0.0f, vm ? vm->position.y : 0.0f, vm ? vm->position.z : 0.0f,
             vm ? vm->rotation.x : 0.0f, vm ? vm->rotation.y : 0.0f, vm ? vm->rotation.z : 0.0f,
             ub ? ub->position.y : 0.0f, ub ? ub->rotation.x : 0.0f, an ? an->position.y : 0.0f, p->can_slide, p->idle_anim, arm_yaw_off, arm_pitch_off);
+    }
+
+    // `cam`: the first frames after each of our own spawns (a new Player, or ours active again)
+    const Player *live = p && p->active ? p : NULL;
+    if (live && live != g_script.spawn_me) {
+        g_script.spawns++;
+        g_script.spawn_frame = 0;
+    }
+    g_script.spawn_me = live;
+    if (live && g_script.spawn_frame >= 0 && g_script.spawn_frame < 5) {
+        char label[16];
+        snprintf(label, sizeof(label), "@spawn%d", g_script.spawn_frame++);
+        script_log_cam(client, label);
+    } else {
+        g_script.spawn_frame = -1;
     }
 
     write_pending_shot(client);

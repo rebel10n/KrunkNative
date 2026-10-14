@@ -163,6 +163,11 @@ void third_person_apply_camera(Client *client, const vec2 view, const float delt
     client->camera.zoom = 1.0f; // no ADS zoom behind the shoulder (v7 thirdPerson: the crosshair stays)
 }
 
+// Our spawn: the camera distance starts over (pulled in at once, no ease out from the last life's).
+void third_person_on_spawn(void) {
+    g_tp.keep = 0.0f;
+}
+
 void third_person_note_frame(const int own_model, const int viewmodel) {
     g_tp.own_model = own_model;
     g_tp.viewmodel = viewmodel;

@@ -57,6 +57,8 @@ void third_person_frame(Client*);
 vec2 third_person_input_look(Client*, vec2 view);
 // After camera_feel_apply: pose the camera from the view look (+ the feel's recoil / shake).
 void third_person_apply_camera(Client*, vec2 view, float delta);
+// Our (re)spawn: the camera starts at its distance (no ease out from where the last life's was).
+void third_person_on_spawn(void);
 
 // What the last rendered frame did (main.c notes it; the input script's `tpstate` logs it):
 // the local model in the world pass, the first-person (viewmodel) pass drawn.

@@ -247,6 +247,16 @@ static int g_look_valid;
 static vec2 g_look_shown;     // the look an unsampled frame put on me->direction (player_look_follows_camera)
 static int g_look_shown_valid;
 
+// Our spawn: the look restarts from the spawn's (me->direction from SPAWN) instead of the last life's,
+// whatever the resync test in the input stage would make of it (v7.1.4 / v10 "start" ->
+// CONTROLS.reset(true): xDr = yDr = 0, pchObjc / object rotation 0, then io_addPlayers sets them
+// from the spawned player's xDire / yDire).
+static void client_look_reset(void) {
+    g_look_valid = 0;
+    g_look_shown_valid = 0;
+    g_look_unsampled = 0;
+}
+
 static void print_usage_to(FILE *out, const char *program) {
     fprintf(out, "Usage: %s [--offline|--sandbox] [--map <name>] [--headless] [--windowed|--fullscreen|--borderless]\n"
                  "          [--hub|--viewer [query]] [--brain <url>] [--connect <host[:port]>] [map.json]\n"
@@ -1059,6 +1069,14 @@ void client_apply_spawn(Client *client, const NetSpawnPacket *packet) {
         player->cosmetics_v7 = packet->cosmetics_v7; // WP-F: SPAWN V4 (shorter: none)
         player->skins = skins;
         player_spawn(player);
+    } else {
+        // players.add runs player.init on every spawn: a player alive already with the same look keeps
+        // its loadout and meshes, but its look feel (recoilAnim(Y), landBobY, leanAnim*, aimVal,
+        // crouchVal) starts from rest like any spawn's.
+        player_reset_feel(player);
+        player->aim_val = 0.0f;
+        player->crouch_val = 0.0f;
+        player_update_height(player);
     }
 
     snprintf(player->name, sizeof(player->name), "%.*s", (int) sizeof(packet->name) - 1, packet->name);
@@ -1097,6 +1115,14 @@ void client_player_spawned(Client *client, Player *player, const int is_you) {
         client->me = player;
         player->is_you = 1;
         client_recon_reset(client); // "start" -> CONTROLS.reset(): tmpInpts emptied, isn = 0
+        // CONTROLS.reset(!detachedCam) + io_addPlayers (v7.1.4 index.js:17198 / 14680-14683, v10
+        // v10.js:218714 / 220059): the camera looks along the spawn's yaw (xDire), pitch yDire = 0
+        // (player.init), never the last life's look; the death chase target (CONTROLS.target) and
+        // the third-person camera's distance start over too. Camera shake is not reset (rotateCam
+        // re-applies RENDER.shakeX/Y every frame).
+        client_look_reset();
+        menu_view_reset();
+        third_person_on_spawn();
         client_force_player_positions(client);
         // Our prediction copy has to slide like the server's player (v3.1.1 reads it back from
         // the spawn data, index.js serverSetting.slidCont); the offline sandbox server too.

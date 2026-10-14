@@ -229,13 +229,15 @@ void player_spawn(Player *player) {
     player_swap_weapon(player, 0, 1, 0, 0);
 
     // getSpawnPoint(player.team, player): every mode, offline and server, bots included.
+    // player.init: yDire = 0 (pitch level); the ENT: xDire = -((spawn.dir || 0) + 1) * PI / 2.
+    // A map without spawn points (KrunkNative only: v7.1.4 reads map.spawns[0]) keeps the
+    // position but still looks level along dir 0, never along the last life's look.
     vec3 spawn_position;
-    int spawn_direction;
-    if (game_get_spawn_point(player->game, player, &spawn_position, &spawn_direction)) {
-        player->position = spawn_position;
-        player->direction.x = 0.0f;
-        player->direction.y = -(float) M_PI / 2.0f * (1.0f + (float) spawn_direction);
-    }
+    int spawn_direction = 0;
+    const int has_spawn = game_get_spawn_point(player->game, player, &spawn_position, &spawn_direction);
+    if (has_spawn) player->position = spawn_position;
+    player->direction.x = 0.0f;
+    player->direction.y = -(float) M_PI / 2.0f * (1.0f + (float) spawn_direction);
 
     // shared/src/modes: the mode's loadout (Gun Game tier, Sharp Shooter, Stalker).
     mode_player_spawned(player->game, player);
