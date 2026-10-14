@@ -22,6 +22,16 @@ int headless_parse_args(int *argc, char **argv) {
     }
     if (out < *argc) argv[out] = NULL;
     *argc = out;
+    // Headless runs (tests, agents, render scenarios) never open the desktop's sound devices:
+    // playback and voice capture both use miniaudio's null backend, whatever the environment or
+    // the Client tab's audioBackend setting asks for (it only applies when the variable is unset).
+    if (g_headless) {
+#ifdef _WIN32
+        _putenv_s("KRUNKNATIVE_AUDIO_BACKEND", "null");
+#else
+        setenv("KRUNKNATIVE_AUDIO_BACKEND", "null", 1);
+#endif
+    }
     return g_headless;
 }
 
