@@ -498,6 +498,49 @@ def sc_pointer_lock_chat():
     })
 
 
+def sc_pointer_lock_next_map():
+    """Online, the server's next round on the next rotation map (12 s rounds; prod chitown: a player
+    was idle-kicked 60 s after the map change, the server getting only empty input): once the new
+    map is up the client must lock, look and move again with no click (natively), also when the Esc
+    menu was open at the END, when a chat line was left open on the results, and when the menu was
+    over the results as the map changed (the spawn closes it, as for a forceSpawn)."""
+    locked = {"menu": "0", "locked": "1", "cursor": "disabled"}
+    probes = """
+        41000 state @next-map
+        41100 cursor 700 400
+        41300 cursor 900 300
+        41600 state @next-map-look
+        41700 down W
+        42200 state @next-map-walking
+        42800 state @next-map-walk
+        42900 up W
+        43500 quit
+    """
+    expects = {
+        "next-map": dict(locked, ended="0"),
+        "next-map-look": dict(locked, ended="0", look="moved", since="next-map"),
+        "next-map-walk": dict(locked, ended="0", move="moved", since="next-map-look"),
+    }
+    variants = {
+        "plain": "",
+        "menu-at-end": "9000 esc",                                  # the Esc menu up at the END
+        "chat-on-results": "20000 down ENTER\n20050 up ENTER\n20300 type gg",  # chat left open
+        # the menu over the results (Esc): the new map's spawn closes it (client_player_spawned)
+        "menu-on-results": "20000 esc\n20800 check @results-menu menuHolder=1 endUI=0",
+    }
+    for name, steps in variants.items():
+        server, port = start_server(f"next-map-{name}", ("--round-seconds", "12"))
+        try:
+            script = "0 play\n" + steps + "\n" + probes
+            lines = run_client(f"next-map-{name}", ["--connect", f"127.0.0.1:{port}"], script, timeout=120)
+            check_states(f"next-map-{name}", lines, script, expects)
+        finally:
+            stop(server)
+        # informative: the rotation's maps (it may repeat one; the INIT path is the same)
+        maps = re.findall(r"Loaded map (\S+)", read(os.path.join(WORK, f"next-map-{name}-server.log")))
+        record(f"next-map-{name}", "server", "maps", "?", "->".join(maps) or "-", True)
+
+
 def sc_endscreen_team():
     """End screen of a team mode: the team totals survive the ESC round trip too."""
     run_client("endscreen-tdm", ["--offline", "--map", "kanji"], """
@@ -1480,6 +1523,7 @@ SCENARIOS = {
 SCENARIOS["endscreen-cursor"] = sc_endscreen_cursor
 SCENARIOS["pointer-lock"] = sc_pointer_lock
 SCENARIOS["pointer-lock-chat"] = sc_pointer_lock_chat
+SCENARIOS["pointer-lock-next-map"] = sc_pointer_lock_next_map
 
 
 def main():
