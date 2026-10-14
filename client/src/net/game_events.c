@@ -160,18 +160,22 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
     Player *killer = events_find_player(client, packet->killer_uid);
     const Weapon *weapon = events_weapon(client, packet->weapon_index);
 
-    if (victim) {
-        // io_killPlayer: overlay.addDeathMarker for a teammate, ourselves or anyone while spectating
-        const Player *me = client->me;
-        if (victim == me || spectate_active() || (me && me->team && me->team == victim->team))
-            hud_death_marker_add(victim->position, victim == me);
-        victim->deaths = (unsigned int) packet->victim_deaths;
-        events_player_dead(client, victim);
-        // v10.0.2 g1: someone else died -> Settings > Game > Customization "Particle Effect on Kill"
-        // (killFx, default on): ExplosionManager.explodeAt(x, y + 8.25, z, 0.8, 12, 0)
-        if (victim != me && !ui_setting_is_false("killFx"))
-            vfx_explode_at(client, (vec3) {victim->position.x, victim->position.y + 8.25f, victim->position.z}, 0.8f, 12, 0);
-    }
+    // g1() runs entirely inside `if (victim)` (game.deob.js:220586): a "3" for a sid we have not
+    // synced yet - a join race, the KILL beating the victim's "0"/ADD_PLAYERS - is dropped whole,
+    // with no kill-feed row, death card, marker or FX. Without this guard the feed printed the
+    // literal events_name() fallback, e.g. "unknown committed neck rope". v10 never shows that.
+    if (!victim) return;
+
+    // io_killPlayer: overlay.addDeathMarker for a teammate, ourselves or anyone while spectating
+    const Player *me = client->me;
+    if (victim == me || spectate_active() || (me && me->team && me->team == victim->team))
+        hud_death_marker_add(victim->position, victim == me);
+    victim->deaths = (unsigned int) packet->victim_deaths;
+    events_player_dead(client, victim);
+    // v10.0.2 g1: someone else died -> Settings > Game > Customization "Particle Effect on Kill"
+    // (killFx, default on): ExplosionManager.explodeAt(x, y + 8.25, z, 0.8, 12, 0)
+    if (victim != me && !ui_setting_is_false("killFx"))
+        vfx_explode_at(client, (vec3) {victim->position.x, victim->position.y + 8.25f, victim->position.z}, 0.8f, 12, 0);
 
     if (killer && killer != victim) killer->kills = (unsigned int) packet->killer_kills;
     if (killer && killer != victim && killer == client->me) sound_events_kill(packet->headshot, killer, packet->weapon_index); // gk: kill sound (getKillSnd)
@@ -189,7 +193,7 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
 #endif
     }
 
-    if (!victim || victim != client->me) return;
+    if (victim != client->me) return;
 
     client_recon_on_death(client); // no movement input leaves until the respawn (net/recon.c)
     HudKillCard card = {0};

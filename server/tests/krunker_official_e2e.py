@@ -102,6 +102,10 @@ AHKEY = int(header_value("KRUNKER_AHKEY"), 0)
 BUILD_VERSION = header_value("KRUNKER_BUILD_VERSION")
 SALT = b"KRUNK3R_AC"
 GAME_ID, CLIENT_ID, MY_SID, BOT_SID = "TEST:abc12", "cid-42", 9, 5
+# killfeed-name regression: DEAD_SID is a player the stub adds ("0") then void-kills ("3", killer
+# -1) so its name must appear in #killFeed; UNKNOWN_SID is a sid the stub never adds, whose "3"
+# must be dropped (a join race) and must never render as "unknown committed ...".
+DEAD_SID, UNKNOWN_SID = 7, 4242
 
 results = []
 
@@ -375,6 +379,7 @@ class Stub:
             if self.got_en.is_set():
                 await send("frs")
                 await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0))
+                await send("0", player("sockDEAD", DEAD_SID, "DeadBot", 8.0, 8.0))
                 await send("ch", -1, "StubBot", "hello from the stub", 0)
                 last_isn = 0
                 while not stop.is_set():
@@ -383,6 +388,13 @@ class Stub:
                         last_isn = int(qs[-1][1][1])
                     sync = [last_isn, 42, 4.0, 0, 4.0, 0, 0, 0, 0.0, True, False, False, 0, False, False, 0, 0, 0, 0, True, False, 0, 0, None, 0]
                     await send("l", sync)
+                    # killfeed-name regression: frames are processed in order, so DeadBot's "0" lands
+                    # before its "3". Re-killing each tick keeps a fresh row in #killFeed throughout
+                    # the in-game window. A void death (killer -1) of a synced player shows its name;
+                    # a "3" for the never-added UNKNOWN_SID is a join race the client must drop, never
+                    # a "<unknown> committed ..." row.
+                    await send("3", DEAD_SID, 1, -1, None, {}, False)
+                    await send("3", UNKNOWN_SID, 1, -1, None, {}, False)
                     await asyncio.sleep(1.0)
             await rd
             tk.cancel()
@@ -599,6 +611,9 @@ def run_native():
     label = "native"
     script = ("0 boot\n1500 text @cb [id=knCaptchaCallback]\n1600 vis @modal knCaptchaHolder knCaptchaManual knCaptchaCbRow\n"
               "8000 clickid knCaptchaOpen\n8300 text @cb2 [id=knCaptchaCallback]\n9000 play\n"
+              # the stub void-kills DeadBot and an unknown sid right after we enter (on its "en");
+              # the rows live 4 s, so probe #killFeed a few times inside that window.
+              "10000 text @feed0 [id=killFeed]\n11000 text @feed1 [id=killFeed]\n12000 text @feed2 [id=killFeed]\n12800 text @feed3 [id=killFeed]\n"
               "14000 players\n14100 down W\n15500 up W\n15700 players\n15900 con say hello official\n16900 players\n17000 state\n"
               "18700 players\n18900 quit\n")
     stub, p, out, log = launch_native(label, script, {"KRUNKNATIVE_KRUNKER_CAPTCHA_TTL_MS": str(CB_TTL_MS)})
@@ -643,6 +658,25 @@ def run_native():
     check("native: the stub player is in the game and moves", len(xs) >= 2 and xs[-1] > xs[0], f"x over time {xs}")
     check("native: our own player is in the game (sid 9, marked *)", any(re.search(r" %d:[^ ]*\*" % MY_SID, r) for r in rows), rows[-1:] if rows else "")
     check("native: the stub's chat line reached the client", "hello from the stub" in text)
+    check_killfeed_names("native", lines)
+
+
+def check_killfeed_names(label, lines):
+    """killfeed-name regression: a void death of a synced player (DeadBot) shows that player's
+    name in #killFeed, and a "3" for a sid we never synced is dropped - never a "unknown" row (or
+    an empty name, e.g. a leading/doubled " committed")."""
+    feeds = []  # (probe label, folded #killFeed text) for every @feedN probe
+    for line in lines:
+        m = re.search(r"\[input_script\] text t=\d+ @(feed\d+) n=\d+ checked=\d+ value=[^ ]* text=(.*)", line)
+        if m:
+            # names are wrapped in LRM/RLM marks (fixStr); drop them before matching
+            feeds.append((m.group(1), m.group(2).replace("‎", "").replace("‏", "")))
+    seen_dead = any("DeadBot committed" in t for _, t in feeds)
+    bad = [(lbl, t) for lbl, t in feeds if "unknown" in t.lower() or t.strip().startswith("committed") or "  committed" in t]
+    check(f"{label}: a synced player's void death shows its name in #killFeed", seen_dead,
+          f"{len(feeds)} #killFeed probes: {[t for _, t in feeds]}")
+    check(f"{label}: a kill for a not-yet-synced sid never renders \"unknown\"/empty in #killFeed",
+          not bad, bad[:3])
 
 
 def post_options(url):
