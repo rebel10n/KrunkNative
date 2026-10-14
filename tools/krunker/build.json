@@ -3,16 +3,16 @@
  "schema": 1,
  "source": {
   "url": "https://kru.eli.gift/game.deob.js",
-  "sha256": "e21ede6ade4aa9e66a10c9b439adff24f9324f5fbb179f38e7600d86c49bd390",
-  "bytes": 13601540
+  "sha256": "f8be7893f18c441a1723035e9761ac30550678dc57d670efb67900308fef04cc",
+  "bytes": 13674377
  },
- "ahkey": 94547,
- "ahkey_hex": "0x17153",
- "ahnum_step": 83,
+ "ahkey": 3,
+ "ahkey_hex": "0x3",
+ "ahnum_step": 3,
  "ahkey_form": "helper",
  "ahnum_trailer": "nibbles",
- "client_version": "10.0.2r1",
- "build_version": "Def6phpLKsJTIw2XpAeEicZWURGypSce",
+ "client_version": "10.0.3r1",
+ "build_version": "1S33onJJF2kbSB7HgXe6QQTHTaVjqoIV",
  "ahnum_exempt": {
   "name": "cptR",
   "wire": "cptR"
@@ -1305,6 +1305,10 @@
    "wire": "ana"
   },
   {
+   "name": "AI_PARTS",
+   "wire": "aip"
+  },
+  {
    "name": "SET_PLAYER_KEY",
    "wire": "spk"
   },
@@ -1646,10 +1650,10 @@
    "ciphertext": 2
   }
  },
- "cheat_keystream_js": "function iïìiîïì(iíÍïiîî, iiÍiïíì) {\n    for (var iìÎiiïî = iïiîïiî, iìÌïiiï = new Uint8Array(iiÍiïíì), iîÍiiíî = 0x0; iîÍiiíî < iiÍiïíì; iîÍiiíî++) {\n      iìÌïiiï[iîÍiiíî] = (iíÍïiîî['charCodeAt'](iîÍiiíî % iíÍïiîî['length']) ^ iìÎiiïî[iîÍiiíî % iìÎiiïî[\"length\"]]) + iîÍiiíî & 0xff;\n    }\n    return iìÌïiiï;\n  }",
- "cheat_salt_js": "var iïiîïiî = [0x4b, 0x52, 0x55, 0x4e, 0x4b, 0x33, 0x52, 0x5f, 0x41, 0x43];",
- "cheat_keystream_standalone_js": "(function () {\n  var iïiîïiî = [0x4b, 0x52, 0x55, 0x4e, 0x4b, 0x33, 0x52, 0x5f, 0x41, 0x43];\n  return function iïìiîïì(iíÍïiîî, iiÍiïíì) {\n    for (var iìÎiiïî = iïiîïiî, iìÌïiiï = new Uint8Array(iiÍiïíì), iîÍiiíî = 0x0; iîÍiiíî < iiÍiïíì; iîÍiiíî++) {\n      iìÌïiiï[iîÍiiíî] = (iíÍïiîî['charCodeAt'](iîÍiiíî % iíÍïiîî['length']) ^ iìÎiiïî[iîÍiiíî % iìÎiiïî[\"length\"]]) + iîÍiiíî & 0xff;\n    }\n    return iìÌïiiï;\n  };\n})()",
- "cheat_handler_js": "function iiiïíìì(iíÏîiïi, iïIiiîí, iiÎiììî) {\n    try {\n      var iiÏiiií;\n      var iîÏïïíî = function (iìÏïììì, iîÌiîií) {\n        var iïIìíìi;\n        iïIìíìi = \"undefined\" != typeof Buffer ? new Uint8Array(Buffer['from'](iìÏïììì, \"base64\")) : new Uint8Array(atob(iìÏïììì)[\"split\"]('')[\"map\"](function (iîÍïiìì) {\n          return iîÍïiìì[\"charCodeAt\"](0x0);\n        }));\n        for (var iîIíïií = iïìiîïì(iîÌiîií, iïIìíìi[\"length\"]), iîÏîiií = new Uint8Array(iïIìíìi['length']), iiÎîíìì = 0x0; iiÎîíìì < iïIìíìi[\"length\"]; iiÎîíìì++) {\n          iîÏîiií[iiÎîíìì] = iïIìíìi[iiÎîíìì] ^ iîIíïií[iiÎîíìì];\n        }\n        var iiÎîììì = new TextDecoder()[\"decode\"](iîÏîiií);\n        return JSON[\"parse\"](iiÎîììì);\n      }(iiÎiììî, iíÏîiïi);\n      try {\n        iiÏiiií = (0x0, eval)(iîÏïïíî);\n      } catch (iîIîìií) {\n        iiÏiiií = {\n          'r': null,\n          'e': {\n            '_eval': iîIîìií[\"message\"] || \"eval_error\"\n          }\n        };\n      }\n      var iïIïïìi = function (iìÏïîìî, iïÌiíîí) {\n        for (var iïIìíii = JSON[\"stringify\"](iìÏïîìî), iïÏíìîî = new TextEncoder()[\"encode\"](iïIìíii), iiÎíiîì = iïìiîïì(iïÌiíîí, iïÏíìîî[\"length\"]), iîÌiïiï = new Uint8Array(iïÏíìîî[\"length\"]), iìÏìíìí = 0x0; iìÏìíìí < iïÏíìîî[\"length\"]; iìÏìíìí++) {\n          iîÌiïiï[iìÏìíìí] = iïÏíìîî[iìÏìíìí] ^ iiÎíiîì[iìÏìíìí];\n        }\n        return \"undefined\" != typeof Buffer ? Buffer[\"from\"](iîÌiïiï)[\"toString\"](\"base64\") : btoa(String[\"fromCharCode\"][\"apply\"](String, iiïîííì(iîÌiïiï)));\n      }(iiÏiiií, iíÏîiïi);\n      var iìÎììii = function (iiÌìiìï, iiÍíiii) {\n        for (var iìÌîiìî = iiÍíiii + JSON[\"stringify\"](iiÌìiìï), iìÎíïïí = 0x811c9dc5, iíIìíii = 0x0; iíIìíii < iìÌîiìî['length']; iíIìíii++) {\n          iìÎíïïí = 0x1000193 * (iìÎíïïí ^= iìÌîiìî[\"charCodeAt\"](iíIìíii)) | 0x0;\n        }\n        return (iìÎíïïí >>> 0x0)[\"toString\"](0x10)['padStart'](0x8, '0');\n      }(iiÏiiií, iíÏîiïi);\n      iïïïiíì[\"send\"](iïìíiíí[\"CHEAT_CHECK_RESPONSE\"], iíÏîiïi, iïIïïìi, iìÎììii);\n    } catch (iïÌìiíi) {}\n  }",
+ "cheat_keystream_js": "function iiìììïì(iîÌîíìí, iíÌíììì) {\n    for (var iîIìîîi = iîiïíîî, iíÍîiîì = new Uint8Array(iíÌíììì), iiÍìïîî = 0x0; iiÍìïîî < iíÌíììì; iiÍìïîî++) {\n      iíÍîiîì[iiÍìïîî] = (iîÌîíìí[\"charCodeAt\"](iiÍìïîî % iîÌîíìí['length']) ^ iîIìîîi[iiÍìïîî % iîIìîîi[\"length\"]]) + iiÍìïîî & 0xff;\n    }\n    return iíÍîiîì;\n  }",
+ "cheat_salt_js": "var iîiïíîî = [0x4b, 0x52, 0x55, 0x4e, 0x4b, 0x33, 0x52, 0x5f, 0x41, 0x43];",
+ "cheat_keystream_standalone_js": "(function () {\n  var iîiïíîî = [0x4b, 0x52, 0x55, 0x4e, 0x4b, 0x33, 0x52, 0x5f, 0x41, 0x43];\n  return function iiìììïì(iîÌîíìí, iíÌíììì) {\n    for (var iîIìîîi = iîiïíîî, iíÍîiîì = new Uint8Array(iíÌíììì), iiÍìïîî = 0x0; iiÍìïîî < iíÌíììì; iiÍìïîî++) {\n      iíÍîiîì[iiÍìïîî] = (iîÌîíìí[\"charCodeAt\"](iiÍìïîî % iîÌîíìí['length']) ^ iîIìîîi[iiÍìïîî % iîIìîîi[\"length\"]]) + iiÍìïîî & 0xff;\n    }\n    return iíÍîiîì;\n  };\n})()",
+ "cheat_handler_js": "function iìíîííì(iîÍiííï, iíIîîîí, iìÏíìíì) {\n    try {\n      var iíÎîïíí;\n      var iíÍíìïi = function (iîIìïïï, iìÏiííì) {\n        var iîÎìíiî;\n        iîÎìíiî = \"undefined\" != typeof Buffer ? new Uint8Array(Buffer[\"from\"](iîIìïïï, \"base64\")) : new Uint8Array(atob(iîIìïïï)['split']('')[\"map\"](function (iìÍîìïi) {\n          return iìÍîìïi[\"charCodeAt\"](0x0);\n        }));\n        for (var iïÍíiìî = iiìììïì(iìÏiííì, iîÎìíiî[\"length\"]), iïIîíii = new Uint8Array(iîÎìíiî[\"length\"]), iiÎííïî = 0x0; iiÎííïî < iîÎìíiî[\"length\"]; iiÎííïî++) {\n          iïIîíii[iiÎííïî] = iîÎìíiî[iiÎííïî] ^ iïÍíiìî[iiÎííïî];\n        }\n        var iíÎiîií = new TextDecoder()['decode'](iïIîíii);\n        return JSON[\"parse\"](iíÎiîií);\n      }(iìÏíìíì, iîÍiííï);\n      try {\n        iíÎîïíí = (0x0, eval)(iíÍíìïi);\n      } catch (iîIïîíi) {\n        iíÎîïíí = {\n          'r': null,\n          'e': {\n            '_eval': iîIïîíi[\"message\"] || \"eval_error\"\n          }\n        };\n      }\n      var iîIiïii = function (iìÌïîiì, iíÌïiiì) {\n        for (var iîÌïïíí = JSON[\"stringify\"](iìÌïîiì), iiÎîîii = new TextEncoder()[\"encode\"](iîÌïïíí), iiÍíîíï = iiìììïì(iíÌïiiì, iiÎîîii['length']), iïÍìíïî = new Uint8Array(iiÎîîii[\"length\"]), iïÍíîîï = 0x0; iïÍíîîï < iiÎîîii[\"length\"]; iïÍíîîï++) {\n          iïÍìíïî[iïÍíîîï] = iiÎîîii[iïÍíîîï] ^ iiÍíîíï[iïÍíîîï];\n        }\n        return \"undefined\" != typeof Buffer ? Buffer['from'](iïÍìíïî)[\"toString\"]('base64') : btoa(String['fromCharCode'][\"apply\"](String, iíìïîiï(iïÍìíïî)));\n      }(iíÎîïíí, iîÍiííï);\n      var iiÍiiìì = function (iîÎiîïí, iiÌïíîì) {\n        for (var iïÍíììî = iiÌïíîì + JSON[\"stringify\"](iîÎiîïí), iìIìiiï = 0x811c9dc5, iìÌiiïï = 0x0; iìÌiiïï < iïÍíììî[\"length\"]; iìÌiiïï++) {\n          iìIìiiï = 0x1000193 * (iìIìiiï ^= iïÍíììî[\"charCodeAt\"](iìÌiiïï)) | 0x0;\n        }\n        return (iìIìiiï >>> 0x0)[\"toString\"](0x10)[\"padStart\"](0x8, '0');\n      }(iíÎîïíí, iîÍiííï);\n      iîiìiîi[\"send\"](iiíîìíì[\"CHEAT_CHECK_RESPONSE\"], iîÍiííï, iîIiïii, iiÍiiìì);\n    } catch (iíÌíïíí) {}\n  }",
  "extras": {
   "matchmaker_url": "https://matchmaker.krunker.io",
   "api_url": "https://api.krunker.io",

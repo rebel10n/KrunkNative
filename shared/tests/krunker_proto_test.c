@@ -1,5 +1,7 @@
-// Official Krunker socket codec (shared/src/krunker_proto.c): ahNum rotation (AHKEY 0x17153 of
-// the live build, 1597 of the older v10.js build, 'cptR' exempt), golden frames, encode/decode
+// Official Krunker socket codec (shared/src/krunker_proto.c): ahNum rotation (the golden vectors
+// use AHKEY 0x17153, the v10.0.2 build's key, 1597 of the older v10.js build; the live build's is
+// KRUNKER_AHKEY, checked for self-consistency, not pinned to a value here), 'cptR' exempt), golden
+// frames, encode/decode
 // round trips of representative packets, and malformed frames failing cleanly (built with ASan +
 // UBSan where available). Prints "Test OK".
 //
@@ -80,8 +82,10 @@ static void test_ahnum(void) {
     krunker_session_init(&s, 1597);
     for (int i = 0; i < 16; i++) CHECK(krunker_proto_next_ahnum(&s, "en") == v10[i]);
 
-    // 'cptR' does not rotate; everything else does (incl. names that only start like it)
-    krunker_session_init(&s, KRUNKER_AHKEY);
+    // 'cptR' does not rotate; everything else does (incl. names that only start like it).
+    // Uses the 0x17153 golden-vector key so the expected values hold across Krunker builds
+    // (KRUNKER_AHKEY itself changes per build; its self-consistency is checked in test_tables).
+    krunker_session_init(&s, 0x17153);
     CHECK(krunker_proto_next_ahnum(&s, "cptR") == 0);
     CHECK(krunker_proto_next_ahnum(&s, "en") == 83);
     CHECK(krunker_proto_next_ahnum(&s, "cptR") == 83);

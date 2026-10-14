@@ -261,6 +261,7 @@ class Stub:
         self.closed = threading.Event()
         self.issued = []          # validation tokens handed out
         self.used_captchas = set()
+        self.bad_version_seeks = []  # dataQuery.v values refused as InvalidVersion
         self.captcha_ok = threading.Event()
         self.loop = None
         self.httpd = None
@@ -288,10 +289,23 @@ class Stub:
                 elif u.path == "/seek-game":
                     qd = dict(q)
                     cap, val = qd.get("captchaToken"), qd.get("validationToken")
+                    # dataQuery is JSON.stringify({v: buildVersion}); the matchmaker/game infra only
+                    # serves a build whose buildVersion matches, else the join is kicked as an invalid
+                    # version. Parse v out so a client that sends the wrong/stale buildVersion is refused
+                    # (this is the regression guard for the stale-krunker_build.h bug).
+                    try:
+                        seek_v = json.loads(qd.get("dataQuery") or "{}").get("v")
+                    except (ValueError, TypeError):
+                        seek_v = None
                     if not cap or cap in stub.used_captchas or val not in stub.issued:
                         status, body = 400, json.dumps({"error": "CaptchaRequired"}).encode()  # the live answer
                         if cap:
                             stub.used_captchas.add(cap)
+                    elif seek_v != BUILD_VERSION:
+                        # captcha accepted, but the build the client presents is not the one we serve
+                        stub.used_captchas.add(cap)
+                        stub.bad_version_seeks.append(seek_v)
+                        status, body = 400, json.dumps({"error": "InvalidVersion"}).encode()
                     else:
                         stub.used_captchas.add(cap)
                         stub.captcha_ok.set()
@@ -459,6 +473,39 @@ def check_matchmaker(label, stub, tokens, client_text):
               q2.get("dataQuery") == dq, [k for k, _ in retry])
     check(f"{label}: the matchmaker let the last retry through", stub.captcha_ok.is_set())
     check(f"{label}: no Turnstile token reaches the log", not any(t in client_text for t in tokens))
+
+
+def check_version_gate():
+    """HTTP-only regression guard for the stale-krunker_build.h "invalid version" kick: a fresh stub
+    matchmaker must ACCEPT a seek whose dataQuery.v is the build's KRUNKER_BUILD_VERSION and REJECT
+    one carrying any other build version. No client / WebSocket: just the matchmaker contract."""
+    mm, wsp = kn_proto.free_ports(2)
+    stub = Stub(mm, wsp)
+    stub.start_http()
+    base = f"http://127.0.0.1:{mm}"
+
+    def seek(v):
+        tok = urllib.request.urlopen(f"{base}/generate-token", timeout=10).read().decode()
+        dq = urllib.parse.quote(json.dumps({"v": v}, separators=(",", ":")))
+        url = (f"{base}/seek-game?hostname=krunker.io&region=de-fra&autoChangeGame=false"
+               f"&validationToken={tok}&dataQuery={dq}&captchaToken=cap_{v[:6]}")
+        try:
+            r = urllib.request.urlopen(url, timeout=10)
+            return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read())
+
+    try:
+        ok_status, ok_body = seek(BUILD_VERSION)
+        check("version gate: the build's buildVersion is accepted (a game is issued)",
+              ok_status == 200 and ok_body.get("gameId") == GAME_ID, (ok_status, ok_body))
+        bad_status, bad_body = seek("STALE000000000000000000000000000")
+        check("version gate: a wrong buildVersion is refused as InvalidVersion",
+              bad_status == 400 and bad_body.get("error") == "InvalidVersion", (bad_status, bad_body))
+        check("version gate: the refused seek recorded the wrong version",
+              stub.bad_version_seeks == ["STALE000000000000000000000000000"], stub.bad_version_seeks)
+    finally:
+        stub.stop()
 
 
 def check_run(label, stub, client_lines, cheat_expected):
@@ -1188,7 +1235,9 @@ def main():
     if websockets is None:
         print("krunker_official_e2e: needs the Python websockets package: skipped")
         return 77
-    ran = False
+    # the matchmaker version contract needs no client or web build: always guard it
+    check_version_gate()
+    ran = True
     if ONLY in ("", "native") and os.path.isfile(f"{BUILD}/client_bin"):
         run_native()
         run_native_paste()
