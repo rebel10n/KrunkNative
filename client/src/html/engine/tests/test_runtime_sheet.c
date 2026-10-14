@@ -23,6 +23,12 @@
  *   target_compile_definitions(test_runtime_sheet PRIVATE KN_REPO_ROOT="${R}")
  *   target_link_libraries(test_runtime_sheet lexbor m)
  *
+ * Second part (regression): the v10 page (ui/v10/index.html) with every <link> / <style> sheet it has
+ * plus enough empty sheets for 20 author sheets, then devconsole.css and a page-module sheet (like
+ * html_ui_add_stylesheet("css/kn-v10-news.css")) appended at runtime. The cascade's sheet index was a
+ * 4-bit field (UA + 14 author sheets): every sheet past the 14th was silently dropped, so one extra
+ * <link> left the dev console unstyled and the news popup collapsed.
+ *
  * Usage: test_runtime_sheet [repo root]. Exit code: number of failed checks.
  */
 #define _POSIX_C_SOURCE 200809L
@@ -45,7 +51,7 @@ static int g_pass;
 static const char *g_root = KN_REPO_ROOT;
 static Dom *g_dom;
 static CssSheet *g_ua;
-static CssSheet *g_sheets[14];
+static CssSheet *g_sheets[40];
 static int g_n_sheets;
 
 /* ui/index.html's <link> sheets, in order (relative to ui/: the url() bases) */
@@ -137,6 +143,60 @@ static void restyle(void)
     cascade_restyle(g_dom, g_ua, g_sheets, g_n_sheets);
 }
 
+/* the v10 page with 20 author sheets, then two runtime sheets past the old 15-sheet cap */
+static void many_sheets(void)
+{
+    size_t len;
+    char *html = read_file("ui/v10/index.html", &len);
+    dom_destroy(g_dom);
+    g_dom = dom_create();
+    if (dom_load_html(g_dom, html, len) != 0) {
+        printf("FAIL v10 dom_load_html\n");
+        g_fail++;
+        free(html);
+        return;
+    }
+    g_n_sheets = 0;
+    for (const char *p = html; (p = strstr(p, "<link rel=\"stylesheet\" href=\"")) != NULL;) {
+        p += strlen("<link rel=\"stylesheet\" href=\"");
+        const char *q = strchr(p, '"');
+        if (!q || g_n_sheets >= 30) break;
+        char href[128], rel[192];
+        snprintf(href, sizeof(href), "%.*s", (int)(q - p), p);
+        snprintf(rel, sizeof(rel), "ui/v10/%s", href);
+        size_t clen;
+        char *css = read_file(rel, &clen);
+        g_sheets[g_n_sheets++] = css_sheet_load(css, clen, href);
+        free(css);
+        p = q;
+    }
+    const char *st = strstr(html, "<style>");
+    const char *st_end = st ? strstr(st, "</style>") : NULL;
+    if (st_end) g_sheets[g_n_sheets++] = css_sheet_load(st + 7, (size_t)(st_end - st - 7), "index.html");
+    free(html);
+    while (g_n_sheets < 20) g_sheets[g_n_sheets++] = css_sheet_load("", 0, "pad.css");
+    restyle();
+    dom_insert_html(g_dom, dom_body(g_dom), DOM_INSERT_BEFORE_END, k_console_html, strlen(k_console_html));
+    static const char news_html[] = "<div id=\"knRtNews\" class=\"knRtCard\"></div>";
+    dom_insert_html(g_dom, dom_body(g_dom), DOM_INSERT_BEFORE_END, news_html, strlen(news_html));
+    char *css = read_file("ui/v10/css/devconsole.css", &len);
+    g_sheets[g_n_sheets++] = css_sheet_load(css, len, "css/devconsole.css");
+    free(css);
+    static const char news_css[] = ".knRtCard{display:flex;position:relative}";
+    g_sheets[g_n_sheets++] = css_sheet_load(news_css, strlen(news_css), "css/kn-rt-news.css");
+    static const char later_css[] = ".knRtCard{display:grid}"; /* same specificity, later sheet: wins */
+    g_sheets[g_n_sheets++] = css_sheet_load(later_css, strlen(later_css), "css/kn-rt-later.css");
+    dom_mark_all_dirty(g_dom);
+    restyle();
+    char n[32];
+    snprintf(n, sizeof(n), "%d", g_n_sheets);
+    check_str("v10 author sheets", g_n_sheets >= 23 ? "23+" : n, "23+");
+    check("#devConsoleOverlay", "display", "none");   /* sheet 21: the runtime console sheet applies */
+    check("#devConsoleOverlay", "position", "fixed");
+    check("#knRtNews", "position", "relative");        /* sheet 22: a page module's runtime sheet */
+    check("#knRtNews", "display", "grid");             /* sheet 23 beats 22's flex on a tie */
+}
+
 int main(int argc, char **argv)
 {
     if (argc > 1) g_root = argv[1];
@@ -219,6 +279,8 @@ int main(int argc, char **argv)
 
     /* the page's own rules are untouched */
     check("#menuWindow", "font-family", "gamefont");
+
+    many_sheets();
 
     printf("%d passed, %d failed\n", g_pass, g_fail);
     return g_fail;

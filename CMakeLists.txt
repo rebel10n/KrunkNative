@@ -881,6 +881,18 @@ else ()
     # kn_editor_mcp: Krunker map editor MCP server (tools/editor-mcp/README.md)
     add_subdirectory(tools/editor-mcp)
 
+    # html_runtime_sheet_test: the cascade with the v7 page's sheets plus a runtime one (devconsole.css),
+    # and the v10 page with more than 14 author sheets plus runtime sheets (the old 4-bit sheet index)
+    if (KRUNKNATIVE_HTML_ENGINE)
+        set(KN_ENGINE_DIR client/src/html/engine)
+        add_executable(html_runtime_sheet_test ${KN_ENGINE_DIR}/tests/test_runtime_sheet.c ${KN_ENGINE_DIR}/dom.c
+                       ${KN_ENGINE_DIR}/css_sheet.c ${KN_ENGINE_DIR}/css_cascade.c ${KN_ENGINE_DIR}/css_values.c
+                       ${KN_ENGINE_DIR}/util.c)
+        target_include_directories(html_runtime_sheet_test PRIVATE ${KN_ENGINE_DIR} client/include client/lib/lexbor)
+        target_link_libraries(html_runtime_sheet_test PRIVATE lexbor m)
+        add_test(NAME html_runtime_sheet_test COMMAND html_runtime_sheet_test ${CMAKE_SOURCE_DIR})
+    endif ()
+
     # ui_test: engine driver for dumps, probes, renders and benchmarks
     # (client/src/html/ui_test.c holds the subcommand table). It is the engine plus
     # the minimum of the client it needs: shader.c (shader_compile) and the shared

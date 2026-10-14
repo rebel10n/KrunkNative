@@ -14,7 +14,10 @@
 /* Module state                                                               */
 /* ------------------------------------------------------------------------- */
 
-#define MAX_SHEETS 15          /* UA + 14 author sheets (4-bit field)        */
+/* UA + the engine's author sheets (engine.c HTML_ENGINE_MAX_SHEETS 32). The sheet index used to be
+ * a 4-bit field of the sort key, so sheets past the 14th author sheet (e.g. a page with 14 <link> /
+ * <style> sheets plus runtime html_ui_add_stylesheet ones) were silently dropped from the cascade. */
+#define MAX_SHEETS 64
 #define MAX_VAR_TOKENS 256
 
 typedef struct SheetSet {
@@ -32,7 +35,8 @@ typedef struct Match {
 
 /* One declaration to apply, sortable by `key`. */
 typedef struct Entry {
-    uint64_t key;
+    uint64_t key;              /* level, specificity, sheet                  */
+    uint32_t key2;             /* rule order, declaration index (ties of key) */
     const CssDecl *decl;
     const char *base;          /* url() base: sheet name atom, NULL = document */
 } Entry;
@@ -100,23 +104,25 @@ static void set_sheets(Dom *dom, CssSheet *ua, CssSheet **author, int n_author)
 /* Cascade levels (3 bits). */
 enum { LEVEL_UA = 0, LEVEL_AUTHOR = 1, LEVEL_INLINE = 2, LEVEL_AUTHOR_IMPORTANT = 3, LEVEL_INLINE_IMPORTANT = 4, LEVEL_UA_IMPORTANT = 5 };
 
-static uint64_t make_key(unsigned level, uint32_t spec, unsigned sheet, uint32_t order, uint32_t decl_index)
+/* Sort key: (level 3 bits, specificity 30 bits, sheet 31 bits) then (rule order 20 bits, declaration
+ * index 12 bits) as the tie-breaker word. */
+static uint64_t make_key(unsigned level, uint32_t spec, unsigned sheet, uint32_t order, uint32_t decl_index, uint32_t *key2)
 {
-    if (order > 0x7fff) {
-        order = 0x7fff;
+    if (order > 0xfffff) {
+        order = 0xfffff;
     }
     if (decl_index > 0xfff) {
         decl_index = 0xfff;
     }
-    return ((uint64_t)level << 61) | ((uint64_t)(spec & 0x3fffffffu) << 31) | ((uint64_t)(sheet & 0xf) << 27)
-         | ((uint64_t)order << 12) | (uint64_t)decl_index;
+    *key2 = (order << 12) | decl_index;
+    return ((uint64_t)level << 61) | ((uint64_t)(spec & 0x3fffffffu) << 31) | (uint64_t)(sheet & 0x7fffffffu);
 }
 
 static int entry_cmp(const void *a, const void *b)
 {
-    uint64_t ka = ((const Entry *)a)->key;
-    uint64_t kb = ((const Entry *)b)->key;
-    return ka < kb ? -1 : ka > kb ? 1 : 0;
+    const Entry *ea = a, *eb = b;
+    if (ea->key != eb->key) return ea->key < eb->key ? -1 : 1;
+    return ea->key2 < eb->key2 ? -1 : ea->key2 > eb->key2 ? 1 : 0;
 }
 
 /* ------------------------------------------------------------------------- */
@@ -254,7 +260,7 @@ static void gather_entries(int pe)
         for (uint32_t d = 0; d < rule->ndecls; d++) {
             const CssDecl *decl = &rule->decls[d];
             Entry e;
-            e.key = make_key(level_for(m->sheet, decl->important), m->specificity, m->sheet, rule->order, d);
+            e.key = make_key(level_for(m->sheet, decl->important), m->specificity, m->sheet, rule->order, d, &e.key2);
             e.decl = decl;
             e.base = sheet_base(g.set.sheets[m->sheet]);
             KN_VEC_PUSH(&g.entries, e);
@@ -303,7 +309,7 @@ static void gather_inline(Dom *dom, HtmlElem e)
     for (size_t i = 0; i < g.inline_decls.len; i++) {
         const CssDecl *d = &g.inline_decls.data[i];
         Entry en;
-        en.key = make_key(d->important ? LEVEL_INLINE_IMPORTANT : LEVEL_INLINE, 0, 0, 0, (uint32_t)i);
+        en.key = make_key(d->important ? LEVEL_INLINE_IMPORTANT : LEVEL_INLINE, 0, 0, 0, (uint32_t)i, &en.key2);
         en.decl = d;
         en.base = NULL;   /* inline style="": url()s resolve against the document */
         KN_VEC_PUSH(&g.entries, en);
