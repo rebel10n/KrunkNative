@@ -120,6 +120,13 @@ struct PaintCtx {
     int hide_scrollbars;       /* 1: paint no scrollbars (headless Chromium `--hide-scrollbars`,
                                   which the doc/ref captures used); layout must then reserve 0 px */
     PaintHost host;
+    /* The top layer (html_dom_set_top_layer: the developer console): when it is a stacking
+     * context of the root's (a positioned body child with a z-index), paint_build() records it
+     * into *top_out instead of the page's list, so the client can draw GL over the page and
+     * still have the top layer above that (html_ui_render_page / html_ui_render_top). NULL
+     * (either): one list. */
+    const Box *top_layer;
+    DisplayList *top_out;
 
     /* private */
     struct PaintCacheTable *caches;

@@ -38,6 +38,12 @@ void html_ui_update(void);
 // Debugging: KRUNKNATIVE_HTML_PROFILE=1 prints per-stage timings every ~2 s,
 // KRUNKNATIVE_HTML_VERBOSE=1 logs loads and failures (client/src/html/engine/README.md).
 void html_ui_render(UI *ui);
+// The same in two passes, for GL the client draws over the page that must stay under the top
+// layer (html_dom_set_top_layer: the developer console) and the select popups: _page draws the
+// rest of the page, _top (after that GL, in the same frame) the top layer and the popups.
+enum { HTML_LAYER_PAGE = 1, HTML_LAYER_TOP = 2 };
+void html_ui_render_page(UI *ui);
+void html_ui_render_top(UI *ui);
 
 // Menu state as the client sees it. The UI logic (client_set_menu_open in
 // client/src/ui/menu_ui.c) records it here and updates the page itself.

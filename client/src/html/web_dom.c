@@ -987,6 +987,10 @@ void html_dom_code_lines(const HtmlElem e, const HtmlCodeLine *lines, const int 
 }
 
 HtmlElem html_dom_element_at(const float x, const float y) { return (HtmlElem) kn_js_element_at(x, y); }
+// the browser hit-tests pointer-events aware only (elementFromPoint): the closest it has
+HtmlElem html_dom_painted_at(const float x, const float y) { return (HtmlElem) kn_js_element_at(x, y); }
+// the page's DOM is always above the canvas: nothing the client draws in GL covers it
+void html_dom_set_top_layer(const HtmlElem e) { (void) e; }
 HtmlElem html_dom_active_element(void) { return (HtmlElem) kn_js_active_element(); }
 
 int html_dom_get_rect(const HtmlElem e, HtmlRect *out) {
@@ -1417,7 +1421,7 @@ void html_ui_backend_update(void) {
     }
 }
 
-void html_ui_backend_render(UI *ui) { (void) ui; }
+void html_ui_backend_render(UI *ui, const int layers) { (void) ui; (void) layers; }
 
 void html_ui_backend_mouse_move(const double x, const double y) { (void) x; (void) y; }
 void html_ui_backend_mouse_button(const int b, const int a, const int m) { (void) b; (void) a; (void) m; }

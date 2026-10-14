@@ -1,7 +1,8 @@
 /* Developer console stylesheet: verbatim from Krunker v3.1.1 offline build
  * mod/devConsole.ts (the `style.textContent` template it appends to <head>).
  * Loaded at runtime by client/src/ui/ui_console.c through html_ui_add_stylesheet().
- * Only change: the root-relative font URL made relative, like the rest of ui/. */
+ * Changes: the root-relative font URL made relative, like the rest of ui/, and the overlay's
+ * z-index (below). */
 @font-face {
   font-family: "LuconDevConsole";
   src: url("fonts/lucon.ttf") format("truetype");
@@ -11,7 +12,10 @@
   position: fixed;
   inset: 0;
   display: none;
-  z-index: 999999;
+  /* KrunkNative: 999999 in devConsole.ts; the v10 page has layers above that (the view stack,
+   * #popupHolder, popup windows, the loader), so the console takes the highest z-index and
+   * ui_console.c keeps it <body>'s last element (it stays above them all) */
+  z-index: 2147483647;
   background: transparent;
   pointer-events: none;
 }

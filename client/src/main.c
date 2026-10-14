@@ -1650,9 +1650,10 @@ void client_tick(Client *client, const float now, const float delta) {
     if (!debug_capture_hide_ui()) {
         spin_wheel_render(client);           // the prize wheel's canvas under its #spinButton (ui/spin_wheel.c)
         ks_client_ui_late(client);           // KrunkScript UI.hideDefault / hideCrosshair over the HUD's writes
-        html_ui_render(client->ui);          // last: composites the page over the scene and HUD
+        html_ui_render_page(client->ui);     // composites the page over the scene and HUD
         viewer_embed_frame(client, delta);   // the item view's 3D showcase over its iframe box (viewer_embed.h)
         spin_wheel_render_confetti(client);  // canvas-confetti draws above the page
+        html_ui_render_top(client->ui);      // last: the developer console (the top layer) over all of it
     }
     input_script_frame_presented(client); // `frames`: every finished frame (input_script.c)
     debug_capture_frame_end(client); // KRUNKNATIVE_SCREENSHOT: reads the finished frame

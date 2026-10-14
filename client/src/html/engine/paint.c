@@ -2477,14 +2477,19 @@ static int push_pop_transform(DisplayList *out)
     return dl_push(out, &it);
 }
 
-static int flatten_context(PaintCtx *ctx, Box *b, Mat2D dev_in, float snap_ox, float snap_oy, DisplayList *out)
+/* top: the list the root's top-layer child context goes to (paint_build_once, the root only:
+ * deeper contexts carry their ancestors' transforms and clips); NULL = none */
+static int flatten_context(PaintCtx *ctx, Box *b, Mat2D dev_in, float snap_ox, float snap_oy, DisplayList *out,
+                           DisplayList *top)
 {
     if (record_if_needed(ctx, b, dev_in, snap_ox, snap_oy) != 0) return -1;
     PaintCache *c = table_find(ctx->caches, b);
+    DisplayList *const page = out;
     int k = 0;
     for (int i = 0; i <= c->list.n; i++) {
         while (k < c->n_children && c->children[k].index == i) {
             const PaintChildRef *ref = &c->children[k++];
+            out = top && ref->box == ctx->top_layer ? top : page;
             /* Composited layers (translateZ / will-change) are NOT origin-snapped:
              * Chrome carries the sub-pixel remainder into the layer contents.
              * Measured on ingame-*: rounding the layer origin to device px costs
@@ -2501,8 +2506,9 @@ static int flatten_context(PaintCtx *ctx, Box *b, Mat2D dev_in, float snap_ox, f
                 cox = (own ? 0 : c->snap_ox) + ref->dx - ref->layer_snap_x - ref->scroll_x;
                 coy = (own ? 0 : c->snap_oy) + ref->dy - ref->layer_snap_y - ref->scroll_y;
             }
-            if (flatten_context(ctx, ref->box, child_dev, cox, coy, out) != 0) return -1;
+            if (flatten_context(ctx, ref->box, child_dev, cox, coy, out, NULL) != 0) return -1;
             if (tr && push_pop_transform(out) != 0) return -1;
+            out = page;
         }
         if (i < c->list.n && dl_push(out, &c->list.items[i]) != 0) return -1;
     }
@@ -2517,6 +2523,8 @@ static int paint_build_once(PaintCtx *ctx, Box *root, DisplayList *out)
     ctx->stats_rebuilt = 0;
     ctx->stats_contexts = 0;
     dl_clear(out);
+    DisplayList *top = ctx->top_layer && ctx->top_out && ctx->top_out != out ? ctx->top_out : NULL;
+    if (ctx->top_out && ctx->top_out != out) dl_clear(ctx->top_out);
     if (!root) return 0;
 
     if (ctx->hide_scrollbars != ctx->last_hide_scrollbars) {
@@ -2545,9 +2553,11 @@ static int paint_build_once(PaintCtx *ctx, Box *root, DisplayList *out)
     /* the root frame: translate by the root box position when non-zero */
     const int tr = root->x != 0 || root->y != 0;
     if (tr && push_translate(out, root->x, root->y) != 0) return -1;
+    if (tr && top && push_translate(top, root->x, root->y) != 0) return -1;
     const Mat2D dev_root = mat_mul(mat_scale(ctx->device_scale, ctx->device_scale), mat_translate(root->x, root->y));
-    rc = flatten_context(ctx, root, dev_root, 0, 0, out);
+    rc = flatten_context(ctx, root, dev_root, 0, 0, out, top);
     if (tr && rc == 0 && push_pop_transform(out) != 0) rc = -1;
+    if (tr && top && rc == 0 && push_pop_transform(top) != 0) rc = -1;
     table_evict(ctx->caches, ctx->frame);
     return rc;
 }

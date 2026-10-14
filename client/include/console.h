@@ -8,8 +8,9 @@
 #include <client.h>
 #include <html_dom.h>
 
-// Per frame from client_menu_tick(): builds the overlay once the game page is up and
-// polls the input line (hints, the toggle character).
+// Per frame from client_menu_tick() and, on the other pages, app_mode_frame(): builds the overlay
+// in every document (or finds it again), keeps it on top and polls the input line (hints, the
+// toggle character).
 void ui_console_tick(Client*);
 int  ui_console_is_open(void);              // devConsole.visible
 void ui_console_toggle(int go_to_game);     // toggleConsole(goToGame): update() frees / relocks the pointer
@@ -17,6 +18,9 @@ void ui_console_toggle(int go_to_game);     // toggleConsole(goToGame): update()
 // keydown (toggle key, F8 cycle, bhop key), handleConsoleKeydown, typing into the input
 // while visible, and the session key binds while hidden. 1 = consumed.
 int  ui_console_key_event(Client*, int key, int scancode, int action, int mods);
+// The same on the other pages (editor, hub, viewer: app_mode.c's key callback, before the page):
+// the toggle key and the open console's keys; no game / mod keys or session binds.
+int  ui_console_app_page_key_event(Client*, int key, int scancode, int action, int mods);
 // Page keydown in the console input (web: kn-shim forwards Escape/Enter plus Tab/arrows/`
 // for data-kn-keys fields). 1 = consumed (preventDefault).
 int  ui_console_page_key(const HtmlEvent*);
@@ -34,3 +38,9 @@ void ui_console_exec(const char *line);     // devConsole.exec(line)
 // being joined again, 0 = nothing to reconnect to (an error line in the console).
 int  ui_console_reconnect(void);
 void ui_console_printf(const char *color, const char *fmt, ...); // a log line (NULL = log colour)
+// Tests (input_script `console @label`): what the player sees of the console on this page, one
+// line of key=value pairs: open, built, page, shown (rendered, not hidden or transparent), sheet
+// (devconsole.css was added and the overlay covers the viewport), last (the overlay is <body>'s
+// last element), top (at how many of 5 points inside the box the console is painted topmost),
+// inside (the whole box in the viewport), rect (CSS px) and vp (the viewport).
+void ui_console_probe(char *out, size_t n);

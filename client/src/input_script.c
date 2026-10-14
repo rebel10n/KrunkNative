@@ -84,6 +84,13 @@
 //                                objective modes' overlay layer drew: hud_objectives.c), :cursor (the
 //                                mouse cursor shows: GLFW cursor mode normal);
 //                                UI state transition checks (server/tests/ui_transitions_e2e.py)
+//   100 console @label           log what the player sees of the developer console (ui_console_probe):
+//                                "[input_script] console t=100 @label open=1 built=1 page=index.html shown=1
+//                                sheet=1 last=1 top=5 inside=1 rect=x,y,w,h vp=WxH" (console_visible_e2e.py)
+//   100 page editor [query]      this window shows another page in place (app_set_mode: game, hub, editor,
+//                                viewer); the clock stops until it is shown and ready (the game page: its
+//                                menu set up), then the script goes on there (game-only commands are skipped
+//                                on a page)
 //   100 scroll @grid knOmGrid    log scroll containers' scrollTop (html_dom_get_scroll), like vis:
 //                                "[input_script] scroll t=100 @grid knOmGrid=196.0" (- = no such id or
 //                                not a scroll container)
@@ -156,6 +163,8 @@ static struct {
     int playing;      // `play` ran and the player is active: time runs (dead or alive)
     int menu_mode;    // the first event is `menu`: time runs from the menu, `play` just enters the game
     int respawn_pending; // `respawn` ran while dead: Play again as soon as the death delay allows
+    int page_wait;    // `page`: 1 until that page is shown and ready, -1 one more frame (its UI ticks), 0 none
+    AppMode page_mode;
     char shot[160];   // pending `shot` path (written at frame end)
     char frames[160]; // `frames` prefix: one PNG per frame while frames_left > 0
     int frames_left, frames_index;
@@ -172,7 +181,7 @@ static struct {
 
 // The page probes: log lines, the whole rest of the line is ids (and @labels).
 static int script_probe(const char *cmd) {
-    return !strcmp(cmd, "vis") || !strcmp(cmd, "scroll") || !strcmp(cmd, "rect");
+    return !strcmp(cmd, "vis") || !strcmp(cmd, "scroll") || !strcmp(cmd, "rect") || !strcmp(cmd, "console");
 }
 
 static void script_load(void) {
@@ -215,7 +224,7 @@ static void script_load(void) {
         if (!strcmp(e->cmd, "con") || script_probe(e->cmd) || !strcmp(e->cmd, "type") || !strcmp(e->cmd, "om") ||
             !strcmp(e->cmd, "call") || !strcmp(e->cmd, "setscroll") || !strcmp(e->cmd, "hit") || !strcmp(e->cmd, "ft") ||
             !strcmp(e->cmd, "nodes") || !strcmp(e->cmd, "rects") || !strcmp(e->cmd, "clicksel") || !strcmp(e->cmd, "wsel") ||
-            !strcmp(e->cmd, "text")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
+            !strcmp(e->cmd, "text") || !strcmp(e->cmd, "page")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
             while (*rest == ' ' || *rest == '\t') rest++;
             snprintf(e->arg, sizeof(e->arg), "%s", rest);
             for (size_t len = strlen(e->arg); len && (e->arg[len - 1] == '\n' || e->arg[len - 1] == '\r' || e->arg[len - 1] == ' '); len--) e->arg[len - 1] = 0;
@@ -635,7 +644,7 @@ static void script_run(Client *client, const ScriptEvent *e) {
         GLFWcharfun cb = glfwSetCharCallback(client->window, NULL);
         glfwSetCharCallback(client->window, cb);
         for (const char *c = e->arg; cb && *c; c++) cb(client->window, (unsigned char) *c);
-    } else if (script_probe(e->cmd)) {
+    } else if (script_probe(e->cmd) && strcmp(e->cmd, "console")) {
         // vis <id> [<id> ...]: one log line with each element's visibility (1 shown, 0 not, - absent);
         // scroll <id> [<id> ...]: their scrollTop instead; rect <id> [<id> ...]: their boxes
         const int scroll = e->cmd[0] == 's';
@@ -696,6 +705,22 @@ static void script_run(Client *client, const ScriptEvent *e) {
         }
         text[n] = 0;
         fprintf(stderr, "[input_script] clip t=%.0f %s text=%s\n", g_script.time, e->arg, text);
+    } else if (!strcmp(e->cmd, "console")) {
+        char state[320];
+        ui_console_probe(state, sizeof(state));
+        fprintf(stderr, "[input_script] console t=%.0f %s %s\n", g_script.time, e->arg, state);
+    } else if (!strcmp(e->cmd, "page")) {
+        char mode[16] = "";
+        const char *query = "";
+        sscanf(e->arg, "%15s", mode);
+        if (strlen(e->arg) > strlen(mode)) query = e->arg + strlen(mode) + 1;
+        fprintf(stderr, "[input_script] page t=%.0f %s\n", g_script.time, e->arg);
+        for (int m = 0; m < APP_MODE_COUNT; m++) {
+            if (strcmp(mode, app_mode_name((AppMode) m))) continue;
+            app_set_mode(client, (AppMode) m, query);
+            g_script.page_wait = 1; // the clock stops until the page is up (page_waiting)
+            g_script.page_mode = (AppMode) m;
+        }
     } else if (!strcmp(e->cmd, "con")) {
         ui_console_exec(e->arg); // con <word>: a one-word developer console command (`end`)
     } else if (!strcmp(e->cmd, "nethit")) {
@@ -718,6 +743,20 @@ static void script_run(Client *client, const ScriptEvent *e) {
         if (g_script.log) fflush(g_script.log);
         glfwSetWindowShouldClose(client->window, 1);
     }
+}
+
+// `page`: 1 while the page it asked for is not shown and ready yet (the game page: its menu set up),
+// then one more frame so the page's UI ticked once; no events run and the clock stands still.
+static int page_waiting(Client *client) {
+    if (!g_script.page_wait) return 0;
+    if (g_script.page_wait < 0) {
+        g_script.page_wait = 0;
+        return 1;
+    }
+    const int ready = g_script.page_mode == APP_MODE_GAME ? app_mode() == APP_MODE_GAME && html_ui_is_ready() && menu_ui()->dom_ready
+                                                           : app_mode() == g_script.page_mode && app_mode_page_ready(client);
+    if (ready) g_script.page_wait = -1;
+    return 1;
 }
 
 // `ft start`: one wall-clock frame time per frame (game and page ticks)
@@ -761,6 +800,8 @@ void input_script_tick(Client *client) {
         while (g_script.next < g_script.count && !strcmp(g_script.events[g_script.next].cmd, "play")) g_script.next++;
     }
 
+    if (page_waiting(client)) return;
+
     // A `vis` / `scroll` / `rect` / `state` probe never shares a frame with the input before it: after a stalled frame the due
     // events would otherwise run together and the probe would read the page before the UI
     // reacted to them (the HUD / menu passes run later in the frame), or the look before the
@@ -774,6 +815,7 @@ void input_script_tick(Client *client) {
         script_run(client, e);
         g_script.next++;
         ran = 1;
+        if (g_script.page_wait) break; // `page`: the rest waits for that page
     }
 
     if (g_script.respawn_pending) {
@@ -874,7 +916,7 @@ void input_script_frame_end(Client *client, const float delta, const float frame
 
     // The frame time, not the world's: the end-of-round slow motion scales the world delta
     // down to 0 for the whole results screen, which would hold every later event back.
-    g_script.time += frame_delta * 1000.0f;
+    if (!g_script.page_wait) g_script.time += frame_delta * 1000.0f;
 }
 
 // Page windows (app_mode.c): the clock starts once the page is ready; game-only commands
@@ -893,19 +935,26 @@ void input_script_page_tick(Client *client) {
         g_script.playing = 1;
         g_script.time = 0.0f;
     }
+    if (page_waiting(client)) return;
+    int ran = 0; // a probe never shares a frame with the input before it (input_script_tick)
     while (g_script.next < g_script.count && g_script.events[g_script.next].t <= g_script.time + 1e-3f) {
-        const ScriptEvent *e = &g_script.events[g_script.next++];
+        const ScriptEvent *e = &g_script.events[g_script.next];
+        const int probe = script_probe(e->cmd) || !strcmp(e->cmd, "state");
+        if (ran && probe && !script_probe(g_script.events[g_script.next - 1].cmd) && strcmp(g_script.events[g_script.next - 1].cmd, "state")) break;
+        g_script.next++;
         static const char *const GAME_ONLY[] = {"play", "pose", "tp", "look", "respawn"};
         int skip = 0;
         for (size_t i = 0; i < sizeof(GAME_ONLY) / sizeof(GAME_ONLY[0]); i++) skip |= !strcmp(e->cmd, GAME_ONLY[i]);
         if (!skip) script_run(client, e);
+        ran = 1;
+        if (g_script.page_wait) break; // `page`: the rest waits for that page
     }
 }
 
 void input_script_page_frame_end(Client *client, const float frame_delta) {
     if (!g_script.active || !g_script.playing) return;
     write_pending_shot(client);
-    g_script.time += frame_delta * 1000.0f;
+    if (!g_script.page_wait) g_script.time += frame_delta * 1000.0f;
 }
 
 void input_script_frame_presented(Client *client) {

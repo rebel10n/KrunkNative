@@ -50,8 +50,10 @@
 #define CON_ARGS_MAX 32
 #define CON_NAME_MAX 64
 #define CON_TEXT_MAX 512
-#define CON_PENDING_MAX 64
 #define CON_GEOM_KEY "krk_dev_console_geom"
+// KrunkNative: the console open or closed, kept across F5 / F4 restarts, page switches and the web
+// build's reloads (devConsole.ts starts closed on every load)
+#define CON_OPEN_KEY "kn_dev_console_open"
 // devconsole.css .modal: padding 7px on a content-box, so offsetWidth = width + 14 (and the
 // height likewise). Geometry is kept as the outer box (devConsole.ts saves offsetWidth /
 // offsetHeight), so the CSS width / height written back is the outer size minus this.
@@ -76,10 +78,13 @@
 void client_send_cycle_packet(Client *client); // main.c
 
 // The overlay devConsole.ts builds and appends to <body>. KrunkNative additions: the
-// data-kn-* glue attributes, and onsubmit="return false" (the mod's submit listener
-// preventDefault()s; the browser runs the attribute, the native engine has no forms).
+// data-kn-* glue attributes, onsubmit="return false" (the mod's submit listener
+// preventDefault()s; the browser runs the attribute, the native engine has no forms), and the
+// overlay's place in the page inline (devconsole.css has the same): over the whole viewport,
+// above every z-index, so the console shows even when its sheet could not be added.
 static const char OVERLAY_HTML[] =
-    "<div id=\"devConsoleOverlay\"><div class=\"modal\" data-kn-pointer=\"1\">"
+    "<div id=\"devConsoleOverlay\" style=\"display: none; position: fixed; left: 0; top: 0; right: 0; bottom: 0; "
+    "z-index: 2147483647; pointer-events: none;\"><div class=\"modal\" data-kn-pointer=\"1\">"
     "<div class=\"titlebar\"><span>Console</span><span class=\"x\">\xE2\x9C\x95</span></div>"
     "<div class=\"body\"><div class=\"logs\" tabindex=\"-1\" style=\"outline: none;\"></div>"
     "<div class=\"inputShell\"><div class=\"hints\"></div>"
@@ -123,15 +128,20 @@ typedef struct {
 typedef struct {
     Client *client;
     int built;                   // the overlay exists in the current page
+    unsigned serial;             // html_ui_page_serial() of the document it was built / found in
+    int sheet;                   // devconsole.css was added to that document
     HtmlElem overlay, modal, header, close_btn, logs, hints, input, submit, grip;
     int visible;
+    int restored;                // the saved open state was read (CON_OPEN_KEY)
     int focus_pending;           // update(): setTimeout(() => input.focus(), 0)
     char last_value[CON_LINE_MAX];
     int log_lines;
     int banner;
 
-    char *pending[CON_PENDING_MAX]; // lines appended before the overlay exists (the banner)
-    int pending_count;
+    // every line still in the log (at most CON_LOG_MAX, as markup): a page switch or a page that
+    // replaced the overlay gets the whole log again, and lines before the overlay exists wait here
+    char *lines[CON_LOG_MAX];
+    int line_head, line_count;
 
     ConCommand cmds[CON_CMDS_MAX];
     int cmd_count;
@@ -223,6 +233,12 @@ static int js_number(const char *s, double *out) {
     return 1;
 }
 
+// The overlay's handles belong to the document shown now (a page switch makes them stale until
+// ui_console_tick finds or builds the overlay of the new one)
+static int con_live(void) {
+    return g_con.built && g_con.serial == html_ui_page_serial() && html_ui_is_ready();
+}
+
 static void escape_html(char *out, const size_t n, const char *text) {
     size_t len = 0;
     for (const char *p = text; *p && len + 7 < n; p++) {
@@ -256,15 +272,17 @@ static void append(const char *text, const char *color) {
 #ifndef __EMSCRIPTEN__
     printf("[console] %s\n", text ? text : ""); // headless runs and logs see the console too
 #endif
-    if (!g_con.built) {
-        if (g_con.pending_count == CON_PENDING_MAX) {
-            free(g_con.pending[0]);
-            memmove(g_con.pending, g_con.pending + 1, sizeof(g_con.pending[0]) * (CON_PENDING_MAX - 1));
-            g_con.pending_count--;
+    char *kept = strdup(html);
+    if (kept) {
+        if (g_con.line_count == CON_LOG_MAX) { // the oldest goes
+            free(g_con.lines[g_con.line_head]);
+            g_con.lines[g_con.line_head] = kept;
+            g_con.line_head = (g_con.line_head + 1) % CON_LOG_MAX;
+        } else {
+            g_con.lines[(g_con.line_head + g_con.line_count++) % CON_LOG_MAX] = kept;
         }
-        g_con.pending[g_con.pending_count++] = strdup(html);
-        return;
     }
+    if (!con_live()) return;
     html_dom_insert_html(g_con.logs, HTML_INSERT_BEFORE_END, html);
     if (++g_con.log_lines > CON_LOG_MAX) {
         const HtmlElem first = html_dom_first_child(g_con.logs);
@@ -292,13 +310,29 @@ void ui_console_printf(const char *color, const char *fmt, ...) {
     append(text, color ? color : COL_LOG);
 }
 
-static void flush_pending(void) {
-    for (int i = 0; i < g_con.pending_count; i++) {
-        html_dom_insert_html(g_con.logs, HTML_INSERT_BEFORE_END, g_con.pending[i]);
-        g_con.log_lines++;
-        free(g_con.pending[i]);
+// The whole kept log into .logs (a fresh or another page's overlay)
+static void render_lines(void) {
+    size_t len = 1;
+    for (int i = 0; i < g_con.line_count; i++) len += strlen(g_con.lines[(g_con.line_head + i) % CON_LOG_MAX]);
+    char *all = malloc(len);
+    if (!all) return;
+    size_t at = 0;
+    for (int i = 0; i < g_con.line_count; i++) {
+        const char *line = g_con.lines[(g_con.line_head + i) % CON_LOG_MAX];
+        const size_t n = strlen(line);
+        memcpy(all + at, line, n);
+        at += n;
     }
-    g_con.pending_count = 0;
+    all[at] = 0;
+    html_dom_set_html(g_con.logs, all);
+    free(all);
+    g_con.log_lines = g_con.line_count;
+    html_dom_scroll_to_bottom(g_con.logs);
+}
+
+static void clear_lines(void) {
+    for (int i = 0; i < g_con.line_count; i++) free(g_con.lines[(g_con.line_head + i) % CON_LOG_MAX]);
+    g_con.line_head = g_con.line_count = 0;
 }
 
 // hookChat: `${name || "Server"}: ${text without tags}` for every "ch".
@@ -827,8 +861,9 @@ static void cmd_help(const int argc, char **argv, const char *rest) {
 
 static void cmd_clear(const int argc, char **argv, const char *rest) {
     (void) argc; (void) argv; (void) rest;
-    if (g_con.built) html_dom_set_html(g_con.logs, "");
+    if (con_live()) html_dom_set_html(g_con.logs, "");
     g_con.log_lines = 0;
+    clear_lines();
 }
 
 static void cmd_echo(const int argc, char **argv, const char *rest) {
@@ -1533,13 +1568,13 @@ int ui_console_chat_command(Client *client, const char *text) {
 // ---------------------------------------------------------------- hints / completion
 
 static void set_input(const char *value) {
-    if (!g_con.built) return;
+    if (!con_live()) return;
     html_dom_set_value(g_con.input, value);
     snprintf(g_con.last_value, sizeof(g_con.last_value), "%s", value);
 }
 
 static void clear_hints(void) {
-    if (!g_con.built) return;
+    if (!con_live()) return;
     html_dom_set_html(g_con.hints, "");
     html_dom_set_class(g_con.hints, "isOpen", 0);
     g_con.hint_count = 0;
@@ -1780,7 +1815,7 @@ static void quote_into(char *out, const size_t n, const char *base, const char *
 // updateHints: the command list for the first word (devConsole), else the command's
 // signature row followed by the argument candidates; while Tab cycles, its pick is active.
 static void update_hints(void) {
-    if (!g_con.built) return;
+    if (!con_live()) return;
     char v[CON_LINE_MAX] = "";
     html_dom_get_value(g_con.input, v, sizeof(v));
     snprintf(g_con.last_value, sizeof(g_con.last_value), "%s", v);
@@ -1836,7 +1871,7 @@ static void update_hints(void) {
 // first (Tab) or last (Shift+Tab). devConsole.ts only completed the command name, to the
 // longest common prefix.
 static void tab_complete(const int dir) {
-    if (!g_con.built) return;
+    if (!con_live()) return;
     char v[CON_LINE_MAX] = "";
     html_dom_get_value(g_con.input, v, sizeof(v));
     if (g_con.cycle_on && !strcmp(v, g_con.cycle_value) && g_con.cycle.count) {
@@ -1889,7 +1924,7 @@ static void hint_sel_paint(void) {
 
 // Returns 0 when there is nothing to select (the caller falls back to history).
 static int hint_sel_move(const int dir) {
-    if (!g_con.built || !html_dom_has_class(g_con.hints, "isOpen")) return 0;
+    if (!con_live() || !html_dom_has_class(g_con.hints, "isOpen")) return 0;
     if (g_con.history_idx != -1) { // still showing a recalled history line: keep walking history
         char v[CON_LINE_MAX] = "";
         html_dom_get_value(g_con.input, v, sizeof(v));
@@ -1910,7 +1945,7 @@ static int hint_sel_move(const int dir) {
 
 // Tab / Enter on a selected row: the row's line goes in the input (like a click on it).
 static int hint_sel_accept(void) {
-    if (!g_con.built || !hint_sel_valid()) return 0;
+    if (!con_live() || !hint_sel_valid()) return 0;
     char line[CON_LINE_MAX];
     snprintf(line, sizeof(line), "%s", g_con.hint_lines[g_con.hint_sel]);
     g_con.hint_sel = -1;
@@ -1946,7 +1981,7 @@ static void history_down(void) {
 
 // inputRow "submit"
 static void submit(void) {
-    if (!g_con.built) return;
+    if (!con_live()) return;
     char line[CON_LINE_MAX] = "";
     html_dom_get_value(g_con.input, line, sizeof(line));
     set_input("");
@@ -1972,31 +2007,55 @@ int ui_console_is_open(void) {
     return g_con.visible;
 }
 
+// The console's own field or log has the focus (a hidden one would keep taking the keys)
+static int con_has_focus(void) {
+    const HtmlElem active = con_live() ? html_dom_active_element() : 0;
+    return active && (active == g_con.input || active == g_con.logs);
+}
+
+// The game page (index.html) runs the menu and the game; the other pages (editor, hub, viewer:
+// app_mode.h) only show the console.
+static int con_game_page(void) {
+    return app_mode() == APP_MODE_GAME;
+}
+
 // update(goToGame)
 static void update(const int go_to_game) {
-    if (g_con.built) html_dom_set_display(g_con.overlay, g_con.visible ? "block" : "none");
+    if (con_live()) html_dom_set_display(g_con.overlay, g_con.visible ? "block" : "none");
     if (g_con.visible) {
         g_con.focus_pending = 1;                            // setTimeout(() => input.focus(), 0)
+        if (!con_game_page()) return;
         if (!html_ui_is_menu_open()) menu_request_open(1);  // document.exitPointerLock()
         ui_controls_reset_keys();
         const HtmlElem chat = html_dom_by_id("chatInput");
         if (chat) html_dom_blur(chat);
         ui_controls_chat_focus(0);
-    } else if (go_to_game) {
-        if (g_con.built) html_dom_blur(g_con.input);
-        if (html_ui_is_menu_open()) menu_play();            // CONTROLS.locklessChange(true) + requestPointerLock()
+    } else {
+        // KrunkNative: hidden always lets go of the focus (devConsole.ts blurs only on goToGame; a
+        // browser drops the focus of a display:none field by itself). The close button kept it
+        // natively: the hidden input went on taking the keys, the toggle key among them, so ` no
+        // longer opened the console again.
+        g_con.focus_pending = 0;
+        if (con_has_focus()) html_dom_blur(html_dom_active_element());
+        if (go_to_game && con_game_page() && html_ui_is_menu_open()) menu_play(); // CONTROLS.locklessChange(true) + requestPointerLock()
     }
 }
 
-void ui_console_toggle(const int go_to_game) {
-    g_con.visible = !g_con.visible;
+static void set_visible(const int visible, const int go_to_game) {
+    g_con.visible = !!visible;
+    g_con.restored = 1;
+    html_storage_set(CON_OPEN_KEY, g_con.visible ? "1" : NULL);
     if (g_con.visible) g_con.fit_vw = g_con.fit_vh = 0.0f; // shown: fitted again with its laid-out size
     update(go_to_game);
 }
 
+void ui_console_toggle(const int go_to_game) {
+    set_visible(!g_con.visible, go_to_game);
+}
+
 // ---------------------------------------------------------------- keys
 
-int ui_console_key_event(Client *client, const int key, const int scancode, const int action, const int mods) {
+static int key_event(Client *client, const int key, const int scancode, const int action, const int mods, const int game) {
     if (client) g_con.client = client;
     if (!html_ui_available()) return 0;
     const int press = action == GLFW_PRESS;
@@ -2024,8 +2083,8 @@ int ui_console_key_event(Client *client, const int key, const int scancode, cons
             return 1;
         }
     }
-    // mods.ts document keydown: toggle key, F8 cycle, bhop key
-    if (ui_mods_key_event(client, key, action, mods, typing)) return 1;
+    // mods.ts document keydown: toggle key, F8 cycle, bhop key (another page: the toggle key only)
+    if (game ? ui_mods_key_event(client, key, action, mods, typing) : ui_mods_toggle_key_event(key, action, typing)) return 1;
 
     if (g_con.visible) {
         if (press && (key == GLFW_KEY_ENTER || key == GLFW_KEY_KP_ENTER)) { // form submit
@@ -2036,7 +2095,7 @@ int ui_console_key_event(Client *client, const int key, const int scancode, cons
         return 1;                                 // overlay keydown/keyup stopPropagation
     }
     // Key bind dispatch: keyBinds[e.key] || keyBinds[e.code], not while typing
-    if (press && !typing && g_con.bind_count) {
+    if (game && press && !typing && g_con.bind_count) {
         const ConPair *bind = pair_find(g_con.binds, g_con.bind_count, ui_mods_key_value(key, mods));
         if (!bind) bind = pair_find(g_con.binds, g_con.bind_count, ui_mods_key_code(key));
         if (bind) {
@@ -2048,8 +2107,17 @@ int ui_console_key_event(Client *client, const int key, const int scancode, cons
     return 0;
 }
 
+int ui_console_key_event(Client *client, const int key, const int scancode, const int action, const int mods) {
+    return key_event(client, key, scancode, action, mods, 1);
+}
+
+int ui_console_app_page_key_event(Client *client, const int key, const int scancode, const int action, const int mods) {
+    if (!con_live()) return 0;
+    return key_event(client, key, scancode, action, mods, 0);
+}
+
 int ui_console_page_key(const HtmlEvent *ev) {
-    if (!g_con.built || !ev || !ev->target || ev->target != g_con.input || !g_con.visible) return 0;
+    if (!con_live() || !ev || !ev->target || ev->target != g_con.input || !g_con.visible) return 0;
     if (html_key_is_escape(ev->key)) {
         ui_console_toggle(1);
         return 1;
@@ -2140,7 +2208,7 @@ static void con_geom_write(const WinGeom *g, const WinGeom *was) {
 // Fits a placed box (data-pos-committed) into the viewport; the CSS-anchored default always
 // fits. Returns 1 when the box moved or shrank.
 static int con_fit(void) {
-    if (!g_con.built || !pos_committed()) return 0;
+    if (!con_live() || !pos_committed()) return 0;
     float vw, vh, dpr;
     html_dom_viewport(&vw, &vh, &dpr);
     if (vw <= 0.0f || vh <= 0.0f) return 0;
@@ -2168,7 +2236,7 @@ static void commit_initial_pos(void) {
 static void save_geom_now(void *user) {
     (void) user;
     g_con.save_timer = 0;
-    if (!g_con.built || !pos_committed()) return;
+    if (!con_live() || !pos_committed()) return;
     char json[160];
     snprintf(json, sizeof(json), "{\"left\":%d,\"top\":%d,\"width\":%d,\"height\":%d}", style_px(g_con.modal, "left"),
              style_px(g_con.modal, "top"), (int) lroundf(html_dom_offset_width(g_con.modal)),
@@ -2226,7 +2294,7 @@ static void reset_geom(void) {
     g_con.save_timer = 0;
     g_con.dragging = g_con.resizing = 0;
     html_storage_set(CON_GEOM_KEY, NULL);
-    if (!g_con.built) return;
+    if (!con_live()) return;
     static const char *const PROPS[] = {"left", "top", "width", "height", "transform"};
     for (size_t i = 0; i < sizeof(PROPS) / sizeof(PROPS[0]); i++) html_dom_set_style(g_con.modal, PROPS[i], "");
     html_dom_remove_attr(g_con.modal, "data-pos-committed");
@@ -2296,7 +2364,7 @@ int ui_console_mouse(const int action, double x, double y, const int css) {
     }
     // GLFW_PRESS
     if (ui_mods_pointer(1, fx, fy)) return 1;
-    if (!g_con.built || !g_con.visible) return 0;
+    if (!con_live() || !g_con.visible) return 0;
     if (hit(g_con.close_btn, fx, fy)) {
         g_con.pressed = g_con.close_btn;
         return 1;
@@ -2335,14 +2403,61 @@ static int l_pointer(void *user, const HtmlEvent *ev, const HtmlArg *args, const
     return ui_console_mouse(action, ev->x, ev->y, 1) ? 0 : 1;
 }
 
+// ---------------------------------------------------------------- tests
+
+void ui_console_probe(char *out, const size_t n) {
+    float vw = 0.0f, vh = 0.0f, dpr = 1.0f;
+    const int html = html_ui_available() && html_ui_is_ready();
+    if (html) html_dom_viewport(&vw, &vh, &dpr);
+    const HtmlElem overlay = html ? html_dom_by_id("devConsoleOverlay") : 0;
+    const HtmlElem modal = overlay ? html_dom_query(overlay, ".modal") : 0;
+    HtmlRect r = {0}, o = {0};
+    const int boxed = modal && html_dom_get_rect(modal, &r);
+    const int sheet = g_con.sheet && overlay && html_dom_get_rect(overlay, &o) && fabsf(o.x) < 0.5f && fabsf(o.y) < 0.5f &&
+                      fabsf(o.w - vw) < 0.5f && fabsf(o.h - vh) < 0.5f;
+    const int shown = modal && html_dom_is_shown(modal);
+    int top = 0;
+    if (boxed && shown) {
+        const float px[5] = {0.5f, 0.1f, 0.9f, 0.1f, 0.9f}, py[5] = {0.5f, 0.1f, 0.1f, 0.9f, 0.9f};
+        for (int i = 0; i < 5; i++) {
+            const HtmlElem at = html_dom_painted_at(r.x + r.w * px[i], r.y + r.h * py[i]); // pointer-events: none too
+            top += at && html_dom_closest(at, "#devConsoleOverlay") == overlay;
+        }
+    }
+    int last = 0;
+    if (overlay && html_dom_parent(overlay) == html_dom_body()) {
+        last = 1;
+        for (HtmlElem e = html_dom_next(overlay); e; e = html_dom_next(e)) {
+            char tag[16] = "";
+            html_dom_tag(e, tag, sizeof(tag));
+            if (strcmp(tag, "script") && strcmp(tag, "style") && strcmp(tag, "link")) last = 0; // rendered elements only
+        }
+    }
+    const int inside = boxed && r.x >= -0.5f && r.y >= -0.5f && r.x + r.w <= vw + 0.5f && r.y + r.h <= vh + 0.5f;
+    snprintf(out, n, "open=%d built=%d page=%s shown=%d sheet=%d last=%d top=%d inside=%d rect=%.1f,%.1f,%.1f,%.1f vp=%.0fx%.0f",
+             g_con.visible, g_con.built, html ? html_ui_current_page() : "-", shown, sheet, last, top, inside, r.x, r.y, r.w,
+             r.h, vw, vh);
+}
+
 // ---------------------------------------------------------------- per frame
 
+// The overlay of this document: devConsole.ts' DOM appended to <body>, or the one already there
+// (the game page's document is kept while the editor / hub page is shown, html_ui_load_page).
 static void build(void) {
     const HtmlElem body = html_dom_body();
     if (!body) return;
-    html_ui_add_stylesheet("css/devconsole.css");
-    html_dom_insert_html(body, HTML_INSERT_BEFORE_END, OVERLAY_HTML);
+    // the sheet per document: the game page keeps its sheets, a page switch starts without it
+    g_con.sheet = html_ui_add_stylesheet("css/devconsole.css");
+    if (!g_con.sheet) {
+        static unsigned warned;
+        if (warned != html_ui_page_serial()) fprintf(stderr, "[console] css/devconsole.css not added (%s): inline styles only\n", html_ui_current_page());
+        warned = html_ui_page_serial();
+    }
     g_con.overlay = html_dom_by_id("devConsoleOverlay");
+    if (!g_con.overlay) {
+        html_dom_insert_html(body, HTML_INSERT_BEFORE_END, OVERLAY_HTML);
+        g_con.overlay = html_dom_by_id("devConsoleOverlay");
+    }
     if (!g_con.overlay) return;
     g_con.modal = html_dom_query(g_con.overlay, ".modal");
     g_con.header = html_dom_query(g_con.overlay, ".titlebar");
@@ -2354,13 +2469,43 @@ static void build(void) {
     g_con.grip = html_dom_query(g_con.overlay, ".grip");
     if (!g_con.modal || !g_con.logs || !g_con.input) return;
     g_con.built = 1;
-    g_con.log_lines = 0;
-    flush_pending();
+    g_con.serial = html_ui_page_serial();
+    g_con.dragging = g_con.resizing = 0;
+    g_con.pressed = 0;
+    g_con.fit_vw = g_con.fit_vh = 0.0f;
+    render_lines();
     restore_geom();
+    html_dom_set_top_layer(g_con.overlay); // natively also above the GL drawn over the page
     html_ui_set_listener(NULL, "knpointerdown", l_pointer);
     html_ui_set_listener(NULL, "knpointermove", l_pointer);
     html_ui_set_listener(NULL, "knpointerup", l_pointer);
-    if (g_con.visible) html_dom_set_display(g_con.overlay, "block");
+    if (!g_con.restored) { // the open state of the last run (CON_OPEN_KEY)
+        char open[4] = "";
+        g_con.restored = 1;
+        if (html_storage_get(CON_OPEN_KEY, open, sizeof(open)) >= 0 && !strcmp(open, "1") && ui_mods_dev_console_enabled()) {
+            g_con.visible = 1;
+        }
+    }
+    update(0);
+}
+
+// KrunkNative: the console stays above the whole page. devconsole.css gives it z-index 999999,
+// which v10's page beats (the view stack 2147483646, #popupHolder, #windowHolder.popupWin, the
+// loader, a custom.css): the overlay has the highest z-index and is kept <body>'s last element,
+// so for the same z-index it paints last too, whatever the page appends later (v10's login view
+// stack, notifications, KrunkScript DIVs ...).
+static void keep_on_top(void) {
+    const HtmlElem body = html_dom_body();
+    for (HtmlElem e = html_dom_next(g_con.overlay); e; e = html_dom_next(e)) {
+        char tag[16] = "";
+        html_dom_tag(e, tag, sizeof(tag));
+        if (!strcmp(tag, "script") || !strcmp(tag, "style") || !strcmp(tag, "link")) continue;
+        const int focused = con_has_focus();
+        html_dom_append(body, g_con.overlay); // moved, not copied: the same elements and state
+        if (focused && g_con.visible) html_dom_focus(g_con.input);
+        return;
+    }
+    if (body && html_dom_parent(g_con.overlay) != body) html_dom_append(body, g_con.overlay);
 }
 
 // The input's `input` listener: a typed toggle character ("`", "~" or the bind's) is
@@ -2374,10 +2519,16 @@ static void poll_input(void) {
     if (!strcmp(bind, "Minus")) toggles[2] = '-';
     else if (!strcmp(bind, "Equal")) toggles[2] = '=';
     else if (!strncmp(bind, "Key", 3) && bind[3] && !bind[4]) toggles[2] = (char) tolower((unsigned char) bind[3]);
-    char *found = NULL;
-    for (char *p = value; *p && !found; p++) if (strchr(toggles, *p)) found = p;
-    if (found && strlen(value) > strlen(g_con.last_value)) {
-        memmove(found, found + 1, strlen(found));
+    // the inserted text (InputEvent.data): what differs between the old and the new value. Only a
+    // single typed toggle character closes the console (devConsole.ts tests e.data); anything
+    // else with one in it (a paste, a recalled line) stays text (it used to close the console).
+    const size_t len = strlen(value), was = strlen(g_con.last_value);
+    size_t pre = 0;
+    while (pre < was && pre < len && value[pre] == g_con.last_value[pre]) pre++;
+    size_t post = 0;
+    while (post < was - pre && post < len - pre && value[len - 1 - post] == g_con.last_value[was - 1 - post]) post++;
+    if (len == was + 1 && pre + post == was && strchr(toggles, value[pre])) {
+        memmove(value + pre, value + pre + 1, len - pre);
         set_input(value);
         ui_console_toggle(1);
         return;
@@ -2400,16 +2551,17 @@ void ui_console_tick(Client *client) {
             appendf(level == NET_NOTE_ERROR ? COL_ERROR : level == NET_NOTE_WARN ? COL_WARN : COL_INFO, "[net] %s", note);
         }
     }
-    if (!html_ui_available() || !html_ui_is_ready() || strcmp(html_ui_current_page(), "index.html")) {
-        g_con.built = 0;
-        return;
-    }
-    if (!g_con.built || !html_dom_by_id("devConsoleOverlay")) {
-        g_con.built = 0;
+    // every page (the game page, and the editor / hub / viewer pages: app_mode_frame), in every state
+    if (!html_ui_available() || !html_ui_is_ready()) return; // a document is loading: kept as it is
+    if (!g_con.built || g_con.serial != html_ui_page_serial() || html_dom_by_id("devConsoleOverlay") != g_con.overlay ||
+        html_dom_query(g_con.overlay, ".row input") != g_con.input) {
+        g_con.built = 0; // another document, or the page replaced the overlay
         build();
         if (!g_con.built) return;
     }
-    ui_mods_tick(client);
+    keep_on_top();
+    if (con_game_page()) ui_mods_tick(client);
+    if (!g_con.visible && con_has_focus()) html_dom_blur(html_dom_active_element()); // a page focused the hidden field
     { // KrunkNative: the window changed size (a resize, F11, another monitor) or the console was shown
         float vw, vh, dpr;
         html_dom_viewport(&vw, &vh, &dpr);

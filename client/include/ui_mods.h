@@ -22,6 +22,9 @@ const char *ui_mods_format_key_bind(const char *code); // formatKeyBind: "`", "F
 // mods.ts document keydown (+ the bind rows' capture). Called from ui_console_key_event
 // with `typing` = focus is in another text field. 1 = consumed.
 int  ui_mods_key_event(Client*, int key, int action, int mods, int typing);
+// The toggle key alone (devConsoleKey): the other pages (editor, hub, viewer) have the console but
+// none of the game's mod keys. 1 = consumed.
+int  ui_mods_toggle_key_event(int key, int action, int typing);
 int  ui_mods_capturing(void);                // a mod bind row waits for "Press any Key"
 // Left button on the injected rows (data-kn-pointer): CSS px; 1 = consumed.
 int  ui_mods_pointer(int down, float x, float y);

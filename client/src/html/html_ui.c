@@ -50,7 +50,15 @@ void html_ui_update(void) {
 }
 
 void html_ui_render(UI *ui) {
-    if (g_initialized) html_ui_backend_render(ui);
+    if (g_initialized) html_ui_backend_render(ui, HTML_LAYER_PAGE | HTML_LAYER_TOP);
+}
+
+void html_ui_render_page(UI *ui) {
+    if (g_initialized) html_ui_backend_render(ui, HTML_LAYER_PAGE);
+}
+
+void html_ui_render_top(UI *ui) {
+    if (g_initialized) html_ui_backend_render(ui, HTML_LAYER_TOP);
 }
 
 void html_ui_set_menu_open(const int open) {

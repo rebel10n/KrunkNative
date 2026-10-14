@@ -12,6 +12,7 @@
 #include <html_dom.h>
 #include <ui_logic.h> // menu_close_window (Test Map) // html_storage_get/set (knTestMap)
 #include <viewer_embed.h> // the hub's item view showcase
+#include <console.h>      // the developer console on every page
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -441,6 +442,7 @@ static void page_resize_cb(GLFWwindow *window, const int width, const int height
 
 static void page_cursor_cb(GLFWwindow *window, double x, double y) {
     cursor_scale(window, &x, &y);
+    if (ui_console_mouse(-1, x, y, 0)) return; // dev console titlebar drag / grip resize
     const AppPage *page = input_page();
     if (page && page->cursor && page->cursor(g_app.client, x, y)) return;
     html_ui_mouse_move(x, y);
@@ -450,6 +452,7 @@ static void page_mouse_cb(GLFWwindow *window, const int button, const int action
     double x, y;
     glfwGetCursorPos(window, &x, &y);
     cursor_scale(window, &x, &y);
+    if (button == GLFW_MOUSE_BUTTON_LEFT && ui_console_mouse(action, x, y, 0)) return; // the dev console's modal
     const AppPage *page = input_page();
     if (page && page->mouse_button && page->mouse_button(g_app.client, button, action, mods, x, y)) return;
     html_ui_mouse_move(x, y);
@@ -471,6 +474,7 @@ static void page_key_cb(GLFWwindow *window, const int key, const int scancode, c
         return;
     }
 #endif
+    if (ui_console_app_page_key_event(g_app.client, key, scancode, action, mods)) return; // the dev console first, as in the game
     const AppPage *page = input_page();
     if (page && page->key && page->key(g_app.client, key, scancode, action, mods)) return;
     html_ui_key(key, scancode, action, mods);
@@ -479,7 +483,8 @@ static void page_key_cb(GLFWwindow *window, const int key, const int scancode, c
 static void page_char_cb(GLFWwindow *window, const unsigned int codepoint) {
     (void) window;
     const AppPage *page = input_page();
-    if (page && page->chr && page->chr(g_app.client, codepoint)) return;
+    // the open console has the keyboard (its key callback took the keys): its input line types
+    if (!ui_console_is_open() && page && page->chr && page->chr(g_app.client, codepoint)) return;
     html_ui_char(codepoint);
 }
 
@@ -585,11 +590,14 @@ int app_mode_frame(Client *client, const float now, const float delta) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     input_script_page_tick(client); // KRUNKNATIVE_INPUT_SCRIPT on a page (keys / mouse / shot)
     if (g_app.entered && g_app.page && g_app.page->tick) g_app.page->tick(client, now, delta);
+    if (g_app.entered) ui_console_tick(client); // the developer console on every page (ui_console.c)
     if (!debug_capture_hide_ui()) {
-        html_ui_render(client->ui);
+        html_ui_render_page(client->ui);
         viewer_embed_frame(client, delta); // the hub's item view showcase iframe (no-op on the viewer page)
+        html_ui_render_top(client->ui);    // the developer console over it (ui_console.c)
     }
     input_script_page_frame_end(client, delta);
+    input_script_frame_presented(client); // `frames` on a page too
     debug_capture_frame_end(client);
     return 1;
 }

@@ -499,6 +499,36 @@ Quick GUI (which QuickSettings let a drag take anywhere) keeps at least its 120 
 strip in the window, and the editor's side panels never grow past what the page leaves beside the
 other panel.
 
+### Never hidden while it is on (Krunker Box Office)
+
+devConsole.ts appends the overlay to `<body>` with `z-index: 999999` and only on the game page;
+the console is shut with `display:none` and starts closed on every load. In the native client it
+"randomly disappeared" because:
+
+- the v10 page has layers above 999999 (the view stack 2147483646, `#popupHolder`, popup windows,
+  the loader, tooltips) and appends some of them to `<body>` after the console (the login view
+  stack), and a `custom.css` can raise anything: the overlay now has the highest z-index (in
+  devconsole.css and inline, so it holds without the sheet) and `ui_console.c` keeps it
+  `<body>`'s last element, so it also wins every tie;
+- natively the client draws GL over the page after compositing it (the item view's 3D showcase,
+  the confetti): the overlay is the page's top layer (`html_dom_set_top_layer`), which
+  `html_ui_render_top()` draws after that GL (`html_ui_render_page()` draws the rest);
+- the editor, hub and viewer pages had no console, and coming back to the game page built a
+  second overlay on the kept document: the console is built (or found again) in every document,
+  with its whole log (the last 1000 lines are kept in C), and keys and mouse reach it there too
+  (the toggle key only: no game or mod keys on those pages);
+- the close button hid it but left its input focused, so the toggle key typed a ` into the
+  hidden field instead of opening it: hiding always lets go of the focus;
+- a pasted or recalled line holding a toggle character closed it: only a single typed toggle
+  character does (`InputEvent.data`, as devConsole.ts);
+- its open state did not survive a reload: it is kept as `kn_dev_console_open` (F5, the F4 / F5
+  restart, page switches, the web build's reload and the next start).
+
+There is no indicator while it is closed: neither devConsole.ts (v7.1.4) nor Krunker v10 shows
+one (v10.0.2 has no developer console at all), so the toggle key (Settings > Controls >
+Developer Tools, default `) is the way back, and it now always works. The checks are
+`client/tests/console_visible_e2e.py` (input script probe `console @label`).
+
 ## F5: full reload
 
 F5 (the Reload Game bind, `cont_gameReloadKey`, Settings > Controls > General; the console's

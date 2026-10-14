@@ -112,6 +112,11 @@ void     html_dom_viewport(float *w, float *h, float *dpr);          // innerWid
 typedef void (*HtmlResizeFn)(HtmlElem, void *user);
 void     html_dom_observe_resize(HtmlElem, HtmlResizeFn fn, void *user); // ResizeObserver-equivalent (coalesced per frame)
 HtmlElem html_dom_element_at(float x, float y);                     // document.elementFromPoint (CSS px; pointer-events aware); 0 = none
+HtmlElem html_dom_painted_at(float x, float y);                     // the element painted topmost there, pointer-events: none too (tests; web: element_at)
+// The page's top layer (the developer console): natively drawn after the GL the client puts over
+// the page (html_ui_render_page / _top); it should also be <body>'s last child with the highest
+// z-index, so it is above the rest of the page too. 0 = none. No-op on the web.
+void     html_dom_set_top_layer(HtmlElem);
 HtmlElem html_dom_active_element(void);                             // document.activeElement; 0 = none / body
 
 // ---- events: page -> C

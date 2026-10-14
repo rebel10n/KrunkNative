@@ -30,8 +30,9 @@ void html_ui_backend_resize(const int width, const int height) {
 void html_ui_backend_update(void) {
 }
 
-void html_ui_backend_render(UI *ui) {
+void html_ui_backend_render(UI *ui, const int layers) {
     (void) ui;
+    (void) layers;
 }
 
 void html_ui_backend_mouse_move(const double x, const double y) {
@@ -182,6 +183,14 @@ HtmlElem html_dom_element_at(const float x, const float y) {
     (void) y;
     return 0;
 }
+
+HtmlElem html_dom_painted_at(const float x, const float y) {
+    (void) x;
+    (void) y;
+    return 0;
+}
+
+void html_dom_set_top_layer(const HtmlElem e) { (void) e; }
 
 HtmlElem html_dom_active_element(void) { return 0; }
 

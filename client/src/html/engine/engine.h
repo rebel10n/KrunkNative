@@ -76,6 +76,7 @@ int engine_canvas_put(Engine *g, HtmlElem e, const unsigned char *rgba, int w, i
 void engine_canvas_gl(Engine *g, HtmlElem e, unsigned tex, int w, int h);
 /* Only the paint output changed (widget value, scroll offset). */
 void engine_mark_paint(Engine *g, HtmlElem e); /* e = 0: everything */
+void engine_set_top_layer(Engine *g, HtmlElem e); /* html_dom_set_top_layer */
 
 /* Clock used for animations, timers and the caret blink (ms).  ui_test pins
  * it for deterministic renders; ms < 0 returns to glfwGetTime(). */

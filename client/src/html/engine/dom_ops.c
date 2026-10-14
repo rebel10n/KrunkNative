@@ -684,6 +684,24 @@ HtmlElem html_dom_element_at(const float x, const float y)
     return box ? dom_node_elem(dom, box->node) : 0;
 }
 
+HtmlElem html_dom_painted_at(const float x, const float y)
+{
+    Engine *g = engine_get();
+    Dom *dom = engine_dom(g);
+    if (!dom) return 0;
+    LayoutTree *tree = engine_flush_layout(g);
+    Box *box = tree ? layout_hit_test(tree, x, y, 0) : NULL;
+    while (box && !box->node) box = box->parent;
+    return box ? dom_node_elem(dom, box->node) : 0;
+}
+
+void html_dom_set_top_layer(const HtmlElem e)
+{
+    Engine *g = engine_get();
+    if (!g) return;
+    engine_set_top_layer(g, e && alive(engine_dom(g), e) ? e : 0);
+}
+
 HtmlElem html_dom_active_element(void)
 {
     Engine *g = engine_get();

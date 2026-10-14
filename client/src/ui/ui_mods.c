@@ -5,6 +5,7 @@
 // natively from main.c, on the web through kn-shim's data-kn-pointer glue).
 #include <ui_mods.h>
 #include <console.h>
+#include <app_mode.h> // the toggle key on the other pages
 #include <ui_logic.h>
 #include <html_ui.h>
 #include <stdio.h>
@@ -376,8 +377,10 @@ static int capture_key(const int key) {
 
 static void toggle_developer_console(void) {
     if (!g_mods.dev_enabled) return;
-    if (ui_console_is_open()) menu_play();   // instructionHolder?.click?.()
-    else menu_request_open(1);               // document.exitPointerLock?.()
+    if (app_mode() == APP_MODE_GAME) {           // the editor / hub / viewer pages have no menu or game
+        if (ui_console_is_open()) menu_play();   // instructionHolder?.click?.()
+        else menu_request_open(1);               // document.exitPointerLock?.()
+    }
     ui_console_toggle(1);
 }
 
@@ -396,6 +399,15 @@ static int parkour_reset_key(const Client *client, const int key) {
     return 0;
 }
 
+int ui_mods_toggle_key_event(const int key, const int action, const int typing) {
+    mods_load();
+    if (action != GLFW_PRESS || g_mods.capturing) return 0;
+    if (!g_mods.dev_enabled || !ui_mods_code_matches(g_mods.dev_key, key)) return 0;
+    if (typing && !ui_console_is_open()) return 0; // another field keeps the character
+    toggle_developer_console();
+    return 1;
+}
+
 int ui_mods_key_event(Client *client, const int key, const int action, const int mods, const int typing) {
     (void) mods;
     mods_load();
@@ -403,11 +415,7 @@ int ui_mods_key_event(Client *client, const int key, const int action, const int
     if (g_mods.capturing) return capture_key(key);
     const int visible = ui_console_is_open();
 
-    if (g_mods.dev_enabled && ui_mods_code_matches(g_mods.dev_key, key)) {
-        if (typing && !visible) return 0; // another field keeps the character
-        toggle_developer_console();
-        return 1;
-    }
+    if (ui_mods_toggle_key_event(key, action, typing)) return 1;
     if (!typing && !visible && ui_mods_code_matches(g_mods.cycle_key, key)) {
         if (client) client_send_cycle_packet(client); // window.io.send("cycle")
         return 1;

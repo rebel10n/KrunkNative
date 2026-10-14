@@ -117,6 +117,8 @@ struct Engine {
     PaintCtx paint;
     DisplayList dl;                          /* last built list, resubmitted every frame */
     DisplayList overlay;                     /* select popup / colour picker */
+    DisplayList top_dl;                      /* the top layer's context (html_dom_set_top_layer) */
+    HtmlElem top_layer;                      /* html_dom_set_top_layer; 0 = none */
     KnArena overlay_arena;
 
     int fb_w, fb_h;                          /* framebuffer px */
@@ -1846,6 +1848,7 @@ static void engine_destroy(Engine *g)
     paint_ctx_free(&g->paint);
     dl_free(&g->dl);
     dl_free(&g->overlay);
+    dl_free(&g->top_dl);
     kn_arena_free(&g->overlay_arena);
     if (g->widgets) widgets_destroy(g->widgets);
     sel_free(&g->sel);
@@ -2221,11 +2224,29 @@ void html_ui_backend_update(void)
     if (g->observe_pending) run_after_layout(g);
 }
 
-void html_ui_backend_render(UI *ui)
+void engine_set_top_layer(Engine *g, HtmlElem e)
+{
+    if (!g || g->top_layer == e) return;
+    g->top_layer = e;
+    engine_mark_paint(g, 0);
+}
+
+void html_ui_backend_render(UI *ui, const int layers)
 {
     (void) ui;
     Engine *g = g_engine;
     if (!g || !g->glb) return;
+    if (!(layers & HTML_LAYER_PAGE)) { /* the top layer of the list the page pass built this frame */
+        if (!g->top_dl.n && !g->overlay.n) return;
+        const GLboolean depth_on = glIsEnabled(GL_DEPTH_TEST);
+        glb_begin(g->glb, g->fb_w, g->fb_h, g->paint.device_scale);
+        if (g->top_dl.n) glb_submit(g->glb, &g->top_dl);
+        if (g->overlay.n) glb_submit(g->glb, &g->overlay);
+        glb_end(g->glb);
+        if (depth_on) glEnable(GL_DEPTH_TEST);
+        glViewport(0, 0, g->fb_w, g->fb_h);
+        return;
+    }
 
     /* game content fetched in the background (asset_fetch.h): page images it brought pop in */
     if (image_cache_retry_missing(g->images) > 0) {
@@ -2248,6 +2269,8 @@ void html_ui_backend_render(UI *ui)
         const double t0 = wall_ms();
         sel_before_paint(g);
         g->paint.body = engine_elem_box(g, dom_body(g->dom)); /* boxes are recycled on rebuilds */
+        g->paint.top_layer = g->top_layer ? engine_elem_box(g, g->top_layer) : NULL;
+        g->paint.top_out = &g->top_dl;
         /* the overlay's glyphs can rebuild a full atlas under g->dl (see paint_build):
          * then paint both again against the new atlas */
         for (int pass = 0; pass < 2; pass++) {
@@ -2281,7 +2304,10 @@ void html_ui_backend_render(UI *ui)
     g->decodes = g->decodes_deferred = 0;
     glb_begin(g->glb, g->fb_w, g->fb_h, g->paint.device_scale);
     if (g->dl.n) glb_submit(g->glb, &g->dl);
-    if (g->overlay.n) glb_submit(g->glb, &g->overlay);
+    if (layers & HTML_LAYER_TOP) { /* else html_ui_render_top() draws them after the client's GL */
+        if (g->top_dl.n) glb_submit(g->glb, &g->top_dl);
+        if (g->overlay.n) glb_submit(g->glb, &g->overlay);
+    }
     glb_end(g->glb);
     image_cache_frame(g->images);
     if (g->profile && g->decodes) prof_add(&g->st_decode, g->decode_ms);

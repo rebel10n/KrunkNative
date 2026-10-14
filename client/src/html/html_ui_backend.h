@@ -10,7 +10,7 @@ int  html_ui_backend_init(const char *ui_dir, int width, int height);
 void html_ui_backend_fini(void);
 void html_ui_backend_resize(int width, int height);
 void html_ui_backend_update(void);
-void html_ui_backend_render(UI *ui);
+void html_ui_backend_render(UI *ui, int layers); // HTML_LAYER_PAGE | HTML_LAYER_TOP (html_ui.h)
 void html_ui_backend_mouse_move(double x, double y);
 void html_ui_backend_mouse_button(int glfw_button, int glfw_action, int mods);
 void html_ui_backend_scroll(double dx, double dy);

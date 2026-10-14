@@ -8,7 +8,8 @@ Console (headless client_bin --sandbox in the menu, input scripts, private XDG_C
   1. off-screen save: krk_dev_console_geom {left 5000, top 5000, 3000 x 2000} -> the console opens
      inside the 1280x720 window, shrunk to it; a typed `echo` runs; a grip resize past the edges
      stops at them; a titlebar drag past the bottom-right corner keeps all of it inside; the save
-     after the drag is that box. Restarted on that save: the same box (no 14 px growth);
+     after the drag is that box. Restarted on that save: open again (kept open across runs), the same
+     box (no 14 px growth);
      `console_reset`: the default place and size, the save deleted
   2. resize: a box saved at 400,300 in 1280x720; the window resized to 800x450 while the console
      is hidden, then to 640x300 while it is shown: inside each time, the save untouched
@@ -172,9 +173,10 @@ def console_offscreen():
     check("the drag saves the box it ended at (outer size)", geom and drag and
           near((geom["left"], geom["top"], geom["width"], geom["height"]), drag), f"saved {geom}, box {drag}")
 
-    # restarted on that save: the same box; console_reset: the default
+    # restarted on that save: the console comes back open (kn_dev_console_open: it was open at the
+    # end of the last run, no ` needed) in the same box; console_reset: the default
     lines = run_client("geom-again", ["--sandbox"],
-                       f"0 menu\n200 down GRAVE\n250 up GRAVE\n1000 rects @again {CONSOLE}\n"
+                       f"0 menu\n1000 rects @again {CONSOLE}\n"
                        f"1100 con console_reset\n1500 rects @reset {CONSOLE}\n2000 quit\n", cfg="geom")
     again = box(lines, "again")
     check("restored from the save: the same box (no growth by the padding)", near(again, drag), f"box {again}, saved {drag}")

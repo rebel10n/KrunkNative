@@ -45,7 +45,10 @@ same C UI logic against the browser's DOM, with a thin JS shim as the only glue.
 3. Per frame: `html_ui_update()` (page events -> handlers, resize observers, timers),
    `client_menu_tick()` (UI logic: connection state, menu/HUD DOM writes), the 3D scene,
    the class preview, then `html_ui_render()` (native: composite the page last,
-   premultiplied; leaves depth test off and blending on).
+   premultiplied; leaves depth test off and blending on). GL the client draws over the page
+   (the item view's showcase, the confetti) goes between `html_ui_render_page()` and
+   `html_ui_render_top()`: the top layer (`html_dom_set_top_layer`, the developer console) and
+   the select popups stay above it.
 4. Input: while `html_ui_is_menu_open()` the client releases the pointer and forwards
    mouse/keyboard to the page in framebuffer pixels; in game the page receives no input
    and only shows the HUD. ESC opens the menu natively; with the menu open the page's
@@ -100,7 +103,8 @@ elements stay valid. All geometry is in CSS px from the viewport's top-left.
 - **Geometry** (valid after layout; 0 while `display:none`): `get_rect`
   (getBoundingClientRect), `offset_width/height`, `viewport(w, h, dpr)`,
   `observe_resize(el, fn, user)` (ResizeObserver equivalent, coalesced per frame),
-  `element_at(x, y)` (elementFromPoint, pointer-events aware) and `active_element()`
+  `element_at(x, y)` (elementFromPoint, pointer-events aware), `painted_at(x, y)` (the topmost
+  painted element, pointer-events: none too; tests) and `active_element()`
   (document.activeElement; 0 for none/body), which the map editor uses to tell clicks on
   its 3D view from clicks on the page and to know when the user is typing.
 
