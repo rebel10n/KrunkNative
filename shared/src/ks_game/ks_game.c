@@ -569,6 +569,10 @@ int ks_game_rate(Game *game, const char *key, const int limit, const int per_10s
 
 int ks_player_allows(const Player *player, const int what)
 {
+    // Krunker "frz" (setFrozen, game.deob.js:220495) clears exactly these four flags; no script needed
+    if (player && player->frozen &&
+        (what & (KS_PLAYER_DEFAULT_MOVEMENT | KS_PLAYER_DEFAULT_VELOCITY | KS_PLAYER_CAN_SHOOT | KS_PLAYER_CAN_MELEE)))
+        return 0;
     if (!player || !player->game || !player->game->ks) return 1;
     const KsRef *ref = ks_ref_find(player->game->ks, KS_REF_PLAYER, player->uid);
     return !ref || (ref->allow & what) == what;

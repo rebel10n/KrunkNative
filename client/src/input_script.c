@@ -90,6 +90,10 @@
 //                                cursor mode (cursor=normal: the mouse shows, disabled: locked to the game)
 //                                and the camera's look (yaw pitch, radians: the pointer-lock tests check that
 //                                mouse motion only turns it while the pointer is locked)
+//   100 sync                     log our player's server-set movement state (official lobbies, krunker_link.c):
+//                                game.move_lock, lockPlayer, frozen, speed boost, noclip, team, health, the mode's
+//                                active objective, position and yaw; then a "sync+" line: unlimited ammo,
+//                                juggernaut, kranked timer, sharingIsCaring, canThrow and the loadout
 //   100 con end                  a developer console command (the rest of the line: con bot_add 5)
 //   100 vis @dead endUI chatHolder  log what the player sees of these page elements (html_dom_is_shown):
 //                                "[input_script] vis t=100 @dead endUI=1 chatHolder=0" (- = no such id,
@@ -644,6 +648,22 @@ static void script_run(Client *client, const ScriptEvent *e) {
                 me ? me->grapple.range : 0.0f,
                 cursor_mode == GLFW_CURSOR_NORMAL ? "normal" : cursor_mode == GLFW_CURSOR_DISABLED ? "disabled" : "hidden",
                 client->camera.rotation.y, client->camera.rotation.x); // the camera's look (mouse-look checks)
+    } else if (!strcmp(e->cmd, "sync")) {
+        // sync: our player's server-set movement state (official-lobby packets: lm/ulm, lock, frz, spb,
+        // noc, tm, wep; client/src/net/krunker_link.c) on one line for scripted checks
+        const Player *me = client->me;
+        fprintf(stderr, "[input_script] sync t=%.0f move_lock=%d locked=%d frozen=%d boost=%.2f noclip=%d team=%d hp=%.0f/%d objective=%d "
+                "pos=%.3f,%.3f,%.3f yaw=%.4f\n", g_script.time, client->game.move_lock, me ? me->mode.locked : -1, me ? me->frozen : -1,
+                me ? me->speed_boost : 0.0f, me ? me->noclip : -1, me ? me->team : -1, me ? me->health : 0.0f, me ? me->max_health : 0,
+                client->game.mode ? client->game.mode->active_objective : -2, me ? me->position.x : 0.0f, me ? me->position.y : 0.0f,
+                me ? me->position.z : 0.0f, me ? me->direction.y : 0.0f);
+        // the rest of the line: unl / jg / sic / chrg / rfl and the loadout ("rg")
+        char loadout[96] = "-";
+        for (int i = 0, n = 0; me && i < me->loadout_size && n < (int) sizeof(loadout) - 12; i++)
+            n += snprintf(loadout + n, sizeof(loadout) - (size_t) n, "%s%d", i ? "/" : "", me->loadout[i]);
+        fprintf(stderr, "[input_script] sync+ t=%.0f unl=%d jug=%d kranked=%.1f share=%d throw=%d loadout=%s\n", g_script.time,
+                me ? me->unlimited_ammo : -1, me ? me->is_juggernaut : -1, me ? me->mode.kranked_timer : 0.0f, me ? me->sharing_is_caring : -1,
+                me ? me->can_throw : -1, loadout);
     } else if (!strcmp(e->cmd, "cosm")) {
         // cosm @label: the store items the menu's class preview and our own (spawned) player wear:
         // "[input_script] cosm t=100 @game who=me hat=111 body=-1 ... primary=-1" ("-" = no such player)

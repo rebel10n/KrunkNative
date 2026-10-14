@@ -33,6 +33,8 @@ typedef enum {
     // 0x0200 player state, S -> C
     NET_EXT_PLAYER_POSE = 0x0200,  // "pz"  sid, pose | 0
     NET_EXT_PLAYER_LOCKS = 0x0201, // "plk" disableShooting, disableMelee
+    NET_EXT_PLAYER_SPEED_BOOST = 0x0202, // "spb" speedBoost, silent (NetSpeedBoostPacket; official lobbies, krunker_link.c)
+    NET_EXT_PLAYER_NAME = 0x0203,        // "00" a player's new name (NetPlayerNamePacket; official lobbies, krunker_link.c)
 
     // 0x0300 store / live service, S -> C
     NET_EXT_SKIN_DEFINITION_CHANGED = 0x0300, // "sdc" {skinId, skin}
@@ -118,6 +120,23 @@ typedef struct {
     int32_t uid;          // the laced player (Player.uid / NetInitPacket client id)
     uint32_t duration_ms; // the spell from now (DRANK: WeaponStream.laced_ms, 8000)
 } NetLacedPacket;
+#pragma pack(pop)
+
+// NET_EXT_PLAYER_SPEED_BOOST (S -> C, to the player): Krunker "spb" [speedBoost, silent]
+// (game.deob.js:220498): Player.speed_boost (the movement acceleration x it, 0 = none); unless
+// silent the chat shows "SpeedBoost - <value>".
+// NET_EXT_PLAYER_NAME (S -> C): one rename of Krunker "00" UPDATE_NAMES [[id, name, alias]..., keepOpen]
+// (game.deob.js:220322), the player's display name from now on.
+#pragma pack(push, 1)
+typedef struct {
+    float boost;    // speedBoost (the server clamps it to 0.1..10; 0 = none)
+    uint8_t silent; // arg 1: no chat line
+} NetSpeedBoostPacket;
+
+typedef struct {
+    int32_t uid;   // the player's sid
+    char name[32]; // PLAYER_NAME_SIZE, NUL-terminated
+} NetPlayerNamePacket;
 #pragma pack(pop)
 
 // Bodies fit one NetPacket (NET_MAX_PAYLOAD 512) after the subtype.

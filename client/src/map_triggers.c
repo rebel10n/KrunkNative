@@ -131,10 +131,20 @@ static void jump_scare(const NetJumpScarePacket *packet) {
     g_scare_until = glfwGetTime() + JUMP_SCARE_TIME;
 }
 
+// changePosition with a direction turns the camera of our own player too (game.deob.js:173813:
+// isYou -> controls.object.rotation.y = xDire), so the next input frame carries the new yaw. Ours
+// takes the look from me->direction (main.c's resync), which the next "l" overwrites when it
+// replays the pending inputs with their old yaw: those take the new yaw as well.
+static void turn_pending_inputs(Client *client, const Player *player) {
+    if (player != client->me) return;
+    for (size_t i = 0; i < client->net_pending_count; i++) client->net_pending_inputs[i].y_dir = player->direction.y;
+}
+
 static void change_position(Client *client, const NetPositionPacket *packet) {
     if (client->game.is_local || !client->me) return; // the offline game moved the player itself
     game_change_position(&client->game, client->me, (vec3) {packet->x, packet->y, packet->z}, 0, packet->stop_momentum,
                          packet->has_direction, packet->direction);
+    if (packet->has_direction) turn_pending_inputs(client, client->me);
 }
 
 // ---------------------------------------------------------------- WP-C v7 packets
@@ -200,6 +210,7 @@ static void change_position_of(Client *client, const NetChangePositionPacket *pa
     if (!player || client->game.is_local) return;
     game_change_position(&client->game, player, (vec3) {packet->x, packet->y, packet->z}, 0, packet->stop_momentum, packet->has_direction,
                          packet->direction);
+    if (packet->has_direction) turn_pending_inputs(client, player);
     if (player != client->me) {
         player->force_pos = 1; // a remote player snaps instead of interpolating
         player->interp_pos_start = player->interp_pos_end = player->position;

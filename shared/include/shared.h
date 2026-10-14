@@ -1151,6 +1151,10 @@ typedef struct Player_t {
     unsigned char god_mode:1;
     unsigned char unlimited_ammo:1;
     unsigned char force_hide:1;
+    // Krunker "frz" (SET_FROZEN, game.deob.js:220495): freeze = !defaultMovement, !defaultVelocity,
+    // disableShooting, disableMelee (ks_player_allows answers 0 for those while set). Only official
+    // lobbies send it (krunker_link.c); it stays until "frz" false.
+    unsigned char frozen:1;
     unsigned char smite:1;      // /smite: every hit this player deals does 10000 damage (Krunker player.smite)
     unsigned char notarget:1;   // /notarget (KrunkNative, Source's notarget): bots and AIs never pick this player as a target
     unsigned char interpolate:1;
@@ -1397,6 +1401,7 @@ typedef struct Player_t {
     unsigned char shot_blast:1;   // the last shot was a full-charge one (shoot(..., fullCharge)): "_blast" sound
     PlayerGrapple grapple;        // grapple (Grappler): the hook point and rope length, active 0 = null
     unsigned char is_juggernaut:1;// isJuggernaut (Juggernaut streak): 2000 HP, Minigun, no regen
+    float speed_boost;            // speedBoost (admin "spb", 0 = none): the movement acceleration x it (player.js:169777)
     float head_mlt;               // headMlt (0 = 1): head hitbox scale (Big Head FFA), spawn "headMlt"
     float adjusted_height;        // adjustedHeight: height with the head scaled by head_mlt (hit tests)
     PlayerAttributes attributes;  // effects.js attributes (effects_reset at spawn)
@@ -2861,6 +2866,7 @@ typedef enum {
     NET_CHEAT_FORCE_COLLIDE = 4,   // "forcecol" -> map objects forced collidable
     NET_CHEAT_THIRD_PERSON = 5,    // KrunkNative /thirdperson: the third-person camera granted (1) / taken (0)
     NET_CHEAT_HELD = 6,            // KrunkNative Physics Gun: a dev carries you (1: your input moves nothing) / let go (0)
+    NET_CHEAT_FROZEN = 7,          // "frz" -> me->frozen (official lobbies, krunker_link.c; our own server never sends it)
 } NetCheatFlag;
 
 typedef struct {

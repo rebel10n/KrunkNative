@@ -239,6 +239,7 @@
  "kn.kio.powUnsupported": "krunker.io's game server asked for a proof of work in a form this client cannot compute yet: it may close the game.",
  "kn.kio.seekRefused": "krunker.io's matchmaker turned the join down (HTTP {0}) {1}",
  "kn.kio.serverError": "krunker.io: {0}",
+ "kn.kio.sessionClosed": "The krunker.io game server ended this session.",
  "kn.kio.unreachable": "Official lobbies unavailable: krunker.io is not reachable.",
  "kn.matchmaker.accountRequired": "This game requires an account.",
  "kn.matchmaker.tooManyRequests": "Too many requests, try again in a minute",

@@ -15,7 +15,10 @@
 #include <krunker_altcha.h>
 #include <cJSON.h>
 #include <map_catalog.h>
+#include <net_ext.h>
+#include <ruleset.h>
 #include <social_v7.h>
+#include <zombies.h> // NET_PACKET_SHARING ("sic")
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -115,6 +118,7 @@ void krunker_link_reset(KrunkerLink *l) {
     krunker_session_init(&l->codec, ahkey);
     l->my_sid = -1;
     l->unsupported_map = -1;
+    l->game_state = -1;
 }
 
 // ---------------------------------------------------------------- inbound
@@ -185,6 +189,8 @@ static void on_add_players(KrunkerLink *l, const KrunkerFrame *f) {
         if (p) {
             p->health = s.health;
             p->max_health = s.max_health;
+            p->team = s.team;
+            snprintf(p->id, sizeof(p->id), "%s", id); // "chgp" findById
         }
         if (s.is_you) {
             const int first = l->my_sid != s.uid;
@@ -261,7 +267,8 @@ static void on_sync_player(KrunkerLink *l, const KrunkerFrame *f) {
               (truthy(A(KRUNKER_SYNC_DID_JUMP_W)) ? NET_RECON_DID_JUMP_W : 0) |
               (truthy(A(KRUNKER_SYNC_ON_LADDER)) ? NET_RECON_ON_LADDER : 0) |
               (truthy(A(KRUNKER_SYNC_CAN_SLIDE)) ? NET_RECON_CAN_SLIDE : 0) |
-              (truthy(A(KRUNKER_SYNC_ON_TERRAIN)) ? NET_RECON_ON_TERRAIN : 0);
+              (truthy(A(KRUNKER_SYNC_ON_TERRAIN)) ? NET_RECON_ON_TERRAIN : 0) |
+              (l->noclip ? NET_RECON_NOCLIP : 0); // "l" has no noclip: the live client keeps "noc"'s through reconcilePlayer
     const KrunkerValue *g = A(KRUNKER_SYNC_GRAPPLE);
     if (krunker_is(g, KRUNKER_ARRAY) && g->len >= 3) {
         r.grapple_active = 1;
@@ -311,7 +318,8 @@ static void on_damage(KrunkerLink *l, const KrunkerFrame *f) {
     emit(l, NET_PACKET_HIT, &h, sizeof(h));
 }
 
-// "h" CHANGE_HEALTH [health, sid (null: you), srcX, srcZ, ..., resetMax] (game.deob.js:221040)
+// "h" CHANGE_HEALTH [health, sid (null: you), srcX, srcZ, ..., resetMax] (game.deob.js:221040):
+// (health > maxHealth || resetMax) && (maxHealth = health): a resetMax may lower it (Juggernaut ends)
 static void on_health(KrunkerLink *l, const KrunkerFrame *f) {
     const int sid = is_nil(arg(f, KRUNKER_HEALTH_ARG_SID)) ? l->my_sid : (int) num(arg(f, KRUNKER_HEALTH_ARG_SID), -1);
     if (sid < 0) return;
@@ -325,11 +333,20 @@ static void on_health(KrunkerLink *l, const KrunkerFrame *f) {
         h.source_z = (float) arg(f, KRUNKER_HEALTH_ARG_SRC_Z)->u.num;
     }
     KrunkerLinkPlayer *p = player(l, sid, 1);
+    const int reset_max = truthy(arg(f, KRUNKER_HEALTH_ARG_RESET_MAX));
+    int max_changed = 0;
     if (p) {
         p->health = h.health;
-        if (h.health > (float) p->max_health) p->max_health = (int) ceilf(h.health);
+        if (h.health > (float) p->max_health || reset_max) {
+            max_changed = p->max_health != (int) ceilf(h.health);
+            p->max_health = (int) ceilf(h.health);
+        }
     }
     emit(l, NET_PACKET_HEALTH, &h, sizeof(h));
+    if (max_changed) { // HEALTH carries no maximum: the TEAM of the same team does (as our server's class change)
+        const NetTeamPacket t = {.uid = sid, .team = p->team, .health = h.health, .max_health = p->max_health};
+        emit(l, NET_PACKET_TEAM, &t, sizeof(t));
+    }
 }
 
 // "ch" ADD_CHAT [team, name, text, kind, color, ...] (game.deob.js:221172): kind 0 player line,
@@ -459,6 +476,260 @@ static void on_error(KrunkerLink *l, const KrunkerFrame *f) {
     note(l, KRUNKER_LINK_EV_ERROR, "%s", e.message);
 }
 
+// ---------------------------------------------------------------- movement locks / buffs (audit cluster A)
+
+static void emit_lock(KrunkerLink *l, const NetLockKind kind, const int locked) {
+    const NetLockPacket p = {.kind = (uint8_t) kind, .locked = (uint8_t) !!locked};
+    emit(l, NET_PACKET_LOCK, &p, sizeof(p));
+}
+
+static void emit_ext(KrunkerLink *l, const uint16_t subtype, const void *body, const uint16_t length) {
+    uint8_t buf[NET_MAX_PAYLOAD];
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), subtype, body, length);
+    if (n) emit(l, NET_PACKET_EXT, buf, n);
+}
+
+// Our client resets game.moveLock and its players at INIT (game_init -> mode_round_start): so do the
+// "q" / "l" shapes that follow them. The server repeats the lock in "start" (arg 4).
+static void locks_reset(KrunkerLink *l) {
+    l->move_lock = l->locked = l->noclip = 0;
+}
+
+// "start" [timer, team, spectating, challMode, moveLock, ...] (iìïìiìi game.deob.js:218939, sent
+// :208260): moveLock != null -> lockMove() / unlockMove() (no position), then iíiiiïî(false): unlocked.
+static void on_start_locks(KrunkerLink *l, const KrunkerFrame *f) {
+    if (!is_nil(arg(f, 4))) {
+        l->move_lock = truthy(arg(f, 4));
+        emit_lock(l, NET_LOCK_MOVE, l->move_lock);
+    }
+    if (l->locked) {
+        l->locked = 0;
+        emit_lock(l, NET_LOCK_PLAYER, 0);
+    }
+}
+
+// What a lock does to one "q" frame (fields of input_fields). game.moveLock: moveDir -1 and no jump
+// (:221748, Uiblms(..., moveLock) predicts the same). window.locked: the live client builds no input
+// frame at all (:221699); our frames keep their isn so the server sees no gap, with nothing pressed.
+static void input_locks(const KrunkerLink *l, double v[15]) {
+    if (l->move_lock || l->locked) {
+        v[4] = -1; // moveDir
+        v[7] = 0;  // jump
+    }
+    if (l->locked) {
+        for (int k = 5; k <= 11; k++) v[k] = 0; // shoot ads (jump) reload crouch scroll wSwap
+        v[13] = v[14] = 0;                      // reset, interact
+    }
+}
+
+// "lm" LOCK_MOVE [x, y, z, xDire] (iîiîìïì :220428): game.lockMove(you, ...) -> moveLock = true and
+// you.resetPosition(x, y, z, xDire) (:169438: y + 0.01, no velocity, on the ground). The position
+// rides our io_tp ack (net_player_teleport: the same resets); xDire, the server's copy of our own
+// yaw, is not applied (our look keeps the player's mouse).
+static void on_lock_move(KrunkerLink *l, const KrunkerFrame *f) {
+    l->move_lock = 1;
+    emit_lock(l, NET_LOCK_MOVE, 1);
+    if (l->my_sid < 0 || !krunker_is(arg(f, 0), KRUNKER_NUM) || !krunker_is(arg(f, 1), KRUNKER_NUM) || !krunker_is(arg(f, 2), KRUNKER_NUM)) return;
+    const NetTeleportPacket tp = {.x = (float) arg(f, 0)->u.num, .y = (float) (arg(f, 1)->u.num + 0.01), .z = (float) arg(f, 2)->u.num};
+    emit(l, NET_PACKET_TELEPORT_ACK, &tp, sizeof(tp));
+}
+
+// "ulm" UNLOCK_MOVE []: game.unlockMove -> moveLock = false
+static void on_unlock_move(KrunkerLink *l) {
+    l->move_lock = 0;
+    emit_lock(l, NET_LOCK_MOVE, 0);
+}
+
+// "lock" LOCK_PLAYER [locked] (iíiiiïî :219705): window.locked + #blockerDiv
+static void on_lock_player(KrunkerLink *l, const KrunkerFrame *f) {
+    l->locked = truthy(arg(f, 0));
+    emit_lock(l, NET_LOCK_PLAYER, l->locked);
+}
+
+// "frz" / "noc" / "unl" [on] (:220495 / :220488 / :220504): our NET_PACKET_CHEAT flags (noclip and
+// unlimited ammo print Krunker's commands.* line there, freeze none)
+static void on_cheat_flag(KrunkerLink *l, const KrunkerFrame *f, const NetCheatFlag flag) {
+    const int on = truthy(arg(f, 0));
+    if (flag == NET_CHEAT_NOCLIP) l->noclip = on;
+    const NetCheatPacket c = {.flag = (uint8_t) flag, .on = (uint8_t) on};
+    emit(l, NET_PACKET_CHEAT, &c, sizeof(c));
+}
+
+// "spb" SET_SPEED_BOOST [speedBoost, silent] (iìîïììî :220498; the server clamps it to 0.1..10, :180931)
+static void on_speed_boost(KrunkerLink *l, const KrunkerFrame *f) {
+    const double boost = num(arg(f, 0), 0);
+    const NetSpeedBoostPacket b = {.boost = isfinite(boost) && boost > 0 ? (float) boost : 0.0f, .silent = (uint8_t) truthy(arg(f, 1))};
+    emit_ext(l, NET_EXT_PLAYER_SPEED_BOOST, &b, sizeof(b));
+}
+
+// "sic" SET_SHARING_IS_CARING [on] (iiïîïíí :220511): half-price mystery boxes + its popup
+static void on_sharing(KrunkerLink *l, const KrunkerFrame *f) {
+    const NetSharingPacket s = {.on = (uint8_t) truthy(arg(f, 0))};
+    emit(l, NET_PACKET_SHARING, &s, sizeof(s));
+}
+
+// "jg" SET_JUGGERNAUT [sid, on] (iíîiìîí :220482): isJuggernaut only; the server's "h" with
+// resetMax carries the 2000 / class maximum
+static void on_juggernaut(KrunkerLink *l, const KrunkerFrame *f) {
+    if (!krunker_is(arg(f, 0), KRUNKER_NUM)) return;
+    const NetJuggernautPacket j = {.uid = (int32_t) arg(f, 0)->u.num, .on = (uint8_t) truthy(arg(f, 1)), .max_health = 0};
+    emit(l, NET_PACKET_JUGGERNAUT, &j, sizeof(j));
+}
+
+// "busy" SET_BUSY [sid, on] (iîíîìîï :220479 -> game.setBusy :188630): isBusy, which only draws a
+// nametag icon in the live client; kept on the player
+static void on_busy(KrunkerLink *l, const KrunkerFrame *f) {
+    KrunkerLinkPlayer *p = player(l, (int) num(arg(f, 0), -1), 0);
+    if (!p || p->busy == truthy(arg(f, 1))) return;
+    p->busy = !p->busy;
+    note(l, KRUNKER_LINK_EV_NOTE, "busy: sid %d %s", p->sid, p->busy ? "busy" : "back");
+}
+
+// "gsc" GAME_STATE_CHANGED [gameState] (iiíiîìí :219143): game.gameState (nothing in this client reads it)
+static void on_game_state(KrunkerLink *l, const KrunkerFrame *f) {
+    const int state = (int) num(arg(f, 0), -1);
+    if (state == l->game_state) return;
+    l->game_state = state;
+    note(l, KRUNKER_LINK_EV_NOTE, "gsc: game state %d", state);
+}
+
+// "chrg" SET_PLAYER_CHARGED [sid, krankedTimer ms] (iïíïìïi :220033): isKranked, its timer
+static void on_charged(KrunkerLink *l, const KrunkerFrame *f) {
+    if (!krunker_is(arg(f, 0), KRUNKER_NUM)) return;
+    const NetModeCounterPacket c = {.kind = NET_MODE_COUNTER_CHARGE, .uid = (int32_t) arg(f, 0)->u.num, .value = (float) num(arg(f, 1), 0)};
+    emit(l, NET_PACKET_MODE_COUNTER, &c, sizeof(c));
+}
+
+// ---------------------------------------------------------------- player-state corrections (audit cluster B)
+
+// "chgp" CHANGE_POSITION [id, x, y, z, doRecon, stopMomentum, dir] (iiíïiíi :220937): players.findById
+// (the socket id of the player's "0", not its sid) -> changePosition (:173813): x y z (and old*),
+// dir != null -> xDire = -(dir + 1) * PI / 2 (ours: the camera follows, so the next "q" carries it),
+// stopMomentum -> velocities and stepVal 0. Our client's changePosition mirror (map_triggers.c) snaps
+// it; for us the pending inputs stay (turned to the new yaw) and the next "l" replays them from the
+// server's new state.
+static void on_change_position(KrunkerLink *l, const KrunkerFrame *f) {
+    char id[64];
+    id_string(arg(f, 0), id, sizeof(id));
+    const KrunkerLinkPlayer *p = NULL;
+    for (int i = 0; id[0] && i < l->player_count && !p; i++) {
+        if (!strcmp(l->players[i].id, id)) p = &l->players[i];
+    }
+    if (!p || !krunker_is(arg(f, 1), KRUNKER_NUM) || !krunker_is(arg(f, 2), KRUNKER_NUM) || !krunker_is(arg(f, 3), KRUNKER_NUM)) return;
+    NetChangePositionPacket c;
+    memset(&c, 0, sizeof(c));
+    c.uid = p->sid;
+    c.x = (float) arg(f, 1)->u.num;
+    c.y = (float) arg(f, 2)->u.num;
+    c.z = (float) arg(f, 3)->u.num;
+    c.recon = (uint8_t) truthy(arg(f, 4));
+    c.stop_momentum = (uint8_t) truthy(arg(f, 5));
+    c.has_direction = (uint8_t) !is_nil(arg(f, 6));
+    c.direction = (int32_t) num(arg(f, 6), 0); // (dir || 0)
+    emit(l, NET_PACKET_CHANGE_POSITION, &c, sizeof(c));
+}
+
+// "tm" UPDATE_TEAM [sid, team] (iiíïiîï :220422): findBySid -> team (ours: the HUD team name follows)
+static void on_update_team(KrunkerLink *l, const KrunkerFrame *f) {
+    KrunkerLinkPlayer *p = player(l, (int) num(arg(f, 0), -1), 0);
+    if (!p || !krunker_is(arg(f, 1), KRUNKER_NUM)) return;
+    p->team = (int) arg(f, 1)->u.num;
+    const NetTeamPacket t = {.uid = p->sid, .team = p->team, .health = p->health, .max_health = p->max_health};
+    emit(l, NET_PACKET_TEAM, &t, sizeof(t));
+}
+
+// "spk" SET_PLAYER_KEY [key, value] (iíîíîîï :220514): you[key] = value, unchecked. The keys this
+// client models go through their own packets; the rest are noted. (This build's server sends none.)
+static void on_set_player_key(KrunkerLink *l, const KrunkerFrame *f) {
+    const char *key = krunker_str(arg(f, 0));
+    const KrunkerValue *v = arg(f, 1);
+    if (!key || l->my_sid < 0) return;
+    KrunkerLinkPlayer *me = player(l, l->my_sid, 0);
+    if (!strcmp(key, "noclip") || !strcmp(key, "unlimitedAmmo")) {
+        const int on = truthy(v);
+        if (key[0] == 'n') l->noclip = on;
+        const NetCheatPacket c = {.flag = key[0] == 'n' ? NET_CHEAT_NOCLIP : NET_CHEAT_UNLIMITED_AMMO, .on = (uint8_t) on};
+        emit(l, NET_PACKET_CHEAT, &c, sizeof(c));
+    } else if (!strcmp(key, "speedBoost")) {
+        const double boost = num(v, 0);
+        const NetSpeedBoostPacket b = {.boost = isfinite(boost) && boost > 0 ? (float) boost : 0.0f, .silent = 1};
+        emit_ext(l, NET_EXT_PLAYER_SPEED_BOOST, &b, sizeof(b));
+    } else if (!strcmp(key, "canThrow") && truthy(v)) {
+        emit(l, NET_PACKET_REFILL, NULL, 0);
+    } else if ((!strcmp(key, "health") || !strcmp(key, "team")) && krunker_is(v, KRUNKER_NUM) && me) {
+        if (key[0] == 'h') me->health = (float) v->u.num;
+        else me->team = (int) v->u.num;
+        const NetTeamPacket t = {.uid = me->sid, .team = me->team, .health = me->health, .max_health = me->max_health};
+        emit(l, NET_PACKET_TEAM, &t, sizeof(t));
+    } else {
+        note(l, KRUNKER_LINK_EV_NOTE, "spk %s: a player key this client does not model", key);
+    }
+}
+
+// "wep" SET_WEAPON [weaponId] (game.setWeapon :189457): activeObjective = the Sharp Shooter weapon;
+// the loadouts themselves arrive in "inatA"
+static void on_set_weapon(KrunkerLink *l, const KrunkerFrame *f) {
+    if (!krunker_is(arg(f, 0), KRUNKER_NUM)) return;
+    const NetObjectivePacket o = {.kind = NET_OBJECTIVE_WEAPON, .value = (int32_t) arg(f, 0)->u.num};
+    emit(l, NET_PACKET_OBJECTIVE, &o, sizeof(o));
+}
+
+// "rg" REGEN_PLAYER [sid, changeClass, items] (iîiîïìi :220027 -> updateItems(game, null, changeClass,
+// items, true), :169313). items = [skins, face, shoe, hat, head, body, back, waist, melee, skinCol,
+// hairCol, dye, pcStat, attach, secIndex (14), classIndex (15), pet, wrist, playerCard]. Without
+// changeClass only the cosmetics change (a guest client shows none). With it, setClass (:169388):
+// the class loadout [primary, secondary if the class has one, knife], full ammo, health = maxHealth
+// = the class health; ours: the LOADOUT and TEAM our server sends for a mid-life class change. Not
+// modelled: the class's speed / wall-jump stats on our player (no packet carries a class index).
+static void on_regen(KrunkerLink *l, const KrunkerFrame *f) {
+    KrunkerLinkPlayer *p = player(l, (int) num(arg(f, 0), -1), 0);
+    const KrunkerValue *items = arg(f, 2);
+    if (!p || !truthy(arg(f, 1)) || !krunker_is(items, KRUNKER_ARRAY)) return;
+    const int ci = (int) num(krunker_at(items, 15), -1), sec = (int) num(krunker_at(items, 14), -1);
+    if (ci < 0 || (size_t) ci >= rules_class_count()) return;
+    const ClassConfig *c = &rules_classes()[ci];
+    NetLoadoutPacket lo;
+    memset(&lo, 0, sizeof(lo));
+    lo.uid = p->sid;
+    lo.weapons[lo.count++] = c->loadout ? c->loadout[0] : 1;
+    if (c->secondary) { // secIndex when it names a secondary weapon, else 2 (the Pistol) (:169383)
+        const Weapon *sw = rules_weapon(sec);
+        lo.weapons[lo.count++] = sw && sw->secondary ? sec : WEAPON_ID_PISTOL;
+    }
+    int has_knife = 0;
+    for (int i = 0; i < lo.count; i++) has_knife |= lo.weapons[i] == WEAPON_ID_KNIFE;
+    if (!has_knife && lo.count < NET_LOADOUT_MAX) lo.weapons[lo.count++] = WEAPON_ID_KNIFE;
+    for (int i = 0; i < lo.count; i++) {
+        const Weapon *w = rules_weapon(lo.weapons[i]);
+        lo.ammo[i] = w ? (int32_t) w->ammo : 0;
+    }
+    emit(l, NET_PACKET_LOADOUT, &lo, sizeof(lo));
+    p->max_health = c->health > 0 ? c->health : p->max_health;
+    p->health = (float) p->max_health;
+    const NetTeamPacket t = {.uid = p->sid, .team = p->team, .health = p->health, .max_health = p->max_health};
+    emit(l, NET_PACKET_TEAM, &t, sizeof(t));
+}
+
+// "00" UPDATE_NAMES [[id, name, alias, ...], keepOpen] (iíîîîíi :220322): per (socket) id the name
+// (alias not shown); keepOpen falsy -> socket.close(): the server ends our session
+static void on_update_names(KrunkerLink *l, const KrunkerFrame *f) {
+    const KrunkerValue *list = arg(f, 0);
+    for (uint32_t i = 0; krunker_is(list, KRUNKER_ARRAY) && i + 1 < list->len; i += 3) {
+        char id[64];
+        id_string(&list->u.items[i], id, sizeof(id));
+        const char *name = krunker_str(&list->u.items[i + 1]);
+        for (int k = 0; id[0] && name && k < l->player_count; k++) {
+            if (strcmp(l->players[k].id, id) != 0) continue;
+            NetPlayerNamePacket n;
+            memset(&n, 0, sizeof(n));
+            n.uid = l->players[k].sid;
+            snprintf(n.name, sizeof(n.name), "%s", name);
+            emit_ext(l, NET_EXT_PLAYER_NAME, &n, sizeof(n));
+        }
+    }
+    if (!truthy(arg(f, 1))) note(l, KRUNKER_LINK_EV_CLOSE, "the server ended the session (UPDATE_NAMES without keepOpen)");
+}
+
 int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len) {
     KrunkerFrame f;
     const int err = krunker_proto_decode(data, len, 0, &f);
@@ -475,7 +746,7 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         case KRUNKER_S2C_INIT_LOAD: // iiïiîïí: the client answers "load" once it may load
             send_c2s(l, KRUNKER_C2S_LOAD, NULL, 0);
             break;
-        case KRUNKER_S2C_INIT_GAME: on_init(l, &f); break;
+        case KRUNKER_S2C_INIT_GAME: on_init(l, &f); locks_reset(l); break;
         case KRUNKER_S2C_ENTER_GAME: note(l, KRUNKER_LINK_EV_NOTE, "frs: the server took our en"); break;
         case KRUNKER_S2C_START_GAME: { // [formattedTimer, ...] (iìïìiìi :218939 -> iìíîiïì(arg0) :218948):
             // team / class ride our SPAWN; arg0 seeds the round clock so the HUD shows it before the
@@ -485,6 +756,7 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
                 const NetTimerPacket t = {.seconds = timer_seconds(NULL, s), .end = 0};
                 emit(l, NET_PACKET_TIMER, &t, sizeof(t));
             }
+            on_start_locks(l, &f);
             break;
         }
         case KRUNKER_S2C_ADD_PLAYERS: on_add_players(l, &f); break;
@@ -495,12 +767,33 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
             l->prev_angle_count = 0;
             l->resync = 1;
             break;
+        // movement locks / buffs of our player (packet-audit cluster A)
+        case KRUNKER_S2C_LOCK_MOVE: on_lock_move(l, &f); break;
+        case KRUNKER_S2C_UNLOCK_MOVE: on_unlock_move(l); break;
+        case KRUNKER_S2C_LOCK_PLAYER: on_lock_player(l, &f); break;
+        case KRUNKER_S2C_SET_FROZEN: on_cheat_flag(l, &f, NET_CHEAT_FROZEN); break;
+        case KRUNKER_S2C_SET_NOCLIP: on_cheat_flag(l, &f, NET_CHEAT_NOCLIP); break;
+        case KRUNKER_S2C_SET_UNLIMITED: on_cheat_flag(l, &f, NET_CHEAT_UNLIMITED_AMMO); break;
+        case KRUNKER_S2C_SET_SPEED_BOOST: on_speed_boost(l, &f); break;
+        case KRUNKER_S2C_SET_SHARING_IS_CARING: on_sharing(l, &f); break;
+        case KRUNKER_S2C_SET_JUGGERNAUT: on_juggernaut(l, &f); break;
+        case KRUNKER_S2C_SET_BUSY: on_busy(l, &f); break;
+        case KRUNKER_S2C_SET_PLAYER_CHARGED: on_charged(l, &f); break;
         case KRUNKER_S2C_REMOVE_PLAYER: {
             const NetLeavePacket leave = {.uid = (int32_t) num(arg(&f, 0), -1)};
             player_remove(l, leave.uid);
             emit(l, NET_PACKET_LEAVE, &leave, sizeof(leave));
             break;
         }
+        // player-state corrections (packet-audit cluster B)
+        case KRUNKER_S2C_CHANGE_POSITION: on_change_position(l, &f); break;
+        case KRUNKER_S2C_UPDATE_TEAM: on_update_team(l, &f); break;
+        case KRUNKER_S2C_SET_PLAYER_KEY: on_set_player_key(l, &f); break;
+        case KRUNKER_S2C_SET_WEAPON: on_set_weapon(l, &f); break;
+        case KRUNKER_S2C_REGEN_PLAYER: on_regen(l, &f); break;
+        case KRUNKER_S2C_REFILL_KNIFE: emit(l, NET_PACKET_REFILL, NULL, 0); break; // iïíìiìì: you.refillKnife()
+        case KRUNKER_S2C_GAME_STATE_CHANGED: on_game_state(l, &f); break;
+        case KRUNKER_S2C_UPDATE_NAMES: on_update_names(l, &f); break;
         case KRUNKER_S2C_KILL_PLAYER: on_kill(l, &f); break;
         case KRUNKER_S2C_DO_DAMAGE: on_damage(l, &f); break;
         case KRUNKER_S2C_CHANGE_HEALTH: on_health(l, &f); break;
@@ -629,6 +922,7 @@ static int send_input_window(KrunkerLink *l, const NetInputPacket *frames, const
     for (int j = 0; j < count && j < NET_INPUT_BATCH_MAX; j++) {
         double v[15];
         input_fields(&frames[j], v);
+        input_locks(l, v);
         if (j == 0) first_isn = v[0];
         dts[j] = v[1];
         for (int k = 2; k < 4; k++) {

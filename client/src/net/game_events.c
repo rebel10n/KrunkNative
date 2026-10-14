@@ -386,6 +386,9 @@ static void events_cheat(Client *client, const NetCheatPacket *packet) {
         case NET_CHEAT_HELD: // KrunkNative: a dev's Physics Gun carries us (mode_input_locked: our input moves nothing)
             if (client->me) client->me->om_held = (unsigned char) !!on;
             break;
+        case NET_CHEAT_FROZEN: // official "frz" (game.deob.js:220495): no line, prediction stops (ks_player_allows)
+            if (client->me) client->me->frozen = (unsigned char) on;
+            break;
         case NET_CHEAT_BORDERS:
             client->game.config.disable_borders = (unsigned int) !on; // movement prediction
             break;
@@ -401,6 +404,31 @@ static void events_cheat(Client *client, const NetCheatPacket *packet) {
     if (line) {
         hud_ui_add_chat(NULL, line, SERVER_CHAT_COLOR);
         ui_console_on_cheat(packet->flag, on); // devConsole hookChat: "Noclip - Enabled", "Force Hide - ..."
+    }
+}
+
+// Official-lobby player state (krunker_link.c, net_ext.h): "spb" speedBoost (+ its "SpeedBoost - x"
+// line unless silent, iìîïììî game.deob.js:220498) and an "00" rename.
+static void events_player_ext(Client *client, const uint16_t subtype, const uint8_t *body, const uint16_t length) {
+    if (subtype == NET_EXT_PLAYER_SPEED_BOOST && length == sizeof(NetSpeedBoostPacket)) {
+        NetSpeedBoostPacket boost;
+        memcpy(&boost, body, sizeof(boost));
+        if (!isfinite(boost.boost) || boost.boost < 0.0f) boost.boost = 0.0f;
+        if (client->me) client->me->speed_boost = boost.boost;
+        if (!boost.silent) {
+            char line[64];
+            snprintf(line, sizeof(line), "SpeedBoost - %g", (double) boost.boost);
+            hud_ui_add_chat(NULL, line, SERVER_CHAT_COLOR);
+        }
+    } else if (subtype == NET_EXT_PLAYER_NAME && length == sizeof(NetPlayerNamePacket)) {
+        NetPlayerNamePacket rename;
+        memcpy(&rename, body, sizeof(rename));
+        rename.name[sizeof(rename.name) - 1] = 0;
+        Player *player = client_find_player(client, rename.uid);
+        if (player && rename.name[0]) {
+            snprintf(player->name, sizeof(player->name), "%s", rename.name);
+            client->game.leaders_dirty = 1;
+        }
     }
 }
 
@@ -958,6 +986,7 @@ int client_handle_game_event(Client *client, const int type, const void *payload
                 nettspend_on_laced(client, body, body_length);       // the local player's post-effect
                 if (client->me) nettspend_audio_on_laced(body, body_length, client->me->uid); // our own laced ambience
             }
+            else if (subtype == NET_EXT_PLAYER_SPEED_BOOST || subtype == NET_EXT_PLAYER_NAME) events_player_ext(client, subtype, body, body_length);
             return 1;
         }
         default:

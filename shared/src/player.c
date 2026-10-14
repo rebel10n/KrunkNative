@@ -1738,7 +1738,7 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
         // 95.js: ac *= limitMM(1 - a0[12], 0, 1) (input[12]: the controller's Gradual Speed)
         accel *= CLAMP(1.0f - input->slowdown, 0.0f, 1.0f);
         if (player->noclip) accel *= 2.0f;
-        // speedBoost (admin) is not in KrunkNative yet
+        if (player->speed_boost) accel *= player->speed_boost; // speedBoost && (ac *= speedBoost): official lobbies' "spb"
         accel *= player_attr_speed(player);
         accel *= player_attr_rooted(player);
         accel *= drank_puddle_slow(player->game, player); // KrunkNative Drank puddles (shared/include/drank.h)

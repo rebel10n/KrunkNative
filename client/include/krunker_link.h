@@ -26,6 +26,30 @@
 //   cpt     [challenge]                      the ALTCHA proof of work (krunker_altcha.h) -> "cptR" [payload]
 //                                            (no ahNum step); unsolvable: KRUNKER_LINK_EV_CAPTCHA (:98132)
 //   error   [message, code]                  NET_PACKET_ERROR + KRUNKER_LINK_EV_ERROR
+// Movement locks and modifiers of our own player (cluster A of the packet audit):
+//   lm      [x, y, z, xDire]                 LOCK_MOVE: NET_PACKET_LOCK (MOVE, 1) + TELEPORT_ACK (resetPosition)
+//                                            (iîiîìïì :220428 -> game.lockMove :188432)
+//   ulm     []                               UNLOCK_MOVE: NET_PACKET_LOCK (MOVE, 0) (game.unlockMove :188442)
+//   lock    [locked]                         LOCK_PLAYER: NET_PACKET_LOCK (PLAYER, locked) (:219705)
+//   frz noc unl [on]                         NET_PACKET_CHEAT FROZEN / NOCLIP / UNLIMITED_AMMO (:220495 :220488 :220504)
+//   spb     [speedBoost, silent]             NET_EXT_PLAYER_SPEED_BOOST (:220498)
+//   sic     [on]                             NET_PACKET_SHARING (:220511)
+//   jg      [sid, on]                        NET_PACKET_JUGGERNAUT (:220482)
+//   busy    [sid, on]                        KrunkerLinkPlayer.busy (setBusy :188630: a nametag icon only)
+//   chrg    [sid, krankedTimer ms]           NET_PACKET_MODE_COUNTER CHARGE (:220033)
+//   While lm holds, every "q" frame sends moveDir -1 and no jump (:221748); while "lock" holds the
+//   live client builds no input at all, so the frames still sent (isn keeps counting) carry none.
+// Player-state corrections (cluster B):
+//   chgp    [socketId, x, y, z, doRecon, stopMomentum, dir]  NET_PACKET_CHANGE_POSITION; the player is
+//                                            found by its socket id (findById), not its sid (:220937)
+//   tm      [sid, team]                      NET_PACKET_TEAM (health kept) (:220422)
+//   spk     [key, value]                     you[key] = value: the keys this client models (:220514)
+//   wep     [weaponId]                       NET_PACKET_OBJECTIVE WEAPON: game.setWeapon = activeObjective (:189457)
+//   rg      [sid, changeClass, items]        a class change: NET_PACKET_LOADOUT + NET_PACKET_TEAM (:220027)
+//   rfl     []                               NET_PACKET_REFILL (:220520)
+//   gsc     [gameState]                      KrunkerLink.game_state (:219143)
+//   00      [[id, name, alias]..., keepOpen] NET_EXT_PLAYER_NAME per rename; keepOpen falsy: the client
+//                                            closes the socket (KRUNKER_LINK_EV_CLOSE) (:220322)
 // Outbound: our NET_PACKET_ENT -> "en", NET_PACKET_INPUT(_BATCH) -> "q" (the delta-compressed
 // window of :221748-221830), NET_PACKET_CHAT_SEND / CHAT_V7 -> "ct"; the rest is dropped.
 #include <krunker_cheat.h>
@@ -42,6 +66,7 @@ typedef enum {
     KRUNKER_LINK_EV_ERROR,      // the server's "error" (it closes right after)
     KRUNKER_LINK_EV_JOINED,     // our own player was added (the "0" with our socket id)
     KRUNKER_LINK_EV_UNSUPPORTED,// something this client cannot show (an unknown map index, ...)
+    KRUNKER_LINK_EV_CLOSE,      // the server told us to close the socket ("00" with keepOpen falsy)
 } KrunkerLinkEvent;
 
 typedef struct {
@@ -66,6 +91,9 @@ typedef struct {
     int sid;
     float health;
     int max_health;
+    char id[64];   // the socket id of its "0" ([0]): "chgp" finds players by it (findById)
+    int team;
+    int busy;      // "busy" setBusy (a nametag icon; nothing in this client shows it)
 } KrunkerLinkPlayer;
 
 typedef struct {
@@ -85,6 +113,10 @@ typedef struct {
     int prev_angle_count;
     int resync;
     int unsupported_map;            // init's map index outside this client's catalogue, -1 = none (KRUNKER_LINK_EV_UNSUPPORTED)
+    // our player's movement state as the server set it ("lm"/"ulm"/"start" game.moveLock, "lock"
+    // window.locked, "noc" noclip): shapes the "q" frames and the "l" RECON flags
+    int move_lock, locked, noclip;
+    int game_state;                 // "gsc" game.gameState, -1 = not sent
     // counters (tests, logs)
     unsigned frames_in, frames_out, cc_answered, cc_failed, captchas_solved, unknown_in;
 } KrunkerLink;

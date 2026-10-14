@@ -4,6 +4,9 @@
 //   cmake-build-debug/krunker_link_test
 #include <krunker_link.h>
 #include <auth_join.h>
+#include <net_ext.h>
+#include <ruleset.h>
+#include <zombies.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,6 +26,20 @@ void krunker_ccr_free(KrunkerCcr *out) {
     free(out->nonce);
     free(out->payload_b64);
     out->nonce = out->payload_b64 = NULL;
+}
+
+// the ruleset the "rg" class change reads (krunker_link.c on_regen): two classes, the second with a secondary
+static const int k_loadout_a[] = {1}, k_loadout_b[] = {3};
+static const ClassConfig k_classes[2] = {{.name = "A", .loadout = k_loadout_a, .health = 100},
+                                         {.name = "B", .loadout = k_loadout_b, .secondary = 1, .health = 150}};
+static Weapon k_weapons[WEAPON_ID_KNIFE + 1];
+const ClassConfig *rules_classes(void) { return k_classes; }
+size_t rules_class_count(void) { return 2; }
+const Weapon *rules_weapon(const int id) {
+    if (id < 0 || id > WEAPON_ID_KNIFE) return NULL;
+    k_weapons[id].ammo = (unsigned) (10 + id); // a distinct full magazine per id
+    k_weapons[id].secondary = id == WEAPON_ID_PISTOL || id == 4; // two secondaries
+    return &k_weapons[id];
 }
 
 static int fake_cheat(void *user, const char *nonce, const char *ct, KrunkerCcr *out) {
@@ -352,6 +369,196 @@ int main(void) {
           "ct");
     clear();
     CHECK(!krunker_link_send_ours(&link, NET_PACKET_HELLO, "abc", 3) && g_out_count == 0, "HELLO dropped");
+    clear();
+
+    // ---- packet-audit cluster A: movement locks / buffs of our player
+    feed(&link, "0", (KrunkerValue[]) {KRUNKER_V_ARRAY(add, KRUNKER_ADD_STRIDE)}, 1); // the other player (sid 7, socket sockB, team 2) is back
+    clear();
+#define PAYLOAD(type, var, packet) type var; memset(&var, 0, sizeof(var)); if (packet) memcpy(&var, (packet)->payload, sizeof(var))
+    feed(&link, "lm", (KrunkerValue[]) {KRUNKER_V_NUM(6), KRUNKER_V_NUM(1), KRUNKER_V_NUM(-6), KRUNKER_V_NUM(0.5)}, 4);
+    p = find_in(NET_PACKET_LOCK, 0);
+    PAYLOAD(NetLockPacket, lk, p);
+    CHECK(p && lk.kind == NET_LOCK_MOVE && lk.locked == 1 && link.move_lock == 1, "lm: LOCK move");
+    p = find_in(NET_PACKET_TELEPORT_ACK, 0);
+    PAYLOAD(NetTeleportPacket, tpa, p);
+    CHECK(p && tpa.x == 6.0f && fabsf(tpa.y - 1.01f) < 1e-5f && tpa.z == -6.0f, "lm: resetPosition (y + 0.01) as a teleport");
+    clear();
+    // a "q" while move-locked: W held (moveDir 0) and a jump go out as moveDir -1, no jump
+    for (int i = 0; i < 3; i++) { in[i].seq = 300 + i; in[i].move_dir = 0; in[i].flags = i == 1 ? NET_INPUT_JUMP : 0; }
+    memcpy(batch + 1, in, sizeof(in));
+    krunker_link_send_ours(&link, NET_PACKET_INPUT_BATCH, batch, sizeof(batch));
+    changes = g_out_count ? krunker_frame_arg(&g_out[0], 5) : NULL;
+    CHECK(krunker_is(changes, KRUNKER_MAP) && krunker_num(krunker_get(changes, "0-4"), 9) == -1 && !krunker_get(changes, "1-7") &&
+          !krunker_get(changes, "2-4"), "q while lm holds: moveDir -1, no jump (%u changes)", changes ? changes->len : 0);
+    clear();
+    feed(&link, "ulm", NULL, 0);
+    p = find_in(NET_PACKET_LOCK, 0);
+    PAYLOAD(NetLockPacket, ulk, p);
+    CHECK(p && ulk.kind == NET_LOCK_MOVE && ulk.locked == 0 && link.move_lock == 0, "ulm: LOCK move off");
+    for (int i = 0; i < 3; i++) in[i].seq = 303 + i;
+    memcpy(batch + 1, in, sizeof(in));
+    krunker_link_send_ours(&link, NET_PACKET_INPUT_BATCH, batch, sizeof(batch));
+    changes = g_out_count ? krunker_frame_arg(&g_out[g_out_count - 1], 5) : NULL;
+    CHECK(krunker_is(changes, KRUNKER_MAP) && krunker_num(krunker_get(changes, "0-4"), 9) == 0 && krunker_num(krunker_get(changes, "1-7"), 9) == 1,
+          "q after ulm: moveDir and jump back");
+    clear();
+    // lock (window.locked): nothing pressed goes out, the frames keep their isn
+    feed(&link, "lock", (KrunkerValue[]) {KRUNKER_V_BOOL(1)}, 1);
+    p = find_in(NET_PACKET_LOCK, 0);
+    PAYLOAD(NetLockPacket, plk, p);
+    CHECK(p && plk.kind == NET_LOCK_PLAYER && plk.locked == 1 && link.locked, "lock: LOCK player");
+    for (int i = 0; i < 3; i++) { in[i].seq = 306 + i; in[i].flags = NET_INPUT_SHOOT | NET_INPUT_CROUCH; }
+    memcpy(batch + 1, in, sizeof(in));
+    krunker_link_send_ours(&link, NET_PACKET_INPUT_BATCH, batch, sizeof(batch));
+    const KrunkerFrame *lq = g_out_count ? &g_out[g_out_count - 1] : NULL;
+    changes = lq ? krunker_frame_arg(lq, 5) : NULL;
+    CHECK(lq && fnum(lq, 1) == 306 && krunker_is(changes, KRUNKER_MAP) && krunker_num(krunker_get(changes, "0-4"), 9) == -1 &&
+          !krunker_get(changes, "0-5") && !krunker_get(changes, "0-9"), "q while locked: isn kept, nothing pressed");
+    feed(&link, "start", (KrunkerValue[]) {KRUNKER_V_STR("3:00"), KRUNKER_V_NUM(1), KRUNKER_V_BOOL(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(1)}, 5);
+    CHECK(link.move_lock == 1 && link.locked == 0 && find_in(NET_PACKET_LOCK, 1) && find_in(NET_PACKET_LOCK, 2),
+          "start: moveLock arg 4 locks, the player lock ends");
+    clear();
+    feed(&link, "start", (KrunkerValue[]) {KRUNKER_V_STR("3:00"), KRUNKER_V_NUM(1), KRUNKER_V_BOOL(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0)}, 5);
+    CHECK(link.move_lock == 0, "start: moveLock 0 unlocks");
+    clear();
+    // frz / noc / unl -> CHEAT flags; noclip rides every later "l"
+    feed(&link, "frz", (KrunkerValue[]) {KRUNKER_V_BOOL(1)}, 1);
+    feed(&link, "noc", (KrunkerValue[]) {KRUNKER_V_BOOL(1)}, 1);
+    feed(&link, "unl", (KrunkerValue[]) {KRUNKER_V_BOOL(0)}, 1);
+    const NetPacket *c0 = find_in(NET_PACKET_CHEAT, 0), *c1 = find_in(NET_PACKET_CHEAT, 1), *c2 = find_in(NET_PACKET_CHEAT, 2);
+    CHECK(c0 && c0->payload[0] == NET_CHEAT_FROZEN && c0->payload[1] == 1 && c1 && c1->payload[0] == NET_CHEAT_NOCLIP && c1->payload[1] == 1 &&
+          c2 && c2->payload[0] == NET_CHEAT_UNLIMITED_AMMO && c2->payload[1] == 0 && link.noclip, "frz / noc / unl");
+    feed(&link, "l", (KrunkerValue[]) {KRUNKER_V_ARRAY(l, 25)}, 1);
+    p = find_in(NET_PACKET_RECON, 0);
+    PAYLOAD(NetReconPacket, rn, p);
+    CHECK(p && (rn.flags & NET_RECON_NOCLIP), "noclip kept through \"l\"");
+    clear();
+    // spb / sic / jg / busy / chrg
+    feed(&link, "spb", (KrunkerValue[]) {KRUNKER_V_NUM(2.5), KRUNKER_V_BOOL(0)}, 2);
+    uint16_t sub = 0, blen = 0;
+    const uint8_t *body = NULL;
+    p = find_in(NET_PACKET_EXT, 0);
+    NetSpeedBoostPacket sb;
+    memset(&sb, 0, sizeof(sb));
+    if (p && net_ext_unpack(p->payload, p->length, &sub, &body, &blen) && blen == sizeof(sb)) memcpy(&sb, body, sizeof(sb));
+    CHECK(p && sub == NET_EXT_PLAYER_SPEED_BOOST && sb.boost == 2.5f && !sb.silent, "spb -> EXT speed boost");
+    feed(&link, "sic", (KrunkerValue[]) {KRUNKER_V_BOOL(1)}, 1);
+    p = find_in(NET_PACKET_SHARING, 0);
+    CHECK(p && p->length == sizeof(NetSharingPacket) && p->payload[0] == 1, "sic -> SHARING");
+    feed(&link, "jg", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_BOOL(1)}, 2);
+    p = find_in(NET_PACKET_JUGGERNAUT, 0);
+    PAYLOAD(NetJuggernautPacket, jg, p);
+    CHECK(p && jg.uid == 7 && jg.on == 1 && jg.max_health == 0, "jg -> JUGGERNAUT");
+    feed(&link, "busy", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_BOOL(1)}, 2);
+    int busy7 = 0;
+    for (int i = 0; i < link.player_count; i++) if (link.players[i].sid == 7) busy7 = link.players[i].busy;
+    CHECK(busy7 == 1, "busy kept on the player");
+    feed(&link, "chrg", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_NUM(15000)}, 2);
+    p = find_in(NET_PACKET_MODE_COUNTER, 0);
+    PAYLOAD(NetModeCounterPacket, mc, p);
+    CHECK(p && mc.kind == NET_MODE_COUNTER_CHARGE && mc.uid == 7 && mc.value == 15000.0f, "chrg -> MODE_COUNTER charge");
+    clear();
+
+    // ---- packet-audit cluster B: player-state corrections
+    // chgp finds the player by its socket id (findById), never by its sid
+    feed(&link, "chgp", (KrunkerValue[]) {KRUNKER_V_STR("sockB"), KRUNKER_V_NUM(10), KRUNKER_V_NUM(2), KRUNKER_V_NUM(3), KRUNKER_V_BOOL(1),
+                                          KRUNKER_V_BOOL(1), KRUNKER_V_NUM(1)}, 7);
+    feed(&link, "chgp", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0)}, 4);
+    feed(&link, "chgp", (KrunkerValue[]) {KRUNKER_V_STR("sockA"), KRUNKER_V_NUM(-4), KRUNKER_V_NUM(0), KRUNKER_V_NUM(8), KRUNKER_V_BOOL(0),
+                                          KRUNKER_V_BOOL(0), KRUNKER_V_NIL}, 7);
+    p = find_in(NET_PACKET_CHANGE_POSITION, 0);
+    PAYLOAD(NetChangePositionPacket, cp, p);
+    CHECK(p && cp.uid == 7 && cp.x == 10.0f && cp.y == 2.0f && cp.z == 3.0f && cp.recon && cp.stop_momentum && cp.has_direction && cp.direction == 1,
+          "chgp sockB -> CHANGE_POSITION sid 7");
+    p = find_in(NET_PACKET_CHANGE_POSITION, 1);
+    PAYLOAD(NetChangePositionPacket, cp2, p);
+    CHECK(p && cp2.uid == 9 && cp2.x == -4.0f && cp2.z == 8.0f && !cp2.has_direction && !cp2.stop_momentum && !find_in(NET_PACKET_CHANGE_POSITION, 2),
+          "chgp sockA -> us; a sid as the id finds nobody");
+    clear();
+    feed(&link, "tm", (KrunkerValue[]) {KRUNKER_V_NUM(9), KRUNKER_V_NUM(2)}, 2);
+    p = find_in(NET_PACKET_TEAM, 0);
+    PAYLOAD(NetTeamPacket, tmp, p);
+    CHECK(p && tmp.uid == 9 && tmp.team == 2 && tmp.health == 45.0f && tmp.max_health == 100, "tm -> TEAM (health kept)");
+    feed(&link, "tm", (KrunkerValue[]) {KRUNKER_V_NUM(4242), KRUNKER_V_NUM(1)}, 2);
+    CHECK(!find_in(NET_PACKET_TEAM, 1), "tm for an unknown sid: nothing");
+    clear();
+    feed(&link, "wep", (KrunkerValue[]) {KRUNKER_V_NUM(5)}, 1);
+    p = find_in(NET_PACKET_OBJECTIVE, 0);
+    PAYLOAD(NetObjectivePacket, ob, p);
+    CHECK(p && ob.kind == NET_OBJECTIVE_WEAPON && ob.value == 5, "wep -> OBJECTIVE weapon 5");
+    feed(&link, "rfl", NULL, 0);
+    p = find_in(NET_PACKET_REFILL, 0);
+    CHECK(p && p->length == 0, "rfl -> REFILL");
+    feed(&link, "gsc", (KrunkerValue[]) {KRUNKER_V_NUM(3)}, 1);
+    CHECK(link.game_state == 3, "gsc -> game_state");
+    feed(&link, "spk", (KrunkerValue[]) {KRUNKER_V_STR("speedBoost"), KRUNKER_V_NUM(3)}, 2);
+    p = find_in(NET_PACKET_EXT, 0);
+    memset(&sb, 0, sizeof(sb));
+    if (p && net_ext_unpack(p->payload, p->length, &sub, &body, &blen) && blen == sizeof(sb)) memcpy(&sb, body, sizeof(sb));
+    CHECK(p && sub == NET_EXT_PLAYER_SPEED_BOOST && sb.boost == 3.0f && sb.silent, "spk speedBoost -> silent EXT speed boost");
+    clear();
+    // rg with a class change: the class loadout (primary, secondary, knife; full ammo) and its health
+    KrunkerValue items[19];
+    for (int i = 0; i < 19; i++) items[i] = KRUNKER_V_NUM(-1);
+    items[14] = KRUNKER_V_NUM(4);
+    items[15] = KRUNKER_V_NUM(1);
+    feed(&link, "rg", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_BOOL(0), KRUNKER_V_ARRAY(items, 19)}, 3);
+    CHECK(!find_in(NET_PACKET_LOADOUT, 0) && !find_in(NET_PACKET_TEAM, 0), "rg without a class change: cosmetics only");
+    feed(&link, "rg", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_BOOL(1), KRUNKER_V_ARRAY(items, 19)}, 3);
+    p = find_in(NET_PACKET_LOADOUT, 0);
+    PAYLOAD(NetLoadoutPacket, lo, p);
+    CHECK(p && lo.uid == 7 && lo.count == 3 && lo.weapons[0] == 3 && lo.weapons[1] == 4 && lo.weapons[2] == WEAPON_ID_KNIFE && lo.ammo[0] == 13 &&
+          lo.ammo[1] == 14 && lo.ammo[2] == 10 + WEAPON_ID_KNIFE, "rg class change -> LOADOUT (the picked secondary)");
+    p = find_in(NET_PACKET_TEAM, 0);
+    PAYLOAD(NetTeamPacket, rgt, p);
+    CHECK(p && rgt.uid == 7 && rgt.team == 2 && rgt.health == 150.0f && rgt.max_health == 150, "rg class change -> TEAM (class health)");
+    clear();
+    items[14] = KRUNKER_V_NUM(5); // not a secondary weapon: setClass falls back to 2, the Pistol
+    feed(&link, "rg", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_BOOL(1), KRUNKER_V_ARRAY(items, 19)}, 3);
+    p = find_in(NET_PACKET_LOADOUT, 0);
+    PAYLOAD(NetLoadoutPacket, lo2, p);
+    CHECK(p && lo2.count == 3 && lo2.weapons[1] == WEAPON_ID_PISTOL, "rg: a non-secondary secIndex becomes the Pistol");
+    clear();
+    // CHANGE_HEALTH: health above maxHealth raises it; resetMax sets it, also downwards (the TEAM carries it)
+    feed(&link, "h", (KrunkerValue[]) {KRUNKER_V_NUM(2000), KRUNKER_V_NUM(7)}, 2);
+    p = find_in(NET_PACKET_TEAM, 0);
+    PAYLOAD(NetTeamPacket, rai, p);
+    CHECK(p && rai.uid == 7 && rai.max_health == 2000 && rai.health == 2000.0f, "h above maxHealth raises it (TEAM)");
+    clear();
+    feed(&link, "h", (KrunkerValue[]) {KRUNKER_V_NUM(1500), KRUNKER_V_NUM(7)}, 2);
+    CHECK(find_in(NET_PACKET_HEALTH, 0) && !find_in(NET_PACKET_TEAM, 0), "h below maxHealth: no TEAM");
+    clear();
+    feed(&link, "h", (KrunkerValue[]) {KRUNKER_V_NUM(120), KRUNKER_V_NUM(7), KRUNKER_V_NIL, KRUNKER_V_NIL, KRUNKER_V_NIL, KRUNKER_V_BOOL(1)}, 6);
+    int max7 = 0;
+    for (int i = 0; i < link.player_count; i++) if (link.players[i].sid == 7) max7 = link.players[i].max_health;
+    p = find_in(NET_PACKET_TEAM, 0);
+    PAYLOAD(NetTeamPacket, rmt, p);
+    CHECK(max7 == 120 && p && rmt.uid == 7 && rmt.max_health == 120 && rmt.health == 120.0f && !find_in(NET_PACKET_TEAM, 1),
+          "h resetMax lowers maxHealth (%d)", max7);
+    clear();
+    // 00: renames by socket id; keepOpen falsy closes
+    const KrunkerValue names[] = {KRUNKER_V_STR("sockB"), KRUNKER_V_STR("Renamed"), KRUNKER_V_STR("al"), KRUNKER_V_STR("nobody"), KRUNKER_V_STR("X"),
+                                  KRUNKER_V_STR("")};
+    feed(&link, "00", (KrunkerValue[]) {KRUNKER_V_ARRAY(names, 6), KRUNKER_V_BOOL(1)}, 2);
+    p = find_in(NET_PACKET_EXT, 0);
+    NetPlayerNamePacket nm;
+    memset(&nm, 0, sizeof(nm));
+    if (p && net_ext_unpack(p->payload, p->length, &sub, &body, &blen) && blen == sizeof(nm)) memcpy(&nm, body, sizeof(nm));
+    CHECK(p && sub == NET_EXT_PLAYER_NAME && nm.uid == 7 && !strcmp(nm.name, "Renamed") && !find_in(NET_PACKET_EXT, 1) &&
+          !g_events[KRUNKER_LINK_EV_CLOSE], "00 keepOpen: one rename, no close");
+    clear();
+    feed(&link, "00", (KrunkerValue[]) {KRUNKER_V_ARRAY(NULL, 0), KRUNKER_V_BOOL(0)}, 2);
+    CHECK(g_events[KRUNKER_LINK_EV_CLOSE] == 1, "00 keepOpen false: close");
+    clear();
+    feed(&link, "00", (KrunkerValue[]) {KRUNKER_V_ARRAY(NULL, 0)}, 1);
+    CHECK(g_events[KRUNKER_LINK_EV_CLOSE] == 1, "00 without keepOpen: close");
+    clear();
+    // init: our client resets game.moveLock and its players, so do the link's locks
+    feed(&link, "lm", (KrunkerValue[]) {KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0)}, 4);
+    feed(&link, "init", (KrunkerValue[]) {KRUNKER_V_NUM(10), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0)}, 3);
+    CHECK(link.move_lock == 0 && link.noclip == 0, "init resets the locks");
+    clear();
+#undef PAYLOAD
 
     printf("%d/%d passed\n", g_pass, g_pass + g_fail);
     return g_fail ? 1 : 0;

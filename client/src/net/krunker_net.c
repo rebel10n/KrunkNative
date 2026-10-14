@@ -86,10 +86,11 @@ static struct {
     // the player's texts the socket thread needs, looked up on the main thread per join (i18n is the
     // main thread's): {0} placeholders filled with i18n_replace where they are used
     struct {
-        char joined[160], error[160], pow[200], map[160];
+        char joined[160], error[160], pow[200], map[160], closed[160];
         char ws_failed[200], ws_denied[200], ws_unreachable[200];
     } tpl;
     volatile int leave_unsupported; // the socket thread saw a map we lack: krunker_net_tick leaves the game
+    volatile int leave_closed;      // the server told us to close ("00" without keepOpen): krunker_net_tick leaves the game
 #ifdef __EMSCRIPTEN__
     EMSCRIPTEN_WEBSOCKET_T ws;
 #elif defined(KRUNKER_NATIVE_WS)
@@ -207,6 +208,9 @@ static void link_event(void *user, const KrunkerLinkEvent kind, const char *text
             break;
         case KRUNKER_LINK_EV_UNSUPPORTED: // a map our catalogue lacks: nothing to show, krunker_net_tick leaves
             K.leave_unsupported = 1;
+            break;
+        case KRUNKER_LINK_EV_CLOSE: // "00" without keepOpen: the live client closes its socket; krunker_net_tick leaves
+            K.leave_closed = 1;
             break;
         case KRUNKER_LINK_EV_JOINED:
             set_notice(0, "%s", i18n_replace(out, sizeof(out), K.tpl.joined, 1, I18N_ARGV(K.game_id)));
@@ -778,6 +782,7 @@ static void load_texts(void) {
     snprintf(K.tpl.pow, sizeof(K.tpl.pow), "%s",
              I18N("kn.kio.powUnsupported", "krunker.io's game server asked for a proof of work in a form this client cannot compute yet: it may close the game."));
     snprintf(K.tpl.map, sizeof(K.tpl.map), "%s", I18N("kn.kio.mapMissing", "Map index {0} of this official game is not in this client's catalogue: pick another lobby."));
+    snprintf(K.tpl.closed, sizeof(K.tpl.closed), "%s", I18N("kn.kio.sessionClosed", "The krunker.io game server ended this session."));
     snprintf(K.tpl.ws_failed, sizeof(K.tpl.ws_failed), "%s", I18N("kn.kio.gsFailed", "Could not connect to the krunker.io game server: {0}"));
 }
 
@@ -994,6 +999,7 @@ int krunker_net_join(Client *client, const char *game_id, const char *region) {
     K.captcha_attempts = K.captcha_sent = 0;
     K.pow_shown = 0;
     K.leave_unsupported = 0;
+    K.leave_closed = 0;
     wipe(K.captcha, sizeof(K.captcha));
     load_texts();
     matchmaker();
@@ -1055,6 +1061,14 @@ void krunker_net_tick(Client *client) {
         printf("[krunker] the game plays map index %s, not in this client's catalogue: leaving\n", index);
         krunker_net_leave(client ? client : K.client, text);
         ui_notify(text);
+        return;
+    }
+    if (K.leave_closed && K.state != KS_OFF) {
+        // "00" UPDATE_NAMES without keepOpen (game.deob.js:220322): the live client closes the socket
+        // itself; ours leaves the game the same way, with the session's end as the reason
+        K.leave_closed = 0;
+        printf("[krunker] the server ended the session (UPDATE_NAMES): closing the socket\n");
+        krunker_net_leave(client ? client : K.client, K.tpl.closed);
         return;
     }
     if (K.pow_result) { // native: the socket thread answered a "cpt"

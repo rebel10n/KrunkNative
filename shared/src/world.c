@@ -102,6 +102,7 @@ void game_change_position(Game *game, Player *player, const vec3 feet, const int
         player->velocity = (vec3) {0.0f, 0.0f, 0.0f};
         player->step_val = 0.0f;
     }
+    player_end_grapple(player); // this.endGrapple(player), unconditionally (v10 :173795)
     if (recon && game_is_authority(game)) { // doRecon: the player's own client snaps to it
         player->recon_snap = 1; // and the next tick's "l" carries the full state (net_send_reconciliation)
         const NetPositionPacket packet = {

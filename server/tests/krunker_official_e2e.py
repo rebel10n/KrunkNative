@@ -53,6 +53,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -251,8 +252,11 @@ ALTCHA = {"algorithm": "SHA-256", "challenge": hashlib.sha256((ALTCHA_SALT + str
 # ---------------------------------------------------------------- the stubs
 
 class Stub:
-    def __init__(self, mm_port, ws_port):
+    def __init__(self, mm_port, ws_port, scenario="default"):
         self.mm_port, self.ws_port = mm_port, ws_port
+        self.scenario = scenario  # "sync": after "en", play the movement-lock / correction packets (sync_phases)
+        self.frame_t = []         # time.monotonic() of every client frame (parallel to self.frames)
+        self.sent = {}            # sync: what the stub sent when (name -> time.monotonic())
         self.http_log = []      # (path, query list)
         self.ws_paths = []
         self.frames = []        # (name, args, ah) from the client
@@ -398,6 +402,7 @@ class Stub:
                             self.proto_errors.append("q firstIsn %d did not advance past %d" % (isn, last_q_isn[0]))
                         last_q_isn[0] = isn
                 self.frames.append((name, args, trailer))
+                self.frame_t.append(time.monotonic())
                 if name == "en":
                     self.got_en.set()
             stop.set()
@@ -426,7 +431,11 @@ class Stub:
                 if self.got_en.is_set() or stop.is_set():
                     break
                 await asyncio.sleep(0.1)
-            if self.got_en.is_set():
+            if self.got_en.is_set() and self.scenario == "sync":
+                await send("frs")
+                await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0))
+                await self.sync_phases(send, stop)
+            elif self.got_en.is_set():
                 await send("frs")
                 await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0))
                 await send("0", player("sockDEAD", DEAD_SID, "DeadBot", 8.0, 8.0))
@@ -453,6 +462,109 @@ class Stub:
         finally:
             stop.set()
             self.closed.set()
+
+    async def sync_phases(self, send, stop):
+        """The packet-audit clusters A / B against a live client (run_native_sync). Paced by the client's
+        own "q" frames: the lock starts once W is held, the teleport once W is let go. Throughout, an
+        "l" every 0.4 s puts us where the server has us (pos, its xDire) and acks the last isn."""
+        pos = [4.0, 0.0, 4.0]
+        yaw = [0.0]
+
+        def q_moves(since):  # the "-4" (moveDir) changes of the "q" frames received after `since`
+            out = []
+            for (name, args, _), t in zip(list(self.frames), list(self.frame_t)):
+                if name == "q" and t >= since and len(args) > 5 and isinstance(args[5], dict):
+                    out += [v for k, v in args[5].items() if k.endswith("-4")]
+            return out
+
+        async def hold(seconds, until=None):
+            end = time.monotonic() + seconds
+            while time.monotonic() < end and not stop.is_set() and not (until and until()):
+                qs = [f for f in self.frames if f[0] == "q"]
+                isn = int(qs[-1][1][1]) if qs else 0
+                await send("l", [isn, 42, pos[0], pos[1], pos[2], 0, 0, 0, yaw[0], True, False, False, 0, False, False, 0, 0, 0, 0, True,
+                                 False, 0, 0, None, 0])
+                await asyncio.sleep(0.4)
+
+        def mark(name):
+            self.sent[name] = time.monotonic()
+
+        t0 = time.monotonic()
+        await hold(12, until=lambda: any(v >= 0 for v in q_moves(t0)))  # W held
+        await hold(0.6)
+        pos[:] = [6.0, 0.0, 6.0]
+        mark("lm")
+        await send("lm", 6.0, 0.0, 6.0, 0.0)  # LOCK_MOVE: moveLock + resetPosition there
+        await hold(3.0)
+        mark("ulm")
+        await send("ulm")
+        await hold(10, until=lambda: -1 in q_moves(self.sent["ulm"] + 0.3))  # moving again, then W let go
+        await hold(0.8)
+        pos[:] = [30.0, 0.0, -12.0]
+        yaw[0] = -math.pi / 2  # changePosition's xDire = -(dir + 1) * PI / 2: the server's "l" says so from now on
+        mark("chgp")
+        await send("chgp", "sockME", 30.0, 0.0, -12.0, True, True, 0)  # findById: the socket id; dir 0 -> yaw -PI/2
+        await hold(2.0)
+        mark("tm")
+        await send("tm", MY_SID, 2)
+        await send("wep", 5)
+        await send("00", ["sockBOT", "RenamedBot", ""], True)
+        await hold(2.0)
+        # the rest of clusters A / B, at 30,-12 (the chgp spot, where every "l" keeps us): W is held
+        # again (the script's second "down W") for "lock" and "frz", which must hold us still
+        t1 = time.monotonic()
+        await hold(12, until=lambda: any(v >= 0 for v in q_moves(t1)))
+        await hold(0.8)
+        mark("lock")
+        await send("lock", True)  # LOCK_PLAYER: window.locked, no input
+        await hold(2.4)
+        mark("unlock")
+        await send("lock", False)
+        await hold(1.2)
+        mark("frz")
+        await send("frz", True)  # SET_FROZEN: !defaultMovement / !defaultVelocity
+        await hold(2.4)
+        mark("unfrz")
+        await send("frz", False)
+        await hold(1.2)
+        mark("buffs")
+        await send("noc", True)
+        await send("unl", True)
+        await send("spb", 2.5, False)
+        await send("sic", True)
+        await send("jg", MY_SID, True)
+        await send("busy", MY_SID, True)
+        await send("chrg", MY_SID, 15000)
+        await send("gsc", 3)
+        await hold(1.5)
+        mark("spk")  # SET_PLAYER_KEY undoes three of them, the packets the rest
+        await send("spk", "noclip", False)
+        await send("spk", "speedBoost", 0)
+        await send("spk", "unlimitedAmmo", False)
+        await send("jg", MY_SID, False)
+        await send("sic", False)
+        await send("busy", MY_SID, False)
+        await hold(1.5)
+        mark("rg")  # REGEN_PLAYER with a class change: Hunter (1), secIndex 2
+        await send("rg", MY_SID, True, [-1] * 14 + [2, 1, -1, -1, -1])
+        await hold(1.5)
+        mark("h")
+        await send("h", 2000, None)  # above maxHealth: it rises
+        await hold(1.2)
+        mark("hreset")
+        await send("h", 120, None, None, None, None, True)  # resetMax: it falls to 120
+        await hold(1.2)
+        mark("rfl")
+        await send("rfl")
+        await hold(1.0)
+        mark("00")
+        await send("00", [], False)  # keepOpen false: the client closes its socket
+        for _ in range(60):
+            if stop.is_set():
+                break
+            await asyncio.sleep(0.1)
+        if stop.is_set():
+            mark("closed")
 
     def start_ws(self):
         started = threading.Event()
@@ -656,9 +768,9 @@ def post(url, body, origin="https://krunker.io", ctype="text/plain"):
         return "refused"
 
 
-def launch_native(label, script_text, extra_env, args=("--krunker",), wrap=()):
+def launch_native(label, script_text, extra_env, args=("--krunker",), wrap=(), scenario="default"):
     mm, wsp = kn_proto.free_ports(2)
-    stub = Stub(mm, wsp)
+    stub = Stub(mm, wsp, scenario)
     stub.start_http()
     stub.start_ws()
     script = os.path.join(WORK, f"{label}.script")
@@ -828,6 +940,141 @@ def run_native_paste():
     # (the `type` lines of the input script are the test's echo of what it typed: not the client's)
     check_matchmaker(label, stub, [BURNT_TOKEN, PASTE_TOKEN], "\n".join(l for l in lines if "[input_script]" not in l))
     check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+
+
+SYNC_RE = re.compile(r"\[input_script\] sync t=(\d+) move_lock=(-?\d+) locked=(-?\d+) frozen=(-?\d+) boost=([-\d.]+) noclip=(-?\d+) "
+                     r"team=(-?\d+) hp=([-\d.]+)/(-?\d+) objective=(-?\d+) pos=([-\d.]+),([-\d.]+),([-\d.]+) yaw=([-\d.]+)")
+
+
+def run_native_sync():
+    """Packet-audit clusters A / B (krunker_link.c): the stub (Stub.sync_phases) locks our movement with
+    "lm" while W is held, unlocks it ("ulm"), teleports us with "chgp" (found by socket id, dir 0), then
+    "tm" (team 2), "wep" (weapon 5), an "00" rename and an "00" without keepOpen. The client's `sync`
+    probes show what it did with each; the stub's frames show what reached the wire."""
+    label = "native-sync"
+    probes = "".join("%d sync\n%d players\n" % (t, t + 10) for t in range(5000, 51000, 300))
+    script = ("0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n5000 down W\n%s"
+              "14000 up W\n20000 down W\n32000 up W\n52000 quit\n" % (PASTE_TOKEN, probes))
+    # (input script events must be in time order: W's release slots in among the probes)
+    events = sorted(script.strip().split("\n"), key=lambda l: int(l.split()[0]))
+    stub, p, out, log = launch_native(label, "\n".join(events) + "\n", {}, scenario="sync")
+    lines = finish_native(label, stub, p, out, log, timeout=240)
+    text = "\n".join(lines)
+    check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+    check(f"{label}: the server saw no ahNum / \"q\"-sequence violations", not stub.proto_errors, stub.proto_errors[:5])
+    for name in ("lm", "ulm", "chgp", "tm", "lock", "frz", "buffs", "spk", "rg", "h", "hreset", "rfl", "00"):
+        check(f"{label}: the stub got to send \"{name}\"", name in stub.sent, sorted(stub.sent))
+    sync = [m for m in (SYNC_RE.search(l) for l in lines) if m]
+    rows = [(int(m.group(1)), int(m.group(2)), float(m.group(11)), float(m.group(13)), m) for m in sync]
+
+    def near(r, x, z, eps):
+        return abs(r[2] - x) <= eps and abs(r[3] - z) <= eps
+
+    locked = [r for r in rows if r[1] == 1]
+    check(f"{label}: lm: our client is move-locked (game.moveLock)", len(locked) >= 3, len(locked))
+    check(f"{label}: lm: resetPosition put us at 6,6 and W moves nothing while locked",
+          locked and all(near(r, 6.0, 6.0, 0.05) for r in locked), [(r[0], r[2], r[3]) for r in locked if not near(r, 6.0, 6.0, 0.05)][:5])
+    last_locked = max((r[0] for r in locked), default=0)
+    after = [r for r in rows if r[0] > last_locked]
+    first_tp = next((r[0] for r in after if near(r, 30.0, -12.0, 3.0)), None)
+    free = [r for r in after if first_tp is None or r[0] < first_tp]
+    check(f"{label}: ulm: the lock ends and W moves us again", free and all(r[1] == 0 for r in free) and
+          any(not near(r, 6.0, 6.0, 0.3) for r in free), [(r[0], r[1], r[2], r[3]) for r in free][:6])
+
+    def q_after(t0, t1=None):
+        return [a for (n, a, _), t in zip(stub.frames, stub.frame_t) if n == "q" and t >= t0 and (t1 is None or t < t1)]
+
+    def moves(qs):
+        return [v for a in qs if len(a) > 5 and isinstance(a[5], dict) for k, v in a[5].items() if k.endswith("-4")]
+
+    if "lm" in stub.sent and "ulm" in stub.sent:
+        lock_moves = moves(q_after(stub.sent["lm"], stub.sent["ulm"]))
+        check(f"{label}: \"q\" while lm holds: W goes out as moveDir -1 (never a direction)",
+              -1 in lock_moves and not any(v >= 0 for v in moves(q_after(stub.sent["lm"] + 0.3, stub.sent["ulm"]))), lock_moves)
+        check(f"{label}: \"q\" after ulm: a direction again", any(v >= 0 for v in moves(q_after(stub.sent["ulm"]))))
+    tp = [r for r in rows if first_tp is not None and r[0] >= first_tp]
+    yaw_ok = [r for r in tp if abs(math.remainder(float(r[4].group(14)) + math.pi / 2, 2 * math.pi)) < 1e-3]
+    check(f"{label}: chgp (by socket id) teleported us to 30,-12", tp and near(tp[0], 30.0, -12.0, 3.0), [(r[0], r[2], r[3]) for r in tp][:3])
+    check(f"{label}: chgp dir 0 turned us to yaw -PI/2", yaw_ok, [r[4].group(14) for r in tp][:3])
+    if "chgp" in stub.sent:
+        yaws = [a[4][1] for a in q_after(stub.sent["chgp"]) if len(a) > 4 and isinstance(a[4], list) and len(a[4]) > 1]
+        check(f"{label}: the next \"q\" carries the new yaw (-1571 / 4712)", any(y in (-1571, 4712) for y in yaws), yaws[:6])
+    check(f"{label}: tm: our team is 2", any(r[4].group(7) == "2" for r in rows))
+    check(f"{label}: wep: the mode's active weapon is 5", any(r[4].group(10) == "5" for r in rows))
+    check(f"{label}: 00: the stub player is renamed", re.search(r"players t=\d+ n=\d+.* %d:RenamedBot@" % BOT_SID, text) is not None)
+    sync_rest_checks(label, stub, lines, text)
+    check(f"{label}: 00 without keepOpen: the client closed the socket", "closed" in stub.sent and
+          stub.sent["closed"] - stub.sent.get("00", 0) < 5, sorted(stub.sent))
+    check(f"{label}: ... leaving the game cleanly (no reconnect, the script ran on to quit)",
+          "the server ended the session (UPDATE_NAMES)" in text and "[krunker] leaving the official game" in text and len(stub.ws_paths) == 1 and
+          p.returncode == 0, (p.returncode, stub.ws_paths))
+
+
+SYNCP_RE = re.compile(r"\[input_script\] sync\+ t=(\d+) unl=(-?\d+) jug=(-?\d+) kranked=([-\d.]+) share=(-?\d+) throw=(-?\d+) loadout=(\S+)")
+
+
+def sync_rest_checks(label, stub, lines, text):
+    """The second half of Stub.sync_phases: lock / frz (W held), the buffs and their undoing (noc unl spb
+    sic jg busy chrg gsc, then spk), rg (a class change), h (a raise, then resetMax down) and rfl, read from
+    the client's `sync` / `sync+` probes in order (the probes run on the script clock, the stub on its own)."""
+    rows = {}
+    for line in lines:
+        m = SYNC_RE.search(line)
+        if m:
+            rows.setdefault(int(m.group(1)), {}).update(
+                t=int(m.group(1)), locked=int(m.group(3)), frozen=int(m.group(4)), boost=float(m.group(5)), noclip=int(m.group(6)),
+                hp=float(m.group(8)), max=int(m.group(9)), x=float(m.group(11)), z=float(m.group(13)))
+        m = SYNCP_RE.search(line)
+        if m:
+            rows.setdefault(int(m.group(1)), {}).update(
+                unl=int(m.group(2)), jug=int(m.group(3)), kranked=float(m.group(4)), share=int(m.group(5)), throw=int(m.group(6)),
+                loadout=m.group(7))
+    seq = [rows[t] for t in sorted(rows) if "x" in rows[t] and "unl" in rows[t]]
+
+    def first(pred, start=0):
+        return next((i for i in range(start or 0, len(seq)) if pred(seq[i])), None)
+
+    def at_tp(r, eps=0.05):
+        return abs(r["x"] - 30.0) <= eps and abs(r["z"] + 12.0) <= eps
+
+    def held_still(key):  # rows while `key` is set, from 0.5 s after it came (the next "l" undid what W did before it)
+        i = first(lambda r: r[key] == 1)
+        j = first(lambda r: r[key] == 0, i) if i is not None else None
+        if i is None or j is None:
+            return i, j, None
+        return i, j, [r for r in seq[i:j] if r["t"] >= seq[i]["t"] + 500]
+
+    def xz(rs):
+        return [(r["t"], r["x"], r["z"]) for r in rs or []]
+
+    i, j, still = held_still("locked")
+    check(f"{label}: lock: lockPlayer set, then cleared", i is not None and j is not None, (i, j))
+    before = seq[max(0, i - 4):i] if i is not None else []
+    check(f"{label}: lock: W moved us just before it (the hold is real)", any(not at_tp(r, 0.3) for r in before), xz(before))
+    check(f"{label}: lock: W moves nothing while locked", still and all(at_tp(r) for r in still), xz(still)[:6])
+    if "lock" in stub.sent and "unlock" in stub.sent:
+        qs = [a for (n, a, _), t in zip(stub.frames, stub.frame_t) if n == "q" and stub.sent["lock"] + 0.3 <= t < stub.sent["unlock"]]
+        mv = [v for a in qs if len(a) > 5 and isinstance(a[5], dict) for k, v in a[5].items() if k.endswith("-4")]
+        check(f"{label}: \"q\" while locked: no direction", qs and not any(v >= 0 for v in mv), mv[:8])
+    i, j, still = held_still("frozen")
+    check(f"{label}: frz: frozen set, then cleared", i is not None and j is not None, (i, j))
+    check(f"{label}: frz: W moves nothing while frozen", still and all(at_tp(r) for r in still), xz(still)[:6])
+    b = first(lambda r: r["noclip"] == 1 and abs(r["boost"] - 2.5) < 1e-3 and r["unl"] == 1 and r["jug"] == 1 and r["share"] == 1 and r["kranked"] > 0)
+    check(f"{label}: noc / unl / spb / sic / jg / chrg: noclip, unlimited ammo, boost 2.5, sharing, juggernaut, kranked", b is not None,
+          [(r["t"], r["noclip"], r["boost"], r["unl"], r["jug"], r["share"], r["kranked"]) for r in seq if r["noclip"] or r["boost"]][:4])
+    u = first(lambda r: r["noclip"] == 0 and r["boost"] == 0 and r["unl"] == 0 and r["jug"] == 0 and r["share"] == 0, b) if b is not None else None
+    check(f"{label}: spk noclip / speedBoost / unlimitedAmmo (and jg / sic off) undo them", u is not None)
+    check(f"{label}: busy and gsc reached the link", "busy: sid %d busy" % MY_SID in text and "busy: sid %d back" % MY_SID in text and
+          "gsc: game state 3" in text)
+    g = first(lambda r: r["hp"] == 60 and r["max"] == 60 and r["loadout"] == "0/2/12", u) if u is not None else None
+    check(f"{label}: rg class change: Hunter's loadout (0 / Pistol / Knife) and 60 / 60 health", g is not None,
+          [(r["t"], r["hp"], r["max"], r["loadout"]) for r in seq[u or 0:]][:24:3])
+    h = first(lambda r: r["hp"] == 2000 and r["max"] == 2000, g) if g is not None else None
+    check(f"{label}: h above maxHealth raises it (2000 / 2000)", h is not None)
+    hr = first(lambda r: r["hp"] == 120 and r["max"] == 120, h) if h is not None else None
+    check(f"{label}: h resetMax lowers maxHealth (120 / 120)", hr is not None)
+    ingame = [r for r in seq[hr:] if r["throw"] != -1] if hr is not None else []  # (-1: we left the game)
+    check(f"{label}: rfl: the knife is back (canThrow)", ingame and all(r["throw"] == 1 for r in ingame))
 
 
 def run_native_lobby():
@@ -1312,6 +1559,7 @@ def main():
     if ONLY in ("", "native") and os.path.isfile(f"{BUILD}/client_bin"):
         run_native()
         run_native_paste()
+        run_native_sync()
         run_native_lobby()
         run_native_optout()
         ran = True
