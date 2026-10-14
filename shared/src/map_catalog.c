@@ -75,6 +75,9 @@ static const MapCatalogEntry k_catalog[] = {
     CUSTOM("SniperRoyale2", "SniperRoyale2", "Community", "https://www.dropbox.com/s/0h3mnvii1nua0h9/Logo.zip?dl=0"),
     CUSTOM("Test", "Test", "Community", ""),
     CUSTOM("Verb_Arena", "Verb_Arena", "Community", "https://www.dropbox.com/s/ejrn99ayvddiq45/Verb%20Mod%20Updated%207April2021.zip?dl=0"),
+    // v10's FTUE (first-time user experience) bot tutorial map (game.deob.js config.maps bot_ftue_v2,
+    // "Mini Industry"); fetched from krunker.io. Keyed in ASCII order: "Verb_Arena" < "bot_ftue_v2" < "eterno_jump".
+    CUSTOM("bot_ftue_v2", "Mini Industry", "Community", ""),
     CUSTOM("eterno_jump", "eterno_jump", "Community", ""),
     CUSTOM("slide_moonlight", "slide_moonlight", "Community", ""),
     CUSTOM("zombie_high", "Zombie_High", "IamFiercer", "https://user-assets.krunker.io/md23677/mod.zip"),
@@ -120,14 +123,14 @@ static const char *const k_games_popular[] = {
     "311_shipyard", "311_freight", "311_industry", "311_kanji", "311_littletown", "311_burg", "311_citadel", "311_evacuation",
     "zombie_high", "152_sandstorm", "152_shipyard", "152_subzero", "152_undergrowth", "slide_moonlight", "152_burg",
     "152_freight", "152_kanji", "152_littletown", "152_lostworld", "SniperRoyale2", "Test", "Verb_Arena", "eterno_jump",
-    "Krunk_Plaza", "Slide_Neon_Stage", "Bhop_VIP", "ClashRoyale", "ESP_Parkour", "FortniteTiltedT",
+    "Krunk_Plaza", "Slide_Neon_Stage", "Bhop_VIP", "ClashRoyale", "ESP_Parkour", "FortniteTiltedT", "bot_ftue_v2",
 };
 static const char *const k_games_new[] = {
     "311_subzero", "311_undergrowth", "311_newtown", "311_oasis", "311_sandstorm", "311_shipyard", "311_soul_sanctum",
     "311_industry", "311_kanji", "311_littletown", "311_lostworld", "311_citadel", "311_evacuation", "311_freight", "311_burg",
     "152_shipyard", "152_subzero", "152_undergrowth", "slide_moonlight", "zombie_high", "152_freight", "152_kanji",
     "152_littletown", "152_lostworld", "152_sandstorm", "Test", "Verb_Arena", "eterno_jump", "152_burg",
-    "Slide_Neon_Stage", "SniperRoyale2", "ClashRoyale", "ESP_Parkour", "FortniteTiltedT", "Krunk_Plaza", "Bhop_VIP",
+    "Slide_Neon_Stage", "SniperRoyale2", "ClashRoyale", "ESP_Parkour", "FortniteTiltedT", "Krunk_Plaza", "Bhop_VIP", "bot_ftue_v2",
 };
 
 // Old names that still resolve (KrunkNative only): the catalogue keys before the v7 maps took

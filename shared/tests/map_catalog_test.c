@@ -147,8 +147,8 @@ static void test_game_init_all(void) {
 int main(const int argc, char **argv) {
     const int verbose = argc > 1 && !strcmp(argv[1], "-v");
     const size_t count = map_catalog_count();
-    CHECK(MAP_CATALOG_OFFICIAL_COUNT == 32 && count == 32 + 12 + 15 + 9,
-          "catalogue has %zu maps: v7.1.4's 32 + 12 community + 15 311_ + 9 152_", count);
+    CHECK(MAP_CATALOG_OFFICIAL_COUNT == 32 && count == 32 + 13 + 15 + 9,
+          "catalogue has %zu maps: v7.1.4's 32 + 13 community + 15 311_ + 9 152_", count);
 
     // official maps: catalogue index == v7.1.4 mapIndex; keys unique; community maps in readdir
     // order, then the v3.1.1 official maps (311_), then its old_* maps (152_)
