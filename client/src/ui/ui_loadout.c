@@ -472,27 +472,51 @@ static OwnedSkin *owned_skins(int *count, const int by_rarity_only) {
     return out;
 }
 
-// ent[1]: selectedSprayIndex as a v7.1.4 store index (players.spray falls back to 2482 for
-// anything that is not a SPRAY item). KrunkNative's default sprays (v3.1.1's Game.sprays, picks
-// 0..52) are the free store items 2482 + i; Random (-2) is one of them per ENT. A type-4 store
-// spray only while it is owned (offline: all are), anything else is the default 2482.
-int ui_loadout_spray(void) {
-    const int pick = sel(SEL_SPRAY);
-    if (pick == -2) return store_spray_from_legacy(rand() % SPRAYS_BASE_COUNT);
-    if (pick >= 0 && pick < SPRAYS_BASE_COUNT) return store_spray_from_legacy(pick);
-    const ViewerSkin *skin = store_skin(pick);
-    if (!skin || skin->type != 4) return SPRAY_DEFAULT_INDEX;
-    if (all_skins_unlocked()) return pick;
-    int n = 0, owned = 0;
-    OwnedSkin *skins = owned_skins(&n, 0);
-    for (int i = 0; i < n && !owned; i++) owned = skins[i].ind == pick;
-    free(skins);
-    return owned ? pick : SPRAY_DEFAULT_INDEX;
+// store.skins items with `free` (and not blocked) of type SPRAY: v10's list of free sprays (v10
+// getSkins(account, true) adds them to everyone's own, guests included).
+static int free_spray(const ViewerSkin *s) {
+    return s && s->type == 4 && (s->flags & VS_FREE) && !(s->flags & VS_BLOCKED);
 }
 
-// updateSprayWheel: the owned SPRAY items other than the equipped one (acc.skins order; v7 puts the
-// favourites first, KrunkNative keeps no favourites), at most SPRAY_WHEEL_MAX, then the equipped
-// spray (sprayIndex <= 0 -> 2482). Returns the count written to `out` (<= max).
+// A free spray outside KrunkNative's own 0..52 picks (v3.1.1's Game.sprays = store 2482 + i), which
+// Select Spray lists by name (BASE_SPRAYS) instead.
+static int free_store_spray(const int index) {
+    return (index < SPRAY_DEFAULT_INDEX || index >= SPRAY_DEFAULT_INDEX + SPRAYS_BASE_COUNT) && free_spray(store_skin(index));
+}
+
+// getRandomOwnedSkin(null, 4) (v10:10178643): one of the account's sprays, the free ones included
+// (offline mode: every spray); -1 for a guest (players.spray then sprays 2482).
+static int random_owned_spray(void) {
+    if (!account_get() && !all_skins_unlocked()) return -1;
+    int n = 0, matches = 0, pick = -1;
+    OwnedSkin *owned = owned_skins(&n, 0);
+    for (int i = 0; i < n; i++) {
+        const ViewerSkin *s = store_skin(owned[i].ind);
+        if (s && s->type == 4 && !free_spray(s) && rand() % ++matches == 0) pick = owned[i].ind; // reservoir sample
+    }
+    free(owned);
+    for (int i = 0; i < g_viewer_skin_count; i++) {
+        if (free_spray(store_skin(i)) && rand() % ++matches == 0) pick = i;
+    }
+    return pick;
+}
+
+// ent[1]: selectedSprayIndex, as v10's ENTER_GAME sends it: the saved store index (-2 Random:
+// random_owned_spray). The client does not check ownership: the server's players.spray keeps a
+// free spray or one canUseSkin allows (the account owns it), anything else sprays 2482
+// (shared/src/social_v7.c game_spray_pick). KrunkNative's own picks 0..52 are the free store items
+// 2482 + i.
+int ui_loadout_spray(void) {
+    const int pick = sel(SEL_SPRAY);
+    if (pick == -2) return random_owned_spray();
+    if (pick >= 0 && pick < SPRAYS_BASE_COUNT) return store_spray_from_legacy(pick);
+    return pick;
+}
+
+// updateSprayWheel: the account's SPRAY items other than the equipped one (acc.skins order, then
+// the free sprays: getSkins(account, true); v7 puts the favourites first, KrunkNative keeps no
+// favourites), at most SPRAY_WHEEL_MAX, then the equipped spray (sprayIndex <= 0 -> 2482).
+// Returns the count written to `out` (<= max).
 int ui_loadout_spray_wheel(int *out, const int max) {
     if (!out || max <= 0) return 0;
     const int pick = sel(SEL_SPRAY);
@@ -501,9 +525,12 @@ int ui_loadout_spray_wheel(int *out, const int max) {
     OwnedSkin *skins = owned_skins(&n, 0);
     for (int i = 0; i < n && count < SPRAY_WHEEL_MAX && count < max - 1; i++) {
         const ViewerSkin *skin = store_skin(skins[i].ind);
-        if (skin && skin->type == 4 && skins[i].ind != equipped) out[count++] = skins[i].ind;
+        if (skin && skin->type == 4 && !free_spray(skin) && skins[i].ind != equipped) out[count++] = skins[i].ind;
     }
     free(skins);
+    for (int i = 0; i < g_viewer_skin_count && count < SPRAY_WHEEL_MAX && count < max - 1; i++) {
+        if (free_spray(store_skin(i)) && i != equipped) out[count++] = i;
+    }
     const ViewerSkin *eq = store_skin(equipped);
     out[count++] = eq && eq->type == 4 ? equipped : SPRAY_DEFAULT_INDEX;
     return count;
@@ -857,7 +884,8 @@ static void gen_tab_customize(StrBuf *out) {
         const char *img_class = cs->type == 16 ? "custIconCard" : "custIcon";
         int spray_item = 0;
         const char *spray_base = cs->type < 0 ? spray_name(pick) : NULL;
-        const ViewerSkin *s = cs->type < 0 && spray_base ? NULL : (has_inventory() ? store_skin(pick) : NULL);
+        const ViewerSkin *s = cs->type < 0 && spray_base ? NULL
+                            : (has_inventory() || (cs->type < 0 && free_spray(store_skin(pick))) ? store_skin(pick) : NULL);
         if (spray_base) { // KrunkNative's default sprays (Game.sprays of v3.1.1): free items
             snprintf(v.name, sizeof(v.name), "%s", spray_base);
             char path[64];
@@ -1054,16 +1082,22 @@ static void owned_card(StrBuf *out, const OwnedSkin *o, const ViewerSkin *s, con
                weapon >= 0 ? "draggable='false' " : "", img_class, (s->flags & VS_RGB) ? " rgbHue" : "", img, o->ind, o->ind);
 }
 
-// One store spray card of Select Spray.
+// One store spray card of Select Spray (v10:10518334: a free one has a light grey border, no
+// count and "Free Spray").
 static void spray_card(StrBuf *out, const PickEntry *e, const ViewerSkin *s) {
     const char *col = rarity_color(s);
-    char img[256], anim[96] = "";
+    const int is_free = free_spray(s);
+    char img[256], anim[96] = "", style[96], count[48] = "";
     skin_thumb(e->ind, img, sizeof(img));
     if (s->frames) snprintf(anim, sizeof(anim), "animation: sprayAnm%d %gs steps(%d) infinite;", s->frames, 1 + s->frame_t / 1000.0, s->frames);
-    sb_appendf(out, "<div class='noBtnCard%s%s' style='height:158px;color:%s;border: 5px solid %s'onclick='selectSpray(%d);cancelTip()' data-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'><div class='sprayCnt'>x%d</div>",
-               s->rarity == 5 ? "" : " blackShad", rarity_anim(s) ? " rainbow" : "", col, col, e->ind, e->ind, e->cnt);
+    if (is_free) snprintf(style, sizeof(style), "border: 5px solid lightgrey");
+    else snprintf(style, sizeof(style), "color:%s;border: 5px solid %s", col, col);
+    if (!is_free) snprintf(count, sizeof(count), "<div class='sprayCnt'>x%d</div>", e->cnt);
+    sb_appendf(out, "<div class='noBtnCard%s%s' style='height:158px;%s'onclick='selectSpray(%d);cancelTip()' data-index='%d' onmouseover='createTip(this)' onmouseout='cancelTip()'>%s",
+               s->rarity == 5 ? "" : " blackShad", !is_free && rarity_anim(s) ? " rainbow" : "", style, e->ind, e->ind, count);
     sb_append_esc(out, s->name ? s->name : "");
-    sb_appendf(out, "<div class='itemOwn'>Spray</div><div draggable='false' class='sprayImg' onmouseenter='playTick()' style='background: url(&quot;%s&quot;) -1px;%s'></div></div>", img, anim);
+    sb_appendf(out, "<div class='itemOwn'>%s</div><div draggable='false' class='sprayImg' onmouseenter='playTick()' style='background: url(&quot;%s&quot;) -1px;%s'></div></div>",
+               is_free ? "Free Spray" : "Spray", img, anim);
 }
 
 static void pick_card(StrBuf *out, const int pos, void *user) {
@@ -1331,7 +1365,8 @@ static char *gen_streaks(void) {
 }
 
 // windows[8] Select Spray: Random, then every spray the player has (free ones first: the
-// default sprays; then the owned store sprays by rarity), with their frame animations.
+// default sprays, then v10's other free sprays by store index; then the owned store sprays by
+// rarity), with their frame animations.
 static char *gen_sprays(void) {
     StrBuf style = {0};
     int frames_seen[16], frames_n = 0;
@@ -1346,18 +1381,23 @@ static char *gen_sprays(void) {
     }
     int n;
     OwnedSkin *owned = owned_skins(&n, 1);
-    for (int i = 0; i < n; i++) {
-        const ViewerSkin *s = store_skin(owned[i].ind);
-        if (!s || s->type != 4) continue;
-        if (s->frames) { // UTILS.getFrameAnim(b7, "sprayAnm") and its @keyframes
-            int seen = 0;
-            for (int k = 0; k < frames_n; k++) seen |= frames_seen[k] == s->frames;
-            if (!seen && frames_n < 16) {
-                sb_appendf(&style, "@keyframes sprayAnm%d {100%%{background-position:-%dpx}}", s->frames, s->frames * 110);
-                frames_seen[frames_n++] = s->frames;
+    // v10's other free sprays (Poisn, Chwoubaka, ...), then the owned ones; a free spray an
+    // account owns (offline mode: all) is listed once, with the free ones
+    for (int pass = 0; pass < 2; pass++) {
+        for (int i = 0; i < (pass ? n : g_viewer_skin_count); i++) {
+            const int ind = pass ? owned[i].ind : i;
+            const ViewerSkin *s = store_skin(ind);
+            if (!s || s->type != 4 || (pass ? free_spray(s) : !free_store_spray(ind))) continue;
+            if (s->frames) { // UTILS.getFrameAnim(b7, "sprayAnm") and its @keyframes
+                int seen = 0;
+                for (int k = 0; k < frames_n; k++) seen |= frames_seen[k] == s->frames;
+                if (!seen && frames_n < 16) {
+                    sb_appendf(&style, "@keyframes sprayAnm%d {100%%{background-position:-%dpx}}", s->frames, s->frames * 110);
+                    frames_seen[frames_n++] = s->frames;
+                }
             }
+            pick_add(PICK_OWNED, ind, pass ? owned[i].cnt : 1);
         }
-        pick_add(PICK_OWNED, owned[i].ind, owned[i].cnt);
     }
     free(owned);
     char *st = sb_finish(&style);

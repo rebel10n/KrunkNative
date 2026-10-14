@@ -78,6 +78,8 @@ int accounts_info_tags(char tags[][24], int max); // ranked / custom / draining 
 // Skins (doc/backend.md 8.7): the coordinator's inventory of this account.
 // 1 = the player may wear store.skins index `skin` (always 1 when not enforced, guests: none).
 int accounts_owns_skin(const ClientConnection*, int skin);
+// The same for the connection playing `player` (GameHooks.can_use_skin: players.spray); 0 for bots.
+int accounts_can_use_skin(const Player*, int skin);
 // Clears cosmetics the player does not own (ENT). Returns how many were stripped.
 int accounts_filter_cosmetics(const ClientConnection*, PlayerCosmetics*, PlayerCosmeticsV7*); // unowned slots -> -1 (+ the premium hat/head, body/back rule)
 // Same for the weapon skins and the melee skin (ENT ent[2] / ent[9]).

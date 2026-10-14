@@ -269,6 +269,12 @@ static int net_game_reward(Game *game, const Player *player) {
     return accounts_reward(player);
 }
 
+// GameHooks.can_use_skin: v10 players.spray's canUseSkin, the coordinator's inventory (accounts.c).
+static int net_game_can_use_skin(const Game *game, const Player *player, const int skin) {
+    (void) game;
+    return accounts_can_use_skin(player, skin);
+}
+
 // GameHooks.progress (WP-E part 2c): v7 incStat / challenge events of account players (accounts.c).
 static void net_game_progress(Game *game, const Player *player, const int stat, const char *key, const int value, const int weapon,
                               const int streak, const int item) {
@@ -1568,8 +1574,7 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             NetSprayRequestPacket spray = {.index = -1};
             if (!client->player || packet->length != sizeof(spray)) break;
             memcpy(&spray, packet->payload, sizeof(spray));
-            const int owned = spray.index >= 0 && accounts_owns_skin(client, spray.index); // canUseSkin
-            game_player_spray_request(&g_server->game, client->player, spray.index, owned);
+            game_player_spray_request(&g_server->game, client->player, spray.index); // canUseSkin: net_game_can_use_skin
             break;
         }
         case NET_PACKET_SPAWN_REQ: { // KrunkNative Object Manager (F1 spawn menu), v7 peers
@@ -1710,6 +1715,7 @@ void net_install_game_hooks(void) {
     g_server->game.hooks.give_skin = net_game_give_skin; // season-system: found skins (accounts.c)
     g_server->game.hooks.kill = net_game_kill;           // v10 Turf Wars clan kills (accounts.c)
     g_server->game.hooks.alloc_uid = net_game_alloc_uid; // bot players (shared/src/bots.c)
+    g_server->game.hooks.can_use_skin = net_game_can_use_skin; // players.spray canUseSkin (accounts.c)
     ks_storage_install_game_hooks(&g_server->game); // WP6: Save / Load Data, Reward KR (ks_storage.c)
 }
 

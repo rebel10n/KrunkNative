@@ -435,13 +435,13 @@ static void spray_place(Game *game, Player *player, const int skin) {
 }
 
 void game_player_spray(Game *game, Player *player) {
-    game_player_spray_pick(game, player, -1, 0);
+    game_player_spray_pick(game, player, -1);
 }
 
-void game_player_spray_pick(Game *game, Player *player, const int wheel_index, const int owned) {
+void game_player_spray_pick(Game *game, Player *player, const int wheel_index) {
     if (!game || !player || !player->active || !game->map || !game_is_authority(game)) return;
     if (game->now - player->last_spray < GAME_SPRAY_TIMER) return;
-    spray_place(game, player, game_spray_pick(game, player, wheel_index, owned));
+    spray_place(game, player, game_spray_pick(game, player, wheel_index));
 }
 
 // ---------------------------------------------------------------- players.interact
@@ -716,12 +716,12 @@ void game_player_drop_all(Game *game, Player *p) {
 
 // WP-E "spry"[, index] (v7 server/index.ts handleSpray): like io_int, the queued inputs first so
 // the ray uses the look the player had when it pressed the key; nothing while the end screen shows.
-void game_player_spray_request(Game *game, Player *player, const int wheel_index, const int owned) {
+void game_player_spray_request(Game *game, Player *player, const int wheel_index) {
     if (!game || !player || !player->active || !game->map || !game_is_authority(game)) return;
     if (game->end_timer > 0.0f) return;
     player_drain_inputs(player);
     if (!player->active) return;
-    game_player_spray_pick(game, player, wheel_index, owned);
+    game_player_spray_pick(game, player, wheel_index);
 }
 
 // v3-shaped "int" (old clients, tests, bots): 0 spray, 1 interact with the target the server's own

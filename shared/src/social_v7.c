@@ -92,23 +92,17 @@ int store_spray_to_legacy(const int index) {
 
 // ---------------------------------------------------------------- spray choice and limit
 
-int game_spray_pick(const Game *game, const Player *player, const int wheel_index, const int owned) {
+int game_spray_pick(const Game *game, const Player *player, const int wheel_index) {
     AccountInfo account;
-    const int has_account = game_account_info(game, player, &account) && account.has_account;
-    const int equipped = store_spray_from_legacy(player ? player->spray_index : 0);
-    if (game && (game->is_sandbox || (has_account && account.premium))) {
-        // v7: `!account || index == null` -> the index only if it is a free spray (or any spray in
-        // the sandbox), else 2482; with an account also when canUseSkin says it is owned.
-        // KrunkNative fix: a plain "spry" (no wheel index) of a premium / sandbox player sprays the
-        // equipped spray, not 2482 (v7 only gets there when the spray key is bound apart from the
-        // wheel key).
-        if (wheel_index < 0) return store_spray(equipped) ? equipped : SPRAY_DEFAULT_INDEX;
-        const StoreSpray *spray = store_spray(wheel_index);
-        const int allowed = spray && (spray->free || game->is_sandbox);
-        if (!has_account) return allowed ? wheel_index : SPRAY_DEFAULT_INDEX;
-        return allowed || (spray && owned) ? wheel_index : SPRAY_DEFAULT_INDEX;
-    }
-    return store_spray(equipped) ? equipped : SPRAY_DEFAULT_INDEX;
+    const int sandbox = game && game->is_sandbox;
+    const int premium = game_account_info(game, player, &account) && account.has_account && account.premium;
+    // (isSandbox || account && account.premiumT > 0) && index != null || (index = player.sprayIndex)
+    const int index = (sandbox || premium) && wheel_index >= 0 ? wheel_index : store_spray_from_legacy(player ? player->spray_index : 0);
+    // skin && type == 4 && (skin.free || isSandbox) || type == 4 && canUseSkin(index, ...) || (index = 2482)
+    const StoreSpray *spray = store_spray(index);
+    if (!spray) return SPRAY_DEFAULT_INDEX;
+    if (spray->free || sandbox) return index;
+    return game && game->hooks.can_use_skin && game->hooks.can_use_skin(game, player, index) ? index : SPRAY_DEFAULT_INDEX;
 }
 
 int game_spray_limit(const Game *game, const Player *player) {

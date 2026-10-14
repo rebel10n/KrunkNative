@@ -493,9 +493,10 @@ static void test_sprays(void) {
     printf("Multi-spray test %s\n", g_failures != failures ? "FAILED" : "OK");
 }
 
-// The spray choice outside the sandbox: premium accounts choose from the wheel (free sprays, or
-// owned ones), everyone else sprays the equipped one.
-static int g_premium, g_verified;
+// The spray choice outside the sandbox (v10 players.spray): premium accounts spray the wheel's
+// index, everyone else the equipped one; either stays when it is a free spray or canUseSkin
+// (GameHooks.can_use_skin) allows it, else 2482. Guests (no hook answer): free sprays only.
+static int g_premium, g_verified, g_owned = -1;
 static int test_account_info(const Game *game, const Player *player, AccountInfo *out) {
     (void) game;
     (void) player;
@@ -503,6 +504,11 @@ static int test_account_info(const Game *game, const Player *player, AccountInfo
     out->premium = (unsigned char) g_premium;
     out->verified = (unsigned char) g_verified;
     return 1;
+}
+static int test_can_use_skin(const Game *game, const Player *player, const int skin) {
+    (void) game;
+    (void) player;
+    return skin == g_owned;
 }
 
 static void test_spray_rules(void) {
@@ -512,25 +518,45 @@ static void test_spray_rules(void) {
     Player *p = player_of(&g_clients[0]);
     const unsigned char sandbox = game->is_sandbox;
     int (*saved)(const Game*, const Player*, AccountInfo*) = game->hooks.account_info;
+    int (*saved_use)(const Game*, const Player*, int) = game->hooks.can_use_skin;
     game->is_sandbox = 0;
+    // a guest: no account, no canUseSkin
+    game->hooks.account_info = NULL;
+    game->hooks.can_use_skin = NULL;
+    p->spray_index = 3; // a v3-era ENT: Game.sprays[3] = store 2485 (free)
+    CHECK(game_spray_pick(game, p, -1) == 2485, "guest: a free legacy spray");
+    p->spray_index = 2535;
+    CHECK(game_spray_pick(game, p, -1) == 2535, "guest: a free store spray (Poisn)");
+    p->spray_index = 867;
+    CHECK(game_spray_pick(game, p, -1) == SPRAY_DEFAULT_INDEX, "guest: a paid spray -> 2482");
+    CHECK(game_spray_pick(game, p, 867) == SPRAY_DEFAULT_INDEX, "guest: the wheel index ignored");
+    // accounts
     game->hooks.account_info = test_account_info;
-    p->spray_index = 3; // a v3-era ENT: Game.sprays[3] = store 2485
+    game->hooks.can_use_skin = test_can_use_skin;
+    g_owned = 867;
+    p->spray_index = 3;
     g_premium = 0;
     CHECK(game_spray_limit(game, p) == SPRAY_MAX_DEFAULT, "maxSprays 1");
-    CHECK(game_spray_pick(game, p, 866, 1) == 2485, "no premium: the equipped spray, the wheel index ignored");
+    CHECK(game_spray_pick(game, p, 866) == 2485, "no premium: the equipped spray, the wheel index ignored");
+    p->spray_index = 867;
+    CHECK(game_spray_pick(game, p, -1) == 867, "no premium: the equipped owned spray");
+    p->spray_index = 866;
+    CHECK(game_spray_pick(game, p, -1) == SPRAY_DEFAULT_INDEX, "no premium: an equipped spray it does not own -> 2482");
     p->spray_index = 100; // a weapon skin (past the legacy 0..52)
-    CHECK(game_spray_pick(game, p, -1, 0) == SPRAY_DEFAULT_INDEX, "equipped non-spray -> 2482");
+    CHECK(game_spray_pick(game, p, -1) == SPRAY_DEFAULT_INDEX, "equipped non-spray -> 2482");
     g_premium = 1;
     CHECK(game_spray_limit(game, p) == SPRAY_MAX_PREMIUM, "maxSpraysP 2");
-    CHECK(game_spray_pick(game, p, 866, 0) == SPRAY_DEFAULT_INDEX, "premium: an unowned paid spray -> 2482");
-    CHECK(game_spray_pick(game, p, 866, 1) == 866, "premium: an owned spray");
-    CHECK(game_spray_pick(game, p, 2535, 0) == 2535, "premium: a free spray");
+    CHECK(game_spray_pick(game, p, 866) == SPRAY_DEFAULT_INDEX, "premium: an unowned paid spray -> 2482");
+    CHECK(game_spray_pick(game, p, 867) == 867, "premium: an owned spray");
+    CHECK(game_spray_pick(game, p, 2535) == 2535, "premium: a free spray");
     p->spray_index = 2489;
-    CHECK(game_spray_pick(game, p, -1, 0) == 2489, "premium plain spry: the equipped spray (KrunkNative fix)");
+    CHECK(game_spray_pick(game, p, -1) == 2489, "premium plain spry: the equipped spray");
     g_verified = 1;
     CHECK(game_spray_limit(game, p) == SPRAY_MAX_FEATURED, "featured: maxSpraysF 3");
     g_premium = g_verified = 0;
+    g_owned = -1;
     game->hooks.account_info = saved;
+    game->hooks.can_use_skin = saved_use;
     game->is_sandbox = sandbox;
     p->spray_index = 0;
     printf("Spray rule test %s\n", g_failures != failures ? "FAILED" : "OK");

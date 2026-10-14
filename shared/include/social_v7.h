@@ -103,13 +103,14 @@ int store_spray_from_legacy(int index);
 // The other way, for NET_PACKET_SPRAY to older peers (they resolve 0..52 as Game.sprays).
 int store_spray_to_legacy(int index);
 
-// players.spray(player, index): the store item a spray uses. `wheel_index` < 0 = none; `owned`:
-// canUseSkin(wheel_index) for the player's account (the server's inventory check; the sandbox
-// owns everything). Premium accounts and the sandbox choose from the wheel, everyone else sprays
-// the equipped sprayIndex, falling back to 2482.
-int game_spray_pick(const Game*, const Player*, int wheel_index, int owned);
+// players.spray(player, index) (v10.0.2 v10:7939498): the store item a spray uses. `wheel_index`
+// < 0 = none. Premium accounts and the sandbox spray the wheel's index, everyone else (and a plain
+// "spry") the equipped sprayIndex (ENT ent[1]). It stays when it is a SPRAY item that is free (or
+// any in the sandbox) or that canUseSkin allows (GameHooks.can_use_skin: the account owns it),
+// else 2482: a guest sprays free sprays only.
+int game_spray_pick(const Game*, const Player*, int wheel_index);
 // "spry" from a connection: drains the player's queued inputs, then game_player_spray_pick.
-void game_player_spray_request(Game*, Player*, int wheel_index, int owned);
+void game_player_spray_request(Game*, Player*, int wheel_index);
 // How many sprays of a player stay on the map (maxSprays / maxSpraysP / maxSpraysF).
 int game_spray_limit(const Game*, const Player*);
 

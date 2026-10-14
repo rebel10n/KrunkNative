@@ -1756,6 +1756,10 @@ typedef struct {
     // v10 Turf Wars (territorialWars.onPlayerDeath): a player died, killer NULL / the victim for
     // a suicide. The server tallies clan kills (server/src/accounts.c); NULL = nothing.
     void (*kill)(struct Game_t*, const Player *victim, const Player *killer);
+    // v10 players.spray's canUseSkin(index, store.skins, player.account, ...): 1 when the player's
+    // account may use store item `skin` (the server: the coordinator's inventory, accounts.c).
+    // NULL = no account (guests, the client mirror): only free items (shared/src/social_v7.c).
+    int (*can_use_skin)(const struct Game_t*, const Player*, int skin);
 } GameHooks;
 
 // Server projectiles (Krunker v3.1.1 src/data/projectile.js). Units per second
@@ -2063,8 +2067,8 @@ void game_player_confirm_interact(Game*, Player*, int kind); // "cnfm": kind 0 t
 void game_player_drop_weapon(Game*, Player*);  // "drpw": players.dropWeapon(player) of the weapon in hand
 void game_player_drop_all(Game*, Player*);     // dropWeapon(player, true): at a death / leave, picked weapons go back to their pickups
 void game_player_spray(Game*, Player*); // players.spray: NET_PACKET_SPRAY_V7 / NET_PACKET_SPRAY + the "spray" sound when the view ray hits a wide enough face
-// WP-E "spry"[, index] (shared/include/social_v7.h): game_spray_pick(wheel_index, owned), then players.spray
-void game_player_spray_pick(Game*, Player*, int wheel_index, int owned);
+// WP-E "spry"[, index] (shared/include/social_v7.h): game_spray_pick(wheel_index), then players.spray
+void game_player_spray_pick(Game*, Player*, int wheel_index);
 // players.js changeInteract types (the #interactMsg line and lastInteractData.type).
 typedef enum {
     GAME_INTERACT_NONE = -1,

@@ -158,12 +158,13 @@ static Spray *spray_slot(Client *client, const int uid, const int slot) {
     return spray;
 }
 
-static void spray_place(Client *client, const int uid, const int slot, const SprayDef def, const float mov_t, const float *position,
-                        const int y_rot, const int x_rot, const int z_rot) {
-    if (!client || !client->game.ready) return;
-    if (!isfinite(position[0]) || !isfinite(position[1]) || !isfinite(position[2])) return;
+// Returns 1 when the decal was placed (or moved).
+static int spray_place(Client *client, const int uid, const int slot, const SprayDef def, const float mov_t, const float *position,
+                       const int y_rot, const int x_rot, const int z_rot) {
+    if (!client || !client->game.ready) return 0;
+    if (!isfinite(position[0]) || !isfinite(position[1]) || !isfinite(position[2])) return 0;
     Spray *spray = spray_slot(client, uid, slot);
-    if (!spray) return;
+    if (!spray) return 0;
 
     BasicMaterial *material = spray->material;
     material->texture = spray_texture(def.id);
@@ -180,20 +181,23 @@ static void spray_place(Client *client, const int uid, const int slot, const Spr
     mesh->transform.rotation = (vec3) {(float) x_rot * deg, (float) y_rot * deg, (float) z_rot * deg};
     mesh->visible = 1;
     mesh_update_transform_matrix(mesh);
+    return 1;
 }
 
 void sprays_add(Client *client, const NetSprayPacket *packet) {
     if (!packet) return;
     float mov_t;
     const SprayDef def = spray_resolve(packet->spray_index, &mov_t);
-    spray_place(client, packet->uid, -1, def, mov_t, packet->position, packet->y_rot, packet->x_rot, 0);
+    if (spray_place(client, packet->uid, -1, def, mov_t, packet->position, packet->y_rot, packet->x_rot, 0))
+        printf("[sprays] decal %d skin=%d texture=textures/sprays/%d.png\n", packet->uid, packet->spray_index, def.id);
 }
 
 void sprays_add_v7(Client *client, const NetSprayV7Packet *packet) {
     if (!packet) return;
     float mov_t;
     const SprayDef def = spray_resolve_v7(packet->skin, &mov_t);
-    spray_place(client, packet->uid, packet->slot, def, mov_t, packet->position, packet->y_rot, packet->x_rot, packet->z_rot);
+    if (spray_place(client, packet->uid, packet->slot, def, mov_t, packet->position, packet->y_rot, packet->x_rot, packet->z_rot))
+        printf("[sprays] decal %d_%u skin=%d texture=textures/sprays/%d.png\n", packet->uid, (unsigned) packet->slot, packet->skin, def.id);
 }
 
 void sprays_tick(Client *client) {
