@@ -10,9 +10,13 @@ scenarios are gone (Krunker v10.0.2 is the only version); the sections below tha
 smoke (`make smoke-ui`), not a diff. KrunkNative-only
 UI with no Krunker counterpart (the `kn-*` scenarios: the Object Manager window and its HUD rack,
 the populated top-right HUD stack `kn-ingame-topright[-old]`: leaderboard, every stat counter and
-the kill feed stacked, which no v10 capture shows since the counters are off by default)
+the kill feed stacked)
 diffs against KN's own renders in `doc/ref/krunknative/` (llvmpipe, made with `--render-scenario`
-from the same scenario): a regression baseline, not a parity reference. `make uidiff` builds `client_bin`
+from the same scenario): a regression baseline, not a parity reference. The counters' parity
+references are `ingame-counters[-ds][-wide]` (capture-v10.js turns them on through v10's settings
+boot: all five, or Deaths + Streak; `-wide` with a kill feed row wider than the leaderboard, so the
+counters flow beside the float), and `menu-host-type` (`doc/ref/krunker-v10/menu/`) is the Host
+Game window with its Community Games card. `make uidiff` builds `client_bin`
 with the in-house engine (`HTML_ENGINE=ON`) and renders every scenario through the
 real client and its C UI logic (see [Rendering with client_bin](#rendering-with-client_bin)):
 

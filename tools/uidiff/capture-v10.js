@@ -150,7 +150,8 @@ const RECT_IDS = ['timerHolder', 'topLeftMatchData', 'matchInfo', 'topLeftData',
   'victorySub', 'endInfo', 'endTimer', 'endTabbedView', 'endMidHolder', 'reloadMsg', 'aimDot', 'aimRecticle', 'chatUI', 'chatUIHolder',
   'chatHolder', 'chatList', 'chatInputHolder', 'spectateUI', 'spectateHUD', 'specNames', 'specTimer', 'specGameInfo', 'specControlHolder',
   'teamScores', 'gameMessage', 'topMidHold', 'interactMsg', 'instructionHolder', 'instructions', 'menuHolder', 'windowHolder', 'uiBase',
-  'topRight', 'leaderboardHolder', 'streakVal', 'perkHolder', 'bottomRight'];
+  'topRight', 'leaderboardHolder', 'streakVal', 'perkHolder', 'bottomRight', 'killCount', 'deathCount', 'streakCount', 'kdCount', 'scoreCount',
+  'killsIcon', 'deathsIcon', 'streakIcon', 'kdIcon', 'menuWindow'];
 const RECTS = `(() => { const o = {}; for (const id of ${JSON.stringify(RECT_IDS)}) { const e = document.getElementById(id);
   if (!e) continue; const cs = getComputedStyle(e); if (cs.display === 'none' || cs.visibility === 'hidden') continue;
   const r = e.getBoundingClientRect(); if (r.width < 1 || r.height < 1) continue;
@@ -316,6 +317,54 @@ function modeScenario(name, mode, run) {
 }
 modeScenario('ingame-mode-point', 'point', async (c) => { await c.eval(PIN_GMSG('next objective 00:45')); });
 modeScenario('ingame-mode-ctf', 'ctf', async (c) => { await c.eval(PIN_GMSG('')); });
+// the top-right stat counters (#killCount, #deathCount, #streakCount, #kdCount, #scoreCount: all off
+// by default) switched on through v10's own settings boot (kro_setngss_<key>, v10:207523, then each
+// setting's set()), one sandbox kill, the figures forced to kn-ingame-counters' (3 kills, 1 death,
+// streak 3, kdVal "3" = (3 / 1).round(1).toString(), score 225). The sandbox rewrites the values
+// through paths PIN_TEXT's instance setters do not see, so FORCE_TEXT writes the text node itself
+// and puts it back whenever the page changes it. -ds: only Deaths and Streak on (the commonest pair).
+const FORCE_TEXT = (vals) => `(() => { const v = ${JSON.stringify(vals)}; let n = 0;
+  for (const id in v) { const t = document.getElementById(id); if (!t) continue; n++;
+    const put = () => { if (t.childNodes.length !== 1 || t.firstChild.nodeType !== 3 || t.firstChild.data !== v[id]) t.replaceChildren(document.createTextNode(v[id])); };
+    put(); new MutationObserver(put).observe(t, { childList: true, characterData: true, subtree: true }); }
+  return n; })()`;
+const COUNTER_VALS = { killsVal: '3', deathsVal: '1', streakVal: '3', kdVal: '3', myScoreVal: '225' };
+const COUNTER_RECTS = `(() => [...document.querySelectorAll('.topRightCounters > .statIcon')].filter(e => getComputedStyle(e).display !== 'none')
+  .map(e => { const r = e.getBoundingClientRect(); return [e.id, Math.round(r.x * 100) / 100, Math.round(r.y * 100) / 100,
+    Math.round(r.width * 100) / 100, Math.round(r.height * 100) / 100]; }))()`;
+// -wide: the kill feed's victim renamed to a long name, so #killFeed (inline-grid) is wider than the floated
+// #leaderboardHolder and sets #topRight's shrink-to-fit width: the counters then flow beside the float
+const WIDE_VICTIM = 'Wintercrystal_Humpenscrump';
+const WIDE_FEED = `(() => { const s = [...document.querySelectorAll('#killFeed .killfeedMsg span')].pop(); if (!s) return 0;
+  s.textContent = ${JSON.stringify(WIDE_VICTIM)}; return 1; })()`;
+function countersScenario(name, keys, wide) {
+  const storage = {};
+  for (const k of keys) storage['kro_setngss_' + k] = 'true';
+  scenario(name, async (c) => {
+    await withBot(c);
+    await c.eval(`(() => { try { ${SG}.players.kill(${SERVER_BOT}, ${SP}, {}); return 1; } catch (e) { return String(e.stack); } })()`);
+    await sleep(800);
+    if (wide && await c.eval(WIDE_FEED) !== 1) console.error('[capture-v10] ' + name + ': no kill feed row');
+    await c.eval(FORCE_TEXT(COUNTER_VALS));
+    await c.eval(HIDE_OVERLAY);
+    await settle(c, 800);
+    console.error('[capture-v10] ' + name + ': ' + JSON.stringify(await c.eval(COUNTER_RECTS)));
+  }, { storage });
+}
+countersScenario('ingame-counters', ['showKillC', 'showDeaths', 'showStreak', 'showKD', 'showScore']);
+countersScenario('ingame-counters-ds', ['showDeaths', 'showStreak']);
+countersScenario('ingame-counters-wide', ['showKillC', 'showDeaths', 'showStreak', 'showKD', 'showScore'], true);
+countersScenario('ingame-counters-ds-wide', ['showDeaths', 'showStreak'], true);
+// the menu's Host Game window (showWindow(42), host_type): its Community Games card draws one of
+// gamecats/c_{0,2,4,6,10,13}.png at random (gen(), v10:215179); Math.random is held at 0 for that one
+// call so the card is c_0, the banner the KrunkNative scenario pins (ui_windows.c gen_42)
+scenario('menu-host-type', async (c) => {
+  await waitSandbox(c);
+  await c.eval(flatPage('#000000'));
+  const r = await c.eval(`(() => { const rnd = Math.random; Math.random = () => 0; try { showWindow(42); return 1; } catch (e) { return String(e.stack); } finally { Math.random = rnd; } })()`);
+  if (r !== 1) console.error('[capture-v10] menu-host-type: ' + r);
+  await settle(c, 1500);
+}, { dir: 'menu' });
 // the sandbox's own game end (the "end" packet, v10's end animation + victory title)
 scenario('ingame-endscreen', async (c) => {
   await enterGame(c);
@@ -372,7 +421,7 @@ async function openPage(o) {
     await c.send('Page.enable');
     await c.setViewport(o.w, o.h);
     CURRENT_MAP = mapJson(o.map, o.mode);
-    const storage = { krunker_haslogin: 'true', consent: '1', custMap: CURRENT_MAP };
+    const storage = Object.assign({ krunker_haslogin: 'true', consent: '1', custMap: CURRENT_MAP }, o.storage || {});
     await c.send('Page.addScriptToEvaluateOnNewDocument', { source: preScript(storage) });
     log('navigate'); await c.send('Page.navigate', { url: 'https://krunker.io/' }); log('navigated');
     await sleep(o.settle);
@@ -382,7 +431,7 @@ async function openPage(o) {
 
 async function capture(sc, idx) {
   const base = +process.env.KN_CAPTURE_PORT_BASE || 9540;
-  const { c, close, errors, blocked } = await openPage({ w: sc.size[0], h: sc.size[1], port: base + (idx % 8), map: sc.map, mode: sc.mode, settle: 10000 });
+  const { c, close, errors, blocked } = await openPage({ w: sc.size[0], h: sc.size[1], port: base + (idx % 8), map: sc.map, mode: sc.mode, storage: sc.storage, settle: 10000 });
   try {
     await sc.run(c);
     const dir = path.join(OUT, sc.dir);

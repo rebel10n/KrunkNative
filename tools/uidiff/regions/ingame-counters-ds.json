@@ -1,0 +1,65 @@
+{
+  "scenario": "ingame-counters-ds",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "counters",
+      "rect": [1201, 56, 71, 29],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "a .topRightCounters line: #deathCount, #streakCount"
+    },
+    {
+      "name": "counter-boxes-top",
+      "rect": [1201, 56, 71, 6],
+      "kind": "flat",
+      "fuzz": 2,
+      "max_pct": 0.0,
+      "note": "box edges and gaps, top band"
+    },
+    {
+      "name": "counter-boxes-bottom",
+      "rect": [1201, 80, 71, 5],
+      "kind": "flat",
+      "fuzz": 2,
+      "max_pct": 0.0,
+      "note": "box edges and gaps, bottom band"
+    },
+    {
+      "name": "counter-deathCount",
+      "rect": [1202, 57, 34, 27],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 4.0,
+      "note": "#deathCount: deaths icon + value (skull icon: nearest-neighbour phase differs from Chrome's by a source row / column)"
+    },
+    {
+      "name": "counter-streakCount",
+      "rect": [1234, 57, 37, 27],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 4.0,
+      "note": "#streakCount: streak icon + value (skull icon: nearest-neighbour phase differs from Chrome's by a source row / column)"
+    },
+    {
+      "name": "leaderboard",
+      "rect": [1066, 7, 207, 48],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#leaderboardHolder: two rows"
+    },
+    {
+      "name": "killfeed",
+      "rect": [1165, 88, 108, 29],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#killFeed: You [AR] Bot"
+    }
+  ]
+}

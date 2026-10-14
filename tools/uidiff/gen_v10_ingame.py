@@ -27,8 +27,8 @@ R, pad = g.R, g.pad
 scen, regions = {}, {}
 
 
-def rects(name):
-    with open(os.path.join(g.REPO, REF, "ingame", name + ".rects.json")) as fh:
+def rects(name, ref_dir="ingame"):
+    with open(os.path.join(g.REPO, REF, ref_dir, name + ".rects.json")) as fh:
         return json.load(fh)
 
 
@@ -45,8 +45,8 @@ def state_of(v7_name, **kw):
     return st
 
 
-def add(name, state, regs, note, frames=3):
-    scen[name] = {"ref": "%s/ingame/%s.png" % (REF, name), "size": [1280, 720], "background": g.GAME_BG,
+def add(name, state, regs, note, frames=3, ref_dir="ingame"):
+    scen[name] = {"ref": "%s/%s/%s.png" % (REF, ref_dir, name), "size": [1280, 720], "background": g.GAME_BG,
                   "state": state, "frames": frames, "note": note + " Reference: the offline v10 sandbox (capture-v10.js)."}
     regions[name] = regs
 
@@ -96,6 +96,63 @@ def main():
     rc = rects("ingame-killfeed")
     add("ingame-killfeed", state_of("ingame-killfeed", scoreboard=[{"rank": 1, "name": "Local User", "score": 75, "me": True}, {"rank": 2, "name": "Bot", "score": 0}]),
         hud_regions(rc), "A kill on a sandbox bot: #killFeed under the two-row leaderboard (the +75 score pop-up and the 1 KS badge come from the kill itself, not the scenario).")
+    # the top-right stat counters (all off by default; the captures turn them on through v10's settings boot) with
+    # the capture's forced figures. No whitespace between the .statIcon siblings in v10's markup: the dark gap
+    # between two grey boxes is the two .greyInner 3 px margins inside each .statIcon (main.css)
+    counter_ids = (("killCount", "kills"), ("deathCount", "deaths"), ("streakCount", "streak"), ("kdCount", "K/D"),
+                   ("scoreCount", "score"))
+    # -wide: the kill feed row wider than the floated board (the capture's WIDE_VICTIM): #topRight shrink-wraps to the
+    # feed and the counters flow beside the float, wrapping, like Chrome (CSS 2.1 9.5)
+    every = ("showKillC", "showDeaths", "showStreak", "showKD", "showScore")
+    for name, on, wide in (("ingame-counters", every, False), ("ingame-counters-ds", ("showDeaths", "showStreak"), False),
+                           ("ingame-counters-wide", every, True), ("ingame-counters-ds-wide", ("showDeaths", "showStreak"), True)):
+        rc = rects(name)
+        st = state_of("ingame-killfeed", scoreboard=[{"rank": 1, "name": "Local User", "score": 75, "me": True},
+                                                     {"rank": 2, "name": "Bot", "score": 0}])
+        st["hud"] = dict(st["hud"], kills=3, deaths=1, score=225, streak=3)
+        if wide:
+            st["killfeed"] = [dict(st["killfeed"][0], victim="Wintercrystal_Humpenscrump")]
+        st["settings"] = {k: k in on for k in ("showKillC", "showDeaths", "showStreak", "showKD", "showScore")}
+        shown = [(i, label) for i, label in counter_ids if i in rc]
+        lines = sorted({rc[i][1] for i, _ in shown})
+        regs = []
+        for n, y in enumerate(lines):
+            on_line = [i for i, _ in shown if rc[i][1] == y]
+            x0 = min(rc[i][0] for i in on_line)
+            x1 = max(rc[i][0] + rc[i][2] for i in on_line)
+            row = pad([x0, y, x1 - x0, rc[on_line[0]][3]], 2)
+            sfx = "" if len(lines) == 1 else "-%d" % (n + 1)
+            regs += [R("counters" + sfx, row, "text", "a .topRightCounters line: " + ", ".join("#" + i for i in on_line)),
+                     # geometry only: bands across the line above and below the icons / digits, nothing but the
+                     # .greyInner fills and the dark gaps between them (each .statIcon's two 3 px margins, scaled): exact
+                     R("counter-boxes-top" + sfx, [row[0], row[1], row[2], 6], "flat", "box edges and gaps, top band",
+                       fuzz=2, max_pct=0.0),
+                     R("counter-boxes-bottom" + sfx, [row[0], row[1] + row[3] - 5, row[2], 5], "flat",
+                       "box edges and gaps, bottom band", fuzz=2, max_pct=0.0)]
+        for i, label in shown:
+            # the skulls (img/skull_0..3.png) are 32 / 64 px pixel art drawn at 24 css px * 0.579 with image-rendering:
+            # pixelated: Chrome and the engine pick a different source row / column now and then (nearest-neighbour phase
+            # at the same snapped rect, the engine's GL sampling); the material-icon star is not affected
+            skull = i != "scoreCount"
+            regs.append(R("counter-" + i, pad(rc[i], 1), "text", "#%s: %s icon + value%s" % (
+                i, label, " (skull icon: nearest-neighbour phase differs from Chrome's by a source row / column)" if skull
+                else ""), max_pct=4.0 if skull else None))
+        regs += [R("leaderboard", pad(rc["leaderboardHolder"], 2), "text", "#leaderboardHolder: two rows"),
+                 R("killfeed", pad(rc["killFeed"], 2), "text", "#killFeed: You [AR] " + st["killfeed"][0]["victim"])]
+        add(name, st, regs, "Top-right stat counters on (%s), 3 kills / 1 death / streak 3 / K/D 3 / 225 score next to the "
+            "two-row leaderboard%s." % (", ".join(on), ", the kill feed's victim long enough to widen #topRight" if wide else ""))
+    rc = rects("menu-host-type", "menu")
+    with open(os.path.join(HERE, "scenarios", "host.json")) as fh:
+        st = json.load(fh)["state"]
+    st["window"] = 42
+    win = rc["menuWindow"]
+    add("menu-host-type", st,
+        [R("window", pad(win, 2), "text", "#menuWindow: Select a Server Type to Host, the five cards (outlined titles over "
+           "downscaled photos)"),
+         R("community-card", [win[0] + 204, win[1] + 48, 182, 182], "image",
+           "the Community Games card: gamecats/c_0.png (525x168) at background-size: cover, centred, under the outlined "
+           "title (v10 picks the banner at random; the capture and the scenario pin c_0)", fuzz=12, max_pct=3.0)],
+        "Host Game (showWindow(42)) over the menu.", ref_dir="menu")
     rc = rects("ingame-death")
     st = state_of("ingame-death")
     st["killcard"] = dict(st["killcard"], weapon="Semi Auto", weaponIcon="icon_8", classIndex=6)  # the v10 sandbox bot's

@@ -1,0 +1,25 @@
+{
+  "scenario": "menu-host-type",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "window",
+      "rect": [341, 238, 597, 244],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#menuWindow: Select a Server Type to Host, the five cards (outlined titles over downscaled photos)"
+    },
+    {
+      "name": "community-card",
+      "rect": [547, 288, 182, 182],
+      "kind": "image",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "the Community Games card: gamecats/c_0.png (525x168) at background-size: cover, centred, under the outlined title (v10 picks the banner at random; the capture and the scenario pin c_0)"
+    }
+  ]
+}

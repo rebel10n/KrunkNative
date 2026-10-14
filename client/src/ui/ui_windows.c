@@ -534,6 +534,26 @@ static char *gen_9(void) { // Select Spray: owned sprays signed in (ui_loadout.c
     char *owned = ui_loadout_generate(9, NULL);
     return owned ? owned : gen_static("9");
 }
+// Host Game (windows[42] host_type): the Community Games card shows a random category banner,
+// gen(): [0, 2, 4, 6, 10, 13][randInt(0, 5)] -> assets.krunker.io/img/backgrounds/gamecats/c_<n>.png
+// (v10:215179; ui/img/backgrounds/gamecats/, live_assets_v10.lock). The captured template froze c_0;
+// scenario renders keep it (uidiff menu-host-type: capture-v10.js holds v10's Math.random at 0).
+static char *gen_42(void) {
+    static const int cats[] = {0, 2, 4, 6, 10, 13};
+    static const char frozen[] = "gamecats/c_0.png";
+    const char *html = ui_windows_html("42");
+    const char *at = html ? strstr(html, frozen) : NULL;
+    if (!at) return gen_static("42");
+    int pick = rand() % 6;
+#ifdef UI_SCENARIO_SUPPORTED
+    if (ui_scenario_active()) pick = 0;
+#endif
+    StrBuf out = {0};
+    sb_append_n(&out, html, (size_t) (at - html));
+    sb_appendf(&out, "gamecats/c_%d.png", cats[pick]);
+    sb_append(&out, at + sizeof(frozen) - 1);
+    return sb_finish(&out);
+}
 static char *gen_23(void) { return hud_ui_player_list_html(); } // Player List (pListKey, hud_ui.c)
 static char *gen_13(void) { return clan_window_gen(); }
 static char *gen_14(void) { return store_window_gen(); } // Store (windows[13], store_ui.c)
@@ -575,6 +595,7 @@ static const WindowDef WINDOWS[] = {
     {39, gen_39},
     {40, gen_40},
     {41, gen_41},
+    {42, gen_42},
     {43, gen_43},
     {44, gen_44},
     {45, gen_45},

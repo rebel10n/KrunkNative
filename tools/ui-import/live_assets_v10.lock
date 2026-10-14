@@ -2834,3 +2834,18 @@ ui	img/menu-bg/2.png	https://assets.krunker.io/img/menu-bg/2.png	b9724e704b16f69
 ui	img/menu-bg/3.png	https://assets.krunker.io/img/menu-bg/3.png	2a06f688113fad814662a8aae0ab3916f216b7933c961ee51ba196cdd93bfed8	245004
 ui	img/menu-bg/8.png	https://assets.krunker.io/img/menu-bg/8.png	b85ce5b5302c17daeef770ea51c4aba913432f17909aec3664d77bd51067fac3	122073
 ui	img/menu-bg/9.png	https://assets.krunker.io/img/menu-bg/9.png	2498cb0d6336aef22935f3777180332034a039c57cb9e6a032f494b6dc8362be	1330788
+# img/backgrounds/gamecats/c_N.png: the Custom Games window's Popular Categories tiles (config.mapCatsP i, v10:216390) and the Host
+# window's Community Games card (one of c_0/2/4/6/10/13, v10:215179); the imported page only had c_1.png
+ui	img/backgrounds/gamecats/c_0.png	https://assets.krunker.io/img/backgrounds/gamecats/c_0.png	eaa9b7f6da2924cc87fc3212bbe17c496e3726d993bbee701192742b186d845c	17156
+ui	img/backgrounds/gamecats/c_2.png	https://assets.krunker.io/img/backgrounds/gamecats/c_2.png	2e75336f5bdf94120670b46f08ce2f0ee0139778e01751ed41303d576903cf4f	33065
+ui	img/backgrounds/gamecats/c_3.png	https://assets.krunker.io/img/backgrounds/gamecats/c_3.png	df919cbf7d58792ff85fdb27ab036140eaca4898d9135c89beafc79e4e2a7640	19609
+ui	img/backgrounds/gamecats/c_4.png	https://assets.krunker.io/img/backgrounds/gamecats/c_4.png	894b8bad9ec835c7cac390ce1a46aceb4fe953d6c2ad80f3c634141b5b4ff3fd	61245
+ui	img/backgrounds/gamecats/c_5.png	https://assets.krunker.io/img/backgrounds/gamecats/c_5.png	cb4411772ff396b1e915eb6ad64a2a0f76dfe258991f84e45a3f951c246a651d	36626
+ui	img/backgrounds/gamecats/c_6.png	https://assets.krunker.io/img/backgrounds/gamecats/c_6.png	a61ba979d387b48f48438709b67ccd68959c938029e4eef83cd451af34c99315	42824
+ui	img/backgrounds/gamecats/c_7.png	https://assets.krunker.io/img/backgrounds/gamecats/c_7.png	ce6ca66f9248533608b3a608287328ebf2528ec2d39c7bfb9f4bb9624fb9a7cb	26966
+ui	img/backgrounds/gamecats/c_8.png	https://assets.krunker.io/img/backgrounds/gamecats/c_8.png	2992f8736f60ca0cdd2d82ba95e6143848c901dd918cdf746dc6d3bb64184daf	27943
+ui	img/backgrounds/gamecats/c_9.png	https://assets.krunker.io/img/backgrounds/gamecats/c_9.png	6b43516b99672d70f70800327ee12be9986c12e91180582d1e7c6e1f704e76f2	37937
+ui	img/backgrounds/gamecats/c_10.png	https://assets.krunker.io/img/backgrounds/gamecats/c_10.png	aa1bfe7581697bede9ed28a90704c6c9940c5a7c32c99e820f29fceacfb8bfca	31769
+ui	img/backgrounds/gamecats/c_11.png	https://assets.krunker.io/img/backgrounds/gamecats/c_11.png	ba66728d6b92173a1ddd8e4d0d2397b7b253b93575de8f68d73fc263a454cc44	39243
+ui	img/backgrounds/gamecats/c_12.png	https://assets.krunker.io/img/backgrounds/gamecats/c_12.png	874146440050733e96b107014a26cb7bdab4f4e4ea3b6ce89c31dedea195fecc	43473
+ui	img/backgrounds/gamecats/c_13.png	https://assets.krunker.io/img/backgrounds/gamecats/c_13.png	732f2992aa5f9d079ec52e414425751080d0b766c5b3ff04b05ac875b86a6e69	26861

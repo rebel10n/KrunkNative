@@ -1,0 +1,137 @@
+{
+  "scenario": "ingame-counters-wide",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "counters-1",
+      "rect": [999, 7, 71, 29],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "a .topRightCounters line: #killCount, #deathCount"
+    },
+    {
+      "name": "counter-boxes-top-1",
+      "rect": [999, 7, 71, 6],
+      "kind": "flat",
+      "fuzz": 2,
+      "max_pct": 0.0,
+      "note": "box edges and gaps, top band"
+    },
+    {
+      "name": "counter-boxes-bottom-1",
+      "rect": [999, 31, 71, 5],
+      "kind": "flat",
+      "fuzz": 2,
+      "max_pct": 0.0,
+      "note": "box edges and gaps, bottom band"
+    },
+    {
+      "name": "counters-2",
+      "rect": [995, 38, 75, 29],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "a .topRightCounters line: #streakCount, #kdCount"
+    },
+    {
+      "name": "counter-boxes-top-2",
+      "rect": [995, 38, 75, 6],
+      "kind": "flat",
+      "fuzz": 2,
+      "max_pct": 0.0,
+      "note": "box edges and gaps, top band"
+    },
+    {
+      "name": "counter-boxes-bottom-2",
+      "rect": [995, 62, 75, 5],
+      "kind": "flat",
+      "fuzz": 2,
+      "max_pct": 0.0,
+      "note": "box edges and gaps, bottom band"
+    },
+    {
+      "name": "counters-3",
+      "rect": [1217, 69, 56, 29],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "a .topRightCounters line: #scoreCount"
+    },
+    {
+      "name": "counter-boxes-top-3",
+      "rect": [1217, 69, 56, 6],
+      "kind": "flat",
+      "fuzz": 2,
+      "max_pct": 0.0,
+      "note": "box edges and gaps, top band"
+    },
+    {
+      "name": "counter-boxes-bottom-3",
+      "rect": [1217, 93, 56, 5],
+      "kind": "flat",
+      "fuzz": 2,
+      "max_pct": 0.0,
+      "note": "box edges and gaps, bottom band"
+    },
+    {
+      "name": "counter-killCount",
+      "rect": [1000, 8, 37, 27],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 4.0,
+      "note": "#killCount: kills icon + value (skull icon: nearest-neighbour phase differs from Chrome's by a source row / column)"
+    },
+    {
+      "name": "counter-deathCount",
+      "rect": [1035, 8, 34, 27],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 4.0,
+      "note": "#deathCount: deaths icon + value (skull icon: nearest-neighbour phase differs from Chrome's by a source row / column)"
+    },
+    {
+      "name": "counter-streakCount",
+      "rect": [996, 39, 37, 27],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 4.0,
+      "note": "#streakCount: streak icon + value (skull icon: nearest-neighbour phase differs from Chrome's by a source row / column)"
+    },
+    {
+      "name": "counter-kdCount",
+      "rect": [1032, 39, 37, 27],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 4.0,
+      "note": "#kdCount: K/D icon + value (skull icon: nearest-neighbour phase differs from Chrome's by a source row / column)"
+    },
+    {
+      "name": "counter-scoreCount",
+      "rect": [1218, 70, 54, 27],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#scoreCount: score icon + value"
+    },
+    {
+      "name": "leaderboard",
+      "rect": [1066, 7, 207, 48],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#leaderboardHolder: two rows"
+    },
+    {
+      "name": "killfeed",
+      "rect": [992, 100, 281, 29],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#killFeed: You [AR] Wintercrystal_Humpenscrump"
+    }
+  ]
+}
