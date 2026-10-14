@@ -316,11 +316,9 @@ static void health_banner(void) {
         if (A.banner_kind == 2) set_banner(0, NULL);
         return;
     }
-    if (!strcmp(A.health, "degraded")) {
-        char t[400];
-        snprintf(t, sizeof(t), "AI service degraded: %s", A.health_reason[0] ? A.health_reason : "answers may ignore your messages");
-        set_banner(2, t);
-    } else if (!strcmp(A.health, "down")) {
+    // "degraded" (the service answered without the token, which works fine in practice) shows no
+    // banner - it only nagged the user. A truly "down" service still warns.
+    if (!strcmp(A.health, "down")) {
         char t[400];
         snprintf(t, sizeof(t), "AI service unavailable: %s", A.health_reason);
         set_banner(2, t);
