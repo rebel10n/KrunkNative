@@ -10,7 +10,9 @@
 // thumbnails.
 
 #include <map_catalog.h>
+#include <flavor.h>
 #include <shared.h>
+#include <strike_maps.h>
 
 #include <ctype.h>
 #include <stdio.h>
@@ -416,7 +418,9 @@ int map_sanitize_json(cJSON *map) {
 }
 
 static char *catalog_path(const size_t index) {
-    return concat(assets_path(), k_catalog[index].path);
+    // Krunker Strike plays FRVR's own copies of its pool maps (strike_maps.h); base is unchanged
+    const StrikeMap *strike = flavor_get() == FLAVOR_STRIKE ? strike_map_for_catalog(index) : NULL;
+    return concat(assets_path(), strike ? strike->path : k_catalog[index].path);
 }
 
 const cJSON *map_catalog_json(const size_t index) {
@@ -487,6 +491,14 @@ int map_catalog_index_of_json(const cJSON *json) {
 
 size_t map_catalog_rotation(int *out, const size_t max) {
     size_t n = 0;
+    if (flavor_get() == FLAVOR_STRIKE) { // Krunker Strike rotates its own pool (strike_maps.h)
+        const StrikeMap *pool = NULL;
+        const size_t count = strike_map_pool(&pool);
+        for (; n < count; n++) {
+            if (out && n < max) out[n] = pool[n].catalog_index;
+        }
+        return out && n > max ? max : n;
+    }
     for (size_t i = 0; i < CATALOG_COUNT; i++) {
         if (!k_catalog[i].rotation) continue;
         if (out && n < max) out[n] = (int) i;

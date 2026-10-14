@@ -794,6 +794,14 @@ else ()
         target_link_libraries(map_catalog_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # strike_maps_test: the Krunker Strike map pool (strike_maps.h): FRVR's seven map files load,
+    # validate and play, and the catalogue swaps them in only under FLAVOR_STRIKE
+    add_executable(strike_maps_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/strike_maps_test.c)
+    target_link_libraries(strike_maps_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(strike_maps_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # map_v7_test (map-logic WP-A): the v7.1.4 map schema, prefab table, shims, round trip and validation
     add_executable(map_v7_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/map_v7_test.c)
     target_link_libraries(map_v7_test PRIVATE m)
