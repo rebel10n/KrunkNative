@@ -190,6 +190,10 @@ int css_parse_color_item(const CssToken *tokens, int n, CssColor *out, int *cons
 CssColor css_color_rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
 /* kind CURRENT -> current, else itself. */
 CssColor css_color_resolve(CssColor c, CssColor current);
+/* color-mix(in srgb|oklab, c1 p1?, c2 p2?) of two resolved colours (premultiplied
+ * interpolation, CSS Color 5 §2); w1 = weight of c1 after percentage normalisation,
+ * alpha_mul = the result's alpha multiplier (sum of percentages < 100%). */
+CssColor css_color_mix(CssColor c1, CssColor c2, float w1, float alpha_mul, int space /* CssColorSpace */);
 
 /* Keyword tables: {"name", value} terminated by a NULL name. */
 typedef struct CssKeyword {
@@ -200,7 +204,15 @@ int css_parse_keyword(const CssToken *tokens, int n, const CssKeyword *table, in
 int css_keyword_lookup(const CssToken *tok, const CssKeyword *table, int *out);
 
 /* Per-property parsers ---------------------------------------------------- */
-int css_parse_transform(const CssToken *tokens, int n, CssTransform *out);           /* translateZ dropped (has_3d set); `none` -> count 0 */
+int css_parse_transform(const CssToken *tokens, int n, CssTransform *out);   /* translateZ(0) dropped (has_3d set); `none` -> count 0 */
+/* Transform list helpers shared by layout, paint and anim (3D-aware). */
+void css_transform_op_identity(CssTransformOp *op, const CssTransformOp *like); /* neutral op of like's kind (keeps a rotation axis) */
+int  css_transform_op_equal(const CssTransformOp *a, const CssTransformOp *b);
+int  css_transform_op_lerp(const CssTransformOp *a, const CssTransformOp *b, float t, CssTransformOp *out); /* 0: not interpolable per op */
+int  css_transform_is_3d(const CssTransform *t);   /* any op with a z / perspective component */
+/* Column-major 4x4 of the op list for a w x h border box (percentages of
+ * translate resolve against it); transform-origin NOT folded in. */
+void css_transform_to_mat4(const CssTransform *t, float w, float h, float out[16]);
 int css_parse_transform_origin(const CssToken *tokens, int n, CssLength *x, CssLength *y);
 int css_parse_position_xy(const CssToken *tokens, int n, CssLength *x, CssLength *y); /* <bg-position>: keywords, `right 8px center`, 1-4 values */
 int css_parse_box_shadow(const CssToken *tokens, int n, CssShadow *out, int *count);  /* keeps the first of a comma list; none -> 0 */
@@ -257,6 +269,43 @@ extern const CssKeyword css_kw_timing[];
 /* ------------------------------------------------------------------------- */
 
 /* Fills *c with every property's initial value (font-size 16px). */
+/* ---- @property (CSS Properties and Values API) ------------------------- */
+typedef enum CssSyntax {
+    CSS_SYNTAX_UNIVERSAL = 0,      /* "*": token stream, not interpolable     */
+    CSS_SYNTAX_NUMBER, CSS_SYNTAX_INTEGER, CSS_SYNTAX_LENGTH, CSS_SYNTAX_PERCENTAGE,
+    CSS_SYNTAX_LENGTH_PERCENTAGE, CSS_SYNTAX_COLOR, CSS_SYNTAX_ANGLE, CSS_SYNTAX_TIME
+} CssSyntax;
+
+typedef struct CssRegisteredProperty {
+    const char *name;              /* atom "--x"                              */
+    uint8_t syntax;                /* CssSyntax                               */
+    uint8_t inherits;
+    const char *initial;           /* atom of initial-value text, or NULL     */
+} CssRegisteredProperty;
+
+/* Typed value of a registered custom property (computed form). */
+typedef struct CssTypedValue {
+    uint8_t syntax;                /* CssSyntax                               */
+    float num;                     /* NUMBER / INTEGER / PERCENTAGE (0..100) / ANGLE deg / TIME s */
+    CssLength len;                 /* LENGTH / LENGTH_PERCENTAGE (em resolved by the caller) */
+    CssColor color;                /* COLOR                                   */
+} CssTypedValue;
+
+/* Registers @property `name` (the at-rule prelude, "--x") with its descriptors
+ * (raw text: syntax incl. quotes, "true"/"false", initial-value). Returns the
+ * custom property id, or CSS_PROP_INVALID when the rule is invalid (unknown or
+ * missing syntax, missing inherits, initial-value missing / not computationally
+ * independent for a non-universal syntax). A later registration of the same
+ * name replaces the earlier one (last rule wins, like Chrome's @property). */
+int css_property_register(const char *name, size_t name_len, const char *syntax, size_t syntax_len,
+                          const char *inherits, size_t inherits_len, const char *initial, size_t initial_len);
+const CssRegisteredProperty *css_property_registration(int custom_prop_id);   /* NULL: unregistered */
+void css_property_registry_clear(void);  /* new document / sheet reload */
+int  css_parse_syntax(const char *text, size_t len);   /* "'<number>'" -> CssSyntax, -1 unsupported */
+int  css_typed_value_parse(int syntax, const char *text, size_t len, float font_px, CssTypedValue *out);
+void css_typed_value_lerp(const CssTypedValue *a, const CssTypedValue *b, float t, CssTypedValue *out);
+size_t css_typed_value_format(const CssTypedValue *v, char *out, size_t cap); /* CSS text for var() substitution */
+
 void css_computed_init_defaults(CssComputed *c);
 /* The shared initial record (same contents as init_defaults). */
 const CssComputed *css_computed_initial(void);

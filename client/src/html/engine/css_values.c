@@ -116,10 +116,16 @@ const char *css_prop_name(int id)
     return NULL;
 }
 
+/* @property registrations, indexed by custom id - CSS_PROP_CUSTOM_BASE
+ * (name == NULL: unregistered).  See css_property_register(). */
+static CssRegisteredProperty g_registered[CSS_PROP_CUSTOM_MAX - CSS_PROP_CUSTOM_BASE];
+
 int css_prop_is_inherited(int id)
 {
     if (CSS_PROP_IS_LONGHAND(id)) return g_prop_inherited[id];
-    return CSS_PROP_IS_CUSTOM(id);
+    if (!CSS_PROP_IS_CUSTOM(id)) return 0;
+    const CssRegisteredProperty *r = &g_registered[id - CSS_PROP_CUSTOM_BASE];
+    return r->name ? r->inherits : 1;
 }
 
 const char *css_prop_initial_text(int id)
@@ -986,6 +992,14 @@ const CssKeyword css_kw_timing[] = {
 static const CssKeyword kw_float[] = { { "none", CSS_FLOAT_NONE }, { "left", CSS_FLOAT_LEFT }, { "right", CSS_FLOAT_RIGHT }, { NULL, 0 } };
 static const CssKeyword kw_clear[] = { { "none", CSS_CLEAR_NONE }, { "left", CSS_CLEAR_LEFT }, { "right", CSS_CLEAR_RIGHT }, { "both", CSS_CLEAR_BOTH }, { NULL, 0 } };
 static const CssKeyword kw_visibility[] = { { "visible", CSS_VISIBILITY_VISIBLE }, { "hidden", CSS_VISIBILITY_HIDDEN }, { "collapse", CSS_VISIBILITY_COLLAPSE }, { NULL, 0 } };
+static const CssKeyword kw_transform_style[] = { { "flat", CSS_TRANSFORM_STYLE_FLAT }, { "preserve-3d", CSS_TRANSFORM_STYLE_PRESERVE_3D }, { NULL, 0 } };
+static const CssKeyword kw_backface[] = { { "visible", CSS_BACKFACE_VISIBLE }, { "hidden", CSS_BACKFACE_HIDDEN }, { NULL, 0 } };
+static const CssKeyword kw_bg_box[] = { { "border-box", CSS_BG_BOX_BORDER }, { "padding-box", CSS_BG_BOX_PADDING },
+                                        { "content-box", CSS_BG_BOX_CONTENT }, { "text", CSS_BG_BOX_TEXT }, { NULL, 0 } };
+static const CssKeyword kw_mask_mode[] = { { "match-source", CSS_MASK_MODE_MATCH_SOURCE }, { "alpha", CSS_MASK_MODE_ALPHA },
+                                           { "luminance", CSS_MASK_MODE_LUMINANCE }, { NULL, 0 } };
+static const CssKeyword kw_box_orient[] = { { "horizontal", CSS_BOX_ORIENT_HORIZONTAL }, { "inline-axis", CSS_BOX_ORIENT_HORIZONTAL },
+                                            { "vertical", CSS_BOX_ORIENT_VERTICAL }, { "block-axis", CSS_BOX_ORIENT_VERTICAL }, { NULL, 0 } };
 static const CssKeyword kw_pointer_events[] = { { "auto", CSS_POINTER_EVENTS_AUTO }, { "none", CSS_POINTER_EVENTS_NONE }, { "all", CSS_POINTER_EVENTS_ALL }, { "visible", CSS_POINTER_EVENTS_AUTO }, { "painted", CSS_POINTER_EVENTS_AUTO }, { NULL, 0 } };
 static const CssKeyword kw_user_select[] = { { "auto", CSS_USER_SELECT_AUTO }, { "none", CSS_USER_SELECT_NONE }, { "text", CSS_USER_SELECT_TEXT }, { "all", CSS_USER_SELECT_ALL }, { "contain", CSS_USER_SELECT_AUTO }, { NULL, 0 } };
 static const CssKeyword kw_direction[] = { { "ltr", CSS_DIRECTION_LTR }, { "rtl", CSS_DIRECTION_RTL }, { NULL, 0 } };
@@ -1058,6 +1072,13 @@ static const NamedColor g_named_colors[] = {
     {NULL,0}
 };
 
+static uint8_t clamp_u8_fwd(double v)
+{
+    if (!(v > 0)) v = 0;
+    if (v > 255) v = 255;
+    return (uint8_t)(v + 0.5);
+}
+
 CssColor css_color_rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a)
 {
     CssColor c = { r, g, b, a, CSS_COLOR_RGBA };
@@ -1066,7 +1087,62 @@ CssColor css_color_rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a)
 
 CssColor css_color_resolve(CssColor c, CssColor current)
 {
-    return c.kind == CSS_COLOR_CURRENT ? current : c;
+    if (c.kind == CSS_COLOR_CURRENT) return current;
+    if (c.kind == CSS_COLOR_CURRENT_MIX) {
+        CssColor other = css_color_rgba(c.r, c.g, c.b, c.a);
+        if (current.kind != CSS_COLOR_RGBA) current = css_color_rgba(current.r, current.g, current.b, current.a);
+        return css_color_mix(current, other, c.mix / 200.0f, 1.0f, c.mix_space);
+    }
+    return c;
+}
+
+/* sRGB <-> OKLab (Björn Ottosson, CSS Color 4 §17). */
+static double srgb_to_linear(double v) { return v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4); }
+static double linear_to_srgb(double v) { return v <= 0.0031308 ? v * 12.92 : 1.055 * pow(v, 1.0 / 2.4) - 0.055; }
+
+static void rgb_to_oklab(const double rgb[3], double lab[3])
+{
+    const double r = srgb_to_linear(rgb[0]), g = srgb_to_linear(rgb[1]), b = srgb_to_linear(rgb[2]);
+    const double l = cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    const double m = cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const double s = cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    lab[0] = 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s;
+    lab[1] = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s;
+    lab[2] = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s;
+}
+
+static void oklab_to_rgb(const double lab[3], double rgb[3])
+{
+    double l = lab[0] + 0.3963377774 * lab[1] + 0.2158037573 * lab[2];
+    double m = lab[0] - 0.1055613458 * lab[1] - 0.0638541728 * lab[2];
+    double s = lab[0] - 0.0894841775 * lab[1] - 1.2914855480 * lab[2];
+    l = l * l * l; m = m * m * m; s = s * s * s;
+    rgb[0] = linear_to_srgb(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s);
+    rgb[1] = linear_to_srgb(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s);
+    rgb[2] = linear_to_srgb(-0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s);
+}
+
+CssColor css_color_mix(CssColor c1, CssColor c2, float w1, float alpha_mul, int space)
+{
+    const double a1 = c1.a / 255.0, a2 = c2.a / 255.0, k1 = w1, k2 = 1.0 - w1;
+    double v1[3] = { c1.r / 255.0, c1.g / 255.0, c1.b / 255.0 };
+    double v2[3] = { c2.r / 255.0, c2.g / 255.0, c2.b / 255.0 };
+    if (space == CSS_COLOR_SPACE_OKLAB) {
+        double t[3];
+        rgb_to_oklab(v1, t); memcpy(v1, t, sizeof t);
+        rgb_to_oklab(v2, t); memcpy(v2, t, sizeof t);
+    }
+    const double a = a1 * k1 + a2 * k2;
+    if (a <= 1e-9) return css_color_rgba(0, 0, 0, 0);
+    double o[3];
+    for (int i = 0; i < 3; i++) o[i] = (v1[i] * a1 * k1 + v2[i] * a2 * k2) / a;   /* premultiplied interpolation */
+    if (space == CSS_COLOR_SPACE_OKLAB) {
+        double t[3];
+        oklab_to_rgb(o, t);
+        memcpy(o, t, sizeof t);
+    }
+    return css_color_rgba(clamp_u8_fwd(o[0] * 255.0), clamp_u8_fwd(o[1] * 255.0), clamp_u8_fwd(o[2] * 255.0),
+                          clamp_u8_fwd(a * alpha_mul * 255.0));
 }
 
 static uint8_t clamp_u8(double v)
@@ -1131,6 +1207,59 @@ static double hue_to_rgb(double p, double q, double t)
     return p;
 }
 
+/* color-mix(in <space>, <color> <pct>?, <color> <pct>?) (CSS Color 5 §2): srgb and oklab,
+ * the spaces v10's sheets use (main.css .chalRewTile / .titleRow: `in srgb, currentColor 30%,
+ * transparent`).  A mix with currentColor stays CSS_COLOR_CURRENT_MIX until used.  Known
+ * gap: a percentage sum below 100% (alpha multiplier) is ignored for currentColor mixes. */
+static int parse_color_mix(const CssToken *body, int n, CssColor *out)
+{
+    CssToken t[64];
+    int m = tokens_copy_nows(body, n, t, 64);
+    int st[4], ln[4];
+    if (split_commas(t, m, st, ln, 4) != 3) return 0;
+    const CssToken *sp = t + st[0];
+    if (ln[0] < 2 || !tok_is_ident(&sp[0], "in")) return 0;
+    int space;
+    if (tok_is_ident(&sp[1], "srgb")) space = CSS_COLOR_SPACE_SRGB;
+    else if (tok_is_ident(&sp[1], "oklab")) space = CSS_COLOR_SPACE_OKLAB;
+    else return 0;
+    if (ln[0] != 2) return 0;
+    CssColor c[2];
+    float p[2];
+    int has[2] = { 0, 0 };
+    for (int k = 0; k < 2; k++) {
+        const CssToken *q = t + st[k + 1];
+        int ql = ln[k + 1], used = 0, i = 0;
+        if (ql > 0 && q[0].type == CSS_TOK_PERCENTAGE) { p[k] = q[0].num; has[k] = 1; i = 1; }
+        if (!css_parse_color_item(q + i, ql - i, &c[k], &used) || used <= 0) return 0;
+        i += used;
+        if (i < ql && !has[k] && q[i].type == CSS_TOK_PERCENTAGE) { p[k] = q[i].num; has[k] = 1; i++; }
+        if (i != ql) return 0;
+        if (has[k] && (p[k] < 0 || p[k] > 100)) return 0;
+        if (c[k].kind == CSS_COLOR_CURRENT_MIX) return 0;
+    }
+    if (!has[0] && !has[1]) { p[0] = p[1] = 50; }
+    else if (!has[0]) p[0] = 100 - p[1];
+    else if (!has[1]) p[1] = 100 - p[0];
+    const float sum = p[0] + p[1];
+    if (sum <= 0) return 0;
+    const float w1 = p[0] / sum, amul = sum < 100 ? sum / 100.0f : 1.0f;
+    const int cur0 = c[0].kind == CSS_COLOR_CURRENT, cur1 = c[1].kind == CSS_COLOR_CURRENT;
+    if (cur0 && cur1) { *out = c[0]; return 1; }
+    if (cur0 || cur1) {
+        const CssColor other = cur0 ? c[1] : c[0];
+        const float wc = cur0 ? w1 : 1.0f - w1;
+        CssColor r = other;
+        r.kind = CSS_COLOR_CURRENT_MIX;
+        r.mix = clamp_u8(wc * 200.0);
+        r.mix_space = (uint8_t)space;
+        *out = r;
+        return 1;
+    }
+    *out = css_color_mix(c[0], c[1], w1, amul, space);
+    return 1;
+}
+
 int css_parse_color_item(const CssToken *tokens, int n, CssColor *out, int *consumed)
 {
     if (n <= 0) return 0;
@@ -1150,6 +1279,13 @@ int css_parse_color_item(const CssToken *tokens, int n, CssColor *out, int *cons
             *out = css_color_rgba((uint8_t)(nc->rgb >> 16), (uint8_t)(nc->rgb >> 8), (uint8_t)nc->rgb, 255);
         }
         if (consumed) *consumed = 1;
+        return 1;
+    }
+    if (t->type == CSS_TOK_FUNCTION && tok_is_func(t, "color-mix")) {
+        int len = css_component_len(tokens, n, 0);
+        if (len < 2 || tokens[len - 1].type != CSS_TOK_RPAREN) return 0;
+        if (!parse_color_mix(tokens + 1, len - 2, out)) return 0;
+        if (consumed) *consumed = len;
         return 1;
     }
     if (t->type == CSS_TOK_FUNCTION) {
@@ -1248,30 +1384,40 @@ int css_parse_transform(const CssToken *tokens, int n, CssTransform *out)
             op.kind = CSS_TRANSFORM_TRANSLATE;
             if (!css_parse_length(as[0], al[0], lf, &op.ty)) return 0;
         } else if (tok_is_func(f, "translatez")) {
+            /* translateZ(0) (the compositing hint all over main.css) stays an identity
+             * that only sets has_3d; a non-zero z is kept for perspective / preserve-3d */
             if (argc != 1) return 0;
             CssLength z;
             if (!css_parse_length(as[0], al[0], 0, &z)) return 0;
-            keep = 0;
             r.has_3d = 1;
+            op.kind = CSS_TRANSFORM_TRANSLATE;
+            op.tz = z.px + z.em * 16.0f;
+            keep = op.tz != 0.0f;
         } else if (tok_is_func(f, "translate3d")) {
             if (argc != 3) return 0;
             op.kind = CSS_TRANSFORM_TRANSLATE;
-            if (!css_parse_length(as[0], al[0], lf, &op.tx) || !css_parse_length(as[1], al[1], lf, &op.ty)) return 0;
+            CssLength z;
+            if (!css_parse_length(as[0], al[0], lf, &op.tx) || !css_parse_length(as[1], al[1], lf, &op.ty) ||
+                !css_parse_length(as[2], al[2], 0, &z)) return 0;
+            op.tz = z.px + z.em * 16.0f;
             r.has_3d = 1;
         } else if (tok_is_func(f, "scale") || tok_is_func(f, "scale3d")) {
-            if (argc < 1 || argc > 3) return 0;
-            if (tok_is_func(f, "scale3d")) r.has_3d = 1;
+            const int s3 = tok_is_func(f, "scale3d");
+            if (s3 ? argc != 3 : (argc < 1 || argc > 2)) return 0;
+            if (s3) r.has_3d = 1;
             op.kind = CSS_TRANSFORM_SCALE;
+            op.sz = 1;
             if (!css_parse_number(as[0], al[0], &op.sx)) return 0;
             op.sy = op.sx;
             if (argc >= 2 && !css_parse_number(as[1], al[1], &op.sy)) return 0;
+            if (s3 && !css_parse_number(as[2], al[2], &op.sz)) return 0;
         } else if (tok_is_func(f, "scalex")) {
             if (argc != 1) return 0;
-            op.kind = CSS_TRANSFORM_SCALE; op.sy = 1;
+            op.kind = CSS_TRANSFORM_SCALE; op.sy = 1; op.sz = 1;
             if (!css_parse_number(as[0], al[0], &op.sx)) return 0;
         } else if (tok_is_func(f, "scaley")) {
             if (argc != 1) return 0;
-            op.kind = CSS_TRANSFORM_SCALE; op.sx = 1;
+            op.kind = CSS_TRANSFORM_SCALE; op.sx = 1; op.sz = 1;
             if (!css_parse_number(as[0], al[0], &op.sy)) return 0;
         } else if (tok_is_func(f, "scalez")) {
             if (argc != 1) return 0;
@@ -1283,8 +1429,27 @@ int css_parse_transform(const CssToken *tokens, int n, CssTransform *out)
             if (!css_parse_angle_deg(as[0], al[0], &op.angle_deg)) return 0;
         } else if (tok_is_func(f, "rotatex") || tok_is_func(f, "rotatey")) {
             if (argc != 1) return 0;
-            keep = 0;
+            op.kind = CSS_TRANSFORM_ROTATE_3D;
+            if (!css_parse_angle_deg(as[0], al[0], &op.angle_deg)) return 0;
+            if (tok_is_func(f, "rotatex")) op.axis[0] = 1; else op.axis[1] = 1;
             r.has_3d = 1;
+        } else if (tok_is_func(f, "rotate3d")) {
+            if (argc != 4) return 0;
+            op.kind = CSS_TRANSFORM_ROTATE_3D;
+            float v[3];
+            for (int k = 0; k < 3; k++) if (!css_parse_number(as[k], al[k], &v[k])) return 0;
+            if (!css_parse_angle_deg(as[3], al[3], &op.angle_deg)) return 0;
+            const float len = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+            if (len > 1e-12f) { op.axis[0] = v[0] / len; op.axis[1] = v[1] / len; op.axis[2] = v[2] / len; }
+            else { op.axis[2] = 1; op.angle_deg = 0; }   /* rotate3d(0, 0, 0, a): identity */
+            if (op.axis[0] == 0 && op.axis[1] == 0) {
+                /* about z: an ordinary 2D rotation (sign of the axis flips the angle) */
+                op.kind = CSS_TRANSFORM_ROTATE;
+                if (op.axis[2] < 0) op.angle_deg = -op.angle_deg;
+                op.axis[2] = 0;
+            } else {
+                r.has_3d = 1;
+            }
         } else if (tok_is_func(f, "skew")) {
             if (argc < 1 || argc > 2) return 0;
             op.kind = CSS_TRANSFORM_SKEW;
@@ -1304,7 +1469,16 @@ int css_parse_transform(const CssToken *tokens, int n, CssTransform *out)
             float *dst[6] = { &op.m.a, &op.m.b, &op.m.c, &op.m.d, &op.m.e, &op.m.f };
             for (int k = 0; k < 6; k++) if (!css_parse_number(as[k], al[k], dst[k])) return 0;
         } else if (tok_is_func(f, "perspective")) {
-            keep = 0;
+            if (argc != 1) return 0;
+            op.kind = CSS_TRANSFORM_PERSPECTIVE;
+            if (al[0] == 1 && tok_is_ident(as[0], "none")) op.persp = 0;
+            else {
+                CssLength d;
+                if (!css_parse_length(as[0], al[0], CSS_LENF_NONNEG, &d)) return 0;
+                op.persp = d.px + d.em * 16.0f;
+                if (op.persp < 1.0f && op.persp >= 0.0f && (d.px != 0 || d.em != 0)) op.persp = 1.0f;  /* clamped to 1px (Chrome) */
+                if (d.px == 0 && d.em == 0) op.persp = 1.0f;   /* perspective(0) acts like 1px */
+            }
             r.has_3d = 1;
         } else return 0;
         if (keep) {
@@ -1315,6 +1489,179 @@ int css_parse_transform(const CssToken *tokens, int n, CssTransform *out)
     }
     *out = r;
     return 1;
+}
+
+/* ---- transform helpers -------------------------------------------------- */
+
+static float op_sz(const CssTransformOp *op) { return op->sz == 0.0f ? 1.0f : op->sz; }   /* 0: written before sz existed (2D scale) */
+
+void css_transform_op_identity(CssTransformOp *op, const CssTransformOp *like)
+{
+    memset(op, 0, sizeof *op);
+    op->kind = like->kind;
+    switch (like->kind) {
+    case CSS_TRANSFORM_SCALE: op->sx = op->sy = op->sz = 1.0f; break;
+    case CSS_TRANSFORM_MATRIX: op->m.a = op->m.d = 1.0f; break;
+    case CSS_TRANSFORM_ROTATE_3D: memcpy(op->axis, like->axis, sizeof op->axis); break;
+    default: break;   /* translate 0 0 0, rotate 0, skew 0 0, perspective none */
+    }
+}
+
+static int len_eq(const CssLength *a, const CssLength *b)
+{
+    return a->kind == b->kind && a->px == b->px && a->pct == b->pct && a->em == b->em;
+}
+
+int css_transform_op_equal(const CssTransformOp *a, const CssTransformOp *b)
+{
+    if (a->kind != b->kind) return 0;
+    switch (a->kind) {
+    case CSS_TRANSFORM_TRANSLATE: return len_eq(&a->tx, &b->tx) && len_eq(&a->ty, &b->ty) && a->tz == b->tz;
+    case CSS_TRANSFORM_SCALE: return a->sx == b->sx && a->sy == b->sy && op_sz(a) == op_sz(b);
+    case CSS_TRANSFORM_ROTATE: return a->angle_deg == b->angle_deg;
+    case CSS_TRANSFORM_SKEW: return a->angle_deg == b->angle_deg && a->angle2_deg == b->angle2_deg;
+    case CSS_TRANSFORM_ROTATE_3D:
+        return a->angle_deg == b->angle_deg && a->axis[0] == b->axis[0] && a->axis[1] == b->axis[1] && a->axis[2] == b->axis[2];
+    case CSS_TRANSFORM_PERSPECTIVE: return a->persp == b->persp;
+    default: return memcmp(&a->m, &b->m, sizeof a->m) == 0;
+    }
+}
+
+static float lerp1(float a, float b, float t) { return a + (b - a) * t; }
+
+static void len_lerp(const CssLength *a, const CssLength *b, float t, CssLength *o)
+{
+    *o = *a;
+    o->px = lerp1(a->px, b->px, t);
+    o->pct = lerp1(a->pct, b->pct, t);
+    o->em = lerp1(a->em, b->em, t);
+    o->pct_term = a->pct_term | b->pct_term;
+}
+
+int css_transform_op_lerp(const CssTransformOp *a, const CssTransformOp *b, float t, CssTransformOp *out)
+{
+    if (a->kind != b->kind) return 0;
+    memset(out, 0, sizeof *out);
+    out->kind = a->kind;
+    switch (a->kind) {
+    case CSS_TRANSFORM_TRANSLATE:
+        len_lerp(&a->tx, &b->tx, t, &out->tx);
+        len_lerp(&a->ty, &b->ty, t, &out->ty);
+        out->tz = lerp1(a->tz, b->tz, t);
+        return 1;
+    case CSS_TRANSFORM_SCALE:
+        out->sx = lerp1(a->sx, b->sx, t);
+        out->sy = lerp1(a->sy, b->sy, t);
+        out->sz = lerp1(op_sz(a), op_sz(b), t);
+        return 1;
+    case CSS_TRANSFORM_ROTATE:
+        out->angle_deg = lerp1(a->angle_deg, b->angle_deg, t);
+        return 1;
+    case CSS_TRANSFORM_SKEW:
+        out->angle_deg = lerp1(a->angle_deg, b->angle_deg, t);
+        out->angle2_deg = lerp1(a->angle2_deg, b->angle2_deg, t);
+        return 1;
+    case CSS_TRANSFORM_ROTATE_3D:
+        /* same axis (CSS Transforms 2 §16.4: rotate3d with equal normalized axes interpolates the
+         * angle); different axes would need quaternion slerp of the decomposed matrices */
+        if (fabsf(a->axis[0] - b->axis[0]) > 1e-5f || fabsf(a->axis[1] - b->axis[1]) > 1e-5f ||
+            fabsf(a->axis[2] - b->axis[2]) > 1e-5f) {
+            if (a->angle_deg != 0.0f && b->angle_deg != 0.0f) return 0;
+        }
+        memcpy(out->axis, a->angle_deg != 0.0f ? a->axis : b->axis, sizeof out->axis);
+        out->angle_deg = lerp1(a->angle_deg, b->angle_deg, t);
+        return 1;
+    case CSS_TRANSFORM_PERSPECTIVE: {
+        /* interpolates the inverse distance (none == infinity == 0) like Chrome */
+        const float ia = a->persp > 0 ? 1.0f / a->persp : 0.0f, ib = b->persp > 0 ? 1.0f / b->persp : 0.0f;
+        const float i = lerp1(ia, ib, t);
+        out->persp = i > 1e-9f ? 1.0f / i : 0.0f;
+        return 1;
+    }
+    default:
+        out->m.a = lerp1(a->m.a, b->m.a, t); out->m.b = lerp1(a->m.b, b->m.b, t);
+        out->m.c = lerp1(a->m.c, b->m.c, t); out->m.d = lerp1(a->m.d, b->m.d, t);
+        out->m.e = lerp1(a->m.e, b->m.e, t); out->m.f = lerp1(a->m.f, b->m.f, t);
+        return 1;
+    }
+}
+
+int css_transform_is_3d(const CssTransform *t)
+{
+    for (int i = 0; i < t->count && i < CSS_MAX_TRANSFORM_OPS; i++) {
+        const CssTransformOp *op = &t->ops[i];
+        if (op->kind == CSS_TRANSFORM_ROTATE_3D || op->kind == CSS_TRANSFORM_PERSPECTIVE) return 1;
+        if (op->kind == CSS_TRANSFORM_TRANSLATE && op->tz != 0.0f) return 1;
+        if (op->kind == CSS_TRANSFORM_SCALE && op_sz(op) != 1.0f) return 1;
+    }
+    return 0;
+}
+
+/* column-major: m[col * 4 + row] */
+static void m4_identity(float m[16])
+{
+    memset(m, 0, 16 * sizeof(float));
+    m[0] = m[5] = m[10] = m[15] = 1.0f;
+}
+
+static void m4_mul(const float a[16], const float b[16], float out[16])
+{
+    float r[16];
+    for (int c = 0; c < 4; c++)
+        for (int rw = 0; rw < 4; rw++) {
+            float v = 0;
+            for (int k = 0; k < 4; k++) v += a[k * 4 + rw] * b[c * 4 + k];
+            r[c * 4 + rw] = v;
+        }
+    memcpy(out, r, sizeof r);
+}
+
+static float len_res(const CssLength *l, float ref)
+{
+    return l->kind == CSS_LEN_VALUE ? l->px + l->pct * 0.01f * ref : 0.0f;
+}
+
+void css_transform_to_mat4(const CssTransform *t, float w, float h, float out[16])
+{
+    const float d2r = 3.14159265358979f / 180.0f;
+    m4_identity(out);
+    for (int i = 0; i < t->count && i < CSS_MAX_TRANSFORM_OPS; i++) {
+        const CssTransformOp *op = &t->ops[i];
+        float k[16];
+        m4_identity(k);
+        switch (op->kind) {
+        case CSS_TRANSFORM_TRANSLATE:
+            k[12] = len_res(&op->tx, w); k[13] = len_res(&op->ty, h); k[14] = op->tz;
+            break;
+        case CSS_TRANSFORM_SCALE: k[0] = op->sx; k[5] = op->sy; k[10] = op_sz(op); break;
+        case CSS_TRANSFORM_ROTATE: {
+            const float r = op->angle_deg * d2r, c = cosf(r), s = sinf(r);
+            k[0] = c; k[1] = s; k[4] = -s; k[5] = c;
+            break;
+        }
+        case CSS_TRANSFORM_SKEW:
+            k[4] = tanf(op->angle_deg * d2r);
+            k[1] = tanf(op->angle2_deg * d2r);
+            break;
+        case CSS_TRANSFORM_MATRIX:
+            k[0] = op->m.a; k[1] = op->m.b; k[4] = op->m.c; k[5] = op->m.d; k[12] = op->m.e; k[13] = op->m.f;
+            break;
+        case CSS_TRANSFORM_ROTATE_3D: {
+            /* CSS Transforms 2 §12 rotate3d() matrix (row R, column C -> k[C * 4 + R]) */
+            const float x = op->axis[0], y = op->axis[1], z = op->axis[2];
+            const float a = op->angle_deg * d2r, sc = sinf(a * 0.5f) * cosf(a * 0.5f), sq = sinf(a * 0.5f) * sinf(a * 0.5f);
+            k[0] = 1 - 2 * (y * y + z * z) * sq;  k[4] = 2 * (x * y * sq - z * sc);    k[8] = 2 * (x * z * sq + y * sc);
+            k[1] = 2 * (x * y * sq + z * sc);     k[5] = 1 - 2 * (x * x + z * z) * sq; k[9] = 2 * (y * z * sq - x * sc);
+            k[2] = 2 * (x * z * sq - y * sc);     k[6] = 2 * (y * z * sq + x * sc);    k[10] = 1 - 2 * (x * x + y * y) * sq;
+            break;
+        }
+        case CSS_TRANSFORM_PERSPECTIVE:
+            if (op->persp > 0) k[11] = -1.0f / op->persp;
+            break;
+        default: break;
+        }
+        m4_mul(out, k, out);
+    }
 }
 
 /* ========================================================================= */
@@ -2805,7 +3152,9 @@ static int shorthand_longhands(int id, int *out)
     case CSS_PROP_BORDER_STYLE: P(BORDER_TOP_STYLE); P(BORDER_RIGHT_STYLE); P(BORDER_BOTTOM_STYLE); P(BORDER_LEFT_STYLE); break;
     case CSS_PROP_BORDER_RADIUS: P(BORDER_TOP_LEFT_RADIUS); P(BORDER_TOP_RIGHT_RADIUS); P(BORDER_BOTTOM_RIGHT_RADIUS); P(BORDER_BOTTOM_LEFT_RADIUS); break;
     case CSS_PROP_OUTLINE: P(OUTLINE_WIDTH); P(OUTLINE_STYLE); P(OUTLINE_COLOR); break;
-    case CSS_PROP_BACKGROUND: P(BACKGROUND_COLOR); P(BACKGROUND_IMAGE); P(BACKGROUND_POSITION_X); P(BACKGROUND_POSITION_Y); P(BACKGROUND_SIZE); P(BACKGROUND_REPEAT); break;
+    case CSS_PROP_BACKGROUND: P(BACKGROUND_COLOR); P(BACKGROUND_IMAGE); P(BACKGROUND_POSITION_X); P(BACKGROUND_POSITION_Y); P(BACKGROUND_SIZE); P(BACKGROUND_REPEAT);
+        P(BACKGROUND_CLIP); P(BACKGROUND_ORIGIN); break;
+    case CSS_PROP_MASK: P(MASK_IMAGE); P(MASK_POSITION); P(MASK_SIZE); P(MASK_REPEAT); P(MASK_MODE); break;
     case CSS_PROP_BACKGROUND_POSITION: P(BACKGROUND_POSITION_X); P(BACKGROUND_POSITION_Y); break;
     case CSS_PROP_ANIMATION: P(ANIMATION_NAME); P(ANIMATION_DURATION); P(ANIMATION_TIMING_FUNCTION); P(ANIMATION_DELAY); P(ANIMATION_ITERATION_COUNT); P(ANIMATION_DIRECTION); P(ANIMATION_FILL_MODE); P(ANIMATION_PLAY_STATE); break;
     case CSS_PROP_TRANSITION: P(TRANSITION_PROPERTY); P(TRANSITION_DURATION); P(TRANSITION_TIMING_FUNCTION); P(TRANSITION_DELAY); break;
@@ -2889,11 +3238,11 @@ static int expand_background(Emit *e, const CssToken *t, int m)
     if (c == 0) return 0;
     ListBuf img, posx, size, rep;
     memset(&img, 0, sizeof(img)); memset(&posx, 0, sizeof(posx)); memset(&size, 0, sizeof(size)); memset(&rep, 0, sizeof(rep));
-    int col_s = -1, col_l = 0;
+    int col_s = -1, col_l = 0, bx_o = -1, bx_c = -1;
     for (int li = 0; li < c; li++) {
         const CssToken *it = t + s[li];
         int n = l[li], i = 0;
-        int gi = -1, gil = 0, gp = -1, gpl = 0, gs = -1, gsl = 0, gr = -1, grl = 0;
+        int gi = -1, gil = 0, gp = -1, gpl = 0, gs = -1, gsl = 0, gr = -1, grl = 0, nbox = 0, box[2] = { -1, -1 };
         if (n == 0) return 0;
         while (i < n) {
             int used = 0;
@@ -2910,10 +3259,13 @@ static int expand_background(Emit *e, const CssToken *t, int m)
             }
             if (gr < 0 && css_parse_bg_repeat_item(it + i, n - i, &rx, &ry, &used)) { gr = i; grl = used; i += used; continue; }
             if (col_s < 0 && li == c - 1 && css_parse_color_item(it + i, n - i, &col, &used)) { col_s = s[li] + i; col_l = used; i += used; continue; }
-            if (tok_is_ident(&it[i], "scroll") || tok_is_ident(&it[i], "fixed") || tok_is_ident(&it[i], "local") ||
-                tok_is_ident(&it[i], "border-box") || tok_is_ident(&it[i], "padding-box") || tok_is_ident(&it[i], "content-box")) { i++; continue; }
+            if (tok_is_ident(&it[i], "scroll") || tok_is_ident(&it[i], "fixed") || tok_is_ident(&it[i], "local")) { i++; continue; }
+            if (nbox < 2 && (tok_is_ident(&it[i], "border-box") || tok_is_ident(&it[i], "padding-box") ||
+                             tok_is_ident(&it[i], "content-box") || (nbox == 1 && tok_is_ident(&it[i], "text")))) { box[nbox++] = i; i++; continue; }
             return 0;
         }
+        /* one <box>: origin and clip; two: origin then clip (the last layer's count) */
+        if (li == c - 1) { bx_o = nbox ? box[0] + s[li] : -1; bx_c = nbox ? box[nbox - 1] + s[li] : -1; }
         if (gi >= 0) lb_add(&img, it + gi, gil); else lb_add_lit(&img, "none");
         if (gp >= 0) lb_add(&posx, it + gp, gpl); else lb_add_lit(&posx, "0% 0%");
         if (gs >= 0) lb_add(&size, it + gs, gsl); else lb_add_lit(&size, "auto");
@@ -2926,6 +3278,60 @@ static int expand_background(Emit *e, const CssToken *t, int m)
     emit(e, CSS_PROP_BACKGROUND_POSITION_Y, posx.t, posx.n);
     emit(e, CSS_PROP_BACKGROUND_SIZE, size.t, size.n);
     emit(e, CSS_PROP_BACKGROUND_REPEAT, rep.t, rep.n);
+    if (bx_c >= 0) emit(e, CSS_PROP_BACKGROUND_CLIP, t + bx_c, 1); else emit_lit(e, CSS_PROP_BACKGROUND_CLIP, "border-box");
+    if (bx_o >= 0 && !tok_is_ident(&t[bx_o], "text")) emit(e, CSS_PROP_BACKGROUND_ORIGIN, t + bx_o, 1);
+    else emit_lit(e, CSS_PROP_BACKGROUND_ORIGIN, "padding-box");
+    return 1;
+}
+
+/* mask: <mask-layer># (CSS Masking 1 §7.8): image || position [/ size]? || repeat ||
+ * geometry boxes || composite || mode.  Boxes and composite are accepted and dropped
+ * (mask-clip / mask-origin / mask-composite keep their initial values). */
+static int expand_mask(Emit *e, const CssToken *t, int m)
+{
+    int s[8], l[8];
+    int c = split_commas(t, m, s, l, 8);
+    if (c == 0) return 0;
+    ListBuf img, pos, size, rep, mode;
+    memset(&img, 0, sizeof(img)); memset(&pos, 0, sizeof(pos)); memset(&size, 0, sizeof(size));
+    memset(&rep, 0, sizeof(rep)); memset(&mode, 0, sizeof(mode));
+    static const char *boxes[] = { "border-box", "padding-box", "content-box", "fill-box", "stroke-box", "view-box",
+                                   "no-clip", "add", "subtract", "intersect", "exclude", NULL };
+    for (int li = 0; li < c; li++) {
+        const CssToken *it = t + s[li];
+        int n = l[li], i = 0;
+        int gi = -1, gil = 0, gp = -1, gpl = 0, gs = -1, gsl = 0, gr = -1, grl = 0, gm = -1;
+        if (n == 0) return 0;
+        while (i < n) {
+            int used = 0, known = 0;
+            CssImage im; CssLength x, y; CssBgSize bs; uint8_t rx, ry;
+            if (gi < 0 && css_parse_image(it + i, n - i, &im, &used)) { gi = i; gil = used; i += used; continue; }
+            if (gp < 0 && parse_position(it + i, n - i, &x, &y, &used)) {
+                gp = i; gpl = used; i += used;
+                if (i < n && tok_is_delim(&it[i], '/')) {
+                    i++;
+                    if (!css_parse_bg_size_item(it + i, n - i, &bs, &used)) return 0;
+                    gs = i; gsl = used; i += used;
+                }
+                continue;
+            }
+            if (gr < 0 && css_parse_bg_repeat_item(it + i, n - i, &rx, &ry, &used)) { gr = i; grl = used; i += used; continue; }
+            if (gm < 0 && (tok_is_ident(&it[i], "alpha") || tok_is_ident(&it[i], "luminance") || tok_is_ident(&it[i], "match-source"))) { gm = i; i++; continue; }
+            for (int k = 0; boxes[k]; k++) if (tok_is_ident(&it[i], boxes[k])) known = 1;
+            if (known) { i++; continue; }
+            return 0;
+        }
+        if (gi >= 0) lb_add(&img, it + gi, gil); else lb_add_lit(&img, "none");
+        if (gp >= 0) lb_add(&pos, it + gp, gpl); else lb_add_lit(&pos, "0% 0%");
+        if (gs >= 0) lb_add(&size, it + gs, gsl); else lb_add_lit(&size, "auto");
+        if (gr >= 0) lb_add(&rep, it + gr, grl); else lb_add_lit(&rep, "repeat");
+        if (gm >= 0) lb_add(&mode, it + gm, 1); else lb_add_lit(&mode, "match-source");
+    }
+    emit(e, CSS_PROP_MASK_IMAGE, img.t, img.n);
+    emit(e, CSS_PROP_MASK_POSITION, pos.t, pos.n);
+    emit(e, CSS_PROP_MASK_SIZE, size.t, size.n);
+    emit(e, CSS_PROP_MASK_REPEAT, rep.t, rep.n);
+    emit(e, CSS_PROP_MASK_MODE, mode.t, mode.n);
     return 1;
 }
 
@@ -3225,6 +3631,7 @@ int css_expand_shorthand(int id, const CssToken *tokens, int n, int important, C
         ok = expand_border_like(&e, lh, 1, t, m, 0); break;
     case CSS_PROP_OUTLINE: ok = expand_border_like(&e, lh, 1, t, m, 1); break;
     case CSS_PROP_BACKGROUND: ok = expand_background(&e, t, m); break;
+    case CSS_PROP_MASK: ok = expand_mask(&e, t, m); break;
     case CSS_PROP_BACKGROUND_POSITION: {
         CssLength x[CSS_MAX_BG_LAYERS], y[CSS_MAX_BG_LAYERS]; int cx, cy;
         flag_full_position(t, m);
@@ -3394,7 +3801,22 @@ static void zoom_non_inherited(CssComputed *c, float k)
         CssTransformOp *op = &c->transform.ops[i];
         if (op->kind == CSS_TRANSFORM_TRANSLATE) { zoom_len(&op->tx, k); zoom_len(&op->ty, k); }
         else if (op->kind == CSS_TRANSFORM_MATRIX) { op->m.e *= k; op->m.f *= k; }
+        if (op->kind == CSS_TRANSFORM_TRANSLATE) op->tz *= k;
+        else if (op->kind == CSS_TRANSFORM_PERSPECTIVE) op->persp *= k;
     }
+    zoom_len(&c->perspective, k);
+    zoom_len(&c->perspective_origin_x, k); zoom_len(&c->perspective_origin_y, k);
+    for (int i = 0; i < c->backdrop_filter_count && i < CSS_MAX_FILTER_OPS; i++) {
+        if (c->backdrop_filters[i].kind == CSS_FILTER_BLUR) c->backdrop_filters[i].amount *= k;
+        else if (c->backdrop_filters[i].kind == CSS_FILTER_DROP_SHADOW) zoom_shadow(&c->backdrop_filters[i].shadow, k);
+    }
+    for (int i = 0; i < CSS_MAX_MASK_LAYERS; i++) {
+        CssBgLayer *b = &c->mask_layers[i];
+        zoom_image(&b->image, k);
+        zoom_len(&b->x, k); zoom_len(&b->y, k);
+        zoom_len(&b->size.w, k); zoom_len(&b->size.h, k);
+    }
+    c->outline_offset *= k;
     zoom_len(&c->transform_origin_x, k); zoom_len(&c->transform_origin_y, k);
     zoom_shadow(&c->box_shadow, k);
     for (int i = 0; i < CSS_MAX_BOX_SHADOWS - 1; i++) zoom_shadow(&c->box_shadow_more[i], k);
@@ -3491,7 +3913,7 @@ void css_computed_copy_prop(CssComputed *d, const CssComputed *s, int id)
     case CSS_PROP_LIST_STYLE_TYPE: CP(list_style_type); break;
     case CSS_PROP_BORDER_SPACING: CP(border_spacing_x); CP(border_spacing_y); break;
     case CSS_PROP_TEXT_SHADOW: CP(text_shadow); break;
-    case CSS_PROP_DISPLAY: CP(display); break;
+    case CSS_PROP_DISPLAY: CP(display); CP(display_legacy_box); break;
     case CSS_PROP_POSITION: CP(position); break;
     case CSS_PROP_FLOAT: CP(float_); break;
     case CSS_PROP_CLEAR: CP(clear); break;
@@ -3569,6 +3991,24 @@ void css_computed_copy_prop(CssComputed *d, const CssComputed *s, int id)
     case CSS_PROP_TRANSITION_DURATION: for (int i = 0; i < CSS_MAX_TRANSITIONS; i++) CP(transitions[i].duration_s); break;
     case CSS_PROP_TRANSITION_TIMING_FUNCTION: for (int i = 0; i < CSS_MAX_TRANSITIONS; i++) CP(transitions[i].timing); break;
     case CSS_PROP_TRANSITION_DELAY: for (int i = 0; i < CSS_MAX_TRANSITIONS; i++) CP(transitions[i].delay_s); break;
+    case CSS_PROP_TEXT_FILL_COLOR: CP(text_fill_color); break;
+    case CSS_PROP_ACCENT_COLOR: CP(accent_color); CP(accent_color_auto); break;
+    case CSS_PROP_BACKDROP_FILTER: CPA(backdrop_filters); CP(backdrop_filter_count); break;
+    case CSS_PROP_PERSPECTIVE: CP(perspective); break;
+    case CSS_PROP_PERSPECTIVE_ORIGIN: CP(perspective_origin_x); CP(perspective_origin_y); break;
+    case CSS_PROP_TRANSFORM_STYLE: CP(transform_style); break;
+    case CSS_PROP_BACKFACE_VISIBILITY: CP(backface_visibility); break;
+    case CSS_PROP_MASK_IMAGE: for (int i = 0; i < CSS_MAX_MASK_LAYERS; i++) CP(mask_layers[i].image); CP(mask_layer_count); break;
+    case CSS_PROP_MASK_POSITION: for (int i = 0; i < CSS_MAX_MASK_LAYERS; i++) { CP(mask_layers[i].x); CP(mask_layers[i].y); } break;
+    case CSS_PROP_MASK_SIZE: for (int i = 0; i < CSS_MAX_MASK_LAYERS; i++) CP(mask_layers[i].size); break;
+    case CSS_PROP_MASK_REPEAT: for (int i = 0; i < CSS_MAX_MASK_LAYERS; i++) { CP(mask_layers[i].repeat_x); CP(mask_layers[i].repeat_y); } break;
+    case CSS_PROP_MASK_MODE: CP(mask_mode); break;
+    case CSS_PROP_BACKGROUND_CLIP: CP(background_clip); break;
+    case CSS_PROP_BACKGROUND_ORIGIN: CP(background_origin); break;
+    case CSS_PROP_OUTLINE_OFFSET: CP(outline_offset); break;
+    case CSS_PROP_ASPECT_RATIO: CP(aspect_ratio); CP(aspect_ratio_auto); break;
+    case CSS_PROP_LINE_CLAMP: CP(line_clamp); break;
+    case CSS_PROP_BOX_ORIENT: CP(box_orient); break;
     default: break; /* ignored properties carry no state */
     }
 #undef CP
@@ -3637,7 +4077,7 @@ int css_computed_apply(CssComputed *d, int id, const CssToken *tokens, int n,
     case CSS_PROP_COLOR: {
         CssColor c;
         if (!css_parse_color(t, m, &c)) return 0;
-        if (c.kind == CSS_COLOR_CURRENT) c = parent ? parent->color : initial->color;
+        if (c.kind != CSS_COLOR_RGBA) c = css_color_resolve(c, parent ? parent->color : initial->color);
         d->color = c;
         return 1;
     }
@@ -3722,7 +4162,13 @@ int css_computed_apply(CssComputed *d, int id, const CssToken *tokens, int n,
         d->text_shadow = s;
         return 1;
     }
-    case CSS_PROP_DISPLAY: SET_KW(css_kw_display, display);
+    case CSS_PROP_DISPLAY: {
+        int v;
+        if (!css_parse_keyword(t, m, css_kw_display, &v)) return 0;
+        d->display = (uint8_t)v;
+        d->display_legacy_box = (uint8_t)(m == 1 && (tok_is_ident(&t[0], "-webkit-box") || tok_is_ident(&t[0], "-webkit-inline-box")));
+        return 1;
+    }
     case CSS_PROP_POSITION: SET_KW(css_kw_position, position);
     case CSS_PROP_FLOAT: SET_KW(kw_float, float_);
     case CSS_PROP_CLEAR: SET_KW(kw_clear, clear);
@@ -4024,6 +4470,128 @@ int css_computed_apply(CssComputed *d, int id, const CssToken *tokens, int n,
         for (int i = 0; i < CSS_MAX_TRANSITIONS; i++) d->transitions[i].timing = v[i % c];
         return 1;
     }
+    case CSS_PROP_TEXT_FILL_COLOR: { CssColor c; if (!css_parse_color(t, m, &c)) return 0; d->text_fill_color = c; return 1; }
+    case CSS_PROP_ACCENT_COLOR: {
+        CssColor c;
+        if (m == 1 && tok_is_ident(&t[0], "auto")) { memset(&d->accent_color, 0, sizeof d->accent_color); d->accent_color_auto = 1; return 1; }
+        if (!css_parse_color(t, m, &c)) return 0;
+        d->accent_color = c; d->accent_color_auto = 0;
+        return 1;
+    }
+    case CSS_PROP_BACKDROP_FILTER: {
+        CssFilterOp f[CSS_MAX_FILTER_OPS]; int c;
+        if (!css_parse_filter(t, m, f, CSS_MAX_FILTER_OPS, &c)) return 0;
+        memset(d->backdrop_filters, 0, sizeof(d->backdrop_filters));
+        for (int i = 0; i < c; i++) d->backdrop_filters[i] = f[i];
+        d->backdrop_filter_count = (uint8_t)c;
+        return 1;
+    }
+    case CSS_PROP_PERSPECTIVE: SET_LEN(CSS_LENF_NONE | CSS_LENF_NONNEG, perspective);
+    case CSS_PROP_PERSPECTIVE_ORIGIN: {
+        CssLength x, y;
+        if (!css_parse_position_xy(t, m, &x, &y)) return 0;
+        resolve_em_len(&x, font_px); resolve_em_len(&y, font_px);
+        d->perspective_origin_x = x; d->perspective_origin_y = y;
+        return 1;
+    }
+    case CSS_PROP_TRANSFORM_STYLE: SET_KW(kw_transform_style, transform_style);
+    case CSS_PROP_BACKFACE_VISIBILITY: SET_KW(kw_backface, backface_visibility);
+    case CSS_PROP_MASK_IMAGE: {
+        CssImage img[CSS_MAX_MASK_LAYERS]; int c;
+        if (!css_parse_bg_image_list(t, m, img, CSS_MAX_MASK_LAYERS, &c)) return 0;
+        if (c > CSS_MAX_MASK_LAYERS) c = CSS_MAX_MASK_LAYERS;
+        for (int i = 0; i < c; i++) d->mask_layers[i].image = img[i];
+        for (int i = c; i < CSS_MAX_MASK_LAYERS; i++) memset(&d->mask_layers[i].image, 0, sizeof(CssImage));
+        int any = 0;
+        for (int i = 0; i < c; i++) any |= img[i].kind != CSS_IMAGE_NONE;
+        d->mask_layer_count = (uint8_t)(any ? c : 0);
+        return 1;
+    }
+    case CSS_PROP_MASK_POSITION: {
+        int st[16], ln[16];
+        int c = split_commas(t, m, st, ln, 16);
+        if (c <= 0) return 0;
+        CssLength x[CSS_MAX_MASK_LAYERS], y[CSS_MAX_MASK_LAYERS];
+        for (int i = 0; i < c; i++) {
+            CssLength px, py; int used = 0;
+            if (!parse_position(t + st[i], ln[i], &px, &py, &used) || used != ln[i]) return 0;
+            if (i < CSS_MAX_MASK_LAYERS) { resolve_em_len(&px, font_px); resolve_em_len(&py, font_px); x[i] = px; y[i] = py; }
+        }
+        if (c > CSS_MAX_MASK_LAYERS) c = CSS_MAX_MASK_LAYERS;
+        for (int i = 0; i < CSS_MAX_MASK_LAYERS; i++) { d->mask_layers[i].x = x[i % c]; d->mask_layers[i].y = y[i % c]; }
+        return 1;
+    }
+    case CSS_PROP_MASK_SIZE: {
+        CssBgSize sz[CSS_MAX_MASK_LAYERS]; int c;
+        if (!css_parse_bg_size_list(t, m, sz, CSS_MAX_MASK_LAYERS, &c)) return 0;
+        if (c > CSS_MAX_MASK_LAYERS) c = CSS_MAX_MASK_LAYERS;
+        for (int i = 0; i < CSS_MAX_MASK_LAYERS; i++) {
+            CssBgSize v = sz[i % c];
+            resolve_em_len(&v.w, font_px); resolve_em_len(&v.h, font_px);
+            d->mask_layers[i].size = v;
+        }
+        return 1;
+    }
+    case CSS_PROP_MASK_REPEAT: {
+        uint8_t rx[CSS_MAX_MASK_LAYERS], ry[CSS_MAX_MASK_LAYERS]; int c;
+        if (!css_parse_bg_repeat_list(t, m, rx, ry, CSS_MAX_MASK_LAYERS, &c)) return 0;
+        if (c > CSS_MAX_MASK_LAYERS) c = CSS_MAX_MASK_LAYERS;
+        for (int i = 0; i < CSS_MAX_MASK_LAYERS; i++) { d->mask_layers[i].repeat_x = rx[i % c]; d->mask_layers[i].repeat_y = ry[i % c]; }
+        return 1;
+    }
+    case CSS_PROP_MASK_MODE: {
+        uint8_t v[8]; int c;
+        if (!css_parse_keyword_list(t, m, kw_mask_mode, v, 8, &c) || c <= 0) return 0;
+        d->mask_mode = v[0];
+        return 1;
+    }
+    case CSS_PROP_BACKGROUND_CLIP: case CSS_PROP_BACKGROUND_ORIGIN: {
+        uint8_t v[8]; int c;
+        if (!css_parse_keyword_list(t, m, kw_bg_box, v, 8, &c) || c <= 0) return 0;
+        if (id == CSS_PROP_BACKGROUND_ORIGIN) { if (v[0] == CSS_BG_BOX_TEXT) return 0; d->background_origin = v[0]; }
+        else d->background_clip = v[0];   /* the engine paints one clip for all layers: the first */
+        return 1;
+    }
+    case CSS_PROP_OUTLINE_OFFSET: {
+        CssLength l;
+        if (!css_parse_length(t, m, 0, &l)) return 0;
+        resolve_em_len(&l, font_px);
+        d->outline_offset = l.px;
+        return 1;
+    }
+    case CSS_PROP_ASPECT_RATIO: {
+        /* auto | <ratio> | auto && <ratio>; <ratio> = <number [0,inf]> [ / <number [0,inf]> ]? */
+        int i = 0, has_auto = 0, has_ratio = 0;
+        float ratio = 0;
+        while (i < m) {
+            if (!has_auto && tok_is_ident(&t[i], "auto")) { has_auto = 1; i++; continue; }
+            if (!has_ratio && t[i].type == CSS_TOK_NUMBER && t[i].num >= 0) {
+                float w = t[i].num, h = 1;
+                i++;
+                if (i < m && tok_is_delim(&t[i], '/')) {
+                    if (i + 1 >= m || t[i + 1].type != CSS_TOK_NUMBER || t[i + 1].num < 0) return 0;
+                    h = t[i + 1].num;
+                    i += 2;
+                }
+                ratio = (w > 0 && h > 0) ? w / h : 0;   /* a degenerate ratio behaves as auto */
+                has_ratio = 1;
+                continue;
+            }
+            return 0;
+        }
+        if (!has_auto && !has_ratio) return 0;
+        d->aspect_ratio = ratio;
+        d->aspect_ratio_auto = (uint8_t)(has_auto || ratio == 0);
+        return 1;
+    }
+    case CSS_PROP_LINE_CLAMP: {
+        if (m == 1 && tok_is_ident(&t[0], "none")) { d->line_clamp = 0; return 1; }
+        int v;
+        if (!css_parse_integer(t, m, &v) || v <= 0) return 0;
+        d->line_clamp = (uint16_t)(v > 65535 ? 65535 : v);
+        return 1;
+    }
+    case CSS_PROP_BOX_ORIENT: SET_KW(kw_box_orient, box_orient);
     case CSS_PROP_FONT_FEATURE_SETTINGS: case CSS_PROP_FONT_SMOOTHING: case CSS_PROP_TOUCH_CALLOUT:
     case CSS_PROP_USER_DRAG: case CSS_PROP_TEXT_RENDERING:
         return 1; /* accepted, no state */
@@ -4034,3 +4602,135 @@ int css_computed_apply(CssComputed *d, int id, const CssToken *tokens, int n,
 
 #undef SET_KW
 #undef SET_LEN
+
+/* ========================================================================= */
+/* @property registrations (CSS Properties and Values API 1)                 */
+/* ========================================================================= */
+
+int css_parse_syntax(const char *text, size_t len)
+{
+    const char *s = kn_str_trim(text, &len);
+    if (len >= 2 && (s[0] == '\'' || s[0] == '"') && s[len - 1] == s[0]) { s++; len -= 2; s = kn_str_trim(s, &len); }
+    static const struct { const char *name; int syntax; } k[] = {
+        { "*", CSS_SYNTAX_UNIVERSAL }, { "<number>", CSS_SYNTAX_NUMBER }, { "<integer>", CSS_SYNTAX_INTEGER },
+        { "<length>", CSS_SYNTAX_LENGTH }, { "<percentage>", CSS_SYNTAX_PERCENTAGE },
+        { "<length-percentage>", CSS_SYNTAX_LENGTH_PERCENTAGE }, { "<color>", CSS_SYNTAX_COLOR },
+        { "<angle>", CSS_SYNTAX_ANGLE }, { "<time>", CSS_SYNTAX_TIME },
+    };
+    for (size_t i = 0; i < sizeof(k) / sizeof(k[0]); i++)
+        if (kn_str_ieq(s, len, k[i].name)) return k[i].syntax;
+    return -1;
+}
+
+int css_typed_value_parse(int syntax, const char *text, size_t len, float font_px, CssTypedValue *out)
+{
+    CssToken t[CSS_MAX_TOKENS];
+    int n = css_tokens_strip_ws(t, css_tokenize(text, len, t, CSS_MAX_TOKENS));
+    CssTypedValue v;
+    memset(&v, 0, sizeof v);
+    v.syntax = (uint8_t)syntax;
+    if (n <= 0) return 0;
+    switch (syntax) {
+    case CSS_SYNTAX_NUMBER: if (!css_parse_number(t, n, &v.num)) return 0; break;
+    case CSS_SYNTAX_INTEGER: { int i; if (!css_parse_integer(t, n, &i)) return 0; v.num = (float)i; break; }
+    case CSS_SYNTAX_LENGTH: case CSS_SYNTAX_LENGTH_PERCENTAGE: case CSS_SYNTAX_PERCENTAGE: {
+        CssLength l;
+        if (!css_parse_length(t, n, syntax == CSS_SYNTAX_LENGTH ? 0 : CSS_LENF_PCT, &l) || l.kind != CSS_LEN_VALUE) return 0;
+        if (syntax == CSS_SYNTAX_PERCENTAGE) {
+            if (l.px != 0 || l.em != 0) return 0;
+            v.num = l.pct;
+        }
+        css_length_resolve_em(&l, font_px > 0 ? font_px : 16.0f);
+        v.len = l;
+        break;
+    }
+    case CSS_SYNTAX_COLOR: if (!css_parse_color(t, n, &v.color)) return 0; break;
+    case CSS_SYNTAX_ANGLE: if (!css_parse_angle_deg(t, n, &v.num)) return 0; break;
+    case CSS_SYNTAX_TIME: if (!css_parse_time_s(t, n, &v.num)) return 0; break;
+    default: return 0;
+    }
+    *out = v;
+    return 1;
+}
+
+void css_typed_value_lerp(const CssTypedValue *a, const CssTypedValue *b, float t, CssTypedValue *out)
+{
+    CssTypedValue r = *a;
+    if (a->syntax != b->syntax) { *out = t < 0.5f ? *a : *b; return; }
+    r.num = lerp1(a->num, b->num, t);
+    if (a->syntax == CSS_SYNTAX_INTEGER) r.num = roundf(r.num);
+    len_lerp(&a->len, &b->len, t, &r.len);
+    if (a->syntax == CSS_SYNTAX_COLOR) {
+        if (a->color.kind == CSS_COLOR_RGBA && b->color.kind == CSS_COLOR_RGBA)
+            r.color = css_color_mix(a->color, b->color, 1.0f - t, 1.0f, CSS_COLOR_SPACE_SRGB);
+        else r.color = t < 0.5f ? a->color : b->color;
+    }
+    *out = r;
+}
+
+size_t css_typed_value_format(const CssTypedValue *v, char *out, size_t cap)
+{
+    int w = 0;
+    switch (v->syntax) {
+    case CSS_SYNTAX_NUMBER: case CSS_SYNTAX_INTEGER: w = snprintf(out, cap, "%g", (double)v->num); break;
+    case CSS_SYNTAX_PERCENTAGE: w = snprintf(out, cap, "%g%%", (double)v->num); break;
+    case CSS_SYNTAX_LENGTH: case CSS_SYNTAX_LENGTH_PERCENTAGE:
+        if (v->len.pct != 0 && v->len.px != 0) w = snprintf(out, cap, "calc(%gpx + %g%%)", (double)v->len.px, (double)v->len.pct);
+        else if (v->len.pct != 0) w = snprintf(out, cap, "%g%%", (double)v->len.pct);
+        else w = snprintf(out, cap, "%gpx", (double)v->len.px);
+        break;
+    case CSS_SYNTAX_COLOR:
+        if (v->color.kind == CSS_COLOR_CURRENT) w = snprintf(out, cap, "currentcolor");
+        else w = snprintf(out, cap, "rgba(%u, %u, %u, %g)", v->color.r, v->color.g, v->color.b, v->color.a / 255.0);
+        break;
+    case CSS_SYNTAX_ANGLE: w = snprintf(out, cap, "%gdeg", (double)v->num); break;
+    case CSS_SYNTAX_TIME: w = snprintf(out, cap, "%gs", (double)v->num); break;
+    default: if (cap) out[0] = 0; return 0;
+    }
+    return w < 0 ? 0 : (size_t)w;
+}
+
+int css_property_register(const char *name, size_t name_len, const char *syntax, size_t syntax_len,
+                          const char *inherits, size_t inherits_len, const char *initial, size_t initial_len)
+{
+    name = kn_str_trim(name, &name_len);
+    if (name_len < 3 || name[0] != '-' || name[1] != '-' || !syntax) return CSS_PROP_INVALID;
+    const int syn = css_parse_syntax(syntax, syntax_len);
+    if (syn < 0 || !inherits) return CSS_PROP_INVALID;
+    inherits = kn_str_trim(inherits, &inherits_len);
+    int inh;
+    if (kn_str_ieq(inherits, inherits_len, "true")) inh = 1;
+    else if (kn_str_ieq(inherits, inherits_len, "false")) inh = 0;
+    else return CSS_PROP_INVALID;
+    const char *init_atom = NULL;
+    if (initial) {
+        initial = kn_str_trim(initial, &initial_len);
+        if (initial_len) init_atom = kn_atom(initial, initial_len);
+    }
+    if (syn != CSS_SYNTAX_UNIVERSAL) {
+        CssTypedValue v;
+        /* the initial value must be computationally independent: no em / var() */
+        if (!init_atom || !css_typed_value_parse(syn, init_atom, strlen(init_atom), 16.0f, &v)) return CSS_PROP_INVALID;
+        if (memchr(init_atom, 'e', strlen(init_atom)) && strstr(init_atom, "em")) return CSS_PROP_INVALID;
+    }
+    const int id = css_prop_lookup(name, name_len);
+    if (!CSS_PROP_IS_CUSTOM(id)) return CSS_PROP_INVALID;
+    CssRegisteredProperty *r = &g_registered[id - CSS_PROP_CUSTOM_BASE];
+    r->name = css_prop_name(id);
+    r->syntax = (uint8_t)syn;
+    r->inherits = (uint8_t)inh;
+    r->initial = init_atom;
+    return id;
+}
+
+const CssRegisteredProperty *css_property_registration(int id)
+{
+    if (!CSS_PROP_IS_CUSTOM(id)) return NULL;
+    const CssRegisteredProperty *r = &g_registered[id - CSS_PROP_CUSTOM_BASE];
+    return r->name ? r : NULL;
+}
+
+void css_property_registry_clear(void)
+{
+    memset(g_registered, 0, sizeof g_registered);
+}

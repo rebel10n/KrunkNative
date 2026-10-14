@@ -63,6 +63,8 @@ extern "C" {
     X(LIST_STYLE_TYPE,            "list-style-type",            1, "disc") \
     X(BORDER_SPACING,             "border-spacing",             1, "0") \
     X(TEXT_SHADOW,                "text-shadow",                1, "none") \
+    X(TEXT_FILL_COLOR,            "-webkit-text-fill-color",    1, "currentcolor") \
+    X(ACCENT_COLOR,               "accent-color",               1, "auto") \
     /* ---- non-inherited ------------------------------------------------ */ \
     X(DISPLAY,                    "display",                    0, "inline") \
     X(POSITION,                   "position",                   0, "static") \
@@ -165,6 +167,22 @@ extern "C" {
     X(TRANSITION_TIMING_FUNCTION, "transition-timing-function", 0, "ease") \
     X(TRANSITION_DELAY,           "transition-delay",           0, "0s") \
     X(ZOOM,                       "zoom",                       0, "1") \
+    X(BACKDROP_FILTER,            "backdrop-filter",            0, "none") \
+    X(PERSPECTIVE,                "perspective",                0, "none") \
+    X(PERSPECTIVE_ORIGIN,         "perspective-origin",         0, "50% 50%") \
+    X(TRANSFORM_STYLE,            "transform-style",            0, "flat") \
+    X(BACKFACE_VISIBILITY,        "backface-visibility",        0, "visible") \
+    X(MASK_IMAGE,                 "mask-image",                 0, "none") \
+    X(MASK_POSITION,              "mask-position",              0, "0% 0%") \
+    X(MASK_SIZE,                  "mask-size",                  0, "auto") \
+    X(MASK_REPEAT,                "mask-repeat",                0, "repeat") \
+    X(MASK_MODE,                  "mask-mode",                  0, "match-source") \
+    X(BACKGROUND_CLIP,            "background-clip",            0, "border-box") \
+    X(BACKGROUND_ORIGIN,          "background-origin",          0, "padding-box") \
+    X(OUTLINE_OFFSET,             "outline-offset",             0, "0") \
+    X(ASPECT_RATIO,               "aspect-ratio",               0, "auto") \
+    X(LINE_CLAMP,                 "-webkit-line-clamp",         0, "none") \
+    X(BOX_ORIENT,                 "-webkit-box-orient",         0, "horizontal") \
     /* ---- accepted and ignored (parse never fails on them) -------------- */ \
     X(FONT_FEATURE_SETTINGS,      "font-feature-settings",      1, "normal") \
     X(FONT_SMOOTHING,             "-webkit-font-smoothing",     1, "auto") \
@@ -202,7 +220,8 @@ extern "C" {
     X(GRID_AREA,            "grid-area") \
     X(PLACE_SELF,           "place-self") \
     X(GRID_TEMPLATE,        "grid-template") \
-    X(GRID,                 "grid")
+    X(GRID,                 "grid") \
+    X(MASK,                 "mask")
 
 /* X(name, canonical_id) ------------------------------------------------- */
 #define CSS_ALIAS_LIST(X) \
@@ -241,7 +260,20 @@ extern "C" {
     X("word-wrap",                          OVERFLOW_WRAP) \
     X("grid-row-gap",                       ROW_GAP) \
     X("grid-column-gap",                    COLUMN_GAP) \
-    X("grid-gap",                           GAP)
+    X("grid-gap",                           GAP) \
+    X("-webkit-backdrop-filter",            BACKDROP_FILTER) \
+    X("-webkit-perspective",                PERSPECTIVE) \
+    X("-webkit-perspective-origin",         PERSPECTIVE_ORIGIN) \
+    X("-webkit-transform-style",            TRANSFORM_STYLE) \
+    X("-webkit-backface-visibility",        BACKFACE_VISIBILITY) \
+    X("-webkit-mask",                       MASK) \
+    X("-webkit-mask-image",                 MASK_IMAGE) \
+    X("-webkit-mask-position",              MASK_POSITION) \
+    X("-webkit-mask-size",                  MASK_SIZE) \
+    X("-webkit-mask-repeat",                MASK_REPEAT) \
+    X("-webkit-mask-mode",                  MASK_MODE) \
+    X("-webkit-background-clip",            BACKGROUND_CLIP) \
+    X("-webkit-background-origin",          BACKGROUND_ORIGIN)
 
 typedef enum CssPropId {
 #define X(id, name, inh, init) CSS_PROP_##id,

@@ -349,7 +349,7 @@ static void test_transforms(void)
           c.transform.ops[0].kind == CSS_TRANSFORM_TRANSLATE && len_is(c.transform.ops[0].tx, 0, -50) &&
           len_is(c.transform.ops[0].ty, 0, -50) && c.transform.ops[1].kind == CSS_TRANSFORM_SCALE &&
           feq(c.transform.ops[1].sx, 1.1f) && feq(c.transform.ops[1].sy, 1.1f));
-    CHECK(apply(&c, NULL, "transform", "translateZ(0)") && c.transform.count == 0);
+    CHECK(apply(&c, NULL, "transform", "translateZ(0)") && c.transform.count == 0 && c.transform.has_3d);
     CHECK(apply(&c, NULL, "-webkit-transform", "scaleX(-1)") && c.transform.count == 1 && feq(c.transform.ops[0].sx, -1) && feq(c.transform.ops[0].sy, 1));
     CHECK(apply(&c, NULL, "transform", "translateX(-50%) rotate(6.5deg)") && c.transform.count == 2 && feq(c.transform.ops[1].angle_deg, 6.5f));
     CHECK(apply(&c, NULL, "transform", "translateY(-180px)") && len_is(c.transform.ops[0].ty, -180, 0));
@@ -365,6 +365,146 @@ static void test_transforms(void)
     CHECK(apply(&c, NULL, "transform-origin", "right bottom") && len_is(c.transform_origin_x, 0, 100) && len_is(c.transform_origin_y, 0, 100));
     CssComputed d = fresh();
     CHECK(len_is(d.transform_origin_x, 0, 50) && len_is(d.transform_origin_y, 0, 50));
+}
+
+/* E2 (ui-e2-paint): 3D transforms, backdrop-filter, masks, background-clip:text,
+ * color-mix(), outline-offset, accent-color, aspect-ratio, line clamp, @property. */
+static void test_e2_values(void)
+{
+    CssComputed c = fresh();
+    /* 3D transforms (svelte.css .reward-card.flipped, main.css rotateX/Y) */
+    CHECK(apply(&c, NULL, "transform", "rotateY(180deg)") && c.transform.count == 1 && c.transform.has_3d &&
+          c.transform.ops[0].kind == CSS_TRANSFORM_ROTATE_3D && feq(c.transform.ops[0].angle_deg, 180) &&
+          feq(c.transform.ops[0].axis[1], 1) && css_transform_is_3d(&c.transform));
+    CHECK(apply(&c, NULL, "transform", "rotateX(-37.5deg) rotateY(45deg)") && c.transform.count == 2 &&
+          feq(c.transform.ops[0].axis[0], 1) && feq(c.transform.ops[1].axis[1], 1));
+    CHECK(apply(&c, NULL, "transform", "rotate3d(0, 0, 2, 30deg)") && c.transform.ops[0].kind == CSS_TRANSFORM_ROTATE &&
+          feq(c.transform.ops[0].angle_deg, 30) && !css_transform_is_3d(&c.transform));
+    CHECK(apply(&c, NULL, "transform", "perspective(500px) translate3d(1px, 2px, 30px)") && c.transform.count == 2 &&
+          c.transform.ops[0].kind == CSS_TRANSFORM_PERSPECTIVE && feq(c.transform.ops[0].persp, 500) && feq(c.transform.ops[1].tz, 30));
+    CHECK(apply(&c, NULL, "transform", "translateZ(0) translateY(10px)") && c.transform.count == 1 && c.transform.has_3d &&
+          !css_transform_is_3d(&c.transform));
+    CHECK(apply(&c, NULL, "transform", "scale3d(2, 3, 4)") && feq(c.transform.ops[0].sz, 4));
+    CHECK(apply(&c, NULL, "transform", "scale(2)") && feq(c.transform.ops[0].sz, 1) && !css_transform_is_3d(&c.transform));
+    {
+        /* rotateY(60deg) without perspective flattens to scaleX(0.5) */
+        float m[16];
+        CHECK(apply(&c, NULL, "transform", "rotateY(60deg)"));
+        css_transform_to_mat4(&c.transform, 100, 100, m);
+        CHECK(feq(m[0], 0.5f) && feq(m[5], 1) && feq(m[2], -0.8660254f) && feq(m[8], 0.8660254f));
+        CHECK(apply(&c, NULL, "transform", "translate(50%, 10px) rotate(90deg)"));
+        css_transform_to_mat4(&c.transform, 200, 100, m);
+        CHECK(feq(m[12], 100) && feq(m[13], 10) && feq(m[0], 0) && feq(m[1], 1) && feq(m[4], -1));
+        CHECK(apply(&c, NULL, "transform", "perspective(100px)"));
+        css_transform_to_mat4(&c.transform, 1, 1, m);
+        CHECK(feq(m[11], -0.01f));
+        /* none -> rotateY(180deg) interpolates the angle about the same axis */
+        CssTransformOp id, mid;
+        CHECK(apply(&c, NULL, "transform", "rotateY(180deg)"));
+        css_transform_op_identity(&id, &c.transform.ops[0]);
+        CHECK(id.kind == CSS_TRANSFORM_ROTATE_3D && feq(id.axis[1], 1) && feq(id.angle_deg, 0));
+        CHECK(css_transform_op_lerp(&id, &c.transform.ops[0], 0.5f, &mid) && feq(mid.angle_deg, 90) && feq(mid.axis[1], 1));
+        CHECK(!css_transform_op_equal(&id, &c.transform.ops[0]) && css_transform_op_equal(&mid, &mid));
+    }
+    CHECK(apply(&c, NULL, "transform-style", "preserve-3d") && c.transform_style == CSS_TRANSFORM_STYLE_PRESERVE_3D);
+    CHECK(apply(&c, NULL, "-webkit-transform-style", "flat") && c.transform_style == CSS_TRANSFORM_STYLE_FLAT);
+    CHECK(apply(&c, NULL, "backface-visibility", "hidden") && c.backface_visibility == CSS_BACKFACE_HIDDEN);
+    CHECK(apply(&c, NULL, "perspective", "800px") && c.perspective.kind == CSS_LEN_VALUE && feq(c.perspective.px, 800));
+    CHECK(apply(&c, NULL, "perspective", "none") && c.perspective.kind == CSS_LEN_NONE);
+    CHECK(apply(&c, NULL, "perspective-origin", "left top") && len_is(c.perspective_origin_x, 0, 0));
+
+    /* backdrop-filter (main.css .death-ui-bottom) */
+    CHECK(apply(&c, NULL, "backdrop-filter", "blur(10px)") && c.backdrop_filter_count == 1 &&
+          c.backdrop_filters[0].kind == CSS_FILTER_BLUR && feq(c.backdrop_filters[0].amount, 10));
+    CHECK(apply(&c, NULL, "-webkit-backdrop-filter", "blur(6px) brightness(0.8)") && c.backdrop_filter_count == 2);
+    CHECK(apply(&c, NULL, "backdrop-filter", "none") && c.backdrop_filter_count == 0);
+
+    /* masks (.menuItemIconMask, the lottery frame) */
+    CHECK(apply(&c, NULL, "-webkit-mask-image", "url(img/icon.png)") && c.mask_layer_count == 1 &&
+          c.mask_layers[0].image.kind == CSS_IMAGE_URL);
+    CHECK(apply(&c, NULL, "mask-size", "contain") && c.mask_layers[0].size.kind == CSS_BG_SIZE_CONTAIN);
+    CHECK(apply(&c, NULL, "mask-repeat", "no-repeat") && c.mask_layers[0].repeat_x == CSS_BG_REPEAT_NO_REPEAT);
+    CHECK(apply(&c, NULL, "mask-position", "center") && len_is(c.mask_layers[0].x, 0, 50) && len_is(c.mask_layers[0].y, 0, 50));
+    CHECK(apply(&c, NULL, "mask-mode", "alpha") && c.mask_mode == CSS_MASK_MODE_ALPHA);
+    CHECK(apply(&c, NULL, "mask", "linear-gradient(#000, #000) 0 0 / 100% 30px no-repeat, linear-gradient(#000, #000) 0 100% / 100% 30px no-repeat,"
+                                  " linear-gradient(#000, #000) 0 0 / 30px 100% no-repeat, linear-gradient(#000, #000) 100% 0 / 30px 100% no-repeat") &&
+          c.mask_layer_count == 4 && c.mask_layers[3].image.kind == CSS_IMAGE_GRADIENT && len_is(c.mask_layers[3].x, 0, 100) &&
+          len_is(c.mask_layers[1].y, 0, 100) && len_is(c.mask_layers[2].size.w, 30, 0) && c.mask_layers[0].repeat_y == CSS_BG_REPEAT_NO_REPEAT);
+    CHECK(apply(&c, NULL, "mask-image", "none") && c.mask_layer_count == 0);
+
+    /* background-clip: text + -webkit-text-fill-color (.vs-text) */
+    CHECK(apply(&c, NULL, "background", "linear-gradient(135deg, #5ce05a 0%, #ff6b6b 100%)") && c.background_clip == CSS_BG_BOX_BORDER);
+    CHECK(apply(&c, NULL, "-webkit-background-clip", "text") && c.background_clip == CSS_BG_BOX_TEXT);
+    CHECK(apply(&c, NULL, "background", "red padding-box") && c.background_clip == CSS_BG_BOX_PADDING && c.background_origin == CSS_BG_BOX_PADDING);
+    CHECK(apply(&c, NULL, "background-origin", "content-box") && c.background_origin == CSS_BG_BOX_CONTENT);
+    CHECK(!apply(&c, NULL, "background-origin", "text"));
+    CHECK(fresh().text_fill_color.kind == CSS_COLOR_CURRENT);
+    CHECK(apply(&c, NULL, "-webkit-text-fill-color", "transparent") && c.text_fill_color.a == 0 && c.text_fill_color.kind == CSS_COLOR_RGBA);
+
+    /* color-mix() (main.css .chalRewTile / .titleRow) */
+    CHECK(apply(&c, NULL, "background-color", "color-mix(in srgb, currentColor 30%, transparent)") &&
+          c.background_color.kind == CSS_COLOR_CURRENT_MIX && c.background_color.mix == 60);
+    {
+        CssColor r = css_color_resolve(c.background_color, css_color_rgba(255, 0, 0, 255));
+        CHECK(color_is(r, 255, 0, 0, 77));
+    }
+    CHECK(apply(&c, NULL, "color", "color-mix(in srgb, red 50%, blue)") && color_is(c.color, 128, 0, 128, 255));
+    CHECK(apply(&c, NULL, "color", "color-mix(in srgb, red, blue 25%)") && color_is(c.color, 191, 0, 64, 255));
+    CHECK(apply(&c, NULL, "color", "color-mix(in oklab, white, black)") && c.color.r > 90 && c.color.r < 110 && c.color.r == c.color.g);
+    CHECK(apply(&c, NULL, "color", "color-mix(in srgb, red 20%, blue 20%)") && color_is(c.color, 128, 0, 128, 102));
+    CHECK(apply(&c, NULL, "background", "linear-gradient(to top, color-mix(in srgb, currentColor 30%, transparent), transparent)") &&
+          c.bg_layers[0].image.gradient.stops[0].color.kind == CSS_COLOR_CURRENT_MIX);
+    CHECK(apply(&c, NULL, "border-bottom", "2px solid color-mix(in srgb, currentColor 45%, transparent)") &&
+          c.border_color[CSS_BOTTOM].kind == CSS_COLOR_CURRENT_MIX);
+    CHECK(!apply(&c, NULL, "color", "color-mix(in hsl, red, blue)") && !apply(&c, NULL, "color", "color-mix(red, blue)"));
+    {
+        CssComputed parent = fresh(), child = fresh();
+        parent.color = css_color_rgba(0, 0, 255, 255);
+        CHECK(apply(&child, &parent, "color", "color-mix(in srgb, currentColor 50%, white)") && color_is(child.color, 128, 128, 255, 255));
+    }
+
+    /* outline-offset, accent-color */
+    CHECK(apply(&c, NULL, "outline-offset", "-2px") && feq(c.outline_offset, -2));
+    CHECK(fresh().accent_color_auto == 1);
+    CHECK(apply(&c, NULL, "accent-color", "#2196f3") && !c.accent_color_auto && color_is(c.accent_color, 0x21, 0x96, 0xf3, 255));
+    CHECK(css_prop_is_inherited(CSS_PROP_ACCENT_COLOR) && css_prop_is_inherited(CSS_PROP_TEXT_FILL_COLOR));
+
+    /* E3: aspect-ratio, -webkit-line-clamp, -webkit-box-orient, legacy box display */
+    CHECK(apply(&c, NULL, "aspect-ratio", "1170 / 150") && feq(c.aspect_ratio, 7.8f) && !c.aspect_ratio_auto);
+    CHECK(apply(&c, NULL, "aspect-ratio", "auto 3/4") && feq(c.aspect_ratio, 0.75f) && c.aspect_ratio_auto);
+    CHECK(apply(&c, NULL, "aspect-ratio", "1") && feq(c.aspect_ratio, 1));
+    CHECK(apply(&c, NULL, "aspect-ratio", "0 / 1") && c.aspect_ratio == 0 && c.aspect_ratio_auto);
+    CHECK(apply(&c, NULL, "aspect-ratio", "auto") && c.aspect_ratio == 0 && c.aspect_ratio_auto);
+    CHECK(!apply(&c, NULL, "aspect-ratio", "-1"));
+    CHECK(apply(&c, NULL, "-webkit-line-clamp", "3") && c.line_clamp == 3);
+    CHECK(apply(&c, NULL, "-webkit-line-clamp", "none") && c.line_clamp == 0);
+    CHECK(!apply(&c, NULL, "-webkit-line-clamp", "0"));
+    CHECK(apply(&c, NULL, "-webkit-box-orient", "vertical") && c.box_orient == CSS_BOX_ORIENT_VERTICAL);
+    CHECK(apply(&c, NULL, "display", "-webkit-box") && c.display == CSS_DISPLAY_FLEX && c.display_legacy_box);
+    CHECK(apply(&c, NULL, "display", "flex") && c.display == CSS_DISPLAY_FLEX && !c.display_legacy_box);
+
+    /* @property (svelte.css --progress) */
+    {
+        int id = css_property_register("--e2-progress", 13, "'<number>'", 10, "false", 5, "0", 1);
+        CHECK(CSS_PROP_IS_CUSTOM(id) && !css_prop_is_inherited(id));
+        const CssRegisteredProperty *r = css_property_registration(id);
+        CHECK(r && r->syntax == CSS_SYNTAX_NUMBER && !r->inherits && r->initial && strcmp(r->initial, "0") == 0);
+        CHECK(css_property_register("--e2-bad", 8, "'<number>'", 10, "false", 5, NULL, 0) == CSS_PROP_INVALID);
+        CHECK(css_property_register("--e2-bad", 8, "'<image>'", 9, "true", 4, "none", 4) == CSS_PROP_INVALID);
+        CHECK(css_parse_syntax("\"<length-percentage>\"", 21) == CSS_SYNTAX_LENGTH_PERCENTAGE);
+        CssTypedValue a, b, m;
+        CHECK(css_typed_value_parse(CSS_SYNTAX_NUMBER, "0", 1, 16, &a) && css_typed_value_parse(CSS_SYNTAX_NUMBER, "1", 1, 16, &b));
+        css_typed_value_lerp(&a, &b, 0.25f, &m);
+        char buf[64];
+        css_typed_value_format(&m, buf, sizeof buf);
+        CHECK(feq(m.num, 0.25f) && strcmp(buf, "0.25") == 0);
+        CHECK(css_typed_value_parse(CSS_SYNTAX_LENGTH, "2em", 3, 10, &a) && feq(a.len.px, 20));
+        css_typed_value_format(&a, buf, sizeof buf);
+        CHECK(strcmp(buf, "20px") == 0);
+        CHECK(!css_typed_value_parse(CSS_SYNTAX_NUMBER, "1px", 3, 16, &a));
+        css_property_registry_clear();
+        CHECK(css_property_registration(id) == NULL && css_prop_is_inherited(id));
+    }
 }
 
 static void test_shadows(void)
@@ -998,7 +1138,11 @@ static void cover_block(const char *where, const char *text, size_t len, Coverag
                         (int)vlen, colon + 1);
             }
         } else if (parsed) cv->ok++;
-        else if (known_gap(name, nl, colon + 1, vlen)) cv->gaps++;
+        else if (known_gap(name, nl, colon + 1, vlen)) {
+            cv->gaps++;
+            if (getenv("KN_SHOW_GAPS"))
+                fprintf(stderr, "  gap [%s] %.*s: %.*s\n", where, (int)nl, name, (int)vlen, colon + 1);
+        }
         else {
             cv->fail++;
             size_t vl = dl - nl - 1;
@@ -1100,6 +1244,7 @@ int main(int argc, char **argv)
     test_var();
     test_colors();
     test_transforms();
+    test_e2_values();
     test_shadows();
     test_backgrounds();
     test_filters_clip();

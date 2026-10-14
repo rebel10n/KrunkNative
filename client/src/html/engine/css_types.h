@@ -46,6 +46,7 @@ extern "C" {
 #define CSS_MAX_CUSTOM_PROPS    96  /* the v10 page: 55 distinct across main.css, bundledStyles.css, svelte.css, hud.css, krunknative.css */
 #define CSS_MAX_CLIP_POINTS     8
 #define CSS_MAX_FONT_FAMILIES   4
+#define CSS_MAX_MASK_LAYERS     4   /* svelte.css .lottery-window.theme-easter: a 4-gradient frame */
 
 /* ------------------------------------------------------------------------- */
 /* Length                                                                     */
@@ -78,12 +79,20 @@ typedef struct CssLength {
 
 typedef enum CssColorKind {
     CSS_COLOR_RGBA = 0,    /* r,g,b,a valid                                   */
-    CSS_COLOR_CURRENT      /* currentColor: resolve against computed `color`  */
+    CSS_COLOR_CURRENT,     /* currentColor: resolve against computed `color`  */
+    CSS_COLOR_CURRENT_MIX  /* color-mix() with currentColor: r,g,b,a hold the */
+                           /* other colour, `mix` currentColor's weight,      */
+                           /* `mix_space` the CssColorSpace; resolve with     */
+                           /* css_color_resolve() at use time                 */
 } CssColorKind;
+
+typedef enum CssColorSpace { CSS_COLOR_SPACE_SRGB = 0, CSS_COLOR_SPACE_OKLAB } CssColorSpace;
 
 typedef struct CssColor {
     uint8_t r, g, b, a;    /* straight (non-premultiplied) alpha              */
     uint8_t kind;          /* CssColorKind                                    */
+    uint8_t mix;           /* CURRENT_MIX: currentColor weight, 0..200 (0.5%) */
+    uint8_t mix_space;     /* CURRENT_MIX: CssColorSpace                      */
 } CssColor;
 
 /* ------------------------------------------------------------------------- */
@@ -198,12 +207,22 @@ typedef enum CssFilterKind {
 } CssFilterKind;
 
 typedef enum CssTransformKind {
-    CSS_TRANSFORM_TRANSLATE = 0,  /* tx, ty (lengths, % of own border box)    */
-    CSS_TRANSFORM_SCALE,          /* sx, sy                                   */
-    CSS_TRANSFORM_ROTATE,         /* angle_deg                                */
+    CSS_TRANSFORM_TRANSLATE = 0,  /* tx, ty (lengths, % of own border box), tz px */
+    CSS_TRANSFORM_SCALE,          /* sx, sy, sz                               */
+    CSS_TRANSFORM_ROTATE,         /* angle_deg (about z)                      */
     CSS_TRANSFORM_SKEW,           /* angle_deg (x), angle2_deg (y)            */
-    CSS_TRANSFORM_MATRIX          /* m                                        */
+    CSS_TRANSFORM_MATRIX,         /* m                                        */
+    CSS_TRANSFORM_ROTATE_3D,      /* angle_deg about the unit axis[3]:        */
+                                  /* rotateX / rotateY / rotate3d             */
+    CSS_TRANSFORM_PERSPECTIVE     /* perspective(): persp px, 0 = none        */
 } CssTransformKind;
+
+typedef enum CssTransformStyle { CSS_TRANSFORM_STYLE_FLAT = 0, CSS_TRANSFORM_STYLE_PRESERVE_3D } CssTransformStyle;
+typedef enum CssBackfaceVisibility { CSS_BACKFACE_VISIBLE = 0, CSS_BACKFACE_HIDDEN } CssBackfaceVisibility;
+/* background-clip / background-origin */
+typedef enum CssBgBox { CSS_BG_BOX_BORDER = 0, CSS_BG_BOX_PADDING, CSS_BG_BOX_CONTENT, CSS_BG_BOX_TEXT } CssBgBox;
+typedef enum CssMaskMode { CSS_MASK_MODE_MATCH_SOURCE = 0, CSS_MASK_MODE_ALPHA, CSS_MASK_MODE_LUMINANCE } CssMaskMode;
+typedef enum CssBoxOrient { CSS_BOX_ORIENT_HORIZONTAL = 0, CSS_BOX_ORIENT_VERTICAL } CssBoxOrient;
 
 typedef enum CssClipPathKind { CSS_CLIP_PATH_NONE = 0, CSS_CLIP_PATH_POLYGON } CssClipPathKind;
 /* CSS_CONTENT_URL: `content: url(...)` replaces an element's image (<img>; Krunker's .challIconHP). */
@@ -232,11 +251,17 @@ typedef struct CssTransformOp {
     float angle_deg;       /* ROTATE / SKEW x                                 */
     float angle2_deg;      /* SKEW y                                          */
     Mat2D m;               /* MATRIX                                          */
+    float tz;              /* TRANSLATE: z in px (translate3d / translateZ)   */
+    float sz;              /* SCALE: z factor (1 for 2D scale)                */
+    float axis[3];         /* ROTATE_3D: unit rotation axis                   */
+    float persp;           /* PERSPECTIVE: distance px (0 = none)             */
 } CssTransformOp;
 
 typedef struct CssTransform {
     CssTransformOp ops[CSS_MAX_TRANSFORM_OPS];
-    uint8_t count;         /* 0 == no 2D ops.  translateZ()/3D ops are dropped. */
+    uint8_t count;         /* 0 == identity.  translateZ(0) / scaleZ() alone   */
+                           /* are dropped; other 3D functions are kept         */
+                           /* (ROTATE_3D, PERSPECTIVE, TRANSLATE with tz)      */
     uint8_t has_3d;        /* a 3D function was present (translateZ(0) etc.):  */
                            /* still `transform != none` (stacking context,     */
                            /* fixed containing block) and a composited-layer   */
@@ -439,6 +464,9 @@ typedef struct CssComputed {
     uint8_t list_style_type;          /* CssListStyleType                      */
     CssLength border_spacing_x, border_spacing_y;
     CssShadowList text_shadow;
+    CssColor text_fill_color;         /* -webkit-text-fill-color; CURRENT = use `color` */
+    CssColor accent_color;            /* accent-color (form controls)          */
+    uint8_t accent_color_auto;        /* 1: accent-color: auto (UA accent)     */
     CssCustomProp custom[CSS_MAX_CUSTOM_PROPS];
     uint8_t custom_count;
     /* Effective zoom (product of the `zoom` of the element and its ancestors,
@@ -524,6 +552,28 @@ typedef struct CssComputed {
     uint8_t animation_count;          /* animation-name list length (<= max); name NULL == none */
     CssTransition transitions[CSS_MAX_TRANSITIONS];
     uint8_t transition_count;
+
+    /* ---- effects / 3D / masks (E2) ------------------------------------- */
+    CssFilterOp backdrop_filters[CSS_MAX_FILTER_OPS];
+    uint8_t backdrop_filter_count;    /* 0 == none                             */
+    CssLength perspective;            /* NONE or px (perspective property)     */
+    CssLength perspective_origin_x, perspective_origin_y; /* default 50% 50%   */
+    uint8_t transform_style;          /* CssTransformStyle                     */
+    uint8_t backface_visibility;      /* CssBackfaceVisibility                 */
+    uint8_t background_clip;          /* CssBgBox (TEXT: background-clip:text) */
+    uint8_t background_origin;        /* CssBgBox (no TEXT)                    */
+    uint8_t mask_mode;                /* CssMaskMode (first value of the list) */
+    uint8_t mask_layer_count;         /* 0 == mask-image: none                 */
+    CssBgLayer mask_layers[CSS_MAX_MASK_LAYERS]; /* image/position/size/repeat as backgrounds */
+    float outline_offset;             /* px                                    */
+
+    /* ---- layout extras (E3) -------------------------------------------- */
+    float aspect_ratio;               /* w/h, 0 when none                      */
+    uint8_t aspect_ratio_auto;        /* `auto` given (alone or with a ratio)  */
+    uint8_t box_orient;               /* CssBoxOrient (-webkit-box-orient)     */
+    uint8_t display_legacy_box;       /* 1: display came from -webkit-box / -webkit-inline-box */
+    uint8_t reserved_e3_;             /* explicit padding (hashed bytewise)    */
+    uint16_t line_clamp;              /* -webkit-line-clamp, 0 = none          */
 
     /* ---- hashes (not part of either range) ------------------------------ */
     uint64_t hash_inherited;
