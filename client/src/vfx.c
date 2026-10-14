@@ -773,8 +773,13 @@ static void spawn_debris(const vec3 position, const float seed, const float size
 }
 
 void vfx_explosion(Client *client, const vec3 position, const float radius) {
+    vfx_explode_at(client, position, radius * VFX_EXPLOSION_SCALE, VFX_EXPLOSION_SMALL, VFX_EXPLOSION_LARGE);
+}
+
+// v10.0.2 ExplosionManager.explodeAt(x, y, z, scale, small, large): `small` / `large` debris counts
+// (null: the defaults above), e.g. the killFx setting's puff on a kill (scale 0.8, 12 small, 0 large).
+void vfx_explode_at(Client *client, const vec3 position, const float scale, const int small, const int large) {
     (void) client;
-    const float scale = radius * VFX_EXPLOSION_SCALE;
     if (scale <= 0.0f) return;
 
     const float size_min = scale * 0.35f;
@@ -782,15 +787,15 @@ void vfx_explosion(Client *client, const vec3 position, const float radius) {
     const float velocity_min = scale * 30.0f;
     const float velocity_range = scale * 17.0f;
 
-    for (int i = 0; i < VFX_EXPLOSION_LARGE; i++) {
+    for (int i = 0; i < large; i++) {
         spawn_debris(position, rand_unit() * 0.1f + 0.9f, size_min, size_range, velocity_min, velocity_range);
     }
 
-    for (int i = 0; i < VFX_EXPLOSION_SMALL; i++) {
+    for (int i = 0; i < small; i++) {
         spawn_debris(position, rand_unit() * 0.9f, size_min, size_range, velocity_min, velocity_range);
     }
 
-    if (vfx.log) fprintf(stderr, "[vfx] explosion %.1f %.1f %.1f r=%.1f\n", position.x, position.y, position.z, radius);
+    if (vfx.log) fprintf(stderr, "[vfx] explosion %.1f %.1f %.1f r=%.1f\n", position.x, position.y, position.z, scale / VFX_EXPLOSION_SCALE);
 }
 
 // ---------------------------------------------------------------- local player

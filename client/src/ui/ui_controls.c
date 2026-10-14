@@ -73,14 +73,15 @@ static const char *const KEYBOARD_MAP[256] = {
     NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
     NULL, NULL, NULL, NULL,
 };
-// The `toggle: true` settings of v7.1.4's SETTINGS.list (settings.js order) offered by the
-// Toggle rows: value, "name [category header]" (windows[6].gen). v7 also lists the hidden
-// per-weapon clones (scrollDir_0, ...); KrunkNative has no per-weapon settings yet, so
-// they are left out.
+// The `toggle: true` settings of v10.0.2's SETTINGS.list (settings order) offered by the
+// Toggle rows: value, "name [category header]" (windows[6].gen; ui/v10/windows/controls-1.html).
+// v10 also lists the hidden per-weapon clones (scrollDir_0, ...); KrunkNative has no per-weapon
+// settings yet, so they are left out.
 static const char *const TOGGLE_SETTINGS[][2] = {
-    {"oldBrowser", "Legacy Browser [Server Browser]"},
-    {"defaultRegionOnly", "Default Region Only [Server Browser]"},
+    {"oldBrowser", "Legacy Browser [Server Browser & Matchmaking]"},
+    {"defaultRegionOnly", "Default Region Only [Server Browser & Matchmaking]"},
     {"kpdVision", "KPD Vision [KPD]"},
+    {"webgpu", "WebGPU rendering [Performance]"},
     {"antiAlias", "Antialiasing [Performance]"},
     {"lowSpec", "Low Spec [Performance]"},
     {"noTex", "No Textures [Performance]"},
@@ -98,6 +99,7 @@ static const char *const TOGGLE_SETTINGS[][2] = {
     {"sniperFlapAnim", "Sniper Flap Animation [Performance]"},
     {"textureAnim", "Texture Animations [Performance]"},
     {"objectAnim", "Object Animations [Performance]"},
+    {"noPaintAnim", "Disable Animated Paints [Performance]"},
     {"screenShake", "Screen Shake [Performance]"},
     {"weaponShine", "Weapons Shine [Performance]"},
     {"showExplo", "Show Explosions [Performance]"},
@@ -126,6 +128,7 @@ static const char *const TOGGLE_SETTINGS[][2] = {
     {"chatFilter", "Profanity Filter [Chat]"},
     {"showMessages", "Show Player Messages [Chat]"},
     {"showUnboxings", "Show Unboxings [Chat]"},
+    {"showFindings", "Show Findings [Chat]"},
     {"chatTextOutline", "Chat Text Outline [Chat]"},
     {"crosshairUseOpacity", "Use Custom Opacity [Crosshair]"},
     {"crosshairAlways", "Always Show [Crosshair]"},
@@ -145,8 +148,8 @@ static const char *const TOGGLE_SETTINGS[][2] = {
     {"showServerTimer", "Show Server Timers [Gameplay Privacy]"},
     {"verifiedBadge", "Show Verified Badge [Gameplay Privacy]"},
     {"premiumBadge", "Show Premium Badge [Gameplay Privacy]"},
-    {"partnerBadge", "Show Partner Badge [Gameplay Privacy]"},
     {"customBadge", "Show Custom Badge [Gameplay Privacy]"},
+    {"rankBadge", "Show Ranked Badge [Gameplay Privacy]"},
     {"toggleADS", "Toggle Weapon ADS [View Model]"},
     {"aimAnim", "Weapon Aim Animation [View Model]"},
     {"hideADS", "Hide Weapon on ADS [View Model]"},
@@ -164,6 +167,8 @@ static const char *const TOGGLE_SETTINGS[][2] = {
     {"bulletTracers", "Bullet Tracers [Editing]"},
     {"scopeBorders", "Scope Borders [Customization]"},
     {"useDamageOverlay", "Use Damage Overlay [Customization]"},
+    {"killFx", "Particle Effect on Kill [Customization]"},
+    {"jumpScare", "Enable Jump Scare [Customization]"},
 };
 
 // v7.1.4's CONTROLS.binds (src/libs/controls.js): every ControlBind(name, def, altDef), with
@@ -221,9 +226,13 @@ static const V7Bind V7_BINDS[] = {
     {"propRotR", -1, "propRotRKey", 78, -1, -1},
     {"noclipSB", -1, "sandboxNoclip", -1, -1, -1},
     {"godModeSB", -1, "sandboxGodMode", -1, -1, -1},
+    {"smiteSB", -1, "sandboxSmite", -1, -1, -1},         // v10.0.2
+    {"unlimitedSB", -1, "sandboxUnlimited", -1, -1, -1}, // v10.0.2
     {"killSB", -1, "sandboxKill", -1, -1, -1},
     {"spawnBot", -1, "sandboxSpawnBot", 107, -1, -1},
     {"clearBots", -1, "sandboxClearBots", 109, -1, -1},
+    // v10.0.2: Ping Position (ranked / comp only; M2 = the middle button)
+    {"markPosition", -1, "markPositionKey", 10002, -1, -1},
     // KrunkNative additions (not v7.1.4 ControlBinds): Reload Game, F5 (keyCode 116) by default: v7
     // has no such bind, the browser's F5 reloads the page; natively it is the full in-place reload
     // (game_reload.h, console `reload`), the web build still reloads the page (reload_key).
@@ -253,6 +262,13 @@ static const V7Bind V7_BINDS[] = {
     {"taunt", 3, "taunt3", 52, -1, -1},
     {"taunt", 4, "taunt4", 53, -1, -1},
     {"taunt", 5, "taunt5", 54, -1, -1},
+    // v10.0.2: the Stalker team's taunts (io.send STALKER_TAUNT, i)
+    {"stalkerTaunt", 0, "stalkerTaunt0", 49, -1, -1},
+    {"stalkerTaunt", 1, "stalkerTaunt1", 50, -1, -1},
+    {"stalkerTaunt", 2, "stalkerTaunt2", 51, -1, -1},
+    {"stalkerTaunt", 3, "stalkerTaunt3", 52, -1, -1},
+    {"stalkerTaunt", 4, "stalkerTaunt4", 53, -1, -1},
+    {"stalkerTaunt", 5, "stalkerTaunt5", 54, -1, -1},
     {"move", 0, "0", 87, -1, UI_CONTROL_FORWARD},
     {"move", 1, "1", 83, -1, UI_CONTROL_BACKWARD},
     {"move", 2, "2", 65, -1, UI_CONTROL_LEFT},
@@ -301,7 +317,8 @@ static const ControlRow TAB_GENERAL[] = {
     {"Primary Weapon", "primary", -1, 0, "Weapon"}, {"Melee Weapon", "melee", -1, 0, "Weapon"},
     {"Secondary Weapon", "swap", -1, 0, "Weapon"}, {"Equipment", "equip", -1, 0, "Weapon"},
     {"Inspect", "inspect", -1, 0, "Weapon"}, {"Spray", "spray", -1, 0, "Weapon"},
-    {"Spray Wheel (Hold)", "sprayWheel", -1, 0, "Weapon"}, {"Player List", "playerList", -1, 0, "Interface"},
+    {"Spray Wheel (Hold)", "sprayWheel", -1, 0, "Weapon"}, {"Ping Position (Ranked Only)", "markPosition", -1, 0, "Weapon"},
+    {"Player List", "playerList", -1, 0, "Interface"},
     {"InGame Leaderboard", "scoreBoard", -1, 0, "Interface"}, {"Hide Players", "hidePlayers", -1, 0, "Players"},
     // KrunkNative additions, last so v7's rows keep their places (binds.reconnect / objectManager above)
     {"Reload Game", "gameReload", -1, 0, "Connection"},
@@ -345,9 +362,13 @@ static const ControlRow TAB_MODES[] = {
     {"Taunt (Psst)", "taunt", 0, 0, "Prop Hunt"}, {"Taunt (Whistle)", "taunt", 1, 0, "Prop Hunt"},
     {"Taunt (Fart)", "taunt", 2, 0, "Prop Hunt"}, {"Taunt (Meme)", "taunt", 3, 0, "Prop Hunt"},
     {"Taunt (WTF is This?)", "taunt", 4, 0, "Prop Hunt"}, {"Taunt (Right Now!)", "taunt", 5, 0, "Prop Hunt"},
+    {"Taunt (Turn around)", "stalkerTaunt", 0, 0, "Stalker"}, {"Taunt (You are next)", "stalkerTaunt", 1, 0, "Stalker"},
+    {"Taunt (Look up)", "stalkerTaunt", 2, 0, "Stalker"}, {"Taunt (Right here)", "stalkerTaunt", 3, 0, "Stalker"},
+    {"Taunt (Over here)", "stalkerTaunt", 4, 0, "Stalker"}, {"Taunt (No escape)", "stalkerTaunt", 5, 0, "Stalker"},
     {"Reset Position (Parkour etc)", "reset", -1, 0, "Parkour & Race"},
     {"Reset To Last Checkpoint (Parkour etc)", "resetLast", -1, 0, "Parkour & Race"},
     {"Noclip", "noclipSB", -1, 0, "Sandbox (Test mode)"}, {"Godmode", "godModeSB", -1, 0, "Sandbox (Test mode)"},
+    {"Smite", "smiteSB", -1, 0, "Sandbox (Test mode)"}, {"Unlimited Ammo", "unlimitedSB", -1, 0, "Sandbox (Test mode)"},
     {"Kill", "killSB", -1, 0, "Sandbox (Test mode)"}, {"Spawn Bot", "spawnBot", -1, 0, "Sandbox (Test mode)"},
     {"Clear Bots", "clearBots", -1, 0, "Sandbox (Test mode)"},
 };
@@ -367,7 +388,7 @@ static struct {
     int alts[UI_CONTROL_COUNT];    // its alternate key (altVal)
     char toggle_sets[TOGGLE_COUNT][SETTING_KEY_MAX]; // "" = -1 (None)
     char messages[MESSAGE_COUNT][MESSAGE_MAX];       // CONTROLS.chatMessages (cont_43_set ..)
-    int scroll_bound;        // !scrollToSwap: a bind uses the wheel or the middle button
+    int scroll_bound;        // !scrollToSwap: a bind uses the wheel
     int changer;             // CONTROLS.inputChanger: V7_BINDS index waiting for "Press any Key", -1 none
     int changer_alt;
     int tab;                 // windows[6].tabIndex
@@ -519,11 +540,12 @@ static int v7_index_by_name(const char *name, int *alt) {
     return -1;
 }
 
-// CONTROLS.checkScroll(): scrollToSwap is off while any bind uses the wheel or the middle button.
+// CONTROLS.checkScroll() (v10.0.2): scrollToSwap is off while any bind uses the wheel. v7 also
+// counted the middle button; v10 binds it by default (Ping Position) and only checks the wheel.
 static void check_for_scroll(void) {
     g_ctl.scroll_bound = 0;
     for (int i = 0; i < V7_BIND_COUNT; i++) {
-        if (g_ctl.val[i] == KEY_SCROLL || g_ctl.alt[i] == KEY_SCROLL || g_ctl.val[i] == KEY_MOUSE_BASE + 2 || g_ctl.alt[i] == KEY_MOUSE_BASE + 2) g_ctl.scroll_bound = 1;
+        if (g_ctl.val[i] == KEY_SCROLL || g_ctl.alt[i] == KEY_SCROLL) g_ctl.scroll_bound = 1;
     }
 }
 
@@ -1278,6 +1300,19 @@ static void press_button(Client *client, const int code) {
         if (!bind_is(UI_CONTROL_PREMIUM0 + i, code) && !(i == 0 && code == 78)) continue;
         const uint8_t index = (uint8_t) i;
         client_net_send(client, NET_PACKET_PREMIUM_ACTION, &index, sizeof(index));
+    }
+    // v10.0.2 pressButton, `game.isSandbox` only (the offline sandbox: client->offline): Noclip,
+    // Godmode, Smite, Unlimited Ammo and Kill on the local player, Spawn Bot / Clear Bots. The
+    // sandbox's authority is the in-process server, so they go through its chat commands (each
+    // answers with its own chat line, as v10's commands.god.on / "Cleared Bots").
+    if (client && client->offline) {
+        static const struct { const char *bind, *command; } SANDBOX_KEYS[] = {
+            {"noclipSB", "noclip"}, {"godModeSB", "god"}, {"smiteSB", "smite"}, {"unlimitedSB", "unlimitedammo"},
+            {"killSB", "kill"}, {"spawnBot", "bot_add 1"}, {"clearBots", "bot_kick all"},
+        };
+        for (size_t i = 0; i < sizeof(SANDBOX_KEYS) / sizeof(SANDBOX_KEYS[0]); i++) {
+            if (v7_is(SANDBOX_KEYS[i].bind, code)) ui_console_exec(SANDBOX_KEYS[i].command);
+        }
     }
 }
 

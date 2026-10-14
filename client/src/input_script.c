@@ -92,6 +92,8 @@
 //                                "[input_script] rects t=100 @label n=3 2482@10,20,163,197 -@..." (tests of
 //                                the virtual card grids, client/src/ui/ui_vgrid.c)
 //   100 nodes @label .skinCard   log the page's element count and how many match the selector
+//   100 text @label #contjump    log the first match's text, value and checked state: "[input_script]
+//                                text t=100 @label n=1 checked=0 value= text=K" (settings / binds tests)
 //   100 ft @label start | stop   wall-clock frame times between start and stop: one line with the
 //                                frame count, avg / p50 / p95 / max ms (perf logs, never asserted here)
 //   100 type rifle               type the rest of the line through the char callback (the focused
@@ -198,7 +200,8 @@ static void script_load(void) {
         (void) b;
         if (!strcmp(e->cmd, "con") || script_probe(e->cmd) || !strcmp(e->cmd, "type") || !strcmp(e->cmd, "om") ||
             !strcmp(e->cmd, "call") || !strcmp(e->cmd, "setscroll") || !strcmp(e->cmd, "hit") || !strcmp(e->cmd, "ft") ||
-            !strcmp(e->cmd, "nodes") || !strcmp(e->cmd, "rects") || !strcmp(e->cmd, "clicksel") || !strcmp(e->cmd, "wsel")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
+            !strcmp(e->cmd, "nodes") || !strcmp(e->cmd, "rects") || !strcmp(e->cmd, "clicksel") || !strcmp(e->cmd, "wsel") ||
+            !strcmp(e->cmd, "text")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
             while (*rest == ' ' || *rest == '\t') rest++;
             snprintf(e->arg, sizeof(e->arg), "%s", rest);
             for (size_t len = strlen(e->arg); len && (e->arg[len - 1] == '\n' || e->arg[len - 1] == '\r' || e->arg[len - 1] == ' '); len--) e->arg[len - 1] = 0;
@@ -435,6 +438,27 @@ static void script_run(Client *client, const ScriptEvent *e) {
         const int all = html_ui_available() ? html_dom_query_all(0, "*", NULL, 0) : 0;
         const int match = html_ui_available() && sel[0] ? html_dom_query_all(0, sel, NULL, 0) : 0;
         fprintf(stderr, "[input_script] nodes t=%.0f %s elements=%d match=%d\n", g_script.time, label, all, match);
+    } else if (!strcmp(e->cmd, "text")) {
+        // text @label <selector>: the first match's textContent (whitespace runs folded, 160 chars),
+        // value and checked state, and how many elements match
+        char label[64] = "", sel[192] = "", text[512] = "", value[160] = "", folded[164];
+        sscanf(e->arg, "%63s %191[^\n]", label, sel);
+        const int n = html_ui_available() && sel[0] ? html_dom_query_all(0, sel, NULL, 0) : 0;
+        const HtmlElem el = n > 0 ? html_dom_query(0, sel) : 0;
+        if (el) {
+            html_dom_get_text(el, text, sizeof(text));
+            if (html_dom_get_value(el, value, sizeof(value)) < 0) value[0] = 0;
+        }
+        size_t k = 0;
+        for (const char *s = text; *s && k + 1 < sizeof(folded) - 3; s++) {
+            const int space = *s == ' ' || *s == '\n' || *s == '\t' || *s == '\r';
+            if (space && (!k || folded[k - 1] == ' ')) continue;
+            folded[k++] = space ? ' ' : *s;
+        }
+        while (k && folded[k - 1] == ' ') k--;
+        folded[k] = 0;
+        fprintf(stderr, "[input_script] text t=%.0f %s n=%d checked=%d value=%s text=%s\n", g_script.time, label, n,
+                el ? html_dom_get_checked(el) : 0, value, folded);
     } else if (!strcmp(e->cmd, "ft")) {
         // ft @label start|stop: wall-clock frame times (input_script_tick samples them)
         char label[64] = "", what[16] = "";

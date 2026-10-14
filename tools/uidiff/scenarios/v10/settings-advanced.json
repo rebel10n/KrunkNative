@@ -4,6 +4,7 @@
     720
   ],
   "background": "#000000",
+  "ref": "doc/ref/krunker-v10/settings/settings-advanced-2.png",
   "state": {
     "menu": true,
     "connected": true,
@@ -21,5 +22,5 @@
     "settingsView": "advanced"
   },
   "frames": 3,
-  "note": "ui/v10 Settings, advanced Display"
+  "note": "ui/v10 Settings, advanced Display; ref captured from the offline v10 sandbox (tools/ui-import/capture_v10_live.js mode)"
 }

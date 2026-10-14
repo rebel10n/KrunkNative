@@ -1978,7 +1978,7 @@ static void hud_skin_reward_hide(void *user) {
 
 // season-system: NET_PACKET_SKIN_FOUND. The finder: v7 io_skinReward (account.addSkin, the
 // #skinRewards card for 5 s, "You found [name]", matchRewardSummary.skins); the others:
-// io_skinFoundMessage ("<name> found [skin]" with Show Unboxings on).
+// io_skinFoundMessage ("<name> found [skin]" with Show Findings on).
 void hud_ui_skin_found(Client *client, const int uid, const int skin_index) {
     if (!html_ui_available() || !html_ui_is_ready()) return;
     const ViewerSkin *skin = viewer_skin(skin_index);
@@ -2008,7 +2008,8 @@ void hud_ui_skin_found(Client *client, const int uid, const int skin_index) {
         hud_add_chat_markup(markup);
         return;
     }
-    if (!skin || !player || !client_render_settings()->show_unboxings) return;
+    // v10.0.2 gates the line on Settings > Game > Chat "Show Findings" (showFindings; v7 used showUnboxings)
+    if (!skin || !player || ui_setting_is_false("showFindings")) return;
     char who[PLAYER_NAME_SIZE * 2], shown[PLAYER_NAME_SIZE];
     size_t wlen = 0;
     who[0] = 0;

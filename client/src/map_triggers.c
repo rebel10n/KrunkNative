@@ -117,6 +117,11 @@ static void play_sound(Client *client, const NetSoundPacket *packet) {
 
 static void jump_scare(const NetJumpScarePacket *packet) {
     if (packet->index != 0) return; // jumpScares[1] is the jumpS_1.mp4 video: no video playback natively
+    // v10.0.2 window.jumpScare: only with Settings > Game > Customization "Enable Jump Scare" (jumpScare,
+    // default on), and at most one every 10 s
+    static double last = -1.0e9;
+    if (ui_setting_is_false("jumpScare") || glfwGetTime() - last < 10.0) return;
+    last = glfwGetTime();
     const HtmlElem image = html_dom_by_id("jumpSIMG");
     if (image) {
         html_dom_set_attr(image, "src", JUMP_SCARE_IMAGE);

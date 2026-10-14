@@ -167,6 +167,10 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
             hud_death_marker_add(victim->position, victim == me);
         victim->deaths = (unsigned int) packet->victim_deaths;
         events_player_dead(client, victim);
+        // v10.0.2 g1: someone else died -> Settings > Game > Customization "Particle Effect on Kill"
+        // (killFx, default on): ExplosionManager.explodeAt(x, y + 8.25, z, 0.8, 12, 0)
+        if (victim != me && !ui_setting_is_false("killFx"))
+            vfx_explode_at(client, (vec3) {victim->position.x, victim->position.y + 8.25f, victim->position.z}, 0.8f, 12, 0);
     }
 
     if (killer && killer != victim) killer->kills = (unsigned int) packet->killer_kills;

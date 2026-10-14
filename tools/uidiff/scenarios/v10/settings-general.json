@@ -4,6 +4,7 @@
     720
   ],
   "background": "#000000",
+  "ref": "doc/ref/krunker-v10/settings/settings-basic-0.png",
   "state": {
     "menu": true,
     "connected": true,
@@ -18,9 +19,8 @@
     "anim_time": 0.8,
     "window": 0,
     "settingsTab": 0,
-    "settingsView": "basic",
-    "clientChrome": true
+    "settingsView": "basic"
   },
   "frames": 3,
-  "note": "ui/v10 Settings, basic General (with the client chrome)"
+  "note": "ui/v10 Settings, basic General (no Game version row: v10 is the only version); ref captured from the offline v10 sandbox (tools/ui-import/capture_v10_live.js mode)"
 }

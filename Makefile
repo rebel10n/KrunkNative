@@ -441,6 +441,10 @@ nuke-e2e: build ## The Nuke on server_bin: a guest's 25 kills, key 3 through a h
 ruleset-e2e: build ## Krunker v10.0.2 is the only version: server_bin and the offline client play v10 with no choice (INIT, server-info, no --ruleset, no picker)
 	timeout 120 $(PYTHON) -I server/tests/ruleset_e2e.py $(DEBUG_DIR)
 
+.PHONY: v10-settings-e2e
+v10-settings-e2e: build ## v10 Settings on ui/v10: one setting per tab applied + persisted, search, presets, export, keybind rebinding, sandbox bind, reset (headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I server/tests/v10_settings_e2e.py $(DEBUG_DIR)
+
 .PHONY: pickup-chat-e2e
 pickup-chat-e2e: build ## Pickup feedback on server_bin: Object Manager Junk + G prints "You found [0.01] Junk" to the finder only, a weapon pickup plays pick_0
 	timeout 120 $(PYTHON) -I server/tests/pickup_chat_e2e.py $(DEBUG_DIR)
@@ -619,8 +623,8 @@ smoke-native: build ## Run the native client offline headless (no window; EGL_DE
 	  && grep -m1 "GL_RENDERER" /tmp/smoke-native.log || { tail -20 /tmp/smoke-native.log; exit 1; }
 
 # The Krunker v10 page tree (ui/v10, being ported to become ui/) with its own window
-# templates: every tools/uidiff/scenarios/v10/*.json rendered headless (main menu, Settings, a
-# few windows) into /tmp/smoke-ui-v10/. Fails on a non-zero exit, an empty
+# templates: every tools/uidiff/scenarios/v10/*.json rendered headless (main menu, Settings and
+# Change Controls tabs, a few windows) into /tmp/smoke-ui-v10/. Fails on a non-zero exit, an empty
 # frame or a window template taken from ui/ instead of ui/v10/windows/.
 smoke-ui-v10: build ## Render the v10 page's menu, Settings and windows headless (/tmp/smoke-ui-v10/*.png)
 	@rm -rf /tmp/smoke-ui-v10 && mkdir -p /tmp/smoke-ui-v10/cfg

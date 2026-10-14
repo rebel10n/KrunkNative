@@ -355,7 +355,12 @@ H(h_settings_search_list) {
     UNUSED;
     char q[128] = "";
     HtmlElem search = html_dom_by_id("settSearch");
-    if (search) html_dom_get_value(search, q, sizeof(q));
+    if (argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str) { // a query argument (uidiff scenarios): typed into the box
+        snprintf(q, sizeof(q), "%s", args[0].str);
+        if (search) html_dom_set_value(search, q);
+    } else if (search) {
+        html_dom_get_value(search, q, sizeof(q));
+    }
     ui_settings_search(q);
     return 1;
 }

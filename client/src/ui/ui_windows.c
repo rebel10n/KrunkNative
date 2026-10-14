@@ -172,8 +172,8 @@ static char *windows_dir(void) {
 #else
     const char *dir = getenv("KRUNKNATIVE_UI_DIR"); // main.c's ui dir override
     if (dir && *dir) {
-        // a page tree without window templates (an incomplete import) borrows ui/'s, so Settings
-        // still opens there
+        // a page tree without window templates (an incomplete import) borrows ui/'s,
+        // so Settings still opens there
         char *own = concat(dir, "/windows/");
         char *index = concat(own, "windows.json");
         FILE *f = fopen(index, "rb");
@@ -234,6 +234,31 @@ static int load_tabs(const char *dir, const cJSON *list, UiTabFile *out, const i
     return n;
 }
 
+// What KrunkNative's settings tabs differ in from the captured v10.0.2 markup, applied once at load
+// so the window, its search and the default scrape all see it:
+//   - "Manage Ads" (openOneTrust) is only written when window.canShowAds: KrunkNative shows no ads
+//     and has no consent manager, so the header goes without it, as v10 renders it then;
+//   - WebGPU rendering ("webgpu", needsRestart) picks three.js's WebGPU backend in a browser; the
+//     client renders through GL (ES on the web) only, so the row is hidden like v10's `hide` rows
+//     (<key>_div, display:none) and its stored value stays unread.
+static char *settings_tab_fixups(char *html) {
+    if (!html) return html;
+    static const char ADS[] = "<div class=\"settingsBtn\" style=\"width:auto;background-color:#994cd1\" onclick=\"openOneTrust()\">Manage Ads</div>";
+    char *ads = strstr(html, ADS);
+    if (ads) memmove(ads, ads + strlen(ADS), strlen(ads + strlen(ADS)) + 1);
+    const char *input = strstr(html, "setSetting(&quot;webgpu&quot;");
+    const char *row = NULL;
+    for (const char *p = html; input && (p = strstr(p, "<div class=\"settName\"")) && p < input; p++) row = p;
+    if (!row || strstr(row, "id=\"webgpu_div\"")) return html;
+    StrBuf sb = {0};
+    const size_t at = strlen("<div class=\"settName\"");
+    sb_append_n(&sb, html, (size_t) (row - html) + at);
+    sb_append(&sb, " id=\"webgpu_div\" style=\"display:none\"");
+    sb_append(&sb, row + at);
+    free(html);
+    return sb_finish(&sb);
+}
+
 int ui_windows_load(void) {
     if (g_loaded) return 1;
     g_loaded = 1;
@@ -274,6 +299,7 @@ int ui_windows_load(void) {
     g_settings_tab_count[1] = load_tabs(dir, cJSON_GetObjectItem(settings, "advanced"), g_settings_tabs[1], UI_SETTINGS_TABS_MAX);
     for (int v = 0; v < 2; v++) {
         for (int t = 0; t < g_settings_tab_count[v]; t++) {
+            g_settings_tabs[v][t].html = settings_tab_fixups(g_settings_tabs[v][t].html);
             char *mobile = ui_mobile_settings_html(g_settings_tabs[v][t].html); // isMobile: "mobile" rows shown
             if (mobile) {
                 free(g_settings_tabs[v][t].html);

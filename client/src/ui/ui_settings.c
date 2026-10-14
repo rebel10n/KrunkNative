@@ -531,6 +531,8 @@ static const SettingPreset PRESETS[] = {
     {"aimAnim", NULL, "false"}, {"hideADS", "true", "true"}, {"showSpdLines", NULL, "0"}, {"scoreScale", "0.6", NULL},
     {"scoreOffY", "2.5", NULL}, {"saturationn", NULL, "1"}, {"menuSaturation", "1", NULL}, {"feedLimit", "4", NULL},
     {"bulletTracers", NULL, "false"}, {"scopeBorders", "true", NULL}, {"useDamageOverlay", "false", "false"},
+    // v10.0.2's new settings with a pro / perf value
+    {"webgpu", "false", "false"}, {"noPaintAnim", NULL, "true"}, {"showFindings", "false", NULL}, {"killFx", "false", "true"},
 };
 
 // KrunkNative addition: the "Beautiful" preset (index 4: a fifth .setSugBox2 "Highest graphics
@@ -1018,6 +1020,7 @@ static const char *const ADVANCED_ONLY[] = {
     "weaponLean", "weaponRot", "weaponOffX", "weaponOffY", "weaponOffZ", "weaponADSOffY", "weapSwapY",
     "weapReloadY", "adsFovMlt", "aimAnim", "hideADS", "showHands", "showWeapon", "showWeaponSec", "showWeaponMel",
     "leftHand", "roundArms", "wallLeanMlt", "wallLean",
+    "webgpu", "noPaintAnim", // v10.0.2
 };
 
 static int advanced_only(const char *row, const char *row_end) {

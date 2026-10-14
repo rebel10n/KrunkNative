@@ -1,0 +1,26 @@
+{
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "ref": "doc/ref/krunker-v10/settings/settings-basic-3.png",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "window": 0,
+    "settingsTab": 3,
+    "settingsView": "basic"
+  },
+  "frames": 3,
+  "note": "ui/v10 Settings, basic Sound; ref captured from the offline v10 sandbox (tools/ui-import/capture_v10_live.js mode)"
+}

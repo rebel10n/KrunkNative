@@ -43,3 +43,5 @@ void vfx_item_effect(vec3 position, int effect);
 // Krunker packet "ex" (index.js gb): explosion at `position` with range `radius`
 // (projectile.explode, e.g. 35 for the RPG).
 void vfx_explosion(Client*, vec3 position, float radius);
+// v10.0.2 ExplosionManager.explodeAt(x, y, z, scale, small, large): debris only (no sound / shake).
+void vfx_explode_at(Client*, vec3 position, float scale, int small, int large);
