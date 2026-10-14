@@ -897,7 +897,7 @@ void client_frame(Client *client) {
     client_tick(client, now, delta);
     gamepad_frame(client, 1); // the gamepad loop after the game frame (its rAF is registered after the game's)
     frame_target_present(client);
-    headless_swap_buffers(client->window); // glfwSwapBuffers; headless: the pbuffer just flushes
+    headless_swap_buffers(client->window); // glfwSwapBuffers; headless: the pbuffer flushes (at most 2 frames in flight)
     glfwPollEvents();
     client_render_frame_end(client); // swap interval (vsync), frame cap sleep, FPS count
 }

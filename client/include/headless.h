@@ -44,6 +44,8 @@ void *headless_get_proc_address(const char *name);
 GLFWwindow *headless_current_window(void);
 // End of frame: glfwSwapBuffers, or (headless) a glFlush, since a pbuffer has no front
 // buffer, plus the framebuffer-size event the null platform skips on fullscreen changes.
+// Headless it also waits for the frame two swaps back (a fence), like a window's swap, so an
+// uncapped client never queues seconds of GPU work for one texture upload to wait on.
 void headless_swap_buffers(GLFWwindow *window);
 // glfwSwapInterval; no-op when headless (a pbuffer never presents, and GLFW has no context).
 void headless_swap_interval(int interval);

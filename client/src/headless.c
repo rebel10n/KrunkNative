@@ -467,11 +467,36 @@ GLFWwindow *headless_current_window(void) {
     return g_headless ? g_egl.window : glfwGetCurrentContext();
 }
 
+// Frames in flight. A window's swap blocks once the driver has queued a frame or two ahead of
+// the GPU; a pbuffer's flush never does. An uncapped headless client (no vsync, no frame cap:
+// ~700 frames per second of menu) on a GPU that other processes keep busy therefore queued
+// seconds of work, and the next call that waits for the GPU (a texture upload: the menu's
+// lazily loaded window images, a map's textures; glReadPixels for a screenshot) waited for all
+// of it inside one frame: Find Game froze the main thread for 3-6 s. Each swap now fences its
+// frame and waits for the frame HEADLESS_FRAMES_IN_FLIGHT swaps back, like a window's swap.
+#define HEADLESS_FRAMES_IN_FLIGHT 2
+#define HEADLESS_FENCE_TIMEOUT_NS 1000000000ull // 1 s: never hang on a lost fence
+static GLsync g_frame_fence[HEADLESS_FRAMES_IN_FLIGHT];
+static unsigned g_frame_fence_next;
+
+static void frame_fences_release(void) {
+    for (int i = 0; i < HEADLESS_FRAMES_IN_FLIGHT; i++) {
+        if (g_frame_fence[i]) glDeleteSync(g_frame_fence[i]);
+        g_frame_fence[i] = NULL;
+    }
+}
+
 void headless_swap_buffers(GLFWwindow *window) {
     if (!g_headless) {
         glfwSwapBuffers(window);
         return;
     }
+    GLsync *fence = &g_frame_fence[g_frame_fence_next++ % HEADLESS_FRAMES_IN_FLIGHT];
+    if (*fence) {
+        glClientWaitSync(*fence, GL_SYNC_FLUSH_COMMANDS_BIT, HEADLESS_FENCE_TIMEOUT_NS);
+        glDeleteSync(*fence);
+    }
+    *fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
     glFlush();
 
     // GLFW's null platform resizes a window that enters or leaves a monitor (fullscreen /
@@ -510,6 +535,7 @@ void headless_resize(const int width, const int height) {
 
 void headless_shutdown(void) {
     if (g_egl.display == EGL_NO_DISPLAY) return;
+    frame_fences_release(); // context objects: while the context is still current
     eglMakeCurrent(g_egl.display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
     if (g_egl.surface != EGL_NO_SURFACE) eglDestroySurface(g_egl.display, g_egl.surface);
     if (g_egl.context != EGL_NO_CONTEXT) eglDestroyContext(g_egl.display, g_egl.context);

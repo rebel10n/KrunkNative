@@ -13,7 +13,8 @@ Headless client_bin runs (one at a time, input scripts clicking the page by elem
      Leaderboards, the small Guide entry), the class preview shows, Host Game shows and the
      old Connect button is gone;
      Settings opens Game Settings; Find Game opens v10's "Select a Server" chooser and its Public
-     tile the server list with both lobbies; Custom Games opens the Custom Games window with its
+     tile the server list with both lobbies, and no frame from the click to the list takes over
+     500 ms (`ft`: the main thread never freezes); Custom Games opens the Custom Games window with its
      map cards; Host Game opens v10's host chooser; More Krunker opens its popup;
      Quick Match seeks again with excludeGame and joins the OTHER lobby
   2. a guest: "Login or Register" opens v10's modal; Register here -> username, password, email
@@ -158,6 +159,11 @@ def nodes(text, label):
     return int(m.group(1)) if m else -1
 
 
+# Find Game (the chooser, the Public list, its region) must never freeze the main thread: every
+# wall-clock frame from the click to the list's screenshot stays under this (`ft`, input_script.c).
+# A frozen frame also ran every later script step inside it, before the game list could arrive.
+FIND_GAME_MAX_FRAME_MS = 500
+
 SIGNED_IN_SCRIPT = """0 menu
 500 vis @header signedInHeaderBar signedOutHeaderBar knV10Name menuKRCount menuBtnConnect menuBtnHost menuBtnQuickMatch :preview
 500 vis @nav menuBtnGuide knV10GuideItem menuBtnTurfWars menuBtnMarket menuBtnLeaderboards menuBtnShop menuBtnChall menuBtnSocial menuBtnSideCommunity
@@ -165,12 +171,14 @@ SIGNED_IN_SCRIPT = """0 menu
 1500 vis @settings windowHolder settHolder
 1600 down ESC
 1620 up ESC
+1900 ft @find start
 2000 clickid menuBtnBrowser
 3000 nodes @chooser .serverHostOp
 3100 call openServerWindow 0
 5000 call setExpandedRegion 0
 6000 nodes @servers .settNameIn
 6100 frames {shots}/servers 1
+6400 ft @find stop
 6500 down ESC
 6520 up ESC
 7000 clickid menuBtnCustomGames
@@ -242,6 +250,9 @@ def signed_in_case(brain_port, games):
     check("1: Find Game opens the Select a Server chooser", nodes(text, "chooser") == 5, str(nodes(text, "chooser")))
     rows = nodes(text, "servers")
     check("1: its Public list shows both lobbies", rows >= 2, "%d rows" % rows)
+    ft = re.search(r"\[input_script\] ft t=\d+ @find frames=(\d+) .* max=([\d.]+) ms", text)
+    check("1: no frame of Find Game takes over %d ms" % FIND_GAME_MAX_FRAME_MS,
+          ft and int(ft.group(1)) > 0 and float(ft.group(2)) <= FIND_GAME_MAX_FRAME_MS, ft.group(0) if ft else "no ft line")
     cards = nodes(text, "games")
     check("1: Custom Games lists games", cards > 0, "%d cards" % cards)
     check("1: Host Game opens the host chooser", nodes(text, "host") == 5, str(nodes(text, "host")))
