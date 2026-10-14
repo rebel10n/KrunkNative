@@ -43,7 +43,7 @@ edge_firewall_dropins:
 kn_gameserver_enabled: true
 
 # In-map billboard text on every edge server.
-kn_gameserver_billboard: "FRVR please hire me"
+kn_gameserver_billboard: "discord.gg/RqnSxVtUyk"
 
 # DNS (tag dns, role kn_dns_check): the <edge>-<n>.krunk.io A records are kept by hand in
 # Spaceship's DNS panel (the zone left Cloudflare on 2026-10-13); the role only checks them.
