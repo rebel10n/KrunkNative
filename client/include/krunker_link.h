@@ -82,6 +82,7 @@ typedef struct {
     double prev_angles[2 + 2 * NET_INPUT_BATCH_MAX];
     int prev_angle_count;
     int resync;
+    int unsupported_map;            // init's map index outside this client's catalogue, -1 = none (KRUNKER_LINK_EV_UNSUPPORTED)
     // counters (tests, logs)
     unsigned frames_in, frames_out, cc_answered, cc_failed, captchas_solved, unknown_in;
 } KrunkerLink;

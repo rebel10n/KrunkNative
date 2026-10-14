@@ -8,9 +8,10 @@
 // for KRUNKER_LOBBIES_CACHE_MS and the request times out after KRUNKER_LOBBIES_TIMEOUT_MS. Each
 // game `[id, region, players, max, data{i map, g mode, c custom, oc, ds, pw, kr, h}, timeLeft]` becomes
 // a server-browser tuple `[id, region, players, max, meta]` with meta.krunker = true (and i, h,
-// mode, cs, oc, ds, pw, kr, timeLeft). Official lobbies speak Krunker's protocol: joining one opens
-// https://krunker.io/?game=<id> in the system browser, or, with KN_KRUNKER_OFFICIAL's in-client
-// switch on (krunker_net.h, default off), joins it in this client.
+// mode, cs, oc, ds, pw, kr, timeLeft). Official lobbies speak Krunker's protocol: joining one joins it
+// in this client (KN_KRUNKER_OFFICIAL, krunker_net.h), or, with the KRUNKNATIVE_KRUNKER_JOIN=browser
+// opt-out (and on Windows, which has no native WebSocket client for it yet), opens
+// https://krunker.io/?game=<id> in the system browser.
 //
 // The Servers window lists them on every native client in their own KRUNKER.IO section after
 // ours, whatever Settings > Quickplay > Server Type says (that one only picks what Quick Match /
@@ -48,8 +49,8 @@ int krunker_lobbies_pick(char *id, size_t n);
 // Seek an official lobby: pick one now (a fresh enough list), or once the list arrives, and
 // open it (krunker_lobbies_open); none matching = a toast. 1 = started, 0 = not available.
 int krunker_lobbies_seek(void);
-// Open https://krunker.io/?game=<id> in the system browser and tell the player why (toast).
-// With KN_KRUNKER_OFFICIAL's in-client switch on (krunker_net_in_client) the game is joined in this
-// client instead (krunker_net_join), the browser staying the fallback when that cannot start.
+// Join official lobby <id> in this client (krunker_net_join; the Servers window closes, failures are
+// explained by krunker_net), or, when krunker_net_in_client() says no (the browser opt-out, Windows),
+// open https://krunker.io/?game=<id> in the system browser and say why (toast).
 void krunker_lobbies_open(const char *id);
 void krunker_lobbies_attach(Client *client); // startup: the client an in-client join drives

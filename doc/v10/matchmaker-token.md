@@ -278,10 +278,16 @@ when a filter is set.
 
   The rows sit in their own groups after ours, "krunker.io - <region>" (or
   "krunker.io - <mode>" in the mode-grouped browser). Those groups have no Quick Join.
-* Joining: Krunker's game protocol is not ours, so a click (`krunkerJoin(id)`) opens
-  `https://krunker.io/?game=<id>` in the system browser and shows a toast saying so.
-  * It goes through `ui_open_browser`, not `ui_open_external`, whose in-app routing would take a
-    krunker.io link for this client's own page.
+* Joining: a click (`krunkerJoin(id)`) joins the lobby in this client through Krunker's own
+  protocol (`krunker_net.h`, KN_KRUNKER_OFFICIAL): the Servers window closes, seek-game asks for
+  that game (its region from the list), the Security Challenge modal shows when the matchmaker
+  wants a captcha, and a join that fails says why (captcha closed or refused, matchmaker
+  unreachable, ACCESS DENIED with the proxy hint, a map outside our catalogue).
+  * Opt-out: `KRUNKNATIVE_KRUNKER_JOIN=browser` (`?krunkerJoin=browser` on the web) opens
+    `https://krunker.io/?game=<id>` in the system browser instead, with a toast saying so (also the
+    Windows default, which has no native WebSocket client for it yet). It goes through
+    `ui_open_browser`, not `ui_open_external`, whose in-app routing would take a krunker.io link for
+    this client's own page.
   * Ids are checked against `[A-Za-z0-9:_-]{1,64}`.
 * A seek for an official lobby picks a public one (not custom, no password), not full, in the
   wanted mode and map, with the most players.

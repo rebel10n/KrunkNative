@@ -362,20 +362,23 @@ def client_settings(port, game_b):
 
 
 def client_official(port):
+    """The browser opt-out (KRUNKNATIVE_KRUNKER_JOIN=browser): official lobbies open on krunker.io.
+    The default, in-client, is client_both's and krunker_official_e2e.py's."""
     hits = len(stub_hits)
     p, log = client("official", port, '0 play\n300 call setSetting "knSeekServers" "official"\n'
                     '400 call setSetting "seek_modes" "%d"\n500 call setSetting "seek_maps" "%d"\n'
                     "1000 down F4\n1050 up F4\n4000 call showWindow 2\n6000 text @status [id=kioStatus]\n"
                     "6100 text @head .setHed\n6150 nodes @kgroups .quickJoin[title*=krunker]\n6200 call setExpandedRegion 1\n"
                     "6500 nodes @rows .kioTag\n"
-                    "6550 nodes @wired [onclick*=krunkerJoin]\n6600 call krunkerJoin \"NY:bbbbb\"\n7500 quit\n" % (MODES["b"], SANDSTORM))
+                    "6550 nodes @wired [onclick*=krunkerJoin]\n6600 call krunkerJoin \"NY:bbbbb\"\n7500 quit\n" % (MODES["b"], SANDSTORM),
+                    extra_env={"KRUNKNATIVE_KRUNKER_JOIN": "browser"})
     finish(p, 60)
     text = read_log(log)
-    check("C4: F4 with Official opens the matching official lobby in the browser",
+    check("C4: opt-out: F4 with Official opens the matching official lobby in the browser",
           "[krunker] official lobby NY:bbbbb: opening https://krunker.io/?game=NY:bbbbb" in text
           and "open (disabled by KRUNKNATIVE_NO_BROWSER): https://krunker.io/?game=NY:bbbbb" in text, text[-600:])
     check("C4: ... and stays in its KrunkNative game (no new seek)", len(joined(text)) == 1, str(joined(text)))
-    check("C4: the Servers window explains the krunker.io section", re.search(r"@status n=1 .*text=KRUNKER\.IO lobbies open in your browser", text),
+    check("C4: the Servers window explains the krunker.io section", re.search(r"@status n=1 .*text=KRUNKER\.IO official lobbies open in your browser", text),
           "")
     m = re.search(r"@head n=\d+ checked=\d value=\S* text=(.*)", text)
     check("C4: the server type only steers the seek: our (tdm) group is still listed, first",
@@ -396,8 +399,9 @@ def client_both(port):
                     "1000 down F4\n1050 up F4\n5000 quit\n" % MODES["kio"])
     finish(p, 60)
     text = read_log(log)
-    check("C5: Both: no KrunkNative server plays it -> the official lobby",
-          "no KrunkNative server matches, trying krunker.io" in text and "https://krunker.io/?game=TOK:ddddd" in text, text[-600:])
+    check("C5: Both: no KrunkNative server plays it -> the official lobby, joined in-client (the default)",
+          "no KrunkNative server matches, trying krunker.io" in text and "[krunker] official lobby TOK:ddddd: joining in-client" in text
+          and "[krunker] joining official game TOK:ddddd" in text and "https://krunker.io/?game=TOK:ddddd" not in text, text[-600:])
 
 
 SANDSTORM = -1

@@ -8,6 +8,12 @@
 // Krunker's packets into NetPackets for the normal inbound queue (client_net_queue_packet), so the
 // game, HUD and menu run unchanged.
 //
+// Failures say what went wrong, never a generic "can't be joined" (krunker_net.c fail_*): the player
+// cancelled the security challenge, krunker.io refused its token twice, the matchmaker / game server
+// is unreachable (natively: the proxy of Settings > Client named), krunker.io refused this network
+// (ACCESS DENIED: points at Settings > Client > Proxy), or the game plays a map this client's catalogue
+// does not have (the session is left; the error screen names the map index).
+//
 // Join flow (game.deob.js; matchmaker client at :147380-147690), the live client's order:
 //   1. GET <matchmaker>/seek-game?hostname=krunker.io&region=<r>&autoChangeGame=false[&game=<gameId>]
 //          &dataQuery={"v":"<buildVersion>"}
@@ -34,9 +40,13 @@
 // networks) on its own thread. Windows has no native path yet (http_conn.c is POSIX).
 //
 // Switches:
-//   KRUNKNATIVE_KRUNKER_JOIN=client (native) / ?krunkerJoin=client (web)   official lobbies of the
-//       server browser join in-client instead of opening krunker.io in the system browser (default
-//       off until it works end to end against the live servers)
+//   Official games are joined in this client by default: a click on an official lobby of the server
+//       browser, Quick Match / Find New Game (F4) with Settings > Quickplay > Server Type Official or
+//       Both (krunker_lobbies_open), and --krunker / ?krunker= below.
+//   KRUNKNATIVE_KRUNKER_JOIN=browser (native) / ?krunkerJoin=browser (web)   the opt-out: lobby clicks
+//       and seeks open https://krunker.io/?game=<id> in the system browser instead, as before the
+//       in-client join was the default ("client" / "1" / unset = in-client). --krunker / ?krunker=
+//       always join in-client: they ask for it explicitly.
 //   --krunker [gameId] (native) / ?krunker=<gameId|1> (web)   join an official game at startup
 //   KRUNKNATIVE_KRUNKER_MATCHMAKER=<url> (native, shared with krunker_lobbies.h) / ?krunkerMM=<url>
 //   KRUNKNATIVE_KRUNKER_REGION=<id> / ?krunkerRegion=<id>      seek region (default de-fra)
@@ -60,7 +70,7 @@
 //   - a dropped official session does not reconnect by itself (the page's reconnect seeks anew)
 #include <client.h>
 
-int krunker_net_in_client(void);   // official lobbies join in-client (the switch above)
+int krunker_net_in_client(void);   // official lobbies join in-client: 1 unless the browser opt-out above is set
 void krunker_net_attach(Client *client); // startup (backend_startup.c): the client the mode drives
 // Seek and join an official game (game_id NULL / "": the matchmaker picks one in the region;
 // region NULL: the default). Stops the knet transport / the offline game first. 1 = started.

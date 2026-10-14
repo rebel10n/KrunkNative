@@ -19,6 +19,10 @@ Stubs (Python, ports from kn_proto.free_ports()):
     player), three "cc" (a script, garbage, an undefined result), a "cpt" ALTCHA challenge, "k"
     moving the stub player every 100 ms, "pi" every second; after the client's "en" its own "0",
     "l" and a "ch" line.
+Lobby runs (the default, no KRUNKNATIVE_KRUNKER_JOIN): "native-lobby" clicks the stub's official lobby
+(GET /game-list) in the server browser from the offline game: it is joined in-client (Cancel in the
+Security Challenge modal first ends the join saying so, a second click + a pasted token joins);
+"native-optout" (KRUNKNATIVE_KRUNKER_JOIN=browser) checks the click opens krunker.io in the browser instead.
 Captcha runs (krunker_captcha.h): native "callback" (the one-time 127.0.0.1 callback: a wrong secret,
 a foreign Origin, a body that is not a token, an expired listener, then the token, then a second
 token), native "paste" (a bad paste refused in the modal, then a good one), web "widget" (the stub
@@ -268,6 +272,9 @@ class Stub:
                     tok = "tok_e2e_%d_0123456789abcdefghijklmnopqrstuvwxyz0123456789" % len(stub.issued)
                     stub.issued.append(tok)
                     body, ctype = tok.encode(), "text/plain"
+                elif u.path == "/game-list":  # the server browser's official lobbies (krunker_lobbies.c)
+                    body, ctype = json.dumps({"success": True, "totalPlayerCount": 3, "games": [
+                        [GAME_ID, "de-fra", 3, 8, {"i": "Kanji", "g": 0}, 240]]}).encode(), "application/json"
                 elif u.path == "/seek-game":
                     qd = dict(q)
                     cap, val = qd.get("captchaToken"), qd.get("validationToken")
@@ -541,7 +548,7 @@ def post(url, body, origin="https://krunker.io", ctype="text/plain"):
         return "refused"
 
 
-def launch_native(label, script_text, extra_env):
+def launch_native(label, script_text, extra_env, args=("--krunker",)):
     mm, wsp = kn_proto.free_ports(2)
     stub = Stub(mm, wsp)
     stub.start_http()
@@ -557,7 +564,7 @@ def launch_native(label, script_text, extra_env):
                 "KRUNKNATIVE_KRUNKER_TRACE": "1", "KRUNKNATIVE_ASSETS_DIR": ASSETS, "KRUNKNATIVE_ASSET_FETCH": "off"})
     env.update(extra_env)
     out = open(log, "w")
-    p = subprocess.Popen(["stdbuf", "-oL", "-eL", f"{BUILD}/client_bin", "--krunker"], stdout=out, stderr=subprocess.STDOUT,
+    p = subprocess.Popen(["stdbuf", "-oL", "-eL", f"{BUILD}/client_bin", *args], stdout=out, stderr=subprocess.STDOUT,
                          stdin=subprocess.DEVNULL, env=env, start_new_session=True, cwd=ROOT)
     return stub, p, out, Log(log)
 
@@ -674,6 +681,61 @@ def run_native_paste():
     # (the `type` lines of the input script are the test's echo of what it typed: not the client's)
     check_matchmaker(label, stub, [BURNT_TOKEN, PASTE_TOKEN], "\n".join(l for l in lines if "[input_script]" not in l))
     check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+
+
+def run_native_lobby():
+    """The default (no KRUNKNATIVE_KRUNKER_JOIN): a click on the official lobby in the server browser
+    joins it in this client. From the offline game: the Servers window lists the stub's lobby, the
+    click seeks it, the Security Challenge modal asks; Cancel ends the join saying so; a second click
+    and a pasted token join the game."""
+    label = "native-lobby"
+    script = ("0 menu\n300 call showWindow 2\n3000 text @status [id=kioStatus]\n3100 nodes @rows .quickJoin[title*=krunker]\n"
+              "3200 call krunkerJoin \"%s\"\n4500 vis @ask1 knCaptchaHolder knCaptchaManual\n4600 clickid knCaptchaCancel\n"
+              "5200 vis @cancelled knCaptchaHolder\n5300 call showWindow 2\n5800 call krunkerJoin \"%s\"\n7000 vis @ask2 knCaptchaHolder\n"
+              "7100 clickid knCaptchaToken\n7200 type %s\n7300 clickid knCaptchaUse\n8000 play\n13000 players\n13200 quit\n"
+              % (GAME_ID, GAME_ID, PASTE_TOKEN))
+    stub, p, out, log = launch_native(label, script, {}, args=("--offline",))
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    st = re.search(r"\[input_script\] text t=\d+ @status n=1 .*?text=(.*)", text)
+    check(f"{label}: the KRUNKER.IO section says its lobbies join here", st and "official lobbies: pick one to join it here" in st.group(1),
+          st.group(1) if st else None)
+    check(f"{label}: no \"can't be joined\" text anywhere", not re.search(r"can.t be joined|cannot be joined|can.t join krunker", text))
+    rows = re.search(r"nodes t=\d+ @rows elements=\d+ match=(\d+)", text)
+    check(f"{label}: the stub's lobby has its krunker.io group", rows and rows.group(1) == "1", rows.group(0) if rows else None)
+    check(f"{label}: the click joins in-client (no browser)", f"[krunker] official lobby {GAME_ID}: joining in-client" in text and
+          "open (disabled by KRUNKNATIVE_NO_BROWSER)" not in text, text[-400:])
+    check(f"{label}: the Security Challenge modal asks", "@ask1 knCaptchaHolder=1 knCaptchaManual=1" in text)
+    check(f"{label}: Cancel ends the join, saying the challenge was closed",
+          "@cancelled knCaptchaHolder=0" in text and "You closed krunker.io's security challenge, so no game was joined" in text)
+    check(f"{label}: the second click asks again", "@ask2 knCaptchaHolder=1" in text)
+    seeks = [q for pth, q, _ in stub.http_log if pth == "/seek-game"]
+    paths = [pth for pth, _, _ in stub.http_log if pth != "/game-list"]
+    check(f"{label}: seek, (cancel), seek, generate-token, seek with the token", paths == ["/seek-game", "/seek-game", "/generate-token", "/seek-game"],
+          paths)
+    check(f"{label}: every seek asks for the clicked lobby (game=, its region)", seeks and all(dict(q).get("game") == GAME_ID and
+          dict(q).get("region") == "de-fra" for q in seeks), seeks[:1])
+    check(f"{label}: the matchmaker let the token through", stub.captcha_ok.is_set())
+    check(f"{label}: WebSocket /ws?gameId=&clientKey=", stub.ws_paths[:1] == [f"/ws?gameId={GAME_ID}&clientKey={CLIENT_ID}"], stub.ws_paths)
+    check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+    check(f"{label}: no Turnstile token reaches the log", PASTE_TOKEN not in "\n".join(l for l in lines if "[input_script]" not in l))
+
+
+def run_native_optout():
+    """KRUNKNATIVE_KRUNKER_JOIN=browser: the click opens krunker.io/?game=<id> in the system browser
+    (KRUNKNATIVE_NO_BROWSER logs it), nothing is sought in-client."""
+    label = "native-optout"
+    script = ("0 menu\n300 call showWindow 2\n3000 text @status [id=kioStatus]\n3200 call krunkerJoin \"%s\"\n4200 quit\n" % GAME_ID)
+    stub, p, out, log = launch_native(label, script, {"KRUNKNATIVE_KRUNKER_JOIN": "browser"}, args=("--offline",))
+    lines = finish_native(label, stub, p, out, log, timeout=120)
+    text = "\n".join(lines)
+    st = re.search(r"\[input_script\] text t=\d+ @status n=1 .*?text=(.*)", text)
+    check(f"{label}: the KRUNKER.IO section says its lobbies open in the browser", st and "official lobbies open in your browser" in st.group(1),
+          st.group(1) if st else None)
+    check(f"{label}: the click opens the lobby in the browser", f"open (disabled by KRUNKNATIVE_NO_BROWSER): https://krunker.io/?game={GAME_ID}" in text,
+          text[-400:])
+    check(f"{label}: nothing is sought in-client", not any(pth == "/seek-game" for pth, _, _ in stub.http_log) and not stub.ws_paths and
+          "joining official game" not in text, [pth for pth, _, _ in stub.http_log])
 
 
 class Cdp:
@@ -909,6 +971,8 @@ def main():
     if ONLY in ("", "native") and os.path.isfile(f"{BUILD}/client_bin"):
         run_native()
         run_native_paste()
+        run_native_lobby()
+        run_native_optout()
         ran = True
     if ONLY in ("", "web") and DIST and CHROME and os.path.isfile(os.path.join(DIST, "client.wasm")):
         run_web("ok")

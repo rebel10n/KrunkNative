@@ -26,6 +26,7 @@
 #include <server_names.h>  // short ?game= ids (CH2:kz862 for CHITOWN2:kz862)
 #include <seek_prefs.h>    // Settings > Quickplay: seek mode / map / server type (mm-token)
 #include <krunker_lobbies.h> // official krunker.io lobbies (native only, mm-token)
+#include <krunker_net.h>     // krunker_net_in_client: official lobbies join here unless the browser opt-out
 #include <v10_party.h>     // the server password popup (ERROR 004005)
 #include <strings.h>
 #include <ctype.h>
@@ -1004,7 +1005,7 @@ static int search_matches(const cJSON *t) {
            (meta_flag(t, "krunker") && (str_has_ci("krunker.io", g_search) || str_has_ci(krunker_region_name(tuple_str(t, 1)), g_search)));
 }
 
-// mm-token: an official krunker.io lobby (krunker_lobbies.c), joined in the browser
+// mm-token: an official krunker.io lobby (krunker_lobbies.c), joined through krunker_net (krunkerJoin)
 static int row_krunker(const cJSON *t) { return meta_flag(t, "krunker"); }
 
 // Settings > Quickplay: the browser shows the server type's lists, rows of the seek mode / map
@@ -1351,11 +1352,13 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
     if (current) sb_append(sb, "color:#fff !important;");
     sb_append(sb, "padding-top:10px;margin-top:0px;' onclick='playSelect(0.1);");
     if (krunker) {
-        // Krunker's protocol is not ours: krunker.io/?game=<id> in the system browser
+        // Krunker's protocol (krunker_net.h): joined in this client, or krunker.io/?game=<id> in the
+        // system browser with the opt-out (krunker_lobbies_open)
         sb_append(sb, "krunkerJoin(\"");
         sb_append_esc(sb, id);
         sb_append(sb, "\")' title='");
-        sb_append_esc(sb, I18N("kn.servers.kioRowTitle", "Opens in your browser: krunker.io games cannot be joined in this client"));
+        sb_append_esc(sb, krunker_net_in_client() ? I18N("kn.servers.kioRowJoin", "Join this official krunker.io game here, as a guest")
+                                                  : I18N("kn.servers.kioRowBrowser", "Opens this official krunker.io game in your browser"));
         sb_append(sb, "'>");
     } else if (finder) {
         // a finder-only server: joined directly (finderJoin(host, port))
@@ -1457,7 +1460,8 @@ static char *get_servers(void) {
         sb_appendf(&sb, "<span style='float:right;color:rgba(255,255,255,0.9)'>%.0f <span style='color:rgba(255,255,255,0.6)'>online</span></span>", g->players);
         if (kio) {
             sb_append(&sb, "<div class='quickJoin' style='opacity:0.6' title='");
-            sb_append_esc(&sb, I18N("kn.servers.kioGroupTitle", "krunker.io games open in your browser"));
+            sb_append_esc(&sb, krunker_net_in_client() ? I18N("kn.servers.kioGroupJoin", "Official krunker.io games: pick a lobby to join it here")
+                                                       : I18N("kn.servers.kioGroupBrowser", "Official krunker.io games: a lobby opens in your browser"));
             sb_append(&sb, "'>krunker.io</div></div>");
         }
         else sb_appendf(&sb, "<div class='quickJoin' onclick='quickJoinRegion(%d,%d)'>Quick Join</div></div>", h, old ? 0 : 1);
@@ -1567,7 +1571,8 @@ static void append_krunker_status(StrBuf *sb, const int groups) {
         sb_append_esc(sb, I18N("kn.servers.kioNoMatch", "No official lobby matches the search or filter."));
     } else {
         sb_append(sb, "color:rgba(255,255,255,0.7)'><span style='color:#ce93d8'>KRUNKER.IO</span> ");
-        sb_append_esc(sb, I18N("kn.servers.kioBrowserOnly", "lobbies open in your browser: this client can't join krunker.io games."));
+        sb_append_esc(sb, krunker_net_in_client() ? I18N("kn.servers.kioJoinHere", "official lobbies: pick one to join it here as a guest.")
+                                                  : I18N("kn.servers.kioOpensInBrowser", "official lobbies open in your browser."));
     }
     sb_append(sb, "</div>");
 }
@@ -2097,7 +2102,7 @@ static void quick_join_region(const int index) {
     free(g_quick_join);
     g_quick_join = NULL;
     g_quick_join_count = g_quick_join_next = 0;
-    if (index < 0 || index >= count || !strncmp(groups[index].key, "kio:", 4)) return; // krunker.io: browser only
+    if (index < 0 || index >= count || !strncmp(groups[index].key, "kio:", 4)) return; // krunker.io groups: no Quick Join (a row joins its own lobby)
     const ServerGroup *g = &groups[index];
     g_quick_join = calloc((size_t) g->game_count + 1, sizeof(char *));
     int brain_rows = 0;
@@ -2227,8 +2232,8 @@ int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         connect_server(text);
         return 1;
     }
-    if (!strcmp(name, "krunkerJoin")) { // an official krunker.io lobby: the system browser
-        if (argc > 0 && args[0].kind == HTML_ARG_STR) krunker_lobbies_open(args[0].str); // the list stays open
+    if (!strcmp(name, "krunkerJoin")) { // an official krunker.io lobby: joined here (or the browser opt-out)
+        if (argc > 0 && args[0].kind == HTML_ARG_STR) krunker_lobbies_open(args[0].str);
         return 1;
     }
     if (!strcmp(name, "finderJoin")) {
@@ -3074,7 +3079,8 @@ int servers_ui_quick_match(void) {
 
 // Find New Game (F4, Krunker's client) and Quick Match: Settings > Quickplay decides where
 // (seek_prefs.h): KrunkNative = a new seek here excluding this lobby (with the seek mode / map);
-// Official = an official krunker.io lobby opened in the browser (native); Both = ours when one
+// Official = an official krunker.io lobby, joined in this client (native; krunker_lobbies_open, the
+// browser with the opt-out); Both = ours when one
 // matches, else an official one. A seek that finds nothing leaves the player in this game with a
 // toast. 0 = nothing to do (offline / direct server with KrunkNative only).
 int servers_ui_find_new_game(void) {

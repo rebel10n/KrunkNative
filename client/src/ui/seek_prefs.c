@@ -4,6 +4,7 @@
 // dsmo / dsma (v10.js:222051-222055) and has no settings row for them; the rows here are
 // KrunkNative's, in v10's settings markup (setHed / setBodH / settName + inputGrey2 select).
 #include <seek_prefs.h>
+#include <krunker_net.h> // krunker_net_in_client (the Server Type texts)
 #include <ui_logic.h>
 #include <map_catalog.h>
 #include <modes.h>
@@ -90,12 +91,16 @@ static void option(StrBuf *sb, const char *value, const char *label, const int s
 
 #ifndef __EMSCRIPTEN__
 // Server Type (native only: the web client never lists krunker.io lobbies): what Quick Match and
-// Find New Game (F4) seek into; the server browser lists both kinds whatever it says.
+// Find New Game (F4) seek into; the server browser lists both kinds whatever it says. Official
+// lobbies are joined in this client (krunker_net.h) unless the browser opt-out is set.
 static void server_type_html(StrBuf *sb) {
     const SeekServers servers = seek_prefs_servers();
+    const int here = krunker_net_in_client();
     sb_append(sb, "<div class=\"settName\" title=\"");
-    sb_append_esc(sb, I18N("kn.quickplay.serverType.info", "What Quick Match and Find New Game (F4) look for. The server browser lists both; "
-                                                            "official krunker.io lobbies open in your browser"));
+    sb_append_esc(sb, here ? I18N("kn.quickplay.serverType.infoJoin", "What Quick Match and Find New Game (F4) look for. The server browser lists both; "
+                                                                       "official krunker.io games are joined in this client as a guest")
+                           : I18N("kn.quickplay.serverType.infoBrowser", "What Quick Match and Find New Game (F4) look for. The server browser lists both; "
+                                                                          "official krunker.io lobbies open in your browser"));
     sb_append(sb, "\">");
     sb_append_esc(sb, I18N("kn.quickplay.serverType", "Server Type"));
     sb_append(sb, " <select id=\"knSeekServers\" onchange=\"window.setSetting(&quot;" SEEK_SERVERS_KEY "&quot;, this.value)\" class=\"inputGrey2\">");
@@ -103,8 +108,10 @@ static void server_type_html(StrBuf *sb) {
     option(sb, "official", I18N("kn.quickplay.serverType.official", "Official (krunker.io)"), servers == SEEK_SERVERS_OFFICIAL);
     option(sb, "both", I18N("kn.quickplay.serverType.both", "Both"), servers == SEEK_SERVERS_BOTH);
     sb_append(sb, "</select></div><div class=\"settName\" style=\"color:rgba(255,255,255,0.5);font-size:15px\">");
-    sb_append_esc(sb, I18N("kn.quickplay.serverType.note", "Quick Match and F4 seek into these. "
-                                                            "Official krunker.io lobbies open in your browser: this client cannot join them. Both prefers a KrunkNative server when one matches."));
+    sb_append_esc(sb, here ? I18N("kn.quickplay.serverType.noteJoin", "Quick Match and F4 seek into these. Official krunker.io games are joined in this client as a guest "
+                                                                       "(krunker.io may ask for a security check first). Both prefers a KrunkNative server when one matches.")
+                           : I18N("kn.quickplay.serverType.noteBrowser", "Quick Match and F4 seek into these. Official krunker.io lobbies open in your browser. "
+                                                                          "Both prefers a KrunkNative server when one matches."));
     sb_append(sb, "</div>");
 }
 #endif

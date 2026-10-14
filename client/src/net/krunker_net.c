@@ -11,6 +11,7 @@
 #include <krunker_altcha.h>
 #include <krunker_captcha.h>
 #include <backend.h>
+#include <html_ui.h>
 #include <ui_logic.h>
 #include <cJSON.h>
 #include <stdarg.h>
@@ -24,6 +25,7 @@
 #include <emscripten/websocket.h>
 #elif !defined(_WIN32)
 #include <http_conn.h>
+#include <http_proxy.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -81,6 +83,13 @@ static struct {
     // and whether the last seek carried one (a CaptchaRequired after it = the token was refused)
     int captcha_attempts, captcha_sent;
     char captcha[KRUNKER_CAPTCHA_TOKEN_MAX + 1];
+    // the player's texts the socket thread needs, looked up on the main thread per join (i18n is the
+    // main thread's): {0} placeholders filled with i18n_replace where they are used
+    struct {
+        char joined[160], error[160], pow[200], map[160];
+        char ws_failed[200], ws_denied[200], ws_unreachable[200];
+    } tpl;
+    volatile int leave_unsupported; // the socket thread saw a map we lack: krunker_net_tick leaves the game
 #ifdef __EMSCRIPTEN__
     EMSCRIPTEN_WEBSOCKET_T ws;
 #elif defined(KRUNKER_NATIVE_WS)
@@ -124,9 +133,20 @@ static int option(const char *env, const char *param, char *out, const size_t n)
     return out[0] != 0;
 }
 
+// In-client unless the opt-out (krunker_net.h): KRUNKNATIVE_KRUNKER_JOIN / ?krunkerJoin = browser
+// ("0" / "off" too); "client", "1" or unset = in-client.
+// Windows has no native WebSocket client for this mode yet (KRUNKER_NATIVE_WS): the browser stays its
+// default there, "client" still asks for the in-client path (which then says why it cannot start).
 int krunker_net_in_client(void) {
     char v[32];
-    return option("KRUNKNATIVE_KRUNKER_JOIN", "krunkerJoin", v, sizeof(v)) && (!strcmp(v, "client") || !strcmp(v, "1"));
+    if (!option("KRUNKNATIVE_KRUNKER_JOIN", "krunkerJoin", v, sizeof(v))) {
+#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
+        return 0;
+#else
+        return 1;
+#endif
+    }
+    return strcmp(v, "browser") != 0 && strcmp(v, "0") != 0 && strcmp(v, "off") != 0;
 }
 
 static int trace_on(void) {
@@ -177,18 +197,19 @@ static void link_send(void *user, const uint8_t *frame, const size_t len);
 static void link_event(void *user, const KrunkerLinkEvent kind, const char *text) {
     (void) user;
     printf("[krunker] %s%s\n", kind == KRUNKER_LINK_EV_CAPTCHA ? "captcha required " : "", text ? text : "");
+    char out[300];
     switch (kind) {
-        case KRUNKER_LINK_EV_CAPTCHA:
-            set_notice(1, "krunker.io asks for a captcha before you can play this game");
+        case KRUNKER_LINK_EV_CAPTCHA: // a "cpt" krunker_altcha cannot answer (not SHA-256 ALTCHA, too big)
+            set_notice(1, "%s", K.tpl.pow);
             break;
         case KRUNKER_LINK_EV_ERROR:
-            set_notice(0, "krunker.io: %s", text ? text : "error");
+            set_notice(0, "%s", i18n_replace(out, sizeof(out), K.tpl.error, 1, I18N_ARGV(text ? text : "error")));
             break;
-        case KRUNKER_LINK_EV_UNSUPPORTED:
-            set_notice(0, "This official game can't be shown here: %s", text ? text : "");
+        case KRUNKER_LINK_EV_UNSUPPORTED: // a map our catalogue lacks: nothing to show, krunker_net_tick leaves
+            K.leave_unsupported = 1;
             break;
         case KRUNKER_LINK_EV_JOINED:
-            set_notice(0, "Joined the official krunker.io game %s", K.game_id);
+            set_notice(0, "%s", i18n_replace(out, sizeof(out), K.tpl.joined, 1, I18N_ARGV(K.game_id)));
             break;
         default:
             break;
@@ -246,8 +267,9 @@ static void socket_opened(void) {
     on_client_socket_connect(client);
 }
 
-// The socket ended (any thread). reason: why, for a connect that never opened.
-static void socket_closed(const int code, const char *reason) {
+// The socket ended (any thread). reason: the close reason (logs, the drop text); message: the
+// player's sentence for a connect that never opened (NULL: K.tpl's, from reason).
+static void socket_closed(const int code, const char *reason, const char *failed) {
     Client *client = K.client;
     pthread_mutex_lock(&client->net_lock);
     if (client->net_socket == KRUNKER_FAKE_FD) client->net_socket = -1; // (another transport may own it by now)
@@ -261,8 +283,11 @@ static void socket_closed(const int code, const char *reason) {
         on_client_socket_disconnect(client);
     } else {
         char message[300];
-        snprintf(message, sizeof(message), "Could not connect to the krunker.io game server%s%s", reason && reason[0] ? ": " : "", reason ? reason : "");
+        if (failed && failed[0]) snprintf(message, sizeof(message), "%s", failed);
+        else if (reason && reason[0]) i18n_replace(message, sizeof(message), K.tpl.ws_failed, 1, I18N_ARGV(reason));
+        else snprintf(message, sizeof(message), "%s", K.tpl.ws_unreachable);
         on_client_socket_failed(client, message);
+        set_notice(0, "%s", message);
     }
 }
 
@@ -320,7 +345,7 @@ static bool ws_on_close(int type, const EmscriptenWebSocketCloseEvent *e, void *
     if (e->socket != K.ws) return true; // an older socket
     K.ws = 0;
     if ((unsigned) (uintptr_t) user == K.generation && K.state != KS_OFF) K.state = KS_CLOSED;
-    socket_closed(e->code, e->reason);
+    socket_closed(e->code, e->reason, NULL);
     return true;
 }
 
@@ -349,7 +374,7 @@ static void ws_close(void) {
     const EMSCRIPTEN_WEBSOCKET_T old = K.ws;
     K.ws = 0;
     emscripten_websocket_close(old, 1000, "leave");
-    if (K.connected) socket_closed(1000, "left");
+    if (K.connected) socket_closed(1000, "left", NULL);
 }
 
 // ---------------------------------------------------------------- native socket
@@ -441,7 +466,8 @@ static int ws_url_split(const char *url, HttpAddr *a, char *target, const size_t
     return 1;
 }
 
-static int ws_handshake(HttpConn *c, const HttpAddr *a, const char *target) {
+// 1 = upgraded; 0 = failed, *status = the HTTP status of a refused upgrade (0: no answer)
+static int ws_handshake(HttpConn *c, const HttpAddr *a, const char *target, int *status_out) {
     static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     uint8_t raw[16];
     char key[25];
@@ -463,6 +489,7 @@ static int ws_handshake(HttpConn *c, const HttpAddr *a, const char *target) {
                              "Sec-WebSocket-Key: %s\r\nSec-WebSocket-Version: 13\r\nOrigin: https://krunker.io\r\n"
                              "User-Agent: KrunkNative\r\n\r\n",
                              target, a->host, default_port ? "" : ":", default_port ? "" : a->port, key);
+    *status_out = 0;
     if (len <= 0 || (size_t) len >= sizeof(req) || !http_conn_send(c, req, (size_t) len)) return 0;
     char resp[4096];
     size_t n = 0;
@@ -475,6 +502,7 @@ static int ws_handshake(HttpConn *c, const HttpAddr *a, const char *target) {
     int status = 0;
     if (sscanf(resp, "HTTP/%*s %d", &status) != 1 || status != 101) {
         fprintf(stderr, "[krunker] websocket upgrade refused: %.*s\n", (int) strcspn(resp, "\r\n"), resp);
+        *status_out = status;
         return 0;
     }
     return 1;
@@ -498,14 +526,25 @@ static void *ws_thread(void *arg) {
     HttpAddr a;
     char target[1024];
     HttpConn c = {.fd = -1};
-    int code = 1006;
+    int code = 1006, status = 0;
     const char *why = "";
+    char failed[300] = ""; // the player's sentence (K.tpl: looked up on the main thread)
     if (!ws_url_split(K.ws_url, &a, target, sizeof(target))) {
         why = "bad WebSocket URL";
+        i18n_replace(failed, sizeof(failed), K.tpl.ws_failed, 1, I18N_ARGV(why));
     } else if (!http_conn_open(&c, &a, KRUNKER_HTTP_TIMEOUT_MS)) {
         why = "cannot reach the game server";
-    } else if (!ws_handshake(&c, &a, target)) {
+        snprintf(failed, sizeof(failed), "%s", K.tpl.ws_unreachable);
+    } else if (!ws_handshake(&c, &a, target, &status)) {
         why = "the WebSocket upgrade failed";
+        if (status == 403) { // krunker.io's block of this network, as on the lobby list (krunker_lobbies.c)
+            snprintf(failed, sizeof(failed), "%s", K.tpl.ws_denied);
+        } else {
+            char detail[64];
+            if (status) snprintf(detail, sizeof(detail), "HTTP %d", status);
+            else snprintf(detail, sizeof(detail), "no answer to the WebSocket upgrade");
+            i18n_replace(failed, sizeof(failed), K.tpl.ws_failed, 1, I18N_ARGV(detail));
+        }
     } else if (!K.quit && generation == K.generation) {
         K.state = KS_OPEN;
         socket_opened();
@@ -591,7 +630,7 @@ static void *ws_thread(void *arg) {
     if (c.fd >= 0) http_conn_close(&c);
     if (generation == K.generation && K.state != KS_OFF) K.state = KS_CLOSED;
     if (K.quit && !K.connected) return NULL; // left while connecting: nothing to report
-    socket_closed(code, why);
+    socket_closed(code, why, failed);
     return NULL;
 }
 
@@ -633,7 +672,9 @@ static void link_send(void *user, const uint8_t *frame, const size_t len) {
     (void) frame;
     (void) len;
 }
-static void ws_open(void) { fail("Joining official krunker.io games in-client is not available on Windows yet"); }
+static void ws_open(void) {
+    fail("%s", I18N("kn.kio.noWindowsSocket", "This Windows build has no WebSocket client for krunker.io's game servers yet: pick a KrunkNative server."));
+}
 static void ws_close(void) {}
 #endif
 
@@ -652,6 +693,99 @@ static const char *matchmaker(void) {
 }
 
 static int is_production(void) { return !strcmp(K.matchmaker, KRUNKER_DEFAULT_MATCHMAKER); }
+
+// The proxy (Settings > Client, http_proxy.h) a connection to url's host goes through: its label in
+// label, 1 = proxied. The web has none (the browser is the network stack).
+static int proxy_for_url(const char *url, char *label, const size_t n) {
+    label[0] = 0;
+#ifdef KRUNKER_NATIVE_WS
+    const char *p = strstr(url, "://");
+    const int tls = !strncmp(url, "https:", 6) || !strncmp(url, "wss:", 4);
+    p = p ? p + 3 : url;
+    char host[128];
+    size_t len = 0;
+    while (p[len] && p[len] != ':' && p[len] != '/' && p[len] != '?' && len + 1 < sizeof(host)) {
+        host[len] = p[len];
+        len++;
+    }
+    host[len] = 0;
+    HttpProxy px;
+    if (!http_proxy_for(host, tls, &px)) return 0;
+    http_proxy_label(&px, label, n);
+    return 1;
+#else
+    (void) url;
+    (void) n;
+    return 0;
+#endif
+}
+
+// krunker.io's block page: "ACCESS DENIED" HTML (a 403) instead of JSON (as krunker_lobbies.c sees it)
+static int access_denied(const int status, const char *body) {
+    static const char WORD[] = "access denied";
+    for (const char *p = body; p && *p; p++) {
+        size_t i = 0;
+        while (i < sizeof(WORD) - 1 && p[i] && (p[i] | 0x20) == WORD[i]) i++;
+        if (i == sizeof(WORD) - 1) return 1;
+    }
+    return status == 403;
+}
+
+// krunker.io refused this network (ACCESS DENIED): the proxy setting is the way round it (natively)
+static void denied_text(char *out, const size_t n, const char *url) {
+    char proxy[160];
+#ifdef __EMSCRIPTEN__
+    (void) url;
+    (void) proxy;
+    snprintf(out, n, "%s", I18N("kn.kio.deniedWeb", "krunker.io refused this network (ACCESS DENIED). Try another network, or the desktop client with a proxy."));
+#else
+    if (proxy_for_url(url, proxy, sizeof(proxy)))
+        i18n_replace(out, n, I18N("kn.kio.deniedProxy", "krunker.io refused this network (ACCESS DENIED), also through the proxy {0}. Try another proxy in Settings > Client."), 1, I18N_ARGV(proxy));
+    else
+        snprintf(out, n, "%s", I18N("kn.kio.denied", "krunker.io refused this network (ACCESS DENIED). Set a proxy in Settings > Client."));
+#endif
+}
+
+// what (the matchmaker / the game server) did not answer at url
+static void unreachable_text(char *out, const size_t n, const char *url, const int game_server) {
+    char proxy[160];
+    if (proxy_for_url(url, proxy, sizeof(proxy))) {
+        if (game_server)
+            i18n_replace(out, n, I18N("kn.kio.gsProxyUnreachable", "Could not reach the krunker.io game server through the proxy {0}. Check it in Settings > Client."), 1, I18N_ARGV(proxy));
+        else
+            i18n_replace(out, n, I18N("kn.kio.mmProxyUnreachable", "Could not reach krunker.io's matchmaker through the proxy {0}. Check it in Settings > Client."), 1, I18N_ARGV(proxy));
+        return;
+    }
+#ifdef __EMSCRIPTEN__
+    snprintf(out, n, "%s", game_server ? I18N("kn.kio.gsUnreachableWeb", "Could not reach the krunker.io game server. Check your connection.")
+                                       : I18N("kn.kio.mmUnreachableWeb", "Could not reach krunker.io's matchmaker. Check your connection."));
+#else
+    snprintf(out, n, "%s", game_server ? I18N("kn.kio.gsUnreachable", "Could not reach the krunker.io game server. Check your connection, or set a proxy in Settings > Client.")
+                                       : I18N("kn.kio.mmUnreachable", "Could not reach krunker.io's matchmaker. Check your connection, or set a proxy in Settings > Client."));
+#endif
+}
+
+static void fail_unreachable(void) {
+    char text[300];
+    unreachable_text(text, sizeof(text), K.matchmaker, 0);
+    fail("%s", text);
+}
+
+// The texts the socket thread uses (K.tpl), in the page's language at join time (main thread).
+static void load_texts(void) {
+    snprintf(K.tpl.joined, sizeof(K.tpl.joined), "%s", I18N("kn.kio.joined", "Joined the official krunker.io game {0}"));
+    snprintf(K.tpl.error, sizeof(K.tpl.error), "%s", I18N("kn.kio.serverError", "krunker.io: {0}"));
+    snprintf(K.tpl.pow, sizeof(K.tpl.pow), "%s",
+             I18N("kn.kio.powUnsupported", "krunker.io's game server asked for a proof of work in a form this client cannot compute yet: it may close the game."));
+    snprintf(K.tpl.map, sizeof(K.tpl.map), "%s", I18N("kn.kio.mapMissing", "Map index {0} of this official game is not in this client's catalogue: pick another lobby."));
+    snprintf(K.tpl.ws_failed, sizeof(K.tpl.ws_failed), "%s", I18N("kn.kio.gsFailed", "Could not connect to the krunker.io game server: {0}"));
+}
+
+// per seek answer: the game server's denied / unreachable sentences for its URL (K.ws_url)
+static void load_ws_texts(void) {
+    denied_text(K.tpl.ws_denied, sizeof(K.tpl.ws_denied), K.ws_url);
+    unreachable_text(K.tpl.ws_unreachable, sizeof(K.tpl.ws_unreachable), K.ws_url, 1);
+}
 
 // URLSearchParams.toString(): application/x-www-form-urlencoded (space '+', * - . _ kept)
 static void form_encode(char *out, const size_t n, const char *s) {
@@ -718,7 +852,7 @@ static void seek(void) {
     const int queued = http_get(url, on_seek); // (the request keeps its own copy)
     wipe(K.captcha, sizeof(K.captcha));          // single-use: never sent twice
     wipe(url, sizeof(url));
-    if (!queued) fail("Could not reach the krunker.io matchmaker");
+    if (!queued) fail_unreachable();
 }
 
 // The player solved (or gave up on) the matchmaker's Turnstile: a fresh validation token, then the
@@ -728,7 +862,11 @@ static void on_token(void *user, int status, const char *body, size_t length);
 static void captcha_done(void *user, const char *token) {
     if (stale(user) || K.state != KS_CAPTCHA) return;
     if (!token) {
-        fail("Matchmaking stopped: krunker.io's security challenge was not completed");
+        // the modal's Cancel (krunker_captcha_ui.c finish(NULL)), or a build with no page to show it in
+        if (!html_ui_available())
+            fail("%s", I18N("kn.kio.captchaNoUi", "krunker.io asks for a security challenge, and this build has no menu to show it in: no game was joined."));
+        else
+            fail("%s", I18N("kn.kio.captchaCancelled", "You closed krunker.io's security challenge, so no game was joined. Pick the lobby again to retry."));
         return;
     }
     snprintf(K.captcha, sizeof(K.captcha), "%s", token);
@@ -737,7 +875,7 @@ static void captcha_done(void *user, const char *token) {
     snprintf(url, sizeof(url), "%s/generate-token", K.matchmaker); // fetchValidationToken (game.deob.js:147576)
     if (!http_get(url, on_token)) {
         wipe(K.captcha, sizeof(K.captcha));
-        fail("Could not reach the krunker.io matchmaker");
+        fail_unreachable();
     }
 }
 
@@ -774,17 +912,31 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         const int refused = K.captcha_sent;
         K.captcha_sent = 0;
         if (K.captcha_attempts >= 2) {
-            fail("krunker.io still asks for a security challenge after %d tries: try again later, or play on krunker.io", K.captcha_attempts);
+            // (every prompt after the first follows a refused token: a cancel ends the join at once)
+            char tries[16], text[300];
+            snprintf(tries, sizeof(tries), "%d", K.captcha_attempts);
+            I18N_F(text, "kn.kio.captchaRefused", "krunker.io refused the security challenge's token {0} times, so no game was joined. Wait a minute and try again.", tries);
+            fail("%s", text);
         } else {
             K.captcha_attempts++;
             K.state = KS_CAPTCHA;
             printf("[krunker] seek-game: CaptchaRequired%s: the player solves Turnstile\n", refused ? " again (the token was refused)" : "");
             krunker_captcha_ask(K.captcha_attempts, refused, captcha_done, user);
         }
+    } else if (status == 0) { // no answer at all (DNS, refused, timeout, the proxy)
+        fail_unreachable();
+    } else if (status != 200 && !error && access_denied(status, body)) {
+        char text[300];
+        denied_text(text, sizeof(text), K.matchmaker);
+        fail("%s", text);
     } else if (status != 200 || error || !host || !game || !client_id) {
-        char text[200];
-        snprintf(text, sizeof(text), "%.180s", error ? error : body ? body : "");
-        fail("The krunker.io matchmaker refused the seek (HTTP %d%s%s)", status, text[0] ? ": " : "", text);
+        char detail[200], code[16], text[300];
+        // the matchmaker's own error word, else the start of its body on one line
+        snprintf(detail, sizeof(detail), "%.120s", error ? error : body && body[0] ? body : "(no reason given)");
+        for (char *c = detail; *c; c++) if (*c == '\r' || *c == '\n' || *c == '\t') *c = ' ';
+        snprintf(code, sizeof(code), "%d", status);
+        I18N_F(text, "kn.kio.seekRefused", "krunker.io's matchmaker turned the join down (HTTP {0}) {1}", code, detail);
+        fail("%s", text);
     } else {
         snprintf(K.game_id, sizeof(K.game_id), "%s", game);
         char query[600];
@@ -795,6 +947,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
             snprintf(K.ws_url, sizeof(K.ws_url), "%s://%s:%s/ws?%s", strncmp(K.matchmaker, "https:", 6) ? "ws" : "wss", host, port_s, query);
         }
         printf("[krunker] seek-game: game %s on %s:%s, opening %s\n", game, host, port_s, K.ws_url);
+        load_ws_texts();
         K.state = KS_CONNECTING;
         pthread_mutex_lock(&K.lock);
         krunker_link_reset(&K.link);
@@ -840,7 +993,9 @@ int krunker_net_join(Client *client, const char *game_id, const char *region) {
     K.altcha_pending = 0;
     K.captcha_attempts = K.captcha_sent = 0;
     K.pow_shown = 0;
+    K.leave_unsupported = 0;
     wipe(K.captcha, sizeof(K.captcha));
+    load_texts();
     matchmaker();
     printf("[krunker] joining official game %s (region %s) through %s\n", K.game_id[0] ? K.game_id : "(any)", K.region, K.matchmaker);
     // the live client's order: seek-game at once, no validation token; generate-token only before a
@@ -887,8 +1042,21 @@ int krunker_net_send_packet(const NetPacketType type, const void *payload, const
 }
 
 void krunker_net_tick(Client *client) {
-    (void) client;
     krunker_captcha_tick(); // the matchmaker's Turnstile modal (the localhost callback natively)
+    if (K.leave_unsupported && K.state != KS_OFF) {
+        // init named a map outside our catalogue (krunker_link on_init): the game cannot be shown, so
+        // the session ends on the error screen saying which map, instead of a loading screen forever
+        K.leave_unsupported = 0;
+        char index[16], text[sizeof(K.tpl.map) + 16];
+        pthread_mutex_lock(&K.lock);
+        snprintf(index, sizeof(index), "%d", K.link.unsupported_map);
+        pthread_mutex_unlock(&K.lock);
+        i18n_replace(text, sizeof(text), K.tpl.map, 1, I18N_ARGV(index));
+        printf("[krunker] the game plays map index %s, not in this client's catalogue: leaving\n", index);
+        krunker_net_leave(client ? client : K.client, text);
+        ui_notify(text);
+        return;
+    }
     if (K.pow_result) { // native: the socket thread answered a "cpt"
         const int solved = K.pow_result == 1;
         K.pow_result = 0;
@@ -912,7 +1080,7 @@ void krunker_net_tick(Client *client) {
             pthread_mutex_unlock(&K.lock);
             printf("[krunker] security challenge answered (%s proof of work, number %ld)\n", K.altcha.algorithm, K.altcha.next);
         } else if (rc < 0 && K.state == KS_OPEN) {
-            set_notice(1, "krunker.io asks for a security challenge this client cannot answer");
+            set_notice(1, "%s", K.tpl.pow);
         }
         free(payload);
     }
@@ -924,18 +1092,9 @@ void krunker_net_tick(Client *client) {
     K.notice_pending = K.captcha_pending = 0;
     pthread_mutex_unlock(&K.lock);
     if (captcha) {
-        // a "cpt" this client cannot answer (not SHA-256 ALTCHA, or too big): the modal says so
+        // a "cpt" this client cannot answer (not SHA-256 ALTCHA, or too big): the Security Challenge
+        // modal shows it failed, the toast says what (the session goes on until the server decides)
         krunker_captcha_pow_end(0);
-#ifdef __EMSCRIPTEN__
-        ui_notify("krunker.io asked for a security challenge this client cannot answer");
-#else
-        // the game opens on krunker.io, where the page answers it
-        char url[256];
-        snprintf(url, sizeof(url), "https://krunker.io/%s%s", K.game_id[0] ? "?game=" : "", K.game_id);
-        ui_open_browser(url);
-        ui_notify("krunker.io asked for a security challenge this client cannot answer: the game opened in your browser instead");
-#endif
-        return;
     }
     char html[sizeof(text) * 2];
     size_t o = 0; // the toast takes HTML: escape the server's text

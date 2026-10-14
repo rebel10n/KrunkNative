@@ -114,6 +114,7 @@ void krunker_link_reset(KrunkerLink *l) {
     l->io = io;
     krunker_session_init(&l->codec, ahkey);
     l->my_sid = -1;
+    l->unsupported_map = -1;
 }
 
 // ---------------------------------------------------------------- inbound
@@ -124,9 +125,11 @@ void krunker_link_reset(KrunkerLink *l) {
 static void on_init(KrunkerLink *l, const KrunkerFrame *f) {
     const int map = (int) num(arg(f, 0), -1), mode = (int) num(arg(f, 1), 0);
     if (map < 0 || map >= MAP_CATALOG_OFFICIAL_COUNT) {
+        l->unsupported_map = map;
         note(l, KRUNKER_LINK_EV_UNSUPPORTED, "the server plays map index %d, which this client does not have", map);
         return;
     }
+    l->unsupported_map = -1;
     NetInitPacket init;
     memset(&init, 0, sizeof(init));
     init.major = NET_PROTOCOL_MAJOR;

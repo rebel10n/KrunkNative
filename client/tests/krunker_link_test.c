@@ -123,9 +123,11 @@ int main(void) {
     NetInitPacket init;
     if (p) memcpy(&init, p->payload, sizeof(init));
     CHECK(p && p->length == sizeof(NetInitPacket) && init.map_index == 10 && init.mode_index == 0, "INIT map 10 mode 0");
+    CHECK(link.unsupported_map == -1, "a catalogue map is not flagged (%d)", link.unsupported_map);
     clear();
     feed(&link, "init", (KrunkerValue[]) {KRUNKER_V_NUM(77), KRUNKER_V_NUM(0)}, 2);
     CHECK(!find_in(NET_PACKET_INIT, 0) && g_events[KRUNKER_LINK_EV_UNSUPPORTED] == 1, "unknown map index refused");
+    CHECK(link.unsupported_map == 77, "the unknown map index is kept for the error screen (%d)", link.unsupported_map);
     clear();
 
     // "0": two players, the second is us

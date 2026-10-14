@@ -313,22 +313,30 @@ static const char *lobby_region(const char *id) {
 
 void krunker_lobbies_open(const char *id) {
     if (!id_ok(id)) return;
-    // KN_KRUNKER_OFFICIAL (krunker_net.h): join in-client when switched on, else the browser
+    // KN_KRUNKER_OFFICIAL (krunker_net.h): joined in this client unless the browser opt-out is set.
+    // A join that cannot start says why itself (krunker_net.c: the error screen and a toast), so it
+    // never falls back to the browser behind the player's back.
     if (krunker_net_in_client() && g_lobbies_client) {
         char text[200];
         printf("[krunker] official lobby %s: joining in-client\n", id);
         I18N_F(text, "kn.kio.joining", "Joining the official krunker.io game {0}...", id);
         ui_notify(text);
-        if (krunker_net_join(g_lobbies_client, id, lobby_region(id))) return;
+        menu_show_window(MENU_WINDOW_NONE, 0); // like a KrunkNative row: the Servers window makes way for the game
+        krunker_net_join(g_lobbies_client, id, lobby_region(id));
+        return;
     }
     const char *site = getenv("KRUNKNATIVE_KRUNKER_URL");
     char url[256], text[256];
     snprintf(url, sizeof(url), "%s/?game=%s", site && site[0] ? site : KRUNKER_DEFAULT_SITE, id);
-    printf("[krunker] official lobby %s: opening %s\n", id, url);
-    // Krunker's protocol is not this client's: the browser joins it (ui_open_browser, never the
-    // in-client routing of krunker.io links)
+    printf("[krunker] official lobby %s: opening %s (in the browser: KRUNKNATIVE_KRUNKER_JOIN=browser or Windows)\n", id, url);
+    // the opt-out: krunker.io's own page joins it (ui_open_browser, never the in-client routing of
+    // krunker.io links)
     ui_open_browser(url);
-    I18N_F(text, "kn.kio.openedInBrowser", "Official lobby {0} opened in your browser (krunker.io games can't be joined in this client)", id);
+#ifdef _WIN32 // no native WebSocket client for krunker.io's game servers on Windows yet (krunker_net.c)
+    I18N_F(text, "kn.kio.openedInBrowserWindows", "Official lobby {0} opened in your browser (this Windows build joins krunker.io games there for now)", id);
+#else
+    I18N_F(text, "kn.kio.openedInBrowserOptOut", "Official lobby {0} opened in your browser (in-client joining is switched off: KRUNKNATIVE_KRUNKER_JOIN=browser)", id);
+#endif
     ui_notify(text);
 }
 

@@ -229,7 +229,7 @@ def storage(cfg, key):
 
 
 DENIED = "krunker.io refused this network (ACCESS DENIED). Set a proxy in Settings > Client."
-OPEN_TEXT = "KRUNKER.IO lobbies open in your browser"
+OPEN_TEXT = "KRUNKER.IO official lobbies: pick one to join it here"  # the in-client default (krunker_net.h)
 
 
 def main():
