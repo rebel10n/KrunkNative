@@ -7,9 +7,12 @@
   1. offline Kanji and Sandstorm (the client's sandbox server grants it): a headless client_bin
      with an input script (fixed 60 fps step) plays in first person (viewmodel, no own model),
      `thirdperson` (own model in the world pass, no viewmodel, the camera behind the shoulder),
-     aiming down sights (first person while aimed, third person again after), backed against a
-     wall (the camera pulled in, never inside or behind solid geometry), `firstperson` (viewmodel
-     back), `/thirdperson on` typed as chat (the grant alone turns it on). Every frame of the third-person stretches is checked through `tpstate`
+     pitching down and up (the view's yaw and the player's never change, the camera swings over /
+     under the eye and stays 5 to the right, v10's pchObjc rig), aiming down sights (third person
+     stays, the camera zooms behind the shoulder, v10 updateAim), the Sniper Rifle's scope (third
+     person, the scope's full zoom), backed against a wall (the camera pulled in, never inside or
+     behind solid geometry), `firstperson` (viewmodel back), `/thirdperson on` typed as chat (the
+     grant alone turns it on). Every frame of the third-person stretches is checked through `tpstate`
      (client/src/input_script.c); a frame of each step is written (FRAMES_DIR, kept).
      Then a death in third person (the death cam, the respawn third person again).
   2. a public server_bin (port from kn_proto.free_ports): `thirdperson` is refused with the
@@ -17,6 +20,7 @@
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL; KRUNKNATIVE_EGL_DEVICE picks it).
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
+import math
 import os
 import re
 import shutil
@@ -85,7 +89,7 @@ def run_client(name, args, script, timeout=180):
 
 
 TP_RE = re.compile(r"\[input_script\] tpstate t=(\d+) view=(\d) model=(\d) own=(\d) viewmodel=(\d) keep=(\S+) "
-                   r"cam=(\S+) eye=(\S+) wall=(\d)")
+                   r"cam=(\S+) eye=(\S+) wall=(\d) rot=(\S+) dir=(\S+) zoom=(\S+) aim=(\S+)")
 
 
 def tpstates(lines):
@@ -96,7 +100,9 @@ def tpstates(lines):
             out.append({"t": int(m.group(1)), "view": int(m.group(2)), "model": int(m.group(3)), "own": int(m.group(4)),
                         "viewmodel": int(m.group(5)), "keep": float(m.group(6)),
                         "cam": tuple(map(float, m.group(7).split(","))), "eye": tuple(map(float, m.group(8).split(","))),
-                        "wall": int(m.group(9))})
+                        "wall": int(m.group(9)), "rot": tuple(map(float, m.group(10).split(","))),
+                        "dir": tuple(map(float, m.group(11).split(","))), "zoom": float(m.group(12)),
+                        "aim": float(m.group(13))})
     return out
 
 
@@ -106,6 +112,29 @@ def span(states, a, b):
 
 def dist(p, q):
     return sum((x - y) ** 2 for x, y in zip(p, q)) ** 0.5
+
+
+def yaw_diff(a, b):
+    return abs(math.remainder(a - b, 2.0 * math.pi))
+
+
+def frame_of(s):
+    """forward / right of the camera's look (three.js: pitch rot.x, yaw rot.y, -Z forward)"""
+    p, y = s["rot"]
+    return ((-math.sin(y) * math.cos(p), math.sin(p), -math.cos(y) * math.cos(p)), (math.cos(y), 0.0, -math.sin(y)))
+
+
+def offset_of(s):
+    """the camera's offset from the eye in the look frame: (right, along the look)"""
+    f, r = frame_of(s)
+    d = [c - e for c, e in zip(s["cam"], s["eye"])]
+    return sum(a * b for a, b in zip(d, r)), sum(a * b for a, b in zip(d, f))
+
+
+def behind(s):
+    """the third-person camera behind the shoulder: 3..15.1 from the eye, right of it, behind it"""
+    right, along = offset_of(s)
+    return 3.0 <= dist(s["cam"], s["eye"]) <= 15.1 and right > 1.0 and along < -2.0 and not s["wall"]
 
 
 def every(start, end, step=100):
@@ -120,12 +149,19 @@ def offline(key):
               f"1400 tpstate\n1400 shot {shot('1-first')}\n"
               "1500 con thirdperson\n" + every(2500, 4000) + f"3000 shot {shot('2-third')}\n"
               "3200 look 1.2 0\n" + f"3800 shot {shot('3-third-turned')}\n"
-              "4000 mdown right\n" + every(4800, 5300) + f"5000 shot {shot('4-ads')}\n"
-              "5400 mup right\n" + every(6500, 7000) +
-              f"7000 pose {backed}\n" + every(7600, 9000) + f"8000 shot {shot('5-backed')}\n"
-              "8500 look 0 0.6\n" + f"8900 shot {shot('6-backed-up')}\n"
-              "9000 con firstperson\n" + every(9600, 10000) + f"9800 shot {shot('7-first-again')}\n"
-              "10300 con say /thirdperson on\n" + every(11000, 11400) + "11500 quit\n")
+              # pitch: down, up, level again (v10: the camera swings around the eye, the yaw stays)
+              "4000 look 0 -1.2\n" + every(4300, 4800, 50) + f"4500 shot {shot('4-down')}\n"
+              "4800 look 0 2.4\n" + every(5100, 5600, 50) + f"5300 shot {shot('5-up')}\n"
+              "5600 look 0 -1.2\n" + every(5900, 6000, 50) +
+              # aiming down sights (the class's rifle), then the Sniper Rifle's scope
+              "6000 mdown right\n" + every(6800, 7300) + f"7000 shot {shot('6-ads')}\n"
+              "7400 mup right\n" + every(8300, 8600) +
+              "8600 con give sniper\n9600 mdown right\n" + every(10600, 11000) + f"10800 shot {shot('7-scoped')}\n"
+              "11000 mup right\n" + every(12000, 12400) +
+              f"12500 pose {backed}\n" + every(13100, 14500) + f"13500 shot {shot('8-backed')}\n"
+              "14000 look 0 0.6\n" + f"14400 shot {shot('9-backed-up')}\n"
+              "14500 con firstperson\n" + every(15100, 15500) + f"15300 shot {shot('10-first-again')}\n"
+              "15800 con say /thirdperson on\n" + every(16500, 16900) + "17000 quit\n")
     lines = run_client(key, ["--offline", path], script)
     st = tpstates(lines)
     check(f"{key}: the script ran (tpstate lines)", len(st) > 40, f"{len(st)} lines; log {os.path.join(WORK, key + '.log')}")
@@ -141,27 +177,57 @@ def offline(key):
     check(f"{key}: thirdperson: the camera is behind the shoulder (3..15.1 from the eye), never in a wall",
           third and all(3.0 <= dist(s["cam"], s["eye"]) <= 15.1 and not s["wall"] for s in third),
           str([(round(dist(s["cam"], s["eye"]), 2), s["wall"]) for s in third][:5]))
-    ads = span(st, 4800, 5300)
-    check(f"{key}: aiming down sights: first person (viewmodel, no own model)",
-          ads and all(not s["view"] and s["viewmodel"] and not s["own"] and dist(s["cam"], s["eye"]) < 0.5 for s in ads), str(ads[:2]))
-    back = span(st, 6500, 7000)
-    check(f"{key}: aim released: third person again", back and all(s["view"] and not s["viewmodel"] for s in back), str(back[:2]))
-    backed = span(st, 7600, 9000)
+    level = span(st, 3900, 4000)
+    yaw0 = level[-1]["rot"][1] if level else None
+    for name, a, b, sign in (("down", 4300, 4800, -1), ("up", 5100, 5600, 1), ("level again", 5900, 6000, 0)):
+        pit = span(st, a, b)
+        check(f"{key}: pitched {name}: the view's yaw is unchanged",
+              pit and yaw0 is not None and all(yaw_diff(s["rot"][1], yaw0) < 1e-3 for s in pit),
+              f"yaw before {yaw0}, {[s['rot'] for s in pit][:4]}")
+        check(f"{key}: pitched {name}: the player's look keeps that yaw (nothing turns sideways)",
+              pit and all(yaw_diff(s["dir"][1], s["rot"][1]) < 2e-3 and abs(s["dir"][0] - s["rot"][0]) < 2e-3 for s in pit),
+              str([(s["rot"], s["dir"]) for s in pit][:4]))
+        # the camera swings over (down) / under (up) the eye, 5 to the right whatever the pitch (scaled
+        # by a pull-in when the floor stops it)
+        ok = pit and all(s["view"] and s["own"] and not s["wall"] and offset_of(s)[0] > 0.0 and offset_of(s)[1] < 0.0 and
+                         abs(offset_of(s)[0] / max(s["keep"], 1e-3) - 5.0 / 14.866) < 0.01 and
+                         (sign == 0 or (s["cam"][1] - s["eye"][1]) * -sign > 5.0 or s["keep"] < 14.0) for s in pit)
+        check(f"{key}: pitched {name}: the camera orbits behind the eye (over it looking down, under it looking up)", ok,
+              str([(s["cam"], s["eye"], s["keep"]) for s in pit][:3]))
+    ads = span(st, 6800, 7300)
+    check(f"{key}: aiming down sights: third person stays (own model, no viewmodel, camera behind the shoulder)",
+          ads and all(s["view"] and s["own"] and not s["viewmodel"] and s["aim"] >= 1.0 and behind(s) for s in ads), str(ads[:2]))
+    check(f"{key}: aiming down sights: the camera zooms (v10 updateAim)", ads and all(s["zoom"] > 1.05 for s in ads),
+          str([s["zoom"] for s in ads][:3]))
+    back = span(st, 8300, 8600)
+    check(f"{key}: aim released: no zoom, still third person",
+          back and all(s["view"] and not s["viewmodel"] and s["zoom"] == 1.0 for s in back), str(back[:2]))
+    scoped = span(st, 10600, 11000)
+    check(f"{key}: Sniper Rifle scoped: third person stays, camera behind the shoulder",
+          scoped and all(s["view"] and s["own"] and not s["viewmodel"] and s["aim"] >= 1.0 and behind(s) for s in scoped),
+          str(scoped[:2]))
+    check(f"{key}: Sniper Rifle scoped: the scope's full zoom (toggleAim)",
+          scoped and all(s["zoom"] > ads[0]["zoom"] + 0.5 for s in scoped) if ads else False, str([s["zoom"] for s in scoped][:3]))
+    unscoped = span(st, 12000, 12400)
+    check(f"{key}: scope released: third person, no zoom",
+          unscoped and all(s["view"] and s["zoom"] == 1.0 and behind(s) for s in unscoped), str(unscoped[:2]))
+    backed = span(st, 13100, 14500)
     check(f"{key}: backed against a wall: never inside or behind geometry",
           backed and all(s["view"] and not s["wall"] and not s["viewmodel"] for s in backed),
           str([s for s in backed if s["wall"] or not s["view"]][:3]))
     check(f"{key}: backed against a wall: the camera is pulled in",
           backed and all(s["keep"] < 14.0 for s in backed), str([s["keep"] for s in backed][:6]))
-    again = span(st, 9600, 10000)
+    again = span(st, 15100, 15500)
     check(f"{key}: firstperson: the viewmodel is back, no own model, camera at the eye",
           again and all(not s["view"] and s["viewmodel"] and not s["own"] and dist(s["cam"], s["eye"]) < 0.5 for s in again),
           str(again[:2]))
-    chat = span(st, 11000, 11400)
+    chat = span(st, 16500, 16900)
     check(f"{key}: /thirdperson typed in the chat: the server's grant turns it on",
           chat and all(s["view"] and s["own"] and not s["viewmodel"] for s in chat), str(chat[:2]))
     check(f"{key}: the console answered", any("Third Person - Enabled" in l for l in lines)
           and any("Third Person - Disabled" in l for l in lines))
-    missing = [n for n in ("1-first", "2-third", "4-ads", "5-backed", "7-first-again") if not os.path.isfile(shot(n))]
+    missing = [n for n in ("1-first", "2-third", "4-down", "5-up", "6-ads", "7-scoped", "8-backed", "10-first-again")
+               if not os.path.isfile(shot(n))]
     check(f"{key}: frames written", not missing, f"missing {missing}")
 
 
@@ -183,7 +249,10 @@ def death():
     later = span(st, 12000, 40000)
     first = next((i for i, s in enumerate(later) if s["view"]), None)
     alive = later[first:] if first is not None else []
-    moved = alive and dist(alive[0]["eye"], dead[0]["eye"] if dead else (0, 0, 0)) > 1.0
+    # respawned: somewhere else, or (the random spawn can be the one died at) after the death cam
+    # stayed on until then
+    moved = alive and (dist(alive[0]["eye"], dead[0]["eye"] if dead else (0, 0, 0)) > 1.0 or
+                       (first > 0 and not later[first - 1]["view"]))
     check("death: respawned in third person (model drawn, no viewmodel)",
           alive and moved and all(s["view"] and s["own"] and not s["viewmodel"] and not s["wall"] for s in alive),
           f"{len(alive)} of {len(later)} late frames; {alive[:1]}")

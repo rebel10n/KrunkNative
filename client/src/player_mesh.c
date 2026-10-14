@@ -1439,7 +1439,9 @@ void player_update_meshes(Player *player, const int is_preview) {
     if (player->render_you && settings->weapon_ads_off_y != 1.0f) aim_offset_y = (aim_offset_y ? aim_offset_y : 0.1f) * settings->weapon_ads_off_y;
 
     // toggleAim: a `scope` weapon (Sniper Rifle) hides its viewmodel once fully aimed so the scope reticle is clear.
-    if (player->weapon->scope && player->render_you && !third_person) {
+    // v10 toggleAim hides weaponMeshes[loadoutIndex] whatever the camera (v10.js 172054): KrunkNative's third
+    // person hides the held weapon of the local model too (the host's thirdPerson keeps v7's rule).
+    if (player->weapon->scope && player->render_you && (!third_person || player_mesh->kn_third_person)) {
         player_arms_set_visible(player_mesh->arms[player->loadout_index], aim_val_mlt < 1.0f);
     }
 

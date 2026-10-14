@@ -3822,15 +3822,17 @@ void client_hud_html_tick(Client *client, const float now_f) {
     next.scoped = weapon && weapon->scope && me->aim_val >= 1.0f && !ui->ended;
     // 95.js toggleAim: with an attachment (and the normal first-person camera) the reticle image
     // (textures/reticles/reticle_<reticleIndex>.png, drawn centred by 91.js) shows once fully aimed.
-    // aiming cancels an inspect in v3.1.1, so the dot never shows during one; keep that explicit
-    next.aim_dot = weapon && weapon_attachment(weapon, DEFAULT_ATTACHMENT_INDEX) && me->aim_val >= 1.0f && !game->config.third_person && !third_person_view(client) && !me->inspecting && !ui->ended;
+    // aiming cancels an inspect in v3.1.1, so the dot never shows during one; keep that explicit.
+    // KrunkNative's third person aims behind the shoulder: v10 toggleAim shows the dot there too
+    // (v10.js 172054, only camType.isNormal); the host's own thirdPerson keeps v7's rule.
+    next.aim_dot = weapon && weapon_attachment(weapon, DEFAULT_ATTACHMENT_INDEX) && me->aim_val >= 1.0f && !game->config.third_person && !me->inspecting && !ui->ended;
     next.weapon = weapon;
     hud_timer(client, next.timer_text, sizeof(next.timer_text));
     next_extra.spread = (int) lroundf(hud_spread(me));
     next_extra.aim_pct = (int) lroundf(CLAMP(me->aim_val, 0.0f, 1.0f) * 100.0f);
-    // v7 updateCrosshair: with a camera offset (thirdPerson) the crosshair stays while aiming; so does
-    // KrunkNative's third person (aiming down sights switches it to first person: third_person_view is off)
-    if (third_person_view(client)) next_extra.aim_pct = 0;
+    // v10 updateCrosshair (v10.js 221608): with a camera offset (thirdPerson) the crosshair stays
+    // while aiming, except with a scope (its overlay takes over); so does KrunkNative's third person
+    if (third_person_view(client) && !(weapon && weapon->scope)) next_extra.aim_pct = 0;
     next_extra.scoreboard = hud_scoreboard_key(client) && !client_render_settings()->old_scoreboard; // g6: leaderType == 1 only
     hud_loadout(me, &next_extra);
     int ping = client->net_ping_ms >= 0 ? client->net_ping_ms : -1; // Krunker shows "-" for -1

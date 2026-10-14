@@ -1,5 +1,5 @@
 // KrunkNative third-person camera (client/include/third_person.h): the console / bind state, the
-// server grant, the local model swap, the camera pose and the aim correction of the input look.
+// server grant, the local model swap and the camera pose.
 #include <third_person.h>
 #include <console.h>
 #include <spectate.h>
@@ -12,7 +12,6 @@ static struct {
     int granted;    // the server's NET_CHEAT_THIRD_PERSON 1 for this round
     int reask;      // INIT cleared the grant while wanted: ask again once in game
     int cancelled;  // firstperson while a request was unanswered: its grant is dropped
-    int aim_fp;     // latched per frame (third_person_frame): aiming down sights shows first person
     int built;      // the mode the local player's mesh was built for (-1 none yet)
     const Player *built_for;
     float keep;     // the camera distance shown (eases out after a wall pulled it in)
@@ -70,11 +69,11 @@ void third_person_on_init(Client *client) {
     g_tp.granted = 0;
 }
 
-// The mode the local player's meshes are built for: granted and not aiming down sights. Only
-// third_person_frame changes its inputs (the aim is latched there), so the meshes it rebuilds,
-// the camera and the viewmodel pass agree for the whole frame.
+// The mode the local player's meshes are built for: granted. Aiming down sights keeps it (v10
+// toggleAim / updateAim only zoom; the camera stays at thrdPX/PY/PZ), so only a grant changes it,
+// and third_person_frame rebuilds the meshes before the frame's input, camera and passes.
 int third_person_model(void) {
-    return g_tp.granted && !g_tp.aim_fp;
+    return g_tp.granted;
 }
 
 // v7's own camera offsets (the game's thirdPerson setting, class camOffX/Y/Z) already build the
@@ -98,12 +97,8 @@ void third_person_frame(Client *client) {
     if (!me || !me->active || !me->mesh) {
         g_tp.built = -1;
         g_tp.built_for = NULL;
-        g_tp.aim_fp = 0;
         return;
     }
-    // ADS / scope: first person (the viewmodel's sights, the scope overlay) from the moment the
-    // aim starts until it is fully released (aim_val back to 0)
-    g_tp.aim_fp = g_tp.granted && me->aim_val > 0.0f;
     const int mode = third_person_model();
     if (g_tp.built_for == me && g_tp.built == mode) return;
     if (g_tp.built_for == me && g_tp.built != -1) {
@@ -128,17 +123,6 @@ static vec3 tp_offset(void) {
     return (vec3) {TP_OFFSET_X, TP_OFFSET_Y, TP_OFFSET_Z};
 }
 
-vec2 third_person_input_look(Client *client, const vec2 view) {
-    if (!third_person_view(client)) return view;
-    const Player *me = client->me;
-    const vec3 eye = tp_eye(me);
-    vec3 camera;
-    third_person_camera_spot(&client->game, eye, view.x, view.y, tp_offset(), &camera);
-    vec2 look = third_person_aim_look(&client->game, me, eye, camera, view);
-    look.x = player_clamp_pitch(look.x);
-    return look;
-}
-
 void third_person_apply_camera(Client *client, const vec2 view, const float delta) {
     if (!third_person_view(client)) {
         g_tp.keep = 0.0f;
@@ -160,7 +144,8 @@ void third_person_apply_camera(Client *client, const vec2 view, const float delt
     client->camera.position = (vec3) {eye.x + (spot.x - eye.x) * k, eye.y + (spot.y - eye.y) * k, eye.z + (spot.z - eye.z) * k};
     client->camera.rotation.x = pitch;
     client->camera.rotation.y = yaw;
-    client->camera.zoom = 1.0f; // no ADS zoom behind the shoulder (v7 thirdPerson: the crosshair stays)
+    // camera.zoom stays camera_feel_apply's ADS zoom: v10 renderer.zoom (updateAim, toggleAim's
+    // scope zoom) narrows the world camera whatever its offset (v10.js 172050-172063, 199263)
 }
 
 // Our spawn: the camera distance starts over (pulled in at once, no ease out from the last life's).

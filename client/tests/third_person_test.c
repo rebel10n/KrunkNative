@@ -4,7 +4,8 @@
 //     on maps without triangles it is exactly the death chase cam's old box + terrain clamp
 //   - the camera spot is pulled in front of a wall behind the player and never ends in one
 //     (synthetic walls, every spawn of Kanji and Sandstorm, backed against walls in 8 directions)
-//   - the aim correction: the eye's ray hits what the crosshair ray from the camera hits
+//   - v10's camera rig (pchObjc under the yaw object): pitching swings the camera over / under
+//     the eye in the yaw's vertical plane, 5 to the right whatever the pitch, never sideways
 //   - the server's permission (chat_commands.c `thirdperson`): refused on a public server with a
 //     notify and an "off", granted offline, to devs, to a custom game's host and with knTPCam
 // GL-free: third_person_cam.c is included. Run from the repository root.
@@ -140,38 +141,49 @@ static void test_synthetic(void) {
     keep = third_person_camera_spot(&game, (vec3) {0.0f, 9.5f, 9.6f}, 0.0f, 0.0f, k_offset, &spot);
     CHECK(keep < TP_MODEL_MIN_DIST, "pressed against the wall: inside the head range (%.2f), the own model is not drawn", keep);
 
-    // the aim: the eye's ray hits the point under the crosshair (a wall far ahead)
-    cJSON *map2 = cJSON_Parse("{\"name\":\"tp2\",\"spawns\":[[0,0,0]],\"objects\":["
-                              "{\"p\":[0,-10,0],\"s\":[400,10,400]},{\"p\":[0,0,-80],\"s\":[400,100,10]}]}");
-    static Game game2;
-    CHECK(game_on(&game2, map2), "tp2 map loaded");
-    if (game2.ready) {
-        for (int k = -2; k <= 2; k++) {
-            const vec2 view = {0.05f * (float) k, 0.15f * (float) k};
-            vec3 cam;
-            third_person_camera_spot(&game2, eye, view.x, view.y, k_offset, &cam);
-            vec3 f;
-            look_frame(view.x, view.y, &f, NULL, NULL);
-            const vec3 seg = {f.x * TP_AIM_RANGE, f.y * TP_AIM_RANGE, f.z * TP_AIM_RANGE};
-            const vec3 cross = at3(cam, seg, world_solid_fraction(&game2, cam, seg));
-            const vec2 look = third_person_aim_look(&game2, NULL, eye, cam, view);
-            vec3 g;
-            look_frame(look.x, look.y, &g, NULL, NULL);
-            const vec3 seg2 = {g.x * TP_AIM_RANGE, g.y * TP_AIM_RANGE, g.z * TP_AIM_RANGE};
-            const vec3 shot = at3(eye, seg2, world_solid_fraction(&game2, eye, seg2));
-            const float miss = len3(sub3(shot, cross));
-            CHECK(miss < 0.05f, "view (%.2f, %.2f): the eye's shot lands %.3f from the crosshair point", view.x, view.y, miss);
-            CHECK(fabsf(look.x - view.x) < 0.2f && fabsf(look.y - view.y) < 0.2f, "the correction stays small (%.3f, %.3f)", look.x - view.x, look.y - view.y);
-        }
-        // nothing ahead (looking into the sky): the aim point is far, the look barely changes
-        const vec2 sky = {1.0f, 0.0f};
-        vec3 cam;
-        third_person_camera_spot(&game2, eye, sky.x, sky.y, k_offset, &cam);
-        const vec2 look = third_person_aim_look(&game2, NULL, eye, cam, sky);
-        CHECK(fabsf(look.x - sky.x) < 0.02f && fabsf(look.y - sky.y) < 0.02f, "the sky: (%.3f, %.3f)", look.x, look.y);
-    }
     cJSON_Delete(map);
-    cJSON_Delete(map2);
+}
+
+// ---------------------------------------------------------------- the pitch never yaws
+
+// v10: RENDER.camera at (thrdPX, thrdPY, thrdPZ) inside CONTROLS.pchObjc (rotation.x = pitch)
+// inside CONTROLS.object (rotation.y = yaw), looking along the look: the camera spot is
+// eye + Ry(yaw) Rx(pitch) (5, 2, 14), as three.js composes the matrices.
+static vec3 v10_rig_spot(const vec3 eye, const float pitch, const float yaw) {
+    const float x = TP_OFFSET_X, y0 = TP_OFFSET_Y, z0 = TP_OFFSET_Z;
+    const float y = y0 * cosf(pitch) - z0 * sinf(pitch), z = y0 * sinf(pitch) + z0 * cosf(pitch); // Rx(pitch)
+    return (vec3) {eye.x + x * cosf(yaw) + z * sinf(yaw), eye.y + y, eye.z - x * sinf(yaw) + z * cosf(yaw)}; // Ry(yaw)
+}
+
+static void test_pitch(void) {
+    printf("pitch: the camera orbits over / under the eye, never sideways...\n");
+    const vec3 eye = {12.0f, 9.5f, -7.0f};
+    int worst_rig = 0, worst_side = 0;
+    float rig_err = 0.0f, side_err = 0.0f;
+    for (int k = 0; k < 16; k++) {
+        const float yaw = -(float) M_PI + (float) k * (float) M_PI / 8.0f;
+        const vec3 right = {cosf(yaw), 0.0f, -sinf(yaw)};
+        for (int p = -10; p <= 10; p++) {
+            const float pitch = (float) p * 0.157f; // -1.57 .. 1.57 (the pitch clamp)
+            vec3 spot;
+            const float keep = third_person_camera_spot(NULL, eye, pitch, yaw, k_offset, &spot);
+            const vec3 rig = v10_rig_spot(eye, pitch, yaw);
+            const float e = len3(sub3(spot, rig));
+            if (e > rig_err) { rig_err = e; worst_rig = k * 100 + p; }
+            // the sideways part of the offset is the 5 to the right, at every pitch
+            const vec3 d = sub3(spot, eye);
+            const float side = fabsf(d.x * right.x + d.z * right.z - TP_OFFSET_X);
+            if (side > side_err) { side_err = side; worst_side = k * 100 + p; }
+            CHECK(fabsf(keep - len3(k_offset)) < 1e-3f, "no world: the full offset (%.3f)", keep);
+        }
+    }
+    CHECK(rig_err < 1e-3f, "the spot is v10's rig Ry(yaw) Rx(pitch) (5, 2, 14) (worst %.5f at %d)", rig_err, worst_rig);
+    CHECK(side_err < 1e-3f, "the camera stays 5 to the right of the eye at every pitch (worst %.5f at %d)", side_err, worst_side);
+    // straight down the camera is above the head, straight up below it (the rig swings, never yaws)
+    vec3 down, up;
+    third_person_camera_spot(NULL, eye, -1.5f, 0.0f, k_offset, &down);
+    third_person_camera_spot(NULL, eye, 1.5f, 0.0f, k_offset, &up);
+    CHECK(down.y > eye.y + 13.0f && up.y < eye.y - 12.0f, "pitch -1.5: above (%.2f), +1.5: below (%.2f)", down.y - eye.y, up.y - eye.y);
 }
 
 // Every spawn of a real map: 16 yaws x 5 pitches in the open, then backed against the first wall
@@ -388,6 +400,7 @@ static void test_permission(void) {
 
 int main(void) {
     test_synthetic();
+    test_pitch();
     test_map("assets/maps/kanji.json");
     test_map("assets/maps/sandstorm_v3.json");
     test_map("assets/maps/krunk_plaza_v2.json"); // baked "cpx" triangles

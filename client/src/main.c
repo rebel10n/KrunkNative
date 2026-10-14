@@ -1815,13 +1815,8 @@ static void client_tick_game(Client *client, const float now, const float frame_
         input.y_dir = player_wrap_yaw(input.y_dir);
         g_look.x = input.x_dir;
         g_look.y = input.y_dir;
-        // KrunkNative third person: g_look stays the view (the camera, the crosshair); the input
-        // aims the eye at what the crosshair ray hits, so the server's hitscan from the eye agrees
-        if (third_person_view(client)) {
-            const vec2 aim = third_person_input_look(client, g_look);
-            input.x_dir = player_clamp_pitch(aim.x);
-            input.y_dir = player_wrap_yaw(aim.y);
-        }
+        // KrunkNative third person sends this look unchanged, as v10's thirdPerson does (the input
+        // frame takes CONTROLS yDr/xDr, v10.js 221504): the camera only rides behind the shoulder.
 
         if (input_sampled) {
             g_look_sent.x = input.x_dir; // what me->direction takes (the resync test above)

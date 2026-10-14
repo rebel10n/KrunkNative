@@ -2,21 +2,29 @@
 // KrunkNative third-person camera (client/src/third_person.c; doc/v7/decisions.md "Third person"):
 // the console's `thirdperson` / `firstperson` (Source style) and the "Third Person" bind.
 //
-// v7.1.4 only has the host's thirdPerson game setting (index.js gameLoop: RENDER.camera at
-// config.thrdPX/PY/PZ = 5, 2, 14 inside the look rig, then lookAt the eye). This is a per-player
-// version of it on top of the normal first-person camera:
+// Krunker v10.0.2 only has the host's thirdPerson game setting (v10.js 221455-221479 gameLoop:
+// RENDER.camera.position.set(5, 2, 14) = config.thrdPX/PY/PZ (v10.js 19999-20001) inside
+// CONTROLS.pchObjc, the pitch object under the yaw object at the eye (202354-202357), then
+// camera.lookAt(eye); but rotateCam (202791) sets camera.rotation to the shake / recoil right
+// after it in the same frame (221597 / 221613), so the camera looks along the player's look,
+// parallel to it at that offset). This is a per-player version of it on top of the normal
+// first-person camera:
 //   - the server decides (NET_CHEAT_THIRD_PERSON, shared/src/chat_commands.c `thirdperson`):
 //     offline, devs, a custom game's host or everyone when the host sets knTPCam; never ranked
 //     or public servers (the reason comes back as a notify);
-//   - the camera sits at v7's offset in the look frame (right 5, up 2, back 14), but keeps the
-//     look direction instead of v7's lookAt(eye), so the crosshair aims; it is pulled in front of
-//     the first solid box / map triangle / terrain between the eye and that spot;
+//   - the camera sits at v10's offset in the look frame (right 5, up 2, back 14) and looks along
+//     the look (pitch, yaw) plus the camera feel (recoil, shake), as v10's does once rotateCam ran:
+//     pitching swings it over / under the eye, never sideways, and never turns the player;
+//   - KrunkNative addition: it is pulled in front of the first solid box / map triangle / terrain
+//     between the eye and that spot (v10 has no camera collision: it goes through walls);
 //   - the local player's model is the third-person one (player_mesh.c), drawn with the world;
-//     no viewmodel;
-//   - aim: the crosshair ray (from the camera, past the eye) finds the aim point and the input
-//     look aims the eye at it, so the server's hitscan from the eye agrees;
-//   - aiming down sights (any weapon, scopes too) goes back to first person, viewmodel and all,
-//     until the aim is fully released (the local model is rebuilt each way, as a loadout change).
+//     no viewmodel (v10 syncHands(renderYou && !thirdPerson), 170835);
+//   - aim: the input look is the view look, unchanged (v10 has no aim correction): shots leave
+//     the eye along it, parallel to the crosshair ray 5 right and 2 up;
+//   - aiming down sights stays third person (v10 has no ADS offset): the world camera zooms as in
+//     first person (updateAim: 1 + (zoom - 1) * aim * adsFov; toggleAim: a scope's full zoom once
+//     aimed, 172050-172063), a scope shows its overlay and hides the held weapon (toggleAim), and
+//     the crosshair stays while aiming except with a scope (updateCrosshair, 221608).
 // The game's own thirdPerson setting and class camOffX/Y/Z keep v7's camera (not this module).
 #include <client.h>
 
@@ -24,16 +32,12 @@
 #define TP_OFFSET_Y 2.0f      // config.thrdPY: up
 #define TP_OFFSET_Z 14.0f     // config.thrdPZ: back
 #define TP_WALL_GAP 1.0f      // the camera stays this far in front of what it was pulled in by
-#define TP_AIM_RANGE 1000.0f  // the crosshair ray's length when it hits nothing
 #define TP_EASE_OUT 0.012f    // per ms: the pulled-in camera eases back out (in: at once)
 #define TP_MODEL_MIN_DIST 3.0f // pulled in closer than this (backed into a corner): the own model is not drawn
 
 // The camera spot for an eye and a look (pitch, yaw), pulled in front of solid geometry.
 // Returns the distance kept from the eye (0..|offset|); pure, for tests.
 float third_person_camera_spot(const Game*, vec3 eye, float pitch, float yaw, vec3 offset, vec3 *out);
-// The look (x = pitch, y = yaw) that aims the eye at what the crosshair ray from `camera` along
-// `view` (pitch, yaw) hits first (solid geometry, other players), never behind the eye.
-vec2 third_person_aim_look(const Game*, const Player *me, vec3 eye, vec3 camera, vec2 view);
 
 // Console / bind: thirdperson asks the server (offline: the sandbox), firstperson is local.
 void third_person_request(Client*);
@@ -44,8 +48,8 @@ void third_person_on_grant(Client*, int on);
 // New connection / round (INIT): the grant is the server's per round; a wanted camera asks again.
 void third_person_on_init(Client*);
 
-// The local model is built as third person: granted and not aiming (player_mesh.c reads it at
-// build time; the frame hook rebuilds the mesh when it changes).
+// The local model is built as third person: granted (player_mesh.c reads it at build time; the
+// frame hook rebuilds the mesh when it changes).
 int third_person_model(void);
 // The third-person view is on this frame (model mode, an active player, no other camera).
 int third_person_view(const Client*);
@@ -53,9 +57,8 @@ int third_person_view(const Client*);
 int third_person_draw_model(const Client*);
 // Per frame, before the input is sampled: rebuild the local mesh on a mode change, re-ask after INIT.
 void third_person_frame(Client*);
-// The input look to send for this view look (third_person_view: the aim correction; else `view`).
-vec2 third_person_input_look(Client*, vec2 view);
-// After camera_feel_apply: pose the camera from the view look (+ the feel's recoil / shake).
+// After camera_feel_apply: pose the camera from the view look (+ the feel's recoil / shake), keeping
+// its ADS zoom.
 void third_person_apply_camera(Client*, vec2 view, float delta);
 // Our (re)spawn: the camera starts at its distance (no ease out from where the last life's was).
 void third_person_on_spawn(void);

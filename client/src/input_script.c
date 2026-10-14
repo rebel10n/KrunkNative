@@ -53,9 +53,11 @@
 //                                its #tScoreM text: "[input_script] flag t=100 i=0 team=1 carrier=-1 pos=..."
 //   100 tpstate                  log the KrunkNative third-person camera of the last frame (third_person.h):
 //                                "[input_script] tpstate t=100 view=1 model=1 own=1 viewmodel=0 keep=14.9
-//                                cam=x,y,z eye=x,y,z wall=0" (own: the local model went into the world pass,
-//                                viewmodel: the first-person pass drew, wall: the camera sits in a solid box or
-//                                solid geometry lies between the eye and it)
+//                                cam=x,y,z eye=x,y,z wall=0 rot=pitch,yaw dir=pitch,yaw zoom=1.00 aim=0.00"
+//                                (own: the local model went into the world pass, viewmodel: the first-person
+//                                pass drew, wall: the camera sits in a solid box or solid geometry lies between
+//                                the eye and it, rot: the camera's rotation, dir: the player's look, zoom: the
+//                                camera's ADS zoom, aim: aim_val)
 //   100 cosm @game               log the store items the menu's class preview and our own player wear
 //                                (hat, body, face, head, back, primary skin, melee: store indices, -1 none)
 //   100 wsel @menu               log what the model build picked on the held slot (weapon, store skin, model /
@@ -596,8 +598,11 @@ static void script_run(Client *client, const ScriptEvent *e) {
         }
         const vec3 seg = {cam.x - eye.x, cam.y - eye.y, cam.z - eye.z};
         if (!wall && (seg.x != 0.0f || seg.y != 0.0f || seg.z != 0.0f)) wall = world_solid_fraction(&client->game, eye, seg) < 1.0f;
-        fprintf(stderr, "[input_script] tpstate t=%.0f view=%d model=%d own=%d viewmodel=%d keep=%.2f cam=%.2f,%.2f,%.2f eye=%.2f,%.2f,%.2f wall=%d\n",
-                g_script.time, f.view, f.model, f.own_model, f.viewmodel, f.keep, cam.x, cam.y, cam.z, eye.x, eye.y, eye.z, wall);
+        const vec2 dir = me ? (vec2) {me->direction.x, me->direction.y} : (vec2) {0.0f, 0.0f};
+        fprintf(stderr, "[input_script] tpstate t=%.0f view=%d model=%d own=%d viewmodel=%d keep=%.2f cam=%.2f,%.2f,%.2f eye=%.2f,%.2f,%.2f wall=%d "
+                        "rot=%.4f,%.4f dir=%.4f,%.4f zoom=%.3f aim=%.2f\n",
+                g_script.time, f.view, f.model, f.own_model, f.viewmodel, f.keep, cam.x, cam.y, cam.z, eye.x, eye.y, eye.z, wall,
+                client->camera.rotation.x, client->camera.rotation.y, dir.x, dir.y, client->camera.zoom, me ? me->aim_val : 0.0f);
     } else if (!strcmp(e->cmd, "hose")) {
         // hose: the held weapon's hose (KrunkNative Piss) as drawn: tip, back end and the trigger hand's
         // centre (world), plus the camera and where the tip / hand land in the window (0..1, y down;
