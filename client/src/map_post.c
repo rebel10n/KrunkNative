@@ -17,6 +17,7 @@
 #include <render_settings.h>
 #include <canvas2d.h>
 #include <weapons.h>
+#include <nettspend.h> // the Drank's cup / the Money Spread's cash stack as pickups
 #include <math.h>
 #include <pcg_basic.h>
 #include <stdio.h>
@@ -483,6 +484,9 @@ static void post_pickups_frame(const Game *game) {
                 const vec3 r = p->object->rotation;
                 p->mesh->transform.rotation_order = ROTATION_ORDER_YXZ;
                 p->mesh->transform.rotation = (vec3) {r.x - (equipment ? 0.0f : (float) M_PI / 2.0f), r.z, r.y - (equipment ? (float) M_PI / 2.0f : 0.0f)};
+                // Nettspend (nettspend.h): the cup's rim / the cash stack's top is the local -z, which the
+                // weapon pose above would point down; turned over so they stand on the pickup's spot
+                if (nettspend_weapon_kind(state.weapon)) p->mesh->transform.rotation.x += (float) M_PI;
                 p->mesh->transform.scale = (vec3) {scale, scale, scale};
                 p->mesh->no_shadow_receive = 0;
                 scene_add_mesh(g_pickup_scene, p->mesh);

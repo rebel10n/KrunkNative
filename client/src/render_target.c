@@ -19,8 +19,13 @@
 // restores the previous draw framebuffer and the full viewport, leaves blending off,
 // depth test on (as scene_render leaves it) and records the program/texture it bound
 // in g_active_shader/g_active_texture. Texture unit 0 holds the scene texture.
+//
+// Nettspend "laced" (client/include/nettspend.h): while nettspend_laced_intensity() > 0 the scene
+// goes through the target too and end() draws it with assets/shaders/laced.frag (the same
+// fullscreen triangle, the same saturate / hue step) instead of the plain composite.
 #include <gl.h>
 #include <GLFW/glfw3.h>
+#include <nettspend.h>
 #include <render_settings.h>
 #include <math.h>
 #include <stdio.h>
@@ -33,6 +38,10 @@ static struct {
     int initialized;
     unsigned int program, vao;
     int loc_scene, loc_filtered, loc_saturate, loc_hue;
+    // the laced pass (nettspend.h): compiled on first use, 0 after a failure (plain composite then)
+    int laced_initialized;
+    unsigned int laced_program;
+    int laced_loc_scene, laced_loc_time, laced_loc_intensity, laced_loc_filtered, laced_loc_saturate, laced_loc_hue;
     int max_size, max_samples;                           // GL_MAX_RENDERBUFFER_SIZE, GL_MAX_SAMPLES
 
     unsigned int fbo, color_tex, depth_rb;              // resolve / single-sample target
@@ -77,6 +86,29 @@ static int rt_init_program(void) {
     glGetIntegerv(GL_MAX_RENDERBUFFER_SIZE, &rt.max_size);
     glGetIntegerv(GL_MAX_SAMPLES, &rt.max_samples);
     if (rt.max_size <= 0) rt.max_size = 4096;
+    return 1;
+}
+
+// The laced pass's program: scene_composite.vert + laced.frag (nettspend.h)
+static int rt_init_laced_program(void) {
+    if (rt.laced_initialized) return rt.laced_program != 0;
+    rt.laced_initialized = 1;
+
+    char *vert = concat(assets_path(), "shaders/scene_composite.vert");
+    char *frag = concat(assets_path(), "shaders/laced.frag");
+    if (vert && frag) rt.laced_program = shader_compile(vert, frag);
+    free(vert);
+    free(frag);
+    if (!rt.laced_program) {
+        fprintf(stderr, "render_target: laced shader unavailable, the laced effect is skipped\n");
+        return 0;
+    }
+    rt.laced_loc_scene = glGetUniformLocation(rt.laced_program, "scene");
+    rt.laced_loc_time = glGetUniformLocation(rt.laced_program, "time");
+    rt.laced_loc_intensity = glGetUniformLocation(rt.laced_program, "intensity");
+    rt.laced_loc_filtered = glGetUniformLocation(rt.laced_program, "filtered");
+    rt.laced_loc_saturate = glGetUniformLocation(rt.laced_program, "saturate_matrix");
+    rt.laced_loc_hue = glGetUniformLocation(rt.laced_program, "hue_matrix");
     return 1;
 }
 
@@ -157,7 +189,8 @@ int render_target_begin(Client *client) {
 
     const float scale = s->resolution > 0.0f ? s->resolution : 1.0f;
     const int aspect = s->aspect_w > 0 && s->aspect_h > 0;
-    const int need = fabsf(scale - 1.0f) > 1e-4f || s->anti_alias || aspect || rt_filtered(s);
+    const int laced = nettspend_laced_intensity() > 0.0f && rt_init_laced_program(); // Nettspend: the laced pass needs the target
+    const int need = fabsf(scale - 1.0f) > 1e-4f || s->anti_alias || aspect || rt_filtered(s) || laced;
     if (!need) {
         if (rt.fbo) rt_delete_targets(); // back to the direct path: release the buffers
         return 0;
@@ -238,21 +271,30 @@ void render_target_end(Client *client) {
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
 #endif
 
-    glUseProgram(rt.program);
-    g_active_shader = rt.program;
+    // Nettspend laced (nettspend.h): the distortion pass instead of the plain composite
+    const float laced_intensity = nettspend_laced_intensity();
+    const int laced = laced_intensity > 0.0f && rt_init_laced_program();
+    const unsigned int program = laced ? rt.laced_program : rt.program;
+
+    glUseProgram(program);
+    g_active_shader = program;
     glActiveTexture(GL_TEXTURE0 + RT_SCENE_TEXTURE_UNIT);
     glBindTexture(GL_TEXTURE_2D, rt.color_tex);
     g_active_texture = rt.color_tex;
-    glUniform1i(rt.loc_scene, RT_SCENE_TEXTURE_UNIT);
+    glUniform1i(laced ? rt.laced_loc_scene : rt.loc_scene, RT_SCENE_TEXTURE_UNIT);
+    if (laced) {
+        glUniform1f(rt.laced_loc_time, nettspend_laced_time());
+        glUniform1f(rt.laced_loc_intensity, laced_intensity);
+    }
 
     const int filtered = rt_filtered(s);
-    glUniform1i(rt.loc_filtered, filtered);
+    glUniform1i(laced ? rt.laced_loc_filtered : rt.loc_filtered, filtered);
     if (filtered) {
         float sat[9], hue[9];
         saturate_matrix(s->saturation, sat);
         hue_matrix(s->hue * 3.6f, hue); // hue-rotate(v * 3.6deg)
-        glUniformMatrix3fv(rt.loc_saturate, 1, GL_TRUE, sat);
-        glUniformMatrix3fv(rt.loc_hue, 1, GL_TRUE, hue);
+        glUniformMatrix3fv(laced ? rt.laced_loc_saturate : rt.loc_saturate, 1, GL_TRUE, sat);
+        glUniformMatrix3fv(laced ? rt.laced_loc_hue : rt.loc_hue, 1, GL_TRUE, hue);
     }
 
     glBindVertexArray(rt.vao);
@@ -271,8 +313,9 @@ void render_target_size(int *width, int *height) {
 void render_target_fini(void) {
     rt_delete_targets();
     if (rt.program) glDeleteProgram(rt.program);
+    if (rt.laced_program) glDeleteProgram(rt.laced_program);
     if (rt.vao) glDeleteVertexArrays(1, &rt.vao);
-    if (g_active_shader == rt.program) g_active_shader = 0;
-    rt.program = rt.vao = 0;
-    rt.initialized = 0;
+    if (g_active_shader == rt.program || g_active_shader == rt.laced_program) g_active_shader = 0;
+    rt.program = rt.laced_program = rt.vao = 0;
+    rt.initialized = rt.laced_initialized = 0;
 }

@@ -19,6 +19,7 @@
 #include <ui_logic.h>
 #include <render_settings.h>
 #include <piss.h> // KrunkNative Piss: the stream's arc and the puddles
+#include <nettspend.h> // Nettspend: the Money Spread's bills, the Drank's pour droplets, the laced clock
 #include <math.h>
 #include <pcg_basic.h>
 #include <stddef.h>
@@ -751,6 +752,51 @@ static void spawn_stream_spray(const WeaponStream *stream, const vec3 source, co
     }
 }
 
+// Nettspend Money Spread (nettspend.h): a fan of bills from `source` along (yaw, pitch): thin flat
+// boxes of the two bill colours in a wide cone, tumbling (spin), under a light gravity, each flying
+// its own short distance; `carry` adds the thrower's velocity like a casing. Like the Piss's spray
+// it ignores the particles setting: it is the throw's only feedback.
+#define VFX_BILLS_PER_THROW 14
+#define VFX_BILL_CONE 0.42f       // yaw / pitch jitter (rad), wider than the pellets' spread
+#define VFX_BILL_SPEED_MIN 0.016f // units / ms
+#define VFX_BILL_SPEED_MAX 0.03f
+#define VFX_BILL_GRAVITY 0.000035f
+#define VFX_BILL_DST_MIN 9.0f     // units flown before a bill goes
+#define VFX_BILL_DST_MAX 22.0f
+static void spawn_money_burst(const vec3 source, const float yaw, const float pitch, const vec3 carry) {
+    const vec4 bill = color_from_hex(NETTSPEND_CASH_COLOR, 1.0f), band = color_from_hex(NETTSPEND_CASH_BAND_COLOR, 1.0f);
+    for (int i = 0; i < VFX_BILLS_PER_THROW; i++) {
+        const float u = yaw + rand_float(-VFX_BILL_CONE, VFX_BILL_CONE);
+        const float v = pitch + rand_float(-VFX_BILL_CONE * 0.6f, VFX_BILL_CONE * 0.6f) + 0.08f;
+        const float spd = rand_float(VFX_BILL_SPEED_MIN, VFX_BILL_SPEED_MAX);
+        const vec3 size = {rand_float(0.42f, 0.5f), 0.012f, rand_float(0.18f, 0.22f)};
+        VfxBox *box = box_spawn(source, direction_from_angles(u, v), rand_float(VFX_BILL_DST_MIN, VFX_BILL_DST_MAX), spd, VFX_BILL_GRAVITY, carry, size,
+                                i % 3 == 2 ? band : bill, 0, 0);
+        if (!box) return;
+        box->roll = rand_float((float) -M_PI, (float) M_PI);
+        box->spin = rand_float(0.006f, 0.014f) * (rand_int(0.0f, 1.0f) ? 1.0f : -1.0f);
+    }
+}
+
+// Nettspend Purple Drank (nettspend.h): the pour-up's droplets, from the bottle's mouth into the
+// cup: a few purple drops a frame falling the short way to the rim (they go when they get there).
+#define VFX_POUR_DROPS_PER_FRAME 3
+#define VFX_POUR_SPEED 0.004f // units / ms, plus the fall
+static void spawn_pour_drops(const vec3 mouth, const vec3 rim, const float strength) {
+    const vec4 lean = color_from_hex(NETTSPEND_DRANK_COLOR, 1.0f);
+    const vec3 to_rim = v3_sub(rim, mouth);
+    const float dst = v3_length(to_rim);
+    if (dst <= 0.001f) return;
+    const int drops = (int) ceilf(VFX_POUR_DROPS_PER_FRAME * strength);
+    for (int i = 0; i < drops; i++) {
+        const vec3 jitter = {rand_float(-0.02f, 0.02f), rand_float(-0.01f, 0.01f), rand_float(-0.02f, 0.02f)};
+        const float s = rand_float(0.02f, 0.035f);
+        VfxBox *box = box_spawn(v3_add(mouth, jitter), to_rim, dst * rand_float(0.95f, 1.1f), VFX_POUR_SPEED, 0.00002f, v3(0.0f, 0.0f, 0.0f),
+                                v3(s, s, s * rand_float(1.5f, 2.5f)), lean, 0, 1);
+        if (!box) return;
+    }
+}
+
 // 88.js ExplosionManager.explodeAt(x, y, z, scale)
 static void spawn_debris(const vec3 position, const float seed, const float size_min, const float size_range,
                          const float velocity_min, const float velocity_range) {
@@ -892,13 +938,25 @@ static void local_shot(Client *client, Player *me) {
     const int scoped = weapon->scope && me->aim_val >= 1.0f;
     const int sprite_model = client->game.map && client->game.map->config.model == MODEL_TYPE_SPRITE;
     const int muzzle_count = fx->akimbo ? 2 : 1;
+    // Nettspend Money Spread (nettspend.h): no muzzle flash or casing, a burst of bills from the top
+    // of the cash stack (the drawn one in hand, else the eye) along the view, then its pellets'
+    // tracers like a shotgun's (weapon.shots: the table's, fx has no entry for it)
+    const int money = me->loadout_index >= 0 && me->loadout_index < me->loadout_size &&
+                      nettspend_weapon_kind(me->loadout[me->loadout_index]) == NETTSPEND_WEAPON_MONEY_SPREAD;
 
-    if (vfx.log) fprintf(stderr, "[vfx] shot %s scoped=%d\n", weapon->src ? weapon->src : "?", scoped);
+    if (vfx.log) fprintf(stderr, "[vfx] shot %s scoped=%d\n", money ? "cash" : weapon->src ? weapon->src : "?", scoped); // cash: the drawn stack, whatever the table's src
 
     PlayerArms *arms = held_arms(me);
 
+    if (money) {
+        vec3 source = {me->position.x, me->position.y + me->height - game_constants.camera_height, me->position.z};
+        if (me->render_you && !sprite_model && !camera_offset_active(client) && ui_controls_weapon_visible(client)) player_hose_points(me, &source, NULL, NULL);
+        if (vfx.log) fprintf(stderr, "[vfx] money burst %.4f %.4f %.4f\n", source.x, source.y, source.z);
+        spawn_money_burst(source, me->direction.y, me->direction.x, me->velocity);
+    }
+
     // !isWeaponHidden: showWeapon/Sec/Mel off means no muzzle sprites, overlay flash or casings
-    if (me->render_you && !sprite_model && ui_controls_weapon_visible(client)) {
+    if (me->render_you && !sprite_model && !money && ui_controls_weapon_visible(client)) {
         if (vfx.settings.muzzle_flash && !fx->no_muzzle && !camera_offset_active(client)) {
             for (int i = 0; i < muzzle_count; i++) {
                 VfxMuzzle *muzzle = &vfx.muzzles[i];
@@ -949,7 +1007,7 @@ static void local_shot(Client *client, Player *me) {
     const int is_projectile = weapon->projectile && (!weapon->projectile_disable || client->game.config.bullet_drop);
     if (is_projectile && !fx->phys_pow) return;
 
-    const int shots = fx->shots < 0 ? 1 : fx->shots;
+    const int shots = money ? (weapon->shots > 1 ? (int) weapon->shots : 1) : fx->shots < 0 ? 1 : fx->shots;
     const int ammo = (int) me->ammo[me->loadout_index];
 
     for (int i = 0; i < shots; i++) {
@@ -987,7 +1045,9 @@ static void local_shot(Client *client, Player *me) {
             vec3 start;
             const int muzzle = muzzle_count > 1 ? (int) rand_int(0.0f, (float) muzzle_count - 1.0f) : 0;
 
-            if (sprite_model || !arms || !arms_point(me, arms->muzzle[muzzle], &start)) {
+            if (money && !sprite_model && player_hose_points(me, &start, NULL, NULL)) {
+                // the top of the cash stack (Nettspend)
+            } else if (sprite_model || !arms || !arms_point(me, arms->muzzle[muzzle], &start)) {
                 start = me->position;
                 start.y += me->height / 2.0f;
             }
@@ -1065,6 +1125,18 @@ void vfx_remote_shot(Client *client, const Player *shooter, const vec3 hit, cons
     if (has_normal && me && v3_length(v3_sub(shooter->position, me->position)) <= 160.0f) {
         spawn_impact(hit, normal_yaw, normal_pitch);
     }
+}
+
+void vfx_remote_money_spread(Client *client, const Player *shooter) {
+    (void) client;
+    if (!shooter) return;
+    // from about the hands of the third-person model: below the eye, a step forward along the look
+    const float pitch = shooter->direction.x, yaw = shooter->direction.y;
+    const vec3 forward = direction_from_angles(yaw, pitch);
+    const vec3 eye = {shooter->position.x, shooter->position.y + shooter->height - game_constants.camera_height - shooter->crouch_val * game_constants.crouch_distance,
+                      shooter->position.z};
+    const vec3 source = v3_add(v3_add(eye, v3_scale(forward, 1.2f)), v3(0.0f, -0.6f, 0.0f));
+    spawn_money_burst(source, yaw, pitch, shooter->velocity);
 }
 
 void vfx_remote_stream_shot(Client *client, const Player *shooter, const WeaponStream *stream, const vec3 hit) {
@@ -1289,6 +1361,22 @@ void vfx_reset(void) {
     vfx.me = NULL;
     vfx.proj_me = NULL;
     projectiles_render_reset();
+    nettspend_laced_reset(); // Nettspend: a map change sobers you up
+}
+
+// Nettspend Purple Drank (nettspend.h): the pour-up's droplets while the local player reloads it
+// in first person (player_pour_points: the bottle shows), at the pour's strength
+static void update_pour(Client *client) {
+    const Player *me = client->me;
+    vec3 mouth, rim;
+    if (!me || !me->active || !me->render_you || !me->weapon || me->reload_timer <= 0.0f || !player_pour_points(me, &mouth, &rim)) return;
+    const float reload_speed = client->game.config.reload_speed > 0.0f ? client->game.config.reload_speed : 1.0f;
+    const float reload_time = me->weapon->reload_time * reload_speed;
+    const float progress = reload_time > 0.0f ? 1.0f - me->reload_timer / reload_time : -1.0f;
+    const float strength = nettspend_pour_strength(progress);
+    if (strength <= 0.0f) return;
+    if (vfx.log) fprintf(stderr, "[vfx] pour %.2f mouth %.4f %.4f %.4f rim %.4f %.4f %.4f\n", strength, mouth.x, mouth.y, mouth.z, rim.x, rim.y, rim.z);
+    spawn_pour_drops(mouth, rim, strength);
 }
 
 void vfx_update(Client *client, const float delta) {
@@ -1338,6 +1426,8 @@ void vfx_update(Client *client, const float delta) {
     // centred 13-unit box would reach back past the camera. Remote shots ("9") arrive between
     // frames and are advanced the same way.
     if (map) detect_local_shot(client);
+    if (map) update_pour(client); // Nettspend: the Drank's pour-up droplets
+    nettspend_laced_tick(dt);     // Nettspend: the laced post-effect's clock (render_target.c reads it)
 
     update_sprites(dt, client->camera.position);
     update_boxes(dt);

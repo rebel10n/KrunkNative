@@ -38,6 +38,8 @@
 #include "../viewer/viewer_store.h" // store skins / rarities (the killer's weapon skin)
 #include <game_config.h>   // game_config_is_custom (the report prompt)
 #include <net_ext.h> // NET_PACKET_EXT (254)
+#include <nettspend.h> // Nettspend: the laced post-effect, the Money Spread's bills
+#include <drank.h>     // KrunkNative Drank: drank_apply_laced (the shared laced timer)
 #include <object_manager.h> // KrunkNative Object Manager: NET_PACKET_SPAWN_RESULT / LOADOUT_EXTRA / SPAWNED_OBJ
 #include <math.h>
 #include <stdio.h>
@@ -411,7 +413,10 @@ static void events_shot(Client *client, const NetShotPacket *packet) {
     const int w = packet->weapon_index;
     const Weapon *weapon = w >= 0 && (size_t) w < client->game.weapon_count && client->game.weapons ? client->game.weapons[w] : NULL;
     if (weapon && weapon->stream) vfx_remote_stream_shot(client, shooter, weapon->stream, hit); // KrunkNative Piss: the spray, no tracer
-    else vfx_remote_shot(client, shooter, hit, packet->has_normal, packet->normal_yaw, packet->normal_pitch, packet->trail);
+    else {
+        if (nettspend_weapon_kind(w) == NETTSPEND_WEAPON_MONEY_SPREAD) vfx_remote_money_spread(client, shooter); // Nettspend: the bills
+        vfx_remote_shot(client, shooter, hit, packet->has_normal, packet->normal_yaw, packet->normal_pitch, packet->trail);
+    }
     if (packet->first) sound_events_remote_shot(client, shooter, packet->first == 2);
 }
 
@@ -948,8 +953,11 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             if (!net_ext_unpack(payload, length, &subtype, &body, &body_length)) return 1;
             // entities, pose, locks ... land with their features; unknown subtypes are ignored, never an error
             if (subtype == NET_EXT_KN_ACCOUNT_RIGHTS) online_mode_on_rights(client, body, body_length); // live sign-in (online_mode.c)
-            // KrunkNative Nettspend: our own laced spell's ambience (the post-effect is the VFX side's)
-            if (subtype == NET_EXT_KN_LACED && client->me) nettspend_audio_on_laced(body, body_length, client->me->uid);
+            else if (subtype == NET_EXT_KN_LACED) { // Nettspend: a bad pour (nettspend.h)
+                drank_apply_laced(&client->game, body, body_length); // the shared timer (Player.laced_timer, drank.h)
+                nettspend_on_laced(client, body, body_length);       // the local player's post-effect
+                if (client->me) nettspend_audio_on_laced(body, body_length, client->me->uid); // our own laced ambience
+            }
             return 1;
         }
         default:

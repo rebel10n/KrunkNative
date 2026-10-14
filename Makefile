@@ -271,6 +271,9 @@ nettspend-audio-test: build ## The Nettspend clips decode and the Drank reload /
 nettspend-loadout-test: build ## Nettspend is a class card, its Loadout tab shows Purple Drank + Money Spread, the preview wears them and the Drank reload plays the pour up (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/nettspend_loadout_e2e.py $(DEBUG_DIR)
 
+nettspend-vfx-test: build ## Nettspend: the Drank's cup + pour-up, the Money Spread's bills and the laced post-effect, headless frames (EGL_DEVICE=)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 1800 $(PYTHON) -I client/tests/nettspend_vfx_e2e.py $(DEBUG_DIR)
+
 minimap-round-test: build ## The in-game minimap is round from its first visible frame after joining, respawning, a map change, spectating and at other sizes / minimapScale (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/minimap_round_e2e.py $(DEBUG_DIR)
 

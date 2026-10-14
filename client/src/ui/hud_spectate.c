@@ -19,6 +19,7 @@
 #include <ui_logic.h>
 #include <html_ui.h>
 #include <render_settings.h>
+#include <nettspend.h> // KN-only class icon art (ui/img/classes/)
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -197,11 +198,13 @@ static void hs_slot_add(const Player *player, const int column) {
     slot->silhouette = -1;
     slot->eye_shown = -1;
 
-    char html[1024];
+    char html[1024], kn_icon[64], icon[80]; // a KN class (Nettspend) has its icon in ui/img/classes/ (nettspend.h)
+    if (!nettspend_class_icon_src(player->class_index, kn_icon, sizeof(kn_icon))) snprintf(icon, sizeof(icon), "textures/classes/icon_%d.png", player->class_index);
+    else snprintf(icon, sizeof(icon), "%s", kn_icon);
     size_t len = (size_t) snprintf(html, sizeof(html),
-        "<img src='textures/classes/icon_%d.png' class='specPlayerIcon%s' id='specPI_%d'>"
+        "<img src='%s' class='specPlayerIcon%s' id='specPI_%d'>"
         "<div class='specPlayerFlag' id='sf_-1'></div><div class='specPlayerName'>",
-        player->class_index, player->active ? "" : " silhouette", player->class_index);
+        icon, player->active ? "" : " silhouette", player->class_index);
     hs_append_escaped(html, sizeof(html), &len, hs_name(player));
     char num[8] = "";
     if (index < 9) snprintf(num, sizeof(num), "%d", index + 1);
@@ -253,8 +256,9 @@ static void hs_update_slots(const Client *client) {
         }
 
         if (slot->icon && player->class_index != slot->class_index) {
-            char src[48], id[24];
-            snprintf(src, sizeof(src), "textures/classes/icon_%d.png", player->class_index);
+            char src[64], id[24];
+            if (!nettspend_class_icon_src(player->class_index, src, sizeof(src))) // a KN class: ui/img/classes/ (nettspend.h)
+                snprintf(src, sizeof(src), "textures/classes/icon_%d.png", player->class_index);
             snprintf(id, sizeof(id), "specPI_%d", player->class_index);
             html_dom_set_attr(slot->icon, "src", src);
             html_dom_set_attr(slot->icon, "id", id);

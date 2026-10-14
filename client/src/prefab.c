@@ -18,6 +18,7 @@
 #include <user_asset.h>
 #include "viewer/viewer_store.h"
 #include <weapons.h>
+#include <nettspend.h> // the Drank's cup / the Money Spread's cash stack as pickups
 #include <world.h>
 #include <math.h>
 #include <stdio.h>
@@ -2065,6 +2066,12 @@ Mesh *prefab_weapon_mesh(const Weapon *weapon, const int no_texture) {
 Mesh *prefab_pickup_mesh(const int weapon_id, const int no_texture, float *scale) {
     if (weapon_id < 0 || weapon_id >= WEAPON_TABLE_COUNT || !rules_weapon(weapon_id)) return NULL;
     const Weapon *weapon = rules_weapon(weapon_id);
+    const NettspendWeapon kn_kind = nettspend_weapon_kind(weapon_id); // Nettspend: the cup / cash stack, x2 like the hose
+    if (kn_kind) {
+        Mesh *mesh = kn_kind == NETTSPEND_WEAPON_DRANK ? nettspend_cup_mesh() : nettspend_cash_mesh();
+        if (mesh && scale) *scale = 2.0f; // the pose (rim up) is map_post.c's, like every pickup's
+        return mesh;
+    }
     if (weapon->stream && !weapon->src) { // KrunkNative Piss: no model, the hose (genHose's mustard default colour) x2
         Mesh *hose = player_hose_mesh(weapon->stream, weapon->stream->color);
         if (hose && scale) *scale = 2.0f;

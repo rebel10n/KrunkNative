@@ -42,6 +42,7 @@
 #include <app_mode.h> // the game page owns the pointer lock (not the hub / editor / viewer)
 #include <pointer_lock.h> // "should the pointer be locked" (client/src/pointer_lock.c)
 #include <online_mode.h> // live sign-in: the session's rights end with it
+#include <nettspend.h>   // KN-only class icon art (ui/img/classes/)
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -426,7 +427,8 @@ static void menu_build_classes(void) {
             if (w >= 0 && (size_t) w < weapon_count && weapons[w] && weapons[w]->name) c->weapon = weapons[w]->name;
         }
         c->hp = classes[i].health;
-        snprintf(c->icon, sizeof(c->icon), "textures/classes/icon_%d.png", classes[i].icon_index);
+        if (!nettspend_class_icon_src(classes[i].icon_index, c->icon, sizeof(c->icon))) // a KN class: ui/img/classes/ (nettspend.h)
+            snprintf(c->icon, sizeof(c->icon), "textures/classes/icon_%d.png", classes[i].icon_index);
         // updateClassPreview: every loadout weapon's name; the icon is the last one's preview
         // (weaponConfig.src, the Bomb's cosmetics/3_default)
         c->loadout_count = 0;

@@ -55,6 +55,12 @@
 //                                t=100 tip=x,y,z back=x,y,z hand=x,y,z cam=x,y,z screen_tip=u,v screen_hand=u,v"
 //                                (hand: the trigger hand's centre; screen_*: window fraction, y down, -1 behind
 //                                the camera; "none" without a hose)
+//   100 pour                     log the Nettspend Purple Drank's pour-up as drawn (first person, while reloading it):
+//                                "[input_script] pour t=100 strength=0.80 mouth=x,y,z rim=x,y,z screen_mouth=u,v
+//                                screen_rim=u,v" (the bottle's mouth, the cup's rim; "none" otherwise)
+//   100 laced 8000               Nettspend: start the laced visuals for 8000 ms as the server's KN_EXT_LACED would
+//                                (nettspend.h); `laced` with no time logs the effect: "[input_script] laced t=100
+//                                intensity=0.83 left=7400 time=0.600"
 //   100 flags                    log each mirrored CTF flag (position, carrier, team), its crystal / stand meshes and
 //                                its #tScoreM text: "[input_script] flag t=100 i=0 team=1 carrier=-1 pos=..."
 //   100 tpstate                  log the KrunkNative third-person camera of the last frame (third_person.h):
@@ -153,6 +159,7 @@
 #include <bots.h>         // `tpstate`: bot_object_blocks_player
 #include <menu_view.h>    // `cam`: menu_view_killer_uid (the death chase)
 #include <spectate.h>     // `cam`: spectate_active
+#include <nettspend.h>    // `pour`, `laced`
 #include <GLFW/glfw3.h>
 #include <png_write.h>
 #include <frame_target.h>
@@ -699,6 +706,26 @@ static void script_run(Client *client, const ScriptEvent *e) {
         } else {
             fprintf(stderr, "[input_script] hose t=%.0f none\n", g_script.time);
         }
+    } else if (!strcmp(e->cmd, "pour")) {
+        // pour: the Drank's pour-up as drawn (nettspend.h): the bottle's mouth and the cup's rim (world and
+        // window fraction) and the pour's strength (nettspend_vfx_e2e.py)
+        vec3 mouth, rim;
+        const Player *me = client->me;
+        if (me && me->weapon && me->reload_timer > 0.0f && player_pour_points(me, &mouth, &rim)) {
+            const float reload_speed = client->game.config.reload_speed > 0.0f ? client->game.config.reload_speed : 1.0f;
+            const float reload_time = me->weapon->reload_time * reload_speed;
+            const float strength = nettspend_pour_strength(reload_time > 0.0f ? 1.0f - me->reload_timer / reload_time : -1.0f);
+            const vec2 sm = script_project(client, mouth), sr = script_project(client, rim);
+            fprintf(stderr, "[input_script] pour t=%.0f strength=%.2f mouth=%.4f,%.4f,%.4f rim=%.4f,%.4f,%.4f screen_mouth=%.4f,%.4f screen_rim=%.4f,%.4f\n",
+                    g_script.time, strength, mouth.x, mouth.y, mouth.z, rim.x, rim.y, rim.z, sm.x, sm.y, sr.x, sr.y);
+        } else {
+            fprintf(stderr, "[input_script] pour t=%.0f none\n", g_script.time);
+        }
+    } else if (!strcmp(e->cmd, "laced")) {
+        // laced <ms>: the laced visuals start (as the server's KN_EXT_LACED for us); laced: log them
+        if (e->v[0] > 0.0f) nettspend_laced_start(e->v[0]);
+        else fprintf(stderr, "[input_script] laced t=%.0f intensity=%.3f left=%.0f time=%.3f\n", g_script.time, nettspend_laced_intensity(),
+                     nettspend_laced_left_ms(), nettspend_laced_time());
     } else if (!strcmp(e->cmd, "flags")) {
         // flags: one log line per mirrored flag (hud_modes: position, carrier, team) with its
         // crystal / stand meshes as drawn (mode_world) and the HUD text (CTF flag-cycle checks)

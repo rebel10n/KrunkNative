@@ -1,6 +1,7 @@
 #include <client.h>
 #include <cosmetics.h>
 #include <gltf.h>
+#include <nettspend.h> // the Drank's cup / pour-up and the Money Spread's cash stack
 #include <render_settings.h>
 #include <skin_fx.h>
 #include <third_person.h> // the local third-person model
@@ -506,6 +507,19 @@ int player_hose_points(const Player *player, vec3 *tip, vec3 *back, vec3 *hand) 
     if (tip) *tip = transform_point_to(&arms->hose->transform, (vec3) {0.0f, 0.0f, -half}, NULL);
     if (back) *back = transform_point_to(&arms->hose->transform, (vec3) {0.0f, 0.0f, half}, NULL);
     if (hand) *hand = transform_point_to(&arms->anchor, player_trigger_hand(arms, player->left_handed), NULL);
+    return 1;
+}
+
+// Nettspend (nettspend.h): the pour-up's points while the local player reloads the Drank in first
+// person: the bottle's mouth and the cup's rim centre (world); 0 otherwise (vfx.c droplets).
+int player_pour_points(const Player *player, vec3 *mouth, vec3 *rim) {
+    const PlayerMesh *mesh = player ? player->mesh : NULL;
+    if (!mesh || !mesh->arms || player->loadout_index < 0 || player->loadout_index >= player->loadout_size) return 0;
+    if (nettspend_weapon_kind(player->loadout[player->loadout_index]) != NETTSPEND_WEAPON_DRANK) return 0;
+    const PlayerArms *arms = mesh->arms[player->loadout_index];
+    if (!arms || !arms->hose || !arms->weapon_left || !arms->weapon_left->visible) return 0;
+    if (mouth) *mouth = transform_point_to(&arms->weapon_left->transform, (vec3) {0.0f, 0.0f, -NETTSPEND_BOTTLE_LENGTH * 0.5f}, NULL);
+    if (rim) *rim = transform_point_to(&arms->hose->transform, (vec3) {0.0f, 0.0f, -arms->hose_length * 0.5f}, NULL);
     return 1;
 }
 
@@ -1124,7 +1138,10 @@ void player_generate_meshes(Player *player, const int render_you) {
                     }
                 }
 
-                if (weapon->src) {
+                // Nettspend (nettspend.h): the Drank's cup and the Money Spread's cash stack are procedural
+                // whatever the table's src / stream say (below, next to the hose)
+                const NettspendWeapon kn_kind = nettspend_weapon_kind(player->loadout[i]);
+                if (weapon->src && !kn_kind) {
                     // player.skins[slot]: remodel / texture, yOff / zOff, mScl and the glow (ai)
                     const ViewerSkin *skin = player_slot_skin(player, i, weapon);
                     char model[128], texture[192];
@@ -1192,7 +1209,59 @@ void player_generate_meshes(Player *player, const int render_you) {
                 // (KN: hose_view from the hand, see player_trigger_hand); third person on the lower body at
                 // the pelvis (hosePelvisHeight - legHeight up, -(hosePelvisForward - hoseLength / 2)
                 // forward). Shown and hidden with the slot like any weapon mesh.
-                if (weapon->stream && !weapon->src) {
+                if (kn_kind == NETTSPEND_WEAPON_DRANK) {
+                    // Nettspend Purple Drank: the lean cup in the trigger hand (the hose's place: arms->hose, so
+                    // the stream leaves and the pour lands at its rim, player_hose_points) and, first person
+                    // only, the pour-up bottle as weapon_left (hidden outside a reload, nettspend_pose_pour);
+                    // third person at the pelvis like the hose
+                    Mesh *cup = nettspend_cup_mesh();
+                    if (cup) {
+                        snprintf(sel_model, sizeof(sel_model), "cup");
+                        snprintf(sel_tex, sizeof(sel_tex), "#%06x", (unsigned) NETTSPEND_DRANK_COLOR);
+                        if (third_person) {
+                            const float forward = weapon->stream ? weapon->stream->pelvis_forward : 1.25f;
+                            const float height = weapon->stream ? weapon->stream->pelvis_height : 4.55f;
+                            cup->transform.parent = player_mesh->body_anchor;
+                            cup->transform.position = (vec3) {0.0f, height - game_constants.leg_height, -(forward - NETTSPEND_CUP_LENGTH * 0.5f)};
+                            cup->transform.rotation = (vec3) {(float) M_PI * 0.5f, 0.0f, 0.0f}; // rim up
+                        } else {
+                            const float mirror = player->left_handed ? -1.0f : 1.0f;
+                            const vec3 hand = player_trigger_hand(arms, player->left_handed);
+                            cup->transform.parent = &arms->anchor;
+                            nettspend_pose_cup_rest(cup, hand, mirror);
+                            Mesh *bottle = nettspend_bottle_mesh();
+                            if (bottle) {
+                                bottle->transform.parent = &arms->anchor;
+                                bottle->visible = 0;
+                                arms->weapon_left = bottle;
+                            }
+                        }
+                        arms->weapon_right = cup;
+                        arms->hose = cup;
+                        arms->hose_length = NETTSPEND_CUP_LENGTH;
+                    }
+                } else if (kn_kind == NETTSPEND_WEAPON_MONEY_SPREAD) {
+                    // Nettspend Money Spread: the cash stack on the trigger hand (first person), at the pelvis
+                    // in third person; its top is the "tip" (arms->hose) the bills burst from (vfx.c)
+                    Mesh *cash = nettspend_cash_mesh();
+                    if (cash) {
+                        snprintf(sel_model, sizeof(sel_model), "cash");
+                        snprintf(sel_tex, sizeof(sel_tex), "#%06x", (unsigned) NETTSPEND_CASH_COLOR);
+                        if (third_person) {
+                            cash->transform.parent = player_mesh->body_anchor;
+                            cash->transform.position = (vec3) {0.0f, 4.55f - game_constants.leg_height, -(1.25f - NETTSPEND_CASH_LENGTH * 0.5f)};
+                            cash->transform.rotation = (vec3) {(float) M_PI * 0.5f, 0.0f, 0.0f};
+                        } else {
+                            const float mirror = player->left_handed ? -1.0f : 1.0f;
+                            const vec3 hand = player_trigger_hand(arms, player->left_handed);
+                            cash->transform.parent = &arms->anchor;
+                            nettspend_pose_cash(cash, hand, mirror);
+                        }
+                        arms->weapon_right = cash;
+                        arms->hose = cash;
+                        arms->hose_length = NETTSPEND_CASH_LENGTH;
+                    }
+                } else if (weapon->stream && !weapon->src) {
                     const WeaponStream *stream = weapon->stream;
                     Mesh *hose = player_hose_mesh(stream, colors[0]);
                     if (hose) {
@@ -1377,6 +1446,10 @@ void player_update_meshes(Player *player, const int is_preview) {
     if (reload_anim > 0.5f) reload_anim = 1.0f - reload_anim;
 
     reload_anim *= player->render_you ? 1.0f : 0.3f;
+    // Nettspend Purple Drank (nettspend.h): the pour-up is the first-person reload animation, so the
+    // upper body keeps still instead of Krunker's dip (which would swing the cup out of view)
+    if (player->render_you && !third_person && player->loadout_index >= 0 && player->loadout_index < player->loadout_size &&
+        nettspend_weapon_kind(player->loadout[player->loadout_index]) == NETTSPEND_WEAPON_DRANK) reload_anim = 0.0f;
 
     const float idle_anim = (1.0f - aim_val_mlt * 0.88f) * 1.75f * weapon_bobbing_mlt;
     const float step_y = player->render_you && !third_person ? fabsf(step_anim_rotate * 0.5f) * anim_mlt_lean : fabsf(step_anim * 3.5f);
@@ -1531,6 +1604,16 @@ void player_update_meshes(Player *player, const int is_preview) {
             if (shoe) shoe->visible = visible;
             if (player_mesh->cosmetic_models[PLAYER_COSMETIC_SHOE_R + i]) gltf_instance_set_visible(player_mesh->cosmetic_models[PLAYER_COSMETIC_SHOE_R + i], visible);
         }
+    }
+
+    // Nettspend Purple Drank (nettspend.h): the pour-up of a first-person reload (the cup drifts
+    // into view, the bottle comes in over the rim and tips; hidden again when the reload ends).
+    // Only the local player's reload_timer runs on the client (procInputs), like the reload dip above.
+    if (held_arms && held_arms->hose && player->render_you && !third_person &&
+        nettspend_weapon_kind(player->loadout[player->loadout_index]) == NETTSPEND_WEAPON_DRANK) {
+        const float reload_time = player->weapon->reload_time * reload_speed;
+        const float progress = player->reload_timer > 0.0f && reload_time > 0.0f ? 1.0f - player->reload_timer / reload_time : -1.0f;
+        nettspend_pose_pour(held_arms->hose, held_arms->weapon_left, player_trigger_hand(held_arms, player->left_handed), left_hand_mlt, progress);
     }
 
     // the charm sways with the weapon (players.js:501-504)
