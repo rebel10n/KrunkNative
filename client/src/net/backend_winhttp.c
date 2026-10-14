@@ -1,8 +1,10 @@
 // WinHTTP transport of the brain client (backend_winhttp.h): Windows has no http_conn.c
 // (POSIX sockets + OpenSSL), so HTTP(S) and the WS(S) social socket go through WinHTTP, which
 // brings TLS (the Windows certificate store), the system proxy and WebSockets (Windows 8+).
+// The client's own proxy (http_proxy.h, http:// only here) is set per request over the system one.
 #ifdef _WIN32
 #include "backend_winhttp.h"
+#include <http_proxy.h>
 #include <windows.h>
 #include <winhttp.h>
 #include <stdio.h>
@@ -92,6 +94,9 @@ static int open_request(Handles *h, const char *method, const char *url, const i
         set_err(err, errn, "cannot open the request", GetLastError());
         goto out;
     }
+    char host8[256]; // Settings > Client > Proxy / HTTPS_PROXY ... (http_proxy.h): this request's proxy
+    if (WideCharToMultiByte(CP_UTF8, 0, host, -1, host8, sizeof(host8), NULL, NULL))
+        http_proxy_winhttp_apply(h->request, host8, uc.nScheme == INTERNET_SCHEME_HTTPS);
     ok = 1;
 out:
     free(wurl);

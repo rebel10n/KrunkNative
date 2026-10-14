@@ -5,7 +5,8 @@
 // NoMatchingServers, "No Games Found / Try changing Quickplay options", when nothing matches). v10
 // has no UI for them; KrunkNative stores one mode and one map (or Any) under those keys in the
 // settings store, plus the server type of the native client: KrunkNative servers, the official
-// krunker.io lobbies (opened in the browser, krunker_lobbies.h) or both, ours first.
+// krunker.io lobbies (opened in the browser, krunker_lobbies.h) or both, ours first. The server
+// type only picks what Quick Match / F4 seek into: the native server browser always lists both.
 // The web build always seeks KrunkNative servers and has no server type row.
 #include <stddef.h>
 
@@ -31,3 +32,6 @@ void seek_prefs_describe(char *out, size_t n);
 // The General settings tab (advanced view) with the Quickplay section at its end (ui_windows.c);
 // NULL = tab unchanged.
 char *seek_prefs_extend_tab(const char *tab);
+// The basic view's General tab with the Server Type row (native) at the end of v10's own
+// "Server Browser & Matchmaking" folder; NULL = tab unchanged (the web build, no such folder).
+char *seek_prefs_extend_basic_tab(const char *tab);

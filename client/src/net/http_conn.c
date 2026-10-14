@@ -2,6 +2,7 @@
 // backend_native.c so the launcher's downloader shares them.
 #include <http_conn.h>
 #if !defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#include <http_proxy.h>
 #include <errno.h>
 #include <netdb.h>
 #include <netinet/in.h>
@@ -264,42 +265,232 @@ static void tls_init_once(void) {
 }
 #endif
 
+#ifdef KRUNKNATIVE_HAVE_TLS
+// A TLS client for host on fd, or inside `under` (an https:// proxy's TLS: the tunnelled
+// handshake reads and writes through it, BIO_f_ssl) when that is set. NULL on failure (logged).
+static SSL *tls_start(const int fd, SSL *under, const char *host) {
+    pthread_once(&g_tls_once, tls_init_once);
+    SSL *ssl = g_tls_ctx ? SSL_new(g_tls_ctx) : NULL;
+    int ok = ssl != NULL;
+    if (ok) {
+        tls_resume(ssl, host);
+        if (under) {
+            BIO *bio = BIO_new(BIO_f_ssl());
+            ok = bio != NULL;
+            if (bio) {
+                BIO_set_ssl(bio, under, BIO_NOCLOSE);
+                SSL_set_bio(ssl, bio, bio); // ssl owns bio (one reference for both directions)
+            }
+        } else {
+            ok = SSL_set_fd(ssl, fd);
+        }
+    }
+    if (!ok || !SSL_set_tlsext_host_name(ssl, host) || !SSL_set1_host(ssl, host) || SSL_connect(ssl) != 1) {
+        const long verify = ssl ? SSL_get_verify_result(ssl) : X509_V_OK;
+        fprintf(stderr, "[http] TLS to %s failed%s%s\n", host, verify != X509_V_OK ? ": " : "",
+                verify != X509_V_OK ? X509_verify_cert_error_string(verify) : "");
+        ERR_clear_error();
+        if (ssl) SSL_free(ssl);
+        return NULL;
+    }
+    return ssl;
+}
+#endif
+
+// ------------------------------------------------------------------ proxy tunnels (http_proxy.h)
+
+static int recv_exact(HttpConn *c, void *out, size_t len) {
+    char *p = out;
+    while (len) {
+        const ssize_t r = http_conn_recv(c, p, len);
+        if (r <= 0) return 0;
+        p += r;
+        len -= (size_t) r;
+    }
+    return 1;
+}
+
+static void host_port(const HttpAddr *a, char *out, const size_t n) {
+    const int v6 = strchr(a->host, ':') != NULL;
+    snprintf(out, n, "%s%s%s:%s", v6 ? "[" : "", a->host, v6 ? "]" : "", a->port);
+}
+
+// HTTP CONNECT host:port (RFC 9110 9.3.6), Basic proxy credentials when the URL has them.
+static int connect_tunnel(HttpConn *c, const HttpProxy *px, const HttpAddr *a, const char *label) {
+    char target[160], auth[400], req[800];
+    host_port(a, target, sizeof(target));
+    http_proxy_basic_auth(px, auth, sizeof(auth));
+    const int len = snprintf(req, sizeof(req), "CONNECT %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: KrunkNative\r\n%s%s%s\r\n", target, target,
+                             auth[0] ? "Proxy-Authorization: Basic " : "", auth, auth[0] ? "\r\n" : "");
+    if (len <= 0 || (size_t) len >= sizeof(req) || !http_conn_send(c, req, (size_t) len)) {
+        fprintf(stderr, "[http] proxy %s: sending CONNECT %s failed\n", label, target);
+        return 0;
+    }
+    // the answer's head, byte by byte: whatever follows it is the tunnel's
+    char resp[4096];
+    size_t n = 0;
+    while (n + 1 < sizeof(resp)) {
+        if (http_conn_recv(c, resp + n, 1) <= 0) {
+            fprintf(stderr, "[http] proxy %s: no answer to CONNECT %s\n", label, target);
+            return 0;
+        }
+        n++;
+        if (n >= 4 && !memcmp(resp + n - 4, "\r\n\r\n", 4)) break;
+    }
+    resp[n] = 0;
+    int status = 0;
+    if (sscanf(resp, "HTTP/%*s %d", &status) != 1 || status < 200 || status > 299) {
+        fprintf(stderr, "[http] proxy %s refused CONNECT %s (HTTP %d%s)\n", label, target, status,
+                status == 407 ? ": proxy authentication required" : "");
+        return 0;
+    }
+    return 1;
+}
+
+// SOCKS5 CONNECT (RFC 1928; user / password RFC 1929). socks5h:// hands the proxy the name,
+// socks5:// the address this client resolved.
+static int socks5_tunnel(HttpConn *c, const HttpProxy *px, const HttpAddr *a, const char *label) {
+    static const char *const REPLIES[] = {"", "general failure", "not allowed by the ruleset", "network unreachable",
+                                          "host unreachable", "connection refused", "TTL expired", "command not supported",
+                                          "address type not supported"};
+    const int auth = px->user[0] != 0;
+    const unsigned char hello[4] = {5, (unsigned char) (auth ? 2 : 1), 0, 2}; // no authentication [, user / password]
+    unsigned char r[262];
+    if (!http_conn_send(c, hello, auth ? 4 : 3) || !recv_exact(c, r, 2) || r[0] != 5) {
+        fprintf(stderr, "[http] proxy %s: not a SOCKS5 proxy\n", label);
+        return 0;
+    }
+    if (r[1] == 2 && auth) {
+        unsigned char msg[3 + 255 + 255];
+        const size_t ul = strlen(px->user) > 255 ? 255 : strlen(px->user), pl = strlen(px->pass) > 255 ? 255 : strlen(px->pass);
+        size_t n = 0;
+        msg[n++] = 1;
+        msg[n++] = (unsigned char) ul;
+        memcpy(msg + n, px->user, ul);
+        n += ul;
+        msg[n++] = (unsigned char) pl;
+        memcpy(msg + n, px->pass, pl);
+        n += pl;
+        if (!http_conn_send(c, msg, n) || !recv_exact(c, r, 2) || r[1] != 0) {
+            fprintf(stderr, "[http] proxy %s: SOCKS5 login refused\n", label);
+            return 0;
+        }
+    } else if (r[1] != 0) {
+        fprintf(stderr, "[http] proxy %s: SOCKS5 wants %s\n", label, r[1] == 2 ? "a user name and password" : "an unsupported login");
+        return 0;
+    }
+    unsigned char req[4 + 1 + 255 + 2];
+    size_t n = 0;
+    req[n++] = 5;
+    req[n++] = 1; // CONNECT
+    req[n++] = 0;
+    const size_t hl = strlen(a->host);
+    if (px->kind == HTTP_PROXY_SOCKS5H) {
+        if (hl > 255) return 0;
+        req[n++] = 3; // DOMAINNAME
+        req[n++] = (unsigned char) hl;
+        memcpy(req + n, a->host, hl);
+        n += hl;
+    } else {
+        struct addrinfo hints = {0}, *res = NULL;
+        hints.ai_family = AF_UNSPEC;
+        hints.ai_socktype = SOCK_STREAM;
+        if (getaddrinfo(a->host, NULL, &hints, &res) != 0 || !res) {
+            fprintf(stderr, "[http] proxy %s: cannot resolve %s (socks5h:// lets the proxy resolve it)\n", label, a->host);
+            return 0;
+        }
+        if (res->ai_family == AF_INET6) {
+            req[n++] = 4;
+            memcpy(req + n, &((const struct sockaddr_in6 *) res->ai_addr)->sin6_addr, 16);
+            n += 16;
+        } else {
+            req[n++] = 1;
+            memcpy(req + n, &((const struct sockaddr_in *) res->ai_addr)->sin_addr, 4);
+            n += 4;
+        }
+        freeaddrinfo(res);
+    }
+    const int port = atoi(a->port);
+    req[n++] = (unsigned char) (port >> 8);
+    req[n++] = (unsigned char) port;
+    if (!http_conn_send(c, req, n) || !recv_exact(c, r, 4) || r[0] != 5) {
+        fprintf(stderr, "[http] proxy %s: no SOCKS5 answer for %s\n", label, a->host);
+        return 0;
+    }
+    if (r[1] != 0) {
+        fprintf(stderr, "[http] proxy %s: SOCKS5 CONNECT %s:%s failed: %s\n", label, a->host, a->port,
+                r[1] < sizeof(REPLIES) / sizeof(REPLIES[0]) ? REPLIES[r[1]] : "error");
+        return 0;
+    }
+    size_t skip = r[3] == 1 ? 4 : r[3] == 4 ? 16 : 0; // BND.ADDR, then BND.PORT
+    if (r[3] == 3) {
+        if (!recv_exact(c, r, 1)) return 0;
+        skip = r[0];
+    }
+    return recv_exact(c, r, skip + 2);
+}
+
 // Connects (and runs the TLS handshake, verifying the certificate for a->host). 0 on failure.
 int http_conn_open(HttpConn *c, const HttpAddr *a, const int timeout_ms) {
     memset(c, 0, sizeof(*c));
-    c->fd = connect_to(a, timeout_ms);
+    c->fd = -1;
+    HttpProxy px;
+    const int via = http_proxy_for(a->host, a->tls, &px);
+    char label[160] = "";
+    if (via) {
+        http_proxy_label(&px, label, sizeof(label));
+        HttpAddr pa;
+        memset(&pa, 0, sizeof(pa));
+        snprintf(pa.host, sizeof(pa.host), "%s", px.host);
+        snprintf(pa.port, sizeof(pa.port), "%s", px.port);
+#ifndef KRUNKNATIVE_HAVE_TLS
+        if (px.kind == HTTP_PROXY_HTTPS) {
+            fprintf(stderr, "[http] proxy %s needs TLS, but this client was built without OpenSSL\n", label);
+            return 0;
+        }
+#endif
+        c->fd = connect_to(&pa, timeout_ms);
+        if (c->fd < 0) fprintf(stderr, "[http] proxy %s is not reachable (for %s)\n", label, a->host);
+    } else {
+        c->fd = connect_to(a, timeout_ms);
+    }
     if (c->fd < 0) return 0;
     struct timeval tv = {timeout_ms / 1000, (timeout_ms % 1000) * 1000};
     setsockopt(c->fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    if (via) {
+#ifdef KRUNKNATIVE_HAVE_TLS
+        if (px.kind == HTTP_PROXY_HTTPS && !(c->ssl = tls_start(c->fd, NULL, px.host))) goto fail; // CONNECT inside it
+#endif
+        const int ok = px.kind == HTTP_PROXY_SOCKS5 || px.kind == HTTP_PROXY_SOCKS5H ? socks5_tunnel(c, &px, a, label)
+                                                                                    : connect_tunnel(c, &px, a, label);
+        if (!ok) goto fail;
+    }
 #ifdef KRUNKNATIVE_HAVE_TLS
     if (a->tls) {
-        pthread_once(&g_tls_once, tls_init_once);
-        SSL *ssl = g_tls_ctx ? SSL_new(g_tls_ctx) : NULL;
+        SSL *under = c->ssl; // the https:// proxy's TLS, NULL otherwise
+        SSL *ssl = tls_start(c->fd, under, a->host);
+        if (!ssl) goto fail;
+        c->proxy_ssl = under;
         c->ssl = ssl;
-        if (ssl) tls_resume(ssl, a->host);
-        if (!c->ssl || !SSL_set_fd(c->ssl, c->fd) || !SSL_set_tlsext_host_name(c->ssl, a->host) ||
-            !SSL_set1_host(c->ssl, a->host) || SSL_connect(c->ssl) != 1) {
-            const long verify = c->ssl ? SSL_get_verify_result(c->ssl) : X509_V_OK;
-            fprintf(stderr, "[http] TLS to %s failed%s%s\n", a->host, verify != X509_V_OK ? ": " : "",
-                    verify != X509_V_OK ? X509_verify_cert_error_string(verify) : "");
-            ERR_clear_error();
-            if (c->ssl) SSL_free(c->ssl);
-            c->ssl = NULL;
-            close(c->fd);
-            c->fd = -1;
-            return 0;
-        }
     }
 #endif
     return 1;
+fail:
+    http_conn_close(c);
+    return 0;
 }
 
 void http_conn_close(HttpConn *c) {
 #ifdef KRUNKNATIVE_HAVE_TLS
     if (c->ssl) {
         SSL_shutdown(c->ssl);
-        SSL_free(c->ssl);
+        SSL_free(c->ssl); // a tunnelled one frees its BIO_f_ssl, not the proxy's SSL under it
         c->ssl = NULL;
+    }
+    if (c->proxy_ssl) {
+        SSL_shutdown(c->proxy_ssl);
+        SSL_free(c->proxy_ssl);
+        c->proxy_ssl = NULL;
     }
 #endif
     if (c->fd >= 0) close(c->fd);
@@ -345,7 +536,7 @@ ssize_t http_conn_recv(HttpConn *c, void *buf, const size_t len) {
 // Decrypted bytes waiting inside the TLS layer (poll() on the fd cannot see them).
 int http_conn_pending(const HttpConn *c) {
 #ifdef KRUNKNATIVE_HAVE_TLS
-    if (c->ssl) return SSL_pending(c->ssl) > 0;
+    if (c->ssl) return SSL_pending(c->ssl) > 0 || (c->proxy_ssl && SSL_pending(c->proxy_ssl) > 0);
 #endif
     (void) c;
     return 0;

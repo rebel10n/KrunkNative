@@ -164,6 +164,12 @@ void backend_set_url(const char *url) {
     pthread_mutex_unlock(&g_lock);
 }
 
+void backend_social_reconnect(void) {
+    pthread_mutex_lock(&g_lock);
+    g_ws_generation++; // the session ends at its next turn, the thread connects again
+    pthread_mutex_unlock(&g_lock);
+}
+
 // ------------------------------------------------------------------ HTTP
 
 // Removes chunked transfer-encoding in place; returns the new length.

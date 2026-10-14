@@ -455,7 +455,7 @@ else ()
         launcher/src/launcher.c launcher/src/launcher_ui.c launcher/src/launcher_ui.h
         launcher/src/update_core.c launcher/src/http_fetch.c launcher/src/archive.c launcher/src/fs.c
         launcher/src/install.c launcher/src/assets_sync.c
-        client/src/net/http_conn.c client/src/headless.c client/src/png_write.c client/src/stb_image.c
+        client/src/net/http_conn.c client/src/net/http_proxy.c client/src/headless.c client/src/png_write.c client/src/stb_image.c
         shared/src/auth_join.c)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         list(APPEND LAUNCHER_SOURCES client/win.rc) # the exe icon + "Krunker Box Office" version info
@@ -755,7 +755,7 @@ else ()
     if (NOT WIN32)
         add_executable(asset_fetch_test client/tests/asset_fetch_test.c client/src/net/asset_fetch.c
                        launcher/src/update_core.c launcher/src/http_fetch.c launcher/src/fs.c launcher/src/install.c
-                       launcher/src/archive.c client/src/net/http_conn.c client/src/stb_image.c shared/src/auth_join.c)
+                       launcher/src/archive.c client/src/net/http_conn.c client/src/net/http_proxy.c client/src/stb_image.c shared/src/auth_join.c)
         target_include_directories(asset_fetch_test PRIVATE launcher/include client/include shared/include)
         target_link_libraries(asset_fetch_test PRIVATE cJSON Threads::Threads m)
         if (OpenSSL_FOUND)
@@ -771,7 +771,7 @@ else ()
     if (NOT WIN32)
         add_executable(assets_bench launcher/tests/assets_bench.c launcher/src/assets_sync.c
                        launcher/src/update_core.c launcher/src/http_fetch.c launcher/src/fs.c launcher/src/archive.c
-                       client/src/net/http_conn.c client/src/stb_image.c shared/src/auth_join.c)
+                       client/src/net/http_conn.c client/src/net/http_proxy.c client/src/stb_image.c shared/src/auth_join.c)
         target_include_directories(assets_bench PRIVATE launcher/include client/include shared/include)
         target_link_libraries(assets_bench PRIVATE cJSON Threads::Threads m)
         if (OpenSSL_FOUND)
@@ -825,7 +825,7 @@ else ()
     # backend_common.c, backend_native.c; on Windows backend_winhttp.c, which CI runs there too)
     add_executable(backend_online_test client/tests/backend_online_test.c client/src/net/online_mode.c
                    client/src/net/backend_common.c client/src/net/backend_native.c client/src/net/backend_winhttp.c
-                   client/src/net/http_conn.c)
+                   client/src/net/http_conn.c client/src/net/http_proxy.c)
     target_include_directories(backend_online_test PRIVATE client/include shared/include)
     target_link_libraries(backend_online_test PRIVATE glfw freetype cJSON Threads::Threads m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -835,6 +835,16 @@ else ()
         target_compile_definitions(backend_online_test PRIVATE KRUNKNATIVE_HAVE_TLS=1)
     endif ()
     add_test(NAME backend_online_test COMMAND backend_online_test)
+
+    # http_proxy_test: the client's proxy URLs and per-host choice (client/src/net/http_proxy.c:
+    # Settings > Client > Proxy and its scope, HTTPS_PROXY / HTTP_PROXY / ALL_PROXY / NO_PROXY). POSIX
+    # (setenv); the tunnels themselves run in server/tests/client_proxy_e2e.py (make client-proxy-e2e).
+    if (NOT WIN32)
+        add_executable(http_proxy_test client/tests/http_proxy_test.c client/src/net/http_proxy.c)
+        target_include_directories(http_proxy_test PRIVATE client/include)
+        target_link_libraries(http_proxy_test PRIVATE Threads::Threads)
+        add_test(NAME http_proxy_test COMMAND http_proxy_test)
+    endif ()
 
     # meshopt_test: the EXT_meshopt_compression decoder (client/lib/meshopt, client/src/gltf_meshopt.c)
     # against the meshoptimizer npm decoder's goldens (client/tests/data/meshopt_golden.json)

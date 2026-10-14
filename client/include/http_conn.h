@@ -20,11 +20,15 @@ const char *http_url_target(const char *url);
 
 typedef struct {
     int fd;
-    void *ssl; // SSL* (KRUNKNATIVE_HAVE_TLS), NULL for plain connections
+    void *ssl;       // SSL* (KRUNKNATIVE_HAVE_TLS) the connection reads and writes, NULL for plain connections
+    void *proxy_ssl; // SSL* of an https:// proxy under ssl (the target's TLS runs inside it), else NULL
 } HttpConn;
 
 // Connects (and runs the TLS handshake, verifying the certificate for a->host). 0 on failure.
 // Host lookups are cached for 5 minutes and TLS sessions per host, process-wide.
+// A host the proxy covers (http_proxy.h: the client setting or HTTPS_PROXY / HTTP_PROXY /
+// ALL_PROXY / NO_PROXY) is reached through it: HTTP CONNECT (http:// / https:// proxies) or
+// SOCKS5, for plain and TLS connections alike; the TLS handshake then runs end to end.
 // timeout_ms bounds the connect and every later send/receive (SO_SNDTIMEO / SO_RCVTIMEO).
 int http_conn_open(HttpConn *c, const HttpAddr *a, int timeout_ms);
 void http_conn_close(HttpConn *c);

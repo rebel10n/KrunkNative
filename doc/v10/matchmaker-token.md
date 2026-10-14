@@ -197,15 +197,18 @@ Tests:
 ## 3. Seek preferences (Settings > General > Quickplay)
 
 The settings rows are KrunkNative's, since v10 has none. They sit at the end of the General tab in
-the advanced view (the switch next to Search). The basic view stays v10's curated General tab,
-which fits the window, so it keeps v10's layout exactly (uidiff `v10/settings-general`):
+the advanced view (the switch next to Search). The basic view stays v10's curated General tab and
+only gains the native Server Type row, last in v10's own "Server Browser & Matchmaking" folder
+(Seek Mode / Seek Map need the advanced view; `--render-scenario` leaves the row out, so uidiff
+still compares v10's tab):
 
 * **Seek Mode**: Any or one mode, stored as the setting `seek_modes` (mode id; our mode ids are
   v10's `gameModes` indices).
 * **Seek Map**: Any or one official map, stored as `seek_maps` (map catalogue index;
   0..31 = Krunker's `mapIndex`).
-* **Server Type**, native only: KrunkNative, Official (krunker.io) or Both, stored as
-  `knSeekServers`. The web build has no row and always seeks KrunkNative servers.
+* **Server Type**, native only: KrunkNative (the default), Official (krunker.io) or Both, stored as
+  `knSeekServers`. It only picks what Quick Match / F4 seek into: the server browser lists both.
+  The web build has no row and always seeks KrunkNative servers.
 
 Seeks send `dataQuery={"dsmo":[mode],"dsma":[map]}`, as v10 does, except when the seek names a
 game. Lobbies announce `meta.mode` and the new `meta.mapIndex` (server_bin). The brain's quick
@@ -223,8 +226,9 @@ A find that comes back empty leaves the player in the current game and shows a t
 Found. Try changing Quickplay options"). The startup seek also sends the preferences (v10
 parity) but never opens krunker.io.
 
-The server browser (Find Game, window 2) shows the server type's lists, filtered to the seek mode
-and map, with a "Showing <mode> on <map>" line when a filter is set.
+The server browser (Find Game, window 2) shows ours and (native) the official krunker.io lobbies
+whatever the server type, filtered to the seek mode and map, with a "Showing <mode> on <map>" line
+when a filter is set.
 
 ## 4. Official krunker.io lobbies (native only, `client/src/ui/krunker_lobbies.c`)
 
@@ -239,7 +243,31 @@ and map, with a "Showing <mode> on <map>" line when a filter is set.
 * Compiled under `#ifndef __EMSCRIPTEN__`. The web build has stubs and never lists or requests
   them.
 * `KRUNKNATIVE_KRUNKER_MATCHMAKER` overrides the URL (tests: a local stub; development: a mirror);
-  `off` disables it. `KRUNKNATIVE_KRUNKER_URL` overrides the site the join link opens.
+  `off` disables it. `KRUNKNATIVE_KRUNKER_URL` overrides the site the join link opens. Headless
+  runs and `--render-scenario` never ask krunker.io unless the URL is given explicitly.
+* Blocked networks: krunker.io answers some networks (this machine's and our servers' IPs) with a
+  403 "ACCESS DENIED" HTML page. The answer is parsed defensively (JSON with a `games` array or
+  nothing), and the KRUNKER.IO section says "krunker.io refused this network (ACCESS DENIED). Set a
+  proxy in Settings > Client." instead of an empty list (also: loading, unreachable, the proxy not
+  reaching krunker.io, refused through the proxy too).
+* Proxy: Settings > Client > Network > Proxy (`client/include/http_proxy.h`): `http://`,
+  `https://`, `socks5://` or `socks5h://host:port` (optional `user:password@`), and Proxy Scope
+  "krunker.io only" (the default: `*.krunker.io`) or "All client traffic" (also the account
+  service, the server finder, news and the asset downloads). Empty: `HTTPS_PROXY` / `HTTP_PROXY` /
+  `ALL_PROXY` minus `NO_PROXY` apply, to every host. Loopback is never proxied. It applies without a
+  restart: the next connection takes it, krunker.io is asked again at once, and with the scope
+  "all" the social socket reconnects.
+  * Linux / macOS (`http_conn.c`): every proxied connection, plain or TLS, is tunnelled with HTTP
+    CONNECT (Basic credentials) or SOCKS5 (RFC 1928/1929); TLS then runs end to end, verified for
+    the target host. An `https://` proxy gets its own TLS with the target's TLS inside it.
+  * Windows (WinHTTP): `http://` proxies are set per request; WinHTTP has no SOCKS, so other kinds
+    are skipped with a warning and the system proxy stays.
+  * Never proxied: the game connection (TCP / UDP / WebTransport to a game server), the server
+    info queries, voice. The launcher process honours the environment variables only (it does not
+    read the client's settings). The web build has no row: the browser is its network stack.
+  * Tests: `client/tests/http_proxy_test.c` (parsing, scope, environment, NO_PROXY) and
+    `server/tests/client_proxy_e2e.py` (`make client-proxy-e2e`: a stub CONNECT / SOCKS5 proxy, the
+    block page, persistence, a live change, `HTTP_PROXY`).
 * Display: each lobby becomes a server-browser row with a purple KRUNKER.IO tag and the same
   columns as ours:
   * name (`h`, else the map `i`)

@@ -483,10 +483,11 @@ static char *gen_settings(void) {
         }
         // the Sound tab gains the client's Audio Output row (ui_client_settings.c)
         char *ext = ui_client_settings_extend_tab(inner_s);
-        // mm-token: General > Quickplay (seek mode / map / server type, seek_prefs.c), in the advanced
-        // view (every setting) only: the basic view stays v10's curated General tab, row for row
-        if (tab == 0 && view == 1) {
-            char *quickplay = seek_prefs_extend_tab(ext ? ext : inner_s);
+        // mm-token: General > Quickplay (seek mode / map / server type, seek_prefs.c) in the advanced
+        // view (every setting); the basic view keeps v10's curated General tab and only gains the
+        // native Server Type row in its own Server Browser & Matchmaking folder
+        if (tab == 0) {
+            char *quickplay = view == 1 ? seek_prefs_extend_tab(ext ? ext : inner_s) : seek_prefs_extend_basic_tab(ext ? ext : inner_s);
             if (quickplay) {
                 free(ext);
                 ext = quickplay;

@@ -32,6 +32,8 @@ const char *krunker_region_name(const char *code) {
 
 #ifndef __EMSCRIPTEN__
 #include <GLFW/glfw3.h>
+#include <headless.h>
+#include <http_proxy.h>
 
 #define KRUNKER_DEFAULT_MATCHMAKER "https://matchmaker.krunker.io"
 #define KRUNKER_DEFAULT_SITE "https://krunker.io"
@@ -46,7 +48,8 @@ static struct {
     double answered_ms;     // the last good answer
     int loading;
     int seek_pending;       // krunker_lobbies_seek waits for the answer
-    char error[160];
+    int refetch;            // the network changed while a request ran: ask again after it
+    char error[200];
 } K = {.fetched_ms = -1e18, .answered_ms = -1e18};
 
 static double now_ms(void) { return glfwGetTime() * 1000.0; }
@@ -57,8 +60,41 @@ static const char *matchmaker_url(void) {
 }
 
 int krunker_lobbies_enabled(void) {
-    const char *url = matchmaker_url();
-    return strcmp(url, "off") != 0 && strcmp(url, "0") != 0;
+    const char *env = getenv("KRUNKNATIVE_KRUNKER_MATCHMAKER");
+    if (env && (!strcmp(env, "off") || !strcmp(env, "0"))) return 0;
+    if (env && env[0]) return 1;
+    // like backend_init: headless runs (tests, captures) and scenario renders never reach the
+    // real krunker.io unless the matchmaker is given explicitly
+#ifdef UI_SCENARIO_SUPPORTED
+    if (ui_scenario_active()) return 0;
+#endif
+    return !headless_enabled();
+}
+
+// The matchmaker's host goes through a proxy (http_proxy.h); its label in *label.
+static int via_proxy(char *label, const size_t n) {
+    char host[128] = "";
+    const char *p = strstr(matchmaker_url(), "://");
+    p = p ? p + 3 : matchmaker_url();
+    size_t len = 0;
+    while (p[len] && p[len] != ':' && p[len] != '/' && len + 1 < sizeof(host)) {
+        host[len] = p[len];
+        len++;
+    }
+    host[len] = 0;
+    HttpProxy px;
+    if (!http_proxy_for(host, !strncmp(matchmaker_url(), "https:", 6), &px)) return 0;
+    http_proxy_label(&px, label, n);
+    return 1;
+}
+
+// krunker.io's block page: "ACCESS DENIED" HTML (a 403) instead of the JSON
+static int access_denied(const int status, const char *body) {
+    static const char WORD[] = "access denied";
+    for (const char *p = body; p && *p; p++) {
+        if (!strncasecmp(p, WORD, sizeof(WORD) - 1)) return 1;
+    }
+    return status == 403;
 }
 
 static int cmp_players(const void *a, const void *b) {
@@ -113,7 +149,15 @@ static void on_list(void *user, const int status, const char *body, const size_t
     (void) user;
     (void) length;
     K.loading = 0;
-    cJSON *res = status == 200 ? cJSON_Parse(body) : NULL;
+    if (K.refetch) { // the proxy changed meanwhile: this answer took the old route
+        K.refetch = 0;
+        K.fetched_ms = -1e18;
+        krunker_lobbies_refresh(0);
+        if (K.loading) return;
+    }
+    // the body may be anything (an HTML block page, a proxy's error page): JSON with a games
+    // array or nothing
+    cJSON *res = status == 200 && body ? cJSON_Parse(body) : NULL;
     const cJSON *games = cJSON_GetObjectItem(res, "games");
     if (cJSON_IsArray(games)) {
         const int n = cJSON_GetArraySize(games);
@@ -143,10 +187,28 @@ static void on_list(void *user, const int status, const char *body, const size_t
         K.players = cJSON_IsNumber(total) ? total->valuedouble : 0;
         K.answered_ms = now_ms();
         K.error[0] = 0;
-        printf("[krunker] %d official lobbies (%.0f players) from %s\n", cJSON_GetArraySize(K.list), K.players, matchmaker_url());
+        char proxy[160];
+        const int proxied = via_proxy(proxy, sizeof(proxy));
+        printf("[krunker] %d official lobbies (%.0f players) from %s%s%s\n", cJSON_GetArraySize(K.list), K.players, matchmaker_url(),
+               proxied ? " via proxy " : "", proxied ? proxy : "");
     } else {
-        snprintf(K.error, sizeof(K.error), "%s", status ? "krunker.io answered with an error" : "krunker.io is not reachable");
-        fprintf(stderr, "[krunker] game list failed (HTTP %d)\n", status);
+        char proxy[160];
+        const int proxied = via_proxy(proxy, sizeof(proxy));
+        if (status && access_denied(status, body)) {
+            if (proxied)
+                snprintf(K.error, sizeof(K.error), "krunker.io refused this network (ACCESS DENIED), also through the proxy %s. "
+                                                   "Try another proxy in Settings > Client.", proxy);
+            else
+                snprintf(K.error, sizeof(K.error), "krunker.io refused this network (ACCESS DENIED). Set a proxy in Settings > Client.");
+        } else if (status) {
+            snprintf(K.error, sizeof(K.error), status == 200 ? "Official lobbies unavailable: krunker.io answered with something else than the lobby list."
+                                                             : "Official lobbies unavailable: krunker.io answered HTTP %d.", status);
+        } else if (proxied) {
+            snprintf(K.error, sizeof(K.error), "Official lobbies unavailable: the proxy %s did not reach krunker.io (Settings > Client).", proxy);
+        } else {
+            snprintf(K.error, sizeof(K.error), "Official lobbies unavailable: krunker.io is not reachable.");
+        }
+        fprintf(stderr, "[krunker] game list failed (HTTP %d%s%s): %s\n", status, proxied ? " via proxy " : "", proxied ? proxy : "", K.error);
     }
     cJSON_Delete(res);
     if (K.seek_pending) {
@@ -165,7 +227,19 @@ void krunker_lobbies_refresh(const int force) {
     snprintf(url, sizeof(url), "%s/game-list?hostname=krunker.io", matchmaker_url());
     K.fetched_ms = now;
     K.loading = backend_http_get_external(url, KRUNKER_LOBBIES_TIMEOUT_MS, on_list, NULL) != 0;
-    if (!K.loading) snprintf(K.error, sizeof(K.error), "krunker.io is not reachable");
+    if (!K.loading) snprintf(K.error, sizeof(K.error), "Official lobbies unavailable: krunker.io is not reachable.");
+}
+
+void krunker_lobbies_network_changed(void) {
+    if (K.loading) {
+        K.refetch = 1;
+        return;
+    }
+    K.fetched_ms = -1e18; // the next refresh asks at once (also within the retry wait)
+    if (menu_window_is_open() && menu_ui()->active_window == 2) {
+        krunker_lobbies_refresh(0);
+        menu_rerender_if_open(2); // "Loading..."
+    }
 }
 
 const cJSON *krunker_lobbies_list(void) { return krunker_lobbies_enabled() ? K.list : NULL; }
@@ -200,7 +274,7 @@ int krunker_lobbies_seek(void) {
         }
         K.seek_pending = 0;
         if (!K.list) {
-            ui_notify("krunker.io is not reachable right now");
+            ui_notify(K.error[0] ? K.error : "krunker.io is not reachable right now");
             return 1;
         }
     }
@@ -236,6 +310,7 @@ void krunker_lobbies_refresh(const int force) { (void) force; }
 const cJSON *krunker_lobbies_list(void) { return NULL; }
 int krunker_lobbies_loading(void) { return 0; }
 const char *krunker_lobbies_error(void) { return ""; }
+void krunker_lobbies_network_changed(void) {}
 double krunker_lobbies_players(void) { return 0; }
 int krunker_lobbies_pick(char *id, const size_t n) {
     (void) id;

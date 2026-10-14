@@ -1162,12 +1162,10 @@ static int build_groups(ServerGroup *groups, const int max) {
     memset(groups, 0, sizeof(*groups) * (size_t) max);
     int count = 0;
     rebuild_finder_rows();
-    // mm-token: Settings > Quickplay's server type picks the lists (the official krunker.io
-    // lobbies natively only, krunker_lobbies.c: their own groups after ours)
-    const SeekServers type = seek_prefs_servers();
-    const int ours = type != SEEK_SERVERS_OFFICIAL;
-    const cJSON *lists[3] = {ours ? brain_games() : NULL, ours ? g_finder_rows : NULL,
-                             type != SEEK_SERVERS_KN ? krunker_lobbies_list() : NULL};
+    // ours, then the official krunker.io lobbies (natively only, krunker_lobbies.c: their own
+    // groups after ours), whatever Settings > Quickplay > Server Type says: that one only picks
+    // what Quick Match / F4 seek into
+    const cJSON *lists[3] = {brain_games(), g_finder_rows, krunker_lobbies_list()};
     const int filter = prefs_filtering();
     if (old_browser()) {
         snprintf(groups[0].key, sizeof(groups[0].key), "official");
@@ -1398,6 +1396,8 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
     sb_append(sb, "</div>");
 }
 
+static void append_krunker_status(StrBuf *sb, int groups);
+
 static char *get_servers(void) {
     static ServerGroup groups[SERVER_GROUPS_MAX];
     const int count = build_groups(groups, SERVER_GROUPS_MAX);
@@ -1407,9 +1407,15 @@ static char *get_servers(void) {
     char def[32] = "";
     default_region(def, sizeof(def));
     StrBuf sb = {0};
+    int kio_groups = 0, kio_status = 0;
+    for (int h = 0; h < count; h++) kio_groups += !strncmp(groups[h].key, "kio:", 4);
     for (int h = 0; h < count; h++) {
         const ServerGroup *g = &groups[h];
         const int open = g_expanded == h;
+        if (!kio_status && !strncmp(g->key, "kio:", 4)) { // the krunker.io groups come last (cmp_groups_*)
+            append_krunker_status(&sb, kio_groups);
+            kio_status = 1;
+        }
         sb_appendf(&sb, "<div class='setHed' style='margin-top:20px;' onmouseenter='playTick()' onclick='playSelect(0.1);setExpandedRegion(%d)' style='cursor: pointer;'", open ? -1 : h);
         if (old && show_region() && strcmp(g->key, "custom") && strcmp(g->key, "official") && region_full_name(g->key)[0]) {
             sb_append(&sb, " title='"); // KrunkNative: the place name's region code (the links' prefix)
@@ -1437,6 +1443,7 @@ static char *get_servers(void) {
         if (!kept || !shown) sb_append(&sb, "<div style='margin-left: 30px;margin-top: 5px;margin-bottom: 2px;'>No Joinable Games Found...</div>");
         sb_append(&sb, "</div>");
     }
+    if (!kio_status) append_krunker_status(&sb, 0); // none listed: why, in its place
     return sb_finish(&sb);
 }
 
@@ -1494,28 +1501,36 @@ static void append_finder_error(StrBuf *sb) {
     sb_append(sb, ")</span></div>");
 }
 
-// mm-token: what Settings > Quickplay does to the list (the seek mode / map filter) and the
-// official krunker.io lobbies' state (native, server type Official / Both).
+#define STATUS_BOX "class='setBodH' style='padding:10px;margin-left:0px;width:calc(100% - 40px);"
+
+// mm-token: what Settings > Quickplay does to the list (the seek mode / map filter).
 static void append_seek_status(StrBuf *sb) {
-    static const char *const box = "class='setBodH' style='padding:10px;margin-left:0px;width:calc(100% - 40px);";
     if (prefs_filtering()) {
         char want[128];
         seek_prefs_describe(want, sizeof(want));
-        sb_appendf(sb, "<div id='knSeekFilter' %scolor:rgba(255,255,255,0.7)'>Showing ", box);
+        sb_append(sb, "<div id='knSeekFilter' " STATUS_BOX "color:rgba(255,255,255,0.7)'>Showing ");
         sb_append_esc(sb, want);
         sb_append(sb, " (Settings &gt; General &gt; Quickplay)</div>");
     }
-    if (seek_prefs_servers() == SEEK_SERVERS_KN || !krunker_lobbies_enabled()) return;
+}
+
+// The KRUNKER.IO section's head (native): what its groups are, or why there are none (loading,
+// krunker.io refusing this network, unreachable). Before its first group, or after ours.
+static void append_krunker_status(StrBuf *sb, const int groups) {
+    if (!krunker_lobbies_enabled()) return;
+    sb_append(sb, "<div id='kioStatus' " STATUS_BOX "margin-top:20px;");
     if (!krunker_lobbies_list() && krunker_lobbies_loading()) {
-        sb_appendf(sb, "<div id='kioStatus' %scolor:rgba(255,255,255,0.7)'>Loading the official krunker.io lobbies...</div>", box);
-    } else if (krunker_lobbies_error()[0]) {
-        sb_appendf(sb, "<div id='kioStatus' %scolor:#ff6b6b'>Official lobbies unavailable: ", box);
+        sb_append(sb, "color:rgba(255,255,255,0.7)'><span style='color:#ce93d8'>KRUNKER.IO</span> Loading the official krunker.io lobbies...");
+    } else if (krunker_lobbies_error()[0] && !groups) {
+        sb_append(sb, "color:#ff6b6b'><span style='color:#ce93d8'>KRUNKER.IO</span> ");
         sb_append_esc(sb, krunker_lobbies_error());
-        sb_append(sb, "</div>");
+    } else if (!groups) {
+        sb_append(sb, "color:rgba(255,255,255,0.7)'><span style='color:#ce93d8'>KRUNKER.IO</span> No official lobby matches the search or filter.");
     } else {
-        sb_appendf(sb, "<div id='kioStatus' %scolor:rgba(255,255,255,0.7)'><span style='color:#ce93d8'>KRUNKER.IO</span> lobbies "
-                       "open in your browser: this client can't join krunker.io games.</div>", box);
+        sb_append(sb, "color:rgba(255,255,255,0.7)'><span style='color:#ce93d8'>KRUNKER.IO</span> lobbies "
+                      "open in your browser: this client can't join krunker.io games.");
     }
+    sb_append(sb, "</div>");
 }
 
 // Leave the brain's lobby (if any) and connect straight to host:port.
@@ -1952,7 +1967,7 @@ char *servers_window_gen(const int id, const char **header) {
     if (id == MENU_WINDOW_HOST) return host_window_gen();
     if (id != 2) return NULL;
     finder_refresh(); // the server finder (both modes), then the brain's own lobbies when there is one
-    if (seek_prefs_servers() != SEEK_SERVERS_KN) krunker_lobbies_refresh(0); // official lobbies (native, cached)
+    krunker_lobbies_refresh(0); // official lobbies (native, cached; listed whatever the server type)
     if (backend_available() != 1 || g_games_override) {
         // no brain: the finder's servers when there is a finder, else the empty list (what
         // v7 shows when client.fetchGameList() has no game)

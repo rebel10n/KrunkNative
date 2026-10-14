@@ -16,6 +16,8 @@
 // shutdown. The web build keeps the item hidden, like krunker.io in a browser.
 #include <client_settings.h>
 #include <ui_logic.h>
+#include <backend.h>         // backend_social_reconnect (a proxy change)
+#include <krunker_lobbies.h> // krunker_lobbies_network_changed (a proxy change)
 #include <backend_ui.h> // servers_ui_region_options (Default Region)
 #include <discord_rpc.h>
 #include <render_settings.h>
@@ -34,6 +36,7 @@
 #include <emscripten.h>
 #else
 #include <headless.h>
+#include <http_proxy.h> // Settings > Client > Network > Proxy
 #include "../audio_miniaudio.h" // ma_is_backend_enabled: the Audio Backend options of this build
 #include <dirent.h>
 #include <errno.h>
@@ -108,6 +111,11 @@ static const CsOption PRIORITIES[] = {{"Normal", "Normal"}, {"Below Normal", "Be
 #endif
 #define COUNT(a) ((int) (sizeof(a) / sizeof((a)[0])))
 
+#ifndef __EMSCRIPTEN__
+// http_proxy.h: what the Proxy row carries
+static const CsOption PROXY_SCOPES[] = {{"krunker", "krunker.io only"}, {"all", "All client traffic"}};
+#endif
+
 static const ClientSetting SETTINGS[] = {
     // ---- Display: window/presentation (glorp "Start Mode", "Uncap FPS"; the game's own rows surfaced)
     {"windowMode", "Window Mode", "Display", CS_SELECT, CS_NATIVE | CS_GAME, "0",
@@ -146,6 +154,21 @@ static const ClientSetting SETTINGS[] = {
      "Account service / community coordinator (kn_brain); empty = https://coordinator.krunk.io"},
     {"finderUrl", "Server Finder URL", "Startup", CS_TEXT, CS_NATIVE | CS_WEB | CS_RESTART, "",
      "Public server list; empty = https://matchmaker.krunk.io/servers, off = none"},
+#ifndef __EMSCRIPTEN__ // platform behaviour: the browser is the web build's network stack
+    // ---- Network (http_proxy.h; applied at once: the next connection takes it)
+    {"proxy", "Proxy", "Network", CS_TEXT, CS_NATIVE, "",
+#ifdef _WIN32
+     "http://host:port (user:password@ allowed; WinHTTP takes no SOCKS). Empty = none (the HTTPS_PROXY / HTTP_PROXY / ALL_PROXY "
+     "environment variables, else the system proxy). Game connections never use it"
+#else
+     "http://host:port, https://host:port, socks5://host:port or socks5h://host:port (user:password@ allowed). Empty = none "
+     "(the HTTPS_PROXY / HTTP_PROXY / ALL_PROXY / NO_PROXY environment variables apply). Game connections never use it"
+#endif
+    },
+    {"proxyScope", "Proxy Scope", "Network", CS_SELECT, CS_NATIVE, "krunker",
+     "krunker.io only: the official lobby list. All client traffic: also the account service, server finder, news and downloads",
+     PROXY_SCOPES, COUNT(PROXY_SCOPES)},
+#endif
     // ---- Game (glorp "Auto Spectate", "Always Play HS Sound on Kill")
     {"autoSpec", "Auto Spectate", "Game", CS_SWITCH, CS_NATIVE | CS_WEB, "false", "Turn Spectate on when the game loads"},
     {"hsSound", "Always Play HS Sound on Kill", "Game", CS_SWITCH, CS_NATIVE | CS_WEB, "false", ""},
@@ -651,6 +674,33 @@ void client_settings_exit(void) {
 #endif
 }
 
+// ---------------------------------------------------------------- proxy (http_proxy.h)
+
+// The Proxy / Proxy Scope rows -> http_proxy_configure; a change re-asks krunker.io at once and
+// (scope all, before or after) reconnects the social socket through the new route. HTTP
+// requests pick it up on their next connection.
+static void apply_proxy(void) {
+#ifndef __EMSCRIPTEN__
+    static int applied;
+    static char last_url[256];
+    static HttpProxyScope last_scope;
+    char url[256], scope[16];
+    cs_string("proxy", url, sizeof(url));
+    cs_string("proxyScope", scope, sizeof(scope));
+    const HttpProxyScope sc = !strcmp(scope, "all") ? HTTP_PROXY_SCOPE_ALL : HTTP_PROXY_SCOPE_KRUNKER;
+    if (applied && !strcmp(url, last_url) && sc == last_scope) return;
+    const int was_all = applied && last_url[0] && last_scope == HTTP_PROXY_SCOPE_ALL;
+    http_proxy_configure(url, sc);
+    if (applied) {
+        krunker_lobbies_network_changed();
+        if (was_all || (url[0] && sc == HTTP_PROXY_SCOPE_ALL)) backend_social_reconnect();
+    }
+    applied = 1;
+    snprintf(last_url, sizeof(last_url), "%s", url);
+    last_scope = sc;
+#endif
+}
+
 // ---------------------------------------------------------------- startup
 
 #ifndef __EMSCRIPTEN__
@@ -709,6 +759,7 @@ void client_settings_startup(Client *client, int *offline) {
     char output[AUDIO_DEVICE_NAME_MAX];
     cs_string("audioOutput", output, sizeof(output));
     audio_set_output_device(output); // before audio_init: opened there (default when missing)
+    apply_proxy(); // before backend_startup's first request
     apply_priority();
     apply_raw_input();
     // KRUNKNATIVE_WINDOW_SIZE and the window F4 / a relaunch restored keep their size
@@ -946,7 +997,8 @@ static void append_row(StrBuf *sb, const ClientSetting *s) {
         case CS_TEXT:
             sb_appendf(sb, "<input type=\"text\" name=\"text\" id=\"knClient_%s\" class=\"inputGrey2\" placeholder=\"", s->key);
             append_attr_escaped(sb, !strcmp(s->key, "brainUrl") ? "https://coordinator.krunk.io"
-                                    : !strcmp(s->key, "finderUrl") ? "https://matchmaker.krunk.io/servers" : s->name);
+                                    : !strcmp(s->key, "finderUrl") ? "https://matchmaker.krunk.io/servers"
+                                    : !strcmp(s->key, "proxy") ? "http://host:port" : s->name);
             sb_append(sb, "\" value=\"");
             append_attr_escaped(sb, value);
             sb_appendf(sb, "\" onchange=\"knClientSet(&quot;%s&quot;, this.value)\">", s->key);
@@ -1058,6 +1110,7 @@ static void apply_setting(const ClientSetting *s) {
     else if (!strcmp(k, "resolution")) apply_resolution();
     else if (!strcmp(k, "autoSpec")) apply_auto_spectate();
     else if (!strcmp(k, "hsSound")) g_cs.hs_sound = cs_bool("hsSound");
+    else if (!strcmp(k, "proxy") || !strcmp(k, "proxyScope")) apply_proxy();
     else if (!strcmp(k, "audioOutput")) {
         char output[AUDIO_DEVICE_NAME_MAX];
         cs_string("audioOutput", output, sizeof(output));
@@ -1106,12 +1159,29 @@ const char *ui_client_settings_reload(void) {
 static void set_client_setting(const char *key, const char *value) {
     const ClientSetting *s = find_setting(key);
     if (!s || (s->flags & CS_GAME) || s->kind == CS_BUTTON) return;
+#ifndef __EMSCRIPTEN__
+    char trimmed[256];
+    if (!strcmp(key, "proxy")) { // trimmed; not a proxy URL: refused, the row shows the old value again
+        while (*value && isspace((unsigned char) *value)) value++;
+        snprintf(trimmed, sizeof(trimmed), "%s", value);
+        size_t len = strlen(trimmed);
+        while (len && isspace((unsigned char) trimmed[len - 1])) trimmed[--len] = 0;
+        HttpProxy px;
+        if (len && !http_proxy_parse(trimmed, &px)) {
+            menu_log("client setting proxy: not a proxy URL: %s", trimmed);
+            ui_notify("Proxy: not a proxy URL (http://host:port, https://host:port, socks5://host:port or socks5h://host:port)");
+            rerender();
+            return;
+        }
+        value = trimmed;
+    }
+#endif
     char before[256];
     setting_value(s, before, sizeof(before));
     store_put(s, value);
     char after[256];
     setting_value(s, after, sizeof(after));
-    menu_log("client setting %s=%s", key, after);
+    menu_log("client setting %s=%s", key, strcmp(key, "proxy") || !strchr(after, '@') ? after : "(with credentials)");
     apply_setting(s);
     // needsRestart: the v3.1.1 client alerts "App will now restart"; here the restart is offered
     if ((s->flags & CS_RESTART) && strcmp(before, after))

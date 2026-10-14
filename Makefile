@@ -480,6 +480,10 @@ reconnect-test: build ## Console reload + rejoin online + offline, F5 relaunch, 
 mm-token-e2e: build ## Matchmaker token (generate-token -> seek-game -> join ticket), Quickplay seek prefs, official krunker.io lobbies (stub), F4 / F5 (kn_brain + 2 server_bin + headless client; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I server/tests/mm_token_e2e.py $(DEBUG_DIR)
 
+.PHONY: client-proxy-e2e
+client-proxy-e2e: build ## Settings > Client > Proxy: krunker.io's lobby list through a stub HTTP CONNECT / SOCKS5 proxy, persisted, live change, HTTP_PROXY, the ACCESS DENIED message (headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I server/tests/client_proxy_e2e.py $(DEBUG_DIR)
+
 .PHONY: console-reload-test
 console-reload-test: build ## Dev console kept in the window (off-screen save, resize, F11, drag, console_reset) + the console's full reload in place and its restart fallback (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I server/tests/console_reload_e2e.py $(DEBUG_DIR)

@@ -11,22 +11,31 @@
 // mode, cs, oc, ds, pw, kr, timeLeft). Official lobbies speak Krunker's protocol, which this
 // client does not: joining one opens https://krunker.io/?game=<id> in the system browser.
 //
+// The Servers window lists them on every native client in their own KRUNKER.IO section after
+// ours, whatever Settings > Quickplay > Server Type says (that one only picks what Quick Match /
+// F4 seek into). krunker.io refuses some networks outright (a 403 "ACCESS DENIED" HTML page):
+// the section then says so and points at Settings > Client > Proxy (http_proxy.h), which by
+// default carries krunker.io's requests only.
+//
 // KRUNKNATIVE_KRUNKER_MATCHMAKER=<url> points it elsewhere (tests: a local stub; development:
-// a mirror), "off" disables it; KRUNKNATIVE_KRUNKER_URL is the site the join link opens.
+// a mirror), "off" disables it; KRUNKNATIVE_KRUNKER_URL is the site the join link opens. Headless
+// runs and --render-scenario never reach krunker.io unless the matchmaker URL is given explicitly.
 #include <cJSON.h>
 #include <stddef.h>
 
 #define KRUNKER_LOBBIES_CACHE_MS 20000.0 // >= 15 s between list requests
 #define KRUNKER_LOBBIES_TIMEOUT_MS 6000
 
-int krunker_lobbies_enabled(void);              // 0 on the web or with the matchmaker "off"
+int krunker_lobbies_enabled(void);              // 0 on the web, with the matchmaker "off", headless without one
 // Fetches the list when the cached one is older than the cache time (force: also within it,
 // still never more often than every 15 s). The callback-free answer re-renders the Servers
 // window (menu_rerender_if_open(2)) and runs a pending seek (krunker_lobbies_seek).
 void krunker_lobbies_refresh(int force);
 const cJSON *krunker_lobbies_list(void);        // tuples, most players first; NULL = none yet
 int krunker_lobbies_loading(void);
-const char *krunker_lobbies_error(void);        // "" = the last request answered
+const char *krunker_lobbies_error(void);        // "" = the last request answered; else a sentence for the player
+// The proxy setting changed (ui_client_settings.c): the next Servers window asks again at once.
+void krunker_lobbies_network_changed(void);
 double krunker_lobbies_players(void);           // totalPlayerCount of the last answer
 // Region code -> Krunker's place name (v10 _7517: "us-nj" -> "New York"); the code when unknown.
 const char *krunker_region_name(const char *code);

@@ -22,8 +22,9 @@ kn_proto.free_ports().
   client 3: Settings > General (advanced view) > Quickplay: the rows render; seek mode tdm set through setSetting persists
     (knSettings) and the next run's startup seek lands on the tdm node
   client 4: server type Official: F4 opens the matching official lobby in the browser (logged with
-    KRUNKNATIVE_NO_BROWSER), the Servers window shows the krunker.io section, a row opens its lobby;
-    the stub was asked once (cache)
+    KRUNKNATIVE_NO_BROWSER), the Servers window shows the krunker.io section after ours (the server
+    type only steers seeks), a row opens its lobby; the stub was asked once (cache)
+  (the proxy for krunker.io, its block page and the default server type: client_proxy_e2e.py)
   client 5: server type Both, a mode only krunker.io plays: F4 falls back to the official lobby
 
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL). Exit 77 when the database is unavailable.
@@ -365,7 +366,8 @@ def client_official(port):
     p, log = client("official", port, '0 play\n300 call setSetting "knSeekServers" "official"\n'
                     '400 call setSetting "seek_modes" "%d"\n500 call setSetting "seek_maps" "%d"\n'
                     "1000 down F4\n1050 up F4\n4000 call showWindow 2\n6000 text @status [id=kioStatus]\n"
-                    "6100 text @head .setHed\n6200 call setExpandedRegion 0\n6500 nodes @rows .kioTag\n"
+                    "6100 text @head .setHed\n6150 nodes @kgroups .quickJoin[title*=krunker]\n6200 call setExpandedRegion 1\n"
+                    "6500 nodes @rows .kioTag\n"
                     "6550 nodes @wired [onclick*=krunkerJoin]\n6600 call krunkerJoin \"NY:bbbbb\"\n7500 quit\n" % (MODES["b"], SANDSTORM))
     finish(p, 60)
     text = read_log(log)
@@ -375,8 +377,11 @@ def client_official(port):
     check("C4: ... and stays in its KrunkNative game (no new seek)", len(joined(text)) == 1, str(joined(text)))
     check("C4: the Servers window explains the krunker.io section", re.search(r"@status n=1 .*text=KRUNKER\.IO lobbies open in your browser", text),
           "")
-    check("C4: its first group is krunker.io - New York (filtered to tdm on Sandstorm)",
-          re.search(r"@head n=\d+ checked=\d value=\S* text=.*krunker\.io - New York", text), "")
+    m = re.search(r"@head n=\d+ checked=\d value=\S* text=(.*)", text)
+    check("C4: the server type only steers the seek: our (tdm) group is still listed, first",
+          m and m.group(1) and "krunker.io" not in m.group(1), m.group(1) if m else "")
+    m = re.search(r"nodes t=\d+ @kgroups elements=\d+ match=(\d+)", text)
+    check("C4: then one krunker.io group (New York: tdm on Sandstorm)", m and m.group(1) == "1", m.group(0) if m else "")
     m = re.search(r"nodes t=\d+ @rows elements=\d+ match=(\d+)", text)
     check("C4: its rows (the open and the full lobby)", m and m.group(1) == "2", m.group(0) if m else "")
     m = re.search(r"nodes t=\d+ @wired elements=\d+ match=(\d+)", text)

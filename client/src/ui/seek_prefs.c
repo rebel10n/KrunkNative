@@ -87,6 +87,23 @@ static void option(StrBuf *sb, const char *value, const char *label, const int s
     sb_append(sb, "</option>");
 }
 
+#ifndef __EMSCRIPTEN__
+// Server Type (native only: the web client never lists krunker.io lobbies): what Quick Match and
+// Find New Game (F4) seek into; the server browser lists both kinds whatever it says.
+static void server_type_html(StrBuf *sb) {
+    const SeekServers servers = seek_prefs_servers();
+    sb_append(sb, "<div class=\"settName\" title=\"What Quick Match and Find New Game (F4) look for. The server browser lists both; "
+                  "official krunker.io lobbies open in your browser\">Server Type "
+                  "<select id=\"knSeekServers\" onchange=\"window.setSetting(&quot;" SEEK_SERVERS_KEY "&quot;, this.value)\" class=\"inputGrey2\">");
+    option(sb, "kn", "KrunkNative", servers == SEEK_SERVERS_KN);
+    option(sb, "official", "Official (krunker.io)", servers == SEEK_SERVERS_OFFICIAL);
+    option(sb, "both", "Both", servers == SEEK_SERVERS_BOTH);
+    sb_append(sb, "</select></div>"
+                  "<div class=\"settName\" style=\"color:rgba(255,255,255,0.5);font-size:15px\">Quick Match and F4 seek into these. "
+                  "Official krunker.io lobbies open in your browser: this client cannot join them. Both prefers a KrunkNative server when one matches.</div>");
+}
+#endif
+
 static void section_html(StrBuf *sb) {
     char value[16];
     sb_append(sb, "<div class=\"setHed\" id=\"setHed_quickplay\" onclick=\"window.windows[0].collapseFolder(this)\">"
@@ -118,16 +135,7 @@ static void section_html(StrBuf *sb) {
     }
     sb_append(sb, "</select></div>");
 #ifndef __EMSCRIPTEN__
-    // Server Type (native only: the web client never lists krunker.io lobbies)
-    const SeekServers servers = seek_prefs_servers();
-    sb_append(sb, "<div class=\"settName\" title=\"Official krunker.io lobbies cannot be joined in this client: they open in your browser\">Server Type "
-                  "<select id=\"knSeekServers\" onchange=\"window.setSetting(&quot;" SEEK_SERVERS_KEY "&quot;, this.value)\" class=\"inputGrey2\">");
-    option(sb, "kn", "KrunkNative", servers == SEEK_SERVERS_KN);
-    option(sb, "official", "Official (krunker.io)", servers == SEEK_SERVERS_OFFICIAL);
-    option(sb, "both", "Both", servers == SEEK_SERVERS_BOTH);
-    sb_append(sb, "</select></div>"
-                  "<div class=\"settName\" style=\"color:rgba(255,255,255,0.5);font-size:15px\">Official krunker.io lobbies open in your browser: "
-                  "this client cannot join them. Both prefers a KrunkNative server when one matches.</div>");
+    server_type_html(sb);
 #endif
     sb_append(sb, "</div>");
 }
@@ -140,4 +148,38 @@ char *seek_prefs_extend_tab(const char *tab) {
     sb_append(&sb, tab);
     section_html(&sb);
     return sb_finish(&sb);
+}
+
+char *seek_prefs_extend_basic_tab(const char *tab) {
+#ifdef __EMSCRIPTEN__
+    (void) tab;
+    return NULL;
+#else
+#ifdef UI_SCENARIO_SUPPORTED
+    if (ui_scenario_active()) return NULL; // uidiff compares the tab with v10's (v10/settings-general)
+#endif
+    // v10's basic General tab: Localization, then Server Browser & Matchmaking (Legacy Browser,
+    // Default Region Only): the row goes last in that folder
+    const char *bod = tab ? strstr(tab, "id=\"setBod_serverb\"") : NULL;
+    if (!bod || strstr(tab, "id=\"knSeekServers\"")) return NULL;
+    const char *p = strchr(bod, '>');
+    int depth = 1; // inside the folder's <div>
+    while (p && depth > 0) {
+        const char *open = strstr(p + 1, "<div"), *close = strstr(p + 1, "</div>");
+        if (!close) return NULL;
+        if (open && open < close) {
+            depth++;
+            p = open;
+        } else {
+            depth--;
+            p = close;
+        }
+    }
+    if (!p) return NULL;
+    StrBuf sb = {0};
+    sb_append_n(&sb, tab, (size_t) (p - tab));
+    server_type_html(&sb);
+    sb_append(&sb, p); // the folder's own </div> onwards
+    return sb_finish(&sb);
+#endif
 }

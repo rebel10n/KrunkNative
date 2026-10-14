@@ -58,6 +58,8 @@ int backend_http_request(const char *method, const char *url, const char *json_b
 // worker, with its own connect / receive timeout, so it never queues behind (or delays) the
 // brain's requests. Same callback rules as backend_http_get.
 int backend_http_get_external(const char *url, int timeout_ms, BackendHttpFn fn, void *user);
+// Native: the social socket reconnects (same brain), e.g. through a changed proxy (http_proxy.h).
+void backend_social_reconnect(void);
 #endif
 
 // Main thread, once per frame: delivers HTTP completions and social frames.

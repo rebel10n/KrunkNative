@@ -2,6 +2,7 @@
 #ifndef __EMSCRIPTEN__
 #include <kn_http.h>
 #include <kn_update.h> // kn_update_resolve_url (redirects)
+#include <http_proxy.h> // the client's proxy setting / HTTPS_PROXY ... (per connection)
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -161,6 +162,9 @@ int kn_http_get(KnHttp *h, const char *url, KnHttpSink *sink, char *err, const s
     const DWORD flags = uc.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0;
     HINTERNET req = WinHttpOpenRequest(conn, L"GET", path[0] ? path : L"/", NULL, WINHTTP_NO_REFERER,
                                        WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
+    char host8[256];
+    if (req && WideCharToMultiByte(CP_UTF8, 0, host, -1, host8, sizeof(host8), NULL, NULL))
+        http_proxy_winhttp_apply(req, host8, uc.nScheme == INTERNET_SCHEME_HTTPS);
     int status = 0;
     wchar_t range[64] = L"";
     if (sink && sink->range_from > 0) swprintf(range, 64, L"Range: bytes=%lld-\r\n", (long long) sink->range_from);
@@ -250,7 +254,7 @@ int kn_http_get_pipelined(KnHttp *h, KnHttpReq *reqs, const size_t n, const int 
 struct KnHttp {
     HttpConn conn;
     int open;
-    char key[200]; // host:port:tls of the open connection
+    char key[200]; // host:port:tls:proxy generation of the open connection
     int timeout_ms;
     char buf[32768];
     size_t pos, len;
@@ -331,7 +335,8 @@ static int build_request(const HttpAddr *a, const char *url, const KnHttpSink *s
 // Opens the connection for a (or keeps the open one when it goes to the same place). 1 ok.
 static int ensure_open(KnHttp *h, const HttpAddr *a, char *err, const size_t errn) {
     char key[sizeof(h->key)];
-    snprintf(key, sizeof(key), "%s:%s:%d", a->host, a->port, a->tls);
+    // the proxy generation too: a connection opened before a proxy change is not reused
+    snprintf(key, sizeof(key), "%s:%s:%d:%u", a->host, a->port, a->tls, http_proxy_generation());
     if (h->open && strcmp(key, h->key) != 0) drop(h);
     if (h->open) return 1;
     STAT_ADD(g_stat_connects);
