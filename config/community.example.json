@@ -1,0 +1,30 @@
+{
+  "_comment": "kn_brain community feed (services/brain/community.c, doc/backend.md 'Community feed'). Copy to config/community.json (or set brain.community.feed); the brain rereads it when it changes. news: the What's New window and the hub's News tab; events / polls: the menu's Community & Events popup. Dates are UTC ISO 8601. Events past ended_at (else start_date + duration_hours) and polls past ends_at are not served.",
+  "news": [
+    {"text": "Krunker Box Office now plays Krunker v10.0.2: Ranked, Turf Wars and the new menu.", "url": "https://krunk.io/", "label": "Play now"},
+    "Server maintenance on Sunday at 10:00 UTC: games restart once."
+  ],
+  "events": [
+    {
+      "id": 1,
+      "player_name": "Krunker Box Office",
+      "title": "Community Night: Kanji 4v4",
+      "description": "Join the team for a night of custom 4v4 games on Kanji. Everyone is welcome.",
+      "banner_url": null,
+      "start_date": "2026-10-24T19:00:00Z",
+      "duration_hours": 3,
+      "ended_at": null,
+      "links": [{"label": "Join the Discord", "url": "https://discord.gg/krunker"}, {"label": "Play Kanji", "url": "/?play=Kanji"}],
+      "tags": ["Community", "Stream"]
+    }
+  ],
+  "polls": [
+    {
+      "id": 1,
+      "title": "Which map should join the ranked pool next?",
+      "description": "Vote for the community map you want to see in ranked next season.",
+      "ends_at": "2026-10-31T00:00:00Z",
+      "url": "https://discord.gg/krunker"
+    }
+  ]
+}

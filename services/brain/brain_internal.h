@@ -107,6 +107,10 @@ void turf_shutdown(Brain *b);
 /* internal WS "turf-kills" {mapId, records}: cb once (same callback shape as ranked_result) */
 void turf_record(Brain *b, const cJSON *frame, RankedResultCb cb, void *ud);
 
+/* ---- v10 community feed: /creators/events, /social/news (community.c) */
+int community_init(Brain *b);
+void community_shutdown(Brain *b);
+
 /* ---- public routes (public_routes.c) */
 int public_routes_init(Brain *b);
 

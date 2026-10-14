@@ -1,0 +1,39 @@
+{
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "account": {
+      "name": "Player",
+      "score": 250000,
+      "funds": 1200
+    },
+    "community": {
+      "news": [
+        "Krunker Box Office now plays Krunker v10.0.2. <a target=\"_blank\" href=\"https://krunk.io/\">Play now</a>",
+        "Server maintenance on Sunday at 10:00 UTC: games restart once."
+      ]
+    },
+    "window": 35,
+    "windowActions": [
+      [
+        "windows.34.viewAll"
+      ]
+    ]
+  },
+  "frames": 3,
+  "note": "ui/v10 What's New -> View All Updates (windows[34].viewAll): every update of the v1.x tab"
+}

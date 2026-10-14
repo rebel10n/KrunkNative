@@ -1,0 +1,41 @@
+ == KRUNKER BOX OFFICE ==
+ - Krunker Box Office's own changelog: the What's New window (showWindow(35)) and the Changelog link
+ - read by client/src/ui/v10_news.c, in Krunker's docs/versions.txt format: "== UPDATE x.y.z ==" starts an update,
+ - "* Name" a group, "- text" a change, "@url" an image; the first update is the current version
+
+ == UPDATE 1.2.0 ==
+ * Krunker v10.0.2
+ - The v10 menu: Guide, What's New, Community & Events, Ranked and Turf Wars
+ - v10 gameplay: Boulder and Compressor, posed hitboxes, new modes and ranked rules
+ - Ranked seasons with the v10 rank icons, clan Turf Wars with daily territory
+ * Economy
+ - Gifting, the market, quick sell, the Black Market and trading
+ * Gameplay
+ - Third person camera over the shoulder
+ - Tool Gun, Physics Gun and building tools in the Object Manager (F1)
+ - Voice chat built in, spectators heard
+ - Nuke for every player, with flash and shake on detonation
+ - Bots fill public lobbies until humans arrive
+ * Fixes
+ - Pointer lock: one owner for the cursor, keys back to the game
+ - Idle kick counts held keys, slow turns, shots and damage as activity
+ - Death cam no longer drifts into the void
+
+ == UPDATE 1.1.0 ==
+ * Krunker v7.1.4
+ - Classes, weapons and combat of v7.1.4: charge, hitboxes, streaks, effects and perks
+ - Seasons, the Battle Pass, badges, challenges and the level curve
+ - v7.1.4 ranked: competitive Hardpoint 4v4
+ - Prize wheels with 10x multi-spins, spin tickets and Spin History
+ - The map editor, KrunkScript and the model viewer
+ * Online
+ - Accounts with 2FA and email verification
+ - Dedicated servers in several regions, matchmaking and the server browser
+ - The web client, the launcher and client updates
+ * Offline
+ - Offline mode runs the real server in the client
+ - The Object Manager (F1): weapons, NPCs, entities and objects
+
+ == INITIAL RELEASE V1.0.0 ==
+ * Krunker Box Office
+ - A native C port of Krunker v3.1.1 with its own renderer, server and web build

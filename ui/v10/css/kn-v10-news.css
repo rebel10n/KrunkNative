@@ -1,0 +1,26 @@
+/* Krunker Box Office: the v10 What's New / Guide / Community popups (client/src/ui/v10_news.c adds
+   this sheet at run time). v10's own rules are its Svelte component sheets in css/svelte.css
+   (svelte-los391 guide, svelte-1ley7u4 community, svelte-1ult4vg news); this only fills in what
+   the native engine does not do. */
+
+/* .eventBanner is aspect-ratio: 1170 / 150 of the card's width, which the engine ignores: the
+   height that ratio gives in the 1200px popup (1176px wide cards) */
+.eventBanner.svelte-1ley7u4 {
+    height: 151px;
+}
+
+/* The popup has no set height, so v10's column flexbox (.communityWrapper height:100%) is of
+   indefinite height and Chrome sizes .communityScrollArea's flex: 1 (basis 0%) by its content;
+   the engine resolves that 0% basis to 0 and the scroll area collapses. Basis auto: the same
+   content height in both. */
+.communityScrollArea.svelte-1ley7u4 {
+    flex-basis: auto;
+}
+
+/* Guide sidebar. Its ::before / ::after (content: '', position: sticky, inline) are empty inline
+   boxes: Chrome gives their line no height, the engine a line-height tall one above the first
+   item. They draw nothing in Chrome, so none here. */
+.tutorialSidebar.svelte-los391::before,
+.tutorialSidebar.svelte-los391::after {
+    display: none;
+}

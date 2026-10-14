@@ -1,0 +1,32 @@
+{
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "ref": "doc/ref/krunker-v10/news/community.png",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "community": {
+      "events": [],
+      "polls": []
+    },
+    "windowActions": [
+      [
+        "openCommunityMenu"
+      ]
+    ]
+  },
+  "frames": 3,
+  "note": "ui/v10 Community & Events (#menuBtnSideCommunity: openCommunityMenu(), communityPopup), no events. Ref: the live v10 capture's community state (states/community.png) undimmed (/0.70: v10 had its login popup open over it); the login popup's area is not compared"
+}

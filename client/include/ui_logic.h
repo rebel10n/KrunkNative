@@ -536,8 +536,22 @@ int  object_manager_ui_props_uid(void);          // the object the Properties pa
 void object_manager_ui_pick_entry(int tab, int item); // an Objects / Entities / NPCs tile click without the window
 // END object_manager_ui block
 
+// BEGIN v10_news block (client/src/ui/v10_news.c): Krunker v10.0.2's What's New (windows[34]
+// Changelog over Krunker Box Office's kn-versions.txt, the menu's #updateAd), Guide (openGuide)
+// and Community & Events (openCommunityMenu, the brain's /creators/events and /social/news).
+char *v10_news_changelog_gen(void);              // windows[34].gen() (showWindow(35))
+void v10_news_toggle_log(HtmlElem obj);          // windows[34].toggleLog
+const char *v10_news_version(void);              // config.gameVersion: the changelog's newest update
+void v10_news_open_guide(const char *section);   // window.openGuide(section); NULL = "how-to-play"
+void v10_news_open_community(void);              // window.openCommunityMenu()
+void v10_news_setup(void);                       // the page is up: the v10 menu items' actions
+void v10_news_tick(void);                        // per frame: the What's New item
+int  v10_news_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 not ours
+void v10_news_scenario(const cJSON *community);  // --render-scenario state.community
+// END v10_news block
+
 // BEGIN ui_loadout block (client/src/ui/ui_loadout.c): Change Loadout + item pickers,
-// K.P.D popup, Changelog (Krunker v3.1.1 guest state).
+// K.P.D popup (Krunker v3.1.1 guest state).
 char *ui_loadout_generate(int id, const char **header); // windows 3/9/15/16/17/20/26/31/32/34/35/38/39; NULL other ids
 char *ui_loadout_gen(void);                      // windows[2].gen()
 void ui_loadout_select(const char *fn, int value); // selectHat/Back/Waist/Melee/Dye/Face/Attachment/Reticle/Spray
@@ -546,7 +560,6 @@ void ui_loadout_select_stat(int index);         // selectStat
 void ui_loadout_skin_selector(int weapon, int secondary); // skinSelector
 void ui_loadout_select_skin(int index, int weapon); // selectSkin
 void ui_loadout_action(int action);              // windows[2].action
-void ui_loadout_toggle_log(HtmlElem obj);        // windows[34].toggleLog
 void ui_loadout_tick(void);                      // the open picker's virtual card grid follows the scroll (ui_vgrid.h)
 int  ui_loadout_secondary(int class_index);     // selected secondary weapon id (secondaryInd, default 2), -1 = class has none
 int  ui_loadout_streak(int slot);                // streakIndex1..3 (data/streaks.js index for slot 0..2), -1 none

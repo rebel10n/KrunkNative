@@ -135,6 +135,7 @@ All keys are optional; env `KN_BRAIN_<KEY>` / CLI `--brain.<key>=` override.
 | `brain.matchmaking.require_version` | `false` | honour the client's `dataQuery.v` (lobbies with another `meta.v` are skipped) |
 | `brain.host_timeout_s` | `10` | how long a host-game request waits for a game server |
 | `brain.ranked.*`, `brain.turf.*` | see 6.5 | v10 ranked queue / profiles and Turf Wars (doc/v10/ranked-impl.md) |
+| `brain.community.feed` | `config/community.json` | the community feed file (6.6), relative to the config root; reread when it changes |
 
 ### gameserver / accounts
 
@@ -980,6 +981,36 @@ deviations and the tests are in `doc/v10/ranked-impl.md`. Summary:
   `window_growth` 10, `window_max` 1000, `cooldown_s` 1800, `poll_timeout_s` 30,
   `creating_timeout_s`, `match_timeout_s`, `start_grace_s` 60) and `brain.turf.*` (`enabled`,
   `kr_per_kill` 1, `day` -1 = the clock, `settle_check_ms` 60000).
+
+### 6.6 Community feed (`community.c`): events, polls, news
+
+The v10 menu's Community & Events popup and the What's New window read Krunker v10.0.2's gapi
+routes, in v10's shapes (client: `client/src/ui/v10_news.c`):
+
+| Route | Answer | v10 caller |
+| --- | --- | --- |
+| `GET /creators/events` | `{"data":{"events":[...],"polls":[...]}}`: event `id, player_id, player_name, title, description, banner_url, start_date, duration_hours, ended_at, links [{label, url}], tags`; poll `id, title, description, ends_in` (seconds) and `url` (KN: v10 builds `community.krunker.io/polls/<id>`) | `gapiClient.creators.getUpcomingEvents()` (Community & Events) |
+| `GET /social/news` | `{"data":{"news":["<html>", ...]}}` | `gapiClient.social.getNews()` (the hub's News tab; KN's What's New window shows the items too) |
+
+Sources, in this order:
+
+- The operators' feed file `brain.community.feed` (default `config/community.json`; format and an
+  example in `config/community.example.json`). It is read again whenever its modification time or
+  size changes, so editing it on a coordinator needs no restart (every coordinator reads its own
+  copy: deploy the same file to each). Dates are UTC ISO 8601. Events whose `ended_at` has passed,
+  or whose `start_date + duration_hours` has, and polls past `ends_at` or without a `url` are not
+  served; events come soonest first. A news entry is plain text or `{text, url, label}`: the brain
+  writes the HTML (escaped text, one `http(s)://` or site-relative link), so the file never puts
+  markup into the clients.
+- With a database: the published maps and mods staff featured (`map_featured` / `mod_featured`
+  > 0, the hub's Featured tab), newest first, at most 12, as events tagged `Featured Map` /
+  `Featured Mod` by their creator, with `Play` (`/?play=<name>`, maps) and `Details`
+  (`/social.html?p=map|mod&q=<name>`) links. `start_date` = `ended_at` = the last update, so the
+  card shows that date without v10's LIVE badge. Only `http(s)` images become `banner_url`.
+
+No file and no featured creation: empty lists (the popup's "No upcoming events"). Streams have no
+source yet (`/api/streams` is v3.1.1's empty placeholder): put them in the feed as events
+(`tags: ["Stream"]`, a Twitch link). Test: `server/tests/v10_news_e2e.py`.
 
 ## 7. Social WebSocket, accounts, profiles (svc-accounts)
 

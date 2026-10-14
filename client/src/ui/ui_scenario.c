@@ -244,6 +244,7 @@ static void warn_unknown_keys(void) {
         "dead", "killcard", "endscreen", "hit", "preview", "scrollbars", "page", "pageQuery", "pageActions",
         "clientChrome", "settingsView", "windowActions", "after_ms", "customMap", "pose", "spectate", "mapFile",
         "account", // WP-E part 2c: a stand-in logged-in account (account_ui_scenario)
+        "community", // v10 Community & Events / news without a brain (v10_news_scenario)
         "ranked",  // the Ranked window's state: {tab, info, profile, board, history, shop, status, searching}
         "turf",    // the Turf Wars window's state: {tab, status, clan, players, board}
         "update",  // the menu's Outdated / Update now box (update_ui_scenario)
@@ -616,7 +617,10 @@ static void apply_window_actions(Client *client) {
 
 static void apply_window(Client *client) {
     int id;
-    if (!scenario_window_id(st("window"), &id)) return;
+    if (!scenario_window_id(st("window"), &id)) {
+        apply_window_actions(client); // no window: the actions open a popup (openGuide, openCommunityMenu)
+        return;
+    }
     if (id == 1) {
         // windows[0].settingType: "basic" (v7's default) or "advanced" (state.settingsView)
         const char *view = st_str("settingsView");
@@ -849,6 +853,7 @@ static int ui_scenario_apply(Client *client) {
     account_ui_scenario(st("account")); // WP-E part 2c: a stand-in logged-in account (badges, challenges)
     ranked_ui_scenario(st("ranked"));   // the Ranked window (ranked_ui.c)
     turf_ui_scenario(st("turf"));       // the Turf Wars window (turf_ui.c)
+    v10_news_scenario(st("community")); // v10 events / polls / news (v10_news.c)
     update_ui_scenario(st("update"));   // the Outdated box without a network check
     if (menu_open) apply_window(client);
     account_ui_scenario_post(); // account.c2fa: v7.1.4's 2FA popup over the window

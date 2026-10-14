@@ -1412,6 +1412,7 @@ static void setup_dom(void) {
     // Krunker v10 keeps Host Game in its action cards (its chooser, window 42: v10_menu.c)
     if (!scenario_on() && !v10_menu_page()) set_display("menuBtnHost", "none");
     servers_ui_menu_setup(); // KrunkNative: the Connect button next to Invite / Join (servers_ui.c)
+    v10_news_setup(); // the v10 menu's Guide / What's New / Community & Events items (v10_news.c)
 
     HtmlElem el;
     if ((el = by_id("classPreviewCanvas"))) html_dom_observe_resize(el, on_observed_resize, NULL);
@@ -1531,6 +1532,7 @@ void client_menu_tick(Client *client) {
         if (menu_state_changed(client)) menu_apply_state(client);
         menu_update_ping(client);
         download_ui_tick(); // ?download opens the Download window (download_ui.c)
+        v10_news_tick();    // the v10 menu's What's New item (v10_news.c)
         ui_loadout_tick();  // item pickers: only the cards near the scroll position exist (ui_vgrid.h)
 
         // window.addEventListener('resize', scaleBase) fallback: poll the viewport too.

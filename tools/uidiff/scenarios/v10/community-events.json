@@ -1,0 +1,88 @@
+{
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "community": {
+      "events": [
+        {
+          "id": 1,
+          "player_name": "Krunker Box Office",
+          "title": "Community Night: Kanji 4v4",
+          "description": "Join the team for a night of custom 4v4 games on Kanji. Everyone is welcome.",
+          "banner_url": null,
+          "start_date": "2030-10-24T19:00:00.000Z",
+          "duration_hours": 3,
+          "ended_at": null,
+          "links": [
+            {
+              "label": "Join the Discord",
+              "url": "https://discord.gg/krunker"
+            },
+            {
+              "label": "Play Kanji",
+              "url": "/?play=Kanji"
+            }
+          ],
+          "tags": [
+            "Community",
+            "Stream"
+          ]
+        },
+        {
+          "id": 12,
+          "player_id": null,
+          "player_name": "Community",
+          "title": "Sky Arena",
+          "description": "A staff pick from the hub.",
+          "banner_url": null,
+          "start_date": "2026-10-11T08:30:00.000Z",
+          "duration_hours": null,
+          "ended_at": "2026-10-11T08:30:00.000Z",
+          "links": [
+            {
+              "label": "Play",
+              "url": "/?play=Sky%20Arena"
+            },
+            {
+              "label": "Details",
+              "url": "/social.html?p=map&q=Sky%20Arena"
+            }
+          ],
+          "tags": [
+            "Featured Map"
+          ]
+        }
+      ],
+      "polls": [
+        {
+          "id": 1,
+          "title": "Which map should join the ranked pool next?",
+          "description": "Vote for the community map you want to see in ranked next season.",
+          "ends_in": 162561,
+          "url": "https://discord.gg/krunker"
+        }
+      ]
+    },
+    "windowActions": [
+      [
+        "openCommunityMenu"
+      ]
+    ]
+  },
+  "frames": 3,
+  "note": "ui/v10 Community & Events with the brain's poll, a feed event and a featured map (/creators/events)"
+}

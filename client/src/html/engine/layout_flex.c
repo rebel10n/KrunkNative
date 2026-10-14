@@ -300,6 +300,14 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
         total_cross += mx + (l ? gap_cross : 0);
     }
     if (nl == 1 && cross_avail >= 0) { total_cross = cross_avail; lines[0].cross = cross_avail; }
+    else if (nl == 1 && row) {
+        /* single-line with an indefinite cross size: the line's cross size is clamped to the
+           container's min / max cross size (css-flexbox 9.4 step 8), so align-items centers /
+           ends / stretches inside a min-height like Chrome (v10's 45px .tutorialNavItem) */
+        float bh = total_cross + box_border_padding_h(b);
+        layout_apply_min_max_h(b, -1, &bh);
+        total_cross = lines[0].cross = kn_maxf(0, bh - box_border_padding_h(b));
+    }
     else if (cross_avail >= 0 && total_cross < cross_avail && nl > 1) {
         float extra = (cross_avail - total_cross) / (float)nl;   /* align-content: normal (stretch); gaps stay */
         for (int l = 0; l < nl; l++) lines[l].cross += extra;

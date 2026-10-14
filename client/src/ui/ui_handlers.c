@@ -392,7 +392,7 @@ H(h_select_stat) {
 H(h_skin_selector) { UNUSED; ui_loadout_skin_selector(arg_int(args, argc, 0, 0), arg_bool(ev, args, argc, 1, 0)); return 1; }
 H(h_select_skin) { UNUSED; ui_loadout_select_skin(arg_int(args, argc, 0, -1), arg_int(args, argc, 1, 0)); return 1; }
 H(h_loadout_action) { UNUSED; ui_loadout_action(arg_int(args, argc, 0, 0)); return 1; }
-H(h_toggle_log) { UNUSED; ui_loadout_toggle_log(arg_elem(ev, args, argc, 0)); return 1; }
+H(h_toggle_log) { UNUSED; v10_news_toggle_log(arg_elem(ev, args, argc, 0)); return 1; } // v10_news.c
 // toggleSpect(this.checked): `co`, read by enterGame (client/src/spectate.c)
 H(h_toggle_spect) {
     UNUSED;
@@ -439,11 +439,13 @@ H(h_close_wind) { UNUSED; menu_toggle_window(0); return 1; }
 H(h_show_games) { UNUSED; menu_show_window(10, 0); return 1; }
 // openDiscord(): window.open(config.discordInvite)
 H(h_open_discord) { UNUSED; ui_open_external("https://discord.gg/krunker"); return 1; }
-// openGuide(on): the "New to Krunker?" guide popup
+// openGuide(on): the "New to Krunker?" guide popup; v10's openGuide(section) is its tutorial
+// popup (the v10 page has no #guidePopupH; v10_news.c)
 H(h_open_guide) {
     UNUSED;
     HtmlElem el = html_dom_by_id("guidePopupH");
-    if (el) html_dom_set_display(el, arg_bool(ev, args, argc, 0, 0) ? "block" : "none");
+    if (!el) return v10_news_handle("openGuide", ev, args, argc);
+    html_dom_set_display(el, arg_bool(ev, args, argc, 0, 0) ? "block" : "none");
     return 1;
 }
 // setSpect(this.checked): #specBtn (v7 menu Spectate switch) = spectateEnabled
@@ -594,6 +596,7 @@ static const UiModuleHandler MODULE_HANDLERS[] = {
     clan_ui_handle,            // clan_ui.c: Clans (windows[12])
     ranked_ui_handle,          // ranked_ui.c: Ranked (windows[26])
     turf_ui_handle,            // turf_ui.c: v10 Turf Wars
+    v10_news_handle,           // v10_news.c: What's New (windows[34]), Guide, Community & Events
     ui_settings_handle,        // ui_settings.c: Game Settings (windows[0])
     ui_controls_handle,        // ui_controls.c: Change Controls (windows[6])
     ui_loadout_handle,         // ui_loadout.c: Change Loadout (windows[2]) and the pickers

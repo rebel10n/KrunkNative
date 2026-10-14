@@ -42,6 +42,7 @@ set(KN_BRAIN_SOURCES
     db_ranked.c
     db_turf.c                       # v10 Turf Wars (0206_turf_wars); rules shared/src/turf_wars.c
     turf.c
+    community.c                     # v10 Community & Events / news feed (/creators/events, /social/news)
     ../../shared/src/turf_wars.c
     # ks-6 (WP6): KrunkScript storage + map KR rewards; the value rules are the game server's
     db_storage.c

@@ -10,7 +10,7 @@
 //     32 reticle, 41 scope, 45 streaks) and their select*() handlers, which save and go back
 //     to window 3 (custClear: windows[n].clear())
 //   - shoPolicePop / hidePolicePop / resetPops / clearPops (K.P.D, "Officer Buddy")
-//   - windows[34] Changelog (docs/versions.txt: "Whats New" / every update) and its toggleLog
+//   (windows[34] Changelog / What's New: client/src/ui/v10_news.c)
 // Items come from KrunkNative's store table (client/src/viewer/viewer_store.h, the v3.1.1
 // skins until the v7 table lands): a guest owns none, a kn_brain account its acc.skins and
 // offline mode every skin. v7's new slots (head, back, shoes, pet, wrist, charm, player card)
@@ -1310,208 +1310,6 @@ static char *gen_sprays(void) {
     return sb_finish(&out);
 }
 
-// ---------------------------------------------------------------- windows[34] Changelog
-
-// Krunker splits docs/versions.txt with
-//   /^\s*== (?=.*?\bUPDATE|UPADTE|INITIAL|TRICKSHOT\b)(.*) ==/gm
-// into [prefix, title, body, title, body, ...]; every pair but the last is an update whose
-// version is the title's first /[\d\.]+/, grouped by its first digit (the tabs v1.x .. v7.x).
-static int is_word_char(const char c) { return isalnum((unsigned char) c) || c == '_'; }
-
-static int changelog_title(const char *line, const size_t len, const char **title, size_t *title_len) {
-    size_t i = 0;
-    while (i < len && isspace((unsigned char) line[i])) i++;
-    if (len - i < 3 || strncmp(line + i, "== ", 3)) return 0;
-    const char *t = line + i + 3;
-    const size_t tl = len - i - 3;
-    int ok = 0;
-    for (size_t k = 0; k + 6 <= tl && !ok; k++) { // .*?\bUPDATE
-        if (!strncmp(t + k, "UPDATE", 6) && (k == 0 || !is_word_char(t[k - 1]))) ok = 1;
-    }
-    if (!ok && tl >= 6 && !strncmp(t, "UPADTE", 6)) ok = 1;
-    if (!ok && tl >= 7 && !strncmp(t, "INITIAL", 7)) ok = 1;
-    if (!ok && tl >= 9 && !strncmp(t, "TRICKSHOT", 9) && (tl == 9 || !is_word_char(t[9]))) ok = 1;
-    if (!ok) return 0;
-    for (size_t k = tl; k >= 3; k--) { // (.*) == : greedy up to the last " ==" on the line
-        if (!strncmp(t + k - 3, " ==", 3)) {
-            *title = t;
-            *title_len = k - 3;
-            return 1;
-        }
-    }
-    return 0;
-}
-
-typedef struct {
-    char version[24];        // "7.1.4"
-    const char *body;        // the update's text up to the next title
-    size_t body_len;
-} LogEntry;
-
-#define GAME_VERSION "7.1.4" // config.gameVersion
-static char *g_log_text;
-static LogEntry *g_log;
-static int g_log_count;
-static int g_log_tab = -1;   // windows[34].tabIndex: the major version shown
-
-static void changelog_load(void) {
-    if (g_log_text) return;
-#ifdef __EMSCRIPTEN__
-    char *path = concat("/ui/windows/", "versions.txt");
-#else
-    const char *dir = getenv("KRUNKNATIVE_UI_DIR");
-    char *path = dir && *dir ? concat(dir, "/windows/versions.txt") : concat(ui_default_path(), "windows/versions.txt");
-#endif
-    unsigned char *data = NULL;
-    size_t length = 0;
-    const int ok = read_file(path, &data, &length) == 0;
-    free(path);
-    if (!ok) return;
-    g_log_text = (char *) data;
-    typedef struct { const char *title; size_t title_len; const char *start, *end; } Hdr;
-    Hdr *hdrs = NULL;
-    size_t count = 0, cap = 0;
-    const char *text = g_log_text, *tend = text + length;
-    for (const char *p = text; p < tend;) {
-        const char *nl = memchr(p, '\n', (size_t) (tend - p));
-        const char *le = nl ? nl : tend;
-        Hdr h;
-        if (changelog_title(p, (size_t) (le - p), &h.title, &h.title_len)) {
-            if (count == cap) {
-                cap = cap ? cap * 2 : 64;
-                Hdr *grown = realloc(hdrs, cap * sizeof(Hdr));
-                if (!grown) break;
-                hdrs = grown;
-            }
-            h.start = p;
-            h.end = h.title + h.title_len + 3;
-            hdrs[count++] = h;
-        }
-        p = nl ? nl + 1 : tend;
-    }
-    g_log = calloc(count ? count : 1, sizeof(LogEntry));
-    for (size_t i = 0; g_log && i + 1 < count; i++) {
-        const char *v = hdrs[i].title, *ve = v + hdrs[i].title_len;
-        while (v < ve && !(isdigit((unsigned char) *v) || *v == '.')) v++;
-        size_t k = 0;
-        LogEntry *e = &g_log[g_log_count];
-        while (v < ve && (isdigit((unsigned char) *v) || *v == '.') && k + 1 < sizeof(e->version)) e->version[k++] = *v++;
-        e->version[k] = 0;
-        if (!k) continue;
-        e->body = hdrs[i].end;
-        e->body_len = (size_t) (hdrs[i + 1].start - hdrs[i].end);
-        if (isdigit((unsigned char) e->version[0]) && e->version[0] - '0' > g_log_tab) g_log_tab = e->version[0] - '0';
-        g_log_count++;
-    }
-    free(hdrs);
-}
-
-// One trimmed line of an update body: [start, end)
-static int next_line(const char **p, const char *end, const char **a, const char **b) {
-    while (*p < end) {
-        const char *nl = memchr(*p, '\n', (size_t) (end - *p));
-        const char *le = nl ? nl : end;
-        *a = *p;
-        *b = le;
-        *p = nl ? nl + 1 : end;
-        while (*a < *b && isspace((unsigned char) **a)) (*a)++;
-        while (*b > *a && isspace((unsigned char) (*b)[-1])) (*b)--;
-        if (*b > *a) return 1;
-    }
-    return 0;
-}
-
-static char *gen_changelog(void) {
-    changelog_load();
-    StrBuf out = {0};
-    if (!g_log_text) {
-        sb_append(&out, "Loading...");
-        return sb_finish(&out);
-    }
-    char seen[32] = "";
-    html_storage_get("lastViewedUpdate", seen, sizeof(seen));
-    if (strcmp(seen, GAME_VERSION)) { // "Whats New in v7.1.4 ?"
-        sb_append(&out, "<div class='logVersionHed' style='background:url(img/backgrounds/whatsnew.png);'>Whats New in v" GAME_VERSION " ?</div>");
-        int open = 0;
-        for (int i = 0; i < g_log_count; i++) {
-            if (strcmp(g_log[i].version, GAME_VERSION)) continue;
-            const char *p = g_log[i].body, *end = p + g_log[i].body_len, *a, *b;
-            while (next_line(&p, end, &a, &b)) {
-                if (*a == '*') {
-                    if (open) sb_append(&out, "</div>");
-                    open = 1;
-                    sb_append(&out, "<div class='mapListCat'>");
-                    sb_append_n(&out, a + 1, (size_t) (b - a - 1));
-                    sb_append(&out, "</div><div class='setBodH' style='padding-top:20px;padding-bottom:20px;'>");
-                } else {
-                    const char *t = a + 1;
-                    if (t < b && *t == ' ') t++;
-                    if (*a == '@') {
-                        sb_append(&out, "<img class='logImg' src='");
-                        sb_append_n(&out, t, (size_t) (b - t));
-                        sb_append(&out, "'><div></div>");
-                    } else {
-                        sb_append(&out, "- <span style='color:rgba(255,255,255,0.6);'>");
-                        sb_append_n(&out, t, (size_t) (b - t));
-                        sb_append(&out, "</span><div></div>");
-                    }
-                }
-            }
-            break;
-        }
-        sb_append(&out, "</div><div class='viewAllUpdates' onclick='windows[34].viewAll()'>View All Updates</div>");
-        return sb_finish(&out);
-    }
-    // every update of the selected major version, newest first; the latest one opened
-    sb_append(&out, "<div style='margin-bottom:15px'><div style='height:20px;'></div><div class='bigMenTabs'>");
-    for (int major = 9; major >= 0; major--) {
-        int any = 0;
-        for (int i = 0; i < g_log_count && !any; i++) any = g_log[i].version[0] - '0' == major;
-        if (any) sb_appendf(&out, "<div class='bigMenTab%s' onclick='windows[34].switchTab(%d)'>v%d.x</div>", g_log_tab == major ? " bigMenTabA" : "", major, major);
-    }
-    sb_append(&out, "</div></div><div id='mailList'>");
-    const char *latest = NULL;
-    for (int i = 0; i < g_log_count && !latest; i++) if (g_log[i].version[0] - '0' == g_log_tab) latest = g_log[i].version;
-    for (int i = 0; i < g_log_count; i++) {
-        if (g_log[i].version[0] - '0' != g_log_tab) continue;
-        const int is_latest = latest && !strcmp(latest, g_log[i].version) && &g_log[i].version[0] == latest;
-        sb_appendf(&out, "<div class='mailObj' onclick='windows[34].toggleLog(this)'><i class='material-icons' style='vertical-align:middle;margin-top:-10px;font-size:50px;float:right;margin-right:10px;color:#fff'>%s</i><div class='mailFrom' style='color: #fbc02d;'>%s %s</div><div style='margin-top:10px;%s'>",
-                   is_latest ? "arrow_drop_up" : "arrow_drop_down", is_latest ? "LATEST UPDATE" : "UPDATE", g_log[i].version, is_latest ? "" : "display:none;");
-        // fixChanges: "*" and "@" lines dropped, "- " removed, one <li> per line
-        sb_append(&out, "<li class='changeText' style='color: rgba(255, 255, 255, 0.5);'>");
-        const char *p = g_log[i].body, *end = p + g_log[i].body_len, *a, *b;
-        int first = 1;
-        while (next_line(&p, end, &a, &b)) {
-            if (*a == '*' || *a == '@') continue;
-            if (!first) sb_append(&out, "</li><li class=\"changeText\" style=\"color: rgba(255, 255, 255, 0.5);\">");
-            first = 0;
-            const char *dash = b - a >= 2 ? strstr(a, "- ") : NULL;
-            if (dash && dash < b) {
-                sb_append_n(&out, a, (size_t) (dash - a));
-                sb_append_n(&out, dash + 2, (size_t) (b - dash - 2));
-            } else {
-                sb_append_n(&out, a, (size_t) (b - a));
-            }
-        }
-        sb_append(&out, "</li></div></div>");
-    }
-    sb_append(&out, "</div>");
-    return sb_finish(&out);
-}
-
-// windows[34].toggleLog(obj): children[2] shown / hidden, children[0] the arrow.
-void ui_loadout_toggle_log(const HtmlElem obj) {
-    if (!obj) return;
-    HtmlElem icon = html_dom_first_child(obj);
-    HtmlElem from = icon ? html_dom_next(icon) : 0;
-    HtmlElem body = from ? html_dom_next(from) : 0;
-    if (!icon || !body) return;
-    char disp[16] = "";
-    const int hidden = html_dom_get_style(body, "display", disp, sizeof(disp)) >= 0 && !strcmp(disp, "none");
-    html_dom_set_display(body, hidden ? "block" : "none");
-    html_dom_set_text(icon, hidden ? "arrow_drop_up" : "arrow_drop_down");
-}
-
 // ---------------------------------------------------------------- window table hook
 
 char *ui_loadout_generate(const int id, const char **header) {
@@ -1527,7 +1325,7 @@ char *ui_loadout_generate(const int id, const char **header) {
         case 31: return gen_attach();
         case 32: return gen_reticle();
         case 34: return gen_items_list("selectDye", 5);
-        case 35: return gen_changelog();
+        case 35: return v10_news_changelog_gen(); // v10_news.c
         case 38: return gen_items_list("selectWaist", 6);
         case 39: return gen_items_list("selectFace", 7);
         case 40: return gen_items_list("selectShoe", 8);
@@ -1978,16 +1776,6 @@ int ui_loadout_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
     if (!strcmp(name, "windows.31.newPop") || !strcmp(name, "windows.40.newPop")) { new_image_pop(name[8] == '3' ? 31 : 40); return 1; }
     if (!strcmp(name, "windows.31.addNew") || !strcmp(name, "windows.40.addNew")) { new_image_add(name[8] == '3' ? 31 : 40); return 1; }
     if (!strcmp(name, "searchItems")) { search_items(ev); return 1; }
-    if (!strcmp(name, "windows.34.switchTab")) {
-        g_log_tab = harg_int(args, argc, 0, g_log_tab);
-        menu_rerender_if_open(35);
-        return 1;
-    }
-    if (!strcmp(name, "windows.34.viewAll")) { // lastViewedUpdate = config.gameVersion; showWindow(35, true)
-        html_storage_set("lastViewedUpdate", GAME_VERSION);
-        menu_show_window(35, 1);
-        return 1;
-    }
     // windows[n].clear(): the Customize tab's custClear "x" (f1822 + select*(-1, true, true))
     if (!strncmp(name, "windows.", 8)) {
         const char *dot = strchr(name + 8, '.');

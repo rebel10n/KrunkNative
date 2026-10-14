@@ -1,0 +1,93 @@
+{
+  "scenario": "v10/guide",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "header",
+      "rect": [
+        122,
+        72,
+        1036,
+        48
+      ],
+      "kind": "text",
+      "note": "How to Krunker",
+      "max_pct": 3.0,
+      "fuzz": 12
+    },
+    {
+      "name": "sidebar",
+      "rect": [
+        122,
+        121,
+        200,
+        500
+      ],
+      "kind": "text",
+      "note": "the twelve sections, Basics active, four locked",
+      "fuzz": 12,
+      "max_pct": 3.0
+    },
+    {
+      "name": "intro",
+      "rect": [
+        328,
+        138,
+        822,
+        48
+      ],
+      "kind": "text",
+      "note": "the Basics headline (22px bold orange #ff9501 on dark): the engine's glyph coverage / gamma differs from Chrome's on this colour (no offset helps: 19.5% at 0,0, 22-24% at +-1px)",
+      "fuzz": 12,
+      "max_pct": 21.0
+    },
+    {
+      "name": "intro-text",
+      "rect": [
+        328,
+        188,
+        822,
+        26
+      ],
+      "kind": "text",
+      "note": "the first intro line (16px): the render sits 1px lower (sub-pixel line placement after the two-line headline)",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "ref_offset": [
+        0,
+        -1
+      ]
+    },
+    {
+      "name": "controls",
+      "rect": [
+        882,
+        318,
+        258,
+        212
+      ],
+      "kind": "text",
+      "note": "the controls list right of the login popup: the capture's video never loaded (a 300x150 box), the render shows its first frame at 16:9 as Chrome does with the video, so this moves",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true
+    },
+    {
+      "name": "footer",
+      "rect": [
+        328,
+        563,
+        822,
+        62
+      ],
+      "kind": "text",
+      "note": "Once a match ends ...: the capture's video never loaded (a 300x150 box), the render shows its first frame at 16:9 as Chrome does with the video, so this moves",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "skip": true
+    }
+  ]
+}

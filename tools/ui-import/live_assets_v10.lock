@@ -1,5 +1,6 @@
 # Krunker v10 (live client v10.0.2, 2026-10-13) content from the live asset hosts (tools/ui-import/fetch_live_assets.py).
 # root assets = new in v10 (not in v7.1.4); assets-v10 = v10 version of a v7.1.4 file with other content (assets/v10/<path>).
+# root ui = page images v10 loads from assets.krunker.io/img/ (ui/img/<path>: the guide popup's img/guide/*, client/src/ui/v10_news.c).
 # Installed by `make assets-import-live`; the store items of assets/skins.json index 6448+ are covered here (see v10_store_assets.js).
 # root	path	url	sha256	size
 assets	models/body/body_265.glb	https://assets.krunker.io/models/body/body_265.glb	e343d6da219de4bb18b04a11cb5f821a994ffe7b51ec6be22e54e9ab922fb71c	596344
@@ -2790,3 +2791,30 @@ assets-v10	textures/weapons/weapon_6_12.png	https://assets.krunker.io/textures/w
 assets-v10	textures/weapons/weapon_6_13.png	https://assets.krunker.io/textures/weapons/weapon_6_13.png	725f627447d671e5538a97323658e0efb9f83292044fc8fa93f6f3a161ce9fde	829112
 assets-v10	textures/weapons/weapon_8_6.png	https://assets.krunker.io/textures/weapons/weapon_8_6.png	907ab5237f0a32a472de38496f7d24ed3a23c398380e58534a9f27eb5bc26542	906386
 assets-v10	textures/weapons/weapon_8_7.png	https://assets.krunker.io/textures/weapons/weapon_8_7.png	f179d493f9066388a7045db733b90c22f019261d292613139078556814d64b59	710471
+ui	img/guide/challenge_mode_off.png	https://assets.krunker.io/img/guide/challenge_mode_off.png	92922698d460af4a3178e2bb98ccf645656c34b3dd888c65510ab1da4ccf7477	1568
+ui	img/guide/challenge_mode_on.png	https://assets.krunker.io/img/guide/challenge_mode_on.png	c973d49f554c2953b27a51ae484d98b35768f8a96913474dbd2146143365f5ce	1887
+ui	img/guide/challenge_mode.png	https://assets.krunker.io/img/guide/challenge_mode.png	11350cdd7566691385597a99e2c1a8a5870a8d9fe85eb174d22024a91f684485	8007
+ui	img/guide/clan_create.png	https://assets.krunker.io/img/guide/clan_create.png	42248cd538237d46c5c6d9b3354e3750c8e3b60397f3a65e5806dcf1da8959c8	4992
+ui	img/guide/clan_manage.png	https://assets.krunker.io/img/guide/clan_manage.png	dd8635fce3861559241a4280e727bd28d89002683ab584676856a2780b5986cd	34773
+ui	img/guide/clan_profile.png	https://assets.krunker.io/img/guide/clan_profile.png	689456a13c4ef93c14f8f06540ba3350ea2f91f98f7a58e3d8e33bc852f67d31	16986
+ui	img/guide/classes.png	https://assets.krunker.io/img/guide/classes.png	86e180e29dffe8fd62d96d0f7f633b7b4b65295a440ac483cdaa6e5c3a25343c	74339
+ui	img/guide/customize_click.png	https://assets.krunker.io/img/guide/customize_click.png	f6fd6be3a8af4ab5b0395da7b1c77a7afc4dd0af7c935eaeab13641dd60cb09e	29432
+ui	img/guide/customize.png	https://assets.krunker.io/img/guide/customize.png	bfb8359cc211960cf2d3809accdcd80d247aca5c6216da45f92dd0e612675f36	44877
+ui	img/guide/customize_result.png	https://assets.krunker.io/img/guide/customize_result.png	87cb0e9381315d8735f9ee91bd844b93bcf80a9d74c687be60b26850dc51df6d	27411
+ui	img/guide/host_find_game.png	https://assets.krunker.io/img/guide/host_find_game.png	8fe98bc01da713eeaf96f816276482b44923e4bb33c192f3cd77cc575aed3d8e	15966
+ui	img/guide/host_game_setup.png	https://assets.krunker.io/img/guide/host_game_setup.png	c2dd5659078d378cbff67ac595f924cb86046ffd4b5d5084c62b0c22eff62ddd	99788
+ui	img/guide/invite_friends.png	https://assets.krunker.io/img/guide/invite_friends.png	ae406e8f6ff18a8fa2c0bdff8d8e816beef189c5301e8e7e73ae05c7e2e8f046	12897
+ui	img/guide/invite_friends_url.png	https://assets.krunker.io/img/guide/invite_friends_url.png	8ec2084f680f9ff37b076485806505b211fec579eb44f5006d80f647b63c2100	2966
+ui	img/guide/loadout.png	https://assets.krunker.io/img/guide/loadout.png	2da6d23150d480bfc00ff6d13e79f1565e1dd3543f00fa2f646a70129fbbb8df	30170
+ui	img/guide/map_challenges.png	https://assets.krunker.io/img/guide/map_challenges.png	10d6b930517ba250bc5f3fa849cb127915b3bd5c78a2581340b7ad9c0d7935bd	202775
+ui	img/guide/market.png	https://assets.krunker.io/img/guide/market.png	08553415aaaaa40644c262241da28c13eabb479731155113e685fc77d0437685	247364
+ui	img/guide/quick_match.png	https://assets.krunker.io/img/guide/quick_match.png	06fed15d1f6bc7350871a9866ced430e7cc225e8844d0eadbbf5e993b083f94d	12156
+ui	img/guide/ranked_leaderboard.png	https://assets.krunker.io/img/guide/ranked_leaderboard.png	e71243b39e5e4724709b73a57565f2b0e461736bb43d2f8fa2cee4d00743beb7	17677
+ui	img/guide/ranked.png	https://assets.krunker.io/img/guide/ranked.png	0f39227839ef12ad15bc271e192d34457b10949c249e125b80b29beefab22c00	51719
+ui	img/guide/spin_reward.png	https://assets.krunker.io/img/guide/spin_reward.png	6f9d266ebb2a146df437f51a95a4ecd6ff69d6e9925680a0c7d7bc804fc9b4c8	96361
+ui	img/guide/spins.png	https://assets.krunker.io/img/guide/spins.png	7feff372569a27d15918351394fa95b28348ea391395e9356554eccd4361e809	98893
+ui	img/guide/streaks_equip.png	https://assets.krunker.io/img/guide/streaks_equip.png	3888af01339f2722a39368570c3d14c9d519d3acaaa85ba1bdd61663759d6b92	16375
+ui	img/guide/streaks_find.png	https://assets.krunker.io/img/guide/streaks_find.png	1a251b8a75951a28427c506d000e3c4c20b52c52c834f651b963361c4aa33e37	19857
+ui	img/guide/trading_ui.png	https://assets.krunker.io/img/guide/trading_ui.png	921c5d561bc037cbd18c4efaade24e84d9b3cf3dca286bba3be781e851589415	81180
+ui	img/guide/weapon_challenges.png	https://assets.krunker.io/img/guide/weapon_challenges.png	7d8dd4d9c7ea6685ecc315e6090cdcabbf27f2f46c818b47e5e2386b85109d13	82705
+ui	img/guide/weapons.png	https://assets.krunker.io/img/guide/weapons.png	86c240fb33720b112b509e0e0e48de372cda85418909b1b717b6fb0245714ae9	81095
