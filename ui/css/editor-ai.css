@@ -581,3 +581,23 @@
 	color: #0a0a0a;
 	border-color: #f2f2f2;
 }
+.knAiShot {
+	display: block;
+	max-width: 100%;
+	max-height: 180px;
+	margin: 0 8px 8px 8px;
+	border-radius: 6px;
+	border: 1px solid #222;
+}
+.knAiWarnNote {
+	background-color: #2a2412;
+	border: 1px solid #5c4d1c;
+	color: #ffe2a0;
+	border-radius: 6px;
+	padding: 6px 8px;
+}
+.knAiSwitch {
+	margin-left: 8px;
+	text-decoration: underline;
+	color: #ffe2a0;
+}

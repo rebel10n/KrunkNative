@@ -286,7 +286,9 @@ Prompts: `build_arena`, `review_map`, `fix_validation`.
 
 | file | role |
 |---|---|
-| `src/main.c` | options, allowed directories, path safety |
+| `src/main.c` | options, root detection |
+| `src/ctx.c` | allowed directories, path safety |
+| `core.cmake` | the tool core compiled into `client_bin`: the map editor's AI panel runs these tools in-process (`client/src/editor/editor_ai_tools.c`; live mode with `Live.loopback` instead of the bus socket) |
 | `src/mcp.c` `src/http.c` | protocol core (stdio), Streamable HTTP transport |
 | `src/project.c` `src/live.c` | projects, edit transactions, live editor bus client |
 | `src/doc.c` `src/schema.c` `src/jsonw.c` | document model, schema, JSON writer |

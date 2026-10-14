@@ -1,0 +1,10 @@
+# Web search for the map editor's AI (services/brain/ai_search.c): the DuckDuckGo MCP server, run by
+# kn_brain itself as a stdio child (no listener: only the brain reaches it, never a client), installed
+# here with uv into its own directory. Pinned versions; bump them here.
+kn_ai_search_enabled: true
+kn_ai_search_dir: /opt/krunknative-ai
+kn_ai_search_uv_version: "0.13.0"
+kn_ai_search_package: duckduckgo-mcp-server
+kn_ai_search_package_version: "0.7.0"
+# kn_brain's ai.search.command (the kn_brain role writes it into the release config)
+kn_ai_search_bin: "{{ kn_ai_search_dir }}/bin/duckduckgo-mcp-server"

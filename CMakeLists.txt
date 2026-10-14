@@ -180,6 +180,9 @@ if (EMSCRIPTEN)
     krunknative_add_opus()
     target_link_libraries(client PRIVATE opus) # voice chat: Opus decode of every clip (voice.c)
     target_compile_definitions(client PRIVATE KRUNKNATIVE_HAVE_OPUS=1)
+    # the map editor AI panel's tools (tools/editor-mcp, in-process: client/src/editor/editor_ai_tools.c)
+    include(tools/editor-mcp/core.cmake)
+    kn_editor_mcp_embed(client)
 
     # HTML UI on the web: the browser page is the UI. The C UI logic drives the page's
     # DOM through web_dom.c (html_dom.h) and ui/js/kn-shim.js; the engine itself is not
@@ -379,6 +382,12 @@ else ()
     target_compile_definitions(${CLIENT_BINARY} PRIVATE KRUNKNATIVE_HAVE_OPUS=1)
     krunknative_link_headless(${CLIENT_BINARY})
     target_include_directories(${CLIENT_BINARY} PRIVATE client/include)
+    # the map editor AI panel's tools (tools/editor-mcp, in-process: client/src/editor/editor_ai_tools.c);
+    # POSIX only like kn_editor_mcp (a Windows client offers the AI chat without the editor tools)
+    if (NOT WIN32)
+        include(tools/editor-mcp/core.cmake)
+        kn_editor_mcp_embed(${CLIENT_BINARY})
+    endif ()
     # Optional TLS for the backend client (client/src/net/backend_native.c: https:// auth service
     # and server finder, wss:// social socket). Without OpenSSL only http:// / ws:// work.
     find_package(OpenSSL COMPONENTS SSL Crypto QUIET)

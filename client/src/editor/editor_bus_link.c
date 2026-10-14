@@ -1895,6 +1895,69 @@ static void announce(void) {
     }
 }
 
+// ---------------------------------------------------------------------------
+// in-process requests (the AI panel's editor tools, editor_ai_tools.c)
+
+// The host ops a tool peer with every scope could send, answered by this editor directly (no
+// socket, no permission dialog: the AI panel asks for approval itself). Only this instance's
+// projects: editor processes joined over the bus are not reached from here.
+cJSON *ed_bus_local_request(const char *op, const cJSON *args, char *err, const size_t errn) {
+    char msg_buf[600];
+    const char *code = NULL, *e = NULL;
+    if (!op) op = "";
+    if (!strcmp(op, "ping") || !strcmp(op, "subscribe")) return cJSON_CreateObject();
+    if (!strcmp(op, "list")) {
+        cJSON *r = cJSON_CreateObject();
+        cJSON *list = cJSON_AddArrayToObject(r, "instances");
+        cJSON *self = cJSON_CreateObject();
+        cJSON_AddNumberToObject(self, "id", B.self_id ? B.self_id : 1);
+        cJSON_AddNumberToObject(self, "pid", (double) getpid());
+        cJSON_AddBoolToObject(self, "host", 1);
+        cJSON_AddItemToObject(self, "projects", local_projects());
+        cJSON_AddItemToArray(list, self);
+        cJSON_AddNumberToObject(r, "self", 0);
+        return r;
+    }
+    cJSON *r = NULL;
+    if (!strcmp(op, "open") || !strcmp(op, "new")) {
+        r = local_op(op, args, &code, &e, msg_buf, sizeof(msg_buf));
+    } else if (!strcmp(op, "call") || !strcmp(op, "close") || !strcmp(op, "focus")) {
+        r = local_op(op, args, &code, &e, msg_buf, sizeof(msg_buf));
+    } else if (!strcmp(op, "copy") || !strcmp(op, "paste")) {
+        cJSON *cargs = cJSON_CreateObject();
+        cJSON_AddStringToObject(cargs, "project", ed_json_str(args, "project", ""));
+        cJSON_AddStringToObject(cargs, "tool", !strcmp(op, "copy") ? "copy_objects" : "paste_objects");
+        cJSON *ta = args ? cJSON_Duplicate(args, 1) : cJSON_CreateObject();
+        cJSON_DeleteItemFromObjectCaseSensitive(ta, "project");
+        if (!strcmp(op, "paste")) {
+            if (!B.clip && !g_ed.copy) {
+                cJSON_Delete(ta);
+                cJSON_Delete(cargs);
+                snprintf(err, errn, "editor: the clipboard is empty (copy first) (bad_args)");
+                return NULL;
+            }
+            cJSON_DeleteItemFromObjectCaseSensitive(ta, "objects");
+            cJSON_AddItemToObject(ta, "objects", cJSON_Duplicate(B.clip ? B.clip : g_ed.copy, 1));
+        }
+        cJSON_AddItemToObject(cargs, "args", ta);
+        r = local_op("call", cargs, &code, &e, msg_buf, sizeof(msg_buf));
+        cJSON_Delete(cargs);
+        if (r && !strcmp(op, "copy")) {
+            cJSON *objs = cJSON_DetachItemFromObjectCaseSensitive(r, "objects");
+            cJSON_Delete(r);
+            r = cJSON_CreateObject();
+            cJSON_AddNumberToObject(r, "count", cJSON_GetArraySize(objs));
+            store_clip(objs ? objs : cJSON_CreateArray(), 0);
+        }
+    } else {
+        snprintf(msg_buf, sizeof(msg_buf), "unknown op \"%s\"", op);
+        code = "bad_args";
+        e = msg_buf;
+    }
+    if (!r) snprintf(err, errn, "editor: %s (%s)", e ? e : "request failed", code ? code : "error");
+    return r;
+}
+
 void ed_bus_poll(void) {
     web_poll();
     if (!B.want) return;

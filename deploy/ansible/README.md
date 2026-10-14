@@ -83,7 +83,15 @@ for k in KN_AI_UPSTREAM_URL KN_AI_UPSTREAM_KEY; do printf '%s' "${!k}" | gh secr
 
 Unset: the file is left as it is; without one the `/ai/*` routes answer 503 and the editor shows "AI
 unavailable". After a deploy `curl -s https://coordinator.krunk.io/ai/status` shows the upstream's health
-(the brain's known-prompt probe: `healthy`, or `degraded` when the provider drops request content).
+(the brain's known-prompt probe per model: `healthy`, or `degraded` when the provider drops request content;
+`health.models` lists each probed model's status, and the default moves to a model that answers).
+
+Web search for the editor AI (role `kn_ai_search`, `services/brain/ai_search.c`): the pinned
+`duckduckgo-mcp-server` (`kn_ai_search_package_version`), installed with a pinned `uv`
+(`kn_ai_search_uv_version`, pip-installed into its own venv) as a uv tool under `/opt/krunknative-ai`
+(root-owned). kn_brain runs it itself as a stdio child (`ai.search.command` in the release config): no
+port, no unit of its own, the kn-brain unit's sandbox, and an environment with none of the brain's
+secrets. `kn_ai_search_enabled: false` turns it off (the editor then offers no Web chip).
 `kn_brain_email_require_verified` (default `[]`, v7.1.4 parity) lists the social features that
 need a verified email.
 

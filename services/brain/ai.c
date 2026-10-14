@@ -49,7 +49,7 @@ static struct {
     AiApi api;
     char default_model[96];
     int max_tokens, timeout_ms, connect_timeout_ms, max_messages, max_rounds;
-    int models_ttl_s, health_interval_s;
+    int models_ttl_s, health_interval_s, health_probe_max;
     int lim_rpm, lim_daily, lim_concurrent;
     int64_t lim_daily_tokens;
     char ua[64];
@@ -268,19 +268,116 @@ static Up *up_start(const char *path, char *body, const int sse, const int timeo
     return u;
 }
 
-/* ------------------------------------------------------------------ health probe */
+/* ------------------------------------------------------------------ health probe (per model)
+ *
+ * A known prompt with a random token goes to a few models: the configured preferred default
+ * (ai.default_model) first, then the tool-capable ones, then the rest, at most
+ * ai.health_probe_max per cycle (start + every ai.health_interval_s), one at a time, until one
+ * echoes the token. Each probed model gets a status the picker shows:
+ *   ok           answered and echoed the token
+ *   degraded     answered without the token (the provider drops / rewrites request content)
+ *   unavailable  an error (HTTP 4xx/5xx or an error body: "Blocked for: ...")
+ * Chats that fail with a model error mark that model unavailable too (re-probed next cycle).
+ * The effective default model is the preferred one when it is ok, else the first ok model, else
+ * the first degraded one (tool-capable first); the service health is the effective default's. */
+
+enum { MH_UNKNOWN = 0, MH_OK, MH_DEGRADED, MH_UNAVAILABLE };
+
+typedef struct {
+    char id[96];
+    int state;
+    char reason[200];
+    int64_t checked_at;    /* wall ms */
+} ModelHealth;
 
 static struct {
-    int state;
+    ModelHealth m[128];
+    int n;
+    int state;             /* AI_HEALTH_* of the effective default */
     char reason[256];
     int64_t checked_at;
     int64_t latency_ms;
-    char model[96];
+    char model[96];        /* the effective default */
     char token[32];
+    char probing[96];      /* model of the probe in flight ("" none) */
     AiBuf raw;
     int running;
+    char queue[16][96];    /* this cycle's models still to probe */
+    int nqueue;
     kn_timer_id timer;
+    int cycles;
 } H;
+
+static const cJSON *models_list(void);
+static int model_row_known(const char *id);
+
+static ModelHealth *mh_get(const char *id, const int create) {
+    for (int i = 0; i < H.n; i++) {
+        if (!strcmp(H.m[i].id, id)) return &H.m[i];
+    }
+    if (!create || H.n >= (int) (sizeof(H.m) / sizeof(H.m[0]))) return NULL;
+    ModelHealth *m = &H.m[H.n++];
+    memset(m, 0, sizeof(*m));
+    copy_str(m->id, sizeof(m->id), id);
+    return m;
+}
+
+static const char *mh_name(const int s) {
+    return s == MH_OK ? "ok" : s == MH_DEGRADED ? "degraded" : s == MH_UNAVAILABLE ? "unavailable" : "unknown";
+}
+
+static void mh_set(const char *id, const int state, const char *reason) {
+    ModelHealth *m = mh_get(id, 1);
+    if (!m) return;
+    if (m->state != state) KN_INFO(MOD, "model %s: %s%s%s", id, mh_name(state), reason && reason[0] ? " (" : "", reason && reason[0] ? reason : "");
+    m->state = state;
+    copy_str(m->reason, sizeof(m->reason), reason);
+    m->checked_at = kn_wall_ms();
+}
+
+static int model_tools(const cJSON *row) { return kn_json_bool(row, "tools", 1); }
+
+/* the effective default: preferred if ok, else the first ok, else the preferred if degraded, else
+ * the first degraded (tool-capable models before the rest), else the preferred */
+static const char *effective_default(void) {
+    const ModelHealth *pref = mh_get(C.default_model, 0);
+    if (pref && pref->state == MH_OK) return C.default_model;
+    for (int want = MH_OK; want <= MH_DEGRADED; want++) {
+        if (want == MH_DEGRADED && pref && pref->state == MH_DEGRADED) return C.default_model;
+        for (int pass = 0; pass < 2; pass++) {
+            const cJSON *row;
+            cJSON_ArrayForEach(row, models_list()) {
+                if (pass == 0 && !model_tools(row)) continue;
+                if (pass == 1 && model_tools(row)) continue;
+                const ModelHealth *m = mh_get(kn_json_str(row, "id", ""), 0);
+                if (m && m->state == want) return m->id;
+            }
+        }
+    }
+    return C.default_model;
+}
+
+static void health_update(void) {
+    const char *def = effective_default();
+    const ModelHealth *m = mh_get(def, 0);
+    int state = AI_HEALTH_UNKNOWN;
+    char reason[256] = "";
+    if (m && m->state == MH_OK) state = AI_HEALTH_OK;
+    else if (m && m->state == MH_DEGRADED) {
+        state = AI_HEALTH_DEGRADED;
+        snprintf(reason, sizeof(reason), "the AI provider answers but does not pass our prompts through (known-prompt check failed)");
+    } else if (m && m->state == MH_UNAVAILABLE) {
+        state = AI_HEALTH_DOWN;
+        snprintf(reason, sizeof(reason), "no model answers (%.60s: %.150s)", m->id, m->reason);
+    }
+    if (state != H.state || strcmp(reason, H.reason) || strcmp(def, H.model)) {
+        if (state == AI_HEALTH_OK) KN_INFO(MOD, "upstream healthy (default model %s)", def);
+        else if (state != AI_HEALTH_UNKNOWN) KN_WARN(MOD, "upstream %s (default model %s): %s", state == AI_HEALTH_DEGRADED ? "degraded" : "down", def, reason);
+    }
+    H.state = state;
+    copy_str(H.reason, sizeof(H.reason), reason);
+    copy_str(H.model, sizeof(H.model), def);
+}
 
 int ai_health(void) { return ai_configured() ? H.state : AI_HEALTH_UNCONFIGURED; }
 const char *ai_health_reason(void) { return ai_configured() ? H.reason : "the AI service is not configured on this server"; }
@@ -303,17 +400,16 @@ cJSON *ai_health_json(void) {
     if (H.checked_at) cJSON_AddNumberToObject(o, "checked_at", (double) H.checked_at);
     if (H.checked_at) cJSON_AddNumberToObject(o, "latency_ms", (double) H.latency_ms);
     if (H.model[0]) cJSON_AddStringToObject(o, "model", H.model);
+    cJSON *models = cJSON_AddObjectToObject(o, "models");
+    for (int i = 0; i < H.n; i++) {
+        cJSON *m = cJSON_AddObjectToObject(models, H.m[i].id);
+        cJSON_AddStringToObject(m, "status", mh_name(H.m[i].state));
+        if (H.m[i].reason[0]) cJSON_AddStringToObject(m, "reason", H.m[i].reason);
+    }
     return o;
 }
 
-static void health_set(const int state, const char *reason) {
-    if (state != H.state || strcmp(reason, H.reason)) {
-        if (state == AI_HEALTH_OK) KN_INFO(MOD, "upstream healthy (%s, %lld ms)", H.model, (long long) H.latency_ms);
-        else KN_WARN(MOD, "upstream %s: %s", health_name(state), reason);
-    }
-    H.state = state;
-    copy_str(H.reason, sizeof(H.reason), reason);
-}
+static void probe_next(void);
 
 static void probe_chunk(Up *u, const char *data, const size_t n) {
     (void) u;
@@ -324,15 +420,16 @@ static void probe_done(Up *u) {
     H.running = 0;
     H.checked_at = kn_wall_ms();
     H.latency_ms = (int64_t) (kn_now_ms() - u->t0);
-    char reason[256];
+    char reason[200];
+    int state;
     if (!u->status) {
-        snprintf(reason, sizeof(reason), "the AI provider is unreachable (%.200s)", u->err);
-        health_set(AI_HEALTH_DOWN, reason);
+        snprintf(reason, sizeof(reason), "unreachable (%.150s)", u->err);
+        state = MH_UNAVAILABLE;
     } else if (u->status >= 400) {
-        char e[200];
+        char e[160];
         ai_error_text(H.raw.data, H.raw.len, e, sizeof(e));
-        snprintf(reason, sizeof(reason), "the AI provider answered HTTP %d: %s", u->status, e);
-        health_set(AI_HEALTH_DOWN, reason);
+        snprintf(reason, sizeof(reason), "HTTP %d: %s", u->status, e);
+        state = MH_UNAVAILABLE;
     } else {
         AiStream s;
         ai_stream_init(&s, NULL, NULL);
@@ -344,24 +441,29 @@ static void probe_done(Up *u) {
         }
         const int echoed = (s.text.data && strstr(s.text.data, H.token)) || (s.reasoning.data && strstr(s.reasoning.data, H.token));
         if (s.error[0]) {
-            snprintf(reason, sizeof(reason), "the AI provider reported an error: %.200s", s.error);
-            health_set(AI_HEALTH_DOWN, reason);
+            snprintf(reason, sizeof(reason), "%.190s", s.error);
+            state = MH_UNAVAILABLE;
         } else if (!echoed) {
-            health_set(AI_HEALTH_DEGRADED, "the AI provider answers but does not pass our prompts through (known-prompt check failed)");
+            snprintf(reason, sizeof(reason), "answers without passing the prompt through");
+            state = MH_DEGRADED;
         } else {
-            health_set(AI_HEALTH_OK, "");
+            reason[0] = 0;
+            state = MH_OK;
         }
         ai_stream_free(&s);
     }
+    mh_set(H.probing, state, reason);
     ai_buf_free(&H.raw);
     up_free(u);
+    if (state == MH_OK) H.nqueue = 0; /* one confirmed model is enough this cycle */
+    H.probing[0] = 0;
+    health_update();
+    probe_next();
 }
 
-static void probe_run(kn_loop *loop, void *ud) {
-    (void) loop; (void) ud;
-    if (H.running || !ai_configured()) return;
+static void probe_start(const char *model) {
     snprintf(H.token, sizeof(H.token), "KN-PROBE-%06u", (unsigned) ((kn_now_ms() * 2654435761u) ^ (uint64_t) rand()) % 1000000u);
-    copy_str(H.model, sizeof(H.model), C.default_model);
+    copy_str(H.probing, sizeof(H.probing), model);
     cJSON *msgs = cJSON_CreateArray();
     cJSON *m = cJSON_CreateObject();
     cJSON_AddStringToObject(m, "role", "user");
@@ -369,9 +471,64 @@ static void probe_run(kn_loop *loop, void *ud) {
     snprintf(prompt, sizeof(prompt), "Health check. Reply with exactly this token and nothing else: %s", H.token);
     cJSON_AddStringToObject(m, "content", prompt);
     cJSON_AddItemToArray(msgs, m);
-    char *body = ai_request_body(C.api, C.default_model, msgs, NULL, NULL, 0, 512);
+    char *body = ai_request_body(C.api, model, msgs, NULL, NULL, 0, 512);
     cJSON_Delete(msgs);
     H.running = up_start(ai_api_path(C.api), body, 0, 60000, probe_chunk, probe_done, NULL) != NULL;
+    if (!H.running) H.probing[0] = 0;
+}
+
+static void probe_next(void) {
+    if (H.running || !H.nqueue) return;
+    char model[96];
+    copy_str(model, sizeof(model), H.queue[0]);
+    memmove(H.queue[0], H.queue[1], sizeof(H.queue[0]) * (size_t) (H.nqueue - 1));
+    H.nqueue--;
+    probe_start(model);
+}
+
+static void queue_add(const char *id) {
+    if (!id || !id[0] || H.nqueue >= C.health_probe_max || H.nqueue >= 16) return;
+    for (int i = 0; i < H.nqueue; i++) {
+        if (!strcmp(H.queue[i], id)) return;
+    }
+    copy_str(H.queue[H.nqueue++], sizeof(H.queue[0]), id);
+}
+
+/* one cycle: the preferred default, then the tool-capable models, then the rest */
+static void probe_cycle(kn_loop *loop, void *ud) {
+    (void) loop; (void) ud;
+    if (H.running || !ai_configured()) return;
+    H.cycles++;
+    H.nqueue = 0;
+    if (!model_row_known(C.default_model) && models_list()) {
+        /* the preferred model is not offered at all */
+        mh_set(C.default_model, MH_UNAVAILABLE, "not in the provider's model list");
+    } else {
+        queue_add(C.default_model);
+    }
+    for (int pass = 0; pass < 2; pass++) {
+        const cJSON *row;
+        cJSON_ArrayForEach(row, models_list()) {
+            if ((pass == 0) != (model_tools(row) != 0)) continue;
+            queue_add(kn_json_str(row, "id", ""));
+        }
+    }
+    probe_next();
+}
+
+/* a chat's model error: the model is marked unavailable until a probe says otherwise */
+static void model_failed(const char *id, const char *reason) {
+    mh_set(id, MH_UNAVAILABLE, reason);
+    health_update();
+}
+
+static void model_answered(const char *id) {
+    ModelHealth *m = mh_get(id, 0);
+    if (m && m->state == MH_UNAVAILABLE) {
+        m->state = MH_UNKNOWN; /* it answers again; the next probe tells ok from degraded */
+        m->reason[0] = 0;
+        health_update();
+    }
 }
 
 /* ------------------------------------------------------------------ /ai/models */
@@ -393,6 +550,9 @@ static const cJSON *model_row(const char *id) {
     }
     return NULL;
 }
+
+static const cJSON *models_list(void) { return M.models; }
+static int model_row_known(const char *id) { return model_row(id) != NULL; }
 
 static cJSON *limits_json(void) {
     cJSON *o = cJSON_CreateObject();
@@ -434,8 +594,16 @@ static void models_reply(kn_http_req *req) {
     cJSON *o = cJSON_CreateObject();
     const int ok = M.models != NULL;
     cJSON_AddBoolToObject(o, "success", ok);
-    cJSON_AddItemToObject(o, "models", ok ? cJSON_Duplicate(M.models, 1) : cJSON_CreateArray());
-    cJSON_AddStringToObject(o, "default", C.default_model);
+    cJSON *rows = ok ? cJSON_Duplicate(M.models, 1) : cJSON_CreateArray();
+    cJSON *row;
+    cJSON_ArrayForEach(row, rows) { /* the probe / chat results: the picker marks unavailable models */
+        const ModelHealth *mh = mh_get(kn_json_str(row, "id", ""), 0);
+        cJSON_AddStringToObject(row, "status", mh_name(mh ? mh->state : MH_UNKNOWN));
+        if (mh && mh->reason[0]) cJSON_AddStringToObject(row, "status_reason", mh->reason);
+    }
+    cJSON_AddItemToObject(o, "models", rows);
+    cJSON_AddStringToObject(o, "default", effective_default());
+    cJSON_AddStringToObject(o, "preferred", C.default_model);
     if (!ok) {
         cJSON_AddStringToObject(o, "error", "AIUnavailable");
         cJSON_AddStringToObject(o, "message", M.error[0] ? M.error : "the model list is not available");
@@ -473,6 +641,7 @@ static void models_done(Up *u) {
             M.fetched_ms = (int64_t) kn_now_ms();
             M.error[0] = 0;
             KN_INFO(MOD, "%d models from the upstream", cJSON_GetArraySize(list));
+            if (!H.cycles) probe_cycle(g_b->loop, NULL); /* the first probes, now that the list is known */
         } else {
             copy_str(M.error, sizeof(M.error), "the AI provider's model list is not readable");
         }
@@ -538,7 +707,8 @@ static void h_status(kn_http_req *req, void *ud) {
     cJSON_AddBoolToObject(o, "configured", ai_configured());
     cJSON_AddItemToObject(o, "health", ai_health_json());
     cJSON_AddItemToObject(o, "limits", limits_json());
-    cJSON_AddStringToObject(o, "default", C.default_model);
+    cJSON_AddStringToObject(o, "default", effective_default());
+    cJSON_AddStringToObject(o, "preferred", C.default_model);
     cJSON_AddItemToObject(o, "server_tools", server_tool_names());
     reply_cors_json(req, 200, o);
     cJSON_Delete(o);
@@ -741,7 +911,7 @@ static void chat_end(Chat *c, const char *code, const char *message) {
         const cJSON *last = cJSON_GetArrayItem(c->appended, cJSON_GetArraySize(c->appended) - 1);
         if (last) cJSON_AddItemToObject(done, "message", cJSON_Duplicate(last, 1));
         int status = 200;
-        if (code) status = !strcmp(code, "UpstreamError") ? 502 : !strcmp(code, "Timeout") ? 504 : 500;
+        if (code) status = !strcmp(code, "UpstreamError") || !strcmp(code, "ModelUnavailable") ? 502 : !strcmp(code, "Timeout") ? 504 : 500;
         reply_cors_json(c->req, status, done);
     }
     cJSON_Delete(done);
@@ -878,7 +1048,6 @@ static void tool_done(void *ud, const int is_error, const char *result) {
     cJSON *m = cJSON_CreateObject();
     cJSON_AddStringToObject(m, "role", "tool");
     cJSON_AddStringToObject(m, "tool_call_id", t->id);
-    cJSON_AddStringToObject(m, "name", t->name);
     AiBuf content = {0};
     if (is_error) ai_buf_add(&content, "Error: ", 7);
     ai_buf_add(&content, text, strlen(text));
@@ -933,6 +1102,12 @@ static void chat_up_done(Up *u) {
     if (status >= 400) {
         char e[240], m[320];
         ai_error_text(c->raw.data, c->raw.len, e, sizeof(e));
+        if (status < 500 && status != 401 && status != 403 && status != 429) { /* the model's own refusal (not key, rate or server trouble) */
+            model_failed(c->model, e);
+            snprintf(m, sizeof(m), "This model is unavailable: %s", e[0] ? e : "the provider refused it");
+            chat_end(c, "ModelUnavailable", m);
+            return;
+        }
         snprintf(m, sizeof(m), "The AI provider answered HTTP %d: %s", status, e);
         chat_end(c, status == 429 ? "UpstreamBusy" : "UpstreamError", m);
         return;
@@ -948,10 +1123,12 @@ static void chat_up_done(Up *u) {
     }
     if (c->st.error[0]) {
         char m[600];
-        snprintf(m, sizeof(m), "The AI provider reported an error: %s", c->st.error);
-        chat_end(c, "UpstreamError", m);
+        model_failed(c->model, c->st.error);
+        snprintf(m, sizeof(m), "This model is unavailable: %s", c->st.error);
+        chat_end(c, "ModelUnavailable", m);
         return;
     }
+    model_answered(c->model);
     chat_round_done(c);
 }
 
@@ -1040,7 +1217,7 @@ static void chat_start(Chat *c) {
         }
     }
     const char *model = kn_json_str(body, "model", "");
-    if (!model[0]) model = C.default_model;
+    if (!model[0]) model = effective_default();
     if (!valid_model_id(model) || (M.models && !model_row(model))) {
         reply_error(c->req, 400, "UnknownModel", "unknown model: pick one from the list");
         chat_free(c);
@@ -1197,6 +1374,8 @@ static void config_load(const struct kn_config *cfg) {
     C.max_rounds = (int) kn_config_int(cfg, "ai.max_rounds", 8);
     C.models_ttl_s = (int) kn_config_int(cfg, "ai.models_ttl_s", 600);
     C.health_interval_s = (int) kn_config_int(cfg, "ai.health_interval_s", 900);
+    C.health_probe_max = (int) kn_config_int(cfg, "ai.health_probe_max", 6);
+    if (C.health_probe_max < 1) C.health_probe_max = 1;
     C.lim_rpm = (int) kn_config_int(cfg, "ai.limit.rpm", 60);
     if (C.lim_rpm > AI_RPM_CAP) C.lim_rpm = AI_RPM_CAP;
     C.lim_daily = (int) kn_config_int(cfg, "ai.limit.daily", 3000);
@@ -1207,6 +1386,17 @@ static void config_load(const struct kn_config *cfg) {
     const size_t nh = kn_config_str_list(cfg, "ai.models_hide", hide, 32);
     C.nhide = 0;
     for (size_t i = 0; i < nh && i < 32; i++) copy_str(C.hide[C.nhide++], sizeof(C.hide[0]), hide[i]);
+}
+
+static void probe_first(kn_loop *loop, void *ud) {
+    if (!H.cycles) probe_cycle(loop, ud);
+}
+
+/* every ai.health_interval_s: a fresh model list (new models, prices), then a probe cycle */
+static void health_tick(kn_loop *loop, void *ud) {
+    M.fetched_ms = 0;
+    models_fetch();
+    probe_cycle(loop, ud);
 }
 
 static void route2(Brain *b, const char *method, const char *path, kn_http_handler h) {
@@ -1240,9 +1430,11 @@ int ai_init(Brain *b) {
             ai_api_name(C.api), C.default_model, C.lim_rpm, C.lim_daily, (long long) C.lim_daily_tokens, C.lim_concurrent);
     srand((unsigned) (kn_wall_ms() ^ (int64_t) getpid()));
     H.state = AI_HEALTH_UNKNOWN;
-    kn_loop_add_timer(b->loop, 500, 0, probe_run, NULL);
+    copy_str(H.model, sizeof(H.model), C.default_model);
+    /* the first cycle starts when the model list arrives (models_done); without one, after 20 s */
+    kn_loop_add_timer(b->loop, 20000, 0, probe_first, NULL);
     if (C.health_interval_s > 0)
-        H.timer = kn_loop_add_timer(b->loop, (uint64_t) C.health_interval_s * 1000, (uint64_t) C.health_interval_s * 1000, probe_run, NULL);
+        H.timer = kn_loop_add_timer(b->loop, (uint64_t) C.health_interval_s * 1000, (uint64_t) C.health_interval_s * 1000, health_tick, NULL);
     models_fetch();
     return 0;
 }

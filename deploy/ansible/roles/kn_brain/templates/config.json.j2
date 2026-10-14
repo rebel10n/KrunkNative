@@ -13,5 +13,9 @@
     "moderators": {{ kn_brain_moderators | to_json }},
     "current_season": {{ kn_brain_current_season | int }},
     "email": { "require_verified": {{ kn_brain_email_require_verified | to_json }} }
+  },
+  "ai": {
+    "_comment": "The map editor's AI (services/brain/ai.h). The upstream URL + key: {{ kn_etc_dir }}/ai.env. Web search: role kn_ai_search.",
+    "search": { "command": {{ (kn_ai_search_command | default('')) | to_json }} }
   }
 }

@@ -42,6 +42,7 @@ from ai_stub import Upstream  # noqa: E402
 DRIVER = os.environ.get("KN_TEST_DB_DRIVER", "sqlite")
 SCHEMA = "kn_test_ai_%d" % os.getpid()
 KEY = "sk-stub-%d-SECRET" % os.getpid()
+ENV_PROBE = os.path.join(os.path.expanduser("~"), ".cache", "kn-ai-env-%d.json" % os.getpid())
 FAILS = []
 
 
@@ -272,6 +273,23 @@ def scenario(port, up, log_path):
         st, body, _ = http(port, "POST", "/ai/chat", dict(chat, messages=[{"role": "user", "content": "hello"}]), auth)
         ub = up.chat_requests()[-1]["body"]
         check("tools" not in ub, "web tools only when web_search is asked for")
+        probe = json.load(open(ENV_PROBE))
+        check(not [k for k in probe["env"] if k.startswith("KN_AI_") or k.startswith("KN_DATABASE") or k.startswith("KN_BRAIN")],
+              "the search child gets none of the brain's secrets (%s)" % probe["env"])
+        os.kill(probe["pid"], 9)
+        ok = False
+        for _ in range(60):  # restarted after a 2 s backoff
+            time.sleep(0.25)
+            try:
+                if json.load(open(ENV_PROBE))["pid"] != probe["pid"]:
+                    st, body, _ = http(port, "POST", "/ai/chat", dict(chat, web_search=True,
+                                       messages=[{"role": "user", "content": 'call tool web_search {"query":"again"}'}]), auth)
+                    ok = "Stub result for again" in body
+                    if ok:
+                        break
+            except (OSError, ValueError):
+                pass
+        check(ok, "the search child is restarted after it dies")
 
     # ---- degraded upstream (drops request content), then healthy again
     up.drop = True
@@ -282,6 +300,33 @@ def scenario(port, up, log_path):
     up.drop = False
     h = wait_health(port, "healthy", 10)
     check(h["state"] == "healthy", "health: healthy again")
+
+    # ---- a model the provider blocks: marked unavailable, the default moves on, a readable error
+    up.blocked.add("glm-5.3-flash")
+    h = None
+    for _ in range(100):
+        st, body, _ = http(port, "GET", "/ai/models")
+        m = json.loads(body)
+        rows = {r["id"]: r for r in m.get("models", [])}
+        if rows.get("glm-5.3-flash", {}).get("status") == "unavailable" and m.get("default") == "gpt-oss-20b":
+            h = m
+            break
+        time.sleep(0.1)
+    check(h is not None, "blocked model: status unavailable, default moves to gpt-oss-20b (%s)" % (m.get("default"), ))
+    if h:
+        glm = {r["id"]: r for r in h["models"]}["glm-5.3-flash"]
+        check("Blocked for: code interpreter abuse" in glm.get("status_reason", "") and h.get("preferred") == "glm-5.3-flash",
+              "the reason reaches the picker (%s)" % glm)
+        check({r["id"]: r for r in h["models"]}["gpt-oss-20b"].get("status") == "ok", "the new default is probe-confirmed")
+    st, body, _ = http(port, "POST", "/ai/chat", chat, auth)
+    r = stream_summary(sse_events(body))
+    check(r["errors"] and r["errors"][0]["error"]["code"] == "ModelUnavailable"
+          and r["errors"][0]["error"]["message"] == "This model is unavailable: Blocked for: code interpreter abuse",
+          "a chat with the blocked model: ModelUnavailable, readable (%s)" % r["errors"])
+    st, body, _ = http(port, "POST", "/ai/chat", dict(chat, model=""), auth)
+    r = stream_summary(sse_events(body))
+    check(r["text"] == "Hello from the stub: hello" and (r["done"] or {}).get("model") == "gpt-oss-20b", "no model given: the effective default answers")
+    up.blocked.clear()
 
     # ---- per-account rate limit (ai.limit.rpm = 12 in this test)
     codes = []
@@ -311,7 +356,8 @@ def main():
     try:
         subprocess.run([BRAIN, "--migrate-only"], cwd=ROOT, env=env, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         extra = ["--ai.health_interval_s=1", "--ai.limit.rpm=12", "--ai.models_hide=hidden-model", "--accounts.email.required=false",
-                 "--smtp.host=", "--ai.search.command=%s -I %s mcp" % (sys.executable, os.path.join(HERE, "ai_stub.py"))]
+                 "--smtp.host=", "--ai.search.command=%s -I %s mcp" % (sys.executable, os.path.join(HERE, "ai_stub.py")),
+                 "--ai.search.env=KN_STUB_ENV_FILE=" + ENV_PROBE]
         with open(log_path, "a") as log:
             proc = subprocess.Popen([BRAIN, "--brain.host=127.0.0.1", "--brain.port=0", "--brain.id=ai-%d" % os.getpid()] + extra,
                                     cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
@@ -330,6 +376,8 @@ def main():
                 proc.kill()
         up.stop()
         subprocess.run(scratch + ["drop", DRIVER, SCHEMA], capture_output=True)
+        if os.path.exists(ENV_PROBE):
+            os.unlink(ENV_PROBE)
     with open(log_path) as f:
         log = f.read()
     check(KEY not in log, "the upstream key never appears in the brain log")

@@ -135,6 +135,12 @@ static const ToolDef *find_tool(const char *name) {
     return NULL;
 }
 
+static cJSON *tools_list(void);
+
+cJSON *mcp_tools_json(void) { return tools_list(); }
+
+const ToolDef *mcp_tool_def(const char *name) { return name ? find_tool(name) : NULL; }
+
 static cJSON *tools_list(void) {
     cJSON *tools = cJSON_CreateArray();
     for (int t = 0; k_tables[t]; t++) {

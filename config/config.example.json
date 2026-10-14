@@ -199,7 +199,13 @@
     "models_hide": [],
     "max_tokens": 4096,
     "health_interval_s": 900,
-    "limit": {"rpm": 60, "daily": 3000, "daily_tokens": 20000000, "concurrent": 3}
+    "health_probe_max": 6,
+    "limit": {"rpm": 60, "daily": 3000, "daily_tokens": 20000000, "concurrent": 3},
+    "search": {
+      "_comment": "Web search: a DuckDuckGo MCP server the brain runs as a stdio child (services/brain/ai_search.c). Locally e.g. \"uvx duckduckgo-mcp-server==0.7.0\"; on kru the role kn_ai_search sets it. Empty = no web search.",
+      "command": "",
+      "timeout_ms": 45000
+    }
   },
   "gameserver": {
     "region": "local",

@@ -69,4 +69,8 @@ typedef struct AiServerTools {
 } AiServerTools;
 void ai_register_server_tools(const AiServerTools *t);
 
+/* ai_search.c: web search (a DuckDuckGo MCP server as a stdio child; ai.search.command) */
+int ai_search_init(Brain *b);
+void ai_search_shutdown(Brain *b);
+
 #endif

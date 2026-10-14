@@ -39,6 +39,10 @@ typedef struct {
     int peer;
     char last_error[256];
     double permission_timeout_s;
+    // In-process editor (client_bin's AI panel runs these tools itself: client/src/editor/
+    // editor_ai_tools.c): requests go straight to the editor's own handler, not over the bus
+    // socket; every scope is granted. NULL = the bus. Returns the op's result or NULL + err.
+    cJSON *(*loopback)(const char *op, const cJSON *args, char *err, size_t errsz);
 } Live;
 
 typedef struct Ctx {
@@ -58,7 +62,9 @@ typedef struct Ctx {
     int log_level;                        // MCP logging/setLevel
 } Ctx;
 
-// ---- paths / safety (main.c)
+// ---- paths / safety (ctx.c)
+// Adds an allowed map directory (resolved; duplicates ignored). 0 ok, -1 not a directory / full.
+int ctx_add_root(Ctx *ctx, const char *dir);
 // Resolves `path` (relative to the root) and checks it lies under an allowed directory.
 int ctx_safe_path(Ctx *ctx, const char *path, int for_write, char *out, size_t size, char *err, size_t errsz);
 // Allowed roots as a JSON array.

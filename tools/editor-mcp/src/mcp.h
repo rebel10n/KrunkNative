@@ -61,3 +61,7 @@ int mcp_run_http(Ctx *ctx, const char *listen, const char *announce_path);
 cJSON *mcp_handle(Ctx *ctx, const cJSON *msg);
 // Calls a tool directly (tests / --call). Returns the MCP result object.
 cJSON *mcp_call_tool(Ctx *ctx, const char *name, const cJSON *args);
+// The tools/list array ({name, title, description, inputSchema, annotations}) and one tool's
+// definition (NULL = unknown): the editor's AI panel offers them to its model.
+cJSON *mcp_tools_json(void);
+const ToolDef *mcp_tool_def(const char *name);

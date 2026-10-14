@@ -64,6 +64,7 @@ set(KN_BRAIN_SOURCES
     hot.c
     # editor-ai: the map editor's AI proxy (/ai/models, /ai/chat, health probe, server tools)
     ai.c
+    ai_search.c                     # web search: a DuckDuckGo MCP server as a stdio child
     ../../shared/src/ai_proto.c
 )
 
@@ -201,6 +202,10 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/ai_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_ai PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;ai")
+    # the same panel in the web client (headless Chromium on KN_WEB_DIST = a `make web` dist dir; else skips 77)
+    add_test(NAME brain_ai_web_e2e
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/ai_web_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_ai_web_e2e PROPERTIES TIMEOUT 480 SKIP_RETURN_CODE 77 LABELS "brain;db;ai;e2e;web")
     # email-verify: verification mails through a fake SMTP server, links, rate limits, gates, 2FA lock
     add_test(NAME brain_account_security
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/account_security_test.py

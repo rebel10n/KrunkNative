@@ -42,6 +42,7 @@ class Upstream:
         self.key = key
         self.requests = []
         self.drop = False
+        self.blocked = set()  # models answering HTTP 400 "Blocked for: code interpreter abuse"
         self.closed_early = threading.Event()
         self.lock = threading.Lock()
         stub = self
@@ -136,6 +137,9 @@ class Upstream:
     def answer(self, h, body):
         kind, a, b = self.plan(body)
         model = body.get("model", "glm-5.3-flash")
+        if model in self.blocked:
+            h._json(400, {"error": {"message": "Blocked for: code interpreter abuse", "type": "invalid_request_error"}})
+            return
         if kind == "fail":
             h._json(500, {"error": {"message": "stub failure"}})
             return
@@ -205,6 +209,11 @@ MCP_TOOLS = [
 
 
 def mcp_main():
+    import os
+    probe = os.environ.get("KN_STUB_ENV_FILE")
+    if probe:  # the test checks what the brain hands its child (no secrets) and restarts it by pid
+        with open(probe, "w") as f:
+            json.dump({"pid": os.getpid(), "env": sorted(os.environ)}, f)
     for line in sys.stdin:
         line = line.strip()
         if not line:

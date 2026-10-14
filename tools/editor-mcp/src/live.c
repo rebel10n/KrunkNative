@@ -26,7 +26,7 @@ static int bus_paths(Live *l, EdBusPaths *p) {
 }
 
 int live_bus_present(Live *l) {
-    if (l->connected) return 1;
+    if (l->connected || l->loopback) return 1;
     EdBusPaths p;
     if (!bus_paths(l, &p)) return 0;
     struct stat st;
@@ -138,6 +138,12 @@ int live_ensure(Ctx *ctx, const unsigned need, char *err, const size_t errsz) {
         snprintf(err, errsz, "live editor mode is off (--no-live)");
         return -1;
     }
+    if (l->loopback) { // in-process: always attached, every scope
+        l->connected = l->handshake_done = 1;
+        l->granted = EDBUS_SCOPE_ALL;
+        snprintf(l->decision, sizeof(l->decision), "embedded");
+        return 0;
+    }
     if (l->denied) {
         snprintf(err, errsz, "the editor denied access earlier (%s%s%s); call editor_connect {retry:true} to ask again", l->decision,
                  l->reason[0] ? ": " : "", l->reason);
@@ -171,6 +177,11 @@ cJSON *live_request(Ctx *ctx, const char *op, cJSON *args, const int timeout_ms,
         return NULL;
     }
     Live *l = &ctx->live;
+    if (l->loopback) {
+        cJSON *res = l->loopback(op, args, err, errsz);
+        cJSON_Delete(args);
+        return res;
+    }
     for (int attempt = 0; attempt < 2; attempt++) {
         const int id = l->next_id++;
         cJSON *req = edbus_req(id, op, attempt == 0 ? args : cJSON_Duplicate(args, 1));
@@ -229,7 +240,8 @@ cJSON *live_status_json(Ctx *ctx) {
     cJSON *o = cJSON_CreateObject();
     cJSON_AddStringToObject(o, "mode", l->mode == 0 ? "off" : l->mode == 1 ? "auto" : "required");
     cJSON_AddBoolToObject(o, "bus_present", l->mode ? live_bus_present(l) : 0);
-    cJSON_AddBoolToObject(o, "attached", l->connected && !l->conn.closed);
+    cJSON_AddBoolToObject(o, "attached", l->loopback || (l->connected && !l->conn.closed));
+    if (l->loopback) cJSON_AddBoolToObject(o, "embedded", 1);
     cJSON_AddItemToObject(o, "requested", edbus_scope_json(l->want_scopes));
     cJSON_AddItemToObject(o, "granted", edbus_scope_json(l->granted));
     if (l->decision[0]) cJSON_AddStringToObject(o, "decision", l->decision);

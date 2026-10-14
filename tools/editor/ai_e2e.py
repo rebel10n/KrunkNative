@@ -10,7 +10,12 @@ KRUNKNATIVE_EDITOR_SCRIPT):
 
 1. guest: the panel opens, lists the models, shows "Sign in to use AI", sends nothing;
 2. signed in (session restored from storage): a prompt streams a reply (text + thinking trace),
-   the usage and account lines fill in, the upstream sees the system prompt and the message.
+   the usage and account lines fill in, the upstream sees the system prompt and the message;
+3. the model asks for editor tools: objects_create runs in this editor against the open map,
+   map_save_as waits for approval and writes the map once allowed, web_search runs on the brain
+   (stub MCP), render_view shows the editor's render in the card (the model gets text);
+4. a second editor restores the conversation from the local history;
+5. the user's own endpoint (a second stub with its own key): called directly, never via the brain.
 Exit 77 when the database, python websockets or the binaries are missing.
 """
 import asyncio
@@ -166,6 +171,76 @@ def main():
               req["body"]["messages"][0]["role"] == "system" and req["body"]["messages"][-1] == {"role": "user", "content": "hello"},
               req["body"]["messages"])
         check("no token or key in the editor log", token not in log and KEY not in log, log[-500:])
+
+        # ---- 3. editor tools, approvals, web search, renders (the stub asks for the tools)
+        data = D("data")
+        saved = os.path.join(data, "krunknative", "editor-ai", "ai_saved.json")
+        create = json.dumps({"objects": [{"prefab": "CUBE", "p": [0, 0, 0], "s": [10, 10, 10]}, {"prefab": "CRATE", "p": [30, 0, 0]}]})
+        s = ["closewindow", "wait:2", "ai:open", "wait:1.5",
+             "ai:send:call tool objects_create " + create, "wait:4", "objdump:" + D("objs.txt"),
+             "ai:send:call tool map_save_as " + json.dumps({"path": saved, "overwrite": True}), "wait:3", "ai:dump:" + D("approval.json"),
+             "ai:approve:5:0:1", "wait:4",
+             "ai:send:call tool web_search " + json.dumps({"query": "krunker parkour"}), "wait:3",
+             "ai:send:call tool render_view " + json.dumps({"position": [0, 60, 120], "target": [0, 0, 0], "width": 160, "height": 90}),
+             "wait:5", "ai:tool:13:0", "ai:dump:" + D("tools.json")]
+        log = editor(port, cfg, s, "tools", {"XDG_DATA_HOME": data})
+        objs = read(D("objs.txt"))
+        check("objects_create ran in the editor: a cube and a crate", "CUBE" in objs and "CRATE" in objs, objs[:400])
+        ap = load(D("approval.json"))
+        conv = ap.get("conv", [])
+        call = conv[5] if len(conv) > 5 else {}
+        st = call.get("meta", {}).get("tools", {}).get("call_stub1", {}).get("status")
+        check("map_save_as waits for approval", st == "approval" and "Allow all this session" in ap.get("list_text", ""),
+              "%s / %s" % (st, ap.get("list_text", "")[-300:]))
+        t = load(D("tools.json"))
+        conv = t.get("conv", [])
+        roles = [m.get("role") for m in conv]
+        check("tool rounds: user / assistant(call) / tool / assistant x4", roles == ["user", "assistant", "tool", "assistant"] * 4, roles)
+        res0 = conv[2].get("content", "") if len(conv) > 2 else ""
+        check("objects_create result went back to the model", '"created"' in res0 and conv[3].get("content", "").startswith("Tool said:"), res0[:300])
+        check("approved map_save_as wrote the map", os.path.exists(saved), saved)
+        web = conv[10].get("content", "") if len(conv) > 10 else ""
+        check("web search ran on the brain (stub MCP)", "Stub result for krunker parkour" in web, web[:200])
+        rv = conv[13] if len(conv) > 13 else {}
+        imgs = rv.get("meta", {}).get("tools", {}).get("call_stub1", {}).get("images", [])
+        check("render_view: the editor's render shown in the card", len(imgs) == 1 and imgs[0].startswith("data:image/png;base64,"), str(imgs)[:200])
+        check("the model gets text, not the image", "image 1: image/png" in (conv[14].get("content", "") if len(conv) > 14 else ""),
+              conv[14] if len(conv) > 14 else conv)
+        req = [r for r in up.chat_requests() if "objects_create" in json.dumps(r["body"].get("tools", []))]
+        check("the editor's tools are offered to the model (54 minus editor_connect)", req and len(req[-1]["body"]["tools"]) >= 50,
+              len(req[-1]["body"]["tools"]) if req else 0)
+        hist = t.get("history", [])
+        check("the chat is in the local history", hist and hist[0].get("title", "").startswith("call tool objects_create"), [h.get("title") for h in hist])
+
+        # ---- 4. a new editor: the history restores the conversation
+        editor(port, cfg, ["closewindow", "wait:1", "ai:open", "wait:1", "ai:history:0", "ai:dump:" + D("restored.json")], "restored",
+               {"XDG_DATA_HOME": data})
+        rs = load(D("restored.json"))
+        check("history: the chat restores in a new editor", len(rs.get("conv", [])) == 16 and "Tool said:" in rs.get("list_text", ""),
+              len(rs.get("conv", [])))
+
+        # ---- 5. the user's own endpoint (the stub upstream directly, with its own key): never via the brain
+        own_key = "sk-own-%d" % os.getpid()
+        up2 = Upstream(own_key).start()
+        try:
+            n_brain = len(up.chat_requests())
+            editor(port, cfg, ["closewindow", "wait:1", "ai:open", "wait:1", "ai:endpoint:%s|%s|gpt-oss-20b" % (up2.url, own_key), "wait:1.5",
+                               "ai:pop:2", "ai:dump:" + D("own-settings.json"), "ai:pop:0", "ai:new", "ai:send:hello", "wait:3",
+                               "ai:dump:" + D("own.json"), "ai:endpoint:"], "own", {"XDG_DATA_HOME": data})
+            o = load(D("own.json"))
+            conv = o.get("conv", [])
+            check("own endpoint: the reply streams from it", o.get("custom") and conv and conv[-1].get("content") == "Hello from the stub: hello", conv)
+            reqs = up2.chat_requests()
+            hl = {k.lower(): v for k, v in (reqs[-1]["headers"] if reqs else {}).items()}
+            check("own endpoint: called directly with the user's key", reqs and hl.get("authorization") == "Bearer " + own_key
+                  and reqs[-1]["body"].get("model") == "gpt-oss-20b" and reqs[-1]["body"].get("tools"), hl.get("authorization"))
+            check("own endpoint: nothing went through the brain's upstream", len(up.chat_requests()) == n_brain)
+            st = load(D("own-settings.json"))
+            check("own endpoint: the settings warn about it", "stored on this computer only" in st.get("pop_text", ""), st.get("pop_text", "")[:300])
+            check("own endpoint: models listed from it", st.get("models", [])[:2] == ["glm-5.3-flash", "gpt-oss-20b"], st.get("models"))
+            check("own endpoint: the key never reaches the brain", own_key not in read(brain_log))
+        finally:
+            up2.stop()
         return 0
     finally:
         if brain:

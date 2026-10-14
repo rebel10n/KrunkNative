@@ -13,6 +13,8 @@
     # group_vars), then kn_brain, then the one-time SQLite -> PostgreSQL move of the coordinator.
     - { role: kn_postgres, tags: [postgres, brain] }
     - { role: kn_redis, tags: [redis, brain] }
+    # the editor AI's web search (DuckDuckGo MCP server, a stdio child of kn_brain; installed with uv)
+    - { role: kn_ai_search, tags: [ai_search, brain] }
     - { role: kn_brain, tags: [brain] }
     - { role: kn_db_cutover, tags: [cutover, brain] }
     - { role: kn_web, tags: [web] }

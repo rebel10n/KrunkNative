@@ -64,6 +64,7 @@ static const BrainModule k_brain_modules[] = {
     {"finder", finder_init, finder_shutdown},
     /* editor-ai: the map editor's AI proxy (ai.h; community role) */
     {"ai", ai_init, ai_shutdown},
+    {"ai-search", ai_search_init, ai_search_shutdown}, /* the AI's web search (ai_search.c) */
 };
 #define BRAIN_MODULE_COUNT (sizeof(k_brain_modules) / sizeof(k_brain_modules[0]))
 

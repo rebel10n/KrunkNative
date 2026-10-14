@@ -275,6 +275,8 @@ void ed_bus_notify_selection(EditorProject *p);
 void ed_bus_clipboard_set(const cJSON *objects);       // UI copy: share with the other windows
 void ed_bus_manage_access(void);                      // remembered MCP grants: list + revoke
 void ed_log_line(const char *line);                   // console ring for the bus "log" tool
+// In-process host op on this editor's projects (the AI panel's tools); NULL + err on failure
+cJSON *ed_bus_local_request(const char *op, const cJSON *args, char *err, size_t errn);
 
 // ---- editor.c
 void editor_set_transform_type(int type);

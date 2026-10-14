@@ -66,7 +66,7 @@ char *sb_take(Sb *sb) {
     return b;
 }
 
-void sb_free(Sb *sb) {
+void sb_dispose(Sb *sb) {
     free(sb->buf);
     memset(sb, 0, sizeof(*sb));
 }
@@ -141,7 +141,7 @@ char *file_read(const char *path, size_t *len) {
     const int err = ferror(f);
     fclose(f);
     if (err) {
-        sb_free(&sb);
+        sb_dispose(&sb);
         return NULL;
     }
     if (len) *len = sb.len;

@@ -168,7 +168,7 @@ int mcp_run_http(Ctx *ctx, const char *listen_addr, const char *announce_path) {
             while ((rc = serve_one(ctx, fd, &in)) == 0 && in.len) {}
             if (rc < 0) break;
         }
-        sb_free(&in);
+        sb_dispose(&in);
         close(fd);
     }
     close(lfd);

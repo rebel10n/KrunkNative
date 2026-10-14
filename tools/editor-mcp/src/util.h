@@ -15,7 +15,7 @@ void sb_puts(Sb *sb, const char *s);
 void sb_putn(Sb *sb, const char *s, size_t n);
 void sb_printf(Sb *sb, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 char *sb_take(Sb *sb); // malloc'd, "" when empty; NULL on OOM. Resets sb.
-void sb_free(Sb *sb);
+void sb_dispose(Sb *sb);
 
 char *base64_encode(const unsigned char *data, size_t len, size_t *out_len);
 unsigned char *base64_decode(const char *text, size_t *out_len); // NULL on bad input

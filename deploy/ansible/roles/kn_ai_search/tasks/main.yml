@@ -1,0 +1,95 @@
+# The editor AI's web search (defaults/main.yml): uv (pinned, pip-installed into its own venv), then the
+# pinned duckduckgo-mcp-server as a uv tool under {{ kn_ai_search_dir }} (root-owned, read-only for
+# kn). kn_brain starts it as a child with the kn-brain unit's hardening and none of its secrets
+# (ai_search.c builds the child's environment); kn_ai_search_command tells the kn_brain role.
+- name: Editor AI web search
+  when: kn_ai_search_enabled | bool
+  block:
+    - name: Python for uv and the MCP server
+      ansible.builtin.apt:
+        name: [python3, python3-venv]
+        state: present
+        install_recommends: false
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install directory
+      ansible.builtin.file:
+        path: "{{ kn_ai_search_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: uv {{ kn_ai_search_uv_version }} (own venv)
+      ansible.builtin.pip:
+        name: "uv=={{ kn_ai_search_uv_version }}"
+        virtualenv: "{{ kn_ai_search_dir }}/uv-venv"
+        virtualenv_command: python3 -m venv
+      ignore_errors: "{{ ansible_check_mode }}"
+
+    - name: Installed MCP server version
+      ansible.builtin.slurp:
+        src: "{{ kn_ai_search_dir }}/installed-version"
+      register: kn_ai_search_installed
+      failed_when: false
+      check_mode: false
+
+    - name: "{{ kn_ai_search_package }}=={{ kn_ai_search_package_version }} (uv tool)"
+      ansible.builtin.command:
+        argv:
+          - "{{ kn_ai_search_dir }}/uv-venv/bin/uv"
+          - tool
+          - install
+          - --force
+          - --python-preference
+          - only-system
+          - "{{ kn_ai_search_package }}=={{ kn_ai_search_package_version }}"
+      environment:
+        UV_TOOL_DIR: "{{ kn_ai_search_dir }}/tools"
+        UV_TOOL_BIN_DIR: "{{ kn_ai_search_dir }}/bin"
+        UV_CACHE_DIR: "{{ kn_ai_search_dir }}/cache"
+        UV_NO_CONFIG: "1"
+      when: >-
+        (kn_ai_search_installed.content | default('') | b64decode | trim)
+        != (kn_ai_search_package ~ '==' ~ kn_ai_search_package_version)
+      register: kn_ai_search_install
+      notify: Restart kn_brain
+
+    - name: Record the installed version
+      ansible.builtin.copy:
+        dest: "{{ kn_ai_search_dir }}/installed-version"
+        content: "{{ kn_ai_search_package }}=={{ kn_ai_search_package_version }}\n"
+        owner: root
+        group: root
+        mode: "0644"
+      when: kn_ai_search_install is changed
+
+    - name: The tree is readable by kn (no writes)
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+        recurse: false
+      loop: ["{{ kn_ai_search_dir }}/tools", "{{ kn_ai_search_dir }}/bin"]
+      ignore_errors: "{{ ansible_check_mode }}"
+
+    - name: The server starts and lists its tools (stdio, no web request)
+      ansible.builtin.shell: |
+        set -eu
+        # stdin stays open a moment: at EOF the server may exit before it answers
+        { printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"deploy","version":"1"}}}' \
+            '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'; sleep 10; } \
+          | timeout 60 runuser -u {{ kn_user }} -- env -i PATH=/usr/bin:/bin HOME=/tmp {{ kn_ai_search_bin | quote }} 2>/dev/null \
+          | grep -Eq '"name": ?"search"'
+      changed_when: false
+      check_mode: false
+      when: not ansible_check_mode
+
+    - name: Tell kn_brain the command (ai.search.command)
+      ansible.builtin.set_fact:
+        kn_ai_search_command: "{{ kn_ai_search_bin }}"
