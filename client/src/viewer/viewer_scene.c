@@ -543,7 +543,7 @@ static void holder_translate_z(MeshTransform *holder, const float d) {
 //   src    store.types[assetType || type || 0] + (assetType || type ? id : weapon) + (mid ? "_" + mid : "")
 //   texSrc mid ? getReModel : melee ? (pat ? tex : "melee/melee_<id>[_<tex>]") : type ? (tex ? "<src>_<tex>" : null)
 //          : tex || "weapons/skins/weapon_<weapon>_<id>"
-static void item_keys(const ViewerSkin *n, char *model, const size_t model_n, char *texture, const size_t texture_n) {
+void viewer_item_keys(const ViewerSkin *n, char *model, const size_t model_n, char *texture, const size_t texture_n) {
     const int dir = n->asset_type ? n->asset_type : n->type;
     const char *types = g_viewer_types[dir >= 0 && dir < g_viewer_type_count ? dir : 0];
     if (n->mid >= 0) snprintf(model, model_n, "%s%d_%d", types, dir ? n->id : n->weapon, n->mid);
@@ -572,7 +572,7 @@ static void item_keys(const ViewerSkin *n, char *model, const size_t model_n, ch
 static void item_build(const ViewerSkin *n, MeshTransform *holder, const vec3 position, const float rot_y, const float scale,
                        const int glow_text, const int emissive) {
     char model[128], texture[192];
-    item_keys(n, model, sizeof(model), texture, sizeof(texture));
+    viewer_item_keys(n, model, sizeof(model), texture, sizeof(texture));
 
     if ((n->flags & VS_HAS_ANIM) && vs.model_count < VIEWER_MAX_ITEMS) {
         char rel[192];
@@ -946,7 +946,7 @@ void vscene_build_cosmetic(const int index) {
     } else {
         const float scale = (n->spn_scl ? n->spn_scl : i_scl ? i_scl : 1.0f) * 2.2f * (exp_scale > 0.0f ? exp_scale : 1.0f);
         char model[128], texture[192];
-        item_keys(n, model, sizeof(model), texture, sizeof(texture));
+        viewer_item_keys(n, model, sizeof(model), texture, sizeof(texture));
         if (!(n->flags & VS_HAS_ANIM)) holder_translate_z(holder, model_center_x(model) * scale); // centerZ
         const int glow = (n->flags & (VS_GLOW | VS_SAME_GLOW)) != 0;
         item_build(n, holder, (vec3) {0}, (n->type && n->type != ITEM_MELEE ? (float) M_PI : (float) M_PI / 2.0f) + x_rot, scale,

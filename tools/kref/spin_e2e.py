@@ -134,7 +134,7 @@ def main():
         cmd("ui showWindow(14)", 1)
         cmd("ui windows[13].switchTab(1)", 2)
         cmd("shot %s/7-wheels-tab.png" % OUT, 1)
-        cmd("ui prizeWheel(4)", 2)
+        cmd("ui prizeWheel(5)", 2)  # v10 store.wheels: 5 is Free KR (4 is Xmas Comm.)
         cmd("shot %s/8-freekr.png" % OUT, 1)
         cmd("clickid spinButton", 12)
         cmd("shot %s/9-freekr-won.png" % OUT, 1)
@@ -144,6 +144,9 @@ def main():
         check(len(hist) == 11 and sum(x["fds"] for x in hist) == 500, "brain: 10x Starter (500 KR) + the ticket's item: %d rows" % len(hist))
         log = open(clog, errors="replace").read()
         check(log.count("[store] unboxing") == 3, "client: three items shown (10x first, Next Item, the ticket's)")
+        shown = re.findall(r"\[store\] won item shown as (its 3D model|its preview image)", log)
+        check(len(shown) == 4 and shown.count("its 3D model") >= 2 and shown[-1] == "its 3D model",
+              "client: the won items and the Free KR coin drawn in #spinItemCanvas, the coin and the items' models in 3D (%r)" % shown)
         check("[store] wheel stopped" in log and "spinHistoryPopup/0 -> 1" in log, "client: the wheel stopped, Spin History opened")
         funds = asyncio.run(ws_call(port, [(["a", 1, [name, None, token], None], "a")]))[0][4][5]
         check(funds in (505, 510, 520, 1000), "Free KR wheel paid out (funds %r)" % funds)

@@ -80,6 +80,12 @@ function offlineFile(u, stubs) {
     const k = path.join(HOME, '.cache/kn-v10/live/api/skins.jspck');
     if (isFile(k)) return k;
   }
+  // the prize wheels and their item pools (v10.js:102764 GET <gapi>/data/spins, jspck): the live answer the
+  // client's wheel table is generated from (tools/ui-import/v10_spins.jspck)
+  if (stubs && stubs.includes('spins') && u.hostname === 'gapi.svc.krunker.io' && p === 'data/spins') {
+    const k = path.join(REPO, 'tools/ui-import/v10_spins.jspck');
+    if (isFile(k)) return k;
+  }
   // the other API reads the boot makes: a 404 is not JSON, so the page logs an error; empty answers instead
   if (stubs && stubs.includes('titles') && u.hostname === 'gapi.svc.krunker.io' && p === 'titles') return ['[]', '.json'];
   if (stubs && stubs.includes('streams') && u.hostname === 'api.krunker.io' && p === 'streams/top') return ['{"streams":[]}', '.json'];
@@ -221,6 +227,9 @@ const SCOPE_ANCHOR = '  var _69422 = null;\n  var _69423 = null;\n';
 // setter (v10:97327, v10:209878)
 const SCOPE_HOOK = '  window.__knScope = function () { return { sg: _69422, sp: _69423, cg: _67298, me: _69415, sock: _33978, ui: _57154,'
   + ' setAcc: function (a) { _67362 = a; },'
+  // the store's prize wheel (S6): v10's own account handler ("a", _70182: a signed-in account with addSkin /
+  // funds) and the spin reply (_72243(err, rands, itemIds, funds, usedTicket): the brain's spins.execute)
+  + ' login: function () { return _70182.apply(null, arguments); }, spinResult: function () { return _72243.apply(null, arguments); },'
   + ' notify: { store: _40196, push: _40197, dismiss: _40205 }, announce: { store: _33843, set: _70210 } }; };\n';
 let clientJs = null;
 function clientScript() {
@@ -508,6 +517,38 @@ scenario('notify-announcement', async (c) => {
   await c.eval(`(() => { window.__knScope().announce.set({ message: 'Double XP weekend is live! Play now.' }); return 1; })()`);
   await settle(c, 800);
 }, { dir: 'notify', stubs: NOTIFY_STUBS });
+// S6: the store's prize wheel won item (doc/ref/krunker-v10.0.2/customize with --out doc/ref/krunker-v10.0.2):
+// signed in through v10's own account handler (_70182, 5000 KR), prizeWheel(wheel, null, false, false,
+// true) and the brain's spins.execute reply handed to v10's _72243 at once; real time: the pointer turns
+// (~7 s), the reveal fills the wheel with the won slice, the item's camera flies 300 -> 30 and the item
+// bobs (sin(t) * 0.55 units, t += 0.0018 dt: its phase is whatever the capture lands on). The wheels
+// and item pools are gapi /data/spins (tools/ui-import/v10_spins.jspck), the skins the live mirror; the
+// item's model and textures come from the asset trees. Native: tools/uidiff/scenarios/v10/spin-item*.json.
+const SPIN_STUBS = ['skins', 'spins', 'titles', 'streams'];
+function spinLogin(funds) {
+  const tuple = new Array(56).fill(null);
+  Object.assign(tuple, { 0: 1, 1: 0, 2: 0, 3: 0, 4: 0, 5: funds, 6: 2600000, 7: null, 8: 0, 9: 0, 10: [], 11: 0, 12: 0, 13: 0, 14: 0,
+    15: {}, 16: 0, 19: 0, 21: 'Sidney', 37: 0, 38: [], 39: [], 47: 0, 55: [] });
+  return `(() => { closWind(); window.__knScope().login(null, 1, 'Sidney', ${JSON.stringify(tuple)}, null, {}); return 1; })()`;
+}
+function spinItem(name, wheel, rand, item) {
+  scenario(name, async (c) => {
+    await waitSandbox(c);
+    await c.eval(flatPage('#000000'));
+    await c.eval(spinLogin(5000));
+    await sleep(1500);
+    const r = await c.eval(`(() => { try { prizeWheel(${wheel}, null, false, false, true); window.__knScope().spinResult(null, ${rand}, ${item}, 4950, null); return 1; }
+      catch (e) { return String(e.stack); } })()`);
+    if (r !== 1) throw new Error(name + ': ' + r);
+    for (let i = 0; i < 120 && await c.eval('spinItem.style.display') !== 'block'; i++) await sleep(1000);
+    await sleep(4000); // the fly-in (camera x 300 -> 30 at 0.24 a frame) and the end animation
+    await settle(c, 600);
+  }, { dir: 'customize', stubs: SPIN_STUBS });
+}
+spinItem('spin-item', 0, 40, 7401);            // Starter, UV Master (Assault Rifle skin)
+spinItem('spin-item-legendary', 1, 97, 7947);  // Elite, Street Surge (Legendary Assault Rifle skin)
+spinItem('spin-item-melee', 2, 99.6, 7915);    // Heroic, Rosethorn (Contraband melee, pool roll 99.6)
+spinItem('spin-item-body', 2, 60, 7962);       // Heroic, Bow Tie (Epic body item)
 // ---------------------------------------------------------------- main
 
 const CLOSERS = new Set();

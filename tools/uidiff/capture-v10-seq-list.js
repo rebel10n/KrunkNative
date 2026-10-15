@@ -185,7 +185,7 @@ module.exports = function (seq, V) {
     unreachable: 'the Ranked popup\'s leaderboard needs a signed-in account and matchmaker / API answers; the offline sandbox is a guest and only reaches ranked-guest (doc/ref/krunker-v10.0.2/ranked-guest.png)',
   });
   seq('spin', {
-    unreachable: 'the store wheel spins on the server\'s spin reply for a signed-in account with KR; the sandbox has neither (the native spin scenarios inject the reply)',
+    unreachable: 'under virtual time the first screenshot after the reveal never returns (the spin renderer\'s own WebGL canvas, swiftshader: tried 2026-10-15, the capture sat idle 11 min at origin + 0). The won item\'s reveal is captured in real time instead: capture-v10.js spin-item* (signed in through v10\'s account handler, its own spin reply), native scenarios spin-item*.json',
   });
   seq('store-tooltip', {
     unreachable: 'the store\'s item list comes from the signed-in store API; the guest sandbox shows no store items to hover',

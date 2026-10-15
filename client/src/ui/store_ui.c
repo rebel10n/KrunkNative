@@ -11,9 +11,9 @@
 // Wheel data is src/data/store.js `wheels` and the TICKET items' spinWheel; skins / rarities come
 // from the client's generated store table (client/src/viewer/viewer_store.h). The wheel's 2D
 // canvas (rarity slices sized by the odds, the pointers, centre) and the confetti are drawn by
-// spin_wheel.c from the state the render loop port below keeps (index.js updateSpinUi). The
-// three.js item preview is not ported: the won item shows its preview PNG (UTILS.getPreview),
-// flying in and bobbing like the 3D model does.
+// spin_wheel.c from the state the render loop port below keeps (index.js updateSpinUi), and so is
+// the won item's three.js scene (spin_item_set, into a <canvas> in #spinItemCanvas), flying in and
+// bobbing.
 #include <backend.h>
 #include <backend_ui.h>
 #include <app_mode.h>
@@ -192,6 +192,13 @@ static struct {
     int has_item;               // a result is loaded
 } g_wheel = {.win_skin = -1, .win_rarity = -1};
 static SpinWheelDraw g_wheel_draw;
+
+// The wheel's clock in seconds: the HUD clock (a --render-scenario's virtual time, an input script's
+// fixed steps), else GLFW's
+static double store_now(void) {
+    const double ms = hud_ui_now_ms(NULL);
+    return ms > 0.0 ? ms / 1000.0 : glfwGetTime();
+}
 #define WHEEL_STEP (1.0 / 60.0)
 
 // UTILS.getPreview(skin, store): the preview on the asset host (assetsUrl), not next to the page
@@ -502,17 +509,27 @@ static const char *item_desc(const ViewerSkin *skin) {
     return weapon && weapon->name ? weapon->name : "";
 }
 
-// #spinItemCanvas: the item instead of the three.js scene, about the wheel's size (the 256 px
-// preview PNGs are cropped to the item), with the rarity's glow; the tick flies it in and bobs it
-static void show_item_image(const char *src, const int rarity, const int coin) {
-    StrBuf img = {0};
-    if (coin) // the Free KR art's coin, cut out round (v7 shows the krunkie_0 coin model)
-        sb_appendf(&img, "<div id='knSpinItemImg' style='width:34%%;height:34%%;margin:33%% auto 0;border-radius:50%%;background:url(%s) center / 165%% no-repeat;transform:scale(0)'></div>", src);
-    else
-        sb_appendf(&img, "<img id='knSpinItemImg' src='%s' onerror='this.onerror=null;this.src=\"./img/noimg.png\";' style='display:block;width:50%%;height:50%%;margin:25%% auto 0;transform:scale(0)'>", src);
-    char *html = sb_finish(&img);
-    set_html("spinItemCanvas", html);
-    free(html);
+// #spinItemCanvas: the won item's 3D scene (v10 appends its spin renderer's <canvas> here; the model
+// is built by spin_wheel.c spin_item_set and drawn into this canvas every frame, flying in and
+// bobbing, see store_ui_tick), with the rarity's glow. A dye (v10 dresses a preview Player in it) and
+// a model that fails to load show their preview PNG instead (the 256 px preview cropped to the item,
+// or the Free KR coin art), flown in and bobbed the same way.
+static void show_item_image(const int skin, const char *src, const int rarity, const int coin) {
+    const int three_d = coin ? spin_item_set_coin() : spin_item_set(skin);
+    printf("[store] won item shown as %s\n", three_d ? "its 3D model" : "its preview image");
+    if (three_d) {
+        // three.js's domElement: setSize keeps it at the holder's CSS size, display block
+        set_html("spinItemCanvas", "<canvas id='knSpinItemGl' style='display:block;width:100%;height:100%'></canvas>");
+    } else {
+        StrBuf img = {0};
+        if (coin) // the Free KR art's coin, cut out round
+            sb_appendf(&img, "<div id='knSpinItemImg' style='width:34%%;height:34%%;margin:33%% auto 0;border-radius:50%%;background:url(%s) center / 165%% no-repeat;transform:scale(0)'></div>", src);
+        else
+            sb_appendf(&img, "<img id='knSpinItemImg' src='%s' onerror='this.onerror=null;this.src=\"./img/noimg.png\";' style='display:block;width:50%%;height:50%%;margin:25%% auto 0;transform:scale(0)'>", src);
+        char *html = sb_finish(&img);
+        set_html("spinItemCanvas", html);
+        free(html);
+    }
     HtmlElem item_canvas = html_dom_by_id("spinItemCanvas");
     if (item_canvas && rarity >= 0 && rarity < g_viewer_rarity_count) {
         char filter[64];
@@ -545,7 +562,7 @@ static void load_next_item(void) {
     g_wheel.has_item = 1;
     char src[160];
     store_skin_preview(item, src, sizeof(src));
-    show_item_image(src, g_wheel.win_rarity, 0);
+    show_item_image(item, src, g_wheel.win_rarity, 0);
     printf("[store] unboxing %s (skin %d, %d owned)\n", skin ? skin->name : "?", item, owned);
 }
 
@@ -625,7 +642,7 @@ static void spin_response(const cJSON *frame) {
     g_wheel.pointers = n;
     g_wheel.item_count = n;
     g_wheel.next_item = 0;
-    g_wheel.step_time = glfwGetTime();
+    g_wheel.step_time = store_now();
     set_html("spinCost", "");
     load_next_item();
 }
@@ -660,8 +677,8 @@ static void spin_kr_response(const cJSON *frame) {
     g_wheel.rotation[0] = 0;
     g_wheel.speed[0] = 1;
     g_wheel.bob_time = 0;
-    g_wheel.step_time = glfwGetTime();
-    show_item_image("./img/shop/spins/4_0.png", g_wheel.win_rarity, 1);
+    g_wheel.step_time = store_now();
+    show_item_image(-1, "./img/shop/spins/4_0.png", g_wheel.win_rarity, 1);
 }
 
 // f1846: every pointer at its target
@@ -695,7 +712,7 @@ static void spin_finished(const int next) {
 
 // spinButton.onclick: ["spin", wheel, ticket, multi] or the Free KR wheel's ["fkr"]
 static void spin_button_click(void) {
-    g_spin_button_time = glfwGetTime();
+    g_spin_button_time = store_now();
     const AccountInfo *acc = account_get();
     if (!g_cur || !acc || g_spinning || !g_can_spin) return;
     if (g_spin_ticket < 0 && acc->funds < g_cur->price) {
@@ -1516,7 +1533,7 @@ int store_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
         return 0;
     }
     if (!strcmp(name, "knSpinUI")) { // spinUI.onclick: closes the wheel at any time
-        if (glfwGetTime() - g_spin_button_time < 0.05) return 1; // a button's click bubbling up
+        if (store_now() - g_spin_button_time < 0.05) return 1; // a button's click bubbling up
         menu_show_window(14, 0);
         toggle_menu_hider(1);
         spin_wheel_confetti_reset();
@@ -1525,17 +1542,17 @@ int store_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
         return 1;
     }
     if (!strcmp(name, "knSpinRespin")) { // spinAgainBtn: prizeWheel(i, skin, multi, true, true)
-        g_spin_button_time = glfwGetTime();
+        g_spin_button_time = store_now();
         if (g_can_respin) prize_wheel(g_spin_index, g_spin_ticket, g_multi, 1, 1);
         return 0;
     }
     if (!strcmp(name, "knSpinNext")) { // spinNextBtn: f1847(true)
-        g_spin_button_time = glfwGetTime();
+        g_spin_button_time = store_now();
         if (g_wheel.next_item < g_wheel.item_count) spin_finished(1);
         return 0;
     }
     if (!strcmp(name, "knSpinEquip")) { // spinEquipBtn: select the won item in its slot
-        g_spin_button_time = glfwGetTime();
+        g_spin_button_time = store_now();
         const ViewerSkin *skin = g_can_equip && g_wheel.win_skin >= 0 ? viewer_skin(g_wheel.win_skin) : NULL;
         if (!skin) return 0;
         // spinEquipBtn's slot table (v7.1.4: by item type)
@@ -1553,13 +1570,13 @@ int store_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
         return 0;
     }
     if (!strcmp(name, "knSpinRespinInfo")) { // spinInfoBtn
-        g_spin_button_time = glfwGetTime();
+        g_spin_button_time = store_now();
         if (g_can_respin && g_wheel.win_skin >= 0) open_item_sales(g_wheel.win_skin);
         return 0;
     }
     if (!strcmp(name, "spinHistoryPopup")) {
         html_ui_stop_propagation(); // f1822(window.event)
-        g_spin_button_time = glfwGetTime();
+        g_spin_button_time = store_now();
         history_popup(argc > 0 && args[0].kind == HTML_ARG_BOOL && args[0].num != 0);
         return 1;
     }
@@ -1586,7 +1603,8 @@ const SpinWheelDraw *store_ui_wheel_draw(void) { return &g_wheel_draw; }
 // (prizeWheel(i, null, multi, false, true) in capture-v7.js)
 void store_ui_scenario_wheel(const int index, const int multi) { prize_wheel(index, -1, multi, 0, 1); }
 
-// state.spinResult {rand, item} (numbers, or arrays for a multi-spin): the brain's spin reply,
+// state.spinResult {rand, item} (numbers, or arrays for a multi-spin): the brain's spin reply
+// ({rand, kr}: the Free KR wheel's io_skinKR with prize index kr),
 // then the spin itself skipped (every pointer at its target: the reveal runs on the next tick,
 // the item already flown in)
 // "live": true keeps the spin running from the first frame (pointers turn, the end animation and
@@ -1596,13 +1614,23 @@ void store_ui_scenario_result(const cJSON *result) {
     const cJSON *items = cJSON_GetObjectItem(result, "item");
     const int n = cJSON_IsArray(items) ? cJSON_GetArraySize(items) : 1;
     const int live = cJSON_IsTrue(cJSON_GetObjectItem(result, "live"));
+    const cJSON *kr = cJSON_GetObjectItem(result, "kr"); // the Free KR wheel: its prize's index (io_skinKR)
     cJSON *frame = cJSON_CreateArray();
-    cJSON_AddItemToArray(frame, cJSON_CreateString("spin"));
-    cJSON_AddItemToArray(frame, cJSON_CreateNull());
-    cJSON_AddItemToArray(frame, cJSON_Duplicate(cJSON_GetObjectItem(result, "rand"), 1));
-    cJSON_AddItemToArray(frame, cJSON_Duplicate(items, 1));
-    cJSON_AddItemToArray(frame, cJSON_CreateNumber(acc ? acc->funds - (g_cur ? g_cur->price * n : 0) : 0));
-    spin_response(frame);
+    if (cJSON_IsNumber(kr)) {
+        cJSON_AddItemToArray(frame, cJSON_CreateString("spinKR"));
+        cJSON_AddItemToArray(frame, cJSON_CreateNumber((double) time(NULL) * 1000.0)); // lastReward
+        cJSON_AddItemToArray(frame, cJSON_Duplicate(cJSON_GetObjectItem(result, "rand"), 1));
+        cJSON_AddItemToArray(frame, cJSON_CreateNumber(kr->valueint));
+        cJSON_AddItemToArray(frame, cJSON_CreateNumber(acc ? acc->funds + k_free_kr[kr->valueint >= 0 && kr->valueint < 4 ? kr->valueint : 0] : 0));
+        spin_kr_response(frame);
+    } else {
+        cJSON_AddItemToArray(frame, cJSON_CreateString("spin"));
+        cJSON_AddItemToArray(frame, cJSON_CreateNull());
+        cJSON_AddItemToArray(frame, cJSON_Duplicate(cJSON_GetObjectItem(result, "rand"), 1));
+        cJSON_AddItemToArray(frame, cJSON_Duplicate(items, 1));
+        cJSON_AddItemToArray(frame, cJSON_CreateNumber(acc ? acc->funds - (g_cur ? g_cur->price * n : 0) : 0));
+        spin_response(frame);
+    }
     cJSON_Delete(frame);
     if (live) return;
     for (int i = 0; i < g_wheel.pointers; i++) g_wheel.rotation[i] = g_wheel.target[i];
@@ -1674,12 +1702,13 @@ static void spin_hole(const int on, const float cx, const float cy, const float 
 // (handed to spin_wheel.c as g_wheel_draw) and the item + name card fly-in.
 void store_ui_tick(void) {
     if (g_eterno_music && (!menu_window_is_open() || menu_ui()->active_window != 14 || g_store_tab != 5)) eterno_music(0);
-    const double now = glfwGetTime();
+    const double now = store_now();
     double delta_ms = g_wheel.last_time > 0 ? (now - g_wheel.last_time) * 1000.0 : 0.0;
     g_wheel.last_time = now;
     if (delta_ms > 100) delta_ms = 100;
     store_ui_sub_tab_tick(delta_ms);
     g_wheel_draw.visible = 0;
+    g_wheel_draw.item_canvas = 0;
     HtmlElem ui = html_dom_by_id("spinUI");
     char disp[16] = "";
     if (!ui || html_dom_get_style(ui, "display", disp, sizeof(disp)) < 0 || strcmp(disp, "block")) {
@@ -1838,6 +1867,12 @@ void store_ui_tick(void) {
         if (fabs(30 - g_wheel.cam_x) <= 0.05) g_wheel.cam_x = 30;
     }
     g_wheel.bob_time += delta_ms * 0.0018;
+    // the 3D item: spin_wheel.c draws it into the page's canvas (camera at (cam_x, 10, 0), the bob)
+    d->item_canvas = html_dom_by_id("knSpinItemGl");
+    d->item_size = (float) item_w;
+    d->item_cam_x = (float) g_wheel.cam_x;
+    d->item_bob = (float) g_wheel.bob_time;
+    if (d->item_canvas) return;
     // the camera (fov 45, y 10) sees the item at distance |(cam_x, 10)|: apparent size ~ 1 / distance;
     // bob: position.y = sin(t) * 0.55 world units, 2 * 31.6 * tan(22.5 deg) = 26.2 units over the canvas
     HtmlElem img = html_dom_by_id("knSpinItemImg");

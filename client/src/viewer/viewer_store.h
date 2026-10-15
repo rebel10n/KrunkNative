@@ -191,3 +191,6 @@ void viewer_skin_preview_path(const ViewerSkin *skin, char *path, size_t n);
 void viewer_preview_export_name(const ViewerSkin *skin, char *buf, size_t n);
 // JS truthiness of skin.tex (a numeric 0 is falsy)
 int viewer_skin_tex_truthy(const ViewerSkin *skin);
+// A store item's model src and texSrc as RENDER.loadMesh gets them (viewer_scene.c: the showcase,
+// cosmetic pages and the spin wheel's item, spin_wheel.c); texture "" = the model's own.
+void viewer_item_keys(const ViewerSkin *n, char *model, size_t model_n, char *texture, size_t texture_n);

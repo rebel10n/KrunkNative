@@ -1,0 +1,56 @@
+{
+  "scenario": "spin-item-body",
+  "defaults": {
+    "fuzz": 12,
+    "max_pct": 3.0
+  },
+  "regions": [
+    {
+      "name": "wheel-ring",
+      "rect": [
+        462,
+        200,
+        356,
+        60
+      ],
+      "note": "the top of the wheel: the won slice filling it (end animation) and the #2b2b2b rim (the 3D item can reach over it on long models; the bob phase is the capture's)",
+      "max_pct": 12.0
+    },
+    {
+      "name": "name-card",
+      "rect": [
+        480,
+        432,
+        320,
+        92
+      ],
+      "kind": "text",
+      "mask": "ink",
+      "note": "#spinItemName: the won item's name, type and NEW, faded in (itemNameFocus 1) (the 3D item's bob phase and confetti reach into it)",
+      "max_pct": 5.5
+    },
+    {
+      "name": "item",
+      "rect": [
+        300,
+        190,
+        680,
+        340
+      ],
+      "max_pct": 15.0,
+      "fuzz": 20,
+      "note": "#spinItemCanvas: the 3D item (spin_wheel.c) with the rarity's drop-shadow glow; the bob (sin(t) * 0.55 units) is at the real-time capture's phase, so a loose bound"
+    },
+    {
+      "name": "buttons",
+      "rect": [
+        505,
+        598,
+        270,
+        40
+      ],
+      "note": "#spinUIBtns: respin price, info and Equip Item (v10's Material Icons 'refresh' glyph is drawn rotated the other way: ~4.6%, the icon font's version)",
+      "max_pct": 5.5
+    }
+  ]
+}
