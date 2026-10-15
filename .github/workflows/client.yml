@@ -114,6 +114,12 @@ jobs:
           tools/release/package-client.sh "linux-${{ matrix.arch }}-polyfilled" "$RUNNER_TEMP/bin/polyfilled" "out/linux-${{ matrix.arch }}-polyfilled" --channel "$CHANNEL"
           cat "$RUNNER_TEMP"/bin/*/build-info.txt
           ls -la out/*
+          # every git-tracked assets/ file ships (the launcher's content index leaves them out, so a
+          # tracked file missing here reaches no native player: titles.json, sounds/kn_*.mp3 did)
+          top="krunknative-client-linux-${{ matrix.arch }}"
+          missing="$(comm -23 <(git ls-files assets | grep -vx assets/README.md | sort) \
+            <(tar -tzf "out/linux-${{ matrix.arch }}/$top.tar.gz" | sed -n "s|^$top/||p" | grep '^assets/' | sort))"
+          [ -z "$missing" ] || { echo "::error title=Package::tracked assets missing from the package: $missing"; exit 1; }
 
       # Install each package the way users do, in old and new distros, and run --version (no
       # game content in CI, so no render: tools/release/test-client-linux.sh with a content dir
@@ -140,6 +146,20 @@ jobs:
           { echo "### Linux ${{ matrix.arch }} packages"; echo '```'; cat "$RUNNER_TEMP"/bin/*/build-info.txt compat-results.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           grep -v 'version=ok' compat-results.txt | sed 's/^/::error title=Distro compatibility::/' || true
           [ "$rc" = 0 ] && [ "$(grep -c 'version=ok' compat-results.txt)" = "$(wc -l < compat.txt)" ]
+
+      # The packaged launcher reaches the live updates server (dl.krunk.io) and reads its manifest:
+      # its own DNS lookup, TLS and redirects on this platform (tools/release/check-launcher.sh;
+      # 2026-10-13 "the box office updater fails to connect to the server"). An outage of kru must
+      # not hold back a release, so a failure is an error annotation, not a failed job.
+      - name: Launcher reaches the updates server
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          a="${{ matrix.arch }}"
+          tools/release/check-launcher.sh "out/linux-$a/krunknative-client-linux-$a.tar.gz" --old-url \
+            || { echo "::error title=Updates server::the linux-$a launcher could not read the updates manifest"; exit 1; }
+          tools/release/check-launcher.sh "out/linux-$a-polyfilled/krunknative-client-linux-$a-polyfilled.tar.gz" \
+            || { echo "::error title=Updates server::the linux-$a-polyfilled launcher could not read the updates manifest"; exit 1; }
 
       - uses: actions/upload-artifact@v7
         with:
@@ -213,6 +233,16 @@ jobs:
           t/krunknative-client-windows-amd64/client.exe --version
           t/krunknative-client-windows-amd64/client.exe --voice-info | grep '^opus=libopus ' # voice chat's codec
           t/krunknative-client-windows-amd64/server.exe --version
+
+      # The packaged launcher reaches the live updates server (dl.krunk.io) and reads its manifest:
+      # its own DNS lookup, TLS and redirects on this platform (tools/release/check-launcher.sh;
+      # 2026-10-13 "the box office updater fails to connect to the server"). An outage of kru must
+      # not hold back a release, so a failure is an error annotation, not a failed job.
+      - name: Launcher reaches the updates server
+        continue-on-error: true
+        run: |
+          tools/release/check-launcher.sh out/krunknative-client-windows-amd64.zip --old-url \
+            || { echo "::error title=Updates server::the Windows launcher (WinHTTP) could not read the updates manifest"; exit 1; }
 
       - uses: actions/upload-artifact@v7
         with:
@@ -290,6 +320,16 @@ jobs:
           (cd / && "$GITHUB_WORKSPACE/t/KrunkNative.app/Contents/MacOS/client_bin" --version)
           (cd / && "$GITHUB_WORKSPACE/t/KrunkNative.app/Contents/MacOS/client_bin" --voice-info) | grep '^opus=libopus '
           otool -L t/KrunkNative.app/Contents/MacOS/client_bin
+
+      # The packaged launcher reaches the live updates server (dl.krunk.io) and reads its manifest:
+      # its own DNS lookup, TLS and redirects on this platform (tools/release/check-launcher.sh;
+      # 2026-10-13 "the box office updater fails to connect to the server"). An outage of kru must
+      # not hold back a release, so a failure is an error annotation, not a failed job.
+      - name: Launcher reaches the updates server
+        continue-on-error: true
+        run: |
+          tools/release/check-launcher.sh "out/krunknative-client-macos-${{ matrix.arch }}.tar.gz" --old-url \
+            || { echo "::error title=Updates server::the macos-${{ matrix.arch }} launcher could not read the updates manifest"; exit 1; }
 
       - uses: actions/upload-artifact@v7
         with:
