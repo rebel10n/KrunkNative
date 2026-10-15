@@ -144,7 +144,8 @@ async def register(sock, name):
 
 
 async def publish(sock, name):
-    mapjson = json.dumps({"name": name, "objects": [{"p": [0, 0, 0], "s": [10, 1, 10]}], "spawns": []})
+    # validateMap (editor publish, creations.c): a name, objects and two spawns
+    mapjson = json.dumps({"name": name, "objects": [{"p": [0, 0, 0], "s": [10, 1, 10]}], "spawns": [[0, 1, 0], [4, 1, 0]]})
     r = await sock.call("pubMR", "uploadM", mapjson, None, "storage test", "", 2)
     return r[1] == "Map Published!"
 

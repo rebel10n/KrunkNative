@@ -3,10 +3,11 @@
  * (Krunker v3.1.1 matchmaker/publicRoutes.ts, called by src/libs/apiClient.js
  * with config.apiURL = the brain):
  *
- *   GET /api/maps?index=&pos=&accountId=&val=  -> {data:[map rows], index, pos, error}
+ *   GET /api/maps?index=&pos=&accountId=&val=&cat=&source=  -> {data:[map rows], index, pos, error}
  *   GET /api/mods?index=&pos=&accountId=&val=  -> {data:[mod rows], index, pos, error}
  *   GET /api/assets?index=&cat=&username=&val= -> {data:[asset rows], index, error}
- *   GET /api/search?type=map|mod&val=          -> {data, index: 0, error}
+ *   GET /api/search?type=map|mod&val=&cat=&source= -> {data, index: 0, error} (maps: an empty val
+ *       with cat= or source= lists that filter, v10's Popular Categories cards)
  *   GET /api/streams?index=                    -> v3.1.1 placeholder (no streams)
  *   GET /api/prices[?id=]                      -> {} / 0 (v3.1.1 placeholder)
  *
@@ -16,6 +17,15 @@
  * players published (published_maps). Tabs (publicRoutes.ts sortMaps):
  * 0 Popular, 1 Featured, 2 New, 3 Favorites (accountId's), 4 all / My Games
  * (accountId's published maps when given). 42 rows per page.
+ *
+ * Map rows carry the Games window's fields (v10 names: map_name, creatorname, map_votes, map_pl,
+ * map_featured, map_updatecounter, map_date, map_info, fav, fund, category) plus KrunkNative's:
+ * map_category (index, -1 none), category (its name, "" none), official (creator "Krunker"),
+ * modes (the map's game mode ids: the Games window's mode tags). cat=<n> keeps the published maps
+ * of that category (the catalogue has no categories, so a category keeps none of them);
+ * source=official|community splits the catalogue's official maps from the rest (the bundled
+ * community maps and published ones). Publishing (uploadM) checks the map like v10's publish:
+ * the editor's validateMap rules (shared/src/map_validate.c), then the name is free.
  */
 #include "acct_internal.h"
 
@@ -29,11 +39,25 @@
 #include "knsvc/json.h"
 #include "knsvc/log.h"
 #include "map_catalog.h"
+#include "map_validate.h"
 
 #define MOD "creations"
 #define TAB_PAGE_SIZE 42
 
 /* ------------------------------------------------------------------ catalogue rows */
+
+/* the map JSON's "modes" (game mode ids) as a new array: the Games window's mode tags */
+static cJSON *modes_array(const cJSON *map) {
+    cJSON *out = cJSON_CreateArray();
+    const cJSON *modes = map ? cJSON_GetObjectItemCaseSensitive(map, "modes") : NULL;
+    const cJSON *m;
+    if (cJSON_IsArray(modes)) {
+        cJSON_ArrayForEach(m, modes) {
+            if (cJSON_IsNumber(m)) cJSON_AddItemToArray(out, cJSON_CreateNumber(m->valuedouble));
+        }
+    }
+    return out;
+}
 
 static cJSON *catalog_row(size_t index) {
     const MapCatalogEntry *e = map_catalog_at(index);
@@ -57,7 +81,33 @@ static cJSON *catalog_row(size_t index) {
     cJSON_AddNumberToObject(row, "fav", 0);
     cJSON_AddStringToObject(row, "mod_url", e->mod_url ? e->mod_url : "");
     cJSON_AddStringToObject(row, "mod_id", "");
+    cJSON_AddStringToObject(row, "category", ""); /* the catalogue keeps no categories */
+    cJSON_AddNumberToObject(row, "map_category", -1);
+    cJSON_AddBoolToObject(row, "official", map_catalog_is_official(e));
+    cJSON_AddItemToObject(row, "modes", modes_array(json));
     return row;
+}
+
+/* a published map row (MAP_COLS): its category name, the Official / Community split and the mode
+ * tags the publish stored in map_info ({"m": [mode ids]}) */
+static void map_row_fields(cJSON *row) {
+    const cJSON *cat = cJSON_GetObjectItemCaseSensitive(row, "map_category");
+    const int index = cJSON_IsNumber(cat) ? (int) cat->valuedouble : -1;
+    const char *name = map_category_name(index);
+    const cJSON *info = cJSON_GetObjectItemCaseSensitive(row, "map_info");
+    cJSON *parsed = NULL;
+    if (cJSON_IsString(info) && info->valuestring) parsed = cJSON_Parse(info->valuestring);
+    else if (cJSON_IsObject(info)) parsed = cJSON_Duplicate(info, 1);
+    const cJSON *m = parsed ? cJSON_GetObjectItemCaseSensitive(parsed, "m") : NULL;
+    cJSON_DeleteItemFromObjectCaseSensitive(row, "category");
+    cJSON_AddStringToObject(row, "category", name ? name : "");
+    cJSON_DeleteItemFromObjectCaseSensitive(row, "map_category");
+    cJSON_AddNumberToObject(row, "map_category", name ? index : -1);
+    cJSON_DeleteItemFromObjectCaseSensitive(row, "official");
+    cJSON_AddBoolToObject(row, "official", 0); /* published maps are community maps */
+    cJSON_DeleteItemFromObjectCaseSensitive(row, "modes");
+    cJSON_AddItemToObject(row, "modes", cJSON_IsArray(m) ? cJSON_Duplicate(m, 1) : cJSON_CreateArray());
+    cJSON_Delete(parsed);
 }
 
 static int contains_ci(const char *hay, const char *needle) {
@@ -71,17 +121,30 @@ static int contains_ci(const char *hay, const char *needle) {
     return 0;
 }
 
+/* SOURCE_*: the source= filter (0 all, 1 official maps, 2 community maps) */
+enum { SOURCE_ALL, SOURCE_OFFICIAL, SOURCE_COMMUNITY };
+
+/* a catalogue row passes the filters: the source split, and no category (the catalogue has none) */
+static int catalog_wanted(size_t index, int category, int source) {
+    const MapCatalogEntry *e = map_catalog_at(index);
+    if (!e || category >= 0) return 0;
+    const int official = map_catalog_is_official(e);
+    return !(source == SOURCE_OFFICIAL && !official) && !(source == SOURCE_COMMUNITY && official);
+}
+
 /* Catalogue part of a tab (or of a search when val != NULL). */
-static void catalog_rows(cJSON *out, int tab, const char *val, int64_t account) {
+static void catalog_rows(cJSON *out, int tab, const char *val, int64_t account, int category, int source) {
     if (val && *val) {
         for (size_t i = 0; i < map_catalog_count(); i++)
-            if (contains_ci(map_catalog_at(i)->name, val)) cJSON_AddItemToArray(out, catalog_row(i));
+            if (contains_ci(map_catalog_at(i)->name, val) && catalog_wanted(i, category, source)) cJSON_AddItemToArray(out, catalog_row(i));
         return;
     }
     if (tab == 3 || (tab == 4 && account > 0)) return; /* favourites / my games: DB only */
     int idx[128];
     const size_t n = map_catalog_games_tab(tab, idx, 128);
-    for (size_t i = 0; i < n; i++) cJSON_AddItemToArray(out, catalog_row((size_t) idx[i]));
+    for (size_t i = 0; i < n; i++) {
+        if (catalog_wanted((size_t) idx[i], category, source)) cJSON_AddItemToArray(out, catalog_row((size_t) idx[i]));
+    }
 }
 
 /* ------------------------------------------------------------------ request plumbing */
@@ -92,6 +155,8 @@ typedef struct ApiReq {
     int tab;
     int pos;
     int64_t account;
+    int category;     /* cat=: a map category index, -1 all */
+    int source;       /* source=: SOURCE_* */
     char val[96];
 } ApiReq;
 
@@ -123,13 +188,15 @@ static void reply_page(ApiReq *a, cJSON *rows, const char *error) {
 static void db_rows_done(kn_db_result *res, void *ud) {
     ApiReq *a = ud;
     cJSON *rows = cJSON_CreateArray();
-    if (a->kind == 0 || a->kind == 3) catalog_rows(rows, a->tab, a->kind == 3 ? a->val : (a->val[0] ? a->val : NULL), a->account);
+    const int maps = a->kind == 0 || a->kind == 3;
+    if (maps) catalog_rows(rows, a->tab, a->kind == 3 ? a->val : (a->val[0] ? a->val : NULL), a->account, a->category, a->source);
     if (kn_db_ok(res)) {
         cJSON *db = kn_db_result_to_json(res);
         cJSON *it;
         /* "New" lists the newest published maps before the catalogue */
         int at = 0;
         while (db && (it = cJSON_DetachItemFromArray(db, 0)) != NULL) {
+            if (maps) map_row_fields(it);
             if (a->kind == 0 && a->tab == 2 && !a->val[0]) cJSON_InsertItemInArray(rows, at++, it);
             else cJSON_AddItemToArray(rows, it);
         }
@@ -149,7 +216,7 @@ static void db_rows_done(kn_db_result *res, void *ud) {
     "coalesce(m.map_image, '') AS map_image, m.map_votes, m.map_plays AS map_pl, m.map_updatecounter, " \
     "m.map_featured, " H0 "m.map_description" H1 " AS map_description, coalesce(a.username, 'Community') AS creatorname, " \
     "m.map_funds AS fund, (SELECT count(*) FROM creation_favs f WHERE f.kind = 0 AND f.creation_id = m.map_id) AS fav, " \
-    "'' AS mod_url, '' AS mod_id FROM published_maps m LEFT JOIN accounts a ON a.id = m.creator_id "
+    "'' AS mod_url, '' AS mod_id, m.map_category FROM published_maps m LEFT JOIN accounts a ON a.id = m.creator_id "
 
 #define MAP_COLS MAP_COLS_("kn_html(", ")", "m.map_info::text AS map_info")
 #define MAP_COLS_ANY MAP_COLS_("{html:", "}", "m.map_info AS map_info__t")
@@ -165,10 +232,11 @@ static void db_rows_done(kn_db_result *res, void *ud) {
 
 static void run(ApiReq *a) {
     Brain *b = g_acct_brain;
-    if (!b || !b->db) {
-        /* no database: catalogue only */
+    const int maps_kind = a->kind == 0 || a->kind == 3;
+    if (!b || !b->db || (maps_kind && a->source == SOURCE_OFFICIAL)) {
+        /* no database, or the official maps only: catalogue only */
         cJSON *rows = cJSON_CreateArray();
-        if (a->kind == 0 || a->kind == 3) catalog_rows(rows, a->tab, a->val[0] ? a->val : NULL, a->account);
+        if (maps_kind) catalog_rows(rows, a->tab, a->val[0] ? a->val : NULL, a->account, a->category, a->source);
         reply_page(a, rows, NULL);
         cJSON_Delete(rows);
         free(a);
@@ -184,6 +252,9 @@ static void run(ApiReq *a) {
     pat[o] = 0;
     const int maps = a->kind == 0 || a->kind == 3;
     const char *order;
+    /* cat=: the category filter goes first in the conditions (maps only; an int we formatted) */
+    char catf[48] = "";
+    if (maps_kind && a->category >= 0) snprintf(catf, sizeof catf, " AND m.map_category = %d", a->category);
     if (a->kind >= 3) order = "ORDER BY 7 DESC LIMIT 200";
     else if (a->tab == 1) order = "AND x_featured > 0 ORDER BY 7 DESC LIMIT 2000";
     else if (a->tab == 2) order = "ORDER BY 4 DESC LIMIT 2000";
@@ -194,7 +265,7 @@ static void run(ApiReq *a) {
     for (int dialect = 0; dialect < 2; dialect++) {
         /* x_* placeholders select the tab filter on the right table */
         char filt[512];
-        snprintf(filt, sizeof filt, "%s", order);
+        snprintf(filt, sizeof filt, "%s %s", catf, order);
         const char *pfx = maps ? "m." : "d.";
         const char *kind = maps ? "0" : "1";
         const char *idc = maps ? "map_id" : "mod_id";
@@ -243,6 +314,11 @@ static ApiReq *api_req(kn_http_req *req, int kind) {
     if (a->pos < 0 || a->pos > 10000) a->pos = 0;
     a->account = query_int(req, "accountId", 0);
     if (kn_http_query_get(req, "val", a->val, sizeof a->val) < 0) a->val[0] = 0;
+    a->category = (int) query_int(req, "cat", -1);
+    if (a->category < 0 || a->category >= MAP_CATEGORY_COUNT) a->category = -1;
+    char source[16] = "";
+    kn_http_query_get(req, "source", source, sizeof source);
+    a->source = !strcmp(source, "official") ? SOURCE_OFFICIAL : !strcmp(source, "community") ? SOURCE_COMMUNITY : SOURCE_ALL;
     return a;
 }
 
@@ -296,7 +372,9 @@ static void h_search(kn_http_req *req, void *ud) {
     const int kind = !strcmp(type, "map") ? 3 : !strcmp(type, "mod") ? 4 : -1;
     ApiReq *a = api_req(req, kind < 0 ? 3 : kind);
     if (!a) return;
-    if (kind < 0 || !a->val[0]) {
+    /* v10's Popular Categories cards search with an empty name and a category (mpCat only): the
+     * category's maps; an empty name without a category or source finds nothing, as before */
+    if (kind < 0 || (!a->val[0] && (kind != 3 || (a->category < 0 && a->source == SOURCE_ALL)))) {
         cJSON *rows = cJSON_CreateArray();
         reply_page(a, rows, NULL);
         cJSON_Delete(rows);
@@ -348,9 +426,13 @@ static void publish_done(SocialSession *s, kn_db_result *res, void *extra) {
     cJSON_Delete(v);
 }
 
-/* ["uploadM", mapJson, thumbDataUrl|null, description, videoId, category] ->
- * ["pubMR", msg] | ["upMp", err]. Name = the map JSON's "name"; republishing your own
- * map updates it (map_updatecounter + 1). */
+/* ["uploadM", mapJson, thumbDataUrl|null, description, videoId, category, postToHub, mobile] ->
+ * ["pubMR", msg] | ["upMp", err]. The checks are the editor's publish (v10 editor publishMap /
+ * uploadGame, validateMap; here shared/src/map_validate.c): the 500k data limit, a category in
+ * the Games window's list, then the map itself (name 1-16 characters without < or >, spawns,
+ * objects and the limits, first error as v7 words it). The name must not be a catalogue map.
+ * Republishing your own map updates it (map_updatecounter + 1). postToHub / mobile are read and
+ * not stored yet (no hub feed post, no mobile flag in the brain). */
 void sh_upload_map(SocialSession *s, const cJSON *f) {
     if (s->account_id <= 0) {
         social_send_n(s, "upMp", 1, cJSON_CreateString("Must be logged in"));
@@ -359,36 +441,48 @@ void sh_upload_map(SocialSession *s, const cJSON *f) {
     const char *data = fa_str(f, 1), *thumb = fa_str(f, 2), *desc = fa_str(f, 3), *video = fa_str(f, 4);
     const int64_t cat = fa_int(f, 5, 0);
     if (!data || strlen(data) > MAP_DATA_MAX) {
-        social_send_n(s, "upMp", 1, cJSON_CreateString(data ? "Map too large" : "Invalid Map"));
+        social_send_n(s, "upMp", 1, cJSON_CreateString(data ? "Failed. 500k Character Game Data Limit" : "Invalid Map"));
         return;
     }
-    cJSON *map = cJSON_Parse(data);
-    const char *name = kn_json_str(map, "name", NULL);
+    if (cat < 0 || cat >= MAP_CATEGORY_COUNT) {
+        social_send_n(s, "upMp", 1, cJSON_CreateString("Invalid Category"));
+        return;
+    }
+    const char *err = NULL;
+    cJSON *map = map_prepare_custom(data, 0, &err);
+    if (!map) {
+        social_send_n(s, "upMp", 1, cJSON_CreateString(err ? err : "Map error occured."));
+        return;
+    }
     char nm[64] = "";
-    int ok = cJSON_IsObject(map) && cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(map, "objects")) && name;
-    if (ok) {
-        snprintf(nm, sizeof nm, "%s", name);
-        size_t n = strlen(nm);
-        ok = n >= 3 && n <= 30;
-        for (size_t i = 0; ok && i < n; i++) ok = isalnum((unsigned char) nm[i]) || nm[i] == '_' || nm[i] == ' ' || nm[i] == '-';
+    snprintf(nm, sizeof nm, "%s", kn_json_str(map, "name", ""));
+    /* map_info {"m": [mode ids], "t": 1 with a thumbnail}: the Games window's tags (map_row_fields) */
+    cJSON *info = cJSON_CreateObject();
+    cJSON *modes = cJSON_AddArrayToObject(info, "m");
+    if (thumb && strncmp(thumb, "data:image/png;base64,", 22) == 0 && strlen(thumb) <= THUMB_MAX) cJSON_AddNumberToObject(info, "t", 1); /* the v10 thumb flag */
+    const cJSON *mode, *list = cJSON_GetObjectItemCaseSensitive(map, "modes");
+    if (cJSON_IsArray(list)) {
+        cJSON_ArrayForEach(mode, list) {
+            if (cJSON_IsNumber(mode)) cJSON_AddItemToArray(modes, cJSON_CreateNumber(mode->valuedouble));
+        }
     }
+    char *info_s = cJSON_PrintUnformatted(info);
+    cJSON_Delete(info);
     cJSON_Delete(map);
-    if (!ok) {
-        social_send_n(s, "upMp", 1, cJSON_CreateString("Invalid Map (needs a 3-30 character name and objects)"));
-        return;
-    }
     if (thumb && (strncmp(thumb, "data:image/png;base64,", 22) != 0 || strlen(thumb) > THUMB_MAX)) thumb = NULL;
     for (size_t i = 0; i < map_catalog_count(); i++) {
         if (!strcasecmp(map_catalog_at(i)->name, nm)) {
             social_send_n(s, "upMp", 1, cJSON_CreateString("Map name taken"));
+            free(info_s);
             return;
         }
     }
     char me[24], c[24];
     social_call(s, &P_PUBLISH_MAP,
                  KN_DB_ARGS(acct_itoa(me, s->account_id), nm, data, desc ? desc : "", video ? video : "",
-                            acct_itoa(c, cat >= 0 && cat < 32 ? cat : 0), thumb),
+                            acct_itoa(c, cat), thumb, info_s ? info_s : "{}"),
                  publish_done, NULL);
+    free(info_s);
 }
 
 static void edit_map_done(SocialSession *s, kn_db_result *res, void *extra) {

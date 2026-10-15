@@ -548,6 +548,29 @@ static int key_ascii_cmp(const void *a, const void *b) {
     return strcmp(ea->key, eb->key);
 }
 
+// v10.0.2 config.mapCats (game.deob / config.js): the Games window's categories in v10's order.
+static const char *const k_map_categories[MAP_CATEGORY_COUNT] = {
+    "Other", "Parkour", "Puzzle", "Trading", "Training", "Social", "Horror", "Adventure",
+    "Battle Royale", "Realism", "Roleplay", "Rotation", "Racing", "Raid", "Remake", "NCR", "Zombies",
+    "Simulation", "Relaxation", "Action", "Tycoon", "Mini-Games", "Single-player", "Education",
+};
+
+const char *map_category_name(const int index) {
+    return index >= 0 && index < MAP_CATEGORY_COUNT ? k_map_categories[index] : NULL;
+}
+
+int map_category_index(const char *name) {
+    if (!name) return -1;
+    for (int i = 0; i < MAP_CATEGORY_COUNT; i++) {
+        if (!strcasecmp_ascii(k_map_categories[i], name)) return i;
+    }
+    return -1;
+}
+
+int map_catalog_is_official(const MapCatalogEntry *entry) {
+    return entry && entry->source == MAP_SOURCE_OFFICIAL;
+}
+
 size_t map_catalog_games_tab(const int tab, int *out, const size_t max) {
     if (!out) return 0;
     size_t n = 0;

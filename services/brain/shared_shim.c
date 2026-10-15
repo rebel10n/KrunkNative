@@ -16,6 +16,7 @@ const char *assets_path(void);
 char *concat(const char *a, const char *b);
 int read_file(const char *path, unsigned char **buf, size_t *length);
 void asset_prefetch_wait(const char *const *paths, size_t count);
+int ensure_asset_file(const char *path);
 
 const char *assets_path(void) {
     static char path[1024];
@@ -62,4 +63,10 @@ int read_file(const char *path, unsigned char **buf, size_t *length) {
 void asset_prefetch_wait(const char *const *paths, size_t count) {
     (void) paths;
     (void) count;
+}
+
+/* utils.c's ensure_asset_file with no fetch hook (the brain never downloads assets): the file is there */
+int ensure_asset_file(const char *path) {
+    (void) path;
+    return 1;
 }

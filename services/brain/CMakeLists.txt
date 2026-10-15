@@ -91,6 +91,17 @@ set(KN_BRAIN_SOURCES
     ../../shared/src/ai_proto.c
 )
 
+# The publish checks are the editor's validateMap (shared/src/map_validate.c): it needs the prefab,
+# trigger and ruleset tables, so kn_brain links the whole shared game core like kn_editor_mcp does,
+# except utils.c and build_info.c (the shim above supplies utils' four asset helpers).
+list(FILTER KN_BRAIN_SOURCES EXCLUDE REGEX "^\\.\\./\\.\\./shared/src/")
+file(GLOB_RECURSE KN_BRAIN_SHARED_CORE CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shared/src/*.c)
+list(FILTER KN_BRAIN_SHARED_CORE EXCLUDE REGEX "/(utils|build_info)\\.c$")
+foreach (KN_SRC IN LISTS KN_BRAIN_SHARED_CORE) # knsvc_existing() wants paths relative to this directory
+    file(RELATIVE_PATH KN_SRC_REL ${CMAKE_CURRENT_SOURCE_DIR} ${KN_SRC})
+    list(APPEND KN_BRAIN_SOURCES ${KN_SRC_REL})
+endforeach ()
+
 # Sources another agent has listed but not landed yet must not break configure
 # (knsvc_existing: services/common/CMakeLists.txt).
 knsvc_existing(KN_BRAIN_SOURCES ${KN_BRAIN_SOURCES})
@@ -165,6 +176,13 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/social_ws_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_social_ws PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+
+    # community maps: uploadM checks (validateMap, category, name), the Games window's category and
+    # official / community filters, map_info mode tags, /api/map-data (creations.c)
+    add_test(NAME brain_community_maps
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/community_maps_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_community_maps PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
 
     # flavor-matchmaking: the Krunker Strike flavor pool in the finder (finder.c, finder_table.c).
     # No database (kn_brain --role finder --no-db); fake UDP KNINFO responders stand in for the game

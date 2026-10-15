@@ -443,23 +443,27 @@ async def scenario(base, internal_url, secret):
     async with Social(ws_url, json_mode=True) as a:
         await a.call("a", "a", 1, [alice, "hunter22", None])
         mapname = "Arena_" + stamp
-        mapjson = json.dumps({"name": mapname, "objects": [{"p": [0, 0, 0], "s": [10, 1, 10]}], "spawns": []})
+        mapjson = json.dumps({"name": mapname, "objects": [{"p": [0, 0, 0], "s": [10, 1, 10]}], "spawns": [[0, 1, 0], [4, 1, 0]]})
         r = await a.call("pubMR", "uploadM", mapjson, None, "my <i>map</i>", "", 2)
         check(r[1] == "Map Published!", "map published: %r" % r)
         r = await a.call("pubMR", "uploadM", mapjson, None, "v2", "", 2)
         check(r[1] == "Map Updated!", "republish updates: %r" % r)
-        r = await a.call("upMp", "uploadM", json.dumps({"name": "Burg", "objects": []}), None, "", "", 0)
+        r = await a.call("upMp", "uploadM", json.dumps({"name": "Burg", "objects": [{"p": [0, 0, 0], "s": [10, 1, 10]}],
+                                                       "spawns": [[0, 1, 0], [4, 1, 0]]}), None, "", "", 0)
         check(r[1] == "Map name taken", "catalogue names reserved")
+        r = await a.call("upMp", "uploadM", json.dumps({"name": "Burg", "objects": [], "spawns": [[0, 1, 0], [4, 1, 0]]}), None, "", "", 0)
+        check(r[1] == "Missing objects.", "publish checks run before the name: %r" % r)
         # catalogue (shared/include/map_catalog.h, since 83d680d): v7.1.4's 32 official maps at their
-        # v7 indices (0 = Burg), then 12 v3.1.1 community maps, its 15 official maps as 311_* ("Burg
-        # (3.1.1)") and its 9 old_* maps as 152_* ("Burg (1.5.2)") = 68. Popular / New list the 32
-        # officials first, then the rest in the v3.1.1 tab order; 42 rows per page (TAB_PAGE_SIZE)
+        # v7 indices (0 = Burg), then 13 community maps (the bundled custom_maps/ and the v10 FTUE
+        # map), its 15 official maps as 311_* ("Burg (3.1.1)") and its 9 old_* maps as 152_*
+        # ("Burg (1.5.2)") = 69 (map_catalog.c). Popular / New list the 32 officials first, then the
+        # rest in the v3.1.1 tab order; 42 rows per page (TAB_PAGE_SIZE)
         page = json.loads(urllib.request.urlopen(http_base + "/api/maps?index=2&pos=0").read())
         page1 = json.loads(urllib.request.urlopen(http_base + "/api/maps?index=2&pos=1").read())
         rows = page["data"] + page1["data"]
         check(rows[0]["map_name"] == mapname and rows[0]["creatorname"] == alice and rows[1]["map_name"] == "Burg"
-              and len(page["data"]) == 42 and len(rows) == 1 + 68,
-              "/api/maps New tab: published map first + 68 catalogue maps (%d)" % len(rows))
+              and len(page["data"]) == 42 and len(rows) == 1 + 69,
+              "/api/maps New tab: published map first + 69 catalogue maps (%d)" % len(rows))
         page = json.loads(urllib.request.urlopen(http_base + "/api/maps?index=0&pos=0").read())
         check(page["data"][0]["map_name"] == "Burg" and page["data"][32]["map_name"] == "Soul Sanctum (3.1.1)"
               and page["error"] is None, "/api/maps Popular = v7 official maps, then the v3.1.1 order")

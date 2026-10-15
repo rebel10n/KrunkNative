@@ -112,6 +112,17 @@ const cJSON **map_catalog_list(const int *indices, size_t count, size_t *out_cou
 // (realloc) when the list does not hold it yet. -1 on failure. Existing indices never move.
 int map_catalog_slot(const cJSON ***maps, size_t *map_count, size_t index);
 
+// The map categories (v10.0.2 config.mapCats, the Games window's category select and the publish
+// form's Category): index 0..MAP_CATEGORY_COUNT-1, the value a published map stores as map_category.
+#define MAP_CATEGORY_COUNT 24
+const char *map_category_name(int index); // NULL out of range
+int map_category_index(const char *name); // case-insensitive, -1 none
+
+// The Official / Community split of the Games window: an official map is one of v7.1.4's 32
+// (MAP_SOURCE_OFFICIAL, map_featured in the catalogue rows); the 311_ / 152_ and bundled maps are
+// community maps, as are published maps (their rows are never official).
+int map_catalog_is_official(const MapCatalogEntry *entry);
+
 // The Games window (windows[9]) tabs: 0 Popular, 1 Featured, 2 New, 3 Favorites (empty), 4 My
 // Games. Featured is the official maps; Popular / New list them first, then the community maps
 // in the order the v3.1.1 offline server answered a guest (doc/ref/krunker-v3.1.1/windows/

@@ -155,7 +155,8 @@ def main():
         D = lambda n: os.path.join(WORK, n)
 
         # ---- run 1: publish, update, publish asset
-        s = ["cfg:set:map.name:%s" % json.dumps(mapname), "add:0", "add:1", "add:0", "wait:1",
+        # add:5 = SPAWN_POINT: uploadM runs v10's validateMap, which refuses a map without spawns
+        s = ["cfg:set:map.name:%s" % json.dumps(mapname), "add:0", "add:1", "add:0", "add:5", "wait:1",
              "publish:7", "wait:6", "dump:popup:%s" % D("pub1.txt"),
              "ui:KE.publishMap()", "wait:4", "dump:popup:%s" % D("pub2-form.txt"),
              "ui:KE.uploadGame()", "wait:4", "dump:popup:%s" % D("pub2.txt"),
@@ -215,7 +216,7 @@ def main():
         e = read(D("edit.txt"))
         check("openEdit: Load in Editor, leaderboard and funds", "Load in Editor" in e and "Update Leaderboard" in e and "Withdraw" in e, e)
         loaded = [l for l in read(D("loaded.txt")).splitlines() if l.strip()]
-        check("Load in Editor (edMp) imports the published map", len(loaded) == 3, "%d objects" % len(loaded))
+        check("Load in Editor (edMp) imports the published map (3 objects + the spawn)", len(loaded) == 4, "%d objects" % len(loaded))
         lb = read(D("lb.txt"))
         check("ulb without a kn_brain answer: \"No reply from the server\"", "No reply from the server" in lb, lb)
         ai = read(D("ai.txt"))

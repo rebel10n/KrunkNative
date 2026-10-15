@@ -612,6 +612,9 @@ static kn_db_result *run_publish_map(kn_dbconn *c, int n, const char *const *p) 
                        " map_image) VALUES ($2, $1, $3, coalesce($4, ''), $5, $6, $7)"),
             7, (const char *const[]){P(0), P(1), P(2), P(3), video, P(5), P(6)});
     }
+    /* P(7): map_info ({"m": mode ids}, creations.c); the thumbnail flag stays with map_image */
+    if (id > 0 && n > 7 && P(7) && *P(7))
+        dbx_exec(&x, SQL(.any = "UPDATE published_maps SET map_info = $2 WHERE map_id = $1"), KN_DB_ARGS(I64S(id), P(7)));
     cJSON *o = cJSON_CreateObject();
     cJSON_AddNumberToObject(o, "updated", up > 0 ? 1 : 0);
     cJSON_AddNumberToObject(o, "id", (double)id);
@@ -621,11 +624,12 @@ static kn_db_result *run_publish_map(kn_dbconn *c, int n, const char *const *p) 
 const kn_proc P_PUBLISH_MAP = {
     "publish_map",
     "WITH up AS (UPDATE published_maps SET map_data = $3, map_description = coalesce($4, ''), map_video = nullif($5, ''), "
-    "  map_category = $6, map_image = coalesce($7, map_image), map_updatecounter = map_updatecounter + 1, map_date = now() "
+    "  map_category = $6, map_image = coalesce($7, map_image), map_info = coalesce(nullif($8, '')::jsonb, map_info), "
+    "  map_updatecounter = map_updatecounter + 1, map_date = now() "
     "  WHERE lower(map_name) = lower($2) AND deleted_at IS NULL AND creator_id = $1 RETURNING map_id), "
     "taken AS (SELECT 1 FROM published_maps WHERE lower(map_name) = lower($2) AND deleted_at IS NULL AND creator_id IS DISTINCT FROM $1), "
-    "ins AS (INSERT INTO published_maps (map_name, creator_id, map_data, map_description, map_video, map_category, map_image) "
-    "  SELECT $2, $1, $3, coalesce($4, ''), nullif($5, ''), $6, $7 "
+    "ins AS (INSERT INTO published_maps (map_name, creator_id, map_data, map_description, map_video, map_category, map_image, map_info) "
+    "  SELECT $2, $1, $3, coalesce($4, ''), nullif($5, ''), $6, $7, coalesce(nullif($8, '')::jsonb, '{}'::jsonb) "
     "  WHERE NOT EXISTS (SELECT 1 FROM up) AND NOT EXISTS (SELECT 1 FROM taken) RETURNING map_id) "
     "SELECT jsonb_build_object('updated', (SELECT count(*) FROM up), "
     "'id', coalesce((SELECT map_id FROM up), (SELECT map_id FROM ins)), "
