@@ -10,8 +10,9 @@ name: Deploy edges
 # dir is named by its content (role kn_release), so most pushes change nothing on the edges. A
 # restart drains: every instance finishes its round (kn_gameserver_drain_timeout, 240 s, all
 # instances of a host in parallel), its players get "GAME UPDATING" and rejoin with a fresh ticket.
-# The edges also run abulxt: only the KrunkNative release + kn-gameserver@ units are touched (no
-# firewall, no DNS here).
+# The edges also run abulxt: only the KrunkNative release + kn-gameserver@ units (Box Office) and
+# kn-strike@ units (Krunker Strike, port 21115+, deploy/ansible/README.md "Krunker Strike servers")
+# are touched (no DNS here).
 #
 # Secrets: EDGES_SSH_KEY (CI-only ed25519, comment krunknative-github-ci-edges, in each edge's
 #          root authorized_keys with no-agent/X11/port-forwarding), EDGES_KNOWN_HOSTS (the edges'
@@ -209,6 +210,20 @@ jobs:
               sleep 5
             done
             echo "::error::$target does not answer the server-info query"; exit 1
+          done
+          # Krunker Strike instance 1 (kn_gameserver tasks/strike.yml, port 21115): reported, never
+          # fatal (a host whose memory holds no Strike instance next to its Box Office ones runs none)
+          for edge in "$@"; do
+            target="$edge-1.krunk.io:21115"
+            for try in $(seq 1 6); do
+              if info="$(python3 -I services/scripts/kn-query.py --json --timeout 3 "$target" 2> /dev/null)"; then
+                echo "$target: $(jq -c '{name, flavor, map, players, max, commit}' <<< "$info")"
+                [ "$(jq -r '.flavor // empty' <<< "$info")" = strike ] || echo "::warning::$target is not a Krunker Strike server"
+                continue 2
+              fi
+              sleep 5
+            done
+            echo "::warning::$target (Krunker Strike) does not answer the server-info query"
           done
           EOF
           chmod +x "$RUNNER_TEMP/edge-health.sh"
