@@ -14,7 +14,7 @@
     2500,
     3000
   ],
-  "anim_origin": "end",
+  "anim_origin": "applied",
   "state": {
     "menu": false,
     "window": null,
@@ -30,10 +30,27 @@
       "timerText": "03:45"
     },
     "chat": [],
-    "console": [
-      "end"
-    ]
+    "console": [],
+    "endscreen": {
+      "place": 1,
+      "result": 1,
+      "text": "#1 VICTORY",
+      "nextRound": "00:17",
+      "results": 1,
+      "items": [
+        {
+          "skin": 1,
+          "r": "gift"
+        },
+        {
+          "skin": 2,
+          "r": "gift"
+        }
+      ],
+      "collect": "none",
+      "raid": 1
+    }
   },
-  "pending": "S4: the Collect Rewards button (svelte-3svau8) for otherData.items is MISSING; add a state key for the items and switch anim_origin to selector:.collect-rewards-button",
-  "note": "Results with two reward skins: the Collect Rewards button, 3 s pulse. Reference: capture-v10-seq.js end-collect-button."
+  "note": "Results with two reward skins: the Collect Rewards button, 3 s pulse. Reference: capture-v10-seq.js end-collect-button. Scenario state.endscreen carries the held items (hud_endscreen_v10_scenario).",
+  "pending": "S4: the row renders where v10 has it (Double XP + COLLECT under the card); left: the v10 capture shows the item icon unloaded (alt text 'Icon') and COLLECT dimmed with no countdown label, the ad-icon.svg paint differs (double-xp 10.7%, collect 17-20% against 3%), and timing:pulse needs a region where the reference changes"
 }

@@ -414,6 +414,27 @@ scenario('ingame-endscreen-late', async (c) => {
   await settle(c, 7000);
 });
 
+// a match the local player won skins in (v10's otherData.items: the local player's itemRewards, read at
+// the END by the end packet, v10:191205-191208 / 191273), then the results after the 5 s endAnim
+// (_72911 in v10:219683's timeout, which also starts the Collect countdown). The Collect Rewards button
+// sits in #endButtonsHolder under the results; the guest signup panel is below it (a skin needs
+// store.skins[i] to exist; the button's icon is the event's killPoolsIcon, 'gift' here: g:195992).
+const COLLECT_SKINS = (process.env.KN_COLLECT_SKINS || '1,2').split(',').map(Number);
+const COLLECT_ITEMS = JSON.stringify(COLLECT_SKINS.map((i) => ({ t: 'skin', i, r: 'gift' })));
+scenario('ingame-endscreen-collect', async (c) => {
+  await enterGame(c);
+  await c.eval(`(() => { ${SP}.itemRewards = ${COLLECT_ITEMS}; window.__knScope().sock.connected = true; ${SG}.endGame(); return 1; })()`);
+  await settle(c, 7000);
+});
+// the same with the raid promo's roll (v10:191274, Math.random < 0.5) forced to show: #raidPromoContainer
+// (its Double XP box and the Collect button stack in the same column)
+scenario('ingame-endscreen-collect-raid', async (c) => {
+  await enterGame(c);
+  await c.eval(`(() => { ${SP}.itemRewards = ${COLLECT_ITEMS}; window.__knScope().sock.connected = true;
+    const rnd = Math.random; Math.random = () => 0; try { ${SG}.endGame(); } finally { Math.random = rnd; } return 1; })()`);
+  await settle(c, 7000);
+});
+
 // ---------------------------------------------------------------- main
 
 const CLOSERS = new Set();

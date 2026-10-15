@@ -13,6 +13,9 @@ v10.0.2 shows there (doc/ref/krunker-v10/ingame/, the offline v10 sandbox):
   - #leaderboardHolder always up in game and while spectating (v10's switchLeaderboard);
   - the player HUD (health bar, weapon slots, ammo, timer) alive, gone on the death screen;
   - the Tab scoreboard in v10's <thead>/<tbody> table;
+  - the bots stop once the kill feed is checked (bot_stop): endGame shows the end screen only to an
+    active player or a spectator, so a bot killing the player before the END left the death card /
+    the menu up instead (endUI=0, the end-screen checks failed now and then);
   - the end screen's v10 Performance tab (Combat Earnings: 2 cells, Combat Record: 5) and a
     guest's signup incentive, whose REGISTER opens v10's login / register modal (loginOrRegister).
 Frames of every step go next to the matching v10 reference into WORK/frames/<step>.sbs.png
@@ -67,6 +70,7 @@ SCRIPT = """
 16200 check @kills killFeed=1 leaderboardHolder=1
 16200 nodes @feed .killfeedItem
 16200 frame @kills ingame-killfeed
+16300 con bot_stop on
 17000 esc
 17800 check @esc menuHolder=1 chatUIHolder=0 instructionHolder=1 inGameUI=0
 18000 play

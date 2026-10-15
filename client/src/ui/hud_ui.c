@@ -71,6 +71,7 @@ void hud_ui_hit(Client*, int kill);
 #include <string.h>
 #include <ruleset.h>
 #include <hud_v10.h>
+#include <hud_endscreen_v10.h> // v10 end-of-match components (hud_endscreen_v10.c): one call each below
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #endif
@@ -2206,7 +2207,7 @@ void hud_ui_skin_found(Client *client, const int uid, const int skin_index) {
     if (skin) hb_append_escaped(name, sizeof(name), &len, skin->name ? skin->name : "");
     if (player && player == client->me) {
         account_add_skin(skin_index);
-        hud_ui_add_reward_skin(skin_index);
+        if (!hud_endscreen_v10_offer_skin(skin_index)) hud_ui_add_reward_skin(skin_index); // held for Collect Rewards
         if (!skin) return;
         char thumb[256], card[1024];
         store_skin_preview(skin_index, thumb, sizeof(thumb));
@@ -2790,8 +2791,19 @@ static void hud_end_screen_dom(const int start) {
     hud_dmg_hide_all();
 }
 
+// The HUD clock: the --render-scenario clock, else under KRUNKNATIVE_FIXED_DELTA the summed frame
+// steps (so a slow host replays the same timers at the scripted pace), else the wall clock.
+static double g_hud_fixed_ms;
+static double g_hud_fixed_last_s = -1.0;
+static void hud_fixed_clock_advance(const double now_s) {
+    if (g_hud_fixed_last_s < 0.0) g_hud_fixed_last_s = now_s;
+    g_hud_fixed_ms += input_script_delta((float) (now_s - g_hud_fixed_last_s)) * 1000.0;
+    g_hud_fixed_last_s = now_s;
+}
+
 static double hud_now_ms(const Client *client) {
     if (g_hud_clock_s >= 0.0) return g_hud_clock_s * 1000.0;
+    if (input_script_fixed_delta()) return g_hud_fixed_ms;
     return client && client->window ? glfwGetTime() * 1000.0 : 0.0;
 }
 
@@ -3052,7 +3064,7 @@ static void hud_end_rewards_html(char *out, const size_t size, size_t *len) {
         hb_append(out, size, len, "<div style=\"text-align:center;color:#fff;font-size:30px;background-color:rgba(0, 0, 0, 0.4);border-radius:6px;padding:20px;\">You didnt earn any rewards this game!</div>");
         return;
     }
-    hb_append(out, size, len, "<div id='rewardTable'>");
+    hb_append(out, size, len, "<div id=\"rewardTable\">");
     for (int i = 0; i < g_end_skin_count; i++) {
         const ViewerSkin *skin = viewer_skin(g_end_skins[i][0]);
         if (!skin) continue;
@@ -3084,7 +3096,7 @@ static void hud_end_card_html(const Client *client, char *out, const size_t size
     } else {
         g_end_tab = 0;
     }
-    hb_append(out, size, &len, "\n\t\t\t\t\t<div class=\"tabBody\">");
+    hb_append(out, size, &len, "\n\t\t\t\t\t<div id=\"endLayoutHolder\" class=\"tabBody\">"); // v10: endLayoutHolder
     switch (g_end_tab) {
         case 1:
             hud_end_performance_html(client, out, size, &len);
@@ -3100,12 +3112,10 @@ static void hud_end_card_html(const Client *client, char *out, const size_t size
             break;
     }
     hb_append(out, size, &len, "</div></div>");
-    // GUI.endScreen.show(): #endButtonsHolder after the card (v10:203140): the Double XP ad button
-    // (no ad in KrunkNative: no onclick) and the empty #collectRewardsButtonContainer (no items).
-    hb_append(out, size, &len, "<div id=\"endButtonsHolder\"><div id=\"doubleXPButton\" onmouseenter=\"playTick(0.1);\">"
-                              "<img style=\"vertical-align: middle;display:inline\" height=\"60px\" src=\"./img/frvr-ui/ad-icon.svg\">"
-                              "<div id=\"returnText\">Double XP</div></div>"
-                              "<div id=\"collectRewardsButtonContainer\" style=\"position: relative;\"></div></div>");
+    // v10's #endButtonsHolder (GUI.endScreen.show, g:203333-203342): after .endCard, in #endTabbedView
+    hb_append(out, size, &len, "<div id=\"endButtonsHolder\" class=\"endButtonsHolder\">%s"
+              "<div id=\"collectRewardsButtonContainer\" class=\"collectRewardsButtonContainer\" style=\"position: relative;\"></div></div>",
+              hud_endscreen_v10_double_xp_html());
 }
 
 static void hud_end_card_render(const Client *client) {
@@ -3114,6 +3124,7 @@ static void hud_end_card_render(const Client *client) {
     hud_end_card_html(client, html, 32768);
     const HtmlElem view = html_dom_by_id("endTabbedView");
     if (view) html_dom_set_html(view, html);
+    hud_endscreen_v10_shown(); // v10 show(): the rank, earnings, raid promo and Collect Rewards mount
     free(html);
 }
 
@@ -3186,6 +3197,7 @@ static void hud_end_results(const Client *client) {
     dom_display("endMidHolder", "inline-block");
 
     g_end_client = client;
+    hud_endscreen_v10_results(hud_now_ms(client)); // endScreen.init: autoCollectTime = now + 10 s (5 s after the END)
     // GUI.endScreen.init(): changeTab(spectating || isCustom ? "leaderboard" : "performance")
     g_end_tab = spectate_active() || !client->me ? 0 : 1;
     hud_end_card_render(client);
@@ -3242,6 +3254,7 @@ void hud_ui_show_end_screen(Client *client, const int result, const char *next_r
         client_pointer_update(client);
         hud_v10_end_signup(0); // showEndScreen: matchEndSignupIncentives hidden until the results
         ui->end_start_ms = hud_now_ms(client);
+        hud_endscreen_v10_begin(client, ui->end_start_ms); // showEndScreen: the raid roll and the held items
         dom_style("endUI", "background-color", "");
         hud_end_screen_dom(1); // the title draws from this frame's HUD tick on (overlay.render after io_gameEnd)
         return;
@@ -3302,6 +3315,7 @@ void hud_ui_hide_end_screen(Client *client) {
     // WP-E part 2c: a new game: endData.mdls, matchRewardSummary = {} and endChals.innerHTML = ""
     memset(&g_end_medals, 0, sizeof(g_end_medals));
     g_end_skin_count = 0;
+    hud_endscreen_v10_reset(); // the held skins, the overlay and the collect state of that end
     battlepass_ui_end_clear(); // v7.1.4: the next end screen's bpData comes with its own commit
     if (!html_ui_available() || !html_ui_is_ready()) return;
     const HtmlElem chals = html_dom_by_id("endChals");
@@ -3928,6 +3942,7 @@ void client_hud_html_tick(Client *client, const float now_f) {
     HudUi *ui = &g_hud_ui;
     HtmlHudState *hud = &client->hud_html;
     const double now = g_hud_clock_s >= 0.0 ? g_hud_clock_s : now_f;
+    hud_fixed_clock_advance(now);
     const int ready = html_ui_is_ready();
     int fps_changed = 0;
     const int fps_before = hud->fps;
@@ -3950,7 +3965,8 @@ void client_hud_html_tick(Client *client, const float now_f) {
 
     hud_autoplay(client);
     hud_net_stats_step(now);
-    hud_end_step(client, now * 1000.0);
+    hud_end_step(client, hud_now_ms(client)); // the HUD clock: the same base as the results' end_start_ms
+    hud_endscreen_v10_tick(hud_now_ms(client)); // the Collect countdown and the rewards overlay schedule: the clock of its results (hud_now_ms), not now_f
     hud_feed_step(now * 1000.0);
     // game-overlay text popups (client/src/ui/hud_popups.c): drawn while playing (no kill card / menu)
     hud_popups_set_comp(client->game.config.comp);

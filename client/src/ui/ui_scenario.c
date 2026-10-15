@@ -77,6 +77,7 @@
 #include <lobby_ui.h> // state.matchVotes: the end screen's vote cards
 #include <v10_party.h> // state.gameCode: the server password popup
 #include <console.h> // state.console: ui_console_exec (frame sequences: `kill`, `end`)
+#include <hud_endscreen_v10.h> // the v10 end-of-match components (state.endscreen rewards / rank)
 
 // Portable temp dir / env helpers (MinGW has no mkdtemp, setenv or lstat).
 static int scenario_make_storage_dir(char *out, const size_t n) {
@@ -982,6 +983,7 @@ static void apply_endscreen(Client *client) {
     const int place = (int) obj_num(end, "place", 1);
     const cJSON *result = cJSON_GetObjectItemCaseSensitive(end, "result");
     hud_ui_show_end_screen(client, cJSON_IsNumber(result) ? result->valueint : place == 1, obj_str(end, "nextRound"));
+    hud_endscreen_v10_scenario(end); // rank / rp / items / raid / collect (hud_endscreen_v10.c)
     if (obj_num(end, "results", 0)) hud_ui_end_results_now(client); // the GUI.endScreen tabs (performance)
 }
 

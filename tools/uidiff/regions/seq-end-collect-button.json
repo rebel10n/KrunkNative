@@ -6,18 +6,41 @@
   },
   "regions": [
     {
-      "name": "button",
-      "rect": [440, 420, 400, 80],
+      "name": "double-xp",
+      "rect": [
+        440,
+        325,
+        250,
+        62
+      ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "the Collect Rewards button"
+      "note": "v10's #doubleXPButton in #endButtonsHolder (KrunkNative: not rendered yet)"
+    },
+    {
+      "name": "collect",
+      "rect": [
+        700,
+        325,
+        160,
+        62
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "the Collect Rewards button, beside Double XP in the same row (v10 flex, gap 10px)"
     }
   ],
   "timing": [
     {
       "name": "pulse",
-      "rect": [440, 420, 400, 80],
+      "rect": [
+        440,
+        420,
+        400,
+        80
+      ],
       "threshold": 0.5
     }
   ]

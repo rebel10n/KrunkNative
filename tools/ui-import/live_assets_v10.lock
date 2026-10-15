@@ -2797,6 +2797,7 @@ assets-v10	textures/weapons/weapon_6_13.png	https://assets.krunker.io/textures/w
 assets-v10	textures/weapons/weapon_8_6.png	https://assets.krunker.io/textures/weapons/weapon_8_6.png	907ab5237f0a32a472de38496f7d24ed3a23c398380e58534a9f27eb5bc26542	906386
 assets-v10	textures/weapons/weapon_8_7.png	https://assets.krunker.io/textures/weapons/weapon_8_7.png	f179d493f9066388a7045db733b90c22f019261d292613139078556814d64b59	710471
 ui	css/fonts/ChakraPetch-Bold.ttf	https://krunkerstrike.frvr.com/css/fonts/ChakraPetch-Bold.ttf	fb428d38d46b0a9ccb72165157d320c784d9c2e3e84148a06fd5eee325ba1798	71436
+ui	img/gift.webp	https://krunker.io/img/gift.webp	cba686c635f7f438f04a2209c8999590ffe14ac52089bdbbbb2a06a2066e8207	23246
 ui	img/guide/challenge_mode_off.png	https://assets.krunker.io/img/guide/challenge_mode_off.png	92922698d460af4a3178e2bb98ccf645656c34b3dd888c65510ab1da4ccf7477	1568
 ui	img/guide/challenge_mode_on.png	https://assets.krunker.io/img/guide/challenge_mode_on.png	c973d49f554c2953b27a51ae484d98b35768f8a96913474dbd2146143365f5ce	1887
 ui	img/guide/challenge_mode.png	https://assets.krunker.io/img/guide/challenge_mode.png	11350cdd7566691385597a99e2c1a8a5870a8d9fe85eb174d22024a91f684485	8007

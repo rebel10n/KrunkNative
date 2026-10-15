@@ -289,6 +289,11 @@ float input_script_delta(const float delta) {
     return g_script.fixed_delta > 0.0f ? g_script.fixed_delta : delta;
 }
 
+int input_script_fixed_delta(void) {
+    script_load();
+    return g_script.fixed_delta > 0.0f;
+}
+
 static int script_key(const char *name) {
     static const struct { const char *name; int key; } keys[] = {
         {"W", GLFW_KEY_W}, {"A", GLFW_KEY_A}, {"S", GLFW_KEY_S}, {"D", GLFW_KEY_D},
@@ -444,6 +449,12 @@ static void script_run(Client *client, const ScriptEvent *e) {
         // config.deathDelay, so the request stays pending (retried every frame in
         // input_script_tick) until our SPAWN arrives; a no-op while alive.
         g_script.respawn_pending = !client->me || !client->me->active;
+    } else if (!strcmp(e->cmd, "skin")) {
+        // skin <index>: the local player found a skin during the match (NET_PACKET_SKIN_FOUND's "skin" path,
+        // hud_ui_skin_found). A match's rewards have no offline source, so the end-screen e2e drives this
+        // (v10_endscreen_e2e.py): the skin is held for the Collect Rewards button (hud_endscreen_v10.c).
+        if (client->me) hud_ui_skin_found(client, client->me->uid, (int) e->v[0]);
+        fprintf(stderr, "[input_script] skin t=%.0f %d\n", g_script.time, (int) e->v[0]);
     } else if (!strcmp(e->cmd, "wheel")) {
         // wheel dy: one wheel event through the scroll path (+1 = up, -1 = down)
         GLFWscrollfun cb = glfwSetScrollCallback(client->window, NULL);
