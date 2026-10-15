@@ -67,6 +67,7 @@
 #include <game_reload.h> // F5: the full reload (game_reload.c)
 #include <ks_client.h> // KrunkScript client host: the map's client script (ks/ks_client_host.c)
 #include <ks_game.h> // ks_game_free
+#include <gpu_timer.h> // KRUNKNATIVE_GPU_TIMING: per-pass GPU / CPU frame times (gpu_timer.c)
 
 #ifdef WIN32
 #include <direct.h>
@@ -1832,8 +1833,10 @@ void client_tick(Client *client, const float now, const float delta) {
     // overwrite (the HTML engine leaves it at transparent black), so set it every frame
     // before this clear and render_target_begin()'s. Maps without a sky dome (Littletown,
     // Freight, Subzero, ...) show it as the whole sky.
+    gpu_timer_frame_begin();
     glClearColor(g_render_lighting.sky_color.x, g_render_lighting.sky_color.y, g_render_lighting.sky_color.z, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    gpu_timer_mark(GPU_PASS_CLEAR);
 #ifdef UI_SCENARIO_SUPPORTED
     ui_scenario_draw_background(); // scenario mode: its background replaces the world
 #endif
@@ -1862,13 +1865,16 @@ void client_tick(Client *client, const float now, const float delta) {
     if (!debug_capture_hide_ui()) {
         spin_wheel_render(client);           // the prize wheel's canvas under its #spinButton (ui/spin_wheel.c)
         ks_client_ui_late(client);           // KrunkScript UI.hideDefault / hideCrosshair over the HUD's writes
+        gpu_timer_mark(GPU_PASS_PREVIEW);
         html_ui_render_page(client->ui);     // composites the page over the scene and HUD
         viewer_embed_frame(client, delta);   // the item view's 3D showcase over its iframe box (viewer_embed.h)
         spin_wheel_render_confetti(client);  // canvas-confetti draws above the page
         html_ui_render_top(client->ui);      // last: the developer console (the top layer) over all of it
     }
+    gpu_timer_mark(GPU_PASS_PAGE);
     input_script_frame_presented(client); // `frames`: every finished frame (input_script.c)
     debug_capture_frame_end(client); // KRUNKNATIVE_SCREENSHOT: reads the finished frame
+    gpu_timer_frame_end();
 }
 
 static void client_tick_game(Client *client, const float now, const float frame_delta) {
@@ -2136,7 +2142,9 @@ static void client_tick_game(Client *client, const float now, const float frame_
         shadow_update(); // static sun shadow map, re-rendered after a map load (shadow.c)
         ocean_update(client->scene, &client->camera, delta * 1000.0f); // v7 ocean: time + mirror reflection pass (ocean.c)
         sky_tick(delta * 1000.0f);
+        gpu_timer_mark(GPU_PASS_PRE);
         sky_render(&client->camera); // Krunker's backgroundScene pass: sky dome first (sky.c)
+        gpu_timer_mark(GPU_PASS_SKY);
         shadow_begin_world();
         spectate_render_begin(client); // first-person spectating hides the followed player's model
         // KrunkNative third person: the local (third-person) model is drawn with the world
@@ -2153,9 +2161,11 @@ static void client_tick_game(Client *client, const float now, const float frame_
         }
         spectate_render_end(client);
         shadow_end_world();
+        gpu_timer_mark(GPU_PASS_WORLD);
         vfx_render_world(client);   // tracers, impacts, casings, explosions, map particles
         nav_overlay_render(client); // show_navmeshes: nav areas + connections, over the world (nav_overlay.c)
         om_build_render(client);    // Object Manager: the Physics Gun's beam, the btools' box and handles (om_build.c)
+        gpu_timer_mark(GPU_PASS_VFX);
     }
 
     if ((!scenario || SCENARIO_PREVIEW()) && !ks_client_3d_disabled()) {
@@ -2177,7 +2187,9 @@ static void client_tick_game(Client *client, const float now, const float frame_
         }
     }
 
+    gpu_timer_mark(GPU_PASS_VIEWMODEL);
     if (scene_target) render_target_end(client); // upscale + filter onto the window; HUD/overlay/page stay native
+    gpu_timer_mark(GPU_PASS_POST);
 
     ui_update(client->ui);
 
@@ -2193,5 +2205,6 @@ static void client_tick_game(Client *client, const float now, const float frame_
     if (!scenario || build_ui_scenario_active()) build_ui_render(client); // v7 charge bar (interactMProg) and build wheel (game-overlay canvas)
     if (!scenario) sprays_wheel_render(client, delta); // WP-E: v7 spray wheel (game-overlay canvas)
     if (!scenario) ks_overlay_frame(frame_delta); // KrunkScript overlay canvas: script render(), below the HTML page
+    gpu_timer_mark(GPU_PASS_HUD);
     input_script_frame_end(client, delta, frame_delta); // KRUNKNATIVE_INPUT_LOG row
 }

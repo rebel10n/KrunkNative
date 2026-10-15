@@ -48,12 +48,68 @@ On Kanji the saved CPU time turns into driver wait (the GPU is the limit there);
 game frame's CPU drops by a third. World captures of both maps from fixed cameras match the old
 build pixel for pixel, except an ad billboard that picks a random image.
 
-## Left, in order of size
+## Round 2: GPU per pass, per-draw uniforms, start-up
 
-- Per-draw uniform traffic: `basic_material_update_uniforms` sets ~40 uniforms per draw through
-  the cache; the lighting/fog/camera block is the same for every draw of a program and could be
-  set once per program per frame (or moved to a UBO).
-- GPU time: the frame is GPU-bound on Kanji at 1280x720 with default settings. A GPU timer-query
-  breakdown (shadow pass, scene, post, HTML page) is the next step before changing render passes.
-- Start-up: `map_catalog_json` walks cJSON arrays by index (`cJSON_GetArrayItem` is O(n)); a
-  linked-list walk would make it linear.
+### Per-pass timing
+
+`KRUNKNATIVE_GPU_TIMING=1` (client/src/gpu_timer.c) prints once a second the average GPU time
+(GL_TIMESTAMP queries, read back 3 frames late so nothing stalls; desktop GL only, GL ES has no
+timer queries) and CPU time of each pass: clear, pre (scene target clear, static shadow map,
+ocean mirror), sky, world, vfx, viewmodel, post (scene target upscale), hud, preview, page.
+
+Kanji / Sandstorm, 1280x720, default settings (resolution 0.6: a 768x432 scene target), best
+second of each run (the RTX 2070 SUPER is shared with the desktop, OBS, Sunshine and other
+agents' clients, so single seconds vary by 2x; medians tell the same story):
+
+| GPU ms | sky | world | viewmodel | post | page (HTML HUD) | total |
+|---|---|---|---|---|---|---|
+| Kanji 0.6 | 0.008 | 0.24-0.28 | 0.011 | 0.015 | 0.32-0.50 | 0.81 |
+| Kanji 1.0 | 0.011 | 0.29-0.32 | 0.02 | - | 0.40-0.47 | 0.73-0.95 |
+| Sandstorm 0.6 | 0.008 | 0.10-0.14 | 0.014 | 0.015 | 0.34 | 0.51-0.62 |
+
+- **The GPU is not the limit.** The whole frame is under 1 ms of GPU time. Without other GPU
+  clients the frame is CPU-bound; the driver spin in round 1's profile was the headless fence wait
+  while the GPU worked on other processes' frames.
+- **Shadows:** the sun shadow map is static (rendered once after a map load, 1024 px, 4096 with
+  highResShad), so it costs nothing per frame; the receiver lookup is part of "world".
+- **Fog** is a few ALU ops in basic.frag; **post** (the scene target's upscale) is 0.015 ms; the
+  **sky** dome 0.01 ms. **Overdraw**: the world pass at 768x432 is 0.1-0.3 ms; moving to full
+  resolution adds about 0.05 ms, so fill rate is not a factor at these settings.
+- The page interval (the HTML HUD's composite, ~30 draws, two small opacity groups) is the largest
+  GPU item in most seconds, but it also absorbs time the GPU spends on other contexts between our
+  submits (hiding the page moves that time into "world"). Nothing in its display list is large.
+
+### Fixed
+
+1. **Scene-wide basic-material uniforms once per program** (`client/src/materials/basic.c`): the
+   sun, ambient, lighting mode, the light arrays (rebuilt with trigonometry for every draw before)
+   and the clip plane are keyed per program on their inputs (a light / clip generation counter,
+   the lighting values, the ruleset light units, the uniform cache's relink epoch); an unchanged
+   key skips them. Fog and tone mapping stay per draw (other files write those names). Hit rate
+   in game: >99.9% (2 misses in 1.2 M draws on Sandstorm).
+2. **Camera uniforms once per program per scene pass** (`client/src/scene.c`).
+3. **Start-up map walk** (`shared/src/map_catalog.c`, `shared/src/map.c`, `client/src/ambient.c`):
+   sanitising a v7 map looked every pooled size up with `cJSON_GetArraySize` / `cJSON_GetArrayItem`
+   on the `xyz` pool (both walk the linked list from its head: quadratic in the object count);
+   the pool is now read into an array once. The map parser's object and colour loops and the AO
+   collector walk their lists instead of indexing them.
+
+A/B on the same game frames (fixed delta, samples at 1999 Hz):
+
+| | Kanji before | after | Sandstorm before | after |
+|---|---|---|---|---|
+| map catalogue load (start-up) | 7843 (3.9 s) | 1066 (0.5 s) | 7848 | 1026 |
+| `basic_material_update_uniforms` | 4066 | 1928 (-53%) | 2571 | 2678 (within run-to-run noise) |
+| `scene_render` | 8395 | 5490 (-35%) | 6166 | 6905 (within run-to-run noise) |
+
+Frame time, NVIDIA, best second, 1280x720 uncapped: Kanji 0.6 0.877 -> 0.872 ms, Kanji 1.0
+0.961 -> 0.739 ms, Sandstorm 0.6 0.645 -> 0.530 ms, Sandstorm 1.0 0.628 -> 0.686 ms. The noise on
+the shared GPU is larger than the change; the CPU sample counts above are the reliable measure.
+World captures of Kanji and Sandstorm from the 4 fixed cameras match the old build pixel for pixel
+except the ad billboard (a random image).
+
+## Left
+
+- The HTML HUD composite: measure on an idle GPU before changing glb_submit.
+- `basic_material_update_uniforms` still makes ~30 cached per-material uniform calls per draw;
+  grouping draws by material (most map objects have their own colour) would not remove them.

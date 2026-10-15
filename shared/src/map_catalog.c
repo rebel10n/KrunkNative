@@ -15,6 +15,7 @@
 #include <strike_maps.h>
 
 #include <ctype.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -393,17 +394,38 @@ static int array_of_three(const cJSON *item) {
     return cJSON_IsArray(item) && cJSON_GetArraySize(item) >= 3;
 }
 
+// The "xyz" size pool as numbers, read once: cJSON arrays are linked lists, and indexing the pool
+// per object (cJSON_GetArraySize + cJSON_GetArrayItem walk from its head) made sanitising a v7
+// map quadratic in its object count (doc/perf-audit.md). NaN marks a pool entry that is not a number.
+typedef struct {
+    double *v;
+    int n;
+} SizePool;
+
+static SizePool size_pool_read(const cJSON *xyz) {
+    SizePool pool = {NULL, 0};
+    if (!cJSON_IsArray(xyz)) return pool;
+    const int n = cJSON_GetArraySize(xyz);
+    pool.v = n > 0 ? malloc((size_t) n * sizeof(double)) : NULL;
+    if (!pool.v) return pool;
+    int i = 0;
+    for (const cJSON *item = xyz->child; item && i < n; item = item->next, i++) {
+        pool.v[i] = cJSON_IsNumber(item) ? cJSON_GetNumberValue(item) : NAN;
+    }
+    pool.n = i;
+    return pool;
+}
+
 // s = [xyz[si*3], xyz[si*3+1], xyz[si*3+2]] when the pool has three numbers there
-static cJSON *size_from_pool(const cJSON *object, const cJSON *xyz) {
+static cJSON *size_from_pool(const cJSON *object, const SizePool *pool) {
     const cJSON *si = cJSON_GetObjectItemCaseSensitive(object, "si");
-    if (!cJSON_IsNumber(si) || !cJSON_IsArray(xyz)) return NULL;
+    if (!cJSON_IsNumber(si) || !pool->v) return NULL;
     const int base = (int) cJSON_GetNumberValue(si) * 3;
-    if (base < 0 || base + 2 >= cJSON_GetArraySize(xyz)) return NULL;
+    if (base < 0 || base + 2 >= pool->n) return NULL;
     double v[3];
     for (int i = 0; i < 3; i++) {
-        const cJSON *n = cJSON_GetArrayItem(xyz, base + i);
-        if (!cJSON_IsNumber(n)) return NULL;
-        v[i] = cJSON_GetNumberValue(n);
+        v[i] = pool->v[base + i];
+        if (isnan(v[i])) return NULL;
     }
     return cJSON_CreateDoubleArray(v, 3);
 }
@@ -411,14 +433,19 @@ static cJSON *size_from_pool(const cJSON *object, const cJSON *xyz) {
 int map_sanitize_json(cJSON *map) {
     cJSON *objects = map ? cJSON_GetObjectItemCaseSensitive(map, "objects") : NULL;
     if (!cJSON_IsArray(objects)) return 0;
-    const cJSON *xyz = cJSON_GetObjectItemCaseSensitive(map, "xyz");
+    SizePool pool = {NULL, 0};
+    int pool_read = 0;
 
     int changed = 0;
     for (cJSON *object = objects->child, *next; object; object = next) {
         next = object->next;
         int keep = cJSON_IsObject(object) && array_of_three(cJSON_GetObjectItemCaseSensitive(object, "p"));
         if (keep && !array_of_three(cJSON_GetObjectItemCaseSensitive(object, "s"))) {
-            cJSON *size = size_from_pool(object, xyz);
+            if (!pool_read) { // only maps with pooled sizes pay for the pool
+                pool = size_pool_read(cJSON_GetObjectItemCaseSensitive(map, "xyz"));
+                pool_read = 1;
+            }
+            cJSON *size = size_from_pool(object, &pool);
             if (size) {
                 cJSON_DeleteItemFromObjectCaseSensitive(object, "s");
                 cJSON_AddItemToObject(object, "s", size);
@@ -433,6 +460,7 @@ int map_sanitize_json(cJSON *map) {
             changed++;
         }
     }
+    free(pool.v);
     return changed;
 }
 

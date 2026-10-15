@@ -381,8 +381,8 @@ static AoBox *ao_collect_boxes(const Map *map, const cJSON *objects, const int m
     size_t count = 0;
     if (!boxes) return NULL;
 
-    for (int i = 0; i < total; i++) {
-        const cJSON *t = cJSON_GetArrayItem(objects, i);
+    int i = 0;
+    for (const cJSON *t = objects ? objects->child : NULL; t && i < total; t = t->next, i++) { // list walk, not GetArrayItem(i)
         const cJSON *p = cJSON_GetObjectItem(t, "p");
         const cJSON *s = cJSON_GetObjectItem(t, "s");
         if (!map_raw_object_kept(t)) continue;

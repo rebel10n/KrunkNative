@@ -272,7 +272,14 @@ void gl_uniform_mat4(GlUniform *uniform, const unsigned int program, const int t
     if (gl_uniform_changed(entry, v, 17)) glUniformMatrix4fv(entry->location, 1, transpose ? GL_TRUE : GL_FALSE, m);
 }
 
+static unsigned int g_uniform_epoch;
+
+unsigned int gl_uniform_epoch(void) {
+    return g_uniform_epoch;
+}
+
 void gl_uniform_forget_program(const unsigned int program) {
+    g_uniform_epoch++; // memos of what a program holds (basic.c, scene.c) start over
     for (size_t i = 0; i < g_uniform_entry_count; i++) {
         GlUniformEntry *entry = g_uniform_entries[i];
         if (entry->program != program) continue;

@@ -1181,8 +1181,9 @@ Map *map_init_ex(const cJSON *raw_data, const int build_meshes) {
     }
 
     if (parsed_colors) {
-        for (int i = 0; i < cJSON_GetArraySize(colors); i++) {
-            const char *hex = cJSON_GetStringValue(cJSON_GetArrayItem(colors, i));
+        int i = 0;
+        for (const cJSON *item = colors->child; item; item = item->next, i++) {
+            const char *hex = cJSON_GetStringValue(item);
             vec4 color = {1.0f, 1.0f, 1.0f, 1.0f};
 
             if (hex) parse_hex_color(hex, &color);
@@ -1231,8 +1232,8 @@ Map *map_init_ex(const cJSON *raw_data, const int build_meshes) {
     if (build_meshes) prefab_begin_map(objects, colors);
 #endif
 
-    for (int i = 0; i < cJSON_GetArraySize(objects); i++) {
-        const cJSON *raw_obj = cJSON_GetArrayItem(objects, i);
+    // walk the list: cJSON_GetArrayItem(objects, i) starts at the head every time (quadratic)
+    for (const cJSON *raw_obj = objects->child; raw_obj; raw_obj = raw_obj->next) {
         const int prefab_id = map_raw_object_prefab(raw_obj);
 
         if (prefab_id == PREFAB_AI_SPAWNER) {

@@ -377,6 +377,11 @@ void scene_render(const Scene *scene, Camera *camera) {
     draw_count += transparent_count;
 
     int last_transparent = -1; // GL_BLEND as the last visible mesh leaves it, culled or not
+    // The camera uniforms are the same for every draw of this call: each program gets them once
+    // (the uniform cache would skip the repeats, but only after resolving and comparing 3 matrices
+    // per draw). Nothing else writes them on a program while this loop runs.
+    unsigned int camera_programs[16];
+    int camera_program_count = 0;
 
     for (size_t i = 0; i < draw_count; i++) {
         const Mesh *mesh = scene->meshes[indices[i]];
@@ -400,9 +405,14 @@ void scene_render(const Scene *scene, Camera *camera) {
         shadow_apply_mesh_uniforms(mesh); // sun shadow receiver uniforms (shadow.c)
 
         gl_uniform_mat4(&u_transform, program, GL_TRUE, mesh->transform_matrix);
-        gl_uniform_mat4(&u_camera_world_inverse, program, GL_TRUE, camera->world_inverse_matrix);
-        gl_uniform_mat4(&u_camera_projection, program, GL_TRUE, camera->projection_matrix);
-        gl_uniform_3f(&u_camera_position, program, camera->position.x, camera->position.y, camera->position.z); // Phong view vector
+        int camera_set = 0;
+        for (int p = 0; p < camera_program_count && !camera_set; p++) camera_set = camera_programs[p] == program;
+        if (!camera_set) {
+            gl_uniform_mat4(&u_camera_world_inverse, program, GL_TRUE, camera->world_inverse_matrix);
+            gl_uniform_mat4(&u_camera_projection, program, GL_TRUE, camera->projection_matrix);
+            gl_uniform_3f(&u_camera_position, program, camera->position.x, camera->position.y, camera->position.z); // Phong view vector
+            if (camera_program_count < 16) camera_programs[camera_program_count++] = program;
+        }
 
 #ifndef KN_GLES
         // OpenGL ES (WebGL2, ANGLE) has no glPolygonMode; wireframe materials render filled there.

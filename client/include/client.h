@@ -157,6 +157,7 @@ void gl_uniform_4f(GlUniform*, unsigned int program, float, float, float, float)
 void gl_uniform_mat3(GlUniform*, unsigned int program, int transpose, const float *m);
 void gl_uniform_mat4(GlUniform*, unsigned int program, int transpose, const float *m);
 void gl_uniform_forget_program(unsigned int program); // linked anew: locations and values are stale
+unsigned int gl_uniform_epoch(void); // changes whenever a program's cached uniform values were forgotten
 
 typedef struct {
     Material base;

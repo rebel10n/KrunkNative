@@ -16,6 +16,8 @@ static unsigned int shader_program = 0;
 static BasicLight g_lights[BASIC_MAX_LIGHTS];
 static unsigned char g_lights_used[BASIC_MAX_LIGHTS];
 static unsigned char g_lights_legacy[BASIC_MAX_LIGHTS];
+// Bumped by every change to the lights or the clip plane (basic_globals_unchanged's key).
+static unsigned int g_lights_gen = 1;
 
 int basic_lights_add(const BasicLight *light) {
     if (!light) return 0;
@@ -24,6 +26,7 @@ int basic_lights_add(const BasicLight *light) {
         g_lights[i] = *light;
         g_lights_used[i] = 1;
         g_lights_legacy[i] = 0;
+        g_lights_gen++;
         return i + 1;
     }
     return 0;
@@ -32,6 +35,7 @@ int basic_lights_add(const BasicLight *light) {
 void basic_lights_update(const int handle, const BasicLight *light) {
     if (handle < 1 || handle > BASIC_MAX_LIGHTS || !light || !g_lights_used[handle - 1]) return;
     g_lights[handle - 1] = *light;
+    g_lights_gen++;
 }
 
 static BasicLight g_lights_override[BASIC_MAX_LIGHTS];
@@ -41,12 +45,14 @@ void basic_lights_override(const BasicLight *lights, int count) {
     if (count > BASIC_MAX_LIGHTS) count = BASIC_MAX_LIGHTS;
     if (count > 0 && lights) memcpy(g_lights_override, lights, (size_t) count * sizeof(BasicLight));
     g_lights_override_count = lights || count <= 0 ? count : -1;
+    g_lights_gen++;
 }
 
 void basic_lights_remove(const int handle) {
     if (handle < 1 || handle > BASIC_MAX_LIGHTS) return;
     g_lights_used[handle - 1] = 0;
     g_lights_legacy[handle - 1] = 0;
+    g_lights_gen++;
 }
 
 static float g_clip_plane[4];
@@ -55,6 +61,7 @@ static int g_clip_enabled;
 void basic_material_set_clip_plane(const float plane[4]) {
     g_clip_enabled = plane != NULL;
     if (plane) memcpy(g_clip_plane, plane, sizeof(g_clip_plane));
+    g_lights_gen++;
 }
 
 void basic_material_set_point_lights(const BasicPointLight *lights, int count) {
@@ -215,6 +222,54 @@ static void basic_upload_lights(const unsigned int program, const int lighting) 
     gl_uniform_1i(&u_point_light_count, program, count);
 }
 
+// The scene-wide uniforms only this file writes (sun, ambient, lighting mode, the light arrays,
+// the clip plane) are the same for every draw of a program until one of their inputs changes.
+// One key per program records what was last uploaded; an unchanged key skips the ~25 cached
+// uniform calls and the light-array rebuild a draw (doc/perf-audit.md). The fog and tone-mapping
+// uniforms are not in it: other files write those names too, so they keep their per-draw calls.
+typedef struct {
+    unsigned int program, epoch, lights_gen;
+    int lighting, enabled, correct_lights;
+    float light_units;
+    vec4 ambient_color, light_color;
+    vec3 light_direction;
+    float ambient_intensity, light_intensity;
+} BasicGlobalsKey;
+
+#define BASIC_GLOBALS_MEMO 16
+static BasicGlobalsKey g_globals_memo[BASIC_GLOBALS_MEMO];
+
+// 1 when `program` already holds the globals for these inputs; else records them (the caller
+// uploads them now).
+static int basic_globals_unchanged(const unsigned int program, const int lighting, const float light_units) {
+    BasicGlobalsKey key;
+    memset(&key, 0, sizeof(key)); // padding included: keys are compared with memcmp
+    key.program = program;
+    key.epoch = gl_uniform_epoch();
+    key.lights_gen = g_lights_gen;
+    key.lighting = lighting;
+    key.enabled = g_render_lighting.enabled;
+    key.correct_lights = g_render_lighting.correct_lights;
+    key.light_units = light_units;
+    key.ambient_color = g_render_lighting.ambient_color;
+    key.light_color = g_render_lighting.light_color;
+    key.light_direction = g_render_lighting.light_direction;
+    key.ambient_intensity = g_render_lighting.ambient_intensity;
+    key.light_intensity = g_render_lighting.light_intensity;
+    int slot = -1;
+    for (int i = 0; i < BASIC_GLOBALS_MEMO; i++) {
+        if (g_globals_memo[i].program == program) {
+            if (!memcmp(&g_globals_memo[i], &key, sizeof(key))) return 1;
+            slot = i;
+            break;
+        }
+        if (slot < 0 && !g_globals_memo[i].program) slot = i;
+    }
+    if (slot < 0) slot = (int) (program % BASIC_GLOBALS_MEMO); // full: evict one
+    g_globals_memo[slot] = key;
+    return 0;
+}
+
 void basic_material_update_uniforms(Material *base) {
     BasicMaterial *material = (BasicMaterial *) base;
     const unsigned int program = material->base.program;
@@ -257,34 +312,35 @@ void basic_material_update_uniforms(Material *base) {
 
     gl_uniform_4f(&u_color, program, material->color.x, material->color.y, material->color.z, material->color.w);
     gl_uniform_4f(&u_emissive, program, material->emissive.x, material->emissive.y, material->emissive.z, material->emissive.w);
-    gl_uniform_4f(&u_ambient_color, program, g_render_lighting.ambient_color.x, g_render_lighting.ambient_color.y, g_render_lighting.ambient_color.z, g_render_lighting.ambient_color.w);
-    gl_uniform_4f(&u_light_color, program, g_render_lighting.light_color.x, g_render_lighting.light_color.y, g_render_lighting.light_color.z, g_render_lighting.light_color.w);
     gl_uniform_4f(&u_fog_color, program, g_render_lighting.fog_color.x, g_render_lighting.fog_color.y, g_render_lighting.fog_color.z, g_render_lighting.fog_color.w);
-    gl_uniform_3f(&u_light_direction, program, g_render_lighting.light_direction.x, g_render_lighting.light_direction.y, g_render_lighting.light_direction.z);
-    // v10 sceneInit: ambientI / lightI * lightIntensityScaling (L201738, L201743)
-    const float light_units = ruleset_current()->light_unit_factor;
-    gl_uniform_1f(&u_ambient_intensity, program, g_render_lighting.ambient_intensity * light_units);
-    gl_uniform_1f(&u_light_intensity, program, g_render_lighting.light_intensity * light_units);
     gl_uniform_1f(&u_fog_near, program, g_render_lighting.fog_near);
     gl_uniform_1f(&u_fog_far, program, g_render_lighting.fog_far);
-    gl_uniform_1i(&u_lighting_enabled, program, g_render_lighting.enabled);
     gl_uniform_1i(&u_fog_enabled, program, g_render_lighting.fog_enabled);
+    // v10 sceneInit: ambientI / lightI * lightIntensityScaling (L201738, L201743)
+    const float light_units = ruleset_current()->light_unit_factor;
+    if (!basic_globals_unchanged(program, render_settings->lighting, light_units)) {
+        gl_uniform_4f(&u_ambient_color, program, g_render_lighting.ambient_color.x, g_render_lighting.ambient_color.y, g_render_lighting.ambient_color.z, g_render_lighting.ambient_color.w);
+        gl_uniform_4f(&u_light_color, program, g_render_lighting.light_color.x, g_render_lighting.light_color.y, g_render_lighting.light_color.z, g_render_lighting.light_color.w);
+        gl_uniform_3f(&u_light_direction, program, g_render_lighting.light_direction.x, g_render_lighting.light_direction.y, g_render_lighting.light_direction.z);
+        gl_uniform_1f(&u_ambient_intensity, program, g_render_lighting.ambient_intensity * light_units);
+        gl_uniform_1f(&u_light_intensity, program, g_render_lighting.light_intensity * light_units);
+        gl_uniform_1i(&u_lighting_enabled, program, g_render_lighting.enabled);
+        // lighting (restart in v7.1.4; applied per draw here): 0 Basic, 1 Lambert, 2 Phong,
+        // 3 Physical (MeshStandardMaterial, roughness 1, metalness 0)
+        gl_uniform_1i(&u_lighting_mode, program, render_settings->lighting);
+        basic_upload_lights(program, render_settings->lighting);
+        gl_uniform_1i(&u_correct_lights, program, g_render_lighting.correct_lights);
+        gl_uniform_1i(&u_clip_enabled, program, g_clip_enabled);
+        if (g_clip_enabled) gl_uniform_4f(&u_clip_plane, program, g_clip_plane[0], g_clip_plane[1], g_clip_plane[2], g_clip_plane[3]);
+    }
 
     gl_uniform_mat3(&u_tex_transform, program, GL_TRUE, transform);
     gl_uniform_1i(&u_tex, program, 0);
-
-    // lighting (restart in v7.1.4; applied per draw here): 0 Basic, 1 Lambert, 2 Phong,
-    // 3 Physical (MeshStandardMaterial, roughness 1, metalness 0)
-    gl_uniform_1i(&u_lighting_mode, program, render_settings->lighting);
-    basic_upload_lights(program, render_settings->lighting);
     gl_uniform_1i(&u_tex_srgb, program, material->texture_srgb);
     gl_uniform_1i(&u_sprite, program, material->sprite);
-    gl_uniform_1i(&u_correct_lights, program, g_render_lighting.correct_lights);
     gl_uniform_1i(&u_tone_mapping, program, g_render_lighting.tone_mapping);
     gl_uniform_1f(&u_tone_mapping_exposure, program, g_render_lighting.tone_mapping_exposure);
     gl_uniform_1i(&u_output_encoding, program, g_render_lighting.output_encoding);
-    gl_uniform_1i(&u_clip_enabled, program, g_clip_enabled);
-    if (g_clip_enabled) gl_uniform_4f(&u_clip_plane, program, g_clip_plane[0], g_clip_plane[1], g_clip_plane[2], g_clip_plane[3]);
 
     // liquids: 55.js render() adds delta * 0.003 to liquidVal every frame and re-displaces the
     // vertices every liquidFreq (50) ms; objectAnim off never displaces them (flat)
