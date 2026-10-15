@@ -42,7 +42,11 @@ static void probe_done(void *user, const int status, const char *body, const siz
     (void) length;
     g_probing = 0;
     g_avail = status == 200 && strstr(body, "\"brain\"") ? 1 : 0;
-    printf("[backend] %s %s\n", g_avail ? "brain found at" : "no brain (GET /mm/status) at", backend_url());
+    if (g_avail) printf("[backend] brain found at %s\n", backend_url());
+    // e.g. `make web-serve`, or `make bridge` with no kn_brain behind it: say what that means rather
+    // than leave it to a failing /social/ws (none is attempted) or a silent guest menu
+    else printf("[backend] no account server at %s (GET /mm/status: HTTP %d): social features are off, playing as a guest "
+                "(run kn_brain, e.g. make backend-up, or pass ?brain=<url>)\n", backend_url(), status);
     if (g_avail && g_social_wanted) backend_social_open();
 }
 
