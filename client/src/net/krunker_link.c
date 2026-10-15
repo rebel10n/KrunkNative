@@ -17,6 +17,7 @@
 //     (recon.c, NET_PACKET_INPUT_BATCH): that window becomes one delta-compressed "q".
 //   - cosmetics / skins / account fields are not mapped (a guest has none): SPAWNs carry none.
 #include <krunker_link.h>
+#include "krunker_link_internal.h" // krunker_link_world.c: mode objectives / world objects
 #include <krunker_cheat.h>
 #include <krunker_altcha.h>
 #include <cJSON.h>
@@ -83,6 +84,7 @@ static void emit(KrunkerLink *l, const uint8_t type, const void *payload, const 
     if (length) memcpy(packet.payload, payload, length);
     l->io.emit(l->io.user, &packet);
 }
+void krunker_link_emit(KrunkerLink *l, const uint8_t type, const void *payload, const uint16_t length) { emit(l, type, payload, length); }
 
 static KrunkerLinkPlayer *player(KrunkerLink *l, const int sid, const int create) {
     for (int i = 0; i < l->player_count; i++) {
@@ -1367,12 +1369,18 @@ static void on_init_hud(KrunkerLink *l, const KrunkerFrame *f) {
         l->flags[slot].carrier = (int) num(krunker_at(e, 4), 0);
         emit_flag(l, slot);
     }
+    // obj [uid, ms]: mode.objWep ? setWeapon(obj[0]) : setObjective(obj[0], obj[1], true) (:219395)
     const KrunkerValue *obj = krunker_get(sync, "obj");
-    if (krunker_is(krunker_at(obj, 0), KRUNKER_NUM)) {
-        const NetObjectiveV7Packet o = {.uid = (int32_t) krunker_at(obj, 0)->u.num, .time_ms = (int32_t) num(krunker_at(obj, 1), 0), .initial = 0};
+    const GameModeConfig *mode = mode_config(l->mode);
+    if (krunker_is(krunker_at(obj, 0), KRUNKER_NUM) && mode && mode->obj_weapon) {
+        const NetObjectivePacket o = {.kind = NET_OBJECTIVE_WEAPON, .value = (int32_t) krunker_at(obj, 0)->u.num};
+        emit(l, NET_PACKET_OBJECTIVE, &o, sizeof(o));
+    } else if (krunker_is(krunker_at(obj, 0), KRUNKER_NUM)) {
+        const NetObjectiveV7Packet o = {.uid = (int32_t) krunker_at(obj, 0)->u.num, .time_ms = (int32_t) num(krunker_at(obj, 1), 0), .initial = 1};
         emit(l, NET_PACKET_OBJECTIVE_V7, &o, sizeof(o));
     }
     zone_packet(l, krunker_get(sync, "zone"));
+    krunker_link_world_init(l, f); // round wins / roundC / lockT, dest, mov, spwns, pkups, gates, banks, dyno, gbl, doms, zombies
 }
 
 // "cc" CHEAT_CHECK [nonce, unused, ciphertextB64] -> "ccr" [nonce, payloadB64, fnvHex]
@@ -2197,9 +2205,11 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         case KRUNKER_S2C_ACTION_FEED: on_action(l, &f); break;
         case KRUNKER_S2C_ADD_CHATI18N: on_chat_i18n(l, &f); break;
         case KRUNKER_S2C_UPDATE_HOST: on_update_host(l, &f); break;
-        default: // combat visuals / sounds (fx), else not translated
-            if (!on_fx(l, krunker_s2c_lookup(f.name, f.name_len), &f)) l->unknown_in++;
+        default: { // combat visuals / sounds (fx); the mode objectives / world objects / AI / zombies / map triggers (krunker_link_world.c)
+            const KrunkerS2C id = (KrunkerS2C) krunker_s2c_lookup(f.name, f.name_len);
+            if (!on_fx(l, id, &f) && !krunker_link_world_frame(l, id, &f)) l->unknown_in++;
             break;
+        }
     }
     krunker_frame_free(&f);
     return 1;

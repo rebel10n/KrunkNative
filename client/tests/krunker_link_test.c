@@ -9,7 +9,7 @@
 #include <ruleset.h>
 #include <zombies.h>
 #include <social_v7.h>
-#include <ai.h>
+#include <ai.h> // test_fx / test_world: the AI packets
 #include <krunker_sounds.h>
 #include <cJSON.h>
 #include <math.h>
@@ -53,7 +53,8 @@ static const char *const k_ctf_lead[] = {"caps", "score", NULL};
 static const char *const k_ctf_end[] = {"sid", "name", "score", "kills", "deaths", "caps", "reward", NULL};
 const GameModeConfig *mode_config(const int id) {
     static const GameModeConfig ctf = {.leader_stats = k_ctf_lead, .end_stats = k_ctf_end};
-    return id == 3 ? &ctf : NULL;
+    static const GameModeConfig shrp = {.obj_weapon = 1}, parkour = {.show_ms = 1}; // test_world: 22, 5
+    return id == 3 ? &ctf : id == 22 ? &shrp : id == 5 ? &parkour : NULL;
 }
 
 static int fake_cheat(void *user, const char *nonce, const char *ct, KrunkerCcr *out) {
@@ -198,7 +199,7 @@ static void test_hud(void) {
         CHECK(fl_p && fl.index == 1 && fl.flag.carrier_uid == 7 && fl.flag.position[1] == 5.0f && fl.flag.team == 0 && !fl.info[0],
               "init: flag uid 41 is index 1, carried by 7");
         READ_IN(NetObjectiveV7Packet, o, OBJECTIVE_V7, 0);
-        CHECK(o_p && o.uid == 3 && o.time_ms == 5000 && !o.initial, "init: objective 3, 5 s");
+        CHECK(o_p && o.uid == 3 && o.time_ms == 5000 && o.initial, "init: objective 3, 5 s (setObjective(.., true))");
         READ_IN(NetZonePacket, z, ZONE, 0);
         CHECK(z_p && z.x == 10 && z.z == 20 && z.size_x == 30 && z.size_z == 40, "init: zone");
     }
@@ -779,6 +780,287 @@ static void test_fx(void) {
         CHECK(link.unknown_in == 0, "every fx packet translated (%u unknown)", link.unknown_in);
     }
     clear();
+}
+
+// krunker_link_world.c: mode objectives, world objects, AI, zombies, loadouts, map triggers
+static void test_world(void) {
+    KrunkerLink link;
+    const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
+    krunker_link_init(&link, &io, KRUNKER_AHKEY);
+    feed(&link, "io-init", (KrunkerValue[]) {KRUNKER_V_STR("sockA")}, 1);
+    KrunkerValue add[2 * 53];
+    for (int i = 0; i < 2 * 53; i++) add[i] = KRUNKER_V_NIL;
+    add[0] = KRUNKER_V_STR("sockA"); add[1] = KRUNKER_V_NUM(9); add[8] = KRUNKER_V_NUM(100);
+    add[53] = KRUNKER_V_STR("sockB"); add[54] = KRUNKER_V_NUM(7); add[61] = KRUNKER_V_NUM(100);
+    feed(&link, "0", (KrunkerValue[]) {KRUNKER_V_ARRAY(add, 2 * 53)}, 1);
+    clear();
+
+    // init (Domination 25): round wins, syncData roundC / lockT / dest / mov / spwns / pkups / gates /
+    // banks / dyno / gbl / doms / mybx / krm / pwup
+    const KrunkerValue w1[] = {KRUNKER_V_NUM(1), KRUNKER_V_NUM(2)}, w2[] = {KRUNKER_V_NUM(2), KRUNKER_V_NUM(1)};
+    const KrunkerValue wins[] = {KRUNKER_V_ARRAY(w1, 2), KRUNKER_V_ARRAY(w2, 2)};
+    const KrunkerValue dest[] = {KRUNKER_V_NUM(12), KRUNKER_V_NUM(13)};
+    const KrunkerValue mov[] = {KRUNKER_V_NUM(20), KRUNKER_V_NUM(4)};
+    const KrunkerValue sp_data[] = {KRUNKER_V_STR("c"), KRUNKER_V_NUM(3)};
+    const KrunkerValue sp0[] = {KRUNKER_V_NUM(3), KRUNKER_V_NUM(501), KRUNKER_V_NUM(1), KRUNKER_V_NUM(2), KRUNKER_V_NUM(3), KRUNKER_V_NUM(2),
+                                KRUNKER_V_MAP(sp_data, 1)};
+    const KrunkerValue spwns[] = {KRUNKER_V_ARRAY(sp0, 7)};
+    const KrunkerValue pos[] = {KRUNKER_V_NUM(7), KRUNKER_V_NUM(8), KRUNKER_V_NUM(9)};
+    const KrunkerValue pk0[] = {KRUNKER_V_NUM(30), KRUNKER_V_NUM(3), KRUNKER_V_NIL, KRUNKER_V_BOOL(1), KRUNKER_V_ARRAY(pos, 3)};
+    const KrunkerValue pkups[] = {KRUNKER_V_ARRAY(pk0, 5)};
+    const KrunkerValue gates[] = {KRUNKER_V_NUM(40), KRUNKER_V_BOOL(1)};
+    const KrunkerValue banks[] = {KRUNKER_V_NUM(41), KRUNKER_V_NUM(250)};
+    const KrunkerValue dy0[] = {KRUNKER_V_NUM(1), KRUNKER_V_NUM(10), KRUNKER_V_NUM(20), KRUNKER_V_NUM(30), KRUNKER_V_NUM(8),
+                                KRUNKER_V_NUM(4), KRUNKER_V_NUM(8), KRUNKER_V_NUM(0), KRUNKER_V_NUM(2000)};
+    const KrunkerValue dyno[] = {KRUNKER_V_ARRAY(dy0, 9)};
+    const KrunkerValue gbl[] = {KRUNKER_V_STR("door"), KRUNKER_V_NUM(1), KRUNKER_V_STR("lvl"), KRUNKER_V_NUM(3)};
+    const KrunkerValue doms[] = {KRUNKER_V_NUM(0), KRUNKER_V_NUM(1), KRUNKER_V_NUM(1), KRUNKER_V_NIL};
+    const KrunkerValue mybx[] = {KRUNKER_V_NUM(50), KRUNKER_V_BOOL(1), KRUNKER_V_NUM(2), KRUNKER_V_NUM(3000), KRUNKER_V_NUM(4), KRUNKER_V_NIL};
+    const KrunkerValue pwup[] = {KRUNKER_V_NUM(0), KRUNKER_V_NUM(9000), KRUNKER_V_NUM(0)};
+    const KrunkerValue sync[] = {KRUNKER_V_STR("roundC"), KRUNKER_V_NUM(2), KRUNKER_V_STR("lockT"), KRUNKER_V_NUM(4500),
+                                 KRUNKER_V_STR("dest"), KRUNKER_V_ARRAY(dest, 2), KRUNKER_V_STR("mov"), KRUNKER_V_ARRAY(mov, 2),
+                                 KRUNKER_V_STR("spwns"), KRUNKER_V_ARRAY(spwns, 1), KRUNKER_V_STR("pkups"), KRUNKER_V_ARRAY(pkups, 1),
+                                 KRUNKER_V_STR("gates"), KRUNKER_V_ARRAY(gates, 2), KRUNKER_V_STR("banks"), KRUNKER_V_ARRAY(banks, 2),
+                                 KRUNKER_V_STR("dyno"), KRUNKER_V_ARRAY(dyno, 1), KRUNKER_V_STR("gbl"), KRUNKER_V_ARRAY(gbl, 4),
+                                 KRUNKER_V_STR("doms"), KRUNKER_V_ARRAY(doms, 4), KRUNKER_V_STR("mybx"), KRUNKER_V_ARRAY(mybx, 6),
+                                 KRUNKER_V_STR("pwup"), KRUNKER_V_ARRAY(pwup, 3)};
+    KrunkerValue init[12];
+    for (int i = 0; i < 12; i++) init[i] = KRUNKER_V_NIL;
+    init[0] = KRUNKER_V_NUM(10);
+    init[1] = KRUNKER_V_NUM(25);
+    init[3] = KRUNKER_V_ARRAY(wins, 2);
+    init[11] = KRUNKER_V_MAP(sync, 13);
+    feed(&link, "init", init, 12);
+    {
+        READ_IN(NetModeSyncV7Packet, ms, MODE_SYNC_V7, 0);
+        CHECK(ms_p && ms.rounds_left == 2 && ms.lockout_ms == 4500 && ms.has_round_wins && ms.team_round_wins[1] == 2 &&
+              ms.team_round_wins[2] == 1 && ms.objective_uid == -1, "init: MODE_SYNC_V7 roundC 2, lockT, round wins 2 / 1");
+        READ_IN(NetObjectStatePacket, d0, OBJECT_STATE, 0);
+        READ_IN(NetObjectStatePacket, d1, OBJECT_STATE, 1);
+        READ_IN(NetObjectStatePacket, mv, OBJECT_STATE, 2);
+        READ_IN(NetObjectStatePacket, gt, OBJECT_STATE, 3);
+        READ_IN(NetObjectStatePacket, bk, OBJECT_STATE, 4);
+        CHECK(d0_p && d0.uid == 12 && d0.kind == NET_OBJECT_DESTROY && d1_p && d1.uid == 13 && mv_p && mv.uid == 20 &&
+              mv.kind == NET_OBJECT_MOVE_TO_NODE && mv.value == 4 && gt_p && gt.uid == 40 && gt.kind == NET_OBJECT_GATE && gt.value == 1 &&
+              bk_p && bk.uid == 41 && bk.kind == NET_OBJECT_BANK && bk.value == 250, "init: dest / mov / gates / banks");
+        READ_IN(NetSpawnableV7Packet, sp, SPAWNABLE_V7, 0);
+        CHECK(sp_p && sp.type == 3 && sp.sid == 501 && sp.active && sp.team == 2 && sp.position[2] == 3.0f && sp.data_c == 3 && sp.data_w == -1,
+              "init: spwns -> a KR Tag (c 3)");
+        READ_IN(NetPickupPacket, pk, PICKUP, 0);
+        CHECK(pk_p && pk.uid == 30 && pk.weapon == 3 && pk.active && pk.moved && pk.position[1] == 8.0f && pk.ammo == 13,
+              "init: pkups (ammo = the weapon's own, %d)", pk.ammo);
+        READ_IN(NetBuildPacket, bo, BUILD, 0);
+        CHECK(bo_p && bo.uid == 2000 && bo.build_index == 1 && bo.position[1] == 18.0f && bo.size[1] == 4.0f, "init: dyno centred (y 20 - 4 / 2)");
+        READ_IN(NetValuePacket, g0, GLOBAL_VALUE, 0);
+        READ_IN(NetValuePacket, g1, GLOBAL_VALUE, 1);
+        CHECK(g0_p && !strcmp(g0.key, "door") && g0.value == 1 && (g0.flags & NET_VALUE_RESET) && g1_p && !strcmp(g1.key, "lvl") && !g1.flags,
+              "init: gbl, the first resets");
+        READ_IN(NetDomUpdatePacket, dm, DOM_UPDATE, 0);
+        CHECK(dm_p && dm.count == 2 && dm.zones[0].uid == 0 && dm.zones[0].captured_by == 1 && dm.zones[0].mlt == 1.0f && dm.zones[1].uid == 1 &&
+              !dm.zones[1].captured_by, "init: doms");
+        READ_IN(NetZombieMachinePacket, mb, ZOMBIE_MACHINE, 0);
+        CHECK(mb_p && mb.kind == ZOMBIE_MACHINE_MYSTERY_BOX && mb.uid == 50 && mb.active && mb.state == 2 && mb.timer == 3000.0f &&
+              mb.pending_weapon == 4 && mb.purchased_by == ZOMBIES_NONE, "init: mybx");
+        READ_IN(NetPowerupPacket, pw, POWERUP, 1);
+        CHECK(pw_p && pw.index == 1 && pw.ms == 9000, "init: pwup fire sale 9 s");
+    }
+    clear();
+
+    // Domination: uct (stride 6), cct
+    const KrunkerValue on1[] = {KRUNKER_V_NUM(1)}, on2[] = {KRUNKER_V_NUM(1), KRUNKER_V_NUM(2)};
+    const KrunkerValue uct[] = {KRUNKER_V_NUM(0), KRUNKER_V_NIL, KRUNKER_V_NUM(2500), KRUNKER_V_NUM(1), KRUNKER_V_ARRAY(on1, 1), KRUNKER_V_NUM(2),
+                                KRUNKER_V_NUM(2), KRUNKER_V_NUM(2), KRUNKER_V_NUM(0), KRUNKER_V_NIL, KRUNKER_V_ARRAY(on2, 2), KRUNKER_V_NIL};
+    feed(&link, "uct", (KrunkerValue[]) {KRUNKER_V_ARRAY(uct, 12)}, 1);
+    feed(&link, "cct", (KrunkerValue[]) {KRUNKER_V_NUM(1), KRUNKER_V_NUM(2)}, 2);
+    {
+        READ_IN(NetDomUpdatePacket, d, DOM_UPDATE, 0);
+        CHECK(d_p && d.count == 2 && !d.zones[0].captured_by && d.zones[0].capture_t == 2500.0f && d.zones[0].last_team_on == 1 &&
+              d.zones[0].teams_on_count == 1 && d.zones[0].mlt == 2.0f && d.zones[1].captured_by == 2 && d.zones[1].teams_on_count == 2 &&
+              d.zones[1].teams_on[1] == 2 && d.zones[1].mlt == 1.0f, "uct: two zones");
+        READ_IN(NetDomCapturePacket, c, DOM_CAPTURE, 0);
+        CHECK(c_p && c.uid == 1 && c.team == 2, "cct: zone 1 by team 2");
+    }
+    clear();
+
+    // crsp / dsp, do / ro / gte / bnk / mo / mf, bo
+    const KrunkerValue wb[] = {KRUNKER_V_STR("wId"), KRUNKER_V_NUM(6), KRUNKER_V_STR("xD"), KRUNKER_V_NUM(1.5)};
+    feed(&link, "crsp", (KrunkerValue[]) {KRUNKER_V_NUM(6), KRUNKER_V_NUM(77), KRUNKER_V_NUM(5), KRUNKER_V_NUM(6), KRUNKER_V_NUM(7), KRUNKER_V_NUM(0),
+                                          KRUNKER_V_MAP(wb, 2)}, 7);
+    feed(&link, "dsp", (KrunkerValue[]) {KRUNKER_V_NUM(77)}, 1);
+    feed(&link, "do", (KrunkerValue[]) {KRUNKER_V_NUM(5)}, 1);
+    feed(&link, "ro", (KrunkerValue[]) {KRUNKER_V_NUM(5)}, 1);
+    feed(&link, "gte", (KrunkerValue[]) {KRUNKER_V_NUM(6), KRUNKER_V_BOOL(0)}, 2);
+    feed(&link, "bnk", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_NUM(30)}, 2);
+    feed(&link, "mo", (KrunkerValue[]) {KRUNKER_V_NUM(8), KRUNKER_V_NUM(2)}, 2);
+    feed(&link, "mf", (KrunkerValue[]) {KRUNKER_V_NUM(8)}, 1);
+    feed(&link, "bo", (KrunkerValue[]) {KRUNKER_V_NUM(2), KRUNKER_V_NUM(1), KRUNKER_V_NUM(2), KRUNKER_V_NUM(3), KRUNKER_V_NUM(10), KRUNKER_V_NUM(20),
+                                        KRUNKER_V_NUM(30), KRUNKER_V_NUM(3), KRUNKER_V_NUM(2001)}, 9);
+    {
+        READ_IN(NetSpawnableV7Packet, a, SPAWNABLE_V7, 0);
+        READ_IN(NetSpawnableV7Packet, b, SPAWNABLE_V7, 1);
+        CHECK(a_p && a.type == 6 && a.sid == 77 && a.active && a.data_w == 6 && a.data_xd == 1.5f && a.position[1] == 6.0f && b_p && b.sid == 77 &&
+              !b.active, "crsp weapon box, dsp");
+        int kinds[6] = {-1, -1, -1, -1, -1, -1}, values[6] = {0};
+        for (int i = 0; i < 6; i++) {
+            READ_IN(NetObjectStatePacket, o, OBJECT_STATE, i);
+            if (o_p) kinds[i] = o.kind, values[i] = o.value;
+        }
+        CHECK(kinds[0] == NET_OBJECT_DESTROY && kinds[1] == NET_OBJECT_RESPAWN && kinds[2] == NET_OBJECT_GATE && values[2] == 0 &&
+              kinds[3] == NET_OBJECT_BANK && values[3] == 30 && kinds[4] == NET_OBJECT_MOVE_TO_NODE && values[4] == 2 &&
+              kinds[5] == NET_OBJECT_MOVE_FROM_NODE, "do / ro / gte / bnk / mo / mf");
+        READ_IN(NetBuildPacket, bo, BUILD, 0);
+        CHECK(bo_p && bo.uid == 2001 && bo.build_index == 2 && bo.direction == 3 && bo.position[1] == 2.0f && bo.size[0] == 10.0f &&
+              bo.size[2] == 30.0f, "bo: not centred");
+    }
+    clear();
+
+    // airdrops, AI
+    const KrunkerValue ad[] = {KRUNKER_V_NUM(2), KRUNKER_V_NUM(300), KRUNKER_V_NUM(1), KRUNKER_V_NUM(400), KRUNKER_V_NUM(3), KRUNKER_V_NUM(5)};
+    feed(&link, "ad", (KrunkerValue[]) {KRUNKER_V_ARRAY(ad, 6)}, 1);
+    feed(&link, "rad", (KrunkerValue[]) {KRUNKER_V_NUM(2)}, 1);
+    feed(&link, "krp", (KrunkerValue[]) {KRUNKER_V_NUM(9), KRUNKER_V_NUM(7)}, 2);
+    KrunkerValue ai[17 * 9];
+    for (int i = 0; i < 17; i++) {
+        const KrunkerValue e[9] = {KRUNKER_V_NUM(100 + i), KRUNKER_V_NUM(i), KRUNKER_V_NUM(1), KRUNKER_V_NUM(2), KRUNKER_V_NUM(0.5),
+                                   KRUNKER_V_NUM(0), KRUNKER_V_NUM(80), KRUNKER_V_BOOL(1), KRUNKER_V_NUM(2)};
+        memcpy(&ai[i * 9], e, sizeof(e));
+    }
+    feed(&link, "ai", (KrunkerValue[]) {KRUNKER_V_ARRAY(ai, 17 * 9)}, 1);
+    feed(&link, "ai", (KrunkerValue[]) {KRUNKER_V_NUM(0)}, 1);
+    const KrunkerValue dat[] = {KRUNKER_V_STR("hasAnim"), KRUNKER_V_NUM(1), KRUNKER_V_STR("health"), KRUNKER_V_NUM(500),
+                                KRUNKER_V_STR("asset"), KRUNKER_V_NUM(0), KRUNKER_V_STR("src"), KRUNKER_V_STR("ghost_0"),
+                                KRUNKER_V_STR("team"), KRUNKER_V_NUM(2)};
+    const KrunkerValue aai[] = {KRUNKER_V_NUM(100), KRUNKER_V_NUM(3), KRUNKER_V_STR("Zombie"), KRUNKER_V_NUM(1), KRUNKER_V_NUM(2),
+                                KRUNKER_V_NUM(3), KRUNKER_V_MAP(dat, 5)};
+    feed(&link, "aai", (KrunkerValue[]) {KRUNKER_V_ARRAY(aai, 7)}, 1);
+    feed(&link, "rai", (KrunkerValue[]) {KRUNKER_V_NUM(100)}, 1);
+    {
+        READ_IN(NetAirDropPacket, d, AIRDROP, 0);
+        CHECK(d_p && d.sid == 2 && d.fall == 300.0f && d.position[1] == 400.0f && d.index == 5 && d.owner_uid == -1, "ad");
+        READ_IN(NetAirDropRemovePacket, r, AIRDROP_REMOVE, 0);
+        READ_IN(NetAirDropClaimPacket, c, AIRDROP_CLAIM, 0);
+        CHECK(r_p && r.sid == 2 && c_p && c.owner_uid == 9 && c.claimer_uid == 7, "rad, krp");
+        READ_IN(NetAISyncV7Packet, s0, AI_SYNC_V7, 0);
+        READ_IN(NetAISyncV7Packet, s1, AI_SYNC_V7, 1);
+        READ_IN(NetAISyncV7Packet, s2, AI_SYNC_V7, 2);
+        CHECK(s0_p && s0.first && s0.count == 16 && s0.entries[3].sid == 103 && s0.entries[3].position[0] == 3.0f && s0.entries[3].health == 80 &&
+              s0.entries[3].did_move && s0.entries[3].team == 2 && s1_p && !s1.first && s1.count == 1 && s1.entries[0].sid == 116 && s2_p &&
+              s2.first && !s2.count, "ai: 17 AIs in two chunks (hideAll once), then none");
+        READ_IN(NetAIAddV7Packet, a, AI_ADD_V7, 0);
+        CHECK(a_p && a.sid == 100 && a.index == 3 && !strcmp(a.name, "Zombie") && a.has_data && a.has_anim && a.max_health == 500.0f && !a.asset[0] &&
+              !strcmp(a.src, "ghost_0") && a.team == 2 && a.position[2] == 3.0f, "aai");
+        READ_IN(NetAIRemovePacket, rm, AI_REMOVE, 0);
+        CHECK(rm_p && rm.sid == 100, "rai");
+    }
+    clear();
+
+    // messages: gmsg (wt + suffix, a text popup), tx, lkt, chp, gt (Parkour's showMS)
+    feed(&link, "gmsg", (KrunkerValue[]) {KRUNKER_V_STR("wt")}, 1);
+    feed(&link, "gmsg", (KrunkerValue[]) {KRUNKER_V_STR("wt"), KRUNKER_V_STR("01:00")}, 2);
+    const KrunkerValue pop[] = {KRUNKER_V_STR("Bomb"), KRUNKER_V_STR("Planted")};
+    feed(&link, "gmsg", (KrunkerValue[]) {KRUNKER_V_STR("next round in"), KRUNKER_V_STR("00:05"), KRUNKER_V_NUM(3), KRUNKER_V_ARRAY(pop, 2)}, 4);
+    feed(&link, "gmsg", NULL, 0);
+    feed(&link, "tx", (KrunkerValue[]) {KRUNKER_V_STR("Overtime"), KRUNKER_V_STR("+60 Seconds")}, 2);
+    feed(&link, "lkt", (KrunkerValue[]) {KRUNKER_V_NUM(90500)}, 1);
+    feed(&link, "chp", (KrunkerValue[]) {KRUNKER_V_BOOL(0)}, 1);
+    feed(&link, "chp", (KrunkerValue[]) {KRUNKER_V_BOOL(1)}, 1);
+    {
+        const char *want[] = {"wt", "wt 01:00", "next round in 00:05", "", "warmup starts in  01:30"};
+        int ok = 1;
+        for (int i = 0; i < 5; i++) {
+            READ_IN(NetGameMessagePacket, m, GAME_MESSAGE, i);
+            if (!m_p || strcmp(m.text, want[i])) {
+                ok = 0;
+                printf("  gmsg %d: \"%s\"\n", i, m_p ? m.text : "(none)");
+            }
+        }
+        CHECK(ok, "gmsg: wt, wt + suffix, msg + suffix, cleared; lkt's warmup line");
+        READ_IN(NetTextPopupPacket, p0, TEXT_POPUP, 0);
+        READ_IN(NetTextPopupPacket, p1, TEXT_POPUP, 1);
+        CHECK(p0_p && !strcmp(p0.title, "Bomb") && !strcmp(p0.text, "Planted") && p1_p && !strcmp(p1.title, "Overtime") &&
+              !strcmp(p1.text, "+60 Seconds"), "gmsg arg 3 / tx text popups");
+        READ_IN(NetLockoutPacket, lk, LOCKOUT, 0);
+        READ_IN(NetCheckpointPacket, c0, CHECKPOINT, 0);
+        READ_IN(NetCheckpointPacket, c1, CHECKPOINT, 1);
+        CHECK(lk_p && lk.ms == 90500 && c0_p && !c0.reset && c1_p && c1.reset, "lkt, chp");
+    }
+    clear();
+    feed(&link, "init", (KrunkerValue[]) {KRUNKER_V_NUM(10), KRUNKER_V_NUM(5)}, 2); // Parkour
+    clear();
+    feed(&link, "gt", (KrunkerValue[]) {KRUNKER_V_NUM(12345), KRUNKER_V_NUM(2)}, 2);
+    {
+        READ_IN(NetLogTimePacket, t, LOG_TIME, 0);
+        CHECK(t_p && t.time_ms == 12345 && t.time_log == 2 && t.kind == NET_LOG_TIME_ZONE && t.show_ms, "gt (Parkour shows ms)");
+    }
+    clear();
+
+    // zombies
+    feed(&link, "upz", (KrunkerValue[]) {KRUNKER_V_NUM(4), KRUNKER_V_STR("FRENZY")}, 2);
+    feed(&link, "pwup", (KrunkerValue[]) {KRUNKER_V_NUM(2), KRUNKER_V_NUM(30000)}, 2);
+    feed(&link, "krm", (KrunkerValue[]) {KRUNKER_V_NUM(60), KRUNKER_V_BOOL(1), KRUNKER_V_NUM(1), KRUNKER_V_NUM(0), KRUNKER_V_NUM(-1), KRUNKER_V_NUM(9)}, 6);
+    feed(&link, "smybx", (KrunkerValue[]) {KRUNKER_V_NUM(50), KRUNKER_V_BOOL(1)}, 2);
+    {
+        READ_IN(NetZombieWavePacket, w, ZOMBIE_WAVE, 0);
+        READ_IN(NetPowerupPacket, p, POWERUP, 0);
+        READ_IN(NetZombieMachinePacket, k, ZOMBIE_MACHINE, 0);
+        READ_IN(NetMysteryBoxSwitchPacket, s, MYSTERY_BOX_SWITCH, 0);
+        CHECK(w_p && w.wave == 4 && !strcmp(w.special, "FRENZY") && p_p && p.index == 2 && p.ms == 30000 && k_p && k.kind == ZOMBIE_MACHINE_KRUM &&
+              k.pending_weapon == -1 && k.purchased_by == 9 && s_p && s.uid == 50 && s.enable, "upz / pwup / krm / smybx");
+    }
+    clear();
+
+    // loadouts: inat (null slots skipped, ammo by compacted slot, a pickup), inatA (everyone)
+    const KrunkerValue lo[] = {KRUNKER_V_NUM(3), KRUNKER_V_NIL, KRUNKER_V_NUM(1)};
+    const KrunkerValue am[] = {KRUNKER_V_NUM(5)};
+    feed(&link, "inat", (KrunkerValue[]) {KRUNKER_V_NUM(9), KRUNKER_V_ARRAY(lo, 3), KRUNKER_V_NUM(1), KRUNKER_V_NUM(31), KRUNKER_V_NIL,
+                                          KRUNKER_V_NIL, KRUNKER_V_NIL, KRUNKER_V_NIL, KRUNKER_V_ARRAY(am, 1)}, 9);
+    feed(&link, "inat", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_ARRAY(lo, 3), KRUNKER_V_NUM(0), KRUNKER_V_NUM(32), KRUNKER_V_NUM(4)}, 5);
+    const KrunkerValue all[] = {KRUNKER_V_NUM(2)};
+    feed(&link, "inatA", (KrunkerValue[]) {KRUNKER_V_ARRAY(all, 1), KRUNKER_V_NUM(0)}, 2);
+    {
+        READ_IN(NetLoadoutPacket, a, LOADOUT, 0);
+        CHECK(a_p && a.uid == 9 && a.count == 2 && a.weapons[0] == 3 && a.weapons[1] == 1 && a.ammo[0] == 5 && a.ammo[1] == -1 && a.loadout_index == 1,
+              "inat: loadout 3 / 1, ammo 5 / the weapon's");
+        CHECK(!find_in(NET_PACKET_PICKUP, 1), "inat: doPickup null = no pickup; absent = a pickup");
+        READ_IN(NetPickupPacket, pk, PICKUP, 0);
+        CHECK(pk_p && pk.uid == 32 && pk.weapon == 4 && pk.active && !pk.moved && pk.ammo == 14, "inat: the absent doPickup / active default true");
+        READ_IN(NetLoadoutPacket, x, LOADOUT, 2);
+        READ_IN(NetLoadoutPacket, y, LOADOUT, 3);
+        CHECK(x_p && y_p && x.count == 1 && x.weapons[0] == 2 && ((x.uid == 9 && y.uid == 7) || (x.uid == 7 && y.uid == 9)), "inatA: both players");
+    }
+    clear();
+
+    // map triggers
+    feed(&link, "cv", (KrunkerValue[]) {KRUNKER_V_STR("coins"), KRUNKER_V_NUM(12)}, 2);
+    feed(&link, "gv", (KrunkerValue[]) {KRUNKER_V_STR("door"), KRUNKER_V_BOOL(1)}, 2);
+    feed(&link, "tgui", (KrunkerValue[]) {KRUNKER_V_NUM(4), KRUNKER_V_NUM(2)}, 2);
+    feed(&link, "cnfm", (KrunkerValue[]) {KRUNKER_V_NUM(15), KRUNKER_V_NUM(2)}, 2);
+    feed(&link, "cnfm", (KrunkerValue[]) {KRUNKER_V_NIL, KRUNKER_V_NUM(0)}, 2);
+    {
+        READ_IN(NetValuePacket, cv, CUSTOM_VALUE, 0);
+        READ_IN(NetValuePacket, gv, GLOBAL_VALUE, 0);
+        READ_IN(NetGuiTogglePacket, tg, GUI_TOGGLE, 0);
+        READ_IN(NetConfirmPacket, c0, CONFIRM_INTERACT, 0);
+        READ_IN(NetConfirmPacket, c1, CONFIRM_INTERACT, 1);
+        CHECK(cv_p && !strcmp(cv.key, "coins") && cv.value == 12 && gv_p && gv.value == 1 && !gv.flags && tg_p && tg.id == 4 && tg.status == 2 &&
+              c0_p && c0.uid == 15 && c0.kind == 2 && c1_p && c1.uid == -1 && !c1.kind, "cv / gv / tgui / cnfm");
+    }
+    clear();
+
+    // Sharp Shooter (objWep 22): init's obj is the weapon (setWeapon), not an objective
+    const KrunkerValue o[] = {KRUNKER_V_NUM(6), KRUNKER_V_NUM(0)};
+    const KrunkerValue sync2[] = {KRUNKER_V_STR("obj"), KRUNKER_V_ARRAY(o, 2)};
+    for (int i = 0; i < 12; i++) init[i] = KRUNKER_V_NIL;
+    init[0] = KRUNKER_V_NUM(10);
+    init[1] = KRUNKER_V_NUM(22);
+    init[11] = KRUNKER_V_MAP(sync2, 1);
+    feed(&link, "init", init, 12);
+    {
+        READ_IN(NetObjectivePacket, w, OBJECTIVE, 0);
+        CHECK(w_p && w.kind == NET_OBJECTIVE_WEAPON && w.value == 6 && !find_in(NET_PACKET_OBJECTIVE_V7, 0), "init objWep: setWeapon(6)");
+    }
+    clear();
+    CHECK(link.unknown_in == 0, "every world packet was handled (%u unknown)", link.unknown_in);
 }
 
 int main(void) {
@@ -1571,6 +1853,7 @@ int main(void) {
     test_hud();
     test_combat();
     test_fx();
+    test_world();
 
     printf("%d/%d passed\n", g_pass, g_pass + g_fail);
     return g_fail ? 1 : 0;

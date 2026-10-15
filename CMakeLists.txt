@@ -984,7 +984,8 @@ else ()
 
     # krunker_link_test (client/include/krunker_net.h, KN_KRUNKER_OFFICIAL): the official-Krunker
     # packet translation (client/src/net/krunker_link.c) over the codec, no sockets
-    add_executable(krunker_link_test client/tests/krunker_link_test.c client/src/net/krunker_link.c client/src/net/krunker_altcha.c client/src/net/krunker_sounds.c
+    add_executable(krunker_link_test client/tests/krunker_link_test.c client/src/net/krunker_link.c client/src/net/krunker_link_world.c
+                   client/src/net/krunker_altcha.c client/src/net/krunker_sounds.c
                    shared/src/krunker_proto.c shared/src/auth_join.c shared/src/net_ext.c shared/src/progression.c shared/src/season.c)
     target_include_directories(krunker_link_test PRIVATE client/include shared/include)
     target_link_libraries(krunker_link_test PRIVATE cJSON m)
@@ -1018,7 +1019,8 @@ else ()
 
     # krunker_sync_test: our prediction (shared physics, the v10 "q" window, krunker_link, net_reconcile)
     # against a double-precision reimplementation of Krunker 10.0.3's procInputs as the official server
-    add_executable(krunker_sync_test ${SHARED_HEADERS} ${SHARED_SOURCES} client/tests/krunker_sync_test.c client/src/net/krunker_link.c client/src/net/krunker_sounds.c
+    add_executable(krunker_sync_test ${SHARED_HEADERS} ${SHARED_SOURCES} client/tests/krunker_sync_test.c client/src/net/krunker_link.c
+                   client/src/net/krunker_link_world.c client/src/net/krunker_sounds.c
                    client/src/net/krunker_altcha.c)
     target_include_directories(krunker_sync_test PRIVATE client/include)
     target_link_libraries(krunker_sync_test PRIVATE m)

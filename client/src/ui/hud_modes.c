@@ -124,7 +124,7 @@ static void hud_modes_apply_loadout(Client *client, const NetLoadoutPacket *pack
 
     mode_set_player_loadout(player, packet->weapons, count, 0);
     for (int i = 0; i < player->loadout_size && i < count; i++) {
-        if (player->ammo) player->ammo[i] = (unsigned int) packet->ammo[i];
+        if (player->ammo && packet->ammo[i] >= 0) player->ammo[i] = (unsigned int) packet->ammo[i]; // -1: the weapon's own (official "inat")
     }
 
     if (had_mesh) client_add_player_mesh(client, player, is_you);
@@ -636,7 +636,13 @@ const char *hud_modes_game_message(void) {
 
 static void hud_modes_message(const Client *client, const GameModeConfig *config) {
     const char *text = g_scenario_message_set ? g_scenario_message : g_modes.message;
-    if (!strcmp(text, NET_GAME_MESSAGE_WAITING)) text = I18N("player.waiting", "waiting for players");
+    char waiting[NET_GAME_MESSAGE_SIZE * 2];
+    if (!strcmp(text, NET_GAME_MESSAGE_WAITING)) {
+        text = I18N("player.waiting", "waiting for players");
+    } else if (!strncmp(text, NET_GAME_MESSAGE_WAITING " ", 3)) { // an official "gmsg" ["wt", suffix]: t(player.waiting) + " " + suffix
+        snprintf(waiting, sizeof(waiting), "%s %s", I18N("player.waiting", "waiting for players"), text + 3);
+        text = waiting;
+    }
 
     if (config && config->flags && client->me) {
         int carrying = 0, enemy_has_ours = 0;

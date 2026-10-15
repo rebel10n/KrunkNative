@@ -100,7 +100,7 @@ ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
 BUILD = os.path.abspath(ARGS[0] if ARGS else "cmake-build-debug")
 DIST = os.path.abspath(ARGS[1]) if len(ARGS) > 1 else None
 ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude": "exclude", "--reload": "reload", "--ingame": "ingame",
-        "--fx": "fx"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+        "--fx": "fx", "--world": "world"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -306,6 +306,7 @@ class Stub:
         self.scenario = scenario  # "sync": after "en", play the movement-lock / correction packets (sync_phases);
         #                           "spawn": after "en", our player at `spawn` and nothing correcting it (run_native_hq);
         #                           "hud": a CTF game, the score / kill / objective / end packets (hud_phases)
+        #                           "world": a Domination game, the mode-objective / world-object packets (world_phases)
         self.map_index = MAP_INDEX if map_index is None else map_index  # init's mapIndex
         self.spawn = spawn or (4.0, 0.0, 4.0)
         self.frame_t = []         # time.monotonic() of every client frame (parallel to self.frames)
@@ -508,7 +509,12 @@ class Stub:
                 if any(f[0] == "load" for f in self.frames):
                     break
                 await asyncio.sleep(0.1)
-            if hud:  # CTF (3, modes.c MODE_ID_CTF): the joiner's team scores + flag lines, syncData's flags (uids 40 / 41, map order)
+            if self.scenario == "world":  # Domination (25) on Kanji: round wins (arg 3), team scores, syncData doms / spwns / dest
+                await send("init", self.map_index, 25, 0, [[1, 1], [2, 0]], [[1, 40], [2, 25]], None, {}, None, 0, None, None,
+                           {"gor": 1, "roundC": 2, "lockT": 0, "doms": [0, 2, 1, None, 2, None], "spwns": [[0, 601, -330.0, -143.0, -40.0, 2, {}]],
+                            "dest": [4], "obj": [None, 0]},
+                           None, False, True, False, None, None, 0)
+            elif hud:  # CTF (3, modes.c MODE_ID_CTF): the joiner's team scores + flag lines, syncData's flags (uids 40 / 41, map order)
                 await send("init", self.map_index, 3, 0, [[1, 0], [2, 0]], [[1, 3, "AT BASE"], [2, 1, "AT BASE"]], None, {}, None, 0, None, None,
                            {"gor": True, "flg": [[40, 0.0, 0.0, 0.0, 0, None], [41, 20.0, 0.0, 20.0, 0, None]], "obj": [None, 0]},
                            None, False, True, False, None, None, 0)
@@ -564,6 +570,11 @@ class Stub:
                 await send("frs")
                 await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0))
                 await self.fx_phases(send, stop)
+            elif self.got_en.is_set() and self.scenario == "world":
+                await send("frs")
+                x, y, z = self.spawn
+                await send("0", player("sockME", MY_SID, "Guest_9", x, z, y, team=1))
+                await self.world_phases(send, stop)
             elif self.got_en.is_set() and hud:
                 await send("frs")
                 await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0, team=1))
@@ -807,6 +818,47 @@ class Stub:
         await hold(3.0)
         self.sent["done"] = time.monotonic()
         await hold(2.0)
+
+    async def world_phases(self, send, stop):
+        """krunker_link_world.c against a live client (run_native_world): Domination zones, spawnables, a
+        destroyed object, game messages, the warmup lockout, a text popup, a loadout, an AI and an airdrop.
+        An "l" every 0.4 s keeps us at the spawn and acks the last isn."""
+        x, y, z = self.spawn
+
+        async def hold(seconds):
+            end = time.monotonic() + seconds
+            while time.monotonic() < end and not stop.is_set():
+                qs = [f for f in self.frames if f[0] == "q"]
+                isn = int(qs[-1][1][1]) if qs else 0
+                await send("l", [isn, 42, x, y, z, 0, 0, 0, 0.0, True, False, False, 0, False, False, 0, 0, 0, 0, True, False, 0, 0, None, 0])
+                await asyncio.sleep(0.4)
+
+        await hold(3.0)
+        self.sent["world"] = time.monotonic()
+        await send("gmsg", "wt")                                   # player.waiting
+        await hold(2.0)
+        await send("gmsg", "wt", "01:00")                          # player.waiting + the suffix
+        await hold(2.0)
+        await send("lkt", 90500)                                   # UPDATE_LOCKOUT_TIM: "warmup starts in  01:30"
+        await hold(2.0)
+        self.sent["objects"] = time.monotonic()
+        await send("uct", [0, None, 2500, 1, [1], 1, 1, 2, 0, None, [], 1])  # zone A: team 1 securing; zone B: team 2's
+        await send("cct", 2, 1)                                    # CAPTURE_CONTROL: zone C to team 1, "Zone C Captured"
+        await send("crsp", 0, 602, -320.0, -143.0, -50.0, 1, {})   # CREATE_SPAWNABLE: a second tag
+        await send("do", 3)                                        # DESTROY_GAMEOBJECT
+        await send("tx", "Overtime", "+60 Seconds")                # TEXT_POPUP
+        await send("inat", MY_SID, [3, None, 1], 0, 0, None, None, None, None, [7])  # PLAYER_INTERACTIONS: our loadout
+        await send("aai", [700, 0, "Zombie", -330.0, -143.0, -60.0, {"hasAnim": 0, "team": 2, "health": 100, "asset": 0, "src": "zombie_0"}])
+        await send("ai", [700, -330.0, -143.0, -60.0, 0, 0, 100, 1, 2])
+        await send("ad", [1, 200, -300.0, 300.0, -30.0, 0])        # SYNC_AIRDROP
+        await hold(4.0)
+        self.sent["dispose"] = time.monotonic()
+        await send("dsp", 601)                                     # DISPOSE_SPAWNABLE: the init's tag goes
+        await send("rai", 700)                                     # REMOVE_BY_SID
+        await send("rad", 1)                                       # REMOVE_AIRDROP_BY_SID
+        await send("gmsg")                                         # cleared
+        await hold(4.0)
+        self.sent["done"] = time.monotonic()
 
     def start_ws(self):
         started = threading.Event()
@@ -1559,6 +1611,68 @@ def run_native_ingame():
     check(f"{label}: our death shows the death card", "1" in shown, shown[-3:])
     check(f"{label}: the death card: deathStats accuracy and the killer's alias", max(grep("dacc") or [0]) >= 1 and
           max(grep("dkill") or [0]) >= 1 and max(grep("dname") or [0]) == 0, (grep("dacc")[-2:], grep("dkill")[-2:], grep("dname")[-2:]))
+
+
+KANJI_INDEX, KANJI_SPAWN = 10, (-343.0, -143.0, -28.0)  # Kanji: 3 Domination zones; its first spawn
+
+
+def run_native_world():
+    """krunker_link_world.c: the stub (Stub.world_phases) plays a Domination game's zone, spawnable, object,
+    message, lockout, text-popup, loadout, AI and airdrop packets. The `world` probe (input_script.c) shows
+    what the client made of them, #gameMessage / #chatList / the popups what the HUD shows."""
+    label = "native-world"
+    dense = ["world", "text @gmsg [id=gameMessage]", "text @chal [id=knChalName]", "sync"]
+    sparse = ["text @chat [id=chatList]"]
+    probes = "".join("%d %s\n" % (t + k, kind) for t in range(5000, 30000, 500) for k, kind in enumerate(dense))
+    probes += "".join("%d %s\n" % (t + k, kind) for t in range(5000, 30000, 2000) for k, kind in enumerate(sparse))
+    script = "0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n%s30500 quit\n" % (PASTE_TOKEN, probes)
+    events = sorted(script.strip().split("\n"), key=lambda l: int(l.split()[0]))
+    stub, p, out, log = launch_native(label, "\n".join(events) + "\n", {}, scenario="world", map_index=KANJI_INDEX, spawn=KANJI_SPAWN)
+    lines = finish_native(label, stub, p, out, log, timeout=240)
+    text = "\n".join(lines)
+    check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+    for name in ("world", "objects", "dispose", "done"):
+        check(f"{label}: the stub got to send its \"{name}\" packets", name in stub.sent, sorted(stub.sent))
+    worlds = [dict(re.findall(r"(\w+)=(\"[^\"]*\"|\S+)", m.group(1))) for m in re.finditer(r"\[input_script\] world (.*)", text)]
+    worlds = [w for w in worlds if "dom" in w]
+    check(f"{label}: the world probe ran", len(worlds) > 10, len(worlds))
+
+    def seen(pred):
+        return any(pred(w) for w in worlds)
+
+    check(f"{label}: init doms: zone A is team 2's", seen(lambda w: w["dom"].startswith("2/0,")), [w["dom"] for w in worlds[:2]])
+    check(f"{label}: init arg 3 / roundC: round wins 1 / 0, 2 rounds left", seen(lambda w: w["wins"] == "1/0" and w["rounds"] == "2"),
+          [(w["wins"], w["rounds"]) for w in worlds[:2]])
+    check(f"{label}: init spwns: the tag at -330,-40", seen(lambda w: "0@-330,-40" in w["tags"]), [w["tags"] for w in worlds[:2]])
+    low = lambda w: w["destroyed"].split(":")[1].split(",")  # noqa: E731 (the destroyed uids below 16)
+    check(f"{label}: init dest: object 4 destroyed", seen(lambda w: "4" in low(w)), sorted({w["destroyed"] for w in worlds}))
+    check(f"{label}: \"do\": object 3 destroyed too", seen(lambda w: "3" in low(w) and "4" in low(w)), sorted({w["destroyed"] for w in worlds}))
+
+    def securing(w):  # zone A: nobody's, captureT from 2500 ms (the client runs the capture on), zone B team 2's
+        z = w["dom"].split(",")
+        return len(z) == 3 and z[0].startswith("0/") and int(z[0][2:]) >= 2500 and z[1] == "2/0"
+
+    check(f"{label}: \"uct\": zone A securing (from 2500 ms), zone B team 2", seen(securing), sorted({w["dom"] for w in worlds})[:4])
+    check(f"{label}: \"cct\": zone C to team 1", seen(lambda w: w["dom"].endswith(",1/0")), sorted({w["dom"] for w in worlds}))
+    check(f"{label}: \"crsp\": the second tag", seen(lambda w: "0@-320,-50" in w["tags"]), sorted({w["tags"] for w in worlds}))
+    check(f"{label}: \"dsp\": the init's tag goes, the second stays", seen(lambda w: w["tags"] == "0@-320,-50"), sorted({w["tags"] for w in worlds}))
+    check(f"{label}: \"aai\" + \"ai\": an AI, \"rai\" removes it", seen(lambda w: w["ai"] == "1") and worlds[-1]["ai"] == "0",
+          sorted({w["ai"] for w in worlds}))
+    check(f"{label}: \"ad\": an airdrop, \"rad\" removes it", seen(lambda w: w["drops"] == "1") and worlds[-1]["drops"] == "0",
+          sorted({w["drops"] for w in worlds}))
+    check(f"{label}: \"lkt\": the lockout (90.5 s)", seen(lambda w: w["lock"].startswith("90") or w["lock"].startswith("89")),
+          sorted({w["lock"] for w in worlds})[:5])
+    gm = [re.sub(r"\s+", " ", m.group(1)).strip() for m in re.finditer(r"\[input_script\] text t=\d+ @gmsg n=\d+ checked=\d+ value=\S* text=(.*)", text)]
+    check(f"{label}: gmsg \"wt\": #gameMessage waiting for players", "waiting for players" in gm, sorted(set(gm)))
+    check(f"{label}: gmsg \"wt\" + suffix", "waiting for players 01:00" in gm, sorted(set(gm)))
+    check(f"{label}: lkt: #gameMessage warmup starts in 01:30", any(g.startswith("warmup starts in 01:") for g in gm), sorted(set(gm)))
+    check(f"{label}: gmsg without args clears it", gm and gm[-1] == "", gm[-3:])
+    chal = [m.group(1).upper() for m in re.finditer(r"\[input_script\] text t=\d+ @chal n=\d+ checked=\d+ value=\S* text=(.*)", text)]
+    check(f"{label}: \"tx\": the Overtime +60 Seconds popup", any("OVERTIME" in c and "+60 SECONDS" in c for c in chal), sorted(set(chal))[-3:])
+    chat = [m.group(1) for m in re.finditer(r"\[input_script\] text t=\d+ @chat n=\d+ checked=\d+ value=\S* text=(.*)", text)]
+    check(f"{label}: \"cct\": the \"Zone C Captured\" chat line", any("Zone C Captured" in c for c in chat), chat[-1:])
+    loads = re.findall(r"\[input_script\] sync\+ t=\d+ .* loadout=(\S+)", text)
+    check(f"{label}: \"inat\": our loadout 3 / 1 (+ the knife)", any(l.startswith("3/1") for l in loads), sorted(set(loads)))
 
 
 def run_native_lobby():
@@ -2380,6 +2494,7 @@ def main():
         run_native_hq()
         run_native_hud()
         run_native_ingame()
+        run_native_world()
         run_native_lobby()
         run_native_badmap()
         run_native_kick()
@@ -2392,6 +2507,8 @@ def main():
         ran = True
     if ONLY == "ingame" and os.path.isfile(f"{BUILD}/client_bin"):  # just official-ingame's run
         run_native_ingame()
+    if ONLY == "world" and os.path.isfile(f"{BUILD}/client_bin"):  # just the mode-objective / world packets
+        run_native_world()
     if ONLY == "exclude" and os.path.isfile(f"{BUILD}/client_bin"):  # just Find New Game's runs
         run_native_exclude()
         run_native_exclude_mm()

@@ -188,6 +188,7 @@
 #include <ruleset.h>      // `class`: the class names
 #include <map_post.h>     // `builds`, `placewatch`
 #include <gamepad.h>      // `gpad`
+#include <ai.h>           // `world`: the AI list
 #include <GLFW/glfw3.h>
 #include <png_write.h>
 #include <frame_target.h>
@@ -762,6 +763,39 @@ static void script_run(Client *client, const ScriptEvent *e) {
                 me ? me->grapple.range : 0.0f,
                 cursor_mode == GLFW_CURSOR_NORMAL ? "normal" : cursor_mode == GLFW_CURSOR_DISABLED ? "disabled" : "hidden",
                 client->camera.rotation.y, client->camera.rotation.x); // the camera's look (mouse-look checks)
+    } else if (!strcmp(e->cmd, "world")) {
+        // world: the mode objectives / world objects the official world packets drive (krunker_link_world.c):
+        // #gameMessage, Domination zones (capturedBy/captureT ms), spawnables (type:sid), destroyed map
+        // objects, AIs, airdrops, the zombie wave, lockout (ms), rounds left and the round wins
+        Game *game = &client->game;
+        const GameMode *mode = game->mode;
+        char dom[160] = "", tags[256] = "";
+        size_t o = 0;
+        for (int z = 0; mode && z < mode->dom_zone_count && o + 24 < sizeof(dom); z++)
+            o += (size_t) snprintf(dom + o, sizeof(dom) - o, "%s%d/%.0f", z ? "," : "", mode->dom_zones[z].captured_by,
+                                   mode->dom_zones[z].capture_t * 1000.0f);
+        o = 0;
+        for (int i = 0; i < MODE_MAX_SPAWNABLES && o + 24 < sizeof(tags); i++) {
+            int data_c = 0;
+            const int type = hud_modes_spawnable_type(i, &data_c);
+            vec3 at;
+            int team = 0;
+            if (type < 0 || !hud_modes_spawnable(i, &at, &team)) continue;
+            o += (size_t) snprintf(tags + o, sizeof(tags) - o, "%s%d@%.0f,%.0f", o ? "," : "", type, at.x, at.z);
+        }
+        int destroyed = 0, drops = 0;
+        char low[64] = "";
+        for (size_t i = 0, n = 0; game->map && i < game->map->object_count; i++) {
+            if (!game->map->objects[i]->destroyed) continue;
+            destroyed++;
+            if (i < 16 && n + 4 < sizeof(low)) n += (size_t) snprintf(low + n, sizeof(low) - n, "%s%zu", n ? "," : "", i); // the uids below 16
+        }
+        const int ais = game->ready ? game_ai_active_count(game, 0) : 0;
+        for (int i = 0; i < AIRDROP_MAX; i++) drops += game->zombies.drops[i].active;
+        fprintf(stderr, "[input_script] world t=%.0f msg=\"%s\" dom=%s tags=%s destroyed=%d:%s ai=%d drops=%d wave=%d lock=%.0f rounds=%d wins=%d/%d\n",
+                g_script.time, hud_modes_game_message(), dom[0] ? dom : "-", tags[0] ? tags : "-", destroyed, low[0] ? low : "-", ais, drops, game->zombies.wave,
+                mode ? mode->lockout_timer * 1000.0f : -1.0f, mode ? mode->round_count : -1, mode ? mode->team_round_wins[1] : -1,
+                mode ? mode->team_round_wins[2] : -1);
     } else if (!strcmp(e->cmd, "sync")) {
         // sync: our player's server-set movement state (official-lobby packets: lm/ulm, lock, frz, spb,
         // noc, tm, wep; client/src/net/krunker_link.c) on one line for scripted checks
