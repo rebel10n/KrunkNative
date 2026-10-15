@@ -135,14 +135,6 @@ void layout_resolve_font(LayoutTree *t, Box *b)
     }
     if (b->font) {
         b->fm = *text_font_metrics(b->font);
-        const float dpr = t->ctx->device_scale;
-        if (dpr > 0.0f && fabsf(dpr - 1.0f) > 1e-4f) {
-            /* rounded in device px (LayoutCtx.device_scale), like text_compute_metrics at 1x */
-            const float a = floorf(b->fm.ascent_raw * dpr + 0.5f), d = floorf(b->fm.descent_raw * dpr + 0.5f);
-            b->fm.ascent = a / dpr;
-            b->fm.descent = d / dpr;
-            b->fm.line_height = (a + d + roundf(b->fm.line_gap * dpr)) / dpr;
-        }
     } else {
         /* no text system: approximate with typical Latin metrics */
         b->fm.size = s->font_size;

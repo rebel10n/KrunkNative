@@ -92,11 +92,6 @@ typedef struct LayoutCtx {
     int (*widget_size)(void *user, lxb_dom_node_t *node, const CssComputed *st, float *w, float *h);
 
     float scrollbar_default_w;       /* 12 (global ::-webkit-scrollbar)        */
-    /* devicePixelRatio (framebuffer px per CSS px; 0 = 1).  Blink lays a zoomed page out in
-     * device px (zoom-for-DSF), so a font's rounded ascent / descent and the floor of the
-     * half-leading are whole DEVICE px: at 2x ChakraPetch 10px is ascent 20 / descent 6 device
-     * px (10 / 3 in CSS px), which puts every baseline 1 device px lower than CSS-px rounding. */
-    float device_scale;
     float scrollbar_min_thumb;       /* 0: Chrome custom scrollbars have none  */
     int relaxed_boundaries;          /* 1: abs+definite size is a boundary even with overflow:visible (the `grow` case) */
     /* Chrome UA intrinsic sizes for replaced elements (border-box px with the

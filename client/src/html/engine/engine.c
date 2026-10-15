@@ -2452,12 +2452,6 @@ static int engine_set_size_ex(Engine *g, const int width, const int height, cons
     g->vw = (float) width / dpr;
     g->vh = (float) height / dpr;
     g->paint.device_scale = dpr;
-    if (fabsf(dpr - (g->lctx.device_scale > 0.0f ? g->lctx.device_scale : 1.0f)) > 1e-4f) {
-        /* font metrics and half-leadings are quantised in device px: re-resolve every box */
-        g->lctx.device_scale = dpr;
-        if (g->tree) layout_rebuild_all(g->tree);
-        if (g->dom) { g->lctx.memo_epoch++; dom_mark_all_dirty(g->dom); }
-    }
     /* vw/vh/vmin/vmax compute to px: restyle everything when a sheet used them */
     css_values_set_viewport(g->vw, g->vh);
     const int media_changed = engine_media_update(g);

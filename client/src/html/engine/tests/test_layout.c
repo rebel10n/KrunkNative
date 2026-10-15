@@ -1286,30 +1286,6 @@ static void t_anonymous_style(void)
     fx_free(fx);
 }
 
-/* devicePixelRatio 2 (LayoutCtx.device_scale): Blink lays a zoomed page out in device px, so the
- * font's rounded ascent / descent and the floor of the half-leading are whole device px. Chrome
- * 152 at --force-device-scale-factor=2, FRVR Strike's class description (ChakraPetch 700 10px,
- * line-height 1.2em: ascent 9.92 -> 20 device px, descent 3.08 -> 6, leading 24 - 26 -> -1 on
- * top): the first baseline sits 9.5 CSS px into the line, not 9 (CSS-px rounding: 10 - 1). */
-static void t_device_scale_metrics(void)
-{
-    const float saved = g_ctx.device_scale;
-    for (int pass = 0; pass < 2; pass++) {
-        g_ctx.device_scale = pass ? 2.0f : 0.0f;
-        Fx *fx = fx_html("<div id=d style='font-family:gamefont;font-size:10px;line-height:12px;width:300px'>Ab<br>Cd</div>", NULL);
-        TextFont *f = text_font(g_ts, "gamefont", 10, 400, 0);
-        const TextMetrics *m = text_font_metrics(f);
-        const float s = pass ? 2.0f : 1.0f;
-        const float a = floorf(m->ascent_raw * s + 0.5f), d = floorf(m->descent_raw * s + 0.5f);
-        const float want = (a + floorf((12.0f * s - (a + d)) * 0.5f + 1e-4f)) / s;
-        Box *b = bx(fx, "d");
-        CHECK_NEAR(b ? b->first_baseline : -1, want, 0.001, pass ? "2x: first baseline from device-px metrics" : "1x: first baseline");
-        CHECK_NEAR(rc(fx, "d").h, 24, 0.001, "two 12px lines either way");
-        fx_free(fx);
-    }
-    g_ctx.device_scale = saved;
-}
-
 static void t_root_overflow(void)
 {
     /* <html>/<body> overflow:hidden and 0px tall (everything positioned), like ui/index.html */
@@ -2080,7 +2056,6 @@ int main(int argc, char **argv)
     t_float_relayout();
     t_anonymous_style();
     t_root_overflow();
-    t_device_scale_metrics();
     t_container_scrollbars();
     t_incremental();
     t_memo_equivalence();

@@ -1254,9 +1254,13 @@ static int glyph_to_quad(Painter *p, const Glyph *g, unsigned synth, float font_
      * (#uiBase, the hub's body) the two roundings differ: rounding only in
      * device space put hub tab labels 1 px low. */
     const float ls = p->text_layer_snap_y;   /* not part of layout space */
-    /* Blink's local space is device px on a zoomed page (devicePixelRatio, zoom-for-DSF) */
-    const float dsf = p->ctx->device_scale > 0.0f ? p->ctx->device_scale : 1.0f;
-    const float bl = roundf((baseline - ls + p->snap_oy) * dsf) / dsf - p->snap_oy + ls;
+    /* At a devicePixelRatio above 1 (the Strike page) this stays CSS px, like the font metrics and
+     * half-leadings: FRVR's captures are Chrome under DevTools device emulation (capture-strike.js:
+     * deviceScaleFactor 2), which lays the page out and rounds text in CSS px. Measured: a sweep of
+     * Ode to Idle Gaming / ChakraPetch sizes and line-heights under that emulation matches CSS-px
+     * rounding in every case; device-px rounding (a real 2x display) matched it in 43 of 60 and put
+     * the Ode labels 1 device px low (strike main-menu play 0.23 -> 2.22 %, account-box 0.44 -> 1.52). */
+    const float bl = roundf(baseline - ls + p->snap_oy) - p->snap_oy + ls;
     d->y = (bl * scale + q.y_off) / scale;
     d->w = q.w / scale;
     d->h = q.h / scale;

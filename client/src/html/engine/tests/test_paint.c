@@ -1655,6 +1655,30 @@ static void test_gradient_tiles_masked_backdrop(void)
     CHECK(mb > bd && pop > mb && g1 > pop);   /* then the element's own masked group */
 }
 
+/* devicePixelRatio 2 (the Strike page): FRVR's captures are Chrome under DevTools device
+ * emulation, which rounds a text baseline in CSS px: a baseline at y 10.25 paints at 10 and one at
+ * 10.5 at 11, never at a half CSS px (device-px rounding put the Ode labels 1 device px low). */
+static void test_device_scale_baseline_css_px(void)
+{
+    printf("devicePixelRatio 2: text baselines rounded in CSS px\n");
+    const float saved = g_ctx.device_scale;
+    float y[3];
+    const float bl[3] = {10.0f, 10.25f, 10.5f};
+    for (int i = 0; i < 3; i++) {
+        reset_tree(); fresh_ctx();
+        g_ctx.device_scale = 2.0f;
+        Box *root = mk_root();
+        Box *line = mk(root, BOX_BLOCK, 0, 0, 200, 30);
+        mk_text(line, 10, bl[i], "ab", 10);
+        build(root);
+        const int gi = find_op(&g_dl, DL_GLYPHS, 0);
+        y[i] = gi >= 0 ? g_dl.items[gi].u.glyphs.quads[0].y : -1000.0f;
+    }
+    g_ctx.device_scale = saved;
+    CHECK_F(y[1] - y[0], 0.0f);
+    CHECK_F(y[2] - y[0], 1.0f);
+}
+
 int main(void)
 {
     paint_ctx_init(&g_ctx);
@@ -1684,6 +1708,7 @@ int main(void)
     test_3d_transforms();
     test_backdrop_mask_clip_text_outline();
     test_gradient_tiles_masked_backdrop();
+    test_device_scale_baseline_css_px();
     paint_ctx_free(&g_ctx);
     dl_free(&g_dl);
     printf("%d passed, %d failed\n", g_pass, g_fail);
