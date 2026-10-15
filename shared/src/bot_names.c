@@ -103,7 +103,7 @@ const char *const g_bot_name_handles[] = {
     "iuhsjfpjb", "9r8230hi", "alskfhali", "aslhalsg", "alsalsg", "Swansdown", "Glockenspiel", "tisa", "tina", "lisa",
     "Samrox8Rhumb", "Cattitude", "Fenestella", "dannn", "8uuhhh", "Buckaroo", "Simplism", "Bupkis", "Calamus",
     "asfasfi", "Ragamuffin", "Zizyphus", "Donkeyman", "asfkaf", "pooper", "Phobophobia", "Rubric", "Orthography",
-    "Prim", "Cordiform", "Oakum", "Gaberlunzie", "goober", "Colossus", "Venefic", "Mobbins", "Cancatervate",
+    "Primツ", "Cordiform", "Oakum", "Gaberlunzie", "goober", "Colossus", "Venefic", "Mobbins", "Cancatervate",
     "Corkscrew", "Dyarchy", "Muumuu", "Tunicle", "Scirocco", "Isopolity", "Concoction", "Necromania", "Gadzooks",
     "Fumulus", "Bumbledom", "Lustring", "Cockatoo", "Annulated", "888666", "Avuncular", "Pedmed13", "Crotchet",
     "Univoltine", "hk888si", "alonn", "nielll", "Diphthong", "tripper", "trippier", "loonna", "wScreax", "aAloonm",
