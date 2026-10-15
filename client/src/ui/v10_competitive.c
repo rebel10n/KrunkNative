@@ -573,9 +573,10 @@ static struct {
     int matches_season;   // 0 = All Time
     int raid_completions; // sort: 0 best_time, 1 completions
     char raid_month[16];  // "all-time" or "YYYY-MM"
-    int kc_team;          // KrunkCup team id, -1 = standings
-    char kc_team_name[64];
-} LB = {.cat = LB_GRID, .ranked_season = -1, .raid_month = "all-time", .kc_team = -1};
+    int kc_team;          // KrunkCup team (jersey style) id, -1 = standings
+    int kc_sort;          // KrunkCup table sort column, -1 = v10's defaultSort
+    int kc_sort_desc;
+} LB = {.cat = LB_GRID, .ranked_season = -1, .raid_month = "all-time", .kc_team = -1, .kc_sort = -1, .kc_sort_desc = 1};
 
 static int season_now(void) { return ranked_season_at((int64_t) time(NULL)); }
 
@@ -866,68 +867,226 @@ static void lb_ranked_matches(StrBuf *sb) {
     sb_append(sb, "</div></div>");
 }
 
-// _49257 KrunkCup (svelte-1xp8pv1): team standings, a team's top contributors
+// ------------------------------------------------------------------ KrunkCup (_49257, svelte-1xp8pv1)
+// A team is a style of the KrunkCup Jerseys item (game.store.skins[7794], v10.js _10603[7794]) and its
+// id is the style index. v10 names it styles[id] with " Away" removed (_49536; "Team <id>" past the
+// list) and draws its jersey preview (_49539 -> _9305, getStylePreview: cosmetics/<dir>_<id>_<tex>_s<id>.png).
+// The names are the KrunkCup Jerseys `styles` of assets/skins.json (index 7794); the viewer store does
+// not carry them. v10 never shows the brain's team "name".
+#define KC_JERSEY_SKIN 7794
+static const char *const k_kc_styles[] = {
+    "Algeria", "Argentina Away", "Australia", "Austria", "Belgium", "Brazil Away", "Canada Away", "Chile",
+    "Colombia", "Costa Rica", "C\xc3\xb4te d'Ivoire", "Croatia Away", "Czechia", "England Away", "France",
+    "Germany Away", "Ghana", "Greece", "Hungary", "Iceland", "Italy", "Jamaica", "Japan Away", "Mexico",
+    "Morocco", "Netherlands", "New Zealand", "Nigeria Away", "Norway", "Paraguay", "Poland", "Portugal",
+    "Qatar", "Saudi Arabia", "Senegal Away", "Spain", "Sweden", "Switzerland", "Turkey", "UAE", "Ukraine",
+    "Uruguay", "USA Away", "Venezuela", "Wales", "Egypt", "Iraq", "Scotland",
+};
+#define KC_STYLES ((int) (sizeof(k_kc_styles) / sizeof(k_kc_styles[0])))
+
+// the sort key of each table column (column 0 is the # rank column, which does not sort)
+static const char *const k_kc_team_keys[] = {NULL, NULL, "total_score", "total_kills", "total_games"};
+static const char *const k_kc_contrib_keys[] = {NULL, NULL, "kills", "score", "games"};
+
+// v10's defaultSort: Score, descending (column 2 of the standings, column 3 of a team's contributors)
+static int kc_sort_col(void) { return LB.kc_team >= 0 ? 3 : 2; }
+
+static void kc_reset_sort(void) {
+    LB.kc_sort = -1;
+    LB.kc_sort_desc = 1;
+}
+
+static void kc_team_name(char *out, const size_t n, const int id) {
+    if (id < 0 || id >= KC_STYLES) {
+        snprintf(out, n, "Team %d", id);
+        return;
+    }
+    snprintf(out, n, "%s", k_kc_styles[id]);
+    const size_t len = strlen(out);
+    if (len > 5 && !strcmp(out + len - 5, " Away")) out[len - 5] = 0; // replace(/\s+Away\b/gi, '')
+}
+
+// _9305(item, style) as an asset URL ("" when the jersey item is not in the store)
+static void kc_team_thumb(char *out, const size_t n, const int id) {
+    const ViewerSkin *s = viewer_skin(KC_JERSEY_SKIN);
+    char path[256];
+    out[0] = 0;
+    if (!s || !s->name || strcmp(s->name, "KrunkCup Jerseys")) return;
+    const int dir = s->asset_type ? s->asset_type : s->type;
+    if (s->pat >= 0) snprintf(path, sizeof(path), "textures/previews/cosmetics/%d_%d_c%d_s%d.png", dir, s->id, s->pat, id);
+    else if (viewer_skin_tex_truthy(s)) snprintf(path, sizeof(path), "textures/previews/cosmetics/%d_%d_%s_s%d.png", dir, s->id, s->tex, id);
+    else snprintf(path, sizeof(path), "textures/previews/cosmetics/%d_%d_s%d.png", dir, s->id, id);
+    html_dom_asset_url(path, out, n);
+}
+
+enum { KC_LOADING, KC_ERROR, KC_LOADED };
+
+static int kc_truthy(const cJSON *v) {
+    if (!v) return 0;
+    if (cJSON_IsBool(v)) return cJSON_IsTrue(v);
+    if (cJSON_IsNumber(v)) return v->valuedouble != 0;
+    if (cJSON_IsString(v)) return v->valuestring && v->valuestring[0] != 0;
+    return cJSON_IsObject(v) || cJSON_IsArray(v);
+}
+
+// the statusText of a 5xx answer (v10 throws "Server error: " + statusText)
+static const char *kc_status_text(const int status) {
+    switch (status) {
+        case 500: return "Internal Server Error";
+        case 502: return "Bad Gateway";
+        case 503: return "Service Unavailable";
+        case 504: return "Gateway Timeout";
+        default: return "";
+    }
+}
+
+// v10 _49550 / _49543: the request fails (the catch shows its message) on a transport failure, a 5xx,
+// a rate limit, an unreadable body or a body with an `error`; an error object's message wins over the
+// fallback text `fail`.
+static int kc_request(const V10Req *r, const char *fail, const cJSON **rows, char *msg, const size_t mn) {
+    *rows = NULL;
+    snprintf(msg, mn, "%s", fail);
+    if (r->status == 0) return KC_LOADING;
+    if (r->status < 0) {
+        snprintf(msg, mn, "Failed to fetch");
+        return KC_ERROR;
+    }
+    if (r->status >= 500) {
+        snprintf(msg, mn, "Server error: %s", kc_status_text(r->status));
+        return KC_ERROR;
+    }
+    if (r->status == 429) return KC_ERROR; // v10 answers with a string: error.message is undefined, so the fallback
+    if (r->status == 204 || r->status == 304) return KC_LOADED;
+    if (!r->json) {
+        snprintf(msg, mn, "Invalid JSON response from server");
+        return KC_ERROR;
+    }
+    const cJSON *err = cJSON_GetObjectItem(r->json, "error");
+    if (kc_truthy(err)) {
+        const char *m = cJSON_GetStringValue(cJSON_GetObjectItem(err, "message"));
+        if (m && m[0]) snprintf(msg, mn, "%s", m);
+        return KC_ERROR;
+    }
+    const cJSON *d = cJSON_GetObjectItem(r->json, "data");
+    if (cJSON_IsArray(d)) *rows = d;
+    return KC_LOADED;
+}
+
+// v10's generic table comparator (_46109): a missing value sorts last whatever the direction
+static int kc_cmp(const cJSON *a, const cJSON *b, const char *key, const int desc) {
+    const cJSON *va = cJSON_GetObjectItem(a, key), *vb = cJSON_GetObjectItem(b, key);
+    if (!cJSON_IsNumber(va)) return 1;
+    if (!cJSON_IsNumber(vb)) return -1;
+    const double x = va->valuedouble, y = vb->valuedouble;
+    return desc ? (y > x) - (y < x) : (x > y) - (x < y);
+}
+
+// stable, like Array.prototype.sort
+static void kc_sort_rows(const cJSON **rows, const int n, const char *key, const int desc) {
+    for (int i = 1; i < n; i++) {
+        const cJSON *x = rows[i];
+        int j = i;
+        while (j > 0 && kc_cmp(rows[j - 1], x, key, desc) > 0) {
+            rows[j] = rows[j - 1];
+            j--;
+        }
+        rows[j] = x;
+    }
+}
+
+static void kc_team_cell(StrBuf *sb, const V10Col *col, const int id) {
+    char thumb[512], name[96];
+    kc_team_thumb(thumb, sizeof(thumb), id);
+    kc_team_name(name, sizeof(name), id);
+    StrBuf cell = {0};
+    sb_appendf(&cell, "<span class=\"team-cell svelte-zls0ao\"><span class=\"thumb svelte-zls0ao\" style=\"background-image: url('%s')\"></span> "
+                      "<span class=\"name svelte-zls0ao\">", thumb);
+    sb_append_esc(&cell, name);
+    sb_append(&cell, "</span></span>");
+    char *html = sb_finish(&cell);
+    v10_table_cell_html(sb, col, html);
+    free(html);
+}
+
+// v10's generic table (_46109) with rank: the standings (_49557) or a team's contributors (_49565)
+static void kc_table(StrBuf *sb, const cJSON *rows, const int n, const int team) {
+    static const V10Col team_cols[] = {{"#", "50px", 1, 0}, {"Team", NULL, 0, 0}, {"Score", NULL, 1, 1}, {"Kills", NULL, 1, 1}, {"Games", NULL, 1, 1}};
+    static const V10Col contrib_cols[] = {{"#", "50px", 1, 0}, {"Player", NULL, 0, 0}, {"Kills", NULL, 1, 1}, {"Score", NULL, 1, 1}, {"Games", NULL, 1, 1}};
+    const V10Col *cols = team >= 0 ? contrib_cols : team_cols;
+    const char *const *keys = team >= 0 ? k_kc_contrib_keys : k_kc_team_keys;
+    const int sort = LB.kc_sort >= 0 ? LB.kc_sort : kc_sort_col();
+    const int desc = LB.kc_sort >= 0 ? LB.kc_sort_desc : 1;
+    const cJSON **sorted = malloc(sizeof(*sorted) * (size_t) n);
+    if (!sorted) return;
+    int k = 0;
+    const cJSON *row;
+    cJSON_ArrayForEach(row, rows) sorted[k++] = row;
+    kc_sort_rows(sorted, n, keys[sort], desc);
+    v10_table_begin(sb, cols, 5, sort, desc, "knLbKcSort(%d)");
+    for (int i = 0; i < n; i++) {
+        const cJSON *e = sorted[i];
+        char rank[24], a[32], b[32], c[32];
+        snprintf(rank, sizeof(rank), "#%d", i + 1);
+        if (team >= 0) {
+            char who[96];
+            player_label(who, sizeof(who), e);
+            v10_fmt_int(a, sizeof(a), v10_num(e, "kills", 0));
+            v10_fmt_int(b, sizeof(b), v10_num(e, "score", 0));
+            v10_fmt_int(c, sizeof(c), v10_num(e, "games", 0));
+            v10_table_row(sb, NULL, 0);
+            v10_table_cell(sb, &cols[0], rank);
+            v10_table_cell(sb, &cols[1], who);
+            v10_table_cell(sb, &cols[2], a);
+            v10_table_cell(sb, &cols[3], b);
+            v10_table_cell(sb, &cols[4], c);
+        } else {
+            char click[96];
+            snprintf(click, sizeof(click), "playTick(0.5);knLbKcTeam(%d)", (int) v10_num(e, "id", -1));
+            v10_fmt_int(a, sizeof(a), v10_num(e, "total_score", 0));
+            v10_fmt_int(b, sizeof(b), v10_num(e, "total_kills", 0));
+            v10_fmt_int(c, sizeof(c), v10_num(e, "total_games", 0));
+            v10_table_row(sb, click, 0);
+            v10_table_cell(sb, &cols[0], rank);
+            kc_team_cell(sb, &cols[1], (int) v10_num(e, "id", -1));
+            v10_table_cell(sb, &cols[2], a);
+            v10_table_cell(sb, &cols[3], b);
+            v10_table_cell(sb, &cols[4], c);
+        }
+        v10_table_row_end(sb);
+    }
+    v10_table_end(sb);
+    free(sorted);
+}
+
+// _49257 KrunkCup: the team standings, or a team's top contributors once a team is picked
 static void lb_krunkcup(StrBuf *sb) {
+    const int team = LB.kc_team;
+    char thumb[512], name[96], path[128], msg[160];
     sb_append(sb, "<div class=\"krunkcup-component svelte-1xp8pv1\"><div class=\"kc-header svelte-1xp8pv1\">"
                   "<button type=\"button\" class=\"back-btn svelte-1xp8pv1\" onclick=\"knLbKcBack()\">&#8592; Back</button> ");
-    if (LB.kc_team >= 0) {
-        sb_append(sb, "<span class=\"kc-thumb svelte-1xp8pv1\"></span> <span class=\"kc-title svelte-1xp8pv1\">");
-        sb_append_esc(sb, LB.kc_team_name);
+    if (team >= 0) {
+        kc_team_thumb(thumb, sizeof(thumb), team);
+        kc_team_name(name, sizeof(name), team);
+        sb_appendf(sb, "<span class=\"kc-thumb svelte-1xp8pv1\" style=\"background-image: url('%s')\"></span> <span class=\"kc-title svelte-1xp8pv1\">", thumb);
+        sb_append_esc(sb, name);
         sb_append(sb, "</span>");
     } else sb_append(sb, "<span class=\"kc-title svelte-1xp8pv1\">KrunkCup</span>");
     sb_append(sb, "</div> ");
-    char path[128];
-    if (LB.kc_team >= 0) snprintf(path, sizeof(path), "/api/leaderboards/krunkcup/teams/%d/contributors", LB.kc_team);
+    if (team >= 0) snprintf(path, sizeof(path), "/api/leaderboards/krunkcup/teams/%d/contributors", team);
     else snprintf(path, sizeof(path), "/api/leaderboards/krunkcup/teams");
     const V10Req *r = v10_get(path, 30000);
-    const cJSON *rows = data_array(r);
-    if (!rows) lb_loading_or(sb, r, "1xp8pv1", "Loading...", LB.kc_team >= 0 ? "Failed to load contributors" : "Failed to load KrunkCup standings");
-    else if (!cJSON_GetArraySize(rows))
+    const cJSON *rows = NULL;
+    const int st = kc_request(r, team >= 0 ? "Failed to fetch KrunkCup contributors" : "Failed to fetch KrunkCup teams", &rows, msg, sizeof(msg));
+    const int n = rows ? cJSON_GetArraySize(rows) : 0;
+    if (st == KC_LOADING) sb_append(sb, "<div class=\"loading svelte-1xp8pv1\">Loading...</div>");
+    else if (st == KC_ERROR) {
+        sb_append(sb, "<div class=\"error svelte-1xp8pv1\">");
+        sb_append_esc(sb, msg);
+        sb_append(sb, "</div>");
+    } else if (!n)
         sb_appendf(sb, "<div class=\"no-data svelte-1xp8pv1\">%s</div>",
-                   LB.kc_team >= 0 ? "No contributors for this team yet." : "No KrunkCup data yet. Equip a KrunkCup jersey with a team style and play!");
-    else if (LB.kc_team >= 0) {
-        static const V10Col cols[] = {{"Player", NULL, 0, 0}, {"Kills", NULL, 1, 1}, {"Score", NULL, 1, 1}, {"Games", NULL, 1, 1}};
-        v10_table_begin(sb, cols, 4, -1, 1, NULL);
-        const cJSON *row;
-        cJSON_ArrayForEach(row, rows) {
-            char name[96], k[32], s[32], g[32];
-            player_label(name, sizeof(name), row);
-            v10_fmt_int(k, sizeof(k), v10_num(row, "kills", 0));
-            v10_fmt_int(s, sizeof(s), v10_num(row, "score", 0));
-            v10_fmt_int(g, sizeof(g), v10_num(row, "games", 0));
-            v10_table_row(sb, NULL, 0);
-            v10_table_cell(sb, &cols[0], name);
-            v10_table_cell(sb, &cols[1], k);
-            v10_table_cell(sb, &cols[2], s);
-            v10_table_cell(sb, &cols[3], g);
-            v10_table_row_end(sb);
-        }
-        v10_table_end(sb);
-    } else {
-        static const V10Col cols[] = {{"Team", NULL, 0, 0}, {"Score", NULL, 1, 1}, {"Kills", NULL, 1, 1}, {"Games", NULL, 1, 1}};
-        v10_table_begin(sb, cols, 4, -1, 1, NULL);
-        const cJSON *row;
-        cJSON_ArrayForEach(row, rows) {
-            char s[32], k[32], g[32], click[96];
-            v10_fmt_int(s, sizeof(s), v10_num(row, "total_score", 0));
-            v10_fmt_int(k, sizeof(k), v10_num(row, "total_kills", 0));
-            v10_fmt_int(g, sizeof(g), v10_num(row, "total_games", 0));
-            snprintf(click, sizeof(click), "knLbKcTeam(%d)", (int) v10_num(row, "id", 0));
-            v10_table_row(sb, click, 0);
-            StrBuf cell = {0};
-            sb_append(&cell, "<span class=\"team-cell svelte-zls0ao\"><span class=\"thumb svelte-zls0ao\"></span> <span class=\"name svelte-zls0ao\">");
-            sb_append_esc(&cell, v10_str(row, "name")[0] ? v10_str(row, "name") : "Team");
-            sb_append(&cell, "</span></span>");
-            char *html = sb_finish(&cell);
-            v10_table_cell_html(sb, &cols[0], html);
-            free(html);
-            v10_table_cell(sb, &cols[1], s);
-            v10_table_cell(sb, &cols[2], k);
-            v10_table_cell(sb, &cols[3], g);
-            v10_table_row_end(sb);
-        }
-        v10_table_end(sb);
-    }
+                   team >= 0 ? "No contributors for this team yet." : "No KrunkCup data yet. Equip a KrunkCup jersey with a team style and play!");
+    else kc_table(sb, rows, n, team);
     sb_append(sb, "</div>");
 }
 
@@ -1002,6 +1161,7 @@ static void lb_open(const char *category) {
     for (int i = 0; category && i < LB_CATEGORIES; i++)
         if (!strcmp(category, names[i])) LB.cat = i;
     LB.kc_team = -1;
+    kc_reset_sort();
     char *html = lb_gen();
     v10_popup_show("defaultModal", html, lb_render);
     free(html);
@@ -1052,6 +1212,7 @@ int v10_competitive_handle(const char *name, const HtmlEvent *ev, const HtmlArg 
     if (!strcmp(name, "knLbCategory")) {
         if (a0 >= 0 && a0 < LB_CATEGORIES) LB.cat = a0;
         LB.kc_team = -1;
+        kc_reset_sort();
     } else if (!strcmp(name, "knLbBack")) {
         LB.cat = LB_GRID;
     } else if (!strcmp(name, "knLbTab")) {
@@ -1077,16 +1238,18 @@ int v10_competitive_handle(const char *name, const HtmlEvent *ev, const HtmlArg 
         snprintf(LB.raid_month, sizeof(LB.raid_month), "%s", v[0] ? v : "all-time");
     } else if (!strcmp(name, "knLbKcTeam")) {
         LB.kc_team = a0;
-        LB.kc_team_name[0] = 0;
-        const V10Req *r = v10_get("/api/leaderboards/krunkcup/teams", 30000);
-        const cJSON *row;
-        cJSON_ArrayForEach(row, data_array(r)) {
-            if ((int) v10_num(row, "id", -1) == a0) snprintf(LB.kc_team_name, sizeof(LB.kc_team_name), "%s", v10_str(row, "name"));
+        kc_reset_sort();
+    } else if (!strcmp(name, "knLbKcSort")) {
+        const int cur = LB.kc_sort >= 0 ? LB.kc_sort : kc_sort_col();
+        const int desc = LB.kc_sort >= 0 ? LB.kc_sort_desc : 1;
+        if (a0 >= 2 && a0 <= 4) {
+            LB.kc_sort = a0;
+            LB.kc_sort_desc = a0 == cur ? !desc : 1; // v10 _46124: the same column toggles, a new one starts descending
         }
-        if (!LB.kc_team_name[0]) snprintf(LB.kc_team_name, sizeof(LB.kc_team_name), "Team %d", a0);
     } else if (!strcmp(name, "knLbKcBack")) {
         if (LB.kc_team >= 0) LB.kc_team = -1;
         else LB.cat = LB_GRID;
+        kc_reset_sort();
     } else {
         return -1;
     }
@@ -1152,6 +1315,7 @@ void v10_competitive_scenario(const cJSON *state) {
         if (LB.cat == LB_RANKED && tab < 2) LB.ranked_tab = tab;
         LB.ranked_region = (int) v10_num(lb, "region", 0) & 3;
         LB.ranked_season = (int) v10_num(lb, "season", -1);
+        if (LB.cat == LB_KRUNKCUP) LB.kc_team = (int) v10_num(lb, "team", -1);
         lb_render();
     }
 }
