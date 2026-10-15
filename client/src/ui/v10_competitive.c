@@ -394,6 +394,34 @@ void v10_back_button(StrBuf *sb, const char *onclick) {
     sb_appendf(sb, "<button class=\"main-button svelte-whnh40\" type=\"button\" onclick=\"%s\">\xe2\x86\x90 Back</button>", onclick);
 }
 
+// The colour emoji of v10's texts. The native engine has no colour emoji font, so a text emoji drew as
+// a missing-glyph box; these are drawn as the Noto Color Emoji artwork Chrome uses (ui/img/kn/emoji/,
+// ui/README.md). Any other text is escaped as it is. cls (may be "") is added to the image's class.
+void v10_emoji(StrBuf *sb, const char *utf8, const char *cls) {
+    static const struct { const char *utf8, *file; } k_emoji[] = {
+        {"\xf0\x9f\x94\x92", "1f512"},             // 🔒 Level / Login Required
+        {"\xf0\x9f\x94\x8d", "1f50d"},             // 🔍 Searching
+        {"\xe2\x9c\xa8", "2728"},                  // ✨ Match found
+        {"\xe2\x9d\x8c", "274c"},                  // ❌ Internal Error
+        {"\xe2\x9a\x94\xef\xb8\x8f", "2694-fe0f"}, // ⚔️ Ranked, Turf Wars tips
+        {"\xe2\x9a\xa0\xef\xb8\x8f", "26a0-fe0f"}, // ⚠️ Turf Wars note
+        {"\xf0\x9f\x8e\xaf", "1f3af"},             // 🎯 Turf Wars: Earn Kills
+        {"\xf0\x9f\x92\xb0", "1f4b0"},             // 💰 Turf Wars: Earn Rewards, Top Grossing Clans
+        {"\xf0\x9f\x91\xa5", "1f465"},             // 👥 Turf Wars tips
+        {"\xf0\x9f\x93\x8a", "1f4ca"},             // 📊 Turf Wars tips
+        {"\xf0\x9f\x8e\xae", "1f3ae"},             // 🎮 Turf Wars tips
+        {"\xf0\x9f\xa5\x87", "1f947"},             // 🥇 Turf Wars medal
+        {"\xf0\x9f\xa5\x88", "1f948"},             // 🥈 Turf Wars medal
+        {"\xf0\x9f\xa5\x89", "1f949"},             // 🥉 Turf Wars medal
+    };
+    for (size_t i = 0; utf8 && i < sizeof(k_emoji) / sizeof(k_emoji[0]); i++)
+        if (!strcmp(utf8, k_emoji[i].utf8)) {
+            sb_appendf(sb, "<img class=\"kn-emoji%s%s\" src=\"./img/kn/emoji/%s.png\" alt=\"\">", cls && *cls ? " " : "", cls ? cls : "", k_emoji[i].file);
+            return;
+        }
+    sb_append_esc(sb, utf8 ? utf8 : "");
+}
+
 // v10's currency table (_6909): KR text, RP material emoji_events, JNK material plumbing
 void v10_currency(StrBuf *sb, const double value, const char *currency, const char *size, const int centered) {
     const char *color = "#2196f3", *icon = "\xf0\x9f\x92\x8e", *kind = "emoji";

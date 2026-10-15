@@ -227,6 +227,8 @@ static void test_shaping(TextSystem *ts) {
     // zero-width marks and fallback
     n = text_shape(game, "a\xE2\x80\x8E" "b\xE2\x80\x8F", 8, 0, g, 64, &total);
     CHECK(n == 2, "U+200E/U+200F skipped (got %d)", n);
+    n = text_shape(game, "\xE2\x9A\xA0\xEF\xB8\x8F", 6, 0, g, 64, &total); // U+26A0 U+FE0F: the selector has no glyph
+    CHECK(n == 1, "U+FE0F skipped after U+26A0 (got %d)", n);
     n = text_shape(game, "\xE6\x97\xA5\xE6\x9C\xAC", 6, 0, g, 64, &total);
     CHECK(n == 2, "CJK -> 2 glyphs");
     if (n == 2) {

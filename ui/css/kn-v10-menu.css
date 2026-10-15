@@ -58,6 +58,15 @@
 	vertical-align: middle;
 }
 
+/* The Turf Wars how-to's card / tip icons (svelte-1sr7h97, v10_emoji in turf_ui.c): the 1.6em image
+ * keeps its place but takes a 1em line, as the emoji glyph does in Chrome, so the titles under the
+ * image icons line up with the one under the 🏆 text glyph. */
+.card-icon .kn-emoji,
+.tip-icon .kn-emoji {
+	margin: -0.3em 0;
+	vertical-align: -0.15em;
+}
+
 /* KrunkNative: the ranked message overlay (Level Required, Login Required, Cooldown, ...; hash
  * svelte-jxc66d) shows like v10's Svelte transitions on its box (scale 0.9 to 1, duration 200 ms,
  * with the opacity ramp) and its backdrop (fade, 200 ms): js bundle, transition:scale / fade on

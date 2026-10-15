@@ -489,8 +489,8 @@ static void maps_table(StrBuf *sb, const char *table, const cJSON *maps, const i
         char pos[48], kills[32], deaths[32], games[32];
         const cJSON *p = cJSON_GetObjectItem(r, "position");
         static const char *const medal[] = {"\xf0\x9f\xa5\x87", "\xf0\x9f\xa5\x88", "\xf0\x9f\xa5\x89"};
+        const int medal_row = medals && cJSON_IsNumber(p) && p->valueint >= 1 && p->valueint <= TURF_SPLIT_COUNT;
         if (!cJSON_IsNumber(p)) snprintf(pos, sizeof(pos), "\xe2\x80\x94");
-        else if (medals && p->valueint >= 1 && p->valueint <= TURF_SPLIT_COUNT) snprintf(pos, sizeof(pos), "#%d %s", p->valueint, medal[p->valueint - 1]);
         else snprintf(pos, sizeof(pos), "#%d", p->valueint);
         v10_fmt_int(kills, sizeof(kills), v10_num(r, "kills", 0));
         if (cJSON_IsNumber(cJSON_GetObjectItem(r, "deaths"))) v10_fmt_int(deaths, sizeof(deaths), v10_num(r, "deaths", 0));
@@ -499,7 +499,14 @@ static void maps_table(StrBuf *sb, const char *table, const cJSON *maps, const i
         else snprintf(games, sizeof(games), "N/A");
         v10_table_row(sb, NULL, 0);
         v10_table_cell(sb, &cols[0], v10_str(r, "map_name"));
-        v10_table_cell(sb, &cols[1], pos);
+        if (medal_row) { // "#1" and the medal image (v10 shows the medal emoji)
+            StrBuf mb = {0};
+            sb_appendf(&mb, "#%d ", p->valueint);
+            v10_emoji(&mb, medal[p->valueint - 1], "");
+            char *mh = sb_finish(&mb);
+            v10_table_cell_html(sb, &cols[1], mh);
+            free(mh);
+        } else v10_table_cell(sb, &cols[1], pos);
         v10_table_cell(sb, &cols[2], kills);
         StrBuf c = {0};
         comparison_cell(&c, r);
@@ -981,7 +988,9 @@ static void gen_boards(StrBuf *sb) {
         sb_append(sb, "<div class=\"leaderboard-grid svelte-raovk7\"><button type=\"button\" class=\"leaderboard-card svelte-raovk7\" onclick=\"playSelect();knTwBoard(0)\">"
                       "<div class=\"card-icon svelte-raovk7\">\xf0\x9f\x8f\x86</div> <h3 class=\"card-title svelte-raovk7\">Top Performing Clans</h3> <p class=\"card-description svelte-raovk7\">"
                       "View clans ranked by performance.</p></button> <button type=\"button\" class=\"leaderboard-card svelte-raovk7\" onclick=\"playSelect();knTwBoard(1)\">"
-                      "<div class=\"card-icon svelte-raovk7\">\xf0\x9f\x92\xb0</div> <h3 class=\"card-title svelte-raovk7\">Top Grossing Clans</h3> <p class=\"card-description svelte-raovk7\">"
+                      "<div class=\"card-icon svelte-raovk7\">");
+        v10_emoji(sb, "\xf0\x9f\x92\xb0", "");
+        sb_append(sb, "</div> <h3 class=\"card-title svelte-raovk7\">Top Grossing Clans</h3> <p class=\"card-description svelte-raovk7\">"
                       "See which clans have earned the most KR from Turf Wars.</p></button> <button type=\"button\" class=\"leaderboard-card svelte-raovk7\" onclick=\"playSelect();knTwBoard(2)\">"
                       "<div class=\"card-icon svelte-raovk7\">\xe2\xad\x90</div> <h3 class=\"card-title svelte-raovk7\">Top Performing Players</h3> <p class=\"card-description svelte-raovk7\">"
                       "All-time leaderboard of top performing players.</p></button></div></div>");
@@ -1201,26 +1210,42 @@ static void gen_recruit(StrBuf *sb) {
 
 // ------------------------------------------------------------------ How to Play (svelte-1sr7h97)
 
+// an emoji as its image HTML (v10_emoji) in a fresh string the caller frees
+static char *emoji_html(const char *utf8) {
+    StrBuf b = {0};
+    v10_emoji(&b, utf8, "");
+    return sb_finish(&b);
+}
+
 static void gen_howto(StrBuf *sb) {
     char split[64];
     snprintf(split, sizeof(split), "%d%% / %d%% / %d%%", (int) lround(g_turf_split[0] * 100), (int) lround(g_turf_split[1] * 100), (int) lround(g_turf_split[2] * 100));
+    /* the Pro Tips icons sit inside the format below, so their image HTML is built first */
+    char *tip_people = emoji_html("\xf0\x9f\x91\xa5"), *tip_chart = emoji_html("\xf0\x9f\x93\x8a");
+    char *tip_pad = emoji_html("\xf0\x9f\x8e\xae"), *tip_sword = emoji_html("\xe2\x9a\x94\xef\xb8\x8f");
     sb_append(sb, "<div class=\"how-to-play-tab svelte-1sr7h97\"><div class=\"content-container svelte-1sr7h97\"><div class=\"header-section svelte-1sr7h97\">"
                   "<h1 class=\"main-title svelte-1sr7h97\">How to Play Turf Wars</h1> <p class=\"subtitle svelte-1sr7h97\">Compete with your clan to control territories and earn rewards!</p></div> "
-                  "<div class=\"info-cards svelte-1sr7h97\"><div class=\"info-card svelte-1sr7h97\"><div class=\"card-icon svelte-1sr7h97\">\xf0\x9f\x8e\xaf</div> "
+                  "<div class=\"info-cards svelte-1sr7h97\"><div class=\"info-card svelte-1sr7h97\"><div class=\"card-icon svelte-1sr7h97\">");
+    v10_emoji(sb, "\xf0\x9f\x8e\xaf", "");
+    sb_append(sb, "</div> "
                   "<h2 class=\"card-title svelte-1sr7h97\">Earn Kills</h2> <p class=\"card-description svelte-1sr7h97\">Play on eligible maps in <strong class=\"svelte-1sr7h97\">Free for All</strong> "
                   "or <strong class=\"svelte-1sr7h97\">Team Deathmatch</strong> modes on official servers. Every kill you earn counts towards your clan's total!</p> "
                   "<div class=\"card-details svelte-1sr7h97\"><div class=\"detail-item svelte-1sr7h97\"><span class=\"detail-label svelte-1sr7h97\">Eligible Maps:</span> "
                   "<div class=\"detail-value svelte-1sr7h97\"><span class=\"map-badge svelte-1sr7h97\">Burg</span><span class=\"map-badge svelte-1sr7h97\">Sandstorm</span>"
                   "<span class=\"map-badge svelte-1sr7h97\">Subzero</span></div></div> <div class=\"detail-item svelte-1sr7h97\"><span class=\"detail-label svelte-1sr7h97\">Eligible Modes:</span> "
                   "<div class=\"detail-value svelte-1sr7h97\"><span class=\"mode-badge svelte-1sr7h97\">Free for All</span><span class=\"mode-badge svelte-1sr7h97\">Team Deathmatch</span>"
-                  "</div></div> <div class=\"detail-note svelte-1sr7h97\"><span class=\"note-icon svelte-1sr7h97\">\xe2\x9a\xa0\xef\xb8\x8f</span> <span class=\"svelte-1sr7h97\">"
+                  "</div></div> <div class=\"detail-note svelte-1sr7h97\"><span class=\"note-icon svelte-1sr7h97\">");
+    v10_emoji(sb, "\xe2\x9a\xa0\xef\xb8\x8f", "");
+    sb_append(sb, "</span> <span class=\"svelte-1sr7h97\">"
                   "Kills only count if you're playing against players from different clans!</span></div></div></div> <div class=\"info-card svelte-1sr7h97\">"
                   "<div class=\"card-icon svelte-1sr7h97\">\xf0\x9f\x8f\x86</div> <h2 class=\"card-title svelte-1sr7h97\">Control Territories</h2> <p class=\"card-description svelte-1sr7h97\">"
                   "At the end of each day, the clan with the most kills on each map wins control of that territory for the next\n          day.</p> <div class=\"card-details svelte-1sr7h97\">"
                   "<div class=\"detail-item svelte-1sr7h97\"><span class=\"detail-label svelte-1sr7h97\">Daily Reset:</span> <span class=\"detail-value svelte-1sr7h97\">Leaderboards reset every "
                   "day at midnight UTC</span></div> <div class=\"detail-item svelte-1sr7h97\"><span class=\"detail-label svelte-1sr7h97\">Victory Condition:</span> "
                   "<span class=\"detail-value svelte-1sr7h97\">Highest total kills across all clan members</span></div></div></div> <div class=\"info-card svelte-1sr7h97\">"
-                  "<div class=\"card-icon svelte-1sr7h97\">\xf0\x9f\x92\xb0</div> <h2 class=\"card-title svelte-1sr7h97\">Earn Rewards</h2> <p class=\"card-description svelte-1sr7h97\">At the end "
+                  "<div class=\"card-icon svelte-1sr7h97\">");
+    v10_emoji(sb, "\xf0\x9f\x92\xb0", "");
+    sb_append(sb, "</div> <h2 class=\"card-title svelte-1sr7h97\">Earn Rewards</h2> <p class=\"card-description svelte-1sr7h97\">At the end "
                   "of each day, all kills made on a map are converted into a KR pool. The <strong class=\"svelte-1sr7h97\">");
     sb_appendf(sb, "top %d clans</strong> on that map split the pool \xe2\x80\x94 you don't have to win the territory to get paid!</p> <div class=\"card-details svelte-1sr7h97\">"
                    "<div class=\"detail-item svelte-1sr7h97\"><span class=\"detail-label svelte-1sr7h97\">Reward Split:</span> <div class=\"detail-value svelte-1sr7h97\">",
@@ -1239,15 +1264,19 @@ static void gen_howto(StrBuf *sb) {
                    "playing on official servers for kills to count</span></li> <li class=\"svelte-1sr7h97\"><span class=\"rule-icon svelte-1sr7h97\">\xe2\x9c\x93</span> "
                    "<span class=\"svelte-1sr7h97\">Territory control is determined daily based on total clan kills</span></li> <li class=\"svelte-1sr7h97\"><span class=\"rule-icon svelte-1sr7h97\">"
                    "\xe2\x9c\x93</span> <span class=\"svelte-1sr7h97\">The top %d clans on each map split the daily KR pool (%s)</span></li></ul></div> <div class=\"tips-section svelte-1sr7h97\">"
-                   "<h2 class=\"section-title svelte-1sr7h97\">Pro Tips</h2> <div class=\"tips-grid svelte-1sr7h97\"><div class=\"tip-card svelte-1sr7h97\"><div class=\"tip-icon svelte-1sr7h97\">"
-                   "\xf0\x9f\x91\xa5</div> <h3 class=\"tip-title svelte-1sr7h97\">Coordinate with Your Clan</h3> <p class=\"tip-text svelte-1sr7h97\">Work together with your clan members to "
-                   "maximize kills on target maps!</p></div> <div class=\"tip-card svelte-1sr7h97\"><div class=\"tip-icon svelte-1sr7h97\">\xf0\x9f\x93\x8a</div> <h3 class=\"tip-title svelte-1sr7h97\">"
+                   "<h2 class=\"section-title svelte-1sr7h97\">Pro Tips</h2> <div class=\"tips-grid svelte-1sr7h97\"><div class=\"tip-card svelte-1sr7h97\"><div class=\"tip-icon svelte-1sr7h97\">%s</div> "
+                   "<h3 class=\"tip-title svelte-1sr7h97\">Coordinate with Your Clan</h3> <p class=\"tip-text svelte-1sr7h97\">Work together with your clan members to "
+                   "maximize kills on target maps!</p></div> <div class=\"tip-card svelte-1sr7h97\"><div class=\"tip-icon svelte-1sr7h97\">%s</div> <h3 class=\"tip-title svelte-1sr7h97\">"
                    "Track Your Progress</h3> <p class=\"tip-text svelte-1sr7h97\">Check the leaderboards regularly to see how your clan is performing!</p></div> <div class=\"tip-card svelte-1sr7h97\">"
-                   "<div class=\"tip-icon svelte-1sr7h97\">\xf0\x9f\x8e\xae</div> <h3 class=\"tip-title svelte-1sr7h97\">Focus on Eligible Maps</h3> <p class=\"tip-text svelte-1sr7h97\">Make sure "
-                   "you're playing on Burg, Sandstorm, or Subzero to earn points!</p></div> <div class=\"tip-card svelte-1sr7h97\"><div class=\"tip-icon svelte-1sr7h97\">\xe2\x9a\x94\xef\xb8\x8f</div> "
+                   "<div class=\"tip-icon svelte-1sr7h97\">%s</div> <h3 class=\"tip-title svelte-1sr7h97\">Focus on Eligible Maps</h3> <p class=\"tip-text svelte-1sr7h97\">Make sure "
+                   "you're playing on Burg, Sandstorm, or Subzero to earn points!</p></div> <div class=\"tip-card svelte-1sr7h97\"><div class=\"tip-icon svelte-1sr7h97\">%s</div> "
                    "<h3 class=\"tip-title svelte-1sr7h97\">Defend Your Territories</h3> <p class=\"tip-text svelte-1sr7h97\">If your clan controls a map, keep playing to maintain control and "
                    "earn more rewards!</p></div></div></div></div></div>",
-               TURF_SPLIT_COUNT, split);
+               TURF_SPLIT_COUNT, split, tip_people, tip_chart, tip_pad, tip_sword);
+    free(tip_people);
+    free(tip_chart);
+    free(tip_pad);
+    free(tip_sword);
 }
 
 // ------------------------------------------------------------------ player view (svelte-7h12t9)

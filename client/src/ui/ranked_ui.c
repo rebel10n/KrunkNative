@@ -159,23 +159,9 @@ static void status_line(const char **text, const char **icon, const char **color
     }
 }
 
-// The emoji of v10's ranked texts (lock, magnifier, sparkles, cross, swords). The native engine has
-// no colour emoji font, so a text emoji drew as a missing-glyph box (the Level Required icon). They
-// are drawn as the same Noto Color Emoji artwork Chrome uses (ui/img/kn/emoji/, ui/README.md).
+// The emoji of v10's ranked texts (lock, magnifier, sparkles, cross, swords) are images (v10_emoji).
 static void emoji(StrBuf *sb, const char *icon, const char *cls) {
-    static const struct { const char *utf8, *file; } k_emoji[] = {
-        {"\xf0\x9f\x94\x92", "1f512"},          // 🔒
-        {"\xf0\x9f\x94\x8d", "1f50d"},          // 🔍
-        {"\xe2\x9c\xa8", "2728"},               // ✨
-        {"\xe2\x9d\x8c", "274c"},               // ❌
-        {"\xe2\x9a\x94\xef\xb8\x8f", "2694-fe0f"}, // ⚔️
-    };
-    for (size_t i = 0; icon && i < sizeof(k_emoji) / sizeof(k_emoji[0]); i++)
-        if (!strcmp(icon, k_emoji[i].utf8)) {
-            sb_appendf(sb, "<img class=\"kn-emoji %s\" src=\"./img/kn/emoji/%s.png\" alt=\"\">", cls, k_emoji[i].file);
-            return;
-        }
-    sb_append_esc(sb, icon ? icon : "");
+    v10_emoji(sb, icon, cls);
 }
 
 static void fmt_time(char *out, const size_t n, const int s) { snprintf(out, n, "%d:%02d", s / 60, s % 60); }

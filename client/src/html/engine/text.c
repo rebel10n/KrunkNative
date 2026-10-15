@@ -250,12 +250,17 @@ static TextFace *text_add_face(TextSystem *ts, const char *family, const char *p
  * (synthetic bold when bold).  Listed first so the glyph does not depend on
  * which system fonts a machine has. */
 static void text_add_bundled_symbols(TextSystem *ts) {
-    char path[1024];
+    /* kn-symbols-emoji.ttf (OFL subset of Noto Emoji, monochrome): U+2620 U+2694 U+269C U+1F3C6, the
+     * v10 category-card icons (Raids, Clans, Ranked, KrunkCup) that the Adwaita Mono subset lacks. */
+    static const char *const files[] = {"kn-symbols.ttf", "kn-symbols-emoji.ttf"};
     const size_t n = strlen(ts->ui_dir);
-    snprintf(path, sizeof path, "%s%scss/fonts/kn-symbols.ttf", ts->ui_dir, n && ts->ui_dir[n - 1] == '/' ? "" : "/");
-    if (ts->fallback_count < TEXT_MAX_FALLBACKS && file_exists(path)) {
-        TextFace *f = text_add_face(ts, "fallback-symbols", path, 400, TEXT_STYLE_NORMAL, 1);
-        if (f) ts->fallback[ts->fallback_count++] = f;
+    for (size_t i = 0; i < sizeof files / sizeof *files; i++) {
+        char path[1024];
+        snprintf(path, sizeof path, "%s%scss/fonts/%s", ts->ui_dir, n && ts->ui_dir[n - 1] == '/' ? "" : "/", files[i]);
+        if (ts->fallback_count < TEXT_MAX_FALLBACKS && file_exists(path)) {
+            TextFace *f = text_add_face(ts, "fallback-symbols", path, 400, TEXT_STYLE_NORMAL, 1);
+            if (f) ts->fallback[ts->fallback_count++] = f;
+        }
     }
 }
 
@@ -762,10 +767,12 @@ static float text_kerning(TextFont *font, TextFace *face, uint32_t prev, uint32_
 
 // ---- shaping -----------------------------------------------------------------
 
+/* Variation selectors (U+FE00..U+FE0F: FE0E text / FE0F emoji presentation) have no glyph of their own;
+ * Chrome draws the base character and skips them, so an emoji written as "U+26A0 U+FE0F" is not a box. */
 static int is_skipped_cp(uint32_t cp) {
     return cp == 0x200E || cp == 0x200F || cp == 0x200B || cp == 0x200C || cp == 0x200D ||
            cp == 0xFEFF || cp == 0x00AD || cp == 0x2060 || (cp >= 0x202A && cp <= 0x202E) ||
-           (cp >= 0x2066 && cp <= 0x2069);
+           (cp >= 0x2066 && cp <= 0x2069) || (cp >= 0xFE00 && cp <= 0xFE0F);
 }
 
 // Longest ligature name of the face's icon table starting at s; returns its length or 0.

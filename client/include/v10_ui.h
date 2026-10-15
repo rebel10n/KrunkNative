@@ -57,6 +57,7 @@ void v10_fmt_int(char *out, size_t n, double v);      // Number.toLocaleString('
 void v10_tabs(StrBuf *sb, const char *const *labels, int count, int active, const char *handler); // svelte-1o3qul6, margin-bottom 0
 void v10_back_button(StrBuf *sb, const char *onclick); // main-button "← Back"
 void v10_currency(StrBuf *sb, double value, const char *currency, const char *size, int centered); // svelte-1r6bdx8
+void v10_emoji(StrBuf *sb, const char *utf8, const char *cls); // an emoji as its image (ui/img/kn/emoji/), else the text
 
 // generic table (svelte-69sryq)
 typedef struct {

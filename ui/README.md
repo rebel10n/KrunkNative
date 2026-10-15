@@ -23,6 +23,7 @@ options: `tools/ui-import/README.md`) and edited since. Which source each file c
 | `i18n/en.json` | **Reconstructed**: the bundle's inline `translations.en` (2170 keys; `i18n-en.json` until 2026-10-14). |
 | `i18n/<code>.json` (es de nl kr pr jp fr fi zh zhtr pl hi ru it tg tr) | Byte-for-byte content of the **served** `https://krunker.io/i18n/<code>.js?v=i41Nu` (what v10's `getTranslations` loads), fetched 2026-10-14 and converted from v10's "key value" line format to JSON by `tools/i18n-import/i18n_import.py`. Details, `i18n/kn/` (Krunker Box Office's own strings) and the gaps: `i18n/README.md`. |
 | `css/fonts/kn-noto-*` | Ours: Noto Sans CJK JP / SC / TC / KR and Noto Sans Devanagari subsets (OFL 1.1, `css/fonts/kn-noto-OFL.txt`) the native engine falls back to for the shipped languages (`i18n/README.md`, "Fonts"). |
+| `css/fonts/kn-symbols-emoji.ttf` | Ours: a subset of Noto Emoji (monochrome `NotoEmoji-Regular.ttf`, OFL 1.1, `css/fonts/kn-symbols-emoji-OFL.txt`) with U+2620 U+2694 U+269C U+1F3C6 only, the second bundled symbol fallback of the native engine (`client/src/html/engine/text.c` text_add_bundled_symbols, after `kn-symbols.ttf`): the Leaderboards category cards (Raids, Clans, Ranked, KrunkCup) and the Turf Wars trophies. |
 | `css/*.css` (Krunker's), `css/fonts/*`, `img/`, `textures/`, the other images | Byte copies of the served files (URL rewriting only). Each `.woff2` also gets a `.ttf`, and each `.webp` a `.webp.png` sidecar (the engine decodes neither). Files the live hosts 404 on (the Play subsets, `favicon.png`, `pro_scope.png`, ...) are v7.1.4's copies (the retired page's). |
 | `<video>` frame sidecars (`assets/videos/limited_shop_banner.webm.knv`, `assets/videos/tutorial/basics.mp4.knv`, `assets/scares/1.mp4.knv`; gitignored like the rest of `assets/`, shipped with the game content) | **Transcoded** from the v10 page's three videos (the Eterno Shop header, the Guide's Basics clip, `jumpScare(1)`; sha256-pinned in `tools/ui-import/live_assets_v10.lock`, fetched by `make assets-import-live`) by `make video-frames` (`python3 -I tools/ui-import/video_frames.py`: ffmpeg/ffprobe, baseline JPEG frames + a frame table, format in its docstring). The native engine has no video decoder: `client/src/html/engine/video.c` plays a `<video>` from `<file>.knv` next to its source, decoding each frame with the in-tree stb_image as playback reaches it; the web build plays the real file. Re-run after a source video changes (`--check` reports stale sidecars). |
 | `windows/versions.txt` | The served `docs/versions.txt` (changelog). |
@@ -83,6 +84,22 @@ without its CDN): `img/mouse/10002.png` (controls), `img/backgrounds/gamecats/c_
   3c38af66779655f39edb0f0be8141be402b2dc854132211630601f8d026a24fa. Not in `tools/ui-import/live_assets_v10.lock`:
   v10 has no origin file for these glyphs (its page does not ship emoji images), so the lock's
   fetch-and-verify model does not apply.
+  The Turf Wars emoji follow the same rule (`client/src/ui/v10_competitive.c` v10_emoji(), the
+  table shared with the ranked texts): `img/kn/emoji/{1f3ae,1f3af,1f465,1f4b0,1f4ca,1f947,1f948,
+  1f949,26a0-fe0f}.png` (the Turf Wars how-to's Earn Kills / Earn Rewards / Pro Tips / note icons,
+  the Top Grossing Clans card and the My Clan medals), the same Noto Color Emoji rasterisation
+  (256 px, glyph at 160 px). PNG sha256: 1f3ae a361b0ef9e16c1e0333d1c40ba65ac915876db3a7526a6828fdb820838e3c384,
+  1f3af 12f5f61e1eaf4a2277c58538b93fe41d61626cf61f5e66d30c4c992fad8d9153, 1f465
+  1fdaf693e8cb4c4d4939b13a5d85c3639a006927981052ad1b3eead2ee093542, 1f4b0
+  ed7694f0bc65fdfe7a6817a8da90dd27e7d6d74b15f03dacbd939694f8b49f89, 1f4ca
+  716d53d1fad73518994ed9f0c26eaea9d0771ed53cb59f04e9bf80ba4e08a31b, 1f947
+  1636fecc7b8ba07e9450cf1c4d95221b4cc06223b64f80e7ba97ec5540fe1152, 1f948
+  d265fd094633c5b7f9b90c5c91aca76089b95e573f8669e08c07d8f56e82bafd, 1f949
+  d65ece522506ee9dc1731bb83dbf2c1fc8351ed09a707e803e53ded4b4db76c2, 26a0-fe0f
+  9ea8993b0702ddc5611a0bb2aa4bc14d4510f43682d729955ec3c8b5e0379816.
+  The 2694 sword of the Turf Wars tips is `2694-fe0f.png` above. The Clans / Raids / Ranked /
+  KrunkCup category cards (U+2694, U+2620, U+269C, U+1F3C6) and the Turf Wars 🏆 (U+1F3C6) are text
+  glyphs instead, from `css/fonts/kn-symbols-emoji.ttf` (table above).
 - `img/ranked/ranks/rank_*.svg` — v10.0.2's eight rank icons, unchanged from
   `assets.krunker.io/img/ranked/ranks/` (the ranked window, `shared/src/ranked.c` ranked_rank_icon).
 - `css/devconsole.css` + `css/fonts/lucon.ttf` — the offline build's developer console
