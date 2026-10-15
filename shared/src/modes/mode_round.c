@@ -825,7 +825,17 @@ float mode_melee_damage(Game *game, Player *dealer, Player *victim, const float 
 // v10.0.2 stalk.onMelee (v10:104385-104387, applied as a damage factor at v10:172543-172544): the
 // stalker's swing at someone else heals it 10 and deals x0.6; any other knife hit in the mode x0.8.
 float mode_melee_stalk(Game *game, Player *dealer, Player *victim, const float damage) {
-    (void) game;
+    if (game && game->mode && game->mode->config.stalker_v7) {
+        // v7.1.4 stalk.onMelee (Krunker Strike: vfe.onMelee): a stalker's swing jump-scares the target,
+        // heals the stalker 40 and takes the target's whole health (`re = d.obj.health || re`)
+        if (!dealer || !victim || dealer->team != 2) return damage;
+        if (game_is_authority(game)) {
+            const NetJumpScarePacket packet = {.index = 0};
+            game_send(game, victim->uid, NET_PACKET_JUMP_SCARE, &packet, sizeof(packet));
+        }
+        player_change_health(dealer, NULL, -40.0f, 0);
+        return victim->health > 0.0f ? victim->health : damage;
+    }
     if (dealer && dealer->team == 2 && dealer != victim) {
         player_change_health(dealer, NULL, -10.0f, 0);
         return damage * 0.6f;

@@ -26,6 +26,9 @@ typedef struct Ruleset_t { // shared.h forward-declares the tag for Game.rules
     // else the bare constant (v7.1.4 / Strike: 0.1 ms)
     unsigned char delta_floor_scaled;
     float end_timer;            // config.endTimer: the end screen / map vote, seconds (v10 25, Krunker Strike 30)
+    float end_anim;             // config.endAnim: the round-end slow motion, seconds (v10 5, Krunker Strike 2.5)
+    // a projectile's head band is plain headScale (v7 / Krunker Strike projectiles), not headScale x headMlt
+    unsigned char projectile_head_plain;
 
     // Weapon ids index this table: 0 .. krunker_weapon_count-1 are Krunker's own (wire ids),
     // WEAPON_ID_KN_BASE.. KrunkNative's; the ids in between are NULL.

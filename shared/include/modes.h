@@ -307,6 +307,8 @@ typedef struct {
     ModeMeleeFn on_melee;            // onMelee as a melee damage factor (v10 Stalker); NULL = none
     unsigned char stalker_v10:1;     // the v10 Stalker rework: the stalker's leap (input[6]), wall stick,
                                      // coyote time and notWallJ walls; canSlide = isStalker (only it slides)
+    unsigned char stalker_v7:1;      // v7.1.4's Stalker (Krunker Strike keeps it, strike_rules.c): pickStalker
+                                     // 400 HP, onMelee = the stalker's swing kills and heals it 40 + jump scare
 } GameModeConfig;
 
 extern const GameModeConfig g_default_game_mode_config;

@@ -215,6 +215,8 @@ static const StrikeStat k_wep_27[] = { // Akimbo Pistol
 static const StrikeStat k_wep_28[] = { // Charge Rifle
     {"canUpgrade", 0}, // v10 true
 };
+// projectile tints where Strike's differ from v10's (pj_color: the client render table)
+static const StrikeWeaponColor k_projectile_colors[] = {{8, 0xFDEBD0}};
 static const StrikeWeapon k_weapons[] = {
     {.id = 0, .name = "Sniper Rifle", .overrides = k_wep_0, .override_count = 9},
     {.id = 1, .name = "Assault Rifle", .overrides = k_wep_1, .override_count = 11},
@@ -248,8 +250,8 @@ static const StrikeWeapon k_weapons[] = {
 };
 // Differences not applied (non-scalar, or no engine field):
 //   cSpread (Shotgun, Sawed Off): Strike keeps one flat pattern of 20 numbers where v10 nests two of 10; the (x, y) pairs are identical, so KN's flattened custom_spread is unchanged
-//   noSkins (Combat Knife 0): not ported: inventory: whether the weapon takes skins (KN's market, not gameplay)
-//   pj_color (Rocket Launcher 16640976): not ported: projectile tint: a client render table (client/src/projectiles_render.c), not a Weapon field
+//   noSkins (Combat Knife 0): not ported: inventory: whether the weapon takes skins (the Strike store / market's, not gameplay)
+//   pj_color (Rocket Launcher 16640976): not ported: projectile tint: not a Weapon field; carried in StrikeRules.projectile_colors for the client's render table (client/src/projectiles_render.c)
 //   recoilData (Assault Rifle): v10's Assault Rifle recoil pattern; KN does not implement recoilData, so dropping it changes nothing
 
 // ---- modes: Strike's gameModes table; offered = described in Strike's menu (i18n descriptionLang)
@@ -580,9 +582,11 @@ const StrikeRules g_strike_rules = {
     .game_time_min = 3,      // serverConfig gameTime def (minutes)
     .intermission_s = 30,
     .physics = k_physics, .physics_count = COUNT(k_physics),
+    .projectile_colors = k_projectile_colors, .projectile_color_count = 1,
     .delta_floor_ms = 0.1f, // procInputs max(floor, min(input[1], dltMx))
     .trigger_action_limit = 5,
     .end_timer_ms = 30000,       // config.endTimer
+    .end_anim_ms = 2500,        // config.endAnim
     .posed_hitboxes = 0, .hit_zones_live = 1, // live target (d.obj.y / adjustedHeight), not the lag-compensated box
     .binds = k_binds, .bind_count = COUNT(k_binds), .scroll_to_swap = 0,
     .pitch_limit = 1.570796326794897f, // Math.PI/2

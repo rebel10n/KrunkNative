@@ -208,8 +208,10 @@ static const StrikeSetting SETTING_ROWS[] = {
     {"Auto Fire", "autoFireMbl", 1}, {"Aim Assist", "aimAssist", 1}, {"X Sensitivity", "sensitivityXMbl", 1.4},
     {"Y Sensitivity", "sensitivityYMbl", 1.4}, {"Aim X Sensitivity", "aimSensitivityXMbl", 1.4}, {"Aim Y Sensitivity", "aimSensitivityYMbl", 1.4},
     {"Invert Y-Axis", "invertYMbl", 0}, {"Vibration", "vibrationMbl", 1}, {"Gradual Speed", "gradSpeedMbl", 0},
-    {"Show jump button and disable tapping screen to jump", "mob_ctrl_disable_tap_jump", 0}, {"Field of View (FOV)", "fov", 90},
-    {"Weapon FOV", "fpsFOV", 80}, {"Left Handed", "leftHanded", 0},
+    {"Show jump button and disable tapping screen to jump", "mob_ctrl_disable_tap_jump", 0},
+    // FOV / Weapon FOV: 1.37.2's `config.fov + 20` / `+ 15` (config.fov 50), the defaults ui_settings.c sets
+    // under Strike (strike_rules.h settings, tools/strike/strike_data.json input.settings)
+    {"Field of View (FOV)", "fov", 70}, {"Weapon FOV", "fpsFOV", 65}, {"Left Handed", "leftHanded", 0},
     {"Master Volume", "sound", 0.8}, {"Ambient Volume", "ambientVolume", 1}, {"Action Volume", "dialogueVolume", 1},
     {"Weapon Volume", "gunsVolume", 0.3}, {"Player Volume", "playerVolume", 1}, {"Cosmetics Volume", "skinVolume", 1},
     {"UI Volume", "uiVolume", 1}, {"Asset Volume", "assetVolume", 1},

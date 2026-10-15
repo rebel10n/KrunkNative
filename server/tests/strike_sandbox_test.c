@@ -16,6 +16,8 @@
 #include <shared.h>
 #include <flavor.h>
 #include <hitboxes.h>
+#include <ai.h> // game_can_see_point
+#include <modes.h> // mode_melee_damage
 #include <knet.h>
 #include <ruleset.h>
 #include <strike_rules.h>
@@ -40,7 +42,7 @@ typedef struct {
 // A flat 1000 x 1000 floor (top at y 2), spawns far apart.
 static const char *k_map =
     "{\"name\":\"Strike Flat\",\"spawns\":[[-300,2,-300,0,0,0],[300,2,300,0,0,0]],"
-    "\"objects\":[{\"p\":[0,0,0],\"s\":[1000,2,1000],\"t\":1}]}";
+    "\"objects\":[{\"p\":[0,0,0],\"s\":[1000,2,1000],\"t\":1},{\"p\":[0,2,-400],\"s\":[20,20,2],\"t\":1}]}";
 
 static void drain(Peer *p) {
     uint8_t bytes[2048];
@@ -103,6 +105,9 @@ typedef struct {
     float body_damage, head_damage;
     float recoil, recoil_force, spread;
     int posed;
+    int stalker_health, stalker_knife;
+    int see_blocked, see_padded, see_low, see_high;
+    float stalk_melee, stalk_heal, living_health;
 } Result;
 
 // Shoot `target` from `shooter` (both standing, 10 units apart along -Z) at height `aim_y` above the
@@ -138,6 +143,13 @@ static Result run(const GameFlavor flavor) {
     const SandboxConfig cfg = {.maps = maps, .map_count = 1, .map_index = 0, .mode_id = MODE_ID_FFA};
     CHECK(sandbox_start(&cfg), "sandbox_start (%s)", flavor_key(flavor));
     r.posed = hitboxes_active(&g_server->game);
+    // canSee from a bare point (Strike's aim assist from the camera): the 20 x 20 x 2 wall at z -400
+    // blocks; a pad over its half width (10) shrinks it to nothing (canSee's pad, vPad false); the
+    // ray starts cameraHeight below the point, so a point 1 above the wall's top still looks into it
+    r.see_blocked = !game_can_see_point(&g_server->game, (vec3) {0, 10, -390}, (vec3) {0, 10, -410}, 0.4f);
+    r.see_padded = game_can_see_point(&g_server->game, (vec3) {0, 10, -390}, (vec3) {0, 10, -410}, 10.5f);
+    r.see_low = !game_can_see_point(&g_server->game, (vec3) {0, 23, -390}, (vec3) {0, 23, -410}, 0.4f);
+    r.see_high = game_can_see_point(&g_server->game, (vec3) {0, 25, -390}, (vec3) {0, 25, -410}, 0.4f);
 
     static Peer a, b;
     join(&a, 1);                                  // Hunter
@@ -182,6 +194,27 @@ static Result run(const GameFlavor flavor) {
     r.head_damage = shot(&b, &a, trigger, hunter, 10.0f, NULL);
     r.recoil = trigger->weapon ? trigger->weapon->recoil : -1.0f;
     r.spread = trigger->weapon ? trigger->weapon->spread : -1.0f;
+
+    // Stalker: pickStalker after the 15 s wait timer, then the stalker's knife swing (onMelee)
+    sandbox_host(0, MODE_ID_STALK);
+    step(&a, &b, 60);
+    for (int f = 0; f < 17 * 60; f++) {
+        input(&a, -1, 0.0f, 0.0f, 0);
+        input(&b, -1, 0.0f, 0.0f, 0);
+        step(&a, &b, 1);
+    }
+    Player *pa = player_of(&a), *pb = player_of(&b);
+    Player *stalker = pa && pa->team == 2 ? pa : pb && pb->team == 2 ? pb : NULL;
+    Player *living = stalker == pa ? pb : pa;
+    if (stalker && living) {
+        r.stalker_health = stalker->max_health;
+        r.stalker_knife = stalker->loadout && stalker->loadout_size > 0 && stalker->loadout[0] == WEAPON_ID_KNIFE;
+        stalker->health = 100.0f;
+        living->health = (float) living->max_health;
+        r.living_health = living->health;
+        r.stalk_melee = mode_melee_damage(&g_server->game, stalker, living, 50.0f);
+        r.stalk_heal = stalker->health - 100.0f;
+    }
 
     sandbox_disconnect(a.fd);
     sandbox_disconnect(b.fd);
@@ -235,6 +268,15 @@ int main(void) {
     CHECK(near(st.recoil, 2.0f, 1e-4f) && st.recoil_force > 0.0f && st.recoil_force <= 2.0f + 1e-3f,
           "Strike AR recoil 0.002/ms (kick %.3f)", (double) st.recoil_force);
     CHECK(near(st.spread, 40.0f, 1e-3f) && near(base.spread, 100.0f, 1e-3f), "AR spread: Strike 40, v10 100");
+
+    // Stalker: v10 floor(200 + 50 x (2 - 1)) and the x0.6 swing with a 10 heal; Strike (v7) 400 HP, the
+    // swing takes the target's whole health and heals the stalker 40
+    CHECK(base.stalker_health == 250 && base.stalker_knife && near(base.stalk_melee, 30.0f, 1e-3f) && near(base.stalk_heal, 10.0f, 1e-3f),
+          "base Stalker: 250 HP, knife, swing x0.6 (%.1f) heals 10 (%.1f)", (double) base.stalk_melee, (double) base.stalk_heal);
+    CHECK(st.stalker_health == 400 && st.stalker_knife && near(st.stalk_melee, st.living_health, 1e-3f) && near(st.stalk_heal, 40.0f, 1e-3f),
+          "Strike Stalker: 400 HP, knife, swing takes the whole health (%.1f) heals 40 (%.1f)", (double) st.stalk_melee, (double) st.stalk_heal);
+    CHECK(st.see_blocked && st.see_padded && st.see_low && st.see_high, "canSee from a point: wall blocks, pad shrinks, ray cameraHeight below (%d %d %d %d)",
+          st.see_blocked, st.see_padded, st.see_low, st.see_high);
 
     if (g_failures) {
         printf("strike_sandbox_test: %d of %d checks failed\n", g_failures, g_checks);

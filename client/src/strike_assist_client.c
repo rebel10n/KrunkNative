@@ -7,11 +7,12 @@
 #include <strike_assist_client.h>
 #include <strike_assist.h>
 #include <flavor.h>
-#include <ai.h>        // game_ai_player_can_see: Game.canSee from the player's eye
+#include <ai.h>        // game_ai_player_can_see / game_can_see_point: Game.canSee
 #include <ruleset.h>     // game_constants_of
 #include <html_dom.h>  // html_dom_viewport: innerWidth / innerHeight
 #include <ui_logic.h>  // ui_setting_value
 #include <ui_mobile.h>
+#include <strike_ui.h> // strike_ui_active / strike_touch_sticks_active
 #include <math.h>
 #include <string.h>
 #include <time.h>
@@ -76,7 +77,9 @@ int strike_assist_client_tick(Client *client) {
         .mobile = 1,
         .aim_assist = (unsigned char) setting_on("aimAssist"),
         .auto_fire = (unsigned char) setting_on("autoFireMbl"),
-        .joystick_active = (unsigned char) ui_mobile_touch_active(),
+        // joystick.active || moveJoystick.active: FRVR's touch controls under the Strike page
+        // (strike_touch.c), v10's #mobileUI otherwise
+        .joystick_active = (unsigned char) (strike_ui_active() ? strike_touch_sticks_active() : ui_mobile_touch_active()),
         .semi_auto = (unsigned char) (me && me->weapon && me->weapon->no_auto),
         .friendly = (unsigned char) (game->mode && game->mode->config.friendly),
         .now_ms = now_ms(),
@@ -95,7 +98,10 @@ int strike_assist_client_tick(Client *client) {
         t->in_frustum = (unsigned char) project(&client->camera, point, &t->sx, &t->sy);
         const vec3 cam = client->camera.position;
         t->dist = sqrtf((point.x - cam.x) * (point.x - cam.x) + (point.y - cam.y) * (point.y - cam.y) + (point.z - cam.z) * (point.z - cam.z));
-        t->visible = (unsigned char) (t->in_frustum && game_ai_player_can_see(game, me, point));
+        // pbe: cnBSeen (the nametag pass's canSee from the player's eye, nameVisRate) ||
+        // !canSee(camera, point, dist < 20 ? .4 : .5): canSee from the bare camera position
+        const float pad = t->dist < k->can_see_near_dist ? k->can_see_pad_near : k->can_see_pad_far;
+        t->visible = (unsigned char) (t->in_frustum && (game_ai_player_can_see(game, me, point) || game_can_see_point(game, cam, point, pad)));
         t->on_ground = p->on_ground;
         n++;
     }

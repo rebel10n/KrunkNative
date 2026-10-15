@@ -788,7 +788,8 @@ static double js_max(const double a, const double b) { return a != a || b != b ?
 
 // Game.canSee(from, x, y, z) == null: from the eye (from.y + height - cameraHeight) along feet ->
 // target; any object box entered before the end blocks (`ah && ah < 1`).
-static int ai_can_see_from(const Game *game, const vec3 feet, const float height, const vec3 target) {
+// `pad` (canSee's pad, vPad false): every box shrinks by it on each side, floored at 0.
+static int ai_can_see_from_pad(const Game *game, const vec3 feet, const float height, const vec3 target, const double pad) {
     if (!game->map) return 1;
     const double ox = feet.x, oz = feet.z;
     const double oy = feet.y + height - game_constants.camera_height;
@@ -798,9 +799,10 @@ static int ai_can_see_from(const Game *game, const vec3 feet, const float height
         const Object *object = game->map->objects[i];
         if (!ai_object_blocks(object) || object->complex_coll) continue;
         const vec3 size = object_box_size(object);
-        const double hx = size.x * 0.5, hz = size.z * 0.5;
+        const double hx = fmax(0.0, size.x * 0.5 - pad), hz = fmax(0.0, size.z * 0.5 - pad);
+        const double cy = object->position.y + size.y * 0.5, hy = fmax(0.0, size.y * 0.5 - pad);
         const double a = (object->position.x - hx - ox) * ix, b = (object->position.x + hx - ox) * ix;
-        const double c = (object->position.y - oy) * iy, d = (object->position.y + size.y - oy) * iy;
+        const double c = (cy - hy - oy) * iy, d = (cy + hy - oy) * iy;
         const double e = (object->position.z - hz - oz) * iz, f = (object->position.z + hz - oz) * iz;
         const double near = js_max(js_max(js_min(a, b), js_min(c, d)), js_min(e, f));
         const double far = js_min(js_min(js_max(a, b), js_max(c, d)), js_max(e, f));
@@ -815,8 +817,16 @@ static int ai_can_see_from(const Game *game, const vec3 feet, const float height
     return 1;
 }
 
+static int ai_can_see_from(const Game *game, const vec3 feet, const float height, const vec3 target) {
+    return ai_can_see_from_pad(game, feet, height, target, 0.0);
+}
+
 int game_ai_player_can_see(const Game *game, const Player *origin, const vec3 target) {
     return ai_can_see_from(game, origin->position, origin->height, target);
+}
+
+int game_can_see_point(const Game *game, const vec3 from, const vec3 target, const float pad) {
+    return ai_can_see_from_pad(game, from, 0.0f, target, pad);
 }
 
 // A target candidate of findNearestTo / findFurthestFrom (players first, then AIs).

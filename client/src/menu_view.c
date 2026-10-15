@@ -7,6 +7,7 @@
 //   endGame(): endAnimationTimeLeft = config.endAnim when (player && player.active) || spectating
 //   controls.js camLookAt / update (chase camera), config.js camChaseTrn/Spd/Dst
 #include <menu_view.h>
+#include <ruleset.h> // config.endAnim (Ruleset.end_anim: Krunker Strike 2.5 s)
 #include <spectate.h>
 #include <input_script.h> // input_script_adjust_input: `look` (menu_view_look)
 #include <ui_logic.h>     // ui_controls_fill_look: the alive mouse sensitivity, reused while dead
@@ -19,7 +20,7 @@
 #define CAM_CHASE_TRN 0.0022f     // config.camChaseTrn: turn rate per ms
 #define CAM_CHASE_SPD 0.0012f     // config.camChaseSpd: glide rate per ms
 #define CAM_CHASE_DST 24.0f       // config.camChaseDst: stop this far from the killer
-#define END_ANIM_MS 5000.0f       // config.endAnim
+#define END_ANIM_MS (ruleset_current()->end_anim * 1000.0f) // config.endAnim (v10 5000, Krunker Strike 2500)
 #define CAM_DELTA_MAX_MS 33.0f    // config.dltMx = Math.round(1000 / 30): gameLoop's gameTimeDiff cap
 // KrunkNative: the death chase stops this far in front of the first solid box / terrain between
 // the death eye and its goal (v7.1.4 has no test: a killer within camChaseDst put the goal behind

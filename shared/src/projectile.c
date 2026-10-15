@@ -4,6 +4,7 @@
 // damage with linear falloff, 0.2x self damage). Krunker speeds are units per
 // millisecond; the simulation keeps those units and converts the tick delta.
 #include <shared.h>
+#include <ruleset.h> // Ruleset.projectile_head_plain (Krunker Strike)
 #include <world.h> // map-logic WP-B: PvP filter, terrain
 #include <ai.h>
 #include <hitboxes.h> // v10.0.2 posed hit boxes
@@ -326,6 +327,8 @@ static void projectile_tick(Game *game, GameProjectile *projectile, const float 
                     float zone_y, zone_ah; // Krunker Strike: the live target (Ruleset.hit_zones_live)
                     player_hit_zone_base(hit.player, &hit.state, &zone_y, &zone_ah);
                     head = hit.zone ? hit.zone - 1 == HIT_KIND_HEAD : player_hit_is_head(hit.player, zone_y, zone_ah, hit_y);
+                    // Krunker Strike (v7): `V < xe.headScale`, no headMlt on a projectile's head band
+                    if (!hit.zone && game_ruleset(game)->projectile_head_plain) head = zone_y + zone_ah - hit_y < game_constants_of(game)->head_scale;
                     leg = hit.zone ? hit.zone - 1 == HIT_KIND_LEG : player_hit_is_leg(hit.player, zone_y, hit_y);
                     damage = player_hit_damage(game, weapon, damage, head, leg);
                 }

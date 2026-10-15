@@ -419,6 +419,10 @@ void game_ai_damage_ex(Game*, GameAI*, Player *dealer, float damage, int force_t
 float game_ai_line_hit(const GameAI*, vec3 origin, vec3 direction);
 // Game.canSee(player, x, y, z, 0, 0, true) == null with the hitscan object filter.
 int game_ai_player_can_see(const Game*, const Player*, vec3 target);
+// Game.canSee(from, x, y, z, pad) == null for a bare point `from` (no height: the ray starts
+// cameraHeight below it, along from -> target, as canSee does with a camera position), boxes shrunk
+// by `pad` (Krunker Strike's aim assist: the camera, pad .4 within 20 units, else .5).
+int game_can_see_point(const Game*, vec3 from, vec3 target, float pad);
 // AI.js shot: projectiles.init(x, y, z, yaw, pitch, stored[1], ai, {}, true, projOb).
 void game_ai_projectile_config_for(const GameAI*, ProjectileConfig *out);
 // Fires an AI's v7 shot (a "pr" with ai_kind 1 + NET_PACKET_AI_SHOT for its projOb visuals).

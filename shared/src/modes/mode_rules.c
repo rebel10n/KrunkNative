@@ -655,7 +655,9 @@ void mode_trigger_pick_stalker(Game *game, const float overflow) {
     Player *stalker;
     if (pick_random(game, &stalker, 1)) {
         mode_update_team(game, stalker, 2);
-        mode_set_role_health(game, stalker, (int) floorf(200.0f + 50.0f * (float) (active - 1)));
+        // v7.1.4 / Krunker Strike: maxHealth = 400 (GameModeConfig.stalker_v7)
+        const int health = game->mode && game->mode->config.stalker_v7 ? 400 : (int) floorf(200.0f + 50.0f * (float) (active - 1));
+        mode_set_role_health(game, stalker, health);
         const int knife = WEAPON_ID_KNIFE;
         mode_set_player_loadout(stalker, &knife, 1, 0);
         mode_send_loadout(game, stalker);

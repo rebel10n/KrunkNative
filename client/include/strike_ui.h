@@ -46,6 +46,9 @@ int  strike_touch_event(Client *client, int phase, long id, float x, float y);
 // The frame's look delta from the aim zone / aim joystick (FRVR fakeMouse(2, dx, dy, "mblInput")),
 // in CSS px of finger travel; 0 when none. main.c drops raw cursor travel under the Strike page.
 int  strike_touch_take_look(float *dx, float *dy);
+// joystick.active || moveJoystick.active: a look drag or the move stick is held (the aim assist's
+// gate, client/src/strike_assist_client.c)
+int  strike_touch_sticks_active(void);
 void strike_touch_tick(Client *client);  // per frame: the controls' DOM follows the game state
 void strike_touch_reset(void);           // release everything held (menu opened, death, end)
 

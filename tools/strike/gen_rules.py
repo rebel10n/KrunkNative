@@ -41,8 +41,9 @@ WEAPON_KEY_DEFAULTS = {"lsMlt": 0.5, "movSpread": 1.0, "chrgMlt": 0.9, "burstR":
 # Keys whose differences the engine has no field for (cosmetic / inventory). They are listed in the
 # generated file and in strike_rules_test, never silently dropped.
 WEAPON_KEYS_NOT_PORTED = {
-    "pj_color": "projectile tint: a client render table (client/src/projectiles_render.c), not a Weapon field",
-    "noSkins": "inventory: whether the weapon takes skins (KN's market, not gameplay)",
+    "pj_color": "projectile tint: not a Weapon field; carried in StrikeRules.projectile_colors for the client's "
+                "render table (client/src/projectiles_render.c)",
+    "noSkins": "inventory: whether the weapon takes skins (the Strike store / market's, not gameplay)",
     "reloY": "viewmodel reload drop (KN animates reloads from the v7 constants)",
 }
 # Non-scalar keys: compared, but only reported.
@@ -264,6 +265,11 @@ def main():
             report.setdefault((key, WEAPON_NONSCALAR_NOTES.get(key, "differs (non-scalar), not applied")), []).append(wpn["name"])
         for key, value in skipped:
             report.setdefault((key, "not ported: " + WEAPON_KEYS_NOT_PORTED[key]), []).append("%s %s" % (wpn["name"], c_num(value)))
+    pj_colors = [(wpn["index"], int(wpn["data"]["pj_color"])) for wpn in d["weapons"]
+                 if is_scalar(wpn["data"].get("pj_color")) and not same(wpn["data"]["pj_color"], v10_weapons[wpn["index"]].get("pj_color"))]
+    w("// projectile tints where Strike's differ from v10's (pj_color: the client render table)")
+    w("static const StrikeWeaponColor k_projectile_colors[] = {%s};" % (
+        ", ".join("{%d, 0x%06X}" % c for c in pj_colors) if pj_colors else "{-1, 0}"))
     w("static const StrikeWeapon k_weapons[] = {")
     for i, name, n in weapon_rows:
         w("    {.id = %d, .name = %s, .overrides = %s, .override_count = %d}," % (i, c_str(name), ("k_wep_%d" % i) if n else "NULL", n))
@@ -381,9 +387,11 @@ def main():
     w("    .intermission_s = %d," % timing["intermTmr"]["def"])
     cb = d["combat"]
     w("    .physics = k_physics, .physics_count = COUNT(k_physics),")
+    w("    .projectile_colors = k_projectile_colors, .projectile_color_count = %d," % len(pj_colors))
     w("    .delta_floor_ms = %s, // procInputs max(floor, min(input[1], dltMx))" % c_float(cb["procinputs_delta_floor_ms"]))
     w("    .trigger_action_limit = %d," % ph["triggerActionLimit"])
     w("    .end_timer_ms = %d,       // config.endTimer" % ph["endTimer"])
+    w("    .end_anim_ms = %d,        // config.endAnim" % ph["endAnim"])
     w("    .posed_hitboxes = %d, .hit_zones_live = %d, // %s" % (cb["hit_test"] != "aabb", cb["hit_test"] == "aabb", cb["zones"]["from"]))
     c = inp["controls"]
     w("    .binds = k_binds, .bind_count = COUNT(k_binds), .scroll_to_swap = %d," % int(inp["scroll_to_swap"]))

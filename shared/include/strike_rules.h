@@ -60,6 +60,12 @@ typedef struct {
     size_t override_count;
 } StrikeWeapon;
 
+// A weapon's projectile tint (pj_color, 0xRRGGBB) where Strike's differs from v10's.
+typedef struct {
+    int id;
+    int color;
+} StrikeWeaponColor;
+
 // A Strike game mode (Strike's gameModes table: v7's without Trade and Impulsed).
 typedef struct {
     int index;               // Strike's mode index (its own numbering)
@@ -172,9 +178,12 @@ typedef struct StrikeRules_t {
     // strike_constants_apply() converts. Strike is v7.1.4's config (crouchLean -PI*0.1 where v10 has 0).
     const StrikeStat *physics;
     size_t physics_count;
+    const StrikeWeaponColor *projectile_colors; // client render table overrides (projectiles_render.c)
+    size_t projectile_color_count;
     float delta_floor_ms;       // procInputs: max(floor, min(input[1], dltMx)) (v7: 0.1 ms; v10: 1 * deltaMlt)
     int trigger_action_limit;   // config.triggerActionLimit
     int end_timer_ms;           // config.endTimer (the end screen)
+    int end_anim_ms;            // config.endAnim (the round-end slow motion)
     // combat: Strike keeps v7's padded AABB hit test with zones measured on the live target (no v10
     // posed hit boxes)
     unsigned char posed_hitboxes;
@@ -203,6 +212,8 @@ const StrikeMode *strike_mode(const StrikeRules *rules, int mode_id);
 const StrikeConfigDefault *strike_config_default(const StrikeRules *rules, const char *var);
 const StrikeBind *strike_bind(const StrikeRules *rules, const char *bind, int index);
 const StrikeSetting *strike_setting(const StrikeRules *rules, const char *key);
+// Strike's projectile tint of weapon `id` (0xRRGGBB), or -1 when it is v10's.
+int strike_projectile_color(const StrikeRules *rules, int id);
 
 // ---- the engine tables built from the data (strike_rules.c; built once, then read-only) ---------
 // Krunker v10.0.2's ruleset (ruleset.h) with Strike's weapon, class and mode tables: the same key /

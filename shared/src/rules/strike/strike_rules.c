@@ -57,6 +57,14 @@ const StrikeBind *strike_bind(const StrikeRules *rules, const char *bind, const 
     return NULL;
 }
 
+int strike_projectile_color(const StrikeRules *rules, const int id) {
+    rules = or_default(rules);
+    for (size_t i = 0; i < rules->projectile_color_count; i++) {
+        if (rules->projectile_colors[i].id == id) return rules->projectile_colors[i].color;
+    }
+    return -1;
+}
+
 const StrikeSetting *strike_setting(const StrikeRules *rules, const char *key) {
     rules = or_default(rules);
     if (!key) return NULL;
@@ -274,6 +282,16 @@ static void build_modes(const Ruleset *rules_v10, const StrikeRules *rules) {
         m->game_time = sm->game_time_ms < 0 ? MODE_GAME_TIME_CONFIG : (float) sm->game_time_ms / 1000.0f;
         m->lives = sm->lives;
         m->party = sm->party;
+        if (sm->mode_id == MODE_ID_STALK) {
+            // Strike's Stalker is v7.1.4's (vfe: no wall-jump keys, no canSlide / onKill / update; onMelee
+            // kills, pickStalker 400 HP): none of v10's rework (strike_rules.h, doc/strike/parity.md)
+            m->stalker_v10 = 0;
+            m->stalker_v7 = 1;
+            m->has_wall_jump = 0;
+            m->wall_jump = m->wall_jump_max = m->wall_jump_d = m->wall_jump_v = m->wall_jump_yv = 0.0f;
+            m->on_kill = NULL;
+            m->update = NULL;
+        }
         if (sm->weapon_order) {
             m->weapon_order = sm->weapon_order;
             m->weapon_order_size = (int) sm->weapon_order_count;
@@ -325,6 +343,8 @@ static void build(void) {
     S.ruleset.delta_floor_scaled = 0; // v7's procInputs: max(0.1, ...), no deltaMlt term
     if (rules->trigger_action_limit > 0) S.ruleset.trigger_action_limit = rules->trigger_action_limit;
     if (rules->end_timer_ms > 0) S.ruleset.end_timer = (float) rules->end_timer_ms / 1000.0f;
+    if (rules->end_anim_ms > 0) S.ruleset.end_anim = (float) rules->end_anim_ms / 1000.0f;
+    S.ruleset.projectile_head_plain = rules->hit_zones_live; // v7's projectile zones: `V < xe.headScale`
     S.ruleset.weapons = S.weapon_table;
     S.ruleset.weapon_count = WEAPON_TABLE_COUNT;
     S.ruleset.krunker_weapon_count = (int) rules->weapon_count; // 29

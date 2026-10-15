@@ -8,6 +8,8 @@
 //          physObj container, rotation.y = PI / 2, scale 1
 //   2.js   getMeleeConfig: melee/melee_<skin> with a Lambert material
 // Units follow Krunker: world units, velocities per ms, gravity per ms^2, times in ms.
+#include <flavor.h>
+#include <strike_rules.h> // Krunker Strike projectile tints
 #include <gl.h>
 #include <projectiles_render.h>
 #include <vfx.h>
@@ -156,7 +158,9 @@ static ProjVisual *proj_spawn(const Client *client, const int weapon_index, cons
         const ProjVisualConfig *config = proj_visual_config(weapon);
         visual->look_dir = config->look_dir;
         visual->size = pv3(config->scale, config->scale, config->length);
-        visual->color = proj_color(config->color);
+        // Krunker Strike's own tints (pj_color, strike_rules.h projectile_colors: the Rocket Launcher's 0xfdebd0)
+        const int strike_color = flavor_current()->rules ? strike_projectile_color(flavor_current()->rules, weapon_index) : -1;
+        visual->color = proj_color(strike_color >= 0 ? strike_color : config->color);
     }
 
     if (proj_log()) {

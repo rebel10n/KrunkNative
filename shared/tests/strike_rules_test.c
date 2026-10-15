@@ -295,6 +295,17 @@ static void check_physics(const cJSON *data) {
     CHECK(strike_ruleset()->trigger_action_limit == 5 && ruleset_v10()->trigger_action_limit == 8, "triggerActionLimit 5 (v10 8)");
     CHECK(strike_ruleset()->end_timer == 30.0f && ruleset_v10()->end_timer == 25.0f && near(r->end_timer_ms, num(ph, "endTimer", NAN)),
           "endTimer: Strike 30 s, v10 25 s");
+    CHECK(strike_ruleset()->end_anim == 2.5f && ruleset_v10()->end_anim == 5.0f && near(r->end_anim_ms, num(ph, "endAnim", NAN)),
+          "endAnim: Strike 2.5 s, v10 5 s");
+    // Stalker: Strike's is v7.1.4's (no v10 rework)
+    const GameModeConfig *st = &strike_ruleset()->modes[MODE_ID_STALK], *sv = &ruleset_v10()->modes[MODE_ID_STALK];
+    CHECK(st->stalker_v7 && !st->stalker_v10 && !st->has_wall_jump && !st->on_kill && !st->update && st->on_melee,
+          "Strike Stalker: v7 (no leap / wall stick / wall jumps / camping / kill heal; onMelee kills)");
+    CHECK(!sv->stalker_v7 && sv->stalker_v10 && sv->has_wall_jump && sv->on_kill && sv->update, "v10 Stalker untouched");
+    CHECK(near(st->speed_mlt[1], 0.65), "Stalker spdMlt {1: .65}");
+    // projectiles: v7's plain headScale band; Strike's Rocket Launcher tint
+    CHECK(strike_ruleset()->projectile_head_plain && !ruleset_v10()->projectile_head_plain, "projectile head band: plain headScale under Strike");
+    CHECK(strike_projectile_color(NULL, 8) == 16640976 && strike_projectile_color(NULL, 1) == -1, "Rocket Launcher pj_color 0xfdebd0");
 }
 
 static void check_combat(const cJSON *data) {

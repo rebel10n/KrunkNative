@@ -20,6 +20,7 @@ static const Ruleset k_v10 = {
     .hit_zones_live = 0, // KrunkNative measures the zones on the rewound box (player.c combat)
     .delta_floor_scaled = 1, // procInputs max(1 * deltaMlt, ...) (v10:169582)
     .end_timer = GAME_END_TIMER, // config.endTimer 25000
+    .end_anim = 5.0f,            // config.endAnim 5000
     .weapons = g_weapons_v10,
     .weapon_count = WEAPON_TABLE_COUNT,
     .krunker_weapon_count = WEAPON_V10_COUNT, // 29 Boulder, 30 Compressor (weapons_v10.c)

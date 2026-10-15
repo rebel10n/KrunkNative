@@ -16,7 +16,12 @@
 // The page is the same on every platform: natively the mouse is one finger (left button), on the web
 // real touches arrive through strike_touch_event (emscripten touch callbacks on the page) and the
 // mouse works the same way as natively.
+// The layout numbers (Gw's positions and sizes, the 640x360 base, the tap-to-jump travel, the move
+// angles) are FRVR's data: StrikeRules.touch (shared/include/strike_rules.h, extracted into
+// tools/strike/strike_data.json "input.touch"); the table below keeps what is code (binds, kinds).
 #include <strike_ui.h>
+#include <strike_rules.h>
+#include <flavor.h>
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <ui_mobile.h>
@@ -32,7 +37,6 @@
 
 #define FADE_MS 250          // nipplejs fadeTime
 #define THRESHOLD 0.1f       // nipplejs threshold (force)
-#define TAP_JUMP_TRAVEL 9.0f // nF.aim end: cf <= 9 is a tap
 #define POINTERS_MAX 8
 #define MOUSE_ID (-1L)
 #define DEG(r) ((r) * 180.0f / (float) M_PI)
@@ -50,7 +54,7 @@ typedef struct {
     const char *cls;     // rhe's attrs.class (p1 turns undefined into the class "undefined")
 } ControlDef;
 
-static const ControlDef CONTROLS[C_COUNT] = {
+static ControlDef CONTROLS[C_COUNT] = { // positions / sizes replaced from StrikeRules.touch (layout_from_rules)
     [C_JUMP] = {"jump", 0, "jump", NULL, UI_CONTROL_JUMP, 26, NAN, 97, NAN, 46, NULL},
     [C_RELOAD] = {"reload", 0, "reload", NULL, UI_CONTROL_RELOAD, 190, NAN, NAN, 16, 46, NULL},
     [C_MELEE] = {"melee", 1, "knife", "gun", UI_CONTROL_MELEE, 100, NAN, NAN, 16, 46, NULL},
@@ -107,13 +111,44 @@ static struct {
     int shown;
 } T = {.io = 0};
 
+// ---------------------------------------------------------------- FRVR's data
+
+static const StrikeTouch *touch_rules(void) {
+    const StrikeRules *r = flavor_current()->rules;
+    return r ? &r->touch : &strike_rules()->touch;
+}
+
+// Gw's positions and sizes from the extracted table (a side -1 there is unset here)
+static void layout_from_rules(void) {
+    static int done;
+    if (done) return;
+    done = 1;
+    const StrikeTouch *t = touch_rules();
+    for (int c = 0; c < C_COUNT; c++) {
+        ControlDef *d = &CONTROLS[c];
+        for (size_t i = 0; i < t->control_count; i++) {
+            const StrikeTouchControl *s = &t->controls[i];
+            if (strcmp(s->id, d->key)) continue;
+            d->left = s->left >= 0 ? (float) s->left : NAN;
+            d->right = s->right >= 0 ? (float) s->right : NAN;
+            d->top = s->top >= 0 ? (float) s->top : NAN;
+            d->bottom = s->bottom >= 0 ? (float) s->bottom : NAN;
+            if (s->size > 0) d->size = s->size;
+            break;
+        }
+    }
+}
+
+static float tap_jump_travel(void) { return (float) touch_rules()->tap_jump_max_travel; } // cf <= 9 is a tap
+
 // ---------------------------------------------------------------- helpers
 
 static float base_scale(void) {
     float w = 0.0f, h = 0.0f;
     html_dom_viewport(&w, &h, NULL);
     if (w <= 0.0f || h <= 0.0f) return 1.0f;
-    return w / h < 16.0f / 9.0f ? w / 640.0f : h / 360.0f; // Pce / --base-scale
+    const StrikeTouch *t = touch_rules();
+    return w / h < 16.0f / 9.0f ? w / (float) t->base_width : h / (float) t->base_height; // Pce / --base-scale
 }
 
 static void key(const int id, const int down) {
@@ -131,9 +166,14 @@ static int setting_true(const char *key) {
     return html_storage_get(key, buf, sizeof(buf)) >= 0 && !strcmp(buf, "true");
 }
 
-static int auto_fire_on(void) { // l(): frvrMenu && settings.tmp.autoFireMbl
+static int auto_fire_on(void) { // l(): frvrMenu && settings.tmp.autoFireMbl (a switch: true by default)
     double v;
-    return ui_setting_number("autoFireMbl", &v) && v != 0.0;
+    if (ui_setting_number("autoFireMbl", &v)) return v != 0.0;
+    const cJSON *s = ui_setting_value("autoFireMbl");
+    if (cJSON_IsBool(s)) return cJSON_IsTrue(s);
+    if (cJSON_IsString(s)) return !strcmp(cJSON_GetStringValue(s), "true");
+    const StrikeSetting *def = strike_setting(flavor_current()->rules, "autoFireMbl");
+    return def ? def->val != 0.0 : 1;
 }
 
 static int melee_selected(void) {
@@ -254,7 +294,8 @@ static StickMove nipple_move(Nipple *n, const float x, const float y) {
 
 static void move_keys(const StickMove *m) { // Q(direction, |angle - 180|, speed)
     const float o = fabsf(m->degree - 180.0f);
-    if ((o >= 165.0f && o <= 195.0f) || (o >= 0.0f && o <= 15.0f)) {
+    const int *fb = touch_rules()->no_forward_back, *st = touch_rules()->no_strafe;
+    if ((o >= (float) fb[2] && o <= (float) fb[3]) || (o >= (float) fb[0] && o <= (float) fb[1])) {
         key(UI_CONTROL_FORWARD, 0);
         key(UI_CONTROL_BACKWARD, 0);
     } else {
@@ -263,7 +304,7 @@ static void move_keys(const StickMove *m) { // Q(direction, |angle - 180|, speed
         if (m->dir_y < 0) { key(UI_CONTROL_FORWARD, 0); key(UI_CONTROL_BACKWARD, 1); }
         else key(UI_CONTROL_BACKWARD, 0);
     }
-    if (o >= 75.0f && o <= 105.0f) {
+    if (o >= (float) st[0] && o <= (float) st[1]) {
         key(UI_CONTROL_LEFT, 0);
         key(UI_CONTROL_RIGHT, 0);
     } else {
@@ -339,7 +380,7 @@ static void aim_zone_end(void) {
     if (setting_true("mob_ctrl_disable_tap_jump")) return;
     const float t = T.cf;
     T.cf = 0.0f;
-    if (t <= TAP_JUMP_TRAVEL) key(UI_CONTROL_JUMP, 1);
+    if (t <= tap_jump_travel()) key(UI_CONTROL_JUMP, 1);
 }
 
 static int aim_stick_visible(void); // Gw.aimJoyStick.visible(bh())
@@ -422,6 +463,7 @@ static void ammo_text(char *out, const size_t n, int *offset_pct, int *visible) 
 }
 
 static void build(void) {
+    layout_from_rules();
     const HtmlElem holder = html_dom_by_id("frvrMenuMobileHolder");
     const HtmlElem anchor = holder ? html_dom_query(holder, ".frvr-notifications-holder") : 0;
     if (!anchor) return;
@@ -710,6 +752,10 @@ int strike_touch_mouse_button(Client *client, const int button, const int action
 int strike_touch_mouse_move(Client *client, const float x, const float y) {
     T.client = client;
     return touch_move(MOUSE_ID, x, y);
+}
+
+int strike_touch_sticks_active(void) { // CONTROLS joystick.active || moveJoystick.active
+    return T.look_active || T.moving;
 }
 
 void strike_touch_reset(void) {
