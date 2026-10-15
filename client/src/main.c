@@ -387,6 +387,33 @@ EM_JS(void, web_take_look, (double *dx, double *dy), {
     look.x = look.y = 0;
 });
 
+// Web look probe for the pointer-lock e2e (tools/kref/pointer-lock-e2e.js), like net_wt.c's
+// kn_wt_stats: the camera look, the lock state, and the mouse movement the game threw away while
+// it was showing with the pointer locked (the "mouse freeze": the cursor is captured, the menu is
+// closed, the mouse turns nothing). Updated once a frame by web_look_note.
+static struct {
+    double moved, applied, frozen; // pixels of movement: taken from the canvas / turned the camera / dropped in game
+    int frozen_frames;
+} g_web_look;
+
+static void web_look_note(const Client *client, const double dx, const double dy, const int allowed) {
+    const double px = fabs(dx) + fabs(dy);
+    g_web_look.moved += px;
+    if (allowed) g_web_look.applied += px;
+    else if (px > 0.0 && client->in_game && client->me && client->me->active && !html_ui_is_menu_open() &&
+             EM_ASM_INT({ return document.pointerLockElement ? 1 : 0; })) {
+        g_web_look.frozen += px;
+        g_web_look.frozen_frames++;
+    }
+}
+
+EMSCRIPTEN_KEEPALIVE const char *kn_look_probe(void) {
+    static char out[256];
+    snprintf(out, sizeof(out), "{\"yaw\":%.4f,\"pitch\":%.4f,\"moved\":%.0f,\"applied\":%.0f,\"frozen\":%.0f,\"frozenFrames\":%d}",
+             (double) g_look.y, (double) g_look.x, g_web_look.moved, g_web_look.applied, g_web_look.frozen, g_web_look.frozen_frames);
+    return out;
+}
+
 #endif
 
 #ifndef __EMSCRIPTEN__
@@ -1915,6 +1942,9 @@ static void client_tick_game(Client *client, const float now, const float frame_
     // v7 f2137: mouse movement only reaches the camera under the pointer lock. A free cursor (the
     // menu, the end screen, a free end title, the console, freeMouse) never turns it.
     if (!client_pointer_look_allowed(client)) look_x = look_y = 0.0f;
+#ifdef __EMSCRIPTEN__
+    web_look_note(client, web_x, web_y, look_x != 0.0f || look_y != 0.0f);
+#endif
 
     // WP-C v7.1.4 netRate: an input frame is sampled (predicted, sent) only once the frame time since
     // the last one reaches half a netRate period; it carries that summed delta (net/recon.c).
