@@ -109,11 +109,11 @@ static void test_combat(Game *game) {
     place(b, 0.0f, -50.0f);
     place(c, 40.0f, 40.0f);
 
-    // Body shot at 50 units: 23 - dmgDrop(5) * (50 - 0) / 700 = 22.64.
+    // Body shot at 50 units: 23 - dmgDrop(8, v10.0.2; v7.1.4: 5) * (50 - 0) / 700 = 22.43.
     g_sent_count = 0;
     aim_at(a, b->position.y + 7.0f, 50.0f);
     shoot(a);
-    const float body = 23.0f - 5.0f * 50.0f / 700.0f;
+    const float body = 23.0f - 8.0f * 50.0f / 700.0f;
     // v7.1.4 changeHealth rounds the damage to 0.1
     CHECK(near(b->health, 100.0f - body, 0.1f), "body shot: health %.2f, expected %.2f", b->health, 100.0f - body);
 
@@ -122,7 +122,7 @@ static void test_combat(Game *game) {
     if (hit) {
         NetHitPacket packet;
         memcpy(&packet, hit->payload, sizeof(packet));
-        CHECK(packet.target_uid == 2 && packet.damage == 23 && !packet.crit && !packet.kill, "HIT {%d, %d, %d, %d}", packet.target_uid, packet.damage, packet.crit, packet.kill);
+        CHECK(packet.target_uid == 2 && packet.damage == (int) roundf(body) && !packet.crit && !packet.kill, "HIT {%d, %d, %d, %d}", packet.target_uid, packet.damage, packet.crit, packet.kill);
     }
 
     CHECK(find_sent(NET_PACKET_SHOT, NET_TARGET_EXCEPT(1), 0) != NULL, "SHOT to everyone but the shooter (spectators too)");
@@ -142,10 +142,10 @@ static void test_combat(Game *game) {
     shoot(a);
     CHECK(near(before_leg - b->health, body * 0.5f, 0.05f), "leg shot: %.2f, expected %.2f", before_leg - b->health, body * 0.5f);
 
-    // Carol chips Bob for the assist (>= assistMin 20 within assistTime 5 s).
-    place(c, 0.0f, 0.0f);
-    c->position.x = 3.0f;
-    aim_at(c, b->position.y + 7.0f, 50.0f);
+    // Carol chips Bob for the assist (>= assistMin 20 within assistTime 5 s): 10 units ahead of
+    // Alice and 1 to the side, inside Bob's posed hitbox (v10; 3 to the side misses it).
+    place(c, 1.0f, -10.0f);
+    aim_at(c, b->position.y + 7.0f, 40.0f);
     shoot(c);
     place(c, 40.0f, 40.0f);
 
@@ -296,7 +296,7 @@ static void test_projectiles(Game *game) {
 
     aim_at(a, b->position.y + 7.0f, 50.0f);
     shoot(a);
-    const float through = 23.0f - 23.0f * 0.5f - 5.0f * 50.0f / 700.0f;
+    const float through = 23.0f - 23.0f * 0.5f - 8.0f * 50.0f / 700.0f;
     CHECK(near(100.0f - b->health, through, 0.1f), "wallbang damage %.2f, expected %.2f", 100.0f - b->health, through);
 
     wall.penetrable = 0;

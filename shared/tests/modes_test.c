@@ -220,9 +220,10 @@ static void test_table(void) {
     const GameModeConfig *ffa = mode_config(MODE_ID_FFA);
     CHECK(!ffa->has_fog_dist && !ffa->has_fog_col && !ffa->has_sky_col && !ffa->has_light_col && !ffa->has_amb_col, "FFA keeps the map lighting");
     CHECK(mode_config(MODE_ID_INFECT)->speed_mlt[2] == 1.15f && mode_config(MODE_ID_HIDE)->speed_mlt[1] == 0.8f, "spdMlt");
-    static const int order[] = {2, 27, 16, 10, 4, 11, 21, 5, 3, 9, 1, 14, 6, 0, 18, 7, 8, 13, 22, 12};
+    // v10.0.2 weaponOrder (v10:105622): v7.1.4's plus the Charge Rifle (28) after the Sniper
+    static const int order[] = {2, 27, 16, 10, 4, 11, 21, 5, 3, 9, 1, 14, 6, 0, 28, 18, 7, 8, 13, 22, 12};
     const GameModeConfig *gun = mode_config(MODE_ID_GUN);
-    CHECK(gun->weapon_order_size == 20 && !memcmp(gun->weapon_order, order, sizeof(order)), "Gun Game v7 order");
+    CHECK(gun->weapon_order_size == 21 && !memcmp(gun->weapon_order, order, sizeof(order)), "Gun Game v10 order");
     CHECK(!gun->no_reward && !gun->no_streaks && mode_streak_disabled(NULL, 4) == 0, "gun: rewards and streaks on in v7");
     CHECK(mode_config(MODE_ID_KING)->kill_mlt == 0.15f && mode_config(MODE_ID_KING)->obj_score == 10 && !mode_config(MODE_ID_KING)->no_score_k, "king keys");
     CHECK(mode_config(MODE_ID_DOM)->capture_time == 10.0f && mode_config(MODE_ID_DOM)->lockout_mlt == 1.5f && mode_config(MODE_ID_DOM)->per_player_mlt == 0.2f, "dom keys");
@@ -658,13 +659,20 @@ static void test_stalker(Game *game) {
     add_player(game, 3, 0);
     tick(game, 15.5f, 0.5f);
     Player *stalker = first_on_team(game, 2);
-    CHECK(stalker && stalker->max_health == 400 && stalker->loadout[0] == WEAPON_ID_KNIFE && stalker->loadout_size == 1, "a 400 hp knife-only Stalker");
+    // v10.0.2 pickStalker (v10:188459): floor(200 + 50 x (active players - 1)) health (v7.1.4: 400)
+    CHECK(stalker && stalker->max_health == 300 && stalker->loadout[0] == WEAPON_ID_KNIFE && stalker->loadout_size == 1, "a 300 hp (3 players) knife-only Stalker");
     CHECK(stalker && stalker->cosmetics.skin_color == 0 && stalker->cosmetics.hat == -1, "Stalker outfit");
     CHECK(game->mode->config.speed_mlt[1] == 0.65f, "the Living walk slowly");
 
     Player *living = first_on_team(game, 1);
+    // v10.0.2 onMelee: a factor, 0.6 for the stalker's stab (which heals it 10: changeHealth -10),
+    // 0.8 for anyone else (v7.1.4: the stab took the victim's whole health)
+    stalker->health = stalker->max_health - 50.0f;
+    const float stalker_health = stalker->health;
     const float damage = mode_melee_damage(game, stalker, living, 50.0f);
-    CHECK(damage == living->health, "onMelee: one stab kills (%.0f)", damage);
+    CHECK(fabsf(damage - 30.0f) < 1e-3f && fabsf(stalker->health - (stalker_health + 10.0f)) < 1e-3f,
+          "onMelee: the stab deals 0.6x (%.1f) and heals the stalker 10 (%.0f -> %.0f)", damage, stalker_health, stalker->health);
+    CHECK(fabsf(mode_melee_damage(game, living, stalker, 50.0f) - 40.0f) < 1e-3f, "onMelee: the Living's knife deals 0.8x");
 
     kill(stalker, living, 1);
     tick(game, 0.1f, 0.1f);
@@ -795,7 +803,7 @@ static void test_misc(Game *game) {
 
     start_mode(game, MODE_ID_RAID);
     a = add_player(game, 1, 0);
-    CHECK(fabsf(game->round_timer - 360.0f) < 0.01f && a->class_index == 9 && a->mode.lives == 1, "Raid config");
+    CHECK(fabsf(game->round_timer - 1500.0f) < 0.01f && a->class_index == 9 && a->mode.lives == 1, "Raid config (v10 25 min)");
 }
 
 
@@ -1223,14 +1231,14 @@ static void test_zombies_raid(Game *game) {
 
     start_mode(game, MODE_ID_RAID);
     a = add_player(game, 1, 0);
-    CHECK(mode_hostable(MODE_ID_RAID) && fabsf(game->round_timer - 360.0f) < 0.01f, "raid hostable, 6 min");
+    CHECK(mode_hostable(MODE_ID_RAID) && fabsf(game->round_timer - 1500.0f) < 0.01f, "raid hostable, 25 min (v10 gameTime 1500000)");
     // raid.js onEnd: with time left, every active player without a time gets the elapsed clock;
     // v7 has no boss-death end timer any more (v3.1.1's Lord of Souls rule)
     game->round_timer = 123.5f;
     mode_on_game_end(game);
-    CHECK(a->mode.has_timer && fabsf(a->mode.timer - (360.0f - 123.5f)) < 1e-3f, "onEnd: time = elapsed clock (%.2f)", a->mode.timer);
+    CHECK(a->mode.has_timer && fabsf(a->mode.timer - (1500.0f - 123.5f)) < 1e-3f, "onEnd: time = elapsed clock (%.2f)", a->mode.timer);
     a->mode.has_timer = 0;
-    game->round_timer = 360.0f;
+    game->round_timer = 1500.0f;
     tick(game, 20.5f, 0.5f);
     tick(game, 10.0f, 0.5f);
     kill(a, NULL, 0);
