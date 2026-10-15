@@ -20,7 +20,12 @@
 //   0 tp x y z yaw pitch         online: the dev "tp" packet to feet x/y/z, then face yaw/pitch
 //   100 down W | up W            keys through the key callback: W A S D SPACE SHIFT TAB ESC ENTER DELETE, any
 //                                A-Z / 0-9, F1-F12, GRAVE (the dev console's `); CTRL+ / SHIFT+ / ALT+ prefixes
-//                                set the modifier bits (down CTRL+C: copy the page selection)
+//                                set the modifier bits (down CTRL+C: copy the page selection). A down of a
+//                                printable key (A-Z, 0-9, SPACE, GRAVE) also sends its char through the char
+//                                callback right after, as GLFW does (none with CTRL+ / ALT+; SHIFT+ letters upper case)
+//   100 gpad start               a game controller button press + release (gamepad.js names: start,
+//                                button_1, ...) through the gamepad event machine, as a pad would
+//                                (Gamepad.active, then CONTROLS' listeners); no pad is needed
 //   100 mdown right | mup right  mouse buttons (left / right), through the mouse button callback
 //   100 cursor 640 360           move the cursor (window coordinates) through the cursor callback
 //   100 click 640 360            cursor there, then a left press + release (e.g. a KrunkScript DIV)
@@ -180,6 +185,7 @@
 #include <nettspend.h>    // `pour`, `laced`
 #include <ruleset.h>      // `class`: the class names
 #include <map_post.h>     // `builds`, `placewatch`
+#include <gamepad.h>      // `gpad`
 #include <GLFW/glfw3.h>
 #include <png_write.h>
 #include <frame_target.h>
@@ -334,6 +340,17 @@ static int script_key(const char *name) {
     return GLFW_KEY_UNKNOWN;
 }
 
+// The code point a US-layout press of `key` types (0: none): letters (Shift: upper case), digits,
+// Space. Ctrl / Alt chords type nothing (GLFW drops their chars: `plain` in _glfwInputChar).
+static unsigned int script_key_char(const int key, const int mods) {
+    if (mods & (GLFW_MOD_CONTROL | GLFW_MOD_ALT)) return 0;
+    if (key >= GLFW_KEY_A && key <= GLFW_KEY_Z) return (unsigned int) ((mods & GLFW_MOD_SHIFT) ? 'A' : 'a') + (unsigned int) (key - GLFW_KEY_A);
+    if (key >= GLFW_KEY_0 && key <= GLFW_KEY_9 && !(mods & GLFW_MOD_SHIFT)) return '0' + (unsigned int) (key - GLFW_KEY_0);
+    if (key == GLFW_KEY_SPACE) return ' ';
+    if (key == GLFW_KEY_GRAVE_ACCENT) return (mods & GLFW_MOD_SHIFT) ? '~' : '`';
+    return 0;
+}
+
 // window fraction (0..1, y down) of a world point through the client camera, as drawn (vfx.c project_to_screen)
 static vec2 script_project(Client *client, const vec3 p) {
     int viewport[4];
@@ -390,7 +407,19 @@ static void script_run(Client *client, const ScriptEvent *e) {
         if (key != GLFW_KEY_UNKNOWN) {
             if (cb) cb(client->window, key, 0, action, mods);
             else ui_controls_key_event(client, key, 0, action, mods);
+            // A real key press of a printable key is a key event AND a char event (GLFW's X11 /
+            // Wayland / Win32 / Cocoa backends: the key callback first, then the char callback,
+            // never with Ctrl or Alt held). Typing tests need both: a field that only sees the
+            // keydown (or a game bind that only checks the char) passes a test it fails for real.
+            const unsigned int cp = script_key_char(key, mods);
+            if (action == GLFW_PRESS && cp) {
+                GLFWcharfun ccb = glfwSetCharCallback(client->window, NULL);
+                glfwSetCharCallback(client->window, ccb);
+                if (ccb) ccb(client->window, cp);
+            }
         }
+    } else if (!strcmp(e->cmd, "gpad")) {
+        if (!gamepad_script_button(e->arg)) fprintf(stderr, "[input_script] gpad %s: unknown button\n", e->arg);
     } else if (!strcmp(e->cmd, "mdown") || !strcmp(e->cmd, "mup")) {
         const int button = !strcmp(e->arg, "right") ? GLFW_MOUSE_BUTTON_RIGHT : GLFW_MOUSE_BUTTON_LEFT;
         const int action = e->cmd[1] == 'd' ? GLFW_PRESS : GLFW_RELEASE;

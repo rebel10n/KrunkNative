@@ -726,6 +726,21 @@ int gamepad_active(void) {
     return g_gp.active;
 }
 
+// Input scripts (input_script.c `gpad start`): one press and release of a standard button, as if
+// the first pad reported it this loop (handle_events: gamepad.active, then the listeners).
+int gamepad_script_button(const char *name) {
+    for (int i = 0; name && i < GP_BUTTON_NAMES; i++) {
+        if (strcmp(GP_NAME[i], name)) continue;
+        GpEvent e = {.name = i, .value = 1.0};
+        g_gp.active = 1;
+        trigger(GP_PRESS, &e);
+        e.value = 0.0;
+        trigger(GP_RELEASE, &e);
+        return 1;
+    }
+    return 0;
+}
+
 void gamepad_set_active(const int active) {
     g_gp.active = active;
 }

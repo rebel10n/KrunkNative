@@ -22,3 +22,6 @@ int  gamepad_active(void);               // Gamepad.active (PRESS START, rumble 
 void gamepad_set_active(int active);     // CONTROLS clears it on mouse input
 int  gamepad_connected(void);            // Gamepad._connected
 void gamepad_set_disabled(int disabled); // v10 toggleGamepad (Settings > Controller "Disable Controllers")
+// Input scripts: a press + release of the standard button named as in gamepad.js ("start",
+// "button_1", ...), through the event machine as a pad would; 0 for an unknown name.
+int  gamepad_script_button(const char *name);

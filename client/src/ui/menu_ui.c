@@ -942,9 +942,15 @@ void menu_auto_respawn_scenario(const cJSON *seconds) {
 // index.html's #instructions as the page boots (the ring at scale 1.4 and #loadGamNm)
 #define MENU_BOOT_RING "<div style=\"width:100%;text-align:center;transform:scale(1.4)\"><div class=\"lds-ring\"><div></div><div></div><div></div><div></div></div></div><div style=\"color:#fff;width:50vw\" id=\"loadGamNm\">"
 #define MENU_ERROR_TAB(handler, label) "\n\t\t\t\t<div class=\"instructionsTab\" onmouseenter=\"playTick();\" onclick=\"playSelect(0.1);" handler "\">" label "</div>"
+// The Gamepad.active the text was last written with (-1: never). KrunkNative: the text follows the
+// flag (client_menu_tick), where v10 only rewrites it at menu toggles; a "PRESS START" written while a
+// pad was active (a plugged-in pad counts as active at start-up) stayed up after the mouse took over.
+static int g_instructions_pad = -1;
+
 void menu_update_instructions(void) {
     HtmlElem el = by_id("instructions");
     if (!el) return;
+    g_instructions_pad = gamepad_active();
     StrBuf sb = {0};
     const int error = g_ui.dom_ready && !can_play() && g_ui.connect_error[0] && !g_ui.connected;
     const int updating = error && !strcmp(g_ui.connect_error, "GAME UPDATING");
@@ -1287,7 +1293,14 @@ void menu_show_window(int id, const int force) {
     const int previous = g_ui.active_window;
     close_window_state();
     if (force || !was_open || id != previous) {
-        if (!g_ui.menu_open) menu_apply_open(1);
+        // UI.toggleMenu(true), as the client's menu state: a window opened over the end screen's
+        // results (a hotkey, the header) left html_ui_is_menu_open() at 0, so Click to Play after
+        // closing it "opened" the menu again instead of bringing the results back (toggleEndScreen)
+        // and CLICK TO PLAY stayed up for the rest of the round.
+        if (!g_ui.menu_open) {
+            if (g_ui.client) client_set_menu_open(g_ui.client, 1);
+            else menu_apply_open(1);
+        }
         HtmlElem mw = by_id("menuWindow");
         HtmlElem header_el = by_id("windowHeader");
         const char *header = "";
@@ -1959,6 +1972,7 @@ void client_menu_tick(Client *client) {
         menu_refresh_tables(client);
         if (menu_state_changed(client)) menu_apply_state(client);
         menu_boot_tick();
+        if (gamepad_active() != g_instructions_pad) menu_update_instructions(); // PRESS START <-> CLICK TO PLAY
         menu_update_ping(client);
         download_ui_tick(); // ?download opens the Download window (download_ui.c)
         v10_news_tick();    // the v10 menu's What's New item (v10_news.c)
