@@ -1574,11 +1574,32 @@ static const char *region_ping_color(const char *region) {
     return ping / 2 >= 150 ? "rgb(255, 75, 66)" : ping / 2 >= 50 ? "rgb(255, 213, 66)" : "rgb(158, 235, 86)";
 }
 
+// The row's title: a custom game's own name (h) as it is, else "<mode name> - <map name>": the
+// mode's display name (Team Deathmatch, not tdm) and the map's catalogue name (shipwrecked ->
+// Tortuga; an official krunker.io name such as Tortuga resolves too), the key when the catalogue
+// does not know the map. Dedicated servers (24/7, finder) show their map alone, as v10 does.
+static void row_title(StrBuf *sb, const cJSON *t) {
+    if (row_h(t)[0]) {
+        sb_append(sb, row_h(t));
+        return;
+    }
+    const char *key = row_i(t);
+    char map[128] = "";
+    const int index = key[0] ? map_catalog_resolve(key, NULL, 0, NULL) : -1;
+    const MapCatalogEntry *entry = index >= 0 ? map_catalog_at((size_t) index) : NULL;
+    snprintf(map, sizeof(map), "%s", entry && entry->name ? entry->name : key);
+    const GameModeConfig *mode = row_mode(t);
+    if (mode && mode->name && !row_dedicated(t)) {
+        sb_append(sb, mode->name);
+        if (map[0]) sb_append(sb, " - ");
+    }
+    sb_append(sb, map);
+}
+
 // One server row (getServers' settName settNameIn). The row's label markup is v10981.
 static void append_row(StrBuf *sb, const cJSON *t, const double now) {
     const int old = old_browser();
     const char *id = tuple_str(t, 0);
-    const char *alias = row_alias(t);
     const int custom = row_custom(t), official = row_official(t), dedicated = row_dedicated(t);
     const int finder = meta_flag(t, "finder");
     const int krunker = row_krunker(t); // mm-token: an official krunker.io lobby
@@ -1586,14 +1607,7 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
     char def[32] = "";
     default_region(def, sizeof(def));
     StrBuf name = {0};
-    if (row_h(t)[0]) sb_append(&name, row_h(t));
-    else sb_append(&name, row_i(t));
-    if (!official && !dedicated && !custom && !row_h(t)[0] && !old && alias[0]) {
-        StrBuf pre = {0};
-        sb_appendf(&pre, "%s_%s", alias, name.data ? name.data : "");
-        sb_free(&name);
-        name = pre;
-    }
+    row_title(&name, t);
     sb_append(sb, "<div class='settName settNameIn' onmouseenter='playTick()'style='");
     if (current) sb_append(sb, "color:#fff !important;");
     sb_append(sb, "padding-top:10px;margin-top:0px;' onclick='playSelect(0.1);");
@@ -1602,10 +1616,7 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
         // system browser with the opt-out (krunker_lobbies_open)
         sb_append(sb, "krunkerJoin(\"");
         sb_append_esc(sb, id);
-        sb_append(sb, "\")' title='");
-        sb_append_esc(sb, krunker_net_in_client() ? I18N("kn.servers.kioRowJoin", "Join this krunker.io server here")
-                                                  : I18N("kn.servers.kioRowBrowser", "Opens this krunker.io server in your browser"));
-        sb_append(sb, "'>");
+        sb_append(sb, "\")'>");
     } else if (finder) {
         // a finder-only server: joined directly (finderJoin(host, port))
         sb_append(sb, "finderJoin(\"");
@@ -1618,16 +1629,9 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
         sb_append_esc(sb, id);
         sb_append(sb, "\", this)'>");
     }
-    // label: a krunker.io lobby's badge leads, before its game mode
-    if (krunker) sb_append(sb, "<div class='krIcon kioTag' style='margin-top:-14px;vertical-align:middle;background-color:#7b1fa2;'>KRUNKER.IO</div> ");
-    if (custom || old) {
-        if (!(dedicated || row_h(t)[0]) && alias[0]) {
-            sb_append_esc(sb, alias);
-            sb_append(sb, "_");
-        }
-    } else {
-        sb_append(sb, "[YEND] ");
-    }
+    // label: the krunker.io tag leads the title ("KRUNKER.IO Team Deathmatch - Kanji")
+    if (krunker) sb_append(sb, " <div class='krIcon kioTag' style='margin-top:-14px;vertical-align:middle;background-color:#7b1fa2;'>KRUNKER.IO</div> ");
+    if (!custom && !old) sb_append(sb, "[YEND] ");
     if (official) sb_append(sb, " <div class='krIcon' style='margin-top:-14px;vertical-align:middle;background-color: var(--green);'>OFFICIAL</div> ");
     if (official || dedicated) sb_append(sb, " <div class='krIcon' style='margin-top:-14px;vertical-align:middle;background-color: var(--blue);'>24/7</div> ");
     sb_append_esc(sb, name.data ? name.data : "");
@@ -1823,7 +1827,7 @@ static void append_krunker_status(StrBuf *sb, const int groups) {
         sb_append_esc(sb, I18N("kn.servers.kioNoMatch", "No krunker.io server matches the search or filter."));
     } else {
         sb_append(sb, "color:rgba(255,255,255,0.7)'><span style='color:#ce93d8'>KRUNKER.IO</span> ");
-        sb_append_esc(sb, krunker_net_in_client() ? I18N("kn.servers.kioJoinHere", "krunker.io servers: pick one to join it here, or Quick Join.")
+        sb_append_esc(sb, krunker_net_in_client() ? I18N("kn.servers.kioJoinHere", "OFFICIAL LOBBIES")
                                                   : I18N("kn.servers.kioOpensInBrowser", "krunker.io servers open in your browser."));
     }
     sb_append(sb, "</div>");

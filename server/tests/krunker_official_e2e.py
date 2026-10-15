@@ -1123,7 +1123,7 @@ def run_native_lobby():
     lines = finish_native(label, stub, p, out, log, timeout=180)
     text = "\n".join(lines)
     st = re.search(r"\[input_script\] text t=\d+ @status n=1 .*?text=(.*)", text)
-    check(f"{label}: the KRUNKER.IO section says its lobbies join here", st and "krunker.io servers: pick one to join it here" in st.group(1),
+    check(f"{label}: the KRUNKER.IO section says its lobbies join here", st and "KRUNKER.IO OFFICIAL LOBBIES" in st.group(1),
           st.group(1) if st else None)
     check(f"{label}: no \"can't be joined\" text anywhere", not re.search(r"can.t be joined|cannot be joined|can.t join krunker", text))
     rows = re.search(r"nodes t=\d+ @rows elements=\d+ match=(\d+)", text)
