@@ -56,7 +56,8 @@ static ClientRenderSettings g_rs = {
     .speed_color = "#ffea78", .speed_color_max = "#ff0000",
     .show_medals = 1, .hide_names = 0, .nametag_opacity = 1.0f, .nametag_style = 0, .health_num = 0,
     .health_col_team = "#9eeb56", .health_col_enemy = "#eb5656",
-    .chat_filter = 0, .show_messages = 1, .show_unboxings = 1, .chat_text_outline = 0,
+    // KrunkNative: player chat is off by default (v10's showMessages defaults on); see apply_show_messages
+    .chat_filter = 0, .show_messages = 0, .show_unboxings = 1, .chat_text_outline = 0,
     .chat_opacity = 1.0f, .chat_bg_opacity = 0.2f, .chat_height = 2.5f, .chat_timer = 0.0f,
     .crosshair_type = 1, .crosshair_style = 0, .crosshair_opacity = 1.0f,
     .crosshair_use_opacity = 0, .crosshair_always = 0, .crosshair_dot = 1, // crosshairDot val true (v7.1.4 and v10)
@@ -222,6 +223,15 @@ static int g_desktop_w, g_desktop_h; // the monitor's mode before exclusive full
 
 static void mark_dom(Client *client) { (void) client; g_dom_dirty = 1; }
 static void mark_swap(Client *client) { (void) client; g_swap_dirty = 1; }
+
+// Settings > Chat "Show Player Messages" (showMessages), human players only. Off: the human lines already
+// in #chatList go (hud_ui_clear_player_chat); bot and system lines stay. The receive gate is hud_ui.c's
+// hud_ui_add_player_chat / hud_ui_add_chat_channel, the send gate ui_controls.c's chat_send and
+// hud_social.c's quick chat; all read g_rs.show_messages.
+static void apply_show_messages(Client *client) {
+    (void) client;
+    if (!g_rs.show_messages) hud_ui_clear_player_chat();
+}
 
 // renderDist.set: camera.far = v * 60 (55.js camera: PerspectiveCamera(.., 0.1, 6000)).
 static void apply_render_dist(Client *client) {
@@ -405,7 +415,7 @@ static const RsEntry RS_TABLE[] = {
     RS_S("healthColT", health_col_team, NULL),
     RS_S("healthColE", health_col_enemy, NULL),
     RS_B("chatFilter", chat_filter, NULL),
-    RS_B("showMessages", show_messages, NULL),
+    RS_B("showMessages", show_messages, apply_show_messages), // player chat: receive + send gates
     RS_B("showUnboxings", show_unboxings, NULL),
     RS_F("chatOp", chat_opacity, mark_dom),             // #chatList opacity
     RS_F("chatBGOp", chat_bg_opacity, NULL),

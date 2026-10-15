@@ -156,6 +156,7 @@
 #include <ui_logic.h>
 #include <html_ui.h>
 #include <console.h> // `con`: ui_console_exec
+#include <player_accounts.h> // `netchat`: the bot PLAYER_INFO the server sends
 #include <sprays.h>  // `vis :spray`
 #include <hud_modes.h>  // `flags`
 #include <mode_world.h> // `flags`
@@ -255,7 +256,8 @@ static void script_load(void) {
         if (!strcmp(e->cmd, "con") || script_probe(e->cmd) || !strcmp(e->cmd, "type") || !strcmp(e->cmd, "om") ||
             !strcmp(e->cmd, "call") || !strcmp(e->cmd, "setscroll") || !strcmp(e->cmd, "hit") || !strcmp(e->cmd, "ft") ||
             !strcmp(e->cmd, "nodes") || !strcmp(e->cmd, "rects") || !strcmp(e->cmd, "clicksel") || !strcmp(e->cmd, "wsel") ||
-            !strcmp(e->cmd, "text") || !strcmp(e->cmd, "grep") || !strcmp(e->cmd, "glyphs") || !strcmp(e->cmd, "locale") || !strcmp(e->cmd, "page")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
+            !strcmp(e->cmd, "text") || !strcmp(e->cmd, "grep") || !strcmp(e->cmd, "glyphs") || !strcmp(e->cmd, "locale") || !strcmp(e->cmd, "page") ||
+            !strcmp(e->cmd, "netchat")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
             while (*rest == ' ' || *rest == '\t') rest++;
             snprintf(e->arg, sizeof(e->arg), "%s", rest);
             for (size_t len = strlen(e->arg); len && (e->arg[len - 1] == '\n' || e->arg[len - 1] == '\r' || e->arg[len - 1] == ' '); len--) e->arg[len - 1] = 0;
@@ -799,6 +801,29 @@ static void script_run(Client *client, const ScriptEvent *e) {
         GLFWcharfun cb = glfwSetCharCallback(client->window, NULL);
         glfwSetCharCallback(client->window, cb);
         for (const char *c = e->arg; cb && *c; c++) cb(client->window, (unsigned char) *c);
+    } else if (!strcmp(e->cmd, "netchat")) {
+        // netchat <kind> <text>: a server chat line as the server would send it, through the client's
+        // event handler (chat_switch_e2e.py). 0 a human player's line (uid 2, a guest: no PLAYER_INFO);
+        // 3 a bot's line (uid 1, after the bot PLAYER_INFO the server sends with its spawn, bots.c
+        // bot_send_info); 1 a game line; 2 a server line.
+        int kind = 0;
+        char text[NET_CHAT_TEXT_SIZE] = "";
+        if (sscanf(e->arg, "%d %287[^\n]", &kind, text) >= 1 && kind >= 0 && kind <= 3) {
+            NetChatPacket chat;
+            if (kind == 3) {
+                NetPlayerInfoPacket info;
+                memset(&info, 0, sizeof(info));
+                info.uid = 1;
+                info.flags = NET_PLAYER_INFO_BOT;
+                player_accounts_on_info(&info);
+                net_packet_chat(&chat, 1, NET_CHAT_PLAYER, "Bot", text);
+            } else if (kind == 0) {
+                net_packet_chat(&chat, 2, NET_CHAT_PLAYER, "Guest", text);
+            } else {
+                net_packet_chat(&chat, -1, (NetChatKind) kind, NULL, text);
+            }
+            client_handle_game_event(client, NET_PACKET_CHAT, &chat, (uint16_t) sizeof(chat));
+        }
     } else if (script_probe(e->cmd) && strcmp(e->cmd, "console")) {
         // vis <id> [<id> ...]: one log line with each element's visibility (1 shown, 0 not, - absent);
         // scroll <id> [<id> ...]: their scrollTop instead; rect <id> [<id> ...]: their boxes

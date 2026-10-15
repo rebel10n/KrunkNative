@@ -348,8 +348,8 @@ static void events_chat(const NetChatPacket *packet) {
     ui_console_on_chat(packet->kind == NET_CHAT_PLAYER ? (name[0] ? name : "unknown") : NULL, text, packet->kind);
 
     switch (packet->kind) {
-        case NET_CHAT_PLAYER:
-            hud_ui_add_chat(name[0] ? name : "unknown", text, NULL);
+        case NET_CHAT_PLAYER: // a bot's line (the server's bot chat) is never hidden by Show Player Messages
+            hud_ui_add_player_chat(name[0] ? name : "unknown", text, !player_accounts_is_bot(packet->uid));
             break;
         case NET_CHAT_SERVER:
             hud_ui_add_chat(NULL, text, SERVER_CHAT_COLOR);

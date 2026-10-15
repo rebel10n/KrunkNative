@@ -29,6 +29,12 @@ const NetPlayerInfoPacket *player_accounts_get(const int uid) {
     return NULL;
 }
 
+// A bot player (server bot_send_info: NET_PLAYER_INFO_BOT). Humans and guests send no such bit.
+int player_accounts_is_bot(const int uid) {
+    const NetPlayerInfoPacket *info = player_accounts_get(uid);
+    return info && (info->flags & NET_PLAYER_INFO_BOT) != 0;
+}
+
 void player_accounts_on_init(void) {
     g_pa.count = 0;
 }

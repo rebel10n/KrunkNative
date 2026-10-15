@@ -2083,7 +2083,9 @@ static int hud_chat_line_channel(const Client *client, const int player_line) {
 
 // f2018: appends one #chatMsg_N row (see hud_chat_row_html for the three kinds) on `channel`;
 // the oldest rows go first beyond config.chatListLength.
-static void hud_add_chat_row_on(const char *name, const char *msg, const char *color, const int channel) {
+// data-kind of a row: "human" (a human player's line: Show Player Messages hides it), "bot" (a bot
+// player's line: always shown), "line" (a system line). hud_ui_clear_player_chat removes "human" rows.
+static void hud_add_chat_row_on(const char *name, const char *msg, const char *color, const int channel, const char *kind) {
     const HtmlElem list = html_dom_by_id("chatList");
     if (!list || !msg || !msg[0]) return;
 
@@ -2094,19 +2096,44 @@ static void hud_add_chat_row_on(const char *name, const char *msg, const char *c
 
     const HtmlElem row = html_dom_create("div", id);
     hud_chat_row_channel(row, channel);
+    html_dom_set_attr(row, "data-kind", kind);
     html_dom_set_html(row, html);
     html_dom_append(list, row);
     html_dom_scroll_to_bottom(list);
 }
 
 static void hud_add_chat_row(const char *name, const char *msg, const char *color) {
-    hud_add_chat_row_on(name, msg, color, hud_chat_line_channel(menu_ui()->client, name && name[0]));
+    hud_add_chat_row_on(name, msg, color, hud_chat_line_channel(menu_ui()->client, name && name[0]), "line");
+}
+
+// Settings > Chat "Show Player Messages" (showMessages) off: the human rows already in #chatList go.
+// Bot and system rows stay: the server decides whether a bot line exists at all.
+void hud_ui_clear_player_chat(void) {
+    if (!html_ui_available() || !html_ui_is_ready()) return;
+    const HtmlElem list = html_dom_by_id("chatList");
+    if (!list) return;
+    HtmlElem row = html_dom_first_child(list);
+    while (row) {
+        const HtmlElem next = html_dom_next(row);
+        char kind[8] = "";
+        if (html_dom_get_attr(row, "data-kind", kind, sizeof(kind)) >= 0 && !strcmp(kind, "human")) html_dom_remove(row);
+        row = next;
+    }
+}
+
+// A player's line (a sender name). human: the sender is not a bot (player_accounts_is_bot). A human
+// line is not shown while Show Player Messages is off; a bot line always is.
+void hud_ui_add_player_chat(const char *name, const char *msg, const int human) {
+    if (!html_ui_available() || !html_ui_is_ready()) return;
+    if (human && !client_render_settings()->show_messages) return;
+    hud_add_chat_row_on(name, msg, NULL, hud_chat_line_channel(menu_ui()->client, 1), human ? "human" : "bot");
 }
 
 // io_addChat(channel, ...) of a v7 "ch": the channel is forced to -1 outside team modes.
-void hud_ui_add_chat_channel(const char *name, const char *msg, const char *color, const int channel) {
+void hud_ui_add_chat_channel(const char *name, const char *msg, const char *color, const int channel, const int human) {
     if (!html_ui_available() || !html_ui_is_ready()) return;
-    hud_add_chat_row_on(name, msg, color, hud_chat_teams(menu_ui()->client) ? channel : -1);
+    if (human && !client_render_settings()->show_messages) return;
+    hud_add_chat_row_on(name, msg, color, hud_chat_teams(menu_ui()->client) ? channel : -1, human ? "human" : "bot");
 }
 
 // index.js (per menu update): the team channel switches back to global when the mode has no teams
@@ -2159,7 +2186,7 @@ static void hud_add_server_chat(const char *msg, const char *color) {
 
 void hud_ui_add_chat(const char *name, const char *msg, const char *color) {
     if (!html_ui_available() || !html_ui_is_ready()) return;
-    hud_add_chat_row(name, msg, color);
+    hud_add_chat_row(name, msg, color); // a system line (name NULL) or a scenario's named line: never gated
 }
 
 // io_addChat(-1, null, html, 1): a system line whose message is markup (UTILS.fixStr only wraps it)

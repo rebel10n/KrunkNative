@@ -2819,6 +2819,7 @@ enum {
     NET_PLAYER_INFO_MOD = 1 << 3,
     NET_PLAYER_INFO_HACKER = 1 << 4, // v10 player.isHacker: a flagged account (accounts.player_hack): the red name
     NET_PLAYER_INFO_HOST = 1 << 5,   // v10 game.host == this player's id: the custom lobby's host (the list's star)
+    NET_PLAYER_INFO_BOT = 1 << 6,    // KrunkNative: a bot player (bots.c bot_send_info); older clients ignore the bit
 };
 
 typedef struct {

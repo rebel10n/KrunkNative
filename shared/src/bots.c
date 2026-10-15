@@ -779,7 +779,8 @@ static void bot_send_info(Game *game, const GameBot *bot, const int target) {
     info.uid = bot->uid;
     info.account_id = GAME_BOT_ACCOUNT_BASE + bot->id;
     info.level = bot->level > 0 ? bot->level : 1;
-    info.flags = (uint8_t) ((bot->premium ? NET_PLAYER_INFO_PREMIUM : 0) | (bot->featured ? NET_PLAYER_INFO_VERIFIED : 0));
+    info.flags = (uint8_t) ((bot->premium ? NET_PLAYER_INFO_PREMIUM : 0) | (bot->featured ? NET_PLAYER_INFO_VERIFIED : 0) |
+                            NET_PLAYER_INFO_BOT); // the client's chat switch never hides a bot's line (client/src/net/game_events.c)
     snprintf(info.clan, sizeof(info.clan), "%s", bot->clan);
     game_send(game, target, NET_PACKET_PLAYER_INFO, &info, sizeof(info));
 }

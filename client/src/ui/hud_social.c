@@ -6,6 +6,7 @@
 #include <sprays.h>
 #include <backend_ui.h> // account_get: premiumT
 #include <console.h>    // ui_console_on_chat: the dev console mirrors chat
+#include <player_accounts.h> // player_accounts_is_bot: a bot's chat line is never hidden
 #include <html_dom.h>
 #include <ui_logic.h>
 #include <cJSON.h>
@@ -112,12 +113,13 @@ void social_on_chat_v7(Client *client, const NetChatV7Packet *packet) {
     name[sizeof(name) - 1] = 0;
     text[sizeof(text) - 1] = 0;
     ui_console_on_chat(name[0] ? name : "unknown", text, NET_CHAT_PLAYER);
-    hud_ui_add_chat_channel(name[0] ? name : "unknown", text, NULL, packet->channel);
+    hud_ui_add_chat_channel(name[0] ? name : "unknown", text, NULL, packet->channel, !player_accounts_is_bot(packet->chat.uid));
 }
 
 int social_quick_chat(Client *client, const char *text) {
     static double last;
     if (!client || !text || !text[0]) return 0;
+    if (!ui_controls_chat_text_allowed(text)) return 0; // showMessages off: quick chat is player chat too
     const double now = glfwGetTime();
     if (last > 0.0 && now - last <= QUICK_CHAT_COOLDOWN) return 0; // Date.now() - lastMsgTime <= 1500
     client_chat_send(client, text);                                    // f1909

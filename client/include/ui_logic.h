@@ -349,8 +349,11 @@ void hud_ui_damage_number(Client*, float x, float y, float z, int value, int cri
 // One #chatList row (Krunker gB/gy): name+msg = player line, else color = server line
 // (type 2), else a plain game line (type 1).
 void hud_ui_add_chat(const char *name, const char *msg, const char *color);
-void hud_ui_add_chat_channel(const char *name, const char *msg, const char *color, int channel); // WP-E: a v7 "ch" line on its channel (-1 all)
+void hud_ui_add_chat_channel(const char *name, const char *msg, const char *color, int channel, int human); // WP-E: a v7 "ch" line on its channel (-1 all); human: Show Player Messages may hide it
+void hud_ui_add_player_chat(const char *name, const char *msg, int human); // a NET_CHAT_PLAYER line: human hidden by Show Player Messages off, a bot's always shown
 void hud_ui_clear_chat(void);                    // empty #chatList, no join lines seeded
+void hud_ui_clear_player_chat(void);             // showMessages off: the human rows of #chatList go; bot and system rows stay
+int  ui_controls_chat_text_allowed(const char *text); // showMessages on, or a "/" line: the chat box may send it
 // hud_ui_add_killfeed with explicit "You" flags and the row's age (into its 4 s life). A NULL
 // killer (not "You") is a self-kill: weapon + victim only. Old Scoreboard puts the row in #chatList.
 // `streak` >= 0: a streak kill (v7 info.stk, the Nuke's): its img/streaks icon replaces the weapon's.

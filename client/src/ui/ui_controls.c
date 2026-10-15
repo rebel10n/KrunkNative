@@ -17,6 +17,7 @@
 // All of it is shared by the native and web clients: main.c feeds GLFW events (the
 // emscripten GLFW port reports DOM keys as GLFW keys) and the page's focusChat events.
 #include <ui_logic.h>
+#include <render_settings.h> // showMessages (ui_controls_chat_text_allowed)
 #include <html_ui.h>
 #include <spectate.h> // spectator keys (pressButton's window.Bf5 block, client/src/spectate.c)
 #include <gamepad.h>  // Gamepad.active (controller: client/src/gamepad.c)
@@ -1159,10 +1160,17 @@ extern void client_chat_send(Client *, const char *) __attribute__((weak));
 #define UI_CHAT_SEND_AVAILABLE() 1
 #endif
 
+// Settings > Chat "Show Player Messages" off: plain text is not sent, but "/" lines still are (the
+// server's commands answer the sender; /clear and the console's own commands are handled before).
+int ui_controls_chat_text_allowed(const char *text) {
+    return client_render_settings()->show_messages || (text && text[0] == '/');
+}
+
 // fp(msg): Krunker sends "ct" and shows the line when the server broadcasts it back.
 static void chat_send(Client *client, const char *text) {
     if (!client) client = menu_ui()->client;
     if (ui_console_chat_command(client, text)) return; // the dev console mod's io.send wrapper: /bhop, singleplayer commands
+    if (!ui_controls_chat_text_allowed(text)) return;  // showMessages off: a player line is not sent
 #ifdef UI_CHAT_SEND_AVAILABLE
     if (client && UI_CHAT_SEND_AVAILABLE()) {
         client_chat_send(client, text); // net chat (client/src/net): the server's echo reaches the HUD
@@ -1170,7 +1178,7 @@ static void chat_send(Client *client, const char *text) {
     }
 #endif
     // No chat transport: echo the line locally.
-    hud_ui_add_chat(client && client->menu_name[0] ? client->menu_name : "Guest", text, NULL);
+    hud_ui_add_player_chat(client && client->menu_name[0] ? client->menu_name : "Guest", text, 1); // our own line: a human's
     printf("[controls] chat (local echo): %s\n", text);
 }
 

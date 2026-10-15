@@ -1723,6 +1723,8 @@ def run_web(mode):
                 if isinstance(v, int):
                     timer_samples.append(v)
             if stub.got_en.is_set():
+                # Settings > Chat "Show Player Messages" is off by default: this check reads the player lines
+                cdp.eval("window.setSetting && window.setSetting('showMessages', true)")
                 time.sleep(1.0)
                 sample_timer()
                 cdp.key("rawKeyDown", "w", "KeyW", 87)

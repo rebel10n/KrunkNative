@@ -100,7 +100,9 @@ def main():
     check("off survives a restart and Settings open", n.get("@still-off") == 0, str(n))
     check("clicking again checks it and stores true", n.get("@on") == 1 and stored() == "true", f"{n} stored {stored()!r}")
 
-    # 3. console clear / cls, chat /clear
+    # 3. console clear / cls, chat /clear (the echoed `say` shows only with Show Player Messages on)
+    with open(os.path.join(STORE, "knSettings.json"), "w") as f:
+        f.write('{"showMessages": true}')
     chat = "[id^=chatMsg_]"
     n = run("clear", f"""0 play
 1000 con echo one
