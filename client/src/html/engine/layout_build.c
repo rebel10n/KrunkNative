@@ -1324,6 +1324,65 @@ static int rebuild_for_node(LayoutTree *t, lxb_dom_node_t *node)
     return LAYOUT_RESTYLE_REBUILT;
 }
 
+/* A display toggle of one flex or grid item (search hides tiles, a tab shows its grid) adds or removes
+ * that item's own box in its container, in document order, instead of rebuilding the container's
+ * children (every sibling's boxes and text). Only for a container whose children are all element
+ * boxes: anonymous wrappers and text runs are wrapped by wrap_flex_grid, so those take the rebuild. */
+static Box *fg_container_for(lxb_dom_node_t *node)
+{
+    if (!node->parent || node->parent->type != LXB_DOM_NODE_TYPE_ELEMENT) return NULL;
+    ElemData *ped = layout_elem_data(node->parent);
+    if (!ped || !ped->box || (ped->computed && ped->computed->display == CSS_DISPLAY_CONTENTS)) return NULL;
+    Box *p = (Box *) ped->box;
+    if (p->type != BOX_FLEX && p->type != BOX_GRID) return NULL;
+    for (Box *c = p->first_child; c; c = c->next) {
+        if ((c->flags & BOXF_ANONYMOUS) || c->type == BOX_TEXT || c->type == BOX_LINEBREAK) return NULL;
+    }
+    return p;
+}
+
+/* The element's box (not pseudo, not out of flow) goes: its subtree is released. */
+static int fg_remove(LayoutTree *t, Box *b)
+{
+    Box *p = b->parent;
+    if (!p || b->pseudo || (b->flags & (BOXF_ANONYMOUS | BOXF_OUT_OF_FLOW | BOXF_FLOAT))) return 0;
+    if (b->prev) b->prev->next = b->next; else p->first_child = b->next;
+    if (b->next) b->next->prev = b->prev; else p->last_child = b->prev;
+    b->prev = b->next = NULL;
+    b->parent = NULL;
+    unlink_abs_rec(b);
+    release_rec(t, b);
+    layout_invalidate(t, p, 0);
+    return 1;
+}
+
+/* The element is shown again: its box (and its subtree) is built into the container before the
+ * next element sibling that has a box there, or last. */
+static int fg_insert(LayoutTree *t, Box *p, lxb_dom_node_t *node, const CssComputed *style)
+{
+    Box *before = NULL;
+    for (lxb_dom_node_t *n = node->next; n && !before; n = n->next) {
+        if (n->type != LXB_DOM_NODE_TYPE_ELEMENT) continue;
+        ElemData *nd = layout_elem_data(n);
+        if (nd && nd->computed && nd->computed->display == CSS_DISPLAY_CONTENTS) return 0;
+        if (nd && nd->box && ((Box *) nd->box)->parent == p) before = (Box *) nd->box;
+    }
+    Box *nb = build_element(t, p, node, style, 0);   /* appended last */
+    if (!nb) return 0;
+    if (before) {
+        p->last_child = nb->prev;
+        if (nb->prev) nb->prev->next = NULL; else p->first_child = NULL;
+        nb->prev = before->prev;
+        nb->next = before;
+        if (before->prev) before->prev->next = nb; else p->first_child = nb;
+        before->prev = nb;
+    }
+    wrap_anonymous(t, nb);          /* the new subtree is normalised as rebuild_children does for its children */
+    assign_containers(t, nb, t->root);
+    layout_invalidate(t, p, 0);
+    return 1;
+}
+
 int layout_children_changed(LayoutTree *t, lxb_dom_node_t *node)
 {
     if (!t || !node) return LAYOUT_RESTYLE_NONE;
@@ -1511,10 +1570,15 @@ int layout_restyled(LayoutTree *t, lxb_dom_node_t *node, const CssComputed *old_
         ElemData *ped = p ? layout_elem_data(p) : NULL;
         if (!ped || !ped->box) return LAYOUT_RESTYLE_NONE;
         if (!rebuild_root_for_node(node->parent)) return LAYOUT_RESTYLE_NONE;
+        Box *fg = fg_container_for(node);
+        /* a subtree built here: REBUILT, so post_restyle skips the restyles of its descendants (they were built from the current styles) */
+        if (fg && s->display != CSS_DISPLAY_CONTENTS && fg_insert(t, fg, node, s)) return LAYOUT_RESTYLE_REBUILT;
         return rebuild_for_node(t, node->parent);
     }
     if (!s || s->display == CSS_DISPLAY_NONE || !old_style || structural_changed(old_style, s)) {
         if (b == t->root) { rebuild_all(t); return LAYOUT_RESTYLE_REBUILT; }
+        if (s && s->display == CSS_DISPLAY_NONE && b->parent && fg_container_for(node) == b->parent && fg_remove(t, b))
+            return LAYOUT_RESTYLE_LAYOUT; /* one box removed in place */
         return rebuild_for_node(t, node->parent ? node->parent : node);
     }
     int has_transform_old = old_style->transform.count > 0, has_transform_new = s->transform.count > 0;

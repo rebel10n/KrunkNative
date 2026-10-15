@@ -49,7 +49,7 @@ static int count_items(const Box *b)
 }
 
 /* Lay the item out with the given border-box sizes (-1: auto). */
-static void item_layout(LayoutTree *t, Box *c, float cw, float ch_def, float w, float h, int shrink, float avail)
+static void item_layout(LayoutTree *t, Box *c, float cw, float ch_def, float w, float h, int shrink, float avail, int measure)
 {
     LayoutInput in;
     memset(&in, 0, sizeof(in));
@@ -58,6 +58,7 @@ static void item_layout(LayoutTree *t, Box *c, float cw, float ch_def, float w, 
     in.definite_h = h >= 0;
     in.shrink_to_fit = shrink;
     in.is_flex_item = 1;
+    in.measure_only = measure;
     LayoutOutput o;
     layout_box(t, c, &in, &o);
 }
@@ -142,7 +143,7 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
         } else {
             int stretch = item_align(s, cs) == CSS_ALIGN_ITEMS_STRETCH && cs->width.kind == CSS_LEN_AUTO && !it->auto_c0 && !it->auto_c1;
             float ow = stretch ? kn_maxf(0, cw - it->cm0 - it->cm1) : -1;
-            item_layout(t, c, cw, LAYOUT_INDEFINITE, ow, -1, !stretch, cw);
+            item_layout(t, c, cw, LAYOUT_INDEFINITE, ow, -1, !stretch, cw, 1); /* the cross pass lays it out again */
             content_main = c->h;
             content_min = c->h;
         }
@@ -295,12 +296,14 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
         Box *c = it->b;
         const CssComputed *cs = c->style;
         if (row) {
-            item_layout(t, c, cw, ch, it->main, -1, 0, cw);
+            /* measured only when the stretch pass below lays it out again (same condition) */
+            const int again = item_align(s, cs) == CSS_ALIGN_ITEMS_STRETCH && cs->height.kind == CSS_LEN_AUTO && !it->auto_c0 && !it->auto_c1;
+            item_layout(t, c, cw, ch, it->main, -1, 0, cw, again);
             it->cross = c->h;
         } else {
             int stretch = item_align(s, cs) == CSS_ALIGN_ITEMS_STRETCH && cs->width.kind == CSS_LEN_AUTO && !it->auto_c0 && !it->auto_c1;
             float ow = stretch ? kn_maxf(box_border_padding_w(c), cw - it->cm0 - it->cm1) : -1;
-            item_layout(t, c, cw, ch, ow, it->main, !stretch, cw);
+            item_layout(t, c, cw, ch, ow, it->main, !stretch, cw, 0);
             it->cross = c->w;
         }
     }
@@ -349,7 +352,7 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
                     float hh = kn_maxf(0, ln->cross - it->cm0 - it->cm1);
                     layout_apply_min_max_h(it->b, ch, &hh);
                     if (fabsf(hh - it->cross) > 0.001f || 1) {
-                        item_layout(t, it->b, cw, ch, it->main, hh, 0, cw);
+                        item_layout(t, it->b, cw, ch, it->main, hh, 0, cw, 0);
                         it->cross = it->b->h;
                     }
                 }

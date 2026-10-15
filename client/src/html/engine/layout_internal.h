@@ -31,6 +31,7 @@ struct LayoutTree {
     int laid_out_once;
     CssComputed anon_style;     /* fallback style for anonymous boxes without a parent */
     Box *free_list;             /* released boxes (incremental rebuilds), linked via next */
+    int memo_off;               /* 1: no memo is served (full_layout); results are still stored */
 };
 
 /* Floats of one block formatting context, margin boxes in BFC-root border-box coords. */
@@ -59,6 +60,8 @@ typedef struct LayoutInput {
     int is_flex_item;           /* percentage heights resolve against flexed size */
     float self_cb_h;            /* layout_box -> its contents: the box's own containing block
                                    height (its % min/max-height base), LAYOUT_INDEFINITE */
+    int measure_only;           /* the caller lays the box out again (its positions come from that
+                                   call): only the size is wanted, see layout_box's memo */
 } LayoutInput;
 
 typedef struct LayoutOutput {

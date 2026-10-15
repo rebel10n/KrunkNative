@@ -1774,6 +1774,101 @@ static void t_video_intrinsic(void)
     g_ctx.video_size = NULL;
 }
 
+/* ------------------------------------------------------------------------- */
+/* incremental memo: relayout after an edit equals a full layout of the same edit */
+/* ------------------------------------------------------------------------- */
+/* The Object Manager's shape: an absolute window with a definite size (the relayout boundary) over
+ * a flex column chain, a scroll grid of tiles (one with an absolute badge) and a table row. Each
+ * step edits one element. The incremental side relayouts from the boundary (layout_restyled +
+ * layout_run, the memo serves the clean siblings); the full side builds the whole tree again. Every
+ * element's rect must agree after every step. */
+#define MEMO_TILES 30
+static const char *const memo_ids[] = {"wbox", "menu", "title", "body", "status", "grid", "foot", "tabs", "tab0", "tab1", "badge3"};
+typedef struct MemoStep { const char *id, *prop, *val; } MemoStep;
+static const MemoStep memo_steps[] = {
+    {"t5", "display", "none"}, {"t5", "display", ""}, {"t7", "height", "80px"}, {"title", "height", "40px"},
+    {"status", "height", "30px"}, {"t3", "display", "none"}, {"foot", "display", "none"}, {"foot", "display", ""},
+    {"body", "display", "none"}, {"body", "display", "flex"}, {"t10", "width", "50%"}, {"grid", "max-height", "120px"},
+    {"t20", "height", "20px"}, {"t3", "display", ""}, {"tab1", "border-bottom", "5px solid #fff"}, {"tab1", "border-bottom", ""},
+    {"title", "width", "200px"}, {"title", "width", ""}, {"foot", "width", "300px"}, {"foot", "width", ""},
+    {"t0", "height", "60px"}, {"status", "height", "70px"}, {"grid", "max-height", "400px"}, {"t29", "display", "none"},
+    {"t29", "display", ""}, {"menu", "max-height", "160px"}, {"menu", "max-height", "400px"}, {"t12", "height", "10px"},
+};
+
+static void memo_page(char *buf, size_t n)
+{
+    size_t k = (size_t)snprintf(buf, n,
+        "<div id=wbox style='position:absolute;left:0;top:0;width:600px;height:500px'>"
+        "<div id=menu style='display:flex;flex-direction:column;width:560px;height:400px;max-height:400px'>"
+        "<div id=title style='height:24px'>Title<div id=badge3 style='position:absolute;top:0;right:0;width:8px;height:8px'></div></div>"
+        "<div id=tabs style='display:table;width:100%%'><div id=tab0 style='display:table-cell;padding:4px'>A</div>"
+        "<div id=tab1 style='display:table-cell;padding:4px'>B</div></div>"
+        "<div id=body style='display:flex;flex-direction:column;flex:1 1 auto;min-height:0'>"
+        "<div id=status style='height:16px'>status</div>"
+        "<div id=grid style='display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:8px;"
+        "max-height:200px;overflow-y:auto'>");
+    for (int i = 0; i < MEMO_TILES && k < n; i++) {
+        k += (size_t)snprintf(buf + k, n - k,
+            "<div id=t%d style='position:relative;height:%dpx'><span id=s%d>tile %d</span></div>",
+            i, 40 + (i % 3) * 10, i, i);
+    }
+    snprintf(buf + k, n - k, "</div></div><div id=foot style='height:30px'>foot</div></div></div>");
+}
+
+/* the element's rect, or 0 when it has no box (display: none): no FAIL, unlike rc() */
+static int memo_rect(Fx *fx, const char *id, HtmlRect *r)
+{
+    HtmlElem e = dom_by_id(fx->dom, id);
+    ElemData *ed = e ? dom_elem_data(fx->dom, e) : NULL;
+    if (!ed || !ed->box) return 0;
+    layout_box_rect_in_viewport((Box *)ed->box, r);
+    return 1;
+}
+
+static void t_memo_equivalence(void)
+{
+    static char body[16384];
+    memo_page(body, sizeof(body));
+    Fx *inc = fx_html(body, NULL);
+    Fx *full = fx_html(body, NULL);
+    const int nsteps = (int)(sizeof(memo_steps) / sizeof(memo_steps[0]));
+    int mismatches = 0;
+    for (int i = 0; i < nsteps; i++) {
+        const MemoStep *st = &memo_steps[i];
+        HtmlElem e = dom_by_id(inc->dom, st->id);
+        ElemData *ed = e ? dom_elem_data(inc->dom, e) : NULL;
+        if (!ed || !ed->computed) { CHECK(0, "memo step %d: no element %s", i, st->id); continue; }
+        CssComputed old = *ed->computed;
+        dom_set_style(inc->dom, e, st->prop, st->val);
+        cascade_restyle(inc->dom, g_ua, inc->sheets, inc->ns);
+        layout_restyled(inc->tree, dom_elem_node(inc->dom, e), &old);
+        layout_run(inc->tree, inc->vw, inc->vh);
+
+        dom_set_style(full->dom, dom_by_id(full->dom, st->id), st->prop, st->val);
+        fx_layout(full);
+
+        int bad_here = 0;
+        const size_t n_ids = sizeof(memo_ids) / sizeof(memo_ids[0]);
+        for (size_t k = 0; k < n_ids + 2 * MEMO_TILES; k++) {
+            char id[16];
+            if (k < n_ids) snprintf(id, sizeof(id), "%s", memo_ids[k]);
+            else if (k < n_ids + MEMO_TILES) snprintf(id, sizeof(id), "t%d", (int)(k - n_ids));
+            else snprintf(id, sizeof(id), "s%d", (int)(k - n_ids - MEMO_TILES));
+            HtmlRect a = { 0, 0, 0, 0 }, b = { 0, 0, 0, 0 };
+            const int pa = memo_rect(inc, id, &a), pb = memo_rect(full, id, &b);
+            if (pa != pb || (pa && !(NEAR(a.x, b.x, 0.01) && NEAR(a.y, b.y, 0.01) && NEAR(a.w, b.w, 0.01) && NEAR(a.h, b.h, 0.01)))) {
+                if (bad_here++ < 2)
+                    printf("  step %d (%s %s=%s) #%s: incremental %.2f,%.2f %.2fx%.2f full %.2f,%.2f %.2fx%.2f\n", i, st->id, st->prop,
+                           st->val, id, a.x, a.y, a.w, a.h, b.x, b.y, b.w, b.h);
+            }
+        }
+        mismatches += bad_here;
+    }
+    CHECK(mismatches == 0, "memo: incremental relayout equals the full layout after every edit (%d mismatches)", mismatches);
+    fx_free(inc);
+    fx_free(full);
+}
+
 int main(int argc, char **argv)
 {
     if (argc > 1) g_root = argv[1];
@@ -1827,6 +1922,7 @@ int main(int argc, char **argv)
     t_root_overflow();
     t_container_scrollbars();
     t_incremental();
+    t_memo_equivalence();
     t_flex_text_content();
     t_innerhtml_detach();
     t_intrinsic_font_restyle();

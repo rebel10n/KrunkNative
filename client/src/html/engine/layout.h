@@ -55,6 +55,23 @@ typedef struct LayoutTree LayoutTree;
 /* Context                                                                    */
 /* ------------------------------------------------------------------------- */
 
+/* Incremental layout memo (layout_block.c, layout_box): the input a box was last laid out with and
+ * the result of that layout.  Layout-private. */
+typedef struct BoxMemoKey {
+    float cb_w, cb_h, avail_w, bfc_x, bfc_y, override_w, override_h, self_cb_h;
+    const void *floats;          /* NULL for BFC roots (their own floats) */
+    int shrink_to_fit, definite_h, is_flex_item;
+} BoxMemoKey;
+
+typedef struct BoxMemo {
+    BoxMemoKey key;
+    uint32_t epoch;              /* LayoutCtx.memo_epoch when stored */
+    float w, h;                  /* border box (measure slot only) */
+    float top_pos, top_neg, bot_pos, bot_neg;
+    int collapses_through;
+    uint8_t valid;
+} BoxMemo;
+
 typedef struct LayoutCtx {
     TextSystem *text;                /* fonts, metrics, measuring, shaping (text.h) */
     const char *base_url;            /* document URL relative to ui/ (for image_size) */
@@ -84,6 +101,10 @@ typedef struct LayoutCtx {
     float ua_input_range_w, ua_input_range_h;  /* 129 x 16 (Chrome 152)        */
     float ua_input_color_w, ua_input_color_h;  /* 50 x 27                      */
     float ua_select_h, ua_select_arrow_w;      /* menulist height 20, chevron 20 */
+    /* bumped by the engine whenever something outside the box tree may change a size (every
+     * dom_mark_all_dirty: images and fonts that arrive, viewport units, media, language): memos
+     * stored under an older epoch are not served */
+    uint32_t memo_epoch;
 } LayoutCtx;
 
 void layout_ctx_init(LayoutCtx *ctx);   /* fills the defaults above; text/callbacks NULL */
@@ -276,6 +297,12 @@ struct Box {
     /* layout-private: anonymous boxes own their style (initial values +
      * inherited properties of the parent box); `style` points at it */
     CssComputed *own_style;
+    /* layout-private: incremental layout memo (see BoxMemo, layout_box): the last computed
+     * input and result (its positions are the ones in the subtree), the last measure-only result,
+     * and whether a descendant is absolutely or fixed positioned (such a subtree is never served) */
+    BoxMemo memo;
+    BoxMemo measure;
+    uint8_t sub_oof;
 };
 
 static inline int box_is_replaced(const Box *b) {

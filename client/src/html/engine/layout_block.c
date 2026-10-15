@@ -671,9 +671,88 @@ static void layout_contents(LayoutTree *t, Box *b, const LayoutInput *in, float 
     }
 }
 
+/* ------------------------------------------------------------------------- */
+/* incremental layout memo                                                    */
+/* ------------------------------------------------------------------------- */
+/* A box laid out again with the input of its last layout gets the same result, when nothing
+ * under it changed: that is the case while the box is clean (no dirty flag in its subtree since
+ * its last layout: invalidation marks every ancestor, so a clean box has no dirty descendant),
+ * its subtree has no absolutely or fixed positioned box (those are placed by their containing
+ * block, which may lie outside the subtree), no memo epoch has passed (LayoutCtx.memo_epoch), and
+ * the input is the same.  Then layout_box returns the memo and leaves the subtree as it is: the
+ * positions inside it are the ones of that last layout, and finalize converts them to absolute
+ * space as before.
+ *
+ * Positions belong to the last layout only, so the memo's last slot serves only the call that
+ * matches it.  A measure-only call (LayoutInput.measure_only: its caller lays the box out again
+ * right after, flex's content-height pass) has its own slot that keeps the sizes: served without
+ * touching the positions the next call sets.  Floats of a non-BFC block (an in-flow child next to
+ * floats) are not part of the key, so such calls are never stored or served. */
+
+static void memo_key_of(BoxMemoKey *k, const LayoutInput *in, const Box *b)
+{
+    k->cb_w = in->cb_w; k->cb_h = in->cb_h; k->avail_w = in->avail_w;
+    k->bfc_x = in->bfc_x; k->bfc_y = in->bfc_y;
+    k->override_w = in->override_w; k->override_h = in->override_h; k->self_cb_h = in->self_cb_h;
+    k->floats = (b->flags & BOXF_BFC_ROOT) ? NULL : in->floats;
+    k->shrink_to_fit = in->shrink_to_fit; k->definite_h = in->definite_h; k->is_flex_item = in->is_flex_item;
+}
+
+static int memo_key_eq(const BoxMemoKey *a, const BoxMemoKey *b)
+{
+    return a->cb_w == b->cb_w && a->cb_h == b->cb_h && a->avail_w == b->avail_w && a->bfc_x == b->bfc_x
+        && a->bfc_y == b->bfc_y && a->override_w == b->override_w && a->override_h == b->override_h
+        && a->self_cb_h == b->self_cb_h && a->floats == b->floats && a->shrink_to_fit == b->shrink_to_fit
+        && a->definite_h == b->definite_h && a->is_flex_item == b->is_flex_item;
+}
+
+static int subtree_has_oof(const Box *b)
+{
+    for (const Box *c = b->first_child; c; c = c->next) {
+        if (c->flags & BOXF_OUT_OF_FLOW) return 1;
+        if (c->sub_oof) return 1;
+    }
+    return 0;
+}
+
+static void memo_store(const LayoutTree *t, Box *b, const BoxMemoKey *key, const LayoutOutput *out, int measure)
+{
+    BoxMemo m;
+    memset(&m, 0, sizeof(m));
+    m.key = *key;
+    m.epoch = t->ctx->memo_epoch;
+    m.w = b->w; m.h = b->h;
+    m.top_pos = out->top_pos; m.top_neg = out->top_neg;
+    m.bot_pos = out->bot_pos; m.bot_neg = out->bot_neg;
+    m.collapses_through = out->collapses_through;
+    m.valid = 1;
+    b->sub_oof = (uint8_t) subtree_has_oof(b);
+    b->memo = m;
+    if (measure) b->measure = m;
+}
+
 void layout_box(LayoutTree *t, Box *b, const LayoutInput *in_, LayoutOutput *out)
 {
     LayoutInput in = *in_;
+    BoxMemoKey key;
+    const int storable = in.floats == NULL || (b->flags & BOXF_BFC_ROOT);
+    if (!storable) {
+        b->memo.valid = 0;
+        b->measure.valid = 0;
+    } else {
+        memo_key_of(&key, &in, b);
+        if (!t->memo_off && b->dirty == 0 && !b->sub_oof) {
+            const BoxMemo *m = in.measure_only ? &b->measure : &b->memo;
+            if (m->valid && m->epoch == t->ctx->memo_epoch && memo_key_eq(&m->key, &key)) {
+                layout_resolve_edges(t, b, in.cb_w); /* the margins the parent reads (intrinsic sizing resets them) */
+                b->w = m->w; b->h = m->h; /* the size of the slot served: a measure serve leaves the last layout's h otherwise */
+                out->top_pos = m->top_pos; out->top_neg = m->top_neg;
+                out->bot_pos = m->bot_pos; out->bot_neg = m->bot_neg;
+                out->collapses_through = m->collapses_through;
+                return;
+            }
+        }
+    }
     const CssComputed *s = b->style;
     LayoutOutput o;
     memset(&o, 0, sizeof(o));
@@ -791,6 +870,7 @@ void layout_box(LayoutTree *t, Box *b, const LayoutInput *in_, LayoutOutput *out
         layout_update_sticky(b);
     }
     b->dirty = 0;
+    if (storable) memo_store(t, b, &key, out, in.measure_only);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1343,7 +1423,9 @@ static void full_layout(LayoutTree *t)
     in.definite_h = 1;
     LayoutOutput o;
     root->lx = 0; root->ly = 0;
+    t->memo_off = 1;
     layout_box(t, root, &in, &o);
+    t->memo_off = 0;
     root->lx = root->margin[CSS_LEFT]; root->ly = root->margin[CSS_TOP];
     layout_finalize(t, root);
     clear_dirty(root);

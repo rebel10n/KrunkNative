@@ -246,7 +246,7 @@ static void engine_apply_lang(Engine *e)
     }
     if (e->text && text_set_lang(e->text, g_doc_lang[0] ? g_doc_lang : NULL)) {
         if (e->tree) layout_rebuild_all(e->tree);
-        if (e->dom) dom_mark_all_dirty(e->dom);
+        if (e->dom) { e->lctx.memo_epoch++; dom_mark_all_dirty(e->dom); }
         e->need_layout = 1;
         e->need_paint = 1;
     }
@@ -677,6 +677,7 @@ static void engine_video_tick(Engine *g)
     if (video_players_tick(g->videos, engine_now_ms() / 1000.0, video_alive, g, NULL) > 0) {
         paint_invalidate_all(&g->paint);
         g->need_layout = 1;
+        g->lctx.memo_epoch++;
         dom_mark_all_dirty(g->dom);
         g->need_paint = 1;
     }
@@ -2341,6 +2342,7 @@ int html_ui_backend_add_stylesheet(const char *href)
     g->sheets[g->n_sheets++] = sheet;
     register_font_faces(g, sheet);
     register_keyframes(g, sheet);
+    g->lctx.memo_epoch++;
     dom_mark_all_dirty(g->dom);
     return 1;
 }
@@ -2369,6 +2371,7 @@ int html_ui_backend_set_custom_css(const char *css)
         register_font_faces(g, sheet);
         register_keyframes(g, sheet);
     }
+    g->lctx.memo_epoch++;
     dom_mark_all_dirty(g->dom);
     g->need_layout = 1;
     g->need_paint = 1;
@@ -2443,7 +2446,7 @@ static int engine_set_size(Engine *g, const int width, const int height)
     /* vw/vh/vmin/vmax compute to px: restyle everything when a sheet used them */
     css_values_set_viewport(g->vw, g->vh);
     const int media_changed = engine_media_update(g);
-    if ((media_changed || css_values_viewport_units_used()) && g->dom) dom_mark_all_dirty(g->dom);
+    if ((media_changed || css_values_viewport_units_used()) && g->dom) { g->lctx.memo_epoch++; dom_mark_all_dirty(g->dom); }
     g->paint.viewport_w = g->vw;
     g->paint.viewport_h = g->vh;
     if (g->widgets) widgets_set_viewport(g->widgets, g->vw, g->vh);
@@ -2521,6 +2524,7 @@ void html_ui_backend_render(UI *ui, const int layers)
 
     /* game content fetched in the background (asset_fetch.h): page images it brought pop in */
     if (image_cache_retry_missing(g->images) > 0) {
+        g->lctx.memo_epoch++;
         dom_mark_all_dirty(g->dom);
         g->need_layout = 1;
         g->need_paint = 1;
