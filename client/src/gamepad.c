@@ -1,4 +1,18 @@
-// Game controllers: Krunker v3.1.1's gamepad module and the controller half of CONTROLS.
+// Game controllers: Krunker's gamepad module and the controller half of CONTROLS, ported from
+// v3.1.1 and brought to v10.0.2 (~/.cache/kn-v10/v10.js, the Gamepad class and CONTROLS'
+// `if (!this.isMobile)` block). v10 kept v3.1.1's loop, threshold, event machine and rumble;
+// what it changed, and this file follows:
+//   - _keyMapping.gamepad names button 16 "vendor" (no CONTROLS mapping: KrunkScript only);
+//   - CONTROLS.mapping.shoulder_bottom_right is {THRES: true, KEY: "shoot"} (no MOUSE): the
+//     trigger's press / release press / release the shoot bind; while held, at or past
+//     triggerThres it is a which-0 mousedown (takes the pointer back into the game), below it
+//     the mouseup (ui_controls_fake_mouse);
+//   - the left stick: each axis through a rescaling dead zone (|v| < deadZoneL ? 0 :
+//     (v - sign(v) * deadZoneL) / (1 - deadZoneL)), then one of 8 directions (45-degree
+//     sectors of atan2(x, y)) holds the move binds;
+//   - KrunkScript onControllerPress / Held / Up fire for every named button and both sticks;
+//   - Settings > Controller "Disable Controllers" (disableCons: toggleGamepad) and the
+//     vibration strength vibrationMlt.
 //
 // Sources (/home/user/jails/kru/src/Krunker_v3.1.1/src/libs, = Krunker.Unpacked-v3.1.1):
 //   gamepad.js (133.js)   the polling loop: requestAnimationFrame + navigator.getGamepads()[0],
@@ -74,6 +88,7 @@ enum {
     GP_SHOULDER_TOP_LEFT, GP_SHOULDER_TOP_RIGHT, GP_SHOULDER_BOTTOM_LEFT, GP_SHOULDER_BOTTOM_RIGHT,
     GP_SELECT, GP_START, GP_STICK_BUTTON_LEFT, GP_STICK_BUTTON_RIGHT,
     GP_D_PAD_UP, GP_D_PAD_DOWN, GP_D_PAD_LEFT, GP_D_PAD_RIGHT,
+    GP_VENDOR, // v10
     GP_BUTTON_NAMES,
     GP_STICK_AXIS_LEFT = GP_BUTTON_NAMES, GP_STICK_AXIS_RIGHT,
     GP_NAMES
@@ -83,13 +98,13 @@ static const char *const GP_NAME[GP_NAMES] = {
     "button_1", "button_2", "button_3", "button_4",
     "shoulder_top_left", "shoulder_top_right", "shoulder_bottom_left", "shoulder_bottom_right",
     "select", "start", "stick_button_left", "stick_button_right",
-    "d_pad_up", "d_pad_down", "d_pad_left", "d_pad_right",
+    "d_pad_up", "d_pad_down", "d_pad_left", "d_pad_right", "vendor",
     "stick_axis_left", "stick_axis_right",
 };
 
-// CONTROLS.mapping: KEY = the bind pressed through Q()/U(); THRES + MOUSE = the left
-// mouse button through fakeMouse once the trigger value reaches cntrlInput.triggerThres.
-// -1 = no entry (start has its own press listener; the stick buttons do nothing).
+// CONTROLS.mapping (v10): KEY = the bind pressed through Q()/U(); the right trigger's entry
+// also has THRES (its hold is a fake mouse button at triggerThres, GP_THRES below).
+// -1 = no entry (start has its own press listener; the stick buttons and vendor do nothing).
 static const int GP_MAPPING[GP_BUTTON_NAMES] = {
     [GP_BUTTON_1] = UI_CONTROL_JUMP,
     [GP_BUTTON_2] = UI_CONTROL_CROUCH,
@@ -98,7 +113,7 @@ static const int GP_MAPPING[GP_BUTTON_NAMES] = {
     [GP_SHOULDER_TOP_LEFT] = UI_CONTROL_SWAP,
     [GP_SHOULDER_TOP_RIGHT] = UI_CONTROL_MELEE,
     [GP_SHOULDER_BOTTOM_LEFT] = UI_CONTROL_AIM,
-    [GP_SHOULDER_BOTTOM_RIGHT] = -2,            // {THRES: true, MOUSE: true}
+    [GP_SHOULDER_BOTTOM_RIGHT] = UI_CONTROL_SHOOT, // {THRES: true, KEY: "shoot"}
     [GP_SELECT] = UI_CONTROL_PLAYER_LIST,
     [GP_START] = -1,
     [GP_STICK_BUTTON_LEFT] = -1,
@@ -107,8 +122,9 @@ static const int GP_MAPPING[GP_BUTTON_NAMES] = {
     [GP_D_PAD_DOWN] = UI_CONTROL_SPRAY,
     [GP_D_PAD_LEFT] = UI_CONTROL_INTERACT,
     [GP_D_PAD_RIGHT] = UI_CONTROL_DROP,
+    [GP_VENDOR] = -1,
 };
-#define GP_MAP_MOUSE (-2)
+#define GP_THRES GP_SHOULDER_BOTTOM_RIGHT // the one entry with THRES
 
 // One _events.gamepad[name] / _events.axes[name] entry.
 typedef struct {
@@ -131,6 +147,7 @@ static struct {
     Client *client;
     int connected;         // _connected
     int active;            // active
+    int disabled;          // disabled (v10 toggleGamepad: Settings > Controller "Disable Controllers")
     int running;           // _requestAnimation armed
     GpEvents buttons, axes;
     int log;
@@ -318,51 +335,59 @@ static void key(const int id, const int down) {
     ui_controls_controller_key(g_gp.client, id, down);
 }
 
-// gamepad.on(["press", "hold", "release"], Object.keys(mapping), ...)
+// gamepad.on(["press", "hold", "release"], Object.keys(mapping), ...) (v10): press / release
+// the KEY's bind; the THRES entry's hold is fakeMouse down at triggerThres, up below it.
 static void on_mapped_button(const int type, const int name, const double value) {
     const int map = GP_MAPPING[name];
-    if (map == -1) return;
-    const UiControllerInput *c = ui_controls_cntrl_input();
-    const int mouse = map == GP_MAP_MOUSE;
-    if (type == GP_PRESS) {
-        if (mouse && value >= c->trigger_thres) ui_controls_fake_mouse(g_gp.client, 0, 0.0f, 0.0f);
-        else if (!mouse) key(map, 1);
-    } else if (type == GP_RELEASE) {
-        if (mouse) ui_controls_fake_mouse(g_gp.client, 1, 0.0f, 0.0f);
-        else key(map, 0);
-    } else if (type == GP_HOLD && mouse) {
-        ui_controls_fake_mouse(g_gp.client, value >= c->trigger_thres ? 0 : 1, 0.0f, 0.0f);
+    if (map < 0) return;
+    if (type == GP_PRESS) key(map, 1);
+    else if (type == GP_RELEASE) key(map, 0);
+    else if (type == GP_HOLD && name == GP_THRES) {
+        ui_controls_fake_mouse(g_gp.client, value >= ui_controls_cntrl_input()->trigger_thres ? 0 : 1, 0.0f, 0.0f);
     }
 }
 
-// gamepad.on("hold", "stick_axis_left"): the move binds go down past deadZoneL.
-static void on_left_stick_hold(const double x, const double y) {
+// v10's left-stick dead zone: inside it 0, outside rescaled to start at 0.
+static double stick_deadzone(double v, const double dz) {
+    if (fabs(v) < dz) return 0.0;
+    v -= (v > 0.0 ? 1.0 : v < 0.0 ? -1.0 : 0.0) * dz;
+    v /= 1.0 - dz;
+    return isfinite(v) ? v : 0.0; // KrunkNative: deadZoneL 1 (only reached at |v| = 1) gives 0, not Infinity
+}
+
+// The 8-way left-stick sector (v10): atan2(x, y) in degrees [0, 360), +22.5, / 45, floored.
+// 0 / 8 = down (+y), 2 = right, 4 = up, 6 = left.
+static int stick_sector(const double x, const double y) {
+    double deg = atan2(x, y);
+    if (deg < 0.0) deg += 2.0 * M_PI;
+    deg = 180.0 * deg / M_PI;
+    return (int) floor((deg + 22.5) / 45.0);
+}
+
+// gamepad.on("hold", "stick_axis_left") (v10): the move binds of the stick's sector go down,
+// the others up; inside the dead zone all four are up.
+static void on_left_stick_hold(const double raw_x, const double raw_y) {
     const UiControllerInput *c = ui_controls_cntrl_input();
     const double dz = c->dead_zone_l;
-    if (c->grad_speed) ui_controls_set_speed_limit((float) (fmax(fabs(x), fabs(y)) / (1.0 - dz)));
-    if (y <= -dz) {
-        key(UI_CONTROL_BACKWARD, 0);
-        key(UI_CONTROL_FORWARD, 1);
-    } else {
-        key(UI_CONTROL_FORWARD, 0);
+    if (c->grad_speed) ui_controls_set_speed_limit((float) (fmax(fabs(raw_x), fabs(raw_y)) / (1.0 - dz)));
+    const double x = stick_deadzone(raw_x, dz), y = stick_deadzone(raw_y, dz);
+    // forward, backward, left, right held per sector (binds.move[0..3])
+    static const unsigned char HELD[9][4] = {
+        {0, 1, 0, 0}, {0, 1, 0, 1}, {0, 0, 0, 1}, {1, 0, 0, 1}, {1, 0, 0, 0},
+        {1, 0, 1, 0}, {0, 0, 1, 0}, {0, 1, 1, 0}, {0, 1, 0, 0},
+    };
+    static const int MOVE[4] = {UI_CONTROL_FORWARD, UI_CONTROL_BACKWARD, UI_CONTROL_LEFT, UI_CONTROL_RIGHT};
+    if (x == 0.0 && y == 0.0) {
+        for (int i = 0; i < 4; i++) key(MOVE[i], 0);
+        return;
     }
-    if (y >= dz) {
-        key(UI_CONTROL_FORWARD, 0);
-        key(UI_CONTROL_BACKWARD, 1);
-    } else {
-        key(UI_CONTROL_BACKWARD, 0);
+    int sector = stick_sector(x, y);
+    if (sector < 0 || sector > 8) sector = 0;
+    for (int i = 0; i < 4; i++) {
+        if (!HELD[sector][i]) key(MOVE[i], 0); // v10 releases first, then presses
     }
-    if (x <= -dz) {
-        key(UI_CONTROL_RIGHT, 0);
-        key(UI_CONTROL_LEFT, 1);
-    } else {
-        key(UI_CONTROL_LEFT, 0);
-    }
-    if (x >= dz) {
-        key(UI_CONTROL_LEFT, 0);
-        key(UI_CONTROL_RIGHT, 1);
-    } else {
-        key(UI_CONTROL_RIGHT, 0);
+    for (int i = 0; i < 4; i++) {
+        if (HELD[sector][i]) key(MOVE[i], 1);
     }
 }
 
@@ -375,16 +400,14 @@ static void trigger(const int type, const GpEvent *e) {
     // KrunkNative: no pad press / hold acts while a text field has focus (ui_text_input_focused,
     // the keyboard hotkeys' rule; v3.1.1 lets the pad through). Releases still land.
     if (type != GP_RELEASE && ui_text_input_focused()) return;
+    if (e->name < GP_BUTTON_NAMES) on_mapped_button(type, e->name, e->value);
+    // KrunkScript onControllerPress / Held / Up (CTL:1137-1141), after the mapping, for every
+    // button and stick name (v10 registers the listener on all of them): the name and the key
+    // code of the bind it presses (0 for the unmapped buttons and the sticks)
+    const int map = e->name < GP_BUTTON_NAMES ? GP_MAPPING[e->name] : -1;
+    const int bound = map >= 0 ? ui_controls_bind(map) : 0;
+    ks_client_controller(type, GP_NAME[e->name], bound > 0 ? bound : 0);
     if (e->name < GP_BUTTON_NAMES) {
-        on_mapped_button(type, e->name, e->value);
-        // KrunkScript onControllerPress / Held / Up (CTL:1137-1141): the button name and the
-        // key code of the bind it presses (0 for the mouse / unmapped buttons)
-        if (GP_MAPPING[e->name] >= 0) {
-            const int bound = ui_controls_bind(GP_MAPPING[e->name]);
-            ks_client_controller(type, GP_NAME[e->name], bound > 0 ? bound : 0);
-        } else if (GP_MAPPING[e->name] == GP_MAP_MOUSE) {
-            ks_client_controller(type, GP_NAME[e->name], 0);
-        }
         if (e->name == GP_START && type == GP_PRESS) ui_controls_toggle(g_gp.client, !ui_controls_enabled(g_gp.client));
         return;
     }
@@ -405,6 +428,7 @@ static void trigger(const int type, const GpEvent *e) {
 
 // _handleEvent(name, events)
 static void handle_events(GpEvents *list) {
+    if (g_gp.disabled) return;
     for (int i = 0; i < list->count;) {
         GpEvent *e = &list->ev[i];
         g_gp.active = 1;
@@ -427,6 +451,7 @@ static void handle_events(GpEvents *list) {
 
 // Gamepad._loop: sample getGamepads()[0], update the events, fire them.
 static void gamepad_loop(void) {
+    if (g_gp.disabled) return;
     GpSample pad;
     if (sample_pad(0, &pad) && pad.connected) {
         listen_buttons(&pad);
@@ -438,7 +463,7 @@ static void gamepad_loop(void) {
 
 // _handleGamepadConnected: only the first pad is taken; the loop starts next frame.
 static void on_connected(const GpSample *pad, const char *name) {
-    if (g_gp.connected) return;
+    if (g_gp.disabled || g_gp.connected) return;
     g_gp.connected = 1;
     g_gp.active = 1;
     memset(&g_gp.buttons, 0, sizeof(g_gp.buttons));
@@ -543,7 +568,8 @@ void gamepad_init(Client *client) {
 
 // ---------------------------------------------------------------- rumble
 
-// weapons.js (27.js) rumble / rumbleDur by weapon name; 0 = unset (|| 0.5 / || 200).
+// weapons.js (27.js; v10.0.2's list adds the later weapons) rumble / rumbleDur by weapon name;
+// 0 = unset (|| 0.5 / || 200).
 static const struct {
     const char *name;
     float rumble;
@@ -554,6 +580,10 @@ static const struct {
     {"Rocket Launcher", 1.0f, 750}, {"Akimbo Uzi", 0.4f, 0}, {"Desert Eagle", 0.8f, 0}, {"Alien Blaster", 0.4f, 0},
     {"Combat Knife", 0.4f, 150}, {"Crossbow", 0.5f, 0}, {"Famas", 0.5f, 0}, {"Sawed Off", 0.8f, 0},
     {"Auto Pistol", 0.8f, 0}, {"Bomb", 0.0f, 0}, {"Blaster", 0.5f, 0},
+    // v10.0.2's later weapons
+    {"Grappler", 0.8f, 0}, {"Tehchy-9", 0.8f, 0}, {"Noob Tube", 0.8f, 0}, {"Slimer", 0.4f, 0},
+    {"Zapper", 0.4f, 0}, {"Minigun", 0.65f, 0}, {"War Machine", 0.8f, 0}, {"Akimbo Pistol", 0.4f, 0},
+    {"Charge Rifle", 0.9f, 500}, {"Compressor", 0.8f, 0},
 };
 
 // Gamepad.rumble(duration, magnitude)
@@ -591,8 +621,9 @@ static void shot_rumble(const Weapon *weapon) {
     }
     if (duration <= 0) duration = 200;
     if (magnitude <= 0.0f) magnitude = 0.5f;
-    if (ui_controls_cntrl_input()->vibration && g_gp.active) {
-        rumble(duration, magnitude);
+    const UiControllerInput *c = ui_controls_cntrl_input();
+    if (c->vibration && g_gp.active) {
+        rumble(duration, magnitude * c->vibration_mlt); // v10: (weapon.rumble || 0.5) * vibrationMlt
         return;
     }
 #ifdef __EMSCRIPTEN__
@@ -697,6 +728,24 @@ int gamepad_active(void) {
 
 void gamepad_set_active(const int active) {
     g_gp.active = active;
+}
+
+// v10 CONTROLS.toggleGamepad(v): gamepad.disabled = v; disabling also runs the disconnect.
+// KrunkNative: enabling again picks up a pad that is still plugged in (natively; the browser
+// fires no new gamepadconnected for it, so on the web the pad needs an input or a replug).
+void gamepad_set_disabled(const int disabled) {
+    if (g_gp.disabled == !!disabled) return;
+    g_gp.disabled = !!disabled;
+    if (disabled) {
+        on_disconnected();
+        return;
+    }
+#ifndef __EMSCRIPTEN__
+    g_pad_slots = 0;
+    for (int jid = GLFW_JOYSTICK_1; jid <= GLFW_JOYSTICK_LAST; jid++) {
+        if (glfwJoystickPresent(jid)) joystick_callback(jid, GLFW_CONNECTED);
+    }
+#endif
 }
 
 int gamepad_connected(void) {

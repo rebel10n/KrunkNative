@@ -461,8 +461,8 @@ static struct {
     .settings = {90.0f, 1, 1, 1, 1, 0, 0.8f, 1.0f, 1.0f, 1},
     // cntrlInput after the settings' set(): sensitivity*Cntrl x5, deadZoneL 0.3 (the
     // setting's val overrides cntrlInput's own 0.25), deadZoneR 0.25, triggerThres 0.1,
-    // invertYCntrl off, vibration on, gradSpeed off.
-    .cntrl = {5.0f, 5.0f, 5.0f, 5.0f, 0.3f, 0.25f, 0.1f, 0, 1, 0},
+    // invertYCntrl off, vibration on, gradSpeed off, vibrationMlt 1.
+    .cntrl = {5.0f, 5.0f, 5.0f, 5.0f, 0.3f, 0.25f, 0.1f, 0, 1, 0, 1.0f},
     .speed_lmt = 1.0f,
 };
 
@@ -1437,6 +1437,11 @@ int ui_controls_key_event(Client *client, const int key, const int scancode, con
     const int press = action == GLFW_PRESS;
     const int menu = html_ui_is_menu_open();
     g_ctl.swallowed_key = 0; // only ever about the key event being dispatched right now
+    // v10 keydown / keyup (Q / U with no input type): gamepad.active = false, inputType = undefined
+    if (action != GLFW_REPEAT) {
+        gamepad_set_active(0);
+        g_ctl.input_cntrl = 0;
+    }
     // controls.js keydown/keyup: `if (controls.enabled) e.preventDefault()`, decided before
     // the key acts (pListKey frees the pointer); the chat key's keydown goes to
     // pressButton without it. The web backend reads it (web_dom.c kn_ui_key_prevent).
@@ -1596,6 +1601,7 @@ static void controller_n(Client *client, const int code, const int down) {
 void ui_controls_controller_key(Client *client, const int id, const int down) {
     ensure_loaded();
     if (!valid_id(id)) return;
+    g_ctl.input_cntrl = 1; // Q / U(..., "cntrlInput"): inputType = "cntrlInput"
     const int code = g_ctl.binds[id];
     if (down) {
         const int typing = ui_text_input_focused();
@@ -1633,22 +1639,23 @@ void ui_controls_toggle(Client *client, const int on) {
     }
 }
 
-// CONTROLS.fakeMouse(type, x, y, 0, "cntrlInput"): 0 = a9 (mousedown, which 0),
-// 1 = aa (mouseup), 2 = a8 (mousemove by x/y).
+// CONTROLS.fakeMouse(type, x, y, 0, "cntrlInput") (v10): 0 = the canvas mousedown with which 0,
+// 1 = mouseup, 2 = mousemove by x/y. v10's controller mapping has no MOUSE entry, so the trigger
+// shoots through its "shoot" KEY (gamepad.c); these only take the pointer back into the game and
+// press / release the unbound mouse code 10000 + which (v3.1.1's which-0 branch shot: UCUz1).
 void ui_controls_fake_mouse(Client *client, const int type, const float dx, const float dy) {
     if (type == 0) {
-        // a9: `if (ak && gamepad.active) gamepad.active = false` (ak = "cntrlInput")
-        gamepad_set_active(0);
+        g_ctl.input_cntrl = 1;              // inputType = "cntrlInput" (gamepad.active stays)
         if (!client || !client->game.ready) return; // masterLock
         if (!ui_controls_enabled(client)) {
             ui_controls_toggle(client, 1);
             return;
         }
         if (g_ctl.chat_focused) chat_blur();
-        g_ctl.shoot = 1;                    // which 0: the default branch -> UCUz1 = 1
-        spectate_mouse_press(client, 1);    // window.Bf5: spectMode(-1)
+        press_code(client, 10000);          // Q(null, 10000 + which, "cntrlInput"); which 0: no spectMode
     } else if (type == 1) {
-        if (!hud_ui_end_screen_interactive()) g_ctl.shoot = 0; // !locked: UCUz1 = 0
+        g_ctl.input_cntrl = 1;
+        if (!hud_ui_end_screen_interactive()) release_code(client, 10000); // !locked: U(null, 10000 + which)
     } else if (type == 2) {
         if (!ui_controls_enabled(client)) return;
         // window.noMouseInp: the first-person spectator view takes no look input. The

@@ -15,6 +15,7 @@
 #if defined(__has_include)
 #if __has_include(<render_settings.h>)
 #include <render_settings.h> // client_apply_render_setting (ui_render_settings.c)
+#include <gamepad.h>         // disableCons: gamepad_set_disabled
 #define UI_HAVE_RENDER_SETTINGS 1
 #endif
 #endif
@@ -70,6 +71,7 @@ static const char *CORE_SETTINGS[] = {
     // Controller (CONTROLS.cntrlInput, ui_controls.c / gamepad.c)
     "sensitivityXCntrl", "sensitivityYCntrl", "aimSensitivityXCntrl", "aimSensitivityYCntrl",
     "deadZoneL", "deadZoneR", "triggerThres", "invertYCntrl", "vibration", "gradSpeed",
+    "vibrationMlt", "disableCons", // v10
 };
 
 // ---------------------------------------------------------------- helpers
@@ -1332,6 +1334,8 @@ void client_apply_setting(Client *client, const char *key, const char *value) {
     else if (!strcmp(key, "triggerThres")) cntrl->trigger_thres = parse_float(value, cntrl->trigger_thres);
     else if (!strcmp(key, "invertYCntrl")) cntrl->invert = parse_bool(value);
     else if (!strcmp(key, "vibration")) cntrl->vibration = parse_bool(value);
+    else if (!strcmp(key, "vibrationMlt")) cntrl->vibration_mlt = parse_float(value, cntrl->vibration_mlt); // v10
+    else if (!strcmp(key, "disableCons")) gamepad_set_disabled(parse_bool(value)); // v10 toggleGamepad
     else if (!strcmp(key, "gradSpeed")) {
         cntrl->grad_speed = parse_bool(value);
         ui_controls_set_speed_limit(1.0f); // q.speedLmt = 1

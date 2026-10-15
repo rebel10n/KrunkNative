@@ -21,3 +21,4 @@ void gamepad_frame_begin(void);          // before a rendered frame's client_tic
 int  gamepad_active(void);               // Gamepad.active (PRESS START, rumble gate)
 void gamepad_set_active(int active);     // CONTROLS clears it on mouse input
 int  gamepad_connected(void);            // Gamepad._connected
+void gamepad_set_disabled(int disabled); // v10 toggleGamepad (Settings > Controller "Disable Controllers")

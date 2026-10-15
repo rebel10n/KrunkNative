@@ -1333,6 +1333,15 @@ else ()
         target_link_libraries(death_cam_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # gamepad_test: the controller module (client/src/gamepad.c) against v10.0.2's Gamepad class and
+    # CONTROLS' controller block: trigger, 8-way left stick, KrunkScript hooks, Disable Controllers.
+    # Window-free: it includes gamepad.c and stubs GLFW's joystick API (GLFW only provides headers).
+    add_executable(gamepad_test client/tests/gamepad_test.c)
+    target_include_directories(gamepad_test PRIVATE client/include client/lib $<TARGET_PROPERTY:glfw,INTERFACE_INCLUDE_DIRECTORIES>
+                               $<TARGET_PROPERTY:freetype,INTERFACE_INCLUDE_DIRECTORIES>)
+    target_link_libraries(gamepad_test PRIVATE m)
+    add_test(NAME gamepad_test COMMAND gamepad_test)
+
     # third_person_test: the KrunkNative third-person camera (client/src/third_person_cam.c): the
     # collision pull-in (world_solid_fraction: boxes, map triangles, terrain) on synthetic walls and
     # every Kanji / Sandstorm spawn, the aim correction, the server's `thirdperson` permission.

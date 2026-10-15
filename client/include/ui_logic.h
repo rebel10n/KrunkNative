@@ -502,6 +502,7 @@ typedef struct {
     float aim_x, aim_y;     // aimSensitivityXCntrl / aimSensitivityYCntrl x 5 (with DNCv5: right mouse)
     float dead_zone_l, dead_zone_r, trigger_thres; // deadZoneL, deadZoneR, triggerThres
     int invert, vibration, grad_speed;              // invertYCntrl, vibration, gradSpeed
+    float vibration_mlt;                            // vibrationMlt (v10): rumble strength x
 } UiControllerInput;
 UiControllerInput *ui_controls_cntrl_input(void);
 int  ui_controls_enabled(const Client*);         // CONTROLS.enabled: the game owns the pointer
