@@ -2,15 +2,11 @@
 // The Host Game flow (client/src/ui/host_flow_ui.c): one window (HOST_FLOW_WINDOW) behind every Host
 // Game entry point, with four steps: 1 Map (the catalogue and the community maps), 2 Mode & classes,
 // 3 Rules (weapons, classes, effects, settings), 4 Server & command: the server_bin line to copy
-// (shared/include/host_command.h), practice on the embedded offline game, and the link to the
-// dedicated-server download page.
+// (shared/include/host_command.h), practice on the embedded offline game, and the Dedicated Server
+// window (dedicated_server_ui.h: downloads, setup, port forwarding, listing, VPS hosting).
 #include <cJSON.h>
 #include <html_dom.h>
 #include <html_ui.h>
-
-// The dedicated-server download page. PLACEHOLDER: another agent is writing the page; replace the
-// URL when it is published.
-#define HOST_FLOW_SERVER_DOWNLOAD_URL "https://krunk.io/host/dedicated-server"
 
 // The Host Game chooser's server types (window 42's cards): config.hostTypes index. Opens step 1.
 void host_flow_open(int host_type);

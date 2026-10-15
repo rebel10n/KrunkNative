@@ -5,6 +5,7 @@
 // steps never loses a value. The command is host_command_build's line for that state.
 #include <host_flow_ui.h>
 #include <host_command.h>
+#include <dedicated_server_ui.h> // "Get the dedicated server": the Dedicated Server window
 #include <client.h>
 #include <game_config.h>
 #include <html_dom.h>
@@ -360,7 +361,9 @@ static void append_server_step(StrBuf *sb) {
     char pub_name[96], pub_creator[64];
     if (practice_index() >= 0 || published_key(g_flow.map_key, pub_name, sizeof(pub_name), pub_creator, sizeof(pub_creator)))
         append_button(sb, I18N("kn.hostflow.practice", "Play this map offline"), "knHostFlow('practice')", 0);
+    sb_append(sb, "<span id='hostFlowGetServer'>"); // the Dedicated Server window (dedicated_server_ui.c)
     append_button(sb, I18N("kn.hostflow.download", "Get the dedicated server"), "knHostFlow('download')", 0);
+    sb_append(sb, "</span>");
     sb_append(sb, "</div>");
 }
 
@@ -502,6 +505,10 @@ int host_flow_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *ar
     if (!name || strcmp(name, "knHostFlow")) return -1;
     char action[24] = "";
     arg_text(args, argc, 0, action, sizeof(action));
+    if (!strcmp(action, "reopen")) { // the Dedicated Server window's Back: this window as it was left (its
+        flow_show();                 // fields are not on that page, so nothing is read back)
+        return 1;
+    }
     char err[160] = "";
     const int page_ok = sync_page(err, sizeof(err)); // the page's values first: every action keeps them
     g_flow.message[0] = 0;
@@ -552,7 +559,7 @@ int host_flow_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *ar
         practice();
         return 1; // the offline game took the window
     } else if (!strcmp(action, "download")) {
-        ui_open_external(HOST_FLOW_SERVER_DOWNLOAD_URL);
+        dedicated_server_ui_open(1); // in the client, not a web page (the flow's values were just kept)
         return 1;
     }
     // "apply" (a server field changed) only re-renders: the command follows the values

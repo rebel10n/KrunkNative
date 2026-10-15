@@ -9,6 +9,7 @@
 #include <ui_mobile.h>
 #include <client_settings.h>
 #include <download_ui.h>
+#include <dedicated_server_ui.h> // the Dedicated Server window (KrunkNative, from the Host Game flow)
 #include <seek_prefs.h> // General > Quickplay rows (mm-token)
 #include <host_flow_ui.h> // the Host Game flow (windows[HOST_FLOW_WINDOW])
 #include <ctype.h>
@@ -560,6 +561,7 @@ static char *gen_23(void) { return hud_ui_player_list_html(); } // Player List (
 static char *gen_13(void) { return clan_window_gen(); }
 static char *gen_14(void) { return store_window_gen(); } // Store (windows[13], store_ui.c)
 static char *gen_25(void) { return download_window_gen(); } // Download Client: KrunkNative's packages (download_ui.c)
+static char *gen_dedicated_server(void) { return dedicated_server_window_gen(DEDICATED_SERVER_WINDOW, NULL); }
 static char *gen_27(void) { return ranked_ui_window_gen(); } // Ranked: '' like v10 (the popup is ranked_ui.c) // Clans (windows[12], clan_ui.c): guest LOGIN REQUIRED
 // Change Loadout and the windows it opens, Changelog: ui_loadout.c
 static char *gen_loadout(void) { return ui_loadout_gen(); }
@@ -586,6 +588,7 @@ static const WindowDef WINDOWS[] = {
     {13, gen_13},
     {14, gen_14},
     {25, gen_25},
+    {DEDICATED_SERVER_WINDOW, gen_dedicated_server}, // KrunkNative: the dedicated server, like 25 (dedicated_server_ui.c)
     {27, gen_27},
     {15, gen_15},
     {16, gen_16},
@@ -653,6 +656,7 @@ char *ui_window_generate(const int id, const char **header, int *sticky) {
     if (!live) live = battlepass_window_gen(id, header); // v7.1.4 Battle Pass (battlepass_ui.c)
     if (!live) live = servers_window_gen(id, header);
     if (!live) live = object_manager_window_gen(id, header); // KrunkNative Object Manager (F1)
+    if (!live) live = dedicated_server_window_gen(id, header); // KrunkNative Dedicated Server (its header)
     if (!live) live = v10_customize_window_gen(id); // v10 page: the Change Loadout shell (v10_customize.c)
     if (live) return live;
     const WindowDef *w = find_window(id);

@@ -1,0 +1,29 @@
+{
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "window": 42,
+    "windowActions": [
+      ["openHostWindow", false, 0],
+      ["knHostFlow", "map", "kanji"],
+      ["knHostFlow", "go", 3],
+      ["knHostFlow", "download"]
+    ]
+  },
+  "frames": 3,
+  "note": "KrunkNative's Dedicated Server window (dedicated_server_ui.c), opened from the Host Game flow's last step (Get the dedicated server). No Krunker reference: render-only (make smoke-ui)."
+}
