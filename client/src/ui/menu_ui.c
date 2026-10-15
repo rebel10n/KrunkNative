@@ -44,7 +44,7 @@
 #include <pointer_lock.h> // "should the pointer be locked" (client/src/pointer_lock.c)
 #include <online_mode.h> // live sign-in: the session's rights end with it
 #include <audio.h> // the auto-respawn countdown's tick_0
-#include <nettspend.h>   // KN-only class icon art (ui/img/classes/)
+#include <nettspend.h>   // the Nettspend's weapon previews
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -425,8 +425,7 @@ static void menu_build_classes(void) {
             if (w >= 0 && (size_t) w < weapon_count && weapons[w] && weapons[w]->name) c->weapon = weapons[w]->name;
         }
         c->hp = classes[i].health;
-        if (!nettspend_class_icon_src(classes[i].icon_index, c->icon, sizeof(c->icon))) // a KN class: ui/img/classes/ (nettspend.h)
-            snprintf(c->icon, sizeof(c->icon), "textures/classes/icon_%d.png", classes[i].icon_index);
+        snprintf(c->icon, sizeof(c->icon), "textures/classes/icon_%d.png", classes[i].icon_index);
         // updateClassPreview: every loadout weapon's name; the icon is the last one's preview
         // (weaponConfig.src, the Bomb's cosmetics/3_default)
         c->loadout_count = 0;
@@ -439,6 +438,8 @@ static void menu_build_classes(void) {
             c->loadout_ids[c->loadout_count] = w;
             c->loadout_names[c->loadout_count++] = weapons[w]->name ? weapons[w]->name : "";
             if (w == 12) snprintf(c->preview, sizeof(c->preview), "textures/previews/cosmetics/3_default.png");
+            else if (nettspend_weapon_kind(w)) // KrunkNative Nettspend: the page's own previews (ui/img/kn, ui_loadout.c's)
+                snprintf(c->preview, sizeof(c->preview), "img/kn/preview_%s.png", nettspend_weapon_kind(w) == NETTSPEND_WEAPON_DRANK ? "drank" : "money_spread");
             else if (weapons[w]->src) snprintf(c->preview, sizeof(c->preview), "textures/previews/weapons/%s.png", weapons[w]->src);
         }
     }

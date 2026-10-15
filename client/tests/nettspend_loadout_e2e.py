@@ -15,6 +15,11 @@ backend with KRUNKNATIVE_AUDIO_LOG so every play is logged):
   5. firing the Drank plays the stream splash (kn_drank_splash) and not the pour; a reload plays the
      pour up (kn_drank_pour once + kn_drank_reload) and not Krunker's reload_1 / reload_2; a Money
      Spread shot plays kn_money_throw.
+  6. no "Unknown" anywhere for weapons 67 / 68 (user, 2026-10-14: "purple drank and money spread
+     appear as unknown item"): the Loadout window, the kill feed after a Drank kill and a Money
+     Spread kill (each row with the icon_kn_* art) and the Object Manager's Weapons tiles show the
+     real names and art, and the HTML engine misses no Nettspend image (KRUNKNATIVE_HTML_IMAGE_LOG:
+     icon_kn_*, the img/kn previews, the class icon_16).
 The weapon ids are read from shared/include/weapons.h (WEAPON_ID_DRANK / WEAPON_ID_MONEY_SPREAD).
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL; KRUNKNATIVE_EGL_DEVICE picks it).
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
@@ -68,6 +73,8 @@ MENU_SCRIPT = """0 menu
 4810 text @sec .custContainer:not([onclick]) .settLabel
 4820 nodes @secpick .custContainer[onclick*="showWindow(20)"]
 4830 wsel @menu
+4840 grep @loadunk Unknown [id=menuWindow]
+4850 nodes @previews .custContainer img[src*="img/kn/preview_"]
 5200 quit
 """
 
@@ -95,6 +102,41 @@ GAME_SCRIPT = """0 menu
 """
 
 
+# A Nettspend kills a placed bot with the Drank, then another with the Money Spread (smite: one hit
+# kills; 8 units away, inside the Money Spread's fan), then opens the Object Manager.
+FEED_SCRIPT = """0 menu
+1500 call showWindow 3
+2500 call selectClass 16
+4300 play
+5500 pose -343 -143 -28 0 0
+5600 con smite
+5700 con bot_stop on
+5800 con bot_place
+6000 pose -343 -143 -20 0 0
+6100 mdown left
+7100 mup left
+7300 nodes @feeddrank [id=killFeed] .weaponChatIcon[src*="icon_kn_drank"]
+7310 grep @feedunk1 Unknown [id=killFeed]
+7400 down E
+7450 up E
+7600 pose -343 -143 -28 0 0
+7800 con bot_place
+8000 pose -343 -143 -20 0 0
+9200 mdown left
+9217 mup left
+9700 mdown left
+9717 mup left
+10000 nodes @feedmoney [id=killFeed] .weaponChatIcon[src*="icon_kn_money"]
+10010 grep @feedunk2 Unknown [id=killFeed]
+10100 call showWindow 100
+10700 nodes @omicons .knOmIcon[src*="textures/weapons/icon_kn_"]
+10710 grep @omunk Unknown .knOmGrid
+10720 text @omdrank [id=knOmW%d] .knOmName
+10730 text @ommoney [id=knOmW%d] .knOmName
+10800 quit
+"""
+
+
 def run(tag, script_text, timeout=240):
     work = os.path.join(WORK, tag)
     cfg = os.path.join(work, "cfg")
@@ -107,7 +149,7 @@ def run(tag, script_text, timeout=240):
     env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": cfg, "XDG_STATE_HOME": os.path.join(work, "state"),
                 "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_UPDATES_URL": "off", "KRUNKNATIVE_INPUT_SCRIPT": script,
                 "KRUNKNATIVE_FIXED_DELTA": str(FRAME_MS), "KRUNKNATIVE_AUDIO_BACKEND": "null", "KRUNKNATIVE_AUDIO_LOG": "1",
-                "KRUNKNATIVE_WINDOW_SIZE": "1280x720"})
+                "KRUNKNATIVE_WINDOW_SIZE": "1280x720", "KRUNKNATIVE_HTML_IMAGE_LOG": "1"})
     with open(log, "w") as out:
         p = subprocess.Popen(["stdbuf", "-oL", f"{BUILD}/client_bin", "--offline", "assets/maps/kanji.json"], stdout=out,
                              stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env, start_new_session=True)
@@ -131,6 +173,21 @@ def states(log):
     return re.findall(r"\[input_script\] state t=(\d+) slot=(\d+)/(\d+) weapon=(.*?) menu=.*? ammo=(-?\d+) .*? reload=([\d.]+) ", log)
 
 
+def grep_hits(log, label):
+    m = re.search(r"\[input_script\] grep t=\d+ @%s needle=\S+ n=(\d+) hits=(\d+)" % re.escape(label), log)
+    return (int(m.group(1)), int(m.group(2))) if m else (0, -1)
+
+
+def nodes_match(log, label):
+    m = re.search(r"\[input_script\] nodes t=\d+ @%s elements=\d+ match=(\d+)" % re.escape(label), log)
+    return int(m.group(1)) if m else -1
+
+
+def kn_image_misses(log):
+    """image-miss lines (KRUNKNATIVE_HTML_IMAGE_LOG=1) for the Nettspend art"""
+    return [line for line in log.splitlines() if line.startswith("image-miss") and re.search(r"icon_kn_|img/kn/|classes/icon_16", line)]
+
+
 def menu_scenario():
     log = run("menu", MENU_SCRIPT)
     m = re.search(r"\[input_script\] rects t=\d+ @cards n=(\d+)", log)
@@ -148,7 +205,13 @@ def menu_scenario():
     check("the class's secondary has no Select Secondary button", bool(m) and m.group(1) == "0", m.group(0) if m else "no nodes line")
     m = re.search(r"\[input_script\] wsel t=\d+ @menu who=preview slot=0 .*?\bw=(\d+)", log)
     check("the live class preview holds the Purple Drank", bool(m) and int(m.group(1)) == DRANK, m.group(0) if m else "no wsel line")
-    if not results[-1] or not all(results[-6:]):
+    n, hits = grep_hits(log, "loadunk")
+    check("the Loadout window says no \"Unknown\" for the Nettspend's weapons", n == 1 and hits == 0, f"n={n} hits={hits}")
+    previews = nodes_match(log, "previews")
+    check("the Loadout tiles show the Drank's and the Money Spread's previews", previews == 2, f"{previews} img/kn previews")
+    misses = kn_image_misses(log)
+    check("no Nettspend image is missing in the menu", not misses, "; ".join(misses[:3]))
+    if not all(results[-9:]):
         print("  log:", os.path.join(WORK, "menu", "client.log"))
 
 
@@ -187,9 +250,36 @@ def game_scenario():
         print("  log:", os.path.join(WORK, "game", "client.log"))
 
 
+def feed_scenario():
+    log = run("feed", FEED_SCRIPT % (DRANK, MONEY))
+    rows = nodes_match(log, "feeddrank")
+    check("a Drank kill's feed row shows the icon_kn_drank art", rows >= 1, f"{rows} rows")
+    n, hits = grep_hits(log, "feedunk1")
+    check("the kill feed says no \"Unknown\" after the Drank kill", n == 1 and hits == 0, f"n={n} hits={hits}")
+    rows = nodes_match(log, "feedmoney")
+    check("a Money Spread kill's feed row shows the icon_kn_money art", rows >= 1, f"{rows} rows")
+    n, hits = grep_hits(log, "feedunk2")
+    check("the kill feed says no \"Unknown\" after the Money Spread kill", n == 1 and hits == 0, f"n={n} hits={hits}")
+    icons = nodes_match(log, "omicons")
+    check("the Object Manager's Drank / Money Spread tiles use the icon_kn_* art", icons == 2, f"{icons} tiles")
+    n, hits = grep_hits(log, "omunk")
+    check("the Object Manager's Weapons tiles say no \"Unknown\"", n >= 1 and hits == 0, f"n={n} hits={hits}")
+    n, drank = text_of(log, "omdrank")
+    _, money = text_of(log, "ommoney")
+    check("the Object Manager names them", drank == "Purple Drank" and money == "Money Spread", f"{drank!r} {money!r}")
+    misses = kn_image_misses(log)
+    check("no Nettspend image is missing in the game (HUD, kill feed, Object Manager)", not misses, "; ".join(misses[:3]))
+    for icon in ("icon_kn_drank", "icon_kn_money"):
+        check(f"{icon} sits next to Krunker's weapon icons (ui/textures/weapons) and the death card's (ui/img/death-ui)",
+              os.path.exists(f"ui/textures/weapons/{icon}.png") and os.path.exists(f"ui/img/death-ui/{icon}.png"))
+    if not all(results[-10:]):
+        print("  log:", os.path.join(WORK, "feed", "client.log"))
+
+
 try:
     menu_scenario()
     game_scenario()
+    feed_scenario()
 finally:
     if all(results) and os.environ.get("KN_KEEP_WORK") is None:
         shutil.rmtree(WORK, ignore_errors=True)

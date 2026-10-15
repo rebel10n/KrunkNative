@@ -307,8 +307,9 @@ static const ClassConfig infiltrator = {
 // drank.h): not a Krunker class. Purple Drank (WEAPON_ID_DRANK) as the primary, Money Spread
 // (WEAPON_ID_MONEY_SPREAD) always as the secondary (kn_secondary: no Select Secondary pick), the
 // knife. A Triggerman baseline (100 health in 6 segments, regen 0.1, speed 1.05, no wall jump,
-// throwChrg 0.8) with the Triggerman's colours in purple and cash green. custom_only / no_comp:
-// custom games only, never comp (player_spawn falls back to the Triggerman), never a bot's pick.
+// throwChrg 0.8) with the Triggerman's colours in purple and cash green. Open to everyone: every
+// lobby (public, custom, comp, the offline sandbox) and the bots (user, 2026-10-14: "THE NETtspend
+// class should be available to all").
 // icon_index 16 = textures/classes/icon_16.png (client asset); no face store item, no speech lines.
 static const ClassConfig nettspend = {
     .name = "Nettspend",
@@ -319,8 +320,6 @@ static const ClassConfig nettspend = {
     .kn_secondary = WEAPON_ID_MONEY_SPREAD + 1,
     .secondary = 1,
     .wall_jump = 0,
-    .custom_only = 1,
-    .no_comp = 1,
     .colors = {0xA77860, 0x7B2CBF, 0x4A1A7A, 0x282828, 0x3FAF5A, 0x2E1047},
     .health = 100,
     .health_segments = 6,

@@ -8,8 +8,8 @@
 // in them (puddle_slow 0.55), the reload is a 1.4 s "pour-up" (long enough for the viewmodel's
 // pour, the scream and the "DRANK DRANK DRANK" line, client/), and each pour-up has a 4% chance
 // (laced_chance, authority-rolled, NET_EXT_KN_LACED) to lace the pourer for 8 s (laced_ms).
-// Magazine: 40 sips (a cup; the Piss's 999 never reloaded), rate 60 ms. No model yet: the Piss's
-// hose (WeaponStream.hose_*) stands in until the client's cup (player_mesh.c, keyed on the id).
+// Magazine: 40 sips (a cup; the Piss's 999 never reloaded), rate 60 ms. No model: the client
+// draws a white styrofoam double cup keyed on the id (client/src/nettspend_vfx.c), never the hose.
 static const WeaponStream k_drank_stream = {
     .color = 0x7b2cbf, // purple (the Piss: mustard #ffd231)
     .particles = 7,
@@ -38,7 +38,7 @@ static const WeaponStream k_drank_stream = {
 
 const Weapon g_drank = {
     .name = "Purple Drank",
-    .src = NULL, // no model: the hose (WeaponStream.hose_*) until the client's double cup
+    .src = NULL, // no model: the client's double cup (the hose_* fields are unused)
     .icon = "icon_kn_drank", // textures/weapons/icon_kn_drank.png (client asset)
 
     .no_spread = 1,
@@ -84,7 +84,6 @@ const Weapon g_drank = {
 
     .sound = "kn_drank_pour", // the pour / splash (assets/sound/kn_drank_pour.mp3, client asset), at most every 220 ms like the Piss's spray
     .type = 0,
-    .tint = 0x7b2cbf, // Weapon.tint: the viewmodel / pickup colour x once there is a model (the hose keeps the skin colour)
     .no_comp = 1,
     .custom_only = 1, // never a random / onlyGoodWeapons pick
     .stream = &k_drank_stream,

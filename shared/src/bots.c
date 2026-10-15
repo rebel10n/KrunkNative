@@ -672,10 +672,10 @@ static int bot_alloc_uid(Game *game) {
 static int bot_class_allowed(const Game *game, const int index) {
     // NextBotManager.isBotClassAllowed: no Rocketeer (7). KrunkNative: no Runner (9, knife only) either,
     // nor v7.1.4's hidden Survivor (14: its Build Tool never fires outside build modes, WP-B).
-    // KrunkNative classes (the Nettspend, ClassConfig.custom_only) are a player's choice, never a bot's.
+    // KrunkNative's Nettspend is open to bots like everyone else.
     // Krunker Strike: only its own classes (flavor_rules.h; base: every class)
     return index >= 0 && (size_t) index < game->class_count && index != 7 && index != 9 && index != CLASS_ID_SURVIVOR &&
-           game->classes[index].loadout && !game->classes[index].custom_only && flavor_class_allowed(index);
+           game->classes[index].loadout && flavor_class_allowed(index);
 }
 
 static int bot_random_class(const Game *game) {
@@ -691,8 +691,8 @@ static int bot_random_secondary(const Game *game) {
     int list[32], n = 0;
     for (size_t i = 0; i < game->weapon_count && n < 32; i++) {
         const Weapon *w = game->weapons[i];
-        // KrunkNative weapons (WEAPON_ID_KN_BASE..: the Money Spread) are never a bot's roll
-        if (w && w->secondary && !w->melee && (int) i != WEAPON_ID_PISTOL && i < WEAPON_ID_KN_BASE) list[n++] = (int) i;
+        // KrunkNative weapons too (the Money Spread); never the KN tools
+        if (w && w->secondary && !w->melee && !w->kn_tool && !w->kn_physgun && (int) i != WEAPON_ID_PISTOL) list[n++] = (int) i;
     }
     if (!n || bot_chance(0.55)) return WEAPON_ID_PISTOL;
     return list[bot_rand_int(0, n - 1)];

@@ -133,9 +133,6 @@ void player_spawn(Player *player) {
     if (player->class_index < 0 || player->class_index >= (int) class_count) {
         player->class_index = 0;
     }
-    // KrunkNative classes (the Nettspend, shared.h ClassConfig.custom_only / no_comp): the gate
-    // of a customOnly / noComp weapon on the class (game_class_allowed); elsewhere the Triggerman
-    if (!game_class_allowed(player->game, player->class_index)) player->class_index = 0;
 
     const ClassConfig *class_config = &classes[player->class_index];
     int loadout[3] = {1, WEAPON_ID_KNIFE, WEAPON_ID_KNIFE};
@@ -153,8 +150,11 @@ void player_spawn(Player *player) {
     // per account) and noComp ones stay out of comp lobbies (`!this.noComp || !game.isComp`).
     const int ranked = player->game->config.comp;
     const int custom = game_config_is_custom(player->game) && !ranked;
+    // A class-bound secondary (the Nettspend's Money Spread) is the class's, not a pick: no gate, so
+    // the class plays the same in every lobby (doc/v7/decisions.md "Nettspend class").
+    const int bound = fixed_secondary >= 0 && picked_secondary == fixed_secondary;
     const int secondary_index = picked_secondary >= 0 && picked_secondary < (int) weapon_count && weapons[picked_secondary] && weapons[picked_secondary]->secondary &&
-        (!weapons[picked_secondary]->custom_only || custom) && !(ranked && weapons[picked_secondary]->no_comp)
+        (bound || ((!weapons[picked_secondary]->custom_only || custom) && !(ranked && weapons[picked_secondary]->no_comp)))
         ? picked_secondary : WEAPON_ID_PISTOL < (int) weapon_count ? WEAPON_ID_PISTOL : -1;
     const int melee_index = WEAPON_ID_KNIFE < (int) weapon_count ? WEAPON_ID_KNIFE : primary_index;
 

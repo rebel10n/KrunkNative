@@ -107,8 +107,8 @@ void comp_ui_refresh(Client *client) {
     // the class picker: grey + lock when the team's slots of a class are taken
     const int limited = game->config.limit_classes;
     const size_t class_count = game->class_count ? game->class_count : CLASS_COUNT;
-    for (size_t c = 0; c < class_count && c < GAME_CONFIG_CLASS_LIMITS; c++) {
-        const int limit = game->config.class_limits[c];
+    for (size_t c = 0; c < class_count; c++) {
+        const int limit = comp_lobby_class_limit(game, (int) c);
         if (limited && !limit) continue;
         const int taken = limited ? comp_lobby_class_count(game, my_team, (int) c) : 0;
         const int full = limited && taken >= limit;
@@ -173,9 +173,10 @@ void comp_ui_round(Client *client) {
     StrBuf sb = {0};
     const int limited = game->config.limit_classes;
     const size_t class_count = game->class_count ? game->class_count : CLASS_COUNT;
-    for (size_t c = 0; c < class_count && c < GAME_CONFIG_CLASS_LIMITS; c++) {
+    // KrunkNative's Nettspend (16) is offered too (comp_lobby_class_limit: 1 a team past classLim15)
+    for (size_t c = 0; c < class_count; c++) {
         if (!class_offered(game, (int) c)) continue;
-        const int limit = game->config.class_limits[c];
+        const int limit = comp_lobby_class_limit(game, (int) c);
         if (limited && !limit) continue;
         sb_appendf(&sb, "<div class='cmpClassLck' style='display:none;' id='cmpClassLck%zu'><span class='material-icons' style='font-size:70px;color:#fff;vertical-align:top;'>lock</span></div>"
                         "<div class='compClassPItm' onmouseenter='SOUND.play(`tick_0`,0.1)' onclick='SOUND.play(`reload_3`,0.09);playSelect(0.03);selectClass(%zu)'>"

@@ -1032,7 +1032,8 @@ static void local_shot(Client *client, Player *me) {
         distance -= VFX_HIT_PULLBACK;
         const vec3 hit = v3_add(origin, v3_scale(direction, distance));
 
-        if (object) {
+        // Nettspend: a bill leaves no dust puff (8 per throw: a grey cloud at the feet); the burst is its effect
+        if (object && !money) {
             float normal_yaw, normal_pitch;
             impact_angles(object, hit, &normal_yaw, &normal_pitch);
             spawn_impact(hit, normal_yaw, normal_pitch);

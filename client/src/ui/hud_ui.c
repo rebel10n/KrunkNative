@@ -71,7 +71,6 @@ void hud_ui_hit(Client*, int kill);
 #include <string.h>
 #include <ruleset.h>
 #include <hud_v10.h>
-#include <nettspend.h> // KN-only weapon icon art (ui/img/weapons/)
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #endif
@@ -348,8 +347,7 @@ static const char *hud_weapon_icon_src(const Weapon *slot, const int can_throw, 
         snprintf(path, sizeof(path), "textures/melee/icon_%d.png", melee_icon);
         html_dom_asset_url(path, out, size);
     } else if (slot && slot->melee && can_throw) snprintf(out, size, "textures/melee/icon_0.png");
-    else if (!nettspend_weapon_icon_src(slot ? slot->icon : NULL, out, size)) // KN-only art (nettspend.h): ui/img/weapons/
-        snprintf(out, size, "textures/weapons/%s.png", slot && slot->icon ? slot->icon : "icon_0");
+    else snprintf(out, size, "textures/weapons/%s.png", slot && slot->icon ? slot->icon : "icon_0");
     return out;
 }
 
@@ -1057,15 +1055,10 @@ static void hud_feed_row_html(const int chat, const char *killer, const int kill
         hb_append(out, size, &len, "<img style='opacity:0.7;margin-right:%dpx;' class='meleeChatIcon' src='textures/melee/icon_0.png' />",
                   FEED_MELEE_PAD);
     } else if (weapon_icon && weapon_icon[0]) {
-        char kn_src[96]; // KN-only art (nettspend.h): ui/img/weapons/<stem>.png instead of textures/weapons/
-        hb_append(out, size, &len, "<img style='opacity:0.7;margin-right:%dpx;' class='weaponChatIcon' src='", hud_feed_icon_pad(weapon_icon));
-        if (nettspend_weapon_icon_src(weapon_icon, kn_src, sizeof(kn_src))) hb_append(out, size, &len, "%s", kn_src);
-        else {
-            hb_append(out, size, &len, "textures/weapons/");
-            hb_append_escaped(out, size, &len, weapon_icon);
-            hb_append(out, size, &len, ".png");
-        }
-        hb_append(out, size, &len, "' />");
+        hb_append(out, size, &len, "<img style='opacity:0.7;margin-right:%dpx;' class='weaponChatIcon' src='textures/weapons/",
+                  hud_feed_icon_pad(weapon_icon));
+        hb_append_escaped(out, size, &len, weapon_icon);
+        hb_append(out, size, &len, ".png' />");
         if (headshot) hb_append(out, size, &len, "<img class='headShotChatIcon' src='img/headshot_0.png'>");
     } else {
         hb_append(out, size, &len, " "); // unknown weapon (no weaponConfig icon): keep the names apart

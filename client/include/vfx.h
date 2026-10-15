@@ -35,7 +35,8 @@ void vfx_remote_shot(Client*, const Player *shooter, vec3 hit, int has_normal, f
 // from its hose along its view, ending about where the stream stopped (`hit`).
 void vfx_remote_stream_shot(Client*, const Player *shooter, const WeaponStream *stream, vec3 hit);
 // Nettspend Money Spread (nettspend.h): another player's throw (NET_PACKET_SHOT of the Money
-// Spread, on top of vfx_remote_shot's pellet tracer): the burst of bills from its hands.
+// Spread, on top of vfx_remote_shot's pellet tracer): the burst of bills from its hands, once per throw
+// (the caller sends it with the throw's first ray only: one NET_PACKET_SHOT per bill).
 void vfx_remote_money_spread(Client*, const Player *shooter);
 // 88.js effect(x, y, z, yaw, pitch, 0): impact puffs plus the bullet hole (index.js g8
 // spawns it at a projectile's end with yaw = pitch = 0).

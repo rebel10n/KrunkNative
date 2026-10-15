@@ -42,4 +42,8 @@ void comp_lobby_send_all(Game*, int uid);
 void comp_lobby_apply(Game*, const NetCompLobbyPacket*);
 // Count of active entries on `team` with class `class_index` (the comp menu's "n/limit").
 int comp_lobby_class_count(const Game*, int team, int class_index);
+// limitClasses: the slots a team has for `class_index` (classLim<i>). KrunkNative classes past Krunker's
+// classLim0..15 (the Nettspend) have no classLim: every slot of the team (tmSize + 1) may take them, so
+// the class is open to all in comp (doc/v7/decisions.md "Nettspend class").
+int comp_lobby_class_limit(const Game*, int class_index);
 void comp_lobby_free(Game*);

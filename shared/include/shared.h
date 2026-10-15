@@ -755,10 +755,6 @@ typedef struct {
     unsigned char no_sleeve:1;  // noSleeve: no arm sleeves on the viewmodel
     unsigned char leap:1;       // leap: melee lunge
     unsigned char back_slide:1; // bkSlid
-    // KrunkNative classes (doc/v7/decisions.md "Nettspend class"): gated like a customOnly / noComp
-    // weapon (player_spawn falls back to class 0), never a bot's pick
-    unsigned char custom_only:1; // custom games only (game_config_is_custom, not comp)
-    unsigned char no_comp:1;     // not in comp / ranked lobbies
     int kn_secondary;           // KrunkNative: weapon id + 1 the class always carries as its secondary (0 = the Select Secondary pick)
     int colors[6];
     int health;

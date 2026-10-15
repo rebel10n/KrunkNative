@@ -130,6 +130,8 @@
 //   100 nodes @label .skinCard   log the page's element count and how many match the selector
 //   100 text @label #contjump    log the first match's text, value and checked state: "[input_script]
 //                                text t=100 @label n=1 checked=0 value= text=K" (settings / binds tests)
+//   100 grep @label Unknown [id=killFeed]  how many matches' text contains the word (case-insensitive):
+//                                "[input_script] grep t=100 @label needle=Unknown n=1 hits=0"
 //   100 glyphs @label #menuWindow  log how many characters every match's rendered text draws without a glyph
 //                                (tofu, html_dom_missing_glyphs) and the first such code point: "[input_script]
 //                                glyphs t=100 @label n=1 missing=0 first=-" (localisation tests: i18n_e2e.py)
@@ -169,6 +171,7 @@
 #include <frame_target.h>
 #include <math.h>
 #include <stdio.h>
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -251,7 +254,7 @@ static void script_load(void) {
         if (!strcmp(e->cmd, "con") || script_probe(e->cmd) || !strcmp(e->cmd, "type") || !strcmp(e->cmd, "om") ||
             !strcmp(e->cmd, "call") || !strcmp(e->cmd, "setscroll") || !strcmp(e->cmd, "hit") || !strcmp(e->cmd, "ft") ||
             !strcmp(e->cmd, "nodes") || !strcmp(e->cmd, "rects") || !strcmp(e->cmd, "clicksel") || !strcmp(e->cmd, "wsel") ||
-            !strcmp(e->cmd, "text") || !strcmp(e->cmd, "glyphs") || !strcmp(e->cmd, "locale") || !strcmp(e->cmd, "page")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
+            !strcmp(e->cmd, "text") || !strcmp(e->cmd, "grep") || !strcmp(e->cmd, "glyphs") || !strcmp(e->cmd, "locale") || !strcmp(e->cmd, "page")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
             while (*rest == ' ' || *rest == '\t') rest++;
             snprintf(e->arg, sizeof(e->arg), "%s", rest);
             for (size_t len = strlen(e->arg); len && (e->arg[len - 1] == '\n' || e->arg[len - 1] == '\r' || e->arg[len - 1] == ' '); len--) e->arg[len - 1] = 0;
@@ -549,6 +552,26 @@ static void script_run(Client *client, const ScriptEvent *e) {
         folded[k] = 0;
         fprintf(stderr, "[input_script] text t=%.0f %s n=%d checked=%d value=%s text=%s\n", g_script.time, label, n,
                 el ? html_dom_get_checked(el) : 0, value, folded);
+    } else if (!strcmp(e->cmd, "grep")) {
+        // grep @label <needle> <selector>: how many matches' textContent contains the needle
+        // (case-insensitive; "Unknown" labels on the KN weapons' tiles and feed rows)
+        char label[64] = "", needle[64] = "", sel[192] = "";
+        sscanf(e->arg, "%63s %63s %191[^\n]", label, needle, sel);
+        HtmlElem els[96];
+        const int n = html_ui_available() && sel[0] ? html_dom_query_all(0, sel, els, 96) : 0;
+        int hits = 0;
+        char *text = malloc(65536);
+        for (int i = 0; text && i < n && i < 96; i++) {
+            html_dom_get_text(els[i], text, 65536);
+            for (char *c = text; *c; c++) *c = (char) tolower((unsigned char) *c);
+            char low[64];
+            size_t k = 0;
+            for (; needle[k] && k + 1 < sizeof(low); k++) low[k] = (char) tolower((unsigned char) needle[k]);
+            low[k] = 0;
+            if (low[0] && strstr(text, low)) hits++;
+        }
+        free(text);
+        fprintf(stderr, "[input_script] grep t=%.0f %s needle=%s n=%d hits=%d\n", g_script.time, label, needle, n, hits);
     } else if (!strcmp(e->cmd, "glyphs")) {
         char label[64] = "", sel[192] = "";
         sscanf(e->arg, "%63s %191[^\n]", label, sel);

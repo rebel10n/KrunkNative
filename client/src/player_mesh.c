@@ -1209,26 +1209,29 @@ void player_generate_meshes(Player *player, const int render_you) {
                 // (KN: hose_view from the hand, see player_trigger_hand); third person on the lower body at
                 // the pelvis (hosePelvisHeight - legHeight up, -(hosePelvisForward - hoseLength / 2)
                 // forward). Shown and hidden with the slot like any weapon mesh.
-                if (kn_kind == NETTSPEND_WEAPON_DRANK) {
-                    // Nettspend Purple Drank: the lean cup in the trigger hand (the hose's place: arms->hose, so
-                    // the stream leaves and the pour lands at its rim, player_hose_points) and, first person
-                    // only, the pour-up bottle as weapon_left (hidden outside a reload, nettspend_pose_pour);
-                    // third person at the pelvis like the hose
-                    Mesh *cup = nettspend_cup_mesh();
-                    if (cup) {
-                        snprintf(sel_model, sizeof(sel_model), "cup");
-                        snprintf(sel_tex, sizeof(sel_tex), "#%06x", (unsigned) NETTSPEND_DRANK_COLOR);
-                        if (third_person) {
-                            const float forward = weapon->stream ? weapon->stream->pelvis_forward : 1.25f;
-                            const float height = weapon->stream ? weapon->stream->pelvis_height : 4.55f;
-                            cup->transform.parent = player_mesh->body_anchor;
-                            cup->transform.position = (vec3) {0.0f, height - game_constants.leg_height, -(forward - NETTSPEND_CUP_LENGTH * 0.5f)};
-                            cup->transform.rotation = (vec3) {(float) M_PI * 0.5f, 0.0f, 0.0f}; // rim up
-                        } else {
-                            const float mirror = player->left_handed ? -1.0f : 1.0f;
-                            const vec3 hand = player_trigger_hand(arms, player->left_handed);
-                            cup->transform.parent = &arms->anchor;
-                            nettspend_pose_cup_rest(cup, hand, mirror);
+                if (kn_kind) {
+                    // Nettspend (nettspend.h): the Purple Drank's white styrofoam double cup or the Money Spread's
+                    // fan of cash, procedural, in the trigger hand on every model (first person, third person,
+                    // the menu's class preview), never the table's stand-ins (the hose, a model). It takes the
+                    // hose's place (arms->hose) so the stream leaves from the rim / the bills from the fan's top
+                    // (player_hose_points). First person only: the Drank's pour-up bottle as weapon_left,
+                    // hidden outside a reload (nettspend_pose_pour).
+                    const int drank = kn_kind == NETTSPEND_WEAPON_DRANK;
+                    Mesh *held = drank ? nettspend_cup_mesh() : nettspend_cash_mesh();
+                    if (held) {
+                        const float mirror = player->left_handed ? -1.0f : 1.0f;
+                        const vec3 hand = player_trigger_hand(arms, player->left_handed);
+                        snprintf(sel_model, sizeof(sel_model), "%s", drank ? "cup" : "cash");
+                        snprintf(sel_tex, sizeof(sel_tex), "#%06x", (unsigned) (drank ? NETTSPEND_FOAM_COLOR : NETTSPEND_CASH_COLOR));
+                        held->transform.parent = &arms->anchor;
+                        if (drank) nettspend_pose_cup_rest(held, hand, mirror);
+                        else nettspend_pose_cash(held, hand, mirror);
+                        if (third_person) { // the body's hand is seen from afar: a bigger cup / fan, its base kept on the fist
+                            const float len = drank ? NETTSPEND_CUP_LENGTH : NETTSPEND_CASH_LENGTH;
+                            held->transform.scale = (vec3) {NETTSPEND_TP_SCALE, NETTSPEND_TP_SCALE, NETTSPEND_TP_SCALE};
+                            held->transform.position.y += (NETTSPEND_TP_SCALE - 1.0f) * len * 0.5f - 0.2f;
+                        }
+                        if (drank && !third_person) {
                             Mesh *bottle = nettspend_bottle_mesh();
                             if (bottle) {
                                 bottle->transform.parent = &arms->anchor;
@@ -1236,30 +1239,9 @@ void player_generate_meshes(Player *player, const int render_you) {
                                 arms->weapon_left = bottle;
                             }
                         }
-                        arms->weapon_right = cup;
-                        arms->hose = cup;
-                        arms->hose_length = NETTSPEND_CUP_LENGTH;
-                    }
-                } else if (kn_kind == NETTSPEND_WEAPON_MONEY_SPREAD) {
-                    // Nettspend Money Spread: the cash stack on the trigger hand (first person), at the pelvis
-                    // in third person; its top is the "tip" (arms->hose) the bills burst from (vfx.c)
-                    Mesh *cash = nettspend_cash_mesh();
-                    if (cash) {
-                        snprintf(sel_model, sizeof(sel_model), "cash");
-                        snprintf(sel_tex, sizeof(sel_tex), "#%06x", (unsigned) NETTSPEND_CASH_COLOR);
-                        if (third_person) {
-                            cash->transform.parent = player_mesh->body_anchor;
-                            cash->transform.position = (vec3) {0.0f, 4.55f - game_constants.leg_height, -(1.25f - NETTSPEND_CASH_LENGTH * 0.5f)};
-                            cash->transform.rotation = (vec3) {(float) M_PI * 0.5f, 0.0f, 0.0f};
-                        } else {
-                            const float mirror = player->left_handed ? -1.0f : 1.0f;
-                            const vec3 hand = player_trigger_hand(arms, player->left_handed);
-                            cash->transform.parent = &arms->anchor;
-                            nettspend_pose_cash(cash, hand, mirror);
-                        }
-                        arms->weapon_right = cash;
-                        arms->hose = cash;
-                        arms->hose_length = NETTSPEND_CASH_LENGTH;
+                        arms->weapon_right = held;
+                        arms->hose = held;
+                        arms->hose_length = drank ? NETTSPEND_CUP_LENGTH : NETTSPEND_CASH_LENGTH;
                     }
                 } else if (weapon->stream && !weapon->src) {
                     const WeaponStream *stream = weapon->stream;

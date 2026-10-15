@@ -4,6 +4,7 @@
 // host config (config.hostTypes[1] + tmSize / specSlots / allowSpect), and v7 game.js
 // lobbyPlayers / syncLobbyP / updLobbyP / canSpawn with the "cd" / "cda" packets.
 // Run from the repository root: ./<build>/comp_ranked_test
+#include <ruleset.h>
 #include <shared.h>
 #include <game_config.h>
 #include <comp_lobby.h>
@@ -271,6 +272,12 @@ static void test_comp_lobby(void) {
     CHECK(comp_lobby_class_count(&game, 1, 0) == 1 && comp_lobby_class_count(&game, 2, 0) == 1, "class counts per team");
     CHECK(comp_lobby_spawn_block(&game, 1) == NULL, "team + class: may spawn");
     CHECK(!comp_lobby_update(&game, 1, 'c', 0) && !comp_lobby_update(&game, 1, 'x', 1), "no change / unknown key");
+    // KrunkNative's Nettspend (class 16): past classLim0..15 it has no classLim, so every slot of the team (2 in this 2v2) may take it
+    CHECK(comp_lobby_class_limit(&game, CLASS_ID_NETTSPEND) == 2 && comp_lobby_class_limit(&game, 7) == 0, "classLim: the Nettspend a team's size (2), the Rocketeer 0");
+    CHECK(comp_lobby_update(&game, 1, 'c', CLASS_ID_NETTSPEND) && comp_lobby_get(&game, 1)->class_index == CLASS_ID_NETTSPEND, "the Nettspend in comp");
+    CHECK(comp_lobby_update(&game, 2, 'c', CLASS_ID_NETTSPEND), "a team mate takes it too: no cap below the team's size");
+    CHECK(!comp_lobby_update(&game, 1, 'c', (int) rules_class_count()), "no class past the table");
+    CHECK(comp_lobby_update(&game, 1, 'c', 0), "back to the Triggerman");
     // the authority's roster team (ranked): no selTeam / size check
     comp_lobby_set_team(&game, 2, 2);
     CHECK(comp_lobby_get(&game, 2)->team == 2, "set_team");

@@ -1,6 +1,7 @@
 // Krunker v7.1.4 comp lobby (shared/include/comp_lobby.h): game.js lobbyPlayers, syncLobbyP,
 // updLobbyP, canSpawn.
 #include <comp_lobby.h>
+#include <ruleset.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -101,16 +102,24 @@ int comp_lobby_class_count(const Game *game, const int team, const int class_ind
     return count;
 }
 
+int comp_lobby_class_limit(const Game *game, const int class_index) {
+    if (!game || class_index < 0) return 0;
+    if (class_index >= GAME_CONFIG_CLASS_LIMITS) return game->config.team_size + 1; // KrunkNative: no classLim, the team's size
+    return game->config.class_limits[class_index];
+}
+
 int comp_lobby_update(Game *game, const int uid, const char key, const int value) {
     CompLobbyEntry *entry = find(game, uid);
     if (!entry || !game->config.comp) return 0;
     const GameConfig *cfg = &game->config;
     if (key == 'c') {
         if (value == entry->class_index) return 0;
-        if (value < 0 || value >= GAME_CONFIG_CLASS_LIMITS) return 0;
-        // limitClasses: classLim<value> slots per team; a class with no limit is locked
+        // any class of the table: Krunker's 16 and KrunkNative's Nettspend (16), open to comp too
+        if (value < 0 || value >= (int) (game->class_count ? game->class_count : rules_class_count())) return 0;
+        // limitClasses: classLim<value> slots per team; a class with no limit is locked. classLim0..15 are
+        // Krunker's; a KrunkNative class past them gets 1 a team (a rankedClasses class's default)
         if (cfg->limit_classes) {
-            const int limit = cfg->class_limits[value];
+            const int limit = comp_lobby_class_limit(game, value);
             if (!limit) return 0;
             int taken = 0;
             const CompLobby *l = game->comp_lobby;

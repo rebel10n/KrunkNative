@@ -2,8 +2,8 @@
 // shared/include/drank.h) through procInputs frames (player_proc_input) on an authority game, the
 // way server_bin and the offline sandbox run it:
 //   the tables (ids 67 / 68 after the Physics Gun, class 16 after Krunker's, flags, Object Manager
-//   tiles and `give` names); a Nettspend spawn carries Drank + Money Spread + knife in a custom
-//   game and falls back to the Triggerman elsewhere / in comp; the Drank's stream (60 ms, 4 a
+//   tiles and `give` names); a Nettspend spawn carries Drank + Money Spread + knife in every lobby
+//   (custom, public, comp) and bots may play it; the Drank's stream (60 ms, 4 a
 //   hit) and purple puddles (10 dps, 6 s) that slow the players standing in them (x0.55, not the
 //   owner, replicated to a client's copy); the Money Spread's 8 bills a throw fading with
 //   distance; the pour-up's laced roll (4% a reload on the seeded pcg32 stream: deterministic,
@@ -12,6 +12,7 @@
 #include <shared.h>
 #include <object_manager.h>
 #include <drank.h>
+#include <bots.h>
 #include <net_ext.h>
 #include <piss.h>
 #include <game_config.h>
@@ -120,6 +121,7 @@ static void test_tables(const Game *game) {
     CHECK(m && !strcmp(m->name, "Money Spread") && m->secondary && m->type == 1 && m->custom_only && m->no_comp && !m->stream, "the Money Spread: a customOnly / noComp secondary");
     CHECK(m && m->shots == 8 && m->custom_spread_count == 8 && m->damage == 7.0f && m->damage_drop == 7.0f && m->range == 60.0f && m->ammo == 5,
           "8 bills of 7, fading to 0 at 60, 5 a magazine");
+    CHECK(d && m && !d->src && !m->src && !d->tint && !m->tint, "no stand-in models or tints (the client draws the cup and the cash)");
     CHECK(!rules_weapon(WEAPON_ID_PISS)->stream->puddle_slow && !rules_weapon(WEAPON_ID_PISS)->stream->laced_chance, "the Piss neither slows nor laces");
     CHECK(object_manager_weapon_listed(WEAPON_ID_DRANK) && object_manager_weapon_listed(WEAPON_ID_MONEY_SPREAD) &&
           object_manager_weapon_allowed(WEAPON_ID_DRANK) && object_manager_weapon_allowed(WEAPON_ID_MONEY_SPREAD), "Object Manager Weapons tiles");
@@ -137,36 +139,55 @@ static void test_tables(const Game *game) {
     const ClassConfig *n = &classes[CLASS_ID_NETTSPEND];
     CHECK(!strcmp(n->name, "Nettspend") && n->icon_index == 16 && n->loadout && n->loadout[0] == WEAPON_ID_DRANK && n->secondary &&
           n->kn_secondary == WEAPON_ID_MONEY_SPREAD + 1, "the Nettspend: Drank, always the Money Spread, icon 16");
-    CHECK(n->custom_only && n->no_comp && !n->hide && n->health == 100 && n->speed == 1.05f && !n->wall_jump, "customOnly / noComp, a Triggerman baseline");
+    CHECK(!n->hide && n->health == 100 && n->speed == 1.05f && !n->wall_jump, "open to everyone, a Triggerman baseline");
     int others = 0;
-    for (int c = 0; c < CLASS_COUNT; c++) others |= classes[c].custom_only || classes[c].no_comp || classes[c].kn_secondary;
+    for (int c = 0; c < CLASS_COUNT; c++) others |= classes[c].kn_secondary;
     CHECK(!others, "Krunker's classes are untouched");
     CHECK(!strcmp(game->classes[CLASS_ID_NETTSPEND].name, "Nettspend"), "in the game's class table");
 }
 
+static int nettspend_loadout_ok(const Player *p) {
+    return p->class_index == CLASS_ID_NETTSPEND && p->loadout_size == 3 && p->loadout[0] == WEAPON_ID_DRANK && p->loadout[1] == WEAPON_ID_MONEY_SPREAD &&
+           p->loadout[2] == WEAPON_ID_KNIFE;
+}
+
 static void test_class_spawn(Game *custom, Game *pub) {
-    printf("Spawns: Drank + Money Spread + knife in a custom game, the Triggerman elsewhere...\n");
+    printf("Spawns: Drank + Money Spread + knife in every lobby (custom, public, comp)...\n");
     Player *p = add_player(custom, 10, CLASS_ID_NETTSPEND);
     p->secondary_index = 15; // a Sawed Off pick changes nothing
     player_spawn(p);
-    CHECK(p->class_index == CLASS_ID_NETTSPEND && p->loadout_size == 3 && p->loadout[0] == WEAPON_ID_DRANK && p->loadout[1] == WEAPON_ID_MONEY_SPREAD &&
-          p->loadout[2] == WEAPON_ID_KNIFE, "custom: %d weapons (%d %d %d)", p->loadout_size, p->loadout[0], p->loadout[1], p->loadout[2]);
+    CHECK(nettspend_loadout_ok(p), "custom: %d weapons (%d %d %d)", p->loadout_size, p->loadout[0], p->loadout[1], p->loadout[2]);
     CHECK(p->weapon == &g_drank && p->ammo[0] == 40 && p->ammo[1] == 5 && p->max_health == 100, "holds the Drank (40), the Money Spread (5), 100 health");
 
-    CHECK(game_class_allowed(custom, CLASS_ID_NETTSPEND) && game_class_allowed(custom, 0) && !game_class_allowed(custom, CLASS_TABLE_COUNT) &&
-          !game_class_allowed(pub, CLASS_ID_NETTSPEND) && game_class_allowed(pub, CLASS_ID_INFILTRATOR), "game_class_allowed: custom yes, public no, Krunker's always");
-    custom->config.comp = 1; // comp: noComp
-    CHECK(!game_class_allowed(custom, CLASS_ID_NETTSPEND), "not in comp");
+    custom->config.comp = 1; // comp: the class and its bound Money Spread stay (noComp gates picks, not the class's own)
     player_spawn(p);
-    CHECK(p->class_index == 0 && p->loadout[0] == 1, "comp: the Triggerman (class %d, weapon %d)", p->class_index, p->loadout[0]);
+    CHECK(nettspend_loadout_ok(p), "comp: still the Nettspend (class %d, %d %d)", p->class_index, p->loadout[0], p->loadout[1]);
     custom->config.comp = 0;
-    p->class_index = CLASS_ID_NETTSPEND; // the pick (the server re-applies the client's before each spawn, net.c)
-    player_spawn(p);
-    CHECK(p->class_index == CLASS_ID_NETTSPEND, "custom again");
     stand(p, 500.0f, 500.0f, 0.0f); // out of the way of the stream tests
 
     Player *q = add_player(pub, 11, CLASS_ID_NETTSPEND);
-    CHECK(q->class_index == 0 && q->loadout[0] == 1 && slot_of(q, WEAPON_ID_MONEY_SPREAD) < 0, "a public game: the Triggerman (class %d)", q->class_index);
+    CHECK(nettspend_loadout_ok(q), "a public game: the Nettspend too (class %d, %d %d)", q->class_index, q->loadout[0], q->loadout_size > 1 ? q->loadout[1] : -1);
+    Player *r = add_player(pub, 12, 0); // a Triggerman picking the Money Spread in a public game: still the customOnly gate
+    r->secondary_index = WEAPON_ID_MONEY_SPREAD;
+    player_spawn(r);
+    CHECK(r->class_index == 0 && slot_of(r, WEAPON_ID_MONEY_SPREAD) < 0, "another class can't pick the Money Spread in public (secondary %d)", r->loadout[1]);
+
+    // bots: a forced Nettspend bot keeps it, and the random class roll reaches it
+    BotAssignments a;
+    char *argv[] = {"class=16", "roam=off"};
+    bot_parse_assignments(2, argv, &a);
+    GameBot *bot = !a.error[0] ? game_bots_add(pub, &a, NULL, 0.0f) : NULL;
+    CHECK(bot && bot->class_index == CLASS_ID_NETTSPEND, "a class=16 bot plays the Nettspend (%d, %s)", bot ? bot->class_index : -2, a.error);
+    game_bots_remove_all(pub);
+    char *argv2[] = {"roam=off"};
+    bot_parse_assignments(1, argv2, &a);
+    int rolled = 0;
+    for (int i = 0; i < 400 && !rolled; i++) {
+        GameBot *b = game_bots_add(pub, &a, NULL, 0.0f);
+        rolled = b && b->class_index == CLASS_ID_NETTSPEND;
+        game_bots_remove_all(pub);
+    }
+    CHECK(rolled, "the bots' random class roll includes the Nettspend");
 }
 
 static void test_drank_stream(Game *game, Player *p, Player *target) {

@@ -33,16 +33,10 @@ typedef enum {
 NettspendWeapon nettspend_weapon_kind(int weapon_id);
 
 // ---- KrunkNative-only icon art ----
-// Krunker's icons are imported content (assets/textures/..., gitignored); KN-only art is tracked in
-// the page tree instead: a weapon icon stem starting "icon_kn_" (the Drank's icon_kn_drank, the
-// Money Spread's icon_kn_money) is ui/img/weapons/<stem>.png (the HUD rack and the kill feed; the
-// death card's ui/img/death-ui/<stem>.png sits with Krunker's), a class icon_index >= CLASS_COUNT
-// (Nettspend: 16) is ui/img/classes/icon_<n>.png. Both write the page URL into `out` and return
-// it, or return NULL for Krunker's own (the caller's usual textures/... path). tools/nettspend/icons.py
-// draws them.
-#define NETTSPEND_ICON_PREFIX "icon_kn_"
-const char *nettspend_weapon_icon_src(const char *icon, char *out, size_t size);
-const char *nettspend_class_icon_src(int icon_index, char *out, size_t size);
+// Next to Krunker's in the page tree (tools/nettspend/icons.py draws them), so the usual URLs find
+// them: ui/textures/weapons/icon_kn_drank.png / icon_kn_money.png (Weapon.icon: HUD rack, kill feed,
+// Object Manager, comp), ui/img/death-ui/<the same stems>.png (the death card) and
+// ui/textures/classes/icon_16.png (the Nettspend's ClassConfig.icon_index).
 
 // ---- the weapon meshes (player_mesh.c, prefab.c pickups) ----
 // The cup / cash stack local frame follows the Piss's hose: the long axis is z, the "tip" (the cup's
@@ -50,12 +44,17 @@ const char *nettspend_class_icon_src(int icon_index, char *out, size_t size);
 // (0, 0, -NETTSPEND_*_LENGTH / 2), so player_hose_points works unchanged with arms->hose set to it.
 #define NETTSPEND_CUP_LENGTH 1.0f     // the double cup's height (z extent; the fist is ~0.8 thick)
 #define NETTSPEND_CUP_RADIUS 0.34f    // its rim radius (the base is narrower)
+#define NETTSPEND_FOAM_COLOR 0xf6f5f1 // the styrofoam: matte off-white
+#define NETTSPEND_FOAM_GLOW 0.22f     // the cup's emissive lift (white in the shade too)
+#define NETTSPEND_CASH_GLOW 0.35f     // the bills' green emissive lift (green in the shade too)
+#define NETTSPEND_TP_SCALE 1.8f      // third person / the class preview: the cup and the cash at this size (the body's fist is far)
 #define NETTSPEND_BOTTLE_LENGTH 1.3f  // the pour-up bottle's height (mouth at -length / 2)
-#define NETTSPEND_CASH_LENGTH 0.5f    // the cash stack's height (z extent, bills stacked along z)
+#define NETTSPEND_CASH_LENGTH 0.9f    // the Money Spread's height (z extent: the brick in the fist, the fan of bills above)
+#define NETTSPEND_CASH_FAN 5          // bills in the fan
 #define NETTSPEND_DRANK_COLOR 0x7b2cbf // the lean (#7b2cbf): the cup's liquid; the stream / puddles use WeaponStream.color
 #define NETTSPEND_CASH_COLOR 0x2f9e5b  // a bill's face
 #define NETTSPEND_CASH_BAND_COLOR 0xf1e6b8 // the stack's paper band / a bill's edge
-// The lean cup (double styrofoam cup, purple liquid), the pour-up bottle, the cash stack. The
+// The lean cup (a white styrofoam double cup, purple lean), the pour-up bottle, the fanned cash. The
 // caller owns the mesh (mesh_fini); the geometries are cached like the hose's and never freed.
 Mesh *nettspend_cup_mesh(void);
 Mesh *nettspend_bottle_mesh(void);

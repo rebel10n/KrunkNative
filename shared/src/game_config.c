@@ -1553,18 +1553,6 @@ int game_apply_map_config(Game *game, const Map *map) {
     return 1;
 }
 
-// KrunkNative classes (shared.h ClassConfig.custom_only / no_comp, the Nettspend; doc/v7/decisions.md
-// "Nettspend class"): the gate of v7's customOnly / noComp weapons on a class. Krunker's own
-// classes are always allowed (their class-list and hide rules are elsewhere).
-int game_class_allowed(const Game *game, const int class_index) {
-    const size_t count = game && game->class_count ? game->class_count : rules_class_count();
-    const ClassConfig *classes = game && game->classes ? game->classes : rules_classes();
-    if (class_index < 0 || (size_t) class_index >= count) return 0;
-    const int ranked = game && game->config.comp;
-    const int custom = game_config_is_custom(game) && !ranked;
-    return !(classes[class_index].custom_only && !custom) && !(ranked && classes[class_index].no_comp);
-}
-
 int game_config_class_for(const Game *game, const int class_index) {
     if (!game || game->config.class_list_count <= 0) return class_index;
     for (int i = 0; i < game->config.class_list_count; i++) {

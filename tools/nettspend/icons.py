@@ -3,16 +3,18 @@
 
   python3 -I tools/nettspend/icons.py            (run from the repository root; needs Pillow)
 
-  ui/img/weapons/icon_kn_drank.png, icon_kn_money.png   the Purple Drank's / Money Spread's HUD rack
+  ui/textures/weapons/icon_kn_drank.png, icon_kn_money.png   the Purple Drank's / Money Spread's HUD rack
                                                         and kill-feed icons (Weapon.icon stems), 256x128
                                                         white silhouettes on transparency like Krunker's
                                                         textures/weapons/icon_<n>.png
   ui/img/death-ui/icon_kn_drank.png, icon_kn_money.png  the same for the death card (./img/death-ui/<stem>.png)
-  ui/img/classes/icon_16.png                            the Nettspend class icon (ClassConfig.icon_index 16),
+  ui/textures/classes/icon_16.png                        the Nettspend class icon (ClassConfig.icon_index 16),
                                                         8x8 pixel art like textures/classes/icon_<n>.png
+  ui/img/kn/preview_drank.png                            the Drank's loadout-tile preview: the white styrofoam
+                                                        double cup in colour, 256x256 (the 3D cup's look)
 
-Krunker's icon trees under assets/ are imported content (gitignored), so the KN art is tracked in the
-page tree and nettspend_weapon_icon_src / nettspend_class_icon_src route the page URLs there.
+They sit next to Krunker's own icons in the page tree (ui/textures/weapons, ui/textures/classes,
+ui/img/death-ui), so every page URL built from Weapon.icon / ClassConfig.icon_index finds them.
 """
 import os
 import sys
@@ -93,6 +95,42 @@ def money():
     return im
 
 
+def drank_preview():
+    """The Drank's weapon-tile preview (ui/img/kn/preview_drank.png, 256x256 in colour): the white
+    styrofoam double cup of the 3D model (client/src/nettspend_vfx.c cup_geometry): two stacked matte
+    off-white cups, the outer one's rolled lip a step under the inner one's, the purple lean just under
+    the top rim, as seen a little from above."""
+    S = 256
+    im = Image.new("RGBA", (S * SS, S * SS), CLEAR)
+    d = ImageDraw.Draw(im)
+    foam, shade, lip = (246, 245, 241, 255), (222, 220, 214, 255), (255, 255, 253, 255)
+    seam = (190, 187, 180, 255)
+    lean, lean_edge, lean_shine = (123, 44, 191, 255), (74, 26, 122, 255), (155, 91, 214, 255)
+    cx = 128
+    top_y, base_y = 52, 226
+    top_w, base_w = 98, 66                 # half widths at the rim and at the base
+    def half(y):
+        return base_w + (top_w - base_w) * (y - base_y) / (top_y - base_y)
+    seam_y = top_y + 34                   # where the inner cup's wall meets the outer cup's rim
+    # the body: a trapezoid with moulded ridges (every 22 units a slightly darker band)
+    d.polygon([(s(cx - half(top_y)), s(top_y)), (s(cx + half(top_y)), s(top_y)), (s(cx + half(base_y)), s(base_y)), (s(cx - half(base_y)), s(base_y))], fill=foam)
+    for y in range(base_y - 26, top_y, -34):
+        d.rectangle([s(cx - half(y)), s(y), s(cx + half(y)), s(y + 2)], fill=shade)
+    # the outer cup's rolled lip under the inner cup's rim, a seam above it
+    d.rounded_rectangle([s(cx - half(seam_y) - 4), s(seam_y - 4), s(cx + half(seam_y) + 4), s(seam_y + 8)], radius=s(4), fill=lip)
+    d.rectangle([s(cx - half(seam_y) - 2), s(seam_y + 8), s(cx + half(seam_y) + 2), s(seam_y + 11)], fill=seam)
+    # the inner cup's rolled rim at the top
+    d.rounded_rectangle([s(cx - top_w - 5), s(top_y - 9), s(cx + top_w + 5), s(top_y + 6)], radius=s(6), fill=lip)
+    # the lean: a dark edge ellipse, the purple surface, a soft highlight off-centre
+    d.ellipse([s(cx - top_w + 4), s(top_y - 2), s(cx + top_w - 4), s(top_y + 26)], fill=lean_edge)
+    d.ellipse([s(cx - top_w + 9), s(top_y + 1), s(cx + top_w - 9), s(top_y + 22)], fill=lean)
+    d.ellipse([s(cx - 46), s(top_y + 6), s(cx - 14), s(top_y + 12)], fill=lean_shine)
+    # the body's shadow edge on the right, so the cup reads as a solid
+    d.polygon([(s(cx + half(top_y) - 14), s(top_y + 10)), (s(cx + half(top_y) - 2), s(top_y + 10)), (s(cx + half(base_y) - 2), s(base_y - 4)),
+               (s(cx + half(base_y) - 12), s(base_y - 4))], fill=shade)
+    return im.resize((S, S), Image.LANCZOS)
+
+
 def class_icon():
     """8x8: the lean cup (purple) with its straw, a cash-green base pixel row."""
     P = (123, 44, 191, 255)   # #7b2cbf, the lean
@@ -120,10 +158,14 @@ def class_icon():
 def main():
     for stem, draw in (("icon_kn_drank", drank), ("icon_kn_money", money)):
         im = draw()
-        finish(im, os.path.join(ROOT, "ui", "img", "weapons", stem + ".png"))
+        finish(im, os.path.join(ROOT, "ui", "textures", "weapons", stem + ".png"))
         finish(im, os.path.join(ROOT, "ui", "img", "death-ui", stem + ".png"))
-    path = os.path.join(ROOT, "ui", "img", "classes", "icon_16.png")
+    path = os.path.join(ROOT, "ui", "textures", "classes", "icon_16.png")
     class_icon().save(path, optimize=True)
+    print(f"wrote {os.path.relpath(path, ROOT)}")
+    path = os.path.join(ROOT, "ui", "img", "kn", "preview_drank.png")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    drank_preview().save(path, optimize=True)
     print(f"wrote {os.path.relpath(path, ROOT)}")
     return 0
 

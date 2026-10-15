@@ -443,8 +443,11 @@ static void events_shot(Client *client, const NetShotPacket *packet) {
     const Weapon *weapon = w >= 0 && (size_t) w < client->game.weapon_count && client->game.weapons ? client->game.weapons[w] : NULL;
     if (weapon && weapon->stream) vfx_remote_stream_shot(client, shooter, weapon->stream, hit); // KrunkNative Piss: the spray, no tracer
     else {
-        if (nettspend_weapon_kind(w) == NETTSPEND_WEAPON_MONEY_SPREAD) vfx_remote_money_spread(client, shooter); // Nettspend: the bills
-        vfx_remote_shot(client, shooter, hit, packet->has_normal, packet->normal_yaw, packet->normal_pitch, packet->trail);
+        // Nettspend: the Money Spread sends one SHOT per bill (combat_send_shot runs per ray); the burst is the throw's,
+        // so it comes with the first ray only (`first` 1 / 2), and a bill leaves no dust puff (no has_normal)
+        const int money = nettspend_weapon_kind(w) == NETTSPEND_WEAPON_MONEY_SPREAD;
+        if (money && packet->first) vfx_remote_money_spread(client, shooter);
+        vfx_remote_shot(client, shooter, hit, !money && packet->has_normal, packet->normal_yaw, packet->normal_pitch, packet->trail);
     }
     if (packet->first) sound_events_remote_shot(client, shooter, packet->first == 2);
 }

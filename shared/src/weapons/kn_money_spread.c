@@ -1,3 +1,4 @@
+#include <stddef.h>
 #include <weapons.h>
 
 // KrunkNative Money Spread (WEAPON_ID_MONEY_SPREAD): not a Krunker v7.1.4 weapon (doc/v7/decisions.md
@@ -7,12 +8,13 @@
 // hsMlt 1), fading to 0 at 60 units (dmgDrop 7 over `range`), 5 throws a magazine, 420 ms
 // between throws, a 180 ms swap and a 1.2 s reload. The Sawed Off (sawed_off.c) was the shape:
 // a wide close-range secondary that trades damage for reach. No knockback (physPow 0).
-// Model: the Pistol's, tinted cash green, until the client's cash stack (player_mesh.c, keyed on
-// the id); the bill-flutter burst and the sound are client assets.
+// No model (`src` NULL): the client draws a fan of cash keyed on the id (client/src/nettspend_vfx.c,
+// player_mesh.c), as it draws the bill-flutter burst; the sound is a client asset. (The first
+// version reused the Pistol's model at this table's scale 1, about 3000x the Pistol's 0.000316: the
+// camera sat inside a giant green pistol, and a throw's recoil swung it like a changing sky.)
 const Weapon g_money_spread = {
     .name = "Money Spread",
-    .src = "weapon_3",       // the Pistol's model (stand-in) ...
-    .tint = 0x3faf5a,        // ... in cash green (Weapon.tint on the viewmodel and pickups)
+    .src = NULL,             // the client's fan of cash (no model)
     .icon = "icon_kn_money", // textures/weapons/icon_kn_money.png (client asset)
 
     .secondary = 1,

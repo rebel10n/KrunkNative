@@ -31,7 +31,6 @@
 #include <string.h>
 #include <ruleset.h>
 #include <cosmetics.h> // cosmetics_route, cosmetics_attach_index (ui_loadout_look)
-#include <game_config.h> // game_class_allowed (KrunkNative custom_only / no_comp classes)
 
 // ---------------------------------------------------------------- Krunker tables
 
@@ -725,18 +724,6 @@ static void gen_tab_class(StrBuf *out) {
         level = level + 1 > 1 ? level + 1 : 1;
         char icon[256];
         snprintf(icon, sizeof(icon), "%s", c->icon);
-        // KrunkNative: a custom_only / no_comp class (the Nettspend) outside a custom game or in a comp
-        // lobby is greyed like a level lock (game_class_allowed, what player_spawn enforces)
-        if (!game_class_allowed(&ui->client->game, c->index)) {
-            sb_appendf(out, "<div class=\"classCard\" onmouseenter=\"playTick()\" >\n\t\t\t\t\t\t<div class=\"classImgH\">\n\t\t\t\t\t\t\t<img loading=\"lazy\" style=\"image-rendering:pixelated\" class=\"classImgC\" src=\"%s\">\n\t\t\t\t\t\t\t<div class='classHP'>%d<span style='color: #868484;font-size: 12px;'> HP</span></div>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t\t<div class=\"className\">",
-                       icon, c->hp);
-            sb_append_esc(out, c->name ? c->name : "");
-            sb_append(out, "</div>\n\t\t\t\t\t\t<div class=\"classWeap\">");
-            sb_append_esc(out, c->weapon ? c->weapon : "");
-            sb_appendf(out, "</div>\n\t\t\t\t\t\t<div class='classXPBar'>\n\t\t\t\t\t\t\t<div class='clsXPBarC' style='width:calc(%d%% - 8px)'></div>\n\t\t\t\t\t\t\t<div class='clsXPBarV'>%d / %d</div>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t\t<div class='classLvl'>Lvl %d</div>\n\t\t\t\t\t\t<div class='lockedClass'>\n\t\t\t\t\t\t\t<span class='material-icons' style='font-size: 70px;color:#fff;'>\n\t\t\t\t\t\t\tlock\n\t\t\t\t\t\t\t</span>\n\t\t\t\t\t\t\t<span class='lockedClassText'>%s</span>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t</div>",
-                       pct, (int) (xp - lo), (int) (hi - lo), level, ui->client->game.config.comp ? "Not in Competitive" : "Custom games only");
-            continue;
-        }
         const int open = class_unlocked(c->index);
         if (!open) { // v10: no onclick, the req line instead of the weapon, the lock over the card
             sb_appendf(out, "<div class=\"classCard\" onmouseenter=\"playTick()\" >\n\t\t\t\t\t\t<div class=\"classImgH\">\n\t\t\t\t\t\t\t<img loading=\"lazy\" style=\"image-rendering:pixelated\" class=\"classImgC\" src=\"%s\">\n\t\t\t\t\t\t\t<div class='classHP'>%d<span style='color: #868484;font-size: 12px;'> HP</span></div>\n\t\t\t\t\t\t</div>\n\t\t\t\t\t\t<div class=\"className\">",

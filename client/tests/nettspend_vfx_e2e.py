@@ -14,11 +14,22 @@ Two runs:
          pours, droplets logged), then `laced 8000` starts the laced visuals: after the fade-in the
          intensity is 1 and the frame differs from the steady one far more than two steady frames
          differ from each other, with a purple cast (a "laced-effect screenshot diff").
-  money: the cash stack is held, a throw bursts the bills from its drawn top (`[vfx] money burst` at
-         the probe's tip) with no muzzle flash, and the next frame differs from the rest frame.
+         The cup is the white styrofoam double cup (`wsel`: model=cup in the foam colour, never the
+         Piss's hose), and its wall shows as near-white pixels between the drawn rim and the fist.
+  money: the fan of cash is held (`wsel`: model=cash, no Pistol stand-in), a throw bursts the bills
+         from its drawn top (`[vfx] money burst` at the probe's tip) with no muzzle flash, and the next
+         frame differs from the rest frame. The sky stays the sky (user, 2026-10-14: "seems to change
+         the skybox"): a patch of open sky above the street keeps its colour from the frame before
+         the Money Spread came out (the class's rifle in hand) through holding it, the throw and the
+         recoil after it (the first version drew the Pistol's model ~3000x too big around the camera).
+  dust:  the money run aimed at the street's ground (`look 0 -0.9`): a throw leaves no grey dust cloud at
+         the feet (the Pistol's impact puffs, one per bill that hit the ground, were a cloud of their own):
+         the grey-white pixels of the ground box grow by no more than GREY_MAX_DELTA after the throw.
+  tp:    third person (`thirdperson`): the body holds the cup, then the cash (wsel tp=1 model=cup /
+         cash), never the hose.
 
 Frames are kept in WORK (printed): <run>_rest.png, drank_pour.png, drank_steady_a/b.png, drank_laced.png,
-money_throw.png; KN_TEST_KEEP=1 keeps the logs on success too. The weapon ids are read from
+money_base.png, money_throw.png, money_after_<ms>.png, tp_drank.png, tp_money.png; KN_TEST_KEEP=1 keeps the logs on success too. The weapon ids are read from
 shared/include/weapons.h (WEAPON_ID_DRANK / WEAPON_ID_MONEY_SPREAD).
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL; KRUNKNATIVE_EGL_DEVICE picks it) and Pillow.
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
@@ -54,6 +65,14 @@ BURST_RE = re.compile(r"\[vfx\] money burst (-?[\d.]+) (-?[\d.]+) (-?[\d.]+)")
 DROPS_RE = re.compile(r"\[vfx\] pour (-?[\d.]+) mouth")
 SHOT_RE = re.compile(r"\[vfx\] shot (\S+) scoped")
 MUZZLE_RE = re.compile(r"\[vfx\] muzzle")
+WSEL_RE = re.compile(r"\[input_script\] wsel t=\d+ @(\S+) who=me slot=(-?\d+) tp=(-?\d+) (.*)")
+SKY_BOX = (285, 5, 345, 70)  # open sky above the street at the pose below (640x360)
+SKY_MAX_SHIFT = 6.0          # mean RGB change of the sky patch allowed (recoil moves the view a little)
+FOAM_MIN = 165               # a "white" foam pixel: every channel at least this ...
+FOAM_SPREAD = 45             # ... and at most this far apart (not tinted)
+FOAM_PIXELS = 120            # near-white pixels the cup's wall shows at least (640x360)
+GREY_BOX = (180, 40, 460, 280)  # the ground in front of the player when aimed down (640x360)
+GREY_MAX_DELTA = 250         # grey-white pixels a throw may add there (a dust cloud adds ~800 on origin/main)
 
 
 def check(name, ok, detail=""):
@@ -88,7 +107,7 @@ def frames_between(start, end, cmd):
 def drank_script(work, weapon):
     shot = lambda name: f"{os.path.join(work, 'drank_' + name)}.png"
     lines = ["0 play", f"400 om add {weapon}", "1000 pose -343 -143 -28 0 0", "1450 state", f"1400 shot {shot('rest')}",
-             "1450 hose", "1500 mdown left", "1900 mup left"]
+             "1450 hose", "1460 wsel @drank", "1500 mdown left", "1900 mup left"]
     lines += frames_between(1500.0, 1900.0, "hose")
     # two steady frames a frame apart (the baseline of the frame diff), then the pour-up and the laced dose
     lines += [f"2200 shot {shot('steady_a')}", f"{2200 + FRAME_MS:.3f} shot {shot('steady_b')}",
@@ -98,11 +117,32 @@ def drank_script(work, weapon):
     return "\n".join(sorted(lines, key=lambda line: float(line.split()[0]))) + "\n"
 
 
+AFTER_MS = (50, 120, 200, 400)
+
+
+def dust_script(work, weapon):
+    shot = lambda name: f"{os.path.join(work, 'dust_' + name)}.png"
+    lines = ["0 play", "300 pose -343 -143 -28 0 0", f"800 om add {weapon}", "1000 pose -343 -143 -28 0 0", "1050 look 0 -0.9",
+             "1100 look 0 0", f"1400 shot {shot('held')}", "1500 mdown left", "1516 mup left", f"1550 shot {shot('fire50')}",
+             f"1620 shot {shot('fire120')}", "1900 quit"]
+    return "\n".join(sorted(lines, key=lambda line: float(line.split()[0]))) + "\n"
+
+
 def money_script(work, weapon):
     shot = lambda name: f"{os.path.join(work, 'money_' + name)}.png"
-    lines = ["0 play", f"400 om add {weapon}", "1000 pose -343 -143 -28 0 0", "1450 state", f"1400 shot {shot('rest')}",
-             "1500 mdown left", f"{1500 + FRAME_MS:.3f} mup left", f"{1500 + FRAME_MS:.3f} shot {shot('throw')}", "1800 quit"]
+    # the base frame: the same pose with the class's rifle, before the Money Spread comes out
+    lines = ["0 play", "300 pose -343 -143 -28 0 0", f"700 shot {shot('base')}", f"800 om add {weapon}", "1000 pose -343 -143 -28 0 0",
+             "1450 state", f"1400 shot {shot('rest')}", "1460 wsel @money",
+             "1500 mdown left", f"{1500 + FRAME_MS:.3f} mup left", f"{1500 + FRAME_MS:.3f} shot {shot('throw')}", "1900 quit"]
+    lines += [f"{1500 + ms} shot {shot('after_%d' % ms)}" for ms in AFTER_MS]
     lines += frames_between(1450.0, 1530.0, "hose")
+    return "\n".join(sorted(lines, key=lambda line: float(line.split()[0]))) + "\n"
+
+
+def tp_script(work, drank, money):
+    shot = lambda name: f"{os.path.join(work, 'tp_' + name)}.png"
+    lines = ["0 play", f"300 om add {drank}", "700 con thirdperson", "1000 pose -343 -143 -28 0 0", "1500 wsel @tpdrank",
+             f"1500 shot {shot('drank')}", f"1600 om add {money}", "2400 wsel @tpmoney", f"2400 shot {shot('money')}", "2500 quit"]
     return "\n".join(sorted(lines, key=lambda line: float(line.split()[0]))) + "\n"
 
 
@@ -143,6 +183,10 @@ def run(tag, text, timeout=240):
                 events.append(("pour", {"t": g[0], "strength": g[1], "mouth": g[2:5], "rim": g[5:8], "screen_mouth": g[8:10],
                                         "screen_rim": g[10:12]}))
                 continue
+            m = WSEL_RE.search(line)
+            if m:
+                events.append(("wsel", {"label": m.group(1), "slot": int(m.group(2)), "tp": int(m.group(3)), "sel": m.group(4)}))
+                continue
             for kind, rx in (("pour_none", POUR_NONE_RE), ("laced", LACED_RE), ("source", SOURCE_RE), ("burst", BURST_RE),
                              ("drops", DROPS_RE), ("shot", SHOT_RE), ("muzzle", MUZZLE_RE)):
                 m = rx.search(line)
@@ -174,6 +218,36 @@ def frame_diff(a, b):
     return sum(diff) / 3.0, (sb[2] - sb[1]) - (sa[2] - sa[1])
 
 
+def sky_shift(a, b):
+    """(mean RGB change of the sky patch, mean absolute per-pixel difference) between two frames"""
+    ia, ib = (Image.open(p).convert("RGB").crop(SKY_BOX) for p in (a, b))
+    ma, mb = ImageStat.Stat(ia).mean, ImageStat.Stat(ib).mean
+    return sum(abs(ma[i] - mb[i]) for i in range(3)) / 3.0, sum(ImageStat.Stat(ImageChops.difference(ia, ib)).mean) / 3.0
+
+
+def grey_pixels(path, box=GREY_BOX):
+    """near-white, untinted pixels in a box of the frame (a dust cloud's colour)"""
+    im = Image.open(path).convert("RGB").crop(box)
+    data = im.tobytes()
+    return sum(1 for i in range(0, len(data), 3) if min(data[i:i + 3]) > 150 and max(data[i:i + 3]) - min(data[i:i + 3]) < 30)
+
+
+def foam_pixels(path, rim, hand):
+    """near-white, untinted pixels in the box from the drawn rim down to the fist (window fractions)"""
+    im = Image.open(path).convert("RGB")
+    w, h = im.size
+    x0, x1 = int(min(rim[0], hand[0]) * w) - 40, int(max(rim[0], hand[0]) * w) + 40
+    y0, y1 = int(rim[1] * h) - 20, int(hand[1] * h) + 10
+    box = im.crop((max(0, x0), max(0, y0), min(w, x1), min(h, y1)))
+    data = box.tobytes()
+    pixels = (data[i:i + 3] for i in range(0, len(data), 3))
+    return sum(1 for r, g, b in pixels if min(r, g, b) >= FOAM_MIN and max(r, g, b) - min(r, g, b) <= FOAM_SPREAD)
+
+
+def wsel_of(events, label):
+    return next((e for kind, e in events if kind == "wsel" and e["label"] == label), None)
+
+
 def verify_drank(events):
     tag = "drank"
     probes = [e for kind, e in events if kind == "hose"]
@@ -184,6 +258,13 @@ def verify_drank(events):
     check(f"{tag}: the rim shows in the window, above the fist", in_window(still["screen_tip"]) and still["screen_tip"][1] < still["screen_hand"][1],
           f"rim at {still['screen_tip'][0]:.3f},{still['screen_tip'][1]:.3f}, hand at {still['screen_hand'][0]:.3f},{still['screen_hand'][1]:.3f}")
     check(f"{tag}: the rim is above the fist (world)", still["tip"][1] > still["hand"][1], f"rim y {still['tip'][1]:.3f}, hand y {still['hand'][1]:.3f}")
+    sel = wsel_of(events, "drank")
+    check(f"{tag}: the held model is the white styrofoam cup, not the hose", sel and "model=cup" in sel["sel"] and "#f6f5f1" in sel["sel"] and "hose" not in sel["sel"],
+          sel["sel"] if sel else "no wsel line")
+    rest = os.path.join(WORK, "drank", "drank_rest.png")
+    if os.path.exists(rest):
+        white = foam_pixels(rest, still["screen_tip"], still["screen_hand"])
+        check(f"{tag}: the cup's wall shows white (styrofoam) pixels", white >= FOAM_PIXELS, f"{white} near-white pixels (>= {FOAM_PIXELS})")
 
     last, worst, sprays, unmatched = None, 0.0, 0, 0
     for kind, e in events:
@@ -241,6 +322,9 @@ def verify_money(events):
     still = probes[0]
     check(f"{tag}: the stack's top shows in the window", in_window(still["screen_tip"]),
           f"top at {still['screen_tip'][0]:.3f},{still['screen_tip'][1]:.3f}")
+    sel = wsel_of(events, "money")
+    check(f"{tag}: the held model is the fan of cash (no Pistol stand-in)", sel and "model=cash" in sel["sel"] and "weapon_3" not in sel["sel"],
+          sel["sel"] if sel else "no wsel line")
     shots = [e for kind, e in events if kind == "shot"]
     check(f"{tag}: the throw is the cash stack's (no model)", shots and shots[0][0] == "cash", f"{[s[0] for s in shots]}")
     last, bursts, worst = None, 0, 0.0
@@ -259,6 +343,33 @@ def verify_money(events):
     if have:
         d, _ = frame_diff(rest, throw)
         check(f"{tag}: the bills show in the frame after the throw", d >= 0.5, f"{d:.2f} mean abs difference")
+    base = os.path.join(WORK, "money", "money_base.png")
+    frames = [("held", rest), ("throw", throw)] + [(f"+{ms} ms", os.path.join(WORK, "money", f"money_after_{ms}.png")) for ms in AFTER_MS]
+    if os.path.exists(base) and all(os.path.exists(p) for _, p in frames):
+        worst = max(((name,) + sky_shift(base, p) for name, p in frames), key=lambda t: t[1])
+        check(f"{tag}: the sky stays the sky while the Money Spread is held and thrown", worst[1] <= SKY_MAX_SHIFT,
+              f"worst {worst[0]}: sky colour moved {worst[1]:.2f} (pixels {worst[2]:.2f}), allowed {SKY_MAX_SHIFT}")
+    else:
+        check(f"{tag}: the sky frames were written", False)
+
+
+def verify_dust(events):
+    tag = "dust"
+    held, fire = (os.path.join(WORK, "dust", f"dust_{n}.png") for n in ("held", "fire50"))
+    if not (os.path.exists(held) and os.path.exists(fire)):
+        check(f"{tag}: the frames were written", False)
+        return
+    before, after = grey_pixels(held), grey_pixels(fire)
+    check(f"{tag}: a throw at the ground leaves no grey dust cloud", after - before <= GREY_MAX_DELTA,
+          f"grey-white pixels {before} held -> {after} after the throw (allowed +{GREY_MAX_DELTA})")
+
+
+def verify_tp(events):
+    tag = "tp"
+    for label, model in (("tpdrank", "cup"), ("tpmoney", "cash")):
+        sel = wsel_of(events, label)
+        check(f"{tag}: third person holds the {model}", sel and sel["tp"] == 1 and f"model={model}" in sel["sel"] and "hose" not in sel["sel"],
+              sel["sel"] if sel else "no wsel line")
 
 
 ids = weapon_ids()
@@ -266,6 +377,8 @@ print(f"weapon ids: Drank {ids['DRANK']}, Money Spread {ids['MONEY_SPREAD']}; fr
 try:
     verify_drank(run("drank", drank_script(os.path.join(WORK, "drank"), ids["DRANK"])))
     verify_money(run("money", money_script(os.path.join(WORK, "money"), ids["MONEY_SPREAD"])))
+    verify_dust(run("dust", dust_script(os.path.join(WORK, "dust"), ids["MONEY_SPREAD"])))
+    verify_tp(run("tp", tp_script(os.path.join(WORK, "tp"), ids["DRANK"], ids["MONEY_SPREAD"])))
 finally:
     if all(results) and not os.environ.get("KN_TEST_KEEP"):
         shutil.rmtree(WORK, ignore_errors=True)

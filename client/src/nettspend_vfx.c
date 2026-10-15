@@ -15,18 +15,6 @@ NettspendWeapon nettspend_weapon_kind(const int weapon_id) {
     return NETTSPEND_WEAPON_NONE;
 }
 
-const char *nettspend_weapon_icon_src(const char *icon, char *out, const size_t size) {
-    if (!icon || strncmp(icon, NETTSPEND_ICON_PREFIX, sizeof(NETTSPEND_ICON_PREFIX) - 1) || !out || !size) return NULL;
-    snprintf(out, size, "img/weapons/%s.png", icon);
-    return out;
-}
-
-const char *nettspend_class_icon_src(const int icon_index, char *out, const size_t size) {
-    if (icon_index < CLASS_COUNT || !out || !size) return NULL;
-    snprintf(out, size, "img/classes/icon_%d.png", icon_index);
-    return out;
-}
-
 // ---------------------------------------------------------------- geometry
 
 // A growing vertex-coloured mesh: positions + UVs (attribute 0 / 1, the `vertex` layout) and a
@@ -190,27 +178,53 @@ static Geometry *gb_upload(GeoBuilder *b) {
     return geometry;
 }
 
-#define CUP_SIDES 18
+#define CUP_SIDES 24
 
-// The lean cup: two nested styrofoam cups (the outer one's rim a little below the inner one's: the
-// "double cup"), a purple liquid surface just under the top rim. Axis z, rim at -length / 2.
+// A styrofoam wall from z0 (radius r0) to z1 (r1) in `bands` matte off-white bands, each band's
+// lower edge a slightly proud, slightly darker ring: the moulded ridges of a foam cup.
+static void gb_foam_wall(GeoBuilder *b, const float z0, const float r0, const float z1, const float r1, const int bands, const vec3 foam,
+                         const vec3 shade) {
+    for (int i = 0; i < bands; i++) {
+        const float t0 = (float) i / (float) bands, t1 = (float) (i + 1) / (float) bands;
+        const float za = z0 + (z1 - z0) * t0, zb = z0 + (z1 - z0) * t1;
+        const float ra = r0 + (r1 - r0) * t0, rb = r0 + (r1 - r0) * t1;
+        const float ridge = (zb - za) * 0.16f; // the ridge's height along the wall
+        gb_frustum(b, za, ra + 0.006f, shade, za + ridge, ra + 0.006f, shade, CUP_SIDES); // the ridge
+        gb_frustum(b, za + ridge, ra, i & 1 ? foam : rgb_scale(foam, 0.985f), zb, rb, foam, CUP_SIDES);
+    }
+}
+
+// The lean cup: a WHITE styrofoam double cup (two stacked foam cups: the outer one's rolled rim sits
+// a little below the inner one's and shows as a second lip), matte off-white with moulded ridges,
+// the purple lean just under the top rim. Axis z, base at +length / 2, rim at -length / 2.
 static Geometry *cup_geometry(void) {
     static Geometry *cached;
     if (cached) return cached;
     GeoBuilder b = {0};
-    const float h = NETTSPEND_CUP_LENGTH * 0.5f, rim = NETTSPEND_CUP_RADIUS, base = rim * 0.72f;
-    const float k = NETTSPEND_CUP_LENGTH / 0.62f; // the details were drawn on a 0.62 cup
-    const vec3 foam = rgb(0xf4f2f8), foam_dark = rgb(0xd8d3e4), lip = rgb(0xc9c3d8);
-    const vec3 lean = rgb(NETTSPEND_DRANK_COLOR);
-    // outer cup: base at +h, its rim 0.11 (x k) below the top
-    gb_frustum(&b, h, base, foam_dark, -h + 0.11f * k, rim - 0.008f * k, foam, CUP_SIDES);
-    gb_frustum(&b, -h + 0.11f * k, rim - 0.008f * k, foam, -h + (0.11f - 0.025f) * k, rim + 0.012f * k, lip, CUP_SIDES); // its lip
-    gb_frustum(&b, -h + (0.11f - 0.025f) * k, rim + 0.012f * k, lip, -h + (0.11f - 0.04f) * k, rim - 0.004f * k, foam, CUP_SIDES);
-    // inner cup: nested, its rim is the top
-    gb_frustum(&b, h - 0.09f * k, base * 1.02f, foam_dark, -h + 0.03f * k, rim, foam, CUP_SIDES);
-    gb_frustum(&b, -h + 0.03f * k, rim, foam, -h, rim + 0.014f * k, lip, CUP_SIDES); // the top lip
-    gb_disc(&b, h, base, foam_dark, CUP_SIDES, 0);                                   // the bottom
-    gb_disc(&b, -h + 0.055f * k, rim - 0.006f * k, lean, CUP_SIDES, 1);               // the lean
+    const float h = NETTSPEND_CUP_LENGTH * 0.5f, rim = NETTSPEND_CUP_RADIUS, base = rim * 0.7f;
+    const vec3 foam = rgb(NETTSPEND_FOAM_COLOR), shade = rgb(0xe9e7e1), lip = rgb(0xfdfdfb), bottom = rgb(0xdcdad3);
+    const vec3 lean = rgb(NETTSPEND_DRANK_COLOR), lean_edge = rgb(0x4a1a7a), lean_shine = rgb(0x9b5bd6);
+    // the outer cup: from the base to its own rim, 0.16 below the top, then its rolled lip
+    const float outer_top = -h + 0.16f * NETTSPEND_CUP_LENGTH;
+    const float outer_rim = base + (rim - base) * ((h - outer_top) / (2.0f * h)) + 0.012f;
+    gb_disc(&b, h, base + 0.01f, bottom, CUP_SIDES, 0);
+    gb_foam_wall(&b, h, base + 0.01f, outer_top, outer_rim, 6, foam, shade);
+    gb_frustum(&b, outer_top, outer_rim, lip, outer_top - 0.02f, outer_rim + 0.022f, lip, CUP_SIDES);   // the rolled lip
+    gb_frustum(&b, outer_top - 0.02f, outer_rim + 0.022f, lip, outer_top - 0.035f, outer_rim - 0.004f, shade, CUP_SIDES);
+    // the inner cup above it: its wall from inside the outer one up to the top, its rolled lip
+    gb_foam_wall(&b, outer_top + 0.06f, outer_rim - 0.01f, -h + 0.025f, rim, 2, foam, shade);
+    gb_frustum(&b, -h + 0.025f, rim, lip, -h, rim + 0.026f, lip, CUP_SIDES);
+    gb_frustum(&b, -h, rim + 0.026f, lip, -h + 0.012f, rim - 0.006f, shade, CUP_SIDES);
+    // the lean: a dark edge, the surface, a soft highlight off-centre
+    gb_disc(&b, -h + 0.07f, rim - 0.01f, lean_edge, CUP_SIDES, 1);
+    gb_disc(&b, -h + 0.069f, rim - 0.05f, lean, CUP_SIDES, 1);
+    if (gb_reserve(&b, 4, 6)) {
+        const float z = -h + 0.068f, cx = -rim * 0.3f, cy = rim * 0.25f, w = rim * 0.22f, d = rim * 0.1f;
+        const unsigned int v0 = gb_vertex(&b, (vec3) {cx - w, cy - d, z}, lean_shine), v1 = gb_vertex(&b, (vec3) {cx + w, cy - d, z}, lean_shine);
+        const unsigned int v2 = gb_vertex(&b, (vec3) {cx + w, cy + d, z}, lean_shine), v3 = gb_vertex(&b, (vec3) {cx - w, cy + d, z}, lean_shine);
+        gb_tri(&b, v0, v1, v2);
+        gb_tri(&b, v0, v2, v3);
+    }
     cached = gb_upload(&b);
     return cached;
 }
@@ -236,28 +250,35 @@ static Geometry *bottle_geometry(void) {
     return cached;
 }
 
-// The cash stack: a banded brick of bills plus three fanned bills on top. Bills are stacked along
-// z (a bill's face is the xy plane), the top at -length / 2.
+// The Money Spread: a fan of bills held up out of a banded brick of cash, like a hand of cards.
+// Local frame (the hose's convention): z is the long axis, the fan's top at -length / 2 (the "tip"
+// the bills burst from), the brick at +length / 2 in the fist; a bill's face is the xz plane (its
+// thickness along y), so the pose's rotation.x = PI / 2 turns the faces toward the camera.
 static Geometry *cash_geometry(void) {
     static Geometry *cached;
     if (cached) return cached;
     GeoBuilder b = {0};
-    const float h = NETTSPEND_CASH_LENGTH * 0.5f, k = NETTSPEND_CASH_LENGTH / 0.36f; // drawn on a 0.36 stack
-    const vec3 bill = rgb(NETTSPEND_CASH_COLOR), bill_dark = rgb_scale(rgb(NETTSPEND_CASH_COLOR), 0.8f), edge = rgb(NETTSPEND_CASH_BAND_COLOR);
-    const vec3 band = rgb(0xfaf6ea), band_ink = rgb(0x3b2a6b);
-    // the brick: x +-0.27 k (a bill's length), y +-0.115 k (its width), z from +h (bottom) to -h + 0.06 k
-    const float top = -h + 0.06f * k, bottom = h, half = (bottom - top) * 0.5f;
-    const vec3 brick_c = {0.0f, 0.0f, (top + bottom) * 0.5f};
-    gb_box(&b, brick_c, (vec3) {0.27f * k, 0.0f, 0.0f}, (vec3) {0.0f, 0.115f * k, 0.0f}, (vec3) {0.0f, 0.0f, half}, bill, edge);
-    // the paper band around its middle, with an ink stripe
-    gb_box(&b, brick_c, (vec3) {0.075f * k, 0.0f, 0.0f}, (vec3) {0.0f, 0.121f * k, 0.0f}, (vec3) {0.0f, 0.0f, half + 0.004f * k}, band, band);
-    gb_box(&b, brick_c, (vec3) {0.02f * k, 0.0f, 0.0f}, (vec3) {0.0f, 0.124f * k, 0.0f}, (vec3) {0.0f, 0.0f, half + 0.006f * k}, band_ink, band_ink);
-    // three fanned bills on top, each turned a little more about z
-    for (int i = 0; i < 3; i++) {
-        const float a = 0.22f * (float) (i + 1), c = cosf(a), s = sinf(a);
-        const vec3 centre = {0.02f * k * (float) i, -0.01f * k * (float) i, top - 0.012f * k * (float) (i + 1)};
-        gb_box(&b, centre, (vec3) {0.26f * k * c, 0.26f * k * s, 0.0f}, (vec3) {-0.11f * k * s, 0.11f * k * c, 0.0f}, (vec3) {0.0f, 0.0f, 0.006f * k},
-               i & 1 ? bill_dark : bill, edge);
+    const float h = NETTSPEND_CASH_LENGTH * 0.5f;
+    const vec3 bill = rgb(NETTSPEND_CASH_COLOR), bill_dark = rgb_scale(rgb(NETTSPEND_CASH_COLOR), 0.82f), edge = rgb(NETTSPEND_CASH_BAND_COLOR);
+    const vec3 seal = rgb(0xa8dcb5), band = rgb(0xfaf6ea), band_ink = rgb(0x3b2a6b);
+    // the brick in the fist: bills stacked along y, x +-0.2 (a bill's width), z from +h up 0.2
+    const vec3 brick = {0.0f, 0.0f, h - 0.1f};
+    gb_box(&b, brick, (vec3) {0.2f, 0.0f, 0.0f}, (vec3) {0.0f, 0.0f, 0.1f}, (vec3) {0.0f, 0.09f, 0.0f}, bill, edge);
+    gb_box(&b, brick, (vec3) {0.2f + 0.004f, 0.0f, 0.0f}, (vec3) {0.0f, 0.0f, 0.035f}, (vec3) {0.0f, 0.094f, 0.0f}, band, band);
+    gb_box(&b, brick, (vec3) {0.2f + 0.006f, 0.0f, 0.0f}, (vec3) {0.0f, 0.0f, 0.01f}, (vec3) {0.0f, 0.096f, 0.0f}, band_ink, band_ink);
+    // the fan: NETTSPEND_CASH_FAN bills pivoting about a point in the brick, each turned about y
+    const float pivot = h - 0.12f, reach = 0.36f, half_long = 0.3f, half_short = 0.13f;
+    for (int i = 0; i < NETTSPEND_CASH_FAN; i++) {
+        const float a = ((float) i - (float) (NETTSPEND_CASH_FAN - 1) * 0.5f) * 0.28f, c = cosf(a), s = sinf(a);
+        const vec3 up = {s, 0.0f, -c}, across = {c, 0.0f, s};
+        const float y = -0.06f + 0.014f * (float) i; // later bills nearer the camera (local +y)
+        const vec3 centre = {up.x * reach, y, pivot + up.z * reach};
+        const vec3 face = i & 1 ? bill_dark : bill;
+        gb_box(&b, centre, (vec3) {across.x * half_short, 0.0f, across.z * half_short}, (vec3) {up.x * half_long, 0.0f, up.z * half_long},
+               (vec3) {0.0f, 0.004f, 0.0f}, face, edge);
+        // the printed oval in the middle of the face (both sides)
+        gb_box(&b, centre, (vec3) {across.x * half_short * 0.55f, 0.0f, across.z * half_short * 0.55f},
+               (vec3) {up.x * half_long * 0.35f, 0.0f, up.z * half_long * 0.35f}, (vec3) {0.0f, 0.0055f, 0.0f}, seal, seal);
     }
     cached = gb_upload(&b);
     return cached;
@@ -279,7 +300,10 @@ static Mesh *colored_mesh(Geometry *geometry) {
 }
 
 Mesh *nettspend_cup_mesh(void) {
-    return colored_mesh(cup_geometry());
+    Mesh *mesh = colored_mesh(cup_geometry());
+    // styrofoam is white even in the shade: a little self-lighting keeps it white, not grey
+    if (mesh) ((BasicMaterial *) mesh->material)->emissive = (vec4) {1.0f, 1.0f, 1.0f, NETTSPEND_FOAM_GLOW};
+    return mesh;
 }
 
 Mesh *nettspend_bottle_mesh(void) {
@@ -287,19 +311,30 @@ Mesh *nettspend_bottle_mesh(void) {
 }
 
 Mesh *nettspend_cash_mesh(void) {
-    return colored_mesh(cash_geometry());
+    Mesh *mesh = colored_mesh(cash_geometry());
+    // the bills keep their green in the shade (a little green self-lighting)
+    if (mesh) {
+        const vec3 green = rgb(NETTSPEND_CASH_COLOR);
+        ((BasicMaterial *) mesh->material)->emissive = (vec4) {green.x, green.y, green.z, NETTSPEND_CASH_GLOW};
+    }
+    return mesh;
 }
 
 // ---------------------------------------------------------------- poses (first person)
 
-// The cup in the fist, rim up and tilted a little toward the camera so the lean shows: rotation.x
-// = PI / 2 maps the local -z (the rim) onto +y; the extra 0.2 leans the rim toward +z (the eye).
+// The cup in the fist, rim up: rotation.x = PI / 2 maps the local -z (the rim) onto +y; the tilt
+// leans the rim a little away from the eye (-z), so the view (from above and behind) sees the white
+// foam wall with its ridges and double lip, and the lean over the rim.
 #define CUP_REST_OFFSET_X 0.0f
-#define CUP_REST_OFFSET_Y 0.62f   // the base on top of the fist (half the hand's thickness 0.41 + the cup's lip)
-#define CUP_REST_OFFSET_Z (-0.3f)
-#define CUP_REST_TILT 0.2f
-#define CASH_REST_OFFSET_Y 0.62f  // the stack lies on the fist
-#define CASH_REST_OFFSET_Z (-0.32f)
+#define CUP_REST_OFFSET_Y 0.66f   // the base on top of the fist (half the hand's thickness 0.41 + a little)
+#define CUP_REST_OFFSET_Z (-0.45f)
+#define CUP_REST_TILT (-0.12f)    // the rim leans away a little: the white wall faces the eye, the lean still shows
+#define CASH_REST_OFFSET_X (-0.05f)
+#define CASH_REST_OFFSET_Y 0.6f   // the brick on top of the fist, the fan clear above it
+#define CASH_REST_OFFSET_Z (-0.1f)
+#define CASH_REST_LEAN 0.25f      // the fan leans back (top away from the eye)
+#define CASH_REST_TURN 0.35f      // ... turned toward the middle of the view
+#define CASH_REST_ROLL 0.2f
 // the pour: the cup rises into the middle of the view (toward the centre and the eye)
 #define POUR_LIFT_X 0.45f
 #define POUR_LIFT_Y 0.7f
@@ -318,10 +353,11 @@ void nettspend_pose_cup_rest(Mesh *cup, const vec3 hand, const float mirror) {
 
 void nettspend_pose_cash(Mesh *cash, const vec3 hand, const float mirror) {
     if (!cash) return;
-    // the stack lies on the fist, bills horizontal (the local z, the stacking axis, onto +y), turned
-    // so its long side runs across the view
-    cash->transform.position = (vec3) {hand.x, hand.y + CASH_REST_OFFSET_Y, hand.z + CASH_REST_OFFSET_Z};
-    cash->transform.rotation = (vec3) {(float) M_PI * 0.5f, 0.0f, 0.35f * mirror};
+    // the brick in the fist, the fan standing up out of it and facing the camera (rotation.x = PI / 2
+    // turns the local -z, the fan's top, onto +y and the bills' faces toward +z), leaning back a
+    // little and turned in toward the middle of the view
+    cash->transform.position = (vec3) {hand.x + CASH_REST_OFFSET_X * mirror, hand.y + CASH_REST_OFFSET_Y, hand.z + CASH_REST_OFFSET_Z};
+    cash->transform.rotation = (vec3) {(float) M_PI * 0.5f - CASH_REST_LEAN, -CASH_REST_TURN * mirror, CASH_REST_ROLL * mirror};
 }
 
 float nettspend_pour_strength(const float progress) {
