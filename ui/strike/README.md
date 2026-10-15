@@ -113,12 +113,81 @@ and POPUP (`In`, the empty popup frame). They are not wired: no C driver fills t
 and the other buttons that open them do nothing, as before. The captures use sample data (guest account,
 fake tournament rows), so they are not shown to players.
 
-Blocked captures (no template yet): MISSION_TAB_SCREEN (`UD`, the daily missions popup), REWARD_TO_CLAIM (`XB`) and
-MATCH_DETAILS_SCREEN (`Ny` / `GB`). The capture states exist in tools/uidiff/capture-strike.js; they did not produce
-references in this run (the duplicate writer and the load limit stopped the run). The seasonal progression track
-(PROGRESSION_TRACK) and the rooms are not captured.
+## Transcribed screens (no capture: not pixel-verified)
 
-Images the new templates reference that are not in this tree: img/currencies/krunkies.png, img/frvr-ui/krunkies.svg,
-img/frvr-ui/xp-icon.svg, img/victory-screen-bg.png. They are fetched from the Internet Archive's
-discordsays.com capture (`cdnfrvr/games/krunkerfrvr/<path>`, the bundle's discord branch), one request per 25 s, GET
-only; the rows are logged in the fetch job's manifest, not vendored here until they are checked.
+MISSION_TAB_SCREEN (`UD`, the Battle Pass screen's Missions tab), REWARD_TO_CLAIM (`XB`, a reward card in the POPUP
+frame), MATCH_DETAILS_SCREEN (`GB` / `Ny`, the round end's podium button) and PROGRESSION_TRACK (`KU`, PROFILE's Rewards
+Track) have no sandbox capture. Their templates (`screens/<VIEW_ID>.html`, hand-written, not generated: the generator
+never touches them) are transcribed from the Mithril views in `assets/index-Cz2uYXJQ.js`, read as text: the same
+elements, classes, inline styles and strings FRVR's code would render, with `<!-- part NAME -->` sections for the row /
+card components that client/src/ui/strike_meta.c fills. Nothing about them is checked against FRVR's own pixels.
+Notes from the bundle:
+- 1.37.2's stylesheet has no `.frvr-mission-card` or `.reward-to-claim` rules (neither has 1.27.0's or 1.7.0's): FRVR
+  shows the mission cards and the reward card's wrapper unstyled, and so does this page.
+- `KU` renders nothing until the game config's (`/v1/game-config` `accountProgression`) item definitions are in. The
+  live client has no source for that config, so the track shows only in a `--render-scenario` with
+  `state.strike.progression` (tools/uidiff/scenarios/strike/progression-track.json: capture-strike.js's PROGRESSION
+  fixture, sample data). The single-track form is the one without a premium track.
+- `XB` appears in FRVR's tournament rewards popup; KrunkNative has no hosted tournaments, so only a scenario opens it.
+- The rooms are still not ported.
+
+## Images fetched for the transcribed screens (2026-10-15)
+
+GET only, one request every 4 to 5 s, exact paths, no cookies, nothing executed. The bundle loads `./img/...` from the
+page's own origin, which for the web build is `https://krunkerstrike.frvr.com/` (the live site serves the current
+build's `public/` tree, so these are the files it serves today, not a 1.37.2 snapshot); `N.assetsUrl()` paths come from
+`https://cdn.frvr.com/games/krunkerfrvr/<path>?build=1.37.2`. The Internet Archive had no capture of any of them
+(~/.cache/kn-wt/strike-ui-port-fetch/manifest.jsonl, NO_SNAPSHOT), and cdn.frvr.com answers 404 for the `./img/` ones.
+
+| path under ui/strike/ | URL | sha256 |
+|---|---|---|
+| img/currencies/krunkies.png | https://krunkerstrike.frvr.com/img/currencies/krunkies.png | 15e051c19960bc9838e63851d99f462be285eafd0ea0cb3b0ef021f296be3621 |
+| img/frvr-ui/krunkies.svg | https://krunkerstrike.frvr.com/img/frvr-ui/krunkies.svg | b1c2d55a02f13b32577dc92cc84c567cfb337801afce89d5c0b2e7ef63f967e1 |
+| img/frvr-ui/xp-icon.svg | https://krunkerstrike.frvr.com/img/frvr-ui/xp-icon.svg | e409063952b8c06fd4a94ecf450d07f9dbdc49ea3b50cbd2d775ed570b3bc4ea |
+| img/victory-screen-bg.png | https://krunkerstrike.frvr.com/img/victory-screen-bg.png | 6bed743d09925967b357dbf2743c04b127e8b389a55b63da155c359046d313f8 |
+| img/battlepass/skull_bg.svg | https://krunkerstrike.frvr.com/img/battlepass/skull_bg.svg | 56b57272ff882538c0d831302cc48ede7bd055edb642b4a68c3cfa5bbc9172fd |
+| img/frvr-ui/check.svg | https://krunkerstrike.frvr.com/img/frvr-ui/check.svg | 7787d59d9f7c010ca116962767b0e1f5d93dee74a47fc6bd4af031f0cf239d48 |
+| img/frvr-ui/warning-octagon-red.svg | https://krunkerstrike.frvr.com/img/frvr-ui/warning-octagon-red.svg | 57fd7a9fa6a85987eec0222316e2f934b187bc1684fa97d299641ef3fbe9cf52 |
+| img/frvr-ui/xp-symbol.svg | https://krunkerstrike.frvr.com/img/frvr-ui/xp-symbol.svg | 95ea4f0cd95b2ceffa44b8fa9e93723ed2f444b2fdc3424cc147607c4e0e8b22 |
+| img/frvr-ui/spin-ticket-1.png | https://krunkerstrike.frvr.com/img/frvr-ui/spin-ticket-1.png | 3a75b0f23fbcac8ce4e30b767d14c935de1e8da3268296b6da9f5d72623a0295 |
+| img/frvr-ui/spin-ticket-2.png | https://krunkerstrike.frvr.com/img/frvr-ui/spin-ticket-2.png | a250ac4e8353b254690045d9fcf3181f905af8df1f80703ac76d7a219f11889d |
+| img/frvr-ui/spin-ticket-3.png | https://krunkerstrike.frvr.com/img/frvr-ui/spin-ticket-3.png | dd4a79c14d726bda8a81834cdc78dee488b57808916e0b82472bcd87132780b1 |
+| img/frvr-ui/spin-ticket-many.png | https://krunkerstrike.frvr.com/img/frvr-ui/spin-ticket-many.png | 4669ea87aa2e19da228b6b72d112f798557c2cae56fd366293ba22b2cf6b7a8c |
+| cdn/img/chals/icon_0.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_0.png?build=1.37.2 | f02ed7e7b4bb01330b77520694797074370dce0617a7cef0353ff8d7dfa5995b |
+| cdn/img/chals/icon_1.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_1.png?build=1.37.2 | 9671f2d4184639b62362d2c24eeb7c8a76a2ea7e39116f0ad4aef1c7e248fa94 |
+| cdn/img/chals/icon_2.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_2.png?build=1.37.2 | f8cac409e07539f0ab73e62430d59b506fcff739c11d6c9be9379e2fce04af0d |
+| cdn/img/chals/icon_3.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_3.png?build=1.37.2 | 9a7ab01f64bbe8746d02ae3d977dc5a1b7a14aa521cfd5beb2c883c087d10050 |
+| cdn/img/chals/icon_4.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_4.png?build=1.37.2 | ce6247c59c3015501397bdd916140ddfec3fb80d7aca0c5370f06638d3549c8f |
+| cdn/img/chals/icon_5.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_5.png?build=1.37.2 | 1e845332fbbceb60e3d204d10abc0c542c6e3ce740cc452d27baaaff3d0d814f |
+| cdn/img/chals/icon_6.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_6.png?build=1.37.2 | df95eba52f8e714a783555a274f755199925fd21b2438e4e10caf06400130b76 |
+| cdn/img/chals/icon_7.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_7.png?build=1.37.2 | dd29569827d08bdf5ae04a43d463205992354b43ad72d16465bf8f2d30c4527e |
+| cdn/img/chals/icon_8.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_8.png?build=1.37.2 | 9683b30002d74023292e73ed0f616dfee85486ae8f7a52a2b41571bef350d82f |
+| cdn/img/chals/icon_9.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_9.png?build=1.37.2 | d5193c6b1839635ad2f72f4f8daa6f71487451d51d32a0383e31e1a7290eed71 |
+| cdn/img/chals/icon_10.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_10.png?build=1.37.2 | f3c359d59f5a041679192413ebed4469d86a16a5ff0fb719889385bfa32754dc |
+| cdn/img/chals/icon_11.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_11.png?build=1.37.2 | 2766feb1165ab25fefbb589f1b2ab9866bf775f1238556f6b057530335e5b98c |
+| cdn/img/chals/icon_12.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_12.png?build=1.37.2 | d9a18a73a5d243b969473e2a6b554fd202ec825b560984a7debe65914a9c2338 |
+| cdn/img/chals/icon_13.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_13.png?build=1.37.2 | 30f75f560da71fd3a017f5e9412c0fbc0a37231d4bac2e9b188f32d9a447566e |
+| cdn/img/chals/icon_14.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_14.png?build=1.37.2 | 32df3005738da465188699df02a0c647b7cdb26268cb78cf40b374480bb5c65a |
+| cdn/img/chals/icon_15.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_15.png?build=1.37.2 | 6f7e3261033bdcf88b5614244c9c8638391ed7f13a782f8d6357fb05e2f82aff |
+| cdn/img/chals/icon_16.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_16.png?build=1.37.2 | e2fb0caae210d6ca00c689107841dc740f35720ae08147381e2adfe6665a44d7 |
+| cdn/img/chals/icon_17.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_17.png?build=1.37.2 | 4fc07a2af192396e2d4b93fd17c5868761f98e5c3d28c93757dc5068b32c9ab3 |
+| cdn/img/chals/icon_18.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_18.png?build=1.37.2 | ca9076fa4dd48f86ff96185902cec4251911111fad8a26df56a4ff0ded850632 |
+| cdn/img/chals/icon_19.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_19.png?build=1.37.2 | 3d61d20da9d4fe1ace7b46e09f63c70b08bd866001c19397cf3dac5048db3c3d |
+| cdn/img/chals/icon_20.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_20.png?build=1.37.2 | 40eeee4a077363979701d1c2e225bc0ce8d6b682fcd16e44a2f76e9cc6a5b6f7 |
+| cdn/img/chals/icon_22.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_22.png?build=1.37.2 | af417595fd95fa7f3f6b88e2719eeda0ce422c046f0962b4e1e6fc62d90dd266 |
+| cdn/img/chals/icon_23.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_23.png?build=1.37.2 | bd6f365e4e372a7b32f11a178fd594d9cf8f29232a8b3855c2e4bbd2a9c7c120 |
+| cdn/img/chals/icon_24.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_24.png?build=1.37.2 | abe5715df1eed8b9a520b730b848d2900d2dcd0ecbb8a31ec83c586edd070c8c |
+| cdn/img/chals/icon_25.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_25.png?build=1.37.2 | 2f6def7518aad9466761068e7e45fcebe1ee622784a492803ae249b7fc1b4675 |
+| cdn/img/chals/icon_26.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_26.png?build=1.37.2 | ca1f7d871c931f218495c170cd1ac671f5ac849ffdcb9a8caf60885afa3c5213 |
+| cdn/img/chals/icon_27.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_27.png?build=1.37.2 | b237d58e401f32b396e8da02778d033f1d854e574acaf4de79a3623253408606 |
+| cdn/img/chals/icon_28.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_28.png?build=1.37.2 | 67fb1163ff00f2b6cb77ea2b0743464d54a916eeea30ef10928392da46ed04f1 |
+| cdn/img/chals/icon_29.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_29.png?build=1.37.2 | 9b75264a4df72cb22677849eb0ecbadf783178aa28d68144f794eaba3ab2ea75 |
+| cdn/img/chals/icon_30.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_30.png?build=1.37.2 | 11f1a86b34c0376efc78b37ad3bbbd1bfb398704dcc6bbab93d0496ce2effc69 |
+| cdn/img/chals/icon_31.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_31.png?build=1.37.2 | c4456e167f356a9d8dfe4e19ece4f4d692bcf048e9dbf518bc3453a93491489f |
+| cdn/img/chals/icon_32.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_32.png?build=1.37.2 | 6f4ab7e7d8d8455119661ee0b2b2ae5ff1b8085cbc7a797858a13c586acfd6ff |
+| cdn/img/chals/icon_33.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_33.png?build=1.37.2 | 09bcaa26a0ba2a4240d3cdd4ed0457e39c885b138f07f782a8aaf04eea56e7da |
+| cdn/img/chals/icon_34.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_34.png?build=1.37.2 | 0a762f79936d5022699fd8ebabcd7dc01a3e5b55dde153669849d3c87b3b4d29 |
+| cdn/img/chals/icon_35.png | https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_35.png?build=1.37.2 | 7516820ddbcca9b46ff710f83c6cb015cfd1a62269f65f338eaa4783b75d1d31 |
+
+Not found: img/chals/icon_21.png (HTTP 404, https://cdn.frvr.com/games/krunkerfrvr/img/chals/icon_21.png?build=1.37.2) (Krunker's own set has no icon_21 either).
+Referenced by the transcribed code but not fetched (nothing here produces them): img/premium/premium-logo.png, img/features/no-ads-unsolicited-logo.svg, img/features/xp-boost-logo.svg (pa()'s feature rewards).

@@ -738,6 +738,29 @@ static void hud_modes_end_value(const Player *player, const NetModeEndEntry *ent
     else snprintf(out, size, "0");
 }
 
+static const char *const k_default_end_stats[] = {"sid", "name", "score", "kills", "deaths", "reward", NULL};
+
+const char *const *hud_modes_end_stats(const Client *client) {
+    const GameModeConfig *config = client ? hud_mode_config(client) : NULL;
+    return config && config->end_stats ? config->end_stats : k_default_end_stats;
+}
+
+int hud_modes_end_rows(int *uids, const int max) {
+    if (!g_modes.end_valid) return 0;
+    int n = 0;
+    for (int i = 0; i < g_modes.end.count && i < NET_MODE_END_MAX && n < max; i++) uids[n++] = g_modes.end.entries[i].uid;
+    return n;
+}
+
+void hud_modes_end_cell(const Player *player, const char *stat, char *out, const size_t size) {
+    if (!player || !stat || !out || !size) return;
+    hud_modes_end_value(player, hud_modes_end_entry(player->uid), stat, out, size);
+}
+
+int hud_modes_end_team_score(const int team) {
+    return g_modes.end_valid && (team == 1 || team == 2) ? g_modes.end.team_scores[team - 1] : 0;
+}
+
 // endGame's #endTable with the mode's endStats (rows in the server's endSort order,
 // your row white, your team 60% white, the enemy COLORS.teams[1]) and teamTotal0/1.
 static void hud_modes_end_screen(const Client *client, const GameModeConfig *config) {
@@ -772,8 +795,7 @@ static void hud_modes_end_screen(const Client *client, const GameModeConfig *con
         }
     }
 
-    static const char *const default_stats[] = {"sid", "name", "score", "kills", "deaths", "reward", NULL};
-    const char *const *stats = config->end_stats ? config->end_stats : default_stats;
+    const char *const *stats = config->end_stats ? config->end_stats : k_default_end_stats;
     int stat_count = 0;
     while (stats[stat_count]) stat_count++;
 

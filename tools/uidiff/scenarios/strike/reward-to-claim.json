@@ -1,0 +1,25 @@
+{
+  "flavor": "strike",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "connected": true,
+    "ready": true,
+    "name": "Guest_4821",
+    "classIndex": 0,
+    "menu": true,
+    "strike": {
+      "screen": "REWARD_TO_CLAIM",
+      "reward": {
+        "type": "currency",
+        "currency": "kr",
+        "amount": 250
+      }
+    }
+  },
+  "frames": 3,
+  "note": "FRVR Krunker Strike 1.37.2, the mobile UI (ui/strike/, client/src/ui/strike_meta.c). NO REFERENCE: FRVR has no sandbox capture of this view; its template is transcribed from the bundle's Mithril code, so this render is NOT pixel-verified (a smoke render only). REWARD_TO_CLAIM (XB): pa({currency kr, amount 250}) in the POPUP frame, as tools/uidiff/capture-strike.js strike-reward-to-claim pushes it (sample data)."
+}

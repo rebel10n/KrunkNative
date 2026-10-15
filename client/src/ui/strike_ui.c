@@ -61,6 +61,10 @@ static const struct { unsigned char translucent, keep_alive; } SCREEN_OPTS[STRIK
     [STRIKE_SCREEN_STORE] = {0, 1},
     [STRIKE_SCREEN_BATTLEPASS] = {0, 1},
     [STRIKE_SCREEN_POPUP] = {1, 0},
+    // REWARD_TO_CLAIM sits in the POPUP frame (In: translucent); the round end is nu(Ad, ...,
+    // {keepAlive: true}), so MATCH_DETAILS_SCREEN pushed over it keeps it (and its fill) rendered
+    [STRIKE_SCREEN_REWARD_TO_CLAIM] = {1, 0},
+    [STRIKE_SCREEN_LEAN_END] = {0, 1},
 };
 
 // Dk: generic.tips.* in English (the 1.37.2 i18n table, tools/strike/strike_data.json)
@@ -166,8 +170,37 @@ static char *template_text(const char *name) {
     return text;
 }
 
-char *strike_template(const char *name, const StrikeVar *vars, const int count) {
-    char *tpl = template_text(name);
+// "<!-- part NAME -->" lines split a template file into its main markup (before the first one)
+// and named parts: the row / card components of a screen transcribed from the bundle
+// (MATCH_DETAILS_SCREEN.html, strike_meta.c). part NULL = the main markup.
+#define PART_MARK "<!-- part "
+static char *template_section(const char *name, const char *part) {
+    char *text = template_text(name);
+    if (!text) return NULL;
+    char *start = text;
+    if (part) {
+        char mark[96];
+        snprintf(mark, sizeof(mark), PART_MARK "%s -->", part);
+        const char *m = strstr(text, mark);
+        if (!m) {
+            fprintf(stderr, "[strike] template %s has no part %s\n", name, part);
+            free(text);
+            return NULL;
+        }
+        start = text + (m - text) + strlen(mark);
+        while (*start == '\n' || *start == '\r') start++;
+    }
+    const char *mark = strstr(start, PART_MARK);
+    size_t n = mark ? (size_t) (mark - start) : strlen(start);
+    if (mark) { // the newline before the next part's marker is not markup
+        while (n > 0 && (start[n - 1] == '\n' || start[n - 1] == '\r')) n--;
+    }
+    memmove(text, start, n);
+    text[n] = 0;
+    return text;
+}
+
+static char *substitute(char *tpl, const StrikeVar *vars, const int count) {
     if (!tpl) return NULL;
     StrBuf sb = {0};
     const char *cur = tpl;
@@ -195,6 +228,14 @@ char *strike_template(const char *name, const StrikeVar *vars, const int count) 
     sb_append(&sb, cur);
     free(tpl);
     return sb_finish(&sb);
+}
+
+char *strike_template(const char *name, const StrikeVar *vars, const int count) {
+    return substitute(template_section(name, NULL), vars, count);
+}
+
+char *strike_template_part(const char *name, const char *part, const StrikeVar *vars, const int count) {
+    return substitute(template_section(name, part), vars, count);
 }
 
 // ---------------------------------------------------------------- holder layers
@@ -606,6 +647,8 @@ int strike_ui_pointer_to_page(void) {
 //   "killfeed": [{killer, victim, killerIsYou, victimIsYou, weapon: "icon_1", headshot}]
 //   "killcard": {killer, weapon, level, score, classIndex}
 //   "end": 1 | 0 | -1       the round end (victory / defeat / draw)
+//   and strike_meta.c's keys (strike_meta_scenario): "progression", "claimed", "reward",
+//   "battlepassTab", "matchDetails"
 void strike_ui_scenario(Client *client, const cJSON *st) {
     if (!st || !strike_ui_active() || !S.dom_ready) return;
     S.client = client;
@@ -638,4 +681,5 @@ void strike_ui_scenario(Client *client, const cJSON *st) {
     const cJSON *loading = cJSON_GetObjectItemCaseSensitive(st, "loading");
     if (cJSON_IsString(loading)) strike_loading_show(loading->valuestring, 0);
     strike_hud_scenario(client, st);
+    strike_meta_scenario(client, st); // progression / reward / battlepassTab / matchDetails (strike_meta.c)
 }

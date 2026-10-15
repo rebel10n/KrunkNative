@@ -323,6 +323,7 @@ static void play(void) {
 
 static void action(const char *a) {
     printf("[strike] action %s\n", a);
+    if (strike_meta_action(a)) return; // missions tab, match details report, rewards track (strike_meta.c)
     if (!strcmp(a, "play")) play();
     else if (!strcmp(a, "back")) {
         strike_screen_pop(); // kt()
@@ -389,9 +390,12 @@ const char *strike_menu_template(const StrikeScreen s) {
     case STRIKE_SCREEN_CUSTOMIZE_CONTROLS:
     case STRIKE_SCREEN_LEADERBOARD_PLAYERS:
     case STRIKE_SCREEN_POPUP:
+    case STRIKE_SCREEN_MATCH_DETAILS:   // transcribed from the bundle (strike_meta.c)
+    case STRIKE_SCREEN_REWARD_TO_CLAIM: // transcribed from the bundle (strike_meta.c)
         return strike_screen_id(s);
     default:
-        return NULL; // no capture of it yet (README.md "Not ported yet")
+        return NULL; // no template of it yet (README.md "Not ported yet"); MISSION_TAB_SCREEN is
+                     // the Battle Pass screen's Missions tab (strikeAction('missions'))
     }
 }
 
@@ -460,10 +464,19 @@ void strike_menu_render(const StrikeScreen s, const HtmlElem root) {
     default:
         break;
     }
+    strike_meta_render(s, root); // the Battle Pass tabs, the Rewards Track, match details, reward card
+}
+
+int strike_menu_level(void) {
+    char name[64];
+    int level = 1, kr = 0;
+    account_values(name, sizeof(name), &level, &kr);
+    return level;
 }
 
 void strike_menu_tick(Client *client) {
     M.client = client;
+    strike_meta_tick(client);
     // the account box follows the account / name (Mithril redraws on every change)
     char name[64], key[160];
     int level = 1, kr = 0;

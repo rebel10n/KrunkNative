@@ -394,6 +394,12 @@ static void end_fill(Client *client, const int result) {
 void strike_hud_end(Client *client, const int result) {
     if (!strike_ui_active()) return;
     H.client = client;
+    // the end timer's packets repeat this every second: the round end is up already (with the
+    // screens pushed over it, MATCH_DETAILS_SCREEN), so only its values follow
+    if (H.end_shown && strike_screen_shown(STRIKE_SCREEN_LEAN_END)) {
+        end_fill(client, result);
+        return;
+    }
     H.kill_card = 0;
     strike_touch_reset();
     strike_screen_replace(STRIKE_SCREEN_LEAN_END); // nu(Ad, ...)

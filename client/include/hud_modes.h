@@ -24,6 +24,15 @@ const char *hud_modes_flag_info(int team);                // teamFlags[team] ("A
 struct cJSON;
 void hud_modes_scenario(Client*, const struct cJSON *mode_hud); // --render-scenario state.modeHud (see .c)
 
+// The round's end table for other end screens (Krunker Strike's MATCH_DETAILS_SCREEN,
+// strike_meta.c): the mode's endStats (NULL-terminated, "sid" / "name" first), the rows'
+// uids in the server's endSort order (0 = no END table this round), one cell as #endTable
+// writes it (a number; "reward" / "time" as text) and the END team totals (team 1 / 2).
+const char *const *hud_modes_end_stats(const Client*);
+int  hud_modes_end_rows(int *uids, int max);
+void hud_modes_end_cell(const Player*, const char *stat, char *out, size_t size);
+int  hud_modes_end_team_score(int team);
+
 // WP-D: the v7.1.4 mode state the HUD shows (ui-v7 owns the DOM): team scores 1..5 (sdm), rounds
 // ("rds"), lockout ("lkt"), the local KR Tags ("krt"), the last "tx" / "Switching Sides" popup.
 // Objective uid / time, dom zones and per-player kranked / headMlt live in client->game.mode.

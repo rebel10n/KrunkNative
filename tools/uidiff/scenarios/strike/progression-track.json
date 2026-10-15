@@ -1,0 +1,630 @@
+{
+  "flavor": "strike",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "connected": true,
+    "ready": true,
+    "name": "Guest_4821",
+    "classIndex": 0,
+    "menu": true,
+    "strike": {
+      "screen": "PROFILE",
+      "account": {
+        "level": 12,
+        "xp": 100,
+        "nextXp": 400,
+        "tickets": 1,
+        "kr": 1250
+      },
+      "progression": {
+        "1": {
+          "slotId": "1_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 25
+            }
+          ]
+        },
+        "2": {
+          "slotId": "2_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 30
+            }
+          ]
+        },
+        "3": {
+          "slotId": "3_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 35
+            }
+          ]
+        },
+        "4": {
+          "slotId": "4_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 40
+            }
+          ]
+        },
+        "5": {
+          "slotId": "5_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "spin_ticket",
+              "amount": 1
+            }
+          ]
+        },
+        "6": {
+          "slotId": "6_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 50
+            }
+          ]
+        },
+        "7": {
+          "slotId": "7_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 55
+            }
+          ]
+        },
+        "8": {
+          "slotId": "8_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 60
+            }
+          ]
+        },
+        "9": {
+          "slotId": "9_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 65
+            }
+          ]
+        },
+        "10": {
+          "slotId": "10_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "spin_ticket",
+              "amount": 1
+            }
+          ]
+        },
+        "11": {
+          "slotId": "11_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 75
+            }
+          ]
+        },
+        "12": {
+          "slotId": "12_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 80
+            }
+          ]
+        },
+        "13": {
+          "slotId": "13_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 85
+            }
+          ]
+        },
+        "14": {
+          "slotId": "14_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 90
+            }
+          ]
+        },
+        "15": {
+          "slotId": "15_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "spin_ticket",
+              "amount": 1
+            }
+          ]
+        },
+        "16": {
+          "slotId": "16_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 100
+            }
+          ]
+        },
+        "17": {
+          "slotId": "17_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 105
+            }
+          ]
+        },
+        "18": {
+          "slotId": "18_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 110
+            }
+          ]
+        },
+        "19": {
+          "slotId": "19_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 115
+            }
+          ]
+        },
+        "20": {
+          "slotId": "20_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "spin_ticket",
+              "amount": 1
+            }
+          ]
+        },
+        "21": {
+          "slotId": "21_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 125
+            }
+          ]
+        },
+        "22": {
+          "slotId": "22_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 130
+            }
+          ]
+        },
+        "23": {
+          "slotId": "23_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 135
+            }
+          ]
+        },
+        "24": {
+          "slotId": "24_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 140
+            }
+          ]
+        },
+        "25": {
+          "slotId": "25_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "spin_ticket",
+              "amount": 1
+            }
+          ]
+        },
+        "26": {
+          "slotId": "26_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 150
+            }
+          ]
+        },
+        "27": {
+          "slotId": "27_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 155
+            }
+          ]
+        },
+        "28": {
+          "slotId": "28_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 160
+            }
+          ]
+        },
+        "29": {
+          "slotId": "29_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 165
+            }
+          ]
+        },
+        "30": {
+          "slotId": "30_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "spin_ticket",
+              "amount": 1
+            }
+          ]
+        },
+        "31": {
+          "slotId": "31_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 175
+            }
+          ]
+        },
+        "32": {
+          "slotId": "32_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 180
+            }
+          ]
+        },
+        "33": {
+          "slotId": "33_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 185
+            }
+          ]
+        },
+        "34": {
+          "slotId": "34_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 190
+            }
+          ]
+        },
+        "35": {
+          "slotId": "35_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "spin_ticket",
+              "amount": 1
+            }
+          ]
+        },
+        "36": {
+          "slotId": "36_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 200
+            }
+          ]
+        },
+        "37": {
+          "slotId": "37_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 205
+            }
+          ]
+        },
+        "38": {
+          "slotId": "38_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 210
+            }
+          ]
+        },
+        "39": {
+          "slotId": "39_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 215
+            }
+          ]
+        },
+        "40": {
+          "slotId": "40_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "spin_ticket",
+              "amount": 1
+            }
+          ]
+        },
+        "41": {
+          "slotId": "41_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 225
+            }
+          ]
+        },
+        "42": {
+          "slotId": "42_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 230
+            }
+          ]
+        },
+        "43": {
+          "slotId": "43_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 235
+            }
+          ]
+        },
+        "44": {
+          "slotId": "44_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 240
+            }
+          ]
+        },
+        "45": {
+          "slotId": "45_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "spin_ticket",
+              "amount": 1
+            }
+          ]
+        },
+        "46": {
+          "slotId": "46_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 250
+            }
+          ]
+        },
+        "47": {
+          "slotId": "47_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 255
+            }
+          ]
+        },
+        "48": {
+          "slotId": "48_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 260
+            }
+          ]
+        },
+        "49": {
+          "slotId": "49_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "kr",
+              "amount": 265
+            }
+          ]
+        },
+        "50": {
+          "slotId": "50_00",
+          "isAutoClaimable": false,
+          "isPlayerChoice": false,
+          "items": [
+            {
+              "type": "currency",
+              "currency": "spin_ticket",
+              "amount": 1
+            }
+          ]
+        }
+      },
+      "claimed": []
+    }
+  },
+  "frames": 3,
+  "note": "FRVR Krunker Strike 1.37.2, the mobile UI (ui/strike/, client/src/ui/strike_meta.c). NO REFERENCE: FRVR has no sandbox capture of this view; its template is transcribed from the bundle's Mithril code, so this render is NOT pixel-verified (a smoke render only). PROGRESSION_TRACK (KU): PROFILE's Rewards Track at level 12; accountProgression is tools/uidiff/capture-strike.js's PROGRESSION fixture (KR every level, a spin ticket every 5th: sample data)."
+}

@@ -1,0 +1,20 @@
+<!-- FRVR Krunker Strike 1.37.2 MATCH_DETAILS_SCREEN (GB / Ny: La > gAe lightbox, the legacy board of vAe / yF headers and K5 / bF rows), TRANSCRIBED from the Mithril views of assets/index-Cz2uYXJQ.js (no sandbox capture exists: not pixel-verified). The parts below the frame are its row components; client/src/ui/strike_meta.c fills them. -->
+<div id="frvrMenuMobile"><div class="frvr-dark-blur"></div><div class="frvr-screen " style="padding: 0px;"><div class="lightbox"><div class="lightbox__content"><div class="match-details__title">Match Details</div><div class="match-details__legacy-board">{{!board}}</div></div><div class="lightbox__buttons"><div class="frvr-button frvr-button--red frvr-button--size-sm frvr-button--width-120" onclick="strikeAction('back')"><span class="frvr-button-text">Close</span></div></div></div></div></div>
+<!-- part ffa -->
+<div class="frvr-lboard-end-screen__content frvr-lboard-end-screen__content--ffa">{{!rows}}</div>
+<!-- part teams -->
+<div class="frvr-lboard-end-screen__content">{{!mine}}<div class="frvr-lboard-end-screen__team">{{!mineRows}}</div>{{!enemy}}<div class="frvr-lboard-end-screen__team">{{!enemyRows}}</div></div>
+<!-- part ffa-header -->
+<div class="frvr-lboard-end-screen__row-wrapper" style="--row-index: 0;"><div class="frvr-lboard-end-screen__row"><div class="frvr-lboard-end-screen__position frvr-lboard-end-screen__position--ffa"><span>#</span></div><div class="frvr-lboard-end-screen__player-name frvr-lboard-end-screen__player-name--team-label frvr-lboard-end-screen__player-name--ffa">{{!report}}</div><div class="frvr-lboard-end-screen__stats">{{!stats}}</div></div></div>
+<!-- part team-header -->
+<div class="frvr-lboard-end-screen__row-wrapper" style="--row-index: {{index}};"><div class="frvr-lboard-end-screen__row {{rowClass}}"><div class="{{positionClass}}"><span>#</span></div><div class="frvr-lboard-end-screen__player-name frvr-lboard-end-screen__player-name--team-label"><div class="frvr-lboard-end-screen__player-name-text"><span>{{label}}</span><span class="frvr-lboard-end-screen__player-name--title {{scoreClass}}">{{score}}</span><span class="frvr-lboard-end-screen__player-name--title"> points</span></div>{{!report}}</div><div class="frvr-lboard-end-screen__stats">{{!stats}}</div></div></div>
+<!-- part row -->
+<div class="frvr-lboard-end-screen__row-wrapper" style="--row-index: {{index}};"><div class="frvr-lboard-end-screen__row"><div class="{{positionClass}}"><span>{{rank}}</span></div><div class="frvr-lboard-end-screen__pfp"><img src="{{pfp}}" style="image-rendering: pixelated;"></div><div class="{{nameClass}}"><span><strong>{{name}}</strong></span>{{!report}}</div><div class="frvr-lboard-end-screen__stats">{{!stats}}</div></div></div>
+<!-- part title-col -->
+<div class="{{class}}"><span class="frvr-lboard-end-screen__stat-col--title">{{value}}</span></div>
+<!-- part stat-col -->
+<div class="{{class}}"><span>{{value}}</span></div>
+<!-- part report -->
+<div class="frvr-lboard-end-screen__report" onclick="strikeAction('match-details-report')"><span>Report players</span></div>
+<!-- part report-symbol -->
+<div class="frvr-lboard-end-screen__report-symbol"><img src="./img/frvr-ui/warning-octagon-red.svg" onclick="strikeAction('match-details-report-player:{{sid}}')"></div>

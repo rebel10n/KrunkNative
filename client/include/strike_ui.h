@@ -10,6 +10,7 @@
 //   client/src/ui/strike_ui.c      page + screen stack (FRVR's Pt/kt/nu router, yz()), the loading
 //                                  screen (vb / fz: curtains, cog, logo, bar), templates, tick
 //   client/src/ui/strike_menu.c    main menu, class selection, tap to play, settings, meta screens
+//   client/src/ui/strike_meta.c    missions tab, reward card, match details, the rewards track
 //   client/src/ui/strike_hud.c     the in-game UI (H5 / IN_GAME_UI): health, ammo, timer, kill feed,
 //                                  scoreboard, kill card, end screens
 //   client/src/ui/strike_touch.c   the mobile controls (a5: joystick zones, control buttons): mouse
@@ -96,6 +97,18 @@ int  strike_loading_shown(void);
 // is malloc'd; values are HTML-escaped unless the key starts with '!' (raw markup).
 typedef struct { const char *key; const char *value; } StrikeVar;
 char *strike_template(const char *name, const StrikeVar *vars, int count);
+// One "<!-- part NAME -->" section of a template file (a row / card component of the screen).
+char *strike_template_part(const char *name, const char *part, const StrikeVar *vars, int count);
+
+// strike_meta.c: the views no sandbox capture exists for, transcribed from the bundle's Mithril
+// code (ui/strike/screens/MISSION_TAB_SCREEN, REWARD_TO_CLAIM, MATCH_DETAILS_SCREEN,
+// PROGRESSION_TRACK.html; not pixel-verified): the Battle Pass screen's Missions tab, the
+// tournament reward card, the round's match details and PROFILE's Rewards Track.
+void strike_meta_render(StrikeScreen s, HtmlElem root); // after strike_menu_render
+int  strike_meta_action(const char *name);              // 1 = one of its strikeAction()s
+void strike_meta_tick(Client *client);
+void strike_meta_scenario(Client *client, const cJSON *state); // --render-scenario state.strike keys
+int  strike_menu_level(void);                           // the account box's level (strike_menu.c)
 
 // Module hooks called by strike_ui.c.
 void strike_menu_install(void);                   // inline handlers of the menu screens
