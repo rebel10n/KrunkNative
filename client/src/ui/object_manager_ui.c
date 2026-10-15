@@ -34,13 +34,14 @@
 // Console: `give` / `drop` are server commands (shared/src/chat_commands.c); a `give` of a weapon
 // to yourself equips it like the Weapons tab's left click (object_manager_ui_chat_sent).
 //
-// Scroll: #knOmGrid, #knOmPropsList and the Tools pane's #knOmToolsList are the scroll containers;
+// Scroll: #knOmGrid<tab> (one per tab, the shown one has no knOmHid), #knOmPropsList and the Tools pane's #knOmToolsList are the scroll containers;
 // the window is a flex column (krunknative.css), so on a short window they shrink and the title,
 // tabs and buttons stay in view. Picks, server results and LOADOUT_EXTRA
 // update the page in place (om_update_*: the status line's text, the tiles' knOmOwned class and
 // badge, the Clear Extras count) so the grid keeps its scrollTop. Only new results rebuild it and
 // start at the top: a tab switch (v7's own tabbed windows set menuWindow.scrollTop = 0 on
-// switchTab, index.js windows[3]) and a search (om_refresh_body).
+// switchTab, index.js windows[3]): a tab switch rebuilds the grid only (om_switch_tab), a search
+// flips the hidden class of its tiles (om_filter). Neither rebuilds the window (no restyle of the page).
 #include <client.h>
 #include <html_dom.h>
 #include <html_ui.h>
@@ -230,49 +231,50 @@ static void om_status_html(char **buf, size_t *len, size_t *cap) {
     om_append(buf, len, cap, "<div id='knOmStatus' class='knOmStatus%s'>%s</div>", error ? " knOmErr" : "", esc);
 }
 
-static void om_grid_html(char **buf, size_t *len, size_t *cap) {
+// The grid of one tab (#knOmGrid<tab>): every tab's grid is in the page, the ones not shown carry
+// knOmHid; every tile is in the page too, the ones the search hides carry knOmHid (om_filter flips
+// those classes as the tab or the search changes: no rebuild of the window or of the grids).
+static void om_grid_html(char **buf, size_t *len, size_t *cap, const int tab) {
     const Client *client = om_client();
     const Player *me = client ? client->me : NULL;
     int shown = 0;
-    om_append(buf, len, cap, "<div id='knOmGrid' class='knOmGrid'>");
-    if (g_om.tab == OM_TAB_WEAPONS) {
+    om_append(buf, len, cap, "<div id='knOmGrid%d' class='knOmGrid%s'>", tab, tab == g_om.tab ? "" : " knOmHid");
+    if (tab == OM_TAB_WEAPONS) {
         for (int id = 0; id < WEAPON_TABLE_COUNT; id++) {
             if (!object_manager_weapon_listed(id)) continue;
             const Weapon *w = rules_weapon(id);
-            if (!om_matches(w->name)) continue;
+            const int hidden = !om_matches(w->name);
             char name[96];
             om_escape(name, sizeof(name), w->name);
             const int owned = om_has_extra(me, id);
             om_append(buf, len, cap,
-                      "<div id='knOmW%d' class='knOmItem%s' onclick='knOmPick(%d,%d)' oncontextmenu='knOmAlt(%d,%d)'>"
+                      "<div id='knOmW%d' class='knOmItem%s%s' onclick='knOmPick(%d,%d)' oncontextmenu='knOmAlt(%d,%d)'>"
                       "<img class='knOmIcon' src='textures/weapons/%s.png'/><div class='knOmName'>%s</div>%s</div>",
-                      id, owned ? " knOmOwned" : "", OM_TAB_WEAPONS, id, OM_TAB_WEAPONS, id, w->icon ? w->icon : "icon_0", name,
-                      owned ? OM_BADGE_HTML : "");
-            shown++;
+                      id, owned ? " knOmOwned" : "", hidden ? " knOmHid" : "", OM_TAB_WEAPONS, id, OM_TAB_WEAPONS, id,
+                      w->icon ? w->icon : "icon_0", name, owned ? OM_BADGE_HTML : "");
+            shown += !hidden;
         }
     } else {
         int count = 0;
-        const ObjectManagerEntry *entries = object_manager_entries(g_om.tab, &count);
+        const ObjectManagerEntry *entries = object_manager_entries(tab, &count);
         for (int i = 0; entries && i < count; i++) {
-            if (!om_matches(entries[i].name)) continue;
+            const int hidden = !om_matches(entries[i].name);
             char name[96];
             om_escape(name, sizeof(name), entries[i].name);
             const char *icon = entries[i].icon ? entries[i].icon : "help";
             if (strstr(icon, ".png")) // a page image (img/props)
-                om_append(buf, len, cap, "<div id='knOmI%d' class='knOmItem' onclick='knOmPick(%d,%d)'><img class='knOmIcon knOmProp' src='%s'/><div class='knOmName'>%s</div></div>",
-                          i, g_om.tab, i, icon, name);
+                om_append(buf, len, cap, "<div id='knOmI%d_%d' class='knOmItem%s' onclick='knOmPick(%d,%d)'><img class='knOmIcon knOmProp' src='%s'/><div class='knOmName'>%s</div></div>",
+                          tab, i, hidden ? " knOmHid" : "", tab, i, icon, name);
             else
                 om_append(buf, len, cap,
-                          "<div id='knOmI%d' class='knOmItem' onclick='knOmPick(%d,%d)'><div class='knOmGlyph'><span class='material-icons'>%s</span></div>"
+                          "<div id='knOmI%d_%d' class='knOmItem%s' onclick='knOmPick(%d,%d)'><div class='knOmGlyph'><span class='material-icons'>%s</span></div>"
                           "<div class='knOmName'>%s</div></div>",
-                          i, g_om.tab, i, icon, name);
-            shown++;
+                          tab, i, hidden ? " knOmHid" : "", tab, i, icon, name);
+            shown += !hidden;
         }
     }
-    if (!shown) {
-        om_append(buf, len, cap, "<div class='knOmEmpty'>%s</div>", g_om.search[0] ? I18N("kn.om.noMatches", "No matches")
-                                                                                     : I18N("kn.om.nothing", "Nothing to spawn here yet"));
-    }
+    om_append(buf, len, cap, "<div id='knOmEmpty%d' class='knOmEmpty%s'>%s</div>", tab, shown ? " knOmHid" : "",
+              g_om.search[0] ? I18N("kn.om.noMatches", "No matches") : I18N("kn.om.nothing", "Nothing to spawn here yet"));
     om_append(buf, len, cap, "</div>");
 }
 
@@ -512,7 +514,9 @@ static char *om_body_html(void) {
     size_t len = 0, cap = 0;
     om_status_html(&buf, &len, &cap);
     if (g_om.props_uid >= 0) om_props_html(&buf, &len, &cap);
-    else om_grid_html(&buf, &len, &cap);
+    else {
+        for (int tab = 0; tab < OM_TAB_COUNT; tab++) om_grid_html(&buf, &len, &cap, tab);
+    }
     return buf;
 }
 
@@ -543,11 +547,12 @@ char *object_manager_window_gen(const int id, const char **header) {
     free(body);
     om_tools_html(&buf, &len, &cap);
     om_append(&buf, &len, &cap, "</div>"); // .knOmMain
-    om_append(&buf, &len, &cap, "<div class='knOmFoot'><div class='knOmHint'>%s</div><div class='knOmBtns'>", om_hint());
-    if (g_om.tab == OM_TAB_WEAPONS) {
+    om_append(&buf, &len, &cap, "<div class='knOmFoot'><div id='knOmHint' class='knOmHint'>%s</div><div class='knOmBtns'>", om_hint());
+    {   // (Weapons only: the other tabs hide it, so a tab switch flips a class, see om_switch_tab)
         char clear[48];
         om_clear_label(clear, sizeof(clear), me);
-        om_append(&buf, &len, &cap, "<div id='knOmClearBtn' class='button small buttonR knOmBtn' onclick='knOmClear()'>%s</div>", clear);
+        om_append(&buf, &len, &cap, "<div id='knOmClearBtn' class='button small buttonR knOmBtn%s' onclick='knOmClear()'>%s</div>",
+                  g_om.tab == OM_TAB_WEAPONS ? "" : " knOmHid", clear);
     }
     om_append(&buf, &len, &cap, "<div id='knOmRemoveBtn' class='button small knOmBtn' onclick='knOmRemove()'>%s</div>"
                                 "<div id='knOmUndoBtn' class='button small knOmBtn' onclick='knOmUndo()'>%s</div></div></div></div>",
@@ -555,8 +560,8 @@ char *object_manager_window_gen(const int id, const char **header) {
     return buf;
 }
 
-// Rebuilds the status + grid only (the search box keeps its focus and caret): the search
-// changed the results, so the new grid starts at the top.
+// Rebuilds the status + grids (the Tools pane, the search box and the footer stay): the Properties
+// panel's Back, or the grids again. The shown grid starts at the top.
 static void om_refresh_body(void) {
     if (!om_window_open()) return;
     const HtmlElem body = html_dom_by_id("knOmBody");
@@ -564,7 +569,9 @@ static void om_refresh_body(void) {
     char *html = om_body_html();
     html_dom_set_html(body, html ? html : "");
     free(html);
-    const HtmlElem grid = html_dom_by_id("knOmGrid");
+    char id[16];
+    snprintf(id, sizeof(id), "knOmGrid%d", g_om.tab);
+    const HtmlElem grid = html_dom_by_id(id);
     if (grid) html_dom_set_scroll(grid, 0.0f, 0.0f);
 }
 
@@ -593,9 +600,9 @@ static void om_update_status(void) {
 }
 
 // The loadout in place (LOADOUT_EXTRA): the weapon tiles' knOmOwned class and LOADOUT badge,
-// the Clear Extras count. Tiles the search hides have no element.
+// the Clear Extras count. The Weapons grid is in the page whichever tab is shown.
 static void om_update_loadout(void) {
-    if (!om_window_open() || g_om.tab != OM_TAB_WEAPONS) return;
+    if (!om_window_open()) return;
     const Client *client = om_client();
     const Player *me = client ? client->me : NULL;
     for (int id = 0; id < WEAPON_TABLE_COUNT; id++) {
@@ -644,6 +651,88 @@ static void om_update_tools(void) {
     if (hint && t) html_dom_set_text(hint, t->hint);
     const HtmlElem gun = html_dom_by_id("knOmToolGun");
     if (gun) html_dom_set_text(gun, om_tool_gun_line());
+}
+
+// The search changed: the tiles it hides get knOmHid in every tab's grid (the hidden grids too:
+// their boxes are not built, so that is a style change only). In place, so the icons stay decoded
+// and the window is not rebuilt per keystroke. The shown grid starts at the top.
+static void om_show_tile(const char *id, const int hidden) {
+    const HtmlElem tile = html_dom_by_id(id);
+    if (tile && html_dom_has_class(tile, "knOmHid") != hidden) html_dom_set_class(tile, "knOmHid", hidden);
+}
+
+static void om_filter_tab(const int tab) {
+    char id[24];
+    int shown = 0;
+    if (tab == OM_TAB_WEAPONS) {
+        for (int w = 0; w < WEAPON_TABLE_COUNT; w++) {
+            if (!object_manager_weapon_listed(w)) continue;
+            const int hidden = !om_matches(rules_weapon(w)->name);
+            snprintf(id, sizeof(id), "knOmW%d", w);
+            om_show_tile(id, hidden);
+            shown += !hidden;
+        }
+    } else {
+        int count = 0;
+        const ObjectManagerEntry *entries = object_manager_entries(tab, &count);
+        for (int i = 0; entries && i < count; i++) {
+            const int hidden = !om_matches(entries[i].name);
+            snprintf(id, sizeof(id), "knOmI%d_%d", tab, i);
+            om_show_tile(id, hidden);
+            shown += !hidden;
+        }
+    }
+    snprintf(id, sizeof(id), "knOmEmpty%d", tab);
+    const HtmlElem empty = html_dom_by_id(id);
+    if (!empty) return;
+    if (!shown) html_dom_set_text(empty, g_om.search[0] ? I18N("kn.om.noMatches", "No matches") : I18N("kn.om.nothing", "Nothing to spawn here yet"));
+    if (html_dom_has_class(empty, "knOmHid") != (shown != 0)) html_dom_set_class(empty, "knOmHid", shown != 0);
+}
+
+static void om_filter(void) {
+    if (!om_window_open() || !html_dom_by_id("knOmGrid0")) return; // the Properties panel: no grids (om_rerender brings them back)
+    for (int tab = 0; tab < OM_TAB_COUNT; tab++) om_filter_tab(tab);
+    char id[16];
+    snprintf(id, sizeof(id), "knOmGrid%d", g_om.tab);
+    const HtmlElem grid = html_dom_by_id(id);
+    if (grid) html_dom_set_scroll(grid, 0.0f, 0.0f);
+}
+
+// A tab switch: the grids are all in the page, so the shown one changes by its class. Not
+// menu_show_window (the whole window rebuilt: its menu, its i18n walk, the page restyle). The status
+// line, the tab buttons, the hint and the Clear button follow. was_props: the Properties panel was up,
+// which replaced the grids: the body is built again.
+static void om_switch_tab(const int was_props) {
+    if (!om_window_open()) return;
+    char id[16];
+    // the Tools pane beside the grids keeps its scroll (it shows the same tools; om_rerender did the same)
+    HtmlScroll tools = {0};
+    const HtmlElem tools_list = html_dom_by_id("knOmToolsList");
+    const int had_tools = tools_list && html_dom_get_scroll(tools_list, &tools);
+    if (was_props || !html_dom_by_id("knOmGrid0")) {
+        om_refresh_body();
+    } else {
+        for (int tab = 0; tab < OM_TAB_COUNT; tab++) {
+            snprintf(id, sizeof(id), "knOmGrid%d", tab);
+            const HtmlElem grid = html_dom_by_id(id);
+            if (!grid) continue;
+            const int hidden = tab != g_om.tab;
+            if (html_dom_has_class(grid, "knOmHid") != hidden) html_dom_set_class(grid, "knOmHid", hidden);
+            if (!hidden) html_dom_set_scroll(grid, 0.0f, 0.0f); // a tab's grid starts at the top (v7 switchTab)
+        }
+    }
+    om_update_status(); // the tab's status line (the Weapons tab's "extra weapons are off" and the host-only lines)
+    for (int tab = 0; tab < OM_TAB_COUNT; tab++) {
+        snprintf(id, sizeof(id), "knOmTab%d", tab);
+        const HtmlElem button = html_dom_by_id(id);
+        if (button && html_dom_has_class(button, "bigMenTabA") != (tab == g_om.tab)) html_dom_set_class(button, "bigMenTabA", tab == g_om.tab);
+    }
+    const HtmlElem hint = html_dom_by_id("knOmHint");
+    if (hint) html_dom_set_text(hint, om_hint());
+    const HtmlElem clear = html_dom_by_id("knOmClearBtn");
+    if (clear && html_dom_has_class(clear, "knOmHid") != (g_om.tab != OM_TAB_WEAPONS)) html_dom_set_class(clear, "knOmHid", g_om.tab != OM_TAB_WEAPONS);
+    const HtmlElem again = had_tools ? html_dom_by_id("knOmToolsList") : 0;
+    if (again) html_dom_set_scroll(again, tools.left, tools.top);
 }
 
 static void om_set_status(const char *text, const int error) {
@@ -949,17 +1038,15 @@ int object_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlAr
     if (!name || strncmp(name, "knOm", 4) != 0) return -1;
     if (!strcmp(name, "knOmTab")) {
         const int tab = arg_num(args, argc, 0, g_om.tab);
-        if (g_om.props_uid >= 0 && tab == g_om.tab) { // the Properties panel: back to the tab's grid
-            g_om.props_uid = -1;
-            om_rerender();
-        }
-        if (tab >= 0 && tab < OM_TAB_COUNT && tab != g_om.tab) {
+        // a tab's button: its grid (the Properties panel's Back too: props_uid -1), at the top (v7 switchTab)
+        if (tab >= 0 && tab < OM_TAB_COUNT && (tab != g_om.tab || g_om.props_uid >= 0)) {
+            const int was_props = g_om.props_uid >= 0;
             g_om.props_uid = -1;
             g_om.tab = tab;
             char value[8];
             snprintf(value, sizeof(value), "%d", tab);
             html_storage_set(OM_TAB_STORAGE, value);
-            om_rerender(); // another grid: it starts at the top (v7 switchTab)
+            om_switch_tab(was_props);
         }
         return 0;
     }
@@ -971,7 +1058,7 @@ int object_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlAr
         else if (ev && ev->value) snprintf(value, sizeof(value), "%s", ev->value);
         snprintf(g_om.search, sizeof(g_om.search), "%s", value);
         if (text) om_rerender();  // the box shows it too
-        else om_refresh_body();                               // typing: keep the box (focus, caret)
+        else om_filter();         // typing: the tiles it hides, in place (the box keeps its focus and caret)
         return 1;
     }
     if (!strcmp(name, "knOmPick")) {

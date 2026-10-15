@@ -391,12 +391,19 @@ img.knOmProp {
   line-height: 60px;
   color: rgba(255, 255, 255, 0.85);
 }
+/* a name wraps onto as many lines as the tile needs: at spaces, and a word too long for the tile
+ * breaks. v10's weapItem / killfeedItem use overflow-wrap: break-word too, with word-break: break-all
+ * (every character a break point, so a name splits mid-word even when it fits): left out here. */
 #menuWindow.dark div.knOmName {
   font-size: 14px;
   color: #fff;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: break-word;
+  line-height: 1.2;
+}
+/* the search's hidden tiles, the empty line when a tab has tiles (om_filter, om_grid_html) */
+#menuWindow.dark .knOmHid {
+  display: none !important;
 }
 #menuWindow.dark div.knOmBadge {
   position: absolute;
@@ -494,7 +501,8 @@ img.knOmProp {
   background-color: rgba(255, 255, 255, 0.05);
   color: #fff;
   font-size: 15px;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: break-word;
   cursor: pointer;
 }
 #menuWindow.dark div.knOmTool:hover {
@@ -542,7 +550,9 @@ img.knOmProp {
 #menuWindow.dark span.knOmGunName {
   font-size: 12px;
   color: #fff;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: break-word;
+  text-align: center;
 }
 #menuWindow.dark input.knOmSnapBox {
   width: 46px;

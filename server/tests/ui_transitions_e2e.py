@@ -846,7 +846,7 @@ def sc_windows():
 
 
 def sc_om_scroll():
-    """The Object Manager (F1, client/src/ui/object_manager_ui.c): its grid (#knOmGrid, a scroll
+    """The Object Manager (F1, client/src/ui/object_manager_ui.c): its grids (#knOmGrid<tab>, a scroll
     container) keeps its scrollTop through whatever a click on it does (a weapon added / taken out,
     a right-click drop, Undo / Remove / Clear Extras, object / entity / NPC spawns and their
     results, LOADOUT_EXTRA); a tab switch and a search show new results from the top. `scroll`
@@ -863,65 +863,65 @@ def sc_om_scroll():
         0 play
         1000 down F1
         1050 up F1
-        2000 check @om windowHolder=1 knOmGrid=1
-        2000 scroll @open knOmGrid
+        2000 check @om windowHolder=1 knOmGrid3=1
+        2000 scroll @open knOmGrid3
         2100 cursor {tile}
         2200 wheel -1
         2300 wheel -1
-        2800 scroll @w-wheel knOmGrid
+        2800 scroll @w-wheel knOmGrid3
         2900 click {tile}
-        3900 scroll @w-add knOmGrid
+        3900 scroll @w-add knOmGrid3
         4000 click {tile}
-        5000 scroll @w-take-out knOmGrid
+        5000 scroll @w-take-out knOmGrid3
         5100 mdown right
         5150 mup right
-        6100 scroll @w-drop knOmGrid
+        6100 scroll @w-drop knOmGrid3
         6200 clickid knOmUndoBtn
-        7200 scroll @w-undo knOmGrid
+        7200 scroll @w-undo knOmGrid3
         7300 clickid knOmRemoveBtn
-        8300 scroll @w-remove knOmGrid
+        8300 scroll @w-remove knOmGrid3
         8400 click {tile}
-        9400 scroll @w-add2 knOmGrid
+        9400 scroll @w-add2 knOmGrid3
         9500 clickid knOmClearBtn
-        10500 scroll @w-clear knOmGrid
+        10500 scroll @w-clear knOmGrid3
         10600 clickid knOmTab0
-        11300 scroll @o-tab knOmGrid
+        11300 scroll @o-tab knOmGrid0
         11400 cursor {tile}
         11500 wheel -1
         11600 wheel -1
-        12100 scroll @o-wheel knOmGrid
+        12100 scroll @o-wheel knOmGrid0
         12200 click {tile}
-        13200 scroll @o-spawn knOmGrid
+        13200 scroll @o-spawn knOmGrid0
         13300 clickid knOmTab1
-        14000 scroll @e-tab knOmGrid
+        14000 scroll @e-tab knOmGrid1
         14100 cursor {tile}
         14200 wheel -1
-        14700 scroll @e-wheel knOmGrid
+        14700 scroll @e-wheel knOmGrid1
         14800 click {tile}
-        15800 scroll @e-spawn knOmGrid
+        15800 scroll @e-spawn knOmGrid1
         15900 clickid knOmTab2
-        16600 scroll @n-tab knOmGrid
+        16600 scroll @n-tab knOmGrid2
         16700 cursor {tile}
         16800 wheel -1
-        17300 scroll @n-wheel knOmGrid
+        17300 scroll @n-wheel knOmGrid2
         17400 click {tile}
-        18400 scroll @n-spawn knOmGrid
+        18400 scroll @n-spawn knOmGrid2
         18500 clickid knOmTab3
-        19200 scroll @w-tab knOmGrid
+        19200 scroll @w-tab knOmGrid3
         19300 cursor {tile}
         19400 wheel -1
         19500 wheel -1
-        20000 scroll @w-wheel2 knOmGrid
+        20000 scroll @w-wheel2 knOmGrid3
         20100 clickid knOmSearchBox
         20600 type a
-        21300 scroll @w-search knOmGrid
+        21300 scroll @w-search knOmGrid3
         21500 quit
     """)
     if lines is None:
         return
     got = {}
     for line in lines:
-        m = re.search(r"\[input_script\] scroll t=\d+ @(\S+) knOmGrid=(\S+)", line)
+        m = re.search(r"\[input_script\] scroll t=\d+ @(\S+) knOmGrid\d=(\S+)", line)
         if m:
             got[m.group(1)] = m.group(2)
     for label, rule in probes:
