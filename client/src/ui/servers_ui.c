@@ -33,6 +33,7 @@
 #include <v10_party.h>     // the server password popup (ERROR 004005)
 #include <strike_director.h> // Krunker Strike: seek through the director, else the finder's Strike pool
 #include <recent_lobbies.h>  // F4 / Quick Match / quick join never land back in the lobby they leave
+#include <v10_studios.h>     // My Games: the Studios row (v10_studios.c)
 #include <flavor.h>
 #include <strings.h>
 #include <ctype.h>
@@ -3284,7 +3285,20 @@ static char *games_window_gen(void) {
         sb_append(&sb, "<div class='bigMFeatHold' style='margin-left:20px;background:#0b0b0b;display:inline-block;width:580px;vertical-align:top;'><div class='biMFeatInfH'>Create your own game & earn real money! Over $750,000 USD has been paid out so far!</div><div class='biMFeatInfB' onclick='openURL(`./editor.html`)'>Open Editor</div><div class='biMFeatInfB' onclick='openURL(`./games`)'>Discover Games</div><div class='biMFeatInfB' onclick='openURL(`https://discord.com/invite/Kfypyp5`)'>Dev Community</div></div>");
     }
     if (tab->owned) {
-        sb_append(&sb, "<div class='setBodH'><div class='settName'>View Game earnings and stats on your dashboard<a style='float:right' href='javascript:windows[27].tabIndex=1;showWindow(28);'>Open Dashboard</a></div><div class='settName'>Publish or create a game<a style='float:right' href='./editor.html' target='_blank'>Open Editor</a></div><div class='settName'>Learn how to make a game<a style='float:right' href='//docs.krunker.io' target='_blank'>Open Documentation</a></div></div>");
+        // v10.js 213312: the editor rows (canShowKrunkerEngine), then Studios with its pending invite
+        // count (window.setStudioInviteCount) and Manage (openStudios, v10_studios.c); the invites
+        // are asked for at most every 30 s. v10 has no Open Dashboard row any more.
+        v10_studios_poll_invites();
+        const int invites = v10_studios_invite_count();
+        sb_append(&sb, "<div class='setBodH'><div class='settName'>Publish or create a game<a style='float:right' href='./editor.html' target='_blank'>Open Editor</a></div>"
+                       "<div class='settName'>Learn how to make a game<a style='float:right' href='//docs.krunker.io' target='_blank'>Open Documentation</a></div>"
+                       "<div class='settName'>");
+        sb_append(&sb, I18N("studios.title", "Studios"));
+        sb_appendf(&sb, "<span id='studioInviteCount' class='studioInviteCount' style='display:%s'>%d</span><a style='float:right' href='javascript:;' "
+                        "onclick='openStudios()' id='knStudiosOpen'>",
+                   invites ? "inline-block" : "none", invites);
+        sb_append(&sb, I18N("studios.open", "Manage"));
+        sb_append(&sb, "</a></div></div>");
     }
     sb_append(&sb, "<div id='mapList'>");
     if (tab->search) {

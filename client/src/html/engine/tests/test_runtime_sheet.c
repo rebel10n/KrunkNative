@@ -221,6 +221,20 @@ int main(int argc, char **argv)
     check("#devConsoleOverlay", "display", "block");
     check("#devConsoleOverlay .modal", "position", "static");
 
+    /* the :disabled state follows the attribute after parsing (a page re-enabling a button with
+     * removeAttribute("disabled") left it unclickable: events.c reads the pseudo bit) */
+    {
+        static const char btn[] = "<button id=\"knDisTest\" disabled>x</button>";
+        dom_insert_html(g_dom, dom_body(g_dom), DOM_INSERT_BEFORE_END, btn, strlen(btn));
+        HtmlElem b = dom_query(g_dom, 0, "#knDisTest");
+        check_str("parsed disabled", (dom_pseudo_state(g_dom, b) & DOM_PSEUDO_DISABLED) ? "on" : "off", "on");
+        dom_remove_attr(g_dom, b, "disabled");
+        check_str("removeAttribute disabled", (dom_pseudo_state(g_dom, b) & DOM_PSEUDO_DISABLED) ? "on" : "off", "off");
+        dom_set_attr(g_dom, b, "disabled", "");
+        check_str("setAttribute disabled", (dom_pseudo_state(g_dom, b) & DOM_PSEUDO_DISABLED) ? "on" : "off", "on");
+        dom_remove(g_dom, b);
+    }
+
     /* html_ui_backend_add_stylesheet: append, register, mark everything dirty */
     char *css = read_file("ui/css/devconsole.css", &len);
     CssSheet *sheet = css_sheet_load(css, len, "css/devconsole.css");

@@ -1626,6 +1626,12 @@ static void after_attr_change(Dom *dom, ElemData *d, const char *name, size_t le
     if (is_id) {
         dom->ids_stale = 1;
     }
+    /* the :disabled state follows the attribute (it was read at parse time only: a button
+     * enabled later by removeAttribute("disabled") stayed unclickable) */
+    if (str_ieq(name, len, "disabled", 8)) {
+        if (lxb_dom_element_has_attribute(lxb_dom_interface_element(d->node), (const lxb_char_t *)"disabled", 8)) d->pseudo |= DOM_PSEUDO_DISABLED;
+        else d->pseudo &= ~(uint32_t)DOM_PSEUDO_DISABLED;
+    }
     if (attr_is_style_only(name, len)) {
         parse_style_attr(dom, d);
         mark_node(dom, d->node, DOM_DIRTY_STYLE);
