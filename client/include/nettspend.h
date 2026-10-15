@@ -54,6 +54,9 @@ NettspendWeapon nettspend_weapon_kind(int weapon_id);
 #define NETTSPEND_DRANK_COLOR 0x7b2cbf // the lean (#7b2cbf): the cup's liquid; the stream / puddles use WeaponStream.color
 #define NETTSPEND_CASH_COLOR 0x2f9e5b  // a bill's face
 #define NETTSPEND_CASH_BAND_COLOR 0xf1e6b8 // the stack's paper band / a bill's edge
+// Third person: the trigger hand's hold point is moved this far out (the arm frame's x) from the pistol's
+// (negative: the model's right), so the cup in the hand clears the torso from the over-the-shoulder camera.
+#define NETTSPEND_TP_HAND_SIDE (-1.2f)
 // The lean cup (a white styrofoam double cup, purple lean), the pour-up bottle, the fanned cash. The
 // caller owns the mesh (mesh_fini); the geometries are cached like the hose's and never freed.
 Mesh *nettspend_cup_mesh(void);

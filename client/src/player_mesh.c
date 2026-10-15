@@ -1063,8 +1063,23 @@ void player_generate_meshes(Player *player, const int render_you) {
         if (player_mesh->arms) {
             for (int i = 0; i < player->loadout_size; i++) {
                 const Weapon *weapon = player->game->weapons[player->loadout[i]];
+                // Nettspend Purple Drank in third person: the trigger hand takes the pistol's grip (offset and
+                // right hold), not the table's: the Drank's grip is the Piss hose's, low at the belly, so the cup
+                // sat at the belt line. The hand is moved out to the trigger side (NETTSPEND_TP_HAND_SIDE) so the
+                // cup clears the torso from the over-the-shoulder camera. The free (left) hand keeps the Drank's own
+                // hold. First person keeps the table's grip.
+                Weapon drank_grip;
+                const Weapon *arms_weapon = weapon;
+                if (third_person && nettspend_weapon_kind(player->loadout[i]) == NETTSPEND_WEAPON_DRANK) {
+                    const Weapon *pistol = player->game->weapons[WEAPON_ID_PISTOL];
+                    drank_grip = *weapon;
+                    drank_grip.offset = pistol->offset;
+                    drank_grip.right_hold = pistol->right_hold;
+                    drank_grip.right_hold.x += NETTSPEND_TP_HAND_SIDE;
+                    arms_weapon = &drank_grip;
+                }
 
-                PlayerArms *arms = generate_arms(weapon, colors[1], colors[5], colors[0], third_person, player->left_handed);
+                PlayerArms *arms = generate_arms(arms_weapon, colors[1], colors[5], colors[0], third_person, player->left_handed);
                 if (!arms) continue;
 
                 arms->anchor.parent = player_mesh->upper_body_anchor;
