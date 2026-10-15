@@ -3,15 +3,35 @@
  *
  * Build (throwaway, from the repository root):
  *   clang -std=c11 -g -fsanitize=address,undefined -DKN_ANIM_NO_SHEET -Iclient/src/html/engine \
- *      client/src/html/engine/anim.c client/src/html/engine/util.c \
+ *      client/src/html/engine/anim.c client/src/html/engine/css_values.c client/src/html/engine/util.c \
  *      client/src/html/engine/tests/test_anim.c -lm -o test_anim
  *   ./test_anim [path/to/ui/css]
  *
  * The 38 @keyframes blocks of ui/css/main.css (+ hud.css, krunknative.css) and two fixture ones are read with a
- * small scanner (css_sheet.c / css_values.c are not required), turned into
+ * small scanner (css_sheet.c / Lexbor are not required), turned into
  * AnimKeyframeSets, and sampled at known times.  Expected values are either
  * exact (linear/steps) or derived from an independent bisection bezier
  * solver defined here.
+ *
+ * The v10 sets of svelte.css (rewardsGlow, dsGlow, the ranked footer pulse,
+ * borderGlow, bannerShaderSweep, shopBadgeShine, smoothBezierFly) and main.css
+ * (backMov, panBackground), the .shopCard background-size transition and the
+ * `transition: all` additions (visibility, z-index, font-weight), transform
+ * lists (reward-card flip, matrix fallback, padding, slerp), color-mix()
+ * with currentColor and registered <length>/<color> customs are checked
+ * against Chrome 152's computed values at the same times, taken from our own
+ * fixture tests/anim_chrome_fixture.html (its header says how to re-run it);
+ * every number is also the CSS math noted next to it.
+ *
+ * Cascade integration (real css_sheet.c / css_cascade.c / css_values.c:
+ * @property parsing, var()/calc() re-resolve per frame, ::before/::after
+ * keys) is compiled with -DKN_ANIM_TEST_CASCADE instead of -DKN_ANIM_NO_SHEET:
+ *   clang -std=c11 -g -fsanitize=address,undefined -DKN_ANIM_TEST_CASCADE -Iclient/src/html/engine \
+ *      -Iclient/include -Ishared/include -Iclient/lib/lexbor client/src/html/engine/anim.c \
+ *      client/src/html/engine/css_values.c client/src/html/engine/css_sheet.c \
+ *      client/src/html/engine/css_cascade.c client/src/html/engine/dom.c client/src/html/engine/util.c \
+ *      client/lib/lexbor/lexbor.c client/src/html/engine/tests/test_anim.c -lm -o test_anim_cascade
+ *   ./test_anim_cascade ui/css
  */
 #include <math.h>
 #include <stdio.h>
@@ -19,7 +39,13 @@
 #include <string.h>
 
 #include "anim.h"
+#include "css_values.h"
 #include "util.h"
+#ifdef KN_ANIM_TEST_CASCADE
+#include "css_cascade.h"
+#include "css_sheet.h"
+#include "dom.h"
+#endif
 
 /* ------------------------------------------------------------------------- */
 /* Harness                                                                    */
@@ -109,6 +135,11 @@ static void base_init(CssComputed *c)
     c->line_height.kind = CSS_LEN_NORMAL;
     c->letter_spacing.kind = CSS_LEN_NORMAL;
     c->z_index_auto = 1;
+    c->font_weight = 400;
+    for (int i = 0; i < CSS_MAX_BG_LAYERS; i++) {   /* background-size: auto */
+        c->bg_layers[i].size.w.kind = CSS_LEN_AUTO;
+        c->bg_layers[i].size.h.kind = CSS_LEN_AUTO;
+    }
 }
 
 /* ------------------------------------------------------------------------- */
@@ -295,6 +326,58 @@ static int parse_filter_text(const char *s, size_t n, AnimFilterList *out)
     return 1;
 }
 
+/* `0%`, `-120px`, `top`/`left` (0%), `center` (50%), `bottom`/`right` (100%). */
+static int parse_pos_text(const char *s, size_t n, CssLength *out)
+{
+    s = kn_str_trim(s, &n);
+    CssLength l = {0};
+    l.kind = CSS_LEN_VALUE;
+    if (str_ieq_n(s, n, "top") || str_ieq_n(s, n, "left")) { *out = l; return 1; }
+    if (str_ieq_n(s, n, "center")) { l.pct = 50; *out = l; return 1; }
+    if (str_ieq_n(s, n, "bottom") || str_ieq_n(s, n, "right")) { l.pct = 100; *out = l; return 1; }
+    return parse_length_text(s, n, out);
+}
+
+/* `x y [blur [spread]] [color]` (color first or last), comma-separated. */
+static int parse_shadow_list_text(const char *s, size_t n, CssShadowList *out)
+{
+    memset(out, 0, sizeof *out);
+    const char *end = s + n;
+    while (s < end && out->count < CSS_MAX_TEXT_SHADOWS) {
+        const char *comma = s;
+        int depth = 0;
+        while (comma < end && (depth || *comma != ',')) { if (*comma == '(') depth++; if (*comma == ')') depth--; comma++; }
+        CssShadow *sh = &out->items[out->count];
+        memset(sh, 0, sizeof *sh);
+        sh->color.kind = CSS_COLOR_CURRENT;
+        float nums[4];
+        int nn = 0;
+        const char *p = s;
+        while (p < comma) {
+            p = skip_ws(p);
+            if (p >= comma) break;
+            const char *q = p;
+            depth = 0;
+            while (q < comma && (depth || !kn_is_space(*q))) { if (*q == '(') depth++; if (*q == ')') depth--; q++; }
+            CssLength l;
+            if ((*p == '-' || *p == '.' || (*p >= '0' && *p <= '9')) && parse_length_text(p, (size_t)(q - p), &l)) {
+                if (nn < 4) nums[nn++] = l.px;
+            } else if (!str_ieq_n(p, (size_t)(q - p), "currentColor") && !parse_color_text(p, (size_t)(q - p), &sh->color)) {
+                return 0;
+            }
+            p = q;
+        }
+        if (nn < 2) return 0;
+        sh->x = nums[0];
+        sh->y = nums[1];
+        sh->blur = nn > 2 ? nums[2] : 0;
+        sh->spread = nn > 3 ? nums[3] : 0;
+        out->count++;
+        s = comma + 1;
+    }
+    return 1;
+}
+
 /* Applies one `name: value` declaration to a frame.  Mirrors what the real
  * loader does with css_computed_apply() + anim_prop_mask_from_css_prop(). */
 static int kf_apply_decl(AnimKeyframeSet *set, AnimKeyframe *frame, const char *name, size_t nn,
@@ -319,6 +402,39 @@ static int kf_apply_decl(AnimKeyframeSet *set, AnimKeyframe *frame, const char *
     if (str_ieq_n(name, nn, "width")) {
         if (!parse_length_text(value, vn, &v.len)) return 0;
         anim_keyframe_set_value(set, frame, ANIM_WIDTH, &v);
+        return 1;
+    }
+    if (str_ieq_n(name, nn, "left")) {
+        if (!parse_length_text(value, vn, &v.len)) return 0;
+        anim_keyframe_set_value(set, frame, ANIM_LEFT, &v);
+        return 1;
+    }
+    if (nn > 2 && name[0] == '-' && name[1] == '-') {
+        anim_keyframe_set_custom(set, frame, kn_atom(name, nn), kn_atom(value, vn));
+        return 1;
+    }
+    if (str_ieq_n(name, nn, "text-shadow")) {
+        if (!parse_shadow_list_text(value, vn, &v.text_shadow)) return 0;
+        anim_keyframe_set_value(set, frame, ANIM_TEXT_SHADOW, &v);
+        return 1;
+    }
+    if (str_ieq_n(name, nn, "background-position") || str_ieq_n(name, nn, "background-position-x") ||
+        str_ieq_n(name, nn, "background-position-y")) {
+        CssLength x, y;
+        int both = str_ieq_n(name, nn, "background-position");
+        if (both) {   /* `X Y` */
+            const char *sp = value;
+            while (sp < value + vn && !kn_is_space(*sp)) sp++;
+            if (!parse_pos_text(value, (size_t)(sp - value), &x) || !parse_pos_text(sp, (size_t)(value + vn - sp), &y)) return 0;
+        } else if (!parse_pos_text(value, vn, &x)) {
+            return 0;
+        }
+        AnimValue vy;
+        memset(&vy, 0, sizeof vy);
+        for (int i = 0; i < CSS_MAX_BG_LAYERS; i++) { v.bg_pos[i] = x; vy.bg_pos[i] = both ? y : x; }
+        if (both || str_ieq_n(name, nn, "background-position-x")) anim_keyframe_set_value(set, frame, ANIM_BACKGROUND_POSITION_X, &v);
+        if (both) anim_keyframe_set_value(set, frame, ANIM_BACKGROUND_POSITION_Y, &vy);
+        else if (str_ieq_n(name, nn, "background-position-y")) anim_keyframe_set_value(set, frame, ANIM_BACKGROUND_POSITION_Y, &v);
         return 1;
     }
     if (str_ieq_n(name, nn, "transform")) {
@@ -393,29 +509,26 @@ static int load_keyframes_text(AnimSystem *sys, const char *text)
             const char *body = p;
             const char *close = strchr(p, '}');
             if (!close) break;
-            AnimKeyframe *frames[8];
-            for (int i = 0; i < noff; i++)
-                frames[i] = anim_keyframes_add_frame(set, offsets[i], NULL);
-            const char *d = body;
-            while (d < close) {
-                d = skip_ws(d);
-                if (d >= close) break;
-                const char *colon = memchr(d, ':', (size_t)(close - d));
-                if (!colon) break;
-                const char *semi = memchr(colon, ';', (size_t)(close - colon));
-                const char *vend = semi ? semi : close;
-                size_t nn = (size_t)(colon - d);
-                const char *nm = kn_str_trim(d, &nn);
-                size_t vn = (size_t)(vend - colon - 1);
-                const char *val = kn_str_trim(colon + 1, &vn);
-                for (int i = 0; i < noff; i++) {
-                    if (!kf_apply_decl(set, frames[i], nm, nn, val, vn)) {
+            /* one frame at a time: adding a frame may move the earlier ones (realloc) */
+            for (int i = 0; i < noff; i++) {
+                AnimKeyframe *frame = anim_keyframes_add_frame(set, offsets[i], NULL);
+                const char *d = body;
+                while (d < close) {
+                    d = skip_ws(d);
+                    if (d >= close) break;
+                    const char *colon = memchr(d, ':', (size_t)(close - d));
+                    if (!colon) break;
+                    const char *semi = memchr(colon, ';', (size_t)(close - colon));
+                    const char *vend = semi ? semi : close;
+                    size_t nn = (size_t)(colon - d);
+                    const char *nm = kn_str_trim(d, &nn);
+                    size_t vn = (size_t)(vend - colon - 1);
+                    const char *val = kn_str_trim(colon + 1, &vn);
+                    if (!kf_apply_decl(set, frame, nm, nn, val, vn) && i == 0)
                         fprintf(stderr, "  (keyframes %.*s: unhandled %.*s: %.*s)\n",
                                 (int)name_len, name, (int)nn, nm, (int)vn, val);
-                        break;
-                    }
+                    d = vend + 1;
                 }
-                d = vend + 1;
             }
             p = close + 1;
         }
@@ -509,9 +622,11 @@ static void test_prop_masks(void)
     CHECK(anim_prop_mask_from_css_prop(CSS_PROP_DISPLAY) == 0);
     CHECK(anim_prop_mask_from_css_prop(CSS_PROP_ANIMATION) == 0);
     CHECK(anim_prop_from_css_prop(CSS_PROP_FILTER) == ANIM_FILTER);
-    CHECK(anim_prop_from_css_prop(CSS_PROP_Z_INDEX) == -1);
+    CHECK(anim_prop_from_css_prop(CSS_PROP_Z_INDEX) == ANIM_Z_INDEX);
+    CHECK(anim_prop_from_css_prop(CSS_PROP_DISPLAY) == -1);
     CHECK(anim_prop_dirty_flags(ANIM_FONT_SIZE) == ANIM_DIRTY_LAYOUT);
-    CHECK(anim_prop_dirty_flags(ANIM_TRANSFORM) == ANIM_DIRTY_PAINT);
+    CHECK(anim_prop_dirty_flags(ANIM_TRANSFORM) == ANIM_DIRTY_TRANSFORM);
+    CHECK(anim_prop_dirty_flags(ANIM_VISIBILITY) == ANIM_DIRTY_REBUILD);
     CHECK(!strcmp(anim_prop_name(ANIM_BORDER_RIGHT_COLOR), "border-right-color"));
 
     /* get/set round trip through CssComputed */
@@ -564,13 +679,23 @@ static void test_value_lerp(void)
     anim_value_lerp(ANIM_TRANSFORM, &a, &b, 0.5f, &o);
     CHECK(o.transform.count == 1 && o.transform.ops[0].kind == CSS_TRANSFORM_SCALE);
     CHECK_NEAR(o.transform.ops[0].sx, 0.75, 1e-6);
-    /* mismatched structure: discrete at 50% */
+    /* mismatched primitives: matrix interpolation of the decomposed lists (Chrome; fixture #mx:
+     * rotate(90deg) -> scale(0.5) at 50% = matrix(0.53033, 0.53033, -0.53033, 0.53033, 0, 0)) */
     a.transform.count = 1; a.transform.ops[0].kind = CSS_TRANSFORM_ROTATE; a.transform.ops[0].angle_deg = 90;
+    CHECK(anim_value_interpolable(ANIM_TRANSFORM, &a, &b));
+    anim_value_lerp(ANIM_TRANSFORM, &a, &b, 0.5f, &o);
+    CHECK(o.transform.count == 1 && o.transform.ops[0].kind == CSS_TRANSFORM_MATRIX);
+    CHECK_NEAR(o.transform.ops[0].m.a, 0.53033, 1e-4); CHECK_NEAR(o.transform.ops[0].m.b, 0.53033, 1e-4);
+    CHECK_NEAR(o.transform.ops[0].m.c, -0.53033, 1e-4); CHECK_NEAR(o.transform.ops[0].m.d, 0.53033, 1e-4);
+    /* a percentage translation in the remainder needs the box: discrete at 50% */
+    a.transform.count = 2; a.transform.ops[1].kind = CSS_TRANSFORM_TRANSLATE;
+    a.transform.ops[1].tx.kind = CSS_LEN_VALUE; a.transform.ops[1].tx.pct = -50; a.transform.ops[1].ty = len_px(0);
     CHECK(!anim_value_interpolable(ANIM_TRANSFORM, &a, &b));
     anim_value_lerp(ANIM_TRANSFORM, &a, &b, 0.49f, &o);
-    CHECK(o.transform.ops[0].kind == CSS_TRANSFORM_ROTATE);
+    CHECK(o.transform.count == 2 && o.transform.ops[0].kind == CSS_TRANSFORM_ROTATE);
     anim_value_lerp(ANIM_TRANSFORM, &a, &b, 0.5f, &o);
-    CHECK(o.transform.ops[0].kind == CSS_TRANSFORM_SCALE);
+    CHECK(o.transform.count == 1 && o.transform.ops[0].kind == CSS_TRANSFORM_SCALE);
+    a.transform.count = 1;
     /* translate pairwise */
     a.transform.ops[0].kind = CSS_TRANSFORM_TRANSLATE; a.transform.ops[0].tx = len_px(-6); a.transform.ops[0].ty = len_px(0);
     b.transform.ops[0].kind = CSS_TRANSFORM_TRANSLATE; b.transform.ops[0].tx = len_px(8); b.transform.ops[0].ty = len_px(0);
@@ -962,17 +1087,18 @@ static void test_transition_all(void)
     CHECK(ne == 1);   /* snapshot kept because the style declares a transition */
 
     base.border_width[CSS_LEFT] = 10.0f;
-    base.border_color[CSS_LEFT] = rgba(255, 255, 255, 255);   /* currentColor -> rgb: discrete, no transition */
+    base.border_color[CSS_LEFT] = rgba(255, 255, 255, 255);   /* currentColor (black) -> white: interpolates (Blink) */
     base.border_style[CSS_LEFT] = CSS_BORDER_STYLE_SOLID;
     CHECK(anim_update_elem(&g_sys, e, &base, t0) == 1);
     uint32_t nt;
     anim_stats(&g_sys, NULL, NULL, &nt);
-    CHECK(nt == 1);
+    CHECK(nt == 2);
 
     CHECK(sample(e, &base, &out, t0, &r));
     CHECK_NEAR(r->border_width[CSS_LEFT], 0, 1e-6);
-    CHECK(r->border_color[CSS_LEFT].r == 255);   /* discrete change lands immediately */
+    CHECK(r->border_color[CSS_LEFT].kind == CSS_COLOR_CURRENT);   /* the start value itself */
     CHECK(sample(e, &base, &out, t0 + 75, &r));
+    CHECK(r->border_color[CSS_LEFT].kind == CSS_COLOR_RGBA && r->border_color[CSS_LEFT].r == 128);
     CHECK_NEAR(r->border_width[CSS_LEFT], 10 * ref_ease_in_out(0.5), 1e-4);   /* = 5 */
     CHECK_NEAR(r->border_width[CSS_LEFT], 5, 1e-4);
     CHECK(sample(e, &base, &out, t0 + 150, &r));
@@ -983,7 +1109,7 @@ static void test_transition_all(void)
     CHECK(anim_next_wakeup(&g_sys, t0 + 10) == t0 + 10);
     dirty_reset();
     anim_tick(&g_sys, t0 + 75);
-    CHECK(g_dirty.calls == 1 && g_dirty.flags == ANIM_DIRTY_LAYOUT);
+    CHECK(g_dirty.calls == 1 && g_dirty.flags == (ANIM_DIRTY_LAYOUT | ANIM_DIRTY_PAINT));
     dirty_reset();
     anim_tick(&g_sys, t0 + 150);
     CHECK(g_dirty.calls == 1);   /* final settle, then dropped */
@@ -1189,6 +1315,890 @@ static void test_many_elements(void)
     CHECK(ne == 0);
 }
 
+
+/* ------------------------------------------------------------------------- */
+/* E1: v10 keyframes vs Chrome 152 (tests/anim_chrome_fixture.html)           */
+/* ------------------------------------------------------------------------- */
+
+static CssLength len_pct(float pct) { CssLength l = {0}; l.pct = pct; l.kind = CSS_LEN_VALUE; return l; }
+
+static void set_bg_pos(CssComputed *c, CssLength x, CssLength y)
+{
+    for (int i = 0; i < CSS_MAX_BG_LAYERS; i++) { c->bg_layers[i].x = x; c->bg_layers[i].y = y; }
+}
+
+static void run_anim(CssComputed *base, const char *name, float dur, float iters, CssTiming timing, int dir, int fill)
+{
+    base->animations[0] = anim_decl(name, dur, 0, iters, timing, dir, fill);
+    base->animation_count = 1;
+}
+
+/* main.css #homeStoreAdC { background-position-y: top; animation: backMov 18s infinite }
+ * @keyframes backMov { 50% { background-position-y: bottom } }: 0% -> 100% -> 0%, ease per half. */
+static void test_back_mov(void)
+{
+    CssComputed base, out;
+    const CssComputed *r;
+    base_init(&base);
+    set_bg_pos(&base, len_pct(0), len_pct(0));
+    run_anim(&base, "backMov", 18, INFINITY, timing_kind(CSS_TIMING_EASE), CSS_ANIM_DIRECTION_NORMAL, CSS_ANIM_FILL_NONE);
+    HtmlElem e = 300;
+    const double t0 = 5000;
+    CHECK(anim_update_elem(&g_sys, e, &base, t0) == 1);
+    static const struct { double t; double pct; } chrome[] = {   /* 100 * ease(t / 9000) on the way down */
+        { 0, 0 }, { 2250, 40.8511 }, { 4500, 80.2403 }, { 9000, 100 }, { 13500, 19.7597 }, { 17000, 0.706896 },
+    };
+    for (size_t i = 0; i < sizeof chrome / sizeof chrome[0]; i++) {
+        CHECK(sample(e, &base, &out, t0 + chrome[i].t, &r));
+        CHECK_NEAR(r->bg_layers[0].y.pct, chrome[i].pct, 2e-3);
+        CHECK_NEAR(r->bg_layers[1].y.pct, chrome[i].pct, 2e-3);
+        CHECK_NEAR(r->bg_layers[0].x.pct, 0, 1e-6);   /* -x is not animated */
+    }
+    CHECK_NEAR(r->bg_layers[0].y.pct, 100 * (1 - ref_ease(8000.0 / 9000.0)), 1e-3);   /* 17000: 2nd half, 8/9 done */
+    dirty_reset();
+    anim_tick(&g_sys, t0 + 100);
+    CHECK(g_dirty.flags == ANIM_DIRTY_PAINT);
+    anim_remove_elem(&g_sys, e);
+}
+
+/* main.css .logVersionHed { animation: panBackground 10s infinite; animation-direction: alternate }
+ * from { background-position: 0px 0px } to { 0px -120px } */
+static void test_pan_background(void)
+{
+    CssComputed base, out;
+    const CssComputed *r;
+    base_init(&base);
+    run_anim(&base, "panBackground", 10, INFINITY, timing_kind(CSS_TIMING_EASE), CSS_ANIM_DIRECTION_ALTERNATE, CSS_ANIM_FILL_NONE);
+    HtmlElem e = 301;
+    CHECK(anim_update_elem(&g_sys, e, &base, 0) == 1);
+    static const struct { double t; double px; } chrome[] = {   /* -120 * ease(p), p reversed on odd iterations */
+        { 0, 0 }, { 2500, -49.0213 }, { 5000, -96.2884 }, { 12500, -115.255 },
+    };
+    for (size_t i = 0; i < sizeof chrome / sizeof chrome[0]; i++) {
+        CHECK(sample(e, &base, &out, chrome[i].t, &r));
+        CHECK_NEAR(r->bg_layers[0].y.px, chrome[i].px, 2e-3);
+        CHECK_NEAR(r->bg_layers[0].x.px, 0, 1e-6);
+    }
+    CHECK_NEAR(r->bg_layers[0].y.px, -120 * ref_ease(0.75), 1e-3);
+    /* zoom: keyframe px scale with the element (Chrome zooms computed lengths) */
+    base.zoom = 2.0f;
+    CHECK(sample(e, &base, &out, 2500, &r));
+    CHECK_NEAR(r->bg_layers[0].y.px, -2 * 49.0213, 4e-3);
+    anim_remove_elem(&g_sys, e);
+}
+
+/* Percentage background-position sets on an element and on a pseudo-element key:
+ * svelte-mqcul7-pulse (.footer.svelte-mqcul7::before, 4s ease-in-out),
+ * svelte-m5s1iy-borderGlow (3s linear), svelte-1w0uz1r-bannerShaderSweep (3s linear). */
+static void test_bg_pos_pct_sets(void)
+{
+    CssComputed base, out;
+    const CssComputed *r;
+    const HtmlElem e = 302, before = ANIM_KEY(302, ANIM_PSEUDO_BEFORE);
+    CHECK(ANIM_KEY_ELEM(before) == e && ANIM_KEY_PSEUDO(before) == ANIM_PSEUDO_BEFORE);
+
+    /* the element itself has no animation; its ::before runs the pulse */
+    base_init(&base);
+    CHECK(anim_update_elem(&g_sys, e, &base, 0) == 0);
+    run_anim(&base, "svelte-mqcul7-pulse", 4, INFINITY, timing_kind(CSS_TIMING_EASE_IN_OUT), CSS_ANIM_DIRECTION_NORMAL, CSS_ANIM_FILL_NONE);
+    CHECK(anim_update_elem(&g_sys, before, &base, 0) == 1);
+    static const struct { double t; double pct; } pulse[] = {   /* 100 * ease-in-out(t / 2000), mirrored */
+        { 0, 0 }, { 500, 12.9162 }, { 1000, 50 }, { 2000, 100 }, { 3000, 50 },
+    };
+    for (size_t i = 0; i < sizeof pulse / sizeof pulse[0]; i++) {
+        CHECK(sample(before, &base, &out, pulse[i].t, &r));
+        CHECK_NEAR(r->bg_layers[0].x.pct, pulse[i].pct, 2e-3);
+        CHECK_NEAR(r->bg_layers[0].y.pct, 50, 1e-4);
+    }
+    CHECK_NEAR(r->bg_layers[0].x.pct, 100 * ref_ease_in_out(0.5), 1e-3);
+    CHECK(!sample(e, &base, &out, 500, &r));   /* separate targets */
+    dirty_reset();
+    anim_tick(&g_sys, 10);
+    CHECK(g_dirty.elem == before && g_dirty.flags == ANIM_DIRTY_PAINT);
+    anim_remove_elem(&g_sys, before);
+
+    base_init(&base);
+    run_anim(&base, "svelte-m5s1iy-borderGlow", 3, INFINITY, timing_kind(CSS_TIMING_LINEAR), CSS_ANIM_DIRECTION_NORMAL, CSS_ANIM_FILL_NONE);
+    CHECK(anim_update_elem(&g_sys, e, &base, 0) == 1);
+    CHECK(sample(e, &base, &out, 750, &r));
+    CHECK_NEAR(r->bg_layers[0].x.pct, 50, 1e-3);
+    CHECK(sample(e, &base, &out, 2250, &r));
+    CHECK_NEAR(r->bg_layers[0].x.pct, 50, 1e-3);
+
+    run_anim(&base, "svelte-1w0uz1r-bannerShaderSweep", 3, INFINITY, timing_kind(CSS_TIMING_LINEAR), CSS_ANIM_DIRECTION_NORMAL, CSS_ANIM_FILL_NONE);
+    CHECK(anim_update_elem(&g_sys, e, &base, 0) == 1);   /* name changed: restarts at 0 */
+    CHECK(sample(e, &base, &out, 1000, &r));
+    CHECK_NEAR(r->bg_layers[0].x.pct, 100, 1e-3);
+    CHECK(sample(e, &base, &out, 2900, &r));
+    CHECK_NEAR(r->bg_layers[0].x.pct, 290, 1e-3);
+    anim_remove_elem(&g_sys, e);
+}
+
+static int alpha_near(const CssColor *c, double a, int tol)
+{
+    return c->kind == CSS_COLOR_RGBA && abs((int)c->a - (int)lround(a * 255)) <= tol;
+}
+
+/* text-shadow: svelte-da3zva-rewardsGlow (= krSaleGlow = buffGlow), svelte-159x57l-dsGlow. */
+static void test_text_shadow_glows(void)
+{
+    CssComputed base, out;
+    const CssComputed *r;
+    base_init(&base);
+    base.color = rgba(255, 213, 79, 255);
+    base.text_shadow.count = 1;
+    base.text_shadow.items[0].blur = 6;
+    base.text_shadow.items[0].color = rgba(255, 213, 79, 77);
+    HtmlElem e = 303;
+    const char *glows[] = { "svelte-da3zva-rewardsGlow", "svelte-159x57l-krSaleGlow", "svelte-1we2ubc-buffGlow" };
+    for (int g = 0; g < 3; g++) {
+        run_anim(&base, glows[g], 3, INFINITY, timing_kind(CSS_TIMING_EASE_IN_OUT), CSS_ANIM_DIRECTION_NORMAL, CSS_ANIM_FILL_NONE);
+        CHECK(anim_update_elem(&g_sys, e, &base, 0) == 1);
+        static const struct { double t, blur, alpha; } chrome[] = {   /* 6 + 4 * ease-in-out(t / 1500), mirrored */
+            { 0, 6, 0.3 }, { 375, 6.51665, 0.33 }, { 750, 8, 0.404 }, { 1500, 10, 0.5 }, { 2250, 8, 0.404 },
+        };
+        for (size_t i = 0; i < sizeof chrome / sizeof chrome[0]; i++) {
+            CHECK(sample(e, &base, &out, chrome[i].t, &r));
+            CHECK(r->text_shadow.count == 1);
+            CHECK_NEAR(r->text_shadow.items[0].blur, chrome[i].blur, 2e-4);
+            CHECK(alpha_near(&r->text_shadow.items[0].color, chrome[i].alpha, 1));
+            CHECK(r->text_shadow.items[0].color.r == 255 && r->text_shadow.items[0].color.g == 213 &&
+                  r->text_shadow.items[0].color.b == 79);
+        }
+        CHECK(sample(e, &base, &out, 750, &r));
+        CHECK(r->text_shadow.items[0].color.a == 103);   /* (77 + 128) / 2 = 102.5 -> 103 = Chrome's 0.404 */
+    }
+    dirty_reset();
+    anim_tick(&g_sys, 10);
+    CHECK(g_dirty.flags == ANIM_DIRTY_PAINT);
+
+    run_anim(&base, "svelte-159x57l-dsGlow", 2, INFINITY, timing_kind(CSS_TIMING_EASE_IN_OUT), CSS_ANIM_DIRECTION_ALTERNATE, CSS_ANIM_FILL_NONE);
+    CHECK(anim_update_elem(&g_sys, e, &base, 0) == 1);
+    static const struct { double t, blur, alpha; } ds[] = {   /* 4 + 6 * ease-in-out(p) */
+        { 0, 4, 0.3 }, { 500, 4.77497, 0.34 }, { 2500, 9.22503, 0.56 },
+    };
+    for (size_t i = 0; i < sizeof ds / sizeof ds[0]; i++) {
+        CHECK(sample(e, &base, &out, ds[i].t, &r));
+        CHECK_NEAR(r->text_shadow.items[0].blur, ds[i].blur, 2e-4);
+        CHECK(alpha_near(&r->text_shadow.items[0].color, ds[i].alpha, 1));
+        CHECK(r->text_shadow.items[0].color.r == 158 && r->text_shadow.items[0].color.g == 235);
+    }
+    anim_remove_elem(&g_sys, e);
+}
+
+/* Lists of different lengths pad with transparent black; currentColor follows `color`. */
+static void test_text_shadow_lists(void)
+{
+    AnimKeyframeSet *set = anim_keyframes_begin(&g_sys, "e1-tsl", 6);
+    AnimKeyframe *f0 = anim_keyframes_add_frame(set, 0, NULL), *f1 = anim_keyframes_add_frame(set, 1, NULL);
+    AnimValue v;
+    memset(&v, 0, sizeof v);
+    v.text_shadow.count = 1;
+    v.text_shadow.items[0].blur = 4;
+    v.text_shadow.items[0].color = rgba(255, 0, 0, 255);
+    anim_keyframe_set_value(set, f0, ANIM_TEXT_SHADOW, &v);
+    memset(&v, 0, sizeof v);
+    v.text_shadow.count = 2;
+    v.text_shadow.items[0].x = v.text_shadow.items[0].y = 2;
+    v.text_shadow.items[0].color = rgba(0, 128, 0, 255);
+    v.text_shadow.items[1].x = v.text_shadow.items[1].y = 4;
+    v.text_shadow.items[1].blur = 2;
+    v.text_shadow.items[1].color.kind = CSS_COLOR_CURRENT;
+    anim_keyframe_set_value(set, f1, ANIM_TEXT_SHADOW, &v);
+
+    CssComputed base, out;
+    const CssComputed *r;
+    base_init(&base);
+    base.color = rgba(0, 0, 255, 255);
+    run_anim(&base, "e1-tsl", 1, 1, timing_kind(CSS_TIMING_LINEAR), CSS_ANIM_DIRECTION_NORMAL, CSS_ANIM_FILL_NONE);
+    HtmlElem e = 304;
+    CHECK(anim_update_elem(&g_sys, e, &base, 0) == 1);
+    /* Chrome: rgb(191, 32, 0) 0.5px 0.5px 3px, rgba(0, 0, 255, 0.25) 1px 1px 0.5px */
+    CHECK(sample(e, &base, &out, 250, &r));
+    CHECK(r->text_shadow.count == 2);
+    const CssShadow *a = &r->text_shadow.items[0], *b = &r->text_shadow.items[1];
+    CHECK(a->color.r == 191 && a->color.g == 32 && a->color.b == 0 && a->color.a == 255);
+    CHECK_NEAR(a->x, 0.5, 1e-5); CHECK_NEAR(a->blur, 3, 1e-5);
+    CHECK(b->color.r == 0 && b->color.g == 0 && b->color.b == 255 && b->color.a == 64);
+    CHECK_NEAR(b->x, 1, 1e-5); CHECK_NEAR(b->blur, 0.5, 1e-5);
+    /* Chrome: rgb(128, 64, 0) 1px 1px 2px, rgba(0, 0, 255, 0.5) 2px 2px 1px */
+    CHECK(sample(e, &base, &out, 500, &r));
+    CHECK(r->text_shadow.items[0].color.r == 128 && r->text_shadow.items[0].color.g == 64);
+    CHECK(r->text_shadow.items[1].color.b == 255 && r->text_shadow.items[1].color.a == 128);
+    anim_remove_elem(&g_sys, e);
+}
+
+/* .shop-badge.svelte-159x57l::after { left: -60%; animation: shopBadgeShine 2.6s ease-in-out infinite }
+ * 0% { left: -60% } 55%, 100% { left: 130% } (Chrome reports px of a 200px containing block). */
+static void test_shop_badge_shine(void)
+{
+    CssComputed base, out;
+    const CssComputed *r;
+    base_init(&base);
+    base.position = CSS_POSITION_ABSOLUTE;
+    base.inset[CSS_LEFT] = len_pct(-60);
+    run_anim(&base, "svelte-159x57l-shopBadgeShine", 2.6f, INFINITY, timing_kind(CSS_TIMING_EASE_IN_OUT),
+             CSS_ANIM_DIRECTION_NORMAL, CSS_ANIM_FILL_NONE);
+    const HtmlElem after = ANIM_KEY(305, ANIM_PSEUDO_AFTER);
+    CHECK(anim_update_elem(&g_sys, after, &base, 0) == 1);
+    /* Chrome's getComputedStyle(left) is the laid-out px, snapped to LayoutUnit
+     * (1/64 px, towards zero): -70.91847 -> -70.90625 ("-70.9062px"). */
+    static const struct { double t, px; } chrome[] = {   /* 2 * (-60 + 190 * ease-in-out(t / 1430)) */
+        { 0, -120 }, { 357.5, -70.9062 }, { 715, 70 }, { 1430, 260 }, { 2000, 260 },
+    };
+    for (size_t i = 0; i < sizeof chrome / sizeof chrome[0]; i++) {
+        CHECK(sample(after, &base, &out, chrome[i].t, &r));
+        CHECK_NEAR(r->inset[CSS_LEFT].pct * 2.0, chrome[i].px, 1.0 / 64.0);
+        double f = chrome[i].t / 1430.0;
+        CHECK_NEAR(r->inset[CSS_LEFT].pct, f >= 1 ? 130 : -60 + 190 * ref_ease_in_out(f), 1e-3);
+    }
+    dirty_reset();
+    anim_tick(&g_sys, 10);
+    CHECK(g_dirty.elem == after && g_dirty.flags == ANIM_DIRTY_LAYOUT);
+    anim_remove_elem(&g_sys, after);
+}
+
+/* main.css .shopCard { background-size: 101%; transition: opacity .1s ease, background-size .1s ease,
+ * background-position .1s ease } .shopCard:hover { background-size: 110% } (3-entry list). */
+static void test_shop_card_zoom(void)
+{
+    CssComputed base, out;
+    const CssComputed *r;
+    base_init(&base);
+    for (int i = 0; i < CSS_MAX_BG_LAYERS; i++) base.bg_layers[i].size.w = len_pct(101);
+    set_bg_pos(&base, len_pct(50), len_pct(50));
+    base.transitions[0] = trans_decl(CSS_PROP_OPACITY, 0.1f, 0, timing_kind(CSS_TIMING_EASE));
+    base.transitions[1] = trans_decl(CSS_PROP_BACKGROUND_SIZE, 0.1f, 0, timing_kind(CSS_TIMING_EASE));
+    base.transitions[2] = trans_decl(CSS_PROP_BACKGROUND_POSITION, 0.1f, 0, timing_kind(CSS_TIMING_EASE));
+    base.transition_count = 3;
+    HtmlElem e = 306;
+    CHECK(anim_update_elem(&g_sys, e, &base, 0) == 0);
+    for (int i = 0; i < CSS_MAX_BG_LAYERS; i++) base.bg_layers[i].size.w = len_pct(110);
+    set_bg_pos(&base, len_pct(50), len_px(10));   /* the 3rd entry is honoured too */
+    CHECK(anim_update_elem(&g_sys, e, &base, 1000) == 1);
+    static const struct { double t, pct; } chrome[] = { { 0, 101 }, { 25, 104.677 }, { 50, 108.222 }, { 75, 109.644 } };
+    for (size_t i = 0; i < sizeof chrome / sizeof chrome[0]; i++) {
+        CHECK(sample(e, &base, &out, 1000 + chrome[i].t, &r));
+        CHECK_NEAR(r->bg_layers[0].size.w.pct, chrome[i].pct, 2e-3);   /* 101 + 9 * ease(t / 100) */
+        CHECK(r->bg_layers[0].size.h.kind == CSS_LEN_AUTO);
+    }
+    CHECK(sample(e, &base, &out, 1050, &r));
+    CHECK_NEAR(r->bg_layers[0].y.pct, 50 * (1 - ref_ease(0.5)), 1e-3);   /* 50% -> 10px: calc() mix */
+    CHECK_NEAR(r->bg_layers[0].y.px, 10 * ref_ease(0.5), 1e-3);
+    /* cover <-> length: not interpolable, no transition (Blink) */
+    anim_tick(&g_sys, 1200);   /* drops the finished transitions */
+    base.bg_layers[0].size.kind = CSS_BG_SIZE_COVER;
+    CHECK(anim_update_elem(&g_sys, e, &base, 2000) == 0);
+    anim_remove_elem(&g_sys, e);
+
+    CssComputed a, b;
+    AnimValue va, vb, vo;
+    base_init(&a);
+    base_init(&b);
+    b.bg_layers[0].size.w = len_px(40);   /* auto -> 40px: incompatible, flips at 50% */
+    anim_value_get(&a, ANIM_BACKGROUND_SIZE, &va);
+    anim_value_get(&b, ANIM_BACKGROUND_SIZE, &vb);
+    CHECK(!anim_value_interpolable(ANIM_BACKGROUND_SIZE, &va, &vb));
+    anim_value_lerp(ANIM_BACKGROUND_SIZE, &va, &vb, 0.49f, &vo);
+    CHECK(vo.bg_size[0].w.kind == CSS_LEN_AUTO);
+    anim_value_lerp(ANIM_BACKGROUND_SIZE, &va, &vb, 0.5f, &vo);
+    CHECK(vo.bg_size[0].w.kind == CSS_LEN_VALUE && vo.bg_size[0].w.px == 40);
+}
+
+/* `transition: all 1s linear` covering visibility, z-index and font-weight (Chrome values). */
+static void test_transition_all_discrete_ints(void)
+{
+    CssComputed base, out;
+    const CssComputed *r;
+    base_init(&base);
+    base.z_index = 1;
+    base.z_index_auto = 0;
+    base.transitions[0] = trans_decl(CSS_PROP_ALL, 1, 0, timing_kind(CSS_TIMING_LINEAR));
+    base.transition_count = 1;
+    HtmlElem e = 307;
+    CHECK(anim_update_elem(&g_sys, e, &base, 0) == 0);
+    base.visibility = CSS_VISIBILITY_HIDDEN;
+    base.z_index = 10;
+    base.font_weight = 700;
+    CHECK(anim_update_elem(&g_sys, e, &base, 1000) == 1);
+    static const struct { double t; int z; } zs[] = { { 0, 1 }, { 250, 3 }, { 500, 6 }, { 750, 8 } };   /* round(1 + 9p) */
+    for (size_t i = 0; i < sizeof zs / sizeof zs[0]; i++) {
+        CHECK(sample(e, &base, &out, 1000 + zs[i].t, &r));
+        CHECK(r->z_index == zs[i].z && !r->z_index_auto);
+        CHECK(r->visibility == CSS_VISIBILITY_VISIBLE);   /* visible until the very end */
+    }
+    CHECK(sample(e, &base, &out, 1250, &r) && r->font_weight == 475);
+    CHECK(sample(e, &base, &out, 1500, &r) && r->font_weight == 550);
+    CHECK(sample(e, &base, &out, 1999, &r) && r->visibility == CSS_VISIBILITY_VISIBLE);
+    dirty_reset();
+    anim_tick(&g_sys, 1500);
+    CHECK(g_dirty.flags & ANIM_DIRTY_REBUILD);
+    anim_tick(&g_sys, 2000);
+    CHECK(!sample(e, &base, &out, 2000, &r));   /* finished: base (hidden) */
+    /* hidden -> visible: visible at once; auto z-index: discrete, no transition */
+    base.visibility = CSS_VISIBILITY_VISIBLE;
+    base.z_index_auto = 1;
+    CHECK(anim_update_elem(&g_sys, e, &base, 3000) == 1);
+    CHECK(sample(e, &base, &out, 3001, &r) && r->visibility == CSS_VISIBILITY_VISIBLE);
+    CHECK(r->z_index_auto == 1);
+    anim_remove_elem(&g_sys, e);
+    /* neither side visible: discrete (not transitioned) */
+    AnimValue a, b;
+    memset(&a, 0, sizeof a);
+    memset(&b, 0, sizeof b);
+    a.kw = CSS_VISIBILITY_HIDDEN;
+    b.kw = CSS_VISIBILITY_COLLAPSE;
+    CHECK(!anim_value_interpolable(ANIM_VISIBILITY, &a, &b));
+}
+
+static double custom_number(const CssComputed *c, const char *name)
+{
+    const char *atom = kn_atom_cstr(name);
+    for (int i = 0; i < c->custom_count; i++)
+        if (c->custom[i].name == atom) return strtod(c->custom[i].value, NULL);
+    return NAN;
+}
+
+/* svelte.css @property --progress { syntax: '<number>'; inherits: false; initial-value: 0 }
+ * .flying-currency.animated { animation: svelte-cow1ce-smoothBezierFly var(--duration)
+ * cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards } with left = the quadratic Bezier of --progress.
+ * The fixture uses start 100px, mid 300px, end 900px and a 1000ms duration. */
+static void test_registered_progress(void)
+{
+    /* the css_values.c registry (inherits / initial-value semantics: the cascade test) */
+    const int id = css_property_register("--progress", 10, "'<number>'", 10, "false", 5, "0", 1);
+    CHECK(id != CSS_PROP_INVALID);
+    const CssRegisteredProperty *reg = css_property_registration(id);
+    CHECK(reg && reg->syntax == CSS_SYNTAX_NUMBER && !reg->inherits && reg->initial == kn_atom_cstr("0"));
+
+    const AnimKeyframeSet *set = anim_keyframes_find(&g_sys, kn_atom_cstr("svelte-cow1ce-smoothBezierFly"));
+    CHECK(set && set->custom_name_count == 1 && set->custom_names[0] == kn_atom_cstr("--progress"));
+    CHECK(set && (set->props & ANIM_PROP_BIT(ANIM_OPACITY)) && (set->props & ANIM_PROP_BIT(ANIM_TRANSFORM)));
+
+    CssComputed base, cas, out;
+    const CssComputed *r;
+    base_init(&base);
+    base.custom[0].name = kn_atom_cstr("--progress");   /* .flying-currency { --progress: 0.7 } */
+    base.custom[0].value = kn_atom_cstr("0.7");
+    base.custom_count = 1;
+    cas = base;
+    anim_custom_fixup(&g_sys, 308, &cas, 0);           /* no animation: untouched */
+    CHECK_NEAR(custom_number(&cas, "--progress"), 0.7, 0);
+
+    run_anim(&base, "svelte-cow1ce-smoothBezierFly", 1, 1, timing_bezier(0.25f, 0.46f, 0.45f, 0.94f),
+             CSS_ANIM_DIRECTION_NORMAL, CSS_ANIM_FILL_FORWARDS);
+    HtmlElem e = 308;
+    dirty_reset();
+    CHECK(anim_update_elem(&g_sys, e, &base, 0) == 1);
+    CHECK(g_dirty.calls == 1 && g_dirty.flags == ANIM_DIRTY_CUSTOM);   /* re-cascade with the animated value */
+    static const struct { double t, left; } chrome[] = {
+        { 0, 100 }, { 200, 100 }, { 350, 363.57 }, { 500, 646.506 }, { 650, 824.902 }, { 800, 900 }, { 1000, 900 }, { 5000, 900 },
+    };
+    for (size_t i = 0; i < sizeof chrome / sizeof chrome[0]; i++) {
+        cas = base;
+        anim_custom_fixup(&g_sys, e, &cas, chrome[i].t);
+        double p = custom_number(&cas, "--progress");
+        double left = 100 * (1 - p) * (1 - p) + 300 * 2 * (1 - p) * p + 900 * p * p;
+        CHECK_NEAR(left, chrome[i].left, 0.1);   /* values are quantized to 1e-4 */
+    }
+    cas = base;
+    anim_custom_fixup(&g_sys, e, &cas, 350);
+    CHECK_NEAR(custom_number(&cas, "--progress"), ref_bezier(0.25, 0.46, 0.45, 0.94, 0.25), 1e-4);
+    CHECK(sample(e, &base, &out, 100, &r));
+    CHECK_NEAR(r->opacity, 0.771324, 1e-4);   /* Chrome; = bezier(0.5) between 0% and 20% */
+    CHECK(sample(e, &base, &out, 900, &r));
+    CHECK_NEAR(r->opacity, 0.537206, 1e-4);
+    dirty_reset();
+    anim_tick(&g_sys, 400);
+    CHECK(g_dirty.flags & ANIM_DIRTY_CUSTOM);
+    /* the animation stops (class removed): one more re-cascade without it */
+    base.animation_count = 0;
+    base.animations[0].name = NULL;
+    dirty_reset();
+    CHECK(anim_update_elem(&g_sys, e, &base, 1200) == 0);
+    CHECK(g_dirty.calls == 1 && g_dirty.flags == ANIM_DIRTY_CUSTOM);
+    cas = base;
+    anim_custom_fixup(&g_sys, e, &cas, 1200);
+    CHECK_NEAR(custom_number(&cas, "--progress"), 0.7, 0);   /* untouched */
+}
+
+/* Unregistered custom properties animate discretely, flipping at 50% of the eased interval. */
+static void test_unregistered_custom(void)
+{
+    AnimKeyframeSet *set = anim_keyframes_begin(&g_sys, "e1-flag", 7);
+    AnimKeyframe *f0 = anim_keyframes_add_frame(set, 0, NULL), *f1 = anim_keyframes_add_frame(set, 1, NULL);
+    anim_keyframe_set_custom(set, f0, kn_atom_cstr("--e1-flag"), kn_atom_cstr("0"));
+    anim_keyframe_set_custom(set, f1, kn_atom_cstr("--e1-flag"), kn_atom_cstr("10"));
+    CssComputed base, cas;
+    base_init(&base);
+    run_anim(&base, "e1-flag", 1, 1, timing_kind(CSS_TIMING_EASE_IN), CSS_ANIM_DIRECTION_NORMAL, CSS_ANIM_FILL_NONE);
+    HtmlElem e = 309;
+    CHECK(anim_update_elem(&g_sys, e, &base, 0) == 1);
+    cas = base;
+    anim_custom_fixup(&g_sys, e, &cas, 600);   /* ease-in(0.6) = 0.4318 < 0.5 */
+    CHECK_NEAR(custom_number(&cas, "--e1-flag"), 0, 0);
+    cas = base;
+    anim_custom_fixup(&g_sys, e, &cas, 700);   /* ease-in(0.7) = 0.5672 */
+    CHECK_NEAR(custom_number(&cas, "--e1-flag"), 10, 0);
+    anim_remove_elem(&g_sys, e);
+}
+
+
+/* ------------------------------------------------------------------------- */
+/* Chrome 152 ground truth for transform lists, color-mix(), typed customs     */
+/* (anim_chrome_fixture.html #flip #mx #pad #slerp #tail #cmix #rlen #rcol)    */
+/* ------------------------------------------------------------------------- */
+
+static CssTransform parse_xf(const char *text)
+{
+    CssToken t[64];
+    CssTransform x;
+    memset(&x, 0, sizeof x);
+    int n = css_tokens_strip_ws(t, css_tokenize(text, strlen(text), t, 64));
+    CHECK(css_parse_transform(t, n, &x));
+    return x;
+}
+
+static CssColor parse_col(const char *text)
+{
+    CssToken t[64];
+    CssColor c;
+    memset(&c, 0, sizeof c);
+    int n = css_tokens_strip_ws(t, css_tokenize(text, strlen(text), t, 64));
+    CHECK(css_parse_color(t, n, &c));
+    return c;
+}
+
+/* The interpolated list's matrix against Chrome's matrix() (6) / matrix3d() (16) values. */
+static void check_xf(const char *from, const char *to, float t, const double *want, int nwant)
+{
+    AnimValue a, b, o;
+    float m[16];
+    memset(&a, 0, sizeof a); memset(&b, 0, sizeof b);
+    a.transform = parse_xf(from);
+    b.transform = parse_xf(to);
+    CHECK(anim_value_interpolable(ANIM_TRANSFORM, &a, &b));
+    anim_value_lerp(ANIM_TRANSFORM, &a, &b, t, &o);
+    css_transform_to_mat4(&o.transform, 100, 50, m);
+    static const int idx6[6] = { 0, 1, 4, 5, 12, 13 };
+    for (int i = 0; i < nwant; i++) {
+        const int k = nwant == 6 ? idx6[i] : i;
+        g_checks++;
+        if (fabs(m[k] - want[i]) > 1e-4) {
+            g_fails++;
+            fprintf(stderr, "FAIL %s -> %s @%.4f: m[%d] = %.6f, Chrome %.6f\n", from, to, t, k, m[k], want[i]);
+        }
+    }
+}
+
+static void test_chrome_transform_lists(void)
+{
+    /* .reward-card { transition: transform 0.4s } -> .flipped { rotateY(180deg) } (ease) */
+    static const struct { double ms; double w[16]; } flip[] = {
+        { 100, { 0.283481, 0, -0.958978, 0, 0, 1, 0, 0, 0.958978, 0, 0.283481, 0, 0, 0, 0, 1 } },
+        { 200, { -0.813432, 0, -0.58166, 0, 0, 1, 0, 0, 0.58166, 0, -0.813432, 0, 0, 0, 0, 1 } },
+        { 300, { -0.992294, 0, -0.123903, 0, 0, 1, 0, 0, 0.123903, 0, -0.992294, 0, 0, 0, 0, 1 } },
+    };
+    for (size_t i = 0; i < 3; i++)
+        check_xf("none", "rotateY(180deg)", (float)ref_ease(flip[i].ms / 400.0), flip[i].w, 16);
+    /* mismatched primitives: decomposed matrix interpolation */
+    static const double mx250[6] = { 0.334848, 0.808395, -0.808395, 0.334848, 0, 0 };
+    static const double mx500[6] = { 0.53033, 0.53033, -0.53033, 0.53033, 0, 0 };
+    static const double mx750[6] = { 0.577425, 0.239177, -0.239177, 0.577425, 0, 0 };
+    check_xf("rotate(90deg)", "scale(0.5)", 0.25f, mx250, 6);
+    check_xf("rotate(90deg)", "scale(0.5)", 0.5f, mx500, 6);
+    check_xf("rotate(90deg)", "scale(0.5)", 0.75f, mx750, 6);
+    /* the shorter list padded with identity functions */
+    static const double pad[6] = { 0.707107, 0.707107, -0.707107, 0.707107, 15, 0 };
+    check_xf("translateX(10px)", "translateX(20px) rotate(90deg)", 0.5f, pad, 6);
+    /* rotate() pairs with rotateY(): different axes slerp */
+    static const double sl250[16] = { 0.886024, 0.386533, -0.256033, 0, -0.386533, 0.920782, 0.052473, 0,
+                                      0.256033, 0.052473, 0.965243, 0, 0, 0, 0, 1 };
+    static const double sl500[16] = { 0.827398, 0.258176, -0.498757, 0, -0.258176, 0.963525, 0.0704647, 0,
+                                      0.498757, 0.0704647, 0.863873, 0, 0, 0, 0, 1 };
+    check_xf("rotate(30deg)", "rotateY(60deg)", 0.25f, sl250, 16);
+    check_xf("rotate(30deg)", "rotateY(60deg)", 0.5f, sl500, 16);
+    /* common prefix per function, the remainders as one matrix */
+    static const double tail[6] = { 1.5, 0, 0.433013, 1.5, 20, 0 };
+    check_xf("translateX(10px) rotate(0deg) scale(2)", "translateX(30px) skewX(30deg)", 0.5f, tail, 6);
+
+    /* zoom scales translateZ and perspective() like the cascade does */
+    CssComputed base, out;
+    const CssComputed *r;
+    AnimKeyframeSet *set = anim_keyframes_begin(&g_sys, "e1-z3d", 6);
+    AnimKeyframe *f1 = anim_keyframes_add_frame(set, 1, NULL);
+    AnimValue v;
+    memset(&v, 0, sizeof v);
+    v.transform = parse_xf("perspective(100px) translateZ(10px)");
+    anim_keyframe_set_value(set, f1, ANIM_TRANSFORM, &v);
+    base_init(&base);
+    base.zoom = 2.0f;
+    run_anim(&base, "e1-z3d", 1, 1, timing_kind(CSS_TIMING_LINEAR), CSS_ANIM_DIRECTION_NORMAL, CSS_ANIM_FILL_FORWARDS);
+    CHECK(anim_update_elem(&g_sys, 310, &base, 0) == 1);
+    CHECK(sample(310, &base, &out, 2000, &r));
+    CHECK(r->transform.count == 2 && r->transform.ops[0].kind == CSS_TRANSFORM_PERSPECTIVE);
+    if (r->transform.count == 2) {
+        CHECK_NEAR(r->transform.ops[0].persp, 200, 1e-4);
+        CHECK_NEAR(r->transform.ops[1].tz, 20, 1e-4);
+    }
+    anim_remove_elem(&g_sys, 310);
+}
+
+static void test_chrome_colors_and_typed_customs(void)
+{
+    /* color-mix(in srgb, currentColor 50%, red) with color: blue -> rgb(0, 255, 0) interpolates in
+     * Oklab (Chrome: oklab(0.419725 0.164257 -0.101172) -> oklab(0.64308 -0.0347916 0.0391649) at 50%
+     * = sRGB 129.6 148.14 115.06) */
+    CssComputed base, out;
+    const CssComputed *r;
+    AnimKeyframeSet *set = anim_keyframes_begin(&g_sys, "e1-cmix", 7);
+    AnimKeyframe *f0 = anim_keyframes_add_frame(set, 0, NULL), *f1 = anim_keyframes_add_frame(set, 1, NULL);
+    AnimValue v;
+    memset(&v, 0, sizeof v);
+    v.color = parse_col("color-mix(in srgb, currentColor 50%, rgb(255, 0, 0))");
+    CHECK(v.color.kind == CSS_COLOR_CURRENT_MIX);
+    anim_keyframe_set_value(set, f0, ANIM_BORDER_TOP_COLOR, &v);
+    v.color = css_color_rgba(0, 255, 0, 255);
+    anim_keyframe_set_value(set, f1, ANIM_BORDER_TOP_COLOR, &v);
+    base_init(&base);
+    base.color = css_color_rgba(0, 0, 255, 255);
+    run_anim(&base, "e1-cmix", 1, 1, timing_kind(CSS_TIMING_LINEAR), CSS_ANIM_DIRECTION_NORMAL, CSS_ANIM_FILL_NONE);
+    CHECK(anim_update_elem(&g_sys, 311, &base, 0) == 1);
+    CHECK(sample(311, &base, &out, 0, &r));
+    CHECK(r->border_color[CSS_TOP].kind == CSS_COLOR_RGBA);
+    CHECK_NEAR(r->border_color[CSS_TOP].r, 127.51, 1); CHECK_NEAR(r->border_color[CSS_TOP].g, 0, 1);
+    CHECK_NEAR(r->border_color[CSS_TOP].b, 127.49, 1);
+    CHECK(sample(311, &base, &out, 500, &r));
+    CHECK_NEAR(r->border_color[CSS_TOP].r, 129.6, 1); CHECK_NEAR(r->border_color[CSS_TOP].g, 148.14, 1);
+    CHECK_NEAR(r->border_color[CSS_TOP].b, 115.06, 1);
+    anim_remove_elem(&g_sys, 311);
+
+    /* registered <length> / <color> custom properties: @keyframes { to { --x: ... } } */
+    CHECK(css_property_register("--e1len", 7, "'<length>'", 10, "false", 5, "0px", 3) != CSS_PROP_INVALID);
+    CHECK(css_property_register("--e1col", 7, "'<color>'", 9, "false", 5, "red", 3) != CSS_PROP_INVALID);
+    set = anim_keyframes_begin(&g_sys, "e1-typed", 8);
+    f1 = anim_keyframes_add_frame(set, 1, NULL);
+    anim_keyframe_set_custom(set, f1, kn_atom_cstr("--e1len"), kn_atom_cstr("200px"));
+    anim_keyframe_set_custom(set, f1, kn_atom_cstr("--e1col"), kn_atom_cstr("rgba(0, 0, 255, 0.5)"));
+    base_init(&base);
+    base.custom[0].name = kn_atom_cstr("--e1len"); base.custom[0].value = kn_atom_cstr("0px");   /* initial values */
+    base.custom[1].name = kn_atom_cstr("--e1col"); base.custom[1].value = kn_atom_cstr("red");
+    base.custom_count = 2;
+    run_anim(&base, "e1-typed", 1, 1, timing_kind(CSS_TIMING_LINEAR), CSS_ANIM_DIRECTION_NORMAL, CSS_ANIM_FILL_NONE);
+    CHECK(anim_update_elem(&g_sys, 312, &base, 0) == 1);
+    static const struct { double t, w; uint8_t r, b; float a; } want[] = {
+        { 250, 50, 218, 37, 0.875f }, { 500, 100, 170, 85, 0.753f },   /* Chrome: rgba(218, 0, 37, 0.875) */
+    };
+    for (size_t i = 0; i < 2; i++) {
+        CssComputed cas = base;
+        anim_custom_fixup(&g_sys, 312, &cas, want[i].t);
+        const char *len = NULL, *col = NULL;
+        for (int k = 0; k < cas.custom_count; k++) {
+            if (cas.custom[k].name == kn_atom_cstr("--e1len")) len = cas.custom[k].value;
+            if (cas.custom[k].name == kn_atom_cstr("--e1col")) col = cas.custom[k].value;
+        }
+        CHECK(len && col);
+        if (!len || !col) continue;
+        CHECK_NEAR(atof(len), want[i].w, 1e-3);
+        CHECK(strstr(len, "px") != NULL);
+        CssColor c = parse_col(col);
+        CHECK_NEAR(c.r, want[i].r, 1); CHECK_NEAR(c.g, 0, 0); CHECK_NEAR(c.b, want[i].b, 1);
+        CHECK_NEAR(c.a / 255.0, want[i].a, 0.004);
+    }
+    anim_remove_elem(&g_sys, 312);
+}
+
+/* engine.c's display: none glue, replayed on the animation system: an element, its child and
+ * its ::before run animations + transitions; hiding forgets every key of the subtree
+ * (anim_forget), showing re-syncs them (anim_sync_tree), while neighbouring records churn on
+ * the same hash chains.  Every live key must still resolve to its own record (the map once
+ * kept a stale duplicate after elem_destroy: use after free in anim_custom_fixup, v10_hud_e2e
+ * spectate -> menu), removed keys to none; then the system is freed (run under ASan). */
+static void test_display_toggle_churn(void)
+{
+    AnimSystem sys;
+    anim_init(&sys, NULL, NULL);
+    AnimKeyframeSet *set = anim_keyframes_begin(&sys, "e1-churn", 8);
+    AnimKeyframe *f0 = anim_keyframes_add_frame(set, 0, NULL);
+    AnimValue v;
+    memset(&v, 0, sizeof v);
+    v.f = 0.25f;
+    anim_keyframe_set_value(set, f0, ANIM_OPACITY, &v);
+    anim_keyframe_set_custom(set, f0, kn_atom_cstr("--e1-churn"), kn_atom_cstr("0"));
+
+    CssComputed base, shown, out;
+    base_init(&base);
+    base.opacity = 1.0f;
+    base.animations[0] = anim_decl("e1-churn", 1, 0, INFINITY, timing_kind(CSS_TIMING_LINEAR), CSS_ANIM_DIRECTION_NORMAL, CSS_ANIM_FILL_NONE);
+    base.animation_count = 1;
+    base.transitions[0].prop = CSS_PROP_ALL;
+    base.transitions[0].duration_s = 1.0f;
+    base.transitions[0].timing = timing_kind(CSS_TIMING_LINEAR);
+    base.transition_count = 1;
+
+    const HtmlElem P = 40, C = 41;
+    const HtmlElem keys[4] = { ANIM_KEY(P, ANIM_PSEUDO_NONE), ANIM_KEY(P, ANIM_PSEUDO_BEFORE),
+                               ANIM_KEY(C, ANIM_PSEUDO_NONE), ANIM_KEY(C, ANIM_PSEUDO_AFTER) };
+    double now = 0;
+    int bad = 0;
+    uint8_t alive[160] = { 0 };
+    for (int cycle = 0; cycle < 200; cycle++) {
+        /* neighbours: create and drop records around ours */
+        for (HtmlElem n = 100 + (HtmlElem)(cycle % 7); n < 160; n += 3) {
+            if (cycle & 1) anim_update_elem(&sys, n, &base, now);
+            else anim_remove_elem(&sys, n);
+            alive[n] = (uint8_t)(cycle & 1);
+        }
+        /* shown: sync every key, change a value to start transitions, tick, sample */
+        for (int k = 0; k < 4; k++) anim_update_elem(&sys, keys[k], &base, now);
+        shown = base;
+        shown.opacity = (cycle & 2) ? 0.5f : 0.75f;
+        now += 16;
+        for (int k = 0; k < 4; k++) anim_update_elem(&sys, keys[k], &shown, now);
+        anim_tick(&sys, now += 16);
+        for (int k = 0; k < 4; k++) {
+            CssComputed cas = shown;
+            anim_custom_fixup(&sys, keys[k], &cas, now);
+            const CssComputed *r = anim_apply(&sys, keys[k], &shown, &out, now);
+            if (r == &shown) bad++;   /* a live key lost its record */
+        }
+        /* hidden: the subtree's keys are forgotten (twice: element, then descendants) */
+        for (int k = 0; k < 4; k++) anim_remove_elem(&sys, keys[k]);
+        for (int k = 2; k < 4; k++) anim_remove_elem(&sys, keys[k]);
+        for (int k = 0; k < 4; k++) {
+            CssComputed cas = shown;
+            anim_custom_fixup(&sys, keys[k], &cas, now);   /* no record: untouched */
+            if (anim_apply(&sys, keys[k], &shown, &out, now) != &shown) bad++;
+        }
+        now += 100;
+    }
+    CHECK(bad == 0);
+    uint32_t elems = 0, want = 0;
+    for (int n = 0; n < 160; n++) want += alive[n];
+    anim_stats(&sys, &elems, NULL, NULL);
+    CHECK(elems == want);   /* only the neighbours still alive; our keys all forgotten */
+    for (HtmlElem n = 100; n < 160; n++) {   /* each neighbour resolves to its own record or none */
+        const CssComputed *r = anim_apply(&sys, n, &base, &out, now);
+        if ((r != &base) != alive[n]) bad++;
+    }
+    CHECK(bad == 0);
+    CHECK(sys.map_cap <= 256);   /* tombstones are rehashed away, the map does not grow with churn */
+
+    /* random churn over element and pseudo keys: membership checked after every operation */
+    static uint8_t live[3][96];
+    memset(live, 0, sizeof live);
+    for (HtmlElem n = 100; n < 160; n++) anim_remove_elem(&sys, n);
+    uint32_t seed = 12345u;
+    int mismatches = 0;
+    for (int op = 0; op < 20000; op++) {
+        seed = seed * 1664525u + 1013904223u;
+        const int ps = (int)((seed >> 8) % 3), e = 1 + (int)((seed >> 12) % 95);
+        const HtmlElem key = ANIM_KEY((HtmlElem)e, ps);
+        if ((seed >> 24) & 1) {
+            anim_update_elem(&sys, key, &base, now);
+            live[ps][e] = 1;
+        } else {
+            anim_remove_elem(&sys, key);
+            live[ps][e] = 0;
+        }
+        for (int c = 0; c < 4; c++) {
+            seed = seed * 1664525u + 1013904223u;
+            const int cps = (int)((seed >> 8) % 3), ce = 1 + (int)((seed >> 12) % 95);
+            const HtmlElem ck = ANIM_KEY((HtmlElem)ce, cps);
+            CssComputed cas = base;
+            anim_custom_fixup(&sys, ck, &cas, now + 100);
+            const int has = anim_apply(&sys, ck, &base, &out, now + 100) != &base;
+            if (has != live[cps][ce]) mismatches++;
+        }
+    }
+    CHECK(mismatches == 0);
+    anim_free(&sys);
+}
+
+#ifdef KN_ANIM_TEST_CASCADE
+/* ------------------------------------------------------------------------- */
+/* Cascade integration: the real sheet loader, cascade hook and var()/calc()  */
+/* ------------------------------------------------------------------------- */
+
+static AnimSystem g_csys;
+static double g_cnow;
+static Dom *g_cdom;
+static int g_custom_marks;
+
+static void cascade_dirty(void *user, HtmlElem key, unsigned flags)
+{
+    (void)user;
+    if (flags & ANIM_DIRTY_CUSTOM) {   /* what engine.c's anim_dirty_cb does */
+        dom_mark_dirty(g_cdom, ANIM_KEY_ELEM(key), DOM_DIRTY_STYLE);
+        g_custom_marks++;
+    }
+}
+
+static void cascade_hook(void *user, HtmlElem e, int pe, CssComputed *out)
+{
+    (void)user;
+    int ps = pe == CSS_PE_NONE ? ANIM_PSEUDO_NONE : pe == CSS_PE_BEFORE ? ANIM_PSEUDO_BEFORE
+           : pe == CSS_PE_AFTER ? ANIM_PSEUDO_AFTER : -1;
+    if (ps >= 0) anim_custom_fixup(&g_csys, ANIM_KEY(e, ps), out, g_cnow);
+}
+
+static CssSheet *load_css_file(const char *dir, const char *name)
+{
+    char path[512];
+    snprintf(path, sizeof path, "%s/%s", dir, name);
+    char *text = read_file(path);
+    if (!text) return NULL;
+    CssSheet *sh = css_sheet_load(text, strlen(text), name);
+    free(text);
+    return sh;
+}
+
+/* restyle -> anim sync (the engine's post_restyle), repeated while custom
+ * animations asked for a re-cascade (engine_flush_style's bounded loop) */
+static void cascade_frame(CssSheet **sheets, int n, HtmlElem e, double now)
+{
+    g_cnow = now;
+    anim_tick(&g_csys, now);   /* html_ui_backend_update: marks custom animations for a re-cascade */
+    for (int pass = 0; pass < 3; pass++) {
+        g_custom_marks = 0;
+        cascade_restyle(g_cdom, NULL, sheets, n);
+        const CssComputed *c = cascade_elem_computed(g_cdom, e);
+        anim_update_elem(&g_csys, e, c, now);
+        if (!g_custom_marks) break;
+    }
+}
+
+static void test_cascade_integration(const char *css_dir)
+{
+    anim_init(&g_csys, cascade_dirty, NULL);
+    CssSheet *svelte = load_css_file(css_dir, "svelte.css"), *main_css = load_css_file(css_dir, "main.css");
+    CHECK(svelte && main_css);
+    if (!svelte || !main_css) return;
+
+    /* @property: the three --progress rules of svelte.css parse and register */
+    uint32_t np = 0;
+    const CssPropertyRule *pr = css_sheet_properties(svelte, &np);
+    CHECK(np == 3);
+    CHECK(np && pr[0].name == kn_atom_cstr("--progress") && pr[0].syntax == kn_atom_cstr("<number>") &&
+          pr[0].initial == kn_atom_cstr("0") && pr[0].inherits == 0);
+    CHECK(anim_properties_load_sheet(svelte) == 3);
+    const CssRegisteredProperty *reg = css_property_registration(css_prop_lookup("--progress", 10));
+    CHECK(reg && reg->syntax == CSS_SYNTAX_NUMBER && !reg->inherits);
+
+    /* the real loader: new properties and custom entries reach the sets */
+    CHECK(anim_keyframes_load_sheet(&g_csys, main_css, css_computed_initial()) > 30);
+    CHECK(anim_keyframes_load_sheet(&g_csys, svelte, css_computed_initial()) > 40);
+    static const struct { const char *name; uint64_t props; } sets[] = {
+        { "backMov", ANIM_PROP_BIT(ANIM_BACKGROUND_POSITION_Y) },
+        { "panBackground", ANIM_PROP_BIT(ANIM_BACKGROUND_POSITION_X) | ANIM_PROP_BIT(ANIM_BACKGROUND_POSITION_Y) },
+        { "svelte-mqcul7-pulse", ANIM_PROP_BIT(ANIM_BACKGROUND_POSITION_X) | ANIM_PROP_BIT(ANIM_BACKGROUND_POSITION_Y) },
+        { "svelte-m5s1iy-borderGlow", ANIM_PROP_BIT(ANIM_BACKGROUND_POSITION_X) | ANIM_PROP_BIT(ANIM_BACKGROUND_POSITION_Y) },
+        { "svelte-1w0uz1r-bannerShaderSweep", ANIM_PROP_BIT(ANIM_BACKGROUND_POSITION_X) | ANIM_PROP_BIT(ANIM_BACKGROUND_POSITION_Y) },
+        { "svelte-da3zva-rewardsGlow", ANIM_PROP_BIT(ANIM_TEXT_SHADOW) },
+        { "svelte-159x57l-dsGlow", ANIM_PROP_BIT(ANIM_TEXT_SHADOW) },
+        { "svelte-159x57l-krSaleGlow", ANIM_PROP_BIT(ANIM_TEXT_SHADOW) },
+        { "svelte-1we2ubc-buffGlow", ANIM_PROP_BIT(ANIM_TEXT_SHADOW) },
+        { "svelte-159x57l-shopBadgeShine", ANIM_PROP_BIT(ANIM_LEFT) },
+    };
+    for (size_t i = 0; i < sizeof sets / sizeof sets[0]; i++) {
+        const AnimKeyframeSet *set = anim_keyframes_find(&g_csys, kn_atom_cstr(sets[i].name));
+        g_checks++;
+        if (!set || set->props != sets[i].props) {
+            g_fails++;
+            fprintf(stderr, "FAIL keyframes %s: props %llx\n", sets[i].name, set ? (unsigned long long)set->props : 0ull);
+        }
+    }
+    const char *flies[] = { "svelte-cow1ce-smoothBezierFly", "svelte-5yw9uo-smoothBezierFly", "svelte-ory46c-smoothBezierFly" };
+    for (int i = 0; i < 3; i++) {
+        const AnimKeyframeSet *set = anim_keyframes_find(&g_csys, kn_atom_cstr(flies[i]));
+        CHECK(set && set->custom_name_count == 1 && set->custom_names[0] == kn_atom_cstr("--progress"));
+    }
+    const AnimKeyframeSet *rg = anim_keyframes_find(&g_csys, kn_atom_cstr("svelte-da3zva-rewardsGlow"));
+    const AnimValue *v50 = NULL;
+    for (uint32_t f = 0; rg && f < rg->count; f++)
+        if (rg->frames[f].offset == 0.5f) v50 = &rg->frames[f].entries[0].value;
+    CHECK(v50 && v50->text_shadow.count == 1 && v50->text_shadow.items[0].blur == 10 && v50->text_shadow.items[0].color.a == 128);
+
+    /* a flying-currency element: left re-resolves from the animated --progress every frame */
+    static const char html[] =
+        "<!doctype html><html><body><div id=fly class=animated "
+        "style=\"--start-x: 100px; --mid-x: 300px; --end-x: 900px; --duration: 1000ms\">"
+        "<span id=kid></span></div><div id=badge></div><div id=flyT></div><div id=bad></div></body></html>";
+    static const char css[] =
+        ".animated { position: fixed; --progress: 0; left: calc(var(--start-x) * (1 - var(--progress)) * (1 - var(--progress))"
+        " + var(--mid-x) * 2 * (1 - var(--progress)) * var(--progress) + var(--end-x) * var(--progress) * var(--progress));"
+        " animation: svelte-cow1ce-smoothBezierFly var(--duration) cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards; }\n"
+        "#kid { width: calc(var(--progress, 7) * 1px); }\n"
+        "#badge { position: absolute; width: 200px; }\n"
+        "#badge::after { content: ''; position: absolute; left: -60%; animation: svelte-159x57l-shopBadgeShine 2.6s ease-in-out infinite; }\n"
+        "#flyT { position: fixed; --progress: 0; transition: all 1s linear; left: calc(100px + 800px * var(--progress));"
+        " animation: e1-flyT 1s linear forwards; }\n"
+        "@keyframes e1-flyT { to { --progress: 1; } }\n"
+        "#bad { --progress: nope; width: calc(var(--progress) * 1px + 5px); }\n";
+    g_cdom = dom_create();
+    dom_load_html(g_cdom, html, sizeof html - 1);
+    CssSheet *fixture = css_sheet_load(css, sizeof css - 1, "fixture");
+    CssSheet *sheets[3] = { svelte, main_css, fixture };
+    cascade_set_custom_hook(cascade_hook, NULL);
+    CHECK(anim_keyframes_load_sheet(&g_csys, fixture, css_computed_initial()) == 1);
+    HtmlElem fly = dom_by_id(g_cdom, "fly"), kid = dom_by_id(g_cdom, "kid"), badge = dom_by_id(g_cdom, "badge");
+    HtmlElem flyT = dom_by_id(g_cdom, "flyT"), bad = dom_by_id(g_cdom, "bad");
+    CHECK(fly && kid && badge && flyT && bad);
+
+    static const struct { double t, left; } chrome[] = {
+        { 0, 100 }, { 200, 100 }, { 350, 363.57 }, { 500, 646.506 }, { 650, 824.902 }, { 800, 900 }, { 1000, 900 }, { 3000, 900 },
+    };
+    for (size_t i = 0; i < sizeof chrome / sizeof chrome[0]; i++) {
+        cascade_frame(sheets, 3, fly, chrome[i].t);
+        const CssComputed *c = cascade_elem_computed(g_cdom, fly);
+        CHECK(c && c->animation_count == 1 && c->animations[0].duration_s == 1.0f);   /* var(--duration) */
+        CHECK(c && c->inset[CSS_LEFT].kind == CSS_LEN_VALUE);
+        if (c) CHECK_NEAR(c->inset[CSS_LEFT].px, chrome[i].left, 0.1);
+        /* inherits: false: the child does not see the animated value (var() fallback) */
+        const CssComputed *k = cascade_elem_computed(g_cdom, kid);
+        if (k && i == 3) CHECK_NEAR(k->width.px, 0, 1e-6);   /* initial-value 0, not the parent's --progress */
+    }
+
+    /* a registered <number> whose value does not parse: invalid at computed-value time -> initial 0 */
+    const CssComputed *bc = cascade_elem_computed(g_cdom, bad);
+    if (bc) CHECK_NEAR(bc->width.px, 5, 1e-6);
+
+    /* var() users moved by an animated custom property start no transition under `transition: all`
+     * (Chrome #flyT: left 100px, 300px, 500px at 0, 250, 500ms) */
+    static const struct { double t, left; } chromeT[] = { { 0, 100 }, { 250, 300 }, { 500, 500 } };
+    for (size_t i = 0; i < 3; i++) {
+        cascade_frame(sheets, 3, flyT, chromeT[i].t);
+        const CssComputed *c = cascade_elem_computed(g_cdom, flyT);
+        CssComputed tmp;
+        const CssComputed *r = c ? anim_apply(&g_csys, flyT, c, &tmp, chromeT[i].t) : NULL;
+        CHECK(r && r->inset[CSS_LEFT].kind == CSS_LEN_VALUE);
+        if (r) CHECK_NEAR(r->inset[CSS_LEFT].px, chromeT[i].left, 0.1);
+    }
+
+    /* ::after under its own key: the cascade's record + anim_apply */
+    cascade_restyle(g_cdom, NULL, sheets, 3);
+    const CssComputed *after = cascade_elem_after(g_cdom, badge);
+    CHECK(after != NULL);
+    if (after) {
+        const HtmlElem key = ANIM_KEY(badge, ANIM_PSEUDO_AFTER);
+        CssComputed tmp;
+        CHECK(anim_update_elem(&g_csys, key, after, 0) == 1);
+        const CssComputed *r = anim_apply(&g_csys, key, after, &tmp, 357.5);
+        CHECK(r != after);
+        CHECK_NEAR(r->inset[CSS_LEFT].pct, -60 + 190 * ref_ease_in_out(0.25), 1e-3);
+        CHECK(anim_update_elem(&g_csys, badge, cascade_elem_computed(g_cdom, badge), 0) == 0);   /* the element: none */
+    }
+
+    cascade_set_custom_hook(NULL, NULL);
+    dom_destroy(g_cdom);
+    css_sheet_destroy(fixture);
+    css_sheet_destroy(svelte);
+    css_sheet_destroy(main_css);
+    cascade_shutdown();
+    anim_free(&g_csys);
+}
+#endif
+
 int main(int argc, char **argv)
 {
     const char *css_dir = argc > 1 ? argv[1] : "ui/css";
@@ -1221,6 +2231,19 @@ int main(int argc, char **argv)
     printf("keyframes loaded: %d (%d sets)\n", loaded, g_sys.set_count);
     CHECK(loaded == 40);
     CHECK(g_sys.set_count == 40);
+    {   /* v10's Svelte component sheet: only the sets the E1 tests sample are asserted */
+        char path[512];
+        snprintf(path, sizeof path, "%s/svelte.css", css_dir);
+        char *text = read_file(path);
+        if (!text) {
+            fprintf(stderr, "cannot read %s\n", path);
+            return 2;
+        }
+        int n = load_keyframes_text(&g_sys, text);
+        free(text);
+        printf("svelte.css keyframes loaded: %d\n", n);
+        CHECK(n > 40);
+    }
     static const struct { const char *name; uint32_t frames; } expect[] = {
         { "blinkTextCursor", 2 }, { "typewriter", 2 }, { "grow", 1 }, { "lds-ring", 2 }, { "spin", 2 },
         { "scaleBob", 2 }, { "rainbow", 6 }, { "rainbowT", 6 }, { "rainbowB", 6 }, { "rainbowBG", 6 },
@@ -1251,6 +2274,22 @@ int main(int argc, char **argv)
     test_transition_shorthand_all_and_delay();
     test_animation_plus_transition();
     test_many_elements();
+    test_back_mov();
+    test_pan_background();
+    test_bg_pos_pct_sets();
+    test_text_shadow_glows();
+    test_text_shadow_lists();
+    test_shop_badge_shine();
+    test_shop_card_zoom();
+    test_transition_all_discrete_ints();
+    test_registered_progress();
+    test_unregistered_custom();
+    test_chrome_transform_lists();
+    test_chrome_colors_and_typed_customs();
+    test_display_toggle_churn();
+#ifdef KN_ANIM_TEST_CASCADE
+    test_cascade_integration(css_dir);
+#endif
 
     uint32_t ne;
     anim_stats(&g_sys, &ne, NULL, NULL);

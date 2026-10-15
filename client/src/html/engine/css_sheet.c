@@ -47,6 +47,7 @@ struct CssSheet {
     struct { CssSelector *data; size_t len, cap; } selectors;
     struct { CssKeyframes *data; size_t len, cap; } keyframes;
     struct { CssFontFace *data; size_t len, cap; } fonts;
+    struct { CssPropertyRule *data; size_t len, cap; } properties;   /* @property */
 
     DomInvalidation *inv;
     uint32_t serial;                /* unique per css_sheet_load()           */
@@ -1059,6 +1060,72 @@ static void add_font_face(CssSheet *sheet, lxb_css_rule_list_t *block)
     }
 }
 
+/* ---- @property ---------------------------------------------------------- */
+
+/* Parses the `{ ... }` block that follows the prelude in the source text
+ * (descriptors are not CSS properties, so the declaration lists Lexbor builds
+ * are not used): `name: value` pairs split on top-level `;`. */
+static void add_property(CssSheet *sheet, const char *prelude, size_t plen, size_t prelude_end)
+{
+    CssPropertyRule pr;
+    int has_inherits = 0;
+    size_t i = prelude_end, end;
+    char q = 0;
+    int depth = 0;
+
+    prelude = kn_str_trim(prelude, &plen);
+    if (plen < 3 || prelude[0] != '-' || prelude[1] != '-') {
+        return;
+    }
+    while (i < sheet->source_len && sheet->source[i] != '{') {
+        i++;
+    }
+    if (i >= sheet->source_len) {
+        return;
+    }
+    i++;
+    memset(&pr, 0, sizeof(pr));
+    pr.name = kn_atom(prelude, plen);
+    for (size_t start = i; i <= sheet->source_len; i++) {
+        char c = i < sheet->source_len ? sheet->source[i] : '}';
+        if (q) {
+            if (c == '\\') i++;
+            else if (c == q) q = 0;
+            continue;
+        }
+        if (c == '"' || c == '\'') { q = c; continue; }
+        if (c == '(' || c == '[') { depth++; continue; }
+        if ((c == ')' || c == ']') && depth > 0) { depth--; continue; }
+        if (depth > 0 || (c != ';' && c != '}')) continue;
+        end = i;
+        {
+            size_t dlen = end - start;
+            const char *d = kn_str_trim(sheet->source + start, &dlen);
+            const char *colon = d ? memchr(d, ':', dlen) : NULL;
+            if (colon != NULL) {
+                size_t nlen = (size_t)(colon - d), vlen = dlen - nlen - 1;
+                const char *nm = kn_str_trim(d, &nlen);
+                const char *v = kn_str_trim(colon + 1, &vlen);
+                if (kn_str_ieq(nm, nlen, "syntax")) {
+                    if (vlen >= 2 && (v[0] == '"' || v[0] == '\'') && v[vlen - 1] == v[0]) { v++; vlen -= 2; }
+                    pr.syntax = kn_atom(v, vlen);
+                } else if (kn_str_ieq(nm, nlen, "inherits")) {
+                    has_inherits = kn_str_ieq(v, vlen, "true") || kn_str_ieq(v, vlen, "false");
+                    pr.inherits = (uint8_t)kn_str_ieq(v, vlen, "true");
+                } else if (kn_str_ieq(nm, nlen, "initial-value")) {
+                    pr.initial = kn_atom(v, vlen);
+                }
+            }
+        }
+        start = i + 1;
+        if (c == '}') break;
+    }
+    if (pr.syntax == NULL || !has_inherits) {
+        return;
+    }
+    KN_VEC_PUSH(&sheet->properties, pr);
+}
+
 /* ---- walk --------------------------------------------------------------- */
 
 static void walk_rules(CssSheet *sheet, lxb_css_rule_t *r)
@@ -1095,6 +1162,10 @@ static void walk_rules(CssSheet *sheet, lxb_css_rule_t *r)
                     size_t plen;
                     const char *prelude = src_slice(sheet, at->prelude_begin, at->prelude_end, &plen);
                     add_keyframes(sheet, prelude, plen, c->block);
+                } else if (kn_str_ieq(nm, nlen, "property")) {
+                    size_t plen;
+                    const char *prelude = src_slice(sheet, at->prelude_begin, at->prelude_end, &plen);
+                    add_property(sheet, prelude, plen, at->prelude_end);
                 }
                 /* @media / @import / @supports: not used by the UI, ignored */
             }
@@ -1187,6 +1258,7 @@ void css_sheet_destroy(CssSheet *sheet)
     }
     KN_VEC_FREE(&sheet->keyframes);
     KN_VEC_FREE(&sheet->fonts);
+    KN_VEC_FREE(&sheet->properties);
     for (size_t i = 0; i < sheet->bucket_cap; i++) {
         free(sheet->buckets[i].key);
         KN_VEC_FREE(&sheet->buckets[i].sels);
@@ -1253,6 +1325,12 @@ const CssKeyframes *css_sheet_keyframes(const CssSheet *sheet, const char *name)
         }
     }
     return NULL;
+}
+
+const CssPropertyRule *css_sheet_properties(const CssSheet *sheet, uint32_t *count)
+{
+    *count = sheet != NULL ? (uint32_t)sheet->properties.len : 0;
+    return sheet != NULL ? sheet->properties.data : NULL;
 }
 
 uint32_t css_sheet_keyframes_count(const CssSheet *sheet) { return (uint32_t)sheet->keyframes.len; }

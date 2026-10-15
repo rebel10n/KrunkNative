@@ -131,10 +131,14 @@ struct Engine {
     struct EngineCanvas { HtmlElem e; unsigned tex; int w, h; int external; } *canvases;
     int n_canvases, cap_canvases;
 
-    /* animation side table: base (un-animated) computed style per element */
-    CssComputed **anim_base;
-    uint32_t anim_base_cap;
+    /* animation side tables: base (un-animated) computed style per element
+     * ([ANIM_PSEUDO_NONE]) and per ::before / ::after record */
+    CssComputed **anim_base[3];
+    uint32_t anim_base_cap[3];
     uint32_t anim_count;
+    /* per element: 1 = its animations were cancelled by display: none */
+    uint8_t *anim_hidden;
+    uint32_t anim_hidden_cap;
 
     /* style records the layout tree last saw (layout_restyled's old_style) */
     CssComputed **shadow;
@@ -422,6 +426,8 @@ static void register_keyframes(Engine *g, const CssSheet *sheet)
 {
     const int n = anim_keyframes_load_sheet(&g->anim, sheet, css_computed_initial());
     if (n) vlog("%s: %d @keyframes sets", css_sheet_name(sheet), n);
+    const int np = anim_properties_load_sheet(sheet);
+    if (np) vlog("%s: %d @property rules", css_sheet_name(sheet), np);
 }
 
 static CssSheet *load_sheet_text(Engine *g, const char *text, size_t len, const char *name)
@@ -738,30 +744,48 @@ int engine_canvas_put(Engine *g, const HtmlElem e, const unsigned char *rgba, co
 /* Animation glue                                                             */
 /* ------------------------------------------------------------------------- */
 
-static CssComputed **anim_base_slot(Engine *g, HtmlElem e, int create)
+/* `key`: ANIM_KEY(elem, ANIM_PSEUDO_*). */
+static CssComputed **anim_base_slot(Engine *g, HtmlElem key, int create)
 {
-    if (e >= g->anim_base_cap) {
+    const int ps = ANIM_KEY_PSEUDO(key);
+    const HtmlElem e = ANIM_KEY_ELEM(key);
+    if (ps > ANIM_PSEUDO_AFTER) return NULL;
+    if (e >= g->anim_base_cap[ps]) {
         if (!create) return NULL;
-        uint32_t cap = g->anim_base_cap ? g->anim_base_cap : 256;
+        uint32_t cap = g->anim_base_cap[ps] ? g->anim_base_cap[ps] : 256;
         while (cap <= e) cap *= 2;
-        CssComputed **grown = realloc(g->anim_base, cap * sizeof(*grown));
+        CssComputed **grown = realloc(g->anim_base[ps], cap * sizeof(*grown));
         if (!grown) return NULL;
-        memset(grown + g->anim_base_cap, 0, (cap - g->anim_base_cap) * sizeof(*grown));
-        g->anim_base = grown;
-        g->anim_base_cap = cap;
+        memset(grown + g->anim_base_cap[ps], 0, (cap - g->anim_base_cap[ps]) * sizeof(*grown));
+        g->anim_base[ps] = grown;
+        g->anim_base_cap[ps] = cap;
     }
-    return &g->anim_base[e];
+    return &g->anim_base[ps][e];
 }
 
-static void anim_forget(Engine *g, HtmlElem e)
+/* The element's computed record (ps 0) or its ::before / ::after record. */
+static CssComputed *anim_record(ElemData *d, int ps)
 {
-    CssComputed **slot = anim_base_slot(g, e, 0);
+    return ps == ANIM_PSEUDO_BEFORE ? d->before : ps == ANIM_PSEUDO_AFTER ? d->after : d->computed;
+}
+
+static void anim_drop_base(Engine *g, HtmlElem key)
+{
+    CssComputed **slot = anim_base_slot(g, key, 0);
     if (slot && *slot) {
         free(*slot);
         *slot = NULL;
         g->anim_count--;
     }
-    anim_remove_elem(&g->anim, e);
+}
+
+static void anim_forget(Engine *g, HtmlElem e)
+{
+    if (e < g->anim_hidden_cap) g->anim_hidden[e] = 0;
+    for (int ps = ANIM_PSEUDO_NONE; ps <= ANIM_PSEUDO_AFTER; ps++) {
+        anim_drop_base(g, ANIM_KEY(e, ps));
+        anim_remove_elem(&g->anim, ANIM_KEY(e, ps));
+    }
 }
 
 static int inherited_differs(const CssComputed *a, const CssComputed *b)
@@ -770,41 +794,132 @@ static int inherited_differs(const CssComputed *a, const CssComputed *b)
                   CSS_COMPUTED_INHERITED_END - CSS_COMPUTED_INHERITED_BEGIN) != 0;
 }
 
-/* Writes the animated style of `e` over its computed record (the base is kept
- * in the side table).  Children re-inherit when an inherited property moved. */
-static void anim_write(Engine *g, HtmlElem e, ElemData *d, const CssComputed *base, double now)
+/* Writes the animated style of target `key` over its computed record (the base
+ * is kept in the side table).  Children re-inherit when an inherited property
+ * of the element moved (pseudo-elements have no element children). */
+static void anim_write(Engine *g, HtmlElem key, ElemData *d, const CssComputed *base, double now)
 {
+    const int ps = ANIM_KEY_PSEUDO(key);
+    CssComputed *rec = anim_record(d, ps);
+    if (!rec) return;
     CssComputed tmp;
-    const CssComputed *s = anim_apply(&g->anim, e, base, &tmp, now);
-    const int inherit_moved = inherited_differs(d->computed, s);
-    if (s != d->computed) memcpy(d->computed, s, sizeof(CssComputed));
+    const CssComputed *s = anim_apply(&g->anim, key, base, &tmp, now);
+    const int inherit_moved = ps == ANIM_PSEUDO_NONE && inherited_differs(rec, s);
+    if (s != rec) memcpy(rec, s, sizeof(CssComputed));
+    const HtmlElem e = ANIM_KEY_ELEM(key);
     if (inherit_moved && dom_first_child(g->dom, e)) dom_mark_dirty(g->dom, e, DOM_DIRTY_DESCENDANTS);
 }
 
-/* The cascade just stored a fresh (un-animated) record for `e`. */
-static void anim_sync_elem(Engine *g, HtmlElem e, ElemData *d, double now)
+/* The cascade just stored a fresh (un-animated) record for the target. */
+static void anim_sync_one(Engine *g, HtmlElem key, ElemData *d, double now)
 {
-    if (!d->computed) return;
-    CssComputed **slot = anim_base_slot(g, e, 0);
-    const int had = slot && *slot;
-    const int active = anim_update_elem(&g->anim, e, d->computed, now);
-    if (!active) {
-        if (had) {
-            free(*slot);
-            *slot = NULL;
-            g->anim_count--;
-        }
+    CssComputed *rec = anim_record(d, ANIM_KEY_PSEUDO(key));
+    if (!rec) { /* the pseudo-element is gone */
+        anim_drop_base(g, key);
+        anim_remove_elem(&g->anim, key);
         return;
     }
-    slot = anim_base_slot(g, e, 1);
+    const int active = anim_update_elem(&g->anim, key, rec, now);
+    if (!active) {
+        anim_drop_base(g, key);
+        return;
+    }
+    CssComputed **slot = anim_base_slot(g, key, 1);
     if (!slot) return;
     if (!*slot) {
         *slot = malloc(sizeof(CssComputed));
         if (!*slot) return;
         g->anim_count++;
     }
-    memcpy(*slot, d->computed, sizeof(CssComputed));
-    anim_write(g, e, d, *slot, now);
+    memcpy(*slot, rec, sizeof(CssComputed));
+    anim_write(g, key, d, *slot, now);
+}
+
+static void anim_sync_tree(Engine *g, HtmlElem e, double now);
+
+/* anim_hidden flag of `e` (set: 1/0; get: set < 0). */
+static int anim_hidden_flag(Engine *g, HtmlElem e, int set)
+{
+    if (e >= g->anim_hidden_cap) {
+        if (set <= 0) return 0;
+        uint32_t cap = g->anim_hidden_cap ? g->anim_hidden_cap : 256;
+        while (cap <= e) cap *= 2;
+        uint8_t *grown = realloc(g->anim_hidden, cap);
+        if (!grown) return 0;
+        memset(grown + g->anim_hidden_cap, 0, cap - g->anim_hidden_cap);
+        g->anim_hidden = grown;
+        g->anim_hidden_cap = cap;
+    }
+    if (set >= 0) g->anim_hidden[e] = (uint8_t)set;
+    return g->anim_hidden[e];
+}
+
+/* Element and ::before / ::after: the cascade recomputes all three together.
+ *
+ * display: none (Chrome, CSS Animations 1 section 3 / CSS Transitions 1
+ * section 3): an element that is not rendered runs no animations and no
+ * transitions; they are cancelled for it and its whole subtree.  When it is
+ * displayed again its animations start over and nothing transitions from the
+ * hidden style (no before-change style).  The cascade skips hidden subtrees
+ * and does not flag unchanged descendants on re-display, so the whole
+ * displayed subtree is re-synced here. */
+static void anim_sync_elem(Engine *g, HtmlElem e, ElemData *d, double now)
+{
+    if (!d->computed) return;
+    if (d->computed->display == CSS_DISPLAY_NONE) {
+        anim_forget(g, e);
+        for (HtmlElem c = dom_next_in_tree(g->dom, e, e); c; c = dom_next_in_tree(g->dom, c, e)) anim_forget(g, c);
+        anim_hidden_flag(g, e, 1);
+        return;
+    }
+    if (anim_hidden_flag(g, e, -1)) {
+        anim_hidden_flag(g, e, 0);
+        anim_sync_tree(g, e, now);
+        return;
+    }
+    for (int ps = ANIM_PSEUDO_NONE; ps <= ANIM_PSEUDO_AFTER; ps++) anim_sync_one(g, ANIM_KEY(e, ps), d, now);
+}
+
+/* `e` and its rendered descendants (display: none subtrees skipped).
+ * Descendants the cascade flagged themselves (DOM_DIRTY_STYLE_CHANGED) are
+ * left to post_restyle, which reaches them later in tree order: syncing them
+ * twice would take the animated record for the base. */
+static void anim_sync_tree(Engine *g, HtmlElem e, double now)
+{
+    ElemData *d = dom_elem_data(g->dom, e);
+    if (!d || !d->computed) return;
+    if (d->computed->display == CSS_DISPLAY_NONE) {
+        anim_hidden_flag(g, e, 1);   /* its subtree re-syncs when it is displayed */
+        return;
+    }
+    for (int ps = ANIM_PSEUDO_NONE; ps <= ANIM_PSEUDO_AFTER; ps++) anim_sync_one(g, ANIM_KEY(e, ps), d, now);
+    for (HtmlElem c = dom_first_child(g->dom, e); c; c = dom_next(g->dom, c)) {
+        const ElemData *cd = dom_elem_data(g->dom, c);
+        if (cd && (cd->dirty & DOM_DIRTY_STYLE_CHANGED)) {
+            if (cd->computed && cd->computed->display != CSS_DISPLAY_NONE) anim_hidden_flag(g, c, 1);
+            continue;   /* post_restyle: anim_sync_elem -> anim_sync_tree of its subtree */
+        }
+        anim_sync_tree(g, c, now);
+    }
+}
+
+/* Cascade hook: animated custom properties of the element being computed.
+ * The cascade's hook is global and two engines can be alive (g_base and
+ * g_page, separate Doms with overlapping element handles), so every cascade
+ * entry that can compute ::before/::after records binds its engine first
+ * (cascade_bind); engine_destroy unbinds. */
+static void anim_cascade_custom_cb(void *user, HtmlElem e, int pe, CssComputed *out)
+{
+    Engine *g = user;
+    const int ps = pe == CSS_PE_NONE ? ANIM_PSEUDO_NONE : pe == CSS_PE_BEFORE ? ANIM_PSEUDO_BEFORE
+                 : pe == CSS_PE_AFTER ? ANIM_PSEUDO_AFTER : -1;
+    if (ps < 0) return;
+    anim_custom_fixup(&g->anim, ANIM_KEY(e, ps), out, engine_now_ms());
+}
+
+static void cascade_bind(Engine *g)
+{
+    cascade_set_custom_hook(anim_cascade_custom_cb, g);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -905,15 +1020,67 @@ static void restyle_to_layout(Engine *g, HtmlElem e, ElemData *d)
     shadow_set(g, e, d->computed);
 }
 
-static void anim_dirty_cb(void *user, HtmlElem e, unsigned flags)
+/* A ::before/::after box: the pseudo-element's own box among the element box's
+ * children (looking through anonymous wrappers), NULL when not found. */
+static Box *find_pseudo_box(Box *b, const lxb_dom_node_t *node, int ps)
+{
+    for (Box *c = b->first_child; c; c = c->next) {
+        if (c->node == node && c->pseudo == ps) return c;
+        if (c->flags & BOXF_ANONYMOUS) {
+            Box *r = find_pseudo_box(c, node, ps);
+            if (r) return r;
+        }
+    }
+    return NULL;
+}
+
+/* Hands an animated pseudo-element record to layout.  Its box borrows the
+ * record (ElemData.before/after, updated in place); layout_restyled() only
+ * knows elements, so this does its in-place part for the pseudo box. */
+static void pseudo_to_layout(Engine *g, HtmlElem e, ElemData *d, int ps, unsigned flags)
+{
+    if (!g->tree) {
+        g->need_rebuild = 1;
+        return;
+    }
+    Box *eb = d->box;
+    if (!eb) return; /* not rendered */
+    Box *pb = find_pseudo_box(eb, d->node, ps);
+    if (!pb || (flags & ANIM_DIRTY_REBUILD)) { /* visibility (box flags), or not found: rebuild like a restyle */
+        restyle_to_layout(g, e, d);
+        return;
+    }
+    if (flags & ANIM_DIRTY_LAYOUT) {
+        layout_invalidate(g->tree, pb, 0);
+        g->need_layout = 1;
+    }
+    if (flags & ANIM_DIRTY_TRANSFORM) {
+        layout_invalidate(g->tree, pb, 1);
+        g->observe_pending = 1;
+    }
+    pb->paint_dirty = 1;
+    for (Box *c = pb->first_child; c; c = c->next) c->paint_dirty = 1; /* the generated text */
+    g->need_paint = 1;
+}
+
+static void anim_dirty_cb(void *user, HtmlElem key, unsigned flags)
 {
     Engine *g = user;
-    (void) flags; /* layout_restyled() classifies the change itself */
-    CssComputed **slot = anim_base_slot(g, e, 0);
+    const HtmlElem e = ANIM_KEY_ELEM(key);
+    const int ps = ANIM_KEY_PSEUDO(key);
     ElemData *d = dom_elem_data(g->dom, e);
-    if (!slot || !*slot || !d || !d->computed) return;
-    anim_write(g, e, d, *slot, engine_now_ms());
-    restyle_to_layout(g, e, d);
+    if (!d || !d->computed) return;
+    if (flags & ANIM_DIRTY_CUSTOM) {
+        /* animated custom properties: re-cascade (var()/calc() users re-resolve
+         * through anim_cascade_custom_cb); post_restyle then re-applies the rest */
+        dom_mark_dirty(g->dom, e, DOM_DIRTY_STYLE);
+        return;
+    }
+    CssComputed **slot = anim_base_slot(g, key, 0);
+    if (!slot || !*slot || !anim_record(d, ps)) return;
+    anim_write(g, key, d, *slot, engine_now_ms());
+    if (ps == ANIM_PSEUDO_NONE) restyle_to_layout(g, e, d); /* layout_restyled() classifies it */
+    else pseudo_to_layout(g, e, d, ps, flags);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1078,6 +1245,7 @@ void engine_flush_style(Engine *g)
      * bounded number of times so those settle in the same frame. */
     for (int pass = 0; pass < 3 && (dom_any_style_dirty(g->dom) || g->structure_dirty); pass++) {
         const double t0 = wall_ms();
+        cascade_bind(g);
         const uint32_t n = dom_any_style_dirty(g->dom) ? cascade_restyle(g->dom, g->ua, g->sheets, g->n_sheets) : 0;
         const double t1 = wall_ms();
         post_restyle(g);
@@ -1219,6 +1387,7 @@ static void eh_restyle(void *user)
 static const CssComputed *wh_computed(void *user, HtmlElem e)
 {
     Engine *g = user;
+    cascade_bind(g);
     return cascade_elem_computed(g->dom, e);
 }
 
@@ -1872,10 +2041,14 @@ static void engine_destroy(Engine *g)
     sel_free(&g->sel);
     events_fini(&g->events);
     anim_free(&g->anim);
-    for (uint32_t i = 0; i < g->anim_base_cap; i++) free(g->anim_base[i]);
+    cascade_set_custom_hook(NULL, NULL);
+    for (int ps = 0; ps < 3; ps++) {
+        for (uint32_t i = 0; i < g->anim_base_cap[ps]; i++) free(g->anim_base[ps][i]);
+        free(g->anim_base[ps]);
+    }
+    free(g->anim_hidden);
     for (uint32_t i = 0; i < g->shadow_cap; i++) free(g->shadow[i]);
     free(g->shadow);
-    free(g->anim_base);
     free(g->saved_scroll);
     while (g->n_canvases) canvas_drop(g, g->n_canvases - 1);
     free(g->canvases);
@@ -2061,6 +2234,7 @@ void html_ui_backend_fini(void)
     g_page = NULL;
     g_base = NULL;
     g_engine = NULL;
+    css_property_registry_clear();   /* @property rules of the pages' sheets */
 }
 
 static void engine_apply_size(Engine *g, int width, int height);

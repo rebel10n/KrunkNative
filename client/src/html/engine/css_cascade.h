@@ -66,6 +66,15 @@ uint32_t cascade_pseudo_computed(Dom *dom, HtmlElem e, int pe, CssComputed *out)
 /* Keyframes lookup across the current sheets (last author sheet wins). */
 const CssKeyframes *cascade_find_keyframes(const char *name);
 
+/* Custom-property hook (the animation system: animated custom properties,
+ * anim_custom_fixup()).  While an element or one of its pseudo-elements
+ * (`pe`: CSS_PE_*) is computed it is called after the custom-property
+ * declarations and the @property semantics (inherits: false, initial values,
+ * invalid-at-computed-value-time; css_property_registration()) and before
+ * every other property, so var() users see its values.  NULL disables it. */
+typedef void (*CascadeCustomHook)(void *user, HtmlElem e, int pe, CssComputed *out);
+void cascade_set_custom_hook(CascadeCustomHook fn, void *user);
+
 /* Frees the module's scratch buffers (optional, for leak checkers). */
 void cascade_shutdown(void);
 

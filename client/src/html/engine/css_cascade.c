@@ -56,7 +56,31 @@ static struct {
     uint32_t inv_serials[MAX_SHEETS]; /* css_sheet_serial of the sheets `inv` was built from */
     int inv_count;
     uint32_t computed_count;
+    CascadeCustomHook custom_hook;   /* cascade_set_custom_hook              */
+    void *custom_user;
+    HtmlElem cur_elem;               /* the element being computed (hook)     */
+    int cur_pe;                      /* CSS_PE_* of the record being computed */
+    /* @property registrations (css_values.c registry), refreshed per restyle */
+    const CssRegisteredProperty *regs[CSS_PROP_CUSTOM_MAX - CSS_PROP_CUSTOM_BASE];
+    int reg_count;
 } g;
+
+static void registry_refresh(void)
+{
+    g.reg_count = 0;
+    for (int id = CSS_PROP_CUSTOM_BASE; id < CSS_PROP_CUSTOM_MAX; id++) {
+        const CssRegisteredProperty *r = css_property_registration(id);
+        if (r != NULL) {
+            g.regs[g.reg_count++] = r;
+        }
+    }
+}
+
+void cascade_set_custom_hook(CascadeCustomHook fn, void *user)
+{
+    g.custom_hook = fn;
+    g.custom_user = user;
+}
 
 static lxb_selectors_t *matcher(void)
 {
@@ -72,6 +96,7 @@ static lxb_selectors_t *matcher(void)
 
 static void set_sheets(Dom *dom, CssSheet *ua, CssSheet **author, int n_author)
 {
+    registry_refresh();
     g.set.count = 0;
     g.set.sheets[g.set.count++] = ua;
     for (int i = 0; i < n_author && g.set.count < MAX_SHEETS; i++) {
@@ -389,6 +414,77 @@ static float own_zoom(CssComputed *out, const CssComputed *parent)
     return z;
 }
 
+/* ---- registered custom properties (CSS Properties and Values API 1) ------ */
+
+static int custom_index(const CssComputed *c, const char *name)
+{
+    for (int i = 0; i < c->custom_count && i < CSS_MAX_CUSTOM_PROPS; i++) {
+        if (c->custom[i].name == name) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/* value NULL removes the property (the guaranteed-invalid value). */
+static void custom_store(CssComputed *c, const char *name, const char *value)
+{
+    const int i = custom_index(c, name);
+    if (i >= 0) {
+        if (value != NULL) {
+            c->custom[i].value = value;
+        } else {
+            c->custom[i] = c->custom[c->custom_count - 1];
+            memset(&c->custom[c->custom_count - 1], 0, sizeof(c->custom[0]));
+            c->custom_count--;
+        }
+        return;
+    }
+    if (value == NULL || c->custom_count >= CSS_MAX_CUSTOM_PROPS) {
+        return;
+    }
+    c->custom[c->custom_count].name = name;
+    c->custom[c->custom_count].value = value;
+    c->custom_count++;
+}
+
+/* After inheritance: `inherits: false` properties do not inherit. */
+static void registered_drop_uninherited(CssComputed *out)
+{
+    for (int i = 0; i < g.reg_count; i++) {
+        if (!g.regs[i]->inherits) {
+            custom_store(out, g.regs[i]->name, NULL);
+        }
+    }
+}
+
+/* After the element's custom declarations: a registered property without a
+ * value takes its initial value, and one whose value does not parse under its
+ * syntax is invalid at computed-value time (initial value).  Values holding
+ * var() are left to substitution time; computed values are not normalized
+ * (em lengths stay em: v10 registers only <number>). */
+static void registered_fixup(CssComputed *out, float font_px)
+{
+    for (int i = 0; i < g.reg_count; i++) {
+        const CssRegisteredProperty *r = g.regs[i];
+        const int k = custom_index(out, r->name);
+        if (k < 0) {
+            if (r->initial != NULL) {
+                custom_store(out, r->name, r->initial);
+            }
+            continue;
+        }
+        const char *v = out->custom[k].value;
+        CssTypedValue tv;
+        if (r->syntax == CSS_SYNTAX_UNIVERSAL || v == NULL || strstr(v, "var(") != NULL) {
+            continue;
+        }
+        if (!css_typed_value_parse(r->syntax, v, strlen(v), font_px, &tv)) {
+            custom_store(out, r->name, r->initial);
+        }
+    }
+}
+
 /* Applies g.entries (sorted ascending) in three passes: custom properties,
  * font-size, everything else.
  *
@@ -417,11 +513,18 @@ static void apply_entries(CssComputed *out, const CssComputed *parent)
     }
     float parent_font = parent != NULL ? parent->font_size : out->font_size;
 
+    if (parent != NULL) {
+        registered_drop_uninherited(out);
+    }
     for (size_t i = 0; i < g.entries.len; i++) {
         const CssDecl *d = g.entries.data[i].decl;
         if (CSS_PROP_IS_CUSTOM(d->prop)) {
             apply_decl(out, d, parent, parent_font);
         }
+    }
+    registered_fixup(out, parent_font);
+    if (g.custom_hook != NULL && g.cur_elem != 0) {
+        g.custom_hook(g.custom_user, g.cur_elem, g.cur_pe, out);
     }
     for (size_t i = 0; i < g.entries.len; i++) {
         const CssDecl *d = g.entries.data[i].decl;
@@ -459,6 +562,8 @@ static void compute_element(Dom *dom, lxb_dom_node_t *node, const CssComputed *p
 {
     init_from_parent(out, parent);
     collect_matches(node);
+    g.cur_elem = dom_node_elem(dom, node);
+    g.cur_pe = CSS_PE_NONE;
     gather_entries(CSS_PE_NONE);
     gather_inline(dom, dom_node_elem(dom, node));
     apply_entries(out, parent);
@@ -470,6 +575,7 @@ static void compute_element(Dom *dom, lxb_dom_node_t *node, const CssComputed *p
 static uint32_t compute_pseudo_from_matches(const CssComputed *elem, int pe, CssComputed *out)
 {
     init_from_parent(out, elem);
+    g.cur_pe = pe;   /* g.cur_elem: set by compute_element / cascade_pseudo_computed */
     gather_entries(pe);
     if (g.entries.len == 0) {
         css_computed_hash(out);
@@ -780,7 +886,9 @@ uint32_t cascade_pseudo_computed(Dom *dom, HtmlElem e, int pe, CssComputed *out)
     if (self == NULL) {
         return 0;
     }
+    registry_refresh();
     collect_matches(node);
+    g.cur_elem = e;
     return compute_pseudo_from_matches(self, pe, out);
 }
 

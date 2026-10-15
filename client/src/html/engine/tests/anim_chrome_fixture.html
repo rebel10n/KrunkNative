@@ -1,0 +1,125 @@
+<!doctype html>
+<!--
+  anim_chrome_fixture.html - ground truth for test_anim.c (our own fixture: the
+  CSS below copies v10's @keyframes / transition declarations as CSS text; the
+  script is ours and only samples Chrome's computed values).  Run:
+    google-chrome --headless=new --disable-gpu --virtual-time-budget=3000 \
+      --dump-dom client/src/html/engine/tests/anim_chrome_fixture.html
+  and read the <pre id=out> JSON: [case, time ms, computed value].
+-->
+<html><head><meta charset="utf-8"><style>
+@property --progress { syntax: '<number>'; inherits: false; initial-value: 0; }
+div { position: absolute; width: 100px; height: 50px; }
+/* main.css #homeStoreAdC + backMov */
+#backMov { background-position-y: top; animation: backMov 18s infinite; }
+@keyframes backMov { 50% { background-position-y: bottom; } }
+/* main.css .logVersionHed + panBackground */
+#pan { animation: panBackground 10s infinite; animation-direction: alternate; }
+@keyframes panBackground { from { background-position: 0px 0px; } to { background-position: 0px -120px; } }
+/* svelte.css .footer.svelte-mqcul7::before + pulse */
+#pulse::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-size: 200% 100%;
+  animation: pulse 4s ease-in-out infinite; }
+@keyframes pulse { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+/* svelte.css m5s1iy borderGlow (linear 3s) */
+#glow { animation: borderGlow 3s linear infinite; }
+@keyframes borderGlow { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+/* svelte.css 1w0uz1r bannerShaderSweep */
+#sweep { background-size: 300% 100%; animation: sweep 3s linear infinite; }
+@keyframes sweep { from { background-position: 0% 50%; } to { background-position: 300% 50%; } }
+/* svelte.css da3zva rewardsGlow (same as krSaleGlow / buffGlow) */
+#rewards { color: #ffd54f; text-shadow: 0 0 6px rgba(255, 213, 79, 0.3); animation: rewardsGlow 3s ease-in-out infinite; }
+@keyframes rewardsGlow { 0% { text-shadow: 0 0 6px rgba(255, 213, 79, 0.3); } 50% { text-shadow: 0 0 10px rgba(255, 213, 79, 0.5); } 100% { text-shadow: 0 0 6px rgba(255, 213, 79, 0.3); } }
+/* svelte.css 159x57l dsGlow */
+#ds { color: #9eeb56; animation: dsGlow 2s ease-in-out infinite alternate; }
+@keyframes dsGlow { 0% { text-shadow: 0 0 4px rgba(158, 235, 86, 0.3); } 100% { text-shadow: 0 0 10px rgba(158, 235, 86, 0.6); } }
+/* svelte.css .shop-badge::after shopBadgeShine */
+#badge { width: 200px; overflow: hidden; }
+#badge::after { content: ''; position: absolute; top: 0; left: -60%; width: 40%; height: 100%; animation: shine 2.6s ease-in-out infinite; }
+@keyframes shine { 0% { left: -60%; } 55%, 100% { left: 130%; } }
+/* text-shadow lists of different lengths, currentColor */
+#tsl { color: rgb(0, 0, 255); animation: tsl 1s linear; }
+@keyframes tsl { from { text-shadow: 0 0 4px red; } to { text-shadow: 2px 2px 0 rgb(0, 128, 0), 4px 4px 2px currentColor; } }
+/* main.css .shopCard background-size transition */
+#card { background-position: center; background-size: 101%; transition: opacity .1s ease, background-size .1s ease, background-position .1s ease; }
+#card.hover { background-size: 110%; }
+/* visibility / z-index / font-weight under transition: all */
+#vis { visibility: visible; z-index: 1; font-weight: 400; transition: all 1s linear; }
+#vis.off { visibility: hidden; z-index: 10; font-weight: 700; }
+/* svelte.css cow1ce flying-currency: @property --progress drives left/top through calc() */
+#fly { --start-x: 100px; --mid-x: 300px; --end-x: 900px; --progress: 0;
+  left: calc(var(--start-x) * (1 - var(--progress)) * (1 - var(--progress)) + var(--mid-x) * 2 * (1 - var(--progress)) * var(--progress) + var(--end-x) * var(--progress) * var(--progress));
+  animation: fly 1000ms cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards; }
+@keyframes fly { 0% { --progress: 0; opacity: 0; } 20% { --progress: 0; opacity: 1; } 80% { --progress: 1; opacity: 1; } 100% { --progress: 1; opacity: 0.4; } }
+/* svelte.css .reward-card (1sac6ik): transition: transform 0.4s; .flipped { transform: rotateY(180deg) } */
+#flip { transform-style: preserve-3d; transition: transform 0.4s; }
+#flip.flipped { transform: rotateY(180deg); }
+/* transform lists: mismatched primitives (matrix), padding, rotate vs rotateY (slerp) */
+#mx { animation: mx 1s linear; }
+@keyframes mx { from { transform: rotate(90deg); } to { transform: scale(0.5); } }
+#pad { animation: pad 1s linear; }
+@keyframes pad { from { transform: translateX(10px); } to { transform: translateX(20px) rotate(90deg); } }
+#slerp { animation: slerp 1s linear; }
+@keyframes slerp { from { transform: rotate(30deg); } to { transform: rotateY(60deg); } }
+#tail { animation: tail 1s linear; }
+@keyframes tail { from { transform: translateX(10px) rotate(0deg) scale(2); } to { transform: translateX(30px) skewX(30deg); } }
+/* color-mix() with currentColor interpolates against the element's color */
+#cmix { color: rgb(0, 0, 255); border-top: 2px solid; animation: cmix 1s linear; }
+@keyframes cmix { from { border-top-color: color-mix(in srgb, currentColor 50%, rgb(255, 0, 0)); } to { border-top-color: rgb(0, 255, 0); } }
+/* registered <length> / <color> custom properties */
+@property --e1len { syntax: '<length>'; inherits: false; initial-value: 0px; }
+@property --e1col { syntax: '<color>'; inherits: false; initial-value: red; }
+#rlen { width: var(--e1len); animation: rlen 1s linear; }
+@keyframes rlen { to { --e1len: 200px; } }
+#rcol { background-color: var(--e1col); animation: rcol 1s linear; }
+@keyframes rcol { to { --e1col: rgba(0, 0, 255, 0.5); } }
+/* var() users moved by an animated custom property start no transitions (transition: all) */
+#flyT { --progress: 0; transition: all 1s linear; left: calc(100px + 800px * var(--progress)); animation: flyT 1s linear forwards; }
+@keyframes flyT { to { --progress: 1; } }
+</style></head><body>
+<div id="backMov"></div><div id="pan"></div><div id="pulse"></div><div id="glow"></div><div id="sweep"></div>
+<div id="rewards">x</div><div id="ds">x</div><div id="badge"></div><div id="tsl">x</div>
+<div id="card"></div><div id="vis"></div><div id="fly"></div>
+<div id="flip"></div><div id="mx"></div><div id="pad"></div><div id="slerp"></div><div id="tail"></div>
+<div id="cmix"></div><div id="rlen"></div><div id="rcol"></div><div id="flyT"></div>
+<pre id="out"></pre>
+<script>
+const out = [];
+function at(id, pseudo, prop, times) {
+  const el = document.getElementById(id);
+  const anims = el.getAnimations({ subtree: true }).filter(a => (a.effect.pseudoElement || null) === pseudo);
+  for (const t of times) {
+    anims.forEach(a => { a.pause(); a.currentTime = t; });
+    out.push([id + (pseudo || '') + ' ' + prop, t, getComputedStyle(el, pseudo).getPropertyValue(prop)]);
+  }
+}
+at('backMov', null, 'background-position-y', [0, 2250, 4500, 9000, 13500, 17000]);
+at('pan', null, 'background-position-y', [0, 2500, 5000, 12500]);
+at('pulse', '::before', 'background-position-x', [0, 500, 1000, 2000, 3000]);
+at('glow', null, 'background-position-x', [0, 750, 2250]);
+at('sweep', null, 'background-position-x', [0, 1000, 2900]);
+at('rewards', null, 'text-shadow', [0, 375, 750, 1500, 2250]);
+at('ds', null, 'text-shadow', [0, 500, 2500]);
+at('badge', '::after', 'left', [0, 357.5, 715, 1430, 2000]);
+at('tsl', null, 'text-shadow', [0, 250, 500]);
+at('fly', null, 'left', [0, 200, 350, 500, 650, 800, 1000]);
+at('fly', null, 'opacity', [100, 900]);
+at('mx', null, 'transform', [250, 500, 750]);
+at('pad', null, 'transform', [500]);
+at('slerp', null, 'transform', [250, 500]);
+at('tail', null, 'transform', [500]);
+at('cmix', null, 'border-top-color', [0, 500]);
+at('rlen', null, 'width', [250, 500]);
+at('rcol', null, 'background-color', [250, 500]);
+at('flyT', null, 'left', [0, 250, 500]);
+// transitions: change the state, then pause the CSSTransitions at fixed times
+document.body.offsetWidth;
+document.getElementById('card').classList.add('hover');
+document.getElementById('vis').classList.add('off');
+document.getElementById('flip').classList.add('flipped');
+at('card', null, 'background-size', [0, 25, 50, 75]);
+at('vis', null, 'visibility', [0, 500, 999]);
+at('vis', null, 'z-index', [0, 250, 500, 750]);
+at('vis', null, 'font-weight', [0, 250, 500]);
+at('flip', null, 'transform', [0, 100, 200, 300]);
+document.getElementById('out').textContent = JSON.stringify(out);
+</script></body></html>

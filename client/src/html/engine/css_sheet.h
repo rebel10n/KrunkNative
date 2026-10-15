@@ -122,6 +122,18 @@ uint32_t css_sheet_keyframes_count(const CssSheet *sheet);
 const CssKeyframes *css_sheet_keyframes_at(const CssSheet *sheet, uint32_t i);
 const CssFontFace *css_sheet_font_faces(const CssSheet *sheet, uint32_t *count);
 
+/* @property --name { syntax; inherits; initial-value } (CSS Properties and
+ * Values API 1).  Descriptors as written: validity (syntax / initial-value
+ * agreement) is checked by the registry (anim_property_register).  Rules
+ * without a syntax or inherits descriptor are dropped here. */
+typedef struct CssPropertyRule {
+    const char *name;      /* atom including "--"                             */
+    const char *syntax;    /* atom, quotes removed ("<number>", "*")          */
+    const char *initial;   /* atom of the trimmed initial-value, or NULL      */
+    uint8_t inherits;
+} CssPropertyRule;
+const CssPropertyRule *css_sheet_properties(const CssSheet *sheet, uint32_t *count);
+
 /* Which selector features (classes, ids, attributes, state pseudo-classes)
  * appear where in this sheet's selectors; see DomInvalidation in dom.h. */
 const DomInvalidation *css_sheet_invalidation(const CssSheet *sheet);

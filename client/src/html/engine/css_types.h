@@ -40,7 +40,7 @@ extern "C" {
 #define CSS_MAX_BG_LAYERS       2
 #define CSS_MAX_FILTER_OPS      6
 #define CSS_MAX_ANIMATIONS      2
-#define CSS_MAX_TRANSITIONS     2
+#define CSS_MAX_TRANSITIONS     4   /* v10: 3-entry lists (.shopCard opacity, background-size, background-position) */
 #define CSS_MAX_BOX_SHADOWS     4
 #define CSS_MAX_GRID_TRACKS     12  /* v7.1.4 editor.css #_toolbar: 10 columns */
 #define CSS_MAX_CUSTOM_PROPS    96  /* the v10 page: 55 distinct across main.css, bundledStyles.css, svelte.css, hud.css, krunknative.css */

@@ -44,17 +44,55 @@
  *    (so 0 <-> 25.25em and 10px <-> 50% both work); unitless numbers
  *    (line-height) lerped together; any keyword side -> discrete at 50%.
  *  - colors: premultiplied-alpha RGBA linear interpolation (Chrome), rounded
- *    to the nearest 8-bit value; currentColor on either side -> discrete.
- *  - transform: op lists with the same length and pairwise kinds are
- *    interpolated per op (translate lengths, scale factors, rotate/skew
- *    angles, matrix components).  `none` on one side becomes the identity of
- *    the other side's structure.  Otherwise discrete at 50%.
+ *    to the nearest 8-bit value.
+ *  - transform (Blink TransformOperations::Blend): functions pair index by
+ *    index while their primitives agree (rotate pairs with rotateX/Y/3d);
+ *    when the whole shorter list agrees it is padded with identity functions
+ *    (`none` is the empty list).  Pairs interpolate per function
+ *    (css_transform_op_lerp: translate x/y/z, scale x/y/z, angles,
+ *    perspective via its inverse; rotations about different axes slerp;
+ *    matrix() decomposed).  After the first disagreeing pair both remainders
+ *    interpolate as matrices (Chromium's decomposition: translate, scale,
+ *    skew, quaternion slerp; CSS Transforms 2 section 16).  Remainders with
+ *    percentage translations or a perspective part stay discrete at 50%
+ *    (Chrome resolves those against the box).
  *  - filter: same scheme (hue-rotate angle, brightness/contrast/... amounts,
  *    drop-shadow components); `none` -> per-function identity.
- *  - box-shadow: lists paired index by index, the shorter one padded with
- *    transparent 0 0 0 0 shadows of the other side's inset (CSS Backgrounds
- *    3, Blink); every pair needs equal inset flags and RGBA colors, else the
- *    whole list is discrete at 50%.  `none` is the empty list.
+ *  - box-shadow / text-shadow: lists paired index by index, the shorter one
+ *    padded with transparent 0 0 0 0 shadows of the other side's inset (CSS
+ *    Backgrounds 3, Blink ShadowListInterpolationType); every pair needs
+ *    equal inset flags, else the whole list is discrete at 50%.  `none` is
+ *    the empty list.
+ *  - currentColor and color-mix(... currentColor ...) (border/outline colors,
+ *    shadow colors) interpolate as their value against the element's `color`
+ *    (css_color_resolve; Blink resolves them at interpolation time); only
+ *    anim_value_lerp() calls without an element context keep them discrete.
+ *  - background-position-x/-y: per layer, per component (px and % lerped
+ *    separately = Chrome's calc() result).  The cascade already repeats the
+ *    list over every layer slot, which is Blink's lowest-common-multiple
+ *    pairing for the layer counts the engine keeps.
+ *  - background-size: per layer; compatible when both are the same keyword
+ *    (cover/contain) or both are length pairs with `auto` in the same
+ *    components (101% auto -> 110% auto lerps the width); any incompatible
+ *    layer makes the whole list discrete at 50% (Blink SizeListInterpolation).
+ *  - z-index: integers rounded with round() (Blink CSSNumberInterpolationType
+ *    round_to_integer); auto on either side -> discrete.  font-weight: number
+ *    clamped to [1, 1000], rounded to the stored integer.
+ *  - visibility: when either end is `visible` the value is `visible` for
+ *    0 < p < 1 (so fade-outs stay visible to the end, as in Chrome); else
+ *    discrete at 50%.
+ *  - custom properties in @keyframes: registered ones (@property, the
+ *    css_values.c registry) interpolate as typed values (<number> <integer>
+ *    <length> <percentage> <length-percentage> <color> <angle> <time>:
+ *    css_typed_value_lerp); unregistered ones, `*` and keyframe values that
+ *    do not parse under the syntax flip at 50% of the eased interval
+ *    progress (Chrome).  Their
+ *    animated values are injected by the cascade (anim_custom_fixup()) so
+ *    var()/calc() users re-resolve every frame; anim_tick reports such
+ *    elements with ANIM_DIRTY_CUSTOM (the engine re-cascades them).
+ *
+ * Pseudo-elements: ::before / ::after animate under their own key
+ * ANIM_KEY(elem, ANIM_PSEUDO_BEFORE / _AFTER); everything above applies.
  *
  * Only the properties listed in AnimProp are animatable; animating anything
  * else is a no-op.  CssComputed hashes are copied from base unchanged.
@@ -74,6 +112,13 @@ extern "C" {
 
 /* Same handle as html_dom.h / dom.h (index into the node table, 0 == none). */
 typedef uint32_t HtmlElem;
+
+/* Animation targets: an element or one of its pseudo-elements.  The element
+ * handle keeps the low 30 bits (node table index). */
+enum { ANIM_PSEUDO_NONE = 0, ANIM_PSEUDO_BEFORE = 1, ANIM_PSEUDO_AFTER = 2 };
+#define ANIM_KEY(elem, pseudo) ((HtmlElem)(elem) | ((uint32_t)(pseudo) << 30))
+#define ANIM_KEY_ELEM(key)     ((HtmlElem)((key) & 0x3FFFFFFFu))
+#define ANIM_KEY_PSEUDO(key)   ((int)((uint32_t)(key) >> 30))
 
 /* ------------------------------------------------------------------------- */
 /* Animatable properties                                                      */
@@ -101,6 +146,12 @@ typedef enum AnimProp {
     ANIM_TRANSFORM,
     ANIM_FILTER,
     ANIM_BOX_SHADOW,
+    ANIM_TEXT_SHADOW,
+    ANIM_BACKGROUND_POSITION_X, ANIM_BACKGROUND_POSITION_Y,
+    ANIM_BACKGROUND_SIZE,
+    ANIM_Z_INDEX,
+    ANIM_FONT_WEIGHT,
+    ANIM_VISIBILITY,
     ANIM_PROP_COUNT
 } AnimProp;
 
@@ -114,7 +165,13 @@ typedef enum AnimValueKind {
     ANIM_KIND_COLOR,       /* CssColor                                        */
     ANIM_KIND_TRANSFORM,   /* CssTransform                                    */
     ANIM_KIND_FILTER,      /* AnimFilterList                                  */
-    ANIM_KIND_SHADOW       /* AnimShadow (box-shadow)                         */
+    ANIM_KIND_SHADOW,      /* AnimShadow (box-shadow)                         */
+    ANIM_KIND_TEXT_SHADOW, /* CssShadowList                                   */
+    ANIM_KIND_BG_POS,      /* CssLength per background layer slot             */
+    ANIM_KIND_BG_SIZE,     /* CssBgSize per background layer slot             */
+    ANIM_KIND_INT,         /* AnimInt (z-index, font-weight)                  */
+    ANIM_KIND_VISIBILITY,  /* CssVisibility                                   */
+    ANIM_KIND_COUNT_
 } AnimValueKind;
 
 typedef struct AnimFilterList {
@@ -128,6 +185,11 @@ typedef struct AnimShadow {
     uint8_t count;         /* 0 .. CSS_MAX_BOX_SHADOWS                        */
 } AnimShadow;
 
+typedef struct AnimInt {
+    int32_t v;
+    uint8_t is_auto;       /* z-index: auto                                   */
+} AnimInt;
+
 /* One animatable value; the active member follows anim_prop_kind(prop). */
 typedef union AnimValue {
     float f;
@@ -136,12 +198,22 @@ typedef union AnimValue {
     CssTransform transform;
     AnimFilterList filter;
     AnimShadow shadow;
+    CssShadowList text_shadow;
+    CssLength bg_pos[CSS_MAX_BG_LAYERS];
+    CssBgSize bg_size[CSS_MAX_BG_LAYERS];
+    AnimInt i;
+    uint8_t kw;            /* visibility                                      */
 } AnimValue;
 
-/* Dirty classes reported through AnimDirtyFn. */
+/* Dirty classes reported through AnimDirtyFn.  For elements the engine lets
+ * layout_restyled() classify the change; pseudo-element boxes (no
+ * layout_restyled of their own) use these directly. */
 enum {
-    ANIM_DIRTY_PAINT  = 1,  /* opacity, colors, transform, filter, shadow     */
-    ANIM_DIRTY_LAYOUT = 2   /* font-size, lengths, border widths (and paint)  */
+    ANIM_DIRTY_PAINT     = 1,  /* colors, opacity, filter, shadows, backgrounds */
+    ANIM_DIRTY_LAYOUT    = 2,  /* font-size/-weight, lengths, border widths     */
+    ANIM_DIRTY_TRANSFORM = 4,  /* transform: matrix refresh                     */
+    ANIM_DIRTY_REBUILD   = 8,  /* visibility: box flags, rebuild the boxes      */
+    ANIM_DIRTY_CUSTOM    = 16  /* custom properties: re-cascade the element     */
 };
 
 AnimValueKind anim_prop_kind(AnimProp prop);
@@ -183,12 +255,21 @@ typedef struct AnimKeyframeEntry {
     AnimValue value;
 } AnimKeyframeEntry;
 
+/* A custom property in a keyframe: raw value text, parsed at sample time
+ * against the registry (registration may come from a later sheet). */
+typedef struct AnimCustomEntry {
+    const char *name;      /* atom including "--"                             */
+    const char *text;      /* atom of the trimmed value text                  */
+} AnimCustomEntry;
+
 typedef struct AnimKeyframe {
     float offset;          /* 0..1 (from == 0, to == 1)                       */
     uint8_t has_timing;    /* animation-timing-function declared in the frame */
     CssTiming timing;
     AnimKeyframeEntry *entries;
     uint32_t count, cap;
+    AnimCustomEntry *customs;
+    uint32_t custom_count, custom_cap;
 } AnimKeyframe;
 
 typedef struct AnimKeyframeSet {
@@ -196,6 +277,8 @@ typedef struct AnimKeyframeSet {
     AnimKeyframe *frames;  /* sorted by offset, stable                        */
     uint32_t count, cap;
     uint64_t props;        /* union of all frames' properties                 */
+    const char **custom_names;  /* distinct custom properties of the frames   */
+    uint32_t custom_name_count, custom_name_cap;
 } AnimKeyframeSet;
 
 typedef struct AnimSystem AnimSystem;
@@ -211,6 +294,8 @@ void anim_keyframe_set_value(AnimKeyframeSet *set, AnimKeyframe *frame, AnimProp
  * (props_mask comes from anim_prop_mask_from_css_prop(prop_id) per decl). */
 void anim_keyframe_set_from_computed(AnimKeyframeSet *set, AnimKeyframe *frame,
                                      const CssComputed *values, uint64_t props_mask);
+/* Sets custom property `name_atom` (incl. "--") to the value text `text_atom`. */
+void anim_keyframe_set_custom(AnimKeyframeSet *set, AnimKeyframe *frame, const char *name_atom, const char *text_atom);
 const AnimKeyframeSet *anim_keyframes_find(const AnimSystem *sys, const char *name_atom);
 /* Drops every set (running animations become inert until re-registered). */
 void anim_keyframes_clear(AnimSystem *sys);
@@ -225,7 +310,20 @@ typedef struct CssSheet CssSheet;
  * Returns the number of sets loaded.  (Compiled out with KN_ANIM_NO_SHEET
  * for standalone builds without css_sheet.c/Lexbor.) */
 int anim_keyframes_load_sheet(AnimSystem *sys, const CssSheet *sheet, const CssComputed *ctx);
+/* Registers every valid @property rule of a sheet with the css_values.c
+ * registry (css_property_register); returns how many. */
+int anim_properties_load_sheet(const CssSheet *sheet);
 #endif
+
+/* ------------------------------------------------------------------------- */
+/* Animated custom properties                                                 */
+/* ------------------------------------------------------------------------- */
+
+/* The cascade's custom-property hook for the target `key` (ANIM_KEY), called
+ * after the element's custom-property declarations (and the registered
+ * initial values, css_cascade.c) and before every other property: writes the
+ * animated custom values at now_ms so var() users resolve them. */
+void anim_custom_fixup(AnimSystem *sys, HtmlElem key, CssComputed *out, double now_ms);
 
 /* ------------------------------------------------------------------------- */
 /* System                                                                     */

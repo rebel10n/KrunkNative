@@ -6,13 +6,14 @@
 #include "anim.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "css_values.h"
 #include "util.h"
 #ifndef KN_ANIM_NO_SHEET
 #include "css_sheet.h"
-#include "css_values.h"
 #endif
 
 #ifndef INFINITY
@@ -70,15 +71,22 @@ static const PropInfo PROPS[ANIM_PROP_COUNT] = {
     [ANIM_BORDER_BOTTOM_COLOR]        = P(COLOR,     PAINT,  BORDER_BOTTOM_COLOR,        "border-bottom-color"),
     [ANIM_BORDER_LEFT_COLOR]          = P(COLOR,     PAINT,  BORDER_LEFT_COLOR,          "border-left-color"),
     [ANIM_OUTLINE_COLOR]              = P(COLOR,     PAINT,  OUTLINE_COLOR,              "outline-color"),
-    [ANIM_TRANSFORM]                  = P(TRANSFORM, PAINT,  TRANSFORM,                  "transform"),
+    [ANIM_TRANSFORM]                  = P(TRANSFORM, TRANSFORM, TRANSFORM,               "transform"),
     [ANIM_FILTER]                     = P(FILTER,    PAINT,  FILTER,                     "filter"),
     [ANIM_BOX_SHADOW]                 = P(SHADOW,    PAINT,  BOX_SHADOW,                 "box-shadow"),
+    [ANIM_TEXT_SHADOW]                = P(TEXT_SHADOW, PAINT, TEXT_SHADOW,               "text-shadow"),
+    [ANIM_BACKGROUND_POSITION_X]      = P(BG_POS,    PAINT,  BACKGROUND_POSITION_X,      "background-position-x"),
+    [ANIM_BACKGROUND_POSITION_Y]      = P(BG_POS,    PAINT,  BACKGROUND_POSITION_Y,      "background-position-y"),
+    [ANIM_BACKGROUND_SIZE]            = P(BG_SIZE,   PAINT,  BACKGROUND_SIZE,            "background-size"),
+    [ANIM_Z_INDEX]                    = P(INT,       PAINT,  Z_INDEX,                    "z-index"),
+    [ANIM_FONT_WEIGHT]                = P(INT,       LAYOUT, FONT_WEIGHT,                "font-weight"),
+    [ANIM_VISIBILITY]                 = P(VISIBILITY, REBUILD, VISIBILITY,               "visibility"),
 };
 #undef P
 
 /* Per-kind slot of each property inside AnimSnapshot (computed once). */
 static uint8_t g_slot[ANIM_PROP_COUNT];
-static uint8_t g_slot_count[6];
+static uint8_t g_slot_count[ANIM_KIND_COUNT_];
 static int g_slots_ready;
 
 static void props_init(void)
@@ -126,7 +134,11 @@ uint64_t anim_prop_mask_from_css_prop(int css_prop_id)
     case CSS_PROP_BORDER_BOTTOM: return ANIM_PROP_BIT(ANIM_BORDER_BOTTOM_WIDTH) | ANIM_PROP_BIT(ANIM_BORDER_BOTTOM_COLOR);
     case CSS_PROP_BORDER_LEFT:   return ANIM_PROP_BIT(ANIM_BORDER_LEFT_WIDTH) | ANIM_PROP_BIT(ANIM_BORDER_LEFT_COLOR);
     case CSS_PROP_OUTLINE:       return ANIM_PROP_BIT(ANIM_OUTLINE_WIDTH) | ANIM_PROP_BIT(ANIM_OUTLINE_COLOR);
-    case CSS_PROP_BACKGROUND:    return ANIM_PROP_BIT(ANIM_BACKGROUND_COLOR);
+    /* `background` transitions every animatable longhand it sets (Chrome):
+     * color, position and size (the image list is not interpolable) */
+    case CSS_PROP_BACKGROUND:    return ANIM_PROP_BIT(ANIM_BACKGROUND_COLOR) | ANIM_PROP_BIT(ANIM_BACKGROUND_POSITION_X) |
+                                        ANIM_PROP_BIT(ANIM_BACKGROUND_POSITION_Y) | ANIM_PROP_BIT(ANIM_BACKGROUND_SIZE);
+    case CSS_PROP_BACKGROUND_POSITION: return ANIM_PROP_BIT(ANIM_BACKGROUND_POSITION_X) | ANIM_PROP_BIT(ANIM_BACKGROUND_POSITION_Y);
     default:                     return 0;
     }
 }
@@ -195,6 +207,19 @@ void anim_value_get(const CssComputed *cc, AnimProp prop, AnimValue *out)
         out->shadow.shadow = c->box_shadow;
         memcpy(out->shadow.more, c->box_shadow_more, sizeof c->box_shadow_more);
         break;
+    case ANIM_KIND_TEXT_SHADOW: out->text_shadow = c->text_shadow; break;
+    case ANIM_KIND_BG_POS:
+        for (int i = 0; i < CSS_MAX_BG_LAYERS; i++)
+            out->bg_pos[i] = prop == ANIM_BACKGROUND_POSITION_Y ? c->bg_layers[i].y : c->bg_layers[i].x;
+        break;
+    case ANIM_KIND_BG_SIZE:
+        for (int i = 0; i < CSS_MAX_BG_LAYERS; i++) out->bg_size[i] = c->bg_layers[i].size;
+        break;
+    case ANIM_KIND_INT:
+        if (prop == ANIM_Z_INDEX) { out->i.v = c->z_index; out->i.is_auto = c->z_index_auto; }
+        else out->i.v = c->font_weight;
+        break;
+    case ANIM_KIND_VISIBILITY: out->kw = c->visibility; break;
     }
 }
 
@@ -214,6 +239,21 @@ void anim_value_set(CssComputed *c, AnimProp prop, const AnimValue *v)
         c->box_shadow = v->shadow.shadow;
         memcpy(c->box_shadow_more, v->shadow.more, sizeof c->box_shadow_more);
         break;
+    case ANIM_KIND_TEXT_SHADOW: c->text_shadow = v->text_shadow; break;
+    case ANIM_KIND_BG_POS:
+        for (int i = 0; i < CSS_MAX_BG_LAYERS; i++) {
+            if (prop == ANIM_BACKGROUND_POSITION_Y) c->bg_layers[i].y = v->bg_pos[i];
+            else c->bg_layers[i].x = v->bg_pos[i];
+        }
+        break;
+    case ANIM_KIND_BG_SIZE:
+        for (int i = 0; i < CSS_MAX_BG_LAYERS; i++) c->bg_layers[i].size = v->bg_size[i];
+        break;
+    case ANIM_KIND_INT:
+        if (prop == ANIM_Z_INDEX) { c->z_index = v->i.v; c->z_index_auto = v->i.is_auto; }
+        else c->font_weight = (int16_t)v->i.v;
+        break;
+    case ANIM_KIND_VISIBILITY: c->visibility = v->kw; break;
     }
 }
 
@@ -264,12 +304,25 @@ static int color_equal(const CssColor *a, const CssColor *b)
         return 0;
     if (a->kind == CSS_COLOR_CURRENT)
         return 1;
+    if (a->kind == CSS_COLOR_CURRENT_MIX && (a->mix != b->mix || a->mix_space != b->mix_space))
+        return 0;
     return a->r == b->r && a->g == b->g && a->b == b->b && a->a == b->a;
+}
+
+/* The element's `color` while one element is being sampled: currentColor and
+ * color-mix(currentColor ...) endpoints interpolate as their value against it
+ * (Blink resolves them at interpolation time).  NULL outside an element
+ * context, where they stay discrete. */
+static const CssColor *g_current_color;
+
+static int color_resolvable(const CssColor *c)
+{
+    return c->kind == CSS_COLOR_RGBA || (g_current_color && g_current_color->kind == CSS_COLOR_RGBA);
 }
 
 static int color_interpolable(const CssColor *a, const CssColor *b)
 {
-    return a->kind == CSS_COLOR_RGBA && b->kind == CSS_COLOR_RGBA;
+    return color_resolvable(a) && color_resolvable(b);
 }
 
 static uint8_t to_u8(float v)
@@ -284,6 +337,18 @@ static void color_lerp(const CssColor *a, const CssColor *b, float t, CssColor *
 {
     if (!color_interpolable(a, b)) {
         *out = t < 0.5f ? *a : *b;
+        return;
+    }
+    /* CSS Color 4 section 12.1: legacy sRGB colors interpolate in sRGB, any
+     * other (a color-mix() result is color(srgb ...)) in Oklab, premultiplied
+     * both ways (Chrome).  Only color-mix() with currentColor still carries
+     * that; mixes of plain colors parse to RGBA and interpolate in sRGB. */
+    const int oklab = a->kind == CSS_COLOR_CURRENT_MIX || b->kind == CSS_COLOR_CURRENT_MIX;
+    CssColor ra, rb;
+    if (a->kind != CSS_COLOR_RGBA) { ra = css_color_resolve(*a, *g_current_color); a = &ra; }
+    if (b->kind != CSS_COLOR_RGBA) { rb = css_color_resolve(*b, *g_current_color); b = &rb; }
+    if (oklab) {
+        *out = css_color_mix(*a, *b, 1.0f - t, 1.0f, CSS_COLOR_SPACE_OKLAB);
         return;
     }
     float aa = a->a / 255.0f, ab = b->a / 255.0f;
@@ -304,19 +369,236 @@ static void color_lerp(const CssColor *a, const CssColor *b, float t, CssColor *
     out->a = to_u8(alpha * 255.0f);
 }
 
-static int transform_op_equal(const CssTransformOp *a, const CssTransformOp *b)
+/* ---- transform lists (Chrome: Blink TransformOperations::Blend) ----------
+ * none is the empty list.  Functions pair index by index while their
+ * primitives agree (translate*, scale*, rotate/rotateZ with rotateX/Y/3d,
+ * skew*, perspective, matrix); when every pair of the shorter list agrees,
+ * it is padded with identity functions of the longer list's kinds (CSS
+ * Transforms 2 section 9, Blink MatchingPrefixLength).  Paired functions
+ * interpolate per function (css_transform_op_lerp; rotations about different
+ * axes slerp their quaternions like gfx::Quaternion::Slerp; matrix() pairs
+ * interpolate decomposed).  From the first disagreeing pair on, the two
+ * remainders interpolate as matrices (decompose_m4 below).  Remainders that need the box
+ * size (percentage translations) or have a perspective part stay discrete
+ * at 50%. */
+
+static int transform_prim_compatible(const CssTransformOp *a, const CssTransformOp *b)
 {
-    if (a->kind != b->kind)
+    if (a->kind == b->kind) return 1;
+    return (a->kind == CSS_TRANSFORM_ROTATE && b->kind == CSS_TRANSFORM_ROTATE_3D) ||
+           (a->kind == CSS_TRANSFORM_ROTATE_3D && b->kind == CSS_TRANSFORM_ROTATE);
+}
+
+/* rotate(a) as rotate3d(0, 0, 1, a) */
+static void transform_op_promote_3d(const CssTransformOp *op, CssTransformOp *out)
+{
+    *out = *op;
+    if (op->kind != CSS_TRANSFORM_ROTATE) return;
+    out->kind = CSS_TRANSFORM_ROTATE_3D;
+    out->axis[0] = out->axis[1] = 0.0f;
+    out->axis[2] = 1.0f;
+}
+
+/* Matrix interpolation (CSS Transforms 2 section 16 "Interpolation of 3D
+ * matrices" = Chromium gfx::DecomposeTransform / BlendDecomposedTransforms /
+ * ComposeTransform): M = T * R(quaternion) * K(skew xy, xz, yz) * S, the
+ * quaternions slerped, the rest lerped.  Matrices with a perspective part
+ * are not decomposed here (the caller keeps them discrete). */
+typedef struct Decomp {
+    double t[3], s[3], k[3] /* xy xz yz */, q[4] /* x y z w */;
+} Decomp;
+
+static double v3_dot(const double *a, const double *b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+
+static int decompose_m4(const float m[16], Decomp *o)
+{
+    if (fabsf(m[3]) > 1e-6f || fabsf(m[7]) > 1e-6f || fabsf(m[11]) > 1e-6f || fabsf(m[15] - 1.0f) > 1e-6f)
         return 0;
-    switch (a->kind) {
-    case CSS_TRANSFORM_TRANSLATE: return length_equal(&a->tx, &b->tx) && length_equal(&a->ty, &b->ty);
-    case CSS_TRANSFORM_SCALE:     return a->sx == b->sx && a->sy == b->sy;
-    case CSS_TRANSFORM_ROTATE:    return a->angle_deg == b->angle_deg;
-    case CSS_TRANSFORM_SKEW:      return a->angle_deg == b->angle_deg && a->angle2_deg == b->angle2_deg;
-    default:
-        return a->m.a == b->m.a && a->m.b == b->m.b && a->m.c == b->m.c &&
-               a->m.d == b->m.d && a->m.e == b->m.e && a->m.f == b->m.f;
+    double c[3][3];   /* columns of the linear part */
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) c[i][j] = m[i * 4 + j];
+        o->t[i] = m[12 + i];
     }
+    o->s[0] = sqrt(v3_dot(c[0], c[0]));
+    if (o->s[0] == 0) return 0;
+    for (int j = 0; j < 3; j++) c[0][j] /= o->s[0];
+    o->k[0] = v3_dot(c[0], c[1]);
+    for (int j = 0; j < 3; j++) c[1][j] -= o->k[0] * c[0][j];
+    o->s[1] = sqrt(v3_dot(c[1], c[1]));
+    if (o->s[1] == 0) return 0;
+    for (int j = 0; j < 3; j++) c[1][j] /= o->s[1];
+    o->k[0] /= o->s[1];
+    o->k[1] = v3_dot(c[0], c[2]);
+    for (int j = 0; j < 3; j++) c[2][j] -= o->k[1] * c[0][j];
+    o->k[2] = v3_dot(c[1], c[2]);
+    for (int j = 0; j < 3; j++) c[2][j] -= o->k[2] * c[1][j];
+    o->s[2] = sqrt(v3_dot(c[2], c[2]));
+    if (o->s[2] == 0) return 0;
+    for (int j = 0; j < 3; j++) c[2][j] /= o->s[2];
+    o->k[1] /= o->s[2];
+    o->k[2] /= o->s[2];
+    const double cr[3] = { c[1][1] * c[2][2] - c[1][2] * c[2][1], c[1][2] * c[2][0] - c[1][0] * c[2][2],
+                           c[1][0] * c[2][1] - c[1][1] * c[2][0] };
+    if (v3_dot(c[0], cr) < 0) {   /* coordinate system flip */
+        for (int i = 0; i < 3; i++) {
+            o->s[i] = -o->s[i];
+            for (int j = 0; j < 3; j++) c[i][j] = -c[i][j];
+        }
+    }
+    /* R(row r, column col) = c[col][r] */
+    const double r00 = c[0][0], r11 = c[1][1], r22 = c[2][2];
+    o->q[0] = 0.5 * sqrt(fmax(1 + r00 - r11 - r22, 0));
+    o->q[1] = 0.5 * sqrt(fmax(1 - r00 + r11 - r22, 0));
+    o->q[2] = 0.5 * sqrt(fmax(1 - r00 - r11 + r22, 0));
+    o->q[3] = 0.5 * sqrt(fmax(1 + r00 + r11 + r22, 0));
+    if (c[1][2] < c[2][1]) o->q[0] = -o->q[0];   /* sign(R21 - R12) */
+    if (c[2][0] < c[0][2]) o->q[1] = -o->q[1];   /* sign(R02 - R20) */
+    if (c[0][1] < c[1][0]) o->q[2] = -o->q[2];   /* sign(R10 - R01) */
+    return 1;
+}
+
+/* gfx::Quaternion::Slerp: shortest path (the start flipped when the half
+ * angle exceeds 90 degrees); nearly equal quaternions keep the start. */
+static void quat_slerp(const double *qa, const double *qb, double t, double *out)
+{
+    double from[4] = { qa[0], qa[1], qa[2], qa[3] };
+    double cosh = from[0] * qb[0] + from[1] * qb[1] + from[2] * qb[2] + from[3] * qb[3];
+    if (cosh < 0) {
+        for (int i = 0; i < 4; i++) from[i] = -from[i];
+        cosh = -cosh;
+    }
+    if (cosh > 1) cosh = 1;
+    const double sinh = sqrt(1.0 - cosh * cosh);
+    if (sinh < 1e-5) {
+        memcpy(out, qa, 4 * sizeof(double));
+        return;
+    }
+    const double half = acos(cosh), wa = sin((1 - t) * half) / sinh, wb = sin(t * half) / sinh;
+    for (int i = 0; i < 4; i++) out[i] = wa * from[i] + wb * qb[i];
+}
+
+static void compose_m4(const Decomp *d, float m[16])
+{
+    const double x = d->q[0], y = d->q[1], z = d->q[2], w = d->q[3];
+    double r[3][3];   /* r[col][row] */
+    r[0][0] = 1 - 2 * (y * y + z * z); r[1][0] = 2 * (x * y - z * w);     r[2][0] = 2 * (x * z + y * w);
+    r[0][1] = 2 * (x * y + z * w);     r[1][1] = 1 - 2 * (x * x + z * z); r[2][1] = 2 * (y * z - x * w);
+    r[0][2] = 2 * (x * z - y * w);     r[1][2] = 2 * (y * z + x * w);     r[2][2] = 1 - 2 * (x * x + y * y);
+    /* L = R * K * S: column 0 = R e0 sx, column 1 = R (kxy, 1, 0) sy, column 2 = R (kxz, kyz, 1) sz */
+    const double kc[3][3] = { { 1, 0, 0 }, { d->k[0], 1, 0 }, { d->k[1], d->k[2], 1 } };
+    memset(m, 0, 16 * sizeof(float));
+    for (int col = 0; col < 3; col++)
+        for (int row = 0; row < 3; row++) {
+            double v = 0;
+            for (int k = 0; k < 3; k++) v += r[k][row] * kc[col][k];
+            m[col * 4 + row] = (float)(v * d->s[col]);
+        }
+    m[12] = (float)d->t[0]; m[13] = (float)d->t[1]; m[14] = (float)d->t[2]; m[15] = 1.0f;
+}
+
+/* Blends two matrices into ops (one matrix() when the result is 2D, else
+ * translate3d rotate3d skewX scale3d); 0 when not possible here. */
+static int m4_blend_ops(const float ma[16], const float mb[16], float t, CssTransformOp *ops, int cap, int *n)
+{
+    Decomp a, b, r;
+    if (!decompose_m4(ma, &a) || !decompose_m4(mb, &b)) return 0;
+    for (int i = 0; i < 3; i++) {
+        r.t[i] = a.t[i] + (b.t[i] - a.t[i]) * t;
+        r.s[i] = a.s[i] + (b.s[i] - a.s[i]) * t;
+        r.k[i] = a.k[i] + (b.k[i] - a.k[i]) * t;
+    }
+    quat_slerp(a.q, b.q, t, r.q);
+    float m[16];
+    compose_m4(&r, m);
+    const float e = 1e-6f;
+    if (fabsf(m[2]) < e && fabsf(m[6]) < e && fabsf(m[8]) < e && fabsf(m[9]) < e && fabsf(m[14]) < e &&
+        fabsf(m[10] - 1.0f) < e) {
+        if (cap < 1) return 0;
+        memset(&ops[0], 0, sizeof ops[0]);
+        ops[0].kind = CSS_TRANSFORM_MATRIX;
+        ops[0].m.a = m[0]; ops[0].m.b = m[1]; ops[0].m.c = m[4]; ops[0].m.d = m[5]; ops[0].m.e = m[12]; ops[0].m.f = m[13];
+        *n = 1;
+        return 1;
+    }
+    if (cap < 4 || fabs(r.k[1]) > 1e-9 || fabs(r.k[2]) > 1e-9) return 0;   /* xz / yz shears: no CSS function */
+    memset(ops, 0, 4 * sizeof ops[0]);
+    ops[0].kind = CSS_TRANSFORM_TRANSLATE;
+    ops[0].tx.kind = ops[0].ty.kind = CSS_LEN_VALUE;
+    ops[0].tx.px = (float)r.t[0]; ops[0].ty.px = (float)r.t[1]; ops[0].tz = (float)r.t[2];
+    const double qw = fmax(-1.0, fmin(1.0, r.q[3])), sh = sqrt(1.0 - qw * qw);
+    ops[1].kind = CSS_TRANSFORM_ROTATE_3D;
+    ops[1].angle_deg = (float)(2.0 * acos(qw) * 180.0 / 3.14159265358979323846);
+    if (sh < 1e-9) ops[1].axis[2] = 1.0f;
+    else { ops[1].axis[0] = (float)(r.q[0] / sh); ops[1].axis[1] = (float)(r.q[1] / sh); ops[1].axis[2] = (float)(r.q[2] / sh); }
+    ops[2].kind = CSS_TRANSFORM_SKEW;
+    ops[2].angle_deg = (float)(atan(r.k[0]) * 180.0 / 3.14159265358979323846);
+    ops[3].kind = CSS_TRANSFORM_SCALE;
+    ops[3].sx = (float)r.s[0]; ops[3].sy = (float)r.s[1]; ops[3].sz = (float)r.s[2];
+    *n = 4;
+    return 1;
+}
+
+/* Rotations about different axes: quaternion slerp (Blink Rotation::Slerp ->
+ * gfx::Quaternion::Slerp), back to axis + angle. */
+static void rotate3d_slerp(const CssTransformOp *a, const CssTransformOp *b, float t, CssTransformOp *out)
+{
+    const double d2r = 3.14159265358979323846 / 180.0;
+    double qa[4], qb[4], q[4];
+    const CssTransformOp *src[2] = { a, b };
+    double *dst[2] = { qa, qb };
+    for (int k = 0; k < 2; k++) {
+        const double h = src[k]->angle_deg * d2r * 0.5, s = sin(h);
+        double x = src[k]->axis[0], y = src[k]->axis[1], z = src[k]->axis[2];
+        const double len = sqrt(x * x + y * y + z * z);
+        if (len > 0) { x /= len; y /= len; z /= len; }
+        dst[k][0] = x * s; dst[k][1] = y * s; dst[k][2] = z * s; dst[k][3] = cos(h);
+    }
+    quat_slerp(qa, qb, t, q);
+    memset(out, 0, sizeof *out);
+    out->kind = CSS_TRANSFORM_ROTATE_3D;
+    double qw = q[3] > 1.0 ? 1.0 : q[3] < -1.0 ? -1.0 : q[3];
+    const double angle = 2.0 * acos(qw), s = sqrt(1.0 - qw * qw);
+    out->angle_deg = (float)(angle / d2r);
+    if (s < 1e-6) {
+        memcpy(out->axis, a->axis, sizeof out->axis);
+    } else {
+        out->axis[0] = (float)(q[0] / s); out->axis[1] = (float)(q[1] / s); out->axis[2] = (float)(q[2] / s);
+    }
+}
+
+/* ops[from..count) as one matrix; 0 when it needs the box size (%, em). */
+static int transform_tail_m4(const CssTransform *t, int from, float out[16])
+{
+    CssTransform tail;
+    memset(&tail, 0, sizeof tail);
+    for (int i = from; i < t->count && i < CSS_MAX_TRANSFORM_OPS; i++) {
+        const CssTransformOp *op = &t->ops[i];
+        if (op->kind == CSS_TRANSFORM_TRANSLATE &&
+            (op->tx.pct != 0 || op->ty.pct != 0 || op->tx.em != 0 || op->ty.em != 0 ||
+             op->tx.kind != CSS_LEN_VALUE || op->ty.kind != CSS_LEN_VALUE))
+            return 0;
+        tail.ops[tail.count++] = *op;
+    }
+    css_transform_to_mat4(&tail, 0.0f, 0.0f, out);
+    return 1;
+}
+
+static void op_to_m4(const CssTransformOp *op, float out[16])
+{
+    CssTransform one;
+    memset(&one, 0, sizeof one);
+    one.ops[0] = *op;
+    one.count = 1;
+    css_transform_to_mat4(&one, 0.0f, 0.0f, out);
+}
+
+/* Length of the per-function prefix (Blink MatchingPrefixLength). */
+static int transform_prefix(const CssTransform *a, const CssTransform *b)
+{
+    const int n = a->count > b->count ? a->count : b->count, m = a->count < b->count ? a->count : b->count;
+    for (int i = 0; i < m; i++)
+        if (!transform_prim_compatible(&a->ops[i], &b->ops[i])) return i;
+    return n;
 }
 
 static int transform_equal(const CssTransform *a, const CssTransform *b)
@@ -324,90 +606,60 @@ static int transform_equal(const CssTransform *a, const CssTransform *b)
     if (a->count != b->count)
         return 0;
     for (int i = 0; i < a->count; i++)
-        if (!transform_op_equal(&a->ops[i], &b->ops[i]))
+        if (!css_transform_op_equal(&a->ops[i], &b->ops[i]))
             return 0;
     return 1;
 }
 
-static void transform_op_identity(CssTransformOp *op, uint8_t kind)
+/* Interpolates; 0 when the lists are not interpolable (caller: discrete). */
+static int transform_blend(const CssTransform *a, const CssTransform *b, float t, CssTransform *out)
 {
-    memset(op, 0, sizeof *op);
-    op->kind = kind;
-    switch (kind) {
-    case CSS_TRANSFORM_SCALE:  op->sx = op->sy = 1.0f; break;
-    case CSS_TRANSFORM_MATRIX: op->m.a = op->m.d = 1.0f; break;
-    default: break;   /* translate 0 0, rotate 0, skew 0 0 */
+    const int n = a->count > b->count ? a->count : b->count;
+    const int prefix = transform_prefix(a, b);
+    CssTransform r;
+    memset(&r, 0, sizeof r);
+    for (int i = 0; i < prefix; i++) {
+        CssTransformOp x, y, o;
+        if (i < a->count) x = a->ops[i]; else css_transform_op_identity(&x, &b->ops[i]);
+        if (i < b->count) y = b->ops[i]; else css_transform_op_identity(&y, &a->ops[i]);
+        if (x.kind != y.kind) {
+            transform_op_promote_3d(&x, &x);
+            transform_op_promote_3d(&y, &y);
+        }
+        if (x.kind == CSS_TRANSFORM_MATRIX) {   /* Blink MatrixTransformOperation::Blend: decomposed */
+            float ma[16], mb[16];
+            int k = 0;
+            op_to_m4(&x, ma);
+            op_to_m4(&y, mb);
+            if (!m4_blend_ops(ma, mb, t, &o, 1, &k)) return 0;
+        } else if (!css_transform_op_lerp(&x, &y, t, &o)) {
+            if (x.kind != CSS_TRANSFORM_ROTATE_3D) return 0;
+            rotate3d_slerp(&x, &y, t, &o);
+        }
+        r.ops[r.count++] = o;
     }
-}
-
-static void transform_identity_like(const CssTransform *shape, CssTransform *out)
-{
-    memset(out, 0, sizeof *out);
-    out->count = shape->count;
-    for (int i = 0; i < shape->count; i++)
-        transform_op_identity(&out->ops[i], shape->ops[i].kind);
+    if (prefix < n) {
+        float ma[16], mb[16];
+        int k = 0;
+        if (!transform_tail_m4(a, prefix, ma) || !transform_tail_m4(b, prefix, mb)) return 0;
+        if (!m4_blend_ops(ma, mb, t, &r.ops[r.count], CSS_MAX_TRANSFORM_OPS - r.count, &k)) return 0;
+        r.count = (uint8_t)(r.count + k);
+    }
+    r.has_3d = (uint8_t)(a->has_3d | b->has_3d);
+    *out = r;
+    return 1;
 }
 
 static int transform_pairable(const CssTransform *a, const CssTransform *b)
 {
-    if (a->count == 0 || b->count == 0)
-        return 1;
-    if (a->count != b->count)
-        return 0;
-    for (int i = 0; i < a->count; i++)
-        if (a->ops[i].kind != b->ops[i].kind)
-            return 0;
-    return 1;
-}
-
-static void transform_op_lerp(const CssTransformOp *a, const CssTransformOp *b, float t, CssTransformOp *out)
-{
-    memset(out, 0, sizeof *out);
-    out->kind = a->kind;
-    switch (a->kind) {
-    case CSS_TRANSFORM_TRANSLATE:
-        length_lerp(&a->tx, &b->tx, t, &out->tx);
-        length_lerp(&a->ty, &b->ty, t, &out->ty);
-        break;
-    case CSS_TRANSFORM_SCALE:
-        out->sx = lerpf(a->sx, b->sx, t);
-        out->sy = lerpf(a->sy, b->sy, t);
-        break;
-    case CSS_TRANSFORM_ROTATE:
-        out->angle_deg = lerpf(a->angle_deg, b->angle_deg, t);
-        break;
-    case CSS_TRANSFORM_SKEW:
-        out->angle_deg = lerpf(a->angle_deg, b->angle_deg, t);
-        out->angle2_deg = lerpf(a->angle2_deg, b->angle2_deg, t);
-        break;
-    default:
-        out->m.a = lerpf(a->m.a, b->m.a, t);
-        out->m.b = lerpf(a->m.b, b->m.b, t);
-        out->m.c = lerpf(a->m.c, b->m.c, t);
-        out->m.d = lerpf(a->m.d, b->m.d, t);
-        out->m.e = lerpf(a->m.e, b->m.e, t);
-        out->m.f = lerpf(a->m.f, b->m.f, t);
-        break;
-    }
+    CssTransform tmp;
+    return transform_blend(a, b, 0.5f, &tmp);
 }
 
 static void transform_lerp(const CssTransform *a, const CssTransform *b, float t, CssTransform *out)
 {
-    if (!transform_pairable(a, b)) {
+    if (!transform_blend(a, b, t, out))
         *out = t < 0.5f ? *a : *b;
-        return;
-    }
-    CssTransform ia, ib;
-    if (a->count == 0 && b->count == 0) {
-        memset(out, 0, sizeof *out);
-        return;
-    }
-    if (a->count == 0) { transform_identity_like(b, &ia); a = &ia; }
-    if (b->count == 0) { transform_identity_like(a, &ib); b = &ib; }
-    memset(out, 0, sizeof *out);
-    out->count = a->count;
-    for (int i = 0; i < a->count; i++)
-        transform_op_lerp(&a->ops[i], &b->ops[i], t, &out->ops[i]);
 }
 
 static int shadow_equal(const CssShadow *a, const CssShadow *b)
@@ -438,28 +690,60 @@ static CssShadow *shadow_at_mut(AnimShadow *s, int i)
     return i == 0 ? &s->shadow : &s->more[i - 1];
 }
 
+/* box-shadow and text-shadow share the list rules through flat arrays. */
+typedef struct ShadowArr {
+    CssShadow s[CSS_MAX_TEXT_SHADOWS > CSS_MAX_BOX_SHADOWS ? CSS_MAX_TEXT_SHADOWS : CSS_MAX_BOX_SHADOWS];
+    int n;
+} ShadowArr;
+
+static void shadow_arr_from_box(const AnimShadow *a, ShadowArr *out)
+{
+    out->n = a->count;
+    for (int i = 0; i < a->count; i++) out->s[i] = *shadow_at(a, i);
+}
+
+static void shadow_arr_to_box(const ShadowArr *a, AnimShadow *out)
+{
+    memset(out, 0, sizeof *out);
+    out->count = (uint8_t)(a->n < CSS_MAX_BOX_SHADOWS ? a->n : CSS_MAX_BOX_SHADOWS);
+    for (int i = 0; i < out->count; i++) *shadow_at_mut(out, i) = a->s[i];
+}
+
+static void shadow_arr_from_text(const CssShadowList *a, ShadowArr *out)
+{
+    out->n = a->count;
+    for (int i = 0; i < a->count; i++) out->s[i] = a->items[i];
+}
+
+static void shadow_arr_to_text(const ShadowArr *a, CssShadowList *out)
+{
+    memset(out, 0, sizeof *out);
+    out->count = (uint8_t)(a->n < CSS_MAX_TEXT_SHADOWS ? a->n : CSS_MAX_TEXT_SHADOWS);
+    for (int i = 0; i < out->count; i++) out->items[i] = a->s[i];
+}
+
 /* Shadow i of `a`, or the transparent padding shadow matching `other`'s. */
-static CssShadow shadow_or_pad(const AnimShadow *a, const AnimShadow *other, int i)
+static CssShadow shadow_or_pad(const ShadowArr *a, const ShadowArr *other, int i)
 {
     CssShadow p;
-    if (i < a->count) return *shadow_at(a, i);
+    if (i < a->n) return a->s[i];
     memset(&p, 0, sizeof p);
     p.color.kind = CSS_COLOR_RGBA;            /* transparent black, 0 offsets */
-    p.inset = i < other->count ? shadow_at(other, i)->inset : 0;
+    p.inset = i < other->n ? other->s[i].inset : 0;
     return p;
 }
 
-static int shadow_list_equal(const AnimShadow *a, const AnimShadow *b)
+static int shadow_arr_equal(const ShadowArr *a, const ShadowArr *b)
 {
-    if (a->count != b->count) return 0;
-    for (int i = 0; i < a->count; i++)
-        if (!shadow_equal(shadow_at(a, i), shadow_at(b, i))) return 0;
+    if (a->n != b->n) return 0;
+    for (int i = 0; i < a->n; i++)
+        if (!shadow_equal(&a->s[i], &b->s[i])) return 0;
     return 1;
 }
 
-static int shadow_list_interpolable(const AnimShadow *a, const AnimShadow *b)
+static int shadow_arr_interpolable(const ShadowArr *a, const ShadowArr *b)
 {
-    const int n = a->count > b->count ? a->count : b->count;
+    const int n = a->n > b->n ? a->n : b->n;
     for (int i = 0; i < n; i++) {
         CssShadow x = shadow_or_pad(a, b, i), y = shadow_or_pad(b, a, i);
         if (x.inset != y.inset || !color_interpolable(&x.color, &y.color)) return 0;
@@ -467,15 +751,114 @@ static int shadow_list_interpolable(const AnimShadow *a, const AnimShadow *b)
     return 1;
 }
 
-static void shadow_list_lerp(const AnimShadow *a, const AnimShadow *b, float t, AnimShadow *out)
+static void shadow_arr_lerp(const ShadowArr *a, const ShadowArr *b, float t, ShadowArr *out)
 {
-    const int n = a->count > b->count ? a->count : b->count;
-    memset(out, 0, sizeof *out);
+    if (!shadow_arr_interpolable(a, b)) {
+        *out = t < 0.5f ? *a : *b;
+        return;
+    }
+    const int n = a->n > b->n ? a->n : b->n;
+    out->n = n;
     for (int i = 0; i < n; i++) {
         CssShadow x = shadow_or_pad(a, b, i), y = shadow_or_pad(b, a, i);
-        shadow_lerp(&x, &y, t, shadow_at_mut(out, i));
+        shadow_lerp(&x, &y, t, &out->s[i]);
     }
-    out->count = (uint8_t)n;
+}
+
+/* ---- background-position / -size, z-index, font-weight, visibility ---- */
+
+static int bg_pos_equal(const CssLength *a, const CssLength *b)
+{
+    for (int i = 0; i < CSS_MAX_BG_LAYERS; i++)
+        if (!length_equal(&a[i], &b[i])) return 0;
+    return 1;
+}
+
+static int bg_pos_interpolable(const CssLength *a, const CssLength *b)
+{
+    for (int i = 0; i < CSS_MAX_BG_LAYERS; i++)
+        if (!length_interpolable(&a[i], &b[i])) return 0;
+    return 1;
+}
+
+static void bg_pos_lerp(const CssLength *a, const CssLength *b, float t, CssLength *out)
+{
+    if (!bg_pos_interpolable(a, b)) {
+        memcpy(out, t < 0.5f ? a : b, sizeof(CssLength) * CSS_MAX_BG_LAYERS);
+        return;
+    }
+    for (int i = 0; i < CSS_MAX_BG_LAYERS; i++) length_lerp(&a[i], &b[i], t, &out[i]);
+}
+
+static int bg_size_equal(const CssBgSize *a, const CssBgSize *b)
+{
+    for (int i = 0; i < CSS_MAX_BG_LAYERS; i++) {
+        if (a[i].kind != b[i].kind) return 0;
+        if (a[i].kind == CSS_BG_SIZE_LENGTHS && (!length_equal(&a[i].w, &b[i].w) || !length_equal(&a[i].h, &b[i].h)))
+            return 0;
+    }
+    return 1;
+}
+
+/* Both auto (a keyword, equal) or both length-percentages. */
+static int bg_size_comp_ok(const CssLength *a, const CssLength *b)
+{
+    if (a->kind == CSS_LEN_AUTO || b->kind == CSS_LEN_AUTO) return a->kind == b->kind;
+    return length_interpolable(a, b);
+}
+
+static int bg_size_interpolable(const CssBgSize *a, const CssBgSize *b)
+{
+    for (int i = 0; i < CSS_MAX_BG_LAYERS; i++) {
+        if (a[i].kind != b[i].kind) return 0;
+        if (a[i].kind == CSS_BG_SIZE_LENGTHS && (!bg_size_comp_ok(&a[i].w, &b[i].w) || !bg_size_comp_ok(&a[i].h, &b[i].h)))
+            return 0;
+    }
+    return 1;
+}
+
+static void bg_size_lerp(const CssBgSize *a, const CssBgSize *b, float t, CssBgSize *out)
+{
+    if (!bg_size_interpolable(a, b)) {
+        memcpy(out, t < 0.5f ? a : b, sizeof(CssBgSize) * CSS_MAX_BG_LAYERS);
+        return;
+    }
+    for (int i = 0; i < CSS_MAX_BG_LAYERS; i++) {
+        out[i] = a[i];
+        if (a[i].kind != CSS_BG_SIZE_LENGTHS) continue;
+        if (a[i].w.kind != CSS_LEN_AUTO) length_lerp(&a[i].w, &b[i].w, t, &out[i].w);
+        if (a[i].h.kind != CSS_LEN_AUTO) length_lerp(&a[i].h, &b[i].h, t, &out[i].h);
+        /* negative sizes are invalid: clamp each component (Blink clamps) */
+        if (out[i].w.kind == CSS_LEN_VALUE && out[i].w.px < 0.0f && out[i].w.pct <= 0.0f) out[i].w.px = 0.0f;
+        if (out[i].h.kind == CSS_LEN_VALUE && out[i].h.px < 0.0f && out[i].h.pct <= 0.0f) out[i].h.px = 0.0f;
+        if (out[i].w.pct < 0.0f) out[i].w.pct = 0.0f;
+        if (out[i].h.pct < 0.0f) out[i].h.pct = 0.0f;
+    }
+}
+
+static void int_lerp(AnimProp prop, const AnimInt *a, const AnimInt *b, float t, AnimInt *out)
+{
+    memset(out, 0, sizeof *out);
+    if (a->is_auto || b->is_auto) {
+        *out = t < 0.5f ? *a : *b;
+        return;
+    }
+    double v = (double)a->v + ((double)b->v - (double)a->v) * (double)t;
+    if (prop == ANIM_FONT_WEIGHT) {
+        if (v < 1.0) v = 1.0;
+        if (v > 1000.0) v = 1000.0;
+    }
+    out->v = (int32_t)round(v);
+}
+
+static void visibility_lerp(uint8_t a, uint8_t b, float t, uint8_t *out)
+{
+    if (a == b) { *out = a; return; }
+    if (a == CSS_VISIBILITY_VISIBLE || b == CSS_VISIBILITY_VISIBLE) {
+        *out = t <= 0.0f ? a : t >= 1.0f ? b : (uint8_t)CSS_VISIBILITY_VISIBLE;
+        return;
+    }
+    *out = t < 0.5f ? a : b;
 }
 
 static int filter_op_equal(const CssFilterOp *a, const CssFilterOp *b)
@@ -562,33 +945,53 @@ static void filter_lerp(const AnimFilterList *a, const AnimFilterList *b, float 
 
 int anim_value_equal(AnimProp prop, const AnimValue *a, const AnimValue *b)
 {
+    ShadowArr x, y;
     switch (PROPS[prop].kind) {
     case ANIM_KIND_FLOAT:     return a->f == b->f;
     case ANIM_KIND_LENGTH:    return length_equal(&a->len, &b->len);
     case ANIM_KIND_COLOR:     return color_equal(&a->color, &b->color);
     case ANIM_KIND_TRANSFORM: return transform_equal(&a->transform, &b->transform);
     case ANIM_KIND_FILTER:    return filter_equal(&a->filter, &b->filter);
-    default:
-        return shadow_list_equal(&a->shadow, &b->shadow);
+    case ANIM_KIND_SHADOW:
+        shadow_arr_from_box(&a->shadow, &x); shadow_arr_from_box(&b->shadow, &y);
+        return shadow_arr_equal(&x, &y);
+    case ANIM_KIND_TEXT_SHADOW:
+        shadow_arr_from_text(&a->text_shadow, &x); shadow_arr_from_text(&b->text_shadow, &y);
+        return shadow_arr_equal(&x, &y);
+    case ANIM_KIND_BG_POS:    return bg_pos_equal(a->bg_pos, b->bg_pos);
+    case ANIM_KIND_BG_SIZE:   return bg_size_equal(a->bg_size, b->bg_size);
+    case ANIM_KIND_INT:       return a->i.v == b->i.v && a->i.is_auto == b->i.is_auto;
+    default:                  return a->kw == b->kw;
     }
 }
 
 int anim_value_interpolable(AnimProp prop, const AnimValue *a, const AnimValue *b)
 {
+    ShadowArr x, y;
     switch (PROPS[prop].kind) {
     case ANIM_KIND_FLOAT:     return 1;
     case ANIM_KIND_LENGTH:    return length_interpolable(&a->len, &b->len);
     case ANIM_KIND_COLOR:     return color_interpolable(&a->color, &b->color);
     case ANIM_KIND_TRANSFORM: return transform_pairable(&a->transform, &b->transform);
     case ANIM_KIND_FILTER:    return filter_pairable(&a->filter, &b->filter);
-    default:
-        return shadow_list_interpolable(&a->shadow, &b->shadow);
+    case ANIM_KIND_SHADOW:
+        shadow_arr_from_box(&a->shadow, &x); shadow_arr_from_box(&b->shadow, &y);
+        return shadow_arr_interpolable(&x, &y);
+    case ANIM_KIND_TEXT_SHADOW:
+        shadow_arr_from_text(&a->text_shadow, &x); shadow_arr_from_text(&b->text_shadow, &y);
+        return shadow_arr_interpolable(&x, &y);
+    case ANIM_KIND_BG_POS:    return bg_pos_interpolable(a->bg_pos, b->bg_pos);
+    case ANIM_KIND_BG_SIZE:   return bg_size_interpolable(a->bg_size, b->bg_size);
+    case ANIM_KIND_INT:       return !a->i.is_auto && !b->i.is_auto;
+    default:   /* Blink: visibility transitions when one side is visible */
+        return a->kw == CSS_VISIBILITY_VISIBLE || b->kw == CSS_VISIBILITY_VISIBLE;
     }
 }
 
 void anim_value_lerp(AnimProp prop, const AnimValue *a, const AnimValue *b, float t, AnimValue *out)
 {
     AnimValue tmp;   /* out may alias a or b */
+    ShadowArr x, y, r;
     memset(&tmp, 0, sizeof tmp);
     switch (PROPS[prop].kind) {
     case ANIM_KIND_FLOAT:
@@ -604,13 +1007,20 @@ void anim_value_lerp(AnimProp prop, const AnimValue *a, const AnimValue *b, floa
     case ANIM_KIND_COLOR:     color_lerp(&a->color, &b->color, t, &tmp.color); break;
     case ANIM_KIND_TRANSFORM: transform_lerp(&a->transform, &b->transform, t, &tmp.transform); break;
     case ANIM_KIND_FILTER:    filter_lerp(&a->filter, &b->filter, t, &tmp.filter); break;
-    default:
-        if (anim_value_interpolable(prop, a, b)) {
-            shadow_list_lerp(&a->shadow, &b->shadow, t, &tmp.shadow);
-        } else {
-            tmp.shadow = t < 0.5f ? a->shadow : b->shadow;
-        }
+    case ANIM_KIND_SHADOW:
+        shadow_arr_from_box(&a->shadow, &x); shadow_arr_from_box(&b->shadow, &y);
+        shadow_arr_lerp(&x, &y, t, &r);
+        shadow_arr_to_box(&r, &tmp.shadow);
         break;
+    case ANIM_KIND_TEXT_SHADOW:
+        shadow_arr_from_text(&a->text_shadow, &x); shadow_arr_from_text(&b->text_shadow, &y);
+        shadow_arr_lerp(&x, &y, t, &r);
+        shadow_arr_to_text(&r, &tmp.text_shadow);
+        break;
+    case ANIM_KIND_BG_POS:    bg_pos_lerp(a->bg_pos, b->bg_pos, t, tmp.bg_pos); break;
+    case ANIM_KIND_BG_SIZE:   bg_size_lerp(a->bg_size, b->bg_size, t, tmp.bg_size); break;
+    case ANIM_KIND_INT:       int_lerp(prop, &a->i, &b->i, t, &tmp.i); break;
+    default:                  visibility_lerp(a->kw, b->kw, t, &tmp.kw); break;
     }
     *out = tmp;
 }
@@ -685,12 +1095,23 @@ float anim_timing_eval(const CssTiming *t, float x)
 
 static void keyframe_set_reset(AnimKeyframeSet *set)
 {
-    for (uint32_t i = 0; i < set->count; i++)
+    for (uint32_t i = 0; i < set->count; i++) {
         free(set->frames[i].entries);
+        free(set->frames[i].customs);
+    }
     free(set->frames);
+    free(set->custom_names);
     set->frames = NULL;
     set->count = set->cap = 0;
     set->props = 0;
+    set->custom_names = NULL;
+    set->custom_name_count = set->custom_name_cap = 0;
+}
+
+/* The set changes the element's output: animatable longhands or custom properties. */
+static int set_animates(const AnimKeyframeSet *set)
+{
+    return set && (set->props != 0 || set->custom_name_count != 0);
 }
 
 static AnimKeyframeSet *keyframes_find_mut(AnimSystem *sys, const char *name_atom)
@@ -768,6 +1189,32 @@ void anim_keyframe_set_value(AnimKeyframeSet *set, AnimKeyframe *frame, AnimProp
     set->props |= ANIM_PROP_BIT(prop);
 }
 
+void anim_keyframe_set_custom(AnimKeyframeSet *set, AnimKeyframe *frame, const char *name_atom, const char *text_atom)
+{
+    for (uint32_t i = 0; i < frame->custom_count; i++) {
+        if (frame->customs[i].name == name_atom) {
+            frame->customs[i].text = text_atom;
+            return;
+        }
+    }
+    if (frame->custom_count == frame->custom_cap) {
+        uint32_t cap = frame->custom_cap ? frame->custom_cap * 2 : 2;
+        frame->customs = realloc(frame->customs, cap * sizeof *frame->customs);
+        frame->custom_cap = cap;
+    }
+    frame->customs[frame->custom_count].name = name_atom;
+    frame->customs[frame->custom_count].text = text_atom;
+    frame->custom_count++;
+    for (uint32_t i = 0; i < set->custom_name_count; i++)
+        if (set->custom_names[i] == name_atom) return;
+    if (set->custom_name_count == set->custom_name_cap) {
+        uint32_t cap = set->custom_name_cap ? set->custom_name_cap * 2 : 2;
+        set->custom_names = realloc(set->custom_names, cap * sizeof *set->custom_names);
+        set->custom_name_cap = cap;
+    }
+    set->custom_names[set->custom_name_count++] = name_atom;
+}
+
 void anim_keyframe_set_from_computed(AnimKeyframeSet *set, AnimKeyframe *frame,
                                      const CssComputed *values, uint64_t props_mask)
 {
@@ -802,10 +1249,26 @@ int anim_keyframes_load_sheet(AnimSystem *sys, const CssSheet *sheet, const CssC
             CssTiming timing;
             int has_timing = 0;
             uint64_t mask = 0;
+            const char *cnames[16], *ctexts[16];
+            int ncustom = 0;
             for (uint32_t d = 0; d < fr->ndecls; d++) {
                 const CssDecl *decl = &fr->decls[d];
                 if (decl->has_var)
                     continue;
+                if (CSS_PROP_IS_CUSTOM(decl->prop)) {
+                    /* raw text, interpreted per the registry when sampled */
+                    char buf[256];
+                    size_t w = css_tokens_to_text(decl->tokens, decl->ntok, buf, sizeof buf);
+                    if (w >= sizeof buf) w = sizeof buf - 1;
+                    size_t len = w;
+                    const char *txt = kn_str_trim(buf, &len);
+                    const char *nm = css_prop_name(decl->prop);
+                    if (nm && ncustom < 16) {
+                        cnames[ncustom] = kn_atom_cstr(nm);
+                        ctexts[ncustom++] = kn_atom(txt, len);
+                    }
+                    continue;
+                }
                 if (!css_computed_apply(&tmp, decl->prop, decl->tokens, decl->ntok, ctx, ctx->font_size))
                     continue;
                 if (decl->prop == CSS_PROP_ANIMATION_TIMING_FUNCTION) {
@@ -817,9 +1280,25 @@ int anim_keyframes_load_sheet(AnimSystem *sys, const CssSheet *sheet, const CssC
             }
             AnimKeyframe *f = anim_keyframes_add_frame(set, fr->offset / 100.0f, has_timing ? &timing : NULL);
             anim_keyframe_set_from_computed(set, f, &tmp, mask);
+            for (int c = 0; c < ncustom; c++)
+                anim_keyframe_set_custom(set, f, cnames[c], ctexts[c]);
         }
     }
     return (int)n;
+}
+
+int anim_properties_load_sheet(const CssSheet *sheet)
+{
+    uint32_t n = 0;
+    const CssPropertyRule *rules = css_sheet_properties(sheet, &n);
+    int ok = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        const CssPropertyRule *r = &rules[i];
+        const char *inh = r->inherits ? "true" : "false";
+        ok += css_property_register(r->name, strlen(r->name), r->syntax, strlen(r->syntax), inh, strlen(inh),
+                                    r->initial, r->initial ? strlen(r->initial) : 0) != CSS_PROP_INVALID;
+    }
+    return ok;
 }
 #endif
 
@@ -868,11 +1347,14 @@ static void value_zoom(AnimProp prop, AnimValue *v, float z)
     case ANIM_KIND_TRANSFORM:
         for (int i = 0; i < v->transform.count && i < CSS_MAX_TRANSFORM_OPS; i++) {
             CssTransformOp *op = &v->transform.ops[i];
-            if (op->kind == CSS_TRANSFORM_TRANSLATE) {
+            if (op->kind == CSS_TRANSFORM_TRANSLATE) {   /* same as the cascade's zoom */
                 if (op->tx.kind == CSS_LEN_VALUE) op->tx.px *= z;
                 if (op->ty.kind == CSS_LEN_VALUE) op->ty.px *= z;
+                op->tz *= z;
             } else if (op->kind == CSS_TRANSFORM_MATRIX) {
                 op->m.e *= z; op->m.f *= z;
+            } else if (op->kind == CSS_TRANSFORM_PERSPECTIVE) {
+                op->persp *= z;
             }
         }
         break;
@@ -889,6 +1371,22 @@ static void value_zoom(AnimProp prop, AnimValue *v, float z)
         for (int i = 0; i < v->shadow.count; i++) {
             CssShadow *sh = shadow_at_mut(&v->shadow, i);
             sh->x *= z; sh->y *= z; sh->blur *= z; sh->spread *= z;
+        }
+        break;
+    case ANIM_KIND_TEXT_SHADOW:
+        for (int i = 0; i < v->text_shadow.count && i < CSS_MAX_TEXT_SHADOWS; i++) {
+            CssShadow *sh = &v->text_shadow.items[i];
+            sh->x *= z; sh->y *= z; sh->blur *= z; sh->spread *= z;
+        }
+        break;
+    case ANIM_KIND_BG_POS:
+        for (int i = 0; i < CSS_MAX_BG_LAYERS; i++)
+            if (v->bg_pos[i].kind == CSS_LEN_VALUE) v->bg_pos[i].px *= z;
+        break;
+    case ANIM_KIND_BG_SIZE:
+        for (int i = 0; i < CSS_MAX_BG_LAYERS; i++) {
+            if (v->bg_size[i].w.kind == CSS_LEN_VALUE) v->bg_size[i].w.px *= z;
+            if (v->bg_size[i].h.kind == CSS_LEN_VALUE) v->bg_size[i].h.px *= z;
         }
         break;
     default:
@@ -963,6 +1461,11 @@ typedef struct AnimSnapshot {
     CssTransform transform;
     AnimFilterList filter;
     AnimShadow shadow;
+    CssShadowList text_shadow;
+    CssLength bg_pos[2][CSS_MAX_BG_LAYERS];
+    CssBgSize bg_size[CSS_MAX_BG_LAYERS];
+    AnimInt ints[2];
+    uint8_t visibility;
 } AnimSnapshot;
 
 static void snapshot_get(const AnimSnapshot *s, AnimProp p, AnimValue *out)
@@ -974,7 +1477,12 @@ static void snapshot_get(const AnimSnapshot *s, AnimProp p, AnimValue *out)
     case ANIM_KIND_COLOR:     out->color = s->color[g_slot[p]]; break;
     case ANIM_KIND_TRANSFORM: out->transform = s->transform; break;
     case ANIM_KIND_FILTER:    out->filter = s->filter; break;
-    default:                  out->shadow = s->shadow; break;
+    case ANIM_KIND_SHADOW:    out->shadow = s->shadow; break;
+    case ANIM_KIND_TEXT_SHADOW: out->text_shadow = s->text_shadow; break;
+    case ANIM_KIND_BG_POS:    memcpy(out->bg_pos, s->bg_pos[g_slot[p]], sizeof out->bg_pos); break;
+    case ANIM_KIND_BG_SIZE:   memcpy(out->bg_size, s->bg_size, sizeof out->bg_size); break;
+    case ANIM_KIND_INT:       out->i = s->ints[g_slot[p]]; break;
+    default:                  out->kw = s->visibility; break;
     }
 }
 
@@ -990,7 +1498,12 @@ static void snapshot_from_computed(AnimSnapshot *s, const CssComputed *c)
         case ANIM_KIND_COLOR:     s->color[g_slot[p]] = v.color; break;
         case ANIM_KIND_TRANSFORM: s->transform = v.transform; break;
         case ANIM_KIND_FILTER:    s->filter = v.filter; break;
-        default:                  s->shadow = v.shadow; break;
+        case ANIM_KIND_SHADOW:    s->shadow = v.shadow; break;
+        case ANIM_KIND_TEXT_SHADOW: s->text_shadow = v.text_shadow; break;
+        case ANIM_KIND_BG_POS:    memcpy(s->bg_pos[g_slot[p]], v.bg_pos, sizeof v.bg_pos); break;
+        case ANIM_KIND_BG_SIZE:   memcpy(s->bg_size, v.bg_size, sizeof v.bg_size); break;
+        case ANIM_KIND_INT:       s->ints[g_slot[p]] = v.i; break;
+        default:                  s->visibility = v.kw; break;
         }
     }
 }
@@ -1025,6 +1538,7 @@ struct AnimElem {
     uint32_t trans_count, trans_cap;
     AnimSnapshot prev;
     uint8_t has_prev;
+    uint8_t custom_driven;   /* a re-cascade for animated custom properties is due */
 };
 
 /* ---- HtmlElem -> index map (open addressing, 0 empty, ~0u tombstone) ---- */
@@ -1076,20 +1590,33 @@ static void map_rehash(AnimSystem *sys, uint32_t cap)
 
 static void map_set(AnimSystem *sys, HtmlElem e, uint32_t v)
 {
-    if ((sys->map_used + 1) * 2 > sys->map_cap)
-        map_rehash(sys, sys->map_cap ? sys->map_cap * 2 : 64);
-    uint32_t mask = sys->map_cap - 1;
+    if ((sys->map_used + 1) * 2 > sys->map_cap) {
+        /* mostly tombstones (records churned): rehash in place; else grow */
+        const uint32_t live = sys->elem_count + 1;
+        map_rehash(sys, sys->map_cap == 0 ? 64 : live * 4 > sys->map_cap ? sys->map_cap * 2 : sys->map_cap);
+    }
+    /* The key may sit past a tombstone on its probe path (elem_destroy re-indexes
+     * the moved record right after map_del): look for it up to the first empty
+     * slot before reusing a tombstone, else the key would be stored twice and a
+     * later map_del would leave a stale index behind (use after free). */
+    uint32_t mask = sys->map_cap - 1, tomb = MAP_TOMB;
     for (uint32_t i = map_hash(e) & mask;; i = (i + 1) & mask) {
         uint32_t k = sys->map_keys[i];
         if (k == e) {
             sys->map_vals[i] = v;
             return;
         }
-        if (k == MAP_EMPTY || k == MAP_TOMB) {
-            if (k == MAP_EMPTY)
+        if (k == MAP_TOMB) {
+            if (tomb == MAP_TOMB) tomb = i;
+            continue;
+        }
+        if (k == MAP_EMPTY) {
+            if (tomb == MAP_TOMB) {
+                tomb = i;
                 sys->map_used++;
-            sys->map_keys[i] = e;
-            sys->map_vals[i] = v;
+            }
+            sys->map_keys[tomb] = e;
+            sys->map_vals[tomb] = v;
             return;
         }
     }
@@ -1222,6 +1749,153 @@ static int32_t running_step_index(const AnimRunning *r, const AnimKeyframeSet *s
     double local = running_local_s(r, now_ms);
     double seg = (double)r->duration_s / n;
     return (int32_t)floor(local / seg + 1e-9);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Animated custom properties                                                 */
+/* ------------------------------------------------------------------------- */
+
+/* The @property registration of `name_atom` (css_values.c registry), or NULL. */
+static const CssRegisteredProperty *registration_of(const char *name_atom)
+{
+    return css_property_registration(css_prop_lookup(name_atom, strlen(name_atom)));
+}
+
+static const char *custom_get(const CssComputed *c, const char *name)
+{
+    for (int i = 0; i < c->custom_count && i < CSS_MAX_CUSTOM_PROPS; i++)
+        if (c->custom[i].name == name) return c->custom[i].value;
+    return NULL;
+}
+
+static void custom_put(CssComputed *c, const char *name, const char *value)
+{
+    for (int i = 0; i < c->custom_count && i < CSS_MAX_CUSTOM_PROPS; i++) {
+        if (c->custom[i].name == name) {
+            c->custom[i].value = value;
+            return;
+        }
+    }
+    if (c->custom_count >= CSS_MAX_CUSTOM_PROPS) return;
+    c->custom[c->custom_count].name = name;
+    c->custom[c->custom_count].value = value;
+    c->custom_count++;
+}
+
+static double quantize(double v, double step)
+{
+    v = floor(v / step + 0.5) * step;
+    return v == 0.0 ? 0.0 : v;   /* no "-0" */
+}
+
+/* Interpolated typed value -> value atom.  Values are atoms (the computed
+ * record keeps them by pointer and may outlive the animation), so they are
+ * quantized to bound the number of distinct atoms one animation creates:
+ * 1e-4 for numbers / percentages / angles / seconds, 1/100 px (sub-pixel for
+ * any on-screen use: --progress driving a 2000px flight moves 0.2px). */
+static const char *typed_atom(CssTypedValue *v)
+{
+    char buf[96];
+    v->num = (float)quantize(v->num, 1e-4);
+    v->len.px = (float)quantize(v->len.px, 1e-2);
+    v->len.pct = (float)quantize(v->len.pct, 1e-4);
+    v->len.em = 0.0f;
+    const size_t n = css_typed_value_format(v, buf, sizeof buf);
+    return n > 0 && n < sizeof buf ? kn_atom(buf, n) : NULL;
+}
+
+typedef struct CustomRef {
+    float offset;
+    const char *text;
+    const CssTiming *timing;
+} CustomRef;
+
+/* Value of custom property `name` at iteration progress p (implicit 0%/100%
+ * frames take `base`, the element's own value; NULL = guaranteed-invalid).
+ * Registered numeric / length / color syntaxes interpolate (Chrome
+ * CSSInterpolationTypesMap for registered properties); unregistered ones,
+ * `*` and values that do not parse under the syntax (var() in a keyframe)
+ * flip at 50% of the eased interval progress.  Returns 0 when the set does
+ * not animate it. */
+static int set_sample_custom(const AnimKeyframeSet *set, const char *name, float p, const CssTiming *anim_timing,
+                             const char *base, const CssRegisteredProperty *reg, float font_px, const char **out)
+{
+    CustomRef refs[ANIM_MAX_REFS];
+    int n = 1;
+    for (uint32_t i = 0; i < set->count && n < ANIM_MAX_REFS - 1; i++) {
+        const AnimKeyframe *f = &set->frames[i];
+        for (uint32_t k = 0; k < f->custom_count; k++) {
+            if (f->customs[k].name != name) continue;
+            refs[n].offset = f->offset;
+            refs[n].text = f->customs[k].text;
+            refs[n].timing = f->has_timing ? &f->timing : NULL;
+            n++;
+            break;
+        }
+    }
+    if (n == 1) return 0;
+    int start = 1;
+    if (refs[1].offset > 0.0f) {
+        refs[0].offset = 0.0f;
+        refs[0].text = base;
+        refs[0].timing = NULL;
+        start = 0;
+    }
+    if (refs[n - 1].offset < 1.0f) {
+        refs[n].offset = 1.0f;
+        refs[n].text = base;
+        refs[n].timing = NULL;
+        n++;
+    }
+    if (p >= refs[n - 1].offset) {
+        *out = refs[n - 1].text;
+        return 1;
+    }
+    int a = start;
+    while (a + 1 < n && refs[a + 1].offset <= p) a++;
+    int b = a + 1;
+    float span = refs[b].offset - refs[a].offset;
+    float f = span > 0.0f ? (p - refs[a].offset) / span : 1.0f;
+    float eased = anim_timing_eval(refs[a].timing ? refs[a].timing : anim_timing, f);
+    if (reg && reg->syntax != CSS_SYNTAX_UNIVERSAL && refs[a].text && refs[b].text) {
+        CssTypedValue va, vb, r;
+        if (css_typed_value_parse(reg->syntax, refs[a].text, strlen(refs[a].text), font_px, &va) &&
+            css_typed_value_parse(reg->syntax, refs[b].text, strlen(refs[b].text), font_px, &vb)) {
+            css_typed_value_lerp(&va, &vb, eased, &r);
+            const char *v = typed_atom(&r);
+            if (v) { *out = v; return 1; }
+        }
+    }
+    *out = eased < 0.5f ? refs[a].text : refs[b].text;   /* discrete: flips at 50% */
+    return 1;
+}
+
+static int running_has_custom(const AnimSystem *sys, const AnimRunning *r)
+{
+    const AnimKeyframeSet *set = anim_keyframes_find(sys, r->name);
+    return set && set->custom_name_count != 0;
+}
+
+void anim_custom_fixup(AnimSystem *sys, HtmlElem key, CssComputed *out, double now_ms)
+{
+    AnimElem *rec = elem_find(sys, key);
+    if (!rec) return;
+    for (uint8_t i = 0; i < rec->anim_count; i++) {   /* later animations sit on top */
+        const AnimRunning *run = &rec->anims[i];
+        const AnimKeyframeSet *set = anim_keyframes_find(sys, run->name);
+        if (!set || set->custom_name_count == 0) continue;
+        int phase;
+        float p;
+        if (!running_sample(run, now_ms, &phase, &p)) continue;
+        for (uint32_t k = 0; k < set->custom_name_count; k++) {
+            const char *name = set->custom_names[k];
+            const char *v;
+            if (set_sample_custom(set, name, p, &run->timing, custom_get(out, name), registration_of(name),
+                                  out->font_size, &v)) {
+                if (v) custom_put(out, name, v);
+            }
+        }
+    }
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1426,22 +2100,41 @@ int anim_update_elem(AnimSystem *sys, HtmlElem elem, const CssComputed *base, do
     }
 
     /* ---- animations: match slots by position + name --------------------- */
+    /* A custom-property animation that starts or stops changes values the
+     * cascade already resolved (var() users): ask for a re-cascade. */
+    int custom_changed = 0;
     uint8_t n = 0;
     for (int i = 0; i < base->animation_count && i < CSS_MAX_ANIMATIONS; i++) {
         const CssAnimation *a = &base->animations[i];
         if (!a->name)
             continue;
         AnimRunning *slot = &rec->anims[n];
-        if (n >= rec->anim_count || slot->name != a->name)
+        if (n >= rec->anim_count || slot->name != a->name) {
+            if (n < rec->anim_count && running_has_custom(sys, slot)) custom_changed = 1;
             running_init(slot, a, now_ms);
+            if (running_has_custom(sys, slot)) custom_changed = 1;
+        }
         running_sync(slot, a, now_ms);
         n++;
     }
+    for (uint8_t i = n; i < rec->anim_count; i++)
+        if (running_has_custom(sys, &rec->anims[i])) custom_changed = 1;
     rec->anim_count = n;
-
     /* ---- transitions ---------------------------------------------------- */
-    if (rec->has_prev)
+    /* The re-cascade a custom-property animation asked for (ANIM_DIRTY_CUSTOM)
+     * only moved var() users: those changes are animation effects (part of
+     * Chrome's before-change style), so they start no transitions.  (A real
+     * style change landing in the same frame is taken as one too.) */
+    const int custom_only = rec->custom_driven;
+    rec->custom_driven = 0;
+    if (custom_changed && sys->dirty_fn) {
+        rec->custom_driven = 1;
+        sys->dirty_fn(sys->dirty_user, elem, ANIM_DIRTY_CUSTOM);
+    }
+    g_current_color = &base->color;
+    if (rec->has_prev && !custom_only)
         transitions_update(rec, base, now_ms);
+    g_current_color = NULL;
     if (wants_trans) {
         snapshot_from_computed(&rec->prev, base);
         rec->has_prev = 1;
@@ -1457,7 +2150,7 @@ int anim_update_elem(AnimSystem *sys, HtmlElem elem, const CssComputed *base, do
         return 1;
     for (uint8_t i = 0; i < rec->anim_count; i++) {
         const AnimKeyframeSet *set = anim_keyframes_find(sys, rec->anims[i].name);
-        if (set && set->props)
+        if (set_animates(set))
             return 1;
     }
     return 0;   /* only unknown names (sprayAnm): nothing to apply */
@@ -1471,6 +2164,7 @@ const CssComputed *anim_apply(AnimSystem *sys, HtmlElem elem, const CssComputed 
         return base;
 
     int changed = 0;
+    g_current_color = &base->color;
     for (uint8_t i = 0; i < rec->anim_count; i++) {
         const AnimRunning *r = &rec->anims[i];
         const AnimKeyframeSet *set = anim_keyframes_find(sys, r->name);
@@ -1503,6 +2197,7 @@ const CssComputed *anim_apply(AnimSystem *sys, HtmlElem elem, const CssComputed 
         }
         anim_value_set(out, (AnimProp)rec->trans[i].prop, &v);
     }
+    g_current_color = NULL;
     return changed ? out : base;
 }
 
@@ -1515,7 +2210,7 @@ void anim_tick(AnimSystem *sys, double now_ms)
         for (uint8_t i = 0; i < rec->anim_count; i++) {
             AnimRunning *r = &rec->anims[i];
             const AnimKeyframeSet *set = anim_keyframes_find(sys, r->name);
-            if (!set || set->props == 0)
+            if (!set_animates(set))
                 continue;
             int phase;
             float p;
@@ -1534,6 +2229,10 @@ void anim_tick(AnimSystem *sys, double now_ms)
             for (int prop = 0; prop < ANIM_PROP_COUNT; prop++)
                 if (set->props & ANIM_PROP_BIT(prop))
                     flags |= PROPS[prop].dirty;
+            if (set->custom_name_count) {
+                flags |= ANIM_DIRTY_CUSTOM;
+                rec->custom_driven = 1;
+            }
         }
 
         for (uint32_t i = 0; i < rec->trans_count;) {
@@ -1561,7 +2260,7 @@ double anim_next_wakeup(const AnimSystem *sys, double now_ms)
         for (uint8_t i = 0; i < rec->anim_count; i++) {
             const AnimRunning *r = &rec->anims[i];
             const AnimKeyframeSet *set = anim_keyframes_find(sys, r->name);
-            if (!set || set->props == 0 || r->play_state == CSS_ANIM_PLAY_PAUSED)
+            if (!set_animates(set) || r->play_state == CSS_ANIM_PLAY_PAUSED)
                 continue;
             double start = running_start_ms(r);
             if (now_ms < start) {

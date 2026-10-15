@@ -1,0 +1,23 @@
+{
+  "ref": "doc/ref/krunknative/main-menu-glow-1500.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 1.5
+  },
+  "frames": 3,
+  "note": "E1 animation frame: the header's Get Signup Rewards text (.ph-rewards-text.svelte-da3zva, rewardsGlow 3s ease-in-out infinite) at page clock 1500 ms. The ref is KrunkNative's own render (only the region kept, the rest flat #222222); main-menu-glow-200 and -1500 differ in ~25% of the region at fuzz 2%, so a glow that stops animating fails one of them. Phase vs Chrome: test_anim.c."
+}

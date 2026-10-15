@@ -1,0 +1,20 @@
+{
+  "scenario": "main-menu-glow-200",
+  "defaults": {
+    "fuzz": 2,
+    "max_pct": 3.0
+  },
+  "regions": [
+    {
+      "name": "rewards-glow",
+      "rect": [
+        130,
+        0,
+        160,
+        36
+      ],
+      "kind": "text",
+      "note": "Get Signup Rewards with text-shadow 0 0 6.14px rgba(255, 213, 79, 0.307) (rewardsGlow at 200 ms: 6px/0.3 -> 10px/0.5 by ease-in-out over 1.5 s)"
+    }
+  ]
+}
