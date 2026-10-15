@@ -49,3 +49,4 @@ void ui_console_printf(const char *color, const char *fmt, ...); // a log line (
 // last element), top (at how many of 5 points inside the box the console is painted topmost),
 // inside (the whole box in the viewport), rect (CSS px) and vp (the viewport).
 void ui_console_probe(char *out, size_t n);
+void ui_console_input_probe(char *out, size_t n); // the input line and its hint rows (input_script `conin`)

@@ -81,36 +81,10 @@ void player_update_height(Player *player) {
     player->height = game_constants.player_height - player->crouch_val * game_constants.crouch_distance;
 }
 
-void player_spawn(Player *player) {
-    free(player->loadout);
-    free(player->ammo);
-    free(player->reloads);
-    free(player->input_queue);
-
-    player->loadout = NULL;
-    player->ammo = NULL;
-    player->reloads = NULL;
-    player->input_queue = NULL;
-    player->input_queue_size = 0;
-    // A new life: no input processed yet (gameserver.ts addPlayer / respawn: _lastDecodedSN = -1,
-    // inputSN 0 = no "l" until procInputs drained one); the client restarts its counter at 0.
-    player->input_seq = -1;
-    player->recon_snap = 0;
-    player->has_shot_vel_obj = 0;
-    player->state_history_count = 0; // players.js init: this.stateHistory.length = 0
-    player->state_history_head = 0;
-    lag_comp_clock_reset(&player->lag_clock); // a new life restarts its input seq at 0
-
-    player->active = 1;
-    // WP-E death screen: player.js reset() of the life counters, spawnTime = Date.now()
-    player->life_start = player->game->now;
-    player->life_shots = player->life_hits = player->life_kills = player->life_score = 0;
-    // player.js init (:434-445): interProg = 0, makingProg = doingInter = false. A hold that
-    // was under way when the player died does not carry into the new life.
-    player->interact_progress = 0.0f;
-    player->making_progress = 0;
-    player->doing_interact = 0;
-
+// setClass: the class loadout of `player` from its class_index and secondary_index: the primary, the picked
+// secondary (when the class has a slot for one) and the knife, health and speed, the ammo and the extra weapons.
+// A spawn runs it, and so does player_switch_class mid-life. 0 when out of memory (the loadout is then NULL).
+static int player_build_loadout(Player *player) {
     const size_t class_count = player->game->class_count ? player->game->class_count : rules_class_count();
     const ClassConfig *classes = player->game->classes ? player->game->classes : rules_classes();
     const size_t weapon_count = player->game->weapon_count ? player->game->weapon_count : rules_weapon_count();
@@ -190,8 +164,7 @@ void player_spawn(Player *player) {
         player->ammo = NULL;
         player->reloads = NULL;
         player->loadout_size = 0;
-        player->active = 0;
-        return;
+        return 0;
     }
 
     for (int i = 0; i < loadout_size; i++) {
@@ -200,6 +173,44 @@ void player_spawn(Player *player) {
     }
     player->loadout_base = loadout_size;
     player_loadout_append_extras(player); // KrunkNative Object Manager: extra weapons after the class loadout
+
+    return 1;
+}
+
+void player_spawn(Player *player) {
+    free(player->loadout);
+    free(player->ammo);
+    free(player->reloads);
+    free(player->input_queue);
+
+    player->loadout = NULL;
+    player->ammo = NULL;
+    player->reloads = NULL;
+    player->input_queue = NULL;
+    player->input_queue_size = 0;
+    // A new life: no input processed yet (gameserver.ts addPlayer / respawn: _lastDecodedSN = -1,
+    // inputSN 0 = no "l" until procInputs drained one); the client restarts its counter at 0.
+    player->input_seq = -1;
+    player->recon_snap = 0;
+    player->has_shot_vel_obj = 0;
+    player->state_history_count = 0; // players.js init: this.stateHistory.length = 0
+    player->state_history_head = 0;
+    lag_comp_clock_reset(&player->lag_clock); // a new life restarts its input seq at 0
+
+    player->active = 1;
+    // WP-E death screen: player.js reset() of the life counters, spawnTime = Date.now()
+    player->life_start = player->game->now;
+    player->life_shots = player->life_hits = player->life_kills = player->life_score = 0;
+    // player.js init (:434-445): interProg = 0, makingProg = doingInter = false. A hold that
+    // was under way when the player died does not carry into the new life.
+    player->interact_progress = 0.0f;
+    player->making_progress = 0;
+    player->doing_interact = 0;
+
+    if (!player_build_loadout(player)) {
+        player->active = 0;
+        return;
+    }
 
     player->velocity.x = 0.0f;
     player->velocity.y = 0.0f;
@@ -269,6 +280,29 @@ void player_spawn(Player *player) {
     // onPlayerSpawn map triggers: v7.1.4 never dispatches them (a reconstruction gap); KN does, from the
     // authority's spawn (doc/v7/decisions.md "player spawn" trigger event; zombie_high relies on it)
     if (game_is_authority(player->game)) trigger_player_event(player->game, TRIGGER_EVENT_ON_PLAYER_SPAWN, player);
+}
+
+// KrunkNative class switch (the console's class, offline sandbox): the class and its secondary take effect
+// now, as a respawn gives them (the loadout, full health, the class's speed, wall jumps and throw charge).
+// Where the player stands and looks, and its input stream, stay as they are: no spawn point, no input reset.
+// 0 when out of memory (the player is then inactive, as a failed spawn leaves it).
+int player_switch_class(Player *player, const int class_index, const int secondary_index) {
+    free(player->loadout);
+    free(player->ammo);
+    free(player->reloads);
+    player->loadout = NULL;
+    player->ammo = NULL;
+    player->reloads = NULL;
+    player->loadout_size = 0;
+    player->class_index = class_index;
+    player->secondary_index = secondary_index;
+    if (!player_build_loadout(player)) {
+        player->active = 0;
+        return 0;
+    }
+    player_movement_spawn(player); // the class's wall-jump limits and movement state (setClass)
+    player_swap_weapon(player, 0, 1, 0, 0); // the held weapon is the new primary, as a spawn leaves it
+    return 1;
 }
 
 void player_queue_input(Player *player, const Input *input) {

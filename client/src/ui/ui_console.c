@@ -18,6 +18,7 @@
 #include <console.h>
 #include <krunker_net.h> // official_sync: the official session's counters
 #include <krunker_lobbies.h> // serverinfo of an official game: its list row (region, players, map, mode)
+#include <ruleset.h>     // class / secondary completion and the class table (rules_classes, rules_weapons)
 #include <ui_mods.h>
 #include <ui_logic.h>
 #include <backend_ui.h> // servers_ui_connect_direct / _disconnect / _reconnect
@@ -114,6 +115,7 @@ typedef struct {
     char desc[CON_TEXT_MAX];
     ConRun run;
     int alias;                   // index into g_con.aliases (alias commands), -1 none
+    int dev;                     // a developer command: hidden (help, completion, run) while the dev console is off
 } ConCommand;
 
 typedef struct {
@@ -400,6 +402,8 @@ static const ConArg A_TP[] = {{"x|player", ARG_STRING, 0}, {"y", ARG_NUMBER, 1},
 static const ConArg A_BRING[] = {{"player|all", ARG_STRING, 0}, {"x", ARG_NUMBER, 1}, {"y", ARG_NUMBER, 1}, {"z", ARG_NUMBER, 1}};
 // KrunkNative Object Manager (shared/src/chat_commands.c cmd_give / cmd_drop)
 static const ConArg A_GIVE[] = {{"weapon|item", ARG_STRING, 0}, {"player", ARG_STRING, 1}};
+// KrunkNative class (dev): the class, and the loadout's secondary weapon (the class's other weapons are its own)
+static const ConArg A_CLASS[] = {{"name|id", ARG_STRING, 0}, {"secondary", ARG_STRING, 1}};
 #define ARGS(a) a, (int) (sizeof(a) / sizeof(a[0]))
 #define NO_ARGS NULL, 0
 
@@ -430,6 +434,17 @@ static ConCommand *put_cmd(const char *name, const int server, const ConArg *arg
 
 static void register_local(const char *name, const ConArg *args, const int nargs, const char *desc, ConRun run) {
     put_cmd(name, 0, args, nargs, desc, run);
+}
+
+// A developer command (the dev console's gate, ui_mods_dev_console_enabled): listed, completed and run only
+// while that is on.
+static void register_dev(const char *name, const ConArg *args, const int nargs, const char *desc, ConRun run) {
+    ConCommand *cmd = put_cmd(name, 0, args, nargs, desc, run);
+    if (cmd) cmd->dev = 1;
+}
+
+static int cmd_visible(const ConCommand *cmd) {
+    return !cmd->dev || ui_mods_dev_console_enabled();
 }
 
 static void register_server(const char *name, const ConArg *args, const int nargs, const char *desc) {
@@ -871,7 +886,7 @@ static void cmd_help(const int argc, char **argv, const char *rest) {
     (void) rest;
     if (argc) {
         const ConCommand *c = find_cmd(argv[0]);
-        if (!c) {
+        if (!c || !cmd_visible(c)) {
             appendf(COL_ERROR, "unknown command: %s", argv[0]);
             return;
         }
@@ -881,8 +896,10 @@ static void cmd_help(const int argc, char **argv, const char *rest) {
         return;
     }
     int order[CON_CMDS_MAX];
-    const int n = g_con.cmd_count;
-    for (int i = 0; i < n; i++) order[i] = i;
+    int n = 0;
+    for (int i = 0; i < g_con.cmd_count; i++) {
+        if (cmd_visible(&g_con.cmds[i])) order[n++] = i;
+    }
     for (int i = 1; i < n; i++) { // Object.keys(cmds).sort()
         const int v = order[i];
         int j = i - 1;
@@ -1376,6 +1393,16 @@ static void cmd_firstperson(const int argc, char **argv, const char *rest) {
     third_person_first_person(con_client());
 }
 
+// class <name|id> [secondary] (KrunkNative dev): the server switches a spawned player's class now (the offline
+// sandbox only for now). The line goes out as typed, quotes included, so the server reads a quoted class name
+// ("Spray N Pray") as one argument. The server refuses what it may not give and says why.
+static void cmd_class(const int argc, char **argv, const char *rest) {
+    (void) argc; (void) argv;
+    char line[CON_LINE_MAX];
+    snprintf(line, sizeof(line), "/class %s", rest ? rest : "");
+    send_server(line);
+}
+
 // logout (KrunkNative): the menu's Logout (account_ui.c logoutAcc: the saved token dropped and
 // revoked, the social socket signed out, the guest header). Client-local: nothing goes to the
 // game server, so its command auth is not involved.
@@ -1432,7 +1459,8 @@ static void register_commands(void) {
     register_local("ping", NO_ARGS, "show current ping", cmd_ping_local);
     register_local("thirdperson", NO_ARGS, "over-the-shoulder camera (offline, devs, custom games that allow it)", cmd_thirdperson);
     register_local("firstperson", NO_ARGS, "back to the first-person camera", cmd_firstperson);
-    register_local("official_sync", ARGS(A_SYNC_RESET), "prediction sync: reconciliations, corrections and their distance (reset clears)", cmd_official_sync);
+    register_dev("official_sync", ARGS(A_SYNC_RESET), "prediction sync: reconciliations, corrections and their distance (reset clears)", cmd_official_sync);
+    register_dev("class", ARGS(A_CLASS), "switch your class now (offline sandbox): its loadout and health, and the secondary weapon", cmd_class);
     register_local("netinfo", NO_ARGS, "show the game transport (WebRTC/WebSocket, UDP/TCP) and its state", cmd_netinfo);
     register_local("show_navmeshes", ARGS(A_NAV_OFF), "visualize generated source-style nav meshes in 3D (off to clear)", cmd_show_navmeshes);
     // Server commands (mirror server/packetHandlers.ts cmds table)
@@ -1540,7 +1568,7 @@ static void con_exec(const char *raw) {
     const int argc = parse_args(rest, work, sizeof(work), argv);
 
     const ConCommand *c = find_cmd(name);
-    if (!c) return; // unknown commands are silent
+    if (!c || !cmd_visible(c)) return; // unknown commands are silent (and a dev command with the dev console off)
     if (!c->server) {
         const ConCommand *previous = g_running;
         g_running = c;
@@ -1748,11 +1776,33 @@ static void con_key_candidates(ConCands *c, const char *prefix) {
 }
 
 static void con_command_candidates(ConCands *c, const char *prefix) {
-    for (int i = 0; i < g_con.cmd_count; i++) cand_add(c, g_con.cmds[i].name, prefix);
+    for (int i = 0; i < g_con.cmd_count; i++) {
+        if (cmd_visible(&g_con.cmds[i])) cand_add(c, g_con.cmds[i].name, prefix);
+    }
 }
 
 static void con_words(ConCands *c, const char *prefix, const char *const *words) {
     for (; *words; words++) cand_add(c, *words, prefix);
+}
+
+// The class table's names (Game.classes, else the ruleset's): "Spray N Pray" and the like insert quoted (quote_into).
+static void con_class_candidates(ConCands *c, const char *prefix) {
+    const Client *client = con_client();
+    const ClassConfig *classes = client && client->game.classes ? client->game.classes : rules_classes();
+    const size_t count = client && client->game.class_count ? client->game.class_count : rules_class_count();
+    for (size_t i = 0; i < count; i++) {
+        if (classes[i].name) cand_add(c, classes[i].name, prefix);
+    }
+}
+
+// The weapons a class's secondary slot can take (Weapon.secondary; the server's gates decide the rest).
+static void con_secondary_candidates(ConCands *c, const char *prefix) {
+    const Client *client = con_client();
+    const Weapon *const *weapons = client && client->game.weapons ? (const Weapon *const *) client->game.weapons : rules_weapons();
+    const size_t count = client && client->game.weapon_count ? client->game.weapon_count : rules_weapon_count();
+    for (size_t i = 0; i < count; i++) {
+        if (weapons[i] && weapons[i]->secondary && weapons[i]->name) cand_add(c, weapons[i]->name, prefix);
+    }
 }
 
 static int cmd_is(const char *cmd, const char *const *names) {
@@ -1765,6 +1815,8 @@ static int cmd_is(const char *cmd, const char *const *names) {
 // What fits argument `arg` of `cmd`, filtered by `prefix`.
 static void arg_candidates(const char *cmd, const int arg, const char *prefix, ConCands *c) {
     static const char *const ON_OFF[] = {"on", "off", NULL};
+    const ConCommand *dev = find_cmd(cmd);
+    if (dev && !cmd_visible(dev)) return; // a dev command's arguments are offered only with the dev console on
     if (cmd_is(cmd, WORDS("help", "exec"))) con_command_candidates(c, prefix);
     else if (cmd_is(cmd, WORDS("alias"))) {
         if (arg == 0) for (int i = 0; i < g_con.alias_count; i++) cand_add(c, g_con.aliases[i].key, prefix);
@@ -1842,6 +1894,9 @@ static void arg_candidates(const char *cmd, const int arg, const char *prefix, C
         }
     } else if (!strcmp(cmd, "score")) {
         if (arg == 0) con_words(c, prefix, WORDS("100", "250", "500", "1000", "-100"));
+    } else if (!strcmp(cmd, "class")) {
+        if (arg == 0) con_class_candidates(c, prefix);
+        else if (arg == 1) con_secondary_candidates(c, prefix);
     }
 }
 
@@ -1894,6 +1949,7 @@ static void update_hints(void) {
     } else {
         html_dom_set_class(g_con.hints, "isOpen", 1);
         const ConCommand *c = find_cmd(ctx.cmd);
+        if (c && !cmd_visible(c)) c = NULL; // a dev command with the dev console off is unknown
         if (c) {
             char args[256], meta[CON_LINE_MAX];
             fmt_args(c, args, sizeof(args));
@@ -2473,6 +2529,14 @@ static int l_pointer(void *user, const HtmlEvent *ev, const HtmlArg *args, const
 }
 
 // ---------------------------------------------------------------- tests
+
+// input_script `conin`: the console's input line and how many hint rows (the tab completion) are showing.
+void ui_console_input_probe(char *out, const size_t n) {
+    char value[CON_LINE_MAX] = "";
+    const int live = con_live();
+    if (live) html_dom_get_value(g_con.input, value, sizeof(value));
+    snprintf(out, n, "value=[%s] hints=%d", value, live ? g_con.hint_count : 0);
+}
 
 void ui_console_probe(char *out, const size_t n) {
     float vw = 0.0f, vh = 0.0f, dpr = 1.0f;

@@ -166,6 +166,7 @@
 #include <menu_view.h>    // `cam`: menu_view_killer_uid (the death chase)
 #include <spectate.h>     // `cam`: spectate_active
 #include <nettspend.h>    // `pour`, `laced`
+#include <ruleset.h>      // `class`: the class names
 #include <GLFW/glfw3.h>
 #include <png_write.h>
 #include <frame_target.h>
@@ -852,6 +853,28 @@ static void script_run(Client *client, const ScriptEvent *e) {
         char state[320];
         ui_console_probe(state, sizeof(state));
         fprintf(stderr, "[input_script] console t=%.0f %s %s\n", g_script.time, e->arg, state);
+    } else if (!strcmp(e->cmd, "conin")) {
+        // conin: the developer console's input line and its hint rows (the tab completion: client/tests/class_console_e2e.py)
+        char state[1024];
+        ui_console_input_probe(state, sizeof(state));
+        fprintf(stderr, "[input_script] conin t=%.0f %s %s\n", g_script.time, e->arg, state);
+    } else if (!strcmp(e->cmd, "class")) {
+        // class @label: the local player's class (index and name), its secondary weapon, health and loadout weapon ids
+        // (client/tests/class_console_e2e.py): "[input_script] class t=100 @label index=3 name=Spray N Pray secondary=2
+        // health=170 max=170 loadout=1,2"
+        const Player *me = client->me;
+        const size_t classes = rules_class_count();
+        const int index = me ? me->class_index : -1;
+        const char *name = index >= 0 && (size_t) index < classes && rules_classes()[index].name ? rules_classes()[index].name : "-";
+        char loadout[96] = "";
+        for (int i = 0; me && i < me->loadout_size && (size_t) strlen(loadout) < sizeof(loadout) - 12; i++) {
+            char id[12];
+            snprintf(id, sizeof(id), "%s%d", i ? "," : "", me->loadout[i]);
+            strncat(loadout, id, sizeof(loadout) - strlen(loadout) - 1);
+        }
+        fprintf(stderr, "[input_script] class t=%.0f %s index=%d name=%s secondary=%d health=%.0f max=%d loadout=%s\n", g_script.time, e->arg,
+                index, name, me ? me->secondary_index : -1, me ? (double) me->health : -1.0, me ? me->max_health : -1,
+                loadout[0] ? loadout : "-");
     } else if (!strcmp(e->cmd, "page")) {
         char mode[16] = "";
         const char *query = "";

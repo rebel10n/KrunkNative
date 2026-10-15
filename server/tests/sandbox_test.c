@@ -11,6 +11,7 @@
 #include <ai.h>   // NET_PACKET_AI_SHOT / NET_PACKET_AI_ANIM
 #include <bots.h> // bot players for the dead-filter match
 #include <social_v7.h> // NET_PACKET_CHAT_V7
+#include <ruleset.h>   // test_class: the class table's health
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -765,6 +766,95 @@ static void pump_three(TestClient *a, TestClient *b, TestClient *c, const int fr
     }
 }
 
+// The last SPAWN the client got for its own (is_you) or another player's life: the newest is the state now.
+static NetSpawnPacket last_spawn_of(const TestClient *c, const int is_you) {
+    NetSpawnPacket out = {0};
+    for (int i = c->count - 1; i >= 0; i--) {
+        NetSpawnPacket spawn;
+        if (c->packets[i].type == NET_PACKET_SPAWN && net_packet_read_spawn(&spawn, &c->packets[i]) && spawn.is_you == is_you && spawn.active) {
+            return spawn;
+        }
+    }
+    return out;
+}
+
+// class (KrunkNative dev, offline sandbox; chat_commands.c cmd_class): the class and its secondary take effect in
+// place (player_switch_class): the new class's health, a SPAWN to the client, the player stays where it stood. A
+// refused class or weapon replies why and leaves the player as it was. The chat limit is 3 lines a second, so each
+// line gets its own second.
+static void test_class(void) {
+    size_t map_count = 0;
+    const cJSON **maps = load_maps(&map_count);
+    const SandboxConfig cfg = {.maps = maps, .map_count = map_count, .map_index = 0, .mode_id = -1};
+    CHECK(sandbox_start(&cfg), "sandbox_start (class)");
+
+    static TestClient c;
+    memset(&c, 0, sizeof(c));
+    c.fd = sandbox_connect();
+    join(&c);
+    pump(&c, 60);
+    NetSpawnPacket me = {0};
+    CHECK(spawn_of(&c, 1, &me), "spawned (class)");
+    Player *p = (Player *) server_player(me.uid);
+    CHECK(p != NULL, "server player (class)");
+    if (!p) {
+        sandbox_stop();
+        return;
+    }
+    CHECK(p->class_index == 0, "joined as class 0, got %d", p->class_index);
+
+    const vec3 before = p->position;
+    chat(&c, "/class \"Spray N Pray\"");
+    pump(&c, 61);
+    const int spray = 3;
+    const float spray_health = (float) rules_classes()[spray].health;
+    CHECK(chat_contains(&c, "Switched to Spray N Pray (3)."), "/class reply");
+    CHECK(p->class_index == spray, "server class %d after the switch", p->class_index);
+    CHECK(p->max_health == (int) spray_health && p->health == spray_health, "health %.0f / max %d after the switch", (double) p->health, p->max_health);
+    CHECK(p->position.x == before.x && p->position.y == before.y && p->position.z == before.z, "the switch keeps the position");
+    const NetSpawnPacket after = last_spawn_of(&c, 1);
+    CHECK(after.class_index == spray && (float) after.health == spray_health, "SPAWN to the client: class %d health %.0f", after.class_index, (double) after.health);
+
+    // refused: an unknown class, an unknown weapon, a primary as the secondary: nothing changes
+    const int secondary_before = p->secondary_index;
+    const float health_before = p->health;
+    chat(&c, "/class 99");
+    pump(&c, 61);
+    chat(&c, "/class Nope");
+    pump(&c, 61);
+    chat(&c, "/class Runner \"Assault Rifle\"");
+    pump(&c, 61);
+    CHECK(chat_contains(&c, "No class called '99'."), "refused: unknown class id");
+    CHECK(chat_contains(&c, "No class called 'Nope'."), "refused: unknown class name");
+    CHECK(chat_contains(&c, "Assault Rifle is not a secondary weapon."), "refused: a primary as the secondary");
+    CHECK(p->class_index == spray && p->secondary_index == secondary_before && p->health == health_before, "refused switches change nothing");
+
+    // a secondary: Triggerman (0) with the Pistol (id 2) in its secondary slot
+    chat(&c, "/class 0 Pistol");
+    pump(&c, 61);
+    CHECK(chat_contains(&c, "Switched to Triggerman (0)."), "/class 0 Pistol reply");
+    CHECK(p->class_index == 0 && p->secondary_index == 2, "class 0 with the Pistol: class %d secondary %d", p->class_index, p->secondary_index);
+    CHECK(p->max_health == rules_classes()[0].health, "Triggerman's health %d", p->max_health);
+
+    // KrunkNative's Nettspend: playable here (a KrunkNative lobby), with its own Drank and Money Spread
+    chat(&c, "/class Nettspend");
+    pump(&c, 61);
+    CHECK(chat_contains(&c, "Switched to Nettspend (16)."), "/class Nettspend reply");
+    CHECK(p->class_index == CLASS_ID_NETTSPEND && p->loadout_size >= 2 && p->loadout[0] == WEAPON_ID_DRANK && p->loadout[1] == WEAPON_ID_MONEY_SPREAD,
+          "the Nettspend's loadout: class %d (%d %d)", p->class_index, p->loadout_size > 0 ? p->loadout[0] : -1, p->loadout_size > 1 ? p->loadout[1] : -1);
+    // the same switch in an official krunker.io game (game_class_allowed, the one class gate) is refused
+    chat(&c, "/class 0");
+    pump(&c, 61);
+    CHECK(p->class_index == 0, "back to the Triggerman (%d)", p->class_index);
+    p->game->is_official = 1;
+    chat(&c, "/class Nettspend");
+    pump(&c, 61);
+    p->game->is_official = 0;
+    CHECK(chat_contains(&c, "Nettspend is not playable on official krunker.io servers."), "official: the Nettspend refused");
+    CHECK(p->class_index == 0, "official: the refusal changes nothing (class %d)", p->class_index);
+    sandbox_stop();
+}
+
 // "bullets keep getting sent to the client after the player is dead": in a bot match a dead
 // player gets no live-world packet (k_live_only) until its respawn, but still the kill feed,
 // chat and projectile ends; a spectator gets everything. On the respawn the projectiles still
@@ -880,6 +970,7 @@ int main(void) {
     test_join_move_leave();
     test_wpc_peer_mix();
     test_dead_player_sync();
+    test_class();
     test_dead_player_live_filter();
     test_idle_kick_map_change();
     test_tp_bring();

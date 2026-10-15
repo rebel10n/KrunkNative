@@ -87,6 +87,10 @@ typedef struct ChatCommandHost {
     // menu, dead): the server runs object_manager_request_view at the connection's view, its extra
     // weapons kept for the next spawn. `give` / `spawn` from the menu go through it.
     void (*om_request_view)(void *user, int id, const NetSpawnReqPacket *req, NetSpawnResultPacket *out);
+    // KrunkNative class (`class`, offline sandbox only): NULL where a class switch is refused. Called after the
+    // player's class and secondary changed: the connection keeps them for its next spawn, and everyone gets the
+    // new look and loadout (SPAWN).
+    void (*class_switched)(void *user, int id);
 
     // per-server state (pnhBannedAddresses, forceCollideState)
     char ip_bans[CHAT_CMD_IP_BANS_MAX][CHAT_CMD_ADDRESS_SIZE];

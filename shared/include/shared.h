@@ -1523,6 +1523,7 @@ typedef struct {
 
 Player *player_init(struct Game_t*);
 void player_spawn(Player*);
+int player_switch_class(Player*, int class_index, int secondary_index); // KrunkNative console class: the loadout now, position kept (player.c)
 void player_swap_weapon(Player*, int, int, int, int);
 void player_update_height(Player*); // players.updateHeight: height from crouch_val
 void player_movement_spawn(Player*); // WP-A setClass: wall-jump limits (class / mode) and the v7 movement state

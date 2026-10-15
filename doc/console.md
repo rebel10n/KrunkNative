@@ -68,6 +68,7 @@ silent (only the `] line` echo), as in the mod.
 | show_navmeshes [off] | v7.1.4: the nav mesh visualizer (below) | same (v7.1.4 command; v3.1.1 has none) |
 | tool_snap [units\|off] | – | Krunker Box Office: the Tool Gun's / Physics Gun's grid step (0.1 to 100 units, or off), the Object Manager's Snap field; no argument prints it. Client-local (stored as `kn_omSnapStep`), so no target selector |
 | thirdperson / firstperson | – (Source engine commands) | Krunker Box Office: the over-the-shoulder camera (doc/v7/decisions.md "Third person"). `thirdperson` asks the server (`/thirdperson on`); it switches when the grant arrives ("Third Person - Enabled") or prints the refusal (public / ranked servers, custom games whose host has `knTPCam` off). `firstperson` goes back at once. Also the Controls bind "Third Person" (unbound by default) |
+| official_sync [reset] | – | Krunker Box Office: an official krunker.io session's prediction counters (reconciliations, corrections and their distance). A dev-console command: hidden from help and completion and not run with the dev console off |
 
 ## Server commands (`/cmd` in chat, or the console without the slash)
 
@@ -117,6 +118,7 @@ io.send wrapper). The other commands run in the offline game's chat handler. `/b
 | bhop | [on\|off\|held] | client | "Bhop - Disabled" / "Bhop - Hold Jump/Crouch" in the console + notify | ✔ (`ui_bhop_set_mode` + `ui_notify`) |
 | clear | – | client | Krunker Box Office: empties your own chat log (#chatList); local only, nothing is sent and other players' chat is untouched | ✔ (`hud_ui_clear_chat`, chat only: in the console `clear` / `/clear` is the console's own) |
 | thirdperson | [on\|off] | own rule | – (Krunker Box Office) | the third-person camera's permission (`chat_third_person_allowed`): the offline sandbox, DEV peers, the custom game's host and everyone with the host's `knTPCam`, open-cheat servers; else a notify ("Third person is off on this server", "No third person in ranked", "The host has third person off"), "Third Person - Not allowed here (…)" and `NET_CHEAT_THIRD_PERSON` 0. Granted: "Third Person - Enabled" / "Disabled" and the cheat flag 1 / 0 |
+| class | <name\|id> [secondary] | dev | – (Krunker Box Office) | switches your class now, in place (`player_switch_class`: the loadout, full health, the class's speed and wall jumps; position, view and inputs kept), and optionally the secondary weapon; a SPAWN tells every client. Offline sandbox only (`ChatCommandHost.class_switched`; elsewhere "class works in the offline sandbox only."). Refusals say why and change nothing: no such class / weapon, ambiguous names, the one class gate `game_class_allowed` ("Nettspend is not playable on official krunker.io servers."), the flavor, the game's class list, a mode's fixed class, a non-secondary weapon, a class with its own secondary. Client side a dev-console command (hidden from help and completion, not run or sent with the dev console off, also from binds and `exec`); class and secondary names complete, names with spaces quoted (`class "Spray N Pray"`) |
 
 ## Target selectors (Krunker Box Office)
 

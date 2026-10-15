@@ -3,6 +3,8 @@
 // differences are commented in place and listed in doc/console.md.
 #include <chat_commands.h>
 #include <game_config.h> // game_config_is_custom (third person)
+#include <flavor_rules.h> // flavor_class_allowed (class)
+#include <ruleset.h>     // rules_classes / rules_weapons (class)
 #include <ai.h>
 #include <bots.h>
 #include <bot_path.h>
@@ -2108,6 +2110,173 @@ static int third_person_allowed(ChatCtx *c, const char **reason) {
     return 0;
 }
 
+// ---------------------------------------------------------------- class (KrunkNative dev, offline sandbox)
+
+// A name matches when its letters and digits (normalise) equal the query's, else when they start with it.
+typedef struct {
+    int exact, exact_n, part, part_n;
+} NameMatch;
+
+static void name_match_add(NameMatch *m, const char *query, const char *name, const int index) {
+    char low[64];
+    normalise(name, low, sizeof(low));
+    if (!strcmp(low, query)) {
+        if (m->exact_n++ == 0) m->exact = index;
+    } else if (query[0] && !strncmp(low, query, strlen(query))) {
+        if (m->part_n++ == 0) m->part = index;
+    }
+}
+
+// The one match's index, else -1 with *matches the count of matches (0 none, > 1 ambiguous).
+static int name_match_result(const NameMatch *m, int *matches) {
+    if (m->exact_n) {
+        *matches = m->exact_n;
+        return m->exact_n == 1 ? m->exact : -1;
+    }
+    *matches = m->part_n;
+    return m->part_n == 1 ? m->part : -1;
+}
+
+// A class by its number, else by name (the same matching as the names the console completes).
+static int class_lookup(const char *query, const ClassConfig *classes, const size_t count, int *matches) {
+    char *end = NULL;
+    const long id = strtol(query, &end, 10);
+    if (query[0] && !*end) {
+        *matches = 1;
+        return id >= 0 && (size_t) id < count ? (int) id : -1;
+    }
+    char needle[64];
+    normalise(query, needle, sizeof(needle));
+    NameMatch m = {0};
+    for (size_t i = 0; i < count; i++) {
+        if (classes[i].name) name_match_add(&m, needle, classes[i].name, (int) i);
+    }
+    return name_match_result(&m, matches);
+}
+
+static int weapon_lookup(const char *query, const Weapon *const *weapons, const size_t count, int *matches) {
+    char *end = NULL;
+    const long id = strtol(query, &end, 10);
+    if (query[0] && !*end) {
+        *matches = 1;
+        return id >= 0 && (size_t) id < count && weapons[id] ? (int) id : -1;
+    }
+    char needle[64];
+    normalise(query, needle, sizeof(needle));
+    NameMatch m = {0};
+    for (size_t i = 0; i < count; i++) {
+        if (weapons[i] && weapons[i]->name) name_match_add(&m, needle, weapons[i]->name, (int) i);
+    }
+    return name_match_result(&m, matches);
+}
+
+// Why this player may not take class `index` here (the gates player_spawn applies, and the class picker):
+// game_class_allowed (the one class gate: KrunkNative's own classes are out of official krunker.io games
+// only), the flavor, the game's class list, the mode's fixed class. 1 with the reply in `out` when refused.
+static int class_refusal(const Game *game, const Player *player, const ClassConfig *classes, const int index, char *out, const size_t n) {
+    const char *name = classes[index].name ? classes[index].name : "That class";
+    if (!game_class_allowed(game, index)) {
+        snprintf(out, n, "%s is not playable on official krunker.io servers.", name);
+        return 1;
+    }
+    if (!flavor_class_allowed(index)) {
+        snprintf(out, n, "%s is not in this flavor.", name);
+        return 1;
+    }
+    if (game->config.class_list_count > 0) {
+        int listed = 0;
+        for (int i = 0; i < game->config.class_list_count; i++) listed |= game->config.class_list[i] == index;
+        if (!listed) {
+            snprintf(out, n, "%s is not in this game's class list.", name);
+            return 1;
+        }
+    }
+    if (game->mode && game->config.force_classes) {
+        const GameModeConfig *mode = &game->mode->config;
+        if (mode->no_weapons || (mode->force_class >= 0 && mode->force_class != index)) {
+            snprintf(out, n, "This mode fixes the class: %s is not allowed.", name);
+            return 1;
+        }
+        if (player->team >= 0 && player->team < 3 && mode->team_class[player->team] >= 0 && mode->team_class[player->team] != index) {
+            snprintf(out, n, "This mode fixes your team's class: %s is not allowed.", name);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// class <name|id> [secondary] (KrunkNative dev, offline sandbox; the console's class): the class and its
+// secondary weapon take effect now, as a respawn gives them (player_switch_class), without a new spawn point
+// or an input reset. A refused class or weapon replies why and changes nothing.
+static void cmd_class(ChatCtx *c) {
+    if (!allowed(c, CHAT_PERM_DEV)) return;
+    char work[NET_CHAT_TEXT_SIZE], *argv[CHAT_ARGS_MAX];
+    const int argc = split_quoted(c->rest, work, sizeof(work), argv, CHAT_ARGS_MAX);
+    if (!argc) {
+        reply(c, "Usage: class <name|id> [secondary]");
+        return;
+    }
+    if (!c->host->class_switched) {
+        reply(c, "class works in the offline sandbox only.");
+        return;
+    }
+    Player *player = c->player;
+    if (!player || !player->active) {
+        reply(c, "Spawn first: class switches a spawned player.");
+        return;
+    }
+    Game *game = c->host->game;
+    const size_t class_count = game->class_count ? game->class_count : rules_class_count();
+    const ClassConfig *classes = game->classes ? game->classes : rules_classes();
+    int matches = 0;
+    const int index = class_lookup(argv[0], classes, class_count, &matches);
+    if (index < 0) {
+        if (matches > 1) reply(c, "Class '%s' is ambiguous (%d matches): be more specific.", argv[0], matches);
+        else reply(c, "No class called '%s'.", argv[0]);
+        return;
+    }
+    char refusal[CHAT_TEXT_MAX];
+    if (class_refusal(game, player, classes, index, refusal, sizeof(refusal))) {
+        reply(c, "%s", refusal);
+        return;
+    }
+    const ClassConfig *cls = &classes[index];
+    const Weapon *const *weapons = game->weapons ? (const Weapon *const *) game->weapons : rules_weapons();
+    const size_t weapon_count = game->weapon_count ? game->weapon_count : rules_weapon_count();
+    int secondary = player->secondary_index;
+    if (argc >= 2) {
+        int wmatches = 0;
+        const int w = weapon_lookup(argv[1], weapons, weapon_count, &wmatches);
+        if (w < 0) {
+            if (wmatches > 1) reply(c, "Weapon '%s' is ambiguous (%d matches): be more specific.", argv[1], wmatches);
+            else reply(c, "No weapon called '%s'.", argv[1]);
+            return;
+        }
+        const Weapon *weapon = weapons[w];
+        const char *wname = weapon->name ? weapon->name : argv[1];
+        const int ranked = game->config.comp;
+        const int custom = game_config_is_custom(game) && !ranked;
+        char refused_weapon[CHAT_TEXT_MAX] = "";
+        if (!weapon->secondary) snprintf(refused_weapon, sizeof(refused_weapon), "%s is not a secondary weapon.", wname);
+        else if (game->config.no_secondaries) snprintf(refused_weapon, sizeof(refused_weapon), "Secondary weapons are off in this game.");
+        else if (cls->kn_secondary > 0) snprintf(refused_weapon, sizeof(refused_weapon), "%s always carries its own secondary.", cls->name);
+        else if (!cls->secondary) snprintf(refused_weapon, sizeof(refused_weapon), "%s has no secondary weapon slot.", cls->name);
+        else if (weapon->custom_only && !custom) snprintf(refused_weapon, sizeof(refused_weapon), "%s is custom games only.", wname);
+        else if (ranked && weapon->no_comp) snprintf(refused_weapon, sizeof(refused_weapon), "%s is not in competitive lobbies.", wname);
+        if (refused_weapon[0]) {
+            reply(c, "%s", refused_weapon);
+            return;
+        }
+        secondary = w;
+    }
+    if (!player_switch_class(player, index, secondary)) {
+        reply(c, "class: out of memory.");
+        return;
+    }
+    c->host->class_switched(c->host->user, c->sender);
+    reply(c, "Switched to %s (%d). Health %d.", cls->name, index, player->max_health);
+}
+
 // thirdperson [on|off]: ask the server for the third-person camera. The reply is the
 // NET_CHEAT_THIRD_PERSON grant (the client only switches once it arrives), a denial the notify.
 static void cmd_third_person(ChatCtx *c) {
@@ -2192,6 +2361,7 @@ static const ChatCommand COMMANDS[] = {
     {{"drop", NULL, "", "drop the weapon in your hand in front of you", CHAT_PERM_ANY}, cmd_drop},
     {{"spawn", NULL, "<object|entity|npc>", "spawn an Object Manager object, entity or NPC at your crosshair (devs: from the menu too)", CHAT_PERM_ANY}, cmd_spawn},
     // KrunkNative third-person camera: its own rule (third_person_allowed), not the perms gate
+    {{"class", NULL, "<name|id> [secondary]", "switch your class now (dev, offline sandbox): its loadout and health, and the secondary weapon", CHAT_PERM_DEV}, cmd_class},
     {{"thirdperson", NULL, "[on|off]", "ask for the third-person camera (offline, devs, custom hosts / knTPCam)", CHAT_PERM_ANY}, cmd_third_person},
 };
 

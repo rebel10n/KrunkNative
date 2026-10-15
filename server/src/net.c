@@ -4,6 +4,7 @@
 // in-process sandbox (sandbox.c); the TCP listener and the net thread live in net_tcp.c.
 #include <server.h>
 #include <server_log.h>
+#include <server_sandbox.h>  // sandbox_running(): `class` is offline only (net_chat_host)
 #include <server_accounts.h> // backend: JOIN, PLAYER_INFO, stats, billboards (doc/backend.md section 8)
 #include <server_votekick.h> // the player list's vote kick / K.P.D call (NET_PACKET_EXT subtypes)
 #include <brain.h>           // brain_enabled(): the brain owns matchmaking and the hub
@@ -999,6 +1000,17 @@ static void net_chat_om_extras(void *user, const int id) {
     net_keep_om_extras(net_client_by_id(id));
 }
 
+// KrunkNative `class` (offline sandbox only, see net_chat_host): the connection keeps the class and secondary its
+// player has now, for its next spawn, and every client gets the new look and loadout (SPAWN, as a respawn sends it).
+static void net_chat_class_switched(void *user, const int id) {
+    (void) user;
+    ClientConnection *client = net_client_by_id(id);
+    if (!client || !client->player) return;
+    client->class_index = client->player->class_index;
+    client->secondary_index = client->player->secondary_index;
+    net_broadcast_spawn(client->player);
+}
+
 static int net_chat_peer_count(void *user) {
     (void) user;
     return (int) g_server->client_count;
@@ -1096,6 +1108,9 @@ ChatCommandHost *net_chat_host(void) {
     g_chat_host.om_extras_changed = net_chat_om_extras;
     g_chat_host.keep = net_chat_keep;                 // KrunkNative: cheats / tp from the menu
     g_chat_host.om_request_view = net_chat_om_view;   // KrunkNative: give / spawn from the menu
+    // KrunkNative `class`: the offline sandbox only, until a live server's path is verified (a mid-life switch
+    // sends SPAWN to every client; the online clients' input bookkeeping is not exercised here)
+    g_chat_host.class_switched = sandbox_running() ? net_chat_class_switched : NULL;
     return &g_chat_host;
 }
 
