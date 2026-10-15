@@ -944,6 +944,7 @@ static void test_dead_player_live_filter(void) {
     client_send(&b, NET_PACKET_ENT, &ent, (uint16_t) NET_ENT_PACKET_V7_SIZE);
     client_send(&a, NET_PACKET_ENT, &ent, (uint16_t) NET_ENT_PACKET_V7_SIZE);
     const int respawn_shots0 = b.type_count[NET_PACKET_SHOT];
+    const int respawn_spec_shots0 = spec.type_count[NET_PACKET_SHOT];
     pump_three(&a, &b, &spec, 30);
     const int spawn_b = index_of_spawn(&b, 0, me_b.uid);
     CHECK(spawn_b >= 0, "B respawned");
@@ -962,7 +963,13 @@ static void test_dead_player_live_filter(void) {
         if (!p || !p->active || p->uid == me_b.uid) continue;
         CHECK(states_about(&b, spawn_b, p->uid) > 0, "respawn: B gets player %d's position again", p->uid);
     }
-    CHECK(b.type_count[NET_PACKET_SHOT] - respawn_shots0 > 0, "respawn: B sees tracers again (%d)", b.type_count[NET_PACKET_SHOT] - respawn_shots0);
+    // the bots may not fire for a few seconds (their fights are random): wait, up to 20 s more,
+    // until the spectator sees a tracer, which B (alive again) must see too
+    for (int f = 0; f < 1200 && spec.type_count[NET_PACKET_SHOT] == respawn_spec_shots0; f += 30) pump_three(&a, &b, &spec, 30);
+    pump_three(&a, &b, &spec, 5);
+    const int spec_shots = spec.type_count[NET_PACKET_SHOT] - respawn_spec_shots0;
+    CHECK(spec_shots > 0, "respawn: the bots fire again (spectator %d SHOT)", spec_shots);
+    CHECK(b.type_count[NET_PACKET_SHOT] - respawn_shots0 > 0, "respawn: B sees tracers again (%d, spectator %d)", b.type_count[NET_PACKET_SHOT] - respawn_shots0, spec_shots);
     sandbox_stop();
 }
 
