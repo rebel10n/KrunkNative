@@ -1921,6 +1921,11 @@ static void client_tick_game(Client *client, const float now, const float frame_
         // The branch runs every frame, so follow cams keep tracking behind the menu.
         const int look = client->mouse_state.locked && !menu_open;
         spectate_tick(client, delta, look ? look_x : 0.0f, look ? look_y : 0.0f);
+    } else {
+        // dead: CONTROLS.updateMouseInp turns the death rig with the mouse (menu_view.c), the chase
+        // (menu_view_camera below) keeps pulling it toward the killer
+        const int look = client->mouse_state.locked && !menu_open;
+        menu_view_look(client, look ? look_x : 0.0f, look ? look_y : 0.0f);
     }
     // didPressed / aba6 / the wheel key last one input frame (v7: wSwap and scrollDelta are cleared
     // when a frame is sampled, so a press between samples reaches the next one)

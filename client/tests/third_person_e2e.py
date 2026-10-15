@@ -236,7 +236,7 @@ def death():
     world), then the respawn is third person again (the grant lasts the round)."""
     shot = lambda n: os.path.join(FRAMES, f"kanji-death-{n}.png")  # noqa: E731
     lines = run_client("death", ["--offline", MAPS["kanji"][0]],
-                       "0 play\n1000 con thirdperson\n2000 tpstate\n2500 con kill\n" + every(3000, 5000, 500) +
+                       "0 play\n1000 con thirdperson\n2000 tpstate\n2500 con kill\n" + every(3000, 12000, 500) +
                        f"4000 shot {shot('1-deathcam')}\n9000 respawn\n" + every(12000, 40000, 500) +
                        f"39800 shot {shot('2-respawned')}\n40200 quit\n", timeout=360)
     st = tpstates(lines)
@@ -245,8 +245,9 @@ def death():
     check("death: the death cam is not the third-person camera, no own model", dead and all(not s["view"] and not s["own"] for s in dead),
           str(dead[:2]))
     # the offline respawn takes a while after `respawn` (death delay, Play again): from the first
-    # third-person frame on, every one must be
-    later = span(st, 12000, 40000)
+    # third-person frame on, every one must be. The window starts at the death (the respawn can
+    # land in the death's own spot, and then only a dead frame before it tells the two apart)
+    later = span(st, 5000, 40000)
     first = next((i for i, s in enumerate(later) if s["view"]), None)
     alive = later[first:] if first is not None else []
     # respawned: somewhere else, or (the random spawn can be the one died at) after the death cam

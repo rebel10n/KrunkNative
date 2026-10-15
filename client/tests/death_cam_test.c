@@ -16,6 +16,13 @@ static int g_failures, g_checks;
 } while (0)
 
 int spectate_active(void) { return 0; }
+// The alive mouse sensitivity (ui_controls.c) and the input script's look: a fixed 0.002 rad per px here.
+void ui_controls_fill_look(Client *client, Input *input, const float dx, const float dy) {
+    (void) client;
+    input->y_dir -= dx * 0.002f;
+    input->x_dir -= dy * 0.002f;
+}
+void input_script_adjust_input(Client *client, Input *input) { (void) client; (void) input; }
 
 static Client g_client;
 static Player g_me, g_killer;
@@ -173,9 +180,121 @@ static void test_map(const char *path) {
     cJSON_Delete(map);
 }
 
+// The signed shortest angle from `from` to `to` (UTILS.angleDistance).
+static float angle_between(const float from, const float to) {
+    return atan2f(sinf(to - from), cosf(from - to));
+}
+
+// A dead player at eye (yaw 0, pitch 0) on an open floor; the killer `killer` (feet), no wall.
+static void dead_on_open_floor(const vec3 killer, const int with_killer) {
+    cJSON *map = cJSON_Parse("{\"name\":\"dc3\",\"spawns\":[[0,0,0]],\"objects\":[{\"p\":[0,-10,0],\"s\":[2000,10,2000]}]}");
+    game_on(&g_client.game, map);
+    cJSON_Delete(map);
+    g_client.net_end_seconds = -1;
+    const vec3 eye = {0.0f, 9.5f, 0.0f};
+    g_client.me = &g_me;
+    g_me.active = 0;
+    g_me.direction = (vec2) {0.0f, 0.0f};
+    g_client.camera.position = eye;
+    g_client.camera.rotation = (vec3) {0.0f, 0.0f, 0.0f};
+    g_client.camera.zoom = 1.0f;
+    g_killer.position = killer;
+    g_killer.height = game_constants.player_height;
+    g_killer.uid = 2;
+    menu_view_death_cam(&g_client, with_killer ? &g_killer : NULL);
+}
+
+// v10 CONTROLS.update (camChaseTrn 0.0022 per ms): the yaw eases toward the killer's bearing, each
+// frame closing 0.0022 of the angle left per ms (never overshooting). A 120 degree turn is then
+// within 1 degree after ~2.1 s (exp(-0.0022 t), time constant 455 ms), 0.1 degree after ~3.2 s.
+static void test_turn_to_killer(void) {
+    printf("the dead camera turns toward the killer...\n");
+    // the killer 40 away at 120 degrees to the left of the death yaw 0 (camera yaw = atan2(-dx, -dz))
+    const float want = 2.0944f;
+    const vec3 killer = {-40.0f * sinf(want), 0.0f, -40.0f * cosf(want)};
+    dead_on_open_floor(killer, 1);
+    CHECK(g_client.game.ready, "dc3 map loaded");
+    if (!g_client.game.ready) return;
+    CHECK(menu_view_dead() && menu_view_killer_uid() == 2, "dead with the killer (uid %d)", menu_view_killer_uid());
+
+    float prev = angle_between(0.0f, want), t = 0.0f, t1 = -1.0f, t01 = -1.0f;
+    int monotonic = 1, overshoot = 0;
+    for (int frame = 1; frame <= 240; frame++) { // 4 s at 60 fps
+        menu_view_camera(&g_client, 1.0f / 60.0f);
+        t += 1.0f / 60.0f;
+        const float err = angle_between(g_client.camera.rotation.y, want);
+        if (fabsf(err) > fabsf(prev) + 1e-5f) monotonic = 0;
+        if (err * prev < 0.0f) overshoot = 1; // the sign flipped: it passed the killer
+        if (t1 < 0.0f && fabsf(err) <= 0.0174533f) t1 = t;
+        if (t01 < 0.0f && fabsf(err) <= 0.00174533f) t01 = t;
+        prev = err;
+    }
+    CHECK(monotonic, "the yaw error grows at some frame (the turn is not monotonic)");
+    CHECK(!overshoot, "the yaw overshot the killer's bearing");
+    CHECK(t1 > 0.0f && t1 <= 2.5f, "within 1 degree of the killer after %.2f s (v10 ~2.1 s)", t1);
+    CHECK(t01 > 0.0f && t01 <= 3.6f, "within 0.1 degree after %.2f s (v10 ~3.2 s)", t01);
+    printf("  120 degree turn: 1 degree at %.2f s, 0.1 degree at %.2f s\n", t1, t01);
+}
+
+// Mouse look while dead: it turns the rig with or without a killer, the pitch stays within +-PI/2,
+// and while the mouse moves the chase does not hold it back (the look can stay away from the killer).
+static void test_mouse_while_dead(void) {
+    printf("mouse look while dead...\n");
+    const vec3 killer = {-34.64f, 0.0f, 20.0f}; // the chase turns toward yaw 2.0944
+    dead_on_open_floor(killer, 1);
+    if (!g_client.game.ready) return;
+    menu_view_camera(&g_client, 1.0f / 60.0f);
+
+    // pitch: a huge push up clamps to +PI/2 (the chase then only pulls it down toward the killer)
+    menu_view_look(&g_client, 0.0f, -1.0e6f);
+    menu_view_camera(&g_client, 1.0f / 60.0f);
+    CHECK(g_client.camera.rotation.x <= (float) M_PI / 2.0f + 1e-6f && g_client.camera.rotation.x >= -(float) M_PI / 2.0f - 1e-6f,
+          "pitch %.4f inside +-PI/2", g_client.camera.rotation.x);
+    CHECK(g_client.camera.rotation.x > 1.4f, "pitch clamped at +PI/2 and the chase only pulled it %.4f", g_client.camera.rotation.x);
+
+    // Look away for 2 s: 4 px a frame to the left (dx > 0 turns the yaw down, away from the killer at
+    // yaw 2.0944). The steady error is 0.008 / (0.0022 * 16.67) = 0.218 rad (12.5 degrees): the chase's
+    // pull balances the mouse.
+    dead_on_open_floor(killer, 1);
+    menu_view_camera(&g_client, 1.0f / 60.0f);
+    float err = 0.0f;
+    for (int f = 0; f < 120; f++) {
+        menu_view_look(&g_client, 4.0f, 0.0f);
+        menu_view_camera(&g_client, 1.0f / 60.0f);
+        err = angle_between(g_client.camera.rotation.y, 2.0944f);
+    }
+    CHECK(fabsf(err) > 0.10f && fabsf(err) < 0.35f, "held look: %.1f degrees off the killer (steady ~12.5)", fabsf(err) * 57.2958f);
+    // release: the chase brings the camera back to within 1 degree in ~2.5 s
+    float t = 0.0f, t1 = -1.0f;
+    for (int f = 0; f < 240; f++) {
+        menu_view_camera(&g_client, 1.0f / 60.0f);
+        t += 1.0f / 60.0f;
+        if (t1 < 0.0f && fabsf(angle_between(g_client.camera.rotation.y, 2.0944f)) <= 0.0174533f) t1 = t;
+    }
+    CHECK(t1 > 0.0f && t1 <= 3.0f, "released: back within 1 degree after %.2f s", t1);
+
+    // no killer (suicide / kCams off): the camera stays where it died, the mouse still turns it
+    dead_on_open_floor(killer, 0);
+    menu_view_camera(&g_client, 1.0f / 60.0f);
+    const vec3 p0 = g_client.camera.position;
+    menu_view_look(&g_client, 100.0f, 0.0f);
+    menu_view_camera(&g_client, 1.0f / 60.0f);
+    CHECK(menu_view_dead() && menu_view_killer_uid() < 0, "no killer: dead without a chase");
+    CHECK(fabsf(g_client.camera.rotation.y + 0.2f) < 1e-4f, "no killer: 100 px turns the camera -0.2 rad (%.4f)", g_client.camera.rotation.y);
+    CHECK(dist3(g_client.camera.position, p0) < 1e-6f, "no killer: the camera does not move");
+
+    // a spawn ends the death view: the look no longer reaches the rig
+    menu_view_reset();
+    CHECK(!menu_view_dead(), "spawn: no death view");
+    menu_view_look(&g_client, 100.0f, 0.0f);
+    CHECK(!menu_view_dead(), "spawn: the look is ignored");
+}
+
 int main(void) {
     test_wall_behind();
     test_hitch_open();
+    test_turn_to_killer();
+    test_mouse_while_dead();
     test_map("assets/maps/kanji.json");
     test_map("assets/maps/sandstorm_v3.json");
     printf("%d checks, %d failures\n", g_checks, g_failures);

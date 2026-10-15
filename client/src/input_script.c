@@ -846,6 +846,26 @@ static void script_run(Client *client, const ScriptEvent *e) {
     } else if (!strcmp(e->cmd, "nethit")) {
         const NetHitPacket hit = {.target_uid = -1, .kill = (uint8_t) (e->v[0] != 0.0f)};
         client_handle_game_event(client, NET_PACKET_HIT, &hit, (uint16_t) sizeof(hit));
+    } else if (!strcmp(e->cmd, "killed")) {
+        // the KILL packet of a death by the first other active player (a rifle kill, no weapon): the
+        // death cam with its killer (client/tests/death_cam_e2e.py); the kill feed and the card follow
+        const Player *me = client->me;
+        const Player *killer = NULL;
+        for (size_t i = 0; me && !killer && i < client->game.player_count; i++) {
+            const Player *p = client->game.players[i];
+            if (p && p != me && p->active) killer = p;
+        }
+        if (me && me->active && killer) {
+            NetKillPacket kill = {0};
+            kill.victim_uid = me->uid;
+            kill.killer_uid = killer->uid;
+            kill.weapon_index = -1;
+            kill.victim_deaths = 1;
+            kill.killer_kills = 1;
+            kill.respawn_delay = 1.0f;
+            client_handle_game_event(client, NET_PACKET_KILL, &kill, (uint16_t) sizeof(kill));
+        }
+        fprintf(stderr, "[input_script] killed t=%.0f by=%d\n", g_script.time, killer ? killer->uid : -1);
     } else if (!strcmp(e->cmd, "resize")) {
         if (e->v[0] >= 1.0f && e->v[1] >= 1.0f) glfwSetWindowSize(client->window, (int) e->v[0], (int) e->v[1]);
     } else if (!strcmp(e->cmd, "blur")) {

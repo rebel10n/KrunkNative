@@ -8,6 +8,8 @@
 //   controls.js camLookAt / update (chase camera), config.js camChaseTrn/Spd/Dst
 #include <menu_view.h>
 #include <spectate.h>
+#include <input_script.h> // input_script_adjust_input: `look` (menu_view_look)
+#include <ui_logic.h>     // ui_controls_fill_look: the alive mouse sensitivity, reused while dead
 #include <bots.h>  // bot_object_blocks_player (death_cam_test)
 #include <world.h> // world_solid_fraction
 #include <math.h>
@@ -26,7 +28,8 @@
 
 static struct {
     float menu_yaw;   // menuCameraYaw (never reset by Krunker, so the spin carries over rounds)
-    int chase;        // CONTROLS.target set
+    int dead;         // the death view (killer or not): the rig takes the mouse and holds the death pose
+    int chase;        // CONTROLS.target set (a killer is known)
     int killer_uid;   // g1(): killer.isSpectating = true until our next spawn, -1 none
     vec3 position;    // CONTROLS.object.position
     float yaw;        // CONTROLS.object.rotation.y
@@ -86,14 +89,16 @@ static void chase_clamp_target(const Game *game) {
 
 void menu_view_death_cam(Client *client, const Player *killer) {
     menu_view_reset();
-    if (!client || !killer) return;
+    if (!client) return;
 
     // The controls rig sits where the first-person camera was (moveCam) with the
     // player's look (object.rotation.y / pitchObj.rotation.x) when the kill lands.
     const Player *me = client->me;
+    g_view.dead = 1;
     g_view.position = client->camera.position;
     g_view.yaw = me ? me->direction.y : client->camera.rotation.y;
     g_view.pitch = me ? me->direction.x : client->camera.rotation.x;
+    if (!killer) return; // no chase (suicide, fall, kCams off): the mouse still turns the rig
 
     // g1() also sets killer.interpolate = false: the killer holds still until its next state
     // (client_apply_state starts a new interpolation).
@@ -105,8 +110,28 @@ void menu_view_death_cam(Client *client, const Player *killer) {
 }
 
 void menu_view_reset(void) {
+    g_view.dead = 0;
     g_view.chase = 0;
     g_view.killer_uid = -1; // players.js spawn/reset: isSpectating = false
+}
+
+int menu_view_dead(void) {
+    return g_view.dead;
+}
+
+// CONTROLS.updateMouseInp while dead (not spectating, camRot on): the look turns the rig with the
+// mouse, sensitivity / aim sensitivity / invertY as alive (ui_controls_fill_look), pitch clamped
+// to +-PI/2, yaw wrapped (controls.js xDr). The chase is not switched off by it: CONTROLS.update
+// keeps pulling the rig toward the killer every frame, so the look only stays away while it moves.
+void menu_view_look(Client *client, const float dx, const float dy) {
+    if (!g_view.dead) return;
+    Input look = {0};
+    look.x_dir = g_view.pitch;
+    look.y_dir = g_view.yaw;
+    ui_controls_fill_look(client, &look, dx, dy);
+    input_script_adjust_input(client, &look); // `look` in the input script (tests)
+    g_view.pitch = player_clamp_pitch(look.x_dir);
+    g_view.yaw = player_wrap_yaw(look.y_dir);
 }
 
 int menu_view_killer_uid(void) {
@@ -182,10 +207,10 @@ void menu_view_camera(Client *client, const float delta) {
         return;
     }
 
-    // Dead: the chase camera (CONTROLS.update runs every frame, menu open or not). Without
-    // a killer the camera keeps the death pose.
-    if (!g_view.chase) return;
-    chase_update(ms);
+    // Dead: CONTROLS.update runs every frame (menu open or not): the chase toward the killer when
+    // there is one, then the rig's pose (the mouse look of menu_view_look turns it between frames).
+    if (!g_view.dead) return;
+    if (g_view.chase) chase_update(ms);
     client->camera.position = g_view.position;
     client->camera.rotation = (vec3) {g_view.pitch, g_view.yaw, 0.0f};
 }

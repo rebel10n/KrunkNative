@@ -6,7 +6,8 @@
 //   in game with the menu open (ESC): the player's own view; procInputs keeps running
 //     with the keys reset (CONTROLS.resetKeys on pointer-lock loss)
 //   dead: CONTROLS.camLookAt(killer) in g1() starts the chase camera that
-//     CONTROLS.update(deltaMs) eases every frame until CONTROLS.reset() (next spawn)
+//     CONTROLS.update(deltaMs) eases every frame until CONTROLS.reset() (next spawn); the mouse turns
+//     the rig meanwhile (CONTROLS.updateMouseInp, menu_view_look), with or without a killer
 //   round end while playing/spectating: deltaMs *= endAnimationTimeLeft / config.endAnim
 //     (5 s slow motion, then the world holds still behind the results)
 // Camera/time state only: client/src/menu_view.c. main.c's client_tick_game drives it.
@@ -15,8 +16,13 @@
 // g1() for the local victim: CONTROLS.camLookAt(killer.x, killer.y + killer.height / 1.5, killer.z).
 // NULL killer (suicide, fall): no chase, the camera stays at the death pose.
 void  menu_view_death_cam(Client*, const Player *killer);
-// CONTROLS.reset(): drop the chase target (spawn, new round, spectating).
+// CONTROLS.reset(): drop the death view and the chase target (spawn, new round, spectating).
 void  menu_view_reset(void);
+// The death view is up (menu_view_death_cam ran and no spawn / spectate since): the rig takes the look.
+int   menu_view_dead(void);
+// CONTROLS.updateMouseInp while dead: the mouse turns the death rig (ui_controls_fill_look sensitivity,
+// pitch clamped to +-PI/2). dx / dy are the frame's look deltas, 0 when the pointer is not locked.
+void  menu_view_look(Client*, float dx, float dy);
 // Per frame: the frame delta the world runs at (end-of-round slow motion), in seconds.
 float menu_view_world_delta(Client*, float delta);
 // The current world time scale (endAnimationTimeLeft / endAnim, 1 outside the slow motion):
