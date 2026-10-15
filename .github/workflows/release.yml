@@ -97,13 +97,15 @@ jobs:
           set -euo pipefail
           docker run --rm -v "$PWD/dist/deploy/${{ matrix.codename }}/bin:/b:ro" "debian:${{ matrix.codename }}" bash -c '
             if grep -q bullseye /etc/os-release; then
-              printf "%s\n" "deb http://archive.debian.org/debian bullseye main" > /etc/apt/sources.list
+              # deb.debian.org as a second source: archive.debian.org 404s files mid-sync (deploy/ansible/build.sh)
+              printf "%s\n" "deb http://archive.debian.org/debian bullseye main" "deb http://deb.debian.org/debian bullseye main" > /etc/apt/sources.list
               rm -f /etc/apt/sources.list.d/*
               echo "Acquire::Check-Valid-Until \"false\";" > /etc/apt/apt.conf.d/99archive
               ssl=libssl1.1
             else
               ssl=libssl3
             fi
+            echo "Acquire::Retries \"5\";" > /etc/apt/apt.conf.d/80retries
             apt-get update -qq > /dev/null
             apt-get install -y -qq --no-install-recommends libcurl4 "$ssl" libcrypt1 ca-certificates > /dev/null
             /b/server_bin --version'
