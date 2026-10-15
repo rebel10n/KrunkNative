@@ -353,8 +353,6 @@
  "kn.servers.hiddenRegion": "Hidden Region",
  "kn.servers.incompatible": "Incompatible",
  "kn.servers.incompatibleTitle": "Protocol {0}: this client speaks {1}",
- "kn.servers.kioGroupBrowser": "Official krunker.io games: a lobby opens in your browser",
- "kn.servers.kioGroupJoin": "Official krunker.io games: pick a lobby to join it here",
  "kn.servers.kioJoinHere": "official lobbies: pick one to join it here as a guest.",
  "kn.servers.kioLoading": "Loading the official krunker.io lobbies...",
  "kn.servers.kioNoMatch": "No official lobby matches the search or filter.",

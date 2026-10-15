@@ -96,6 +96,8 @@ static int g_last_direct;        // the last session was a direct one: `reconnec
 static int g_left_offline;       // `disconnect` left the offline game: `reconnect` starts it again
 static int g_quick_join_left;    // quickJoinRegion: remaining candidates
 static char **g_quick_join;      // candidate game ids
+static int *g_quick_join_kio;    // per candidate: an official krunker.io lobby (krunker_lobbies_open)
+static int g_quick_join_kio_group; // the group quick-joined is a krunker.io group (no seek fallback)
 static int g_quick_join_count, g_quick_join_next;
 
 // Rejoining after the server went away, refused the join key or the transport lost the session
@@ -1358,8 +1360,14 @@ static int cmp_groups_order(const void *a, const void *b) {
     const int d = (y->order ? y->order : -1) - (x->order ? x->order : -1);
     return d ? d : x->region_rank - y->region_rank; // qsort is not stable: insertion order breaks ties
 }
+// The top groups of both browsers: Official Customs, then Custom Games (oldBrowser's order)
+static int group_top(const ServerGroup *g) {
+    return !strcmp(g->key, "official") ? 1 : !strcmp(g->key, "custom") ? 2 : 0;
+}
 static int cmp_groups_players(const void *a, const void *b) {
     const ServerGroup *x = a, *y = b;
+    const int tx = group_top(x), ty = group_top(y);
+    if (tx || ty) return tx && ty ? tx - ty : ty ? 1 : -1; // official and custom first
     const int kx = !strncmp(x->key, "kio:", 4), ky = !strncmp(y->key, "kio:", 4);
     if (kx != ky) return kx - ky; // krunker.io's groups after ours (mm-token)
     if (y->players != x->players) return y->players > x->players ? 1 : -1;
@@ -1413,9 +1421,10 @@ static int build_groups(ServerGroup *groups, const int max) {
             cJSON_ArrayForEach(t, lists[l]) {
                 const char *region = tuple_str(t, 1);
                 if (!meta_of(t) || (filter && !row_prefs_match(t))) continue;
-                if (row_krunker(t)) { // official lobbies: one group per Krunker region, after ours
+                if (row_krunker(t)) { // official customs and custom games: the top groups; the other official lobbies: one group per Krunker region, after ours
                     char key[32];
-                    snprintf(key, sizeof(key), "kio:%s", region);
+                    if (row_official(t) || row_custom(t)) snprintf(key, sizeof(key), "%s", row_official(t) ? "official" : "custom");
+                    else snprintf(key, sizeof(key), "kio:%s", region);
                     int gi = find_group(groups, count, key);
                     if (gi < 0 && count < max) {
                         ServerGroup *g = &groups[count];
@@ -1456,6 +1465,13 @@ static int build_groups(ServerGroup *groups, const int max) {
         }
         return count;
     }
+    // the top groups, as oldBrowser's: official customs and custom games, whatever their mode
+    snprintf(groups[0].key, sizeof(groups[0].key), "official");
+    snprintf(groups[0].name, sizeof(groups[0].name), "Official Customs");
+    snprintf(groups[1].key, sizeof(groups[1].key), "custom");
+    snprintf(groups[1].name, sizeof(groups[1].name), "Custom Games");
+    groups[1].region_rank = 1;
+    count = 2;
     // the mode groups (gameModes order); tab 0 = Official Servers (no customs), 1 = Custom Servers
     int modes = 0;
     const GameModeConfig *list = mode_list(&modes);
@@ -1474,7 +1490,11 @@ static int build_groups(ServerGroup *groups, const int max) {
             if (!row_krunker(t) && only_default && strcmp(def, tuple_str(t, 1))) continue;
             if ((g_server_tab == 0 && custom) || (g_server_tab == 1 && !custom)) continue;
             int gi;
-            if (row_krunker(t)) { // official lobbies: their own mode groups
+            if (row_official(t)) { // official customs: the top group
+                gi = find_group(groups, count, "official");
+            } else if (custom) { // custom games, ours and krunker.io's: the top group
+                gi = find_group(groups, count, "custom");
+            } else if (row_krunker(t)) { // official lobbies: their own mode groups
                 char key[32];
                 snprintf(key, sizeof(key), "kio:%s", row_alias(t));
                 gi = find_group(groups, count, key);
@@ -1637,6 +1657,14 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
 
 static void append_krunker_status(StrBuf *sb, int groups);
 
+// a group holds an official krunker.io lobby (the top groups too: official customs, custom games)
+static int group_has_krunker(const ServerGroup *g) {
+    for (int i = 0; i < g->game_count; i++) {
+        if (row_krunker(g->games[i])) return 1;
+    }
+    return 0;
+}
+
 static char *get_servers(void) {
     static ServerGroup groups[SERVER_GROUPS_MAX];
     const int count = build_groups(groups, SERVER_GROUPS_MAX);
@@ -1647,7 +1675,7 @@ static char *get_servers(void) {
     default_region(def, sizeof(def));
     StrBuf sb = {0};
     int kio_groups = 0, kio_status = 0;
-    for (int h = 0; h < count; h++) kio_groups += !strncmp(groups[h].key, "kio:", 4);
+    for (int h = 0; h < count; h++) kio_groups += group_has_krunker(&groups[h]);
     for (int h = 0; h < count; h++) {
         const ServerGroup *g = &groups[h];
         const int open = g_expanded == h;
@@ -1663,15 +1691,9 @@ static char *get_servers(void) {
         }
         sb_appendf(&sb, "><span class='material-icons plusOrMinus'>%s</span> ", open ? "expand_more" : "navigate_next");
         sb_append_esc(&sb, g->name);
-        const int kio = !strncmp(g->key, "kio:", 4); // official krunker.io lobbies: no Quick Join here
         sb_appendf(&sb, "<span style='float:right;color:rgba(255,255,255,0.9)'>%.0f <span style='color:rgba(255,255,255,0.6)'>online</span></span>", g->players);
-        if (kio) {
-            sb_append(&sb, "<div class='quickJoin' style='opacity:0.6' title='");
-            sb_append_esc(&sb, krunker_net_in_client() ? I18N("kn.servers.kioGroupJoin", "Official krunker.io games: pick a lobby to join it here")
-                                                       : I18N("kn.servers.kioGroupBrowser", "Official krunker.io games: a lobby opens in your browser"));
-            sb_append(&sb, "'>krunker.io</div></div>");
-        }
-        else sb_appendf(&sb, "<div class='quickJoin' onclick='quickJoinRegion(%d,%d)'>Quick Join</div></div>", h, old ? 0 : 1);
+        // krunker.io groups too: the first joinable lobby (servers_quick_join_next)
+        sb_appendf(&sb, "<div class='quickJoin' onclick='quickJoinRegion(%d,%d)'>Quick Join</div></div>", h, old ? 0 : 1);
         if (!open) continue;
         sb_append(&sb, "<div class='setBodH' style='padding-top:10px;padding-bottom:10px;'>");
         int shown = 0, kept = 0;
@@ -2334,11 +2356,25 @@ static void servers_timer_tick(void) {
     }
 }
 
-// quickJoinRegion(i): switchGame on the first joinable candidates (getServers(i))
+// the recent rank of quick join candidate i: a krunker.io lobby's own list (krunker_net.h)
+static int quick_join_rank(const int i) {
+    return g_quick_join_kio[i] ? krunker_net_recent_rank(g_quick_join[i]) : recent_lobbies_rank(&g_recent_games, g_quick_join[i]);
+}
+
+// quickJoinRegion(i): switchGame on the first joinable candidates (getServers(i)); a krunker.io
+// candidate is joined through krunker_lobbies_open (in-client, or the browser), never seek()
 void servers_quick_join_next(void) {
     while (g_quick_join_next < g_quick_join_count && g_quick_join_left > 0) {
+        const int kio = g_quick_join_kio[g_quick_join_next];
         const char *id = g_quick_join[g_quick_join_next++];
         g_quick_join_left--;
+        if (kio) { // an official krunker.io lobby: krunker_lobbies_open joins it in-client, or opens it in the browser
+            const char *playing = krunker_net_game();
+            if (playing[0] && !strcmp(id, playing)) continue; // the lobby it is in: no rejoin
+            g_quick_join_left = 0;
+            krunker_lobbies_open(id);
+            return;
+        }
         if (g_game_id[0] && !strcmp(id, g_game_id)) continue;
 #ifdef __EMSCRIPTEN__
         switch_server(id); // reloads the page: only the first candidate matters
@@ -2349,6 +2385,7 @@ void servers_quick_join_next(void) {
 #endif
     }
     g_quick_join_left = 0;
+    if (g_quick_join_kio_group) ui_notify(I18N("windows.servers.none", "No Joinable Games Found..."));
 }
 
 static void quick_join_region(const int index) {
@@ -2356,21 +2393,25 @@ static void quick_join_region(const int index) {
     const int count = build_groups(groups, SERVER_GROUPS_MAX);
     for (int i = 0; i < g_quick_join_count; i++) free(g_quick_join[i]);
     free(g_quick_join);
+    free(g_quick_join_kio);
     g_quick_join = NULL;
+    g_quick_join_kio = NULL;
     g_quick_join_count = g_quick_join_next = 0;
-    if (index < 0 || index >= count || !strncmp(groups[index].key, "kio:", 4)) return; // krunker.io groups: no Quick Join (a row joins its own lobby)
+    if (index < 0 || index >= count) return;
     const ServerGroup *g = &groups[index];
+    g_quick_join_kio_group = !strncmp(g->key, "kio:", 4);
     g_quick_join = calloc((size_t) g->game_count + 1, sizeof(char *));
+    g_quick_join_kio = calloc((size_t) g->game_count + 1, sizeof(int));
     int brain_rows = 0;
     // the fullest joinable finder-only server (rows are sorted), one this client was not in lately
     // first (recent_lobbies.h)
     const cJSON *finder_pick = NULL;
     int finder_pick_rank = 0;
-    for (int i = 0; g_quick_join && i < g->game_count; i++) {
+    for (int i = 0; g_quick_join && g_quick_join_kio && i < g->game_count; i++) {
         const cJSON *t = g->games[i];
         const int players = row_players(t), max_players = tuple_int(t, 3);
         if (g_search[0] && !search_matches(t)) continue;
-        if (!meta_flag(t, "finder")) brain_rows++;
+        if (!meta_flag(t, "finder") && !row_krunker(t)) brain_rows++;
         if (meta_flag(t, "finder")) {
             const cJSON *meta = cJSON_GetArrayItem(t, 4);
             const char *host = cJSON_GetStringValue(cJSON_GetObjectItem(meta, "host"));
@@ -2385,22 +2426,40 @@ static void quick_join_region(const int index) {
             continue;
         }
         if (!(players < max_players && players > 0)) continue; // regionID.games.filter(p < max && p > 0)
+        const int krunker = row_krunker(t);
+        if (krunker && meta_flag(t, "pw")) continue; // a password lobby is not joinable from the list
         const cJSON *id = cJSON_GetArrayItem(t, 0);
-        if (cJSON_IsString(id)) g_quick_join[g_quick_join_count++] = strdup(id->valuestring);
+        if (cJSON_IsString(id)) {
+            g_quick_join_kio[g_quick_join_count] = krunker;
+            g_quick_join[g_quick_join_count++] = strdup(id->valuestring);
+        }
     }
     // lobbies this client was in lately go last, the older ones before the newer (a stable reorder:
     // the list's order otherwise); the one it is in is skipped by servers_quick_join_next
-    for (int rank = RECENT_LOBBIES_MAX; rank >= 1 && g_quick_join; rank--) {
+    for (int rank = RECENT_LOBBIES_MAX; rank >= 1 && g_quick_join && g_quick_join_kio; rank--) {
         for (int i = 0, moved = 0; i + moved < g_quick_join_count;) {
-            if (recent_lobbies_rank(&g_recent_games, g_quick_join[i]) != rank) {
+            if (quick_join_rank(i) != rank) {
                 i++;
                 continue;
             }
             char *id = g_quick_join[i];
+            const int kio = g_quick_join_kio[i];
             memmove(&g_quick_join[i], &g_quick_join[i + 1], sizeof(char *) * (size_t) (g_quick_join_count - i - 1));
+            memmove(&g_quick_join_kio[i], &g_quick_join_kio[i + 1], sizeof(int) * (size_t) (g_quick_join_count - i - 1));
             g_quick_join[g_quick_join_count - 1] = id;
+            g_quick_join_kio[g_quick_join_count - 1] = kio;
             moved++;
         }
+    }
+    if (g_quick_join_kio_group) { // official krunker.io lobbies: the first joinable one (servers_quick_join_next)
+        if (!g_quick_join_count) {
+            ui_notify(I18N("windows.servers.none", "No Joinable Games Found..."));
+            return;
+        }
+        g_quick_join_left = 10;
+        menu_show_window(MENU_WINDOW_NONE, 0);
+        servers_quick_join_next();
+        return;
     }
     if (!g_quick_join_count && finder_pick && !(brain_rows && backend_available() == 1 && strcmp(g->key, "custom"))) {
         // a region only finder-listed servers run in (or no brain): join the best one directly
