@@ -1436,13 +1436,13 @@ static void register_commands(void) {
     register_local("alias", ARGS(A_ALIAS), "define a command alias", cmd_alias);
     register_local("exec", ARGS(A_COMMANDS), "run multiple commands separated by ;", cmd_exec);
     register_local("connect", ARGS(A_HOSTNAME), "seek and connect through a matchmaker hostname", cmd_connect);
-    register_local("disconnect", NO_ARGS, "disconnect and stay in the menu", cmd_disconnect);
+    register_local("disconnect", NO_ARGS, "disconnect and reset to default endpoints", cmd_disconnect);
     register_local("quit", NO_ARGS, "close the window", cmd_quit);
     register_local("reconnect", NO_ARGS, "reconnect to the last server", cmd_reconnect);
     register_local("logout", NO_ARGS, "log out of your account (the menu's Logout)", cmd_logout);
     register_local("reload", NO_ARGS, "full reload in place (F5 relaunches): settings, binds, textures, models, sounds, shaders, menu; then rejoin", cmd_reload);
     register_local("console_reset", NO_ARGS, "put the console back at its default place and size", cmd_console_reset);
-    register_local("offline", ARGS(A_MAP_OPT), "switch to offline mode (the in-process server), optionally on a map", cmd_offline);
+    register_local("offline", ARGS(A_MAP_OPT), "switch to offline mode", cmd_offline);
     register_local("sandbox", NO_ARGS, "play offline on the sandbox (editor test) map", cmd_sandbox);
     register_local("ahk", NO_ARGS, "show current antihack key", cmd_ahk);
     register_local("version", NO_ARGS, "show current client version", cmd_version);
@@ -1465,13 +1465,13 @@ static void register_commands(void) {
     register_local("netinfo", NO_ARGS, "show the game transport (WebRTC/WebSocket, UDP/TCP) and its state", cmd_netinfo);
     register_local("show_navmeshes", ARGS(A_NAV_OFF), "visualize generated source-style nav meshes in 3D (off to clear)", cmd_show_navmeshes);
     // Server commands (mirror server/packetHandlers.ts cmds table)
-    register_server("god", ARGS(A_TOGGLE), "toggle god mode (self, target or selector: * @bots @team Joel*)");
+    register_server("god", ARGS(A_TOGGLE), "toggle god mode (self or target)");
     register_server("ungod", ARGS(A_TARGET), "turn god mode off (self, target or selector)");
-    register_server("noclip", ARGS(A_TOGGLE), "toggle noclip (self, target or selector)");
-    register_server("smite", ARGS(A_TOGGLE), "toggle smite-on-hit (self, target or selector)");
+    register_server("noclip", ARGS(A_TOGGLE), "toggle noclip (self or target)");
+    register_server("smite", ARGS(A_TOGGLE), "toggle smite-on-hit (self or target)");
     register_server("notarget", ARGS(A_TOGGLE), "toggle notarget: bots and AIs ignore you (self, target or selector)");
-    register_server("forcehide", ARGS(A_TOGGLE), "toggle forcehide (self, target or selector)");
-    register_server("unlimitedammo", ARGS(A_TOGGLE), "toggle unlimited ammo (self, target or selector)");
+    register_server("forcehide", ARGS(A_TOGGLE), "toggle forcehide (self or target)");
+    register_server("unlimitedammo", ARGS(A_TOGGLE), "toggle unlimited ammo (self or target)");
     register_server("c", NO_ARGS, "show connected players and menu count");
     register_server("count", NO_ARGS, "alias for /c (show connected players and menu count)");
     register_server("ping", ARGS(A_NAME_ID), "show your ping (devs can target players)");
