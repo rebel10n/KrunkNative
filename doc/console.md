@@ -314,6 +314,15 @@ sometimes forgets the crouch so the landing does not slide, hesitates, skips lan
 normal 30% none / 35% learning / 35% clean; hard 15% learning / 85% clean; max all clean. The
 safety checks apply to every skill.
 
+## Build load fixture (Krunker Box Office `build_fill`)
+
+`build_fill [count] [kind]` (`CHAT_PERM_HOST_DEV`, like `tp`) places `count` player builds
+(default 100, at most 2000; the 1200 `config.buildMax` cap still applies) of `BUILD_OBJS` kind
+0-3 (default 0, the Build Block) through `game_build_object`, the Build Tool's own server path:
+every client gets the "bo" packets. They stack in layers of 10 x 10 starting 30 units along +x
+of your feet and cost no score. Reply: "Built N Build Blocks (M builds)." / "Spawn first.". It is
+a load fixture for placement and frame-time tests (`client/tests/build_place_e2e.py`).
+
 ## Teleports (Krunker Box Office `tp` / `bring`)
 
 v3.1.1 has only the `tp` packet (the mod's Ctrl TP: a camera-ray hit). v7.1.4's admin menu

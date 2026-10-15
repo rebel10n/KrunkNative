@@ -20,6 +20,7 @@
 #include <nettspend.h> // the Drank's cup / the Money Spread's cash stack as pickups
 #include <math.h>
 #include <pcg_basic.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -354,6 +355,63 @@ static void post_track_meshes(const Map *map) {
     }
 }
 
+// ---- an open-addressing index from an Object pointer to its entry in one of the arrays below
+// (builds, spawned objects), so a frame looks each object up in O(1) instead of scanning the
+// array per object (O(n^2) with a thousand builds). A slot holds entry index + 1 (0 empty); the
+// arrays swap-remove, so a removal marks the index dirty and the next lookup rebuilds it.
+typedef struct {
+    uint32_t *slots;
+    size_t mask;   // capacity - 1 (a power of two), 0 = no table yet
+    int dirty;
+} PostIndex;
+
+static size_t post_index_hash(const void *key, const size_t mask) {
+    uint64_t h = (uint64_t) (uintptr_t) key;
+    h ^= h >> 33;
+    h *= 0xff51afd7ed558ccdull;
+    h ^= h >> 33;
+    return (size_t) h & mask;
+}
+
+static void post_index_free(PostIndex *index) {
+    free(index->slots);
+    *index = (PostIndex) {0};
+}
+
+static void post_index_put(PostIndex *index, const void *key, const size_t entry) {
+    size_t h = post_index_hash(key, index->mask);
+    while (index->slots[h]) h = (h + 1) & index->mask;
+    index->slots[h] = (uint32_t) (entry + 1);
+}
+
+// Entry `count - 1` (just appended, under `key`) joins the index, or the next lookup rebuilds it
+static void post_index_added(PostIndex *index, const void *key, const size_t count) {
+    if (!index->dirty && index->mask && count * 2 <= index->mask + 1) post_index_put(index, key, count - 1);
+    else index->dirty = 1;
+}
+
+// Rebuilt for `count` entries (keys read through key_of) when dirty or more than half full with one
+// more: 0 when out of memory (callers fall back to a scan).
+static int post_index_ready(PostIndex *index, const size_t count, const void *(*key_of)(size_t)) {
+    if (!index->dirty && index->mask && (count + 1) * 2 <= index->mask + 1) return 1;
+    size_t cap = 64;
+    while (cap < (count + 1) * 2) cap *= 2;
+    if (cap != index->mask + 1 || !index->slots) {
+        uint32_t *slots = malloc(cap * sizeof(uint32_t));
+        if (!slots) {
+            post_index_free(index);
+            return 0;
+        }
+        free(index->slots);
+        index->slots = slots;
+        index->mask = cap - 1;
+    }
+    memset(index->slots, 0, cap * sizeof(uint32_t));
+    for (size_t i = 0; i < count; i++) post_index_put(index, key_of(i), i);
+    index->dirty = 0;
+    return 1;
+}
+
 // ---- player builds (shared/src/build.c): their meshes live here, keyed by the Object (build.c
 // frees Objects on removeBuilds / replacement without a scene) plus its build index and position
 typedef struct {
@@ -367,6 +425,9 @@ typedef struct {
 static BuildMesh *g_builds;
 static size_t g_build_count;
 static Scene *g_build_scene;
+static PostIndex g_build_index;
+
+static const void *post_build_key(const size_t i) { return g_builds[i].object; }
 
 static void post_builds_clear(void) {
     for (size_t i = 0; i < g_build_count; i++) {
@@ -377,8 +438,33 @@ static void post_builds_clear(void) {
     g_builds = NULL;
     g_build_count = 0;
     g_build_scene = NULL;
+    post_index_free(&g_build_index);
 }
 
+static int post_build_matches(const BuildMesh *b, const Object *object) {
+    return b->object == object && b->build_index == object->build_index && b->position.x == object->position.x &&
+           b->position.y == object->position.y && b->position.z == object->position.z;
+}
+
+// The entry of a build: same Object, build index and position (a freed Object's address can come
+// back for another build); NULL = none
+static BuildMesh *post_build_find(const Object *object) {
+    if (post_index_ready(&g_build_index, g_build_count, post_build_key)) {
+        for (size_t h = post_index_hash(object, g_build_index.mask); g_build_index.slots[h]; h = (h + 1) & g_build_index.mask) {
+            BuildMesh *b = &g_builds[g_build_index.slots[h] - 1];
+            if (post_build_matches(b, object)) return b;
+        }
+        return NULL;
+    }
+    for (size_t k = 0; k < g_build_count; k++) {
+        if (post_build_matches(&g_builds[k], object)) return &g_builds[k];
+    }
+    return NULL;
+}
+
+// Every frame: a mesh for each build (a new one when a build is new or was replaced at its uid),
+// shown while the build stands; the meshes of builds that are gone leave the scene. Linear in the
+// map's objects (the index above), whatever the number of builds.
 static void post_builds_frame(Scene *scene, const Map *map) {
     if (!scene || !map) return;
     if (g_build_scene && g_build_scene != scene) post_builds_clear();
@@ -387,15 +473,7 @@ static void post_builds_frame(Scene *scene, const Map *map) {
     for (size_t i = 0; i < map->object_count; i++) {
         const Object *object = map->objects[i];
         if (!object->dynamic) continue;
-        BuildMesh *entry = NULL;
-        for (size_t k = 0; k < g_build_count; k++) {
-            BuildMesh *b = &g_builds[k];
-            if (b->object == object && b->build_index == object->build_index && b->position.x == object->position.x &&
-                b->position.y == object->position.y && b->position.z == object->position.z) {
-                entry = b;
-                break;
-            }
-        }
+        BuildMesh *entry = post_build_find(object);
         if (!entry) {
             Mesh *mesh = prefab_build_dynamic(object);
             if (!mesh) continue;
@@ -407,6 +485,7 @@ static void post_builds_frame(Scene *scene, const Map *map) {
             g_builds = grown;
             entry = &g_builds[g_build_count++];
             *entry = (BuildMesh) {object, object->build_index, object->position, mesh, 0};
+            post_index_added(&g_build_index, object, g_build_count);
             scene_add_mesh(scene, mesh);
         }
         entry->seen = 1;
@@ -420,7 +499,15 @@ static void post_builds_frame(Scene *scene, const Map *map) {
         scene_remove_mesh(scene, g_builds[k].mesh);
         mesh_fini(g_builds[k].mesh);
         g_builds[k] = g_builds[--g_build_count];
+        g_build_index.dirty = 1;
     }
+}
+
+int map_post_build_meshes(int *visible) {
+    int shown = 0;
+    for (size_t i = 0; i < g_build_count; i++) shown += g_builds[i].mesh->visible ? 1 : 0;
+    if (visible) *visible = shown;
+    return (int) g_build_count;
 }
 
 // ---- weapon pickups (MapManager.addWeapon mesh, game.resetPickups / updatePickup): one mesh per
@@ -511,12 +598,24 @@ static SpawnedMesh *g_spawned;
 static size_t g_spawned_count;
 static Scene *g_spawned_scene;
 
+static PostIndex g_spawned_index; // object -> g_spawned entry (PostIndex above)
+
+static const void *post_spawned_key(const size_t i) { return g_spawned[i].object; }
+
 static SpawnedMesh *post_spawned_find(const Object *object) {
+    if (post_index_ready(&g_spawned_index, g_spawned_count, post_spawned_key)) {
+        for (size_t h = post_index_hash(object, g_spawned_index.mask); g_spawned_index.slots[h]; h = (h + 1) & g_spawned_index.mask) {
+            SpawnedMesh *entry = &g_spawned[g_spawned_index.slots[h] - 1];
+            if (entry->object == object) return entry;
+        }
+        return NULL;
+    }
     for (size_t i = 0; i < g_spawned_count; i++) {
         if (g_spawned[i].object == object) return &g_spawned[i];
     }
     return NULL;
 }
+
 
 // Object Manager map edits changed what stands in the map: the shadow casters and the light
 // objects are rebuilt on the next frame (map_post_frame)
@@ -542,6 +641,7 @@ static void post_spawned_frame(Scene *scene, const Map *map) {
             g_spawned = grown;
             entry = &g_spawned[g_spawned_count++];
             *entry = (SpawnedMesh) {object, 0};
+            post_index_added(&g_spawned_index, object, g_spawned_count);
             if (object->map_edit) g_map_edits_dirty = 1;
             if (object->mesh) {
                 scene_add_mesh(scene, object->mesh);
@@ -559,12 +659,22 @@ static void post_spawned_frame(Scene *scene, const Map *map) {
     }
 }
 
+int map_post_spawned_meshes(void) {
+    int shown = 0;
+    for (size_t i = 0; i < g_spawned_count; i++) {
+        const Mesh *mesh = g_spawned[i].object->mesh;
+        shown += g_spawned[i].in_scene && mesh && mesh->visible;
+    }
+    return shown;
+}
+
 void map_post_object_freed(const Object *object) {
     if (object->map_edit) g_map_edits_dirty = 1;
     for (size_t i = 0; i < g_spawned_count; i++) {
         if (g_spawned[i].object != object) continue;
         if (g_spawned[i].in_scene && g_spawned_scene && object->mesh) scene_remove_mesh(g_spawned_scene, object->mesh);
         g_spawned[i] = g_spawned[--g_spawned_count];
+        g_spawned_index.dirty = 1;
         break;
     }
     for (size_t i = 0; i < g_pickup_count; i++) {
@@ -637,6 +747,7 @@ static void post_spawned_load(Scene *scene, const Map *map) {
         if (!grown) break;
         g_spawned = grown;
         g_spawned[g_spawned_count++] = (SpawnedMesh) {object, object->mesh != NULL};
+        post_index_added(&g_spawned_index, object, g_spawned_count);
     }
 }
 
@@ -644,6 +755,7 @@ static void post_spawned_unload(void) {
     free(g_spawned);
     g_spawned = NULL;
     g_spawned_count = 0;
+    post_index_free(&g_spawned_index);
     g_spawned_scene = NULL;
     free(g_detached); // (client_unload_map restored the map edits first)
     g_detached = NULL;

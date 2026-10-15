@@ -363,6 +363,9 @@ typedef struct {
     unsigned char tel_checkpoint:1;     // TELEPORTER "tcp" (telCheckPoint): to the player's check point
     unsigned char dynamic:1;            // a player build (game.buildObj): removed by removeBuilds
     int build_index;                    // buildObjs.js index of a build (typeInd; dynamic objects only)
+    // KrunkNative client prediction (build.c world_predict_build): ms this client's own build, shown
+    // ahead of the server's "bo", stays before it gives up on it (the server refused); 0 = a real build
+    float predicted_ms;
     // KrunkNative Object Manager (shared/src/object_manager.c): spawned at run time from a menu
     // record (raw points into the game's ObjectManager records); removed with the builds at round start
     unsigned char spawned:1;
@@ -1919,6 +1922,7 @@ typedef struct {
     int build_count;             // game.buildCount (config.buildMax 1200)
     size_t static_object_count;  // map objects before any build (builds are appended after them)
     unsigned char save_colls:1;  // game.saveColls: some object listens to onEnterObject / onExitObject
+    unsigned char predicted_builds:1; // client: some build may be predicted (Object.predicted_ms, build.c)
 } GameWorld;
 // ---- end WP-B
 

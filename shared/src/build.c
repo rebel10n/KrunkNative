@@ -98,6 +98,46 @@ static Object *build_make(const int build_index, const vec3 feet, const vec3 siz
     return object;
 }
 
+// A destroyed build that only keeps a uid taken (a joiner's gap, a prediction the server refused)
+static void build_make_placeholder(Object *object) {
+    object->active = 0;
+    object->destroyed = 1;
+    object->collision_type = COLLISION_TYPE_NONE;
+    object->predicted_ms = 0.0f;
+    object->position = (vec3) {0.0f, -100000.0f, 0.0f};
+    object->scale = (vec3) {0.0f, 0.0f, 0.0f};
+}
+
+// Client: the local player's build, shown now at the uid the server's "bo" will take (world.h)
+static void build_predict(Game *game, const int build_index, const vec3 feet, const vec3 size, const float direction) {
+    Map *map = game->map;
+    int pending = 0;
+    for (size_t i = 0; i < map->object_count; i++) pending += map->objects[i]->predicted_ms > 0.0f;
+    if (game->world.build_count + pending + 1 >= BUILD_MAX) return; // the server would answer "Build limit reached"
+    Object *object = build_make(build_index, feet, size, direction);
+    if (!object) return;
+    object->predicted_ms = BUILD_PREDICT_MS;
+    if (!build_push(map, object)) {
+        build_free(object);
+        return;
+    }
+    game->world.predicted_builds = 1;
+}
+
+void world_builds_tick(Game *game, const float delta) {
+    Map *map = game->map;
+    if (!game->world.predicted_builds || !map) return;
+    int pending = 0;
+    for (size_t i = 0; i < map->object_count; i++) { // (Object Manager stand-ins may sit between builds)
+        Object *object = map->objects[i];
+        if (object->predicted_ms <= 0.0f) continue;
+        object->predicted_ms -= delta * 1000.0f;
+        if (object->predicted_ms <= 0.0f) build_make_placeholder(object); // never confirmed: the server refused it
+        else pending = 1;
+    }
+    game->world.predicted_builds = (unsigned char) pending;
+}
+
 int game_build_object(Game *game, const int build_index, const vec3 feet, vec3 size, const float direction, const int grounded, Player *player) {
     if (!game->map || build_index < 0 || build_index >= WORLD_BUILD_COUNT) return 0;
     const WorldBuildObject *def = &g_build_objects[build_index];
@@ -144,9 +184,7 @@ void world_apply_build_packet(Game *game, const NetBuildPacket *packet) {
     while (map->object_count < uid) {
         Object *gap = build_make(0, (vec3) {0.0f, -100000.0f, 0.0f}, (vec3) {0.0f, 0.0f, 0.0f}, 0.0f);
         if (!gap) return;
-        gap->active = 0;
-        gap->destroyed = 1;
-        gap->collision_type = COLLISION_TYPE_NONE;
+        build_make_placeholder(gap);
         if (!build_push(map, gap)) {
             build_free(gap);
             return;
@@ -156,7 +194,7 @@ void world_apply_build_packet(Game *game, const NetBuildPacket *packet) {
     const vec3 size = {packet->size[0], packet->size[1], packet->size[2]};
     Object *object = build_make(packet->build_index, feet, size, (float) packet->direction * (float) M_PI / 2.0f);
     if (!object) return;
-    if (uid < map->object_count) { // a placeholder (or a stale build) at that uid
+    if (uid < map->object_count) { // a placeholder, our prediction (or a stale build) at that uid
         if (map->objects[uid]->spawned) map_object_free(map->objects[uid]); // a stale Object Manager object
         else build_free(map->objects[uid]);
         map->objects[uid] = object;
@@ -165,6 +203,16 @@ void world_apply_build_packet(Game *game, const NetBuildPacket *packet) {
         return;
     }
     game->world.build_count++;
+    // KrunkNative prediction: this is a build we predicted at another uid (one of ours the server
+    // refused took the uid it expected): that copy gives way now
+    for (size_t i = 0; game->world.predicted_builds && i < map->object_count; i++) {
+        Object *other = map->objects[i];
+        if (i == uid || other->predicted_ms <= 0.0f || other->build_index != object->build_index) continue;
+        if (fabsf(other->position.x - feet.x) < 0.01f && fabsf(other->position.y - feet.y) < 0.01f && fabsf(other->position.z - feet.z) < 0.01f) {
+            build_make_placeholder(other);
+            break;
+        }
+    }
 }
 
 // game.removeBuilds: every dynamic object goes, buildCount = 0. KrunkNative: the Object Manager's
@@ -193,9 +241,7 @@ int world_put_object(Game *game, const size_t uid, Object *object) {
     while (map->object_count < uid) {
         Object *gap = build_make(0, (vec3) {0.0f, -100000.0f, 0.0f}, (vec3) {0.0f, 0.0f, 0.0f}, 0.0f);
         if (!gap) return 0;
-        gap->active = 0;
-        gap->destroyed = 1;
-        gap->collision_type = COLLISION_TYPE_NONE;
+        build_make_placeholder(gap);
         if (!build_push(map, gap)) {
             build_free(gap);
             return 0;
@@ -203,7 +249,8 @@ int world_put_object(Game *game, const size_t uid, Object *object) {
     }
     if (uid < map->object_count) {
         Object *old = map->objects[uid];
-        if (!old->dynamic || !old->destroyed) return 0; // only a placeholder gives way
+        // only a placeholder gives way, or a build we predicted there (the server gave the uid to this)
+        if (!old->dynamic || (!old->destroyed && old->predicted_ms <= 0.0f)) return 0;
         build_free(old);
         map->objects[uid] = object;
         return 1;
@@ -570,6 +617,11 @@ int player_build(Player *player, const int place) {
         if (player->reloads && player->loadout_index >= 0) player->reloads[player->loadout_index] = player->weapon->rate;
         player->did_shoot = 1;
         player->did_act = 1;
+    }
+    if (!authority && place && can && player->is_you) {
+        // KrunkNative: the local player's build shows at once, not a round trip and a server tick later
+        build_predict(game, bi, (vec3) {(float) hx, (float) hy, (float) hz}, (vec3) {(float) w, (float) h, (float) l}, (float) dir);
+        return 0;
     }
     if (!authority || !can) return 0;
     if (!game_build_object(game, bi, (vec3) {(float) hx, (float) hy, (float) hz}, (vec3) {(float) w, (float) h, (float) l}, (float) dir, 0, player)) return 0;

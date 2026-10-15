@@ -77,6 +77,14 @@ void world_apply_build_packet(Game*, const NetBuildPacket*); // client: "bo" / s
 void world_remove_builds(Game*);                             // game.removeBuilds (finishInit)
 int world_put_object(Game*, size_t uid, Object *object);     // KrunkNative Object Manager (client): object at the server uid
 void world_send_builds(Game*, int uid);                      // syncData.dyno for a joiner
+// KrunkNative client prediction of the local player's builds: player_build on a client puts the
+// build it placed into the map at once (Object.predicted_ms), at the uid the server is expected to
+// give it; the server's "bo" replaces it there (world_apply_build_packet, which also drops a
+// prediction of the same build at another uid). One the server never confirms (it refused: score,
+// the cap, a different hit) turns into a destroyed placeholder after BUILD_PREDICT_MS, so the uids
+// stay aligned. world_builds_tick (game_tick_world, clients) runs that clock (delta in seconds).
+#define BUILD_PREDICT_MS 1500.0f
+void world_builds_tick(Game*, float delta);
 // The Build Tool (players.build / procInputs selectBuild), for the weapon code: holding aim picks
 // Player.build_index from the look delta (radians this input); firing calls player_build(place):
 // the ray to the nearest object / terrain, the face, buildSnap of a build target, the overlap test,

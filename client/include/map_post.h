@@ -18,6 +18,11 @@ void map_post_object_freed(const Object *object);
 // shadow map and the light objects follow on the next frame.
 void map_post_object_detach(const Object *object, int uid);
 void map_post_object_attach(const Object *object, int uid);
+// Tests (input_script `builds` / `placewatch`): the player builds that have a mesh in the scene,
+// and how many of those are shown this frame (*visible, may be NULL).
+int map_post_build_meshes(int *visible);
+// Tests (input_script `builds`): the Object Manager objects whose meshes are in the scene and shown
+int map_post_spawned_meshes(void);
 Mesh *prefab_build_dynamic(const Object *object); // prefab.c: the mesh of a player build (caller owns it)
 Mesh *prefab_pickup_mesh(int weapon_id, int no_texture, float *scale); // prefab.c: a weapon pickup's model (caller owns it)
 Mesh *prefab_weapon_mesh(const Weapon *weapon, int no_texture);   // prefab.c: a weapon's model, unposed (caller owns it)

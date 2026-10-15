@@ -746,6 +746,7 @@ void game_tick_world(Game *game, const float now, const float delta, const float
 
     const int authority = game_is_authority(game);
     int next_round = 0;
+    if (!authority) world_builds_tick(game, delta); // KrunkNative: predicted builds the server never confirmed give way (build.c)
 
     if (authority) {
         next_round = game_tick_round(game, delta);

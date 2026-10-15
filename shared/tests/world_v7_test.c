@@ -536,6 +536,120 @@ static void test_zones(void) {
     cJSON_Delete(json);
 }
 
+// ---------------------------------------------------------------- build prediction (KrunkNative)
+
+// A client mirror of the authority's map: the Build Tool on the client shows the local player's
+// build at once (Object.predicted_ms) at the uid the server gives it; the server's "bo" replaces
+// it there; one the server never confirms becomes a placeholder; stand on a predicted block.
+static void test_build_prediction(void) {
+    printf("Running build prediction test...\n");
+    cJSON *json = load_map("shared/tests/maps/v7_zones.json");
+    Game game, client;
+    game_on(&game, json, MODE_ID_BHOP);
+    game_on(&client, json, MODE_ID_BHOP);
+    client.is_local = 0; // a client: not the authority, "bo" from the server
+    client.server = NULL;
+    CHECK(game.ready && client.ready && !game_is_authority(&client), "an authority and a client game");
+    if (!game.ready || !client.ready) return;
+    Player *ps = add_player(&game, 1, 0), *pc = add_player(&client, 1, 0);
+    pc->is_you = 1;
+    const size_t base = game.map->object_count;
+    CHECK(client.map->object_count == base, "the same map objects");
+    Player *both[2] = {ps, pc};
+    for (int i = 0; i < 2; i++) {
+        place(both[i], 300.0f, 0.0f, 300.0f);
+        both[i]->score = 100;
+        both[i]->build_index = 0;
+        both[i]->select_build = 0;
+        both[i]->direction = (vec2) {-1.2f, 0.0f};
+    }
+
+    // 1. the client places: no round trip, the block is in its map at once, at the next uid
+    CHECK(!player_build(pc, 1), "client player_build: not the authority's build");
+    CHECK(client.map->object_count == base + 1, "the predicted block is in the client's map (%zu objects)", client.map->object_count);
+    if (client.map->object_count != base + 1) return;
+    Object *predicted = client.map->objects[base];
+    CHECK(predicted->dynamic && predicted->active && predicted->predicted_ms > 0.0f && predicted->collision_type == COLLISION_TYPE_BOX &&
+          !client.world.build_count && client.world.predicted_builds, "predicted: active, solid, not counted yet");
+    const vec3 at = predicted->position;
+
+    // 2. it collides: standing on top of it, the client player stays there
+    place(pc, at.x, at.y + 10.5f, at.z);
+    for (int i = 0; i < 30; i++) frame(pc, 0);
+    CHECK(near(pc->position.y, at.y + 10.0f, 0.05f) && pc->on_ground, "stands on the predicted block (y %.2f, top %.2f)", pc->position.y, at.y + 10.0f);
+
+    // 3. the server's "bo" (same input on the authority) replaces it at its uid
+    g_sent_count = 0;
+    CHECK(player_build(ps, 1) && game.map->object_count == base + 1, "the authority builds it");
+    const Sent *bo = find_sent(NET_PACKET_BUILD, 0);
+    CHECK(bo && ((const NetBuildPacket *) bo->payload)->uid == (int32_t) base, "\"bo\" at the predicted uid");
+    if (bo) world_apply_build_packet(&client, (const NetBuildPacket *) bo->payload);
+    const Object *real = client.map->objects[base];
+    CHECK(client.map->object_count == base + 1 && real->predicted_ms == 0.0f && real->active && client.world.build_count == 1 &&
+          near(real->position.x, at.x, 1e-3f) && near(real->position.y, at.y, 1e-3f) && near(real->position.z, at.z, 1e-3f),
+          "replaced by the server's build: one block, same place, counted");
+    world_builds_tick(&client, 0.016f);
+    CHECK(!client.world.predicted_builds, "nothing predicted any more");
+
+    // 4. one the server refuses (never confirmed): a placeholder after BUILD_PREDICT_MS, the uid kept
+    place(pc, 360.0f, 0.0f, 300.0f);
+    pc->direction = (vec2) {-1.2f, 0.0f};
+    player_build(pc, 1);
+    CHECK(client.map->object_count == base + 2 && client.map->objects[base + 1]->predicted_ms > 0.0f, "a second prediction");
+    if (client.map->object_count != base + 2) return;
+    world_builds_tick(&client, BUILD_PREDICT_MS / 1000.0f * 0.5f);
+    CHECK(client.map->objects[base + 1]->active, "still shown before the timeout");
+    world_builds_tick(&client, BUILD_PREDICT_MS / 1000.0f * 0.6f);
+    const Object *refused = client.map->objects[base + 1];
+    CHECK(!refused->active && refused->destroyed && refused->collision_type == COLLISION_TYPE_NONE && refused->predicted_ms == 0.0f &&
+          client.map->object_count == base + 2 && !client.world.predicted_builds, "refused: a destroyed placeholder keeps the uid");
+    // the server's next build takes that uid: it replaces the placeholder
+    g_sent_count = 0;
+    CHECK(game_build_object(&game, 1, (vec3) {200.0f, 0.0f, 200.0f}, (vec3) {0, 0, 0}, 0.0f, 0, ps), "the server's next build");
+    bo = find_sent(NET_PACKET_BUILD, 0);
+    if (bo) world_apply_build_packet(&client, (const NetBuildPacket *) bo->payload);
+    CHECK(client.map->object_count == base + 2 && client.map->objects[base + 1]->active && client.map->objects[base + 1]->build_index == 1,
+          "the server's build replaces the placeholder");
+
+    // 5. two predictions, the server keeps only the second (at the first one's uid): the copy goes
+    place(pc, 260.0f, 0.0f, 300.0f);
+    player_build(pc, 1);
+    place(pc, 220.0f, 0.0f, 300.0f);
+    player_build(pc, 1);
+    CHECK(client.map->object_count == base + 4, "two predictions");
+    if (client.map->object_count != base + 4) return;
+    const vec3 second = client.map->objects[base + 3]->position;
+    g_sent_count = 0;
+    place(ps, 220.0f, 0.0f, 300.0f);
+    CHECK(player_build(ps, 1), "the authority builds only the second");
+    bo = find_sent(NET_PACKET_BUILD, 0);
+    CHECK(bo && ((const NetBuildPacket *) bo->payload)->uid == (int32_t) (base + 2), "at the first prediction's uid");
+    if (bo) world_apply_build_packet(&client, (const NetBuildPacket *) bo->payload);
+    CHECK(near(client.map->objects[base + 2]->position.x, second.x, 1e-3f) && client.map->objects[base + 2]->predicted_ms == 0.0f &&
+          !client.map->objects[base + 3]->active && client.map->objects[base + 3]->collision_type == COLLISION_TYPE_NONE,
+          "the server's build at base+2, the duplicate prediction at base+3 gave way at once");
+    CHECK(near(second.x, 220.0f, 0.5f), "(the second prediction was at x 220: %.2f)", second.x);
+
+    // 6. an Object Manager object the server put at a predicted uid takes it (world_put_object)
+    place(pc, 180.0f, 0.0f, 300.0f);
+    player_build(pc, 1);
+    const size_t om_uid = client.map->object_count - 1;
+    if (om_uid < base) return;
+    CHECK(client.map->objects[om_uid]->predicted_ms > 0.0f, "a prediction where the Object Manager object lands");
+    Object *spawned = calloc(1, sizeof(Object));
+    spawned->spawned = 1;
+    spawned->active = 1;
+    CHECK(world_put_object(&client, om_uid, spawned) && client.map->objects[om_uid] == spawned, "the spawned object replaces the prediction");
+
+    // 7. removeBuilds takes predictions too
+    world_remove_builds(&client);
+    CHECK(client.map->object_count == base, "round start: predictions removed with the builds");
+
+    game_init(&game, 0, 0, 1);
+    game_init(&client, 0, 0, 1);
+    cJSON_Delete(json);
+}
+
 // ---------------------------------------------------------------- the ownTime clock
 
 static void test_own_time(void) {
@@ -701,6 +815,7 @@ int main(void) {
     test_terrain();
     test_br_zone();
     test_zones();
+    test_build_prediction();
     test_own_time();
     test_input_bits();
     test_prop_collision();

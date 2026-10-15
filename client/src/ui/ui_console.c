@@ -400,6 +400,7 @@ static const ConArg A_NAV_OFF[] = {{"off", ARG_STRING, 1}}; // show_navmeshes: [
 // KrunkNative teleports (shared/src/chat_commands.c cmd_tp / cmd_bring)
 static const ConArg A_TP[] = {{"x|player", ARG_STRING, 0}, {"y", ARG_NUMBER, 1}, {"z", ARG_NUMBER, 1}};
 static const ConArg A_BRING[] = {{"player|all", ARG_STRING, 0}, {"x", ARG_NUMBER, 1}, {"y", ARG_NUMBER, 1}, {"z", ARG_NUMBER, 1}};
+static const ConArg A_BUILD_FILL[] = {{"count", ARG_NUMBER, 1}, {"kind", ARG_NUMBER, 1}}; // shared/src/chat_commands.c cmd_build_fill
 // KrunkNative Object Manager (shared/src/chat_commands.c cmd_give / cmd_drop)
 static const ConArg A_GIVE[] = {{"weapon|item", ARG_STRING, 0}, {"player", ARG_STRING, 1}};
 // KrunkNative class (dev): the class, and the loadout's secondary weapon (the class's other weapons are its own)
@@ -1518,6 +1519,7 @@ static void register_commands(void) {
     register_server("bot_difficulty", ARGS(A_BOT_DIFF), "set default bot difficulty");
     register_server("tp", ARGS(A_TP), "teleport yourself to x y z (feet, as pos prints) or to a player");
     register_server("bring", ARGS(A_BRING), "bring a player (or all) to you, or to x y z");
+    register_server("build_fill", ARGS(A_BUILD_FILL), "place count player builds in a stack beside you (a placement load test)");
     register_server("give", ARGS(A_GIVE), "give a weapon (an extra loadout slot) or an item; others: devs and the host");
     register_server("drop", NO_ARGS, "drop the weapon in your hand in front of you");
 }

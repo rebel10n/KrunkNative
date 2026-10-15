@@ -14,6 +14,7 @@
 #include <object_manager.h> // give / drop (KrunkNative Object Manager)
 #include <target_select.h>
 #include <weapons.h>
+#include <world.h> // build_fill: game_build_object
 #include <ctype.h>
 #include <math.h>
 #include <stdarg.h>
@@ -1700,6 +1701,35 @@ static void cmd_tp(ChatCtx *c) {
     reply(c, "Teleported to %s.", label);
 }
 
+// build_fill [count] [0-3] (KrunkNative): count player builds (default 100, game_build_object: the
+// Build Tool's own path, "bo" to everyone, the BUILD_MAX cap) of BUILD_OBJS kind 0-3 (default the
+// Build Block), stacked in 10 x 10 layers starting 30 units along +x of your feet. A load fixture for
+// placement and frame-time tests (doc/console.md); costs no score.
+static void cmd_build_fill(ChatCtx *c) {
+    if (!allowed(c, CHAT_PERM_HOST_DEV)) return;
+    Player *self = c->player;
+    if (!self || !self->active) {
+        reply(c, "Spawn first.");
+        return;
+    }
+    const int count = c->argc > 0 && c->argv[0][0] ? atoi(c->argv[0]) : 100;
+    const int kind = c->argc > 1 && c->argv[1][0] ? atoi(c->argv[1]) : 0;
+    if (count < 1 || count > 2000 || kind < 0 || kind >= WORLD_BUILD_COUNT) {
+        reply(c, "Usage: build_fill [count 1-2000] [kind 0-%d]", WORLD_BUILD_COUNT - 1);
+        return;
+    }
+    const WorldBuildObject *def = &g_build_objects[kind];
+    int placed = 0;
+    for (int i = 0; i < count; i++) {
+        const int layer = i / 100, row = (i / 10) % 10, col = i % 10;
+        const vec3 feet = {self->position.x + 30.0f + def->w * 0.5f + (float) col * def->w, self->position.y + (float) layer * def->h,
+                           self->position.z + ((float) row - 4.5f) * def->l};
+        if (!game_build_object(c->host->game, kind, feet, (vec3) {0, 0, 0}, 0.0f, 0, self)) break;
+        placed++;
+    }
+    reply(c, "Built %d %s%s (%d builds).", placed, def->name, placed == 1 ? "" : "s", c->host->game->world.build_count);
+}
+
 // bring <player|all> [<x> <y> <z>]: all = every spawned player but you
 static void cmd_bring(ChatCtx *c) {
     if (!allowed(c, CHAT_PERM_HOST_DEV)) return;
@@ -2356,6 +2386,7 @@ static const ChatCommand COMMANDS[] = {
     // KrunkNative: v7.1.4's admin teleports (handleAdminAction 4 / 5 / 9) with coordinates
     {{"tp", NULL, "<x> <y> <z> | <player>", "teleport yourself to a coordinate or to a player", CHAT_PERM_HOST_DEV}, cmd_tp},
     {{"bring", NULL, "<player|all|selector> [<x> <y> <z>]", "bring players to you or to a coordinate", CHAT_PERM_HOST_DEV}, cmd_bring},
+    {{"build_fill", NULL, "[count] [kind 0-3]", "place count player builds in a stack beside you (a placement load test)", CHAT_PERM_HOST_DEV}, cmd_build_fill},
     // KrunkNative Object Manager (its own rules: object_manager_caps)
     {{"give", NULL, "[selector] <weapon|item> [player|selector]", "give a weapon (an extra loadout slot) or an item; others: devs and the host", CHAT_PERM_ANY}, cmd_give},
     {{"drop", NULL, "", "drop the weapon in your hand in front of you", CHAT_PERM_ANY}, cmd_drop},

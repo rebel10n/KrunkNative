@@ -139,6 +139,13 @@
 //                                gen=3 keys=1009"
 //   100 ft @label start | stop   wall-clock frame times between start and stop: one line with the
 //                                frame count, avg / p50 / p95 / max ms (perf logs, never asserted here)
+//   100 builds @label            log the player builds: "[input_script] builds t=100 @label n=12 predicted=1
+//                                meshes=12 visible=12 last=x,y,z spawned=2" (n: active map builds, predicted: the
+//                                ones this client placed ahead of the server, meshes / visible: their meshes in the
+//                                scene, last: the newest one's feet, spawned: Object Manager objects drawn; map_post.c)
+//   100 placewatch @label        from this frame, count frames and wall-clock ms until one more build mesh shows
+//                                (with `mdown left` on the Build Tool: input to block visible): "[input_script]
+//                                place t=100 @label frames=2 ms=3.1 visible=13" ("timeout" after 5 s)
 //   100 type rifle               type the rest of the line through the char callback (the focused
 //                                text field; the menu or the chat must have the keyboard)
 //   100 clip @copied             log the system clipboard (GLFW): "[input_script] clip t=100 @copied
@@ -168,6 +175,7 @@
 #include <spectate.h>     // `cam`: spectate_active
 #include <nettspend.h>    // `pour`, `laced`
 #include <ruleset.h>      // `class`: the class names
+#include <map_post.h>     // `builds`, `placewatch`
 #include <GLFW/glfw3.h>
 #include <png_write.h>
 #include <frame_target.h>
@@ -209,6 +217,9 @@ static struct {
     double ft_last;   // `ft`: wall clock of the previous frame (s), 0 = not measuring
     float *ft_ms;     // frame times collected since `ft start`
     int ft_n, ft_cap;
+    char pw_label[64]; // `placewatch`: the label, "" = not watching
+    int pw_base, pw_frames; // visible build meshes when it started, frames since
+    double pw_start;  // wall clock when it started (s)
 } g_script;
 
 // The page probes: log lines, the whole rest of the line is ids (and @labels).
@@ -257,7 +268,7 @@ static void script_load(void) {
             !strcmp(e->cmd, "call") || !strcmp(e->cmd, "setscroll") || !strcmp(e->cmd, "hit") || !strcmp(e->cmd, "ft") ||
             !strcmp(e->cmd, "nodes") || !strcmp(e->cmd, "rects") || !strcmp(e->cmd, "clicksel") || !strcmp(e->cmd, "wsel") ||
             !strcmp(e->cmd, "text") || !strcmp(e->cmd, "grep") || !strcmp(e->cmd, "glyphs") || !strcmp(e->cmd, "locale") || !strcmp(e->cmd, "page") ||
-            !strcmp(e->cmd, "netchat")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
+            !strcmp(e->cmd, "netchat") || !strcmp(e->cmd, "builds") || !strcmp(e->cmd, "placewatch")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
             while (*rest == ' ' || *rest == '\t') rest++;
             snprintf(e->arg, sizeof(e->arg), "%s", rest);
             for (size_t len = strlen(e->arg); len && (e->arg[len - 1] == '\n' || e->arg[len - 1] == '\r' || e->arg[len - 1] == ' '); len--) e->arg[len - 1] = 0;
@@ -631,6 +642,27 @@ static void script_run(Client *client, const ScriptEvent *e) {
                     n ? sum / n : 0.0f, n ? g_script.ft_ms[n / 2] : 0.0f, n ? g_script.ft_ms[(n * 95) / 100 < n ? (n * 95) / 100 : n - 1] : 0.0f,
                     n ? g_script.ft_ms[n - 1] : 0.0f);
         }
+    } else if (!strcmp(e->cmd, "builds")) {
+        int n = 0, predicted = 0, visible = 0;
+        const Map *map = client->game.map;
+        const Object *last = NULL;
+        for (size_t i = 0; map && i < map->object_count; i++) {
+            const Object *o = map->objects[i];
+            if (!o->dynamic || !o->active || o->destroyed) continue;
+            n++;
+            predicted += o->predicted_ms > 0.0f;
+            last = o;
+        }
+        const int meshes = map_post_build_meshes(&visible);
+        char at[96] = "-";
+        if (last) snprintf(at, sizeof(at), "%.2f,%.2f,%.2f", last->position.x, last->position.y, last->position.z);
+        fprintf(stderr, "[input_script] builds t=%.0f %s n=%d predicted=%d meshes=%d visible=%d last=%s spawned=%d\n", g_script.time,
+                e->arg[0] ? e->arg : "-", n, predicted, meshes, visible, at, map_post_spawned_meshes());
+    } else if (!strcmp(e->cmd, "placewatch")) {
+        snprintf(g_script.pw_label, sizeof(g_script.pw_label), "%s", e->arg[0] ? e->arg : "-");
+        map_post_build_meshes(&g_script.pw_base);
+        g_script.pw_frames = 0;
+        g_script.pw_start = glfwGetTime();
     } else if (!strcmp(e->cmd, "om")) {
         char what[16] = "";
         int id = -1;
@@ -1164,6 +1196,20 @@ void input_script_frame_end(Client *client, const float delta, const float frame
         script_log_cam(client, label);
     } else {
         g_script.spawn_frame = -1;
+    }
+
+    if (g_script.pw_label[0]) { // `placewatch`: this frame's build meshes are in the scene (map_post_frame ran)
+        int visible = 0;
+        map_post_build_meshes(&visible);
+        const double ms = (glfwGetTime() - g_script.pw_start) * 1000.0;
+        if (visible > g_script.pw_base || ms > 5000.0) {
+            if (visible > g_script.pw_base)
+                fprintf(stderr, "[input_script] place t=%.0f %s frames=%d ms=%.1f visible=%d\n", g_script.time, g_script.pw_label, g_script.pw_frames, ms, visible);
+            else fprintf(stderr, "[input_script] place t=%.0f %s timeout frames=%d\n", g_script.time, g_script.pw_label, g_script.pw_frames);
+            g_script.pw_label[0] = 0;
+        } else {
+            g_script.pw_frames++;
+        }
     }
 
     write_pending_shot(client);
