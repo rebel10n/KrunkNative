@@ -103,6 +103,18 @@
 // NET_EXT_VOTE_KICK -> "v2k" [alias, 1] / [alias] (kickVote :220193, the [2] key :221373) and
 // NET_EXT_KPD_CALL -> "kpd" [0, {id: socket id}] (callPolice :216272) / [tab], NET_EXT_KPD_RATE ->
 // "rkpd" [0 | 1] (the officer's verdict, iiïíïíì); the rest is dropped.
+// Combat visuals and sounds (fx):
+//   9       [[sid, hx, hy, hz, impYaw, impPitch, trail, ...]]   NET_PACKET_SHOT (first 0: the gun sound is "s")
+//   s       [sound, sid, x, y, z, vol, rate, dist, roll, force, isAsset]  NET_PACKET_SOUND (krunker_sounds.h names)
+//   so      [sound, vol, mode, x, y, z, rate, dist, roll, isAsset]        NET_PACKET_SOUND (mode 1: 2D, uid -2)
+//   sso     [sound, isAsset]                 NET_PACKET_STOP_SOUND
+//   pr      [x, y, z, yaw, pitch, wep|stored, sid, isStored, custom, owner]  NET_PACKET_PROJECTILE (slot remapped)
+//   pre     [sid|shotCntP, isOwn, x, y, z, impact]  NET_PACKET_PROJECTILE_END (own: NET_PROJECTILE_END_OWN - cnt)
+//   ex      [x, y, z, radius, smCnt, lgCnt]  NET_PACKET_EXPLOSION
+//   k [11]  grapple [x, y, z] | null         NET_PACKET_GRAPPLE on a change
+//   pk upk bh n bbm fh scr is camb asnd rsnd shk ana   EFFECT / PERKS / MODE_COUNTER HEAD / NUKE / SOUND
+//                                            adrop_0 / CHEAT FORCE_HIDE / JUMP_SCARE / SOUND / AMBIENT_CHANGE /
+//                                            PLAYER_SOUND / NET_EXT_KN_OFFICIAL_SHAKE / OBJECT_ANIM | AI_ANIM
 // Muting is client-side in v10 too (muteUser :217141 only saves mute_chat / mute_voice), and
 // reportPlayer opens the profile: neither has a packet.
 #include <krunker_cheat.h>
@@ -167,6 +179,8 @@ typedef struct {
     int class_index; // "0" [6] / "rg" items [15]: the kill card's killer class icon
     char name[32];   // "0" [5] / "00" name (not the alias): the "uh" host line names it
     NetPlayerInfoPacket info; // "0"'s account fields (level, clan, flags) as emitted (HOST follows "uh")
+    int grapple;   // "k"[11] grapple: 1 hooked at grapple_point (NET_PACKET_GRAPPLE goes out on a change)
+    float grapple_point[3];
 } KrunkerLinkPlayer;
 
 // what LEADERBOARD carries of a player that the official packets give piecemeal ("7" columns, "3"
@@ -199,6 +213,10 @@ typedef struct {
     KrunkerLinkPlayer players[KRUNKER_LINK_MAX_PLAYERS];
     int kpd_case;       // startGame gave a K.P.D case (kpdData): a later one without clears it
     char host_id[64];   // init arg 5 / "uh": the custom lobby's host socket id ("" none): PLAYER_INFO's HOST flag
+    // "pr" / "pre": the server's projectile sid (+ 1, 0 = free) of each of our projectile slots (the
+    // official pool is not bounded by our GAME_MAX_PROJECTILES), filled round-robin from proj_next
+    int proj_sid[GAME_MAX_PROJECTILES];
+    int proj_next;
     int player_count;
     // "q" window compression (game.deob.js:221765-221830): the last value of every input field
     // (iîîíîîi, kept across windows), the previous window's angle list (iîiìîií) and the resync

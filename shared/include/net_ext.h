@@ -90,6 +90,8 @@ typedef enum {
     NET_EXT_KN_OFFICIAL_AMMO = 0x8030,         // "uamo" NetOfficialAmmoPacket
     NET_EXT_KN_OFFICIAL_CHAT_I18N = 0x8031,    // "chi" NetOfficialChatI18nHeader + strings
     NET_EXT_KN_OFFICIAL_LEADER_BOARD = 0x8032, // "ulb" NetOfficialLeaderBoardHeader + strings
+    // 0x8040 official combat effects (client-local, like 0x8030)
+    NET_EXT_KN_OFFICIAL_SHAKE = 0x8040,        // "shk" NetOfficialShakePacket: renderer.shake(amount)
 } NetExtSubtype;
 
 // NET_EXT_KN_ACCOUNT_AUTH (C -> S): the identity the player now has in the menu. The server verifies
@@ -174,6 +176,12 @@ typedef struct {
     int32_t ammo[NET_OFFICIAL_AMMO_SLOTS];
     int32_t reserve[NET_OFFICIAL_AMMO_SLOTS];
 } NetOfficialAmmoPacket;
+
+// NET_EXT_KN_OFFICIAL_SHAKE: Krunker "shk" SHAKE [amount] (renderer.shake, game.deob.js 10.0.3; the
+// server already scaled it by distance, game.rumble): the camera shake our camera_feel_shake keeps the max of
+typedef struct {
+    float amount;
+} NetOfficialShakePacket;
 
 // NET_EXT_KN_OFFICIAL_CHAT_I18N: Krunker "chi" ADD_CHATI18N [team, name, key | [key, ...args], kind,
 // color] (game.deob.js:221142): addChat with i18n.t(key, ...args), translated on the client's main

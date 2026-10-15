@@ -99,7 +99,8 @@ except ImportError:  # pragma: no cover
 ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
 BUILD = os.path.abspath(ARGS[0] if ARGS else "cmake-build-debug")
 DIST = os.path.abspath(ARGS[1]) if len(ARGS) > 1 else None
-ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude": "exclude", "--reload": "reload", "--ingame": "ingame"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude": "exclude", "--reload": "reload", "--ingame": "ingame",
+        "--fx": "fx"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -117,17 +118,20 @@ def asset_tree():
             not os.path.isdir(os.path.join(main, "models")):
         return os.environ.get("KRUNKNATIVE_ASSETS_DIR") or local
     out = os.path.join(WORK, "assets")
-    os.makedirs(os.path.join(out, "maps"))
+    merged = ("maps", "sound")  # both trees' files, this checkout's win (sound: the mp3s are gitignored, a few files tracked)
+    for name in merged:
+        os.makedirs(os.path.join(out, name))
     for name in sorted(set(os.listdir(main)) | set(os.listdir(local))):
-        if name != "maps":
+        if name not in merged:
             src = os.path.join(local, name) if os.path.lexists(os.path.join(local, name)) else os.path.join(main, name)
             os.symlink(src, os.path.join(out, name))
-    for src in (os.path.join(main, "maps"), os.path.join(local, "maps")):  # this checkout's maps win
-        for name in os.listdir(src):
-            link = os.path.join(out, "maps", name)
-            if os.path.lexists(link):
-                os.unlink(link)
-            os.symlink(os.path.join(src, name), link)
+    for sub in merged:
+        for src in (os.path.join(main, sub), os.path.join(local, sub)):
+            for name in os.listdir(src) if os.path.isdir(src) else ():
+                link = os.path.join(out, sub, name)
+                if os.path.lexists(link):
+                    os.unlink(link)
+                os.symlink(os.path.join(src, name), link)
     return out
 
 
@@ -556,6 +560,10 @@ class Stub:
                 await send("frs")
                 await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0, team=1))
                 await self.ingame_phases(send, stop)
+            elif self.got_en.is_set() and self.scenario == "fx":
+                await send("frs")
+                await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0))
+                await self.fx_phases(send, stop)
             elif self.got_en.is_set() and hud:
                 await send("frs")
                 await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0, team=1))
@@ -770,6 +778,35 @@ class Stub:
         await send("3", MY_SID, 1, BOT_SID, [1, 1234, None, [61000, 40, "37.5%", 4, 350]], {"wId": 1}, False)
         await hold(6.0)
         self.sent["done"] = time.monotonic()
+
+    async def fx_phases(self, send, stop):
+        """Combat visuals / sounds (run_native_fx): the stub bot's shot ("9" with an impact + its "s" gun
+        sound by index), a rocket ("pr", then "pre" on impact), an "ex", a 2D "so", an "n", a "shk". An
+        "l" every 0.4 s keeps us at 4, 0, 4 and acks the last isn."""
+        async def hold(seconds):
+            end = time.monotonic() + seconds
+            while time.monotonic() < end and not stop.is_set():
+                qs = [f for f in self.frames if f[0] == "q"]
+                isn = int(qs[-1][1][1]) if qs else 0
+                await send("l", [isn, 42, 4.0, 0, 4.0, 0, 0, 0, 0.0, True, False, False, 0, False, False, 0, 0, 0, 0, True, False, 0, 0, None, 0])
+                await asyncio.sleep(0.4)
+
+        await hold(3.0)
+        self.sent["fx"] = time.monotonic()
+        # SHOW_TRACER: the bot's ray hits a wall at 8, 3, 8 (impact yaw / pitch), within 200 of us
+        await send("9", [BOT_SID, 8.0, 3.0, 8.0, 1.57, 0.0, 1, 0.0, 0.0, 11.0, 0.0, 0, 0])
+        await send("s", 5, BOT_SID, 0, 0, 0, 0.85, 1.0)  # PLAYER_SOUND: sounds[5] = weapon_1, the shot
+        # SHOW_PROJECTILE: the bot's rocket (weapon 8), server sid 300, toward +z; its END_PROJECTILE impact
+        await send("pr", 0.0, 6.0, 0.0, math.pi, 0.0, 8, 300, None, None, BOT_SID)
+        await hold(0.4)
+        await send("pre", 300, 0, 0.0, 6.0, 20.0, 1)
+        await send("ex", 6, 1, 6, 30, 3, 2)              # EXPLOSION
+        await send("so", "cheer_0", 0.5, 1)             # PLAY_SOUND, 2D
+        await send("n", 0)                              # NUKE_UPDATE: the siren
+        await send("shk", 0.5)                          # SHAKE
+        await hold(3.0)
+        self.sent["done"] = time.monotonic()
+        await hold(2.0)
 
     def start_ws(self):
         started = threading.Event()
@@ -1654,6 +1691,32 @@ def run_native_kick():
     check(f"{label}: no reconnect by itself", len(stub.ws_paths) == 1, stub.ws_paths)
 
 
+def run_native_fx():
+    """Combat visuals / sounds (krunker_link.c fx): the stub (Stub.fx_phases) has its bot shoot, fire a
+    rocket, explode and play sounds; the client's vfx / projectile / audio logs show what it made of them."""
+    label = "native-fx"
+    script = "0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n15000 quit\n" % PASTE_TOKEN
+    stub, p, out, log = launch_native(label, script, {"KRUNKNATIVE_VFX_LOG": "1", "KRUNKNATIVE_AUDIO_LOG": "1"}, scenario="fx")
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+    for name in ("fx", "done"):
+        check(f"{label}: the stub got to send its \"{name}\" packets", name in stub.sent, sorted(stub.sent))
+    check(f"{label}: the server saw no ahNum / \"q\"-sequence violations", not stub.proto_errors, stub.proto_errors[:5])
+    check(f"{label}: SHOW_TRACER: the bot's tracer to 8, 3, 8", re.search(r"\[vfx\] remote shot from .* to 8\.0 3\.0 8\.0", text),
+          [l for l in lines if "[vfx]" in l][:5])
+    audio = [l for l in lines if "[audio]" in l and " play" in l]
+    check(f"{label}: PLAYER_SOUND: sounds[5] (weapon_1) plays in 3D, once (the tracer adds none)",
+          sum(1 for l in audio if "play3d weapon_1 " in l) == 1, audio[:8])
+    check(f"{label}: SHOW_PROJECTILE: the rocket (weapon 8) flies", re.search(r"\[proj\] spawn w8 box at 0\.0 6\.0 0\.0 v [-\d.]+ [-\d.]+ 0\.\d+", text),
+          [l for l in lines if "[proj]" in l][:5])
+    check(f"{label}: END_PROJECTILE: ends it with its impact", re.search(r"\[proj\] end id \d+ at 0\.0 6\.0 20\.0 impact 1", text),
+          [l for l in lines if "[proj]" in l][:5])
+    check(f"{label}: EXPLOSION: the blast at 6, 1, 6", "[vfx] explosion 6.0 1.0 6.0" in text, [l for l in lines if "explosion" in l][:4])
+    check(f"{label}: PLAY_SOUND: cheer_0 in 2D", any("play2d cheer_0 " in l for l in audio), audio[-6:])
+    check(f"{label}: NUKE_UPDATE 0: the siren", any("play2d siren_0 " in l for l in audio), audio[-6:])
+
+
 def run_native_optout():
     """KRUNKNATIVE_KRUNKER_JOIN=browser: the click opens krunker.io/?game=<id> in the system browser
     (KRUNKNATIVE_NO_BROWSER logs it), nothing is sought in-client."""
@@ -2320,6 +2383,7 @@ def main():
         run_native_lobby()
         run_native_badmap()
         run_native_kick()
+        run_native_fx()
         run_native_optout()
         run_native_exclude()
         run_native_exclude_mm()
@@ -2331,6 +2395,8 @@ def main():
     if ONLY == "exclude" and os.path.isfile(f"{BUILD}/client_bin"):  # just Find New Game's runs
         run_native_exclude()
         run_native_exclude_mm()
+    if ONLY == "fx" and os.path.isfile(f"{BUILD}/client_bin"):  # just the combat visuals / sounds run
+        run_native_fx()
     if ONLY == "reload" and os.path.isfile(f"{BUILD}/client_bin"):  # just the reload runs
         run_native_reload(False)
         run_native_reload(True)

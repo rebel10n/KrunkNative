@@ -2762,10 +2762,15 @@ typedef struct {
 } NetProjectilePacket;
 
 typedef struct {
-    int32_t id;
+    int32_t id;            // the server's projectile slot; <= NET_PROJECTILE_END_OWN: our own predicted one (below)
     float position[3];
     uint8_t impact;        // impact particles at the end point
 } NetProjectileEndPacket;
+// Official krunker.io sessions (client/src/net/krunker_link.c): the owner gets no "pr" for its own
+// predicted projectile, and the "pre" ending it names the owner's shotCntP instead of a slot. The
+// link sends that as id = NET_PROJECTILE_END_OWN - shotCntP; the client ends its prediction tagged
+// with that count (projectiles_render.c). Our own server never sends a negative id.
+#define NET_PROJECTILE_END_OWN (-2)
 
 typedef struct {
     float position[3];

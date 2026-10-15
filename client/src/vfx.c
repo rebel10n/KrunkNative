@@ -1125,9 +1125,10 @@ void vfx_remote_shot(Client *client, const Player *shooter, const vec3 hit, cons
         spawn_tracer(start, hit, v3_length(v3_sub(hit, start)), trail);
     }
 
-    // index.js g7: impacts only within 160 units of the local player
+    // v10.0.2 SHOW_TRACER (v10.js:220581): the impact only when the hit point is within 200 units of us
+    // (getDistance3D(you, hit) <= 200; v3.1.1's g7 measured the shooter within 160)
     const Player *me = client->me;
-    if (has_normal && me && v3_length(v3_sub(shooter->position, me->position)) <= 160.0f) {
+    if (has_normal && me && v3_length(v3_sub(hit, me->position)) <= 200.0f) {
         spawn_impact(hit, normal_yaw, normal_pitch);
     }
 }

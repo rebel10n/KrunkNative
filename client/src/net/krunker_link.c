@@ -25,6 +25,8 @@
 #include <net_ext.h>     // NET_EXT_KN_OFFICIAL_* (clusters C / D)
 #include <ruleset.h>
 #include <krunker_maps.h>
+#include <krunker_sounds.h> // "s" / "so" / "sso": the official sound-name table
+#include <ai.h>             // "ana": NetAIAnimPacket
 #include <progression.h> // overlay.medalsList: the medals "6" / "am" give by index
 #include <social_v7.h>
 #include <zombies.h> // NET_PACKET_SHARING ("sic")
@@ -354,6 +356,8 @@ static void on_add_players(KrunkerLink *l, const KrunkerFrame *f) {
     }
 }
 
+static void fx_grapple(KrunkerLink *l, int sid, const KrunkerValue *g); // combat visuals (fx, below)
+
 // "k" UPDATE_PLAYERS [list, sendRateA, servTim] (game.deob.js:220529): 13 values per player,
 // [0] sid [1..3] x y z [4] xDire (deg) [5] yDire (deg) [6] stepVal [7] onGround [8] crouchVal
 // [9] weapon (loadout index) [10] aimVal [11] grapple [12] ping. Our own sid is skipped (as in JS).
@@ -382,6 +386,7 @@ static void on_update_players(KrunkerLink *l, const KrunkerFrame *f) {
         s.aim_val = 1.0f - (float) num(&e[KRUNKER_K_AIM_VAL], 1); // Krunker 1 = hip, ours 0
         s.crouch_val = (float) num(&e[KRUNKER_K_CROUCH_VAL], 0);
         emit(l, NET_PACKET_STATE, &s, sizeof(s));
+        fx_grapple(l, sid, &e[KRUNKER_K_GRAPPLE]);
     }
 }
 
@@ -1746,6 +1751,337 @@ static void on_update_names(KrunkerLink *l, const KrunkerFrame *f) {
     if (!truthy(arg(f, 1))) note(l, KRUNKER_LINK_EV_CLOSE, "the server ended the session (UPDATE_NAMES without keepOpen)");
 }
 
+// ---------------------------------------------------------------- combat visuals / sounds (fx)
+
+// A sound as "s" / "so" / "sso" / "asnd" carry it (game.playerSound: `isAsset || !isFinite(i) ? i :
+// sounds[i]`): an index into the official sound-name table (krunker_sounds.h), a name, or with
+// isAsset a user asset id ("asset:<id>", audio.c). 0: nothing to play (unknown index, a name our
+// NetSoundPacket cannot hold: truncated it would name another file).
+static int fx_sound_name(const KrunkerValue *v, const int asset, char out[NET_SOUND_NAME_SIZE]) {
+    char id[64];
+    out[0] = 0;
+    if (asset) {
+        id_string(v, id, sizeof(id));
+        if (!id[0]) return 0;
+        return snprintf(out, NET_SOUND_NAME_SIZE, "asset:%s", id) < NET_SOUND_NAME_SIZE;
+    }
+    const char *name = krunker_is(v, KRUNKER_NUM) && isfinite(v->u.num) ? krunker_sound_name((int) v->u.num) : krunker_str(v);
+    if (!name || !name[0] || strlen(name) >= NET_SOUND_NAME_SIZE) return 0;
+    snprintf(out, NET_SOUND_NAME_SIZE, "%s", name);
+    return 1;
+}
+
+// JS `a || 1` of a volume / rate
+static float fx_or_one(const KrunkerValue *v) {
+    const double x = num(v, 0);
+    return x != 0 && isfinite(x) ? (float) x : 1.0f;
+}
+
+// "9" SHOW_TRACER [[sid, x, y, z, impYaw, impPitch, trail, sx, sy, sh, sz, bulletT, impactT]] (iíïîîîi
+// :220792): the shooter's tracer to the hit and, when [4] is set (a map object was hit), the impact.
+// The shot's sound is its own "s" (shoot -> playSound), so first stays 0 (our client would add a
+// second gun sound); the weapon is the shooter's current one on the client (-1). [7..10] (the origin
+// before the shooter's first "k") and [11] / [12] (skin tracer / impact types) are not mapped.
+static void on_tracer(KrunkerLink *l, const KrunkerFrame *f) {
+    const KrunkerValue *a = arg(f, 0);
+    if (!krunker_is(a, KRUNKER_ARRAY) || a->len < 4 || !krunker_is(krunker_at(a, 0), KRUNKER_NUM)) return;
+    NetShotPacket s;
+    memset(&s, 0, sizeof(s));
+    s.uid = (int32_t) krunker_at(a, 0)->u.num;
+    s.weapon_index = -1;
+    for (int k = 0; k < 3; k++) s.hit[k] = (float) num(krunker_at(a, (uint32_t) (1 + k)), 0);
+    s.has_normal = !is_nil(krunker_at(a, 4)) ? 1 : 0;
+    s.normal_yaw = (float) num(krunker_at(a, 4), 0);
+    s.normal_pitch = (float) num(krunker_at(a, 5), 0);
+    s.trail = (uint8_t) num(krunker_at(a, 6), 0);
+    s.first = 0;
+    emit(l, NET_PACKET_SHOT, &s, sizeof(s));
+}
+
+// "s" PLAYER_SOUND [sound, sid, x, y, z, vol, rate, dist, roll, forcePos, isAsset] (iîîîïìï :220021 ->
+// game.playerSound :187796): play3D at the player (unknown: nothing) or, forcePos, at x y z
+static void on_player_sound(KrunkerLink *l, const KrunkerFrame *f) {
+    NetSoundPacket s;
+    memset(&s, 0, sizeof(s));
+    if (!fx_sound_name(arg(f, 0), truthy(arg(f, 10)), s.name)) return;
+    s.uid = truthy(arg(f, 9)) ? -1 : (int32_t) num(arg(f, 1), -1);
+    for (int k = 0; k < 3; k++) s.position[k] = (float) num(arg(f, (uint32_t) (2 + k)), 0);
+    s.volume = fx_or_one(arg(f, 5));
+    s.rate = fx_or_one(arg(f, 6));
+    emit(l, NET_PACKET_SOUND, &s, sizeof(s));
+}
+
+// "so" PLAY_SOUND [sound, vol, mode, x, y, z, rate, dist, roll, isAsset] (iíîiíîí :220017): mode 1 a
+// 2D play (map_triggers.c play_sound: uid -2), else play3D at x y z
+static void on_play_sound(KrunkerLink *l, const KrunkerFrame *f) {
+    NetSoundPacket s;
+    memset(&s, 0, sizeof(s));
+    if (!fx_sound_name(arg(f, 0), truthy(arg(f, 9)), s.name)) return;
+    s.uid = num(arg(f, 2), 0) == 1 ? -2 : -1;
+    for (int k = 0; k < 3; k++) s.position[k] = (float) num(arg(f, (uint32_t) (3 + k)), 0);
+    s.volume = fx_or_one(arg(f, 1));
+    s.rate = fx_or_one(arg(f, 6));
+    emit(l, NET_PACKET_SOUND, &s, sizeof(s));
+}
+
+// "sso" STOP_SOUND [sound, isAsset] (iíîíîíî :220013)
+static void on_stop_sound(KrunkerLink *l, const KrunkerFrame *f) {
+    NetStopSoundPacket s;
+    memset(&s, 0, sizeof(s));
+    const int asset = truthy(arg(f, 1));
+    if (asset) id_string(arg(f, 0), s.name, sizeof(s.name)); // the client stops no asset sounds (its own rule)
+    else if (!fx_sound_name(arg(f, 0), 0, s.name)) return;
+    s.asset = (uint8_t) asset;
+    emit(l, NET_PACKET_STOP_SOUND, &s, sizeof(s));
+}
+
+// Our projectile slot of the server's projectile sid: the slot already holding it, else (create)
+// a free one, else the next one round-robin (a projectile that left its range without a "pre").
+static int fx_proj_slot(KrunkerLink *l, const int sid, const int create) {
+    const int n = (int) (sizeof(l->proj_sid) / sizeof(l->proj_sid[0]));
+    for (int i = 0; i < n; i++) {
+        if (l->proj_sid[i] == sid + 1) return i;
+    }
+    if (!create) return -1;
+    for (int i = 0; i < n; i++) {
+        if (!l->proj_sid[i]) return l->proj_sid[i] = sid + 1, i;
+    }
+    const int i = l->proj_next;
+    l->proj_next = (l->proj_next + 1) % n;
+    l->proj_sid[i] = sid + 1;
+    return i;
+}
+
+// "pr" SHOW_PROJECTILE [x, y, z, yaw, pitch, index, sid, isStored, customProj, owner] (iìíîíìî
+// :220839): physObj(x, y, z, yaw, pitch, cfg.range, .., cfg, sid) with cfg = weaponConfig[index]
+// .projectile, or projectiles.stored[index] (0 the thrown knife, 1 an AI's orb, 2 a bombardment
+// bomb: no visual of ours). Velocity as Projectile.init (:180002, shared/src/projectile.c): d = yaw -
+// PI, spd * (sin d cos pitch, sin pitch, cos d cos pitch).
+static void on_projectile(KrunkerLink *l, const KrunkerFrame *f) {
+    if (!krunker_is(arg(f, 6), KRUNKER_NUM)) return;
+    const int index = (int) num(arg(f, 5), -1);
+    NetProjectilePacket p;
+    memset(&p, 0, sizeof(p));
+    float speed = 0, gravity = 0, range = 0;
+    if (truthy(arg(f, 7))) {
+        if (index == 0) { // stored[0]: the thrown knife (spd 0.38, grav 0.0002, range 1500)
+            p.weapon_index = WEAPON_ID_KNIFE;
+            speed = 0.38f, gravity = 0.0002f, range = 1500.0f;
+        } else if (index == 1) { // stored[1]: an AI's orb (spd 0.1, grav 0, range 500)
+            p.weapon_index = -1;
+            p.ai_kind = 1;
+            speed = 0.1f, range = 500.0f;
+        } else {
+            return;
+        }
+    } else {
+        const Weapon *w = index >= 0 ? rules_weapon(index) : NULL;
+        if (!w || w->projectile_config.speed <= 0.0f) return;
+        p.weapon_index = index;
+        speed = w->projectile_config.speed, gravity = w->projectile_config.gravity, range = w->projectile_config.range;
+    }
+    p.id = fx_proj_slot(l, (int) arg(f, 6)->u.num, 1);
+    p.owner_uid = (int32_t) num(arg(f, 9), -1);
+    for (int k = 0; k < 3; k++) p.position[k] = (float) num(arg(f, (uint32_t) k), 0);
+    const double d = num(arg(f, 3), 0) - M_PI, pitch = num(arg(f, 4), 0);
+    p.velocity[0] = (float) (speed * sin(d) * cos(pitch));
+    p.velocity[1] = (float) (speed * sin(pitch));
+    p.velocity[2] = (float) (speed * cos(d) * cos(pitch));
+    p.gravity = gravity;
+    p.range = range;
+    emit(l, NET_PACKET_PROJECTILE, &p, sizeof(p));
+}
+
+// "pre" END_PROJECTILE [sid | ownShotCnt, isOwn, x, y, z, impact] (iiiîïîî :220828): disablePhys
+// (a knife lingers) + effect on an impact. isOwn: our own predicted projectile, which never had a
+// "pr", named by our shotCntP (NET_PROJECTILE_END_OWN). An unknown sid still shows the impact (id -1).
+static void on_projectile_end(KrunkerLink *l, const KrunkerFrame *f) {
+    NetProjectileEndPacket e;
+    memset(&e, 0, sizeof(e));
+    const int n = (int) num(arg(f, 0), -1);
+    if (truthy(arg(f, 1))) {
+        if (n < 0) return;
+        e.id = NET_PROJECTILE_END_OWN - n;
+    } else {
+        e.id = n >= 0 ? fx_proj_slot(l, n, 0) : -1;
+        if (e.id >= 0) l->proj_sid[e.id] = 0;
+    }
+    for (int k = 0; k < 3; k++) e.position[k] = (float) num(arg(f, (uint32_t) (2 + k)), 0);
+    e.impact = (uint8_t) truthy(arg(f, 5));
+    emit(l, NET_PACKET_PROJECTILE_END, &e, sizeof(e));
+}
+
+// "ex" EXPLOSION [x, y, z, radius, smCnt, lgCnt] (iïïííìî :220848): shake, "explosion", explodeAt.
+// smCnt / lgCnt (debris counts) are not mapped: our explosion picks its own.
+static void on_explosion(KrunkerLink *l, const KrunkerFrame *f) {
+    NetExplosionPacket e;
+    memset(&e, 0, sizeof(e));
+    for (int k = 0; k < 3; k++) e.position[k] = (float) num(arg(f, (uint32_t) k), 0);
+    e.radius = (float) num(arg(f, 3), 0);
+    emit(l, NET_PACKET_EXPLOSION, &e, sizeof(e));
+}
+
+// "k" [11] grapple: [x, y, z] while another player is hooked, null otherwise (players.js sync); our
+// client draws the rope from NET_PACKET_GRAPPLE, sent when it changes
+static void fx_grapple(KrunkerLink *l, const int sid, const KrunkerValue *g) {
+    KrunkerLinkPlayer *p = player(l, sid, 0);
+    if (!p) return;
+    const int on = krunker_is(g, KRUNKER_ARRAY) && g->len >= 3;
+    float point[3] = {0, 0, 0};
+    for (int k = 0; on && k < 3; k++) point[k] = (float) num(krunker_at(g, (uint32_t) k), 0);
+    if (on == p->grapple && (!on || !memcmp(point, p->grapple_point, sizeof(point)))) return;
+    p->grapple = on;
+    memcpy(p->grapple_point, point, sizeof(point));
+    NetGrapplePacket gp;
+    memset(&gp, 0, sizeof(gp));
+    gp.uid = sid;
+    gp.active = (uint8_t) on;
+    memcpy(gp.point, point, sizeof(point));
+    emit(l, NET_PACKET_GRAPPLE, &gp, sizeof(gp));
+}
+
+// "pk" EFFECT [index, count] (iîïìîìî :220696): our player's effect stacks (#perkHolder)
+static void on_effect(KrunkerLink *l, const KrunkerFrame *f) {
+    const int index = (int) num(arg(f, 0), -1);
+    if (index < 0 || index > 255) return;
+    const NetEffectPacket e = {.effect = (uint8_t) index, .count = (uint8_t) num(arg(f, 1), 0)};
+    emit(l, NET_PACKET_EFFECT, &e, sizeof(e));
+}
+
+// "upk" UPDATE_ZOMBIE_PERKS [sid, perks] (iîïïíìî :220688); the 250 maxHealth comes as its own "h"
+static void on_zombie_perks(KrunkerLink *l, const KrunkerFrame *f) {
+    if (!krunker_is(arg(f, 0), KRUNKER_NUM)) return;
+    NetPerksPacket p;
+    memset(&p, 0, sizeof(p));
+    p.uid = (int32_t) arg(f, 0)->u.num;
+    const KrunkerValue *list = arg(f, 1);
+    for (uint32_t i = 0; krunker_is(list, KRUNKER_ARRAY) && i < list->len && p.count < PLAYER_PERK_MAX; i++)
+        p.perks[p.count++] = (int8_t) num(krunker_at(list, i), -1);
+    emit(l, NET_PACKET_PERKS, &p, sizeof(p));
+}
+
+// "bh" UPDATE_HEAD_SIZE [sid, headMlt, ..] (iïîiíiï :221034): Big Head's head scale
+static void on_head_size(KrunkerLink *l, const KrunkerFrame *f) {
+    if (!krunker_is(arg(f, 0), KRUNKER_NUM)) return;
+    const NetModeCounterPacket c = {.kind = NET_MODE_COUNTER_HEAD, .uid = (int32_t) arg(f, 0)->u.num, .value = (float) num(arg(f, 1), 1)};
+    emit(l, NET_PACKET_MODE_COUNTER, &c, sizeof(c));
+}
+
+// "asnd" ADD_PLAYER_SOUND [sid, sound, {vol, rate, dist, roll, loop}] (game.addPlayerSound :190261) and
+// "rsnd" REMOVE_PLAYER_SOUND [sid, sound | null, force] (:190275). The Juggernaut's jug_0 loop is
+// skipped: our NET_PACKET_JUGGERNAUT ("jg") already plays it, it would play twice.
+static void on_player_sound_loop(KrunkerLink *l, const KrunkerFrame *f, const int add) {
+    NetPlayerSoundPacket s;
+    memset(&s, 0, sizeof(s));
+    if (!fx_sound_name(arg(f, 1), 0, s.name) && (add || !is_nil(arg(f, 1)))) return;
+    if (!strcmp(s.name, "jug_0")) return;
+    s.uid = (int32_t) num(arg(f, 0), -1);
+    s.add = (uint8_t) add;
+    if (add) {
+        const KrunkerValue *d = arg(f, 2);
+        s.loop = (uint8_t) truthy(krunker_get(d, "loop"));
+        s.volume = fx_or_one(krunker_get(d, "vol"));
+        s.rate = fx_or_one(krunker_get(d, "rate"));
+    } else {
+        s.force = (uint8_t) (truthy(arg(f, 2)) || !s.name[0]);
+    }
+    emit(l, NET_PACKET_PLAYER_SOUND, &s, sizeof(s));
+}
+
+// "camb" CHANGE_AMBIENT [soundscape, custom, fade] (window.changeAmbient :220206): config.soundScapes
+// value; a custom soundscape (asset) and the fade are not supported by our client
+static void on_ambient(KrunkerLink *l, const KrunkerFrame *f) {
+    if (truthy(arg(f, 1))) return;
+    char text[32];
+    id_string(arg(f, 0), text, sizeof(text));
+    if (!text[0]) return;
+    const NetAmbientPacket a = {.ambient = (int32_t) strtol(text, NULL, 10)}; // parseInt
+    emit(l, NET_PACKET_AMBIENT_CHANGE, &a, sizeof(a));
+}
+
+// "ana" SERV_ANIM [uid | sid, clip, raw, isObj] (iîiiììì :220526): a map object's (isObj) or an AI's
+// clip, by name when raw, else an index into config.clipNames
+static void on_serv_anim(KrunkerLink *l, const KrunkerFrame *f) {
+    static const char *const clip_names[] = {"Idle", "Move", "MoveFast", "Jump", "Melee", "Shoot", "Crouch"};
+    if (!krunker_is(arg(f, 0), KRUNKER_NUM)) return;
+    const int raw = truthy(arg(f, 2));
+    char clip[GAME_AI_ANIM_SIZE] = "";
+    if (raw) {
+        id_string(arg(f, 1), clip, sizeof(clip));
+    } else {
+        const int i = (int) num(arg(f, 1), -1);
+        if (i >= 0 && i < (int) (sizeof(clip_names) / sizeof(clip_names[0]))) snprintf(clip, sizeof(clip), "%s", clip_names[i]);
+    }
+    if (!clip[0]) return;
+    if (truthy(arg(f, 3))) {
+        NetObjectAnimPacket a;
+        memset(&a, 0, sizeof(a));
+        a.uid = (int32_t) arg(f, 0)->u.num;
+        a.is_object = 1;
+        a.raw = (uint8_t) raw;
+        snprintf(a.clip, sizeof(a.clip), "%s", clip);
+        emit(l, NET_PACKET_OBJECT_ANIM, &a, sizeof(a));
+    } else {
+        NetAIAnimPacket a;
+        memset(&a, 0, sizeof(a));
+        a.sid = (int32_t) arg(f, 0)->u.num;
+        a.raw = (uint8_t) raw;
+        snprintf(a.clip, sizeof(a.clip), "%s", clip);
+        emit(l, NET_PACKET_AI_ANIM, &a, sizeof(a));
+    }
+}
+
+// The fx packets without arguments worth a function of their own. 1 = handled.
+static int on_fx(KrunkerLink *l, const KrunkerS2C id, const KrunkerFrame *f) {
+    switch (id) {
+        case KRUNKER_S2C_SHOW_TRACER: on_tracer(l, f); return 1;
+        case KRUNKER_S2C_PLAYER_SOUND: on_player_sound(l, f); return 1;
+        case KRUNKER_S2C_PLAY_SOUND: on_play_sound(l, f); return 1;
+        case KRUNKER_S2C_STOP_SOUND: on_stop_sound(l, f); return 1;
+        case KRUNKER_S2C_SHOW_PROJECTILE: on_projectile(l, f); return 1;
+        case KRUNKER_S2C_END_PROJECTILE: on_projectile_end(l, f); return 1;
+        case KRUNKER_S2C_EXPLOSION: on_explosion(l, f); return 1;
+        case KRUNKER_S2C_EFFECT: on_effect(l, f); return 1;
+        case KRUNKER_S2C_UPDATE_ZOMBIE_PERKS: on_zombie_perks(l, f); return 1;
+        case KRUNKER_S2C_UPDATE_HEAD_SIZE: on_head_size(l, f); return 1;
+        case KRUNKER_S2C_ADD_PLAYER_SOUND: on_player_sound_loop(l, f, 1); return 1;
+        case KRUNKER_S2C_REMOVE_PLAYER_SOUND: on_player_sound_loop(l, f, 0); return 1;
+        case KRUNKER_S2C_CHANGE_AMBIENT: on_ambient(l, f); return 1;
+        case KRUNKER_S2C_SERV_ANIM: on_serv_anim(l, f); return 1;
+        case KRUNKER_S2C_NUKE_UPDATE: { // "n" [0 siren | 1 detonated] (iíííiíì :220228)
+            const NetNukePacket n = {.state = (uint8_t) num(arg(f, 0), 0)};
+            emit(l, NET_PACKET_NUKE, &n, sizeof(n));
+            return 1;
+        }
+        case KRUNKER_S2C_BOMBARDMENT_UPDATE: { // "bbm" [state] (iííiíïí :220231): 0 plays adrop_0, 1 nothing
+            if (num(arg(f, 0), 1) != 0) return 1;
+            NetSoundPacket s = {.name = "adrop_0", .uid = -2, .volume = 1.0f, .rate = 1.0f};
+            emit(l, NET_PACKET_SOUND, &s, sizeof(s));
+            return 1;
+        }
+        case KRUNKER_S2C_TRIGGER_IMG_SOUND: { // "is" [sound, image] (game.triggerImgSound :187805): the 2D sound
+            NetSoundPacket s;                  // (the #imgFlash image is not shown)
+            memset(&s, 0, sizeof(s));
+            if (!fx_sound_name(arg(f, 0), 0, s.name)) return 1;
+            s.uid = -2, s.volume = 1.0f, s.rate = 1.0f;
+            emit(l, NET_PACKET_SOUND, &s, sizeof(s));
+            return 1;
+        }
+        case KRUNKER_S2C_JUMP_SCARE: { // "scr" [index] (window.jumpScare :222997)
+            const NetJumpScarePacket j = {.index = (int32_t) num(arg(f, 0), 0)};
+            emit(l, NET_PACKET_JUMP_SCARE, &j, sizeof(j));
+            return 1;
+        }
+        case KRUNKER_S2C_SET_HIDDEN: on_cheat_flag(l, f, NET_CHEAT_FORCE_HIDE); return 1; // "fh" [on] (:220508)
+        case KRUNKER_S2C_SHAKE: { // "shk" [amount] (renderer.shake)
+            const NetOfficialShakePacket s = {.amount = (float) num(arg(f, 0), 0)};
+            if (s.amount > 0) emit_ext(l, NET_EXT_KN_OFFICIAL_SHAKE, &s, sizeof(s));
+            return 1;
+        }
+        default: return 0;
+    }
+}
+
 int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len) {
     KrunkerFrame f;
     const int err = krunker_proto_decode(data, len, 0, &f);
@@ -1861,7 +2197,9 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         case KRUNKER_S2C_ACTION_FEED: on_action(l, &f); break;
         case KRUNKER_S2C_ADD_CHATI18N: on_chat_i18n(l, &f); break;
         case KRUNKER_S2C_UPDATE_HOST: on_update_host(l, &f); break;
-        default: l->unknown_in++; break;
+        default: // combat visuals / sounds (fx), else not translated
+            if (!on_fx(l, krunker_s2c_lookup(f.name, f.name_len), &f)) l->unknown_in++;
+            break;
     }
     krunker_frame_free(&f);
     return 1;

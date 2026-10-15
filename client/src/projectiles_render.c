@@ -61,6 +61,7 @@ typedef struct {
     unsigned char linked;        // server id known
     unsigned char own_unclaimed; // server visual of our own shot that arrived before the prediction
     int server_id;
+    unsigned int own_cnt;        // a prediction's shotCntP (owid): an official "pre" names it (NET_PROJECTILE_END_OWN)
     int weapon_index;
     float age;                   // ms since spawn
     vec3 position;
@@ -223,9 +224,25 @@ void projectiles_render_server_end(Client *client, const NetProjectileEndPacket 
     const vec3 end = {packet->position[0], packet->position[1], packet->position[2]};
     if (proj_log()) fprintf(stderr, "[proj] end id %d at %.1f %.1f %.1f impact %d\n", packet->id, end.x, end.y, end.z, packet->impact);
 
+    // an official "pre" of our own prediction (krunker_link.c): it names the shot's shotCntP, never a
+    // "pr" id; the prediction with that owid, else the oldest one still flying unlinked
+    ProjVisual *own = NULL;
+    if (packet->id <= NET_PROJECTILE_END_OWN) {
+        const unsigned int cnt = (unsigned int) (NET_PROJECTILE_END_OWN - packet->id);
+        for (int i = 0; i < PROJ_MAX; i++) {
+            ProjVisual *visual = &proj.visuals[i];
+            if (!visual->active || !visual->predicted || visual->linked || visual->linger > 0.0f) continue;
+            if (visual->own_cnt == cnt) {
+                own = visual;
+                break;
+            }
+            if (!own || visual->age > own->age) own = visual;
+        }
+    }
+
     for (int i = 0; i < PROJ_MAX; i++) {
         ProjVisual *visual = &proj.visuals[i];
-        if (!visual->active || !visual->linked || visual->server_id != packet->id) continue;
+        if (!visual->active || (visual != own && (!visual->linked || visual->server_id != packet->id))) continue;
 
         if (visual->knife && packet->impact) {
             // lingerTime && impact: stuck at the end point, lookAt(end - velocity)
@@ -285,7 +302,10 @@ void projectiles_render_local_shot(Client *client, const Player *me, const int t
     const vec3 origin = {me->position.x, me->position.y + me->height - game_constants.camera_height, me->position.z};
 
     ProjVisual *visual = proj_spawn(client, weapon_index, origin, velocity, config->gravity, PROJ_LOCAL_DST);
-    if (visual) visual->predicted = 1;
+    if (visual) {
+        visual->predicted = 1;
+        visual->own_cnt = me->shot_count; // shotCntP, already counted for this shot (player.c)
+    }
 }
 
 // 88.js D.update

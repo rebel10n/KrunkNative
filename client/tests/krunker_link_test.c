@@ -9,6 +9,8 @@
 #include <ruleset.h>
 #include <zombies.h>
 #include <social_v7.h>
+#include <ai.h>
+#include <krunker_sounds.h>
 #include <cJSON.h>
 #include <math.h>
 #include <stdio.h>
@@ -42,6 +44,7 @@ const Weapon *rules_weapon(const int id) {
     if (id < 0 || id > WEAPON_ID_KNIFE) return NULL;
     k_weapons[id].ammo = (unsigned) (10 + id); // a distinct full magazine per id
     k_weapons[id].secondary = id == WEAPON_ID_PISTOL || id == 4; // two secondaries
+    if (id == 9) k_weapons[id].projectile_config = (ProjectileConfig) {.speed = 0.6f, .gravity = 0.0001f, .range = 1200.0f}; // "pr": a rocket
     return &k_weapons[id];
 }
 
@@ -578,6 +581,203 @@ static void test_combat(void) {
     clear();
     feed(&link, "uh", (KrunkerValue[]) {KRUNKER_V_STR("sockA"), KRUNKER_V_BOOL(1)}, 2);
     CHECK(find_in(NET_PACKET_PLAYER_INFO, 0) && !find_in(NET_PACKET_EXT, 0), "uh silent: no line");
+    clear();
+}
+
+// Combat visuals / sounds (fx): "9" "s" "so" "sso" "pr" "pre" "ex" "k"[11] "pk" "upk" "bh" "n" "bbm"
+// "asnd" "rsnd" "fh" "scr" "is" "camb" "shk" "ana"
+static void test_fx(void) {
+    KrunkerLink link;
+    const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
+    krunker_link_init(&link, &io, KRUNKER_AHKEY);
+    feed(&link, "io-init", (KrunkerValue[]) {KRUNKER_V_STR("sockA")}, 1);
+    KrunkerValue add[2 * 53];
+    for (int i = 0; i < 2 * 53; i++) add[i] = KRUNKER_V_NIL;
+    add[0] = KRUNKER_V_STR("sockA"); add[1] = KRUNKER_V_NUM(9); add[8] = KRUNKER_V_NUM(100);
+    add[53] = KRUNKER_V_STR("sockB"); add[54] = KRUNKER_V_NUM(7); add[61] = KRUNKER_V_NUM(100);
+    feed(&link, "0", (KrunkerValue[]) {KRUNKER_V_ARRAY(add, 2 * 53)}, 1);
+    clear();
+
+    // "9": a ray of 7 to (10, 2, -3) hitting a wall (impact yaw / pitch), trail 1
+    const KrunkerValue ray[] = {KRUNKER_V_NUM(7), KRUNKER_V_NUM(10), KRUNKER_V_NUM(2), KRUNKER_V_NUM(-3), KRUNKER_V_NUM(1.5), KRUNKER_V_NUM(0.25),
+                                KRUNKER_V_NUM(1), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(11), KRUNKER_V_NUM(0)};
+    feed(&link, "9", (KrunkerValue[]) {KRUNKER_V_ARRAY(ray, 11)}, 1);
+    const KrunkerValue ray2[] = {KRUNKER_V_NUM(7), KRUNKER_V_NUM(1), KRUNKER_V_NUM(2), KRUNKER_V_NUM(3), KRUNKER_V_NIL, KRUNKER_V_NIL, KRUNKER_V_NUM(0)};
+    feed(&link, "9", (KrunkerValue[]) {KRUNKER_V_ARRAY(ray2, 7)}, 1);
+    {
+        READ_IN(NetShotPacket, a, SHOT, 0);
+        READ_IN(NetShotPacket, b, SHOT, 1);
+        CHECK(a_p && a.uid == 7 && a.hit[0] == 10 && a.hit[2] == -3 && a.has_normal && a.normal_yaw == 1.5f && a.normal_pitch == 0.25f &&
+              a.trail == 1 && !a.first && a.weapon_index == -1, "9: tracer + impact, no gun sound of its own");
+        CHECK(b_p && !b.has_normal && b.hit[1] == 2, "9: a ray into the air has no impact");
+    }
+    clear();
+
+    // "s": sounds[5] ("weapon_1") at sid 7, volume 0.85, rate 1.05; a name; forcePos; an asset; the long name skipped
+    feed(&link, "s", (KrunkerValue[]) {KRUNKER_V_NUM(5), KRUNKER_V_NUM(7), KRUNKER_V_NUM(1), KRUNKER_V_NUM(2), KRUNKER_V_NUM(3), KRUNKER_V_NUM(0.85),
+                                       KRUNKER_V_NUM(1.05)}, 7);
+    feed(&link, "s", (KrunkerValue[]) {KRUNKER_V_STR("spray"), KRUNKER_V_NUM(7), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NIL,
+                                       KRUNKER_V_NIL, KRUNKER_V_NIL, KRUNKER_V_NIL, KRUNKER_V_BOOL(1)}, 10);
+    feed(&link, "s", (KrunkerValue[]) {KRUNKER_V_NUM(9001), KRUNKER_V_NUM(7), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(1),
+                                       KRUNKER_V_NUM(1), KRUNKER_V_NIL, KRUNKER_V_NIL, KRUNKER_V_NIL, KRUNKER_V_BOOL(1)}, 11);
+    int long_index = -1;
+    for (int i = 0; i < krunker_sound_count(); i++) {
+        if (strlen(krunker_sound_name(i)) >= NET_SOUND_NAME_SIZE) long_index = i;
+    }
+    feed(&link, "s", (KrunkerValue[]) {KRUNKER_V_NUM(long_index), KRUNKER_V_NUM(7)}, 2);
+    feed(&link, "s", (KrunkerValue[]) {KRUNKER_V_NUM(100000), KRUNKER_V_NUM(7)}, 2);
+    {
+        READ_IN(NetSoundPacket, a, SOUND, 0);
+        READ_IN(NetSoundPacket, b, SOUND, 1);
+        READ_IN(NetSoundPacket, c, SOUND, 2);
+        CHECK(krunker_sound_count() == 399 && !strcmp(krunker_sound_name(0), "spray") && !strcmp(krunker_sound_name(5), "weapon_1"),
+              "the official sound table (%d)", krunker_sound_count());
+        CHECK(a_p && !strcmp(a.name, "weapon_1") && a.uid == 7 && a.position[2] == 3 && fabsf(a.volume - 0.85f) < 1e-6f &&
+              fabsf(a.rate - 1.05f) < 1e-6f, "s: sounds[5] at sid 7 (%s)", a.name);
+        CHECK(b_p && !strcmp(b.name, "spray") && b.uid == -1 && b.volume == 1.0f && b.rate == 1.0f, "s: a name, forcePos, vol / rate || 1");
+        CHECK(c_p && !strcmp(c.name, "asset:9001"), "s: isAsset (%s)", c.name);
+        CHECK(long_index >= 0 && !find_in(NET_PACKET_SOUND, 3), "s: a name past NET_SOUND_NAME_SIZE and an unknown index are dropped");
+    }
+    clear();
+
+    // "so" 2D / 3D, "sso"
+    feed(&link, "so", (KrunkerValue[]) {KRUNKER_V_STR("cheer_0"), KRUNKER_V_NUM(0.5), KRUNKER_V_NUM(1)}, 3);
+    feed(&link, "so", (KrunkerValue[]) {KRUNKER_V_NUM(1), KRUNKER_V_NUM(0.4), KRUNKER_V_NUM(0), KRUNKER_V_NUM(4), KRUNKER_V_NUM(5), KRUNKER_V_NUM(6),
+                                        KRUNKER_V_NUM(2)}, 7);
+    feed(&link, "sso", (KrunkerValue[]) {KRUNKER_V_NUM(1)}, 1);
+    {
+        READ_IN(NetSoundPacket, a, SOUND, 0);
+        READ_IN(NetSoundPacket, b, SOUND, 1);
+        READ_IN(NetStopSoundPacket, st, STOP_SOUND, 0);
+        CHECK(a_p && !strcmp(a.name, "cheer_0") && a.uid == -2 && fabsf(a.volume - 0.5f) < 1e-6f, "so: mode 1 is 2D");
+        CHECK(b_p && !strcmp(b.name, "taunt_0") && b.uid == -1 && b.position[1] == 5 && b.rate == 2.0f, "so: 3D at x y z (%s)", b.name);
+        CHECK(st_p && !strcmp(st.name, "taunt_0") && !st.asset, "sso: by index");
+    }
+    clear();
+
+    // "pr": a rocket (weapon 9) of 7, server sid 300 (past our 64 slots); a thrown knife (stored 0); "pre" for both
+    feed(&link, "pr", (KrunkerValue[]) {KRUNKER_V_NUM(1), KRUNKER_V_NUM(2), KRUNKER_V_NUM(3), KRUNKER_V_NUM(M_PI), KRUNKER_V_NUM(0), KRUNKER_V_NUM(9),
+                                        KRUNKER_V_NUM(300), KRUNKER_V_NIL, KRUNKER_V_NIL, KRUNKER_V_NUM(7)}, 10);
+    feed(&link, "pr", (KrunkerValue[]) {KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(M_PI / 2), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0),
+                                        KRUNKER_V_NUM(301), KRUNKER_V_NUM(1), KRUNKER_V_NIL, KRUNKER_V_NUM(7)}, 10);
+    feed(&link, "pr", (KrunkerValue[]) {KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(2),
+                                        KRUNKER_V_NUM(302), KRUNKER_V_NUM(1)}, 8); // a bombardment bomb: no visual of ours
+    {
+        READ_IN(NetProjectilePacket, r, PROJECTILE, 0);
+        READ_IN(NetProjectilePacket, k, PROJECTILE, 1);
+        CHECK(r_p && r.weapon_index == 9 && r.owner_uid == 7 && r.id >= 0 && r.id < GAME_MAX_PROJECTILES && r.position[2] == 3 &&
+              fabsf(r.velocity[2] - 0.6f) < 1e-5f && fabsf(r.velocity[0]) < 1e-5f && r.gravity == 0.0001f && r.range == 1200.0f,
+              "pr: rocket, yaw PI flies +z at its spd (v %g %g %g)", r.velocity[0], r.velocity[1], r.velocity[2]);
+        CHECK(k_p && k.weapon_index == WEAPON_ID_KNIFE && k.id != r.id && fabsf(k.velocity[0] + 0.38f) < 1e-5f && k.range == 1500.0f && !k.ai_kind,
+              "pr: stored[0] the thrown knife (v %g %g %g)", k.velocity[0], k.velocity[1], k.velocity[2]);
+        CHECK(!find_in(NET_PACKET_PROJECTILE, 2), "pr: stored[2] dropped");
+        feed(&link, "pre", (KrunkerValue[]) {KRUNKER_V_NUM(300), KRUNKER_V_NUM(0), KRUNKER_V_NUM(5), KRUNKER_V_NUM(6), KRUNKER_V_NUM(7), KRUNKER_V_NUM(1)}, 6);
+        feed(&link, "pre", (KrunkerValue[]) {KRUNKER_V_NUM(4), KRUNKER_V_NUM(1), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0)}, 6);
+        feed(&link, "pre", (KrunkerValue[]) {KRUNKER_V_NUM(999), KRUNKER_V_NUM(0), KRUNKER_V_NUM(1), KRUNKER_V_NUM(1), KRUNKER_V_NUM(1), KRUNKER_V_NUM(1)}, 6);
+        READ_IN(NetProjectileEndPacket, e, PROJECTILE_END, 0);
+        READ_IN(NetProjectileEndPacket, o, PROJECTILE_END, 1);
+        READ_IN(NetProjectileEndPacket, u, PROJECTILE_END, 2);
+        CHECK(e_p && e.id == r.id && e.impact && e.position[1] == 6, "pre: the rocket's slot, impact");
+        CHECK(o_p && o.id == NET_PROJECTILE_END_OWN - 4 && !o.impact, "pre: our own prediction by shotCntP 4 (%d)", o.id);
+        CHECK(u_p && u.id == -1 && u.impact, "pre: an unknown sid still shows its impact");
+        clear();
+        // the freed slot is reused; a 65th live projectile reuses one round-robin
+        for (int i = 0; i < 70; i++)
+            feed(&link, "pr", (KrunkerValue[]) {KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(9),
+                                                KRUNKER_V_NUM(1000 + i), KRUNKER_V_NIL, KRUNKER_V_NIL, KRUNKER_V_NUM(7)}, 10);
+        int ok = 1;
+        for (int i = 0; i < 70; i++) {
+            const NetPacket *p = find_in(NET_PACKET_PROJECTILE, i);
+            NetProjectilePacket pp;
+            if (!p) { ok = 0; break; }
+            memcpy(&pp, p->payload, sizeof(pp));
+            ok &= pp.id >= 0 && pp.id < GAME_MAX_PROJECTILES;
+        }
+        CHECK(ok, "pr: every projectile gets one of our %d slots", GAME_MAX_PROJECTILES);
+    }
+    clear();
+
+    // "ex"
+    feed(&link, "ex", (KrunkerValue[]) {KRUNKER_V_NUM(10), KRUNKER_V_NUM(20), KRUNKER_V_NUM(30), KRUNKER_V_NUM(40), KRUNKER_V_NUM(3), KRUNKER_V_NUM(2)}, 6);
+    {
+        READ_IN(NetExplosionPacket, x, EXPLOSION, 0);
+        CHECK(x_p && x.position[0] == 10 && x.position[2] == 30 && x.radius == 40, "ex: position, radius");
+    }
+    clear();
+
+    // "k" [11]: 7 hooks on (1, 2, 3), stays hooked (no repeat), lets go
+    KrunkerValue k[13], hook[] = {KRUNKER_V_NUM(1), KRUNKER_V_NUM(2), KRUNKER_V_NUM(3)};
+    for (int i = 0; i < 13; i++) k[i] = KRUNKER_V_NUM(0);
+    k[0] = KRUNKER_V_NUM(7);
+    k[11] = KRUNKER_V_ARRAY(hook, 3);
+    feed(&link, "k", (KrunkerValue[]) {KRUNKER_V_ARRAY(k, 13), KRUNKER_V_NUM(10), KRUNKER_V_NUM(0)}, 3);
+    feed(&link, "k", (KrunkerValue[]) {KRUNKER_V_ARRAY(k, 13), KRUNKER_V_NUM(10), KRUNKER_V_NUM(0)}, 3);
+    k[11] = KRUNKER_V_NIL;
+    feed(&link, "k", (KrunkerValue[]) {KRUNKER_V_ARRAY(k, 13), KRUNKER_V_NUM(10), KRUNKER_V_NUM(0)}, 3);
+    {
+        READ_IN(NetGrapplePacket, g0, GRAPPLE, 0);
+        READ_IN(NetGrapplePacket, g1, GRAPPLE, 1);
+        CHECK(g0_p && g0.uid == 7 && g0.active && g0.point[1] == 2 && g1_p && !g1.active && !find_in(NET_PACKET_GRAPPLE, 2),
+              "k[11]: the rope on a change only");
+    }
+    clear();
+
+    // the rest
+    feed(&link, "pk", (KrunkerValue[]) {KRUNKER_V_NUM(2), KRUNKER_V_NUM(3)}, 2);
+    const KrunkerValue perks[] = {KRUNKER_V_NUM(0), KRUNKER_V_NUM(4)};
+    feed(&link, "upk", (KrunkerValue[]) {KRUNKER_V_NUM(9), KRUNKER_V_ARRAY(perks, 2)}, 2);
+    feed(&link, "bh", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_NUM(2.5)}, 2);
+    feed(&link, "n", (KrunkerValue[]) {KRUNKER_V_NUM(1)}, 1);
+    feed(&link, "bbm", (KrunkerValue[]) {KRUNKER_V_NUM(0)}, 1);
+    feed(&link, "bbm", (KrunkerValue[]) {KRUNKER_V_NUM(1)}, 1);
+    const KrunkerValue snd[] = {KRUNKER_V_STR("loop"), KRUNKER_V_BOOL(1), KRUNKER_V_STR("vol"), KRUNKER_V_NUM(0.3)};
+    feed(&link, "asnd", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_STR("staunt_1"), KRUNKER_V_MAP(snd, 2)}, 3);
+    feed(&link, "asnd", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_STR("jug_0"), KRUNKER_V_MAP(snd, 2)}, 3);
+    feed(&link, "rsnd", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_NIL, KRUNKER_V_BOOL(0)}, 3);
+    feed(&link, "fh", (KrunkerValue[]) {KRUNKER_V_BOOL(1)}, 1);
+    feed(&link, "scr", (KrunkerValue[]) {KRUNKER_V_NUM(1)}, 1);
+    feed(&link, "is", (KrunkerValue[]) {KRUNKER_V_STR("nuke_0"), KRUNKER_V_STR("img/x")}, 2);
+    feed(&link, "camb", (KrunkerValue[]) {KRUNKER_V_STR("3")}, 1);
+    feed(&link, "camb", (KrunkerValue[]) {KRUNKER_V_STR("77"), KRUNKER_V_BOOL(1)}, 2);
+    feed(&link, "shk", (KrunkerValue[]) {KRUNKER_V_NUM(0.4)}, 1);
+    feed(&link, "ana", (KrunkerValue[]) {KRUNKER_V_NUM(12), KRUNKER_V_NUM(5), KRUNKER_V_BOOL(0), KRUNKER_V_BOOL(1)}, 4);
+    feed(&link, "ana", (KrunkerValue[]) {KRUNKER_V_NUM(3), KRUNKER_V_STR("Dance"), KRUNKER_V_BOOL(1)}, 3);
+    {
+        READ_IN(NetEffectPacket, ef, EFFECT, 0);
+        READ_IN(NetPerksPacket, pk, PERKS, 0);
+        READ_IN(NetModeCounterPacket, bh, MODE_COUNTER, 0);
+        READ_IN(NetNukePacket, nk, NUKE, 0);
+        READ_IN(NetSoundPacket, ad, SOUND, 0);
+        READ_IN(NetSoundPacket, is, SOUND, 1);
+        READ_IN(NetPlayerSoundPacket, as, PLAYER_SOUND, 0);
+        READ_IN(NetPlayerSoundPacket, rs, PLAYER_SOUND, 1);
+        READ_IN(NetCheatPacket, fh, CHEAT, 0);
+        READ_IN(NetJumpScarePacket, sc, JUMP_SCARE, 0);
+        READ_IN(NetAmbientPacket, am, AMBIENT_CHANGE, 0);
+        READ_IN(NetObjectAnimPacket, oa, OBJECT_ANIM, 0);
+        READ_IN(NetAIAnimPacket, aa, AI_ANIM, 0);
+        uint16_t sl = 0;
+        const uint8_t *shk = NULL;
+        for (int i = 0; i < 4 && !shk; i++) shk = ext_body(i, NET_EXT_KN_OFFICIAL_SHAKE, &sl);
+        NetOfficialShakePacket shake = {0};
+        if (shk && sl == sizeof(shake)) memcpy(&shake, shk, sizeof(shake));
+        CHECK(ef_p && ef.effect == 2 && ef.count == 3, "pk");
+        CHECK(pk_p && pk.uid == 9 && pk.count == 2 && pk.perks[1] == 4, "upk");
+        CHECK(bh_p && bh.kind == NET_MODE_COUNTER_HEAD && bh.uid == 7 && bh.value == 2.5f, "bh");
+        CHECK(nk_p && nk.state == 1, "n");
+        CHECK(ad_p && !strcmp(ad.name, "adrop_0") && ad.uid == -2 && !find_in(NET_PACKET_SOUND, 2) && is_p && !strcmp(is.name, "nuke_0") &&
+              is.uid == -2, "bbm 0 -> adrop_0 (1: nothing), is -> its 2D sound");
+        CHECK(as_p && as.add && as.loop && as.uid == 7 && !strcmp(as.name, "staunt_1") && fabsf(as.volume - 0.3f) < 1e-6f && as.rate == 1.0f,
+              "asnd");
+        CHECK(rs_p && !rs.add && rs.force && rs.uid == 7 && !find_in(NET_PACKET_PLAYER_SOUND, 2), "rsnd without a name: all; asnd jug_0 skipped");
+        CHECK(fh_p && fh.flag == NET_CHEAT_FORCE_HIDE && fh.on, "fh");
+        CHECK(sc_p && sc.index == 1, "scr");
+        CHECK(am_p && am.ambient == 3 && !find_in(NET_PACKET_AMBIENT_CHANGE, 1), "camb parseInt, a custom one dropped");
+        CHECK(shk && fabsf(shake.amount - 0.4f) < 1e-6f, "shk -> NET_EXT_KN_OFFICIAL_SHAKE");
+        CHECK(oa_p && oa.uid == 12 && oa.is_object && !oa.raw && !strcmp(oa.clip, "Shoot"), "ana: a map object, clipNames[5]");
+        CHECK(aa_p && aa.sid == 3 && aa.raw && !strcmp(aa.clip, "Dance"), "ana: an AI's raw clip");
+        CHECK(link.unknown_in == 0, "every fx packet translated (%u unknown)", link.unknown_in);
+    }
     clear();
 }
 
@@ -1370,6 +1570,7 @@ int main(void) {
     }
     test_hud();
     test_combat();
+    test_fx();
 
     printf("%d/%d passed\n", g_pass, g_pass + g_fail);
     return g_fail ? 1 : 0;

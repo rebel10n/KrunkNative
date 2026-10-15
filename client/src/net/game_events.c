@@ -1092,6 +1092,11 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             else if (subtype == NET_EXT_PLAYER_SPEED_BOOST || subtype == NET_EXT_PLAYER_NAME) events_player_ext(client, subtype, body, body_length);
             else if (subtype == NET_EXT_KN_BOT_PATH) nav_overlay_bot_path(client, body, body_length); // the spectated bot's route (nav_overlay.c)
             else if (subtype >= NET_EXT_KN_OFFICIAL_AMMO && subtype <= NET_EXT_KN_OFFICIAL_LEADER_BOARD) events_official_hud(client, subtype, body, body_length);
+            else if (subtype == NET_EXT_KN_OFFICIAL_SHAKE && body_length == sizeof(NetOfficialShakePacket)) { // "shk"
+                NetOfficialShakePacket shake;
+                memcpy(&shake, body, sizeof(shake));
+                if (isfinite(shake.amount)) camera_feel_shake(shake.amount);
+            }
             return 1;
         }
         default:
