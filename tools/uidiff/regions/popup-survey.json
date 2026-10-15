@@ -1,0 +1,20 @@
+{
+  "scenario": "popup-survey",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "popup",
+      "rect": [
+        10,
+        456,
+        242,
+        220
+      ],
+      "kind": "popup",
+      "note": "the survey notification in v10's notification centre (the chat holder, bottom left, above the chat input)"
+    }
+  ]
+}

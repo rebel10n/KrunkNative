@@ -16,6 +16,7 @@
 #include <backend.h>
 #include <backend_ui.h>
 #include <ui_logic.h>
+#include <v10_misc_popups.h>
 #include <html_ui.h>
 #include <ctype.h>
 #include <stdint.h>
@@ -943,6 +944,7 @@ void v10_news_setup(void) {
     HtmlElem guide = html_dom_by_id("menuBtnGuide");
     if (!guide) return; // not the v10 page
     html_ui_add_stylesheet("css/kn-v10-news.css");
+    v10_misc_popups_setup(); // the Svelte popups v10 mounts with the page (k-ID intro; css/kn-v10-popups.css)
     menu_item_action(html_dom_closest(guide, ".menuItem"), "openGuide()");
     menu_item_action(html_dom_query(html_dom_by_id("updateAd"), ".menuItem"), "showWindow(35)");
     HtmlElem community = html_dom_by_id("menuBtnSideCommunity");
@@ -956,6 +958,7 @@ void v10_news_setup(void) {
 }
 
 void v10_news_tick(void) {
+    v10_misc_popups_tick(); // countdowns of the open mission briefing, lottery and survey
     update_ad_tick();
     // the What's New item is up: its news are fetched before the click (news_fetch: once per TTL)
     if (L.ad_shown == 1) news_fetch();
@@ -963,6 +966,8 @@ void v10_news_tick(void) {
 
 int v10_news_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     if (!name) return -1;
+    const int misc = v10_misc_popups_handle(name, ev, args, argc); // knMisc*, openLottery, manageAccNames
+    if (misc >= 0) return misc;
     const char *s0 = argc > 0 && args[0].kind == HTML_ARG_STR ? args[0].str : NULL;
     if (!strcmp(name, "openGuide") || !strcmp(name, "window.openGuide")) {
         v10_news_open_guide(s0);
@@ -1000,10 +1005,11 @@ int v10_news_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
     return -1;
 }
 
-// --render-scenario state.community: {events, polls, news} as the brain would answer, no requests
+// --render-scenario state.community: {events, polls, news, popups} as the brain would answer, no requests
 void v10_news_scenario(const cJSON *community) {
     if (!cJSON_IsObject(community)) return;
     L.scenario = 1;
+    v10_misc_popups_scenario(cJSON_GetObjectItem(community, "popups"));
     const cJSON *ev = cJSON_GetObjectItem(community, "events"), *po = cJSON_GetObjectItem(community, "polls");
     const cJSON *news = cJSON_GetObjectItem(community, "news");
     cJSON_Delete(E.events);

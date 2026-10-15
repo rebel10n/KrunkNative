@@ -1,0 +1,65 @@
+{
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Player",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "community": {
+      "popups": {
+        "open": "premium",
+        "premium": {
+          "shop": {
+            "children": [
+              {
+                "id": 1,
+                "product_id": "p1",
+                "data": {
+                  "tag": "popular"
+                }
+              }
+            ],
+            "products": {
+              "p1": {
+                "id": "p1",
+                "name": "Krunker Premium",
+                "description": "Premium access for every match",
+                "available": true,
+                "headCol": "#ffc147",
+                "image_url": "",
+                "prices": [
+                  {
+                    "available": true,
+                    "type": "real",
+                    "real": {
+                      "price_usd": 9.99
+                    },
+                    "recurring": {
+                      "amount": 1,
+                      "periodicity": "month"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "subscriptions": []
+        }
+      }
+    }
+  },
+  "frames": 3,
+  "note": "NO v10 REFERENCE: v10 never shows the premium subscription branch (behind () => !0x0, v10:129547). Regression baseline of this port only.",
+  "ref": "doc/ref/krunknative/popup-premium.png"
+}

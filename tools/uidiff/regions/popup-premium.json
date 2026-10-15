@@ -1,0 +1,20 @@
+{
+  "scenario": "popup-premium",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "popup",
+      "rect": [
+        263,
+        116,
+        753,
+        487
+      ],
+      "kind": "popup",
+      "note": "the premium subscription shop"
+    }
+  ]
+}

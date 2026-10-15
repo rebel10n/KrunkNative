@@ -68,6 +68,9 @@ static struct {
         int visible;
         char title[64], text[256], button[24], color[16], icon[16];
         int force_close;
+        int intro;                // 200 ms after it appeared: Svelte's scale / fade intro (g:114154-114158)
+        int outro;                // 200 ms after the button / Escape hid it: the same transition backwards
+        int timer;                // the intro / outro's end (overlay_done)
     } overlay;
     int buying;                   // a purchase in flight
     int tick_timer;
@@ -212,6 +215,24 @@ static void clear_state(void) { // clearState
     update_banner();
 }
 
+// v10's message overlay mounts and unmounts with `transition:scale={{start: 0.9, duration: 200}}` and fade:
+// both ways, 200 ms (g:114154-114158, the 'both' transitions). The intro and outro classes ride on every
+// render inside their 200 ms, so the poll's re-renders do not cut the animation short.
+static void overlay_done(void *user) {
+    (void) user;
+    R.overlay.timer = 0;
+    R.overlay.intro = 0;
+    if (R.overlay.outro) {
+        R.overlay.outro = 0;
+        render(); // the outro is over: the overlay is unmounted
+    }
+}
+
+static void overlay_timer_restart(void) {
+    if (R.overlay.timer) html_timer_cancel(R.overlay.timer);
+    R.overlay.timer = html_timer_add(200, overlay_done, NULL);
+}
+
 static void show_overlay(const char *title, const char *text, const char *button, const char *color, const char *icon, const int force_close) {
     R.overlay.visible = 1;
     snprintf(R.overlay.title, sizeof(R.overlay.title), "%s", title);
@@ -220,6 +241,9 @@ static void show_overlay(const char *title, const char *text, const char *button
     snprintf(R.overlay.color, sizeof(R.overlay.color), "%s", color ? color : "#5ce05a");
     snprintf(R.overlay.icon, sizeof(R.overlay.icon), "%s", icon ? icon : "");
     R.overlay.force_close = force_close;
+    R.overlay.intro = 1;
+    R.overlay.outro = 0;
+    overlay_timer_restart();
 }
 
 static void internal_error(void) {
@@ -638,11 +662,17 @@ int ranked_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
     if (!strcmp(name, "knRkTab")) {
         if (arg0 >= 0 && arg0 < TAB_COUNT) R.tab = arg0;
     } else if (!strcmp(name, "knRkOverlay")) { // the overlay's button / Escape
+        const int was_shown = R.overlay.visible;
         R.overlay.visible = 0;
         if (R.overlay.force_close) {
             render();
             v10_popup_close();
             return 1;
+        }
+        if (was_shown) { // the outro: the same transition backwards (the overlay unmounts when it ends)
+            R.overlay.intro = 0;
+            R.overlay.outro = 1;
+            overlay_timer_restart();
         }
     } else if (!strcmp(name, "knRkAllRegions")) {
         int on = !R.all_regions;
@@ -1172,12 +1202,14 @@ static void gen_shop(StrBuf *sb) {
     sb_append(sb, "</div></div>");
 }
 
+// The overlay's markup: kn-ranked-intro while it mounts, kn-ranked-outro while it unmounts (css/kn-v10-popups.css).
 static void gen_overlay(StrBuf *sb) {
-    if (!R.overlay.visible) {
+    if (!R.overlay.visible && !R.overlay.outro) {
         sb_append(sb, "<!---->");
         return;
     }
-    sb_append(sb, "<div class=\"overlay-container svelte-jxc66d\"><div class=\"overlay-content svelte-jxc66d\">");
+    const char *cls = R.overlay.intro ? " kn-ranked-intro" : !R.overlay.visible ? " kn-ranked-outro" : "";
+    sb_appendf(sb, "<div class=\"overlay-container svelte-jxc66d%s\"><div class=\"overlay-content svelte-jxc66d\">", cls);
     if (R.overlay.icon[0]) {
         sb_append(sb, "<div class=\"emoji-icon svelte-jxc66d\">");
         emoji(sb, R.overlay.icon, "overlay-emoji");

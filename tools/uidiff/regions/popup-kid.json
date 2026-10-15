@@ -1,0 +1,20 @@
+{
+  "scenario": "popup-kid",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "popup",
+      "rect": [
+        64,
+        44,
+        1154,
+        632
+      ],
+      "kind": "popup",
+      "note": "the k-ID GDC 2025 dialog"
+    }
+  ]
+}

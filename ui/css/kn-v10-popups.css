@@ -1,0 +1,71 @@
+/* KrunkNative overrides for the Svelte popups v10 mounts that the port builds in
+   client/src/ui/v10_misc_popups.c and client/src/ui/ranked_ui.c. Everything else is ui/css/svelte.css's
+   (v10's own copy, never edited). */
+
+/* ---- k-ID dialog (svelte-lbi007, v10:118640 / mounted v10:223353): a <dialog> in the top layer with its
+   ::backdrop (rgba(0,0,0,0.8), blur(5px) where the engine can blur). Here a fixed layer stands in for it. */
+.kn-kid-layer {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2147483000;
+    overflow: auto;
+}
+/* transition:fly={{y: 20, duration: 500}}: opacity 0 -> 1 and 20 px -> 0 with Svelte's cubicOut, which is
+   cubic-bezier(1/3, 1, 2/3, 1) exactly (y = 1 - (1 - t)^3) */
+.kn-kid-fly {
+    animation: knKidFly 500ms cubic-bezier(0.333333, 1, 0.666667, 1) both;
+}
+@keyframes knKidFly {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* ---- ranked message overlay (ranked_ui.c, v10 g:114154-114158, both transitions 200 ms): the root fades
+   (linear); the box scales 0.9 <-> 1 with its opacity (Svelte's scale: both eased with cubicOut). In the
+   outro Svelte runs the same curve from t = 1 to 0, which is 1 - u^3 for the real progress u: easeIn cubic,
+   cubic-bezier(1/3, 0, 2/3, 0) exactly. */
+.kn-ranked-intro {
+    animation: knRankedFade 200ms linear both;
+}
+.kn-ranked-intro > .overlay-content {
+    animation: knRankedScale 200ms cubic-bezier(0.333333, 1, 0.666667, 1) both;
+}
+.kn-ranked-outro {
+    animation: knRankedFadeOut 200ms linear both;
+    pointer-events: none;
+}
+.kn-ranked-outro > .overlay-content {
+    animation: knRankedScaleOut 200ms cubic-bezier(0.333333, 0, 0.666667, 0) both;
+}
+@keyframes knRankedFade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+@keyframes knRankedFadeOut {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+@keyframes knRankedScale {
+    from { opacity: 0; transform: scale(0.9); }
+    to { opacity: 1; transform: scale(1); }
+}
+@keyframes knRankedScaleOut {
+    from { opacity: 1; transform: scale(1); }
+    to { opacity: 0; transform: scale(0.9); }
+}
+
+
+/* ---- k-ID benefit icons: v10 draws these as colour emoji (the system's emoji font); the port has no colour
+   emoji font, so they are images (ui/img/kid/*.svg, drawn for this port, not v10's own artwork). */
+.kn-kid-layer .benefit-icon .kid-icon {
+    width: 1.2em;
+    height: 1.2em;
+    vertical-align: middle;
+}

@@ -1,0 +1,34 @@
+{
+  "scenario": "seq-ranked-overlay-open",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "overlay",
+      "rect": [
+        477,
+        266,
+        326,
+        188
+      ],
+      "kind": "popup",
+      "note": "the message overlay's box (the intro's scale and fade in progress)",
+      "pending": "S7: no reference frames (v10 unreachable offline; KrunkNative renders not committed)"
+    }
+  ],
+  "timing": [
+    {
+      "name": "overlay-intro",
+      "rect": [
+        477,
+        266,
+        326,
+        188
+      ],
+      "threshold": 0.5,
+      "pending": "S7: no reference frames (v10 unreachable offline; KrunkNative renders not committed)"
+    }
+  ]
+}

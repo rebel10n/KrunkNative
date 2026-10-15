@@ -1,0 +1,20 @@
+{
+  "scenario": "popup-mission-briefing",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "popup",
+      "rect": [
+        312,
+        160,
+        656,
+        400
+      ],
+      "kind": "popup",
+      "note": "the Operation: Ghost Recruit modal"
+    }
+  ]
+}

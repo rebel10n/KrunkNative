@@ -162,6 +162,21 @@ module.exports = function (seq, V) {
   seq('tooltip-loadout', {
     unreachable: 'a guest owns no skins: Change Loadout lists no item with createTip (0 on every tab), and the store window (showWindow(14)) throws without the signed-in store data',
   });
+  // openRankedMenu() for a signed-in account below level 10 (v10:113127-113140: "Level Required", forceClose):
+  // the message overlay mounts with transition:scale={{start: 0.9, duration: 200}} and fade, both ways
+  // (g:114154-114158). The three frames are 80, 120 and 160 ms after it mounted.
+  seq('ranked-overlay-open', {
+    bg: '#000000', times: [80, 120, 160],
+    prepare: async (c) => { await menu(c); },
+    trigger: async (c) => {
+      await evalOk(c, `window.__knScope().setAcc({ name: 'Sidney', level: 5, isDev: false, funds: 2500, score: 2600000,
+        stats: {}, skins: [], badges: [], getSkinCount: () => 0 }); window.openRankedMenu()`, 'openRankedMenu');
+    },
+    origin: `[...document.querySelectorAll('.overlay-title')].some((e) => e.textContent === 'Level Required')`,
+    originNote: 'the Level Required overlay mounts (v10:113127-113140, openRankedMenu for a level 5 account)',
+    note: 'The ranked message overlay opening: the root fades (linear) and the box scales 0.9 -> 1 with its opacity (cubicOut), 200 ms, g:114154-114158.',
+    unreachable: 'the offline sandbox never mounts v10\'s ranked component: openRankedMenu needs the ranked client the sign-in handler creates (v10:210029), and setAcc alone does not create it (the Level Required overlay never mounts). The uidiff scenario seq-ranked-overlay-open is skipped as unreachable; KrunkNative renders its frames with --render-scenario',
+  });
   seq('ranked-leaderboard-open', {
     unreachable: 'the Ranked popup\'s leaderboard needs a signed-in account and matchmaker / API answers; the offline sandbox is a guest and only reaches ranked-guest (doc/ref/krunker-v10.0.2/ranked-guest.png)',
   });

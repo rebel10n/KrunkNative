@@ -1,0 +1,33 @@
+{
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Player",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "community": {
+      "popups": {
+        "open": "hook",
+        "hook": {
+          "kr": 14,
+          "score": 2600,
+          "secs": 30
+        }
+      }
+    }
+  },
+  "frames": 3,
+  "note": "NO v10 REFERENCE: v10 never enables the guest mission manager (config.enabled = false, v10:118812). Regression baseline of this port only.",
+  "ref": "doc/ref/krunknative/popup-mission-briefing.png"
+}

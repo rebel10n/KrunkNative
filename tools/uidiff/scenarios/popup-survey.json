@@ -1,0 +1,50 @@
+{
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Player",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "ffa on Kanji",
+    "anim_time": 0.8,
+    "community": {
+      "popups": {
+        "open": "survey",
+        "survey": {
+          "surveyId": "kn-demo",
+          "question": "How is your Krunker Box Office experience so far?",
+          "answers": [
+            "Great",
+            "Good",
+            "Okay",
+            "Bad"
+          ],
+          "rewardAmount": 10,
+          "secondsLeft": 118.8,
+          "durationSeconds": 120
+        }
+      }
+    },
+    "account": {
+      "name": "Sidney",
+      "score": 2600000,
+      "funds": 2500,
+      "premium": 0,
+      "clan": "AAA",
+      "badges": [],
+      "stats": {}
+    }
+  },
+  "frames": 3,
+  "note": "the GAME_SURVEY notification on the toast stack, bottom right (v10 capture)",
+  "ref": "doc/ref/krunker-v10/popups/popup-survey.png"
+}

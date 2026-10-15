@@ -1,0 +1,20 @@
+{
+  "scenario": "popup-usernames",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "popup",
+      "rect": [
+        370,
+        152,
+        540,
+        416
+      ],
+      "kind": "popup",
+      "note": "the Usernames modal"
+    }
+  ]
+}
