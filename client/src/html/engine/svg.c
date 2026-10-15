@@ -66,6 +66,9 @@ typedef struct {
  * its shapes sit between two sentinel shapes "__knfxb<i>" / "__knfxe<i>". */
 typedef struct {
     int filter, clip, mask;
+    float ctm[6];      /* the element's user space in the root's (its own transform and its
+                        * ancestors'): where its mask / clip content (userSpaceOnUse) and its
+                        * filter's offsets and blur live (nanosvg layout: x' = a x + c y + e) */
 } SvgFx;
 
 struct SvgImage {
@@ -417,10 +420,12 @@ static char *svg_rewrite_rgba(const char *text, const size_t len, size_t *out_le
  * definitions are cut out of the document and every element that uses one is
  * wrapped in two sentinel shapes; a raster pass then draws the shapes between
  * them into a layer of their own, applies the filter, the clip path and the
- * mask (that order, as SVG does) and composites the layer.  Limits: the
- * definitions are drawn in the root's user space (an ancestor transform of
- * the element is not applied to them), mask/clip content units are
- * userSpaceOnUse, and a filter is read as its shadows (SvgFilter). */
+ * mask (that order, as SVG does) and composites the layer.  The definitions
+ * and the filter's offsets / blur live in the user space of the element using
+ * them (SvgFx.ctm: its transform and its ancestors', as SVG's userSpaceOnUse
+ * says; Krunker Strike's ticket-outline.svg masks a path inside a scaled <g>).
+ * Limits: mask/clip content units are userSpaceOnUse, and a filter is read as
+ * its shadows (SvgFilter). */
 
 typedef struct {
     const char *start, *end; /* '<' .. past '>' */
@@ -601,6 +606,7 @@ static void svg_fx_prepare(SvgImage *svg) {
         int fx;            /* fx index or -1 */
         const char *start; /* '<' of the start tag */
         const char *content;
+        float xf[6];       /* the element's user space in the root's */
     } stack[64];
     int depth = 0, in_def = 0, in_filter = -1;
     SvgCut cuts[SVG_MAX_REFS + SVG_MAX_FILTERS];
@@ -659,6 +665,20 @@ static void svg_fx_prepare(SvgImage *svg) {
         }
 
         int def = 0, index = -1, fx = -1;
+        /* this element's user space: its transform, then its parent's */
+        float xf[6];
+        nsvg__xformIdentity(xf);
+        {
+            size_t tl = 0;
+            const char *tv = svg_tag_attr(&t, "transform", &tl);
+            char tb[512];
+            if (tv && tl < sizeof tb) {
+                memcpy(tb, tv, tl);
+                tb[tl] = 0;
+                nsvg__parseTransform(xf, tb);
+            }
+            if (depth > 0) nsvg__xformMultiply(xf, stack[depth - 1].xf);
+        }
         if (svg_tag_is(&t, "mask") || svg_tag_is(&t, "clipPath")) {
             def = svg_tag_is(&t, "mask") ? 1 : 2;
             if (svg->nrefs < SVG_MAX_REFS && !t.self_closing) {
@@ -731,6 +751,7 @@ static void svg_fx_prepare(SvgImage *svg) {
             const int hm = svg_tag_url(&t, "mask", c, sizeof c);
             if (hf || hc || hm) {
                 fx = svg->nfx++;
+                memcpy(svg->fx[fx].ctm, xf, sizeof xf);
                 pend[fx].start = t.start;
                 memcpy(pend[fx].filter, a, sizeof a);
                 memcpy(pend[fx].clip, b, sizeof b);
@@ -746,6 +767,7 @@ static void svg_fx_prepare(SvgImage *svg) {
         stack[depth].fx = fx;
         stack[depth].start = t.start;
         stack[depth].content = t.end;
+        memcpy(stack[depth].xf, xf, sizeof xf);
         depth++;
         if (def) in_def++;
     }
@@ -951,7 +973,7 @@ static void svg_blur(float *a, float *tmp, const int w, const int h, const float
     }
 }
 
-static void svg_apply_filter(const SvgCtx *c, const SvgFilter *f, unsigned char *layer) {
+static void svg_apply_filter(const SvgCtx *c, const SvgFilter *f, const float *ctm, unsigned char *layer) {
     const size_t n = (size_t) c->w * (size_t) c->h;
     float *alpha = malloc(n * sizeof *alpha), *sh = malloc(n * sizeof *sh), *tmp = malloc(n * sizeof *tmp);
     unsigned char *out = calloc(1, n * 4), *spx = malloc(n * 4);
@@ -962,7 +984,9 @@ static void svg_apply_filter(const SvgCtx *c, const SvgFilter *f, unsigned char 
         for (int s = 0; s < f->count; s++) {
             const SvgShadow *d = &f->sh[s];
             if (d->inner != pass) continue;
-            const float ox = d->dx * c->sx, oy = d->dy * c->sy;
+            /* dx / dy / stdDeviation are in the element's user space (primitiveUnits userSpaceOnUse) */
+            const float ox = (ctm[0] * d->dx + ctm[2] * d->dy) * c->sx, oy = (ctm[1] * d->dx + ctm[3] * d->dy) * c->sy;
+            const float ks = sqrtf(fabsf(ctm[0] * ctm[3] - ctm[1] * ctm[2]));
             for (int y = 0; y < c->h; y++)
                 for (int x = 0; x < c->w; x++) { /* the source alpha moved by (ox, oy), bilinear */
                     const float fx = (float) x - ox, fy = (float) y - oy;
@@ -977,7 +1001,7 @@ static void svg_apply_filter(const SvgCtx *c, const SvgFilter *f, unsigned char 
                         }
                     sh[(size_t) y * (size_t) c->w + (size_t) x] = v;
                 }
-            if (d->sd > 0.0f) svg_blur(sh, tmp, c->w, c->h, d->sd * 0.5f * (c->sx + c->sy));
+            if (d->sd > 0.0f) svg_blur(sh, tmp, c->w, c->h, d->sd * ks * 0.5f * (c->sx + c->sy));
             for (size_t i = 0; i < n; i++) {
                 const float hard = fminf(1.0f, alpha[i] * 127.0f); /* the exporters' hardAlpha */
                 float a = d->inner ? fmaxf(0.0f, hard - sh[i]) : sh[i] * (d->out ? 1.0f - hard : 1.0f);
@@ -997,10 +1021,32 @@ done:
     free(spx);
 }
 
+/* The definition's content placed in the user space of the element using it (ctm): the root's
+ * attributes, then the content in a <g transform="matrix(ctm)">. */
+static NSVGimage *svg_parse_ref(const SvgCtx *c, const SvgRef *r, const float *ctm) {
+    if (!r->tail) return NULL;
+    const char *gt = memchr(r->tail, '>', r->tail_len);
+    static const char close[] = "</svg>";
+    if (!gt || r->tail_len < sizeof close - 1 + (size_t) (gt + 1 - r->tail)) return NULL;
+    const size_t head = (size_t) (gt + 1 - r->tail), body = r->tail_len - head - (sizeof close - 1);
+    char g[200];
+    const int gl = snprintf(g, sizeof g, "<g transform=\"matrix(%.9g %.9g %.9g %.9g %.9g %.9g)\">", (double) ctm[0], (double) ctm[1],
+                            (double) ctm[2], (double) ctm[3], (double) ctm[4], (double) ctm[5]);
+    const size_t n = head + (size_t) gl + body + 4 + sizeof close - 1;
+    char *t = malloc(n + 1);
+    if (!t) return NULL;
+    snprintf(t, n + 1, "%.*s%s%.*s</g>%s", (int) head, r->tail, g, (int) body, gt + 1, close);
+    NSVGimage *img = svg_parse_tail(c->svg, t, n, c->attrs, c->al);
+    free(t);
+    return img;
+}
+
 /* layer *= the mask's luminance x alpha, or the clip path's alpha */
-static void svg_apply_ref(const SvgCtx *c, const SvgRef *r, unsigned char *layer) {
+static void svg_apply_ref(const SvgCtx *c, const SvgRef *r, const float *ctm, unsigned char *layer) {
     const size_t n = (size_t) c->w * (size_t) c->h;
-    NSVGimage *img = r->tail ? svg_parse_tail(c->svg, r->tail, r->tail_len, c->attrs, c->al) : NULL;
+    NSVGimage *img = svg_parse_ref(c, r, ctm);
+    float inv[6];
+    nsvg__xformInverse(inv, (float *) ctm);
     unsigned char *m = img ? malloc(n * 4) : NULL;
     if (m) nsvgRasterize(c->rast, img, c->tx, c->ty, c->rs, m, c->w, c->h, c->w * 4);
     for (int y = 0; y < c->h; y++)
@@ -1012,7 +1058,8 @@ static void svg_apply_ref(const SvgCtx *c, const SvgRef *r, unsigned char *layer
                 v = r->clip ? q[3] : (unsigned) ((0.2125f * (float) q[0] + 0.7154f * (float) q[1] + 0.0721f * (float) q[2]) * (float) q[3] / 255.0f + 0.5f);
             }
             if (r->has_rect) {
-                const float px = ((float) x + 0.5f - c->tx) / c->sx, py = ((float) y + 0.5f - c->ty) / c->sy;
+                const float ux = ((float) x + 0.5f - c->tx) / c->sx, uy = ((float) y + 0.5f - c->ty) / c->sy;
+                const float px = inv[0] * ux + inv[2] * uy + inv[4], py = inv[1] * ux + inv[3] * uy + inv[5]; /* the element's space */
                 if (px < r->rect[0] || py < r->rect[1] || px > r->rect[0] + r->rect[2] || py > r->rect[1] + r->rect[3]) v = 0;
             }
             for (int k = 0; k < 4; k++) layer[i * 4 + k] = svg_mul8(layer[i * 4 + k], v);
@@ -1024,8 +1071,8 @@ static void svg_apply_ref(const SvgCtx *c, const SvgRef *r, unsigned char *layer
 /* A masked element nanosvg draws nothing of (a pattern or <image> fill, e.g.
  * battlepass/unlocked_front.svg): the mask's own shapes stand in for it, as
  * they did before masks were applied, rather than nothing at all. */
-static void svg_ref_stand_in(const SvgCtx *c, const SvgRef *r, unsigned char *layer) {
-    NSVGimage *img = r->tail ? svg_parse_tail(c->svg, r->tail, r->tail_len, c->attrs, c->al) : NULL;
+static void svg_ref_stand_in(const SvgCtx *c, const SvgRef *r, const float *ctm, unsigned char *layer) {
+    NSVGimage *img = svg_parse_ref(c, r, ctm);
     if (!img) return;
     nsvgRasterize(c->rast, img, c->tx, c->ty, c->rs, c->tmp, c->w, c->h, c->w * 4);
     svg_over(layer, c->tmp, (size_t) c->w * (size_t) c->h, 0);
@@ -1062,13 +1109,13 @@ static NSVGshape *svg_render_seq(SvgCtx *c, NSVGshape *s, const int stop, unsign
             if (!layer) return NULL;
             NSVGshape *next = svg_render_seq(c, s->next, k, layer);
             const SvgFx *fx = &c->svg->fx[k];
-            if (fx->filter >= 0) svg_apply_filter(c, &c->svg->filters[fx->filter], layer);
-            if (fx->clip >= 0) svg_apply_ref(c, &c->svg->refs[fx->clip], layer);
+            if (fx->filter >= 0) svg_apply_filter(c, &c->svg->filters[fx->filter], fx->ctm, layer);
+            if (fx->clip >= 0) svg_apply_ref(c, &c->svg->refs[fx->clip], fx->ctm, layer);
             if (fx->mask >= 0) {
                 size_t i = 0;
                 while (i < pixels && !layer[i * 4 + 3]) i++;
-                if (i == pixels) svg_ref_stand_in(c, &c->svg->refs[fx->mask], layer);
-                else svg_apply_ref(c, &c->svg->refs[fx->mask], layer);
+                if (i == pixels) svg_ref_stand_in(c, &c->svg->refs[fx->mask], fx->ctm, layer);
+                else svg_apply_ref(c, &c->svg->refs[fx->mask], fx->ctm, layer);
             }
             svg_over(dst, layer, pixels, 1);
             free(layer);

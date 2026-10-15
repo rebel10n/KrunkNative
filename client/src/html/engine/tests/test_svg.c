@@ -350,6 +350,75 @@ static void test_fx(const char *root) {
     svg_image_destroy(s);
 }
 
+/* Masks, clip paths and filters live in the user space of the element using them (its transform
+ * and its ancestors'), and Inkscape's feFlood / feComposite / feGaussianBlur / feOffset / feMerge
+ * drop shadow is read as one. */
+static void test_fx_space(const char *root) {
+    static const char scaled[] =
+        "<svg width=\"40\" height=\"40\" viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\">"
+        "<g transform=\"scale(4)\">"
+        "<mask id=\"m\" maskUnits=\"userSpaceOnUse\" x=\"0\" y=\"0\" width=\"10\" height=\"10\" fill=\"#000\">"
+        "<rect x=\"0\" y=\"0\" width=\"10\" height=\"10\" fill=\"#fff\"/><rect x=\"2\" y=\"2\" width=\"3\" height=\"3\"/></mask>"
+        "<rect x=\"0\" y=\"0\" width=\"10\" height=\"10\" fill=\"#ff0000\" mask=\"url(#m)\"/></g></svg>";
+    SvgImage *s = svg_image_create((const unsigned char *) scaled, sizeof scaled - 1);
+    unsigned char *px = s ? svg_image_rasterize(s, 40, 40) : NULL;
+    CHECK(px != NULL);
+    if (px) {
+#define AT(x, y) (px + ((y) * 40 + (x)) * 4)
+        CHECK(AT(14, 14)[3] == 0);                       /* the hole at (2..5) x 4 = 8..20 px */
+        CHECK(AT(30, 30)[0] == 255 && AT(30, 30)[3] == 255); /* masked in */
+        CHECK(AT(5, 30)[3] == 255);                      /* the mask rect is 0..10 x 4: all in */
+#undef AT
+        free(px);
+    }
+    svg_image_destroy(s);
+
+    static const char shadow[] =
+        "<svg width=\"40\" height=\"40\" viewBox=\"0 0 40 40\" xmlns=\"http://www.w3.org/2000/svg\">"
+        "<defs><filter id=\"f\" x=\"-1\" y=\"-1\" width=\"3\" height=\"3\">"
+        "<feFlood flood-color=\"#000000\" flood-opacity=\"1\" result=\"flood\"/>"
+        "<feComposite in=\"flood\" in2=\"SourceGraphic\" operator=\"in\" result=\"c\"/>"
+        "<feGaussianBlur in=\"c\" stdDeviation=\"0\" result=\"b\"/><feOffset dx=\"2\" dy=\"2\" result=\"o\"/>"
+        "<feMerge><feMergeNode in=\"o\"/><feMergeNode in=\"SourceGraphic\"/></feMerge></filter></defs>"
+        "<g transform=\"scale(2)\"><rect x=\"4\" y=\"4\" width=\"8\" height=\"8\" fill=\"#ffffff\" filter=\"url(#f)\"/></g></svg>";
+    s = svg_image_create((const unsigned char *) shadow, sizeof shadow - 1);
+    px = s ? svg_image_rasterize(s, 40, 40) : NULL;
+    CHECK(px != NULL);
+    if (px) {
+#define AT(x, y) (px + ((y) * 40 + (x)) * 4)
+        CHECK(AT(16, 16)[0] == 255 && AT(16, 16)[3] == 255); /* the source on top */
+        CHECK(AT(26, 26)[0] < 30 && AT(26, 26)[3] > 200);    /* the black shadow 2 x 2 = 4 px down-right */
+        CHECK(AT(6, 6)[3] == 0);                              /* nothing up-left */
+#undef AT
+        free(px);
+    }
+    svg_image_destroy(s);
+
+    /* Krunker Strike's outlined ticket: white body, the black outside outline (a mask in a <g> scaled
+     * 4.2) and a drop shadow down-left */
+    char path[1024];
+    snprintf(path, sizeof path, "%s/ui/strike/img/frvr-ui/ticket-outline.svg", root);
+    FILE *f = fopen(path, "rb");
+    if (!f) return;
+    static unsigned char buf[65536];
+    const size_t n = fread(buf, 1, sizeof buf, f);
+    fclose(f);
+    s = svg_image_create(buf, n);
+    px = s ? svg_image_rasterize(s, 54, 58) : NULL;
+    CHECK(px != NULL);
+    if (px) {
+        int white = 0, dark = 0;
+        for (int i = 0; i < 54 * 58; i++) {
+            if (px[i * 4 + 3] < 200) continue;
+            if (px[i * 4] > 230) white++;
+            if (px[i * 4] < 40) dark++;
+        }
+        CHECK(white > 300 && dark > 300); /* both the body and its outline / shadow are there */
+        free(px);
+    }
+    svg_image_destroy(s);
+}
+
 int main(int argc, char **argv) {
     const char *root = argc > 1 ? argv[1] : ".";
     test_sniff();
@@ -359,6 +428,7 @@ int main(int argc, char **argv) {
     test_rgba();
     test_page_icons(root);
     test_fx(root);
+    test_fx_space(root);
     printf("test_svg: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;
 }
