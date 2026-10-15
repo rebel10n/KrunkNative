@@ -60,7 +60,15 @@ CHECK_GENERATOR = if [ -n "$(GENERATOR)" ] && [ -f "$(1)/CMakeCache.txt" ] && \
 
 # Configure: preset + generator + HTML engine switch + user flags (the web build
 # ignores the switch: its UI is always the browser page driven by web_dom.c).
-CONFIGURE = $(call CHECK_GENERATOR,$(2)); $(CMAKE) --preset $(1) $(GEN_FLAG) -DKRUNKNATIVE_HTML_ENGINE=$(HTML_ENGINE) $(CMAKE_FLAGS)
+# It runs only when the build dir has no cache yet or the configure line changed (stamp file):
+# re-running `cmake --preset` on every build regenerated the whole build tree each time. Edits to
+# a CMakeLists.txt are still picked up: the generator re-runs CMake by itself when one changes.
+CONFIGURE = $(call CHECK_GENERATOR,$(2)); \
+	kn_line='$(1) $(GEN_FLAG) -DKRUNKNATIVE_HTML_ENGINE=$(HTML_ENGINE) $(CMAKE_FLAGS)'; \
+	if [ ! -f "$(2)/CMakeCache.txt" ] || [ "$$(cat "$(2)/.kn-configure" 2>/dev/null)" != "$$kn_line" ]; then \
+	  $(CMAKE) --preset $(1) $(GEN_FLAG) -DKRUNKNATIVE_HTML_ENGINE=$(HTML_ENGINE) $(CMAKE_FLAGS) && \
+	  printf '%s' "$$kn_line" > "$(2)/.kn-configure"; \
+	fi
 BUILD     = $(CMAKE) --build $(1) --parallel $(JOBS)
 
 # Emscripten: use emcc from PATH, else activate the emsdk checkout in $(EMSDK).
@@ -76,9 +84,16 @@ MAP_ARG = $(if $(MAP),assets/maps/$(MAP).json,)
 
 # --------------------------------------------------------------------------- native
 
-.PHONY: build configure release configure-release all
+.PHONY: build build-client build-server configure release configure-release all
 build: configure ## Build debug client, server and tests (default)
 	$(call BUILD,$(DEBUG_DIR))
+
+# The run targets build only what they start (not every test program and tool).
+build-client: configure ## Build only the debug client
+	$(call BUILD,$(DEBUG_DIR)) --target $(CLIENT_BIN)
+
+build-server: configure ## Build only the debug server
+	$(call BUILD,$(DEBUG_DIR)) --target $(SERVER_BIN)
 
 configure: ## Configure the debug build
 	@$(call CONFIGURE,debug,$(DEBUG_DIR))
@@ -115,7 +130,7 @@ RUN_BRAIN_ENV = $(if $(KRUNKNATIVE_BRAIN_URL),,$(if $(filter-out 5050,$(BRAIN_PO
 VSYNC ?= 1
 FRAME_CAP ?= 144
 RUN_PERF = KRUNKNATIVE_VSYNC=$(VSYNC) KRUNKNATIVE_FRAME_CAP=$(FRAME_CAP)
-run: build ## Run the debug client (ARGS="--offline" MAP=<name>; VSYNC=0 FRAME_CAP=0 to uncap; BACKEND=0 skips the backend)
+run: build-client ## Run the debug client (ARGS="--offline" MAP=<name>; VSYNC=0 FRAME_CAP=0 to uncap; BACKEND=0 skips the backend)
 	@if [ "$(BACKEND)" != 0 ] && [ -f config/config.json ] && ! curl -s -m 1 http://127.0.0.1:$(BRAIN_PORT)/mm/status 2>/dev/null | grep -q '"brain"'; then \
 	  echo "[run] no brain on 127.0.0.1:$(BRAIN_PORT): starting the local backend (make backend-up; BACKEND=0 skips)"; \
 	  $(MAKE) --no-print-directory backend-up BRAIN_PORT=$(BRAIN_PORT) || echo "[run] backend-up failed: accounts are unavailable (see make backend-status)"; \
@@ -133,7 +148,7 @@ launcher-release: release ## Run the release launcher (ARGS=...)
 run-release: release ## Run the release client
 	cd $(RELEASE_DIR) && $(RUN_PERF) ./$(CLIENT_BIN) $(ARGS) $(if $(MAP),../$(MAP_ARG),)
 
-server: build ## Run the debug server (ARGS=...)
+server: build-server ## Run the debug server (ARGS=...)
 	cd $(DEBUG_DIR) && ./$(SERVER_BIN) $(ARGS)
 
 server-release: release ## Run the release server
@@ -148,10 +163,10 @@ strike: ## Build a Krunker Strike-branded client + server into cmake-build-strik
 	@$(call CONFIGURE,strike,$(STRIKE_DIR))
 	$(call BUILD,$(STRIKE_DIR))
 
-run-strike: build ## Run the debug client as Krunker Strike (runtime --flavor; ARGS=, MAP=)
+run-strike: build-client ## Run the debug client as Krunker Strike (runtime --flavor; ARGS=, MAP=)
 	cd $(DEBUG_DIR) && $(RUN_BRAIN_ENV) $(RUN_PERF) ./$(CLIENT_BIN) --flavor strike $(ARGS) $(if $(MAP),../$(MAP_ARG),)
 
-server-strike: build ## Run the debug server as Krunker Strike (runtime --flavor; ARGS=)
+server-strike: build-server ## Run the debug server as Krunker Strike (runtime --flavor; ARGS=)
 	cd $(DEBUG_DIR) && ./$(SERVER_BIN) --flavor strike $(ARGS)
 
 # strike-dist builds a Release tree whose compile-time DEFAULT flavor is Strike
@@ -671,7 +686,7 @@ db-status: services ## List applied/pending database migrations
 services-test: services ## Run the backend unit tests (ctest -L knsvc; DB tests use their own database)
 	cd $(DEBUG_DIR) && ctest -L knsvc --output-on-failure
 
-backend-up: build services ## Start the local backend in the background: migrate, brain, GAMESERVERS game servers, net-bridge
+backend-up: build-server services ## Start the local backend in the background: migrate, brain, GAMESERVERS game servers, net-bridge
 	BUILD_DIR=$(DEBUG_DIR) GAMESERVERS=$(GAMESERVERS) BACKEND_ARGS="$(BACKEND_ARGS)" deploy/local/backend.sh up
 
 backend-down: ## Stop what backend-up started

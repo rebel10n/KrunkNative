@@ -3,6 +3,27 @@ project(KrunkNative)
 
 set(CMAKE_C_STANDARD 11)
 
+# Faster rebuilds: a compiler cache (ccache, else sccache) and the mold linker when they are
+# installed, unless the configure already chose a launcher / linker. A cached compile is a
+# copy, so a fresh build dir or a second checkout rebuilds in seconds. The web build (emcc),
+# Apple (ld64) and Windows targets keep their own toolchains. -DKRUNKNATIVE_FAST_BUILD=OFF opts out.
+option(KRUNKNATIVE_FAST_BUILD "Use ccache/sccache and the mold linker when available" ON)
+if (KRUNKNATIVE_FAST_BUILD AND NOT EMSCRIPTEN)
+    if (NOT CMAKE_C_COMPILER_LAUNCHER)
+        find_program(KN_COMPILER_CACHE NAMES ccache sccache)
+        if (KN_COMPILER_CACHE)
+            set(CMAKE_C_COMPILER_LAUNCHER ${KN_COMPILER_CACHE})
+            set(CMAKE_CXX_COMPILER_LAUNCHER ${KN_COMPILER_CACHE})
+        endif ()
+    endif ()
+    if (NOT CMAKE_LINKER_TYPE AND NOT APPLE AND NOT WIN32 AND NOT CMAKE_VERSION VERSION_LESS 3.29)
+        find_program(KN_MOLD mold)
+        if (KN_MOLD)
+            set(CMAKE_LINKER_TYPE MOLD)
+        endif ()
+    endif ()
+endif ()
+
 if (NOT EMSCRIPTEN)
     find_package(Threads REQUIRED)
 endif ()
