@@ -10,6 +10,8 @@
 #include <ui_logic.h>
 #include <lobby_ui.h> // WP-E voteOnMatch
 #include <ui_host_config.h> // WP-E createPrivateRoom: the host config request
+#include <host_flow_ui.h>   // the Host Game flow: openHostWindow, selectHostMap, showGames(true)
+#include <game_config.h>    // GAME_HOST_CUSTOM
 #include <cJSON.h>
 #include <map_catalog.h>  // Host Game / Games window maps
 #include <sound_events.h> // ui_sound_play_tick / ui_sound_play
@@ -139,13 +141,12 @@ H(h_open_url) {
     return 1;
 }
 
-// Hosting is the dedicated server's job (doc/backend.md 8.7): the client no longer creates
-// servers or custom lobbies. Host Game (hidden outside --render-scenario) points there;
-// practice play on the embedded offline game stays (playMap / knHostOffline).
+// openHostWindow(false, type): the chooser's server-type cards (window 42) open the Host Game flow
+// (host_flow_ui.c) at its Map step for that config.hostTypes index. The flow ends at the server_bin
+// command for the dedicated server; practice play on the embedded offline game stays (playMap, knHostOffline).
 H(h_open_host_window) {
     UNUSED;
-    ui_alert(I18N("kn.host.dedicated", "To host a server, run the dedicated server: server_bin (see \"Hosting a server\" in the README). "
-                                       "Players join it from the server list or by direct connect."));
+    host_flow_open(arg_int(args, argc, 1, GAME_HOST_CUSTOM));
     return 1;
 }
 // v10 Invite / Join (v10_party.c): openJoinWindow(a, skipClipboard), copyInviteLink(toast)
@@ -193,7 +194,7 @@ H(h_join_game) {
 // community maps are not in the default rotation) and the offline game starts or reloads
 // on it with `mode` (Krunker mode id, -1 = keep). Connected to a server, Krunker's room
 // request has no native equivalent: the client plays there (menu_host_offline).
-static void host_catalog_map(const int catalog_index, const int mode) {
+void host_catalog_map(const int catalog_index, const int mode) {
     Client *client = menu_ui()->client;
     const int slot = catalog_index >= 0 ? map_catalog_slot(&client->game.maps, &client->game.map_count, (size_t) catalog_index) : -1;
     if (catalog_index >= 0 && slot < 0) menu_log("host: map %s could not be loaded", map_catalog_at((size_t) catalog_index)->key);
@@ -314,12 +315,13 @@ H(h_play_map) {
 
 // selectHostMap(name, modURL, id, creator): Krunker remembers the community game for the
 // Host Game window (selectedCustomMapId); KrunkNative selects the catalogue map.
+// The Games window's Host button: the Host Game flow at its Mode step with that map chosen.
 H(h_select_host_map) {
     UNUSED;
-    const int index = catalog_index_for_row(arg_str(ev, args, argc, 0, ""), arg_str(ev, args, argc, 3, ""));
-    Client *client = menu_ui()->client;
-    const int slot = index >= 0 ? map_catalog_slot(&client->game.maps, &client->game.map_count, (size_t) index) : -1;
-    if (slot >= 0) menu_select_map(slot);
+    const char *name = arg_str(ev, args, argc, 0, "");
+    const int index = catalog_index_for_row(name, arg_str(ev, args, argc, 3, ""));
+    if (index >= 0) host_flow_open_map(index);
+    else menu_log("host: %s is not in the map catalogue (no Host Game flow for it yet)", name);
     return 1;
 }
 
@@ -431,8 +433,17 @@ H(h_client) { (void) user; ui_client_settings_handle(html_ui_current_handler(), 
 
 // closWind(): UI.toggleWindow(false) (the window's close button / backdrop)
 H(h_close_wind) { UNUSED; menu_toggle_window(0); return 1; }
-// showGames(hostType): windows[9].hostType = hostType || null; showWindow(10)
-H(h_show_games) { UNUSED; menu_show_window(10, 0); return 1; }
+// showGames(hostType): windows[9].hostType = hostType || null; showWindow(10). The chooser's Community
+// Games card (showGames(true)) is the Host Game flow's community maps; Custom Games (no argument) browses.
+H(h_show_games) {
+    UNUSED;
+    if (arg_bool(ev, args, argc, 0, 0)) {
+        host_flow_open_community();
+        return 1;
+    }
+    menu_show_window(10, 0);
+    return 1;
+}
 // openDiscord(): window.open(config.discordInvite)
 H(h_open_discord) { UNUSED; ui_open_external("https://discord.gg/krunker"); return 1; }
 // openGuide(on): the "New to Krunker?" guide popup; v10's openGuide(section) is its tutorial
@@ -558,7 +569,7 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"windows.1.searchList", h_servers},
     {"windows.2.action", h_loadout_action},
     {"windows.3.switchTab", h_switch_tab},
-    // WP-E Host Game rows (ui_host_config.c, routed through servers_ui_handle)
+    // WP-E Host Game rows (ui_host_config.c, routed through servers_ui_handle; the flow's own rows: host_flow_ui.c)
     {"windows.7.toggle", h_servers},
     {"windows.7.changeWep", h_servers},
     {"windows.7.toggleWep", h_servers},
@@ -585,6 +596,7 @@ static const HtmlHandlerEntry HANDLERS[] = {
 // handler result (0 = `return false` cancels the default action).
 typedef int (*UiModuleHandler)(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc);
 static const UiModuleHandler MODULE_HANDLERS[] = {
+    host_flow_ui_handle,       // host_flow_ui.c: the Host Game flow (knHostFlow), every Host Game entry point
     v10_menu_handle,           // v10_menu.c / v10_login.c: the v10 page's menu shell, loginOrRegister
     v10_rewards_handle,        // v10_rewards.c: v10.0.2 signup rewards, windows[32] (before account_ui.c's v7 ones)
     account_ui_handle,         // account_ui.c: Account window, logout, mail, profile

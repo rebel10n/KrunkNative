@@ -9,6 +9,7 @@
 #include <client_settings.h>
 #include <download_ui.h>
 #include <seek_prefs.h> // General > Quickplay rows (mm-token)
+#include <host_flow_ui.h> // the Host Game flow (windows[HOST_FLOW_WINDOW])
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -573,6 +574,7 @@ static char *gen_object_manager(void) { return object_manager_window_gen(OBJECT_
 static const WindowDef WINDOWS[] = {
     {SERVERS_WINDOW_CONNECT, servers_connect_window_gen}, // KrunkNative: the menu's Connect button (servers_ui.c)
     {OBJECT_MANAGER_WINDOW, gen_object_manager},          // KrunkNative: the Object Manager (object_manager_ui.c)
+    {HOST_FLOW_WINDOW, host_flow_window_gen},             // KrunkNative: the Host Game flow (host_flow_ui.c)
     {1, gen_settings},
     {3, gen_loadout},
     {7, gen_7},

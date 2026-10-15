@@ -3222,9 +3222,9 @@ static void games_search(void) {
 // catalogue's hostable maps as the "Default Krunker Maps" cards (gameMap<index>, read back by
 // createPrivateRoom through ui_host_checked_*), and WP-E's game-config bodies
 // (client/src/ui/ui_host_config.c) in place of the captured hostTb1 / hostTb2 / hostTb3 ones.
-// Hosting a server is server_bin's job (doc/backend.md 8.11): the menu's Host Game button is
-// hidden natively (menu_ui.c) and openHostWindow is an alert; the window stays for
-// --render-scenario and the console, and Start Game plays the pick offline.
+// Hosting a server is server_bin's job (doc/backend.md 8.11). Every Host Game entry point now opens
+// the Host Game flow (host_flow_ui.c), which ends at the server_bin command; this window (windows[8])
+// is kept for --render-scenario and the editor's templates, and its Start Game plays the pick offline.
 static int g_host_type = GAME_HOST_CUSTOM; // openHostWindow(false, type): config.hostTypes index
 
 void servers_ui_set_host_type(const int host_type) {

@@ -317,8 +317,15 @@ static cJSON *gs_game_typed(const cJSON *obj) {
     cJSON *typed = cJSON_CreateObject();
     const cJSON *item;
     cJSON_ArrayForEach(item, (cJSON_IsObject(obj) ? obj : NULL)) {
+        if (!typed) break;
+        // the Host Game request's class / weapon / effect overrides (game_config_setup reads them from
+        // the game request, as the sandbox and a hosted game get them); kept as they are
+        if (!strcmp(item->string, "classes") || !strcmp(item->string, "weps") || !strcmp(item->string, "cls") || !strcmp(item->string, "prks")) {
+            if (cJSON_IsArray(item) || cJSON_IsObject(item)) cJSON_AddItemToObject(typed, item->string, cJSON_Duplicate(item, 1));
+            continue;
+        }
         const GameConfigOption *o = gs_game_option(item->string);
-        if (!o || !typed) continue;
+        if (!o) continue;
         cJSON_DeleteItemFromObjectCaseSensitive(typed, o->var);
         if (o->kind == GC_INPUT) {
             if (cJSON_IsString(item)) cJSON_AddStringToObject(typed, o->var, item->valuestring);
@@ -887,6 +894,17 @@ static cJSON *g_cli_section;  // --gameserver.<key>=<value> overrides (main.c)
 int gs_config_set_cli(const char *key, const char *value) {
     if (!g_cli_section) g_cli_section = cJSON_CreateObject();
     if (!g_cli_section || !key || !key[0]) return -1;
+    // --set gameserver.game.<var>=<value>: the game object's <var> (as server.cfg's `game.<var> value`)
+    if (!strncmp(key, "game.", 5) && key[5]) {
+        cJSON *game = cJSON_GetObjectItemCaseSensitive(g_cli_section, "game");
+        if (!cJSON_IsObject(game)) {
+            cJSON_DeleteItemFromObjectCaseSensitive(g_cli_section, "game");
+            game = cJSON_AddObjectToObject(g_cli_section, "game");
+        }
+        if (!game) return -1;
+        gs_override(game, key + 5, value ? value : "");
+        return 0;
+    }
     gs_override(g_cli_section, key, value ? value : "");
     return 0;
 }
@@ -934,6 +952,17 @@ int gs_config_load(GsConfig *cfg, const char *path, const int explicit_path, cha
 
     const cJSON *cli;
     cJSON_ArrayForEach(cli, g_cli_section) {
+        cJSON *old = cJSON_GetObjectItemCaseSensitive(section, cli->string);
+        if (cJSON_IsObject(old) && cJSON_IsObject(cli)) { // game.<var> overrides keep the file's other game keys
+            const cJSON *sub;
+            cJSON_ArrayForEach(sub, cli) {
+                cJSON *dup = cJSON_Duplicate(sub, 1);
+                if (!dup) continue;
+                if (cJSON_GetObjectItemCaseSensitive(old, sub->string)) cJSON_ReplaceItemInObjectCaseSensitive(old, sub->string, dup);
+                else cJSON_AddItemToObject(old, sub->string, dup);
+            }
+            continue;
+        }
         cJSON *copy = cJSON_Duplicate(cli, 1);
         if (!copy) continue;
         if (cJSON_GetObjectItemCaseSensitive(section, cli->string)) cJSON_ReplaceItemInObjectCaseSensitive(section, cli->string, copy);

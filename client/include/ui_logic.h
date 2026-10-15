@@ -537,6 +537,10 @@ void hud_objectives_fini(void);                   // its canvas (GL)
 #define OBJECT_MANAGER_WINDOW (KN_WINDOW_BASE + 0)
 // KN_WINDOW_BASE + 1: free (it was the Turf Wars window; Turf Wars is v10's popup now, turf_ui.c)
 // KN_WINDOW_BASE + 2: SERVERS_WINDOW_CONNECT (backend_ui.h), the menu's Connect window
+#define HOST_FLOW_WINDOW (KN_WINDOW_BASE + 3) // the Host Game flow (host_flow_ui.h): every Host Game entry point
+// The Host Game practice: the embedded offline game plays catalogue map `catalog_index` in Krunker
+// mode `mode` (-1 keeps it); the Games window's Play and the Host Game flow's Play offline (ui_handlers.c)
+void host_catalog_map(int catalog_index, int mode);
 void object_manager_ui_toggle(Client*);          // the F1 bind: open (pointer freed) / close (pointer back)
 int  object_manager_ui_escape(void);             // Escape on the window: 1 = back to the game
 int  object_manager_ui_search_focused(void);     // its search box has the keyboard (F1 still toggles)

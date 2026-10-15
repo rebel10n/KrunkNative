@@ -610,6 +610,15 @@ else ()
         target_link_libraries(config_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # host_command_test (Host Game flow): the server_bin line the flow generates (shared/src/host_command.c);
+    # --emit prints the lines server/tests/host_command_parse_test.py runs through server_bin
+    add_executable(host_command_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/host_command_test.c)
+    target_link_libraries(host_command_test PRIVATE m)
+    add_test(NAME host_command_test COMMAND host_command_test)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(host_command_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     add_executable(class_spawn_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/class_spawn_test.c)
     target_link_libraries(class_spawn_test PRIVATE m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -798,6 +807,14 @@ else ()
     target_link_libraries(sandbox_config_test PRIVATE kn_server_core m)
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(sandbox_config_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
+    # host_command_config_test (Host Game flow): --set gameserver.game.<var> reaches the game (server/src/config.c)
+    add_executable(host_command_config_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/host_command_config_test.c)
+    target_link_libraries(host_command_config_test PRIVATE kn_server_core m)
+    add_test(NAME host_command_config_test COMMAND host_command_config_test)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(host_command_config_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
     # ks_server_test: the KrunkScript server host (server/src/ks_server_host.c) over the sandbox

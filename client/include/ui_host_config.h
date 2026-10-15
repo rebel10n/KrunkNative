@@ -20,6 +20,8 @@ typedef enum {
 // embedded "config" or a saved preset ({modes, classes, settings, weps, cls, prks}) whose values
 // the rows start from, as v7 does for pasted map data.
 char *ui_host_config_tab_html(HostConfigTab tab, int host_type, const cJSON *preset);
+// The same bodies without the .hide class: the Host Game flow (host_flow_ui.c) shows its own steps.
+char *ui_host_config_step_html(HostConfigTab tab, int host_type, const cJSON *preset);
 // windows.7.toggle / changeWep / toggleWep / changeCls / toggleCls / changeEffects / toggleEffects
 // and updateSliderLabel / updateSliderLabel2 of these rows. -1: not one of them.
 int ui_host_config_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc);

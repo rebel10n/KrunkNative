@@ -108,10 +108,15 @@ static void entry_rows(StrBuf *sb, const GameConfigTable table, const char lette
 }
 
 // One Advanced matrix: the select + switch header, then every entry's rows (only the open one shown).
+// The tab bodies start hidden (the .hide class: windows[7]'s tabs show one at a time); the Host
+// Game flow's steps show them by their own step (ui_host_config_step_html), so no .hide there.
+static int g_show_bodies;
+static const char *hide_class(void) { return g_show_bodies ? "" : " hide"; }
+
 static void matrix(StrBuf *sb, const GameConfigTable table, const char *title, const char *select_id, const char *change, const char *toggle,
                    const char *toggle_id, const char *conf_prefix, const char letter, const int t, const cJSON *preset, const char *preset_key, const int open) {
-    sb_appendf(sb, "<div class='hostTb2 hide'><div class='setHed' style='margin-bottom:15px%s'>%s<select id='%s' class='inputGrey2' onchange='windows[7].%s(this.value)'>",
-               table == GAME_CONFIG_WEAPON ? ";" : "", title, select_id, change);
+    sb_appendf(sb, "<div class='hostTb2%s'><div class='setHed' style='margin-bottom:15px%s'>%s<select id='%s' class='inputGrey2' onchange='windows[7].%s(this.value)'>",
+               hide_class(), table == GAME_CONFIG_WEAPON ? ";" : "", title, select_id, change);
     const int count = table_count(table);
     for (int i = 0; i < count; i++) {
         sb_appendf(sb, "<option value='%d' %s>", i, i == 0 ? "selected" : "");
@@ -148,7 +153,7 @@ static void settings_rows(StrBuf *sb, const int host_type, const cJSON *preset) 
     const cJSON *settings = cJSON_GetObjectItemCaseSensitive(preset, "settings");
     size_t count = 0;
     const GameConfigOption *options = game_config_options(GAME_CONFIG_SERVER, &count);
-    sb_append(sb, "<div class='hostTb2 hide'><div class='setHed' style='margin-bottom:15px'>Settings</div><div class='setBodH'>");
+    sb_appendf(sb, "<div class='hostTb2%s'><div class='setHed' style='margin-bottom:15px'>Settings</div><div class='setBodH'>", hide_class());
     int open = 1;
     for (size_t k = 0; k < count; k++) {
         const GameConfigOption *o = &options[k];
@@ -197,14 +202,14 @@ static void settings_rows(StrBuf *sb, const int host_type, const cJSON *preset) 
     sb_append(sb, "</div>");
 }
 
-char *ui_host_config_tab_html(const HostConfigTab tab, const int host_type, const cJSON *preset) {
+static char *tab_html(const HostConfigTab tab, const int host_type, const cJSON *preset) {
     const unsigned int flags = game_host_type_flags(host_type);
     const int choices = !(flags & (GAME_HOST_FLAG_COMP | GAME_HOST_FLAG_RESTRICT));
     StrBuf sb = {0};
     if (tab == HOST_CONFIG_TAB_MODES && choices) {
         const cJSON *modes = cJSON_GetObjectItemCaseSensitive(preset, "modes"), *classes = cJSON_GetObjectItemCaseSensitive(preset, "classes");
-        sb_append(&sb, "<div class='hostTb1 hide'><div class='setHed' style='margin-bottom:15px;margin-top:30px;'>Game Modes"
-                       "<div class='hostToggle' onclick='windows[7].toggle(&quot;gameMode&quot;)'>Toggle</div></div><div style='margin-top:5px'>");
+        sb_appendf(&sb, "<div class='hostTb1%s'><div class='setHed' style='margin-bottom:15px;margin-top:30px;'>Game Modes", hide_class());
+        sb_append(&sb, "<div class='hostToggle' onclick='windows[7].toggle(&quot;gameMode&quot;)'>Toggle</div></div><div style='margin-top:5px'>");
         for (int id = 0; id < MODE_COUNT; id++) {
             const GameModeConfig *mode = mode_config(id);
             if (!mode || !mode->name || !mode_hostable(id)) continue;
@@ -236,6 +241,18 @@ char *ui_host_config_tab_html(const HostConfigTab tab, const int host_type, cons
                        "margin-bottom:5px;' autocomplete='off' autocorrect='off' autocapitalize='off' spellcheck='false'></div></div>");
     }
     return sb_finish(&sb);
+}
+
+char *ui_host_config_tab_html(const HostConfigTab tab, const int host_type, const cJSON *preset) {
+    g_show_bodies = 0;
+    return tab_html(tab, host_type, preset);
+}
+
+char *ui_host_config_step_html(const HostConfigTab tab, const int host_type, const cJSON *preset) {
+    g_show_bodies = 1;
+    char *html = tab_html(tab, host_type, preset);
+    g_show_bodies = 0;
+    return html;
 }
 
 // ---------------------------------------------------------------- handlers
