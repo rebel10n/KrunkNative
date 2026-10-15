@@ -57,8 +57,15 @@ void v10_party_copy_invite_link(const int toast) {
 
 // ------------------------------------------------------------------ Join
 
+// The clipboard's text (and the Join button's text when no field is open): a refused text reopens the
+// Join window (showWindow(24)) with the error as a notice.
 void v10_party_join_text(const char *text) {
-    servers_ui_join_link(text ? text : ""); // not a game link / code: showWindow(24)
+    if (!servers_ui_join_link(text ? text : "")) menu_show_window(MENU_WINDOW_JOIN, 0);
+}
+
+// The Join window's field (joinGame()): a refused text keeps the window as it is, the typed text with it.
+void v10_party_join_field(const char *text) {
+    servers_ui_join_link(text ? text : "");
 }
 
 static void clipboard_join(void *user) {
@@ -111,7 +118,7 @@ static int same_site(const char *url) {
 int v10_party_open_url(const char *url) {
     char id[160];
     if (!url || !same_site(url) || !strstr(url, "game=") || !kn_game_link_parse(url, id, sizeof(id))) return 0;
-    if (!servers_ui_join_game(id)) servers_ui_join_link(url); // no matchmaker: the Join window
+    if (!servers_ui_join_game(id) && !servers_ui_join_link(url)) menu_show_window(MENU_WINDOW_JOIN, 0); // no matchmaker: the Join window
     return 1;
 }
 

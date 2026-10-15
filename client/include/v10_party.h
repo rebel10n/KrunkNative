@@ -19,6 +19,9 @@ void v10_party_open_join_window(int skip_clipboard);
 // v10 _72569(text) (joinGame(): #gameURL's value): a game link "[http(s)://][www.]<site>/?game=<id>"
 // or a bare "NODE:lobby" code joins that game; anything else (re)opens the Join window.
 void v10_party_join_text(const char *text);
+// joinGame() (the Join window's field): the same parse, but a refused text only shows its notice and the
+// window stays open with the typed text.
+void v10_party_join_field(const char *text);
 // A friend's "Join" (switchServer(gameInstanceId)): the game id from the friends list / the
 // "presence:game" push (kn_brain game_presence.c). 1 = joining, 0 = no matchmaker here.
 // A game that needs a password asks for it once the server refuses the join (the popup below).

@@ -103,6 +103,23 @@ int main(void) {
     CHECK(parse_is("CH2:kz-862", NULL));
     CHECK(parse_is("", NULL));
     CHECK(parse_is(NULL, NULL));
+    // a bare query: ?game= or game= (no site)
+    CHECK(parse_is("?game=CH2:kz862", "CH2:kz862"));
+    CHECK(parse_is("game=CH2%3Akz862", "CH2:kz862"));
+    CHECK(parse_is("?game=", NULL));
+    CHECK(parse_is("?mygame=CH2:kz862", NULL));
+    // krunker.io's own links: the official site (kn_game_link_is_krunker)
+    CHECK(kn_game_link_is_krunker("https://krunker.io/?game=ab12:xyz"));
+    CHECK(kn_game_link_is_krunker("  https://www.Krunker.io/?game=ab12:xyz  "));
+    CHECK(kn_game_link_is_krunker("krunker.io/?game=ab12:xyz"));
+    CHECK(kn_game_link_is_krunker("http://eu.krunker.io:8080/?game=ab12%3Axyz"));
+    CHECK(!kn_game_link_is_krunker("https://krunker.io.evil.com/?game=ab12:xyz"));
+    CHECK(!kn_game_link_is_krunker("https://notkrunker.io/?game=ab12:xyz"));
+    CHECK(!kn_game_link_is_krunker("https://krunk.io/?game=CH2:kz862"));
+    CHECK(!kn_game_link_is_krunker("CH2:kz862"));
+    CHECK(!kn_game_link_is_krunker("?game=ab12:xyz"));
+    CHECK(!kn_game_link_is_krunker("krunker.io"));
+    CHECK(!kn_game_link_is_krunker(NULL));
 
     if (g_fail) return 1;
     printf("Test OK\n");

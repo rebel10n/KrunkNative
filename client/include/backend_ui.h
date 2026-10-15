@@ -151,8 +151,14 @@ const char *servers_ui_rejoin_text(void);    // "Reconnecting..." / "Rejoining a
 // process was in with the restart rejoin's backoff (REJOIN_RESTART; the screen says Game Updating).
 void servers_ui_hold_startup_seek(int hold);
 void servers_ui_resume_rejoin(const char *game_id);
-int  servers_ui_join_link(const char *text);  // Join window / pasted link or "NODE:lobby" id (v3.1.1 f9); 1 = joining
-int  servers_ui_connect_game(const char *text); // Connect window / console connect given a game link or id (CH2:kz862); 1 = joining, 0 = an address
+int  servers_ui_join_link(const char *text);  // Join field / pasted link or "NODE:lobby" id (v3.1.1 f9); 1 = joining, 0 = refused (a notice says why)
+// Connect window / console connect / Join field given a game link or lobby id (CH2:kz862) or a krunker.io
+// game link: 1 = joining (the brain's seek, or the official krunker.io join), 0 = not a game link (err
+// untouched: read it as host[:port]), -1 = a game that cannot be joined here (err = the text to show).
+int  servers_ui_connect_game(const char *text, char *err, size_t n);
+// The address of a direct connect: "local" / "default", or host[:port] with host an IPv4 address,
+// localhost or a dotted name and port 1..65535 (default 21015). 1 = valid (host, port written); 0 = err says why.
+int  servers_ui_parse_address(const char *text, char *host, size_t host_n, int *port, char *err, size_t err_n);
 int  servers_ui_join_game(const char *game_id); // v10 switchServer(id) (a friend's game): seek it; 1 = joining, 0 = no matchmaker
 int  servers_ui_join_password(const char *password); // v10 submitGameCode: the same game again with the server password
 void servers_ui_invite_link(char *out, size_t n); // copyInviteLink: <origin>/?game=<id>, the id unescaped, short (CH2:kz862)

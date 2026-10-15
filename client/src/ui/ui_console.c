@@ -1048,50 +1048,35 @@ static void cmd_connect(const int argc, char **argv, const char *rest) {
     if (rest && *rest) snprintf(input, sizeof(input), "%s", rest);
     else join_args(argc, argv, 0, input, sizeof(input));
     trim(input);
-    if (input[0] && con_client() && servers_ui_connect_game(input)) {
-        appendf(COL_INFO, "Joining game %s...", input);
-        return;
-    }
-    char target[CON_TEXT_MAX];
-    snprintf(target, sizeof(target), "%s", input[0] ? input : "local");
-    char low[CON_TEXT_MAX];
-    snprintf(low, sizeof(low), "%s", target);
-    lower(low);
-    const int local = !strcmp(low, "local") || !strcmp(low, "default");
-
-    char host[128];
-    unsigned int port = NET_DEFAULT_PORT;
-    if (local) {
-        snprintf(host, sizeof(host), "127.0.0.1");
-    } else {
-        const char *start = strstr(target, "://") ? strstr(target, "://") + 3 : target;
-        snprintf(host, sizeof(host), "%s", start);
-        char *slash = strchr(host, '/');
-        if (slash) *slash = 0;
-        char *colon = strrchr(host, ':');
-        if (colon) {
-            *colon = 0;
-            port = (unsigned int) strtoul(colon + 1, NULL, 10);
-        }
-        if (!host[0] || !port || port > 65535) {
-            append("connect <local|hostname>", COL_ERROR);
+    char err[200] = "";
+    if (input[0] && con_client()) {
+        // a game link (krunker.io's official lobby, a KrunkNative link) or a lobby id joins that game
+        const int game = servers_ui_connect_game(input, err, sizeof(err));
+        if (game > 0) {
+            appendf(COL_INFO, "Joining game %s...", input);
             return;
         }
-        if (!strcmp(host, "localhost") || !strcmp(host, "0.0.0.0")) snprintf(host, sizeof(host), "127.0.0.1");
+        if (game < 0) {
+            printf("[mm] connect refused: %s\n", err);
+            append(err, COL_ERROR);
+            return;
+        }
     }
-    if (local) append("Connecting through local...", COL_INFO);
-    else appendf(COL_INFO, "Connecting through %s:%u...", host, port);
-    appendf(COL_INFO, "  Server: tcp://%s:%u", host, port);
-#ifndef __EMSCRIPTEN__
-    unsigned int b[4];
-    char tail;
-    if (sscanf(host, "%u.%u.%u.%u%c", &b[0], &b[1], &b[2], &b[3], &tail) != 4 || b[0] > 255 || b[1] > 255 || b[2] > 255 || b[3] > 255) {
-        appendf(COL_ERROR, "connect failed: cannot resolve %s (IPv4 addresses only)", host);
+    char host[160];
+    int port = NET_DEFAULT_PORT;
+    if (!servers_ui_parse_address(input, host, sizeof(host), &port, err, sizeof(err))) {
+        printf("[mm] connect refused: %s\n", err);
+        append(err, COL_ERROR); // the same text as the Connect window
         return;
     }
-#endif
+    char low[CON_TEXT_MAX];
+    snprintf(low, sizeof(low), "%s", input[0] ? input : "local");
+    lower(low);
+    if (!strcmp(low, "local") || !strcmp(low, "default")) append("Connecting through local...", COL_INFO);
+    else appendf(COL_INFO, "Connecting through %s:%d...", host, port);
+    appendf(COL_INFO, "  Server: tcp://%s:%d", host, port);
     if (!con_client()) return;
-    servers_ui_connect_direct(host, (int) port); // pinned; switch_server leaves an offline game (its spinner: direct_join)
+    servers_ui_connect_direct(host, port); // pinned; switch_server leaves an offline game (its spinner: direct_join)
 }
 
 // disconnect: socket closed, back to the menu, and nothing reconnects (no matchmaker seek,

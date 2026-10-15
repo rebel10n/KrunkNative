@@ -185,7 +185,7 @@ H(h_join_game) {
     char text[512] = "";
     HtmlElem input = html_dom_by_id("gameURL");
     if (input) html_dom_get_value(input, text, sizeof(text));
-    v10_party_join_text(text);
+    v10_party_join_field(text);
     return 1;
 }
 // Host a map of the catalogue (shared/src/map_catalog.c) on the embedded local server:

@@ -991,30 +991,57 @@ static int strike_join_code(const char *text) {
     return 1;
 }
 
-int servers_ui_join_link(const char *text) {
-    if (text && strike_join_code(text)) return 1;
-    char id[160];
-    kn_game_link_parse(text, id, sizeof(id));
-    if (!id[0] || !g_brain_mode || backend_available() != 1) {
-        menu_show_window(MENU_WINDOW_JOIN, 0);
-        return 0;
+// An official krunker.io lobby (a krunker.io game link): joined in this client (krunker_net),
+// or opened in the browser with the opt-out (krunker_lobbies_open). The web build has no
+// official join. 1 = started, -1 = refused (err says why).
+static int join_official(const char *id, char *err, const size_t n) {
+    for (const char *p = id; *p; p++) {
+        if (!isalnum((unsigned char) *p) && *p != ':' && *p != '-' && *p != '_') {
+            snprintf(err, n, "%s", I18N("kn.connect.badAddress", "Not a game link or server address: paste a krunker.io or KrunkNative game link, or enter host:port"));
+            return -1;
+        }
     }
-    printf("[mm] join link: %s\n", id);
+#ifdef __EMSCRIPTEN__
+    (void) id;
+    snprintf(err, n, "%s", I18N("kn.connect.officialWeb", "Official krunker.io lobbies join in the desktop client, not in the browser build"));
+    return -1;
+#else
+    printf("[mm] connect: official krunker.io lobby %s\n", id);
+    krunker_lobbies_open(id); // in this client, or the browser (its own message)
+    return 1;
+#endif
+}
+
+// The game-link forms of a typed address: the Connect window, the console `connect`, the Join
+// field. A krunker.io link joins the official lobby; a KrunkNative link or a lobby id (CH2:kz862)
+// seeks it through the matchmaker, which a client without one cannot do (-1 with err). 1 =
+// joining, 0 = not a game link (err untouched: the caller reads it as host[:port]), -1 = refused.
+int servers_ui_connect_game(const char *text, char *err, const size_t n) {
+    char id[160];
+    if (!kn_game_link_parse(text, id, sizeof(id))) return 0;
+    if (kn_game_link_is_krunker(text)) return join_official(id, err, n);
+    if (!g_brain_mode || backend_available() != 1) {
+        snprintf(err, n, "%s", I18N("kn.connect.noMatchmaker", "This game link needs the KrunkNative matchmaker, which is not reachable: enter host:port instead"));
+        return -1;
+    }
+    printf("[mm] connect: game %s\n", id);
     menu_show_window(MENU_WINDOW_NONE, 0);
     switch_server(id); // web: location -> ?game=<id> (f9: location.href = link); native: seek it
     return 1;
 }
 
-// The Connect window / console `connect` given a game link or a lobby id (CH2:kz862, the
-// invite link) instead of host[:port]: join that game through the matchmaker. 0 = not a game
-// id (or no brain): the caller connects to it as an address.
-int servers_ui_connect_game(const char *text) {
-    char id[160];
-    if (!kn_game_link_parse(text, id, sizeof(id)) || !g_brain_mode || backend_available() != 1) return 0;
-    printf("[mm] connect: game %s\n", id);
-    menu_show_window(MENU_WINDOW_NONE, 0);
-    switch_server(id);
-    return 1;
+// The Join field / a pasted link (v3.1.1 f9, v10 _72569): a game link or a lobby id joins that
+// game (servers_ui_connect_game); anything else, or a link that cannot join, is an error. The error
+// is shown as a notice (ui_notify) and the Join window stays as it is. 1 = joining.
+int servers_ui_join_link(const char *text) {
+    if (text && strike_join_code(text)) return 1;
+    char err[200] = "";
+    const int game = servers_ui_connect_game(text, err, sizeof(err));
+    if (game > 0) return 1;
+    if (!game) snprintf(err, sizeof(err), "%s", I18N("kn.join.notLink", "Not a game link: paste a krunker.io or KrunkNative game link, or a lobby code such as CH2:kz862"));
+    printf("[mm] join refused: %s\n", err);
+    ui_notify(err);
+    return 0;
 }
 
 // v10 switchServer(friend.gameInstanceId) (the social panel's "Join <name>'s match", the profile
@@ -2079,8 +2106,55 @@ static void rejoin_tick(Client *client) {
 // "local" / "localhost" = 127.0.0.1, natively IPv4 only) and joins through the same pinned
 // direct session (servers_ui_connect_direct), so `reconnect` / `disconnect` keep working.
 
-// "host[:port]" -> host + port. 0 with a message in err on a bad address.
-static int parse_connect_address(const char *text, char *host, const size_t host_n, int *port, char *err, const size_t err_n) {
+// A dotted IPv4 address (four 0..255 parts, nothing else).
+static int ipv4_ok(const char *h) {
+    int parts = 0, digits = 0;
+    unsigned int v = 0;
+    for (const char *p = h;; p++) {
+        if (*p >= '0' && *p <= '9') {
+            v = v * 10 + (unsigned int) (*p - '0');
+            if (++digits > 3 || v > 255) return 0;
+        } else if (*p == '.' || !*p) {
+            if (!digits) return 0;
+            parts++;
+            digits = 0;
+            v = 0;
+            if (!*p) break;
+        } else {
+            return 0;
+        }
+    }
+    return parts == 4;
+}
+
+// A dotted name (krunker.io, eu.krunk.io): labels of letters, digits and inner hyphens, at least
+// one dot, not all-numeric (an all-numeric dotted host is an IPv4 address: ipv4_ok).
+static int name_ok(const char *h) {
+    if (!h[0] || strlen(h) > 253 || !strchr(h, '.')) return 0;
+    const char *label = h;
+    for (const char *p = h;; p++) {
+        if (*p && *p != '.') {
+            if (!isalnum((unsigned char) *p) && *p != '-') return 0;
+            continue;
+        }
+        const size_t n = (size_t) (p - label);
+        if (!n || n > 63 || label[0] == '-' || p[-1] == '-') return 0;
+        if (!*p) break;
+        label = p + 1;
+    }
+    const char *last = strrchr(h, '.') + 1;
+    for (const char *p = last; *p; p++) {
+        if (!isdigit((unsigned char) *p)) return 1;
+    }
+    return 0;
+}
+
+// The address of a direct connect (console `connect`, the Connect window): "local" / "default"
+// = this machine, else host[:port] (port 21015 by default; a scheme and a path are dropped). The
+// host is an IPv4 address, localhost or a dotted name (the transport resolves it, natively and on
+// the web); anything else, or a port outside 1..65535, is refused with err, the text the player
+// reads. 1 = a valid address (host, port written).
+int servers_ui_parse_address(const char *text, char *host, const size_t host_n, int *port, char *err, const size_t err_n) {
     char target[256];
     while (text && (*text == ' ' || *text == '\t')) text++;
     snprintf(target, sizeof(target), "%s", text && *text ? text : "local");
@@ -2096,23 +2170,20 @@ static int parse_connect_address(const char *text, char *host, const size_t host
     char *slash = strchr(host, '/');
     if (slash) *slash = 0;
     char *colon = strrchr(host, ':');
+    int ok = 1;
     if (colon) {
         *colon = 0;
-        *port = (int) strtoul(colon + 1, NULL, 10);
-    }
-    if (!host[0] || *port <= 0 || *port > 65535) {
-        snprintf(err, err_n, "%s", I18N("kn.connect.badAddress", "Enter a server address: host or host:port"));
-        return 0;
+        const char *digits = colon + 1;
+        const size_t len = strlen(digits);
+        ok = len > 0 && len <= 5 && strspn(digits, "0123456789") == len;
+        if (ok) *port = atoi(digits);
     }
     if (!strcmp(host, "localhost") || !strcmp(host, "0.0.0.0")) snprintf(host, host_n, "127.0.0.1");
-#ifndef __EMSCRIPTEN__
-    unsigned int b[4];
-    char tail;
-    if (sscanf(host, "%u.%u.%u.%u%c", &b[0], &b[1], &b[2], &b[3], &tail) != 4 || b[0] > 255 || b[1] > 255 || b[2] > 255 || b[3] > 255) {
-        i18n_trf(err, err_n, "kn.connect.ipv4Only", "Cannot resolve {0} (IPv4 addresses only)", 1, I18N_ARGV(host));
+    ok = ok && *port > 0 && *port <= 65535 && (!strcmp(host, "127.0.0.1") || ipv4_ok(host) || name_ok(host));
+    if (!ok) {
+        snprintf(err, err_n, "%s", I18N("kn.connect.badAddress", "Not a game link or server address: paste a krunker.io or KrunkNative game link, or enter host:port"));
         return 0;
     }
-#endif
     return 1;
 }
 
@@ -2134,19 +2205,21 @@ char *servers_connect_window_gen(void) {
 // connectServer(): the window's field (or an address argument); a game link / lobby id
 // (CH2:kz862) joins that game instead
 static void connect_server(const char *text) {
-    char host[160], err[160] = "";
+    char host[160], err[200] = "";
     int port;
-    if (servers_ui_connect_game(text)) return;
-    if (!parse_connect_address(text, host, sizeof(host), &port, err, sizeof(err))) {
-        HtmlElem resp = html_dom_by_id("connectResp");
-        if (resp) {
-            html_dom_set_text(resp, err);
-            html_dom_set_display(resp, "block");
-        }
+    const int game = servers_ui_connect_game(text, err, sizeof(err));
+    if (game > 0) return;
+    if (game == 0 && servers_ui_parse_address(text, host, sizeof(host), &port, err, sizeof(err))) {
+        printf("[mm] connect window: %s:%d\n", host, port);
+        servers_ui_connect_direct(host, port); // pinned, like the console's connect (its spinner: direct_join)
         return;
     }
-    printf("[mm] connect window: %s:%d\n", host, port);
-    servers_ui_connect_direct(host, port); // pinned, like the console's connect (its spinner: direct_join)
+    printf("[mm] connect refused: %s\n", err);
+    HtmlElem resp = html_dom_by_id("connectResp");
+    if (resp) {
+        html_dom_set_text(resp, err);
+        html_dom_set_display(resp, "block");
+    }
 }
 
 // The menu's Connect button, injected once after Join (#menuBtnJoin).

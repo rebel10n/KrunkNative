@@ -31,3 +31,7 @@ int kn_game_id_matches(const char *id, const char *game_id, const char *region);
 // bare id "NODE:lobby" (/^([A-Z]+):(\w+)$/ widened to node ids with digits: CHITOWN2:kz862,
 // CH2:kz862) -> id. Surrounding blanks are ignored. 0 (id = "") when text is neither.
 int kn_game_link_parse(const char *text, char *id, size_t n);
+
+// 1 when text is a game link (kn_game_link_parse) whose site is krunker.io or *.krunker.io: an
+// official krunker.io lobby, joined through the official path (krunker_lobbies_open), not the brain.
+int kn_game_link_is_krunker(const char *text);
