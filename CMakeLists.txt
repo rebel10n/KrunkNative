@@ -1386,6 +1386,14 @@ else ()
     target_link_libraries(gamepad_test PRIVATE m)
     add_test(NAME gamepad_test COMMAND gamepad_test)
 
+    # mesh_cache_test: mesh_update_transform_matrix's cached world matrix (client/src/mesh.c) stays the
+    # freshly computed one through every kind of transform-chain change. Includes mesh.c; GL-free.
+    add_executable(mesh_cache_test client/tests/mesh_cache_test.c)
+    target_include_directories(mesh_cache_test PRIVATE client/include client/lib $<TARGET_PROPERTY:glfw,INTERFACE_INCLUDE_DIRECTORIES>
+                               $<TARGET_PROPERTY:freetype,INTERFACE_INCLUDE_DIRECTORIES>)
+    target_link_libraries(mesh_cache_test PRIVATE m)
+    add_test(NAME mesh_cache_test COMMAND mesh_cache_test)
+
     # third_person_test: the KrunkNative third-person camera (client/src/third_person_cam.c): the
     # collision pull-in (world_solid_fraction: boxes, map triangles, terrain) on synthetic walls and
     # every Kanji / Sandstorm spawn, the aim correction, the server's `thirdperson` permission.

@@ -78,7 +78,33 @@ static void transform_apply(const MeshTransform *transform, const float *in, flo
     mat4x4(translate_matrix, tmp1, out);
 }
 
+static void snapshot_take(MeshTransformSnapshot *s, const MeshTransform *t) {
+    memset(s, 0, sizeof(*s)); // padding too: snapshots are compared with memcmp
+    s->node = t;
+    s->parent = t->parent;
+    s->rotation_order = t->rotation_order;
+    s->position = t->position;
+    s->rotation = t->rotation;
+    s->scale = t->scale;
+}
+
+// 1 when every node of the chain still has the address and values transform_matrix was built from.
+static int transform_cache_valid(const Mesh *mesh) {
+    const int depth = mesh->_xf_cache_depth;
+    if (depth <= 0 || depth > MESH_XF_CACHE_DEPTH) return 0;
+    const MeshTransform *t = &mesh->transform;
+    for (int i = 0; i < depth; i++, t = t->parent) {
+        MeshTransformSnapshot now;
+        if (!t) return 0;
+        snapshot_take(&now, t);
+        if (memcmp(&now, &mesh->_xf_cache[i], sizeof(now))) return 0;
+    }
+    return t == NULL; // the chain ended where it did
+}
+
 void mesh_update_transform_matrix(Mesh *mesh) {
+    if (transform_cache_valid(mesh)) return;
+
     static const float identity[] = {
         1.0f, 0.0f, 0.0f, 0.0f,
         0.0f, 1.0f, 0.0f, 0.0f,
@@ -89,10 +115,14 @@ void mesh_update_transform_matrix(Mesh *mesh) {
     memcpy(mesh->transform_matrix, identity, sizeof(identity));
 
     float tmp[16];
+    int depth = 0;
     for (const MeshTransform *transform = &mesh->transform; transform; transform = transform->parent) {
         transform_apply(transform, mesh->transform_matrix, tmp);
         memcpy(mesh->transform_matrix, tmp, sizeof(tmp));
+        if (depth < MESH_XF_CACHE_DEPTH) snapshot_take(&mesh->_xf_cache[depth], transform);
+        depth++;
     }
+    mesh->_xf_cache_depth = depth <= MESH_XF_CACHE_DEPTH ? depth : 0; // deeper chains: no cache
 }
 
 vec3 transform_point_to(const MeshTransform *node, const vec3 local, const MeshTransform *root) {
@@ -113,4 +143,4 @@ vec3 transform_point_to(const MeshTransform *node, const vec3 local, const MeshT
 void mesh_fini(Mesh *mesh) {
     material_fini(mesh->material);
     free(mesh);
-}
+}

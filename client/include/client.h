@@ -342,6 +342,17 @@ typedef struct MeshTransform_t {
     vec3 scale;
 } MeshTransform;
 
+// What mesh_update_transform_matrix() last computed transform_matrix from: one node of the
+// transform chain, by address and value. A chain with every node unchanged keeps its matrix
+// (map geometry never moves, so scene_render stops rebuilding thousands of matrices a frame).
+#define MESH_XF_CACHE_DEPTH 8
+typedef struct {
+    const MeshTransform *node;
+    const MeshTransform *parent;
+    RotationOrder rotation_order;
+    vec3 position, rotation, scale;
+} MeshTransformSnapshot;
+
 typedef struct {
     MeshTransform transform;
 
@@ -350,6 +361,9 @@ typedef struct {
 
     float transform_matrix[16];
     float _camera_space_matrix[16]; // temporary - used during scene depth sort
+    // mesh_update_transform_matrix's cache: _xf_cache_depth nodes (0 = none: zeroed meshes recompute)
+    int _xf_cache_depth;
+    MeshTransformSnapshot _xf_cache[MESH_XF_CACHE_DEPTH];
 
     Material *material;
 

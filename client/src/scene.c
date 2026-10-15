@@ -191,28 +191,17 @@ void scene_remove_mesh(Scene *scene, Mesh *mesh) {
     scene->meshes = meshes;
 }
 
-const Scene *sort_scene;
+static const Scene *sort_scene;
 
-// qsort comparator over mesh indices: the exact `int (*)(const void *, const void *)` type
-// (calling it through a cast function pointer is UB, -fsanitize=function).
-int scene_depth_sort(const void *p_a_idx, const void *p_b_idx) {
-    const Mesh *a = sort_scene->meshes[*(const size_t *) p_a_idx];
-    const Mesh *b = sort_scene->meshes[*(const size_t *) p_b_idx];
-
-    if (!a->visible) return 1;
-    if (!b->visible) return -1;
-
-    if (a->material->transparent || b->material->transparent) {
-        if (!b->material->transparent) return 1;
-        if (!a->material->transparent) return -1;
-
-        const float a_depth = a->_camera_space_matrix[11];
-        const float b_depth = b->_camera_space_matrix[11];
-
-        return b_depth > a_depth ? -1 : 1;
-    }
-
-    return 0;
+// qsort comparator over the transparent meshes' indices: back to front (camera-space z, the
+// farthest first), equal depths in scene order. The exact `int (*)(const void *, const void *)`
+// type (calling it through a cast function pointer is UB, -fsanitize=function).
+static int scene_depth_sort(const void *p_a_idx, const void *p_b_idx) {
+    const size_t ia = *(const size_t *) p_a_idx, ib = *(const size_t *) p_b_idx;
+    const float a_depth = sort_scene->meshes[ia]->_camera_space_matrix[11];
+    const float b_depth = sort_scene->meshes[ib]->_camera_space_matrix[11];
+    if (a_depth != b_depth) return a_depth < b_depth ? -1 : 1;
+    return ia < ib ? -1 : ia > ib;
 }
 
 // Per-draw GL state of scene_render(), filtered against what the previous draw set.
@@ -361,28 +350,36 @@ void scene_render(const Scene *scene, Camera *camera) {
 
     // A VLA must have a positive size (C11 6.7.6.2p5): an empty scene (a fresh map, a cleared
     // preview) still runs the camera / GL state setup and teardown around the draw loop.
+    // Draw order: the visible opaque meshes in scene order, then the visible transparent ones back
+    // to front (only those are sorted; hidden meshes are left out).
     size_t indices[scene->mesh_count ? scene->mesh_count : 1];
+    size_t transparent[scene->mesh_count ? scene->mesh_count : 1];
+    size_t draw_count = 0, transparent_count = 0;
 
     for (size_t i = 0; i < scene->mesh_count; i++) {
         Mesh *mesh = scene->meshes[i];
-        mesh_update_transform_matrix(mesh);
+        mesh_update_transform_matrix(mesh); // hidden ones too: other code reads their matrix (cached: cheap)
+        if (!mesh->visible) continue;
 
         if (mesh->material->transparent) {
-            mat4x4(camera->world_inverse_matrix, mesh->transform_matrix, mesh->_camera_space_matrix);
+            // only the camera-space depth (row 2 of view * model, translation column) is sorted on
+            const float *v = camera->world_inverse_matrix, *m = mesh->transform_matrix;
+            mesh->_camera_space_matrix[11] = v[8] * m[3] + v[9] * m[7] + v[10] * m[11] + v[11] * m[15];
+            transparent[transparent_count++] = i;
+        } else {
+            indices[draw_count++] = i;
         }
-
-        indices[i] = i;
     }
 
     sort_scene = scene;
-    qsort(indices, scene->mesh_count, sizeof(size_t), scene_depth_sort);
+    if (transparent_count > 1) qsort(transparent, transparent_count, sizeof(size_t), scene_depth_sort);
+    memcpy(&indices[draw_count], transparent, transparent_count * sizeof(size_t));
+    draw_count += transparent_count;
 
     int last_transparent = -1; // GL_BLEND as the last visible mesh leaves it, culled or not
 
-    for (size_t i = 0; i < scene->mesh_count; i++) {
+    for (size_t i = 0; i < draw_count; i++) {
         const Mesh *mesh = scene->meshes[indices[i]];
-
-        if (!mesh->visible) continue;
         last_transparent = mesh->material->transparent ? 1 : 0;
         if (scene_mesh_culled(mesh, frustum)) continue;
 
