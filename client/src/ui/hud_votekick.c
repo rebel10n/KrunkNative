@@ -118,7 +118,9 @@ int hud_votekick_row_allowed(const Client *client, const char *alias, const int 
     (void) level_ok;
     if (!client || !account_get() || !alias || !alias[0]) return 0;
     if (client->game.is_ranked) return 0;
-    if (game_config_is_custom(&client->game) && !client->game.is_sandbox) return 0; // !game.isCustom (the sandbox votes)
+    // !game.isCustom: the offline sandbox is hosted as custom on the server, but v10's sandbox is not,
+    // and the client never receives the server's is_sandbox flag, so client->offline stands in for it
+    if (game_config_is_custom(&client->game) && !client->game.is_sandbox && !client->offline) return 0;
     if (!strcmp(alias, my_alias(client))) return 0;
     if (voted_on(alias)) return 0;
     if (g_vk.active) return !strcmp(g_vk.target, alias);
@@ -384,6 +386,14 @@ void hud_votekick_kpd_request(Client *client, const int tab) {
     req.tab = (uint8_t) tab;
     req.uid = -1;
     send_ext(client, NET_EXT_KPD_CALL, &req, sizeof(req));
+}
+
+// The player list's Kick / Ban (v10 ADMIN_ACTIONS): one NET_EXT_ADMIN_ACTION. The button shows only
+// for DEV / the host; the server re-checks the sender's DEV right and the target on every request.
+void hud_votekick_admin_action(Client *client, const int uid, const int action) {
+    if (!client || uid < 0) return;
+    NetAdminActionPacket req = {.uid = uid, .action = (uint8_t) action};
+    send_ext(client, NET_EXT_ADMIN_ACTION, &req, sizeof(req));
 }
 
 // ---------------------------------------------------------------- the K.P.D officer (kpdData)

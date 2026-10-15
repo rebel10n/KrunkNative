@@ -728,8 +728,16 @@ static int hud_plist_matches(const char *name) {
 
 static void hud_plist_clan(StrBuf *sb, const char *clan) {
     if (!clan || !clan[0]) return;
-    // COLORS.getClanCol(clan, "#353535"): DEV / VIP / CMD (v7.1.4)
-    const char *col = !strcmp(clan, "DEV") ? "#40C4FF" : !strcmp(clan, "VIP") ? "#11D445" : !strcmp(clan, "CMD") ? "#993299" : "#353535";
+    // v10 COLORS.getClanCol(clan, "#353535") (game.deob.js:4306488): the staff clans are #FBC02D, any
+    // other clan (VIP, CMD, ...) the #353535 default. The list is lowercased in v10.
+    static const char *const staff[] = {"arae", "lain", "scte", "fame", "kpd", "jump", "art", "dev", "mmok", "nl"};
+    int gold = 0;
+    char low[32];
+    size_t i;
+    for (i = 0; clan[i] && i + 1 < sizeof(low); i++) low[i] = (char) tolower((unsigned char) clan[i]);
+    low[i] = 0;
+    for (size_t k = 0; k < sizeof(staff) / sizeof(staff[0]); k++) gold |= !strcmp(low, staff[k]);
+    const char *col = gold ? "#FBC02D" : "#353535";
     sb_appendf(sb, "<span style='color:%s'> [", col);
     sb_append_esc(sb, clan);
     sb_append(sb, "]</span>");
@@ -888,7 +896,8 @@ static char *hud_plist_rows(void) {
         if (is_host) sb_append(&sb, "<i class='material-icons' style='font-size:25px'>stars</i>"); // isHost
         const NetPlayerInfoPacket *info = me ? player_accounts_get(me->uid) : NULL;
         const AccountInfo *acc = account_get();
-        sb_append_esc(&sb, me ? hud_player_name(client, me) : acc ? acc->name : client ? client->menu_name : "");
+        // the local row is the account's alias when signed in (v10 Game.players alias of the account)
+        sb_append_esc(&sb, acc ? acc->name : me ? hud_player_name(client, me) : client ? client->menu_name : "");
         hud_plist_clan(&sb, info && info->account_id > 0 ? info->clan : acc ? acc->clan : NULL);
         sb_append(&sb, "</td><td class='pListActions'>");
         if (spectate_active()) sb_append(&sb, "<span onmouseenter='playTick()' title='Clear Focus' class='punishButton kick' onclick='clearFocus()'>Clear Focus</span>");
@@ -931,6 +940,9 @@ char *hud_ui_player_list_html(void) {
     const size_t count = client && client->game.players ? client->game.player_count : 0;
     size_t listed = 0;
     for (size_t i = 0; i < count; i++) listed += client->game.players[i] != NULL;
+    // --render-scenario state.playerList stands in for the lobby's players: v10's list.length counts them
+    const cJSON *scenario = hud_votekick_override();
+    if (scenario) listed = (size_t) cJSON_GetArraySize(scenario) + 1; // + the local player's row
     StrBuf sb = {0};
     if (listed) {
         sb_appendf(&sb, "<div id='playerSearchH' class='setHed'>%s [%zu]<div id='plySearchH'><input id='plySearch' type='text' ",
@@ -4096,6 +4108,34 @@ void client_hud_html_tick(Client *client, const float now_f) {
     // (shared/src/player.c hitscan is still a TODO).
 }
 
+// punishPlayer(id, action) as the list sends it: the server's chat command for the action (kick
+// "/kick", ban "/ban", kill, tp2 / tpme / bring, "/bring all" for 9); the server checks the rights
+static void plist_punish_send(const int uid, const int action) {
+    if (action == 0 || action == 1) { // Kick / Ban: v10 ADMIN_ACTIONS (the server checks DEV and the target)
+        if (menu_ui()->client) hud_votekick_admin_action(menu_ui()->client, uid, action);
+        return;
+    }
+    const char *alias = hud_plist_alias(uid);
+    char line[NET_CHAT_TEXT_SIZE] = "";
+    if (action == 9) snprintf(line, sizeof(line), "/bring all");
+    else if (alias) {
+        const char *cmd = action == 0 ? "kick" : action == 1 ? "ban" : action == 3 ? "kill" : action == 4 ? "tp" : action == 5 ? "bring" : NULL;
+        if (cmd) snprintf(line, sizeof(line), "/%s %s", cmd, alias);
+    }
+    if (line[0] && menu_ui()->client) client_chat_send(menu_ui()->client, line);
+}
+
+// the ban confirm's answer (v10 banPlayerConfirmed: clearPops, punishPlayer(id, 1))
+static int g_ban_uid = -1;
+static void plist_ban_answered(const int accepted, const char *text, void *user) {
+    (void) text;
+    (void) user;
+    const int uid = g_ban_uid;
+    g_ban_uid = -1;
+    ui_loadout_clear_pops();
+    if (accepted && uid >= 0) plist_punish_send(uid, 1);
+}
+
 // Inline handlers this module owns (ui_handlers.c h_fallback); -1 = not ours.
 int hud_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     if (!name) return -1;
@@ -4165,21 +4205,22 @@ int hud_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, co
         free(html);
         return 1;
     }
-    if (!strcmp(name, "punishPlayer") || !strcmp(name, "banPlayer")) {
+    if (!strcmp(name, "punishPlayer")) {
         // punishPlayer(id, action): the server's chat commands, which check the rights themselves
-        // (0 kick, 3 kill, 4 TP2 = teleport to them, 5 TPME = bring them, 9 TPAll); banPlayer(id)
-        const int ban = !strcmp(name, "banPlayer");
-        const int action = ban ? 1 : argc > 1 ? (int) (args[1].kind == HTML_ARG_STR && args[1].str ? atoi(args[1].str) : args[1].num) : -1;
+        // (0 kick, 3 kill, 4 TP2 = teleport to them, 5 TPME = bring them, 9 TPAll)
+        const int action = argc > 1 ? (int) (args[1].kind == HTML_ARG_STR && args[1].str ? atoi(args[1].str) : args[1].num) : -1;
+        const int uid = argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str ? atoi(args[0].str) : argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : -1;
+        plist_punish_send(uid, action);
+        return 1;
+    }
+    if (!strcmp(name, "banPlayer")) { // banPlayer(id): v10's YES/NO confirm, then punishPlayer(id, 1)
         const int uid = argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str ? atoi(args[0].str) : argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : -1;
         const char *alias = hud_plist_alias(uid);
-        char line[NET_CHAT_TEXT_SIZE] = "";
-        if (action == 9) snprintf(line, sizeof(line), "/bring all");
-        else if (alias) {
-            const char *cmd = action == 0 ? "kick" : action == 1 ? "ban" : action == 3 ? "kill" : action == 4 ? "tp" : action == 5 ? "bring" : NULL;
-            if (cmd) snprintf(line, sizeof(line), "/%s %s", cmd, alias);
-        }
-        if (line[0] && menu_ui()->client) client_chat_send(menu_ui()->client, line);
-        if (ban) ui_loadout_clear_pops();
+        if (!alias) return 1;
+        char q[160];
+        snprintf(q, sizeof(q), "Are you sure you want ban %s from this game?", alias); // windows.playerlist.ban
+        g_ban_uid = uid;
+        ui_confirm(q, plist_ban_answered, NULL);
         return 1;
     }
     {

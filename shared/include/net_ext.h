@@ -62,6 +62,7 @@ typedef enum {
     NET_EXT_KPD_RESET = 0x0804,       // "kpdf" S -> C, no body: the officer's verdict is open again (kpdData kept)
     NET_EXT_KPD_DATA = 0x0805,        // startGame kpdData S -> C NetKpdDataPacket: the officer's case in this lobby
     NET_EXT_KPD_RATE = 0x0806,        // "rkpd" C -> S NetKpdRatePacket: the officer's verdict on the case
+    NET_EXT_ADMIN_ACTION = 0x0807,    // v10 ADMIN_ACTIONS C -> S NetAdminActionPacket: a DEV's kick / ban from the player list
 
     // 0x8000.. KrunkNative-only
     NET_EXT_BLOCK_KN = 0x8000,
@@ -226,6 +227,17 @@ typedef struct {
     uint8_t tab;
     int32_t uid;
 } NetKpdCallPacket;
+
+// NET_EXT_ADMIN_ACTION (C -> S, v10 "ADMIN_ACTIONS" [action, id, extraBan] from the player list's
+// Kick and Ban buttons): action 0 kicks player `uid` (a Game uid), 1 bans it (its account, when it
+// has one, from this server's bans). The server checks the sender is DEV on every request and that
+// the target is a player here other than the sender; the client's own check only shows the button.
+// Other actions (kill, tp2, tpme, ...) stay chat commands. A refused request changes nothing and
+// the sender gets a Server line.
+typedef struct {
+    int32_t uid;
+    uint8_t action; // 0 kick, 1 ban
+} NetAdminActionPacket;
 
 // NET_EXT_KPD_RESPONSE (S -> C, v10 "kpd" [code, message, data]): code 0 answers a call
 // (status: NET_KPD_* with the message to show and the suspect's name); codes 1..3 carry a list

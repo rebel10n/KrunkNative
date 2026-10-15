@@ -17,3 +17,19 @@
 .suggestion-link.svelte-16z1lxi {
 	font-size: inherit;
 }
+
+/* Player List (windows[22], hud_ui.c), measured against v10's DOM in headless Chromium (the reference
+   ingame-playerlist.html.gz): Chromium ignores a table's padding when its borders collapse, so v10's
+   rows start at the table's edge (pListTable's 10 px padding is cleared here), and each row is 34.7 px
+   tall: the 3 px collapsed tr border-bottom (main.css `th, tr`) is part of the row. This engine adds
+   no collapsed border to a row's height, so the cells carry the difference as bottom padding: the
+   local row (its own row in v10: 28.7 px) keeps 11.7 px, the others 12.9 px (they are 34.7 px apart). */
+.pListTable {
+	padding: 0;
+}
+.pListTable td {
+	padding-bottom: 11.7px;
+}
+.pListTable tr + tr td {
+	padding-bottom: 12.9px;
+}

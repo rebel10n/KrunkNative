@@ -310,6 +310,7 @@ const char *hud_votekick_target(void);            // its target alias ("" none)
 int  hud_votekick_row_allowed(const Client*, const char *alias, int level_ok); // the row's Votekick button (v10 :214300)
 int  hud_votekick_kpd_row_allowed(const Client*); // the row's K.P.D button (account level >= 5)
 void hud_votekick_kpd_request(Client*, int tab);  // "kpd" tab 1 / 2: an officer's list for the K.P.D popup
+void hud_votekick_admin_action(Client*, int uid, int action); // NET_EXT_ADMIN_ACTION: 0 kick, 1 ban (DEV; the server checks)
 char *hud_kpd_list_html(int code, int status, const char *message, const char *json, size_t json_len); // policeRes 1 / 2 table, malloc'd
 int  hud_votekick_handle(Client*, const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // kickVote, confirmPolice, callPolice, copyUser, policeJoin
 void hud_votekick_set_override(const struct cJSON *rows); // --render-scenario state.playerList (hud_ui.c rows from these)

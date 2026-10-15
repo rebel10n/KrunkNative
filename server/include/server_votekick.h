@@ -36,6 +36,7 @@ void votekick_handle_kpd(ClientConnection *client, const uint8_t *body, uint16_t
 // goes to kn_brain (kpd_rate: the call's status / rating). votekick_kpd_recorded: the call's id.
 void votekick_officer_joined(const ClientConnection *client);
 void votekick_handle_kpd_rate(ClientConnection *client, const uint8_t *body, uint16_t length);
+void votekick_handle_admin(ClientConnection *client, const uint8_t *body, uint16_t length); // NET_EXT_ADMIN_ACTION (DEV kick / ban)
 void votekick_kpd_recorded(int suspect_id, int64_t call_id);
 
 void votekick_kpd_reply(const ClientConnection *to, uint8_t code, uint8_t status, const char *message, const char *name,

@@ -97,6 +97,9 @@ typedef struct ChatCommandHost {
 // io_ct after the burst limit: 1 when `text` was a known "/" command (handled, not
 // broadcast), 0 when it is ordinary chat (unknown commands included).
 int chat_command_handle(ChatCommandHost*, int sender_id, const char *text);
+// NET_EXT_ADMIN_ACTION (the player list's Kick / Ban): /kick or /ban (ban 1) of the player with
+// Game uid target_uid, as sender_id. The DEV permission is checked again here. 1 = removed.
+int chat_command_admin_action(ChatCommandHost*, int sender_id, int target_uid, int ban);
 // io_prmA(index): the premiumKeys (and KrunkNative's N key, index 0): 0 noclip, 1 god,
 // 2 kill self, 3 smite, gated like /noclip (requirePremiumCheatPerm). The noclip toggle
 // reaches the client as NET_CHEAT_NOCLIP; denials as ["notify", ...].

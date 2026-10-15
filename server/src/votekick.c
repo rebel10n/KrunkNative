@@ -16,6 +16,7 @@
 #include <server_log.h>
 #include <shared.h>
 #include <game_config.h> // game_config_is_custom: no vote kicks in hosted lobbies (v10 isCustom)
+#include <chat_commands.h> // chat_command_admin_action: the DEV kick / ban (NET_EXT_ADMIN_ACTION)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -437,6 +438,25 @@ void votekick_handle_kpd(ClientConnection *client, const uint8_t *body, const ui
     g_vk.last_kpd_call_at = g_server->now;
     server_log("[kpd] %s called the K.P.D on %s", client->name, target->name);
     accounts_kpd_request(client, 0, target); // the record (kn_brain), then the answer
+}
+
+// NET_EXT_ADMIN_ACTION (v10 ADMIN_ACTIONS from the player list's Kick / Ban): a DEV's request. The
+// sender's DEV right is checked here from the connection (never from the client's button), then the
+// target is looked up by uid in this game and the kick / ban runs through the chat command layer,
+// which checks the same right again. Anything else is refused with nothing changed.
+void votekick_handle_admin(ClientConnection *client, const uint8_t *body, const uint16_t length) {
+    if (!client || length < sizeof(NetAdminActionPacket)) return;
+    NetAdminActionPacket req;
+    memcpy(&req, body, sizeof(req));
+    if (req.action != 0 && req.action != 1) return; // kill / tp / bring stay chat commands
+    if (!net_client_is_dev(client)) {
+        vk_chat_to(client, "Only DEV accounts can kick or ban from the player list");
+        return;
+    }
+    if (!chat_command_admin_action(net_chat_host(), client->id, req.uid, req.action == 1)) {
+        // the target left, or it is the sender: nothing was removed
+        return;
+    }
 }
 
 // ---------------------------------------------------------------- K.P.D officers

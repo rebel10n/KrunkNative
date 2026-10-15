@@ -495,6 +495,31 @@ static void cmd_kick_or_ban(ChatCtx *c, const int ban) {
 static void cmd_kick(ChatCtx *c) { cmd_kick_or_ban(c, 0); }
 static void cmd_ban(ChatCtx *c) { cmd_kick_or_ban(c, 1); }
 
+// NET_EXT_ADMIN_ACTION (the player list's Kick / Ban, v10 ADMIN_ACTIONS): /kick and /ban for one
+// player picked by uid. The sender's rights are checked here again (allowed, CHAT_PERM_DEV: the same
+// gate as the chat command), so the caller must not have checked them for us. 1 = the player was
+// kicked or banned.
+int chat_command_admin_action(ChatCommandHost *host, const int sender_id, const int target_uid, const int ban) {
+    if (!host || !host->game || sender_id == CHAT_CMD_CONSOLE) return 0;
+    ChatCtx c;
+    memset(&c, 0, sizeof(c));
+    c.host = host;
+    c.sender = sender_id;
+    c.command = ban ? "ban" : "kick";
+    if (peer_by_id(host, sender_id, &c.self)) {
+        c.has_self = 1;
+        c.player = c.self.player;
+    }
+    if (!allowed(&c, CHAT_PERM_DEV)) return 0;
+    if (target_uid == sender_id) {
+        reply(&c, ban ? "Cannot ban yourself." : "Cannot kick yourself.");
+        return 0;
+    }
+    Player *target = game_find_player(host->game, target_uid);
+    if (!target) return 0;
+    return kick_or_ban_one(&c, target, ban, 0);
+}
+
 static int all_digits(const char *s) {
     if (!*s) return 0;
     for (; *s; s++) if (!isdigit((unsigned char) *s)) return 0;

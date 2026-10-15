@@ -7,23 +7,46 @@
   "regions": [
     {
       "name": "player-list-header",
-      "rect": [331, 236, 617, 40],
+      "rect": [
+        331,
+        262,
+        617,
+        40
+      ],
+      "ref_offset": [
+        0,
+        -26
+      ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#playerSearchH: Player List [4] and the search box"
+      "note": "#playerSearchH: Player List [4] and the search box. The window is centred and v10's reference is the sandbox, whose Developer Tools block (below the rows) makes its window 54 px taller, so its window (and header) sits 26 px higher than a lobby's (this render has no such block)."
     },
     {
       "name": "player-list-rows",
-      "rect": [343, 283, 595, 138],
+      "rect": [
+        343,
+        309,
+        595,
+        138
+      ],
+      "ref_offset": [
+        0,
+        -26
+      ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "#playerListH: the local row, then ping / name [clan] / chat mute / voice mute / K.P.D / Votekick per player"
+      "note": "#playerListH: the local row, then ping / name [clan] / chat mute / voice mute / K.P.D / Votekick per player. Same 26 px centring offset as the header; the row pitch matches v10 (see kn-v10-menu.css, Player List)."
     },
     {
       "name": "player-list-sandbox-tools",
-      "rect": [333, 419, 614, 63],
+      "rect": [
+        333,
+        419,
+        614,
+        63
+      ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,

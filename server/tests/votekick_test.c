@@ -14,6 +14,9 @@
 //   7. a K.P.D officer (a moderator account) joining gets the open case (kpdData sus / caller), a
 //      verdict before kpdWatchTime (10 s) is refused ("kpdf"), then it counts once; nobody else
 //      gets a rated case
+//   8. the player list's Kick / Ban (NET_EXT_ADMIN_ACTION): a non-DEV's request is refused and
+//      removes nobody; a DEV's kick and ban remove the target, a DEV cannot kick herself, a missing
+//      uid removes nobody; /kick in chat still works
 // Run from the repository root: ./<build>/votekick_test
 #include <server_sandbox.h>
 #include <server.h>
@@ -154,6 +157,22 @@ static void kpd(TestClient *c, const int uid) {
     uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(k)];
     const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_KPD_CALL, &k, sizeof(k));
     send_to(c, NET_PACKET_EXT, buf, n);
+}
+
+// the player list's Kick (0) / Ban (1) of Game uid `uid` (NET_EXT_ADMIN_ACTION, v10 ADMIN_ACTIONS)
+static void admin_action(TestClient *c, const int uid, const int action) {
+    const NetAdminActionPacket a = {.uid = uid, .action = (uint8_t) action};
+    uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(a)];
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_ADMIN_ACTION, &a, sizeof(a));
+    send_to(c, NET_PACKET_EXT, buf, n);
+}
+
+// a chat line (NET_PACKET_CHAT_SEND), e.g. "/kick Bob"
+static void chat(TestClient *c, const char *text) {
+    NetChatSendPacket packet;
+    memset(&packet, 0, sizeof(packet));
+    snprintf(packet.text, sizeof(packet.text), "%s", text);
+    send_to(c, NET_PACKET_CHAT_SEND, &packet, (uint16_t) (strlen(packet.text) + 1));
 }
 
 static void kpd_rate(TestClient *c, const int tagged) {
@@ -377,6 +396,38 @@ int main(void) {
     kpd_rate(C, 1);
     pump(5);
     CHECK(!got_chat(C, "Case") && !ext_count(C, NET_EXT_KPD_RESET), "a player without a case cannot rate");
+
+    // ---- 8. the player list's Kick / Ban (NET_EXT_ADMIN_ACTION, v10 ADMIN_ACTIONS): DEV only
+    reset_received();
+    CHECK(conn(A) && conn(B) && conn(C), "Alice, Bob and Carol are here for the admin cases");
+    admin_action(B, conn(A)->id, 0); // a non-DEV account asks to kick Alice
+    admin_action(A, conn(B)->id, 0); // Alice is not DEV yet (the 5c / 7 flags are cleared): refused
+    admin_action(A, conn(C)->id, 1); // ... and a ban of Carol
+    pump(5);
+    CHECK(conn(A) && conn(B) && conn(C) && !got_error(B, "Kicked") && !got_error(C, "Banned"),
+          "a non-DEV's kick and ban change nothing: Bob and Carol stay");
+    CHECK(got_chat(A, "Only DEV accounts can kick or ban from the player list"), "the refused sender is told why");
+    CHECK(!got_error(A, "Kicked") && conn(A), "a non-DEV is not kicked by another non-DEV's request");
+    reset_received();
+    conn(A)->acct.flags |= NET_PLAYER_INFO_DEV; // Alice is DEV now (the server re-reads it on every request)
+    admin_action(A, conn(A)->id, 0);
+    admin_action(A, 99999, 0); // no such player
+    pump(5);
+    CHECK(conn(A) && got_chat(A, "Cannot kick yourself"), "a DEV cannot kick herself");
+    CHECK(conn(C) != NULL, "a missing target removes nobody");
+    const int kick_uid = conn(C)->id;
+    admin_action(A, kick_uid, 0);
+    pump(5);
+    CHECK(got_error(C, "Kicked") && !conn(C), "a DEV's kick from the list kicks Carol");
+    chat(A, "/kick Bob"); // the chat command is unchanged
+    pump(5);
+    CHECK(got_error(B, "Kicked") && !conn(B), "/kick Bob in chat still kicks Bob");
+    if (conn(D)) {
+        admin_action(A, conn(D)->id, 1);
+        pump(5);
+        CHECK(got_error(D, "Banned") && !conn(D), "a DEV's ban from the list bans Dave's connection");
+    }
+    conn(A)->acct.flags = 0;
 
     for (int i = 0; i < CLIENTS; i++) {
         if (g_clients[i].fd >= NET_LOOPBACK_FD_BASE) sandbox_disconnect(g_clients[i].fd);
