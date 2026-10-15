@@ -545,6 +545,7 @@ void hud_objectives_fini(void);                   // its canvas (GL)
 // The Host Game practice: the embedded offline game plays catalogue map `catalog_index` in Krunker
 // mode `mode` (-1 keeps it); the Games window's Play and the Host Game flow's Play offline (ui_handlers.c)
 void host_catalog_map(int catalog_index, int mode);
+#define ALT_MANAGER_WINDOW (KN_WINDOW_BASE + 4) // the saved accounts (alt_manager_ui.c), from More Krunker
 void object_manager_ui_toggle(Client*);          // the F1 bind: open (pointer freed) / close (pointer back)
 int  object_manager_ui_escape(void);             // Escape on the window: 1 = back to the game
 int  object_manager_ui_search_focused(void);     // its search box has the keyboard (F1 still toggles)

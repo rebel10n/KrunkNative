@@ -25,11 +25,17 @@ int headless_parse_args(int *argc, char **argv) {
     // Headless runs (tests, agents, render scenarios) never open the desktop's sound devices:
     // playback and voice capture both use miniaudio's null backend, whatever the environment or
     // the Client tab's audioBackend setting asks for (it only applies when the variable is unset).
+    // Nor do they reach the desktop keyring: the alt vault's master key goes to the run's own config
+    // directory (the 0600 file keystore, client/src/alt/alt_keystore.c) unless a run forces another one.
+    // A private XDG_CONFIG_HOME does not isolate the Secret Service or the Keychain, so without this
+    // every e2e client would leave a key item in the user's login keyring.
     if (g_headless) {
 #ifdef _WIN32
         _putenv_s("KRUNKNATIVE_AUDIO_BACKEND", "null");
+        if (!getenv("KRUNKNATIVE_ALT_KEYSTORE")) _putenv_s("KRUNKNATIVE_ALT_KEYSTORE", "file");
 #else
         setenv("KRUNKNATIVE_AUDIO_BACKEND", "null", 1);
+        setenv("KRUNKNATIVE_ALT_KEYSTORE", "file", 0);
 #endif
     }
     return g_headless;

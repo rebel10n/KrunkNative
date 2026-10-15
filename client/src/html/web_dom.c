@@ -13,6 +13,7 @@
 
 #include "html_ui_backend.h"
 #include <html_dom.h>
+#include <alt_web.h> // the web vault self-test (client/src/alt/alt_web_test.c)
 #include <cJSON.h>
 #include <emscripten.h>
 #include <gl.h>
@@ -1592,6 +1593,8 @@ static void st_part2(void *user);
 static void run_selftest(void) {
     char buf[256];
     printf("[kn-selftest] start\n");
+    // the web vault (client/src/alt/alt_web_test.c): on a throwaway IndexedDB database, never the page's own
+    st_check(alt_web_selftest() == 0, "alt vault: SubtleCrypto seal and open, the stored key, the stored record, wrong key and tamper");
 
     const HtmlElem body = html_dom_body();
     st_check(body != 0, "body handle");

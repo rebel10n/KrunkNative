@@ -6297,8 +6297,9 @@ static int l_document_click(void *user, const HtmlEvent *ev, const HtmlArg *args
 static void hub_connected(void) {
     // captchaCallback -> io.connect(...) callback: guest (no saved token) -> Login button
     g_hub.connected = 1;
-    char name[64] = "", token[192] = "";
-    if (g_hub.brain && html_storage_get("krunker_username", name, sizeof(name)) >= 0 && html_storage_get("krunker_token", token, sizeof(token)) >= 0 && name[0] && token[0]) {
+    char name[64] = "";
+    // the saved session: the alt vault's (account_ui.c), not the plain krunker_token key, which a cipher build empties
+    if (g_hub.brain && html_storage_get("krunker_username", name, sizeof(name)) >= 0 && account_session_token()[0] && name[0]) {
         if (account_get()) {
             // account_ui.c's restore already answered on this socket
             g_hub.fe = 1;

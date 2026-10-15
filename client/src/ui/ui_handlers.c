@@ -19,6 +19,7 @@
 #include <console.h>      // #knConsoleInput keys (developer console, ui_console.c)
 #include <ui_mobile.h>    // isMobile: Escape resumes without a pointer lock (ui_mobile.c)
 #include <backend_ui.h>   // brain backend: account (account_ui.c) + matchmaker (servers_ui.c)
+#include <alt_manager_ui.h> // the saved accounts window (alt_manager_ui.c)
 #include <v10_ui.h> // v10 Leaderboards / view stack (v10_competitive.c)
 #include <v10_party.h>    // v10 Invite / Join (v10_party.c)
 #include <client_settings.h> // Settings > Client tab + the Exit menu item (ui_client_settings.c)
@@ -618,6 +619,7 @@ static const UiModuleHandler MODULE_HANDLERS[] = {
     ui_client_settings_handle, // ui_client_settings.c: Settings > Client, the Exit item
     update_ui_handle,          // update_ui.c: knUpdateNow / knUpdateDownload (the Outdated box)
     object_manager_ui_handle,  // object_manager_ui.c: the KrunkNative Object Manager (knOm*)
+    alt_manager_ui_handle,     // alt_manager_ui.c: the KrunkNative saved accounts (knAlt*)
     v10_party_ui_handle,       // v10_party.c: the server password popup (submitGameCode)
 };
 

@@ -142,6 +142,27 @@ def storage(xdg, key):
         return ""
 
 
+def vault_session(xdg):
+    """The KrunkNative session the client keeps sealed in its alt vault (client/src/alt/alt_vault.h:
+    KNALTV01 header, AES-256-GCM; a headless client uses the file keystore, <config>/krunknative/alt/master.key).
+    Returns the active account's token, "" when there is none."""
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    alt = os.path.join(xdg, "krunknative", "alt")
+    try:
+        with open(os.path.join(alt, "vault.bin"), "rb") as f:
+            rec = f.read()
+        with open(os.path.join(alt, "master.key"), "rb") as f:
+            key = f.read()
+    except OSError:
+        return ""
+    if rec[:8] != b"KNALTV01" or len(key) != 32:
+        return ""
+    n = int.from_bytes(rec[21:25], "big")
+    doc = json.loads(AESGCM(key).decrypt(rec[9:21], rec[41:41 + n] + rec[25:41], rec[:25]))
+    active = doc.get("active_kn", "")
+    return next((p.get("secret", "") for p in doc.get("profiles", []) if active and p.get("id") == active), "")
+
+
 def play(seek, token):
     c = kn_proto.Conn("127.0.0.1", int(seek["port"]))
     c.send(1, bytes([1, 3, 0]))
@@ -205,8 +226,10 @@ def run():
     check("brain: one signup_rewards row", psql(f"SELECT count(*) FROM signup_rewards WHERE account_id = {acc_id}") == "1")
 
     # 2. the next start: logged in from the saved session, nothing granted twice
-    token = storage(xdg, "krunker_token")
-    check("the session token was saved", bool(token))
+    # the session is kept sealed in the alt vault (client/src/alt/), never as a plain krunker_token
+    token = vault_session(xdg)
+    check("the session token was saved (sealed in the alt vault, not in plain krunker_token)",
+          bool(token) and not storage(xdg, "krunker_token"))
     c = Client("relogin", xdg)
     time.sleep(16)
     c.shot("4-relogin")

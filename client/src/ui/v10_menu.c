@@ -833,13 +833,17 @@ static void generic_popup(const char *html, const char *cls) {
 // showMoreKrunker(): the moreKrunkerPopup (_66797). Mods: window.canShowMods (the Mod Manager
 // exists natively); Sandbox: openURL("/?sandbox") = KrunkNative's embedded offline game; Editor:
 // openURL("/editor.html") (app_mode); KPD: showPolicePop(); "Download our client": the Client
-// window (showWindow(25), download_ui.c).
+// window (showWindow(25), download_ui.c). Accounts: KrunkNative's saved accounts (alt_manager_ui.c),
+// not a Krunker option.
 static void more_krunker(void) {
-    static const struct { const char *title, *symbol, *img, *desc, *action; } k_options[] = {
+    char accounts_action[48];
+    snprintf(accounts_action, sizeof(accounts_action), "clearPops(),showWindow(%d)", ALT_MANAGER_WINDOW);
+    const struct { const char *title, *symbol, *img, *desc, *action; } k_options[] = {
         {"Mods", "color_lens", NULL, "Customize your experience", "clearPops(),showWindow(4)"},
         {"Sandbox", "castle", NULL, "Try every skin", "clearPops(),knHostOffline()"},
         {"Editor", "construction", NULL, "Create your own maps and game modes", "clearPops(),openURL('/editor.html')"},
         {"KPD", NULL, "./img/police.png", "Stop criminals", "clearPops(),shoPolicePop()"},
+        {"Accounts", "switch_account", NULL, "Switch between your own accounts", accounts_action},
     };
     StrBuf sb = {0};
     sb_append(&sb, "<div class=\"moreKrunkerHolder svelte-19783yx\"><div class=\"moreKrunkerTitle svelte-19783yx\"><span class=\"svelte-19783yx\">"

@@ -484,6 +484,10 @@ else ()
     if (OpenSSL_FOUND AND NOT CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(${CLIENT_BINARY} PRIVATE OpenSSL::SSL OpenSSL::Crypto)
         target_compile_definitions(${CLIENT_BINARY} PRIVATE KRUNKNATIVE_HAVE_TLS=1)
+        # the alt vault's master key in the login Keychain (client/src/alt/alt_keystore.c)
+        if (APPLE)
+            target_link_libraries(${CLIENT_BINARY} PRIVATE "-framework Security" "-framework CoreFoundation")
+        endif ()
         if (KRUNKNATIVE_TLS_STATIC)
             target_compile_definitions(${CLIENT_BINARY} PRIVATE KRUNKNATIVE_TLS_STATIC=1)
         endif ()
@@ -1011,6 +1015,19 @@ else ()
     target_include_directories(krunker_cheat_test PRIVATE client/include client/src/net)
     target_link_libraries(krunker_cheat_test PRIVATE kn_quickjs)
     add_test(NAME krunker_cheat_test COMMAND krunker_cheat_test)
+
+    # alt_vault_test (the alt manager): AES-256-GCM known answers (NIST / the cryptography package),
+    # the sealed vault record round trip, a flipped byte or a wrong key rejected, no plaintext token
+    # in the file, profile switches, the file keystore's 0600 key and the store's save / reopen
+    # (client/src/alt/). Uses the file keystore only (KRUNKNATIVE_ALT_KEYSTORE=file, set by the test).
+    if (OpenSSL_FOUND AND NOT WIN32)
+        add_executable(alt_vault_test client/tests/alt_vault_test.c client/src/alt/alt_crypto.c client/src/alt/alt_vault.c
+                       client/src/alt/alt_keystore.c client/src/alt/alt_store.c)
+        target_include_directories(alt_vault_test PRIVATE client/include)
+        target_compile_definitions(alt_vault_test PRIVATE KRUNKNATIVE_HAVE_TLS=1)
+        target_link_libraries(alt_vault_test PRIVATE cJSON OpenSSL::SSL OpenSSL::Crypto m)
+        add_test(NAME alt_vault_test COMMAND alt_vault_test)
+    endif ()
 
     # qr_code_test (email-verify): the v7.1.4 2FA popup's QR code encoder (client/src/ui/qr_code.c)
     # against python-qrcode goldens (client/tests/data/qr_golden.json)

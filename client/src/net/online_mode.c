@@ -174,8 +174,8 @@ void online_mode_on_challenge(void *client_ptr, const void *challenge_in) {
     live_note_challenge(&ch); // a sign-in later in the session answers the same challenge
     if (!ch.online_mode) return; // offline_mode server: the guest JOIN already sent is all it needs
     const AccountInfo *acc = account_get();
-    char saved[8] = "";
-    if (g_online && !acc && !g_join.no_defer && html_storage_get("krunker_token", saved, sizeof(saved)) > 0 && saved[0] && backend_enabled()) {
+    // a saved session (the alt vault's, or the legacy key): account_session_token() holds it at startup
+    if (g_online && !acc && !g_join.no_defer && account_session_token()[0] && backend_enabled()) {
         // startup: the token restore on the social socket is still running; retry from the tick
         g_join.deferred = ch;
         g_join.has_deferred = 1;

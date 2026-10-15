@@ -532,6 +532,9 @@ rtc-build: ## Build the WebRTC gateway (net-bridge/rtc/kn-rtc, needs Go)
 rtc: rtc-build ## Run the WebRTC <-> UDP gateway (signaling http $(RTC_HTTP), ICE udp $(RTC_ICE))
 	$(RTC_BIN) -http $(RTC_HTTP) -ice-addr $(RTC_ICE) -info-file $(DIST_WEB)/rtc.json
 
+alt-test: build ## The alt manager's vault: AES-256-GCM vectors, tamper and wrong-key rejection, no plaintext on disk, profile switching, the file keystore and the store (headless, file keystore)
+	cd $(DEBUG_DIR) && env -u DISPLAY -u WAYLAND_DISPLAY ctest -R '^alt_vault_test$$' --output-on-failure
+
 test-net: build ## knet transport unit test (loss/dup/reorder), v7 chat/voice channels + sprays (social_test), 2-client UDP end-to-end (headless)
 	./$(DEBUG_DIR)/knet_test
 	./$(DEBUG_DIR)/social_test

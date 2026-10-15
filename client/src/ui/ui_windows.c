@@ -4,6 +4,7 @@
 // (tpl_splice below), so the output stays byte-identical to the page's.
 #include <ui_logic.h>
 #include <backend_ui.h>
+#include <alt_manager_ui.h> // the saved accounts window (alt_manager_ui.c)
 #include <map_catalog.h>
 #include <ui_mobile.h>
 #include <client_settings.h>
@@ -571,10 +572,13 @@ LOADOUT_GEN(50) LOADOUT_GEN(51) LOADOUT_GEN(52)
 
 static char *gen_object_manager(void) { return object_manager_window_gen(OBJECT_MANAGER_WINDOW, NULL); }
 
+static char *gen_alt_manager(void) { return alt_manager_window_gen(ALT_MANAGER_WINDOW, NULL); }
+
 static const WindowDef WINDOWS[] = {
     {SERVERS_WINDOW_CONNECT, servers_connect_window_gen}, // KrunkNative: the menu's Connect button (servers_ui.c)
     {OBJECT_MANAGER_WINDOW, gen_object_manager},          // KrunkNative: the Object Manager (object_manager_ui.c)
     {HOST_FLOW_WINDOW, host_flow_window_gen},             // KrunkNative: the Host Game flow (host_flow_ui.c)
+    {ALT_MANAGER_WINDOW, gen_alt_manager},                // KrunkNative: the saved accounts (alt_manager_ui.c)
     {1, gen_settings},
     {3, gen_loadout},
     {7, gen_7},
@@ -630,6 +634,7 @@ void ui_window_meta(const int id, const char **cls, const char **style) {
     const UiWindowMeta *m = ui_windows_meta(key);
     if (cls) *cls = m ? m->cls : "dark";
     if (style) *style = m ? m->style : id == OBJECT_MANAGER_WINDOW ? "overflow-y: auto; width: 1120px;"
+                                     : id == ALT_MANAGER_WINDOW ? "overflow-y: auto; width: 620px;"
                                      : "overflow-y: auto;";
 }
 

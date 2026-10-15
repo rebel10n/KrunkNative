@@ -1,0 +1,27 @@
+#pragma once
+// The client's one open alt vault (client/src/alt/alt_store.c): the KrunkNative session the player
+// is signed in with lives here, sealed, instead of in the plain krunker_token storage key. The
+// store opens the vault at startup when a vault file exists, creates the master key on the first
+// save, and reports why it cannot (no crypto in this build, a locked keyring, a damaged file).
+// Every call is a no-op returning failure until alt_store_open() succeeds.
+#include <alt_vault.h>
+
+#include <stddef.h>
+
+// config_dir NULL = $XDG_CONFIG_HOME/krunknative (else ~/.config/krunknative), the storage directory.
+// 0 open (a vault loaded, or none yet), -1 unavailable: alt_store_error() says why.
+int alt_store_open(const char *config_dir);
+int alt_store_ready(void);
+const char *alt_store_error(void);
+const char *alt_store_keystore(void); // "file", "secret service", "keychain"; "" before the first save
+// The open vault, for the manager to list and edit (NULL unless ready). Call alt_store_save() after a change.
+AltVault *alt_store_vault(void);
+int alt_store_save(void); // 0 ok, -1 failure (the vault stays as it was in memory)
+// The active KrunkNative session: 1 and its username / token, 0 when signed out or not ready.
+int alt_store_kn_session(char *name, size_t namecap, char *token, size_t tokencap);
+// Keeps a KrunkNative session: the account's profile gets this token and becomes the active one.
+// 0 ok, -1 failure (the caller may keep its own copy then).
+int alt_store_kn_save(const char *username, const char *token);
+// Signs out: the active pointer clears, the saved profile stays. 0 ok (or nothing to clear).
+int alt_store_kn_sign_out(void);
+void alt_store_close(void); // wipes the vault and the key from memory

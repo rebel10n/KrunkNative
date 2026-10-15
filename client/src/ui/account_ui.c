@@ -15,6 +15,7 @@
 #include <v10_menu.h> // the v10 page's header bar (v10_menu.c)
 #include <backend.h>
 #include <backend_ui.h>
+#include <alt_store.h> // the encrypted session vault (client/src/alt/)
 #include <app_mode.h>
 #include <html_ui.h>
 #include <ui_logic.h>
@@ -365,13 +366,82 @@ static void send_account_request(const int action, const char *name, const char 
     send_account_request_email(action, name, pass, third, NULL);
 }
 
-// readyLoad(): krunker_token + krunker_username -> sendAccountRequest(1, [name, null, token])
+// KrunkNative session storage (client/src/alt/alt_store.c). Where the build has a cipher the session
+// token lives only in the alt vault: the plain krunker_token key is emptied, and a sign-in whose vault
+// cannot be written lasts this session only, never as plain text. Builds without a cipher keep the
+// v3.1.1 key as before.
+static void save_session(const char *username, const char *token) {
+    if (alt_crypto_available()) {
+        if (token && token[0] && username && username[0]) alt_store_kn_save(username, token);
+        html_storage_set("krunker_token", "");
+        return;
+    }
+#ifdef __EMSCRIPTEN__
+    // the web without a vault (no SubtleCrypto: an insecure origin) keeps the token in memory for this
+    // page load only; plain browser storage never holds it
+    html_storage_set("krunker_token", "");
+#else
+    html_storage_set("krunker_token", token ? token : "");
+#endif
+}
+
+// A saved session the server refused, or a switch that failed: nothing restores it from storage again.
+static void forget_saved_session(void) {
+    html_storage_set("krunker_token", "");
+    alt_store_kn_sign_out();
+    g_token[0] = 0;
+}
+
+// Startup: the vault's active session becomes g_token. A plain token (an older build's, or one written
+// into the storage directory since) moves into the vault and wins: every save here empties the plain
+// key, so a plain token is always newer than the vault's session. A vault that exists but cannot be
+// opened yields no sign-in.
+static void load_session(void) {
+    g_token[0] = 0;
+    if (!alt_crypto_available()) {
+#ifdef __EMSCRIPTEN__
+        html_storage_set("krunker_token", ""); // a plain token from an older build is removed, never read
+#else
+        storage_get("krunker_token", g_token, sizeof(g_token));
+#endif
+        return;
+    }
+    if (!alt_store_ready()) {
+#ifdef __EMSCRIPTEN__
+        html_storage_set("krunker_token", ""); // the vault did not open: no plain copy stays in browser storage
+#endif
+        return;
+    }
+    char legacy[sizeof(g_token)], user[64];
+    storage_get("krunker_token", legacy, sizeof(legacy));
+    storage_get("krunker_username", user, sizeof(user));
+    const int moved = legacy[0] && user[0] && alt_store_kn_save(user, legacy) == 0;
+    if (moved) {
+        copy_str(g_token, sizeof(g_token), legacy);
+        html_storage_set("krunker_token", "");
+    }
+    alt_wipe(legacy, sizeof(legacy));
+    if (moved) return;
+    char name[64];
+    if (alt_store_kn_session(name, sizeof(name), g_token, sizeof(g_token)) == 1) {
+        // the restore sends krunker_username with the token: they must name the same account
+        html_storage_set("krunker_username", name);
+    }
+#ifdef __EMSCRIPTEN__
+    html_storage_set("krunker_token", ""); // a plain copy the vault could not take never stays in browser storage
+#endif
+}
+
+// readyLoad(): the saved session (krunker_username + g_token) -> sendAccountRequest(1, [name, null, token])
 static void try_restore(void) {
     if (g_restore_sent || !backend_enabled()) return;
     char name[64], token[sizeof(g_token)];
     storage_get("krunker_username", name, sizeof(name));
-    storage_get("krunker_token", token, sizeof(token));
-    if (!name[0] || !token[0]) return;
+    copy_str(token, sizeof(token), g_token);
+    if (!name[0] || !token[0]) {
+        alt_wipe(token, sizeof(token));
+        return;
+    }
     g_restore_sent = 1;
     cJSON *frame = cJSON_CreateArray();
     cJSON_AddItemToArray(frame, cJSON_CreateString("a"));
@@ -383,6 +453,7 @@ static void try_restore(void) {
     cJSON_AddItemToArray(frame, payload);
     backend_social_send(frame);
     cJSON_Delete(frame);
+    alt_wipe(token, sizeof(token));
 }
 
 static void clear_account(void) {
@@ -460,8 +531,7 @@ static void account_response(const cJSON *frame) {
         if (was_restore && !g_logged_in) {
             // a stale saved token: v3.1.1 keeps the values, but nothing would ever log in
             // with them again; drop the token so the next start does not retry it
-            html_storage_set("krunker_token", "");
-            g_token[0] = 0;
+            forget_saved_session();
         }
         return;
     }
@@ -490,7 +560,7 @@ static void account_response(const cJSON *frame) {
     const char *token = str_at(frame, 5);
     if (token && token[0]) {
         copy_str(g_token, sizeof(g_token), token);
-        html_storage_set("krunker_token", token);
+        save_session(username, token);
     }
     apply_menu_name();
     mark_header();
@@ -502,22 +572,42 @@ static void account_response(const cJSON *frame) {
     avatar_ui_refresh();     // the profile picture's review status (after the token is saved above)
 }
 
-// logoutAcc()
-static void logout(void) {
+// The signed-in account ends here: the server hears logoutAcc and the session leaves storage. The
+// vault keeps the profile (and its session) so the player can switch back to it.
+static void end_session(void) {
     send_account_request(-1, NULL, NULL, NULL);
     show_acc_resp(NULL);
     html_storage_set("krunker_id", "");
     html_storage_set("krunker_username", "");
     html_storage_set("krunker_token", "");
+    alt_store_kn_sign_out();
     g_token[0] = 0;
     g_tab_index = 0;
     g_logout_sessions = 0;
     clear_account();
     apply_menu_name();
     mark_header();
+}
+
+// logoutAcc()
+static void logout(void) {
+    end_session();
     printf("[account] logged out\n");
     menu_show_window(5, 1); // showWindow(5)
     menu_update_class_box();
+}
+
+// The alt manager's switch (alt_manager_ui.c): signs the current account out, then signs in with a
+// saved session through the same restore as a saved login. 0 started, -1 when this build has no
+// account server (nothing happens).
+int account_ui_use_session(const char *username, const char *token) {
+    if (!username || !username[0] || !token || !token[0] || !backend_enabled()) return -1;
+    if (g_logged_in) end_session();
+    html_storage_set("krunker_username", username);
+    copy_str(g_token, sizeof(g_token), token);
+    g_restore_sent = 0;
+    try_restore(); // the result (a token refresh included) comes back as "a" and is saved by save_session
+    return 0;
 }
 
 // The menu's Logout (logoutAcc) and the developer console's `logout` (ui_console.c): 1 when an
@@ -642,7 +732,7 @@ static void on_social(void *user, const cJSON *frame) {
         const char *token = str_at(frame, 2);
         if (token && token[0]) {
             copy_str(g_token, sizeof(g_token), token);
-            html_storage_set("krunker_token", token);
+            save_session(g_acc.name, token);
             apply_menu_name();
         }
         HtmlElem res = html_dom_by_id("newPRes");
@@ -655,7 +745,8 @@ static void on_social(void *user, const cJSON *frame) {
 
 void account_ui_init(Client *client) {
     g_client = client;
-    storage_get("krunker_token", g_token, sizeof(g_token));
+    alt_store_open(NULL); // the vault, if the player has one (no key is read without a vault file)
+    load_session();
     if (!backend_enabled()) return;
     backend_social_listen(on_social, NULL);
     backend_social_open(); // "__open" restores the saved session
@@ -1273,8 +1364,8 @@ static int reset_frame(const char *label, const cJSON *frame) {
         memset(&g_reset, 0, sizeof(g_reset));
         if (user && user[0] && token && token[0]) {
             html_storage_set("krunker_username", user);
-            html_storage_set("krunker_token", token);
             copy_str(g_token, sizeof(g_token), token);
+            save_session(user, token);
             g_restore_sent = 0;
             try_restore();
         }

@@ -3676,8 +3676,7 @@ void servers_ui_tick(Client *client) {
         if (g_startup_hold) return; // a restart's resume rejoins its lobby instead (servers_ui_resume_rejoin)
         // readyLoad restores the saved session before the seek; wait briefly for it so
         // the lobby sees the account (the ticket carries it).
-        char token[8] = "";
-        const int has_token = html_storage_get("krunker_token", token, sizeof(token)) >= 0 && token[0];
+        const int has_token = account_session_token()[0] != 0; // the saved session (the alt vault's, or legacy)
         if (backend_available() < 0) return; // GET /mm/status still running (backend.h)
         // the restore needs the brain: count the wait from when it answered, not from startup
         // (a slow /mm/status could use the whole window up, and the seek went out as a guest)

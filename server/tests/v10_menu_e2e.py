@@ -263,7 +263,8 @@ def signed_in_case(brain_port, games):
     cards = nodes(text, "games")
     check("1: Custom Games lists games", cards > 0, "%d cards" % cards)
     check("1: Host Game opens the host chooser", nodes(text, "host") == 5, str(nodes(text, "host")))
-    check("1: More Krunker opens its popup", nodes(text, "more") == 4, str(nodes(text, "more")))
+    # v10's popup has Mods, Sandbox, Editor and KPD; KrunkNative adds Accounts (the alt manager, alt_manager_ui.c)
+    check("1: More Krunker opens its popup", nodes(text, "more") == 5, str(nodes(text, "more")))
     qm = re.search(r"\[mm\] quick match: seeking a lobby other than (\S+)", text)
     check("1: Quick Match seeks with the current lobby excluded", qm and joins and qm.group(1) == joins[0],
           "%s %s" % (qm.group(1) if qm else None, joins))
