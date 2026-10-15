@@ -18,12 +18,20 @@ void map_post_object_freed(const Object *object);
 // shadow map and the light objects follow on the next frame.
 void map_post_object_detach(const Object *object, int uid);
 void map_post_object_attach(const Object *object, int uid);
-// Tests (input_script `builds` / `placewatch`): the player builds that have a mesh in the scene,
-// and how many of those are shown this frame (*visible, may be NULL).
+// Tests (input_script `builds` / `placewatch`): the player builds that have a slot in the build
+// batch, and how many of those are shown this frame (*visible, may be NULL).
 int map_post_build_meshes(int *visible);
+int map_post_build_draws(void); // the draw calls the builds take this frame (one batch: 0 or 1)
 // Tests (input_script `builds`): the Object Manager objects whose meshes are in the scene and shown
 int map_post_spawned_meshes(void);
-Mesh *prefab_build_dynamic(const Object *object); // prefab.c: the mesh of a player build (caller owns it)
+// prefab.c: player builds, drawn in one batch (map_post.c). A build's PREFAB_BUILD_VERTICES world-space
+// vertices of PREFAB_BUILD_FLOATS floats (position, uv, colour; a hidden build: all at the origin),
+// in prefab_cube_geo's order and index pattern (a ramp: its plane as the first face, the rest
+// degenerate); the material the batch draws them with (the caller owns the mesh, not the geometry).
+#define PREFAB_BUILD_VERTICES 24
+#define PREFAB_BUILD_FLOATS 8
+void prefab_build_vertices(const Object *object, int shown, float out[PREFAB_BUILD_VERTICES * PREFAB_BUILD_FLOATS]);
+Mesh *prefab_build_batch_mesh(Geometry *geometry);
 Mesh *prefab_pickup_mesh(int weapon_id, int no_texture, float *scale); // prefab.c: a weapon pickup's model (caller owns it)
 Mesh *prefab_weapon_mesh(const Weapon *weapon, int no_texture);   // prefab.c: a weapon's model, unposed (caller owns it)
 Mesh *prefab_asset_mesh(const char *model, const char *texture);   // prefab.c: models/<model>.obj + textures/<texture>.png (caller owns it)

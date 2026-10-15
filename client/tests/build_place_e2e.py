@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Build Tool placement end to end: placed builds are drawn and collide, the local player's build
-shows at once (client prediction, shared/src/build.c build_predict) and is replaced by the
-server's, Object Manager undo removes what it spawned, and many builds keep their meshes.
+(and Object Manager object) shows at once (client prediction, shared/src/build.c build_predict,
+object_manager_predict_spawn) and is replaced by the server's, Object Manager undo removes what it
+spawned, and many builds are drawn in one batch.
 
   python3 -I client/tests/build_place_e2e.py BUILD_DIR      (run from the repository root)
 
@@ -9,13 +10,15 @@ server's, Object Manager undo removes what it spawned, and many builds keep thei
      KRUNKNATIVE_NET_DELAY_MS=150 (a 300 ms round trip, so the prediction is seen before the
      server's answer): the Build Tool places a Build Block. `placewatch` sees it drawn within 2
      frames of the click; at once it is the client's prediction (predicted=1), after the round
-     trip the server's build in its place (predicted=0, one build, one mesh, same spot).
+     trip the server's build in its place (predicted=0, one build, one mesh, same spot). An Object
+     Manager object (Objects tab) shows at once the same way (spawned_predicted=1) and is then the
+     server's (one object drawn, nothing predicted).
   2. offline Lostworld (the client's own sandbox server, no added delay: its debug latency stalls
      the in-process join): the build is drawn and is the server's (one build, one mesh). Walking
      into it stops at its face (it collides). An Object Manager object spawned and then undone (U)
      leaves the scene; the build stays. `build_fill 300` (the Build Tool's server path,
-     doc/console.md): 301 builds, 301 meshes shown (map_post.c's indexed build meshes); the frame
-     times are logged, not asserted.
+     doc/console.md): 301 builds, each in the build batch, one draw call (map_post.c); the frame times
+     are logged, not asserted.
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL; KRUNKNATIVE_EGL_DEVICE picks it).
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
@@ -83,7 +86,8 @@ def run_client(name, args, script, extra_env=None, timeout=180):
     return read(log).splitlines()
 
 
-BUILDS_RE = re.compile(r"\[input_script\] builds t=\d+ (@\S+) n=(\d+) predicted=(\d+) meshes=(\d+) visible=(\d+) last=(\S+) spawned=(\d+)")
+BUILDS_RE = re.compile(r"\[input_script\] builds t=\d+ (@\S+) n=(\d+) predicted=(\d+) meshes=(\d+) visible=(\d+) last=(\S+) spawned=(\d+) "
+                       r"draws=(\d+) spawned_predicted=(\d+)")
 PLACE_RE = re.compile(r"\[input_script\] place t=\d+ (@\S+) frames=(\d+) ms=(\S+) visible=(\d+)")
 STATE_RE = re.compile(r"\[input_script\] state t=\d+ .*?pos=(\S+),(\S+),(\S+) ")
 
@@ -95,7 +99,8 @@ def builds(lines):
         if m:
             last = tuple(map(float, m.group(6).split(","))) if m.group(6) != "-" else None
             out[m.group(1)] = {"n": int(m.group(2)), "predicted": int(m.group(3)), "meshes": int(m.group(4)),
-                               "visible": int(m.group(5)), "last": last, "spawned": int(m.group(7))}
+                               "visible": int(m.group(5)), "last": last, "spawned": int(m.group(7)), "draws": int(m.group(8)),
+                               "spawned_predicted": int(m.group(9))}
     return out
 
 
@@ -171,9 +176,22 @@ try:
     while time.time() < end and "Listening on port" not in read(slog):
         time.sleep(0.2)
     check("server_bin listening", "Listening on port" in read(slog), slog)
-    online = PLACE.replace(" pose ", " tp ") + "\n6000 quit\n"
+    online = PLACE.replace(" pose ", " tp ") + f"""
+4700 tp {SPOT} 1.571 -0.4
+5200 builds @ombefore
+5300 om object 10
+5350 builds @omearly
+6800 builds @omlate
+7000 quit
+"""
     lines = run_client("online", ["--connect", f"127.0.0.1:{port}"], online, {"KRUNKNATIVE_NET_DELAY_MS": DELAY_MS})
     check_placement("online", lines, True)
+    b = builds(lines)
+    ombefore, omearly, omlate = b.get("@ombefore"), b.get("@omearly"), b.get("@omlate")
+    check("online: an Object Manager object shows at once, the client's prediction",
+          ombefore and omearly and omearly["spawned"] == ombefore["spawned"] + 1 and omearly["spawned_predicted"] == 1, f"{ombefore} -> {omearly}")
+    check("online: then it is the server's object (one object, nothing predicted)",
+          omearly and omlate and omlate["spawned"] == omearly["spawned"] and omlate["spawned_predicted"] == 0, f"{omearly} -> {omlate}")
     stop(server)
 
     # ------------------------------------------------------------------ 2. offline
@@ -210,8 +228,9 @@ try:
           spawned and undone and undone["spawned"] == spawned["spawned"] - 1 and undone["n"] == 1 and undone["visible"] == 1,
           f"{spawned} -> {undone}")
     filled = b.get("@filled")
-    check("offline: build_fill 300: 301 builds, each drawn once",
-          filled and filled["n"] == 301 and filled["meshes"] == 301 and filled["visible"] == 301 and filled["predicted"] == 0, str(filled))
+    check("offline: build_fill 300: 301 builds, each drawn once, all in one draw call (the build batch)",
+          filled and filled["n"] == 301 and filled["meshes"] == 301 and filled["visible"] == 301 and filled["predicted"] == 0 and
+          filled["draws"] == 1, str(filled))
     for line in lines:
         if "] ft " in line:
             print("      " + line.split("] ", 1)[1], flush=True)

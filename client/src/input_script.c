@@ -142,9 +142,11 @@
 //   100 ft @label start | stop   wall-clock frame times between start and stop: one line with the
 //                                frame count, avg / p50 / p95 / max ms (perf logs, never asserted here)
 //   100 builds @label            log the player builds: "[input_script] builds t=100 @label n=12 predicted=1
-//                                meshes=12 visible=12 last=x,y,z spawned=2" (n: active map builds, predicted: the
-//                                ones this client placed ahead of the server, meshes / visible: their meshes in the
-//                                scene, last: the newest one's feet, spawned: Object Manager objects drawn; map_post.c)
+//                                meshes=12 visible=12 last=x,y,z spawned=2 draws=1 spawned_predicted=0" (n: active map
+//                                builds, predicted: the ones this client placed ahead of the server, meshes / visible:
+//                                their slots in the build batch, last: the newest one's feet, spawned: Object Manager
+//                                objects drawn, draws: the builds' draw calls, spawned_predicted: Object Manager objects
+//                                this client placed ahead of the server; map_post.c)
 //   100 placewatch @label        from this frame, count frames and wall-clock ms until one more build mesh shows
 //                                (with `mdown left` on the Build Tool: input to block visible): "[input_script]
 //                                place t=100 @label frames=2 ms=3.1 visible=13" ("timeout" after 5 s)
@@ -645,11 +647,12 @@ static void script_run(Client *client, const ScriptEvent *e) {
                     n ? g_script.ft_ms[n - 1] : 0.0f);
         }
     } else if (!strcmp(e->cmd, "builds")) {
-        int n = 0, predicted = 0, visible = 0;
+        int n = 0, predicted = 0, visible = 0, spawned_predicted = 0;
         const Map *map = client->game.map;
         const Object *last = NULL;
         for (size_t i = 0; map && i < map->object_count; i++) {
             const Object *o = map->objects[i];
+            spawned_predicted += o->spawned && o->predicted_ms > 0.0f;
             if (!o->dynamic || !o->active || o->destroyed) continue;
             n++;
             predicted += o->predicted_ms > 0.0f;
@@ -658,8 +661,9 @@ static void script_run(Client *client, const ScriptEvent *e) {
         const int meshes = map_post_build_meshes(&visible);
         char at[96] = "-";
         if (last) snprintf(at, sizeof(at), "%.2f,%.2f,%.2f", last->position.x, last->position.y, last->position.z);
-        fprintf(stderr, "[input_script] builds t=%.0f %s n=%d predicted=%d meshes=%d visible=%d last=%s spawned=%d\n", g_script.time,
-                e->arg[0] ? e->arg : "-", n, predicted, meshes, visible, at, map_post_spawned_meshes());
+        fprintf(stderr, "[input_script] builds t=%.0f %s n=%d predicted=%d meshes=%d visible=%d last=%s spawned=%d draws=%d spawned_predicted=%d\n",
+                g_script.time, e->arg[0] ? e->arg : "-", n, predicted, meshes, visible, at, map_post_spawned_meshes(), map_post_build_draws(),
+                spawned_predicted);
     } else if (!strcmp(e->cmd, "placewatch")) {
         snprintf(g_script.pw_label, sizeof(g_script.pw_label), "%s", e->arg[0] ? e->arg : "-");
         map_post_build_meshes(&g_script.pw_base);

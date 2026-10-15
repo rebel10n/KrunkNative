@@ -1547,10 +1547,10 @@ static int om_look_quarter(const Player *player) {
 
 // A catalogue record placed on the surface at the crosshair (aim) or at `at` (aim NULL), turned to
 // face the player (a quarter turn: the AABB collision matches the model; ramps and ladders take
-// map.js's "d" instead). Owned by the round's records from here on.
-static int om_spawn_record(Game *game, ObjectManager *om, Player *player, const char *json, vec3 at, const ObjectManagerAim *aim) {
+// map.js's "d" instead). The caller owns it; NULL: not a record.
+static cJSON *om_place_record(const Game *game, const Player *player, const char *json, vec3 at, const ObjectManagerAim *aim) {
     cJSON *record = cJSON_Parse(json);
-    if (!record) return -1;
+    if (!record) return NULL;
     const int prefab = map_raw_object_prefab(record);
     const PrefabData *pd = prefab_data(prefab);
     double size[3] = {10.0, 10.0, 10.0};
@@ -1581,12 +1581,56 @@ static int om_spawn_record(Game *game, ObjectManager *om, Player *player, const 
     cJSON_AddItemToObject(record, "p", cJSON_CreateDoubleArray(pos, 3));
     cJSON_AddItemToObject(record, "s", cJSON_CreateDoubleArray(size, 3));
     if (turn) cJSON_AddItemToObject(record, "r", cJSON_CreateDoubleArray(rot, 3));
+    return record;
+}
+
+// The record placed (om_place_record) as a spawned object, sent to everyone. Owned by the round's
+// records from here on.
+static int om_spawn_record(Game *game, ObjectManager *om, Player *player, const char *json, vec3 at, const ObjectManagerAim *aim) {
+    cJSON *record = om_place_record(game, player, json, at, aim);
+    if (!record) return -1;
     const int uid = spawned_add(game, om, record, player->uid, -1);
     if (uid < 0) return -1;
     thing_push(om, OM_KIND_OBJECT, 0, uid, player->uid);
     spawned_send(game, NET_TARGET_ALL, OM_SPAWNED_ADD, uid, game->map->objects[uid]);
     if (game->map->objects[uid]->pickup) game_pickup_send(game, NET_TARGET_ALL, uid);
     return uid;
+}
+
+Object *object_manager_predict_spawn(Game *game, Player *player, const int item, const float pitch, const float yaw, int *uid) {
+    if (uid) *uid = -1;
+    if (!game || !game->map || !player || game_is_authority(game)) return NULL;
+    int count = 0;
+    const ObjectManagerEntry *entries = object_manager_entries(OM_TAB_OBJECTS, &count);
+    if (!entries || item < 0 || item >= count || entries[item].kind != OM_ENTRY_RECORD) return NULL;
+    ObjectManager *om = om_of(game);
+    ObjectManagerAim aim;
+    if (!om || !object_manager_aim(game, player, pitch, yaw, &aim)) return NULL; // the server answers NO_TARGET
+    // the server's om_spawn_entry: the record on the face the crosshair hit, facing the player
+    cJSON *record = om_place_record(game, player, entries[item].json, om_floor_point(game, &aim, 4.0f), &aim);
+    if (!record) return NULL;
+    cJSON_AddItemToArray(om->records, record); // (Object.raw points into the round's records)
+    Object *object = map_object_from_json(game->map, record, 1);
+    if (!object) return NULL;
+    // pickups and the zombies machines join runtimes keyed by uid: they wait for the server
+    if (object->pickup || object->prefab == PREFAB_MYSTERY_BOX || object->prefab == PREFAB_PERK_MACHINE || object->prefab == PREFAB_KRUM_MACHINE) {
+        map_object_free(object);
+        return NULL;
+    }
+    object->spawned = 1;
+    object->spawn_owner = player->uid;
+    object->destroyed_by = -1;
+    object->predicted_ms = BUILD_PREDICT_MS;
+    Object **grown = realloc(game->map->objects, (game->map->object_count + 1) * sizeof(Object *));
+    if (!grown) {
+        map_object_free(object);
+        return NULL;
+    }
+    game->map->objects = grown;
+    game->map->objects[game->map->object_count++] = object;
+    game->world.predicted_builds = 1;
+    if (uid) *uid = (int) game->map->object_count - 1;
+    return object;
 }
 
 static int om_spawn_entry(Game *game, Player *player, const NetSpawnReqPacket *req, const int tab, const int dev, NetSpawnResultPacket *out) {

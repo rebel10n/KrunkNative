@@ -47,6 +47,7 @@
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <object_manager.h>
+#include <world.h> // world_cancel_prediction (Objects-tab spawn prediction)
 #include <om_interp.h> // other players' edits eased (SPAWNED_OBJ)
 #include <spectate.h> // client_find_player
 #include <weapons.h>
@@ -64,6 +65,8 @@
 #define OM_TOOL_STORAGE "kn_omTool"
 #define OM_EQUIP_SECONDS 3.0 // a pending equip (pick / give) waits this long for its LOADOUT_EXTRA
 #define OM_STATUS_SECONDS 4.0
+#define OM_SPAWNS_PENDING 16          // Objects-tab spawns tracked on their way (their predictions)
+#define OM_SPAWN_ANSWER_SECONDS 3.0   // one unanswered this long is forgotten (its prediction gave way already)
 #define OM_BADGE_HTML "<div class='knOmBadge'>LOADOUT</div>" // on a weapon tile in the loadout (knOmOwned)
 
 // the tab labels, through i18n at render time (kn.om.tab.*)
@@ -75,6 +78,12 @@ static const char *tab_name(const int tab) {
         default: return I18N("kn.om.tab.weapons", "Weapons");
     }
 }
+
+typedef struct {
+    int item, uid;        // the Objects entry, the prediction's uid (-1 none)
+    const Object *object; // the prediction (compared, never read: it may be gone)
+    double at;            // glfwGetTime() of the request
+} OmPendingSpawn;
 
 static struct {
     int tab;              // ObjectManagerTab on show
@@ -98,6 +107,10 @@ static struct {
     char hud_text[48];    // what #knToolHud shows, "" hidden
     int props_uid;        // the object the Properties panel shows, -1 none (the grid)
     char props_sent[48];  // the label of the field patch on its way
+    // Objects-tab spawns on their way, oldest first: the prediction each shows (object_manager_predict_spawn,
+    // uid -1 none), cancelled when its SPAWN_RESULT comes (refused, or the server's object took another uid)
+    OmPendingSpawn spawns[OM_SPAWNS_PENDING];
+    int spawn_count;
 } g_om = {.tab = OM_TAB_WEAPONS, .caps = -1, .pending_equip = -1, .props_uid = -1};
 
 static Client *om_client(void) { return menu_ui()->client; }
@@ -139,13 +152,31 @@ static void om_send(const int action, const int item) {
         return;
     }
     NetSpawnReqPacket req = {.action = (uint8_t) action, .item = (int16_t) item};
-    const Player *me = client->me;
+    Player *me = client->me;
     // the crosshair: the view the menu was opened over; not spawned in (a dev in the menu), the
     // camera's look (the server places from its view of this connection, object_manager_request_view)
     const int alive = me && me->active;
     req.pitch = alive ? me->direction.x : client->camera.rotation.x;
     req.yaw = alive ? me->direction.y : client->camera.rotation.y;
+    if (action == OM_ACTION_SPAWN_OBJECT) {
+        // KrunkNative: the object shows at once (when we may spawn), not a round trip later
+        const double now = glfwGetTime();
+        while (g_om.spawn_count && (g_om.spawn_count == OM_SPAWNS_PENDING || now - g_om.spawns[0].at > OM_SPAWN_ANSWER_SECONDS)) {
+            memmove(&g_om.spawns[0], &g_om.spawns[1], (size_t) --g_om.spawn_count * sizeof(g_om.spawns[0])); // unanswered: forgotten
+        }
+        int uid = -1;
+        const Object *object = alive && g_om.caps >= 0 && (g_om.caps & OM_CAP_SPAWN) ? object_manager_predict_spawn(&client->game, me, item, req.pitch, req.yaw, &uid) : NULL;
+        g_om.spawns[g_om.spawn_count++] = (OmPendingSpawn) {item, uid, object, now};
+    }
     client_net_send(client, NET_PACKET_SPAWN_REQ, &req, sizeof(req));
+}
+
+// The SPAWN_RESULT of the oldest Objects-tab spawn on its way: its prediction gives way unless the
+// server's object replaced it at its uid already (world_cancel_prediction checks)
+static void om_spawn_answered(Client *client, const int item) {
+    if (!g_om.spawn_count || g_om.spawns[0].item != item) return; // not one of ours (a /spawn)
+    if (g_om.spawns[0].object) world_cancel_prediction(&client->game, g_om.spawns[0].uid, g_om.spawns[0].object);
+    memmove(&g_om.spawns[0], &g_om.spawns[1], (size_t) --g_om.spawn_count * sizeof(g_om.spawns[0]));
 }
 
 static int om_has_extra(const Player *me, const int weapon) {
@@ -1136,6 +1167,7 @@ int object_manager_ui_handle(const char *name, const HtmlEvent *ev, const HtmlAr
 
 static void om_on_result(const NetSpawnResultPacket *r) {
     printf("[object-manager] action %u item %d: %s (caps %u)\n", r->action, r->item, r->status ? object_manager_status_text(r->status) : "ok", r->caps);
+    if (r->action == OM_ACTION_SPAWN_OBJECT && om_client()) om_spawn_answered(om_client(), r->item);
     g_om.caps = r->caps;
     g_om.extra_max = r->extra_max;
     if (r->action == OM_ACTION_QUERY) {

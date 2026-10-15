@@ -462,6 +462,15 @@ cJSON *object_manager_record(const Game *game, int uid);
 void player_set_extra_weapons(Player *player, const int *weapon_ids, int count);
 // Client: a SPAWNED_OBJ (`length` bytes). 1 applied.
 int object_manager_apply_spawned(Game *game, const void *payload, uint16_t length);
+// KrunkNative client prediction of an Objects-tab spawn (OM_ACTION_SPAWN_OBJECT `item` at the look
+// pitch / yaw the request carries): the object the server will place (om_spawn_entry's record, on
+// the face the crosshair hit, facing the player) joins this client's map now, flagged
+// Object.predicted_ms, at the uid (*uid) the server's SPAWNED_OBJ is expected to take, where that
+// replaces it (world_put_object). The caller cancels it when the request's SPAWN_RESULT comes
+// (world_cancel_prediction: refused, or the server's object took another uid); one never answered
+// gives way after BUILD_PREDICT_MS (world_builds_tick). Pickups and machines are not predicted.
+// NULL: nothing predicted (*uid -1).
+Object *object_manager_predict_spawn(Game *game, Player *player, int item, float pitch, float yaw, int *uid);
 
 // The surface at the crosshair: the player's eye along (pitch, yaw), map objects and terrain.
 typedef struct {

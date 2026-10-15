@@ -124,6 +124,33 @@ static void build_predict(Game *game, const int build_index, const vec3 feet, co
     game->world.predicted_builds = 1;
 }
 
+// A prediction gives way: a predicted build becomes a placeholder, a predicted Object Manager object
+// is freed for one (its mesh leaves the scene), so uid `i` stays taken
+static void build_drop_prediction(Map *map, const size_t i) {
+    Object *object = map->objects[i];
+    if (!object->spawned) {
+        build_make_placeholder(object);
+        return;
+    }
+    Object *gap = build_make(0, (vec3) {0.0f, -100000.0f, 0.0f}, (vec3) {0.0f, 0.0f, 0.0f}, 0.0f);
+    if (!gap) { // out of memory: an inert spawned slot
+        object->active = 0;
+        object->destroyed = 1;
+        object->collision_type = COLLISION_TYPE_NONE;
+        object->predicted_ms = 0.0f;
+        return;
+    }
+    build_make_placeholder(gap);
+    map_object_free(object);
+    map->objects[i] = gap;
+}
+
+void world_cancel_prediction(Game *game, const int uid, const Object *object) {
+    Map *map = game->map;
+    if (!map || uid < 0 || (size_t) uid >= map->object_count || map->objects[uid] != object || object->predicted_ms <= 0.0f) return;
+    build_drop_prediction(map, (size_t) uid);
+}
+
 void world_builds_tick(Game *game, const float delta) {
     Map *map = game->map;
     if (!game->world.predicted_builds || !map) return;
@@ -132,7 +159,7 @@ void world_builds_tick(Game *game, const float delta) {
         Object *object = map->objects[i];
         if (object->predicted_ms <= 0.0f) continue;
         object->predicted_ms -= delta * 1000.0f;
-        if (object->predicted_ms <= 0.0f) build_make_placeholder(object); // never confirmed: the server refused it
+        if (object->predicted_ms <= 0.0f) build_drop_prediction(map, i); // never confirmed: the server refused it
         else pending = 1;
     }
     game->world.predicted_builds = (unsigned char) pending;
@@ -207,7 +234,7 @@ void world_apply_build_packet(Game *game, const NetBuildPacket *packet) {
     // refused took the uid it expected): that copy gives way now
     for (size_t i = 0; game->world.predicted_builds && i < map->object_count; i++) {
         Object *other = map->objects[i];
-        if (i == uid || other->predicted_ms <= 0.0f || other->build_index != object->build_index) continue;
+        if (i == uid || !other->dynamic || other->predicted_ms <= 0.0f || other->build_index != object->build_index) continue;
         if (fabsf(other->position.x - feet.x) < 0.01f && fabsf(other->position.y - feet.y) < 0.01f && fabsf(other->position.z - feet.z) < 0.01f) {
             build_make_placeholder(other);
             break;
@@ -249,9 +276,10 @@ int world_put_object(Game *game, const size_t uid, Object *object) {
     }
     if (uid < map->object_count) {
         Object *old = map->objects[uid];
-        // only a placeholder gives way, or a build we predicted there (the server gave the uid to this)
-        if (!old->dynamic || (!old->destroyed && old->predicted_ms <= 0.0f)) return 0;
-        build_free(old);
+        // only a placeholder gives way, or what we predicted there (the server gave the uid to this)
+        if (old->predicted_ms <= 0.0f && (!old->dynamic || !old->destroyed)) return 0;
+        if (old->spawned) map_object_free(old); // our predicted Object Manager object
+        else build_free(old);
         map->objects[uid] = object;
         return 1;
     }

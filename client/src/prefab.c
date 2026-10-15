@@ -20,6 +20,7 @@
 #include <weapons.h>
 #include <nettspend.h> // the Drank's cup / the Money Spread's cash stack as pickups
 #include <world.h>
+#include <map_post.h> // prefab_build_vertices / prefab_build_batch_mesh (the build batch)
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -2096,42 +2097,97 @@ unsigned int prefab_asset_texture(const char *src) {
     return src ? prefab_load_texture_src(src) : 0;
 }
 
-// A player build (shared/src/build.c, Object.dynamic): v7 draws them through ShaderMesh.addBuild
+// Player builds (shared/src/build.c, Object.dynamic): v7 draws them through ShaderMesh.addBuild
 // (instanced, Lambert, DoubleSide): grain_0 stretched over every face, the build object's colour,
 // no ambient gradient. Stairs (custMod addRamp) are drawn as the ramp plane instead of v7's
-// 2-unit slab (documented). The caller (map_post.c) owns the mesh: build.c frees Objects without
-// knowing about scenes, so builds never keep it in Object.mesh.
-Mesh *prefab_build_dynamic(const Object *object) {
-    const int index = object->build_index >= 0 && object->build_index < WORLD_BUILD_COUNT ? object->build_index : 0;
-    const int rgb = g_build_objects[index].color;
-    const vec4 color = {(float) ((rgb >> 16) & 255) / 255.0f, (float) ((rgb >> 8) & 255) / 255.0f, (float) (rgb & 255) / 255.0f, 1.0f};
-    const unsigned int texture = client_render_settings()->no_textures ? 0 : prefab_load_texture_src("grain_0");
-    Mesh *mesh;
+// 2-unit slab (documented). KrunkNative draws every build in one batch mesh (map_post.c, like v7's
+// one instanced draw): prefab_build_vertices bakes a build into world-space vertices with the
+// texture coordinates the Krunker cube / plane UV modes of basic.frag give a unit-size build
+// (uv_size 1, no flips) and its colour as the vertex colour; prefab_build_batch_mesh is the
+// material they share. Build.c frees Objects without knowing about scenes, so builds never keep a
+// mesh in Object.mesh.
+
+// The pose the build's own mesh had: a unit cube scaled to the build, or the ramp plane (1)
+static int prefab_build_pose(const Object *object, MeshTransform *t) {
+    memset(t, 0, sizeof(*t));
+    t->position = object->position;
     if (object->prefab == PREFAB_RAMP) {
         const int odd = object->direction % 2;
         const float width = odd ? object->scale.x : object->scale.z, length = odd ? object->scale.z : object->scale.x;
         const float height = object->scale.y, slant = sqrtf(height * height + length * length);
-        mesh = prefab_new_mesh(prefab_plane_xy_geo());
-        if (!mesh) return NULL;
-        mesh->transform.position = object->position;
-        mesh->transform.position.y += height * 0.5f;
-        mesh->transform.rotation_order = ROTATION_ORDER_YXZ;
-        mesh->transform.rotation = (vec3) {(slant > 0.0f ? asinf(height / slant) : 0.0f) - (float) M_PI / 2.0f,
-                                           -(float) M_PI / 2.0f - (float) M_PI * 0.5f * (float) object->direction, 0.0f};
-        mesh->transform.scale = (vec3) {width, slant, 1.0f};
-        ((BasicMaterial *) mesh->material)->uv_mode = BASIC_UV_PLANE;
-    } else {
-        mesh = prefab_new_mesh(prefab_cube_geo(0x3f));
-        if (!mesh) return NULL;
-        mesh->transform.position = object->position;
-        mesh->transform.scale = object->scale;
-        ((BasicMaterial *) mesh->material)->uv_mode = BASIC_UV_CUBE;
+        t->position.y += height * 0.5f;
+        t->rotation_order = ROTATION_ORDER_YXZ;
+        t->rotation = (vec3) {(slant > 0.0f ? asinf(height / slant) : 0.0f) - (float) M_PI / 2.0f,
+                              -(float) M_PI / 2.0f - (float) M_PI * 0.5f * (float) object->direction, 0.0f};
+        t->scale = (vec3) {width, slant, 1.0f};
+        return 1;
     }
+    t->scale = object->scale;
+    return 0;
+}
+
+// basic.frag krunker_cube_uv with uv_size 1 and no flips, for cube face f (0 +Z, 1 -Z, 2 -X, 3 +X,
+// 4 top, 5 bottom) at unit-cube point p
+static vec2 prefab_build_cube_uv(const int f, const vec3 p) {
+    static const float faces[6][9] = { // center, axis_u, axis_v
+        {0.0f, 0.5f, 0.5f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f},
+        {0.0f, 0.5f, -0.5f, -1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f},
+        {-0.5f, 0.5f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f},
+        {0.5f, 0.5f, 0.0f, 0.0f, 0.0f, -1.0f, 0.0f, 1.0f, 0.0f},
+        {0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, -1.0f},
+        {0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f},
+    };
+    const float *c = faces[f];
+    const float dx = p.x - c[0], dy = p.y - c[1], dz = p.z - c[2];
+    return (vec2) {0.5f + dx * c[3] + dy * c[4] + dz * c[5], dx * c[6] + dy * c[7] + dz * c[8] + 0.5f};
+}
+
+void prefab_build_vertices(const Object *object, const int shown, float out[PREFAB_BUILD_VERTICES * PREFAB_BUILD_FLOATS]) {
+    static const vec3 cube[PREFAB_BUILD_VERTICES] = { // prefab_cube_geo's vertex order (face = index / 4)
+        {-0.5f, 0.0f, 0.5f}, {0.5f, 1.0f, 0.5f}, {-0.5f, 1.0f, 0.5f}, {0.5f, 0.0f, 0.5f},
+        {0.5f, 0.0f, -0.5f}, {-0.5f, 1.0f, -0.5f}, {0.5f, 1.0f, -0.5f}, {-0.5f, 0.0f, -0.5f},
+        {-0.5f, 0.0f, -0.5f}, {-0.5f, 1.0f, 0.5f}, {-0.5f, 1.0f, -0.5f}, {-0.5f, 0.0f, 0.5f},
+        {0.5f, 0.0f, 0.5f}, {0.5f, 1.0f, -0.5f}, {0.5f, 1.0f, 0.5f}, {0.5f, 0.0f, -0.5f},
+        {-0.5f, 1.0f, 0.5f}, {0.5f, 1.0f, -0.5f}, {-0.5f, 1.0f, -0.5f}, {0.5f, 1.0f, 0.5f},
+        {-0.5f, 0.0f, -0.5f}, {0.5f, 0.0f, 0.5f}, {-0.5f, 0.0f, 0.5f}, {0.5f, 0.0f, -0.5f},
+    };
+    static const vec3 plane[4] = {{-0.5f, -0.5f, 0.0f}, {0.5f, 0.5f, 0.0f}, {-0.5f, 0.5f, 0.0f}, {0.5f, -0.5f, 0.0f}}; // prefab_plane_xy_geo
+    memset(out, 0, sizeof(float) * PREFAB_BUILD_VERTICES * PREFAB_BUILD_FLOATS);
+    if (!shown) return; // every vertex at the origin: zero-area triangles, nothing drawn
+    const int index = object->build_index >= 0 && object->build_index < WORLD_BUILD_COUNT ? object->build_index : 0;
+    const int rgb = g_build_objects[index].color;
+    const float color[3] = {(float) ((rgb >> 16) & 255) / 255.0f, (float) ((rgb >> 8) & 255) / 255.0f, (float) (rgb & 255) / 255.0f};
+    Mesh pose;
+    memset(&pose, 0, sizeof(pose));
+    const int ramp = prefab_build_pose(object, &pose.transform);
+    mesh_update_transform_matrix(&pose);
+    const float *m = pose.transform_matrix; // row-major
+    const int count = ramp ? 4 : PREFAB_BUILD_VERTICES;
+    for (int i = 0; i < PREFAB_BUILD_VERTICES; i++) {
+        const int k = i < count ? i : 0; // a ramp's 20 spare vertices sit on its first one (degenerate)
+        const vec3 p = ramp ? plane[k] : cube[k];
+        float *v = out + i * PREFAB_BUILD_FLOATS;
+        v[0] = m[0] * p.x + m[1] * p.y + m[2] * p.z + m[3];
+        v[1] = m[4] * p.x + m[5] * p.y + m[6] * p.z + m[7];
+        v[2] = m[8] * p.x + m[9] * p.y + m[10] * p.z + m[11];
+        // basic.frag uv_mode 2 (plane: 0.5 + x, y + 0.5) / 1 (krunker_cube_uv) at uv_size 1
+        const vec2 uv = ramp ? (vec2) {0.5f + p.x, p.y + 0.5f} : prefab_build_cube_uv(k / 4, p);
+        v[3] = uv.x;
+        v[4] = uv.y;
+        memcpy(v + 5, color, sizeof(color));
+    }
+}
+
+Mesh *prefab_build_batch_mesh(Geometry *geometry) {
+    Mesh *mesh = prefab_new_mesh(geometry);
+    if (!mesh) return NULL;
     BasicMaterial *material = (BasicMaterial *) mesh->material;
+    material->uv_mode = BASIC_UV_MESH;
     material->uv_size = (vec3) {1.0f, 1.0f, 1.0f};
-    material->color = color;
-    material->color_bottom = color;
-    material->texture = texture;
+    material->color = (vec4) {1.0f, 1.0f, 1.0f, 1.0f}; // times the vertex colour: the build object's colour
+    material->color_bottom = material->color;
+    material->use_vertex_color = 1;
+    material->texture = client_render_settings()->no_textures ? 0 : prefab_load_texture_src("grain_0");
     material->double_sided = 1;
     return mesh;
 }

@@ -2543,6 +2543,97 @@ static void test_interp(void) {
           object_manager_yaw_pack(-0.5f) == object_manager_yaw_pack(2.0f * (float) M_PI - 0.5f), "yaw packing");
 }
 
+// KrunkNative client prediction of Objects-tab spawns (object_manager_predict_spawn): a's client (a
+// mirror game that applies what a hears) shows the crate at once at the uid the server gives it;
+// the server's SPAWNED_OBJ replaces it there; a cancelled one (its SPAWN_RESULT refused it) or one
+// never answered leaves a placeholder so the uids stay aligned.
+static void test_prediction(TestClient *a) {
+    printf("spawn prediction...\n");
+    Player *p = player_of(a);
+    if (!p) return;
+    Game *game = &g_server->game;
+    pump(200);
+    Game mirror;
+    memset(&mirror, 0, sizeof(mirror));
+    const cJSON *maps[1] = {game->map->raw_data};
+    int modes[1] = {MODE_ID_FFA};
+    game_configure(&mirror, NULL, maps, 1, modes, 1, NULL, 0, NULL, 0);
+    game_init(&mirror, 0, 0, 0);
+    // the earlier tests' spawned objects (gone now, their uids kept) are placeholders on this client
+    if (mirror.ready && game->map->object_count > mirror.map->object_count) {
+        Object *pad = calloc(1, sizeof(Object));
+        pad->dynamic = pad->destroyed = 1;
+        pad->collision_type = COLLISION_TYPE_NONE;
+        if (!world_put_object(&mirror, game->map->object_count - 1, pad)) free(pad);
+    }
+    CHECK(mirror.ready && !game_is_authority(&mirror) && mirror.map->object_count == game->map->object_count, "a client mirror of the map");
+    if (!mirror.ready || mirror.map->object_count != game->map->object_count) return;
+    Player *me = player_init(&mirror);
+    me->uid = p->uid;
+    me->position = p->position;
+    me->direction = p->direction;
+    me->height = p->height;
+    me->is_you = 1;
+    const int crate = entry_index(OM_TAB_OBJECTS, "Crate");
+    const float pitch = -0.6f, yaw = p->direction.y;
+
+    // 1. shown at once at the next uid, solid
+    int uid = -1;
+    const Object *predicted = object_manager_predict_spawn(&mirror, me, crate, pitch, yaw, &uid);
+    CHECK(predicted && uid == (int) game->map->object_count && mirror.map->object_count == (size_t) uid + 1 && predicted->spawned &&
+          predicted->active && predicted->predicted_ms > 0.0f && predicted->collision_type == COLLISION_TYPE_BOX && predicted->prefab == PREFAB_CRATE,
+          "the crate is predicted at uid %d (server objects %zu)", uid, game->map->object_count);
+    if (!predicted) return;
+    const vec3 at = predicted->position;
+
+    // 2. the server spawns it (same aim): its SPAWNED_OBJ takes the predicted uid
+    NetSpawnResultPacket r = request_at(a, OM_ACTION_SPAWN_OBJECT, crate, pitch, yaw);
+    CHECK(r.status == OM_STATUS_OK && game->map->object_count == (size_t) uid + 1, "the server spawns it at that uid (status %u)", r.status);
+    for (int i = 0; i < a->count; i++) {
+        if (a->packets[i].type == NET_PACKET_SPAWNED_OBJ) object_manager_apply_spawned(&mirror, a->packets[i].payload, a->packets[i].length);
+    }
+    const Object *real = mirror.map->objects[uid];
+    const Object *server = game->map->objects[uid];
+    world_cancel_prediction(&mirror, uid, predicted); // its SPAWN_RESULT: nothing to cancel any more
+    real = mirror.map->objects[uid];
+    CHECK(mirror.map->object_count == (size_t) uid + 1 && real->spawned && real->active && real->predicted_ms == 0.0f &&
+          fabsf(real->position.x - server->position.x) < 0.001f && fabsf(real->position.z - server->position.z) < 0.001f,
+          "replaced by the server's crate: one object at the uid");
+    CHECK(fabsf(at.x - server->position.x) < 0.11f && fabsf(at.y - server->position.y) < 0.11f && fabsf(at.z - server->position.z) < 0.11f,
+          "the prediction stood where the server put it (%.2f %.2f %.2f / %.2f %.2f %.2f)", at.x, at.y, at.z, server->position.x,
+          server->position.y, server->position.z);
+
+    // 3. refused (its SPAWN_RESULT cancels it): a placeholder keeps the uid, the server's next object takes it
+    me->direction.y = yaw + (float) M_PI * 0.5f;
+    predicted = object_manager_predict_spawn(&mirror, me, crate, pitch, me->direction.y, &uid);
+    CHECK(predicted && uid == (int) mirror.map->object_count - 1, "a second prediction");
+    if (!predicted) return;
+    world_cancel_prediction(&mirror, uid, predicted);
+    const Object *gap = mirror.map->objects[uid];
+    CHECK(!gap->spawned && !gap->active && gap->collision_type == COLLISION_TYPE_NONE && mirror.map->object_count == (size_t) uid + 1,
+          "cancelled: a placeholder at uid %d", uid);
+    pump(20);
+    r = request_at(a, OM_ACTION_SPAWN_OBJECT, crate, pitch, yaw + (float) M_PI);
+    for (int i = 0; i < a->count; i++) {
+        if (a->packets[i].type == NET_PACKET_SPAWNED_OBJ) object_manager_apply_spawned(&mirror, a->packets[i].payload, a->packets[i].length);
+    }
+    CHECK(r.status == OM_STATUS_OK && mirror.map->objects[uid]->spawned && mirror.map->objects[uid]->active, "the server's next object replaces the placeholder");
+
+    // 4. never answered: gone after BUILD_PREDICT_MS
+    predicted = object_manager_predict_spawn(&mirror, me, crate, pitch, me->direction.y, &uid);
+    CHECK(predicted != NULL, "a third prediction");
+    world_builds_tick(&mirror, BUILD_PREDICT_MS / 1000.0f + 0.1f);
+    CHECK(predicted && !mirror.map->objects[uid]->active && !mirror.map->objects[uid]->spawned && !mirror.world.predicted_builds,
+          "unanswered: a placeholder after the timeout");
+
+    // 5. the authority never predicts
+    CHECK(!object_manager_predict_spawn(game, p, crate, pitch, yaw, &uid) && uid == -1, "no prediction on the authority");
+
+    world_remove_builds(&mirror); // (the mirror is left like the other tests' mirrors)
+    object_manager_round_start(&mirror);
+    clean_up(a);
+}
+
 int main(void) {
     setvbuf(stdout, NULL, _IONBF, 0);
     test_codec();
@@ -2567,6 +2658,7 @@ int main(void) {
         test_dev_privileges(&g_clients[0], &g_clients[1]);
         test_physgun_player(&g_clients[0], &g_clients[1]);
         test_physgun_props(&g_clients[0]);
+        test_prediction(&g_clients[0]);
         test_menu_state(&g_clients[3], &g_clients[1]);
         test_entity_touch(&g_clients[0], &g_clients[1]); // last: power-ups change loadouts and scores
         for (int i = 0; i < CLIENTS; i++) leave(&g_clients[i]);

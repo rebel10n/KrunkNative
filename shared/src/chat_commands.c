@@ -1749,7 +1749,8 @@ static void cmd_build_fill(ChatCtx *c) {
         if (!game_build_object(c->host->game, kind, feet, (vec3) {0, 0, 0}, 0.0f, 0, self)) break;
         placed++;
     }
-    reply(c, "Built %d %s%s (%d builds).", placed, def->name, placed == 1 ? "" : "s", c->host->game->world.build_count);
+    const size_t len = strlen(def->name);
+    reply(c, "Built %d %s%s (%d builds).", placed, def->name, placed == 1 || (len && def->name[len - 1] == 's') ? "" : "s", c->host->game->world.build_count);
 }
 
 // bring <player|all> [<x> <y> <z>]: all = every spawned player but you

@@ -412,28 +412,52 @@ static int post_index_ready(PostIndex *index, const size_t count, const void *(*
     return 1;
 }
 
-// ---- player builds (shared/src/build.c): their meshes live here, keyed by the Object (build.c
-// frees Objects on removeBuilds / replacement without a scene) plus its build index and position
+// ---- player builds (shared/src/build.c), drawn in one batch: one mesh whose vertex buffer holds a
+// slot of PREFAB_BUILD_VERTICES world-space vertices per build (prefab_build_vertices), one draw call
+// for them all (v7 draws its builds as one instanced ShaderMesh). Entry i of g_builds owns slot i;
+// entries are keyed by the Object (build.c frees Objects on removeBuilds / replacement without a
+// scene) plus its build index and position. A new build appends a slot, a build that goes moves the
+// last slot into its place, a build destroyed (or back) rewrites its slot: each frame uploads only
+// the slots that changed (one glBufferSubData over their range), so a placement never rebuilds the
+// whole batch. The index buffer repeats prefab_cube_geo's 36 indices per slot.
 typedef struct {
     const Object *object;
     int build_index;
     vec3 position;
-    Mesh *mesh;
+    int shown;
     int seen;
 } BuildMesh;
+
+#define BUILD_SLOT_FLOATS (PREFAB_BUILD_VERTICES * PREFAB_BUILD_FLOATS)
+#define BUILD_SLOT_INDICES 36
 
 static BuildMesh *g_builds;
 static size_t g_build_count;
 static Scene *g_build_scene;
 static PostIndex g_build_index;
 
+static struct {
+    Geometry geometry;  // vao + ebo (owned here), index_count = 36 per build
+    unsigned int vbo;
+    Mesh *mesh;         // in g_build_scene while it exists
+    float *vertices;    // CPU copy of every slot
+    size_t capacity;    // slots the GL buffers hold
+    size_t dirty_lo, dirty_hi; // slots to upload [lo, hi)
+    int realloc;        // the GL buffers must be (re)created at `capacity`
+} g_batch;
+
 static const void *post_build_key(const size_t i) { return g_builds[i].object; }
 
 static void post_builds_clear(void) {
-    for (size_t i = 0; i < g_build_count; i++) {
-        if (g_build_scene) scene_remove_mesh(g_build_scene, g_builds[i].mesh);
-        mesh_fini(g_builds[i].mesh);
+    if (g_batch.mesh) {
+        if (g_build_scene) scene_remove_mesh(g_build_scene, g_batch.mesh);
+        mesh_fini(g_batch.mesh);
     }
+    if (g_batch.geometry.vao) glDeleteVertexArrays(1, &g_batch.geometry.vao);
+    if (g_batch.geometry.ebo) glDeleteBuffers(1, &g_batch.geometry.ebo);
+    if (g_batch.vbo) glDeleteBuffers(1, &g_batch.vbo);
+    free(g_batch.vertices);
+    memset(&g_batch, 0, sizeof(g_batch));
     free(g_builds);
     g_builds = NULL;
     g_build_count = 0;
@@ -462,8 +486,89 @@ static BuildMesh *post_build_find(const Object *object) {
     return NULL;
 }
 
-// Every frame: a mesh for each build (a new one when a build is new or was replaced at its uid),
-// shown while the build stands; the meshes of builds that are gone leave the scene. Linear in the
+static void post_batch_dirty(const size_t slot) {
+    if (g_batch.dirty_lo >= g_batch.dirty_hi) {
+        g_batch.dirty_lo = slot;
+        g_batch.dirty_hi = slot + 1;
+    } else {
+        if (slot < g_batch.dirty_lo) g_batch.dirty_lo = slot;
+        if (slot + 1 > g_batch.dirty_hi) g_batch.dirty_hi = slot + 1;
+    }
+}
+
+// Room for `count` slots in the CPU copy (doubling); 0 when out of memory
+static int post_batch_reserve(const size_t count) {
+    if (count <= g_batch.capacity) return 1;
+    size_t capacity = g_batch.capacity ? g_batch.capacity : 64;
+    while (capacity < count) capacity *= 2;
+    float *grown = realloc(g_batch.vertices, capacity * BUILD_SLOT_FLOATS * sizeof(float));
+    if (!grown) return 0;
+    g_batch.vertices = grown;
+    g_batch.capacity = capacity;
+    g_batch.realloc = 1;
+    return 1;
+}
+
+static void post_batch_write(const size_t slot, const Object *object, const int shown) {
+    prefab_build_vertices(object, shown, g_batch.vertices + slot * BUILD_SLOT_FLOATS);
+    post_batch_dirty(slot);
+}
+
+// The frame's changes to the GL buffers (new buffers after a growth, else the changed range), and
+// the draw's index count
+static void post_batch_upload(Scene *scene) {
+    if (!g_build_count && !g_batch.mesh) return;
+    if (!g_batch.geometry.vao) {
+        glGenVertexArrays(1, &g_batch.geometry.vao);
+        glGenBuffers(1, &g_batch.geometry.ebo);
+        glGenBuffers(1, &g_batch.vbo);
+        glBindVertexArray(g_batch.geometry.vao);
+        glBindBuffer(GL_ARRAY_BUFFER, g_batch.vbo);
+        const GLsizei stride = PREFAB_BUILD_FLOATS * sizeof(float);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, NULL);
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, stride, (void *) (3 * sizeof(float)));
+        glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, stride, (void *) (5 * sizeof(float)));
+        glEnableVertexAttribArray(0);
+        glEnableVertexAttribArray(1);
+        glEnableVertexAttribArray(2);
+        g_batch.realloc = 1;
+    }
+    if (!g_batch.mesh) {
+        g_batch.mesh = prefab_build_batch_mesh(&g_batch.geometry); // bound_radius 0: never frustum-culled
+        if (!g_batch.mesh) return;
+        scene_add_mesh(scene, g_batch.mesh);
+    }
+    glBindVertexArray(g_batch.geometry.vao);
+    glBindBuffer(GL_ARRAY_BUFFER, g_batch.vbo);
+    if (g_batch.realloc) {
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr) (g_batch.capacity * BUILD_SLOT_FLOATS * sizeof(float)), g_batch.vertices, GL_DYNAMIC_DRAW);
+        static const unsigned int pattern[BUILD_SLOT_INDICES] = {
+            0, 1, 2, 0, 3, 1, 4, 5, 6, 4, 7, 5, 8, 9, 10, 8, 11, 9, 12, 13, 14, 12, 15, 13, 16, 17, 18, 16, 19, 17, 20, 21, 22, 20, 23, 21,
+        };
+        unsigned int *indices = malloc(g_batch.capacity * BUILD_SLOT_INDICES * sizeof(unsigned int));
+        if (indices) {
+            for (size_t s = 0; s < g_batch.capacity; s++) {
+                for (int k = 0; k < BUILD_SLOT_INDICES; k++) indices[s * BUILD_SLOT_INDICES + k] = (unsigned int) (s * PREFAB_BUILD_VERTICES) + pattern[k];
+            }
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, g_batch.geometry.ebo);
+            glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr) (g_batch.capacity * BUILD_SLOT_INDICES * sizeof(unsigned int)), indices, GL_STATIC_DRAW);
+            free(indices);
+        }
+        g_batch.realloc = 0;
+    } else if (g_batch.dirty_lo < g_batch.dirty_hi) {
+        const size_t bytes = BUILD_SLOT_FLOATS * sizeof(float);
+        glBufferSubData(GL_ARRAY_BUFFER, (GLintptr) (g_batch.dirty_lo * bytes), (GLsizeiptr) ((g_batch.dirty_hi - g_batch.dirty_lo) * bytes),
+                        g_batch.vertices + g_batch.dirty_lo * BUILD_SLOT_FLOATS);
+    }
+    glBindVertexArray(0); // nothing else edits this VAO's element buffer
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    g_batch.dirty_lo = g_batch.dirty_hi = 0;
+    g_batch.geometry.index_count = (int) (g_build_count * BUILD_SLOT_INDICES);
+    g_batch.mesh->visible = g_build_count > 0;
+}
+
+// Every frame: a slot for each build (a new one when a build is new or was replaced at its uid),
+// filled while the build stands; the slots of builds that are gone leave the batch. Linear in the
 // map's objects (the index above), whatever the number of builds.
 static void post_builds_frame(Scene *scene, const Map *map) {
     if (!scene || !map) return;
@@ -473,41 +578,48 @@ static void post_builds_frame(Scene *scene, const Map *map) {
     for (size_t i = 0; i < map->object_count; i++) {
         const Object *object = map->objects[i];
         if (!object->dynamic) continue;
+        const int shown = object->active && !object->destroyed;
         BuildMesh *entry = post_build_find(object);
         if (!entry) {
-            Mesh *mesh = prefab_build_dynamic(object);
-            if (!mesh) continue;
             BuildMesh *grown = realloc(g_builds, (g_build_count + 1) * sizeof(BuildMesh));
-            if (!grown) {
-                mesh_fini(mesh);
-                continue;
-            }
+            if (!grown) continue;
             g_builds = grown;
+            if (!post_batch_reserve(g_build_count + 1)) continue;
             entry = &g_builds[g_build_count++];
-            *entry = (BuildMesh) {object, object->build_index, object->position, mesh, 0};
+            *entry = (BuildMesh) {object, object->build_index, object->position, shown, 0};
             post_index_added(&g_build_index, object, g_build_count);
-            scene_add_mesh(scene, mesh);
+            post_batch_write(g_build_count - 1, object, shown);
+        } else if (entry->shown != shown) {
+            entry->shown = shown;
+            post_batch_write((size_t) (entry - g_builds), object, shown);
         }
         entry->seen = 1;
-        entry->mesh->visible = object->active && !object->destroyed;
     }
     for (size_t k = 0; k < g_build_count;) {
         if (g_builds[k].seen) {
             k++;
             continue;
         }
-        scene_remove_mesh(scene, g_builds[k].mesh);
-        mesh_fini(g_builds[k].mesh);
-        g_builds[k] = g_builds[--g_build_count];
+        const size_t last = --g_build_count;
+        if (k != last) {
+            g_builds[k] = g_builds[last];
+            memcpy(g_batch.vertices + k * BUILD_SLOT_FLOATS, g_batch.vertices + last * BUILD_SLOT_FLOATS, BUILD_SLOT_FLOATS * sizeof(float));
+            post_batch_dirty(k);
+        }
         g_build_index.dirty = 1;
     }
+    post_batch_upload(scene);
 }
 
 int map_post_build_meshes(int *visible) {
     int shown = 0;
-    for (size_t i = 0; i < g_build_count; i++) shown += g_builds[i].mesh->visible ? 1 : 0;
+    for (size_t i = 0; i < g_build_count; i++) shown += g_builds[i].shown ? 1 : 0;
     if (visible) *visible = shown;
     return (int) g_build_count;
+}
+
+int map_post_build_draws(void) {
+    return g_batch.mesh && g_batch.mesh->visible && g_batch.geometry.index_count > 0 ? 1 : 0;
 }
 
 // ---- weapon pickups (MapManager.addWeapon mesh, game.resetPickups / updatePickup): one mesh per
