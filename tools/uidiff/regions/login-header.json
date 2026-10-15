@@ -13,7 +13,7 @@
         200,
         38
       ],
-      "max_pct": 10.0,
+      "max_pct": 5.0,
       "note": "the green Login submit: full size (193 x 32 at 1280x720); a text-sized one leaves most of this dark. The rest is glyph rasterisation"
     },
     {
@@ -36,7 +36,7 @@
         46
       ],
       "kind": "text",
-      "max_pct": 8.0
+      "max_pct": 1.0
     },
     {
       "name": "auth-actions",

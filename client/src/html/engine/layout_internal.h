@@ -84,11 +84,22 @@ float layout_resolve_len_auto(const CssLength *l, float base, int *is_auto);
 void  layout_resolve_edges(LayoutTree *t, Box *b, float cb_w);
 void  layout_apply_min_max_w(const Box *b, float cb_w, float *border_w);
 void  layout_apply_min_max_h(const Box *b, float cb_h, float *border_h);
+/* layout_apply_min_max_w plus the content keywords of min-width / max-width (min-content,
+ * max-content, fit-content: CSS Sizing 3 5.1); avail_border is the border-box width a
+ * fit-content keyword fits into (< 0: indefinite, max-content) */
+void  layout_apply_min_max_w_kw(LayoutTree *t, Box *b, float cb_w, float avail_border, float *border_w);
 float layout_box_sizing_w(const Box *b, float css_w);   /* content->border adjust */
 float layout_box_sizing_h(const Box *b, float css_h);
 float layout_horizontal_extras(const Box *b);            /* border + padding + scrollbar */
 float layout_vertical_extras(const Box *b);
 float layout_intrinsic_width(LayoutTree *t, Box *b, int max_content);  /* border-box width */
+/* min-/max-content border-box width of a box's contents, ignoring its own width / min-width /
+ * max-width (what the content-keyword sizes resolve against) */
+float layout_content_width(LayoutTree *t, Box *b, int max_content);
+/* min-content / max-content / fit-content (a CssLengthKind) as a border-box width;
+ * fit-content fits avail_border (< 0: indefinite, max-content) */
+float layout_content_kw_width(LayoutTree *t, Box *b, int kind, float avail_border);
+int   layout_len_is_content_kw(const CssLength *l);
 /* aspect-ratio (CSS Sizing 4) of a non-replaced box (0: none; replaced boxes: replaced_size),
  * and the border-box size it transfers from the other one (< 0 without a ratio) */
 float layout_pref_ratio(const Box *b);

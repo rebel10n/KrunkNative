@@ -192,6 +192,12 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
             float v = layout_resolve_len(mx, main_avail, LAYOUT_INF);
             it->max_main = row ? layout_box_sizing_w(c, v) : layout_box_sizing_h(c, v);
         }
+        /* content keywords of min-width / max-width (row containers; a column's are height) */
+        if (row && (layout_len_is_content_kw(mx) || layout_len_is_content_kw(mn))) {
+            float fit_avail = main_avail < 0 ? -1.0f : kn_maxf(0.0f, main_avail - it->mm0 - it->mm1);
+            if (layout_len_is_content_kw(mx)) it->max_main = layout_content_kw_width(t, c, mx->kind, fit_avail);
+            if (layout_len_is_content_kw(mn)) it->min_main = layout_content_kw_width(t, c, mn->kind, fit_avail);
+        }
         it->hypo = clampf_mm(base, it->min_main, it->max_main);
     }
 

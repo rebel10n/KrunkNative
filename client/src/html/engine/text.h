@@ -28,8 +28,8 @@
 //       per-glyph only.  Generic `monospace` uses Noto Sans Mono / DejaVu Sans
 //       Mono / Liberation Mono when present (Chrome's fontconfig monospace).
 //   KRUNKNATIVE_HTML_OBLIQUE_SKEW=0.2      synthetic oblique shear (x += k*y).
-//   KRUNKNATIVE_HTML_FAKE_BOLD_DIVISOR=24  embolden strength = size / divisor
-//       (Skia kOutlineEmboldenDivisor).
+//   KRUNKNATIVE_HTML_FAKE_BOLD_DIVISOR=n   synthetic-bold width = size / n instead of
+//       Skia's fake-bold curve (size/24 at <= 9 px down to size/32 at >= 36 px).
 //   KRUNKNATIVE_HTML_FAKE_BOLD_ADVANCE=0|1 add the embolden strength to the
 //       advance of synthetic-bold glyphs (Skia/FreeType leave it unchanged).
 //   KRUNKNATIVE_HTML_TEXT_GAMMA=gamma:contrast   text_gamma_lut() parameters

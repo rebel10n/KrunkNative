@@ -421,6 +421,8 @@ static float ratio_source_height(const Box *b, float cb_h)
 /* ------------------------------------------------------------------------- */
 
 static void replaced_size(LayoutTree *t, Box *b, float cb_w, float cb_h, float *out_w, float *out_h);
+static void content_widths(LayoutTree *t, Box *b, float *out_min, float *out_max);
+static void min_max_kw_intrinsic(LayoutTree *t, Box *b, float *minw, float *maxw);
 
 float layout_intrinsic_width(LayoutTree *t, Box *b, int max_content)
 {
@@ -444,6 +446,27 @@ float layout_intrinsic_width(LayoutTree *t, Box *b, int max_content)
         /* aspect-ratio: the width transferred from a definite height */
         minw = maxw = layout_ratio_width(b, ratio_source_height(b, -1.0f));
     } else {
+        content_widths(t, b, &minw, &maxw);
+    }
+    min_max_kw_intrinsic(t, b, &minw, &maxw);
+    /* percentage min/max-width: cyclic in an intrinsic size contribution, so they behave as
+     * auto / none here (cb -1) and clamp in layout (v7 editor #welcomeSubTitle: an
+     * inline-block with max-width: 60% came out 0 px wide) */
+    layout_apply_min_max_w(b, -1.0f, &minw);
+    layout_apply_min_max_w(b, -1.0f, &maxw);
+    if (maxw < minw) maxw = minw;
+    b->min_content_w = minw;
+    b->max_content_w = maxw;
+    b->intrinsic_gen = t->generation;
+    return max_content ? maxw : minw;
+}
+
+/* The content-based min-/max-content border-box widths of a non-replaced box (its children or
+ * lines plus its border, padding and a scroll bar), whatever its width properties say. */
+static void content_widths(LayoutTree *t, Box *b, float *out_min, float *out_max)
+{
+    const CssComputed *s = b->style;
+    {
         float cmin = 0, cmax = 0;
         switch (b->type) {
         case BOX_FLEX:  layout_flex_intrinsic(t, b, &cmin, &cmax); break;
@@ -477,19 +500,83 @@ float layout_intrinsic_width(LayoutTree *t, Box *b, int max_content)
         float extras = box_border_padding_w(b) + (s->overflow_y == CSS_OVERFLOW_SCROLL ? t->ctx->scrollbar_default_w : 0);
         if (s->width.kind == CSS_LEN_MIN_CONTENT) cmax = cmin;
         else if (s->width.kind == CSS_LEN_MAX_CONTENT) cmin = cmax;
-        minw = cmin + extras;
-        maxw = cmax + extras;
+        *out_min = cmin + extras;
+        *out_max = cmax + extras;
     }
-    /* percentage min/max-width: cyclic in an intrinsic size contribution, so they behave as
-     * auto / none here (cb -1) and clamp in layout (v7 editor #welcomeSubTitle: an
-     * inline-block with max-width: 60% came out 0 px wide) */
-    layout_apply_min_max_w(b, -1.0f, &minw);
-    layout_apply_min_max_w(b, -1.0f, &maxw);
-    if (maxw < minw) maxw = minw;
-    b->min_content_w = minw;
-    b->max_content_w = maxw;
-    b->intrinsic_gen = t->generation;
-    return max_content ? maxw : minw;
+}
+
+int layout_len_is_content_kw(const CssLength *l)
+{
+    return l->kind == CSS_LEN_MIN_CONTENT || l->kind == CSS_LEN_MAX_CONTENT || l->kind == CSS_LEN_FIT_CONTENT;
+}
+
+float layout_content_width(LayoutTree *t, Box *b, int max_content)
+{
+    float w = layout_intrinsic_width(t, b, max_content);   /* resolves the font; cached */
+    const CssComputed *s = b->style;
+    if (box_is_replaced(b)) return w;
+    if (s->width.kind == CSS_LEN_AUTO && layout_pref_ratio(b) <= 0.0f
+        && !layout_len_is_content_kw(&s->min_width) && !layout_len_is_content_kw(&s->max_width)
+        && s->min_width.kind != CSS_LEN_VALUE && s->max_width.kind != CSS_LEN_VALUE)
+        return w;   /* nothing clamped the cached content size */
+    float mn, mx;
+    content_widths(t, b, &mn, &mx);
+    return max_content ? mx : mn;
+}
+
+/* A min-width / max-width content keyword as a border-box width (CSS Sizing 3 5.1):
+ * fit-content = min(max-content, max(min-content, available)). */
+float layout_content_kw_width(LayoutTree *t, Box *b, int kind, float avail_border)
+{
+    float margin[4], padding[4], border[4];
+    memcpy(margin, b->margin, sizeof margin);
+    memcpy(padding, b->padding, sizeof padding);
+    memcpy(border, b->border, sizeof border);
+    float mn = layout_content_width(t, b, 0), mx = layout_content_width(t, b, 1);
+    /* an uncached measure re-resolves the edges against a 0 containing block */
+    memcpy(b->margin, margin, sizeof margin);
+    memcpy(b->padding, padding, sizeof padding);
+    memcpy(b->border, border, sizeof border);
+    if (kind == CSS_LEN_MIN_CONTENT) return mn;
+    if (kind == CSS_LEN_MAX_CONTENT || avail_border < 0) return mx;
+    return kn_minf(kn_maxf(mn, avail_border), mx);
+}
+
+void layout_apply_min_max_w_kw(LayoutTree *t, Box *b, float cb_w, float avail_border, float *border_w)
+{
+    const CssComputed *s = b->style;
+    if (layout_len_is_content_kw(&s->max_width)) {
+        float mx = layout_content_kw_width(t, b, s->max_width.kind, avail_border);
+        if (*border_w > mx) *border_w = mx;
+    }
+    layout_apply_min_max_w(b, cb_w, border_w);
+    if (layout_len_is_content_kw(&s->min_width)) {
+        float mn = layout_content_kw_width(t, b, s->min_width.kind, avail_border);
+        if (*border_w < mn) *border_w = mn;
+    }
+}
+
+/* The content keywords of min-width / max-width in an intrinsic size contribution, where the
+ * available space is indefinite: fit-content is min-content in the min-content contribution
+ * and max-content in the max-content one. */
+static void min_max_kw_intrinsic(LayoutTree *t, Box *b, float *minw, float *maxw)
+{
+    const CssComputed *s = b->style;
+    if (box_is_replaced(b) || (!layout_len_is_content_kw(&s->max_width) && !layout_len_is_content_kw(&s->min_width))) return;
+    float cmin, cmax;
+    content_widths(t, b, &cmin, &cmax);
+    if (layout_len_is_content_kw(&s->max_width)) {
+        float mx_min = s->max_width.kind == CSS_LEN_MAX_CONTENT ? cmax : cmin;
+        float mx_max = s->max_width.kind == CSS_LEN_MIN_CONTENT ? cmin : cmax;
+        if (*minw > mx_min) *minw = mx_min;
+        if (*maxw > mx_max) *maxw = mx_max;
+    }
+    if (layout_len_is_content_kw(&s->min_width)) {
+        float mn_min = s->min_width.kind == CSS_LEN_MAX_CONTENT ? cmax : cmin;
+        float mn_max = s->min_width.kind == CSS_LEN_MIN_CONTENT ? cmin : cmax;
+        if (*minw < mn_min) *minw = mn_min;
+        if (*maxw < mn_max) *maxw = mn_max;
+    }
 }
 
 float layout_intrinsic_margin_width(LayoutTree *t, Box *b, int max_content, float cb_w)
@@ -569,6 +656,8 @@ static void compute_width(LayoutTree *t, Box *b, const LayoutInput *in)
     int mr_auto = s->margin[CSS_RIGHT].kind == CSS_LEN_AUTO;
     float extras = layout_horizontal_extras(b);
     float bw;
+    /* the border box a fit-content min-width / max-width fits into */
+    const float avail_border = avail - (ml_auto ? 0 : b->margin[CSS_LEFT]) - (mr_auto ? 0 : b->margin[CSS_RIGHT]);
 
     if (box_is_replaced(b)) {
         float h;
@@ -577,26 +666,28 @@ static void compute_width(LayoutTree *t, Box *b, const LayoutInput *in)
         /* aspect-ratio: an auto width transferred from the definite height (also in block flow,
          * like Chrome: the box does not stretch) */
         bw = layout_ratio_width(b, ratio_source_height(b, in->cb_h));
-        layout_apply_min_max_w(b, cb_w, &bw);
+        layout_apply_min_max_w_kw(t, b, cb_w, avail_border, &bw);
     } else if (s->width.kind == CSS_LEN_VALUE) {
         bw = layout_box_sizing_w(b, kn_maxf(0.0f, layout_resolve_len(&s->width, cb_w, 0)));
-        layout_apply_min_max_w(b, cb_w, &bw);
+        layout_apply_min_max_w_kw(t, b, cb_w, avail_border, &bw);
     } else if (s->width.kind == CSS_LEN_MIN_CONTENT || s->width.kind == CSS_LEN_MAX_CONTENT || s->width.kind == CSS_LEN_FIT_CONTENT
                || in->shrink_to_fit || b->type == BOX_TABLE) {
-        float avail_border = avail - (ml_auto ? 0 : b->margin[CSS_LEFT]) - (mr_auto ? 0 : b->margin[CSS_RIGHT]);
         if (s->width.kind == CSS_LEN_MIN_CONTENT) bw = layout_intrinsic_width(t, b, 0);
         else if (s->width.kind == CSS_LEN_MAX_CONTENT) bw = layout_intrinsic_width(t, b, 1);
         else bw = shrink_to_fit(t, b, avail_border);
-        layout_apply_min_max_w(b, cb_w, &bw);
+        layout_apply_min_max_w_kw(t, b, cb_w, avail_border, &bw);
     } else {
         /* auto: fill */
         float mlv = ml_auto ? 0 : b->margin[CSS_LEFT], mrv = mr_auto ? 0 : b->margin[CSS_RIGHT];
         bw = avail - mlv - mrv;
         if (bw < extras) bw = extras;
-        layout_apply_min_max_w(b, cb_w, &bw);
+        const float fill = bw;
+        layout_apply_min_max_w_kw(t, b, cb_w, avail_border, &bw);
         b->margin[CSS_LEFT] = mlv; b->margin[CSS_RIGHT] = mrv;
         b->w = bw;
-        return;
+        /* a max-width / min-width made the width definite: auto margins take the rest
+         * (margin: 0 auto centres it, CSS 2 10.3.3) */
+        if (in->shrink_to_fit || bw == fill || !(ml_auto || mr_auto)) return;
     }
     b->w = bw;
     if (in->shrink_to_fit) {
@@ -1134,7 +1225,7 @@ void layout_position_abs_children(LayoutTree *t, Box *cb)
         if (w_auto && !l_auto && !r_auto) {
             float bw = cbw - left - right - ml - mr;
             if (bw < box_border_padding_w(a)) bw = box_border_padding_w(a);
-            layout_apply_min_max_w(a, cbw, &bw);
+            layout_apply_min_max_w_kw(t, a, cbw, bw, &bw);
             in.override_w = bw;
             in.avail_w = bw + ml + mr;
         } else {

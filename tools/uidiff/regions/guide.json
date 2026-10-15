@@ -40,9 +40,9 @@
         48
       ],
       "kind": "text",
-      "note": "the Basics headline (22px bold orange #ff9501 on dark): the engine's glyph coverage / gamma differs from Chrome's on this colour (no offset helps: 19.5% at 0,0, 22-24% at +-1px)",
+      "note": "the Basics headline (22px bold orange #ff9501 on dark, synthetic bold): 19.5% while the engine's fake bold was anchored bottom-left and size/24 wide; 9.9% with Skia's centred one. What is left is the engine's glyph coverage / gamma on this colour (no offset helps)",
       "fuzz": 12,
-      "max_pct": 21.0
+      "max_pct": 12.0
     },
     {
       "name": "intro-text",

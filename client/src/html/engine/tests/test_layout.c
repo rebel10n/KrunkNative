@@ -1695,6 +1695,42 @@ static void t_all_unset(void)
     fx_free(fx);
 }
 
+/* Content keywords of min-width / max-width (CSS Sizing 3 5.1), values from Chrome 152: the
+ * contents are two floats in a BFC (min-content 50, max-content 80). v10's .game-announcement label is a
+ * block with max-width: fit-content, so its underline spans the text only. */
+static void t_min_max_width_content(void)
+{
+#define KW_FL "<div style='overflow:hidden'><div style='float:left;width:50px;height:4px'></div>" \
+              "<div style='float:left;width:30px;height:4px'></div></div>"
+    Fx *fx = fx_html(
+        "<div style='width:400px'>"
+        "<div id=fit style='max-width:fit-content;padding:0 5px'>" KW_FL "</div>"
+        "<div id=fitc style='max-width:fit-content;margin:0 auto'>" KW_FL "</div>"
+        "<div id=px style='max-width:200px;margin:0 auto'>" KW_FL "</div>"
+        "<div id=minc style='max-width:min-content'>" KW_FL "</div>"
+        "<div id=maxc style='width:300px;max-width:max-content'>" KW_FL "</div>"
+        "<div id=minw style='width:30px;min-width:max-content'>" KW_FL "</div>"
+        "<div style='width:60px'><div id=narrow style='max-width:fit-content'>" KW_FL "</div></div>"
+        "<div style='display:flex'><div id=fl style='flex:1;max-width:fit-content'>" KW_FL "</div><div id=fl2 style='flex:1'></div></div>"
+        "<div style='position:relative;height:10px'><div id=abs style='position:absolute;left:0;right:0;max-width:fit-content'>" KW_FL "</div></div>"
+        "<div id=ib style='display:inline-block;max-width:min-content'>" KW_FL "</div>"
+        "</div>", NULL);
+#undef KW_FL
+    CHECK_NEAR(rc(fx, "fit").w, 90, 0.01, "max-width: fit-content: max-content 80 + padding");
+    CHECK_NEAR(rc(fx, "fitc").w, 80, 0.01, "max-width: fit-content with auto margins: 80 wide");
+    CHECK_NEAR(rc(fx, "fitc").x, 160, 0.01, "max-width: fit-content with auto margins: centred");
+    CHECK_NEAR(rc(fx, "px").x, 100, 0.01, "max-width: 200px with auto margins: centred");
+    CHECK_NEAR(rc(fx, "minc").w, 50, 0.01, "max-width: min-content");
+    CHECK_NEAR(rc(fx, "maxc").w, 80, 0.01, "width: 300px; max-width: max-content");
+    CHECK_NEAR(rc(fx, "minw").w, 80, 0.01, "width: 30px; min-width: max-content");
+    CHECK_NEAR(rc(fx, "narrow").w, 60, 0.01, "max-width: fit-content in 60 px: min(80, max(50, 60))");
+    CHECK_NEAR(rc(fx, "fl").w, 80, 0.01, "flex: 1 item with max-width: fit-content");
+    CHECK_NEAR(rc(fx, "fl2").w, 320, 0.01, "its flex: 1 sibling takes the rest");
+    CHECK_NEAR(rc(fx, "abs").w, 80, 0.01, "left: 0; right: 0 with max-width: fit-content");
+    CHECK_NEAR(rc(fx, "ib").w, 50, 0.01, "inline-block max-width: min-content (intrinsic contribution)");
+    fx_free(fx);
+}
+
 /* aspect-ratio (CSS Sizing 4), values from Chrome: the v10 uses (.eventBanner 1170 / 150 of a
  * 1176 px card, #charPreviewSlot canvas 3 / 4 of 600 px, the market grids' aspect-ratio: 1 cells) */
 static void t_aspect_ratio(void)
@@ -2025,6 +2061,7 @@ int main(int argc, char **argv)
     t_innerhtml_detach();
     t_intrinsic_font_restyle();
     t_flex_column_scroll_panes();
+    t_min_max_width_content();
     t_aspect_ratio();
     t_aspect_ratio_content();
     t_line_clamp();

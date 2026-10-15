@@ -276,6 +276,7 @@ in `client_menu_tick()`), and the client uses its built-in menu text and HUD.
 | `KRUNKNATIVE_HTML_TEXT_GAMMA=<gamma>:<contrast>` | text: gamma/contrast of the glyph coverage LUT (default 2.2:0.5) |
 | `KRUNKNATIVE_HTML_OBLIQUE_SKEW=<k>` | text: synthetic oblique shear |
 | `KRUNKNATIVE_HTML_FAKE_BOLD_ADVANCE=0\|1` | text: add the synthetic-bold strength to the advance |
+| `KRUNKNATIVE_HTML_FAKE_BOLD_DIVISOR=<n>` | text: synthetic-bold width = size / n instead of Skia's fake-bold curve (size/24 at 9 px to size/32 at 36 px) |
 | `KRUNKNATIVE_HTML_FALLBACK_FONT=<path>[:<path>...]` | text: fallback faces for missing glyphs |
 | `KRUNKNATIVE_LANG=<code>` | i18n: the UI language for this run (v10 codes: en ru jp zh zhtr kr hi ...), over the stored `krk_lang` (native only) |
 | `KRUNKNATIVE_AUTOPLAY=1` (web `?kn_autoplay=1`) | enter the game as soon as page and map are ready (headless HUD screenshots) |

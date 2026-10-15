@@ -295,6 +295,18 @@ static void test_raster(TextSystem *ts) {
     CHECK(text_glyph_quad(ts, &g[0], 32, TEXT_SYNTH_BOLD, &qb), "bold quad for T");
     printf("  'T' 32px quad %gx%g off (%g,%g); bold %gx%g off (%g,%g); uv (%.4f,%.4f)-(%.4f,%.4f)\n",
            qr.w, qr.h, qr.x_off, qr.y_off, qb.w, qb.h, qb.x_off, qb.y_off, qr.u0, qr.v0, qr.u1, qr.v1);
+    // Chrome's fake bold (Skia stroke-and-fill) grows the glyph on every side: at 96 px the
+    // width is 3 px, 1.5 px per side, so the bold bitmap reaches past the regular one on the
+    // left and the top as well as on the right and the bottom (FT_Outline_EmboldenXY alone
+    // keeps the bottom-left corner fixed)
+    GlyphQuad qr96, qb96;
+    CHECK(text_glyph_quad(ts, &g[0], 96, 0, &qr96) && text_glyph_quad(ts, &g[0], 96, TEXT_SYNTH_BOLD, &qb96),
+          "96px quads for T");
+    printf("  'T' 96px quad x %g..%g y %g..%g; bold x %g..%g y %g..%g\n", qr96.x_off, qr96.x_off + qr96.w,
+           qr96.y_off, qr96.y_off + qr96.h, qb96.x_off, qb96.x_off + qb96.w, qb96.y_off, qb96.y_off + qb96.h);
+    CHECK(qb96.x_off <= qr96.x_off - 1 && qb96.x_off + qb96.w >= qr96.x_off + qr96.w + 1, "bold grows left and right");
+    CHECK(qb96.y_off <= qr96.y_off - 1 && qb96.y_off + qb96.h >= qr96.y_off + qr96.h + 1, "bold grows up and down");
+    CHECK(qb96.w - qr96.w <= 4 && qb96.h - qr96.h <= 4, "bold width follows Skia's curve (96 px: 3 px, not 96/24 = 4)");
     CHECK(qb.w > qr.w && qb.h > qr.h, "emboldened T bigger in both axes");
     CHECK(qr.texture == text_atlas_texture(ts) && qr.generation == text_atlas_generation(ts), "quad texture/generation");
     GlyphQuad again;

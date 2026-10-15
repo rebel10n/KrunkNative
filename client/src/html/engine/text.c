@@ -17,9 +17,16 @@
 //    hinting at device scale 1 turns subpixel positioning off and uses hinted
 //    integer advances.  Measured against doc/ref (menu + windows + in-game):
 //    slight >> none > full; see text_snap_origin() for the device snapping.
-//  * Synthetic bold: FT_Outline_Embolden with strength = em/24 px
-//    (SkFontHost_FreeType_common.cpp kOutlineEmboldenDivisor); Skia does not
-//    widen the advance (KRUNKNATIVE_HTML_FAKE_BOLD_ADVANCE=1 does).
+//  * Synthetic bold: Chromium does not build Skia with SK_USE_FREETYPE_EMBOLDEN,
+//    so SkScalerContext::MakeRecAndEffects turns SkFont::setEmbolden into a
+//    stroke-and-fill of the glyph path with width = size * interp(size; 9 px ->
+//    1/24, 36 px -> 1/32) (kStdFakeBoldInterpKeys/Values): the outline grows
+//    by width/2 on every side, centred on the glyph.  FT_Outline_EmboldenXY by
+//    that width, translated back by width/2, reproduces it (measured against
+//    Chrome 152 at 12..48 px: per-size best width = Skia's curve; a real
+//    FT_Stroker border was no closer).  The advance stays unchanged
+//    (getBoundingClientRect widths of 400 and 700 GameFont runs are equal);
+//    KRUNKNATIVE_HTML_FAKE_BOLD_ADVANCE=1 widens it.
 //  * Synthetic oblique: Blink calls SkFont::setSkewX(-1/4); the plan asks for
 //    0.2 to be compared visually, so the shear is a knob (default 0.2).
 //  * Gamma: SkMaskGamma preblend, see text_gamma_lut_ex().
@@ -47,7 +54,6 @@
 #define TEXT_MAX_FACES 48
 #define TEXT_FAMILY_MAX 64
 #define TEXT_MAX_FALLBACKS 16
-#define TEXT_EMBOLDEN_DIVISOR 24.0f   // Skia kOutlineEmboldenDivisor
 #define TEXT_DEFAULT_OBLIQUE_SKEW 0.2f
 #ifndef TEXT_DEFAULT_HINTING
 #define TEXT_DEFAULT_HINTING TEXT_HINT_SLIGHT
@@ -112,7 +118,7 @@ struct TextSystem {
     int subpixel;        // 1/4-px x phases + linear advances (Chrome: on unless full hinting)
     int linear_metrics;  // unhinted fractional advances
     int force_autohint;
-    float bold_divisor;  // embolden strength = size / bold_divisor
+    float bold_divisor;  // > 0: embolden width = size / bold_divisor; 0: Skia's curve
     float oblique_skew;
     int fake_bold_advance;
     float gamma, contrast;
@@ -410,8 +416,8 @@ TextSystem *text_create(const char *ui_dir) {
     ts->subpixel = env_int("KRUNKNATIVE_HTML_SUBPX", ts->hinting != TEXT_HINT_FULL) != 0;
     ts->linear_metrics = env_int("KRUNKNATIVE_HTML_LINEAR_METRICS", ts->subpixel || ts->hinting == TEXT_HINT_NONE) != 0;
     ts->force_autohint = env_int("KRUNKNATIVE_HTML_AUTOHINT", 0) != 0;
-    ts->bold_divisor = env_float("KRUNKNATIVE_HTML_FAKE_BOLD_DIVISOR", TEXT_EMBOLDEN_DIVISOR);
-    if (ts->bold_divisor <= 0) ts->bold_divisor = TEXT_EMBOLDEN_DIVISOR;
+    ts->bold_divisor = env_float("KRUNKNATIVE_HTML_FAKE_BOLD_DIVISOR", 0);
+    if (ts->bold_divisor < 0) ts->bold_divisor = 0;
     ts->oblique_skew = env_float("KRUNKNATIVE_HTML_OBLIQUE_SKEW", TEXT_DEFAULT_OBLIQUE_SKEW);
     ts->fake_bold_advance = env_int("KRUNKNATIVE_HTML_FAKE_BOLD_ADVANCE", 0);
     text_gamma_params(&ts->gamma, &ts->contrast);
@@ -741,6 +747,18 @@ static void adv_insert(TextFont *font, uint64_t key, float val) {
     font->adv_count++;
 }
 
+/* Width in px by which synthetic bold grows a glyph of `size` px (the stroke width of Skia's
+ * fake bold: SkScalerContext.cpp kStdFakeBoldInterpKeys {9, 36} / Values {1/24, 1/32},
+ * SkScalarInterpFunc, clamped at both ends). */
+static float text_fake_bold_width(const TextSystem *ts, float size) {
+    if (ts->bold_divisor > 0) return size / ts->bold_divisor;
+    const float k0 = 9.0f, k1 = 36.0f, v0 = 1.0f / 24.0f, v1 = 1.0f / 32.0f;
+    float t = (size - k0) / (k1 - k0);
+    if (t < 0) t = 0;
+    if (t > 1) t = 1;
+    return size * (v0 + t * (v1 - v0));
+}
+
 static float text_glyph_advance(TextFont *font, TextFace *face, uint32_t gi) {
     uint64_t key = (1ull << 32) | ((uint64_t) face->id << 24) | (gi & 0xFFFFFF);
     float adv;
@@ -750,7 +768,7 @@ static float text_glyph_advance(TextFont *font, TextFace *face, uint32_t gi) {
     if (face_set_size(face, font->size64) && !FT_Load_Glyph(face->ft, gi, text_load_flags(ts))) {
         if (ts->linear_metrics) adv = (float) face->ft->glyph->linearHoriAdvance / 65536.0f;
         else adv = (float) face->ft->glyph->advance.x / 64.0f;
-        if ((font->synth & TEXT_SYNTH_BOLD) && ts->fake_bold_advance) adv += font->size / ts->bold_divisor;
+        if ((font->synth & TEXT_SYNTH_BOLD) && ts->fake_bold_advance) adv += text_fake_bold_width(ts, font->size);
     }
     adv_insert(font, key, adv);
     return adv;
@@ -1236,8 +1254,12 @@ int text_glyph_quad(TextSystem *ts, const Glyph *g, float device_size, unsigned 
     FT_GlyphSlot slot = face->ft->glyph;
     if (slot->format != FT_GLYPH_FORMAT_OUTLINE) return 0;
     if (synth & TEXT_SYNTH_BOLD) {
-        FT_Pos strength = (FT_Pos) lroundf((float) size64 / ts->bold_divisor);
+        /* EmboldenXY grows the outline by strength/2 per side and then shifts it by
+         * (strength/2, strength/2), keeping the bottom-left corner; Skia's stroke grows it in
+         * place, so shift it back */
+        FT_Pos strength = (FT_Pos) lroundf(text_fake_bold_width(ts, (float) size64 / 64.0f) * 64.0f);
         FT_Outline_EmboldenXY(&slot->outline, strength, strength);
+        FT_Outline_Translate(&slot->outline, -(strength / 2), -(strength / 2));
     }
     if (synth & TEXT_SYNTH_OBLIQUE) {
         FT_Matrix m = {0x10000, (FT_Fixed) (ts->oblique_skew * 65536.0f), 0, 0x10000};
