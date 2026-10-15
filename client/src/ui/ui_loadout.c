@@ -34,6 +34,7 @@
 #include <cosmetics.h> // cosmetics_route, cosmetics_attach_index (ui_loadout_look)
 #include <krunker_net.h> // the K.P.D's account in an official krunker.io game (police_identity)
 #include <game_config.h> // game_class_allowed: KrunkNative's own classes are out of official krunker.io games
+#include <strike_econ.h> // Krunker Strike: the look is Strike's loadout (strike_econ_apply_look)
 
 // ---------------------------------------------------------------- Krunker tables
 
@@ -337,6 +338,10 @@ void ui_loadout_look(const int class_index, const int for_ent, LoadoutLook *out)
     out->secondary_index = ui_loadout_secondary(class_index);
     // forceAttach ? 0 : parseInt(attachIndex): the primary weapon's (also weapon_attachment()'s) or its skin's
     const int primary = class_at(class_index).primary;
+    // Krunker Strike: the store items come from the account's Strike loadout only (strike_econ.c),
+    // never the Box Office picks; the routing below still applies
+    if (strike_econ_apply_look(primary, out->secondary_index, &out->skins, &out->cosmetics, &out->cosmetics_v7))
+        cosmetics_route(&out->cosmetics, &out->cosmetics_v7);
     const Weapon *pw = rules_weapon(primary);
     out->attach_index = pw && pw->force_attach ? 0 : cosmetics_attach_index(out->skins.primary, sel(SEL_ATTACH));
 }
@@ -533,6 +538,8 @@ static int random_owned_spray(void) {
 // (shared/src/social_v7.c game_spray_pick). KrunkNative's own picks 0..52 are the free store items
 // 2482 + i.
 int ui_loadout_spray(void) {
+    const int strike = strike_econ_spray(); // Krunker Strike: the equipped Strike spray
+    if (strike >= 0) return strike;
     const int pick = sel(SEL_SPRAY);
     if (pick == -2) return random_owned_spray();
     if (pick >= 0 && pick < SPRAYS_BASE_COUNT) return store_spray_from_legacy(pick);

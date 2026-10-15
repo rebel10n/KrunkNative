@@ -12,6 +12,7 @@
 #include "brain_internal.h"
 #include "game_presence.h"
 #include "roles.h"
+#include "strike_econ.h"
 #include "knsvc/crypto.h"
 #include "knsvc/http.h"
 #include "knsvc/json.h"
@@ -221,6 +222,8 @@ static void on_acct_reply(void *ud, const char *err, const cJSON *data) {
 typedef struct AuthCtx {
     ReplyCtx r;
     cJSON *claims;
+    Brain *b;
+    int strike; /* a Krunker Strike game server ("flavor": "strike"): the account's Strike inventory */
 } AuthCtx;
 
 static void auth_finish(AuthCtx *a, const char *err, const cJSON *account) {
@@ -234,8 +237,17 @@ static void auth_finish(AuthCtx *a, const char *err, const cJSON *account) {
     free(a);
 }
 
+static void on_auth_strike(void *ud, const char *err, const cJSON *data) {
+    auth_finish(ud, err, err ? NULL : data);
+}
+
 static void on_auth_account(void *ud, const char *err, const cJSON *data) {
     AuthCtx *a = ud;
+    /* a Strike server: Strike's items / krunkies / level, never Box Office's (strike_econ.c) */
+    if (!err && data && a->strike) {
+        strike_econ_overlay(a->b, data, on_auth_strike, a);
+        return;
+    }
     /* A valid ticket stays valid when the account lookup fails: report the
      * claims (guest-equivalent) but carry the error for the game server. */
     auth_finish(a, err, err ? NULL : data);
@@ -277,6 +289,16 @@ static void on_has_joined(void *ud, const char *err, const cJSON *profile) {
     free(h);
 }
 
+/* Krunker Strike: a Strike node's joins see the account's Strike inventory and its commits are
+ * Strike progress (strike_econ.c), never Box Office stats. The node's hello flavor (registry) or the
+ * frame's own "flavor" (server/src/accounts.c tags auth / commit frames) says so. */
+static int node_is_strike(NodeConn *c, const cJSON *frame) {
+    if (!strcmp(kn_json_str(frame, "flavor", ""), "strike")) return 1;
+    MmNode *n = c->helloed ? registry_node(c->b->registry, c->node_id) : NULL;
+    const char *f = n ? registry_node_flavor(n) : NULL;
+    return f && !strcmp(f, "strike");
+}
+
 static void handle_auth(NodeConn *c, const cJSON *frame) {
     AuthCtx *a = calloc(1, sizeof(*a));
     if (!a) return;
@@ -287,6 +309,8 @@ static void handle_auth(NodeConn *c, const cJSON *frame) {
     }
     a->r = *rc;
     free(rc);
+    a->b = c->b;
+    a->strike = node_is_strike(c, frame);
     const char *ticket = kn_json_str(frame, "ticket", NULL);
     const char *token = kn_json_str(frame, "token", NULL);
     const cJSON *hj = cJSON_GetObjectItemCaseSensitive(frame, "hasJoined");
@@ -383,7 +407,7 @@ static void on_commit_stats(void *ud, const char *err, const cJSON *data) {
         cc->all_ok = 0;
         cJSON_AddStringToObject(res, "err", err);
     } else if (data) {
-        const char *keys[] = {"funds", "level", "score", "kr_awarded", "duplicate"};
+        const char *keys[] = {"funds", "level", "score", "kr_awarded", "duplicate", "xp", "levelUp", "kr", "missions"};
         for (size_t i = 0; i < sizeof(keys) / sizeof(*keys); i++) {
             const cJSON *v = cJSON_GetObjectItemCaseSensitive(data, keys[i]);
             if (v) cJSON_AddItemToObject(res, keys[i], cJSON_Duplicate(v, 1));
@@ -413,6 +437,7 @@ static void handle_commit(NodeConn *c, const cJSON *frame) {
     char match_key[160];
     snprintf(match_key, sizeof(match_key), "%s:%s", lobby, match);
     const cJSON *players = cJSON_GetObjectItemCaseSensitive(frame, "players");
+    const int strike = node_is_strike(c, frame);
     const cJSON *p;
     cJSON_ArrayForEach(p, players) {
         int64_t acc = kn_json_int(p, "accountId", 0);
@@ -441,7 +466,10 @@ static void handle_commit(NodeConn *c, const cJSON *frame) {
         it->ctx = cc;
         it->account_id = acc;
         cc->outstanding++;
-        accounts_internal_call(c->b, "stats", args, on_commit_stats, it);
+        if (strike) /* Krunker Strike: Strike's XP, krunkies, missions and stats (strike_econ.c) */
+            strike_econ_commit(c->b, acc, args, kn_json_str(args, "match", match_key), on_commit_stats, it);
+        else
+            accounts_internal_call(c->b, "stats", args, on_commit_stats, it);
         cJSON_Delete(args);
     }
     if (--cc->outstanding == 0) commit_done(cc);

@@ -2931,6 +2931,207 @@
    }
   ]
  },
+ "economy": {
+  "currencies": {
+   "DAILY_KR_GAINED": "daily_kr_gained",
+   "EXPERIENCE": "xp",
+   "KRUNKIES": "kr",
+   "NAME_CHANGE": "name_change",
+   "SEASONAL_EVENT_TOKENS": "seasonal_event_tokens",
+   "SPIN_GOLDEN_TICKET": "spin_golden_ticket",
+   "SPIN_TICKET": "spin_ticket"
+  },
+  "golden_spin_meter_default": 10,
+  "item_rarities": {
+   "Contraband": 5,
+   "Epic": 2,
+   "Legendary": 3,
+   "Nft": 7,
+   "Rare": 1,
+   "Relic": 4,
+   "Uncommon": 0,
+   "Unobtainable": 6
+  },
+  "mission_keys": [
+   "amc",
+   "amp",
+   "ast",
+   "atkm",
+   "bst",
+   "cnf",
+   "d",
+   "defm",
+   "dep",
+   "dym",
+   "find",
+   "fk",
+   "gifts",
+   "gp",
+   "hs",
+   "k",
+   "kstk",
+   "ls",
+   "mk",
+   "rcm",
+   "rnd",
+   "score",
+   "spry",
+   "stk",
+   "time",
+   "tmk",
+   "twm",
+   "uwk",
+   "w",
+   "wpb"
+  ],
+  "mission_types": [
+   "daily",
+   "discord"
+  ],
+  "past_max_level_reward": {
+   "amount": 1,
+   "currency": "spin_ticket"
+  },
+  "price_types": {
+   "Ads": "ads",
+   "Free": "free",
+   "RealMoney": "real_money",
+   "VirtualCurrency": "virtual_currency"
+  },
+  "schemas": {
+   "item_definition": [
+    "type",
+    "weapon",
+    "name",
+    "rarity",
+    "id",
+    "default",
+    "data"
+   ],
+   "mission": [
+    "isActive",
+    "type",
+    "key",
+    "requiredValue",
+    "singleMatch",
+    "weapon",
+    "mapIndex",
+    "mapId",
+    "modeIndex",
+    "classIndex",
+    "streakIndex",
+    "itemPickup",
+    "noEndMatch",
+    "lesser",
+    "event",
+    "season",
+    "boss",
+    "weight",
+    "rewards",
+    "discordQuestId",
+    "discordQuestSkuId",
+    "expireAt",
+    "milestone"
+   ],
+   "player_mission": [
+    "details",
+    "progress",
+    "completed"
+   ],
+   "shop_product": [
+    "active",
+    "price",
+    "products",
+    "activateCondition",
+    "chatbotOnlyProduct",
+    "backgroundImage",
+    "refreshTime",
+    "maxPurchaseCount",
+    "discountedBy"
+   ],
+   "spin_result": [
+    "reward",
+    "poolId",
+    "poolWeight",
+    "rand"
+   ],
+   "spin_wheel": [
+    "name",
+    "nameKey",
+    "rewards",
+    "price",
+    "timeBetweenSpins",
+    "maxAccumulatedSpins",
+    "hideInShop",
+    "heroicSpinTriggerChance",
+    "requiresRewardedAd",
+    "imageUrl",
+    "buttonColor",
+    "category",
+    "type"
+   ],
+   "spin_wheel_pool": [
+    "weight",
+    "poolId",
+    "poolName",
+    "color",
+    "guaranteedIfSpinCountIs",
+    "items",
+    "textColor"
+   ]
+  },
+  "spin_wheel_types": {
+   "Ad": "ad",
+   "ChatbotBoost": "chatbot_boost",
+   "Default": "default",
+   "Free": "free",
+   "GoldenChatbotBoost": "golden_chatbot_boost",
+   "GoldenSpin": "golden_spin"
+  },
+  "store_section_types": {
+   "CurrencyConversion": "currency_conversion",
+   "CurrencyGrid": "currency_grid",
+   "EventBoosters": "event_boosters",
+   "SpinWheel": "spin_wheel"
+  },
+  "weapon_types": {
+   "Akimbo_Pistol": 27,
+   "Akimbo_Uzi": 9,
+   "Alien_Blaster": 11,
+   "Assault_Rifle": 1,
+   "Auto_Pistol": 16,
+   "Blaster": 18,
+   "Bomb": 17,
+   "Build_Tool": 19,
+   "Charge_Rifle": 28,
+   "Combat_Knife": 12,
+   "Crossbow": 13,
+   "Desert_Eagle": 10,
+   "Famas": 14,
+   "Grappler": 20,
+   "Machine_Gun": 6,
+   "Minigun": 25,
+   "Noob_Tube": 22,
+   "Pistol": 2,
+   "Revolver": 4,
+   "Rocket_Launcher": 8,
+   "Sawed_Off": 15,
+   "Semi_Auto": 7,
+   "Shotgun": 5,
+   "Slimer": 23,
+   "Sniper_Rifle": 0,
+   "Submachine_Gun": 3,
+   "Tehchy_9": 21,
+   "War_Machine": 26,
+   "Zapper": 24
+  },
+  "xp_curve": {
+   "base": 100,
+   "divisor": 3.5,
+   "rule": "level L (L >= 1) costs base + step * floor(L / divisor) XP; level 1 starts at 0 XP",
+   "step": 100
+  }
+ },
  "gateway": {
   "allocate_literals": [
    "`${g1[e]}/v1/director/allocate`",

@@ -37,6 +37,7 @@
 #include <string.h>
 
 #include "hot.h"
+#include "strike_econ.h"
 #include "knsvc/config.h"
 #include "knsvc/json.h"
 #include "knsvc/log.h"
@@ -196,6 +197,7 @@ void sh_gapi(SocialSession *s, const cJSON *f) {
         r.seg[r.nseg++] = t;
     }
     if (r.nseg > 0 && !strcmp(r.seg[0], "clans") && clan_v10_gapi(s, &r)) return;
+    if (r.nseg > 0 && !strcmp(r.seg[0], "strike") && strike_econ_gapi(s, &r)) return; /* Krunker Strike (strike_econ.c) */
     if (route(s, &r)) return;
     gapi_error(s, r.rid, 404, "NOT_FOUND", "Not found.");
 }

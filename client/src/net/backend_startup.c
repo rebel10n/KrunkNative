@@ -5,6 +5,7 @@
 #include <backend.h>
 #include <backend_ui.h>
 #include <strike_director.h> // Krunker Strike: the director matchmakes
+#include <strike_econ.h>     // Krunker Strike: the account's Strike economy state
 #include <online_mode.h>
 #include <krunker_net.h>
 #include <krunker_account.h>
@@ -118,4 +119,5 @@ void backend_frame(Client *client) {
     v10_menu_account_tick();   // the menu header: the krunker.io account in a krunker.io server, else the KrunkNative one
     krunker_net_tick(client); // official krunker.io games: notices, captcha
     v10_social_tick(); // the v10 page's Social hub: friends event bus, menu badge (v10_social.c)
+    strike_econ_tick(); // Krunker Strike: the signed-in account's Strike wallet / items / loadout (strike_econ.c)
 }

@@ -76,6 +76,12 @@ set(KN_BRAIN_SOURCES
     # v10.0.2 one-time signup perks (0116_v10_rewards)
     db_rewards.c
     rewards.c
+    # strike-economy: Krunker Strike's skins, spins, store, krunkies, missions, progression and
+    # leaderboards (0320_strike_economy; the rules and the bundle's XP curve: shared/src/strike_economy.c)
+    strike_econ.c
+    db_strike.c
+    ../../shared/src/strike_economy.c
+    ../../shared/src/rules/strike/strike_economy_data.c
     # email-verify: v7.1.4 2FA (TOTP), email verification and outbound mail (0109_account_security)
     account_security.c
     db_security.c
@@ -341,6 +347,19 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/rewards_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_rewards PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+    # Krunker Strike's economy: catalogue seeded (0320), spin odds / costs / grants, store, loadout,
+    # missions, track, Strike commits and auth, Strike vs Box Office separation, leaderboards
+    add_test(NAME brain_strike_economy
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/strike_economy_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_strike_economy PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;economy;strike")
+    # an equipped Strike skin renders in game (headless client_bin --flavor strike on a linked Strike server_bin)
+    if (TARGET client_bin AND TARGET server_bin)
+        add_test(NAME brain_strike_skin_e2e
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/client/tests/strike_skin_e2e.py ${CMAKE_BINARY_DIR}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_strike_skin_e2e PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "brain;db;economy;strike;e2e")
+    endif ()
     # editor-ai: the AI proxy (ai.c) against a stub upstream and a stub MCP server (tests/ai_stub.py; sqlite
     # scratch database unless KN_TEST_DB_DRIVER says otherwise; never the live provider)
     add_test(NAME brain_ai
@@ -455,8 +474,11 @@ foreach (drv IN ITEMS sqlite mysql)
         add_test(NAME brain_economy_${drv}
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/economy_test.py
                     $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+        add_test(NAME brain_strike_economy_${drv}
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/strike_economy_test.py
+                    $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_social_ws_${drv} brain_ranked_${drv} brain_turf_${drv} brain_storage_${drv} brain_kpd_${drv} brain_progress_${drv} brain_season_${drv}
-            brain_account_security_${drv} brain_economy_${drv}
+            brain_account_security_${drv} brain_economy_${drv} brain_strike_economy_${drv}
             PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77
             ENVIRONMENT KN_TEST_DB_DRIVER=${drv} LABELS "knsvc;brain;db;${drv}")
         set_tests_properties(brain_ranked_${drv} PROPERTIES TIMEOUT 420)

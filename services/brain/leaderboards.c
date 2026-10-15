@@ -14,6 +14,7 @@
 #include "acct_internal.h"
 #include "brain_internal.h"
 #include "hot.h"
+#include "strike_econ.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -365,7 +366,9 @@ static const struct {
 static void h_http_board(kn_http_req *req, void *ud) {
     Brain *b = ud;
     const char *type = kn_http_param(req, "type");
-    char sort[16] = "", season[16] = "";
+    char sort[16] = "", season[16] = "", flavor[16] = "";
+    /* Krunker Strike's own leaderboards (its stats, never Box Office's): strike_econ.c */
+    if (kn_http_query_get(req, "flavor", flavor, sizeof flavor) && !strcmp(flavor, "strike")) return strike_econ_http_board(b, req, type);
     kn_http_query_get(req, "sort", sort, sizeof sort);
     kn_http_query_get(req, "season", season, sizeof season);
     char key[96];

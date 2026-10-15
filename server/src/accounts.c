@@ -30,6 +30,14 @@
 #include <string.h>
 #include <strings.h>
 #include <time.h>
+#include <flavor.h>         // Krunker Strike: auth / commit frames carry the flavor
+
+// Krunker Strike: the brain answers a Strike server's auth with the account's Strike inventory,
+// krunkies and level, and files its commits as Strike progress (services/brain/strike_econ.c).
+// Base frames are unchanged (no "flavor" key).
+static void acc_flavor_tag(cJSON *frame) {
+    if (flavor_get() != FLAVOR_BASE) cJSON_AddStringToObject(frame, "flavor", flavor_current()->key);
+}
 
 #define ACC_SNAPSHOT_INTERVAL 5.0f   // brainClient.ts SNAPSHOT_INTERVAL_MS
 #define ACC_PUSH_DEBOUNCE 0.25f      // DEBOUNCE_PUSH_MS
@@ -1047,7 +1055,8 @@ static void acc_add_progress(cJSON *p, const ClientConnection *client, const Pla
         const int map_index = g->current_map_index >= 0 && (size_t) g->current_map_index < g->map_count
                                   ? map_catalog_index_of_json(g->maps[g->current_map_index]) : -1;
         const int reward_skin = map_index >= 0 && map_index < MAP_CATALOG_OFFICIAL_COUNT ? season_map_reward(SEASON_CURRENT, map_index) : 0;
-        if (reward_skin && player && pcg32_boundedrand(SEASON_MAP_REWARD_CHANCE) == SEASON_MAP_REWARD_CHANCE - 1)
+        // (never in a Krunker Strike match: these are Box Office store skins; Strike's items are its own)
+        if (reward_skin && player && flavor_get() == FLAVOR_BASE && pcg32_boundedrand(SEASON_MAP_REWARD_CHANCE) == SEASON_MAP_REWARD_CHANCE - 1)
             accounts_give_skin(player, reward_skin, "mapreward");
     }
     cJSON *medals = cJSON_AddObjectToObject(p, "medals");
@@ -1092,6 +1101,7 @@ static void acc_commit(ClientConnection **clients, const int count, const int fi
     cJSON *frame = cJSON_CreateObject();
     const uint32_t rid = brain_next_rid();
     cJSON_AddStringToObject(frame, "type", "commit");
+    acc_flavor_tag(frame);
     cJSON_AddNumberToObject(frame, "rid", rid);
     cJSON_AddStringToObject(frame, "lobbyId", g_acc.lobby_id);
     cJSON_AddStringToObject(frame, "matchId", match_id);
@@ -1825,6 +1835,7 @@ static void acc_send_auth(ClientConnection *client, const char *key, const char 
     cJSON *frame = cJSON_CreateObject();
     const uint32_t rid = brain_next_rid();
     cJSON_AddStringToObject(frame, "type", "auth");
+    acc_flavor_tag(frame);
     cJSON_AddNumberToObject(frame, "rid", rid);
     cJSON_AddStringToObject(frame, key, value);
     if (client->acct.resumed) cJSON_AddBoolToObject(frame, "resume", 1); // the brain skips the ticket's expiry
@@ -1890,6 +1901,7 @@ static int acc_online_join(ClientConnection *client, const NetJoinPacket *join, 
         cJSON *frame = cJSON_CreateObject();
         const uint32_t rid = brain_next_rid();
         cJSON_AddStringToObject(frame, "type", "auth");
+        acc_flavor_tag(frame);
         cJSON_AddNumberToObject(frame, "rid", rid);
         cJSON *hj = cJSON_AddObjectToObject(frame, "hasJoined");
         cJSON_AddStringToObject(hj, "username", username);
@@ -2577,6 +2589,7 @@ void accounts_handle_live_auth(ClientConnection *client, const uint8_t *body, co
         cJSON *frame = cJSON_CreateObject();
         rid = brain_next_rid();
         cJSON_AddStringToObject(frame, "type", "auth");
+        acc_flavor_tag(frame);
         cJSON_AddNumberToObject(frame, "rid", rid);
         cJSON_AddStringToObject(frame, "token", req.key);
         brain_post(frame, 0);
@@ -2599,6 +2612,7 @@ void accounts_handle_live_auth(ClientConnection *client, const uint8_t *body, co
             cJSON *frame = cJSON_CreateObject();
             rid = brain_next_rid();
             cJSON_AddStringToObject(frame, "type", "auth");
+            acc_flavor_tag(frame);
             cJSON_AddNumberToObject(frame, "rid", rid);
             cJSON *hj = cJSON_AddObjectToObject(frame, "hasJoined");
             cJSON_AddStringToObject(hj, "username", username);

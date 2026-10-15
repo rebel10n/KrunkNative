@@ -93,3 +93,41 @@ See `~/.cache/kn-strike/STRIKE-BRIEF.md` for the per-module interfaces, test bar
 | flavor-matchmaking | `server/src/` finder, `services/` coordinator | list Strike lobbies separately; a Strike region/pool in the brain |
 | flavor-packaging | `tools/release/`, `launcher/` | a `make strike` dedicated-server dist + a Strike client package |
 | flavor-docs/e2e | `doc/v10/`, `server/tests/`, `tools/uidiff/` | per-module e2e + a uidiff scenario for the Strike brand |
+
+## Economy
+
+Krunker Strike keeps its own economy and progression, keyed by account but never mixed into Box
+Office's (FRVR's economy is separate from Krunker's): its own wallet (`kr` = krunkies, `spin_ticket`,
+`spin_golden_ticket`, ...), inventory, loadout, XP / level, stats, missions and leaderboards.
+
+- **Data.** `tools/strike/extract_strike.py` reads the bundle's economy anchors into
+  `strike_data.json` (`items`: item types, rarities, crate tiers, KR packages; `economy`: wallet
+  currencies, wheel / price / weapon / rarity enums, the gateway's zod shapes, the account XP curve
+  `100 + 100 * floor(L / 3.5)`, the golden spin meter (10), the reward past the track's last level
+  (1 spin ticket), the mission keys). `tools/strike/gen_economy.py` turns it plus the Krunker store
+  skins FRVR's item definitions name (`assets/skins.json`) into `shared/src/rules/strike/
+  strike_economy_data.c` (`shared/include/strike_economy.h`) and migration `0320_strike_economy`
+  (the same catalogue as seed rows). What FRVR serves from its gateway and never shipped in the
+  client (the item list, prices, store products, missions, the track's rewards) is KrunkNative's,
+  marked KN in the generator.
+- **Wheels.** Odds are the bundle's crate tiers: Starter 75/22/3 (Starter wheel 50 KR, the Free wheel
+  every 4 h), Elite 50/30/15/5 (Elite 100 KR, Lucky Draw 1 spin ticket, a 10x Lucky Draw guarantees
+  an Epic or better), Heroic 0/48/35/14/2.49/0.5/0.01 (the Golden spin, 1 golden ticket). Every 10
+  paid spins fill the golden spin meter for a golden ticket. Rolls are kn_brain's; charge and grant
+  are one transaction.
+- **Store.** Virtual currency and free products only (no real money): spin tickets, a golden ticket,
+  the Hunter bundle (the class FRVR sells), a name change, a daily free KR package and four daily
+  deals priced by rarity.
+- **Progression.** Strike XP from Strike matches; the free track (30 levels, then a spin ticket per
+  level) unlocks Run N Gun (5) and Rocketeer (15) (FRVR's `rewards_track` classes), daily missions
+  (level 3) and golden tickets; Shotgunner and Detective come from spin tickets.
+- **Serving.** kn_brain (`services/brain/strike_econ.c`, `db_strike.c`) answers FRVR's gateway paths
+  under `/strike` on the social socket's gapi tunnel (`/strike/v1/players/me`, `/v1/item-definitions/*`,
+  `/v2/spin-wheels/*`, `/v1/shop`, `/v1/missions/*`, `/v1/players/me/claim/progression`,
+  `/v1/game-config`, `/v1/leaderboards/:board`; HTTP `/api/strike/leaderboards/:type` and
+  `/api/leaderboards/:type?flavor=strike`). A Strike game server's auth gets the account's Strike
+  inventory / krunkies / level, and its match commits become Strike XP, krunkies, stats and mission
+  progress (the node's hello flavor or the frame's `flavor`); Box Office stats never move.
+- **Client.** `client/include/strike_econ.h` is the API the Strike screens use (state, requests,
+  change events, `knStrike*` page handlers); under `FLAVOR_STRIKE` the player wears the Strike
+  loadout (`ui_loadout_look`).

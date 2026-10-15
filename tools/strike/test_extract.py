@@ -139,6 +139,19 @@ def test_golden(d):
     mob = d["ui"]["mobile"]
     check(mob["detect"]["global"] == "window._isMobile" and mob["detect"]["user_agent_regexes"]
           and mob["frvr_menu_constant"] is True, "mobile detection")
+    eco = d["economy"]
+    check(eco["currencies"].get("KRUNKIES") == "kr" and eco["currencies"].get("SPIN_GOLDEN_TICKET") == "spin_golden_ticket",
+          "wallet currencies %r" % eco["currencies"])
+    check(eco["xp_curve"]["base"] == 100 and eco["xp_curve"]["step"] == 100 and eco["xp_curve"]["divisor"] == 3.5,
+          "account XP curve %r" % eco["xp_curve"])
+    check(eco["golden_spin_meter_default"] == 10 and eco["past_max_level_reward"] == {"currency": "spin_ticket", "amount": 1},
+          "golden spin meter / past-max-level reward")
+    check(eco["spin_wheel_types"].get("GoldenSpin") == "golden_spin" and eco["weapon_types"].get("Assault_Rifle") == 1,
+          "wheel / weapon enums")
+    check({"k", "hs", "w", "gp", "score", "kstk"} <= set(eco["mission_keys"]), "mission keys %r" % eco["mission_keys"])
+    check("guaranteedIfSpinCountIs" in eco["schemas"]["spin_wheel_pool"] and "rand" in eco["schemas"]["spin_result"],
+          "gateway schemas")
+    check([t["name"] for t in d["items"]["crate_tiers"]] == ["Starter", "Elite", "Heroic"], "crate tiers")
     check(any(f["family"] == "ChakraPetch" for f in d["ui"]["css"]["build"]["fonts"]), "ChakraPetch font")
     check("loading-screen__curtains" in (d["ui"]["entries"]["build"]["body_markup"] or ""), "loading screen")
     # gameplay-parity sections (strike-gameplay2): physics, combat, input

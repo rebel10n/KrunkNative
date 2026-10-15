@@ -27,6 +27,9 @@ Output sections:
   gateway   FRVR gateway REST routes (method, path, body keys, error), directors, regions, headers,
             the Discord URL mappings
   items     item types, unlock origins, reward/compensation enums, rarities, packages, crate tiers
+  economy   wallet currencies, wheel / price / weapon / rarity enums, the gateway's zod shapes (item
+            definition, wheel, pool, spin result, mission, shop product), the account XP curve, the
+            golden spin meter, the reward past the track's last level, the mission keys
   config    constants (player cap, tick rates), custom-game settings (match minutes, warmup,
             rounds, intermission), class/weapon config tables, player cap, timing
   i18n      every English UI string (key -> text)
@@ -1218,6 +1221,94 @@ def extract_items(s):
     return out
 
 
+def _ts_enums(s):
+    """Every TypeScript enum of the bundle: {sorted key list: {name: value}} (string and numeric)."""
+    enums = {}
+    for m in re.finditer(r'(?:var |,)([\w$]+)=\(([\w$]+)=>\(((?:\2\.[\w$]+="[^"]*",)+)\2\)\)\(\1\|\|\{\}\)', s):
+        enums.setdefault(",".join(sorted(re.findall(r'[\w$]+\.([\w$]+)="', m.group(3)))),
+                         dict(re.findall(r'[\w$]+\.([\w$]+)="([^"]*)"', m.group(3))))
+    for m in re.finditer(r'(?:var |,)([\w$]+)=\(([\w$]+)=>\(((?:\2\[\2\.[\w$]+=-?\d+\]="[^"]*",)+)\2\)\)\(\1\|\|\{\}\)', s):
+        vals = {k: int(v) for k, v in re.findall(r'\[[\w$]+\.([\w$]+)=(-?\d+)\]', m.group(3))}
+        enums.setdefault(",".join(sorted(vals)), vals)
+    return enums
+
+
+def _enum_with(enums, anchor, *keys):
+    for vals in enums.values():
+        if all(k in vals for k in keys):
+            return vals
+    fail(anchor, "no enum with %s" % ", ".join(keys))
+
+
+def _zod_keys(s, anchor, pattern):
+    """The field names of the zod $.object({...}) that starts where `pattern` matches."""
+    m = re.search(pattern, s)
+    if not m:
+        fail(anchor, "pattern %r not found" % pattern)
+    k = m.start()
+    while s[k] != "{":
+        k += 1
+    end = skip_balanced(s, k)
+    body, keys, depth, i = s[k + 1:end], [], 0, 0
+    while i < len(body):
+        c = body[i]
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        elif depth == 0:
+            km = re.match(r'([\w$]+):', body[i:])
+            if km and (i == 0 or body[i - 1] == ","):
+                keys.append(km.group(1))
+                i += km.end()
+                continue
+        i += 1
+    return keys
+
+
+def extract_economy(s):
+    """Strike's economy as the client sees it (the server data behind it is FRVR's gateway): wallet
+    currencies, wheel / price / item enums, the gateway's zod shapes, the account XP curve, the
+    golden spin meter, what an account past the track's last level gets, the mission keys the game
+    reports. Read by tools/strike/gen_economy.py."""
+    out = {}
+    cur, _ = literal_at(s, r'(?<![\w$])[\w$]{1,4}=\{EXPERIENCE:"xp",KRUNKIES:"kr",', "economy.currencies")
+    out["currencies"] = cur
+    enums = _ts_enums(s)
+    out["spin_wheel_types"] = _enum_with(enums, "economy.spin_wheel_types", "GoldenSpin", "Free", "Default")
+    out["price_types"] = _enum_with(enums, "economy.price_types", "RealMoney", "VirtualCurrency", "Ads")
+    out["store_section_types"] = _enum_with(enums, "economy.store_section_types", "SpinWheel", "CurrencyConversion")
+    out["weapon_types"] = _enum_with(enums, "economy.weapon_types", "Sniper_Rifle", "Charge_Rifle")
+    out["item_rarities"] = _enum_with(enums, "economy.item_rarities", "Uncommon", "Unobtainable", "Nft")
+    # LA(xp): level 1 starts at 0 XP; level e costs 100+100*floor(e/3.5)
+    xm = re.search(r'const [\w$]+=(\d+)\+(\d+)\*Math\.floor\([\w$]+/([\d.]+)\);[\w$]+\+=[\w$]+,[\w$]+<=[\w$]+&&', s)
+    if not xm:
+        fail("economy.xp_curve", "the level cost 100+100*Math.floor(e/3.5) not found")
+    out["xp_curve"] = {"base": int(xm.group(1)), "step": int(xm.group(2)), "divisor": float(xm.group(3)),
+                       "rule": "level L (L >= 1) costs base + step * floor(L / divisor) XP; level 1 starts at 0 XP"}
+    gm = re.search(r'spinsToGetGoldenSpin\)\|\|(\d+)', s)
+    if not gm:
+        fail("economy.golden_spin", "spinsToGetGoldenSpin default not found")
+    out["golden_spin_meter_default"] = int(gm.group(1))
+    am = re.search(r'if\([\w$]+>[\w$]+\)\{const [\w$]+=await [\w$]+\(\{type:[\w$]+\.Currency,currency:[\w$]+\.([A-Z_]+),amount:(\d+)\}\)', s)
+    if not am:
+        fail("economy.past_max_level", "the reward past the last track level not found")
+    out["past_max_level_reward"] = {"currency": cur.get(am.group(1)), "amount": int(am.group(2))}
+    out["mission_keys"] = sorted(set(re.findall(r'missions\.update\([\w$]+,"([A-Za-z]+)"', s)))
+    out["schemas"] = {
+        "item_definition": _zod_keys(s, "economy.schemas.item", r'\$\.object\(\{type:\$\.nativeEnum\([\w$]+\),weapon:'),
+        "spin_wheel": _zod_keys(s, "economy.schemas.wheel", r'\$\.object\(\{name:\$\.string\(\),nameKey:\$\.string\(\),rewards:'),
+        "spin_wheel_pool": _zod_keys(s, "economy.schemas.pool", r'\$\.object\(\{weight:\$\.number\(\),poolId:\$\.string\(\),poolName:'),
+        "spin_result": _zod_keys(s, "economy.schemas.spin", r'\$\.object\(\{reward:[\w$]+,poolId:\$\.string\(\),poolWeight:'),
+        "mission": _zod_keys(s, "economy.schemas.mission", r'\$\.object\(\{isActive:\$\.boolean\(\),type:\$\.enum\('),
+        "player_mission": _zod_keys(s, "economy.schemas.player_mission", r'\$\.object\(\{details:[\w$]+,progress:'),
+        "shop_product": _zod_keys(s, "economy.schemas.product", r'\$\.object\(\{active:\$\.boolean\(\),price:\$\.array\('),
+    }
+    mt = re.search(r'type:\$\.enum\(\[((?:"[a-z]+",?)+)\]\),key:', s)
+    out["mission_types"] = re.findall(r'"([a-z]+)"', mt.group(1)) if mt else fail("economy.mission_types", "not found")
+    return out
+
+
 def extract_i18n(s):
     m = re.search(r"=`\n(menu\.btn\.[\w.]+ [^\n]*\n)", s)
     if not m:
@@ -1933,6 +2024,7 @@ def extract(build, live):
         "packets": new["packets"],
         "gateway": gateway,
         "items": new["items"],
+        "economy": extract_economy(s),
         "config": {"constants": constants, "player_cap": player_cap, "timing": timing,
                    "serverConfig": tables["serverConfig"], "classConfig": tables["classConfig"],
                    "weaponConfig": tables["weaponConfig"], "serverPresets": tables["serverPresets"]},

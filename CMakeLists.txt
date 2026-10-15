@@ -676,7 +676,8 @@ else ()
     # v10_gameplay_test: the v10.0.2-only gameplay (Boulder, Compressor, Stalker rework, ranked rules)
     # flavor_gameplay_test: the product-flavor gameplay (Krunker Strike plays FRVR's tables; base unchanged)
     # strike_rules_test: Krunker Strike's rules (strike_rules.h) against tools/strike/strike_data.json
-    foreach (wpb_test weapons_v7_test combat_test charge_grapple_test piss_test nettspend_test ruleset_test hitboxes_test v10_gameplay_test flavor_gameplay_test strike_rules_test)
+    # strike_economy_test: Krunker Strike's economy (strike_economy.h): catalogue, wheel odds, XP curve
+    foreach (wpb_test weapons_v7_test combat_test charge_grapple_test piss_test nettspend_test ruleset_test hitboxes_test v10_gameplay_test flavor_gameplay_test strike_rules_test strike_economy_test)
         add_executable(${wpb_test} ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/${wpb_test}.c)
         target_link_libraries(${wpb_test} PRIVATE m)
         if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
@@ -910,6 +911,8 @@ else ()
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(map_catalog_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
+
+    add_test(NAME strike_economy_test COMMAND strike_economy_test)
 
     # strike_maps_test: the Krunker Strike map pool (strike_maps.h): FRVR's seven map files load,
     # validate and play, and the catalogue swaps them in only under FLAVOR_STRIKE
