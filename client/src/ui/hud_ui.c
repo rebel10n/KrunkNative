@@ -20,7 +20,8 @@
 //   f1985 (leaderType 1): #centerLeaderDisplay table while the scoreboard key is held
 //   game-overlay default crosshair (type 1): four 4x21 bars on a square of
 //     max(58, spread * 1.1 * uiHeight / 693), opacity = 1 - aimVal, hidden while reloading
-//   game-overlay showHit(): four 7x25 bars at 45deg, spacing 37 (+0.14/ms), fading 0.0062/ms
+//   game-overlay showHit(): four 7x25 bars at 45deg, spacing 37 (+0.14/ms), fading 0.0062/ms,
+//     advanced before each draw (the first frame shows one frame of it)
 // Krunker draws the last two on its <canvas id="game-overlay">; the page builds them from
 // divs inside #inGameUI (ui/css/hud.css) so they scale with #uiBase like the canvas.
 //
@@ -110,6 +111,7 @@ void hud_ui_hit(Client*, int kill);
 #define HIT_SPACING 37.0
 #define HIT_INC 0.14               // spacing px per ms
 #define HIT_FADE 0.0062            // opacity per ms
+#define HIT_DELTA_MAX_MS 33.0      // config.dltMx: the overlay's delta clamp
 #define HIT_KILL_MLT 1.2
 #define HIT_COLOR "#ffffff"
 #define HIT_KILL_COLOR "#ff0000"
@@ -195,6 +197,7 @@ typedef struct {
     HtmlElem hitmarker;      // #knHitmarker (0 until created)
     int hit_active;
     double hit_start_ms;
+    double hit_frame_ms, hit_frame_dt; // clock of the last hud_hit_step and the frame interval before it
     double hit_opacity, hit_spacing, hit_inc, hit_fade; // hitSet values captured by hud_ui_hit
     FeedRow feed[FEED_MAX];
     int feed_count;
@@ -239,7 +242,7 @@ typedef struct {
 
 static unsigned g_combat_hash; // hud_combat_step: FNV-1a of the last written perks / streaks state, 0 = rewrite
 
-static HudUi g_hud_ui = {.visible = -1, .in_game = -1, .cross_shown = -1, .ping = INT_MIN, .chat_shown = -1, .board_shown = -1, .old_board = -1, .feed_last_ms = -1.0, .dmg_last_ms = -1.0, .nums_last_ms = -1.0, .speed_shown = -1, .show_ui = -1,
+static HudUi g_hud_ui = {.visible = -1, .in_game = -1, .cross_shown = -1, .ping = INT_MIN, .chat_shown = -1, .board_shown = -1, .old_board = -1, .feed_last_ms = -1.0, .hit_frame_ms = -1.0, .dmg_last_ms = -1.0, .nums_last_ms = -1.0, .speed_shown = -1, .show_ui = -1,
                          .vic = {0.0, 0.05, 2.5, 0.005, 0.01}, .tick_last_ms = -1.0};
 
 // Scenario values (client_bin --render-scenario, ui_scenario.c) that replace what the
@@ -1495,9 +1498,22 @@ static void hud_hide_crosshair(void) {
     g_hud_ui.cross_shown = 0;
 }
 
+// The HUD clock in ms: the scenario clock (hud_ui_set_clock), else GLFW's.
+static double hud_hit_now_ms(const Client *client) {
+    return (g_hud_clock_s >= 0.0 ? g_hud_clock_s : client && client->window ? glfwGetTime() : 0.0) * 1000.0;
+}
+
 static void hud_hide_hit(void) {
     if (g_hud_ui.hitmarker) html_dom_set_display(g_hud_ui.hitmarker, "none");
     g_hud_ui.hit_active = 0;
+}
+
+// The overlay's frame clock (client_hud_html_tick, every frame): the last frame interval.
+static void hud_hit_frame(const double now_ms) {
+    HudUi *ui = &g_hud_ui;
+    if (now_ms <= ui->hit_frame_ms) return;
+    ui->hit_frame_dt = ui->hit_frame_ms >= 0.0 ? now_ms - ui->hit_frame_ms : 0.0;
+    ui->hit_frame_ms = now_ms;
 }
 
 // game-overlay showHit() per frame: spacing grows hitSet.inc per ms while the opacity
@@ -1552,8 +1568,13 @@ void hud_ui_hit(Client *client, const int kill) {
     html_dom_set_style(hm, "opacity", text);
     html_dom_set_display(hm, "block");
 
+    // v10's overlay advances the marker before drawing it (spacing += inc * delta, opacity -=
+    // fadeOut * delta, v10.js:160624, delta = the loop's clamped frame time, dltMx 33 ms), so the
+    // first frame that shows a hit already has one frame of fade and spread: start one frame back.
+    const double now_ms = hud_hit_now_ms(client);
     ui->hit_active = 1;
-    ui->hit_start_ms = (g_hud_clock_s >= 0.0 ? g_hud_clock_s : client && client->window ? glfwGetTime() : 0.0) * 1000.0;
+    ui->hit_start_ms = now_ms - fmin(ui->hit_frame_dt, HIT_DELTA_MAX_MS);
+    hud_hit_step(now_ms);
 }
 
 /* ------------------------------------------------------------ damage direction (aV.hits) */
@@ -3469,7 +3490,7 @@ void hud_ui_hit_elapsed(Client *client, const int kill, const double elapsed_ms)
     hud_ui_hit(client, kill);
     if (!g_hud_ui.hit_active) return;
     g_hud_ui.hit_start_ms -= elapsed_ms;
-    hud_hit_step(g_hud_ui.hit_start_ms + elapsed_ms);
+    hud_hit_step(hud_hit_now_ms(client));
 }
 
 /* ------------------------------------------------------------ visibility */
@@ -3970,6 +3991,7 @@ void client_hud_html_tick(Client *client, const float now_f) {
     HtmlHudState *hud = &client->hud_html;
     const double now = g_hud_clock_s >= 0.0 ? g_hud_clock_s : now_f;
     hud_fixed_clock_advance(now);
+    hud_hit_frame(now * 1000.0);
     const int ready = html_ui_is_ready();
     int fps_changed = 0;
     const int fps_before = hud->fps;

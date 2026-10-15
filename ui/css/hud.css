@@ -155,3 +155,13 @@ html.kn-hud-visible #aimRecticle {
 .knCrossArm-b { top: calc(var(--kn-cross-size) / 2 - 22px); }
 .knCrossArm-l { left: calc(var(--kn-cross-size) / -2 - 1px); }
 .knCrossArm-r { left: calc(var(--kn-cross-size) / 2 - 22px); }
+
+/* The timer icon (main.css #timerIcon.topLeftOld: 45px, image-rendering pixelated /
+ * crisp-edges) is img/timer.png (32x32) drawn at 45 x the #uiBase scale, i.e. scaled DOWN
+ * on screen (26 device px at 720p). v10's Chromium filters that downscale: the reference
+ * (doc/ref/krunker-v10/ingame/*.png) has partially covered edge pixels, not nearest-
+ * neighbour ones, which read as the icon sitting ~1 px further left. Smooth sampling here
+ * matches it (ingame-* `timer` region 3.74% -> 2.88%). */
+#timerIcon.topLeftOld {
+  image-rendering: auto;
+}
