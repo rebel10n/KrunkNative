@@ -3,7 +3,8 @@
 //     -> NET_PACKET_OBJECT_STATE: the mirrored object state, meshRef.visible, updateShadowMap
 //   "chp" checkpointSet -> NET_PACKET_CHECKPOINT: the "Checkpoint!" popup (hud_popups.c)
 //   "s" playPlayerSound -> NET_PACKET_SOUND: Game.playerSound -> SOUND.play3D
-//   "scr" jumpScare(0) -> NET_PACKET_JUMP_SCARE: #jumpSIMG "/scares/jumpS_2.png" for 3 s + jumpS_1
+//   "scr" jumpScare(0) -> NET_PACKET_JUMP_SCARE: #jumpSIMG "/scares/jumpS_2.png" for 3 s + jumpS_1;
+//     jumpScare(1): #jumpSVID plays /scares/1.mp4, #jumpSVIDHolder shown for 4 s
 //   "am" [text, null] -> NET_PACKET_POPUP: a medal popup without score
 //   reconcilePlayer of a doRecon changePosition -> NET_PACKET_POSITION
 // WP-C v7 packets (shared.h NET_PACKET_BLOCK_TRIGGERS):
@@ -32,6 +33,9 @@
 #define JUMP_SCARE_TIME 3.0                   // setTimeout(hide, 3000)
 
 static double g_scare_until;
+#define JUMP_SCARE_VIDEO "scares/1.mp4"         // jumpScares[1].vid (natively its .knv sidecar, engine/video.h)
+#define JUMP_SCARE_VIDEO_TIME 4.0               // setTimeout(hide #jumpSVIDHolder, 4000)
+static double g_scare_video_until;
 
 #define CLIENT_PLAYER_SOUND_MAX 32
 static struct {
@@ -116,12 +120,27 @@ static void play_sound(Client *client, const NetSoundPacket *packet) {
 }
 
 static void jump_scare(const NetJumpScarePacket *packet) {
-    if (packet->index != 0) return; // jumpScares[1] is the jumpS_1.mp4 video: no video playback natively
+    if (packet->index != 0 && packet->index != 1) return; // jumpScares[0] the image, [1] the video
     // v10.0.2 window.jumpScare: only with Settings > Game > Customization "Enable Jump Scare" (jumpScare,
     // default on), and at most one every 10 s
     static double last = -1.0e9;
     if (ui_setting_is_false("jumpScare") || glfwGetTime() - last < 10.0) return;
     last = glfwGetTime();
+    if (packet->index == 1) {
+        // jumpSVID.src = "/scares/1.mp4"; jumpSVID.play(); #jumpSVIDHolder shown for 4 s. play() is the
+        // autoplay attribute here: the src change runs the load algorithm, which then plays (natively
+        // silent: the engine decodes no audio)
+        const HtmlElem video = html_dom_by_id("jumpSVID"), holder = html_dom_by_id("jumpSVIDHolder");
+        char url[512];
+        html_dom_asset_url(JUMP_SCARE_VIDEO, url, sizeof(url));
+        if (video) {
+            html_dom_set_attr(video, "autoplay", "");
+            html_dom_set_attr(video, "src", url);
+        }
+        if (holder) html_dom_set_display(holder, "block");
+        g_scare_video_until = glfwGetTime() + JUMP_SCARE_VIDEO_TIME;
+        return;
+    }
     const HtmlElem image = html_dom_by_id("jumpSIMG");
     if (image) {
         html_dom_set_attr(image, "src", JUMP_SCARE_IMAGE);
@@ -320,6 +339,11 @@ int client_triggers_handle_event(Client *client, const int type, const void *pay
 
 void client_triggers_tick(Client *client) {
     (void) client;
+    if (g_scare_video_until && glfwGetTime() >= g_scare_video_until) {
+        g_scare_video_until = 0.0;
+        const HtmlElem holder = html_dom_by_id("jumpSVIDHolder");
+        if (holder) html_dom_set_display(holder, "none");
+    }
     if (!g_scare_until || glfwGetTime() < g_scare_until) return;
     g_scare_until = 0.0;
     const HtmlElem image = html_dom_by_id("jumpSIMG");

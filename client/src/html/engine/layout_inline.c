@@ -221,6 +221,8 @@ typedef struct Lines {
     float last_baseline, first_baseline;
     float pending_open_w;         /* start edges waiting for content         */
     int ellipsis;
+    int clamp;                    /* -webkit-line-clamp: lines kept (0: none) */
+    int more_after;               /* end_line from break_line: content follows */
     Box *abs_after[16];           /* block-level abs boxes after line content: */
     int abs_after_n;              /* static position at the next line's top  */
 } Lines;
@@ -458,7 +460,10 @@ static void end_line(Lines *L, int forced)
 
     /* --- ellipsis --- */
     int ell_item = -1; float ell_w = 0; Glyph ell_glyphs[3]; int ell_count = 0; memset(ell_glyphs, 0, sizeof(ell_glyphs));
-    if (L->ellipsis && content_end > avail_w(L) + 0.01f) {
+    /* -webkit-line-clamp: the last kept line ends in an ellipsis when content follows it (Blink
+     * puts it after the line's content, truncating the text so both fit the line) */
+    const int clamp_ell = L->clamp > 0 && L->more_after && (int)L->lines.len == L->clamp - 1;
+    if ((L->ellipsis && content_end > avail_w(L) + 0.01f) || clamp_ell) {
         float limit = avail_w(L);
         for (int i = (int)L->items.len - 1; i >= 0; i--) {
             LItem *it = &L->items.data[i];
@@ -623,7 +628,9 @@ static void end_line(Lines *L, int forced)
 
 static void break_line(Lines *L)
 {
+    L->more_after = 1;
     end_line(L, 0);
+    L->more_after = 0;
     begin_line(L);
 }
 
@@ -976,6 +983,14 @@ static void repoint_runs(Box *b)
             if (b->lines[i].items[j].kind == ITEM_TEXT) b->lines[i].items[j].box->frag_count = 0;
 }
 
+/* -webkit-line-clamp of the element whose lines these are (through anonymous wrappers). */
+static int line_clamp_of(const Box *b)
+{
+    const Box *o = b;
+    while (o && (o->flags & BOXF_ANONYMOUS) && o->parent) o = o->parent;
+    return o && layout_style_line_clamps(o->style) ? o->style->line_clamp : 0;
+}
+
 /* Blink ShouldTruncateOverflowingText: the block container that owns the
  * line boxes truncates when it (or, for an anonymous block wrapper, the
  * element it wraps content of) clips overflow and has text-overflow:
@@ -1002,6 +1017,7 @@ void layout_inline_contents(LayoutTree *t, Box *b, const LayoutInput *in, float 
     L.rtl = (b->flags & BOXF_RTL) != 0;
     L.text_align = b->style->text_align;
     L.ellipsis = should_truncate(b);
+    L.clamp = line_clamp_of(b);
     L.first_baseline = -1; L.last_baseline = -1;
     state_metrics(b, &L.strut_A, &L.strut_D, &L.strut_lt, &L.strut_lb);
     free_text_runs_rec(b);
@@ -1021,6 +1037,13 @@ void layout_inline_contents(LayoutTree *t, Box *b, const LayoutInput *in, float 
     b->first_baseline = L.first_baseline;
     b->baseline_offset = L.last_baseline;
     float h = L.y;
+    if (L.clamp > 0 && (int)L.lines.len > L.clamp) {
+        /* the box ends after the clamp's last line; later lines overflow it (clipped by the
+         * overflow: hidden the legacy idiom pairs it with) */
+        const LineBox *last = &L.lines.data[L.clamp - 1];
+        h = last->y + last->h - L.content_y;
+        b->baseline_offset = last->baseline;
+    }
     if (L.own_bfc) {
         float fb = floats_bottom(L.floats);
         if (fb > -LAYOUT_INF / 2 && fb - L.content_y > h) h = fb - L.content_y;

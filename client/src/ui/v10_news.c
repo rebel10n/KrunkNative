@@ -7,8 +7,8 @@
 //     News tab feed) as v10 .news-item cards above the notes, when there are any.
 //   - openGuide(section): v10's tutorialPopup (_66971, svelte-los391) with its twelve sections,
 //     the img/guide/* images (tools/ui-import/live_assets_v10.lock) and the Basics video
-//     (videos/tutorial/basics.mp4; the native engine has no video decoder, so natively its first
-//     frame, ui/img/guide/kn_basics_poster.jpg, stands in for it).
+//     (videos/tutorial/basics.mp4; natively the engine plays its .knv frame sidecar, engine/video.h,
+//     with its first frame, ui/img/guide/kn_basics_poster.jpg, as the poster while that is missing).
 //   - openCommunityMenu(): v10's communityPopup (_66842, svelte-1ley7u4): polls and events from
 //     the brain's GET /creators/events (services/brain/community.c), the socials footer.
 // The v10 menu's Svelte items (#menuBtnGuide, #updateAd, #menuBtnSideCommunity) get their v10
@@ -544,18 +544,19 @@ static int guide_unlocked(const int i) {
 }
 
 static void guide_video(StrBuf *out) {
-#ifdef __EMSCRIPTEN__
     char url[512];
     html_dom_asset_url("videos/tutorial/basics.mp4", url, sizeof(url));
     sb_append(out, "<video style=\"width: 700px;\" preload=\"auto\" src=\"");
     sb_append_esc(out, url);
-    sb_append(out, "\" autoplay=\"\" loop=\"\" playsinline=\"\"></video>");
-#else
-    // no video decoder in the native engine: the video's first frame (KN deviation)
-    sb_append(out, "<img style=\"width: 700px;\" src=\"");
+    sb_append(out, "\" autoplay=\"\" loop=\"\" playsinline=\"\"");
+#ifndef __EMSCRIPTEN__
+    // the native engine plays the video's .knv frame sidecar (engine/video.h); its first frame
+    // stands in while the sidecar is missing (KN addition: v10 has no poster)
+    sb_append(out, " poster=\"");
     sb_img(out, "img/guide/kn_basics_poster.jpg");
-    sb_append(out, "\" alt=\"\">");
+    sb_append(out, "\"");
 #endif
+    sb_append(out, "></video>");
 }
 
 static char *guide_markup(void) {

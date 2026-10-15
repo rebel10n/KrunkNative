@@ -234,6 +234,21 @@ static int input_type_is_hidden(lxb_dom_node_t *node)
 
 static int replaced_intrinsics_unzoomed(LayoutTree *t, Box *b);
 
+const char *layout_media_src(const Box *b, size_t *len)
+{
+    size_t n = 0;
+    if (len) *len = 0;
+    if (!b || !b->node || b->pseudo) return NULL;
+    const char *src = elem_attr(b->node, "src", &n);
+    if (src && n) { if (len) *len = n; return src; }
+    for (lxb_dom_node_t *c = b->node->first_child; c; c = c->next) {
+        if (c->type != LXB_DOM_NODE_TYPE_ELEMENT || c->local_name != LXB_TAG_SOURCE) continue;
+        src = elem_attr(c, "src", &n);
+        if (src && n) { if (len) *len = n; return src; }
+    }
+    return NULL;
+}
+
 /* Natural sizes, width/height attributes and the UA control sizes are CSS px:
  * they scale with the effective zoom like every computed length.  The
  * widget_size callback already returns zoomed sizes (font-based or scaled). */
@@ -285,7 +300,33 @@ static int replaced_intrinsics_unzoomed(LayoutTree *t, Box *b)
         b->intrinsic_w = b->attr_w >= 0 ? b->attr_w : ctx->ua_canvas_w;
         b->intrinsic_h = b->attr_h >= 0 ? b->attr_h : ctx->ua_canvas_h;
         b->attr_w = b->attr_h = -1.0f;   /* canvas attributes are the bitmap size, not presentational hints */
-    } else if (tag == LXB_TAG_VIDEO || tag == LXB_TAG_IFRAME) {
+    } else if (tag == LXB_TAG_VIDEO) {
+        /* 300 x 150 until the source's size is known (video.h); the poster (painted while
+         * there is no frame: b->src) sizes it meanwhile, like Chrome */
+        size_t len = 0, plen = 0;
+        float w = 0, h = 0;
+        const char *poster = elem_attr(b->node, "poster", &plen);
+        if (poster && plen) {
+            char *s = malloc(plen + 1);
+            if (s) { memcpy(s, poster, plen); s[plen] = 0; }
+            b->src = s;
+        }
+        b->intrinsic_w = ctx->ua_canvas_w;
+        b->intrinsic_h = ctx->ua_canvas_h;
+        const char *vsrc = layout_media_src(b, &len);
+        char url[512];
+        if (vsrc && len && len < sizeof(url) && ctx->video_size) {
+            memcpy(url, vsrc, len);
+            url[len] = 0;
+            if (ctx->video_size(ctx->user, url, ctx->base_url, &w, &h) && w > 0 && h > 0) {
+                b->intrinsic_w = w; b->intrinsic_h = h;
+                w = -1.0f;
+            }
+        }
+        if (w >= 0 && b->src && ctx->image_size && ctx->image_size(ctx->user, b->src, ctx->base_url, &w, &h) && w > 0 && h > 0) {
+            b->intrinsic_w = w; b->intrinsic_h = h;
+        }
+    } else if (tag == LXB_TAG_IFRAME) {
         b->intrinsic_w = ctx->ua_canvas_w;
         b->intrinsic_h = ctx->ua_canvas_h;
     } else if (tag == LXB_TAG_INPUT) {
@@ -397,6 +438,15 @@ static int blockify(int d)
     }
 }
 
+/* display: -webkit-box / -webkit-inline-box with -webkit-box-orient: vertical and a
+ * -webkit-line-clamp: Blink lays it out as a block container whose Nth line ends the box
+ * (layout_inline.c clamps), not as the flexbox the legacy box otherwise emulates. */
+int layout_style_line_clamps(const CssComputed *s)
+{
+    return s->display_legacy_box && s->box_orient == CSS_BOX_ORIENT_VERTICAL && s->line_clamp > 0
+        && (s->display == CSS_DISPLAY_FLEX || s->display == CSS_DISPLAY_INLINE_FLEX);
+}
+
 static uint8_t type_for_display(int d, int tag)
 {
     uint8_t rt = replaced_type_for_tag(tag);
@@ -460,7 +510,7 @@ static void set_flags_from_style(LayoutTree *t, Box *b, int parent_is_flex_or_gr
         /* BFC roots: floats, abs, inline-blocks, overflow != visible, flex/grid items, table cells, flex/grid containers */
         if (oof || floated || (b->flags & BOXF_ATOMIC) || (b->flags & BOXF_SCROLL_CONTAINER)
             || parent_is_flex_or_grid || b->type == BOX_TABLE_CELL || b->type == BOX_FLEX || b->type == BOX_GRID
-            || b->type == BOX_TABLE || !b->parent)
+            || b->type == BOX_TABLE || !b->parent || layout_style_line_clamps(s))
             b->flags |= BOXF_BFC_ROOT;
     }
     set_dynamic_flags(t, b, parent_is_flex_or_grid);
@@ -580,7 +630,9 @@ static Box *build_element(LayoutTree *t, Box *parent, lxb_dom_node_t *node, cons
         if (bed && !bed->box) bed->box = br;
         return br;
     }
-    Box *b = layout_new_box(t, type_for_display(d, replaced ? tag : 0), node, style);
+    uint8_t type = type_for_display(d, replaced ? tag : 0);
+    if (type == BOX_FLEX && layout_style_line_clamps(style)) type = BOX_BLOCK;
+    Box *b = layout_new_box(t, type, node, style);
     b->pseudo = (uint8_t)pseudo;
     if (pseudo == 1) b->flags |= BOXF_PSEUDO_BEFORE;
     if (pseudo == 2) b->flags |= BOXF_PSEUDO_AFTER;
@@ -1338,6 +1390,7 @@ static float used_border(const CssComputed *s, int i)
 static int structural_changed(const CssComputed *a, const CssComputed *b)
 {
     return a->display != b->display || a->position != b->position || a->float_ != b->float_
+        || layout_style_line_clamps(a) != layout_style_line_clamps(b)
         || a->overflow_x != b->overflow_x || a->overflow_y != b->overflow_y
         || (a->clip_path.kind != CSS_CLIP_PATH_NONE) != (b->clip_path.kind != CSS_CLIP_PATH_NONE)
         || a->content.kind != b->content.kind || a->content.str != b->content.str || a->content.base != b->content.base;
@@ -1361,7 +1414,8 @@ static int layout_changed(const CssComputed *a, const CssComputed *b)
     if (!len_eq(&a->width, &b->width) || !len_eq(&a->height, &b->height) || !len_eq(&a->min_width, &b->min_width)
         || !len_eq(&a->min_height, &b->min_height) || !len_eq(&a->max_width, &b->max_width) || !len_eq(&a->max_height, &b->max_height)) return 1;
     if (a->text_overflow != b->text_overflow || a->vertical_align != b->vertical_align || !len_eq(&a->vertical_align_length, &b->vertical_align_length)) return 1;
-    if (a->flex_direction != b->flex_direction || a->flex_wrap != b->flex_wrap || a->justify_content != b->justify_content || a->align_content != b->align_content
+    if (a->flex_direction != b->flex_direction || a->box_orient != b->box_orient || a->display_legacy_box != b->display_legacy_box
+        || a->aspect_ratio != b->aspect_ratio || a->aspect_ratio_auto != b->aspect_ratio_auto || a->line_clamp != b->line_clamp || a->flex_wrap != b->flex_wrap || a->justify_content != b->justify_content || a->align_content != b->align_content
         || a->align_items != b->align_items || a->flex_grow != b->flex_grow || a->flex_shrink != b->flex_shrink
         || !len_eq(&a->flex_basis, &b->flex_basis)) return 1;
     if (a->grid_column_count != b->grid_column_count || !len_eq(&a->row_gap, &b->row_gap) || !len_eq(&a->column_gap, &b->column_gap)) return 1;

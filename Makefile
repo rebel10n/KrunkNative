@@ -359,6 +359,10 @@ assets-check-live: ## List both locks' files missing from (exit 1) or differing 
 	$(PYTHON) -I tools/ui-import/fetch_live_assets.py check --assets assets --ui ui
 	$(PYTHON) -I tools/ui-import/fetch_live_assets.py check --lock tools/ui-import/live_assets_v10.lock --assets assets --ui ui
 
+.PHONY: video-frames
+video-frames: ## The native HTML engine's <video> frame sidecars (<file>.knv next to the v10 page's videos in assets/; ffmpeg; ARGS=--check)
+	$(PYTHON) -I tools/ui-import/video_frames.py --assets assets $(ARGS)
+
 .PHONY: branding branding-check
 branding: ## Fetch krunker.io's app icons (tools/branding/branding.lock, sha256-pinned; KN_FETCH_PROXY=) and write the PWA / window / Windows / Android / iOS icons
 	$(PYTHON) -I tools/branding/fetch_branding.py install

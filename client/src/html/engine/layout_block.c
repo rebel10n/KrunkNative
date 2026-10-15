@@ -378,6 +378,45 @@ void layout_update_transform(Box *b)
 }
 
 /* ------------------------------------------------------------------------- */
+/* aspect-ratio (CSS Sizing 4)                                                */
+/* ------------------------------------------------------------------------- */
+
+float layout_pref_ratio(const Box *b)
+{
+    return box_is_replaced(b) ? 0.0f : b->style->aspect_ratio;
+}
+
+/* Border-box height of a non-replaced box of border-box width `bw` through its
+ * preferred aspect ratio (which applies to the box-sizing box). */
+float layout_ratio_height(const Box *b, float bw)
+{
+    const float r = layout_pref_ratio(b);
+    if (!(r > 0.0f)) return -1.0f;
+    if (b->style->box_sizing == CSS_BOX_SIZING_BORDER_BOX) return kn_maxf(bw / r, box_border_padding_h(b));
+    return kn_maxf(0.0f, bw - box_border_padding_w(b)) / r + box_border_padding_h(b);
+}
+
+/* Border-box width from a border-box height through the preferred ratio. */
+float layout_ratio_width(const Box *b, float bh)
+{
+    const float r = layout_pref_ratio(b);
+    if (!(r > 0.0f)) return -1.0f;
+    if (b->style->box_sizing == CSS_BOX_SIZING_BORDER_BOX) return kn_maxf(bh * r, box_border_padding_w(b));
+    return kn_maxf(0.0f, bh - box_border_padding_h(b)) * r + box_border_padding_w(b);
+}
+
+/* The border-box height a ratio box takes its width from: its definite
+ * `height` (cb_h: % base, < 0 indefinite); < 0 when height is auto. */
+static float ratio_source_height(const Box *b, float cb_h)
+{
+    const CssComputed *s = b->style;
+    if (s->height.kind != CSS_LEN_VALUE || (s->height.pct != 0.0f && cb_h < 0)) return -1.0f;
+    float bh = layout_box_sizing_h(b, kn_maxf(0.0f, layout_resolve_len(&s->height, cb_h, 0)));
+    layout_apply_min_max_h(b, cb_h, &bh);
+    return bh;
+}
+
+/* ------------------------------------------------------------------------- */
 /* intrinsic widths                                                           */
 /* ------------------------------------------------------------------------- */
 
@@ -401,6 +440,9 @@ float layout_intrinsic_width(LayoutTree *t, Box *b, int max_content)
         minw = maxw = w;
     } else if (s->width.kind == CSS_LEN_VALUE && s->width.pct == 0.0f) {
         minw = maxw = layout_box_sizing_w(b, s->width.px);
+    } else if (layout_pref_ratio(b) > 0.0f && s->width.kind == CSS_LEN_AUTO && ratio_source_height(b, -1.0f) >= 0.0f) {
+        /* aspect-ratio: the width transferred from a definite height */
+        minw = maxw = layout_ratio_width(b, ratio_source_height(b, -1.0f));
     } else {
         float cmin = 0, cmax = 0;
         switch (b->type) {
@@ -482,7 +524,12 @@ static void replaced_size(LayoutTree *t, Box *b, float cb_w, float cb_h, float *
     }
     /* form controls have no intrinsic aspect ratio (Chrome): auto height stays the intrinsic height */
     float ratio = (iw > 0 && ih > 0 && b->type != BOX_INPUT && b->type != BOX_SELECT) ? ih / iw : 0;
-    if (w_auto && h_auto) { w = iw; h = ih; }
+    /* aspect-ratio: <ratio> replaces the natural ratio; `auto && <ratio>` only stands in for a
+     * missing one (CSS Sizing 4; applied to the content box, the canvas/img/video case) */
+    const int css_ratio = s->aspect_ratio > 0.0f && !(s->aspect_ratio_auto && ratio > 0);
+    if (css_ratio) ratio = 1.0f / s->aspect_ratio;
+    if (w_auto && h_auto && css_ratio) { w = iw > 0 ? iw : 300.0f; h = w * ratio; }
+    else if (w_auto && h_auto) { w = iw; h = ih; }
     else if (w_auto) {
         /* width from height via ratio; border-box height given */
         float ch = s->box_sizing == CSS_BOX_SIZING_BORDER_BOX ? kn_maxf(0, h - box_border_padding_h(b)) : h;
@@ -526,6 +573,11 @@ static void compute_width(LayoutTree *t, Box *b, const LayoutInput *in)
     if (box_is_replaced(b)) {
         float h;
         replaced_size(t, b, cb_w, in->cb_h, &bw, &h);
+    } else if (s->width.kind == CSS_LEN_AUTO && layout_pref_ratio(b) > 0.0f && ratio_source_height(b, in->cb_h) >= 0.0f) {
+        /* aspect-ratio: an auto width transferred from the definite height (also in block flow,
+         * like Chrome: the box does not stretch) */
+        bw = layout_ratio_width(b, ratio_source_height(b, in->cb_h));
+        layout_apply_min_max_w(b, cb_w, &bw);
     } else if (s->width.kind == CSS_LEN_VALUE) {
         bw = layout_box_sizing_w(b, kn_maxf(0.0f, layout_resolve_len(&s->width, cb_w, 0)));
         layout_apply_min_max_w(b, cb_w, &bw);
@@ -657,6 +709,14 @@ void layout_box(LayoutTree *t, Box *b, const LayoutInput *in_, LayoutOutput *out
     else if (s->height.kind == CSS_LEN_VALUE && !(s->height.pct != 0 && in.cb_h < 0))
         tentative_h = layout_box_sizing_h(b, kn_maxf(0.0f, layout_resolve_len(&s->height, in.cb_h, 0)));
     if (tentative_h >= 0) layout_apply_min_max_h(b, in.cb_h, &tentative_h);
+    /* aspect-ratio: an auto height transferred from the width; definite for percentage children */
+    int ratio_h = 0;
+    if (tentative_h < 0 && layout_pref_ratio(b) > 0.0f) {
+        tentative_h = layout_ratio_height(b, b->w);
+        layout_apply_min_max_h(b, in.cb_h, &tentative_h);
+        h_definite = 1;
+        ratio_h = 1;
+    }
 
     for (int pass = 0; pass < 3; pass++) {
         float content_h = 0;
@@ -678,6 +738,8 @@ void layout_box(LayoutTree *t, Box *b, const LayoutInput *in_, LayoutOutput *out
         /* height */
         float bh;
         if (in.override_h >= 0) bh = in.override_h;
+        else if (ratio_h && s->min_height.kind == CSS_LEN_AUTO && !(b->flags & BOXF_SCROLL_CONTAINER))
+            bh = kn_maxf(tentative_h, content_h + layout_vertical_extras(b));  /* min-height: auto = content */
         else if (tentative_h >= 0) bh = tentative_h;
         else if (box_is_replaced(b)) bh = content_h + box_border_padding_h(b);
         else bh = content_h + layout_vertical_extras(b);

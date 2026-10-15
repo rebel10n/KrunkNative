@@ -62,6 +62,9 @@ typedef struct LayoutCtx {
     /* Intrinsic size of an <img>; return 0 when missing/undecodable.  The engine
      * binds image_get(); tests may stub it (image_get needs a GL context). */
     int (*image_size)(void *user, const char *url, const char *base, float *w, float *h);
+    /* Natural size of a <video> source (video.c: the .knv sidecar's header); 0 while
+     * unknown (the box keeps 300 x 150 or its poster's size).  NULL: never known. */
+    int (*video_size)(void *user, const char *url, const char *base, float *w, float *h);
     /* Width of the custom scrollbar for a scroll container (the
      * ::-webkit-scrollbar width).  NULL: scrollbar_default_w. */
     float (*scrollbar_width)(void *user, lxb_dom_node_t *node, float default_w);
@@ -402,6 +405,10 @@ static inline float box_client_h(const Box *b) { return box_padding_h(b) - b->sc
 
 /* Debug: dump the tree (box type, node name/id, rect) to a string builder. */
 void layout_dump(const Box *root, KnStrBuf *out);
+
+/* A <video>'s media URL as written: its `src` attribute, else the first <source src>
+ * child's; NULL when it has none.  *len receives the length (not NUL-terminated). */
+const char *layout_media_src(const Box *b, size_t *len);
 
 #ifdef __cplusplus
 }

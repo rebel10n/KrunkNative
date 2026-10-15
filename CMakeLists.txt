@@ -1164,6 +1164,16 @@ else ()
                     ${KN_ENGINE_DIR}/gl_backend.c client/src/shader.c shared/src/utils.c
             DEFINES KN_REPO_ROOT="${CMAKE_SOURCE_DIR}" KN_WIDGETS_GL KN_EVENTS_STANDALONE
             LIBS lexbor freetype ARGS ${CMAKE_SOURCE_DIR})
+        # @media (test_css_media.c: the evaluator, the cascade across viewport changes, v10's svelte.css at 1280 / 1000 px)
+        krunknative_html_engine_test(html_css_media_test
+            SOURCES ${KN_ENGINE_DIR}/tests/test_css_media.c ${KN_ENGINE_DIR}/dom.c ${KN_ENGINE_DIR}/css_sheet.c
+                    ${KN_ENGINE_DIR}/css_cascade.c ${KN_ENGINE_DIR}/css_values.c ${KN_ENGINE_DIR}/util.c
+            LIBS lexbor ARGS ${CMAKE_SOURCE_DIR})
+        # <video> sidecars (test_video.c: the .knv header, frame index, real sidecars under assets/)
+        krunknative_html_engine_test(html_video_test GL
+            SOURCES ${KN_ENGINE_DIR}/tests/test_video.c ${KN_ENGINE_DIR}/video.c ${KN_ENGINE_DIR}/image.c
+                    ${KN_ENGINE_DIR}/svg.c ${KN_ENGINE_DIR}/util.c client/src/stb_image.c shared/src/utils.c
+            LIBS lexbor ARGS ${CMAKE_SOURCE_DIR})
     endif ()
 
     # ui_test: engine driver for dumps, probes, renders and benchmarks

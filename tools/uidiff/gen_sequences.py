@@ -186,7 +186,9 @@ sc("mobile-menu", [0], "applied", dict(MENU),
 sc("menu-1000", [0], "cycle", dict(MENU),
    [R("menu", [0, 0, 1000, 720], "scene", "the menu at 1000 px wide (the @media rules)", max_pct=10.0)],
    bg="#222222", size=(1000, 720),
-   pending="E3: @media (max-width) is ignored by the engine (css_sheet.c); the menu keeps its wide layout",
+   pending="E3: the v10 narrow menu (Skin Manager in the nav, no Quick Match panel, the model shown) is not a CSS @media "
+           "result: none of the page's max-width rules matches a menu element (test_css_media covers the engine's @media at 1000 px); "
+           "its cause is not found yet",
    note="The menu at 1000 px wide (the @media rules). Reference: capture-v10-seq.js menu-1000.")
 
 

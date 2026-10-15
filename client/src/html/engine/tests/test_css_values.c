@@ -872,6 +872,7 @@ static void test_text_props(void)
     CHECK(apply(&c, NULL, "direction", "rtl") && c.direction == CSS_DIRECTION_RTL);
     CHECK(apply(&c, NULL, "-webkit-user-select", "text") && c.user_select == CSS_USER_SELECT_TEXT);
     CHECK(apply(&c, NULL, "-webkit-appearance", "textfield") && c.appearance == CSS_APPEARANCE_TEXTFIELD);
+    CHECK(css_computed_initial()->appearance == CSS_APPEARANCE_NONE); /* initial: none (the UA sheet says auto for controls) */
     CHECK(!apply(&c, NULL, "-moz-appearance", "none"));
     CHECK(apply(&c, NULL, "pointer-events", "all") && c.pointer_events == CSS_POINTER_EVENTS_ALL);
     CHECK(apply(&c, NULL, "visibility", "hidden") && c.visibility == CSS_VISIBILITY_HIDDEN);

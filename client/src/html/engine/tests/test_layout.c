@@ -1651,6 +1651,129 @@ static void t_all_unset(void)
     fx_free(fx);
 }
 
+/* aspect-ratio (CSS Sizing 4), values from Chrome: the v10 uses (.eventBanner 1170 / 150 of a
+ * 1176 px card, #charPreviewSlot canvas 3 / 4 of 600 px, the market grids' aspect-ratio: 1 cells) */
+static void t_aspect_ratio(void)
+{
+    Fx *fx = fx_html(
+        "<div style='width:1176px'><div id=banner class=banner></div></div>"
+        "<div id=hfix style='height:100px;aspect-ratio:2'></div>"
+        "<div id=grid style='display:grid;grid-template-columns:repeat(auto-fill, minmax(150px, 1fr));gap:10px;width:640px'>"
+        "<div id=cell style='position:relative;aspect-ratio:1'></div><div style='aspect-ratio:1'></div></div>"
+        /* main.css #charPreviewSlot canvas, in a block (the engine's flex basis ignores a replaced
+         * item's percentage width, which Chrome resolves: a separate flex gap) */
+        "<div id=slot style='width:600px;height:500px;overflow:hidden'>"
+        "<canvas id=cv style='width:100%;height:auto;aspect-ratio:3 / 4'></canvas></div>"
+        "<div id=grow style='width:100px;aspect-ratio:4'><div style='height:50px'></div></div>"
+        "<div id=clip style='width:100px;aspect-ratio:4;overflow:hidden'><div style='height:50px'></div></div>"
+        "<div id=cbox style='width:100px;padding:10px;aspect-ratio:1'></div>"
+        "<div id=bbox style='width:100px;padding:10px;box-sizing:border-box;aspect-ratio:1'></div>"
+        "<div id=none style='width:100px;aspect-ratio:auto'></div>"
+        "<div id=pct style='width:200px;aspect-ratio:2'><div id=pctc style='height:50%'></div></div>",
+        ".banner { display: block; width: 100%; aspect-ratio: 1170 / 150; }");
+    CHECK_NEAR(rc(fx, "banner").h, 1176.0f * 150.0f / 1170.0f, 0.01, ".eventBanner height from its width");
+    CHECK_NEAR(rc(fx, "hfix").w, 200, 0.01, "auto width from a definite height (no stretch)");
+    CHECK_NEAR(rc(fx, "cell").w, 152.5, 0.01, "auto-fill grid column");
+    CHECK_NEAR(rc(fx, "cell").h, 152.5, 0.01, "aspect-ratio: 1 grid item: height = column width (no stretch)");
+    CHECK_NEAR(rc(fx, "grid").h, 152.5, 0.01, "grid row sized by the ratio items");
+    CHECK_NEAR(rc(fx, "cv").w, 600, 0.01, "canvas width: 100%");
+    CHECK_NEAR(rc(fx, "cv").h, 800, 0.01, "canvas aspect-ratio 3 / 4 replaces its natural 2:1");
+    CHECK_NEAR(rc(fx, "grow").h, 50, 0.01, "min-height: auto: content taller than the ratio grows the box");
+    CHECK_NEAR(rc(fx, "clip").h, 25, 0.01, "overflow: hidden: the ratio height holds");
+    CHECK_NEAR(rc(fx, "cbox").h, 120, 0.01, "content-box ratio: 100 content + 2*10 padding");
+    CHECK_NEAR(rc(fx, "bbox").h, 100, 0.01, "border-box ratio: the border box is square");
+    CHECK_NEAR(rc(fx, "none").h, 0, 0.01, "aspect-ratio: auto on a non-replaced box: no ratio");
+    CHECK_NEAR(rc(fx, "pctc").h, 50, 0.01, "the ratio height is definite for percentage children");
+    fx_free(fx);
+}
+
+/* v10's market card (v10_market.c: svelte-hk8nq9 .market-card-shell { width: 100%; aspect-ratio: 1 }
+ * around svelte-r5taai .market-card with inline width / height: 100%, holding a width / height: 100%
+ * <img> and a space).  The ratio height is definite, so the card's height: 100% resolves against it and
+ * the shell stays square (Chrome); a content-sized child taller than the ratio grows the shell
+ * instead (min-height: auto). */
+static void t_aspect_ratio_content(void)
+{
+    Fx *fx = fx_html(
+        "<div style='display:grid;grid-template-columns:repeat(2, 237px);gap:10px;width:484px;font-size:16px;line-height:normal'>"
+        "<div id=shell style='position:relative;width:100%;aspect-ratio:1'>"
+        "<div id=card style='position:relative;overflow:hidden;width:100%;height:100%'><img style='width:100%;height:100%' src='img/app_0.png'> </div></div>"
+        "<div id=shell2 style='position:relative;width:100%;aspect-ratio:1'>"
+        "<div id=card2 style='position:relative;overflow:hidden'><img style='width:100%;height:100%' src='img/app_0.png'> </div></div></div>",
+        "");
+    CHECK_NEAR(rc(fx, "shell").h, 237, 0.01, "market card shell: square");
+    CHECK_NEAR(rc(fx, "card").h, 237, 0.01, "height: 100% of the ratio height (definite)");
+    CHECK(rc(fx, "card2").h > 237.5f, "a content-sized child: image + the line's descent (%.2f)", rc(fx, "card2").h);
+    CHECK_NEAR(rc(fx, "shell2").h, rc(fx, "card2").h, 0.01, "min-height: auto: the ratio box grows to that content");
+    fx_free(fx);
+}
+
+/* -webkit-line-clamp with display: -webkit-box + -webkit-box-orient: vertical (v10's .eventDesc /
+ * .pollDesc): the box ends after the Nth line, which ends in an ellipsis when text follows */
+static void t_line_clamp(void)
+{
+    const char *css = ".d { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;"
+                      " width: 200px; font-size: 13px; line-height: 20px; }";
+    Fx *fx = fx_html(
+        "<div id=long class=d>Join the team for a night of custom 4v4 games on Kanji. Everyone is welcome, bring friends,"
+        " bring snacks, bring your best aim and your worst puns.</div>"
+        "<div id=short class=d>Short text.</div>"
+        "<div id=two class=d>Vote for the community map you want</div>"
+        "<div id=col style='display:-webkit-box;-webkit-box-orient:vertical;width:300px'><div id=c1 style='height:10px'></div><div id=c2 style='height:10px'></div></div>"
+        "<div id=row style='display:-webkit-box;width:300px'><div id=r1 style='width:50px;height:10px'></div><div id=r2 style='width:50px;height:10px'></div></div>",
+        css);
+    Box *lb = bx(fx, "long");
+    CHECK_NEAR(rc(fx, "long").h, 40, 0.01, "clamped to 2 lines of 20px");
+    CHECK(lb && count_lines(lb) >= 3, "the text needs more than 2 lines (%d)", lb ? count_lines(lb) : -1);
+    const TextRun *last = NULL;
+    if (lb && lb->line_count >= 2) {
+        const LineBox *ln = &lb->lines[1];
+        for (int i = 0; i < ln->item_count; i++) if (ln->items[i].run) last = ln->items[i].run;
+    }
+    CHECK(last && last->ellipsis, "the 2nd line ends in an ellipsis");
+    CHECK(last && last->x + last->width + last->ellipsis_w <= 200.01f, "text + ellipsis fit the line (%.1f)",
+          last ? last->x + last->width + last->ellipsis_w : -1.0);
+    if (lb && lb->line_count) {
+        const LineBox *ln = &lb->lines[0];
+        int e = 0;
+        for (int i = 0; i < ln->item_count; i++) if (ln->items[i].run && ln->items[i].run->ellipsis) e = 1;
+        CHECK(!e, "the 1st line has no ellipsis");
+    }
+    CHECK_NEAR(rc(fx, "short").h, 20, 0.01, "one line: not clamped");
+    const TextRun *sr = first_run(bx(fx, "short"));
+    CHECK(sr && !sr->ellipsis, "one line: no ellipsis");
+    CHECK_NEAR(rc(fx, "c2").y - rc(fx, "c1").y, 10, 0.01, "-webkit-box-orient: vertical stacks the children");
+    CHECK_NEAR(rc(fx, "r2").x - rc(fx, "r1").x, 50, 0.01, "-webkit-box (horizontal) lays them out in a row");
+    CHECK_NEAR(rc(fx, "r2").y, rc(fx, "r1").y, 0.01, "-webkit-box row: same top");
+    fx_free(fx);
+}
+
+static int video_size_stub(void *user, const char *url, const char *base, float *w, float *h)
+{
+    (void)user; (void)base;
+    if (!url || !strstr(url, "basics.mp4")) return 0;
+    *w = 1280; *h = 720;
+    return 1;
+}
+
+/* <video>: 300 x 150 without a known source, the source's natural size once known; no UA size */
+static void t_video_intrinsic(void)
+{
+    g_ctx.video_size = video_size_stub;
+    Fx *fx = fx_html("<video id=v1 style='width:700px' src='/assets/videos/tutorial/basics.mp4' autoplay loop></video>"
+                     "<video id=v2></video>"
+                     "<video id=v3><source src='/assets/videos/tutorial/basics.mp4' type='video/mp4'></video>"
+                     "<video id=v4 src='/assets/videos/missing.mp4' style='width:600px'></video>", NULL);
+    CHECK_NEAR(rc(fx, "v1").w, 700, 0.01, "video width");
+    CHECK_NEAR(rc(fx, "v1").h, 393.75, 0.01, "video height from the source's 16:9");
+    CHECK_NEAR(rc(fx, "v2").w, 300, 0.01, "no source: 300 wide");
+    CHECK_NEAR(rc(fx, "v2").h, 150, 0.01, "no source: 150 tall");
+    CHECK_NEAR(rc(fx, "v3").w, 1280, 0.01, "<source src> child: natural width");
+    CHECK_NEAR(rc(fx, "v4").h, 300, 0.01, "unknown source: the default 2:1 ratio");
+    fx_free(fx);
+    g_ctx.video_size = NULL;
+}
+
 int main(int argc, char **argv)
 {
     if (argc > 1) g_root = argv[1];
@@ -1708,6 +1831,10 @@ int main(int argc, char **argv)
     t_innerhtml_detach();
     t_intrinsic_font_restyle();
     t_flex_column_scroll_panes();
+    t_aspect_ratio();
+    t_aspect_ratio_content();
+    t_line_clamp();
+    t_video_intrinsic();
 
     css_sheet_destroy(g_ua);
     cascade_shutdown();

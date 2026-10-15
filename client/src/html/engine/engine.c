@@ -55,6 +55,7 @@
 #include "gl_backend.h"
 #include "text.h"
 #include "image.h"
+#include "video.h"
 #include "anim.h"
 #include "events.h"
 #include "widgets.h"
@@ -129,6 +130,7 @@ struct Engine {
     /* <canvas> bitmaps written by html_dom_canvas_put (premultiplied RGBA8, MAX_LEVEL 0, owned)
      * or shown with html_dom_canvas_gl (the client's render target: external, row 0 at the bottom) */
     struct EngineCanvas { HtmlElem e; unsigned tex; int w, h; int external; } *canvases;
+    VideoPlayers *videos;                    /* <video> playback (video.h), keyed by HtmlElem */
     int n_canvases, cap_canvases;
 
     /* animation side tables: base (un-animated) computed style per element
@@ -624,13 +626,74 @@ static void canvas_drop(Engine *g, const int i)
     g->canvases[i] = g->canvases[--g->n_canvases];
 }
 
+/* ------------------------------------------------------------------------- */
+/* <video> (video.h)                                                          */
+/* ------------------------------------------------------------------------- */
+
+static int lh_video_size(void *user, const char *url, const char *base, float *w, float *h)
+{
+    Engine *g = user;
+    char path[1024];
+    int nw = 0, nh = 0;
+    if (!g || !video_sidecar_path(g->ui_dir, url, base, path, sizeof(path)) || !video_probe(path, &nw, &nh)) return 0;
+    *w = (float) nw;
+    *h = (float) nh;
+    return 1;
+}
+
+/* The current frame of a <video> box: its source's sidecar played on the engine clock. */
+static int engine_video_frame(Engine *g, const Box *box, const HtmlElem e, uint32_t *tex, float *w, float *h)
+{
+    size_t len = 0;
+    const char *src = layout_media_src(box, &len);
+    char url[512], path[1024];
+    if (!g->videos || !src || !len || len >= sizeof(url)) return 0;
+    memcpy(url, src, len);
+    url[len] = 0;
+    if (!video_sidecar_path(g->ui_dir, url, g->page, path, sizeof(path))) return 0;
+    const int flags = (dom_has_attr(g->dom, e, "autoplay") ? VIDEO_AUTOPLAY : 0) | (dom_has_attr(g->dom, e, "loop") ? VIDEO_LOOP : 0);
+    unsigned t = 0;
+    int tw = 0, th = 0;
+    if (!video_players_frame(g->videos, (uintptr_t) e, path, flags, engine_now_ms() / 1000.0, &t, &tw, &th)) return 0;
+    *tex = t;
+    *w = (float) tw;
+    *h = (float) th;
+    return 1;
+}
+
+static int video_alive(void *user, uintptr_t key)
+{
+    Engine *g = user;
+    return engine_elem_box(g, (HtmlElem) key) != NULL;
+}
+
+/* Every frame: playing videos advance in place (the display list keeps the texture,
+ * sampled at every submit: no restyle, layout or paint).  One whose sidecar just
+ * arrived has a natural size and a first frame to record: relayout and repaint, as
+ * for a page image that pops in. */
+static void engine_video_tick(Engine *g)
+{
+    if (!g->videos || !video_players_count(g->videos)) return;
+    if (video_players_tick(g->videos, engine_now_ms() / 1000.0, video_alive, g, NULL) > 0) {
+        paint_invalidate_all(&g->paint);
+        g->need_layout = 1;
+        dom_mark_all_dirty(g->dom);
+        g->need_paint = 1;
+    }
+}
+
 /* The bitmap of a <canvas> box: what the page drew with html_dom_canvas_put, 0 = none
- * (an untouched canvas paints nothing, like a fresh transparent bitmap). */
+ * (an untouched canvas paints nothing, like a fresh transparent bitmap).  A <video> box:
+ * its current frame (engine_video_frame); 0 paints its poster or nothing. */
 static int paint_canvas_image_hook(void *user, const Box *box, uint32_t *tex, float *w, float *h, int *flip_y)
 {
     Engine *g = user;
     if (!g || !box || !box->node) return 0;
     const HtmlElem e = dom_node_elem(g->dom, box->node);
+    if (box->type == BOX_VIDEO) {
+        *flip_y = 0;
+        return e ? engine_video_frame(g, box, e, tex, w, h) : 0;
+    }
     const struct EngineCanvas *c = e ? canvas_find(g, e) : NULL;
     if (!c || !c->tex) return 0;
     *tex = c->tex;
@@ -1802,6 +1865,7 @@ void engine_before_remove(Engine *g, HtmlElem e, int include_root)
         while (a && a != e) a = dom_parent(g->dom, a);
         if (a == e) canvas_drop(g, i);
     }
+    /* <video> players are dropped by engine_video_tick once their element has no box */
     sel_node_removed(g, e, include_root);
     /* Boxes point at the nodes about to be destroyed (text nodes included). */
     detach_boxes(g, e, include_root, 0);
@@ -2052,6 +2116,7 @@ static void engine_destroy(Engine *g)
     free(g->saved_scroll);
     while (g->n_canvases) canvas_drop(g, g->n_canvases - 1);
     free(g->canvases);
+    video_players_destroy(g->videos);
     if (g->glb) glb_destroy(g->glb);
     if (g->images) image_cache_destroy(g->images);
     if (g->text) text_destroy(g->text);
@@ -2080,6 +2145,12 @@ static Engine *engine_create(const char *ui_dir, const char *page, const int wid
     g->vw = (float) g->fb_w;
     g->vh = (float) g->fb_h;
     css_values_set_viewport(g->vw, g->vh);
+    {   /* sheets loaded below evaluate their @media against this viewport */
+        CssMediaEnv env = *css_media_env();
+        env.width = g->vw;
+        env.height = g->vh;
+        css_media_set_env(&env);
+    }
     g->display_hz = detect_display_hz();
 
     make_ui_dir(ui_dir, g->ui_dir, sizeof(g->ui_dir));
@@ -2110,6 +2181,7 @@ static Engine *engine_create(const char *ui_dir, const char *page, const int wid
     g->text = text_create(g->ui_dir);
     if (g->text && g_doc_lang[0]) text_set_lang(g->text, g_doc_lang); /* engine_set_lang before this page */
     g->images = image_cache_create(g->ui_dir);
+    g->videos = video_players_create();
     if (!g->text || !g->images) {
         fprintf(stderr, "[html_engine] text/image system creation failed\n");
         goto fail;
@@ -2167,6 +2239,7 @@ static Engine *engine_create(const char *ui_dir, const char *page, const int wid
     g->lctx.text = g->text;
     g->lctx.user = g;
     g->lctx.image_size = lh_image_size;
+    g->lctx.video_size = lh_video_size;
     g->lctx.scrollbar_width = lh_scrollbar_width;
     g->lctx.widget_size = lh_widget_size;
     g->lctx.base_url = g->page;
@@ -2332,6 +2405,21 @@ int html_ui_backend_load_page(const char *page)
     return 1;
 }
 
+/* @media: the viewport in CSS px (1 CSS px per framebuffer px, like vw/vh).
+ * Returns 1 when a sheet's @media result flipped (its rule index changed). */
+static int engine_media_update(Engine *g)
+{
+    CssMediaEnv env = *css_media_env();
+    int changed = 0;
+    env.width = g->vw;
+    env.height = g->vh;
+    css_media_set_env(&env);
+    if (g->ua) changed |= css_sheet_media_update(g->ua);
+    for (int i = 0; i < g->n_sheets; i++) changed |= css_sheet_media_update(g->sheets[i]);
+    if (changed) vlog("@media: viewport %.0fx%.0f changed the matching rules", g->vw, g->vh);
+    return changed;
+}
+
 static void fire_resize_listener(Engine *g)
 {
     HtmlEvent ev;
@@ -2354,7 +2442,8 @@ static int engine_set_size(Engine *g, const int width, const int height)
     g->vh = (float) height;
     /* vw/vh/vmin/vmax compute to px: restyle everything when a sheet used them */
     css_values_set_viewport(g->vw, g->vh);
-    if (css_values_viewport_units_used() && g->dom) dom_mark_all_dirty(g->dom);
+    const int media_changed = engine_media_update(g);
+    if ((media_changed || css_values_viewport_units_used()) && g->dom) dom_mark_all_dirty(g->dom);
     g->paint.viewport_w = g->vw;
     g->paint.viewport_h = g->vh;
     if (g->widgets) widgets_set_viewport(g->widgets, g->vw, g->vh);
@@ -2401,6 +2490,7 @@ void html_ui_backend_update(void)
     if (pace_due(&g->next_anim, 1.0 / g->display_hz, now)) {
         g->anim_scroll_saved = 0;
         anim_tick(&g->anim, engine_now_ms());
+        engine_video_tick(g);
     }
     if (g->observe_pending) run_after_layout(g);
 }

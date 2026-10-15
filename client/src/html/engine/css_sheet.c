@@ -29,6 +29,14 @@
 typedef struct U32Vec { uint32_t *data; size_t len, cap; } U32Vec;
 typedef struct DeclVec { CssDecl *data; size_t len, cap; } DeclVec;
 
+/* One @media block: its query list and the enclosing block (nested @media
+ * blocks AND their conditions). */
+typedef struct CssMediaBlock {
+    const char *text;       /* the prelude (query list) as written, atom     */
+    int32_t parent;         /* enclosing block, -1: top level                */
+    uint8_t match;          /* own query list matches the current env        */
+} CssMediaBlock;
+
 typedef struct Bucket {
     char *key;              /* kind byte + lower-cased name                  */
     U32Vec sels;
@@ -48,6 +56,8 @@ struct CssSheet {
     struct { CssKeyframes *data; size_t len, cap; } keyframes;
     struct { CssFontFace *data; size_t len, cap; } fonts;
     struct { CssPropertyRule *data; size_t len, cap; } properties;   /* @property */
+    struct { CssMediaBlock *data; size_t len, cap; } media;   /* @media blocks */
+    int32_t cur_media;              /* walk: innermost open @media block, -1 */
 
     DomInvalidation *inv;
     uint32_t serial;                /* unique per css_sheet_load()           */
@@ -412,8 +422,50 @@ static Bucket *bucket_get(CssSheet *sheet, int kind, const char *name, size_t nl
     return b;
 }
 
+/* 1 when the rule's enclosing @media blocks all match (always without one). */
+static int rule_media_active(const CssSheet *sheet, uint32_t rule)
+{
+    int32_t m = rule < sheet->rules.len ? sheet->rules.data[rule].media : -1;
+    while (m >= 0 && (size_t)m < sheet->media.len) {
+        if (!sheet->media.data[m].match) {
+            return 0;
+        }
+        m = sheet->media.data[m].parent;
+    }
+    return 1;
+}
+
+/* Adds selector `index` (key already picked) to the rule index when its
+ * rule's @media blocks match. */
+static void index_push(CssSheet *sheet, const CssSelector *cs, uint32_t index)
+{
+    if (!rule_media_active(sheet, cs->rule)) {
+        return;
+    }
+    if (cs->key_kind == CSS_KEY_UNIVERSAL) {
+        KN_VEC_PUSH(&sheet->universal, index);
+    } else {
+        KN_VEC_PUSH(&bucket_get(sheet, cs->key_kind, cs->key, strlen(cs->key), 1)->sels, index);
+    }
+}
+
+/* Rebuilds the rule index from scratch (after an @media result flipped).
+ * Bucket keys stay; selector order inside each bucket stays ascending. */
+static void index_rebuild(CssSheet *sheet)
+{
+    for (size_t i = 0; i < sheet->bucket_cap; i++) {
+        sheet->buckets[i].sels.len = 0;
+    }
+    sheet->universal.len = 0;
+    for (size_t i = 0; i < sheet->selectors.len; i++) {
+        if (sheet->selectors.data[i].list != NULL) {
+            index_push(sheet, &sheet->selectors.data[i], (uint32_t)i);
+        }
+    }
+}
+
 /* Picks the index key of a parsed complex selector from its rightmost
- * compound: id > class > tag > universal. */
+ * compound: id > class > tag > universal, and indexes it. */
 static void index_selector(CssSheet *sheet, CssSelector *cs, uint32_t index)
 {
     lxb_css_selector_t *s;
@@ -440,12 +492,11 @@ static void index_selector(CssSheet *sheet, CssSelector *cs, uint32_t index)
     if (best == NULL) {
         cs->key_kind = CSS_KEY_UNIVERSAL;
         cs->key = NULL;
-        KN_VEC_PUSH(&sheet->universal, index);
-        return;
+    } else {
+        cs->key_kind = best_rank == 3 ? CSS_KEY_ID : best_rank == 2 ? CSS_KEY_CLASS : CSS_KEY_TAG;
+        cs->key = kn_atom_lower((const char *)best->name.data, best->name.length);
     }
-    cs->key_kind = best_rank == 3 ? CSS_KEY_ID : best_rank == 2 ? CSS_KEY_CLASS : CSS_KEY_TAG;
-    cs->key = kn_atom_lower((const char *)best->name.data, best->name.length);
-    KN_VEC_PUSH(&bucket_get(sheet, cs->key_kind, cs->key, strlen(cs->key), 1)->sels, index);
+    index_push(sheet, cs, index);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -881,6 +932,7 @@ static void add_rule(CssSheet *sheet, const char *prelude, size_t plen, lxb_css_
     rule.decls = dv.data;
     rule.ndecls = (uint32_t)dv.len;
     rule.order = (uint32_t)sheet->rules.len;
+    rule.media = sheet->cur_media;
     KN_VEC_PUSH(&sheet->rules, rule);
     sc.rule = rule.order;
     split_commas(sheet, prelude, plen, add_selector, &sc);
@@ -1128,6 +1180,31 @@ static void add_property(CssSheet *sheet, const char *prelude, size_t plen, size
 
 /* ---- walk --------------------------------------------------------------- */
 
+static void walk_rules(CssSheet *sheet, lxb_css_rule_t *r);
+
+/* @media <query list> { rules }: the rules are kept with the block's index
+ * (rule.media); index_push() leaves them out of the rule index while the
+ * block does not match.  @keyframes / @font-face inside apply regardless. */
+static void walk_media(CssSheet *sheet, lxb_css_rule_at_t *at)
+{
+    CssMediaBlock mb;
+    size_t plen;
+    const char *prelude = src_slice(sheet, at->prelude_begin, at->prelude_end, &plen);
+    const int32_t outer = sheet->cur_media;
+
+    if (at->u.media == NULL || at->u.media->block == NULL) {
+        return;
+    }
+    prelude = kn_str_trim(prelude, &plen);
+    mb.text = kn_atom(prelude, plen);
+    mb.parent = outer;
+    mb.match = (uint8_t)(css_media_query_matches(prelude, plen) != 0);
+    KN_VEC_PUSH(&sheet->media, mb);
+    sheet->cur_media = (int32_t)(sheet->media.len - 1);
+    walk_rules(sheet, at->u.media->block->first);
+    sheet->cur_media = outer;
+}
+
 static void walk_rules(CssSheet *sheet, lxb_css_rule_t *r)
 {
     for (; r != NULL; r = r->next) {
@@ -1151,6 +1228,10 @@ static void walk_rules(CssSheet *sheet, lxb_css_rule_t *r)
         }
         case LXB_CSS_RULE_AT_RULE: {
             lxb_css_rule_at_t *at = lxb_css_rule_at(r);
+            if (at->type == LXB_CSS_AT_RULE_MEDIA) {
+                walk_media(sheet, at);
+                break;
+            }
             if (at->type == LXB_CSS_AT_RULE_FONT_FACE) {
                 add_font_face(sheet, at->u.font_face->block);
             } else if (at->type == LXB_CSS_AT_RULE__CUSTOM) {
@@ -1167,7 +1248,7 @@ static void walk_rules(CssSheet *sheet, lxb_css_rule_t *r)
                     const char *prelude = src_slice(sheet, at->prelude_begin, at->prelude_end, &plen);
                     add_property(sheet, prelude, plen, at->prelude_end);
                 }
-                /* @media / @import / @supports: not used by the UI, ignored */
+                /* @import / @supports: not used by the UI, ignored */
             }
             break;
         }
@@ -1230,6 +1311,7 @@ CssSheet *css_sheet_load(const char *text, size_t len, const char *name)
         css_sheet_destroy(sheet);
         return NULL;
     }
+    sheet->cur_media = -1;
     walk_rules(sheet, sheet->lxb->root);
     return sheet;
 }
@@ -1259,6 +1341,7 @@ void css_sheet_destroy(CssSheet *sheet)
     KN_VEC_FREE(&sheet->keyframes);
     KN_VEC_FREE(&sheet->fonts);
     KN_VEC_FREE(&sheet->properties);
+    KN_VEC_FREE(&sheet->media);
     for (size_t i = 0; i < sheet->bucket_cap; i++) {
         free(sheet->buckets[i].key);
         KN_VEC_FREE(&sheet->buckets[i].sels);
@@ -1350,4 +1433,524 @@ const DomInvalidation *css_sheet_invalidation(const CssSheet *sheet)
 uint32_t css_sheet_serial(const CssSheet *sheet)
 {
     return sheet != NULL ? sheet->serial : 0;
+}
+
+/* ------------------------------------------------------------------------- */
+/* @media: Media Queries 4 evaluation                                         */
+/* ------------------------------------------------------------------------- */
+
+static CssMediaEnv g_media_env = { 1280.0f, 720.0f, 1.0f, 0, 0, 0 };
+
+void css_media_set_env(const CssMediaEnv *env)
+{
+    if (env != NULL) {
+        g_media_env = *env;
+        if (!(g_media_env.dppx > 0.0f)) {
+            g_media_env.dppx = 1.0f;
+        }
+    }
+}
+
+const CssMediaEnv *css_media_env(void) { return &g_media_env; }
+
+/* Three-valued results (MQ4 "unknown" for general-enclosed / unknown
+ * features); a syntax error is MQ_ERR and makes the whole query false. */
+enum { MQ_FALSE = 0, MQ_TRUE = 1, MQ_UNKNOWN = 2, MQ_ERR = -1 };
+
+typedef struct MqCur { const char *p, *end; } MqCur;
+
+typedef struct MqVal {
+    enum { MQV_NONE, MQV_NUM, MQV_LEN, MQV_RES, MQV_RATIO, MQV_IDENT } kind;
+    float v;                    /* NUM / LEN (px) / RES (dppx) / RATIO (w/h) */
+    char ident[40];             /* lower-cased                                */
+} MqVal;
+
+static void mq_ws(MqCur *c)
+{
+    while (c->p < c->end) {
+        if (*c->p == ' ' || *c->p == '\t' || *c->p == '\n' || *c->p == '\r' || *c->p == '\f') {
+            c->p++;
+        } else if (c->p + 1 < c->end && c->p[0] == '/' && c->p[1] == '*') {
+            const char *e = c->p + 2;
+            while (e + 1 < c->end && !(e[0] == '*' && e[1] == '/')) e++;
+            c->p = e + 1 < c->end ? e + 2 : c->end;
+        } else {
+            break;
+        }
+    }
+}
+
+static int mq_is_name(int ch)
+{
+    return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-' || ch == '_'
+        || (unsigned char)ch >= 0x80;
+}
+
+/* Reads an identifier (lower-cased into out); 0 when there is none. */
+static size_t mq_ident(MqCur *c, char *out, size_t cap)
+{
+    const char *s = c->p;
+    size_t n = 0;
+    if (s >= c->end || !(mq_is_name(*s) && !(*s >= '0' && *s <= '9'))) {
+        return 0;
+    }
+    if (*s == '-' && (s + 1 >= c->end || (s[1] >= '0' && s[1] <= '9') || s[1] == '.')) {
+        return 0;               /* a negative number */
+    }
+    while (c->p < c->end && mq_is_name(*c->p)) {
+        if (n + 1 < cap) out[n++] = (char)kn_to_lower((unsigned char)*c->p);
+        c->p++;
+    }
+    out[n] = '\0';
+    return n;
+}
+
+/* Consumes the keyword `kw` (case-insensitive, not followed by a name char). */
+static int mq_kw(MqCur *c, const char *kw)
+{
+    size_t n = strlen(kw);
+    if ((size_t)(c->end - c->p) < n || !kn_str_ieq(c->p, n, kw)) {
+        return 0;
+    }
+    if (c->p + n < c->end && mq_is_name(c->p[n])) {
+        return 0;
+    }
+    c->p += n;
+    return 1;
+}
+
+static int mq_number(MqCur *c, float *out)
+{
+    char buf[48];
+    size_t n = 0;
+    const char *s = c->p;
+    if (s < c->end && (*s == '+' || *s == '-')) buf[n++] = *s++;
+    const char *digits = s;
+    while (s < c->end && n < sizeof(buf) - 1 && ((*s >= '0' && *s <= '9') || *s == '.')) buf[n++] = *s++;
+    if (s == digits) {
+        return 0;
+    }
+    if (s + 1 < c->end && (*s == 'e' || *s == 'E') && ((s[1] >= '0' && s[1] <= '9') || ((s[1] == '+' || s[1] == '-') && s + 2 < c->end && s[2] >= '0' && s[2] <= '9'))) {
+        buf[n++] = *s++;
+        if (*s == '+' || *s == '-') buf[n++] = *s++;
+        while (s < c->end && n < sizeof(buf) - 1 && *s >= '0' && *s <= '9') buf[n++] = *s++;
+    }
+    buf[n] = '\0';
+    *out = (float)atof(buf);
+    c->p = s;
+    return 1;
+}
+
+/* <number> [unit] | <ratio> | <ident>. */
+static int mq_value(MqCur *c, MqVal *v)
+{
+    float num;
+    memset(v, 0, sizeof(*v));
+    if (mq_ident(c, v->ident, sizeof(v->ident))) {
+        v->kind = MQV_IDENT;
+        return 1;
+    }
+    if (!mq_number(c, &num)) {
+        return 0;
+    }
+    char unit[16];
+    if (c->p < c->end && *c->p == '%') {
+        return 0;
+    }
+    if (mq_ident(c, unit, sizeof(unit))) {
+        static const struct { const char *u; int kind; float k; } units[] = {
+            { "px", MQV_LEN, 1.0f }, { "em", MQV_LEN, 16.0f }, { "rem", MQV_LEN, 16.0f },
+            { "ex", MQV_LEN, 8.0f }, { "ch", MQV_LEN, 8.0f },
+            { "in", MQV_LEN, 96.0f }, { "cm", MQV_LEN, 96.0f / 2.54f }, { "mm", MQV_LEN, 96.0f / 25.4f },
+            { "q", MQV_LEN, 96.0f / 101.6f }, { "pt", MQV_LEN, 96.0f / 72.0f }, { "pc", MQV_LEN, 16.0f },
+            { "dppx", MQV_RES, 1.0f }, { "x", MQV_RES, 1.0f }, { "dpi", MQV_RES, 1.0f / 96.0f },
+            { "dpcm", MQV_RES, 2.54f / 96.0f },
+        };
+        for (size_t i = 0; i < sizeof(units) / sizeof(units[0]); i++) {
+            if (!strcmp(unit, units[i].u)) {
+                v->kind = units[i].kind;
+                v->v = num * units[i].k;
+                return 1;
+            }
+        }
+        if (!strcmp(unit, "vw") || !strcmp(unit, "vh") || !strcmp(unit, "vmin") || !strcmp(unit, "vmax")) {
+            const float w = g_media_env.width, h = g_media_env.height;
+            const float base = unit[1] == 'w' ? w : unit[1] == 'h' ? h : unit[2] == 'i' ? (w < h ? w : h) : (w > h ? w : h);
+            v->kind = MQV_LEN;
+            v->v = num * base / 100.0f;
+            return 1;
+        }
+        return 0;
+    }
+    /* <ratio>: number [ / number ] */
+    MqCur save = *c;
+    mq_ws(c);
+    if (c->p < c->end && *c->p == '/') {
+        float den;
+        c->p++;
+        mq_ws(c);
+        if (!mq_number(c, &den)) {
+            return 0;
+        }
+        v->kind = MQV_RATIO;
+        v->v = den > 0.0f ? num / den : (num > 0.0f ? 1e30f : 0.0f);
+        return 1;
+    }
+    *c = save;
+    v->kind = MQV_NUM;
+    v->v = num;
+    return 1;
+}
+
+enum { MQ_OP_NONE, MQ_OP_EQ, MQ_OP_LT, MQ_OP_LE, MQ_OP_GT, MQ_OP_GE };
+
+static int mq_op(MqCur *c)
+{
+    if (c->p >= c->end) return MQ_OP_NONE;
+    const char ch = *c->p;
+    if (ch == '=') { c->p++; return MQ_OP_EQ; }
+    if (ch == '<' || ch == '>') {
+        c->p++;
+        if (c->p < c->end && *c->p == '=') {
+            c->p++;
+            return ch == '<' ? MQ_OP_LE : MQ_OP_GE;
+        }
+        return ch == '<' ? MQ_OP_LT : MQ_OP_GT;
+    }
+    return MQ_OP_NONE;
+}
+
+static int mq_flip(int op)
+{
+    return op == MQ_OP_LT ? MQ_OP_GT : op == MQ_OP_LE ? MQ_OP_GE : op == MQ_OP_GT ? MQ_OP_LT : op == MQ_OP_GE ? MQ_OP_LE : op;
+}
+
+static int mq_cmp(float actual, int op, float want)
+{
+    const float eps = 1e-4f * (1.0f + (want < 0 ? -want : want));
+    switch (op) {
+    case MQ_OP_EQ: return actual > want - eps && actual < want + eps;
+    case MQ_OP_LT: return actual < want - eps;
+    case MQ_OP_LE: return actual <= want + eps;
+    case MQ_OP_GT: return actual > want + eps;
+    case MQ_OP_GE: return actual >= want - eps;
+    default: return 0;
+    }
+}
+
+/* Range features: their value in the environment and the value kind they
+ * take.  Returns 0 for a feature that is not a range feature. */
+static int mq_range_feature(const char *name, float *actual, int *kind)
+{
+    const CssMediaEnv *e = &g_media_env;
+    if (!strcmp(name, "width") || !strcmp(name, "device-width")) { *actual = e->width; *kind = MQV_LEN; return 1; }
+    if (!strcmp(name, "height") || !strcmp(name, "device-height")) { *actual = e->height; *kind = MQV_LEN; return 1; }
+    if (!strcmp(name, "aspect-ratio") || !strcmp(name, "device-aspect-ratio")) {
+        *actual = e->height > 0.0f ? e->width / e->height : 0.0f;
+        *kind = MQV_RATIO;
+        return 1;
+    }
+    if (!strcmp(name, "resolution")) { *actual = e->dppx; *kind = MQV_RES; return 1; }
+    if (!strcmp(name, "-webkit-device-pixel-ratio")) { *actual = e->dppx; *kind = MQV_NUM; return 1; }
+    if (!strcmp(name, "color")) { *actual = 8.0f; *kind = MQV_NUM; return 1; }
+    if (!strcmp(name, "color-index") || !strcmp(name, "monochrome")) { *actual = 0.0f; *kind = MQV_NUM; return 1; }
+    return 0;
+}
+
+/* Checks a value against a range feature's kind; *out is the comparable number. */
+static int mq_range_value(const MqVal *v, int kind, float *out)
+{
+    if (kind == MQV_LEN) {
+        if (v->kind == MQV_LEN || (v->kind == MQV_NUM && v->v == 0.0f)) { *out = v->v; return 1; }
+        return 0;
+    }
+    if (kind == MQV_RATIO) {
+        if (v->kind == MQV_RATIO || v->kind == MQV_NUM) { *out = v->v; return 1; }
+        return 0;
+    }
+    if (kind == MQV_RES) {
+        if (v->kind == MQV_RES) { *out = v->v; return 1; }
+        return 0;
+    }
+    if (v->kind == MQV_NUM) { *out = v->v; return 1; }
+    return 0;
+}
+
+/* Discrete features: the environment's value(s); "" for an unknown name.
+ * A boolean context `(feature)` is true unless the value is none /
+ * no-preference / 0. */
+static const char *mq_discrete_feature(const char *name)
+{
+    const CssMediaEnv *e = &g_media_env;
+    if (!strcmp(name, "orientation")) return e->height >= e->width ? "portrait" : "landscape";
+    if (!strcmp(name, "prefers-color-scheme")) return e->dark ? "dark" : "light";
+    if (!strcmp(name, "prefers-reduced-motion")) return e->reduced_motion ? "reduce" : "no-preference";
+    if (!strcmp(name, "prefers-contrast") || !strcmp(name, "prefers-reduced-transparency")
+        || !strcmp(name, "prefers-reduced-data")) return "no-preference";
+    if (!strcmp(name, "forced-colors") || !strcmp(name, "inverted-colors")) return "none";
+    if (!strcmp(name, "hover") || !strcmp(name, "any-hover")) return e->coarse ? "none" : "hover";
+    if (!strcmp(name, "pointer") || !strcmp(name, "any-pointer")) return e->coarse ? "coarse" : "fine";
+    if (!strcmp(name, "update")) return "fast";
+    if (!strcmp(name, "scan")) return "progressive";
+    if (!strcmp(name, "grid")) return "0";
+    if (!strcmp(name, "display-mode")) return "browser";
+    if (!strcmp(name, "color-gamut")) return "srgb";
+    if (!strcmp(name, "dynamic-range") || !strcmp(name, "video-dynamic-range")) return "standard";
+    if (!strcmp(name, "scripting")) return "enabled";
+    if (!strcmp(name, "overflow-block") || !strcmp(name, "overflow-inline")) return "scroll";
+    return "";
+}
+
+/* `( <mf-name> [: <value>] )` or a range, cursor after '('. Returns MQ_TRUE /
+ * MQ_FALSE, or MQ_ERR when it is not a media feature (general-enclosed). */
+static int mq_feature(MqCur *c)
+{
+    char name[48];
+    MqVal v1, v2;
+    float actual, want;
+    int kind;
+    MqCur save = *c;
+
+    if (mq_ident(c, name, sizeof(name))) {
+        mq_ws(c);
+        if (c->p < c->end && (*c->p == ':' || *c->p == ')')) {
+            const int has_value = *c->p == ':';
+            int op = MQ_OP_EQ;
+            const char *base = name;
+            if (!strncmp(name, "min-", 4)) { op = MQ_OP_GE; base = name + 4; }
+            else if (!strncmp(name, "max-", 4)) { op = MQ_OP_LE; base = name + 4; }
+            else if (!strncmp(name, "-webkit-min-", 12)) { op = MQ_OP_GE; base = name + 12; }
+            else if (!strncmp(name, "-webkit-max-", 12)) { op = MQ_OP_LE; base = name + 12; }
+            char full[56];
+            if (base == name + 12) { snprintf(full, sizeof(full), "-webkit-%s", base); base = full; }
+            if (!has_value) {
+                if (op != MQ_OP_EQ) return MQ_ERR;          /* (min-width) is invalid */
+                if (mq_range_feature(base, &actual, &kind)) return actual != 0.0f ? MQ_TRUE : MQ_FALSE;
+                const char *d = mq_discrete_feature(base);
+                if (!*d) return MQ_ERR;
+                return strcmp(d, "none") && strcmp(d, "no-preference") && strcmp(d, "0") ? MQ_TRUE : MQ_FALSE;
+            }
+            c->p++;                                          /* ':' */
+            mq_ws(c);
+            if (!mq_value(c, &v1)) return MQ_ERR;
+            mq_ws(c);
+            if (c->p >= c->end || *c->p != ')') return MQ_ERR;
+            if (mq_range_feature(base, &actual, &kind)) {
+                if (!mq_range_value(&v1, kind, &want)) return MQ_ERR;
+                return mq_cmp(actual, op, want) ? MQ_TRUE : MQ_FALSE;
+            }
+            if (op != MQ_OP_EQ) return MQ_ERR;
+            const char *d = mq_discrete_feature(base);
+            if (!*d) return MQ_ERR;
+            if (v1.kind == MQV_NUM) {
+                char num[16];
+                snprintf(num, sizeof(num), "%g", (double)v1.v);
+                return !strcmp(d, num) ? MQ_TRUE : MQ_FALSE;
+            }
+            if (v1.kind != MQV_IDENT) return MQ_ERR;
+            return !strcmp(d, v1.ident) ? MQ_TRUE : MQ_FALSE;
+        }
+        /* <mf-name> <op> <value> */
+        const int op = mq_op(c);
+        if (op == MQ_OP_NONE || !mq_range_feature(name, &actual, &kind)) return MQ_ERR;
+        mq_ws(c);
+        if (!mq_value(c, &v1) || !mq_range_value(&v1, kind, &want)) return MQ_ERR;
+        mq_ws(c);
+        if (c->p >= c->end || *c->p != ')') return MQ_ERR;
+        return mq_cmp(actual, op, want) ? MQ_TRUE : MQ_FALSE;
+    }
+    /* <value> <op> <mf-name> [ <op> <value> ] */
+    *c = save;
+    if (!mq_value(c, &v1)) return MQ_ERR;
+    mq_ws(c);
+    const int op1 = mq_op(c);
+    if (op1 == MQ_OP_NONE) return MQ_ERR;
+    mq_ws(c);
+    if (!mq_ident(c, name, sizeof(name)) || !mq_range_feature(name, &actual, &kind)) return MQ_ERR;
+    if (!mq_range_value(&v1, kind, &want)) return MQ_ERR;
+    int r = mq_cmp(actual, mq_flip(op1), want);
+    mq_ws(c);
+    const int op2 = mq_op(c);
+    if (op2 != MQ_OP_NONE) {
+        /* both operators must point the same way: a < x < b, a > x > b */
+        const int lt1 = op1 == MQ_OP_LT || op1 == MQ_OP_LE, lt2 = op2 == MQ_OP_LT || op2 == MQ_OP_LE;
+        if (op1 == MQ_OP_EQ || op2 == MQ_OP_EQ || lt1 != lt2) return MQ_ERR;
+        mq_ws(c);
+        if (!mq_value(c, &v2) || !mq_range_value(&v2, kind, &want)) return MQ_ERR;
+        r = r && mq_cmp(actual, op2, want);
+        mq_ws(c);
+    }
+    if (c->p >= c->end || *c->p != ')') return MQ_ERR;
+    return r ? MQ_TRUE : MQ_FALSE;
+}
+
+/* Skips to just past the ')' matching an already consumed '('. */
+static int mq_skip_block(MqCur *c)
+{
+    int depth = 1;
+    while (c->p < c->end) {
+        const char ch = *c->p++;
+        if (ch == '(' || ch == '[' || ch == '{') depth++;
+        else if (ch == ')' || ch == ']' || ch == '}') {
+            if (--depth == 0) return 1;
+        } else if (ch == '"' || ch == '\'') {
+            while (c->p < c->end && *c->p != ch) {
+                if (*c->p == '\\' && c->p + 1 < c->end) c->p++;
+                c->p++;
+            }
+            if (c->p < c->end) c->p++;
+        }
+    }
+    return 0;
+}
+
+static int mq_not3(int r) { return r == MQ_TRUE ? MQ_FALSE : r == MQ_FALSE ? MQ_TRUE : r; }
+static int mq_and3(int a, int b) { return a == MQ_FALSE || b == MQ_FALSE ? MQ_FALSE : a == MQ_UNKNOWN || b == MQ_UNKNOWN ? MQ_UNKNOWN : MQ_TRUE; }
+static int mq_or3(int a, int b) { return a == MQ_TRUE || b == MQ_TRUE ? MQ_TRUE : a == MQ_UNKNOWN || b == MQ_UNKNOWN ? MQ_UNKNOWN : MQ_FALSE; }
+
+static int mq_condition(MqCur *c, int allow_or, int depth);
+
+/* <media-in-parens>: ( <condition> ) | ( <feature> ) | <general-enclosed> */
+static int mq_in_parens(MqCur *c, int depth)
+{
+    mq_ws(c);
+    if (c->p >= c->end || *c->p != '(' || depth > 32) {
+        return MQ_ERR;
+    }
+    c->p++;
+    const char *inner = c->p;
+    mq_ws(c);
+    MqCur probe = *c;
+    if ((c->p < c->end && *c->p == '(') || (mq_kw(&probe, "not") && (mq_ws(&probe), probe.p < probe.end && *probe.p == '('))) {
+        int r = mq_condition(c, 1, depth + 1);
+        mq_ws(c);
+        if (r != MQ_ERR && c->p < c->end && *c->p == ')') {
+            c->p++;
+            return r;
+        }
+    } else {
+        int r = mq_feature(c);
+        if (r != MQ_ERR) {
+            c->p++;                                   /* ')' */
+            return r;
+        }
+    }
+    /* <general-enclosed>: unknown */
+    c->p = inner;
+    return mq_skip_block(c) ? MQ_UNKNOWN : MQ_ERR;
+}
+
+static int mq_condition(MqCur *c, int allow_or, int depth)
+{
+    mq_ws(c);
+    if (mq_kw(c, "not")) {
+        int r = mq_in_parens(c, depth);
+        return r == MQ_ERR ? MQ_ERR : mq_not3(r);
+    }
+    int r = mq_in_parens(c, depth);
+    int joiner = 0;                                   /* 1 and, 2 or: never mixed */
+    while (r != MQ_ERR) {
+        MqCur save = *c;
+        mq_ws(c);
+        int j = mq_kw(c, "and") ? 1 : (allow_or && mq_kw(c, "or")) ? 2 : 0;
+        if (j == 0) {
+            *c = save;
+            break;
+        }
+        if (joiner != 0 && joiner != j) return MQ_ERR;
+        joiner = j;
+        const int b = mq_in_parens(c, depth);
+        if (b == MQ_ERR) return MQ_ERR;
+        r = j == 1 ? mq_and3(r, b) : mq_or3(r, b);
+    }
+    return r;
+}
+
+/* One <media-query> (no top-level comma). */
+static int mq_query(const char *s, size_t len)
+{
+    MqCur c = { s, s + len };
+    int r;
+    mq_ws(&c);
+    if (c.p >= c.end) {
+        return 0;                                     /* an empty query in a list is invalid */
+    }
+    MqCur probe = c;
+    if (*c.p == '(' || (mq_kw(&probe, "not") && (mq_ws(&probe), probe.p < probe.end && *probe.p == '('))) {
+        r = mq_condition(&c, 1, 0);
+    } else {
+        int negate = 0;
+        char type[32];
+        if (mq_kw(&c, "not")) negate = 1;
+        else (void)mq_kw(&c, "only");
+        mq_ws(&c);
+        if (!mq_ident(&c, type, sizeof(type))) return 0;
+        if (!strcmp(type, "not") || !strcmp(type, "only") || !strcmp(type, "and") || !strcmp(type, "or")) return 0;
+        r = !strcmp(type, "all") || !strcmp(type, "screen") ? MQ_TRUE : MQ_FALSE;
+        mq_ws(&c);
+        if (mq_kw(&c, "and")) {
+            const int cond = mq_condition(&c, 0, 0);
+            if (cond == MQ_ERR) return 0;
+            r = mq_and3(r, cond);
+        }
+        if (negate) r = r == MQ_UNKNOWN ? MQ_FALSE : mq_not3(r);
+    }
+    mq_ws(&c);
+    if (r == MQ_ERR || c.p != c.end) {
+        return 0;
+    }
+    return r == MQ_TRUE;
+}
+
+typedef struct MqListCtx { int any; } MqListCtx;
+
+static void mq_list_part(CssSheet *sheet, const char *s, size_t len, void *ctx)
+{
+    (void)sheet;
+    if (mq_query(s, len)) {
+        ((MqListCtx *)ctx)->any = 1;
+    }
+}
+
+int css_media_query_matches(const char *text, size_t len)
+{
+    MqListCtx ctx = { 0 };
+    size_t n = len;
+    const char *s = text != NULL ? kn_str_trim(text, &n) : "";
+    if (text == NULL || n == 0) {
+        return 1;                                     /* @media {} == all */
+    }
+    split_commas(NULL, s, n, mq_list_part, &ctx);
+    return ctx.any;
+}
+
+int css_sheet_media_update(CssSheet *sheet)
+{
+    int changed = 0;
+    if (sheet == NULL) {
+        return 0;
+    }
+    for (size_t i = 0; i < sheet->media.len; i++) {
+        CssMediaBlock *mb = &sheet->media.data[i];
+        const uint8_t m = (uint8_t)(css_media_query_matches(mb->text, strlen(mb->text)) != 0);
+        if (m != mb->match) {
+            mb->match = m;
+            changed = 1;
+        }
+    }
+    if (changed) {
+        index_rebuild(sheet);
+    }
+    return changed;
+}
+
+uint32_t css_sheet_media_count(const CssSheet *sheet) { return sheet != NULL ? (uint32_t)sheet->media.len : 0; }
+
+uint32_t css_sheet_media_matching(const CssSheet *sheet)
+{
+    uint32_t n = 0;
+    for (size_t i = 0; sheet != NULL && i < sheet->media.len; i++) {
+        n += sheet->media.data[i].match;
+    }
+    return n;
 }

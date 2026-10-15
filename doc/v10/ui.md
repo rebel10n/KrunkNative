@@ -246,15 +246,17 @@ grep -o -E "[\"'](\./|/)?(img|textures|videos|sound|models|scares|promo|css|font
 - **Guide** = `openGuide(section)` -> `#genericPop.tutorialPopup` with `_66971`'s markup, its twelve
   sections (locked ones still open, as in v10; the level comes from the account) and the 27
   `img/guide/*.png` (pinned in `tools/ui-import/live_assets_v10.lock`, root `ui`). Natively the
-  Basics video is its first frame (`ui/img/guide/kn_basics_poster.jpg`, from the pinned
-  `videos/tutorial/basics.mp4`): the engine has no video decoder. The web build plays the video.
+  Basics video plays from its `.knv` frame sidecar (`client/src/html/engine/video.h`, `make
+  video-frames`; silent, 15 fps at 700 px), with its first frame
+  (`ui/img/guide/kn_basics_poster.jpg`) as the poster while the sidecar is missing. The web build
+  plays the video.
 - **Community & Events** = `openCommunityMenu()` -> `#genericPop.communityPopup` with `_66842`'s
   markup: polls and events from `GET /creators/events` (`doc/backend.md` 6.6; "Loading events..."
   while it runs, "No upcoming events" without a brain or events), v10's date / LIVE / duration /
   tags / links rules, the five socials. Links go through `knCommunityLink()`: a `/?play=<map>`
   link plays the map here (`playMap`), the rest open like every external link
   (`ui_open_external`: the hub for `/social.html?...`, the browser for http(s)).
-- Native-only differences: no `aspect-ratio` (the event banner gets v10's 1170:150 height in px,
-  `ui/css/kn-v10-news.css`), no `-webkit-line-clamp` (descriptions are not cut), remote
+- Native-only differences: the event banner's height is also spelled out in px
+  (`ui/css/kn-v10-news.css`, from before the engine had `aspect-ratio`; same 1170:150 result), remote
   `banner_url` images are not loaded (no banner box then), Twitch's inline `<svg>` icon is drawn
   as an SVG image, and the event date has a plain space before AM/PM (Chrome: U+202F).

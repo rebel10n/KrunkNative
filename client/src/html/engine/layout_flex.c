@@ -28,8 +28,18 @@ typedef struct FItem {
 
 typedef struct FLine { int first, count; float cross; float pos; } FLine;
 
-static int is_row(const Box *b) { return b->style->flex_direction == CSS_FLEX_DIRECTION_ROW || b->style->flex_direction == CSS_FLEX_DIRECTION_ROW_REVERSE; }
-static int is_reverse(const Box *b) { return b->style->flex_direction == CSS_FLEX_DIRECTION_ROW_REVERSE || b->style->flex_direction == CSS_FLEX_DIRECTION_COLUMN_REVERSE; }
+/* display: -webkit-box: Blink's flexbox emulation takes the direction from -webkit-box-orient
+ * (flex-direction does not apply; -webkit-box-direction is not supported: normal) */
+static int is_row(const Box *b)
+{
+    if (b->style->display_legacy_box) return b->style->box_orient != CSS_BOX_ORIENT_VERTICAL;
+    return b->style->flex_direction == CSS_FLEX_DIRECTION_ROW || b->style->flex_direction == CSS_FLEX_DIRECTION_ROW_REVERSE;
+}
+static int is_reverse(const Box *b)
+{
+    if (b->style->display_legacy_box) return 0;
+    return b->style->flex_direction == CSS_FLEX_DIRECTION_ROW_REVERSE || b->style->flex_direction == CSS_FLEX_DIRECTION_COLUMN_REVERSE;
+}
 
 static int count_items(const Box *b)
 {

@@ -3,8 +3,9 @@
    (svelte-los391 guide, svelte-1ley7u4 community, svelte-1ult4vg news); this only fills in what
    the native engine does not do. */
 
-/* .eventBanner is aspect-ratio: 1170 / 150 of the card's width, which the engine ignores: the
-   height that ratio gives in the 1200px popup (1176px wide cards) */
+/* .eventBanner is aspect-ratio: 1170 / 150 of the card's width. The engine applies that ratio too,
+   but this explicit height wins over it: it is the height that ratio gives in the 1200px popup
+   (1176px wide cards), so the banner is the same either way */
 .eventBanner.svelte-1ley7u4 {
     height: 151px;
 }

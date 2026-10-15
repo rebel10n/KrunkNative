@@ -10,6 +10,13 @@
  * css_parse_declaration() so calc()/var()/shorthands all go through one value
  * parser.  Token slices point into the sheet's private copy of the source
  * text, which lives as long as the sheet.
+ *
+ * @media: rules inside an @media block (nested blocks AND their queries) are
+ * parsed and kept like any other; only those whose media queries match the
+ * current media environment (css_media_set_env: the viewport in CSS px, ...)
+ * are in the rule index the cascade reads.  css_sheet_media_update()
+ * re-evaluates the queries and rebuilds the index when a result flipped;
+ * the caller then restyles everything (engine.c does on resize).
  */
 #ifndef KN_CSS_SHEET_H
 #define KN_CSS_SHEET_H
@@ -60,6 +67,7 @@ typedef struct CssRule {
     uint32_t ndecls;
     uint32_t order;         /* 0-based position among the sheet's rules      */
     uint32_t stamp;         /* cascade scratch: last restyle that visited it */
+    int32_t media;          /* innermost enclosing @media block, -1: none    */
 } CssRule;
 
 /* Index key kinds (the rightmost compound's most specific simple selector). */
@@ -139,6 +147,35 @@ const CssPropertyRule *css_sheet_properties(const CssSheet *sheet, uint32_t *cou
 const DomInvalidation *css_sheet_invalidation(const CssSheet *sheet);
 /* Unique id of this load (distinguishes a reloaded sheet at a reused address). */
 uint32_t css_sheet_serial(const CssSheet *sheet);
+
+/* ---- @media (Media Queries 4) -------------------------------------------
+ * The environment queries are evaluated against.  Native defaults are a
+ * desktop Chrome: screen, hover/fine pointer, light scheme, no reduced
+ * motion, 1 dppx.  Lengths are CSS px (the engine's viewport: 1 CSS px per
+ * framebuffer px); `em`/`rem` in a query are the initial 16px. */
+typedef struct CssMediaEnv {
+    float width, height;            /* viewport, CSS px                      */
+    float dppx;                     /* resolution / device-pixel-ratio       */
+    uint8_t dark;                   /* prefers-color-scheme: dark            */
+    uint8_t reduced_motion;         /* prefers-reduced-motion: reduce        */
+    uint8_t coarse;                 /* pointer: coarse, hover: none (touch)  */
+} CssMediaEnv;
+
+/* Sets the process-wide media environment (sheets loaded afterwards use it;
+ * call css_sheet_media_update() on the existing ones). */
+void css_media_set_env(const CssMediaEnv *env);
+const CssMediaEnv *css_media_env(void);
+/* 1 when the media query list `text` (an @media prelude, "" == all) matches
+ * the current environment.  Unknown features / syntax errors evaluate to
+ * false for that query, like Blink. */
+int css_media_query_matches(const char *text, size_t len);
+/* Re-evaluates the sheet's @media blocks against the current environment;
+ * returns 1 when a block's result changed (the rule index was rebuilt and
+ * every element needs restyling), 0 otherwise. */
+int css_sheet_media_update(CssSheet *sheet);
+/* Number of @media blocks in the sheet / how many currently match. */
+uint32_t css_sheet_media_count(const CssSheet *sheet);
+uint32_t css_sheet_media_matching(const CssSheet *sheet);
 
 /* Strips a trailing pseudo-element from selector text in place of `out`
  * (returns the kind, CSS_PE_NONE when none, -1 when the selector can never

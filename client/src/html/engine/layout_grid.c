@@ -928,8 +928,11 @@ static int stretches_w(const Box *gb, const Box *it)
 static int stretches_h(const Box *gb, const Box *it)
 {
     const CssComputed *cs = it->style;
+    /* an item with an aspect-ratio takes its height from its width: normal aligns it as start
+     * (CSS Grid 1 / Box Alignment; the engine maps normal to stretch, so both do here) */
     return item_align(gb, it) == CSS_ALIGN_ITEMS_STRETCH && cs->height.kind == CSS_LEN_AUTO
-        && cs->margin[CSS_TOP].kind != CSS_LEN_AUTO && cs->margin[CSS_BOTTOM].kind != CSS_LEN_AUTO && grid_item_stretches(it);
+        && cs->margin[CSS_TOP].kind != CSS_LEN_AUTO && cs->margin[CSS_BOTTOM].kind != CSS_LEN_AUTO && grid_item_stretches(it)
+        && !(layout_pref_ratio(it) > 0.0f);
 }
 
 static float non_auto_margin(const Box *it, int side)

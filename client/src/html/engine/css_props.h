@@ -74,7 +74,7 @@ extern "C" {
     X(TABLE_LAYOUT,               "table-layout",               0, "auto") \
     X(OVERFLOW_X,                 "overflow-x",                 0, "visible") \
     X(OVERFLOW_Y,                 "overflow-y",                 0, "visible") \
-    X(APPEARANCE,                 "appearance",                 0, "auto") \
+    X(APPEARANCE,                 "appearance",                 0, "none") \
     X(WILL_CHANGE,                "will-change",                0, "auto") \
     X(Z_INDEX,                    "z-index",                    0, "auto") \
     X(OPACITY,                    "opacity",                    0, "1") \

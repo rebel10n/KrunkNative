@@ -86,6 +86,11 @@ float layout_box_sizing_h(const Box *b, float css_h);
 float layout_horizontal_extras(const Box *b);            /* border + padding + scrollbar */
 float layout_vertical_extras(const Box *b);
 float layout_intrinsic_width(LayoutTree *t, Box *b, int max_content);  /* border-box width */
+/* aspect-ratio (CSS Sizing 4) of a non-replaced box (0: none; replaced boxes: replaced_size),
+ * and the border-box size it transfers from the other one (< 0 without a ratio) */
+float layout_pref_ratio(const Box *b);
+float layout_ratio_height(const Box *b, float border_w);
+float layout_ratio_width(const Box *b, float border_h);
 float layout_intrinsic_margin_width(LayoutTree *t, Box *b, int max_content, float cb_w);
 void  layout_position_abs_children(LayoutTree *t, Box *cb);
 void  layout_update_transform(Box *b);
@@ -131,6 +136,7 @@ void  layout_resolve_font(LayoutTree *t, Box *b);
 void  layout_anon_inherit(Box *anon, const CssComputed *parent_style);   /* refresh an anonymous box's style */
 void  layout_restyle_anon_children(Box *b);                             /* re-inherit anon descendants of b */
 int   layout_elem_tag(const Box *b);            /* LXB_TAG_* or 0            */
+int   layout_style_line_clamps(const CssComputed *s);  /* -webkit-line-clamp applies (legacy vertical box) */
 
 /* ---- helpers ------------------------------------------------------------ */
 static inline float kn_maxf(float a, float b) { return a > b ? a : b; }

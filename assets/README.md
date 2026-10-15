@@ -23,7 +23,7 @@ file of the same name when v7 changed it:
 | `models/` | `public/models/` | props, `weapons/` (incl. `weapon_<w>_<mid>.gltf` remodels), `melee/`, `attach/` and the cosmetic dirs `hats/ body/ back/ waist/ faces/ shoes/ pets/ charms/ wrist/ collectibles/ tickets/`. `.obj`, plus `.gltf` for the animated (`hasAnim`) items, loaded by `client/src/gltf.c` |
 | `textures/` | `public/textures/` | model textures, `previews/` (item previews, `UTILS.getPreview`), `badges/`, `playercards/` (`.webp`, plus the importer's `.webp.png` sidecars for the native HTML engine), `classes/`, ... |
 | `sound/` | `public/sound/` | weapon, class and per-skin sounds |
-| `videos/` | `public/videos/` | skin `video` textures |
+| `videos/` | `public/videos/` | skin `video` textures; the v10 page's `limited_shop_banner.webm` / `tutorial/basics.mp4` (plus `scares/1.mp4`) with their `.knv` frame sidecars for the native HTML engine's `<video>` (`make video-frames`, ui/README.md) |
 | `user-assets/` | `public/user-assets/` | map/AI user assets (`model.gltf`/`.glb`, `sound.mp3`, ...) |
 | `scares/` | `public/scares/` | jump-scare trigger media |
 | `skins.json` | gapi `/data/skins` | the v10.0.2 store table (8069 skins, 19 item types): unpacked with v7.1.4's `src/shim/jspck.js` and run through v10's `applyShopMutations` (templates, noSpin / noSale / limited / limT / tradable fixups) by `tools/ui-import/v10_skins.js`; the pinned live response is `~/.cache/kn-v10/live/api/skins.jspck` (sha256 in `tools/ui-import/v10_store.js`, override with `KN_V10_SKINS`), refreshed by `make store-import` |

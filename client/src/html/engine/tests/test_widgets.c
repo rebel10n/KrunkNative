@@ -234,6 +234,7 @@ static const char *k_extra =
     "<textarea id=\"tb\" rows=\"3\" cols=\"10\" maxlength=\"12\" placeholder=\"Say\" style=\"font-family:gamefont;font-size:16px\"></textarea>"
     "<input id=\"rgz\" type=\"range\" style=\"zoom:2\">"
     "<input id=\"cbz\" type=\"checkbox\" style=\"zoom:0.5\">"
+    "<input id=\"cbu\" type=\"checkbox\" style=\"all:unset\"><input id=\"cbn\" type=\"checkbox\">"
     "<label class=\"switch\"><input id=\"cb\" type=\"checkbox\"><span id=\"cbs\" class=\"slider\"></span></label>"
     "<select id=\"long\" onchange=\"setSetting(&quot;long&quot;, this.value)\"><option value=\"v0\">Alpha</option><option value=\"v1\">Bravo</option><option value=\"v2\">Charlie</option><option value=\"v3\">Chess</option><option value=\"v4\">Delta</option><option value=\"v5\">Echo</option><option value=\"v6\">Foxtrot</option><option value=\"v7\">Golf</option><option value=\"v8\">Hotel</option><option value=\"v9\">India</option><option value=\"v10\">Juliet</option><option value=\"v11\">Kilo</option><option value=\"v12\">Lima</option><option value=\"v13\">Mike</option><option value=\"v14\">November</option><option value=\"v15\">Oscar</option><option value=\"v16\">Papa</option><option value=\"v17\">Quebec</option><option value=\"v18\">Romeo</option><option value=\"v19\">Sierra</option><option value=\"v20\">Tango</option><option value=\"v21\">Uniform</option><option value=\"v22\">Victor</option><option value=\"v23\">Whiskey</option><option value=\"v24\">Xray</option><option value=\"v25\" selected>Yankee</option><option value=\"v26\">Zulu</option><option value=\"v27\">Zebra</option><option value=\"v28\">Zeta</option><option value=\"v29\">Zinc</option></select>"
     "<select id=\"dk\" style=\"background-color:#161616;color:#f2f2f2\"><option value=\"1\">One</option>"
@@ -1120,6 +1121,24 @@ static void test_checkbox(void)
         CHECK(cst && cst->display == CSS_DISPLAY_NONE, ".switch input is display:none");
         widgets_paint(g_w, cb, &g, &a);
         CHECK(dl.n > 0, "a native (appearance:auto) checkbox paints its box when given a geometry (%d items)", dl.n);
+        dl_free(&dl);
+    }
+    /* `all: unset` resets appearance to its initial value, none (Chrome), so a checkbox loses its
+     * native box like an appearance:none one; the UA rule keeps a plain checkbox's auto */
+    {
+        DisplayList dl = {0};
+        WidgetPaintArgs a = {&dl, dl_alloc, NULL, 1.0f, 0};
+        WidgetGeom g = {0, 0, 13, 13, {0, 0, 0, 0}, {0, 0, 0, 0}};
+        const CssComputed *un = cascade_elem_computed(g_dom, by_id("cbu"));
+        const CssComputed *na = cascade_elem_computed(g_dom, by_id("cbn"));
+        CHECK(un && un->appearance == CSS_APPEARANCE_NONE, "all: unset checkbox: appearance none");
+        CHECK(na && na->appearance == CSS_APPEARANCE_AUTO, "UA checkbox: appearance auto");
+        widgets_paint(g_w, by_id("cbu"), &g, &a);
+        CHECK(dl.n == 0, "an all: unset checkbox paints no native box (%d items)", dl.n);
+        dl_free(&dl);
+        memset(&dl, 0, sizeof(dl));
+        widgets_paint(g_w, by_id("cbn"), &g, &a);
+        CHECK(dl.n > 0, "a plain checkbox still paints its native box (%d items)", dl.n);
         dl_free(&dl);
     }
 }

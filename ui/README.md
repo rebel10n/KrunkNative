@@ -24,6 +24,7 @@ options: `tools/ui-import/README.md`) and edited since. Which source each file c
 | `i18n/<code>.json` (es de nl kr pr jp fr fi zh zhtr pl hi ru it tg tr) | Byte-for-byte content of the **served** `https://krunker.io/i18n/<code>.js?v=i41Nu` (what v10's `getTranslations` loads), fetched 2026-10-14 and converted from v10's "key value" line format to JSON by `tools/i18n-import/i18n_import.py`. Details, `i18n/kn/` (Krunker Box Office's own strings) and the gaps: `i18n/README.md`. |
 | `css/fonts/kn-noto-*` | Ours: Noto Sans CJK JP / SC / TC / KR and Noto Sans Devanagari subsets (OFL 1.1, `css/fonts/kn-noto-OFL.txt`) the native engine falls back to for the shipped languages (`i18n/README.md`, "Fonts"). |
 | `css/*.css` (Krunker's), `css/fonts/*`, `img/`, `textures/`, the other images | Byte copies of the served files (URL rewriting only). Each `.woff2` also gets a `.ttf`, and each `.webp` a `.webp.png` sidecar (the engine decodes neither). Files the live hosts 404 on (the Play subsets, `favicon.png`, `pro_scope.png`, ...) are v7.1.4's copies (the retired page's). |
+| `<video>` frame sidecars (`assets/videos/limited_shop_banner.webm.knv`, `assets/videos/tutorial/basics.mp4.knv`, `assets/scares/1.mp4.knv`; gitignored like the rest of `assets/`, shipped with the game content) | **Transcoded** from the v10 page's three videos (the Eterno Shop header, the Guide's Basics clip, `jumpScare(1)`; sha256-pinned in `tools/ui-import/live_assets_v10.lock`, fetched by `make assets-import-live`) by `make video-frames` (`python3 -I tools/ui-import/video_frames.py`: ffmpeg/ffprobe, baseline JPEG frames + a frame table, format in its docstring). The native engine has no video decoder: `client/src/html/engine/video.c` plays a `<video>` from `<file>.knv` next to its source, decoding each frame with the in-tree stb_image as playback reaches it; the web build plays the real file. Re-run after a source video changes (`--check` reports stale sidecars). |
 | `windows/versions.txt` | The served `docs/versions.txt` (changelog). |
 | `windows/` (`<n>.html`, `settings-{basic,advanced}-<t>.html`, `controls-<t>.html`, `windows.json`) | **Rendered**: what v10's own client writes into `#menuWindow` for `showWindow(1..54)`, every settings tab of both views and the five Change Controls tabs, captured by `capture_v10_live.js` (offline mode, below) and kept as `tools/ui-import/krunker-windows-v10.json.gz`; split by `tools/ui-import/windows_v10.py` with `windows_v7.py`'s rules (pickers cut to 4 cards, per-weapon setting clones and the host window's big Advanced bodies dropped, Download Client = ours). Windows 5 (Account) and 14 (Store) are v7.1.4's captures (`"from": "v7.1.4"` in windows.json): offline, v10 shows a guest its login popup instead of Account and cannot build the Store without its API. Slots 11, 12, 22, 28, 29 are empty in v10. The `#classPreviewCanvas` v10 moves into the loadout windows is dropped from the templates (the page keeps the menu's one). |
 | `img/kn-strike-logo.png`, `css/fonts/ChakraPetch-OFL.txt` | Ours (Krunker Strike, `doc/v10/krunker-strike.md`): the real Krunker Strike FRVR logo (`https://krunkerstrike.frvr.com/img/krunker_logo.png`, 1024x348, pinned in `tools/ui-import/live_assets_v10.lock`) that `client/src/ui/flavor_ui.c` puts in place of `#mainLogo` when the Strike flavor is active, and the OFL 1.1 licence of `css/fonts/ChakraPetch-Bold.ttf` (Cadson Demak's Chakra Petch; Krunker v10 serves it, the Strike page uses its 700 weight, `css/krunknative.css` declares the `@font-face`). A base build never shows them. |
@@ -41,15 +42,13 @@ page and pinned client script (`~/.cache/kn-v10/v10.js`, the 2026-10-13 v10.0.2 
 from the mirror with nothing leaving the machine, FRVR's SDK replaced by an inert logged-out
 stand-in, and no API (store data, server lists, news). Files taken from it are marked **rendered**.
 
-What the native engine does not draw on this page. None of these is used by the window
+What the native engine does not draw on this page (`aspect-ratio`, `-webkit-line-clamp` and `<video>`
+are drawn: `<video>` from its frame sidecars, below). None of these is used by the window
 templates, and a headless render of every `showWindow(1..54)`, settings tab and controls tab
 on this page shows no blank window (`make smoke-ui` renders a subset); the stylesheet rules
 that use them degrade as follows: `backdrop-filter` (frosted panels of Svelte popups: Turf Wars
 territory panel, shop header, premium cards, notifications) is ignored, so those panels show
-their plain translucent background; `aspect-ratio` (`.eventBanner`, market / trade / profile
-thumbnails) is ignored, so those boxes size from their content or explicit height; `-webkit-
-line-clamp` (`.eventDesc`, `.pollDesc`) is ignored, so event text is not cut at its line count;
-`mask-*` (`.menuItemIconMask` icons) is ignored, so a masked icon paints as a `currentColor`
+their plain translucent background; `mask-*` (`.menuItemIconMask` icons) is ignored, so a masked icon paints as a `currentColor`
 square; `color-mix()` (`.chalRewTile`, `.titleRow`, `.titleSlotTag`, `.leaderTitle` gradients /
 border) is not parsed, so those declarations are dropped and the tiles lose that tint.
 Images the templates name that neither the mirror nor the retired v7.1.4 page had (broken images, as on v10
