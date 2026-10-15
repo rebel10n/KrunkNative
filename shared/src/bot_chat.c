@@ -347,7 +347,7 @@ static BotChat *bot_chat_get(Game *game, const int create) {
     if (!game->bot_chat && create) {
         BotChat *bc = calloc(1, sizeof(*bc));
         if (!bc) return NULL;
-        bc->enabled = 1;
+        bc->enabled = 0; // off by default: the server turns it on from gameserver.bot_chat (server_configure_bots)
         bc->ai = 1;
         bc->next_id = 1;
         bc->last_global_line = -1000.0f;
@@ -364,7 +364,7 @@ void bot_chat_set_enabled(Game *game, const int on) {
     BotChat *bc = bot_chat_get(game, 1);
     if (bc) bc->enabled = (unsigned char) !!on;
 }
-int bot_chat_enabled(const Game *game) { return !game || !game->bot_chat || game->bot_chat->enabled; }
+int bot_chat_enabled(const Game *game) { return game && game->bot_chat && game->bot_chat->enabled; }
 void bot_chat_set_ai(Game *game, const int on) {
     BotChat *bc = bot_chat_get(game, 1);
     if (bc) bc->ai = (unsigned char) !!on;
@@ -471,8 +471,8 @@ static void queue_line(Game *game, BotChat *bc, const Player *bot, BotChatSpeake
 
 void bot_chat_on_match_end(Game *game, const ModeWinner *winner, Player *const *sorted, const size_t count) {
     if (!game || !game_is_authority(game)) return;
-    BotChat *bc = bot_chat_get(game, 1);
-    if (!bc || !bc->enabled) return;
+    if (!bot_chat_enabled(game)) return; // off: no state, no draws, no lines, no AI request
+    BotChat *bc = game->bot_chat;
     bc->pending_count = 0; // kill / death comments not out yet are dropped: the end screen is the gg moment
 
     const Player *bots[BOT_CHAT_SPEAKERS_MAX];
@@ -546,8 +546,8 @@ void bot_chat_on_match_end(Game *game, const ModeWinner *winner, Player *const *
 void bot_chat_on_kill(Game *game, const Player *victim, const Player *killer) {
     if (!game || !game_is_authority(game) || game->end_timer > 0.0f) return;
     if (!(killer && killer->is_bot) && !(victim && victim->is_bot)) return; // humans only: nothing to allocate
-    BotChat *bc = bot_chat_get(game, 1);
-    if (!bc || !bc->enabled) return;
+    if (!bot_chat_enabled(game)) return; // off: no state, no draws, no lines, no AI request
+    BotChat *bc = game->bot_chat;
     const Player *bot = NULL;
     const Player *other = NULL;
     float chance = 0.0f;

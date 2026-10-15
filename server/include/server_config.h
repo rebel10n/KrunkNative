@@ -120,9 +120,11 @@ typedef struct {
     int bot_quota;
     float bot_quota_grace;
     char bot_difficulty[16];
-    // Bot chat (shared/src/bot_chat.c): bot_chat off = the bots never chat; bot_chat_ai off = their
-    // lines are templates only (never the coordinator's AI gateway, which otherwise writes them
-    // while a signed-in player is in the lobby). Both default on.
+    // Bot chat (shared/src/bot_chat.c): bot_chat off = the bots never chat (no gg, no kill comments,
+    // no in-character lines, no AI request). Default OFF; server.cfg `bot_chat true` turns it on.
+    // bot_chat_ai off = their lines are templates only (never the coordinator's AI gateway, which
+    // otherwise writes them while a signed-in player is in the lobby). bot_chat_ai defaults on; it
+    // only matters while bot_chat is on.
     int bot_chat;
     int bot_chat_ai;
     char log_file[GS_STR_LARGE];         // append every log line here too ("" = stdout/stderr only)

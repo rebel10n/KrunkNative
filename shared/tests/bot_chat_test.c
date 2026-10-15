@@ -361,9 +361,31 @@ static void test_kills(Game *game) {
     CHECK(g_line_count - before <= BOT_CHAT_END_MAX_SPEAKERS, "end screen: only the gg speakers (%d)", g_line_count - before);
 }
 
+// The default is off (gameserver.bot_chat false): no lines, no generation, no AI request, no state.
+static void test_default_off(Game *game) {
+    printf("Running default off test...\n");
+    CHECK(!bot_chat_enabled(game), "bot chat is off by default");
+    game->hooks.bot_banter = test_banter;
+    g_hook_accept = 1;
+    g_hook_calls = 0;
+    g_line_count = 0;
+    for (int r = 0; r < 6; r++) {
+        int f;
+        round_end(game, 8.0f, &f);
+    }
+    CHECK(g_line_count == 0, "default: no bot lines (%d)", g_line_count);
+    CHECK(g_hook_calls == 0, "default: no AI request (%d)", g_hook_calls);
+    const BotChatStats *st = bot_chat_stats(game);
+    CHECK(!st || (st->lines == 0 && st->ai_requests == 0 && st->ends_chatty == 0 && st->ends_silent == 0), "default: nothing generated");
+    game->hooks.bot_banter = NULL;
+}
+
 static void test_off(Game *game) {
     printf("Running off switch test...\n");
     bot_chat_set_enabled(game, 0);
+    game->hooks.bot_banter = test_banter;
+    g_hook_accept = 1;
+    g_hook_calls = 0;
     g_line_count = 0;
     for (int r = 0; r < 6; r++) {
         int f;
@@ -378,6 +400,8 @@ static void test_off(Game *game) {
         tick(game, 0.2f, 30.0f);
     }
     CHECK(g_line_count == 0, "bot_chat off: no lines (%d)", g_line_count);
+    CHECK(g_hook_calls == 0, "bot_chat off: no AI request (%d)", g_hook_calls);
+    game->hooks.bot_banter = NULL;
     bot_chat_set_enabled(game, 1);
 }
 
@@ -409,6 +433,9 @@ int main(void) {
     tick(&game, 1.0f, 30.0f);
     CHECK(bots_spawned(&game) == 5, "5 bots in the game (%d)", bots_spawned(&game));
 
+    test_default_off(&game);
+    bot_chat_set_enabled(&game, 1); // on (gameserver.bot_chat true): the lines come back
+    CHECK(bot_chat_enabled(&game), "on: enabled");
     test_match_end(&game);
     test_ai(&game);
     test_kills(&game);

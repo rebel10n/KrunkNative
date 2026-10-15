@@ -71,7 +71,8 @@ void gs_config_defaults(GsConfig *cfg) {
     cfg->lag_comp_scale = 1.0f;         // x each player's lagComp (ENT slider): 1 = v3.1.1
     gs_copy(cfg->bot_difficulty, sizeof(cfg->bot_difficulty), "normal"); // bots / bot_quota: 0 = no bots
     cfg->bot_quota_grace = 10.0f; // bot_quota: an empty lobby keeps its bots this long
-    cfg->bot_chat = 1;            // bots say gg / comment kills (templates, or kn_brain's AI with bot_chat_ai)
+    cfg->bot_chat = 0;            // off by default: no gg, no kill comments, no AI calls
+                                  // 1 = bots say gg / comment kills (templates, or kn_brain's AI with bot_chat_ai)
     cfg->bot_chat_ai = 1;
 }
 

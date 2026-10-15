@@ -62,7 +62,7 @@ typedef struct {
 typedef struct BotChat_t BotChat;
 
 // Settings (persist across rounds; the server's bot_chat / bot_chat_ai keys, main.c).
-void bot_chat_set_enabled(Game*, int on);        // off: no bot lines at all (default on)
+void bot_chat_set_enabled(Game*, int on);        // off: no bot lines, no AI request (default OFF; gameserver.bot_chat)
 int  bot_chat_enabled(const Game*);
 void bot_chat_set_ai(Game*, int on);             // off: templates only, the hook is never asked (default on)
 int  bot_chat_ai(const Game*);

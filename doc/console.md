@@ -233,7 +233,10 @@ max_players; `kn_gameserver_bots_enabled: false` / `kn_gameserver_instance_bot_q
 Bot chat (`shared/src/bot_chat.c`, Krunker Box Office addition; user, 2026-10-14: "some bots
 should be able to say gg, we don't need more than one or two bots saying it and it should be at
 different intervals"): bots post chat lines like humans do (`NET_PACKET_CHAT`, kind player, the
-bot's uid and name).
+bot's uid and name). **Off by default** (`gameserver.bot_chat` false): with it off the bots send no
+chat at all and make no AI request, and the chat code does not run. Turn it on with server.cfg
+`bot_chat true`, config `gameserver.bot_chat`, env `KN_GAMESERVER_BOT_CHAT=true` or
+`--gameserver.bot_chat=true`.
 - Match end: with a 70% chance (never more than 3 chatty match ends in a row, never more than 2
   silent ones) one or two bots speak, each on its own delay 0.8-7 s after the end and at least
   0.7 s apart. The first says a plain "gg" variant (always a template); the second (or the lone
@@ -251,8 +254,8 @@ bot's uid and name).
   `services/brain/ai.c`: one non-streamed completion with a tight prompt, `ai.banter.*` limits,
   the answer cut to its first line) and posts the answer when it arrives, or the template 6 s
   after the line's delay. Guests-only lobbies, standalone servers and the offline game get
-  templates only. server.cfg / config `bot_chat false` silences the bots, `bot_chat_ai false`
-  keeps them on templates. Tests: `bot_chat_test`, `server/tests/bots_chat_e2e.py` (a stubbed
+  templates only. server.cfg / config `bot_chat` (default false) silences or enables the bots;
+  `bot_chat_ai false` keeps them on templates. Tests: `bot_chat_test`, `server/tests/bots_chat_e2e.py` (a stubbed
   AI gateway: `make bots-chat-e2e`).
 
 AI (`bot_type nextbot`, the default): Idle / Hunt / Attack / Hide with the BotProfile presets

@@ -14,7 +14,8 @@ kn_brain on a sqlite scratch database (services/brain/tests/db_scratch.py) with 
      every line <= 70 characters
   4. kill / death comments while the bots fight: never closer than the global cooldown
   5. the stub gateway goes down: the lines keep coming (templates), no bot line is lost to the error
-  6. a standalone server (no brain): template lines; `bot_chat false`: the bots never chat
+  6. a standalone server (no brain): template lines with `bot_chat true`; with no bot_chat key (the default is
+     off) and with `bot_chat false` the bots never chat
 Prints PASS/FAIL lines; exit code 0 only when everything passed. Exit 77 when sqlite is unavailable.
 """
 import json
@@ -364,19 +365,22 @@ def brain_linked_scenario(up, brain_port, env):
 
 
 def standalone_scenario(env):
-    for enabled in (True, False):
-        gs = os.path.join(WORK, "gs2-%d.json" % enabled)
+    # default (no bot_chat key: off), bot_chat true (on: the lines come back), bot_chat false (off)
+    for label, extra, shown in (("default", {}, "bot_chat unset (default off)"), ("on", {"bot_chat": True}, "bot_chat true"),
+                                ("off", {"bot_chat": False}, "bot_chat false")):
+        enabled = label == "on"
+        gs = os.path.join(WORK, "gs2-%s.json" % label)
         with open(gs, "w") as f:
-            json.dump({"gameserver": {"name": "bots chat standalone", "region": "local", "listen_port": GAME2_PORT,
-                                      "modes": ["ffa"], "maps": ["Sandstorm"], "max_players": 8, "round_seconds": 600,
-                                      "bots": 4, "bot_chat": enabled, "rcon_host": "127.0.0.1", "rcon_port": RCON2_PORT,
-                                      "rcon_password": "rc-pw"}}, f)
-        log = os.path.join(WORK, "gs2-%d.log" % enabled)
+            json.dump({"gameserver": dict({"name": "bots chat standalone", "region": "local", "listen_port": GAME2_PORT,
+                                           "modes": ["ffa"], "maps": ["Sandstorm"], "max_players": 8, "round_seconds": 600,
+                                           "bots": 4, "rcon_host": "127.0.0.1", "rcon_port": RCON2_PORT,
+                                           "rcon_password": "rc-pw"}, **extra)}, f)
+        log = os.path.join(WORK, "gs2-%s.log" % label)
         p = start_server(gs, log, env)
         info = wait_for(lambda: (lambda i: i if i.get("bots", 0) >= 4 else None)(query(GAME2_PORT)), 20)
-        check("standalone server (bot_chat %s) up with 4 bots" % enabled, bool(info), str(info)[:200])
+        check("standalone server (%s) up with 4 bots" % shown, bool(info), str(info)[:200])
         w = Watcher(GAME2_PORT, "Guest_sa")
-        check("guest spawned (standalone)", w.uid is not None)
+        check("guest spawned (standalone, %s)" % label, w.uid is not None)
         w.pump(1.0)
         chatty, lines = [], []
         for i in range(3 if enabled else 4):
@@ -389,7 +393,7 @@ def standalone_scenario(env):
             check("standalone: templated lines without a brain (%s)" % "".join("C" if c else "s" for c in chatty), any(chatty))
         else:
             w.pump(10.0)
-            check("bot_chat false: the bots never chat (%d lines)" % len(w.lines), not w.lines, " | ".join(t for _, _, _, t in w.lines[:3]))
+            check("%s: the bots never chat (%d lines)" % (shown, len(w.lines)), not w.lines, " | ".join(t for _, _, _, t in w.lines[:3]))
         w.close()
         p.terminate()
         try:
