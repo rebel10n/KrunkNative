@@ -13,7 +13,10 @@ one file make one upstream request; paths outside shared/include/user_asset_path
 letters, an unknown file name, dot segments, an encoded slash) answer 404 without reaching the host;
 an upstream 404 answers 404 and is remembered (no second request); an HTML page answered 200 (a CDN's
 block page), a body over the size cap and a redirect (never followed) answer 502 and nothing is cached;
-user_assets.enabled=false answers 503.
+user_assets.enabled=false answers 503. Proxy: with user_assets.upstream on a host name only a stub
+forward proxy knows, KN_USER_ASSETS_PROXY (what the deploy writes from the krunkbox .env) and, without
+it, KN_FETCH_PROXY (the local-run convention) send the fetch through the proxy (absolute-URI GET);
+with neither the fetch fails (502).
 
 Database: as streams_test.py (sqlite here). 77 = skip (no database driver).
 """
@@ -111,6 +114,41 @@ class Host:
         return H
 
 
+class Proxy:
+    """A stub HTTP forward proxy: GET http://upstream.invalid/<path> is answered from `host` (the stub
+    user-asset host). Records the absolute URIs it saw."""
+
+    def __init__(self, host):
+        self.seen = []
+        proxy = self
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                proxy.seen.append(self.path)
+                prefix = "http://upstream.invalid/"
+                if not self.path.startswith(prefix):
+                    self.send_response(502)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                try:
+                    with urllib.request.urlopen(host.url + self.path[len(prefix):], timeout=10) as r:
+                        status, body = r.status, r.read()
+                except urllib.error.HTTPError as e:
+                    status, body = e.code, e.read()
+                self.send_response(status)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.url = "http://127.0.0.1:%d" % self.srv.server_address[1]
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+
 def bound_port(log_path, proc):
     for _ in range(300):
         if proc.poll() is not None:
@@ -132,13 +170,13 @@ def get(port, path, timeout=20):
         return e.code, e.read(), dict(e.headers)
 
 
-def run_brain(env, work, host, tag, more=()):
+def run_brain(env, work, host, tag, more=(), upstream=None, cache="cache"):
     log_path = os.path.join(work, "brain-%s.log" % tag)
     extra = ["--brain.host=127.0.0.1", "--brain.port=0", "--brain.id=uassets-%d" % os.getpid(),
              "--accounts.email.required=false", "--smtp.host=",
              "--accounts.assets_dir=%s" % os.path.join(work, "tree"),
-             "--user_assets.upstream=%s" % host.url,
-             "--user_assets.cache_dir=%s" % os.path.join(work, "cache")] + list(more)
+             "--user_assets.upstream=%s" % (upstream or host.url),
+             "--user_assets.cache_dir=%s" % os.path.join(work, cache)] + list(more)
     with open(log_path, "a") as log:
         proc = subprocess.Popen([BRAIN] + extra, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
     return proc, log_path
@@ -201,7 +239,8 @@ def main():
     host = Host()
     procs = []
     try:
-        env = {k: v for k, v in os.environ.items() if not k.startswith("KN_USER_ASSETS")}
+        env = {k: v for k, v in os.environ.items()
+               if not k.startswith("KN_USER_ASSETS") and k != "KN_FETCH_PROXY" and not k.lower().endswith("_proxy")}
         env.update(dbenv, KN_BRAIN_INTERNAL_SECRET="kn-uassets-test-%d" % os.getpid())
         subprocess.run([BRAIN, "--migrate-only"], cwd=ROOT, env=env, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -220,6 +259,28 @@ def main():
         check(st == 200 and host.count("/9356/texture.png") == 1, "the disk cache answers a restarted brain")
         proc.terminate()
         proc.wait(10)
+
+        proxy = Proxy(host)
+        for tag, var in (("proxy", "KN_USER_ASSETS_PROXY"), ("fetchproxy", "KN_FETCH_PROXY")):
+            print("through a proxy (%s):" % var)
+            proc, log_path = run_brain(dict(env, **{var: proxy.url}), work, host, tag, upstream="http://upstream.invalid/",
+                                       cache="cache-" + tag)
+            procs.append(proc)
+            before = len(proxy.seen)
+            st, body, _ = get(bound_port(log_path, proc), "/api/user-assets/7282/model.obj")
+            check(st == 200 and body == OBJ, "%s: fetched through the proxy" % var)
+            check(proxy.seen[before:] == ["http://upstream.invalid/7282/model.obj"], "%s: the proxy saw the request (%s)" % (var, proxy.seen[before:]))
+            proc.terminate()
+            proc.wait(10)
+        print("no proxy, the same unreachable upstream:")
+        proc, log_path = run_brain(env, work, host, "noproxy", upstream="http://upstream.invalid/", cache="cache-noproxy")
+        procs.append(proc)
+        before = len(proxy.seen)
+        st, _, _ = get(bound_port(log_path, proc), "/api/user-assets/7282/model.obj")
+        check(st == 502 and len(proxy.seen) == before, "502, the proxy not asked (%d)" % st)
+        proc.terminate()
+        proc.wait(10)
+        proxy.srv.shutdown()
 
         print("off (user_assets.enabled=false):")
         proc, log_path = run_brain(env, work, host, "off", ["--user_assets.enabled=false"])

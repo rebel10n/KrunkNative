@@ -30,7 +30,7 @@ static int via(const char *host, const int tls, const char *label) {
 }
 
 static void clear_env(void) {
-    static const char *const VARS[] = {"http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY"};
+    static const char *const VARS[] = {"http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY", "KN_FETCH_PROXY"};
     for (size_t i = 0; i < sizeof(VARS) / sizeof(VARS[0]); i++) unsetenv(VARS[i]);
 }
 
@@ -104,6 +104,18 @@ int main(void) {
     clear_env();
     setenv("HTTPS_PROXY", "ftp://nope", 1);
     check("an invalid environment proxy is ignored", via("krunker.io", 1, NULL));
+    clear_env();
+    // KN_FETCH_PROXY (the dev tools' convention): krunker.io hosts only, before the standard variables
+    setenv("KN_FETCH_PROXY", "127.0.0.1:8888", 1);
+    setenv("HTTPS_PROXY", "http://env.example:3128", 1);
+    check("KN_FETCH_PROXY: user-assets.krunker.io goes through it",
+          via("user-assets.krunker.io", 1, "http://127.0.0.1:8888") && via("gapi.svc.krunker.io", 1, "http://127.0.0.1:8888"));
+    check("KN_FETCH_PROXY: other hosts keep the standard variables", via("coordinator.krunk.io", 1, "http://env.example:3128"));
+    http_proxy_configure("http://setting.example:8080", HTTP_PROXY_SCOPE_KRUNKER);
+    check("KN_FETCH_PROXY: the client setting wins", via("user-assets.krunker.io", 1, "http://setting.example:8080"));
+    http_proxy_configure("", HTTP_PROXY_SCOPE_KRUNKER);
+    setenv("KN_FETCH_PROXY", "ftp://nope", 1);
+    check("KN_FETCH_PROXY: an invalid value is ignored", via("user-assets.krunker.io", 1, "http://env.example:3128"));
     clear_env();
 
     printf("%d/%d passed\n", g_count - g_fail, g_count);

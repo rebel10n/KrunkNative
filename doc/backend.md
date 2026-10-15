@@ -1140,6 +1140,33 @@ No file and no featured creation: empty lists (the popup's "No upcoming events")
 source yet (`/api/streams` is v3.1.1's empty placeholder): put them in the feed as events
 (`tags: ["Stream"]`, a Twitch link). Test: `server/tests/v10_news_e2e.py`.
 
+### 6.7 User-asset mirror (`user_assets.c`): community maps' Krunker user assets
+
+`GET /api/user-assets/<id>/<file>` (alias `/user-assets/<id>/<file>`) mirrors Krunker's user-asset host
+(`https://user-assets.krunker.io/<id>/<file>`) for the clients: community maps name textures, models,
+sounds and resource packs there. Native clients ask Krunker's host first and come here when it refuses
+them (Cloudflare answers 403 to some networks); the web client always comes here (the host sends no
+CORS headers). Paths and content rules: `shared/include/user_asset_path.h` (an asset id, `md<id>` or
+`m<id>`, Krunker's file names; size caps; never an HTML page). Answers from
+`<accounts.assets_dir>/user-assets/`, then `user_assets.cache_dir`, else the upstream (written into the
+cache); an upstream 404 is remembered `user_assets.fail_cache_s`. Config keys: `config/config.example.json`
+`"user_assets"`.
+
+Proxy: the upstream fetch goes through, in order, `KN_USER_ASSETS_PROXY`, `user_assets.proxy`,
+`KN_FETCH_PROXY` (curl syntax; none = direct). Krunker's CDN refuses kru's network as it refuses this
+dev machine's: on kru the deploy (role `kn_brain`, `tasks/user_assets_proxy.yml`) reads `PROXY` from the
+krunkbox service's `/home/kru/krunkbox/.env` (`kn_brain_user_assets_proxy_env`) and writes it as
+`KN_USER_ASSETS_PROXY` into `/etc/krunknative/user-assets.env` (0640 root:kn, an optional
+`EnvironmentFile` of the kn-brain units), with `no_log` on every task that sees the value; only that
+one key is copied (the rest of the .env is not the brain's). No file or no key: nothing changes, the
+mirror fetches directly. Locally `KN_FETCH_PROXY=http://127.0.0.1:8888` (the dev machine's proxy on the
+same network) makes kn_brain and the native client (krunker.io hosts only, `client/src/net/http_proxy.c`)
+fetch through it; players' clients have no such variable and go direct, then to the mirror.
+
+Tests: `services/brain/tests/user_assets_test.py` (ctest `brain_user_assets_e2e`: stub host, stub forward
+proxy for both variables), `deploy/ansible/tests/user_assets_proxy_test.py` (`make deploy-test`: the role's
+tasks on fake .env files, the value never in ansible's output).
+
 ## 7. Social WebSocket, accounts, profiles (svc-accounts)
 
 Owner: svc-accounts. Code: `services/brain/accounts.c` (accounts, sessions, internal

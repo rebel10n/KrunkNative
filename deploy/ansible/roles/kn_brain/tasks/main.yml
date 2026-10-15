@@ -122,6 +122,9 @@
     msg: "KN_AI_UPSTREAM_URL / KN_AI_UPSTREAM_KEY not set: {{ kn_etc_dir }}/ai.env left as it is (the editor's AI answers 503 without it). Source ~/.config/kn-secrets/ai.env or set the KN_AI_UPSTREAM_* CI secrets."
   when: (kn_brain_ai_upstream_url | length == 0) or (kn_brain_ai_upstream_key | length == 0)
 
+- name: User-asset mirror proxy (the krunkbox .env's PROXY)
+  ansible.builtin.include_tasks: user_assets_proxy.yml
+
 - name: Systemd target
   ansible.builtin.copy:
     dest: /etc/systemd/system/krunknative.target

@@ -14,8 +14,9 @@
  * (user_asset_content_ok: never an HTML block page), redirects not followed. Answers, in order:
  *   1. the brain's asset tree (accounts.assets_dir)/user-assets/<rel>: the imported v7 assets;
  *   2. the cache, user_assets.cache_dir (default cache/user-assets): what an earlier request fetched;
- *   3. user_assets.upstream (default Krunker's host) through user_assets.proxy (curl syntax, empty =
- *      direct; KN_USER_ASSETS_PROXY overrides it: a network Krunker's CDN accepts), written into
+ *   3. user_assets.upstream (default Krunker's host) through a proxy when one is set (curl syntax:
+ *      KN_USER_ASSETS_PROXY, which the deploy writes from the krunkbox .env's PROXY on kru, else
+ *      user_assets.proxy, else KN_FETCH_PROXY; none = direct), written into
  *      the cache and answered. An upstream 404 is remembered for user_assets.fail_cache_s (404),
  *      other failures answer 502 and are remembered for a few seconds.
  * At most UA_FETCHES transfers run at once; requests for a path being fetched wait for that fetch.
@@ -389,8 +390,12 @@ int user_assets_init(Brain *b) {
     snprintf(C.upstream, sizeof(C.upstream), "%s", kn_config_str(b->cfg, "user_assets.upstream", USER_ASSET_HOST_URL));
     const size_t ulen = strlen(C.upstream);
     if (ulen && C.upstream[ulen - 1] != '/' && ulen + 1 < sizeof(C.upstream)) C.upstream[ulen] = '/', C.upstream[ulen + 1] = 0;
+    /* KN_USER_ASSETS_PROXY (the deploy writes it from the krunkbox .env), user_assets.proxy, else
+     * KN_FETCH_PROXY (the tools' convention for local runs, e.g. http://127.0.0.1:8888) */
     const char *proxy = getenv("KN_USER_ASSETS_PROXY");
-    snprintf(C.proxy, sizeof(C.proxy), "%s", proxy && *proxy ? proxy : kn_config_str(b->cfg, "user_assets.proxy", ""));
+    if (!proxy || !*proxy) proxy = kn_config_str(b->cfg, "user_assets.proxy", "");
+    if (!proxy || !*proxy) proxy = getenv("KN_FETCH_PROXY");
+    snprintf(C.proxy, sizeof(C.proxy), "%s", proxy ? proxy : "");
     char path[1024];
     const char *cache = kn_config_str(b->cfg, "user_assets.cache_dir", "cache/user-assets");
     if (!kn_config_resolve_path(b->cfg, cache, path, sizeof(path))) snprintf(path, sizeof(path), "%s", cache);

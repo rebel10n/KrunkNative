@@ -230,7 +230,7 @@
     }
   },
   "user_assets": {
-    "_comment": "GET /api/user-assets/<id>/<file> (services/brain/user_assets.c): the clients' mirror of Krunker's user-asset host (community maps' textures, models, sounds, resource packs; the web client cannot read the host itself: no CORS). Answers from <accounts.assets_dir>/user-assets/, then cache_dir, else fetches upstream (through proxy, curl syntax; KN_USER_ASSETS_PROXY overrides it) into cache_dir. An upstream 404 is remembered fail_cache_s, other failures error_cache_s.",
+    "_comment": "GET /api/user-assets/<id>/<file> (services/brain/user_assets.c): the clients' mirror of Krunker's user-asset host (community maps' textures, models, sounds, resource packs; the web client cannot read the host itself: no CORS). Answers from <accounts.assets_dir>/user-assets/, then cache_dir, else fetches upstream into cache_dir, through a proxy when one is set: KN_USER_ASSETS_PROXY (on kru the deploy writes it from the krunkbox .env), else proxy (curl syntax), else KN_FETCH_PROXY. An upstream 404 is remembered fail_cache_s, other failures error_cache_s.",
     "enabled": true,
     "upstream": "https://user-assets.krunker.io/",
     "proxy": "",

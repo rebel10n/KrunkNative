@@ -727,10 +727,11 @@ launcher-online-e2e: build ## Launcher-started client: finder + matchmaker reque
 check: test ks-test editor-mcp-test lint bridge-check deploy-test krunker-build-test ## Everything CI runs that does not need a display
 
 .PHONY: deploy-test
-deploy-test: ## The asset CDN split (deploy/asset-shards.json) + the edge game-server render (Box Office + Krunker Strike instances, firewall, net-bridge allowlist; needs ansible-playbook, else skipped)
+deploy-test: ## The asset CDN split (deploy/asset-shards.json) + the edge game-server render (Box Office + Krunker Strike instances, firewall, net-bridge allowlist; needs ansible-playbook, else skipped); the brain's user-asset proxy from a fake krunkbox .env (ansible, skipped without it)
 	$(PYTHON) -I deploy/pages/asset_shards.py self-test
 	$(PYTHON) -I deploy/pages/assets_cdn_test.py
 	$(PYTHON) -I deploy/ansible/tests/render_test.py
+	$(PYTHON) -I deploy/ansible/tests/user_assets_proxy_test.py; rc=$$?; [ $$rc -eq 0 ] || [ $$rc -eq 77 ]
 
 lint: ## Lint workflow YAML, presets and the web glue scripts (ui/js)
 	@command -v actionlint >/dev/null && actionlint || echo "actionlint not installed, skipping"

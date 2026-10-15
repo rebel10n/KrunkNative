@@ -1,0 +1,40 @@
+# The proxy of kn_brain's user-asset mirror (services/brain/user_assets.c): user-assets.krunker.io
+# answers 403 (Cloudflare) to this network, the krunkbox service's PROXY gets through. Its value is
+# copied from the krunkbox .env (kn_brain_user_assets_proxy_env) into <kn_etc_dir>/user-assets.env as
+# KN_USER_ASSETS_PROXY, the one variable the kn-brain units read from it (EnvironmentFile on the whole
+# .env would hand the brain every other krunkbox setting). Never logged; nothing changes when the file
+# or the key is missing. deploy/ansible/tests/user_assets_proxy_test.py runs this file on a fake .env.
+- name: Read the krunkbox env file (its PROXY; never logged)
+  ansible.builtin.slurp:
+    src: "{{ kn_brain_user_assets_proxy_env }}"
+  register: kn_brain_krunkbox_env
+  failed_when: false
+  no_log: true
+
+- name: Pick its PROXY (never logged)
+  ansible.builtin.set_fact:
+    kn_brain_user_assets_proxy: >-
+      {{ ((kn_brain_krunkbox_env.content | default('') | b64decode).splitlines()
+          | select('match', '^\s*(export\s+)?PROXY\s*=') | list | last | default(''))
+         | regex_replace('^\s*(export\s+)?PROXY\s*=\s*', '') | trim
+         | regex_replace('^"(.*)"$', '\1') | regex_replace("^'(.*)'$", '\1') }}
+  no_log: true
+
+- name: User-asset proxy env file (KN_USER_ASSETS_PROXY, never logged)
+  ansible.builtin.copy:
+    dest: "{{ kn_etc_dir }}/user-assets.env"
+    content: |
+      # Managed by KrunkNative deploy/ansible (role kn_brain): the user-asset mirror's proxy, from
+      # {{ kn_brain_user_assets_proxy_env }} PROXY. Never commit.
+      KN_USER_ASSETS_PROXY={{ kn_brain_user_assets_proxy | string | to_json(ensure_ascii=False) }}
+    owner: "{{ kn_brain_env_owner }}"
+    group: "{{ kn_group }}"
+    mode: "0640"
+  when: kn_brain_user_assets_proxy | length > 0
+  no_log: true
+  notify: Restart kn_brain
+
+- name: Note when there is no krunkbox PROXY
+  ansible.builtin.debug:
+    msg: "No PROXY in {{ kn_brain_user_assets_proxy_env }}: {{ kn_etc_dir }}/user-assets.env left as it is (the user-asset mirror fetches directly)."
+  when: kn_brain_user_assets_proxy | length == 0

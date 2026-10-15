@@ -17,7 +17,7 @@
     "email": { "require_verified": {{ kn_brain_email_require_verified | to_json }} }
   },
   "user_assets": {
-    "_comment": "GET /api/user-assets/<id>/<file> (services/brain/user_assets.c): the clients' mirror of Krunker's user-asset host for community maps. The cache lives in the state dir (the release is read-only and replaced). A network Krunker's CDN refuses: KN_USER_ASSETS_PROXY in {{ kn_etc_dir }}/secrets.env.",
+    "_comment": "GET /api/user-assets/<id>/<file> (services/brain/user_assets.c): the clients' mirror of Krunker's user-asset host for community maps. The cache lives in the state dir (the release is read-only and replaced). Its proxy: KN_USER_ASSETS_PROXY in {{ kn_etc_dir }}/user-assets.env, written from the krunkbox .env's PROXY (tasks/user_assets_proxy.yml).",
     "cache_dir": "{{ kn_state_dir }}/user-assets"
   },
   "ai": {

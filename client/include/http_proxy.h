@@ -7,7 +7,8 @@
 // lobby list krunker.io blocks some networks from) or all client traffic. With the setting empty
 // the standard environment applies to every host: HTTPS_PROXY / https_proxy for https:// and
 // wss:// URLs, HTTP_PROXY / http_proxy for http:// and ws://, then ALL_PROXY / all_proxy, minus
-// NO_PROXY / no_proxy ("*", host names and domain suffixes). Loopback hosts never go through it.
+// NO_PROXY / no_proxy ("*", host names and domain suffixes); KN_FETCH_PROXY (a dev convention, unset
+// for players) goes before them for krunker.io hosts. Loopback hosts never go through it.
 //
 // What uses it: http_conn.c (POSIX: Linux, macOS; the brain's HTTP + social WebSocket, streamed
 // requests, the asset fetch, the launcher's downloads) tunnels every proxied connection, plain or

@@ -231,6 +231,11 @@ int http_proxy_for(const char *host, const int tls, HttpProxy *out) {
     if (set) *out = g_cfg.proxy;
     pthread_mutex_unlock(&g_cfg_lock);
     if (set) return scope == HTTP_PROXY_SCOPE_ALL || http_proxy_host_is_krunker(host);
+    // KN_FETCH_PROXY (the dev tools' convention: fetch_maps.py, fetch_live_assets.py): krunker.io
+    // hosts only, e.g. user-assets.krunker.io for community maps' user assets from a network
+    // Cloudflare refuses. Unset for players: their clients go direct, then to the brain's mirror.
+    const char *fetch = getenv("KN_FETCH_PROXY");
+    if (fetch && *fetch && http_proxy_host_is_krunker(host) && http_proxy_parse(fetch, out)) return 1;
     const char *env = tls ? env2("https_proxy", "HTTPS_PROXY") : env2("http_proxy", "HTTP_PROXY");
     if (!env) env = env2("all_proxy", "ALL_PROXY");
     if (!env || no_proxy_match(host)) return 0;

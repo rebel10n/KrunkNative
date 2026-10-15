@@ -18,6 +18,8 @@ EnvironmentFile={{ kn_etc_dir }}/secrets.env
 EnvironmentFile=-{{ kn_etc_dir }}/smtp.env
 # KN_AI_UPSTREAM_URL / KN_AI_UPSTREAM_KEY (the map editor's AI proxy, services/brain/ai.h), optional.
 EnvironmentFile=-{{ kn_etc_dir }}/ai.env
+# KN_USER_ASSETS_PROXY (the user-asset mirror's proxy, services/brain/user_assets.c), optional; from the krunkbox .env.
+EnvironmentFile=-{{ kn_etc_dir }}/user-assets.env
 # KN_REDIS_URL / _USERNAME / _PREFIX (role kn_redis; password KN_REDIS_PASSWORD in secrets.env):
 # the optional hot tier. Absent or Redis down = the database alone (doc/backend.md 3.11).
 EnvironmentFile=-{{ kn_etc_dir }}/redis.env

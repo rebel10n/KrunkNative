@@ -55,3 +55,7 @@ kn_brain_runtime_packages: [libssl3, libcrypt1, libpq5, libsqlite3-0, libmariadb
 # hiredis (the Redis hot tier, knsvc_redis) by Debian release: 11/12 ship 0.14, 13 ships 1.1.
 kn_brain_hiredis_package: >-
   {{ 'libhiredis1.1.0' if (ansible_facts.distribution_major_version | int) >= 13 else 'libhiredis0.14' }}
+# The user-asset mirror's proxy (tasks/user_assets_proxy.yml): PROXY of this env file (the krunkbox
+# service's, on kru) becomes KN_USER_ASSETS_PROXY in <kn_etc_dir>/user-assets.env. Missing: no proxy.
+kn_brain_user_assets_proxy_env: /home/kru/krunkbox/.env
+kn_brain_env_owner: root
