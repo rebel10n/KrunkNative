@@ -340,6 +340,10 @@ assets-import-v7: ## Import the Krunker content set into assets/ (models, textur
 	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --assets assets
 	node tools/ui-import/gen_viewer_store.js
 
+.PHONY: assets-link
+assets-link: ## In a linked git worktree: symlink the main checkout's gitignored game content (assets/*/*) into assets/ (KN_ASSETS_FROM=<dir> for another source)
+	@tools/assets/link-worktree-assets.sh
+
 assets-check-v7: ## Drift check of assets/ and the generated store tables against the Krunker content set (exit 1 on any difference)
 	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --check --assets assets
 	GEN_CHECK=1 node tools/ui-import/gen_viewer_store.js
@@ -783,6 +787,8 @@ EGL_DEVICE ?=
 UI_DIR ?=
 
 smoke-native: build ## Run the native client offline headless (no window; EGL_DEVICE=nvidia|mesa, UI_DIR=<dir>) and screenshot the menu (/tmp/smoke-native.png)
+	@# the client needs the gitignored game content (fonts first): a fresh worktree links the main checkout's
+	@tools/assets/link-worktree-assets.sh --check || tools/assets/link-worktree-assets.sh
 	@rm -f /tmp/smoke-native.png
 	@env -u DISPLAY -u WAYLAND_DISPLAY KRUNKNATIVE_HEADLESS=1 $(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) \
 	  $(if $(UI_DIR),KRUNKNATIVE_UI_DIR=$(UI_DIR),) \
@@ -797,6 +803,7 @@ smoke-native: build ## Run the native client offline headless (no window; EGL_DE
 # Settings and Change Controls tabs, windows, store, social ...) rendered headless into
 # /tmp/smoke-ui/. Fails on a non-zero exit, an empty frame or a missing window template.
 smoke-ui: build ## Render the page's render-only scenarios headless (/tmp/smoke-ui/*.png)
+	@tools/assets/link-worktree-assets.sh --check || tools/assets/link-worktree-assets.sh
 	@rm -rf /tmp/smoke-ui && mkdir -p /tmp/smoke-ui/cfg
 	@for f in tools/uidiff/scenarios/*.json; do n=$$(basename $$f .json); [ -f tools/uidiff/regions/$$n.json ] && continue; \
 	  env -u DISPLAY -u WAYLAND_DISPLAY KRUNKNATIVE_HEADLESS=1 $(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) \
