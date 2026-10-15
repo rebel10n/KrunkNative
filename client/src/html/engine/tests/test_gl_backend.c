@@ -475,7 +475,7 @@ int main(int argc, char **argv) {
         return 77;
     }
     headless_make_context_current(win);
-    if (!gladLoadGLLoader((GLADloadproc) headless_get_proc_address)) {
+    if (!kn_gl_load(headless_get_proc_address)) {
         fprintf(stderr, "glad failed\n");
         return 2;
     }

@@ -39,6 +39,7 @@
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <store_spins.h>
+#include <ks_game.h> // ks_wall_ms: the portable wall clock
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -77,9 +78,7 @@ static double g_clock_ms; // 0 = real time
 static double menu_now_ms(void) {
     if (g_clock_ms > 0.0) return g_clock_ms;
     if (scenario_on()) return SCENARIO_CLOCK_MS;
-    struct timespec ts;
-    timespec_get(&ts, TIME_UTC);
-    return (double) ts.tv_sec * 1000.0 + (double) ts.tv_nsec / 1e6;
+    return ks_wall_ms(); // portable: MinGW's msvcrt has no timespec_get / TIME_UTC
 }
 
 static long long days_from_civil(long long y, const int m, const int d) { // proleptic Gregorian, 1970-01-01 = 0

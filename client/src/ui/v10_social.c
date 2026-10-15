@@ -218,8 +218,13 @@ static double now_ms(void) {
 
 static void local_tm(const double ms, struct tm *out) {
     const time_t t = (time_t) (ms / 1000.0);
+#ifdef _WIN32 // MinGW's msvcrt declares neither gmtime_r nor localtime_r (v10_market.c's pattern)
+    if (S.scenario) gmtime_s(out, &t); // --render-scenario: the same frame in every time zone
+    else localtime_s(out, &t);
+#else
     if (S.scenario) gmtime_r(&t, out); // --render-scenario: the same frame in every time zone
     else localtime_r(&t, out);
+#endif
 }
 
 // toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) in en-US: "03:07 PM"

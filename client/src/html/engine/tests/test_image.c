@@ -186,7 +186,9 @@ static unsigned char *read_texture(const unsigned tex, const int w, const int h)
     unsigned char *px = malloc((size_t) w * h * 4);
     glBindTexture(GL_TEXTURE_2D, tex);
     glPixelStorei(GL_PACK_ALIGNMENT, 4);
+#ifndef KN_GLES /* desktop GL: texel readback (no glGetTexImage on ES; the ES build skips these checks) */
     glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
+#endif
     glBindTexture(GL_TEXTURE_2D, 0);
     return px;
 }
@@ -364,16 +366,19 @@ static void test_texture_state(ImageCache *cache) {
     CHECK(v == GL_CLAMP_TO_EDGE, "WRAP_T %d", v);
     glGetTexParameteriv(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, &v);
     CHECK(v == 3, "MAX_LEVEL %d, expected 3 (8x8 -> 1x1)", v);
+#ifndef KN_GLES /* desktop GL: per-level queries (no glGetTexLevelParameteriv on ES) */
     glGetTexLevelParameteriv(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT, &v);
     CHECK(v == GL_RGBA8, "internal format 0x%x", v);
     glGetTexLevelParameteriv(GL_TEXTURE_2D, 1, GL_TEXTURE_WIDTH, &v);
     CHECK(v == 4, "mip level 1 width %d", v);
     glGetTexLevelParameteriv(GL_TEXTURE_2D, 3, GL_TEXTURE_WIDTH, &v);
     CHECK(v == 1, "mip level 3 width %d", v);
+#endif
     glBindTexture(GL_TEXTURE_2D, 0);
 
     /* mips are built from premultiplied texels: every level keeps rgb <= a,
      * and a non-square NPOT chain (prem_bg 1277x562) is complete down to 1x1 */
+#ifndef KN_GLES /* desktop GL: mip sizes and texels are read back (glGetTexImage) */
     {
         const ImageEntry *logo = get_loaded(cache, "img/logo_6.png", "index.html");
         glBindTexture(GL_TEXTURE_2D, logo->tex);
@@ -400,6 +405,7 @@ static void test_texture_state(ImageCache *cache) {
         CHECK(lw == 1 && lh == 1, "prem_bg level 10 %dx%d", lw, lh);
         glBindTexture(GL_TEXTURE_2D, 0);
     }
+#endif
 
     /* image_texture(): one texture for both samplings (gl_backend applies GL_NEAREST per
      * draw).  The old readback twin could fail and then the lazy draw path drew nothing. */
@@ -612,12 +618,18 @@ int main(int argc, char **argv) {
     }
 
     headless_make_context_current(window);
-    if (!gladLoadGLLoader((GLADloadproc) headless_get_proc_address)) {
+    if (!kn_gl_load(headless_get_proc_address)) {
         fprintf(stderr, "gladLoadGLLoader failed\n");
         return 2;
     }
 
     printf("GL %s on %s\n", glGetString(GL_VERSION), glGetString(GL_RENDERER));
+#ifdef KN_GLES
+    /* The texel and mip checks read textures back with glGetTexImage and
+     * glGetTexLevelParameteriv, which OpenGL ES does not have: desktop GL only. */
+    printf("image: texel readback is desktop GL only, skipped on OpenGL ES\n");
+    return 77;
+#endif
 
     /* loaders.c leaves the process-global flip flag set; make sure the engine
      * ignores it (it uses the thread-local override). */

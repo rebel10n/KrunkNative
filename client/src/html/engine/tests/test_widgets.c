@@ -1363,7 +1363,7 @@ static void test_gl_render(void)
     win = glfwCreateWindow(64, 64, "test_widgets", NULL, NULL);
     if (!win) { printf("  (no GL context: skipping the render)\n"); return; }
     headless_make_context_current(win);
-    if (!gladLoadGLLoader((GLADloadproc) headless_get_proc_address)) { printf("  (glad failed: skipping the render)\n"); return; }
+    if (!kn_gl_load(headless_get_proc_address)) { printf("  (glad failed: skipping the render)\n"); return; }
     widgets_set_gl_ready(g_w, 1);
     b = glb_create();
     if (!b) { printf("  (glb_create failed: skipping the render)\n"); return; }

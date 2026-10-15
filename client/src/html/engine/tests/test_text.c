@@ -53,7 +53,9 @@ static void read_atlas(TextSystem *ts) {
     if (!g_atlas_pixels) g_atlas_pixels = malloc((size_t) n * (size_t) n);
     glBindTexture(GL_TEXTURE_2D, text_atlas_texture(ts));
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
+#ifndef KN_GLES /* desktop GL: no glGetTexImage on ES (main() skips this test there) */
     glGetTexImage(GL_TEXTURE_2D, 0, GL_RED, GL_UNSIGNED_BYTE, g_atlas_pixels);
+#endif
 }
 
 // Renders a run at device scale and returns its ink bbox (pixels with
@@ -458,8 +460,14 @@ int main(int argc, char **argv) {
     GLFWwindow *win = glfwCreateWindow(64, 64, "text test", NULL, NULL);
     if (!win) { fprintf(stderr, "no GL window\n"); return 77; }
     headless_make_context_current(win);
-    if (!gladLoadGLLoader((GLADloadproc) headless_get_proc_address)) { fprintf(stderr, "glad failed\n"); return 2; }
+    if (!kn_gl_load(headless_get_proc_address)) { fprintf(stderr, "glad failed\n"); return 2; }
     printf("GL: %s\n", glGetString(GL_VERSION));
+#ifdef KN_GLES
+    /* The glyph atlas is read back with glGetTexImage, which OpenGL ES does not have:
+     * the ink bounds checked below need it, so desktop GL only. */
+    printf("text: atlas readback is desktop GL only, skipped on OpenGL ES\n");
+    return 77;
+#endif
 
     TextSystem *ts = text_create(ui_dir);
     if (!ts) { fprintf(stderr, "text_create failed\n"); return 2; }

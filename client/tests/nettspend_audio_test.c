@@ -75,9 +75,9 @@ static long capture_loud_samples(const char *path, long *frames) {
 int main(int argc, char **argv) {
     const char *root = argc > 1 ? argv[1] : ".";
     char probe[1024];
-    snprintf(probe, sizeof(probe), "%s/assets/sound/reload_1.mp3", root);
+    snprintf(probe, sizeof(probe), "%s/assets/sound/kn_drank_reload.mp3", root);
     if (access(probe, R_OK) != 0) {
-        printf("no content tree at %s (assets/sound/reload_1.mp3): skip\n", root);
+        printf("no content tree at %s (assets/sound/kn_drank_reload.mp3): skip\n", root);
         return 77;
     }
 
