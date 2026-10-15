@@ -1091,8 +1091,7 @@ static void cmd_connect(const int argc, char **argv, const char *rest) {
     }
 #endif
     if (!con_client()) return;
-    servers_ui_connect_direct(host, (int) port); // pinned; switch_server leaves an offline game
-    menu_show_connecting(); // CONNECTING... until the server answers
+    servers_ui_connect_direct(host, (int) port); // pinned; switch_server leaves an offline game (its spinner: direct_join)
 }
 
 // disconnect: socket closed, back to the menu, and nothing reconnects (no matchmaker seek,

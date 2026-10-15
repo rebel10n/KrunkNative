@@ -593,8 +593,15 @@ typedef struct {
 typedef enum {
     NET_STATUS_NONE = 0,
     NET_STATUS_CONNECTED,
-    NET_STATUS_FAILED, // connect attempt failed or the session dropped; see net_status_error
+    NET_STATUS_FAILED, // connect attempt failed or the session dropped; see net_status_error (final: see net_status_final)
+    NET_STATUS_CONNECTING, // a switch closed the session on purpose, or a retry is under way: the page's loading spinner
 } NetStatus;
+
+// Retry budget of the transports (net.c, net_web.c, net_wt.c): this many failed connect attempts /
+// unstable sessions in a row and the client gives up. A give-up is a final NET_STATUS_FAILED ("Disconnected:
+// gave up after N attempts"), the page shows the disconnected screen with Retry (client_net_request_reconnect).
+// Until then every failure is NET_STATUS_FAILED but not final: the page keeps its loading spinner.
+#define NET_RETRY_BUDGET 5
 
 typedef struct {
     GLFWwindow *window;
@@ -648,6 +655,7 @@ typedef struct {
     // NET_STATUS_FAILED details (under net_lock) for menu_poll_connection: a live session dropped
     // (not a kick / server stop / connect failure: servers_ui.c rejoins), v7's "Code:" / "Reason:".
     int net_status_dropped;
+    int net_status_gave_up;        // the NET_STATUS_FAILED is the retry budget's give-up (client_net_give_up): the page's disconnected screen
     int net_close_intended;        // a server switch / quit closes the session on purpose: not a drop (no rejoin)
     int net_status_close_code;
     char net_status_close_reason[24];
@@ -768,6 +776,9 @@ void on_client_socket_failed(Client*, const char*); // connect attempt failed wi
 // first call per session wins (the most specific cause is reported first).
 void client_net_set_drop(Client*, const char *tag, int close_code, const char *fmt, ...) __attribute__((format(printf, 4, 5)));
 void client_net_request_reconnect(Client*);        // page `reconnect`: retry now instead of after the backoff
+// The retry budget is spent (any transport, any thread): hold the transport (only the page's reconnect
+// tries again) and report a final NET_STATUS_FAILED "Disconnected: gave up after <attempts> attempts".
+void client_net_give_up(Client*, int attempts);
 // Krunker disconnect(reason, code): close the remote session for good (no auto-retry until
 // client_net_request_reconnect); NET_STATUS_FAILED carries reason/code. No-op without a session.
 #define CLIENT_HAVE_NET_DISCONNECT 1

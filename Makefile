@@ -594,6 +594,10 @@ client-proxy-e2e: build ## Settings > Client > Proxy: krunker.io's lobby list th
 auto-restart-e2e: build ## Auto-restart for updates: a server update (004004) restarts the client through the launcher / itself and it rejoins the lobby / server; the web page reloads with its query (WEB_DIST=dist/web; kn_brain + server_bin + headless client; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I server/tests/auto_restart_e2e.py $(DEBUG_DIR) $(WEB_DIST)
 
+.PHONY: connect-ux-e2e
+connect-ux-e2e: build ## Server switch / reconnect shows the loading spinner, not a lost connection; the disconnected screen with Retry only after the retry budget (headless; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 300 $(PYTHON) -I server/tests/connect_ux_e2e.py $(DEBUG_DIR)
+
 .PHONY: console-reload-test
 console-reload-test: build ## Dev console kept in the window (off-screen save, resize, F11, drag, console_reset) + the console's full reload in place and its restart fallback (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I server/tests/console_reload_e2e.py $(DEBUG_DIR)

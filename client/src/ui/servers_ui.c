@@ -126,6 +126,13 @@ static void rejoin_cancel(void) {
     menu_update_instructions(); // the error screen's "Rejoining..." line goes
 }
 
+// The transport gave up (client_net_give_up): the retry budget is spent, so no rejoin runs any more.
+void servers_ui_gave_up(void) {
+    g_rejoin_seek = 0;
+    g_rejoin_next = 0;
+    rejoin_cancel();
+}
+
 // windows[1]
 static cJSON *g_games;           // serverListData (array of tuples, owned)
 static double g_total_players, g_social_players;
@@ -243,6 +250,22 @@ static int hide_full(void) {
 
 // ------------------------------------------------------------------ joining
 
+static const char *row_i(const cJSON *t); // the lobby row's map (defined with the list rows)
+
+// The map of a lobby the list knows ("Loading <map> ..." while the switch connects); NULL = not known.
+static const char *game_map(const char *id) {
+    if (!id || !id[0] || !g_games) return NULL;
+    const cJSON *t;
+    cJSON_ArrayForEach(t, g_games) {
+        const char *gid = cJSON_GetStringValue(cJSON_GetArrayItem(t, 0));
+        if (gid && !strcmp(gid, id)) {
+            const char *map = row_i(t);
+            return map && map[0] ? map : NULL;
+        }
+    }
+    return NULL;
+}
+
 // joinServer(host, port, gameId, clientKey): point the transport at the game server.
 // region: the lobby's (a seek answer's; NULL = unknown, looked up in the game list).
 static void join_server(const char *host, const int port, const char *game_id, const char *client_key, const char *web_url,
@@ -289,6 +312,7 @@ static void join_server(const char *host, const int port, const char *game_id, c
 
     printf("[mm] joining %s at %s:%d\n", g_game_id, host, port);
     page_game_url(g_game_id, NULL);
+    menu_show_connecting_map(game_map(g_game_id)); // the spinner, "Loading <map> ..." for the lobby's map
     client_net_switch_server(client);
 }
 
@@ -550,6 +574,7 @@ void servers_ui_invite_link(char *out, const size_t n) {
 
 // fatalError(message): the connection error screen (retry link = seek again)
 static void fatal_error(const char *message) {
+    g_client->net_hold_retry = 1; // a seek that failed: no transport retry, the page shows the error (final)
     on_client_socket_failed(g_client, message);
 }
 
@@ -785,6 +810,7 @@ static int strike_seek(const int priv, const char *code) {
 static void seek(const char *game_id, const int auto_change, void *quiet) {
     char path[3072], enc[512];
     g_pin = PIN_NONE;
+    if (g_client && !g_client->net_connected && !menu_connecting()) menu_show_connecting_map(NULL); // looking for the server: the spinner
     g_rejoin_seek = g_rejoin_next;
     g_rejoin_next = 0;
     if (!g_rejoin_seek) rejoin_cancel(); // any other matchmaking action replaces a pending rejoin
@@ -1786,6 +1812,7 @@ static void direct_join(const char *host, const int port) {
     pthread_mutex_unlock(&g_client->net_lock);
     printf("[mm] direct connect %s:%d (%s mode)\n", host, port, online_mode_name());
     menu_show_window(MENU_WINDOW_NONE, 0);
+    menu_show_connecting_map(NULL); // CONNECTING: the spinner until the server answers
     client_net_switch_server(g_client);
 }
 
@@ -2122,8 +2149,7 @@ static void connect_server(const char *text) {
         return;
     }
     printf("[mm] connect window: %s:%d\n", host, port);
-    servers_ui_connect_direct(host, port); // pinned, like the console's connect
-    menu_show_connecting();                // CONNECTING... until the server answers
+    servers_ui_connect_direct(host, port); // pinned, like the console's connect (its spinner: direct_join)
 }
 
 // The menu's Connect button, injected once after Join (#menuBtnJoin).

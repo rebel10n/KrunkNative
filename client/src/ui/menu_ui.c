@@ -53,10 +53,6 @@
 // After closing the menu the pointer lock request is asynchronous in browsers; do not
 // treat "not locked yet" as "lock lost" for this long.
 #define MENU_LOCK_GRACE_SECONDS 1.0
-// How long "CONNECTING..." may stay up with no connection event from the transport
-// before the page shows the connection error screen on its own (the transport reports
-// every failed attempt within ~2 s, so this only covers a hung transport).
-#define CONNECT_TIMEOUT_MS 6000.0
 // Failures repeat every retry; identical text is re-applied at most this often.
 #define MENU_CONNECT_ERROR_REPEAT_SECONDS 5.0
 #define SPEECH_BUBBLE_MS 2100.0
@@ -692,6 +688,7 @@ int menu_error_screen_shown(void) {
 static void menu_apply_error_screen(const int on) {
     if (on == g_error_screen) return;
     g_error_screen = on;
+    if (on) menu_log("error screen: %s", g_ui.connect_error);
     // v10: both go above the menu layer while the box shows (main.css .onError)
     HtmlElem holder = by_id("instructionHolder"), update_bg = by_id("instructionsUpdateBG");
     if (holder) html_dom_set_class(holder, "onError", on);
@@ -1030,7 +1027,10 @@ void menu_update_instructions(void) {
             else
                 sb_appendf(&eb, "<div style='margin-top:10px;font-size:15px;color:rgba(255,255,255,0.4)'>%s</div>", I18N("error.extentions", "If you have any extensions, disable them"));
         }
-        sb_appendf(&eb, "<div class=\"instructionsTabs\">" MENU_ERROR_TAB("knRetry()", "%s"), find ? find : "Find Game");
+        // Retry: the give-up's button (menu_retry_connect: the pinned server again, else a fresh seek);
+        // an inactivity kick keeps v10's Find Game alone
+        sb_appendf(&eb, "<div class=\"instructionsTabs\">" MENU_ERROR_TAB("knRetry()", "%s"),
+                   inactive ? (find ? find : "Find Game") : I18N("kn.error.retry", "Retry"));
         if (!inactive)
             sb_appendf(&eb, MENU_ERROR_TAB("knHostOffline()", "%s") MENU_ERROR_TAB("showWindow(2)", "Servers") MENU_ERROR_TAB("showWindow(1)", "Settings"),
                        I18N("kn.error.playOffline", "Play Offline"));
@@ -1389,32 +1389,47 @@ void menu_commit_account_name(void) {
 
 // ---------------------------------------------------------------- connection / play
 
-static void connect_timer_fire(void *user) {
-    (void) user;
-    g_ui.connect_timer = 0;
-    if (g_ui.connected || g_ui.connect_error[0]) return;
-    snprintf(g_ui.connect_error, sizeof(g_ui.connect_error), "%s", CONNECT_ERROR_DEFAULT);
-    snprintf(g_connect_code, sizeof(g_connect_code), "000001"); // Krunker: io connect error -> disconnect(null, "000001")
-    menu_update_instructions();
+// ---- the connecting spinner: a server switch, a reconnect, a retry within the transport's budget
+// A server change looks like a game load, not like a lost connection (v10 loads every game on a
+// fresh page: the boot curtain and the ring, with "Loading <map> ..." as loadGamNm). The spinner
+// stays up until the connection is in (its INIT lifts the curtain) or the transport gives up (the
+// Lost Connection screen with Retry). g_connect_map is the target's map ("" = the ring alone, the
+// map is not known yet).
+static int g_connecting;          // the spinner is up for a connect under way
+static char g_connect_map[96];    // its target's map, for "Loading <map> ..."
+
+int menu_connecting(void) {
+    return g_connecting;
 }
 
-static void arm_connect_timer(void) {
-    if (g_ui.connect_timer) html_timer_cancel(g_ui.connect_timer);
-    g_ui.connect_timer = html_timer_add(CONNECT_TIMEOUT_MS, connect_timer_fire, NULL);
+// Starts the spinner for a connect to a server whose game (map) is `map` ("" or NULL: not known).
+// Idempotent: a later call (the lobby's map once the join is answered) only updates the text.
+void menu_show_connecting_map(const char *map) {
+    snprintf(g_connect_map, sizeof(g_connect_map), "%s", map ? map : "");
+    if (!g_connecting) {
+        g_connecting = 1;
+        g_ui.connected = 0;
+        g_ui.ready = 0;
+        g_ui.connect_error[0] = 0;
+        if (g_ui.client) g_ui.client->menu_connect_sent = 0;
+        if (g_ui.dom_ready && !g_boot_curtain) menu_boot_arm(0);
+    }
+    if (g_connect_map[0]) menu_load_gam_set(LOAD_GAM_LOADING, g_connect_map);
+    else menu_load_gam_set(LOAD_GAM_NONE, "");
+    menu_log("connecting (%s)", g_connect_map[0] ? g_connect_map : "the lobby's map not known yet");
+    menu_update_top_bar();
+    menu_update_instructions();
 }
 
 // The old `connect {connected, error}` event, applied directly.
 static void menu_set_connect(const int connected, const char *error, const char *code) {
     Client *client = g_ui.client;
+    g_connecting = 0;
     g_ui.connected = !!connected;
     if (connected) g_ui.connect_error[0] = 0;
     else snprintf(g_ui.connect_error, sizeof(g_ui.connect_error), "%s", error && error[0] ? error : CONNECT_ERROR_DEFAULT);
     snprintf(g_connect_code, sizeof(g_connect_code), "%s", !connected && code && code[0] ? code : "000000");
     if (connected) menu_idle_reset(); // Krunker's retry link reloads the page: a fresh idle timer
-    if (g_ui.connect_timer) {
-        html_timer_cancel(g_ui.connect_timer);
-        g_ui.connect_timer = 0;
-    }
     if (!connected) g_ui.ready = 0; // the next INIT (reconnect) makes the client ready again
     client->menu_connect_sent = connected ? 1 : 0;
     menu_update_top_bar();
@@ -1494,38 +1509,49 @@ void menu_host_offline(void) {
         if (!g_load_gam_map[0]) g_load_gam = LOAD_GAM_NONE;
         menu_boot_arm(0);
     }
+    g_connecting = 0; // a local game is not a connect: "Hosting", not the spinner
     g_ui.connect_error[0] = 0;
-    arm_connect_timer();
     menu_update_instructions();
     request_pointer_lock_if_web();
     menu_request_play(1);
 }
 
-// CONNECTING... (the error screen goes) until the server answers or the timer fires.
+// The loading spinner for a reconnect / retry to the page's own game: v10's "Loading <map> ..." with
+// the curtain until its INIT. A server switch names the target's map (menu_show_connecting_map).
 void menu_show_connecting(void) {
-    // v10 joins every game on a fresh page (switchGame / backToOrigin): the curtain until its INIT
-    menu_load_gam_set(LOAD_GAM_NONE, "");
-    if (g_ui.dom_ready) menu_boot_arm(0);
-    g_ui.connect_error[0] = 0;
-    arm_connect_timer();
-    menu_update_instructions();
+    menu_show_connecting_map(g_ui.map_name);
 }
 
-// The error screen's "here" link: ask for an immediate reconnect (natively the net
-// thread retries on its own with a backoff anyway). Pinned to a direct server
-// (servers_ui.c) it retries that server; otherwise with a brain it seeks a new game.
+// The error screen's Retry (and "Find Game" on a screen that has no server of its own): a new try at
+// the same server (pinned: the transport) or a fresh seek for a brain session (servers_ui.c).
 void menu_retry_connect(void) {
-    menu_show_connecting();
     if (client_is_connected(g_ui.client)) {
         g_boot_any = 1; // nothing is left: the game still loaded lifts the curtain again
         return;
     }
+    menu_show_connecting();
     if (servers_ui_retry()) return; // brain matchmaker: seek a new game (servers_ui.c)
     client_net_request_reconnect(g_ui.client);
 }
 
 // Main-thread half of the connection events: consume the NetStatus the transport left
 // under net_lock (events.c), keep net_connected truthful and update the page.
+// The spinner (menu_show_connecting_map) with the target's text kept as it is.
+static void connecting_spinner(void) {
+    char map[sizeof(g_connect_map)];
+    snprintf(map, sizeof(map), "%s", g_connect_map);
+    menu_show_connecting_map(map);
+}
+
+// Main-thread half of the connection events: consume the NetStatus the transport left
+// under net_lock (events.c), keep net_connected truthful and update the page.
+// What the page shows for each event (v10 loads every server change like a game load):
+//   CONNECTING                              the spinner (a switch: the old session closed on purpose)
+//   FAILED, the transport retries itself    the spinner (a connect attempt failed, within the budget)
+//   FAILED, a rejoin is under way           the spinner ("Rejoining a game..." is not shown)
+//   FAILED, a server update (004004)        the Game Updating screen with its rejoin line (v10's notice)
+//   FAILED, held (a server ERROR, a
+//     disconnect, a give-up)                the Lost Connection screen with Retry (the give-up's text)
 static void menu_poll_connection(Client *client) {
     char error[sizeof(client->net_status_error)];
     char code[sizeof(client->net_status_code)];
@@ -1537,6 +1563,7 @@ static void menu_poll_connection(Client *client) {
     memcpy(error, client->net_status_error, sizeof(error));
     memcpy(code, client->net_status_code, sizeof(code)); // "(Error 0x<code>)": 000005 idle kick, 000001 connect error / lost session
     const int dropped = client->net_status_dropped, close_code = client->net_status_close_code;
+    const int gave_up = client->net_status_gave_up;
     memcpy(close_reason, client->net_status_close_reason, sizeof(close_reason));
     pthread_mutex_unlock(&client->net_lock);
 
@@ -1546,6 +1573,8 @@ static void menu_poll_connection(Client *client) {
                             (g_ui.ready || client->me != NULL || client->game.player_count > 0);
     if (status == NET_STATUS_CONNECTED) {
         client->net_connected = 1;
+    } else if (status == NET_STATUS_CONNECTING) {
+        client->net_connected = 0; // a switch closed the session on purpose: the next one follows (spinner below)
     } else if (status == NET_STATUS_FAILED) {
         client->net_connected = 0;
         online_mode_session_ended(); // its rights and live sign-ins went with it
@@ -1563,17 +1592,12 @@ static void menu_poll_connection(Client *client) {
         }
     }
 
-    // KrunkNative: a server shutdown / a refused join key rejoins through the matchmaker with a
-    // fresh ticket (servers_ui.c); meanwhile its connect errors keep the server's message up
-    int keep_screen = 0;
+    // KrunkNative: a server shutdown / a refused join key / a lost session rejoins through the
+    // matchmaker with a fresh ticket (servers_ui.c); a give-up is final and ends every rejoin.
+    int rejoining = 0;
     if (status == NET_STATUS_FAILED) {
-        const int was_rejoining = servers_ui_rejoining();
-        servers_ui_connection_lost(error, sizeof(error), code, dropped, had_session);
-        keep_screen = was_rejoining && !dropped && !strcmp(code, "000001");
-        if (!keep_screen) {
-            g_connect_close_code = close_code;
-            snprintf(g_connect_close_reason, sizeof(g_connect_close_reason), "%s", close_reason);
-        }
+        if (gave_up) servers_ui_gave_up();
+        else rejoining = servers_ui_connection_lost(error, sizeof(error), code, dropped, had_session);
     }
 
     if (!html_ui_available() || !g_ui.dom_ready) return;
@@ -1583,15 +1607,42 @@ static void menu_poll_connection(Client *client) {
             menu_set_connect(1, NULL, NULL);
             client->menu_connect_error[0] = 0;
         }
-    } else if (status == NET_STATUS_FAILED && !keep_screen) {
-        const double now = glfwGetTime();
-        const int changed = client->menu_connect_sent != 0 || strcmp(error, client->menu_connect_error) != 0;
+        return;
+    }
+    if (status == NET_STATUS_CONNECTING) {
+        connecting_spinner();
+        return;
+    }
+    if (status != NET_STATUS_FAILED) return;
 
-        if (changed || now - client->menu_connect_error_time >= MENU_CONNECT_ERROR_REPEAT_SECONDS) {
-            menu_set_connect(0, error, code);
-            memcpy(client->menu_connect_error, error, sizeof(client->menu_connect_error));
-            client->menu_connect_error_time = now;
+    // the Game Updating screen: a server update (004004) while we rejoin, or it stays up for the rejoin
+    // (its failed connects do not replace the server's message)
+    const int updating_box = !strcmp(g_ui.connect_error, "GAME UPDATING");
+    if (rejoining && (updating_box || !strcmp(code, NET_ERROR_CODE_UPDATING))) {
+        if (!updating_box) {
+            g_connect_close_code = close_code;
+            snprintf(g_connect_close_reason, sizeof(g_connect_close_reason), "%s", close_reason);
+            menu_set_connect(0, "GAME UPDATING", code);
         }
+        return;
+    }
+
+    // a transport that retries by itself (within its budget) or a rejoin under way: the spinner
+    const int transport_retries = !gave_up && !client->net_hold_retry && !client->net_should_quit;
+    if (rejoining || transport_retries) {
+        connecting_spinner();
+        return;
+    }
+
+    // held: a server's ERROR (kick, ban, refused join key with no rejoin), a user disconnect, or the give-up
+    g_connect_close_code = close_code;
+    snprintf(g_connect_close_reason, sizeof(g_connect_close_reason), "%s", close_reason);
+    const double now = glfwGetTime();
+    const int changed = client->menu_connect_sent != 0 || strcmp(error, client->menu_connect_error) != 0;
+    if (changed || now - client->menu_connect_error_time >= MENU_CONNECT_ERROR_REPEAT_SECONDS) {
+        menu_set_connect(0, error, code);
+        memcpy(client->menu_connect_error, error, sizeof(client->menu_connect_error));
+        client->menu_connect_error_time = now;
     }
 }
 
@@ -1831,7 +1882,6 @@ static void menu_dom_init(void) {
 
     // bridgeReady
     g_ui.dom_ready = 1;
-    if (!g_ui.connected && !g_ui.connect_error[0]) arm_connect_timer();
     ui_settings_push_saved();
     ui_client_settings_dom_init(); // Exit button, custom CSS, auto spectate, Discord/auto-join timer
     v10_rewards_dom_init();        // v10.0.2 rewards: the sidebar's Battle Pass item, windows[32] (v10_rewards.c)

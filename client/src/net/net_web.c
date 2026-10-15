@@ -53,6 +53,10 @@ static void net_web_schedule_reconnect(Client *client) {
     if (client->net_hold_retry) return; // server ERROR: only the page's `reconnect` tries again
 
     g_web_failures++;
+    if (g_web_failures >= NET_RETRY_BUDGET) { // the retry budget is spent: the page's disconnected screen, with Retry
+        client_net_give_up(client, g_web_failures);
+        return;
+    }
     int delay = NET_WEB_RETRY_MILLIS;
     for (int i = 1; i < g_web_failures && delay < NET_WEB_RETRY_MAX_MILLIS; i++) delay *= 2;
     if (delay > NET_WEB_RETRY_MAX_MILLIS) delay = NET_WEB_RETRY_MAX_MILLIS;
@@ -249,6 +253,7 @@ int net_web_connect(Client *client) {
     if (net_wt_connect(client)) return 1; // UDP-style transport first: knet over WebTransport (net_wt.c)
 
     if (!emscripten_websocket_is_supported()) {
+        client->net_hold_retry = 1; // no WebSocket will ever open here: final, the disconnected screen
         on_client_socket_failed(client, "WebSockets are not supported by this browser");
         return 0;
     }

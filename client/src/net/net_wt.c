@@ -28,6 +28,8 @@
 #define WT_RETRY_MILLIS 2000
 #define WT_BACKOFF_FIRST 20.0        // s before a backend that failed to open is tried again
 #define WT_BACKOFF_MAX 300.0         // ... doubling per consecutive failure up to this
+#define WT_STABLE_SECONDS 10.0       // a knet session that lasted this long is not a quick drop (retry budget)
+static int g_wt_quick_drops;         // consecutive knet sessions lost within WT_STABLE_SECONDS (NET_RETRY_BUDGET)
 
 enum { WT_IDLE, WT_OPENING, WT_HANDSHAKE, WT_UP };
 
@@ -241,7 +243,11 @@ static void wt_finish(const char *why) {
         client->net_socket = -1;
         pthread_mutex_unlock(&client->net_lock);
         on_client_socket_disconnect(client);
-        if (!g_wt.reconnect_pending && !client->net_should_quit && !client->offline && !client->net_hold_retry) {
+        // the retry budget: sessions that keep dropping right away (not one that lasted) give up
+        g_wt_quick_drops = wt_now() - g_wt.up_at < WT_STABLE_SECONDS ? g_wt_quick_drops + 1 : 1;
+        if (g_wt_quick_drops >= NET_RETRY_BUDGET && !client->net_should_quit && !client->offline && !client->net_hold_retry) {
+            client_net_give_up(client, g_wt_quick_drops);
+        } else if (!g_wt.reconnect_pending && !client->net_should_quit && !client->offline && !client->net_hold_retry) {
             g_wt.reconnect_pending = 1; // the same transport first (net_wt_connect: it is healthy)
             client_net_note(NET_NOTE_INFO, "reconnecting in %d s (%s first)", WT_RETRY_MILLIS / 1000, wt_label_of(g_wt.backend));
             emscripten_async_call(wt_reconnect_later, client, WT_RETRY_MILLIS);

@@ -173,6 +173,14 @@ static int net_retry_sleep(Client *client, const int failures) {
     return explicit_retry ? 0 : failures;
 }
 
+// The retry budget (NET_RETRY_BUDGET): the failure count that spent it gives up instead of sleeping.
+// The page shows the spinner until then (every failure is reported non-final, events.c).
+// A held transport (a server ERROR, or a session the rejoin owns) reports its own reason: not a give-up.
+static int net_retry_wait(Client *client, const int failures) {
+    if (failures >= NET_RETRY_BUDGET && !client->net_should_quit && !client->net_hold_retry) client_net_give_up(client, failures);
+    return net_retry_sleep(client, failures);
+}
+
 static void net_set_non_blocking(const int client_socket) {
 #ifdef WIN32
     unsigned long non_blocking = 1;
@@ -303,7 +311,7 @@ void *net_main(void *user_data) {
             if (udp != 0 || udp_mode > 0) {
                 if (udp == 0 && !client->net_should_quit) on_client_socket_failed(client, "No UDP answer from the server");
                 failures = udp > 0 && time(NULL) - udp_started >= NET_SESSION_STABLE_SECONDS ? 1 : failures + 1;
-                if (!client->net_should_quit) failures = net_retry_sleep(client, failures);
+                if (!client->net_should_quit) failures = net_retry_wait(client, failures);
                 continue;
             }
             client_net_note(NET_NOTE_WARN, "no UDP (knet) answer from %s:%u, using TCP", client->net_address, (unsigned int) client->net_port);
@@ -313,7 +321,7 @@ void *net_main(void *user_data) {
 
         if (client_socket < 0) {
             on_client_socket_error(client, NET_ERRNO);
-            failures = net_retry_sleep(client, failures + 1);
+            failures = net_retry_wait(client, failures + 1);
             continue;
         }
 
@@ -324,7 +332,7 @@ void *net_main(void *user_data) {
 
             if (!client->net_should_quit) {
                 on_client_socket_error(client, connect_error);
-                failures = net_retry_sleep(client, failures + 1);
+                failures = net_retry_wait(client, failures + 1);
             }
 
             continue;
@@ -361,7 +369,7 @@ void *net_main(void *user_data) {
         on_client_socket_disconnect(client);
 
         failures = time(NULL) - session_started >= NET_SESSION_STABLE_SECONDS ? 1 : failures + 1;
-        if (!client->net_should_quit) failures = net_retry_sleep(client, failures);
+        if (!client->net_should_quit) failures = net_retry_wait(client, failures);
     }
 
     return NULL;
@@ -388,7 +396,10 @@ void client_net_stop(Client *client, const char *reason) {
     client->net_hold_retry = 0;
     client->net_retry_now = 0;
     client->net_connected = 0;
-    if (!had_session) on_client_socket_failed(client, reason ? reason : "Disconnected"); // stopped while (re)trying
+    if (!had_session) { // stopped while (re)trying: the page's disconnected screen (final, not a spinner)
+        client->net_hold_retry = 1;
+        on_client_socket_failed(client, reason ? reason : "Disconnected");
+    }
 }
 
 // Brain matchmaking: move the session to client->net_address:net_port (set by the
@@ -423,6 +434,7 @@ void client_net_switch_server(Client *client) {
     args.client = client;
     args.address = NULL; // client->net_address as set by the matchmaker
     if (pthread_create(&client->net_thread, NULL, net_main, &args)) {
+        client->net_hold_retry = 1; // no thread will retry: final
         on_client_socket_failed(client, "Failed to start network thread");
         return;
     }

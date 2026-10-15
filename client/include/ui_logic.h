@@ -78,7 +78,6 @@ typedef struct {
     int name_set;           // a nickname was saved/committed (else #accName stays empty)
 
     char connect_error[160]; // text of the connection error screen; "" while connected/connecting
-    int connect_timer;       // CONNECT_TIMEOUT_MS watchdog (html_timer id, 0 = none)
     int bubble_timer;        // speech bubble hide timer
     int rect_timer;          // coalesced sendPreviewRect (setTimeout 0)
 
@@ -129,7 +128,9 @@ void menu_schedule_rect(void);                   // scheduleRect
 void menu_play(void);                            // play
 void menu_host_offline(void);                    // hostOffline
 void menu_retry_connect(void);                   // retryConnect
-void menu_show_connecting(void);                 // CONNECTING... + the connect timeout, no reconnect / seek
+void menu_show_connecting(void);                 // the loading spinner for a reconnect / retry (the page's map)
+void menu_show_connecting_map(const char *map);  // the spinner for a server switch to the game on `map` ("" / NULL: not known)
+int  menu_connecting(void);                     // the spinner is up (a connect under way)
 // v10.0.2 boot curtain (#instructionsFadeBG until the first INIT, then its 0.7 s fade), #loadGamNm
 // and the auto-respawn countdown (menu_ui.c)
 void menu_auto_respawn_begin(const Client *client); // the death delay ended: autoRespawn(forceSpawn + 1)

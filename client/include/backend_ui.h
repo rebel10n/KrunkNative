@@ -143,6 +143,8 @@ int  servers_ui_find_new_game(void);         // F4 / Quick Match per Settings > 
 // A live session's server stopping for an update (004004) restarts the client instead when
 // Settings > Client > Auto-restart is on (game_reload.h): the new process rejoins the lobby.
 int  servers_ui_connection_lost(char *error, size_t error_size, const char *code, int dropped, int had_session);
+// The transport gave up (the retry budget is spent, client_net_give_up): no rejoin any more.
+void servers_ui_gave_up(void);
 int  servers_ui_rejoining(void);             // 1 = a rejoin is due / seeking, or the client restarts (the error screen says so)
 const char *servers_ui_rejoin_text(void);    // "Reconnecting..." / "Rejoining a game..." / "Restarting..." for that line
 // A restart's resume (game_reload.c): hold the startup seek, then rejoin the lobby the old

@@ -16,6 +16,7 @@
 static void net_set_status_code(Client *client, const NetStatus status, const char *error, const char *code) {
     pthread_mutex_lock(&client->net_lock);
     client->net_status = status;
+    client->net_status_gave_up = 0;
     snprintf(client->net_status_code, sizeof(client->net_status_code), "%s", code ? code : "");
     strncpy(client->net_status_error, error ? error : "", sizeof(client->net_status_error) - 1);
     client->net_status_error[sizeof(client->net_status_error) - 1] = 0;
@@ -90,9 +91,9 @@ void on_client_socket_disconnect(Client *client) {
         return;
     }
 
-    if (intended) { // a server switch (or a stop without a reason): the next session follows
-        net_set_status_code(client, NET_STATUS_FAILED, "Disconnected from server", "000000");
-        printf("disconnected from server (switching)\n");
+    if (intended) { // a server switch: the next session follows at once, the page shows its loading spinner
+        net_set_status_code(client, NET_STATUS_CONNECTING, "", "");
+        printf("switching servers (the session closed on purpose)\n");
         return;
     }
 
@@ -185,4 +186,28 @@ void client_net_request_reconnect(Client *client) {
 #else
     client->net_retry_now = 1; // net_main() polls this inside its retry sleep
 #endif
+}
+
+// The retry budget is spent (NET_RETRY_BUDGET failed attempts in a row): the transport holds
+// (net_hold_retry, like a server ERROR: only the page's Retry starts it again), so the page shows
+// the disconnected screen with its Retry button. Any other failure is reported with the transport
+// still retrying, which the page shows as the loading spinner.
+void client_net_give_up(Client *client, const int attempts) {
+    client->net_hold_retry = 1;
+    char last[sizeof(client->net_status_error)], message[sizeof(client->net_status_error)];
+    pthread_mutex_lock(&client->net_lock);
+    snprintf(last, sizeof(last), "%s", client->net_status_error);
+    pthread_mutex_unlock(&client->net_lock);
+    // the last attempt's own text, unless it already says "Disconnected" (a lost session's reason)
+    if (last[0] && strncmp(last, "Disconnected", 12) != 0) snprintf(message, sizeof(message), "Disconnected: gave up after %d attempts (%s)", attempts, last);
+    else if (last[0]) snprintf(message, sizeof(message), "%s; gave up after %d attempts", last, attempts);
+    else snprintf(message, sizeof(message), "Disconnected: gave up after %d attempts", attempts);
+    net_set_status_code(client, NET_STATUS_FAILED, message, "000001");
+    pthread_mutex_lock(&client->net_lock);
+    client->net_status_dropped = 0; // not a lost session for servers_ui.c: the give-up is final
+    client->net_status_close_code = 0;
+    client->net_status_close_reason[0] = 0;
+    client->net_status_gave_up = 1;
+    pthread_mutex_unlock(&client->net_lock);
+    printf("[net] gave up after %d attempts: %s\n", attempts, last[0] ? last : "no answer");
 }

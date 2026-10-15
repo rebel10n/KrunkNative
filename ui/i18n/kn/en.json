@@ -210,6 +210,7 @@
  "kn.error.playOffline": "Play Offline",
  "kn.error.reconnect": "Reconnect",
  "kn.error.restartingUpdate": "Restarting for an update",
+ "kn.error.retry": "Retry",
  "kn.games.loadFailed": "Failed to load the game.",
  "kn.host.created": "Game Created",
  "kn.host.creating": "Creating Game...",
