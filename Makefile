@@ -566,6 +566,10 @@ mm-token-e2e: build ## Matchmaker token (generate-token -> seek-game -> join tic
 client-proxy-e2e: build ## Settings > Client > Proxy: krunker.io's lobby list through a stub HTTP CONNECT / SOCKS5 proxy, persisted, live change, HTTP_PROXY, the ACCESS DENIED message (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I server/tests/client_proxy_e2e.py $(DEBUG_DIR)
 
+.PHONY: auto-restart-e2e
+auto-restart-e2e: build ## Auto-restart for updates: a server update (004004) restarts the client through the launcher / itself and it rejoins the lobby / server; the web page reloads with its query (WEB_DIST=dist/web; kn_brain + server_bin + headless client; EGL_DEVICE=...)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I server/tests/auto_restart_e2e.py $(DEBUG_DIR) $(WEB_DIST)
+
 .PHONY: console-reload-test
 console-reload-test: build ## Dev console kept in the window (off-screen save, resize, F11, drag, console_reset) + the console's full reload in place and its restart fallback (headless; EGL_DEVICE=...)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) $(PYTHON) -I server/tests/console_reload_e2e.py $(DEBUG_DIR)
@@ -637,7 +641,7 @@ backend-run: build services ## Foreground variant of backend-up (ctrl-c stops al
 # headless (EGL_DEVICE=...; LAUNCHER_E2E_ARGS=--no-client skips it).
 LAUNCHER_E2E_ARGS ?=
 .PHONY: launcher-e2e
-launcher-e2e: build ## Launcher + updates server end to end: executable update, self-update, content diff, deb, corrupt package, the client's Update now
+launcher-e2e: build ## Launcher + updates server end to end: executable update, self-update, content diff, deb, corrupt package, the client's Update now, Auto-restart for updates (mid-match defers to the match end, the menu restarts, a refused package restarts once)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I launcher/tests/launcher_e2e.py $(DEBUG_DIR) $(LAUNCHER_E2E_ARGS)
 
 # A launcher-started client is online (launcher/tests/launcher_online_e2e.py): stub finder +

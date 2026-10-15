@@ -90,6 +90,13 @@ int app_route_url(const char *url);
 // itself with its command line (page switches like --editor dropped: the game page).
 // Returns only when that failed.
 void app_reload(const char *url);
+// Natively: the command line app_reload re-executes (argv[0] = the executable, page switches
+// dropped, NULL-terminated); NULL on the web. A restart through the launcher passes it on.
+char *const *app_exec_args(void);
+// Natively, right before this process is replaced or exits for a restart (app_reload, the
+// launcher restart): the input-script handover (KRUNKNATIVE_INPUT_SCRIPT_RELAUNCH) and the
+// window state (client_render_window_before_exec) for the new process.
+void app_reload_prepare(void);
 
 // Editor "Test Map" (Krunker opens the game with the map): the game window (natively: the
 // existing one is raised, else a new one opens with `--game testMap=1`; web:

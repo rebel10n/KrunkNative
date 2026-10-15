@@ -14,6 +14,7 @@
 // ?game=<id>: the web build does exactly that, the native client re-seeks in place.
 #include <backend.h>
 #include <backend_ui.h>
+#include <game_reload.h> // game_reload_server_updating: the auto-restart on a server update
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <map_catalog.h>
@@ -60,6 +61,8 @@ static const struct {
 static Client *g_client;
 static int g_brain_mode;
 static int g_started;            // the startup seek ran
+static int g_startup_hold;       // a restart's resume holds the startup seek (servers_ui_hold_startup_seek)
+static char g_pending_play[96], g_pending_game[160]; // ?play= / ?game= (servers_ui_query), taken by the startup seek / tick
 static double g_start_time;
 static char g_region[32];        // region id the client seeks in
 static char g_exclude_game[160]; // v10 Quick Match: the next seek's excludeGame (the lobby it leaves)
@@ -1861,7 +1864,7 @@ static int connection_dropped(char *error, const size_t error_size) {
 // Main thread, for every NET_STATUS_FAILED (menu_ui.c menu_poll_connection): error / code are
 // what the screen shows; error may be rewritten. dropped: the transport lost a live session
 // without a server ERROR (events.c). 1 = a rejoin is under way.
-int servers_ui_connection_lost(char *error, const size_t error_size, const char *code, const int dropped) {
+int servers_ui_connection_lost(char *error, const size_t error_size, const char *code, const int dropped, const int had_session) {
     if (!g_client || g_client->offline || !code) return servers_ui_rejoining();
     // the game needs its server password (v10 ENTER_CODE -> gameCode()): ask; Submit joins again
     if (!dropped && !strcmp(code, NET_ERROR_CODE_PASSWORD) && !ci_contains(error, "too many")) v10_party_password_prompt();
@@ -1870,6 +1873,20 @@ int servers_ui_connection_lost(char *error, const size_t error_size, const char 
     const int key = !strcmp(code, NET_ERROR_CODE_TICKET) && ci_contains(error, "join key");
     if ((!restart && !key) || g_pin == PIN_IDLE) return servers_ui_rejoining();
     const double now = glfwGetTime();
+    // The server of a live session stops for an update (004004: "restarting for an update,
+    // reconnect after"; a drain refuses new connections with the same code, but those never had a
+    // session). Settings > Client > Auto-restart (default on): the client restarts itself and the
+    // new process rejoins this lobby (the restart rejoin's backoff) or the direct server; no
+    // in-place rejoin here, the screen keeps the server's message with "Restarting..." meanwhile.
+    if (had_session && !strcmp(code, NET_ERROR_CODE_UPDATING)) {
+        const int lobby = g_brain_mode && g_pin != PIN_DIRECT && backend_available() == 1 && g_game_id[0];
+        if (game_reload_server_updating(g_client, lobby ? g_game_id : NULL)) {
+            g_server_gone = 1;
+            rejoin_cancel();
+            menu_update_instructions();
+            return 1;
+        }
+    }
     if (!g_brain_mode || g_pin == PIN_DIRECT || backend_available() != 1) {
         if (!restart) return servers_ui_rejoining();
         // a direct server: the transport (holding after the ERROR) tries the address again
@@ -1909,15 +1926,47 @@ int servers_ui_connection_lost(char *error, const size_t error_size, const char 
 
 // 1 while a rejoin is due or its seek / connection runs (the error screen says "Rejoining...").
 int servers_ui_rejoining(void) {
+    if (game_reload_restart_pending()) return 1; // the client restarts for the update (game_reload.c)
     return g_rejoin != REJOIN_NONE && (g_rejoin_at > 0.0 || g_rejoin_seek || g_rejoin == REJOIN_DIRECT);
 }
 
 // The error screen's line while rejoining: the same lobby again after a lost connection or on a
-// direct server, else a (possibly other) game through the matchmaker.
+// direct server, else a (possibly other) game through the matchmaker; "Restarting..." while the
+// client restarts for an update.
 const char *servers_ui_rejoin_text(void) {
+    if (game_reload_restart_pending()) return I18N("kn.update.restarting", "Restarting...");
     if (g_rejoin == REJOIN_DROP || g_rejoin == REJOIN_DIRECT || servers_ui_pinned() || !g_brain_mode)
         return I18N("kn.mm.reconnecting", "Reconnecting...");
     return I18N("kn.mm.rejoining", "Rejoining a game...");
+}
+
+// A restart's resume (game_reload.c): no startup seek until servers_ui_resume_rejoin says which
+// lobby, or the resume gives up (hold 0).
+void servers_ui_hold_startup_seek(const int hold) {
+    g_startup_hold = hold;
+}
+
+// The new process after a restart for a server update: the lobby the old one was in, sought
+// again like after its ERROR (REJOIN_RESTART: a fresh ticket for the same game id once the
+// matchmaker lists it, every REJOIN_RETRY_DELAY for REJOIN_WINDOW, else the region's best lobby
+// with autoChangeGame). The error screen shows the server's message meanwhile.
+void servers_ui_resume_rejoin(const char *game_id) {
+    g_startup_hold = 0;
+    g_started = 1; // no startup seek: this is it
+    g_pending_game[0] = 0; // the page's ?game= names this lobby too (the web's address bar)
+    if (!g_brain_mode || !g_client) {
+        printf("[mm] resume: no matchmaker, the lobby %s cannot be rejoined\n", game_id ? game_id : "");
+        return;
+    }
+    const double now = glfwGetTime();
+    g_pin = PIN_NONE;
+    g_server_gone = 1;
+    g_rejoin = REJOIN_RESTART;
+    g_rejoin_at = now + REJOIN_FIRST_DELAY;
+    g_rejoin_until = now + REJOIN_WINDOW;
+    snprintf(g_rejoin_game, sizeof(g_rejoin_game), "%s", game_id ? game_id : "");
+    printf("[mm] resume after the server's update: rejoining %s through the matchmaker\n", g_rejoin_game[0] ? g_rejoin_game : "the region's best lobby");
+    menu_show_connect_error("GAME UPDATING", NET_ERROR_CODE_UPDATING); // the Game Updating screen with "Rejoining a game..."
 }
 
 static void rejoin_tick(Client *client) {
@@ -3001,7 +3050,6 @@ const char *ui_host_checked_map(void) {
 // (GET /api/map-data) and played in the offline game when no brain lobby can host them.
 static char g_play_name[96];
 static int g_play_catalogue;
-static char g_pending_play[96], g_pending_game[160];
 
 static void on_map_data(void *user, const int status, const char *body, const size_t length) {
     (void) user;
@@ -3282,6 +3330,7 @@ void servers_ui_tick(Client *client) {
     }
     if (!g_brain_mode) return;
     if (!g_started) {
+        if (g_startup_hold) return; // a restart's resume rejoins its lobby instead (servers_ui_resume_rejoin)
         // readyLoad restores the saved session before the seek; wait briefly for it so
         // the lobby sees the account (the ticket carries it).
         char token[8] = "";

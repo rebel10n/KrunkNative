@@ -1733,7 +1733,9 @@ ticket), `session` = the social session token, `name` reserved (guests stay
 Error codes (`shared.h` `NET_ERROR_CODE_*`): `004001` invalid/expired ticket or session, guests
 refused; `004002` logged in elsewhere; `004003` banned; `004004` server draining or stopping for
 an update (`"GAME UPDATING"`); `004006` server stopped (8.5). The client rejoins through the
-matchmaker on `004004` / `004006` and on a refused join key (9.4).
+matchmaker on `004004` / `004006` and on a refused join key (9.4); `004004` on a live session is
+"restarting for an update, reconnect after": with Settings > Client > "Auto-restart for updates"
+(default on) the client restarts itself first (9.4, `client/include/game_reload.h`).
 
 ### 8.4 Lobby state, stats and rewards
 
@@ -2173,6 +2175,19 @@ menu re-seeks the same lobby so the server attaches (or drops) the account.
    tries ("gave up after 4 quick reconnects"). The gateways tell their players before a restart (doc/transport.md
    "Goodbyes"): "GAME UPDATING" / "Server restarting" (004004 / 004006), the restart rejoin
    above.
+   Auto-restart for updates (Settings > Client, default on; `client/src/game_reload.c`): `004004`
+   on a session that had been joined (a drain refusing a new connection sends it too) shows the
+   Game Updating screen with "Restarting..." for 1.5 s, then restarts the client instead of
+   rejoining in place. Natively a launcher-started client restarts through the launcher
+   (`krunknative --wait-pid PID -- <the same command line>`: its update check runs first, so a
+   newer build that passed `staged_client_runs` is what comes back), else it re-executes itself
+   (F4's restart; a replaced executable is the new build). The new process gets
+   `KRUNKNATIVE_RELOAD_RESUME` = `rejoin <lobby id>` (or `connect host:port` for a direct server),
+   skips the startup seek and runs the restart rejoin above for that lobby. The web page reloads
+   (`location.reload()`: `?game=` / `?ws=` / the rest of the query kept; the lobby id goes through
+   `sessionStorage` `knRejoin`). Off: the in-place rejoin. Tests: `make auto-restart-e2e`
+   (`server/tests/auto_restart_e2e.py`: lobby through a stand-in launcher, new pid, same lobby;
+   direct server via exec; the web reload with its query), `restart_rejoin_e2e.py` case 4 (off).
 
 Servers window (2): `GET /mm/game-list` + `GET /api/player-count` (cached
 `serverBrowserRate` 10 s), region groups, Custom Games group (`meta.cs`), search, Hide
@@ -2422,9 +2437,17 @@ connection code with OpenSSL; Windows: WinHTTP with the system certificate store
 runs only with `KRUNKNATIVE_UPDATES_URL`), and when a newer build exists shows a box in the menu's
 left column above v7's notices: **Outdated** (orange) or **Update available** (yellow), the latest
 version, **Update now** (only under the launcher, for self-updating installs: starts the launcher
-with `--wait-pid` and quits; never forced mid-game) and **Download** (the deb/rpm/archive for this
+with `--wait-pid PID -- <the client's command line>` and quits) and **Download** (the deb/rpm/archive for this
 install, else the release page; only `github.com/rebel10n/KrunkNative/` and the updates host are
 opened). Console: `update` (status), `update check`, `update now` (menu open only), `update download`.
+With Settings > Client > **Auto-restart for updates** (default on; `client/src/game_reload.c`) a
+build Update now could install restarts the client by itself: in the menu after 1.5 s, in a match
+never while playing but 5 s after the match ends or when the menu next shows outside a match (Esc
+or a death mid-match does not count; the box says "Restarts after this match"). A restart for a build the launcher then could not install (corrupt package, the
+staged client does not run here) brings the installed client back (the launcher starts it instead
+of waiting for a click) and `KRUNKNATIVE_UPDATE_TRIED` keeps it from restarting for that build
+again. The web build compares its page's `<meta name="kn-build">` with the live page's (hourly): a
+newer deploy is "Update available" and the same automatic restart, as `location.reload()`.
 
 **Download window** (`client/src/ui/download_ui.c`, the header's "Download Our Client" = v7's
 `showWindow(25)`; `/?download` opens it, the hub's app badges link there): every package of the

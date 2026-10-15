@@ -37,6 +37,9 @@ const char *ui_client_settings_reload(void);
 
 // ---- game side
 int  client_settings_hs_sound_always(void);              // "Always Play HS Sound on Kill"
+// "Auto-restart for updates" (default on, game_reload.h): the client restarts itself (the web
+// page reloads) when the server stops for an update or a newer client is ready to run.
+int  client_settings_auto_restart(void);
 void client_settings_fullscreen_size(int *w, int *h);    // "Resolution" for exclusive fullscreen (unchanged when unset)
 
 // ---- UI (client/src/ui)

@@ -2759,9 +2759,11 @@ typedef struct {
 
 // NetErrorPacket codes the client acts on (doc/backend.md 8.3 / 8.5; the rest are shown only):
 // a refused join ticket makes a matchmade client seek a fresh one (once); the two shutdown
-// codes make it rejoin through the matchmaker (fresh ticket) once the server is gone.
+// codes make it rejoin through the matchmaker (fresh ticket) once the server is gone. 004004 on
+// a live session is the explicit "restarting for an update, reconnect after": the client restarts
+// itself (the web page reloads) and the new process rejoins the same lobby (game_reload.h).
 #define NET_ERROR_CODE_TICKET "004001"   // invalid / expired join key or session, guests refused
-#define NET_ERROR_CODE_UPDATING "004004" // "GAME UPDATING": draining, or stopping for an update
+#define NET_ERROR_CODE_UPDATING "004004" // "GAME UPDATING": draining (a refused connect), or stopping for an update (rejoin after)
 #define NET_ERROR_CODE_SHUTDOWN "004006" // the server stopped (restart / shutdown / console quit)
 #define NET_ERROR_CODE_PASSWORD "004005" // the server password (gameserver.password) is missing / wrong / locked out
 #define NET_ERROR_CODE_FLAVOR "004007"   // a cross-flavor peer (Krunker Strike vs Krunker Box Office); shown, not acted on

@@ -63,7 +63,7 @@ const SCREEN = "(() => { const u = document.getElementById('instructionsUpdate')
     if (report.sessionAgain && report.screens.length) break;
   }
   if (report.sessionAgain) report.inGameAgain = await play(deadline + 20000);
-  report.console = lines.slice(mark).filter(l => /disconnected|\[mm\]|session|transport|reconnect|websocket|\[rtc\]|ERROR|EXCEPTION/i.test(l)).slice(0, 40);
+  report.console = lines.slice(mark).filter(l => /disconnected|\[mm\]|\[reload\]|session|transport|reconnect|websocket|\[rtc\]|ERROR|EXCEPTION/i.test(l)).slice(0, 40);
   console.log(JSON.stringify(report));
   process.exit(0);
 })().catch((e) => { console.error(e); process.exit(2); });

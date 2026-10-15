@@ -510,6 +510,13 @@ static int run_phase(LauncherUi *ui) {
         pthread_join(t, NULL);
         if (L.cancel) return 0;
         if (L.ok || !ui) return L.ok ? 1 : (L.can_play ? 2 : 0);
+        // the client restarted itself for an update (--wait-pid: Update now, the auto-restart): a
+        // failed update (e.g. the staged client does not run here) starts the installed client
+        // again instead of waiting for a click; the client then keeps offering the download
+        if (L.wait_pid > 0 && L.can_play) {
+            printf("[launcher] the update failed: starting the installed client\n");
+            return 2;
+        }
         // the error stays on screen until the user picks
         for (;;) {
             pthread_mutex_lock(&L.lock);

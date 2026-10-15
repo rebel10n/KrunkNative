@@ -20,6 +20,19 @@ launcher with their embedded commit id patched (same length), so they report ano
   5  corrupt package on the server: refused by its sha256, the install stays as it was
   6  the client itself (headless, --offline): detects "outdated" from the manifest and `update
      now` restarts through KRUNKNATIVE_LAUNCHER (a stand-in that records its arguments)
+  7  Auto-restart for updates (Settings > Client, default on; client/include/game_reload.h), the
+     real launcher (KRUNKNATIVE_LAUNCHER = the install's own) and a second channel manifest
+     (no game content set, a package without assets/: nothing is written outside the scratch dir):
+     a  in a match (offline game): the newer build is found mid-match (the manifest answers 503
+        until the player is in game, then `update check`) and the client does NOT restart while
+        playing; the match ends (`end`): it restarts through the launcher, which installs the
+        update (sha256, the staged client's --version check) and starts the new client with the
+        same command line, back in the offline game
+     b  in the menu: the newer build restarts the client right away; the new client is current
+     c  a package the launcher refuses (corrupt): one restart, the launcher starts the installed
+        client again, which does not restart for that build a second time (no loop)
+     d  a package whose client does not run here (launcher.c staged_client_runs): the same, the
+        install never gets the staged client
 """
 import argparse
 import hashlib
@@ -73,6 +86,10 @@ def run(cmd, env=None, cwd=None, timeout=120):
     return p.returncode, p.stdout.decode(errors="replace")
 
 
+AUTO_GATE = threading.Event()  # step 7: /auto/ answers 503 until set
+AUTO_GATE.set()
+
+
 class Log:
     def __init__(self):
         self.lock = threading.Lock()
@@ -94,6 +111,9 @@ def serve(root, port, log):
         def do_GET(self):
             with log.lock:
                 log.paths.append(self.path)
+            if self.path.startswith("/auto/") and not AUTO_GATE.is_set():
+                self.send_error(503)
+                return
             super().do_GET()
 
         def log_message(self, *a):
@@ -139,6 +159,170 @@ def tree_state(root):
 
 def objects_fetched(paths):
     return sorted(p.rsplit("/", 1)[1] for p in paths if "/assets/objects/" in p)
+
+
+AUTO_PIDS = set()  # step 7: client / launcher processes of our installs (killed at the end)
+
+
+def pids_of(inst):
+    """pids whose executable lies in the install dir inst (our scratch installs only)."""
+    out = []
+    for d in os.listdir("/proc"):
+        if not d.isdigit():
+            continue
+        try:
+            exe = os.readlink("/proc/%s/exe" % d)
+            with open("/proc/%s/stat" % d) as f:
+                zombie = f.read().split(")")[-1].split()[0] == "Z"
+        except OSError:
+            continue
+        if not zombie and exe.startswith(inst.rstrip("/") + "/"):
+            out.append(int(d))
+    return out
+
+
+def kill_tree_pid(pid):
+    for sig in (15, 9):
+        try:
+            os.kill(pid, sig)
+        except OSError:
+            return
+        for _ in range(50):
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                return
+            time.sleep(0.1)
+
+
+def private_assets(tmp):
+    """A game content dir of symlinks to the checkout's assets/ entries: step 7's manifest has no
+    content set and its packages no assets/, so the launcher writes nothing into it."""
+    root = os.path.join(tmp, "auto-assets")
+    if not os.path.isdir(root):
+        os.makedirs(root)
+        real = os.path.realpath(os.path.join(REPO, "assets"))
+        for entry in os.listdir(real):
+            os.symlink(os.path.realpath(os.path.join(real, entry)), os.path.join(root, entry))
+    return root
+
+
+def auto_restart_steps(tmp, env, srv_root, port, plat, marker, new_bins, kn_build, new12, old12, client_bin, launcher_bin):
+    store = os.path.join(srv_root, "auto", "client")
+    pkg_name = f"krunknative-client-{plat}.tar.gz"
+    pkg_files = {
+        "client_bin": (read(os.path.join(new_bins, "client_bin")), 0o755),
+        "krunknative": (read(os.path.join(new_bins, "krunknative")), 0o755),
+        "ui/index.html": (b"<html>new</html>", 0o644),
+        "kn-install.json": (json.dumps(marker).encode(), 0o644),
+    }
+    os.makedirs(os.path.join(store, "builds", new12))
+    pkg = os.path.join(store, "builds", new12, pkg_name)
+    make_package(pkg, f"krunknative-client-{plat}", pkg_files)
+    good = read(pkg)
+    manifest = {"format": 1, "channel": "latest", "build": json.loads(kn_build),
+                "platforms": {plat: {"update": {"url": f"builds/{new12}/{pkg_name}", "sha256": sha256(good), "size": len(good)}}}}
+    write(os.path.join(store, "latest.json"), json.dumps(manifest))
+    url = f"http://127.0.0.1:{port}/auto/client/latest.json"
+    assets = private_assets(tmp)
+
+    def run_auto(name, args, script, relaunch, gate_on=None, timeout=180):
+        inst = os.path.join(tmp, name)
+        os.makedirs(inst)
+        shutil.copy2(client_bin, os.path.join(inst, "client_bin"))  # the old build (no assets/: see private_assets)
+        shutil.copy2(launcher_bin, os.path.join(inst, "krunknative"))
+        write(os.path.join(inst, "ui", "index.html"), "<html>old</html>")
+        write(os.path.join(inst, "kn-install.json"), json.dumps(dict(marker, package="tar.gz")))
+        write(os.path.join(tmp, name + ".script"), script)
+        write(os.path.join(tmp, name + "-relaunch.script"), relaunch)
+        cenv = dict(env)
+        cenv.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_ASSETS_DIR": assets, "KRUNKNATIVE_UI_DIR": os.path.join(REPO, "ui"),
+                     "KRUNKNATIVE_LAUNCHER": os.path.join(inst, "krunknative"), "KRUNKNATIVE_UPDATES_URL": url,
+                     "KRUNKNATIVE_INPUT_SCRIPT": os.path.join(tmp, name + ".script"),
+                     "KRUNKNATIVE_INPUT_SCRIPT_RELAUNCH": os.path.join(tmp, name + "-relaunch.script"),
+                     "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "KRUNKNATIVE_WINDOW_SIZE": "640x360",
+                     "XDG_CONFIG_HOME": os.path.join(tmp, name + "-cfg"), "XDG_STATE_HOME": os.path.join(tmp, name + "-state")})
+        log = os.path.join(tmp, name + ".log")
+        if gate_on:
+            AUTO_GATE.clear()
+        p = subprocess.Popen(["stdbuf", "-oL", "-eL", os.path.join(inst, "client_bin")] + args, cwd=inst, env=cenv,
+                             stdout=open(log, "w"), stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, start_new_session=True)
+        AUTO_PIDS.add(p.pid)
+        end = time.time() + timeout
+        while time.time() < end:
+            text = read(log).decode(errors="replace")
+            if gate_on and not AUTO_GATE.is_set() and re.search(gate_on, text):
+                AUTO_GATE.set()
+            p.poll()
+            live = pids_of(inst)
+            AUTO_PIDS.update(live)
+            if p.returncode is not None and not live:
+                break
+            time.sleep(0.2)
+        else:
+            check(False, f"{name}: the clients finished in time")
+        for pid in pids_of(inst):
+            kill_tree_pid(pid)
+        AUTO_GATE.set()
+        return inst, read(log).decode(errors="replace")
+
+    # 7a: in a match. The newer build is found while playing; the restart waits for the match end.
+    print("7a auto-restart: in a match")
+    inst, out = run_auto("auto-match", ["--offline"],
+                         "0 play\n1000 state\n3000 con update check\n9000 state\n9500 con end\n60000 quit\n",
+                         "0 play\n2000 state\n8000 quit\n", gate_on=r"\[input_script\] state t=")
+    print("\n".join("     " + line for line in out.splitlines() if re.match(r"\[(update|reload|launcher)\]", line)))
+    found = out.find("[reload] a newer client is ready")
+    restart = out.find("[update] restarting through")
+    st = [m.group(1) for m in re.finditer(r"\[input_script\] state t=\d+ slot=\S+ weapon=.+? menu=(\d)", out)]
+    check(found >= 0 and "(Update now: via the launcher)" in out, "7a: the client finds the newer build (mid-match)")
+    check(found >= 0 and restart > found and "the match ended, restarting" in out[found:restart] and len(st) >= 2 and st[1] == "0",
+          "7a: no restart while playing (still in game after the check), only once the match ended")
+    check(f"updated to v9.9.9-1-g{new12[:7]}" in out and read(os.path.join(inst, "client_bin")) == pkg_files["client_bin"][0],
+          "7a: the launcher installed the update (sha256 + staged client check) after the restart")
+    after = out[restart:] if restart >= 0 else ""
+    check(f"({new12}," in after and re.search(r"\[update\] latest \S+ \(\S+\): current", after) is not None,
+          "7a: the new client came back (the patched commit, up to date)")
+    check(re.search(r"\[input_script\] state t=\d+ slot=\S+ weapon=.+? menu=0", after.split("starting ")[-1]) is not None,
+          "7a: the new client is back in the offline game (the same command line)")
+
+    # 7b: in the menu: right away
+    print("7b auto-restart: in the menu")
+    inst, out = run_auto("auto-menu", ["--offline"], "0 menu\n40000 quit\n", "0 menu\n6000 quit\n")
+    print("\n".join("     " + line for line in out.splitlines() if re.match(r"\[(update|reload|launcher)\]", line)))
+    check("in the menu, restarting" in out and "[update] restarting through" in out, "7b: in the menu the newer build restarts the client")
+    check(read(os.path.join(inst, "client_bin")) == pkg_files["client_bin"][0] and f"({new12}," in out.split("restarting through")[-1],
+          "7b: the update is installed and the new client runs")
+    check(out.count("restarting through") == 1, "7b: one restart (the new client is current)")
+
+    # 7c: the launcher refuses the package: one restart, then the installed client stays
+    print("7c auto-restart: a package the launcher refuses")
+    write(pkg, good[:-10] + b"0123456789")
+    inst, out = run_auto("auto-bad", ["--offline"], "0 menu\n40000 quit\n", "0 menu\n9000 quit\n")
+    write(pkg, good)
+    print("\n".join("     " + line for line in out.splitlines() if re.match(r"\[(update|reload|launcher)\]", line)))
+    check("corrupt" in out and "the update failed: starting the installed client" in out, "7c: the launcher refused it and started the installed client")
+    check(read(os.path.join(inst, "client_bin")) != pkg_files["client_bin"][0] and f"({old12}," in out.split("starting the installed client")[-1],
+          "7c: the install is unchanged, the old client runs again")
+    check(out.count("[update] restarting through") == 1 and "was tried already" in out, "7c: no second restart for that build (no loop)")
+
+    # 7d: the staged client does not run here (launcher.c staged_client_runs): never installed, one
+    # restart, the installed client runs again and does not restart for that build a second time
+    print("7d auto-restart: a staged client that does not run here")
+    broken = dict(pkg_files, client_bin=(b"#!/bin/sh\necho 'needs a newer system' >&2\nexit 3\n", 0o755))
+    make_package(pkg, f"krunknative-client-{plat}", broken)
+    bad = read(pkg)
+    write(os.path.join(store, "latest.json"), json.dumps(dict(manifest, platforms={plat: {"update": {
+        "url": f"builds/{new12}/{pkg_name}", "sha256": sha256(bad), "size": len(bad)}}})))
+    inst, out = run_auto("auto-norun", ["--offline"], "0 menu\n40000 quit\n", "0 menu\n9000 quit\n")
+    write(pkg, good)
+    write(os.path.join(store, "latest.json"), json.dumps(manifest))
+    print("\n".join("     " + line for line in out.splitlines() if re.match(r"\[(update|reload|launcher)\]", line)))
+    check("does not start here" in out and "the update failed: starting the installed client" in out,
+          "7d: the launcher's staged client check refused it and started the installed client")
+    check(read(os.path.join(inst, "client_bin")) == read(client_bin) and f"({old12}," in out.split("starting the installed client")[-1],
+          "7d: the install is unchanged (the staged client never replaced it), the old client runs again")
+    check(out.count("[update] restarting through") == 1 and "was tried already" in out, "7d: no second restart for that build (no loop)")
 
 
 def main():
@@ -357,9 +541,16 @@ def main():
             check(any("restarting through" in line for line in lines), "update now restarts through the launcher")
             time.sleep(0.5)
             args = read(record).decode().split() if os.path.exists(record) else []
-            check(len(args) == 2 and args[0] == "--wait-pid" and args[1].isdigit(), f"launcher started with --wait-pid ({args})")
+            # --wait-pid <pid>, then the client's own command line after "--" (it comes back the same)
+            check(args[:2] == ["--wait-pid", args[1] if len(args) > 1 else ""] and len(args) > 1 and args[1].isdigit()
+                  and args[2:] == ["--", "--offline"], f"launcher started with --wait-pid <pid> -- --offline ({args})")
             check(took < 60, f"the client quit for the update ({took:.0f} s, before the script's quit)")
+        # ------------------------------------------------------------ 7 auto-restart for updates
+        if not a.no_client:
+            auto_restart_steps(tmp, env, srv_root, port, plat, marker, new_bins, kn_build, new12, old12, client_bin, launcher_bin)
     finally:
+        for pid in AUTO_PIDS:
+            kill_tree_pid(pid)
         srv.shutdown()
         if FAILS or a.keep:
             print(f"scratch kept: {tmp}")

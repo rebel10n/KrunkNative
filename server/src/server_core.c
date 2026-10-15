@@ -97,7 +97,10 @@ void server_core_tick(const float now, const float delta, const double tick_wall
 // when an update starts; its client shows the "Game Updating" screen for that text. Without
 // a message the native client only saw its socket drop, retried with its spent join ticket and
 // showed the restarted server's "Join key expired". KrunkNative sends ERROR on every stop: the
-// v7 text for an update, a plain description otherwise (server_shutdown_message).
+// v7 text for an update, a plain description otherwise (server_shutdown_message). The code tells
+// the reason apart: 004004 (NET_ERROR_CODE_UPDATING) with the v7 text is "restarting for an
+// update, reconnect after", on which the client restarts itself and rejoins (game_reload.h);
+// 004006 is any other stop (the client rejoins in place).
 
 static pthread_mutex_t g_reason_lock = PTHREAD_MUTEX_INITIALIZER;
 static char g_shutdown_reason[64];

@@ -8,8 +8,10 @@ port from kn_proto.free_ports().
 
   A. WebRTC, a deploy restarts kn-rtc ("update" in KRUNK_NATIVE_STOP_REASON_FILE, SIGTERM): the
      gateway sends the browser its knet goodbye with an ERROR frame (GAME UPDATING, 004004) and the
-     game server its goodbye; the page shows Game Updating + "Reconnecting...", reconnects through
-     the restarted gateway and is back in game; the server freed the player at once (no knet timeout)
+     game server its goodbye; the page shows Game Updating + "Restarting..." and reloads itself
+     (Settings > Client > Auto-restart for updates, default on: a deploy may have brought a newer
+     page too; client/include/game_reload.h), reconnects through the restarted gateway and is back
+     in game; the server freed the player at once (no knet timeout)
   B. WebSocket, net-bridge restarts (no reason file): an ERROR frame at a frame boundary ("Server
      restarting", 004006) and a 1012 close; the page shows it and reconnects
   C. WebRTC, kn-rtc is killed (-9: no word from anyone) and started again: the page shows the
@@ -181,8 +183,9 @@ def main():
                   read_log(RTC_LOG)[-400:])
             check("A: the page got the gateway's ERROR (knet goodbye with a frame)",
                   "disconnected from server: GAME UPDATING (004004)" in log, log[-600:])
-            check("A: the error screen says Game Updating and Reconnecting...",
-                  "Game Updating" in screens and "Reconnecting..." in screens, screens[-400:])
+            check("A: the error screen says Game Updating and Restarting... (the auto-restart reloads the page)",
+                  "Game Updating" in screens and "Restarting..." in screens, screens[-400:])
+            check("A: the page reloaded itself for the update", "reloading the page" in log, log[-600:])
             check("A: the game server freed the player at once (the gateway's goodbye, not a knet timeout)",
                   state.get("freed") and state["freed"] - state["t"] < 3 and read_log(GAME_LOG).count("timed out") == state["timeouts"],
                   read_log(GAME_LOG)[-400:])

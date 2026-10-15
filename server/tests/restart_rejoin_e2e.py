@@ -14,9 +14,11 @@ from kn_proto.free_ports().
   2. protocol client: SIGTERM with "update" in gameserver.shutdown_reason_file (a deploy) ->
      ERROR "GAME UPDATING" (004004, v7.1.4's text)
   3. protocol client: console `quit restart` -> ERROR "Server restarting" (004006)
-  4. headless client_bin in brain mode, in a game: the deploy restart (reason "update" + SIGTERM,
-     then a new server_bin). The client shows the reason, seeks again (never sends its old
-     ticket), gets a fresh ticket for the restarted server's lobby and is back in the game
+  4. headless client_bin in brain mode, in a game, Settings > Client > Auto-restart for updates
+     off: the deploy restart (reason "update" + SIGTERM, then a new server_bin). The client shows
+     the reason, seeks again in place (never sends its old ticket), gets a fresh ticket for the
+     restarted server's lobby and is back in the game (with the setting on, the default, the
+     client restarts itself and rejoins instead: server/tests/auto_restart_e2e.py)
   5. client_bin: the server is killed (-9: no message), restarted after the ticket expired; the
      client shows the transport's reason ("Disconnected: the server closed the connection"),
      holds the transport (the old ticket is never resent), rejoins through the matchmaker with a
@@ -280,11 +282,17 @@ def protocol_cases(brain_port):
         c.close()
 
 
-def client(name, brain_port, script):
-    """A headless client_bin in brain mode with an input script (started, not waited for)."""
+def client(name, brain_port, script, client_settings=None):
+    """A headless client_bin in brain mode with an input script (started, not waited for);
+    client_settings: the Settings > Client store (knClient.json) to start with."""
     path = os.path.join(WORK, name + ".script")
     with open(path, "w") as f:
         f.write(script)
+    if client_settings is not None:
+        store = os.path.join(WORK, name + "-cfg", "krunknative")
+        os.makedirs(store, exist_ok=True)
+        with open(os.path.join(store, "knClient.json"), "w") as f:
+            json.dump(client_settings, f)
     log = os.path.join(WORK, name + ".log")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
     env.update({"KRUNKNATIVE_HEADLESS": "1", "XDG_CONFIG_HOME": os.path.join(WORK, name + "-cfg"),
@@ -336,7 +344,7 @@ def client_restart(brain_port):
     node = Node(brain_port)
     check("4: node up", node.linked and node.game, str(node.game))
     old = node.game
-    p, log = client("deploy", brain_port, SCRIPT.format(respawn=12000, state=26000, quit=27000))
+    p, log = client("deploy", brain_port, SCRIPT.format(respawn=12000, state=26000, quit=27000), {"autoRestart": False})
     check("4: the client joins the lobby and plays", wait_for(lambda: states(read_log(log)), 40), read_log(log)[-400:])
     with open(REASON_FILE, "w") as f:
         f.write("update")
@@ -347,6 +355,8 @@ def client_restart(brain_port):
     finish(p, 60)
     text = read_log(log)
     check("4: the client got the server's reason", "server stopped (GAME UPDATING)" in text, text[-600:])
+    check("4: Auto-restart off: no restart, the rejoin runs in place", "[reload] the server is restarting" not in text
+          and "resume after the restart" not in text, text[-600:])
     check("4: it rejoined through the matchmaker with a fresh ticket",
           re.search(r"\[mm\] rejoin: %s with a fresh join ticket" % re.escape(node2.game or "-"), text) is not None
           and joined(text) == [old, node2.game], str(joined(text)))

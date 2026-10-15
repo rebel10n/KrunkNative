@@ -93,6 +93,8 @@
  "kn.client.audioOutput.notConnected": "{0} (not connected)",
  "kn.client.autoJoin.info": "Enter the match as soon as the game has loaded",
  "kn.client.autoJoin.name": "Auto Join",
+ "kn.client.autoRestart.info": "Restart the client (reload the page on the web) when the game server restarts for an update or a newer client is ready; in a match it waits for the end",
+ "kn.client.autoRestart.name": "Auto-restart for updates",
  "kn.client.autoSpec.info": "Turn Spectate on when the game loads",
  "kn.client.autoSpec.name": "Auto Spectate",
  "kn.client.brainUrl.info": "Account service / community coordinator (kn_brain); empty = https://coordinator.krunk.io",
@@ -368,5 +370,8 @@
  "kn.update.download": "Download",
  "kn.update.launcherFailed": "Could not start the launcher: download the update instead.",
  "kn.update.now": "Update now",
- "kn.update.outdated": "Outdated"
+ "kn.update.outdated": "Outdated",
+ "kn.update.restartAfterMatch": "Restarts after this match",
+ "kn.update.restarting": "Restarting...",
+ "kn.update.restartingNotice": "Restarting for an update..."
 }

@@ -139,9 +139,16 @@ int  servers_ui_find_new_game(void);         // F4 / Quick Match per Settings > 
 // a refused join key (004001) or a session the transport lost without a server ERROR (dropped: not
 // a kick / ban) starts a rejoin through the matchmaker with a fresh ticket (direct servers: the
 // transport retries). error may be rewritten (a second refusal, quick drops). 1 = rejoining.
-int  servers_ui_connection_lost(char *error, size_t error_size, const char *code, int dropped);
-int  servers_ui_rejoining(void);             // 1 = a rejoin is due / seeking (the error screen says so)
-const char *servers_ui_rejoin_text(void);    // "Reconnecting..." / "Rejoining a game..." for that line
+// had_session: the session had been joined (a drain refuses new connections with 004004 too).
+// A live session's server stopping for an update (004004) restarts the client instead when
+// Settings > Client > Auto-restart is on (game_reload.h): the new process rejoins the lobby.
+int  servers_ui_connection_lost(char *error, size_t error_size, const char *code, int dropped, int had_session);
+int  servers_ui_rejoining(void);             // 1 = a rejoin is due / seeking, or the client restarts (the error screen says so)
+const char *servers_ui_rejoin_text(void);    // "Reconnecting..." / "Rejoining a game..." / "Restarting..." for that line
+// A restart's resume (game_reload.c): hold the startup seek, then rejoin the lobby the old
+// process was in with the restart rejoin's backoff (REJOIN_RESTART; the screen says Game Updating).
+void servers_ui_hold_startup_seek(int hold);
+void servers_ui_resume_rejoin(const char *game_id);
 int  servers_ui_join_link(const char *text);  // Join window / pasted link or "NODE:lobby" id (v3.1.1 f9); 1 = joining
 int  servers_ui_connect_game(const char *text); // Connect window / console connect given a game link or id (CH2:kz862); 1 = joining, 0 = an address
 int  servers_ui_join_game(const char *game_id); // v10 switchServer(id) (a friend's game): seek it; 1 = joining, 0 = no matchmaker

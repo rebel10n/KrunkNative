@@ -301,22 +301,16 @@ void app_mode_parse_args(int *argc, char **argv) {
 #endif
 }
 
-void app_reload(const char *url) {
+char *const *app_exec_args(void) {
 #ifdef __EMSCRIPTEN__
-    if (url) EM_ASM({ location.href = UTF8ToString($0); }, url); // F4: location.href = "/"
-    else EM_ASM({ location.reload(); });                          // F5: location.reload()
+    return NULL;
 #else
-    (void) url;
-    if (!g_exec_argv || !g_exec_argv[0]) return;
-    char path[4096] = "";
-#ifdef _WIN32
-    if (!GetModuleFileNameA(NULL, path, sizeof(path))) snprintf(path, sizeof(path), "%s", g_exec_argv[0]);
-#else
-    const ssize_t n = readlink("/proc/self/exe", path, sizeof(path) - 1);
-    if (n > 0) path[n] = 0;
-    else if (!realpath(g_exec_argv[0], path)) snprintf(path, sizeof(path), "%s", g_exec_argv[0]);
+    return g_exec_argv;
 #endif
-    fprintf(stderr, "[app] reload: restarting %s\n", path);
+}
+
+void app_reload_prepare(void) {
+#ifndef __EMSCRIPTEN__
     // input-script tests (client/src/input_script.c): the relaunched process plays this script
     // instead of starting the current one (which pressed the key) over
     const char *next_script = getenv("KRUNKNATIVE_INPUT_SCRIPT_RELAUNCH");
@@ -331,6 +325,31 @@ void app_reload(const char *url) {
     }
     client_render_window_before_exec(g_app.client); // the new process reopens the window as it is now
     fflush(NULL);
+#endif
+}
+
+void app_reload(const char *url) {
+#ifdef __EMSCRIPTEN__
+    if (url) EM_ASM({ location.href = UTF8ToString($0); }, url); // F4: location.href = "/"
+    else EM_ASM({ location.reload(); });                          // F5: location.reload()
+#else
+    (void) url;
+    if (!g_exec_argv || !g_exec_argv[0]) return;
+    char path[4096] = "";
+#ifdef _WIN32
+    if (!GetModuleFileNameA(NULL, path, sizeof(path))) snprintf(path, sizeof(path), "%s", g_exec_argv[0]);
+#else
+    const ssize_t n = readlink("/proc/self/exe", path, sizeof(path) - 1);
+    if (n > 0) path[n] = 0;
+    else if (!realpath(g_exec_argv[0], path)) snprintf(path, sizeof(path), "%s", g_exec_argv[0]);
+    // the file this process runs was replaced (an update installed over it): Linux names the old
+    // inode "<path> (deleted)"; the file now at <path> is the new build, which is what to run
+    static const char deleted[] = " (deleted)";
+    const size_t len = strlen(path), dl = sizeof(deleted) - 1;
+    if (len > dl && !strcmp(path + len - dl, deleted)) path[len - dl] = 0;
+#endif
+    fprintf(stderr, "[app] reload: restarting %s\n", path);
+    app_reload_prepare();
 #ifdef _WIN32
     _execv(path, (const char *const *) g_exec_argv);
 #else

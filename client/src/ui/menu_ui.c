@@ -1406,6 +1406,16 @@ static void menu_set_connect(const int connected, const char *error, const char 
     menu_update_instructions();
 }
 
+// The connection error screen with a message of our own (servers_ui_resume_rejoin: the new
+// process after a restart for a server update shows "GAME UPDATING" while it rejoins).
+void menu_show_connect_error(const char *error, const char *code) {
+    menu_set_connect(0, error, code);
+    if (g_ui.client) {
+        snprintf(g_ui.client->menu_connect_error, sizeof(g_ui.client->menu_connect_error), "%s", error ? error : "");
+        g_ui.client->menu_connect_error_time = glfwGetTime();
+    }
+}
+
 // Enter the game for a `play` that arrived before the map was ready (the INIT packet
 // is processed by client_tick_net on a later frame).
 static void menu_try_play(Client *client) {
@@ -1515,6 +1525,10 @@ static void menu_poll_connection(Client *client) {
     memcpy(close_reason, client->net_status_close_reason, sizeof(close_reason));
     pthread_mutex_unlock(&client->net_lock);
 
+    // a session that had been joined (its INIT made the menu ready, or its players exist), as
+    // opposed to a connect the server refused (a drain answers that with 004004 too)
+    const int had_session = status == NET_STATUS_FAILED && !client->offline &&
+                            (g_ui.ready || client->me != NULL || client->game.player_count > 0);
     if (status == NET_STATUS_CONNECTED) {
         client->net_connected = 1;
     } else if (status == NET_STATUS_FAILED) {
@@ -1539,7 +1553,7 @@ static void menu_poll_connection(Client *client) {
     int keep_screen = 0;
     if (status == NET_STATUS_FAILED) {
         const int was_rejoining = servers_ui_rejoining();
-        servers_ui_connection_lost(error, sizeof(error), code, dropped);
+        servers_ui_connection_lost(error, sizeof(error), code, dropped, had_session);
         keep_screen = was_rejoining && !dropped && !strcmp(code, "000001");
         if (!keep_screen) {
             g_connect_close_code = close_code;

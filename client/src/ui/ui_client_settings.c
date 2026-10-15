@@ -141,6 +141,8 @@ static const ClientSetting SETTINGS[] = {
     {"swapper", "Resource Swapper", "Client", CS_SWITCH, CS_NATIVE | CS_RESTART, "true",
      "Files in the swapper folder replace the game's files at the same path (css/main.css, img/..., textures/..., sound/...)",
      NULL, 0, 0, 0, 0, "Open folder", "openSwapper"},
+    {"autoRestart", "Auto-restart for updates", "Client", CS_SWITCH, CS_NATIVE | CS_WEB, "true",
+     "Restart the client (reload the page on the web) when the game server restarts for an update or a newer client is ready; in a match it waits for the end"},
     {"customCSS", "Custom CSS", "Client", CS_SWITCH, CS_NATIVE, "true", "Applies custom.css from the client folder over the menu and HUD",
      NULL, 0, 0, 0, 0, "Edit", "editCSS"},
     // ---- Startup (--offline; auto join; the matchmaker)
@@ -205,6 +207,8 @@ static const ClientSetting SETTINGS[] = {
 //   I18N("kn.client.discordRPC.name", "Discord Rich Presence")  I18N("kn.client.discordRPC.info", "Show the mode and map you play on your Discord profile")
 //   I18N("settings.client.resourceSwapper", "Resource Swapper")  I18N("kn.client.swapper.button", "Open folder")
 //   I18N("kn.client.swapper.info", "Files in the swapper folder replace the game's files at the same path (css/main.css, img/..., textures/..., sound/...)")
+//   I18N("kn.client.autoRestart.name", "Auto-restart for updates")
+//   I18N("kn.client.autoRestart.info", "Restart the client (reload the page on the web) when the game server restarts for an update or a newer client is ready; in a match it waits for the end")
 //   I18N("kn.client.customCSS.name", "Custom CSS")  I18N("kn.client.customCSS.info", "Applies custom.css from the client folder over the menu and HUD")  I18N("kn.client.customCSS.button", "Edit")
 //   I18N("kn.client.startOffline.name", "Start Offline")  I18N("kn.client.startOffline.info", "Start in an offline game on the built-in server (like --offline)")
 //   I18N("kn.client.autoJoin.name", "Auto Join")  I18N("kn.client.autoJoin.info", "Enter the match as soon as the game has loaded")
@@ -652,6 +656,11 @@ void client_settings_fullscreen_size(int *w, int *h) {
 
 int client_settings_hs_sound_always(void) {
     return g_cs.hs_sound;
+}
+
+int client_settings_auto_restart(void) {
+    store_load(); // asked before the startup too (a server ERROR right after the connect)
+    return cs_bool("autoRestart");
 }
 
 static void apply_auto_spectate(void) {
