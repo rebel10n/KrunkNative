@@ -150,14 +150,22 @@ function clientAddress(req: IncomingMessage): string {
 const perIp = new Map<string, number>();
 
 /**
- * Upgrade-time admission for `/native` (index.ts): an HTTP status to refuse with, or
- * null. Refusing before the WebSocket handshake costs nothing and leaves no socket open.
+ * Upgrade-time admission for `/native` (index.ts): why to refuse, or null. `status` is the
+ * HTTP answer for a request that is not a WebSocket upgrade; a real upgrade is accepted and
+ * closed at once with `close` and the reason, because a browser hides an HTTP refusal of the
+ * handshake (the page only sees close 1006 with no reason) and the client could neither show
+ * why nor tell a final refusal (1008: the target is not allowed, retrying cannot help) from a
+ * full bridge (1013: try again later). No bridged TCP connection is opened either way.
  */
-export function admit(req: IncomingMessage): { status: number; reason: string } | null {
-  if (!resolveTarget(req)) return { status: 403, reason: "target not allowed" };
-  if (MAX_SESSIONS && sessions.size >= MAX_SESSIONS) return { status: 503, reason: "bridge full" };
+export type Refusal = { status: number; close: number; reason: string };
+export const CLOSE_POLICY = 1008;
+export const CLOSE_TRY_AGAIN_LATER = 1013;
+
+export function admit(req: IncomingMessage): Refusal | null {
+  if (!resolveTarget(req)) return { status: 403, close: CLOSE_POLICY, reason: "target not allowed" };
+  if (MAX_SESSIONS && sessions.size >= MAX_SESSIONS) return { status: 503, close: CLOSE_TRY_AGAIN_LATER, reason: "bridge full" };
   if (MAX_PER_IP && (perIp.get(clientAddress(req)) || 0) >= MAX_PER_IP) {
-    return { status: 429, reason: "too many connections from this address" };
+    return { status: 429, close: CLOSE_TRY_AGAIN_LATER, reason: "too many connections from this address" };
   }
   return null;
 }

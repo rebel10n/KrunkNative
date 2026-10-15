@@ -174,7 +174,11 @@ function describeAddress(http: ReturnType<typeof createServer>): string {
   return `http://${host}:${address.port}`;
 }
 
-/** Hand a `/native` upgrade to the passthrough, or refuse it before the handshake. */
+/**
+ * Hand a `/native` upgrade to the passthrough, or refuse it: a WebSocket handshake is
+ * completed and closed at once with the refusal's close code and reason (the page shows
+ * them; webBridge.admit), anything else gets the HTTP status.
+ */
 function upgradeNative(
   wss: ReturnType<typeof webBridge.createServer>,
   request: IncomingMessage,
@@ -184,11 +188,18 @@ function upgradeNative(
   const refused = webBridge.admit(request);
   if (refused) {
     console.warn(
-      `[web-bridge] ${request.socket.remoteAddress || "?"} upgrade refused ${refused.status}: ${refused.reason} (${request.url})`,
+      `[web-bridge] ${request.socket.remoteAddress || "?"} upgrade refused ${refused.close}: ${refused.reason} (${request.url})`,
     );
-    socket.end(
-      `HTTP/1.1 ${refused.status} ${refused.reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`,
-    );
+    if (!/websocket/i.test(String(request.headers.upgrade || "")) || !request.headers["sec-websocket-key"]) {
+      socket.end(
+        `HTTP/1.1 ${refused.status} ${refused.reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`,
+      );
+      return;
+    }
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      ws.on("error", () => ws.terminate());
+      ws.close(refused.close, refused.reason);
+    });
     return;
   }
   wss.handleUpgrade(request, socket, head, (ws) => {

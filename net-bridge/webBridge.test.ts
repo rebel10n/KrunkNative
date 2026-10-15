@@ -1,11 +1,26 @@
-// Unit checks of the bridge's graceful stop (webBridge.ts): the ERROR frame, the stop reason file
-// and the frame cursor that keeps the frame out of the middle of the server's.
+// Unit checks of the bridge (webBridge.ts): /native admission (allowlist, close codes), the graceful
+// stop's ERROR frame, the stop reason file and the frame cursor that keeps the frame out of the
+// middle of the server's.
 //   npm test            (node -r ts-node/register/transpile-only webBridge.test.ts)
 import assert from "assert";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { errorFrame, scanFrames, stopMessage, type FrameCursor } from "./webBridge";
+import type { IncomingMessage } from "http";
+import { admit, CLOSE_POLICY, errorFrame, scanFrames, stopMessage, type FrameCursor } from "./webBridge";
+
+// admission (no KRUNK_NATIVE_TARGETS here: the default 127.0.0.1:21015-21078 plus any loopback)
+const upgrade = (url: string) => ({ url, headers: {}, socket: { remoteAddress: "127.0.0.1" } }) as unknown as IncomingMessage;
+assert.strictEqual(admit(upgrade("/native")), null);
+assert.strictEqual(admit(upgrade("/native?target=127.0.0.1:21016")), null);
+assert.strictEqual(admit(upgrade("/native?target=localhost:30000")), null);
+for (const bad of ["/native?target=example.com:21015", "/native?target=10.0.0.1:21015", "/native?target=127.0.0.1", "/native?target=127.0.0.1:99999"]) {
+  const refused = admit(upgrade(bad));
+  assert.ok(refused, bad);
+  assert.strictEqual(refused.close, CLOSE_POLICY, bad); // final for the client (net_web.c): no retry loop
+  assert.strictEqual(refused.status, 403, bad);
+  assert.strictEqual(refused.reason, "target not allowed", bad);
+}
 
 const frame = errorFrame("GAME UPDATING", "004004");
 assert.strictEqual(frame.length, 3 + 104);

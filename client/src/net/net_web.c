@@ -207,7 +207,25 @@ static bool net_web_on_close(int event_type, const EmscriptenWebSocketCloseEvent
         g_web_read_buffer.length = 0;
         return true;
     }
-    if (client->net_session_connected && !g_web_switching && !client->net_should_quit) net_web_explain_close(client, event->code, event->reason);
+    // net-bridge refuses a session by accepting the handshake and closing it at once (webBridge.ts
+    // admit: a browser hides an HTTP refusal of the upgrade): 1008 = this bridge does not allow the
+    // target, which no retry changes. Final like a server ERROR: the Lost Connection box names the
+    // refusal and only Retry tries again (no backoff loop, no matchmaker rejoin). 1013 = the bridge
+    // is full: an ordinary failure, retried with the backoff.
+    const int refused = event->code == 1008 && !g_web_switching && !client->net_should_quit;
+    char refusal[160] = "";
+    if (refused) {
+        snprintf(refusal, sizeof(refusal), "The connection gateway refused this server: %s", event->reason[0] ? event->reason : "policy violation");
+        fprintf(stderr, "[net] %s (%s)\n", refusal, g_web_url);
+        if (client->net_session_connected) {
+            pthread_mutex_lock(&client->net_lock);
+            snprintf(client->net_disconnect_reason, sizeof(client->net_disconnect_reason), "%s", refusal);
+            snprintf(client->net_disconnect_code, sizeof(client->net_disconnect_code), "000000");
+            pthread_mutex_unlock(&client->net_lock);
+        }
+    } else if (client->net_session_connected && !g_web_switching && !client->net_should_quit) {
+        net_web_explain_close(client, event->code, event->reason);
+    }
 
     pthread_mutex_lock(&client->net_lock);
     if (client->net_socket == NET_WEB_FAKE_FD) client->net_socket = -1; // (an official krunker.io socket may own it now)
@@ -227,8 +245,13 @@ static bool net_web_on_close(int event_type, const EmscriptenWebSocketCloseEvent
         if (emscripten_get_now() - g_web_opened_at >= NET_WEB_SESSION_STABLE_MILLIS) g_web_failures = 0; // a session that lasted
         on_client_socket_disconnect(client);
     } else if (!client->offline && !client->net_should_quit) { // (client_net_stop already said why)
-        char message[160]; // the bridge's close reason (e.g. "target not allowed") when it gave one
-        snprintf(message, sizeof(message), "Could not connect to %s%s%s", g_web_url, event->reason[0] ? ": " : "", event->reason);
+        char message[sizeof(client->net_status_error)]; // the bridge's close reason (e.g. "target not allowed") when it gave one
+        if (refused) {
+            client->net_hold_retry = 1;
+            snprintf(message, sizeof(message), "%s", refusal);
+        } else {
+            snprintf(message, sizeof(message), "Could not connect to %s%s%s", g_web_url, event->reason[0] ? ": " : "", event->reason);
+        }
         on_client_socket_failed(client, message);
     }
 
