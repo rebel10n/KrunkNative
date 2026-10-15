@@ -973,6 +973,109 @@ static void test_dead_player_live_filter(void) {
     sandbox_stop();
 }
 
+// The last round clock ("t", not the end screen's) received from index `from` on, -1 none.
+static int last_round_seconds(const TestClient *c, const int from) {
+    int seconds = -1;
+    for (int i = from; i < c->count; i++) {
+        if (c->packets[i].type != NET_PACKET_TIMER || c->packets[i].length != sizeof(NetTimerPacket)) continue;
+        NetTimerPacket t;
+        memcpy(&t, c->packets[i].payload, sizeof(t));
+        if (!t.end) seconds = t.seconds;
+    }
+    return seconds;
+}
+
+// R64: /endless pauses the round clock and a second /endless resumes it from there (no reset to a
+// full round, no clock running on behind the frozen display).
+static void test_endless_resumes(void) {
+    size_t map_count = 0;
+    const cJSON **maps = load_maps(&map_count);
+    const SandboxConfig cfg = {.maps = maps, .map_count = map_count, .map_index = 0, .mode_id = MODE_ID_FFA};
+    CHECK(sandbox_start(&cfg), "sandbox_start (endless)");
+    static TestClient c;
+    memset(&c, 0, sizeof(c));
+    c.fd = sandbox_connect();
+    join(&c);
+    pump(&c, 60 * 5); // 5 s of the round
+    const int before = last_round_seconds(&c, 0);
+    CHECK(before > 0, "a running round clock (%d)", before);
+
+    int mark = c.count;
+    command(&c, &c, &c, "/endless");
+    CHECK(chat_contains(&c, "Match timer set to endless."), "endless on");
+    pump(&c, 60 * 6); // 6 s endless
+    const int frozen = last_round_seconds(&c, mark);
+    CHECK(frozen < 0 || frozen == before, "endless: the clock stays at %d (got %d)", before, frozen);
+    CHECK(g_server->game.round_endless && fabsf(g_server->game.round_timer - (float) before) < 1.5f,
+          "endless: the server clock is paused at %d (round_timer %.2f)", before, (double) g_server->game.round_timer);
+
+    mark = c.count;
+    command(&c, &c, &c, "/endless");
+    CHECK(chat_contains(&c, "Match timer resumed."), "endless off");
+    pump(&c, 60 * 2); // 2 s on
+    const int resumed = last_round_seconds(&c, mark);
+    CHECK(resumed >= before - 3 && resumed <= before, "endless off: resumes from %d (got %d)", before, resumed);
+    sandbox_disconnect(c.fd);
+    sandbox_step(1.0 / 60.0);
+    sandbox_stop();
+}
+
+// R45: a noclip player flying level off the map's edge stays in the air on the server too (no
+// gravity, no ground under it, the client's prediction and the server agree), and like v10.0.2
+// players.tickPlayer (y <= deathY && !godMode: noclip is not exempt) diving below deathY kills it.
+static void test_noclip_off_edge(void) {
+    size_t map_count = 0;
+    const cJSON **maps = load_maps(&map_count);
+    const SandboxConfig cfg = {.maps = maps, .map_count = map_count, .map_index = 0, .mode_id = MODE_ID_FFA};
+    CHECK(sandbox_start(&cfg), "sandbox_start (noclip)");
+    static TestClient c;
+    memset(&c, 0, sizeof(c));
+    c.fd = sandbox_connect();
+    join(&c);
+    pump(&c, 30);
+    NetSpawnPacket me = {0};
+    CHECK(spawn_of(&c, 1, &me) != NULL, "spawned (noclip)");
+    Player *p = (Player *) server_player(me.uid);
+    CHECK(p && g_server->game.map, "server player (noclip)");
+    if (!p || !g_server->game.map) {
+        sandbox_stop();
+        return;
+    }
+    command(&c, &c, &c, "/noclip");
+    pump(&c, 2);
+    CHECK(p->noclip, "/noclip on");
+
+    // 12 s level flight (pitch 0) straight on: far past Burg's edge, over nothing
+    const float y0 = p->position.y;
+    int seq = 0;
+    for (; seq < 60 * 12; seq++) {
+        const NetInputPacket input = {.seq = seq, .move_dir = 0, .delta = 1.0f / 60.0f, .x_dir = 0.0f, .y_dir = me.direction[1]};
+        client_send(&c, NET_PACKET_INPUT, &input, sizeof(input));
+        pump(&c, 1);
+    }
+    pump(&c, 10);
+    const float flown = hypotf(p->position.x - me.position[0], p->position.z - me.position[2]);
+    CHECK(p->active && fabsf(p->position.y - y0) < 0.01f && flown > 500.0f,
+          "noclip off the edge: alive at y %.2f (from %.2f), %.0f units out", (double) p->position.y, (double) y0, (double) flown);
+    const NetPacket *recon_packet = last(&c, NET_PACKET_RECON);
+    NetReconPacket recon = {0};
+    if (recon_packet) memcpy(&recon, recon_packet->payload, recon_packet->length < sizeof(recon) ? recon_packet->length : sizeof(recon));
+    CHECK(recon_packet && fabsf(recon.position[1] - y0) < 0.01f, "noclip: the owner's RECON keeps the height (y %.2f)", (double) recon.position[1]);
+
+    // dive: below deathY the server kills it (v10 exempts godMode only)
+    const float death_y = g_server->game.map->death_y;
+    for (int f = 0; f < 60 * 30 && p->active; f++, seq++) {
+        const NetInputPacket input = {.seq = seq, .move_dir = 0, .delta = 1.0f / 60.0f, .x_dir = -1.2f, .y_dir = me.direction[1]};
+        client_send(&c, NET_PACKET_INPUT, &input, sizeof(input));
+        pump(&c, 1);
+    }
+    CHECK(!p->active && p->position.y <= death_y + 0.01f, "noclip below deathY %.0f: killed (active %d, y %.2f)", (double) death_y,
+          p->active, (double) p->position.y);
+    sandbox_disconnect(c.fd);
+    sandbox_step(1.0 / 60.0);
+    sandbox_stop();
+}
+
 int main(void) {
     test_join_move_leave();
     test_wpc_peer_mix();
@@ -982,6 +1085,8 @@ int main(void) {
     test_idle_kick_map_change();
     test_tp_bring();
     test_restart_and_disconnect();
+    test_endless_resumes();
+    test_noclip_off_edge();
     if (g_failures) {
         printf("%d of %d checks failed\n", g_failures, g_checks);
         return 1;
