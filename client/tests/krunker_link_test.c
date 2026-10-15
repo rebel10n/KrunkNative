@@ -375,6 +375,46 @@ int main(void) {
           g_out[0].ah_echo == (int) NEXT_AH(), "en");
     clear();
 
+    // the loadout: a guest's "en" keeps a fresh guest's cosmetics; a socket signed in to a krunker.io
+    // account (link.account, krunker_account.h) sends the player's own
+    ent.cosmetics = PLAYER_COSMETICS_NONE;
+    ent.cosmetics.hat = 5;
+    ent.cosmetics.body = 6;
+    ent.cosmetics.face = 11;
+    ent.skins = (PlayerSkins) {100, 101, 200};
+    ent.spray_index = 3000;
+    ent.cosmetics_v7 = (PlayerCosmeticsV7) {7, 12, 13, 14, 15, {8, 9}, 16, -1};
+    krunker_link_send_ours(&link, NET_PACKET_ENT, &ent, sizeof(ent));
+    enter = g_out_count ? krunker_frame_arg(&g_out[0], 0) : NULL;
+    NEXT_AH();
+    CHECK(enter && krunker_num(krunker_at(enter, 3), 0) == -1 && krunker_num(krunker_at(enter, 1), 0) == 2482 &&
+          krunker_num(krunker_at(krunker_at(enter, 2), 0), 0) == -1 && krunker_num(krunker_at(enter, 9), 0) == -1 &&
+          krunker_is(krunker_at(krunker_at(enter, 29), 0), KRUNKER_NIL), "guest en: no cosmetics");
+    clear();
+    link.account = 1;
+    krunker_link_send_ours(&link, NET_PACKET_ENT, &ent, sizeof(ent));
+    enter = g_out_count ? krunker_frame_arg(&g_out[0], 0) : NULL;
+    CHECK(enter && enter->len == 35 && krunker_num(krunker_at(enter, 0), -1) == 3 && krunker_num(krunker_at(enter, 1), 0) == 3000 &&
+          krunker_num(krunker_at(krunker_at(enter, 2), 0), 0) == 100 && krunker_num(krunker_at(krunker_at(enter, 2), 1), 0) == 101 &&
+          krunker_num(krunker_at(enter, 3), 0) == 5 && krunker_num(krunker_at(enter, 4), 0) == 6 && krunker_num(krunker_at(enter, 9), 0) == 200 &&
+          krunker_num(krunker_at(enter, 15), 0) == 13 && krunker_num(krunker_at(enter, 20), 0) == 11 && krunker_num(krunker_at(enter, 21), 0) == 14 &&
+          krunker_num(krunker_at(enter, 25), 0) == 15 && krunker_num(krunker_at(krunker_at(enter, 29), 0), 0) == 8 &&
+          krunker_num(krunker_at(krunker_at(enter, 29), 1), 0) == 9 && krunker_num(krunker_at(enter, 30), 0) == 12 &&
+          krunker_num(krunker_at(enter, 31), 0) == 7 && krunker_num(krunker_at(enter, 32), 0) == 16 && krunker_num(krunker_at(enter, 14), 0) == -1 &&
+          g_out[0].ah_echo == (int) NEXT_AH(), "signed-in en: the player's own loadout");
+    clear();
+    link.account = 0;
+
+    // "a" ACCOUNT_RESPONSE: the account signed in on the socket (name, level from player_score)
+    const KrunkerValue acc_data[] = {KRUNKER_V_STR("player_score"), KRUNKER_V_NUM(40000), KRUNKER_V_STR("player_kills"), KRUNKER_V_NUM(3)};
+    feed(&link, "a", (KrunkerValue[]) {KRUNKER_V_NIL, KRUNKER_V_NUM(123), KRUNKER_V_STR("KioPlayer"), KRUNKER_V_MAP(acc_data, 2), KRUNKER_V_STR("legacy")}, 5);
+    CHECK(g_events[KRUNKER_LINK_EV_ACCOUNT] == 1 && !strcmp(link.account_name, "KioPlayer") && link.account_level == 6 && g_out_count == 0,
+          "a: account %s level %d", link.account_name, link.account_level);
+    clear();
+    feed(&link, "a", (KrunkerValue[]) {KRUNKER_V_STR("Invalid session"), KRUNKER_V_NIL, KRUNKER_V_NIL}, 3);
+    CHECK(g_events[KRUNKER_LINK_EV_ACCOUNT] == 0 && !strcmp(link.account_name, "KioPlayer"), "a with an error: not signed in");
+    clear();
+
     // input windows -> "q"
     NetInputPacket in[3];
     memset(in, 0, sizeof(in));

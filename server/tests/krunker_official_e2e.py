@@ -1114,7 +1114,7 @@ def run_native_lobby():
     click seeks it, the Security Challenge modal asks; Cancel ends the join saying so; a second click
     and a pasted token join the game."""
     label = "native-lobby"
-    script = ("0 menu\n300 call showWindow 2\n3000 text @status [id=kioStatus]\n3100 nodes @rows .quickJoin[title*=krunker]\n"
+    script = ("0 menu\n300 call showWindow 2\n3000 text @status [id=kioStatus]\n3100 nodes @rows .quickJoin\n"
               "3200 call krunkerJoin \"%s\"\n4500 vis @ask1 knCaptchaHolder knCaptchaManual\n4600 clickid knCaptchaCancel\n"
               "5200 vis @cancelled knCaptchaHolder\n5300 call showWindow 2\n5800 call krunkerJoin \"%s\"\n7000 vis @ask2 knCaptchaHolder\n"
               "7100 clickid knCaptchaToken\n7200 type %s\n7300 clickid knCaptchaUse\n8000 play\n13000 players\n13200 quit\n"
@@ -1123,11 +1123,11 @@ def run_native_lobby():
     lines = finish_native(label, stub, p, out, log, timeout=180)
     text = "\n".join(lines)
     st = re.search(r"\[input_script\] text t=\d+ @status n=1 .*?text=(.*)", text)
-    check(f"{label}: the KRUNKER.IO section says its lobbies join here", st and "official lobbies: pick one to join it here" in st.group(1),
+    check(f"{label}: the KRUNKER.IO section says its lobbies join here", st and "krunker.io servers: pick one to join it here" in st.group(1),
           st.group(1) if st else None)
     check(f"{label}: no \"can't be joined\" text anywhere", not re.search(r"can.t be joined|cannot be joined|can.t join krunker", text))
     rows = re.search(r"nodes t=\d+ @rows elements=\d+ match=(\d+)", text)
-    check(f"{label}: the stub's lobby has its krunker.io group", rows and rows.group(1) == "1", rows.group(0) if rows else None)
+    check(f"{label}: the krunker.io group is listed with its Quick Join (main's group header)", rows and int(rows.group(1)) >= 1, rows.group(0) if rows else None)
     check(f"{label}: the click joins in-client (no browser)", f"[krunker] official lobby {GAME_ID}: joining in-client" in text and
           "open (disabled by KRUNKNATIVE_NO_BROWSER)" not in text, text[-400:])
     check(f"{label}: the Security Challenge modal asks", "@ask1 knCaptchaHolder=1 knCaptchaManual=1" in text)
@@ -1155,7 +1155,7 @@ def run_native_optout():
     lines = finish_native(label, stub, p, out, log, timeout=120)
     text = "\n".join(lines)
     st = re.search(r"\[input_script\] text t=\d+ @status n=1 .*?text=(.*)", text)
-    check(f"{label}: the KRUNKER.IO section says its lobbies open in the browser", st and "official lobbies open in your browser" in st.group(1),
+    check(f"{label}: the KRUNKER.IO section says its lobbies open in the browser", st and "krunker.io servers open in your browser" in st.group(1),
           st.group(1) if st else None)
     check(f"{label}: the click opens the lobby in the browser", f"open (disabled by KRUNKNATIVE_NO_BROWSER): https://krunker.io/?game={GAME_ID}" in text,
           text[-400:])

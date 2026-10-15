@@ -381,7 +381,7 @@ def client_official(port):
           "[krunker] official lobby NY:bbbbb: opening https://krunker.io/?game=NY:bbbbb" in text
           and "open (disabled by KRUNKNATIVE_NO_BROWSER): https://krunker.io/?game=NY:bbbbb" in text, text[-600:])
     check("C4: ... and stays in its KrunkNative game (no new seek)", len(joined(text)) == 1, str(joined(text)))
-    check("C4: the Servers window explains the krunker.io section", re.search(r"@status n=1 .*text=KRUNKER\.IO official lobbies open in your browser", text),
+    check("C4: the Servers window explains the krunker.io section", re.search(r"@status n=1 .*text=KRUNKER\.IO krunker\.io servers open in your browser", text),
           "")
     m = re.search(r"@head n=\d+ checked=\d value=\S* text=(.*)", text)
     check("C4: the server type only steers the seek: our (tdm) group is still listed, first",

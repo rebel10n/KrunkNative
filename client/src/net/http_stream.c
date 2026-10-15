@@ -239,6 +239,7 @@ static void stream_free(HttpStream *s) {
     free(s->url);
     if (s->headers) memset(s->headers, 0, strlen(s->headers)); // may carry a key
     free(s->headers);
+    if (s->body) memset(s->body, 0, strlen(s->body)); // may carry a password (krunker_account.c)
     free(s->body);
     pthread_mutex_destroy(&s->mu);
     free(s);

@@ -98,19 +98,19 @@ static void server_type_html(StrBuf *sb) {
     const int here = krunker_net_in_client();
     sb_append(sb, "<div class=\"settName\" title=\"");
     sb_append_esc(sb, here ? I18N("kn.quickplay.serverType.infoJoin", "What Quick Match and Find New Game (F4) look for. The server browser lists both; "
-                                                                       "official krunker.io games are joined in this client as a guest")
+                                                                       "krunker.io servers are joined in this client")
                            : I18N("kn.quickplay.serverType.infoBrowser", "What Quick Match and Find New Game (F4) look for. The server browser lists both; "
-                                                                          "official krunker.io lobbies open in your browser"));
+                                                                          "krunker.io servers open in your browser"));
     sb_append(sb, "\">");
     sb_append_esc(sb, I18N("kn.quickplay.serverType", "Server Type"));
     sb_append(sb, " <select id=\"knSeekServers\" onchange=\"window.setSetting(&quot;" SEEK_SERVERS_KEY "&quot;, this.value)\" class=\"inputGrey2\">");
     option(sb, "kn", "KrunkNative", servers == SEEK_SERVERS_KN);
-    option(sb, "official", I18N("kn.quickplay.serverType.official", "Official (krunker.io)"), servers == SEEK_SERVERS_OFFICIAL);
+    option(sb, "official", I18N("kn.quickplay.serverType.official", "krunker.io servers"), servers == SEEK_SERVERS_OFFICIAL);
     option(sb, "both", I18N("kn.quickplay.serverType.both", "Both"), servers == SEEK_SERVERS_BOTH);
     sb_append(sb, "</select></div><div class=\"settName\" style=\"color:rgba(255,255,255,0.5);font-size:15px\">");
-    sb_append_esc(sb, here ? I18N("kn.quickplay.serverType.noteJoin", "Quick Match and F4 seek into these. Official krunker.io games are joined in this client as a guest "
-                                                                       "(krunker.io may ask for a security check first). Both prefers a KrunkNative server when one matches.")
-                           : I18N("kn.quickplay.serverType.noteBrowser", "Quick Match and F4 seek into these. Official krunker.io lobbies open in your browser. "
+    sb_append_esc(sb, here ? I18N("kn.quickplay.serverType.noteJoin", "Quick Match and F4 seek into these. krunker.io servers are joined in this client with your "
+                                                                       "krunker.io account (krunker.io may ask for a security check first). Both prefers a KrunkNative server when one matches.")
+                           : I18N("kn.quickplay.serverType.noteBrowser", "Quick Match and F4 seek into these. krunker.io servers open in your browser. "
                                                                           "Both prefers a KrunkNative server when one matches."));
     sb_append(sb, "</div>");
 }

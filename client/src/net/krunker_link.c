@@ -207,6 +207,7 @@ static void emit_lobby_config(KrunkerLink *l, const KrunkerFrame *f) {
     l->sync_hz = rates.sync_hz;
     emit(l, NET_PACKET_NETWORK_DATA, &rates, sizeof(rates));
 }
+static void on_account(KrunkerLink *l, const KrunkerFrame *f);
 
 // init [mapIndex, modeIndex, eventIndex, ...] (INIT_GAME, game.deob.js:219289 -> 219300):
 // mapIndex indexes the server's map list (fetched by index from the API, :219292); our catalogue's
@@ -981,10 +982,32 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         case KRUNKER_S2C_KPD_RESPONSE: on_kpd_response(l, &f); break;
         case KRUNKER_S2C_KPD_RESET: emit_ext(l, NET_EXT_KPD_RESET, NULL, 0); break; // "kpdf" (iiíìîìi)
         case KRUNKER_S2C_DISCONNECT: note(l, KRUNKER_LINK_EV_ERROR, "the server disconnected us (dc)"); break;
+        case KRUNKER_S2C_ACCOUNT_RESPONSE: on_account(l, &f); break;
         default: l->unknown_in++; break;
     }
     krunker_frame_free(&f);
     return 1;
+}
+
+// "a" ACCOUNT_RESPONSE [error, id, username, data, token, ...] (iîïïiii, game.deob.js:210016): the
+// game server signed the socket's account in (the `at=` of krunker_account.h). data is the account
+// row (new Account(id, name, data), :114314): its level is floor(rankVar * sqrt(player_score))
+// (updateLevel, rankVar 0.03). An error string (arg 0) = not signed in. The token (arg 4, the
+// legacy krunker_token) is not kept: krunker_account.h holds the session.
+static void on_account(KrunkerLink *l, const KrunkerFrame *f) {
+    const char *error = krunker_str(arg(f, 0));
+    if (error && error[0]) {
+        note(l, KRUNKER_LINK_EV_NOTE, "account: the server did not sign the account in (%s)", error);
+        return;
+    }
+    const char *name = krunker_str(arg(f, 2));
+    if (!name || !name[0]) return;
+    snprintf(l->account_name, sizeof(l->account_name), "%s", name);
+    const KrunkerValue *score = krunker_get(arg(f, 3), "player_score");
+    const double s = krunker_num(score, 0);
+    const int level = (int) floor(0.03 * sqrt(s > 0 ? s : 0)); // progression_level (shared/src/progression.c)
+    l->account_level = level < 1 ? 1 : level;
+    note(l, KRUNKER_LINK_EV_ACCOUNT, "%s", l->account_name);
 }
 
 // ---------------------------------------------------------------- outbound
@@ -993,54 +1016,63 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
 // owns no cosmetics, so every cosmetic is a fresh krunker.io guest's saved value (:210435-210491:
 // -1, team 1, spray 2482, secondary 2, streak indexes parseInt(null) = NaN, charms [undefined, -1]);
 // only the class, the secondary, spectate, lag compensation, the sight, challenge and anon mode
-// come from our ENT.
+// come from our ENT. On a socket signed in to a krunker.io account (l->account) the player's own
+// loadout goes out instead, like the live client's saved selections: the spray, the weapon and melee
+// skins and the cosmetic slots of our ENT (krunker.io keeps what the account owns).
 static int send_enter(KrunkerLink *l, const void *payload, const uint16_t length) {
     NetEntPacket ent;
     memset(&ent, 0, sizeof(ent));
     ent.secondary_index = -1;
     ent.lag_comp = 1.0f;
+    ent.cosmetics = PLAYER_COSMETICS_NONE;
+    ent.skins = (PlayerSkins) {-1, -1, -1};
+    ent.cosmetics_v7 = (PlayerCosmeticsV7) {-1, -1, -1, -1, -1, {-1, -1}, -1, -1};
     memcpy(&ent, payload, length < sizeof(ent) ? length : sizeof(ent));
     if (length <= offsetof(NetEntPacket, secondary_index)) ent.secondary_index = -1;
     if (length <= offsetof(NetEntPacket, lag_comp)) ent.lag_comp = 1.0f;
     if (length <= offsetof(NetEntPacket, attach_index)) ent.attach_index = 0;
     const double nan = NAN;
-    const KrunkerValue skins[] = {KRUNKER_V_NUM(-1), KRUNKER_V_NUM(-1)};
-    const KrunkerValue charms[] = {KRUNKER_V_NIL, KRUNKER_V_NUM(-1)};
+    const int own = l->account; // the account's loadout, else a guest's
+#define OWN(v) ((own && (v) >= 0) ? (double) (v) : -1.0)
+    const KrunkerValue skins[] = {KRUNKER_V_NUM(OWN(ent.skins.primary)), KRUNKER_V_NUM(OWN(ent.skins.secondary))};
+    const KrunkerValue charms[] = {own && ent.cosmetics_v7.charms[0] >= 0 ? KRUNKER_V_NUM(ent.cosmetics_v7.charms[0]) : KRUNKER_V_NIL,
+                                   KRUNKER_V_NUM(OWN(ent.cosmetics_v7.charms[1]))};
     const KrunkerValue enter[35] = {
         KRUNKER_V_NUM(ent.class_index),                                   // [0] classIndex
-        KRUNKER_V_NUM(2482),                                              // [1] sprayIndex (0x9b2)
+        KRUNKER_V_NUM(own && ent.spray_index > 0 ? ent.spray_index : 2482), // [1] sprayIndex (0x9b2)
         KRUNKER_V_ARRAY(skins, 2),                                        // [2] weapon skins
-        KRUNKER_V_NUM(-1),                                                // [3] hatIndex
-        KRUNKER_V_NUM(-1),                                                // [4] bodyIndex
+        KRUNKER_V_NUM(OWN(ent.cosmetics.hat)),                            // [3] hatIndex
+        KRUNKER_V_NUM(OWN(ent.cosmetics.body)),                           // [4] bodyIndex
         KRUNKER_V_NUM(ent.secondary_index >= 0 ? ent.secondary_index : 2),// [5] secondaryInd
         KRUNKER_V_NUM(ent.spectate ? 1 : 0),                              // [6] spectate
         KRUNKER_V_NUM(ent.chall_mode ? 1 : 0),                            // [7] challenge mode
         KRUNKER_V_NUM(1),                                                 // [8] team pick (iïíiîiì)
-        KRUNKER_V_NUM(-1),                                                // [9] meleeIndex
+        KRUNKER_V_NUM(OWN(ent.skins.melee)),                              // [9] meleeIndex
         KRUNKER_V_NUM(-1),                                                // [10] skinColIndex
         KRUNKER_V_NUM(ent.lag_comp),                                      // [11] lagComp
         KRUNKER_V_NUM(ent.attach_index >= 0 ? ent.attach_index : 0),      // [12] attachIndex
         KRUNKER_V_NUM(-1),                                                // [13] pcStatIndex
-        KRUNKER_V_NUM(-1),                                                // [14] dyeIndex
-        KRUNKER_V_NUM(-1),                                                // [15] shoeIndex
-        KRUNKER_V_NUM(-1),                                                // [16] waistIndex
+        KRUNKER_V_NUM(OWN(ent.cosmetics.dye)),                            // [14] dyeIndex
+        KRUNKER_V_NUM(OWN(ent.cosmetics_v7.shoe)),                        // [15] shoeIndex
+        KRUNKER_V_NUM(OWN(ent.cosmetics.waist)),                          // [16] waistIndex
         KRUNKER_V_NUM(-1),                                                // [17] hairCol
         KRUNKER_V_NUM(-1),                                                // [18] chatCol
         KRUNKER_V_NUM(ent.anon_mode ? 1 : 0),                             // [19] anonMode
-        KRUNKER_V_NUM(-1),                                                // [20] faceIndex
-        KRUNKER_V_NUM(-1),                                                // [21] petIndex
+        KRUNKER_V_NUM(OWN(ent.cosmetics.face)),                           // [20] faceIndex
+        KRUNKER_V_NUM(OWN(ent.cosmetics_v7.pet)),                         // [21] petIndex
         KRUNKER_V_NUM(0),                                                 // [22] verifiedBadge
         KRUNKER_V_NUM(0),                                                 // [23] premiumBadge
         KRUNKER_V_NUM(0),                                                 // [24] customBadge
-        KRUNKER_V_NUM(-1),                                                // [25] wristIndex
+        KRUNKER_V_NUM(OWN(ent.cosmetics_v7.wrist)),                       // [25] wristIndex
         KRUNKER_V_NUM(nan), KRUNKER_V_NUM(nan), KRUNKER_V_NUM(nan),       // [26..28] streakIndex1..3
         KRUNKER_V_ARRAY(charms, 2),                                       // [29] charms
-        KRUNKER_V_NUM(-1),                                                // [30] backIndex
-        KRUNKER_V_NUM(-1),                                                // [31] headIndex
-        KRUNKER_V_NUM(-1),                                                // [32] playerCardIndex
+        KRUNKER_V_NUM(OWN(ent.cosmetics_v7.back)),                        // [30] backIndex
+        KRUNKER_V_NUM(OWN(ent.cosmetics_v7.head)),                        // [31] headIndex
+        KRUNKER_V_NUM(OWN(ent.cosmetics_v7.player_card)),                 // [32] playerCardIndex
         KRUNKER_V_NUM(0),                                                 // [33] rankBadge
         KRUNKER_V_NUM(-1),                                                // [34] titleIndex
     };
+#undef OWN
     const KrunkerValue args[] = {
         KRUNKER_V_ARRAY(enter, 35),
         KRUNKER_V_NUM(16), KRUNKER_V_NUM(18), // constants of the call

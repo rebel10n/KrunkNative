@@ -15,8 +15,10 @@
 // does not have (the session is left; the error screen names the map index).
 //
 // Join flow (game.deob.js; matchmaker client at :147380-147690), the live client's order:
+//   0. the krunker.io account's fresh access token (krunker_account.h: refreshed first when it is
+//      about to expire), none for a guest
 //   1. GET <matchmaker>/seek-game?hostname=krunker.io&region=<r>&autoChangeGame=false[&game=<gameId>]
-//          &dataQuery={"v":"<buildVersion>"}
+//          &dataQuery={"v":"<buildVersion>"}[&accessToken=<the account's>]
 //      (matchmakerSeek's parameter order; no validationToken: iïîìîíì passes undefined for a guest)
 //      -> {host, port, gameId, clientId, data}, or 400 {"error":"CaptchaRequired"}:
 //   1b. CaptchaRequired: the player solves Cloudflare Turnstile (krunker_captcha.h: the widget on the
@@ -25,7 +27,9 @@
 //      validationToken=<token> after autoChangeGame and captchaToken=<turnstile> after dataQuery
 //      (:147445-147467; at most 2 captcha prompts per join, like the live client). Turnstile tokens
 //      are single-use: sent once, wiped, never logged.
-//   3. WebSocket <scheme>://<host>[:port]/ws?gameId=<gameId>&clientKey=<clientId>   (:222369-222371)
+//   3. WebSocket <scheme>://<host>[:port]/ws?gameId=<gameId>&clientKey=<clientId>[&at=<access token>]
+//      (:222360-222371); a signed-in socket gets "a" ACCOUNT_RESPONSE (the account's name and level,
+//      shown by the account UI) and our "en" carries the player's own loadout (krunker_link.c)
 //      production (the default matchmaker): wss:// and no port; a matchmaker given explicitly
 //      (tests, mirrors): its own scheme (http -> ws, https -> wss) and the port seek-game returned
 //   4. io-init, load / init (map + mode), our "en" when the player presses Play, then the game.
@@ -61,8 +65,8 @@
 //     voice, sounds, every KrunkScript packet, "00" names, "uid" reconnect ids
 //   - maps beyond Krunker v7.1.4's 32 official ones (init's mapIndex >= 32; custom / community
 //     maps the API serves by index), the mode's own rules for the Krunker mode id
-//   - cosmetics, skins, accounts: everyone is shown with default cosmetics, we join as a guest
-//     (no FRVR access token: `at=` and accessToken omitted)
+//   - cosmetics, skins: everyone is shown with default cosmetics ("0"'s cosmetic slots are not read);
+//     the account (krunker_account.h) is the player's own when signed in, a guest's otherwise
 //   - CHEAT_CHECK natively (QuickJS, the CHEAT_CHECK agent's), Windows; on the web a Turnstile token
 //     from krunker.io can only be pasted (a page cannot take the localhost callback)
 //   - the "cpt" answer's payload shape is ALTCHA's widget format, not readable in the bundle: unverified

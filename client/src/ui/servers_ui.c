@@ -1586,8 +1586,8 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
         sb_append(sb, "krunkerJoin(\"");
         sb_append_esc(sb, id);
         sb_append(sb, "\")' title='");
-        sb_append_esc(sb, krunker_net_in_client() ? I18N("kn.servers.kioRowJoin", "Join this official krunker.io game here, as a guest")
-                                                  : I18N("kn.servers.kioRowBrowser", "Opens this official krunker.io game in your browser"));
+        sb_append_esc(sb, krunker_net_in_client() ? I18N("kn.servers.kioRowJoin", "Join this krunker.io server here")
+                                                  : I18N("kn.servers.kioRowBrowser", "Opens this krunker.io server in your browser"));
         sb_append(sb, "'>");
     } else if (finder) {
         // a finder-only server: joined directly (finderJoin(host, port))
@@ -1601,7 +1601,8 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
         sb_append_esc(sb, id);
         sb_append(sb, "\", this)'>");
     }
-    // label
+    // label: a krunker.io lobby's badge leads, before its game mode
+    if (krunker) sb_append(sb, "<div class='krIcon kioTag' style='margin-top:-14px;vertical-align:middle;background-color:#7b1fa2;'>KRUNKER.IO</div> ");
     if (custom || old) {
         if (!(dedicated || row_h(t)[0]) && alias[0]) {
             sb_append_esc(sb, alias);
@@ -1610,7 +1611,6 @@ static void append_row(StrBuf *sb, const cJSON *t, const double now) {
     } else {
         sb_append(sb, "[YEND] ");
     }
-    if (krunker) sb_append(sb, " <div class='krIcon kioTag' style='margin-top:-14px;vertical-align:middle;background-color:#7b1fa2;'>KRUNKER.IO</div> ");
     if (official) sb_append(sb, " <div class='krIcon' style='margin-top:-14px;vertical-align:middle;background-color: var(--green);'>OFFICIAL</div> ");
     if (official || dedicated) sb_append(sb, " <div class='krIcon' style='margin-top:-14px;vertical-align:middle;background-color: var(--blue);'>24/7</div> ");
     sb_append_esc(sb, name.data ? name.data : "");
@@ -1792,20 +1792,22 @@ static void append_seek_status(StrBuf *sb) {
 // krunker.io refusing this network, unreachable). Before its first group, or after ours.
 static void append_krunker_status(StrBuf *sb, const int groups) {
     if (!krunker_lobbies_enabled()) return;
-    sb_append(sb, "<div id='kioStatus' " STATUS_BOX "margin-top:20px;");
+    // which account each server type sees (krunker_account.h: krunker.io servers have their own)
+    krunker_account_ui_accounts_html(sb);
+    sb_append(sb, "<div id='kioStatus' " STATUS_BOX "margin-top:10px;");
     if (!krunker_lobbies_list() && krunker_lobbies_loading()) {
         sb_append(sb, "color:rgba(255,255,255,0.7)'><span style='color:#ce93d8'>KRUNKER.IO</span> ");
-        sb_append_esc(sb, I18N("kn.servers.kioLoading", "Loading the official krunker.io lobbies..."));
+        sb_append_esc(sb, I18N("kn.servers.kioLoading", "Loading the krunker.io servers..."));
     } else if (krunker_lobbies_error()[0] && !groups) {
         sb_append(sb, "color:#ff6b6b'><span style='color:#ce93d8'>KRUNKER.IO</span> ");
         sb_append_esc(sb, krunker_lobbies_error());
     } else if (!groups) {
         sb_append(sb, "color:rgba(255,255,255,0.7)'><span style='color:#ce93d8'>KRUNKER.IO</span> ");
-        sb_append_esc(sb, I18N("kn.servers.kioNoMatch", "No official lobby matches the search or filter."));
+        sb_append_esc(sb, I18N("kn.servers.kioNoMatch", "No krunker.io server matches the search or filter."));
     } else {
         sb_append(sb, "color:rgba(255,255,255,0.7)'><span style='color:#ce93d8'>KRUNKER.IO</span> ");
-        sb_append_esc(sb, krunker_net_in_client() ? I18N("kn.servers.kioJoinHere", "official lobbies: pick one to join it here as a guest.")
-                                                  : I18N("kn.servers.kioOpensInBrowser", "official lobbies open in your browser."));
+        sb_append_esc(sb, krunker_net_in_client() ? I18N("kn.servers.kioJoinHere", "krunker.io servers: pick one to join it here, or Quick Join.")
+                                                  : I18N("kn.servers.kioOpensInBrowser", "krunker.io servers open in your browser."));
     }
     sb_append(sb, "</div>");
 }

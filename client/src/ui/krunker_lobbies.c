@@ -211,14 +211,14 @@ static void on_list(void *user, const int status, const char *body, const size_t
             char code[16];
             snprintf(code, sizeof(code), "%d", status);
             if (status == 200)
-                snprintf(K.error, sizeof(K.error), "%s", I18N("kn.kio.notAList", "Official lobbies unavailable: krunker.io answered with something else than the lobby list."));
+                snprintf(K.error, sizeof(K.error), "%s", I18N("kn.kio.notAList", "krunker.io servers unavailable: krunker.io answered with something else than the lobby list."));
             else
-                i18n_trf(K.error, sizeof(K.error), "kn.kio.http", "Official lobbies unavailable: krunker.io answered HTTP {0}.", 1, I18N_ARGV(code));
+                i18n_trf(K.error, sizeof(K.error), "kn.kio.http", "krunker.io servers unavailable: krunker.io answered HTTP {0}.", 1, I18N_ARGV(code));
         } else if (proxied) {
-            i18n_trf(K.error, sizeof(K.error), "kn.kio.proxyUnreachable", "Official lobbies unavailable: the proxy {0} did not reach krunker.io (Settings > Client).",
+            i18n_trf(K.error, sizeof(K.error), "kn.kio.proxyUnreachable", "krunker.io servers unavailable: the proxy {0} did not reach krunker.io (Settings > Client).",
                      1, I18N_ARGV(proxy));
         } else {
-            snprintf(K.error, sizeof(K.error), "%s", I18N("kn.kio.unreachable", "Official lobbies unavailable: krunker.io is not reachable."));
+            snprintf(K.error, sizeof(K.error), "%s", I18N("kn.kio.unreachable", "krunker.io servers unavailable: krunker.io is not reachable."));
         }
         fprintf(stderr, "[krunker] game list failed (HTTP %d%s%s): %s\n", status, proxied ? " via proxy " : "", proxied ? proxy : "", K.error);
     }
@@ -239,7 +239,7 @@ void krunker_lobbies_refresh(const int force) {
     snprintf(url, sizeof(url), "%s/game-list?hostname=krunker.io", matchmaker_url());
     K.fetched_ms = now;
     K.loading = backend_http_get_external(url, KRUNKER_LOBBIES_TIMEOUT_MS, on_list, NULL) != 0;
-    if (!K.loading) snprintf(K.error, sizeof(K.error), "%s", I18N("kn.kio.unreachable", "Official lobbies unavailable: krunker.io is not reachable."));
+    if (!K.loading) snprintf(K.error, sizeof(K.error), "%s", I18N("kn.kio.unreachable", "krunker.io servers unavailable: krunker.io is not reachable."));
 }
 
 void krunker_lobbies_network_changed(void) {
@@ -290,7 +290,7 @@ int krunker_lobbies_seek(void) {
         K.seek_pending = 1;
         krunker_lobbies_refresh(1);
         if (K.loading) {
-            ui_notify(I18N("kn.kio.looking", "Looking for an official krunker.io lobby..."));
+            ui_notify(I18N("kn.kio.looking", "Looking for a krunker.io server..."));
             return 1;
         }
         K.seek_pending = 0;
@@ -314,7 +314,7 @@ int krunker_lobbies_seek(void) {
         if (!strcmp(id, krunker_net_game())) {
             // the only official lobby with room is the one the player is in: stay, no rejoin
             seek_prefs_describe(want, sizeof(want));
-            I18N_F(text, "kn.kio.noOtherLobby", "No other official krunker.io lobby has room for {0}: you stay in this one", want);
+            I18N_F(text, "kn.kio.noOtherLobby", "No other krunker.io server has room for {0}: you stay in this one", want);
             printf("[krunker] seek: no other official lobby has room, staying in %s\n", id);
             ui_notify(text);
             return 1;
@@ -349,7 +349,7 @@ void krunker_lobbies_open(const char *id) {
     if (krunker_net_in_client() && g_lobbies_client) {
         char text[200];
         printf("[krunker] official lobby %s: joining in-client\n", id);
-        I18N_F(text, "kn.kio.joining", "Joining the official krunker.io game {0}...", id);
+        I18N_F(text, "kn.kio.joining", "Joining the krunker.io server {0}...", id);
         ui_notify(text);
         menu_show_window(MENU_WINDOW_NONE, 0); // like a KrunkNative row: the Servers window makes way for the game
         krunker_net_join(g_lobbies_client, id, lobby_region(id));
@@ -363,9 +363,9 @@ void krunker_lobbies_open(const char *id) {
     // krunker.io links)
     ui_open_browser(url);
 #ifdef _WIN32 // no native WebSocket client for krunker.io's game servers on Windows yet (krunker_net.c)
-    I18N_F(text, "kn.kio.openedInBrowserWindows", "Official lobby {0} opened in your browser (this Windows build joins krunker.io games there for now)", id);
+    I18N_F(text, "kn.kio.openedInBrowserWindows", "krunker.io server {0} opened in your browser (this Windows build joins krunker.io servers there for now)", id);
 #else
-    I18N_F(text, "kn.kio.openedInBrowserOptOut", "Official lobby {0} opened in your browser (in-client joining is switched off: KRUNKNATIVE_KRUNKER_JOIN=browser)", id);
+    I18N_F(text, "kn.kio.openedInBrowserOptOut", "krunker.io server {0} opened in your browser (in-client joining is switched off: KRUNKNATIVE_KRUNKER_JOIN=browser)", id);
 #endif
     ui_notify(text);
 }

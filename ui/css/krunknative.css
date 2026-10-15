@@ -875,6 +875,52 @@ html.kn-bare-window #instructions {
   background-color: #9e9e9e;
 }
 
+/* The krunker.io account modal (client/src/ui/krunker_account_ui.c): the Security Challenge look,
+ * one level below it (a username sign-in shows the challenge on top). */
+.kn-kio-account-holder {
+  z-index: 2147483645;
+}
+.kn-kio-input {
+  flex: none;
+  width: 100%;
+  font-size: 18px;
+  margin-top: 8px;
+}
+/* The "Accounts" line: which account each server type sees (Servers window, Account settings). */
+.kn-accounts {
+  background-color: rgba(0, 0, 0, 0.3);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-top: 10px;
+  margin-bottom: 4px;
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.7);
+}
+.kn-accounts-row {
+  display: inline-block;
+  margin-right: 28px;
+}
+.kn-accounts-kind {
+  color: rgba(255, 255, 255, 0.55);
+}
+.kn-accounts-name {
+  color: #fff;
+}
+.kn-accounts-level {
+  color: rgba(255, 255, 255, 0.6);
+}
+.kn-accounts-guest {
+  color: rgba(255, 255, 255, 0.8);
+}
+.kn-accounts-btn {
+  cursor: pointer;
+  color: #2196f3;
+  margin-left: 6px;
+}
+.kn-accounts-btn:hover {
+  color: #42a5f5;
+}
+
 /* KrunkNative's password-reset steps (client/src/ui/account_ui.c reset_render) fill the Account
  * window with v7.1.4's guest-form markup: its Back / Send Code buttons are .accBtn, a rule of
  * v7's css/main.css (line 2658) the v10 page lacks. Without it they shrank to their text. */

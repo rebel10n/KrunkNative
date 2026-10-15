@@ -12,6 +12,7 @@
 #include <krunker_captcha.h>
 #include <recent_lobbies.h>
 #include <seek_prefs.h>
+#include <krunker_account.h>
 #include <backend.h>
 #include <html_ui.h>
 #include <ui_logic.h>
@@ -52,9 +53,11 @@ static const char *const k_regions[] = {KRUNKER_REGIONS};
 // excludeGame, so an answer that is another recent game is excluded in turn, at most this many
 // times more, before the best answer so far is taken (recent_lobbies.h)
 #define KRUNKER_SEEK_NEW_RETRIES 2
+#define KRUNKER_ACCESS_MAX 4100 // an access token (JWT) + NUL
 
 typedef enum {
     KS_OFF = 0,    // not in an official game
+    KS_ACCOUNT,    // the krunker.io account's fresh access token (krunker_account.h; a refresh may run)
     KS_LIST,       // Find New Game: GET /game-list, to pick a game this client was not in lately
     KS_TOKEN,      // GET /generate-token (after a captcha: the retry's fresh validation token)
     KS_SEEK,       // GET /seek-game
@@ -81,7 +84,12 @@ static struct {
     char exclude[96], fallback[96];
     int fallback_rank;
     RecentLobbies recent; // the official games joined lately, most recent first (main thread)
-    char ws_url[1024];
+    char ws_url[1024 + KRUNKER_ACCESS_MAX];
+    char ws_log[1024];   // ws_url without the account's `at=`: what the log shows
+    // the krunker.io account's access token for this join (krunker_account_fresh_token), "" = a guest;
+    // seek-game's accessToken and the socket's at=. Never logged; wiped on leave.
+    char access[KRUNKER_ACCESS_MAX];
+    volatile int account_event; // the socket thread saw "a" ACCOUNT_RESPONSE: krunker_net_tick tells krunker_account
     int connected;       // on_client_socket_connect was reported for this socket
     KrunkerLink link;
     pthread_mutex_t lock;
@@ -120,6 +128,11 @@ static struct {
        , .wake = {-1, -1}
 #endif
 };
+
+static void wipe(void *p, size_t n) {
+    volatile unsigned char *v = p;
+    while (n--) *v++ = 0;
+}
 
 // ---------------------------------------------------------------- switches
 
@@ -179,6 +192,12 @@ static void trace_frame(const char *dir, const uint8_t *data, const size_t len) 
     KrunkerFrame f;
     if (krunker_proto_decode(data, len, 0, &f) != KRUNKER_PROTO_OK) {
         printf("[krunker] %s (%zu bytes, undecodable)\n", dir, len);
+        return;
+    }
+    if (!strcmp(f.name, krunker_s2c_wire(KRUNKER_S2C_ACCOUNT_RESPONSE)) || !strcmp(f.name, krunker_s2c_wire(KRUNKER_S2C_NEW_TOKEN))) {
+        // the account's answer / a new session token: tokens are never logged
+        printf("[krunker] %s %s ah=%d (account data, not logged)\n", dir, f.name, f.ah_echo);
+        krunker_frame_free(&f);
         return;
     }
     KrunkerBuf json = {0};
@@ -254,6 +273,9 @@ static void link_event(void *user, const KrunkerLinkEvent kind, const char *text
         case KRUNKER_LINK_EV_JOINED:
             set_notice(0, "%s", i18n_replace(out, sizeof(out), K.tpl.joined, 1, I18N_ARGV(K.game_id)));
             break;
+        case KRUNKER_LINK_EV_ACCOUNT: // "a": the account is signed in on this socket (krunker_net_tick tells krunker_account)
+            K.account_event = 1;
+            break;
         default:
             break;
     }
@@ -306,7 +328,7 @@ static void socket_opened(void) {
     client->net_socket = KRUNKER_FAKE_FD;
     pthread_mutex_unlock(&client->net_lock);
     K.connected = 1;
-    printf("[krunker] connected to %s\n", K.ws_url);
+    printf("[krunker] connected to %s\n", K.ws_log);
     on_client_socket_connect(client);
 }
 
@@ -376,7 +398,7 @@ static bool ws_on_error(int type, const EmscriptenWebSocketErrorEvent *e, void *
     (void) type;
     (void) e;
     (void) user;
-    fprintf(stderr, "[krunker] websocket error (%s)\n", K.ws_url);
+    fprintf(stderr, "[krunker] websocket error (%s)\n", K.ws_log);
     return true;
 }
 
@@ -398,7 +420,7 @@ static void ws_open(void) {
     K.ws = emscripten_websocket_new(&attr);
     if (K.ws <= 0) {
         K.ws = 0;
-        fail("Could not open a WebSocket to %s", K.ws_url);
+        fail("Could not open a WebSocket to %s", K.ws_log);
         return;
     }
     void *gen = (void *) (uintptr_t) K.generation;
@@ -523,7 +545,7 @@ static int ws_handshake(HttpConn *c, const HttpAddr *a, const char *target, int 
     }
     key[24] = 0;
     const int default_port = !strcmp(a->port, a->tls ? "443" : "80");
-    char req[2048];
+    char req[2048 + KRUNKER_ACCESS_MAX]; // (the target carries the account's at=)
     // Origin: the page Krunker's game servers serve (a browser sends its page origin)
     const int len = snprintf(req, sizeof(req),
                              "GET %s HTTP/1.1\r\nHost: %s%s%s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
@@ -531,7 +553,9 @@ static int ws_handshake(HttpConn *c, const HttpAddr *a, const char *target, int 
                              "User-Agent: KrunkNative\r\n\r\n",
                              target, a->host, default_port ? "" : ":", default_port ? "" : a->port, key);
     *status_out = 0;
-    if (len <= 0 || (size_t) len >= sizeof(req) || !http_conn_send(c, req, (size_t) len)) return 0;
+    const int sent = len > 0 && (size_t) len < sizeof(req) && http_conn_send(c, req, (size_t) len);
+    wipe(req, sizeof(req));
+    if (!sent) return 0;
     char resp[4096];
     size_t n = 0;
     while (n + 1 < sizeof(resp)) {
@@ -565,7 +589,7 @@ static void out_flush(HttpConn *c, int *ok) {
 static void *ws_thread(void *arg) {
     const unsigned generation = (unsigned) (uintptr_t) arg;
     HttpAddr a;
-    char target[1024];
+    char target[sizeof(K.ws_url)];
     HttpConn c = {.fd = -1};
     int code = 1006, status = 0;
     const char *why = "";
@@ -814,11 +838,11 @@ static void fail_unreachable(void) {
 
 // The texts the socket thread uses (K.tpl), in the page's language at join time (main thread).
 static void load_texts(void) {
-    snprintf(K.tpl.joined, sizeof(K.tpl.joined), "%s", I18N("kn.kio.joined", "Joined the official krunker.io game {0}"));
+    snprintf(K.tpl.joined, sizeof(K.tpl.joined), "%s", I18N("kn.kio.joined", "Joined the krunker.io server {0}"));
     snprintf(K.tpl.error, sizeof(K.tpl.error), "%s", I18N("kn.kio.serverError", "krunker.io: {0}"));
     snprintf(K.tpl.pow, sizeof(K.tpl.pow), "%s",
              I18N("kn.kio.powUnsupported", "krunker.io's game server asked for a proof of work in a form this client cannot compute yet: it may close the game."));
-    snprintf(K.tpl.map, sizeof(K.tpl.map), "%s", I18N("kn.kio.mapMissing", "Map index {0} of this official game is not in this client's catalogue: pick another lobby."));
+    snprintf(K.tpl.map, sizeof(K.tpl.map), "%s", I18N("kn.kio.mapMissing", "Map index {0} of this krunker.io server is not in this client's catalogue: pick another lobby."));
     snprintf(K.tpl.closed, sizeof(K.tpl.closed), "%s", I18N("kn.kio.sessionClosed", "The krunker.io game server ended this session."));
     snprintf(K.tpl.ws_failed, sizeof(K.tpl.ws_failed), "%s", I18N("kn.kio.gsFailed", "Could not connect to the krunker.io game server: {0}"));
 }
@@ -849,15 +873,11 @@ static void form_encode(char *out, const size_t n, const char *s) {
 }
 
 static void append_param(char *url, const size_t n, const char *key, const char *value) {
-    char enc[KRUNKER_CAPTCHA_TOKEN_MAX * 3 + 1];
+    static char enc[(KRUNKER_CAPTCHA_TOKEN_MAX > KRUNKER_ACCESS_MAX ? KRUNKER_CAPTCHA_TOKEN_MAX : KRUNKER_ACCESS_MAX) * 3 + 1];
     form_encode(enc, sizeof(enc), value);
     const size_t len = strlen(url);
     snprintf(url + len, n - len, "%s%s=%s", strchr(url, '?') ? "&" : "?", key, enc);
-}
-
-static void wipe(void *p, size_t n) {
-    volatile unsigned char *v = p;
-    while (n--) *v++ = 0;
+    wipe(enc, sizeof(enc));
 }
 
 static int http_get(const char *url, BackendHttpFn fn) {
@@ -872,13 +892,14 @@ static int http_get(const char *url, BackendHttpFn fn) {
 static int stale(void *user) { return (unsigned) (uintptr_t) user != K.generation || K.state == KS_OFF; }
 
 static void on_seek(void *user, int status, const char *body, size_t length);
+static void seek(void);
 
 static void seek(void) {
     // matchmakerSeek (game.deob.js:147610-147631): hostname, region, autoChangeGame,
     // validationToken, then game / excludeGame / dataQuery / captchaToken / accessToken when set
     // (null ones are dropped, matchmakerRequest :147647). The first seek has no validationToken
     // (iïîìîíì passes undefined for a guest); only the captcha retry fetches one (:147466).
-    static char url[16384];
+    static char url[32768];
     snprintf(url, sizeof(url), "%s/seek-game", K.matchmaker);
     append_param(url, sizeof(url), "hostname", "krunker.io");
     append_param(url, sizeof(url), "region", K.region);
@@ -897,11 +918,14 @@ static void seek(void) {
     } else {
         append_param(url, sizeof(url), "dataQuery", "{\"v\":\"" KRUNKER_BUILD_VERSION "\"}"); // iïîìîíì: {v: buildVersion}
     }
-    const size_t logged = strlen(url); // the log stops before the captcha token: never logged
+    const size_t logged = strlen(url); // the log stops before the captcha and access tokens: never logged
     K.captcha_sent = K.captcha[0] != 0;
     if (K.captcha_sent) append_param(url, sizeof(url), "captchaToken", K.captcha);
+    // the krunker.io account (krunker_account.h): matchmakerSeek's last parameter (:147630)
+    if (K.access[0]) append_param(url, sizeof(url), "accessToken", K.access);
     K.state = KS_SEEK;
-    printf("[krunker] seek-game: %.*s%s\n", (int) logged, url, K.captcha_sent ? "&captchaToken=(the player's Turnstile token)" : "");
+    printf("[krunker] seek-game: %.*s%s%s\n", (int) logged, url, K.captcha_sent ? "&captchaToken=(the player's Turnstile token)" : "",
+           K.access[0] ? "&accessToken=(the krunker.io account's)" : "");
     const int queued = http_get(url, on_seek); // (the request keeps its own copy)
     wipe(K.captcha, sizeof(K.captcha));          // single-use: never sent twice
     wipe(url, sizeof(url));
@@ -1055,17 +1079,21 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         snprintf(K.game_id, sizeof(K.game_id), "%s", game);
         recent_lobbies_push(&K.recent, game);
         char query[600];
-        snprintf(query, sizeof(query), "gameId=%s&clientKey=%s", game, client_id); // no clientUID / bpt / tc / at (guest) / dm
+        snprintf(query, sizeof(query), "gameId=%s&clientKey=%s", game, client_id); // no clientUID / bpt / tc / dm
         if (is_production() || !port_s[0]) {
-            snprintf(K.ws_url, sizeof(K.ws_url), "wss://%s/ws?%s", host, query);
+            snprintf(K.ws_log, sizeof(K.ws_log), "wss://%s/ws?%s", host, query);
         } else {
-            snprintf(K.ws_url, sizeof(K.ws_url), "%s://%s:%s/ws?%s", strncmp(K.matchmaker, "https:", 6) ? "ws" : "wss", host, port_s, query);
+            snprintf(K.ws_log, sizeof(K.ws_log), "%s://%s:%s/ws?%s", strncmp(K.matchmaker, "https:", 6) ? "ws" : "wss", host, port_s, query);
         }
-        printf("[krunker] seek-game: game %s on %s:%s, opening %s\n", game, host, port_s, K.ws_url);
+        // the krunker.io account: "at=" + the fresh access token as it is (iîíîiìî :222367, after tc)
+        snprintf(K.ws_url, sizeof(K.ws_url), "%s%s%s", K.ws_log, K.access[0] ? "&at=" : "", K.access);
+        printf("[krunker] seek-game: game %s on %s:%s, opening %s%s\n", game, host, port_s, K.ws_log,
+               K.access[0] ? "&at=(the krunker.io account's token)" : "");
         load_ws_texts();
         K.state = KS_CONNECTING;
         pthread_mutex_lock(&K.lock);
         krunker_link_reset(&K.link);
+        K.link.account = K.access[0] != 0; // "en" then carries the player's own loadout
         pthread_mutex_unlock(&K.lock);
         ws_open();
     }
@@ -1085,6 +1113,22 @@ int krunker_net_open(void) { return K.state == KS_OPEN; }
 static void stop_socket(void) {
     K.generation++;
     ws_close();
+}
+
+// The krunker.io account's token for this join (krunker_account_fresh_token): NULL = as a guest.
+// Then Find New Game's lobby list (seek_new 2), or seek-game at once.
+static void on_access(void *user, const char *token) {
+    if (stale(user) || K.state != KS_ACCOUNT) return;
+    snprintf(K.access, sizeof(K.access), "%s", token && strlen(token) < sizeof(K.access) ? token : "");
+    if (K.access[0]) printf("[krunker] joining with the krunker.io account %s\n", krunker_account_name());
+    else if (krunker_account_signed_in()) printf("[krunker] the krunker.io account has no usable token: joining as a guest\n");
+    if (K.seek_new == 2) {
+        K.state = KS_LIST;
+        char url[600];
+        snprintf(url, sizeof(url), "%s/game-list?hostname=krunker.io", K.matchmaker);
+        if (http_get(url, on_game_list)) return;
+    }
+    seek();
 }
 
 // krunker_net_join, or (seek_new) Find New Game: no game asked for, excludeGame = exclude; seek_new 2:
@@ -1120,17 +1164,14 @@ static int join(Client *client, const char *game_id, const char *region, const i
     wipe(K.captcha, sizeof(K.captcha));
     load_texts();
     matchmaker();
+    wipe(K.access, sizeof(K.access));
     if (K.exclude[0]) printf("[krunker] finding a new official game (region %s, not %s) through %s\n", K.region, K.exclude, K.matchmaker);
     else printf("[krunker] joining official game %s (region %s) through %s\n", K.game_id[0] ? K.game_id : "(any)", K.region, K.matchmaker);
-    if (seek_new == 2) {
-        K.state = KS_LIST;
-        char url[600];
-        snprintf(url, sizeof(url), "%s/game-list?hostname=krunker.io", K.matchmaker);
-        if (http_get(url, on_game_list)) return 1;
-    }
-    // the live client's order: seek-game at once, no validation token; generate-token only before a
-    // captcha retry (captcha_done)
-    seek();
+    // the live client's order (seek, :147412): the account's fresh access token first (a refresh when it
+    // is about to expire), then on_access starts Find New Game's list or seek-game, no validation token;
+    // generate-token only before a captcha retry (captcha_done)
+    K.state = KS_ACCOUNT;
+    krunker_account_fresh_token(on_access, (void *) (uintptr_t) K.generation);
     return K.state != KS_CLOSED;
 }
 
@@ -1167,9 +1208,11 @@ void krunker_net_leave(Client *client, const char *reason) {
     printf("[krunker] leaving the official game%s%s\n", reason ? ": " : "", reason ? reason : "");
     K.state = KS_OFF;
     K.altcha_pending = K.pow_shown = 0;
-    krunker_captcha_close(); // a pending Turnstile request ends with the session
+    wipe(K.access, sizeof(K.access));
+    if (!krunker_account_owns_captcha()) krunker_captcha_close(); // a pending Turnstile request ends with the session (not a sign-in's)
     wipe(K.captcha, sizeof(K.captcha));
     stop_socket(); // native: joins the thread, which reports the disconnect; web: the close callback does
+    wipe(K.ws_url, sizeof(K.ws_url)); // (it carried the account's at=)
 }
 
 void krunker_net_reconnect(Client *client) {
@@ -1202,6 +1245,16 @@ int krunker_net_sync_info(char *out, const size_t n) {
 
 void krunker_net_tick(Client *client) {
     krunker_captcha_tick(); // the matchmaker's Turnstile modal (the localhost callback natively)
+    if (K.account_event) { // the game server's "a": the account's name and level for the account UI
+        K.account_event = 0;
+        char name[sizeof(K.link.account_name)];
+        pthread_mutex_lock(&K.lock);
+        snprintf(name, sizeof(name), "%s", K.link.account_name);
+        const int level = K.link.account_level;
+        pthread_mutex_unlock(&K.lock);
+        printf("[krunker] the game server signed in the krunker.io account %s (level %d)\n", name, level);
+        if (K.access[0]) krunker_account_note_game(name, level);
+    }
     if (K.leave_unsupported && K.state != KS_OFF) {
         // init named a map outside our catalogue (krunker_link on_init): the game cannot be shown, so
         // the session ends on the error screen saying which map, instead of a loading screen forever

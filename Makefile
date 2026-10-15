@@ -526,6 +526,10 @@ test-net: build ## knet transport unit test (loss/dup/reorder), v7 chat/voice ch
 krunker-official-e2e: build ## Official krunker.io mode (krunker_net.h) against a local matchmaker + game server stub: native, and the web build when dist/web has one
 	timeout 900 $(PYTHON) -I server/tests/krunker_official_e2e.py $(DEBUG_DIR) $(DIST_WEB)
 
+.PHONY: krunker-account-e2e
+krunker-account-e2e: build ## The krunker.io account backend (krunker_account.h): sign in (Turnstile, 2FA), Accounts line, krunker.io Quick Join, refresh, accessToken / at=, sign out, against local stubs
+	timeout 300 $(PYTHON) -I server/tests/krunker_account_e2e.py $(DEBUG_DIR)
+
 .PHONY: target-select-e2e
 target-select-e2e: build ## Player target selectors on server_bin: god * / ungod * / give * over clients and bots, a guest refused, kick @bots, rcon op / kick *
 	timeout 300 $(PYTHON) -I server/tests/target_select_e2e.py $(DEBUG_DIR)

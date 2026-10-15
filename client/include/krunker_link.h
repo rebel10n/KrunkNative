@@ -57,6 +57,9 @@
 //   kpd     [code, message, data]            NET_EXT_KPD_RESPONSE (policeRes, :216287; code 0 only)
 //   kpdf    []                               NET_EXT_KPD_RESET (iiíìîìi: the officer's verdict open again)
 //   start   [.., kpdData {sus, caller}]      NET_EXT_KPD_DATA (socket ids as our uids) for a K.P.D officer
+//   a       [error, id, name, data, ...]     ACCOUNT_RESPONSE (iîïïiii :210016): our krunker.io account
+//                                            signed in on this socket -> KRUNKER_LINK_EV_ACCOUNT (name,
+//                                            level = floor(0.03 * sqrt(data.player_score)))
 // Outbound: our NET_PACKET_ENT -> "en", NET_PACKET_INPUT(_BATCH) -> "q" (the delta-compressed
 // window of :221748-221830), NET_PACKET_CHAT_SEND / CHAT_V7 -> "ct", the player list's EXT
 // NET_EXT_VOTE_KICK -> "v2k" [alias, 1] / [alias] (kickVote :220193, the [2] key :221373) and
@@ -79,6 +82,8 @@ typedef enum {
     KRUNKER_LINK_EV_JOINED,     // our own player was added (the "0" with our socket id)
     KRUNKER_LINK_EV_UNSUPPORTED,// something this client cannot show (an unknown map index, ...)
     KRUNKER_LINK_EV_CLOSE,      // the server told us to close the socket ("00" with keepOpen falsy)
+    KRUNKER_LINK_EV_ACCOUNT,    // "a" ACCOUNT_RESPONSE: the game server signed our krunker.io account in
+                                // (text: its name; account_name / account_level of the link)
 } KrunkerLinkEvent;
 
 typedef struct {
@@ -133,6 +138,11 @@ typedef struct {
     // init's lobby settings (emit_lobby_config): applyNetworking's rates (snf, tf, sf) and how many
     // config keys the lobby set
     int send_hz, tick_hz, sync_hz, config_keys;
+    // the socket carries a krunker.io account's token (`at=`, krunker_account.h): set by the transport
+    // after krunker_link_reset; "en" then sends the player's own loadout instead of a guest's
+    int account;
+    char account_name[64];          // "a" ACCOUNT_RESPONSE: the account's name, "" none yet
+    int account_level;              // its level (Account.updateLevel over player_score), 0 = not in it
     // counters (tests, logs, the console's official_sync)
     unsigned frames_in, frames_out, cc_answered, cc_failed, captchas_solved, unknown_in;
     unsigned syncs, sync_failed;    // "l" SYNC_PLAYER applied, "f" SYNC_FAILED received

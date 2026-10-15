@@ -28,7 +28,7 @@ typedef enum {
 } HttpProxyKind;
 
 typedef enum {
-    HTTP_PROXY_SCOPE_KRUNKER = 0, // krunker.io and its subdomains only
+    HTTP_PROXY_SCOPE_KRUNKER = 0, // krunker.io and its subdomains (+ crucible.frvr.com, the krunker.io account's refresh)
     HTTP_PROXY_SCOPE_ALL = 1,     // every HTTP(S) / WS(S) connection of the client
 } HttpProxyScope;
 
@@ -45,7 +45,7 @@ int http_proxy_parse(const char *url, HttpProxy *out);
 void http_proxy_configure(const char *url, HttpProxyScope scope);
 // The proxy a connection to host goes through (tls: an https:// / wss:// URL). 1 = *out is set.
 int http_proxy_for(const char *host, int tls, HttpProxy *out);
-// host is krunker.io or one of its subdomains
+// host is krunker.io or one of its subdomains, or crucible.frvr.com (the krunker.io account's auth service)
 int http_proxy_host_is_krunker(const char *host);
 // Bumped by every http_proxy_configure: kept-alive connections opened before it are dropped.
 unsigned http_proxy_generation(void);

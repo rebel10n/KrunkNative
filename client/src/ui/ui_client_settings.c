@@ -168,7 +168,7 @@ static const ClientSetting SETTINGS[] = {
 #endif
     },
     {"proxyScope", "Proxy Scope", "Network", CS_SELECT, CS_NATIVE, "krunker",
-     "krunker.io only: the official lobby list. All client traffic: also the account service, server finder, news and downloads",
+     "krunker.io only: the krunker.io server list and account. All client traffic: also the account service, server finder, news and downloads",
      PROXY_SCOPES, COUNT(PROXY_SCOPES)},
 #endif
     // ---- Game (glorp "Auto Spectate", "Always Play HS Sound on Kill")
@@ -220,7 +220,7 @@ static const ClientSetting SETTINGS[] = {
 //   I18N("kn.client.proxy.info", "http://host:port, https://host:port, socks5://host:port or socks5h://host:port (user:password@ allowed). Empty = none (the HTTPS_PROXY / HTTP_PROXY / ALL_PROXY / NO_PROXY environment variables apply). Game connections never use it")
 //   I18N("kn.client.proxy.infoWin", "http://host:port (user:password@ allowed; WinHTTP takes no SOCKS). Empty = none (the HTTPS_PROXY / HTTP_PROXY / ALL_PROXY environment variables, else the system proxy). Game connections never use it")
 //   I18N("kn.client.proxyScope.name", "Proxy Scope")  I18N("kn.client.proxyScope.opt.krunker", "krunker.io only")  I18N("kn.client.proxyScope.opt.all", "All client traffic")
-//   I18N("kn.client.proxyScope.info", "krunker.io only: the official lobby list. All client traffic: also the account service, server finder, news and downloads")
+//   I18N("kn.client.proxyScope.info", "krunker.io only: the krunker.io server list and account. All client traffic: also the account service, server finder, news and downloads")
 //   I18N("kn.client.autoSpec.name", "Auto Spectate")  I18N("kn.client.autoSpec.info", "Turn Spectate on when the game loads")
 //   I18N("kn.client.hsSound.name", "Always Play HS Sound on Kill")
 //   I18N("kn.client.openConfig.name", "Client Folder")  I18N("kn.client.openConfig.info", "Settings, swapper and custom.css")  I18N("kn.client.openConfig.button", "Open")

@@ -702,6 +702,42 @@ int backend_social_send_text(const char *json) {
 
 // ------------------------------------------------------------------ main thread
 
+// The URL for a log line: the values of query parameters that carry secrets (krunker.io's seek-game:
+// captchaToken, accessToken, validationToken; a socket's at=; any token=) shown as "(redacted)".
+static char *redacted_url(const char *url) {
+    static const char *const secret[] = {"captchaToken", "accessToken", "validationToken", "at", "token"};
+    static const char MARK[] = "(redacted)";
+    size_t parts = 1;
+    for (const char *c = url; *c; c++) parts += *c == '&';
+    char *out = malloc(strlen(url) + 1 + parts * sizeof(MARK)); // room for a mark per parameter
+    if (!out) return NULL;
+    const char *q = strchr(url, '?');
+    if (!q) {
+        strcpy(out, url);
+        return out;
+    }
+    size_t o = (size_t) (q - url) + 1;
+    memcpy(out, url, o);
+    for (const char *p = q + 1; *p;) {
+        const size_t part = strcspn(p, "&");
+        const char *eq = memchr(p, '=', part);
+        int hide = 0;
+        for (size_t i = 0; eq && i < sizeof(secret) / sizeof(secret[0]); i++)
+            hide |= (size_t) (eq - p) == strlen(secret[i]) && !strncmp(p, secret[i], (size_t) (eq - p));
+        const size_t keep = hide ? (size_t) (eq - p) + 1 : part;
+        memcpy(out + o, p, keep);
+        o += keep;
+        if (hide) {
+            memcpy(out + o, MARK, sizeof(MARK) - 1);
+            o += sizeof(MARK) - 1;
+        }
+        p += part;
+        if (*p == '&') out[o++] = *p++;
+    }
+    out[o] = 0;
+    return out;
+}
+
 void backend_poll(void) {
     pthread_mutex_lock(&g_lock);
     HttpJob *done = g_http_done;
@@ -716,7 +752,9 @@ void backend_poll(void) {
             // a transport error: say which request and why (silent before: an empty server
             // finder looked like "no servers"); the reason is also the callback's body
             if (!done->err[0]) snprintf(done->err, sizeof(done->err), "no answer");
-            fprintf(stderr, "[http] %s %s failed: %s\n", done->method, done->url, done->err);
+            char *shown = redacted_url(done->url);
+            fprintf(stderr, "[http] %s %s failed: %s\n", done->method, shown ? shown : "(url)", done->err);
+            free(shown);
         }
         if (done->fn) {
             const char *body = done->status ? (done->body ? done->body : "") : done->err;

@@ -150,7 +150,11 @@ static int ends_with_domain(const char *host, const char *domain) {
     return h == d || host[h - d - 1] == '.';
 }
 
-int http_proxy_host_is_krunker(const char *host) { return host && ends_with_domain(host, "krunker.io"); }
+// krunker.io and its subdomains, plus crucible.frvr.com: the FRVR auth service the krunker.io account
+// refreshes its session at (krunker_account.h), so the krunker.io scope carries the whole account flow
+int http_proxy_host_is_krunker(const char *host) {
+    return host && (ends_with_domain(host, "krunker.io") || ends_with_domain(host, "crucible.frvr.com"));
+}
 
 static int is_loopback(const char *host) {
     return !strcasecmp(host, "localhost") || ends_with_domain(host, "localhost") || !strncmp(host, "127.", 4) ||
