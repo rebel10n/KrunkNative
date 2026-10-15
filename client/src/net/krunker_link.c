@@ -137,7 +137,10 @@ void krunker_link_reset(KrunkerLink *l) {
     l->send_hz = 10; // applyNetworking() defaults until init's networking
     l->tick_hz = 30;
     l->sync_hz = 1;
+    l->last_isn_sent = l->last_ack = -1;
 }
+
+int krunker_link_inputs_paused(const KrunkerLink *l) { return l->locked || l->you_gone; }
 
 // ---------------------------------------------------------------- inbound
 
@@ -235,6 +238,9 @@ static void on_init(KrunkerLink *l, const KrunkerFrame *f) {
     info.map_index = map;
     info.mode_index = mode;
     info.custom = custom_map(arg(f, KRUNKER_MAPS_INIT_CUSTOM_ARG), info.custom_id, sizeof(info.custom_id));
+    // initGame drops our player (you = null) until the new round's "0": no input frame meanwhile, so the
+    // last round's player (still alive on our side until INIT reaches the game) sends nothing into this one
+    if (l->my_sid >= 0) l->you_gone = 1;
     if (map < 0 && !info.custom && !info.custom_id[0]) {
         l->unsupported_map = map;
         note(l, KRUNKER_LINK_EV_UNSUPPORTED, "the server's init names no map");
@@ -311,6 +317,7 @@ static void on_add_players(KrunkerLink *l, const KrunkerFrame *f) {
         if (s.is_you) {
             const int first = l->my_sid != s.uid;
             l->my_sid = s.uid;
+            l->you_gone = 0;
             if (first) note(l, KRUNKER_LINK_EV_JOINED, "joined as sid %d (%s)", s.uid, s.name);
         }
         emit(l, NET_PACKET_SPAWN, &s, sizeof(s));
@@ -395,6 +402,8 @@ static void on_sync_player(KrunkerLink *l, const KrunkerFrame *f) {
 #undef A
     emit(l, NET_PACKET_RECON, &r, sizeof(r));
     l->syncs++;
+    l->last_ack = r.ack_seq;
+    memcpy(l->sync_pos, r.position, sizeof(l->sync_pos));
     if (krunker_is(ping, KRUNKER_NUM)) {
         const NetPingResultPacket pr = {.ping_ms = (int32_t) ping->u.num};
         emit(l, NET_PACKET_PING_RESULT, &pr, sizeof(pr));
@@ -700,17 +709,14 @@ static void on_start_locks(KrunkerLink *l, const KrunkerFrame *f) {
     }
 }
 
-// What a lock does to one "q" frame (fields of input_fields). game.moveLock: moveDir -1 and no jump
-// (:221748, Uiblms(..., moveLock) predicts the same). window.locked: the live client builds no input
-// frame at all (:221699); our frames keep their isn so the server sees no gap, with nothing pressed.
+// What game.moveLock does to one "q" frame (fields of input_fields): moveDir -1 and no jump (:221748,
+// Uiblms(..., moveLock) predicts the same). window.locked is not here: the live client builds no input
+// frame at all while it is set (krunker_link_inputs_paused; our client samples none, net/recon.c), so
+// nothing is sent and no isn is used up. Frames built before the "lock" reached us go out as built.
 static void input_locks(const KrunkerLink *l, double v[15]) {
-    if (l->move_lock || l->locked) {
+    if (l->move_lock) {
         v[4] = -1; // moveDir
         v[7] = 0;  // jump
-    }
-    if (l->locked) {
-        for (int k = 5; k <= 11; k++) v[k] = 0; // shoot ads (jump) reload crouch scroll wSwap
-        v[13] = v[14] = 0;                      // reset, interact
     }
 }
 
@@ -1154,12 +1160,13 @@ static int send_input_window(KrunkerLink *l, const NetInputPacket *frames, const
     char keys[NET_INPUT_BATCH_MAX * 11][8];
     KrunkerValue change_kv[NET_INPUT_BATCH_MAX * 11 * 2];
     int changes = 0;
-    double first_isn = 0;
+    double first_isn = 0, last_isn = 0;
     for (int j = 0; j < count && j < NET_INPUT_BATCH_MAX; j++) {
         double v[15];
         krunker_link_input_fields(&frames[j], v);
         input_locks(l, v);
         if (j == 0) first_isn = v[0];
+        last_isn = v[0];
         dts[j] = v[1];
         for (int k = 2; k < 4; k++) {
             if (angle_count < 2) angles[angle_count++] = v[k];
@@ -1226,6 +1233,11 @@ static int send_input_window(KrunkerLink *l, const NetInputPacket *frames, const
     if (changes || (angle_count && !same_angles)) args[argc++] = same_angles ? KRUNKER_V_NUM(0) : KRUNKER_V_ARRAY(angle_items, angle_count);
     if (changes) args[argc++] = KRUNKER_V_MAP(change_kv, changes);
     const int sent = send_c2s(l, KRUNKER_C2S_INPUT, args, argc);
+    if (sent) {
+        l->q_sent++;
+        l->q_frames += (unsigned) n;
+        l->last_isn_sent = (int) last_isn;
+    }
     memcpy(l->prev_angles, angles, sizeof(double) * (size_t) angle_count);
     l->prev_angle_count = angle_count;
     l->resync = 0;

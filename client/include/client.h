@@ -679,6 +679,7 @@ typedef struct {
     // RECON snaps and replays; a correction is one that moved it more than NET_RECON_CORRECTION_EPS
     unsigned int net_recon_corrections;
     float net_recon_error_last, net_recon_error_max;
+    float net_recon_error_peak;      // the largest since the last "[krunker] sync" trace line took it (krunker_net.c)
     double net_recon_error_sum;
     unsigned int net_inputs_dropped; // NET_EXT_KN_INPUTS_DROPPED: an official server's "f" (SYNC_FAILED)
 

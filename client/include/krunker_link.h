@@ -44,7 +44,8 @@
 //   busy    [sid, on]                        KrunkerLinkPlayer.busy (setBusy :188630: a nametag icon only)
 //   chrg    [sid, krankedTimer ms]           NET_PACKET_MODE_COUNTER CHARGE (:220033)
 //   While lm holds, every "q" frame sends moveDir -1 and no jump (:221748); while "lock" holds the
-//   live client builds no input at all, so the frames still sent (isn keeps counting) carry none.
+//   live client builds no input at all, and neither does ours (krunker_link_inputs_paused): no "q"
+//   leaves and the isn does not count on until the lock ends.
 // Player-state corrections (cluster B):
 //   chgp    [socketId, x, y, z, doRecon, stopMomentum, dir]  NET_PACKET_CHANGE_POSITION; the player is
 //                                            found by its socket id (findById), not its sid (:220937)
@@ -162,10 +163,23 @@ typedef struct {
     int account;
     char account_name[64];          // "a" ACCOUNT_RESPONSE: the account's name, "" none yet
     int account_level;              // its level (Account.updateLevel over player_score), 0 = not in it
+    // init after we had a player: v10 drops it (you = null, game.deob.js initGame) and builds no input
+    // frame until our next "0" brings it back; the old round's player must not send into the new one
+    int you_gone;
     // counters (tests, logs, the console's official_sync)
     unsigned frames_in, frames_out, cc_answered, cc_failed, captchas_solved, unknown_in;
     unsigned syncs, sync_failed;    // "l" SYNC_PLAYER applied, "f" SYNC_FAILED received
+    // the input stream (KRUNKNATIVE_KRUNKER_TRACE=sync, krunker_net.c): "q" windows and the input frames
+    // in them, the last isn sent, the server's last ack ("l" inputSN, -1 none yet) and where it had us
+    unsigned q_sent, q_frames;
+    int last_isn_sent, last_ack;
+    float sync_pos[3];
 } KrunkerLink;
+
+// Whether our client builds input frames now. v10's gameLoop builds, predicts and sends none while
+// window.locked ("lock") or while it has no player of its own (`you && you.active && !locked`,
+// game.deob.js:223145): no isn is used up, the "q" window does not fill, nothing is predicted.
+int krunker_link_inputs_paused(const KrunkerLink *link);
 
 void krunker_link_init(KrunkerLink *link, const KrunkerLinkIO *io, int64_t ahkey);
 // A new WebSocket: ahNum 0, every per-connection state cleared (the io stays).

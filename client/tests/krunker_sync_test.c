@@ -66,6 +66,7 @@ typedef struct {
     // negative control: read input[4] as our raw move_dir (the link before the movDirs fix)
     int control_raw_move_dir;
     int dead; // between our death and our respawn: the server ignores our "q" frames (io_q)
+    int last_isn, isn_gaps; // the isn stream as decoded: a frame that is not the last + 1 (-1: none yet)
 } Server;
 
 static void server_defaults(Server *s) {
@@ -77,6 +78,7 @@ static void server_defaults(Server *s) {
     s->sl_a = s->sl_t = 1.0;
     s->spd_mlt = 0.95, s->aim_spd = 130.0;     // Assault Rifle spdMlt, aimSpd (ms)
     s->aim = 1.0;                              // hip
+    s->last_isn = -1;
     s->height = 11.0;
     s->on_ground = 1;
     s->last_vals[4] = -1;
@@ -360,6 +362,8 @@ typedef struct {
     int next_seq;
     unsigned frame_rng;
     int control_aim_ours, control_no_config;
+    int control_no_pause;    // negative control: input frames built through a lock (the client before the pause)
+    unsigned q_while_locked; // "q" windows sent while the link knew of a lock
     // measurements
     unsigned recons, over; // over: corrections above SYNC_TOLERANCE
     float max_correction, sum_correction;
@@ -483,6 +487,7 @@ static int sim_init(Sim *sim, const double grav, const double jump, const double
 
 static void client_flush(Sim *sim) {
     if (!sim->batch_count) return;
+    if (sim->link.locked) sim->q_while_locked++;
     uint8_t payload[NET_MAX_PAYLOAD];
     payload[0] = (uint8_t) sim->batch_count;
     memcpy(payload + 1, sim->batch, (size_t) sim->batch_count * sizeof(NetInputPacket));
@@ -500,7 +505,11 @@ static void server_tick(Sim *sim) {
             if (f.name_len == 1 && f.name[0] == 'q') {
                 double frames[NET_INPUT_BATCH_MAX][15];
                 const int n = server_decode_q(&sim->server, &f, frames, NET_INPUT_BATCH_MAX);
-                for (int j = 0; j < n; j++) server_proc(&sim->server, frames[j]);
+                for (int j = 0; j < n; j++) {
+                    if (sim->server.last_isn >= 0 && (int) frames[j][0] != sim->server.last_isn + 1) sim->server.isn_gaps++;
+                    sim->server.last_isn = (int) frames[j][0];
+                    server_proc(&sim->server, frames[j]);
+                }
             }
             krunker_frame_free(&f);
         }
@@ -535,6 +544,11 @@ static void sim_step(Sim *sim, Input input, const float fps) {
         free(data);
     }
     if (!sim->me || !sim->me->active) { // dead or not spawned yet: no input frame leaves (main.c)
+        game_tick(&sim->game, (float) sim->now, delta);
+        return;
+    }
+    // recon.c client_recon_sample: v10 builds no input frame while "lock" holds (krunker_link_inputs_paused)
+    if (!sim->control_no_pause && krunker_link_inputs_paused(&sim->link)) {
         game_tick(&sim->game, (float) sim->now, delta);
         return;
     }
@@ -753,6 +767,58 @@ static Result run_spawned(const Script script, const double seconds, const doubl
     return res;
 }
 
+// "lock" [true] at lock_at and [false] at unlock_at, each reaching us one latency later, W held throughout.
+// v10 builds no input frame in between: nothing is sent, no isn is used up, nothing is predicted, and the
+// server (no inputs) does not move us either. Measured: the "q" windows sent while locked, the isn gaps the
+// server saw, how far we moved while locked, the corrections.
+typedef struct {
+    Result r;
+    unsigned q_while_locked;
+    int isn_gaps;
+    float moved_while_locked;
+} LockResult;
+
+static void server_send_lock(Sim *sim, const int on) {
+    const KrunkerValue arg = KRUNKER_V_BOOL(on);
+    KrunkerBuf buf = {0};
+    krunker_proto_encode_ah(0, "lock", &arg, 1, &buf);
+    wire_push(&sim->down, sim->now + sim->latency, buf.data, buf.len);
+    krunker_buf_free(&buf);
+}
+
+static LockResult run_locked(const Script script, const double seconds, const double lock_at, const double unlock_at, const int no_pause) {
+    Sim *sim = calloc(1, sizeof(Sim));
+    LockResult res = {0};
+    if (!sim || !sim_init_spawned(sim, 1, 1, 1.2)) {
+        CHECK(0, "locked sim init");
+        free(sim);
+        return res;
+    }
+    sim->control_no_pause = no_pause;
+    int sent_lock = 0, sent_unlock = 0, was_locked = 0;
+    vec3 at_lock = {0};
+    while (sim->now < seconds) {
+        if (!sent_lock && sim->now >= lock_at) sent_lock = 1, server_send_lock(sim, 1);
+        if (!sent_unlock && sim->now >= unlock_at) sent_unlock = 1, server_send_lock(sim, 0);
+        sim_step(sim, script(sim->now), 144.0f);
+        if (sim->link.locked && !was_locked) at_lock = sim->me->position;
+        if (sim->link.locked) {
+            const vec3 p = sim->me->position;
+            const float d = sqrtf((p.x - at_lock.x) * (p.x - at_lock.x) + (p.z - at_lock.z) * (p.z - at_lock.z));
+            if (d > res.moved_while_locked) res.moved_while_locked = d;
+        }
+        was_locked = sim->link.locked;
+    }
+    res.r.max = sim->max_correction;
+    res.r.recons = sim->recons;
+    res.r.over = sim->over;
+    res.r.mean = sim->recons ? sim->sum_correction / (float) sim->recons : 0.0f;
+    res.q_while_locked = sim->q_while_locked;
+    res.isn_gaps = sim->server.isn_gaps;
+    free(sim);
+    return res;
+}
+
 static Input script_release(const double t) { // W held; jump pressed at 1 s, released at 1.2 s
     Input in = base_input(t);
     in.move_dir = 0;
@@ -830,6 +896,22 @@ int main(void) {
                (double) r.mean, (double) SYNC_TOLERANCE, r.over);
         CHECK(r.recons >= 3 && r.over <= 1 && r.max < 0.25f, "respawn: syncs %u, %u corrections above %.2f, max %.5f", r.recons, r.over,
               (double) SYNC_TOLERANCE, (double) r.max);
+    }
+
+    // "lock" while walking: no "q" while it holds, the isn stream has no gap, we stand still and the
+    // server agrees when it ends
+    {
+        const LockResult l = run_locked(script_hold, 6.0, 2.0, 3.6, 0);
+        printf("%-58s %u syncs, correction max %.5f, over %.2f: %u, q while locked %u, isn gaps %d, moved %.4f\n", "lock while walking (W held)",
+               l.r.recons, (double) l.r.max, (double) SYNC_TOLERANCE, l.r.over, l.q_while_locked, l.isn_gaps, (double) l.moved_while_locked);
+        CHECK(l.q_while_locked == 0, "lock: %u \"q\" windows sent while locked (v10 builds no input frame)", l.q_while_locked);
+        CHECK(l.isn_gaps == 0, "lock: the server saw %d isn gaps", l.isn_gaps);
+        CHECK(l.moved_while_locked < 1e-4f, "lock: we moved %.4f while locked", (double) l.moved_while_locked);
+        CHECK(l.r.recons >= 5 && l.r.over <= 1 && l.r.max < 0.25f, "lock: syncs %u, %u corrections above %.2f, max %.5f", l.r.recons, l.r.over,
+              (double) SYNC_TOLERANCE, (double) l.r.max);
+        const LockResult c = run_locked(script_hold, 6.0, 2.0, 3.6, 1);
+        printf("%-58s q while locked %u\n", "control: input frames built through the lock", c.q_while_locked);
+        CHECK(c.q_while_locked > 10, "the control must send \"q\" while locked (%u)", c.q_while_locked);
     }
 
     // negative controls: each bug must show as corrections

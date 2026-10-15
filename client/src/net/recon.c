@@ -18,6 +18,7 @@
 #include <client.h>
 #include <game_config.h> // game_network_data: the "q" window (tickRate)
 #include <ks_client.h> // ks_client_no_prediction
+#include <krunker_net.h> // krunker_net_inputs_paused: an official server's "lock"
 #include <ui_logic.h>  // ui_setting_number ("netRate")
 #include <ui_mobile.h> // ui_mobile_active (netRate's mobile default)
 #include <GLFW/glfw3.h>
@@ -152,6 +153,11 @@ static int recon_net_rate_hz(void) {
 // Online and offline alike (v7's sandbox player samples the same frames). Returns the delta (s) of
 // the input frame to build this frame, or -1 when this frame samples none.
 float client_recon_sample(Client *client, const float frame_delta) {
+    // v10 gameLoop (game.deob.js:223145): `you && you.active && !window.locked`, else no input frame
+    // at all: on an official server's "lock" (or while it has not given us our player back after an
+    // init) no isn is used, nothing is predicted and neither the frame time nor the "q" window runs on.
+    // KrunkNative's own server takes zero-input frames through a lock (mode_input_locked) instead.
+    if (!client->game.is_local && krunker_net_inputs_paused()) return -1.0f;
     // v10 gameLoop: iiïïiïï += gameTimeDiff on every frame our player is active (main.c only asks
     // then), sampled or not; the "q" window closes on the next sampled frame past tickRate
     if (!client->game.is_local && isfinite(frame_delta) && frame_delta > 0.0f) client->net_batch_time += frame_delta;
@@ -260,6 +266,7 @@ void client_recon_apply(Client *client, const NetReconPacket *packet) {
     client->net_recon_error_last = error;
     client->net_recon_error_sum += error;
     if (error > client->net_recon_error_max) client->net_recon_error_max = error;
+    if (error > client->net_recon_error_peak) client->net_recon_error_peak = error;
     if (error > NET_RECON_CORRECTION_EPS) client->net_recon_corrections++;
 
     if (g_recon.log) {

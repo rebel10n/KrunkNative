@@ -19,6 +19,7 @@
 #include <ui_logic.h>
 #include <join_errors.h> // a failed join's text and place (join_errors.c)
 #include <cJSON.h>
+#include <GLFW/glfw3.h> // glfwGetTime: the sync trace's second
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -189,14 +190,19 @@ int krunker_net_in_client(void) {
     return strcmp(v, "browser") != 0 && strcmp(v, "0") != 0 && strcmp(v, "off") != 0;
 }
 
-static int trace_on(void) {
+// KRUNKNATIVE_KRUNKER_TRACE / ?krunkerTrace (krunker_net.h): 0 off (unset, "0"), 1 every frame and the
+// sync line ("1", anything else), 2 the sync line only ("sync")
+static int trace_mode(void) {
     static int cached = -1;
     if (cached < 0) {
         char v[8];
-        cached = option("KRUNKNATIVE_KRUNKER_TRACE", "krunkerTrace", v, sizeof(v)) && strcmp(v, "0") != 0;
+        if (!option("KRUNKNATIVE_KRUNKER_TRACE", "krunkerTrace", v, sizeof(v)) || !strcmp(v, "0")) cached = 0;
+        else cached = !strcmp(v, "sync") ? 2 : 1;
     }
     return cached;
 }
+
+static int trace_on(void) { return trace_mode() == 1; }
 
 static void trace_frame(const char *dir, const uint8_t *data, const size_t len) {
     if (!trace_on()) return;
@@ -1389,6 +1395,55 @@ int krunker_net_send_packet(const NetPacketType type, const void *payload, const
     return sent;
 }
 
+int krunker_net_inputs_paused(void) {
+    if (K.state != KS_OPEN) return 0;
+    pthread_mutex_lock(&K.lock);
+    const int paused = krunker_link_inputs_paused(&K.link) || K.map_gate;
+    pthread_mutex_unlock(&K.lock);
+    return paused;
+}
+
+// KRUNKNATIVE_KRUNKER_TRACE=sync: one line a second while we have a player in the official game, the
+// numbers that tell "the server does not take my inputs" from "it takes them and disagrees": "q"
+// windows and input frames sent in that second (v10: ~tf windows a second, netRate frames), the last
+// isn sent and the server's last ack ("l" inputSN; "behind" = isn - ack, a few windows at most when it
+// keeps up, growing when it does not), "l" / "f" received, the corrections reconciliation made (above
+// NET_RECON_CORRECTION_EPS) and the largest (units), the pending inputs, where the last "l" put us and
+// where we are now, the locks (lm, lock, paused) and the CHEAT_CHECKs answered / failed so far.
+static void trace_sync_tick(Client *client) {
+    static double last_at;
+    static unsigned q0, frames0, syncs0, failed0, recons0, corr0;
+    static int primed;
+    if (!trace_mode() || K.state != KS_OPEN || !client) return;
+    const double now = glfwGetTime();
+    if (primed && now - last_at < 1.0) return;
+    pthread_mutex_lock(&K.lock);
+    const unsigned q = K.link.q_sent, frames = K.link.q_frames, syncs = K.link.syncs, failed = K.link.sync_failed;
+    const int isn = K.link.last_isn_sent, ack = K.link.last_ack, move_lock = K.link.move_lock, locked = K.link.locked;
+    const int paused = krunker_link_inputs_paused(&K.link) || K.map_gate;
+    const unsigned cc_ok = K.link.cc_answered, cc_bad = K.link.cc_failed;
+    const float sx = K.link.sync_pos[0], sy = K.link.sync_pos[1], sz = K.link.sync_pos[2];
+    pthread_mutex_unlock(&K.lock);
+    const unsigned recons = client->net_recon_count, corr = client->net_recon_corrections;
+    if (primed && client->me && client->me->active) {
+        const double dt = now - last_at;
+        const Player *me = client->me;
+#define SINCE(v, v0) ((v) >= (v0) ? (v) - (v0) : (v)) // a new socket restarts the link's counters
+
+        printf("[krunker] sync %.1fs: q %u (%u inputs) isn %d ack %d (%d behind) l %u f %u corr %u/%u max %.2f pending %zu "
+               "srv %.2f %.2f %.2f me %.2f %.2f %.2f lm %d lock %d paused %d cc %u/%u\n",
+               dt, SINCE(q, q0), SINCE(frames, frames0), isn, ack, isn >= 0 && ack >= 0 ? isn - ack : -1, SINCE(syncs, syncs0),
+               SINCE(failed, failed0), SINCE(corr, corr0), SINCE(recons, recons0), (double) client->net_recon_error_peak, client->net_pending_count, (double) sx, (double) sy, (double) sz,
+               (double) me->position.x, (double) me->position.y, (double) me->position.z, move_lock, locked, paused, cc_ok, cc_bad);
+#undef SINCE
+        fflush(stdout);
+    }
+    client->net_recon_error_peak = 0.0f;
+    q0 = q, frames0 = frames, syncs0 = syncs, failed0 = failed, recons0 = recons, corr0 = corr;
+    last_at = now;
+    primed = 1;
+}
+
 int krunker_net_sync_info(char *out, const size_t n) {
     if (!out || !n) return 0;
     out[0] = 0;
@@ -1413,6 +1468,7 @@ void krunker_net_tick(Client *client) {
         if (K.access[0]) krunker_account_note_game(name, level);
     }
     if (K.state != KS_OFF) kmap_tick(client ? client : K.client);
+    trace_sync_tick(client ? client : K.client);
     if (K.leave_unsupported && K.state != KS_OFF) {
         // init's map cannot be shown (not in krunker_maps.h's table, the cache or the API; or no map at all):
         // the session ends on the error screen saying which map and why, instead of a loading screen forever

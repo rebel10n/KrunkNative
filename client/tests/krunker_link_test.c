@@ -311,6 +311,8 @@ int main(void) {
           r.slide_ms == 250.0 && fabsf(r.slide_timer - 0.25f) < 1e-6f && fabsf(r.can_slide_timer - 0.1f) < 1e-6f && !r.grapple_active, "RECON");
     CHECK(p && r.on_wall == 3 && fabsf(r.aim_val - 0.75f) < 1e-6f, "RECON onWall side %d, aimVal 0.25 -> ours 0.75 (%f)", p ? r.on_wall : -1,
           p ? r.aim_val : -1.0f);
+    CHECK(link.last_ack == 41 && link.sync_pos[0] == 5.0f && link.syncs >= 1, "\"l\" kept for the sync trace: ack %d, server x %g", link.last_ack,
+          (double) link.sync_pos[0]);
     p = find_in(NET_PACKET_PING_RESULT, 0);
     CHECK(p && ((const NetPingResultPacket *) p->payload)->ping_ms == 63, "PING_RESULT");
     CHECK(g_out_count == 1 && !strcmp(g_out[0].name, "v") && g_out[0].ah_echo == (int) NEXT_AH(), "PONG v");
@@ -500,6 +502,8 @@ int main(void) {
           krunker_num(krunker_get(changes, "2-7"), -1) == 1 && krunker_num(krunker_get(changes, "0-12"), -1) == 0, "q changes (%u)",
           changes ? changes->len : 0);
     CHECK(q->ah_echo == (int) NEXT_AH(), "q ahNum");
+    CHECK(link.q_sent == 1 && link.q_frames == 3 && link.last_isn_sent == 102, "sync trace counters: %u q, %u frames, last isn %d", link.q_sent,
+          link.q_frames, link.last_isn_sent);
     clear();
     // the same window again, no turn: only the head (angles equal, nothing changed... but jump released: one change)
     for (int i = 0; i < 3; i++) { in[i].seq = 103 + i; in[i].delta = 0.016f; in[i].y_dir = 1.02f; in[i].flags = 0; }
@@ -590,18 +594,25 @@ int main(void) {
     CHECK(krunker_is(changes, KRUNKER_MAP) && krunker_num(krunker_get(changes, "0-4"), 9) == 1 && krunker_num(krunker_get(changes, "1-7"), 9) == 1, // our move_dir 0 = movDirs 1
           "q after ulm: moveDir and jump back");
     clear();
-    // lock (window.locked): nothing pressed goes out, the frames keep their isn
+    // lock (window.locked): v10 builds no input frame while it holds (gameLoop `!window.locked`), so the
+    // client is told to sample none (inputs paused); a window built before the lock goes out as built
+    CHECK(!krunker_link_inputs_paused(&link), "inputs flow before the lock");
     feed(&link, "lock", (KrunkerValue[]) {KRUNKER_V_BOOL(1)}, 1);
     p = find_in(NET_PACKET_LOCK, 0);
     PAYLOAD(NetLockPacket, plk, p);
     CHECK(p && plk.kind == NET_LOCK_PLAYER && plk.locked == 1 && link.locked, "lock: LOCK player");
+    CHECK(krunker_link_inputs_paused(&link), "lock: input frames paused");
     for (int i = 0; i < 3; i++) { in[i].seq = 306 + i; in[i].flags = NET_INPUT_SHOOT | NET_INPUT_CROUCH; }
     memcpy(batch + 1, in, sizeof(in));
     krunker_link_send_ours(&link, NET_PACKET_INPUT_BATCH, batch, sizeof(batch));
     const KrunkerFrame *lq = g_out_count ? &g_out[g_out_count - 1] : NULL;
     changes = lq ? krunker_frame_arg(lq, 5) : NULL;
-    CHECK(lq && fnum(lq, 1) == 306 && krunker_is(changes, KRUNKER_MAP) && krunker_num(krunker_get(changes, "0-4"), 9) == -1 &&
-          !krunker_get(changes, "0-5") && !krunker_get(changes, "0-9"), "q while locked: isn kept, nothing pressed");
+    CHECK(lq && fnum(lq, 1) == 306 && krunker_is(changes, KRUNKER_MAP) && !krunker_get(changes, "0-4") && // moveDir 1 unchanged, not -1
+          krunker_num(krunker_get(changes, "0-5"), 9) == 1 && krunker_num(krunker_get(changes, "0-9"), 9) == 1,
+          "a window built before the lock reached us goes out as built (no zeroed frames)");
+    feed(&link, "lock", (KrunkerValue[]) {KRUNKER_V_BOOL(0)}, 1);
+    CHECK(!link.locked && !krunker_link_inputs_paused(&link), "lock false: input frames again");
+    feed(&link, "lock", (KrunkerValue[]) {KRUNKER_V_BOOL(1)}, 1);
     feed(&link, "start", (KrunkerValue[]) {KRUNKER_V_STR("3:00"), KRUNKER_V_NUM(1), KRUNKER_V_BOOL(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(1)}, 5);
     CHECK(link.move_lock == 1 && link.locked == 0 && find_in(NET_PACKET_LOCK, 1) && find_in(NET_PACKET_LOCK, 2),
           "start: moveLock arg 4 locks, the player lock ends");
@@ -743,8 +754,30 @@ int main(void) {
     clear();
     // init: our client resets game.moveLock and its players, so do the link's locks
     feed(&link, "lm", (KrunkerValue[]) {KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0)}, 4);
+    CHECK(link.my_sid == 9 && !krunker_link_inputs_paused(&link), "our player is in: inputs flow");
     feed(&link, "init", (KrunkerValue[]) {KRUNKER_V_NUM(10), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0)}, 3);
     CHECK(link.move_lock == 0 && link.noclip == 0, "init resets the locks");
+    // a new round's init drops our player (v10 initGame: you = null) until our "0": the last round's
+    // player builds no input frame for the new one meanwhile
+    CHECK(krunker_link_inputs_paused(&link), "init: no input frames until our player is back");
+    {
+        KrunkerValue other[53];
+        for (int i = 0; i < 53; i++) other[i] = KRUNKER_V_NIL;
+        other[0] = KRUNKER_V_STR("sockB"); other[1] = KRUNKER_V_NUM(7);
+        feed(&link, "0", (KrunkerValue[]) {KRUNKER_V_ARRAY(other, 53)}, 1);
+        CHECK(krunker_link_inputs_paused(&link), "someone else's \"0\" does not bring our player back");
+        other[0] = KRUNKER_V_STR("sockA"); other[1] = KRUNKER_V_NUM(9);
+        feed(&link, "0", (KrunkerValue[]) {KRUNKER_V_ARRAY(other, 53)}, 1);
+        CHECK(!krunker_link_inputs_paused(&link), "our \"0\": input frames again");
+    }
+    clear();
+    {
+        // a fresh connection: no player yet, nothing paused (our client has no player to sample for)
+        KrunkerLink fresh;
+        krunker_link_init(&fresh, NULL, 3);
+        feed(&fresh, "init", (KrunkerValue[]) {KRUNKER_V_NUM(10), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0)}, 3);
+        CHECK(!krunker_link_inputs_paused(&fresh) && fresh.last_ack == -1 && fresh.last_isn_sent == -1, "first init: not paused, no ack yet");
+    }
     clear();
 #undef PAYLOAD
 

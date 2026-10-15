@@ -54,7 +54,13 @@
 //   --krunker [gameId] (native) / ?krunker=<gameId|1> (web)   join an official game at startup
 //   KRUNKNATIVE_KRUNKER_MATCHMAKER=<url> (native, shared with krunker_lobbies.h) / ?krunkerMM=<url>
 //   KRUNKNATIVE_KRUNKER_REGION=<id> / ?krunkerRegion=<id>      seek region (default de-fra)
-//   KRUNKNATIVE_KRUNKER_TRACE=1 / ?krunkerTrace=1              log every frame in and out as JSON
+//   KRUNKNATIVE_KRUNKER_TRACE=1 / ?krunkerTrace=1              log every frame in and out as JSON, and
+//       the sync line below
+//   KRUNKNATIVE_KRUNKER_TRACE=sync / ?krunkerTrace=sync        only one "[krunker] sync" line a second while
+//       in a game: "q" windows / input frames sent, the last isn sent, the server's last ack ("l"
+//       inputSN) and how far behind it is, "l" / "f" received, the corrections and the largest one
+//       (units), pending inputs, the server's position of us next to ours, the locks, the CHEAT_CHECKs
+//       answered / failed. Off by default.
 //
 // Not done (the demo bar is "joined, sees others move, can move and chat"):
 //   - "q" syncTimes (the servTim of frames that fired, game.deob.js:221756): shots and melee are
@@ -111,3 +117,7 @@ void krunker_net_tick(Client *client);      // main thread, once per frame: noti
 // The console's official_sync: the link's sync counters and the lobby's rates as one line. 0 = no
 // official session (out is "").
 int krunker_net_sync_info(char *out, size_t n);
+// Whether the official session wants no input frame built now (net/recon.c samples none): v10's gameLoop
+// builds none while "lock" holds or while it has no player of its own (krunker_link_inputs_paused), and an
+// init's map still loading (the packets after it held) is the latter. 0 when no official game is open.
+int krunker_net_inputs_paused(void);

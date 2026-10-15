@@ -949,6 +949,45 @@ def run_native():
     check("native: the stub's chat line reached the client", "hello from the stub" in text)
     check_killfeed_names("native", lines)
     check_timer_countdown("native", lines)
+    check_sync_trace("native", lines)
+
+
+SYNC_TRACE_RE = re.compile(r"\[krunker\] sync ([\d.]+)s: q (\d+) \((\d+) inputs\) isn (-?\d+) ack (-?\d+) \((-?\d+) behind\) l (\d+) f (\d+) "
+                           r"corr (\d+)/(\d+) max ([\d.]+) pending (\d+) srv (\S+) (\S+) (\S+) me (\S+) (\S+) (\S+) lm (\d+) lock (\d+) paused (\d+)")
+
+
+def sync_trace_rows(lines):
+    rows = []
+    for l in lines:
+        m = SYNC_TRACE_RE.search(l)
+        if m:
+            g = m.groups()
+            rows.append(dict(dt=float(g[0]), q=int(g[1]), inputs=int(g[2]), isn=int(g[3]), ack=int(g[4]), behind=int(g[5]), l=int(g[6]),
+                             f=int(g[7]), corr=int(g[8]), recons=int(g[9]), max=float(g[10]), pending=int(g[11]),
+                             srv=tuple(float(v) for v in g[12:15]), me=tuple(float(v) for v in g[15:18]), lm=int(g[18]), lock=int(g[19]),
+                             paused=int(g[20])))
+    return rows
+
+
+def check_sync_trace(label, lines):
+    """KRUNKNATIVE_KRUNKER_TRACE's sync line (krunker_net.c trace_sync_tick): one a second in the game. The
+    "q" cadence is v10's (a window closes on the first input frame past tickRate, 1000 / tf ms: at most
+    tf = 30 a second), the isn sent and the stub's acks ("l" inputSN, the last window's firstIsn) advance."""
+    rows = sync_trace_rows(lines)
+    sending = [r for r in rows if r["q"] > 0]
+    check(f"{label}: sync trace: a line a second while in the game", len(sending) >= 3, len(rows))
+    rates = sorted(r["q"] / r["dt"] for r in sending)
+    med = rates[len(rates) // 2] if rates else 0
+    check(f"{label}: sync trace: \"q\" at v10's cadence (tf 30: <= 30 windows a second, median {med:.1f})",
+          rates and 10 <= med <= 31.5 and max(rates) <= 33, [round(v, 1) for v in rates])
+    isns = [r["isn"] for r in sending]
+    acks = [r["ack"] for r in sending if r["ack"] >= 0]
+    check(f"{label}: sync trace: the isn sent advances every second", len(isns) >= 3 and all(b > a for a, b in zip(isns, isns[1:])), isns)
+    check(f"{label}: sync trace: the server's ack (\"l\" inputSN) advances and keeps up",
+          len(acks) >= 2 and acks[-1] > acks[0] and all(0 <= r["behind"] < 400 for r in sending if r["ack"] >= 0),
+          [(r["isn"], r["ack"], r["behind"]) for r in sending][:8])
+    check(f"{label}: sync trace: \"l\" about once a second, no \"f\"", sum(r["l"] for r in sending) >= len(sending) - 2 and
+          not any(r["f"] for r in rows), [(r["l"], r["f"]) for r in rows][:8])
 
 
 def check_timer_countdown(label, lines):
@@ -1006,10 +1045,12 @@ def run_native_paste():
               "3000 clickid knCaptchaToken\n3100 type %s\n3200 clickid knCaptchaUse\n3400 vis @used knCaptchaManual knCaptchaCancel knCaptchaHolder\n"
               "3500 text @box [id=knCaptchaToken]\n3800 play\n8000 players\n8200 quit\n"
               % (os.path.join(WORK, "native-modal"), BURNT_TOKEN, PASTE_TOKEN))
-    stub, p, out, log = launch_native(label, script, {})
+    stub, p, out, log = launch_native(label, script, {"KRUNKNATIVE_KRUNKER_TRACE": ""})  # unset: the trace's default
     stub.used_captchas.add(BURNT_TOKEN)
     lines = finish_native(label, stub, p, out, log, timeout=180)
     text = "\n".join(lines)
+    check(f"{label}: no krunker trace by default (no frame lines, no sync line)",
+          not any("[krunker] sync " in l or "[krunker] <= " in l or "[krunker] => " in l for l in lines))
     bad = re.search(r"\[input_script\] text t=\d+ @bad n=1 checked=0 value= text=(.*)", text)
     check(f"{label}: a paste that is not a token is refused in the modal", bad and "not a Turnstile token" in bad.group(1), bad.group(1) if bad else None)
     check(f"{label}: the modal stays up after the bad paste", "@bad knCaptchaHolder=1" in text)
@@ -1188,9 +1229,15 @@ def sync_rest_checks(label, stub, lines, text):
     check(f"{label}: lock: W moved us just before it (the hold is real)", any(not at_tp(r, 0.3) for r in before), xz(before))
     check(f"{label}: lock: W moves nothing while locked", still and all(at_tp(r) for r in still), xz(still)[:6])
     if "lock" in stub.sent and "unlock" in stub.sent:
+        # v10 builds no input frame while window.locked (gameLoop `!window.locked`): no "q" at all, and the
+        # isn picks up where it stopped (the stub's sequencing check above sees no rewind)
         qs = [a for (n, a, _), t in zip(stub.frames, stub.frame_t) if n == "q" and stub.sent["lock"] + 0.3 <= t < stub.sent["unlock"]]
-        mv = [v for a in qs if len(a) > 5 and isinstance(a[5], dict) for k, v in a[5].items() if k.endswith("-4")]
-        check(f"{label}: \"q\" while locked: no direction", qs and not any(v >= 0 for v in mv), mv[:8])
+        after = [a for (n, a, _), t in zip(stub.frames, stub.frame_t) if n == "q" and t >= stub.sent["unlock"] + 0.3]
+        check(f"{label}: no \"q\" while locked", not qs, [a[:2] for a in qs][:6])
+        check(f"{label}: \"q\" again after the lock", len(after) >= 3, len(after))
+        trace = sync_trace_rows(lines)
+        check(f"{label}: sync trace: paused while locked", any(r["lock"] == 1 and r["paused"] == 1 and r["q"] == 0 for r in trace),
+              [(r["lock"], r["paused"], r["q"]) for r in trace if r["lock"]][:6])
     i, j, still = held_still("frozen")
     check(f"{label}: frz: frozen set, then cleared", i is not None and j is not None, (i, j))
     check(f"{label}: frz: W moves nothing while frozen", still and all(at_tp(r) for r in still), xz(still)[:6])
