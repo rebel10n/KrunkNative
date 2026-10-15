@@ -725,6 +725,7 @@ static void memo_store(const LayoutTree *t, Box *b, const BoxMemoKey *key, const
     m.top_pos = out->top_pos; m.top_neg = out->top_neg;
     m.bot_pos = out->bot_pos; m.bot_neg = out->bot_neg;
     m.collapses_through = out->collapses_through;
+    memcpy(m.margin, b->margin, sizeof(m.margin));
     m.valid = 1;
     b->sub_oof = (uint8_t) subtree_has_oof(b);
     b->memo = m;
@@ -744,7 +745,10 @@ void layout_box(LayoutTree *t, Box *b, const LayoutInput *in_, LayoutOutput *out
         if (!t->memo_off && b->dirty == 0 && !b->sub_oof) {
             const BoxMemo *m = in.measure_only ? &b->measure : &b->memo;
             if (m->valid && m->epoch == t->ctx->memo_epoch && memo_key_eq(&m->key, &key)) {
-                layout_resolve_edges(t, b, in.cb_w); /* the margins the parent reads (intrinsic sizing resets them) */
+                layout_resolve_edges(t, b, in.cb_w); /* padding / border (intrinsic sizing resets them) */
+                /* the margins the parent reads are the ones that layout left: resolve_edges turns auto
+                 * ones into 0, so a served `margin: auto` block (an <img class=custIcon>) lost its centring */
+                memcpy(b->margin, m->margin, sizeof(b->margin));
                 b->w = m->w; b->h = m->h; /* the size of the slot served: a measure serve leaves the last layout's h otherwise */
                 out->top_pos = m->top_pos; out->top_neg = m->top_neg;
                 out->bot_pos = m->bot_pos; out->bot_neg = m->bot_neg;

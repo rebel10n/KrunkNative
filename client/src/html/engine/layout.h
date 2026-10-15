@@ -68,6 +68,7 @@ typedef struct BoxMemo {
     uint32_t epoch;              /* LayoutCtx.memo_epoch when stored */
     float w, h;                  /* border box (measure slot only) */
     float top_pos, top_neg, bot_pos, bot_neg;
+    float margin[4];             /* the margins that layout left (auto ones resolved: margin: auto centring) */
     int collapses_through;
     uint8_t valid;
 } BoxMemo;

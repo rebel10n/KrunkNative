@@ -25,7 +25,7 @@
         527
       ],
       "kind": "text",
-      "note": "#loadoutContent / .wcpItems (the preview column is left out: the capture's WebGPU canvas is blank)"
+      "note": "#loadoutContent / .wcpItems (the preview column is left out: the capture's WebGPU canvas is blank). The Streaks tile differs on purpose: v10 defaults streakIndex3 to 0, the Nuke (v10.js:210268 _70281(2, NaN, 0)), and draws assets.krunker.io/img/streaks/0.png, which the offline mirror lacks (a broken image); ours draws the Nuke (about 1% of this region). The tile icons are centred by margin:auto (img.custIcon): a memo-served relayout used to drop that (layout_block.c, BoxMemo.margin)"
     }
   ]
 }

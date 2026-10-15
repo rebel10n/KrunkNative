@@ -1938,6 +1938,32 @@ static void t_bfc_roots(void)
     fx_free(fx);
 }
 
+/* A clean `margin: auto` block served from the memo keeps its centring (the Change Loadout tiles'
+ * <img class=custIcon>, display:block;margin:auto, drew at the tile's left edge once 88bdbe21's memo
+ * served them: layout_resolve_edges makes auto margins 0, and the memo had not kept the resolved ones).
+ * overflow:hidden makes #c a BFC root, like the replaced <img>: only those are memoised in a block flow. */
+static void t_memo_auto_margin(void)
+{
+    Fx *fx = fx_html("<div id=wrap style='position:absolute;left:0;top:0;width:400px;height:300px'>"
+                     "<div id=c style='width:100px;height:20px;margin:auto;overflow:hidden'></div>"
+                     "<div id=d style='height:20px'>d</div></div>", NULL);
+    HtmlRect r = { 0, 0, 0, 0 };
+    CHECK(memo_rect(fx, "c", &r), "memo auto margin: #c has a box");
+    CHECK_NEAR(r.x, 150, 0.01, "memo auto margin: centred on the full layout");
+    HtmlElem d = dom_by_id(fx->dom, "d");
+    ElemData *ed = d ? dom_elem_data(fx->dom, d) : NULL;
+    if (ed && ed->computed) {
+        CssComputed old = *ed->computed;
+        dom_set_style(fx->dom, d, "height", "40px");
+        cascade_restyle(fx->dom, g_ua, fx->sheets, fx->ns);
+        layout_restyled(fx->tree, dom_elem_node(fx->dom, d), &old);
+        layout_run(fx->tree, fx->vw, fx->vh);
+    }
+    CHECK(memo_rect(fx, "c", &r), "memo auto margin: #c still has a box");
+    CHECK_NEAR(r.x, 150, 0.01, "memo auto margin: still centred after a sibling's relayout (memo served)");
+    fx_free(fx);
+}
+
 int main(int argc, char **argv)
 {
     if (argc > 1) g_root = argv[1];
@@ -1994,6 +2020,7 @@ int main(int argc, char **argv)
     t_container_scrollbars();
     t_incremental();
     t_memo_equivalence();
+    t_memo_auto_margin();
     t_flex_text_content();
     t_innerhtml_detach();
     t_intrinsic_font_restyle();
