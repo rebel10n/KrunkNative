@@ -122,7 +122,7 @@ static const ClientSetting SETTINGS[] = {
      "F11 switches between windowed and the last fullscreen mode", WINDOW_MODES, COUNT(WINDOW_MODES)},
     {"resolution", "Resolution", "Display", CS_SELECT, CS_NATIVE, "",
      "Window size in windowed mode, display mode in fullscreen (borderless always covers the monitor)"},
-    {"vsync", "V-Sync", "Display", CS_SWITCH, CS_NATIVE | CS_GAME, "false", "Wait for the display refresh (swap interval 1)"},
+    {"vsync", "V-Sync", "Display", CS_SWITCH, CS_NATIVE | CS_GAME, "true", "Wait for the display refresh (swap interval 1)"},
     // ---- System (glorp "Raw Input", "Webview Priority"; KRUNKNATIVE_AUDIO_BACKEND)
     {"rawInput", "Raw Input", "System", CS_SWITCH, CS_NATIVE, "true", "Unaccelerated mouse motion while the pointer is locked"},
     {"audioBackend", "Audio Backend", "System", CS_SELECT, CS_NATIVE | CS_RESTART, "",

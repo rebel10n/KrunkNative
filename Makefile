@@ -110,8 +110,8 @@ BRAIN_PORT ?= 5050
 # it as KRUNKNATIVE_BRAIN_URL (5050 is the client's own probed default); an explicit
 # KRUNKNATIVE_BRAIN_URL in the environment wins
 RUN_BRAIN_ENV = $(if $(KRUNKNATIVE_BRAIN_URL),,$(if $(filter-out 5050,$(BRAIN_PORT)),KRUNKNATIVE_BRAIN_URL=http://127.0.0.1:$(BRAIN_PORT)))
-# Dev runs pace the client so it doesn't peg the GPU/CPU: vsync on and a frame cap. Override with
-# VSYNC=0 FRAME_CAP=0 for an uncapped (competitive-feel) run. The shipped defaults are unchanged.
+# Dev runs pace the client so it doesn't peg the GPU/CPU: vsync on (also the client's own default)
+# and a frame cap. Override with VSYNC=0 FRAME_CAP=0 for an uncapped (competitive-feel) run.
 VSYNC ?= 1
 FRAME_CAP ?= 144
 RUN_PERF = KRUNKNATIVE_VSYNC=$(VSYNC) KRUNKNATIVE_FRAME_CAP=$(FRAME_CAP)

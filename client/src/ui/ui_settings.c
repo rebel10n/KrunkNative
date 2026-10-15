@@ -554,8 +554,10 @@ static const SettingPreset PRESETS[] = {
 // Custom saves krk_customPre, going back to Custom restores it). This table is the one place
 // its values live. Each is the top of what v7's settings list offers (settings.js), checked
 // against what KrunkNative renders (render_settings.h):
-//   resolution 2        slider max: the scene FBO at 2x the window (dpr x 2 on the web),
-//                       supersampled down; with antiAlias the smoothest edges on offer
+//   resolution 1        the scene FBO at the window's own size (dpr x 1 on the web): the
+//                       slider goes to 2 (supersampling), but the user asked for 1.0 (2x
+//                       costs four times the fill rate for little gain); antiAlias smooths
+//                       the edges
 //   antiAlias           MSAA on the scene FBO
 //   postProcessing      on (the map's post shaders)
 //   shadows, highResShad  sun shadow map, 4096 instead of 1024 (shadow.c)
@@ -576,7 +578,7 @@ static const SettingPreset PRESETS[] = {
 // (colour grading is taste, the defaults are the maps' intended colours), HUD/viewmodel,
 // and the KrunkNative-only vsync/windowMode (device choices, not quality).
 static const struct { const char *key, *value; } BEAUTIFUL[] = {
-    {"resolution", "2"}, {"updateRate", "0"}, {"antiAlias", "true"}, {"postProcessing", "true"},
+    {"resolution", "1"}, {"updateRate", "0"}, {"antiAlias", "true"}, {"postProcessing", "true"},
     {"lowSpec", "false"}, {"noTex", "false"}, {"mapDet", "true"}, {"particles", "true"},
     {"particlesDist", "1000"}, {"renderDist", "100"}, {"reflection", "6"}, {"shadows", "true"},
     {"softShad", "true"}, {"highResShad", "true"}, {"shadowsDynamic", "true"}, {"ambientShading", "true"},

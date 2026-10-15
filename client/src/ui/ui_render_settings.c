@@ -74,8 +74,11 @@ static ClientRenderSettings g_rs = {
     .reticle_width = 2.0f, .reticle_height = 2.0f, .use_damage_overlay = 1,
     // General
     .lag_comp = 1.0f,
-    // KrunkNative
-    .vsync = 0, .window_mode = RS_WINDOWED,
+    // KrunkNative. vsync on by default (the user: "whenever we run the client bin we run it with
+    // vsync/performance settings so its not makin my pc chug"): v10's own default is updateRate 0
+    // (no cap) under the browser's requestAnimationFrame, which always runs at the display rate, so
+    // swap interval 1 is what v10 does natively. updateRate stays 0 like v10's.
+    .vsync = 1, .window_mode = RS_WINDOWED,
 };
 
 const ClientRenderSettings *client_render_settings(void) {
@@ -198,6 +201,8 @@ static int g_swap_dirty = 1;      // swap interval needs syncing (native)
 static int g_forced_window_mode = -1;
 static int g_window_mode_applied = RS_WINDOWED;
 static float g_resolution_override = 0.0f; // KRUNKNATIVE_RESOLUTION
+static int g_frame_cap_override = -1;      // KRUNKNATIVE_FRAME_CAP (0 = uncapped); -1 = the store's
+static int g_vsync_override = -1;          // KRUNKNATIVE_VSYNC; -1 = the store's
 static int g_fullscreen_kind = RS_FULLSCREEN; // F11 target: the last non-windowed mode chosen
 static int g_initialized;         // client_render_settings_init ran (not in --render-scenario runs)
 static int g_fps_log;             // KRUNKNATIVE_FPS_LOG
@@ -521,6 +526,9 @@ int client_apply_render_setting(Client *client, const char *key, const char *val
         case RS_T_URL: localize_image_url(value, field, e->size); break;
         case RS_T_ASPECT: parse_aspect(value); break;
     }
+    // The KRUNKNATIVE_* overrides beat the store (a saved updateRate / vsync) for the whole run
+    if (!strcmp(key, "updateRate") && g_frame_cap_override >= 0) g_rs.frame_cap = g_frame_cap_override;
+    if (!strcmp(key, "vsync") && g_vsync_override >= 0) g_rs.vsync = g_vsync_override;
     if (!strcmp(key, "resolution")) {
         if (g_resolution_override > 0.0f) g_rs.resolution = g_resolution_override;
         if (g_rs.resolution < 0.1f) g_rs.resolution = 0.1f;
@@ -546,10 +554,10 @@ void client_render_settings_init(Client *client) {
         g_rs.resolution = (float) d;
     }
     const char *cap = getenv("KRUNKNATIVE_FRAME_CAP");
-    if (cap && parse_number(cap, &d) && d >= 0.0) g_rs.frame_cap = (int) d;
+    if (cap && parse_number(cap, &d) && d >= 0.0) g_rs.frame_cap = g_frame_cap_override = (int) d;
     else if (headless_enabled()) g_headless_cap = KN_HEADLESS_FRAME_CAP;
     const char *vsync = getenv("KRUNKNATIVE_VSYNC");
-    if (vsync && *vsync) g_rs.vsync = parse_bool(vsync);
+    if (vsync && *vsync) g_rs.vsync = g_vsync_override = parse_bool(vsync);
     const char *fps_log = getenv("KRUNKNATIVE_FPS_LOG"); // "[render] fps N" once a second (stderr)
     g_fps_log = fps_log && *fps_log && strcmp(fps_log, "0");
     g_initialized = 1;

@@ -33,6 +33,7 @@
 #include <zombies_render.h> // map-logic WP-H in-world (zombies_render.c)
 #include <hud_gui.h> // map "gui" custom HUD (ui/hud_gui.c)
 #include <math.h>
+#include <signal.h> // Ctrl+C / SIGTERM: a clean shutdown (install_quit_signals)
 #include <stdio.h>
 #include <stdlib.h>
 #include <pcg_basic.h>
@@ -385,6 +386,47 @@ EM_JS(void, web_take_look, (double *dx, double *dy), {
     look.x = look.y = 0;
 });
 
+#endif
+
+#ifndef __EMSCRIPTEN__
+// Ctrl+C / SIGTERM / SIGHUP (native): the handler only records the signal; the main loop sees it
+// and leaves through the normal shutdown below it (window state, net thread, audio, GL, Discord),
+// so the process exits 0 with the same output as closing the window. Settings are already on
+// disk (every change is saved when it is made). A second signal before that finishes ends the
+// process at once (_exit, async-signal-safe), for a shutdown that hangs.
+static volatile sig_atomic_t g_quit_signal;
+
+static void quit_signal_handler(const int signo) {
+    if (g_quit_signal) _exit(128 + signo);
+    g_quit_signal = signo;
+}
+
+static void install_quit_signals(void) {
+#ifdef _WIN32
+    signal(SIGINT, quit_signal_handler);
+    signal(SIGTERM, quit_signal_handler);
+#else
+    struct sigaction action;
+    memset(&action, 0, sizeof(action));
+    action.sa_handler = quit_signal_handler;
+    sigemptyset(&action.sa_mask);
+    action.sa_flags = SA_RESTART; // other threads' blocking calls carry on
+    sigaction(SIGINT, &action, NULL);
+    sigaction(SIGTERM, &action, NULL);
+    sigaction(SIGHUP, &action, NULL);
+#endif
+}
+
+static const char *quit_signal_name(const int signo) {
+    switch (signo) {
+        case SIGINT: return "SIGINT";
+        case SIGTERM: return "SIGTERM";
+#ifndef _WIN32
+        case SIGHUP: return "SIGHUP";
+#endif
+        default: return "signal";
+    }
+}
 #endif
 
 static int file_exists(const char *path) {
@@ -869,9 +911,11 @@ int main(int argc, char **argv) {
     emscripten_set_main_loop_arg(web_main_loop, &INSTANCE, 0, 0);
     return 0;
 #else
-    while (!glfwWindowShouldClose(INSTANCE.window)) {
+    install_quit_signals();
+    while (!glfwWindowShouldClose(INSTANCE.window) && !g_quit_signal) {
         client_frame(&INSTANCE);
     }
+    if (g_quit_signal) printf("[client] %s: shutting down\n", quit_signal_name(g_quit_signal));
 
     client_render_window_exit(&INSTANCE); // keep the windowed rect + maximized flag for the next start
     INSTANCE.net_should_quit = 1;
