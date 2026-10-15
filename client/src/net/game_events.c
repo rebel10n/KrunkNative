@@ -42,6 +42,7 @@
 #include <drank.h>     // KrunkNative Drank: drank_apply_laced (the shared laced timer)
 #include <nav_overlay.h> // NET_EXT_KN_BOT_PATH: the spectated bot's route (show_navmeshes overlay)
 #include <object_manager.h> // KrunkNative Object Manager: NET_PACKET_SPAWN_RESULT / LOADOUT_EXTRA / SPAWNED_OBJ
+#include <strike_ui.h>       // Krunker Strike: its own in-game UI gets the same events (strike_hud.c)
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -191,10 +192,13 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
         const int stk = packet->fists & NET_KILL_NUKE ? STREAK_NUKE : -1; // info.stk: the Nuke's icon
         hud_ui_add_killfeed_ex(client, self ? NULL : events_name(killer), !self && killer == client->me, victim_name,
                                victim && victim == client->me, weapon && weapon->icon ? weapon->icon : NULL, packet->headshot, stk, 0.0);
+        strike_hud_killfeed(client, self ? NULL : events_name(killer), !self && killer == client->me, victim_name,
+                            victim && victim == client->me, weapon, packet->headshot);
     } else {
 #ifdef HUD_UI_HAVE_KILLFEED_SUICIDE
         hud_ui_add_killfeed_suicide(client, victim_name, victim && victim == client->me);
 #endif
+        strike_hud_killfeed(client, NULL, 0, victim_name, victim && victim == client->me, NULL, 0);
     }
 
     if (victim != client->me) return;
@@ -252,6 +256,7 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
     card.score = packet->score;
 
     hud_ui_show_death(client, &card);
+    strike_hud_death(client, &card, killer && killer != victim ? killer : NULL); // the Strike kill card
 
     client->spawn_requested = 0;
     client->net_death_time = glfwGetTime();
@@ -295,6 +300,7 @@ static void events_show_end(Client *client) {
     const int seconds = client->net_end_seconds > 0 ? client->net_end_seconds : 0;
     snprintf(text, sizeof(text), "%02d:%02d", seconds / 60 % 60, seconds % 60);
     hud_ui_show_end_screen(client, client->net_end_result, text);
+    strike_hud_end(client, client->net_end_result); // the Strike victory title and end screen
 }
 
 // endGame(): the round is over. Players stay as they are (v3.1.1 keeps them active and
@@ -1031,6 +1037,7 @@ void client_game_events_reset(Client *client) {
     g_death_info_valid = 0;
 #ifdef HUD_UI_HAVE_HIDE_END_SCREEN
     hud_ui_hide_end_screen(client); // no-op unless the end screen is up
+    strike_hud_end_hide(client);
 #endif
     client->net_round_seconds = -1;
     client->net_end_seconds = -1;
@@ -1102,6 +1109,11 @@ void client_game_events_tick(Client *client) {
     if (glfwGetTime() < client->net_death_time + client->net_respawn_delay) return;
 
     client->net_death_menu_pending = 0;
+    // Krunker Strike: Cg() after xe.deathDelay, straight back into the game (strike_hud.c)
+    if (strike_ui_active()) {
+        strike_hud_respawn(client);
+        return;
+    }
     // f1771 runs UI.toggleMenu(true) also when the menu is up already (ESC before the death or
     // during it): toggleMenuHider(true) drops .onDeathScrn, so the chat leaves the death
     // screen's place (main.css #uiBase.onDeathScrn #chatHolder) for the menu's.

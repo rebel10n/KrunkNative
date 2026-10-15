@@ -1,0 +1,21 @@
+{
+  "ref": "doc/ref/krunker-strike-1.37.2/strike-popup.png",
+  "flavor": "strike",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "connected": true,
+    "ready": true,
+    "name": "Guest_4821",
+    "classIndex": 0,
+    "menu": true,
+    "strike": {
+      "screen": "POPUP"
+    }
+  },
+  "frames": 3,
+  "note": "FRVR Krunker Strike 1.37.2, the mobile UI (ui/strike/, client/src/ui/strike_*.c). The popup frame (POPUP) with no content: the dark blur and the popup holder. Reference: capture-strike.js strike-popup: Pt(In, {builder: () => []})."
+}

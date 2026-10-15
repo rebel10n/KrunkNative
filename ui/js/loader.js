@@ -16,6 +16,8 @@
 //   kn-wt          WebTransport relay URL (net-bridge/wt, doc/transport.md), e.g.
 //                  https://wt.krunk.io:8443/native; "off" = WebSocket only; "" = fetch wt.json
 //                  next to the page (dev relay with a self-signed certificate hash)
+//   kn-root        "" = the client files (client.js/.wasm/.data) sit next to the page; else their
+//                  directory relative to it ("../" for a page one level down: strike/index.html)
 //   kn-config      "" = none; else a JSON file next to the page (stage.py writes kn-config.json)
 //                  read before boot, which picks the game content origin at run time:
 //                    {"asset_origin": "cdn", "asset_fallback": "own",
@@ -45,6 +47,7 @@
   var wt = meta('kn-wt');
   var rtc = meta('kn-rtc');
   var config = meta('kn-config');
+  var root = meta('kn-root');
   var assetFallback = '';
   var assetRoutes = [];
 
@@ -77,7 +80,7 @@
 
   function start() {
     var script = document.createElement('script');
-    script.src = build ? 'client.' + build + '.js' : 'client.js';
+    script.src = root + (build ? 'client.' + build + '.js' : 'client.js');
     script.async = true;
     script.onerror = function () {
       // No wasm next to the page (e.g. ui/ served on its own): leave the static page up.

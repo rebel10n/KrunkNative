@@ -213,12 +213,18 @@ scenarios=()
 if [ $# -gt 0 ]; then
     for n in "$@"; do
         n=${n%.json}
-        scenarios+=("${n##*/}")
+        # a name, a path, or a subdirectory scenario ("strike/main-menu": scenarios/strike/)
+        case "$n" in
+            */scenarios/*) n=${n##*/scenarios/} ;;
+            scenarios/*) n=${n#scenarios/} ;;
+            */*/*) n=${n##*/} ;;
+        esac
+        scenarios+=("$n")
     done
 else
-    for f in "$here"/scenarios/*.json; do
+    for f in "$here"/scenarios/*.json "$here"/scenarios/strike/*.json; do
         [ -e "$f" ] || continue
-        n=${f##*/}
+        n=${f#"$here"/scenarios/}
         # only the scenarios with a reference and regions (the others are smoke-ui renders)
         [ -f "$here/regions/$n" ] || continue
         scenarios+=("${n%.json}")

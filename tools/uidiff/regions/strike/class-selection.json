@@ -1,0 +1,74 @@
+{
+  "scenario": "strike/class-selection",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "header",
+      "rect": [
+        0,
+        0,
+        440,
+        75
+      ],
+      "kind": "text",
+      "fuzz": 8,
+      "max_pct": 1.0,
+      "note": "back arrow, CLASS SELECTION title, home"
+    },
+    {
+      "name": "class-list",
+      "rect": [
+        30,
+        100,
+        392,
+        610
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "the six class bullets (class-selection__class-bullet)"
+    },
+    {
+      "name": "figure",
+      "rect": [
+        470,
+        200,
+        340,
+        440
+      ],
+      "kind": "image",
+      "fuzz": 16,
+      "max_pct": 12.0,
+      "note": "the centre viewer (class-selection__character-holder)"
+    },
+    {
+      "name": "selected-card",
+      "rect": [
+        866,
+        300,
+        340,
+        240
+      ],
+      "kind": "text",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "TRIGGERMAN card: description, weapon"
+    },
+    {
+      "name": "select-button",
+      "rect": [
+        470,
+        625,
+        340,
+        65
+      ],
+      "kind": "text",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "SELECTED / SELECT button"
+    }
+  ]
+}

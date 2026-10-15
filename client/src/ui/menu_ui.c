@@ -22,7 +22,7 @@
 #include <gamepad.h> // Gamepad.active: "PRESS START" (client/src/gamepad.c)
 #include <spectate.h> // the Spectate switch: "CLICK TO SPECTATE" (client/src/spectate.c)
 #include <console.h> // developer console overlay (client/src/ui/ui_console.c)
-#include <flavor_ui.h> // Krunker Strike menu branding (client/src/ui/flavor_ui.c)
+#include <strike_ui.h> // Krunker Strike: FRVR's mobile page instead of the v10 one (strike_ui.c)
 #include <ui_interact.h> // the interact prompt (client/src/ui/ui_interact.c)
 #include <game_config.h> // Game.config.classes / isCustom (the class list)
 #include <client_settings.h> // Exit menu item + Settings > Client (client/src/ui/ui_client_settings.c)
@@ -1056,9 +1056,6 @@ void menu_update_instructions(void) {
     menu_apply_error_screen(error);
     menu_apply_update_art(updating);
     set_style("instructionHolder", "pointer-events", "all");
-    // Krunker Strike: the spinner states (page loading, connecting) are the brand's loading
-    // screen (the Strike curtains over #instructionHolder, flavor_ui.c); no-op for base
-    flavor_ui_set_loading(!error && (!g_ui.dom_ready || !can_play()));
 }
 
 void menu_set_region_label(const char *name) {
@@ -1812,8 +1809,6 @@ static void setup_dom(void) {
     v10_competitive_setup(); // the v10 page: Ranked / Turf Wars / Leaderboards (v10_competitive.c)
     v10_market_menu_setup(); // v10 Market & Trading: #menuBtnMarket (v10_market.c)
 
-    flavor_ui_apply(); // Krunker Strike: brand the wordmark + theming hooks (no-op for base)
-
     HtmlElem el;
     if ((el = by_id("classPreviewCanvas"))) html_dom_observe_resize(el, on_observed_resize, NULL);
     if ((el = by_id("menuClassContainer"))) html_dom_observe_resize(el, on_observed_resize, NULL);
@@ -1896,6 +1891,7 @@ static void menu_dom_init(void) {
 void client_set_menu_open(Client *client, const int open) {
     html_ui_set_menu_open(open);
     menu_apply_open(open);
+    if (strike_ui_active()) strike_ui_menu_open(client, open); // the Strike screens follow (TAP_TO_PLAY / game)
 
 #ifdef __EMSCRIPTEN__
     if (open) g_lock.waiting = 0;
@@ -1939,7 +1935,19 @@ void client_menu_tick(Client *client) {
     menu_poll_connection(client); // before the HTML check: net_connected must track the transport even with the stub
     if (!html_ui_available()) return;
 
-    if (!g_ui.dom_ready && html_dom_by_id("uiBase")) menu_dom_init();
+    if (!g_ui.dom_ready && strike_ui_active()) {
+        // Krunker Strike: FRVR's page has none of v10's markup; its own setup (strike_ui.c) and the
+        // menu state below (connection, play, settings) drive it. The v10 DOM writes find nothing.
+        if (strike_ui_dom_present()) {
+            i18n_init();
+            ui_settings_load();
+            menu_build_classes();
+            menu_build_maps();
+            g_ui.dom_ready = 1;
+            ui_settings_push_saved();
+            strike_ui_dom_init(client);
+        }
+    } else if (!g_ui.dom_ready && html_dom_by_id("uiBase")) menu_dom_init();
 
     menu_try_play(client);
 #ifdef __EMSCRIPTEN__
@@ -1958,7 +1966,11 @@ void client_menu_tick(Client *client) {
 #endif
     menu_idle_tick(client);
 
-    if (g_ui.dom_ready) {
+    if (g_ui.dom_ready && strike_ui_active()) {
+        menu_refresh_tables(client);
+        if (menu_state_changed(client)) menu_apply_state(client);
+        strike_ui_tick(client); // the Strike page (strike_ui.c): screens, in-game UI, touch controls
+    } else if (g_ui.dom_ready) {
         menu_refresh_tables(client);
         if (menu_state_changed(client)) menu_apply_state(client);
         menu_boot_tick();

@@ -1,0 +1,24 @@
+{
+	"lang": "en-us",
+	"name": "Krunker FRVR",
+	"short_name": "Krunker",
+	"description": "Krunker is a fast-paced pixelated first-person shooter game.",
+	"icons": [
+		{
+		"src": "/img/pwa/icon192x192.png",
+		"type": "image/png",
+		"sizes": "192x192"
+		},
+		{
+		"src": "/img/pwa/icon512x512.png",
+		"type": "image/png",
+		"sizes": "512x512"
+		}
+	],
+	"start_url": "./?pwa",
+	"display": "standalone",
+	"orientation": "landscape",
+	"background_color": "#000000",
+	"theme_color": "#000000",
+	"ms_start_compatible": true
+}

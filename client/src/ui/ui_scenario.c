@@ -44,7 +44,8 @@
 #include <ui_interact.h> // state.interact
 #include <backend_ui.h> // WP-E part 2c: state.account
 #include <app_mode.h> // state.page: hub / editor / viewer pages
-#include <flavor.h> // top-level "flavor": render the Strike brand (flavor-ui)
+#include <flavor.h> // top-level "flavor": the Krunker Strike page (strike_ui.c)
+#include <strike_ui.h> // state.strike
 #include <debug_capture.h> // state.pageActions calls with arguments
 #include <html_ui.h>
 #include <html_dom.h>
@@ -312,6 +313,7 @@ static void warn_unknown_keys(void) {
         "gameCode", // v10 gameCode(): the server password popup (v10_party.c)
         "update",  // the menu's Outdated / Update now box (update_ui_scenario)
         "connectError", // with connected:false, the Lost Connection screen's error text (menu_ui.c)
+        "strike",  // Krunker Strike's page: {screen, settingsTab, loading, killfeed, killcard, end, boot} (strike_ui.c)
         "spin",    // the store's prize wheel screen: prizeWheel(spin) without the backend (store_ui.c)
         "spinResult", // {rand, item} (arrays for a multi-spin): the wheel's spin reply (the won item's reveal)
         "spinMulti",  // with spin: the wheel's Nx spin (prizeWheel(i, null, multi))
@@ -375,10 +377,9 @@ int ui_scenario_begin(const char *scenario_path, const char *out_png) {
     g_sc.frames = (int) obj_num(g_sc.root, "frames", 3);
     if (g_sc.frames < 1) g_sc.frames = 1;
 
-    // optional top-level "flavor" ("base"/"strike"): render the menu with that product flavor's
-    // branding (flavor-ui, client/src/ui/flavor_ui.c). Absent = the process flavor (base unless
-    // --flavor/KN_FLAVOR set it). This runs before the DOM is built, so `make uidiff` renders the
-    // Strike brand from the scenario file alone, with no per-scenario env.
+    // optional top-level "flavor" ("base" / "strike"): render that product flavor's page (Krunker
+    // Strike: FRVR's ui/strike/index.html, strike_ui.c). Absent = the process flavor. Set before the
+    // UI is created, so `make uidiff` renders the Strike page from the scenario file alone.
     const char *flavor = obj_str(g_sc.root, "flavor");
     if (flavor && flavor[0]) flavor_set_key(flavor);
 
@@ -1150,6 +1151,7 @@ static int ui_scenario_apply(Client *client) {
         hud_votekick_on_state(client, &state);
     }
 
+    strike_ui_scenario(client, st("strike")); // Krunker Strike's screens / in-game UI (no-op on the base page)
     run_frames(client, 2);
     apply_killcard(client);
     apply_endscreen(client);

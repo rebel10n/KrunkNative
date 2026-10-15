@@ -18,6 +18,7 @@
 #include <html_dom.h> // html_storage_*: the version toggle's old knRuleset entry
 #include <ruleset.h>  // the startup log: Krunker v10.0.2
 #include <flavor.h>   // --flavor / KN_FLAVOR: the product flavor (Krunker Strike branding)
+#include <strike_ui.h> // Krunker Strike: FRVR's mobile page ui/strike/ and its touch controls
 #include <object_manager.h> // object_manager_restore_map (client_unload_map)
 #include <om_interp.h>     // om_interp_frame
 #include <ui_logic.h> // keybinds, chat and input settings (client/src/ui/ui_controls.c), every build
@@ -489,6 +490,22 @@ static int parse_startup_args(int argc, char **argv, int *offline, int *sandbox,
 static void client_resolve_flavor(int *argc, char **argv) {
     const char *env = getenv("KN_FLAVOR");
     if (env && env[0]) flavor_set_key(env);
+#ifdef __EMSCRIPTEN__
+    // The web build's Krunker Strike page is strike/index.html (ui/strike/, strike_ui.h); ?flavor=
+    // also picks it. The page decides: its document is the UI the browser shows.
+    char *web_flavor = (char *) EM_ASM_PTR({
+        var f = "";
+        try {
+            var q = /[?&]flavor=([a-z]+)/.exec(location.search);
+            if (q) f = q[1];
+            // no backslash in EM_ASM text (a regex's \/ reaches the JS as //, a comment)
+            else if (location.pathname.indexOf("/strike/") >= 0 || location.pathname.slice(-7) === "/strike") f = "strike";
+        } catch (e) {}
+        return stringToNewUTF8(f);
+    });
+    if (web_flavor && web_flavor[0]) flavor_set_key(web_flavor);
+    free(web_flavor);
+#endif
     int out = 1;
     for (int i = 1; i < *argc; i++) {
         if (!strncmp(argv[i], "--flavor=", 9)) {
@@ -818,7 +835,10 @@ int main(int argc, char **argv) {
     // the browser renders the same page and the C UI logic drives it through web_dom.c.
     {
         const char *ui_dir_override = getenv("KRUNKNATIVE_UI_DIR"); // alternate page tree (tests/dev)
-        char *ui_dir = ui_dir_override && *ui_dir_override ? concat(ui_dir_override, "/") : concat(ui_default_path(), "");
+        char *base_dir = ui_dir_override && *ui_dir_override ? concat(ui_dir_override, "/") : concat(ui_default_path(), "");
+        // Krunker Strike shows FRVR's Strike page (ui/strike/index.html) instead of Krunker's
+        char *ui_dir = strike_ui_page_dir(base_dir);
+        free(base_dir);
         int fb_width, fb_height;
         glfwGetFramebufferSize(INSTANCE.window, &fb_width, &fb_height);
 
@@ -1487,18 +1507,28 @@ static void html_cursor_scale(GLFWwindow *window, double *x, double *y) {
 
 // The page takes pointer input while the menu is open or the end-screen results are up.
 static int html_pointer_input(void) {
+    // Krunker Strike: in game the mouse is a finger on the mobile controls (strike_touch.c)
+    if (strike_ui_active()) return strike_ui_pointer_to_page();
     // ks_client_pointer_free: KrunkScript INPUTS.unlockMouse / freeMouse (clicks reach script DIVs)
     return html_ui_is_menu_open() || hud_ui_end_screen_interactive() || ks_client_pointer_free();
 }
 
 static void cursor_pos_callback(GLFWwindow *window, double x, double y) {
     ks_client_cursor(glfwGetWindowUserPointer(window), x, y); // KrunkScript INPUTS.mousePos / mouseMovement
-    if (ui_mobile_active()) { // KRUNKNATIVE_MOBILE: a drag of the mouse touch (ui_mobile.c)
+    // KRUNKNATIVE_MOBILE: a drag of the mouse touch (ui_mobile.c). Krunker Strike has its own
+    // touch controls (strike_touch.c, below) and no #mobileUI, so the mouse stays theirs.
+    if (ui_mobile_active() && !strike_ui_active()) {
         double mx = x, my = y;
         html_cursor_scale(window, &mx, &my);
         if (ui_mobile_mouse(UI_TOUCH_MOVE, (float) mx, (float) my)) return;
     }
-    if (!html_pointer_input()) return;
+    if (!html_pointer_input()) {
+        if (strike_ui_active()) { // Krunker Strike: a finger dragging over the mobile controls
+            html_cursor_scale(window, &x, &y);
+            strike_touch_mouse_move(glfwGetWindowUserPointer(window), (float) x, (float) y);
+        }
+        return;
+    }
     html_cursor_scale(window, &x, &y);
     if (ui_console_mouse(-1, x, y, 0)) return; // dev console titlebar drag / grip resize
     html_ui_mouse_move(x, y);
@@ -1507,7 +1537,16 @@ static void cursor_pos_callback(GLFWwindow *window, double x, double y) {
 static void mouse_button_callback(GLFWwindow *window, const int button, const int action, const int mods) {
     Client *client = glfwGetWindowUserPointer(window);
     if (ks_client_mouse_button(client, button, action)) return; // KrunkScript onMouseClick / onMouseUp, re-lock after unlockMouse
-    if (ui_mobile_active() && button == GLFW_MOUSE_BUTTON_LEFT && action != GLFW_REPEAT) { // the touch controls' mouse touch
+    if (!html_pointer_input() && strike_ui_active()) {
+        // Krunker Strike: the mobile version everywhere; the left button is a finger on the touch
+        // controls (strike_touch.c), never a desktop shot / aim
+        double tx, ty;
+        glfwGetCursorPos(window, &tx, &ty);
+        html_cursor_scale(window, &tx, &ty);
+        strike_touch_mouse_button(client, button, action, (float) tx, (float) ty);
+        return;
+    }
+    if (ui_mobile_active() && !strike_ui_active() && button == GLFW_MOUSE_BUTTON_LEFT && action != GLFW_REPEAT) { // the touch controls' mouse touch
         double mx, my;
         glfwGetCursorPos(window, &mx, &my);
         html_cursor_scale(window, &mx, &my);
@@ -1858,6 +1897,13 @@ static void client_tick_game(Client *client, const float now, const float frame_
     look_x = (float) web_x;
     look_y = (float) web_y;
 #endif
+    // Krunker Strike: no pointer lock, the cursor never turns the camera; the aim zone / aim
+    // joystick drags do (strike_touch.c, FRVR fakeMouse(2, dx, dy, "mblInput"))
+    if (strike_ui_active()) {
+        float touch_x = 0.0f, touch_y = 0.0f;
+        look_x = look_y = 0.0f;
+        if (strike_touch_take_look(&touch_x, &touch_y)) ui_mobile_add_look(client, touch_x, touch_y);
+    }
     // v7 f2137: mouse movement only reaches the camera under the pointer lock. A free cursor (the
     // menu, the end screen, a free end title, the console, freeMouse) never turns it.
     if (!client_pointer_look_allowed(client)) look_x = look_y = 0.0f;

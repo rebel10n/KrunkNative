@@ -1,0 +1,58 @@
+{
+ "name": "strike-loading",
+ "step_ms": 100,
+ "frames": [
+  {
+   "frame": "0000.png",
+   "t_ms": 0
+  },
+  {
+   "frame": "0001.png",
+   "t_ms": 100
+  },
+  {
+   "frame": "0002.png",
+   "t_ms": 200
+  },
+  {
+   "frame": "0003.png",
+   "t_ms": 300
+  },
+  {
+   "frame": "0004.png",
+   "t_ms": 400
+  },
+  {
+   "frame": "0005.png",
+   "t_ms": 500
+  },
+  {
+   "frame": "0006.png",
+   "t_ms": 600
+  },
+  {
+   "frame": "0007.png",
+   "t_ms": 700
+  },
+  {
+   "frame": "0008.png",
+   "t_ms": 800
+  },
+  {
+   "frame": "0009.png",
+   "t_ms": 900
+  },
+  {
+   "frame": "0010.png",
+   "t_ms": 1000
+  },
+  {
+   "frame": "0011.png",
+   "t_ms": 1100
+  },
+  {
+   "frame": "0012.png",
+   "t_ms": 1200
+  }
+ ]
+}

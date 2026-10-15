@@ -1,0 +1,87 @@
+{
+  "scenario": "strike/main-menu",
+  "defaults": {
+    "fuzz": 8,
+    "max_pct": 1.0
+  },
+  "regions": [
+    {
+      "name": "account-box",
+      "rect": [
+        0,
+        28,
+        356,
+        120
+      ],
+      "kind": "text",
+      "fuzz": 8,
+      "max_pct": 1.0,
+      "note": "#mobMenuAcc: face, GUEST_4821, LEVEL 12 100/400, ticket and KR (FRVR jU)"
+    },
+    {
+      "name": "logo",
+      "rect": [
+        450,
+        40,
+        260,
+        110
+      ],
+      "kind": "image",
+      "fuzz": 10,
+      "max_pct": 2.0,
+      "note": "the Krunker Strike FRVR logo (MAIN_MENU, the page's own img)"
+    },
+    {
+      "name": "figure",
+      "rect": [
+        480,
+        190,
+        380,
+        430
+      ],
+      "kind": "image",
+      "fuzz": 16,
+      "max_pct": 12.0,
+      "note": "the class preview: the menu viewer (yc / mI), pose and turn differ from FRVR's idle"
+    },
+    {
+      "name": "extras-customize",
+      "rect": [
+        28,
+        452,
+        306,
+        146
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "EXTRAS and CUSTOMIZE buttons (frvr-button)"
+    },
+    {
+      "name": "play",
+      "rect": [
+        845,
+        535,
+        405,
+        130
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "PLAY button and the 200/200 reset bar"
+    },
+    {
+      "name": "settings-gear",
+      "rect": [
+        1190,
+        30,
+        60,
+        60
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.0,
+      "note": "settings gear"
+    }
+  ]
+}

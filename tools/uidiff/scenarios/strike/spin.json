@@ -1,0 +1,21 @@
+{
+  "ref": "doc/ref/krunker-strike-1.37.2/strike-spin.png",
+  "flavor": "strike",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "connected": true,
+    "ready": true,
+    "name": "Guest_4821",
+    "classIndex": 0,
+    "menu": true,
+    "strike": {
+      "screen": "SPIN"
+    }
+  },
+  "frames": 3,
+  "note": "FRVR Krunker Strike 1.37.2, the mobile UI (ui/strike/, client/src/ui/strike_*.c). Prize wheels (SPIN): the ticket wheel and its odds; the wheel face is drawn by FRVR's canvas code and is not drawn natively yet. Reference: capture-strike.js strike-spin: Pt(SA, {spinnerIndex})."
+}

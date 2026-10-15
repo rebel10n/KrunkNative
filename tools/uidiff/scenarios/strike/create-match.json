@@ -1,0 +1,21 @@
+{
+  "ref": "doc/ref/krunker-strike-1.37.2/strike-create-match.png",
+  "flavor": "strike",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#000000",
+  "state": {
+    "connected": true,
+    "ready": true,
+    "name": "Guest_4821",
+    "classIndex": 0,
+    "menu": true,
+    "strike": {
+      "screen": "CREATE_MATCH"
+    }
+  },
+  "frames": 3,
+  "note": "FRVR Krunker Strike 1.37.2, the mobile UI (ui/strike/, client/src/ui/strike_*.c); reference: FRVR's own client in the offline sandbox (tools/uidiff/capture-strike.js strike-create-match: Pt(CREATE_MATCH) on a clean stack)."
+}

@@ -12,7 +12,8 @@
 //     the gradual joystick speed (gradSpeedMbl -> CONTROLS.speedLmt, ui_controls.c);
 //   - pointer-lock-free play ("TAP TO PLAY", locklessChange).
 // Natively ui_mobile_active() is 0 unless KRUNKNATIVE_MOBILE=1: GLFW delivers touchscreen input
-// as mouse events, and ui_mobile_mouse() feeds the left button to the same touch targets.
+// as mouse events, and ui_mobile_mouse() feeds the left button to the same touch targets. The
+// Krunker Strike flavor is the mobile version on every platform, so it is 1 there too (strike_ui.h).
 #include <client.h>
 
 typedef enum { UI_TOUCH_START, UI_TOUCH_MOVE, UI_TOUCH_END, UI_TOUCH_CANCEL } UiTouchPhase;
@@ -36,6 +37,9 @@ int   ui_mobile_take_look(int aiming, float *dx, float *dy);
 int   ui_mobile_mouse(UiTouchPhase phase, float x, float y);
 // The scenario renderer's state.mobile and tests: force the phone layout on or off.
 void  ui_mobile_force(int on);
+// Krunker Strike's controls (strike_touch.c) look through the same mblInput path: finger travel
+// in CSS px, scaled by the mobile sensitivities when ui_mobile_take_look() hands it on.
+void  ui_mobile_add_look(Client *client, float dx, float dy);
 // The play gesture on a phone (TAP TO PLAY): fullscreen + landscape lock (the Krunker
 // apps' behaviour; the v3.1.1 page itself stayed windowed). No-op unless mobile.
 void  ui_mobile_play_gesture(void);

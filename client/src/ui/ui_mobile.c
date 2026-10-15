@@ -28,6 +28,7 @@
 #include <ui_logic.h>
 #include <html_ui.h>
 #include <spectate.h>
+#include <flavor.h> // Krunker Strike is the mobile version on every platform
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -123,6 +124,9 @@ static struct {
 // iPadOS desktop-mode Safari (a "Macintosh" UA with multi-touch) as mobile, and accepts
 // ?mobile=1 / ?mobile=0 to force either layout (testing on desktop browsers).
 static int detect_mobile(void) {
+    // Krunker Strike: FRVR's mobile UI everywhere (window._isMobile / useMobileControls forced on,
+    // strike_ui.h): no pointer lock, the touch controls of strike_touch.c, mobile settings
+    if (flavor_get() == FLAVOR_STRIKE) return 1;
 #ifdef __EMSCRIPTEN__
     return EM_ASM_INT({
         try {
@@ -667,6 +671,11 @@ void ui_mobile_tick(Client *client) {
         html_dom_set_display(g_mb.ui, visible ? "block" : "none");
         if (!visible) release_all();
     }
+}
+
+void ui_mobile_add_look(Client *client, const float dx, const float dy) {
+    if (client) g_mb.client = client;
+    look(dx, dy);
 }
 
 int ui_mobile_take_look(const int aiming, float *dx, float *dy) {

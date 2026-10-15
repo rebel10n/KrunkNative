@@ -255,7 +255,8 @@ if (EMSCRIPTEN)
     #   -lwebsocket.js             emscripten/websocket.h implementation (net_web.c)
     #   EXPORTED_RUNTIME_METHODS   UTF8ToString/stringToNewUTF8 are used from EM_ASM blocks; stack* let page JS ccall() with string arguments
     #   EXPORTED_FUNCTIONS         JS -> C entry points called by ui/js/kn-shim.js (page events, ResizeObserver)
-    #   --preload-file             the window templates, read with fopen() from /ui/windows (MEMFS), and
+    #   --preload-file             the window templates, read with fopen() from /ui/windows (MEMFS), the
+    #                              Krunker Strike screen templates (/ui/strike/screens), and
     #                              the English string tables (v10 has them inline; the other languages
     #                              are fetched when picked: client/src/ui/i18n.c)
     target_link_options(client PRIVATE
@@ -275,6 +276,8 @@ if (EMSCRIPTEN)
         # SHELL: keeps each pair together (CMake de-duplicates a repeated --preload-file option)
         "SHELL:--preload-file ${CMAKE_SOURCE_DIR}/ui/i18n/en.json@/ui/i18n/en.json"
         "SHELL:--preload-file ${CMAKE_SOURCE_DIR}/ui/i18n/kn/en.json@/ui/i18n/kn/en.json"
+        # Krunker Strike's screen templates (client/src/ui/strike_ui.c), for the strike/ page
+        "SHELL:--preload-file ${CMAKE_SOURCE_DIR}/ui/strike/screens@/ui/strike/screens"
     )
 
     # Assemble the static site: the ui/ page tree (its js/loader.js pulls in

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,user-scalable=no,minimum-scale=1,maximum-scale=1,viewport-fit=cover"
+    />
+    <title>Krunker</title>
+    <link rel="shortcut icon" type="image/png" href="./img/favicon.png" />
+    <link rel="stylesheet" crossorigin href="./assets/index-CJ_IUjn5.css" />
+    <link rel="stylesheet" href="./icons.css" data-id="fantasticon:icons" />
+    <!-- KrunkNative: workarounds for engine gaps only (README.md "Overrides"); never restyles FRVR's UI -->
+    <link rel="stylesheet" href="./css/kn-strike-overrides.css" />
+    <!-- KrunkNative web build only (the native engine ignores <script>): DOM glue + client loader;
+         this page sits one level below the client files and the game content -->
+    <meta name="kn-root" content="../" />
+    <meta name="kn-asset-base" content="../" />
+    <script src="../js/kn-shim.js"></script>
+    <script src="../js/loader.js"></script>
+  </head>
+  <body>
+    <!-- KrunkNative: the GL canvas the web build draws the game into (FRVR's three.js appended its own) -->
+    <canvas id="canvas" tabindex="-1" oncontextmenu="return false;"></canvas>
+    <canvas
+      id="game-overlay"
+      oncontextmenu="return false;"
+      style="
+        position: absolute;
+        pointer-events: none;
+        z-index: 1;
+        image-rendering: pixelated;
+        text-rendering: optimizeLegibility;
+      "
+    ></canvas>
+    <div class="loading-screen" id="frvrLoadingScreen">
+      <div class="loading-screen__curtains">
+        <div class="loading-screen__left-curtain"></div>
+        <div class="loading-screen__right-curtain"></div>
+      </div>
+      <div class="loading-screen__center">
+        <div class="loading-screen__loading-info">
+          <span>Loading Assets</span>
+        </div>
+        <div class="loading-screen__cog"><img src="./img/cogwheel.svg" /></div>
+        <div class="loading-screen__logo">
+          <img class="loading-screen__logo__img" src="./img/krunker_logo.png" />
+        </div>
+        <div class="loading-screen__sparkles">
+          <img src="./img/loading-sparkles.svg" />
+        </div>
+      </div>
+      <div class="loading-screen__loading-bar-bg"></div>
+      <div
+        class="loading-screen__loading-bar loading-screen__loading-bar--first-load"
+      ></div>
+    </div>
+    <div id="frvrMenuMobileHolder"></div>
+    <div id="frvr-force-fullscreen-container"></div>
+  </body>
+</html>

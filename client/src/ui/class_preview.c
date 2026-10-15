@@ -19,6 +19,7 @@
 #include <html_ui.h>
 #include <html_dom.h> // html_dom_viewport
 #include <ui_logic.h> // ui_loadout_*, ui_police_active
+#include <strike_ui.h> // strike_ui_active(): Krunker Strike's viewer framing
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,6 +35,12 @@
 #define PREVIEW_CAMERA_Y 17.0f
 #define PREVIEW_CAMERA_Z (-29.0f)
 #define PREVIEW_LOOK_AT_HEIGHT 0.8f
+// Krunker Strike's menu viewer (FRVR 1.37.2 yc / mI.createCamAndOrbit, read as text): PerspectiveCamera(60)
+// at x = 15 / zoom, OrbitControls locked level (minPolar PI/2), target (0, playerHeight / 2, 0). The model
+// faces +X (yaw -PI/2: the camera side) in the menu's scene.
+#define PREVIEW_STRIKE_FOV ((float) M_PI * 60.0f / 180.0f)
+#define PREVIEW_STRIKE_DISTANCE 14.6f
+#define PREVIEW_STRIKE_YAW (-(float) M_PI / 4.0f)
 // scene.add(new AmbientLight(0x97A1A8)); DirectionalLight(0xF2F7FC, 0.5) at (10, 17, -10).
 #define PREVIEW_AMBIENT_COLOR 0x97A1A8
 #define PREVIEW_AMBIENT_INTENSITY 1.0f
@@ -227,14 +234,22 @@ static void preview_frame(Client *client) {
     Camera *camera = &preview->camera;
 
     const vec3 target = {0.0f, game_constants.player_height * PREVIEW_LOOK_AT_HEIGHT, 0.0f};
+    // Krunker Strike (FRVR's viewer, yc / mI.createCamAndOrbit): a 60 degree lens 15 units out on
+    // +X, level with the middle of the model (playerHeight / 2); the model faces that camera.
+    const int strike = strike_ui_active();
 
-    camera->fov = PREVIEW_FOV;
+    camera->fov = strike ? PREVIEW_STRIKE_FOV : PREVIEW_FOV;
     camera->zoom = 1.0f;
     camera->near = PREVIEW_NEAR;
     camera->far = PREVIEW_FAR;
     camera->position = (vec3) {PREVIEW_CAMERA_X, PREVIEW_CAMERA_Y, PREVIEW_CAMERA_Z};
     vec3 look = target;
-    if (g_v10_mode == 1) {
+    if (strike) {
+        // level with the figure's centre, 0.6 units lower: the figure sits where FRVR's does in its box
+        const float mid = game_constants.player_height * 0.5f - 0.6f;
+        camera->position = (vec3) {PREVIEW_STRIKE_DISTANCE, mid, 0.0f};
+        look = (vec3) {0.0f, mid, 0.0f};
+    } else if (g_v10_mode == 1) {
         camera->position = (vec3) {PREVIEW_V10_MENU_X, PREVIEW_V10_MENU_Y, PREVIEW_V10_MENU_Z};
         look = (vec3) {0.0f, PREVIEW_V10_MENU_LOOK_Y, 0.0f};
     } else if (g_v10_mode == 2) {
@@ -255,7 +270,7 @@ static void preview_frame(Client *client) {
 
     Player *player = preview->player;
     player->direction.x = 0.0f;
-    player->direction.y = g_v10_mode == 2 ? g_v10_xdire : PREVIEW_YAW;
+    player->direction.y = strike ? PREVIEW_STRIKE_YAW : g_v10_mode == 2 ? g_v10_xdire : PREVIEW_YAW;
 }
 
 // The v10 page's pose for this frame: its window column when the canvas sits in #charPreviewSlot.
