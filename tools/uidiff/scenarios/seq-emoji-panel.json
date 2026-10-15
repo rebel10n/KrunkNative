@@ -31,7 +31,6 @@
     "chatOpen": true,
     "chatInput": ":"
   },
-  "pending": "S5: the in-game emoji panel (svelte-13g6jqo, slideInUp) is MISSING",
-  "unreachable": "the sandbox capture hung after the first frame (CDP timeout at 900 s; the reference holds only 0 ms, not used): the chat Enter then \":\" keyup path does not lay out #emojiPanelHolder > * within the budget",
-  "note": "Chat open with \":\" typed: the emoji panel. Reference: capture-v10-seq.js emoji-panel."
+  "unreachable": "no v10 reference: capture-v10-seq.js emoji-panel hung after its first frame in the offline v10 sandbox (CDP timeout at 900 s: the chat Enter then \":\" keyup path never laid out #emojiPanelHolder > *), and v10 is only read statically now (its JS is not run to recapture). KrunkNative's panel (client/src/ui/v10_notify.c, v10:197370-197420) is compared by kn-notify-emoji, a KN baseline; its icons are the emoji skins' thumbnails (img), not text emoji, so no glyph needs a colour image",
+  "note": "Chat open with \":\" typed: the emoji panel (svelte-13g6jqo, slideInUp). Reference: capture-v10-seq.js emoji-panel (unreachable, above); the panel itself is kn-notify-emoji."
 }
