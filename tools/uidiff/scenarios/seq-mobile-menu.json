@@ -21,6 +21,6 @@
     "mapFile": "maps/311_kanji.json",
     "gameName": ""
   },
-  "pending": "S8: no state key turns the mobile UI on (toggleMobileUI(true))",
+  "pending": "v10's mobile menu is the live menu with krunker_haslogin=true and no backend: no header bars, no play column. toggleMobileUI(true) changes no menu element (sandbox probe: visibility and rects identical before/after), so the diff is not a mobile gap; needs a native haslogin-without-account state in v10_menu.c (S2)",
   "note": "The mobile menu layout (toggleMobileUI(true)). Reference: capture-v10-seq.js mobile-menu."
 }

@@ -1,7 +1,7 @@
 #pragma once
-// Krunker v3.1.1's mobile controls (CONTROLS in 132.js of the unpacked client, UI in
-// 103.js, the "mobile" settings in 134.js, mobileControlPositions in 1.js), driven over
-// the DOM-ops API like the rest of the C UI logic: client/src/ui/ui_mobile.c.
+// Krunker v10.0.2's mobile controls (CONTROLS.isMobile, the #mobileUI touch table, the
+// nipplejs joystick, the "mobile" settings; game.deob.js), driven over the DOM-ops API like the
+// rest of the C UI logic: client/src/ui/ui_mobile.c.
 //
 //   - detection: CONTROLS.checkMobile() (user agent, or no requestPointerLock);
 //   - #mobileUI: shown while the game owns the input (toggleControlUI/toggleGameUI),
@@ -11,7 +11,8 @@
 //   - touch look (fakeMouse(2, dx, dy, 0, "mblInput")) with the mobile sensitivities,
 //     the gradual joystick speed (gradSpeedMbl -> CONTROLS.speedLmt, ui_controls.c);
 //   - pointer-lock-free play ("TAP TO PLAY", locklessChange).
-// Natively ui_mobile_active() is 0: GLFW delivers touchscreen input as mouse events.
+// Natively ui_mobile_active() is 0 unless KRUNKNATIVE_MOBILE=1: GLFW delivers touchscreen input
+// as mouse events, and ui_mobile_mouse() feeds the left button to the same touch targets.
 #include <client.h>
 
 typedef enum { UI_TOUCH_START, UI_TOUCH_MOVE, UI_TOUCH_END, UI_TOUCH_CANCEL } UiTouchPhase;
@@ -30,6 +31,11 @@ int   ui_mobile_touch(UiTouchPhase phase, const UiTouch *changed, int count);
 // (sensitivityXMbl/YMbl * 4, aim sensitivities while the right button is held) and
 // invertYMbl; 0 when nothing moved. ui_controls_fill_input multiplies by mouseSens.
 int   ui_mobile_take_look(int aiming, float *dx, float *dy);
+// Native mouse as the one touch (only while #mobileUI is up): the left button's press / drag /
+// release, 1 = consumed (the page and the game do not see it). KRUNKNATIVE_MOBILE=1 forces it.
+int   ui_mobile_mouse(UiTouchPhase phase, float x, float y);
+// The scenario renderer's state.mobile and tests: force the phone layout on or off.
+void  ui_mobile_force(int on);
 // The play gesture on a phone (TAP TO PLAY): fullscreen + landscape lock (the Krunker
 // apps' behaviour; the v3.1.1 page itself stayed windowed). No-op unless mobile.
 void  ui_mobile_play_gesture(void);

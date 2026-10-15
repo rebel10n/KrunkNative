@@ -37,6 +37,7 @@
 #include <GLFW/glfw3.h>
 #include <headless.h> // swap/current window that also work without a window (KRUNKNATIVE_HEADLESS)
 #include <ui_logic.h>
+#include <ui_mobile.h> // state.mobile (ui_mobile_force)
 #include <hud_modes.h>
 #include <net_ext.h> // state.voteKick: NetVoteKickStatePacket
 #include <modes.h>
@@ -294,7 +295,7 @@ static void warn_unknown_keys(void) {
     static const char *const known[] = {
         "menu", "window", "settingsTab", "connected", "ready", "inGame", "mapName", "modeName", "region", "name",
         "gameName", "classIndex", "anim_time", "hud", "chat", "chatOpen", "chatInput", "killfeed", "scoreboard",
-        "dead", "killcard", "endscreen", "hit", "preview", "scrollbars", "page", "pageQuery", "pageActions",
+        "dead", "killcard", "endscreen", "hit", "preview", "scrollbars", "mobile", "page", "pageQuery", "pageActions",
         "clientChrome", "settingsView", "windowActions", "after_ms", "customMap", "pose", "spectate", "mapFile",
         "account", // WP-E part 2c: a stand-in logged-in account (account_ui_scenario)
         "playerList", // the Player List's rows [{uid, name, clan, ping, account, level, hacker, speaking, chatMuted, voiceMuted}] (hud_ui.c)
@@ -389,6 +390,8 @@ int ui_scenario_begin(const char *scenario_path, const char *out_png) {
     // time after the event, so the capture follows the state by that much instead of the cycle
     g_sc.after_ms = obj_num(g_sc.state, "after_ms", 0.0);
     g_sc.preview = st_bool("preview", 0);
+    // state.mobile: the phone layout (v10's CONTROLS.isMobile: #mobileUI, the joystick, lockless play)
+    if (st_has("mobile")) ui_mobile_force(st_bool("mobile", 0));
 
     // anim_times [ms, ...] + anim_origin: a frame sequence (<out>.<t>.png per time)
     g_sc.seq_origin_ms = -1.0;

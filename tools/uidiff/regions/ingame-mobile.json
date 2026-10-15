@@ -1,0 +1,204 @@
+{
+  "scenario": "ingame-mobile",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "timer",
+      "rect": [
+        5,
+        5,
+        67,
+        26
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 5.5,
+      "note": "#timerHolder (timer icon + 03:45). Chrome pixel-snaps the box: 5.9px -> 6px (uiBase scale 0.394); the engine does not snap, so the glyph edges differ by a sub-pixel (~5%)"
+    },
+    {
+      "name": "match-info",
+      "rect": [
+        5,
+        35,
+        37,
+        14
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#matchInfo"
+    },
+    {
+      "name": "player-card",
+      "rect": [
+        5,
+        352,
+        138,
+        32
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#bottomLeftPlayer: class image, FFA, health bar, 100"
+    },
+    {
+      "name": "ammo",
+      "rect": [
+        770,
+        365,
+        68,
+        20
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#ammoHolder: 30 | 30"
+    },
+    {
+      "name": "leaderboard",
+      "rect": [
+        722,
+        5,
+        117,
+        17
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#leaderboardHolder"
+    },
+    {
+      "name": "joystick",
+      "rect": [
+        97,
+        197,
+        145,
+        145
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#mobileJoystick nipplejs ring (120px) + front knob at rest"
+    },
+    {
+      "name": "btn-esc",
+      "rect": [
+        148,
+        0,
+        48,
+        48
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#mobileEsc (home icon, 18% 1%)"
+    },
+    {
+      "name": "btn-shoot",
+      "rect": [
+        20,
+        104,
+        72,
+        72
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 6.5,
+      "note": "#mobileShoot (rocket, rotate 90deg). Chrome snaps the box to 25,109 (layout 25.3,109.2); the engine draws it at the fractional origin: edge AA only (~6%). Experiment: an integer top gives 0% for btn-kswap, the same cause"
+    },
+    {
+      "name": "btn-aimshoot",
+      "rect": [
+        660,
+        214,
+        78,
+        78
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#mobileAimShoot (70px, 56% / right 13%)"
+    },
+    {
+      "name": "btn-scope",
+      "rect": [
+        707,
+        133,
+        48,
+        48
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#mobileScope (crosshair, 35% / right 11%)"
+    },
+    {
+      "name": "btn-jump",
+      "rect": [
+        783,
+        191,
+        48,
+        48
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#mobileJump (up arrow, 50% / right 2%)"
+    },
+    {
+      "name": "btn-crouch",
+      "rect": [
+        673,
+        316,
+        48,
+        48
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#mobileCrouch (down arrow, 82% / right 15%)"
+    },
+    {
+      "name": "btn-reload",
+      "rect": [
+        572,
+        281,
+        48,
+        48
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#mobileReload (73% / right 27%)"
+    },
+    {
+      "name": "btn-swap",
+      "rect": [
+        398,
+        327,
+        48,
+        48
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": "#mobileSwap (85%, margin auto)"
+    },
+    {
+      "name": "btn-kswap",
+      "rect": [
+        398,
+        249,
+        48,
+        48
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 12.0,
+      "note": "#mobileKSwap (melee knife, 65% / margin auto). Layout top 253.5px: Chrome snaps it to 254 (the ring and knife sit 1px lower in the reference), the engine does not; with an integer top this region is 0.000% (checked), so the gap is pixel snapping in the engine's paint, not the CSS"
+    }
+  ]
+}

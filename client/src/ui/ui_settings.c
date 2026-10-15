@@ -293,6 +293,11 @@ const cJSON *ui_setting_value(const char *key) {
     }
     const cJSON *v = ui_setting_saved(key);
     if (v) return v;
+    if (key && !strcmp(key, "scaleUI") && ui_mobile_active()) { // v10: scaleUI's val is 0.9 on phones, 0.7 on desktop
+        static cJSON *phone;
+        if (!phone) phone = cJSON_CreateNumber(0.9);
+        return phone;
+    }
     return g_defaults ? cJSON_GetObjectItem(g_defaults, key) : NULL;
 }
 

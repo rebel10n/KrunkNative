@@ -176,7 +176,7 @@ async function settle(c, ms = 600) {
 const SCOPE_ANCHOR = '  var _69422 = null;\n  var _69423 = null;\n';
 // setAcc(a) stands a signed-in account (_67362, v10's iîïììîí) in for the Player List capture: the
 // K.P.D and Votekick buttons are an account's.
-const SCOPE_HOOK = '  window.__knScope = function () { return { sg: _69422, sp: _69423, cg: _67298, me: _69415, sock: _33978,'
+const SCOPE_HOOK = '  window.__knScope = function () { return { sg: _69422, sp: _69423, cg: _67298, me: _69415, sock: _33978, ui: _57154,'
   + ' setAcc: function (a) { _67362 = a; } }; };\n';
 let clientJs = null;
 function clientScript() {
@@ -190,7 +190,7 @@ const SG = 'window.__knScope().sg', SP = 'window.__knScope().sp', CG = 'window._
 async function waitSandbox(c) {
   for (let i = 0; i < 60; i++) {
     log('waitSandbox ' + i);
-    if (await c.eval(`!!(window.__knScope && ${SG} && /CLICK TO PLAY/i.test(instructions.innerText))`).catch(() => false)) return 1;
+    if (await c.eval(`!!(window.__knScope && ${SG} && /CLICK TO PLAY|TAP TO PLAY/i.test(instructions.innerText))`).catch(() => false)) return 1;
     await sleep(500);
   }
   throw new Error('the v10 sandbox did not start');
@@ -214,6 +214,14 @@ const S = {};
 function scenario(name, run, opts = {}) { S[name] = Object.assign({ name, dir: 'ingame', run, size: [1280, 720] }, opts); }
 
 scenario('ingame-plain', async (c) => { await enterGame(c); await settle(c, 800); });
+// the phone layout: a landscape phone viewport (844x390, iPhone 12-class CSS pixels) with v10's own
+// mobile flag: window._isMobile (the page's inline script sets it from the user agent, so it is pinned before it runs) (v10: CONTROLS.isMobile = the joystick (nipplejs, static, size 120),
+// the mobileControlPositions pass, the touch handlers on #mobileUI, lockless play with TAP TO PLAY;
+// UI.isMobileControls = #mobileUI over the game, with the mobile weapon-holder and chat rules)
+scenario('ingame-mobile', async (c) => {
+  await enterGame(c);
+  await settle(c, 800);
+}, { size: [844, 390], mobile: true });
 scenario('ingame-scoreboard', async (c) => {
   await enterGame(c);
   await key(c, 'Tab', 'Tab', 9, true);
@@ -448,7 +456,7 @@ async function openPage(o) {
     await c.setViewport(o.w, o.h);
     CURRENT_MAP = mapJson(o.map, o.mode);
     const storage = Object.assign({ krunker_haslogin: 'true', consent: '1', custMap: CURRENT_MAP }, o.storage || {});
-    await c.send('Page.addScriptToEvaluateOnNewDocument', { source: preScript(storage) });
+    await c.send('Page.addScriptToEvaluateOnNewDocument', { source: (o.mobile ? "Object.defineProperty(window, '_isMobile', { get: () => true, set() {}, configurable: true });" : '') + preScript(storage) });
     // capture-v10-seq.js: extra pre-page script, virtual time before the first page script, a query
     if (o.preScript) await c.send('Page.addScriptToEvaluateOnNewDocument', { source: o.preScript });
     if (o.beforeNavigate) await o.beforeNavigate(c);
@@ -460,7 +468,7 @@ async function openPage(o) {
 
 async function capture(sc, idx) {
   const base = +process.env.KN_CAPTURE_PORT_BASE || 9540;
-  const { c, close, errors, blocked } = await openPage({ w: sc.size[0], h: sc.size[1], port: base + (idx % 8), map: sc.map, mode: sc.mode, storage: sc.storage, settle: 10000 });
+  const { c, close, errors, blocked } = await openPage({ w: sc.size[0], h: sc.size[1], port: base + (idx % 8), map: sc.map, mode: sc.mode, storage: sc.storage, mobile: sc.mobile, settle: 10000 });
   try {
     await sc.run(c);
     const dir = path.join(OUT, sc.dir);

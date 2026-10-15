@@ -1,17 +1,17 @@
 // Krunker v3.1.1's mobile controls over the DOM-ops API (contract: ui_mobile.h).
 //
-// Sources (unpacked v3.1.1 client):
-//   132.js  CONTROLS.checkMobile, the nipplejs joystick handlers (start/move/end), the
-//           mobileControlPositions layout pass, the `ae` touch-target table (mobileUI,
-//           mobileJump, ..., mobileSwap) and the #mobileUI touchstart/move/end/cancel
-//           listeners, fakeMouse(2, dx, dy, 0, "mblInput"), locklessChange
-//   103.js  UI.toggleGameUI / toggleControlUI: #mobileUI display
-//   134.js  settings sensitivityXMbl/YMbl, aimSensitivityXMbl/YMbl (x4), invertYMbl,
-//           vibrationMbl, gradSpeedMbl (category "mobile", hide: !isMobile)
-//   1.js    mobileControlPositions
-//   index.js  "TAP TO PLAY", UsePointerLock = ... && !isMobile
-//   public/libs/nipplejs.min.js  the joystick (static mode, size 120, color black):
-//           markup, styles, direction/angle maths, rest/show/hide transitions
+// Sources (Krunker v10.0.2, game.deob.js; v7.1.4 where v10 kept it):
+//   CONTROLS (the controls object, isMobile): the nipplejs joystick (static, size 120,
+//           color black, mobile move/end handlers), the mobileControlPositions pass
+//           (iiììïîì: mobileJoystick .. mobileKSwap), the touch-target table `iiÌïîiï`
+//           (down/up per #mobileUI child, move = fakeMouse(2, ..., "mblInput") for every
+//           touch that started on a tracked element), the #mobileUI touchstart /
+//           touchmove / touchend / touchcancel listeners, locklessChange
+//   UI.toggleGameUI / toggleControlUI / toggleMobileUI: #mobileUI display, #uiBase.isMobile
+//   settings: sensitivityXMbl/YMbl, aimSensitivityXMbl/YMbl, invertYMbl, gradSpeedMbl
+//           (category "mobile", hide: !isMobile); scaleUI defaults to 0.9 on mobile
+//   public/libs/nipplejs.min.js (v7.1.4's copy, the one v10 loads): the joystick's markup,
+//           styles and rest/show/hide transitions (fadeTime 0 for Krunker's options)
 //
 // nipplejs is not vendored: the static joystick Krunker configures is ~100 lines of
 // geometry, re-implemented below with the same DOM (div.nipple > div.back + div.front,
@@ -41,24 +41,25 @@
 #define MOBILE_TOUCH_MAX 16
 #define NIPPLE_SIZE 120.0f        // nipplejs.create({size: 120})
 #define NIPPLE_THRESHOLD 0.1f     // nipplejs default threshold (force)
-#define NIPPLE_REST_OPACITY "0.5" // restOpacity (static mode)
-#define NIPPLE_FADE_MS 250        // fadeTime
+#define NIPPLE_REST_OPACITY "0.5" // restOpacity (nipplejs default)
+#define NIPPLE_FADE_MS 0          // fadeTime (nipplejs default: Krunker's options do not set it)
 #define DEG(r) ((r) * 180.0f / (float) M_PI)
 
 // The `ae` table of 132.js, in #mobileUI's DOM order (index.html): the joystick zone
 // first, then the buttons. MB_UI is #mobileUI itself (a touch on no button = look).
 typedef enum {
     MB_UI = -1,
-    MB_JUMP, MB_CROUCH, MB_ESC, MB_SHOOT, MB_AIMSHOOT, MB_SCOPE, MB_RELOAD, MB_SWAP,
+    MB_JUMP, MB_CROUCH, MB_ESC, MB_SHOOT, MB_AIMSHOOT, MB_SCOPE, MB_RELOAD, MB_SWAP, MB_KSWAP,
     MB_COUNT,
     MB_JOYSTICK = 100,
 } MobileTarget;
 
 static const char *const BUTTON_IDS[MB_COUNT] = {
     "mobileJump", "mobileCrouch", "mobileEsc", "mobileShoot", "mobileAimShoot", "mobileScope", "mobileReload", "mobileSwap",
+    "mobileKSwap",
 };
 
-// G.mobileControlPositions (1.js): fractions of #mobileUI; NAN = not set.
+// G.mobileControlPositions (v10 iiììïîì): fractions of #mobileUI; NAN = not set.
 typedef struct { const char *id; float left, top, right; } ControlPosition;
 static const ControlPosition POSITIONS[] = {
     {"mobileJoystick", 0.2f, 0.69f, NAN},
@@ -70,11 +71,12 @@ static const ControlPosition POSITIONS[] = {
     {"mobileScope", NAN, 0.35f, 0.11f},
     {"mobileReload", NAN, 0.73f, 0.27f},
     {"mobileSwap", 0.0f, 0.85f, 0.0f},
+    {"mobileKSwap", 0.0f, 0.65f, 0.0f},
 };
 // The JS doubles the fractions above stand for (0.69 * 100 = 68.99999999999999 in JS).
 static const double POSITION_VALUES[][3] = {
     {0.2, 0.69, NAN}, {NAN, 0.5, 0.02}, {NAN, 0.82, 0.15}, {0.18, 0.01, NAN}, {0.03, 0.28, NAN},
-    {NAN, 0.56, 0.13}, {NAN, 0.35, 0.11}, {NAN, 0.73, 0.27}, {0.0, 0.85, 0.0},
+    {NAN, 0.56, 0.13}, {NAN, 0.35, 0.11}, {NAN, 0.73, 0.27}, {0.0, 0.85, 0.0}, {0.0, 0.65, 0.0},
 };
 
 typedef struct {
@@ -135,7 +137,10 @@ static int detect_mobile(void) {
         return 0;
     });
 #else
-    return 0; // native: GLFW reports touchscreens as a mouse (see ui_mobile.h)
+    // native: GLFW reports touchscreens as a mouse, so the phone layout is opt-in (the
+    // mouse drives the touch controls, ui_mobile_mouse); KRUNKNATIVE_MOBILE=1 forces it
+    const char *e = getenv("KRUNKNATIVE_MOBILE");
+    return e && e[0] == '1';
 #endif
 }
 
@@ -146,6 +151,13 @@ int ui_mobile_active(void) {
         if (g_mb.mobile) printf("[mobile] mobile device detected: touch controls on, pointer lock off\n");
     }
     return g_mb.mobile;
+}
+
+// The scenario renderer (state.mobile) and tests: force the phone layout on or off before
+// the page reads CONTROLS.isMobile.
+void ui_mobile_force(const int on) {
+    g_mb.detected = 1;
+    g_mb.mobile = on ? 1 : 0;
 }
 
 // ---------------------------------------------------------------- settings
@@ -230,10 +242,13 @@ static void spect_prev(void) { // `if (window.Bf5) window.spectMode(-1)`
     if (g_mb.client && spectate_active()) spectate_mouse_press(g_mb.client, 1);
 }
 
+// The transform each target's down / up handler writes (v10 iiÌïîiï; scaleMap is empty, so
+// the 1.1 press scale and the rest scale 1 are the only values). Crouch never scales, and
+// the shoot button keeps its rotate + 1.1 after release, as v10's up handler writes it.
 static void button_down(const int b) {
     switch (b) {
         case MB_JUMP: set_transform(b, "scale(1.1)"); key(UI_CONTROL_JUMP, 1); break;
-        case MB_CROUCH: set_transform(b, "scale(1.1)"); key(UI_CONTROL_CROUCH, 1); break;
+        case MB_CROUCH: set_transform(b, "scale(1)"); key(UI_CONTROL_CROUCH, 1); break;
         case MB_ESC: // V.toggle(false); setTimeout(() => V.resetKeys())
             if (g_mb.client && !html_ui_is_menu_open()) client_set_menu_open(g_mb.client, 1);
             html_timer_add(0, t_reset_keys, NULL);
@@ -269,18 +284,19 @@ static void button_down(const int b) {
             break;
         case MB_RELOAD: set_transform(b, "scale(1.1)"); key(UI_CONTROL_RELOAD, 1); break;
         case MB_SWAP: set_transform(b, "scale(1.1)"); key(UI_CONTROL_SWAP, 1); break;
+        case MB_KSWAP: set_transform(b, "scale(1.1)"); key(UI_CONTROL_MELEE, 1); break; // binds.melee
         default: break;
     }
 }
 
 static void button_up(const int b) {
     switch (b) {
-        case MB_JUMP: set_transform(b, ""); key(UI_CONTROL_JUMP, 0); break;
-        case MB_CROUCH: set_transform(b, ""); key(UI_CONTROL_CROUCH, 0); break;
+        case MB_JUMP: set_transform(b, "scale(1)"); key(UI_CONTROL_JUMP, 0); break;
+        case MB_CROUCH: set_transform(b, "scale(1)"); key(UI_CONTROL_CROUCH, 0); break;
         case MB_AIMSHOOT:
             g_mb.ready_to_shoot = 0;
             stop_auto_fire();
-            set_transform(b, "");
+            set_transform(b, "scale(1)");
             if (g_mb.already_aim) {
                 g_mb.already_aim = 0;
                 ui_controls_touch_shoot(0);
@@ -295,16 +311,19 @@ static void button_up(const int b) {
                 key(UI_CONTROL_AIM, 0);
             }
             break;
-        case MB_SHOOT: set_transform(b, ""); ui_controls_touch_shoot(0); break;
-        case MB_SCOPE: set_transform(b, ""); break;
-        case MB_RELOAD: set_transform(b, ""); key(UI_CONTROL_RELOAD, 0); break;
-        case MB_SWAP: set_transform(b, ""); key(UI_CONTROL_SWAP, 0); break;
+        case MB_SHOOT: set_transform(b, "rotate(90deg) scale(1.1)"); ui_controls_touch_shoot(0); break;
+        case MB_SCOPE: set_transform(b, "scale(1)"); break;
+        case MB_RELOAD: set_transform(b, "scale(1)"); key(UI_CONTROL_RELOAD, 0); break;
+        case MB_SWAP: set_transform(b, "scale(1)"); key(UI_CONTROL_SWAP, 0); break;
+        case MB_KSWAP: set_transform(b, "scale(1)"); key(UI_CONTROL_MELEE, 0); break;
         default: break;
     }
 }
 
-static int has_move(const int cb) { // ae[cb].move: mobileUI, mobileAimShoot, mobileScope look
-    return cb == MB_UI || cb == MB_AIMSHOOT || cb == MB_SCOPE;
+// Every tracked touch looks: v10 gives each table entry the same move handler (fakeMouse
+// with the touch's screen delta), whichever element the touch started on.
+static int has_move(const int cb) {
+    return cb == MB_UI || (cb >= 0 && cb < MB_COUNT);
 }
 
 // ---------------------------------------------------------------- joystick (nipplejs)
@@ -396,7 +415,7 @@ static void stick_end(void) {
     g_mb.stick_dir_x = g_mb.stick_dir_y = 0;
     // hide(): restOpacity; restPosition(): front back to the centre over fadeTime
     nipple_style(g_mb.nipple, "opacity", NIPPLE_REST_OPACITY);
-    nipple_style(g_mb.front, "transition", "top 250ms, left 250ms");
+    nipple_style(g_mb.front, "transition", "top 0ms, left 0ms");
     stick_front(0.0f, 0.0f);
     g_mb.stick_rest_timer = html_timer_add(NIPPLE_FADE_MS, t_stick_rested, NULL);
     // X.on("end"): U() every move key
@@ -487,6 +506,25 @@ int ui_mobile_touch(const UiTouchPhase phase, const UiTouch *changed, const int 
     return 1; // aj.preventDefault() (touchend only skips it in Krunker; no default there either)
 }
 
+// ---------------------------------------------------------------- native mouse as the touch
+
+// Native builds have no touchscreen events: with the phone layout forced (KRUNKNATIVE_MOBILE=1,
+// state.mobile), the left mouse button is the one touch: a press starts it on whatever
+// #mobileUI element is under the pointer, a drag is its move, the release its end. Only
+// while #mobileUI is up (the game has the input); otherwise the page gets the mouse.
+#define MOUSE_TOUCH_ID 0x6d6f7573L
+static int g_mouse_touch;
+
+int ui_mobile_mouse(const UiTouchPhase phase, const float x, const float y) {
+    if (!g_mb.mobile || !g_mb.dom_ready || g_mb.visible != 1) return 0;
+    if (phase != UI_TOUCH_START && !g_mouse_touch) return 0;
+    const UiTouch t = {MOUSE_TOUCH_ID, x, y, x, y};
+    if (phase == UI_TOUCH_START) g_mouse_touch = 1;
+    if (phase == UI_TOUCH_END || phase == UI_TOUCH_CANCEL) g_mouse_touch = 0;
+    ui_mobile_touch(phase, &t, 1);
+    return 1;
+}
+
 // ---------------------------------------------------------------- web backend
 
 #ifdef __EMSCRIPTEN__
@@ -553,6 +591,8 @@ static void apply_positions(void) {
     for (size_t i = 0; i < sizeof(POSITIONS) / sizeof(POSITIONS[0]); i++) {
         const HtmlElem el = html_dom_by_id(POSITIONS[i].id);
         if (!el) continue;
+        // v10: the shoot button is rotated a quarter turn (the rocket points along the stick)
+        if (!strcmp(POSITIONS[i].id, "mobileShoot")) html_dom_set_style(el, "transform", "rotate(90deg)");
         for (int s = 0; s < 3; s++) {
             const double v = POSITION_VALUES[i][s];
             if (isnan(v)) continue;
@@ -573,7 +613,7 @@ static void build_joystick(void) {
     if (!g_mb.zone) return;
     html_dom_set_style(g_mb.zone, "touch-action", "none");
     html_dom_set_html(g_mb.zone,
-        "<div class=\"nipple collection_0\" id=\"nipple_0_0\" style=\"position: absolute; opacity: 0.5; display: block; z-index: 999; transition: opacity 250ms;\">"
+        "<div class=\"nipple collection_0\" id=\"nipple_0_0\" style=\"position: absolute; opacity: 0.5; display: block; z-index: 999; transition: opacity;\">"
         "<div class=\"back\" style=\"position: absolute; display: block; width: 120px; height: 120px; margin-left: -60px; margin-top: -60px; background: black; opacity: 0.5; border-radius: 50%;\"></div>"
         "<div class=\"front\" style=\"width: 60px; height: 60px; position: absolute; display: block; margin-left: -30px; margin-top: -30px; background: black; opacity: 0.5; border-radius: 50%; left: 0px; top: 0px;\"></div>"
         "</div>");
@@ -589,13 +629,19 @@ static void dom_init(void) {
     build_joystick();
     apply_positions();
     register_touch_listeners();
+    // uiBase.classList.toggle('isMobile', UI.isMobileControls) (v10 at the start of a game)
+    const HtmlElem base = html_dom_by_id("uiBase");
+    if (base) html_dom_set_class(base, "isMobile", 1);
     g_mb.dom_ready = 1;
 }
 
-// Every touch and held control lets go (the UI went away under the fingers).
+// Every touch and held control lets go (the UI went away under the fingers): the targets
+// go back to the transform their up handler leaves them in.
 static void release_all(void) {
     for (int i = g_mb.touch_count - 1; i >= 0; i--) {
-        if (g_mb.touches[i].cb != MB_UI) set_transform(g_mb.touches[i].cb, "");
+        const int b = g_mb.touches[i].cb;
+        if (b == MB_UI || b == MB_ESC) continue;
+        set_transform(b, b == MB_SHOOT ? "rotate(90deg) scale(1.1)" : "scale(1)");
     }
     g_mb.touch_count = 0;
     stick_end();

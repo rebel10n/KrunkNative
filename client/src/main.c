@@ -1449,6 +1449,11 @@ static int html_pointer_input(void) {
 
 static void cursor_pos_callback(GLFWwindow *window, double x, double y) {
     ks_client_cursor(glfwGetWindowUserPointer(window), x, y); // KrunkScript INPUTS.mousePos / mouseMovement
+    if (ui_mobile_active()) { // KRUNKNATIVE_MOBILE: a drag of the mouse touch (ui_mobile.c)
+        double mx = x, my = y;
+        html_cursor_scale(window, &mx, &my);
+        if (ui_mobile_mouse(UI_TOUCH_MOVE, (float) mx, (float) my)) return;
+    }
     if (!html_pointer_input()) return;
     html_cursor_scale(window, &x, &y);
     if (ui_console_mouse(-1, x, y, 0)) return; // dev console titlebar drag / grip resize
@@ -1458,6 +1463,12 @@ static void cursor_pos_callback(GLFWwindow *window, double x, double y) {
 static void mouse_button_callback(GLFWwindow *window, const int button, const int action, const int mods) {
     Client *client = glfwGetWindowUserPointer(window);
     if (ks_client_mouse_button(client, button, action)) return; // KrunkScript onMouseClick / onMouseUp, re-lock after unlockMouse
+    if (ui_mobile_active() && button == GLFW_MOUSE_BUTTON_LEFT && action != GLFW_REPEAT) { // the touch controls' mouse touch
+        double mx, my;
+        glfwGetCursorPos(window, &mx, &my);
+        html_cursor_scale(window, &mx, &my);
+        if (ui_mobile_mouse(action == GLFW_PRESS ? UI_TOUCH_START : UI_TOUCH_END, (float) mx, (float) my)) return;
+    }
     if (!html_pointer_input()) {
         // CONTROLS mousedown with the controls off (a free end title): toggle(true), no shot
         if (action == GLFW_PRESS && client_pointer_click(client)) return;
