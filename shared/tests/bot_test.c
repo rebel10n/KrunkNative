@@ -553,6 +553,86 @@ static void test_quota_fill(Game *game, const int tdm_index) {
     game_init(game, 0, 0, 1);
 }
 
+// Two active players standing on one spot (game_get_spawn_point's spawn_occupied radius).
+static int count_stacked(const Game *game) {
+    const float radius = 2.0f * game_constants.player_scale;
+    int n = 0;
+    for (size_t i = 0; i < game->player_count; i++) {
+        const Player *a = game->players[i];
+        for (size_t j = i + 1; a->active && j < game->player_count; j++) {
+            const Player *b = game->players[j];
+            const float dx = a->position.x - b->position.x, dz = a->position.z - b->position.z;
+            n += b->active && dx * dx + dz * dz < radius * radius && fabsf(a->position.y - b->position.y) < game_constants.player_height;
+        }
+    }
+    return n;
+}
+
+// server.cfg bot_quota fill pace (bot_quota_tick): one human in a 16-player lobby gets its 15 bots
+// within 2 s (the quota used to add one per 300 ms: 4.5 s), the first tick puts a bot on every free
+// spawn (at most 8 per tick) and never two bodies on one spot, a leave's bots come back as fast,
+// a lowered quota takes its bots at once, and a fill tick stays under a quarter of a tick.
+static void test_quota_pace(Game *game, const int map_index, const int mode_index, const char *label) {
+    printf("Running bot quota pace test (%s)...\n", label);
+    free_players(game);
+    game_init(game, map_index, mode_index, 1);
+    game->config.max_players = 16;
+    game_bots_set_quota(game, 16, 1);
+    game_bots_set_quota_grace(game, 10.0f);
+    tick(game, 1.5f, 30.0f); // past the round-start hold: an idle, empty lobby
+    CHECK(count_bots(game, 0) == 0, "pace %s: an empty lobby has no bots (%d)", label, count_bots(game, 0));
+
+    bot_nav_for(game); // the grid is built on a map's first bot update (~100 ms on Sandstorm): not the fill's cost
+    add_human(game, 900, "P");
+    const int spawns = (int) game->map->spawn_count;
+    int per_tick[90] = {0}, ticks = 0, stacked_first = 0, free_first = 0;
+    double worst_ms = 0.0;
+    for (; ticks < 90 && count_bots(game, 0) < 15; ticks++) {
+        const clock_t start = clock();
+        tick(game, 1.0f / 30.0f, 30.0f);
+        const double ms = (double) (clock() - start) * 1000.0 / CLOCKS_PER_SEC;
+        if (ms > worst_ms) worst_ms = ms;
+        per_tick[ticks] = count_bots(game, 0);
+        if (!ticks) {
+            stacked_first = count_stacked(game);
+            free_first = game_spawn_point_free(game);
+        }
+    }
+    printf("  %d spawns, 16 quota, 1 human: bots after each 30 Hz tick:", spawns);
+    for (int i = 0; i < ticks; i++) printf(" %d", per_tick[i]);
+    printf("\n  full after %d ticks (%.2f s), worst tick %.3f ms\n", ticks, ticks / 30.0, worst_ms);
+    CHECK(count_bots(game, 0) == 15, "pace %s: 1 human fills to 16 players (%d bots)", label, count_bots(game, 0));
+    CHECK(ticks <= 60, "pace %s: full within 2 s of the join (%d ticks)", label, ticks);
+    CHECK(per_tick[0] >= 8 || per_tick[0] == 15 || !free_first, "pace %s: the first tick fills every free spawn (%d bots, a spawn still free: %d)",
+          label, per_tick[0], free_first);
+    CHECK(stacked_first == 0, "pace %s: no two bodies on one spawn after the burst (%d pairs)", label, stacked_first);
+    CHECK(worst_ms < 8.0, "pace %s: the fill tick costs %.3f ms (8 ms: a quarter of a 30 Hz tick, debug build)", label, worst_ms);
+
+    add_human(game, 901, "Q");
+    add_human(game, 902, "R");
+    add_human(game, 903, "S");
+    CHECK(count_bots(game, 0) == 12, "pace %s: 3 joins take 3 bots at once (%d)", label, count_bots(game, 0));
+    tick(game, 1.0f, 30.0f);
+    remove_human(game, 903);
+    remove_human(game, 902);
+    remove_human(game, 901);
+    ticks = 0;
+    for (; ticks < 90 && count_bots(game, 0) < 15; ticks++) tick(game, 1.0f / 30.0f, 30.0f);
+    CHECK(count_bots(game, 0) == 15 && ticks <= 60, "pace %s: 3 leaves bring 3 bots back within 2 s (%d bots, %d ticks)", label,
+          count_bots(game, 0), ticks);
+
+    game_bots_set_autofill(game, 1, 4); // chat `autofill 4`: 1 human + 3 bots
+    tick(game, 1.0f / 30.0f, 30.0f);
+    CHECK(count_bots(game, 0) == 3, "pace %s: a lowered quota takes its bots in one tick (%d)", label, count_bots(game, 0));
+
+    game_bots_set_quota(game, 0, 0);
+    run("/bot_kick all");
+    game->bots->autofill_off = 0;
+    game->bots->autofill_forced = 0;
+    free_players(game);
+    game_init(game, 0, 0, 1);
+}
+
 // The nav grid (bot_nav.c): Sandstorm's walkable surfaces, a route between spawns that only
 // steps over walkable cells, and objective volumes (no collider) are not floors.
 static void test_nav(Game *game, const int sandstorm) {
@@ -839,6 +919,9 @@ int main(void) {
     test_teams(&game, 1);
     test_quota(&game);
     test_quota_fill(&game, 1);
+    test_quota_pace(&game, 0, 0, "arena, 6 spawns");
+    test_quota_pace(&game, 3, 0, "sandstorm_v3 ffa");
+    test_quota_pace(&game, 1, 1, "sandstorm tdm");
     test_nav(&game, 1);
     const float nav_seconds = getenv("KN_BOT_NAV_SECONDS") ? (float) atof(getenv("KN_BOT_NAV_SECONDS")) : 45.0f;
     for (int i = 0; i < NAV_MAPS; i++) test_nav_follow(&game, 2 + i, k_nav_maps[i], nav_seconds, 0, 0);

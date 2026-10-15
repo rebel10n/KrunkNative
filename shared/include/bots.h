@@ -254,7 +254,8 @@ typedef struct GameBots_t {
     int quota;
     unsigned char quota_fill:1;
     int slots;                      // lobby size for the quota (0 = game->config.max_players, -1 = no quota bots: ranked / custom)
-    float quota_timer;              // ms until the quota adds / removes the next bot
+    float quota_timer;              // ms of the round-start hold before the quota acts (0 = none)
+    float quota_stack;              // ms a missing quota bot has waited for a free spawn (joins onto a taken one at 1000)
     float quota_grace;              // fill: ms the bots wait for a human after the last one left
     float quota_empty;              // fill: ms the game has had no human (while quota bots remain)
     BotNav *nav;                    // the current map's grid (built on first use)

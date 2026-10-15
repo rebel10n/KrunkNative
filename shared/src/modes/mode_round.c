@@ -473,14 +473,15 @@ void mode_team_score_add(Game *game, const int team, const int amount) {
 
 // ------------------------------------------------------------------ player hooks
 
-// players.setTeam (not from a queue).
-static int mode_pick_team(const Game *game, const Player *player) {
+// players.setTeam (not from a queue). `current`: the player's team before (player->team);
+// `player` may be NULL (game_spawn_point_free asks for a player not added yet).
+static int mode_pick_team_of(const Game *game, const Player *player, const int current) {
     const GameModeConfig *config = &game->mode->config;
 
     if (!game->mode->wait_timer_count && config->conv_team) return config->conv_team;
     if (config->team_options[0] && !config->team_sort) return 1;
     if (config->friendly) return 1;
-    if (player->team || !config->teams) return player->team;
+    if (current || !config->teams) return current;
 
     if (config->multi_team) { // sdm: the smallest team (ties keep the lowest team after team 2's start)
         int counts[MODE_TEAMS] = {0};
@@ -505,6 +506,10 @@ static int mode_pick_team(const Game *game, const Player *player) {
     }
 
     return team1 >= team2 ? 2 : 1;
+}
+
+static int mode_pick_team(const Game *game, const Player *player) {
+    return mode_pick_team_of(game, player, player->team);
 }
 
 // players.add: setTeam and Player.lives (only while the waitTimers still run).
@@ -692,6 +697,30 @@ int game_get_spawn_point(Game *game, const Player *player, vec3 *position, int *
     *position = best->spread > 0.0f ? spawn_point_spread(game, best, best->spread + 7.0f) : best->position;
     *direction = best->direction;
     return 1;
+}
+
+// KrunkNative (the bot fill, shared/src/bots.c bot_quota_tick): would a player added now, on the
+// team players.add gives a teamless newcomer, get a spawn nobody stands on (tier 0 above)? Comp
+// spawns spread every player, a map without spawns has nothing to wait for (both 1); with no spawn
+// of that team at all (tier 2's fallback) any unoccupied spawn counts.
+int game_spawn_point_free(const Game *game) {
+    const Map *map = game->map;
+    if (!map || !map->spawn_count) return 1;
+    const GameMode *mode = game->mode;
+    const int team = mode && game_is_authority(game) ? mode_pick_team_of(game, NULL, 0) : 0;
+    const int spawn_team = mode && mode->flipped_spawns && (team == 1 || team == 2) ? 3 - team : team;
+    const int use_comp = mode && mode->wait_timer_count && mode->wait_timers[0].comp;
+    if (use_comp) return 1;
+    int eligible = 0;
+    for (size_t s = 0; s < map->spawn_count; s++) {
+        if (spawn_candidate(game, NULL, map->spawns[s], spawn_team, use_comp, 0)) return 1;
+        eligible += spawn_candidate(game, NULL, map->spawns[s], spawn_team, use_comp, 1);
+    }
+    if (eligible) return 0;
+    for (size_t s = 0; s < map->spawn_count; s++) {
+        if (!spawn_occupied(game, NULL, map->spawns[s])) return 1;
+    }
+    return 0;
 }
 
 // After player_spawn built the class loadout (and picked the spawn point, game_get_spawn_point):

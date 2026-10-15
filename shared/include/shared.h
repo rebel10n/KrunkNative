@@ -2105,6 +2105,9 @@ void game_players_add(Game*, Player*);
 // game.js getSpawnPoint(player.team, player): the point a (re)spawning player is placed at
 // (shared/src/modes/mode_round.c). 0: the map has no spawns.
 int game_get_spawn_point(Game*, const Player*, vec3 *position, int *direction);
+// KrunkNative: 1 when a player added now (the team players.add would give it) gets a spawn point
+// nobody stands on (game_get_spawn_point's first tier), so the bot fill never stacks bodies.
+int game_spawn_point_free(const Game*);
 void game_broadcast();
 int game_is_authority(const Game*);      // server or local game: runs damage/kills/score
 // io_ent spawn rules: a ready round, not the end screen, not alive, config.deathDelay since

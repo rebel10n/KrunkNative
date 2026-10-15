@@ -1101,6 +1101,7 @@ void game_bots_set_quota(Game *game, const int quota, const int fill) {
     bots->quota = quota < 0 ? 0 : quota > GAME_BOT_LIMIT ? GAME_BOT_LIMIT : quota;
     bots->quota_fill = (unsigned char) !!fill;
     bots->quota_timer = 0.0f;
+    bots->quota_stack = 0.0f;
     bots->quota_empty = 0.0f;
 }
 
@@ -1129,6 +1130,7 @@ int game_bots_set_autofill(Game *game, const int on, const int quota) {
         bots->quota_fill = 1;
     }
     bots->quota_timer = 0.0f;
+    bots->quota_stack = 0.0f;
     bots->quota_empty = 0.0f;
     return 0;
 }
@@ -1159,6 +1161,7 @@ void game_bots_on_init(Game *game) {
         bot->path.count = 0;
     }
     bots->quota_timer = 1000.0f; // let the round's humans spawn first
+    bots->quota_stack = 0.0f;
 }
 
 // ---------------------------------------------------------------- world queries
@@ -2005,8 +2008,19 @@ void game_bots_human_joined(Game *game, const Player *player) {
     }
 }
 
-// Add / remove one bot every 300 ms toward the wanted count. Fill: after the last human left the
-// bots wait `quota_grace` ms (a quick rejoin keeps the match), then all of them leave at once.
+// Toward the wanted count. Every missing bot joins in the tick it is wanted, as long as it gets a
+// spawn point nobody stands on (game_spawn_point_free; a burst on a map with fewer spawns than
+// bots would stack bodies), at most BOT_QUOTA_ADDS_PER_TICK per tick (the tick's cost); the rest
+// follow as the first ones walk off their spawns (usually within 0.5 s), and when every spawn stays
+// taken for BOT_QUOTA_STACK_MS one joins onto a taken one, as a respawn would (a shorter wait put
+// bots inside the human still standing on its spawn while the first bots were walking off; a map
+// with fewer spawns than players still fills, a bot a second). Bots over the count leave
+// at once. Fill: after the last human left the bots wait `quota_grace` ms (a quick rejoin keeps
+// the match), then all of them leave at once.
+// (Until 2026-10-15 the quota added or removed one bot per 300 ms tick: 7 bots took 2.1 s, 15 took
+// 4.5 s, the "bots fill in slowly" report.)
+#define BOT_QUOTA_ADDS_PER_TICK 8
+#define BOT_QUOTA_STACK_MS 1000.0f
 static void bot_quota_tick(Game *game, GameBots *bots, const float dt) {
     if (!bots->quota || bots->autofill_off) return; // (autofill off: game_bots_set_autofill took them)
     const int humans = bot_count_humans(game);
@@ -2018,16 +2032,30 @@ static void bot_quota_tick(Game *game, GameBots *bots, const float dt) {
         return;
     }
     if (humans) bots->quota_empty = 0.0f;
-    bots->quota_timer -= dt;
-    if (bots->quota_timer > 0.0f) return;
-    bots->quota_timer = 300.0f;
+    if (bots->quota_timer > 0.0f) { // the round-start hold (game_bots_on_init)
+        bots->quota_timer -= dt;
+        return;
+    }
     const int want = bot_quota_want(game, bots, humans, quota_bots);
-    if (quota_bots < want) {
+    if (quota_bots >= want) bots->quota_stack = 0.0f; // the wait starts with the next missing bot
+    for (int added = 0; quota_bots < want && added < BOT_QUOTA_ADDS_PER_TICK; added++) {
+        if (!game_spawn_point_free(game)) {
+            if (bots->quota_stack < BOT_QUOTA_STACK_MS) { // wait for a spawn to clear
+                bots->quota_stack += dt;
+                break;
+            }
+        }
+        bots->quota_stack = 0.0f;
         GameBot *bot = game_bots_add(game, NULL, NULL, 0.0f); // team 0: players.add puts it on the smaller team
-        if (bot) bot->quota = 1;
-    } else if (quota_bots > want) {
+        if (!bot) break;
+        bot->quota = 1;
+        quota_bots++;
+    }
+    while (quota_bots > want) {
         GameBot *bot = bot_quota_victim(game, bots, 0);
-        if (bot) game_bots_remove(game, bot);
+        if (!bot) break;
+        game_bots_remove(game, bot);
+        quota_bots--;
     }
 }
 

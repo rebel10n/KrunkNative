@@ -855,6 +855,19 @@ static void test_class(void) {
     sandbox_stop();
 }
 
+// The human `uid` of client `c` alive, for a scripted /kill: a bot of the match may have killed it
+// first, so it sends ENT again (every 0.5 s: the server takes it once config.deathDelay has
+// passed) until the server has it back, up to 6 s. Returns the server's player.
+static const Player *alive_for_kill(TestClient *c, const int uid, const NetEntPacket *ent, TestClient *a, TestClient *b, TestClient *spec) {
+    const Player *p = server_player(uid);
+    for (int f = 0; p && !p->active && f < 360; f++) {
+        if (f % 30 == 0) client_send(c, NET_PACKET_ENT, ent, (uint16_t) NET_ENT_PACKET_V7_SIZE);
+        pump_three(a, b, spec, 1);
+        p = server_player(uid);
+    }
+    return p;
+}
+
 // "bullets keep getting sent to the client after the player is dead": in a bot match a dead
 // player gets no live-world packet (k_live_only) until its respawn, but still the kill feed,
 // chat and projectile ends; a spectator gets everything. On the respawn the projectiles still
@@ -891,7 +904,11 @@ static void test_dead_player_live_filter(void) {
     CHECK(alive_shots > 0, "alive: B sees the bots' tracers (%d SHOT)", alive_shots);
 
     // dead: B kills itself and stays on the death screen 10 s; meanwhile a projectile that
-    // outlives the death screen, one that ends during it, A's chat and A's death (kill feed)
+    // outlives the death screen, one that ends during it, A's chat and A's death (kill feed).
+    // The six bots are all in from the start (the quota fills at once), so one may have got B
+    // in the 10 s: back in first, to die on cue.
+    const Player *pb = alive_for_kill(&b, me_b.uid, &ent, &a, &b, &spec);
+    CHECK(pb && pb->active, "B alive before its /kill");
     b.count = 0;
     spec.count = 0;
     chat(&b, "/kill");
@@ -910,11 +927,7 @@ static void test_dead_player_live_filter(void) {
     pump_three(&a, &b, &spec, 60);
     chat(&a, "dead players read chat");
     pump_three(&a, &b, &spec, 60);
-    const Player *pa = server_player(me_a.uid);
-    if (pa && !pa->active) { // a bot got A first: back in, to die on cue
-        client_send(&a, NET_PACKET_ENT, &ent, (uint16_t) NET_ENT_PACKET_V7_SIZE);
-        pump_three(&a, &b, &spec, 5);
-    }
+    const Player *pa = alive_for_kill(&a, me_a.uid, &ent, &a, &b, &spec); // a bot got A first: back in, to die on cue
     CHECK(pa && pa->active, "A alive before its /kill");
     chat(&a, "/kill");
     pump_three(&a, &b, &spec, 480);

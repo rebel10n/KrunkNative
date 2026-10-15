@@ -210,9 +210,14 @@ max_players; `kn_gameserver_bots_enabled: false` / `kn_gameserver_instance_bot_q
 - An empty lobby stays empty. With no human in the game the quota bots stay `bot_quota_grace`
   seconds (default 10, so a quick rejoin keeps the match), then all leave at once.
 - With humans, bots fill the game to N players (never past max_players): one human = N - 1
-  bots. A joining human makes a bot leave at once (`game_bots_human_joined`, not on the 300 ms
-  quota tick), from the human's team in team modes, so teams stay balanced and the join never
-  waits; a leaving human brings one back on the next tick. New bots go to the smaller team.
+  bots. A joining human makes a bot leave at once (`game_bots_human_joined`, not on the quota
+  tick), from the human's team in team modes, so teams stay balanced and the join never waits.
+  Missing bots (the first human, a leave, `autofill`) join in the next tick, one on every spawn
+  nobody stands on (at most 8 a tick); the rest follow as those walk off their spawns (a 16-player
+  Sandstorm lobby is full about 0.5 s after the first human spawns), and when every spawn stays
+  taken for 1 s one joins onto a taken spawn. A lowered quota takes its extra bots at once.
+  A new round holds the fill for 1 s so the round's humans spawn first. New bots go to the
+  smaller team.
 - Humans are the non-bot players in the game. Spectators and clients still in the menu have no
   player and do not count (v7 `checkPlayerLimit` also counts `players.list` without `isBot`).
 - The connection limit (`net_add_client`) counts connections only, so a lobby of bots is never
@@ -229,7 +234,9 @@ max_players; `kn_gameserver_bots_enabled: false` / `kn_gameserver_instance_bot_q
   ranked ("No autofill in ranked."). No argument: "Autofill ON (fill to 4 players, 3 bots now)". The
   info query's tags carry `autofill` while it runs, the lobby meta `autofill`, `/server` and the
   server console's `status` a bots line. Tests: `server/tests/bot_fill_e2e.py` 2b,
-  `server/tests/command_auth_e2e.py` (a guest's `/autofill` is refused and logged).
+  `server/tests/command_auth_e2e.py` (a guest's `/autofill` is refused and logged). The fill's pace:
+  `server/tests/bot_fill_time_e2e.py` (each bot's join time from the human's spawn, under 2 s for
+  bot_quota and `autofill`) and bot_test's quota pace test.
 - Bots earn nothing: stats, challenges, medals, KR and BP go to accounts only.
 
 Bot chat (`shared/src/bot_chat.c`, Krunker Box Office addition; user, 2026-10-14: "some bots
