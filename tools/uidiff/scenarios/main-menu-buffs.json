@@ -1,0 +1,29 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/main-menu-buffs.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.8,
+    "windowActions": [
+      [
+        "knV10MenuClock",
+        1792238400000
+      ]
+    ]
+  },
+  "frames": 3,
+  "note": "Krunker v10.0.2 main menu, guest, on a Saturday of an even ISO week (2026-10-17, week 42): #activeBuffs shows 2x Class XP and 2x Raid Drops after the buff separator (v10:219599-219600 at the INIT, #buffSepStart v10:147300). v10_menu.c buffs_update; knV10MenuClock pins the date. Reference: main-menu.png's capture DOM with those three displays set as v10's code sets them, laid out by headless Chromium with v10's CSS (node tools/uidiff/capture-v10-menu-idle.js --state buffs)."
+}

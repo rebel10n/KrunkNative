@@ -2699,6 +2699,57 @@ static int games_map_players(const char *map) {
     return n;
 }
 
+// window.fetchMatches(cb) (v10:215860): GET /game-list, then {map: players} over the custom games
+// (data.c: the key is data.i, the map; each game counts min(players, max)), {} when the request
+// fails. A fixed list (servers_ui_set_games: scenarios, KRUNKNATIVE_SERVER_LIST) answers at once.
+typedef struct {
+    ServersMatchesFn fn;
+    void *user;
+} MatchesReq;
+
+static cJSON *matches_of(const cJSON *games) {
+    cJSON *out = cJSON_CreateObject();
+    const cJSON *t;
+    cJSON_ArrayForEach(t, games) {
+        if (!row_custom(t)) continue;
+        const char *map = row_i(t);
+        cJSON *have = cJSON_GetObjectItemCaseSensitive(out, map);
+        if (have) cJSON_SetNumberValue(have, have->valuedouble + row_players(t));
+        else cJSON_AddNumberToObject(out, map, row_players(t));
+    }
+    return out;
+}
+
+static void on_matches(void *user, const int status, const char *body, const size_t length) {
+    (void) length;
+    MatchesReq *req = user;
+    cJSON *res = status == 200 && body ? cJSON_Parse(body) : NULL;
+    cJSON *matches = matches_of(cJSON_GetObjectItem(res, "games"));
+    req->fn(req->user, matches);
+    cJSON_Delete(matches);
+    cJSON_Delete(res);
+    free(req);
+}
+
+void servers_ui_fetch_matches(const ServersMatchesFn fn, void *user) {
+    if (!fn) return;
+    if (g_games_override || backend_available() != 1) {
+        cJSON *matches = matches_of(g_games_override ? g_games : NULL);
+        fn(user, matches);
+        cJSON_Delete(matches);
+        return;
+    }
+    MatchesReq *req = malloc(sizeof(*req));
+    if (!req) return;
+    *req = (MatchesReq) {fn, user};
+    if (!backend_http_get("/mm/game-list?hostname=krunknative", on_matches, req)) {
+        free(req);
+        cJSON *matches = cJSON_CreateObject();
+        fn(user, matches);
+        cJSON_Delete(matches);
+    }
+}
+
 typedef struct {
     const char *name, *creator, *mod_url, *image, *category, *friendname;
     char id[24];

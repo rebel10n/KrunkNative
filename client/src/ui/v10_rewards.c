@@ -423,35 +423,37 @@ void v10_rewards_challenges_changed(void) {
 
 /* ------------------------------------------------------------------ the sidebar's Battle Pass item */
 
-// _52122: shown for an account once windows[5].data ("bpdl") is there; v10 renders it first in
-// #menuItemContainer, before the Daily Spin item
+// _52122: shown for any account (v10:146916, {#if !guest}), first in #menuItemContainer, before
+// the Daily Spin item. Until windows[5].data ("bpdl") is there v10 falls back to "Battlepass",
+// LVL 1 and a full bar (`maxed || !need ? 100`).
 static void bp_item_update(void) {
     HtmlElem box = html_dom_by_id("menuItemContainer");
     if (!box) return;
-    if (account_get()) battlepass_ui_request();
-    const BattlePass *bp = account_get() ? battlepass_ui_pass() : NULL;
+    const int signed_in = account_get() != NULL;
+    if (signed_in) battlepass_ui_request();
+    const BattlePass *bp = signed_in ? battlepass_ui_pass() : NULL;
     char key[sizeof g_bp_item_key];
     int64_t xp = 0;
-    int complete = 0, level = 0;
+    int complete = 0, level = 1, need = 0;
     if (bp) {
         level = bp_level(bp, battlepass_ui_bpp(), &xp, &complete);
+        need = bp_level_need(bp, level);
         snprintf(key, sizeof key, "%d|%d|%lld|%d|%s", bp->id, level, (long long) xp, complete, bp->name);
     } else {
-        key[0] = 0;
+        snprintf(key, sizeof key, "%s", signed_in ? "-" : "");
     }
     HtmlElem item = html_dom_by_id("knBpItem");
     if (!strcmp(key, g_bp_item_key) && (item != 0) == (key[0] != 0)) return;
     snprintf(g_bp_item_key, sizeof g_bp_item_key, "%s", key);
-    if (!bp) {
+    if (!signed_in) {
         if (item) html_dom_remove(item);
         return;
     }
-    const int need = bp_level_need(bp, level);
     const double pct = complete || need <= 0 ? 100.0 : (double) xp / need * 100.0 > 100.0 ? 100.0 : (double) xp / need * 100.0;
     StrBuf sb = {0};
     sb_append(&sb, "<img class=\"bpLogo svelte-159x57l\" src=\"./img/battlepass/logo_0.png\" alt=\"Battlepass\"> <div class=\"bpInfo svelte-159x57l\">"
                    "<div class=\"menuItemTitle svelte-159x57l\" id=\"menuBtnBattlepass\" style=\"color: #fff;\">");
-    sb_append_esc(&sb, bp->name[0] ? bp->name : "Battlepass");
+    sb_append_esc(&sb, bp && bp->name[0] ? bp->name : "Battlepass");
     sb_appendf(&sb, "</div> <div class=\"bpMeta svelte-159x57l\" style=\"color: rgba(255,255,255,0.6);\"><span class=\"bpLevel svelte-159x57l\" "
                     "style=\"color: #fff;\">LVL %d</span> ", level);
     if (complete) sb_append(&sb, "<span class=\"bpComplete svelte-159x57l\" style=\"color: #ffe540;\">MAX</span>");
@@ -522,4 +524,5 @@ void v10_rewards_dom_init(void) {
 void v10_rewards_tick(void) {
     if (!html_ui_available()) return;
     bp_item_update();
+    v10_menu_tick(); // the menu's idle state (v10_menu.c)
 }

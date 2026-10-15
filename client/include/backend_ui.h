@@ -159,6 +159,10 @@ char *servers_ui_region_options(const char *selected); // region <option>s (2-le
 int  servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // -1 = not ours
 char *servers_window_gen(int id, const char **header); // windows 2 (Servers), 8 (Host), 10 (Custom Games)
 void servers_ui_set_games(const cJSON *list);    // fixed /mm/game-list answer (scenarios, KRUNKNATIVE_SERVER_LIST); NULL = the brain's
+// v10 window.fetchMatches: {map: players} of the custom games in the game list (v10 Popular Now);
+// fn runs once (at once for a fixed list or without a brain), the object is only valid during the call
+typedef void (*ServersMatchesFn)(void *user, const cJSON *matches);
+void servers_ui_fetch_matches(ServersMatchesFn fn, void *user);
 // KrunkNative addition: the menu's Connect button (next to Invite / Join) and its window
 // showWindow id of KrunkNative's Connect window: above every Krunker page's windows[] (it was 53,
 // past v7's 52, which is v10's second Change Loadout entry; ui_logic.h KN_WINDOW_BASE)

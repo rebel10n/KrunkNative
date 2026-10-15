@@ -1,0 +1,74 @@
+{
+  "scenario": "main-menu-krsale",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "store-item",
+      "rect": [
+        0,
+        115,
+        220,
+        30
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 8.0,
+      "note": "#menuItemShop: Store + KR DISCOUNT (krSaleGlow at 800 ms) + 36:00:00 (v10_menu.c store_item_update)"
+    },
+    {
+      "name": "active-buffs",
+      "rect": [
+        655,
+        610,
+        115,
+        24
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 8.0,
+      "note": "#activeBuffs: the separator and 2x RAID DROPS (every weekend)"
+    },
+    {
+      "name": "header-left",
+      "rect": [
+        0,
+        0,
+        300,
+        50
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 6.0,
+      "note": "v10 #playerHeaderEl, as main-menu"
+    },
+    {
+      "name": "side-nav",
+      "rect": [
+        0,
+        50,
+        220,
+        300
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 6.0,
+      "note": "#menuItemContainer guest, as main-menu"
+    },
+    {
+      "name": "action-cards",
+      "rect": [
+        1085,
+        450,
+        195,
+        225
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 6.0,
+      "note": "#subLogoButtons' action cards, as main-menu"
+    }
+  ]
+}

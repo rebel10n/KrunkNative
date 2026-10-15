@@ -1,0 +1,29 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/main-menu-popular.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.8,
+    "windowActions": [
+      [
+        "knV10Popular",
+        "{\"games\":[[\"NA:aaa1\",\"us-nj\",23,40,{\"c\":1,\"i\":\"Rooftop Parkour\",\"g\":0}],[\"NA:aaa2\",\"us-nj\",41,40,{\"c\":1,\"i\":\"Zombie Labs\",\"g\":0}],[\"NA:aaa3\",\"us-nj\",9,10,{\"c\":1,\"i\":\"Mini Burg\",\"g\":0}],[\"NA:aaa4\",\"us-nj\",7,8,{\"c\":1,\"i\":\"1v1 Arena\",\"g\":0}],[\"NA:aaa5\",\"us-nj\",5,10,{\"c\":1,\"i\":\"Mini Burg\",\"g\":0}],[\"NA:off1\",\"us-nj\",60,8,{\"i\":\"Burg\",\"g\":0}]]}"
+      ]
+    ]
+  },
+  "frames": 3,
+  "note": "Krunker v10.0.2 main menu, guest, with custom games in the game list: Popular Now (_52548 v10:147200, svelte-6ewa5r) shows the top 3 maps by players (min(players, max) summed per map: Zombie Labs 40, Rooftop Parkour 23, Mini Burg 14; the official Burg game is not custom) above the match-info bar. Reference: node tools/uidiff/capture-v10-menu-idle.js --state popular (v10's template rendered into the capture DOM)."
+}

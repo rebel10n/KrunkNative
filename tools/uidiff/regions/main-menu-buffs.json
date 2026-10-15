@@ -1,0 +1,74 @@
+{
+  "scenario": "main-menu-buffs",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "active-buffs",
+      "rect": [
+        620,
+        610,
+        190,
+        24
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 8.0,
+      "note": "#activeBuffs: the separator, 2x CLASS XP, 2x RAID DROPS (buff-badge #ffd54f, buffGlow at 800 ms) in the match-info bar's Invite/Join segment (v10_menu.c buffs_update)"
+    },
+    {
+      "name": "match-info",
+      "rect": [
+        420,
+        608,
+        440,
+        26
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 18.0,
+      "note": "the whole match-info bar: the badges widen its third segment and the bar stays centred (same glyph gap as main-menu no-connect-button)"
+    },
+    {
+      "name": "header-left",
+      "rect": [
+        0,
+        0,
+        300,
+        50
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 6.0,
+      "note": "v10 #playerHeaderEl, as main-menu"
+    },
+    {
+      "name": "side-nav",
+      "rect": [
+        0,
+        50,
+        220,
+        300
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 6.0,
+      "note": "#menuItemContainer guest, as main-menu"
+    },
+    {
+      "name": "action-cards",
+      "rect": [
+        1085,
+        450,
+        195,
+        225
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 6.0,
+      "note": "#subLogoButtons' action cards, as main-menu"
+    }
+  ]
+}

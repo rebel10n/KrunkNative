@@ -1,0 +1,22 @@
+{
+  "scenario": "ranked-shop-flying",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "flying-number",
+      "rect": [
+        840,
+        130,
+        120,
+        60
+      ],
+      "kind": "text",
+      "fuzz": 10,
+      "max_pct": 2.0,
+      "note": "the '-500' flying number 817 ms into flyUp (translateY(-40px) * ease-out progress, opacity 1 -> 0) over the RP balance; the background is KrunkNative's own ranked-shop render"
+    }
+  ]
+}

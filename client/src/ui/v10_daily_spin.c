@@ -40,6 +40,13 @@ static void tier(const int stage, const char **name, const char **color) {
 
 static int claimable(void) { return account_get() && g_ds.known && !g_ds.claimed && g_ds.score >= g_ds.max_score; }
 
+#define DS_TOOLTIP "<div class=\"dsTooltip svelte-159x57l\"><p class=\"svelte-159x57l\">Earn free spins by playing games and scoring points!</p> <div class=\"dsTipTiers svelte-159x57l\"><div class=\"dsTipTier svelte-159x57l\"><div class=\"dsTipName svelte-159x57l\" style=\"color:#b2f252;\">Starter</div> <div class=\"dsTipDesc svelte-159x57l\">Default spin (most days)</div></div> <div class=\"dsTipTier svelte-159x57l\"><div class=\"dsTipName dsTipGlowElite svelte-159x57l\" style=\"color:#2196F3;\">Elite</div> <div class=\"dsTipDesc svelte-159x57l\">Every 3rd day (better rewards)</div></div> <div class=\"dsTipTier svelte-159x57l\"><div class=\"dsTipName dsTipGlowHeroic svelte-159x57l\" style=\"color:#fc9803;\">Heroic</div> <div class=\"dsTipDesc svelte-159x57l\">Every 7th day (best rewards)</div></div></div> <ul class=\"svelte-159x57l\"><li class=\"svelte-159x57l\">Play matches to earn score points</li> <li class=\"svelte-159x57l\">Reach enough points to unlock a free spin</li> <li class=\"svelte-159x57l\">Resets daily — come back tomorrow for more!</li></ul></div>"
+
+static char g_item_html[2048]; // what #dailySpinDiv shows besides the tooltip (written only when it changes)
+
+// _52122's Daily Spin block (v10:146955-147020). Svelte updates only what changed: the item is
+// rewritten only when its content does (so .dsClaim's dsGlow keeps its phase), and hovering only
+// adds / removes the tooltip ({#if hover}, its dsTipFade runs on each show).
 static void render_item(HtmlElem item) {
     const char *name, *color;
     tier(g_ds.stage, &name, &color);
@@ -57,11 +64,16 @@ static void render_item(HtmlElem item) {
                    g_ds.score, g_ds.max_score, pct);
     }
     sb_append(&sb, "</div></div> ");
-    if (g_ds.tip)
-        sb_append(&sb, "<div class=\"dsTooltip svelte-159x57l\"><p class=\"svelte-159x57l\">Earn free spins by playing games and scoring points!</p> <div class=\"dsTipTiers svelte-159x57l\"><div class=\"dsTipTier svelte-159x57l\"><div class=\"dsTipName svelte-159x57l\" style=\"color:#b2f252;\">Starter</div> <div class=\"dsTipDesc svelte-159x57l\">Default spin (most days)</div></div> <div class=\"dsTipTier svelte-159x57l\"><div class=\"dsTipName dsTipGlowElite svelte-159x57l\" style=\"color:#2196F3;\">Elite</div> <div class=\"dsTipDesc svelte-159x57l\">Every 3rd day (better rewards)</div></div> <div class=\"dsTipTier svelte-159x57l\"><div class=\"dsTipName dsTipGlowHeroic svelte-159x57l\" style=\"color:#fc9803;\">Heroic</div> <div class=\"dsTipDesc svelte-159x57l\">Every 7th day (best rewards)</div></div></div> <ul class=\"svelte-159x57l\"><li class=\"svelte-159x57l\">Play matches to earn score points</li> <li class=\"svelte-159x57l\">Reach enough points to unlock a free spin</li> <li class=\"svelte-159x57l\">Resets daily — come back tomorrow for more!</li></ul></div>");
     char *html = sb_finish(&sb);
-    html_dom_set_html(item, html);
+    HtmlElem tip = html_dom_query(item, ".dsTooltip");
+    if (strcmp(html, g_item_html) != 0 || (!tip && !html_dom_query(item, ".dsLogo"))) {
+        snprintf(g_item_html, sizeof g_item_html, "%s", html);
+        html_dom_set_html(item, html);
+        tip = 0;
+    }
     free(html);
+    if (g_ds.tip && !tip) html_dom_insert_html(item, HTML_INSERT_BEFORE_END, DS_TOOLTIP);
+    else if (!g_ds.tip && tip) html_dom_remove(tip);
     html_dom_set_class(item, "dsClaimable", can);
     html_dom_set_class(item, "dsClaimed", done);
 }
@@ -88,6 +100,7 @@ static void sync_item(void) {
         html_dom_insert_html(bp ? bp : box, bp ? HTML_INSERT_AFTER_END : HTML_INSERT_AFTER_BEGIN, MARKUP);
         item = html_dom_by_id("dailySpinDiv");
         if (!item) return;
+        g_item_html[0] = 0;
     }
     render_item(item);
 }

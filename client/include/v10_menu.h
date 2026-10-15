@@ -12,3 +12,8 @@ int  v10_menu_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args,
 int  v10_menu_login_open(void);          // the login / register modal is up (Enter in its fields is its own)
 int  v10_menu_login_escape(void);        // Escape: closes the modal; 1 = it was up
 int  v10_login_guest_window(void);       // showWindow(5) for a guest: the modal instead (1 = taken over)
+void v10_menu_tick(void);                // per frame: the menu's idle state (Popular Now, #activeBuffs, the Store item's badges)
+// v10's CurrencyDisplay flying number (svelte-1gpc1nd): "+N" / "-N" rising 40 px and fading over
+// 1.5 s over `anchor` (the display whose value changed by `value`), then removed; a new one
+// replaces the previous. v10 shows it on the Ranked shop's RP balance (v10:113910).
+void v10_flying_number(HtmlElem anchor, double value);

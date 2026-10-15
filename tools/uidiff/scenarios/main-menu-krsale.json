@@ -1,0 +1,29 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/main-menu-krsale.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.8,
+    "windowActions": [
+      [
+        "knV10MenuClock",
+        1792843200000
+      ]
+    ]
+  },
+  "frames": 3,
+  "note": "Krunker v10.0.2 main menu, guest, on a Saturday of an odd ISO week (2026-10-24 12:00 UTC, week 43): 2x Raid Drops in #activeBuffs and the Store item's KR DISCOUNT with 36:00:00 to Monday (v10:146842-146893, 147097-147111). v10_menu.c store_item_update. Reference: node tools/uidiff/capture-v10-menu-idle.js --state krsale."
+}

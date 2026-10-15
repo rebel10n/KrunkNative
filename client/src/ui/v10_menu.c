@@ -21,6 +21,16 @@
 //     Settings (showWindow(1)), More Krunker (showMoreKrunker(): the moreKrunkerPopup, v10:196675)
 //   - the class preview container shown at boot (menuClassContainer.style.display = '', v10:222888)
 //   - no live-streams overlay (v10 hides it until Twitch answers with streams; KrunkNative has none)
+//   - the menu's idle state (v10_menu_tick): Popular Now (_52548 v10:147200, svelte-6ewa5r: the top 3
+//     custom maps of the game list by players, asked again every 60 s), the match-info bar's
+//     #activeBuffs (svelte-1we2ubc: 2x XP / 2x Class XP / 2x Raid Drops, set at every INIT as
+//     v10:219599-219601 does, #buffSepStart shown with any of them, v10:147300), the Store item's
+//     shop badge (limited spins on now, rotating every 4 s) and KR DISCOUNT countdown (KR sale
+//     weekends, v10:146842-146893), and the CurrencyDisplay's flying "+N" (svelte-1gpc1nd, v10:25667:
+//     v10_flying_number). v10's header bar (_52526) writes plain text into #menuKRCount /
+//     #menuJNKCount / #menuRPCount: no flying number and no count animation there; v10 shows the
+//     flying number only on the Ranked shop's RP balance (CurrencyDisplay showFlyingNumbers,
+//     v10:113910).
 // The login / register modal (loginOrRegister) is v10_login.c.
 #include <v10_menu.h>
 #include <backend.h>
@@ -28,9 +38,12 @@
 #include <client_settings.h>
 #include <html_ui.h>
 #include <ui_logic.h>
+#include <store_spins.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 int  v10_login_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // v10_login.c
 void v10_login_account_changed(void);
@@ -43,6 +56,77 @@ static struct {
 } V = {.signed_in = -1};
 
 static HtmlElem by_id(const char *id) { return html_dom_by_id(id); }
+
+// ---------------------------------------------------------------- the menu's clock
+
+// The scenario renders (native only: ui_scenario.c; the web build has none)
+static int scenario_on(void) {
+#ifdef UI_SCENARIO_SUPPORTED
+    return ui_scenario_active();
+#else
+    return 0;
+#endif
+}
+
+
+// The date the weekend badges read (new Date() in v10). knV10MenuClock(ms) pins it (tests); a
+// --render-scenario render pins it to a weekday (the v10 reference captures show no weekend badge).
+#define SCENARIO_CLOCK_MS 1791979200000.0 // 2026-10-14T12:00:00Z, a Wednesday
+static double g_clock_ms; // 0 = real time
+
+static double menu_now_ms(void) {
+    if (g_clock_ms > 0.0) return g_clock_ms;
+    if (scenario_on()) return SCENARIO_CLOCK_MS;
+    struct timespec ts;
+    timespec_get(&ts, TIME_UTC);
+    return (double) ts.tv_sec * 1000.0 + (double) ts.tv_nsec / 1e6;
+}
+
+static long long days_from_civil(long long y, const int m, const int d) { // proleptic Gregorian, 1970-01-01 = 0
+    y -= m <= 2;
+    const long long era = (y >= 0 ? y : y - 399) / 400;
+    const long long yoe = y - era * 400;
+    const long long doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    const long long doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + doe - 719468;
+}
+
+static long long civil_year(const long long z0) { // the year of day z0
+    const long long z = z0 + 719468;
+    const long long era = (z >= 0 ? z : z - 146096) / 146097;
+    const long long doe = z - era * 146097;
+    const long long yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    const long long doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    const long long mp = (5 * doy + 2) / 153;
+    return yoe + era * 400 + (mp >= 10);
+}
+
+static int utc_day(const double ms) { // getUTCDay(): 0 Sunday .. 6 Saturday
+    const long long day = (long long) floor(ms / 86400000.0);
+    return (int) (((day + 4) % 7 + 7) % 7);
+}
+
+// Date.prototype.getWeek (v10:24788): the ISO week of the UTC date
+static int iso_week(const double ms) {
+    const long long day = (long long) floor(ms / 86400000.0);
+    const long long thursday = day + 3 - (utc_day(ms) + 6) % 7;
+    const long long jan4 = days_from_civil(civil_year(thursday), 1, 4);
+    const int jan4_wday = (int) (((jan4 + 4) % 7 + 7) % 7);
+    return 1 + (int) floor(((double) (thursday - jan4) - 3.0 + (jan4_wday + 6) % 7) / 7.0 + 0.5);
+}
+
+// v10:24796 isWeekend(days, oddWeek, anyWeek): a Saturday / Sunday (UTC) of an odd week (oddWeek),
+// an even one (!oddWeek) or any (anyWeek)
+static int weekend(const double ms, const int odd_week, const int any_week) {
+    const int wday = utc_day(ms);
+    if (wday != 6 && wday != 0) return 0;
+    const int odd = iso_week(ms) & 1;
+    return any_week || (odd_week ? odd : !odd);
+}
+
+static int kr_sale(const double ms) { return weekend(ms, 1, 0); }         // v10:24803 (window.isSteamBuild: never here)
+static int double_class_xp(const double ms) { return weekend(ms, 0, 0); } // v10:24806
+static int double_raid_drops(const double ms) { return weekend(ms, 0, 1); } // v10:24809
 
 int v10_menu_page(void) { return html_ui_available() && by_id("menuBtnQuickMatch") != 0; }
 
@@ -181,6 +265,256 @@ void v10_menu_account_changed(void) {
     v10_login_account_changed(); // a login closes the modal (v10: $account set -> the modal leaves the stack)
 }
 
+// ---------------------------------------------------------------- the idle state
+
+// Popular Now (_52548): fetchMatches -> the entries with players > 0, sorted by players
+// (descending, stable), the first 3; rendered as the first child of #subLogoButtons while there is
+// one. onMount fetches once, then every 60 s unless the rail is hidden (offsetParent === null).
+// KrunkNative: the first fetch waits for the brain probe (backend_available) instead of answering
+// {} while it runs, which would leave the rail empty for the first minute.
+#define POPULAR_MAX 3
+#define POPULAR_POOL 64
+#define POPULAR_REFRESH_MS 60000.0
+static struct {
+    int count;
+    char name[POPULAR_MAX][128];
+    int players[POPULAR_MAX];
+    char key[POPULAR_MAX * 140];
+    int first_done;  // onMount's fetch went out
+    int timer;       // the 60 s interval (html timer id)
+} P;
+
+static HtmlElem popular_rail(void) { return html_dom_query(0, "#subLogoButtons > .popRail"); }
+
+static void popular_render(void) {
+    HtmlElem rail = popular_rail();
+    if (!P.count) {
+        if (rail) html_dom_remove(rail);
+        return;
+    }
+    char key[sizeof P.key] = "";
+    for (int i = 0; i < P.count; i++) {
+        char part[140];
+        snprintf(part, sizeof part, "%s\x1f%d\x1e", P.name[i], P.players[i]);
+        strncat(key, part, sizeof key - strlen(key) - 1);
+    }
+    if (rail && !strcmp(key, P.key)) return;
+    snprintf(P.key, sizeof P.key, "%s", key);
+    StrBuf sb = {0};
+    sb_append(&sb, "<div class=\"popRail svelte-6ewa5r\"><div class=\"popRailHeader svelte-6ewa5r\">");
+    sb_append_esc(&sb, I18N("menu.popular.header", "Popular Now"));
+    sb_append(&sb, "</div> <div class=\"popRailCards svelte-6ewa5r\">");
+    for (int i = 0; i < P.count; i++) {
+        char count[24], playing[64];
+        snprintf(count, sizeof count, "%d", P.players[i]);
+        I18N_F(playing, "menu.popular.players", "{0} playing", count);
+        sb_append(&sb, "<div class=\"popRailCard svelte-6ewa5r\" title=\"");
+        sb_append_esc(&sb, P.name[i]);
+        sb_appendf(&sb, "\" onclick=\"knV10PopularPlay(%d)\" onmouseenter=\"playTick()\"><div class=\"popRailInfo svelte-6ewa5r\"><div class=\"popRailName svelte-6ewa5r\">", i);
+        sb_append_esc(&sb, P.name[i]);
+        sb_append(&sb, "</div> <div class=\"popRailCount svelte-6ewa5r\">");
+        sb_append_esc(&sb, playing);
+        sb_append(&sb, "</div></div> <span class=\"material-icons popRailPlay svelte-6ewa5r\">play_arrow</span></div>");
+    }
+    sb_append(&sb, "</div></div>");
+    char *html = sb_finish(&sb);
+    if (rail) html_dom_remove(rail);
+    HtmlElem holder = by_id("subLogoButtons");
+    if (holder) html_dom_insert_html(holder, HTML_INSERT_AFTER_BEGIN, html);
+    free(html);
+}
+
+static void popular_matches(void *user, const cJSON *matches) {
+    (void) user;
+    struct { const char *name; int players; } pool[POPULAR_POOL];
+    int n = 0;
+    const cJSON *m;
+    cJSON_ArrayForEach(m, matches) {
+        const int players = cJSON_IsNumber(m) ? (int) m->valuedouble : 0;
+        if (players <= 0 || !m->string || n >= POPULAR_POOL) continue;
+        pool[n].name = m->string;
+        pool[n++].players = players;
+    }
+    for (int i = 1; i < n; i++) { // Array.sort((a, b) => b.players - a.players): stable
+        const int p = pool[i].players;
+        const char *name = pool[i].name;
+        int j = i - 1;
+        while (j >= 0 && pool[j].players < p) {
+            pool[j + 1] = pool[j];
+            j--;
+        }
+        pool[j + 1].players = p;
+        pool[j + 1].name = name;
+    }
+    P.count = n < POPULAR_MAX ? n : POPULAR_MAX;
+    for (int i = 0; i < P.count; i++) {
+        snprintf(P.name[i], sizeof P.name[i], "%s", pool[i].name);
+        P.players[i] = pool[i].players;
+    }
+    if (v10_menu_page()) popular_render();
+}
+
+static void popular_fetch(void) { servers_ui_fetch_matches(popular_matches, NULL); }
+
+static void popular_interval(void *user) {
+    (void) user;
+    P.timer = html_timer_add(POPULAR_REFRESH_MS, popular_interval, NULL);
+    HtmlElem rail = popular_rail();
+    if (rail && !html_dom_is_shown(rail)) return; // offsetParent === null
+    popular_fetch();
+}
+
+// #activeBuffs (_52546): the badges' display at every INIT (v10:219599-219601) and #buffSepStart
+// after them (its MutationObserver, v10:147302)
+static char g_buff_init[48]; // the INIT (map, mode) the badges were set for
+
+static void buffs_update(const Client *client, const int force) {
+    const Game *game = client ? &client->game : NULL;
+    char init[sizeof g_buff_init];
+    snprintf(init, sizeof init, "%p|%p", game ? (const void *) game->map : NULL, game ? (const void *) game->mode : NULL);
+    if (!force && !strcmp(init, g_buff_init)) return; // v10 keeps what the last INIT set
+    snprintf(g_buff_init, sizeof g_buff_init, "%s", init);
+    const double now = menu_now_ms();
+    const int xp = game && game->map && game->mode && game->mode->config.double_xp;
+    const int class_xp = game && game->map && double_class_xp(now), raid = game && game->map && double_raid_drops(now);
+    set_display(by_id("doubleClassXPAd"), class_xp ? "block" : "none");
+    set_display(by_id("doubleRaidDropsAd"), raid ? "block" : "none");
+    set_display(by_id("doubleXPAd"), xp ? "block" : "none");
+    set_display(by_id("buffSepStart"), class_xp || raid || xp ? "" : "none");
+}
+
+// The Store item's children (v10:146879-146893, 147097-147111): the shop badge with the current
+// message ("<name> spin available" per limited wheel on now, "Bundle sale on now" for a discounted
+// bundle: KrunkNative sells none) and, on KR sale weekends, KR DISCOUNT with the time to Monday 00:00
+// UTC. Only their texts change once shown, so heartbeat / shine / krSaleGlow keep running.
+#define SHOP_BADGE_ROTATE_TICKS 4 // setInterval 4000 ms, counted on the 1 s one
+static struct {
+    int ticks, index; // the 1 s interval's count; the message shown
+    int timer;        // the 1 s interval (html timer id)
+} S;
+
+// v10:24816 (a wheel with a startDate / endDate): now in (startDate, endDate]
+static int wheel_live(const StoreWheel *w, const double now) {
+    if (!w->start_ms && !w->end_ms) return 1;
+    const double start = w->start_ms ? (double) w->start_ms : now - 1000.0, end = w->end_ms ? (double) w->end_ms : now + 1000.0;
+    return now > start && !(now > end);
+}
+
+static void kr_sale_timer(const double now, char *out, const size_t n) { // v10:146845
+    out[0] = 0;
+    const int wday = utc_day(now);
+    const int add = wday == 6 ? 2 : wday == 0 ? 1 : 0;
+    if (!add) return;
+    const double end = (floor(now / 86400000.0) + add) * 86400000.0;
+    const double left = end - now;
+    if (left <= 0) return;
+    const long long h = (long long) floor(left / 3600000.0), m = (long long) floor(fmod(left, 3600000.0) / 60000.0),
+                    sec = (long long) floor(fmod(left, 60000.0) / 1000.0);
+    snprintf(out, n, "%02lld:%02lld:%02lld", h, m, sec);
+}
+
+static void store_item_update(void) {
+    HtmlElem title = by_id("menuBtnShop");
+    if (!title) return;
+    const double now = menu_now_ms();
+    char messages[8][64];
+    int count = 0;
+    const StoreSpins *spins = store_spins_builtin();
+    for (int i = 0; spins && i < spins->wheel_count && count < 8; i++) {
+        const StoreWheel *w = &spins->wheels[i];
+        if ((w->start_ms || w->end_ms) && !w->hide && !w->locked && wheel_live(w, now))
+            snprintf(messages[count++], sizeof messages[0], "%s spin available", w->name);
+    }
+    if (count > 1 && S.ticks > 0 && S.ticks % SHOP_BADGE_ROTATE_TICKS == 0) S.index = (S.index + 1) % count;
+    HtmlElem badge = html_dom_query(title, ".shop-badge");
+    if (count) {
+        char text[80];
+        snprintf(text, sizeof text, " %s", messages[S.index % count]);
+        if (!badge) {
+            HtmlElem kr = html_dom_query(title, ".kr-sale-info");
+            if (kr) html_dom_remove(kr); // the badge comes first (re-added below)
+            html_dom_insert_html(title, HTML_INSERT_BEFORE_END, "<span class=\"shop-badge svelte-159x57l\"><span class=\"shop-badge-star svelte-159x57l\">&#9733;</span><span class=\"knShopBadgeText\"></span></span>");
+            badge = html_dom_query(title, ".shop-badge");
+        }
+        HtmlElem t = badge ? html_dom_query(badge, ".knShopBadgeText") : 0;
+        char have[80] = "";
+        if (t) html_dom_get_text(t, have, sizeof have);
+        if (t && strcmp(have, text) != 0) html_dom_set_text(t, text);
+    } else if (badge) {
+        html_dom_remove(badge);
+    }
+    HtmlElem kr = html_dom_query(title, ".kr-sale-info");
+    if (kr_sale(now)) {
+        char timer[32];
+        kr_sale_timer(now, timer, sizeof timer);
+        if (!kr) {
+            html_dom_insert_html(title, HTML_INSERT_BEFORE_END, " <span class=\"kr-sale-info svelte-159x57l\"><span class=\"kr-sale-title svelte-159x57l\">KR DISCOUNT</span> "
+                                                                "<span class=\"kr-sale-timer svelte-159x57l\"></span></span>");
+            kr = html_dom_query(title, ".kr-sale-info");
+        }
+        HtmlElem t = kr ? html_dom_query(kr, ".kr-sale-timer") : 0;
+        char have[32] = "";
+        if (t) html_dom_get_text(t, have, sizeof have);
+        if (t && strcmp(have, timer) != 0) html_dom_set_text(t, timer);
+    } else if (kr) {
+        html_dom_remove(kr);
+    }
+}
+
+// The CurrencyDisplay's flying number (_8800 v10:25667, mounted by _8787 into a fixed full-window
+// layer on <body>): value > 0 "+N" green, < 0 "-N" red, centred over the display (left = its
+// centre, top = its top - 10), flyUp 1.5 s, removed after 1.5 s; a new one replaces the last.
+static struct {
+    int seq, timer;
+    char id[24];
+} F;
+
+static void flying_remove(void *user) {
+    (void) user;
+    F.timer = 0;
+    HtmlElem el = F.id[0] ? by_id(F.id) : 0;
+    if (el) html_dom_remove(el);
+    F.id[0] = 0;
+}
+
+void v10_flying_number(const HtmlElem anchor, const double value) {
+    HtmlRect r;
+    HtmlElem body = html_dom_body();
+    if (!anchor || !body || !html_dom_get_rect(anchor, &r)) return;
+    if (F.timer) html_timer_cancel(F.timer);
+    flying_remove(NULL);
+    char digits[40], text[48];
+    comma(digits, sizeof digits, fabs(value)); // _8986 (toString + thousands commas)
+    snprintf(text, sizeof text, "%s%s", value > 0 ? "+" : value < 0 ? "-" : "", digits);
+    snprintf(F.id, sizeof F.id, "knV10Fly%d", ++F.seq);
+    char html[512];
+    snprintf(html, sizeof html,
+             "<div id=\"%s\" style=\"position: fixed; top: 0px; left: 0px; pointer-events: none; z-index: 9999; width: 100%%; height: 100%%;\">"
+             "<div class=\"flying-number svelte-1gpc1nd%s\" style=\"left: %.6gpx; top: %.6gpx;\">%s</div></div>",
+             F.id, value > 0 ? " positive" : value < 0 ? " negative" : "", r.x + r.w / 2.0f, r.y - 10.0f, text);
+    html_dom_insert_html(body, HTML_INSERT_BEFORE_END, html);
+    F.timer = html_timer_add(1500.0, flying_remove, NULL); // onComplete after 0x5dc ms
+}
+
+static void store_item_interval(void *user) { // the KR sale timer's 1 s interval
+    (void) user;
+    S.timer = html_timer_add(1000.0, store_item_interval, NULL);
+    store_item_update();
+    S.ticks++;
+}
+
+void v10_menu_tick(void) {
+    if (!V.wired || !v10_menu_page()) return;
+    if (!P.first_done) { // onMount (see popular_render)
+        if (backend_available() == -1 && !scenario_on()) return;
+        P.first_done = 1;
+        popular_fetch();
+        P.timer = html_timer_add(POPULAR_REFRESH_MS, popular_interval, NULL);
+        store_item_interval(NULL);
+    }
+    buffs_update(menu_ui()->client, 0);
+}
+
 // ---------------------------------------------------------------- set-up
 
 // The match-info bar's segments take the menu's info elements, as its $effect does (v10:147258).
@@ -273,6 +607,13 @@ void v10_menu_dom_init(void) {
     set_display(by_id("menuClassContainer"), "");
     // .streams-overlay: only with streams to show (_52549); KrunkNative lists none
     set_display(html_dom_query(0, "#tlInfHold .streams-overlay"), "none");
+    // the idle state starts over with the page (v10_menu_tick: Popular Now's onMount, the intervals)
+    html_timer_cancel(P.timer);
+    html_timer_cancel(S.timer);
+    P.timer = S.timer = 0;
+    P.first_done = 0;
+    P.key[0] = 0;
+    g_buff_init[0] = 0;
     V.wired = 1;
     V.signed_in = -1;
     v10_menu_account_changed();
@@ -367,6 +708,34 @@ int v10_menu_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
     }
     if (!strcmp(name, "knV10Notifications")) {
         notifications_toggle();
+        return 1;
+    }
+    if (!strcmp(name, "knV10PopularPlay")) { // a Popular Now card: playSelect(); openURL("/?play=" + name, 1)
+        const int i = argc > 0 ? (int) args[0].num : -1;
+        if (i < 0 || i >= P.count) return 1;
+        const HtmlArg map = {.kind = HTML_ARG_STR, .str = P.name[i]};
+        html_ui_dispatch("playSelect", ev, NULL, 0);
+        html_ui_dispatch("playMap", ev, &map, 1); // KrunkNative: ?play= in place (servers_ui.c)
+        return 1;
+    }
+    if (!strcmp(name, "knV10MenuClock")) { // tests: the date the weekend badges read (ms since 1970, 0 = now); an INIT re-reads it
+        g_clock_ms = argc > 0 ? args[0].num : 0.0;
+        buffs_update(menu_ui()->client, 1);
+        store_item_update();
+        return 1;
+    }
+    if (!strcmp(name, "knV10FlyingNumber")) { // tests: v10_flying_number(querySelector(sel), value)
+        const char *sel = argc > 0 && args[0].kind == HTML_ARG_STR ? args[0].str : NULL;
+        v10_flying_number(sel ? html_dom_query(0, sel) : 0, argc > 1 ? args[1].num : 0.0);
+        return 1;
+    }
+    if (!strcmp(name, "knV10Popular")) { // tests: fetch again now (the 60 s interval's body); a JSON game list first replaces the brain's
+        if (argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str) {
+            cJSON *list = cJSON_Parse(args[0].str);
+            if (list) servers_ui_set_games(list);
+            cJSON_Delete(list);
+        }
+        popular_fetch();
         return 1;
     }
     return -1;

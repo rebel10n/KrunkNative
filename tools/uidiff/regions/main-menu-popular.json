@@ -1,0 +1,74 @@
+{
+  "scenario": "main-menu-popular",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "popular-rail",
+      "rect": [
+        955,
+        395,
+        320,
+        58
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 8.0,
+      "note": "Popular Now (svelte-6ewa5r): the header and three cards (name, 'N playing', play_arrow), top 3 by players (v10_menu.c popular_render)"
+    },
+    {
+      "name": "match-info",
+      "rect": [
+        420,
+        608,
+        440,
+        26
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 18.0,
+      "note": "the match-info bar is unaffected by the rail"
+    },
+    {
+      "name": "header-left",
+      "rect": [
+        0,
+        0,
+        300,
+        50
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 6.0,
+      "note": "v10 #playerHeaderEl, as main-menu"
+    },
+    {
+      "name": "side-nav",
+      "rect": [
+        0,
+        50,
+        220,
+        300
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 6.0,
+      "note": "#menuItemContainer guest, as main-menu"
+    },
+    {
+      "name": "action-cards",
+      "rect": [
+        1085,
+        450,
+        195,
+        225
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 6.0,
+      "note": "#subLogoButtons' action cards, as main-menu"
+    }
+  ]
+}
