@@ -479,13 +479,15 @@ static void test_npcs_entities(TestClient *a, TestClient *b) {
     pump(30);
     CHECK(count_type(b, NET_PACKET_AI_ADD_V7) >= OM_NPCS_PER_PLAYER - 1, "AI_ADD_V7 to the other player (%d)", count_type(b, NET_PACKET_AI_ADD_V7));
 
-    // undo: the newest NPC goes
-    const int before = ai_count() + game_bots_count(&g_server->game);
+    // undo: the newest NPC goes. Counted around the request alone (the authority handles it at once):
+    // the AIs keep fighting each other, and one killed by another AI in the ticks before or after
+    // the undo is not the undo's doing (it happened in the train once the RNG stream shifted)
     pump(20);
+    const int before = ai_count() + game_bots_count(&g_server->game);
     NetSpawnResultPacket r = request(a, OM_ACTION_UNDO, 0, 0.0f);
+    const int after = ai_count() + game_bots_count(&g_server->game);
     pump(2);
-    CHECK(r.status == OM_STATUS_OK && ai_count() + game_bots_count(&g_server->game) == before - 1, "undo removes the last NPC (%d -> %d)", before,
-          ai_count() + game_bots_count(&g_server->game));
+    CHECK(r.status == OM_STATUS_OK && after == before - 1, "undo removes the last NPC (%d -> %d)", before, after);
     for (int i = 0; i < 20; i++) { // undo everything this player spawned
         pump(20);
         if (request(a, OM_ACTION_UNDO, 0, 0.0f).status != OM_STATUS_OK) break;

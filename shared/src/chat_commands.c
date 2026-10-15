@@ -1418,7 +1418,7 @@ static void cmd_bot_type(ChatCtx *c) {
     reply(c, "Bot type set to %s; removed %d %s bot%s.", bot_type_name(next), removed, bot_type_name(previous), plural(removed));
 }
 
-// botMatchesQuery: all / * / "" = every bot, a number = position, bot id or player sid,
+// botMatchesQuery: all / * / "" = every bot, a number = position, bot id or player sid (exact),
 // else the normalised name / socket id / sid (exact or prefix).
 static int bot_matches(const GameBot *bot, const int position, const char *query) {
     char needle[64];
@@ -1426,7 +1426,9 @@ static int bot_matches(const GameBot *bot, const int position, const char *query
     if (!needle[0] || !strcmp(needle, "all") || !strcmp(query, "*")) return 1;
     char *end = NULL;
     const long n = strtol(query, &end, 10);
-    if (end && !*end && end != query && (n == position || n == bot->id || n == bot->uid)) return 1;
+    // a number is exact: the position, the bot id or the player sid (never a prefix of the random
+    // socket id, which can start with a digit: "1" must not match "1mWRmXAGlnCB")
+    if (end && !*end && end != query) return n == position || n == bot->id || n == bot->uid;
     char keys[3][64], sid[16];
     normalise(bot->name, keys[0], sizeof(keys[0]));
     normalise(bot->socket_id, keys[1], sizeof(keys[1]));

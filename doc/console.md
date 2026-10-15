@@ -268,8 +268,18 @@ chat at all and make no AI request, and the chat code does not run. Turn it on w
   AI gateway: `make bots-chat-e2e`).
 
 AI (`bot_type nextbot`, the default): Idle / Hunt / Attack / Hide with the BotProfile presets
-(reaction time, aim focus, dodge, chase timeout, coward / retreat), aim-down-sights and recoil
-control by skill, reloads and the secondary on an empty primary. `bot_type tfue` runs bots.js
+(reaction time, aim focus, dodge, coward / retreat), aim-down-sights and recoil control by skill,
+reloads and the secondary on an empty primary. Perception (`bot_sense.c`, v7 vision.ts): known
+threats with last known positions, line of sight to the gut / chest / head / feet (game.canSee),
+the recognize gate, heard and hit stimuli, forgotten 5-10 s (by tier) after the last stimulus;
+a target that breaks line of sight is chased to its predicted position and then searched for
+around it until the memory expires (v7's 2-4 s chase timeout is gone). Krunker Box Office adds
+peripheral vision (a close target outside the 90-120 degree FOV), hearing (gunfire within
+900-2600 units, running footsteps within 120-260, by tier), a tracking error that decays while
+locked on (reset after a 300 ms gap, larger on a fast-crossing target, scaled by accuracy),
+target leading (projectile flight time; the slew lag of hitscan), bursts that rest and pause
+while the recoil climb settles, and hide spots that break the threat's line of sight.
+`bot_type tfue` runs bots.js
 Bot.update (turnSpd, roam circle, 2 s re-target, fire inside half the range). Both walk over a
 nav grid built from the map (`bot_nav.c`, v7 navmesh.ts idea: walkable tops at the body's
 width, headroom, walk / jump / drop links checked for parapets and floors in the way, A* with a

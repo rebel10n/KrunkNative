@@ -28,6 +28,10 @@
 //   fired on the first frame after a landing that can jump, and every landing slides. AI jumps
 //   (ledges, dodges, randomJump) are refused under a ceiling they would hit. Hopping is a per-bot
 //   skill (none / learning / clean) from the personality seed, correlated with difficulty.
+// - Perception / combat (shared/src/bot_sense.c): known threats with last known positions,
+//   peripheral vision, hearing (gunfire, footsteps), a search of where a lost target went until
+//   its memory expires (v7 KNOWN_THREAT_FORGET_MS), aim error that decays while locked on,
+//   target leading and recoil-aware bursts. v7's chase timeout (2-4 s) is replaced by the memory.
 // - Parsed but without effect natively: voiceChat (no clip), noRecoil, spreadMlt, rangeMlt
 //   (only the AI's engage range), scoreOnDeath, head / pet / shoes / wrist (no such v3.1.1 slots).
 #include <bots.h>
@@ -848,6 +852,7 @@ static void bot_reset_ai(GameBot *bot, const Player *p) {
     bot->hide_timer = 0.0f;
     bot->ignore_timer = 0.0f;
     bot->ignore_uid = -1;
+    bot_sense_reset(&bot->sense);
     bot->stuck_pos = p->position;
     bot->stuck_timer = bot->stuck_check = bot->recover_timer = 0.0f;
     bot->probe_timer = 0.0f;
@@ -1027,6 +1032,7 @@ GameBot *game_bots_add(Game *game, const BotAssignments *a, const vec3 *at, cons
     bot->can_respawn = 1;
     bot->target_uid = -1;
     bot->ignore_uid = -1;
+    bot->hold_uid = -1;
     bot->uid = bot_alloc_uid(game);
     bot_roll_identity(bot, a);
     if (at) {
@@ -1239,12 +1245,10 @@ static int bot_is_enemy(const GameBot *bot, const Player *self, const Player *ot
     return 1;
 }
 
-static vec3 bot_aim_point(const Player *t, const float frac) {
-    return (vec3) {t->position.x, t->position.y + t->height * frac, t->position.z};
-}
-
+// game.canSee to any of the aim parts (gut, chest, head, feet): a head over a crate or feet under
+// a gap are in sight (vision.ts VisiblePointOnThreat).
 static int bot_line_of_sight(const Game *game, const Player *self, const Player *other) {
-    return game_ai_player_can_see(game, self, bot_aim_point(other, 0.8f)); // game.canSee
+    return bot_sense_los(game, self, other) >= 0;
 }
 
 // ---------------------------------------------------------------- AI
@@ -1388,7 +1392,11 @@ static void bot_pick_hide(Game *game, GameBot *bot, const Player *self) {
         if (!bot_nav_random_point_from(game, &self->position, &p)) break;
         const float from_self = bot_d2d(p, self->position);
         if (from_self > 320.0f || from_self < 40.0f) continue;
-        const float score = bot_d2d(p, bot->last_known) - from_self * 0.5f;
+        float score = bot_d2d(p, bot->last_known) - from_self * 0.5f;
+        // a spot the threat cannot see from where it was last known is worth a lot more
+        const vec3 eye = {p.x, p.y + self->height - game_constants.camera_height, p.z};
+        const vec3 chest = {bot->last_known.x - eye.x, bot->last_known.y + self->height * 0.6f - eye.y, bot->last_known.z - eye.z};
+        if (bot_segment_hits(game, eye, chest, 1)) score += 200.0f;
         if (score > best_score) {
             best_score = score;
             best = p;
@@ -1409,7 +1417,7 @@ static void bot_set_state(GameBot *bot, const BotState state) {
 }
 
 // AttackState::OnEnter: dodge / crouch-and-hold / coward rolls from the profile.
-static void bot_enter_attack(GameBot *bot, const BotProfile *profile, Player *target, const int seen) {
+static void bot_enter_attack(GameBot *bot, const BotProfile *profile, const BotSenseProfile *senses, Player *target, const int seen) {
     bot_set_state(bot, BOT_STATE_ATTACK);
     bot->target_uid = target->uid;
     bot->should_dodge = bot_rand_int(0, 100) <= (int) (80.0f * profile->skill);
@@ -1422,38 +1430,191 @@ static void bot_enter_attack(GameBot *bot, const BotProfile *profile, Player *ta
     bot->not_seen = 0.0f;
     bot->have_seen = (unsigned char) seen;
     bot->reaction = (profile->reaction + profile->attack_delay) * 1000.0f + bot_rand_float(0.0f, 80.0f);
+    bot_sense_engage(&bot->sense, senses, bot->player, target->uid, bot_rand_float(0.0f, 80.0f)); // the trigger waits the profile's reaction
     bot->ads = bot_chance(0.45 + 0.55 * profile->skill); // KrunkNative: hip fire spread is huge, players ADS
-    bot->last_known = target->position;
+    if (!bot_sense_predict(&bot->sense, target->uid, &bot->last_known)) bot->last_known = target->position;
 }
 
-// Vision: the nearest enemy in sight (FOV 90, line of sight, targetDistance), or whoever just
-// hurt us (heard/hit stimuli skip the FOV).
-static Player *bot_acquire(Game *game, GameBot *bot, Player *self, const float distance) {
-    // someone hit us: the latest damage_received entry
-    if (self->health < bot->last_health) {
-        const PlayerDamage *latest = NULL;
-        for (int k = 0; k < PLAYER_DAMAGE_SLOTS; k++) {
-            const PlayerDamage *d = &self->damage_received[k];
-            if (d->uid >= 0 && (!latest || d->time > latest->time)) latest = d;
+// Perception (bot_sense.c, vision.ts RefreshPrimaryThreat): the scan refreshes the known threats
+// (sight within the FOV / peripheral band with line of sight, gunfire and footsteps in earshot,
+// whoever hurt us), then every 1 s with a target / 0.5 s without (or at once when hurt) the best
+// known threat is engaged: the current one keeps a 350 score margin, a closer visible one wins.
+// Returns the target (NULL: none known).
+static Player *bot_perceive(Game *game, GameBot *bot, Player *self, const BotProfile *profile, const BotSenseProfile *senses, const float distance,
+                            const int hurt, Player *target, const float dt) {
+    const BotConfig *cfg = &bot->config;
+    const BotSenseRules rules = {cfg->target_team, (unsigned char) (bot->type != BOT_TYPE_TFUE || cfg->target_bots), distance};
+    bot_sense_update(game, &bot->sense, self, bot->yaw, senses, &rules, hurt, dt);
+    bot->sees_target = (unsigned char) (target && bot_sense_visible(&bot->sense, target->uid));
+    if (!(cfg->attack_target || cfg->watch_target || cfg->follow_target)) return target;
+    bot->action_freq -= dt;
+    if (bot->action_freq > 0.0f && target && !hurt) return target;
+    bot->action_freq = target ? 1000.0f : 500.0f;
+    Player *pick = bot_sense_select(game, &bot->sense, self, &rules, target ? target->uid : -1, bot->ignore_timer > 0.0f ? bot->ignore_uid : -1);
+    if (pick && pick != target) {
+        target = pick;
+        bot_enter_attack(bot, profile, senses, target, bot_sense_visible(&bot->sense, target->uid));
+        bot->sees_target = (unsigned char) bot_sense_visible(&bot->sense, target->uid);
+    }
+    return target;
+}
+
+// AttackState for one tick: the hunt for a target out of sight (its predicted position, then a
+// search of where it went, until the memory expires), the aim (bot_sense_aim: the visible part,
+// led, with the lock-state tracking error and the recoil pull), the movement (close in to combat
+// range, hold / dodge) and the trigger (bot_sense_fire: reaction, bursts, recoil rests).
+// The damage-less hold (KrunkNative, from the coordinator's report of bots shooting at a target they
+// cannot hit): the time a bot keeps one target in sight with no damage landing on it. A hit (health
+// below the last check) restarts it. Returns 1 once BOT_HOLD_CAP_MS has run out.
+static int bot_hold_expired(GameBot *bot, const Player *target, const int in_sight, const float dt) {
+    if (bot->hold_uid != target->uid || target->health < bot->hold_health) {
+        bot->hold_uid = target->uid;
+        bot->hold_ms = 0.0f;
+    }
+    bot->hold_health = target->health;
+    if (in_sight) bot->hold_ms += dt;
+    return bot->hold_ms > BOT_HOLD_CAP_MS;
+}
+
+static void bot_attack(Game *game, GameBot *bot, Player *self, Player *target, const BotProfile *profile, const BotSenseProfile *senses,
+                       const float aim_rate, const float yaw_tolerance, const int max_mode, const float dt, BotFrame *f) {
+    const BotConfig *cfg = &bot->config;
+    const int aims = cfg->watch_target || cfg->attack_target || cfg->follow_target;
+    const BotThreat *known = bot_sense_threat(&bot->sense, target->uid);
+    if (!known) { // forgotten: no stimulus for memory_ms; IgnoreEnemies(1 s)
+        bot->ignore_uid = target->uid;
+        bot->ignore_timer = NB_ATTACK_DROP_IGNORE_MS;
+        bot->target_uid = -1;
+        bot->has_roam = 0;
+        bot_set_state(bot, BOT_STATE_HUNT);
+        return;
+    }
+    const float hit_age_now = bot_sense_hit_age(&bot->sense, target->uid);
+    if (bot_hold_expired(bot, target, bot->sees_target && !(hit_age_now >= 0.0f && hit_age_now < BOT_HOLD_CAP_MS), dt)) { // in sight for BOT_HOLD_CAP_MS, nothing landed: move on
+        bot->ignore_uid = target->uid;
+        bot->ignore_timer = NB_ATTACK_DROP_IGNORE_MS;
+        bot->target_uid = -1;
+        bot->has_roam = 0;
+        bot->hold_uid = -1;
+        bot_sense_give_up(&bot->sense, target->uid);
+        bot_set_state(bot, BOT_STATE_HUNT);
+        return;
+    }
+    const float hit_age = bot_sense_hit_age(&bot->sense, target->uid);
+    vec3 goal; // where to go and look when the target is out of sight
+    if (bot->sees_target) {
+        bot->have_seen = 1;
+        bot->not_seen = 0.0f;
+        bot->last_known = goal = target->position;
+    } else {
+        bot->not_seen += dt;
+        // AttackState's lost-sight chase (v7 states.ts: 2 s + 2 s x (1 - aggression), +1 s crouched), for
+        // a threat the bot never saw (a heard shot): past it the attack ends and the bot goes back to its
+        // objective / roam route. A threat seen and then lost keeps its memory for the search (the
+        // memory tests in bot_test.c).
+        float chase = NB_ATTACK_CHASE_BASE_MS + NB_ATTACK_CHASE_AGGRO_MS * (1.0f - profile->aggression);
+        if (self->crouch_val > 0.5f) chase += NB_ATTACK_CHASE_CROUCH_MS;
+        // the lost-sight chase (v7 states.ts) is for a threat never seen and never hit: a heard shot that
+        // went quiet. A shooter that hit the bot keeps its memory (the forget window), as does one seen
+        // then lost (the memory tests in bot_test.c)
+        if (!bot->have_seen && hit_age < 0.0f && bot->not_seen > chase) {
+            bot_sense_give_up(&bot->sense, target->uid);
+            bot->ignore_uid = target->uid;
+            bot->ignore_timer = NB_ATTACK_DROP_IGNORE_MS;
+            bot->target_uid = -1;
+            bot->has_roam = 0;
+            bot_set_state(bot, BOT_STATE_HUNT);
+            return;
         }
-        Player *attacker = latest ? game_find_player(game, latest->uid) : NULL;
-        if (attacker && bot_is_enemy(bot, self, attacker)) return attacker;
+        bot->last_known = known->known;
+        bot_sense_search(game, &bot->sense, target->uid, self, bot->path_stranded, dt, &goal);
     }
-    Player *best = NULL;
-    float best_d = 0.0f;
-    for (size_t i = 0; i < game->player_count; i++) {
-        Player *o = game->players[i];
-        if (!bot_is_enemy(bot, self, o) || (bot->ignore_timer > 0.0f && o->uid == bot->ignore_uid)) continue;
-        const float d = bot_d3d(o->position, self->position);
-        if (d > distance || (best && d >= best_d)) continue;
-        float yaw, pitch;
-        bot_drs(o->position, self->position, 0.0f, &yaw, &pitch);
-        if (d > 60.0f && fabsf(bot_angle_delta(bot->yaw, yaw)) > NB_VISION_FOV_HALF) continue;
-        if (!bot_line_of_sight(game, self, o)) continue;
-        best = o;
-        best_d = d;
+    // coward: break off after a short hesitation
+    if (bot->coward && cfg->retreat) {
+        if (bot->coward_at == 0.0f) bot->coward_at = bot->state_time + (float) bot_rand_int(800, 1600);
+        if (bot->state_time >= bot->coward_at && self->health < (float) self->max_health) {
+            bot_set_state(bot, BOT_STATE_HIDE);
+            bot->hide_timer = NB_RETREAT_DURATION_MS;
+            bot->coward = 0;
+            bot_pick_hide(game, bot, self);
+            return;
+        }
     }
-    return best;
+
+    // aim
+    float want_yaw, want_pitch;
+    bot_sense_aim(&bot->sense, senses, self, target, bot->sees_target, goal, dt, &want_yaw, &want_pitch);
+    const float slew = max_mode ? aim_rate : senses->track_rate;
+    if (aims) {
+        f->yaw = bot->yaw = bot_turn_yaw(bot->yaw, want_yaw, slew * dt);
+        f->pitch = bot->pitch = bot_turn_pitch(bot->pitch, bot->sees_target ? want_pitch : 0.0f, slew * dt);
+    }
+    const float yaw_err = fabsf(bot_angle_delta(bot->yaw, want_yaw));
+    const float range = bot_d3d(target->position, self->position);
+    const Weapon *w = self->weapon;
+    const int melee = w && w->melee;
+
+    // movement: close in to combat range, then hold / dodge (AttackState::ApplyDodge);
+    // the objective comes first for a flag carrier / a bot holding its point (bot_objective.c)
+    vec3 objective_goal;
+    if (cfg->roam && bot_objective_over_combat(game, bot, self, target, dt, &objective_goal)) {
+        bot_walk(game, bot, self, objective_goal, dt, f);
+    } else if (cfg->follow_target) {
+        const float want_range = melee ? 4.0f : MIN(NB_COMBAT_RANGE, bot_engage_range(bot, self) * 0.6f);
+        if (!bot->sees_target || range > want_range + NB_HYSTERESIS_RANGE * 0.5f) {
+            bot_walk(game, bot, self, goal, dt, f);
+        } else if (bot->crouch_hold && !melee) {
+            f->move = MOVE_NONE;
+            f->crouch = 1;
+        } else if (bot->should_dodge && range <= NB_DODGE_RANGE && yaw_err <= NB_ENGAGED_FACE_TOLERANCE) {
+            if ((float) bot->dodge_until <= bot->state_time) {
+                if (profile->skill > 0.5f) bot->dodge = bot->first_dodge ? (bot_chance(0.5) ? 2 : 1) : (bot->dodge == 1 ? 2 : 1);
+                else {
+                    int next;
+                    do {
+                        next = bot->first_dodge && bot_rand_int(0, 100) < NB_JUMP_CHANCE ? bot_rand_int(0, 3) : bot_rand_int(0, 2);
+                    } while (!bot->first_dodge && next == bot->dodge);
+                    bot->dodge = next;
+                }
+                bot->first_dodge = 0;
+                bot->dodge_until = (int) bot->state_time + bot_rand_int(NB_DODGE_HOLD_MIN_MS, NB_DODGE_HOLD_MAX_MS);
+            }
+            switch (bot->dodge) {
+                case 1: if (bot_probe(game, self, bot->yaw + BOT_HALF_PI) != 2) f->move = MOVE_LEFT; break;
+                case 2: if (bot_probe(game, self, bot->yaw - BOT_HALF_PI) != 2) f->move = MOVE_RIGHT; break;
+                case 3: if (self->on_ground) f->jump = 1; break;
+                default: if (range < NB_COMBAT_RANGE - NB_HYSTERESIS_RANGE && bot_probe(game, self, bot->yaw + BOT_PI) != 2) f->move = MOVE_BACK; break;
+            }
+        } else if (range < NB_CLOSE_STOP_DISTANCE && !melee && bot_probe(game, self, bot->yaw + BOT_PI) != 2) {
+            f->move = MOVE_BACK;
+        }
+    }
+
+    // fire: aim down sights first (snipers always, others per engagement), shotguns hip fire up close
+    if (cfg->attack_target && w) {
+        const int sniper = w->scope && !melee;
+        const int ads = bot->sees_target && !melee && !w->no_aim && (sniper || bot->ads) && range > (w->shots > 1 ? 45.0f : 15.0f);
+        if (ads) f->scope = 1;
+        const float tolerance = melee ? 0.6f : MAX(yaw_tolerance * (range > 300.0f ? 0.5f : 1.0f), 0.05f);
+        const int aimed = yaw_err <= tolerance && fabsf(want_pitch - bot->pitch) <= tolerance * 1.5f;
+        const int ready = !ads || self->aim_val >= (sniper ? 0.95f : 0.7f);
+        const int in_range = range <= bot_engage_range(bot, self) * (melee ? 1.2f : 1.0f);
+        // the line of fire: a wall on the look ray takes the bullet, so no trigger pull (the bot
+        // re-aims or moves on; the damage-less hold above ends it). The ray of this tick's shot
+        // leaves at the look plus the recoil climb as the tick moves it (player.c combat:
+        // shot_angles.x += recoilAnimY * recoilMlt) and anywhere within the weapon's spread of that,
+        // so the whole square around the climbed look must be clear (10% over the spread: the
+        // movement share of it is not predicted)
+        int clear = 0;
+        if (aimed && ready && in_range) {
+            const float climb = bot_sense_shot_climb(self, dt);
+            const float spread = melee ? 0.0f : bot_sense_shot_spread(self, dt) * 1.1f;
+            clear = bot_sense_clear_shot(game, self, bot->yaw, bot->pitch + climb, range, spread, target->position.y + 1.0f);
+        }
+        f->shoot = (unsigned char) (bot_sense_fire(&bot->sense, senses, self, aimed && ready && clear, bot->sees_target, in_range, dt) != 0);
+    }
+    bot_weapon_upkeep(bot, self, f, 1, range);
+    if (cfg->random_jump && self->on_ground && bot->tick % 100 == 0 && bot_rand_int(0, 100) >= 25) f->jump = 1;
 }
 
 // The NextBot behaviour (Idle / Hunt / Attack / Hide) for one tick of dt ms.
@@ -1533,6 +1694,7 @@ static void bot_update_nextbot(Game *game, GameBot *bot, Player *self, const flo
     const BotProfile profile = bot_profile(cfg->difficulty);
     const int max_mode = cfg->difficulty >= BOT_DIFFICULTY_MAX;
     const float accuracy = max_mode ? 100.0f : CLAMP(MAX(cfg->accuracy, profile.skill * 100.0f), 0.0f, 100.0f);
+    const BotSenseProfile senses = bot_sense_profile(cfg->difficulty, accuracy);
     const float aim_rate = max_mode ? 0.035f : MAX(0.006f, NB_TURN_RATE * (0.55f + accuracy / 100.0f));
     const float path_rate = MAX(0.0025f, NB_PATH_TURN_RATE * (0.75f + accuracy / 200.0f));
     const float yaw_tolerance = max_mode ? 0.08f : NB_ATTACK_YAW_TOLERANCE;
@@ -1546,36 +1708,16 @@ static void bot_update_nextbot(Game *game, GameBot *bot, Player *self, const flo
     Player *target = bot_target(game, bot);
     if (target && !bot_is_enemy(bot, self, target)) target = NULL;
 
-    // vision scan
-    bot->action_freq -= dt;
+    // perception (bot_sense.c): the known threats, and the one to engage
     const int hurt = self->health < bot->last_health;
-    if (bot->action_freq <= 0.0f || hurt) {
-        bot->action_freq = NB_VISION_SCAN_MS;
-        if (target) {
-            bot->sees_target = (unsigned char) bot_line_of_sight(game, self, target);
-            // a closer visible enemy wins (TARGET_SWITCH_SCORE_MARGIN)
-            Player *other = bot_acquire(game, bot, self, distance);
-            if (other && other != target && bot_d3d(other->position, self->position) + 350.0f < bot_d3d(target->position, self->position)) {
-                target = other;
-                bot_enter_attack(bot, &profile, target, 1);
-                bot->sees_target = 1;
-            }
-        } else if (cfg->attack_target || cfg->watch_target || cfg->follow_target) {
-            Player *seen = bot_acquire(game, bot, self, distance);
-            if (seen) {
-                target = seen;
-                bot_enter_attack(bot, &profile, target, 1);
-                bot->sees_target = 1;
-            }
-        }
-    }
+    target = bot_perceive(game, bot, self, &profile, &senses, distance, hurt, target, dt);
     bot->last_health = self->health;
 
     // retreat (shouldRetreat): low on health with a threat around
     if (cfg->retreat && target && bot->state != BOT_STATE_HIDE && self->health < (float) self->max_health * NB_RETREAT_HEALTH_FRACTION) {
         bot_set_state(bot, BOT_STATE_HIDE);
         bot->hide_timer = NB_RETREAT_DURATION_MS;
-        bot->last_known = target->position;
+        if (!bot_sense_predict(&bot->sense, target->uid, &bot->last_known)) bot->last_known = target->position;
         bot_pick_hide(game, bot, self);
     }
 
@@ -1586,7 +1728,16 @@ static void bot_update_nextbot(Game *game, GameBot *bot, Player *self, const flo
         case BOT_STATE_HIDE: {
             bot->hide_timer -= dt;
             if (bot->hide_timer <= 0.0f) {
-                bot_set_state(bot, target ? BOT_STATE_ATTACK : BOT_STATE_HUNT);
+                // HideState -> Idle -> Attack (v7 states.ts maybeEngageOrRetreat): a threat still known
+                // is engaged again. KN bug fixed (the "forgor" report): only the state was set here, the
+                // Hunt below overwrote it, and a bot in Hunt never re-engages the target it already has
+                // (bot_perceive enters Attack on a new pick only), so it roamed off from its attacker
+                if (target) {
+                    bot_enter_attack(bot, &profile, &senses, target, bot_sense_visible(&bot->sense, target->uid));
+                    bot_attack(game, bot, self, target, &profile, &senses, aim_rate, yaw_tolerance, max_mode, dt, f);
+                    return;
+                }
+                bot_set_state(bot, BOT_STATE_HUNT);
                 break;
             }
             // run to the hide spot, looking where we go
@@ -1603,113 +1754,7 @@ static void bot_update_nextbot(Game *game, GameBot *bot, Player *self, const flo
         }
         case BOT_STATE_ATTACK: {
             if (!target) break;
-            if (bot->sees_target) {
-                bot->have_seen = 1;
-                bot->not_seen = 0.0f;
-                bot->last_known = target->position;
-            } else {
-                bot->not_seen += dt;
-                float chase = NB_ATTACK_CHASE_BASE_MS + NB_ATTACK_CHASE_AGGRO_MS * (1.0f - profile.aggression);
-                if (self->crouch_val > 0.5f) chase += NB_ATTACK_CHASE_CROUCH_MS;
-                if (bot->not_seen > chase) { // give up; IgnoreEnemies(1 s)
-                    bot->ignore_uid = target->uid;
-                    bot->ignore_timer = NB_ATTACK_DROP_IGNORE_MS;
-                    bot->target_uid = -1;
-                    bot->has_roam = 0;
-                    bot_set_state(bot, BOT_STATE_HUNT);
-                    break;
-                }
-            }
-            // coward: break off after a short hesitation
-            if (bot->coward && cfg->retreat) {
-                if (bot->coward_at == 0.0f) bot->coward_at = bot->state_time + (float) bot_rand_int(800, 1600);
-                if (bot->state_time >= bot->coward_at && self->health < (float) self->max_health) {
-                    bot_set_state(bot, BOT_STATE_HIDE);
-                    bot->hide_timer = NB_RETREAT_DURATION_MS;
-                    bot->coward = 0;
-                    bot_pick_hide(game, bot, self);
-                    return;
-                }
-            }
-
-            // aim (body.ts AimAt with the held aim-focus offset)
-            const vec3 eye = bot_eye(self);
-            const vec3 aim_at = bot->sees_target ? bot_aim_point(target, max_mode ? 0.88f : 0.72f) : (vec3) {bot->last_known.x, bot->last_known.y + target->height * 0.72f, bot->last_known.z};
-            float want_yaw, want_pitch;
-            bot_drs(aim_at, eye, 0.0f, &want_yaw, &want_pitch);
-            bot->aim_offset_timer -= dt;
-            if (bot->aim_offset_timer <= 0.0f) {
-                bot->aim_offset_timer = NB_AIM_OFFSET_INTERVAL_MS;
-                const float spread = NB_AIM_OFFSET_MAX_RAD * (1.0f - (max_mode ? 1.0f : profile.skill));
-                bot->aim_offset_yaw = bot_rand_float(-1.0f, 1.0f) * spread;
-                bot->aim_offset_pitch = bot_rand_float(-1.0f, 1.0f) * spread;
-            }
-            want_yaw += bot->aim_offset_yaw;
-            want_pitch += bot->aim_offset_pitch;
-            // pull down against the recoil climb (shots leave at pitch + recoilAnimY * recoilMlt),
-            // as well as the bot's skill allows
-            const float climb = self->recoil_anim_y * game_constants.recoil_mlt;
-            const float pull = max_mode ? 1.0f : 0.25f + 0.65f * profile.skill;
-            want_pitch -= climb * pull;
-            if (aims) {
-                f->yaw = bot->yaw = bot_turn_yaw(bot->yaw, want_yaw, aim_rate * dt);
-                f->pitch = bot->pitch = bot_turn_pitch(bot->pitch, want_pitch, aim_rate * dt);
-            }
-            const float yaw_err = fabsf(bot_angle_delta(bot->yaw, want_yaw));
-            const float range = bot_d3d(target->position, self->position);
-            const Weapon *w = self->weapon;
-            const int melee = w && w->melee;
-
-            // movement: close in to combat range, then hold / dodge (AttackState::ApplyDodge);
-            // the objective comes first for a flag carrier / a bot holding its point (bot_objective.c)
-            vec3 objective_goal;
-            if (cfg->roam && bot_objective_over_combat(game, bot, self, target, dt, &objective_goal)) {
-                bot_walk(game, bot, self, objective_goal, dt, f);
-            } else if (cfg->follow_target) {
-                const float want_range = melee ? 4.0f : MIN(NB_COMBAT_RANGE, bot_engage_range(bot, self) * 0.6f);
-                if (!bot->sees_target || range > want_range + NB_HYSTERESIS_RANGE * 0.5f) {
-                    bot_walk(game, bot, self, bot->sees_target ? target->position : bot->last_known, dt, f);
-                } else if (bot->crouch_hold && !melee) {
-                    f->move = MOVE_NONE;
-                    f->crouch = 1;
-                } else if (bot->should_dodge && range <= NB_DODGE_RANGE && yaw_err <= NB_ENGAGED_FACE_TOLERANCE) {
-                    if ((float) bot->dodge_until <= bot->state_time) {
-                        if (profile.skill > 0.5f) bot->dodge = bot->first_dodge ? (bot_chance(0.5) ? 2 : 1) : (bot->dodge == 1 ? 2 : 1);
-                        else {
-                            int next;
-                            do {
-                                next = bot->first_dodge && bot_rand_int(0, 100) < NB_JUMP_CHANCE ? bot_rand_int(0, 3) : bot_rand_int(0, 2);
-                            } while (!bot->first_dodge && next == bot->dodge);
-                            bot->dodge = next;
-                        }
-                        bot->first_dodge = 0;
-                        bot->dodge_until = (int) bot->state_time + bot_rand_int(NB_DODGE_HOLD_MIN_MS, NB_DODGE_HOLD_MAX_MS);
-                    }
-                    switch (bot->dodge) {
-                        case 1: if (bot_probe(game, self, bot->yaw + BOT_HALF_PI) != 2) f->move = MOVE_LEFT; break;
-                        case 2: if (bot_probe(game, self, bot->yaw - BOT_HALF_PI) != 2) f->move = MOVE_RIGHT; break;
-                        case 3: if (self->on_ground) f->jump = 1; break;
-                        default: if (range < NB_COMBAT_RANGE - NB_HYSTERESIS_RANGE && bot_probe(game, self, bot->yaw + BOT_PI) != 2) f->move = MOVE_BACK; break;
-                    }
-                } else if (range < NB_CLOSE_STOP_DISTANCE && !melee && bot_probe(game, self, bot->yaw + BOT_PI) != 2) {
-                    f->move = MOVE_BACK;
-                }
-            }
-
-            // fire: aim down sights first (snipers always, others per engagement), shotguns hip fire up close
-            if (cfg->attack_target && bot->sees_target && w) {
-                const int sniper = w->scope && !melee;
-                const int ads = !melee && !w->no_aim && (sniper || bot->ads) && range > (w->shots > 1 ? 45.0f : 15.0f);
-                if (ads) f->scope = 1;
-                const float tolerance = melee ? 0.6f : MAX(yaw_tolerance * (range > 300.0f ? 0.5f : 1.0f), 0.05f);
-                const int aimed = yaw_err <= tolerance && fabsf(want_pitch - bot->pitch) <= tolerance * 1.5f;
-                // burst control: let an uncompensated climb settle before the next shot
-                const int settled = climb * (1.0f - pull) < 0.035f + 0.02f * (1.0f - profile.skill);
-                const int ready = bot->reaction <= 0.0f && settled && (!ads || self->aim_val >= (sniper ? 0.95f : 0.7f));
-                if (aimed && ready && range <= bot_engage_range(bot, self) * (melee ? 1.2f : 1.0f)) f->shoot = 1;
-            }
-            bot_weapon_upkeep(bot, self, f, 1, range);
-            if (cfg->random_jump && self->on_ground && bot->tick % 100 == 0 && bot_rand_int(0, 100) >= 25) f->jump = 1;
+            bot_attack(game, bot, self, target, &profile, &senses, aim_rate, yaw_tolerance, max_mode, dt, f);
             return;
         }
         default:

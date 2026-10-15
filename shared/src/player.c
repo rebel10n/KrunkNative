@@ -3575,6 +3575,7 @@ void player_shoot(Player *player) {
 
         shot_angles.x = player->direction.x + player->recoil_anim_y * game_constants.recoil_mlt + spread;
         shot_angles.y = player->direction.y + spread;
+        player->shot_look = shot_angles;
 
         // {dmgMlt: 1 - (chrgMlt || 0.9) * (1 - charge), effectInd / effectC: floor(charge * 10)}
         const float charge_mlt = weapon->charge_mlt > 0.0f ? weapon->charge_mlt : 0.9f;
@@ -3616,6 +3617,7 @@ void player_shoot(Player *player) {
 
             shot_angles.x += player->recoil_anim_y * game_constants.recoil_mlt;
 
+            if (i >= 0) player->shot_look = shot_angles; // the bullet's own look (not the physPow knock ray)
             combat_fire_ray(player, i, shot_angles.x, shot_angles.y, shot_height, charge);
         }
     }

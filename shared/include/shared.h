@@ -1280,6 +1280,7 @@ typedef struct Player_t {
     vec3 last_position;
     vec3 velocity;
     vec2 direction;
+    vec2 shot_look;               // the pitch / yaw the last ray left with (recoil and spread included): the line of fire
 
     float x_vel_cylinder;
     float z_vel_cylinder;

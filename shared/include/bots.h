@@ -20,10 +20,12 @@
 // Intentional differences are documented in bots.c and doc/console.md.
 #include <shared.h>
 #include <bot_move.h>
+#include <bot_sense.h>
 
 #define GAME_BOTS_MAX 32            // parseBotConfigAssignments: Math.min(32, count) per bot_add
 #define GAME_BOT_LIMIT 16           // config.botLimit: the server.cfg quota cap
 #define BOT_QUOTA_GRACE_MS 10000.0f // fill: an empty lobby's bots wait this long for a rejoin (server.cfg bot_quota_grace)
+#define BOT_HOLD_CAP_MS 4000.0f     // a bot in sight of one target this long with no damage landing on it moves on (bots.c)
 #define GAME_BOT_UID_BASE 1         // offline (no alloc_uid hook): uids after the local player's 0
 #define GAME_BOT_ACCOUNT_BASE 2000000 // NextBot createAccount: Account(2_000_000 + id)
 #define GAME_BOT_CLAN_SIZE 8
@@ -220,6 +222,9 @@ typedef struct GameBot_t {
     float hide_timer;
     float ignore_timer;             // DropCurrentTarget(ms): no re-lock on ignore_uid
     int ignore_uid;
+    float hold_ms;                  // time locked on hold_uid in sight with no damage landing on it (BOT_HOLD_CAP_MS)
+    float hold_health;              // hold_uid's health at the last check: lower = a hit landed
+    int hold_uid;
     vec3 last_known;                // the target's last seen position
     vec3 stuck_pos;
     float stuck_timer, stuck_check, recover_timer;
@@ -242,6 +247,7 @@ typedef struct GameBot_t {
     vec3 route_target;
     BotObjective objective;         // the mode objective it plays (shared/src/bot_objective.c)
     BotMove move;                   // locomotion: slide hopping, jump / crouch gating (shared/src/bot_move.c)
+    BotSense sense;                 // perception + combat state (shared/src/bot_sense.c)
 } GameBot;
 
 typedef struct GameBots_t {

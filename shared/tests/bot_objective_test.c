@@ -229,6 +229,49 @@ static void test_tdf(Game *game, const int mode_index) {
     CHECK(escort > 0, "teammates escort the carrier");
 }
 
+// An objective with a fight: a bot on its way to a zone (ZONE, not arrived) that a player hit recently.
+// The fight comes first while the attacker is in fight range, even when the bot has stalled; out of
+// range, or with no hit on it, the objective stands (the old rule, unchanged).
+static void test_under_fire(Game *game, const int mode_index) {
+    printf("Running objective under fire test...\n");
+    start(game, mode_index, 1, 1);
+    GameBot *bot = NULL;
+    Player *enemy = NULL;
+    for (int i = 0; i < game->bots->count; i++) {
+        if (!game->bots->list[i].player) continue;
+        if (!bot && game->bots->list[i].player->team == 1) bot = &game->bots->list[i];
+        else if (!enemy && game->bots->list[i].player->team == 2) enemy = game->bots->list[i].player;
+    }
+    CHECK(bot && enemy, "a bot and an enemy in the lobby");
+    if (!bot || !enemy) return;
+    Player *self = bot->player;
+    BotObjective *o = &bot->objective;
+    o->kind = BOT_GOAL_ZONE;
+    o->goal = (vec3) {self->position.x + 600.0f, self->position.y, self->position.z};
+    o->last_flag = self->mode.flag;
+    o->last_tags = self->mode.dog_tags;
+    o->think_timer = 1e6f; // no re-think: the goal stays
+    o->fail_timer = 0.0f;
+    o->arrived = 0;
+    const float dt = 1.0f / 30.0f;
+    const int stalled_ms = 6000 + 1; // OBJ_STALL_MS (bot_objective.c)
+    enemy->position = (vec3) {self->position.x + 60.0f, self->position.y, self->position.z};
+    vec3 goal;
+
+    bot_sense_reset(&bot->sense);
+    bot_sense_seed(&bot->sense, enemy, enemy->position, BOT_STIMULUS_HIT);
+    bot->state_time = (float) stalled_ms;
+    CHECK(bot_objective_over_combat(game, bot, self, enemy, dt, &goal) == 0, "under fire in range, stalled: the fight, not the objective");
+    bot_sense_reset(&bot->sense);
+    CHECK(bot_objective_over_combat(game, bot, self, enemy, dt, &goal) == 1, "no hit, stalled: the objective (the old rule)");
+    bot_sense_reset(&bot->sense);
+    bot_sense_seed(&bot->sense, enemy, enemy->position, BOT_STIMULUS_HIT);
+    bot->state_time = 0.0f;
+    CHECK(bot_objective_over_combat(game, bot, self, enemy, dt, &goal) == 0, "under fire in range: the fight");
+    enemy->position = (vec3) {self->position.x + 400.0f, self->position.y, self->position.z};
+    CHECK(bot_objective_over_combat(game, bot, self, enemy, dt, &goal) == 1, "under fire, attacker out of range: the objective");
+}
+
 static void test_lms(Game *game, const int mode_index) {
     printf("Running Last Man Standing test...\n");
     start(game, mode_index, 2, 1);
@@ -426,6 +469,7 @@ int main(void) {
     test_ctf(&game, 0);
     test_ctf_small(&game);
     test_point(&game, 1);
+    test_under_fire(&game, 1);
     test_dom(&game, 2);
     test_king(&game, 3);
     test_tdf(&game, 4);

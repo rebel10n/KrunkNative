@@ -10,6 +10,7 @@
 // every flagUpdate, zone ownership, the active objective), plus the server's own knowledge of
 // where the remaining enemies are in elimination modes (rate-limited to a 2 s old position).
 #include <bot_objective.h>
+#include <bot_sense.h>
 #include <spawnables.h>
 #include <pcg_basic.h>
 #include <math.h>
@@ -30,6 +31,7 @@ int mode_player_collides(const Player*, vec3 center, vec3 half); // shared/src/m
 #define OBJ_HOLD_FIGHT_RANGE 160.0f  // a holder leaves its spot only for an enemy this close
 #define OBJ_CHASE_RANGE 180.0f       // on the way to a goal: an enemy further away is shot at on the move, not chased
 #define OBJ_STALL_MS 6000.0f         // a fight that has not ended after this long: back to the objective, shooting on the move
+#define OBJ_UNDER_FIRE_MS 3000.0f    // a player that hit the bot this recently is still the fight (not the objective)
 #define OBJ_GUARD_OFFSET 26.0f       // the defender's spot: this far from the flag toward the enemy
 #define OBJ_SPREAD_MAX 14.0f         // spread spots inside a zone: at most this far off its centre
 #define OBJ_KITE_MS 8000.0f          // a neutral-flag carrier picks a new hiding spot this often
@@ -550,6 +552,17 @@ int bot_objective_update(Game *game, GameBot *bot, Player *self, const float dt)
     o->arrived = (unsigned char) obj_arrived(self, o);
     if (o->arrived) o->hold_time += dt;
     else o->hold_time = 0.0f;
+    // the point is contested: an enemy standing in the volume we hold is known to us (the HUD's
+    // contested state tells a player as much), wherever we are looking. Without it two holders on one
+    // zone could sweep their looks away from each other for good and the zone never fell
+    if (o->arrived && o->hold && o->has_zone) {
+        for (size_t i = 0; i < game->player_count; i++) {
+            const Player *p = game->players[i];
+            if (p != self && obj_alive(p) && obj_enemy(game, self, p) && mode_player_collides(p, o->zone_center, o->zone_half)) {
+                bot_sense_seed(&bot->sense, p, p->position, BOT_STIMULUS_HEARD);
+            }
+        }
+    }
     if (!self->mode.flag) o->stalemate_ms = 0.0f;
     else if ((o->kind == BOT_GOAL_HOME && o->arrived && o->hold) || o->kind == BOT_GOAL_CARRIER) o->stalemate_ms += dt;
     return 1;
@@ -617,6 +630,16 @@ int bot_objective_over_combat(Game *game, GameBot *bot, Player *self, const Play
     if (o->kind == BOT_GOAL_NONE) return 0;
     const float range = obj_d3d(target->position, self->position);
     const int stalled = bot->state_time > OBJ_STALL_MS; // in this Attack (bots.c state_time) without a result
+    // under fire from a player in fight range: the fight comes first, stalled or not (the attacker is
+    // the threat). A carrier keeps running home / kiting; the attacker out of range is the objective's.
+    const float hit_age = bot_sense_hit_age(&bot->sense, target->uid);
+    const int under_fire = hit_age >= 0.0f && hit_age < OBJ_UNDER_FIRE_MS;
+    if (under_fire && range <= OBJ_CHASE_RANGE && o->kind != BOT_GOAL_HOME && o->kind != BOT_GOAL_CARRIER && o->kind != BOT_GOAL_KITE && o->kind != BOT_GOAL_DEPOSIT) return 0;
+    // a threat out of sight that is not shooting at us is only remembered (bot_sense's memory keeps
+    // it for the search): the objective comes first, the bot does not leave it to go looking. Without
+    // this the longer memory kept CTF attackers searching for enemies they had lost (twice the Attack
+    // time of main in bot_objective_test, flags no longer captured)
+    const int quiet = !bot->sees_target && !under_fire;
     switch (o->kind) {
         case BOT_GOAL_HOME: // a carrier never stops to fight: it shoots on the run
         case BOT_GOAL_KITE:
@@ -631,7 +654,7 @@ int bot_objective_over_combat(Game *game, GameBot *bot, Player *self, const Play
         case BOT_GOAL_ZONE:
         case BOT_GOAL_SITE:
         case BOT_GOAL_GUARD:
-            if (obj_arrived(self, o) ? range <= OBJ_HOLD_FIGHT_RANGE : range <= OBJ_CHASE_RANGE && !stalled) return 0;
+            if (!quiet && (obj_arrived(self, o) ? range <= OBJ_HOLD_FIGHT_RANGE : range <= OBJ_CHASE_RANGE && !stalled)) return 0;
             // on it: keep moving inside it while shooting (a strafe), not back to one spot
             *goal = o->hold && obj_arrived(self, o) ? bot_objective_hold_spot(game, bot, self, dt) : o->goal;
             return 1;
@@ -639,7 +662,7 @@ int bot_objective_over_combat(Game *game, GameBot *bot, Player *self, const Play
         case BOT_GOAL_NONE:
             return 0;
         default: // on the way to a flag / carrier / tag: a far enemy is shot at on the move, a close one fought
-            if (range <= OBJ_CHASE_RANGE && !stalled) return 0;
+            if (!quiet && range <= OBJ_CHASE_RANGE && !stalled) return 0;
             *goal = o->goal;
             return 1;
     }
