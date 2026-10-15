@@ -230,6 +230,29 @@ void ui_prompt(const char *text, UiDialogFn fn, void *user) {
 #endif
 }
 
+// v10's error popup (_69540 with an error kind, v10.js:215850): genericPopup(..., "responsePop") with
+// the red clear icon over the text. The text is plain: it is escaped here. Used where a failure
+// leaves the player in the game they are in (a Find New Game that found nothing: join_errors.h).
+void ui_error_popup(const char *text) {
+    StrBuf sb = {0};
+    sb_append(&sb, "<div style='width:100%;text-align:center'><div><i class='material-icons' style='font-size:80px;color:#e33b3b'>clear</i></div>"
+                   "<div style='font-size:20px;color:rgba(255,255,255,0.5)'>");
+    sb_append_esc(&sb, text && text[0] ? text : "Failed");
+    sb_append(&sb, "</div></div>");
+    char *html = sb_finish(&sb);
+    ui_loadout_clear_pops();
+    HtmlElem holder = html_dom_by_id("popupHolder");
+    if (holder) html_dom_set_display(holder, "block");
+    HtmlElem pop = html_dom_by_id("genericPop");
+    if (pop) {
+        html_dom_set_attr(pop, "class", "responsePop");
+        html_dom_set_attr(pop, "style", "");
+        html_dom_set_html(pop, html);
+        html_dom_set_display(pop, "block");
+    }
+    free(html);
+}
+
 void ui_alert(const char *text) {
     menu_log("alert: %s", text ? text : "");
 #ifdef __EMSCRIPTEN__

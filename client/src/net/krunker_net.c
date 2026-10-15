@@ -15,6 +15,7 @@
 #include <backend.h>
 #include <html_ui.h>
 #include <ui_logic.h>
+#include <join_errors.h> // a failed join's text and place (join_errors.c)
 #include <cJSON.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -87,6 +88,7 @@ static struct {
     // main-thread notices (krunker_net_tick)
     char notice[256];
     int notice_pending, captcha_pending;
+    int notice_popup; // the pending notice is an error (v10's error popup), else an info toast
     KrunkerAltcha altcha; // web: the "cpt" being solved in slices
     int altcha_pending;
     int pow_shown;           // the "cpt" modal shows "verifying…" (krunker_captcha_pow_begin)
@@ -187,14 +189,38 @@ static void trace_frame(const char *dir, const uint8_t *data, const size_t len) 
     krunker_frame_free(&f);
 }
 
+// The main thread shows the pending notice in krunker_net_tick: an info toast (set_notice), or an
+// error popup the player stays in the game past (set_popup_notice). A failure that ends the join is
+// not a notice: present_failure shows it on the Lost Connection screen.
+static void post_notice(const int popup, const int captcha, const char *fmt, va_list ap) {
+    vsnprintf(K.notice, sizeof(K.notice), fmt, ap);
+    K.notice_pending = 1;
+    K.notice_popup = popup;
+    if (captcha) K.captcha_pending = 1;
+}
+
 static void set_notice(const int captcha, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 static void set_notice(const int captcha, const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
-    vsnprintf(K.notice, sizeof(K.notice), fmt, ap);
+    post_notice(0, captcha, fmt, ap);
     va_end(ap);
-    K.notice_pending = 1;
-    if (captcha) K.captcha_pending = 1;
+}
+
+static void set_popup_notice(const int captcha, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
+static void set_popup_notice(const int captcha, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    post_notice(1, captcha, fmt, ap);
+    va_end(ap);
+}
+
+// A failure that ends the join (or the session): the Lost Connection screen (on_client_socket_failed),
+// or, when the player is in a game and stays in it, v10's error popup over that game (join_errors.h).
+static void present_failure(const char *text) {
+    Client *client = K.client;
+    if (join_error_place(client && client->net_connected) == JOIN_ERROR_POPUP) set_popup_notice(0, "%s", text);
+    else if (client) on_client_socket_failed(client, text);
 }
 
 // ---------------------------------------------------------------- link I/O
@@ -214,10 +240,10 @@ static void link_event(void *user, const KrunkerLinkEvent kind, const char *text
     char out[300];
     switch (kind) {
         case KRUNKER_LINK_EV_CAPTCHA: // a "cpt" krunker_altcha cannot answer (not SHA-256 ALTCHA, too big)
-            set_notice(1, "%s", K.tpl.pow);
+            set_popup_notice(1, "%s", K.tpl.pow);
             break;
         case KRUNKER_LINK_EV_ERROR:
-            set_notice(0, "%s", i18n_replace(out, sizeof(out), K.tpl.error, 1, I18N_ARGV(text ? text : "error")));
+            present_failure(i18n_replace(out, sizeof(out), K.tpl.error, 1, I18N_ARGV(text ? text : "error")));
             break;
         case KRUNKER_LINK_EV_UNSUPPORTED: // a map our catalogue lacks: nothing to show, krunker_net_tick leaves
             K.leave_unsupported = 1;
@@ -303,8 +329,7 @@ static void socket_closed(const int code, const char *reason, const char *failed
         if (failed && failed[0]) snprintf(message, sizeof(message), "%s", failed);
         else if (reason && reason[0]) i18n_replace(message, sizeof(message), K.tpl.ws_failed, 1, I18N_ARGV(reason));
         else snprintf(message, sizeof(message), "%s", K.tpl.ws_unreachable);
-        on_client_socket_failed(client, message);
-        set_notice(0, "%s", message);
+        present_failure(message);
     }
 }
 
@@ -317,8 +342,7 @@ static void fail(const char *fmt, ...) {
     va_end(ap);
     fprintf(stderr, "[krunker] %s\n", message);
     K.state = KS_CLOSED;
-    if (K.client) on_client_socket_failed(K.client, message);
-    set_notice(0, "%s", message);
+    present_failure(message);
 }
 
 // ---------------------------------------------------------------- web socket
@@ -932,7 +956,7 @@ static void captcha_done(void *user, const char *token) {
         // the modal's Cancel (krunker_captcha_ui.c finish(NULL)), or a build with no page to show it in
         if (!html_ui_available())
             fail("%s", I18N("kn.kio.captchaNoUi", "krunker.io asks for a security challenge, and this build has no menu to show it in: no game was joined."));
-        else
+        else // the player closed it: KN's sentence says what they did (krunker_net.c's e2e pins it; v10's CaptchaRequired
             fail("%s", I18N("kn.kio.captchaCancelled", "You closed krunker.io's security challenge, so no game was joined. Pick the lobby again to retry."));
         return;
     }
@@ -980,9 +1004,10 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         K.captcha_sent = 0;
         if (K.captcha_attempts >= 2) {
             // (every prompt after the first follows a refused token: a cancel ends the join at once)
-            char tries[16], text[300];
-            snprintf(tries, sizeof(tries), "%d", K.captcha_attempts);
-            I18N_F(text, "kn.kio.captchaRefused", "krunker.io refused the security challenge's token {0} times, so no game was joined. Wait a minute and try again.", tries);
+            // v10 gives up after the second refused token with the same CaptchaRequired (v10.js:147444-147450)
+            char text[300];
+            printf("[krunker] the security challenge's token was refused %d times\n", K.captcha_attempts);
+            join_error_text("CaptchaRequired", text, sizeof(text));
             fail("%s", text);
         } else {
             K.captcha_attempts++;
@@ -997,12 +1022,12 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         denied_text(text, sizeof(text), K.matchmaker);
         fail("%s", text);
     } else if (status != 200 || error || !host || !game || !client_id) {
-        char detail[200], code[16], text[300];
-        // the matchmaker's own error word, else the start of its body on one line
+        char detail[200], text[300];
+        // the matchmaker's own error word, else the start of its body on one line (the log)
         snprintf(detail, sizeof(detail), "%.120s", error ? error : body && body[0] ? body : "(no reason given)");
         for (char *c = detail; *c; c++) if (*c == '\r' || *c == '\n' || *c == '\t') *c = ' ';
-        snprintf(code, sizeof(code), "%d", status);
-        I18N_F(text, "kn.kio.seekRefused", "krunker.io's matchmaker turned the join down (HTTP {0}) {1}", code, detail);
+        printf("[krunker] seek-game refused (HTTP %d): %s\n", status, detail);
+        join_error_text(error ? error : "GameIssue", text, sizeof(text));
         fail("%s", text);
     } else if (K.seek_new && !K.game_id[0] && recent_lobbies_rank(&K.recent, game) &&
                (K.seek_new_retries < KRUNKER_SEEK_NEW_RETRIES || (K.fallback[0] && strcmp(K.fallback, game) &&
@@ -1187,8 +1212,9 @@ void krunker_net_tick(Client *client) {
         pthread_mutex_unlock(&K.lock);
         i18n_replace(text, sizeof(text), K.tpl.map, 1, I18N_ARGV(index));
         printf("[krunker] the game plays map index %s, not in this client's catalogue: leaving\n", index);
-        krunker_net_leave(client ? client : K.client, text);
-        ui_notify(text);
+        Client *leaving = client ? client : K.client;
+        krunker_net_leave(leaving, text);
+        if (leaving) on_client_socket_failed(leaving, text); // the session ended: the Lost Connection screen says why
         return;
     }
     if (K.leave_closed && K.state != KS_OFF) {
@@ -1222,7 +1248,7 @@ void krunker_net_tick(Client *client) {
             pthread_mutex_unlock(&K.lock);
             printf("[krunker] security challenge answered (%s proof of work, number %ld)\n", K.altcha.algorithm, K.altcha.next);
         } else if (rc < 0 && K.state == KS_OPEN) {
-            set_notice(1, "%s", K.tpl.pow);
+            set_popup_notice(1, "%s", K.tpl.pow);
         }
         free(payload);
     }
@@ -1230,13 +1256,17 @@ void krunker_net_tick(Client *client) {
     pthread_mutex_lock(&K.lock);
     char text[sizeof(K.notice)];
     snprintf(text, sizeof(text), "%s", K.notice);
-    const int captcha = K.captcha_pending;
-    K.notice_pending = K.captcha_pending = 0;
+    const int captcha = K.captcha_pending, popup = K.notice_popup;
+    K.notice_pending = K.captcha_pending = K.notice_popup = 0;
     pthread_mutex_unlock(&K.lock);
     if (captcha) {
         // a "cpt" this client cannot answer (not SHA-256 ALTCHA, or too big): the Security Challenge
         // modal shows it failed, the toast says what (the session goes on until the server decides)
         krunker_captcha_pow_end(0);
+    }
+    if (popup) { // an error the player stays in the game past: v10's error popup (it escapes the text)
+        ui_error_popup(text);
+        return;
     }
     char html[sizeof(text) * 2];
     size_t o = 0; // the toast takes HTML: escape the server's text

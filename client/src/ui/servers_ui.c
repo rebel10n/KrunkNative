@@ -25,6 +25,7 @@
 #include <game_config.h> // WP-E host types (GAME_HOST_CUSTOM, hostTypes titles)
 #include <ui_host_config.h> // WP-E: the Host Game window's mode / advanced / server bodies
 #include <server_names.h>  // short ?game= ids (CH2:kz862 for CHITOWN2:kz862)
+#include <join_errors.h>   // a failed join's text and place (join_errors.c)
 #include <seek_prefs.h>    // Settings > Quickplay: seek mode / map / server type (mm-token)
 #include <krunker_lobbies.h> // official krunker.io lobbies (native only, mm-token)
 #include <krunker_net.h>     // krunker_net_in_client: official lobbies join here unless the browser opt-out
@@ -345,48 +346,23 @@ void servers_ui_join_ticket(const char *host, const int port, const char *game_i
 
 // A matchmaker.* value as plain text (the error screen and the toast escape it): v10's
 // "<br><small>" lines become ". ", other tags go. Static buffer: one message at a time.
-static const char *mm_plain(const char *html) {
+// v3.1.1 matchmaker error names -> i18n matchmaker.* texts (the startup seek's catch)
+static void fatal_error(const char *message);
+
+// The matchmaker's error word as the player reads it (join_errors.c: v10's texts, KN's where v10 has none).
+// The buffer is reused by the next call: the callers use the text at once.
+static const char *seek_error_text(const char *error) {
     static char out[256];
-    size_t o = 0;
-    for (const char *p = html; *p && o + 3 < sizeof(out);) {
-        if (!strncmp(p, "<br>", 4)) {
-            out[o++] = '.';
-            out[o++] = ' ';
-            p += 4;
-        } else if (*p == '<') {
-            const char *close = strchr(p, '>');
-            p = close ? close + 1 : p + strlen(p);
-        } else {
-            out[o++] = *p++;
-        }
-    }
-    out[o] = 0;
+    join_error_text(error, out, sizeof(out));
     return out;
 }
 
-// v3.1.1 matchmaker error names -> i18n matchmaker.* texts (the startup seek's catch)
-static const char *seek_error_text(const char *error) {
-    if (!error) return I18N("kn.matchmaker.unreachable", "Could not reach the matchmaker");
-    if (!strcmp(error, "InvalidGameId")) return I18N("matchmaker.InvalidGameId", "Game not found.");
-    if (!strcmp(error, "GameFull")) return I18N("matchmaker.GameFull", "Game is full.");
-    // menu_ui.c recognises the Game Updating screen by this text: it stays the English sentinel
-    if (!strcmp(error, "NoServersMatchQuery") || !strcmp(error, "updating")) return "GAME UPDATING";
-    if (!strcmp(error, "NoAvailableServers") || !strcmp(error, "no_lobbies")) return I18N("matchmaker.NoAvailableServers", "Servers are at Max Capacity");
-    if (!strcmp(error, "Failed")) return I18N("generic.failed", "Failed");
-    // KrunkNative: the brain refuses a guest only a lobby of a server_bin that still refused
-    // guests (every current server admits them, as Krunker's do); the error screen adds a
-    // "Log in" link (servers_ui_account_required)
-    if (!strcmp(error, "AccountRequired")) return I18N("kn.matchmaker.accountRequired", "This game requires an account.");
-    // v10.0.2: the seek preferences matched nothing (matchmaker.NoMatchingServers) and the
-    // validation token refusals (ClientManager ERRORS, v10.js:147687-147692)
-    if (!strcmp(error, "NoMatchingServers"))
-        return mm_plain(I18N("matchmaker.NoMatchingServers", "No Games Found<br><small>Try changing Quickplay options</small>"));
-    if (!strcmp(error, "InvalidClientValidationToken")) return "Socket Error";
-    if (!strcmp(error, "InvalidClientIP")) return "Socket Mismatch";
-    if (!strcmp(error, "ExpiredClientValidationToken")) return "Validation Error";
-    if (!strcmp(error, "InvalidClientValidationTokenData")) return "Data Error";
-    if (!strcmp(error, "TooManyRequests")) return I18N("kn.matchmaker.tooManyRequests", "Too many requests, try again in a minute");
-    return error;
+// A failed join or lobby search the player hears about (the seek, krunker_lobbies.c's no-room and
+// no-list answers): v10's error popup while the player stays in a game, else the Lost Connection
+// screen (join_error_place).
+void servers_ui_seek_failed(const char *text) {
+    if (join_error_place(g_client && g_client->net_connected) == JOIN_ERROR_POPUP) ui_error_popup(text);
+    else fatal_error(text);
 }
 
 static int token_refusal(const char *error) {
@@ -681,8 +657,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
                 printf("[mm] find new game: no KrunkNative server matches, trying krunker.io\n");
             } else {
                 printf("[mm] find new game failed: %s\n", cJSON_IsString(err) ? err->valuestring : "no response");
-                ui_notify(seek_error_text(cJSON_IsString(err) ? err->valuestring : status ? "GameFull" : NULL));
-                if (!g_client->net_connected) fatal_error(seek_error_text(cJSON_IsString(err) ? err->valuestring : status ? "GameFull" : NULL));
+                servers_ui_seek_failed(seek_error_text(cJSON_IsString(err) ? err->valuestring : status ? "GameIssue" : NULL));
             }
             cJSON_Delete(res);
             return;
@@ -690,7 +665,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         if (cJSON_IsString(err) && !strcmp(err->valuestring, "AccountRequired") && g_seek_game[0]) {
             snprintf(g_account_game, sizeof(g_account_game), "%s", g_seek_game); // log in -> join it
         }
-        fatal_error(seek_error_text(cJSON_IsString(err) ? err->valuestring : status ? "GameFull" : NULL));
+        fatal_error(seek_error_text(cJSON_IsString(err) ? err->valuestring : status ? "GameIssue" : NULL));
     }
     cJSON_Delete(res);
 }
@@ -701,7 +676,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
 static void strike_seek_failed(const char *error) {
     if (g_find_seek && g_client->net_connected) { // Find New Game found nothing: stay in this lobby
         snprintf(g_game_id, sizeof(g_game_id), "%s", g_find_prev_game);
-        ui_notify(seek_error_text(error));
+        ui_error_popup(seek_error_text(error));
     } else {
         fatal_error(seek_error_text(error));
     }

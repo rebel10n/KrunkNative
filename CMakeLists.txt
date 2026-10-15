@@ -902,6 +902,12 @@ else ()
     target_link_libraries(krunker_link_test PRIVATE cJSON m)
     add_test(NAME krunker_link_test COMMAND krunker_link_test)
 
+    # join_errors_test (client/src/ui/join_errors.c): the text of each failed-join code (v10.0.2's where
+    # v10 has the same case, KN's where it has none) and where it shows (in a game: the error popup)
+    add_executable(join_errors_test client/tests/join_errors_test.c client/src/ui/join_errors.c)
+    target_include_directories(join_errors_test PRIVATE client/include shared/include)
+    add_test(NAME join_errors_test COMMAND join_errors_test)
+
     # krunker_sync_test: our prediction (shared physics, the v10 "q" window, krunker_link, net_reconcile)
     # against a double-precision reimplementation of Krunker 10.0.3's procInputs as the official server
     add_executable(krunker_sync_test ${SHARED_HEADERS} ${SHARED_SOURCES} client/tests/krunker_sync_test.c client/src/net/krunker_link.c

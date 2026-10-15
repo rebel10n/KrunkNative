@@ -1,6 +1,7 @@
 // Official krunker.io lobbies (client/include/krunker_lobbies.h, doc/v10/matchmaker-token.md
 // "Official lobbies"). Native only: platform behaviour, so the web build compiles the stubs at
 // the end (#ifndef __EMSCRIPTEN__) and never lists or requests anything from krunker.io.
+#include <join_errors.h>
 #include <krunker_lobbies.h>
 #include <krunker_net.h>
 #include <seek_prefs.h>
@@ -303,7 +304,8 @@ int krunker_lobbies_seek(void) {
                 krunker_net_seek_new(g_lobbies_client, NULL, 1);
                 return 1;
             }
-            ui_notify(K.error[0] ? K.error : I18N("kn.kio.notReachableNow", "krunker.io is not reachable right now"));
+            // a failure, not news: the Lost Connection screen (servers_ui.c), the error popup in a game
+            servers_ui_seek_failed(K.error[0] ? K.error : I18N("kn.kio.notReachableNow", "krunker.io is not reachable right now"));
             return 1;
         }
     }
@@ -320,10 +322,11 @@ int krunker_lobbies_seek(void) {
         printf("[krunker] seek: official lobby %s%s\n", id, krunker_net_recent_rank(id) ? " (a recent one: nothing else has room)" : "");
         krunker_lobbies_open(id);
     } else {
+        // v10's text for a search that matched no game (matchmaker.NoMatchingServers), as a failure
         seek_prefs_describe(want, sizeof(want));
-        I18N_F(text, "kn.kio.noRoom", "No official krunker.io lobby has room for {0}", want);
         printf("[krunker] seek: No official krunker.io lobby has room for %s\n", want);
-        ui_notify(text);
+        join_error_text("NoMatchingServers", text, sizeof(text));
+        servers_ui_seek_failed(text);
     }
     return 1;
 }

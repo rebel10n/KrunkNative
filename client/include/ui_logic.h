@@ -642,6 +642,8 @@ typedef void (*UiDialogFn)(int accepted, const char *text, void *user);
 void ui_confirm(const char *text, UiDialogFn fn, void *user);
 void ui_prompt(const char *text, UiDialogFn fn, void *user);
 void ui_alert(const char *text);
+void ui_error_popup(const char *text);          // v10's error popup (responsePop, red clear icon): a failure the player stays in a game past (join_errors.h)
+void servers_ui_seek_failed(const char *text);   // a failed join / lobby search: the error popup in a game, else the Lost Connection screen
 void ui_dialog_answer(int accepted);             // knDialog(1|0)
 void ui_dialog_cancel(void);                     // clearPops / #popupBack
 int  ui_dialog_prompt_focused(HtmlElem el);      // el is the open prompt's text field
