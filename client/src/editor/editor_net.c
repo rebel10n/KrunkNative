@@ -54,6 +54,7 @@
 #include <backend_ui.h>
 #include <gl.h>
 #include <html_ui.h>
+#include <map_validate.h> // publishMap: validateMap before the upload popup
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1159,9 +1160,26 @@ void ed_net_publish(void) {
         io_po(NULL, "Must be logged in", NULL);
         return;
     }
+    // v10 publishMap: a named map is checked first (validateMap(JSON.parse(getMapExport()), cb,
+    // false)) and its first error is the failure popup; nothing is uploaded. An unnamed map opens
+    // the publish form unchecked, as in v10 (its name comes later; uploadM checks it then).
+    char *exported = ed_map_export_string();
+    if (ed_json_str(g_ed.proj->map_config, "name", "")[0]) {
+        cJSON *doc = exported ? cJSON_Parse(exported) : NULL;
+        const char *error = doc ? map_validate_error(doc, 0) : "Map error occured.";
+        if (error) {
+            char copy[256];
+            snprintf(copy, sizeof(copy), "%s", error); // map_validate_error's storage is static
+            cJSON_Delete(doc);
+            free(exported);
+            io_po(NULL, copy, NULL);
+            return;
+        }
+        cJSON_Delete(doc);
+    }
     if (!g_listening) g_listening = backend_social_listen(on_social, NULL);
     free(g_pub_map);
-    g_pub_map = ed_map_export_string(); // saveVal("mapToPub", getMapExport())
+    g_pub_map = exported; // saveVal("mapToPub", getMapExport())
     cJSON_Delete(g_pub_row);
     g_pub_row = NULL;
     g_pub_gen++;

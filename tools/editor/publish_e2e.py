@@ -8,6 +8,8 @@ sqlite needs no server; services/brain/tests/db_scratch.py) on an ephemeral port
 registers over the social socket; two headless editor runs (client_bin --editor, EGL, no window on
 any display) restore its session from storage and drive editor_net.c with KRUNKNATIVE_EDITOR_SCRIPT:
 
+0. Publish > Game on a map without a spawn point: v10's publishMap runs validateMap first and shows
+   "Missing spawn points." as the failure popup; no publish form, nothing uploaded.
 1. Publish > Game (publishMap -> the My Games lookup -> publishGamePopup -> uploadM -> pubMR ->
    mapResp "Game Uploaded!"), the map on /api/maps; publishMap again: "Update Game" / "Publish v0.2"
    -> "Game Updated!"; Publish > Asset -> uploadA -> kn_brain's "File uploads are not supported".
@@ -153,6 +155,18 @@ def main():
             with open(os.path.join(cfg, "krunknative", k + ".json"), "w") as f:
                 f.write(v)
         D = lambda n: os.path.join(WORK, n)
+
+        # ---- run 0: v10's publishMap checks a named map before anything is uploaded: no spawn point
+        # -> validateMap's first error as the failure popup, no publish form, nothing on the brain
+        bad = mapname + "x"
+        s = ["cfg:set:map.name:%s" % json.dumps(bad), "add:0", "wait:1", "publish:7", "wait:4", "dump:popup:%s" % D("pub0.txt")]
+        log0 = editor(port, cfg, s, "run0")
+        p0 = read(D("pub0.txt"))
+        check("publish refuses a spawnless map: v10's \"Missing spawn points.\" popup", "X Missing spawn points." in p0, p0 + log0[-800:])
+        check("... before the upload: no publish form, no uploadM",
+              "Publish Game" not in p0 and "KE.uploadGame" not in log0 and "publish thumbnail" not in log0, p0)
+        rows = api(port, "/api/maps?index=4&pos=0&accountId=%d" % acc_id)["data"]
+        check("... and the brain has no such map", not [r for r in rows if r["map_name"] == bad], str(rows)[:300])
 
         # ---- run 1: publish, update, publish asset
         # add:5 = SPAWN_POINT: uploadM runs v10's validateMap, which refuses a map without spawns
