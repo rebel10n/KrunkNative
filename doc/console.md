@@ -281,14 +281,21 @@ route's own level, no stepping off an edge the route does not drop from, players
 a replan that routes around the spot after 0.8 s without progress and a stuck recovery (back
 off, hop, new goal) after a second one. The grid and the sweeps model Krunker's movement: the
 climb height (3), low obstacles standing on a floor (a hop lands on top), ramps that lift a
-walker onto their surface from the side as well as up the slope, ladders that are walked past,
-seams between floor tiles that the body bridges; hops at a jump link wait until the run-up heads
-at the ledge. Whatever chose the move (walking, Attack's dodges, mimic), `bot_path_guard` drops a
+walker onto their surface from the side as well as up the slope, ladders that are walked past
+(and let go of, away from the ladder, when one holds the body above the route), seams between
+floor tiles that the body bridges, cylinders as the circles the body collides with, border
+objects as the 500-unit walls (borderH) they are; hops at a jump link wait until the run-up heads
+at the ledge. A start or goal with no node in reach (a goal inside a solid, like oasis_v3's hill
+centre) snaps to the nearest node; a point overhead (a Kill Confirmed tag or a flag dropped
+mid-jump) is jumped for, then given up. Whatever chose the move (walking, Attack's dodges, mimic), `bot_path_guard` drops a
 move or a hop that would carry the body off a void edge (nothing above deathY to land on) and
 brakes a drift toward one; a one-way drop into a pit with no way back out costs A* extra.
 `bot_nav` prints the counters ("falls": bots that died under deathY); `bot_test` runs 8 roaming
 bots on Kanji, Sandstorm, Industry, v7's SkyTemple and FRVR Strike's SkyTemple (and fighting on
-both islands) and fails on stuck recoveries, bots pressing into walls or bots falling off.
+both islands) and fails on stuck recoveries, bots pressing into walls or bots falling off;
+`bot_stuck_test` checks that every spawn of every rotation map is routable and that six bots on a
+fixed list of maps and modes never stand stuck over 5 s or run into one spot again and again
+(`KN_STUCK_ALL=1`: every rotation map in every mode the bots play).
 `shared/include/bot_path.h` is the read-only view of a bot's route (`bot_path_current`) for the
 spectate overlay and bot movement.
 

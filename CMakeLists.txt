@@ -733,6 +733,13 @@ else ()
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(bot_objective_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
+    # bot_stuck_test: every rotation map's spawns are routable on the nav grid, and six bots on a
+    # fixed list of maps and modes never stay stuck (KN_STUCK_ALL=1: every rotation map and mode)
+    add_executable(bot_stuck_test ${SHARED_HEADERS} ${SHARED_SOURCES} shared/tests/bot_stuck_test.c)
+    target_link_libraries(bot_stuck_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(bot_stuck_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
     # nav_overlay_test (KrunkNative spectate overlay): the NET_EXT_KN_BOT_PATH body
     # (shared/src/bot_path_net.c fill / decode) and the GL-free overlay geometry
     # (client/src/nav_overlay_geom.c: route polyline, goal / target / last-known markers)

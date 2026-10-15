@@ -47,7 +47,10 @@
 typedef struct {
     float x0, x1, y0, y1, z0, z1;
     unsigned char ramp;
+    unsigned char cyl;           // a CYLINDER: the body collides with the circle (player.c), not the box
+    unsigned char border;        // a border ("bo"): solid borderH (500) over its top, no floor to stand on
     float rsx, rsz, rex, rez;    // ramp start / end (x, z)
+    float cx, cz, rad;           // cyl: the circle (radius min(sx, sz) / 2, movement_box)
 } NavBox;
 
 typedef struct {
@@ -116,6 +119,17 @@ static float nav_ramp_y(const NavBox *b, const float x, const float z) {
     return b->y0 + (b->y1 - b->y0) * t;
 }
 
+// A cylinder's circle meets the rectangle [x0, x1] x [z0, z1] (a point when x0 == x1, z0 == z1).
+// Every test below takes a box by its bounds first; a cylinder (a tower, a column: clockwork's
+// invisible 424-wide one) must also pass this, or the corners of its bounds, which the body walks
+// through, are walls and floors to the grid (KN bug: clockwork's spawn at (338, 18, 71) stood
+// inside the bounds of the cylinder beside it, off the grid, and its bot never moved).
+static int nav_cyl_rect(const NavBox *b, const float x0, const float x1, const float z0, const float z1) {
+    const float qx = CLAMP(b->cx, x0, x1) - b->cx, qz = CLAMP(b->cz, z0, z1) - b->cz;
+    return qx * qx + qz * qz < b->rad * b->rad;
+}
+#define NAV_CYL_MISS(box, X0, X1, Z0, Z1) ((box)->cyl && !nav_cyl_rect(box, X0, X1, Z0, Z1))
+
 // The top a standing player meets inside the box at (x, z): the ramp surface or the top.
 static float nav_box_top(const NavBox *b, const float x, const float z) { return b->ramp ? nav_ramp_y(b, x, z) : b->y1; }
 
@@ -166,7 +180,7 @@ static int nav_ramp_snap(const BotNav *nav, const float x, const float y, const 
 static int nav_clear(const BotNav *nav, const float x, const float y, const float z) {
     const float r = NAV_RADIUS;
     NAV_FOR_BOXES(nav, x - r, x + r, z - r, z + r, {
-        if (box->x1 < x - r || box->x0 > x + r || box->z1 < z - r || box->z0 > z + r) continue;
+        if (box->x1 < x - r || box->x0 > x + r || box->z1 < z - r || box->z0 > z + r || NAV_CYL_MISS(box, x - r, x + r, z - r, z + r)) continue;
         const float top = box->ramp ? nav_box_top(box, x, z) : box->y1;
         if (box->y0 < y + NAV_HEIGHT && top > y + NAV_STEP) return 0;
     });
@@ -177,7 +191,7 @@ static int nav_clear(const BotNav *nav, const float x, const float y, const floa
 // (stairs are thin boxes a step apart; a lip over a fall has nothing).
 static int nav_supported_point(const BotNav *nav, const float x, const float y, const float z) {
     NAV_FOR_BOXES(nav, x, x, z, z, {
-        if (x < box->x0 || x > box->x1 || z < box->z0 || z > box->z1) continue;
+        if (x < box->x0 || x > box->x1 || z < box->z0 || z > box->z1 || NAV_CYL_MISS(box, x, x, z, z)) continue;
         const float top = nav_box_top(box, x, z);
         if (top >= y - NAV_STEP && top <= y + NAV_STEP) return 1;
     });
@@ -210,6 +224,19 @@ static int nav_segment_clear(const BotNav *nav, const vec3 a, const vec3 b, cons
             if (n > t0) t0 = n;
             if (f < t1) t1 = f;
             if (t0 > t1) hit = 0;
+        }
+        if (hit && box->cyl) { // the circle's span along the segment (2D)
+            const float ox = ax - box->cx, oz = az - box->cz, qa = dx * dx + dz * dz;
+            const float qb = 2.0f * (ox * dx + oz * dz), qc = ox * ox + oz * oz - box->rad * box->rad;
+            const float disc = qb * qb - 4.0f * qa * qc;
+            if (qa < 1e-8f) hit = qc < 0.0f;
+            else if (disc <= 0.0f) hit = 0;
+            else {
+                const float sq = sqrtf(disc);
+                t0 = MAX(t0, (-qb - sq) / (2.0f * qa));
+                t1 = MIN(t1, (-qb + sq) / (2.0f * qa));
+                hit = t0 <= t1;
+            }
         }
         if (hit && t1 > 0.0f && t0 < 1.0f) return 0;
     });
@@ -265,7 +292,9 @@ static int nav_hazard(const Map *map, const float x, const float y, const float 
         if (!o->active || !(o->jump_pad || o->kill || (o->ramp && o->ramp->boost))) continue;
         const float hx = o->scale.x * 0.5f + NAV_RADIUS, hz = o->scale.z * 0.5f + NAV_RADIUS;
         if (x < o->position.x - hx || x > o->position.x + hx || z < o->position.z - hz || z > o->position.z + hz) continue;
-        if (y + NAV_HEIGHT < o->position.y || y > o->position.y + o->scale.y + 1.0f) continue;
+        // the feet over its top: the player is not inside it (movement_collides_padded: p.y <= top). Freight
+        // has a death zone inside its floor slab, a unit under a spawn: 1.0 here took the spawn off the grid
+        if (y + NAV_HEIGHT < o->position.y || y > o->position.y + o->scale.y + 0.5f) continue;
         return 1;
     }
     return 0;
@@ -296,7 +325,7 @@ static int nav_slope_walk(const BotNav *nav, const vec3 a, const vec3 b) {
     return fabsf(y - b.y) <= 1.0f;
 }
 
-static BotNav *nav_build(const Map *map) {
+static BotNav *nav_build(const Map *map, const float border_h) {
     BotNav *nav = calloc(1, sizeof(BotNav));
     if (!nav) return NULL;
     nav->key = map->raw_data;
@@ -317,6 +346,19 @@ static BotNav *nav_build(const Map *map) {
         b->z1 = o->position.z + size.z * 0.5f;
         b->y0 = o->position.y;
         b->y1 = o->position.y + (size.y > 0.01f ? size.y : 0.01f);
+        if (o->collision_type == COLLISION_TYPE_CYLINDER && !o->ramp) {
+            b->cyl = 1;
+            b->cx = o->position.x;
+            b->cz = o->position.z;
+            b->rad = MIN(size.x, size.z) * 0.5f;
+        }
+        // a border box collides borderH above its top (movement_border: an invisible wall, lagoon's
+        // cliff edges; whoever lands up there stands at top + borderH): a wall to the grid. The bots
+        // walked into lagoon's south edge again and again toward a "floor" past it
+        if (o->is_border && border_h > 0.0f && !o->ramp && !b->cyl) {
+            b->border = 1;
+            b->y1 += border_h;
+        }
         if (o->ramp) {
             b->ramp = 1;
             b->rsx = o->ramp->start.x;
@@ -379,6 +421,7 @@ static BotNav *nav_build(const Map *map) {
     if (!cands) goto fail;
     for (int i = 0; i < nav->box_count; i++) {
         const NavBox *b = &nav->boxes[i];
+        if (b->border) continue; // nobody walks on top of a border
         const int cx0 = MAX(0, (int) ceilf((b->x0 - nav->x0) / NAV_CELL - 0.5f)), cx1 = MIN(nav->w - 1, (int) floorf((b->x1 - nav->x0) / NAV_CELL - 0.5f));
         const int cz0 = MAX(0, (int) ceilf((b->z0 - nav->z0) / NAV_CELL - 0.5f)), cz1 = MIN(nav->h - 1, (int) floorf((b->z1 - nav->z0) / NAV_CELL - 0.5f));
         for (int cz = cz0; cz <= cz1; cz++) {
@@ -580,7 +623,7 @@ BotNav *bot_nav_for(Game *game) {
     bots->nav_built_at = game->now;
     if (bots->nav_failed_key == game->map->raw_data && !stale) return NULL;
     bots->nav_failed_key = NULL;
-    bots->nav = nav_build(game->map);
+    bots->nav = nav_build(game->map, game->config.disable_borders ? 0.0f : game_constants.border_height);
     if (!bots->nav) bots->nav_failed_key = game->map->raw_data;
     return bots->nav;
 }
@@ -638,6 +681,32 @@ static int nav_nearest(const BotNav *nav, const vec3 p, const int search) {
                         const vec3 a = {p.x, node->y, p.z}, b = {node->x, node->y, node->z};
                         if (!nav_walk_line(nav, a, b)) continue;
                     }
+                    best_score = score;
+                    best = n;
+                }
+            }
+        }
+    }
+    return best;
+}
+
+// The node nearest `p` in any layer, nothing in between checked: the fallback when nav_nearest
+// finds none (a goal inside a solid: the bottom centre of oasis_v3's hill is inside the platform
+// it stands on, and no bot could route to the hill; a point under or above every floor). Planar
+// distance plus twice the height difference.
+static int nav_nearest_any(const BotNav *nav, const vec3 p, const int search) {
+    const int cx = (int) floorf((p.x - nav->x0) / NAV_CELL), cz = (int) floorf((p.z - nav->z0) / NAV_CELL);
+    int best = -1;
+    float best_score = 1e9f;
+    for (int dz = -search; dz <= search; dz++) {
+        for (int dx = -search; dx <= search; dx++) {
+            const int x = cx + dx, z = cz + dz;
+            if (x < 0 || z < 0 || x >= nav->w || z >= nav->h) continue;
+            const int cell = z * nav->w + x;
+            for (int n = nav->cell_first[cell]; n < nav->cell_first[cell + 1]; n++) {
+                const NavNode *node = &nav->nodes[n];
+                const float score = hypotf(p.x - node->x, p.z - node->z) + fabsf(p.y - node->y) * 2.0f;
+                if (score < best_score) {
                     best_score = score;
                     best = n;
                 }
@@ -705,7 +774,9 @@ int bot_nav_find_path(Game *game, const vec3 from, const vec3 to, BotPath *out) 
     BotNav *nav = bot_nav_for(game);
     if (!nav) return 0;
     const float now_ms = game->now * 1000.0f;
-    const int start = nav_nearest(nav, from, 5), goal = nav_nearest(nav, to, 4);
+    int start = nav_nearest(nav, from, 5), goal = nav_nearest(nav, to, 4);
+    if (start < 0) start = nav_nearest_any(nav, from, 3);
+    if (goal < 0) goal = nav_nearest_any(nav, to, 6); // the closest the grid gets to it
     if (start < 0 || goal < 0) return 0;
     const vec3 goal_pos = nav_node_pos(nav, goal);
 
@@ -854,7 +925,7 @@ static int nav_ground_at(const BotNav *nav, const float x, const float y, const 
     float best = -1e9f;
     int found = 0;
     NAV_FOR_BOXES(nav, x - half, x + half, z - half, z + half, {
-        if (x + half < box->x0 || x - half > box->x1 || z + half < box->z0 || z - half > box->z1) continue;
+        if (x + half < box->x0 || x - half > box->x1 || z + half < box->z0 || z - half > box->z1 || NAV_CYL_MISS(box, x - half, x + half, z - half, z + half)) continue;
         const float top = nav_box_top(box, CLAMP(x, box->x0, box->x1), CLAMP(z, box->z0, box->z1));
         if (top > y + up || top < y - max_drop) continue;
         if (top > best) {
@@ -904,7 +975,7 @@ static int nav_sweep(const BotNav *nav, const vec3 feet, const vec3 dir, const f
         int blocked = 0, hard = 0;
         float block_top = -1e9f;
         NAV_FOR_BOXES(nav, x - r, x + r, z - r, z + r, {
-            if (hard || box->x1 <= x - r || box->x0 >= x + r || box->z1 <= z - r || box->z0 >= z + r) continue;
+            if (hard || box->x1 <= x - r || box->x0 >= x + r || box->z1 <= z - r || box->z0 >= z + r || NAV_CYL_MISS(box, x - r, x + r, z - r, z + r)) continue;
             const float top = box->ramp ? nav_ramp_y(box, CLAMP(x, box->x0, box->x1), CLAMP(z, box->z0, box->z1)) : box->y1;
             if (box->ramp && top <= y + NAV_RAMP_SNAP) continue; // the slope we walk, or a ramp side that lifts us onto it
             if (box->y0 < head && top > knee && top > prev_y + NAV_CLIMB) {
@@ -918,7 +989,7 @@ static int nav_sweep(const BotNav *nav, const vec3 feet, const vec3 dir, const f
             // room over the obstacle for the body (no beam or ceiling right above it)
             const float top0 = block_top, top1 = block_top + NAV_HEIGHT;
             NAV_FOR_BOXES(nav, x - r, x + r, z - r, z + r, {
-                if (hard || box->x1 <= x - r || box->x0 >= x + r || box->z1 <= z - r || box->z0 >= z + r) continue;
+                if (hard || box->x1 <= x - r || box->x0 >= x + r || box->z1 <= z - r || box->z0 >= z + r || NAV_CYL_MISS(box, x - r, x + r, z - r, z + r)) continue;
                 if (box->y0 < top1 && box->y1 > top0 + 0.01f) hard = 1;
             });
             if (hard) return 2;
@@ -947,7 +1018,7 @@ int bot_nav_ground(Game *game, const vec3 p, const float max_drop, float *ground
     int found = 0;
     const float x0 = p.x - 0.5f, x1 = p.x + 0.5f, z0 = p.z - 0.5f, z1 = p.z + 0.5f;
     NAV_FOR_BOXES(nav, x0, x1, z0, z1, {
-        if (p.x < box->x0 - 0.5f || p.x > box->x1 + 0.5f || p.z < box->z0 - 0.5f || p.z > box->z1 + 0.5f) continue;
+        if (p.x < box->x0 - 0.5f || p.x > box->x1 + 0.5f || p.z < box->z0 - 0.5f || p.z > box->z1 + 0.5f || NAV_CYL_MISS(box, x0, x1, z0, z1)) continue;
         const float top = nav_box_top(box, CLAMP(p.x, box->x0, box->x1), CLAMP(p.z, box->z0, box->z1));
         if (top > p.y + NAV_STEP || top < p.y - max_drop) continue;
         if (top > best) {
@@ -967,7 +1038,7 @@ float bot_nav_headroom(Game *game, const vec3 p, const float cap) {
     const float r = NAV_BODY;
     float room = cap;
     NAV_FOR_BOXES(nav, p.x - r, p.x + r, p.z - r, p.z + r, {
-        if (box->x1 < p.x - r || box->x0 > p.x + r || box->z1 < p.z - r || box->z0 > p.z + r) continue;
+        if (box->x1 < p.x - r || box->x0 > p.x + r || box->z1 < p.z - r || box->z0 > p.z + r || NAV_CYL_MISS(box, p.x - r, p.x + r, p.z - r, p.z + r)) continue;
         if (box->y0 <= p.y + NAV_STEP) continue; // the floor / a step
         room = MIN(room, box->y0 - p.y);
     });

@@ -120,7 +120,10 @@ static void test_ctf(Game *game, const int mode_index) {
             if (bot->state >= 0 && bot->state < 8) states[bot->state]++;
             if (bot->player->mode.flag) {
                 pickups++;
-                home_runs += bot->objective.kind == BOT_GOAL_HOME; // a carrier's goal is home
+                // a carrier's goal is home; or, in a both-flags-taken stalemate, the enemy carrier
+                // (bot_objective.c OBJ_STALEMATE_MS), or our own dropped flag on the way (a return)
+                const BotObjective *o = &bot->objective;
+                home_runs += o->kind == BOT_GOAL_HOME || (o->kind == BOT_GOAL_CARRIER && o->stalemate_ms > 0.0f) || o->kind == BOT_GOAL_FLAG;
             }
         }
         if (s <= 45 * 30 && pickups) picked_in_time = 1; // a bot carries a flag
@@ -130,7 +133,7 @@ static void test_ctf(Game *game, const int mode_index) {
            states[BOT_STATE_OBJECTIVE], states[BOT_STATE_HUNT], states[BOT_STATE_ATTACK], states[BOT_STATE_HIDE], pickups, home_runs, g_kills, first_capture);
     CHECK(states[BOT_STATE_OBJECTIVE] > states[BOT_STATE_HUNT], "bots play the objective rather than roam");
     CHECK(picked_in_time, "a flag is picked up within 45 s");
-    CHECK(pickups > 0 && home_runs >= pickups * 9 / 10, "carriers head home (%d of %d ticks)", home_runs, pickups);
+    CHECK(pickups > 0 && home_runs >= pickups * 9 / 10, "carriers head home, or for the enemy carrier in a stalemate (%d of %d ticks)", home_runs, pickups);
     CHECK(g_captures >= 1, "a flag is captured within 150 s (team scores %d / %d)", game->mode->team_scores[1], game->mode->team_scores[2]);
 }
 

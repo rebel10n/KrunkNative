@@ -640,7 +640,8 @@ static void test_nav(Game *game, const int sandstorm) {
     free_players(game);
     game_init(game, sandstorm, 0, 1);
     BotNav *nav = bot_nav_for(game);
-    CHECK(nav && bot_nav_node_count(nav) > 5000, "Sandstorm grid (%d nodes)", bot_nav_node_count(nav));
+    // ~4700: the roofs are borders (500 units of wall over them, nobody stands up there), no nodes
+    CHECK(nav && bot_nav_node_count(nav) > 4000, "Sandstorm grid (%d nodes)", bot_nav_node_count(nav));
     BotPath path;
     const vec3 a = game->map->spawns[0]->position, b = game->map->spawns[2]->position;
     CHECK(bot_nav_find_path(game, a, b, &path) && path.reached && path.count > 1, "route between spawns (%d points)", path.count);

@@ -48,6 +48,9 @@
 #define BP_PLAYER_RADIUS 2.6f         // another player's body half width (playerScale)
 #define BP_JUMP_AIR_MS 800.0f         // a standing jump's time in the air (lands ~0.8 s later on flat ground)
 #define BP_AIR_LOOK_MS 250.0f         // airborne: where the drift carries the body this soon must have ground below
+#define BP_ITEM_REACH 16.0f           // a point overhead a standing jump touches with the body (peak ~14 + a pickup's half size)
+#define BP_ITEM_GIVE_UP_MS 3000.0f    // jumping for one this long without getting it: give it up
+#define BP_CROWD_NEAR 14.0f           // closer than this to the point, players in the way are walked through
 #define BP_SLOW 0.012f                // horizontal speed (units / ms) under which a hop needs no run-up alignment
 
 // KrunkNative move codes (Input.move_dir, ui_controls.c): 0 forward, 2 right, 4 back, 6 left
@@ -201,8 +204,12 @@ static void bp_search(Game *game, GameBot *bot, const Player *self, const vec3 g
     f->best_dist = 1e9f;
     f->no_progress = 0.0f;
     if (!bot_nav_find_path(game, self->position, goal, &bot->path)) {
+        // no grid near us or the goal: give the goal up (Hunt picks another, an objective roams for
+        // a while) instead of pressing straight at it for good; no grid at all: walk straight
+        const int stranded = bot_nav_for(game) != NULL;
+        if (stranded && !bot->path_stranded) bots->nav_stats.unreachable++;
         bot->path.count = 0;
-        bot->path_stranded = 0;
+        bot->path_stranded = stranded;
         return;
     }
     // unreachable from here, and the route's end is no closer than we are: give the goal up
@@ -302,6 +309,31 @@ static int bp_aligned(const Player *self, const vec3 dir) {
     return speed < BP_SLOW || (vx * dir.x + vz * dir.z) >= 0.8f * speed;
 }
 
+// The world yaw away from the ladder the body hangs on (the nearest one it touches): 1 and *yaw.
+static int bp_ladder_away(const Game *game, const Player *self, float *yaw) {
+    if (!game->map) return 0;
+    const vec3 p = self->position;
+    float best = 1e9f;
+    for (size_t i = 0; i < game->map->object_count; i++) {
+        const Object *o = game->map->objects[i];
+        if (!o->active || !(o->ladder || o->rope_ladder)) continue;
+        if (p.y > o->position.y + o->scale.y + 0.5f || p.y + BP_HEIGHT < o->position.y) continue;
+        const float dx = p.x - o->position.x, dz = p.z - o->position.z;
+        const float reach = MAX(o->scale.x, o->scale.z) * 0.5f + 6.0f; // the body's padded reach
+        if (fabsf(dx) > reach || fabsf(dz) > reach) continue;
+        const float dist = hypotf(dx, dz);
+        if (dist >= best) continue;
+        best = dist;
+        // from its centre out through the body; on top of it, the way it faces out
+        if (dist > 0.05f) *yaw = bp_yaw_to((vec3) {p.x + dx, p.y, p.z + dz}, p);
+        else {
+            const float face = (float) M_PI * 0.5f * (float) o->direction;
+            *yaw = bp_yaw_to((vec3) {p.x + cosf(face), p.y, p.z + sinf(face)}, p);
+        }
+    }
+    return best < 1e9f;
+}
+
 // Another active player's body stands in the swept lane ahead.
 static int bp_player_ahead(const Game *game, const Player *self, const vec3 dir, const float reach) {
     for (size_t i = 0; i < game->player_count; i++) {
@@ -366,17 +398,42 @@ void bot_path_move(Game *game, GameBot *bot, Player *self, const vec3 point, con
         f->moving = 1;
         return;
     }
-    if (d < 2.5f) {
-        f->moving = 0;
-        f->no_progress = 0.0f;
+    // the grid has no ladder links: a ladder touched in passing (one beside a corridor) is walked
+    // past (it is no wall; walking along it does not climb), but one held above the level we head
+    // for is stepped off, away from it (Krunker climbs whatever ladder you walk into, and a body
+    // touching one below its top hangs there: velocity.y 0, no gravity). Before the arrival test:
+    // a drop waypoint right under a bot hanging beside freight's ladder top read as reached, and
+    // the bot hung in mid-air at (134, 32, -52) for the rest of the round.
+    if (self->on_ladder && p.y > point.y + BP_STEP + 1.0f) {
+        float away;
+        out->move = bp_ladder_away(game, self, &away) ? bp_move_code(look_yaw, away) : BP_MOVE_BACK;
+        f->moving = 1;
         return;
     }
-    // the grid has no ladder links: a ladder touched in passing (one beside a corridor) is walked
-    // past (it is no wall; walking along it does not climb), but one climbed above the level we
-    // head for is stepped back off (Krunker climbs whatever ladder you walk into)
-    if (self->on_ladder && p.y > point.y + BP_STEP + 1.0f) {
-        out->move = BP_MOVE_BACK;
-        f->moving = 1;
+    if (d < 2.5f) {
+        f->moving = 0;
+        if (point.y > p.y + BP_STEP + 1.0f && !self->on_ladder) {
+            // right under the point, which hangs in the air: a Kill Confirmed tag or a dropped flag
+            // stays where its carrier died, mid-jump (bots stood under one for good: kanji, industry,
+            // citadel). Jump for it while a jump can reach it, then give it up for a while
+            f->no_progress += dt;
+            if (point.y <= p.y + BP_ITEM_REACH && self->on_ground && f->no_progress < BP_ITEM_GIVE_UP_MS) out->jump = 1;
+            if (f->no_progress >= BP_ITEM_GIVE_UP_MS || point.y > p.y + BP_ITEM_REACH) {
+                f->no_progress = 0.0f;
+                bot->path_stranded = 1; // the route layer gives it up (an objective roams for a while)
+                out->give_up = 1;
+            }
+            return;
+        }
+        if (point.y < p.y - (BP_STEP + 1.0f) && self->on_ground) {
+            // over a drop's landing but still standing on the lip (the body is wider than the point
+            // under its centre): carry on the way we came to step off (burg_new: a bot stood on a
+            // ledge right over its drop waypoint)
+            out->move = bp_move_code(look_yaw, f->move_yaw);
+            f->moving = 1;
+            return;
+        }
+        f->no_progress = 0.0f;
         return;
     }
     if (!self->on_ground && !self->on_ladder) {
@@ -453,7 +510,10 @@ void bot_path_move(Game *game, GameBot *bot, Player *self, const vec3 point, con
         const float yaw = look_yaw - (float) code * (BP_PI / 4.0f);
         // off the wanted lane the sweep is shorter (we only side-step for a moment) and never hops
         const float lane_reach = i == 0 ? reach : MAX(BP_REACH_MIN, reach * 0.6f);
-        const int ok = bp_lane_ok(game, bot, self, yaw, lane_reach, allow_hop && i == 0, dropping, i < 3, point.y);
+        // players in the way are side-stepped on the way, not near the point: there they stand
+        // around it (escorting a carrier, a crowd at a tag) and side-stepping them never arrives
+        // (industry's Team Defender: bots circled the carrier into stuck recoveries)
+        const int ok = bp_lane_ok(game, bot, self, yaw, lane_reach, allow_hop && i == 0, dropping, i < 3 && d > BP_CROWD_NEAR, point.y);
         if (i < 7) f->lanes[i] = (unsigned char) ok;
         if (!ok) continue;
         if (ok == 3) { // a player in the way: side-step if a neighbouring lane is open, else walk through
