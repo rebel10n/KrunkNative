@@ -511,7 +511,10 @@ static int map_list_find(const Client *client, const uint32_t hash) {
     return -1;
 }
 
-static int map_list_add(Client *client, const cJSON *map) {
+int client_map_list_add(Client *client, const cJSON *map) {
+    for (size_t i = 0; i < client->game.map_count; i++) {
+        if (client->game.maps[i] == map) return (int) i; // already listed (an official game's next round)
+    }
     const cJSON **list = realloc((void *) client->game.maps, (client->game.map_count + 1) * sizeof(*list));
     if (!list) return -1;
 
@@ -546,7 +549,7 @@ int client_map_prepare_init(Client *client, NetInitPacket *init) {
 
     for (size_t i = 0; i < client->net_map_cache_count; i++) {
         if (net_map_hash(client->net_map_cache[i], NULL, NULL) != info->hash) continue;
-        const int added = map_list_add(client, client->net_map_cache[i]);
+        const int added = client_map_list_add(client, client->net_map_cache[i]);
         if (added >= 0) init->map_index = added;
         return 1;
     }
@@ -641,7 +644,7 @@ static void events_map_data(Client *client, const void *payload, const uint16_t 
     }
 
     printf("downloaded map %s\n", client->net_map_info.name);
-    map_download_finish(client, map_list_add(client, map));
+    map_download_finish(client, client_map_list_add(client, map));
 }
 
 #define EVENTS_READ(type, var) \

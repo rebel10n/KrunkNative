@@ -7,8 +7,11 @@
 // Inbound (S->C), each turned into the NetPacket(s) our client already handles:
 //   io-init [socketId]                       remember the socket id (players.add compares ids with it)
 //   load    [...]                            answered with "load" (INIT_LOAD, :222180)
-//   init    [mapIndex, modeIndex, ...]       NET_PACKET_INIT (map catalogue index 0..31 = Krunker's
-//                                            official mapIndex; modeIndex = the Krunker mode id) (:219289)
+//   init    [mapIndex, modeIndex, ..., custom]  io.map (krunker_map_source.h: Krunker's official list,
+//                                            krunker_maps.h, or arg 9's inline custom map), which emits
+//                                            NET_PACKET_INIT with the client's map slot; without io.map:
+//                                            NET_PACKET_INIT with mapIndex as is (modeIndex = the Krunker
+//                                            mode id) (:219289)
 //   frs     [...]                            ENTER_GAME acknowledgement: logged (the spawn is "0")
 //   0       [flat list, stride 53]           NET_PACKET_SPAWN per player (:220266, players.add :171902)
 //   k       [flat list, stride 13, rate, t]  NET_PACKET_STATE per other player (:220529)
@@ -69,6 +72,7 @@
 // reportPlayer opens the profile: neither has a packet.
 #include <krunker_cheat.h>
 #include <krunker_proto.h>
+#include <cJSON.h>
 #include <shared.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -86,6 +90,17 @@ typedef enum {
                                 // (text: its name; account_name / account_level of the link)
 } KrunkerLinkEvent;
 
+// init [mapIndex, modeIndex, eventIndex, ..., customsData] (INIT_GAME, game.deob.js:219289): what the
+// client needs to find the map (io.map).
+typedef struct {
+    NetInitPacket init; // the INIT to emit once the map is the client's (init.map_index = map_index until then)
+    int map_index;      // arg 0: a position in Krunker's official list (krunker_maps.h), -1 when absent
+    int mode_index;     // arg 1: the Krunker mode id
+    cJSON *custom;      // arg 9 .data of a custom game (a JSON string or an object), parsed; NULL otherwise.
+                        // io.map takes it (frees or keeps it)
+    char custom_id[48]; // arg 9 .id ("" none)
+} KrunkerLinkInit;
+
 typedef struct {
     // a translated packet for the client's inbound queue
     void (*emit)(void *user, const NetPacket *packet);
@@ -101,6 +116,9 @@ typedef struct {
     // (krunker_link_send "cptR"), -1 = refused / unsolvable (KRUNKER_LINK_EV_CAPTCHA)
     int (*altcha)(void *user, const char *algorithm, const char *challenge, const char *salt, const char *signature, long max_number,
                   char **payload_b64);
+    // optional: an init's map. Called instead of emitting NET_PACKET_INIT: the transport resolves the map
+    // (krunker_map_source.h), holds what follows meanwhile and emits info->init with its own map slot.
+    void (*map)(void *user, KrunkerLinkInit *info);
     void *user;
 } KrunkerLinkIO;
 
@@ -130,7 +148,8 @@ typedef struct {
     double prev_angles[2 + 2 * NET_INPUT_BATCH_MAX];
     int prev_angle_count;
     int resync;
-    int unsupported_map;            // init's map index outside this client's catalogue, -1 = none (KRUNKER_LINK_EV_UNSUPPORTED)
+    int unsupported_map;            // init named no map (no index, no custom data), -1 = none (KRUNKER_LINK_EV_UNSUPPORTED);
+                                    // the transport sets it for a map it cannot resolve (krunker_net.c)
     // our player's movement state as the server set it ("lm"/"ulm"/"start" game.moveLock, "lock"
     // window.locked, "noc" noclip): shapes the "q" frames and the "l" RECON flags
     int move_lock, locked, noclip;

@@ -201,6 +201,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, off
 	./$(DEBUG_DIR)/krunker_proto_test
 	./$(DEBUG_DIR)/krunker_link_test
 	./$(DEBUG_DIR)/krunker_sync_test
+	./$(DEBUG_DIR)/krunker_maps_test
 	./$(DEBUG_DIR)/lagcomp_test
 	./$(DEBUG_DIR)/map_v7_test
 	./$(DEBUG_DIR)/map_v10_test
@@ -377,12 +378,16 @@ branding-check: ## The verbatim krunker.io icons in the tree match tools/brandin
 # tables, cheat-check keystream) are extracted statically from Krunker's client bundle into the
 # committed shared/include/krunker_build.h + tools/krunker/build.json (tools/krunker/extract_build.py).
 # SRC=<path|url> reads another bundle (game.deob.js / game.debug.js / game.min.js / manifest).
-.PHONY: krunker-build krunker-build-check krunker-build-test
-krunker-build: ## Regenerate shared/include/krunker_build.h from Krunker's bundle (default https://kru.eli.gift/game.deob.js, cached by ETag; SRC=, FORCE=1)
+.PHONY: krunker-build krunker-build-check krunker-build-test krunker-maps
+krunker-build: ## Regenerate shared/include/krunker_build.h from Krunker's bundle (default https://kru.eli.gift/game.deob.js, cached by ETag; SRC=, FORCE=1) and krunker_maps.h (+ tools/krunker/maps.lock.json)
 	$(PYTHON) -I tools/krunker/extract_build.py $(SRC) $(if $(FORCE),--force,)
 
-krunker-build-check: ## Regenerate krunker_build.h from the current Krunker bundle into a temp file; exit 1 when the committed header / build.json differ (bundle unreachable: header <-> build.json only, STRICT=1 fails)
+krunker-build-check: ## Regenerate krunker_build.h from the current Krunker bundle into a temp file; exit 1 when the committed header / build.json differ, or krunker_maps.h / the official map files / the bundle's map anchors disagree with tools/krunker/maps.lock.json (bundle unreachable: header <-> build.json only, STRICT=1 fails)
 	$(PYTHON) -I tools/krunker/extract_build.py $(SRC) --check $(if $(STRICT),--strict,)
+
+krunker-maps: ## Fetch Krunker's official map list and every map JSON (GET <gapi>/maps, /maps/<i>; rate-limited, KN_FETCH_PROXY=) into assets/maps/official/ + tools/krunker/maps.lock.json, then regenerate krunker_maps.h
+	$(PYTHON) -I tools/krunker/fetch_maps.py fetch
+	$(PYTHON) -I tools/krunker/extract_build.py $(SRC)
 
 krunker-build-test: ## Extractor regression test: every local Krunker bundle (deob / debug / min / v10.js / the current one) incl. the per-player layouts, synthetic broken anchors, the header compiles
 	$(PYTHON) -I tools/krunker/test_extract.py

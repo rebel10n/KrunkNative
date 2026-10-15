@@ -6,7 +6,8 @@
 #include <seek_prefs.h>
 #include <krunker_net.h> // krunker_net_in_client (the Server Type texts)
 #include <ui_logic.h>
-#include <map_catalog.h>
+#include <krunker_maps.h>
+#include <krunker_map_source.h> // the official list: names (krunker_maps.h)
 #include <modes.h>
 #include <cJSON.h>
 #include <stdio.h>
@@ -36,12 +37,12 @@ int seek_prefs_mode(void) {
 
 int seek_prefs_map(void) {
     const int index = saved_first_index(SEEK_MAPS_KEY);
-    return index >= 0 && map_catalog_at((size_t) index) ? index : -1;
+    return index >= 0 && index < KRUNKER_OFFICIAL_MAP_COUNT ? index : -1;
 }
 
 const char *seek_prefs_map_name(void) {
     const int index = seek_prefs_map();
-    return index >= 0 ? map_catalog_at((size_t) index)->name : NULL;
+    return index >= 0 ? krunker_official_map_name(index) : NULL;
 }
 
 SeekServers seek_prefs_servers(void) {
@@ -161,7 +162,7 @@ static void section_html(StrBuf *sb) {
         option(sb, value, modes[i].name, i == mode);
     }
     sb_append(sb, "</select></div>");
-    // Seek Map: the official maps (catalogue 0..31 = Krunker's mapIndex)
+    // Seek Map: Krunker's official maps, all of the list (krunker_maps.h): the index is the mapIndex dsma sends
     const int map = seek_prefs_map();
     sb_append(sb, "<div class=\"settName\" title=\"");
     sb_append_esc(sb, I18N("kn.quickplay.seekMap.info", "Quick Match, Find New Game (F4) and the server browser look for this map"));
@@ -169,11 +170,11 @@ static void section_html(StrBuf *sb) {
     sb_append_esc(sb, I18N("kn.quickplay.seekMap", "Seek Map"));
     sb_append(sb, " <select id=\"knSeekMap\" onchange=\"window.setSetting(&quot;" SEEK_MAPS_KEY "&quot;, this.value)\" class=\"inputGrey2\">");
     option(sb, "", I18N("kn.quickplay.any", "Any"), map < 0);
-    for (size_t i = 0; i < map_catalog_count() && i < MAP_CATALOG_OFFICIAL_COUNT; i++) {
-        const MapCatalogEntry *e = map_catalog_at(i);
-        if (!e || !e->name) continue;
-        snprintf(value, sizeof(value), "%zu", i);
-        option(sb, value, e->name, (int) i == map);
+    for (int i = 0; i < KRUNKER_OFFICIAL_MAP_COUNT; i++) {
+        const char *name = krunker_official_map_name(i);
+        if (!name) continue;
+        snprintf(value, sizeof(value), "%d", i);
+        option(sb, value, name, i == map);
     }
     sb_append(sb, "</select></div>");
 #ifndef __EMSCRIPTEN__

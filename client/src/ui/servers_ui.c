@@ -1632,7 +1632,10 @@ static void row_title(StrBuf *sb, const cJSON *t) {
     }
     const char *key = row_i(t);
     char map[128] = "";
-    const int index = key[0] ? map_catalog_resolve(key, NULL, 0, NULL) : -1;
+    // an official krunker.io lobby's `i` is Krunker's own mapName (krunker_maps.h), shown as sent like v10
+    // does: the catalogue's fuzzy names would retitle it ("Old_Burg" is the alias of Burg (1.5.2),
+    // "Slide Moonlight" the key slide_moonlight, krunker_maps_test test_lobby_names)
+    const int index = key[0] && !row_krunker(t) ? map_catalog_resolve(key, NULL, 0, NULL) : -1;
     const MapCatalogEntry *entry = index >= 0 ? map_catalog_at((size_t) index) : NULL;
     snprintf(map, sizeof(map), "%s", entry && entry->name ? entry->name : key);
     const GameModeConfig *mode = row_mode(t);

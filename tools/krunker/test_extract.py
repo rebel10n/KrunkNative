@@ -146,6 +146,20 @@ def comparable(doc):
 
 # ------------------------------------------------------------------ 1. real bundles
 
+def check_maps(label, doc):
+    """The official map table anchors (tools/krunker/maps.py) of a 10.0.2+ bundle: the API, and the raid
+    preset naming map 43 Bastion."""
+    mp = doc.get("maps")
+    check(mp is not None, "%s: map anchors extract" % label)
+    if not mp:
+        return
+    check(mp["api_url"] == "https://gapi.svc.krunker.io" and mp["list_path"] == "/maps" and mp["map_path"] == "/maps/",
+          "%s: maps API gapi /maps, /maps/<i>" % label)
+    raid = [p for p in mp["presets"] if 43 in p["indices"]]
+    check(raid and raid[0]["names"][raid[0]["indices"].index(43)] == "bastion", "%s: preset map 43 is bastion" % label)
+    check((mp.get("ftue") or {}).get("fileName") == "bot_ftue_v2", "%s: FTUE map file" % label)
+
+
 def test_real_bundles(tmp):
     required = os.environ.get("KRUNKER_BUNDLES_REQUIRED") == "1"
     deob_path = os.path.join(OFFICIAL, "game.deob.js")
@@ -173,6 +187,7 @@ def test_real_bundles(tmp):
             continue
         check_values(label, doc, LIVE)
         check_layouts(label, doc, KNOWN_LAYOUTS)
+        check_maps(label, doc)
         if label == "game.deob.js":
             ref = doc
             check(doc["deobfuscation"] is None, "game.deob.js needs no string-array decoding")
@@ -191,6 +206,7 @@ def test_real_bundles(tmp):
         if doc:
             check_values("v10.js", doc, OLD_V10)
             check_layouts("v10.js", doc, KNOWN_LAYOUTS)
+            check_maps("v10.js", doc)
             print("  %-19s %s" % ("v10.js", E.summary(E.build_doc(doc, prov)).split("\n")[0]))
     else:
         print("  SKIP v10.js (not on this machine)")
@@ -202,6 +218,10 @@ def test_real_bundles(tmp):
         check(err is None, "current bundle %s extracts (%s)" % (os.path.basename(cur), err))
         if doc:
             check_layouts("current bundle", doc, KNOWN_LAYOUTS)
+            check_maps("current bundle", doc)
+            mm = E.maps_module()
+            check(mm.consistency(doc["maps"] or {}, mm.read_lock()) == [],
+                  "current bundle: map anchors agree with maps.lock.json %r" % mm.consistency(doc["maps"] or {}, mm.read_lock()))
             print("  %-19s %s" % ("current bundle", E.summary(E.build_doc(doc, prov)).split("\n")[1].strip()))
     else:
         print("  SKIP current bundle (build.json's sha256 is not on this machine)")
@@ -236,7 +256,42 @@ FIXTURE = r"""!function () {
   var vv1 = '9.8.7';
   var vv2 = vv1 + 'r3';
   var vv3 = process["env"]['CUSTOM_VERSION'];
-  zz1 = process['env']["MATCHMAKER_URI"] || "https://mm.example.test", zz2 = process["env"]["API_URI"] || "https://api.example.test";
+  zz1 = process['env']["MATCHMAKER_URI"] || "https://mm.example.test", zz2 = process["env"]["API_URI"] || "https://api.example.test", zz3 = process["env"]["GAPI_URI"] || "https://gapi.example.test";
+  var mapi = {
+    'getMaps': function () {
+      return rq1(this, '/maps', {
+        'method': "GET"
+      });
+    },
+    'getMap': function (m1) {
+      return rq1(this, "/maps/"["concat"](m1), {
+        'method': "GET",
+        'cache': "no-cache"
+      });
+    }
+  };
+  var mlist = [];
+  api1["maps"]["getMaps"]()["then"](function (r1) {
+    r1["data"]["forEach"](function (r2) {
+      mlist["push"](r2);
+    });
+  });
+  function onInit1(i1, i2, i3, i4, i5, i6, i7, i8, i9, c9) {
+    mlist[i1]["didLoad"] || c9 && c9["data"] ? go1() : api1['maps']["getMap"](i1)["then"](function (r3) {
+      mlist[i1] = r3["data"];
+    });
+  }
+  var hosts1 = [{
+    'title': "Raid Server Setup",
+    'allMaps': ['tortuga', "bastion"],
+    'overDat': {
+      'maps': [0x12],
+      'modes': [0x17]
+    },
+    'all': {
+      'maps': [0x12, 0x2b]
+    }
+  }];
   var vv4 = zz9 ? "0x4AAAAAAAtestSiteKey000" : "1x00000000000000000000BB";
   zz9 ? (vv5 = ['de-fra', "us-nj"], zz8 || vv5['push']("sss")) : vv5 = ["local"];
   var vv6 = ['us-wa'];
@@ -531,6 +586,11 @@ def test_synthetic(tmp):
         check(ex["client_revision"] == "7", "fixture: clientRevision")
         check(ex["custom_build_version"] == {"value": None, "env": "CUSTOM_VERSION"}, "fixture: customBuildVersion")
         check(doc["warnings"] == [], "fixture: no warnings")
+        mp = doc.get("maps") or {}
+        check(mp.get("api_url") == "https://gapi.example.test" and mp.get("list_path") == "/maps" and
+              mp.get("map_path") == "/maps/", "fixture: maps API (%r)" % ({k: mp.get(k) for k in ("api_url", "list_path", "map_path")},))
+        check(mp.get("presets") == [{"title": "Raid Server Setup", "names": ["tortuga", "bastion"], "indices": [18, 43]}],
+              "fixture: host preset maps paired by length (%r)" % mp.get("presets"))
         check_layouts("fixture", doc, FIX_LAYOUTS)
     ob = obfuscate(fx)
     check("\n" not in ob and "'buildVersion'" in ob and "dA(0x" in ob, "obfuscated fixture is one line with decoder calls")
@@ -573,6 +633,9 @@ def test_synthetic(tmp):
         ("DO_DAMAGE arguments", lambda s: s.replace('"aikills"', '"aikils"')),
         ("CHANGE_HEALTH arguments", lambda s: s.replace("|| e6)", "|| e7)")),
         ("GET_SCORE arguments", lambda s: s.replace("[g4 || 0x0]", "[g4]")),
+        ("maps", lambda s: s.replace('"/maps/"["concat"](m1)', '"/maps/"')),
+        ("maps", lambda s: s.replace('mlist["push"](r2)', 'mlist["push"](r1)')),
+        ("maps", lambda s: s.replace('c9 && c9["data"]', 'c9')),
     ]
     for anchor, brk in breaks:
         broken = brk(fx)

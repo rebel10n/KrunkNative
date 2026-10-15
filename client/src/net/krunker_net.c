@@ -13,6 +13,7 @@
 #include <recent_lobbies.h>
 #include <seek_prefs.h>
 #include <krunker_account.h>
+#include <krunker_map_source.h>
 #include <backend.h>
 #include <html_ui.h>
 #include <ui_logic.h>
@@ -112,8 +113,18 @@ static struct {
         char joined[160], error[160], pow[200], map[160], closed[160];
         char ws_failed[200], ws_denied[200], ws_unreachable[200];
     } tpl;
-    volatile int leave_unsupported; // the socket thread saw a map we lack: krunker_net_tick leaves the game
+    volatile int leave_unsupported; // a map nothing can show (kmap_tick, or an init naming none): krunker_net_tick leaves
     volatile int leave_closed;      // the server told us to close ("00" without keepOpen): krunker_net_tick leaves the game
+    // init's map (krunker_map_source.h): the socket thread hands each init over (map_next, link_map), the
+    // main thread resolves it (kmap_tick) while everything the link emits after it waits in held, in order
+    KrunkerLinkInit map_next;
+    int map_next_set, map_gate;  // K.lock
+    NetPacket *held;             // K.lock
+    size_t held_count, held_cap;
+    KrunkerMapRequest map_req;   // main thread
+    NetInitPacket map_init;
+    int map_req_active;
+    char map_label[64], map_why[200]; // the map nothing could show, and why (krunker_net_tick's message)
 #ifdef __EMSCRIPTEN__
     EMSCRIPTEN_WEBSOCKET_T ws;
 #elif defined(KRUNKER_NATIVE_WS)
@@ -244,14 +255,35 @@ static void present_failure(const char *text) {
 
 // ---------------------------------------------------------------- link I/O
 
+#define KRUNKER_HELD_MAX 8192 // packets kept while init's map loads (states beyond this are dropped)
+
+// K.lock held (every link call is)
+static void held_push(const NetPacket *packet) {
+    if (K.held_count >= KRUNKER_HELD_MAX && packet->type == NET_PACKET_STATE) return;
+    if (K.held_count == K.held_cap) {
+        const size_t cap = K.held_cap ? K.held_cap * 2 : 64;
+        NetPacket *grown = realloc(K.held, cap * sizeof(*grown));
+        if (!grown) return;
+        K.held = grown;
+        K.held_cap = cap;
+    }
+    K.held[K.held_count++] = *packet;
+}
+
 static void link_emit(void *user, const NetPacket *packet) {
     (void) user;
     if (!K.client) return;
+    if (K.map_gate) { // init's map is still loading (kmap_tick): after it, in order
+        held_push(packet);
+        return;
+    }
     client_net_log_packet("<=", (NetPacketType) packet->type, packet->payload, packet->length);
     client_net_queue_packet(K.client, packet);
 }
 
 static void link_send(void *user, const uint8_t *frame, const size_t len);
+
+static void kmap_fail(int index, const char *custom_id, const char *why);
 
 static void link_event(void *user, const KrunkerLinkEvent kind, const char *text) {
     (void) user;
@@ -264,8 +296,8 @@ static void link_event(void *user, const KrunkerLinkEvent kind, const char *text
         case KRUNKER_LINK_EV_ERROR:
             present_failure(i18n_replace(out, sizeof(out), K.tpl.error, 1, I18N_ARGV(text ? text : "error")));
             break;
-        case KRUNKER_LINK_EV_UNSUPPORTED: // a map our catalogue lacks: nothing to show, krunker_net_tick leaves
-            K.leave_unsupported = 1;
+        case KRUNKER_LINK_EV_UNSUPPORTED: // an init naming no map: nothing to show, krunker_net_tick leaves
+            kmap_fail(K.link.unsupported_map, NULL, text);
             break;
         case KRUNKER_LINK_EV_CLOSE: // "00" without keepOpen: the live client closes its socket; krunker_net_tick leaves
             K.leave_closed = 1;
@@ -315,8 +347,113 @@ static int link_altcha(void *user, const char *alg, const char *challenge, const
 #endif
 }
 
+// init (socket thread, K.lock held): the map is resolved on the main thread (kmap_tick); until then the
+// link's packets wait (link_emit). A newer init supersedes one not picked up yet, and what was held for
+// the older round goes.
+static void link_map(void *user, KrunkerLinkInit *info) {
+    (void) user;
+    if (K.map_next_set) cJSON_Delete(K.map_next.custom);
+    K.map_next = *info;
+    info->custom = NULL;
+    K.map_next_set = 1;
+    K.map_gate = 1;
+    K.held_count = 0;
+}
+
+// the map source's network (an index past krunker_maps.h's table): the client's HTTP, its proxy
+static int kmap_fetch(const char *url, KrunkerMapFetchDone done, void *ctx) {
+#ifdef __EMSCRIPTEN__
+    return backend_http_request("GET", url, NULL, done, ctx); // gapi answers Access-Control-Allow-Origin: *
+#else
+    return backend_http_get_external(url, 20000, done, ctx);
+#endif
+}
+
+// main thread: a new socket / leaving drops init's map state
+static void kmap_reset(void) {
+    if (K.map_req_active) krunker_map_request_cancel(&K.map_req);
+    K.map_req_active = 0;
+    pthread_mutex_lock(&K.lock);
+    if (K.map_next_set) cJSON_Delete(K.map_next.custom);
+    K.map_next.custom = NULL;
+    K.map_next_set = K.map_gate = 0;
+    K.held_count = 0;
+    pthread_mutex_unlock(&K.lock);
+}
+
+// K.lock held
+static void kmap_fail(const int index, const char *custom_id, const char *why) {
+    if (custom_id && custom_id[0]) snprintf(K.map_label, sizeof(K.map_label), "%s", custom_id);
+    else snprintf(K.map_label, sizeof(K.map_label), "%d", index);
+    snprintf(K.map_why, sizeof(K.map_why), "%s", why && why[0] ? why : "unknown map");
+    // nothing the server sends after an init we cannot play reaches the game: the link's packets are held
+    // until krunker_net_tick leaves (krunker_net_leave -> kmap_reset drops them)
+    K.map_gate = 1;
+    K.leave_unsupported = 1;
+}
+
+// main thread, every frame: resolve init's map; when it is ready, it joins the client's map list and
+// INIT (with that slot) goes out, then what the link held meanwhile
+static void kmap_tick(Client *client) {
+    KrunkerLinkInit next;
+    int have_next = 0;
+    pthread_mutex_lock(&K.lock);
+    if (K.map_next_set) {
+        next = K.map_next;
+        K.map_next.custom = NULL;
+        K.map_next_set = 0;
+        have_next = 1;
+    }
+    pthread_mutex_unlock(&K.lock);
+    if (have_next) {
+        if (K.map_req_active) krunker_map_request_cancel(&K.map_req);
+        krunker_map_request_begin(&K.map_req, next.map_index, next.custom, next.custom_id);
+        K.map_init = next.init;
+        K.map_req_active = 1;
+    }
+    if (!K.map_req_active || !client) return;
+    const cJSON *json = NULL;
+    char why[200];
+    const KrunkerMapStatus status = krunker_map_request_poll(&K.map_req, &json, why, sizeof(why));
+    if (status == KRUNKER_MAP_PENDING) return;
+    K.map_req_active = 0;
+    const int index = K.map_req.index;
+    if (status == KRUNKER_MAP_READY) {
+        const int slot = client_map_list_add(client, json);
+        if (slot >= 0) {
+            const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(json, "name"));
+            printf("[krunker] map %d%s%s: %s (map slot %d)\n", index, K.map_req.custom_id[0] ? ", custom " : "", K.map_req.custom_id,
+                   name ? name : "?", slot);
+            pthread_mutex_lock(&K.lock);
+            if (!K.map_next_set) { // (a newer init that came meanwhile keeps the gate: its own map is next)
+                K.map_init.map_index = slot;
+                NetPacket packet;
+                memset(&packet, 0, sizeof(packet));
+                packet.type = NET_PACKET_INIT;
+                packet.length = sizeof(K.map_init);
+                memcpy(packet.payload, &K.map_init, sizeof(K.map_init));
+                K.map_gate = 0;
+                link_emit(NULL, &packet);
+                for (size_t i = 0; i < K.held_count; i++) link_emit(NULL, &K.held[i]);
+                K.held_count = 0;
+            }
+            pthread_mutex_unlock(&K.lock);
+            return;
+        }
+        snprintf(why, sizeof(why), "out of memory");
+    }
+    printf("[krunker] map %d%s%s cannot be shown: %s\n", index, K.map_req.custom_id[0] ? ", custom " : "", K.map_req.custom_id, why);
+    pthread_mutex_lock(&K.lock);
+    K.link.unsupported_map = index;
+    K.held_count = 0;
+    kmap_fail(index, K.map_req.custom_id, why);
+    pthread_mutex_unlock(&K.lock);
+}
+
 static void link_setup(void) {
-    const KrunkerLinkIO io = {.emit = link_emit, .send = link_send, .event = link_event, .cheat = link_cheat, .altcha = link_altcha, .user = NULL};
+    const KrunkerLinkIO io = {.emit = link_emit, .send = link_send, .event = link_event, .cheat = link_cheat, .altcha = link_altcha,
+                              .map = link_map, .user = NULL};
+    krunker_map_source_set_fetch(kmap_fetch);
     krunker_link_init(&K.link, &io, KRUNKER_AHKEY);
 }
 
@@ -842,7 +979,7 @@ static void load_texts(void) {
     snprintf(K.tpl.error, sizeof(K.tpl.error), "%s", I18N("kn.kio.serverError", "krunker.io: {0}"));
     snprintf(K.tpl.pow, sizeof(K.tpl.pow), "%s",
              I18N("kn.kio.powUnsupported", "krunker.io's game server asked for a proof of work in a form this client cannot compute yet: it may close the game."));
-    snprintf(K.tpl.map, sizeof(K.tpl.map), "%s", I18N("kn.kio.mapMissing", "Map index {0} of this krunker.io server is not in this client's catalogue: pick another lobby."));
+    snprintf(K.tpl.map, sizeof(K.tpl.map), "%s", I18N("kn.kio.mapMissing", "Map {0} of this official game could not be loaded ({1}): pick another lobby."));
     snprintf(K.tpl.closed, sizeof(K.tpl.closed), "%s", I18N("kn.kio.sessionClosed", "The krunker.io game server ended this session."));
     snprintf(K.tpl.ws_failed, sizeof(K.tpl.ws_failed), "%s", I18N("kn.kio.gsFailed", "Could not connect to the krunker.io game server: {0}"));
 }
@@ -1091,6 +1228,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
                K.access[0] ? "&at=(the krunker.io account's token)" : "");
         load_ws_texts();
         K.state = KS_CONNECTING;
+        kmap_reset();
         pthread_mutex_lock(&K.lock);
         krunker_link_reset(&K.link);
         K.link.account = K.access[0] != 0; // "en" then carries the player's own loadout
@@ -1162,6 +1300,7 @@ static int join(Client *client, const char *game_id, const char *region, const i
     K.pow_shown = 0;
     K.leave_unsupported = 0;
     K.leave_closed = 0;
+    kmap_reset();
     wipe(K.captcha, sizeof(K.captcha));
     load_texts();
     matchmaker();
@@ -1225,6 +1364,7 @@ void krunker_net_leave(Client *client, const char *reason) {
     Client *owner = client ? client : K.client;
     if (owner) owner->game.is_official = 0; // back in KrunkNative's lobbies (the KN-only classes are playable again)
     K.altcha_pending = K.pow_shown = 0;
+    kmap_reset();
     wipe(K.access, sizeof(K.access));
     if (!krunker_account_owns_captcha()) krunker_captcha_close(); // a pending Turnstile request ends with the session (not a sign-in's)
     wipe(K.captcha, sizeof(K.captcha));
@@ -1272,16 +1412,18 @@ void krunker_net_tick(Client *client) {
         printf("[krunker] the game server signed in the krunker.io account %s (level %d)\n", name, level);
         if (K.access[0]) krunker_account_note_game(name, level);
     }
+    if (K.state != KS_OFF) kmap_tick(client ? client : K.client);
     if (K.leave_unsupported && K.state != KS_OFF) {
-        // init named a map outside our catalogue (krunker_link on_init): the game cannot be shown, so
-        // the session ends on the error screen saying which map, instead of a loading screen forever
-        K.leave_unsupported = 0;
-        char index[16], text[sizeof(K.tpl.map) + 16];
+        // init's map cannot be shown (not in krunker_maps.h's table, the cache or the API; or no map at all):
+        // the session ends on the error screen saying which map and why, instead of a loading screen forever
+        char label[sizeof(K.map_label)], why[sizeof(K.map_why)], text[sizeof(K.tpl.map) + sizeof(label) + sizeof(why)];
         pthread_mutex_lock(&K.lock);
-        snprintf(index, sizeof(index), "%d", K.link.unsupported_map);
+        K.leave_unsupported = 0;
+        snprintf(label, sizeof(label), "%s", K.map_label);
+        snprintf(why, sizeof(why), "%s", K.map_why);
         pthread_mutex_unlock(&K.lock);
-        i18n_replace(text, sizeof(text), K.tpl.map, 1, I18N_ARGV(index));
-        printf("[krunker] the game plays map index %s, not in this client's catalogue: leaving\n", index);
+        i18n_replace(text, sizeof(text), K.tpl.map, 2, I18N_ARGV(label, why));
+        printf("[krunker] leaving: %s\n", text);
         Client *leaving = client ? client : K.client;
         krunker_net_leave(leaving, text);
         if (leaving) on_client_socket_failed(leaving, text); // the session ended: the Lost Connection screen says why

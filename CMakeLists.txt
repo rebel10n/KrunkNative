@@ -944,6 +944,17 @@ else ()
         target_link_libraries(krunker_sync_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
     add_test(NAME krunker_sync_test COMMAND krunker_sync_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    # krunker_maps_test: Krunker's official map table (shared/include/krunker_maps.h, generated) loads and
+    # plays every map; an official game's map resolution (client/src/net/krunker_map_source.c): inline
+    # custom maps, the user cache, GET <API>/maps/<index> past the table
+    add_executable(krunker_maps_test ${SHARED_HEADERS} ${SHARED_SOURCES} client/tests/krunker_maps_test.c
+                   client/src/net/krunker_map_source.c)
+    target_include_directories(krunker_maps_test PRIVATE client/include shared/include)
+    target_link_libraries(krunker_maps_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(krunker_maps_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+    add_test(NAME krunker_maps_test COMMAND krunker_maps_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
     # update_test (launcher/, doc/backend.md "Client updates"): manifest parsing, version
     # comparison, asset diffing, URL resolution, package extraction and the journaled swap

@@ -57,7 +57,7 @@ import tempfile
 import urllib.error
 import urllib.request
 
-GENERATOR_REV = 2  # bump when the output format or the extraction rules change
+GENERATOR_REV = 3  # bump when the output format or the extraction rules change
 SCHEMA = 1         # KRUNKER_BUILD_SCHEMA: bump when the header's C interface changes
 
 DEFAULT_URL = os.environ.get("KRUNKER_BUILD_URL", "https://kru.eli.gift/game.deob.js")
@@ -68,6 +68,16 @@ DEFAULT_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like G
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 OUT_HEADER = os.path.join(ROOT, "shared", "include", "krunker_build.h")
 OUT_JSON = os.path.join(ROOT, "tools", "krunker", "build.json")
+
+
+def maps_module():
+    """tools/krunker/maps.py: the official map table (build.json "maps" + shared/include/krunker_maps.h)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import maps
+    maps.xb = sys.modules[__name__]
+    return maps
 
 
 class ExtractError(Exception):
@@ -1324,6 +1334,7 @@ def extract(src):
         "client_revision": _opt("clientRevision", x_client_revision, norm, warnings),
         "custom_build_version": _opt("customBuildVersion", x_custom_build_version, norm, warnings),
     }
+    maps = _opt("maps", maps_module().extract_maps, norm, warnings)
     out.update({
         "packets_c2s": [{"name": k, "wire": v} for k, v in tables["c2s"]],
         "packets_s2c": [{"name": k, "wire": v} for k, v in tables["s2c"]],
@@ -1343,6 +1354,7 @@ def extract(src):
         "cheat_keystream_standalone_js": cheat["standalone_js"],
         "cheat_handler_js": cheat["handler_js"],
         "extras": extras,
+        "maps": maps,
         "warnings": warnings,
         "deobfuscation": deob,
     })
@@ -1661,6 +1673,26 @@ def summary(doc):
                 ",".join(ex["regions"]["regions"]) if ex.get("regions") else None))
 
 
+def write_maps_header(doc, path):
+    """shared/include/krunker_maps.h from build.json's "maps" + tools/krunker/maps.lock.json (written only
+    when it changes); 1 when the bundle's map anchors and the fetched list disagree."""
+    mm = maps_module()
+    lock = mm.read_lock()
+    if not doc.get("maps") or not lock or not lock.get("maps"):
+        log("FAILED: maps: %s" % ("the bundle's map API anchors did not extract" if not doc.get("maps") else
+                                  "tools/krunker/maps.lock.json missing; run tools/krunker/fetch_maps.py fetch"))
+        return 1
+    rc = 0
+    for p in mm.consistency(doc["maps"], lock) + mm.verify_files(lock):
+        log("maps: " + p)
+        rc = 1
+    text = mm.render_header(doc["maps"], lock)
+    if read_text(path) != text:
+        _atomic_write(path, text.encode())
+        log("wrote %s (%d official maps)" % (os.path.relpath(path, ROOT), len(lock["maps"])))
+    return rc
+
+
 def read_text(path):
     try:
         with open(path, encoding="utf8") as f:
@@ -1679,7 +1711,10 @@ def main(argv=None):
     ap.add_argument("--force", action="store_true", help="regenerate even when the source sha256 is unchanged")
     ap.add_argument("--header", default=OUT_HEADER)
     ap.add_argument("--json", default=OUT_JSON)
+    ap.add_argument("--maps-header", help="default: shared/include/krunker_maps.h, or krunker_maps.h beside --header")
     a = ap.parse_args(argv)
+    maps_header = a.maps_header or (maps_module().OUT_HEADER if os.path.abspath(a.header) == os.path.abspath(OUT_HEADER)
+                                    else os.path.join(os.path.dirname(os.path.abspath(a.header)), "krunker_maps.h"))
 
     old_json = read_text(a.json)
     old = json.loads(old_json) if old_json else None
@@ -1690,7 +1725,7 @@ def main(argv=None):
             return 1
         _atomic_write(a.header, render_header(old).encode())
         log("wrote %s" % a.header)
-        return 0
+        return write_maps_header(old, maps_header)
 
     if a.check:
         rc = 0
@@ -1701,16 +1736,25 @@ def main(argv=None):
             log("STALE: %s does not match %s; run `make krunker-build`" % (
                 os.path.relpath(a.header, ROOT), os.path.relpath(a.json, ROOT)))
             rc = 1
+        mm = maps_module()
         try:
             text, prov = load_source(a.source)
         except (ExtractError, OSError) as e:
             log("cannot read the bundle (%s): checked header <-> build.json only" % e)
+            for p in mm.problems(old.get("maps"), mm.read_lock(), maps_header):
+                log("STALE: maps: " + p)
+                rc = 1
             return 2 if a.strict else rc
         try:
             doc = build_doc(extract(text), prov)
         except ExtractError as e:
             log("the current bundle does not extract: %s" % e)
             return 1
+        # the map table is checked against the bundle that is there now (its anchors, the lock's files and
+        # the header), whether or not the build constants changed
+        for p in mm.problems(doc.get("maps"), mm.read_lock(), maps_header):
+            log("STALE: maps: " + p)
+            rc = 1
         if prov["sha256"] != old["source"]["sha256"]:
             log("STALE: the bundle changed (sha256 %s -> %s); run `make krunker-build`\n  committed: %s\n  current:   %s"
                 % (old["source"]["sha256"][:16], prov["sha256"][:16], summary(old), summary(doc)))
@@ -1738,6 +1782,8 @@ def main(argv=None):
                 os.path.relpath(a.json, ROOT))
             return 1
         if rc == 0:
+            log("maps: %d official maps (%s), every bundle anchor agrees, files match maps.lock.json" % (
+                len(mm.read_lock()["maps"]), os.path.relpath(maps_header, ROOT)))
             log("up to date (bundle sha256 %s, regenerated header identical)" % prov["sha256"][:16])
         return rc
 
@@ -1746,13 +1792,16 @@ def main(argv=None):
         if (not a.print and not a.force and old and old["source"]["sha256"] == prov["sha256"]
                 and old.get("generator_rev") == GENERATOR_REV and read_text(a.header) == render_header(old)):
             log("up to date (bundle sha256 %s, %s)" % (prov["sha256"][:16], prov["origin"]))
-            return 0
+            return write_maps_header(old, maps_header)
         doc = build_doc(extract(text), prov)
     except ExtractError as e:
         log("FAILED: %s" % e)
         return 1
     for w_ in doc["warnings"]:
         log("warning: " + w_)
+    if not doc.get("maps") and not a.print:
+        log("FAILED: maps: the bundle's map API anchors did not extract (see the warning above)")
+        return 1
     if a.print:
         sys.stdout.write(render_json(doc))
         return 0
@@ -1760,7 +1809,7 @@ def main(argv=None):
     _atomic_write(a.header, render_header(doc).encode())
     log("wrote %s and %s from %s (%s)\n  %s" % (os.path.relpath(a.header, ROOT), os.path.relpath(a.json, ROOT),
                                                 prov.get("url") or prov.get("file"), prov["origin"], summary(doc)))
-    return 0
+    return write_maps_header(doc, maps_header)
 
 
 if __name__ == "__main__":

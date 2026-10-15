@@ -256,7 +256,7 @@
  "kn.kio.joined": "Joined the krunker.io server {0}",
  "kn.kio.joining": "Joining the krunker.io server {0}...",
  "kn.kio.looking": "Looking for a krunker.io server...",
- "kn.kio.mapMissing": "Map index {0} of this krunker.io server is not in this client's catalogue: pick another lobby.",
+ "kn.kio.mapMissing": "Map {0} of this official game could not be loaded ({1}): pick another lobby.",
  "kn.kio.mmProxyUnreachable": "Could not reach krunker.io's matchmaker through the proxy {0}. Check it in Settings > Client.",
  "kn.kio.mmUnreachable": "Could not reach krunker.io's matchmaker. Check your connection, or set a proxy in Settings > Client.",
  "kn.kio.mmUnreachableWeb": "Could not reach krunker.io's matchmaker. Check your connection.",

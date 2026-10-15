@@ -943,6 +943,7 @@ void client_force_player_positions(Client*); // players.js forcePos(): every rem
 int client_map_prepare_init(Client*, NetInitPacket*);   // 1: apply now (map_index resolved), 0: map download started
 int client_map_hold(Client*, const NetPacket*);         // 1: packet queued until the streamed map is in
 int client_map_take_ready(Client*, NetInitPacket*, NetPacket**, size_t*); // 1: download done (INIT + held packets, caller frees)
+int client_map_list_add(Client*, const cJSON*); // index of the map in game.maps, appending it (official games, streamed maps); -1 OOM
 
 void client_animate_object_texture(Object*, float);
 

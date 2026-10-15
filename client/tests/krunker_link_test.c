@@ -3,6 +3,7 @@
 // -> Krunker frames out (decoded again and checked field by field, ahNum trailers included).
 //   cmake-build-debug/krunker_link_test
 #include <krunker_link.h>
+#include <krunker_maps.h>
 #include <auth_join.h>
 #include <net_ext.h>
 #include <ruleset.h>
@@ -74,6 +75,17 @@ static void cap_event(void *user, const KrunkerLinkEvent kind, const char *text)
     if ((int) kind < 16) g_events[kind]++;
 }
 
+// io.map double: the inits the transport would resolve
+static KrunkerLinkInit g_inits[8];
+static int g_init_count;
+static void cap_map(void *user, KrunkerLinkInit *info) {
+    (void) user;
+    if (g_init_count < 8) {
+        g_inits[g_init_count++] = *info;
+        info->custom = NULL; // taken (freed by the test)
+    }
+}
+
 static void clear(void) {
     for (int i = 0; i < g_out_count; i++) krunker_frame_free(&g_out[i]);
     g_in_count = g_out_count = 0;
@@ -143,9 +155,55 @@ int main(void) {
     CHECK(p && p->length == sizeof(NetInitPacket) && init.map_index == 10 && init.mode_index == 0, "INIT map 10 mode 0");
     CHECK(link.unsupported_map == -1, "a catalogue map is not flagged (%d)", link.unsupported_map);
     clear();
-    feed(&link, "init", (KrunkerValue[]) {KRUNKER_V_NUM(77), KRUNKER_V_NUM(0)}, 2);
-    CHECK(!find_in(NET_PACKET_INIT, 0) && g_events[KRUNKER_LINK_EV_UNSUPPORTED] == 1, "unknown map index refused");
-    CHECK(link.unsupported_map == 77, "the unknown map index is kept for the error screen (%d)", link.unsupported_map);
+    // Krunker's whole official list passes (krunker_maps.h): 42 (Frontier, the index the user reported), 43
+    // (Bastion) and the highest index; and an index past the table too (the transport fetches
+    // GET <gapi>/maps/<index>, as the live client does)
+    const int idx[] = {42, 43, KRUNKER_OFFICIAL_MAP_COUNT - 1, KRUNKER_OFFICIAL_MAP_COUNT + 31};
+    for (size_t k = 0; k < sizeof(idx) / sizeof(idx[0]); k++) {
+        feed(&link, "init", (KrunkerValue[]) {KRUNKER_V_NUM(idx[k]), KRUNKER_V_NUM(1)}, 2);
+        p = find_in(NET_PACKET_INIT, 0);
+        if (p) memcpy(&init, p->payload, sizeof(init));
+        CHECK(p && init.map_index == idx[k] && init.mode_index == 1 && !g_events[KRUNKER_LINK_EV_UNSUPPORTED],
+              "init map %d emitted without io.map", idx[k]);
+        clear();
+    }
+    CHECK(!strcmp(KRUNKER_MAPS_API_URL, "https://gapi.svc.krunker.io") && KRUNKER_OFFICIAL_MAP_COUNT >= 46, "maps API / table");
+    // an init naming no map at all is the only refusal
+    feed(&link, "init", (KrunkerValue[]) {KRUNKER_V_NIL, KRUNKER_V_NUM(0)}, 2);
+    CHECK(!find_in(NET_PACKET_INIT, 0) && g_events[KRUNKER_LINK_EV_UNSUPPORTED] == 1, "init without a map refused");
+    CHECK(link.unsupported_map == -1, "no map index (%d)", link.unsupported_map);
+    clear();
+
+    // with io.map the transport gets the init (and emits INIT itself once the map is loaded)
+    KrunkerLinkIO io_map = io;
+    io_map.map = cap_map;
+    KrunkerLink mlink;
+    krunker_link_init(&mlink, &io_map, KRUNKER_AHKEY);
+    feed(&mlink, "init", (KrunkerValue[]) {KRUNKER_V_NUM(43), KRUNKER_V_NUM(23), KRUNKER_V_NUM(0)}, 3);
+    CHECK(g_init_count == 1 && g_inits[0].map_index == 43 && g_inits[0].mode_index == 23 && g_inits[0].init.map_index == 43 &&
+          g_inits[0].init.mode_index == 23 && !g_inits[0].custom && !g_inits[0].custom_id[0] && !find_in(NET_PACKET_INIT, 0),
+          "io.map: init 43 handed over, no INIT emitted by the link");
+    // a custom game: arg 9 {data: "<map JSON>", id, creator}
+    KrunkerValue cust_kv[] = {KRUNKER_V_STR("data"), KRUNKER_V_STR("{\"name\":\"Custom\",\"objects\":[{\"p\":[0,0,0],\"s\":[1,1,1]}]}"),
+                              KRUNKER_V_STR("id"), KRUNKER_V_NUM(4242), KRUNKER_V_STR("creator"), KRUNKER_V_STR("someone")};
+    KrunkerValue cust_args[10];
+    for (int i = 0; i < 10; i++) cust_args[i] = KRUNKER_V_NIL;
+    cust_args[0] = KRUNKER_V_NUM(0);
+    cust_args[1] = KRUNKER_V_NUM(0);
+    cust_args[KRUNKER_MAPS_INIT_CUSTOM_ARG] = KRUNKER_V_MAP(cust_kv, 3);
+    feed(&mlink, "init", cust_args, 10);
+    CHECK(g_init_count == 2 && g_inits[1].custom && !strcmp(g_inits[1].custom_id, "4242") &&
+          !strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(g_inits[1].custom, "name")), "Custom"),
+          "io.map: a custom game's inline map (string data) and id");
+    // ... data as an object, id as a string
+    KrunkerValue obj_kv[] = {KRUNKER_V_STR("name"), KRUNKER_V_STR("Obj"), KRUNKER_V_STR("objects"), KRUNKER_V_ARRAY(NULL, 0)};
+    KrunkerValue cust2_kv[] = {KRUNKER_V_STR("data"), KRUNKER_V_MAP(obj_kv, 2), KRUNKER_V_STR("id"), KRUNKER_V_STR("m77")};
+    cust_args[KRUNKER_MAPS_INIT_CUSTOM_ARG] = KRUNKER_V_MAP(cust2_kv, 2);
+    feed(&mlink, "init", cust_args, 10);
+    CHECK(g_init_count == 3 && g_inits[2].custom && !strcmp(g_inits[2].custom_id, "m77") &&
+          cJSON_IsArray(cJSON_GetObjectItem(g_inits[2].custom, "objects")), "io.map: object data, string id");
+    for (int i = 0; i < g_init_count; i++) cJSON_Delete(g_inits[i].custom);
+    g_init_count = 0;
     clear();
 
     // init's lobby settings: [6] config, [7] weps / cls / prks, [12] networking -> GAME_CONFIG + NETWORK_DATA before INIT

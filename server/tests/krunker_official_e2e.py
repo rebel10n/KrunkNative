@@ -15,10 +15,14 @@ Stubs (Python, ports from kn_proto.free_ports()):
     domain the sitekey is not for). Nothing is injected outside the test's own browser.
   - a Krunker game server: a WebSocket at /ws?gameId=&clientKey= speaking the official framing,
     msgpack([name, ...args]) + the 2 ahNum trailer bytes, with the stub's own msgpack codec (the
-    @msgpack/msgpack number rules). It sends io-init, load, init (map 10, mode 0), "0" (a stub
+    @msgpack/msgpack number rules). It sends io-init, load, init (map 43 = Bastion, mode 0: past v7.1.4's 32 maps,
+    shared/include/krunker_maps.h), "0" (a stub
     player), three "cc" (a script, garbage, an undefined result), a "cpt" ALTCHA challenge, "k"
     moving the stub player every 100 ms, "pi" every second; after the client's "en" its own "0",
     "l" and a "ch" line.
+Map run "native-hq": init with map 34 (HQ, refused before this client shipped Krunker's whole list); the
+client must load assets/maps/official/34_hq.json, stand on the floor at the HQ spawn the stub puts it on
+(no "l" corrects it) and walk across it with W while the stub takes its "q" frames.
 Find New Game runs (--exclude alone): "native-exclude" (Quick Match with Server Type Official, the lobby
 list: never the game it leaves, no bouncing between two, the least recent once all are recent) and
 "native-exclude-mm" (no list from krunker_lobbies: krunker_net's own list pick, then the live client's
@@ -97,10 +101,34 @@ ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
 CHROME = shutil.which("chromium-browser") or shutil.which("chromium") or shutil.which("google-chrome")
-# the asset tree: this checkout's, else the main checkout's (a worktree may lack the large content)
-ASSETS = os.environ.get("KRUNKNATIVE_ASSETS_DIR") or next(
-    (d for d in (os.path.join(ROOT, "assets"), os.path.expanduser("~/src/KrunkNative/assets")) if os.path.isdir(os.path.join(d, "models"))),
-    os.path.join(ROOT, "assets"))
+
+
+def asset_tree():
+    """The asset tree the client reads: this checkout's when it has the large content (models, textures:
+    gitignored, so a worktree lacks them), else KRUNKNATIVE_ASSETS_DIR's (or the main checkout's) content with
+    this checkout's tracked files on top (assets/maps/official/ is new in a worktree, and the client must play
+    this checkout's official maps), through symlinks in WORK."""
+    local = os.path.join(ROOT, "assets")
+    main = os.environ.get("KRUNKNATIVE_ASSETS_DIR") or os.path.expanduser("~/src/KrunkNative/assets")
+    if os.path.realpath(main) == os.path.realpath(local) or os.path.isdir(os.path.join(local, "models")) or \
+            not os.path.isdir(os.path.join(main, "models")):
+        return os.environ.get("KRUNKNATIVE_ASSETS_DIR") or local
+    out = os.path.join(WORK, "assets")
+    os.makedirs(os.path.join(out, "maps"))
+    for name in sorted(set(os.listdir(main)) | set(os.listdir(local))):
+        if name != "maps":
+            src = os.path.join(local, name) if os.path.lexists(os.path.join(local, name)) else os.path.join(main, name)
+            os.symlink(src, os.path.join(out, name))
+    for src in (os.path.join(main, "maps"), os.path.join(local, "maps")):  # this checkout's maps win
+        for name in os.listdir(src):
+            link = os.path.join(out, "maps", name)
+            if os.path.lexists(link):
+                os.unlink(link)
+            os.symlink(os.path.join(src, name), link)
+    return out
+
+
+ASSETS = asset_tree()
 
 
 def header_value(name):
@@ -113,6 +141,8 @@ AHKEY = int(header_value("KRUNKER_AHKEY"), 0)
 BUILD_VERSION = header_value("KRUNKER_BUILD_VERSION")
 SALT = b"KRUNK3R_AC"
 GAME_ID, CLIENT_ID, MY_SID, BOT_SID = "TEST:abc12", "cid-42", 9, 5
+OLD_BURG_GAME = "TEST:oldbg"  # a second official lobby in the browser's list, on Old_Burg (never joined)
+MAP_INDEX, MAP_NAME = 43, "Bastion"  # past v7.1.4's 32 maps: the map the client used to refuse
 # killfeed-name regression: DEAD_SID is a player the stub adds ("0") then void-kills ("3", killer
 # -1) so its name must appear in #killFeed; UNKNOWN_SID is a sid the stub never adds, whose "3"
 # must be dropped (a join race) and must never render as "unknown committed ...".
@@ -264,9 +294,12 @@ ALTCHA_UNSOLVABLE = dict(ALTCHA, algorithm="SHA-512", challenge=hashlib.sha512((
 # ---------------------------------------------------------------- the stubs
 
 class Stub:
-    def __init__(self, mm_port, ws_port, scenario="default"):
+    def __init__(self, mm_port, ws_port, scenario="default", map_index=None, spawn=None):
         self.mm_port, self.ws_port = mm_port, ws_port
-        self.scenario = scenario  # "sync": after "en", play the movement-lock / correction packets (sync_phases)
+        self.scenario = scenario  # "sync": after "en", play the movement-lock / correction packets (sync_phases);
+        #                           "spawn": after "en", our player at `spawn` and nothing correcting it (run_native_hq)
+        self.map_index = MAP_INDEX if map_index is None else map_index  # init's mapIndex
+        self.spawn = spawn or (4.0, 0.0, 4.0)
         self.frame_t = []         # time.monotonic() of every client frame (parallel to self.frames)
         self.sent = {}            # sync: what the stub sent when (name -> time.monotonic())
         self.http_log = []      # (path, query list)
@@ -316,13 +349,15 @@ class Stub:
                         body, ctype = json.dumps({"success": True, "totalPlayerCount": 9, "games": [
                             [g, "de-fra", n, 8, {"i": "Kanji", "g": 0}, 240] for g, n in stub.lobbies]}).encode(), "application/json"
                 elif u.path == "/game-list":  # the server browser's official lobbies (krunker_lobbies.c)
-                    body, ctype = json.dumps({"success": True, "totalPlayerCount": 3, "games": [
-                        [GAME_ID, "de-fra", 3, 8, {"i": "Kanji", "g": 0}, 240]]}).encode(), "application/json"
+                    body, ctype = json.dumps({"success": True, "totalPlayerCount": 5, "games": [
+                        [GAME_ID, "de-fra", 3, 8, {"i": MAP_NAME, "g": 0}, 240],
+                        # its row must read Krunker's own name: the catalogue's alias would retitle it Burg (1.5.2)
+                        [OLD_BURG_GAME, "de-fra", 2, 8, {"i": "Old_Burg", "g": 0}, 240]]}).encode(), "application/json"
                 elif u.path == "/seek-game" and stub.lobbies is not None:
                     qd = dict(q)
                     game = qd.get("game") or next((g for g, _ in stub.lobbies if g != qd.get("excludeGame")), None)
                     body = json.dumps({"host": "127.0.0.1", "port": stub.ws_port, "gameId": game, "clientId": CLIENT_ID,
-                                       "data": {"i": "Kanji", "g": 0}}).encode()
+                                       "data": {"i": MAP_NAME, "g": 0}}).encode()
                     ctype = "application/json"
                 elif u.path == "/seek-game":
                     qd = dict(q)
@@ -348,7 +383,7 @@ class Stub:
                         stub.used_captchas.add(cap)
                         stub.captcha_ok.set()
                         body = json.dumps({"host": "127.0.0.1", "port": stub.ws_port, "gameId": GAME_ID, "clientId": CLIENT_ID,
-                                           "data": {"i": "Kanji", "g": 0}}).encode()
+                                           "data": {"i": MAP_NAME, "g": 0}}).encode()
                     ctype = "application/json"
                 else:
                     self.send_response(404)
@@ -373,9 +408,9 @@ class Stub:
             ah[0] = (ah[0] + 0x11) & 0xff  # the server's own trailer (the client never checks it)
             await ws.send(frame(name, *args, ah=ah[0]))
 
-        def player(sock, sid, name, x, z):
+        def player(sock, sid, name, x, z, y=0):
             e = [None] * 53
-            e[0], e[1], e[2], e[3], e[4], e[5], e[6], e[7], e[8], e[9], e[18] = sock, sid, x, 0, z, name, 0, None, 100, 0, 0.0
+            e[0], e[1], e[2], e[3], e[4], e[5], e[6], e[7], e[8], e[9], e[18] = sock, sid, x, y, z, name, 0, None, 100, 0, 0.0
             return e
 
         stop = asyncio.Event()
@@ -453,7 +488,7 @@ class Stub:
                 if any(f[0] == "load" for f in self.frames):
                     break
                 await asyncio.sleep(0.1)
-            await send("init", 10, 0, 0, None, None, None, {}, None, 0, None, {"gor": True}, None, False, True, False, None, None, 0)
+            await send("init", self.map_index, 0, 0, None, None, None, {}, None, 0, None, {"gor": True}, None, False, True, False, None, None, 0)
             await send("0", player("sockBOT", BOT_SID, "StubBot", 0.0, 0.0))
             for nonce, ct, _ in CC_CASES:
                 await send("cc", nonce, None, ct)
@@ -463,7 +498,16 @@ class Stub:
                 if self.got_en.is_set() or stop.is_set():
                     break
                 await asyncio.sleep(0.1)
-            if self.got_en.is_set() and self.scenario == "sync":
+            if self.got_en.is_set() and self.scenario == "spawn":
+                # the live server's spawn: our player where the map's spawn is (x, y, z); no "l" corrects it,
+                # so where the client stands and walks is its own simulation of this map
+                await send("frs")
+                sx, sy, sz = self.spawn
+                await send("0", player("sockME", MY_SID, "Guest_9", sx, sz, sy))
+                self.sent["spawn"] = time.monotonic()
+                while not stop.is_set():
+                    await asyncio.sleep(0.2)
+            elif self.got_en.is_set() and self.scenario == "sync":
                 await send("frs")
                 await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0))
                 await self.sync_phases(send, stop)
@@ -747,7 +791,10 @@ def check_run(label, stub, client_lines, cheat_expected):
 
     text = "\n".join(client_lines)
     check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
-    check(f"{label}: init translated (map 10, mode 0)", "init: map 10, mode 0" in text)
+    check(f"{label}: init translated (map {MAP_INDEX}, mode 0)", f"init: map {MAP_INDEX}, mode 0" in text)
+    check(f"{label}: map {MAP_INDEX} resolved through krunker_maps.h ({MAP_NAME})",
+          re.search(r"\[krunker\] map %d: %s \(map slot \d+\)" % (MAP_INDEX, MAP_NAME), text) is not None)
+    check(f"{label}: no missing-map error", "could not be loaded" not in text and "cannot be shown" not in text)
     return text
 
 
@@ -800,9 +847,10 @@ def post(url, body, origin="https://krunker.io", ctype="text/plain"):
         return "refused"
 
 
-def launch_native(label, script_text, extra_env, args=("--krunker",), wrap=(), scenario="default", stub_setup=None, display=None):
+def launch_native(label, script_text, extra_env, args=("--krunker",), wrap=(), scenario="default", stub_setup=None, display=None,
+                  map_index=None, spawn=None):
     mm, wsp = kn_proto.free_ports(2)
-    stub = Stub(mm, wsp, scenario)
+    stub = Stub(mm, wsp, scenario, map_index, spawn)
     if stub_setup:
         stub_setup(stub)
     stub.start_http()
@@ -1046,6 +1094,57 @@ def run_native_sync():
           p.returncode == 0, (p.returncode, stub.ws_paths))
 
 
+HQ_INDEX, HQ_NAME, HQ_FILE = 34, "HQ", "34_hq.json"  # past v7.1.4's 32 maps: main refused it ("map index 34")
+
+
+def hq_spawn():
+    """A spawn of HQ as the live server has it: from this checkout's v10 file (assets/maps/official/34_hq.json).
+    Spawn 4: W (a fresh player's yaw walks -Z) has open floor ahead of it; spawns 0 and 1 face a crate 2.5 away
+    (krunker_maps_test walks the same line)."""
+    with open(os.path.join(ROOT, "assets", "maps", "official", HQ_FILE)) as f:
+        x, y, z = json.load(f)["spawns"][4][:3]
+    return float(x), float(y), float(z)
+
+
+def run_native_hq():
+    """An official game on HQ (mapIndex 34, a map v7.1.4 lacked): the client loads 34_hq.json, the stub puts
+    our player on one of its spawns and never corrects it, and we stand on the floor there, then walk with W:
+    the client's own simulation of the map holds us up (a wrong or missing map drops us into the void, the
+    "spawned in the middle of nowhere" desync) and the stub takes the "q" frames (ahNum, sequence)."""
+    label = "native-hq"
+    sx, sy, sz = hq_spawn()
+    probes = "".join("%d sync\n" % t for t in range(5000, 15000, 250))
+    script = ("0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n%s9000 down W\n12000 up W\n15200 quit\n"
+              % (PASTE_TOKEN, probes))
+    events = sorted(script.strip().split("\n"), key=lambda l: int(l.split()[0]))
+    stub, p, out, log = launch_native(label, "\n".join(events) + "\n", {}, scenario="spawn", map_index=HQ_INDEX, spawn=(sx, sy, sz))
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    check(f"{label}: init translated (map {HQ_INDEX})", f"init: map {HQ_INDEX}, mode 0" in text)
+    slot = re.search(r"\[krunker\] map %d: %s \(map slot (\d+)\)" % (HQ_INDEX, HQ_NAME), text)
+    check(f"{label}: map {HQ_INDEX} resolved through krunker_maps.h ({HQ_NAME}, {HQ_FILE})", slot is not None)
+    check(f"{label}: no missing-map error", "could not be loaded" not in text and "cannot be shown" not in text and
+          "not in this client's catalogue" not in text)
+    check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+    check(f"{label}: the server saw no ahNum / \"q\"-sequence violations", not stub.proto_errors, stub.proto_errors[:5])
+    rows = [(int(m.group(1)), float(m.group(11)), float(m.group(12)), float(m.group(13))) for m in (SYNC_RE.search(l) for l in lines) if m]
+    spawned = [r for r in rows if abs(r[1] - sx) < 3 and abs(r[3] - sz) < 3]
+    before = [r for r in spawned if 7000 <= r[0] < 9000]
+    check(f"{label}: placed on the spawn {sx:g},{sy:g},{sz:g} and standing there on the floor (no fall)",
+          len(before) >= 4 and all(abs(r[2] - sy) < 2.0 for r in before), [(r[0], r[1], r[2], r[3]) for r in rows if 6000 <= r[0] < 9000][:8])
+    walked = [r for r in rows if 9500 <= r[0] <= 15000]
+    far = max((math.hypot(r[1] - sx, r[3] - sz) for r in walked), default=0.0)
+    check(f"{label}: W walks us across the map (moved {far:.1f})", far > 10.0, [(r[0], r[1], r[2], r[3]) for r in walked][:6])
+    check(f"{label}: walking keeps us on the map's ground (never below the spawn by 30)", walked and all(r[2] > sy - 30.0 for r in walked),
+          [(r[0], r[2]) for r in walked if r[2] <= sy - 30.0][:5])
+    if "spawn" in stub.sent:
+        qs = [a for (n, a, _), t in zip(stub.frames, stub.frame_t) if n == "q" and t >= stub.sent["spawn"]]
+        mv = [v for a in qs if len(a) > 5 and isinstance(a[5], dict) for k, v in a[5].items() if k.endswith("-4")]
+        check(f"{label}: the stub took our \"q\" frames with W's direction", len(qs) > 20 and any(v >= 0 for v in mv), (len(qs), mv[:8]))
+    else:
+        check(f"{label}: the stub spawned us", False, sorted(stub.sent))
+
+
 SYNCP_RE = re.compile(r"\[input_script\] sync\+ t=(\d+) unl=(-?\d+) jug=(-?\d+) kranked=([-\d.]+) share=(-?\d+) throw=(-?\d+) loadout=(\S+)")
 
 
@@ -1120,13 +1219,16 @@ def run_native_lobby():
     and a pasted token join the game."""
     label = "native-lobby"
     script = ("0 menu\n300 call showWindow 2\n3000 text @status [id=kioStatus]\n3100 nodes @rows .quickJoin\n"
+              # the KRUNKER.IO group (the last one) opened: its rows' titles
+              "3120 clicksel .setHed .plusOrMinus\n3160 grep @kioOld Old_Burg .settNameIn\n3170 grep @kio152 1.5.2 .settNameIn\n"
+              "3180 grep @kioMap %s .settNameIn\n"
               "3200 call krunkerJoin \"%s\"\n4500 vis @ask1 knCaptchaHolder knCaptchaManual\n4600 clickid knCaptchaCancel\n"
               "5200 vis @cancelled knCaptchaHolder\n5300 call showWindow 2\n5800 call krunkerJoin \"%s\"\n7000 vis @ask2 knCaptchaHolder\n"
               "7100 clickid knCaptchaToken\n7200 type %s\n7300 clickid knCaptchaUse\n8000 play\n13000 players\n"
               # in the official game: the Invite link is krunker.io's, the serverinfo and the menu's region
               # label name the official lobby (its list row: region, map, mode, players)
               "13050 con status\n13100 call copyInviteLink\n13150 text @region [id=menuRegionLabel]\n13200 quit\n"
-              % (GAME_ID, GAME_ID, PASTE_TOKEN))
+              % (MAP_NAME, GAME_ID, GAME_ID, PASTE_TOKEN))
     stub, p, out, log = launch_native(label, script, {}, args=("--offline",))
     lines = finish_native(label, stub, p, out, log, timeout=180)
     text = "\n".join(lines)
@@ -1136,6 +1238,9 @@ def run_native_lobby():
     check(f"{label}: no \"can't be joined\" text anywhere", not re.search(r"can.t be joined|cannot be joined|can.t join krunker", text))
     rows = re.search(r"nodes t=\d+ @rows elements=\d+ match=(\d+)", text)
     check(f"{label}: the krunker.io group is listed with its Quick Join (main's group header)", rows and int(rows.group(1)) >= 1, rows.group(0) if rows else None)
+    grep = {m.group(1): int(m.group(2)) for m in re.finditer(r"\[input_script\] grep t=\d+ @(\w+) needle=\S+ n=\d+ hits=(\d+)", text)}
+    check(f"{label}: official rows read Krunker's map names as sent (Old_Burg, {MAP_NAME}; never Burg (1.5.2))",
+          grep.get("kioOld", 0) >= 1 and grep.get("kioMap", 0) >= 1 and grep.get("kio152", -1) == 0, grep)
     check(f"{label}: the click joins in-client (no browser)", f"[krunker] official lobby {GAME_ID}: joining in-client" in text and
           "open (disabled by KRUNKNATIVE_NO_BROWSER)" not in text, text[-400:])
     check(f"{label}: the Security Challenge modal asks", "@ask1 knCaptchaHolder=1 knCaptchaManual=1" in text)
@@ -1153,12 +1258,12 @@ def run_native_lobby():
     check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
     check(f"{label}: Invite in the official game copies krunker.io's link (?game= the id as it is)",
           f"[party] invite link copied: https://krunker.io/?game={GAME_ID}" in text, text[-300:])
-    # the stub's lobby: [GAME_ID, "de-fra", 3, 8, {"i": "Kanji", "g": 0}] (krunker_region_name: Frankfurt)
+    # the stub's lobby: [GAME_ID, "de-fra", 3, 8, {"i": MAP_NAME, "g": 0}] (krunker_region_name: Frankfurt)
     check(f"{label}: the menu's region label names the official region", re.search(r"@region n=1 .*?text=Frankfurt\b", text) is not None,
           re.search(r"@region.*", text).group(0) if re.search(r"@region.*", text) else None)
     srv = re.search(r"\[console\] Lobby: (.*)", text)
     check(f"{label}: serverinfo names the official lobby, its region, map and mode",
-          srv is not None and srv.group(1).startswith(f"{GAME_ID} | region Frankfurt (de-fra) | map Kanji | mode ") and srv.group(1).endswith("(0)"),
+          srv is not None and srv.group(1).startswith(f"{GAME_ID} | region Frankfurt (de-fra) | map {MAP_NAME} | mode ") and srv.group(1).endswith("(0)"),
           srv.group(1) if srv else None)
     check(f"{label}: serverinfo's players are the official list's (3/8)", "[console] Players: 3/8 (krunker.io's list)" in text, "")
     check(f"{label}: serverinfo's endpoint is krunker.io's game server", "[console] Endpoint: krunker.io official game server" in text, "")
@@ -1785,6 +1890,7 @@ def main():
         run_native()
         run_native_paste()
         run_native_sync()
+        run_native_hq()
         run_native_lobby()
         run_native_optout()
         run_native_exclude()

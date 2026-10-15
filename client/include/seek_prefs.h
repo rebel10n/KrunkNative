@@ -17,7 +17,7 @@ typedef enum {
 } SeekServers;
 
 int seek_prefs_mode(void);          // mode id (modes.h, = Krunker's mode index), -1 = any
-int seek_prefs_map(void);           // map catalogue index (map_catalog.h, 0..31 = Krunker's mapIndex), -1 = any
+int seek_prefs_map(void);           // Krunker's official mapIndex (krunker_maps.h, 0..KRUNKER_OFFICIAL_MAP_COUNT-1), -1 = any
 SeekServers seek_prefs_servers(void);
 // Settings > Quickplay > Auto Seek on Launch (knSeekOnLaunch, default on; v10 has no such option):
 // the launch seeks the way F4 does, once the menu is up, unless it names a lobby or starts offline.

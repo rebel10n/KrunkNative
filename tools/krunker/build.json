@@ -1,5 +1,5 @@
 {
- "generator_rev": 2,
+ "generator_rev": 3,
  "schema": 1,
  "source": {
   "url": "https://kru.eli.gift/game.deob.js",
@@ -2205,6 +2205,88 @@
   "custom_build_version": {
    "value": null,
    "env": "CUSTOM_VERSION"
+  }
+ },
+ "maps": {
+  "api_url": "https://gapi.svc.krunker.io",
+  "list_path": "/maps",
+  "map_path": "/maps/",
+  "response": "data",
+  "custom_inline_arg": 9,
+  "static_file": {
+   "prefix": "maps/",
+   "suffix": ".json?v=OpCIg"
+  },
+  "ftue": {
+   "name": "Mini Industry",
+   "fileName": "bot_ftue_v2"
+  },
+  "presets": [
+   {
+    "title": "Comp Server Setup",
+    "names": [
+     "burg",
+     "sandstorm",
+     "undergrowth",
+     "shipment",
+     "industry",
+     "lumber",
+     "site",
+     "bureau",
+     "atomic",
+     "lush",
+     "eterno simulator",
+     "frontier"
+    ],
+    "indices": [
+     0,
+     2,
+     4,
+     5,
+     11,
+     12,
+     14,
+     17,
+     23,
+     36,
+     39,
+     42
+    ]
+   },
+   {
+    "title": "Zombies Server Setup",
+    "names": [
+     "facility"
+    ],
+    "indices": [
+     27
+    ]
+   },
+   {
+    "title": "Raid Server Setup",
+    "names": [
+     "tortuga",
+     "laboratory",
+     "soul sanctum",
+     "khepri",
+     "bastion"
+    ],
+    "indices": [
+     18,
+     29,
+     31,
+     35,
+     43
+    ]
+   }
+  ],
+  "rotation": {
+   "2": "Sandstorm",
+   "4": "Undergrowth",
+   "11": "Industry",
+   "14": "Site",
+   "17": "Bureau",
+   "42": "Frontier"
   }
  },
  "warnings": [],

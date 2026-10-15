@@ -21,9 +21,9 @@
 #include <krunker_altcha.h>
 #include <cJSON.h>
 #include <game_config.h>
-#include <map_catalog.h>
 #include <net_ext.h>
 #include <ruleset.h>
+#include <krunker_maps.h>
 #include <social_v7.h>
 #include <zombies.h> // NET_PACKET_SHARING ("sic")
 #include <net_ext.h> // the player list's vote kick / K.P.D (NET_PACKET_EXT subtypes)
@@ -209,14 +209,35 @@ static void emit_lobby_config(KrunkerLink *l, const KrunkerFrame *f) {
 }
 static void on_account(KrunkerLink *l, const KrunkerFrame *f);
 
-// init [mapIndex, modeIndex, eventIndex, ...] (INIT_GAME, game.deob.js:219289 -> 219300):
-// mapIndex indexes the server's map list (fetched by index from the API, :219292); our catalogue's
-// first MAP_CATALOG_OFFICIAL_COUNT entries are Krunker's official maps in that order.
+// init arg 9 (customsData, :219300 -> prepareGame :188875): {data: "<map JSON>", id, creator, ...} of
+// a custom game. data is a JSON string (prepareGame JSON.parses it); an object is taken as well.
+static cJSON *custom_map(const KrunkerValue *custom, char *id, const size_t id_size) {
+    id[0] = 0;
+    if (!krunker_is(custom, KRUNKER_MAP)) return NULL;
+    id_string(krunker_get(custom, "id"), id, id_size);
+    const KrunkerValue *data = krunker_get(custom, "data");
+    if (krunker_is(data, KRUNKER_STR)) return cJSON_ParseWithLength(krunker_str(data), data->len);
+    if (!krunker_is(data, KRUNKER_MAP)) return NULL;
+    KrunkerBuf buf = {0};
+    cJSON *json = krunker_value_to_json(data, &buf) == KRUNKER_PROTO_OK ? cJSON_ParseWithLength((const char *) buf.data, buf.len) : NULL;
+    krunker_buf_free(&buf);
+    return json;
+}
+
+// init [mapIndex, modeIndex, eventIndex, ..., customsData] (INIT_GAME, game.deob.js:219289 -> 219300):
+// mapIndex is a position in Krunker's official list (the live client GETs <gapi>/maps/<mapIndex> when it
+// does not have it, :219292; this client ships the list, krunker_maps.h); a custom game sends its map
+// in arg 9. io.map turns either into one of the client's maps (krunker_net.c, krunker_map_source.h).
 static void on_init(KrunkerLink *l, const KrunkerFrame *f) {
-    const int map = (int) num(arg(f, 0), -1), mode = (int) num(arg(f, 1), 0);
-    if (map < 0 || map >= MAP_CATALOG_OFFICIAL_COUNT) {
+    const int map = krunker_is(arg(f, 0), KRUNKER_NUM) ? (int) num(arg(f, 0), -1) : -1, mode = (int) num(arg(f, 1), 0);
+    KrunkerLinkInit info;
+    memset(&info, 0, sizeof(info));
+    info.map_index = map;
+    info.mode_index = mode;
+    info.custom = custom_map(arg(f, KRUNKER_MAPS_INIT_CUSTOM_ARG), info.custom_id, sizeof(info.custom_id));
+    if (map < 0 && !info.custom && !info.custom_id[0]) {
         l->unsupported_map = map;
-        note(l, KRUNKER_LINK_EV_UNSUPPORTED, "the server plays map index %d, which this client does not have", map);
+        note(l, KRUNKER_LINK_EV_UNSUPPORTED, "the server's init names no map");
         return;
     }
     l->unsupported_map = -1;
@@ -231,9 +252,16 @@ static void on_init(KrunkerLink *l, const KrunkerFrame *f) {
     init.tick_rate = l->tick_hz; // applyNetworking tf (tickFrequency, default 30, game.deob.js:186955)
     init.client_id = 0;
     init.ruleset = NET_INIT_RULESET;
+    note(l, KRUNKER_LINK_EV_NOTE, "init: map %d%s%s%s, mode %d, %d config keys, rates snf %d tf %d sf %d", map,
+         info.custom_id[0] || info.custom ? " (custom " : "", info.custom_id[0] ? info.custom_id : info.custom ? "inline" : "",
+         info.custom_id[0] || info.custom ? ")" : "", mode, l->config_keys, l->send_hz, l->tick_hz, l->sync_hz);
+    if (l->io.map) {
+        info.init = init;
+        l->io.map(l->io.user, &info); // takes info.custom
+        return;
+    }
+    cJSON_Delete(info.custom);
     emit(l, NET_PACKET_INIT, &init, sizeof(init));
-    note(l, KRUNKER_LINK_EV_NOTE, "init: map %d, mode %d, %d config keys, rates snf %d tf %d sf %d", map, mode, l->config_keys,
-         l->send_hz, l->tick_hz, l->sync_hz);
 }
 
 // "0" ADD_PLAYERS: a flat list, 53 (0x35) values per player (game.deob.js:220266-220330); the
