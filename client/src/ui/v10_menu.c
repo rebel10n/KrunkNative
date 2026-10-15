@@ -20,7 +20,9 @@
 //     Signup Rewards", signed in avatar + name + level bar, KR, Junk, RP, Wallet; Notifications,
 //     Settings (showWindow(1)), More Krunker (showMoreKrunker(): the moreKrunkerPopup, v10:196675)
 //   - the class preview container shown at boot (menuClassContainer.style.display = '', v10:222888)
-//   - no live-streams overlay (v10 hides it until Twitch answers with streams; KrunkNative has none)
+//   - the Live Streams overlay (.streams-overlay in #tlInfHold, v10:145187 / 146035): the brain's
+//     /streams/top (Twitch's live Krunker streams, streams.c), the small view's three cards, a click
+//     opens twitch.tv/<name> in the browser; no answer hides it, no live streams shows v10's text
 //   - the menu's idle state (v10_menu_tick): Popular Now (_52548 v10:147200, svelte-6ewa5r: the top 3
 //     custom maps of the game list by players, asked again every 60 s), the match-info bar's
 //     #activeBuffs (svelte-1we2ubc: 2x XP / 2x Class XP / 2x Raid Drops, set at every INIT as
@@ -46,6 +48,7 @@
 #include <ui_logic.h>
 #include <store_spins.h>
 #include <ks_game.h> // ks_wall_ms: the portable wall clock
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -413,6 +416,140 @@ static void popular_interval(void *user) {
     popular_fetch();
 }
 
+// ---------------------------------------------------------------- Live Streams (.streams-overlay)
+
+// The Live Streams overlay (_52196 / _52549, v10:145187, 146035): the top right panel's card list.
+// fetchTopStreams (_52138, v10:145037) asks /streams/top, then every 30 s (v10:146178). KrunkNative's
+// brain answers it from Twitch's live streams of the Krunker category (streams.c), in v10's
+// {streams, promo, dropCampaigns} shape. The small view (v10's default, _52546) shows the first three
+// cards: a red live dot with the viewer count (formatViewerCount: "1.2K"), the title, the streamer's
+// name, and a click that opens twitch.tv/<name> (openStream, v10:145133). An answer with no live
+// streams shows v10's text (streamers.none, "No active streams!"). No answer (no brain, the feature
+// off) hides the overlay.
+#define STREAMS_SHOWN 3
+#define STREAMS_REFRESH_MS 30000.0
+#define STREAMS_NAME_MAX 25
+static struct {
+    int listed;               // 1 = the last answer was a list (the overlay shows), 0 = hidden
+    int count;                // live streams in the answer
+    int n;                    // cards kept (at most STREAMS_SHOWN)
+    char user[STREAMS_SHOWN][64];
+    char title[STREAMS_SHOWN][160];
+    char thumb[STREAMS_SHOWN][320];
+    int viewers[STREAMS_SHOWN];
+    int closed;               // the Hide button (v10's closed view): the cards fold away, the header stays
+    int timer;                // the 30 s interval (html timer id)
+    int override;             // tests: knV10Streams gave the list, the brain is not asked
+} L;
+
+// a Twitch login: letters, digits and '_' (the card's link is twitch.tv/<name>)
+static int streams_login_ok(const char *s) {
+    const size_t n = strlen(s);
+    if (!n || n > STREAMS_NAME_MAX) return 0;
+    for (size_t i = 0; i < n; i++) {
+        if (!isalnum((unsigned char) s[i]) && s[i] != '_') return 0;
+    }
+    return 1;
+}
+
+// formatViewerCount (v10:146000): from 1000 on, one decimal and K
+static void streams_viewers(char *out, const size_t n, const int v) {
+    if (v >= 1000) snprintf(out, n, "%.1fK", v / 1000.0);
+    else snprintf(out, n, "%d", v);
+}
+
+// The overlay is the page's own (ui/index.html #knStreams: v10's header with the Hide button); its
+// body (the cards, or the empty text) is rebuilt at every answer. No answer: the overlay is hidden.
+static void streams_render(void) {
+    HtmlElem ov = by_id("knStreams");
+    if (!ov) return;
+    if (!L.listed) {
+        set_display(ov, "none");
+        return;
+    }
+    set_display(ov, "");
+    StrBuf sb = {0};
+    sb_append(&sb, "<div class=\"streams-body svelte-60shhe\" id=\"knStreamsBody\">");
+    if (!L.count) {
+        sb_append(&sb, "<div class=\"streams-empty svelte-60shhe\" style=\"padding:8px 4px;font-size:14px;\">");
+        sb_append_esc(&sb, I18N("streamers.none", "No active streams!"));
+        sb_append(&sb, "</div>");
+    } else {
+        sb_appendf(&sb, "<div class=\"streams-grid regular-grid svelte-60shhe\" style=\"grid-template-columns: repeat(%d, 180px);\">", L.n);
+        for (int i = 0; i < L.n; i++) {
+            char count[24], views[64];
+            streams_viewers(count, sizeof count, L.viewers[i]);
+            I18N_F(views, "streamers.views", "{0} viewers", count);
+            sb_appendf(&sb, "<div class=\"stream-card svelte-60shhe\" style=\"pointer-events:all;cursor:pointer;\" title=\"");
+            sb_append_esc(&sb, L.title[i]);
+            sb_appendf(&sb, "\" onclick=\"knV10Stream(%d)\"><div class=\"thumbnail svelte-60shhe\">"
+                            "<img loading=\"lazy\" decoding=\"async\" class=\"svelte-60shhe\" src=\"", i);
+            sb_append_esc(&sb, L.thumb[i]);
+            sb_append(&sb, "\" alt=\"");
+            sb_append_esc(&sb, L.title[i]);
+            sb_append(&sb, "\"> <div class=\"viewer-count svelte-60shhe\"><span class=\"dot svelte-60shhe\"></span> <span class=\"svelte-60shhe\">");
+            sb_append_esc(&sb, views);
+            sb_append(&sb, "</span></div></div><div class=\"stream-info svelte-60shhe\"><h3 class=\"stream-title svelte-60shhe\">");
+            sb_append_esc(&sb, L.title[i]);
+            sb_append(&sb, "</h3><p class=\"stream-username svelte-60shhe\">");
+            sb_append_esc(&sb, L.user[i]);
+            sb_append(&sb, "</p></div></div>");
+        }
+        sb_append(&sb, "</div>");
+    }
+    sb_append(&sb, "</div>");
+    char *html = sb_finish(&sb);
+    HtmlElem old = by_id("knStreamsBody");
+    if (old) html_dom_remove(old);
+    if (html) html_dom_insert_html(ov, HTML_INSERT_BEFORE_END, html);
+    free(html);
+    set_display(by_id("knStreamsBody"), L.closed ? "none" : "");
+    HtmlElem hide = by_id("knStreamsHide");
+    if (hide) html_dom_set_text(hide, L.closed ? "Show" : "Hide");
+}
+
+// an answer: the streams array of /streams/top's data (NULL = no answer: hidden)
+static void streams_apply(const cJSON *streams) {
+    L.listed = cJSON_IsArray(streams);
+    L.count = L.n = 0;
+    const cJSON *s = NULL;
+    if (L.listed) cJSON_ArrayForEach(s, streams) {
+        const cJSON *u = cJSON_GetObjectItemCaseSensitive(s, "username");
+        if (!cJSON_IsString(u) || !streams_login_ok(u->valuestring)) continue;
+        L.count++;
+        if (L.n >= STREAMS_SHOWN) continue;
+        const cJSON *t = cJSON_GetObjectItemCaseSensitive(s, "title");
+        const cJSON *v = cJSON_GetObjectItemCaseSensitive(s, "viewerCount");
+        const cJSON *th = cJSON_GetObjectItemCaseSensitive(s, "thumbnailUrl");
+        snprintf(L.user[L.n], sizeof L.user[0], "%s", u->valuestring);
+        snprintf(L.title[L.n], sizeof L.title[0], "%s", cJSON_IsString(t) ? t->valuestring : "");
+        const int https = cJSON_IsString(th) && !strncmp(th->valuestring, "https://", 8);
+        snprintf(L.thumb[L.n], sizeof L.thumb[0], "%s", https ? th->valuestring : "");
+        L.viewers[L.n] = cJSON_IsNumber(v) && v->valuedouble > 0 ? (int) v->valuedouble : 0;
+        L.n++;
+    }
+    if (v10_menu_page()) streams_render();
+}
+
+static void streams_body(void *user, const int status, const char *body, size_t length) {
+    (void) user;
+    (void) length;
+    cJSON *res = status == 200 && body ? cJSON_Parse(body) : NULL;
+    streams_apply(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(res, "data"), "streams"));
+    cJSON_Delete(res);
+}
+
+static void streams_fetch(void) {
+    if (L.override) return;
+    if (backend_available() != 1 || !backend_http_get("/streams/top?cb=2", streams_body, NULL)) streams_apply(NULL);
+}
+
+static void streams_interval(void *user) {
+    (void) user;
+    L.timer = html_timer_add(STREAMS_REFRESH_MS, streams_interval, NULL);
+    streams_fetch();
+}
+
 // #activeBuffs (_52546): the badges' display at every INIT (v10:219599-219601) and #buffSepStart
 // after them (its MutationObserver, v10:147302)
 static char g_buff_init[48]; // the INIT (map, mode) the badges were set for
@@ -559,6 +696,8 @@ void v10_menu_tick(void) {
         P.first_done = 1;
         popular_fetch();
         P.timer = html_timer_add(POPULAR_REFRESH_MS, popular_interval, NULL);
+        streams_fetch(); // fetchTopStreams on mount (_52138, v10:146178), then every 30 s
+        L.timer = html_timer_add(STREAMS_REFRESH_MS, streams_interval, NULL);
         store_item_interval(NULL);
     }
     buffs_update(menu_ui()->client, 0);
@@ -662,13 +801,13 @@ void v10_menu_dom_init(void) {
     header_setup();
     // menuClassContainer.style.display = '' once the menu is mounted (v10:222888)
     set_display(by_id("menuClassContainer"), "");
-    // .streams-overlay: only with streams to show (_52549); KrunkNative lists none
-    set_display(html_dom_query(0, "#tlInfHold .streams-overlay"), "none");
     // the idle state starts over with the page (v10_menu_tick: Popular Now's onMount, the intervals)
     html_timer_cancel(P.timer);
     html_timer_cancel(S.timer);
-    P.timer = S.timer = 0;
+    html_timer_cancel(L.timer);
+    P.timer = S.timer = L.timer = 0;
     P.first_done = 0;
+    streams_render(); // the last answer stays (the overlay is hidden until the first one: its markup starts hidden)
     P.key[0] = 0;
     g_buff_init[0] = 0;
     V.wired = 1;
@@ -765,6 +904,31 @@ int v10_menu_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, 
     }
     if (!strcmp(name, "knV10Notifications")) {
         notifications_toggle();
+        return 1;
+    }
+    if (!strcmp(name, "knV10StreamsToggle")) { // the overlay's Hide / Show (v10's closed view: the header stays)
+        L.closed = !L.closed;
+        streams_render();
+        return 1;
+    }
+    if (!strcmp(name, "knV10Stream")) { // a Live Streams card: openStream(username) = window.open("https://twitch.tv/" + username)
+        const int i = argc > 0 ? (int) args[0].num : -1;
+        if (i < 0 || i >= L.n) return 1;
+        char url[128];
+        snprintf(url, sizeof url, "https://twitch.tv/%s", L.user[i]);
+        ui_open_external(url);
+        return 1;
+    }
+    if (!strcmp(name, "knV10Streams")) { // tests: the Live Streams list from a JSON {"streams":[...]} ("" = back to the brain's answer)
+        const char *json = argc > 0 && args[0].kind == HTML_ARG_STR ? args[0].str : NULL;
+        L.override = json && *json;
+        if (L.override) {
+            cJSON *res = cJSON_Parse(json);
+            streams_apply(cJSON_GetObjectItemCaseSensitive(res, "streams"));
+            cJSON_Delete(res);
+        } else {
+            streams_fetch();
+        }
         return 1;
     }
     if (!strcmp(name, "knV10PopularPlay")) { // a Popular Now card: playSelect(); openURL("/?play=" + name, 1)

@@ -25,6 +25,7 @@
 #include "hot.h"
 #include "releases.h"
 #include "ai.h"
+#include "streams.h"
 #include "build_info.h"
 #include "knsvc/config.h"
 #include "knsvc/db.h"
@@ -67,6 +68,7 @@ static const BrainModule k_brain_modules[] = {
     /* editor-ai: the map editor's AI proxy (ai.h; community role) */
     {"ai", ai_init, ai_shutdown},
     {"ai-search", ai_search_init, ai_search_shutdown}, /* the AI's web search (ai_search.c) */
+    {"streams", streams_init, streams_shutdown}, /* v10 Live Streams: /streams/top (streams.c) */
 };
 #define BRAIN_MODULE_COUNT (sizeof(k_brain_modules) / sizeof(k_brain_modules[0]))
 

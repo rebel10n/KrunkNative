@@ -84,6 +84,9 @@ set(KN_BRAIN_SOURCES
     # editor-ai: the map editor's AI proxy (/ai/models, /ai/chat, health probe, server tools)
     ai.c
     ai_search.c                     # web search: a DuckDuckGo MCP server as a stdio child
+    # v10 Live Streams: GET /streams/top from Twitch Helix (streams.c; streams_norm.c is pure)
+    streams.c
+    streams_norm.c
     ../../shared/src/ai_proto.c
 )
 
@@ -135,6 +138,13 @@ add_executable(kn_brain_releases_test tests/test_releases.c release_info.c)
 target_include_directories(kn_brain_releases_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(kn_brain_releases_test PRIVATE knsvc)
 add_test(NAME brain_releases COMMAND kn_brain_releases_test)
+
+# v10 Live Streams: the pure normaliser and the token / game answers (streams_norm.c)
+add_executable(kn_brain_streams_test tests/test_streams.c streams_norm.c)
+target_include_directories(kn_brain_streams_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(kn_brain_streams_test PRIVATE knsvc)
+add_test(NAME brain_streams COMMAND kn_brain_streams_test)
+set_tests_properties(brain_streams PROPERTIES LABELS "knsvc;brain")
 set_tests_properties(brain_releases PROPERTIES LABELS "knsvc;brain")
 set_tests_properties(brain_registry PROPERTIES LABELS "knsvc;brain")
 
@@ -257,6 +267,11 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/ai_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_ai PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;ai")
+    # v10 Live Streams: /streams/top against a stub Twitch (tests/streams_test.py; never the live API)
+    add_test(NAME brain_streams_e2e
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/streams_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_streams_e2e PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
     # the same panel in the web client (headless Chromium on KN_WEB_DIST = a `make web` dist dir; else skips 77)
     add_test(NAME brain_ai_web_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/ai_web_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
