@@ -296,7 +296,7 @@ const GameModeConfig g_mode_configs[MODE_COUNT] = {
         .end_stats = k_stats_zom, .leader_stats = k_lead_zom, .send_rate = 5, .min_players = 1, .friendly = 1,
         .view_dis = 500.0f, .no_class_scr = 1, .force_class = 9, .finite_ammo = 1, LOADOUT(starting_loadout, k_zom_start),
         .no_scr_limit = 1, .unrestricted_weapons = 1, .points_per_hit = 0.085f, .starter_score = 150,
-        .game_time = 0.0f, .regen_mlt = 0.1f, .prevent_custom = 1, .force_charge = 1, .no_minimap = 1,
+        .game_time = 0.0f, .regen_mlt = 0.1f, .prevent_custom = 1, .force_charge = 1, .force_old_scoreboard = 1, .no_minimap = 1,
         .win_condition = mode_win_team2, .condition = mode_cond_raid, // zom.js: winCondition 2, someone alive
         .game_start = mode_zombies_game_start, .update = mode_zombies_update, .on_kill = mode_zombies_on_kill,
         .on_pre_end = mode_zombies_on_pre_end},

@@ -63,6 +63,7 @@ static const char *CORE_SETTINGS[] = {
     "sensitivityX", "sensitivityY", "aimSensitivityX", "aimSensitivityY", "invertY", "fov",
     "adsFovMlt", "scaleUI", "uiScaling", "resolution", "shadows", "softShad", "highResShad", "ambientShading",
     "showFPS", "speedScale", "dmgScale", "ambientVolume", "gunsVolume", "playerVolume", "uiVolume",
+    "oldScoreboard", // its default depends on the device (ui_setting_value)
     // input/camera settings (ui_controls.c)
     "fpsFOV", "scrollDir", "showWeapon", "showWeaponSec", "showWeaponMel", "shwChat", "slidCont",
     "sound", "voiceVolume", "assetVolume",
@@ -299,6 +300,11 @@ const cJSON *ui_setting_value(const char *key) {
         static cJSON *phone;
         if (!phone) phone = cJSON_CreateNumber(0.9);
         return phone;
+    }
+    if (key && !strcmp(key, "oldScoreboard") && ui_mobile_active()) { // v10: oldScoreboard's val is !!isMobile
+        static cJSON *classic;                                            // (the kill feed in the chat)
+        if (!classic) classic = cJSON_CreateTrue();
+        return classic;
     }
     return g_defaults ? cJSON_GetObjectItem(g_defaults, key) : NULL;
 }

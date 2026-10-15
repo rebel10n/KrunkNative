@@ -84,8 +84,9 @@ def main():
     add("ingame-plain", state_of("ingame-plain"), hud_regions(rc), "Plain HUD (FFA on Kanji), full ammo, over flat black.")
     add("ingame-scoped", state_of("ingame-scoped"),
         [r for r in hud_regions(rects("ingame-scoped")) if r["name"] != "crosshair"], "Aiming down sights (right mouse held).")
-    add("ingame-reloading", state_of("ingame-reloading", hud=dict(state_of("ingame-reloading")["hud"], ammo=27)),
-        hud_regions(rects("ingame-reloading")), "Three shots then R: reloading.")
+    # reloadUIAnim's bar as captured: #ammoHolder background-size "57% 100%" (ingame-reloading.html.gz)
+    add("ingame-reloading", state_of("ingame-reloading", hud=dict(state_of("ingame-reloading")["hud"], ammo=27, reloadPercent=57)),
+        hud_regions(rects("ingame-reloading")), "Three shots then R: reloading, the reload bar at the capture's 57%.")
     add("ingame-scoreboard", state_of("ingame-scoreboard"), hud_regions(rects("ingame-scoreboard")),
         "Tab held: #centerLeaderDisplay (one row) over the HUD.")
     add("ingame-chat-open", state_of("ingame-chat-open"), hud_regions(rects("ingame-chat-open")),

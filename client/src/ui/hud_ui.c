@@ -1977,8 +1977,16 @@ void hud_ui_add_killfeed(Client *client, const char *killer, const char *victim,
 
 // Old Scoreboard (oldScoreboard -> switchLeaderboard(0), leaderType 0): gE() writes kill
 // lines into #chatList instead of #killFeed.
+// settings.tmp.leaderType == 0: Use Classic io Scoreboard (oldScoreboard; v10's default on phones),
+// or a mode whose custUI forces it (zom: switchLeaderboard(true, true), mode.forceOldScoreboard).
+static int hud_old_scoreboard(const Client *client) {
+    const GameMode *mode = client ? client->game.mode : NULL;
+    return client_render_settings()->old_scoreboard || (mode && mode->config.force_old_scoreboard);
+}
+
+// gE(): kill-feed rows go to #chatList with the old scoreboard, else to #killFeed.
 static int hud_feed_in_chat(void) {
-    return client_render_settings()->old_scoreboard;
+    return hud_old_scoreboard(menu_ui()->client);
 }
 
 // Evicts the oldest children of `list` (and their bR entries) until fewer than `limit` remain.
@@ -2312,6 +2320,9 @@ void hud_ui_found_junk(const char *line) {
     hud_add_chat_markup(markup);
 }
 
+static char g_welcome_last[128]; // the welMsg last seen (v10 _59519), map welMsg <= 70 chars
+static int g_welcome_adopt;      // take the next welMsg as seen without a line (a scenario's chat)
+
 // Empties #chatList and marks the session's join lines as written (a scenario brings
 // its own chat history).
 void hud_ui_clear_chat(void) {
@@ -2322,11 +2333,26 @@ void hud_ui_clear_chat(void) {
     }
     g_hud_ui.chat_seq = 0;
     g_hud_ui.chat_seeded = 1;
+    g_welcome_adopt = 1;
+}
+
+// window.welcome(welMsg) on a map init (game.deob.js 167354): the map's line again whenever the
+// loaded map's welMsg differs from the last one seen, e.g. the next map of the rotation.
+static void hud_welcome_step(const Client *client) {
+    if (!g_hud_ui.chat_seeded || !client->game.map) return;
+    const char *msg = hud_welcome_msg(client);
+    if (!strcmp(msg, g_welcome_last)) return;
+    snprintf(g_welcome_last, sizeof(g_welcome_last), "%s", msg);
+    if (!g_welcome_adopt) hud_add_server_chat(msg, SERVER_MSG_COLOR);
+    g_welcome_adopt = 0;
 }
 
 static void hud_seed_chat(const Client *client) {
     HudUi *ui = &g_hud_ui;
-    if (ui->chat_seeded) return;
+    if (ui->chat_seeded) {
+        hud_welcome_step(client);
+        return;
+    }
     // The join line names the player like the server does ("Guest_1"): wait for SPAWN's
     // name, then fall back to the menu name.
     if (client->me && !client->me->name[0] && ui->seed_wait++ < HUD_SEED_WAIT_SAMPLES) return;
@@ -2334,6 +2360,8 @@ static void hud_seed_chat(const Client *client) {
     ui->seed_wait = 0;
 
     hud_add_server_chat(hud_welcome_msg(client), SERVER_MSG_COLOR); // map welMsg
+    snprintf(g_welcome_last, sizeof(g_welcome_last), "%s", hud_welcome_msg(client));
+    g_welcome_adopt = 0;
     const char *name = hud_my_name(client);
     if (name[0]) {                                                   // config.serverMessages[0]
         char msg[PLAYER_NAME_SIZE + sizeof(client->menu_name) + 32];
@@ -2490,7 +2518,7 @@ static void hud_render_game_info(const Client *client) {
 static void hud_old_board_step(const Client *client) {
     HudUi *ui = &g_hud_ui;
     const ClientRenderSettings *rs = client_render_settings();
-    const int old = rs->old_scoreboard;
+    const int old = hud_old_scoreboard(client);
     // v10 shows and fills #leaderboardHolder whatever the leaderType (hud_v10.c)
     const int board = 1;
     if (old != ui->old_board) {
@@ -4114,7 +4142,7 @@ void client_hud_html_tick(Client *client, const float now_f) {
     // v10 updateCrosshair (v10.js 221608): with a camera offset (thirdPerson) the crosshair stays
     // while aiming, except with a scope (its overlay takes over); so does KrunkNative's third person
     if (third_person_view(client) && !(weapon && weapon->scope)) next_extra.aim_pct = 0;
-    next_extra.scoreboard = hud_scoreboard_key(client) && !client_render_settings()->old_scoreboard; // g6: leaderType == 1 only
+    next_extra.scoreboard = hud_scoreboard_key(client) && !hud_old_scoreboard(client); // g6: leaderType == 1 only
     hud_loadout(me, &next_extra);
     int ping = client->net_ping_ms >= 0 ? client->net_ping_ms : -1; // Krunker shows "-" for -1
     int reloading = next.reload_percent > 0;

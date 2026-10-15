@@ -206,7 +206,8 @@ def pump_all(peers, seconds):
 
 def refused(peer, mark, server_log, command, before):
     """The guest got the notify and nothing else, and the server logged the denial."""
-    texts = [p for p in peer.texts(mark) if b" joined the game" not in p and b" left the game" not in p]  # broadcasts
+    # broadcasts, and the server's welcome line (the default motd) on a first spawn
+    texts = [p for p in peer.texts(mark) if b" joined the game" not in p and b" left the game" not in p and b"Welcome to " not in p]
     notified = any(b"DEV only" in p or b"Host or developer required" in p or b"premium custom host" in p for p in texts)
     leaked = [p for p in texts if not (b"DEV only" in p or b"Host or developer required" in p or b"premium custom host" in p)]
     logged = f"perms denied: {command} from" in log(server_log)[before:]

@@ -208,6 +208,10 @@ static void test_table(void) {
     CHECK(mode_hostable(MODE_ID_RAID) && mode_hostable(MODE_ID_GUN) &&
           !mode_hostable(MODE_ID_CAR) && !mode_hostable(MODE_ID_AON) && !mode_hostable(MODE_ID_MD) && !mode_hostable(MODE_ID_ZOM) &&
           !mode_hostable(MODE_ID_IMP) && mode_hostable(MODE_ID_DOM), "preventCustomGames (raid hostable again)");
+    // v10 zom custUI: switchLeaderboard(true, true), the kill feed in the chat; every other mode leaves it to the setting
+    int forced_old = 0;
+    for (int id = 0; id < MODE_COUNT; id++) forced_old += mode_config(id) && mode_config(id)->force_old_scoreboard;
+    CHECK(mode_config(MODE_ID_ZOM)->force_old_scoreboard && forced_old == 1, "forceOldScoreboard: Zombies only (%d modes)", forced_old);
 
     const GameModeConfig *stalk = mode_config(MODE_ID_STALK);
     CHECK(stalk->has_fog_dist && stalk->fog_dist == 250.0f && stalk->has_fog_col && stalk->fog_col == 1842204 &&

@@ -112,6 +112,8 @@
 //   100 scroll @grid knOmGrid    log scroll containers' scrollTop (html_dom_get_scroll), like vis:
 //                                "[input_script] scroll t=100 @grid knOmGrid=196.0" (- = no such id or
 //                                not a scroll container)
+//   100 style @r ammoHolder:background-size  log inline style values, like vis: "[input_script] style
+//                                t=100 @r ammoHolder:background-size=57%_100%" (spaces as _, - = unset or no such id)
 //   100 rect @menu chatHolder uiBase  log page elements' boxes, like vis: "[input_script] rect t=100
 //                                @menu chatHolder=86.8,653.2,239.1,55.0,413.0,95.0" = the viewport rect
 //                                x,y,w,h (CSS px, getBoundingClientRect) then the layout size
@@ -224,7 +226,7 @@ static struct {
 
 // The page probes: log lines, the whole rest of the line is ids (and @labels).
 static int script_probe(const char *cmd) {
-    return !strcmp(cmd, "vis") || !strcmp(cmd, "scroll") || !strcmp(cmd, "rect") || !strcmp(cmd, "console");
+    return !strcmp(cmd, "vis") || !strcmp(cmd, "scroll") || !strcmp(cmd, "rect") || !strcmp(cmd, "console") || !strcmp(cmd, "style");
 }
 
 static void script_load(void) {
@@ -874,7 +876,8 @@ static void script_run(Client *client, const ScriptEvent *e) {
     } else if (script_probe(e->cmd) && strcmp(e->cmd, "console")) {
         // vis <id> [<id> ...]: one log line with each element's visibility (1 shown, 0 not, - absent);
         // scroll <id> [<id> ...]: their scrollTop instead; rect <id> [<id> ...]: their boxes
-        const int scroll = e->cmd[0] == 's';
+        const int style = !strcmp(e->cmd, "style");
+        const int scroll = !style && e->cmd[0] == 's';
         const int rect = e->cmd[0] == 'r';
         char line[2048];
         int n = snprintf(line, sizeof(line), "[input_script] %s t=%.0f", e->cmd, g_script.time);
@@ -888,6 +891,16 @@ static void script_run(Client *client, const ScriptEvent *e) {
             c += len;
             if (id[0] == '@') { // a label for the log reader
                 n += snprintf(line + n, sizeof(line) - (size_t) n, " %s", id);
+                continue;
+            }
+            if (style) { // id:property -> the inline value, spaces as '_' ("57%_100%"), - unset
+                char *colon = strchr(id, ':');
+                if (colon) *colon = 0;
+                const HtmlElem el = colon && html_ui_available() ? html_dom_by_id(id) : 0;
+                char value[128];
+                if (!el || html_dom_get_style(el, colon + 1, value, sizeof(value)) < 0 || !value[0]) snprintf(value, sizeof(value), "-");
+                for (char *v = value; *v; v++) if (*v == ' ') *v = '_';
+                n += snprintf(line + n, sizeof(line) - (size_t) n, " %s:%s=%s", id, colon ? colon + 1 : "", value);
                 continue;
             }
             if (rect) {

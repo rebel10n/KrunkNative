@@ -26,7 +26,7 @@
       "ammoLimit": false,
       "melee": false,
       "reloading": true,
-      "reloadPercent": 0,
+      "reloadPercent": 57,
       "timerText": "03:45",
       "kills": 0,
       "deaths": 0,
@@ -69,5 +69,5 @@
     ]
   },
   "frames": 3,
-  "note": "Three shots then R: reloading. Reference: the offline v10 sandbox (capture-v10.js)."
+  "note": "Three shots then R: reloading, the reload bar at the capture's 57%. Reference: the offline v10 sandbox (capture-v10.js)."
 }

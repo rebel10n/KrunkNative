@@ -263,6 +263,7 @@ typedef struct {
     unsigned char finite_ammo:1;     // finiteAmmo (Zombies: reserve ammo)
     unsigned char unrestricted_weapons:1; // unrestrictedWeapons (Zombies)
     unsigned char force_charge:1;    // forceCharge (Zombies)
+    unsigned char force_old_scoreboard:1; // forceOldScoreboard (Zombies custUI: switchLeaderboard(true, true), feed rows in chat)
     float points_per_hit;            // pointsPerHit (Zombies 0.085 x damage)
     int starter_score;               // starterScore (Zombies 150)
     float regen_mlt;                 // regenMlt (Zombies 0.1; 0 = 1)
