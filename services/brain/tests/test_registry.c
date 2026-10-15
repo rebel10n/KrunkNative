@@ -82,7 +82,8 @@ int main(void) {
     MmPickQuery qxf = {.region = "de-fra", .auto_change = 1, .now_ms = 6000, .exclude_game = "FRA:ccccc"};
     CHECK(registry_pick(r, &p, &qxf, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "NY2:bbbbb"));
     p.cross_region = 0;
-    CHECK(registry_pick(r, &p, &qxf, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "FRA:ccccc")); /* the only one */
+    /* the excluded lobby is the only one with room in the region: never answered, NoOtherLobby */
+    CHECK(registry_pick(r, &p, &qxf, &pick) == MM_PICK_NO_OTHER_LOBBY);
     p.cross_region = 1;
     /* excludeRecent (the lobbies before it, recent_lobbies.h): skipped too, so F4 never bounces
      * between the last two; when nothing else has room they come back before the one it leaves */

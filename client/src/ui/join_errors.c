@@ -41,6 +41,9 @@ void join_error_text(const char *code, char *out, const size_t n) {
         snprintf(out, n, "%s", I18N("matchmaker.NoAvailableServers", "Servers are at Max Capacity"));
     else if (!strcmp(code, "NoMatchingServers"))
         plain(I18N("matchmaker.NoMatchingServers", "No Games Found<br><small>Try changing Quickplay options</small>"), out, n);
+    // KrunkNative: the only lobby with room is the one a seek leaves (excludeGame): never sent back to
+    // it; Find New Game / Quick Match keeps the player in that lobby (servers_ui.c on_seek)
+    else if (!strcmp(code, "NoOtherLobby")) snprintf(out, n, "%s", I18N("kn.mm.noOtherLobby", "No other lobby has room: you stay in this one"));
     else if (!strcmp(code, "CaptchaRequired"))
         plain(I18N("matchmaker.CaptchaRequired", "Security check failed<br><small>Complete the security check and try again</small>"), out, n);
     else if (!strcmp(code, "RecaptchaFailed"))

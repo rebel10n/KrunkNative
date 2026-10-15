@@ -360,7 +360,7 @@ static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, co
     MmPickError e = registry_pick(b->registry, &mm_settings()->policy, &q, &pick);
     if (e != MM_PICK_OK) {
         static const char *names[] = {"", "InvalidGameId", "GameFull", "NoServersMatchQuery", "NoAvailableServers",
-                                      "AccountRequired", "IncompatibleVersion", "NoMatchingServers"};
+                                      "AccountRequired", "IncompatibleVersion", "NoMatchingServers", "NoOtherLobby"};
         reply_error(req, error_status(names[e]), names[e]);
         return;
     }

@@ -190,19 +190,19 @@ def main():
             return 1
         ok("both servers verified and listed under ?flavor=all")
 
-        # ?exclude= (a seek leaving its current / recent servers, client recent_lobbies.h): left out
-        # while another server matches, listed again when none does
+        # ?exclude= (a seek leaving its current / recent servers, client recent_lobbies.h): never
+        # listed, so a seek is not sent back to a server it leaves
         ex_one = http_json(finder_url + "/servers?flavor=all&exclude=127.0.0.1:%d" % base_q).get("servers", [])
         if names(ex_one) == ["Strike Srv"]:
-            ok("?exclude= leaves the excluded server out while another one matches")
+            ok("?exclude= leaves the excluded server out")
         else:
             fail("?exclude=<base> listing is %s, expected ['Strike Srv']" % names(ex_one))
         ex_all = http_json(finder_url + "/servers?flavor=strike&exclude=127.0.0.1:%d,127.0.0.1:%d"
                            % (strike_q, base_q)).get("servers", [])
-        if names(ex_all) == ["Strike Srv"]:
-            ok("?exclude= falls back to the excluded servers when nothing else matches")
+        if names(ex_all) == []:
+            ok("?exclude= lists nothing when every matching server is excluded")
         else:
-            fail("?exclude=<all> strike listing is %s, expected ['Strike Srv']" % names(ex_all))
+            fail("?exclude=<all> strike listing is %s, expected []" % names(ex_all))
 
         # base client: no ?flavor -> only the base server, and the entry carries no "flavor" key
         base_list = http_json(finder_url + "/servers").get("servers", [])

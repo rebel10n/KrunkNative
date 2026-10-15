@@ -649,7 +649,8 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         if (rejoin) rejoin_cancel(); // gave up: the seek's error below
         const int nothing = cJSON_IsString(err) && (!strcmp(err->valuestring, "NoMatchingServers") ||
                                                     !strcmp(err->valuestring, "NoAvailableServers") ||
-                                                    !strcmp(err->valuestring, "NoServersMatchQuery"));
+                                                    !strcmp(err->valuestring, "NoServersMatchQuery") ||
+                                                    !strcmp(err->valuestring, "NoOtherLobby"));
         if (find && (nothing || g_client->net_connected)) {
             // Find New Game / Quick Match found nothing here: the player stays in this lobby
             snprintf(g_game_id, sizeof(g_game_id), "%s", g_find_prev_game);
@@ -721,7 +722,9 @@ static void on_strike_finder(void *user, const int status, const char *body, con
         join_server(host, port, "", NULL, NULL, cJSON_GetStringValue(cJSON_GetObjectItem(best, "region")));
     } else {
         fprintf(stderr, "[strike] finder pool: no Strike server with room (HTTP %d)\n", status);
-        strike_seek_failed(error && error[0] ? error : "NoAvailableServers");
+        // Find New Game / Quick Match: the finder lists nothing it leaves, so from a lobby the answer is
+        // that no other one has room (the player stays in it)
+        strike_seek_failed(g_find_seek && g_find_prev_game[0] ? "NoOtherLobby" : error && error[0] ? error : "NoAvailableServers");
     }
     cJSON_Delete(res);
     free(error);
@@ -754,6 +757,17 @@ static void on_strike_allocation(void *user, const StrikeAllocation *a) {
     if (g_pin != PIN_NONE) {
         printf("[strike] allocation ignored: %s\n", g_pin == PIN_DIRECT ? "pinned to a direct server" : "disconnected by the user");
         return;
+    }
+    // Find New Game / Quick Match: the director takes no excludeGame, so an answer on a server or game
+    // this client leaves goes to the finder's Strike pool instead, which never lists those
+    if (a->ok && g_find_seek) {
+        char server[RECENT_LOBBY_ID_MAX];
+        snprintf(server, sizeof(server), "%s:%d", a->host, a->port);
+        if (recent_lobbies_rank(&g_recent_servers, server) || (g_find_prev_game[0] && !strcmp(a->game_id, g_find_prev_game))) {
+            printf("[strike] director answered the lobby this client leaves (%s): the finder's pool instead\n", a->game_id);
+            if (!strike_finder_seek(NULL)) strike_seek_failed("NoOtherLobby");
+            return;
+        }
     }
     if (a->ok) {
         g_find_seek = g_find_both = 0;
@@ -917,7 +931,10 @@ static void on_ping_list(void *user, const int status, const char *body, const s
         list = NULL;
     }
     cJSON_Delete(list);
-    if (g_pin != PIN_NONE) printf("[mm] seek skipped: %s\n", g_pin == PIN_DIRECT ? "pinned to a direct server" : "disconnected by the user");
+    if (g_pin != PIN_NONE) {
+        printf("[mm] seek skipped: %s\n", g_pin == PIN_DIRECT ? "pinned to a direct server" : "disconnected by the user");
+        g_exclude_game[0] = 0; // the Quick Match this skipped must not leak into a later seek
+    }
     // v3.1.1's startup seek sends autoChangeGame: false - a ?game= that is gone, full or needs
     // an account shows its error (Game not found. / ...) with the "seek a new game" link
     // instead of quietly landing somewhere else

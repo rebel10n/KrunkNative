@@ -311,13 +311,12 @@ cJSON *finder_list(FinderTable *t, const FinderFilter *f, uint64_t now_ms) {
     /* fresh = verified by a poll within two intervals plus the timeout */
     const uint64_t fresh = (uint64_t) t->cfg.poll_interval_ms * 2 + (uint64_t) t->cfg.poll_timeout_ms;
     const char *exclude = f->exclude && *f->exclude ? f->exclude : NULL;
-    /* with an exclude list: first without those servers; only when that lists nothing, with them */
+    /* an exclude list (the servers a seek leaves) is never listed: a seek must not be sent back */
     int n = 0;
-    for (int pass = exclude ? 0 : 1; pass < 2 && n == 0; pass++)
     for (size_t i = 0; i < t->count && n < limit; i++) {
         const FinderEntry *e = t->items[i];
         if (!e->info || now_ms - e->last_ok_ms > fresh || !matches(e, f)) continue;
-        if (pass == 0 && excluded(e, exclude)) continue;
+        if (excluded(e, exclude)) continue;
         const cJSON *info = e->info;
         cJSON *o = cJSON_CreateObject();
         cJSON_AddStringToObject(o, "host", e->host);

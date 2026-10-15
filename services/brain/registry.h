@@ -181,8 +181,10 @@ typedef enum MmPickError {
     MM_PICK_NONE,                  /* nothing with room */
     MM_PICK_ACCOUNT_REQUIRED,      /* requested lobby refuses guests (legacy onlineMode), the player a guest, autoChangeGame off */
     MM_PICK_INCOMPATIBLE,          /* requested lobby speaks another protocol major, autoChangeGame off */
-    MM_PICK_NO_PREF_MATCH          /* lobbies have room but none plays the seek modes / maps (v10
+    MM_PICK_NO_PREF_MATCH,         /* lobbies have room but none plays the seek modes / maps (v10
                                     * dataQuery dsmo / dsma): NoMatchingServers */
+    MM_PICK_NO_OTHER_LOBBY         /* the only lobby with room is the excludeGame one the player leaves:
+                                    * NoOtherLobby (never sent back to it) */
 } MmPickError;
 
 typedef struct MmPickQuery {

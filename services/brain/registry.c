@@ -636,12 +636,13 @@ MmPickError registry_pick(Registry *r, const MmPolicy *p, const MmPickQuery *q, 
         out->changed = 1;
     }
     /* 2./3. the best public lobby with room (registry.h): region first, then all; with
-     * excludeGame (v10 Quick Match) / excludeRecent every other lobby first, then the recent ones,
-     * the one the player leaves last */
+     * excludeGame (v10 Quick Match) / excludeRecent every other lobby first, then the recent ones.
+     * The excludeGame lobby itself is never answered (KrunkNative: the player leaves it, so a seek
+     * that excludes it reports MM_PICK_NO_OTHER_LOBBY instead of sending them back). */
     int soft = p->soft_cap > 0;
     const char *exclude = q->exclude_game && *q->exclude_game ? q->exclude_game : NULL;
     const char *recent = q->exclude_recent && *q->exclude_recent ? q->exclude_recent : NULL;
-    for (int ex = recent ? 0 : exclude ? 1 : 2; ex < 3; ex++) {
+    for (int ex = recent ? 0 : exclude ? 1 : 2; ex < (exclude ? 2 : 3); ex++) {
         const char *skip = ex <= 1 ? exclude : NULL, *skip_recent = ex == 0 ? recent : NULL;
         for (int pass = soft ? 0 : 1; pass < 2; pass++) {
             int use_soft = pass == 0;
@@ -666,6 +667,14 @@ MmPickError registry_pick(Registry *r, const MmPolicy *p, const MmPickQuery *q, 
     }
     out->changed = 0;
     if (any && !any_version) return MM_PICK_NO_MATCH;
+    /* the only lobby with room is the one the seek excludes: say so (the client stays put) */
+    if (exclude) {
+        MmNode *en = NULL;
+        const MmLobby *el = registry_lobby_find(r, exclude, &en);
+        if (el && !el->custom && !el->no_seek && lobby_joinable(en, el) && lobby_auto_ok(en, el, q) && version_ok(el, q->version) &&
+            proto_ok(el, q) && ruleset_ok(el, q) && prefs_ok(el, q) && registry_lobby_taken(r, el, q->now_ms) < registry_lobby_cap(el, p))
+            return MM_PICK_NO_OTHER_LOBBY;
+    }
     return any_room && (q->mode_count > 0 || q->map_count > 0) ? MM_PICK_NO_PREF_MATCH : MM_PICK_NONE;
 }
 
