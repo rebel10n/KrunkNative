@@ -255,8 +255,14 @@ static void set_popup_notice(const int captcha, const char *fmt, ...) {
 // or, when the player is in a game and stays in it, v10's error popup over that game (join_errors.h).
 static void present_failure(const char *text) {
     Client *client = K.client;
-    if (join_error_place(client && client->net_connected) == JOIN_ERROR_POPUP) set_popup_notice(0, "%s", text);
-    else if (client) on_client_socket_failed(client, text);
+    if (join_error_place(client && client->net_connected) == JOIN_ERROR_POPUP) {
+        set_popup_notice(0, "%s", text);
+    } else if (client) {
+        // final, like servers_ui.c fatal_error: no transport retries it (menu_poll_connection would
+        // keep the spinner up), the error screen's Retry seeks again (krunker_net_reconnect)
+        client->net_hold_retry = 1;
+        on_client_socket_failed(client, text);
+    }
 }
 
 // ---------------------------------------------------------------- link I/O
@@ -1047,7 +1053,13 @@ static void seek(void) {
     append_param(url, sizeof(url), "hostname", "krunker.io");
     append_param(url, sizeof(url), "region", K.region);
     append_param(url, sizeof(url), "autoChangeGame", "false");
-    if (K.token[0]) append_param(url, sizeof(url), "validationToken", K.token);
+    // the log shows where the validation token goes, never its value (like the captcha / access tokens)
+    size_t token_at = 0, token_end = 0;
+    if (K.token[0]) {
+        token_at = strlen(url) + sizeof("&validationToken=") - 1;
+        append_param(url, sizeof(url), "validationToken", K.token);
+        token_end = strlen(url);
+    }
     if (K.game_id[0]) append_param(url, sizeof(url), "game", K.game_id);
     else if (K.exclude[0]) append_param(url, sizeof(url), "excludeGame", K.exclude); // backToOrigin's ?exclude= (:141624, :222302)
     if (K.seek_new && !K.game_id[0]) {
@@ -1067,8 +1079,9 @@ static void seek(void) {
     // the krunker.io account (krunker_account.h): matchmakerSeek's last parameter (:147630)
     if (K.access[0]) append_param(url, sizeof(url), "accessToken", K.access);
     K.state = KS_SEEK;
-    printf("[krunker] seek-game: %.*s%s%s\n", (int) logged, url, K.captcha_sent ? "&captchaToken=(the player's Turnstile token)" : "",
-           K.access[0] ? "&accessToken=(the krunker.io account's)" : "");
+    if (token_end) printf("[krunker] seek-game: %.*s(redacted)%.*s", (int) token_at, url, (int) (logged - token_end), url + token_end);
+    else printf("[krunker] seek-game: %.*s", (int) logged, url);
+    printf("%s%s\n", K.captcha_sent ? "&captchaToken=(the player's Turnstile token)" : "", K.access[0] ? "&accessToken=(the krunker.io account's)" : "");
     const int queued = http_get(url, on_seek); // (the request keeps its own copy)
     wipe(K.captcha, sizeof(K.captcha));          // single-use: never sent twice
     wipe(url, sizeof(url));

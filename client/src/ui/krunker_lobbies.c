@@ -5,6 +5,7 @@
 #include <krunker_lobbies.h>
 #include <krunker_net.h>
 #include <seek_prefs.h>
+#include <server_names.h>
 #include <ui_logic.h>
 #include <backend.h>
 #include <stdio.h>
@@ -341,14 +342,16 @@ int krunker_lobbies_seek(void) {
     return 1;
 }
 
-// The lobby's region (tuple [1]) from the current list, "" when it is not listed.
+// The lobby's region (tuple [1]) from the current list; a pasted link to a lobby that is not listed
+// (no list yet, a custom or private game) the region its id prefix names ("NY:" us-nj), so the seek
+// and the error screen's Region line are the lobby's, not the saved / default one. "" when neither.
 static const char *lobby_region(const char *id) {
     const cJSON *t;
     cJSON_ArrayForEach(t, K.list) {
         const char *tid = cJSON_GetStringValue(cJSON_GetArrayItem(t, 0));
         if (tid && !strcmp(tid, id)) return cJSON_GetStringValue(cJSON_GetArrayItem(t, 1));
     }
-    return "";
+    return kn_krunker_game_region(id);
 }
 
 void krunker_lobbies_open(const char *id) {

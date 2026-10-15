@@ -35,3 +35,7 @@ int kn_game_link_parse(const char *text, char *id, size_t n);
 // 1 when text is a game link (kn_game_link_parse) whose site is krunker.io or *.krunker.io: an
 // official krunker.io lobby, joined through the official path (krunker_lobbies_open), not the brain.
 int kn_game_link_is_krunker(const char *text);
+
+// The krunker.io matchmaker region of an official lobby id from its prefix ("NY:dy6cs" -> "us-nj"),
+// "" when the prefix is not one of the live regions (v10 regionIndexs, checked against /game-list).
+const char *kn_krunker_game_region(const char *id);

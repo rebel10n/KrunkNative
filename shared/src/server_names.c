@@ -112,6 +112,23 @@ int kn_game_link_parse(const char *text, char *id, const size_t n) {
     return ok;
 }
 
+const char *kn_krunker_game_region(const char *id) {
+    // v10's regionIndexs (v10.js:19923) -> the region codes of its prod list (:16443); only the
+    // prefixes krunker.io's /game-list pairs with those regions (2026-10-15): the rest of
+    // regionIndexs (MIA, STL, CHI, MX, SEO, LON, AFR, IOW) has no live lobbies to check against
+    static const char *const MAP[][2] = {
+        {"NY", "us-nj"}, {"SV", "us-ca-sv"}, {"DAL", "us-tx"}, {"BRZ", "brz"}, {"BHN", "me-bhn"}, {"TOK", "jb-hnd"},
+        {"SIN", "sgp"},  {"MBI", "as-mb"},   {"FRA", "de-fra"}, {"SYD", "au-syd"}, {"SSS", "sss"},
+    };
+    const char *colon = id ? strchr(id, ':') : NULL;
+    if (!colon) return "";
+    const size_t len = (size_t) (colon - id);
+    for (size_t i = 0; i < sizeof(MAP) / sizeof(MAP[0]); i++) {
+        if (strlen(MAP[i][0]) == len && !strncasecmp(id, MAP[i][0], len)) return MAP[i][1];
+    }
+    return "";
+}
+
 int kn_game_link_is_krunker(const char *text) {
     char id[160];
     if (!kn_game_link_parse(text, id, sizeof(id))) return 0;

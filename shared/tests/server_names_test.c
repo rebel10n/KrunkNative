@@ -121,6 +121,19 @@ int main(void) {
     CHECK(!kn_game_link_is_krunker("krunker.io"));
     CHECK(!kn_game_link_is_krunker(NULL));
 
+    // an official lobby's region from its id prefix (kn_krunker_game_region)
+    CHECK(!strcmp(kn_krunker_game_region("NY:dy6cs"), "us-nj"));
+    CHECK(!strcmp(kn_krunker_game_region("SYD:t80f3"), "au-syd"));
+    CHECK(!strcmp(kn_krunker_game_region("SIN:gbeu8"), "sgp"));
+    CHECK(!strcmp(kn_krunker_game_region("FRA:5navf"), "de-fra"));
+    CHECK(!strcmp(kn_krunker_game_region("TOK:a1"), "jb-hnd"));
+    CHECK(!strcmp(kn_krunker_game_region("sv:a1"), "us-ca-sv"));
+    CHECK(!strcmp(kn_krunker_game_region("N:a1"), ""));
+    CHECK(!strcmp(kn_krunker_game_region("NYC:a1"), ""));
+    CHECK(!strcmp(kn_krunker_game_region("CH2:kz862"), ""));
+    CHECK(!strcmp(kn_krunker_game_region("dy6cs"), ""));
+    CHECK(!strcmp(kn_krunker_game_region(NULL), ""));
+
     if (g_fail) return 1;
     printf("Test OK\n");
     return 0;

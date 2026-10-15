@@ -697,6 +697,11 @@ def check_matchmaker(label, stub, tokens, client_text):
               q2.get("dataQuery") == dq, [k for k, _ in retry])
     check(f"{label}: the matchmaker let the last retry through", stub.captcha_ok.is_set())
     check(f"{label}: no Turnstile token reaches the log", not any(t in client_text for t in tokens))
+    # the matchmaker's validation tokens are redacted like the captcha and access tokens: never logged,
+    # raw or URL-encoded, while the seek line itself still is
+    leaked = [t for t in stub.issued if t in client_text or urllib.parse.quote(t, safe="") in client_text]
+    check(f"{label}: no validation token reaches the log",
+          stub.issued and not leaked and "validationToken=(redacted)" in client_text, leaked or len(stub.issued))
 
 
 def check_version_gate():
