@@ -27,7 +27,7 @@
  *   GET  /players/<name>/listings                                       [{marketid, skinindex, m, funds}]
  *   GET  /clans/<id>/profile, /clans/by-name/<name>                     clan profile (the clan view)
  *   POST /clans/<id>/apply                                              {}
- * Other /clans/* paths are clan_v10.c's (the clan window's settings tab).
+ * Other /clans/* paths are clan_v10.c's (the clan window's settings tab), the /studios paths studios.c's.
  */
 #include "acct_internal.h"
 
@@ -38,6 +38,7 @@
 
 #include "hot.h"
 #include "strike_econ.h"
+#include "studios.h"
 #include "knsvc/config.h"
 #include "knsvc/json.h"
 #include "knsvc/log.h"
@@ -198,6 +199,7 @@ void sh_gapi(SocialSession *s, const cJSON *f) {
     }
     if (r.nseg > 0 && !strcmp(r.seg[0], "clans") && clan_v10_gapi(s, &r)) return;
     if (r.nseg > 0 && !strcmp(r.seg[0], "strike") && strike_econ_gapi(s, &r)) return; /* Krunker Strike (strike_econ.c) */
+    if (r.nseg > 0 && !strcmp(r.seg[0], "studios") && studios_gapi(s, &r)) return; /* v10 Studios (studios.c) */
     if (route(s, &r)) return;
     gapi_error(s, r.rid, 404, "NOT_FOUND", "Not found.");
 }

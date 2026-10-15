@@ -20,6 +20,7 @@ set(KN_BRAIN_SOURCES
     social_gapi.c
     db_social_v10.c
     clan_v10.c
+    studios.c                       # v10 Studios: the /studios gapi routes (db_studios.c, 0330_studios)
     game_presence.c                 # v10 presence:game (account -> its game, pushed to friends)
     profiles.c
     leaderboards.c
@@ -49,6 +50,7 @@ set(KN_BRAIN_SOURCES
     db_ranked.c
     db_turf.c                       # v10 Turf Wars (0206_turf_wars); rules shared/src/turf_wars.c
     db_kpd.c                        # the player list's K.P.D distress calls (0209_kpd_calls)
+    db_studios.c                    # v10 Studios: members, games, currencies, monetization (0330_studios)
     turf.c
     community.c                     # v10 Community & Events / news feed (/creators/events, /social/news)
     ../../shared/src/turf_wars.c
@@ -402,6 +404,11 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/clan_v10_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_clan_v10 PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+    # v10.0.2 Studios: the /studios gapi routes (studios.c, db_studios.c, 0330_studios)
+    add_test(NAME brain_studios
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/studios_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_studios PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
     # v10.0.2 Social hub on the v10 page through two headless clients (v10_social.c, social_gapi.c, social_eb.c)
     add_test(NAME brain_v10_social_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/v10_social_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
