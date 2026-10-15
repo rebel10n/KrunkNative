@@ -1,0 +1,21 @@
+{
+ "name": "menu-1000",
+ "size": [
+  1000,
+  720
+ ],
+ "background": "#222222",
+ "times": [
+  0
+ ],
+ "origin": "the trigger",
+ "restartAnims": true,
+ "frames": {
+  "0": 0
+ },
+ "rafCalls": 0,
+ "note": "The menu in a 1000 px wide window: the @media (max-width) rules (narrow layout).",
+ "pageErrors": 2,
+ "requestsRefused": 3,
+ "tool": "tools/uidiff/capture-v10-seq.js"
+}

@@ -1,0 +1,47 @@
+{
+ "name": "click-to-play-grow",
+ "size": [
+  1280,
+  720
+ ],
+ "background": "#222222",
+ "times": [
+  0,
+  200,
+  400,
+  600,
+  800,
+  1000,
+  1200,
+  1400
+ ],
+ "origin": "the trigger",
+ "restartAnims": true,
+ "frames": {
+  "0": 0,
+  "200": 200,
+  "400": 400,
+  "600": 600,
+  "800": 800.1,
+  "1000": 1000,
+  "1200": 1200,
+  "1400": 1400
+ },
+ "probe": {
+  "expr": "getComputedStyle(instructions).transform",
+  "values": {
+   "0": "matrix(1, 0, 0, 1, -211.508, -30.5)",
+   "200": "matrix(1, 0, 0, 1, -195.742, -28)",
+   "400": "matrix(1, 0, 0, 1, -180.641, -25.5)",
+   "600": "matrix(1, 0, 0, 1, -174.484, -25)",
+   "800": "matrix(1, 0, 0, 1, -173.055, -25)",
+   "1000": "matrix(1, 0, 0, 1, -174.484, -25)",
+   "1200": "matrix(1, 0, 0, 1, -180.641, -25.5)",
+   "1400": "matrix(1, 0, 0, 1, -195.742, -28)"
+  }
+ },
+ "note": "CLICK TO PLAY (#instructions grow 0.8 s alternate): 8 frames over one 1.6 s cycle, the menu animations restarted at the origin (the native scenario: anim_origin \"cycle\").",
+ "pageErrors": 2,
+ "requestsRefused": 3,
+ "tool": "tools/uidiff/capture-v10-seq.js"
+}

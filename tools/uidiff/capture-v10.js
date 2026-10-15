@@ -449,7 +449,10 @@ async function openPage(o) {
     CURRENT_MAP = mapJson(o.map, o.mode);
     const storage = Object.assign({ krunker_haslogin: 'true', consent: '1', custMap: CURRENT_MAP }, o.storage || {});
     await c.send('Page.addScriptToEvaluateOnNewDocument', { source: preScript(storage) });
-    log('navigate'); await c.send('Page.navigate', { url: 'https://krunker.io/' }); log('navigated');
+    // capture-v10-seq.js: extra pre-page script, virtual time before the first page script, a query
+    if (o.preScript) await c.send('Page.addScriptToEvaluateOnNewDocument', { source: o.preScript });
+    if (o.beforeNavigate) await o.beforeNavigate(c);
+    log('navigate'); await c.send('Page.navigate', { url: 'https://krunker.io/' + (o.query || '') }); log('navigated');
     await sleep(o.settle);
   } catch (e) { close(); throw e; }
   return { c, errors, blocked, missing, close };
@@ -470,7 +473,11 @@ async function capture(sc, idx) {
   } finally { close(); }
 }
 
-(async () => {
+// the frame-sequence captures (capture-v10-seq.js) reuse the sandbox: openPage, enterGame, the
+// page helpers; the CLI below runs only when this file is the entry point
+module.exports = { REPO, openPage, enterGame, waitSandbox, lock, key, shoot, settle, flatPage, scenario, S, RECTS, PIN_TIMER, PIN_TEXT,
+  PIN_GMSG, HIDE_OVERLAY, PAUSE_ANIMS, GAME_CANVAS, SPAWN_BOT, SERVER_BOT, SG, SP, CG, CLOSERS, setOut: (o) => { OUT = o; } };
+if (require.main === module) (async () => {
   const args = process.argv.slice(2);
   const names = [];
   for (let i = 0; i < args.length; i++) {

@@ -1,0 +1,33 @@
+{
+  "scenario": "seq-death",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "death-bar",
+      "rect": [0, 560, 1280, 160],
+      "kind": "scene",
+      "fuzz": 12,
+      "max_pct": 8.0,
+      "note": "the bottom card (backdrop-filter blur over the checker) moving up"
+    },
+    {
+      "name": "you-died",
+      "rect": [580, 560, 320, 160],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 10.0,
+      "note": "\"You Died\" + the stat lines",
+      "pending": "S4: \"Time Survived : 2s\" (v10) shows Unknown natively"
+    }
+  ],
+  "timing": [
+    {
+      "name": "moveup",
+      "rect": [0, 560, 1280, 160],
+      "threshold": 0.5
+    }
+  ]
+}

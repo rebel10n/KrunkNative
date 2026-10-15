@@ -1,0 +1,29 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/sequences/loading-map-name",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "anim_times": [
+    0
+  ],
+  "anim_origin": "boot",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": false,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "boot": {
+      "loadGamNm": "play",
+      "map": "Kanji"
+    }
+  },
+  "note": "The loading screen of a ?play=Kanji link (v10:197704). Reference: capture-v10-seq.js loading-map-name."
+}

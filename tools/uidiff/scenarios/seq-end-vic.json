@@ -1,0 +1,62 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/sequences/end-vic",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "checker",
+  "anim_times": [
+    0,
+    100,
+    200,
+    300,
+    400,
+    500,
+    600,
+    700,
+    800,
+    900,
+    1000,
+    1100,
+    1200,
+    1300,
+    1400,
+    1500,
+    1600,
+    1700,
+    1800,
+    1900,
+    2000,
+    2100,
+    2200,
+    2300,
+    2400,
+    2500,
+    2600,
+    2700,
+    2800,
+    2900,
+    3000
+  ],
+  "anim_origin": "end",
+  "state": {
+    "menu": false,
+    "window": null,
+    "connected": true,
+    "ready": true,
+    "inGame": true,
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "modeName": "Free for All",
+    "name": "Local User",
+    "region": "...",
+    "hud": {
+      "timerText": "03:45"
+    },
+    "chat": [],
+    "console": [
+      "end"
+    ]
+  },
+  "note": "The match end (console `end`: 3 s timer; origin at the end packet): victory title + #endUI every 100 ms for 3 s."
+}

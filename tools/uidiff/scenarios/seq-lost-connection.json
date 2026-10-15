@@ -1,0 +1,27 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/sequences/lost-connection",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "anim_times": [
+    0,
+    500
+  ],
+  "anim_origin": "applied",
+  "state": {
+    "menu": true,
+    "connected": false,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "connectError": "DISCONNECTED"
+  },
+  "note": "The Lost Connection box (the \"error\" packet, player.disconnect \"DISCONNECTED\"); no open transition: the 500 ms frame equals the first. Reference: capture-v10-seq.js lost-connection."
+}

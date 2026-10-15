@@ -1,0 +1,29 @@
+{
+ "name": "lost-connection",
+ "size": [
+  1280,
+  720
+ ],
+ "background": "#222222",
+ "times": [
+  0,
+  500
+ ],
+ "origin": "the trigger",
+ "restartAnims": false,
+ "frames": {
+  "0": 0,
+  "500": 500
+ },
+ "probe": {
+  "expr": "instructionsUpdate.innerText",
+  "values": {
+   "0": "Lost Connection\nDISCONNECTED\nID: 0x000000 | Code: 0 | Reason: 0\nRegion: 0\nIf you have any extensions, disable them\nFind Game\tServers\tSettings",
+   "500": "Lost Connection DISCONNECTED ID: 0x000000 | Code: 0 | Reason: 0Region: 0If you have any extensions, disable them\n\t\t\t\tFind Game\n\t\t\t\tServers\n\t\t\t\tSettings\n\t\t\t"
+  }
+ },
+ "note": "The \"error\" packet with player.disconnect's text (\"DISCONNECTED\", what a dropped socket shows: v10:221943): #instructionHolder.onError with Lost Connection. No open transition (the 500 ms frame must equal the first).",
+ "pageErrors": 2,
+ "requestsRefused": 3,
+ "tool": "tools/uidiff/capture-v10-seq.js"
+}

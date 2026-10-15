@@ -1,0 +1,24 @@
+{
+  "scenario": "seq-emoji-panel",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "panel",
+      "rect": [0, 400, 400, 320],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "the emoji panel over the chat"
+    }
+  ],
+  "timing": [
+    {
+      "name": "slide",
+      "rect": [0, 400, 400, 320],
+      "threshold": 0.5
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "scenario": "seq-tooltip-loadout",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "tip",
+      "rect": [400, 200, 300, 200],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "createTip"
+    }
+  ]
+}

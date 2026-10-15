@@ -34,6 +34,7 @@
 
 #include <gl.h>
 #include <GLFW/glfw3.h>
+#include <headless.h> // ctest: KRUNKNATIVE_HEADLESS=1, an EGL pbuffer instead of a window
 #include <stb_image.h>
 
 #include "image.h"
@@ -585,15 +586,16 @@ static void test_geometry(void) {
 
 /* ---- main ------------------------------------------------------------------- */
 
-int main(const int argc, char **argv) {
+int main(int argc, char **argv) {
+    headless_parse_args(&argc, argv); // KRUNKNATIVE_HEADLESS=1 / --headless
     const char *ui_dir = argc > 1 ? argv[1] : "../ui/";
 
     test_url_resolution();
     test_geometry();
 
-    if (!glfwInit()) {
+    if (!headless_glfw_init()) {
         fprintf(stderr, "glfwInit failed\n");
-        return 2;
+        return 77; // no GL: ctest SKIP_RETURN_CODE
     }
 
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
@@ -601,14 +603,16 @@ int main(const int argc, char **argv) {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
+    headless_window_hints();
+
     GLFWwindow *window = glfwCreateWindow(64, 64, "test_image", NULL, NULL);
     if (!window) {
         fprintf(stderr, "glfwCreateWindow failed\n");
-        return 2;
+        return 77;
     }
 
-    glfwMakeContextCurrent(window);
-    if (!gladLoadGLLoader((GLADloadproc) glfwGetProcAddress)) {
+    headless_make_context_current(window);
+    if (!gladLoadGLLoader((GLADloadproc) headless_get_proc_address)) {
         fprintf(stderr, "gladLoadGLLoader failed\n");
         return 2;
     }

@@ -1,0 +1,24 @@
+{
+  "scenario": "seq-click-to-play-grow",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "click-to-play",
+      "rect": [500, 270, 280, 60],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 4.0,
+      "note": "#instructions CLICK TO PLAY while it grows"
+    }
+  ],
+  "timing": [
+    {
+      "name": "grow",
+      "rect": [500, 270, 280, 60],
+      "threshold": 0.5
+    }
+  ]
+}

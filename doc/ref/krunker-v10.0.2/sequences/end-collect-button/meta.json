@@ -1,0 +1,33 @@
+{
+ "name": "end-collect-button",
+ "size": [
+  1280,
+  720
+ ],
+ "background": "checker",
+ "times": [
+  0,
+  500,
+  1000,
+  1500,
+  2000,
+  2500,
+  3000
+ ],
+ "origin": "the Collect Rewards button laid out",
+ "restartAnims": false,
+ "frames": {
+  "0": 0,
+  "500": 500,
+  "1000": 1000,
+  "1500": 1500.1,
+  "2000": 2000,
+  "2500": 2500,
+  "3000": 3000
+ },
+ "rafCalls": 732,
+ "note": "Results with otherData.items injected (two skins with a rarity): the Collect Rewards button and its 3 s pulse.",
+ "pageErrors": 2,
+ "requestsRefused": 3,
+ "tool": "tools/uidiff/capture-v10-seq.js"
+}

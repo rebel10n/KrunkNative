@@ -1,0 +1,26 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/sequences/mobile-menu",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "anim_times": [
+    0
+  ],
+  "anim_origin": "applied",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": ""
+  },
+  "pending": "S8: no state key turns the mobile UI on (toggleMobileUI(true))",
+  "note": "The mobile menu layout (toggleMobileUI(true)). Reference: capture-v10-seq.js mobile-menu."
+}

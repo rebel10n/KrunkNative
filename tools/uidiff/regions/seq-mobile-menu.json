@@ -1,0 +1,17 @@
+{
+  "scenario": "seq-mobile-menu",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "menu",
+      "rect": [0, 0, 1280, 720],
+      "kind": "scene",
+      "fuzz": 12,
+      "max_pct": 10.0,
+      "note": "the mobile menu layout"
+    }
+  ]
+}

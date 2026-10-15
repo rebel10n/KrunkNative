@@ -1,0 +1,17 @@
+{
+  "scenario": "seq-game-announcement",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "banner",
+      "rect": [340, 0, 600, 120],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "the announcement banner"
+    }
+  ]
+}

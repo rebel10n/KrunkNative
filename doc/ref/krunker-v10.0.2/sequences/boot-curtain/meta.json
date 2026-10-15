@@ -1,0 +1,44 @@
+{
+ "name": "boot-curtain",
+ "size": [
+  1280,
+  720
+ ],
+ "background": "checker",
+ "times": [
+  0,
+  100,
+  200,
+  350,
+  500,
+  700,
+  900
+ ],
+ "origin": "the first INIT (v10:219396 instructionsFadeBG.style.opacity = 0)",
+ "restartAnims": false,
+ "frames": {
+  "0": 0,
+  "100": 100.1,
+  "200": 200,
+  "350": 350,
+  "500": 500,
+  "700": 700,
+  "900": 900
+ },
+ "probe": {
+  "expr": "getComputedStyle(instructionsFadeBG).opacity",
+  "values": {
+   "0": "1",
+   "100": "0.959012",
+   "200": "0.830298",
+   "350": "0.5",
+   "500": "0.169702",
+   "700": "0",
+   "900": "0"
+  }
+ },
+ "note": "The boot curtain #instructionsFadeBG (#222, opacity 1) fading out over 0.7 s ease-in-out after the first INIT. Booted under virtual time (the page loads in 0 virtual ms: menu parts that wait on timers are not there yet); the checker shows where the 3D view is.",
+ "pageErrors": 2,
+ "requestsRefused": 3,
+ "tool": "tools/uidiff/capture-v10-seq.js"
+}

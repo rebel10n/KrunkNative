@@ -1,0 +1,35 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/sequences/game-announcement",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "checker",
+  "anim_times": [
+    0,
+    100,
+    200,
+    300,
+    500,
+    1000
+  ],
+  "anim_origin": "applied",
+  "state": {
+    "menu": false,
+    "window": null,
+    "connected": true,
+    "ready": true,
+    "inGame": true,
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "modeName": "Free for All",
+    "name": "Local User",
+    "region": "...",
+    "hud": {
+      "timerText": "03:45"
+    },
+    "chat": []
+  },
+  "unreachable": "the GAME_ANNOUNCEMENT handler (_70210, v10:222148) is registered on the matchmaker socket when it connects; the sandbox socket has no event table (sock.events is null) and the $gameAnnouncement store (_33843) is module-private",
+  "note": "A GAME_ANNOUNCEMENT {message}: svelte-1m80xxc (S5 builds it, add a state key then)."
+}

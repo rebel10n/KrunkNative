@@ -1,0 +1,17 @@
+{
+  "scenario": "seq-menu-1000",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "menu",
+      "rect": [0, 0, 1000, 720],
+      "kind": "scene",
+      "fuzz": 12,
+      "max_pct": 10.0,
+      "note": "the menu at 1000 px wide (the @media rules)"
+    }
+  ]
+}

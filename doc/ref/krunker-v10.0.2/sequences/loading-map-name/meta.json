@@ -1,0 +1,27 @@
+{
+ "name": "loading-map-name",
+ "size": [
+  1280,
+  720
+ ],
+ "background": "#222222",
+ "times": [
+  0
+ ],
+ "origin": "the first step showing #loadingBg with loadGamNm \"Loading Kanji ...\" (v10:197704)",
+ "restartAnims": false,
+ "frames": {
+  "0": 0
+ },
+ "rafCalls": 0,
+ "probe": {
+  "expr": "loadGamNm.innerHTML",
+  "values": {
+   "0": "Loading Kanji ..."
+  }
+ },
+ "note": "?play=Kanji link: the loading screen with \"Loading Kanji ...\" before the first INIT.",
+ "pageErrors": 0,
+ "requestsRefused": 1,
+ "tool": "tools/uidiff/capture-v10-seq.js"
+}

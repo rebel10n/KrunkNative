@@ -1,0 +1,24 @@
+{
+  "scenario": "seq-boot-curtain",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "view",
+      "rect": [900, 130, 300, 260],
+      "kind": "flat",
+      "fuzz": 3,
+      "max_pct": 0.5,
+      "note": "the checker under #instructionsFadeBG (#222): the curtain's opacity"
+    }
+  ],
+  "timing": [
+    {
+      "name": "curtain",
+      "rect": [900, 130, 300, 260],
+      "threshold": 0.5
+    }
+  ]
+}

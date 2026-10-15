@@ -1,0 +1,24 @@
+{
+  "scenario": "seq-end-rewards-overlay",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "cards",
+      "rect": [240, 100, 800, 520],
+      "kind": "scene",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "the reward cards flipping, then flying to the backpack"
+    }
+  ],
+  "timing": [
+    {
+      "name": "flip",
+      "rect": [240, 100, 800, 520],
+      "threshold": 0.5
+    }
+  ]
+}

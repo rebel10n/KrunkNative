@@ -10,6 +10,7 @@
 
 #include <gl.h>
 #include <GLFW/glfw3.h>
+#include <headless.h> // ctest: KRUNKNATIVE_HEADLESS=1, an EGL pbuffer instead of a window
 
 #include <math.h>
 #include <stdio.h>
@@ -446,16 +447,18 @@ static void test_atlas_rebuild(TextSystem *ts) {
 }
 
 int main(int argc, char **argv) {
+    headless_parse_args(&argc, argv); // KRUNKNATIVE_HEADLESS=1 / --headless
     const char *ui_dir = argc > 1 ? argv[1] : "ui";
-    if (!glfwInit()) { fprintf(stderr, "glfwInit failed\n"); return 2; }
+    if (!headless_glfw_init()) { fprintf(stderr, "glfwInit failed\n"); return 77; }
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    headless_window_hints();
     GLFWwindow *win = glfwCreateWindow(64, 64, "text test", NULL, NULL);
-    if (!win) { fprintf(stderr, "no GL window\n"); return 2; }
-    glfwMakeContextCurrent(win);
-    if (!gladLoadGLLoader((GLADloadproc) glfwGetProcAddress)) { fprintf(stderr, "glad failed\n"); return 2; }
+    if (!win) { fprintf(stderr, "no GL window\n"); return 77; }
+    headless_make_context_current(win);
+    if (!gladLoadGLLoader((GLADloadproc) headless_get_proc_address)) { fprintf(stderr, "glad failed\n"); return 2; }
     printf("GL: %s\n", glGetString(GL_VERSION));
 
     TextSystem *ts = text_create(ui_dir);

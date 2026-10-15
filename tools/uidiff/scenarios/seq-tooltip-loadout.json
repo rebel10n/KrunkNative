@@ -1,0 +1,29 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/sequences/tooltip-loadout",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "anim_times": [
+    0,
+    100,
+    300
+  ],
+  "anim_origin": "applied",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "window": 3
+  },
+  "unreachable": "a guest owns no skins: Change Loadout lists no item with createTip (0 on every tab), and the store window (showWindow(14)) throws without the signed-in store data",
+  "note": "Customize (Loadout), the pointer on the first item: the item tooltip (S5; also needs a pointer state key)."
+}

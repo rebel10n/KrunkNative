@@ -1,0 +1,24 @@
+{
+  "scenario": "seq-end-vic",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "vic-title",
+      "rect": [300, 270, 680, 140],
+      "kind": "scene",
+      "fuzz": 12,
+      "max_pct": 6.0,
+      "note": "the victory title on the overlay canvas"
+    }
+  ],
+  "timing": [
+    {
+      "name": "title",
+      "rect": [300, 270, 680, 140],
+      "threshold": 0.5
+    }
+  ]
+}

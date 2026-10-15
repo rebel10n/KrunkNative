@@ -1,0 +1,27 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/sequences/game-updating",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "anim_times": [
+    0,
+    500
+  ],
+  "anim_origin": "applied",
+  "state": {
+    "menu": true,
+    "connected": false,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "connectError": "GAME UPDATING"
+  },
+  "note": "The Game Updating screen (v10:221859). Reference: capture-v10-seq.js game-updating."
+}

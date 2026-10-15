@@ -46,6 +46,7 @@
 #ifdef KN_WIDGETS_GL
 #include <gl.h>
 #include <GLFW/glfw3.h>
+#include <headless.h> // ctest: KRUNKNATIVE_HEADLESS=1, an EGL pbuffer instead of a window
 #include "gl_backend.h"
 unsigned int g_active_shader = 0;
 unsigned int g_active_texture = 0;
@@ -1339,10 +1340,11 @@ static void test_gl_render(void)
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    headless_window_hints();
     win = glfwCreateWindow(64, 64, "test_widgets", NULL, NULL);
     if (!win) { printf("  (no GL context: skipping the render)\n"); return; }
-    glfwMakeContextCurrent(win);
-    if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) { printf("  (glad failed: skipping the render)\n"); return; }
+    headless_make_context_current(win);
+    if (!gladLoadGLLoader((GLADloadproc) headless_get_proc_address)) { printf("  (glad failed: skipping the render)\n"); return; }
     widgets_set_gl_ready(g_w, 1);
     b = glb_create();
     if (!b) { printf("  (glb_create failed: skipping the render)\n"); return; }
@@ -1438,6 +1440,9 @@ static void test_gl_render(void)
 
 int main(int argc, char **argv)
 {
+#ifdef KN_WIDGETS_GL
+    headless_parse_args(&argc, argv); // KRUNKNATIVE_HEADLESS=1 / --headless
+#endif
     WidgetsHost host = {0};
     char fontpath[1024];
     if (argc > 1) g_root = argv[1];
@@ -1471,7 +1476,7 @@ int main(int argc, char **argv)
     CHECK(g_w != NULL, "widgets_create");
 
 #ifdef KN_WIDGETS_GL
-    if (!glfwInit()) printf("  (glfwInit failed: no render)\n");
+    if (!headless_glfw_init()) printf("  (glfwInit failed: no render)\n");
 #endif
 
     test_kinds();

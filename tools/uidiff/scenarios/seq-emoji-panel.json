@@ -1,0 +1,37 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/sequences/emoji-panel",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "checker",
+  "anim_times": [
+    0,
+    100,
+    200,
+    300,
+    500
+  ],
+  "anim_origin": "applied",
+  "state": {
+    "menu": false,
+    "window": null,
+    "connected": true,
+    "ready": true,
+    "inGame": true,
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "modeName": "Free for All",
+    "name": "Local User",
+    "region": "...",
+    "hud": {
+      "timerText": "03:45"
+    },
+    "chat": [],
+    "chatOpen": true,
+    "chatInput": ":"
+  },
+  "pending": "S5: the in-game emoji panel (svelte-13g6jqo, slideInUp) is MISSING",
+  "unreachable": "the sandbox capture hung after the first frame (CDP timeout at 900 s; the reference holds only 0 ms, not used): the chat Enter then \":\" keyup path does not lay out #emojiPanelHolder > * within the budget",
+  "note": "Chat open with \":\" typed: the emoji panel. Reference: capture-v10-seq.js emoji-panel."
+}

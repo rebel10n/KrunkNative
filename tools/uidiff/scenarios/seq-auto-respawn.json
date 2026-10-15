@@ -1,0 +1,37 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/sequences/auto-respawn",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "checker",
+  "anim_times": [
+    0,
+    1000,
+    2000,
+    2900
+  ],
+  "anim_origin": "death",
+  "state": {
+    "menu": false,
+    "window": null,
+    "connected": true,
+    "ready": true,
+    "inGame": true,
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "modeName": "Free for All",
+    "name": "Local User",
+    "region": "...",
+    "hud": {
+      "timerText": "03:45"
+    },
+    "chat": [],
+    "autoRespawn": 3,
+    "console": [
+      "kill"
+    ]
+  },
+  "unreachable": "v10 never shows \"Auto Respawning in {0}\" on a death: the death handler calls _67300(forceSpawn + 1) (v10:220379) while _69619 (in play) is still true, so _67303 stores null (v10:209740) and the 1 s chain stops after its first tick_0. Tried in the sandbox with forceSpawn 3, locked and unlocked: #instructions stays CLICK TO PLAY. The native state.autoRespawn (S1) is covered by its own scenario",
+  "note": "Auto Respawn 3 s (state.autoRespawn is S1's, ui-s1-boot): no v10 reference is reachable."
+}

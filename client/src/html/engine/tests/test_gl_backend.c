@@ -33,6 +33,7 @@
 //   cd $KN/cmake-build-debug && LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a <build>/test_gl_backend <scratch>/out.ppm
 #include <gl.h>
 #include <GLFW/glfw3.h>
+#include <headless.h> // ctest: KRUNKNATIVE_HEADLESS=1, an EGL pbuffer instead of a window
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -456,23 +457,25 @@ static void build_list(DisplayList *dl, GLuint checker, GLuint disc, DlGlyphQuad
 }
 
 int main(int argc, char **argv) {
+    headless_parse_args(&argc, argv); // KRUNKNATIVE_HEADLESS=1 / --headless
     const char *out = argc > 1 ? argv[1] : "test_gl_backend.ppm";
 
-    if (!glfwInit()) {
+    if (!headless_glfw_init()) {
         fprintf(stderr, "glfwInit failed\n");
-        return 2;
+        return 77; // no GL: ctest SKIP_RETURN_CODE
     }
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    headless_window_hints();
     GLFWwindow *win = glfwCreateWindow(64, 64, "glb test", NULL, NULL);
     if (!win) {
         fprintf(stderr, "glfwCreateWindow failed\n");
-        return 2;
+        return 77;
     }
-    glfwMakeContextCurrent(win);
-    if (!gladLoadGLLoader((GLADloadproc) glfwGetProcAddress)) {
+    headless_make_context_current(win);
+    if (!gladLoadGLLoader((GLADloadproc) headless_get_proc_address)) {
         fprintf(stderr, "glad failed\n");
         return 2;
     }

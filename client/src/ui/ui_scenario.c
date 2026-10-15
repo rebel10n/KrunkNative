@@ -15,6 +15,19 @@
 //     (engine_set_clock_override / hud_ui_set_clock), so the capture is deterministic;
 //   - html_storage (settings, class index, name) lives in a temporary XDG_CONFIG_HOME.
 //
+// Frame sequences (top-level `anim_times` [ms, ...] + `anim_origin`): instead of one capture,
+// <out>.<t>.png is written at origin + t for every t, on the same virtual clock, so animation
+// durations, delays, easing and setTimeout chains are tested (tools/uidiff/README.md "Frame
+// sequences"). The origin is the first frame showing the applied state (`applied`, default);
+// the first k * 1.6 s after it (`cycle`: every infinite menu animation at its start, as
+// capture-v10-seq.js' restartAnims puts them); clock 0 (`boot`); the first frame after a state
+// change of the running game: the first INIT (`init`), the local player's spawn (`spawn`), its
+// death (`death`), its next kill (`kill`), the match end (`end`); or the first frame laying out
+// an element matching a CSS selector (`selector:<css>`, a box with a size: the page's own timers
+// and packets). state.console runs developer console commands once the state is applied
+// (`kill`, `end`), or {"at_ms": n, "cmd": "..."} n ms later (`bot 1`, then `kill @bots`), so the
+// death / kill / end sequences come from the sandbox server's own packets.
+//
 // State is applied through the same calls the game and the page use: client_set_menu_open,
 // client_enter_game, menu_show_window / the windows.0.changeTab handler, menu_set_class_index,
 // the MenuUi net fields + menu_update_instructions, hud_ui_* (override, chat, kill feed,
@@ -62,6 +75,7 @@
 #include <update_ui.h> // state.update: the Outdated box
 #include <lobby_ui.h> // state.matchVotes: the end screen's vote cards
 #include <v10_party.h> // state.gameCode: the server password popup
+#include <console.h> // state.console: ui_console_exec (frame sequences: `kill`, `end`)
 
 // Portable temp dir / env helpers (MinGW has no mkdtemp, setenv or lstat).
 static int scenario_make_storage_dir(char *out, const size_t n) {
@@ -98,6 +112,20 @@ static void scenario_setenv(const char *name, const char *value) {
 #define SCENARIO_WALL_LIMIT_S 120.0     // real-time cap for each wait loop
 #define SCENARIO_SETTLE_FRAMES 4        // frames between state application and capture
 #define SCENARIO_RNG_SEED 0x4b4eu         // deterministic map/spawn picks
+#define SCENARIO_SEQ_MAX 64               // anim_times entries
+#define SCENARIO_SEQ_ORIGIN_MAX_FRAMES 5400 // 90 s of virtual time for the origin event (a round end, a menu timer)
+#define SCENARIO_SEQ_START_MS 1500.0      // a sequence's state is applied no earlier: the boot curtain (0.7 s fade after the first INIT) is gone, as in the long-running v10 page of the references
+#define SCENARIO_SEQ_WALL_FPS 20.0          // a sequence's real-time cap: 120 s + its frames at this rate
+// the textured background of in-game sequences (backdrop-filter / blur show on it): the same
+// pixels as capture-v10-seq.js's checkerPng()
+#define SCENARIO_CHECKER_CELL 32
+#define SCENARIO_CHECKER_LIGHT 0x8a8a8a
+#define SCENARIO_CHECKER_DARK 0x343434
+
+#define SCENARIO_CONSOLE_MAX 16             // state.console entries
+
+typedef enum { ORIGIN_APPLIED, ORIGIN_BOOT, ORIGIN_INIT, ORIGIN_SPAWN, ORIGIN_DEATH, ORIGIN_KILL, ORIGIN_END, ORIGIN_SELECTOR, ORIGIN_CYCLE } ScenarioOrigin;
+static const char *const k_origin_names[] = {"applied", "boot", "init", "spawn", "death", "kill", "end", "selector", "cycle"};
 
 void client_tick(Client*, float, float); // main.c
 
@@ -116,6 +144,26 @@ typedef struct {
     char bg_image[1200];
     unsigned bg_tex, bg_fbo;
     int bg_w, bg_h;
+
+    int bg_checker;       // background "checker[:cell[:#light:#dark]]": generated, no file
+    int bg_cell;
+    unsigned char bg_light[3], bg_dark[3];
+
+    // frame sequence: anim_times [ms] after the origin, each written to <out>.<t>.png
+    double seq_ms[SCENARIO_SEQ_MAX];
+    int seq_count, seq_done;
+    int seq_origin;       // ScenarioOrigin
+    const char *seq_selector; // "selector:<css>": the first frame that lays out a match
+    double seq_origin_ms; // virtual clock of the origin frame, < 0 until it happened
+    int seq_seen_spawn;   // death origin: the local player was alive first
+    unsigned seq_kills0;  // kill origin: the local player's kills when the state was applied
+    int seq_failed;
+
+    // state.console: commands at the applied clock + at_ms (strings: at once)
+    struct { const char *cmd; double at_ms; int done; } console[SCENARIO_CONSOLE_MAX];
+    int console_count;
+    double applied_clock_ms; // < 0 until the state is applied
+    double wall_extra_s;     // real-time allowance a long frame sequence adds to each wait loop
 
     char root_dir[1024];  // repo root with trailing slash (assets_path() minus "assets/")
     char map_path[1200];
@@ -275,10 +323,14 @@ static void warn_unknown_keys(void) {
         "boot",       // S1: true | {loadGamNm: "play" | "host" | "noGames", map}: the boot curtain before the first INIT
         "autoRespawn", // S1: N: the play prompt's "Auto Respawning in N" subtitle
     };
+    static const char *const known_seq[] = {
+        "console", // developer console commands once the state is applied (`kill`, `end`: frame sequences)
+    };
     const cJSON *item;
     cJSON_ArrayForEach(item, g_sc.state) {
         int ok = 0;
         for (size_t i = 0; i < sizeof(known) / sizeof(known[0]) && !ok; i++) ok = !strcmp(item->string, known[i]);
+        for (size_t i = 0; i < sizeof(known_seq) / sizeof(known_seq[0]) && !ok; i++) ok = !strcmp(item->string, known_seq[i]);
         if (!ok) fprintf(stderr, "[scenario] warning: unknown state key '%s' ignored\n", item->string);
     }
 }
@@ -337,10 +389,61 @@ int ui_scenario_begin(const char *scenario_path, const char *out_png) {
     g_sc.after_ms = obj_num(g_sc.state, "after_ms", 0.0);
     g_sc.preview = st_bool("preview", 0);
 
-    // background: "#rrggbb" or an image path; default opaque black
+    // anim_times [ms, ...] + anim_origin: a frame sequence (<out>.<t>.png per time)
+    g_sc.seq_origin_ms = -1.0;
+    g_sc.applied_clock_ms = -1.0;
+    const cJSON *times = cJSON_GetObjectItemCaseSensitive(g_sc.root, "anim_times");
+    const cJSON *t;
+    cJSON_ArrayForEach(t, times) {
+        if (!cJSON_IsNumber(t) || t->valuedouble < 0.0 || g_sc.seq_count >= SCENARIO_SEQ_MAX) {
+            fprintf(stderr, "[scenario] `anim_times` takes up to %d times >= 0 (ms)\n", SCENARIO_SEQ_MAX);
+            return 0;
+        }
+        if (g_sc.seq_count && t->valuedouble <= g_sc.seq_ms[g_sc.seq_count - 1]) {
+            fprintf(stderr, "[scenario] `anim_times` must increase\n");
+            return 0;
+        }
+        g_sc.seq_ms[g_sc.seq_count++] = t->valuedouble;
+    }
+    const char *origin = obj_str(g_sc.root, "anim_origin");
+    if (origin) {
+        g_sc.seq_origin = -1;
+        for (int i = 0; i < (int) (sizeof(k_origin_names) / sizeof(k_origin_names[0])); i++) {
+            if (!strcmp(origin, k_origin_names[i])) g_sc.seq_origin = i;
+        }
+        if (!strncmp(origin, "selector:", 9) && origin[9]) {
+            g_sc.seq_origin = ORIGIN_SELECTOR;
+            g_sc.seq_selector = origin + 9;
+        } else if (g_sc.seq_origin == ORIGIN_SELECTOR) {
+            g_sc.seq_origin = -1;
+        }
+        if (g_sc.seq_origin < 0) {
+            fprintf(stderr, "[scenario] unknown anim_origin '%s' (applied, cycle, boot, init, spawn, death, kill, end, selector:<css>)\n", origin);
+            return 0;
+        }
+    }
+    if (g_sc.seq_count && g_sc.seq_origin == ORIGIN_BOOT) g_sc.seq_origin_ms = 0.0;
+
+    // background: "#rrggbb", "checker[:cell[:#light:#dark]]" or an image path; default opaque black
     const char *bg = obj_str(g_sc.root, "background");
     g_sc.bg_is_color = 1;
-    if (bg && bg[0] == '#' && strlen(bg) == 7) {
+    if (bg && !strncmp(bg, "checker", 7) && (!bg[7] || bg[7] == ':')) {
+        g_sc.bg_is_color = 0;
+        g_sc.bg_checker = 1;
+        g_sc.bg_cell = SCENARIO_CHECKER_CELL;
+        unsigned light = SCENARIO_CHECKER_LIGHT, dark = SCENARIO_CHECKER_DARK;
+        if (bg[7] == ':') {
+            int cell = 0;
+            char a[8] = "", b[8] = "";
+            const int n = sscanf(bg + 8, "%d:#%6[0-9a-fA-F]:#%6[0-9a-fA-F]", &cell, a, b);
+            if (n >= 1 && cell > 0) g_sc.bg_cell = cell;
+            if (n == 3) { light = (unsigned) strtoul(a, NULL, 16); dark = (unsigned) strtoul(b, NULL, 16); }
+        }
+        for (int i = 0; i < 3; i++) {
+            g_sc.bg_light[i] = (unsigned char) (light >> (16 - 8 * i));
+            g_sc.bg_dark[i] = (unsigned char) (dark >> (16 - 8 * i));
+        }
+    } else if (bg && bg[0] == '#' && strlen(bg) == 7) {
         const unsigned v = (unsigned) strtoul(bg + 1, NULL, 16);
         g_sc.bg_rgb[0] = (float) ((v >> 16) & 255) / 255.0f;
         g_sc.bg_rgb[1] = (float) ((v >> 8) & 255) / 255.0f;
@@ -449,11 +552,30 @@ void ui_scenario_end(void) {
 
 /* ------------------------------------------------------------ background */
 
+// the "checker" background: cells of bg_cell px from the top-left corner, light first
+static unsigned char *checker_pixels(void) {
+    g_sc.bg_w = g_sc.w;
+    g_sc.bg_h = g_sc.h;
+    unsigned char *px = malloc((size_t) g_sc.w * (size_t) g_sc.h * 4);
+    if (!px) return NULL;
+    for (int y = 0; y < g_sc.h; y++) {
+        for (int x = 0; x < g_sc.w; x++) {
+            const unsigned char *c = ((x / g_sc.bg_cell) + (y / g_sc.bg_cell)) % 2 ? g_sc.bg_dark : g_sc.bg_light;
+            unsigned char *o = px + ((size_t) y * (size_t) g_sc.w + (size_t) x) * 4;
+            o[0] = c[0];
+            o[1] = c[1];
+            o[2] = c[2];
+            o[3] = 255;
+        }
+    }
+    return px;
+}
+
 static int background_init(void) {
     if (g_sc.bg_is_color) return 1;
     int n = 0;
     stbi_set_flip_vertically_on_load_thread(0);
-    unsigned char *px = stbi_load(g_sc.bg_image, &g_sc.bg_w, &g_sc.bg_h, &n, 4);
+    unsigned char *px = g_sc.bg_checker ? checker_pixels() : stbi_load(g_sc.bg_image, &g_sc.bg_w, &g_sc.bg_h, &n, 4);
     if (!px) {
         fprintf(stderr, "[scenario] cannot decode background %s\n", g_sc.bg_image);
         return 0;
@@ -467,7 +589,8 @@ static int background_init(void) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glBindTexture(GL_TEXTURE_2D, 0);
     g_active_texture = 0; // the client's texture-binding cache (main.c)
-    stbi_image_free(px);
+    if (g_sc.bg_checker) free(px);
+    else stbi_image_free(px);
     glGenFramebuffers(1, &g_sc.bg_fbo);
     glBindFramebuffer(GL_READ_FRAMEBUFFER, g_sc.bg_fbo);
     glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_sc.bg_tex, 0);
@@ -546,6 +669,74 @@ static int spawned(const Client *c) {
 }
 
 static void run_frames(Client *client, int n);
+static int read_back(const char *path);
+static void run_console(double clock_ms);
+
+/* ------------------------------------------------------------ frame sequences */
+
+// <out>.<t>.png: "uidiff/death.png" at 500 ms -> "uidiff/death.500.png"
+static void seq_path(const double t_ms, char *out, const size_t n) {
+    const size_t len = strlen(g_sc.out);
+    const int ext = len > 4 && !strcasecmp(g_sc.out + len - 4, ".png");
+    snprintf(out, n, "%.*s.%.0f.png", (int) (ext ? len - 4 : len), g_sc.out, t_ms);
+}
+
+// the virtual clock of the next pending capture (INFINITY: none, or the origin has not happened)
+static double seq_next_ms(void) {
+    if (g_sc.seq_done >= g_sc.seq_count || g_sc.seq_origin_ms < 0.0) return INFINITY;
+    return g_sc.seq_origin_ms + g_sc.seq_ms[g_sc.seq_done];
+}
+
+// the state change of anim_origin, checked after every frame: the origin is the first frame that
+// processed it (the page's animations it starts begin on that frame's clock)
+static int seq_origin_reached(const Client *c) {
+    switch ((ScenarioOrigin) g_sc.seq_origin) {
+    case ORIGIN_INIT: return c->game.ready && c->map_loaded;   // the first INIT
+    case ORIGIN_SPAWN: return spawned(c);
+    case ORIGIN_DEATH: return g_sc.seq_seen_spawn && c->in_game && (c->net_death_menu_pending || !(c->me && c->me->active));
+    case ORIGIN_KILL: return g_sc.applied_clock_ms >= 0.0 && c->me && c->me->kills > g_sc.seq_kills0;
+    case ORIGIN_SELECTOR: {
+        const HtmlElem e = html_dom_query(0, g_sc.seq_selector);
+        HtmlRect r;
+        return e && html_dom_get_rect(e, &r) && r.w > 0.0f && r.h > 0.0f;
+    }
+    case ORIGIN_END: return g_sc.seq_seen_spawn && c->net_end_seconds >= 0 && c->net_end_result != INT32_MIN; // menu_view.c `ended`
+    default: return 0; // boot: clock 0 (begin); applied: ui_scenario_run
+    }
+}
+
+// One 60 Hz frame. With a sequence, a frame lands exactly on the next capture time when that
+// comes first, and every capture due at this clock is read back before the buffers swap.
+static void scenario_step(Client *client) {
+    double next = g_sc.clock_ms + SCENARIO_FRAME_MS;
+    run_console(g_sc.clock_ms);
+    if (!g_sc.seq_count) {
+        scenario_frame(client, next, 1);
+        return;
+    }
+    const double due = seq_next_ms();
+    if (due > g_sc.clock_ms + 1e-6 && due < next) next = due;
+    scenario_frame(client, next, 0);
+    if (spawned(client)) g_sc.seq_seen_spawn = 1;
+    if (g_sc.seq_origin_ms < 0.0 && seq_origin_reached(client)) {
+        g_sc.seq_origin_ms = g_sc.clock_ms;
+        printf("[scenario] sequence origin '%s' at %.3f s\n", k_origin_names[g_sc.seq_origin], g_sc.clock_ms / 1000.0);
+    }
+    while (!g_sc.seq_failed && seq_next_ms() <= g_sc.clock_ms + 1e-6) {
+        char path[1100];
+        seq_path(g_sc.seq_ms[g_sc.seq_done], path, sizeof(path));
+        if (!read_back(path)) {
+            fprintf(stderr, "[scenario] could not write %s\n", path);
+            g_sc.seq_failed = 1;
+            break;
+        }
+        printf("[scenario] %dx%d at %.3f s (origin + %.0f ms) -> %s\n", g_sc.w, g_sc.h, g_sc.clock_ms / 1000.0,
+               g_sc.seq_ms[g_sc.seq_done], path);
+        // the last frame is also <out> itself (smoke renders, a missing-render check)
+        if (++g_sc.seq_done == g_sc.seq_count && !read_back(g_sc.out)) g_sc.seq_failed = 1;
+    }
+    headless_swap_buffers(client->window);
+}
 
 static int spectating(const Client *c) {
     return c->in_game && spectate_active();
@@ -578,8 +769,8 @@ static int run_until(Client *client, int (*done)(const Client*), const int max_f
     const double wall0 = glfwGetTime();
     for (int i = 0; i < max_frames; i++) {
         if (done(client)) return 1;
-        scenario_frame(client, g_sc.clock_ms + SCENARIO_FRAME_MS, 1);
-        if (glfwGetTime() - wall0 > SCENARIO_WALL_LIMIT_S) break;
+        scenario_step(client);
+        if (glfwGetTime() - wall0 > SCENARIO_WALL_LIMIT_S + g_sc.wall_extra_s) break;
     }
     if (done(client)) return 1;
     fprintf(stderr, "[scenario] timed out waiting for %s\n", what);
@@ -587,7 +778,7 @@ static int run_until(Client *client, int (*done)(const Client*), const int max_f
 }
 
 static void run_frames(Client *client, const int n) {
-    for (int i = 0; i < n; i++) scenario_frame(client, g_sc.clock_ms + SCENARIO_FRAME_MS, 1);
+    for (int i = 0; i < n; i++) scenario_step(client);
 }
 
 /* ------------------------------------------------------------ state */
@@ -991,6 +1182,60 @@ static void dump_line(const char *line, void *user) {
     fprintf(stderr, "%s\n", line);
 }
 
+// state.console: developer console commands (devConsole.exec) once the state is applied: `kill`
+// (the sandbox server kills the local player: the death sequence), `end` (the round ends in 3 s);
+// {"at_ms": n, "cmd": "..."} runs n ms of virtual time later (`bot 1`, then `kill @bots` once the
+// bot spawned: the kill sequences)
+static void run_console(const double clock_ms) {
+    for (int i = 0; g_sc.applied_clock_ms >= 0.0 && i < g_sc.console_count; i++) {
+        if (g_sc.console[i].done || clock_ms + 1e-6 < g_sc.applied_clock_ms + g_sc.console[i].at_ms) continue;
+        g_sc.console[i].done = 1;
+        printf("[scenario] console at %.3f s: %s\n", clock_ms / 1000.0, g_sc.console[i].cmd);
+        ui_console_exec(g_sc.console[i].cmd);
+    }
+}
+
+static int apply_console(const Client *client) {
+    const cJSON *cmd;
+    cJSON_ArrayForEach(cmd, st("console")) {
+        const char *text = cJSON_IsString(cmd) ? cmd->valuestring : obj_str(cmd, "cmd");
+        if (!text || !text[0] || g_sc.console_count >= SCENARIO_CONSOLE_MAX) {
+            fprintf(stderr, "[scenario] state.console takes up to %d commands: \"cmd\" or {\"at_ms\": n, \"cmd\": \"cmd\"}\n",
+                    SCENARIO_CONSOLE_MAX);
+            return 0;
+        }
+        g_sc.console[g_sc.console_count].cmd = text;
+        g_sc.console[g_sc.console_count].at_ms = cJSON_IsObject(cmd) ? obj_num(cmd, "at_ms", 0.0) : 0.0;
+        g_sc.console_count++;
+    }
+    g_sc.seq_kills0 = client->me ? client->me->kills : 0;
+    g_sc.applied_clock_ms = g_sc.clock_ms;
+    run_console(g_sc.clock_ms); // the at_ms 0 ones
+    return 1;
+}
+
+static int seq_finished(const Client *c) {
+    (void) c;
+    return g_sc.seq_done >= g_sc.seq_count || g_sc.seq_failed;
+}
+
+// anim_times: frames until every capture is written (the origin may still be ahead: a round end)
+static int run_sequence(Client *client) {
+    if (g_sc.seq_origin == ORIGIN_APPLIED || g_sc.seq_origin == ORIGIN_CYCLE) {
+        // the first frame after the state is the origin; timed state (kill feed age, hit marker)
+        // is what it is at that frame. cycle: the first animation cycle start from there on
+        g_sc.seq_origin_ms = g_sc.clock_ms + SCENARIO_FRAME_MS;
+        if (g_sc.seq_origin == ORIGIN_CYCLE) g_sc.seq_origin_ms = ceil(g_sc.seq_origin_ms / SCENARIO_ANIM_CYCLE_MS) * SCENARIO_ANIM_CYCLE_MS;
+        apply_timed(client, g_sc.seq_origin_ms);
+        printf("[scenario] sequence origin '%s' at %.3f s\n", k_origin_names[g_sc.seq_origin], g_sc.seq_origin_ms / 1000.0);
+    }
+    const int frames = SCENARIO_SEQ_ORIGIN_MAX_FRAMES + g_sc.seq_count +
+                       (int) ceil(g_sc.seq_ms[g_sc.seq_count - 1] / SCENARIO_FRAME_MS);
+    g_sc.wall_extra_s = frames / SCENARIO_SEQ_WALL_FPS;
+    if (!run_until(client, seq_finished, frames, g_sc.seq_origin_ms < 0.0 ? "the sequence origin" : "the frame sequence")) return 1;
+    return g_sc.seq_failed ? 1 : 0;
+}
+
 int ui_scenario_run(Client *client) {
     if (!g_sc.active) return 2;
     if (!html_ui_available()) {
@@ -1001,9 +1246,15 @@ int ui_scenario_run(Client *client) {
 
     // boot: first frame at clock 0 (the page's animation origin), then 60 Hz
     g_sc.last_now_s = -1.0;
-    scenario_frame(client, 0.0, 1);
+    g_sc.clock_ms = -SCENARIO_FRAME_MS; // the step lands on 0 (anim_origin boot: t = 0 is this frame)
+    scenario_step(client);
     if (!run_until(client, boot_done, SCENARIO_BOOT_MAX_FRAMES, "the page, map and local server")) return 1;
+    if (g_sc.seq_count && g_sc.seq_origin != ORIGIN_BOOT && g_sc.seq_origin != ORIGIN_INIT) {
+        while (g_sc.clock_ms < SCENARIO_SEQ_START_MS) scenario_step(client);
+    }
     if (!ui_scenario_apply(client)) return 1;
+    if (!apply_console(client)) return 1;
+    if (g_sc.seq_count) return run_sequence(client);
     const double applied_ms = g_sc.clock_ms;
     run_frames(client, SCENARIO_SETTLE_FRAMES);
 

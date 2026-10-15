@@ -1,0 +1,42 @@
+{
+ "name": "kill",
+ "size": [
+  1280,
+  720
+ ],
+ "background": "checker",
+ "times": [
+  0,
+  100,
+  200,
+  300,
+  500,
+  700,
+  1000,
+  1500,
+  2000,
+  3500,
+  4000,
+  4200
+ ],
+ "origin": "the trigger",
+ "restartAnims": false,
+ "frames": {
+  "0": 0,
+  "100": 100.1,
+  "200": 200,
+  "300": 300,
+  "500": 500,
+  "700": 700,
+  "1000": 1000.1,
+  "1500": 1500,
+  "2000": 2000.1,
+  "3500": 3500,
+  "4000": 4000,
+  "4200": 4200
+ },
+ "note": "The local player kills a sandbox bot: the kill feed row (4 s, then gone: 3500 / 4000 / 4200), the score popup and the medal; native: `bot 1` then `kill @bots`.",
+ "pageErrors": 2,
+ "requestsRefused": 3,
+ "tool": "tools/uidiff/capture-v10-seq.js"
+}

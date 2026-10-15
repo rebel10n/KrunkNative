@@ -1,0 +1,29 @@
+{
+ "name": "game-updating",
+ "size": [
+  1280,
+  720
+ ],
+ "background": "#222222",
+ "times": [
+  0,
+  500
+ ],
+ "origin": "the trigger",
+ "restartAnims": false,
+ "frames": {
+  "0": 0,
+  "500": 500
+ },
+ "probe": {
+  "expr": "[instructionsUpdateBG.style.backgroundImage, instructionsUpdateCredit.innerText].join(' | ')",
+  "values": {
+   "0": "url(\"https://assets.krunker.io/img/menu-bg/8.png?build=FArgZqd2pNs7O8lWk4TblHSdDWfMUfD2\") | Art By @Flair741",
+   "500": "url(\"https://assets.krunker.io/img/menu-bg/8.png?build=FArgZqd2pNs7O8lWk4TblHSdDWfMUfD2\") | Art By @Flair741"
+  }
+ },
+ "note": "The \"error\" packet with \"GAME UPDATING\" (v10:221859): the Game Updating screen, img/menu-bg/<id>.png art (Math.random is seeded) and its credit; the Twitch iframes stay blank offline.",
+ "pageErrors": 2,
+ "requestsRefused": 3,
+ "tool": "tools/uidiff/capture-v10-seq.js"
+}

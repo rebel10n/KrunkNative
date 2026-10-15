@@ -1,0 +1,42 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/sequences/end-rewards-overlay",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "checker",
+  "anim_times": [
+    0,
+    250,
+    500,
+    750,
+    1000,
+    1500,
+    2000,
+    2500,
+    3000,
+    4000
+  ],
+  "anim_origin": "end",
+  "state": {
+    "menu": false,
+    "window": null,
+    "connected": true,
+    "ready": true,
+    "inGame": true,
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "modeName": "Free for All",
+    "name": "Local User",
+    "region": "...",
+    "hud": {
+      "timerText": "03:45"
+    },
+    "chat": [],
+    "console": [
+      "end"
+    ]
+  },
+  "pending": "S4: the rewards overlay (svelte-1sac6ik: card flip, fly to the backpack) is MISSING",
+  "note": "Collect clicked: the rewards overlay sequence (v10:195771+). Reference: capture-v10-seq.js end-rewards-overlay."
+}

@@ -1,0 +1,21 @@
+{
+ "name": "mobile-menu",
+ "size": [
+  1280,
+  720
+ ],
+ "background": "#222222",
+ "times": [
+  0
+ ],
+ "origin": "the trigger",
+ "restartAnims": false,
+ "frames": {
+  "0": 0
+ },
+ "rafCalls": 0,
+ "note": "toggleMobileUI(true) on the menu (v10:160965): the mobile layout.",
+ "pageErrors": 2,
+ "requestsRefused": 3,
+ "tool": "tools/uidiff/capture-v10-seq.js"
+}

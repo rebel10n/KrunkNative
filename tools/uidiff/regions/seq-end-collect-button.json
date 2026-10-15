@@ -1,0 +1,24 @@
+{
+  "scenario": "seq-end-collect-button",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "button",
+      "rect": [440, 420, 400, 80],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "the Collect Rewards button"
+    }
+  ],
+  "timing": [
+    {
+      "name": "pulse",
+      "rect": [440, 420, 400, 80],
+      "threshold": 0.5
+    }
+  ]
+}

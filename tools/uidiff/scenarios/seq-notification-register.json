@@ -1,0 +1,32 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/sequences/notification-register",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "anim_times": [
+    0,
+    100,
+    200,
+    300,
+    500,
+    1000,
+    2000
+  ],
+  "anim_origin": "selector:.register-notification",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": ""
+  },
+  "unreachable": "the sandbox did not lay out .register-notification within 70 s of virtual time after the boot (capture-v10-seq.js notification-register: origin not reached); the v10 notification center is MISSING natively (S5), so there is no reference to diff against",
+  "note": "The guest Register notification sliding in (slideIn 0.3 s, 15 s countdown bar). Reference: capture-v10-seq.js notification-register."
+}

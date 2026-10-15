@@ -1,0 +1,39 @@
+{
+ "name": "end-rewards-overlay",
+ "size": [
+  1280,
+  720
+ ],
+ "background": "checker",
+ "times": [
+  0,
+  250,
+  500,
+  750,
+  1000,
+  1500,
+  2000,
+  2500,
+  3000,
+  4000
+ ],
+ "origin": "the trigger",
+ "restartAnims": false,
+ "frames": {
+  "0": 0,
+  "250": 250,
+  "500": 500,
+  "750": 750,
+  "1000": 1000.1,
+  "1500": 1500,
+  "2000": 2000,
+  "2500": 2500,
+  "3000": 3000,
+  "4000": 4000
+ },
+ "rafCalls": 968,
+ "note": "Collect clicked: the rewards overlay (svelte-1sac6ik: the card flips, then the items fly to the backpack, the setTimeout chain of v10:195771+).",
+ "pageErrors": 2,
+ "requestsRefused": 3,
+ "tool": "tools/uidiff/capture-v10-seq.js"
+}

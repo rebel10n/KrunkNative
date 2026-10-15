@@ -1,0 +1,24 @@
+{
+  "scenario": "seq-notification-register",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "toast",
+      "rect": [900, 40, 380, 140],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "the guest Register notification"
+    }
+  ],
+  "timing": [
+    {
+      "name": "slide",
+      "rect": [900, 40, 380, 140],
+      "threshold": 0.5
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+ "name": "hit",
+ "size": [
+  1280,
+  720
+ ],
+ "background": "checker",
+ "times": [
+  0,
+  50,
+  100,
+  150,
+  200,
+  300,
+  500,
+  700,
+  1000
+ ],
+ "origin": "the trigger",
+ "restartAnims": false,
+ "frames": {
+  "0": 0,
+  "50": 50,
+  "100": 100,
+  "150": 150,
+  "200": 200,
+  "300": 300,
+  "500": 500.1,
+  "700": 700,
+  "1000": 1000
+ },
+ "note": "The local player deals 40 damage to a bot (DO_DAMAGE): the hit marker and the damage number over 1 s. The native has no damage command: its scenario injects the hit marker (state.hit) at the origin; damage numbers are not injectable there yet.",
+ "pageErrors": 2,
+ "requestsRefused": 3,
+ "tool": "tools/uidiff/capture-v10-seq.js"
+}

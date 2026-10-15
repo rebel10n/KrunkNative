@@ -1,0 +1,17 @@
+{
+  "scenario": "seq-game-updating",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "box",
+      "rect": [450, 300, 380, 120],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "the Game Updating box (the art behind it is not painted offline)"
+    }
+  ]
+}

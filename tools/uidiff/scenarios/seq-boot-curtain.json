@@ -1,0 +1,31 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/sequences/boot-curtain",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "checker",
+  "anim_times": [
+    0,
+    100,
+    200,
+    350,
+    500,
+    700,
+    900
+  ],
+  "anim_origin": "init",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": ""
+  },
+  "note": "The boot curtain #instructionsFadeBG (#222 over the 3D view, here the checker) fading out over 0.7 s ease-in-out after the first INIT (v10:219396). Reference: capture-v10-seq.js boot-curtain."
+}

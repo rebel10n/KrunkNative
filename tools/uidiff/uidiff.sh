@@ -28,6 +28,19 @@
 # element) in the reference OR the render. Use it for opaque flat fills (health
 # bar segments) that a median would swallow.
 #
+# Frame sequences: a scenario with "anim_times" [ms, ...] (+ "anim_origin") renders
+# <name>.<t>.png per time (client/src/ui/ui_scenario.c) against the reference frames
+# <ref>/<t>.png (ref is a directory: tools/uidiff/capture-v10-seq.js). Every frame is
+# diffed with the regions whose "times" include it (default: all), each with its
+# "at": {"<t>": {...}} overrides. Every "timing" entry {name, rect, threshold (0.5),
+# tolerance_ms (one 60 Hz frame)} is a timing assertion: the time where the region's
+# change from the first frame first reaches threshold x its largest change
+# (interpolated between frames) must agree between reference and render.
+#
+# "pending": "<owner: what is missing>" on a region (or a timing entry) skips it with that
+# text, on a scenario skips the whole scenario without rendering it: the native side is not
+# built yet (UI-PARITY-AUDIT section 4); its owner removes the key with the implementation.
+#
 # Outputs (per scenario, in $UIDIFF_OUT):
 #   <name>.png        the render
 #   <name>.log        the renderer's stdout/stderr
@@ -36,6 +49,9 @@
 #   <name>.sbs.png    reference | render side by side
 #   <name>.regions/   per-region crops (ref-, render-, diff-<region>.png;
 #                     mask-<region>.png for ink-masked regions)
+#   sequences: <name>.<t>.png, <name>.<t>.diff.png, <name>.<t>.sbs.png and
+#   <name>.<t>.regions/ per frame, <name>.strip.png (reference frames over the
+#   rendered ones, quarter size)
 #
 # Environment:
 #   UIDIFF_OUT         output dir (default cmake-build-debug/uidiff)
@@ -55,8 +71,8 @@
 #   UIDIFF_XVFB_ARGS   extra arguments for xvfb-run (default: -a)
 #
 # Exit status: 0 when every non-skipped region of every scenario passes,
-# 1 when any region fails or a render is missing/has the wrong size,
-# 2 on usage/tool errors.
+# 1 when any region fails or a render or a reference frame is missing/has the wrong size
+# (each one a FAIL row for its scenario; the run goes on), 2 on usage/tool errors.
 set -euo pipefail
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -219,49 +235,16 @@ failed_scenarios=()
 printf '%-22s %-20s %9s %9s %6s %s\n' SCENARIO REGION 'DIFF%' 'MAX%' FUZZ RESULT
 printf '%-22s %-20s %9s %9s %6s %s\n' ---------------------- -------------------- --------- --------- ------ ------
 
-for name in "${scenarios[@]}"; do
-    scenario="$here/scenarios/$name.json"
-    regions="$here/regions/$name.json"
-    if [ ! -f "$scenario" ]; then
-        echo "uidiff: scenario not found: $scenario" >&2
-        exit 2
-    fi
-    if [ ! -f "$regions" ]; then
-        echo "uidiff: regions not found: $regions" >&2
-        exit 2
-    fi
-    IFS=$'\t' read -r ref w h background _frames < <(python3 -I "$json_py" scenario "$scenario") || true
-    if [ ! -f "$ref" ]; then
-        echo "uidiff: $name: reference missing: $ref" >&2
-        exit 2
-    fi
-    read -r ref_w ref_h < <(image_size "$ref")
-    if [ "$ref_w" != "$w" ] || [ "$ref_h" != "$h" ]; then
-        echo "uidiff: $name: reference $ref is ${ref_w}x${ref_h}, scenario size is ${w}x${h}" >&2
-    fi
-
-    render="$out_dir/$name.png"
-    mkdir -p "$(dirname "$render")"
-    scenario_abs=$(cd "$(dirname "$scenario")" && pwd)/$(basename "$scenario")
-    render_abs=$(cd "$(dirname "$render")" && pwd)/$(basename "$render")
-    scenario_failed=0
-    if ! ( render_scenario "$name" "$scenario_abs" "$ref" "$w" "$h" "$render_abs" ) >"$out_dir/$name.log" 2>&1 \
-        || [ ! -s "$render" ]; then
-        printf '%-22s %-20s %9s %9s %6s %s\n' "$name" '(render)' - - - "FAIL (no render, see $out_dir/$name.log)"
-        tail -n 5 "$out_dir/$name.log" >&2 || true
-        failed=$((failed + 1)); total=$((total + 1)); failed_scenarios+=("$name")
-        continue
-    fi
-    read -r rw rh < <(image_size "$render")
-    if [ "$rw" != "$w" ] || [ "$rh" != "$h" ]; then
-        printf '%-22s %-20s %9s %9s %6s %s\n' "$name" '(render)' - - - "FAIL (render is ${rw}x${rh}, want ${w}x${h})"
-        failed=$((failed + 1)); total=$((total + 1)); failed_scenarios+=("$name")
-        continue
-    fi
-
-    crop_dir="$out_dir/$name.regions"
+# diff_frame <name> <label> <ref.png> <render.png> <crop-dir> <diff.png> <sbs.png> <background> [t]:
+# every region of regions/<name>.json (of frame t of a sequence) against the reference; prints
+# the table rows and counts into the totals; returns 1 when a region failed.
+diff_frame() {
+    local name=$1 label=$2 ref=$3 render=$4 crop_dir=$5 diff_png=$6 sbs_png=$7 background=$8 t=${9:-}
+    local regions="$here/regions/$name.json" frame_failed=0
+    local rname rx ry rwid rhgt rfuzz rmax rskip rmask rkernel rthresh rcolors rcfuzz rdx rdy rexpect
+    local fuzz geom ref_crop ren_crop diff_crop ref_geom note bad ink p ae x2 y2 result color
     mkdir -p "$crop_dir"
-    draw_ops=()
+    local draw_ops=()
     while IFS=$'\t' read -r rname rx ry rwid rhgt rfuzz rmax rskip rmask rkernel rthresh rcolors rcfuzz rdx rdy rexpect; do
         [ -n "$rname" ] || continue
         total=$((total + 1))
@@ -308,23 +291,169 @@ for name in "${scenarios[@]}"; do
             p=$(pct "${ae%%.*}" "$rwid" "$rhgt")
         fi
         x2=$((rx + rwid - 1)); y2=$((ry + rhgt - 1))
-        if [ "$rskip" = 1 ]; then
+        if [ "$rskip" != 0 ]; then
             result=SKIP; skipped=$((skipped + 1)); color='#9e9e9e'
+            [ "$rskip" = 1 ] || note="$note (pending: $rskip)"
         elif le "$p" "$rmax"; then
             result=PASS; passed=$((passed + 1)); color='#00c853'
         else
-            result=FAIL; failed=$((failed + 1)); scenario_failed=1; color='#ff1744'
+            result=FAIL; failed=$((failed + 1)); frame_failed=1; color='#ff1744'
         fi
         draw_ops+=(-stroke "$color" -draw "rectangle $rx,$ry $x2,$y2")
-        printf '%-22s %-20s %9s %9s %5s%% %s%s\n' "$name" "$rname" "$p" "$rmax" "$fuzz" "$result" "$note"
-    done < <(python3 -I "$json_py" regions "$regions")
+        printf '%-22s %-20s %9s %9s %5s%% %s%s\n' "$label" "$rname" "$p" "$rmax" "$fuzz" "$result" "$note"
+    done < <(python3 -I "$json_py" regions "$regions" ${t:+"$t"})
 
     # Whole-image visual + side by side.
-    im_compare -metric AE -fuzz "$(scaled_fuzz 6)%" "$ref" "$render" "$out_dir/$name.diff.png" >/dev/null 2>&1 || true
+    im_compare -metric AE -fuzz "$(scaled_fuzz 6)%" "$ref" "$render" "$diff_png" >/dev/null 2>&1 || true
     if [ ${#draw_ops[@]} -gt 0 ]; then
-        im_convert "$out_dir/$name.diff.png" -fill none -strokewidth 1 "${draw_ops[@]}" "$out_dir/$name.diff.png"
+        im_convert "$diff_png" -fill none -strokewidth 1 "${draw_ops[@]}" "$diff_png"
     fi
-    im_convert "$ref" "$render" +append "$out_dir/$name.sbs.png"
+    im_convert "$ref" "$render" +append "$sbs_png"
+    return "$frame_failed"
+}
+
+# region_change <a.png> <b.png> <geometry> -> mean |a - b| over the region (0..1, grey)
+region_change() {
+    im_convert "$1" "$2" -crop "$3" +repage -compose difference -composite -colorspace gray -format '%[fx:mean]\n' info: 2>/dev/null \
+        | head -n 1
+}
+
+# timing_check <name> <ref-dir> <render-base> <times...>: every "timing" entry of regions/<name>.json:
+# the time its region's change from the first frame first reaches `threshold` of its largest change,
+# in the reference and in the render, must agree within tolerance_ms (default one 60 Hz frame).
+timing_check() {
+    local name=$1 ref_dir=$2 base=$3; shift 3
+    local times=("$@") regions="$here/regions/$name.json" check_failed=0
+    local tname tx ty tw th tthr ttol tskip geom t first_ref first_ren ref_cross ren_cross ref_peak ren_peak delta result
+    while IFS=$'\t' read -r tname tx ty tw th tthr ttol tskip; do
+        [ -n "$tname" ] || continue
+        total=$((total + 1))
+        geom="${tw}x${th}+${tx}+${ty}"
+        first_ref="$ref_dir/${times[0]}.png"
+        first_ren="$base.${times[0]}.png"
+        read -r ref_cross ref_peak < <(for t in "${times[@]}"; do echo "$t $(region_change "$first_ref" "$ref_dir/$t.png" "$geom")"; done \
+            | python3 -I "$json_py" crossing "$tthr")
+        read -r ren_cross ren_peak < <(for t in "${times[@]}"; do echo "$t $(region_change "$first_ren" "$base.$t.png" "$geom")"; done \
+            | python3 -I "$json_py" crossing "$tthr")
+        if [ "$ref_cross" = none ]; then
+            result="FAIL (the reference does not change here: fix the region)"; delta=-
+        elif [ "$ren_cross" = none ]; then
+            result="FAIL (no change in the render; reference crosses at ${ref_cross} ms)"; delta=-
+        else
+            delta=$(awk -v a="$ren_cross" -v b="$ref_cross" 'BEGIN { d = a - b; printf "%.1f", d < 0 ? -d : d }')
+            if le "$delta" "$ttol"; then result="PASS"; else result="FAIL"; fi
+            result="$result (crosses ${tthr}: reference ${ref_cross} ms, render ${ren_cross} ms)"
+        fi
+        if [ "$tskip" != 0 ]; then
+            skipped=$((skipped + 1)); result="SKIP ${result#* }"
+            [ "$tskip" = 1 ] || result="$result (pending: $tskip)"
+        elif [[ $result == PASS* ]]; then
+            passed=$((passed + 1))
+        else
+            failed=$((failed + 1)); check_failed=1
+        fi
+        printf '%-22s %-20s %9s %9s %6s %s\n' "$name" "timing:$tname" "$delta" "$(printf '%.1f' "$ttol")" ms "$result"
+    done < <(python3 -I "$json_py" timing "$regions")
+    return "$check_failed"
+}
+
+for name in "${scenarios[@]}"; do
+    scenario="$here/scenarios/$name.json"
+    regions="$here/regions/$name.json"
+    if [ ! -f "$scenario" ]; then
+        echo "uidiff: scenario not found: $scenario" >&2
+        exit 2
+    fi
+    IFS=$'\t' read -r ref w h background _frames anim_times pending < <(python3 -I "$json_py" scenario "$scenario") || true
+    # "pending" (the native side is not built yet) / "unreachable" (no v10 reference can be captured
+    # offline): the whole scenario is reported, not rendered
+    if [ -n "${pending:-}" ] && [ "$pending" != - ]; then
+        printf '%-22s %-20s %9s %9s %6s %s\n' "$name" '(scenario)' - - - "SKIP ($pending)"
+        skipped=$((skipped + 1)); total=$((total + 1))
+        continue
+    fi
+    if [ ! -f "$regions" ]; then
+        echo "uidiff: regions not found: $regions" >&2
+        exit 2
+    fi
+    # a frame sequence (anim_times): ref is a directory of <t>.png, the render <name>.<t>.png
+    seq_times=()
+    if [ -n "${anim_times:-}" ] && [ "$anim_times" != - ]; then
+        IFS=, read -r -a seq_times <<<"$anim_times"
+        ref_first="$ref/${seq_times[0]}.png"
+        # a missing reference (sequence dir or frame) is this scenario's FAIL row, not a run error
+        ref_missing=
+        if [ ! -d "$ref" ]; then
+            ref_missing="reference sequence missing: $ref/ (tools/uidiff/capture-v10-seq.js)"
+        else
+            for t in "${seq_times[@]}"; do
+                [ -f "$ref/$t.png" ] || { ref_missing="reference frame missing: $ref/$t.png"; break; }
+            done
+        fi
+        if [ -n "$ref_missing" ]; then
+            echo "uidiff: $name: $ref_missing" >&2
+            printf '%-22s %-20s %9s %9s %6s %s\n' "$name" '(reference)' - - - "FAIL ($ref_missing)"
+            failed=$((failed + 1)); total=$((total + 1)); failed_scenarios+=("$name")
+            continue
+        fi
+    else
+        if [ ! -f "$ref" ]; then
+            echo "uidiff: $name: reference missing: $ref" >&2
+            exit 2
+        fi
+        ref_first=$ref
+    fi
+    read -r ref_w ref_h < <(image_size "$ref_first")
+    if [ "$ref_w" != "$w" ] || [ "$ref_h" != "$h" ]; then
+        echo "uidiff: $name: reference $ref_first is ${ref_w}x${ref_h}, scenario size is ${w}x${h}" >&2
+    fi
+
+    render="$out_dir/$name.png"
+    mkdir -p "$(dirname "$render")"
+    scenario_abs=$(cd "$(dirname "$scenario")" && pwd)/$(basename "$scenario")
+    render_abs=$(cd "$(dirname "$render")" && pwd)/$(basename "$render")
+    scenario_failed=0
+    for t in "${seq_times[@]}"; do rm -f "$out_dir/$name.$t.png"; done
+    missing=
+    if ! ( render_scenario "$name" "$scenario_abs" "$ref_first" "$w" "$h" "$render_abs" ) >"$out_dir/$name.log" 2>&1 \
+        || [ ! -s "$render" ]; then
+        missing="no render, see $out_dir/$name.log"
+    fi
+    if [ -z "$missing" ] && [ "$render_cmd" = cp ] && [ ${#seq_times[@]} -gt 0 ]; then
+        for t in "${seq_times[@]}"; do cp "$ref/$t.png" "$out_dir/$name.$t.png"; done # self-test: the reference frames
+    fi
+    for t in "${seq_times[@]}"; do
+        [ -n "$missing" ] || [ -s "$out_dir/$name.$t.png" ] || missing="no frame $t ms, see $out_dir/$name.log"
+    done
+    if [ -n "$missing" ]; then
+        printf '%-22s %-20s %9s %9s %6s %s\n' "$name" '(render)' - - - "FAIL ($missing)"
+        tail -n 5 "$out_dir/$name.log" >&2 || true
+        failed=$((failed + 1)); total=$((total + 1)); failed_scenarios+=("$name")
+        continue
+    fi
+    read -r rw rh < <(image_size "$render")
+    if [ "$rw" != "$w" ] || [ "$rh" != "$h" ]; then
+        printf '%-22s %-20s %9s %9s %6s %s\n' "$name" '(render)' - - - "FAIL (render is ${rw}x${rh}, want ${w}x${h})"
+        failed=$((failed + 1)); total=$((total + 1)); failed_scenarios+=("$name")
+        continue
+    fi
+
+    if [ ${#seq_times[@]} -eq 0 ]; then
+        diff_frame "$name" "$name" "$ref" "$render" "$out_dir/$name.regions" "$out_dir/$name.diff.png" "$out_dir/$name.sbs.png" \
+            "$background" || scenario_failed=1
+    else
+        # per frame: the regions of that frame (region "times" / "at"), then the timing checks
+        for t in "${seq_times[@]}"; do
+            diff_frame "$name" "$name@$t" "$ref/$t.png" "$out_dir/$name.$t.png" "$out_dir/$name.$t.regions" \
+                "$out_dir/$name.$t.diff.png" "$out_dir/$name.$t.sbs.png" "$background" "$t" || scenario_failed=1
+        done
+        timing_check "$name" "$ref" "$out_dir/$name" "${seq_times[@]}" || scenario_failed=1
+        # the whole sequence at a glance: reference row over render row, a quarter size
+        ref_frames=(); ren_frames=()
+        for t in "${seq_times[@]}"; do ref_frames+=("$ref/$t.png"); ren_frames+=("$out_dir/$name.$t.png"); done
+        im_convert \( "${ref_frames[@]}" +append \) \( "${ren_frames[@]}" +append \) -append \
+            -resize 25% "$out_dir/$name.strip.png" 2>/dev/null || true
+    fi
     [ "$scenario_failed" = 0 ] || failed_scenarios+=("$name")
 done
 

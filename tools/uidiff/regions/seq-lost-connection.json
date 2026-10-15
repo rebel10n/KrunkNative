@@ -1,0 +1,17 @@
+{
+  "scenario": "seq-lost-connection",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "box",
+      "rect": [450, 270, 380, 180],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "the Lost Connection box (DISCONNECTED, Find Game / Servers / Settings)"
+    }
+  ]
+}

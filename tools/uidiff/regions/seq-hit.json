@@ -1,0 +1,24 @@
+{
+  "scenario": "seq-hit",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "hit-marker",
+      "rect": [600, 320, 80, 80],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 4.0,
+      "note": "the hit marker over the aim dot"
+    }
+  ],
+  "timing": [
+    {
+      "name": "marker",
+      "rect": [600, 320, 80, 80],
+      "threshold": 0.5
+    }
+  ]
+}

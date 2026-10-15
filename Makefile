@@ -243,13 +243,20 @@ test: build ## Run the shared movement/collision test (+ the knet transport, off
 	./$(DEBUG_DIR)/pointer_lock_test
 	./$(DEBUG_DIR)/mod_pack_test .
 	./$(DEBUG_DIR)/nettspend_audio_test $(CURDIR)
+	$(MAKE) --no-print-directory html-engine-test-run
 
 # --------------------------------------------------------------------------- html-engine
 # The in-house HTML/CSS engine (client/src/html/engine/README.md, doc/html-ui-engine.md).
 # These targets use the debug directory with HTML_ENGINE=ON (the default) so they also
 # work after a `make HTML_ENGINE=OFF`.
 
-.PHONY: ui-test ui-import assets-import uidiff
+.PHONY: ui-test ui-import assets-import uidiff html-engine-test html-engine-test-run
+html-engine-test: build ## The engine's unit tests (client/src/html/engine/tests: html_<module>_test, ctest -L html-engine; the GL ones headless)
+	$(MAKE) --no-print-directory html-engine-test-run
+
+html-engine-test-run:
+	cd $(DEBUG_DIR) && env -u DISPLAY -u WAYLAND_DISPLAY KRUNKNATIVE_AUDIO_BACKEND=null ctest -L '^html-engine$$' --timeout 300 --output-on-failure
+
 viewer-diff: build ## Viewer render scenarios vs the v7.1.4 viewer captures (doc/ref/krunker-v7.1.4/viewer, headless; EGL_DEVICE=)
 	EGL_DEVICE=$(or $(EGL_DEVICE),nvidia) tools/kref/viewer-diff.sh $(DEBUG_DIR)
 

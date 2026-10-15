@@ -1,0 +1,48 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/sequences/kill",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "checker",
+  "anim_times": [
+    0,
+    100,
+    200,
+    300,
+    500,
+    700,
+    1000,
+    1500,
+    2000,
+    3500,
+    4000,
+    4200
+  ],
+  "anim_origin": "kill",
+  "state": {
+    "menu": false,
+    "window": null,
+    "connected": true,
+    "ready": true,
+    "inGame": true,
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "modeName": "Free for All",
+    "name": "Local User",
+    "region": "...",
+    "hud": {
+      "timerText": "03:45"
+    },
+    "chat": [],
+    "console": [
+      "notarget on",
+      "bot 1",
+      {
+        "at_ms": 1500,
+        "cmd": "kill @bots"
+      }
+    ]
+  },
+  "note": "The local player kills a bot (`bot 1`, then `kill @bots`): kill feed row (gone after 4 s), score popup, medal."
+}

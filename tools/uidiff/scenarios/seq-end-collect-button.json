@@ -1,0 +1,39 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/sequences/end-collect-button",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "checker",
+  "anim_times": [
+    0,
+    500,
+    1000,
+    1500,
+    2000,
+    2500,
+    3000
+  ],
+  "anim_origin": "end",
+  "state": {
+    "menu": false,
+    "window": null,
+    "connected": true,
+    "ready": true,
+    "inGame": true,
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "modeName": "Free for All",
+    "name": "Local User",
+    "region": "...",
+    "hud": {
+      "timerText": "03:45"
+    },
+    "chat": [],
+    "console": [
+      "end"
+    ]
+  },
+  "pending": "S4: the Collect Rewards button (svelte-3svau8) for otherData.items is MISSING; add a state key for the items and switch anim_origin to selector:.collect-rewards-button",
+  "note": "Results with two reward skins: the Collect Rewards button, 3 s pulse. Reference: capture-v10-seq.js end-collect-button."
+}

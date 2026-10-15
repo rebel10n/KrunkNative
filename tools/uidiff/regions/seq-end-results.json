@@ -1,0 +1,24 @@
+{
+  "scenario": "seq-end-results",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "results",
+      "rect": [353, 100, 579, 330],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 8.0,
+      "note": "#endTabbedView and the title above it"
+    }
+  ],
+  "timing": [
+    {
+      "name": "results",
+      "rect": [353, 100, 579, 330],
+      "threshold": 0.5
+    }
+  ]
+}

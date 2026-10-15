@@ -1,0 +1,26 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/sequences/menu-1000",
+  "size": [
+    1000,
+    720
+  ],
+  "background": "#222222",
+  "anim_times": [
+    0
+  ],
+  "anim_origin": "cycle",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": ""
+  },
+  "pending": "E3: @media (max-width) is ignored by the engine (css_sheet.c); the menu keeps its wide layout",
+  "note": "The menu at 1000 px wide (the @media rules). Reference: capture-v10-seq.js menu-1000."
+}

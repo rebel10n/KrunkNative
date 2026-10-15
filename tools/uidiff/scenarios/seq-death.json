@@ -1,0 +1,38 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/sequences/death",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "checker",
+  "anim_times": [
+    0,
+    250,
+    500,
+    750,
+    1000,
+    1500,
+    2000
+  ],
+  "anim_origin": "death",
+  "state": {
+    "menu": false,
+    "window": null,
+    "connected": true,
+    "ready": true,
+    "inGame": true,
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "modeName": "Free for All",
+    "name": "Local User",
+    "region": "...",
+    "hud": {
+      "timerText": "03:45"
+    },
+    "chat": [],
+    "console": [
+      "kill"
+    ]
+  },
+  "note": "Self-kill: the \"You Died\" card over the checker (backdrop-filter blur), death-ui-moveup / chat-moveup 1.5 s."
+}

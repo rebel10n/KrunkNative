@@ -1079,6 +1079,80 @@ else ()
         target_include_directories(html_runtime_sheet_test PRIVATE ${KN_ENGINE_DIR} client/include client/lib/lexbor)
         target_link_libraries(html_runtime_sheet_test PRIVATE lexbor m)
         add_test(NAME html_runtime_sheet_test COMMAND html_runtime_sheet_test ${CMAKE_SOURCE_DIR})
+
+        # The engine's standalone unit tests (client/src/html/engine/tests/test_<module>.c), one
+        # html_<module>_test each, over only the engine sources it exercises. `make test` (and so CI's
+        # `make check`) runs them: `make html-engine-test`, ctest -L '^html-engine$'. A name listed in
+        # KN_HTML_ENGINE_KNOWN_FAIL gets the label html-engine-known-fail instead (stale expectations
+        # its module's owner has to update; not run by `make test`). The GL ones (gl_backend, image,
+        # text, widgets; layout only links text.c) make their context through headless.h
+        # (KRUNKNATIVE_HEADLESS=1: an EGL pbuffer, no window) and exit 77 (skipped) without GL.
+        set(KN_HTML_ENGINE_KNOWN_FAIL "" CACHE STRING "html_<module>_test names labelled html-engine-known-fail")
+        function(krunknative_html_engine_test name)
+            cmake_parse_arguments(ARG "GL" "" "SOURCES;ARGS;DEFINES;LIBS" ${ARGN})
+            add_executable(${name} ${ARG_SOURCES})
+            target_include_directories(${name} PRIVATE ${KN_ENGINE_DIR} client/include client/lib/lexbor)
+            target_compile_definitions(${name} PRIVATE ${ARG_DEFINES})
+            target_link_libraries(${name} PRIVATE ${ARG_LIBS} m)
+            set(env "KRUNKNATIVE_ASSETS_DIR=${CMAKE_SOURCE_DIR}/assets")
+            if (ARG_GL)
+                target_sources(${name} PRIVATE client/src/headless.c)
+                target_link_libraries(${name} PRIVATE glfw)
+                krunknative_link_gl(${name})
+                krunknative_link_headless(${name})
+                list(APPEND env KRUNKNATIVE_HEADLESS=1)
+            endif ()
+            add_test(NAME ${name} COMMAND ${name} ${ARG_ARGS} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+            set(label html-engine)
+            if (name IN_LIST KN_HTML_ENGINE_KNOWN_FAIL)
+                set(label html-engine-known-fail)
+            endif ()
+            set_tests_properties(${name} PROPERTIES LABELS ${label} ENVIRONMENT "${env}" SKIP_RETURN_CODE 77)
+            if (NOT CMAKE_VERSION VERSION_LESS 3.22) # no window on any display
+                set_tests_properties(${name} PROPERTIES ENVIRONMENT_MODIFICATION "DISPLAY=unset:;WAYLAND_DISPLAY=unset:")
+            endif ()
+        endfunction ()
+        set_tests_properties(html_runtime_sheet_test PROPERTIES LABELS html-engine)
+
+        krunknative_html_engine_test(html_anim_test
+            SOURCES ${KN_ENGINE_DIR}/tests/test_anim.c ${KN_ENGINE_DIR}/anim.c ${KN_ENGINE_DIR}/css_values.c
+                    ${KN_ENGINE_DIR}/util.c
+            DEFINES KN_ANIM_NO_SHEET ARGS ${CMAKE_SOURCE_DIR}/ui/css)
+        krunknative_html_engine_test(html_css_values_test
+            SOURCES ${KN_ENGINE_DIR}/tests/test_css_values.c ${KN_ENGINE_DIR}/css_values.c ${KN_ENGINE_DIR}/css_sheet.c
+                    ${KN_ENGINE_DIR}/css_cascade.c ${KN_ENGINE_DIR}/dom.c ${KN_ENGINE_DIR}/util.c
+            LIBS lexbor ARGS ${CMAKE_SOURCE_DIR})
+        krunknative_html_engine_test(html_events_test
+            SOURCES ${KN_ENGINE_DIR}/tests/test_events.c ${KN_ENGINE_DIR}/events.c ${KN_ENGINE_DIR}/util.c
+            DEFINES KN_EVENTS_STANDALONE LIBS lexbor ARGS ${CMAKE_SOURCE_DIR})
+        krunknative_html_engine_test(html_paint_test
+            SOURCES ${KN_ENGINE_DIR}/tests/test_paint.c ${KN_ENGINE_DIR}/paint.c ${KN_ENGINE_DIR}/util.c)
+        krunknative_html_engine_test(html_svg_test
+            SOURCES ${KN_ENGINE_DIR}/tests/test_svg.c ${KN_ENGINE_DIR}/svg.c ARGS ${CMAKE_SOURCE_DIR})
+        file(GLOB KN_ENGINE_LAYOUT_SOURCES ${KN_ENGINE_DIR}/layout_*.c)
+        krunknative_html_engine_test(html_layout_test GL
+            SOURCES ${KN_ENGINE_DIR}/tests/test_layout.c ${KN_ENGINE_LAYOUT_SOURCES}
+                    ${KN_ENGINE_DIR}/dom.c ${KN_ENGINE_DIR}/css_sheet.c ${KN_ENGINE_DIR}/css_cascade.c
+                    ${KN_ENGINE_DIR}/css_values.c ${KN_ENGINE_DIR}/text.c ${KN_ENGINE_DIR}/util.c
+            LIBS lexbor freetype ARGS ${CMAKE_SOURCE_DIR})
+        krunknative_html_engine_test(html_gl_backend_test GL
+            SOURCES ${KN_ENGINE_DIR}/tests/test_gl_backend.c ${KN_ENGINE_DIR}/gl_backend.c client/src/shader.c
+                    shared/src/utils.c
+            LIBS freetype ARGS ${CMAKE_CURRENT_BINARY_DIR}/html_gl_backend_test.ppm)
+        krunknative_html_engine_test(html_image_test GL
+            SOURCES ${KN_ENGINE_DIR}/tests/test_image.c ${KN_ENGINE_DIR}/image.c ${KN_ENGINE_DIR}/svg.c
+                    client/src/stb_image.c shared/src/utils.c
+            ARGS ${CMAKE_SOURCE_DIR}/ui/)
+        krunknative_html_engine_test(html_text_test GL
+            SOURCES ${KN_ENGINE_DIR}/tests/test_text.c ${KN_ENGINE_DIR}/text.c
+            LIBS freetype ARGS ${CMAKE_SOURCE_DIR}/ui)
+        krunknative_html_engine_test(html_widgets_test GL
+            SOURCES ${KN_ENGINE_DIR}/tests/test_widgets.c ${KN_ENGINE_DIR}/widgets.c ${KN_ENGINE_DIR}/events.c
+                    ${KN_ENGINE_DIR}/dom.c ${KN_ENGINE_DIR}/util.c ${KN_ENGINE_DIR}/css_sheet.c
+                    ${KN_ENGINE_DIR}/css_values.c ${KN_ENGINE_DIR}/css_cascade.c ${KN_ENGINE_DIR}/text.c
+                    ${KN_ENGINE_DIR}/gl_backend.c client/src/shader.c shared/src/utils.c
+            DEFINES KN_REPO_ROOT="${CMAKE_SOURCE_DIR}" KN_WIDGETS_GL KN_EVENTS_STANDALONE
+            LIBS lexbor freetype ARGS ${CMAKE_SOURCE_DIR})
     endif ()
 
     # ui_test: engine driver for dumps, probes, renders and benchmarks

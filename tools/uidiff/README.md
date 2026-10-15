@@ -208,6 +208,7 @@ client_bin --render-scenario <scenario.json> <out.png>
 | `matchVotes` | array of `{mode, map, name, votes}` | the end screen's vote cards (a `MATCH_VOTE_STATE` packet through `lobby_events_handle`), with `endscreen` |
 | `charge` | number or `{prog, over}` | in game: the weapon charge bar (interactMProg) at this interMProg, or the overCharged cross (`build_ui_scenario`) |
 | `interact` | string | in game: `#interactMsg`'s innerHTML, shown through `ui_interact_tick` as if the player stood at an interactable (`ui_interact_scenario`) |
+| `console` | array of `"cmd"` / `{at_ms, cmd}` | developer console commands (`ui_console_exec`) once the state is applied, or `at_ms` of virtual time later: `kill`, `end`, `bot 1` + `{"at_ms": 1500, "cmd": "kill @bots"}` (the sandbox server's own packets drive what follows) |
 
 ### Regions JSON
 
@@ -237,11 +238,83 @@ client_bin --render-scenario <scenario.json> <out.png>
 | `ref_offset` | `[dx, dy]`: the reference is cropped at `rect + offset`, the render at `rect` (content a capture artifact moved, see win-settings-general) |
 | `expect` | `reference` (default) or `background`: compare against the scenario's flat `#rrggbb` background (regions that must stay empty) |
 
+| `pending` | `"<owner>: <what is missing>"`: skipped like `skip`, the text printed: the native side is not built yet (UI-PARITY-AUDIT section 4); the owner removes it with the implementation. On a scenario (top level) the whole scenario is reported as pending without rendering |
+
 `<out>/<name>.regions/mask-<region>.png` shows the mask of masked regions; the
 renderer's output goes to `<out>/<name>.log`. `selftest.sh` uses scenarios
 without `ref_offset`/`expect: background` regions (those compare against
 something other than the plain reference, so `UIDIFF_RENDER_CMD=cp` cannot
 pass them).
+
+## Frame sequences
+
+Single frames test layout; sequences test timing (durations, delays, easing, setTimeout
+chains). A scenario with `anim_times` renders a frame at each time after an origin event and
+diffs it against the reference frame captured at the same time after the same event in v10:
+
+```json
+{
+  "ref": "doc/ref/krunker-v10.0.2/sequences/death",
+  "size": [1280, 720],
+  "background": "checker",
+  "anim_times": [0, 250, 500, 750, 1000, 1500, 2000],
+  "anim_origin": "death",
+  "state": { "inGame": true, "mapName": "Kanji", "console": ["kill"] }
+}
+```
+
+- `ref` is a directory of `<t>.png` (+ `meta.json`: origin, the virtual clock of each frame,
+  the per-frame `probe` values, notes); the renderer writes `<out>.<t>.png` per time (and the
+  last frame as `<out>` itself).
+- `anim_origin` (`client/src/ui/ui_scenario.c`): `applied` (default: the first frame after the
+  state is applied; timed state such as `killfeed` ages and `hit` is set for that frame), `cycle`
+  (the first multiple of 1.6 s after that: every infinite menu animation at its start), `boot`
+  (clock 0), `init` (the first INIT), `spawn`, `death` (the local player's), `kill` (its next
+  kill), `end` (the match end), `selector:<css>` (the first frame laying out a match: a page
+  timer or packet). Frames land exactly on origin + t on the 60 Hz virtual clock.
+- `background: "checker"` (`checker[:cell[:#light:#dark]]`, default 32 px `#8a8a8a` / `#343434`)
+  replaces the hidden 3D view with a texture, so `backdrop-filter` and `filter: blur()` show; the
+  v10 capture paints the same pixels (`capture-v10-seq.js` `checkerPng`).
+- Regions apply to every frame unless they list `times`; `"at": {"500": {"max_pct": 5}}`
+  overrides keys for one frame.
+- `timing` entries are the timing assertion:
+  `{"name": "card", "rect": [x, y, w, h], "threshold": 0.5, "tolerance_ms": 16.7}`. For the
+  reference and the render, the change of the rect from the first frame (mean absolute
+  difference) is followed over the frames; the time where it first reaches `threshold` of its
+  largest value (linearly interpolated between frames) must agree within `tolerance_ms` (one
+  60 Hz frame by default). A render that never changes there fails; a reference that never
+  changes is a bad rect. `pending` / `skip` work as on regions.
+- Outputs: `<name>.<t>.png`, `<name>.<t>.diff.png`, `<name>.<t>.sbs.png`,
+  `<name>.<t>.regions/` per frame and `<name>.strip.png` (reference frames over rendered ones).
+
+References: `node tools/uidiff/capture-v10-seq.js [--out DIR] [--list] [name...]` (default
+`doc/ref/krunker-v10.0.2/sequences/`), the offline v10 sandbox of `capture-v10.js` with
+CDP virtual time: JS timers, `Date.now` / `performance.now` and the overlay canvas'
+`requestAnimationFrame` follow virtual time; Chromium's animation timeline is frozen
+(`Animation.setPlaybackRate` 0) and every CSS animation / transition is set to its virtual age
+before each step and screenshot. `--list` prints every sequence, the ones the sandbox cannot reach
+with the reason (never faked). The sequences (`seq-<name>` scenarios):
+
+| Sequence | Origin (v10 / native) | What it shows |
+|---|---|---|
+| `boot-curtain` | first INIT / `init` | `#instructionsFadeBG` fading 0.7 s ease-in-out |
+| `loading-map-name` | the loading screen of `?play=` / pending S1 | `#loadGamNm` "Loading Kanji ..." |
+| `click-to-play-grow` | animations restarted / `cycle` | CLICK TO PLAY `grow` over one 1.6 s cycle |
+| `auto-respawn` | "Auto Respawning in 3" / `death` | the 1 s countdown (`state.autoRespawn`: S1) |
+| `lost-connection`, `game-updating` | the `error` packet / `applied` (`connectError`) | the error screens, no open transition |
+| `death` | death screen shown / `death` | self-kill card over the checker, moveup 1.5 s |
+| `kill` | the kill / `kill` (`bot 1`, `kill @bots`) | kill feed (gone after 4 s), score popup, medal |
+| `hit` | DO_DAMAGE / `applied` (`state.hit`) | hit marker (+ damage number in v10) |
+| `emoji-panel`, `game-announcement` | panel / banner laid out / pending S5 | slideInUp, the banner |
+| `end-vic`, `end-results` | the end packet / `end` (`console end`) | victory title every 100 ms, the results |
+| `end-collect-button`, `end-rewards-overlay` | injected `otherData.items` / pending S4 | Collect Rewards pulse, card flip + fly |
+| `notification-register` | the 45-60 s guest timer / pending S5 | notification center slideIn + countdown |
+| `tooltip-loadout` | pointer on an item / pending S5 | createTip |
+| `mobile-menu`, `menu-1000` | / pending S8, `cycle` at 1000 px | mobile layout, the `@media` narrow layout |
+
+Unreachable offline (listed by `--list`, not captured): `nuke-flash` (a 25-streak pickup drawn
+on the overlay canvas), `ranked-leaderboard-open` (signed-in ranked data), `spin` (the server's
+spin reply), `store-tooltip` (the signed-in store list).
 
 ## Scenarios
 

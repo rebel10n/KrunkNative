@@ -1,0 +1,32 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/sequences/click-to-play-grow",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "anim_times": [
+    0,
+    200,
+    400,
+    600,
+    800,
+    1000,
+    1200,
+    1400
+  ],
+  "anim_origin": "cycle",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": ""
+  },
+  "note": "CLICK TO PLAY (#instructions grow 0.8 s infinite alternate): one 1.6 s cycle from the animation start (origin cycle = capture-v10-seq.js restartAnims)."
+}

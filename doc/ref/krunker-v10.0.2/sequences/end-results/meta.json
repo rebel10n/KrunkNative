@@ -1,0 +1,32 @@
+{
+ "name": "end-results",
+ "size": [
+  1280,
+  720
+ ],
+ "background": "checker",
+ "times": [
+  0,
+  2000,
+  4000,
+  5000,
+  5500,
+  6000,
+  7000
+ ],
+ "origin": "the trigger",
+ "restartAnims": false,
+ "frames": {
+  "0": 0,
+  "2000": 2000,
+  "4000": 4000,
+  "5000": 5000.1,
+  "5500": 5500,
+  "6000": 6000,
+  "7000": 7000
+ },
+ "note": "The end animation, then the results (tabs, Combat Earnings) with the socket marked connected.",
+ "pageErrors": 2,
+ "requestsRefused": 3,
+ "tool": "tools/uidiff/capture-v10-seq.js"
+}

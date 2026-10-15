@@ -1,0 +1,57 @@
+{
+  "scenario": "ingame-pause-esc",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "logo",
+      "rect": [525, 8, 230, 100],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 2.0,
+      "note": "#mainLogo over the paused game"
+    },
+    {
+      "name": "click-to-play",
+      "rect": [535, 284, 210, 36],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#instructions CLICK TO PLAY (grow animation at anim_time 0.8 like the reference)"
+    },
+    {
+      "name": "class-card",
+      "rect": [512, 562, 256, 46],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "the class / weapon label and the Customize button under the preview"
+    },
+    {
+      "name": "crosshair",
+      "rect": [595, 315, 90, 70],
+      "kind": "image",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "mask": "ink",
+      "pending": "S3: v10 keeps the crosshair (#aimDot / #aimRecticle) over the paused menu; the native hides it",
+      "note": "the crosshair above the class preview"
+    },
+    {
+      "name": "menu-left",
+      "rect": [0, 0, 360, 210],
+      "kind": "text",
+      "skip": true,
+      "note": "the sandbox page (custom map) shows Skin Manager and no login bar: not the live menu's (main-menu)"
+    },
+    {
+      "name": "menu-right",
+      "rect": [1180, 220, 100, 120],
+      "kind": "image",
+      "skip": true,
+      "note": "play buttons: absent from the sandbox page, so the reference cannot say whether a match hides them"
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "scenario": "seq-kill",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "killfeed",
+      "rect": [1060, 40, 220, 60],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#killFeed rows (gone at 4 s)",
+      "pending": "T: the sandbox servers name the players differently (native Guest 1 / a random bot, v10 Local User / Bot); needs a player-name override in the scenario"
+    },
+    {
+      "name": "popup",
+      "rect": [560, 220, 160, 70],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 6.0,
+      "note": "the +75 score popup"
+    }
+  ],
+  "timing": [
+    {
+      "name": "popup",
+      "rect": [560, 220, 160, 70],
+      "threshold": 0.5
+    }
+  ]
+}

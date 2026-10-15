@@ -1,0 +1,17 @@
+{
+  "scenario": "seq-loading-map-name",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "loading",
+      "rect": [540, 260, 200, 110],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#loadGamNm \"Loading Kanji ...\" on #loadingBg"
+    }
+  ]
+}

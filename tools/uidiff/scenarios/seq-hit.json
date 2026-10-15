@@ -1,0 +1,41 @@
+{
+  "ref": "doc/ref/krunker-v10.0.2/sequences/hit",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "checker",
+  "anim_times": [
+    0,
+    50,
+    100,
+    150,
+    200,
+    300,
+    500,
+    700,
+    1000
+  ],
+  "anim_origin": "applied",
+  "state": {
+    "menu": false,
+    "window": null,
+    "connected": true,
+    "ready": true,
+    "inGame": true,
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "modeName": "Free for All",
+    "name": "Local User",
+    "region": "...",
+    "hud": {
+      "timerText": "03:45"
+    },
+    "chat": [],
+    "hit": {
+      "kill": 0,
+      "elapsed_ms": 0
+    }
+  },
+  "note": "The hit marker from the origin (state.hit; v10: DO_DAMAGE of 40 on a bot). Damage numbers: not injectable natively yet."
+}

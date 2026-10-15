@@ -1,0 +1,17 @@
+{
+  "scenario": "seq-auto-respawn",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "subtitle",
+      "rect": [480, 280, 320, 80],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#instructions \"Auto Respawning in N\""
+    }
+  ]
+}
