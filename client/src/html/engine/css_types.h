@@ -107,7 +107,8 @@ typedef enum CssDisplay {
     CSS_DISPLAY_INLINE_BLOCK, CSS_DISPLAY_FLEX, CSS_DISPLAY_INLINE_FLEX,
     CSS_DISPLAY_GRID, CSS_DISPLAY_INLINE_GRID, CSS_DISPLAY_TABLE,
     CSS_DISPLAY_INLINE_TABLE, CSS_DISPLAY_TABLE_ROW, CSS_DISPLAY_TABLE_CELL,
-    CSS_DISPLAY_TABLE_ROW_GROUP, CSS_DISPLAY_LIST_ITEM, CSS_DISPLAY_CONTENTS
+    CSS_DISPLAY_TABLE_ROW_GROUP, CSS_DISPLAY_LIST_ITEM, CSS_DISPLAY_CONTENTS,
+    CSS_DISPLAY_FLOW_ROOT  /* a block box that establishes a block formatting context */
 } CssDisplay;
 
 typedef enum CssPosition {
@@ -237,6 +238,9 @@ typedef enum CssRadialShape { CSS_RADIAL_ELLIPSE = 0, CSS_RADIAL_CIRCLE } CssRad
 typedef enum CssRadialExtent { CSS_RADIAL_FARTHEST_CORNER = 0, CSS_RADIAL_CLOSEST_SIDE, CSS_RADIAL_CLOSEST_CORNER, CSS_RADIAL_FARTHEST_SIDE } CssRadialExtent;
 
 /* will-change is accepted and ignored; kept as bits for completeness */
+/* contain (CSS Containment 2): strict = size layout paint style, content = layout paint style */
+enum { CSS_CONTAIN_NONE = 0, CSS_CONTAIN_SIZE = 1, CSS_CONTAIN_LAYOUT = 2, CSS_CONTAIN_STYLE = 4, CSS_CONTAIN_PAINT = 8,
+       CSS_CONTAIN_INLINE_SIZE = 16 };
 enum { CSS_WILL_CHANGE_NONE = 0, CSS_WILL_CHANGE_TRANSFORM = 1, CSS_WILL_CHANGE_OPACITY = 2, CSS_WILL_CHANGE_OTHER = 4 };
 
 /* ------------------------------------------------------------------------- */
@@ -490,6 +494,8 @@ typedef struct CssComputed {
     uint8_t overflow_x, overflow_y;   /* CssOverflow                           */
     uint8_t appearance;               /* CssAppearance                         */
     uint8_t will_change;              /* bits, ignored by layout               */
+    uint8_t contain;                  /* CSS_CONTAIN_* bits; layout reads only
+                                         layout / paint (a BFC root)            */
     int32_t z_index;                  /* clamped to int32 like Chrome          */
     uint8_t z_index_auto;
     float opacity;                    /* 0..1                                  */

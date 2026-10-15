@@ -1869,6 +1869,31 @@ static void t_memo_equivalence(void)
     fx_free(full);
 }
 
+/* Block formatting context roots contain their floats (auto height) and keep clear of the
+ * floats around them. Values from Chrome 152: a 50x30 float inside each box; overflow: clip
+ * and contain: style do not establish a BFC (CSS Overflow 3, CSS Containment 2). */
+static void t_bfc_roots(void)
+{
+#define BFC_CASE(id, st) "<div style='width:300px;overflow:hidden'><div id=" id " style='" st "'>" \
+    "<div style='float:left;width:50px;height:30px'></div></div>" \
+    "<div id=" id "n style='overflow:hidden;height:10px'></div></div>"
+    Fx *fx = fx_html(
+        BFC_CASE("fr", "display:flow-root") BFC_CASE("blk", "display:block") BFC_CASE("clip", "overflow:clip")
+        BFC_CASE("cl", "contain:layout") BFC_CASE("cp", "contain:paint") BFC_CASE("cc", "contain:content")
+        BFC_CASE("cs", "contain:style"), NULL);
+#undef BFC_CASE
+    static const struct { const char *id; float h, next_x; } want[] = {
+        { "fr", 30, 0 }, { "blk", 0, 50 }, { "clip", 0, 50 }, { "cl", 30, 0 }, { "cp", 30, 0 }, { "cc", 30, 0 }, { "cs", 0, 50 },
+    };
+    for (size_t i = 0; i < sizeof want / sizeof *want; i++) {
+        char next[16];
+        snprintf(next, sizeof next, "%sn", want[i].id);
+        CHECK_NEAR(rc(fx, want[i].id).h, want[i].h, 0.01, want[i].id);   /* height with a 50x30 float inside */
+        CHECK_NEAR(rc(fx, next).x, want[i].next_x, 0.01, next);         /* the BFC after it: beside an escaped float */
+    }
+    fx_free(fx);
+}
+
 int main(int argc, char **argv)
 {
     if (argc > 1) g_root = argv[1];
@@ -1931,6 +1956,7 @@ int main(int argc, char **argv)
     t_aspect_ratio_content();
     t_line_clamp();
     t_video_intrinsic();
+    t_bfc_roots();
 
     css_sheet_destroy(g_ua);
     cascade_shutdown();

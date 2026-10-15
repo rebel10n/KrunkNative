@@ -894,6 +894,12 @@ static void test_text_props(void)
     CHECK(apply(&c, NULL, "pointer-events", "all") && c.pointer_events == CSS_POINTER_EVENTS_ALL);
     CHECK(apply(&c, NULL, "visibility", "hidden") && c.visibility == CSS_VISIBILITY_HIDDEN);
     CHECK(apply(&c, NULL, "will-change", "transform, opacity") && c.will_change == (CSS_WILL_CHANGE_TRANSFORM | CSS_WILL_CHANGE_OPACITY));
+    CHECK(apply(&c, NULL, "contain", "content") && c.contain == (CSS_CONTAIN_LAYOUT | CSS_CONTAIN_PAINT | CSS_CONTAIN_STYLE));
+    CHECK(apply(&c, NULL, "contain", "paint layout") && c.contain == (CSS_CONTAIN_LAYOUT | CSS_CONTAIN_PAINT));
+    CHECK(apply(&c, NULL, "contain", "none") && c.contain == CSS_CONTAIN_NONE);
+    CHECK(!apply(&c, NULL, "contain", "layout layout") && !apply(&c, NULL, "contain", "strict paint")
+          && !apply(&c, NULL, "contain", "size inline-size"));   /* repeated / combined keywords are invalid */
+    CHECK(apply(&c, NULL, "display", "flow-root") && c.display == CSS_DISPLAY_FLOW_ROOT);
     CHECK(apply(&c, NULL, "outline", "none") && c.outline_style == CSS_BORDER_STYLE_NONE);
     CHECK(apply(&c, NULL, "list-style", "none") && c.list_style_type == CSS_LIST_STYLE_NONE);
     CHECK(!apply(&c, NULL, "display", "blockish"));

@@ -245,6 +245,7 @@ int css_parse_vertical_align(const CssToken *tokens, int n, uint8_t *kw, CssLeng
 int css_parse_content(const CssToken *tokens, int n, CssContent *out);
 int css_parse_text_decoration(const CssToken *tokens, int n, uint8_t *bits);
 int css_parse_will_change(const CssToken *tokens, int n, uint8_t *bits);
+int css_parse_contain(const CssToken *tokens, int n, uint8_t *bits);
 /* animation-* longhand lists (comma separated).  *count receives the item count (<= max). */
 int css_parse_animation_names(const CssToken *tokens, int n, const char **out, int max, int *count);
 int css_parse_time_list(const CssToken *tokens, int n, float *out, int max, int *count);

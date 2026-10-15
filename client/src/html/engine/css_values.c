@@ -953,6 +953,7 @@ const CssKeyword css_kw_display[] = {
     { "grid", CSS_DISPLAY_GRID }, { "inline-grid", CSS_DISPLAY_INLINE_GRID }, { "table", CSS_DISPLAY_TABLE },
     { "inline-table", CSS_DISPLAY_INLINE_TABLE }, { "table-row", CSS_DISPLAY_TABLE_ROW }, { "table-cell", CSS_DISPLAY_TABLE_CELL },
     { "table-row-group", CSS_DISPLAY_TABLE_ROW_GROUP }, { "list-item", CSS_DISPLAY_LIST_ITEM }, { "contents", CSS_DISPLAY_CONTENTS },
+    { "flow-root", CSS_DISPLAY_FLOW_ROOT },
     { "-webkit-box", CSS_DISPLAY_FLEX }, { "-webkit-flex", CSS_DISPLAY_FLEX }, { "-webkit-inline-box", CSS_DISPLAY_INLINE_FLEX },
     { NULL, 0 }
 };
@@ -3045,6 +3046,33 @@ int css_parse_will_change(const CssToken *tokens, int n, uint8_t *bits)
     return 1;
 }
 
+/* contain: none | strict | content | [ [size | inline-size] || layout || style || paint ] */
+int css_parse_contain(const CssToken *tokens, int n, uint8_t *bits)
+{
+    CssToken t[8];
+    int m = tokens_copy_nows(tokens, n, t, 8);
+    if (m == 0 || m > 4) return 0;
+    uint8_t b = 0;
+    for (int i = 0; i < m; i++) {
+        uint8_t bit;
+        if (t[i].type != CSS_TOK_IDENT) return 0;
+        if (m == 1 && tok_is_ident(&t[i], "none")) bit = 0;
+        else if (m == 1 && tok_is_ident(&t[i], "strict")) bit = CSS_CONTAIN_SIZE | CSS_CONTAIN_LAYOUT | CSS_CONTAIN_PAINT | CSS_CONTAIN_STYLE;
+        else if (m == 1 && tok_is_ident(&t[i], "content")) bit = CSS_CONTAIN_LAYOUT | CSS_CONTAIN_PAINT | CSS_CONTAIN_STYLE;
+        else if (tok_is_ident(&t[i], "size")) bit = CSS_CONTAIN_SIZE;
+        else if (tok_is_ident(&t[i], "inline-size")) bit = CSS_CONTAIN_INLINE_SIZE;
+        else if (tok_is_ident(&t[i], "layout")) bit = CSS_CONTAIN_LAYOUT;
+        else if (tok_is_ident(&t[i], "style")) bit = CSS_CONTAIN_STYLE;
+        else if (tok_is_ident(&t[i], "paint")) bit = CSS_CONTAIN_PAINT;
+        else return 0;
+        if (b & bit) return 0;   /* each keyword once */
+        b |= bit;
+    }
+    if ((b & CSS_CONTAIN_SIZE) && (b & CSS_CONTAIN_INLINE_SIZE)) return 0;
+    *bits = b;
+    return 1;
+}
+
 /* ========================================================================= */
 /* var()                                                                     */
 /* ========================================================================= */
@@ -3940,6 +3968,7 @@ void css_computed_copy_prop(CssComputed *d, const CssComputed *s, int id)
     case CSS_PROP_OVERFLOW_Y: CP(overflow_y); break;
     case CSS_PROP_APPEARANCE: CP(appearance); break;
     case CSS_PROP_WILL_CHANGE: CP(will_change); break;
+    case CSS_PROP_CONTAIN: CP(contain); break;
     case CSS_PROP_Z_INDEX: CP(z_index); CP(z_index_auto); break;
     case CSS_PROP_OPACITY: CP(opacity); break;
     case CSS_PROP_TOP: case CSS_PROP_RIGHT: case CSS_PROP_BOTTOM: case CSS_PROP_LEFT: CP(inset[id - CSS_PROP_TOP]); break;
@@ -4207,6 +4236,7 @@ int css_computed_apply(CssComputed *d, int id, const CssToken *tokens, int n,
     case CSS_PROP_OVERFLOW_Y: SET_KW(css_kw_overflow, overflow_y);
     case CSS_PROP_APPEARANCE: SET_KW(kw_appearance, appearance);
     case CSS_PROP_WILL_CHANGE: { uint8_t b; if (!css_parse_will_change(t, m, &b)) return 0; d->will_change = b; return 1; }
+    case CSS_PROP_CONTAIN: { uint8_t b; if (!css_parse_contain(t, m, &b)) return 0; d->contain = b; return 1; }
     case CSS_PROP_Z_INDEX: {
         int32_t z; int a;
         if (!css_parse_z_index(t, m, &z, &a)) return 0;

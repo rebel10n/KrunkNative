@@ -503,14 +503,22 @@ static void set_flags_from_style(LayoutTree *t, Box *b, int parent_is_flex_or_gr
     }
 
     if (b->type != BOX_INLINE && b->type != BOX_TEXT && b->type != BOX_LINEBREAK) {
-        if (s->overflow_x != CSS_OVERFLOW_VISIBLE || s->overflow_y != CSS_OVERFLOW_VISIBLE) {
+        /* overflow: clip clips without making a scroll container (or a BFC, CSS Overflow 3) */
+        const int clip_x = s->overflow_x == CSS_OVERFLOW_CLIP, clip_y = s->overflow_y == CSS_OVERFLOW_CLIP;
+        if ((s->overflow_x != CSS_OVERFLOW_VISIBLE && !clip_x) || (s->overflow_y != CSS_OVERFLOW_VISIBLE && !clip_y)) {
             b->flags |= BOXF_SCROLL_CONTAINER | BOXF_CLIPS;
+        } else if (clip_x || clip_y) {
+            b->flags |= BOXF_CLIPS;
         }
         if (s->clip_path.kind != CSS_CLIP_PATH_NONE) b->flags |= BOXF_CLIPS;
-        /* BFC roots: floats, abs, inline-blocks, overflow != visible, flex/grid items, table cells, flex/grid containers */
+        /* BFC roots (CSS Display 3 / CSS 2 9.4.1): floats, abs, inline-blocks, scroll containers
+         * (overflow other than visible / clip), flex/grid items, table cells, flex/grid containers,
+         * display: flow-root, layout / paint containment (contain: layout | paint | content |
+         * strict). Not here: multi-column containers (no multicol layout) */
         if (oof || floated || (b->flags & BOXF_ATOMIC) || (b->flags & BOXF_SCROLL_CONTAINER)
             || parent_is_flex_or_grid || b->type == BOX_TABLE_CELL || b->type == BOX_FLEX || b->type == BOX_GRID
-            || b->type == BOX_TABLE || !b->parent || layout_style_line_clamps(s))
+            || b->type == BOX_TABLE || !b->parent || layout_style_line_clamps(s)
+            || d == CSS_DISPLAY_FLOW_ROOT || (s->contain & (CSS_CONTAIN_LAYOUT | CSS_CONTAIN_PAINT)))
             b->flags |= BOXF_BFC_ROOT;
     }
     set_dynamic_flags(t, b, parent_is_flex_or_grid);
@@ -1451,6 +1459,7 @@ static int structural_changed(const CssComputed *a, const CssComputed *b)
     return a->display != b->display || a->position != b->position || a->float_ != b->float_
         || layout_style_line_clamps(a) != layout_style_line_clamps(b)
         || a->overflow_x != b->overflow_x || a->overflow_y != b->overflow_y
+        || (a->contain & (CSS_CONTAIN_LAYOUT | CSS_CONTAIN_PAINT)) != (b->contain & (CSS_CONTAIN_LAYOUT | CSS_CONTAIN_PAINT))
         || (a->clip_path.kind != CSS_CLIP_PATH_NONE) != (b->clip_path.kind != CSS_CLIP_PATH_NONE)
         || a->content.kind != b->content.kind || a->content.str != b->content.str || a->content.base != b->content.base;
 }

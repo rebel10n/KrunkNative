@@ -77,6 +77,7 @@ extern "C" {
     X(OVERFLOW_Y,                 "overflow-y",                 0, "visible") \
     X(APPEARANCE,                 "appearance",                 0, "none") \
     X(WILL_CHANGE,                "will-change",                0, "auto") \
+    X(CONTAIN,                    "contain",                    0, "none") \
     X(Z_INDEX,                    "z-index",                    0, "auto") \
     X(OPACITY,                    "opacity",                    0, "1") \
     X(TOP,                        "top",                        0, "auto") \
