@@ -393,13 +393,13 @@ void client_net_stop(Client *client, const char *reason) {
         client->net_thread_running = 0;
     }
     client->net_should_quit = 0;
-    client->net_hold_retry = 0;
     client->net_retry_now = 0;
     client->net_connected = 0;
-    if (!had_session) { // stopped while (re)trying: the page's disconnected screen (final, not a spinner)
-        client->net_hold_retry = 1;
-        on_client_socket_failed(client, reason ? reason : "Disconnected");
-    }
+    // No thread retries after a stop (the user's disconnect): held, so the page shows the Lost
+    // Connection screen (menu_ui.c menu_poll_connection), not the spinner of a retrying transport.
+    // The next connect / switch clears it. Like net_web.c, whose stop leaves net_should_quit set.
+    client->net_hold_retry = 1;
+    if (!had_session) on_client_socket_failed(client, reason ? reason : "Disconnected"); // stopped while (re)trying
 }
 
 // Brain matchmaking: move the session to client->net_address:net_port (set by the

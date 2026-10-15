@@ -1031,8 +1031,9 @@ def sc_om_tools():
 
 def sc_online():
     """Online: ESC / death on a server, offline and back online, disconnect / reconnect, then the
-    server goes away (Lost Connection): ESC keeps the error box (v7 f2040 is terminal), and
-    `offline` leaves it."""
+    server goes away: the loading spinner while the transport retries (no error box), the Lost
+    Connection box once it gives up (NET_RETRY_BUDGET, ~50 s: connect_ux_e2e), ESC keeps the
+    error box (v7 f2040 is terminal), and `offline` leaves it."""
     server, port = start_server("online")
     killed = []
 
@@ -1063,22 +1064,24 @@ def sc_online():
             20000 respawn
             22000 check @reconnected {HUD}
             22500 check @kill-server inGameUI=?
-            34000 check @lost-connection instructionsUpdate=1 menuHolder=0 inGameUI=0 chatHolder=0
-            34500 esc
-            35500 check @lost-connection-esc instructionsUpdate=1 inGameUI=0
-            36000 esc
-            37000 check @lost-connection-esc-esc instructionsUpdate=1 inGameUI=0
-            37500 con offline
-            40000 respawn
-            42000 check @offline-after-lost {HUD} instructionsUpdate=0 chatHolder=1
-            42500 quit
-        """, on_line=watch, timeout=150)
+            34000 check @lost-retrying instructionsUpdate=0 inGameUI=0 chatHolder=0
+            75000 check @lost-connection instructionsUpdate=1 menuHolder=0 inGameUI=0 chatHolder=0
+            75500 esc
+            76500 check @lost-connection-esc instructionsUpdate=1 inGameUI=0
+            77000 esc
+            78000 check @lost-connection-esc-esc instructionsUpdate=1 inGameUI=0
+            78500 con offline
+            81000 respawn
+            83000 check @offline-after-lost {HUD} instructionsUpdate=0 chatHolder=1
+            83500 quit
+        """, on_line=watch, timeout=180)
     finally:
         stop(server)
 
 
 def sc_lost_during_end():
-    """The server goes away while the results show: the Lost Connection box, not the old results."""
+    """The server goes away while the results show: not the old results, the spinner while the
+    transport retries, then the Lost Connection box once it gives up."""
     server, port = start_server("lost-end")
     killed = []
 
@@ -1093,11 +1096,12 @@ def sc_lost_during_end():
             1000 con end
             12000 check @end endUI=1 matchVoteHolder=? :cursor=1
             12100 check @kill-server endUI=?
-            24000 check @lost instructionsUpdate=1 endUI=0
-            24500 esc
-            25500 check @lost-esc instructionsUpdate=1 endUI=0
-            26000 quit
-        """, on_line=watch, timeout=90)
+            24000 check @lost-retrying instructionsUpdate=0 endUI=0
+            64000 check @lost instructionsUpdate=1 endUI=0
+            64500 esc
+            65500 check @lost-esc instructionsUpdate=1 endUI=0
+            66000 quit
+        """, on_line=watch, timeout=130)
     finally:
         stop(server)
 
