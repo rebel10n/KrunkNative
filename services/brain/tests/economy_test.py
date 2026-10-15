@@ -341,6 +341,12 @@ async def scenario(url, db):
         check(len(mails) == 1 and "Moon Dragon" in mails[0][1], "seller gets the v7 'Item sold' mail: %r" % mails)
         r = await b.call(("br", "po"), "pi", listing, 3, op())
         check(r[0] == "br" and r[1] is None, "a sold listing is unavailable")
+        # the cards' estimate badge (v10 getPrices): each item's mean completed sale price, a whole KR number
+        page = await b.call("0", "r", "market", "prices", B, names["bob"], None, -1)
+        rows = page[3] if page[1:3] == ["market", "prices"] and isinstance(page[3], list) else []
+        est = next((x.get("est") for x in rows if x.get("ski") == 4), None)
+        check(isinstance(est, int) and est == 1009 and all(x.get("ski") != 2 for x in rows),
+              "prices: Moon Dragon's estimate is its one sale (1009 KR), unsold items have none: %r" % (rows,))
         r = await c.call(("lir", "po"), "li", 4, 4, 8, 500, op())
         l2 = r[1]["listingId"]
         r = await c.call(("ulir", "po"), "uli", 4, l2, 8, op())

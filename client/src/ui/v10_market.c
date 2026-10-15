@@ -32,8 +32,9 @@
 //   /trades/player-search, /trades/inventory/<id>         ["sp"] / ["ri"]
 //   /market/black-market(/purchase)                       the store table / ["pbm"]
 // What does not exist here: Junk and crafting (the Junkyard has no recipes), item instances (wear,
-// mints, serials, paint, styles, name tags: every item is a stack), the listing-price estimates of
-// /webhooks/general/items/prices (social_estimate_value: data/prices.js) and the 3D showcase.
+// mints, serials, paint, styles, name tags: every item is a stack) and the 3D showcase. The estimates of
+// /webhooks/general/items/prices are ["r","market","prices"]: this economy's own mean sale prices,
+// then the bundled data/prices.js snapshot (social_estimate_value); with neither, v10's "~ Unknown".
 #include <backend.h>
 #include <backend_ui.h>
 #include <economy_client.h>
@@ -2615,6 +2616,7 @@ void v10_market_open(int tab, const int item) {
     M.tnote[0] = M.bm_note[0] = 0;
     M.last_search[0] = 0;
     if (!g_scenario) send_frame(econ_rules_request());
+    if (!g_scenario) request_page("market", "prices", -1); // v10: getPrices on the exchange's mount (_36377)
     M.tab = -1;
     switch_tab(tab);
     if (tab == TAB_MARKET && item >= 0) open_detail(item);
@@ -3206,6 +3208,7 @@ static void on_social(void *user, const cJSON *frame) {
             else if (!strcmp(sub, "sales")) { M.sales_loading = 0; set_json(&M.sales, a3); }
             else if (!strcmp(sub, "history")) { M.hist_loading = 0; set_json(&M.hist, a3); }
             else if (!strcmp(sub, "stats")) { M.stats_loading = 0; set_json(&M.stats, a3); }
+            else if (!strcmp(sub, "prices")) social_set_estimates(a3); // the cards' "~ N KR" (social_estimate_value)
             else if (!strcmp(sub, "trades")) {
                 M.trades_loading = 0;
                 M.trades_loaded = 1;

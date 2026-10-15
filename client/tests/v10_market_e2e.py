@@ -9,7 +9,7 @@ kn_brain (sqlite, temp dir) and one headless client_bin at a time, from the v10 
   4. bob's inventory: Quick sell -> Get KR -> confirm: KR credited, the stack drops
   5. alice's Trading tab: Start a Trade -> bob -> Create Trade: add her item, add his, Submit ->
      confirm (his offer side included); then bob's Trading tab -> the incoming offer -> Accept
-  6. both live balances (the header KR) and the ledger match
+  6. both live balances (the header KR) and the ledger match; the sold item's estimate badge is its sale price
 
   python3 -I client/tests/v10_market_e2e.py BUILD_DIR      (repository root)
 Headless client_bin (KRUNKNATIVE_HEADLESS=1, null audio, no DISPLAY, private XDG dirs) driven through
@@ -165,6 +165,18 @@ class Client:
         self.cmd("text " + chars)
         time.sleep(0.6)
 
+    def textof(self, target, timeout=10.0):
+        """[ui_cmds] textof: the element's text (whitespace folded), '' when it has none"""
+        mark = len(self.text())
+        self.cmd("textof " + target)
+        end = time.time() + timeout
+        while time.time() < end:
+            m = re.search(r"\[ui_cmds\] textof %s = '(.*)'" % re.escape(target), self.text()[mark:])
+            if m:
+                return m.group(1)
+            time.sleep(0.1)
+        return ""
+
     def shot(self, name):
         path = os.path.join(WORK, "%s-%s.png" % (self.tag, name))
         self.cmd("shot " + path)
@@ -294,6 +306,15 @@ def scenario(port, ids, tokens, names):
             check(one("SELECT count FROM inventory WHERE account_id = ? AND skin_id = 4", B) == 1, "bob got alice's item")
             check(one("SELECT count FROM inventory WHERE account_id = ? AND skin_id = 3", A) == 1, "alice got bob's item")
             check(b_before >= 0, "bob's balance is sane (%d)" % b_before)
+            # the estimate badge (v10 getPrices): Moon Dragon sold once here at 300 KR, so its "~" is the server's
+            # 300, not the bundled snapshot's 480
+            c.click("v10mkSide0")
+            c.click("v10mkTab1")
+            check(c.has("v10mkQS4", 25), "bob: his inventory with the Moon Dragon")
+            grid = c.textof("v10mkGridHolder")
+            check("Moon Dragon" in grid and "~ 300 KR" in grid and "480" not in grid,
+                  "the Moon Dragon card's estimate is this market's sale price (~ 300 KR): %r" % grid[:200])
+            c.shot("estimate")
     finally:
         c.close()
 

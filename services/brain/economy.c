@@ -365,6 +365,18 @@ static void market_query(SocialSession *s, MarketCtx *c) {
                                    " (SELECT max(price) FROM market_listings l WHERE l.skin_id = i.skin_id AND l.sold_at IS NULL AND l.cancelled_at IS NULL) AS high__i"
                                    " FROM inventory i WHERE count > 0 GROUP BY skin_id ORDER BY 2 ASC, skin_id LIMIT 50"),
                      0, NULL, market_done, c);
+    } else if (!strcmp(c->sub, "prices")) {
+        /* KrunkNative (v10's getPrices / items/prices, the cards' "~ N KR" estimate badge): each item's
+         * estimate from this economy's own completed market sales, the rounded mean price (v10's comes
+         * from Krunker's market; an item never sold here has none: the client falls back to its bundled
+         * snapshot, then v10's "Unknown") */
+        social_query(s, SQL(.pg = "SELECT skin_id AS ski, round(avg(price))::bigint AS est FROM market_listings"
+                                  " WHERE sold_at IS NOT NULL GROUP BY skin_id ORDER BY skin_id",
+                            .sqlite = "SELECT skin_id AS ski, CAST(round(avg(price)) AS INTEGER) AS est FROM market_listings"
+                                      " WHERE sold_at IS NOT NULL GROUP BY skin_id ORDER BY skin_id",
+                            .mysql = "SELECT skin_id AS ski, CAST(ROUND(AVG(price)) AS SIGNED) AS est FROM market_listings"
+                                     " WHERE sold_at IS NOT NULL GROUP BY skin_id ORDER BY skin_id"),
+                     0, NULL, market_done, c);
     } else if (!strcmp(c->sub, "history")) {
         /* KrunkNative (the v10 Market History tab): the account's closed market trades, newest first:
          * {type buy|sell, date, skinindex, amount, who, status completed|cancelled} */

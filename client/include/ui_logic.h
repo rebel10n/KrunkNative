@@ -651,7 +651,8 @@ void ui_loadout_kpd_apply_result(int ok, const char *text); // the application's
 void ui_loadout_hide_police_pop(void);           // hidePolicePop
 void ui_loadout_clear_pops(void);                // clearPops
 void ui_loadout_reset_pops(void);                // resetPops (the popup holder stays up)
-int social_estimate_value(int skin);             // data/prices.js prices.estimateValue (0 unknown)
+int social_estimate_value(int skin);             // prices.estimateValue: kn_brain's sale prices, else data/prices.js (0 unknown)
+void social_set_estimates(const cJSON *rows); // v10 getPrices -> _36377: the server's [{ski, est}] (v10_market.c)
 int  ui_police_active(void);                     // Officer Buddy is in the class preview
 const char *ui_police_class_name(void);          // his classN: "Marshal" for an officer, else "Officer"
 void menu_idle_reset(void);                      // menu_ui.c: CONTROLS.idleTimer = 0 (any key, window, menu toggle)

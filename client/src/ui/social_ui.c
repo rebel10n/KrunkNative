@@ -2090,7 +2090,27 @@ static const int k_prices[] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 150000,
 };
 
+// v10's getPrices (items/prices: _36377 replaces the estimate list when the exchange opens): KrunkNative's
+// kn_brain answers ["r","market","prices"] with this economy's own sale prices ({ski, est}: the mean of the
+// item's completed market sales, services/brain/economy.c). They come first; the snapshot above covers the
+// rest; an item in neither is v10's "Unknown".
+static int *g_server_prices;
+
+void social_set_estimates(const cJSON *rows) {
+    if (!g_server_prices) g_server_prices = calloc((size_t) g_viewer_skin_count, sizeof(int));
+    if (!g_server_prices) return;
+    memset(g_server_prices, 0, (size_t) g_viewer_skin_count * sizeof(int));
+    const cJSON *it;
+    cJSON_ArrayForEach(it, rows) {
+        const cJSON *ski = cJSON_GetObjectItemCaseSensitive(it, "ski"), *est = cJSON_GetObjectItemCaseSensitive(it, "est");
+        if (!cJSON_IsNumber(ski) || !cJSON_IsNumber(est)) continue;
+        const int k = (int) ski->valuedouble;
+        if (k >= 0 && k < g_viewer_skin_count && est->valuedouble > 0) g_server_prices[k] = (int) fmin(est->valuedouble, 2e9);
+    }
+}
+
 static int estimate_value(const int skin) {
+    if (g_server_prices && skin >= 0 && skin < g_viewer_skin_count && g_server_prices[skin] > 0) return g_server_prices[skin];
     return skin >= 0 && (size_t) skin < sizeof(k_prices) / sizeof(k_prices[0]) ? k_prices[skin] : 0;
 }
 
