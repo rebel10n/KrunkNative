@@ -14,6 +14,8 @@
 //                    failed-request box
 //   popup-usernames  manageAccNames() with a signed-in account (the capture's setAcc hook)
 //   popup-survey     the GAME_SURVEY notification, sent through the sandbox socket as the server sends it
+//   ranked/ranked-home  openRankedMenu() signed in (FRVR's isLoggedIn, the $account store) with the ranked API
+//                    answered from a fixture: the Ranked popup's Home tab
 //   (the ranked message overlay's open sequence is capture-v10-seq-list.js's ranked-overlay-open)
 // Not captured: popup-premium (the subscription branch sits in the else of a constant `() => !0x0` condition,
 // v10:129547, so v10 never renders it) and popup-mission-briefing (the guest hook manager has config.enabled
@@ -47,12 +49,14 @@ const FRVR_STUB = `(() => { const noop = () => Promise.resolve(); const deep = (
   const none = () => Promise.resolve(null);
   window.FRVR = deep({ config: Object.assign({ abTests: {} }, window.FRVR && window.FRVR.config), init: () => Promise.resolve(), lifecycle: {},
     channel: deep({ getId: () => 'web' }), channelCharacteristics: { allowNavigation: true },
-    auth: deep({ isLoggedIn: () => false, isLoggingIn: false, getFreshAccessToken: none, getCurrentPlatform: () => 'web', logout: none,
+    auth: deep({ isLoggedIn: () => !!window.__knLoggedIn, isLoggingIn: false, getFreshAccessToken: () => Promise.resolve(window.__knLoggedIn ? 'kn-capture' : null), getCurrentPlatform: () => 'web', logout: none,
       tokenHandler: deep({ getRefreshToken: () => null, getAccessToken: () => null }) }),
     iap: deep({ getUnconsumedPurchases: () => Promise.resolve([]), purchase: () => Promise.reject(new Error('offline')), consumePurchase: none }),
     ads: deep({ AdType: { Interstitial: 0, Reward: 1, Banner: 2 }, AdShowResult: { Shown: 0, Skipped: 1, Failed: 2 }, show: () => Promise.resolve(2) }),
     tracker: deep({}), bootstrapper: deep({}), abTests: { abTestCohorts: {} } }); })();`;
 let CURRENT_MAP = 'null'; // the capture's map JSON (openPage)
+let CURRENT_API = {}; // the capture's API answers: { '/path': json } on api.krunker.io (openPage, o.api)
+const MISSED = []; // API requests the sandbox answered 404 (KN_CAPTURE_DEBUG lists them)
 const isFile = (f) => { try { return fs.statSync(f).isFile(); } catch (e) { return false; } };
 // the file (or [content, ext]) an offline request is answered with ('' = 404)
 function offlineFile(u) {
@@ -63,7 +67,9 @@ function offlineFile(u) {
   if (p === 'libs/frvr-channel-web.min.js') return ['', '.js'];
   if (/^static\/index-[^/]*\.js$/.test(p)) return [clientScript(), '.js'];
   if (/^(gapi\.svc|api)\.krunker\.io$/.test(u.hostname) && p === 'maps') return ['{"data":[' + CURRENT_MAP + ']}', '.json'];
-  if (/^(gapi\.svc|api|matchmaker)\.krunker\.io$/.test(u.hostname)) return '';
+  if (u.hostname === 'api.krunker.io' && Object.prototype.hasOwnProperty.call(CURRENT_API, '/' + p))
+    return [JSON.stringify(CURRENT_API['/' + p]), '.json'];
+  if (/^(gapi\.svc|api|matchmaker)\.krunker\.io$/.test(u.hostname)) { MISSED.push(u.hostname + u.pathname + u.search); return ''; }
   const f = path.join(OFFLINE, p);
   if (isFile(f)) return f;
   if (p.startsWith('libs/')) { const l = path.join(V7_PUBLIC, p); if (isFile(l)) return l; }
@@ -126,7 +132,7 @@ async function settle(c, ms = 600) {
 // reaches the sandbox game and setAcc(a), which stands a signed-in account in for the guest
 const SCOPE_ANCHOR = '  var _69422 = null;\n  var _69423 = null;\n';
 const SCOPE_HOOK = '  window.__knScope = function () { return { sg: _69422, sp: _69423, cg: _67298, me: _69415, sock: _33978,'
-  + ' setAcc: function (a) { _67362 = a; }, boot: function (x) { return _73861(x); }, survey: function (p) { return _70256(p); } }; };\n';
+  + ' setAcc: function (a) { _67362 = a; }, setAccStore: function (a) { _67362 = a; _10539.set(a); }, boot: function (x) { return _73861(x); }, survey: function (p) { return _70256(p); } }; };\n';
 let clientJs = null;
 function clientScript() {
   if (clientJs) return clientJs;
@@ -181,6 +187,8 @@ async function openPage(o) {
     await c.send('Page.enable');
     await c.send('Emulation.setDeviceMetricsOverride', { width: o.w, height: o.h, deviceScaleFactor: 1, mobile: false });
     CURRENT_MAP = mapJson();
+    CURRENT_API = o.api || {};
+    MISSED.length = 0;
     const storage = Object.assign({ krunker_haslogin: 'true', consent: '1', custMap: CURRENT_MAP }, o.storage || {});
     await c.send('Page.addScriptToEvaluateOnNewDocument', { source: preScript(storage) });
     log('navigate'); await c.send('Page.navigate', { url: 'https://krunker.io/' });
@@ -243,17 +251,46 @@ scenario('popup-survey', async (c) => {
   await settle(c, 800);
 });
 
+// the Ranked popup's Home tab (openRankedMenu, v10:215664 -> rankedMenuModal) for a signed-in level-60 player: the
+// sign-in that creates the ranked client's session is FRVR's (the stub's isLoggedIn follows window.__knLoggedIn),
+// the account goes into both the account object and the $account store, and the ranked API answers come from
+// RANKED_API (the same player as tools/uidiff/scenarios/kn-ranked-home.json's state.ranked)
+const RANKED_PROFILE = { player_name: 'Player', rank: 8, conservative_rating: 7.12, mmr: 1712, wins: 31, losses: 21, draws: 0,
+  abandons: 1, total_kills: 812, total_deaths: 640, total_assists: 120, total_score: 51000, total_objective_score: 900,
+  total_damage_done: 91000, total_time_played: 15600000, highest_kill_count: 34, highest_damage_in_match: 4100, peak_mmr: 1790,
+  last_milestone_claimed: 1, total_accuracy: 0, total_matches: 52, placement_left: 0 };
+const RANKED_MILESTONES = [{ matches: 10, reward: 100 }, { matches: 25, reward: 200 }, { matches: 50, reward: 350 },
+  { matches: 75, reward: 500 }, { matches: 100, reward: 750 }];
+function rankedApi() {
+  const api = {};
+  // _7307(): the season of today's date; the region the default region maps to (_34037: Europe = 3 without a setting)
+  const now = new Date(); const season = now.getUTCFullYear() < 2025 ? 0 : 12 * (now.getUTCFullYear() - 2025) + (now.getUTCMonth() + 1 - 8 + 1);
+  for (const s of [season, season - 1, 15]) for (const r of ['', '/region/3', '/region/1', '/region/2', '/region/0'])
+    api[`/player-profile/me/season/${s}${r}`] = { data: { profile: Object.assign({}, RANKED_PROFILE), milestones: RANKED_MILESTONES } };
+  api['/ranked/me/connection'] = { data: null };
+  return api;
+}
+scenario('ranked-home', async (c) => {
+  await waitSandbox(c);
+  await c.eval(flatPage('#000000'));
+  await c.eval(`(() => { window.__knLoggedIn = true; window.__knScope().setAccStore({ name: 'Player', level: 60, isDev: false, funds: 2500,
+    score: 200000, rankedPoints: 1840, premiumT: 0, stats: {}, skins: [], badges: [], getSkinCount: () => 0 }); openRankedMenu(); return 1; })()`);
+  await sleep(3000);
+  await settle(c, 800);
+}, { dir: 'ranked', api: rankedApi() });
+
 // ---------------------------------------------------------------- main
 
 async function capture(sc, idx) {
   const base = +process.env.KN_CAPTURE_PORT_BASE || 9560;
-  const { c, close, errors } = await openPage({ w: sc.size[0], h: sc.size[1], port: base + (idx % 8), storage: sc.storage, settle: 10000 });
+  const { c, close, errors } = await openPage({ w: sc.size[0], h: sc.size[1], port: base + (idx % 8), storage: sc.storage, api: sc.api, settle: 10000 });
   try {
     await sc.run(c);
     const dir = path.join(OUT, sc.dir);
     fs.mkdirSync(dir, { recursive: true });
     await c.shot(path.join(dir, sc.name + '.png'));
     console.error(`[capture-v10-popups] ${sc.dir}/${sc.name}.png (${errors.length} page errors)`);
+    if (process.env.KN_CAPTURE_DEBUG) for (const m of MISSED) console.error('  404 ' + m);
     if (process.env.KN_CAPTURE_ERRORS) for (const e of errors.slice(0, 20)) console.error('  ' + String(e).split('\n')[0]);
   } finally { close(); }
 }

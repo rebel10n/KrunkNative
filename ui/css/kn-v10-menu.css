@@ -72,3 +72,15 @@
  * kn-ranked-intro / kn-ranked-outro, which client/src/ui/ranked_ui.c sets only while the overlay
  * mounts or unmounts. A rule on .overlay-container itself would outrank them (two classes against
  * one: the outro ran the intro's keyframes) and restart on every re-render of the popup. */
+
+/* The Ranked popup's map carousel (ranked_ui.c gen_home). v10 (svelte.css .map-carousel-container.svelte-17kea4i)
+ * scrolls it by translateX(calc(-1 * var(--total-maps) * (var(--map-width) + var(--map-gap)))) over
+ * var(--total-maps) * 5s; the engine does not substitute var() inside @keyframes (anim.c skips such
+ * declarations), so it stood still. The same motion without var(): --map-width is (100% - 6 * 15px) / 7
+ * of the wrapper, so 5 maps (RANKED_SEASON_MAPS, asserted in ranked_ui.c) scroll -5 * (100% + 15px) / 7
+ * in 25 s, and the [...maps, ...maps] row loops seamlessly. */
+.map-carousel-container.svelte-17kea4i {animation: kn-ranked-carousel 25s linear infinite;}
+@keyframes kn-ranked-carousel {
+  0% {transform: translateX(0);}
+  100% {transform: translateX(calc(-71.428571% - 10.714286px));}
+}

@@ -8,54 +8,80 @@
     {
       "name": "rk-tabs",
       "rect": [
-        300,
-        170,
-        680,
-        40
+        333,
+        128,
+        614,
+        44
       ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "the five tabs"
-    },
-    {
-      "name": "rk-banner-start",
-      "rect": [
-        300,
-        215,
-        680,
-        90
-      ],
-      "kind": "text",
-      "fuzz": 12,
-      "max_pct": 3.0,
-      "note": "status banner, FIND MATCH, All regions, region"
+      "note": "the tab bar (svelte-mqcul7): Home / Profile / Leaderboard / Match History / Shop, Region: Europe"
     },
     {
       "name": "rk-card",
       "rect": [
-        300,
-        300,
-        220,
-        180
+        333,
+        172,
+        614,
+        80
       ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "rank card: icon, Gold 2, rating, quick stats"
+      "note": "the rank card (svelte-17kea4i): the Gold 2 icon and name, Rating / Matches / Win Rate / KD Average, Season 15"
     },
     {
       "name": "rk-progress",
       "rect": [
-        520,
-        300,
-        460,
-        180
+        333,
+        252,
+        614,
+        118
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 5.0,
+      "note": "Ranked Progression (svelte-6hxhl0): 52/100 matches, the milestone markers (10 / 25 CLAIMED, 50 CLAIM +350 RP, 75, 100), the bar, 23 matches until next reward, 890 RP estimated. Every box sits where v10's does; the title and the bottom row land 1 px higher (sub-pixel line boxes rounded the other way), which moves every glyph edge of this text-heavy block"
+    },
+    {
+      "name": "rk-challenges",
+      "rect": [
+        333,
+        376,
+        614,
+        26
       ],
       "kind": "text",
       "fuzz": 12,
       "max_pct": 3.0,
-      "note": "Ranked Progression with milestones"
+      "note": "the Ranked Challenges link"
+    },
+    {
+      "name": "rk-maps",
+      "rect": [
+        333,
+        408,
+        614,
+        92
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 8.0,
+      "note": "the season's map pool: the description and the scrolling map carousel (v10's 25 s loop paused at 800 ms: kn-v10-menu.css kn-ranked-carousel, the engine has no var() in @keyframes)"
+    },
+    {
+      "name": "rk-footer",
+      "rect": [
+        322,
+        549,
+        636,
+        54
+      ],
+      "kind": "text",
+      "fuzz": 20,
+      "max_pct": 9.0,
+      "note": "the matchmaking footer: the status line, All regions, FIND MATCH. The \u2694\ufe0f is Chrome's colour-emoji glyph in v10 and the engine's fallback here (2-4 px narrower, so the status text starts 4 px further left) and FIND MATCH's box is 1 px taller; a missing / moved / recoloured footer still fails"
     }
   ]
 }

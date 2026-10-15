@@ -1,10 +1,10 @@
 {
-  "ref": "doc/ref/krunknative/kn-ranked-home.png",
+  "ref": "doc/ref/krunker-v10/ranked/ranked-home.png",
   "size": [
     1280,
     720
   ],
-  "background": "#d6c6c6",
+  "background": "#000000",
   "state": {
     "menu": true,
     "window": 27,
@@ -82,8 +82,11 @@
         "season": 15,
         "currentSeason": 15
       }
+    },
+    "storage": {
+      "krunker_rankedRegion": "eu"
     }
   },
   "frames": 3,
-  "note": "KrunkNative: the v10 Ranked window (Home tab, signed in): no Krunker reference (v10's is a Svelte popup)"
+  "note": "Krunker v10.0.2's Ranked popup (rankedMenuModal), Home tab, signed in: doc/ref/krunker-v10/ranked/ranked-home.png is captured from the offline v10 sandbox (tools/uidiff/capture-v10-popups.js ranked-home: FRVR signed in, the $account store set, the ranked API answered from the same profile and milestones as state.ranked). v10 reads the ranked region from the default region (Europe without one); KrunkNative defaults to North America (its servers' region), so the scenario picks eu (krunker_rankedRegion) like the capture"
 }
