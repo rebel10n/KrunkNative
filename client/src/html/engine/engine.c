@@ -118,6 +118,7 @@ struct Engine {
 
     int fb_w, fb_h;                          /* framebuffer px */
     float vw, vh;                            /* CSS px */
+    float dpr;                               /* devicePixelRatio: framebuffer px per CSS px */
 
     /* dirty state */
     int need_rebuild;                        /* box tree must be rebuilt */
@@ -1838,6 +1839,11 @@ void engine_viewport(Engine *g, float *w, float *h)
     if (h) *h = g ? g->vh : 0.0f;
 }
 
+float engine_device_pixel_ratio(Engine *g)
+{
+    return g && g->dpr > 0.0f ? g->dpr : 1.0f;
+}
+
 void engine_children_changed(Engine *g, HtmlElem e)
 {
     if (!g || !e) return;
@@ -2143,6 +2149,7 @@ static Engine *engine_create(const char *ui_dir, const char *page, const int wid
     g->dump_dl = getenv("KRUNKNATIVE_HTML_DUMP_DL") != NULL;
     g->fb_w = width > 0 ? width : 1;
     g->fb_h = height > 0 ? height : 1;
+    g->dpr = 1.0f;
     g->vw = (float) g->fb_w;
     g->vh = (float) g->fb_h;
     css_values_set_viewport(g->vw, g->vh);
@@ -2434,15 +2441,17 @@ static void fire_resize_listener(Engine *g)
     html_ui_dispatch_listener(NULL, &ev);
 }
 
-/* Framebuffer size change; 0 when the size is unchanged. */
-static int engine_set_size(Engine *g, const int width, const int height)
+/* Framebuffer size change; 0 when the size is unchanged (force: the dpr changed). */
+static int engine_set_size_ex(Engine *g, const int width, const int height, const int force)
 {
     if (!g || width <= 0 || height <= 0) return 0;
-    if (width == g->fb_w && height == g->fb_h) return 0;
+    if (!force && width == g->fb_w && height == g->fb_h) return 0;
     g->fb_w = width;
     g->fb_h = height;
-    g->vw = (float) width;
-    g->vh = (float) height;
+    const float dpr = engine_device_pixel_ratio(g);
+    g->vw = (float) width / dpr;
+    g->vh = (float) height / dpr;
+    g->paint.device_scale = dpr;
     /* vw/vh/vmin/vmax compute to px: restyle everything when a sheet used them */
     css_values_set_viewport(g->vw, g->vh);
     const int media_changed = engine_media_update(g);
@@ -2453,8 +2462,22 @@ static int engine_set_size(Engine *g, const int width, const int height)
     g->need_layout = 1;
     paint_invalidate_all(&g->paint);
     g->need_paint = 1;
-    vlog("resize %dx%d", width, height);
+    vlog("resize %dx%d (dpr %g: %gx%g CSS px)", width, height, dpr, g->vw, g->vh);
     return 1;
+}
+
+static int engine_set_size(Engine *g, const int width, const int height)
+{
+    return engine_set_size_ex(g, width, height, 0);
+}
+
+void engine_set_device_pixel_ratio(Engine *g, float dpr)
+{
+    if (!g) return;
+    if (!(dpr > 0.0f)) dpr = 1.0f;
+    if (fabsf(dpr - engine_device_pixel_ratio(g)) < 1e-4f) return;
+    g->dpr = dpr;
+    if (engine_set_size_ex(g, g->fb_w, g->fb_h, 1) && g->sent_initial_resize) fire_resize_listener(g);
 }
 
 static void engine_apply_size(Engine *g, const int width, const int height)
@@ -2496,6 +2519,13 @@ void html_ui_backend_update(void)
         engine_video_tick(g);
     }
     if (g->observe_pending) run_after_layout(g);
+}
+
+void engine_anim_seek(Engine *g, double now_ms, double current_ms)
+{
+    if (!g) return;
+    anim_seek(&g->anim, now_ms, current_ms);
+    g->next_anim = 0.0; /* tick the animations on the coming frame */
 }
 
 void engine_set_top_layer(Engine *g, HtmlElem e)
@@ -2603,8 +2633,8 @@ void html_ui_backend_mouse_move(const double x, const double y)
 {
     Engine *g = g_engine;
     if (!g) return;
-    g->mouse_x = (float) x;
-    g->mouse_y = (float) y;
+    g->mouse_x = (float) x / engine_device_pixel_ratio(g); /* framebuffer px -> CSS px */
+    g->mouse_y = (float) y / engine_device_pixel_ratio(g);
     events_mouse_move(&g->events, g->mouse_x, g->mouse_y);
     if (g->widgets) widgets_pointer_moved(g->widgets, g->mouse_x, g->mouse_y);
     sel_drag_to(g, g->mouse_x, g->mouse_y);

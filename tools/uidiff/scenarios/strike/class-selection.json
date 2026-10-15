@@ -13,10 +13,11 @@
     "classIndex": 0,
     "menu": true,
     "preview": true,
+    "anim_seek": 800,
     "strike": {
       "screen": "CLASS_SELECTION"
     }
   },
   "frames": 3,
-  "note": "FRVR Krunker Strike 1.37.2, the mobile UI (ui/strike/, client/src/ui/strike_*.c); reference: FRVR's own client in the offline sandbox (tools/uidiff/capture-strike.js strike-class-selection: Pt(CLASS_SELECTION) on a clean stack)."
+  "note": "FRVR Krunker Strike 1.37.2, the mobile UI (ui/strike/, client/src/ui/strike_*.c); reference: FRVR's own client in the offline sandbox (tools/uidiff/capture-strike.js strike-class-selection, FINISH_ANIMS: infinite animations at currentTime 800 ms, hence state.anim_seek: Pt(CLASS_SELECTION) on a clean stack)."
 }

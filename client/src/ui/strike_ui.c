@@ -18,6 +18,7 @@
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <shared.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -526,12 +527,28 @@ int strike_ui_dom_present(void) {
     return html_dom_by_id("frvrMenuMobileHolder") != 0;
 }
 
+#define STRIKE_CSS_HEIGHT 360.0f // the reference phone viewport's height (CSS px)
+
 // :root --base-scale is .2777777778vh, or .15625vw under (max-aspect-ratio: 16/9). STOPGAP until
 // the native engine evaluates @media (the ui-e3-layout agent): set the narrow-window value inline
 // on <html>; remove this function once @media lands. The browser applies the @media rule itself.
 static void apply_viewport(void) {
-    float w = 0.0f, h = 0.0f;
-    html_dom_viewport(&w, &h, NULL);
+    float w = 0.0f, h = 0.0f, dpr = 1.0f;
+    html_dom_viewport(&w, &h, &dpr);
+#ifndef __EMSCRIPTEN__
+    // FRVR's page is a phone page: laid out on a phone's CSS viewport and drawn at its devicePixelRatio
+    // (the references: 640x360 CSS px at DPR 2, tools/uidiff/capture-strike.js). Natively the window is
+    // that phone: STRIKE_CSS_HEIGHT CSS px tall whatever its size, so the page's absolute px (body's
+    // 16px line, .material-icons 24px, 1px borders, margin-left: -2px) keep their size against its
+    // --base-scale units, as on the phone. The browser applies its own devicePixelRatio.
+    if (h > 0.0f && dpr > 0.0f) {
+        const float want = h * dpr / STRIKE_CSS_HEIGHT;
+        if (fabsf(want - dpr) > 1e-3f) {
+            html_dom_set_device_pixel_ratio(want);
+            html_dom_viewport(&w, &h, &dpr);
+        }
+    }
+#endif
     if (w <= 0.0f || h <= 0.0f || (w == S.vw && h == S.vh)) return;
     S.vw = w;
     S.vh = h;

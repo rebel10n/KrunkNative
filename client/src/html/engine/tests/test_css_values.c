@@ -537,6 +537,19 @@ static void test_shadows(void)
           feq(c.text_shadow.items[0].blur, 3) && color_is(c.text_shadow.items[1].color, 255, 255, 255, 255) && feq(c.text_shadow.items[1].y, 1));
     CHECK(apply(&c, NULL, "text-shadow", "-1px -1px 0 #202020, 1px -1px 0 #202020, -1px 1px 0 #202020, 1px 1px 0 #202020, -2px -2px 0 #202020, 2px -2px 0 #202020, -2px 2px 0 #202020, 2px 2px 0 #202020, -3px -3px 0 #202020, 3px -3px 0 #202020, -3px 3px 0 #202020, 3px 3px 0 #202020") &&
           c.text_shadow.count == 12 && feq(c.text_shadow.items[11].x, 3));
+    /* Krunker Strike's text outline (.class-selection__class-name span): 9 shadows of calc() offsets,
+     * ~260 tokens with the whitespace; a longer value must not be cut short and dropped. */
+    {
+        char outline[2048] = "";
+        static const int OFF[9][2] = {{-1, -1}, {-1, 0}, {-1, 1}, {0, -1}, {0, 0}, {0, 1}, {1, -1}, {1, 0}, {1, 1}};
+        for (int i = 0; i < 9; i++) {
+            char one[160];
+            snprintf(one, sizeof(one), "%scalc(%d * 2px) calc(%d * 2px) 0 rgba(0,0,0,.5)", i ? ", " : "", OFF[i][0], OFF[i][1]);
+            strcat(outline, one);
+        }
+        CHECK(apply(&c, NULL, "text-shadow", outline) && c.text_shadow.count == 9 &&
+              feq(c.text_shadow.items[8].x, 2) && feq(c.text_shadow.items[8].y, 2) && (color_is(c.text_shadow.items[8].color, 0, 0, 0, 128) || color_is(c.text_shadow.items[8].color, 0, 0, 0, 127)));
+    }
     CHECK(!apply(&c, NULL, "text-shadow", "inset 0 0 1px red"));
     CHECK(!apply(&c, NULL, "text-shadow", "0 0 0 0 red"));
     CHECK(apply(&c, NULL, "text-shadow", "none") && c.text_shadow.count == 0);

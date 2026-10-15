@@ -11,7 +11,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define CSS_MAX_TOKENS 256   /* per declaration; the longest shipped value (12-layer text-shadow) needs ~110 */
+/* Tokens per declaration, whitespace included (the value is tokenized before var() substitution and
+ * a longer one is cut short, i.e. dropped as invalid). Krunker Strike's stylesheet outlines its pixel
+ * text with 9 to 26 text-shadows of calc(n * var(--base-scale)) offsets: up to ~700 tokens (v10's
+ * longest, a 12-layer text-shadow, needs ~250). */
+#define CSS_MAX_TOKENS 1024
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846

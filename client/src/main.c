@@ -1540,6 +1540,17 @@ static void html_cursor_scale(GLFWwindow *window, double *x, double *y) {
     }
 }
 
+// Framebuffer px -> the page's CSS px (html_dom_viewport's devicePixelRatio: the Krunker Strike
+// page is laid out on a phone-sized viewport, strike_ui.c), what strike_touch.c's hit tests take.
+static void html_css_point(double *x, double *y) {
+    float vw, vh, dpr = 1.0f;
+    html_dom_viewport(&vw, &vh, &dpr);
+    if (dpr > 0.0f) {
+        *x /= dpr;
+        *y /= dpr;
+    }
+}
+
 // The page takes pointer input while the menu is open or the end-screen results are up.
 static int html_pointer_input(void) {
     // Krunker Strike: in game the mouse is a finger on the mobile controls (strike_touch.c)
@@ -1560,6 +1571,7 @@ static void cursor_pos_callback(GLFWwindow *window, double x, double y) {
     if (!html_pointer_input()) {
         if (strike_ui_active()) { // Krunker Strike: a finger dragging over the mobile controls
             html_cursor_scale(window, &x, &y);
+            html_css_point(&x, &y);
             strike_touch_mouse_move(glfwGetWindowUserPointer(window), (float) x, (float) y);
         }
         return;
@@ -1578,6 +1590,7 @@ static void mouse_button_callback(GLFWwindow *window, const int button, const in
         double tx, ty;
         glfwGetCursorPos(window, &tx, &ty);
         html_cursor_scale(window, &tx, &ty);
+        html_css_point(&tx, &ty);
         strike_touch_mouse_button(client, button, action, (float) tx, (float) ty);
         return;
     }

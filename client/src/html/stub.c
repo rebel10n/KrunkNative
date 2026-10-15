@@ -203,6 +203,8 @@ void html_dom_viewport(float *w, float *h, float *dpr) {
     if (dpr) *dpr = 1.0f;
 }
 
+void html_dom_set_device_pixel_ratio(const float dpr) { (void) dpr; }
+
 void html_dom_observe_resize(const HtmlElem e, const HtmlResizeFn fn, void *user) { (void) e; (void) fn; (void) user; }
 
 #else

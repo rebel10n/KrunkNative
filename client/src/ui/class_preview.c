@@ -35,12 +35,33 @@
 #define PREVIEW_CAMERA_Y 17.0f
 #define PREVIEW_CAMERA_Z (-29.0f)
 #define PREVIEW_LOOK_AT_HEIGHT 0.8f
-// Krunker Strike's menu viewer (FRVR 1.37.2 yc / mI.createCamAndOrbit, read as text): PerspectiveCamera(60)
-// at x = 15 / zoom, OrbitControls locked level (minPolar PI/2), target (0, playerHeight / 2, 0). The model
-// faces +X (yaw -PI/2: the camera side) in the menu's scene.
+// Krunker Strike's menu viewer (FRVR 1.37.2 mI, assets/index-Cz2uYXJQ.js, read as text):
+// - createCamAndOrbit: PerspectiveCamera(60, canvas aspect) at (15 / zoom, 0, 0), zoom 1, looking at
+//   mainMenuCamTarget (0, playerHeight / 2, 0); its OrbitControls (minPolarAngle PI/2, maxPolarAngle 0)
+//   clamp the polar angle to PI/2 on update(), keeping the radius: the camera ends level with the
+//   target, sqrt(15^2 + (playerHeight / 2)^2) out on +X.
+// - updatePlayer: the player is new DL(-1, ...) with init(0, 1, 0, "preview"), so updateMesh (id -1) puts
+//   the model at y = 1; crouchVal = options.crouch (Vre default true), xDire = toRad(-70), updateHeight;
+//   animate (Vre) false: no step / idle animation, the pose is static.
+// - updateHeight leans a crouched body by Strike's crouchLean, -(PI * 0.1) (v10 has 0).
+// - initLighting (lighting Vre INGAME): AmbientLight(0x97A1A8) from setup() plus DirectionalLight(0xF2F8FC,
+//   1.2) at lightDistance * (cos n, sin n sin t, sin n cos t), t = PI (0.2 - 0.5), n = 2 PI (0.25 - 0.5).
+// - addShadow: a 0x1B1B1B disc at opacity 0.2 under the feet when viewerData.showShadow (MAIN_MENU only).
 #define PREVIEW_STRIKE_FOV ((float) M_PI * 60.0f / 180.0f)
-#define PREVIEW_STRIKE_DISTANCE 14.6f
-#define PREVIEW_STRIKE_YAW (-(float) M_PI / 4.0f)
+#define PREVIEW_STRIKE_CAMERA_X 15.0f
+#define PREVIEW_STRIKE_YAW (-(float) M_PI * 70.0f / 180.0f)
+#define PREVIEW_STRIKE_PLAYER_Y 1.0f
+#define PREVIEW_STRIKE_CROUCH_LEAN (-(float) M_PI * 0.1f)
+#define PREVIEW_STRIKE_LIGHT_COLOR 0xF2F8FC
+#define PREVIEW_STRIKE_LIGHT_INTENSITY 1.2f
+// addShadow: Ir.GEOS.generateCylinder(1, 1, 1, {sides: 64, colr: 0x1B1B1B, transparent, opacity: 0.2}),
+// scale (4, 0.01, 4), moveMesh(0, 0.49, 0): the cylinder stands on its origin, so a disc of radius 4 with
+// its top at y = 0.5; the level camera above it only sees that top.
+#define PREVIEW_STRIKE_SHADOW_SIDES 64
+#define PREVIEW_STRIKE_SHADOW_RADIUS 4.0f
+#define PREVIEW_STRIKE_SHADOW_Y 0.5f
+#define PREVIEW_STRIKE_SHADOW_COLOR 0x1B1B1B
+#define PREVIEW_STRIKE_SHADOW_OPACITY 0.2f
 // scene.add(new AmbientLight(0x97A1A8)); DirectionalLight(0xF2F7FC, 0.5) at (10, 17, -10).
 #define PREVIEW_AMBIENT_COLOR 0x97A1A8
 #define PREVIEW_AMBIENT_INTENSITY 1.0f
@@ -217,6 +238,82 @@ static int preview_player_create(Client *client) {
     return 1;
 }
 
+// Krunker Strike: FRVR's viewer shadow (addShadow), shown where viewerData.showShadow is set (MAIN_MENU).
+// Its geometry, material and mesh belong to the preview (strike_shadow_free).
+static Mesh *g_strike_shadow;
+static unsigned int g_strike_shadow_vbo;
+
+static Mesh *strike_shadow_create(void) {
+    enum { SIDES = PREVIEW_STRIKE_SHADOW_SIDES };
+    vertex v[SIDES + 1];
+    unsigned int idx[SIDES * 3];
+    v[0] = (vertex) {{0.0f, PREVIEW_STRIKE_SHADOW_Y, 0.0f}, {0.5f, 0.5f}};
+    for (int i = 0; i < SIDES; i++) {
+        const float theta = 2.0f * (float) M_PI * (float) i / (float) SIDES;
+        v[1 + i] = (vertex) {{PREVIEW_STRIKE_SHADOW_RADIUS * sinf(theta), PREVIEW_STRIKE_SHADOW_Y, PREVIEW_STRIKE_SHADOW_RADIUS * cosf(theta)},
+                             {cosf(theta) * 0.5f + 0.5f, sinf(theta) * 0.5f + 0.5f}};
+        idx[i * 3 + 0] = (unsigned int) (1 + i);
+        idx[i * 3 + 1] = (unsigned int) (1 + (i + 1) % SIDES);
+        idx[i * 3 + 2] = 0;
+    }
+
+    Geometry *geometry = calloc(1, sizeof(Geometry));
+    BasicMaterial *material = basic_material_init();
+    if (!geometry || !material) {
+        free(geometry);
+        free(material);
+        return NULL;
+    }
+    glGenVertexArrays(1, &geometry->vao);
+    glGenBuffers(1, &geometry->ebo);
+    glGenBuffers(1, &g_strike_shadow_vbo);
+    glBindVertexArray(geometry->vao);
+    glBindBuffer(GL_ARRAY_BUFFER, g_strike_shadow_vbo);
+    glBufferData(GL_ARRAY_BUFFER, (long) sizeof(v), v, GL_STATIC_DRAW);
+    geometry_set_bounds(geometry, v, SIDES + 1);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, geometry->ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (long) sizeof(idx), idx, GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), NULL);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *) (3 * sizeof(float)));
+    glEnableVertexAttribArray(0);
+    glEnableVertexAttribArray(1);
+    glBindVertexArray(0);
+    geometry->index_count = SIDES * 3;
+
+    material->color = hex_to_vec(PREVIEW_STRIKE_SHADOW_COLOR);
+    material->color.w = PREVIEW_STRIKE_SHADOW_OPACITY;
+    material->color_bottom = material->color;
+    material->base.transparent = 1;
+    material->fog_enabled = 0;
+    material->use_flat_normal = 1; // a horizontal disc: (0, 1, 0)
+    return mesh_init(geometry, &material->base);
+}
+
+static void strike_shadow_free(Scene *scene) {
+    if (!g_strike_shadow) return;
+    if (scene) scene_remove_mesh(scene, g_strike_shadow);
+    Geometry *geometry = g_strike_shadow->geometry;
+    mesh_fini(g_strike_shadow); // frees the material, not the geometry
+    g_strike_shadow = NULL;
+    if (geometry) {
+        glDeleteVertexArrays(1, &geometry->vao);
+        glDeleteBuffers(1, &geometry->ebo);
+        free(geometry);
+    }
+    if (g_strike_shadow_vbo) glDeleteBuffers(1, &g_strike_shadow_vbo);
+    g_strike_shadow_vbo = 0;
+}
+
+// Shows FRVR's viewer shadow on MAIN_MENU (yc {showShadow: true}); every other viewer has none.
+static void strike_shadow_update(Scene *scene, const int strike) {
+    const int show = strike && strike_screen_top() == STRIKE_SCREEN_MAIN_MENU;
+    if (show && !g_strike_shadow && scene) {
+        g_strike_shadow = strike_shadow_create();
+        if (g_strike_shadow) scene_add_mesh(scene, g_strike_shadow);
+    }
+    if (g_strike_shadow) g_strike_shadow->visible = show;
+}
+
 // Krunker's preview loop: Te7() walks the step cycle in place, idleAnim advances.
 static void preview_animate(Player *player, int *step_dir, const float delta) {
     player->step_val += delta * PREVIEW_STEP_SPEED * (float) *step_dir;
@@ -247,9 +344,9 @@ static void preview_frame(Client *client) {
     camera->position = (vec3) {PREVIEW_CAMERA_X, PREVIEW_CAMERA_Y, PREVIEW_CAMERA_Z};
     vec3 look = target;
     if (strike) {
-        // level with the figure's centre, 0.6 units lower: the figure sits where FRVR's does in its box
-        const float mid = game_constants.player_height * 0.5f - 0.6f;
-        camera->position = (vec3) {PREVIEW_STRIKE_DISTANCE, mid, 0.0f};
+        // FRVR's orbit-clamped camera: level with (0, playerHeight / 2, 0) at the radius of (15, 0, 0)
+        const float mid = game_constants.player_height * 0.5f;
+        camera->position = (vec3) {sqrtf(PREVIEW_STRIKE_CAMERA_X * PREVIEW_STRIKE_CAMERA_X + mid * mid), mid, 0.0f};
         look = (vec3) {0.0f, mid, 0.0f};
     } else if (g_v10_mode == 1) {
         camera->position = (vec3) {PREVIEW_V10_MENU_X, PREVIEW_V10_MENU_Y, PREVIEW_V10_MENU_Z};
@@ -273,6 +370,8 @@ static void preview_frame(Client *client) {
     Player *player = preview->player;
     player->direction.x = 0.0f;
     player->direction.y = strike ? PREVIEW_STRIKE_YAW : g_v10_mode == 2 ? g_v10_xdire : PREVIEW_YAW;
+    // FRVR: classPlayer = new DL(-1, ...), init(0, 1, 0, "preview"): id -1 moves the mesh to (x, y, z)
+    player->position.y = strike ? PREVIEW_STRIKE_PLAYER_Y : 0.0f;
 }
 
 // The v10 page's pose for this frame: its window column when the canvas sits in #charPreviewSlot.
@@ -293,6 +392,11 @@ static void preview_lighting_apply(RenderLighting *saved) {
     *saved = g_render_lighting;
 
     vec3 light = {PREVIEW_LIGHT_X, PREVIEW_LIGHT_Y, PREVIEW_LIGHT_Z};
+    const int strike = strike_ui_active();
+    if (strike) { // FRVR's INGAME sun: (cos n, sin n sin t, sin n cos t)
+        const float t = (float) M_PI * (0.2f - 0.5f), n = 2.0f * (float) M_PI * (0.25f - 0.5f);
+        light = (vec3) {cosf(n), sinf(n) * sinf(t), sinf(n) * cosf(t)};
+    }
     const float length = sqrtf(light.x * light.x + light.y * light.y + light.z * light.z);
     light.x /= length;
     light.y /= length;
@@ -300,8 +404,8 @@ static void preview_lighting_apply(RenderLighting *saved) {
 
     g_render_lighting.ambient_color = hex_to_vec(PREVIEW_AMBIENT_COLOR);
     g_render_lighting.ambient_intensity = PREVIEW_AMBIENT_INTENSITY;
-    g_render_lighting.light_color = hex_to_vec(PREVIEW_LIGHT_COLOR);
-    g_render_lighting.light_intensity = PREVIEW_LIGHT_INTENSITY;
+    g_render_lighting.light_color = hex_to_vec(strike ? PREVIEW_STRIKE_LIGHT_COLOR : PREVIEW_LIGHT_COLOR);
+    g_render_lighting.light_intensity = strike ? PREVIEW_STRIKE_LIGHT_INTENSITY : PREVIEW_LIGHT_INTENSITY;
     g_render_lighting.light_direction = light; // basic.frag: direction towards the light
     g_render_lighting.enabled = 1;
     g_render_lighting.fog_enabled = 0; // the preview is not part of the map
@@ -504,9 +608,20 @@ void client_class_preview_render(Client *client) {
     const HtmlElem canvas = html_dom_by_id("classPreviewCanvas");
     if (!canvas || !preview_target(preview, width, height)) return;
 
-    preview_animate(preview->player, &preview->step_dir, delta);
+    const int strike = strike_ui_active();
+    if (!strike) preview_animate(preview->player, &preview->step_dir, delta); // FRVR's viewer: animate false
+    strike_shadow_update(preview->scene, strike);
     preview_frame(client);
+    preview->player->crouch_val = strike ? 1.0f : 0.0f; // FRVR: crouchVal = options.crouch (true)
     player_update_meshes(preview->player, 1);
+    if (strike && preview->player->mesh) {
+        // updateHeight's lean with Strike's crouchLean in place of the shared (v10) one: the lower body
+        // tilts by it and the upper body (arms, weapon) turns back by as much
+        const float lean = (PREVIEW_STRIKE_CROUCH_LEAN - game_constants.crouch_lean) * preview->player->crouch_val;
+        PlayerMesh *mesh = preview->player->mesh;
+        mesh->body_anchor->rotation.x += lean;
+        mesh->upper_body_anchor->rotation.x -= lean;
+    }
 
     // Render into the target: transparent where the model isn't, premultiplied alpha (three.js
     // WebGLRenderer({alpha: true}) on Krunker's classPreviewCanvas). Save the state touched here.
@@ -575,6 +690,7 @@ void client_class_preview_fini(Client *client) {
 
     preview_player_destroy(client);
     preview_target_free(preview);
+    strike_shadow_free(preview->scene);
 
     if (preview->scene) {
         scene_fini(preview->scene);

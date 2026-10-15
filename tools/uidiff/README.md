@@ -194,6 +194,7 @@ client_bin --render-scenario <scenario.json> <out.png>
 | `inGame` | bool | HUD visible when `inGame && !menu`; with `menu` also true = ESC pause |
 | `mapName`, `modeName`, `region`, `name`, `gameName`, `classIndex` | string / int | state glue (`#curGameInfo`, `#menuRegionLabel`, `#menuClassNameTag`, `#gameNameHolder`, class box) |
 | `anim_time` | number | animation clock (s) of the captured frame (see [anim_time](#anim_time)) |
+| `anim_seek` | number | ms: the capture frames pin every CSS animation like a Web Animations capture (`capture-strike.js` FINISH_ANIMS): finite ones and transitions finished, infinite ones at currentTime = `anim_seek`; the Krunker Strike references use 800 |
 | `hud` | object | the `hud` payload of `ui/js/hud.js`: `health, maxHealth, healthSegments, ammo, ammoMax, ammoLimit, melee, reloading, reloadPercent, timerText, kills, deaths, score, weaponName, weaponIcon, classIndex, scoped, fps, aim, spread, scoreboard, ping, loadout[{name,icon,melee}], loadoutIndex` |
 | `chat` | array of `{text, color}` | `#chatList` rows (server messages are `#fc03ec`); a row may carry `name`/`msg` for player lines |
 | `chatOpen`, `chatInput` | bool, string | `#chatInput` focused with the given text |

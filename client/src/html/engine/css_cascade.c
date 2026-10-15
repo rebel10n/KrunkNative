@@ -18,7 +18,7 @@
  * a 4-bit field of the sort key, so sheets past the 14th author sheet (e.g. a page with 14 <link> /
  * <style> sheets plus runtime html_ui_add_stylesheet ones) were silently dropped from the cascade. */
 #define MAX_SHEETS 64
-#define MAX_VAR_TOKENS 256
+#define MAX_VAR_TOKENS 1024 /* a var()-substituted value: as long as CSS_MAX_TOKENS (css_values.c) allows */
 
 typedef struct SheetSet {
     CssSheet *sheets[MAX_SHEETS];

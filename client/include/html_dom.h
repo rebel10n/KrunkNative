@@ -125,6 +125,11 @@ int      html_dom_is_shown(HtmlElem);
 float    html_dom_offset_width(HtmlElem);
 float    html_dom_offset_height(HtmlElem);
 void     html_dom_viewport(float *w, float *h, float *dpr);          // innerWidth/innerHeight/devicePixelRatio
+// Native engine: the page's devicePixelRatio (CSS px = framebuffer px / dpr; 1 by default, the
+// framebuffer is laid out 1:1). A page made for phones (the Krunker Strike page, strike_ui.c) is
+// laid out on a phone-sized CSS viewport and drawn scaled up, as a phone browser does. No-op on the
+// web, where the browser's devicePixelRatio applies.
+void     html_dom_set_device_pixel_ratio(float dpr);
 typedef void (*HtmlResizeFn)(HtmlElem, void *user);
 void     html_dom_observe_resize(HtmlElem, HtmlResizeFn fn, void *user); // ResizeObserver-equivalent (coalesced per frame)
 HtmlElem html_dom_element_at(float x, float y);                     // document.elementFromPoint (CSS px; pointer-events aware); 0 = none

@@ -432,7 +432,7 @@ static void class_preview_canvas(const HtmlElem root, const char *box, const flo
 void strike_menu_render(const StrikeScreen s, const HtmlElem root) {
     switch (s) {
     case STRIKE_SCREEN_MAIN_MENU:
-        class_preview_canvas(root, "canvas", 0.0f, 22.0f, 100.0f, 78.0f); // MAIN_MENU: FRVR's canvas, the figure below the header
+        class_preview_canvas(root, "canvas", 0.0f, 0.0f, 100.0f, 100.0f); // MAIN_MENU: canvas{width:100%;height:100%} of the screen
         fill_account(root);
         break;
     case STRIKE_SCREEN_TAP_TO_PLAY:
@@ -441,7 +441,9 @@ void strike_menu_render(const StrikeScreen s, const HtmlElem root) {
     case STRIKE_SCREEN_CLASS_SELECTION:
         M.previewed = current_class(); // _r = loadout.classIndex
         class_selection_fill(root);
-        class_preview_canvas(root, ".class-selection__character-holder", 33.0f, 22.0f, 34.0f, 78.0f); // the centre column
+        // FRVR's capture: the holder's canvas is the screen's size too (1280x720 at DPR 2), the figure
+        // where MAIN_MENU has it
+        class_preview_canvas(root, ".class-selection__character-holder", 0.0f, 0.0f, 100.0f, 100.0f);
         break;
     case STRIKE_SCREEN_SETTINGS:
         if (M.settings_tab != 0) settings_tab(root, M.settings_tab);

@@ -14,6 +14,11 @@
 //   - the engine's animation/timer clock and the HUD clock follow a virtual 60 Hz clock
 //     (engine_set_clock_override / hud_ui_set_clock), so the capture is deterministic;
 //   - html_storage (settings, class index, name) lives in a temporary XDG_CONFIG_HOME.
+//   - state.anim_seek (ms): the capture frames pin the page's animations the way a Web Animations
+//     capture does (tools/uidiff/capture-strike.js FINISH_ANIMS): finite animations and transitions
+//     finished, infinite ones at currentTime = anim_seek (engine_anim_seek). The Krunker Strike
+//     references were taken like that, at 800 ms, so their animations' phases do not depend on
+//     when each one started.
 //
 // Frame sequences (top-level `anim_times` [ms, ...] + `anim_origin`): instead of one capture,
 // <out>.<t>.png is written at origin + t for every t, on the same virtual clock, so animation
@@ -141,6 +146,8 @@ typedef struct {
     int w, h, frames;
     double anim_time_s;
     double after_ms;      // state.after_ms > 0: capture exactly this long after the state was applied
+    double anim_seek_ms;  // state.anim_seek >= 0: the capture frames seek the animations there (engine_anim_seek)
+    int seeking;          // the capture frames are running
     int preview;
 
     int bg_is_color;
@@ -297,7 +304,7 @@ static int find_map(const char *name, char *out, const size_t n) {
 static void warn_unknown_keys(void) {
     static const char *const known[] = {
         "menu", "window", "settingsTab", "connected", "ready", "inGame", "mapName", "modeName", "region", "name",
-        "gameName", "classIndex", "anim_time", "hud", "chat", "chatOpen", "chatInput", "killfeed", "scoreboard",
+        "gameName", "classIndex", "anim_time", "anim_seek", "hud", "chat", "chatOpen", "chatInput", "killfeed", "scoreboard",
         "dead", "killcard", "endscreen", "hit", "preview", "scrollbars", "mobile", "page", "pageQuery", "pageActions",
         "clientChrome", "settingsView", "windowActions", "after_ms", "customMap", "pose", "spectate", "mapFile", "official",
         "account", // WP-E part 2c: a stand-in logged-in account (account_ui_scenario)
@@ -394,6 +401,7 @@ int ui_scenario_begin(const char *scenario_path, const char *out_png) {
     // one-shot animations (the death screen's 1.5 s slide-in): the reference was taken a fixed
     // time after the event, so the capture follows the state by that much instead of the cycle
     g_sc.after_ms = obj_num(g_sc.state, "after_ms", 0.0);
+    g_sc.anim_seek_ms = obj_num(g_sc.state, "anim_seek", -1.0);
     g_sc.preview = st_bool("preview", 0);
     // state.mobile: the phone layout (v10's CONTROLS.isMobile: #mobileUI, the joystick, lockless play)
     if (st_has("mobile")) ui_mobile_force(st_bool("mobile", 0));
@@ -657,6 +665,8 @@ void ui_scenario_draw_background(void) {
 static void scenario_frame(Client *client, const double clock_ms, const int present) {
     g_sc.clock_ms = clock_ms;
     engine_set_clock_override(clock_ms);
+    // state.anim_seek: before this frame's engine update ticks the animations (FINISH_ANIMS)
+    if (g_sc.seeking && g_sc.anim_seek_ms >= 0.0) engine_anim_seek(engine_get(), clock_ms, g_sc.anim_seek_ms);
     hud_ui_set_clock(clock_ms / 1000.0);
     gltf_set_clock_override(clock_ms / 1000.0);
     const double now_s = clock_ms / 1000.0;
@@ -1292,6 +1302,7 @@ int ui_scenario_run(Client *client) {
     engine_set_clock_override(g_sc.clock_ms);
     hud_ui_set_clock(g_sc.clock_ms / 1000.0);
     apply_timed(client, capture_ms);
+    g_sc.seeking = 1;
     for (int i = 0; i < g_sc.frames; i++) {
         const int last = i == g_sc.frames - 1;
         // windowScroll clamps against the scroll range, which is only final once the window has

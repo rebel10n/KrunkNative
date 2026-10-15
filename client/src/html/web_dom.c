@@ -1115,6 +1115,9 @@ void html_dom_viewport(float *w, float *h, float *dpr) {
     if (dpr) *dpr = v[2];
 }
 
+// The browser's devicePixelRatio applies on the web (native engine only).
+void html_dom_set_device_pixel_ratio(const float dpr) { (void) dpr; }
+
 // ---- resize observers: the shim's ResizeObserver calls kn_ui_resize_observed(id); the ids
 // are queued and the C callbacks run from html_ui_backend_update() (one per element per frame).
 

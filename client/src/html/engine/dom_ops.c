@@ -727,7 +727,12 @@ float html_dom_offset_height(const HtmlElem e)
 void html_dom_viewport(float *w, float *h, float *dpr)
 {
     engine_viewport(engine_get(), w, h);
-    if (dpr) *dpr = 1.0f;
+    if (dpr) *dpr = engine_device_pixel_ratio(engine_get());
+}
+
+void html_dom_set_device_pixel_ratio(const float dpr)
+{
+    engine_set_device_pixel_ratio(engine_get(), dpr);
 }
 
 HtmlElem html_dom_element_at(const float x, const float y)

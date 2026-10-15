@@ -997,6 +997,63 @@ static void test_shake(void)
     anim_remove_elem(&g_sys, e);
 }
 
+/* anim_seek: tools/uidiff/capture-strike.js FINISH_ANIMS (document.getAnimations(): finite ones
+ * finish(), infinite ones pause() at currentTime 800) for still captures. */
+static void test_seek(void)
+{
+    CssComputed base, out;
+    const CssComputed *r;
+    const double t0 = 5000.0, now = 9123.0;
+
+    /* infinite shake 0.5s, 0.1s delay: currentTime 350 ms = 0.25 s into the 0.5 s cycle = 50% (-8px) */
+    CssComputed inf;
+    base_init(&inf);
+    inf.animations[0] = anim_decl("shake", 0.5f, 0.1f, INFINITY, timing_kind(CSS_TIMING_EASE), CSS_ANIM_DIRECTION_NORMAL, CSS_ANIM_FILL_NONE);
+    inf.animation_count = 1;
+    HtmlElem ei = 140;
+    anim_update_elem(&g_sys, ei, &inf, t0);
+
+    /* finite shake: finish() leaves it after its end (fill none: no effect) */
+    base_init(&base);
+    base.animations[0] = anim_decl("shake", 0.5f, 0, 1, timing_kind(CSS_TIMING_EASE), CSS_ANIM_DIRECTION_NORMAL, CSS_ANIM_FILL_NONE);
+    base.animation_count = 1;
+    HtmlElem ef = 141;
+    anim_update_elem(&g_sys, ef, &base, t0);
+
+    /* a running opacity transition: finish() shows the end value (the base) */
+    CssComputed tr;
+    base_init(&tr);
+    tr.transitions[0] = trans_decl(CSS_PROP_OPACITY, 10.0f, 0, timing_kind(CSS_TIMING_LINEAR));
+    tr.transition_count = 1;
+    HtmlElem et = 142;
+    anim_update_elem(&g_sys, et, &tr, t0);
+    tr.opacity = 0.0f;
+    anim_update_elem(&g_sys, et, &tr, t0);
+    CHECK(sample(et, &tr, &out, t0 + 1000, &r) && r->opacity > 0.5f);
+
+    anim_seek(&g_sys, now, 350.0);
+    dirty_reset();
+    anim_tick(&g_sys, now);
+    CHECK(g_dirty.calls >= 3); /* every seeked element is reported */
+
+    CHECK(sample(ei, &inf, &out, now, &r));
+    CHECK(r->transform.count == 1);
+    CHECK_NEAR(r->transform.ops[0].tx.px, -8, 1e-4);
+    CHECK(!sample(ef, &base, &out, now, &r) && r->transform.count == 0);
+    CHECK(!sample(et, &tr, &out, now, &r) && r->opacity == 0.0f);
+
+    /* a paused infinite animation keeps the seeked time */
+    inf.animations[0].play_state = CSS_ANIM_PLAY_PAUSED;
+    anim_update_elem(&g_sys, ei, &inf, now);
+    anim_seek(&g_sys, now, 100.0 + 125.0); /* 25%: 6 - 12 * ease(0.5) */
+    CHECK(sample(ei, &inf, &out, now + 4000.0, &r));
+    CHECK_NEAR(r->transform.ops[0].tx.px, 6 - 12 * ref_ease(0.5), 1e-4);
+
+    anim_remove_elem(&g_sys, ei);
+    anim_remove_elem(&g_sys, ef);
+    anim_remove_elem(&g_sys, et);
+}
+
 static void test_fill_and_negative_delay(void)
 {
     /* .terminalEffect: typewriter 4s steps(44) 1s 1 normal both, width 0 -> 25.25em */
@@ -2288,6 +2345,7 @@ int main(int argc, char **argv)
     test_rainbow();
     test_shake();
     test_fill_and_negative_delay();
+    test_seek();
     test_unknown_name();
     test_transition_all();
     test_transition_transform();

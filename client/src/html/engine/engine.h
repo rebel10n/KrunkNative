@@ -44,6 +44,10 @@ Widgets *engine_widgets(Engine *g);
 EventSystem *engine_events(Engine *g);
 /* Viewport in CSS px (== framebuffer px, devicePixelRatio 1). */
 void engine_viewport(Engine *g, float *w, float *h);
+/* devicePixelRatio (html_dom_set_device_pixel_ratio): the viewport is the framebuffer / dpr CSS px,
+ * painted at dpr device px per CSS px; pointer input (framebuffer px) is divided by it. */
+float engine_device_pixel_ratio(Engine *g);
+void engine_set_device_pixel_ratio(Engine *g, float dpr);
 
 /* Brings computed styles up to date (cascade + animation sync). */
 void engine_flush_style(Engine *g);
@@ -85,6 +89,9 @@ void engine_set_lang(const char *lang);
  * it for deterministic renders; ms < 0 returns to glfwGetTime(). */
 double engine_now_ms(void);
 void engine_set_clock_override(double ms);
+/* Still captures (client_bin --render-scenario `anim_seek`): anim_seek() over the page's animations
+ * for the frame at clock now_ms: finite ones and transitions finished, infinite ones at current_ms. */
+void engine_anim_seek(Engine *g, double now_ms, double current_ms);
 // 1: scrollbars take no space and are not painted (matches headless Chromium --hide-scrollbars; uidiff only).
 void engine_set_hide_scrollbars(int hide);
 

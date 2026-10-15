@@ -2298,6 +2298,29 @@ int anim_has_active(const AnimSystem *sys, double now_ms)
     return !isinf(anim_next_wakeup(sys, now_ms));
 }
 
+void anim_seek(AnimSystem *sys, double now_ms, double current_ms)
+{
+    for (uint32_t ei = 0; ei < sys->elem_count; ei++) {
+        AnimElem *rec = sys->elems[ei];
+        for (uint8_t i = 0; i < rec->anim_count; i++) {
+            AnimRunning *r = &rec->anims[i];
+            const double active = running_active_s(r);
+            /* local (active) time: finish() puts currentTime at delay + active duration */
+            const double local = isinf(active) ? current_ms / 1000.0 - r->delay_s : active;
+            if (r->play_state == CSS_ANIM_PLAY_PAUSED)
+                r->pause_local_s = local;
+            else
+                r->created_ms = now_ms - local * 1000.0 - sec_to_ms(r->delay_s);
+            r->last_phase = PHASE_NONE; /* the next tick reports the element */
+            r->last_step = -1;
+        }
+        for (uint32_t i = 0; i < rec->trans_count; i++) {
+            AnimTransition *t = &rec->trans[i];
+            t->start_ms = t->end_ms = now_ms - 1.0; /* ended: anim_tick drops it, the base value shows */
+        }
+    }
+}
+
 void anim_remove_elem(AnimSystem *sys, HtmlElem elem)
 {
     uint32_t idx = map_find(sys, elem);

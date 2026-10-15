@@ -373,6 +373,13 @@ double anim_next_wakeup(const AnimSystem *sys, double now_ms);
 
 /* Element removed from the document: forget its state. */
 void anim_remove_elem(AnimSystem *sys, HtmlElem elem);
+
+/* Pins every running animation and transition for a still capture, as a Web Animations client
+ * does with document.getAnimations() (tools/uidiff/capture-strike.js FINISH_ANIMS): an animation
+ * with a finite active duration and every transition is finish()ed; an infinite animation gets
+ * currentTime = current_ms (its delay included), paused or not.  now_ms is the clock of the next
+ * anim_tick, which reports the changed elements. */
+void anim_seek(AnimSystem *sys, double now_ms, double current_ms);
 /* Diagnostics: number of elements with state, running animations and
  * transitions (any pointer may be NULL). */
 void anim_stats(const AnimSystem *sys, uint32_t *elems, uint32_t *animations, uint32_t *transitions);
