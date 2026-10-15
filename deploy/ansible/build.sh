@@ -35,19 +35,29 @@ for codename in "${codenames[@]}"; do
             export DEBIAN_FRONTEND=noninteractive
             # bullseye is EOL: the deb.debian.org security pocket 404s. Use archive.debian.org
             # (as com.clara does); security + updates too, since the image already has them.
+            # deb.debian.org still carries bullseye main (11.11) as a second source: apt fetches a
+            # package version from the next source when one 404s (archive.debian.org returned 404
+            # for g++_10.2.1-1 for ~10 min on 2026-10-15, runs 38688156771 / 38688711980).
             if grep -q bullseye /etc/os-release; then
                 rm -f /etc/apt/sources.list.d/*
                 printf "%s\n" "deb http://archive.debian.org/debian bullseye main" \
+                    "deb http://deb.debian.org/debian bullseye main" \
                     "deb http://archive.debian.org/debian bullseye-updates main" \
                     "deb http://archive.debian.org/debian-security bullseye-security main" > /etc/apt/sources.list
                 echo "Acquire::Check-Valid-Until \"false\";" > /etc/apt/apt.conf.d/99archive
             fi
-            apt-get update -qq >/dev/null
+            echo "Acquire::Retries \"5\";" > /etc/apt/apt.conf.d/80retries
             # libsqlite3-dev / libmariadb-dev: store adapters are AUTO (built when found);
             # libhiredis-dev: the optional Redis hot tier of kn_brain (KNSVC_REDIS, doc/backend.md 3.11).
-            apt-get install -y -qq --no-install-recommends cmake ninja-build gcc g++ libc6-dev make \
-                pkg-config libssl-dev libpq-dev libsqlite3-dev libmariadb-dev libcrypt-dev libcurl4-openssl-dev \
-                libhiredis-dev python3 >/dev/null
+            # Up to three tries, a fresh index each: a mirror mid-sync 404s files its index still lists.
+            for try in 1 2 3; do
+                if apt-get update -qq >/dev/null && apt-get install -y -qq --no-install-recommends cmake ninja-build gcc g++ libc6-dev make \
+                    pkg-config libssl-dev libpq-dev libsqlite3-dev libmariadb-dev libcrypt-dev libcurl4-openssl-dev \
+                    libhiredis-dev python3 >/dev/null; then break; fi
+                [ "$try" -lt 3 ] || exit 100
+                echo "apt failed (try $try), retrying in 30 s" >&2
+                sleep 30
+            done
             cmake -S /src -B /build -G Ninja -DCMAKE_BUILD_TYPE=Release \
                 -DKRUNKNATIVE_HTML_ENGINE=OFF -DGLFW_BUILD_X11=OFF -DGLFW_BUILD_WAYLAND=OFF $KN_CMAKE_ARGS >/build/configure.log
             cmake --build /build --target $TARGETS

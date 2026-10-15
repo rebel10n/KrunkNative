@@ -18,19 +18,20 @@ typedef struct {
     float speed;
 } ExpectedClass;
 
-// Copied from Krunker v7.1.4 src/data/classes.js (v7 changes: Hunter speed 1.05 -> 1.0, Run N Gun
-// HP 100 -> 90, Spray N Pray HP 170 -> 180 and speed 0.95 -> 0.9, Rocketeer gets a secondary, Agent
-// HP 100 -> 110, Trooper speed 1.0 -> 0.9; new Survivor and Infiltrator).
+// Krunker v10.0.2's class table (shared/src/rules/v10/classes_v10.c), v7.1.4 src/data/classes.js
+// where v10 kept it (v7 changes: Hunter speed 1.05 -> 1.0, Spray N Pray speed 0.95 -> 0.9, Rocketeer
+// gets a secondary, Trooper speed 1.0 -> 0.9; new Survivor and Infiltrator). v10.0.2 moved three
+// healths back from v7.1.4's: Run N Gun 90 -> 100, Spray N Pray 180 -> 170, Agent 110 -> 105.
 static const ExpectedClass expected_classes[] = {
     {"Triggerman", 1, 1, 0, 100, 6, 0.1f, 1.05f},
     {"Hunter", 0, 1, 0, 60, 5, 0.1f, 1.0f},
-    {"Run N Gun", 3, 0, 1, 90, 6, 0.1f, 1.18f},
-    {"Spray N Pray", 6, 0, 0, 180, 7, 0.05f, 0.9f},
+    {"Run N Gun", 3, 0, 1, 100, 6, 0.1f, 1.18f},
+    {"Spray N Pray", 6, 0, 0, 170, 7, 0.05f, 0.9f},
     {"Vince", 5, 1, 0, 90, 6, 0.1f, 1.0f},
     {"Detective", 4, 0, 0, 100, 6, 0.1f, 1.0f},
     {"Marksman", 7, 1, 0, 90, 6, 0.1f, 1.0f},
     {"Rocketeer", 8, 1, 0, 130, 7, 0.1f, 0.86f},
-    {"Agent", 9, 0, 1, 110, 6, 0.1f, 1.2f},
+    {"Agent", 9, 0, 1, 105, 6, 0.1f, 1.2f},
     {"Runner", 12, 0, 1, 120, 6, 0.2f, 1.0f},
     {"Deagler", 10, 0, 0, 60, 5, 0.1f, 1.0f},
     {"Bowman", 13, 1, 0, 100, 6, 0.1f, 1.0f},
