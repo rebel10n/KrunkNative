@@ -1090,6 +1090,16 @@ static int net_chat_list_account_bans(void *user, int *out, const int max) {
     return accounts_list_account_bans(out, max);
 }
 
+static int net_chat_kpd_officer(void *user, const int requester, const char *name, const int on) {
+    (void) user;
+    return accounts_kpd_officer(requester, name, on);
+}
+
+static int net_chat_kpd_apps(void *user, const int requester) {
+    (void) user;
+    return accounts_kpd_apps(requester);
+}
+
 ChatCommandHost *net_chat_host(void) {
     g_chat_host.game = &g_server->game;
     g_chat_host.perms = g_server->config.perms;
@@ -1111,6 +1121,8 @@ ChatCommandHost *net_chat_host(void) {
     // KrunkNative `class`: the offline sandbox only, until a live server's path is verified (a mid-life switch
     // sends SPAWN to every client; the online clients' input bookkeeping is not exercised here)
     g_chat_host.class_switched = sandbox_running() ? net_chat_class_switched : NULL;
+    g_chat_host.kpd_officer = net_chat_kpd_officer;   // KrunkNative: /kpd <account> on|off (kn_brain)
+    g_chat_host.kpd_apps = net_chat_kpd_apps;         // KrunkNative: /kpd apps
     return &g_chat_host;
 }
 
@@ -1819,6 +1831,7 @@ int net_handle_packet(ClientConnection *client, const NetPacket *packet) {
             else if (subtype == NET_EXT_ADMIN_ACTION) votekick_handle_admin(client, body, body_length); // ADMIN_ACTIONS (votekick.c)
             else if (subtype == NET_EXT_KPD_CALL) votekick_handle_kpd(client, body, body_length);        // "kpd" (votekick.c)
             else if (subtype == NET_EXT_KPD_RATE) votekick_handle_kpd_rate(client, body, body_length);   // "rkpd" (votekick.c)
+            else if (subtype == NET_EXT_KPD_APPLY) votekick_handle_kpd_apply(client, body, body_length); // "kpdA" (votekick.c)
             break;
         }
         default:

@@ -20,6 +20,7 @@
 #define KPD_AUTO_TIME_S 60.0f      // config.kpdAutoTime
 #define KPD_WATCH_TIME_S 10.0f     // config.kpdWatchTime: an officer watches this long before the verdict counts
 #define KPD_CASE_TIME_S 600.0f     // KrunkNative: an officer joining later than this after the call gets no case
+#define KPD_APPLY_LVL 50           // v10 kpdSubmit: level 50 to apply to the K.P.D
 
 void votekick_init(Game *game);   // hooks.vote_kick_expired, clears the lists (a new server / sandbox)
 void votekick_handle(ClientConnection *client, const uint8_t *body, uint16_t length); // NET_EXT_VOTE_KICK
@@ -32,11 +33,14 @@ void votekick_send_state(const ClientConnection *to); // the running vote to a (
 // NET_EXT_KPD_CALL: the rules (level, the target, rate limits), then accounts_kpd_request
 void votekick_handle_kpd(ClientConnection *client, const uint8_t *body, uint16_t length);
 // K.P.D officers (moderator / DEV accounts, v10 isMod / isDeputy): one who joins a lobby with an open
-// call gets the case (NET_EXT_KPD_DATA, v10 startGame kpdData); its verdict (NET_EXT_KPD_RATE, "rkpd")
-// goes to kn_brain (kpd_rate: the call's status / rating). votekick_kpd_recorded: the call's id.
+// call gets the case (NET_EXT_KPD_DATA, v10 startGame kpdData), and so does an officer already in the
+// lobby with no open case when a call comes in (votekick_handle_kpd; not its own call). One officer per
+// case; a rated case frees the officer for the next. Its verdict (NET_EXT_KPD_RATE, "rkpd") goes to
+// kn_brain (kpd_rate: the call's status / rating). votekick_kpd_recorded: the call's id.
 void votekick_officer_joined(const ClientConnection *client);
 void votekick_handle_kpd_rate(ClientConnection *client, const uint8_t *body, uint16_t length);
 void votekick_handle_admin(ClientConnection *client, const uint8_t *body, uint16_t length); // NET_EXT_ADMIN_ACTION (DEV kick / ban)
+void votekick_handle_kpd_apply(ClientConnection *client, const uint8_t *body, uint16_t length); // NET_EXT_KPD_APPLY ("kpdA")
 void votekick_kpd_recorded(int suspect_id, int64_t call_id);
 
 void votekick_kpd_reply(const ClientConnection *to, uint8_t code, uint8_t status, const char *message, const char *name,

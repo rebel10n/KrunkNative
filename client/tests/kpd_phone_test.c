@@ -10,6 +10,12 @@
 //   * a new round (INIT: hud_votekick_reset) and a lost session (hud_votekick_on_session_lost) end a
 //     call and cancel its timer; a second callPolice while a call runs sends nothing.
 //   * with no socket (and not offline) nothing is sent: the phone is never raised.
+// The officer's side runs here too (policeRes codes 1..3 and the verdict panel):
+//   * a list in pages (name "page/pages") is joined and rendered into #kpdCalls with the last page;
+//     a list for another tab than the one on show is ignored; v10's call order and rating colours;
+//     the Stats tab's Range / Tag Count table
+//   * kpdSubmit sends one "kpdA"; its answer (code 6) shows the success or the error popup
+//   * [Y] twice (kpdVoteY) tags the case: one "rkpd" 1; no case or not spectating: the key does nothing
 #include <ui_logic.h>
 #include <client.h>
 #include <html_dom.h>
@@ -82,16 +88,24 @@ static void advance(const double ms) {
 // ------------------------------------------------------------------ page (DOM) stubs
 #define ELEM_PHONE 1
 #define ELEM_VOTE 2
+#define ELEM_KPD_CALLS 3
+static char *g_kpd_calls_html; // #kpdCalls' innerHTML (NULL: never set)
+static int g_kpd_tab_shown;    // ui_loadout_kpd_tab()
 static char g_phone_margin[32] = "-700px"; // the stylesheet's #phoneImg default is hidden (the INIT state)
 
 HtmlElem html_dom_by_id(const char *id) {
     if (!strcmp(id, "phoneImg")) return ELEM_PHONE;
     if (!strcmp(id, "voteToKick")) return ELEM_VOTE;
+    if (!strcmp(id, "kpdCalls")) return ELEM_KPD_CALLS;
     return 0;
 }
 HtmlElem html_dom_root(void) { return 0; }
 int html_dom_query_all(HtmlElem root, const char *selector, HtmlElem *out, int max) { (void) root; (void) selector; (void) out; (void) max; return 0; }
-void html_dom_set_html(HtmlElem e, const char *html) { (void) e; (void) html; }
+void html_dom_set_html(HtmlElem e, const char *html) {
+    if (e != ELEM_KPD_CALLS) return;
+    free(g_kpd_calls_html);
+    g_kpd_calls_html = strdup(html ? html : "");
+}
 void html_dom_set_attr(HtmlElem e, const char *name, const char *value) { (void) e; (void) name; (void) value; }
 void html_dom_set_display(HtmlElem e, const char *value) { (void) e; (void) value; }
 void html_dom_set_style(HtmlElem e, const char *prop, const char *value) {
@@ -133,19 +147,33 @@ void ui_loadout_clear_pops(void) { g_popups_cleared++; }
 const AccountInfo *account_get(void) { return NULL; }
 int game_config_is_custom(const Game *g) { (void) g; return 0; }
 int servers_ui_join_game(const char *game_id) { (void) game_id; return 0; }
-int spectate_active(void) { return 0; }
+static int g_spectating;
+int spectate_active(void) { return g_spectating; }
 int spectate_focused_uid(void) { return -1; }
 void spectate_focus_player(Client *client, int uid, int quiet_auto) { (void) client; (void) uid; (void) quiet_auto; }
-MenuUi *menu_ui(void) { return NULL; }
+static MenuUi g_menu; // the player list is not open (refresh_player_list)
+MenuUi *menu_ui(void) { return &g_menu; }
 void menu_show_window(int id, int force) { (void) id; (void) force; }
+int ui_loadout_kpd_tab(void) { return g_kpd_tab_shown; }
+void ui_loadout_switch_kpd_tab(int tab) { g_kpd_tab_shown = tab; }
+static int g_apply_results, g_apply_ok;
+static char g_apply_text[96];
+void ui_loadout_kpd_apply_result(int ok, const char *text) {
+    g_apply_results++;
+    g_apply_ok = ok;
+    snprintf(g_apply_text, sizeof(g_apply_text), "%s", text ? text : "");
+}
 
 // The packets the client sends: the count, and the last one's subtype
-static int g_sent, g_last_sub;
+static int g_sent, g_last_sub, g_last_byte;
 void client_net_send(Client *client, NetPacketType type, const void *payload, uint16_t length) {
     (void) client;
     uint16_t sub = 0, body_len = 0;
     const uint8_t *body = NULL;
-    if (type == NET_PACKET_EXT && net_ext_unpack(payload, length, &sub, &body, &body_len)) g_last_sub = sub;
+    if (type == NET_PACKET_EXT && net_ext_unpack(payload, length, &sub, &body, &body_len)) {
+        g_last_sub = sub;
+        g_last_byte = body_len ? body[0] : -1;
+    }
     g_sent++;
 }
 
@@ -310,6 +338,98 @@ static void case_scenario_phone(void) {
     CHECK(!phone_up() && live_timers() == 0, "the capture hook drops it again");
 }
 
+static void list_page(Client *client, const uint8_t code, const char *page, const char *json) {
+    NetKpdResponsePacket r;
+    memset(&r, 0, sizeof(r));
+    r.code = code;
+    r.status = NET_KPD_REPORTED;
+    snprintf(r.name, sizeof(r.name), "%s", page);
+    hud_votekick_on_kpd(client, &r, json, strlen(json));
+}
+
+static void case_officer_list_pages(void) {
+    reset_world();
+    Client *c = make_client(0);
+    free(g_kpd_calls_html);
+    g_kpd_calls_html = NULL;
+    g_kpd_tab_shown = 0; // Active Calls
+    list_page(c, 1, "1/2", "[{\"can\":\"rep1\",\"con\":\"susA\",\"gst\":0,\"gco\":\"NODE:a1\",\"typ\":0,\"jop\":0,\"jor\":3}]");
+    CHECK(!g_kpd_calls_html, "page 1 of 2 renders nothing yet");
+    list_page(c, 1, "2/2", "[{\"can\":\"rep2\",\"con\":\"susB\",\"gst\":0,\"gco\":\"NODE:b2\",\"typ\":1,\"jop\":5,\"jor\":5}]");
+    const char *h = g_kpd_calls_html ? g_kpd_calls_html : "";
+    CHECK(strstr(h, "susA") && strstr(h, "susB") && strstr(h, "policeJoin('NODE:a1')") && strstr(h, "policeJoin('NODE:b2')"),
+          "the last page renders both pages' calls with their Join: %s", h);
+    CHECK(strstr(h, "susB") < strstr(h, "susA"), "v10's order: the ranked call first");
+    CHECK(strstr(h, "[ranked] rep2") && strstr(h, "color:#fc3232'>0/3") && strstr(h, "color:#63de26'>5/5"),
+          "v10's type tag and rating colours: %s", h);
+    CHECK(strstr(h, "<span class='callRegion'>NODE</span>"), "the Info column's server (gco before ':')");
+    list_page(c, 2, "", "[{\"modn\":\"m\",\"htag\":1,\"hckn\":\"x\"}]");
+    CHECK(g_kpd_calls_html && !strstr(g_kpd_calls_html, "Moderator"), "a Ban Logs answer while Active Calls shows is ignored");
+    list_page(c, 1, "", "[]");
+    CHECK(g_kpd_calls_html && !strcmp(g_kpd_calls_html, "No Active Distress Calls"), "no calls: %s", g_kpd_calls_html);
+    g_kpd_tab_shown = 2; // Stats
+    list_page(c, 3, "", "[{\"1dayEntries\":2,\"alltimeEntries\":7}]");
+    h = g_kpd_calls_html ? g_kpd_calls_html : "";
+    CHECK(strstr(h, "Tag Count") && strstr(h, "1day</span></td><td><span style='color:#858585'>2<") &&
+              strstr(h, "alltime</span></td><td><span style='color:#858585'>7<"), "the Stats table: %s", h);
+    g_kpd_tab_shown = 0;
+    g_sent = 0;
+    hud_votekick_kpd_request(c, 1);
+    CHECK(g_sent == 1 && g_last_sub == NET_EXT_KPD_CALL && g_last_byte == 1, "switchKPDTab(0): one \"kpd\" tab 1 request");
+    c->net_socket = -1;
+    hud_votekick_kpd_request(c, 1);
+    CHECK(g_sent == 1 && g_kpd_calls_html && !strcmp(g_kpd_calls_html, "Not connected to a server"),
+          "no session: nothing sent, the list says why (%s)", g_kpd_calls_html);
+    free(c);
+}
+
+static void vote(Client *client, const int yes) { hud_votekick_kpd_key(client, yes); } // kpdVoteY / kpdVoteN
+
+static void case_verdict_keys(void) {
+    reset_world();
+    Client *c = make_client(0);
+    c->net_client_id = 4;
+    g_spectating = 1;
+    vote(c, 1);
+    CHECK(g_sent == 0, "no case: Y sends nothing");
+    const NetKpdDataPacket d = {.sus = 9, .caller = 3};
+    hud_votekick_on_kpd_data(c, &d);
+    g_spectating = 0;
+    vote(c, 1);
+    CHECK(g_sent == 0, "not spectating: Y sends nothing");
+    g_spectating = 1;
+    vote(c, 1); // "Are you 100% sure?"
+    CHECK(g_sent == 0, "the first YES asks again");
+    vote(c, 1); // tagged
+    CHECK(g_sent == 1 && g_last_sub == NET_EXT_KPD_RATE && g_last_byte == 1, "the second YES sends rkpd 1 (%d %#x %d)", g_sent, g_last_sub, g_last_byte);
+    vote(c, 0);
+    CHECK(g_sent == 1, "the case is submitted: no second verdict");
+    hud_votekick_on_kpd_reset(c); // "kpdf": watch longer, the verdict is open again
+    vote(c, 0);
+    CHECK(g_sent == 2 && g_last_sub == NET_EXT_KPD_RATE && g_last_byte == 0, "after kpdf, NO sends rkpd 0");
+    g_spectating = 0;
+    free(c);
+}
+
+// kpdSubmit's "kpdA" and its answer (policeRes code 6)
+static void case_application(void) {
+    reset_world();
+    Client *c = make_client(0);
+    g_apply_results = 0;
+    hud_votekick_kpd_apply(c, "cop#1", "I hunt hackers");
+    CHECK(g_sent == 1 && g_last_sub == NET_EXT_KPD_APPLY && g_last_byte == 'c', "kpdSubmit sends one kpdA (%d %#x)", g_sent, g_last_sub);
+    answer(c, 6, NET_KPD_REPORTED, "Application sent! The K.P.D will review it.", "");
+    CHECK(g_apply_results == 1 && g_apply_ok && strstr(g_apply_text, "Application sent"), "received: the success popup (%s)", g_apply_text);
+    answer(c, 6, NET_KPD_REFUSED, "Your application is already in review", "");
+    CHECK(g_apply_results == 2 && !g_apply_ok && strstr(g_apply_text, "already in review"), "refused: the error popup (%s)", g_apply_text);
+    CHECK(!phone_up() && !chat_has("review"), "an application's answer is no call's: no phone, no chat");
+    c->net_socket = -1;
+    g_sent = 0;
+    hud_votekick_kpd_apply(c, "cop#1", "again");
+    CHECK(g_sent == 0 && g_apply_results == 3 && !g_apply_ok, "no session: nothing sent, the error popup");
+    free(c);
+}
+
 int main(void) {
     case_no_answer_times_out();
     case_reported_answer_cancels_timer();
@@ -320,6 +440,10 @@ int main(void) {
     case_no_socket_raises_nothing();
     case_late_answer_after_timeout();
     case_scenario_phone();
+    case_officer_list_pages();
+    case_verdict_keys();
+    case_application();
+    free(g_kpd_calls_html);
     printf("kpd_phone_test: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

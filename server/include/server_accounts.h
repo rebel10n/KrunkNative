@@ -99,6 +99,13 @@ void accounts_kpd_request(ClientConnection *client, int tab, const ClientConnect
 // An officer's verdict on call `call_id` (op kpd_rate; 0 / no coordinator: logged only). A refusal
 // ("Case already closed") is told to the officer in chat.
 void accounts_kpd_rate(ClientConnection *officer, int64_t call_id, int tagged, const char *suspect);
+// A K.P.D application (NET_EXT_KPD_APPLY, op kpd_apply): the answer is policeRes code 6.
+void accounts_kpd_apply(ClientConnection *client, const char *discord, const char *reason);
+// /kpd <name> on|off and /kpd apps (chat_commands.c, DEV): ops kpd_officer / kpd_apps; the answer goes
+// to `requester` (a connection id, or CHAT_CMD_CONSOLE: the log). A grant reaches a connection of that
+// account here at once. 0 when nothing could be sent (told already).
+int accounts_kpd_officer(int requester, const char *name, int on);
+int accounts_kpd_apps(int requester);
 void net_resume_ent(ClientConnection*, int spectate);              // replay a deferred ENT
 void net_comp_lobby_sync(ClientConnection*);                        // v7 syncLobbyP(player, id, 0) once the identity is known
 int net_client_is_dev(const ClientConnection*);                    // DEV checks: op, the server's machine, a DEV account

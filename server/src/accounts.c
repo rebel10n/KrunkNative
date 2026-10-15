@@ -628,12 +628,16 @@ void accounts_give_skin(const Player *player, const int skin, const char *reason
 static struct {
     uint32_t rid;
     int conn_id;
-    uint8_t tab;        // 0 a call, 1..3 an officer's list, ACC_KPD_RATE a verdict
+    uint8_t tab;        // 0 a call, 1..3 an officer's list, ACC_KPD_RATE a verdict, ACC_KPD_APPLY / _OFFICER / _APPS
+    int on;             // ACC_KPD_OFFICER: grant (1) or revoke (0)
     int suspect_id;     // a call's suspect connection (votekick_kpd_recorded)
     float since;        // the request's server time (acc_kpd_expire)
     char name[SERVER_PLAYER_NAME_MAX];
 } g_kpd_pending[ACC_KPD_PENDING];
 #define ACC_KPD_RATE 0xff
+#define ACC_KPD_APPLY 0xfe   // an application (answer: policeRes code 6)
+#define ACC_KPD_OFFICER 0xfd // a grant / revoke of the officer flag (/kpd <name> on|off)
+#define ACC_KPD_APPS 0xfc    // the pending applications (/kpd apps)
 // A brain answer that never comes (the link dropped with the frame on it) would hold its slot, and the
 // caller's phone, for good: after this long the request is answered as unreachable and the slot freed.
 // The brain answers in well under a second; the client's own no-answer timeout is longer (15 s).
@@ -668,7 +672,7 @@ void accounts_kpd_request(ClientConnection *client, const int tab, const ClientC
     cJSON *frame = cJSON_CreateObject();
     cJSON_AddStringToObject(frame, "type", "acct");
     cJSON_AddNumberToObject(frame, "rid", rid);
-    cJSON_AddStringToObject(frame, "op", tab == 0 ? "kpd_call" : tab == 2 ? "kpd_log" : "kpd_calls");
+    cJSON_AddStringToObject(frame, "op", tab == 0 ? "kpd_call" : tab == 2 ? "kpd_log" : tab == 3 ? "kpd_stats" : "kpd_calls");
     cJSON *args = cJSON_AddObjectToObject(frame, "args");
     cJSON_AddNumberToObject(args, "id", client->acct.account_id);
     cJSON_AddStringToObject(args, "name", client->name);
@@ -687,7 +691,7 @@ void accounts_kpd_request(ClientConnection *client, const int tab, const ClientC
         cJSON_AddNumberToObject(args, "typ", g_server->game.is_ranked || accounts_ranked_active() ? 1 : g_server->game.comp_lobby ? 2
                                            : accounts_is_custom_host(client) || g_acc.hosted_map ? 3 : 0); // a hosted custom lobby
     } else {
-        cJSON_AddNumberToObject(args, "limit", 50);
+        cJSON_AddNumberToObject(args, "limit", 50); // the lists; kpd_stats reads the officer's id
     }
     if (brain_post(frame, 0) != 0) {
         votekick_kpd_reply(client, (uint8_t) tab, NET_KPD_UNAVAILABLE, "K.P.D is unreachable right now", name, tab ? "[]" : NULL);
@@ -728,6 +732,116 @@ void accounts_kpd_rate(ClientConnection *officer, const int64_t call_id, const i
     snprintf(g_kpd_pending[slot].name, sizeof(g_kpd_pending[slot].name), "%s", suspect ? suspect : "");
 }
 
+// One brain "acct" op for a K.P.D request that answers someone (requester: a connection id, or
+// CHAT_CMD_CONSOLE for the server console). -1 when no slot / no brain (nothing was sent).
+static int acc_kpd_post(const int requester, const uint8_t tab, const char *op, cJSON *args, const char *name, const int on) {
+    const int slot = g_acc.brain && brain_linked() ? acc_kpd_slot() : -1;
+    if (slot < 0) {
+        cJSON_Delete(args);
+        return -1;
+    }
+    const uint32_t rid = brain_next_rid();
+    cJSON *frame = cJSON_CreateObject();
+    cJSON_AddStringToObject(frame, "type", "acct");
+    cJSON_AddNumberToObject(frame, "rid", rid);
+    cJSON_AddStringToObject(frame, "op", op);
+    cJSON_AddItemToObject(frame, "args", args);
+    if (brain_post(frame, 0) != 0) return -1;
+    g_kpd_pending[slot].rid = rid;
+    g_kpd_pending[slot].conn_id = requester;
+    g_kpd_pending[slot].tab = tab;
+    g_kpd_pending[slot].on = on;
+    g_kpd_pending[slot].suspect_id = -1;
+    g_kpd_pending[slot].since = g_server->now;
+    snprintf(g_kpd_pending[slot].name, sizeof(g_kpd_pending[slot].name), "%s", name ? name : "");
+    return 0;
+}
+
+void accounts_kpd_apply(ClientConnection *client, const char *discord, const char *reason) {
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddNumberToObject(args, "id", client->acct.account_id);
+    cJSON_AddStringToObject(args, "name", client->acct.username[0] ? client->acct.username : client->name);
+    cJSON_AddStringToObject(args, "discord", discord);
+    cJSON_AddStringToObject(args, "reason", reason);
+    if (acc_kpd_post(client->id, ACC_KPD_APPLY, "kpd_apply", args, client->name, 0) != 0)
+        votekick_kpd_reply(client, 6, NET_KPD_UNAVAILABLE, "K.P.D is unreachable right now", "", NULL);
+}
+
+// The answer of a console / chat command: the requester's chat, or the server log for the console
+static void acc_kpd_tell(const int requester, const char *text) {
+    ClientConnection *client = requester >= 0 ? acc_client_by_id(requester) : NULL;
+    if (client) acc_chat_to(client, text);
+    else server_log("[kpd] %s", text);
+}
+
+int accounts_kpd_officer(const int requester, const char *name, const int on) {
+    const ClientConnection *by = requester >= 0 ? acc_client_by_id(requester) : NULL;
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddNumberToObject(args, "actor", by && by->acct.account_id > 0 ? by->acct.account_id : 0); // 0: console / config op
+    cJSON_AddStringToObject(args, "name", name);
+    cJSON_AddNumberToObject(args, "on", on ? 1 : 0);
+    if (acc_kpd_post(requester, ACC_KPD_OFFICER, "kpd_officer", args, name, on) != 0) {
+        acc_kpd_tell(requester, "K.P.D is unreachable right now (no coordinator)");
+        return 0;
+    }
+    return 1;
+}
+
+int accounts_kpd_apps(const int requester) {
+    cJSON *args = cJSON_CreateObject();
+    cJSON_AddNumberToObject(args, "limit", 10);
+    if (acc_kpd_post(requester, ACC_KPD_APPS, "kpd_apps", args, "", 0) != 0) {
+        acc_kpd_tell(requester, "K.P.D is unreachable right now (no coordinator)");
+        return 0;
+    }
+    return 1;
+}
+
+// A grant / revoke landed: a connection of that account here follows at once (the officer flag the
+// cases go by, the player info); its client sees the officer view with its next account data.
+static void acc_kpd_officer_live(const int64_t account_id, const int on) {
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        ClientConnection *c = &g_server->clients[i];
+        if (account_id <= 0 || c->acct.account_id != account_id) continue;
+        if (on) c->acct.flags |= NET_PLAYER_INFO_MOD;
+        else c->acct.flags &= (uint8_t) ~NET_PLAYER_INFO_MOD;
+        acc_broadcast_info(c);
+        if (on) votekick_officer_joined(c); // an open call here is the new officer's case
+    }
+}
+
+static void acc_kpd_command_reply(const int requester, const int tab, const int on, const char *name, const cJSON *err, const cJSON *data) {
+    char text[256];
+    if (cJSON_IsString(err) && err->valuestring[0]) {
+        snprintf(text, sizeof(text), "K.P.D: %s", err->valuestring);
+        acc_kpd_tell(requester, text);
+        return;
+    }
+    if (tab == ACC_KPD_OFFICER) {
+        const cJSON *n = cJSON_GetObjectItem(data, "n"), *id = cJSON_GetObjectItem(data, "id");
+        snprintf(text, sizeof(text), "%s %s a K.P.D officer", cJSON_IsString(n) ? n->valuestring : name, on ? "is now" : "is no longer");
+        acc_kpd_tell(requester, text);
+        if (cJSON_IsNumber(id)) acc_kpd_officer_live((int64_t) id->valuedouble, on);
+        return;
+    }
+    const int count = cJSON_IsArray(data) ? cJSON_GetArraySize(data) : 0;
+    if (!count) {
+        acc_kpd_tell(requester, "No pending K.P.D applications");
+        return;
+    }
+    snprintf(text, sizeof(text), "%d pending K.P.D application%s (/kpd <name> on grants):", count, count == 1 ? "" : "s");
+    acc_kpd_tell(requester, text);
+    const cJSON *r;
+    cJSON_ArrayForEach(r, data) {
+        const char *n = cJSON_GetStringValue(cJSON_GetObjectItem(r, "n")), *d = cJSON_GetStringValue(cJSON_GetObjectItem(r, "discord"));
+        const char *why = cJSON_GetStringValue(cJSON_GetObjectItem(r, "reason"));
+        const cJSON *jop = cJSON_GetObjectItem(r, "jop"), *jor = cJSON_GetObjectItem(r, "jor");
+        snprintf(text, sizeof(text), "%s (%d/%d helpful, discord %s): %.120s", n ? n : "?", cJSON_IsNumber(jop) ? jop->valueint : 0,
+                 cJSON_IsNumber(jor) ? jor->valueint : 0, d ? d : "?", why ? why : "");
+        acc_kpd_tell(requester, text);
+    }
+}
+
 // Pending K.P.D requests older than ACC_KPD_TIMEOUT_S: the caller gets the unreachable answer (a call's
 // code 0, an officer's list its tab with no rows) and the slot is free again. A late brain answer for
 // a freed request finds no slot and is ignored (acc_handle_kpd_reply).
@@ -740,8 +854,63 @@ static void acc_kpd_expire(const float now) {
         g_kpd_pending[i].rid = 0;
         server_log("[kpd] no answer from the brain for %s (tab %d): released", name, tab);
         if (tab == ACC_KPD_RATE) continue;
+        if (tab == ACC_KPD_OFFICER || tab == ACC_KPD_APPS) {
+            acc_kpd_tell(conn_id, "K.P.D is unreachable right now");
+            continue;
+        }
         ClientConnection *client = acc_client_by_id(conn_id);
+        if (client && tab == ACC_KPD_APPLY) {
+            votekick_kpd_reply(client, 6, NET_KPD_UNAVAILABLE, "K.P.D is unreachable right now", "", NULL);
+            continue;
+        }
         if (client) votekick_kpd_reply(client, (uint8_t) tab, NET_KPD_UNAVAILABLE, "K.P.D is unreachable right now", name, tab ? "[]" : NULL);
+    }
+}
+
+// An officer's list (policeRes code `tab`) in as many NET_EXT_KPD_RESPONSE packets as it needs: each
+// carries a whole JSON array of rows and `name` "page/pages" (1-based); the client joins the pages and
+// renders the list with the last one. A row longer than one packet is left out. (One packet holds
+// about three Distress Calls rows: a list cut to fit one would not parse.)
+static void acc_kpd_send_list(const ClientConnection *client, const int tab, const cJSON *data) {
+    enum { ROOM = NET_EXT_BODY_MAX - (int) sizeof(NetKpdResponsePacket), PAGES_MAX = 64 };
+    char *pages[PAGES_MAX];
+    int count = 0;
+    char page[ROOM + 1];
+    size_t len = 0;
+    const cJSON *rows = cJSON_IsArray(data) ? data : NULL, *row;
+    cJSON_ArrayForEach(row, rows) {
+        char *text = cJSON_PrintUnformatted(row);
+        const size_t n = text ? strlen(text) : 0;
+        if (!n || n + 2 > ROOM) { // "[" row "]"
+            free(text);
+            continue;
+        }
+        if (len && len + 1 + n + 1 > ROOM) { // the page is full: close it
+            page[len++] = ']';
+            page[len] = 0;
+            if (count < PAGES_MAX) pages[count++] = strdup(page);
+            len = 0;
+        }
+        page[len] = len ? ',' : '[';
+        len++;
+        memcpy(page + len, text, n);
+        len += n;
+        free(text);
+    }
+    if (len) {
+        page[len++] = ']';
+        page[len] = 0;
+        if (count < PAGES_MAX) pages[count++] = strdup(page);
+    }
+    if (!count) {
+        votekick_kpd_reply(client, (uint8_t) tab, NET_KPD_REPORTED, "", "", "[]");
+        return;
+    }
+    for (int i = 0; i < count; i++) {
+        char tag[16];
+        snprintf(tag, sizeof(tag), "%d/%d", i + 1, count);
+        votekick_kpd_reply(client, (uint8_t) tab, NET_KPD_REPORTED, "", tag, pages[i] ? pages[i] : "[]");
+        free(pages[i]);
     }
 }
 
@@ -767,6 +936,18 @@ static int acc_handle_kpd_reply(const cJSON *frame) {
             if (failed && client) acc_chat_to(client, err->valuestring);
             return 1;
         }
+        if (tab == ACC_KPD_OFFICER || tab == ACC_KPD_APPS) {
+            server_log("[kpd] %s%s: %s", tab == ACC_KPD_APPS ? "applications" : g_kpd_pending[i].on ? "grant " : "revoke ",
+                       tab == ACC_KPD_APPS ? "" : name, failed ? err->valuestring : "done");
+            acc_kpd_command_reply(g_kpd_pending[i].conn_id, tab, g_kpd_pending[i].on, name, err, data);
+            return 1;
+        }
+        if (tab == ACC_KPD_APPLY) {
+            server_log("[kpd] application of %s: %s", name, failed ? err->valuestring : "received");
+            if (client) votekick_kpd_reply(client, 6, failed ? NET_KPD_REFUSED : NET_KPD_REPORTED,
+                                           failed ? err->valuestring : "Application sent! The K.P.D will review it.", "", NULL);
+            return 1;
+        }
         if (!client) return 1; // left meanwhile
         if (cJSON_IsString(err) && err->valuestring[0]) {
             const int already = strstr(err->valuestring, "lready") != NULL;
@@ -778,9 +959,7 @@ static int acc_handle_kpd_reply(const cJSON *frame) {
             snprintf(text, sizeof(text), "Reported %s to the K.P.D", name);
             votekick_kpd_reply(client, 0, NET_KPD_REPORTED, text, name, NULL);
         } else {
-            char *json = cJSON_IsArray(data) ? cJSON_PrintUnformatted(data) : NULL;
-            votekick_kpd_reply(client, (uint8_t) tab, NET_KPD_REPORTED, "", "", json ? json : "[]");
-            free(json);
+            acc_kpd_send_list(client, tab, data);
         }
         return 1;
     }

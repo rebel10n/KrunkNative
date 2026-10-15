@@ -384,6 +384,7 @@ static const ConArg A_MAP_OPT[] = {{"map", ARG_STRING, 1}};
 static const ConArg A_MODE[] = {{"alias", ARG_STRING, 1}};
 static const ConArg A_TEAM[] = {{"red|blue", ARG_STRING, 0}};
 static const ConArg A_UNBAN[] = {{"accountId|name|id", ARG_STRING, 1}};
+static const ConArg A_KPD[] = {{"account|apps", ARG_STRING, 0}, {"on|off", ARG_STRING, 1}}; // KrunkNative /kpd
 static const ConArg A_BANIP[] = {{"name|id|ip", ARG_STRING, 1}};
 static const ConArg A_IP[] = {{"ip", ARG_STRING, 1}};
 static const ConArg A_AMOUNT[] = {{"amount", ARG_NUMBER, 1}};
@@ -1496,6 +1497,7 @@ static void register_commands(void) {
     register_server("ban", ARGS(A_NAME_ID), "ban a player account");
     register_server("unban", ARGS(A_UNBAN), "unban an account");
     register_server("bans", NO_ARGS, "list banned account ids");
+    register_server("kpd", ARGS(A_KPD), "grant or revoke K.P.D officer (on|off), or list the K.P.D applications (apps)");
     register_server("ip", ARGS(A_NAME_ID), "show a player's IP");
     register_server("banip", ARGS(A_BANIP), "ban an IP in this lobby");
     register_server("unbanip", ARGS(A_IP), "unban an IP");

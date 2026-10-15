@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """The in-game Player List (v10 windows[22], showWindow(23): client/src/ui/hud_ui.c + hud_votekick.c) end
-to end on a headless client_bin signed in as alice (level 30), in a brain-linked server_bin lobby with
+to end on a headless client_bin signed in as alice (level 51, 21 of 22 helpful reports), in a brain-linked server_bin lobby with
 three signed-in protocol peers: bob (6), carol (9, a flagged hacker) and dave (3).
 
   python3 -I client/tests/playerlist_e2e.py BUILD_DIR      (repository root)
@@ -17,9 +17,18 @@ private XDG_CONFIG_HOME), joined through the matchmaker and driven through KRUNK
      "alice voted to kick dave", no Votekick buttons left (initiated); bob's yes -> "Votes: 2/3";
      carol's yes kicks dave: the prompt hides, dave's row goes
   4. Call K.P.D on carol: the confirm popup ("Only call the K.P.D if you strongly suspect carol"),
-     Call -> "Reported carol to the K.P.D" in chat, the kpd_calls row (reporter alice)
+     Call -> "Reported carol to the K.P.D" in chat, the kpd_calls row (reporter alice); More Krunker ->
+     KPD: v10's player text, her Helpful Reports (21/22) and the application link: the form (Discord,
+     reason), Submit: "Application sent!", the kpd_applications row
   5. a second launch (alice now a moderator): the mutes are still there (from disk), and the open call
      on carol is alice's case: carol's row is first in a red frame (the officer's suspect row)
+  6. a third launch: alice (the officer) spectates in the lobby before any call (carol has left, so no
+     open case); eve joins and bob calls the K.P.D on her. Alice gets the case at once: the verdict
+     panel asks "Is eve hacking?". Escape (the menu, a free cursor), More Krunker -> KPD: the officer's
+     view (five tabs, Mod Rules) lists the call in #kpdCalls (eve, reporter bob, Join) first, above the
+     older open calls (more than one packet's worth); Ban Logs and Stats answer too. Escape again (the
+     panel is back), after kpdWatchTime [Y] ("Are you 100% sure?") and [Y] again tags eve: the server records the verdict and kpd_calls has it (status 1, rating 1, handled_by alice);
+     the popup again: eve's call has left Active Calls, Ban Logs and Stats show alice's tag
 77 = skip (no client_bin / server_bin / kn_brain, no database).
 """
 import json
@@ -51,11 +60,12 @@ SECRET = "kn-plist-%d" % os.getpid()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-plist-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
 PW = "pw-plist-%d" % os.getpid()
-ALICE, BOB, CAROL, DAVE = "pla%d" % STAMP, "plb%d" % STAMP, "plc%d" % STAMP, "pld%d" % STAMP
+ALICE, BOB, CAROL, DAVE, EVE = "pla%d" % STAMP, "plb%d" % STAMP, "plc%d" % STAMP, "pld%d" % STAMP, "ple%d" % STAMP
 
 CHAT_SEND, ERROR, FORWARDED, EXT = 8, 30, 85, 254
-EXT_AUTH, EXT_RIGHTS, EXT_VOTE_KICK, EXT_VK_STATE = 0x8000, 0x8001, 0x0800, 0x0801
+EXT_AUTH, EXT_RIGHTS, EXT_VOTE_KICK, EXT_VK_STATE, EXT_KPD_CALL, EXT_KPD_RESPONSE = 0x8000, 0x8001, 0x0800, 0x0801, 0x0802, 0x0803
 RIGHTS_FMT = "<BBBBii32s64s"
+FILLER_CALLS = 6  # third launch: older open calls from other lobbies
 VK_STATE_FMT = "<BBBii32s32s"
 results = []
 procs = []
@@ -201,6 +211,17 @@ class Peer(kn_proto.Conn):
     def say(self, text):
         self.send(CHAT_SEND, text.encode() + b"\0")
 
+    def kpd_call(self, uid):
+        self.send(EXT, struct.pack("<H", EXT_KPD_CALL) + struct.pack("<Bi", 0, uid))
+
+    def kpd_answers(self):
+        """policeRes code 0 answers: [(status, message)]"""
+        out = []
+        for t, p in self.packets:
+            if t == EXT and len(p) >= 2 + 98 and struct.unpack("<H", p[:2])[0] == EXT_KPD_RESPONSE and p[2] == 0:
+                out.append((p[3], kn_proto.uncstr(p[4:68])))
+        return out
+
     def vote(self, alias, yes=1):
         self.send(EXT, struct.pack("<H", EXT_VOTE_KICK) + struct.pack("<32sB", kn_proto.cstr(alias, 32), yes))
 
@@ -223,7 +244,7 @@ class Peer(kn_proto.Conn):
 class Client:
     """One headless client_bin signed in (the stored token), joined through the matchmaker."""
 
-    def __init__(self, brain, name, token, tag):
+    def __init__(self, brain, name, token, tag, script="0 play\n"):
         self.tag = tag
         self.cmds = os.path.join(WORK, tag + ".cmds")
         self.log = os.path.join(WORK, tag + ".log")
@@ -235,9 +256,10 @@ class Client:
         # Settings > Chat "Show Player Messages" on (default off): this test reads the player chat lines
         with open(os.path.join(self.cfg, "krunknative", "knSettings.json"), "w") as f:
             f.write('{"showMessages": true}')
+        script_text = script
         script = os.path.join(WORK, tag + ".script")
         with open(script, "w") as f:
-            f.write("0 play\n")
+            f.write(script_text)
         open(self.cmds, "w").close()
         env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_UI_DIR")}
         env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": self.cfg,
@@ -434,6 +456,31 @@ def first_launch(brain, node_log, sql, tokens, ids, peers):
     rows = sql("SELECT reporter_id, suspect_id, status FROM kpd_calls")
     check("4: kpd_calls has alice's call on carol (open)", rows == [[str(ids[ALICE]), str(ids[CAROL]), "0"]], str(rows))
     c.shot("kpd")
+
+    # the K.P.D popup of a player (v10's text), and the application: alice has 21 helpful reports of 22
+    c.cmd("key 256")
+    check("4: Escape opens the menu", wait_for(lambda: c.has_box("menuHolder"), 6))
+    c.cmd("ui showMoreKrunker()")
+    check("4: More Krunker -> KPD", wait_for(lambda: c.count(".moreKrunkerOption") == 4, 5) and c.clicksel(3, ".moreKrunkerOption"))
+    pop = wait_for(lambda: (lambda t: t if t and "Helpful Reports" in t else None)(c.textof("policePopC")), 6) or ""
+    check("4: v10's player text: the Player List key, the guide image, the reward",
+          "If you suspect that there is a cheater in your current lobby" in pop and "Press [" in pop and "to open the Player List" in pop
+          and "you will be granted KR as a reward" in pop and c.count("#policePopC img.kpdGuideImg") == 1
+          and c.count("#policePopC .menuTabNew") == 0, pop)
+    check("4: her Helpful Reports 21/22, and she may apply", "21/22 Helpful Reports" in pop and "You may qualify to become a K.P.D officer" in pop, pop)
+    check("4: the application link", c.clicksel(1, "#policePopC a"))
+    check("4: the application form", wait_for(lambda: c.has_box("kpdDiscord") and c.has_box("kpdExplain"), 5))
+    c.cmd("focus kpdDiscord")
+    c.cmd("text alice#1")
+    c.cmd("focus kpdExplain")
+    c.cmd("text I\\shunt\\shackers")
+    time.sleep(0.5)
+    c.cmd("clickid confirmBtn")
+    sent = wait_for(lambda: (lambda t: t if t and "Application sent" in t else None)(c.textof("genericPop")), 8)
+    check("4: Submit: \"Application sent!\"", sent, c.textof("genericPop"))
+    rows = sql("SELECT account_id, discord, reason, status FROM kpd_applications")
+    check("4: kpd_applications keeps it (pending)", rows == [[str(ids[ALICE]), "alice#1", "I hunt hackers", "0"]], str(rows))
+    c.cmd("ui clearPops()")
     c.close()
     check("the first client quits cleanly", c.proc.returncode == 0, str(c.proc.returncode))
 
@@ -458,6 +505,107 @@ def second_launch(brain, node_log, sql, tokens, ids, peers):
     check("5: bob is still muted (chat and voice, from disk)", t_bob and "speaker_notes_off" in t_bob and "voice_over_off" in t_bob, t_bob)
     c.shot("officer")
     c.close()
+
+
+def third_launch(brain, node_log, sql, tokens, ids, peers):
+    carol = peers[CAROL]
+    with carol.lock:  # the suspect of the open call leaves: no case waits for alice when she comes
+        carol.closed = True
+        carol.close()
+    check("6: carol leaves", wait_for(lambda: "%s disconnected" % CAROL in read_log(node_log), 10), read_log(node_log)[-300:])
+    time.sleep(1)
+    # older open calls from other lobbies: the Distress Calls list then needs more than one packet (pages)
+    for k in range(FILLER_CALLS):
+        sql("INSERT INTO kpd_calls (reporter_name, suspect_name, lobby, node, typ) VALUES ('fill%d', 'Guest_%d', 'OTHER:f%d', 'OTHER', 0)"
+            % (k, k, k))
+    # an officer spectating: the Spectate switch on (toggleSpect), then Play (the ENT carries spectate)
+    c = Client(brain, ALICE, tokens[ALICE][0], "a3", script="0 menu\n300 call toggleSpect 1\n600 play\n")
+    check("6: alice (the officer) joins the lobby", joined(c, node_log, ALICE), c.text()[-500:])
+    check("6: alice is spectating", wait_for(lambda: "[spectate] spectating" in c.text(), 20), c.text()[-400:])
+    time.sleep(2)
+    cases = len(re.findall(r"officer %s takes the case" % ALICE, read_log(node_log)))
+    eve = Peer("203.0.113.99", tokens[EVE][0])
+    check("6: eve signs in and spawns", eve.ok and eve.uid >= 0, f"{eve.ok} {eve.uid}")
+    peers[EVE] = eve
+    check("6: no case for alice before the call", len(re.findall(r"officer %s takes the case" % ALICE, read_log(node_log))) == cases)
+    bob = peers[BOB]
+    time.sleep(1)
+    bob.kpd_call(eve.uid)
+    ans = bob.wait(lambda: bob.kpd_answers(), 10)
+    check("6: bob calls the K.P.D on eve: reported", ans and ans[-1][0] == 0 and EVE in ans[-1][1], str(ans))
+    handed = wait_for(lambda: re.search(r"officer %s takes the case of %s" % (ALICE, EVE), read_log(node_log)), 10)
+    check("6: the server hands the officer already in the lobby the case at once", handed, read_log(node_log)[-500:])
+    handed_at = time.time()
+    check("6: the verdict panel asks \"Is eve hacking?\"", wait_for(lambda: c.textof("specKPDTxt") == "Is %s hacking?" % EVE, 8),
+          c.textof("specKPDTxt"))
+    check("6: the panel shows (spectating)", c.has_box("specKPDContr"))
+    c.shot("case")
+
+    # the K.P.D popup: Escape (the menu frees the cursor), More Krunker -> KPD
+    c.cmd("key 256")
+    check("6: Escape opens the menu", wait_for(lambda: c.has_box("menuHolder"), 6))
+    c.cmd("ui showMoreKrunker()")
+    check("6: More Krunker shows its tiles", wait_for(lambda: c.count(".moreKrunkerOption") == 4, 5), str(c.count(".moreKrunkerOption")))
+    check("6: click the KPD tile", c.clicksel(3, ".moreKrunkerOption"))
+    calls = wait_for(lambda: (lambda t: t if t and EVE in t else None)(c.textof("kpdCalls")), 10)
+    check("6: the officer's view: five tabs (Active Calls first, on show) and the Mod Rules line",
+          c.count("#policePopC .menuTabNew") == 5 and c.count("#policePopC .menuTabNew.tabANew") == 1
+          and "Mod Rules" in (c.textof("policePopC") or "") and "Active Calls" in (c.textof("policePopC") or ""), c.textof("policePopC"))
+    check("6: #kpdCalls lists bob's call on eve with Join", calls and BOB in calls and "Join" in calls and "ago" in calls, calls)
+    # the open calls: bob's on eve (newest, first), alice's own on carol from the first launch and the
+    # fillers, in several packets (accounts.c acc_kpd_send_list) joined by the client
+    first = c.textof("#kpdCalls tr:nth-child(2)") or ""
+    n_calls = 2 + FILLER_CALLS
+    check("6: the table: a row per open call (%d, over several packets), the newest (eve's) first, each with Join" % n_calls,
+          c.count("#kpdCalls tr") == 1 + n_calls and c.count("#kpdCalls .policeJoinB") == n_calls and BOB in first and EVE in first
+          and "fill%d" % (FILLER_CALLS - 1) in calls, "%d rows, first %s" % (c.count("#kpdCalls tr"), first))
+    c.shot("calls")
+    check("6: Ban Logs tab", c.clicksel(1, "#policePopC .menuTabNew"))
+    logs = wait_for(lambda: (lambda t: t if t and t != "Loading..." and EVE not in t else None)(c.textof("kpdCalls")), 8)
+    check("6: Ban Logs answers (nothing rated yet: No Data)", logs == "No Data", logs)
+    check("6: Stats tab", c.clicksel(2, "#policePopC .menuTabNew"))
+    stats = wait_for(lambda: (lambda t: t if t and "Tag Count" in t else None)(c.textof("kpdCalls")), 8)
+    check("6: Stats answers: Range / Tag Count, alice tagged nobody yet", stats and "1day0" in stats and "alltime0" in stats, stats)
+    check("6: back to Active Calls", c.clicksel(0, "#policePopC .menuTabNew"))
+    check("6: the call again", wait_for(lambda: EVE in (c.textof("kpdCalls") or ""), 8), c.textof("kpdCalls"))
+    c.cmd("ui clearPops()")
+    time.sleep(0.5)
+
+    # the verdict, v10's way: the keys while spectating (the menu closed)
+    c.cmd("key 256")
+    check("6: Escape closes the menu: the verdict panel is back", wait_for(lambda: not c.has_box("menuHolder") and c.has_box("specKPDContr"), 6))
+    wait = 10.5 - (time.time() - handed_at)  # kpdWatchTime from the handover
+    if wait > 0:
+        time.sleep(wait)
+    c.shot("verdict")
+    c.cmd("key 89")  # kpdVoteY
+    check("6: [Y]: \"Are you 100% sure?\"", wait_for(lambda: c.textof("specKPDTxt") == "Are you 100% sure?", 5), c.textof("specKPDTxt"))
+    c.cmd("key 89")
+    check("6: [Y] again: Case submitted, Suspect Tagged",
+          wait_for(lambda: (lambda t: "Case submitted!" in t and "Suspect Tagged" in t and "Not" not in t)(c.textof("specKPDTxt") or ""), 5),
+          c.textof("specKPDTxt"))
+    check("6: the server records the officer's verdict",
+          wait_for(lambda: re.search(r"officer %s rated %s: tagged" % (ALICE, EVE), read_log(node_log)), 8)
+          and wait_for(lambda: re.search(r"the verdict on %s: recorded" % EVE, read_log(node_log)), 8), read_log(node_log)[-500:])
+    rows = sql("SELECT status, rating, handled_by FROM kpd_calls WHERE suspect_id = %d" % ids[EVE])
+    check("6: kpd_calls: eve's call handled, tagged, by alice", rows == [["1", "1", str(ids[ALICE])]], str(rows))
+    c.shot("tagged")
+    rows = sql("SELECT jobrating, jobratingpositive FROM players WHERE player_id = %d" % ids[BOB])
+    check("6: bob's Helpful Reports: 1/1", rows == [["1", "1"]], str(rows))
+    c.cmd("key 256")
+    check("6: the menu again", wait_for(lambda: c.has_box("menuHolder"), 6))
+    c.cmd("ui shoPolicePop()")
+    calls = wait_for(lambda: (lambda t: t if t and t != "Loading..." else None)(c.textof("kpdCalls")), 8)
+    check("6: the closed call has left Active Calls", calls and EVE not in calls and CAROL in calls, calls)
+    check("6: Ban Logs tab", c.clicksel(1, "#policePopC .menuTabNew"))
+    logs = wait_for(lambda: (lambda t: t if t and EVE in t else None)(c.textof("kpdCalls")), 8)
+    check("6: Ban Logs: alice tagged eve", logs and ALICE in logs and "tagged" in logs and "untagged" not in logs, logs)
+    check("6: Stats tab", c.clicksel(2, "#policePopC .menuTabNew"))
+    stats = wait_for(lambda: (lambda t: t if t and "alltime1" in t else None)(c.textof("kpdCalls")), 8)
+    check("6: Stats: one tag today and all time", stats and "1day1" in stats, stats)
+    c.cmd("ui clearPops()")
+    c.close()
+    check("the third client quits cleanly", c.proc.returncode == 0, str(c.proc.returncode))
 
 
 def main():
@@ -494,13 +642,14 @@ def main():
         port = int(m.group(1))
         node_log = node(port)
         check("the node links to the coordinator", wait_for(lambda: "welcomed" in read_log(node_log) or "linked" in read_log(node_log), 20))
-        tokens = {n: register(port, n) for n in (ALICE, BOB, CAROL, DAVE)}
+        tokens = {n: register(port, n) for n in (ALICE, BOB, CAROL, DAVE, EVE)}
         if not all(t for t, _ in tokens.values()):
             return 1
         ids = {n: tokens[n][1] for n in tokens}
         sql = Sql(db)
-        for name, score in ((ALICE, 1000000), (BOB, 40000), (CAROL, 90000), (DAVE, 10000)):
+        for name, score in ((ALICE, 3000000), (BOB, 40000), (CAROL, 90000), (DAVE, 10000), (EVE, 20000)):
             sql("UPDATE players SET player_score = %d WHERE player_id = %d" % (score, ids[name]))
+        sql("UPDATE players SET jobrating = 22, jobratingpositive = 21 WHERE player_id = %d" % ids[ALICE])  # her Helpful Reports
         sql("UPDATE players SET player_hack = 1 WHERE player_id = %d" % ids[CAROL])
         for i, name in enumerate((BOB, CAROL, DAVE)):
             p = Peer("203.0.113.%d" % (90 + i), tokens[name][0])
@@ -517,6 +666,7 @@ def main():
         threading.Thread(target=drain, daemon=True).start()
         first_launch(port, node_log, sql, tokens, ids, peers)
         second_launch(port, node_log, sql, tokens, ids, peers)
+        third_launch(port, node_log, sql, tokens, ids, peers)
     finally:
         if "stop" in locals():
             stop.set()

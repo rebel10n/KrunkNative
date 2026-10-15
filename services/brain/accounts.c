@@ -1316,13 +1316,23 @@ int accounts_internal_call(Brain *b, const char *op, const cJSON *args, AcctRepl
     }
     /* the in-game player list's K.P.D call (db_kpd.c): the game server reports a suspect
      * (kpd_call, args = the call), an officer rates it (kpd_rate, args {call, id, rating}), an
-     * officer's lists (kpd_calls / kpd_log, args.limit) */
-    if (!strcmp(op, "kpd_call") || !strcmp(op, "kpd_rate")) {
+     * officer's lists (kpd_calls / kpd_log, args.limit; kpd_stats, args.id), an application (kpd_apply,
+     * args {id, name, discord, reason}), the pending ones (kpd_apps, args.limit) and a developer's grant
+     * or revoke of the officer flag (kpd_officer, args {actor, name, on}) */
+    if (!strcmp(op, "kpd_call") || !strcmp(op, "kpd_rate") || !strcmp(op, "kpd_apply") || !strcmp(op, "kpd_officer")) {
         OpCtx *o = op_new(cb, ud, op);
         if (!o) return -1;
         char *json = args ? cJSON_PrintUnformatted(args) : NULL;
-        kn_db_call(g_acct_brain->db, !strcmp(op, "kpd_rate") ? &P_KPD_RATE : &P_KPD_CALL, KN_DB_ARGS(json ? json : "{}"), op_json_done, o);
+        const kn_proc *proc = !strcmp(op, "kpd_rate") ? &P_KPD_RATE : !strcmp(op, "kpd_apply") ? &P_KPD_APPLY
+                            : !strcmp(op, "kpd_officer") ? &P_KPD_OFFICER : &P_KPD_CALL;
+        kn_db_call(g_acct_brain->db, proc, KN_DB_ARGS(json ? json : "{}"), op_json_done, o);
         free(json);
+        return 0;
+    }
+    if (!strcmp(op, "kpd_apps")) { /* the pending K.P.D applications (args.limit) */
+        OpCtx *o = op_new(cb, ud, op);
+        if (!o) return -1;
+        kn_db_call(g_acct_brain->db, &P_KPD_APPS, KN_DB_ARGS(acct_itoa(v1, kn_json_int(args, "limit", 10))), op_json_done, o);
         return 0;
     }
     if (!strcmp(op, "kpd_calls") || !strcmp(op, "kpd_log")) {
@@ -1330,6 +1340,12 @@ int accounts_internal_call(Brain *b, const char *op, const cJSON *args, AcctRepl
         if (!o) return -1;
         kn_db_call(g_acct_brain->db, !strcmp(op, "kpd_log") ? &P_KPD_LOG : &P_KPD_CALLS,
                    KN_DB_ARGS(acct_itoa(v1, kn_json_int(args, "limit", 50))), op_json_done, o);
+        return 0;
+    }
+    if (!strcmp(op, "kpd_stats")) { /* the officer's tags by range (args.id: the officer) */
+        OpCtx *o = op_new(cb, ud, op);
+        if (!o) return -1;
+        kn_db_call(g_acct_brain->db, &P_KPD_STATS, KN_DB_ARGS(acct_itoa(v1, kn_json_int(args, "id", 0))), op_json_done, o);
         return 0;
     }
     cb(ud, "Unknown op.", NULL);

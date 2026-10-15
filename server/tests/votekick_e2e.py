@@ -7,7 +7,7 @@ works too), one brain-linked server_bin node, protocol 1.4 peers signed in to re
   python3 -I server/tests/votekick_e2e.py BUILD_DIR      (run from the repository root)
 
 Accounts (levels from player_score, Krunker v10 level = 0.03 * sqrt(score)): alice 30, bob 6, carol 9
-(flagged hacker: player_hack), dave 3, an officer (player_moderator). Peers are bridged browsers
+(flagged hacker: player_hack), dave 3, an officer (made with /kpd). Peers are bridged browsers
 (NET_PACKET_FORWARDED, TEST-NET addresses: never the server's own machine, which is DEV).
   1. PLAYER_INFO: carol's carries NET_PLAYER_INFO_HACKER (v10 isHacker: the list's red name)
   2. K.P.D: dave (level 3) is refused (Requires Lvl 5); bob reports carol: "Reported carol to the K.P.D",
@@ -15,9 +15,11 @@ Accounts (levels from player_score, Krunker v10 level = 0.03 * sqrt(score)): ali
   3. vote kick: alice opens a vote on dave (everyone gets "vk" opened 1/3 by alice), bob and carol vote
      yes: dave gets ERROR "Vote Kicked", everyone "vk" ended (passed); dave signing in again on a
      new connection is refused for voteKickBan (30 min); a new vote right after: the cooldown
-  4. the officer signs in: NET_EXT_KPD_DATA {sus carol, caller bob}; a verdict right away is refused
-     ("kpdf", kpdWatchTime); after 10 s "rkpd" tagged: the row is handled (status 1, rating 1,
-     handled_by the officer, handled_at) and kpd_log lists it with the officer's name
+  4. /kpd: alice's (a player) changes nothing; bob, made a developer (his own call is never his
+     case), runs "/kpd <officer> on": the account is an officer (player_moderator), "/kpd apps" lists none. The officer signs in: NET_EXT_KPD_DATA {sus carol,
+     caller bob}; a verdict right away is refused ("kpdf", kpdWatchTime); after 10 s "rkpd" tagged: the
+     row is handled (status 1, rating 1, handled_by the officer, handled_at); bob's Helpful Reports 1/1;
+     "/kpd <officer> off" revokes it, moderation_log has both
 Exit 77 when the database is unavailable.
 """
 import json
@@ -50,6 +52,7 @@ NODE = "VKE2E"
 ALICE, BOB, CAROL, DAVE, COP = ("vka%d" % STAMP, "vkb%d" % STAMP, "vkc%d" % STAMP, "vkd%d" % STAMP, "vkcop%d" % STAMP)
 
 CHAT, ERROR, PLAYER_INFO, FORWARDED, EXT = 9, 30, 34, 85, 254
+CHAT_SEND = 8
 EXT_AUTH, EXT_RIGHTS = 0x8000, 0x8001
 EXT_VOTE_KICK, EXT_VK_STATE, EXT_KPD_CALL, EXT_KPD_RESPONSE, EXT_KPD_RESET, EXT_KPD_DATA, EXT_KPD_RATE = (
     0x0800, 0x0801, 0x0802, 0x0803, 0x0804, 0x0805, 0x0806)
@@ -202,6 +205,9 @@ class Peer(kn_proto.Conn):
     def vote(self, alias, yes=1):
         self.ext(EXT_VOTE_KICK, struct.pack("<32sB", kn_proto.cstr(alias, 32), yes))
 
+    def say(self, text):
+        self.send(CHAT_SEND, text.encode() + b"\0")
+
     def kpd(self, uid):
         self.ext(EXT_KPD_CALL, struct.pack("<Bi", 0, uid))
 
@@ -269,11 +275,10 @@ def node(port_brain):
 
 def scenario(port, log, sql, tokens):
     ids = {n: tokens[n][1] for n in tokens}
-    # levels (v10: 0.03 * sqrt(score)), carol flagged, the officer a moderator
+    # levels (v10: 0.03 * sqrt(score)), carol flagged; the officer is made with /kpd (section 4)
     for name, score in ((ALICE, 1000000), (BOB, 40000), (CAROL, 90000), (DAVE, 10000), (COP, 2800000)):
         sql("UPDATE players SET player_score = %d WHERE player_id = %d" % (score, ids[name]))
     sql("UPDATE players SET player_hack = 1 WHERE player_id = %d" % ids[CAROL])
-    sql("UPDATE players SET player_moderator = 1 WHERE player_id = %d" % ids[COP])
 
     peers = {}
     for i, name in enumerate((ALICE, BOB, CAROL, DAVE)):
@@ -348,7 +353,29 @@ def scenario(port, log, sql, tokens):
     check("3: a new vote right after: the cooldown", b.wait(lambda: any("just ended" in t for t in b.chats(mark)), 4)
           and not b.vk_states(mark), str(b.chats(mark)))
 
-    # 4. the officer
+    # 4. the officer: a developer makes the account a K.P.D officer with /kpd (no SQL)
+    mark = len(a.packets)
+    a.say("/kpd %s on" % COP)
+    a.pump(1.0)
+    rows = sql("SELECT player_moderator FROM players WHERE player_id = %d" % ids[COP])
+    check("4: /kpd from a player changes nothing", rows == [["0"]] and not any("officer" in t for t in a.chats(mark)), f"{rows} {a.chats(mark)}")
+    # bob becomes a developer (signs in again): a DEV is an officer too, but the open call is his own
+    sql("UPDATE players SET player_developer = 1 WHERE player_id = %d" % ids[BOB])
+    mark = len(b.packets)
+    r = b.sign_in(tokens[BOB][0])
+    check("4: bob signs in again as a developer (DEV)", r is not None and r["status"] == ST_OK and r["rights"] & 1, str(r))
+    b.pump(0.5)
+    check("4: his own call is never his case", not ext_bodies(b.packets, EXT_KPD_DATA, mark))
+    mark = len(b.packets)
+    b.say("/kpd %s on" % COP)
+    told = b.wait(lambda: [t for t in b.chats(mark) if "K.P.D" in t], 8)
+    check("4: /kpd <officer> on: \"is now a K.P.D officer\"", told and "%s is now a K.P.D officer" % COP in told[0], str(told))
+    rows = sql("SELECT player_moderator FROM players WHERE player_id = %d" % ids[COP])
+    check("4: the account is a moderator", rows == [["1"]], str(rows))
+    mark = len(b.packets)
+    b.say("/kpd apps")
+    told = b.wait(lambda: [t for t in b.chats(mark) if "application" in t], 8)
+    check("4: /kpd apps: none pending", told and "No pending K.P.D applications" in told[0], str(told))
     o = Peer("203.0.113.80")
     mark = len(o.packets)
     r = o.sign_in(tokens[COP][0])
@@ -380,6 +407,16 @@ def scenario(port, log, sql, tokens):
     mark = len(o.packets)
     o.rate(0)
     check("4: a second verdict: Case already closed", o.wait(lambda: any("already closed" in t for t in o.chats(mark)), 4))
+    rows = sql("SELECT jobrating, jobratingpositive FROM players WHERE player_id = %d" % ids[BOB])
+    check("4: bob's Helpful Reports: 1/1 (jobrating / jobratingpositive)", rows == [["1", "1"]], str(rows))
+    mark = len(b.packets)
+    b.say("/kpd %s off" % COP)
+    told = b.wait(lambda: [t for t in b.chats(mark) if "K.P.D" in t], 8)
+    check("4: /kpd <officer> off: \"is no longer a K.P.D officer\"", told and "%s is no longer a K.P.D officer" % COP in told[0], str(told))
+    rows = sql("SELECT player_moderator FROM players WHERE player_id = %d" % ids[COP])
+    check("4: the account is no moderator any more", rows == [["0"]], str(rows))
+    rows = sql("SELECT action FROM moderation_log WHERE target_id = %d ORDER BY id" % ids[COP])
+    check("4: moderation_log: kpd_grant, kpd_revoke", rows == [["kpd_grant"], ["kpd_revoke"]], str(rows))
     for p in (a, b, c, o):
         p.close()
 

@@ -393,6 +393,8 @@ H(h_select_skin) { UNUSED; ui_loadout_select_skin(arg_int(args, argc, 0, -1), ar
 H(h_loadout_action) { UNUSED; ui_loadout_action(arg_int(args, argc, 0, 0)); return 1; }
 H(h_toggle_log) { UNUSED; v10_news_toggle_log(arg_elem(ev, args, argc, 0)); return 1; } // v10_news.c
 // toggleSpect(this.checked): `co`, read by enterGame (client/src/spectate.c)
+H(h_kpd_apply_pop) { UNUSED; ui_loadout_kpd_apply_pop(); return 1; } // KrunkNative: the K.P.D application form
+H(h_kpd_submit) { UNUSED; ui_loadout_kpd_submit(); return 1; }        // v10 kpdSubmit()
 H(h_toggle_spect) {
     UNUSED;
     spectate_set_requested(arg_bool(ev, args, argc, 0, 0));
@@ -546,6 +548,8 @@ static const HtmlHandlerEntry HANDLERS[] = {
     {"toggleSpect", h_toggle_spect},
     {"claimReward", h_claim_reward},
     {"shoPolicePop", h_police_pop},
+    {"kpdApplyPop", h_kpd_apply_pop},
+    {"kpdSubmit", h_kpd_submit},
     {"sub2FA", h_noop},
     {"focusChat", h_focus_chat},
     {"sendReaction", h_noop},

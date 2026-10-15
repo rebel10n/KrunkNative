@@ -63,6 +63,7 @@ typedef enum {
     NET_EXT_KPD_DATA = 0x0805,        // startGame kpdData S -> C NetKpdDataPacket: the officer's case in this lobby
     NET_EXT_KPD_RATE = 0x0806,        // "rkpd" C -> S NetKpdRatePacket: the officer's verdict on the case
     NET_EXT_ADMIN_ACTION = 0x0807,    // v10 ADMIN_ACTIONS C -> S NetAdminActionPacket: a DEV's kick / ban from the player list
+    NET_EXT_KPD_APPLY = 0x0808,       // "kpdA" C -> S NetKpdApplyPacket: a K.P.D application (answer: NET_EXT_KPD_RESPONSE code 6)
 
     // 0x8000.. KrunkNative-only
     NET_EXT_BLOCK_KN = 0x8000,
@@ -240,8 +241,10 @@ typedef struct {
 } NetAdminActionPacket;
 
 // NET_EXT_KPD_RESPONSE (S -> C, v10 "kpd" [code, message, data]): code 0 answers a call
-// (status: NET_KPD_* with the message to show and the suspect's name); codes 1..3 carry a list
-// for the K.P.D window as a JSON array after the struct (the rest of the body, not 0-terminated).
+// (status: NET_KPD_* with the message to show and the suspect's name), code 6 an application
+// (NET_EXT_KPD_APPLY, KrunkNative); codes 1..3 carry a list
+// for the K.P.D window as a JSON array after the struct (the rest of the body, not 0-terminated). A
+// list longer than one packet comes in pages, each a whole array with `name` "page/pages" (1-based).
 enum {
     NET_KPD_REPORTED = 0,   // "Reported <name> to the K.P.D"
     NET_KPD_BUSY = 1,       // already reported / cooling down / rate limited: `message` says why
@@ -262,6 +265,15 @@ typedef struct NetKpdDataPacket {
     int32_t sus;
     int32_t caller;
 } NetKpdDataPacket;
+
+// NET_EXT_KPD_APPLY (C -> S, v10 "kpdA" [discord, reason] from kpdSubmit): an account of level 50 or more,
+// not flagged and not an officer, applies to the K.P.D; kn_brain keeps it (kpd_applications) when the
+// reporter has 20 positive reports and a rating above 0.7. The answer is NET_EXT_KPD_RESPONSE code 6
+// (status NET_KPD_REPORTED: received, else refused with the message). Strings 0-terminated.
+typedef struct {
+    char discord[40];
+    char reason[300];
+} NetKpdApplyPacket;
 
 // NET_EXT_KPD_RATE (C -> S, v10 "rkpd" [tagged]): the officer's verdict, 1 tagged (hacking: [Y] twice,
 // "Are you 100% sure?"), 0 not tagged ([N]). The server records it on the call (kn_brain kpd_rate:

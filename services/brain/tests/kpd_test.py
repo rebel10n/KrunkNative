@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The in-game player list's K.P.D call on kn_brain (services/brain/db_kpd.c, migration 0209_kpd_calls): the game server's "acct" ops kpd_call / kpd_calls / kpd_log.
+"""The in-game player list's K.P.D call on kn_brain (services/brain/db_kpd.c, migration 0209_kpd_calls): the game server's "acct" ops kpd_call / kpd_calls / kpd_log / kpd_rate / kpd_stats / kpd_apply / kpd_apps / kpd_officer.
   kpd_test.py <kn_brain> <repo root> [database]
 Database: argument, else $KN_MM_TEST_DATABASE, else config/config.json's database.name (local
 PostgreSQL); every run uses its own schema (kn_test_kpd_<pid>, dropped after) and an ephemeral port.
@@ -13,6 +13,11 @@ Two accounts register over the social socket; a fake game server on /mm/internal
     jop / jor / cos: the reporter's rating)
   - kpd_rate: an officer's verdict (rating 1 tagged / 0 not), status handled, once per call; the
     reporter's rating jop / jor follows; kpd_log: the rated calls {modn, htag, hckn}
+  - kpd_stats: the officer's tagged verdicts by range (v10's Stats tab: 1day .. alltimeEntries)
+  - the reporter's Helpful Reports: kpd_rate counts into players.jobrating / jobratingpositive
+  - kpd_apply: refused below 20 positive reports, kept from there (one pending), listed by kpd_apps;
+    kpd_officer: refused for a player, a developer grants (moderator flag, application closed), the
+    console (actor 0) revokes, moderation_log keeps both; an officer cannot apply
 """
 import asyncio
 import json
@@ -226,6 +231,66 @@ async def scenario(port, dbcfg):
             check(rows == [["2", "1"]], "alice's rating 1/2 (one helpful of two rated): %s" % rows)
         err, data = await n.op("kpd_log", limit=10)
         check(err is None and len(data or []) == 2 and sorted(d["htag"] for d in data) == [0, 1], "the log: tagged and untagged: %s" % data)
+
+        print("== kpd_stats (v10's Stats tab: the officer's tags by range)")
+        err, data = await n.op("kpd_stats", id=bob_id)
+        st = data[0] if isinstance(data, list) and data else {}
+        ranges = ("1day", "3day", "7day", "14day", "30day", "90day", "alltime")
+        check(err is None and all(st.get(r + "Entries") == 1 for r in ranges),
+              "bob tagged one case (the untagged guest case does not count): %s %s" % (err, data))
+        err, data = await n.op("kpd_stats", id=alice_id)
+        st = data[0] if isinstance(data, list) and data else {}
+        check(err is None and all(st.get(r + "Entries") == 0 for r in ranges), "alice rated nothing: %s %s" % (err, data))
+
+        print("== the reporter's Helpful Reports (players.jobrating / jobratingpositive: v10 jobRating / jobRatingPos)")
+        rows = sql(dbcfg, "SELECT jobrating, jobratingpositive FROM players WHERE player_id = %d" % alice_id)
+        if rows is not None:
+            check(rows == [["2", "1"]], "alice: 2 rated calls, 1 helpful: %s" % rows)
+        rows = sql(dbcfg, "SELECT jobrating, jobratingpositive FROM players WHERE player_id = %d" % bob_id)
+        if rows is not None:
+            check(rows == [["0", "0"]], "bob's call is unrated: 0/0: %s" % rows)
+
+        print("== kpd_apply (\"kpdA\"), kpd_apps, kpd_officer (grant / revoke)")
+        app = dict(id=alice_id, name=alice, discord="alice#1", reason="I hunt hackers")
+        err, _ = await n.op("kpd_apply", **app)
+        check(err and "20 positive reports" in err, "1 helpful report: not yet (%s)" % err)
+        err, _ = await n.op("kpd_apply", **dict(app, discord=""))
+        check(err and "Invalid Discord" in err, "no Discord: %s" % err)
+        sql(dbcfg, "UPDATE players SET jobrating = 22, jobratingpositive = 21 WHERE player_id = %d" % alice_id)  # 20 more helpful ones
+        err, data = await n.op("kpd_apply", **app)
+        check(err is None and data and data.get("id", 0) > 0, "21 of 22 helpful: the application is kept: %s %s" % (err, data))
+        err, _ = await n.op("kpd_apply", **app)
+        check(err and "already in review" in err, "a second one while the first is pending: %s" % err)
+        err, data = await n.op("kpd_apps", limit=10)
+        mine = [d for d in data or [] if d.get("n") == alice]
+        check(err is None and len(mine) == 1 and mine[0]["discord"] == "alice#1" and mine[0]["reason"] == "I hunt hackers"
+              and mine[0]["jop"] == 21 and mine[0]["jor"] == 22, "kpd_apps lists it with the rating: %s %s" % (err, data))
+        err, _ = await n.op("kpd_officer", actor=bob_id, name=alice, on=1)
+        check(err and "Only developers" in err, "a player cannot grant: %s" % err)
+        sql(dbcfg, "UPDATE players SET player_developer = 1 WHERE player_id = %d" % bob_id)
+        err, data = await n.op("kpd_officer", actor=bob_id, name=alice.upper(), on=1)
+        check(err is None and data and data.get("id") == alice_id and data.get("n") == alice and data.get("on") == 1,
+              "a developer grants it (the name in any case): %s %s" % (err, data))
+        rows = sql(dbcfg, "SELECT player_moderator FROM players WHERE player_id = %d" % alice_id)
+        if rows is not None:
+            check(rows == [["1"]], "alice is a moderator (K.P.D officer): %s" % rows)
+        rows = sql(dbcfg, "SELECT status FROM kpd_applications WHERE account_id = %d" % alice_id)
+        if rows is not None:
+            check(rows == [["1"]], "her application is closed as granted: %s" % rows)
+        err, data = await n.op("kpd_apps", limit=10)
+        check(err is None and not [d for d in data or [] if d.get("n") == alice], "and no longer pending: %s" % data)
+        err, _ = await n.op("kpd_apply", **app)
+        check(err and "Already K.P.D" in err, "an officer cannot apply: %s" % err)
+        err, data = await n.op("kpd_officer", actor=0, name=alice, on=0)
+        check(err is None and data and data.get("on") == 0, "the game server's console revokes it: %s %s" % (err, data))
+        rows = sql(dbcfg, "SELECT player_moderator FROM players WHERE player_id = %d" % alice_id)
+        if rows is not None:
+            check(rows == [["0"]], "alice is no longer a moderator: %s" % rows)
+        rows = sql(dbcfg, "SELECT coalesce(actor_id, 0), action FROM moderation_log WHERE target_id = %d ORDER BY id" % alice_id)
+        if rows is not None:
+            check(rows == [[str(bob_id), "kpd_grant"], ["0", "kpd_revoke"]], "moderation_log: the grant by bob, the revoke: %s" % rows)
+        err, _ = await n.op("kpd_officer", actor=0, name="nobody_" + stamp, on=1)
+        check(err and "not found" in err, "an unknown account: %s" % err)
 
 
 def main():

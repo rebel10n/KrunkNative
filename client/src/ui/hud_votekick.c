@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <time.h> // the Distress Calls' "N ago"
 
 #define VOTED_MAX 32
 
@@ -51,6 +52,9 @@ static struct {
     int kpd_sus, kpd_caller;   // the suspect's / reporter's uid (-1 none)
     int kpd_step;              // iìíîiíi: -1 not tagged, 0 "Is X hacking?", 1 "Are you 100% sure?", 2 tagged
     int kpd_done;              // iîíìiïi: the verdict went out ("rkpd")
+    // an officer's list arriving in pages (policeRes code list_code), joined until the last one
+    cJSON *list_rows;
+    int list_code;
     // --render-scenario / tests: the rows come from here instead of the live game
     cJSON *override;
 } g_vk;
@@ -321,6 +325,8 @@ static void call_police(Client *client, const char *alias, const int uid) {
     g_vk.call_timer = html_timer_add(KPD_NO_ANSWER_MS, call_no_answer, NULL);
 }
 
+static void kpd_list_show(int code, int status, const char *message, const char *json, size_t json_len);
+
 // policeRes(code, message, data) (v10 :216287): code 0 ends the call (the siren for a report,
 // the busy tone for anything else), codes 1..3 fill #kpdCalls of the K.P.D popup.
 void hud_votekick_on_kpd(Client *client, const NetKpdResponsePacket *res, const char *json, const size_t json_len) {
@@ -344,19 +350,90 @@ void hud_votekick_on_kpd(Client *client, const NetKpdResponsePacket *res, const 
         audio_play("whoosh_0", 0.1f, 0, 1.0f);
         return;
     }
-    // an officer's list: the K.P.D popup's #kpdCalls (hud_kpd_list_html renders v10's table)
+    if (res->code == 6) { // KrunkNative: the K.P.D application's answer (kpdSubmit's "Loading..." goes)
+        ui_loadout_kpd_apply_result(res->status == NET_KPD_REPORTED, message[0] ? message : res->status == NET_KPD_REPORTED ? "Application sent" : "");
+        return;
+    }
+    // an officer's list (v10 policeRes codes 1..5): only for the tab on show (`_71731 != code - 1`)
+    if (res->code < 1 || res->code > 5 || res->code - 1 != ui_loadout_kpd_tab()) return;
+    int page = 0, pages = 0;
+    if (sscanf(name, "%d/%d", &page, &pages) == 2 && pages > 1 && page >= 1 && page <= pages) {
+        // a long list comes in pages (accounts.c acc_kpd_send_list): joined, rendered with the last
+        if (page == 1 || g_vk.list_code != res->code || !g_vk.list_rows) {
+            cJSON_Delete(g_vk.list_rows);
+            g_vk.list_rows = cJSON_CreateArray();
+            g_vk.list_code = res->code;
+        }
+        cJSON *part = json && json_len ? cJSON_ParseWithLength(json, json_len) : NULL;
+        while (cJSON_IsArray(part) && g_vk.list_rows && cJSON_GetArraySize(part) > 0) cJSON_AddItemToArray(g_vk.list_rows, cJSON_DetachItemFromArray(part, 0));
+        cJSON_Delete(part);
+        if (page < pages) return;
+        char *joined = g_vk.list_rows ? cJSON_PrintUnformatted(g_vk.list_rows) : NULL;
+        cJSON_Delete(g_vk.list_rows);
+        g_vk.list_rows = NULL;
+        kpd_list_show(res->code, res->status, message, joined, joined ? strlen(joined) : 0);
+        free(joined);
+        return;
+    }
+    kpd_list_show(res->code, res->status, message, json, json_len);
+}
+
+// v10 _8991(ms): "[Ny ][Nd ][Nh ]Nm" (minutes always, no seconds)
+static void kpd_duration(char *out, const size_t size, const double seconds) {
+    long s = seconds > 0 ? (long) seconds : 0, m = s / 60, h = m / 60, d = h / 24;
+    const long y = d / 365;
+    m %= 60, h %= 24, d %= 365;
+    size_t n = 0;
+    out[0] = 0;
+    if (y) n += (size_t) snprintf(out + n, size - n, "%ldy ", y);
+    if (d && n < size) n += (size_t) snprintf(out + n, size - n, "%ldd ", d);
+    if (h && n < size) n += (size_t) snprintf(out + n, size - n, "%ldh ", h);
+    if (n < size) snprintf(out + n, size - n, "%ldm", m);
+}
+
+// v10's Distress Calls order: three stable sorts, the last by call type (1 ranked, 2 comp, public,
+// 3 custom), the one before by the reporter's rating ((jop || 1) / (jor || 1): above 0.7 by helpful
+// reports, 0.5..0.7 next, the rest last); the server's order (newest first) breaks ties.
+typedef struct {
+    const cJSON *row;
+    int index, type_rank, rating_rank;
+} KpdCallRow;
+
+static double kpd_num(const cJSON *row, const char *key) {
+    const cJSON *v = cJSON_GetObjectItem(row, key);
+    return cJSON_IsNumber(v) ? v->valuedouble : 0.0;
+}
+
+static double kpd_ratio(const cJSON *row) {
+    const double p = kpd_num(row, "jop"), t = kpd_num(row, "jor");
+    return (p ? p : 1.0) / (t ? t : 1.0);
+}
+
+static int kpd_call_cmp(const void *a, const void *b) {
+    const KpdCallRow *x = a, *y = b;
+    if (x->type_rank != y->type_rank) return x->type_rank - y->type_rank;
+    if (x->rating_rank != y->rating_rank) return y->rating_rank - x->rating_rank;
+    return x->index - y->index;
+}
+
+// v10's rating colours (_71728) at its thresholds
+static const char *kpd_rating_color(const double ratio) {
+    return ratio <= 0.5 ? "#fc3232" : ratio <= 0.7 ? "#f7d31e" : "#63de26";
+}
+
+static void kpd_list_show(const int code, const int status, const char *message, const char *json, const size_t json_len) {
     const HtmlElem holder = html_dom_by_id("kpdCalls");
     if (!holder) return;
-    char *html = hud_kpd_list_html(res->code, res->status, message, json, json_len);
+    char *html = hud_kpd_list_html(code, status, message, json, json_len);
     if (html) html_dom_set_html(holder, html);
     free(html);
 }
 
-// v10 policeRes codes 1 (Distress Calls) and 2 (the moderation log), from the brain's JSON rows
+// v10 policeRes codes 1 (Active Calls), 2 (Ban Logs) and 3 (Stats), from the brain's JSON rows
 char *hud_kpd_list_html(const int code, const int status, const char *message, const char *json, const size_t json_len) {
     cJSON *rows = json && json_len ? cJSON_ParseWithLength(json, json_len) : NULL;
     const int count = cJSON_IsArray(rows) ? cJSON_GetArraySize(rows) : 0;
-    size_t cap = 1024 + (size_t) count * 512;
+    size_t cap = 2048 + (size_t) count * 768;
     char *out = malloc(cap);
     if (!out) {
         cJSON_Delete(rows);
@@ -364,33 +441,41 @@ char *hud_kpd_list_html(const int code, const int status, const char *message, c
     }
     size_t len = 0;
     out[0] = 0;
+    const double now = (double) time(NULL);
     if (status != NET_KPD_REPORTED) {
         append_esc(out, cap, &len, message && message[0] ? message : "Request Failed");
     } else if (!count) {
         append_esc(out, cap, &len, code == 1 ? "No Active Distress Calls" : "No Data");
     } else if (code == 1) {
+        KpdCallRow *order = calloc((size_t) count, sizeof(*order));
+        int n = 0;
+        const cJSON *r;
+        cJSON_ArrayForEach(r, rows) {
+            if (!order) break;
+            const double ratio = kpd_ratio(r);
+            const int typ = (int) kpd_num(r, "typ");
+            order[n] = (KpdCallRow) {.row = r, .index = n, .type_rank = typ == 1 ? 0 : typ == 2 ? 1 : typ == 3 ? 3 : 2,
+                                     .rating_rank = ratio <= 0.5 ? 0 : ratio <= 0.7 ? 1 : 1 + (int) kpd_num(r, "jop")};
+            n++;
+        }
+        if (order) qsort(order, (size_t) n, sizeof(*order), kpd_call_cmp);
         len += (size_t) snprintf(out + len, cap - len, "<table style=\"width:100%%\"><tr><th style=\"font-size: 16px;\">Rating</th>"
                                                        "<th style=\"font-size: 16px;\">Reporter</th><th style=\"font-size: 16px;\">Suspect</th>"
                                                        "<th style=\"font-size: 16px;\">Info</th><th style=\"font-size: 16px;\">Join</th></tr>");
-        const cJSON *r;
-        cJSON_ArrayForEach(r, rows) {
-            const cJSON *jop = cJSON_GetObjectItem(r, "jop"), *jor = cJSON_GetObjectItem(r, "jor"), *typ = cJSON_GetObjectItem(r, "typ");
-            const cJSON *gst = cJSON_GetObjectItem(r, "gst");
+        for (int i = 0; i < n && len + 700 < cap; i++) {
+            r = order[i].row;
             const char *can = cJSON_GetStringValue(cJSON_GetObjectItem(r, "can")), *con = cJSON_GetStringValue(cJSON_GetObjectItem(r, "con"));
             const char *gco = cJSON_GetStringValue(cJSON_GetObjectItem(r, "gco"));
-            const double p = cJSON_IsNumber(jop) ? jop->valuedouble : 0, t = cJSON_IsNumber(jor) ? jor->valuedouble : 0;
-            const double ratio = t > 0 ? p / t : 1.0;
-            const char *col = ratio <= 0.5 ? "#eb5656" : ratio <= 0.7 ? "#fbc02d" : "#7eeb7a";
-            const int type = cJSON_IsNumber(typ) ? typ->valueint : 0;
-            len += (size_t) snprintf(out + len, cap - len, "<tr><td><span class='kpdRepLvl' style='color:%s'>%d/%d</span></td><td>", col, (int) p, (int) t);
-            if (len + 400 > cap) break;
-            append_esc(out, cap, &len, type == 1 ? "[ranked] " : type == 2 ? "[comp] " : type == 3 ? "[custom] " : "");
-            len += (size_t) snprintf(out + len, cap - len, "<a href='javascript:void(0)' onclick='openPlayerProfile(\"");
+            const int type = (int) kpd_num(r, "typ");
+            len += (size_t) snprintf(out + len, cap - len, "<tr><td><span class='kpdRepLvl' style='color:%s'>%d/%d</span></td>",
+                                     kpd_rating_color(kpd_ratio(r)), (int) kpd_num(r, "jop"), (int) kpd_num(r, "jor"));
+            len += (size_t) snprintf(out + len, cap - len, "<td><a href='javascript:void(0)' onclick='openPlayerProfile(\"");
             append_esc(out, cap, &len, can ? can : "");
-            len += (size_t) snprintf(out + len, cap - len, "\")' class='menuLink' style='font-size:16px'>");
+            len += (size_t) snprintf(out + len, cap - len, "\")' class='menuLink' style='font-size:16px'>%s",
+                                     type == 1 ? "[ranked] " : type == 2 ? "[comp] " : type == 3 ? "[custom] " : "");
             append_esc(out, cap, &len, can ? can : "");
             len += (size_t) snprintf(out + len, cap - len, "</a></td>");
-            if (cJSON_IsNumber(gst) && gst->valueint) {
+            if (kpd_num(r, "gst")) {
                 len += (size_t) snprintf(out + len, cap - len, "<td style='color: var(--red);'>Guest</td>");
             } else {
                 len += (size_t) snprintf(out + len, cap - len, "<td><a href='javascript:void(0)' onclick='openPlayerProfile(\"");
@@ -399,36 +484,86 @@ char *hud_kpd_list_html(const int code, const int status, const char *message, c
                 append_esc(out, cap, &len, con ? con : "");
                 len += (size_t) snprintf(out + len, cap - len, "</a></td>");
             }
-            len += (size_t) snprintf(out + len, cap - len, "<td><span class='callRegion'>");
-            append_esc(out, cap, &len, gco ? gco : "");
+            // Info: how long ago, and the server (v10 gco.split(':')[0]: KrunkNative's game code is node:lobby)
+            char ago[48], server[64];
+            const double tim = kpd_num(r, "tim");
+            kpd_duration(ago, sizeof(ago), tim > 0 ? now - tim : 0);
+            snprintf(server, sizeof(server), "%s", gco ? gco : "");
+            server[strcspn(server, ":")] = 0;
+            len += (size_t) snprintf(out + len, cap - len, "<td><span style='color:#858585;margin-right:12px'>%s ago</span><span class='callRegion'>", ago);
+            append_esc(out, cap, &len, server);
             len += (size_t) snprintf(out + len, cap - len, "</span></td><td><span class='policeJoinB' onclick=\"policeJoin('");
             append_esc(out, cap, &len, gco ? gco : "");
             len += (size_t) snprintf(out + len, cap - len, "')\">Join</span></td></tr>");
         }
+        free(order);
         len += (size_t) snprintf(out + len, cap - len, "</table>");
-    } else {
+    } else if (code == 2) {
         len += (size_t) snprintf(out + len, cap - len, "<table style=\"width:100%%\"><tr><th style=\"font-size: 16px;\">Moderator</th>"
-                                                       "<th style=\"font-size: 16px;\">Action</th><th style=\"font-size: 16px;\">Suspect</th></tr>");
+                                                       "<th style=\"font-size: 16px;\">Action</th><th style=\"font-size: 16px;\">Suspect</th>"
+                                                       "<th style=\"font-size: 16px;\">Time</th></tr>");
         const cJSON *r;
         cJSON_ArrayForEach(r, rows) {
             const char *modn = cJSON_GetStringValue(cJSON_GetObjectItem(r, "modn")), *hckn = cJSON_GetStringValue(cJSON_GetObjectItem(r, "hckn"));
-            const cJSON *htag = cJSON_GetObjectItem(r, "htag");
-            if (len + 300 > cap) break;
+            if (len + 600 > cap) break;
             len += (size_t) snprintf(out + len, cap - len, "<tr><td>");
             append_esc(out, cap, &len, modn ? modn : "");
             len += (size_t) snprintf(out + len, cap - len, "</td><td><span style='color:#858585'>%s</span></td><td style='color: var(--red);'>",
-                                     cJSON_IsNumber(htag) && htag->valueint ? "tagged" : "untagged");
+                                     kpd_num(r, "htag") ? "tagged" : "untagged");
             append_esc(out, cap, &len, hckn ? hckn : "");
-            len += (size_t) snprintf(out + len, cap - len, "</td></tr>");
+            // v10 _8962(dat, true) + " ago": "H:MM D Mon YYYY ago" (the brain's dat: epoch seconds)
+            char when[48] = "None";
+            const time_t dat = (time_t) kpd_num(r, "dat");
+            struct tm tm;
+            static const char *const months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+#ifdef _WIN32
+            const int ok = dat > 0 && !localtime_s(&tm, &dat);
+#else
+            const int ok = dat > 0 && localtime_r(&dat, &tm) != NULL;
+#endif
+            if (ok)
+                snprintf(when, sizeof(when), "%d:%02d %d %s %d", tm.tm_hour, tm.tm_min, tm.tm_mday, months[tm.tm_mon % 12], tm.tm_year + 1900);
+            len += (size_t) snprintf(out + len, cap - len, "</td><td><span style='color:#858585;'>%s ago</span></td></tr>", when);
         }
         len += (size_t) snprintf(out + len, cap - len, "</table>");
+    } else if (code == 3) {
+        static const char *const ranges[] = {"1day", "3day", "7day", "14day", "30day", "90day", "alltime"};
+        const cJSON *first = cJSON_GetArrayItem(rows, 0);
+        len += (size_t) snprintf(out + len, cap - len, "<table style=\"width:100%%\"><tr><th style=\"font-size: 16px;\">Range</th>"
+                                                       "<th style=\"font-size: 16px;\">Tag Count</th></tr>");
+        for (size_t i = 0; i < sizeof(ranges) / sizeof(ranges[0]); i++) {
+            char key[24];
+            snprintf(key, sizeof(key), "%sEntries", ranges[i]);
+            len += (size_t) snprintf(out + len, cap - len, "<tr><td><span style='color:#858585'>%s</span></td><td><span style='color:#858585'>%d</span></td></tr>",
+                                     ranges[i], (int) kpd_num(first, key));
+        }
+        len += (size_t) snprintf(out + len, cap - len, "</table>");
+    } else {
+        append_esc(out, cap, &len, "No Data");
     }
     cJSON_Delete(rows);
     return out;
 }
 
 // The K.P.D popup's tabs for officers: "kpd" tab (1 calls, 2 log) -> policeRes(code)
+// kpdSubmit's "kpdA" [discord, reason]: the server checks the account, kn_brain keeps the application
+void hud_votekick_kpd_apply(Client *client, const char *discord, const char *reason) {
+    if (!client || !call_reachable(client)) {
+        ui_loadout_kpd_apply_result(0, "Not connected to a server");
+        return;
+    }
+    NetKpdApplyPacket req;
+    memset(&req, 0, sizeof(req));
+    snprintf(req.discord, sizeof(req.discord), "%s", discord ? discord : "");
+    snprintf(req.reason, sizeof(req.reason), "%s", reason ? reason : "");
+    send_ext(client, NET_EXT_KPD_APPLY, &req, sizeof(req));
+}
+
 void hud_votekick_kpd_request(Client *client, const int tab) {
+    if (!client || !call_reachable(client)) { // no session: no answer can come (the list would say Loading... for good)
+        kpd_list_show(tab, NET_KPD_UNAVAILABLE, "Not connected to a server", NULL, 0);
+        return;
+    }
     NetKpdCallPacket req;
     memset(&req, 0, sizeof(req));
     req.tab = (uint8_t) tab;
@@ -619,8 +754,8 @@ int hud_votekick_handle(Client *client, const char *name, const HtmlEvent *ev, c
         servers_ui_join_game(arg_text(args, argc, 0));
         return 1;
     }
-    if (!strcmp(name, "switchKPDTab")) { // switchKPDTab(i): the officers' tabs (0 calls, 1 log)
-        hud_votekick_kpd_request(client, arg_int(args, argc, 0, 0) + 1);
+    if (!strcmp(name, "switchKPDTab")) { // switchKPDTab(i): the officers' tab i, showPolicePop() again (ui_loadout.c)
+        ui_loadout_switch_kpd_tab(arg_int(args, argc, 0, 0));
         return 1;
     }
     return -1;

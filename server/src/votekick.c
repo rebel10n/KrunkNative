@@ -376,6 +376,8 @@ void votekick_kpd_reply(const ClientConnection *to, const uint8_t code, const ui
     vk_send_ext(to, NET_EXT_KPD_RESPONSE, body, (uint16_t) n);
 }
 
+static void kpd_offer_new_call(int recent);
+
 static KpdRecent *kpd_recent(const ClientConnection *target) {
     for (int i = 0; i < g_vk.recent_count; i++) {
         KpdRecent *r = &g_vk.recent[i];
@@ -392,9 +394,13 @@ void votekick_handle_kpd(ClientConnection *client, const uint8_t *body, const ui
         votekick_kpd_reply(client, 0, NET_KPD_REFUSED, "Sign in to call the K.P.D", "", NULL);
         return;
     }
-    if (req.tab != 0) { // the K.P.D window's lists: moderators (and DEV) only
+    if (req.tab != 0) { // the K.P.D window's lists (1 Active Calls, 2 Ban Logs, 3 Stats): moderators (and DEV) only
         if (!(client->acct.flags & NET_PLAYER_INFO_MOD) && !net_client_is_dev(client)) {
             votekick_kpd_reply(client, req.tab, NET_KPD_REFUSED, "K.P.D officers only", "", "[]");
+            return;
+        }
+        if (req.tab > 3) { // v10's Demos / Reviewers come from its web API, not this socket
+            votekick_kpd_reply(client, req.tab, NET_KPD_UNAVAILABLE, "Not available on this server", "", "[]");
             return;
         }
         accounts_kpd_request(client, req.tab, NULL);
@@ -437,7 +443,32 @@ void votekick_handle_kpd(ClientConnection *client, const uint8_t *body, const ui
     recent->rated = 0;
     g_vk.last_kpd_call_at = g_server->now;
     server_log("[kpd] %s called the K.P.D on %s", client->name, target->name);
+    const int recent_index = (int) (recent - g_vk.recent);
     accounts_kpd_request(client, 0, target); // the record (kn_brain), then the answer
+    kpd_offer_new_call(recent_index);       // an officer already here: the case now (its call id follows the record)
+}
+
+// NET_EXT_KPD_APPLY (v10 "kpdA" from kpdSubmit): v10's client rules again here (an account of level
+// KPD_APPLY_LVL, not flagged, not an officer, a Discord name and a reason); kn_brain checks the
+// reports (20 positive, rating above 0.7) and keeps it. The answer is policeRes code 6.
+void votekick_handle_kpd_apply(ClientConnection *client, const uint8_t *body, const uint16_t length) {
+    if (!client || length < sizeof(NetKpdApplyPacket)) return;
+    NetKpdApplyPacket req;
+    memcpy(&req, body, sizeof(req));
+    req.discord[sizeof(req.discord) - 1] = 0;
+    req.reason[sizeof(req.reason) - 1] = 0;
+    const char *refused = !vk_is_account(client)                                ? "Sign in to apply for K.P.D"
+                          : client->acct.level < KPD_APPLY_LVL || client->acct.hack ? "Requires Lvl 50"
+                          : !req.discord[0]                                      ? "Invalid Discord"
+                          : !req.reason[0]                                       ? "Invalid Reason"
+                          : client->acct.flags & (NET_PLAYER_INFO_MOD | NET_PLAYER_INFO_DEV) ? "Already K.P.D" // the account's (v10 isMod), not a local / op DEV
+                                                                                 : NULL;
+    if (refused) {
+        votekick_kpd_reply(client, 6, NET_KPD_REFUSED, refused, "", NULL);
+        return;
+    }
+    server_log("[kpd] %s applies to the K.P.D", client->name);
+    accounts_kpd_apply(client, req.discord, req.reason);
 }
 
 // NET_EXT_ADMIN_ACTION (v10 ADMIN_ACTIONS from the player list's Kick / Ban): a DEV's request. The
@@ -476,30 +507,78 @@ static void kpd_send_data(const ClientConnection *to, const int sus, const int c
     vk_send_ext(to, NET_EXT_KPD_DATA, &d, sizeof(d));
 }
 
-void votekick_officer_joined(const ClientConnection *client) {
-    if (!kpd_is_officer(client)) return;
+// A case an officer can still work: not rated, not older than KPD_CASE_TIME_S, the suspect still here
+static int kpd_case_open(const KpdRecent *r) {
+    return !r->rated && g_server->now - r->at <= KPD_CASE_TIME_S && vk_by_id(r->suspect_id) != NULL;
+}
+
+static int kpd_case_held(const int recent) {
+    for (int k = 0; k < g_vk.officer_count; k++) {
+        if (g_vk.officers[k].recent == recent && !g_vk.officers[k].rated && kpd_case_open(&g_vk.recent[recent])) return 1;
+    }
+    return 0;
+}
+
+// The officer's slot: NULL when it works an open case already (it keeps that one) or there is no
+// room, else its old slot (a closed case: free for the next) or a new one.
+static KpdOfficer *kpd_free_officer(const ClientConnection *client) {
     for (int i = 0; i < g_vk.officer_count; i++) {
-        if (g_vk.officers[i].conn_id == client->id) return; // a live sign-in again: the case stands
+        KpdOfficer *o = &g_vk.officers[i];
+        if (o->conn_id != client->id) continue;
+        const int working = !o->rated && o->recent >= 0 && o->recent < g_vk.recent_count && kpd_case_open(&g_vk.recent[o->recent]);
+        return working ? NULL : o;
     }
-    // the newest open call whose suspect is still here and that no officer holds
-    int best = -1;
-    for (int i = 0; i < g_vk.recent_count; i++) {
-        const KpdRecent *r = &g_vk.recent[i];
-        if (r->rated || g_server->now - r->at > KPD_CASE_TIME_S || r->suspect_id == client->id || !vk_by_id(r->suspect_id)) continue;
-        int held = 0;
-        for (int k = 0; k < g_vk.officer_count; k++) held |= g_vk.officers[k].recent == i;
-        if (!held && (best < 0 || r->at > g_vk.recent[best].at)) best = i;
-    }
-    if (best < 0 || g_vk.officer_count >= KPD_OFFICERS_MAX) return;
+    if (g_vk.officer_count >= KPD_OFFICERS_MAX) return NULL;
     KpdOfficer *o = &g_vk.officers[g_vk.officer_count++];
+    memset(o, 0, sizeof(*o));
     o->conn_id = client->id;
-    o->recent = best;
+    o->recent = -1;
+    return o;
+}
+
+// The officer may work this call: not its own call, not a call on itself, nobody else on it
+static int kpd_case_for(const ClientConnection *client, const int recent) {
+    const KpdRecent *r = &g_vk.recent[recent];
+    return kpd_case_open(r) && r->suspect_id != client->id && r->caller_id != client->id && !kpd_case_held(recent);
+}
+
+static void kpd_hand_over(const ClientConnection *client, KpdOfficer *o, const int recent) {
+    o->recent = recent;
     o->since = g_server->now;
     o->rated = 0;
-    const KpdRecent *r = &g_vk.recent[best];
+    const KpdRecent *r = &g_vk.recent[recent];
     const int caller = vk_by_id(r->caller_id) ? r->caller_id : -1;
     server_log("[kpd] officer %s takes the case of %s (call %lld)", client->name, r->name, (long long) r->call_id);
     kpd_send_data(client, r->suspect_id, caller);
+}
+
+// The newest open call this officer may work goes to it (v10 startGame kpdData). Called when an
+// officer's account settles here (a join, a live sign-in) and, for the officers already in the lobby,
+// when a call comes in (votekick_handle_kpd).
+static int kpd_offer(const ClientConnection *client, const int only) {
+    if (!kpd_is_officer(client)) return 0;
+    int best = -1;
+    for (int i = 0; i < g_vk.recent_count; i++) {
+        if ((only < 0 || i == only) && kpd_case_for(client, i) && (best < 0 || g_vk.recent[i].at > g_vk.recent[best].at)) best = i;
+    }
+    if (best < 0) return 0;
+    KpdOfficer *o = kpd_free_officer(client);
+    if (!o) return 0;
+    kpd_hand_over(client, o, best);
+    return 1;
+}
+
+void votekick_officer_joined(const ClientConnection *client) {
+    // a live sign-in again while the case is open: the case stands (kpd_free_officer)
+    kpd_offer(client, -1);
+}
+
+// A call came in (KrunkNative: v10's officers answer it from the Distress Calls list and join; an
+// officer already in this lobby gets it here, at once): the first officer with no open case takes it.
+static void kpd_offer_new_call(const int recent) {
+    for (size_t i = 0; i < g_server->client_count; i++) {
+        if (kpd_offer(&g_server->clients[i], recent)) return;
+    }
 }
 
 void votekick_handle_kpd_rate(ClientConnection *client, const uint8_t *body, const uint16_t length) {

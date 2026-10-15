@@ -1157,7 +1157,7 @@ void menu_update_class_box(void) {
     const int police = ui_police_active();
     const MenuClass *c = menu_class_at(police ? MENU_POLICE_CLASS : g_ui.client->menu_class_index);
     HtmlElem name_el = by_id("menuClassName"), sub_el = by_id("menuClassSubtext"), tag_el = by_id("menuClassNameTag");
-    if (name_el) html_dom_set_text(name_el, police ? "Officer" : c ? c->name : ""); // vO349.classN (K.P.D)
+    if (name_el) html_dom_set_text(name_el, police ? ui_police_class_name() : c ? c->name : ""); // vO349.classN (K.P.D)
     char icon[256] = "";
     StrBuf sb = {0};
     for (int i = 0; c && i < c->loadout_count; i++) {

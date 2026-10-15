@@ -313,9 +313,10 @@ int  hud_votekick_active(void);                   // a vote runs (voteToKick sho
 const char *hud_votekick_target(void);            // its target alias ("" none)
 int  hud_votekick_row_allowed(const Client*, const char *alias, int level_ok); // the row's Votekick button (v10 :214300)
 int  hud_votekick_kpd_row_allowed(const Client*); // the row's K.P.D button (account level >= 5)
-void hud_votekick_kpd_request(Client*, int tab);  // "kpd" tab 1 / 2: an officer's list for the K.P.D popup
+void hud_votekick_kpd_apply(Client*, const char *discord, const char *reason); // "kpdA": the K.P.D application
+void hud_votekick_kpd_request(Client*, int tab);  // "kpd" tab 1 / 2 / 3: an officer's list for the K.P.D popup
 void hud_votekick_admin_action(Client*, int uid, int action); // NET_EXT_ADMIN_ACTION: 0 kick, 1 ban (DEV; the server checks)
-char *hud_kpd_list_html(int code, int status, const char *message, const char *json, size_t json_len); // policeRes 1 / 2 table, malloc'd
+char *hud_kpd_list_html(int code, int status, const char *message, const char *json, size_t json_len); // policeRes 1 / 2 / 3 table, malloc'd
 int  hud_votekick_handle(Client*, const char *name, const HtmlEvent *ev, const HtmlArg *args, int argc); // kickVote, confirmPolice, callPolice, copyUser, policeJoin
 void hud_votekick_set_override(const struct cJSON *rows); // --render-scenario state.playerList (hud_ui.c rows from these)
 const struct cJSON *hud_votekick_override(void);
@@ -642,11 +643,17 @@ void ui_loadout_class_bubble(int index);         // selectClass speech line
 void ui_loadout_switch_tab(int tab);             // windows[2].switchTab(tab, true): Class / Loadout / Customize / Other
 void ui_loadout_select_tab(int tab);             // the same from selectClass: re-renders only an open window 3
 void ui_loadout_show_police_pop(void);           // shoPolicePop
+void ui_loadout_switch_kpd_tab(int tab);         // switchKPDTab(i): an officer's tab, showPolicePop() again
+int  ui_loadout_kpd_tab(void);                   // the officer's tab on show (_71731: 0 Active Calls .. 4 Reviewers)
+void ui_loadout_kpd_apply_pop(void);             // kpdApplyPop(): the K.P.D application form (KrunkNative)
+void ui_loadout_kpd_submit(void);                // kpdSubmit(): v10's checks, then NET_EXT_KPD_APPLY
+void ui_loadout_kpd_apply_result(int ok, const char *text); // the application's answer (policeRes code 6)
 void ui_loadout_hide_police_pop(void);           // hidePolicePop
 void ui_loadout_clear_pops(void);                // clearPops
 void ui_loadout_reset_pops(void);                // resetPops (the popup holder stays up)
 int social_estimate_value(int skin);             // data/prices.js prices.estimateValue (0 unknown)
 int  ui_police_active(void);                     // Officer Buddy is in the class preview
+const char *ui_police_class_name(void);          // his classN: "Marshal" for an officer, else "Officer"
 void menu_idle_reset(void);                      // menu_ui.c: CONTROLS.idleTimer = 0 (any key, window, menu toggle)
 void ui_games_switch_tab(int tab);               // ui_windows.c: windows[9].switchTab (Custom Games tabs)
 // ui_dialog.c: window.confirm/prompt/alert (web: the browser's; native: the page's

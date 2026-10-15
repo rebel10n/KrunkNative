@@ -393,6 +393,7 @@ static const char *k_inventory[] = {
     "createPrivateRoom", "windows.7.toggle", "windows.7.changeEffects", "windows.7.toggleEffects",
     "updateSliderLabel2", "updateSliderLabel", "windows.7.updateSet", "windows.7.presetAction",
     "selectSpray", "changeContMsg", "changeContSet", "imagePopup", "aspectSelect",
+    "knV10StreamsToggle", /* KrunkNative: the Live Streams overlay toggle (1572082c) */
 };
 
 static void test_parser_corpus(const char *repo)
@@ -415,13 +416,13 @@ static void test_parser_corpus(const char *repo)
         closedir(d);
     }
     printf("corpus: %d inline handlers, %d parse failures, %d distinct callees\n", total, failed, g_callee_n);
-    CHECK(total == 2307);
+    CHECK(total == 2308);
     CHECK(failed == 0);
     printf("callees:");
     for (int i = 0; i < g_callee_n; i++) printf(" %s(%d)", g_callees[i].name, g_callees[i].count);
     printf("\n");
     const int inv_n = (int)(sizeof(k_inventory) / sizeof(k_inventory[0]));
-    CHECK(inv_n == 109);
+    CHECK(inv_n == 110);
     for (int i = 0; i < inv_n; i++) {
         int found = 0;
         for (int j = 0; j < g_callee_n; j++) if (!strcmp(g_callees[j].name, k_inventory[i])) found = 1;

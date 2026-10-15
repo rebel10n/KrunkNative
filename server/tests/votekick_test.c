@@ -175,6 +175,16 @@ static void chat(TestClient *c, const char *text) {
     send_to(c, NET_PACKET_CHAT_SEND, &packet, (uint16_t) (strlen(packet.text) + 1));
 }
 
+static void kpd_apply(TestClient *c, const char *discord, const char *reason) {
+    NetKpdApplyPacket k;
+    memset(&k, 0, sizeof(k));
+    snprintf(k.discord, sizeof(k.discord), "%s", discord);
+    snprintf(k.reason, sizeof(k.reason), "%s", reason);
+    uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(k)];
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), NET_EXT_KPD_APPLY, &k, sizeof(k));
+    send_to(c, NET_PACKET_EXT, buf, n);
+}
+
 static void kpd_rate(TestClient *c, const int tagged) {
     const NetKpdRatePacket k = {.tagged = (uint8_t) tagged};
     uint8_t buf[NET_EXT_HEADER_SIZE + sizeof(k)];
@@ -396,6 +406,76 @@ int main(void) {
     kpd_rate(C, 1);
     pump(5);
     CHECK(!got_chat(C, "Case") && !ext_count(C, NET_EXT_KPD_RESET), "a player without a case cannot rate");
+
+    // ---- 7b. an officer already in the lobby when the call is placed gets the case at once
+    pump((int) (60 * (KPD_CALL_TIME_S + 1.0f))); // the lobby's line is free again
+    conn(D)->acct.flags |= NET_PLAYER_INFO_MOD;  // the officer stays in the lobby, its last case closed
+    reset_received();
+    kpd(A, bob); // Alice calls the K.P.D on Bob
+    pump(5);
+    CHECK(ext_nth(A, NET_EXT_KPD_RESPONSE, 0, &r, sizeof(r)) && r.status == NET_KPD_REPORTED, "Alice reports Bob");
+    CHECK(ext_nth(D, NET_EXT_KPD_DATA, 0, &kd, sizeof(kd)) && kd.sus == bob && kd.caller == conn(A)->player->uid,
+          "the officer in the lobby gets kpdData at once: sus Bob (%d), caller Alice", kd.sus);
+    CHECK(!ext_count(A, NET_EXT_KPD_DATA) && !ext_count(B, NET_EXT_KPD_DATA) && !ext_count(C, NET_EXT_KPD_DATA), "nobody else gets it");
+    votekick_officer_joined(conn(D)); // a live sign-in again: the case stands, no second handover
+    pump(2);
+    CHECK(ext_count(D, NET_EXT_KPD_DATA) == 1, "a second settle keeps the one case");
+    pump((int) (60 * (KPD_CALL_TIME_S + 1.0f)));
+    reset_received();
+    kpd(C, conn(A)->player->uid); // a second call while the officer works Bob's case
+    pump(5);
+    CHECK(ext_nth(C, NET_EXT_KPD_RESPONSE, 0, &r, sizeof(r)) && r.status == NET_KPD_REPORTED, "Carol reports Alice");
+    CHECK(!ext_count(D, NET_EXT_KPD_DATA), "an officer with an open case keeps it (no second case)");
+    pump((int) (60 * (KPD_WATCH_TIME_S + 0.5f)));
+    reset_received();
+    kpd_rate(D, 0);
+    pump(5);
+    CHECK(!ext_count(D, NET_EXT_KPD_RESET) && !got_chat(D, "longer") && !got_chat(D, "closed"), "the officer's verdict on Bob counts");
+    conn(A)->acct.flags |= NET_PLAYER_INFO_MOD; // an officer who is the suspect of the open call: never their own case
+    votekick_officer_joined(conn(A));
+    pump(2);
+    CHECK(!ext_count(A, NET_EXT_KPD_DATA), "nobody gets the case on themselves");
+    conn(C)->acct.flags |= NET_PLAYER_INFO_MOD; // nor the call they placed
+    votekick_officer_joined(conn(C));
+    pump(2);
+    CHECK(!ext_count(C, NET_EXT_KPD_DATA), "nobody gets their own call");
+    votekick_officer_joined(conn(D)); // the officer's case is closed: the open call on Alice is next
+    pump(2);
+    CHECK(ext_nth(D, NET_EXT_KPD_DATA, 0, &kd, sizeof(kd)) && kd.sus == conn(A)->player->uid, "a free officer settling takes the next open call");
+    conn(A)->acct.flags = conn(C)->acct.flags = conn(D)->acct.flags = 0;
+
+    // ---- 7c. the K.P.D application ("kpdA") and /kpd: the server's rules (no coordinator here)
+    reset_received();
+    kpd_apply(A, "alice#1", "I hunt hackers"); // Alice is level 30
+    pump(3);
+    CHECK(ext_nth(A, NET_EXT_KPD_RESPONSE, 0, &r, sizeof(r)) && r.code == 6 && r.status == NET_KPD_REFUSED && strstr(r.message, "Lvl 50"),
+          "an application below level 50 is refused (\"%s\")", r.message);
+    conn(A)->acct.level = 60;
+    reset_received();
+    kpd_apply(A, "", "I hunt hackers");
+    pump(3);
+    CHECK(ext_nth(A, NET_EXT_KPD_RESPONSE, 0, &r, sizeof(r)) && r.code == 6 && strstr(r.message, "Invalid Discord"), "no Discord: refused");
+    conn(A)->acct.flags |= NET_PLAYER_INFO_MOD;
+    reset_received();
+    kpd_apply(A, "alice#1", "again");
+    pump(3);
+    CHECK(ext_nth(A, NET_EXT_KPD_RESPONSE, 0, &r, sizeof(r)) && r.code == 6 && strstr(r.message, "Already K.P.D"), "an officer: Already K.P.D");
+    conn(A)->acct.flags = 0;
+    reset_received();
+    kpd_apply(A, "alice#1", "I hunt hackers");
+    pump(3);
+    CHECK(ext_nth(A, NET_EXT_KPD_RESPONSE, 0, &r, sizeof(r)) && r.code == 6 && r.status == NET_KPD_UNAVAILABLE,
+          "a valid application with no coordinator: unreachable (\"%s\")", r.message);
+    conn(A)->acct.level = 30;
+    conn(B)->op = 1; // DEV (the sandbox's open perms would let anyone run it; the DEV rule is chat_commands.c's)
+    chat(B, "/kpd Carol");
+    pump(3);
+    CHECK(got_chat(B, "Usage: /kpd"), "/kpd without on|off: usage");
+    reset_received();
+    chat(B, "/kpd Carol on");
+    pump(3);
+    CHECK(got_chat(B, "unreachable"), "/kpd Carol on with no coordinator: unreachable");
+    conn(B)->op = 0;
 
     // ---- 8. the player list's Kick / Ban (NET_EXT_ADMIN_ACTION, v10 ADMIN_ACTIONS): DEV only
     reset_received();

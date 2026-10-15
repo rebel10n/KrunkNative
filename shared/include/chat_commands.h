@@ -91,6 +91,11 @@ typedef struct ChatCommandHost {
     // player's class and secondary changed: the connection keeps them for its next spawn, and everyone gets the
     // new look and loadout (SPAWN).
     void (*class_switched)(void *user, int id);
+    // KrunkNative (optional): /kpd grants (on 1) or revokes the K.P.D officer flag of account `name`,
+    // /kpd apps lists the pending applications (kn_brain); the host answers `requester` (a connection
+    // id or CHAT_CMD_CONSOLE) when the coordinator does. 0 = nothing sent (the host told why).
+    int  (*kpd_officer)(void *user, int requester, const char *name, int on);
+    int  (*kpd_apps)(void *user, int requester);
 
     // per-server state (pnhBannedAddresses, forceCollideState)
     char ip_bans[CHAT_CMD_IP_BANS_MAX][CHAT_CMD_ADDRESS_SIZE];

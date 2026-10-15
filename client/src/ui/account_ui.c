@@ -250,6 +250,8 @@ static void set_data(const cJSON *h) {
     g_acc.is_mod = (int) num_at(h, 21);
     g_acc.elo = num_at(h, 22); // player_elo: this season's ranked rating (kn_brain ranked.c)
     g_acc.premium = num_at(h, 27) > 0;
+    g_acc.job_rating = (int) num_at(h, 38);     // jobRating: the K.P.D calls an officer rated
+    g_acc.job_rating_pos = (int) num_at(h, 39); // jobRatingPos: the ones rated tagged
     g_acc.has_2fa = (int) num_at(h, 28);
     const char *alias = str_at(h, 29);
     copy_str(g_acc.alias, sizeof(g_acc.alias), g_acc.premium && alias && alias[0] ? alias : g_acc.name);
@@ -1813,7 +1815,9 @@ static char *gen_account(void) {
         sb_append(&sb, "</div><div class='statTabB2 hide'>");
         pst_num(&sb, I18N("stats.crouches", "Crouches"), stat_num("crc"), 0);
         pst_num(&sb, I18N("stats.sprays", "Sprays Placed"), stat_num("spry"), 0);
-        pst(&sb, I18N("stats.kpd", "Helpful Reports"), "0/0");
+        char kpd[32];
+        snprintf(kpd, sizeof(kpd), "%d/%d", g_acc.job_rating_pos, g_acc.job_rating); // jobRatingPos / jobRating
+        pst(&sb, I18N("stats.kpd", "Helpful Reports"), kpd);
         sb_append(&sb, "</div><div class='statTabB3 hide'>");
         const MenuUi *ui = menu_ui();
         for (int i = 0; i < ui->class_count; i++) {

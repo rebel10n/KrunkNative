@@ -553,6 +553,28 @@ static void cmd_unban(ChatCtx *c) {
     else reply(c, "Account %d was not banned.", account);
 }
 
+// KrunkNative: /kpd <name> on|off (the K.P.D officer flag of an account, kn_brain) and /kpd apps (the
+// pending applications). DEV only; the answer comes from the host once the coordinator replies.
+static void cmd_kpd(ChatCtx *c) {
+    if (!allowed(c, CHAT_PERM_DEV)) return;
+    if (c->argc >= 1 && !strcasecmp(c->argv[0], "apps")) {
+        if (!c->host->kpd_apps) reply(c, "No K.P.D on this server.");
+        else c->host->kpd_apps(c->host->user, c->sender);
+        return;
+    }
+    const int on = c->argc >= 2 && (!strcasecmp(c->argv[1], "on") || !strcmp(c->argv[1], "1"));
+    const int off = c->argc >= 2 && (!strcasecmp(c->argv[1], "off") || !strcmp(c->argv[1], "0"));
+    if (c->argc < 2 || !c->argv[0][0] || (!on && !off)) {
+        reply(c, "Usage: /kpd <account> on|off, /kpd apps");
+        return;
+    }
+    if (!c->host->kpd_officer) {
+        reply(c, "No K.P.D on this server.");
+        return;
+    }
+    c->host->kpd_officer(c->host->user, c->sender, c->argv[0], on);
+}
+
 static int compare_ints(const void *a, const void *b) {
     const int x = *(const int *) a, y = *(const int *) b;
     return (x > y) - (x < y);
@@ -2335,6 +2357,7 @@ static const ChatCommand COMMANDS[] = {
     {{"kick", NULL, "<name|id|selector>", "kick a player (kick @bots: every match but you)", CHAT_PERM_DEV}, cmd_kick},
     {{"ban", NULL, "<name|id|selector>", "ban a player account (or every match but you)", CHAT_PERM_DEV}, cmd_ban},
     {{"unban", NULL, "<accountId|name|id>", "unban an account", CHAT_PERM_DEV}, cmd_unban},
+    {{"kpd", NULL, "<account> on|off | apps", "grant or revoke K.P.D officer, or list the K.P.D applications", CHAT_PERM_DEV}, cmd_kpd},
     {{"bans", NULL, "", "list banned account ids", CHAT_PERM_DEV}, cmd_bans},
     {{"ip", NULL, "<name|id>", "show a player's IP", CHAT_PERM_DEV}, cmd_ip},
     {{"banip", NULL, "<name|id|ip>", "ban an IP in this lobby", CHAT_PERM_DEV}, cmd_banip},

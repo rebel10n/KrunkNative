@@ -94,7 +94,7 @@ extern const kn_proc P_POST_FULL, P_FEED, P_CLAN_CREATE, P_CLAN_REQUEST, P_CLAN_
 extern const kn_proc P_POST_CREATE_V10, P_GIVEAWAY_SETTLE;
 
 /* ---- the K.P.D distress calls of the in-game player list (db_kpd.c, migration 0209) */
-extern const kn_proc P_KPD_CALL, P_KPD_CALLS, P_KPD_LOG, P_KPD_RATE;
+extern const kn_proc P_KPD_CALL, P_KPD_CALLS, P_KPD_LOG, P_KPD_RATE, P_KPD_STATS, P_KPD_APPLY, P_KPD_APPS, P_KPD_OFFICER;
 
 /* ---- the economy (db_economy.c, 0111_economy): KR gifts, the market, trade offers, KR history */
 extern const kn_proc P_GIFT, P_MARKET_LIST, P_MARKET_UNLIST, P_MARKET_BUY, P_QUICK_SELL, P_MARKET_ITEM, P_TRADE_PAGE,
