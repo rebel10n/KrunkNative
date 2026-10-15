@@ -375,6 +375,8 @@
  "kn.quickplay.serverType.noteBrowser": "Quick Match and F4 seek into these. krunker.io servers open in your browser. Both prefers a KrunkNative server when one matches.",
  "kn.quickplay.serverType.noteJoin": "Quick Match and F4 seek into these. krunker.io servers are joined in this client with your krunker.io account (krunker.io may ask for a security check first). Both prefers a KrunkNative server when one matches.",
  "kn.quickplay.serverType.official": "krunker.io servers",
+ "kn.reload.lobbyFull": "The game you were in is full: joining another one",
+ "kn.reload.lobbyGone": "The game you were in has ended: joining another one",
  "kn.servers.currentRegion": "Current Region",
  "kn.servers.downloadTitle": "Download server: {0}",
  "kn.servers.finderUnavailable": "Server finder unavailable:",

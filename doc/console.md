@@ -615,6 +615,12 @@ F5 (the Reload Game bind, `cont_gameReloadKey`, Settings > Controls > General) r
 client natively (mm-token, doc/v10/matchmaker-token.md "Keys"): the process re-executes itself as
 F4 used to (the same command line, the window kept as it is) and the new process comes back to
 the same session (`KRUNKNATIVE_RELOAD_RESUME` below; a lobby is the new process's startup seek).
+A reload always goes back into the same game: a KrunkNative lobby by its game id (also when F5 is
+pressed while it is still loading), an official krunker.io game by its krunker.io game id, never a
+seek by the Quickplay settings (Auto Seek on Launch), an `excludeGame` seek, or what the command line
+alone would start (`--offline`, `--krunker`). Only when that game is gone (`InvalidGameId`) or full
+(`GameFull`) does the client seek another one, and a notice says so ("The game you were in has
+ended: joining another one" / "... is full: ...").
 F4 is Find New Game now (Krunker's client: a new seek per Settings > General > Quickplay, no
 restart). The console's `reload` is the full reload in place described here.
 
@@ -639,13 +645,14 @@ Natively, in place, in this order (`client/src/game_reload.c`):
    rewritten.
 4. Back into the game: the console's `reconnect`. Offline the local game restarts on the same map
    and mode (the map is built again with the new textures and models); online the client rejoins
-   the same server (a matchmade lobby is sought again for a fresh ticket). In the menu with no game,
+   the same server (a matchmade lobby is sought again by its game id for a fresh ticket, an official
+   krunker.io game by its id; gone or full, another one with a notice, as for F5). In the menu with no game,
    it stays there; when nothing can be rejoined it returns to the menu. A notice says what happened.
 
 What a running process cannot load again makes `reload` restart the client instead, like F5 (the same
 command line, the window kept as it is), and the new process comes back to the same session
-(`KRUNKNATIVE_RELOAD_RESUME`: the offline map and mode, the server address, or the lobby id
-once the matchmaker answers):
+(`KRUNKNATIVE_RELOAD_RESUME`: the offline map and mode, the server address, the lobby id once the
+matchmaker answers, or the official krunker.io game id and region):
 
 - a file of the menu page tree changed (`ui/`, or the `KRUNKNATIVE_UI_DIR` tree; not
   `ui/windows`, which reloads in place) since the client started or last reloaded;

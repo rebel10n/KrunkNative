@@ -85,6 +85,9 @@ static struct {
     int seek_new, seek_new_retries;
     char exclude[96], fallback[96];
     int fallback_rank;
+    // a reload's join (krunker_net_reload_join): the game the player was in; gone or full -> one
+    // seek without it (no excludeGame) and a notice
+    int reload;
     RecentLobbies recent; // the official games joined lately, most recent first (main thread)
     char ws_url[1024 + KRUNKER_ACCESS_MAX];
     char ws_log[1024];   // ws_url without the account's `at=`: what the log shows
@@ -1201,6 +1204,21 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         char text[300];
         denied_text(text, sizeof(text), K.matchmaker);
         fail("%s", text);
+    } else if (K.reload && K.game_id[0] && error && (!strcmp(error, "InvalidGameId") || !strcmp(error, "GameFull"))) {
+        // a reload's game is gone or full: say so, then the matchmaker picks one in the region
+        // (Find New Game's seek, with nothing to exclude: the player left no game)
+        const int full = !strcmp(error, "GameFull");
+        printf("[krunker] reload: official game %s is %s: seeking another game\n", K.game_id, full ? "full" : "gone");
+        ui_notify(full ? I18N("kn.reload.lobbyFull", "The game you were in is full: joining another one")
+                       : I18N("kn.reload.lobbyGone", "The game you were in has ended: joining another one"));
+        K.reload = 0;
+        K.game_id[0] = 0;
+        K.exclude[0] = 0;
+        K.seek_new = 1;
+        K.seek_new_retries = 0;
+        cJSON_Delete(res);
+        seek();
+        return;
     } else if (status != 200 || error || !host || !game || !client_id) {
         char detail[200], text[300];
         // the matchmaker's own error word, else the start of its body on one line (the log)
@@ -1232,6 +1250,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         seek();
         return;
     } else {
+        K.reload = 0;
         snprintf(K.game_id, sizeof(K.game_id), "%s", game);
         recent_lobbies_push(&K.recent, game);
         char query[600];
@@ -1290,7 +1309,7 @@ static void on_access(void *user, const char *token) {
 
 // krunker_net_join, or (seek_new) Find New Game: no game asked for, excludeGame = exclude; seek_new 2:
 // the lobby list first (on_game_list).
-static int join(Client *client, const char *game_id, const char *region, const int seek_new, const char *exclude) {
+static int join(Client *client, const char *game_id, const char *region, const int seek_new, const char *exclude, const int reload) {
     if (!client) return 0;
     if (!K.client) krunker_net_attach(client);
     if (K.state != KS_OFF) krunker_net_leave(client, NULL); // another official game: an intended switch
@@ -1305,6 +1324,7 @@ static int join(Client *client, const char *game_id, const char *region, const i
     snprintf(K.game_id, sizeof(K.game_id), "%s", game_id ? game_id : "");
     K.seek_new = seek_new;
     K.seek_new_retries = 0;
+    K.reload = reload && K.game_id[0];
     K.fallback[0] = 0;
     K.fallback_rank = 0;
     snprintf(K.exclude, sizeof(K.exclude), "%s", exclude ? exclude : "");
@@ -1335,7 +1355,17 @@ static int join(Client *client, const char *game_id, const char *region, const i
 }
 
 int krunker_net_join(Client *client, const char *game_id, const char *region) {
-    return join(client, game_id, region, 0, NULL);
+    return join(client, game_id, region, 0, NULL, 0);
+}
+
+// Reload (game_reload.c): the official game the player was in, by its id (the copies: K.game_id may be
+// the argument itself, and join() leaves the current session first)
+int krunker_net_reload_join(Client *client, const char *game_id, const char *region) {
+    char game[sizeof(K.game_id)], r[sizeof(K.region)];
+    snprintf(game, sizeof(game), "%s", game_id ? game_id : "");
+    snprintf(r, sizeof(r), "%s", region ? region : "");
+    printf("[krunker] reload: rejoining official game %s\n", game[0] ? game : "(any)");
+    return join(client, game, r[0] ? r : NULL, 0, NULL, 1);
 }
 
 // krunker.io's Find New Game (F4 / backToOrigin(false, {exclude: game}), game.deob.js :141618-141626,
@@ -1345,7 +1375,7 @@ int krunker_net_seek_new(Client *client, const char *region, const int use_list)
     char r[sizeof(K.region)] = "";
     if (region && region[0]) snprintf(r, sizeof(r), "%s", region);
     else if (K.region[0]) snprintf(r, sizeof(r), "%s", K.region); // the region the player is playing in
-    return join(client, NULL, r[0] ? r : NULL, use_list ? 2 : 1, K.recent.count ? K.recent.ids[0] : NULL);
+    return join(client, NULL, r[0] ? r : NULL, use_list ? 2 : 1, K.recent.count ? K.recent.ids[0] : NULL, 0);
 }
 
 int krunker_net_recent_rank(const char *game_id) { return recent_lobbies_rank(&K.recent, game_id); }

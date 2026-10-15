@@ -877,6 +877,12 @@ int main(int argc, char **argv) {
         .address = INSTANCE.net_address, // DEFAULT_SERVER_ADDRESS unless --connect
     };
 
+    // F5's relaunch runs the same command line: the new process goes back into the old one's lobby,
+    // direct server or official game (game_reload.c resume_tick / servers_ui_reload_resume), never
+    // into what that command line starts (--offline / Start Offline's local game, --krunker's any
+    // official game, which was a random one)
+    if (!SCENARIO_ACTIVE() && game_reload_resume_online()) offline = g_krunker_start = 0;
+
     // brain backend (backend_ui.h): with a brain URL the matchmaker picks the game
     // server (servers_ui.c starts the transport); offline / --connect / no brain: as before
     // an official krunker.io start skips the brain's matchmaking like an offline one
@@ -887,6 +893,8 @@ int main(int argc, char **argv) {
         krunker_net_join(&INSTANCE, g_krunker_game, NULL); // matchmaker, then Krunker's WebSocket (krunker_net.c)
     } else if (offline) {
         if (!local_game_start(&INSTANCE)) return -1; // the in-process sandbox server, joined like any server (net/offline.c)
+    } else if (!SCENARIO_ACTIVE() && game_reload_resume_official(&INSTANCE)) {
+        (void) net_args; // F5's relaunch from an official krunker.io game: that game again, by its id
     } else {
 #ifdef __EMSCRIPTEN__
         (void) net_args;

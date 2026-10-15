@@ -31,6 +31,9 @@ Lobby runs (the default, no KRUNKNATIVE_KRUNKER_JOIN): "native-lobby" clicks the
 (GET /game-list) in the server browser from the offline game: it is joined in-client (Cancel in the
 Security Challenge modal first ends the join saying so, a second click + a pasted token joins);
 "native-optout" (KRUNKNATIVE_KRUNKER_JOIN=browser) checks the click opens krunker.io in the browser instead.
+Reload runs (--reload alone): "native-reload" (--krunker, a lobby joined, F5: the relaunched client,
+whose command line alone would join the matchmaker's pick, rejoins that official game by its id) and
+"native-reload-gone" (the game ended meanwhile: InvalidGameId, the client says so and seeks another).
 Captcha runs (krunker_captcha.h): native "callback" (the one-time 127.0.0.1 callback: a wrong secret,
 a foreign Origin, a body that is not a token, an expired listener, then the token, then a second
 token), native "paste" (a bad paste refused in the modal, then a good one), native "webview" (the
@@ -96,7 +99,7 @@ except ImportError:  # pragma: no cover
 ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
 BUILD = os.path.abspath(ARGS[0] if ARGS else "cmake-build-debug")
 DIST = os.path.abspath(ARGS[1]) if len(ARGS) > 1 else None
-ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude": "exclude"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude": "exclude", "--reload": "reload"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -322,6 +325,7 @@ class Stub:
         # lobby that is not excludeGame; list_fail: /game-list requests answered 503 (-1 = all)
         self.lobbies = None   # [(gameId, players)], busiest first
         self.list_fail = 0
+        self.gone_after = {}  # the reload runs: gameId -> seeks answered before it is gone (InvalidGameId)
         self.list_requests = 0
 
     # matchmaker
@@ -356,8 +360,13 @@ class Stub:
                 elif u.path == "/seek-game" and stub.lobbies is not None:
                     qd = dict(q)
                     game = qd.get("game") or next((g for g, _ in stub.lobbies if g != qd.get("excludeGame")), None)
-                    body = json.dumps({"host": "127.0.0.1", "port": stub.ws_port, "gameId": game, "clientId": CLIENT_ID,
-                                       "data": {"i": MAP_NAME, "g": 0}}).encode()
+                    if game in stub.gone_after and stub.gone_after[game] <= 0:
+                        status, body = 404, json.dumps({"error": "InvalidGameId"}).encode()  # the game ended
+                    else:
+                        if game in stub.gone_after:
+                            stub.gone_after[game] -= 1
+                        body = json.dumps({"host": "127.0.0.1", "port": stub.ws_port, "gameId": game, "clientId": CLIENT_ID,
+                                           "data": {"i": MAP_NAME, "g": 0}}).encode()
                     ctype = "application/json"
                 elif u.path == "/seek-game":
                     qd = dict(q)
@@ -1408,6 +1417,46 @@ def run_native_exclude_mm():
           "[krunker] seek: no lobby list" in text and "[krunker] game-list: FRA:bbbbb" in text, [l for l in lines if "[krunker]" in l][-12:])
 
 
+def run_native_reload(gone):
+    """Reload (F5) in an official game: the client relaunches with the same command line (--krunker, which
+    alone joins whatever game the matchmaker picks) and comes back into the official game it was in, by
+    its id (never a seek by the Quickplay settings or excludeGame). gone: that game ended meanwhile
+    (InvalidGameId): the reload says so and the matchmaker picks another game."""
+    label = "native-reload-gone" if gone else "native-reload"
+
+    def setup(st):
+        st.lobbies = EXCLUDE_LOBBIES
+        if gone:
+            st.gone_after = {"FRA:bbbbb": 1}  # the first process joins it; the relaunched one finds it gone
+
+    relaunch = os.path.join(WORK, label + "-relaunch.script")
+    with open(relaunch, "w") as f:
+        f.write("0 boot\n6000 players\n6500 quit\n")
+    stub, p, out, log = launch_native(label, '0 boot\n3000 call krunkerJoin "FRA:bbbbb"\n7000 down F5\n7050 up F5\n90000 quit\n',
+                                      {"KRUNKNATIVE_INPUT_SCRIPT_RELAUNCH": relaunch}, args=("--krunker",), stub_setup=setup)
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    after = text[text.find("[app] reload: restarting"):] if "[app] reload: restarting" in text else ""
+    seeks = [dict(q) for pth, q, _ in stub.http_log if pth == "/seek-game"]
+    got = [(q.get("game"), q.get("excludeGame")) for q in seeks]
+    check(f"{label}: F5 relaunched the client", "[reload] restart: F5: relaunch" in text and after, text[-400:])
+    check(f"{label}: the session handed over is the official game", "[reload] resume after the restart: krunker FRA:bbbbb region " in after,
+          after[:400])
+    joins = re.findall(r"\[krunker\] seek-game: game (\S+) on", after)
+    if not gone:
+        check(f"{label}: --krunker joined the matchmaker's pick, krunkerJoin bbbbb, the reload bbbbb again by its id (no seek "
+              "without a game, no excludeGame)", got == [(None, None), ("FRA:bbbbb", None), ("FRA:bbbbb", None)], got)
+        check(f"{label}: the relaunched client plays bbbbb", joins == ["FRA:bbbbb"], joins)
+    else:
+        check(f"{label}: the reload asked for bbbbb, then (gone) one seek with no game and no excludeGame",
+              got == [(None, None), ("FRA:bbbbb", None), ("FRA:bbbbb", None), (None, None)], got)
+        check(f"{label}: and said so", "[krunker] reload: official game FRA:bbbbb is gone: seeking another game" in after,
+              [l for l in after.splitlines() if "[krunker]" in l][-8:])
+        check(f"{label}: the relaunched client plays the matchmaker's pick", joins == ["FRA:aaaaa"], joins)
+    check(f"{label}: no KrunkNative seek in the relaunched client (no launch seek)",
+          "[mm] launch seek" not in after and "[mm] joining" not in after, "")
+
+
 # ---------------------------------------------------------------- native: the challenge window (kn_webview.h)
 
 WEBVIEW_SOLVE_MS = 1500  # the stub widget's "player" solves it this long after it is shown
@@ -1947,10 +1996,15 @@ def main():
         run_native_optout()
         run_native_exclude()
         run_native_exclude_mm()
+        run_native_reload(False)
+        run_native_reload(True)
         ran = True
     if ONLY == "exclude" and os.path.isfile(f"{BUILD}/client_bin"):  # just Find New Game's runs
         run_native_exclude()
         run_native_exclude_mm()
+    if ONLY == "reload" and os.path.isfile(f"{BUILD}/client_bin"):  # just the reload runs
+        run_native_reload(False)
+        run_native_reload(True)
     webview_skipped = None
     if ONLY in ("", "native", "webview") and os.path.isfile(f"{BUILD}/client_bin"):
         webview_skipped = webview_skip_reason()

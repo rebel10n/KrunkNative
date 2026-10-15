@@ -14,6 +14,7 @@
 #include <console.h>         // ui_console_exec / ui_console_reconnect
 #include <gltf.h>
 #include <html_ui.h>
+#include <krunker_net.h>      // an official krunker.io game: rejoined by its id (krunker_net_reload_join)
 #include <map_catalog.h>
 #include <ui_logic.h>
 #include <ui_mods.h>
@@ -47,11 +48,14 @@ static struct {
     char why[32];
     double epoch; // wall clock (s): files modified later are new to this process
     // restart fallback, the new process side: "offline <map key> <mode>", "connect <host:port>",
-    // "game <lobby id>", "rejoin <lobby id>" (a server update: the restart rejoin's backoff)
+    // "game <lobby id>", "rejoin <lobby id>" (a server update: the restart rejoin's backoff),
+    // "krunker <official game id> <region>" (an official krunker.io game)
     ResumeStage stage;
     char kind[16];
     char target[200];
+    char region[48]; // krunker: the official game's region
     int mode;
+    int resuming; // the restart handed a session over (game_reload_resume_*)
     double since; // glfwGetTime when the stage began
 } g_rl = {.mode = -1};
 
@@ -112,25 +116,41 @@ EM_JS(char *, kn_js_session_take, (const char *key), {
 static void resume_parse(const char *resume) {
     char copy[300];
     snprintf(copy, sizeof(copy), "%s", resume);
-    char *kind = strtok(copy, "\t"), *target = kind ? strtok(NULL, "\t") : NULL, *mode = target ? strtok(NULL, "\t") : NULL;
+    char *kind = strtok(copy, "\t"), *target = kind ? strtok(NULL, "\t") : NULL, *third = target ? strtok(NULL, "\t") : NULL;
     if (!kind || !target) return;
+    const int official = !strcmp(kind, "krunker");
     snprintf(g_rl.kind, sizeof(g_rl.kind), "%s", kind);
     snprintf(g_rl.target, sizeof(g_rl.target), "%s", target);
-    g_rl.mode = mode ? atoi(mode) : -1;
+    snprintf(g_rl.region, sizeof(g_rl.region), "%s", official && third ? third : "");
+    g_rl.mode = !official && third ? atoi(third) : -1;
     g_rl.stage = RESUME_START;
     g_rl.since = -1.0;
-    printf("[reload] resume after the restart: %s %s%s%s\n", kind, target, mode ? " mode " : "", mode ? mode : "");
+    g_rl.resuming = 1;
+    printf("[reload] resume after the restart: %s %s%s%s\n", kind, target, third ? (official ? " region " : " mode ") : "", third ? third : "");
     if (!strcmp(kind, "game")) {
-        // a lobby: the startup seek takes it, like the web reload's ?game= (servers_ui_query), so
-        // no second seek races it (both landed in the lobby: two joins, one dropped)
-        char query[220];
-        snprintf(query, sizeof(query), "game=%s", target);
-        servers_ui_query(query);
+        // a lobby: the startup seek takes it by its game id (servers_ui_reload_resume: never the
+        // launch seek nor excludeGame; gone or full, another one and a notice), so no second seek
+        // races it (both landed in the lobby: two joins, one dropped)
+        servers_ui_reload_resume(target);
         g_rl.stage = RESUME_NONE;
-    } else if (!strcmp(kind, "rejoin")) {
-        // a server update: no startup seek; the restart rejoin starts once the matchmaker answers
+    } else {
+        // a server update's lobby (the restart rejoin starts once the matchmaker answers), the offline
+        // game, a direct server or an official game: no startup seek (nor the launch seek) meanwhile
         servers_ui_hold_startup_seek(1);
     }
+}
+
+int game_reload_resume_online(void) { return g_rl.resuming && strcmp(g_rl.kind, "offline") != 0; }
+
+// main.c, at the start of the network: an official krunker.io game is joined again right away (as
+// --krunker joins one), by its game id; gone or full, krunker_net says so and finds another
+int game_reload_resume_official(Client *client) {
+    if (!g_rl.resuming || g_rl.stage != RESUME_START || strcmp(g_rl.kind, "krunker") != 0) return 0;
+    g_rl.stage = RESUME_NONE;
+    servers_ui_skip_startup_seek();
+    printf("[reload] resume: rejoining official game %s\n", g_rl.target);
+    if (!krunker_net_reload_join(client, g_rl.target, g_rl.region[0] ? g_rl.region : NULL)) ui_notify("Reloaded. The game could not be rejoined");
+    return 1;
 }
 
 void game_reload_startup(void) {
@@ -174,10 +194,19 @@ static int session_line(const Client *client, char *out, const size_t n) {
         snprintf(out, n, "offline\t%s\t%d", entry->key, game_mode_id(game));
         return 1;
     }
-    if (!client->net_connected) return 0;
+    if (krunker_net_active()) {
+        // an official krunker.io game (also while it is joined or rejoined): its game id and region.
+        // Find New Game's seek has none yet: nothing to come back to (servers_ui's lobby id is the
+        // KrunkNative one from before)
+        const char *game = krunker_net_session_game();
+        if (!game[0]) return 0;
+        snprintf(out, n, "krunker\t%s\t%s", game, krunker_net_region());
+        return 1;
+    }
     char target[200];
     const int kind = servers_ui_session_target(target, sizeof(target));
-    if (!kind) return 0;
+    // a matchmade lobby also while it is still being joined; a direct server only when connected
+    if (!kind || (kind == 1 && !client->net_connected)) return 0;
     snprintf(out, n, "%s\t%s", kind == 2 ? "game" : "connect", target);
     return 1;
 }
@@ -263,6 +292,23 @@ static void restart(Client *client, const char *why) {
 // Back into what the player was doing: `reconnect` (the offline game restarts on its map and
 // mode with the new assets; an online one rejoins the same server or lobby).
 static void reenter(Client *client) {
+    if (!client->offline && krunker_net_active() && krunker_net_session_game()[0]) {
+        // an official game: the same one again by its id (not servers_ui's KrunkNative lobby)
+        char game[96], region[48];
+        snprintf(game, sizeof(game), "%s", krunker_net_session_game());
+        snprintf(region, sizeof(region), "%s", krunker_net_region());
+        if (krunker_net_reload_join(client, game, region)) {
+            printf("[reload] rejoining official game %s\n", game);
+            ui_notify("Reloaded: rejoining the game");
+            return;
+        }
+    }
+    if (!client->offline && servers_ui_reload_rejoin()) {
+        // a matchmade lobby: the same one by its game id (gone or full: another one, said so)
+        printf("[reload] rejoining the lobby\n");
+        ui_notify("Reloaded: rejoining the game");
+        return;
+    }
     if (!client->offline && !client->net_connected) {
         printf("[reload] no game to rejoin\n");
         ui_notify("Reloaded");
@@ -330,7 +376,7 @@ static void resume_tick(Client *client) {
         if (!ready) {
             if (waited > (lobby ? RESUME_LOBBY_SECONDS : RESUME_WAIT_SECONDS)) {
                 printf("[reload] resume: gave up waiting for the %s\n", lobby ? "matchmaker" : "menu");
-                if (!strcmp(g_rl.kind, "rejoin")) servers_ui_hold_startup_seek(0); // the ordinary startup seek, if any
+                servers_ui_hold_startup_seek(0); // the ordinary startup seek, if any
                 ui_notify("Reloaded. The game could not be rejoined");
                 g_rl.stage = RESUME_NONE;
             }
@@ -355,12 +401,14 @@ static void resume_tick(Client *client) {
             g_rl.stage = RESUME_NONE;
             if (!lobby && same_server(client, g_rl.target)) { // the command line joins it already
                 printf("[reload] resume: already joining %s\n", g_rl.target);
+                servers_ui_skip_startup_seek();
                 return;
             }
             snprintf(line, sizeof(line), "connect %s", g_rl.target);
         }
         printf("[reload] resume: %s\n", line);
         ui_console_exec(line);
+        servers_ui_skip_startup_seek(); // the session is this one (no startup or launch seek after it)
 #endif
         return;
     }

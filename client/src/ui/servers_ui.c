@@ -84,6 +84,12 @@ static char g_account_game[160]; // AccountRequired: the lobby a guest was refus
 // and with server type Both an official krunker.io lobby is the fallback
 static int g_find_seek, g_find_both;
 static char g_find_prev_game[160];
+// Reload (F5's relaunch, the console's `reload`; game_reload.c): the lobby the player was in, sought
+// by its id (no Quickplay launch seek, no excludeGame). Gone or full: one plain seek, and a notice
+// says why (reload_fallback). g_reload_game: the new process's lobby, taken by the startup seek;
+// g_reload_next marks the next seek() as a reload's, g_reload_seek the one in flight.
+static char g_reload_game[160];
+static int g_reload_next, g_reload_seek;
 static char g_password_game[160]; // the game (lobby id, or "host:port" direct) net_join.password was typed for
 static void page_game_url(const char *id, const char *region);
 // Source-console style pinning: a server the user picked by hand (console `connect`, Direct
@@ -574,6 +580,20 @@ static void seek_req_free(SeekReq *r) {
 
 static void seek_unreachable(void);
 static void on_token(void *user, int status, const char *body, size_t length);
+static void seek(const char *game_id, int auto_change, void *quiet);
+
+// A reload's lobby is gone (InvalidGameId: its server stopped) or full (GameFull): the player is
+// told so and one plain seek in the region finds another (never excludeGame: nothing to leave).
+static void reload_fallback(const char *game_id, const int full) {
+    char id[sizeof(g_seek_game)];
+    snprintf(id, sizeof(id), "%s", game_id ? game_id : "");
+    printf("[mm] reload: lobby %s is %s: seeking another lobby\n", id[0] ? id : "(none)", full ? "full" : "gone");
+    ui_notify(full ? I18N("kn.reload.lobbyFull", "The game you were in is full: joining another one")
+                   : I18N("kn.reload.lobbyGone", "The game you were in has ended: joining another one"));
+    g_game_id[0] = 0;
+    g_exclude_game[0] = 0;
+    seek(NULL, 1, NULL);
+}
 
 static int seek_request_token(SeekReq *r) {
     return backend_http_get("/mm/generate-token", on_token, r);
@@ -585,8 +605,10 @@ static void on_seek(void *user, const int status, const char *body, const size_t
     const int quiet = req && req->quiet != NULL;
     const int rejoin = g_rejoin_seek;
     const int find = g_find_seek, find_both = g_find_both;
+    const int reload = g_reload_seek;
     g_seek_inflight = 0;
     g_rejoin_seek = 0;
+    g_reload_seek = 0;
     g_find_seek = g_find_both = 0;
     if (g_pin != PIN_NONE) {
         // the user connected to / disconnected from a server by hand while this seek ran
@@ -603,6 +625,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         req->retried = 1;
         g_seek_inflight = 1;
         g_rejoin_seek = rejoin;
+        g_reload_seek = reload;
         g_find_seek = find;
         g_find_both = find_both;
         cJSON_Delete(res);
@@ -649,6 +672,11 @@ static void on_seek(void *user, const int status, const char *body, const size_t
             return;
         }
         if (rejoin) rejoin_cancel(); // gave up: the seek's error below
+        if (reload && cJSON_IsString(err) && (!strcmp(err->valuestring, "InvalidGameId") || !strcmp(err->valuestring, "GameFull"))) {
+            reload_fallback(g_seek_game, !strcmp(err->valuestring, "GameFull"));
+            cJSON_Delete(res);
+            return;
+        }
         const int nothing = cJSON_IsString(err) && (!strcmp(err->valuestring, "NoMatchingServers") ||
                                                     !strcmp(err->valuestring, "NoAvailableServers") ||
                                                     !strcmp(err->valuestring, "NoServersMatchQuery") ||
@@ -807,6 +835,9 @@ static void seek(const char *game_id, const int auto_change, void *quiet) {
     if (g_client && !g_client->net_connected && !menu_connecting()) menu_show_connecting_map(NULL); // looking for the server: the spinner
     g_rejoin_seek = g_rejoin_next;
     g_rejoin_next = 0;
+    g_reload_seek = g_reload_next && game_id && game_id[0]; // a reload asks for its lobby by id
+    g_reload_next = 0;
+    if (g_reload_seek) g_exclude_game[0] = 0; // a reload leaves no lobby: never excludeGame
     if (!g_rejoin_seek) rejoin_cancel(); // any other matchmaking action replaces a pending rejoin
     snprintf(g_seek_game, sizeof(g_seek_game), "%s", game_id ? game_id : "");
     g_account_game[0] = 0;
@@ -937,6 +968,7 @@ static void on_ping_list(void *user, const int status, const char *body, const s
     if (g_pin != PIN_NONE) {
         printf("[mm] seek skipped: %s\n", g_pin == PIN_DIRECT ? "pinned to a direct server" : "disconnected by the user");
         g_exclude_game[0] = 0; // the Quick Match this skipped must not leak into a later seek
+        g_reload_next = 0;     // nor the reload's mark
     }
     // v3.1.1's startup seek sends autoChangeGame: false - a ?game= that is gone, full or needs
     // an account shows its error (Game not found. / ...) with the "seek a new game" link
@@ -999,6 +1031,7 @@ static void start_seek(const char *game_id) {
     if (!backend_http_get("/mm/ping-list", on_ping_list, copy)) {
         free(copy);
         g_find_seek = g_find_both = 0;
+        g_reload_next = 0;
         fatal_error(I18N("kn.matchmaker.unreachable", "Could not reach the matchmaker"));
     }
 }
@@ -1961,7 +1994,9 @@ int servers_ui_reconnect(void) {
 
 int servers_ui_session_target(char *out, const size_t n) {
     if (!g_client || !out || !n) return 0;
-    if (!g_last_direct && g_brain_mode && g_pin != PIN_DIRECT && g_game_id[0]) {
+    // a matchmade lobby: also while it is still being joined (F5 during the load) or rejoined; never
+    // one the player left with `disconnect` (PIN_IDLE)
+    if (!g_last_direct && g_brain_mode && g_pin == PIN_NONE && g_game_id[0]) {
         snprintf(out, n, "%s", g_game_id); // `connect <id>` seeks it again (servers_ui_connect_game)
         return 2;
     }
@@ -2115,6 +2150,31 @@ const char *servers_ui_rejoin_text(void) {
 // lobby, or the resume gives up (hold 0).
 void servers_ui_hold_startup_seek(const int hold) {
     g_startup_hold = hold;
+}
+
+// A restart's resume went into its session another way (`offline`, `connect`, the official game):
+// the startup seek never runs (no launch seek either).
+void servers_ui_skip_startup_seek(void) {
+    g_startup_hold = 0;
+    g_started = 1;
+}
+
+// F5's relaunch (game_reload.c): the new process's startup seek is the old one's lobby, by its id.
+void servers_ui_reload_resume(const char *game_id) {
+    snprintf(g_reload_game, sizeof(g_reload_game), "%s", game_id ? game_id : "");
+}
+
+// The console's `reload` in place (game_reload.c): the lobby the player is in, sought again by its id
+// for a fresh ticket (gone or full: reload_fallback). 0 = not in a matchmade lobby.
+int servers_ui_reload_rejoin(void) {
+    if (!g_client || g_last_direct || !g_brain_mode || g_pin != PIN_NONE || !g_game_id[0] || g_seek_inflight || backend_available() != 1)
+        return 0;
+    char id[sizeof(g_game_id)];
+    snprintf(id, sizeof(id), "%s", g_game_id);
+    printf("[mm] reload: rejoining lobby %s\n", id);
+    g_reload_next = 1;
+    seek(id, 0, NULL);
+    return 1;
 }
 
 // The new process after a restart for a server update: the lobby the old one was in, sought
@@ -3654,7 +3714,7 @@ void servers_ui_tick(Client *client) {
         }
         g_pending_play[0] = g_pending_game[0] = 0;
     }
-    if (g_brain_mode && !g_started && backend_available() == 0) {
+    if (g_brain_mode && !g_started && !g_startup_hold && backend_available() == 0) {
         // a default brain URL (page origin / local config) with no kn_brain behind it: play on
         // the default server as before; account actions say "Failed to connect"
         printf("[mm] no brain at %s: direct connection (accounts need a brain: make backend-up)\n", backend_url());
@@ -3683,6 +3743,18 @@ void servers_ui_tick(Client *client) {
         static double brain_ready_at = -1.0;
         if (brain_ready_at < 0.0) brain_ready_at = glfwGetTime() > g_start_time ? glfwGetTime() : g_start_time;
         if (has_token && !account_get() && glfwGetTime() - brain_ready_at < RESTORE_WAIT_SECONDS) return;
+        if (g_reload_game[0]) {
+            // F5's relaunch (game_reload.c): the lobby the old process was in, by its id. Never the
+            // launch seek (Quickplay), nor a ?game= / ?play= / KRUNKNATIVE_GAME of the launch; gone
+            // or full: on_seek's reload_fallback seeks another one and says so
+            g_started = 1;
+            g_pending_game[0] = g_pending_play[0] = 0;
+            printf("[mm] reload: rejoining lobby %s\n", g_reload_game);
+            g_reload_next = 1;
+            start_seek(g_reload_game);
+            g_reload_game[0] = 0;
+            return;
+        }
         char *game = NULL;
         if (g_pending_game[0]) {
             // the page's ?game= / --game "game=<id>" (servers_ui_query) is this startup seek's
@@ -3708,6 +3780,19 @@ void servers_ui_tick(Client *client) {
             return;
         }
         g_started = 1;
+#ifdef __EMSCRIPTEN__
+        // the browser's reload (F5, the Reload Game key) of a game page: its ?game= is the lobby the
+        // player was in, so a gone or full one falls back like the native relaunch (reload_fallback)
+        if (game && EM_ASM_INT({
+                try {
+                    var e = performance.getEntriesByType('navigation')[0];
+                    return e && e.type === 'reload' ? 1 : 0;
+                } catch (x) { return 0; }
+            })) {
+            printf("[mm] reload: rejoining lobby %s\n", game);
+            g_reload_next = 1;
+        }
+#endif
         start_seek(game);
         free(game);
         return;

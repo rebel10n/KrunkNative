@@ -41,6 +41,14 @@ void game_reload_tick(Client *client);
 // main.c at startup, before anything is loaded: files changed after this moment are new to this
 // process; also picks up the session a reload restart hands over (KRUNKNATIVE_RELOAD_RESUME).
 void game_reload_startup(void);
+// After game_reload_startup: 1 when the restart handed over a lobby, a direct server or an official
+// game, so main.c skips what the (same) command line starts: --offline / Start Offline's local game,
+// --krunker's any official game. A lobby is sought by its game id, never by the Quickplay launch
+// seek or excludeGame (servers_ui_reload_resume).
+int game_reload_resume_online(void);
+// main.c: an official krunker.io game handed over is joined again now (krunker_net_reload_join), in
+// place of the network start; 1 = it was one.
+int game_reload_resume_official(Client *client);
 
 // ---- auto-restart for updates
 // The server of a live session stopped for an update (servers_ui.c: ERROR 004004). With the

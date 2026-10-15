@@ -85,6 +85,10 @@ void krunker_net_attach(Client *client); // startup (backend_startup.c): the cli
 // Seek and join an official game (game_id NULL / "": the matchmaker picks one in the region;
 // region NULL: the default). Stops the knet transport / the offline game first. 1 = started.
 int krunker_net_join(Client *client, const char *game_id, const char *region);
+// Reload (game_reload.c: F5's relaunch, the console's `reload`): krunker_net_join for the game the
+// player was in. Only when the matchmaker says it is gone (InvalidGameId) or full (GameFull): a notice
+// says so and the matchmaker picks another game in the region (no excludeGame). 1 = started.
+int krunker_net_reload_join(Client *client, const char *game_id, const char *region);
 // Find New Game for an official game (F4 / Quick Match): use_list = 1 first asks <matchmaker>/game-list
 // and joins the busiest public game with room in the same region (region NULL: the one the player is
 // in) for the saved seek mode / map that is not one of the recent games (recent_lobbies.h). Without

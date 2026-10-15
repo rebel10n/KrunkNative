@@ -134,7 +134,8 @@ void servers_ui_disconnect(void);           // console `disconnect`: stay discon
 int  servers_ui_reconnect(void);            // console `reconnect`: the last server (lobby: sought again); 1 = started
 int  servers_ui_reconnect_offline(void);    // console `reconnect`: 1 = `disconnect` left the offline game, start it again
 // F5's restart fallback (game_reload.c): what the next process joins to come back to this session,
-// 2 = the matchmade lobby id, 1 = "host:port", 0 when there is no server to come back to.
+// 2 = the matchmade lobby id (also while it is being joined), 1 = "host:port" (the caller checks the
+// connection), 0 when there is no server to come back to.
 int  servers_ui_session_target(char *out, size_t n);
 void servers_ui_tick(Client*);
 int  servers_ui_retry(void);                 // the error screen's "seek a new game" link; 1 = handled
@@ -156,6 +157,14 @@ const char *servers_ui_rejoin_text(void);    // "Reconnecting..." / "Rejoining a
 // process was in with the restart rejoin's backoff (REJOIN_RESTART; the screen says Game Updating).
 void servers_ui_hold_startup_seek(int hold);
 void servers_ui_resume_rejoin(const char *game_id);
+// The resume joined its session itself (offline game, direct server, official game): no startup seek.
+void servers_ui_skip_startup_seek(void);
+// Reload (F5's relaunch / the console's `reload`): the lobby the player was in, sought by its game id
+// (never the Quickplay launch seek, never excludeGame); only when it is gone or full, one plain seek
+// elsewhere, and a notice says so. _resume: the new process's startup seek; _rejoin: in place now,
+// 0 = not in a matchmade lobby.
+void servers_ui_reload_resume(const char *game_id);
+int  servers_ui_reload_rejoin(void);
 int  servers_ui_join_link(const char *text);  // Join field / pasted link or "NODE:lobby" id (v3.1.1 f9); 1 = joining, 0 = refused (a notice says why)
 // Connect window / console connect / Join field given a game link or lobby id (CH2:kz862) or a krunker.io
 // game link: 1 = joining (the brain's seek, or the official krunker.io join), 0 = not a game link (err
