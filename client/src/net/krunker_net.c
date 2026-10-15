@@ -98,10 +98,9 @@ static struct {
     int connected;       // on_client_socket_connect was reported for this socket
     KrunkerLink link;
     pthread_mutex_t lock;
-    // main-thread notices (krunker_net_tick)
+    // the main thread's pending error popup (krunker_net_tick)
     char notice[256];
     int notice_pending, captcha_pending;
-    int notice_popup; // the pending notice is an error (v10's error popup), else an info toast
     KrunkerAltcha altcha; // web: the "cpt" being solved in slices
     int altcha_pending;
     int pow_shown;           // web: krunker_captcha_pow_begin was told of the "cpt" being solved
@@ -114,7 +113,7 @@ static struct {
     // the player's texts the socket thread needs, looked up on the main thread per join (i18n is the
     // main thread's): {0} placeholders filled with i18n_replace where they are used
     struct {
-        char joined[160], error[160], pow[200], map[160], closed[160];
+        char error[160], pow[200], map[160], closed[160];
         char ws_failed[200], ws_denied[200], ws_unreachable[200];
     } tpl;
     volatile int leave_unsupported; // a map nothing can show (kmap_tick, or an init naming none): krunker_net_tick leaves
@@ -129,6 +128,8 @@ static struct {
     NetInitPacket map_init;
     int map_req_active;
     char map_label[64], map_why[200]; // the map nothing could show, and why (krunker_net_tick's message)
+    volatile int leave_error;       // the server's "error" / "dc" ended the session: krunker_net_tick leaves the game
+    char leave_text[300];           // leave_error's reason for the error screen (K.lock)
 #ifdef __EMSCRIPTEN__
     EMSCRIPTEN_WEBSOCKET_T ws;
 #elif defined(KRUNKER_NATIVE_WS)
@@ -228,30 +229,17 @@ static void trace_frame(const char *dir, const uint8_t *data, const size_t len) 
     krunker_frame_free(&f);
 }
 
-// The main thread shows the pending notice in krunker_net_tick: an info toast (set_notice), or an
-// error popup the player stays in the game past (set_popup_notice). A failure that ends the join is
-// not a notice: present_failure shows it on the Lost Connection screen.
-static void post_notice(const int popup, const int captcha, const char *fmt, va_list ap) {
-    vsnprintf(K.notice, sizeof(K.notice), fmt, ap);
-    K.notice_pending = 1;
-    K.notice_popup = popup;
-    if (captcha) K.captcha_pending = 1;
-}
-
-static void set_notice(const int captcha, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
-static void set_notice(const int captcha, const char *fmt, ...) {
-    va_list ap;
-    va_start(ap, fmt);
-    post_notice(0, captcha, fmt, ap);
-    va_end(ap);
-}
-
+// The main thread shows the pending notice in krunker_net_tick: an error popup the player stays in
+// the game past. A failure that ends the join is not a notice: present_failure shows it on the Lost
+// Connection screen. A join that works shows nothing (no toast): the loading screen and the game do.
 static void set_popup_notice(const int captcha, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 static void set_popup_notice(const int captcha, const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
-    post_notice(1, captcha, fmt, ap);
+    vsnprintf(K.notice, sizeof(K.notice), fmt, ap);
     va_end(ap);
+    K.notice_pending = 1;
+    if (captcha) K.captcha_pending = 1;
 }
 
 // A failure that ends the join (or the session): the Lost Connection screen (on_client_socket_failed),
@@ -308,8 +296,9 @@ static void link_event(void *user, const KrunkerLinkEvent kind, const char *text
         case KRUNKER_LINK_EV_CAPTCHA: // a "cpt" krunker_altcha cannot answer (not SHA-256 ALTCHA, too big)
             set_popup_notice(1, "%s", K.tpl.pow);
             break;
-        case KRUNKER_LINK_EV_ERROR:
-            present_failure(i18n_replace(out, sizeof(out), K.tpl.error, 1, I18N_ARGV(text ? text : "error")));
+        case KRUNKER_LINK_EV_ERROR: // the session is over (v10: the error screen): krunker_net_tick leaves
+            snprintf(K.leave_text, sizeof(K.leave_text), "%s", i18n_replace(out, sizeof(out), K.tpl.error, 1, I18N_ARGV(text ? text : "error")));
+            K.leave_error = 1;
             break;
         case KRUNKER_LINK_EV_UNSUPPORTED: // an init naming no map: nothing to show, krunker_net_tick leaves
             kmap_fail(K.link.unsupported_map, NULL, text);
@@ -317,8 +306,7 @@ static void link_event(void *user, const KrunkerLinkEvent kind, const char *text
         case KRUNKER_LINK_EV_CLOSE: // "00" without keepOpen: the live client closes its socket; krunker_net_tick leaves
             K.leave_closed = 1;
             break;
-        case KRUNKER_LINK_EV_JOINED:
-            set_notice(0, "%s", i18n_replace(out, sizeof(out), K.tpl.joined, 1, I18N_ARGV(K.game_id)));
+        case KRUNKER_LINK_EV_JOINED: // no toast: the loading screen and then the game show the join
             break;
         case KRUNKER_LINK_EV_ACCOUNT: // "a": the account is signed in on this socket (krunker_net_tick tells krunker_account)
             K.account_event = 1;
@@ -990,7 +978,6 @@ static void fail_unreachable(void) {
 
 // The texts the socket thread uses (K.tpl), in the page's language at join time (main thread).
 static void load_texts(void) {
-    snprintf(K.tpl.joined, sizeof(K.tpl.joined), "%s", I18N("kn.kio.joined", "Joined the krunker.io server {0}"));
     snprintf(K.tpl.error, sizeof(K.tpl.error), "%s", I18N("kn.kio.serverError", "krunker.io: {0}"));
     snprintf(K.tpl.pow, sizeof(K.tpl.pow), "%s",
              I18N("kn.kio.powUnsupported", "krunker.io's game server asked for a proof of work in a form this client cannot compute yet: it may close the game."));
@@ -1340,6 +1327,7 @@ static int join(Client *client, const char *game_id, const char *region, const i
     K.leave_unsupported = 0;
     K.leave_closed = 0;
     kmap_reset();
+    K.leave_error = 0;
     wipe(K.captcha, sizeof(K.captcha));
     load_texts();
     matchmaker();
@@ -1400,11 +1388,11 @@ void krunker_net_leave(Client *client, const char *reason) {
     if (K.state == KS_OFF) return;
     if (client && K.connected) {
         pthread_mutex_lock(&client->net_lock);
-        if (reason) {
+        if (!reason) {
+            client->net_close_intended = 1;
+        } else if (!client->net_disconnect_reason[0]) { // (the server's own "error" text and code stay: client_net_queue_packet)
             snprintf(client->net_disconnect_reason, sizeof(client->net_disconnect_reason), "%s", reason);
             snprintf(client->net_disconnect_code, sizeof(client->net_disconnect_code), "000000");
-        } else {
-            client->net_close_intended = 1;
         }
         pthread_mutex_unlock(&client->net_lock);
     }
@@ -1528,6 +1516,20 @@ void krunker_net_tick(Client *client) {
         if (leaving) on_client_socket_failed(leaving, text); // the session ended: the Lost Connection screen says why
         return;
     }
+    if (K.leave_error && K.state != KS_OFF) {
+        // the server's "error" (an idle kick, ...) or "dc": the session is over. The live client closes
+        // its socket and shows the error screen (v10's gW); ours closes it now instead of waiting for
+        // the server's close, which stops the game, and the Lost Connection screen says why (the
+        // "error" packet's own text and code, client_net_queue_packet; else leave_text)
+        K.leave_error = 0;
+        char text[sizeof(K.leave_text)];
+        pthread_mutex_lock(&K.lock);
+        snprintf(text, sizeof(text), "%s", K.leave_text);
+        pthread_mutex_unlock(&K.lock);
+        printf("[krunker] the server ended the session (%s): closing the socket\n", text);
+        krunker_net_leave(client ? client : K.client, text);
+        return;
+    }
     if (K.leave_closed && K.state != KS_OFF) {
         // "00" UPDATE_NAMES without keepOpen (game.deob.js:220322): the live client closes the socket
         // itself; ours leaves the game the same way, with the session's end as the reason
@@ -1567,26 +1569,13 @@ void krunker_net_tick(Client *client) {
     pthread_mutex_lock(&K.lock);
     char text[sizeof(K.notice)];
     snprintf(text, sizeof(text), "%s", K.notice);
-    const int captcha = K.captcha_pending, popup = K.notice_popup;
-    K.notice_pending = K.captcha_pending = K.notice_popup = 0;
+    const int captcha = K.captcha_pending;
+    K.notice_pending = K.captcha_pending = 0;
     pthread_mutex_unlock(&K.lock);
     if (captcha) {
         // a "cpt" this client cannot answer (not SHA-256 ALTCHA, or too big): the Security Challenge
-        // modal's passive card shows it failed, the toast says what (the session goes on until the server decides)
+        // modal's passive card shows it failed, the popup says what (the session goes on until the server decides)
         krunker_captcha_pow_end(0);
     }
-    if (popup) { // an error the player stays in the game past: v10's error popup (it escapes the text)
-        ui_error_popup(text);
-        return;
-    }
-    char html[sizeof(text) * 2];
-    size_t o = 0; // the toast takes HTML: escape the server's text
-    for (const char *p = text; *p && o + 6 < sizeof(html); p++) {
-        if (*p == '<') o += (size_t) snprintf(html + o, sizeof(html) - o, "&lt;");
-        else if (*p == '>') o += (size_t) snprintf(html + o, sizeof(html) - o, "&gt;");
-        else if (*p == '&') o += (size_t) snprintf(html + o, sizeof(html) - o, "&amp;");
-        else html[o++] = *p;
-    }
-    html[o] = 0;
-    ui_notify(html);
+    ui_error_popup(text); // an error the player stays in the game past: v10's error popup (it escapes the text)
 }

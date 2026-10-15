@@ -253,8 +253,6 @@
  "kn.kio.gsProxyUnreachable": "Could not reach the krunker.io game server through the proxy {0}. Check it in Settings > Client.",
  "kn.kio.gsUnreachable": "Could not reach the krunker.io game server. Check your connection, or set a proxy in Settings > Client.",
  "kn.kio.gsUnreachableWeb": "Could not reach the krunker.io game server. Check your connection.",
- "kn.kio.joined": "Joined the krunker.io server {0}",
- "kn.kio.joining": "Joining the krunker.io server {0}...",
  "kn.kio.looking": "Looking for a krunker.io server...",
  "kn.kio.mapMissing": "Map {0} of this official game could not be loaded ({1}): pick another lobby.",
  "kn.kio.mmProxyUnreachable": "Could not reach krunker.io's matchmaker through the proxy {0}. Check it in Settings > Client.",

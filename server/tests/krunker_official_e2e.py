@@ -327,6 +327,7 @@ class Stub:
         self.list_fail = 0
         self.gone_after = {}  # the reload runs: gameId -> seeks answered before it is gone (InvalidGameId)
         self.list_requests = 0
+        self.client_closed_t = None  # time.monotonic() when the client closed the game socket
 
     # matchmaker
     def start_http(self):
@@ -488,6 +489,7 @@ class Stub:
                 await reader()
             except websockets.ConnectionClosed:
                 stop.set()
+            self.client_closed_t = time.monotonic()  # the client closed its socket (the stub never does first)
 
         rd = asyncio.ensure_future(reader_safe())
         try:
@@ -520,6 +522,18 @@ class Stub:
                 await send("frs")
                 await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0))
                 await self.sync_phases(send, stop)
+            elif self.got_en.is_set() and self.scenario == "kick":
+                # run_native_kick: in the game, the server's "error" (an idle kick); the socket stays open:
+                # the client must close it itself
+                await send("frs")
+                await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0))
+                await asyncio.sleep(3.0)
+                self.sent["error"] = time.monotonic()
+                await send("error", KICK_TEXT, KICK_CODE)
+                for _ in range(150):
+                    if stop.is_set():
+                        break
+                    await asyncio.sleep(0.1)
             elif self.got_en.is_set():
                 await send("frs")
                 await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0))
@@ -1284,8 +1298,9 @@ def run_native_lobby():
               "3120 clicksel .setHed .plusOrMinus\n3160 grep @kioOld Old_Burg .settNameIn\n3170 grep @kio152 1.5.2 .settNameIn\n"
               "3180 grep @kioMap %s .settNameIn\n"
               "3200 call krunkerJoin \"%s\"\n4500 vis @ask1 knCaptchaHolder knCaptchaManual\n4600 clickid knCaptchaCancel\n"
-              "5200 vis @cancelled knCaptchaHolder\n5300 call showWindow 2\n5800 call krunkerJoin \"%s\"\n7000 vis @ask2 knCaptchaHolder\n"
-              "7100 clickid knCaptchaToken\n7200 type %s\n7300 clickid knCaptchaUse\n8000 play\n13000 players\n"
+              "5200 vis @cancelled knCaptchaHolder\n5300 call showWindow 2\n5800 call krunkerJoin \"%s\"\n6200 text @toast1 [id=knNotify]\n"
+              "7000 vis @ask2 knCaptchaHolder\n"
+              "7100 clickid knCaptchaToken\n7200 type %s\n7300 clickid knCaptchaUse\n8000 play\n12800 text @toast2 [id=knNotify]\n13000 players\n"
               # in the official game: the Invite link is krunker.io's, the serverinfo and the menu's region
               # label name the official lobby (its list row: region, map, mode, players)
               "13050 con status\n13100 call copyInviteLink\n13150 text @region [id=menuRegionLabel]\n13200 quit\n"
@@ -1328,7 +1343,78 @@ def run_native_lobby():
           srv.group(1) if srv else None)
     check(f"{label}: serverinfo's players are the official list's (3/8)", "[console] Players: 3/8 (krunker.io's list)" in text, "")
     check(f"{label}: serverinfo's endpoint is krunker.io's game server", "[console] Endpoint: krunker.io official game server" in text, "")
+    toasts = re.findall(r"\[input_script\] text t=\d+ @toast\d n=\d+ .*?text=(.*)", text)
+    check(f"{label}: entering the game shows no toast (no \"Joining\" / \"Joined\" the krunker.io server)",
+          len(toasts) == 2 and not any(re.search(r"Join(ing|ed) the krunker\.io", t) for t in toasts), toasts)
     check(f"{label}: no Turnstile token reaches the log", PASTE_TOKEN not in "\n".join(l for l in lines if "[input_script]" not in l))
+
+
+BAD_MAP_INDEX = 999  # past krunker_maps.h's table, not in the (private) cache, and the maps API does not answer
+
+
+def run_native_badmap():
+    """A lobby whose init names a map index this client lacks: the client closes the krunker.io socket,
+    the game stops and v10's Lost Connection screen says which map; no toast, no game left running."""
+    label = "native-badmap"
+    # the player's path: the offline game, the server browser, a click on the official lobby
+    script = ("0 menu\n300 call showWindow 2\n3000 call krunkerJoin \"%s\"\n4500 clickid knCaptchaToken\n4600 type %s\n"
+              "4700 clickid knCaptchaUse\n"
+              "9000 text @toast [id=knNotify]\n9100 nodes @box .instructionsHeader\n9200 text @screen [id=instructionsUpdate]\n"
+              "9300 state\n12000 state\n12100 text @toast2 [id=knNotify]\n12300 quit\n" % (GAME_ID, PASTE_TOKEN))
+    dead_api = kn_proto.free_ports(1)[0]  # nothing listens: GET /maps/<index> gets no response
+    env = {"KRUNKNATIVE_KRUNKER_MAPS_API": "http://127.0.0.1:%d" % dead_api,
+           "KRUNKNATIVE_KRUNKER_MAP_CACHE": os.path.join(WORK, label + "-maps")}
+    stub, p, out, log = launch_native(label, script, env, args=("--offline",), map_index=BAD_MAP_INDEX)
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    check(f"{label}: the stub's init reached the client", f"init: map {BAD_MAP_INDEX}," in text, text[-400:])
+    check(f"{label}: the client closed the krunker.io socket", stub.client_closed_t is not None and
+          any(f"[krunker] leaving the official game" in l for l in lines), stub.client_closed_t)
+    check(f"{label}: it never sent \"en\" (no game was entered)", not stub.got_en.is_set())
+    screen = [l for l in lines if "[ui log] error screen" in l]
+    check(f"{label}: the error screen says which map and why", any(f"Map {BAD_MAP_INDEX} " in l and "no response" in l for l in screen), screen[:2])
+    box = re.search(r"nodes t=\d+ @box elements=\d+ match=(\d+)", text)
+    check(f"{label}: the Lost Connection box is up", box and int(box.group(1)) >= 1, box.group(0) if box else None)
+    shown = re.search(r"\[input_script\] text t=\d+ @screen n=\d+ .*?text=(.*)", text)
+    check(f"{label}: the screen's text names the map", shown and f"Map {BAD_MAP_INDEX} " in shown.group(1), shown.group(1) if shown else None)
+    toasts = re.findall(r"\[input_script\] text t=\d+ @toast2? n=\d+ .*?text=(.*)", text)
+    check(f"{label}: no toast", len(toasts) == 2 and not any(t.strip() for t in toasts), toasts)
+    st = re.findall(r"\[input_script\] state t=(\d+) .*", text)
+    check(f"{label}: the client stays on the error screen (it does not reconnect by itself)",
+          len(stub.ws_paths) == 1, stub.ws_paths)
+    check(f"{label}: the menu is back with the box over it, the pointer free (no game left running)",
+          len(st) == 2 and all(" menu=1 locked=0 " in l for l in re.findall(r"\[input_script\] state t=\d+ .*", text)), st)
+
+
+KICK_TEXT, KICK_CODE = "Kicked for inactivity", "000005"
+
+
+def run_native_kick():
+    """In an official game, the server's "error" (an idle kick) with the socket left open: the client
+    closes the socket itself, the game stops, and v10's error screen says why (the server's text, v10's
+    wording); no popup over it, no toast."""
+    label = "native-kick"
+    script = ("0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n"
+              "13000 text @toast [id=knNotify]\n13100 nodes @box .instructionsHeader\n13200 text @screen [id=instructionsUpdate]\n"
+              "13300 vis @pop genericPop\n13400 state\n13600 quit\n" % PASTE_TOKEN)
+    stub, p, out, log = launch_native(label, script, {}, scenario="kick")
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+    check(f"{label}: the stub sent its \"error\"", "error" in stub.sent, sorted(stub.sent))
+    closed = stub.client_closed_t is not None and "error" in stub.sent and stub.client_closed_t - stub.sent["error"] < 5
+    check(f"{label}: the client closed the socket itself (the stub kept it open)", closed,
+          (stub.client_closed_t, stub.sent.get("error")))
+    screen = [l for l in lines if "[ui log] error screen" in l]
+    check(f"{label}: the error screen takes the server's reason", any(KICK_TEXT in l for l in screen), screen[:2])
+    shown = re.search(r"\[input_script\] text t=\d+ @screen n=\d+ .*?text=(.*)", text)
+    check(f"{label}: the Lost Connection box shows it (v10's idle-kick wording)", shown and "Disconnected due to inactivity" in shown.group(1), shown.group(1) if shown else None)
+    check(f"{label}: no error popup over it", "@pop genericPop=0" in text, [l for l in lines if "@pop" in l])
+    toast = re.search(r"\[input_script\] text t=\d+ @toast n=\d+ .*?text=(.*)", text)
+    check(f"{label}: no toast", toast is not None and not toast.group(1).strip(), toast.group(0) if toast else None)
+    st = re.findall(r"\[input_script\] state t=\d+ .*", text)
+    check(f"{label}: the game stopped: the menu is back, the pointer free", st and " menu=1 locked=0 " in st[-1], st[-1:])
+    check(f"{label}: no reconnect by itself", len(stub.ws_paths) == 1, stub.ws_paths)
 
 
 def run_native_optout():
@@ -1993,6 +2079,8 @@ def main():
         run_native_sync()
         run_native_hq()
         run_native_lobby()
+        run_native_badmap()
+        run_native_kick()
         run_native_optout()
         run_native_exclude()
         run_native_exclude_mm()

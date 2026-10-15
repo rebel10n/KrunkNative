@@ -357,13 +357,11 @@ static const char *lobby_region(const char *id) {
 void krunker_lobbies_open(const char *id) {
     if (!id_ok(id)) return;
     // KN_KRUNKER_OFFICIAL (krunker_net.h): joined in this client unless the browser opt-out is set.
-    // A join that cannot start says why itself (krunker_net.c: the error screen and a toast), so it
-    // never falls back to the browser behind the player's back.
+    // A join that cannot start says why itself (krunker_net.c: the error screen or v10's error popup),
+    // so it never falls back to the browser behind the player's back. One that starts shows no toast:
+    // the loading screen says it.
     if (krunker_net_in_client() && g_lobbies_client) {
-        char text[200];
         printf("[krunker] official lobby %s: joining in-client\n", id);
-        I18N_F(text, "kn.kio.joining", "Joining the krunker.io server {0}...", id);
-        ui_notify(text);
         menu_show_window(MENU_WINDOW_NONE, 0); // like a KrunkNative row: the Servers window makes way for the game
         krunker_net_join(g_lobbies_client, id, lobby_region(id));
         return;
