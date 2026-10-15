@@ -3,8 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -71,5 +74,30 @@ func TestStopMessage(t *testing.T) {
 	os.WriteFile(f, []byte("restart"), 0o644)
 	if m, c := stopMessage(f); m != "Server restarting" || c != "004006" {
 		t.Fatalf("restart: %q %q", m, c)
+	}
+}
+
+// Every signaling answer, a refusal included, tells the page how the gateway saw it (address,
+// browser, session) in X-KN-RTC-Peer, exposed to the page's fetch for its dev-console failures.
+func TestPeerHeaderOnRefusal(t *testing.T) {
+	g := &gateway{targets: allowlist{defaultHost: "127.0.0.1", defaultPort: 21015, rules: parseRules("127.0.0.1:21015")}, perIP: map[string]int{}}
+	req := httptest.NewRequest(http.MethodPost, "/rtc?target=10.0.0.9:21015", strings.NewReader("v=0"))
+	req.RemoteAddr = "5.188.124.57:40000"
+	req.Header.Set("Origin", "https://krunk.io")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/153.0.0.0 Safari/537.36")
+	rec := httptest.NewRecorder()
+	g.handle(rec, req)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "target not allowed") {
+		t.Fatalf("refusal %d %q", rec.Code, rec.Body.String())
+	}
+	peer := rec.Header().Get(peerHeader)
+	if !strings.Contains(peer, "address 5.188.124.57") || !strings.Contains(peer, "Chrome/153") || !strings.Contains(peer, "session -") {
+		t.Fatalf("peer header %q", peer)
+	}
+	if !strings.Contains(rec.Header().Get("Access-Control-Expose-Headers"), peerHeader) {
+		t.Fatalf("the page cannot read %s: expose %q", peerHeader, rec.Header().Get("Access-Control-Expose-Headers"))
+	}
+	if got := peerInfo(12, "1.2.3.4", ""); got != "session #12; address 1.2.3.4; unknown browser" {
+		t.Fatalf("peerInfo %q", got)
 	}
 }

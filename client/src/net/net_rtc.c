@@ -93,6 +93,7 @@ EM_JS(void, kn_rtc_install, (void), {
                  ', dtls ' + (sctp && sctp.transport ? sctp.transport.state : '-') + ', sctp ' + (sctp ? sctp.state : '-') +
                  ', channel ' + (s.dc ? s.dc.readyState : '-') : "") +
             '; gateway ' + (s.remote || '-') + '; local candidates ' + local +
+            '; gateway view ' + (s.peer || '-') + '; browser ' + (typeof navigator !== 'undefined' ? navigator.userAgent : '-') +
             (s.lastStats ? '; ' + s.lastStats : "") +
             '; timings ' + JSON.stringify(s.times) + '; events: ' + s.events.join(' | ');
     };
@@ -103,7 +104,7 @@ EM_JS(void, kn_rtc_open, (const char *target_c, int gen, int signal_ms, int sile
     const t0 = performance.now();
     const at = () => Math.round(performance.now() - t0);
     const s = {pc: null, dc: null, gen: gen, t0: t0, phase: 'signaling', up: false, done: false, events: [], local: {}, times: {},
-               timers: [], remote: "", path: "", lastStats: "", url: ""};
+               timers: [], remote: "", path: "", lastStats: "", url: "", peer: "", gwClose: ""};
     Module.knRtc = s;
     const live = () => Module.knRtc === s;
     const ev = (m) => { s.events.push('+' + at() + 'ms ' + m); if (s.events.length > 40) s.events.splice(0, 1); };
@@ -114,10 +115,15 @@ EM_JS(void, kn_rtc_open, (const char *target_c, int gen, int signal_ms, int sile
         if (s.done) return;
         s.done = true;
         s.timers.forEach((t) => clearTimeout(t));
+        if (s.gwClose) reason += ' (the gateway said: ' + s.gwClose + ')';
         ev('fail: ' + reason);
         try { s.lastStats = await Promise.race([Module.knRtcStats(s), new Promise((r) => setTimeout(() => r(s.lastStats), 400))]); } catch (e) {}
-        console.warn('[rtc] ' + (s.up ? 'session lost' : 'could not open') + ': ' + reason + ' -- ' + Module.knRtcDiag(s));
+        // who failed, as both ends see it: the browser's user agent and the address / session number the
+        // gateway logged (X-KN-RTC-Peer), so a console line matches the gateway's log line
+        const who = (s.peer || 'no answer from the gateway') + '; ' + (typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown browser');
+        console.warn('[rtc] ' + (s.up ? 'session lost' : 'could not open') + ': ' + reason + ' [' + who + '] -- ' + Module.knRtcDiag(s));
         if (!live()) return; // the client closed it meanwhile
+        note(1, 'webrtc ' + (s.up ? 'session lost' : 'could not open') + ': ' + reason + ' [' + who + ']'); // the in-game console
         Module.knRtc = undefined;
         try { if (s.dc) s.dc.close(); } catch (e) {}
         try { if (s.pc) s.pc.close(); } catch (e) {}
@@ -183,6 +189,12 @@ EM_JS(void, kn_rtc_open, (const char *target_c, int gen, int signal_ms, int sile
             dc.onerror = (e) => { ev('channel error ' + (e && e.error ? e.error.message : "")); };
             dc.onclose = () => { ev('channel closed'); if (live()) fail(s.up ? 'the gateway closed the data channel' : 'the data channel closed while opening'); };
             dc.onmessage = (e) => {
+                // the gateway's last word before it closes the session (net-bridge/rtc closeNotice)
+                if (typeof e.data === 'string' && e.data.indexOf('kn-rtc-close: ') === 0) {
+                    s.gwClose = e.data.slice(14, 300);
+                    ev('gateway closing: ' + s.gwClose);
+                    return;
+                }
                 if (!live() || !(e.data instanceof ArrayBuffer)) return;
                 const n = e.data.byteLength;
                 const p = _malloc(n);
@@ -197,6 +209,7 @@ EM_JS(void, kn_rtc_open, (const char *target_c, int gen, int signal_ms, int sile
             try {
                 res = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/sdp'}, body: pc.localDescription.sdp, signal: abort.signal});
                 body = await res.text();
+                s.peer = res.headers.get('X-KN-RTC-Peer') || "";
             } catch (e) {
                 throw new Error(abort.signal.aborted ? 'signaling: no answer from the gateway within ' + signal_ms + ' ms' : 'signaling: ' + (e && e.message ? e.message : e));
             }

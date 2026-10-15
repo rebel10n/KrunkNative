@@ -199,8 +199,16 @@ EM_JS(int, kn_dg_online, (void), { return typeof navigator === 'undefined' || na
 // come from wt_tick / wt_receive / kn_dg_on_close and net_rtc.c's fail().
 static void wt_explain(Client *client, const char *why) {
     const char *label = wt_label_of(g_wt.backend);
+    // the WebRTC gateway's own reason (its kn-rtc-close notice, net_rtc.c fail): shown as it said it
+    const char *said = strstr(why, "(the gateway said: ");
     if (!kn_dg_online()) client_net_set_drop(client, "offline", 0, "your network is offline (the browser reports no connection)");
-    else if (strstr(why, "no datagram")) client_net_set_drop(client, "timeout", 0, "no data from the server for %.0f s (%s)", KNET_TIMEOUT, label);
+    else if (said) {
+        char reason[160];
+        snprintf(reason, sizeof(reason), "%s", said + strlen("(the gateway said: "));
+        const size_t n = strlen(reason);
+        if (n && reason[n - 1] == ')') reason[n - 1] = 0;
+        client_net_set_drop(client, "gateway", 0, "the connection gateway closed the connection: %s (%s)", reason, label);
+    } else if (strstr(why, "no datagram")) client_net_set_drop(client, "timeout", 0, "no data from the server for %.0f s (%s)", KNET_TIMEOUT, label);
     else if (strstr(why, "server closed")) client_net_set_drop(client, "closed", 0, "the server closed the connection");
     else if (strstr(why, "ICE") || strstr(why, "peer connection") || strstr(why, "DTLS"))
         client_net_set_drop(client, "ice", 0, "the network path to the connection gateway was lost (%s: %s)", label, why);

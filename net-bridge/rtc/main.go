@@ -267,8 +267,29 @@ func (g *gateway) cors(w http.ResponseWriter, req *http.Request) bool {
 	h.Set("Vary", "Origin")
 	h.Set("Access-Control-Allow-Methods", "POST, OPTIONS")
 	h.Set("Access-Control-Allow-Headers", "Content-Type")
+	h.Set("Access-Control-Expose-Headers", peerHeader) // the page prints it with its failures
 	h.Set("Access-Control-Max-Age", "600")
 	return true
+}
+
+// peerHeader: on every answer and refusal, how the gateway sees the attempt (peerInfo), so the
+// browser's dev console prints the same address, browser and session number as this log.
+const peerHeader = "X-KN-RTC-Peer"
+
+// closeNotice: the text message the gateway sends on the data channel just before it closes the
+// session (s.close), so the browser can print why ("kn-rtc-close: <reason>"); knet itself only
+// uses binary messages.
+const closeNotice = "kn-rtc-close: "
+
+func peerInfo(id int64, client, ua string) string {
+	session := "-"
+	if id > 0 {
+		session = fmt.Sprintf("#%d", id)
+	}
+	if ua == "" {
+		ua = "unknown browser"
+	}
+	return fmt.Sprintf("session %s; address %s; %s", session, client, ua)
 }
 
 type session struct {
@@ -421,6 +442,11 @@ func (s *session) close(why string) {
 			}
 		}
 	}
+	if dc := s.dc.Load(); dc != nil && dc.ReadyState() == webrtc.DataChannelStateOpen {
+		if dc.SendText(closeNotice+why) == nil { // best effort: a lost path (ICE consent) cannot carry it
+			time.Sleep(100 * time.Millisecond) // the notice goes out before the association closes
+		}
+	}
 	s.udp.Close()
 	s.g.release(s.client)
 	s.g.live.Delete(s.id)
@@ -526,6 +552,7 @@ func (g *gateway) handle(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	client := g.clientAddress(req)
+	w.Header().Set(peerHeader, peerInfo(0, client, browserFamily(req.UserAgent())))
 	target, ok := g.targets.resolve(req.URL.Query().Get("target"))
 	if !ok {
 		log.Printf("[rtc] %s refused: target not allowed (%s)", client, req.URL.RawQuery)
@@ -544,6 +571,7 @@ func (g *gateway) handle(w http.ResponseWriter, req *http.Request) {
 	}
 
 	s := &session{g: g, id: g.nextID.Add(1), client: client, target: target, started: time.Now(), ua: browserFamily(req.UserAgent())}
+	w.Header().Set(peerHeader, peerInfo(s.id, client, s.ua))
 	g.live.Store(s.id, s)
 	fail := func(status int, msg string, err error) {
 		log.Printf("[rtc] #%d %s: %s: %v", s.id, client, msg, err)
