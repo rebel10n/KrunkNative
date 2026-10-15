@@ -390,6 +390,7 @@ int  ui_scenario_run(Client*);                   // frames + state + PNG; proces
 void ui_scenario_end(void);                      // remove the temporary storage dir
 void ui_scenario_draw_background(void);          // after the frame's glClear, instead of the world
 int  ui_scenario_draws_preview(void);            // state.preview: first-person weapon + class preview
+int  ui_scenario_draws_nametags(void);           // state.nametags: the overlay nametags over the background
 #endif
 // END ui_scenario block
 
@@ -654,7 +655,8 @@ void ui_loadout_reset_pops(void);                // resetPops (the popup holder 
 int social_estimate_value(int skin);             // prices.estimateValue: kn_brain's sale prices, else data/prices.js (0 unknown)
 void social_set_estimates(const cJSON *rows); // v10 getPrices -> _36377: the server's [{ski, est}] (v10_market.c)
 int  ui_police_active(void);                     // Officer Buddy is in the class preview
-const char *ui_police_class_name(void);          // his classN: "Marshal" for an officer, else "Officer"
+const char *ui_police_class_name(void);          // his classN: "Deputy" / "Marshal" for an officer, else "Officer"
+int  ui_police_officer(void);                    // v10 isMod || isDeputy of the K.P.D's account (an official game: its krunker.io one)
 void menu_idle_reset(void);                      // menu_ui.c: CONTROLS.idleTimer = 0 (any key, window, menu toggle)
 void ui_games_switch_tab(int tab);               // ui_windows.c: windows[9].switchTab (Custom Games tabs)
 // ui_dialog.c: window.confirm/prompt/alert (web: the browser's; native: the page's

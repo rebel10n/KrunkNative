@@ -85,6 +85,8 @@ typedef struct {
     int nametag_style;       // nametagStyle 0..3
     int health_num;          // healthNum
     char health_col_team[RS_COLOR_MAX], health_col_enemy[RS_COLOR_MAX]; // healthColT/E
+    int kpd_vision;          // kpdVision (K.P.D officers spectating a case: the suspect's sight lines, nametags.c)
+    char kpd_vision_col[RS_COLOR_MAX]; // kpdVisionCol: the bar colour of a player the suspect can see
     // (v3's xpBarCol / xpBarOpac are gone with the in-game XP bar: v7.1.4 has neither)
     int chat_filter, show_messages, show_unboxings, chat_text_outline; // chat flags (chat owner)
     float chat_opacity, chat_bg_opacity, chat_height, chat_timer; // chatOp (#chatList), chatBGOp, chatHeight (x100 px), chatTimer (s)

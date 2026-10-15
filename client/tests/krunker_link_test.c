@@ -465,11 +465,16 @@ int main(void) {
     clear();
     link.account = 0;
 
-    // "a" ACCOUNT_RESPONSE: the account signed in on the socket (name, level from player_score)
-    const KrunkerValue acc_data[] = {KRUNKER_V_STR("player_score"), KRUNKER_V_NUM(40000), KRUNKER_V_STR("player_kills"), KRUNKER_V_NUM(3)};
-    feed(&link, "a", (KrunkerValue[]) {KRUNKER_V_NIL, KRUNKER_V_NUM(123), KRUNKER_V_STR("KioPlayer"), KRUNKER_V_MAP(acc_data, 2), KRUNKER_V_STR("legacy")}, 5);
+    // "a" ACCOUNT_RESPONSE: the account signed in on the socket (name, level from player_score) and its
+    // K.P.D fields (player_role 3 = isDeputy, the Helpful Reports)
+    const KrunkerValue acc_data[] = {KRUNKER_V_STR("player_score"), KRUNKER_V_NUM(40000), KRUNKER_V_STR("player_kills"), KRUNKER_V_NUM(3),
+                                     KRUNKER_V_STR("player_role"), KRUNKER_V_NUM(3), KRUNKER_V_STR("jobrating"), KRUNKER_V_NUM(9),
+                                     KRUNKER_V_STR("jobratingpositive"), KRUNKER_V_NUM(7)};
+    feed(&link, "a", (KrunkerValue[]) {KRUNKER_V_NIL, KRUNKER_V_NUM(123), KRUNKER_V_STR("KioPlayer"), KRUNKER_V_MAP(acc_data, 5), KRUNKER_V_STR("legacy")}, 5);
     CHECK(g_events[KRUNKER_LINK_EV_ACCOUNT] == 1 && !strcmp(link.account_name, "KioPlayer") && link.account_level == 6 && g_out_count == 0,
           "a: account %s level %d", link.account_name, link.account_level);
+    CHECK(link.account_role == 3 && link.account_dev == 0 && link.account_job_rating == 9 && link.account_job_rating_pos == 7,
+          "a: role %d dev %d reports %d/%d", link.account_role, link.account_dev, link.account_job_rating_pos, link.account_job_rating);
     clear();
     feed(&link, "a", (KrunkerValue[]) {KRUNKER_V_STR("Invalid session"), KRUNKER_V_NIL, KRUNKER_V_NIL}, 3);
     CHECK(g_events[KRUNKER_LINK_EV_ACCOUNT] == 0 && !strcmp(link.account_name, "KioPlayer"), "a with an error: not signed in");
@@ -841,6 +846,61 @@ int main(void) {
         if (e && net_ext_unpack(e->payload, e->length, &sub, &b, &bl) && bl >= sizeof(r)) memcpy(&r, b, sizeof(r));
         CHECK(sub == NET_EXT_KPD_RESPONSE && r.code == 0 && r.status == NET_KPD_REPORTED && !strcmp(r.name, "Other") &&
               !strcmp(r.message, "Reported Other to the K.P.D"), "kpd reported -> KPD_RESPONSE");
+        clear();
+    }
+    { // an officer's list: "kpd" [1, "", [rows]] -> KPD_RESPONSE code 1 with the rows as JSON (one page)
+        const KrunkerValue row0[] = {KRUNKER_V_STR("can"), KRUNKER_V_STR("rep"), KRUNKER_V_STR("con"), KRUNKER_V_STR("sus"),
+                                     KRUNKER_V_STR("jop"), KRUNKER_V_NUM(2)};
+        const KrunkerValue rows[] = {KRUNKER_V_MAP(row0, 3)};
+        feed(&link, "kpd", (KrunkerValue[]) {KRUNKER_V_NUM(1), KRUNKER_V_STR(""), KRUNKER_V_ARRAY(rows, 1)}, 3);
+        const NetPacket *e = find_in(NET_PACKET_EXT, 0);
+        uint16_t sub = 0, bl = 0;
+        const uint8_t *b = NULL;
+        NetKpdResponsePacket r;
+        memset(&r, 0, sizeof(r));
+        char json[512] = "";
+        if (e && net_ext_unpack(e->payload, e->length, &sub, &b, &bl) && bl >= sizeof(r)) {
+            memcpy(&r, b, sizeof(r));
+            snprintf(json, sizeof(json), "%.*s", (int) (bl - sizeof(r)), (const char *) b + sizeof(r));
+        }
+        CHECK(sub == NET_EXT_KPD_RESPONSE && r.code == 1 && r.status == NET_KPD_REPORTED && !r.name[0] && find_in(NET_PACKET_EXT, 1) == NULL &&
+                  !strcmp(json, "[{\"can\":\"rep\",\"con\":\"sus\",\"jop\":2}]"),
+              "kpd list 1 -> one KPD_RESPONSE with the rows (%s)", json);
+        clear();
+        // a long list: pages of whole rows, each "page/pages", joined they are every row
+        enum { ROWS = 40 };
+        KrunkerValue many_kv[ROWS][4], many[ROWS];
+        char names[ROWS][24];
+        for (int i = 0; i < ROWS; i++) {
+            snprintf(names[i], sizeof(names[i]), "suspect_number_%02d", i);
+            many_kv[i][0] = KRUNKER_V_STR("con");
+            many_kv[i][1] = KRUNKER_V_STR(names[i]);
+            many_kv[i][2] = KRUNKER_V_STR("tim");
+            many_kv[i][3] = KRUNKER_V_NUM(1700000000000.0 + i);
+            many[i] = KRUNKER_V_MAP(many_kv[i], 2);
+        }
+        feed(&link, "kpd", (KrunkerValue[]) {KRUNKER_V_NUM(2), KRUNKER_V_STR(""), KRUNKER_V_ARRAY(many, ROWS)}, 3);
+        int pages = 0, rows_seen = 0, tags_ok = 1;
+        for (const NetPacket *p; (p = find_in(NET_PACKET_EXT, pages)) != NULL; pages++) {
+            if (!net_ext_unpack(p->payload, p->length, &sub, &b, &bl) || sub != NET_EXT_KPD_RESPONSE || bl < sizeof(r)) break;
+            memcpy(&r, b, sizeof(r));
+            int page = 0, of = 0;
+            tags_ok &= r.code == 2 && sscanf(r.name, "%d/%d", &page, &of) == 2 && page == pages + 1;
+            cJSON *arr = cJSON_ParseWithLength((const char *) b + sizeof(r), bl - sizeof(r));
+            rows_seen += cJSON_IsArray(arr) ? cJSON_GetArraySize(arr) : 0;
+            cJSON_Delete(arr);
+        }
+        CHECK(pages > 1 && tags_ok && rows_seen == ROWS, "kpd list 2 of %d rows -> %d pages, %d rows", ROWS, pages, rows_seen);
+        clear();
+        // nil data (an empty list): "[]"
+        feed(&link, "kpd", (KrunkerValue[]) {KRUNKER_V_NUM(3), KRUNKER_V_STR(""), KRUNKER_V_NIL}, 3);
+        e = find_in(NET_PACKET_EXT, 0);
+        json[0] = 0;
+        if (e && net_ext_unpack(e->payload, e->length, &sub, &b, &bl) && bl >= sizeof(r)) {
+            memcpy(&r, b, sizeof(r));
+            snprintf(json, sizeof(json), "%.*s", (int) (bl - sizeof(r)), (const char *) b + sizeof(r));
+        }
+        CHECK(r.code == 3 && !strcmp(json, "[]"), "kpd list 3 with no data -> [] (%s)", json);
         clear();
     }
     { // the officer's verdict out ("rkpd" [1]) and "kpdf" in

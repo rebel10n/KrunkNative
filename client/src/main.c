@@ -88,9 +88,11 @@
 #endif
 #define SCENARIO_ACTIVE() ui_scenario_active()
 #define SCENARIO_PREVIEW() ui_scenario_draws_preview()
+#define SCENARIO_NAMETAGS() ui_scenario_draws_nametags()
 #else
 #define SCENARIO_ACTIVE() 0
 #define SCENARIO_PREVIEW() 0
+#define SCENARIO_NAMETAGS() 0
 #endif
 
 #define DEFAULT_SERVER_ADDRESS "127.0.0.1"
@@ -2200,7 +2202,13 @@ static void client_tick_game(Client *client, const float now, const float frame_
     }
 
     if (!scenario) vfx_render_screen(client); // overlay-canvas muzzle flash + damage overlay
-    if (!scenario) nametags_tick(client); // overlay-canvas nametags + mode markers (page elements)
+    if (scenario && SCENARIO_NAMETAGS()) { // no world pass set the camera's matrices: the tags project with them
+        GLint viewport[4];
+        glGetIntegerv(GL_VIEWPORT, viewport);
+        camera_update_projection_matrix(&client->camera, viewport[3] > 0 ? (float) viewport[2] / (float) viewport[3] : 1.0f);
+        camera_update_world_inverse_matrix(&client->camera);
+    }
+    if (!scenario || SCENARIO_NAMETAGS()) nametags_tick(client); // overlay-canvas nametags + mode markers (page elements)
     if (!scenario) hud_objectives_render(client);     // v7 flag pings, Hardpoint / Domination markers (game-overlay canvas)
     if (!scenario || build_ui_scenario_active()) build_ui_render(client); // v7 charge bar (interactMProg) and build wheel (game-overlay canvas)
     if (!scenario) sprays_wheel_render(client, delta); // WP-E: v7 spray wheel (game-overlay canvas)

@@ -113,6 +113,16 @@ int krunker_net_invite_link(char *out, size_t n);
 // session follows); else the error screen shows it.
 void krunker_net_leave(Client *client, const char *reason);
 int krunker_net_active(void);      // the mode owns the connection (seeking, connecting, open or dropped)
+// The krunker.io account the official game server signed in on this session ("a" ACCOUNT_RESPONSE,
+// v10's _67362 there): 1 = one is (out filled), 0 = a guest or no official session (out zeroed).
+typedef struct {
+    char name[64];
+    int level;
+    int role;                       // player_role: 2 isMod (Marshal), 3 isDeputy
+    int dev;                        // player_developer
+    int job_rating, job_rating_pos; // jobrating / jobratingpositive (Helpful Reports)
+} KrunkerNetAccount;
+int krunker_net_account(KrunkerNetAccount *out);
 int krunker_net_open(void);        // the WebSocket is open
 // client_net_send_packet while active: our packet translated and sent (or dropped). 1 = sent.
 int krunker_net_send_packet(NetPacketType type, const void *payload, uint16_t length);

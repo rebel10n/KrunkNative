@@ -891,6 +891,18 @@ void ui_settings_apply_values(const HtmlElem root) {
     ui_setting_to_string(ui_setting_value("voiceChatType"), type, sizeof(type));
     const HtmlElem distance = atoi(type) ? html_dom_by_id("voiceDistance_div") : 0;
     if (distance) html_dom_set_style(distance, "display", "block");
+    // `kpd: true` rows (v10 :211087): hidden unless the account is K.P.D. The captured tabs were made
+    // without one, so for an officer the KPD folder and its kpdVisionCol row (with kpdVision's switch;
+    // kpdVision's own row has hide: true) are shown here.
+    if (ui_police_officer()) {
+        const char *const ids[] = {"setHed_kpd", "setBod_kpd"};
+        for (int i = 0; i < 2; i++) {
+            const HtmlElem el = html_dom_by_id(ids[i]);
+            if (el) html_dom_set_display(el, "");
+        }
+        const HtmlElem row = html_dom_by_id("kpdVisionCol_div");
+        if (row) html_dom_set_style(row, "display", "block");
+    }
 }
 
 void ui_settings_push_saved(void) {

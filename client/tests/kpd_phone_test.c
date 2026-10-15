@@ -16,6 +16,11 @@
 //     the Stats tab's Range / Tag Count table
 //   * kpdSubmit sends one "kpdA"; its answer (code 6) shows the success or the error popup
 //   * [Y] twice (kpdVoteY) tags the case: one "rkpd" 1; no case or not spectating: the key does nothing
+//   * a list request nobody answers (an official krunker.io server that sends an officer's list only to
+//     its own officers, a dropped brain request) says "Request Failed" after KPD_NO_ANSWER_MS instead of
+//     "Loading..." for good; an answer, another tab or a new request cancels that
+//   * the case's suspect / caller (hud_votekick_kpd_sus / _caller: KPD Vision, the spectator cards)
+//     belong to the connection the case came on
 #include <ui_logic.h>
 #include <client.h>
 #include <html_dom.h>
@@ -430,6 +435,71 @@ static void case_application(void) {
     free(c);
 }
 
+static void case_list_no_answer(void) {
+    reset_world();
+    Client *c = make_client(0);
+    free(g_kpd_calls_html);
+    g_kpd_calls_html = strdup("Loading...");
+    g_kpd_tab_shown = 0;
+    hud_votekick_kpd_request(c, 1);
+    CHECK(g_sent == 1 && live_timers() == 1 && g_last_timer_ms == 15000.0, "the request arms a 15 s no-answer timer (%d timers)", live_timers());
+    advance(14999);
+    CHECK(!strcmp(g_kpd_calls_html, "Loading..."), "still loading just before the timeout");
+    advance(1);
+    CHECK(!strcmp(g_kpd_calls_html, "Request Failed"), "no answer: v10's failed-request text, not Loading... for good (%s)", g_kpd_calls_html);
+    CHECK(live_timers() == 0, "no timer left");
+
+    // an answer in time cancels it (a page of two counts: the rest is on its way)
+    free(g_kpd_calls_html);
+    g_kpd_calls_html = strdup("Loading...");
+    hud_votekick_kpd_request(c, 1);
+    list_page(c, 1, "1/2", "[{\"can\":\"rep1\",\"con\":\"susA\",\"typ\":0}]");
+    CHECK(live_timers() == 0, "the first page cancels the timer");
+    list_page(c, 1, "2/2", "[{\"can\":\"rep2\",\"con\":\"susB\",\"typ\":0}]");
+    advance(60000);
+    CHECK(strstr(g_kpd_calls_html, "susA") && strstr(g_kpd_calls_html, "susB"), "the answered list stays (%s)", g_kpd_calls_html);
+
+    // the officer moved to another tab: the old request's timeout leaves the new tab alone
+    hud_votekick_kpd_request(c, 1);
+    g_kpd_tab_shown = 3; // Demos: no request, its own text
+    free(g_kpd_calls_html);
+    g_kpd_calls_html = strdup("K.P.D demos are not recorded on this server");
+    advance(15000);
+    CHECK(!strcmp(g_kpd_calls_html, "K.P.D demos are not recorded on this server"), "another tab's text is kept (%s)", g_kpd_calls_html);
+
+    // a second request replaces the first one's timer (one timer, the newest tab)
+    g_kpd_tab_shown = 1;
+    hud_votekick_kpd_request(c, 1);
+    hud_votekick_kpd_request(c, 2);
+    CHECK(live_timers() == 1, "one timer for the newest request (%d)", live_timers());
+    free(g_kpd_calls_html);
+    g_kpd_calls_html = strdup("Loading...");
+    list_page(c, 1, "", "[]"); // a late Active Calls answer: not the tab on show
+    advance(15000);
+    CHECK(!strcmp(g_kpd_calls_html, "Request Failed"), "Ban Logs never answered: Request Failed (%s)", g_kpd_calls_html);
+    g_kpd_tab_shown = 0;
+    free(c);
+}
+
+static void case_vision_case_owner(void) {
+    reset_world();
+    Client *c = make_client(0);
+    c->net_client_id = 6; // a connection no case came on (case_verdict_keys' was on 4)
+    CHECK(hud_votekick_kpd_sus(c) == -1 && hud_votekick_kpd_caller(c) == -1, "no case: no suspect, no caller");
+    c->net_client_id = 4;
+    const NetKpdDataPacket d = {.sus = 9, .caller = 3};
+    hud_votekick_on_kpd_data(c, &d);
+    CHECK(hud_votekick_kpd_sus(c) == 9 && hud_votekick_kpd_caller(c) == 3, "the case names suspect 9 and caller 3 (%d %d)",
+          hud_votekick_kpd_sus(c), hud_votekick_kpd_caller(c));
+    c->net_client_id = 5; // a new connection (another server): the case stays behind
+    CHECK(hud_votekick_kpd_sus(c) == -1 && hud_votekick_kpd_caller(c) == -1, "a new connection has no case");
+    c->net_client_id = 4;
+    const NetKpdDataPacket none = {.sus = -1, .caller = -1};
+    hud_votekick_on_kpd_data(c, &none);
+    CHECK(hud_votekick_kpd_sus(c) == -1 && hud_votekick_kpd_caller(c) == -1, "kpdData null ends the case");
+    free(c);
+}
+
 int main(void) {
     case_no_answer_times_out();
     case_reported_answer_cancels_timer();
@@ -443,6 +513,8 @@ int main(void) {
     case_officer_list_pages();
     case_verdict_keys();
     case_application();
+    case_list_no_answer();
+    case_vision_case_owner();
     free(g_kpd_calls_html);
     printf("kpd_phone_test: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

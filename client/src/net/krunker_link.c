@@ -513,13 +513,83 @@ static void on_vote_kick(KrunkerLink *l, const KrunkerFrame *f) {
     emit_ext(l, NET_EXT_VOTE_KICK_STATE, &s, sizeof(s));
 }
 
+// An officer's list (policeRes codes 1..5, data an array of rows) as NET_EXT_KPD_RESPONSE: the rows as
+// JSON after the struct, in pages of whole rows when they do not fit one packet (name "page/pages",
+// as our own server sends them: server/src/accounts.c acc_kpd_send_list). A row too long for a page
+// is left out. data that is no array (an object, nil) goes as one page holding it, or "[]".
+static void kpd_list_page(KrunkerLink *l, const int code, const char *message, const char *tag, const char *json, const size_t len) {
+    uint8_t body[NET_EXT_BODY_MAX];
+    NetKpdResponsePacket r;
+    memset(&r, 0, sizeof(r));
+    r.code = (uint8_t) code;
+    r.status = NET_KPD_REPORTED;
+    snprintf(r.message, sizeof(r.message), "%s", message ? message : "");
+    snprintf(r.name, sizeof(r.name), "%s", tag ? tag : "");
+    memcpy(body, &r, sizeof(r));
+    memcpy(body + sizeof(r), json, len);
+    emit_ext(l, NET_EXT_KPD_RESPONSE, body, (uint16_t) (sizeof(r) + len));
+}
+
+static void kpd_list(KrunkerLink *l, const int code, const char *message, const KrunkerValue *data) {
+    enum { ROOM = NET_EXT_BODY_MAX - (int) sizeof(NetKpdResponsePacket), PAGES_MAX = 64 };
+    cJSON *rows = value_json(data);
+    if (rows && !cJSON_IsArray(rows)) { // one value: a list of one
+        cJSON *one = cJSON_CreateArray();
+        cJSON_AddItemToArray(one, rows);
+        rows = one;
+    }
+    char *pages[PAGES_MAX];
+    int count = 0;
+    char page[ROOM + 1];
+    size_t len = 0;
+    const cJSON *row;
+    cJSON_ArrayForEach(row, rows) {
+        char *text = cJSON_PrintUnformatted(row);
+        const size_t n = text ? strlen(text) : 0;
+        if (n && n + 2 <= ROOM) {
+            if (len && len + 1 + n + 1 > ROOM) { // the page is full: close it
+                page[len++] = ']';
+                page[len] = 0;
+                if (count < PAGES_MAX) pages[count++] = strdup(page);
+                len = 0;
+            }
+            page[len] = len ? ',' : '[';
+            len++;
+            memcpy(page + len, text, n);
+            len += n;
+        }
+        cJSON_free(text);
+    }
+    cJSON_Delete(rows);
+    if (len) {
+        page[len++] = ']';
+        page[len] = 0;
+        if (count < PAGES_MAX) pages[count++] = strdup(page);
+    }
+    if (!count) {
+        kpd_list_page(l, code, message, "", "[]", 2);
+        return;
+    }
+    for (int i = 0; i < count; i++) {
+        char tag[16];
+        if (count > 1) snprintf(tag, sizeof(tag), "%d/%d", i + 1, count);
+        else tag[0] = 0;
+        if (pages[i]) kpd_list_page(l, code, message, tag, pages[i], strlen(pages[i]));
+        free(pages[i]);
+    }
+}
+
 // "kpd" KPD_RESPONSE [code, message, data] (policeRes, :216287): code 0 answers a call ("reported"
-// with data.n the suspect, else the message to show). The officers' lists (codes 1..5) need a
-// K.P.D officer account and are not shown by this client.
+// with data.n the suspect, else the message to show); codes 1..5 are the officer's lists (an account
+// the server knows as K.P.D asked for them with ["kpd", tab]).
 static void on_kpd_response(KrunkerLink *l, const KrunkerFrame *f) {
     const int code = (int) num(arg(f, 0), -1);
+    if (code >= 1 && code <= 5) {
+        kpd_list(l, code, krunker_str(arg(f, 1)), arg(f, 2));
+        return;
+    }
     if (code != 0) {
-        note(l, KRUNKER_LINK_EV_NOTE, "kpd: officer list %d ignored", code);
+        note(l, KRUNKER_LINK_EV_NOTE, "kpd: response %d ignored", code);
         return;
     }
     NetKpdResponsePacket r;
@@ -1041,6 +1111,11 @@ static void on_account(KrunkerLink *l, const KrunkerFrame *f) {
     const double s = krunker_num(score, 0);
     const int level = (int) floor(0.03 * sqrt(s > 0 ? s : 0)); // progression_level (shared/src/progression.c)
     l->account_level = level < 1 ? 1 : level;
+    const KrunkerValue *data = arg(f, 3);
+    l->account_role = (int) krunker_num(krunker_get(data, "player_role"), 0);
+    l->account_dev = (int) krunker_num(krunker_get(data, "player_developer"), 0);
+    l->account_job_rating = (int) krunker_num(krunker_get(data, "jobrating"), 0);
+    l->account_job_rating_pos = (int) krunker_num(krunker_get(data, "jobratingpositive"), 0);
     note(l, KRUNKER_LINK_EV_ACCOUNT, "%s", l->account_name);
 }
 

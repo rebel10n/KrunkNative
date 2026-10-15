@@ -55,6 +55,8 @@ static struct {
     // an officer's list arriving in pages (policeRes code list_code), joined until the last one
     cJSON *list_rows;
     int list_code;
+    int list_timer;            // the list request's no-answer timer, 0 none
+    int list_wait;             // the code it waits for (tab + 1)
     // --render-scenario / tests: the rows come from here instead of the live game
     cJSON *override;
 } g_vk;
@@ -356,6 +358,10 @@ void hud_votekick_on_kpd(Client *client, const NetKpdResponsePacket *res, const 
     }
     // an officer's list (v10 policeRes codes 1..5): only for the tab on show (`_71731 != code - 1`)
     if (res->code < 1 || res->code > 5 || res->code - 1 != ui_loadout_kpd_tab()) return;
+    if (g_vk.list_timer && res->code == g_vk.list_wait) { // the answer is here: no "Request Failed"
+        html_timer_cancel(g_vk.list_timer);
+        g_vk.list_timer = 0;
+    }
     int page = 0, pages = 0;
     if (sscanf(name, "%d/%d", &page, &pages) == 2 && pages > 1 && page >= 1 && page <= pages) {
         // a long list comes in pages (accounts.c acc_kpd_send_list): joined, rendered with the last
@@ -559,7 +565,22 @@ void hud_votekick_kpd_apply(Client *client, const char *discord, const char *rea
     send_ext(client, NET_EXT_KPD_APPLY, &req, sizeof(req));
 }
 
+// KrunkNative: a list request nothing answered in KPD_NO_ANSWER_MS (a server that refuses it in
+// silence, a dropped brain request) says v10's failed-request text (_71741) instead of "Loading..."
+// for good, if its tab is still the one on show.
+static void list_no_answer(void *user) {
+    (void) user;
+    g_vk.list_timer = 0;
+    if (g_vk.list_wait - 1 != ui_loadout_kpd_tab()) return;
+    cJSON_Delete(g_vk.list_rows); // pages that came before the rest went missing
+    g_vk.list_rows = NULL;
+    const HtmlElem holder = html_dom_by_id("kpdCalls");
+    if (holder) html_dom_set_html(holder, "Request Failed");
+}
+
 void hud_votekick_kpd_request(Client *client, const int tab) {
+    if (g_vk.list_timer) html_timer_cancel(g_vk.list_timer);
+    g_vk.list_timer = 0;
     if (!client || !call_reachable(client)) { // no session: no answer can come (the list would say Loading... for good)
         kpd_list_show(tab, NET_KPD_UNAVAILABLE, "Not connected to a server", NULL, 0);
         return;
@@ -569,6 +590,8 @@ void hud_votekick_kpd_request(Client *client, const int tab) {
     req.tab = (uint8_t) tab;
     req.uid = -1;
     send_ext(client, NET_EXT_KPD_CALL, &req, sizeof(req));
+    g_vk.list_wait = tab;
+    g_vk.list_timer = html_timer_add(KPD_NO_ANSWER_MS, list_no_answer, NULL);
 }
 
 // The player list's Kick / Ban (v10 ADMIN_ACTIONS): one NET_EXT_ADMIN_ACTION. The button shows only

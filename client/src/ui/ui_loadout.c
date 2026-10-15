@@ -32,6 +32,7 @@
 #include <string.h>
 #include <ruleset.h>
 #include <cosmetics.h> // cosmetics_route, cosmetics_attach_index (ui_loadout_look)
+#include <krunker_net.h> // the K.P.D's account in an official krunker.io game (police_identity)
 #include <game_config.h> // game_class_allowed: KrunkNative's own classes are out of official krunker.io games
 
 // ---------------------------------------------------------------- Krunker tables
@@ -2152,13 +2153,45 @@ static int g_kpd_tab; // _71731
 #define KPD_APPLY_REPORTS 20 // v10: an application from 20 positive reports (and a rating above 0.7)
 #define KPD_APPLY_LEVEL 50   // v10 kpdSubmit: level 50
 
-static int police_officer(const AccountInfo *acc) {
-    // v10 isMod || isDeputy; KrunkNative's officers are the moderator and DEV accounts (server/src/votekick.c)
-    return acc && (acc->is_mod || acc->is_dev);
+// v10's _67362 for the K.P.D: the account the game server knows. In an official krunker.io game that is
+// the krunker.io account its server signed in on the socket ("a", krunker_net_account), or a guest: our
+// own account means nothing to krunker.io's K.P.D, whose lists only its officers get (an officer view
+// for ours would ask that server for lists it never sends: "Loading..." for good). Elsewhere it is ours.
+typedef struct {
+    int signed_in;
+    int officer;                    // v10 isMod || isDeputy
+    int deputy;                     // isDeputy (classN "Deputy")
+    int job_rating, job_rating_pos; // jobRating / jobRatingPos
+} PoliceIdentity;
+
+static PoliceIdentity police_identity(void) {
+    PoliceIdentity id = {0};
+    if (krunker_net_active()) {
+        KrunkerNetAccount k;
+        if (krunker_net_account(&k)) {
+            id.signed_in = 1;
+            id.officer = k.role == 2 || k.role == 3; // updatePerms: isMod = role 2, isDeputy = role 3
+            id.deputy = k.role == 3;
+            id.job_rating = k.job_rating;
+            id.job_rating_pos = k.job_rating_pos;
+        }
+        return id;
+    }
+    const AccountInfo *acc = account_get();
+    if (!acc) return id;
+    id.signed_in = 1;
+    // KrunkNative's officers are the moderator and DEV accounts (server/src/votekick.c kpd_is_officer)
+    id.officer = acc->is_mod || acc->is_dev;
+    id.job_rating = acc->job_rating;
+    id.job_rating_pos = acc->job_rating_pos;
+    return id;
 }
 
+int ui_police_officer(void) { return police_identity().officer; }
+
 const char *ui_police_class_name(void) {
-    return police_officer(account_get()) ? "Marshal" : "Officer"; // v10 classN: isDeputy ? Deputy : isMod ? Marshal : Officer
+    const PoliceIdentity id = police_identity(); // v10 classN: isDeputy ? Deputy : isMod ? Marshal : Officer
+    return id.deputy ? "Deputy" : id.officer ? "Marshal" : "Officer";
 }
 
 int ui_loadout_kpd_tab(void) { return g_kpd_tab; }
@@ -2172,8 +2205,9 @@ void ui_loadout_switch_kpd_tab(const int tab) {
 // officer), the speech line for a guest (1), a player (0: "You look Strong...") or an officer (3:
 // "Welcome Back Officer..."), and the K.P.D text. An officer gets v10's officer view: the Mod Rules
 // line, the tab bar (switchKPDTab) and #kpdCalls, filled by policeRes (hud_votekick.c) for the tab.
-// A player sees its Helpful Reports bar (jobRatingPos / jobRating, none tracked: 0/0) and the
-// application line (20 positive reports needed).
+// A player sees its Helpful Reports bar (jobRatingPos / jobRating) and the application line (20
+// positive reports needed). Who is an officer, a player or a guest is police_identity's: in an official
+// krunker.io game the account that game's server signed in (a guest there sees v10's guest view).
 void ui_loadout_show_police_pop(void) {
     reset_pops();
     HtmlElem holder = html_dom_by_id("popupHolder");
@@ -2187,8 +2221,9 @@ void ui_loadout_show_police_pop(void) {
     audio_play("ambient_9", 0.14f, 1, 1.0f);
     if (g_police_timer) html_timer_cancel(g_police_timer);
     g_police_timer = html_timer_add(rand_between(15000, 30000), police_idle, NULL);
-    const AccountInfo *acc = account_get();
-    const int officer = police_officer(acc);
+    const PoliceIdentity id = police_identity();
+    const PoliceIdentity *acc = id.signed_in ? &id : NULL;
+    const int officer = id.officer, official = krunker_net_active();
     police_say(officer ? "Welcome Back Officer. Let's see who needs our help today..."
                : acc   ? "You look Strong. Why don't you join us?"
                        : "Sign In to Join the Fight against the Hackers!");
@@ -2221,6 +2256,9 @@ void ui_loadout_show_police_pop(void) {
                            acc->job_rating_pos, acc->job_rating, 100.0 * ratio, col);
             sb_append(&sb, "<div style='margin-top:20px;margin-bottom:20px;font-size:25px;color:white;'>");
             if (!acc) sb_append(&sb, "Sign-in to apply for K.P.D");
+            else if (acc->job_rating_pos >= KPD_APPLY_REPORTS && ratio > 0.7 && official)
+                // krunker.io's K.P.D: v10's own Google Form
+                sb_append(&sb, "You may qualify to become a K.P.D officer. Submit a application <a href='https://forms.gle/1xy2LznPkYn9gh8Q7' target='_blank' style='color:#fff'>here</a>");
             else if (acc->job_rating_pos >= KPD_APPLY_REPORTS && ratio > 0.7)
                 // v10 links its Google Form here; KrunkNative's form is in the game (kpdApplyPop), on v10's own kpdSubmit
                 sb_append(&sb, "You may qualify to become a K.P.D officer. Submit a application <a href='#' onclick='kpdApplyPop()' style='color:#fff'>here</a>");
@@ -2293,7 +2331,7 @@ void ui_loadout_kpd_submit(void) {
     if (!acc || acc->level < KPD_APPLY_LEVEL || acc->hack) ui_error_popup("Requires Lvl 50");
     else if (!discord[0]) ui_error_popup("Invalid Discord");
     else if (!reason[0]) ui_error_popup("Invalid Reason");
-    else if (police_officer(acc)) ui_error_popup("Already K.P.D");
+    else if (acc->is_mod || acc->is_dev) ui_error_popup("Already K.P.D");
     else {
         kpd_generic_popup("<div style='width:100%;text-align:center'><div class='lds-ring'><div></div><div></div><div></div><div></div></div>"
                           "<div style='font-size:20px;color:rgba(255,255,255,0.5)'>Loading...</div></div>", "loadingPop");

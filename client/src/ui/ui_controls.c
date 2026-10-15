@@ -1339,6 +1339,12 @@ static void press_button(Client *client, const int code) {
     if (client && spectate_active() && (v7_is("kpdVoteY", code) || v7_is("kpdVoteN", code)) &&
         hud_votekick_kpd_key(client, v7_is("kpdVoteY", code)))
         return;
+    // kpdVisionKey (=, v10 :221154): an officer (isMod || isDeputy) spectating a case flips
+    // kpdVision and is told "KPD Vision Enabled / Disabled" (updateGameMessage type 2)
+    if (client && spectate_active() && v7_is("kpdVision", code) && ui_police_officer() && hud_votekick_kpd_sus(client) >= 0) {
+        flip_setting("kpdVision");
+        hud_ui_add_chat(NULL, ui_setting_is_false("kpdVision") ? "KPD Vision Disabled" : "KPD Vision Enabled", "#fc03ec");
+    }
     if (client && spectate_press_key(client, code)) return;
     // kickVoteY / kickVoteN (v10 :221373): a running vote kick takes [1] / [2] (the weapon keys
     // still swap: v10 handles both); hud_votekick.c checks the vote, the account and that we live

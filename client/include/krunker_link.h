@@ -58,7 +58,8 @@
 //   00      [[id, name, alias]..., keepOpen] NET_EXT_PLAYER_NAME per rename; keepOpen falsy: the client
 //                                            closes the socket (KRUNKER_LINK_EV_CLOSE) (:220322)
 //   vk      [alias, votes, needed, isNew, voter] | [null]  NET_EXT_VOTE_KICK_STATE (io "vk", :219974)
-//   kpd     [code, message, data]            NET_EXT_KPD_RESPONSE (policeRes, :216287; code 0 only)
+//   kpd     [code, message, data]            NET_EXT_KPD_RESPONSE (policeRes, :216287): code 0 a call's
+//                                            answer; 1..5 an officer's list, data as JSON in pages
 //   kpdf    []                               NET_EXT_KPD_RESET (iiíìîìi: the officer's verdict open again)
 //   start   [.., kpdData {sus, caller}]      NET_EXT_KPD_DATA (socket ids as our uids) for a K.P.D officer
 //   a       [error, id, name, data, ...]     ACCOUNT_RESPONSE (iîïïiii :210016): our krunker.io account
@@ -163,6 +164,9 @@ typedef struct {
     int account;
     char account_name[64];          // "a" ACCOUNT_RESPONSE: the account's name, "" none yet
     int account_level;              // its level (Account.updateLevel over player_score), 0 = not in it
+    // the account row's K.P.D fields (Account :112781-112904): player_role (2 isMod "Marshal", 3
+    // isDeputy), player_developer, jobrating / jobratingpositive (the Helpful Reports)
+    int account_role, account_dev, account_job_rating, account_job_rating_pos;
     // init after we had a player: v10 drops it (you = null, game.deob.js initGame) and builds no input
     // frame until our next "0" brings it back; the old round's player must not send into the new one
     int you_gone;

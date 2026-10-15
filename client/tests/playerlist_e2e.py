@@ -20,6 +20,7 @@ private XDG_CONFIG_HOME), joined through the matchmaker and driven through KRUNK
      Call -> "Reported carol to the K.P.D" in chat, the kpd_calls row (reporter alice); More Krunker ->
      KPD: v10's player text, her Helpful Reports (21/22) and the application link: the form (Discord,
      reason), Submit: "Application sent!", the kpd_applications row
+     Settings has no KPD folder for her (not K.P.D)
   5. a second launch (alice now a moderator): the mutes are still there (from disk), and the open call
      on carol is alice's case: carol's row is first in a red frame (the officer's suspect row)
   6. a third launch: alice (the officer) spectates in the lobby before any call (carol has left, so no
@@ -28,7 +29,17 @@ private XDG_CONFIG_HOME), joined through the matchmaker and driven through KRUNK
      view (five tabs, Mod Rules) lists the call in #kpdCalls (eve, reporter bob, Join) first, above the
      older open calls (more than one packet's worth); Ban Logs and Stats answer too. Escape again (the
      panel is back), after kpdWatchTime [Y] ("Are you 100% sure?") and [Y] again tags eve: the server records the verdict and kpd_calls has it (status 1, rating 1, handled_by alice);
-     the popup again: eve's call has left Active Calls, Ban Logs and Stats show alice's tag
+     the popup again: eve's call has left Active Calls, Ban Logs and Stats show alice's tag.
+     KPD Vision with the case (v10.js:159973-160035, :209342, :221687): alice follows eve ("SUSPECT"
+     under her stats), eve's spectator card is .specKPDSuspect and bob's .specKPDCaller, the KPD Vision
+     row shows its key [=], and [=] turns KPD Vision off and on ("KPD Vision Disabled" / "Enabled");
+     Settings > General shows the officer the KPD folder (KPD Vision's switch and colour)
+  7. the vision overlay headless (client_bin --render-scenario, no server needed): spectating Team
+     Deathmatch on Kanji's sandbox bots (bot 9, frozen by bot_stop), state.kpdCase hands the officer a
+     case on a bot that sees an enemy, state.nametags draws the tags over the black background. The
+     screenshot (kept as kpd-vision.png in the logs dir on a failure) has the kpdVisionCol (#00ffff)
+     bar of the player the suspect sees, the red SUSPECT label and the suspect's / caller's card
+     outlines (#c00000 / #135DD8)
 77 = skip (no client_bin / server_bin / kn_brain, no database).
 """
 import json
@@ -46,6 +57,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import zlib
 
 ROOT = os.getcwd()
 sys.path.insert(0, os.path.join(ROOT, "server", "tests"))
@@ -481,6 +493,9 @@ def first_launch(brain, node_log, sql, tokens, ids, peers):
     rows = sql("SELECT account_id, discord, reason, status FROM kpd_applications")
     check("4: kpd_applications keeps it (pending)", rows == [[str(ids[ALICE]), "alice#1", "I hunt hackers", "0"]], str(rows))
     c.cmd("ui clearPops()")
+    c.cmd("ui showWindow(1)")  # Settings: the `kpd: true` rows are for officers only
+    check("4: Settings has no KPD folder for a player", wait_for(lambda: c.has_box("setHed_local"), 6) and not c.has_box("setHed_kpd")
+          and not c.has_box("kpdVisionCol_div"))
     c.close()
     check("the first client quits cleanly", c.proc.returncode == 0, str(c.proc.returncode))
 
@@ -539,6 +554,19 @@ def third_launch(brain, node_log, sql, tokens, ids, peers):
     check("6: the verdict panel asks \"Is eve hacking?\"", wait_for(lambda: c.textof("specKPDTxt") == "Is %s hacking?" % EVE, 8),
           c.textof("specKPDTxt"))
     check("6: the panel shows (spectating)", c.has_box("specKPDContr"))
+    # KPD Vision: the case marks the suspect and the caller on the spectator HUD
+    check("6: alice follows the suspect: SUSPECT under the followed player's stats",
+          wait_for(lambda: c.has_box("specSUS") and c.textof("specSUS") == "SUSPECT", 8), c.textof("specSUS"))
+    check("6: eve's spectator card is the suspect's, bob's the caller's",
+          wait_for(lambda: c.count(".specKPDSuspect") == 1 and c.count(".specKPDCaller") == 1, 8)
+          and EVE in (c.textof(".specKPDSuspect .specPlayerName") or "") and BOB in (c.textof(".specKPDCaller .specPlayerName") or ""),
+          "%d %d %s %s" % (c.count(".specKPDSuspect"), c.count(".specKPDCaller"), c.textof(".specKPDSuspect .specPlayerName"),
+                           c.textof(".specKPDCaller .specPlayerName")))
+    check("6: the KPD Vision row shows with its key", c.has_box("kpdVision") and c.textof("kpdVision") == "[=]", c.textof("kpdVision"))
+    c.cmd("key 61")  # kpdVisionKey (=): an officer with a case flips kpdVision
+    check("6: [=]: KPD Vision Disabled", wait_for(lambda: "KPD Vision Disabled" in (c.textof("chatList") or ""), 5), c.textof("chatList"))
+    c.cmd("key 61")
+    check("6: [=] again: KPD Vision Enabled", wait_for(lambda: "KPD Vision Enabled" in (c.textof("chatList") or ""), 5), c.textof("chatList"))
     c.shot("case")
 
     # the K.P.D popup: Escape (the menu frees the cursor), More Krunker -> KPD
@@ -604,8 +632,101 @@ def third_launch(brain, node_log, sql, tokens, ids, peers):
     stats = wait_for(lambda: (lambda t: t if t and "alltime1" in t else None)(c.textof("kpdCalls")), 8)
     check("6: Stats: one tag today and all time", stats and "1day1" in stats, stats)
     c.cmd("ui clearPops()")
+    c.cmd("ui showWindow(1)")
+    check("6: Settings > General: the officer's KPD folder with KPD Vision (switch and colour)",
+          wait_for(lambda: c.has_box("setHed_kpd") and c.has_box("kpdVisionCol_div"), 6)
+          and c.count("#kpdVisionCol_div input[type=checkbox]") == 1 and c.has_box("slid_kpdVisionCol"))
     c.close()
     check("the third client quits cleanly", c.proc.returncode == 0, str(c.proc.returncode))
+
+
+def png_rgb(path):
+    """The pixels of an 8-bit RGB / RGBA, non-interlaced PNG (client_bin's own png_write) as rows of (r, g, b)."""
+    with open(path, "rb") as f:
+        data = f.read()
+    pos, idat, w, h, ctype = 8, b"", 0, 0, 6
+    while pos < len(data):
+        n, kind = struct.unpack(">I4s", data[pos:pos + 8])
+        body = data[pos + 8:pos + 8 + n]
+        if kind == b"IHDR":
+            w, h, _, ctype = struct.unpack(">IIBB", body[:10])
+        elif kind == b"IDAT":
+            idat += body
+        pos += 12 + n
+    bpp = 4 if ctype == 6 else 3
+    raw, stride, rows, prev = zlib.decompress(idat), w * bpp, [], bytearray(w * bpp)
+    for y in range(h):
+        ft, line = raw[y * (stride + 1)], bytearray(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)])
+        for i in range(stride):
+            a = line[i - bpp] if i >= bpp else 0
+            b, c = prev[i], prev[i - bpp] if i >= bpp else 0
+            if ft == 1:
+                line[i] = (line[i] + a) & 255
+            elif ft == 2:
+                line[i] = (line[i] + b) & 255
+            elif ft == 3:
+                line[i] = (line[i] + (a + b) // 2) & 255
+            elif ft == 4:
+                p = a + b - c
+                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                line[i] = (line[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+        rows.append([tuple(line[x * bpp:x * bpp + 3]) for x in range(w)])
+        prev = line
+    return rows
+
+
+def vision_screenshot():
+    """7. KPD Vision headless: the scenario renders the case's overlay over the sandbox's frozen bots."""
+    scen = os.path.join(WORK, "kpd-vision.json")
+    state = {
+        "menu": False,
+        "window": None,
+        "connected": True,
+        "ready": True,
+        "inGame": True,
+        "mapName": "Kanji",
+        "mapFile": "maps/311_kanji.json",
+        "modeName": "Team Deathmatch",
+        "name": "Local User",
+        "region": "...",
+        "anim_time": 0.8,
+        "spectate": True,
+        "hud": {"health": 100, "maxHealth": 100, "healthSegments": 6, "ammo": 30, "ammoMax": 30, "timerText": "03:45",
+                "weaponName": "Assault Rifle", "weaponIcon": "icon_2", "classIndex": 0, "spread": 100,
+                "loadout": [{"name": "Assault Rifle", "icon": "icon_2", "melee": False}, {"name": "Pistol", "icon": "icon_3", "melee": False},
+                            {"name": "Combat Knife", "icon": "icon_0", "melee": True}], "loadoutIndex": 0},
+        "console": ["bot 9", {"at_ms": 3000, "cmd": "bot_stop"}],  # the bots stand still from 3 s on
+        "kpdCase": True, "nametags": True,
+    }
+    with open(scen, "w") as f:  # 239 frames: the capture comes a second after bot_stop, once the case is on
+        json.dump({"size": [1280, 720], "background": "#000000", "state": state, "frames": 239}, f)
+    out = os.path.join(WORK, "kpd-vision.png")
+    cfg = os.path.join(WORK, "scenario-cfg")
+    os.makedirs(cfg, exist_ok=True)
+    env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_UI_DIR")}
+    env.update({"KRUNKNATIVE_HEADLESS": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "XDG_CONFIG_HOME": cfg,
+                "XDG_STATE_HOME": os.path.join(WORK, "scenario-state")})
+    r = subprocess.run([os.path.join(BUILD, "client_bin"), "--render-scenario", scen, out],
+                       cwd=ROOT, env=env, capture_output=True, text=True, timeout=300)
+    log = (r.stdout or "") + (r.stderr or "")
+    case = re.search(r"K\.P\.D case: suspect (\d+) \(sees (-?\d+)\), caller (\d+)", log)
+    check("7: the scenario renders the vision overlay", r.returncode == 0 and os.path.exists(out), log[-400:])
+    check("7: the case is on a bot that sees an enemy", case and case.group(2) != "-1", case.group(0) if case else log[-300:])
+    if r.returncode or not os.path.exists(out):
+        return
+    px = png_rgb(out)
+
+    def count(pred, x0=0, y0=0, x1=None, y1=None):
+        return sum(1 for row in px[y0:y1] for p in row[x0:x1] if pred(p))
+    near = lambda c, t=24: (lambda p: all(abs(p[i] - c[i]) <= t for i in range(3)))  # noqa: E731
+    cyan = count(near((0, 255, 255)), 0, 120, None, 560)  # the world area: below the spectator HUD, above the panel
+    check("7: the bar of the player the suspect sees is kpdVisionCol #00ffff", cyan >= 100, "%d cyan px" % cyan)
+    red_label = count(near((255, 0, 0), 40), 0, 60, 300, 100)  # #specSUS: "SUSPECT" in red under the stats
+    check("7: SUSPECT under the followed player's stats", red_label >= 50, "%d red px" % red_label)
+    outline_sus = count(near((0xc0, 0, 0), 30), 300, 30, 980, 100)
+    outline_caller = count(near((0x13, 0x5d, 0xd8), 30), 300, 30, 980, 100)
+    check("7: the suspect's card outlined #c00000, the caller's #135DD8", outline_sus >= 40 and outline_caller >= 40,
+          "%d red, %d blue px" % (outline_sus, outline_caller))
 
 
 def main():
@@ -667,6 +788,7 @@ def main():
         first_launch(port, node_log, sql, tokens, ids, peers)
         second_launch(port, node_log, sql, tokens, ids, peers)
         third_launch(port, node_log, sql, tokens, ids, peers)
+        vision_screenshot()
     finally:
         if "stop" in locals():
             stop.set()

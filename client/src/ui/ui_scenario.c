@@ -46,6 +46,7 @@
 #include <v10_notify.h> // S5: state.notify
 #include <hud_modes.h>
 #include <net_ext.h> // state.voteKick: NetVoteKickStatePacket
+#include <nametags.h> // state.kpdCase: the suspect is a player that sees an enemy (nametags_can_see)
 #include <modes.h>
 #include <ui_interact.h> // state.interact
 #include <backend_ui.h> // WP-E part 2c: state.account
@@ -174,6 +175,7 @@ typedef struct {
     struct { const char *cmd; double at_ms; int done; } console[SCENARIO_CONSOLE_MAX];
     int console_count;
     double applied_clock_ms; // < 0 until the state is applied
+    int kpd_case_done;       // state.kpdCase handed over
     double wall_extra_s;     // real-time allowance a long frame sequence adds to each wait loop
 
     char root_dir[1024];  // repo root with trailing slash (assets_path() minus "assets/")
@@ -318,6 +320,8 @@ static void warn_unknown_keys(void) {
         "social",  // the v10 Social hub popup / views: {tab, sub, feed, friends, selected, messages, search, view} (v10_social.c)
         "clan",    // the Clans window (13): {data: clanData, tab, motd, loot, recruit} (clan_ui.c)
         "kpdPhone", // in game: true = the K.P.D phone up with a call in flight, no request sent (hud_votekick.c)
+        "nametags", // in game: the players' nametags (page elements) drawn over the background (the world is not)
+        "kpdCase",  // spectating: an officer's case (kpdData) on the first other player, the second its caller (hud_votekick.c)
         "gameCode", // v10 gameCode(): the server password popup (v10_party.c)
         "update",  // the menu's Outdated / Update now box (update_ui_scenario)
         "connectError", // with connected:false, the Lost Connection screen's error text (menu_ui.c)
@@ -538,6 +542,7 @@ void ui_scenario_window_size(int *w, int *h) {
 const char *ui_scenario_map_path(void) { return g_sc.map_path[0] ? g_sc.map_path : NULL; }
 
 int ui_scenario_draws_preview(void) { return g_sc.preview; }
+int ui_scenario_draws_nametags(void) { return g_sc.active && st_bool("nametags", 0); }
 
 static void remove_tree(const char *path) {
     DIR *dir = opendir(path);
@@ -696,6 +701,7 @@ static int spawned(const Client *c) {
 static void run_frames(Client *client, int n);
 static int read_back(const char *path);
 static void run_console(double clock_ms);
+static void apply_kpd_case(Client *client);
 
 /* ------------------------------------------------------------ frame sequences */
 
@@ -735,6 +741,7 @@ static int seq_origin_reached(const Client *c) {
 static void scenario_step(Client *client) {
     double next = g_sc.clock_ms + SCENARIO_FRAME_MS;
     run_console(g_sc.clock_ms);
+    apply_kpd_case(client);
     if (!g_sc.seq_count) {
         scenario_frame(client, next, 1);
         return;
@@ -1226,6 +1233,42 @@ static void run_console(const double clock_ms) {
     }
 }
 
+// state.kpdCase: the officer's case (NET_EXT_KPD_DATA {sus, caller}) once every console command ran
+// (`bot N`, then `bot_stop` so the view holds still) and two other players are in the game. The suspect
+// is the first player that sees an enemy (KPD Vision then has a bar to colour; else the first player),
+// its caller the next other player that is not the one it sees. The case focuses the suspect
+// (spectating), and the spectator HUD / nametags show it (KPD Vision on by default).
+static void apply_kpd_case(Client *client) {
+    if (g_sc.kpd_case_done || g_sc.applied_clock_ms < 0.0 || !st_bool("kpdCase", 0) || !spectate_active()) return;
+    for (int i = 0; i < g_sc.console_count; i++)
+        if (!g_sc.console[i].done) return;
+    const Game *game = &client->game;
+    const Player *list[64];
+    int n = 0;
+    for (size_t i = 0; i < game->player_count && n < 64; i++) {
+        const Player *p = game->players[i];
+        if (p && p != client->me && p->active && p->mesh) list[n++] = p;
+    }
+    if (n < 2) return;
+    int sus = 0, seen = -1;
+    for (int s = 0; s < n && seen < 0; s++) {
+        for (int e = 0; e < n; e++) {
+            if (e == s || (list[s]->team && list[s]->team == list[e]->team) || !nametags_can_see(game, list[s], list[e]->position)) continue;
+            sus = s;
+            seen = e;
+            break;
+        }
+    }
+    int caller = -1;
+    for (int c = 0; c < n && caller < 0; c++)
+        if (c != sus && c != seen) caller = c;
+    if (caller < 0) caller = sus ? 0 : 1;
+    g_sc.kpd_case_done = 1;
+    const NetKpdDataPacket d = {.sus = list[sus]->uid, .caller = list[caller]->uid};
+    printf("[scenario] K.P.D case: suspect %d (sees %d), caller %d\n", d.sus, seen >= 0 ? list[seen]->uid : -1, d.caller);
+    hud_votekick_on_kpd_data(client, &d);
+}
+
 static int apply_console(const Client *client) {
     const cJSON *cmd;
     cJSON_ArrayForEach(cmd, st("console")) {
@@ -1309,6 +1352,8 @@ int ui_scenario_run(Client *client) {
         // settled (a short window overflows only at its final height): re-apply it against the
         // settled layout, right before the capturing frame (the Object Manager's #knOmToolsList).
         if (last) apply_window_scroll();
+        run_console(g_sc.clock_ms); // timed commands (`bot_stop` at_ms) come due here too
+        apply_kpd_case(client); // state.kpdCase: the bots of the console's `bot N` may spawn only now
         scenario_frame(client, first_ms + (double) i * SCENARIO_FRAME_MS, !last);
     }
     // Debug: KRUNKNATIVE_SCENARIO_DUMP=<selector> prints the captured frame's box tree of
@@ -1343,4 +1388,5 @@ int ui_scenario_run(Client *client) { (void) client; return 1; }
 void ui_scenario_end(void) {}
 void ui_scenario_draw_background(void) {}
 int ui_scenario_draws_preview(void) { return 0; }
+int ui_scenario_draws_nametags(void) { return 0; }
 #endif // KRUNKNATIVE_HTML_ENGINE && !__EMSCRIPTEN__

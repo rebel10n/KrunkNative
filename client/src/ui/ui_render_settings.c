@@ -56,6 +56,7 @@ static ClientRenderSettings g_rs = {
     .speed_color = "#ffea78", .speed_color_max = "#ff0000",
     .show_medals = 1, .hide_names = 0, .nametag_opacity = 1.0f, .nametag_style = 0, .health_num = 0,
     .health_col_team = "#9eeb56", .health_col_enemy = "#eb5656",
+    .kpd_vision = 1, .kpd_vision_col = "#00ffff", // v10 settings kpdVision (val true) / kpdVisionCol
     // KrunkNative: player chat is off by default (v10's showMessages defaults on); see apply_show_messages
     .chat_filter = 0, .show_messages = 0, .show_unboxings = 1, .chat_text_outline = 0,
     .chat_opacity = 1.0f, .chat_bg_opacity = 0.2f, .chat_height = 2.5f, .chat_timer = 0.0f,
@@ -419,6 +420,8 @@ static const RsEntry RS_TABLE[] = {
     RS_B("healthNum", health_num, NULL),
     RS_S("healthColT", health_col_team, NULL),
     RS_S("healthColE", health_col_enemy, NULL),
+    RS_B("kpdVision", kpd_vision, NULL),
+    RS_S("kpdVisionCol", kpd_vision_col, NULL),
     RS_B("chatFilter", chat_filter, NULL),
     RS_B("showMessages", show_messages, apply_show_messages), // player chat: receive + send gates
     RS_B("showUnboxings", show_unboxings, NULL),

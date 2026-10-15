@@ -6,9 +6,11 @@
 //             name, slot number for the 1-9 keys, eye on the target)
 //   io_updateTimer #specTimer = the round clock; map.js #specGameInfo = mode name; spec0/spec1
 //             team scores (team modes only); #specControlHolder (objective cam row only with
-//             objective cams, KPD Vision row hidden), its key labels from the binds
-//             (updateKeybindUI: #specObjCam, #specFreeCam, #specNamesF, #specFirstP, #specFocus,
-//             #specMinimap)
+//             objective cams, the KPD Vision row only with a K.P.D case: hud_votekick.c), its key
+//             labels from the binds (updateKeybindUI: #specObjCam, #specFreeCam, #specNamesF,
+//             #specFirstP, #specFocus, #specMinimap, #kpdVision)
+//   K.P.D     an officer's case (kpdData): #specSUS under the followed suspect's stats, the
+//             suspect's / caller's cards .specKPDSuspect / .specKPDCaller (v10 :209342, :221687)
 //   UI.js     toggleGameUI / toggleControlUI with window.spectating: #spectateUI shown, the
 //             player HUD holders hidden, #topLeftMain + #topRight + chat kept
 //   game-overlay fakeCross: the small four-bar crosshair drawn while following in first person
@@ -34,6 +36,7 @@ typedef struct {
     int class_index;
     int silhouette;     // -1 unknown
     int eye_shown;      // -1 unknown
+    int kpd_mark;       // the K.P.D case's mark: 0 none, 1 specKPDSuspect, 2 specKPDCaller; -1 unknown
 } SpecSlot;
 
 static struct {
@@ -41,7 +44,7 @@ static struct {
     int was_active;
     SpecSlot slots[SPEC_SLOT_MAX];
     int slot_count;
-    char stats_key[256];        // what #specStats / #specNames currently show
+    char stats_key[256];        // what #specStats / #specNames / #specSUS currently show
     int dirty;                  // cw() requested
     char timer[16];
     char info[64];
@@ -50,7 +53,7 @@ static struct {
     char teams_key[160];
     char recticle[16];
     int cross;                  // fake crosshair shown, -1 unknown
-    char keys_key[160];         // the bind labels written into #specControlHolder
+    char keys_key[192];         // the bind labels written into #specControlHolder
     int obj_row;                // the Objective Cam row shown, -1 unknown
     char bot[256];              // #knSpecBot's text ("" = hidden)
     int bot_shown;              // -1 unknown
@@ -201,6 +204,7 @@ static void hs_slot_add(const Player *player, const int column) {
     slot->class_index = player->class_index;
     slot->silhouette = -1;
     slot->eye_shown = -1;
+    slot->kpd_mark = -1;
 
     char html[1024];
     size_t len = (size_t) snprintf(html, sizeof(html),
@@ -275,8 +279,17 @@ static void hs_update_slots(const Client *client) {
         const int eye = target >= 0 && target == player->uid;
         if (slot->eye && eye != slot->eye_shown) {
             html_dom_set_display(slot->eye, eye ? "inline-block" : "none");
-            if (slot->kpd) html_dom_set_display(slot->kpd, "none"); // no K.P.D reports in KrunkNative
             slot->eye_shown = eye;
+        }
+
+        // v10 (:221687): the officer's case marks the suspect's and the caller's cards (main.css:
+        // a red / blue outline round the class icon, the name in that colour, #specKPD's icon)
+        const int sus = hud_votekick_kpd_sus(client), caller = hud_votekick_kpd_caller(client);
+        const int kpd = sus >= 0 && sus == player->uid ? 1 : caller >= 0 && caller == player->uid ? 2 : 0;
+        if (slot->elm && kpd != slot->kpd_mark) {
+            html_dom_set_class(slot->elm, "specKPDSuspect", kpd == 1);
+            html_dom_set_class(slot->elm, "specKPDCaller", kpd == 2);
+            slot->kpd_mark = kpd;
         }
     }
 }
@@ -300,7 +313,9 @@ static void hs_update_stats(const Client *client) {
     if (target) {
         const int hp = (int) ceilf(target->health > 0.0f ? target->health : 0.0f);
         const int mhp = target->max_health > 0 ? target->max_health : 100;
-        snprintf(key, sizeof(key), "%d|%d|%d|%d|%s", target->uid, target->class_index, hp, mhp, hs_name(target));
+        // #specSUS (SUSPECT) while the followed player is the K.P.D case's suspect (v10 :209342)
+        const int sus = hud_votekick_kpd_sus(client) == target->uid;
+        snprintf(key, sizeof(key), "%d|%d|%d|%d|%d|%s", target->uid, target->class_index, hp, mhp, sus, hs_name(target));
     } else {
         snprintf(key, sizeof(key), "-");
     }
@@ -339,7 +354,7 @@ static void hs_update_stats(const Client *client) {
     const HtmlElem stats = html_dom_by_id("specStatsInner");
     if (stats) html_dom_set_html(stats, html);
     hs_set_display("specNames", "none");
-    hs_set_display("specSUS", "none");
+    hs_set_display("specSUS", hud_votekick_kpd_sus(client) == target->uid ? "inline-block" : "none");
     hs_set_display("specStats", "inline-block");
 }
 
@@ -405,11 +420,13 @@ static void hs_update_info(const Client *client) {
 
     // updateKeybindUI: "[" + UTILS.getKeyName(CONTROLS.binds.<bind>.val) + "]"
     static const char *const labels[][2] = {{"specObjCam", "specObj"}, {"specFreeCam", "specFree"}, {"specNamesF", "specNames"},
-                                           {"specFirstP", "specFirst"}, {"specFocus", "specFocus"}, {"specMinimap", "specMiniMap"}};
-    char keys[160], names[6][24];
+                                           {"specFirstP", "specFirst"}, {"specFocus", "specFocus"}, {"specMinimap", "specMiniMap"},
+                                           {"kpdVision", "kpdVision"}};
+    enum { LABELS = (int) (sizeof(labels) / sizeof(labels[0])) };
+    char keys[192], names[LABELS][24];
     size_t len = 0;
     keys[0] = 0;
-    for (int i = 0; i < 6; i++) {
+    for (int i = 0; i < LABELS; i++) {
         char name[24];
         ui_controls_key_name(ui_controls_v7_bind(labels[i][1], -1, 0), name, sizeof(name));
         snprintf(names[i], sizeof(names[i]), "[%s]", name);
@@ -417,7 +434,7 @@ static void hs_update_info(const Client *client) {
     }
     if (strcmp(keys, g_hs.keys_key)) {
         snprintf(g_hs.keys_key, sizeof(g_hs.keys_key), "%s", keys);
-        for (int i = 0; i < 6; i++) {
+        for (int i = 0; i < LABELS; i++) {
             const HtmlElem el = html_dom_by_id(labels[i][0]);
             if (el) html_dom_set_text(el, names[i]);
         }

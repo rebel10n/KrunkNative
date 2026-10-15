@@ -29,5 +29,8 @@ void nametags_tick(Client *client);
 // project a world point through the world camera into viewport fractions (0..1, y down);
 // 0 when it is outside the frustum (three.js frustum.containPoint).
 int nametags_project(const Camera *camera, vec3 point, double *fx, double *fy);
+// Game.canSee(origin, target) == null: nothing the hitscan would stop lies between the origin's eye
+// and the target (KPD Vision's test; the --render-scenario kpdCase picks its suspect with it).
+int nametags_can_see(const Game *game, const Player *origin, vec3 target);
 // scaleBase's UI scale (the canvas context's ctx.scale(scale)) for a vw x vh viewport.
 double nametags_ui_scale(float vw, float vh);

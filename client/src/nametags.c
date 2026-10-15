@@ -7,7 +7,10 @@
 // sets player.isSpectating, i.e. "nametag visible") and g1() (the killer's tag),
 // src/data/game.js canSee, src/data/colors.js, src/config.js (nameOffset*, nameVisRate).
 //
-// Not ported (no data in KrunkNative): the K.P.D red name (no reports), the site mode's bomb pickup "warning" icon
+// K.P.D (v10.js:159973-160035): an officer's case (kpdData, hud_votekick.c) names the suspect in
+// #eb5656 and the caller in #135DD8; with KPD Vision on while spectating, the bar of every player the
+// followed one can see (Game.canSee, not itself, not its team) is kpdVisionCol.
+// Not ported (no data in KrunkNative): the site mode's bomb pickup "warning" icon
 // (map objects keep no pickup id), Game.mode.teamSee (it compares team names with team
 // numbers in v3.1.1, so it never applies) and the terrain term of canSee (no terrain).
 // Level box, clan tag and premium / featured badges come from the account data a
@@ -53,6 +56,8 @@
 #define NT_PREMIUM_COLOR "#FBC02D"    // COLORS.verified.clan
 #define NT_FEATURED_COLOR "#40C4FF"   // COLORS.verified.player
 #define NT_SITE_COLOR "#FBC02D"
+#define NT_KPD_SUSPECT_COLOR "#eb5656" // kpdData.sus's name
+#define NT_KPD_CALLER_COLOR "#135DD8"  // kpdData.caller's name
 #define NT_STROKE "#2e2e2e"
 #define NT_DEMO_UID -100         // KRUNKNATIVE_NAMETAG_DEMO=2 tags: uid NT_DEMO_UID - i
 #define NT_DEMO_TAGS 5
@@ -83,11 +88,13 @@ typedef struct {
     int pass_los;            // diagnosis (KRUNKNATIVE_NAMETAG_LOG): the pass's Game.canSee result, -1 none
     double pass_t;           // diagnosis: glfwGetTime of that pass
     vec3 pass_me;            // diagnosis: the viewer's position at that pass
+    int kpd_seen;            // diagnosis: KPD Vision's sight line from the followed player this frame, -1 not judged
     int shown;               // last written root display
     int seen;                // still in the player list this frame
     int style;               // nametagStyle the geometry was written for (-1 none)
     int has_level;
     char text_name[64], text_clan[24], text_level[16], text_num[16], text_voice[16];
+    StyleCache name_color;   // the name's fill: white, the K.P.D suspect's / caller's colour
     StyleCache left, top, transform, hp_w, hp_color, chase_w, chase_disp, num_disp, voice_disp, opacity, clan_style, badge_ml[NT_BADGES];
 } Tag;
 
@@ -492,8 +499,10 @@ static void nt_tag_hide(Tag *tag) {
 }
 
 // overlay.render's player block for one visible tag at viewport fraction (fx, fy).
+// bar_color: the bar's fill instead of healthColT / healthColE (KPD Vision), NULL none; name_color:
+// the name's fill (white unless the K.P.D case names the player).
 static void nt_tag_update(Tag *tag, const Player *player, const TagInfo *info, const double fx, const double fy,
-                          const float scale, const int teammate) {
+                          const float scale, const int teammate, const char *bar_color, const char *name_color) {
     const ClientRenderSettings *rs = client_render_settings();
     const int style = rs->nametag_style < 0 || rs->nametag_style > 3 ? 0 : rs->nametag_style;
     const float opacity = rs->nametag_opacity;
@@ -534,7 +543,8 @@ static void nt_tag_update(Tag *tag, const Player *player, const TagInfo *info, c
             snprintf(v, sizeof(v), "%.2fpx", player->hp_chase * NT_BAR_W);
             nt_style(tag->chase, "width", v, &tag->chase_w);
         }
-        nt_jitter_color(teammate ? rs->health_col_team : rs->health_col_enemy, v, sizeof(v));
+        if (bar_color) snprintf(v, sizeof(v), "%s", bar_color);
+        else nt_jitter_color(teammate ? rs->health_col_team : rs->health_col_enemy, v, sizeof(v));
         nt_style(tag->hp, "background-color", v, &tag->hp_color);
         nt_style(tag->num, "display", rs->health_num ? "block" : "none", &tag->num_disp);
         if (rs->health_num) {
@@ -552,6 +562,7 @@ static void nt_tag_update(Tag *tag, const Player *player, const TagInfo *info, c
             nt_text(tag->lvl_text, v, tag->text_level, sizeof(tag->text_level));
         }
         nt_tag_row(tag, info, opacity);
+        nt_style(tag->name, "color", name_color ? name_color : "white", &tag->name_color);
     }
     // voiceStreamQueues[aX] && .length: the speaker icon ai[ag] ("volume_down" / "volume_up",
     // flipped every 300 ms) above the name, keyed by the name the tag shows
@@ -694,11 +705,11 @@ static void nt_trace(Client *client, const vec3 camera, const int hidden) {
         const double dist = nt_distance(camera, anchor);
         fprintf(log, "{\"f\":%ld,\"t\":%.3f,\"uid\":%d,\"team\":%d,\"active\":%d,\"mesh\":%d,\"hidden\":%d,\"tag\":%d,"
                      "\"visible\":%d,\"shown\":%d,\"in_view\":%d,\"fx\":%.3f,\"fy\":%.3f,\"dist\":%.1f,\"los\":%d,"
-                     "\"me_active\":%d,\"me_team\":%d,\"pass_los\":%d,\"pass_t\":%.3f,\"pass_me\":[%.2f,%.2f,%.2f],"
+                     "\"kpd\":%d,\"me_active\":%d,\"me_team\":%d,\"pass_los\":%d,\"pass_t\":%.3f,\"pass_me\":[%.2f,%.2f,%.2f],"
                      "\"me\":[%.2f,%.2f,%.2f]}\n",
                 frame, glfwGetTime(), player->uid, player->team, player->active, player->mesh != NULL, hidden, tag != NULL,
                 tag ? tag->visible : -1, tag ? tag->shown : -1, in_view, fx, fy, dist,
-                me ? nt_can_see(game, me, player->position) : -1, me ? me->active : -1, me ? me->team : -1,
+                me ? nt_can_see(game, me, player->position) : -1, tag ? tag->kpd_seen : -1, me ? me->active : -1, me ? me->team : -1,
                 tag ? tag->pass_los : -1, tag ? tag->pass_t : 0.0, tag ? tag->pass_me.x : 0.0f, tag ? tag->pass_me.y : 0.0f,
                 tag ? tag->pass_me.z : 0.0f, me ? me->position.x : 0.0f, me ? me->position.y : 0.0f, me ? me->position.z : 0.0f);
     }
@@ -714,6 +725,10 @@ static void nt_players(Client *client, const vec3 camera, const int hidden) {
     const int target_uid = spectate_target_uid();
     // aD = player && player.team ? player.team : window.spectating ? 1 : 0
     const int local_team = me && me->team ? me->team : spectating ? 1 : 0;
+    // the K.P.D case (kpdData {sus, caller}) and KPD Vision's viewer: (kpdData || isReplay) &&
+    // kpdVision && window.spectating && controls.spect.target
+    const int kpd_sus = hud_votekick_kpd_sus(client), kpd_caller = hud_votekick_kpd_caller(client);
+    const Player *kpd_viewer = kpd_sus >= 0 && rs->kpd_vision && spectating && target_uid >= 0 ? client_find_player(client, target_uid) : NULL;
 
     // players.js forcePos() on our spawn: every player's B8epi1 = false (v10.js:170705), so
     // nothing is shown until the next nameVisRate pass decides again
@@ -738,6 +753,7 @@ static void nt_players(Client *client, const vec3 camera, const int hidden) {
         Tag *tag = nt_tag_for(player->uid, 0);
         if (!tag) continue;
         tag->seen = 1;
+        tag->kpd_seen = -1;
         // a player that is dead or has no model (before its spawn's mesh) loses its flag: the
         // player init sets B8epi1 = false on every spawn (v10.js:169228), so a respawn starts hidden
         if (!player->active || !player->mesh) tag->visible = 0;
@@ -764,7 +780,16 @@ static void nt_players(Client *client, const vec3 camera, const int hidden) {
         TagInfo info;
         nt_info(player, &info);
         const int teammate = (player->team && local_team == player->team) || (mode && mode->fake_names && local_team != 2);
-        nt_tag_update(tag, player, &info, fx, fy, nt_distance_scale(camera, anchor), teammate);
+        // KPD Vision: !target || player == target || (target.team && target.team == player.team) ||
+        // canSee(target, player) != null keeps the colour; a player the target can see is kpdVisionCol
+        const int judged = kpd_viewer && player != kpd_viewer && !(kpd_viewer->team && kpd_viewer->team == player->team);
+        const int seen_by_target = judged && nt_can_see(game, kpd_viewer, player->position);
+        tag->kpd_seen = judged ? seen_by_target : -1;
+        const char *name_color = kpd_caller >= 0 && player->uid == kpd_caller ? NT_KPD_CALLER_COLOR
+                                 : kpd_sus >= 0 && player->uid == kpd_sus    ? NT_KPD_SUSPECT_COLOR
+                                                                             : NULL;
+        nt_tag_update(tag, player, &info, fx, fy, nt_distance_scale(camera, anchor), teammate,
+                      seen_by_target ? rs->kpd_vision_col : NULL, name_color);
     }
 
     if (g_nt.demo == 2) {
@@ -986,7 +1011,7 @@ static void nt_demo_tags(Client *client) {
             continue;
         }
         if (!tag->root && !nt_tag_create(tag, NT_MAX_TAGS - 1 - i)) continue;
-        nt_tag_update(tag, &fake, &info, fx, fy, nt_distance_scale(client->camera.position, anchor), s[5] != 0.0f);
+        nt_tag_update(tag, &fake, &info, fx, fy, nt_distance_scale(client->camera.position, anchor), s[5] != 0.0f, NULL, NULL);
     }
 }
 
@@ -1070,6 +1095,10 @@ void nametags_tick(Client *client) {
     // (game-overlay.js f1565, the dom zone circles): client/src/ui/hud_objectives.c
     if (mode->site) nt_sites(client);
     else for (int s = 0; s < NT_MAX_SITES; s++) nt_display(g_nt.sites[s].el, 0, &g_nt.sites[s].shown);
+}
+
+int nametags_can_see(const Game *game, const Player *origin, const vec3 target) {
+    return game && origin && nt_can_see(game, origin, target);
 }
 
 int nametags_project(const Camera *camera, const vec3 point, double *fx, double *fy) {

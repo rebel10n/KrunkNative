@@ -1271,6 +1271,22 @@ void krunker_net_attach(Client *client) {
 }
 
 int krunker_net_active(void) { return K.state != KS_OFF; }
+
+int krunker_net_account(KrunkerNetAccount *out) {
+    memset(out, 0, sizeof(*out));
+    pthread_mutex_lock(&K.lock);
+    const int signed_in = K.state != KS_OFF && K.link.account_name[0];
+    if (signed_in) {
+        snprintf(out->name, sizeof(out->name), "%s", K.link.account_name);
+        out->level = K.link.account_level;
+        out->role = K.link.account_role;
+        out->dev = K.link.account_dev;
+        out->job_rating = K.link.account_job_rating;
+        out->job_rating_pos = K.link.account_job_rating_pos;
+    }
+    pthread_mutex_unlock(&K.lock);
+    return signed_in;
+}
 int krunker_net_open(void) { return K.state == KS_OPEN; }
 
 static void stop_socket(void) {
