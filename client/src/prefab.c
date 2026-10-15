@@ -1797,7 +1797,11 @@ static Mesh *prefab_build_ladder(Object *object, const cJSON *raw_obj, const Pre
     material->emissive = st->emissive;
     prefab_apply_texture_keys(material, object, raw_obj, 1);
     prefab_apply_transparency(material, object, st, 1);
-    material->double_sided = 0;
+    // v10 MapManager.addPlane sets side = 2 (DoubleSide) on the rungs (the shared option bag, after
+    // the two rail addCubes, which stay FrontSide): culled rungs vanished from behind and edge-on.
+    // The rails are closed boxes, so drawing their back faces changes nothing while the ladder is
+    // opaque; a see-through one keeps single-sided faces (its rails' insides would show).
+    material->double_sided = !material->base.transparent;
     prefab_apply_lighting_controls(material, object);
     return mesh;
 }

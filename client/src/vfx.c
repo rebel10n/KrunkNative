@@ -947,6 +947,12 @@ static void local_shot(Client *client, Player *me) {
     if (vfx.log) fprintf(stderr, "[vfx] shot %s scoped=%d\n", money ? "cash" : weapon->src ? weapon->src : "?", scoped); // cash: the drawn stack, whatever the table's src
 
     PlayerArms *arms = held_arms(me);
+    // v10 players.js: the weapon mesh creates its muzzles at z = -muzOff, y = muzOffY (x 0), so the
+    // tracer leaves the barrel even when no flash ever init()s them (muzzleFlash off, nMuz, hidden)
+    if (arms && !arms->muzzle_placed) {
+        arms->muzzle[0] = arms->muzzle[1] = v3(0.0f, fx->muz_off_y, -fx->muz_off);
+        arms->muzzle_placed = 1;
+    }
 
     if (money) {
         vec3 source = {me->position.x, me->position.y + me->height - game_constants.camera_height, me->position.z};
@@ -1040,9 +1046,7 @@ static void local_shot(Client *client, Player *me) {
         }
 
         if (distance >= VFX_TRACER_MIN_DST && vfx.settings.tracers) {
-            // muzzles[i].getWorldPosition(): the barrel tip only once a muzzle flash has placed the
-            // sprite there; with muzzleFlash off (or the weapon hidden, camOffset, nMuz) v3.1.1's
-            // tracer starts at the weapon anchor origin instead.
+            // muzzles[i].getWorldPosition(): the barrel tip (placed above, or by the last flash)
             vec3 start;
             const int muzzle = muzzle_count > 1 ? (int) rand_int(0.0f, (float) muzzle_count - 1.0f) : 0;
 

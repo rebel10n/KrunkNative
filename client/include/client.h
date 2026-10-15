@@ -418,9 +418,12 @@ typedef struct {
     int melee_pose;   // first-person melee: arms are posed per arm (pivots) and the melee mesh hangs off the right pivot
     vec3 melee_position; // first-person melee mesh hold (weaponGeos xP/yP/zP incl. the skin's sxOff/syOff/szOff)
     vec3 melee_rotation; // its rotation (yR/zR incl. the skin's flip and sxRot)
-    // ac.muzzles[i] (local player): sprite positions in the anchor, (0, 0, 0) until a muzzle flash
-    // first init()s them at the barrel. The local tracer starts there either way (vfx.c local_shot).
+    // ac.muzzles[i] (local player): sprite positions in the anchor. v10 builds them at the barrel,
+    // (0, muzOffY, -muzOff), with the weapon mesh; a muzzle flash init()s them again (the akimbo x).
+    // vfx.c local_shot places them on the first shot (muzzle_placed) and starts the tracer there,
+    // muzzleFlash on or off (v3.1.1 left them at the anchor origin until a flash).
     vec3 muzzle[2];
+    int muzzle_placed;
     // v7.1.4 (WP-F): the weapon's charm (players.js:1262-1291): charms/charm_mount_0 at the weapon's
     // charm mount, the charm item inside it (swaying, player_update_meshes); NULL when none
     Mesh *charm_mount;

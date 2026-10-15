@@ -230,6 +230,21 @@ int main(const int argc, char **argv) {
     cJSON_Delete(moved);
     moved = NULL;
     CHECK(map_catalog_load_file("assets/maps/nosuchmap.json", &moved) == -1 && !moved, "load_file of a missing map");
+    // the v3.1.1 / v1.5.2 maps carry MAP_KEY_V3_PLANES (v3.1.1 plane rotation), loaded by key or by path
+    const cJSON *k311 = map_catalog_json((size_t) map_catalog_index_of_key("311_kanji"));
+    const cJSON *k152 = map_catalog_json((size_t) map_catalog_index_of_key("152_kanji"));
+    const cJSON *k7 = map_catalog_json(10);
+    CHECK(k311 && cJSON_IsTrue(cJSON_GetObjectItem(k311, MAP_KEY_V3_PLANES)) && k152 &&
+          cJSON_IsTrue(cJSON_GetObjectItem(k152, MAP_KEY_V3_PLANES)) && k7 && !cJSON_GetObjectItem(k7, MAP_KEY_V3_PLANES),
+          "v3 plane flag on 311_ / 152_ maps only");
+    CHECK(!map_catalog_load_file("assets/maps/311_kanji.json", &moved) && cJSON_IsTrue(cJSON_GetObjectItem(moved, MAP_KEY_V3_PLANES)),
+          "v3 plane flag on a 311_ map loaded by path");
+    cJSON_Delete(moved);
+    moved = NULL;
+    CHECK(!map_catalog_load_file("assets/maps/kanji.json", &moved) && !cJSON_GetObjectItem(moved, MAP_KEY_V3_PLANES),
+          "no v3 plane flag on a v7 map loaded by path");
+    cJSON_Delete(moved);
+    moved = NULL;
 
     // cmd_map lookups: official names first, then community keys
     CHECK(map_catalog_find("burg") == 0, "find burg");

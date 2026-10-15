@@ -283,6 +283,7 @@ typedef struct {
     unsigned char can_script:1;         // "sci" (any truthy value: the v7 serializer writes this.sci)
     unsigned char start_inactive:1;     // MYSTERY_BOX: built with active false (switchMysteryBox turns one on)
     unsigned char legacy_trigger:1;     // TRIGGER without "tas": its single-action keys were wrapped into tas[0]
+    unsigned char v3_plane_rotation:1;  // PLANE / BILLBOARD / LIQUID / RUNE of a map flagged MAP_KEY_V3_PLANES: v3.1.1 rotation
     // v7 collision kinds (player.js collision chain, map-logic.md §1.6). The pass-through volumes
     // (no_pvp, force_pvp, redirection, server_node) are COLLISION_TYPE_NONE: non-solid for players,
     // bullets, AIs, bot navigation and spawn checks; whoever implements their behaviour tests the
@@ -646,6 +647,12 @@ int map_raw_object_kept(const cJSON *raw_obj);
 //     Rx(r0) * Ry(r1) * Rz(r2) * Rx(-PI/2) of the XY unit plane (v3: Euler YXZ (r2, r0 - PI/2, r1))
 //   RECTAREA_LIGHT: (r2, r0, r1)
 // Old v3 maps go through the same table: rotated v3 planes look different, exactly as in v7.
+// KrunkNative difference: the catalogue's v3.1.1 / v1.5.2 maps ("311_*", "152_*", which v10 does
+// not ship) carry MAP_KEY_V3_PLANES (map_catalog_json), and their PLANE / BILLBOARD / LIQUID / RUNE
+// objects (Object.v3_plane_rotation) keep v3.1.1's addPlane rotation, Ry(r2) * Rx(r0 - PI/2) * Rz(r1)
+// of the XY unit plane: with v7's a billboard turned by r2 = +-PI/2 faced the wall, its poster
+// mirrored (Krunker's own v7 re-saves of those maps negate r2 for that reason).
+#define MAP_KEY_V3_PLANES "knV3Planes"
 void map_object_rotation(const Object *object, float out[9]);
 // A custom texture id (skyDomeTexA, skyDomeEmisTex, mmId) as v10.0.2 accepts it: the digits of a
 // number or of a string made only of digits and the letters "tlnesacdgxufqmrpbhv" (v7.1.4 lacked

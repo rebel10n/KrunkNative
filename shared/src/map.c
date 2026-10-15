@@ -899,6 +899,19 @@ void map_object_rotation(const Object *object, float out[9]) {
         case PREFAB_LIGHT_BAR: case PREFAB_SPRAY: case PREFAB_LEADERBOARD: case PREFAB_RUNE:
             // render.js similateRot: parent rotateX(r0) rotateY(r1) rotateZ(r2), child rotateX(-PI/2)
             // (RUNE too: map.js passes r[0..2] to addFixedPlane; map-G fix, it was unrotated)
+            if (object->v3_plane_rotation) {
+                // v3.1.1 93.js addPlane(..., yR = r2, xR = r0 - PI/2, zR = r1) -> 94.js xR + PI/2 ->
+                // 55.js rotateY(yR) rotateX(xR - PI/2) rotateZ(zR): Ry(r2) * Rx(r0 - PI/2) * Rz(r1)
+                const float a = r.x - (float) M_PI / 2.0f, b = r.z, c = r.y;
+                const float ca = cosf(a), sa = sinf(a), cb = cosf(b), sb = sinf(b), cc = cosf(c), sc = sinf(c);
+                const float yxz[9] = {
+                    cb * cc + sb * sa * sc, sb * sa * cc - cb * sc, sb * ca,
+                    ca * sc, ca * cc, -sa,
+                    cb * sa * sc - sb * cc, sb * sc + cb * sa * cc, cb * ca,
+                };
+                memcpy(out, yxz, sizeof(yxz));
+                return;
+            }
             x = r.x, y = r.y, z = r.z;
             plane = 1;
             break;
@@ -945,7 +958,7 @@ void map_object_rotation(const Object *object, float out[9]) {
 // One kept map object record -> a new Object, not yet in any map (map_init_ex's loop, and the
 // KrunkNative Object Manager's run-time records through map_object_from_json). `position` /
 // `scale` get the record's rounded p / s (before the ladder offsets). NULL: out of memory.
-static Object *map_parse_object(const cJSON *raw_obj, const vec4 *parsed_colors, const int map_no_ambient, const int build_meshes,
+static Object *map_parse_object(const cJSON *raw_obj, const vec4 *parsed_colors, const int map_no_ambient, const int v3_planes, const int build_meshes,
                                 vec3 *out_position, vec3 *out_scale) {
     (void) parsed_colors;
     (void) build_meshes;
@@ -972,6 +985,9 @@ static Object *map_parse_object(const cJSON *raw_obj, const vec4 *parsed_colors,
     object->position = position;
     object->scale = scale;
     object->prefab = prefab_id;
+    // the v3.1.1 addPlane objects of a 311_ / 152_ map (map_object_rotation), before the mesh is built
+    object->v3_plane_rotation = (unsigned char) (v3_planes && (prefab_id == PREFAB_PLANE || prefab_id == PREFAB_BILLBOARD ||
+                                                               prefab_id == PREFAB_LIQUID || prefab_id == PREFAB_RUNE));
     map_parse_generic(object, raw_obj);
     const cJSON *obj_ab = cJSON_GetObjectItem(raw_obj, "ab"); // "ab != null", so ab: 0 counts too
     object->ambient_enabled = !map_no_ambient && (!obj_ab || cJSON_IsNull(obj_ab));
@@ -1135,6 +1151,7 @@ Map *map_init_ex(const cJSON *raw_data, const int build_meshes) {
     const cJSON *death_y = cJSON_GetObjectItem(raw_data, "dthY");
     // Krunker 93.js: amb = map.nAmb || obj.ab != null ? null : ambientVal (cube shading gradient)
     const int map_no_ambient = map_flag_is_set(cJSON_GetObjectItem(raw_data, "nAmb"));
+    const int v3_planes = cJSON_IsTrue(cJSON_GetObjectItem(raw_data, MAP_KEY_V3_PLANES));
 
     if (!cJSON_IsArray(objects) || !cJSON_IsArray(spawns)) return NULL;
 
@@ -1228,7 +1245,7 @@ Map *map_init_ex(const cJSON *raw_data, const int build_meshes) {
         if (!map_raw_object_kept(raw_obj)) continue;
 
         vec3 position, scale;
-        Object *object = map_parse_object(raw_obj, parsed_colors, map_no_ambient, build_meshes, &position, &scale);
+        Object *object = map_parse_object(raw_obj, parsed_colors, map_no_ambient, v3_planes, build_meshes, &position, &scale);
         if (!object) continue;
 
         if (position.x - scale.x * 0.5f < map->dimensions.min.x) {
@@ -1296,8 +1313,9 @@ void map_reset(Map *map) {
 Object *map_object_from_json(const Map *map, const cJSON *raw_obj, const int build_meshes) {
     if (!cJSON_IsObject(raw_obj) || !map_raw_object_kept(raw_obj)) return NULL;
     const int map_no_ambient = map && map_flag_is_set(cJSON_GetObjectItem(map->raw_data, "nAmb"));
+    const int v3_planes = map && cJSON_IsTrue(cJSON_GetObjectItem(map->raw_data, MAP_KEY_V3_PLANES));
     vec3 position, scale;
-    return map_parse_object(raw_obj, NULL, map_no_ambient, build_meshes, &position, &scale);
+    return map_parse_object(raw_obj, NULL, map_no_ambient, v3_planes, build_meshes, &position, &scale);
 }
 
 void map_object_free(Object *object) {

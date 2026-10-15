@@ -228,14 +228,33 @@ static int load_json_path(const char *path, cJSON **out) {
     return *out ? 0 : -1;
 }
 
+// KrunkNative: the catalogue's v3.1.1 / v1.5.2 maps (311_*, 152_*) keep v3.1.1's plane rotation
+// (MAP_KEY_V3_PLANES, map_object_rotation in map.c), however they are loaded
+static void catalog_mark_v3_planes(const size_t index, cJSON *json) {
+    if (index >= CATALOG_COUNT || !cJSON_IsObject(json)) return;
+    if (strncmp(k_catalog[index].key, "311_", 4) && strncmp(k_catalog[index].key, "152_", 4)) return;
+    if (!cJSON_GetObjectItemCaseSensitive(json, MAP_KEY_V3_PLANES)) cJSON_AddTrueToObject(json, MAP_KEY_V3_PLANES);
+}
+
 int map_catalog_load_file(const char *path, cJSON **out) {
     if (!path || !out) return -1;
-    if (!load_json_path(path, out)) return 0;
+    if (!load_json_path(path, out)) {
+        // a catalogue map's own file named by path ("assets/maps/311_kanji.json"): its exact key
+        const char *base = strrchr(path, '/');
+        char stem[96];
+        snprintf(stem, sizeof(stem), "%s", base ? base + 1 : path);
+        const size_t n = strlen(stem);
+        if (n > 5 && !strcmp(stem + n - 5, ".json")) stem[n - 5] = 0;
+        const int own = map_catalog_index_of_key(stem);
+        if (own >= 0) catalog_mark_v3_planes((size_t) own, *out);
+        return 0;
+    }
     const int index = map_catalog_index_of_file(path);
     if (index < 0) return -1;
     char *moved = catalog_path((size_t) index);
     const int failed = !moved || load_json_path(moved, out);
     if (!failed) fprintf(stderr, "map %s: not found, loading the catalogue's %s (%s)\n", path, k_catalog[index].key, moved);
+    if (!failed) catalog_mark_v3_planes((size_t) index, *out);
     free(moved);
     return failed ? -1 : 0;
 }
@@ -452,6 +471,7 @@ const cJSON *map_catalog_json(const size_t index) {
     const cJSON *name = cJSON_GetObjectItemCaseSensitive(json, "name");
     if (!cJSON_IsString(name)) cJSON_AddStringToObject(json, "name", k_catalog[index].name);
     else if (strcmp(name->valuestring, k_catalog[index].name)) cJSON_ReplaceItemInObjectCaseSensitive(json, "name", cJSON_CreateString(k_catalog[index].name));
+    catalog_mark_v3_planes(index, json);
     g_catalog_json[index] = json;
     return json;
 }

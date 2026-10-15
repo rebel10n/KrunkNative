@@ -531,6 +531,17 @@ static void check_tables(void) {
     Object rect = {.prefab = PREFAB_RECTAREA_LIGHT, .rotation = {0.0f, 0.0f, (float) M_PI / 2.0f}};
     map_object_rotation(&rect, m);
     CHECK(fabsf(m[4] - 1.0f) < 1e-6f && fabsf(m[2] - 1.0f) < 1e-6f, "RECTAREA_LIGHT r2 rotates about Y");
+    // a billboard r = (PI/2, 0, PI/2): v7 similateRot faces it -X; a 311_ map's (v3.1.1 addPlane
+    // Ry(r2) Rx(r0 - PI/2) Rz(r1)) faces +X, upright, and a flat v3 plane still faces up
+    Object bb = {.prefab = PREFAB_BILLBOARD, .rotation = {(float) M_PI / 2.0f, 0.0f, (float) M_PI / 2.0f}};
+    map_object_rotation(&bb, m);
+    CHECK(fabsf(m[2] + 1.0f) < 1e-5f && fabsf(m[4] - 1.0f) < 1e-5f, "v7 billboard r2 = PI/2 faces -X");
+    bb.v3_plane_rotation = 1;
+    map_object_rotation(&bb, m);
+    CHECK(fabsf(m[2] - 1.0f) < 1e-5f && fabsf(m[4] - 1.0f) < 1e-5f && fabsf(m[8]) < 1e-5f, "v3 billboard r2 = PI/2 faces +X");
+    Object v3plane = {.prefab = PREFAB_PLANE, .v3_plane_rotation = 1};
+    map_object_rotation(&v3plane, m);
+    CHECK(fabsf(m[5] - 1.0f) < 1e-6f && fabsf(m[2]) < 1e-6f && fabsf(m[8]) < 1e-6f, "v3 plane normal up");
     Object pad = {.prefab = PREFAB_BOOST_PAD, .rotation = {(float) M_PI / 2.0f, 0.0f, 0.0f}}; // v7 xR = r0: about X
     map_object_rotation(&pad, m);
     CHECK(fabsf(m[0] - 1.0f) < 1e-6f && fabsf(m[7] - 1.0f) < 1e-6f, "BOOST_PAD r0 rotates about X (v7 order)");
