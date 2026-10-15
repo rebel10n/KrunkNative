@@ -944,6 +944,13 @@ static const char *hud_plist_alias(const int uid) {
         const Player *p = client->game.players[i];
         if (p && p->uid == uid) return hud_player_name(client, p);
     }
+    // --render-scenario state.playerList stands in for the lobby's players (their rows have no Game.players entry)
+    const cJSON *scenario = hud_votekick_override();
+    const cJSON *o;
+    cJSON_ArrayForEach(o, scenario) {
+        const cJSON *id = cJSON_GetObjectItem(o, "uid"), *name = cJSON_GetObjectItem(o, "name");
+        if (cJSON_IsNumber(id) && id->valueint == uid && cJSON_IsString(name)) return name->valuestring;
+    }
     return NULL;
 }
 

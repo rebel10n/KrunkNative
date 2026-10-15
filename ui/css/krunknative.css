@@ -965,3 +965,39 @@ body.kn-flavor-strike.kn-flavor-loading #instructionHolder::after {
   background: var(--kn-flavor-curtain-right);
   clip-path: polygon(15% 0, 100% 0, 100% 100%, 0 100%);
 }
+
+/* Confirm popups (genericPopup(..., "confPop"): ui_confirm's YES / NO (ui_dialog.c), the Kick / Ban
+ * punish popup (hud_ui.c punishPopup) and the Ban confirm (banPlayer), the clan and client confirms).
+ * main.css gives .confPop a 400px content box, 434px drawn with its padding and border, and no
+ * limit: with UI scaling off it is wider than a phone viewport and clips on both sides. Its Kick /
+ * Ban row (.takeActionTable, table-layout fixed, cells at 100% + padding + margin) lays out wider
+ * than the card in this engine (the Ban button leaves the card on the right). Chromium lays v10's own
+ * markup out inside the card: two 189.5px buttons, 7px apart, 7px from the edges (measured with v10's
+ * main.css; the same numbers come out of the flex row below). The card keeps v10's 434px drawn width
+ * and keeps 16px clear of each viewport edge when the viewport is narrower. */
+.confPop {
+  box-sizing: border-box;
+  width: 434px;
+  max-width: calc(100% - 32px);
+  overflow-wrap: anywhere; /* a long alias with no space wraps inside the card */
+}
+.confPop #confirmBtn,
+.confPop #declineBtn {
+  box-sizing: border-box;
+  width: 49%; /* 196px drawn on the 400px content box, as before; two of them fit a narrower card */
+}
+.confPop .takeActionTable {
+  display: flex;
+  box-sizing: border-box;
+  gap: 7px;
+  padding: 7px;
+  width: 100%;
+}
+.confPop .takeActionTable > .takeActionBtn {
+  flex: 1 1 0;
+  min-width: 0;
+  box-sizing: border-box;
+  display: block;
+  width: auto;
+  margin: 0; /* main.css's -6px top / 6px right margins are for table cells, which Chromium ignores */
+}

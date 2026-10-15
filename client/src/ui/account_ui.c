@@ -2247,6 +2247,7 @@ void account_ui_scenario(const cJSON *account) {
     g_acc.score = cnum(account, "score");
     g_acc.funds = cnum(account, "funds");
     g_acc.premium = cnum(account, "premium") != 0.0;
+    g_acc.is_dev = cnum(account, "dev") != 0.0; // the player list's Kick / Ban (punishPopup) need DEV rights
     update_level();
     const cJSON *stats = cJSON_GetObjectItem(account, "stats");
     g_acc.stats = cJSON_IsObject(stats) ? cJSON_Duplicate(stats, 1) : cJSON_CreateObject();
