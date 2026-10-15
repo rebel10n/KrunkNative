@@ -1,0 +1,35 @@
+{
+  "scenario": "kn-customize-colors",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "colour-rows",
+      "rect": [
+        546,
+        500,
+        535,
+        80
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 2.0,
+      "note": "Skin Color: v10's round swatches (main.css .skinColorItem: 30px, 3px #525252 border, radius 20px, float right, written last-to-first so the first colour sits leftmost) and the premium + icon (.premiumSkinCol); Hair / Chat Name Color: the + icon (v10_customize.c other_container, v10.js windows.loadout.color.skin). v10 has no .activeSkin rule: the picked colour is not ringed"
+    },
+    {
+      "name": "toolbar",
+      "rect": [
+        198,
+        70,
+        883,
+        53
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#loadoutToolbar signed in: the account name, Class / Loadout / Customize tabs"
+    }
+  ]
+}
