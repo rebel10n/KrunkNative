@@ -14,10 +14,12 @@ No database or coordinator: standalone server_bin processes from generated serve
      the server stays base; `--flavor bogus` is rejected (exit 2).
   4. branding: server_bin / client_bin --version print "Krunker Strike" under the flavor, and
      KN_FLAVOR=strike brands client_bin --version too (no GL / display needed).
+  5. client_bin --help lists --flavor base|strike, KN_FLAVOR and every flag the client's parsers take.
 Prints PASS/FAIL lines; exit code 0 only when everything passed.
 """
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -106,6 +108,22 @@ def run_version(binary, args, env_extra=None):
     return r.returncode, r.stdout + r.stderr
 
 
+# The client's command-line parsers (main.c strips --flavor, then headless / backend / app mode take
+# theirs, then parse_startup_args): every flag they compare argv against must be in `--help`. The
+# editor's own flags (editor_bus_parse_arg) are editor_usage()'s, printed under --help as well.
+CLIENT_ARG_SOURCES = ("client/src/main.c", "client/src/headless.c", "client/src/net/backend_startup.c",
+                      "client/src/app_mode.c")
+
+
+def client_parsed_flags():
+    flags = set()
+    for path in CLIENT_ARG_SOURCES:
+        with open(path) as f:
+            src = f.read()
+        flags.update(re.findall(r'strn?cmp\((?:argv\[i\]|arg), "(-{1,2}[a-z][a-z-]*)=?"', src))
+    return flags
+
+
 def main():
     with open(os.path.join(WORK, "none.json"), "w") as f:
         f.write("{}")
@@ -152,6 +170,16 @@ def main():
     check("client --flavor strike --version: Krunker Strike", rc == 0 and "Krunker Strike (KrunkNative client)" in out)
     rc, out = run_version("client_bin", [], {"KN_FLAVOR": "strike"})
     check("client KN_FLAVOR=strike --version: Krunker Strike", rc == 0 and "Krunker Strike (KrunkNative client)" in out)
+
+    # 5. client_bin --help documents the flavor and every flag the parsers take (no GL / display needed)
+    env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
+    r = subprocess.run([f"{BUILD}/client_bin", "--help"], capture_output=True, text=True, env=env, timeout=30)
+    usage = r.stdout
+    check("client --help: exit 0, usage on stdout", r.returncode == 0 and "Usage:" in usage, f"rc {r.returncode}")
+    check("client --help: --flavor base|strike and KN_FLAVOR", "--flavor base|strike" in usage and "KN_FLAVOR" in usage)
+    parsed = client_parsed_flags()
+    missing = sorted(f for f in parsed if not re.search(r"(?<![\w-])" + re.escape(f) + r"(?![\w-])", usage))
+    check(f"client --help: all {len(parsed)} parsed flags listed", len(parsed) >= 15 and not missing, f"missing {missing}")
 
 
 try:

@@ -266,17 +266,37 @@ static void client_look_reset(void) {
 }
 
 static void print_usage_to(FILE *out, const char *program) {
+    // Every flag a parser takes (parse_startup_args here, client_resolve_flavor, headless_parse_args,
+    // backend_parse_args, app_mode_parse_args) is listed: server/tests/strike_flavor_e2e.py checks it.
     fprintf(out, "Usage: %s [--offline|--sandbox] [--map <name>] [--headless] [--windowed|--fullscreen|--borderless]\n"
-                 "          [--hub|--viewer [query]] [--brain <url>] [--connect <host[:port]>] [map.json]\n"
+                 "          [--flavor base|strike] [--game|--hub|--viewer [query]] [--brain <url>] [--connect <host[:port]>]\n"
+                 "          [--mode online|offline] [--finder <url>] [map.json]\n"
                  "  --offline       play on the in-process sandbox server (no network); a random rotation map\n"
                  "                  unless --map / map.json (console `offline`, web ?offline=1)\n"
                  "  --sandbox       --offline on the sandbox map, v7's blank Test map (console `sandbox`, web ?sandbox)\n"
                  "  --map <name>    start on a catalogue map: key, name or path under assets/maps (web ?map=)\n"
+                 "  map.json        start on this map file (offline: the sandbox server plays it)\n"
                  "  --krunker [id]  join an official krunker.io game (that game id, else any) over Krunker's own\n"
                  "                  protocol (web ?krunker=<id|1>; client/include/krunker_net.h)\n"
+                 "  --flavor base|strike  the product flavor: base = Krunker Box Office, strike = Krunker Strike\n"
+                 "                  (its brand and FRVR's Strike rules); also --flavor=<key>. Default: the env\n"
+                 "                  KN_FLAVOR=base|strike, else the build's flavor (-DKRUNKNATIVE_FLAVOR)\n"
+                 "  --headless      no window on any display: GLFW's null platform and an EGL pbuffer (also\n"
+                 "                  KRUNKNATIVE_HEADLESS=1; KRUNKNATIVE_EGL_DEVICE=nvidia|mesa|<n> picks the GPU)\n"
+                 "  --windowed | --fullscreen | --borderless   the window mode for this run (the stored Settings >\n"
+                 "                  Display window mode is not changed)\n"
+                 "  --game | --hub | --social | --viewer [query]   start on that page: the game (default), the\n"
+                 "                  social hub (--social is the same page) or the model viewer, with an optional\n"
+                 "                  page query (the page's ?query)\n"
+                 "  --brain <url>   the account / matchmaking service (default https://coordinator.krunk.io)\n"
+                 "  --connect <host[:port]>   join that dedicated server directly (no matchmaking)\n"
+                 "  --mode online|offline     account mode (Settings > Client > Account Mode): offline = no account\n"
+                 "                  service at all, every skin owned, nothing saved\n"
+                 "  --finder <url>  the community server list (default https://matchmaker.krunk.io/servers; off = none)\n"
                  "       %s --editor [query] [editor flags] [map.json ...]   (map editor, one project per map)\n"
                  "       %s --render-scenario <scenario.json> <out.png>   (tools/uidiff; HTML_ENGINE=ON builds)\n"
-                 "       %s --help | --version\n", program, program, program, program);
+                 "       %s --help | -h | --version | --voice-info   (--voice-info: the linked Opus version)\n",
+            program, program, program, program);
     editor_usage(out); // client/src/editor/editor_bus_link.c
 }
 
@@ -562,6 +582,10 @@ int main(int argc, char **argv) {
         }
         if (!strcmp(argv[i], "--voice-info")) { // packaging checks: the voice codec is linked in
             printf("opus=%s\n", voice_opus_version());
+            return 0;
+        }
+        if (!strcmp(argv[i], "--help") || !strcmp(argv[i], "-h")) { // no display or GL needed either
+            print_usage_to(stdout, argv[0]);
             return 0;
         }
     }
