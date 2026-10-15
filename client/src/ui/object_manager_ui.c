@@ -705,10 +705,7 @@ static void om_filter(void) {
 static void om_switch_tab(const int was_props) {
     if (!om_window_open()) return;
     char id[16];
-    // the Tools pane beside the grids keeps its scroll (it shows the same tools; om_rerender did the same)
-    HtmlScroll tools = {0};
-    const HtmlElem tools_list = html_dom_by_id("knOmToolsList");
-    const int had_tools = tools_list && html_dom_get_scroll(tools_list, &tools);
+    // (the Tools pane beside the grids is not touched here, so its scroll stays: no save and restore)
     if (was_props || !html_dom_by_id("knOmGrid0")) {
         om_refresh_body();
     } else {
@@ -718,7 +715,6 @@ static void om_switch_tab(const int was_props) {
             if (!grid) continue;
             const int hidden = tab != g_om.tab;
             if (html_dom_has_class(grid, "knOmHid") != hidden) html_dom_set_class(grid, "knOmHid", hidden);
-            if (!hidden) html_dom_set_scroll(grid, 0.0f, 0.0f); // a tab's grid starts at the top (v7 switchTab)
         }
     }
     om_update_status(); // the tab's status line (the Weapons tab's "extra weapons are off" and the host-only lines)
@@ -731,8 +727,11 @@ static void om_switch_tab(const int was_props) {
     if (hint) html_dom_set_text(hint, om_hint());
     const HtmlElem clear = html_dom_by_id("knOmClearBtn");
     if (clear && html_dom_has_class(clear, "knOmHid") != (g_om.tab != OM_TAB_WEAPONS)) html_dom_set_class(clear, "knOmHid", g_om.tab != OM_TAB_WEAPONS);
-    const HtmlElem again = had_tools ? html_dom_by_id("knOmToolsList") : 0;
-    if (again) html_dom_set_scroll(again, tools.left, tools.top);
+    // the shown grid starts at the top (v7 switchTab): last, so the one layout the changes above need
+    // is the one this makes (a scroll setter lays out at once; before, it was a second layout per click)
+    snprintf(id, sizeof(id), "knOmGrid%d", g_om.tab);
+    const HtmlElem shown = html_dom_by_id(id);
+    if (shown) html_dom_set_scroll(shown, 0.0f, 0.0f);
 }
 
 static void om_set_status(const char *text, const int error) {
