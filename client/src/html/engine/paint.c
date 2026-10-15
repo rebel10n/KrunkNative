@@ -1236,7 +1236,9 @@ static int glyph_to_quad(Painter *p, const Glyph *g, unsigned synth, float font_
      * (#uiBase, the hub's body) the two roundings differ: rounding only in
      * device space put hub tab labels 1 px low. */
     const float ls = p->text_layer_snap_y;   /* not part of layout space */
-    const float bl = roundf(baseline - ls + p->snap_oy) - p->snap_oy + ls;
+    /* Blink's local space is device px on a zoomed page (devicePixelRatio, zoom-for-DSF) */
+    const float dsf = p->ctx->device_scale > 0.0f ? p->ctx->device_scale : 1.0f;
+    const float bl = roundf((baseline - ls + p->snap_oy) * dsf) / dsf - p->snap_oy + ls;
     d->y = (bl * scale + q.y_off) / scale;
     d->w = q.w / scale;
     d->h = q.h / scale;

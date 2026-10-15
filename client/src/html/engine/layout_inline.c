@@ -263,15 +263,17 @@ static float resolve_vertical_align_offset(const Box *child, const Box *parent, 
     }
 }
 
-static void state_metrics(Box *b, float *A, float *D, float *lt, float *lb)
+static void state_metrics(const LayoutTree *t, Box *b, float *A, float *D, float *lt, float *lb)
 {
     float lh = layout_line_height(b);
     float a = b->fm.ascent, d = b->fm.descent;
     float lead = lh - (a + d);
     /* Blink (CalculateLeadingSpace): the ascent side gets floor(leading / 2),
      * the descent side the rest, so an odd or fractional leading never puts
-     * the baseline on a fractional px (text would round differently). */
-    float top = floorf(lead * 0.5f + 1e-4f);
+     * the baseline on a fractional px (text would round differently).  Blink
+     * floors in its layout px, which are device px on a zoomed page. */
+    const float dpr = t->ctx->device_scale > 0.0f ? t->ctx->device_scale : 1.0f;
+    float top = floorf(lead * 0.5f * dpr + 1e-4f) / dpr;
     *A = a; *D = d; *lt = top; *lb = lead - top;
 }
 
@@ -284,7 +286,7 @@ static int push_state(Lines *L, Box *box)
     st.box = box;
     st.parent = top_state(L);
     IState *ps = &L->states.data[st.parent];
-    state_metrics(box, &st.A, &st.D, &st.lead_top, &st.lead_bot);
+    state_metrics(L->t, box, &st.A, &st.D, &st.lead_top, &st.lead_bot);
     int va = box->vertical_align;
     if (va == CSS_VERTICAL_ALIGN_TOP || va == CSS_VERTICAL_ALIGN_BOTTOM) {
         st.group = (int)L->states.len;   /* own group root */
@@ -1032,7 +1034,7 @@ void layout_inline_contents(LayoutTree *t, Box *b, const LayoutInput *in, float 
     L.ellipsis = should_truncate(b);
     L.clamp = line_clamp_of(b);
     L.first_baseline = -1; L.last_baseline = -1;
-    state_metrics(b, &L.strut_A, &L.strut_D, &L.strut_lt, &L.strut_lb);
+    state_metrics(t, b, &L.strut_A, &L.strut_D, &L.strut_lt, &L.strut_lb);
     free_text_runs_rec(b);
 
     Flattener f;
