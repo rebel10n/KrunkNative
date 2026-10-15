@@ -156,6 +156,25 @@ static void status_line(const char **text, const char **icon, const char **color
     }
 }
 
+// The emoji of v10's ranked texts (lock, magnifier, sparkles, cross, swords). The native engine has
+// no colour emoji font, so a text emoji drew as a missing-glyph box (the Level Required icon). They
+// are drawn as the same Noto Color Emoji artwork Chrome uses (ui/img/kn/emoji/, ui/README.md).
+static void emoji(StrBuf *sb, const char *icon, const char *cls) {
+    static const struct { const char *utf8, *file; } k_emoji[] = {
+        {"\xf0\x9f\x94\x92", "1f512"},          // 🔒
+        {"\xf0\x9f\x94\x8d", "1f50d"},          // 🔍
+        {"\xe2\x9c\xa8", "2728"},               // ✨
+        {"\xe2\x9d\x8c", "274c"},               // ❌
+        {"\xe2\x9a\x94\xef\xb8\x8f", "2694-fe0f"}, // ⚔️
+    };
+    for (size_t i = 0; icon && i < sizeof(k_emoji) / sizeof(k_emoji[0]); i++)
+        if (!strcmp(icon, k_emoji[i].utf8)) {
+            sb_appendf(sb, "<img class=\"kn-emoji %s\" src=\"./img/kn/emoji/%s.png\" alt=\"\">", cls, k_emoji[i].file);
+            return;
+        }
+    sb_append_esc(sb, icon ? icon : "");
+}
+
 static void fmt_time(char *out, const size_t n, const int s) { snprintf(out, n, "%d:%02d", s / 60, s % 60); }
 
 // $rankedMatchMakingStatus: the .ranked-matchmaking-status banner (v10 matchmakingStatusEl)
@@ -1159,8 +1178,11 @@ static void gen_overlay(StrBuf *sb) {
         return;
     }
     sb_append(sb, "<div class=\"overlay-container svelte-jxc66d\"><div class=\"overlay-content svelte-jxc66d\">");
-    if (R.overlay.icon[0]) sb_appendf(sb, "<div class=\"emoji-icon svelte-jxc66d\">%s</div>", R.overlay.icon);
-    else sb_append(sb, "<!---->");
+    if (R.overlay.icon[0]) {
+        sb_append(sb, "<div class=\"emoji-icon svelte-jxc66d\">");
+        emoji(sb, R.overlay.icon, "overlay-emoji");
+        sb_append(sb, "</div>");
+    } else sb_append(sb, "<!---->");
     sb_append(sb, " <h2 class=\"overlay-title svelte-jxc66d\">");
     sb_append_esc(sb, R.overlay.title);
     sb_append(sb, "</h2> <p class=\"overlay-description svelte-jxc66d\">");
@@ -1174,9 +1196,10 @@ static void gen_footer(StrBuf *sb) {
     const char *text, *icon, *color;
     status_line(&text, &icon, &color);
     sb_appendf(sb, "<div class=\"footer %ssvelte-mqcul7\"><div class=\"matchmaking-info svelte-mqcul7\"><span class=\"status-icon svelte-mqcul7\" "
-                   "style=\"display:inline-block;width:26px;height:26px;line-height:26px;font-size:26px;margin-right:10px;\">%s</span> "
-                   "<span class=\"status-text svelte-mqcul7\" style=\"color: %s;\">",
-               R.state == MM_SEARCHING ? "matchmaking-active " : "", icon, color);
+                   "style=\"display:inline-block;width:26px;height:26px;line-height:26px;font-size:26px;margin-right:10px;\">",
+               R.state == MM_SEARCHING ? "matchmaking-active " : "");
+    emoji(sb, icon, "status-emoji");
+    sb_appendf(sb, "</span> <span class=\"status-text svelte-mqcul7\" style=\"color: %s;\">", color);
     sb_append_esc(sb, text);
     sb_append(sb, "</span></div> <div class=\"footer-controls svelte-mqcul7\">");
     if (R.state == MM_IDLE)

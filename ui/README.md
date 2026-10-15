@@ -67,6 +67,22 @@ without its CDN): `img/mouse/10002.png` (controls), `img/backgrounds/gamecats/c_
 - `css/ranked-kn.css` — the Ranked window (slot 27) in Krunker v10.0.2's layout and the Turf Wars
   window (v10 shows both as Svelte popups whose styles live in its JS bundle), added at run time
   by `client/src/ui/ranked_ui.c` / `turf_ui.c` (doc/v10/ranked-impl.md).
+- `img/kn/emoji/{1f512,1f50d,2728,274c,2694-fe0f}.png` — the emoji of v10's ranked texts (Level
+  Required / Login Required lock U+1F512, the Searching magnifier U+1F50D, Match found sparkles
+  U+2728, Internal Error cross U+274C, Ready / in-game swords U+2694 U+FE0F), drawn by
+  `client/src/ui/ranked_ui.c` emoji(). The native engine has no colour emoji font, so the text
+  glyphs drew as missing-glyph boxes. v10 draws the same glyphs as text in Chrome through the
+  system Noto Color Emoji font, so these are that font's artwork rasterised once (256 px square,
+  glyph at 160 px, centred): Noto Color Emoji, `/usr/share/fonts/google-noto-color-emoji-fonts/
+  Noto-COLRv1.ttf` (sha256 94c6c870925aaafd3fdda338fc4b2e4dfb74260c9aefa87d4aa8a145a993a5a2),
+  headless Chrome 152 `--screenshot`, 2026-10-14. Noto Color Emoji is under the OFL 1.1. PNG sha256:
+  1f512 29326ab9943289f4c7c08eb381058b7c7a4d429a67d26253b82aba087e06fa2e, 1f50d
+  7d32c8f2dcaa60336f16d0d366dc7a76fe1979d9934ce9119f6e55ef516f32bf, 2728
+  579e117ba7b50db524e3fe6f037c9d04ac496e8bf05de5412a547ebbf95f589f, 274c
+  3f2524bf89a93681223456982adf97973b11453902cc8a71c0a19d2cebcfaf4a, 2694-fe0f
+  3c38af66779655f39edb0f0be8141be402b2dc854132211630601f8d026a24fa. Not in `tools/ui-import/live_assets_v10.lock`:
+  v10 has no origin file for these glyphs (its page does not ship emoji images), so the lock's
+  fetch-and-verify model does not apply.
 - `img/ranked/ranks/rank_*.svg` — v10.0.2's eight rank icons, unchanged from
   `assets.krunker.io/img/ranked/ranks/` (the ranked window, `shared/src/ranked.c` ranked_rank_icon).
 - `css/devconsole.css` + `css/fonts/lucon.ttf` — the offline build's developer console
