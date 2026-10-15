@@ -880,9 +880,6 @@ static void gen_home(StrBuf *sb) {
                   "emoji_events</span> <span class=\"challenges-link-text svelte-17kea4i\">Ranked Challenges</span> <span class=\"material-icons svelte-17kea4i\">chevron_right</span></div> "
                   "<div class=\"description-container svelte-17kea4i\"><p class=\"svelte-17kea4i\">Compete in a best of 3 - 4v4 Hardpoint - map pool rotates every season</p> "
                   "<div class=\"map-carousel-wrapper svelte-17kea4i\">");
-    // ui/css/kn-v10-menu.css kn-ranked-carousel scrolls exactly RANKED_SEASON_MAPS cards (v10's keyframes use
-    // var(--total-maps), which the engine does not substitute in @keyframes)
-    _Static_assert(RANKED_SEASON_MAPS == 5, "ui/css/kn-v10-menu.css kn-ranked-carousel is written for 5 maps");
     int maps[RANKED_SEASON_MAPS];
     ranked_season_maps(season, maps);
     sb_appendf(sb, "<div class=\"map-carousel-container svelte-17kea4i\" style=\"--total-maps: %d; --extended-maps: %d;\">", RANKED_SEASON_MAPS, 2 * RANKED_SEASON_MAPS);

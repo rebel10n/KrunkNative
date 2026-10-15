@@ -280,9 +280,9 @@ static int replaced_intrinsics_unzoomed(LayoutTree *t, Box *b)
     int tag = layout_elem_tag(b);
     b->attr_w = attr_number(b->node, "width");
     b->attr_h = attr_number(b->node, "height");
-    if (tag == LXB_TAG_IMG) {
-        size_t len;
-        const char *src = elem_attr(b->node, "src", &len);
+    if (tag == LXB_TAG_IMG || b->type == BOX_IMAGE) {   /* an <img>, or an element replaced by content: url() */
+        size_t len = 0;
+        const char *src = tag == LXB_TAG_IMG ? elem_attr(b->node, "src", &len) : NULL;
         float w = 0, h = 0;
         char key[512];
         if (b->style && b->style->content.kind == CSS_CONTENT_URL && b->style->content.str) {
@@ -629,6 +629,10 @@ static Box *build_element(LayoutTree *t, Box *parent, lxb_dom_node_t *node, cons
     int tag = pseudo ? 0 : node_tag(node);
     int replaced = !pseudo && replaced_type_for_tag(tag) != 0;
     if (replaced && tag == LXB_TAG_INPUT && input_type_is_hidden(node)) return NULL;
+    /* content: url(...) on an element (not a ::before / ::after) replaces it with that image, as in
+     * Chrome (CSS Content 3); Krunker Strike's .watch-ad-img, .kr_img.  Strings do not apply there. */
+    int content_image = 0;
+    if (!pseudo && !replaced && style->content.kind == CSS_CONTENT_URL && style->content.str) replaced = content_image = 1;
 
     int parent_fg = parent && (parent->type == BOX_FLEX || parent->type == BOX_GRID);
     int d = button_display(style->display, tag);
@@ -646,7 +650,7 @@ static Box *build_element(LayoutTree *t, Box *parent, lxb_dom_node_t *node, cons
         if (bed && !bed->box) bed->box = br;
         return br;
     }
-    uint8_t type = type_for_display(d, replaced ? tag : 0);
+    uint8_t type = type_for_display(d, content_image ? LXB_TAG_IMG : replaced ? tag : 0);
     if (type == BOX_FLEX && layout_style_line_clamps(style)) type = BOX_BLOCK;
     Box *b = layout_new_box(t, type, node, style);
     b->pseudo = (uint8_t)pseudo;

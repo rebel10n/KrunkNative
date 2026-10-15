@@ -18,6 +18,7 @@
     "mapFile": "maps/311_kanji.json",
     "gameName": "ffa on Kanji",
     "anim_time": 0.8,
+    "anim_seek": 800,
     "account": {
       "name": "Player",
       "score": 200000,

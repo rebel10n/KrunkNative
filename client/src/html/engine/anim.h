@@ -262,6 +262,15 @@ typedef struct AnimCustomEntry {
     const char *text;      /* atom of the trimmed value text                  */
 } AnimCustomEntry;
 
+/* A longhand whose value uses var(): kept as text and resolved per element
+ * when sampled (Chrome substitutes keyframe var()s with the animated
+ * element's own custom properties), then sets the AnimProps in `props`. */
+typedef struct AnimVarEntry {
+    int css_prop;          /* CssPropId                                       */
+    const char *text;      /* atom of the value text                          */
+    uint64_t props;        /* anim_prop_mask_from_css_prop(css_prop)          */
+} AnimVarEntry;
+
 typedef struct AnimKeyframe {
     float offset;          /* 0..1 (from == 0, to == 1)                       */
     uint8_t has_timing;    /* animation-timing-function declared in the frame */
@@ -270,6 +279,8 @@ typedef struct AnimKeyframe {
     uint32_t count, cap;
     AnimCustomEntry *customs;
     uint32_t custom_count, custom_cap;
+    AnimVarEntry *vars;
+    uint32_t var_count, var_cap;
 } AnimKeyframe;
 
 typedef struct AnimKeyframeSet {
@@ -279,6 +290,7 @@ typedef struct AnimKeyframeSet {
     uint64_t props;        /* union of all frames' properties                 */
     const char **custom_names;  /* distinct custom properties of the frames   */
     uint32_t custom_name_count, custom_name_cap;
+    uint8_t has_vars;      /* some frame has var() longhands (AnimVarEntry)    */
 } AnimKeyframeSet;
 
 typedef struct AnimSystem AnimSystem;
@@ -294,6 +306,9 @@ void anim_keyframe_set_value(AnimKeyframeSet *set, AnimKeyframe *frame, AnimProp
  * (props_mask comes from anim_prop_mask_from_css_prop(prop_id) per decl). */
 void anim_keyframe_set_from_computed(AnimKeyframeSet *set, AnimKeyframe *frame,
                                      const CssComputed *values, uint64_t props_mask);
+/* Adds a var() longhand (value text `text_atom`) setting `props` to a frame:
+ * resolved against each animated element's custom properties when sampled. */
+void anim_keyframe_add_var(AnimKeyframeSet *set, AnimKeyframe *frame, int css_prop, const char *text_atom, uint64_t props);
 /* Sets custom property `name_atom` (incl. "--") to the value text `text_atom`. */
 void anim_keyframe_set_custom(AnimKeyframeSet *set, AnimKeyframe *frame, const char *name_atom, const char *text_atom);
 const AnimKeyframeSet *anim_keyframes_find(const AnimSystem *sys, const char *name_atom);
@@ -306,7 +321,8 @@ typedef struct CssSheet CssSheet;
  * the same name replace earlier ones).  Frame declarations are resolved with
  * css_computed_apply() against `ctx` (em/% of font-size, inherit/initial),
  * normally the root element's computed style; a frame's own
- * animation-timing-function is honoured; var() inside keyframes is skipped.
+ * animation-timing-function is honoured; a longhand using var() is kept as
+ * text and resolved per element when sampled (AnimVarEntry).
  * Returns the number of sets loaded.  (Compiled out with KN_ANIM_NO_SHEET
  * for standalone builds without css_sheet.c/Lexbor.) */
 int anim_keyframes_load_sheet(AnimSystem *sys, const CssSheet *sheet, const CssComputed *ctx);

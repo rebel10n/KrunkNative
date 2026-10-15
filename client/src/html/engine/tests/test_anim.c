@@ -2201,7 +2201,7 @@ static void test_cascade_integration(const char *css_dir)
     static const char html[] =
         "<!doctype html><html><body><div id=fly class=animated "
         "style=\"--start-x: 100px; --mid-x: 300px; --end-x: 900px; --duration: 1000ms\">"
-        "<span id=kid></span></div><div id=badge></div><div id=flyT></div><div id=bad></div></body></html>";
+        "<span id=kid></span></div><div id=badge></div><div id=flyT></div><div id=bad></div><div id=dot></div></body></html>";
     static const char css[] =
         ".animated { position: fixed; --progress: 0; left: calc(var(--start-x) * (1 - var(--progress)) * (1 - var(--progress))"
         " + var(--mid-x) * 2 * (1 - var(--progress)) * var(--progress) + var(--end-x) * var(--progress) * var(--progress));"
@@ -2212,16 +2212,40 @@ static void test_cascade_integration(const char *css_dir)
         "#flyT { position: fixed; --progress: 0; transition: all 1s linear; left: calc(100px + 800px * var(--progress));"
         " animation: e1-flyT 1s linear forwards; }\n"
         "@keyframes e1-flyT { to { --progress: 1; } }\n"
-        "#bad { --progress: nope; width: calc(var(--progress) * 1px + 5px); }\n";
+        "#bad { --progress: nope; width: calc(var(--progress) * 1px + 5px); }\n"
+        /* Krunker Strike's red dot (frvr-button__red-dot, @keyframes shake): var() in the frames,
+         * resolved with the element's own --base-scale */
+        "#dot { --base-scale: 2px; animation: e1-varShake 4s ease infinite; }\n"
+        "@keyframes e1-varShake { 0%,to { transform: translate(0) } 20% { transform: translate(calc(2 * var(--base-scale))) }"
+        " 50% { transform: translate(calc(-3 * var(--nope, var(--base-scale)))) } }\n";
     g_cdom = dom_create();
     dom_load_html(g_cdom, html, sizeof html - 1);
     CssSheet *fixture = css_sheet_load(css, sizeof css - 1, "fixture");
     CssSheet *sheets[3] = { svelte, main_css, fixture };
     cascade_set_custom_hook(cascade_hook, NULL);
-    CHECK(anim_keyframes_load_sheet(&g_csys, fixture, css_computed_initial()) == 1);
+    CHECK(anim_keyframes_load_sheet(&g_csys, fixture, css_computed_initial()) == 2);
     HtmlElem fly = dom_by_id(g_cdom, "fly"), kid = dom_by_id(g_cdom, "kid"), badge = dom_by_id(g_cdom, "badge");
     HtmlElem flyT = dom_by_id(g_cdom, "flyT"), bad = dom_by_id(g_cdom, "bad");
     CHECK(fly && kid && badge && flyT && bad);
+
+    /* var() in @keyframes: 20% of 4 s = 800 ms -> translate(4px); 50% -> the fallback, -6px */
+    {
+        HtmlElem dot = dom_by_id(g_cdom, "dot");
+        const AnimKeyframeSet *vs = anim_keyframes_find(&g_csys, kn_atom_cstr("e1-varShake"));
+        CHECK(dot && vs && vs->has_vars && (vs->props & ANIM_PROP_BIT(ANIM_TRANSFORM)));
+        cascade_frame(sheets, 3, dot, 0);
+        static CssComputed out;
+        cascade_frame(sheets, 3, dot, 800);
+        const CssComputed *c = cascade_elem_computed(g_cdom, dot);
+        if (c) c = anim_apply(&g_csys, dot, c, &out, 800);
+        CHECK(c && c->transform.count == 1 && c->transform.ops[0].kind == CSS_TRANSFORM_TRANSLATE);
+        if (c && c->transform.count == 1) CHECK_NEAR(c->transform.ops[0].tx.px, 4, 1e-4);
+        cascade_frame(sheets, 3, dot, 2000);
+        c = cascade_elem_computed(g_cdom, dot);
+        if (c) c = anim_apply(&g_csys, dot, c, &out, 2000);
+        CHECK(c && c->transform.count == 1);
+        if (c && c->transform.count == 1) CHECK_NEAR(c->transform.ops[0].tx.px, -6, 1e-4);
+    }
 
     static const struct { double t, left; } chrome[] = {
         { 0, 100 }, { 200, 100 }, { 350, 363.57 }, { 500, 646.506 }, { 650, 824.902 }, { 800, 900 }, { 1000, 900 }, { 3000, 900 },

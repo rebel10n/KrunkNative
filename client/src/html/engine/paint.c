@@ -2033,6 +2033,7 @@ static int push_clip_path(Painter *p, const Box *b)
     it.op = DL_PUSH_CLIP_POLY;
     it.u.clip_poly.pts = pts;
     it.u.clip_poly.n = n;
+    it.u.clip_poly.evenodd = s->clip_path.evenodd;
     emit(p, &it);
     return 1;
 }

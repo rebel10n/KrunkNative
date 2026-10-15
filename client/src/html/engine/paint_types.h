@@ -150,7 +150,7 @@ typedef struct {
         } text_shadow;
         struct { DlRect rect; } clip_rect;                                          // DL_PUSH_CLIP_RECT
         struct { DlRect rect; DlRadii radii; } clip_rrect;                          // DL_PUSH_CLIP_RRECT
-        struct { const float *pts; int n; } clip_poly;                              // DL_PUSH_CLIP_POLY, pts = x0,y0,x1,y1,... (n points)
+        struct { const float *pts; int n; int evenodd; } clip_poly;                 // DL_PUSH_CLIP_POLY, pts = x0,y0,x1,y1,... (n points), fill rule
         struct { Mat2D m; } transform;                                              // DL_PUSH_TRANSFORM
         DlGroup group;                                                              // DL_PUSH_GROUP
         struct {                                                                    // DL_BACKDROP

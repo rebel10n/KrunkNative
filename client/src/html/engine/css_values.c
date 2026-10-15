@@ -924,6 +924,38 @@ static int time_from_token(const CssToken *t, float *out)
     return 0;
 }
 
+/* A <time> at t[0]: a dimension, or a math function (calc(), min(), max(), clamp()) of times
+ * and numbers (`calc(var(--total-maps) * 5s)`, v10's ranked map carousel).  The calc evaluator
+ * works on lengths, so a copy with s / ms as px (seconds) is evaluated; any length or percentage
+ * makes it invalid, and so does a plain number (calc(5) is no time).  *used: tokens taken. */
+static int time_from_tokens(const CssToken *t, int n, int *used, float *out)
+{
+    if (n <= 0) return 0;
+    if (time_from_token(&t[0], out)) { *used = 1; return 1; }
+    if (!(tok_is_func(&t[0], "calc") || tok_is_func(&t[0], "-webkit-calc") || tok_is_func(&t[0], "min") ||
+          tok_is_func(&t[0], "max") || tok_is_func(&t[0], "clamp")))
+        return 0;
+    const int len = css_component_len(t, n, 0);
+    CssToken buf[128];
+    if (len <= 0 || len > (int)(sizeof buf / sizeof buf[0])) return 0;
+    for (int i = 0; i < len; i++) {
+        buf[i] = t[i];
+        if (t[i].type == CSS_TOK_PERCENTAGE) return 0;
+        if (t[i].type == CSS_TOK_DIMENSION) {
+            if (t[i].unit == CSS_UNIT_S) buf[i].num = t[i].num;
+            else if (t[i].unit == CSS_UNIT_MS) buf[i].num = t[i].num / 1000.0;
+            else return 0;
+            buf[i].unit = CSS_UNIT_PX;
+        }
+    }
+    int j = 0;
+    CalcVal v;
+    if (!calc_primary(buf, len, &j, &v, 0) || j != len || v.is_number || v.pct != 0.0 || v.em != 0.0) return 0;
+    *out = (float)v.px;
+    *used = len;
+    return 1;
+}
+
 int css_parse_time_s(const CssToken *tokens, int n, float *out)
 {
     CssToken t;
@@ -2307,7 +2339,10 @@ int css_parse_clip_path(const CssToken *tokens, int n, CssClipPath *out)
     int s[CSS_MAX_CLIP_POINTS + 2], l[CSS_MAX_CLIP_POINTS + 2];
     int c = split_commas(t + 1, m - 2, s, l, CSS_MAX_CLIP_POINTS + 2);
     int first = 0;
-    if (c > 0 && l[0] == 1 && (tok_is_ident(&t[1 + s[0]], "nonzero") || tok_is_ident(&t[1 + s[0]], "evenodd"))) first = 1;
+    if (c > 0 && l[0] == 1 && (tok_is_ident(&t[1 + s[0]], "nonzero") || tok_is_ident(&t[1 + s[0]], "evenodd"))) {
+        first = 1;
+        r.evenodd = (uint8_t) tok_is_ident(&t[1 + s[0]], "evenodd");
+    }
     if (c - first < 3 || c - first > CSS_MAX_CLIP_POINTS) return 0;
     for (int i = first; i < c; i++) {
         const CssToken *it = t + 1 + s[i];
@@ -2411,11 +2446,11 @@ static int parse_animation_item_parts(const CssToken *t, int n, CssAnimation *ou
     while (i < n && t[i].type != CSS_TOK_COMMA) {
         const CssToken *k = &t[i];
         float f; int used = 0, kw;
-        if (time_from_token(k, &f)) {
-            if (times == 0) { a.duration_s = f; p.dur_s = i; p.dur_l = 1; }
-            else if (times == 1) { a.delay_s = f; p.delay_s = i; p.delay_l = 1; }
+        if (time_from_tokens(t + i, n - i, &used, &f)) {
+            if (times == 0) { a.duration_s = f; p.dur_s = i; p.dur_l = used; }
+            else if (times == 1) { a.delay_s = f; p.delay_s = i; p.delay_l = used; }
             else return 0;
-            times++; i++; continue;
+            times++; i += used; continue;
         }
         if (!got_timing && css_parse_timing(t + i, n - i, &a.timing, &used)) { got_timing = 1; p.timing_s = i; p.timing_l = used; i += used; continue; }
         if (!got_iter && (k->type == CSS_TOK_NUMBER || tok_is_ident(k, "infinite"))) {
@@ -2459,11 +2494,11 @@ static int parse_transition_item_parts(const CssToken *t, int n, CssTransition *
     while (i < n && t[i].type != CSS_TOK_COMMA) {
         const CssToken *k = &t[i];
         float f; int used = 0;
-        if (time_from_token(k, &f)) {
-            if (times == 0) { tr.duration_s = f; p.dur_s = i; p.dur_l = 1; }
-            else if (times == 1) { tr.delay_s = f; p.delay_s = i; p.delay_l = 1; }
+        if (time_from_tokens(t + i, n - i, &used, &f)) {
+            if (times == 0) { tr.duration_s = f; p.dur_s = i; p.dur_l = used; }
+            else if (times == 1) { tr.delay_s = f; p.delay_s = i; p.delay_l = used; }
             else return 0;
-            times++; i++; continue;
+            times++; i += used; continue;
         }
         if (!got_timing && css_parse_timing(t + i, n - i, &tr.timing, &used)) { got_timing = 1; p.timing_s = i; p.timing_l = used; i += used; continue; }
         if (!got_prop && k->type == CSS_TOK_IDENT) {
@@ -2517,7 +2552,10 @@ int css_parse_time_list(const CssToken *tokens, int n, float *out, int max, int 
 {
     LIST_PROLOGUE
     float tmp[16];
-    for (int i = 0; i < c; i++) if (l[i] != 1 || !time_from_token(&t[s[i]], &tmp[i])) return 0;
+    for (int i = 0; i < c; i++) {
+        int used = 0;
+        if (!time_from_tokens(&t[s[i]], l[i], &used, &tmp[i]) || used != l[i]) return 0;
+    }
     int k = c < max ? c : max;
     for (int i = 0; i < k; i++) out[i] = tmp[i];
     *count = c;

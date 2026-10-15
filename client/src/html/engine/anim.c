@@ -1097,7 +1097,9 @@ static void keyframe_set_reset(AnimKeyframeSet *set)
     for (uint32_t i = 0; i < set->count; i++) {
         free(set->frames[i].entries);
         free(set->frames[i].customs);
+        free(set->frames[i].vars);
     }
+    set->has_vars = 0;
     free(set->frames);
     free(set->custom_names);
     set->frames = NULL;
@@ -1169,7 +1171,7 @@ AnimKeyframe *anim_keyframes_add_frame(AnimKeyframeSet *set, float offset, const
     return f;
 }
 
-void anim_keyframe_set_value(AnimKeyframeSet *set, AnimKeyframe *frame, AnimProp prop, const AnimValue *v)
+static void frame_put(AnimKeyframe *frame, AnimProp prop, const AnimValue *v)
 {
     for (uint32_t i = 0; i < frame->count; i++) {
         if (frame->entries[i].prop == prop) {
@@ -1185,7 +1187,28 @@ void anim_keyframe_set_value(AnimKeyframeSet *set, AnimKeyframe *frame, AnimProp
     frame->entries[frame->count].prop = (uint8_t)prop;
     frame->entries[frame->count].value = *v;
     frame->count++;
+}
+
+void anim_keyframe_set_value(AnimKeyframeSet *set, AnimKeyframe *frame, AnimProp prop, const AnimValue *v)
+{
+    frame_put(frame, prop, v);
     set->props |= ANIM_PROP_BIT(prop);
+}
+
+void anim_keyframe_add_var(AnimKeyframeSet *set, AnimKeyframe *frame, int css_prop, const char *text_atom, uint64_t props)
+{
+    if (!props || !text_atom) return;
+    if (frame->var_count == frame->var_cap) {
+        uint32_t cap = frame->var_cap ? frame->var_cap * 2 : 2;
+        frame->vars = realloc(frame->vars, cap * sizeof *frame->vars);
+        frame->var_cap = cap;
+    }
+    frame->vars[frame->var_count].css_prop = css_prop;
+    frame->vars[frame->var_count].text = text_atom;
+    frame->vars[frame->var_count].props = props;
+    frame->var_count++;
+    set->props |= props;
+    set->has_vars = 1;
 }
 
 void anim_keyframe_set_custom(AnimKeyframeSet *set, AnimKeyframe *frame, const char *name_atom, const char *text_atom)
@@ -1250,8 +1273,24 @@ int anim_keyframes_load_sheet(AnimSystem *sys, const CssSheet *sheet, const CssC
             uint64_t mask = 0;
             const char *cnames[16], *ctexts[16];
             int ncustom = 0;
+            int vprops[16];
+            const char *vtexts[16];
+            int nvar = 0;
             for (uint32_t d = 0; d < fr->ndecls; d++) {
                 const CssDecl *decl = &fr->decls[d];
+                if (decl->has_var && !CSS_PROP_IS_CUSTOM(decl->prop)) {
+                    /* resolved per element when sampled (set_with_vars); a pending
+                     * shorthand (SHORTHAND_REF) is not kept */
+                    if (decl->ntok > 0 && decl->tokens[0].type == CSS_TOK_SHORTHAND_REF) continue;
+                    char buf[4096];
+                    size_t w = css_tokens_to_text(decl->tokens, decl->ntok, buf, sizeof buf);
+                    if (w >= sizeof buf || nvar >= 16) continue;
+                    size_t len = w;
+                    const char *txt = kn_str_trim(buf, &len);
+                    vprops[nvar] = decl->prop;
+                    vtexts[nvar++] = kn_atom(txt, len);
+                    continue;
+                }
                 if (decl->has_var)
                     continue;
                 if (CSS_PROP_IS_CUSTOM(decl->prop)) {
@@ -1281,6 +1320,8 @@ int anim_keyframes_load_sheet(AnimSystem *sys, const CssSheet *sheet, const CssC
             anim_keyframe_set_from_computed(set, f, &tmp, mask);
             for (int c = 0; c < ncustom; c++)
                 anim_keyframe_set_custom(set, f, cnames[c], ctexts[c]);
+            for (int v = 0; v < nvar; v++)
+                anim_keyframe_add_var(set, f, vprops[v], vtexts[v], anim_prop_mask_from_css_prop(vprops[v]));
         }
     }
     return (int)n;
@@ -2155,6 +2196,73 @@ int anim_update_elem(AnimSystem *sys, HtmlElem elem, const CssComputed *base, do
     return 0;   /* only unknown names (sprayAnm): nothing to apply */
 }
 
+#ifndef KN_ANIM_NO_SHEET
+static const char *var_from_base(void *user, const char *name, size_t len)
+{
+    return css_computed_custom_get((const CssComputed *)user, name, len);
+}
+
+/* `set` with its frames' var() longhands resolved against `base`'s custom
+ * properties (the element's own, as Chrome resolves keyframe var()s); NULL
+ * when it has none.  A value that does not resolve or parse leaves the frame
+ * without that property (Chrome: invalid at computed-value time).  Free with
+ * set_with_vars_free(). */
+static AnimKeyframeSet *set_with_vars(const AnimKeyframeSet *set, const CssComputed *base)
+{
+    if (!set->has_vars) return NULL;
+    AnimKeyframeSet *r = calloc(1, sizeof *r);
+    CssComputed *scratch = malloc(sizeof *scratch);
+    if (r) r->frames = calloc(set->count ? set->count : 1, sizeof *r->frames);
+    if (!r || !scratch || !r->frames) {
+        if (r) free(r->frames);
+        free(r);
+        free(scratch);
+        return NULL;
+    }
+    r->name = set->name;
+    r->count = r->cap = set->count;
+    r->props = set->props;
+    for (uint32_t i = 0; i < set->count; i++) {
+        const AnimKeyframe *src = &set->frames[i];
+        AnimKeyframe *f = &r->frames[i];
+        f->offset = src->offset;
+        f->has_timing = src->has_timing;
+        f->timing = src->timing;
+        for (uint32_t e = 0; e < src->count; e++)
+            frame_put(f, (AnimProp)src->entries[e].prop, &src->entries[e].value);
+        for (uint32_t v = 0; v < src->var_count; v++) {
+            const AnimVarEntry *ve = &src->vars[v];
+            CssToken in[256], out[256];
+            int n = css_tokenize(ve->text, strlen(ve->text), in, 256);
+            int m = css_substitute_vars(in, n, out, 256, var_from_base, (void *)base);
+            if (m <= 0) continue;
+            *scratch = *base;
+            if (!css_computed_apply(scratch, ve->css_prop, out, m, base, base->font_size)) continue;
+            for (int p = 0; p < ANIM_PROP_COUNT; p++) {
+                if (!(ve->props & ANIM_PROP_BIT(p))) continue;
+                AnimValue val;
+                anim_value_get(scratch, (AnimProp)p, &val);
+                frame_put(f, (AnimProp)p, &val);
+            }
+        }
+    }
+    free(scratch);
+    return r;
+}
+
+static void set_with_vars_free(AnimKeyframeSet *r)
+{
+    if (!r) return;
+    for (uint32_t i = 0; i < r->count; i++)
+        free(r->frames[i].entries);
+    free(r->frames);
+    free(r);
+}
+#else
+static AnimKeyframeSet *set_with_vars(const AnimKeyframeSet *set, const CssComputed *base) { (void)set; (void)base; return NULL; }
+static void set_with_vars_free(AnimKeyframeSet *r) { (void)r; }
+#endif
+
 const CssComputed *anim_apply(AnimSystem *sys, HtmlElem elem, const CssComputed *base,
                               CssComputed *out, double now_ms)
 {
@@ -2173,12 +2281,14 @@ const CssComputed *anim_apply(AnimSystem *sys, HtmlElem elem, const CssComputed 
         float p;
         if (!running_sample(r, now_ms, &phase, &p))
             continue;
+        AnimKeyframeSet *resolved = set_with_vars(set, base);
+        const AnimKeyframeSet *use = resolved ? resolved : set;
         for (int prop = 0; prop < ANIM_PROP_COUNT; prop++) {
-            if (!(set->props & ANIM_PROP_BIT(prop)))
+            if (!(use->props & ANIM_PROP_BIT(prop)))
                 continue;
             AnimValue bv, v;
             anim_value_get(base, (AnimProp)prop, &bv);
-            if (!set_sample_prop(set, (AnimProp)prop, p, &r->timing, &bv, base->zoom > 0.0f ? base->zoom : 1.0f, &v))
+            if (!set_sample_prop(use, (AnimProp)prop, p, &r->timing, &bv, base->zoom > 0.0f ? base->zoom : 1.0f, &v))
                 continue;
             if (!changed) {
                 *out = *base;
@@ -2186,6 +2296,7 @@ const CssComputed *anim_apply(AnimSystem *sys, HtmlElem elem, const CssComputed 
             }
             anim_value_set(out, (AnimProp)prop, &v);
         }
+        set_with_vars_free(resolved);
     }
     for (uint32_t i = 0; i < rec->trans_count; i++) {
         AnimValue v;

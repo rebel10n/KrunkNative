@@ -1255,6 +1255,12 @@ else ()
             SOURCES ${KN_ENGINE_DIR}/tests/test_anim.c ${KN_ENGINE_DIR}/anim.c ${KN_ENGINE_DIR}/css_values.c
                     ${KN_ENGINE_DIR}/util.c
             DEFINES KN_ANIM_NO_SHEET ARGS ${CMAKE_SOURCE_DIR}/ui/css)
+        # the same file's cascade integration (real css_sheet / css_cascade: @property, var() in
+        # @keyframes and in animated values, ::before / ::after keys)
+        krunknative_html_engine_test(html_anim_cascade_test
+            SOURCES ${KN_ENGINE_DIR}/tests/test_anim.c ${KN_ENGINE_DIR}/anim.c ${KN_ENGINE_DIR}/css_values.c
+                    ${KN_ENGINE_DIR}/css_sheet.c ${KN_ENGINE_DIR}/css_cascade.c ${KN_ENGINE_DIR}/dom.c ${KN_ENGINE_DIR}/util.c
+            DEFINES KN_ANIM_TEST_CASCADE LIBS lexbor ARGS ${CMAKE_SOURCE_DIR}/ui/css)
         krunknative_html_engine_test(html_css_values_test
             SOURCES ${KN_ENGINE_DIR}/tests/test_css_values.c ${KN_ENGINE_DIR}/css_values.c ${KN_ENGINE_DIR}/css_sheet.c
                     ${KN_ENGINE_DIR}/css_cascade.c ${KN_ENGINE_DIR}/dom.c ${KN_ENGINE_DIR}/util.c

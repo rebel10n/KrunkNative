@@ -618,6 +618,13 @@ static void test_filters_clip(void)
     CHECK(apply(&c, NULL, "clip-path", "polygon(0 0, 100% 0, 100% 100%, 11% 100%, 0 0)") && c.clip_path.kind == CSS_CLIP_PATH_POLYGON &&
           c.clip_path.point_count == 5 && len_is(c.clip_path.x[3], 0, 11) && len_is(c.clip_path.y[3], 0, 100));
     CHECK(!apply(&c, NULL, "clip-path", "polygon(0 0, 10px)"));
+    /* Krunker Strike's frames: 20 points in two rings (more than the old 8), and the fill rule */
+    CHECK(apply(&c, NULL, "clip-path", "polygon(0 3px,3.5px 0,calc(100% - 4.5px) 0,100% 4.5px,100% calc(100% - 3.5px),"
+          "calc(100% - 3.5px) 100%,4.5px 100%,2.75px calc(100% - 3.5px),0 calc(100% - 4.5px),0 3px,3px 4.4px,3px calc(100% - 6.6px),"
+          "4.9px calc(100% - 5.9px),6.4px calc(100% - 3px),calc(100% - 4.7px) calc(100% - 3px),calc(100% - 3px) calc(100% - 4.7px),"
+          "calc(100% - 3px) 5.6px,calc(100% - 5.4px) 3px,4.8px 3px,3px 4.4px)") &&
+          c.clip_path.point_count == 20 && !c.clip_path.evenodd && c.clip_path.x[19].px == 3.0f);
+    CHECK(apply(&c, NULL, "clip-path", "polygon(evenodd, 0 0, 10px 0, 0 10px)") && c.clip_path.point_count == 3 && c.clip_path.evenodd);
     CHECK(apply(&c, NULL, "clip-path", "none") && c.clip_path.kind == CSS_CLIP_PATH_NONE);
 }
 
@@ -646,6 +653,15 @@ static void test_animation(void)
     CHECK(!apply(&c, NULL, "animation-timing-function", "steps(0)"));
     CHECK(!apply(&c, NULL, "animation-timing-function", "cubic-bezier(2,0,0,1)"));
     CHECK(!apply(&c, NULL, "animation-duration", "-1s"));
+    /* <time> math (v10's ranked map carousel: calc(var(--total-maps) * 5s), var() substituted first) */
+    CHECK(apply(&c, NULL, "animation", "scroll calc(5 * 5s) linear infinite") && c.animation_count == 1 &&
+          feq(c.animations[0].duration_s, 25) && isinf(c.animations[0].iterations) && c.animations[0].timing.kind == CSS_TIMING_LINEAR);
+    CHECK(apply(&c, NULL, "animation-duration", "calc(1s + 500ms)") && feq(c.animations[0].duration_s, 1.5f));
+    CHECK(apply(&c, NULL, "animation-duration", "max(2s, 300ms)") && feq(c.animations[0].duration_s, 2));
+    CHECK(apply(&c, NULL, "transition", "opacity calc(0.1s * 2) ease calc(50ms)") && feq(c.transitions[0].duration_s, 0.2f) &&
+          feq(c.transitions[0].delay_s, 0.05f));
+    CHECK(!apply(&c, NULL, "animation-duration", "calc(5)"));
+    CHECK(!apply(&c, NULL, "animation-duration", "calc(1s + 5px)"));
 
     CHECK(apply(&c, NULL, "transition", "all 0.15s ease-in-out") && c.transition_count == 1 && c.transitions[0].prop == CSS_PROP_ALL &&
           feq(c.transitions[0].duration_s, 0.15f) && c.transitions[0].timing.kind == CSS_TIMING_EASE_IN_OUT);

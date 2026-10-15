@@ -128,6 +128,7 @@ typedef struct {
     Mat2D xform;
     float pts[GLB_MAX_POLY * 2];
     int n_pts;
+    int evenodd;                // the polygon's fill rule (nonzero by default)
 } ClipFrame;
 
 typedef struct {
@@ -1226,77 +1227,106 @@ static void draw_border(GlBackend *b, const DlItem *it) {
 }
 
 // ---------------------------------------------------------------------------
-// polygon triangulation (ear clipping, device space) for stencil clip-paths
+// polygon fill (device space) for stencil clip-paths
 // ---------------------------------------------------------------------------
 
-static float tri_area2(const float *p, int a, int b, int c) {
-    return (p[b * 2] - p[a * 2]) * (p[c * 2 + 1] - p[a * 2 + 1]) - (p[c * 2] - p[a * 2]) * (p[b * 2 + 1] - p[a * 2 + 1]);
+typedef struct { float x0, y0, x1, y1; int dir; } PolyEdge; // y0 < y1; dir +1 downwards in the source order
+
+static int float_cmp(const void *a, const void *b) {
+    const float x = *(const float *) a, y = *(const float *) b;
+    return x < y ? -1 : x > y;
 }
 
-static int point_in_tri(const float *p, int a, int b, int c, int q) {
-    const float s1 = tri_area2(p, a, b, q), s2 = tri_area2(p, b, c, q), s3 = tri_area2(p, c, a, q);
-    const int neg = s1 < 0.0f || s2 < 0.0f || s3 < 0.0f;
-    const int pos = s1 > 0.0f || s2 > 0.0f || s3 > 0.0f;
-    return !(neg && pos);
+typedef struct { float xm, xa, xb; int dir; } SlabEdge;
+
+static int slab_cmp(const void *a, const void *b) {
+    const float x = ((const SlabEdge *) a)->xm, y = ((const SlabEdge *) b)->xm;
+    return x < y ? -1 : x > y;
 }
 
-// Fills `tris` with up to 3*(n-2) indices. Returns the index count.
-static int triangulate(const float *pts, int n, int *tris) {
-    if (n < 3) return 0;
-    int ring[GLB_MAX_POLY];
-    for (int i = 0; i < n; i++) ring[i] = i;
+static float edge_x(const PolyEdge *e, const float y) {
+    return e->x0 + (e->x1 - e->x0) * (y - e->y0) / (e->y1 - e->y0);
+}
 
-    float area = 0.0f;
+// Emits the inside of a device-space polygon (any shape: concave, self-intersecting, several rings
+// drawn as one path, as Krunker Strike's clip-path frames are) under the nonzero or evenodd rule as
+// disjoint trapezoids: the y range is cut at every vertex and edge crossing, and in each slab the
+// edges are ordered by x and the winding walked. Exact, and no pixel is covered twice (the stencil
+// clip counts coverage).
+static void emit_polygon(GlBackend *b, const float *pts, const int n, const int evenodd) {
+    if (n < 3) return;
+    PolyEdge edges[GLB_MAX_POLY];
+    int ne = 0;
     for (int i = 0; i < n; i++) {
         const int j = (i + 1) % n;
-        area += pts[i * 2] * pts[j * 2 + 1] - pts[j * 2] * pts[i * 2 + 1];
-    }
-    const float orient = area >= 0.0f ? 1.0f : -1.0f;
-
-    int count = n, out = 0, guard = 0;
-    while (count > 3 && guard++ < 4 * GLB_MAX_POLY) {
-        int found = 0;
-        for (int i = 0; i < count; i++) {
-            const int a = ring[(i + count - 1) % count], bb = ring[i], c = ring[(i + 1) % count];
-            if (tri_area2(pts, a, bb, c) * orient <= 1e-9f) continue;   // reflex
-            int inside = 0;
-            for (int k = 0; k < count && !inside; k++) {
-                const int q = ring[k];
-                if (q == a || q == bb || q == c) continue;
-                inside = point_in_tri(pts, a, bb, c, q);
-            }
-            if (inside) continue;
-            tris[out++] = a; tris[out++] = bb; tris[out++] = c;
-            for (int k = i; k < count - 1; k++) ring[k] = ring[k + 1];
-            count--;
-            found = 1;
-            break;
+        float x0 = pts[i * 2], y0 = pts[i * 2 + 1], x1 = pts[j * 2], y1 = pts[j * 2 + 1];
+        if (y0 == y1) continue;
+        int dir = 1;
+        if (y0 > y1) {
+            float t = x0; x0 = x1; x1 = t;
+            t = y0; y0 = y1; y1 = t;
+            dir = -1;
         }
-        if (!found) break;      // degenerate: fall through with a fan of what is left
+        edges[ne++] = (PolyEdge) {x0, y0, x1, y1, dir};
     }
-    if (count >= 3) {
-        for (int i = 1; i + 1 < count; i++) {
-            tris[out++] = ring[0]; tris[out++] = ring[i]; tris[out++] = ring[i + 1];
+    if (ne < 2) return;
+    // slab boundaries: the vertices and the edge crossings
+    const int cap_y = n + ne * (ne - 1) / 2;
+    float *ys = malloc((size_t) cap_y * sizeof *ys);
+    SlabEdge *slab = malloc((size_t) ne * sizeof *slab);
+    if (!ys || !slab) {
+        free(ys);
+        free(slab);
+        return;
+    }
+    int ny = 0;
+    for (int i = 0; i < n; i++) ys[ny++] = pts[i * 2 + 1];
+    for (int i = 0; i < ne; i++) {
+        for (int j = i + 1; j < ne; j++) {
+            const PolyEdge *a = &edges[i], *c = &edges[j];
+            const float lo = fmaxf(a->y0, c->y0), hi = fminf(a->y1, c->y1);
+            if (!(hi > lo)) continue;
+            const float da = edge_x(a, lo) - edge_x(c, lo), db = edge_x(a, hi) - edge_x(c, hi);
+            if ((da < 0.0f && db > 0.0f) || (da > 0.0f && db < 0.0f)) ys[ny++] = lo + (hi - lo) * da / (da - db);
         }
     }
-    return out;
-}
-
-// Emits a device-space polygon (mode 0) as triangles.
-static void emit_polygon(GlBackend *b, const float *pts, int n) {
-    int tris[GLB_MAX_POLY * 3];
-    const int nt = triangulate(pts, n, tris);
-    if (!nt || reserve(b, n, nt)) return;
+    qsort(ys, (size_t) ny, sizeof *ys, float_cmp);
     const uint8_t white[4] = {255, 255, 255, 255};
-    GlbVertex t = vertex_template(b, MODE_SOLID, white);
-    const uint32_t base = (uint32_t) b->nv;
-    for (int i = 0; i < n; i++) {
-        GlbVertex v = t;
-        v.x = pts[i * 2];
-        v.y = pts[i * 2 + 1];
-        b->verts[b->nv++] = v;
+    const GlbVertex t = vertex_template(b, MODE_SOLID, white);
+    for (int k = 0; k + 1 < ny; k++) {
+        const float ya = ys[k], yb = ys[k + 1];
+        if (!(yb - ya > 1e-4f)) continue;
+        const float ym = (ya + yb) * 0.5f;
+        int ns = 0;
+        for (int i = 0; i < ne; i++) {
+            const PolyEdge *e = &edges[i];
+            if (e->y0 <= ym && e->y1 > ym) slab[ns++] = (SlabEdge) {edge_x(e, ym), edge_x(e, ya), edge_x(e, yb), e->dir};
+        }
+        qsort(slab, (size_t) ns, sizeof *slab, slab_cmp);
+        int w = 0, left = -1;
+        for (int i = 0; i < ns; i++) {
+            const int was = evenodd ? (w & 1) : w != 0;
+            w += evenodd ? 1 : slab[i].dir;
+            const int now = evenodd ? (w & 1) : w != 0;
+            if (!was && now) left = i;
+            if (was && !now && left >= 0) {
+                if (reserve(b, 4, 6)) break;
+                const uint32_t base = (uint32_t) b->nv;
+                const float q[4][2] = {{slab[left].xa, ya}, {slab[i].xa, ya}, {slab[i].xb, yb}, {slab[left].xb, yb}};
+                for (int v = 0; v < 4; v++) {
+                    GlbVertex vx = t;
+                    vx.x = q[v][0];
+                    vx.y = q[v][1];
+                    b->verts[b->nv++] = vx;
+                }
+                static const uint32_t quad[6] = {0, 1, 2, 0, 2, 3};
+                for (int v = 0; v < 6; v++) b->idx[b->ni++] = base + quad[v];
+                left = -1;
+            }
+        }
     }
-    for (int i = 0; i < nt; i++) b->idx[b->ni++] = base + (uint32_t) tris[i];
+    free(ys);
+    free(slab);
 }
 
 // ---------------------------------------------------------------------------
@@ -1305,7 +1335,7 @@ static void emit_polygon(GlBackend *b, const float *pts, int n) {
 
 static void emit_clip_shape(GlBackend *b, const ClipFrame *f) {
     if (f->shape_poly) {
-        emit_polygon(b, f->pts, f->n_pts);
+        emit_polygon(b, f->pts, f->n_pts, f->evenodd);
         return;
     }
     const Mat2D saved = b->xform;
@@ -1390,11 +1420,12 @@ static void push_clip_rrect(GlBackend *b, DlRect rect, DlRadii radii) {
     stencil_push(b, f);
 }
 
-static void push_clip_poly(GlBackend *b, const float *pts, int n) {
+static void push_clip_poly(GlBackend *b, const float *pts, int n, const int evenodd) {
     ClipFrame *f = clip_frame_begin(b);
     if (!f) return;
     if (n > GLB_MAX_POLY) n = GLB_MAX_POLY;
     f->shape_poly = 1;
+    f->evenodd = evenodd;
     f->n_pts = n;
     float bounds[4] = {1e30f, 1e30f, -1e30f, -1e30f};
     for (int i = 0; i < n; i++) {
@@ -2260,7 +2291,7 @@ void glb_submit(GlBackend *b, const DisplayList *list) {
                 push_clip_rrect(b, it->u.clip_rrect.rect, it->u.clip_rrect.radii);
                 break;
             case DL_PUSH_CLIP_POLY:
-                push_clip_poly(b, it->u.clip_poly.pts, it->u.clip_poly.n);
+                push_clip_poly(b, it->u.clip_poly.pts, it->u.clip_poly.n, it->u.clip_poly.evenodd);
                 break;
             case DL_POP_CLIP:
                 pop_clip(b);

@@ -68,7 +68,7 @@
       "kind": "text",
       "fuzz": 20,
       "max_pct": 8.0,
-      "note": "the season's map pool: the description and the scrolling map carousel (v10's 25 s loop paused at 800 ms: kn-v10-menu.css kn-ranked-carousel, the engine has no var() in @keyframes)"
+      "note": "the season's map pool: the description and the scrolling map carousel (v10's own svelte-17kea4i-infinite-scroll, 25 s, var() in its keyframes, paused at 800 ms like the capture: state.anim_seek)"
     },
     {
       "name": "rk-footer",

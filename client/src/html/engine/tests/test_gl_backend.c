@@ -362,6 +362,34 @@ static void build_list(DisplayList *dl, GLuint checker, GLuint disc, DlGlyphQuad
         // after the pops nothing is clipped: a small marker rect
         push_rect(dl, dl_rect(300, 390, 200, 6), orange);
     }
+    {   // clip-path frames as Krunker Strike draws them: one polygon of two rings (the outer one, back to
+        // its first point, then the inner one reversed), nonzero: a 10 px frame with a hole
+        static const float frame[18] = {700, 600, 800, 600, 800, 700, 700, 700, 700, 600,
+                                        710, 610, 710, 690, 790, 690, 790, 610};
+        DlItem c = item(DL_PUSH_CLIP_POLY);
+        c.u.clip_poly.pts = frame;
+        c.u.clip_poly.n = 9;
+        dl_push(dl, &c);
+        push_rect(dl, dl_rect(690, 590, 120, 120), orange);
+        push_op(dl, DL_POP_CLIP);
+        // a self-intersecting pentagram: evenodd leaves its centre out, nonzero fills it
+        static float star[2][10];
+        for (int k = 0; k < 2; k++)
+            for (int i = 0; i < 5; i++) {
+                const float a = (-90.0f + 144.0f * (float) i) * 3.14159265f / 180.0f;
+                star[k][i * 2] = 900.0f + 120.0f * (float) k + 45.0f * cosf(a);
+                star[k][i * 2 + 1] = 655.0f + 45.0f * sinf(a);
+            }
+        for (int k = 0; k < 2; k++) {
+            DlItem cs = item(DL_PUSH_CLIP_POLY);
+            cs.u.clip_poly.pts = star[k];
+            cs.u.clip_poly.n = 5;
+            cs.u.clip_poly.evenodd = k == 0;
+            dl_push(dl, &cs);
+            push_rect(dl, dl_rect(840 + 120 * k, 600, 120, 110), orange);
+            push_op(dl, DL_POP_CLIP);
+        }
+    }
     {   // transform: scale(0.8) rotate(45deg) about (700, 320); clip rect inside -> stencil
         const float cx = 700, cy = 320, s = 0.8f, a = 45.0f * 3.14159265f / 180.0f;
         Mat2D m = {1, 0, 0, 1, cx, cy};
@@ -611,6 +639,13 @@ int main(int argc, char **argv) {
     expect(img, 498, 277, BG.r, BG.g, BG.b, 2, "nested clips: outside rrect corner");
     expect(img, 497, 292, 255, 112, 67, 2, "nested clips: inside rrect past corner");
     expect(img, 400, 393, 255, 112, 67, 2, "clips popped: marker visible");
+    expect(img, 705, 650, 255, 112, 67, 2, "clip frame (two rings, nonzero): left side");
+    expect(img, 795, 605, 255, 112, 67, 2, "clip frame: top right corner");
+    expect(img, 750, 650, BG.r, BG.g, BG.b, 2, "clip frame: the hole");
+    expect(img, 695, 650, BG.r, BG.g, BG.b, 2, "clip frame: outside");
+    expect(img, 900, 655, BG.r, BG.g, BG.b, 2, "evenodd pentagram: centre out");
+    expect(img, 900, 620, 255, 112, 67, 2, "evenodd pentagram: top point in");
+    expect(img, 1020, 655, 255, 112, 67, 2, "nonzero pentagram: centre in");
     expect(img, 700, 320, 38, 166, 154, 2, "transform: rotated clip center");
     expect(img, 640, 282, BG.r, BG.g, BG.b, 2, "transform: original corner now outside");
     // opacity group: overlap pixel = 0.5 * blue + 0.5 * bg (NOT 0.25 red)

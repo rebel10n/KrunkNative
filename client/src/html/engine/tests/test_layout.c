@@ -784,6 +784,26 @@ static void t_abs_static_inline(void)
 }
 
 /* CSS zoom (Chrome semantics, values from Chrome 152 getBoundingClientRect). */
+/* content: url() on an element replaces it with the image (Chrome; Krunker Strike's .watch-ad-img on a <div>) */
+static void t_content_url_element(void)
+{
+    float nw = 0, nh = 0;
+    CHECK(png_size(NULL, "img/app_0.png", "index.html", &nw, &nh) && nw > 0, "content url: test image present");
+    Fx *fx = fx_html(
+        "<div id=cu style='content:url(img/app_0.png)'>text</div>"
+        "<div><span id=cs style='content:url(img/app_0.png);height:20px'>text</span></div>"
+        "<div id=cn style='content:\"x\"'>abc</div>", NULL);
+    Box *cu = bx(fx, "cu"), *cs = bx(fx, "cs"), *cn = bx(fx, "cn");
+    CHECK(cu && cu->type == BOX_IMAGE && cu->src, "content url: a <div> becomes an image box");
+    CHECK_NEAR(rc(fx, "cu").w, nw, 0.01, "content url: natural width");
+    CHECK_NEAR(rc(fx, "cu").h, nh, 0.01, "content url: natural height");
+    CHECK(cs && cs->type == BOX_IMAGE && (cs->flags & BOXF_INLINE_LEVEL), "content url: a <span> becomes an inline replaced image");
+    CHECK_NEAR(rc(fx, "cs").h, 20, 0.01, "content url: sized like an image (height given)");
+    CHECK_NEAR(rc(fx, "cs").w, 20 * nw / nh, 0.01, "content url: width from the aspect ratio");
+    CHECK(cn && cn->type == BOX_BLOCK, "content url: a string content leaves the element alone");
+    fx_free(fx);
+}
+
 static void t_zoom(void)
 {
     Fx *fx = fx_html(
@@ -1952,6 +1972,7 @@ int main(int argc, char **argv)
     t_empty_table_overflow();
     t_grid_named();
     t_zoom();
+    t_content_url_element();
     t_half_leading_floor();
     t_ua_defaults();
     t_all_unset();

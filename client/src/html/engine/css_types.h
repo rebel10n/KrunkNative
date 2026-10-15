@@ -44,7 +44,7 @@ extern "C" {
 #define CSS_MAX_BOX_SHADOWS     4
 #define CSS_MAX_GRID_TRACKS     12  /* v7.1.4 editor.css #_toolbar: 10 columns */
 #define CSS_MAX_CUSTOM_PROPS    96  /* the v10 page: 55 distinct across main.css, bundledStyles.css, svelte.css, hud.css, krunknative.css */
-#define CSS_MAX_CLIP_POINTS     8
+#define CSS_MAX_CLIP_POINTS     32  /* polygon() points; Krunker Strike frames use up to 20 (two rings) */
 #define CSS_MAX_FONT_FAMILIES   4
 #define CSS_MAX_MASK_LAYERS     4   /* svelte.css .lottery-window.theme-easter: a 4-gradient frame */
 
@@ -426,6 +426,7 @@ typedef struct CssClipPath {
     uint8_t kind;          /* CssClipPathKind                                 */
     CssLength x[CSS_MAX_CLIP_POINTS], y[CSS_MAX_CLIP_POINTS];
     uint8_t point_count;
+    uint8_t evenodd;       /* polygon(evenodd, ...); the default fill rule is nonzero */
 } CssClipPath;
 
 typedef struct CssContent {
