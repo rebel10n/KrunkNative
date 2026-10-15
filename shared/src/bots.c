@@ -1745,9 +1745,15 @@ static void bot_update_nextbot(Game *game, GameBot *bot, Player *self, const flo
             }
         }
         if (objective && o->hold && o->arrived) {
-            // on the point: stand there and look out (a sweep around the threat direction)
+            // on the point: look out (a sweep around the threat direction) and keep moving inside it.
+            // KN bug fixed (the user: "these bots just walk and get stuck at the zone"): arrived is
+            // the body inside the volume, so a bot stood still from its first step in, at the edge;
+            // v10's bots contest the zone, moving and strafing in it
             f->yaw = bot->yaw = bot_turn_yaw(bot->yaw, bot_objective_hold_yaw(bot, self, dt), path_rate * dt);
             f->pitch = bot->pitch = bot_turn_pitch(bot->pitch, 0.0f, path_rate * dt);
+            int on_path;
+            const vec3 point = bot_route(game, bot, self, bot_objective_hold_spot(game, bot, self, dt), dt, &on_path, &f->jump);
+            bot_move_toward(game, bot, self, point, on_path, dt, f);
         } else {
             int on_path;
             const vec3 point = bot_route(game, bot, self, bot->roam_target, dt, &on_path, &f->jump);

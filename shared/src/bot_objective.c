@@ -36,6 +36,11 @@ int mode_player_collides(const Player*, vec3 center, vec3 half); // shared/src/m
 #define OBJ_STALEMATE_MS 15000.0f    // CTF: a carrier waiting for our flag this long hunts their carrier itself
 #define OBJ_LOOK_SWEEP_MS 1500.0f
 #define OBJ_LOOK_SWEEP_RAD 0.7f
+#define OBJ_WANDER_MIN_MS 1200.0f    // holding: a new spot inside the zone this often (or once reached)
+#define OBJ_WANDER_MAX_MS 2500.0f
+#define OBJ_WANDER_REACH 22.0f       // ... within this of the bot (a strafe, not a lap of the zone)
+#define OBJ_WANDER_GOAL 10.0f        // ... within this of the goal for a hold without a volume (a flag guard)
+#define OBJ_WANDER_INSET 4.0f        // ... this far inside the volume's edges (the body stays in)
 
 // ---------------------------------------------------------------- helpers
 
@@ -123,6 +128,7 @@ static void obj_set_goal(BotObjective *o, const BotGoalKind kind, const int inde
     if (o->kind != kind || o->index != index) {
         o->hold_time = 0.0f;
         o->arrived = 0;
+        o->has_wander = 0;
     }
     o->kind = kind;
     o->index = index;
@@ -562,6 +568,43 @@ float bot_objective_hold_yaw(GameBot *bot, const Player *self, const float dt) {
     return (float) -atan2(-p, u) + o->look_offset;
 }
 
+vec3 bot_objective_hold_spot(Game *game, GameBot *bot, const Player *self, const float dt) {
+    BotObjective *o = &bot->objective;
+    o->wander_timer -= dt;
+    const int reached = o->has_wander && obj_d2d(self->position, o->wander) < 3.0f;
+    if (o->has_wander && !reached && o->wander_timer > 0.0f) return o->wander;
+    // the area to pick in: the volume less an inset (a narrow one: its middle), else around the goal
+    float x0, x1, z0, z1;
+    if (o->has_zone) {
+        const float ix = fminf(OBJ_WANDER_INSET, o->zone_half.x * 0.4f), iz = fminf(OBJ_WANDER_INSET, o->zone_half.z * 0.4f);
+        x0 = o->zone_center.x - o->zone_half.x + ix, x1 = o->zone_center.x + o->zone_half.x - ix;
+        z0 = o->zone_center.z - o->zone_half.z + iz, z1 = o->zone_center.z + o->zone_half.z - iz;
+    } else {
+        x0 = o->goal.x - OBJ_WANDER_GOAL, x1 = o->goal.x + OBJ_WANDER_GOAL;
+        z0 = o->goal.z - OBJ_WANDER_GOAL, z1 = o->goal.z + OBJ_WANDER_GOAL;
+    }
+    // near the bot, on its floor, on the walkable grid (a spot in a wall would strand the route)
+    const float nx0 = fmaxf(x0, self->position.x - OBJ_WANDER_REACH), nx1 = fminf(x1, self->position.x + OBJ_WANDER_REACH);
+    const float nz0 = fmaxf(z0, self->position.z - OBJ_WANDER_REACH), nz1 = fminf(z1, self->position.z + OBJ_WANDER_REACH);
+    vec3 pick = o->goal;
+    for (int tries = 0; tries < 10; tries++) {
+        const int near = tries < 7 && nx0 < nx1 && nz0 < nz1;
+        vec3 p = {near ? obj_rand(nx0, nx1) : obj_rand(x0, x1), self->position.y + 2.0f, near ? obj_rand(nz0, nz1) : obj_rand(z0, z1)};
+        if (obj_d2d(p, self->position) < 6.0f) continue; // a step that moves it
+        float ground;
+        if (!bot_nav_ground(game, p, 8.0f, &ground)) continue;
+        p.y = ground;
+        if (o->has_zone && (p.y > o->zone_center.y + o->zone_half.y || p.y + self->height < o->zone_center.y - o->zone_half.y)) continue;
+        if (!bot_nav_on_grid(game, p) || bot_hazard_at(game, p)) continue;
+        pick = p;
+        break;
+    }
+    o->wander = pick;
+    o->has_wander = 1;
+    o->wander_timer = obj_rand(OBJ_WANDER_MIN_MS, OBJ_WANDER_MAX_MS);
+    return pick;
+}
+
 int bot_objective_over_combat(Game *game, GameBot *bot, Player *self, const Player *target, const float dt, vec3 *goal) {
     BotObjective *o = &bot->objective;
     if (!game || !game->mode || !game->map || !game->bots || !target || o->fail_timer > 0.0f) return 0;
@@ -589,7 +632,8 @@ int bot_objective_over_combat(Game *game, GameBot *bot, Player *self, const Play
         case BOT_GOAL_SITE:
         case BOT_GOAL_GUARD:
             if (obj_arrived(self, o) ? range <= OBJ_HOLD_FIGHT_RANGE : range <= OBJ_CHASE_RANGE && !stalled) return 0;
-            *goal = o->goal;
+            // on it: keep moving inside it while shooting (a strafe), not back to one spot
+            *goal = o->hold && obj_arrived(self, o) ? bot_objective_hold_spot(game, bot, self, dt) : o->goal;
             return 1;
         case BOT_GOAL_HUNT: // the enemy is the goal
         case BOT_GOAL_NONE:

@@ -274,6 +274,123 @@ static void test_ctf_small(Game *game) {
     CHECK(g_captures >= 1, "a flag is captured within 120 s");
 }
 
+
+// "these bots just walk and get stuck at the zone" (the user). v10's bots contest a zone: they move
+// inside it, strafe and fight. Here a bot holding counted as arrived the moment its body touched the
+// volume and stood there, at the edge, for the rest of the hold. In Hardpoint, King of the Hill and
+// Domination on several rotation maps: no bot heading for or holding a zone (state Objective) may
+// stand within 1 unit (feet, 2D) of one spot for over ZONE_FREEZE_S while at the zone (inside its
+// volume or within ZONE_NEAR of it). Fights (Attack: v7's crouch-and-hold) and retreats are not
+// judged here. KN_ZONE_ALL=1: every rotation map with zones, 60 s each (the full sweep).
+#define ZONE_FREEZE_S 4.0f
+#define ZONE_NEAR 24.0f
+static float zone_outside(const vec3 p, const vec3 center, const vec3 half) { // 2D distance outside the box
+    const float dx = fmaxf(0.0f, fabsf(p.x - center.x) - half.x), dz = fmaxf(0.0f, fabsf(p.z - center.z) - half.z);
+    return hypotf(dx, dz);
+}
+
+static int zone_freeze_run(const cJSON *map, const char *map_name, const int mode, const char *mode_name, const float seconds) {
+    static const cJSON *maps[1];
+    static int modes[1];
+    maps[0] = map;
+    modes[0] = mode;
+    Game game = {0};
+    g_game = &game;
+    game_configure(&game, NULL, maps, 1, modes, 1, NULL, 0, NULL, 0);
+    game.hooks.send = test_send;
+    game.round_length = 100000.0f;
+    game_init(&game, 0, 0, 1);
+    if (!game.ready || !game.mode || !(game.mode->config.dom ? game.mode->dom_zone_count : game.mode->objective_count)) {
+        game_bots_remove_all(&game);
+        free_players(&game);
+        return -1; // no zones on this map
+    }
+    for (int team = 1; team <= 2; team++) {
+        for (int i = 0; i < 3; i++) {
+            char team_arg[16];
+            snprintf(team_arg, sizeof(team_arg), "team=%d", team);
+            char *argv[] = {team_arg, "difficulty=normal"};
+            BotAssignments a;
+            bot_parse_assignments(2, argv, &a);
+            CHECK(game_bots_add(&game, &a, NULL, 0.0f) != NULL, "bot added");
+        }
+    }
+    vec3 anchor[GAME_BOTS_MAX];
+    float still[GAME_BOTS_MAX] = {0}, worst[GAME_BOTS_MAX] = {0};
+    vec3 worst_at[GAME_BOTS_MAX];
+    int worst_inside[GAME_BOTS_MAX] = {0}, at_zone_ticks = 0;
+    const float dt = 1.0f / 30.0f;
+    tick(&game, 1.0f, 30.0f);
+    for (int s = 0; s < (int) (seconds * 30.0f); s++) {
+        tick(&game, dt, 30.0f);
+        for (int i = 0; i < game.bots->count && i < GAME_BOTS_MAX; i++) {
+            const GameBot *bot = &game.bots->list[i];
+            const BotObjective *o = &bot->objective;
+            const Player *p = bot->player;
+            const int at_zone = p && p->active && bot->state == BOT_STATE_OBJECTIVE && o->has_zone && zone_outside(p->position, o->zone_center, o->zone_half) <= ZONE_NEAR;
+            at_zone_ticks += at_zone;
+            if (!at_zone || hypotf(p->position.x - anchor[i].x, p->position.z - anchor[i].z) > 1.0f || still[i] <= 0.0f) {
+                if (p) anchor[i] = p->position;
+                still[i] = at_zone ? dt : 0.0f;
+                continue;
+            }
+            still[i] += dt;
+            if (still[i] > worst[i]) {
+                worst[i] = still[i];
+                worst_at[i] = p->position;
+                worst_inside[i] = o->arrived;
+            }
+        }
+    }
+    int frozen = 0;
+    for (int i = 0; i < game.bots->count && i < GAME_BOTS_MAX; i++) {
+        if (worst[i] <= ZONE_FREEZE_S) continue;
+        frozen++;
+        printf("  %s on %s: bot %d stood %.1f s at (%.0f %.0f %.0f), %s the zone\n", mode_name, map_name, i, worst[i], worst_at[i].x, worst_at[i].y, worst_at[i].z,
+               worst_inside[i] ? "inside" : "at the edge of");
+    }
+    CHECK(at_zone_ticks > 0, "%s on %s: the bots reach the zone", mode_name, map_name);
+    game_bots_remove_all(&game);
+    free_players(&game);
+    return frozen;
+}
+
+static void test_zone_freeze(void) {
+    printf("Running zone freeze test...\n");
+    static const struct { const char *mode, *map; } k_runs[] = {
+        {"point", "sandstorm_v3"}, {"point", "kanji"}, {"point", "burg_new"}, {"point", "littletown"},
+        {"king", "industry"}, {"king", "lumber"}, {"king", "subzero_new"},
+        {"dom", "sandstorm_v3"}, {"dom", "industry"}, {"dom", "tropicano"},
+    };
+    int runs = 0, frozen = 0;
+    if (getenv("KN_ZONE_ALL")) {
+        int rotation[64];
+        const size_t n = map_catalog_rotation(rotation, 64);
+        static const char *const k_modes[] = {"point", "king", "dom"};
+        for (size_t m = 0; m < 3; m++) {
+            for (size_t i = 0; i < n; i++) {
+                const MapCatalogEntry *e = map_catalog_at((size_t) rotation[i]);
+                const cJSON *map = map_catalog_json((size_t) rotation[i]);
+                if (!e || !map) continue;
+                const int f = zone_freeze_run(map, e->key, mode_find(k_modes[m]), k_modes[m], 60.0f);
+                if (f >= 0) runs++, frozen += f;
+            }
+        }
+    } else {
+        for (size_t r = 0; r < sizeof(k_runs) / sizeof(k_runs[0]); r++) {
+            const int key = map_catalog_index_of_key(k_runs[r].map);
+            const cJSON *map = key >= 0 ? map_catalog_json((size_t) key) : NULL;
+            CHECK(map != NULL, "map %s", k_runs[r].map);
+            if (!map) continue;
+            const int f = zone_freeze_run(map, k_runs[r].map, mode_find(k_runs[r].mode), k_runs[r].mode, 30.0f);
+            CHECK(f >= 0, "%s has %s zones", k_runs[r].map, k_runs[r].mode);
+            if (f >= 0) runs++, frozen += f;
+        }
+    }
+    printf("  %d runs, %d bots stood still at a zone over %.0f s\n", runs, frozen, ZONE_FREEZE_S);
+    CHECK(frozen == 0, "no bot stands still at the zone over %.0f s (%d)", ZONE_FREEZE_S, frozen);
+}
+
 int main(void) {
     const int key = map_catalog_index_of_key("sandstorm_v3");
     const cJSON *sandstorm = key >= 0 ? map_catalog_json((size_t) key) : NULL;
@@ -310,6 +427,7 @@ int main(void) {
     test_king(&game, 3);
     test_tdf(&game, 4);
     test_lms(&game, 5);
+    test_zone_freeze();
 
     if (g_failures) {
         printf("%d check(s) failed\n", g_failures);

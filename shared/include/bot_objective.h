@@ -27,6 +27,10 @@
 int bot_objective_update(Game*, GameBot*, Player *self, float dt);
 // The yaw to face while holding a point (sweeps around the threat direction).
 float bot_objective_hold_yaw(GameBot*, const Player *self, float dt);
+// Where to walk while holding (arrived on a hold goal): v10's bots contest a zone, they keep moving
+// inside it and strafe, never parked where they stepped in. A walkable spot inside the volume near
+// the bot (around the goal without a volume), a new one once reached or every 1.2-2.5 s.
+vec3 bot_objective_hold_spot(Game*, GameBot*, const Player *self, float dt);
 // Attack: 1 when the objective outweighs chasing `target` (a flag carrier runs home, a holder
 // stays on its point while the enemy is far): *goal is where to walk while fighting.
 int bot_objective_over_combat(Game*, GameBot*, Player *self, const Player *target, float dt, vec3 *goal);

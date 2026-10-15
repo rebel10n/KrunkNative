@@ -132,6 +132,9 @@ typedef struct {
     float hold_time;                // ms spent holding at the goal
     float stalemate_ms;             // CTF: ms carrying while the enemy holds our flag (then hunt their carrier)
     float look_timer, look_offset;  // the hold look sweep
+    vec3 wander;                    // holding: the spot inside the zone it walks to now (has_wander)
+    float wander_timer;             // ms until it picks another
+    unsigned char has_wander;
     int rank, team_bots;            // this bot among its team's bots (list order), their count
     int last_flag, last_tags;       // a change re-thinks at once
 } BotObjective;
