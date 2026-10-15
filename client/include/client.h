@@ -486,8 +486,12 @@ void player_mesh_debug_log(Player*, double now); // KRUNKNATIVE_PLAYER_LOG (play
 // centre; any may be NULL. 0 when the held weapon has no hose.
 int player_hose_points(const Player*, vec3 *tip, vec3 *back, vec3 *hand);
 // Nettspend Purple Drank (nettspend.h): the pour-up's bottle mouth and cup rim (world) while the
-// local player reloads it in first person; 0 otherwise.
+// local player reloads it (first or third person); 0 otherwise.
 int player_pour_points(const Player*, vec3 *mouth, vec3 *rim);
+// The held slot's hands (world, first or third person): the trigger hand's and the off hand's centres,
+// and where the Drank's bottle is held (`bottle`, its grip; `bottle_visible` 0 when hidden); 0
+// without arms. Any may be NULL.
+int player_hands_points(const Player*, vec3 *trigger, vec3 *off, vec3 *bottle, int *bottle_visible);
 
 Mesh *mesh_init(Geometry*, Material*);
 void mesh_update_transform_matrix(Mesh*);

@@ -320,7 +320,7 @@ Mesh *nettspend_cash_mesh(void) {
     return mesh;
 }
 
-// ---------------------------------------------------------------- poses (first person)
+// ---------------------------------------------------------------- poses
 
 // The cup in the fist, rim up: rotation.x = PI / 2 maps the local -z (the rim) onto +y; the tilt
 // leans the rim a little away from the eye (-z), so the view (from above and behind) sees the white
@@ -335,10 +335,16 @@ Mesh *nettspend_cash_mesh(void) {
 #define CASH_REST_LEAN 0.25f      // the fan leans back (top away from the eye)
 #define CASH_REST_TURN 0.35f      // ... turned toward the middle of the view
 #define CASH_REST_ROLL 0.2f
-// the pour: the cup rises into the middle of the view (toward the centre and the eye)
-#define POUR_LIFT_X 0.45f
+// the pour: the cup rises toward the eye and a little to the trigger hand's side, so the bottle
+// comes in on the off hand's side (its arm never crosses in front of the cup)
+#define POUR_LIFT_X 0.25f
 #define POUR_LIFT_Y 0.7f
 #define POUR_LIFT_Z 0.25f
+// the tipped bottle: its mouth this far out (toward the off hand) and up from the rim's centre, tipped
+// this far (radians from upright): the fist stays out beside the rim, its forearm clear of the cup
+#define POUR_MOUTH_X 0.15f
+#define POUR_MOUTH_Y 0.12f
+#define POUR_TIP 1.95f
 
 static float smooth01(const float x) {
     const float t = fminf(fmaxf(x, 0.0f), 1.0f);
@@ -347,7 +353,10 @@ static float smooth01(const float x) {
 
 void nettspend_pose_cup_rest(Mesh *cup, const vec3 hand, const float mirror) {
     if (!cup) return;
-    cup->transform.position = (vec3) {hand.x + CUP_REST_OFFSET_X * mirror, hand.y + CUP_REST_OFFSET_Y, hand.z + CUP_REST_OFFSET_Z};
+    // the cup's scale (third person: the mesh's own) grows about its centre: lift it so the base stays on the fist
+    const float scale = cup->transform.scale.x;
+    cup->transform.position = (vec3) {hand.x + CUP_REST_OFFSET_X * mirror, hand.y + CUP_REST_OFFSET_Y + (scale - 1.0f) * NETTSPEND_CUP_LENGTH * 0.5f,
+                                      hand.z + CUP_REST_OFFSET_Z};
     cup->transform.rotation = (vec3) {(float) M_PI * 0.5f + CUP_REST_TILT, 0.0f, 0.0f};
 }
 
@@ -365,41 +374,60 @@ float nettspend_pour_strength(const float progress) {
     return smooth01((progress - 0.22f) / 0.18f) * (1.0f - smooth01((progress - 0.74f) / 0.1f));
 }
 
-// The pour-up in three beats of the reload: the bottle drops in from above (0..0.25), tips over
-// the rim and pours (0.25..0.8), then lifts out (0.8..1). The cup drifts up and toward the screen
-// centre meanwhile so the pour is in view.
-float nettspend_pose_pour(Mesh *cup, Mesh *bottle, const vec3 hand, const float mirror, const float progress) {
+// The pour-up in three beats of the reload: the off hand brings the bottle up (upright, held low on
+// its body, NETTSPEND_BOTTLE_GRIP: nothing comes out of the air) and over the cup (0..0.25), tips it
+// over the rim and pours (0.25..0.8), then takes it back down (0.8..1). The trigger hand holds the
+// cup up toward the eye meanwhile. The hands follow (cup_hand / bottle_hand: player_mesh.c
+// turns the arms to reach them), so the cup and the bottle never leave a fist.
+float nettspend_pose_pour(Mesh *cup, Mesh *bottle, const vec3 hand, const vec3 off_hand, const float mirror, const float scale, const float progress,
+                          vec3 *cup_hand, vec3 *bottle_hand) {
     nettspend_pose_cup_rest(cup, hand, mirror);
+    if (cup_hand) *cup_hand = hand;
+    if (bottle_hand) *bottle_hand = off_hand;
     if (progress < 0.0f || progress > 1.0f) {
         if (bottle) bottle->visible = 0;
         return 0.0f;
     }
-    const float in = smooth01(progress / 0.25f);                 // the bottle's descent
-    const float out = smooth01((progress - 0.8f) / 0.2f);        // its exit
+    const float in = smooth01(progress / 0.25f);                 // the bottle's carry over the cup
+    const float out = smooth01((progress - 0.8f) / 0.2f);        // its way back down
     const float pour = nettspend_pour_strength(progress);        // the tip
-    const float lift = in * (1.0f - out);
+    const float carry = in * (1.0f - out);                       // 0 at the off hand's rest, 1 over the cup
+    // across and up scale with the cup (third person: the body's bigger cup goes clear of the head, seen
+    // from the chase camera behind it); toward the eye stays (scaled, it went into the head)
+    const vec3 lift = {POUR_LIFT_X * scale * mirror * carry, POUR_LIFT_Y * scale * carry, POUR_LIFT_Z * carry};
     if (cup) {
-        cup->transform.position.x -= POUR_LIFT_X * mirror * lift;
-        cup->transform.position.y += POUR_LIFT_Y * lift;
-        cup->transform.position.z += POUR_LIFT_Z * lift;
+        cup->transform.position.x += lift.x;
+        cup->transform.position.y += lift.y;
+        cup->transform.position.z += lift.z;
     }
+    if (cup_hand) *cup_hand = (vec3) {hand.x + lift.x, hand.y + lift.y, hand.z + lift.z};
     if (!bottle) return pour;
     bottle->visible = 1;
     // the rim's centre: the cup's local (0, 0, -h) through its rotation (PI / 2 + tilt about x)
-    const float tilt = (float) M_PI * 0.5f + CUP_REST_TILT, h = NETTSPEND_CUP_LENGTH * 0.5f;
-    const vec3 rim = {cup ? cup->transform.position.x : hand.x, (cup ? cup->transform.position.y : hand.y) + sinf(tilt) * h,
-                      (cup ? cup->transform.position.z : hand.z) - cosf(tilt) * h};
-    // rotation (PI / 2, psi, 0): the mouth (local -z) ends up along (-sin psi, cos psi, 0), so psi
-    // past PI / 2 points it down over the cup; psi is mirrored for the left-handed
-    const float psi0 = 2.05f * pour;
-    const vec3 mouth_dir = {-sinf(psi0) * mirror, cosf(psi0), 0.0f};
-    const float hb = NETTSPEND_BOTTLE_LENGTH * 0.5f;
-    // where the mouth goes: over the rim while pouring, else above and beside the cup, with the
-    // descent / exit lifting it out of view
+    const float tilt = (float) M_PI * 0.5f + CUP_REST_TILT, h = NETTSPEND_CUP_LENGTH * 0.5f * scale;
+    const vec3 rim = {cup ? cup->transform.position.x : hand.x + lift.x, (cup ? cup->transform.position.y : hand.y + lift.y) + sinf(tilt) * h,
+                      (cup ? cup->transform.position.z : hand.z + lift.z) - cosf(tilt) * h};
+    // the bottle works on the off hand's side of the cup (side: -1 = the screen's left for the
+    // right-handed) and tips toward the trigger hand's. rotation (PI / 2, psi, 0): the mouth (local
+    // -z) ends up along (-sin psi, cos psi, 0), so psi past PI / 2 points it down toward the cup; psi
+    // takes the side's sign. Upright (psi 0) in the hand: the tip only tilts once over the cup.
+    const float side = -mirror;
+    const float psi0 = POUR_TIP * pour;
+    const vec3 mouth_dir = {-sinf(psi0) * side, cosf(psi0), 0.0f};
+    const float hb = NETTSPEND_BOTTLE_LENGTH * 0.5f * scale; // the bottle's half length, scaled like its mesh
+    // the mouth over the rim while pouring, else beside and above the cup
     const float beside = 1.0f - pour;
-    const vec3 mouth = {rim.x + (0.08f + 0.4f * beside) * mirror, rim.y + 0.16f + 0.3f * beside + 1.4f * (1.0f - lift), rim.z + 0.02f};
-    bottle->transform.position = (vec3) {mouth.x - mouth_dir.x * hb, mouth.y - mouth_dir.y * hb, mouth.z - mouth_dir.z * hb};
-    bottle->transform.rotation = (vec3) {(float) M_PI * 0.5f, psi0 * mirror, 0.0f};
+    const vec3 mouth = {rim.x + (POUR_MOUTH_X + 0.3f * beside) * scale * side, rim.y + (POUR_MOUTH_Y + 0.3f * beside) * scale, rim.z + 0.02f * scale};
+    // the fist's place on the bottle: low on its body (NETTSPEND_BOTTLE_GRIP of the half length from the centre toward the mouth)
+    const float to_grip = hb * (1.0f - NETTSPEND_BOTTLE_GRIP);
+    const vec3 grip_over = {mouth.x - mouth_dir.x * to_grip, mouth.y - mouth_dir.y * to_grip, mouth.z - mouth_dir.z * to_grip};
+    const vec3 grip = {off_hand.x + (grip_over.x - off_hand.x) * carry, off_hand.y + (grip_over.y - off_hand.y) * carry,
+                       off_hand.z + (grip_over.z - off_hand.z) * carry};
+    bottle->transform.position = (vec3) {grip.x - mouth_dir.x * hb * NETTSPEND_BOTTLE_GRIP, grip.y - mouth_dir.y * hb * NETTSPEND_BOTTLE_GRIP,
+                                         grip.z - mouth_dir.z * hb * NETTSPEND_BOTTLE_GRIP};
+    bottle->transform.rotation = (vec3) {(float) M_PI * 0.5f, psi0 * side, 0.0f};
+    bottle->transform.scale = (vec3) {scale, scale, scale};
+    if (bottle_hand) *bottle_hand = grip;
     return pour;
 }
 

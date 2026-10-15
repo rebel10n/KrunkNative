@@ -58,6 +58,8 @@ HOSE_RE = re.compile(rf"\[input_script\] hose t=(\d+) tip={VEC} back={VEC} hand=
                      r"screen_tip=(-?[\d.]+),(-?[\d.]+) screen_hand=(-?[\d.]+),(-?[\d.]+)")
 POUR_RE = re.compile(rf"\[input_script\] pour t=(\d+) strength=(-?[\d.]+) mouth={VEC} rim={VEC} "
                      r"screen_mouth=(-?[\d.]+),(-?[\d.]+) screen_rim=(-?[\d.]+),(-?[\d.]+)")
+HANDS_RE = re.compile(rf"\[input_script\] hands t=(\d+) trigger={VEC} off={VEC} screen_trigger=(-?[\d.]+),(-?[\d.]+) "
+                      rf"screen_off=(-?[\d.]+),(-?[\d.]+) bottle={VEC} visible=(\d) screen_bottle=(-?[\d.]+),(-?[\d.]+)")
 POUR_NONE_RE = re.compile(r"\[input_script\] pour t=(\d+) none")
 LACED_RE = re.compile(r"\[input_script\] laced t=(\d+) intensity=(-?[\d.]+) left=(-?[\d.]+) time=(-?[\d.]+)")
 SOURCE_RE = re.compile(r"\[vfx\] stream source (-?[\d.]+) (-?[\d.]+) (-?[\d.]+)")
@@ -73,6 +75,11 @@ FOAM_SPREAD = 45             # ... and at most this far apart (not tinted)
 FOAM_PIXELS = 120            # near-white pixels the cup's wall shows at least (640x360)
 GREY_BOX = (180, 40, 460, 280)  # the ground in front of the player when aimed down (640x360)
 GREY_MAX_DELTA = 250         # grey-white pixels a throw may add there (a dust cloud adds ~800 on origin/main)
+CUP_X = (0.3, 0.7)           # the cup's rim across the window: in front of the chest, not out at the camera's edge
+BOTTLE_FROM_HAND = 0.05      # units: the bottle's grip (where it is held) from the off hand's centre, every pour-up frame
+OFF_HAND_RISE = 0.5          # units the off hand at least lifts the bottle above its rest (over the cup) during the pour-up
+TP_SCALE = 1.8               # NETTSPEND_TP_SCALE: third person's cup and bottle (the mouth's reach over the rim scales too)
+HAND_BELOW = 0.12            # window fraction a fist's centre may sit below the bottom edge (the view cuts the arms there)
 
 
 def check(name, ok, detail=""):
@@ -107,12 +114,13 @@ def frames_between(start, end, cmd):
 def drank_script(work, weapon):
     shot = lambda name: f"{os.path.join(work, 'drank_' + name)}.png"
     lines = ["0 play", f"400 om add {weapon}", "1000 pose -343 -143 -28 0 0", "1450 state", f"1400 shot {shot('rest')}",
-             "1450 hose", "1460 wsel @drank", "1500 mdown left", "1900 mup left"]
+             "1450 hose", "1450 hands", "1460 wsel @drank", "1500 mdown left", "1900 mup left"]
     lines += frames_between(1500.0, 1900.0, "hose")
     # two steady frames a frame apart (the baseline of the frame diff), then the pour-up and the laced dose
     lines += [f"2200 shot {shot('steady_a')}", f"{2200 + FRAME_MS:.3f} shot {shot('steady_b')}",
               "2300 down R", f"{2300 + 2 * FRAME_MS:.3f} up R", f"{2300 + RELOAD_MS * 0.5:.0f} shot {shot('pour')}"]
     lines += frames_between(2300.0, 2300.0 + RELOAD_MS + 100.0, "pour")
+    lines += frames_between(2300.0, 2300.0 + RELOAD_MS + 100.0, "hands")
     lines += ["3900 laced 8000", "4600 laced", f"4600 shot {shot('laced')}", "4700 quit"]
     return "\n".join(sorted(lines, key=lambda line: float(line.split()[0]))) + "\n"
 
@@ -132,7 +140,7 @@ def money_script(work, weapon):
     shot = lambda name: f"{os.path.join(work, 'money_' + name)}.png"
     # the base frame: the same pose with the class's rifle, before the Money Spread comes out
     lines = ["0 play", "300 pose -343 -143 -28 0 0", f"700 shot {shot('base')}", f"800 om add {weapon}", "1000 pose -343 -143 -28 0 0",
-             "1450 state", f"1400 shot {shot('rest')}", "1460 wsel @money",
+             "1450 state", f"1400 shot {shot('rest')}", "1450 hands", "1460 wsel @money",
              "1500 mdown left", f"{1500 + FRAME_MS:.3f} mup left", f"{1500 + FRAME_MS:.3f} shot {shot('throw')}", "1900 quit"]
     lines += [f"{1500 + ms} shot {shot('after_%d' % ms)}" for ms in AFTER_MS]
     lines += frames_between(1450.0, 1530.0, "hose")
@@ -141,8 +149,13 @@ def money_script(work, weapon):
 
 def tp_script(work, drank, money):
     shot = lambda name: f"{os.path.join(work, 'tp_' + name)}.png"
+    # the Drank in third person, then its pour-up (a reload after a sip) from the third-person camera, then the cash
     lines = ["0 play", f"300 om add {drank}", "700 con thirdperson", "1000 pose -343 -143 -28 0 0", "1500 wsel @tpdrank",
-             f"1500 shot {shot('drank')}", f"1600 om add {money}", "2400 wsel @tpmoney", f"2400 shot {shot('money')}", "2500 quit"]
+             f"1500 shot {shot('drank')}", "1500 hands", "1550 mdown left", "1700 mup left", "2300 down R", f"{2300 + 2 * FRAME_MS:.3f} up R",
+             f"{2300 + RELOAD_MS * 0.5:.0f} shot {shot('pour')}", f"{2300 + RELOAD_MS + 300:.0f} om add {money}",
+             f"{2300 + RELOAD_MS + 1100:.0f} wsel @tpmoney", f"{2300 + RELOAD_MS + 1100:.0f} shot {shot('money')}", f"{2300 + RELOAD_MS + 1200:.0f} quit"]
+    lines += frames_between(2300.0, 2300.0 + RELOAD_MS + 100.0, "pour")
+    lines += frames_between(2300.0, 2300.0 + RELOAD_MS + 100.0, "hands")
     return "\n".join(sorted(lines, key=lambda line: float(line.split()[0]))) + "\n"
 
 
@@ -183,6 +196,12 @@ def run(tag, text, timeout=240):
                 events.append(("pour", {"t": g[0], "strength": g[1], "mouth": g[2:5], "rim": g[5:8], "screen_mouth": g[8:10],
                                         "screen_rim": g[10:12]}))
                 continue
+            m = HANDS_RE.search(line)
+            if m:
+                g = [float(x) for x in m.groups()]
+                events.append(("hands", {"t": g[0], "trigger": g[1:4], "off": g[4:7], "screen_trigger": g[7:9], "screen_off": g[9:11],
+                                         "bottle": g[11:14], "visible": int(g[14]), "screen_bottle": g[15:17]}))
+                continue
             m = WSEL_RE.search(line)
             if m:
                 events.append(("wsel", {"label": m.group(1), "slot": int(m.group(2)), "tp": int(m.group(3)), "sel": m.group(4)}))
@@ -206,6 +225,11 @@ def length(a):
 
 def in_window(uv):
     return 0.0 < uv[0] < 1.0 and 0.0 < uv[1] < 1.0
+
+
+def hand_in_frame(uv):
+    """a fist at the bottom of the window: its centre may sit up to HAND_BELOW (window fraction) under the edge"""
+    return 0.0 < uv[0] < 1.0 and 0.0 < uv[1] < 1.0 + HAND_BELOW
 
 
 def frame_diff(a, b):
@@ -265,6 +289,20 @@ def verify_drank(events):
     if os.path.exists(rest):
         white = foam_pixels(rest, still["screen_tip"], still["screen_hand"])
         check(f"{tag}: the cup's wall shows white (styrofoam) pixels", white >= FOAM_PIXELS, f"{white} near-white pixels (>= {FOAM_PIXELS})")
+    check(f"{tag}: the cup is held in front of the chest (its rim in the middle third of the window)", CUP_X[0] <= still["screen_tip"][0] <= CUP_X[1],
+          f"rim at x {still['screen_tip'][0]:.3f} (allowed {CUP_X[0]}..{CUP_X[1]})")
+    hands = [e for kind, e in events if kind == "hands"]
+    check(f"{tag}: the hands probe ran", hands)
+    if hands:
+        rest_hands = hands[0]
+        check(f"{tag}: both hands are in the frame while the cup is held (the fists at the bottom edge)",
+              hand_in_frame(rest_hands["screen_trigger"]) and hand_in_frame(rest_hands["screen_off"]),
+              f"trigger at {rest_hands['screen_trigger']}, off hand at {rest_hands['screen_off']}")
+        poured = [h for h in hands if h["visible"]]
+        verify_off_hand_pour(tag, hands)
+        check(f"{tag}: the pour-up uses both hands (the off hand carries the bottle, the trigger hand holds the cup)",
+              bool(poured) and all(hand_in_frame(h["screen_off"]) and hand_in_frame(h["screen_trigger"]) for h in poured),
+              f"{len(poured)} frames with the bottle out")
 
     last, worst, sprays, unmatched = None, 0.0, 0, 0
     for kind, e in events:
@@ -280,15 +318,7 @@ def verify_drank(events):
     check(f"{tag}: every stream shot leaves from the drawn rim", sprays and not unmatched and worst <= SOURCE_TOLERANCE,
           f"worst {worst:.4f} units from the rim, {unmatched} without a probe")
 
-    pours = [e for kind, e in events if kind == "pour"]
-    strong = [e for e in pours if e["strength"] >= 0.5]
-    check(f"{tag}: the reload is the pour-up (pour probes with the bottle tipped)", len(strong) >= 10, f"{len(pours)} pour probes, {len(strong)} at strength >= 0.5")
-    if strong:
-        above = all(e["mouth"][1] > e["rim"][1] for e in strong)
-        near = max(math.hypot(e["mouth"][0] - e["rim"][0], e["mouth"][2] - e["rim"][2]) for e in strong)
-        shown = all(in_window(e["screen_mouth"]) and in_window(e["screen_rim"]) for e in strong)
-        check(f"{tag}: the bottle's mouth pours from above the rim", above and near <= 0.45, f"mouth over the rim within {near:.3f} on x/z, above: {above}")
-        check(f"{tag}: the pour shows (mouth and rim in the window)", shown)
+    verify_pour_probes(tag, events, 1.0)
     drops = sum(1 for kind, _ in events if kind == "drops")
     check(f"{tag}: the pour's droplets spawned", drops >= 10, f"{drops} frames with droplets")
     ended = any(kind == "pour_none" and e[0] >= 2300 + RELOAD_MS for kind, e in events)
@@ -325,6 +355,10 @@ def verify_money(events):
     sel = wsel_of(events, "money")
     check(f"{tag}: the held model is the fan of cash (no Pistol stand-in)", sel and "model=cash" in sel["sel"] and "weapon_3" not in sel["sel"],
           sel["sel"] if sel else "no wsel line")
+    hands = [e for kind, e in events if kind == "hands"]
+    check(f"{tag}: both hands are in the frame while the cash is held (the fists at the bottom edge)",
+          hands and hand_in_frame(hands[0]["screen_trigger"]) and hand_in_frame(hands[0]["screen_off"]),
+          f"trigger {hands[0]['screen_trigger'] if hands else None}, off hand {hands[0]['screen_off'] if hands else None}")
     shots = [e for kind, e in events if kind == "shot"]
     check(f"{tag}: the throw is the cash stack's (no model)", shots and shots[0][0] == "cash", f"{[s[0] for s in shots]}")
     last, bursts, worst = None, 0, 0.0
@@ -370,6 +404,45 @@ def verify_tp(events):
         sel = wsel_of(events, label)
         check(f"{tag}: third person holds the {model}", sel and sel["tp"] == 1 and f"model={model}" in sel["sel"] and "hose" not in sel["sel"],
               sel["sel"] if sel else "no wsel line")
+    # the pour-up seen from the third-person camera: the same off-hand bottle, over the body's cup
+    verify_off_hand_pour(tag, [e for kind, e in events if kind == "hands"])
+    verify_pour_probes(tag, events, TP_SCALE)
+    rest, pour = (os.path.join(WORK, "tp", f"tp_{n}.png") for n in ("drank", "pour"))
+    if os.path.exists(rest) and os.path.exists(pour):
+        diff, _ = frame_diff(rest, pour)
+        check(f"{tag}: the pour-up frame differs from the rest frame (the bottle is in view)", diff >= 0.3, f"{diff:.2f} mean abs difference")
+
+
+def verify_off_hand_pour(tag, hands):
+    """the bottle comes from the off hand, stays in it (its grip on the fist) while it is carried over the cup and tipped,
+    and goes back: the off hand rises with it and is at its rest again once the reload is over"""
+    poured = [h for h in hands if h["visible"]]
+    worst = max((length(sub(h["bottle"], h["off"])) for h in poured), default=None)
+    check(f"{tag}: the bottle stays in the off hand through the pour-up (every frame)", poured and worst <= BOTTLE_FROM_HAND,
+          f"{len(poured)} frames, worst {worst if worst is None else round(worst, 4)} units between the bottle's grip and the off hand "
+          f"(allowed {BOTTLE_FROM_HAND})")
+    if not hands or not poured:
+        return
+    rest = hands[0]["off"]
+    rise = max(h["off"][1] for h in poured) - rest[1]
+    check(f"{tag}: the off hand carries the bottle up over the cup", rise >= OFF_HAND_RISE, f"rises {rise:.3f} units (>= {OFF_HAND_RISE})")
+    after = [h for h in hands if h["t"] >= 2300 + RELOAD_MS and not h["visible"]]
+    back = after and length(sub(after[-1]["off"], rest)) <= 0.3
+    check(f"{tag}: the off hand is back at its rest after the pour-up", back,
+          f"{length(sub(after[-1]['off'], rest)):.3f} units from its rest" if after else "no probe after the reload")
+
+
+def verify_pour_probes(tag, events, scale):
+    pours = [e for kind, e in events if kind == "pour"]
+    strong = [e for e in pours if e["strength"] >= 0.5]
+    check(f"{tag}: the reload is the pour-up (pour probes with the bottle tipped)", len(strong) >= 10, f"{len(pours)} pour probes, {len(strong)} at strength >= 0.5")
+    if strong:
+        above = all(e["mouth"][1] > e["rim"][1] for e in strong)
+        near = max(math.hypot(e["mouth"][0] - e["rim"][0], e["mouth"][2] - e["rim"][2]) for e in strong)
+        shown = all(in_window(e["screen_mouth"]) and in_window(e["screen_rim"]) for e in strong)
+        check(f"{tag}: the bottle's mouth pours from above the rim", above and near <= 0.45 * scale,
+              f"mouth over the rim within {near:.3f} on x/z (allowed {0.45 * scale:.2f}), above: {above}")
+        check(f"{tag}: the pour shows (mouth and rim in the window)", shown)
 
 
 ids = weapon_ids()

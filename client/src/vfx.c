@@ -1370,7 +1370,7 @@ void vfx_reset(void) {
 }
 
 // Nettspend Purple Drank (nettspend.h): the pour-up's droplets while the local player reloads it
-// in first person (player_pour_points: the bottle shows), at the pour's strength
+// in first or third person (player_pour_points: the bottle shows), at the pour's strength
 static void update_pour(Client *client) {
     const Player *me = client->me;
     vec3 mouth, rim;

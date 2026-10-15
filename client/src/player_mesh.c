@@ -488,13 +488,60 @@ static const ViewerSkin *player_slot_skin(const Player *player, const int slot, 
 
 // KrunkNative Piss: the centre of the trigger hand (the arm generate_arms gives the right hold:
 // arms->right, arms->left when left-handed), i.e. of its lower arm's last (skin) segment, in the
-// arms anchor's frame. Static there (the per-arm pivots only move for melee), so the first-person
-// hose is placed from it once.
-static vec3 player_trigger_hand(const PlayerArms *arms, const int left_handed) {
-    const PlayerArmMesh *arm = left_handed ? arms->left : arms->right;
+// arms anchor's frame. Static there (the per-arm pivots only move for melee and the Drank's
+// pour-up), so the first-person hose is placed from it once.
+static vec3 player_arm_hand(const PlayerArms *arms, const PlayerArmMesh *arm) {
     if (!arm || !arm->lower || !arm->lower->mesh_count) return (vec3) {0.0f, 0.0f, 0.0f};
     const Mesh *skin = arm->lower->meshes[arm->lower->mesh_count - 1];
     return transform_point_to(&skin->transform, (vec3) {0.0f, 0.5f, 0.0f}, &arms->anchor); // the unit cube spans y 0..1
+}
+
+static vec3 player_trigger_hand(const PlayerArms *arms, const int left_handed) {
+    return player_arm_hand(arms, left_handed ? arms->left : arms->right);
+}
+
+// The other hand (the Drank's bottle comes from it: the pour-up uses both)
+static vec3 player_off_hand(const PlayerArms *arms, const int left_handed) {
+    return player_arm_hand(arms, left_handed ? arms->right : arms->left);
+}
+
+// Turns `arm` (its pivot, identity at rest outside melee) about its shoulder (arm->anchor's origin)
+// so the hand centre at `rest` (the arms anchor frame, the pivot at identity) lands on `target`: the
+// rotation takes the shoulder-to-hand direction onto the shoulder-to-target one, and the arm slides
+// along it for the difference in reach, so the shoulder stays put (on the body in third person; in
+// first person the long sleeve keeps passing below the camera). Nettspend's pour-up: the hands
+// follow the cup and the bottle.
+static void player_arm_reach(PlayerArmMesh *arm, const vec3 rest, const vec3 target) {
+    if (!arm) return;
+    const vec3 sh = arm->anchor.position;
+    const float ax = rest.x - sh.x, ay = rest.y - sh.y, az = rest.z - sh.z;
+    const float bx = target.x - sh.x, by = target.y - sh.y, bz = target.z - sh.z;
+    const float la = sqrtf(ax * ax + ay * ay + az * az), lb = sqrtf(bx * bx + by * by + bz * bz);
+    float m[3][3] = {{1.0f, 0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}};
+    if (la > 1e-4f && lb > 1e-4f) {
+        float kx = ay * bz - az * by, ky = az * bx - ax * bz, kz = ax * by - ay * bx;
+        const float sn = sqrtf(kx * kx + ky * ky + kz * kz) / (la * lb), cs = (ax * bx + ay * by + az * bz) / (la * lb);
+        if (sn > 1e-5f) { // Rodrigues: R = I + sin K + (1 - cos) K^2 about the unit axis k
+            const float kl = sqrtf(kx * kx + ky * ky + kz * kz);
+            kx /= kl, ky /= kl, kz /= kl;
+            const float t = 1.0f - cs;
+            m[0][0] = cs + kx * kx * t, m[0][1] = kx * ky * t - kz * sn, m[0][2] = kx * kz * t + ky * sn;
+            m[1][0] = ky * kx * t + kz * sn, m[1][1] = cs + ky * ky * t, m[1][2] = ky * kz * t - kx * sn;
+            m[2][0] = kz * kx * t - ky * sn, m[2][1] = kz * ky * t + kx * sn, m[2][2] = cs + kz * kz * t;
+        }
+    }
+    // the pivot's rotation (intrinsic: Rx * Ry * Rz, three.js "XYZ"), from the matrix
+    const float y = asinf(fminf(fmaxf(m[0][2], -1.0f), 1.0f));
+    const float x = fabsf(m[0][2]) < 0.9999999f ? atan2f(-m[1][2], m[2][2]) : atan2f(m[2][1], m[1][1]);
+    const float z = fabsf(m[0][2]) < 0.9999999f ? atan2f(-m[0][1], m[0][0]) : 0.0f;
+    arm->pivot.rotation_order = ROTATION_ORDER_INTRINSIC;
+    arm->pivot.rotation = (vec3) {x, y, z};
+    // p' = R p + P: the shoulder stays (P = sh - R sh) and the hand reaches target (+ the slide)
+    const float rax = m[0][0] * ax + m[0][1] * ay + m[0][2] * az, ray = m[1][0] * ax + m[1][1] * ay + m[1][2] * az,
+                raz = m[2][0] * ax + m[2][1] * ay + m[2][2] * az;
+    const float rsx = m[0][0] * sh.x + m[0][1] * sh.y + m[0][2] * sh.z, rsy = m[1][0] * sh.x + m[1][1] * sh.y + m[1][2] * sh.z,
+                rsz = m[2][0] * sh.x + m[2][1] * sh.y + m[2][2] * sh.z;
+    arm->pivot.position = (vec3) {sh.x - rsx + bx - rax, sh.y - rsy + by - ray, sh.z - rsz + bz - raz};
 }
 
 int player_hose_points(const Player *player, vec3 *tip, vec3 *back, vec3 *hand) {
@@ -510,8 +557,8 @@ int player_hose_points(const Player *player, vec3 *tip, vec3 *back, vec3 *hand) 
     return 1;
 }
 
-// Nettspend (nettspend.h): the pour-up's points while the local player reloads the Drank in first
-// person: the bottle's mouth and the cup's rim centre (world); 0 otherwise (vfx.c droplets).
+// Nettspend (nettspend.h): the pour-up's points while the local player reloads the Drank (first or
+// third person): the bottle's mouth and the cup's rim centre (world); 0 otherwise (vfx.c droplets).
 int player_pour_points(const Player *player, vec3 *mouth, vec3 *rim) {
     const PlayerMesh *mesh = player ? player->mesh : NULL;
     if (!mesh || !mesh->arms || player->loadout_index < 0 || player->loadout_index >= player->loadout_size) return 0;
@@ -520,6 +567,20 @@ int player_pour_points(const Player *player, vec3 *mouth, vec3 *rim) {
     if (!arms || !arms->hose || !arms->weapon_left || !arms->weapon_left->visible) return 0;
     if (mouth) *mouth = transform_point_to(&arms->weapon_left->transform, (vec3) {0.0f, 0.0f, -NETTSPEND_BOTTLE_LENGTH * 0.5f}, NULL);
     if (rim) *rim = transform_point_to(&arms->hose->transform, (vec3) {0.0f, 0.0f, -arms->hose_length * 0.5f}, NULL);
+    return 1;
+}
+
+int player_hands_points(const Player *player, vec3 *trigger, vec3 *off, vec3 *bottle, int *bottle_visible) {
+    const PlayerMesh *mesh = player ? player->mesh : NULL;
+    if (!mesh || !mesh->arms || player->loadout_index < 0 || player->loadout_index >= player->loadout_size) return 0;
+    const PlayerArms *arms = mesh->arms[player->loadout_index];
+    if (!arms) return 0;
+    if (trigger) *trigger = transform_point_to(&arms->anchor, player_trigger_hand(arms, player->left_handed), NULL);
+    if (off) *off = transform_point_to(&arms->anchor, player_off_hand(arms, player->left_handed), NULL);
+    // the bottle's grip (where the off hand holds it: NETTSPEND_BOTTLE_GRIP of its half length from the centre toward the mouth)
+    if (bottle) *bottle = arms->weapon_left ? transform_point_to(&arms->weapon_left->transform, (vec3) {0.0f, 0.0f, -NETTSPEND_BOTTLE_LENGTH * 0.5f * NETTSPEND_BOTTLE_GRIP}, NULL)
+                                            : (vec3) {0.0f, 0.0f, 0.0f};
+    if (bottle_visible) *bottle_visible = arms->weapon_left ? arms->weapon_left->visible : 0;
     return 1;
 }
 
@@ -1229,8 +1290,8 @@ void player_generate_meshes(Player *player, const int render_you) {
                     // fan of cash, procedural, in the trigger hand on every model (first person, third person,
                     // the menu's class preview), never the table's stand-ins (the hose, a model). It takes the
                     // hose's place (arms->hose) so the stream leaves from the rim / the bills from the fan's top
-                    // (player_hose_points). First person only: the Drank's pour-up bottle as weapon_left,
-                    // hidden outside a reload (nettspend_pose_pour).
+                    // (player_hose_points). Both hands take part in the Drank's pour-up: the bottle is the off hand's
+                    // (arms->weapon_left, hidden outside a reload, nettspend_pose_pour), in third person too.
                     const int drank = kn_kind == NETTSPEND_WEAPON_DRANK;
                     Mesh *held = drank ? nettspend_cup_mesh() : nettspend_cash_mesh();
                     if (held) {
@@ -1239,14 +1300,16 @@ void player_generate_meshes(Player *player, const int render_you) {
                         snprintf(sel_model, sizeof(sel_model), "%s", drank ? "cup" : "cash");
                         snprintf(sel_tex, sizeof(sel_tex), "#%06x", (unsigned) (drank ? NETTSPEND_FOAM_COLOR : NETTSPEND_CASH_COLOR));
                         held->transform.parent = &arms->anchor;
-                        if (drank) nettspend_pose_cup_rest(held, hand, mirror);
-                        else nettspend_pose_cash(held, hand, mirror);
-                        if (third_person) { // the body's hand is seen from afar: a bigger cup / fan, its base kept on the fist
-                            const float len = drank ? NETTSPEND_CUP_LENGTH : NETTSPEND_CASH_LENGTH;
-                            held->transform.scale = (vec3) {NETTSPEND_TP_SCALE, NETTSPEND_TP_SCALE, NETTSPEND_TP_SCALE};
-                            held->transform.position.y += (NETTSPEND_TP_SCALE - 1.0f) * len * 0.5f - 0.2f;
+                        if (third_person) { // the body's hand is seen from afar: a bigger cup / fan (nettspend_pose_cup_rest keeps its base on the fist)
+                            const float s = NETTSPEND_TP_SCALE;
+                            held->transform.scale = (vec3) {s, s, s};
                         }
-                        if (drank && !third_person) {
+                        if (drank) nettspend_pose_cup_rest(held, hand, mirror);
+                        else {
+                            nettspend_pose_cash(held, hand, mirror);
+                            if (third_person) held->transform.position.y += (NETTSPEND_TP_SCALE - 1.0f) * NETTSPEND_CASH_LENGTH * 0.5f - 0.2f;
+                        }
+                        if (drank) {
                             Mesh *bottle = nettspend_bottle_mesh();
                             if (bottle) {
                                 bottle->transform.parent = &arms->anchor;
@@ -1608,14 +1671,29 @@ void player_update_meshes(Player *player, const int is_preview) {
         }
     }
 
-    // Nettspend Purple Drank (nettspend.h): the pour-up of a first-person reload (the cup drifts
-    // into view, the bottle comes in over the rim and tips; hidden again when the reload ends).
-    // Only the local player's reload_timer runs on the client (procInputs), like the reload dip above.
-    if (held_arms && held_arms->hose && player->render_you && !third_person &&
-        nettspend_weapon_kind(player->loadout[player->loadout_index]) == NETTSPEND_WEAPON_DRANK) {
+    // Nettspend Purple Drank (nettspend.h): the pour-up of the local player's reload, first and third
+    // person: the off hand brings the bottle over the cup and tips it, the trigger hand holds the cup up,
+    // and both arms reach where the cup and the bottle are (player_arm_reach; back at rest, identity,
+    // outside the reload). Only the local player's reload_timer runs on the client (procInputs), like
+    // the reload dip above: the others' pour stays hidden.
+    if (held_arms && held_arms->hose && !held_arms->melee_pose && nettspend_weapon_kind(player->loadout[player->loadout_index]) == NETTSPEND_WEAPON_DRANK) {
+        PlayerArmMesh *trigger_arm = player->left_handed ? held_arms->left : held_arms->right;
+        PlayerArmMesh *off_arm = player->left_handed ? held_arms->right : held_arms->left;
+        for (int i = 0; i < 2; i++) {
+            PlayerArmMesh *arm = i ? off_arm : trigger_arm;
+            if (!arm) continue;
+            arm->pivot.position = arm->pivot.rotation = (vec3) {0.0f, 0.0f, 0.0f};
+        }
+        const vec3 trigger_rest = player_trigger_hand(held_arms, player->left_handed), off_rest = player_off_hand(held_arms, player->left_handed);
         const float reload_time = player->weapon->reload_time * reload_speed;
-        const float progress = player->reload_timer > 0.0f && reload_time > 0.0f ? 1.0f - player->reload_timer / reload_time : -1.0f;
-        nettspend_pose_pour(held_arms->hose, held_arms->weapon_left, player_trigger_hand(held_arms, player->left_handed), left_hand_mlt, progress);
+        const float progress = player->render_you && player->reload_timer > 0.0f && reload_time > 0.0f ? 1.0f - player->reload_timer / reload_time : -1.0f;
+        vec3 cup_hand, bottle_hand;
+        nettspend_pose_pour(held_arms->hose, held_arms->weapon_left, trigger_rest, off_rest, left_hand_mlt, held_arms->hose->transform.scale.x, progress,
+                            &cup_hand, &bottle_hand);
+        if (progress >= 0.0f && progress <= 1.0f) {
+            player_arm_reach(trigger_arm, trigger_rest, cup_hand);
+            player_arm_reach(off_arm, off_rest, bottle_hand);
+        }
     }
 
     // the charm sways with the weapon (players.js:501-504)

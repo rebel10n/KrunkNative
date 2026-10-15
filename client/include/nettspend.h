@@ -49,6 +49,12 @@ NettspendWeapon nettspend_weapon_kind(int weapon_id);
 #define NETTSPEND_CASH_GLOW 0.35f     // the bills' green emissive lift (green in the shade too)
 #define NETTSPEND_TP_SCALE 1.8f      // third person / the class preview: the cup and the cash at this size (the body's fist is far)
 #define NETTSPEND_BOTTLE_LENGTH 1.3f  // the pour-up bottle's height (mouth at -length / 2)
+// Where the off hand holds the bottle: this far (of its half length) from its centre toward the mouth;
+// negative = toward the bottom. Low on the body, tipped over the cup from the off hand's side: the
+// whole bottle shows between the fist and the rim, while the forearm leaves the fist the other way
+// (held round the label or the neck, the fist hid the bottle; poured from the far side, the arm
+// crossed in front of the cup).
+#define NETTSPEND_BOTTLE_GRIP (-0.6f)
 #define NETTSPEND_CASH_LENGTH 0.9f    // the Money Spread's height (z extent: the brick in the fist, the fan of bills above)
 #define NETTSPEND_CASH_FAN 5          // bills in the fan
 #define NETTSPEND_DRANK_COLOR 0x7b2cbf // the lean (#7b2cbf): the cup's liquid; the stream / puddles use WeaponStream.color
@@ -63,12 +69,18 @@ Mesh *nettspend_cup_mesh(void);
 Mesh *nettspend_bottle_mesh(void);
 Mesh *nettspend_cash_mesh(void);
 
-// The pour-up (first person, the local player's reload of the Drank): poses `cup` (arms->hose) and
-// `bottle` (arms->weapon_left, hidden outside the reload) from the trigger hand's centre `hand` (the
-// arms anchor frame, x mirrored for left-handed) and the reload progress 0..1 (0 = just started).
+// The pour-up (the local player's reload of the Drank, first and third person): poses `cup`
+// (arms->hose) and `bottle` (arms->weapon_left, hidden outside the reload) from the trigger hand's
+// centre `hand` and the off hand's centre `off_hand` (the arms anchor frame, the rest pose, x mirrored
+// for left-handed), the cup's and bottle's scale (third person: NETTSPEND_TP_SCALE) and the reload
+// progress 0..1 (0 = just started). Both hands take part: the bottle starts and ends in the off hand,
+// which carries it (held low on its body) over the cup and tips it. `cup_hand` / `bottle_hand` (may be NULL) get where the
+// trigger hand holds the cup and the off hand the bottle (the anchor frame; the rest centres outside
+// the reload): player_mesh.c reaches the arms there.
 // `progress` < 0: not reloading (the rest pose, bottle hidden). Returns the pour's strength 0..1
 // (the droplets' rate, vfx.c).
-float nettspend_pose_pour(Mesh *cup, Mesh *bottle, vec3 hand, float mirror, float progress);
+float nettspend_pose_pour(Mesh *cup, Mesh *bottle, vec3 hand, vec3 off_hand, float mirror, float scale, float progress,
+                          vec3 *cup_hand, vec3 *bottle_hand);
 // The pour's strength 0..1 at reload progress 0..1 (the bottle is tipped over the cup; vfx.c's
 // droplet rate), 0 outside the pour beat or when not reloading (progress < 0)
 float nettspend_pour_strength(float progress);
