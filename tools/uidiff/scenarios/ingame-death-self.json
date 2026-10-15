@@ -17,6 +17,7 @@
     "name": "Local User",
     "region": "...",
     "anim_time": 0.8,
+    "after_ms": 816.67,
     "hud": {
       "health": 0,
       "maxHealth": 100,
@@ -80,5 +81,5 @@
     ]
   },
   "frames": 6,
-  "note": "Killed with no killer: `You Died` + stats. Reference: the offline v10 sandbox (capture-v10.js)."
+  "note": "Killed with no killer: `You Died` + stats. Reference: the offline v10 sandbox (capture-v10.js). The death screen's one-shot death-ui-moveup (1.5 s) starts the frame after the state is applied, and capture-v10.js pauses every animation at 800 ms: after_ms = 800 + 1 frame captures the same phase (anim_time alone left the slide-in a few ms further on, every stats row 1-2 px high)."
 }
