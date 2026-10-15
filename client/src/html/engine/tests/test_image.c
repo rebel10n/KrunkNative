@@ -156,6 +156,10 @@ static const Expected k_css_url[] = {
     {"../img/blank_2.png", "css/main.css", 32, 32},
     {"../img/doublexp.png", "css/main.css", 632, 512},
     {"../img/hp_0.png", "css/main.css", 32, 32},
+    /* css/svelte.css: the raffle themes (krunker.io/img/, live_assets_v10.lock), WebP read through the .webp.png sidecar */
+    {"../img/lottery_bg.webp", "css/svelte.css", 1300, 840},
+    {"../img/lottery_bg_easter.webp", "css/svelte.css", 1300, 840},
+    {"../img/lottery_bg_neutral.webp", "css/svelte.css", 1300, 840},
     {"../img/medals/medal_0.png", "css/main.css", 256, 256},
     {"../img/mobile/icon_0.png", "css/main.css", 256, 256},
     {"../img/mobile/icon_1.png", "css/main.css", 256, 256},
@@ -268,9 +272,18 @@ static void test_url_resolution(void) {
           "query+fragment stripped: %s", out);
     CHECK(image_resolve_url("./img/./x.png", "index.html", out, sizeof(out)) && !strcmp(out, "img/x.png"),
           "dot segments: %s", out);
-    CHECK(image_resolve_url("../../img/x.png", "css/main.css", out, sizeof(out)) == 0, "escape above root accepted");
-    CHECK(image_resolve_url("../x.png", "index.html", out, sizeof(out)) == 0, "escape from root accepted");
-    CHECK(image_resolve_url("/../x.png", "index.html", out, sizeof(out)) == 0, "absolute escape accepted");
+    /* ".." above the root clamps at the root like a browser (v10 main.css: ../../img/frvr-ui/doublexp.svg) */
+    CHECK(image_resolve_url("../../img/frvr-ui/doublexp.svg", "css/main.css", out, sizeof(out)) &&
+              !strcmp(out, "img/frvr-ui/doublexp.svg"),
+          "clamp above root: %s", out);
+    CHECK(image_resolve_url("../x.png", "index.html", out, sizeof(out)) && !strcmp(out, "x.png"),
+          "clamp from root: %s", out);
+    CHECK(image_resolve_url("/../x.png", "index.html", out, sizeof(out)) && !strcmp(out, "x.png"),
+          "clamp absolute: %s", out);
+    CHECK(image_resolve_url("../../../a/../../img/x.png", "windows/host.html", out, sizeof(out)) &&
+              !strcmp(out, "img/x.png"),
+          "clamp repeated: %s", out);
+    CHECK(image_resolve_url("../..", "index.html", out, sizeof(out)) == 0, "root itself accepted");
     CHECK(image_resolve_url("http://example.com/x.png", "index.html", out, sizeof(out)) == 0, "http accepted");
     CHECK(image_resolve_url("data:image/png;base64,AAAA", "index.html", out, sizeof(out)) == 0, "data: accepted");
     CHECK(image_resolve_url("//cdn/x.png", "index.html", out, sizeof(out)) == 0, "protocol-relative accepted");
@@ -478,7 +491,13 @@ static void test_failures(ImageCache *cache) {
     CHECK(css->failed, "css decoded as an image");
 
     /* rejected URLs */
-    CHECK(image_get(cache, "../../etc/passwd", "css/main.css")->failed, "escape loaded");
+    /* ".." clamps at the ui root: this is ui/etc/passwd (absent), never /etc/passwd */
+    CHECK(image_get(cache, "../../../../../../etc/passwd", "css/main.css")->failed, "escape loaded");
+    /* v10 main.css's Double XP art climbs above css/ by two: Chrome clamps it to the root */
+    {
+        const ImageEntry *dxp = get_loaded(cache, "../../img/frvr-ui/doublexp.svg", "css/main.css");
+        CHECK(dxp && !dxp->failed && dxp->w > 0, "../../img/frvr-ui/doublexp.svg not clamped to the root");
+    }
     CHECK(image_get(cache, "http://example.com/x.png", "index.html")->failed, "http loaded");
     CHECK(image_get(cache, "", "index.html")->failed, "empty loaded");
 

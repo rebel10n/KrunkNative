@@ -240,7 +240,9 @@ static int image_url_has_scheme(const char *url, const size_t len) {
 }
 
 /* Appends `text` (len bytes) to the segment stack in `out`, collapsing "." and
- * "..".  Returns 0 when ".." would climb above the root. */
+ * "..".  A ".." at the root stays at the root, as browsers clamp it (RFC 3986
+ * §5.2.4: v10's main.css loads "../../img/frvr-ui/doublexp.svg" from css/,
+ * which Chrome fetches as /img/frvr-ui/doublexp.svg).  Returns 0 on overflow. */
 static int image_url_push(const char *text, size_t len, char *out, size_t cap, size_t *out_len) {
     size_t i = 0;
 
@@ -254,8 +256,7 @@ static int image_url_push(const char *text, size_t len, char *out, size_t cap, s
         if (seg_len == 0 || (seg_len == 1 && seg[0] == '.')) {
             /* empty or "." : nothing */
         } else if (seg_len == 2 && seg[0] == '.' && seg[1] == '.') {
-            if (*out_len == 0) return 0;
-
+            /* at the root (*out_len == 0) it stays there */
             size_t k = *out_len;
             while (k > 0 && out[k - 1] != '/') k--;
             *out_len = k > 0 ? k - 1 : 0;
@@ -974,7 +975,7 @@ const ImageEntry *image_get(ImageCache *cache, const char *url, const char *base
     slot = image_cache_add(cache, key, hash);
     if (!slot) return &failed_entry;
 
-    if (!resolved) image_fail(slot, "rejected URL (scheme, empty, or escapes the ui root)");
+    if (!resolved) image_fail(slot, "rejected URL (scheme, empty, or too long)");
     else if (data_url) image_load(cache, slot, url);
     else image_probe(cache, slot);
 

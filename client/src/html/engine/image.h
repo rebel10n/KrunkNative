@@ -18,8 +18,8 @@
  * written in, relative to the ui/ root ("index.html", "css/main.css",
  * "windows/host.html"; NULL or "" == root).  `url` is resolved against it
  * like a browser does: query (`?build=...`) and fragment are stripped, "."
- * and ".." segments are collapsed, a leading "/" means the ui/ root.  A URL
- * that escapes above the root, has a scheme (http:, ...; data: URLs are
+ * and ".." segments are collapsed (a ".." at the root stays there, as in a
+ * browser), a leading "/" means the ui/ root.  A URL that has a scheme (http:, ...; data: URLs are
  * decoded in place, see image_decode_data_url), or is
  * empty resolves to a failed entry.  The normalised root-relative path
  * ("img/logo_4.png") is both the cache key and the request URL on the web.

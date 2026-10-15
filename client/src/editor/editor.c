@@ -1066,7 +1066,8 @@ static void move_camera(const float dt) {
 // views and the editor bus), window:N (showWindow), closewindow, ctab:N /
 // stab:N (Controls / Settings tab), quickedit, select:I (object index), panel:NAME (right
 // panel), menu:I[:J] (open toolbar root I and its sub-menu J), open:ID (folder header id),
-// add:I (createObjects[I]), teleport (the teleport popup), ui:CALL (an inline-handler call
+// add:I (createObjects[I]), teleport (the teleport popup), texlist (the T-key texture / model
+// variant list of the selected object), ui:CALL (an inline-handler call
 // without ';', e.g. ui:windows[2].switchTab(1)), dump:right|left|window|popup|toolbar:FILE,
 // wait:S (the rest S seconds later; the page is "ready" for captures after the last command).
 void ed_window_set_tabs(int controls, int settings, int quick_edit);
@@ -1407,6 +1408,7 @@ static void run_script_text(const char *text) {
         else if (ed_triggers_script(cmd, arg) || ed_gameconfig_script(cmd, arg) || ed_customgui_script(cmd, arg)) {} // trig: / cfg: / gui: (logic UI tests)
         else if (ed_tools_script(cmd, arg)) {} // tool: (editor_tools.c, tools_check.py)
         else if (!strcmp(cmd, "teleport")) editor_teleport_popup();
+        else if (!strcmp(cmd, "texlist")) editor_texture_list(); // the T-key picker (model variants / textures)
         else if (!strcmp(cmd, "ui") && arg) debug_capture_dispatch(arg); // inline-handler calls: "ui:showWindow(3)"
         else if (!strcmp(cmd, "publish")) ed_net_script_publish(arg); // editor_net.c
         else if (ed_net_script(cmd, arg)) {} // net: (editor_net.c, tools/editor/publish_e2e.py)

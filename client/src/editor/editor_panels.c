@@ -1298,7 +1298,7 @@ static void templ_pairs(EdBuf *h, const cJSON *list, const int script, const int
             char img[160];
             if (map) snprintf(img, sizeof(img), "img/maps/map_%d.png", idx);
             else if (script) snprintf(img, sizeof(img), "img/templates/scripts/%d.png", idx);
-            else snprintf(img, sizeof(img), "img/templates/%s.png", ed_json_str(t, "icon", ""));
+            else snprintf(img, sizeof(img), "img/templates/%d.png", (int) ed_json_num(t, "icon", 0)); // icon: a number (templates.json)
             if (!k) edb_addf(h, "<div class='editInfoPair'%s>", i == pairs - 1 && map ? "" : "style='margin-right: 10px'");
             edb_addf(h, "<div class='editInfoView' style='background-image:url(%s);%s%s' onclick='loadQuick(%d,%s,%s)'><div class='editInfoText'>", img,
                      k ? "margin-top: 10px;" : "", map ? "background-size: cover;" : "", idx, script ? "true" : "false", map ? "true" : "undefined");
