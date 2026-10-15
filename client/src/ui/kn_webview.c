@@ -8,9 +8,10 @@
 //     passes by itself (Turnstile's non-interactive / managed check) never shows anything. Only when
 //     the player is needed is the view moved into a real window, created centred on the work area of
 //     the monitor under the pointer and kept above the game (reveal()): Turnstile's
-//     before-interactive-callback, Cloudflare's own interstitial, a failure the widget offers "Try
-//     again" for, no token after KN_WEBVIEW_REVEAL_MS (KRUNKNATIVE_WEBVIEW_REVEAL_MS), or the player
-//     asking for it (kn_webview_captcha_open again: the modal's button);
+//     before-interactive-callback (interactiveBegin), a widget error / expiry / timeout (the widget's
+//     own "Try again" is in the window), no token after KN_WEBVIEW_REVEAL_MS (KRUNKNATIVE_WEBVIEW_REVEAL_MS;
+//     Cloudflare's interstitial and an HTTP error page are not taken as "needs the player": they may
+//     pass by themselves), or the player asking for it (kn_webview_captcha_open with show_now);
 //   - navigates to a REAL krunker.io URL (https only; plain http only to a loopback host, for the
 //     tests' stub page) in an ephemeral web context (no cookies or storage on disk);
 //   - injects one user script, which does nothing unless the top document's origin is that URL's; it
@@ -41,7 +42,6 @@
 #define BRIDGE_EVENT "kn-captcha"
 #define WINDOW_W 520
 #define WINDOW_H 600
-#define KN_WEBVIEW_REVEAL_MS 10000 // no token by then: the window is shown (a stuck check needs the player)
 
 static struct {
     int gtk;            // 0 not tried, 1 up, -1 failed
@@ -247,13 +247,14 @@ static void on_message(WebKitUserContentManager *m, WebKitJavascriptResult *r, g
             W.ev_failed = 1;
         } else if (!strcmp(code, "noscript")) {
             snprintf(text, sizeof(text), "Cloudflare's challenge did not load in the window (blocked or offline).");
-            W.ev_status = 1;
         } else {
             snprintf(text, sizeof(text), "The challenge failed (Cloudflare error %s): \"Try again\" in its window.", code);
-            W.ev_status = 1;
         }
         set_msg(text);
-        if (!W.ev_failed) W.reveal = "a failure the player can retry"; // its "Try again" is in the window
+        if (!W.ev_failed) { // a failure the player can retry: its "Try again" is in the window
+            W.ev_status = 1;
+            W.reveal = "a failure the player can retry";
+        }
     } else if (!strncmp(s, "expired:", 8) || !strncmp(s, "timeout:", 8)) {
         printf("[webview] the challenge %s\n", s[0] == 'e' ? "expired" : "timed out");
         W.ev_status = 1;
@@ -266,9 +267,9 @@ static void on_message(WebKitUserContentManager *m, WebKitJavascriptResult *r, g
             set_msg(W.window ? "Cloudflare's widget is up in the challenge window." : "Cloudflare is checking this computer\xe2\x80\xa6");
         }
     } else if (!strncmp(s, "interstitial:", 13)) {
-        printf("[webview] Cloudflare checks the visit to %s first\n", W.origin);
-        W.ev_status = 1;
-        W.reveal = "Cloudflare's interstitial";
+        // Cloudflare's own page check: it may pass by itself, so it is not a reason to show the window
+        // (the no-token backstop still is). Its line is kept for the window's reveal.
+        printf("[webview] Cloudflare checks the visit to %s first (hidden: waiting for it)\n", W.origin);
         set_msg("Cloudflare checks your visit to krunker.io first: follow it in the challenge window.");
     } else if (!strncmp(s, "interactive:", 12)) {
         printf("[webview] Turnstile needs the player\n");
@@ -462,7 +463,8 @@ static int toolkit_up(void) {
     return 1;
 }
 
-int kn_webview_captcha_open(const char *url, const char *sitekey, const char *title, const char *proxy, char *err, const size_t errn) {
+int kn_webview_captcha_open(const char *url, const char *sitekey, const char *title, const char *proxy, const int show_now, char *err,
+                            const size_t errn) {
     if (err && errn) err[0] = 0;
     if (env_off()) {
         if (err) snprintf(err, errn, "the webview is turned off (KRUNKNATIVE_WEBVIEW=0)");
@@ -473,7 +475,7 @@ int kn_webview_captcha_open(const char *url, const char *sitekey, const char *ti
         return 1;
     }
     if (W.offscreen) { // running hidden: the player asks to see it (the modal's button)
-        reveal("the player asked for it");
+        W.reveal = "the player asked for it";
         return 1;
     }
     if (!url || !url[0]) {
@@ -545,7 +547,8 @@ int kn_webview_captcha_open(const char *url, const char *sitekey, const char *ti
     gtk_widget_show_all(W.offscreen);
     W.opened_us = g_get_monotonic_time();
     const char *rv = getenv("KRUNKNATIVE_WEBVIEW_REVEAL_MS");
-    W.reveal_ms = rv && rv[0] ? atoi(rv) : KN_WEBVIEW_REVEAL_MS;
+    W.reveal_ms = rv && rv[0] ? atoi(rv) : KN_WEBVIEW_REVEAL_DEFAULT_MS;
+    if (show_now) W.reveal = "the player asked for it"; // shown by the next poll (it reports KN_WEBVIEW_SHOWN)
 
     printf("[webview] challenge running hidden: %s (%s)%s; shown only if it needs the player\n", url, W.origin,
            proxy && proxy[0] ? ", through the client's proxy" : "");
@@ -581,13 +584,19 @@ void kn_webview_pump(void) {
 int kn_webview_captcha_poll(char *token, const size_t n, char *err, const size_t errn) {
     kn_webview_pump();
     if (err && errn) err[0] = 0;
+    int shown = 0;
     if (W.offscreen && !W.ev_token && !W.ev_failed) {
         if (!W.reveal && W.reveal_ms >= 0 && g_get_monotonic_time() - W.opened_us >= (gint64) W.reveal_ms * 1000)
             W.reveal = "no token in time";
         if (W.reveal) {
             reveal(W.reveal);
             W.reveal = NULL;
+            shown = W.window != NULL;
         }
+    }
+    if (shown) { // the player is needed now: the caller shows its prompt (the widget's line rides along)
+        if (err) snprintf(err, errn, "%s", W.msg);
+        return KN_WEBVIEW_SHOWN;
     }
     if (W.ev_token) {
         W.ev_token = 0;
@@ -622,11 +631,13 @@ int kn_webview_captcha_poll(char *token, const size_t n, char *err, const size_t
 
 int kn_webview_available(void) { return 0; }
 
-int kn_webview_captcha_open(const char *url, const char *sitekey, const char *title, const char *proxy, char *err, const size_t errn) {
+int kn_webview_captcha_open(const char *url, const char *sitekey, const char *title, const char *proxy, const int show_now, char *err,
+                            const size_t errn) {
     (void) url;
     (void) proxy;
     (void) sitekey;
     (void) title;
+    (void) show_now;
     if (err && errn) snprintf(err, errn, "this build has no webview");
     return 0;
 }

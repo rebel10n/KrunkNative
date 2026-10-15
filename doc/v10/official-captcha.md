@@ -11,8 +11,9 @@ krunker.io itself) or sends the player to krunker.io to solve it, and hands the 
 to the matchmaker once.
 
 The in-game socket captcha `cpt` is a different thing: an ALTCHA proof of work that
-`krunker_altcha.c` computes (that is how it is meant to be passed). The same modal shows it in a
-passive "Verifying…" state and then the result.
+`krunker_altcha.c` computes (that is how it is meant to be passed). Nothing is shown while it is
+computed or when it passes (the player sees only the loading state); only a failure shows the same
+modal's passive card, saying so, for a moment.
 
 ## What the live client does (game.deob.js)
 
@@ -49,9 +50,14 @@ with or without the `accept-language` header. Skipping the early token does not 
 ## Native client: the challenge window (KN_WEBVIEW)
 
 Built with a webview (CMake `-DKN_WEBVIEW=AUTO|ON|OFF`; AUTO, the default, is on when pkg-config finds
-`webkit2gtk-4.1`; Linux only for now), `CaptchaRequired` makes the modal say "Solve it in the window that
-opened" and opens a separate OS window (a GTK window with a WebKitGTK view; never drawn into the GL
-scene) on a **real krunker.io page**:
+`webkit2gtk-4.1`; Linux only for now), `CaptchaRequired` runs the challenge **silently first**: a
+WebKitGTK view (a GTK offscreen window, never drawn into the GL scene) on a **real krunker.io page**,
+with no window and no modal on screen, so a check that passes by itself (Turnstile's managed check)
+only ever shows the player the loading state. The view moves into a real OS window and the modal
+comes up only when the player is needed: Turnstile's `before-interactive-callback`, a widget error /
+expiry / timeout (its "Try again" is in the window), no token within 20 s
+(`KN_WEBVIEW_REVEAL_DEFAULT_MS`, `KRUNKNATIVE_WEBVIEW_REVEAL_MS`), or the player's "Solve the
+challenge". Cloudflare's interstitial alone is not a reason (it may pass by itself):
 
 - **URL: `https://krunker.io/robots.txt`** (`KN_WEBVIEW_CAPTCHA_URL`). The live client has no dedicated
   challenge page: `getCaptchaToken` (game.deob.js :115623) loads
@@ -86,12 +92,12 @@ scene) on a **real krunker.io page**:
   the same proxy as the matchmaker requests (`http_proxy_for("matchmaker.krunker.io")`: the client
   setting or the environment; `http://` and `socks5://` proxies; loopback direct), so the challenge is
   solved from the network the seek comes from.
-- **The modal, when the window works, shows only "Solve the challenge"** (opens / raises the window)
+- **The modal, once the window is shown, has only "Solve the challenge"** (raises the window)
   **and Cancel.** The paste box, the userscript callback and the "open krunker.io in the browser" path
   stay hidden: the webview is the one path the player sees (the user asked not to be shown the
   paste / userscript route when the window works). Closing the window says so ("Solve the challenge"
-  opens it again); Cancel ends the join. A refused token (used or expired) brings the modal back and
-  opens a fresh window, at most twice like the live client.
+  opens it again); Cancel ends the join. A refused token (used or expired) starts a fresh silent run,
+  at most twice like the live client.
 - **Fallbacks only when the window can't be the path:** no webview in the build (macOS, Windows,
   `KN_WEBVIEW=OFF`, the release packages), `KRUNKNATIVE_WEBVIEW=0`, no display for GTK, or the window
   failing to start / load / returning a non-token — then the modal shows the manual path below (open
@@ -230,16 +236,21 @@ challenge); the client side of the exchange is covered by the tests below.
   has no webview or `xvfb-run` is missing): client_bin under its own `xvfb-run` (GLFW headless, GTK on
   the private Xvfb), `KRUNKNATIVE_KRUNKER_CAPTCHA_URL` pointing at the test's stub page, which defines a
   stub `window.turnstile` that reports how it was rendered and "is solved" 1.5 s later by firing the
-  widget's own callback. The matchmaker refuses the first token; the window opens again, the second
-  token joins and the game runs. Also: the modal shows "Solve the challenge" + "Open in your browser
-  instead" + the paste box with no callback armed; the page's own scripts see no `knCaptcha` handler;
+  widget's own callback. The matchmaker refuses the first token; the challenge runs again, the second
+  token joins and the game runs. Silent first: no window is ever mapped, and the modal stays hidden at
+  every probe from the first seek through the game socket's `cpt` (answered with no card), so the
+  player sees only the loading state; no callback is armed; the page's own scripts see no `knCaptcha` handler;
   a frame of another origin is refused and its forged token never reaches the matchmaker; the window
   closes after each token; the stub page never sees a token; nothing of the run (WebKit's processes,
   Xvfb) is left. The `native` / `native-paste` runs have no display, so in a webview build they also
   cover GTK failing to start and the fallback;
+- native `native-webview-interactive`: the stub widget calls `before-interactive-callback` first: only
+  then is the window mapped (centred, never moved) and the modal comes up with it; the stub's game
+  server then sends a `cpt` this client cannot answer (SHA-512), and only that failure shows the
+  passive card;
 - web `web`: the page's request for `api.js` is answered over the DevTools protocol (in the test's own
   browser only) by a stub widget that calls back with a fake token; the game runs as before and the
-  `cpt` modal shows "Verified ✓";
+  `cpt` is answered with no card on screen;
 - web `web-domain`: the stub widget answers `110200`; the modal explains it and the pasted token joins.
 
 Every run checks the live order (seek, CaptchaRequired, generate-token, seek with both tokens) and

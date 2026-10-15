@@ -11,14 +11,17 @@
 //              widget refuses (error 110200 and friends), which the modal says, falling back to:
 //      native  with a webview (kn_webview.h, KN_WEBVIEW: WebKitGTK on Linux) the modal opens a window
 //              on a real krunker.io page with Cloudflare's widget, the player solves it there and the
-//              widget's token comes back once; the paths below stay as "Open in your browser
-//              instead" and the paste box, and take over when the window cannot start or load.
+//              widget's token comes back once. The window runs hidden first: the modal stays hidden
+//              while Turnstile passes by itself, and comes up (with the window shown) only when the
+//              player is needed. The paths below stay as "Open in your browser instead" and the paste
+//              box, and take over when the window cannot start or load.
 //              Without one the modal explains, opens krunker.io in the system browser, and
 //              takes the token either pasted by the player (2a) or POSTed by the player's own
 //              userscript on krunker.io to a one-shot 127.0.0.1 callback (2b, krunker_captcha_cb.h).
 //    Tokens are single-use, live ~300 s, are handed to krunker_net once, never logged or stored.
 // 2. The game socket's "cpt": an ALTCHA proof of work that krunker_altcha.c answers itself (computing it
-//    is how that captcha is passed). The modal shows "verifying…" and the result, without input.
+//    is how that captcha is passed). Nothing is shown while it works or when it passes: the player sees
+//    only the loading state. A failure shows the modal's passive card (no input) a moment.
 #include <stddef.h>
 
 // token: the Turnstile response, valid during the call only (copy it); NULL = the player cancelled /
@@ -34,8 +37,8 @@ int krunker_captcha_asking(void);
 // Main thread, once per frame (krunker_net_tick): the callback listener, the challenge window, timeouts.
 void krunker_captcha_tick(void);
 
-// The socket "cpt": the modal in its passive state. begin = "verifying…", end = the result (shown a
-// moment, then hidden). Never blocks the game's pointer.
+// The socket "cpt", solved by this client: begin / end(solved) show nothing (logged only); end(0) shows
+// the modal's passive card saying it failed (a moment, then hidden). Never blocks the game's pointer.
 void krunker_captcha_pow_begin(void);
 void krunker_captcha_pow_end(int solved);
 

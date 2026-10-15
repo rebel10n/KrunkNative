@@ -32,11 +32,13 @@ a foreign Origin, a body that is not a token, an expired listener, then the toke
 token), native "paste" (a bad paste refused in the modal, then a good one), native "webview" (the
 challenge window of kn_webview.h, WebKitGTK on a private Xvfb of the run's own whose top-level windows
 x11_watch.py records: it loads the test's stub krunker.io page, KRUNKNATIVE_KRUNKER_CAPTCHA_URL, whose
-stub `turnstile` widget "is solved" by firing its own callback; it passes by itself, so the challenge
-runs hidden and nothing is ever mapped; the first token is refused by the matchmaker, the challenge runs
-again, the second joins; a frame of another origin tries to post a forged token), native
+stub `turnstile` widget "is solved" by firing its own callback; silent first: it passes by itself, so
+the challenge runs hidden, nothing is ever mapped and the security-challenge modal stays hidden at every
+probe of the run; the first token is refused by the matchmaker, the challenge runs again hidden, the
+second joins; a frame of another origin tries to post a forged token), native
 "webview-interactive" (the stub widget calls before-interactive-callback first: only then is the window
-created, mapped once already centred on the work area, never moved), web "widget" (the stub widget's
+created, mapped once already centred on the work area, never moved, and the modal comes up with it),
+web "widget" (the stub widget's
 token) and web "domain" (110200: the modal says why and falls back to the paste box). Those native
 runs without a display (callback, paste) also cover a webview build falling back. Each
 checks the live client's order: seek-game (no validationToken), CaptchaRequired, generate-token,
@@ -255,6 +257,8 @@ CC_CASES = [  # nonce, ciphertext, expected (payload, hash) or None = no ccr
 ALTCHA_SALT, ALTCHA_NUMBER = "e2e-salt?expires=1999999999", 4321
 ALTCHA = {"algorithm": "SHA-256", "challenge": hashlib.sha256((ALTCHA_SALT + str(ALTCHA_NUMBER)).encode()).hexdigest(),
           "maxnumber": 20000, "salt": ALTCHA_SALT, "signature": "e2esig"}
+# a "cpt" in a form krunker_altcha.c does not compute (not SHA-256): the client says it failed
+ALTCHA_UNSOLVABLE = dict(ALTCHA, algorithm="SHA-512", challenge=hashlib.sha512((ALTCHA_SALT + str(ALTCHA_NUMBER)).encode()).hexdigest())
 
 
 # ---------------------------------------------------------------- the stubs
@@ -277,6 +281,7 @@ class Stub:
         self.used_captchas = set()
         self.bad_version_seeks = []  # dataQuery.v values refused as InvalidVersion
         self.captcha_ok = threading.Event()
+        self.cpt = ALTCHA         # the game socket's "cpt" (ALTCHA_UNSOLVABLE: one this client cannot answer)
         self.loop = None
         self.httpd = None
         # the Find New Game runs (exclude): several lobbies, seeks without a captcha; seek-game answers
@@ -452,7 +457,7 @@ class Stub:
             await send("0", player("sockBOT", BOT_SID, "StubBot", 0.0, 0.0))
             for nonce, ct, _ in CC_CASES:
                 await send("cc", nonce, None, ct)
-            await send("cpt", ALTCHA)
+            await send("cpt", self.cpt)
             tk = asyncio.ensure_future(ticker())
             for _ in range(900):
                 if self.got_en.is_set() or stop.is_set():
@@ -950,7 +955,7 @@ def run_native_paste():
               "1500 clickid knCaptchaToken\n1600 type not a token!\n1700 clickid knCaptchaUse\n1800 text @bad [id=knCaptchaStatus]\n"
               "1900 vis @bad knCaptchaHolder\n1950 clickid knCaptchaToken\n2000 down CTRL+A\n2050 up CTRL+A\n2100 down DELETE\n2150 up DELETE\n"
               "2300 type %s\n2400 clickid knCaptchaUse\n2900 text @again [id=knCaptchaStatus]\n2950 vis @again knCaptchaManual\n"
-              "3000 clickid knCaptchaToken\n3100 type %s\n3200 clickid knCaptchaUse\n3400 vis @used knCaptchaManual knCaptchaCancel\n"
+              "3000 clickid knCaptchaToken\n3100 type %s\n3200 clickid knCaptchaUse\n3400 vis @used knCaptchaManual knCaptchaCancel knCaptchaHolder\n"
               "3500 text @box [id=knCaptchaToken]\n3800 play\n8000 players\n8200 quit\n"
               % (os.path.join(WORK, "native-modal"), BURNT_TOKEN, PASTE_TOKEN))
     stub, p, out, log = launch_native(label, script, {})
@@ -963,8 +968,8 @@ def run_native_paste():
     again = re.search(r"\[input_script\] text t=\d+ @again n=1 checked=0 value= text=(.*)", text)
     check(f"{label}: a refused token brings the modal back, saying so", again and "refused that token" in again.group(1) and
           "@again knCaptchaManual=1" in text and "attempt 2, the last token was refused" in text, again.group(1) if again else None)
-    # (the "cpt" proof-of-work state may already show the passive modal: the request's parts are gone)
-    check(f"{label}: the good paste closes the modal", "@used knCaptchaManual=0 knCaptchaCancel=0" in text)
+    # (the game socket's "cpt" is answered with nothing on screen: the whole holder is gone)
+    check(f"{label}: the good paste closes the modal", "@used knCaptchaManual=0 knCaptchaCancel=0 knCaptchaHolder=0" in text)
     box = re.search(r"\[input_script\] text t=\d+ @box n=1 checked=0 value=(\S*) ", text)
     check(f"{label}: the paste box is emptied", box is not None and box.group(1) == "", box.group(0) if box else None)
     check(f"{label}: the bad paste never reached the matchmaker", not any("not a token" in r for _, _, r in stub.http_log))
@@ -1379,7 +1384,7 @@ def session_alive(pgid):
 XVFB_W, XVFB_H = 1280, 800
 
 
-def webview_session(label, script, page, used_first):
+def webview_session(label, script, page, used_first, stub_setup=None):
     """client_bin (headless game) with the challenge window on a private Xvfb whose top-level windows a
     watcher records (x11_watch.py: no window manager, so a window maps where the client put it)."""
     xvfb = PrivateXvfb("%dx%dx24" % (XVFB_W, XVFB_H))
@@ -1387,7 +1392,7 @@ def webview_session(label, script, page, used_first):
     url = "http://127.0.0.1:%d/robots.txt" % page.port
     p = None
     try:
-        stub, p, out, log = launch_native(label, script, {"KRUNKNATIVE_KRUNKER_CAPTCHA_URL": url}, display=xvfb.display)
+        stub, p, out, log = launch_native(label, script, {"KRUNKNATIVE_KRUNKER_CAPTCHA_URL": url}, display=xvfb.display, stub_setup=stub_setup)
         if used_first:
             stub.used_captchas.add(webview_token(1))  # the matchmaker refuses the first one (used / expired)
         lines = finish_native(label, stub, p, out, log, timeout=180)
@@ -1414,8 +1419,14 @@ def run_native_webview():
     (page_port,) = kn_proto.free_ports(1)
     page = ChallengePage(page_port)
     page.start()
-    script = ("0 boot\n1200 vis @modal knCaptchaHolder knCaptchaSolve knCaptchaManual knCaptchaOpen knCaptchaCbRow\n"
-              "16000 play\n21000 players\n21200 quit\n")
+    # the modal's probes from the first seek until the game is in: both attempts of the matchmaker's
+    # challenge (the stub solves each 1.5 s after it renders, the second starts after the first token is
+    # refused), the join, then the game socket's own ALTCHA "cpt", which the client answers itself: it
+    # shows no card either (the player sees only the loading state). Every 400 ms: a card would stay
+    # longer than that.
+    probe_t = list(range(800, 15601, 400))
+    probes = "".join("%d vis @silent knCaptchaHolder knCaptchaSolve knCaptchaManual knCaptchaCancel\n" % t for t in probe_t)
+    script = "0 boot\n" + probes + "16000 play\n21000 players\n21200 quit\n"
     stub, lines, log, left, maps, moves = webview_session(label, script, page, True)
     text = "\n".join(lines)
     check(f"{label}: the challenge passed by itself: no window was ever mapped on the display", not maps,
@@ -1424,15 +1435,22 @@ def run_native_webview():
           text.count("[webview] challenge running hidden") == 2 and "[webview] challenge window shown" not in text and
           text.count("[webview] challenge window closed (it was never shown)") == 2,
           [l for l in lines if "[webview]" in l][:12])
+    silent = re.findall(r"\[input_script\] vis t=\d+ @silent (.*)", text)
+    check(f"{label}: silent first: the security-challenge modal stayed hidden at every probe (no modal, no popup)",
+          len(silent) == len(probe_t) and not any(re.search(r"knCaptchaHolder=1|knCaptchaSolve=1|knCaptchaManual=1", s) for s in silent),
+          [s for s in silent if "=1" in s][:4] or len(silent))
+    probe_lines = [i for i, l in enumerate(lines) if "@silent " in l and "[input_script] vis" in l]
+    pow_ok = [i for i, l in enumerate(lines) if "[krunker] captcha: the game server's proof of work passed (nothing shown)" in l]
+    check(f"{label}: the game socket's \"cpt\" was answered inside the probed window, with no card",
+          pow_ok and probe_lines and pow_ok[0] < probe_lines[-1] and "security challenge answered" in text and
+          "proof of work failed" not in text, [l for l in lines if "proof of work" in l][:4])
+    check(f"{label}: the modal was never asked to come up (no 'window is up' prompt)",
+          "[krunker] captcha: the challenge window is up" not in text)
     vis = [q.get("visibility") for q in page.probes if q.get("render")]
     check(f"{label}: hidden, the page still runs as a visible one (Turnstile is not throttled)", vis and all(v == "visible" for v in vis), vis)
     client_text = "\n".join(l for l in lines if "[input_script] type" not in l)
     check(f"{label}: WebKitGTK came up on the run's own X display", "[webview] WebKitGTK " in text,
           next((l for l in lines if "[webview]" in l), log.path))
-    vis = re.search(r"\[input_script\] vis t=\d+ @modal (.*)", text)
-    check(f"{label}: the webview is the only path on screen: \"Solve the challenge\", no paste box / userscript / open-site",
-          vis and all(f"{k}=1" in vis.group(1) for k in ("knCaptchaHolder", "knCaptchaSolve")) and
-          all(f"{k}=0" in vis.group(1) for k in ("knCaptchaManual", "knCaptchaOpen", "knCaptchaCbRow")), vis.group(1) if vis else None)
     check(f"{label}: the window loaded the challenge page twice (once per attempt), as WebKit",
           len(page.loads) == 2 and all("AppleWebKit" in ua for ua in page.loads), page.loads)
     renders = [q for q in page.probes if q.get("render")]
@@ -1451,7 +1469,7 @@ def run_native_webview():
     check(f"{label}: a token per attempt, solved in the window, then the window closed",
           text.count("[krunker] captcha: solved in the challenge window") == 2 and text.count("[webview] challenge window closed") >= 2,
           [l for l in lines if "[webview]" in l or "captcha:" in l][:16])
-    check(f"{label}: the refused token brought the window back (attempt 2)", "attempt 2, the last token was refused" in text)
+    check(f"{label}: the refused token started a second silent run (attempt 2), not a popup", "attempt 2, the last token was refused" in text)
     check(f"{label}: the challenge page never saw a token", not any("e2eWebviewToken" in pth or "e2eForged" in pth for pth in page.paths))
     check_matchmaker(label, stub, [webview_token(1), webview_token(2)], client_text)
     check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
@@ -1466,8 +1484,15 @@ def run_native_webview_interactive():
     (page_port,) = kn_proto.free_ports(1)
     page = ChallengePage(page_port, interactive=True)
     page.start()
-    script = "0 boot\n10000 play\n15000 players\n15200 quit\n"
-    stub, lines, log, left, maps, moves = webview_session(label, script, page, False)
+    # the stub's game server sends a "cpt" this client cannot answer: only that failure shows the
+    # modal's passive card (a solved one shows nothing: native-webview)
+    probes = "".join("%d vis @pow knCaptchaHolder knCaptchaSolve knCaptchaCancel\n%d text @powst [id=knCaptchaStatus]\n" % (t, t + 50)
+                     for t in range(1000, 9801, 400))
+    script = "0 boot\n" + probes + "10000 play\n15000 players\n15200 quit\n"
+
+    def unsolvable(stub):
+        stub.cpt = ALTCHA_UNSOLVABLE
+    stub, lines, log, left, maps, moves = webview_session(label, script, page, False, stub_setup=unsolvable)
     text = "\n".join(lines)
     wins = [m for m in maps if "krunker.io" in m["name"]]
     check(f"{label}: one window, the challenge's, was mapped", len(maps) == 1 and len(wins) == 1,
@@ -1482,10 +1507,31 @@ def run_native_webview_interactive():
           "[webview] challenge running hidden" in text and
           "[webview] challenge window shown (Turnstile needs the player) at %d,%d %dx%d" % want in text,
           [l for l in lines if "[webview]" in l][:12])
+    up = [i for i, l in enumerate(lines) if "[krunker] captcha: the challenge window is up: the player solves it" in l]
+    solved = [i for i, l in enumerate(lines) if "[krunker] captcha: solved in the challenge window" in l]
+    check(f"{label}: the modal came up with the window, once, before the token (the player's turn)",
+          len(up) == 1 and solved and up[0] < solved[0], [l for l in lines if "captcha:" in l][:8])
     check(f"{label}: the token joins (one attempt), the window closes",
           text.count("[krunker] captcha: solved in the challenge window") == 1 and "[webview] challenge window closed\n" in text + "\n",
           [l for l in lines if "[webview]" in l or "captcha:" in l][:12])
     check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+    fail_i = [i for i, l in enumerate(lines) if "[krunker] captcha: the game server's proof of work failed: the card says so" in l]
+    check(f"{label}: a \"cpt\" this client cannot answer is said, after the token (not before it)",
+          len(fail_i) == 1 and solved and fail_i[0] > solved[0] and "proof of work passed" not in text, [l for l in lines if "proof of work" in l][:4])
+    # each @pow vis line is followed by its @powst text line: the card is the holder shown with the
+    # failure line and no Solve / Cancel
+    pairs, last_vis = [], None
+    for l in lines:
+        m = re.search(r"\[input_script\] vis t=\d+ @pow (.*)", l)
+        if m:
+            last_vis = m.group(1)
+        m = re.search(r"\[input_script\] text t=\d+ @powst n=\d+ checked=\d+ value=\S* text=(.*)", l)
+        if m and last_vis is not None:
+            pairs.append((last_vis, m.group(1)))
+            last_vis = None
+    card = [v for v, st in pairs if "knCaptchaHolder=1" in v and "could not answer it" in st]
+    check(f"{label}: the failed \"cpt\" shows the passive card (no Solve, no Cancel) while it is said",
+          card and all("knCaptchaSolve=0" in v and "knCaptchaCancel=0" in v for v in card), pairs[-6:])
     check(f"{label}: nothing of the run is left (client_bin, WebKit's processes)", not left)
 
 
@@ -1658,7 +1704,7 @@ def run_web(mode):
         else:
             check(f"{label}: the stub widget rendered inside the modal", bool(seen_modal) and seen_modal.get("widget"), seen_modal)
             # CLICK TO PLAY once the map is in (menu_ui.c needs a trusted click), until the client's "en";
-            # meanwhile the "cpt" proof-of-work modal is watched (passive, "Verifying…" then the result)
+            # meanwhile the passive "cpt" card is watched for: solved by the client, it must never show
             end = time.time() + 150
             while time.time() < end and not stub.got_en.is_set():
                 time.sleep(0.3)
@@ -1719,7 +1765,8 @@ def run_web(mode):
     if mode != "ok":
         check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text or stub.ws_paths, stub.ws_paths)
         return
-    check("web: the \"cpt\" modal showed the proof of work and its result", any(s_ and s_.startswith("Verif") for s_ in statuses), statuses)
+    check("web: the \"cpt\" was answered with no card on screen (the player sees only the loading state)",
+          not statuses and "security challenge answered" in text and "proof of work failed" not in text, statuses)
     check_run("web", stub, lines, True)
     k = [l for l in lines if "[krunker] <= k " in l]
     check("web: the stub player's \"k\" updates arrived", len(k) >= 5, len(k))

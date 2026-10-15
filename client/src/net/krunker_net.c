@@ -99,7 +99,7 @@ static struct {
     int notice_popup; // the pending notice is an error (v10's error popup), else an info toast
     KrunkerAltcha altcha; // web: the "cpt" being solved in slices
     int altcha_pending;
-    int pow_shown;           // the "cpt" modal shows "verifying…" (krunker_captcha_pow_begin)
+    int pow_shown;           // web: krunker_captcha_pow_begin was told of the "cpt" being solved
     volatile int pow_result; // native: the socket thread's "cpt" outcome for the modal (1 solved, 2 not)
     // the matchmaker's Turnstile (game.deob.js seek, :147445-147467): prompts so far this join (the live
     // client gives up after 2), the player's token until the retry's seek-game takes it (then wiped),
@@ -1300,7 +1300,7 @@ void krunker_net_tick(Client *client) {
         K.pow_result = 0;
         krunker_captcha_pow_end(solved);
     }
-    if (K.altcha_pending && !K.pow_shown) { // web: "verifying…" while the slices run
+    if (K.altcha_pending && !K.pow_shown) { // web: the slices start (nothing is shown unless it fails)
         K.pow_shown = 1;
         krunker_captcha_pow_begin();
     }
@@ -1331,7 +1331,7 @@ void krunker_net_tick(Client *client) {
     pthread_mutex_unlock(&K.lock);
     if (captcha) {
         // a "cpt" this client cannot answer (not SHA-256 ALTCHA, or too big): the Security Challenge
-        // modal shows it failed, the toast says what (the session goes on until the server decides)
+        // modal's passive card shows it failed, the toast says what (the session goes on until the server decides)
         krunker_captcha_pow_end(0);
     }
     if (popup) { // an error the player stays in the game past: v10's error popup (it escapes the text)
