@@ -17,10 +17,22 @@
  * 401 {"error":"SignInRequired","message":"Sign in to use AI"}. Signed-in accounts get a
  * generous per-account budget (ai.limit.*; 429 {"error":"RateLimited"} beyond it).
  *
- * Config (all overridable with KN_AI_* env vars, e.g. KN_AI_UPSTREAM_KEY):
+ * Upstreams are named provider profiles (ai_provider.h). Each consumer routes to one:
+ *   ai.editor.provider      the editor's chat (the /ai/ routes) default "default"
+ *   ai.banter.provider      bot chat lines (bot-banter)         default "default"
+ *   ai.moderation.provider  avatar review (ai_moderate_image)    default "default"
+ *   ai.providers.<name>.url / .key      "https://host/v1" and the Bearer key (never logged, never in
+ *                           an answer or a dump); KN_AI_<NAME>_URL / KN_AI_<NAME>_KEY override them
+ *   ai.providers.<name>.model           the profile's model ("" = the consumer's choice; the editor's
+ *                           default model when set, else ai.default_model)
+ *   ai.providers.<name>.rpm             requests per minute over the profile's consumers (0 = none)
+ *   ai.providers.<name>.daily_budget_tokens  prompt + completion tokens per UTC day (0 = none)
+ *   "default" is the legacy upstream: ai.upstream_url / ai.upstream_key, KN_AI_UPSTREAM_URL /
+ *   KN_AI_UPSTREAM_KEY (KN_AI_DEFAULT_URL / _KEY and ai.providers.default.* take precedence). A
+ *   config with only those keeps working. Counters: /ai/status "providers" and "consumers".
  *   ai.enabled              (bool, default 1)   off = 503 {"error":"AIUnavailable"}
- *   ai.upstream_url         KN_AI_UPSTREAM_URL  OpenAI-compatible base (".../v1")
- *   ai.upstream_key         KN_AI_UPSTREAM_KEY  Bearer key (never logged, never sent to a client)
+ *   ai.upstream_url         KN_AI_UPSTREAM_URL  the "default" profile's OpenAI-compatible base (".../v1")
+ *   ai.upstream_key         KN_AI_UPSTREAM_KEY  the "default" profile's Bearer key (never logged, never sent to a client)
  *   ai.api                  "chat" (default) | "responses"
  *   ai.default_model        (default glm-5.3-flash)
  *   ai.models_hide          ids left out of /ai/models (list)
@@ -41,6 +53,7 @@
 #define KN_BRAIN_AI_H
 
 #include "brain.h"
+#include "ai_provider.h"
 
 int ai_init(Brain *b);
 void ai_shutdown(Brain *b);

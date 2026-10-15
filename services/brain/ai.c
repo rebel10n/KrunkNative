@@ -45,8 +45,7 @@
 
 static struct {
     int enabled;
-    char url[512];         /* base, no trailing '/' */
-    char *key;             /* never logged */
+    const AiProvider *ed;  /* the editor's provider profile (ai_provider.h); NULL = editor off */
     AiApi api;
     char default_model[96];
     int max_tokens, timeout_ms, connect_timeout_ms, max_messages, max_rounds;
@@ -62,7 +61,8 @@ static struct {
 static Brain *g_b;
 static const AiServerTools *g_server_tools;
 
-int ai_configured(void) { return C.enabled && C.url[0] && C.key && C.key[0]; }
+/* the editor's profile is configured (ai_provider_get returns only configured profiles) */
+int ai_configured(void) { return C.enabled && C.ed != NULL; }
 
 void ai_register_server_tools(const AiServerTools *t) { g_server_tools = t; }
 
@@ -77,6 +77,7 @@ typedef void (*UpDoneFn)(Up *u);                               /* loop thread; o
 struct Up {
     char url[1024];
     char method[8];
+    char *key;             /* the profile's bearer key, a copy (zeroed when the transfer is freed) */
     char *body;
     int timeout_ms;
     int sse;               /* Accept: text/event-stream */
@@ -115,6 +116,10 @@ static void up_track(Up *u, const int add) {
 static void up_free(Up *u) {
     if (!u) return;
     up_track(u, 0);
+    if (u->key) {
+        memset(u->key, 0, strlen(u->key));
+        free(u->key);
+    }
     free(u->body);
     ai_buf_free(&u->pending);
     pthread_mutex_destroy(&u->mu);
@@ -189,7 +194,7 @@ static void *up_thread(void *arg) {
     } else {
         struct curl_slist *h = NULL;
         char auth[1200];
-        snprintf(auth, sizeof(auth), "Authorization: Bearer %s", C.key ? C.key : "");
+        snprintf(auth, sizeof(auth), "Authorization: Bearer %s", u->key ? u->key : "");
         h = curl_slist_append(h, auth);
         memset(auth, 0, sizeof(auth));
         h = curl_slist_append(h, u->sse ? "Accept: text/event-stream" : "Accept: application/json");
@@ -236,15 +241,22 @@ static void *up_thread(void *arg) {
     return NULL;
 }
 
-/* path is appended to C.url ("/models", "/chat/completions"). body taken over (NULL = GET). */
-static Up *up_start(const char *path, char *body, const int sse, const int timeout_ms, UpChunkFn on_chunk, UpDoneFn on_done, void *ud) {
+/* path is appended to the profile's url ("/models", "/chat/completions"); the key is copied in.
+ * body taken over (NULL = GET). */
+static Up *up_start(const AiProvider *p, const char *path, char *body, const int sse, const int timeout_ms, UpChunkFn on_chunk, UpDoneFn on_done, void *ud) {
     Up *u = calloc(1, sizeof(*u));
     if (!u) {
         free(body);
         return NULL;
     }
+    u->key = strdup(p->key ? p->key : "");
+    if (!u->key) {
+        free(body);
+        free(u);
+        return NULL;
+    }
     pthread_mutex_init(&u->mu, NULL);
-    snprintf(u->url, sizeof(u->url), "%s%s", C.url, path);
+    snprintf(u->url, sizeof(u->url), "%s%s", p->url, path);
     copy_str(u->method, sizeof(u->method), body ? "POST" : "GET");
     u->body = body;
     u->sse = sse;
@@ -475,7 +487,7 @@ static void probe_start(const char *model) {
     cJSON_AddItemToArray(msgs, m);
     char *body = ai_request_body(C.api, model, msgs, NULL, NULL, 0, 512);
     cJSON_Delete(msgs);
-    H.running = up_start(ai_api_path(C.api), body, 0, 60000, probe_chunk, probe_done, NULL) != NULL;
+    H.running = up_start(C.ed, ai_api_path(C.api), body, 0, 60000, probe_chunk, probe_done, NULL) != NULL;
     if (!H.running) H.probing[0] = 0;
 }
 
@@ -670,7 +682,7 @@ static int models_fresh(void) {
 
 static void models_fetch(void) {
     if (M.fetching || !ai_configured()) return;
-    M.fetching = up_start("/models", NULL, 0, 30000, models_chunk, models_done, NULL) != NULL;
+    M.fetching = up_start(C.ed, "/models", NULL, 0, 30000, models_chunk, models_done, NULL) != NULL;
 }
 
 static void h_models(kn_http_req *req, void *ud) {
@@ -712,6 +724,7 @@ static void h_status(kn_http_req *req, void *ud) {
     cJSON_AddStringToObject(o, "default", effective_default());
     cJSON_AddStringToObject(o, "preferred", C.default_model);
     cJSON_AddItemToObject(o, "server_tools", server_tool_names());
+    ai_provider_status_add(o); /* profiles and consumers: counters and limits, never a key */
     reply_cors_json(req, 200, o);
     cJSON_Delete(o);
 }
@@ -832,6 +845,7 @@ typedef struct Chat {
     cJSON *tool_results;   /* results of the round's server tools, in call order */
     uint64_t t0;
     int finished;
+    int counted;           /* ai_provider_begin ran: the editor's profile counts this chat's tokens */
 } Chat;
 
 static void chat_free(Chat *c) {
@@ -876,6 +890,7 @@ static void chat_end(Chat *c, const char *code, const char *message) {
     if (c->finished) return;
     c->finished = 1;
     if (c->lim) c->lim->tokens += c->prompt_tokens + c->completion_tokens;
+    if (c->counted) ai_provider_charge(C.ed, "editor", c->prompt_tokens + c->completion_tokens);
     const double secs = (double) (kn_now_ms() - c->t0) / 1000.0;
     const cJSON *row = model_row(c->model);
     const double cost = ai_usage_cost(row, c->prompt_tokens, c->completion_tokens);
@@ -1151,7 +1166,7 @@ static void chat_round(Chat *c) {
         chat_send(c, ai_sse_event("kn.round", ev));
         cJSON_Delete(ev);
     }
-    c->up = up_start(ai_api_path(C.api), body, 1, C.timeout_ms, chat_chunk, chat_up_done, c);
+    c->up = up_start(C.ed, ai_api_path(C.api), body, 1, C.timeout_ms, chat_chunk, chat_up_done, c);
     if (!c->up) chat_end(c, "Internal", "cannot start the upstream request");
 }
 
@@ -1254,7 +1269,8 @@ static void chat_start(Chat *c) {
         chat_free(c);
         return;
     }
-    if (lim_admit(c->lim, lm, sizeof(lm), &retry)) {
+    /* the editor's provider profile (rpm, daily token budget over every consumer of it), then the account */
+    if (ai_provider_check(C.ed, lm, sizeof(lm), &retry) || lim_admit(c->lim, lm, sizeof(lm), &retry)) {
         Lim *l = c->lim;
         c->lim = NULL; /* not admitted: nothing to release */
         cJSON *o = cJSON_CreateObject();
@@ -1271,6 +1287,8 @@ static void chat_start(Chat *c) {
         chat_free(c);
         return;
     }
+    ai_provider_begin(C.ed, "editor");
+    c->counted = 1;
     c->t0 = kn_now_ms();
     if (c->stream) {
         brain_cors_headers(c->req);
@@ -1371,6 +1389,7 @@ typedef struct {
     AiBanterDoneFn done;
     void *ud;
     AiBuf raw;
+    const AiProvider *prov; /* the banter profile (ai_provider_get("banter")) */
     char model[96];
     char name[40];
 } Banter;
@@ -1440,6 +1459,7 @@ static void banter_done(Up *u) {
             ai_stream_feed(&s, bn->raw.data ? bn->raw.data : "", bn->raw.len);
             ai_stream_finish(&s);
         } else ai_parse_response(&s, bn->raw.data ? bn->raw.data : "", bn->raw.len);
+        if (s.has_usage) ai_provider_charge(bn->prov, "banter", s.prompt_tokens + s.completion_tokens);
         if (s.error[0]) snprintf(err, sizeof(err), "%.190s", s.error);
         else {
             banter_clean(s.text.data, bn->name, text, sizeof(text));
@@ -1459,7 +1479,9 @@ static void banter_done(Up *u) {
 
 void ai_bot_banter(Brain *b, const cJSON *frame, AiBanterDoneFn done, void *ud) {
     (void) b;
-    if (!C.enabled || !ai_configured() || !C.banter_enabled) {
+    /* the banter profile is its own: the editor may be off while bot chat runs */
+    const AiProvider *bp = ai_provider_get("banter");
+    if (!C.enabled || !bp || !C.banter_enabled) {
         done(ud, "AI unavailable", NULL);
         return;
     }
@@ -1468,7 +1490,9 @@ void ai_bot_banter(Brain *b, const cJSON *frame, AiBanterDoneFn done, void *ud) 
         BN.window_start = now;
         BN.window_count = 0;
     }
-    if (BN.window_count >= C.banter_rpm || BN.live >= AI_BANTER_LIVE_MAX) {
+    char pmsg[200];
+    int pretry = 0;
+    if (BN.window_count >= C.banter_rpm || BN.live >= AI_BANTER_LIVE_MAX || ai_provider_check(bp, pmsg, sizeof(pmsg), &pretry)) {
         done(ud, "rate limited", NULL);
         return;
     }
@@ -1505,8 +1529,10 @@ void ai_bot_banter(Brain *b, const cJSON *frame, AiBanterDoneFn done, void *ud) 
     cJSON_AddStringToObject(m, "role", "user");
     cJSON_AddStringToObject(m, "content", user);
     cJSON_AddItemToArray(msgs, m);
-    const char *model = effective_default();
-    const cJSON *row = model_row(model);
+    /* the banter profile's model; the editor's effective default when it is the same profile,
+     * else the preferred model the editor is configured with */
+    const char *model = bp->model[0] ? bp->model : bp == C.ed ? effective_default() : C.default_model;
+    const cJSON *row = bp == C.ed ? model_row(model) : NULL;
     const char *effort = row && cJSON_GetArraySize(cJSON_GetObjectItem(row, "efforts")) > 0 ? "low" : NULL;
     char *body = ai_request_body(C.api, model, msgs, NULL, effort, 0, C.banter_max_tokens);
     cJSON_Delete(msgs);
@@ -1519,13 +1545,15 @@ void ai_bot_banter(Brain *b, const cJSON *frame, AiBanterDoneFn done, void *ud) 
     }
     bn->done = done;
     bn->ud = ud;
+    bn->prov = bp;
     copy_str(bn->model, sizeof(bn->model), model);
     copy_str(bn->name, sizeof(bn->name), name);
-    if (!up_start(ai_api_path(C.api), body, 0, C.banter_timeout_ms, banter_chunk, banter_done, bn)) {
+    if (!up_start(bp, ai_api_path(C.api), body, 0, C.banter_timeout_ms, banter_chunk, banter_done, bn)) {
         free(bn);
         done(ud, "cannot start the upstream request", NULL);
         return;
     }
+    ai_provider_begin(bp, "banter");
     BN.live++;
     BN.window_count++;
 }
@@ -1534,15 +1562,12 @@ void ai_bot_banter(Brain *b, const cJSON *frame, AiBanterDoneFn done, void *ud) 
 
 static void config_load(const struct kn_config *cfg) {
     C.enabled = kn_config_bool(cfg, "ai.enabled", 1);
-    const char *url = kn_config_str(cfg, "ai.upstream_url", "");
-    copy_str(C.url, sizeof(C.url), url);
-    size_t n = strlen(C.url);
-    while (n && C.url[n - 1] == '/') C.url[--n] = 0;
-    free(C.key);
-    const char *key = kn_config_str(cfg, "ai.upstream_key", "");
-    C.key = key && key[0] ? strdup(key) : NULL;
+    /* the editor's upstream: ai.editor.provider -> a named profile (ai_provider.h; default "default") */
+    C.ed = ai_provider_get("editor");
     C.api = ai_api_parse(kn_config_str(cfg, "ai.api", "chat"), AI_API_CHAT);
-    copy_str(C.default_model, sizeof(C.default_model), kn_config_str(cfg, "ai.default_model", "glm-5.3-flash"));
+    /* a profile's own model wins over ai.default_model */
+    copy_str(C.default_model, sizeof(C.default_model),
+             C.ed && C.ed->model[0] ? C.ed->model : kn_config_str(cfg, "ai.default_model", "glm-5.3-flash"));
     C.max_tokens = (int) kn_config_int(cfg, "ai.max_tokens", 4096);
     C.timeout_ms = (int) kn_config_int(cfg, "ai.timeout_ms", 300000);
     C.connect_timeout_ms = (int) kn_config_int(cfg, "ai.connect_timeout_ms", 10000);
@@ -1588,6 +1613,7 @@ static void route2(Brain *b, const char *method, const char *path, kn_http_handl
 
 int ai_init(Brain *b) {
     g_b = b;
+    ai_provider_load(b->cfg);
     config_load(b->cfg);
 #ifdef KN_HAVE_CURL
     curl_global_init(CURL_GLOBAL_DEFAULT);
@@ -1600,14 +1626,14 @@ int ai_init(Brain *b) {
         return 0;
     }
     if (!ai_configured()) {
-        KN_INFO(MOD, "AI proxy unconfigured: set KN_AI_UPSTREAM_URL and KN_AI_UPSTREAM_KEY (routes answer 503)");
+        KN_INFO(MOD, "AI proxy unconfigured: the editor's provider (ai.editor.provider) has no url or key: set KN_AI_UPSTREAM_URL and KN_AI_UPSTREAM_KEY, or a named profile (ai.providers.<name>, KN_AI_<NAME>_URL / _KEY); routes answer 503");
         return 0;
     }
 #ifndef KN_HAVE_CURL
     KN_WARN(MOD, "built without libcurl: only plain http:// upstreams would work, and none do (no TLS)");
 #endif
-    KN_INFO(MOD, "AI proxy on: %s (%s api), default model %s, limits %d/min %d/day %lld tokens/day, %d concurrent", C.url,
-            ai_api_name(C.api), C.default_model, C.lim_rpm, C.lim_daily, (long long) C.lim_daily_tokens, C.lim_concurrent);
+    KN_INFO(MOD, "AI proxy on: editor provider %s (%s api), default model %s, limits %d/min %d/day %lld tokens/day, %d concurrent",
+            C.ed->name, ai_api_name(C.api), C.default_model, C.lim_rpm, C.lim_daily, (long long) C.lim_daily_tokens, C.lim_concurrent);
     srand((unsigned) (kn_wall_ms() ^ (int64_t) getpid()));
     H.state = AI_HEALTH_UNKNOWN;
     copy_str(H.model, sizeof(H.model), C.default_model);
@@ -1639,7 +1665,6 @@ void ai_shutdown(Brain *b) {
     free(g_lims);
     g_lims = NULL;
     g_nlims = g_caplims = 0;
-    if (C.key) memset(C.key, 0, strlen(C.key));
-    free(C.key);
-    C.key = NULL;
+    C.ed = NULL;
+    ai_provider_shutdown();
 }

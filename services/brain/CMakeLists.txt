@@ -83,6 +83,7 @@ set(KN_BRAIN_SOURCES
     hot.c
     # editor-ai: the map editor's AI proxy (/ai/models, /ai/chat, health probe, server tools)
     ai.c
+    ai_provider.c                   # named AI provider profiles: ai.<consumer>.provider routing, keys, limits
     ai_search.c                     # web search: a DuckDuckGo MCP server as a stdio child
     # v10 Live Streams: GET /streams/top from Twitch Helix (streams.c; streams_norm.c is pure)
     streams.c
@@ -112,6 +113,14 @@ if (TARGET knsvc_redis)
     target_link_libraries(kn_brain PRIVATE knsvc_redis)
     target_compile_definitions(kn_brain PRIVATE KN_HAVE_REDIS=1)
 endif ()
+
+# editor-ai: named AI provider profiles (ai_provider.c): three profiles and three consumers, the legacy
+# single key, env precedence, routing failures, limits, redaction of every dump (pure, no DB).
+add_executable(kn_brain_ai_provider_test tests/test_ai_provider.c ai_provider.c)
+target_include_directories(kn_brain_ai_provider_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(kn_brain_ai_provider_test PRIVATE knsvc)
+add_test(NAME brain_ai_provider COMMAND kn_brain_ai_provider_test)
+set_tests_properties(brain_ai_provider PROPERTIES LABELS "knsvc;brain;ai")
 
 # Registry unit test (pure, no DB).
 add_executable(kn_brain_registry_test tests/test_registry.c registry.c ${CMAKE_SOURCE_DIR}/shared/src/server_names.c)
@@ -276,6 +285,11 @@ if (Python3_FOUND)
     add_test(NAME brain_ai_web_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/ai_web_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_ai_web_e2e PROPERTIES TIMEOUT 480 SKIP_RETURN_CODE 77 LABELS "brain;db;ai;e2e;web")
+    # editor-ai: named provider profiles on kn_brain (ai_provider.c): three stub upstreams with their own keys,
+    # the editor routed to its profile, the others see nothing; counters and status (never a key)
+    add_test(NAME brain_ai_providers_e2e
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/ai_providers_e2e.py $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_ai_providers_e2e PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "brain;db;ai;e2e")
     # email-verify: verification mails through a fake SMTP server, links, rate limits, gates, 2FA lock
     add_test(NAME brain_account_security
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/account_security_test.py

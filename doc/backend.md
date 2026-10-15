@@ -141,6 +141,82 @@ All keys are optional; env `KN_BRAIN_<KEY>` / CLI `--brain.<key>=` override.
 | `brain.ranked.*`, `brain.turf.*` | see 6.5 | v10 ranked queue / profiles and Turf Wars (doc/v10/ranked-impl.md) |
 | `brain.community.feed` | `config/community.json` | the community feed file (6.6), relative to the config root; reread when it changes |
 
+### AI providers (`ai_provider.c`, `ai.h`)
+
+The brain's AI consumers each use one named **provider profile**: an OpenAI-compatible endpoint
+with its own key. A profile is `ai.providers.<name>`; each consumer picks one with
+`ai.<consumer>.provider` (default `"default"`):
+
+| consumer | routing key | what it does |
+|---|---|---|
+| editor | `ai.editor.provider` | the map editor's chat (`/ai/*`), its model list and health probe |
+| banter | `ai.banter.provider` | bot chat lines for game servers (`bot-banter`) |
+| moderation | `ai.moderation.provider` | avatar review (`ai_moderate_image`, once the avatar upload lands) |
+
+| key | env form | meaning |
+|---|---|---|
+| `ai.providers.<name>.url` | `KN_AI_<NAME>_URL` | base ending in `/v1` (`http://` or `https://`), no trailing slash |
+| `ai.providers.<name>.key` | `KN_AI_<NAME>_KEY` | Bearer key; never logged, never in an answer, masked in a config dump |
+| `ai.providers.<name>.model` | | the profile's model; `""` = the consumer's choice (banter: the editor's effective default when it is the same profile, else the editor's preferred model: `ai.providers.editor.model`, or `ai.default_model`) |
+| `ai.providers.<name>.rpm` | | requests per minute over every consumer of the profile (0 = none) |
+| `ai.providers.<name>.daily_budget_tokens` | | prompt + completion tokens per UTC day over every consumer of the profile (0 = none) |
+
+`<NAME>` is the profile name upper-cased (`a-z`, `0-9`, up to 15 characters, not `upstream`).
+Precedence per field: env `KN_AI_<NAME>_*` > the file (`ai.providers.<name>.*`, or
+`KN_AI_PROVIDERS_<NAME>_*`). A profile can exist from its env alone. `ai.<consumer>.provider`
+also reads its env form (`KN_AI_EDITOR_PROVIDER`, `KN_AI_BANTER_PROVIDER`, `KN_AI_MODERATION_PROVIDER`).
+A consumer routed to a missing or unconfigured profile is off (the editor's routes answer 503,
+bot chat says "AI unavailable"); the log says which one.
+
+**The legacy single key keeps working.** `ai.upstream_url` / `ai.upstream_key` (env
+`KN_AI_UPSTREAM_URL` / `KN_AI_UPSTREAM_KEY`) are the `default` profile. With nothing else set, all
+three consumers use it, as before. `KN_AI_DEFAULT_URL` / `KN_AI_DEFAULT_KEY` and
+`ai.providers.default.*` take precedence over them.
+
+Worked example, three keys (the keys go in the environment, `~/.config/kn-secrets/ai.env` locally,
+`/etc/krunknative/ai.env` on a server; the file holds the routing and the limits):
+
+```sh
+# ~/.config/kn-secrets/ai.env
+KN_AI_EDITOR_KEY=sk-...editor...
+KN_AI_VISION_KEY=sk-...moderation...
+KN_AI_BANTER_KEY=sk-...banter...
+```
+
+```json
+{
+  "ai": {
+    "providers": {
+      "editor": {"url": "https://chat.example.com/v1", "model": "glm-5.3-flash",
+                 "rpm": 60, "daily_budget_tokens": 20000000},
+      "vision": {"url": "https://vision.example.com/v1", "model": "gemini-3.8-flash-high", "rpm": 30},
+      "banter": {"url": "https://chat.example.com/v1", "model": "glm-5.3-flash",
+                 "rpm": 120, "daily_budget_tokens": 2000000}
+    },
+    "editor": {"provider": "editor"},
+    "banter": {"provider": "banter"},
+    "moderation": {"provider": "vision"}
+  }
+}
+```
+
+Each consumer now talks to its own key, and each key has its own limits; the editor and the banter
+profile here are on the same host with separate keys, so one can be rotated or capped without the
+other. `GET /ai/status` shows the counters per profile (`providers`: requests in the last minute,
+requests and tokens today) and per consumer (`consumers`), never a key or a URL.
+
+Single key, the same as before this change (no `providers`, no routing):
+
+```sh
+# ~/.config/kn-secrets/ai.env
+KN_AI_UPSTREAM_URL=https://chat.example.com/v1
+KN_AI_UPSTREAM_KEY=sk-...
+```
+
+Secrets: keep keys in `key` fields or the env, never inside a URL. The config dump
+(`kn_config_dump_redacted`) masks every key whose name contains `key`, `token`, `secret` or
+`password`, but it does not read a URL's user info or query string.
+
 ### gameserver / accounts
 
 (see section 8 for `gameserver`, section 7 for `accounts`)
