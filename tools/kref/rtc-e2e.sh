@@ -8,8 +8,9 @@
 #   KN_UDP_LOSS="0 5 5"   drop/dup/reorder on the server's receive side (as udp_e2e / wt-e2e)
 #   KN_TEST_MAP=map.json  another map (streamed over the reliable channel: fragmentation + resends)
 set -euo pipefail
-BUILD=${1:?native build dir}
-DIST=${2:?web dist dir}
+# absolute: the bridge runs from net-bridge/, where a relative dist dir served nothing (no page, no session)
+BUILD=$(cd "${1:?native build dir}" && pwd)
+DIST=$(cd "${2:?web dist dir}" && pwd)
 SECONDS_RUN=${3:-30}
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/kn-rtc-e2e-XXXXXX")
 BASE=$((24000 + RANDOM % 1500))

@@ -6,8 +6,9 @@
 #   tools/kref/wt-e2e.sh BUILD_DIR WEB_DIST_DIR [seconds]      (run from the repo root)
 #   KN_UDP_LOSS="10 5 5"  loss simulation on the server's receive side
 set -euo pipefail
-BUILD=${1:?native build dir}
-DIST=${2:?web dist dir}
+# absolute: the bridge runs from net-bridge/, where a relative dist dir served nothing (no page, no session)
+BUILD=$(cd "${1:?native build dir}" && pwd)
+DIST=$(cd "${2:?web dist dir}" && pwd)
 SECONDS_RUN=${3:-30}
 WORK=$(mktemp -d /tmp/kn-wt-e2e-XXXXXX)
 BASE=$((24000 + RANDOM % 1500))
