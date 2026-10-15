@@ -1324,12 +1324,21 @@ static void v10_store_kr(StrBuf *sb) {
 }
 
 // the Eterno Shop (svelte-gh77t9): its offers come from the shop API, which KrunkNative has not:
-// the header and the component's empty state
+// the header and the component's empty state. The header video (limited_shop_banner.webm) plays
+// natively from its .knv frame sidecar (engine/video.h); its first frame,
+// ui/img/shop/kn_eterno_poster.jpg, stands in as the poster while that is missing or loading
+// (KN addition: v10 has no poster, its browser shows the webm's first frame at once).
 static void v10_store_eterno(StrBuf *sb) {
     char vid[256];
     store_asset_url("videos/limited_shop_banner.webm", vid, sizeof(vid));
-    sb_appendf(sb, "<div id=\"shop-header\" class=\"svelte-gh77t9\"><video autoplay=\"\" loop=\"\" playsinline=\"\" class=\"shop-background-video svelte-gh77t9\"><source src=\"%s\" type=\"video/webm\" class=\"svelte-gh77t9\"></video> <div id=\"shop-header-name\" class=\"svelte-gh77t9\">Eterno Shop</div> <div id=\"shop-header-desc\" class=\"svelte-gh77t9\">Limited-time offers—grab them before they're gone! Check back often so you don't miss out on rare deals.</div></div> <div class=\"error-container svelte-gh77t9\"><div class=\"error-text svelte-gh77t9\">No offers right now</div> <button class=\"retry-button svelte-gh77t9\" onclick=\"updateWindow(14)\">Retry</button></div>",
-               vid);
+    const char *poster =
+#ifndef __EMSCRIPTEN__
+        " poster=\"./img/shop/kn_eterno_poster.jpg\"";
+#else
+        "";
+#endif
+    sb_appendf(sb, "<div id=\"shop-header\" class=\"svelte-gh77t9\"><video autoplay=\"\" loop=\"\" playsinline=\"\"%s class=\"shop-background-video svelte-gh77t9\"><source src=\"%s\" type=\"video/webm\" class=\"svelte-gh77t9\"></video> <div id=\"shop-header-name\" class=\"svelte-gh77t9\">Eterno Shop</div> <div id=\"shop-header-desc\" class=\"svelte-gh77t9\">Limited-time offers—grab them before they're gone! Check back often so you don't miss out on rare deals.</div></div> <div class=\"error-container svelte-gh77t9\"><div class=\"error-text svelte-gh77t9\">No offers right now</div> <button class=\"retry-button svelte-gh77t9\" onclick=\"updateWindow(14)\">Retry</button></div>",
+               poster, vid);
 }
 
 static char *v10_store_window_gen(void) {
