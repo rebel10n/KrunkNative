@@ -156,6 +156,7 @@ void local_game_host_config(Client *client, const cJSON *request, const int host
 static int offline_begin(Client *client, const int map_index) {
     Game *game = &client->game;
     if (!game->map_count) return 0;
+    client_leave_game(client); // the game being left (a server's, or an offline one started over)
 
     const SandboxConfig cfg = {
         .maps = game->maps,
@@ -207,6 +208,7 @@ int local_game_start(Client *client) {
 
 void local_game_stop(Client *client) {
     if (!client->offline) return;
+    client_leave_game(client); // the offline game is left: its chat, feed, players and end screen go
 
     const int socket = offline_socket(client);
     if (socket >= 0) sandbox_disconnect(socket);

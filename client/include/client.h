@@ -690,6 +690,7 @@ typedef struct {
     int net_status_close_code;
     char net_status_close_reason[24];
     int net_session_connected;     // transport-private: a session was established (disconnect vs. failed connect)
+    unsigned net_session_seq;      // under net_lock: bumped by every session that connects (a new game's INIT leaves the old game)
     char net_address[64];          // server address/port, for net_main() and error messages
     char net_ws_url[512];          // web: game WebSocket URL override (brain seek webUrl / /native?target=), "" = default (net_web.c)
     NetJoinPacket net_join;        // sent right after HELLO (net.c / net_web.c, under net_lock); all empty = guest (backend_ui.h)
@@ -727,7 +728,7 @@ typedef struct {
     float net_damage_from_x;       // dealer x/z of that hit (Krunker "h" packet args 3/4)
     float net_damage_from_z;
     double net_damage_from_time;   // glfwGetTime() of that hit
-    double net_death_time;         // glfwGetTime() of the local player's death, 0 = alive
+    double net_death_time;         // client_death_clock() of the local player's death, 0 = alive
     float net_respawn_delay;       // seconds after net_death_time before the menu returns
     int net_death_menu_pending;    // reopen the menu once the death delay ran out (Krunker cE())
     // Server projectiles in flight (PROJECTILE / PROJECTILE_END), dead-reckoned per frame by
@@ -963,6 +964,8 @@ int  client_recon_delay_inbound(Client*, const NetPacket*);       // KRUNKNATIVE
 void client_recon_drain_delayed(Client*, void (*)(Client*, const NetPacket*));
 void client_game_events_tick(Client*); // per frame: death delay -> menu, HUD bridge
 void client_game_events_reset(Client*); // new session / INIT: forget round and death state
+double client_death_clock(const Client*); // the death delay's clock (s): the HUD frame clock (GLFW in play)
+void client_leave_game(Client*);        // the game is left (disconnect, switch, offline <-> online): its state goes
 void client_apply_init(Client*, const NetInitPacket*);  // main.c: (re)load the map and drop the players
 // main.c scene helpers for client->game (also driven by the offline game, net/local_game.c)
 void client_load_map(Client*);

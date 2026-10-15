@@ -408,6 +408,7 @@ void client_net_stop(Client *client, const char *reason) {
 void client_net_switch_server(Client *client) {
     static NetMainArgs args;
 
+    client_leave_game(client); // the game being left: its chat, feed, players and end screen go now
     krunker_net_leave(client, NULL); // from an official krunker.io game back to ours
     if (client->offline) local_game_stop(client); // leave the in-process game
     if (client->game.player_count) client_clear_players(client);

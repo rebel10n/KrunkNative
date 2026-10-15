@@ -298,15 +298,13 @@ static void reenter(Client *client) {
         snprintf(game, sizeof(game), "%s", krunker_net_session_game());
         snprintf(region, sizeof(region), "%s", krunker_net_region());
         if (krunker_net_reload_join(client, game, region)) {
-            printf("[reload] rejoining official game %s\n", game);
-            ui_notify("Reloaded: rejoining the game");
+            printf("[reload] rejoining official game %s\n", game); // the join's loading state says it, no toast
             return;
         }
     }
     if (!client->offline && servers_ui_reload_rejoin()) {
         // a matchmade lobby: the same one by its game id (gone or full: another one, said so)
-        printf("[reload] rejoining the lobby\n");
-        ui_notify("Reloaded: rejoining the game");
+        printf("[reload] rejoining the lobby\n"); // the join's loading state says it, no toast
         return;
     }
     if (!client->offline && !client->net_connected) {
@@ -317,7 +315,7 @@ static void reenter(Client *client) {
     const int offline = client->offline;
     if (ui_console_reconnect()) {
         printf("[reload] %s\n", offline ? "the offline game restarts" : "rejoining the server");
-        ui_notify(offline ? "Reloaded" : "Reloaded: rejoining the server");
+        if (offline) ui_notify("Reloaded"); // a server rejoin: its loading state says it, no toast
         return;
     }
     printf("[reload] could not rejoin: back to the menu\n");

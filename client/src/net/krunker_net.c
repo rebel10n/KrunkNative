@@ -1192,12 +1192,11 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         denied_text(text, sizeof(text), K.matchmaker);
         fail("%s", text);
     } else if (K.reload && K.game_id[0] && error && (!strcmp(error, "InvalidGameId") || !strcmp(error, "GameFull"))) {
-        // a reload's game is gone or full: say so, then the matchmaker picks one in the region
-        // (Find New Game's seek, with nothing to exclude: the player left no game)
+        // a reload's game is gone or full: the matchmaker picks one in the region (Find New Game's
+        // seek, with nothing to exclude: the player left no game). The loading state stays up through
+        // it (join), no toast; the log says why.
         const int full = !strcmp(error, "GameFull");
         printf("[krunker] reload: official game %s is %s: seeking another game\n", K.game_id, full ? "full" : "gone");
-        ui_notify(full ? I18N("kn.reload.lobbyFull", "The game you were in is full: joining another one")
-                       : I18N("kn.reload.lobbyGone", "The game you were in has ended: joining another one"));
         K.reload = 0;
         K.game_id[0] = 0;
         K.exclude[0] = 0;
@@ -1315,12 +1314,17 @@ static void on_access(void *user, const char *token) {
 static int join(Client *client, const char *game_id, const char *region, const int seek_new, const char *exclude, const int reload) {
     if (!client) return 0;
     if (!K.client) krunker_net_attach(client);
+    client_leave_game(client); // the game being left (ours, the offline one or another official one) goes now
     if (K.state != KS_OFF) krunker_net_leave(client, NULL); // another official game: an intended switch
     // our own transports and the offline game make way (an intended switch, not a drop)
     client_net_release(client);
     if (client->game.player_count) client_clear_players(client);
     client->in_game = 0;
     client->menu_play_pending = 0;
+    // v10's loading state for the whole join (matchmaker, captcha, socket, map): the spinner until
+    // the game's INIT, never a toast (menu_poll_connection lifts it on the connect, present_failure
+    // replaces it with the Lost Connection screen)
+    if (!menu_connecting()) menu_show_connecting_map(NULL);
     client->game.is_official = 1; // krunker.io's own lobby: the KrunkNative-only classes are out (game_class_allowed)
 
     K.generation++;

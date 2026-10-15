@@ -373,6 +373,7 @@ int client_net_send_packet(const int socket, const NetPacketType type, const voi
 // socket is closed and the new one opened from its close callback; an idle transport
 // (the brain startup seek) connects now.
 void client_net_switch_server(Client *client) {
+    client_leave_game(client); // the game being left: its chat, feed, players and end screen go now
     krunker_net_leave(client, NULL); // from an official krunker.io game back to ours
     if (client->offline) local_game_stop(client); // leave the in-process game
     if (client->game.player_count) client_clear_players(client);

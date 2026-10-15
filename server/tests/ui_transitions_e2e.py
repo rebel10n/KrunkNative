@@ -1106,6 +1106,153 @@ def sc_lost_during_end():
         stop(server)
 
 
+def probes(lines, kind):
+    """`[input_script] <kind> t=.. @label k=v ...` lines (grep, nodes, text) -> {label: {k: v}}."""
+    out = {}
+    for line in lines or []:
+        m = re.search(rf"\[input_script\] {kind} t=\d+ @(\S+)(.*)", line)
+        if m:
+            rest, text = m.group(2), None
+            if " text=" in rest:  # `text` probes end with the element's text, spaces and all
+                rest, text = rest.split(" text=", 1)
+            out[m.group(1)] = dict(kv.split("=", 1) for kv in rest.split() if "=" in kv)
+            if text is not None:
+                out[m.group(1)]["text"] = text
+    return out
+
+
+def start_console_server(name, extra=(), commands=(), settle=1.0):
+    """server_bin whose console reads the test's lines (stdin): `commands` are sent once it listens,
+    then the test waits `settle` seconds (an `end` needs ~4 s to end the round: 3 s timer + the tick)."""
+    (port,) = free_ports(1)
+    log = os.path.join(WORK, f"{name}-server.log")
+    with open(log, "w") as out:
+        p = subprocess.Popen([f"{BUILD}/server_bin", "--headless", "--cfg", "none", "--port", str(port), *extra], stdout=out,
+                             stderr=subprocess.STDOUT, stdin=subprocess.PIPE, start_new_session=True, text=True)
+    with LOCK:
+        procs.append(p)
+    time.sleep(1.0)
+    for command in commands:
+        p.stdin.write(command + "\n")
+        p.stdin.flush()
+    time.sleep(settle)
+    return p, port
+
+
+# Leaving a game clears everything of it (client_leave_game): v10 leaves a game by loading a new
+# page (location.href, v10:218690 / v10:221895). Player chat is on (KrunkNative turns it off by
+# default; v10's showMessages is on) so the `say` line is seen.
+CHAT_ON = {"knSettings": '{"showMessages":true}'}
+
+
+def sc_leave_state():
+    """Offline -> online -> another server -> disconnect: after each leave the old game's chat line,
+    its end screen and its rows are gone (#chatList holds only the new game's join lines)."""
+    a, port_a = start_server("leave-a")
+    b, port_b = start_server("leave-b")
+    try:
+        lines = run_client("leave-state", ["--offline", "--map", "kanji"], f"""
+            0 play
+            500 con say zzofflinemark
+            2000 grep @offline zzofflinemark [id=chatList]
+            2000 nodes @offline [id=chatList] .chatItem
+            2500 con connect 127.0.0.1:{port_a}
+            6000 respawn
+            8000 grep @online-a zzofflinemark [id=chatList]
+            8000 nodes @online-a [id=chatList] .chatItem
+            8000 check @online-a {HUD} endUI=0
+            8500 con say zzservermark
+            10000 grep @online-a-said zzservermark [id=chatList]
+            10500 con end
+            17000 check @online-a-end endUI=1
+            17500 con connect 127.0.0.1:{port_b}
+            17600 check @switching endUI=0 deathUIHolder=0
+            17600 grep @switching zzservermark [id=chatList]
+            21000 respawn
+            23000 grep @online-b zzservermark [id=chatList]
+            23000 nodes @online-b [id=chatList] .chatItem
+            23000 check @online-b {HUD} endUI=0 endInfo=0
+            23500 con say zzbmark
+            25000 grep @online-b-said zzbmark [id=chatList]
+            25500 con disconnect
+            26500 grep @disconnected zzbmark [id=chatList]
+            26500 nodes @disconnected [id=chatList] .chatItem
+            26500 nodes @disconnected-feed [id=killFeed] div
+            26500 check @disconnected endUI=0 deathUIHolder=0 inGameUI=0
+            27000 con offline
+            30000 respawn
+            32000 grep @offline-again zzbmark [id=chatList]
+            32000 nodes @offline-again [id=chatList] .chatItem
+            32500 quit
+        """, timeout=150, storage=CHAT_ON)
+        greps, nodes = probes(lines, "grep"), probes(lines, "nodes")
+
+        def hits(label, want):
+            got = greps.get(label, {}).get("hits", "no probe")
+            record("leave-state", label, "old chat line", want, got, got == want)
+
+        def rows(label, want):  # the join lines of the game just joined: the welcome line + "... joined the game"
+            got = nodes.get(label, {}).get("match", "no probe")
+            ok = got.isdigit() and (int(got) == want if want == 0 else 1 <= int(got) <= want)
+            record("leave-state", label, "#chatList rows", f"<={want}" if want else "0", got, ok)
+
+        hits("offline", "1")
+        hits("online-a", "0")
+        rows("online-a", 3)
+        hits("online-a-said", "1")
+        hits("switching", "0")
+        hits("online-b", "0")
+        rows("online-b", 3)
+        hits("online-b-said", "1")
+        hits("disconnected", "0")
+        rows("disconnected", 0)
+        got = nodes.get("disconnected-feed", {}).get("match", "no probe")
+        record("leave-state", "disconnected", "#killFeed rows", "0", got, got == "0")
+        hits("offline-again", "0")
+        rows("offline-again", 3)
+    finally:
+        stop(a)
+        stop(b)
+
+
+def sc_join_end():
+    """Joining a server whose round is over (end screen + map vote): Play gets the end screen (the
+    server spawns the late joiner and sends the late "end": the title, then the results, the vote
+    and "Next Round in"), never the menu camera with nothing on screen."""
+    server, port = start_console_server("join-end", commands=["end"], settle=5.0)
+    try:
+        lines = run_client("join-end", ["--connect", f"127.0.0.1:{port}"], f"""
+            0 play
+            500 check @joined endUI=1 menuHolder=0 inGameUI=0 instructionHolder=0
+            6500 check @results {RESULTS} endTimer=1 :cursor=1
+            6500 text @results [id=endTimer]
+            7000 quit
+        """, timeout=90)
+        text = probes(lines, "text").get("results", {}).get("text", "")
+        record("join-end", "results", "#endTimer", "Next Round in", text, "Next Round" in text)
+    finally:
+        stop(server)
+
+
+def sc_join_waiting():
+    """Joining before the match starts: a mode that waits for players (Infected, minPlayers 2) shows
+    v10's "waiting for players" (gmsg 'wt' -> player.waiting) on the HUD; a mode whose round opens
+    with a countdown (Race, waitTimers "race starting in ") shows the countdown."""
+    for name, mode, want in (("join-waiting", "infect", "waiting for players"), ("join-countdown", "race", "race starting in")):
+        server, port = start_server(name, ("--mode", mode))
+        try:
+            lines = run_client(name, ["--connect", f"127.0.0.1:{port}"], """
+                0 play
+                1500 check @playing inGameUI=1 menuHolder=0 gameMessage=1
+                1500 text @playing [id=gameMessage]
+                2000 quit
+            """, timeout=90)
+            text = probes(lines, "text").get("playing", {}).get("text", "")
+            record(name, "playing", "#gameMessage", want, text or "-", want in text.lower())
+        finally:
+            stop(server)
+
+
 class Manifest(http.server.BaseHTTPRequestHandler):
     body = b""
 
@@ -1685,6 +1832,9 @@ SCENARIOS["server-list"] = sc_server_list
 SCENARIOS["pointer-lock"] = sc_pointer_lock
 SCENARIOS["pointer-lock-chat"] = sc_pointer_lock_chat
 SCENARIOS["pointer-lock-next-map"] = sc_pointer_lock_next_map
+SCENARIOS["leave-state"] = sc_leave_state
+SCENARIOS["join-end"] = sc_join_end
+SCENARIOS["join-waiting"] = sc_join_waiting
 
 
 def main():

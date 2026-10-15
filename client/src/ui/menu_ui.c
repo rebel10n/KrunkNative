@@ -1587,16 +1587,19 @@ static void menu_poll_connection(Client *client) {
         client->net_connected = 1;
     } else if (status == NET_STATUS_CONNECTING) {
         client->net_connected = 0; // a switch closed the session on purpose: the next one follows (spinner below)
+        if (!client->offline) client_leave_game(client); // that game's chat, feed, players and end screen go now
     } else if (status == NET_STATUS_FAILED) {
         client->net_connected = 0;
         online_mode_session_ended(); // its rights and live sign-ins went with it
 
         if (!client->offline) {
-            // The session is gone: drop its players (the next INIT starts fresh) so the
-            // player can enter again after the transport reconnects, and show the menu
-            // (Krunker's disconnect() shows the error screen over it).
+            // The session is gone: its game is left (client_leave_game: players, chat, kill feed,
+            // end screen, ...; the next INIT starts fresh) so the player can enter again after the
+            // transport reconnects, and show the menu (Krunker's disconnect() shows the error
+            // screen over it). Escape must not bring that game's results back.
+            client_leave_game(client);
             if (client->game.player_count) client_clear_players(client);
-            hud_ui_hide_end_screen(client); // its end screen went with it (Escape must not bring the results back)
+            hud_ui_hide_end_screen(client);
             client->in_game = 0;
             client->spawn_requested = 0;
             client->menu_play_pending = 0;

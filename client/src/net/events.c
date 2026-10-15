@@ -53,6 +53,7 @@ void on_client_socket_connect(Client *client) {
     client->net_drop_tag[0] = 0;
     client->net_drop_close_code = 0;
     client->net_close_intended = 0;
+    client->net_session_seq++; // client_handle_net_packet: this session's INIT leaves the game before it
     pthread_mutex_unlock(&client->net_lock);
     net_set_status(client, NET_STATUS_CONNECTED, NULL);
 

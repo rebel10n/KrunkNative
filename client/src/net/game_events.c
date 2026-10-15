@@ -268,7 +268,7 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
     strike_hud_death(client, &card, killer && killer != victim ? killer : NULL); // the Strike kill card
 
     client->spawn_requested = 0;
-    client->net_death_time = glfwGetTime();
+    client->net_death_time = client_death_clock(client);
     client->net_respawn_delay = packet->respawn_delay > 0.0f ? packet->respawn_delay : GAME_DEATH_DELAY;
     client->net_death_menu_pending = 1;
 }
@@ -1104,6 +1104,8 @@ int client_handle_game_event(Client *client, const int type, const void *payload
     }
 }
 
+static int g_game_joined; // an INIT was applied since the last client_leave_game
+
 // New session or round (INIT): no clock, no end screen, nobody dead yet.
 void client_game_events_reset(Client *client) {
     client_world_reset(); // WP-B: no speed-run time yet
@@ -1134,6 +1136,35 @@ void client_game_events_reset(Client *client) {
     projectiles_render_reset();
     sprays_clear(client); // "init": RENDER.clearSprays()
     voice_reset_queues(); // initGame: voiceStreamQueues = {}
+    g_game_joined = 1;
+}
+
+// Leaving a game: a disconnect or a lost session, a server switch (matchmaker, server browser,
+// `connect`, a reconnect), KrunkNative <-> official krunker.io, offline <-> online, a reload.
+// v10 leaves a game by loading a new page (enterGame's links, backToOrigin, the reload: all
+// location.href, v10:218690 / v10:221895), so nothing of the old game survives it. Here the page
+// stays: what that game put on it goes now, not when the next game's INIT comes (or never, for a
+// Lost Connection screen): the chat and kill feed, the death card, the end screen and its vote,
+// the players (the scoreboard, the leaderboard, the player list), spectating, the vote kick, the
+// round clock, the game popups and the announcement banner. Main thread; a no-op until a game's
+// INIT was applied since the last leave.
+void client_leave_game(Client *client) {
+    if (!client || !g_game_joined) return;
+    g_game_joined = 0;
+    if (client->game.player_count || client->me) client_clear_players(client); // spectating ends with them
+    client_game_events_reset(client); // the round clock, the end screen, the vote kick, the mode HUD
+    g_game_joined = 0;                // (client_game_events_reset marks a game joined)
+    lobby_vote_reset();               // the end screen's vote cards
+    social_reset_server();
+    object_manager_ui_reset();
+    hud_ui_leave_game(client);        // chat, kill feed, death card, damage indicators, leader stats
+    hud_spectate_reset();
+    strike_hud_reset();
+    v10_announce_set(NULL);
+    client->in_game = 0;
+    client->spawn_requested = 0;
+    menu_rerender_if_open(23); // the Player List has nobody left
+    printf("[client] left the game: its chat, feed, players and end screen are gone\n");
 }
 
 // Test hook (KRUNKNATIVE_TEST_AIM=1, never set in normal runs): point the local
@@ -1178,6 +1209,14 @@ static void events_test_aim(Client *client) {
     me->direction.x = atan2f(head - eye, sqrtf(dx * dx + dz * dz)) - me->recoil_anim_y * game_constants.recoil_mlt;
 }
 
+// The clock of the death delay (net_death_time, the menu after deathDelay, the respawn gate in
+// client_enter_game): the HUD's frame clock (hud_ui_now_ms), in seconds. In play that is GLFW's
+// clock, as before; --render-scenario's virtual clock and KRUNKNATIVE_FIXED_DELTA's summed frame
+// deltas otherwise, so a scenario's death card -> menu step does not depend on the machine's load.
+double client_death_clock(const Client *client) {
+    return hud_ui_now_ms(client) / 1000.0;
+}
+
 // Per frame: Krunker reopens the menu config.deathDelay after the death (cE()),
 // from where Play respawns.
 void client_game_events_tick(Client *client) {
@@ -1187,7 +1226,7 @@ void client_game_events_tick(Client *client) {
     sprays_tick(client);    // framed / moving spray textures
     client_triggers_tick(client); // jump scare timeout
     if (!client->net_death_menu_pending) return;
-    if (glfwGetTime() < client->net_death_time + client->net_respawn_delay) return;
+    if (client_death_clock(client) < client->net_death_time + client->net_respawn_delay) return;
 
     client->net_death_menu_pending = 0;
     // Krunker Strike: Cg() after xe.deathDelay, straight back into the game (strike_hud.c)

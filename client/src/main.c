@@ -1428,6 +1428,14 @@ static void client_handle_net_packet(Client *client, const NetPacket *packet) {
             NetInitPacket init;
             if (!net_packet_read_init(&init, packet)) break;
             if (client_refuse_wrong_flavor(client, &init)) break; // Krunker Strike: a cross-flavor server
+            // the first INIT of another session: the game before it was left (a switch whose status
+            // the menu never saw: a quick reconnect overwrote it)
+            static unsigned last_session_seq;
+            pthread_mutex_lock(&client->net_lock);
+            const unsigned session = client->net_session_seq;
+            pthread_mutex_unlock(&client->net_lock);
+            if (session != last_session_seq && !client->offline) client_leave_game(client);
+            last_session_seq = session;
             menu_idle_reset(); // v7 io_init: CONTROLS.idleTimer = 0 (a map change restarts the menu idle kick)
             if (client_map_prepare_init(client, &init)) client_apply_init(client, &init);
             break;
@@ -1814,7 +1822,7 @@ void client_enter_game(Client *client) {
     const int respawn = client->in_game && client->me && !client->me->active;
     if (client->in_game && !respawn && !leave_spectate) return;
     if (respawn && (client->spawn_requested || client->net_end_result != INT32_MIN)) return;
-    if (respawn && client->net_death_time > 0.0 && glfwGetTime() < client->net_death_time + client->net_respawn_delay) return;
+    if (respawn && client->net_death_time > 0.0 && client_death_clock(client) < client->net_death_time + client->net_respawn_delay) return;
 
     client->in_game = 1;
 

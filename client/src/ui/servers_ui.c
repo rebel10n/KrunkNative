@@ -609,14 +609,14 @@ static void seek_unreachable(void);
 static void on_token(void *user, int status, const char *body, size_t length);
 static void seek(const char *game_id, int auto_change, void *quiet);
 
-// A reload's lobby is gone (InvalidGameId: its server stopped) or full (GameFull): the player is
-// told so and one plain seek in the region finds another (never excludeGame: nothing to leave).
+// A reload's lobby is gone (InvalidGameId: its server stopped) or full (GameFull): one plain seek in
+// the region finds another (never excludeGame: nothing to leave). The loading state stays up through
+// it (v10 shows no toast while it joins a game); the log says why.
 static void reload_fallback(const char *game_id, const int full) {
     char id[sizeof(g_seek_game)];
     snprintf(id, sizeof(id), "%s", game_id ? game_id : "");
     printf("[mm] reload: lobby %s is %s: seeking another lobby\n", id[0] ? id : "(none)", full ? "full" : "gone");
-    ui_notify(full ? I18N("kn.reload.lobbyFull", "The game you were in is full: joining another one")
-                   : I18N("kn.reload.lobbyGone", "The game you were in has ended: joining another one"));
+    if (g_client && !g_client->net_connected) menu_show_connecting_map(NULL);
     g_game_id[0] = 0;
     g_exclude_game[0] = 0;
     seek(NULL, 1, NULL);

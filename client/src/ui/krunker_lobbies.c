@@ -305,7 +305,10 @@ int krunker_lobbies_seek(void) {
         K.seek_pending = 1;
         krunker_lobbies_refresh(1);
         if (K.loading) {
-            ui_notify(I18N("kn.kio.looking", "Looking for a krunker.io server..."));
+            // v10's loading state while the list comes (no toast in the join flow): the spinner, unless
+            // a game is still up (the join that follows shows it: krunker_net.c join)
+            printf("[krunker] seek: looking for a krunker.io server (the lobby list)\n");
+            if (g_lobbies_client && !g_lobbies_client->net_connected && !g_lobbies_client->offline && !menu_connecting()) menu_show_connecting_map(NULL);
             return 1;
         }
         K.seek_pending = 0;

@@ -4031,6 +4031,45 @@ static void hud_reset_page(Client *client) {
     if (base) html_dom_observe_resize(base, on_ui_base_resize, NULL);
 }
 
+// The game is left (client_leave_game): v10 leaves a game by loading a new page, so nothing the
+// HUD wrote for it is left. #chatList and #killFeed are emptied (the next game seeds its own join
+// lines), the death card and the end screen go, the damage indicators, the head-to-head counts and
+// the leader stats are forgotten, and the board / chat are written again for the next game.
+void hud_ui_leave_game(Client *client) {
+    HudUi *ui = &g_hud_ui;
+    if (client) {
+        hud_ui_hide_end_screen(client);
+        hud_ui_hide_death(client);
+    }
+    const int page = html_ui_available() && html_ui_is_ready();
+    hud_feed_clear(page);
+    if (page) {
+        const HtmlElem list = html_dom_by_id("chatList");
+        if (list) html_dom_set_html(list, "");
+        const HtmlElem feed = html_dom_by_id("killFeed");
+        if (feed) html_dom_set_html(feed, "");
+        hud_dmg_clear();
+        hud_nums_hide_all();
+    }
+    for (int i = 0; i < DMG_NUM_MAX; i++) ui->nums[i].life_ms = 0.0;
+    ui->chat_seq = 0;
+    ui->chat_seeded = 0;
+    ui->seed_wait = 0;
+    ui->in_game_was = 0;
+    g_welcome_last[0] = 0;
+    g_welcome_adopt = 0;
+    g_h2h_count = 0;
+    g_leader_stats_valid = 0;
+    ui->board_shown = -1;
+    ui->old_board_hash = 0;
+    ui->board_hash = 0;
+    ui->streak = -1;
+    g_combat_hash = 0;
+    hud_popups_on_spawn(); // the medal / score popups of that game go (overlay.reset)
+    hud_ui_relayout();
+    if (client) client->hud_html.valid = 0;
+}
+
 // Per frame from client_menu_tick(): sample fps, keep the HUD visibility in step with
 // the game/menu state, step the hit marker and, at most 20 Hz, rewrite the value
 // groups that changed since the last write.
