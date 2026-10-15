@@ -14,6 +14,7 @@
 #include <game_config.h>    // GAME_HOST_CUSTOM
 #include <cJSON.h>
 #include <map_catalog.h>  // Host Game / Games window maps
+#include <community_host.h> // community_pick / community_host_slot (the Host Game seam)
 #include <sound_events.h> // ui_sound_play_tick / ui_sound_play
 #include <spectate.h>     // spectate_set_requested (toggleSpect)
 #include <console.h>      // #knConsoleInput keys (developer console, ui_console.c)
@@ -199,29 +200,7 @@ void host_catalog_map(const int catalog_index, const int mode) {
     Client *client = menu_ui()->client;
     const int slot = catalog_index >= 0 ? map_catalog_slot(&client->game.maps, &client->game.map_count, (size_t) catalog_index) : -1;
     if (catalog_index >= 0 && slot < 0) menu_log("host: map %s could not be loaded", map_catalog_at((size_t) catalog_index)->key);
-    if (slot >= 0) menu_select_map(slot);
-    if (mode >= 0) client->net_mode_index = mode; // local_game_start reads it (Krunker mode id)
-    // Krunker creates a new room: a running offline game reloads on the picked map and
-    // mode; otherwise the offline game starts directly on it (offline_start_map).
-    if (client->offline && slot >= 0) local_game_host(client, slot, client->net_mode_index);
-    else if (slot >= 0) client->offline_start_map = client->game.maps[slot];
-    menu_host_offline();
-    client->offline_start_map = NULL; // not consumed when a server connection took the request
-}
-
-// A Games-window row (name, creatorname) -> catalogue index: rows by "Krunker" are the
-// official maps (and the 311_ maps, "Burg (3.1.1)"), the others community maps; a bare
-// name (playMap) prefers the official map, like the server's cmd_map. -1 = unknown.
-static int catalog_index_for_row(const char *name, const char *creator) {
-    const int want_custom = creator && creator[0] && strcmp(creator, "Krunker") != 0;
-    for (int pass = 0; pass < 2; pass++) {
-        for (size_t i = 0; i < map_catalog_count(); i++) {
-            const MapCatalogEntry *e = map_catalog_at(i);
-            if (pass == 0 && (e->source == MAP_SOURCE_CUSTOM) != want_custom) continue;
-            if (!strcmp(e->name, name)) return (int) i;
-        }
-    }
-    return map_catalog_find(name);
+    community_host_slot(client, slot, mode); // community_maps.c: the Host Game seam
 }
 
 // createPrivateRoom(): Krunker collects the checked #gameMap<i> boxes and creates the room;
@@ -303,7 +282,7 @@ H(h_export_settings) { UNUSED; ui_settings_export(); return 1; }
 H(h_play_map) {
     UNUSED;
     const char *name = arg_str(ev, args, argc, 0, "");
-    const int index = catalog_index_for_row(name, NULL);
+    const int index = community_catalogue_index(name, NULL);
     // brain: a lobby on that map, else /mm/host-game; a published map: its JSON (servers_ui.c)
     if (servers_ui_play_map(name, index >= 0)) return 1;
     if (index < 0) {
@@ -315,14 +294,25 @@ H(h_play_map) {
 }
 
 // selectHostMap(name, modURL, id, creator): Krunker remembers the community game for the
-// Host Game window (selectedCustomMapId); KrunkNative selects the catalogue map.
-// The Games window's Host button: the Host Game flow at its Mode step with that map chosen.
+// Host Game window (selectedCustomMapId). A catalogue map opens the Host Game flow at its Mode step
+// with that map chosen; a published map (kn_brain) is downloaded, checked and given a slot in the
+// client's map list (community_pick: the Host Game seam), which the menu selects.
+static void on_host_map_picked(void *user, const int slot) {
+    char *name = user;
+    if (slot >= 0) menu_select_map(slot);
+    menu_log("selectHostMap: %s -> slot %d", name ? name : "?", slot);
+    free(name);
+}
+
 H(h_select_host_map) {
     UNUSED;
-    const char *name = arg_str(ev, args, argc, 0, "");
-    const int index = catalog_index_for_row(name, arg_str(ev, args, argc, 3, ""));
-    if (index >= 0) host_flow_open_map(index);
-    else menu_log("host: %s is not in the map catalogue (no Host Game flow for it yet)", name);
+    const CommunityMapRef ref = {arg_str(ev, args, argc, 0, ""), arg_str(ev, args, argc, 3, "")};
+    const int index = community_catalogue_index(ref.name, ref.creator);
+    if (index >= 0) {
+        host_flow_open_map(index);
+        return 1;
+    }
+    community_pick(menu_ui()->client, &ref, on_host_map_picked, strdup(ref.name));
     return 1;
 }
 

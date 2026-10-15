@@ -950,6 +950,17 @@ else ()
     target_link_libraries(krunker_link_test PRIVATE cJSON m)
     add_test(NAME krunker_link_test COMMAND krunker_link_test)
 
+    # community_maps_test (client/include/community_maps.h): the Games window's /api/search request,
+    # the mode tags, the catalogue match of a row and the map slot (community_maps_core.c)
+    add_executable(community_maps_test ${SHARED_HEADERS} ${SHARED_SOURCES} client/tests/community_maps_test.c
+                   client/src/ui/community_maps_core.c)
+    target_include_directories(community_maps_test PRIVATE client/include shared/include)
+    target_link_libraries(community_maps_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(community_maps_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+    add_test(NAME community_maps_test COMMAND community_maps_test)
+
     # join_errors_test (client/src/ui/join_errors.c): the text of each failed-join code (v10.0.2's where
     # v10 has the same case, KN's where it has none) and where it shows (in a game: the error popup)
     add_executable(join_errors_test client/tests/join_errors_test.c client/src/ui/join_errors.c)

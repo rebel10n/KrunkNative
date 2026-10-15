@@ -275,6 +275,13 @@ if (TARGET ${SERVER_BINARY} OR TARGET server_bin)
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/tools/editor/publish_e2e.py ${CMAKE_BINARY_DIR}
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_editor_publish_e2e PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e;editor")
+        # community maps in the Games window: browse (New, mode tags, NEW!), search by name /
+        # category / source, the Host Game pick and Play of a published map, a spawnless row refused
+        # (headless client_bin on ui/; skips 77 without a database, websockets or client_bin)
+        add_test(NAME brain_community_games_e2e
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/community_games_e2e.py ${CMAKE_BINARY_DIR}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_community_games_e2e PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
         # editor-ai: the editor's AI panel against kn_brain + a stub upstream / stub MCP (headless
         # client_bin --editor: guest gating, a streamed reply, editor tools, approvals, web search, history)
         add_test(NAME brain_editor_ai_e2e

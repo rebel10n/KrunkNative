@@ -18,6 +18,7 @@
 #include <html_ui.h>
 #include <ui_logic.h>
 #include <map_catalog.h>
+#include <community_maps.h> // published maps: the Search tab request, the Play download
 #include <online_mode.h> // server finder URL, online / offline mode
 #include <ruleset.h>       // seek ?ruleset=v10
 #include <build_info.h>   // kn_build_protocol (seek-game proto)
@@ -40,6 +41,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+#include <time.h>
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #endif
@@ -2740,7 +2742,7 @@ static void open_server_window(const int which) {
 static void games_load_more(const HtmlEvent *ev);
 
 static void host_switch_tab(int tab);
-static void games_search(void);
+static void games_search(const HtmlArg *args, int argc);
 
 int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args, const int argc) {
     if (!name) return -1;
@@ -2822,7 +2824,7 @@ int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         return 1;
     }
     if (!strcmp(name, "favoriteM") || !strcmp(name, "windows.9.searchMaps")) {
-        if (name[0] == 'w') games_search();
+        if (name[0] == 'w') games_search(args, argc);
         return 1; // favoriteM: favourites need an account API the brain does not have
     }
     if (!strcmp(name, "checkedSwitchServer") || !strcmp(name, "switchServer")) {
@@ -3029,7 +3031,25 @@ typedef struct {
     char id[24];
     double votes, plays;
     int fav;
+    const cJSON *modes; // the row's game mode ids (kn_brain: map_info / the catalogue map's "modes")
+    double age_days;    // days since map_date (v10's mapAgeD badge), -1 unknown
+    int updates;        // map_updatecounter
 } GameCard;
+
+// map_date (ISO 8601, "2026-10-15T10:00:00Z" / "2026-10-15 10:00:00+00") -> days before now, -1
+// when it does not parse (v10: (Date.now() - new Date(map_date)) / 86400000)
+static double days_since(const char *date) {
+    int y, mo, d, h = 0, mi = 0, sec = 0;
+    if (!date || sscanf(date, "%d-%d-%d%*[T ]%d:%d:%d", &y, &mo, &d, &h, &mi, &sec) < 3) return -1;
+    // days from civil (proleptic Gregorian, UTC), Howard Hinnant's algorithm
+    y -= mo <= 2;
+    const long era = (y >= 0 ? y : y - 399) / 400;
+    const long yoe = y - era * 400, doy = (153 * (mo + (mo > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    const long days = era * 146097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719468;
+    const double then = (double) days * 86400.0 + h * 3600.0 + mi * 60.0 + sec;
+    const double age = ((double) time(NULL) - then) / 86400.0;
+    return age >= 0 ? age : 0;
+}
 
 // UTILS.formatNumYT: k = floor(digits / 3) thousands; the value at 2 significant digits, else 1,
 // whichever leaves at most two digits; one decimal when fractional ("1.2k", "12k", "0.1m").
@@ -3077,9 +3097,25 @@ static void games_card(StrBuf *sb, const GameCard *c, const int tab) {
     sb_append(sb, "&quot;)' title='Play' style='margin-top:-5px;'><span class='material-icons' style='font-size:80px;color:#fff;'>play_arrow</span></div><div class='mapActionSep' style='margin-left:2px'></div>");
     sb_appendf(sb, "<div class='mapActionB%s'onclick='favoriteM(0,this, %s);'>%s</div></div></div>", fav ? "" : " sel", c->id,
                fav ? "<span class='material-icons' style='font-size:70px;color:#fff;'>star</span>" : "<span class='material-icons' style='font-size:70px;color:#fff;'>star_border</span>");
+    // v10: a map published or updated in the last 7 days wears the NEW! / UPDATED badge
+    if (c->age_days >= 0 && c->age_days <= 7) {
+        sb_appendf(sb, "<div class='mapAgeD' style='background-image:%s'>%s</div>",
+                   c->updates > 1 ? "linear-gradient(to right,#E040FB,#6240fb);" : "linear-gradient(to right,#fb9c40,#fb4040);",
+                   c->updates > 1 ? "UPDATED" : "NEW!");
+    }
     sb_append(sb, "<div class='mapsVotes' title='Players Online' id='pcnt_");
     sb_append_esc(sb, c->name);
-    sb_appendf(sb, "' style='left:10px;right:unset'>%s<span style='color:#999999;'> online</span></div><div style='height:200px;width:100%%;overflow: hidden;'><img class='mapListThumb' loading='lazy' src='", online);
+    // KrunkNative: the map's game modes as the thumbnail's tooltip (v10's card has no mode tags;
+    // a title keeps the card's look v10's)
+    char modes[256];
+    community_mode_names(modes, sizeof(modes), c->modes);
+    sb_appendf(sb, "' style='left:10px;right:unset'>%s<span style='color:#999999;'> online</span></div><div style='height:200px;width:100%%;overflow: hidden;'", online);
+    if (modes[0]) {
+        sb_append(sb, " title='");
+        sb_append_esc(sb, modes);
+        sb_append(sb, "'");
+    }
+    sb_append(sb, "><img class='mapListThumb' loading='lazy' src='");
     sb_append_esc(sb, c->image && c->image[0] ? c->image : "./img/noimg.png");
     sb_append(sb, "' /></div><div style='margin-top:5px;padding-left:5px;padding-right:5px;line-height:30px;margin-bottom:0px;'><div style='display:inline-block;max-width:250px;overflow:hidden;white-space:nowrap'><a href='javascript:;' onclick='openURL(&quot;https://krunker.io/social.html?q=");
     sb_append_esc(sb, c->name);
@@ -3115,6 +3151,10 @@ static void card_from_brain(GameCard *c, const cJSON *r) {
     c->plays = cJSON_GetNumberValue(cJSON_GetObjectItem(r, "map_pl"));
     if (c->plays != c->plays) c->plays = 0;
     c->fav = cJSON_IsTrue(cJSON_GetObjectItem(r, "fav"));
+    c->modes = cJSON_GetObjectItem(r, "modes");
+    c->age_days = days_since(cJSON_GetStringValue(cJSON_GetObjectItem(r, "map_date")));
+    c->updates = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(r, "map_updatecounter"));
+    if (c->updates != c->updates) c->updates = 0;
     // KrunkNative: the official maps' own thumbnail (v7's listMaps gives them a map_image too)
     const int index = !c->image || !c->image[0] ? map_catalog_find(c->name) : -1;
     static char thumb[8][48];
@@ -3127,6 +3167,7 @@ static void card_from_brain(GameCard *c, const cJSON *r) {
 
 static void card_from_catalogue(GameCard *c, const MapCatalogEntry *e, char *thumb, const size_t n) {
     memset(c, 0, sizeof(*c));
+    c->age_days = -1; // no mode tags without kn_brain: the catalogue does not load every map for a card
     c->name = e->name;
     c->creator = e->creator;
     c->mod_url = e->mod_url;
@@ -3212,6 +3253,10 @@ static char *games_window_gen(void) {
     if (tab->search) {
         sb_append(&sb, "<input type='text' id='mpSrch' class='smlInput' placeholder='Game Name or Keyword' onkeydown='if(window.event.keyCode==13)windows[9].searchMaps()' /><select id='mpCat'><option value='-1'>All</option>");
         for (size_t i = 0; i < sizeof(k_map_cats) / sizeof(k_map_cats[0]); i++) sb_appendf(&sb, "<option value='%d'>%s</option>", (int) i, k_map_cats[i]);
+        // KrunkNative: the Official / Community split (kn_brain's source=) as the last two options:
+        // v10 lists only its players' games here, KrunkNative's catalogue also holds Krunker's own
+        // maps; after the categories, so Popular Categories' mpCat.selectedIndex stays v10's
+        sb_append(&sb, "<option value='official'>Official</option><option value='community'>Community</option>");
         sb_append(&sb, "</select><div class='searchBtn' onclick='windows[9].searchMaps()'><span class='material-icons' style='color:#fff;font-size:45px;margin-bottom:-30px;line-height:75px'>search</span></div><div style='color:rgba(0,0,0,0.5);margin-top:10px' id='searchResultsMA'></div>");
     } else {
         StrBuf cards = {0};
@@ -3233,22 +3278,76 @@ static char *games_window_gen(void) {
     return sb_finish(&sb);
 }
 
-// windows[9].searchMaps(): API_CLIENT.searchMap(text, category) has no KrunkNative route; the
-// catalogue and the loaded brain rows are searched by name (and category) instead.
-static void games_search(void) {
+// windows[9].searchMaps() (v10): searchResultsMA = "Loading...", API_CLIENT.searchMap(mpSrch.value,
+// mpCat's value) -> searchResp: the cards or "No Games found!". kn_brain's /api/search answers it
+// (name, category, and KrunkNative's Official / Community split: mpCat's last two options); without
+// a brain the catalogue and the loaded rows are searched by name (and category) here. Script /
+// scenario arguments (query, category, "official" | "community") are put into the fields first.
+static unsigned g_search_gen; // the latest search: an older answer is dropped
+
+static void search_results(const char *cards, const int count) {
+    HtmlElem out = html_dom_by_id("searchResultsMA");
+    if (!out) return;
+    StrBuf res = {0};
+    if (count) {
+        sb_append(&res, "<div style='height:10px'></div>");
+        sb_append(&res, cards ? cards : "");
+    } else {
+        sb_append(&res, I18N("windows.maps.none", "No Games found!"));
+    }
+    char *html = sb_finish(&res);
+    html_dom_set_html(out, html);
+    free(html);
+}
+
+static void on_search(void *user, const int status, const char *body, const size_t length) {
+    if ((unsigned) (uintptr_t) user != g_search_gen) return;
+    cJSON *res = status == 200 && body ? cJSON_ParseWithLength(body, length) : NULL;
+    StrBuf sb = {0};
+    int count = 0;
+    const cJSON *r;
+    cJSON_ArrayForEach(r, cJSON_GetObjectItem(res, "data")) {
+        GameCard card;
+        card_from_brain(&card, r);
+        games_card(&sb, &card, 6);
+        count++;
+    }
+    cJSON_Delete(res);
+    char *cards = sb_finish(&sb);
+    search_results(cards, count);
+    free(cards);
+}
+
+static void games_search(const HtmlArg *args, const int argc) {
     HtmlElem input = html_dom_by_id("mpSrch"), cat = html_dom_by_id("mpCat"), out = html_dom_by_id("searchResultsMA");
     if (!out) return;
+    if (argc > 0 && args[0].kind == HTML_ARG_STR && args[0].str && input) html_dom_set_value(input, args[0].str);
+    if (argc > 1 && args[1].kind == HTML_ARG_NUM && cat) {
+        char v[16];
+        snprintf(v, sizeof(v), "%d", (int) args[1].num);
+        html_dom_set_value(cat, v);
+    }
+    if (argc > 2 && args[2].kind == HTML_ARG_STR && args[2].str && args[2].str[0] && cat) html_dom_set_value(cat, args[2].str);
     char q[96] = "", c[16] = "-1";
     if (input) html_dom_get_value(input, q, sizeof(q));
     if (cat) html_dom_get_value(cat, c, sizeof(c));
     snprintf(g_games_search, sizeof(g_games_search), "%s", q);
-    g_games_search_cat = atoi(c);
+    const int source = community_source_of(c); // "official" / "community": no category
+    g_games_search_cat = source == COMMUNITY_SOURCE_ALL ? atoi(c) : -1;
+    g_search_gen++;
+    if (backend_available() == 1) {
+        char path[512];
+        if (community_search_path(path, sizeof(path), q, g_games_search_cat, source)) {
+            html_dom_set_html(out, "Loading...");
+            if (backend_http_get(path, on_search, (void *) (uintptr_t) g_search_gen)) return;
+        }
+    }
     const char *want_cat = g_games_search_cat >= 0 && g_games_search_cat < (int) (sizeof(k_map_cats) / sizeof(k_map_cats[0])) ? k_map_cats[g_games_search_cat] : NULL;
     StrBuf sb = {0};
     int count = 0;
     const char *seen[256];
     int seen_n = 0;
-    for (int data = 0; data < GAMES_TABS; data++) {
+    for (int data = 0; data < GAMES_TABS && source != COMMUNITY_SOURCE_OFFICIAL; data++) {
         const cJSON *r;
         cJSON_ArrayForEach(r, g_games_tabs[data].rows) {
             GameCard card;
@@ -3264,7 +3363,8 @@ static void games_search(void) {
     }
     for (size_t i = 0; !want_cat && i < map_catalog_count(); i++) {
         const MapCatalogEntry *e = map_catalog_at(i);
-        if (!str_has_ci(e->name, q)) continue;
+        const int official = map_catalog_is_official(e);
+        if (!str_has_ci(e->name, q) || (source == COMMUNITY_SOURCE_OFFICIAL && !official) || (source == COMMUNITY_SOURCE_COMMUNITY && official)) continue;
         int dup = 0;
         for (int k = 0; k < seen_n; k++) dup |= !strcmp(seen[k], e->name);
         if (dup) continue;
@@ -3276,17 +3376,8 @@ static void games_search(void) {
         count++;
     }
     char *cards = sb_finish(&sb);
-    StrBuf res = {0};
-    if (count) {
-        sb_append(&res, "<div style='height:10px'></div>");
-        sb_append(&res, cards);
-    } else {
-        sb_append(&res, I18N("windows.maps.none", "No Games found!"));
-    }
+    search_results(cards, count);
     free(cards);
-    char *html = sb_finish(&res);
-    html_dom_set_html(out, html);
-    free(html);
 }
 
 // ---- windows[7] (Host Custom Game, showWindow(8)): v7's captured markup with the map
@@ -3449,28 +3540,22 @@ const char *ui_host_checked_map(void) {
 static char g_play_name[96];
 static int g_play_catalogue;
 
-static void on_map_data(void *user, const int status, const char *body, const size_t length) {
+// a published map from kn_brain (community_fetch: downloaded once, checked like v10's
+// prepareGame + validateMap): the offline game hosts it, like the editor's Test Map
+static void on_play_fetched(void *user, const cJSON *map, const char *error) {
     (void) user;
-    (void) length;
-    cJSON *map = status == 200 ? cJSON_Parse(body) : NULL;
-    if (!cJSON_IsObject(map)) {
-        cJSON_Delete(map);
-        ui_alert(I18N("matchmaker.InvalidGameId", "Game not found."));
+    if (!map) {
+        ui_alert(error ? error : I18N("matchmaker.InvalidGameId", "Game not found."));
         return;
     }
-    // the offline game hosts the published map (like the editor's Test Map)
     if (!g_client->offline) client_net_disconnect(g_client, "Offline", "000000");
     menu_show_window(MENU_WINDOW_NONE, 0);
     if (local_game_host_custom(g_client, map)) printf("[mm] playing published map %s offline\n", g_play_name);
     else ui_alert(I18N("kn.games.loadFailed", "Failed to load the game."));
-    cJSON_Delete(map);
 }
 
 static void fetch_map_data(const char *name) {
-    char path[256], enc[192];
-    backend_url_encode(enc, sizeof(enc), name);
-    snprintf(path, sizeof(path), "/api/map-data?name=%s", enc);
-    backend_http_get(path, on_map_data, NULL);
+    community_fetch(name, on_play_fetched, NULL);
 }
 
 static void on_play_list(void *user, const int status, const char *body, const size_t length) {
