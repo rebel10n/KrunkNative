@@ -360,6 +360,11 @@ int  ui_controls_chat_text_allowed(const char *text); // showMessages on, or a "
 // `streak` >= 0: a streak kill (v7 info.stk, the Nuke's): its img/streaks icon replaces the weapon's.
 void hud_ui_add_killfeed_ex(Client*, const char *killer, int killer_is_you, const char *victim, int victim_is_you,
                             const char *weapon_icon, int is_headshot, int streak, double age_ms);
+// HUD_FEED_* bits of hud_ui_add_killfeed_flags: the v10 feed row's extra icons (killInfo fs / pj / wb,
+// :221227-221246) and "3" hideFeed (player.killedBy counts, no row)
+enum { HUD_FEED_WALLBANG = 1, HUD_FEED_FISTS = 2, HUD_FEED_THROWN = 4, HUD_FEED_HIDDEN = 8 };
+void hud_ui_add_killfeed_flags(Client*, const char *killer, int killer_is_you, const char *victim, int victim_is_you,
+                               const char *weapon_icon, int is_headshot, int streak, int flags);
 void hud_ui_hit_elapsed(Client*, int kill, double elapsed_ms); // hud_ui_hit `elapsed_ms` ago
 
 // Scenario overrides (NULL clears): the `state.hud` payload replaces the values the HUD

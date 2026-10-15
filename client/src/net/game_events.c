@@ -192,14 +192,20 @@ static void events_kill(Client *client, const NetKillPacket *packet) {
 
     if (killer) { // g1: b8 found, even when it is the victim (hC = "": weapon + victim only, e.g. own rocket)
         const int self = killer == victim;
-        const int stk = packet->fists & NET_KILL_NUKE ? STREAK_NUKE : -1; // info.stk: the Nuke's icon
-        hud_ui_add_killfeed_ex(client, self ? NULL : events_name(killer), !self && killer == client->me, victim_name,
-                               victim && victim == client->me, weapon && weapon->icon ? weapon->icon : NULL, packet->headshot, stk, 0.0);
+        // info.stk: the streak's icon (the Nuke on our servers; any streak from an official one)
+        const int stk = NET_KILL_STREAK(packet->fists) >= 0 ? NET_KILL_STREAK(packet->fists) : packet->fists & NET_KILL_NUKE ? STREAK_NUKE : -1;
+        // weaponConfig[wId != null ? wId : killer.loadout[killer.loadoutIndex]] (the feed row, :221227)
+        const Weapon *feed_weapon = weapon ? weapon : killer->weapon;
+        const int feed_flags = (packet->wallbang ? HUD_FEED_WALLBANG : 0) | (packet->fists & NET_KILL_FISTS ? HUD_FEED_FISTS : 0) |
+                               (packet->fists & NET_KILL_THROWN ? HUD_FEED_THROWN : 0) | (packet->fists & NET_KILL_HIDE_FEED ? HUD_FEED_HIDDEN : 0);
+        hud_ui_add_killfeed_flags(client, self ? NULL : events_name(killer), !self && killer == client->me, victim_name,
+                                  victim && victim == client->me, feed_weapon && feed_weapon->icon ? feed_weapon->icon : NULL, packet->headshot,
+                                  stk, feed_flags);
         strike_hud_killfeed(client, self ? NULL : events_name(killer), !self && killer == client->me, victim_name,
                             victim && victim == client->me, weapon, packet->headshot);
     } else {
 #ifdef HUD_UI_HAVE_KILLFEED_SUICIDE
-        hud_ui_add_killfeed_suicide(client, victim_name, victim && victim == client->me);
+        if (!(packet->fists & NET_KILL_HIDE_FEED)) hud_ui_add_killfeed_suicide(client, victim_name, victim && victim == client->me);
 #endif
         strike_hud_killfeed(client, NULL, 0, victim_name, victim && victim == client->me, NULL, 0);
     }
@@ -272,9 +278,11 @@ static void events_health(Client *client, const NetHealthPacket *packet) {
     Player *player = events_find_player(client, packet->uid);
     if (!player) return;
 
+    const float before = player->health;
     player->health = packet->health;
 
-    if (player != client->me || !packet->has_source) return;
+    // v10 "h" (:221062): the hit direction / shake only when the health went down
+    if (player != client->me || !packet->has_source || packet->health >= before) return;
 
     client->net_damage_from_valid = 1;
     client->net_damage_from_x = packet->source_x;

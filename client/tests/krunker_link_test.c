@@ -8,6 +8,7 @@
 #include <net_ext.h>
 #include <ruleset.h>
 #include <zombies.h>
+#include <social_v7.h>
 #include <cJSON.h>
 #include <math.h>
 #include <stdio.h>
@@ -442,6 +443,144 @@ static void test_hud(void) {
     clear();
 }
 
+
+// Names, account fields, the kill feed / death card, damage and health, chat tabs, the host
+// (official-ingame: krunker_link.c on_add_players / on_kill / on_damage / on_health / on_chat / "uh")
+static void test_combat(void) {
+    KrunkerLink link;
+    const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
+    krunker_link_init(&link, &io, KRUNKER_AHKEY);
+    feed(&link, "io-init", (KrunkerValue[]) {KRUNKER_V_STR("sockA")}, 1);
+    feed(&link, "init", (KrunkerValue[]) {KRUNKER_V_NUM(10), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0), KRUNKER_V_NIL, KRUNKER_V_NIL,
+                                          KRUNKER_V_STR("sockB")}, 6); // arg 5: the host is sockB
+    clear();
+    // "0": us (9, class 0) and sockB (7: alias "Ace", name "acct", class 1, level 33, clan, premium,
+    // featured, hacker, bot, creator)
+    KrunkerValue add[2 * 53];
+    for (int i = 0; i < 2 * 53; i++) add[i] = KRUNKER_V_NIL;
+    add[0] = KRUNKER_V_STR("sockA"); add[1] = KRUNKER_V_NUM(9); add[5] = KRUNKER_V_STR("me"); add[8] = KRUNKER_V_NUM(100); add[9] = KRUNKER_V_NUM(1);
+    KrunkerValue *b = add + 53;
+    b[0] = KRUNKER_V_STR("sockB"); b[1] = KRUNKER_V_NUM(7); b[5] = KRUNKER_V_STR("acct"); b[6] = KRUNKER_V_NUM(1); b[8] = KRUNKER_V_NUM(100);
+    b[9] = KRUNKER_V_NUM(2); b[KRUNKER_ADD_LEVEL] = KRUNKER_V_NUM(33); b[KRUNKER_ADD_CLAN] = KRUNKER_V_STR("CLN");
+    b[KRUNKER_ADD_IS_HACKER] = KRUNKER_V_BOOL(1); b[KRUNKER_ADD_FEATURED] = KRUNKER_V_BOOL(1); b[KRUNKER_ADD_PREMIUM_T] = KRUNKER_V_NUM(5);
+    b[KRUNKER_ADD_ALIAS] = KRUNKER_V_STR("Ace"); b[KRUNKER_ADD_ACCID] = KRUNKER_V_NUM(4242); b[KRUNKER_ADD_IS_BOT] = KRUNKER_V_BOOL(1);
+    b[KRUNKER_ADD_CREATOR_BADGE] = KRUNKER_V_NUM(1);
+    feed(&link, "0", (KrunkerValue[]) {KRUNKER_V_ARRAY(add, 2 * 53)}, 1);
+    {
+        READ_IN(NetSpawnPacket, s1, SPAWN, 1);
+        CHECK(s1_p && s1.uid == 7 && !strcmp(s1.name, "Ace"), "0: the alias is the name (%s)", s1.name);
+        READ_IN(NetPlayerInfoPacket, i0, PLAYER_INFO, 0);
+        READ_IN(NetPlayerInfoPacket, i1, PLAYER_INFO, 1);
+        CHECK(i0_p && i0.uid == 9 && !i0.flags && !i0.level, "0: our PLAYER_INFO (guest)");
+        const int want = NET_PLAYER_INFO_PREMIUM | NET_PLAYER_INFO_VERIFIED | NET_PLAYER_INFO_HACKER | NET_PLAYER_INFO_BOT |
+                         NET_PLAYER_INFO_CREATOR | NET_PLAYER_INFO_HOST;
+        CHECK(i1_p && i1.uid == 7 && i1.level == 33 && i1.account_id == 4242 && !strcmp(i1.clan, "CLN") && i1.flags == want,
+              "0: account fields of 7 (flags %#x)", i1_p ? i1.flags : 0);
+    }
+    clear();
+
+    // "4": Math.ceil(dmg)
+    feed(&link, "4", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_NUM(24.1), KRUNKER_V_BOOL(0), KRUNKER_V_BOOL(0)}, 4);
+    {
+        READ_IN(NetHitPacket, h, HIT, 0);
+        CHECK(h_p && h.damage == 25, "4: 24.1 shows 25 (%d)", h.damage);
+    }
+    // "h": a source only without noHitMarker
+    feed(&link, "h", (KrunkerValue[]) {KRUNKER_V_NUM(80), KRUNKER_V_NIL, KRUNKER_V_NUM(3), KRUNKER_V_NUM(4)}, 4);
+    feed(&link, "h", (KrunkerValue[]) {KRUNKER_V_NUM(70), KRUNKER_V_NIL, KRUNKER_V_NUM(3), KRUNKER_V_NUM(4), KRUNKER_V_BOOL(1)}, 5);
+    {
+        READ_IN(NetHealthPacket, a, HEALTH, 0);
+        READ_IN(NetHealthPacket, c, HEALTH, 1);
+        CHECK(a_p && a.uid == 9 && a.has_source && a.source_x == 3.0f && c_p && !c.has_source, "h: noHitMarker drops the source");
+    }
+    clear();
+
+    // "3": 7 kills us with a wallbang headshot, thrown melee; deathStats to the victim
+    const KrunkerValue pc[] = {KRUNKER_V_NUM(2), KRUNKER_V_STR("1.52")};
+    const KrunkerValue life[] = {KRUNKER_V_NUM(61000), KRUNKER_V_NUM(40), KRUNKER_V_STR("37.5%"), KRUNKER_V_NUM(4), KRUNKER_V_NUM(350)};
+    const KrunkerValue stats[] = {KRUNKER_V_NUM(5), KRUNKER_V_NUM(1234), KRUNKER_V_ARRAY(pc, 2), KRUNKER_V_ARRAY(life, 5)};
+    const KrunkerValue info[] = {KRUNKER_V_STR("wId"), KRUNKER_V_NUM(5), KRUNKER_V_STR("wb"), KRUNKER_V_BOOL(1), KRUNKER_V_STR("hs"),
+                                 KRUNKER_V_BOOL(1), KRUNKER_V_STR("pj"), KRUNKER_V_BOOL(1)};
+    feed(&link, "3", (KrunkerValue[]) {KRUNKER_V_NUM(9), KRUNKER_V_NUM(1), KRUNKER_V_NUM(7), KRUNKER_V_ARRAY(stats, 4), KRUNKER_V_MAP(info, 4),
+                                       KRUNKER_V_BOOL(0)}, 6);
+    {
+        READ_IN(NetDeathInfoPacket, d, DEATH_INFO, 0);
+        READ_IN(NetKillPacket, k, KILL, 0);
+        CHECK(d_p && d.victim_uid == 9 && d.killer_uid == 7 && d.weapon_index == 5 && d.class_stat == 1234 && d.pc_stat_index == 2 &&
+              !strncmp(d.pc_stat_value, "1.52", sizeof(d.pc_stat_value)) && d.time_alive_ms == 61000 && d.shots == 40 &&
+              !strncmp(d.accuracy, "37.5%", sizeof(d.accuracy)) && d.kills == 4 && d.score == 350 && d.thrown && !d.fists,
+              "3: DEATH_INFO for our own death");
+        CHECK(k_p && d_p && d_p < k_p && k.killer_class == 1 && k.wallbang && k.headshot && (k.fists & NET_KILL_THROWN) &&
+              !(k.fists & NET_KILL_HIDE_FEED) && NET_KILL_STREAK(k.fists) == -1, "3: the killer's class, wb / hs / pj, DEATH_INFO first");
+    }
+    clear();
+    // another player's death: no DEATH_INFO; a streak kill (stk 3) with hideFeed; a Nuke (stk 0)
+    const KrunkerValue info2[] = {KRUNKER_V_STR("stk"), KRUNKER_V_NUM(3)};
+    const KrunkerValue info3[] = {KRUNKER_V_STR("stk"), KRUNKER_V_NUM(0), KRUNKER_V_STR("fs"), KRUNKER_V_BOOL(1)};
+    feed(&link, "3", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_NUM(1), KRUNKER_V_NUM(9), KRUNKER_V_NIL, KRUNKER_V_MAP(info2, 1), KRUNKER_V_BOOL(1)}, 6);
+    feed(&link, "3", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_NUM(2), KRUNKER_V_NUM(9), KRUNKER_V_NIL, KRUNKER_V_MAP(info3, 2)}, 5);
+    {
+        READ_IN(NetKillPacket, k, KILL, 0);
+        READ_IN(NetKillPacket, n, KILL, 1);
+        CHECK(!find_in(NET_PACKET_DEATH_INFO, 0) && k_p && NET_KILL_STREAK(k.fists) == 3 && (k.fists & NET_KILL_HIDE_FEED) &&
+              !(k.fists & NET_KILL_NUKE) && k.killer_class == 0, "3: streak 3, hideFeed, no DEATH_INFO for others");
+        CHECK(n_p && NET_KILL_STREAK(n.fists) == 0 && (n.fists & NET_KILL_NUKE) && (n.fists & NET_KILL_FISTS), "3: a Nuke kill (stk 0), fists");
+    }
+    clear();
+
+    // "ch": a team line with the sender's account; a server line stays a v3 chat
+    feed(&link, "ch", (KrunkerValue[]) {KRUNKER_V_NUM(1), KRUNKER_V_STR("Ace"), KRUNKER_V_STR("push b"), KRUNKER_V_NUM(0), KRUNKER_V_NIL,
+                                        KRUNKER_V_NIL, KRUNKER_V_NUM(4242)}, 7);
+    feed(&link, "ch", (KrunkerValue[]) {KRUNKER_V_NUM(-1), KRUNKER_V_NIL, KRUNKER_V_STR("server says"), KRUNKER_V_NUM(2), KRUNKER_V_STR("#00ff00")}, 5);
+    {
+        READ_IN(NetChatV7Packet, v, CHAT_V7, 0);
+        READ_IN(NetChatPacket, c, CHAT, 0);
+        CHECK(v_p && v.channel == CHAT_CHANNEL_TEAM && v.account_id == 4242 && !strcmp(v.chat.text, "push b"), "ch: team tab + account");
+        CHECK(c_p && c.kind == NET_CHAT_SERVER && !strcmp(c.text, "server says"), "ch: a server line");
+    }
+    clear();
+
+    // "rg" class change: the kill card's class follows
+    feed(&link, "rg", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_BOOL(1),
+                                        KRUNKER_V_ARRAY(((KrunkerValue[]) {KRUNKER_V_NUM(-1), KRUNKER_V_NUM(-1), KRUNKER_V_NUM(-1), KRUNKER_V_NUM(-1),
+                                                                           KRUNKER_V_NUM(-1), KRUNKER_V_NUM(-1), KRUNKER_V_NUM(-1), KRUNKER_V_NUM(-1),
+                                                                           KRUNKER_V_NUM(-1), KRUNKER_V_NUM(-1), KRUNKER_V_NUM(-1), KRUNKER_V_NUM(-1),
+                                                                           KRUNKER_V_NUM(-1), KRUNKER_V_NUM(-1), KRUNKER_V_NUM(-1), KRUNKER_V_NUM(0)}), 16)}, 3);
+    clear();
+    feed(&link, "3", (KrunkerValue[]) {KRUNKER_V_NUM(9), KRUNKER_V_NUM(2), KRUNKER_V_NUM(7), KRUNKER_V_NIL, KRUNKER_V_NIL, KRUNKER_V_BOOL(0)}, 6);
+    {
+        READ_IN(NetKillPacket, k, KILL, 0);
+        CHECK(k_p && k.killer_class == 0 && !find_in(NET_PACKET_DEATH_INFO, 0), "rg: the killer's new class (%d); no stats, no DEATH_INFO",
+              k.killer_class);
+    }
+    clear();
+
+    // "uh": the host moves to us, then to 7 (by its name, not the alias); silent: no line
+    feed(&link, "uh", (KrunkerValue[]) {KRUNKER_V_STR("sockA"), KRUNKER_V_BOOL(0)}, 2);
+    {
+        READ_IN(NetPlayerInfoPacket, a, PLAYER_INFO, 0);
+        READ_IN(NetPlayerInfoPacket, c, PLAYER_INFO, 1);
+        uint16_t len = 0;
+        const uint8_t *body = ext_body(0, NET_EXT_KN_OFFICIAL_CHAT_I18N, &len);
+        CHECK(a_p && c_p && (a.flags & NET_PLAYER_INFO_HOST) == (a.uid == 9 ? NET_PLAYER_INFO_HOST : 0) &&
+              (c.flags & NET_PLAYER_INFO_HOST) == (c.uid == 9 ? NET_PLAYER_INFO_HOST : 0), "uh: HOST moves to us");
+        CHECK(body && len > sizeof(NetOfficialChatI18nHeader) + 1 && !strcmp((const char *) body + sizeof(NetOfficialChatI18nHeader) + 1,
+                                                                             "host.transfer.you"), "uh: You are now Host!");
+    }
+    clear();
+    feed(&link, "uh", (KrunkerValue[]) {KRUNKER_V_STR("sockB")}, 1);
+    {
+        uint16_t len = 0;
+        const uint8_t *body = ext_body(0, NET_EXT_KN_OFFICIAL_CHAT_I18N, &len);
+        const char *key = body ? (const char *) body + sizeof(NetOfficialChatI18nHeader) + 1 : "";
+        CHECK(body && !strcmp(key, "host.transfer") && !strcmp(key + strlen(key) + 1, "acct"), "uh: Host Transfered to acct");
+    }
+    clear();
+    feed(&link, "uh", (KrunkerValue[]) {KRUNKER_V_STR("sockA"), KRUNKER_V_BOOL(1)}, 2);
+    CHECK(find_in(NET_PACKET_PLAYER_INFO, 0) && !find_in(NET_PACKET_EXT, 0), "uh silent: no line");
+    clear();
+}
+
 int main(void) {
     KrunkerLink link;
     const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
@@ -648,9 +787,10 @@ int main(void) {
     if (p) memcpy(&kill, p->payload, sizeof(kill));
     CHECK(p && kill.victim_uid == 7 && kill.killer_uid == 9 && kill.weapon_index == 3 && kill.victim_deaths == 2, "KILL");
     feed(&link, "ch", (KrunkerValue[]) {KRUNKER_V_NUM(-1), KRUNKER_V_STR("Other"), KRUNKER_V_STR("hello there"), KRUNKER_V_NUM(0)}, 4);
-    p = find_in(NET_PACKET_CHAT, 0);
-    CHECK(p && !strcmp(((const NetChatPacket *) p->payload)->text, "hello there") && !strcmp(((const NetChatPacket *) p->payload)->name, "Other") &&
-          ((const NetChatPacket *) p->payload)->kind == NET_CHAT_PLAYER, "CHAT");
+    p = find_in(NET_PACKET_CHAT_V7, 0); // a player line: our v7 chat (channel -1 = every tab)
+    CHECK(p && p->length == sizeof(NetChatV7Packet) && !strcmp(((const NetChatV7Packet *) p->payload)->chat.text, "hello there") &&
+          !strcmp(((const NetChatV7Packet *) p->payload)->chat.name, "Other") && ((const NetChatV7Packet *) p->payload)->chat.kind == NET_CHAT_PLAYER &&
+          ((const NetChatV7Packet *) p->payload)->channel == CHAT_CHANNEL_ALL && !find_in(NET_PACKET_CHAT, 0), "CHAT");
     feed(&link, "2", (KrunkerValue[]) {KRUNKER_V_NUM(7)}, 1);
     p = find_in(NET_PACKET_LEAVE, 0);
     CHECK(p && ((const NetLeavePacket *) p->payload)->uid == 7, "LEAVE");
@@ -1058,8 +1198,8 @@ int main(void) {
     NetPlayerNamePacket nm;
     memset(&nm, 0, sizeof(nm));
     if (p && net_ext_unpack(p->payload, p->length, &sub, &body, &blen) && blen == sizeof(nm)) memcpy(&nm, body, sizeof(nm));
-    CHECK(p && sub == NET_EXT_PLAYER_NAME && nm.uid == 7 && !strcmp(nm.name, "Renamed") && !find_in(NET_PACKET_EXT, 1) &&
-          !g_events[KRUNKER_LINK_EV_CLOSE], "00 keepOpen: one rename, no close");
+    CHECK(p && sub == NET_EXT_PLAYER_NAME && nm.uid == 7 && !strcmp(nm.name, "al") && !find_in(NET_PACKET_EXT, 1) &&
+          !g_events[KRUNKER_LINK_EV_CLOSE], "00 keepOpen: one rename (the alias is shown), no close");
     clear();
     feed(&link, "00", (KrunkerValue[]) {KRUNKER_V_ARRAY(NULL, 0), KRUNKER_V_BOOL(0)}, 2);
     CHECK(g_events[KRUNKER_LINK_EV_CLOSE] == 1, "00 keepOpen false: close");
@@ -1229,6 +1369,7 @@ int main(void) {
         clear();
     }
     test_hud();
+    test_combat();
 
     printf("%d/%d passed\n", g_pass, g_pass + g_fail);
     return g_fail ? 1 : 0;

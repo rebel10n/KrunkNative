@@ -19,10 +19,17 @@
 //   l       [state array]                    NET_PACKET_RECON + NET_PACKET_PING_RESULT; answered "v" (:220335)
 //   f       [reason]                         SYNC_FAILED: the "q" compression state restarts and
 //                                            NET_EXT_KN_INPUTS_DROPPED empties the pending inputs (:220333)
+//   0       ... [10] level [11] clan [16] isHacker [25] featured [27] premiumT [28] alias [31] accid
+//           [44] isBot [51] creatorBadge     NET_PACKET_PLAYER_INFO per player (the board, nametags, kill card);
+//                                            names are alias || name (players.add :171939)
 //   2       [sid]                            NET_PACKET_LEAVE (:220567)
-//   3       [victim, deaths, killer, stats, info, hideFeed]  NET_PACKET_KILL (:220579)
-//   4       [sid, dmg, crit, kill, isAI]     NET_PACKET_HIT (:221254)
-//   h       [health, sid|null, ...]          NET_PACKET_HEALTH (:221040)
+//   3       [victim, deaths, killer, stats, info, hideFeed]  NET_PACKET_KILL (:220579): killInfo wId / fs /
+//                                            hs / wb / pj / stk, hideFeed (NET_KILL_* bits), the killer's class;
+//                                            to us also NET_PACKET_DEATH_INFO first (deathStats, :220591)
+//   4       [sid, dmg, crit, kill, isAI]     NET_PACKET_HIT, dmg Math.ceil'd (dmgType 0, :221259)
+//   h       [health, sid|null, srcX, srcZ, noHitMarker, resetMax]  NET_PACKET_HEALTH (:221040; no source
+//                                            with noHitMarker)
+//   uh      [hostSocketId, silent]           the host's PLAYER_INFO HOST flag + "host.transfer" line (:219273)
 //   t       [formatted, state, rawMs]        NET_PACKET_TIMER: the match clock (:220234, broadcast :191565)
 //   start   [formatted, ...]                 seeds the round clock from arg0 (:218939 -> :218948); clears the
 //                                            "q" compression state and resync (:218971-218974): the life's first "q" is full
@@ -157,6 +164,9 @@ typedef struct {
     char id[64];   // the socket id of its "0" ([0]): "chgp" finds players by it (findById)
     int team;
     int busy;      // "busy" setBusy (a nametag icon; nothing in this client shows it)
+    int class_index; // "0" [6] / "rg" items [15]: the kill card's killer class icon
+    char name[32];   // "0" [5] / "00" name (not the alias): the "uh" host line names it
+    NetPlayerInfoPacket info; // "0"'s account fields (level, clan, flags) as emitted (HOST follows "uh")
 } KrunkerLinkPlayer;
 
 // what LEADERBOARD carries of a player that the official packets give piecemeal ("7" columns, "3"
@@ -188,6 +198,7 @@ typedef struct {
     int flag_count;
     KrunkerLinkPlayer players[KRUNKER_LINK_MAX_PLAYERS];
     int kpd_case;       // startGame gave a K.P.D case (kpdData): a later one without clears it
+    char host_id[64];   // init arg 5 / "uh": the custom lobby's host socket id ("" none): PLAYER_INFO's HOST flag
     int player_count;
     // "q" window compression (game.deob.js:221765-221830): the last value of every input field
     // (iîîíîîi, kept across windows), the previous window's angle list (iîiìîií) and the resync

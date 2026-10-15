@@ -1049,15 +1049,18 @@ static void hud_feed_open(char *out, const size_t size, size_t *len, const int c
 // `streak` >= 0: info.stk (a Nuke kill): the streak's icon instead of the weapon's.
 static void hud_feed_row_html(const int chat, const char *killer, const int killer_is_you, const char *victim,
                               const int victim_is_you, const char *weapon_icon, const int headshot, const int streak,
-                              char *out, const size_t size) {
+                              const int flags, char *out, const size_t size) {
     size_t len = 0;
     out[0] = 0;
     hud_feed_open(out, size, &len, chat);
     if (killer || killer_is_you) hud_feed_name_span(out, size, &len, killer ? killer : "", killer_is_you, 0);
+    int known = 1;
     if (streak >= 0) { // info.stk != null: <img class='streakChatIcon' src='/img/streaks/<stk>.png' />
         hb_append(out, size, &len, "<img class='streakChatIcon' src='img/streaks/%d.png' />", streak);
-        if (headshot) hb_append(out, size, &len, "<img class='headShotChatIcon' src='img/headshot_0.png'>");
+    } else if (flags & HUD_FEED_FISTS) { // info.fs: the fists icon instead of the weapon's
+        hb_append(out, size, &len, "<img class='fistChatIcon' src='textures/weapons/icon_0.png' />");
     } else if (weapon_icon && !strcmp(weapon_icon, FEED_MELEE_ICON)) {
+        if (flags & HUD_FEED_THROWN) hb_append(out, size, &len, "<img class='thrownChatIcon' src='./img/thrown_0.png'>"); // info.pj
         hb_append(out, size, &len, "<img style='opacity:0.7;margin-right:%dpx;' class='meleeChatIcon' src='textures/melee/icon_0.png' />",
                   FEED_MELEE_PAD);
     } else if (weapon_icon && weapon_icon[0]) {
@@ -1065,10 +1068,13 @@ static void hud_feed_row_html(const int chat, const char *killer, const int kill
                   hud_feed_icon_pad(weapon_icon));
         hb_append_escaped(out, size, &len, weapon_icon);
         hb_append(out, size, &len, ".png' />");
-        if (headshot) hb_append(out, size, &len, "<img class='headShotChatIcon' src='img/headshot_0.png'>");
     } else {
+        known = 0;
         hb_append(out, size, &len, " "); // unknown weapon (no weaponConfig icon): keep the names apart
     }
+    // after any icon: info.wb, then info.hs (v10 :221244-221245)
+    if (known && (flags & HUD_FEED_WALLBANG)) hb_append(out, size, &len, "<img class='headShotChatIcon' src='./img/wallbang_0.png'>");
+    if (known && headshot) hb_append(out, size, &len, "<img class='headShotChatIcon' src='img/headshot_0.png'>");
     hud_feed_name_span(out, size, &len, victim, victim_is_you, 0);
     hb_append(out, size, &len, "</span></div><br>");
 }
@@ -2041,15 +2047,28 @@ static void hud_feed_insert(const int chat, const char *html, double age_ms) {
 
 static void hud_h2h_count(const char *killer, int killer_is_you, const char *victim, int victim_is_you);
 
-void hud_ui_add_killfeed_ex(Client *client, const char *killer, const int killer_is_you, const char *victim, const int victim_is_you,
-                            const char *weapon_icon, const int is_headshot, const int streak, const double age_ms) {
-    (void) client;
+static void hud_killfeed_row(const char *killer, const int killer_is_you, const char *victim, const int victim_is_you,
+                             const char *weapon_icon, const int is_headshot, const int streak, const int flags, const double age_ms) {
     hud_h2h_count(killer, killer_is_you, victim, victim_is_you); // player.killedBy (death screen)
+    if (flags & HUD_FEED_HIDDEN) return;                // "3" hideFeed
     if (!client_render_settings()->show_kills) return; // SETTINGS.tmp.showKills
     const int chat = hud_feed_in_chat();
     char html[1024];
-    hud_feed_row_html(chat, killer, killer_is_you, victim ? victim : "", victim_is_you, weapon_icon, is_headshot, streak, html, sizeof(html));
+    hud_feed_row_html(chat, killer, killer_is_you, victim ? victim : "", victim_is_you, weapon_icon, is_headshot, streak, flags, html,
+                      sizeof(html));
     hud_feed_insert(chat, html, age_ms);
+}
+
+void hud_ui_add_killfeed_ex(Client *client, const char *killer, const int killer_is_you, const char *victim, const int victim_is_you,
+                            const char *weapon_icon, const int is_headshot, const int streak, const double age_ms) {
+    (void) client;
+    hud_killfeed_row(killer, killer_is_you, victim, victim_is_you, weapon_icon, is_headshot, streak, 0, age_ms);
+}
+
+void hud_ui_add_killfeed_flags(Client *client, const char *killer, const int killer_is_you, const char *victim, const int victim_is_you,
+                               const char *weapon_icon, const int is_headshot, const int streak, const int flags) {
+    (void) client;
+    hud_killfeed_row(killer, killer_is_you, victim, victim_is_you, weapon_icon, is_headshot, streak, flags, 0.0);
 }
 
 void hud_ui_add_killfeed_suicide(Client *client, const char *victim, const int victim_is_you) {

@@ -243,6 +243,7 @@ static void on_init(KrunkerLink *l, const KrunkerFrame *f) {
     // initGame drops our player (you = null) until the new round's "0": no input frame meanwhile, so the
     // last round's player (still alive on our side until INIT reaches the game) sends nothing into this one
     if (l->my_sid >= 0) l->you_gone = 1;
+    id_string(arg(f, 5), l->host_id, sizeof(l->host_id)); // game.host (:219329): a custom lobby's host
     if (map < 0 && !info.custom && !info.custom_id[0]) {
         l->unsupported_map = map;
         note(l, KRUNKER_LINK_EV_UNSUPPORTED, "the server's init names no map");
@@ -270,6 +271,15 @@ static void on_init(KrunkerLink *l, const KrunkerFrame *f) {
     }
     cJSON_Delete(info.custom);
     emit(l, NET_PACKET_INIT, &init, sizeof(init));
+}
+
+// A player's account fields as v10 keeps them from its "0" entry (players.add :220273-220283): the
+// leaderboard / Tab board / end table / nametags read them through NET_PACKET_PLAYER_INFO. HOST is
+// game.host (init arg 5, "uh") == the player's socket id.
+static void emit_player_info(KrunkerLink *l, KrunkerLinkPlayer *p) {
+    p->info.flags = (uint8_t) ((p->info.flags & ~NET_PLAYER_INFO_HOST) |
+                               (l->host_id[0] && p->id[0] && !strcmp(l->host_id, p->id) ? NET_PLAYER_INFO_HOST : 0));
+    emit(l, NET_PACKET_PLAYER_INFO, &p->info, sizeof(p->info));
 }
 
 // "0" ADD_PLAYERS: a flat list, 53 (0x35) values per player (game.deob.js:220266-220330); the
@@ -300,7 +310,9 @@ static void on_add_players(KrunkerLink *l, const KrunkerFrame *f) {
         s.position[2] = (float) num(E(KRUNKER_ADD_Z), 0);
         s.direction[0] = 0.0f;                     // yDire is not in "0"
         s.direction[1] = (float) num(E(KRUNKER_ADD_X_DIRE), 0);    // xDire
-        const char *name = krunker_str(E(KRUNKER_ADD_NAME));
+        // the name everything shows is the alias: players.add `alias = [28] || name` (:171939)
+        const char *name = krunker_str(E(KRUNKER_ADD_ALIAS));
+        if (!name || !name[0]) name = krunker_str(E(KRUNKER_ADD_NAME));
         if (name && name[0]) snprintf(s.name, sizeof(s.name), "%s", name);
         else snprintf(s.name, sizeof(s.name), "Guest_%d", s.uid); // players.add's default
         s.secondary_index = (int32_t) num(E(KRUNKER_ADD_SEC_INDEX), -1);
@@ -308,14 +320,29 @@ static void on_add_players(KrunkerLink *l, const KrunkerFrame *f) {
         s.attach_index = (int32_t) num(E(KRUNKER_ADD_ATTACH_INDEX), 0); // was 23 (pcStatIndex)
         s.head_mlt = 1.0f;
         s.cosmetics_v7 = PLAYER_COSMETICS_V7_NONE;
-#undef E
         KrunkerLinkPlayer *p = player(l, s.uid, 1);
         if (p) {
             p->health = s.health;
             p->max_health = s.max_health;
             p->team = s.team;
             snprintf(p->id, sizeof(p->id), "%s", id); // "chgp" findById
+            p->class_index = s.class_index;
+            const char *real = krunker_str(E(KRUNKER_ADD_NAME));
+            snprintf(p->name, sizeof(p->name), "%s", real && real[0] ? real : s.name);
+            NetPlayerInfoPacket *in = &p->info;
+            memset(in, 0, sizeof(*in));
+            in->uid = s.uid;
+            in->account_id = (int32_t) num(E(KRUNKER_ADD_ACCID), 0);
+            in->level = (int32_t) num(E(KRUNKER_ADD_LEVEL), 0);
+            const char *clan = krunker_str(E(KRUNKER_ADD_CLAN));
+            if (clan) snprintf(in->clan, sizeof(in->clan), "%s", clan);
+            in->flags = (uint8_t) ((num(E(KRUNKER_ADD_PREMIUM_T), 0) > 0 ? NET_PLAYER_INFO_PREMIUM : 0) |
+                                   (truthy(E(KRUNKER_ADD_FEATURED)) ? NET_PLAYER_INFO_VERIFIED : 0) |
+                                   (truthy(E(KRUNKER_ADD_IS_HACKER)) ? NET_PLAYER_INFO_HACKER : 0) |
+                                   (truthy(E(KRUNKER_ADD_IS_BOT)) ? NET_PLAYER_INFO_BOT : 0) |
+                                   (truthy(E(KRUNKER_ADD_CREATOR_BADGE)) ? NET_PLAYER_INFO_CREATOR : 0));
         }
+#undef E
         if (s.is_you) {
             const int first = l->my_sid != s.uid;
             l->my_sid = s.uid;
@@ -323,6 +350,7 @@ static void on_add_players(KrunkerLink *l, const KrunkerFrame *f) {
             if (first) note(l, KRUNKER_LINK_EV_JOINED, "joined as sid %d (%s)", s.uid, s.name);
         }
         emit(l, NET_PACKET_SPAWN, &s, sizeof(s));
+        if (p) emit_player_info(l, p); // after SPAWN, as our own server sends it
     }
 }
 
@@ -414,8 +442,46 @@ static void on_sync_player(KrunkerLink *l, const KrunkerFrame *f) {
 
 static KrunkerLinkStats *stats(KrunkerLink *l, int sid); // the HUD stats of clusters C / D (below)
 
+static void js_string(const KrunkerValue *v, char *out, size_t n); // below
+
+// "3" deathStats to the victim (:220591-220616, iîïïiìî): [weaponId, killerClassStat, [pcStatIndex,
+// value] | null, [timeAliveMs, shots, accuracy, kills, score]] -> NET_PACKET_DEATH_INFO ahead of the
+// KILL (the death card's stats panel, the killer's class level and player-card stat), as our server
+// sends it (combat: player.c)
+static void emit_death_info(KrunkerLink *l, const NetKillPacket *k, const KrunkerValue *stats, const KrunkerValue *info) {
+    if (!krunker_is(stats, KRUNKER_ARRAY)) return;
+    NetDeathInfoPacket d;
+    memset(&d, 0, sizeof(d));
+    d.victim_uid = k->victim_uid;
+    d.killer_uid = k->killer_uid;
+    d.weapon_index = (int32_t) num(krunker_at(stats, 0), -1);
+    d.class_stat = (int32_t) num(krunker_at(stats, 1), 0);
+    d.pc_stat_index = -1;
+    const KrunkerValue *pc = krunker_at(stats, 2);
+    if (krunker_is(pc, KRUNKER_ARRAY) && krunker_is(krunker_at(pc, 0), KRUNKER_NUM)) {
+        d.pc_stat_index = (int8_t) num(krunker_at(pc, 0), -1);
+        char value[sizeof(d.pc_stat_value) + 1];
+        js_string(krunker_at(pc, 1), value, sizeof(value));
+        memcpy(d.pc_stat_value, value, sizeof(d.pc_stat_value));
+    }
+    const KrunkerValue *life = krunker_at(stats, 3);
+    if (krunker_is(life, KRUNKER_ARRAY)) {
+        d.time_alive_ms = (int32_t) num(krunker_at(life, 0), 0);
+        d.shots = (int32_t) num(krunker_at(life, 1), 0);
+        char acc[sizeof(d.accuracy) + 1];
+        js_string(krunker_at(life, 2), acc, sizeof(acc));
+        memcpy(d.accuracy, acc, sizeof(d.accuracy));
+        d.kills = (int32_t) num(krunker_at(life, 3), 0);
+        d.score = (int32_t) num(krunker_at(life, 4), 0);
+    }
+    d.thrown = krunker_is(info, KRUNKER_MAP) && truthy(krunker_get(info, "pj"));
+    d.fists = (k->fists & NET_KILL_FISTS) ? 1 : 0;
+    emit(l, NET_PACKET_DEATH_INFO, &d, sizeof(d));
+}
+
 // "3" KILL_PLAYER [victimSid, victimDeaths, killerSid, deathStats, killInfo, hideFeed]
-// (game.deob.js:220579; killInfo {wId, fs, stk, pkg} at :220620's feed)
+// (game.deob.js:220579; the feed row :221222-221246 reads killInfo {wId (null: the killer's held
+// weapon), stk (+ pkg), fs, pj, wb, hs}; hideFeed: no row, killedBy still counts, :220629)
 static void on_kill(KrunkerLink *l, const KrunkerFrame *f) {
     if (!krunker_is(arg(f, KRUNKER_KILL_ARG_VICTIM), KRUNKER_NUM)) return;
     NetKillPacket k;
@@ -427,12 +493,18 @@ static void on_kill(KrunkerLink *l, const KrunkerFrame *f) {
     const KrunkerValue *info = arg(f, KRUNKER_KILL_ARG_INFO);
     if (krunker_is(info, KRUNKER_MAP)) {
         k.weapon_index = (int32_t) num(krunker_get(info, "wId"), -1);
-        k.fists = truthy(krunker_get(info, "fs")) ? NET_KILL_FISTS : 0;
+        const KrunkerValue *stk = krunker_get(info, "stk");
+        const int streak = krunker_is(stk, KRUNKER_NUM) && stk->u.num >= 0 && stk->u.num < 15 ? (int) stk->u.num : -1;
+        k.fists = (uint8_t) ((truthy(krunker_get(info, "fs")) ? NET_KILL_FISTS : 0) | (streak == 0 ? NET_KILL_NUKE : 0) |
+                             (truthy(krunker_get(info, "pj")) ? NET_KILL_THROWN : 0) | (streak >= 0 ? (streak + 1) << NET_KILL_STREAK_SHIFT : 0));
         k.headshot = truthy(krunker_get(info, "hs")) ? 1 : 0;
+        k.wallbang = truthy(krunker_get(info, "wb")) ? 1 : 0;
     } else if (krunker_is(info, KRUNKER_NUM)) {
         k.weapon_index = (int32_t) info->u.num;
     }
-    k.killer_class = -1;
+    if (truthy(arg(f, KRUNKER_KILL_ARG_HIDE_FEED))) k.fists |= NET_KILL_HIDE_FEED;
+    const KrunkerLinkPlayer *killer = k.killer_uid >= 0 ? player(l, k.killer_uid, 0) : NULL;
+    k.killer_class = killer ? killer->class_index : -1; // the kill card's class icon (killer.classIndex, :220616)
     k.respawn_delay = GAME_DEATH_DELAY;
     // killer_kills (#killsVal, the board): the live server sends the killer its "6" (totalKills)
     // right before this "3" (players.kill :174098), so ours is already counted; others count here
@@ -441,15 +513,18 @@ static void on_kill(KrunkerLink *l, const KrunkerFrame *f) {
     k.killer_kills = ks ? ks->kills : 0;
     KrunkerLinkStats *vs = stats(l, k.victim_uid);
     if (vs) vs->deaths = k.victim_deaths;
+    if (k.victim_uid == l->my_sid) emit_death_info(l, &k, arg(f, KRUNKER_KILL_ARG_STATS), info);
     emit(l, NET_PACKET_KILL, &k, sizeof(k));
 }
 
-// "4" DO_DAMAGE [targetSid, damage, crit, kill, isAI, silent] (game.deob.js:221254)
+// "4" DO_DAMAGE [targetSid, damage, crit, kill, isAI, silent] (game.deob.js:221254): the number is
+// Math.ceil(dmg) (settings dmgType 0, "Rounded", the default, :221259). Not carried: silent (no
+// hit sound) and the live build's crit_0 sound (10.0.3; v10.0.2 and our assets have hit_0 only).
 static void on_damage(KrunkerLink *l, const KrunkerFrame *f) {
     NetHitPacket h;
     memset(&h, 0, sizeof(h));
     h.target_uid = (int32_t) num(arg(f, KRUNKER_DAMAGE_ARG_TARGET), -1);
-    h.damage = (int32_t) js_round(num(arg(f, KRUNKER_DAMAGE_ARG_DAMAGE), 0));
+    h.damage = (int32_t) ceil(num(arg(f, KRUNKER_DAMAGE_ARG_DAMAGE), 0));
     h.crit = truthy(arg(f, KRUNKER_DAMAGE_ARG_CRIT)) ? 1 : 0;
     h.kill = truthy(arg(f, KRUNKER_DAMAGE_ARG_KILL)) ? 1 : 0;
     h.ai = truthy(arg(f, KRUNKER_DAMAGE_ARG_AI)) ? 1 : 0;
@@ -465,7 +540,9 @@ static void on_health(KrunkerLink *l, const KrunkerFrame *f) {
     memset(&h, 0, sizeof(h));
     h.uid = sid;
     h.health = (float) num(arg(f, KRUNKER_HEALTH_ARG_HEALTH), 0);
-    if (krunker_is(arg(f, KRUNKER_HEALTH_ARG_SRC_X), KRUNKER_NUM) && krunker_is(arg(f, KRUNKER_HEALTH_ARG_SRC_Z), KRUNKER_NUM)) {
+    // the hit direction only without noHitMarker (:221062-221075: falls, zones, regen send none)
+    if (krunker_is(arg(f, KRUNKER_HEALTH_ARG_SRC_X), KRUNKER_NUM) && krunker_is(arg(f, KRUNKER_HEALTH_ARG_SRC_Z), KRUNKER_NUM) &&
+        !truthy(arg(f, KRUNKER_HEALTH_ARG_NO_HIT_MARKER))) {
         h.has_source = 1;
         h.source_x = (float) arg(f, KRUNKER_HEALTH_ARG_SRC_X)->u.num;
         h.source_z = (float) arg(f, KRUNKER_HEALTH_ARG_SRC_Z)->u.num;
@@ -487,8 +564,11 @@ static void on_health(KrunkerLink *l, const KrunkerFrame *f) {
     }
 }
 
-// "ch" ADD_CHAT [team, name, text, kind, color, ...] (game.deob.js:221172): kind 0 player line,
-// 1 / 4 game line, 2 server line (color), 3 trade request (text = the sender's sid)
+// "ch" ADD_CHAT [team, name, text, kind, color, nameColor, senderAccountId, extra] (game.deob.js:221172):
+// kind 0 player line, 1 / 4 game line, 2 server line (color), 3 trade request (text = the sender's
+// sid). A player line goes out as our v7 chat (NET_PACKET_CHAT_V7): arg 0 is its chat tab (0 global,
+// 1 team; the HUD forces -1 outside team modes, as addChat does) and arg 6 the account the mute list
+// checks. Not carried: a server line's own colour (the HUD's #fc03ec default), nameColor, extra actions.
 static void on_chat(KrunkerLink *l, const KrunkerFrame *f) {
     const char *text = krunker_str(arg(f, 2));
     const int kind = (int) num(arg(f, 3), 0);
@@ -500,6 +580,16 @@ static void on_chat(KrunkerLink *l, const KrunkerFrame *f) {
     const char *name = krunker_str(arg(f, 1));
     snprintf(c.name, sizeof(c.name), "%s", name ? name : "");
     snprintf(c.text, sizeof(c.text), "%s", text);
+    if (kind == 0) {
+        NetChatV7Packet v;
+        memset(&v, 0, sizeof(v));
+        const double team = num(arg(f, 0), 0);
+        v.channel = (int8_t) (team == CHAT_CHANNEL_TEAM ? CHAT_CHANNEL_TEAM : team < 0 ? CHAT_CHANNEL_ALL : CHAT_CHANNEL_GLOBAL);
+        v.account_id = (int32_t) num(arg(f, 6), 0);
+        v.chat = c;
+        emit(l, NET_PACKET_CHAT_V7, &v, sizeof(v));
+        return;
+    }
     emit(l, NET_PACKET_CHAT, &c, sizeof(c));
 }
 
@@ -1023,6 +1113,34 @@ static void on_action(KrunkerLink *l, const KrunkerFrame *f) {
 
 // "chi" ADD_CHATI18N [team, name, key | [key, ...args], kind, color, ...] (iïîíïîï :221142):
 // addChat(team, name, i18n.t(key, ...args), kind, color). Translated by the client (main thread).
+// One localized chat line (Krunker's addChat(team, name, i18n.t(key, ...args), kind, color)) as
+// NET_EXT_KN_OFFICIAL_CHAT_I18N; kind is Krunker's (0 player, 2 server, else a game line).
+static void emit_chat_i18n(KrunkerLink *l, const int kind, const char *name, const char *key, const char *const *args,
+                           const int argc, const char *color) {
+    uint8_t body[NET_EXT_BODY_MAX];
+    NetOfficialChatI18nHeader h;
+    memset(&h, 0, sizeof(h));
+    h.kind = (uint8_t) (kind == 0 ? NET_CHAT_PLAYER : kind == 2 ? NET_CHAT_SERVER : NET_CHAT_GAME);
+    if (color) snprintf(h.color, sizeof(h.color), "%s", color);
+    size_t len = sizeof(h);
+    const char *head[2] = {name ? name : "", key};
+    for (int i = 0; i < 2; i++) {
+        const size_t n = strlen(head[i]) + 1;
+        if (len + n > sizeof(body)) return;
+        memcpy(body + len, head[i], n);
+        len += n;
+    }
+    for (int i = 0; i < argc && h.argc < 16; i++) {
+        const size_t n = strlen(args[i]) + 1;
+        if (len + n > sizeof(body)) break;
+        memcpy(body + len, args[i], n);
+        len += n;
+        h.argc++;
+    }
+    memcpy(body, &h, sizeof(h));
+    emit_hud_ext(l, NET_EXT_KN_OFFICIAL_CHAT_I18N, body, (uint16_t) len);
+}
+
 static void on_chat_i18n(KrunkerLink *l, const KrunkerFrame *f) {
     const KrunkerValue *k = arg(f, 2);
     const KrunkerValue *key = krunker_is(k, KRUNKER_ARRAY) ? krunker_at(k, 0) : k;
@@ -1030,32 +1148,35 @@ static void on_chat_i18n(KrunkerLink *l, const KrunkerFrame *f) {
     const char *ks = krunker_str(key);
     const int kind = (int) num(arg(f, 3), 0);
     if (!ks || !ks[0] || kind == 3) return;
-    uint8_t body[NET_EXT_BODY_MAX];
-    NetOfficialChatI18nHeader h;
-    memset(&h, 0, sizeof(h));
-    h.kind = (uint8_t) (kind == 0 ? NET_CHAT_PLAYER : kind == 2 ? NET_CHAT_SERVER : NET_CHAT_GAME);
-    const char *color = krunker_str(arg(f, 4));
-    if (color) snprintf(h.color, sizeof(h.color), "%s", color);
-    const char *name = krunker_str(arg(f, 1));
-    size_t len = sizeof(h);
-    const char *head[2] = {name ? name : "", ks};
-    for (int i = 0; i < 2; i++) {
-        const size_t n = strlen(head[i]) + 1;
-        if (len + n > sizeof(body)) return;
-        memcpy(body + len, head[i], n);
-        len += n;
+    char store[16][128];
+    const char *args[16];
+    int n = 0;
+    for (uint32_t i = 0; i < argc && n < 16; i++, n++) {
+        js_string(krunker_at(k, i + 1), store[n], sizeof(store[n]));
+        args[n] = store[n];
     }
-    for (uint32_t i = 0; i < argc && h.argc < 16; i++) {
-        char a[128];
-        js_string(krunker_at(k, i + 1), a, sizeof(a));
-        const size_t n = strlen(a) + 1;
-        if (len + n > sizeof(body)) break;
-        memcpy(body + len, a, n);
-        len += n;
-        h.argc++;
+    emit_chat_i18n(l, kind, krunker_str(arg(f, 1)), ks, args, n, krunker_str(arg(f, 4)));
+}
+
+// "uh" UPDATE_HOST [hostSocketId | null, silent] (iíîíïìï :219273): game.host (the player list's star:
+// PLAYER_INFO HOST) and, unless silent, "You are now Host!" / "Host Transfered to <name>" (kind 2)
+static void on_update_host(KrunkerLink *l, const KrunkerFrame *f) {
+    char host[sizeof(l->host_id)];
+    id_string(arg(f, 0), host, sizeof(host));
+    const int changed = strcmp(host, l->host_id) != 0;
+    snprintf(l->host_id, sizeof(l->host_id), "%s", host);
+    for (int i = 0; changed && i < l->player_count; i++) emit_player_info(l, &l->players[i]);
+    if (truthy(arg(f, 1)) || !host[0]) return;
+    if (l->socket_id[0] && !strcmp(host, l->socket_id)) {
+        emit_chat_i18n(l, 2, NULL, "host.transfer.you", NULL, 0, NULL);
+        return;
     }
-    memcpy(body, &h, sizeof(h));
-    emit_hud_ext(l, NET_EXT_KN_OFFICIAL_CHAT_I18N, body, (uint16_t) len);
+    for (int i = 0; i < l->player_count; i++) {
+        if (strcmp(l->players[i].id, host) != 0) continue;
+        const char *args[1] = {l->players[i].name};
+        emit_chat_i18n(l, 2, NULL, "host.transfer", args, 1, NULL);
+        return;
+    }
 }
 
 // endForm's reward cell: player.reward ? "<span style='color:#F8C55C'>+N</span> KR" : "NONE", or
@@ -1579,6 +1700,7 @@ static void on_regen(KrunkerLink *l, const KrunkerFrame *f) {
     const int ci = (int) num(krunker_at(items, 15), -1), sec = (int) num(krunker_at(items, 14), -1);
     if (ci < 0 || (size_t) ci >= rules_class_count()) return;
     const ClassConfig *c = &rules_classes()[ci];
+    p->class_index = ci;
     NetLoadoutPacket lo;
     memset(&lo, 0, sizeof(lo));
     lo.uid = p->sid;
@@ -1601,16 +1723,19 @@ static void on_regen(KrunkerLink *l, const KrunkerFrame *f) {
     emit(l, NET_PACKET_TEAM, &t, sizeof(t));
 }
 
-// "00" UPDATE_NAMES [[id, name, alias, ...], keepOpen] (iíîîîíi :220322): per (socket) id the name
-// (alias not shown); keepOpen falsy -> socket.close(): the server ends our session
+// "00" UPDATE_NAMES [[id, name, alias, ...], keepOpen] (iíîîîíi :220322): per (socket) id the name and
+// alias (what is shown: alias || name); keepOpen falsy -> socket.close(): the server ends our session
 static void on_update_names(KrunkerLink *l, const KrunkerFrame *f) {
     const KrunkerValue *list = arg(f, 0);
     for (uint32_t i = 0; krunker_is(list, KRUNKER_ARRAY) && i + 1 < list->len; i += 3) {
         char id[64];
         id_string(&list->u.items[i], id, sizeof(id));
-        const char *name = krunker_str(&list->u.items[i + 1]);
+        const char *alias = i + 2 < list->len ? krunker_str(&list->u.items[i + 2]) : NULL;
+        const char *name = alias && alias[0] ? alias : krunker_str(&list->u.items[i + 1]); // alias || name, as "0"
         for (int k = 0; id[0] && name && k < l->player_count; k++) {
             if (strcmp(l->players[k].id, id) != 0) continue;
+            const char *real = krunker_str(&list->u.items[i + 1]);
+            if (real && real[0]) snprintf(l->players[k].name, sizeof(l->players[k].name), "%s", real);
             NetPlayerNamePacket n;
             memset(&n, 0, sizeof(n));
             n.uid = l->players[k].sid;
@@ -1735,6 +1860,7 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         case KRUNKER_S2C_END_GAME: on_end_game(l, &f); break;
         case KRUNKER_S2C_ACTION_FEED: on_action(l, &f); break;
         case KRUNKER_S2C_ADD_CHATI18N: on_chat_i18n(l, &f); break;
+        case KRUNKER_S2C_UPDATE_HOST: on_update_host(l, &f); break;
         default: l->unknown_in++; break;
     }
     krunker_frame_free(&f);

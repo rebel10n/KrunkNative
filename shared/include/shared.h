@@ -2669,10 +2669,16 @@ typedef struct {
 _Static_assert(sizeof(NetKillPacket) == 35, "NetKillPacket: older peers check this exact size");
 #define NET_KILL_FISTS 0x01 // NetKillPacket.fists bit 0: melee without the knife (Krunker fs)
 #define NET_KILL_NUKE 0x02  // bit 1: a Nuke kill, v7 info {stk: 0} (the kill feed's img/streaks/0.png)
+// Bits only the official-Krunker link sets (client/src/net/krunker_link.c, never on the wire: our
+// servers send 0 there and net.c keeps only NET_KILL_FISTS for older peers):
+#define NET_KILL_THROWN 0x04    // killInfo.pj: a thrown melee (the feed's img/thrown_0.png before the melee icon)
+#define NET_KILL_HIDE_FEED 0x08 // "3" hideFeed: no kill-feed row (player.killedBy still counts)
+#define NET_KILL_STREAK_SHIFT 4 // bits 4-7: killInfo.stk + 1 (0 = not a streak kill): img/streaks/<stk>.png
+#define NET_KILL_STREAK(fists) ((int) ((fists) >> NET_KILL_STREAK_SHIFT) - 1)
 
 typedef struct {
     int32_t target_uid;
-    int32_t damage;        // Math.round(dmg)
+    int32_t damage;        // Math.round(dmg) (official lobbies: Math.ceil, v10's default "Rounded" dmgType)
     uint8_t crit;          // headshot
     uint8_t kill;
     uint8_t ai;            // target_uid is an AI sid (Krunker "4" fifth value isAI)

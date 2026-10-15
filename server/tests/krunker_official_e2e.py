@@ -99,7 +99,7 @@ except ImportError:  # pragma: no cover
 ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
 BUILD = os.path.abspath(ARGS[0] if ARGS else "cmake-build-debug")
 DIST = os.path.abspath(ARGS[1]) if len(ARGS) > 1 else None
-ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude": "exclude", "--reload": "reload"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude": "exclude", "--reload": "reload", "--ingame": "ingame"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -426,6 +426,7 @@ class Stub:
             return e
 
         hud = self.scenario == "hud"
+        ingame = self.scenario == "ingame"
 
         stop = asyncio.Event()
 
@@ -507,9 +508,17 @@ class Stub:
                 await send("init", self.map_index, 3, 0, [[1, 0], [2, 0]], [[1, 3, "AT BASE"], [2, 1, "AT BASE"]], None, {}, None, 0, None, None,
                            {"gor": True, "flg": [[40, 0.0, 0.0, 0.0, 0, None], [41, 20.0, 0.0, 20.0, 0, None]], "obj": [None, 0]},
                            None, False, True, False, None, None, 0)
+            elif ingame:  # TDM (1); arg 5: the bot hosts this (custom) lobby; arg 14 isOfficial
+                await send("init", self.map_index, 1, 0, [[1, 0], [2, 0]], [[1, 0], [2, 0]], "sockBOT", {}, None, 0, None, None, {"gor": True},
+                           None, False, True, False, None, None, 0)
             else:
                 await send("init", self.map_index, 0, 0, None, None, None, {}, None, 0, None, {"gor": True}, None, False, True, False, None, None, 0)
-            await send("0", player("sockBOT", BOT_SID, "StubBot", 0.0, 0.0, team=2 if hud else 0))
+            if ingame:  # the bot's account: alias AceBot (its name "acctBot" is never shown), class 1, level 33, clan CLN, featured
+                bot = player("sockBOT", BOT_SID, "acctBot", 0.0, 0.0, team=2)
+                bot[6], bot[10], bot[11], bot[25], bot[28], bot[31] = 1, 33, "CLN", True, "AceBot", 777
+                await send("0", bot)
+            else:
+                await send("0", player("sockBOT", BOT_SID, "StubBot", 0.0, 0.0, team=2 if hud else 0))
             for nonce, ct, _ in CC_CASES:
                 await send("cc", nonce, None, ct)
             await send("cpt", self.cpt)
@@ -543,6 +552,10 @@ class Stub:
                     if stop.is_set():
                         break
                     await asyncio.sleep(0.1)
+            elif self.got_en.is_set() and ingame:
+                await send("frs")
+                await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0, team=1))
+                await self.ingame_phases(send, stop)
             elif self.got_en.is_set() and hud:
                 await send("frs")
                 await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0, team=1))
@@ -725,6 +738,37 @@ class Stub:
                                            BOT_SID, ["StubBot", "StubBot"], 40, 0, 1, 0, "NONE"],
                                     "tms": [[1, 5, None], [2, 1, None]], "mdls": [], "mts": [], "vo": {}, "modeIndex": 3}, 1, 3, 12, None, {})
         await hold(12.0)
+        self.sent["done"] = time.monotonic()
+
+    async def ingame_phases(self, send, stop):
+        """official-ingame (run_native_ingame): names and account fields, the kill feed's v10 icons,
+        hideFeed, team chat, the host line, our own death card from deathStats. An "l" every 0.4 s keeps
+        us where we spawned and acks the last isn."""
+        async def hold(seconds):
+            end = time.monotonic() + seconds
+            while time.monotonic() < end and not stop.is_set():
+                qs = [f for f in self.frames if f[0] == "q"]
+                isn = int(qs[-1][1][1]) if qs else 0
+                await send("l", [isn, 42, 4.0, 0, 4.0, 0, 0, 0, 0.0, True, False, False, 0, False, False, 0, 0, 0, 0, True, False, 0, 0, None, 0])
+                await asyncio.sleep(0.4)
+
+        await hold(3.0)
+        self.sent["ingame"] = time.monotonic()
+        await send("7", [MY_SID, 10, BOT_SID, 50])  # UPDATE_LEADERS (TDM: score): the board lists the alias and clan
+        await send("ch", 1, "AceBot", "team push b", 0, None, None, 777)  # a team-tab line
+        await send("ch", 0, "AceBot", "global hello", 0, None, None, 777)
+        # kills of the bot by us, each in the feed for 4 s: a wallbang headshot, a hidden one, streak 2, a thrown melee
+        await send("3", BOT_SID, 1, MY_SID, None, {"wId": 1, "wb": True, "hs": True}, False)
+        await send("3", BOT_SID, 2, MY_SID, None, {"stk": 3}, True)
+        await send("3", BOT_SID, 3, MY_SID, None, {"stk": 2}, False)
+        await send("3", BOT_SID, 4, MY_SID, None, {"wId": 12, "pj": True}, False)
+        await send("4", BOT_SID, 24.1, False, False, False)  # DO_DAMAGE: 25 on the damage number
+        await send("uh", "sockME", False)  # UPDATE_HOST: "You are now Host!"
+        await hold(3.0)
+        self.sent["death"] = time.monotonic()
+        # the bot kills us: deathStats [weapon, killer class stat, [pcStat, value], [alive ms, shots, accuracy, kills, score]]
+        await send("3", MY_SID, 1, BOT_SID, [1, 1234, None, [61000, 40, "37.5%", 4, 350]], {"wId": 1}, False)
+        await hold(6.0)
         self.sent["done"] = time.monotonic()
 
     def start_ws(self):
@@ -1419,6 +1463,65 @@ def run_native_hud():
     endtab = [clean(t) for t in probe("endtab")]
     check(f"{label}: END_GAME: the results list both players with our reward", any("Guest_9" in t and "StubBot" in t and "12" in t
                                                                                      for t in endtab), endtab[-1:])
+
+
+def run_native_ingame():
+    """official-ingame (krunker_link.c names / kill feed / death card / chat / host): the stub
+    (Stub.ingame_phases) plays a TDM lobby whose bot is "AceBot" (alias; its name acctBot), clan CLN,
+    level 33, featured, class 1, the lobby's host; we kill it four ways, chat arrives on both tabs, the
+    host moves to us, then the bot kills us with deathStats."""
+    label = "native-ingame"
+    dense = ["nodes @wb [src='./img/wallbang_0.png']", "nodes @hs [src='img/headshot_0.png']",
+             "nodes @thrown .thrownChatIcon", "nodes @stk2 [src='img/streaks/2.png']",
+             "nodes @stk3 [src='img/streaks/3.png']", "text @feed [id=killFeed]"]
+    sparse = ["text @lead [id=leaderContainer]", "nodes @team1 [data-tab='1']", "grep @chatteam push [id=chatList]",
+              "grep @chatglob hello [id=chatList]", "grep @host Host! [id=chatList]", "grep @dacc 37.5% [id=deathUIHolder]",
+              "grep @dkill AceBot [id=deathUIHolder]", "grep @dname acctBot [id=deathUIHolder]", "vis @death deathUIHolder"]
+    probes = "".join("%d %s\n" % (t + k, kind) for t in range(5000, 22000, 600) for k, kind in enumerate(dense))
+    probes += "".join("%d %s\n" % (t + k, kind) for t in range(5000, 22000, 1500) for k, kind in enumerate(sparse))
+    script = "0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n%s22500 quit\n" % (PASTE_TOKEN, probes)
+    events = sorted(script.strip().split("\n"), key=lambda l: int(l.split()[0]))
+    # Settings > Chat "Show Player Messages" (showMessages, v10's default off) on, as a player who reads chat
+    store = os.path.join(WORK, label + "-cfg", "krunknative")
+    os.makedirs(store, exist_ok=True)
+    with open(os.path.join(store, "knSettings.json"), "w") as f:
+        json.dump({"showMessages": True}, f)
+    stub, p, out, log = launch_native(label, "\n".join(events) + "\n", {}, scenario="ingame")
+    lines = finish_native(label, stub, p, out, log, timeout=240)
+    text = "\n".join(lines)
+    check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+    for name in ("ingame", "death", "done"):
+        check(f"{label}: the stub got to send its \"{name}\" packets", name in stub.sent, sorted(stub.sent))
+    check(f"{label}: the server saw no ahNum / \"q\"-sequence violations", not stub.proto_errors, stub.proto_errors[:5])
+
+    def nodes(name):
+        return [int(m.group(1)) for m in re.finditer(r"\[input_script\] nodes t=\d+ @%s elements=\d+ match=(\d+)" % name, text)]
+
+    def grep(name):
+        return [int(m.group(1)) for m in re.finditer(r"\[input_script\] grep t=\d+ @%s needle=\S+ n=\d+ hits=(\d+)" % name, text)]
+
+    def probe(name):
+        return [m.group(1) for m in re.finditer(r"\[input_script\] text t=\d+ @%s n=\d+ checked=\d+ value=\S* text=(.*)" % name, text)]
+
+    clean = lambda t: t.replace("\u200e", "").replace("\u200f", "")  # noqa: E731
+    feed = [clean(t) for t in probe("feed")]
+    check(f"{label}: \"3\" wb + hs: the feed row has the wallbang and headshot icons", max(nodes("wb") or [0]) >= 1 and max(nodes("hs") or [0]) >= 1,
+          (nodes("wb")[-3:], nodes("hs")[-3:]))
+    check(f"{label}: \"3\" pj: the thrown icon", max(nodes("thrown") or [0]) >= 1, nodes("thrown")[-3:])
+    check(f"{label}: \"3\" stk 2: the streak icon", max(nodes("stk2") or [0]) >= 1, nodes("stk2")[-3:])
+    check(f"{label}: \"3\" hideFeed: no row for the hidden (stk 3) kill", nodes("stk3") and max(nodes("stk3")) == 0, nodes("stk3")[-3:])
+    check(f"{label}: the feed shows the bot's alias, never its name", any("AceBot" in t for t in feed) and not any("acctBot" in t for t in feed),
+          feed[-1:])
+    lead = [clean(t) for t in probe("lead")]
+    check(f"{label}: the leaderboard: alias and clan CLN", any("AceBot" in t and "CLN" in t for t in lead), lead[-1:])
+    check(f"{label}: \"ch\" team 1: a team-tab row", max(nodes("team1") or [0]) >= 1, nodes("team1")[-3:])
+    check(f"{label}: \"ch\": both lines reached #chatList", max(grep("chatteam") or [0]) >= 1 and max(grep("chatglob") or [0]) >= 1,
+          (grep("chatteam")[-2:], grep("chatglob")[-2:]))
+    check(f"{label}: \"uh\": You are now Host!", max(grep("host") or [0]) >= 1, grep("host")[-2:])
+    shown = re.findall(r"\[input_script\] vis t=\d+ @death deathUIHolder=(\d)", text)
+    check(f"{label}: our death shows the death card", "1" in shown, shown[-3:])
+    check(f"{label}: the death card: deathStats accuracy and the killer's alias", max(grep("dacc") or [0]) >= 1 and
+          max(grep("dkill") or [0]) >= 1 and max(grep("dname") or [0]) == 0, (grep("dacc")[-2:], grep("dkill")[-2:], grep("dname")[-2:]))
 
 
 def run_native_lobby():
@@ -2213,6 +2316,7 @@ def main():
         run_native_sync()
         run_native_hq()
         run_native_hud()
+        run_native_ingame()
         run_native_lobby()
         run_native_badmap()
         run_native_kick()
@@ -2222,6 +2326,8 @@ def main():
         run_native_reload(False)
         run_native_reload(True)
         ran = True
+    if ONLY == "ingame" and os.path.isfile(f"{BUILD}/client_bin"):  # just official-ingame's run
+        run_native_ingame()
     if ONLY == "exclude" and os.path.isfile(f"{BUILD}/client_bin"):  # just Find New Game's runs
         run_native_exclude()
         run_native_exclude_mm()
