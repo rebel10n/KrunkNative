@@ -262,6 +262,13 @@ static void join_account(void *ud, kn_http_req *req, const int64_t id, const int
 /* regions=eu or as,eu,na (v10 "&regions=" + regions.join(",")); unknown entries are dropped */
 static void h_queue(kn_http_req *req, void *ud) {
     (void) ud;
+    /* ranked is Krunker Box Office's: its matches are hosted on base nodes only (brain_host_game_ex
+     * flavor NULL), so another app's client (?flavor=strike, doc/backend.md "Flavor pools") is never
+     * queued into one, whose server would refuse its HELLO */
+    char flavor[16] = "";
+    kn_http_query_get(req, "flavor", flavor, sizeof flavor);
+    if (!registry_flavor_match("", flavor))
+        return reply_mm_error(req, "FLAVOR_UNAVAILABLE", "Ranked is not available in this game", NULL);
     if (!db_ready()) return reply_mm_error(req, "INTERNAL_ERROR", "Ranked is unavailable", NULL);
     if (R.b->draining) return reply_mm_error(req, "INTERNAL_ERROR", "updating", NULL);
     JoinCtx *j = calloc(1, sizeof(*j));

@@ -23,6 +23,7 @@
 #include <ui_logic.h>
 #include <html_ui.h>
 #include <ranked.h>
+#include <flavor.h> // the coordinator's flavor pool: ranked is Box Office's
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -273,6 +274,8 @@ static void handle_message(const cJSON *msg) {
             show_overlay("Level Required", "You must be level 10 or higher to access Ranked Mode.", "OK", "#ff3939", "\xf0\x9f\x94\x92", 0);
         else if (!strcmp(code, "LOGIN_REQUIRED"))
             show_overlay("Login Required", "You must be logged in to access Ranked Mode.", "GOT IT", "#5ce05a", "\xf0\x9f\x94\x92", 1);
+        else if (!strcmp(code, "FLAVOR_UNAVAILABLE"))
+            show_overlay("Ranked Unavailable", "Ranked is not available in this game.", "OK", "#ff3939", "\xf0\x9f\x94\x92", 0);
         else if (!strcmp(code, "NO_RANK_DATA"))
             show_overlay("Rank Data Missing", "We could not retrieve your ranked data. Please try again later.", "OK", "#ff3939", "\xe2\x9d\x8c", 0);
         else if (!strcmp(code, "COOLDOWN")) {
@@ -377,7 +380,11 @@ static void start_matchmaking(void) { // startMatchmaking(allRegions)
     if (R.state != MM_IDLE || !acc()) return;
     char t[256], path[512];
     token(t, sizeof(t));
-    snprintf(path, sizeof(path), "/mm/ranked/queue?token=%s&regions=%s", t, R.all_regions ? "as,eu,na" : my_region());
+    int len = snprintf(path, sizeof(path), "/mm/ranked/queue?token=%s&regions=%s", t, R.all_regions ? "as,eu,na" : my_region());
+    // another app's client (Krunker Strike) says so: the coordinator never queues it into a Box Office
+    // ranked match (FLAVOR_UNAVAILABLE), whose server would refuse it
+    if (flavor_get() != FLAVOR_BASE && len > 0 && (size_t) len < sizeof(path))
+        snprintf(path + len, sizeof(path) - (size_t) len, "&flavor=%s", flavor_current()->key);
     R.state = MM_SEARCHING;
     R.busy = 1;
     R.queued_at = (double) time(NULL);

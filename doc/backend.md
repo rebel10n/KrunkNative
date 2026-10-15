@@ -1047,9 +1047,13 @@ the base game only, `strike` = Strike only, `all` / `*` = both (dashboards).
 | `/mm/game-list`, `/mm/game-info` | the pool's lobbies (the short link `CH1:abcde` resolves inside the pool) |
 | `/mm/ping-list`, `/mm/regions` | regions / nodes of the pool |
 | `/mm/host-game`, a node's `host-request` | a node of the pool (the requesting node's); ranked stays base |
+| `/mm/ranked/queue` | Box Office only: `?flavor=strike` is refused (`ERROR FLAVOR_UNAVAILABLE`), ranked matches are hosted on base nodes |
 | finder `/servers` | the same split by the KNINFO `flavor` (`finder_table.c`) |
 
-The Box Office client sends no `flavor` (unchanged requests); the Strike client adds
+Every client path that picks a lobby goes through these routes: Quick Match / F4 (`excludeGame`,
+`excludeRecent`), the server browser's Quick Join and rows, party follow, a friend's game, invite
+links, the Join window, the restart / drop rejoin and server redirects all seek by id or quick join
+in the pool. The Box Office client sends no `flavor` (unchanged requests); the Strike client adds
 `flavor=strike` to each of them (`servers_ui.c` `mm_flavor_param`), lists no official krunker.io
 lobbies, and joins with the coordinator's signed join ticket (5.3) like any client. The standalone
 `kn_strike_director` (doc/v10/strike-director.md) is the matchmaker only where no coordinator runs.

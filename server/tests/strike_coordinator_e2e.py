@@ -22,6 +22,13 @@ rotation), both also heartbeating to the brain's finder. Every port from kn_prot
   4. client_bin (headless): a Strike client (KN_FLAVOR=strike) seeks through the coordinator, joins
      SCSTRIKE1 and its server list shows only Strike lobbies; a Box Office client joins SCBASE1 and
      lists only Box Office ones (skipped without assets/css/fonts: KRUNKNATIVE_ASSETS_DIR)
+  4b. every other path that picks a lobby for a client keeps the pools apart: Quick Match / F4
+     (excludeGame / excludeRecent: never the other app's lobby, NoOtherLobby instead), party follow /
+     friend join / invite accept / rejoin (a lobby by canonical or short link id: the other app's is
+     InvalidGameId), game-info by link, the ranked queue (Box Office's: a Strike client gets
+     FLAVOR_UNAVAILABLE); in the clients, the server browser's Quick Join of every region group and a
+     pasted game link (console `connect`, the Join window's / a friend's join path) of the other app's
+     lobby never join it
   5. the base server stops: a Box Office seek finds nothing (never the Strike lobby) while a Strike
      seek still lands on SCSTRIKE1
 
@@ -136,18 +143,27 @@ def assets_dir():
 
 
 # The Servers window (showWindow 2), each region group expanded in turn (setExpandedRegion): how many
-# rows name the Strike node / the base node. Selectors as [id=...]: '#' starts a script comment.
+# rows name the Strike node / the base node; then every group's Quick Join, then the other app's
+# lobby as a pasted game link (console `connect`: the Join window's and a friend's join path,
+# servers_ui_join_game). Selectors as [id=...]: '#' starts a script comment.
 GROUPS = 8
-CLIENT_SCRIPT = "0 menu\n3000 state\n3100 call showWindow 2\n" + "".join(
-    "%d call setExpandedRegion %d\n%d grep @list%d SCSTRIKE [id=serverHolder]\n%d grep @list%d SCBASE [id=serverHolder]\n"
-    % (5000 + 400 * i, i, 5300 + 400 * i, i, 5300 + 400 * i, i) for i in range(GROUPS)) + "%d quit\n" % (5600 + 400 * GROUPS)
 
 
-def client(name, brain_port, flavor, assets, secs=120):
+def client_script(other_game):
+    s = "0 menu\n3000 state\n3100 call showWindow 2\n" + "".join(
+        "%d call setExpandedRegion %d\n%d grep @list%d SCSTRIKE [id=serverHolder]\n%d grep @list%d SCBASE [id=serverHolder]\n"
+        % (5000 + 400 * i, i, 5300 + 400 * i, i, 5300 + 400 * i, i) for i in range(GROUPS))
+    t = 5600 + 400 * GROUPS
+    s += "".join("%d call quickJoinRegion %d 1\n" % (t + 1500 * i, i) for i in range(GROUPS))
+    t += 1500 * GROUPS
+    return s + "%d con connect %s\n%d state\n%d quit\n" % (t, other_game, t + 3000, t + 3200)
+
+
+def client(name, brain_port, flavor, assets, other_game, secs=150):
     """One headless client_bin through the coordinator (KN_FLAVOR = the app); returns its log."""
     path = os.path.join(WORK, name + ".script")
     with open(path, "w") as f:
-        f.write(CLIENT_SCRIPT)
+        f.write(client_script(other_game))
     cfg = os.path.join(WORK, name + "-cfg")
     os.makedirs(os.path.join(cfg, "krunknative"), exist_ok=True)
     log = os.path.join(WORK, name + ".log")
@@ -310,12 +326,45 @@ def main():
             c.close()
         conns.clear()
 
+        # 4b. the other lobby-picking paths
+        code, rep = http(port, "/mm/seek-game?hostname=krunknative&region=local&flavor=strike&excludeGame=" + strike_id)
+        check("Strike Quick Match leaving the only Strike lobby: NoOtherLobby, never the base one",
+              code != 200 and rep.get("error") == "NoOtherLobby", (code, rep))
+        code, rep = http(port, "/mm/seek-game?hostname=krunknative&region=local&excludeGame=" + base_id)
+        check("Box Office Quick Match leaving the only base lobby: NoOtherLobby, never the Strike one",
+              code != 200 and rep.get("error") == "NoOtherLobby", (code, rep))
+        code, rep = http(port, "/mm/seek-game?hostname=krunknative&region=local&flavor=strike&excludeGame=x:y&excludeRecent=" + strike_id)
+        check("Strike F4 with its lobby as a recent one: back to it (the only Strike lobby), not the base one",
+              code == 200 and rep.get("gameId") == strike_id, (code, rep.get("gameId") if isinstance(rep, dict) else rep))
+        base_link, strike_link = "SCB1:" + base_id.split(":", 1)[1], "SCS1:" + strike_id.split(":", 1)[1]
+        code, rep = seek(port, None, base_link, auto=False)
+        check("party follow / invite by the short link (%s): Box Office joins its lobby" % base_link,
+              code == 200 and rep.get("gameId") == base_id, (code, rep))
+        code, rep = seek(port, "strike", base_link, auto=False)
+        check("... a Strike client following that link: InvalidGameId", code == 404 and rep.get("error") == "InvalidGameId", (code, rep))
+        code, rep = seek(port, "strike", strike_link, auto=False)
+        check("a Strike friend / invite link (%s): the Strike client joins it" % strike_link,
+              code == 200 and rep.get("gameId") == strike_id, (code, rep))
+        code, rep = seek(port, None, strike_link, auto=False)
+        check("... a Box Office client following it: InvalidGameId", code == 404 and rep.get("error") == "InvalidGameId", (code, rep))
+        code, rep = seek(port, "strike", base_id, auto=True)
+        check("a Strike rejoin / follow of a base lobby with autoChangeGame: a Strike lobby instead",
+              code == 200 and rep.get("gameId") == strike_id and rep.get("changeReason"), (code, rep.get("gameId")))
+        code, gi = http(port, "/mm/game-info?flavor=strike&game=" + base_link)
+        check("game-info of a base link for a Strike client: never the base lobby", code == 200 and gi[0] == strike_id, (code, gi and gi[0]))
+        code, rq = http(port, "/mm/ranked/queue?regions=na&flavor=strike")
+        check("ranked queue (Box Office's) for a Strike client: FLAVOR_UNAVAILABLE",
+              code == 200 and rq.get("type") == "ERROR" and rq.get("payload", {}).get("code") == "FLAVOR_UNAVAILABLE", (code, rq))
+        code, rq = http(port, "/mm/ranked/queue?regions=na")
+        check("ranked queue for a Box Office guest: its usual answer (not FLAVOR_UNAVAILABLE)",
+              code == 200 and rq.get("payload", {}).get("code") not in (None, "FLAVOR_UNAVAILABLE"), (code, rq))
+
         # 4. the two apps through the coordinator
         assets = assets_dir()
         if not os.access(f"{BUILD}/client_bin", os.X_OK) or not assets:
             print("NOTE  client_bin cases skipped (no client_bin or no assets/css/fonts: set KRUNKNATIVE_ASSETS_DIR)")
         else:
-            text = client("strike-client", port, "strike", assets)
+            text = client("strike-client", port, "strike", assets, base_id)
             check("Strike client: joins SCSTRIKE1 through the coordinator",
                   re.search(r"\[mm\] joining SCSTRIKE1:\S+ at 127\.0\.0\.1:%d" % STRIKE_PORT, text) and "connected to server" in text
                   and "flavor mismatch" not in text, [l for l in text.splitlines() if "[mm]" in l or "flavor" in l][:8])
@@ -332,7 +381,12 @@ def main():
                   ("" if dom else " (no Servers window on the Strike page: data checked above)"),
                   (grep_hits(text, "SCSTRIKE")[1] and grep_hits(text, "SCBASE")[1] == 0) if dom else lists,
                   (grep_hits(text, "SCSTRIKE"), grep_hits(text, "SCBASE")))
-            text = client("base-client", port, None, assets)
+            check("Strike client: Quick Join of every group and the base lobby's link never join SCBASE1",
+                  "joining SCBASE1" not in text and "127.0.0.1:%d" % BASE_PORT not in text
+                  and re.search(r"\[mm\] connect: game %s" % re.escape(base_id), text)
+                  and re.search(r"seek failed \(HTTP 404\): InvalidGameId", text),
+                  [l for l in text.splitlines() if "[mm]" in l][-8:])
+            text = client("base-client", port, None, assets, strike_id)
             check("Box Office client: joins SCBASE1 through the coordinator",
                   re.search(r"\[mm\] joining SCBASE1:\S+ at 127\.0\.0\.1:%d" % BASE_PORT, text) and "connected to server" in text,
                   [l for l in text.splitlines() if "[mm]" in l][:8])
@@ -343,6 +397,11 @@ def main():
             check("Box Office client: its server list shows the base lobby, not the Strike one",
                   grep_hits(text, "SCBASE")[1] and grep_hits(text, "SCSTRIKE")[1] == 0,
                   (grep_hits(text, "SCBASE"), grep_hits(text, "SCSTRIKE")))
+            check("Box Office client: Quick Join of every group and the Strike lobby's link never join SCSTRIKE1",
+                  "joining SCSTRIKE1" not in text and "127.0.0.1:%d" % STRIKE_PORT not in text
+                  and re.search(r"\[mm\] connect: game %s" % re.escape(strike_id), text)
+                  and re.search(r"seek failed \(HTTP 404\): InvalidGameId", text),
+                  [l for l in text.splitlines() if "[mm]" in l][-8:])
 
         # 5. only Strike lobbies left: Box Office finds nothing, Strike still plays
         base_proc.terminate()
