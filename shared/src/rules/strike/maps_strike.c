@@ -30,6 +30,20 @@ size_t strike_map_pool(const StrikeMap **out) {
     return POOL_COUNT;
 }
 
+size_t strike_map_pool_expand(const StrikeMap *pool, const size_t count, int *out, const size_t max) {
+    size_t n = 0;
+    for (size_t i = 0; pool && i < count; i++) {
+        for (int k = 0; k < pool[i].weight; k++, n++) {
+            if (out && n < max) out[n] = pool[i].catalog_index;
+        }
+    }
+    return out && n > max ? max : n;
+}
+
+size_t strike_map_rotation(int *out, const size_t max) {
+    return strike_map_pool_expand(k_pool, POOL_COUNT, out, max);
+}
+
 const StrikeMap *strike_map_for_catalog(const size_t index) {
     for (size_t i = 0; i < POOL_COUNT; i++) {
         if ((size_t) k_pool[i].catalog_index == index) return &k_pool[i];

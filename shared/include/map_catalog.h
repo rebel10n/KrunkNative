@@ -100,7 +100,8 @@ size_t map_catalog_load_official(void);
 // Catalogue index of a JSON returned by map_catalog_json, -1 when it is not one of them.
 int map_catalog_index_of_json(const cJSON *json);
 
-// The public rotation (src/data/map.js rotationMaps): catalogue indices, returns the count.
+// The public rotation (src/data/map.js rotationMaps): catalogue indices, returns the count. Under
+// Krunker Strike: FRVR's pool, each map listed by its weight (strike_maps.h strike_map_rotation).
 size_t map_catalog_rotation(int *out, size_t max);
 
 // calloc'd array of the catalogue maps at `indices` (loaded on demand; missing ones are

@@ -11,6 +11,8 @@
 #include <prefabs.h>
 #include <shared.h>
 #include <strike_maps.h>
+#include <ruleset.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -167,12 +169,67 @@ static void test_strike(void) {
     }
 }
 
+// The rotation a game plays without a map list (game_configure / map_list_with_custom): under Strike
+// FRVR's pool, each map listed StrikeMap.weight times (mapPool's mapWeight); base keeps v7's
+// rotationMaps. Runs after test_strike (the pool files are cached by then).
+static void test_rotation(void) {
+    // the weighting rule on a pool of our own: weights 2, 0, 3
+    const StrikeMap pool[] = {{"a", "A", "a", "a.json", 4, 2}, {"b", "B", "b", "b.json", 5, 0}, {"c", "C", "c", "c.json", 6, 3}};
+    int out[8];
+    CHECK(strike_map_pool_expand(pool, 3, out, 8) == 5 && out[0] == 4 && out[1] == 4 && out[2] == 6 && out[4] == 6,
+          "weights 2 / 0 / 3 expand to 4 4 6 6 6");
+    CHECK(strike_map_pool_expand(pool, 3, NULL, 0) == 5 && strike_map_pool_expand(pool, 3, out, 2) == 2, "expand: count, clamp");
+
+    CHECK(flavor_set(FLAVOR_STRIKE), "flavor_set(FLAVOR_STRIKE)");
+    int rotation[64];
+    const size_t n = strike_map_rotation(rotation, 64);
+    CHECK(n == WANT_COUNT && map_catalog_rotation(NULL, 0) == n, "Strike rotation = the weighted pool (%zu)", n);
+    const Ruleset *rules = ruleset_current();
+    CHECK(rules->rotation_map_count == n && !memcmp(rules->rotation_maps, rotation, n * sizeof(int)), "strike_ruleset() rotation_maps = the pool");
+
+    static Game game;
+    game_configure(&game, NULL, NULL, 0, NULL, 0, NULL, 0, NULL, 0);
+    CHECK(game.map_count == n, "Strike game_configure without maps: %zu pool maps (got %zu)", n, game.map_count);
+    for (size_t i = 0; i < game.map_count && i < n; i++) {
+        CHECK(game.maps[i] == map_catalog_json((size_t) rotation[i]), "Strike game map %zu is pool map %d", i, rotation[i]);
+    }
+    int in_pool = 1;
+    for (size_t i = 0; i < game.map_count; i++) in_pool &= map_catalog_index_of_json(game.maps[i]) >= 0 && strike_map_for_catalog((size_t) map_catalog_index_of_json(game.maps[i])) != NULL;
+    CHECK(in_pool, "Strike: never a map outside FRVR's pool (v7 rotationMaps)");
+    for (int round = 0; round < 3; round++) {
+        game_init(&game, -1, 0, 0);
+        CHECK(game.ready && game.map && strike_map_for_catalog((size_t) map_catalog_index_of_json(game.maps[game.current_map_index])) != NULL,
+              "Strike round %d plays a pool map", round);
+    }
+
+    cJSON *custom = cJSON_Parse("{\"name\":\"custom\"}");
+    size_t list_count = 0;
+    const cJSON **list = map_list_with_custom(custom, &list_count);
+    CHECK(list && list_count == n + 1 && list[0] == custom && list[1] == map_catalog_json((size_t) rotation[0]),
+          "Strike map_list_with_custom: the custom map then the pool (%zu)", list_count);
+    free(list);
+
+    // base: v7's rotationMaps, as before
+    CHECK(flavor_set(FLAVOR_BASE), "flavor_set(FLAVOR_BASE)");
+    game_configure(&game, NULL, NULL, 0, NULL, 0, NULL, 0, NULL, 0);
+    const size_t base_n = sizeof(g_rotation_maps) / sizeof(g_rotation_maps[0]);
+    int same = game.map_count == base_n;
+    for (size_t i = 0; same && i < base_n; i++) same = game.maps[i] == g_maps[g_rotation_maps[i]];
+    CHECK(same, "base game_configure without maps: v7's %zu rotation maps (got %zu)", base_n, game.map_count);
+    CHECK(ruleset_current()->rotation_maps == g_rotation_maps, "base ruleset rotation_maps = g_rotation_maps");
+    list = map_list_with_custom(custom, &list_count);
+    CHECK(list && list_count == base_n + 1 && list[1] == g_maps[g_rotation_maps[0]], "base map_list_with_custom (%zu)", list_count);
+    free(list);
+    cJSON_Delete(custom);
+}
+
 int main(const int argc, char **argv) {
     const int verbose = argc > 1 && !strcmp(argv[1], "-v");
     test_table();
     test_files(verbose);
     test_base();
     test_strike();
+    test_rotation();
     printf("strike_maps_test: %d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

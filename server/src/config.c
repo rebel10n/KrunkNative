@@ -12,6 +12,8 @@
 #include <server_config.h>
 #include <build_info.h> // KN_PRODUCT_NAME
 #include <flavor.h> // gameserver.flavor: the product flavor (Krunker Strike)
+#include <flavor_rules.h> // the flavor's lobby defaults and mode rotation (Krunker Strike)
+#include <strike_rules.h> // StrikeRules: Krunker Strike's modes and lobby cap
 #include <server.h> // g_server (effective lobby size in the summary)
 #include <server_log.h>
 #include <map_catalog.h>
@@ -31,6 +33,10 @@ static void gs_copy(char *dst, const size_t size, const char *src) {
     snprintf(dst, size, "%s", src ? src : "");
 }
 
+static int g_flavor_locked; // --flavor given: gameserver.flavor does not apply (gs_config_lock_flavor)
+
+void gs_config_lock_flavor(void) { g_flavor_locked = 1; }
+
 void gs_config_defaults(GsConfig *cfg) {
     memset(cfg, 0, sizeof(*cfg));
     gs_copy(cfg->region, sizeof(cfg->region), "local");
@@ -42,8 +48,8 @@ void gs_config_defaults(GsConfig *cfg) {
     gs_copy(cfg->public_host, sizeof(cfg->public_host), "127.0.0.1");
     gs_copy(cfg->brain_secret, sizeof(cfg->brain_secret), "kn-dev-secret"); // = kn_brain's brain.internal_secret default
     cfg->tick_rate = 30;
-    cfg->max_players = 8;
-    cfg->game = g_default_game_config;
+    cfg->max_players = flavor_max_players() > 0 ? flavor_max_players() : 8; // Krunker Strike: 10
+    cfg->game = *flavor_default_game_config(); // base: g_default_game_config
     cfg->custom_games = 1;
     gs_copy(cfg->join_message, sizeof(cfg->join_message), "$ joined the game"); // config.serverMessages[0]
     gs_copy(cfg->leave_message, sizeof(cfg->leave_message), "$ left the game"); // serverMessages[1]
@@ -355,6 +361,15 @@ int gs_config_from_json(GsConfig *cfg, const cJSON *s, char *err, const size_t e
         server_log_error("config: gameserver.flavor '%s' is unknown (base|strike): ignored", cfg->flavor);
         cfg->flavor[0] = 0;
     }
+    // The flavor this config runs as (main.c applies gameserver.flavor after loading unless --flavor
+    // was given). When it is not the one gs_config_defaults() saw, its lobby defaults go in now,
+    // under the keys read below.
+    const GameFlavor flavor = !g_flavor_locked && cfg->flavor[0] ? flavor_from_key(cfg->flavor, flavor_get()) : flavor_get();
+    if (flavor != flavor_get() && cJSON_GetObjectItem(s, "flavor")) {
+        const StrikeRules *rules = flavor_config(flavor)->rules;
+        cfg->max_players = rules && rules->max_players > 0 ? rules->max_players : 8;
+        cfg->game = rules ? *strike_game_config() : g_default_game_config;
+    }
     gs_read_str(s, "node_id", cfg->node_id, sizeof(cfg->node_id));
     gs_read_str(s, "name", cfg->name, sizeof(cfg->name));
     gs_read_str(s, "listen_host", cfg->listen_host, sizeof(cfg->listen_host));
@@ -389,6 +404,8 @@ int gs_config_from_json(GsConfig *cfg, const cJSON *s, char *err, const size_t e
         cfg->mode_count = 0;
         char names[GS_MAX_LIST][GS_STR_SMALL];
         const int n = gs_read_lines(s, "modes", &names[0][0], sizeof(names[0]), GS_MAX_LIST);
+        const int *rotation_modes = NULL; // the flavor's public rotation (Krunker Strike: its offered modes)
+        const size_t rotation_count = flavor_rotation_modes(flavor, &rotation_modes);
         for (int i = 0; i < n; i++) {
             const int rotation = !strcasecmp(names[i], "rotation");
             const int id = rotation ? -1 : mode_find(names[i]);
@@ -396,9 +413,13 @@ int gs_config_from_json(GsConfig *cfg, const cJSON *s, char *err, const size_t e
                 snprintf(err, err_size, "gameserver.modes: unknown mode '%s'", names[i]);
                 return -1;
             }
-            const size_t add = rotation ? sizeof(g_rotation_modes) / sizeof(g_rotation_modes[0]) : 1;
+            if (!rotation && flavor_config(flavor)->rules && !strike_mode(flavor_config(flavor)->rules, id)) {
+                snprintf(err, err_size, "gameserver.modes: '%s' is not a %s mode", names[i], flavor_display_name(flavor));
+                return -1;
+            }
+            const size_t add = rotation ? rotation_count : 1;
             for (size_t r = 0; r < add; r++) {
-                const int mode_id = rotation ? g_rotation_modes[r] : id;
+                const int mode_id = rotation ? rotation_modes[r] : id;
                 int dup = 0;
                 for (int k = 0; k < cfg->mode_count; k++) dup |= cfg->modes[k] == mode_id;
                 if (!dup && cfg->mode_count < GS_MAX_LIST) cfg->modes[cfg->mode_count++] = mode_id;

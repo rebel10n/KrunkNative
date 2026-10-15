@@ -135,7 +135,11 @@ typedef struct {
 
 extern GsConfig g_gs_config;
 
+// The defaults of the process flavor (flavor.h): Krunker Strike starts from its lobby cap and lobby
+// config (flavor_rules.h), base from Krunker's.
 void gs_config_defaults(GsConfig*);
+// --flavor was given: the process flavor wins over gameserver.flavor (set before gs_config_load()).
+void gs_config_lock_flavor(void);
 // Reads `path` (NULL: $KN_CONFIG, else config/config.json). A missing file is not an
 // error when the path was not given explicitly. Returns 0 on success, else fills err.
 int gs_config_load(GsConfig*, const char *path, int explicit_path, char *err, size_t err_size);

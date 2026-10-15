@@ -31,6 +31,12 @@ typedef struct {
 // The pool, in FRVR's table order (catalogue indices 0, 2, 3, 7, 9, 15, 22). Returns the count;
 // *out (optional) points at the static table.
 size_t strike_map_pool(const StrikeMap **out);
+// The public rotation FRVR builds from the pool: each map's catalogue index listed `weight` times
+// (mapPool: config.maps gets mapWeight copies, then a uniform pick); weight <= 0 leaves a map out.
+// Returns the full count (at most max written; with out, the return is clamped to max).
+size_t strike_map_rotation(int *out, size_t max);
+// The same for any pool (strike_map_rotation over the static one); the rule in one place.
+size_t strike_map_pool_expand(const StrikeMap *pool, size_t count, int *out, size_t max);
 // The pool map that stands in for catalogue map `index`, NULL when that map is not in the pool.
 const StrikeMap *strike_map_for_catalog(size_t index);
 // A pool map by key ("skytemple") or FRVR name ("SkyTemple"), case-insensitive; NULL none.

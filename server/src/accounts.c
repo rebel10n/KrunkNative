@@ -19,6 +19,7 @@
 #include <ks_storage.h>    // WP6: GAME.STORAGE / KR reward replies ("acct-r")
 #include <season.h>       // v7 endGame BPP of the commit (bp_match_points), map rewards
 #include <bots.h>         // game_bots_count (lobby meta "bots")
+#include <flavor_rules.h> // the flavor's lobby config (Krunker Strike)
 #include <modes.h>        // mode_team_score: the ranked result's teamScores
 #include <pcg_basic.h>
 #include <math.h>
@@ -2448,7 +2449,7 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
     }
     // Comp (ranked), Zombies and Raid hosts: setupGameConfig's overDat / forceDat / allowedDat
     cJSON *forced = ranked || host_index == GAME_HOST_ZOMBIES || host_index == GAME_HOST_RAID ? game_config_setup(host_index, request, NULL, ranked) : NULL;
-    GameConfig game_config = g_default_game_config;
+    GameConfig game_config = *flavor_default_game_config(); // base: g_default_game_config
     game_config_read(&game_config, forced ? forced : request, GAME_CONFIG_CLAMP_HOSTED, host_index); // round 1 before its map loads
 
     // maps: catalogue indices, or names (this server's own maps first: custom dirs / the

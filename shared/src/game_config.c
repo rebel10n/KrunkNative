@@ -27,6 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ruleset.h>
+#include <flavor_rules.h> // Krunker Strike: its classes, lobby defaults
 
 // ---------------------------------------------------------------- option tables
 
@@ -591,6 +592,9 @@ static float gc_max_for(const GameConfigOption *o, const int clamp) {
 }
 
 static float gc_default(const GameConfigOption *o, const int comp) {
+    // Krunker Strike's serverConfig defaults (flavor_rules.h; Strike has no comp defC); base: none
+    float flavor_def;
+    if (flavor_config_default(o->var, &flavor_def)) return flavor_def;
     return comp && (o->flags & GC_HAS_DEF_C) ? o->def_c : o->def;
 }
 
@@ -1658,7 +1662,7 @@ void game_config_on_init(Game *game) {
     if (!st) return;
     if (!st->received) { // a server without GAME_CONFIG (older protocol): the defaults
         const GameConfig keep = game->config;
-        game->config = g_default_game_config;
+        game->config = *flavor_default_game_config(); // base: g_default_game_config
         game->config.maps = keep.maps;
         game->config.map_count = keep.map_count;
         game->config.modes = keep.modes;

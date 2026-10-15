@@ -16,7 +16,8 @@
 #include <comp_lobby.h> // v7 comp lobby (lobbyPlayers)
 #include <account.h>     // WP-E part 2c: incMedal (accounts and the sandbox)
 #include <progression.h> // WP-E part 2c: overlay.medalsList
-#include <flavor_rules.h> // product-flavor gameplay deltas (Strike: no passive regen)
+#include <flavor_rules.h> // product-flavor defaults (Krunker Strike: its lobby config)
+#include <map_catalog.h>  // map_catalog_rotation: Krunker Strike's weighted map pool
 #include <pcg_basic.h>
 #include <stdio.h>
 #include <string.h>
@@ -101,7 +102,7 @@ void game_configure(
     const Ruleset *rules = ruleset_current();
     game->rules = rules;
     if (config) game->config = *config;
-    else game->config = g_default_game_config;
+    else game->config = *flavor_default_game_config(); // base: g_default_game_config
     game_config_sync_teams(&game->config); // WP-E: team1/2_name point at this copy's team_names
     game_config_free(game);                // WP-E: a new configuration drops the host request / overrides
     comp_lobby_free(game);                 // and a new game object's lobbyPlayers start empty
@@ -114,6 +115,23 @@ void game_configure(
     if (map_count) {
         game->maps = maps;
         game->map_count = map_count;
+    } else if (flavor_current()->rules) {
+        // Krunker Strike: FRVR's map pool, each map listed StrikeMap.weight times (mapPool's
+        // mapWeight; game_init then picks uniformly), never the v7 rotation (map_catalog.c)
+        load_default_maps();
+        const size_t total = map_catalog_rotation(NULL, 0);
+        int *pool = total ? malloc(total * sizeof(int)) : NULL;
+        const size_t n = pool ? map_catalog_rotation(pool, total) : 0;
+        game->maps = n ? calloc(n, sizeof(cJSON *)) : NULL;
+        game->map_count = 0;
+        for (size_t i = 0; game->maps && i < n; i++) {
+            if (pool[i] >= 0 && pool[i] < MAP_CATALOG_OFFICIAL_COUNT && g_maps[pool[i]]) game->maps[game->map_count++] = g_maps[pool[i]];
+        }
+        free(pool);
+        if (!game->map_count) {
+            free(game->maps);
+            game->maps = NULL;
+        }
     } else {
         load_default_maps();
 
@@ -708,7 +726,7 @@ static void game_tick_regen(Game *game, Player *player, const float delta) {
         const int regen_on = player->hit_timer <= 0.0f && !player->chall_mode && !player->is_juggernaut && game->config.health_regen &&
                              !(game->mode && game->mode->config.no_regen) && !player->mode.no_regen &&
                              game->classes && player->class_index >= 0 && player->class_index < (int) game->class_count;
-        const float regen = flavor_scale_regen(regen_on ? game->classes[player->class_index].regen : 0.0f); // Strike: 0 (base: no-op)
+        const float regen = regen_on ? game->classes[player->class_index].regen : 0.0f;
         if (regen > 0.0f) player_change_health(player, NULL, -(float) player->max_health * regen, 0);
         player_effects_regen_tick(player); // v7.1.4 Poisoned every 8th tick, Zapped every 2nd (shared/src/effects.c)
     }

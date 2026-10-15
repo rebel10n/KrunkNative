@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Krunker Strike is a product FLAVOR of Krunker Box Office (doc/v10/krunker-strike.md,
-shared/include/flavor.h): the same server core and client, a distinct brand and a bounded set of
-gameplay deltas, chosen at startup and advertised by the server.
+shared/include/flavor.h): the same server core and client, a distinct brand and FRVR's Strike rules
+as data (shared/include/strike_rules.h), chosen at startup and advertised by the server.
 
   python3 -I server/tests/strike_flavor_e2e.py BUILD_DIR      (run from the repository root)
 

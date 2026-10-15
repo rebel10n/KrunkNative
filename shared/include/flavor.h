@@ -1,8 +1,9 @@
 #pragma once
 // Krunker Strike is a product FLAVOR of Krunker Box Office (doc/v10/krunker-strike.md): the same
-// C11 engine, the same shared core and the same Krunker v10.0.2 ruleset, with a distinct brand and
-// a small, bounded set of gameplay deltas layered on top via FlavorConfig. Flavor is ORTHOGONAL to
-// Ruleset (shared/include/ruleset.h): one flavor per process, chosen once at startup (server:
+// C11 engine and shared core playing FRVR's Krunker Strike, whose rules are data extracted from
+// FRVR's client (FlavorConfig.rules, shared/include/strike_rules.h). A flavor with rules swaps the
+// ruleset's weapon / class / mode tables for its own (ruleset_current()); the gameplay gates are in
+// shared/include/flavor_rules.h. One flavor per process, chosen once at startup (server:
 // --flavor / server.cfg `flavor`; client: --flavor / KN_FLAVOR / the compile-time default), then
 // advertised by the server (server-info `flavor`) and adopted / shown by the client.
 //
@@ -20,18 +21,15 @@ typedef enum {
     FLAVOR_COUNT
 } GameFlavor;
 
-// The gameplay deltas a flavor layers over the ruleset. v1 ships the seam with a single knob; the
-// flavor-gameplay module (see the brief) owns setting Strike's values and the code that reads them.
-// FLAVOR_BASE leaves every field at its neutral (no-op) value, so a default build is the base game
-// byte-for-byte.
+struct StrikeRules_t; // shared/include/strike_rules.h
+
+// What a flavor is. FLAVOR_BASE has no rules (NULL), so a default build is the base game
+// byte-for-byte; Strike's are FRVR's data (strike_rules()).
 typedef struct {
     GameFlavor flavor;
     const char *key;          // wire / config token, lowercase: "base", "strike"
     const char *display_name; // player-facing brand: "Krunker Box Office", "Krunker Strike"
-    float damage_mult;        // global outgoing-damage multiplier (dealer-dealt combat damage only);
-                              // 1.0 = neutral (base). Strike: 1.25 (a harder-hitting, hardcore feel).
-    float regen_mult;         // passive health-regen multiplier, composed with the mode regenMlt;
-                              // 1.0 = neutral (base). Strike: 0.0 (no passive regen).
+    const struct StrikeRules_t *rules; // the game's rules as data; NULL = Krunker v10.0.2's own
 } FlavorConfig;
 
 // ---- the process flavor (set once at startup; never NULL) --------------------------------------

@@ -13,6 +13,7 @@
 
 #include "mode_internal.h"
 #include <ruleset.h>
+#include <flavor_rules.h> // flavor_mode_allowed: the modes a flavor offers (Krunker Strike)
 
 const GameModeConfig g_default_game_mode_config = {
     .id = MODE_ID_FFA,
@@ -310,13 +311,19 @@ int mode_count(void) {
     return MODE_COUNT;
 }
 
+// The ruleset's mode table: g_mode_configs, or a flavor's copy with its values (Krunker Strike's
+// score limits and Gun Game order, strike_rules.h). The ids are the same either way.
+static const GameModeConfig *mode_table(void) {
+    return ruleset_current()->modes;
+}
+
 const GameModeConfig *mode_config(const int id) {
-    return id >= 0 && id < MODE_COUNT ? &g_mode_configs[id] : NULL;
+    return id >= 0 && id < MODE_COUNT ? &mode_table()[id] : NULL;
 }
 
 const GameModeConfig *mode_list(int *count) {
     if (count) *count = MODE_COUNT;
-    return g_mode_configs;
+    return mode_table();
 }
 
 const char *mode_name(const int id) {
@@ -328,7 +335,7 @@ const char *mode_name(const int id) {
 // through hostType 3 only (WP-E), Ranked (37 / 38) never.
 int mode_hostable(const int id) {
     const GameModeConfig *config = mode_config(id);
-    return config && id < MODE_V7_TABLE_SIZE && !config->prevent_custom;
+    return config && id < MODE_V7_TABLE_SIZE && !config->prevent_custom && flavor_mode_allowed(id);
 }
 
 static int mode_text_equal(const char *a, const char *b) {
@@ -349,7 +356,7 @@ int mode_find(const char *query) {
     if (end && !*end) return number >= 0 && number < MODE_COUNT ? (int) number : -1;
 
     for (int i = 0; i < MODE_COUNT; i++) {
-        const GameModeConfig *config = &g_mode_configs[i];
+        const GameModeConfig *config = &mode_table()[i];
         if (mode_text_equal(query, config->alias) || mode_text_equal(query, config->key) || mode_text_equal(query, config->name)) return i;
     }
 

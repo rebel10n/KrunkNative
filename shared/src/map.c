@@ -1,5 +1,6 @@
 #include <shared.h>
 #include <map_catalog.h>
+#include <flavor.h> // map_list_with_custom: Krunker Strike rotates its own pool
 #include <prefabs.h>
 #include <terrain.h> // map_terrain_free (WP-B)
 #include <cJSON.h>
@@ -112,17 +113,29 @@ const cJSON **map_list_with_custom(const cJSON *custom_map, size_t *map_count) {
 
     load_default_maps();
 
-    const size_t default_count = sizeof(g_rotation_maps) / sizeof(g_rotation_maps[0]);
+    // Krunker Strike: the custom map, then FRVR's weighted pool (map_catalog_rotation), not v7's list
+    const int strike = flavor_current()->rules != NULL;
+    const size_t strike_total = strike ? map_catalog_rotation(NULL, 0) : 0;
+    int *strike_pool = strike_total ? malloc(strike_total * sizeof(int)) : NULL;
+    const size_t strike_count = strike_pool ? map_catalog_rotation(strike_pool, strike_total) : 0;
+    const size_t default_count = strike ? strike_count : sizeof(g_rotation_maps) / sizeof(g_rotation_maps[0]);
     const cJSON **maps = calloc(default_count + 1, sizeof(cJSON *));
-    if (!maps) return NULL;
+    if (!maps) {
+        free(strike_pool);
+        return NULL;
+    }
 
     maps[0] = custom_map;
 
+    size_t n = 1;
     for (size_t i = 0; i < default_count; i++) {
-        maps[i + 1] = g_maps[g_rotation_maps[i]];
+        const int index = strike ? strike_pool[i] : g_rotation_maps[i];
+        if (strike && (index < 0 || index >= MAP_CATALOG_OFFICIAL_COUNT || !g_maps[index])) continue;
+        maps[n++] = g_maps[index];
     }
+    free(strike_pool);
 
-    if (map_count) *map_count = default_count + 1;
+    if (map_count) *map_count = n;
     return maps;
 }
 

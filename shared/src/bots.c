@@ -34,6 +34,7 @@
 #include <bot_objective.h>
 #include <bot_path.h>
 #include <ai.h>
+#include <flavor_rules.h> // flavor_class_allowed: Krunker Strike bots play its classes
 #include <pcg_basic.h>
 #include <ctype.h>
 #include <math.h>
@@ -672,8 +673,9 @@ static int bot_class_allowed(const Game *game, const int index) {
     // NextBotManager.isBotClassAllowed: no Rocketeer (7). KrunkNative: no Runner (9, knife only) either,
     // nor v7.1.4's hidden Survivor (14: its Build Tool never fires outside build modes, WP-B).
     // KrunkNative classes (the Nettspend, ClassConfig.custom_only) are a player's choice, never a bot's.
+    // Krunker Strike: only its own classes (flavor_rules.h; base: every class)
     return index >= 0 && (size_t) index < game->class_count && index != 7 && index != 9 && index != CLASS_ID_SURVIVOR &&
-           game->classes[index].loadout && !game->classes[index].custom_only;
+           game->classes[index].loadout && !game->classes[index].custom_only && flavor_class_allowed(index);
 }
 
 static int bot_random_class(const Game *game) {

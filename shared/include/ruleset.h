@@ -51,8 +51,11 @@ typedef struct Ruleset_t { // shared.h forward-declares the tag for Game.rules
     float light_unit_factor;    // config.lightIntensityScaling: map light intensity x PI
 } Ruleset;
 
-// The ruleset: Krunker v10.0.2. Never NULL.
+// The ruleset: Krunker v10.0.2. Never NULL. Under a flavor with rules (Krunker Strike, flavor.h)
+// it is v10's with that flavor's weapon / class / mode tables (strike_rules.h strike_ruleset()).
 const Ruleset *ruleset_current(void);
+// Krunker v10.0.2's own tables, whatever the flavor (what a flavor's tables are built from).
+const Ruleset *ruleset_v10(void);
 
 // Short forms for code without a Game in scope (menus, viewer, catalogues).
 const Weapon *const *rules_weapons(void);

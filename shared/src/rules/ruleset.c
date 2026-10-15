@@ -2,7 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ruleset.h>
+#include <flavor.h>
 #include <map_catalog.h>
+#include <strike_rules.h>
 #include <triggers.h>
 
 // The ruleset (shared/include/ruleset.h): Krunker v10.0.2, the only version. Its tables are in
@@ -34,21 +36,28 @@ static const Ruleset k_v10 = {
     .light_unit_factor = (float) M_PI, // config.lightIntensityScaling
 };
 
-const Ruleset *ruleset_current(void) {
+const Ruleset *ruleset_v10(void) {
     return &k_v10;
 }
 
-const Weapon *const *rules_weapons(void) { return k_v10.weapons; }
-size_t rules_weapon_count(void) { return k_v10.weapon_count; }
-int rules_krunker_weapon_count(void) { return k_v10.krunker_weapon_count; }
-const ClassConfig *rules_classes(void) { return k_v10.classes; }
-size_t rules_class_count(void) { return k_v10.class_count; }
-
-const Weapon *rules_weapon(const int id) {
-    return id >= 0 && (size_t) id < k_v10.weapon_count ? k_v10.weapons[id] : NULL;
+// Krunker Strike (flavor.h, strike_rules.h) plays v10's ruleset with FRVR's weapon / class / mode
+// tables; FLAVOR_BASE (rules NULL) is v10 itself.
+const Ruleset *ruleset_current(void) {
+    return flavor_current()->rules ? strike_ruleset() : &k_v10;
 }
 
-const Ruleset *game_ruleset(const Game *game) { return game && game->rules ? game->rules : &k_v10; }
+const Weapon *const *rules_weapons(void) { return ruleset_current()->weapons; }
+size_t rules_weapon_count(void) { return ruleset_current()->weapon_count; }
+int rules_krunker_weapon_count(void) { return ruleset_current()->krunker_weapon_count; }
+const ClassConfig *rules_classes(void) { return ruleset_current()->classes; }
+size_t rules_class_count(void) { return ruleset_current()->class_count; }
+
+const Weapon *rules_weapon(const int id) {
+    const Ruleset *rules = ruleset_current();
+    return id >= 0 && (size_t) id < rules->weapon_count ? rules->weapons[id] : NULL;
+}
+
+const Ruleset *game_ruleset(const Game *game) { return game && game->rules ? game->rules : ruleset_current(); }
 int game_is_ranked(const Game *game) { return game && game->is_ranked; }
 
 float rules_reward_mlt(const Game *game) {

@@ -1,15 +1,16 @@
 // The process flavor and its table (shared/include/flavor.h). Pure C; no engine / net deps.
 #include <flavor.h>
 #include <build_info.h> // KN_PRODUCT_NAME: FLAVOR_BASE's display name stays the base product name
+#include <strike_rules.h> // g_strike_rules: FRVR's Krunker Strike as data
 #include <strings.h>    // strcasecmp
 
-// One entry per GameFlavor, indexed by the enum. FLAVOR_BASE is the neutral no-op (every knob at its
-// identity value) so a base build is the base game byte-for-byte; Strike layers a bounded, hardcore
-// set of gameplay deltas (flavor-gameplay). Fields: {flavor, key, display_name, damage_mult,
-// regen_mult}. Keep the key lowercase and <= 7 chars: it rides the server-info `flavor` field (8 B).
+// One entry per GameFlavor, indexed by the enum. FLAVOR_BASE has no rules, so a base build is the
+// base game byte-for-byte; Strike plays FRVR's rules (strike_rules.h). Fields: {flavor, key,
+// display_name, rules}. Keep the key lowercase and <= 7 chars: it rides the server-info `flavor`
+// field (8 B).
 static const FlavorConfig k_flavors[FLAVOR_COUNT] = {
-    [FLAVOR_BASE]   = {FLAVOR_BASE,   "base",   KN_PRODUCT_NAME, 1.0f,  1.0f},
-    [FLAVOR_STRIKE] = {FLAVOR_STRIKE, "strike", "Krunker Strike", 1.25f, 0.0f},
+    [FLAVOR_BASE]   = {FLAVOR_BASE,   "base",   KN_PRODUCT_NAME, NULL},
+    [FLAVOR_STRIKE] = {FLAVOR_STRIKE, "strike", "Krunker Strike", &g_strike_rules},
 };
 
 // Compile-time default: -DKN_FLAVOR_DEFAULT=1 (CMake KRUNKNATIVE_FLAVOR=strike) ships a binary whose

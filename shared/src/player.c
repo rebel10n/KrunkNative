@@ -7,7 +7,7 @@
 #include <game_config.h> // WP-E: config.classes, forceC
 #include <ks_game.h> // KrunkScript hook points (onPlayerUpdate / Spawn / Damage / Death)
 #include <triggers_v7.h> // WP-C: onPlayerSpawn / Damage / Die / Kill map triggers
-#include <flavor_rules.h> // product-flavor gameplay deltas (Strike: outgoing-damage multiplier)
+#include <flavor_rules.h> // product-flavor gates (Krunker Strike: its six classes)
 #include <player_card.h> // WP-E: the death screen's life accuracy
 #include <piss.h> // KrunkNative Piss: the stream and its puddles
 #include <math.h>
@@ -120,6 +120,9 @@ void player_spawn(Player *player) {
     // WP-E (v7 player.js:649-664): config.classes first (classes[0] when not listed), and the
     // mode's classes only with forceC.
     player->class_index = game_config_class_for(player->game, player->class_index);
+    // Krunker Strike: a pick Strike lacks plays its starter class; a mode's forced class still
+    // applies below (flavor_rules.h; base: the pick itself)
+    player->class_index = flavor_class_pick(player->class_index);
     if (player->game->mode && player->game->config.force_classes) {
         const GameModeConfig *mode_config = &player->game->mode->config;
         if (mode_config->no_weapons) player->class_index = 9;
@@ -2651,7 +2654,6 @@ int player_change_health(Player *victim, Player *dealer, float damage, const int
     if (damage < 0.0f && victim->health == (float) victim->max_health) return 0;
     if (dealer && damage > 0.0f && dealer != victim && !combat_can_damage(dealer, victim)) return 0;
     if (dealer && damage > 0.0f && dealer->dmg_mlt > 0.0f) damage *= dealer->dmg_mlt; // v7.1.4 bots: player.dmgMlt
-    if (dealer && damage > 0.0f) damage = flavor_scale_damage(damage); // Strike: global outgoing combat damage (base: no-op)
     if (dealer && dealer->smite && damage > 0.0f) damage = 10000.0f; // /smite: weapon/melee/explosion dmg = 10000
 
     if (dealer && dealer->team > 0 && dealer->team < GAME_CONFIG_TEAMS) damage *= game->config.team_damage[dealer->team]; // t<team>Dmg (sdm teams 3-5 too)

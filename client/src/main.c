@@ -440,7 +440,8 @@ static int parse_startup_args(int argc, char **argv, int *offline, int *sandbox,
 }
 
 // The product flavor (flavor.h): --flavor base|strike wins, then KN_FLAVOR, then the compile-time
-// default (base, or Strike for a -DKRUNKNATIVE_FLAVOR=strike build). Only the display name changes.
+// default (base, or Strike for a -DKRUNKNATIVE_FLAVOR=strike build). The flavor brands the client and,
+// for Strike, swaps in FRVR's rules (ruleset_current(), strike_rules.h) before any game is configured.
 // Sets the flavor from KN_FLAVOR / --flavor and REMOVES --flavor[=key] (and a separate key
 // argument) from argv so the ordinary argument parser below never sees it and treats it as unknown.
 static void client_resolve_flavor(int *argc, char **argv) {

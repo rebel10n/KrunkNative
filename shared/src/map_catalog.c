@@ -491,14 +491,8 @@ int map_catalog_index_of_json(const cJSON *json) {
 
 size_t map_catalog_rotation(int *out, const size_t max) {
     size_t n = 0;
-    if (flavor_get() == FLAVOR_STRIKE) { // Krunker Strike rotates its own pool (strike_maps.h)
-        const StrikeMap *pool = NULL;
-        const size_t count = strike_map_pool(&pool);
-        for (; n < count; n++) {
-            if (out && n < max) out[n] = pool[n].catalog_index;
-        }
-        return out && n > max ? max : n;
-    }
+    // Krunker Strike rotates its own pool, weighted (strike_maps.h strike_map_rotation)
+    if (flavor_get() == FLAVOR_STRIKE) return strike_map_rotation(out, max);
     for (size_t i = 0; i < CATALOG_COUNT; i++) {
         if (!k_catalog[i].rotation) continue;
         if (out && n < max) out[n] = (int) i;

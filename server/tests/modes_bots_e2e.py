@@ -16,6 +16,9 @@ zone / a bomb site for KN_MODES_HOLD_SECONDS (5) without leaving (STATE position
 volumes), a zone capture ("cct"), a carried neutral flag (tdf / car), a confirm / deposit (team
 score), the round decided (Last Man Standing). KN_MODES_OBJECTIVE_BUDGET=0 skips that phase. The
 watcher respawns when killed (a dead player gets no positions).
+KN_MODES_FLAVOR=strike runs every server as Krunker Strike (server_bin --flavor strike: FRVR's
+class / weapon / mode tables, shared/include/strike_rules.h) and skips the modes Strike does not
+have (Trade, Impulsed: the server refuses them).
 """
 import json
 import os
@@ -38,6 +41,9 @@ OBJECTIVE_V7, OBJECTIVE_OCCUPANCY, DOM_UPDATE, DOM_CAPTURE, SPAWNABLE_V7, MODE_S
 WATCH = float(os.environ.get("KN_MODES_WATCH", "8"))
 BUDGET_ENV = os.environ.get("KN_MODES_OBJECTIVE_BUDGET")  # seconds for every mode (unset: the PLAY budgets)
 HOLD_SECONDS = float(os.environ.get("KN_MODES_HOLD_SECONDS", "5"))
+FLAVOR = os.environ.get("KN_MODES_FLAVOR", "")  # "strike": server_bin --flavor strike
+FLAVOR_ARGS = ["--flavor", FLAVOR] if FLAVOR else []
+STRIKE_ABSENT = {"trade", "imp"}  # v7 modes FRVR's Strike table leaves out (strike_data.json modes)
 PREFAB_OBJECTIVE, PREFAB_DOMINATION_ZONE, PREFAB_BOMB_SITE = 14, 77, 45
 
 MODES = ["ffa", "tdm", "point", "ctf", "bhop", "hide", "infect", "race", "lms", "simon", "gun", "prop", "boss", "clas",
@@ -163,7 +169,7 @@ def run_mode(mode_id, alias, port):
                 f"round_seconds {round_seconds}\nbot_quota 4\nbot_difficulty easy\n")
     log_path = os.path.join(WORK, f"m{mode_id}.log")
     log = open(log_path, "w")
-    proc = subprocess.Popen([f"{BUILD}/server_bin", "--headless", "--cfg", cfg, "--config", os.path.join(WORK, "none.json")],
+    proc = subprocess.Popen([f"{BUILD}/server_bin", "--headless", "--cfg", cfg, "--config", os.path.join(WORK, "none.json"), *FLAVOR_ARGS],
                             stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
     try:
         info = None
@@ -252,6 +258,9 @@ def main():
         f.write("{}")
     ids = ONLY or list(range(len(MODES)))
     for mode_id in ids:
+        if FLAVOR == "strike" and MODES[mode_id] in STRIKE_ABSENT:
+            print(f"SKIP  mode {mode_id:2d} {MODES[mode_id]}: not a Krunker Strike mode", flush=True)
+            continue
         run_mode(mode_id, MODES[mode_id], kn_proto.free_ports(1)[0])  # ephemeral: concurrent runs
 
 

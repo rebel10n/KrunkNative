@@ -1,6 +1,7 @@
 #include <server_cli.h>
 #include <ruleset.h> // the startup log: Krunker v10.0.2
 #include <flavor.h>   // --flavor / server.cfg `flavor`: the product flavor (Krunker Strike)
+#include <flavor_rules.h> // the flavor's mode rotation (Krunker Strike)
 #include <server_accounts.h>
 #include <brain.h>
 #include <info_query.h>
@@ -677,7 +678,10 @@ int main(int argc, char **argv) {
         print_usage(stdout, argv[0]);
         return 0;
     }
-    if (args.flavor) flavor_set_key(args.flavor); // --flavor wins over server.cfg; before --version
+    if (args.flavor) { // --flavor wins over server.cfg; before --version and the config defaults
+        flavor_set_key(args.flavor);
+        gs_config_lock_flavor();
+    }
     if (args.version) {
         printf(KN_PRODUCT_NAME " server_bin %d.%d.%d (Krunker v3.1.1 port)\n", g_server_version.major, g_server_version.minor, g_server_version.patch);
         if (flavor_get() != FLAVOR_BASE) printf("flavor %s (%s)\n", flavor_current()->key, flavor_current()->display_name);
@@ -772,10 +776,17 @@ int main(int argc, char **argv) {
             cJSON_Delete(startup_map);
             return 2;
         }
+        if (!rotation && !flavor_mode_allowed(mode_id)) {
+            fprintf(stderr, "Mode '%s' is not a %s mode\n", args.mode, flavor_current()->display_name);
+            cJSON_Delete(startup_map);
+            return 2;
+        }
 
         cfg->mode_count = 0;
-        if (rotation) {
-            for (size_t m = 0; m < sizeof(g_rotation_modes) / sizeof(g_rotation_modes[0]); m++) cfg->modes[cfg->mode_count++] = g_rotation_modes[m];
+        if (rotation) { // the flavor's public rotation (Krunker Strike: the modes its menu offers)
+            const int *rotation_modes = NULL;
+            const size_t rotation_count = flavor_rotation_modes(flavor_get(), &rotation_modes);
+            for (size_t m = 0; m < rotation_count && cfg->mode_count < GS_MAX_LIST; m++) cfg->modes[cfg->mode_count++] = rotation_modes[m];
         } else {
             cfg->modes[cfg->mode_count++] = mode_id;
         }
