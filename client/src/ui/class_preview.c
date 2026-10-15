@@ -58,7 +58,9 @@
 // - KRUNKNATIVE_PREVIEW_TEST=1 forces the rectangle below (CSS px) while the menu
 //   is open, so the C side can be checked without the page sending previewRect.
 // - KRUNKNATIVE_PREVIEW_DUMP=<file.ppm> writes the preview's render target (premultiplied,
-//   i.e. over black) once, PREVIEW_DUMP_FRAME frames in.
+//   i.e. over black) once, PREVIEW_DUMP_FRAME frames in. A "%d" in the name (/tmp/cls-%d.ppm)
+//   writes one per class instead, PREVIEW_DUMP_FRAME frames after that class's model is up
+//   (client/tests/class_preview_all_e2e.py).
 // - KRUNKNATIVE_PREVIEW_LOG=1 prints the canvas box in device px whenever it changes and
 //   the first frame the canvas shows (client/tests/preview_hole_e2e.py).
 // - KRUNKNATIVE_PREVIEW_WORLD=1 also keeps a copy of the third-person model in the
@@ -533,7 +535,21 @@ void client_class_preview_render(Client *client) {
     scene_set_alpha_target(0);
     g_render_lighting = saved_lighting;
 
-    if (dump_path && ++frames == PREVIEW_DUMP_FRAME) preview_dump(dump_path, width, height);
+    if (dump_path && strstr(dump_path, "%d")) { // one dump per class, PREVIEW_DUMP_FRAME frames after it is built
+        static int dumped_class = -1;
+        if (preview->class_index != dumped_class) {
+            dumped_class = preview->class_index;
+            frames = 0;
+        }
+        if (++frames == PREVIEW_DUMP_FRAME) {
+            char path[512];
+            const char *mark = strstr(dump_path, "%d");
+            snprintf(path, sizeof(path), "%.*s%d%s", (int) (mark - dump_path), dump_path, preview->class_index, mark + 2);
+            preview_dump(path, width, height);
+        }
+    } else if (dump_path && ++frames == PREVIEW_DUMP_FRAME) {
+        preview_dump(dump_path, width, height);
+    }
 
     glBindFramebuffer(GL_FRAMEBUFFER, (GLuint) prev_fbo);
     glViewport(prev_viewport[0], prev_viewport[1], prev_viewport[2], prev_viewport[3]);

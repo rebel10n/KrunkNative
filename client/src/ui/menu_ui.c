@@ -1784,26 +1784,10 @@ static void setup_dom(void) {
             html_dom_append(parent, holder);
         }
     }
-    // Ranked (doc/v7/decisions.md "Ranked", ranked_ui.c / windows[26] = showWindow(27)): v7.1.4 keeps
-    // the window and its "menu.btn.ranked" label but its page has no button left, so KrunkNative adds
-    // one to the main menu bar (#subLogoButtons), right after Server Finder: both start a match
-    // (Invite / Join / Connect / KPD are lobby links and tools), so the two matchmaking entries sit
-    // together. Styled with v7's own `button small buttonO` (#ff6a0b): v7's ranked colour (store.js
-    // limT "Ranked" #ff5500) and unlike its neighbours. --render-scenario leaves the bar as v7 has it.
-    if (!scenario_on() && !by_id("menuBtnRanked")) {
-        HtmlElem finder = by_id("menuBtnBrowser");
-        if (finder) html_dom_insert_html(finder, HTML_INSERT_AFTER_END,
-            "<div class=\"button small buttonO\" id=\"menuBtnRanked\" onmouseenter=\"playTick()\" "
-            "onclick=\"playSelect(),openRankedMenu()\">Ranked</div>");
-    }
-    // v10's #menuBtnTurfWars (icon flag): the Turf Wars window, after Ranked
-    if (!scenario_on() && !by_id("menuBtnTurfWars")) {
-        HtmlElem ranked = by_id("menuBtnRanked");
-        if (ranked) html_dom_insert_html(ranked, HTML_INSERT_AFTER_END,
-            "<div class=\"button small buttonG\" id=\"menuBtnTurfWars\" onmouseenter=\"playTick()\" "
-            "onclick=\"playSelect(),openTurfWars()\">Turf Wars</div>");
-    }
-    // Krunker v10 keeps Host Game in its action cards (its chooser, window 42: v10_menu.c)
+    // Ranked and Turf Wars are the v10 page's own entries: #menuBtnRanked is an action card in
+    // #subLogoButtons (the main bar, next to Quick Match), #menuBtnTurfWars a side-nav item
+    // (v10_competitive.c wires both). Krunker v10 keeps Host Game in its action cards (its
+    // chooser, window 42: v10_menu.c)
     servers_ui_menu_setup(); // KrunkNative: the Connect button next to Invite / Join (servers_ui.c)
     v10_news_setup(); // the v10 menu's Guide / What's New / Community & Events items (v10_news.c)
     v10_competitive_setup(); // the v10 page: Ranked / Turf Wars / Leaderboards (v10_competitive.c)

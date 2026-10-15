@@ -20,10 +20,12 @@ Checks, per window size / UI scale (native) or size / devicePixelRatio (web):
 - seamless: frame / world (the same run with KRUNKNATIVE_HIDE_UI=1 natively; on the web a
   screenshot with the page hidden, the game's main loop paused around the pair) per line along
   each edge of the box, at every offset from 10 px outside to 10 px inside, is the shade's ratio
-  (0.5, within LEVEL_TOLERANCE) and the same at every offset within TOLERANCE: a ring of other
+  (0.5, within LEVEL_TOLERANCE) and the same within TOLERANCE at every offset up to RING px from
+  the edge (the lines farther out set the level and pick the plain positions): a ring of other
   pixels at any edge fails. Lines are taken only at positions where the whole 20 px profile is
   flat (within SELECT), so page text, buttons and the model are skipped; an edge with too few such
-  positions fails too (a ring disqualifies every position it crosses);
+  positions is covered by the page (v10's class box over the bottom edge) and one such edge is
+  allowed: a ring disqualifies every position it crosses on every edge, so it still fails;
 - popup: with a popup open (native: the Exit button's confirm, web: #popupHolder shown) the same
   at 0.5 x 0.25, and nothing inside the box is brighter than 25% (the model is under the backdrop);
 - startup: the first frames after the map is ready (native) / while the page loads (web) are
@@ -46,6 +48,7 @@ BUILD = sys.argv[2 if WEB else 1] if len(sys.argv) > (2 if WEB else 1) else "cma
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-preview-hole-", dir=CACHE if os.path.isdir(CACHE) else None)
 REACH = 10          # px on each side of an edge
+RING = 4            # px on each side of an edge where a seam / ring is looked for
 TOLERANCE = 0.05    # |line median of frame / world over the shade - 1|
 SELECT = 0.06       # a position along an edge counts when its whole profile is this flat (relative)
 LEVEL_TOLERANCE = 0.1  # |the shade measured at an edge / the expected shade - 1|
@@ -124,7 +127,7 @@ def seam_check(ratio, box, shade=None):
     percent differently, and a panel over the shade is not the shade) must be the same at every
     offset within TOLERANCE."""
     import numpy as np
-    bad, detail, measured = [], [], 0
+    bad, covered, detail, measured = [], [], [], 0
     for edge in ("left", "right", "top", "bottom"):
         if not edge_on_screen(ratio.shape, box, edge):
             continue
@@ -136,18 +139,26 @@ def seam_check(ratio, box, shade=None):
             if shade is not None:  # and only the page's shade there (not a panel over it)
                 plain &= np.abs(ref[:, 0] / shade - 1) < LEVEL_TOLERANCE
         clean = lines[plain]
-        if len(clean) < MIN_LINES:
-            bad.append(edge)
+        if len(clean) < MIN_LINES:  # page content over this edge (v10's class box, CLICK TO PLAY)
+            covered.append(edge)
             detail.append(f"{edge}: {len(clean)} plain positions of {len(lines)}")
             continue
         med = np.median(clean, axis=0)
         level = float(np.median(med))
-        worst = int(np.argmax(np.abs(med - level)))
+        # a seam or ring sits at the edge: the worst line within RING px of it (farther out, the
+        # world's own gradients and the two runs' lighting differ by a few percent at startup)
+        near = np.arange(REACH - RING, REACH + RING)
+        worst = int(near[np.argmax(np.abs(med[near] - level))])
         detail.append(f"{edge}: {level:.3f}, worst {med[worst]:.3f} at {worst - REACH:+d} ({len(clean)} positions)")
         if abs(med[worst] / level - 1) > TOLERANCE:
             bad.append(edge)
     if measured < 2:
         return False, "fewer than two edges on screen"
+    # an edge the page covers (v10's class box sits over the canvas's bottom edge, CLICK TO PLAY
+    # over its top one at some scales) has too few plain positions to measure; a ring runs round
+    # every edge, so it shows on the others: all but one on-screen edge must be measured
+    if measured - len(covered) < max(2, measured - 1):
+        bad += covered
     return not bad, ("BAD " + ", ".join(bad) + " | ") * bool(bad) + "; ".join(detail)
 
 
@@ -157,7 +168,7 @@ def ring_check(ratio, box):
     equal to their side's level within TOLERANCE (a hole whose shade differs inside the box passes
     when it is sharp; seam_check is the stricter test of the preview's design)."""
     import numpy as np
-    bad, detail, measured = [], [], 0
+    bad, covered, detail, measured = [], [], [], 0
     for edge in ("left", "right", "top", "bottom"):
         if not edge_on_screen(ratio.shape, box, edge):
             continue
@@ -169,8 +180,8 @@ def ring_check(ratio, box):
             flat = (np.abs(lines[:, :REACH] / out_ref - 1) < SELECT).all(axis=1) & \
                    (np.abs(lines[:, REACH:] / in_ref - 1) < SELECT).all(axis=1)
         clean = lines[flat]
-        if len(clean) < MIN_LINES:
-            bad.append(edge)
+        if len(clean) < MIN_LINES:  # page content over this edge
+            covered.append(edge)
             detail.append(f"{edge}: {len(clean)} flat positions of {len(lines)}")
             continue
         med = np.median(clean, axis=0)
@@ -182,6 +193,11 @@ def ring_check(ratio, box):
             bad.append(edge)
     if measured < 2:
         return False, "fewer than two edges on screen"
+    # an edge the page covers (v10's class box sits over the canvas's bottom edge, CLICK TO PLAY
+    # over its top one at some scales) has too few plain positions to measure; a ring runs round
+    # every edge, so it shows on the others: all but one on-screen edge must be measured
+    if measured - len(covered) < max(2, measured - 1):
+        bad += covered
     return not bad, ("BAD " + ", ".join(bad) + " | ") * bool(bad) + "; ".join(detail)
 
 
@@ -269,10 +285,19 @@ def native_popup_case(size, scale_ui):
     x, y, w, h = box
     H, W = frame.shape[:2]
     # the box without the screen's last row / column (#uiBase's scaled edge, a fraction of a px
-    # short of the window like v7's in Chrome) and the confirm box in the middle
-    inner = frame[max(0, y):min(H - 1, y + h), max(0, x):min(W - 1, x + w)].max(axis=2)
-    xs = np.arange(max(0, x), min(W - 1, x + w))
-    inner = inner[:, np.abs(xs - W / 2) > 260]
+    # short of the window like v7's in Chrome) and without the confirm box in the middle, found by
+    # its YES / NO buttons (green, red): their span, from 2.5 button heights above them (the
+    # question) to its border below them
+    green = (frame[..., 1] > 180) & (frame[..., 0] < 140) & (frame[..., 2] < 140)
+    red = (frame[..., 0] > 200) & (frame[..., 1] < 120) & (frame[..., 2] < 120)
+    ys, xs_b = np.nonzero(green | red)
+    keep = np.ones((H, W), bool)
+    if len(xs_b):
+        bh = ys.max() - ys.min() + 1
+        pad = max(12, int(0.7 * bh))  # the box's padding and border
+        keep[max(0, int(ys.min() - 2.5 * bh)):int(ys.max() + pad), max(0, xs_b.min() - pad):xs_b.max() + pad] = False
+    region = (slice(max(0, y), min(H - 1, y + h)), slice(max(0, x), min(W - 1, x + w)))
+    inner = frame[region].max(axis=2)[keep[region]]
     peak = float(inner.max()) if inner.size else 255.0
     check(f"native {tag}: the model is under the popup's backdrop", peak <= 255 * 0.25 + 4, f"brightest {peak:.0f}")
 
