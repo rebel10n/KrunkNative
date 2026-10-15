@@ -1189,6 +1189,16 @@ else ()
         add_test(NAME nettspend_audio_test COMMAND nettspend_audio_test ${CMAKE_SOURCE_DIR})
     endif ()
 
+    # audio_volume_test: every Audio slider (v10's nine SOUND.volumes slots, dialogueVolume / skinVolume
+    # included) reaches the sounds of its category (client/src/audio.c). GL-free, no audio device.
+    if (NOT WIN32)
+        add_executable(audio_volume_test client/tests/audio_volume_test.c client/src/audio.c client/src/miniaudio.c
+                       ${SHARED_HEADERS} ${SHARED_SOURCES})
+        target_include_directories(audio_volume_test PRIVATE client/include client/lib)
+        target_link_libraries(audio_volume_test PRIVATE cJSON freetype glfw Threads::Threads m ${CMAKE_DL_LIBS})
+        add_test(NAME audio_volume_test COMMAND audio_volume_test)
+    endif ()
+
     # KrunkScript (doc/v7/krunkscript.md 6.6): ksc (check; WP2 adds run) over the ks
     # sources only, and ks_front_test (lexer/parser/checker + shared/tests/ks suite)
     file(GLOB KS_SOURCES shared/src/ks/*.c)

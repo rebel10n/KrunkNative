@@ -111,35 +111,104 @@ static struct {
     FILE *capture;
     ma_uint64 capture_frames;
 } g_audio = {
-    .volumes = {0.8f, 1.0f, 1.0f, 0.5f, 1.0f, 1.0f, 1.0f},
+    .volumes = {0.8f, 1.0f, 1.0f, 0.5f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f},
     .rate_scale = 1.0f,
 };
 
-// SOUND.soundCats (64.js), verbatim.
+// SOUND.soundCats (v10.js:193556), verbatim: the category of every sound Krunker v10.0.2 lists. A sound
+// it does not list plays at volume 1 (getVolume: `soundCats[name] != null ? volumes[cat] : 1`).
 static const struct {
     const char *name;
     int category;
 } SOUND_CATS[] = {
-    {"nuke_0", 0}, {"siren_0", 0}, {"jumpS_0", 0}, {"beep_0", 0}, {"bo_plant", 0}, {"bo_diff", 0},
-    {"ambient_1", 2}, {"ambient_2", 2}, {"ambient_3", 2}, {"ambient_4", 2}, {"ambient_5", 2},
-    {"ambient_6", 2}, {"ambient_7", 2}, {"ambient_8", 2},
-    {"aim_0", 3}, {"aim_1", 3}, {"explosion", 3}, {"gclick_0", 3}, {"pick_0", 3}, {"pick_1", 3},
-    {"reload_1", 3}, {"reload_2", 3}, {"swsh_0_0", 3}, {"swsh_0_1", 3},
-    {"weapon_1", 3}, {"weapon_1_0", 3}, {"weapon_2", 3}, {"weapon_3", 3}, {"weapon_4", 3},
-    {"weapon_5", 3}, {"weapon_6", 3}, {"weapon_7", 3}, {"weapon_8", 3}, {"weapon_9", 3},
-    {"weapon_10", 3}, {"weapon_11", 3}, {"weapon_12", 3}, {"weapon_13", 3}, {"weapon_14", 3},
-    {"weapon_15", 3}, {"weapon_16", 3}, {"weapon_17", 3}, {"weapon_18", 3}, {"whizz_0", 3},
-    {"whizz_1", 3}, {"weapon_6_0", 3}, {"weapon_1_2", 3}, {"weapon_3_0", 3}, {"rico_1", 3},
-    {"rico_2", 3}, {"case_0", 3}, {"case_1", 3}, {"weapon_3_2", 3}, {"weapon_2_0", 3},
-    {"weapon_1_4", 3}, {"weapon_1_3", 3}, {"weapon_8_0", 3}, {"weapon_10_0", 3},
-    {"melee_12", 3}, {"swsh_12_0", 3}, {"swsh_12_1", 3}, {"weapon_4_0", 3}, {"melee_equip", 3},
-    {"melee_14", 3}, {"swsh_14_0", 3}, {"swsh_14_1", 3}, {"weapon_1_5", 3}, {"weapon_19", 3},
-    {"melee_19", 3}, {"swsh_19_0", 3}, {"swsh_19_1", 3},
-    {"fart_0", 4}, {"headshot_0", 4}, {"hit_0", 4}, {"impact_0", 4}, {"jump_0", 4}, {"jump_1", 4},
-    {"land_0", 4}, {"punch_0", 4}, {"punch_1", 4}, {"slide_0", 4}, {"spray", 4}, {"step_0", 4},
-    {"step_1", 4}, {"step_2", 4}, {"taunt_0", 4}, {"taunt_1", 4}, {"taunt_2", 4}, {"taunt_3", 4},
-    {"taunt_4", 4}, {"cough_1", 4}, {"cough_2", 4}, {"collect_1", 4}, {"bounce_0", 4},
-    {"buy_0", 5}, {"buy_1", 5}, {"cheer_0", 5}, {"reward", 5}, {"store", 5}, {"tick_0", 5},
+    {"nuke_0", 0}, {"siren_0", 0}, {"scare_0", 0}, {"scare_1", 0}, {"beep_0", 0}, {"dragon_0", 0}, {"egg_0", 0},
+    {"ambient_1", 2}, {"ambient_2", 2}, {"ambient_3", 2}, {"ambient_4", 2}, {"ambient_5", 2}, {"ambient_6", 2},
+    {"ambient_7", 2}, {"ambient_8", 2}, {"ambient_9", 2}, {"ambient_10", 2}, {"gong_0", 2}, {"ambient_11", 2},
+    {"ambient_12", 2}, {"ambient_13", 2}, {"ambient_14", 2}, {"ambient_15", 2}, {"ambient_16", 2}, {"ambient_17", 2},
+    {"ambient_18", 2}, {"ambient_19", 2}, {"jug_0", 2}, {"aim_0", 3}, {"aim_1", 3}, {"explosion", 3},
+    {"gclick_0", 3}, {"pick_0", 3}, {"pick_1", 3}, {"reload_1", 3}, {"reload_2", 3}, {"swsh_0_0", 3},
+    {"swsh_0_1", 3}, {"weapon_1", 3}, {"weapon_1_0", 3}, {"weapon_2", 3}, {"weapon_3", 3}, {"weapon_4", 3},
+    {"weapon_5", 3}, {"weapon_6", 3}, {"weapon_7", 3}, {"weapon_8", 3}, {"weapon_9", 3}, {"weapon_10", 3},
+    {"weapon_11", 3}, {"weapon_12", 3}, {"weapon_13", 3}, {"weapon_14", 3}, {"weapon_15", 3}, {"weapon_16", 3},
+    {"weapon_17", 3}, {"weapon_18", 3}, {"whizz_0", 3}, {"whizz_1", 3}, {"weapon_6_0", 3}, {"weapon_1_2", 3},
+    {"weapon_3_0", 3}, {"rico_1", 3}, {"rico_2", 3}, {"case_0", 3}, {"case_1", 3}, {"weapon_3_2", 3},
+    {"weapon_2_0", 3}, {"weapon_1_4", 3}, {"weapon_1_3", 3}, {"weapon_17_0", 3}, {"weapon_8_0", 3},
+    {"weapon_10_0", 3}, {"melee_12", 3}, {"swsh_12_0", 3}, {"swsh_12_1", 3}, {"weapon_4_0", 3}, {"melee_equip", 3},
+    {"melee_14", 3}, {"swsh_14_0", 3}, {"swsh_14_1", 3}, {"weapon_1_5", 3}, {"weapon_19", 3}, {"melee_19", 3},
+    {"swsh_19_0", 3}, {"swsh_19_1", 3}, {"weapon_11_0", 3}, {"weapon_4_1", 3}, {"weapon_4_2", 3}, {"weapon_4_3", 3},
+    {"weapon_7_0", 3}, {"melee_25", 3}, {"melee_25_1", 3}, {"weapon_1_6", 3}, {"weapon_7_1", 3}, {"weapon_2_1", 3},
+    {"weapon_1_7", 3}, {"weapon_2_3", 3}, {"swing_0", 3}, {"weapon_9_0", 3}, {"weapon_1_8", 3}, {"weapon_3_16", 3},
+    {"weapon_14_0", 3}, {"weapon_10_1", 3}, {"weapon_11_1", 3}, {"melee_38", 3}, {"weapon_12_0", 3},
+    {"weapon_14_1", 3}, {"weapon_6_1", 3}, {"weapon_2_4", 3}, {"weapon_10_2", 3}, {"weapon_8_1", 3},
+    {"weapon_5_0", 3}, {"weapon_4_4", 3}, {"weapon_20", 3}, {"weapon_17_1", 3}, {"weapon_3_3", 3}, {"melee_42", 3},
+    {"weapon_2_5", 3}, {"weapon_1_12", 3}, {"weapon_1_9", 3}, {"weapon_2_6", 3}, {"weapon_2_7", 3},
+    {"weapon_2_8", 3}, {"weapon_2_9", 3}, {"weapon_5_1", 3}, {"weapon_5_2", 3}, {"weapon_7_2", 3}, {"weapon_7_3", 3},
+    {"weapon_7_4", 3}, {"weapon_7_5", 3}, {"weapon_9_1", 3}, {"weapon_10_3", 3}, {"weapon_15_1", 3},
+    {"weapon_15_2", 3}, {"weapon_15_3", 3}, {"weapon_16_1", 3}, {"weapon_6_2", 3}, {"weapon_3_4", 3},
+    {"weapon_4_6", 3}, {"weapon_4_5", 3}, {"weapon_1_11", 3}, {"weapon_17_3", 3}, {"weapon_2_10", 3},
+    {"weapon_7_6", 3}, {"weapon_8_2", 3}, {"weapon_11_3", 3}, {"weapon_1_10", 3}, {"weapon_22", 3},
+    {"weapon_17_4", 3}, {"weapon_19_0", 3}, {"weapon_12_1", 3}, {"weapon_14_2", 3}, {"weapon_1_13", 3},
+    {"weapon_2_11", 3}, {"weapon_3_6", 3}, {"weapon_4_8", 3}, {"weapon_5_3", 3}, {"weapon_6_3", 3},
+    {"weapon_7_7", 3}, {"weapon_8_3", 3}, {"weapon_9_2", 3}, {"weapon_10_4", 3}, {"weapon_11_4", 3},
+    {"weapon_12_2", 3}, {"weapon_14_3", 3}, {"weapon_15_4", 3}, {"weapon_16_2", 3}, {"weapon_19_1", 3},
+    {"weapon_3_5", 3}, {"weapon_9_3", 3}, {"weapon_6_4", 3}, {"weapon_2_13", 3}, {"weapon_7_9", 3}, {"melee_65", 3},
+    {"weapon_28_0", 3}, {"weapon_11_6", 3}, {"weapon_10_6", 3}, {"weapon_1_15", 3}, {"weapon_1_16", 3},
+    {"weapon_2_14", 3}, {"weapon_6_6", 3}, {"weapon_4_10", 3}, {"weapon_2_15", 3}, {"weapon_1_17", 3},
+    {"weapon_23", 3}, {"weapon_6_7", 3}, {"weapon_2_16", 3}, {"weapon_21", 3}, {"weapon_6_8", 3}, {"weapon_6_9", 3},
+    {"weapon_11_7", 3}, {"weapon_7_10", 3}, {"weapon_24", 3}, {"weapon_4_11", 3}, {"weapon_1_18", 3},
+    {"weapon_25", 3}, {"weapon_26", 3}, {"weapon_5_5", 3}, {"weapon_1_19", 3}, {"weapon_27", 3}, {"weapon_28", 3},
+    {"weapon_6_10", 3}, {"weapon_1_20", 3}, {"weapon_17_6", 3}, {"weapon_3_8", 3}, {"weapon_2_18", 3},
+    {"weapon_29", 3}, {"weapon_29_blast", 3}, {"weapon_4_12", 3}, {"weapon_1_21", 3}, {"weapon_9_6", 3},
+    {"weapon_4_13", 3}, {"weapon_16_4", 3}, {"weapon_4_14", 3}, {"weapon_1_22", 3}, {"weapon_8_5", 3},
+    {"weapon_8_5_r_1", 3}, {"weapon_8_5_r_2", 3}, {"weapon_4_15", 3}, {"weapon_6_11", 3}, {"weapon_9_7", 3},
+    {"weapon_upgraded", 3}, {"weapon_14_5", 3}, {"weapon_12_4", 3}, {"weapon_3_9", 3}, {"weapon_4_17", 3},
+    {"weapon_5_6", 3}, {"weapon_19_3", 3}, {"weapon_1_23", 3}, {"weapon_1_24", 3}, {"weapon_4_18", 3},
+    {"weapon_11_9", 3}, {"weapon_29_2", 3}, {"weapon_4_16", 3}, {"weapon_2_19", 3}, {"weapon_2_20", 3},
+    {"weapon_10_7", 3}, {"weapon_3_10", 3}, {"weapon_31", 3}, {"weapon_15_7", 3}, {"weapon_15_7_r_1", 3},
+    {"weapon_15_7_r_2", 3}, {"weapon_8_8", 3}, {"weapon_2_25", 3}, {"weapon_2_26", 3}, {"weapon_7_16", 3},
+    {"weapon_1_33", 3}, {"weapon_4_20", 3}, {"weapon_4_21", 3}, {"weapon_5_10", 3}, {"weapon_1_34", 3},
+    {"weapon_29_3", 3}, {"weapon_14_6", 3}, {"weapon_11_10", 3}, {"weapon_2_27", 3}, {"weapon_6_14", 3},
+    {"weapon_31_1", 3}, {"weapon_31_1_r_1", 3}, {"weapon_31_1_r_2", 3}, {"weapon_8_10", 3}, {"weapon_8_10_r_1", 3},
+    {"weapon_8_10_r_2", 3}, {"weapon_5_11", 3}, {"weapon_5_11_r_1", 3}, {"weapon_5_11_r_2", 3}, {"weapon_10_12", 3},
+    {"weapon_6_15", 3}, {"weapon_6_16", 3}, {"weapon_1_35", 3}, {"weapon_3_11", 3}, {"weapon_22_4", 3},
+    {"weapon_8_7", 3}, {"weapon_10_11", 3}, {"weapon_7_15", 3}, {"weapon_6_12", 3}, {"weapon_7_13", 3},
+    {"weapon_9_8", 3}, {"weapon_5_7", 3}, {"weapon_1_31", 3}, {"weapon_7_14", 3}, {"weapon_2_22", 3},
+    {"weapon_8_6", 3}, {"weapon_5_8", 3}, {"weapon_1_32", 3}, {"weapon_7_12", 3}, {"weapon_2_24", 3},
+    {"weapon_4_19", 3}, {"weapon_1_30", 3}, {"weapon_19_4", 3}, {"weapon_19_6", 3}, {"weapon_1_28", 3},
+    {"weapon_6_13", 3}, {"weapon_1_29", 3}, {"weapon_2_23", 3}, {"weapon_7_11", 3}, {"weapon_5_9", 3},
+    {"weapon_22_3", 3}, {"weapon_10_10", 3}, {"weapon_2_28", 3}, {"weapon_1_36", 3}, {"weapon_3_12", 3},
+    {"weapon_4_22", 3}, {"weapon_1_37", 3}, {"weapon_5_12", 3}, {"weapon_6_17", 3}, {"weapon_12_6", 3},
+    {"weapon_1_38", 3}, {"weapon_4_23", 3}, {"weapon_4_24", 3}, {"weapon_15_8", 3}, {"weapon_15_9", 3},
+    {"weapon_2_29", 3}, {"weapon_4_25", 3}, {"weapon_6_19", 3}, {"weapon_7_18", 3}, {"weapon_1_39", 3},
+    {"weapon_2_30", 3}, {"weapon_4_27", 3}, {"weapon_8_12", 3}, {"weapon_4_28", 3}, {"melee_butterfly_equip", 3},
+    {"melee_butterfly_inspect", 3}, {"weapon_1_42", 3}, {"weapon_5_13", 3}, {"weapon_5_14", 3}, {"weapon_8_14", 3},
+    {"weapon_10_13", 3}, {"weapon_5_15", 3}, {"weapon_14_8", 3}, {"weapon_14_9", 3}, {"weapon_5_16", 3},
+    {"weapon_1_43", 3}, {"weapon_1_44", 3}, {"weapon_1_46", 3}, {"weapon_14_10", 3}, {"weapon_5_17", 3},
+    {"weapon_2_33", 3}, {"weapon_5_18", 3}, {"weapon_4_29", 3}, {"weapon_1_47", 3}, {"weapon_1_48", 3},
+    {"weapon_4_30", 3}, {"weapon_8_15", 3}, {"weapon_12_8", 3}, {"weapon_16_6", 3}, {"weapon_4_31", 3},
+    {"weapon_1_49", 3}, {"weapon_4_32", 3}, {"weapon_1_50", 3}, {"weapon_4_33", 3}, {"weapon_7_19", 3},
+    {"weapon_17_8", 3}, {"weapon_19_8", 3}, {"weapon_11_12", 3}, {"weapon_5_20", 3}, {"weapon_6_21", 3},
+    {"weapon_3_14", 3}, {"weapon_15_11", 3}, {"weapon_8_17", 3}, {"weapon_22_5", 3}, {"weapon_1_52", 3},
+    {"weapon_4_36", 3}, {"melee_dragonbfk_inspect", 3}, {"melee_dragonbfk_equip", 3}, {"vcoreintial", 3},
+    {"vcoreblasterinspect", 3}, {"vcoredeagleinspect", 3}, {"vcoreaxeinspect", 3}, {"fart_0", 4}, {"headshot_0", 4},
+    {"hit_0", 4}, {"impact_0", 4}, {"jump_0", 4}, {"jump_1", 4}, {"land_0", 4}, {"punch_0", 4}, {"punch_1", 4},
+    {"slide_0", 4}, {"spray", 4}, {"step_0", 4}, {"step_1", 4}, {"step_2", 4}, {"taunt_0", 4}, {"taunt_1", 4},
+    {"taunt_2", 4}, {"taunt_3", 4}, {"taunt_4", 4}, {"cough_1", 4}, {"cough_2", 4}, {"collect_1", 4},
+    {"bounce_0", 4}, {"build_0", 4}, {"break_wood", 4}, {"taunt_5", 4}, {"spray_1", 4}, {"takedmg_0", 4},
+    {"takedmg_1", 4}, {"stepwo_0", 4}, {"stepwo_1", 4}, {"stepwat_0", 4}, {"stepwat_1", 4}, {"stepsa_0", 4},
+    {"stepsa_1", 4}, {"stepsno_0", 4}, {"stepsno_1", 4}, {"stepsno_2", 4}, {"egg_1", 4}, {"bounce_1", 4},
+    {"zap_0", 4}, {"crit_0", 4}, {"reload_3", 4}, {"buy_0", 5}, {"buy_1", 5}, {"cheer_0", 5}, {"reward", 5},
+    {"cheer_1", 5}, {"store", 5}, {"tick_0", 5}, {"limited_0", 5}, {"limited_1", 5}, {"limited_2", 5},
+    {"limited_3", 5}, {"limited_4", 5}, {"limited_5", 5}, {"limited_6", 5}, {"limited_7", 5}, {"bundle_1", 5},
+    {"bundle_2", 5}, {"bundle_3", 5}, {"bundle_4", 5}, {"select_0", 5}, {"unwrap_0", 5}, {"hover_0", 5},
+    {"bundle_5", 5}, {"menu_0", 5}, {"bundle_6", 5}, {"bundle_7", 5}, {"menu_1", 5}, {"bundle_8", 5},
+    {"bundle_9", 5}, {"bundle_10", 5}, {"bundle_11", 5}, {"bundle_12", 5}, {"bundle_13", 5}, {"bundle_14", 5},
+    {"bundle_15", 5}, {"bundle_16", 5}, {"bundle_17", 5}, {"bundle_18", 5}, {"eterno_lofi", 5}, {"bo_plant", 7},
+    {"bo_diff", 7}, {"bhop_reset", 7}, {"bhop_check", 7}, {"dom_zone_securing_0", 7}, {"dom_zone_securing_1", 7},
+    {"dom_zone_losing_0", 7}, {"dom_zone_secured_0", 7}, {"dom_zone_secured_1", 7}, {"dom_zone_secured_2", 7},
+    {"dom_zone_all_0", 7}, {"dom_zone_all_1", 7}, {"medal_0", 7}, {"medal_1", 7}, {"gift_0", 7}, {"mystery_0", 7},
+    {"mystery_1", 7}, {"firesale_0", 7}, {"firesale_1", 7}, {"instantkill_0", 7}, {"shoe_1", 8}, {"shoe_2", 8},
+    {"shoe_19", 8}, {"shoe_28", 8}, {"shoe_46", 8}, {"inspect_idol_music_loop", 8}, {"inspect_monte_carlo_spin", 8},
 };
 
 // ---------------------------------------------------------------- helpers
@@ -849,6 +918,10 @@ void audio_set_volume(const AudioCategory category, const float volume) {
     }
 }
 
+float audio_sound_volume(const char *name) {
+    return name ? category_factor(sound_category(name)) : 0.0f;
+}
+
 float audio_get_volume(const AudioCategory category) {
     if ((int) category < 0 || category >= AUDIO_CAT_COUNT) return 0.0f;
     return g_audio.volumes[category];
@@ -866,6 +939,8 @@ int audio_apply_setting(const char *key, const char *value) {
         {"playerVolume", AUDIO_CAT_PLAYER},
         {"uiVolume", AUDIO_CAT_UI},
         {"assetVolume", AUDIO_CAT_ASSET},
+        {"dialogueVolume", AUDIO_CAT_DIALOGUE}, // v10.js: SOUND.setVolume(v, 7), "Audio performed on action"
+        {"skinVolume", AUDIO_CAT_SKIN},         // v10.js: SOUND.setVolume(v, 8), "Sound emitted from skins"
     };
 
     if (!key || !value) return 0;

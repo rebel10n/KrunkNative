@@ -24,7 +24,9 @@
 #include <common.h>
 
 // Krunker's SOUND.volumes indices (settings: sound=0, voiceVolume=1, ambientVolume=2,
-// gunsVolume=3, playerVolume=4, uiVolume=5, assetVolume=6).
+// gunsVolume=3, playerVolume=4, uiVolume=5, assetVolume=6; v10.0.2 adds dialogueVolume=7, the
+// "Action" sounds such as medals, bomb plant / defuse and zone calls, and skinVolume=8, cosmetic
+// sounds such as shoe steps: v10.js:193554 volumes = [1 x 9]).
 typedef enum {
     AUDIO_CAT_MASTER = 0,
     AUDIO_CAT_VOICE = 1,
@@ -33,6 +35,8 @@ typedef enum {
     AUDIO_CAT_PLAYER = 4,
     AUDIO_CAT_UI = 5,
     AUDIO_CAT_ASSET = 6,
+    AUDIO_CAT_DIALOGUE = 7,
+    AUDIO_CAT_SKIN = 8,
     AUDIO_CAT_COUNT
 } AudioCategory;
 
@@ -76,6 +80,8 @@ void audio_update(vec3 listener_position, float yaw, float pitch);
 // (master 0.8, weapons 0.5, everything else 1).
 void audio_set_volume(AudioCategory category, float volume);
 float audio_get_volume(AudioCategory category);
+// SOUND.getVolume(name): the category volume a sound plays at (1 for a sound soundCats does not list)
+float audio_sound_volume(const char *name);
 // Krunker setting key -> audio_set_volume ("sound", "ambientVolume", "voiceVolume",
 // "gunsVolume", "playerVolume", "uiVolume", "assetVolume"). Returns 1 when the key was an
 // audio setting.
