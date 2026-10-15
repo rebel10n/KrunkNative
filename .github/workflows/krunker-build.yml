@@ -1,0 +1,42 @@
+name: Krunker build
+
+# Krunker's live client against the committed build constants (tools/krunker/extract_build.py,
+# shared/include/krunker_build.h + tools/krunker/build.json, krunker_maps.h): official servers
+# refuse a client whose version, ahNum key or packet tables are stale, as 10.0.3 did (6e198333).
+# Every 6 hours (and by hand) the extractor downloads https://kru.eli.gift/game.deob.js as text
+# (a static parse, nothing executes it) and regenerates the header into a temp file. A changed
+# bundle fails the run and attaches krunker-build.diff, the regenerated files against main:
+# land it with `make krunker-build`. An unreachable or 404 bundle is a warning, not a failure
+# (the check then compares the header with build.json only).
+on:
+  schedule:
+    - cron: "23 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Committed constants match the live bundle
+        id: check
+        run: make krunker-build-check
+
+      - name: Regenerate (the bundle changed)
+        if: failure() && steps.check.outcome == 'failure'
+        run: |
+          make krunker-build FORCE=1 || true
+          git diff --stat
+          git diff > krunker-build.diff
+
+      - uses: actions/upload-artifact@v7
+        if: failure() && steps.check.outcome == 'failure'
+        with:
+          name: krunker-build-diff
+          path: krunker-build.diff
+          if-no-files-found: ignore
