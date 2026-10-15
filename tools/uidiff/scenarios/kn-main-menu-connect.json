@@ -1,0 +1,24 @@
+{
+  "ref": "doc/ref/krunknative/kn-main-menu-connect.png",
+  "size": [
+    1280,
+    720
+  ],
+  "background": "#222222",
+  "state": {
+    "menu": true,
+    "connected": true,
+    "ready": true,
+    "inGame": false,
+    "name": "Guest",
+    "classIndex": 0,
+    "region": "...",
+    "mapName": "Kanji",
+    "mapFile": "maps/311_kanji.json",
+    "gameName": "",
+    "anim_time": 0.8,
+    "clientChrome": true
+  },
+  "frames": 3,
+  "note": "KrunkNative: the v10 main menu with the desktop client's additions (state.clientChrome), here the Connect link after Invite - Join in the match bar (servers_ui_menu_setup), drawn like v10's own match actions. No Krunker reference (v10's bar ends at Join); compare its row with doc/ref/krunker-v10.0.2/main-menu.png"
+}

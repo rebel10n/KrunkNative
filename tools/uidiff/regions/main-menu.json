@@ -107,7 +107,7 @@
       "kind": "text",
       "fuzz": 20,
       "max_pct": 18.0,
-      "note": "the match-info bar: #mapInfoHld + #menuRegionLabel + Invite / Join, and no Connect button (v10_menu.c). Same glyph rasterisation gap, multiplied by the empty #menuRegionLabel place: the reference draws a 6 px '...' the engine's block lays out at 0 x 0 (#menuRegionLabel { display: block }, kn-v10-menu.css); every other box in the bar matches (615..629 both)"
+      "note": "the match-info bar: #mapInfoHld + #menuRegionLabel + Invite / Join, and no Connect link: v10's bar ends at Join, the client adds Connect only outside scenarios or with state.clientChrome (servers_ui_menu_setup; kn-main-menu-connect). Same glyph rasterisation gap, multiplied by the empty #menuRegionLabel place: the reference draws a 6 px '...' the engine's block lays out at 0 x 0 (#menuRegionLabel { display: block }, kn-v10-menu.css); every other box in the bar matches (615..629 both)"
     }
   ]
 }

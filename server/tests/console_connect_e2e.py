@@ -11,7 +11,9 @@ server), then drives a headless client_bin in brain mode through KRUNKNATIVE_UI_
      seek moves it back to the lobby (the old menu_retry_connect -> servers_ui_retry seek)
   3. `reconnect` (while connected) comes back to that same server
   4. `disconnect` stays disconnected: no seek, no transport retry
-  5. `reconnect` after `disconnect` reaches the same server again
+  5. `reconnect` after `disconnect` reaches the same server again; after another `disconnect`
+     the menu's Connect link (after Invite - Join on v10's match bar) opens the Connect window
+     with that server filled in and its button joins it
   6. the local server goes away: the transport retries with a backoff (2 s, 4 s, ...)
      and never falls back to the lobby
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL; KRUNKNATIVE_EGL_DEVICE picks it).
@@ -80,6 +82,20 @@ def con(line):
         f.write(f"con {line}\n")
     wait_for(lambda: any(f"] {line}" in l for l in client_lines()[mark:]), 5.0)
     return mark
+
+
+def ui(line):
+    """One KRUNKNATIVE_UI_CMDS line (clickid, rect, value, ...); returns the log line count before it."""
+    mark = len(client_lines())
+    with open(CMDS, "a") as f:
+        f.write(f"{line}\n")
+    return mark
+
+
+def rect_of(lines):
+    """[x, y, w, h] of the last "[ui_cmds] #id rect x y w h" line, None without one."""
+    m = re.search(r" rect ([-\d.]+) ([-\d.]+) ([-\d.]+) ([-\d.]+)", lines[-1]) if lines else None
+    return [float(v) for v in m.groups()] if m else None
 
 
 def after(mark, pattern):
@@ -157,6 +173,28 @@ def run():
 
     mark = con("reconnect")
     check("reconnect after disconnect reaches the same server", wait_for(lambda: after(mark, re.escape(here)), 10.0))
+
+    # the menu's Connect link (servers_ui_menu_setup: after Invite - Join in v10's match bar) opens
+    # the Connect window with the last direct server filled in; its button joins it
+    mark = con("disconnect")
+    wait_for(lambda: after(mark, r"disconnected from server"), 5.0)
+    time.sleep(1.0)
+    mark = ui("rect menuBtnConnect")
+    ui("rect menuBtnJoin")
+    bar = wait_for(lambda: after(mark, r"\[ui_cmds\] #menuBtnConnect (rect|: no box)"), 5.0)
+    join = wait_for(lambda: after(mark, r"\[ui_cmds\] #menuBtnJoin (rect|: no box)"), 5.0)
+    c, j = rect_of(bar), rect_of(join)
+    check("the Connect link sits after Join on the match bar's line",
+          c and j and c[2] > 0 and c[0] > j[0] + j[2] and abs((c[1] + c[3] / 2) - (j[1] + j[3] / 2)) < 2, f"connect {c} join {j}")
+    mark = ui("clickid menuBtnConnect")
+    time.sleep(1.0)
+    ui("value connectAddr")
+    val = wait_for(lambda: after(mark, r"\[ui_cmds\] value connectAddr"), 5.0)
+    check("the Connect link opens the Connect window with the last server",
+          val and f"'127.0.0.1:{LOCAL_PORT}'" in val[-1], "; ".join(val or []))
+    mark = ui("clicksel 0 #connectAddr ~ .joinBtn")
+    check("its Connect button joins that server", wait_for(lambda: after(mark, re.escape(here)), 10.0)
+          and after(mark, re.escape(f"[mm] connect window: 127.0.0.1:{LOCAL_PORT}")), "; ".join(after(mark, r"\[mm\]|connected to")))
 
     time.sleep(1.0)
     mark = len(client_lines())

@@ -11,7 +11,7 @@ Headless client_bin runs (one at a time, input scripts clicking the page by elem
   1. a signed-in player (saved krunker_username / krunker_token): the header is v10's signed-in
      bar (name, level, KR), the nav shows v10's signed-in items (Turf Wars, Market & Trading,
      Leaderboards, the small Guide entry), the class preview shows, Host Game shows and the
-     old Connect button is gone;
+     Connect link is on the match bar after Join (it opens the Connect window);
      Settings opens Game Settings; Find Game opens v10's "Select a Server" chooser and its Public
      tile the server list with both lobbies, and no frame from the click to the list takes over
      500 ms (`ft`: the main thread never freezes); Custom Games opens the Custom Games window with its
@@ -242,7 +242,7 @@ def signed_in_case(brain_port, games):
     h = vis(text, "header")
     check("1: signed-in header bar (no guest bar)", h.get("signedInHeaderBar") == "1" and h.get("signedOutHeaderBar") == "0", str(h))
     check("1: name and KR in the header", h.get("knV10Name") == "1" and h.get("menuKRCount") == "1", str(h))
-    check("1: no Connect button, Host Game and Quick Match shown", h.get("menuBtnConnect") == "-" and h.get("menuBtnHost") == "1"
+    check("1: Connect link, Host Game and Quick Match shown", h.get("menuBtnConnect") == "1" and h.get("menuBtnHost") == "1"
           and h.get("menuBtnQuickMatch") == "1", str(h))
     check("1: the class preview is drawn", h.get(":preview") == "1", str(h))
     # an account keeps the chat and gets the Spectate switch on the menu (v10 hideChatIfGuestUser

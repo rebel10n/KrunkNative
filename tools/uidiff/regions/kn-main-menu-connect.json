@@ -1,0 +1,35 @@
+{
+  "scenario": "kn-main-menu-connect",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "match-bar",
+      "rect": [
+        436,
+        608,
+        400,
+        26
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 2.0,
+      "note": "the match-info bar with the client's Connect link after Invite - Join (servers_ui_menu_setup): the same .match-action-sep / .match-action-btn markup as v10's Invite / Join, so its font, size, colour and gaps are theirs. Compare its left part with main-menu's no-connect-button region (doc/ref/krunker-v10.0.2/main-menu.png)"
+    },
+    {
+      "name": "side-nav",
+      "rect": [
+        0,
+        50,
+        220,
+        300
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 2.0,
+      "note": "#menuItemContainer guest with the client chrome (state.clientChrome): the Exit item under Community & Events"
+    }
+  ]
+}

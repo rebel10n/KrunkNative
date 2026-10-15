@@ -2292,22 +2292,30 @@ static void connect_server(const char *text) {
     }
 }
 
-// The menu's Connect button, injected once after Join (#menuBtnJoin).
+// The menu's Connect link, injected once after Join (#menuBtnJoin). KrunkNative addition (Krunker
+// v10's match bar ends at Join; doc/v10/ui.md 2): it is one more match action in the same bar,
+// written exactly like v10's Invite / Join (a .match-action-sep "-" then a .match-action-btn with
+// a white span, svelte.css: 14px bold uppercase, 0.7 opacity, 1 on hover; the same playSelect(0.1)
+// click sound v10_menu.c wires on them), so it reads as part of the bar, not a standalone button.
+// It opens the Connect window (SERVERS_WINDOW_CONNECT). --render-scenario keeps v10's bar for
+// uidiff unless the scenario asks for the client's own additions (state.clientChrome:
+// kn-main-menu-connect.json).
 void servers_ui_menu_setup(void) {
     if (html_dom_by_id("menuBtnConnect")) return;
-    // Krunker v10's menu has no such button (doc/v10/ui.md 2): direct connects there are the
-    // console's `connect host[:port]` and the Join window's links / ids
-    if (html_dom_by_id("menuBtnQuickMatch")) return;
 #ifdef UI_SCENARIO_SUPPORTED
-    if (ui_scenario_active()) return; // uidiff compares the row with v7.1.4's
+    if (ui_scenario_active() && !ui_scenario_client_chrome()) return;
 #endif
     HtmlElem join = html_dom_by_id("menuBtnJoin");
-    if (join) {
-        char html[256];
-        snprintf(html, sizeof(html), "<div class=\"button small buttonPI\" id=\"menuBtnConnect\" onmouseenter=\"playTick()\" onclick=\"playSelect(),openConnectWindow()\">%s</div>",
-                 I18N("kn.connect.title", "Connect"));
-        html_dom_insert_html(join, HTML_INSERT_AFTER_END, html);
-    }
+    if (!join) return;
+    StrBuf sb = {0};
+    sb_append(&sb, " <span class=\"match-action-sep svelte-1vrfz9w\" style=\"color:#fff\">-</span> "
+                   "<div class=\"match-action-btn svelte-1vrfz9w\" id=\"menuBtnConnect\" "
+                   "onclick=\"playSelect(0.1),openConnectWindow()\"><span style=\"color:#fff\">");
+    sb_append_esc(&sb, I18N("kn.connect.title", "Connect"));
+    sb_append(&sb, "</span></div>");
+    char *html = sb_finish(&sb);
+    if (html) html_dom_insert_html(join, HTML_INSERT_AFTER_END, html);
+    free(html);
 }
 
 // The header's left slot: v7's "+ Host Game" (showWindow(42)). Hosting is the dedicated
