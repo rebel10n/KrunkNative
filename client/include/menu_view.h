@@ -21,7 +21,8 @@ void  menu_view_reset(void);
 // The death view is up (menu_view_death_cam ran and no spawn / spectate since): the rig takes the look.
 int   menu_view_dead(void);
 // CONTROLS.updateMouseInp while dead: the mouse turns the death rig (ui_controls_fill_look sensitivity,
-// pitch clamped to +-PI/2). dx / dy are the frame's look deltas, 0 when the pointer is not locked.
+// 0.2 of it while the chase runs (a killer known), pitch clamped to +-PI/2). dx / dy are the frame's
+// look deltas, 0 when the pointer is not locked.
 void  menu_view_look(Client*, float dx, float dy);
 // Per frame: the frame delta the world runs at (end-of-round slow motion), in seconds.
 float menu_view_world_delta(Client*, float delta);

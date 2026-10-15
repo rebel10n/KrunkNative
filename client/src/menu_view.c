@@ -25,6 +25,9 @@
 // the death eye and its goal (v7.1.4 has no test: a killer within camChaseDst put the goal behind
 // the victim, often inside or past a wall, and the player saw the void until the respawn).
 #define DEATH_CAM_WALL_GAP 2.0f
+// CONTROLS.updateMouseInp: the look sensitivity is (CONTROLS.target ? 0.2 : 1) of the alive one, and
+// CONTROLS.target is set while the chase runs (a killer is known).
+#define DEATH_CAM_CHASE_LOOK_SCALE 0.2f
 
 static struct {
     float menu_yaw;   // menuCameraYaw (never reset by Krunker, so the spin carries over rounds)
@@ -121,14 +124,16 @@ int menu_view_dead(void) {
 
 // CONTROLS.updateMouseInp while dead (not spectating, camRot on): the look turns the rig with the
 // mouse, sensitivity / aim sensitivity / invertY as alive (ui_controls_fill_look), pitch clamped
-// to +-PI/2, yaw wrapped (controls.js xDr). The chase is not switched off by it: CONTROLS.update
+// to +-PI/2, yaw wrapped (controls.js xDr). With the chase (a killer known) the look runs at 0.2 of
+// that speed (DEATH_CAM_CHASE_LOOK_SCALE). The chase is not switched off by it: CONTROLS.update
 // keeps pulling the rig toward the killer every frame, so the look only stays away while it moves.
 void menu_view_look(Client *client, const float dx, const float dy) {
     if (!g_view.dead) return;
+    const float scale = g_view.chase ? DEATH_CAM_CHASE_LOOK_SCALE : 1.0f;
     Input look = {0};
     look.x_dir = g_view.pitch;
     look.y_dir = g_view.yaw;
-    ui_controls_fill_look(client, &look, dx, dy);
+    ui_controls_fill_look(client, &look, dx * scale, dy * scale);
     input_script_adjust_input(client, &look); // `look` in the input script (tests)
     g_view.pitch = player_clamp_pitch(look.x_dir);
     g_view.yaw = player_wrap_yaw(look.y_dir);

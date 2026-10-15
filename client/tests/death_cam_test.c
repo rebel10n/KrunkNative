@@ -252,18 +252,20 @@ static void test_mouse_while_dead(void) {
           "pitch %.4f inside +-PI/2", g_client.camera.rotation.x);
     CHECK(g_client.camera.rotation.x > 1.4f, "pitch clamped at +PI/2 and the chase only pulled it %.4f", g_client.camera.rotation.x);
 
-    // Look away for 2 s: 4 px a frame to the left (dx > 0 turns the yaw down, away from the killer at
-    // yaw 2.0944). The steady error is 0.008 / (0.0022 * 16.67) = 0.218 rad (12.5 degrees): the chase's
-    // pull balances the mouse.
+    // Let the chase settle for 5 s first (the 2.09 rad turn is gone), then look away for 2 s: 4 px a
+    // frame to the left (dx > 0 turns the yaw down, away from the killer at yaw 2.0944). With the chase
+    // the look runs at 0.2 speed: 4 * 0.002 * 0.2 = 0.0016 rad a frame. The steady error is
+    // (1 - c) * 0.0016 / c = 0.042 rad (2.4 degrees), c = 0.0022 * 16.67 the chase's pull per frame.
     dead_on_open_floor(killer, 1);
     menu_view_camera(&g_client, 1.0f / 60.0f);
+    for (int f = 0; f < 300; f++) menu_view_camera(&g_client, 1.0f / 60.0f);
     float err = 0.0f;
     for (int f = 0; f < 120; f++) {
         menu_view_look(&g_client, 4.0f, 0.0f);
         menu_view_camera(&g_client, 1.0f / 60.0f);
         err = angle_between(g_client.camera.rotation.y, 2.0944f);
     }
-    CHECK(fabsf(err) > 0.10f && fabsf(err) < 0.35f, "held look: %.1f degrees off the killer (steady ~12.5)", fabsf(err) * 57.2958f);
+    CHECK(fabsf(err) > 0.035f && fabsf(err) < 0.05f, "held look: %.1f degrees off the killer (steady ~2.4)", fabsf(err) * 57.2958f);
     // release: the chase brings the camera back to within 1 degree in ~2.5 s
     float t = 0.0f, t1 = -1.0f;
     for (int f = 0; f < 240; f++) {
@@ -290,11 +292,34 @@ static void test_mouse_while_dead(void) {
     CHECK(!menu_view_dead(), "spawn: the look is ignored");
 }
 
+// CONTROLS.updateMouseInp: the look runs at 0.2 of the alive speed while CONTROLS.target is set (a
+// killer is known, the chase) and at full speed with no killer. The stub above turns 100 px into
+// 0.2 rad, so the rig turns 0.04 rad with a killer and 0.2 rad without, on both axes.
+static void test_look_speed_by_chase(void) {
+    printf("mouse look speed: 0.2 with a killer, full speed without...\n");
+    const vec3 killer = {-34.64f, 0.0f, 20.0f};
+    dead_on_open_floor(killer, 1);
+    if (!g_client.game.ready) return;
+    CHECK(g_view.chase == 1 && menu_view_killer_uid() == 2, "killer: the chase is running");
+    menu_view_look(&g_client, 100.0f, 0.0f);
+    CHECK(fabsf(g_view.yaw + 0.04f) < 1e-5f, "killer: 100 px turns the rig -0.04 rad (%.5f)", g_view.yaw);
+    menu_view_look(&g_client, 0.0f, 100.0f);
+    CHECK(fabsf(g_view.pitch + 0.04f) < 1e-5f, "killer: 100 px pitches the rig -0.04 rad (%.5f)", g_view.pitch);
+
+    dead_on_open_floor(killer, 0);
+    CHECK(g_view.chase == 0, "no killer: no chase");
+    menu_view_look(&g_client, 100.0f, 0.0f);
+    CHECK(fabsf(g_view.yaw + 0.2f) < 1e-5f, "no killer: 100 px turns the rig -0.2 rad (%.5f)", g_view.yaw);
+    menu_view_look(&g_client, 0.0f, 100.0f);
+    CHECK(fabsf(g_view.pitch + 0.2f) < 1e-5f, "no killer: 100 px pitches the rig -0.2 rad (%.5f)", g_view.pitch);
+}
+
 int main(void) {
     test_wall_behind();
     test_hitch_open();
     test_turn_to_killer();
     test_mouse_while_dead();
+    test_look_speed_by_chase();
     test_map("assets/maps/kanji.json");
     test_map("assets/maps/sandstorm_v3.json");
     printf("%d checks, %d failures\n", g_checks, g_failures);
