@@ -9,7 +9,8 @@ PostgreSQL / python websockets). KN_TEST_DB_DRIVER=sqlite|mysql runs on that sto
 Covers the publish checks (uploadM = the editor's publishMap: the 500k limit, the category list,
 validateMap's messages, the catalogue name), the stored fields (category, modes from map_info,
 official split, votes / plays), the Games window tabs and the new cat= / source= filters on
-/api/maps and /api/search, republish, another creator's name, and /api/map-data by name and id.
+/api/maps and /api/search (source=published: no catalogue map), republish, another creator's name,
+and /api/map-data by name, id and name + creator.
 """
 import asyncio
 import json
@@ -206,6 +207,16 @@ async def scenario(port):
     map_id = row.get("map_id")
     by_id = urllib.request.urlopen(base + "/api/map-data?id=%s" % map_id).read()
     check(json.loads(by_id)["name"] == name, "map-data by id (%s) serves the same map" % map_id)
+    by_creator = urllib.request.urlopen(base + "/api/map-data?name=%s&creator=%s" % (urllib.parse.quote(name), alice.upper())).read()
+    check(json.loads(by_creator)["name"] == name, "map-data with its creator (any case) serves it")
+    try:
+        urllib.request.urlopen(base + "/api/map-data?name=%s&creator=%s" % (urllib.parse.quote(name), bob))
+        check(False, "map-data with another creator is 404")
+    except urllib.error.HTTPError as e:
+        check(e.code == 404, "map-data with another creator is 404")
+    published = get(base, "/api/search?type=map&val=&source=published")["data"]
+    check([r["map_name"] for r in published] == [name] and published[0]["creatorname"] == alice,
+          "source=published lists the published maps only (no catalogue map): %r" % [r.get("map_name") for r in published][:5])
     try:
         urllib.request.urlopen(base + "/api/map-data?name=Nope_" + stamp)
         check(False, "map-data of an unknown name is 404")

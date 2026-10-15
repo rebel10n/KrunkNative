@@ -170,6 +170,7 @@ set(SERVER_CORE_SOURCES
     server/src/ks_storage.c
     server/src/bot_banter.c       # bot chat via kn_brain (templates only without a brain link: the offline sandbox)
     server/src/votekick.c
+    server/src/published_maps.c   # published:<creator>/<name> maps: v10's checks + the cache (the fetch is brain.c's)
 )
 # What the core needs from the backend link in a build without it (the client): brain.c
 # compiled without knsvc is the standalone stub; sandbox_backend.c stands in for the
@@ -861,6 +862,14 @@ else ()
     add_executable(host_command_config_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/host_command_config_test.c)
     target_link_libraries(host_command_config_test PRIVATE kn_server_core m)
     add_test(NAME host_command_config_test COMMAND host_command_config_test)
+
+    # published_maps_test: published:<creator>/<name> server maps (server/src/published_maps.c): the
+    # spec, v10's checks, the disk cache fallback and gameserver.maps (POSIX: setenv / getpid)
+    if (NOT WIN32)
+        add_executable(published_maps_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/published_maps_test.c)
+        target_link_libraries(published_maps_test PRIVATE kn_server_core m)
+        add_test(NAME published_maps_test COMMAND published_maps_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    endif ()
     if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_libraries(host_command_config_test PRIVATE ws2_32) # shared/src/net.c
     endif ()

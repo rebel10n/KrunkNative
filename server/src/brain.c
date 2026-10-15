@@ -574,15 +574,16 @@ static void *brain_fetch_https_thread(void *arg) {
     return NULL;
 }
 
-int brain_fetch_map(const uint32_t rid, const char *name) {
+int brain_fetch_map(const uint32_t rid, const char *name, const char *creator) {
     if (!g_brain.enabled || !name || !name[0]) return -1;
     if (!strncmp(g_http_base, "https://", 8)) {
         BrainFetchHttps *f = calloc(1, sizeof(*f));
         if (!f) return -1;
         f->rid = rid;
-        char encoded[256];
+        char encoded[256], enc_creator[192];
         brain_url_encode(encoded, sizeof(encoded), name);
-        snprintf(f->url, sizeof(f->url), "%s/api/map-data?name=%s", g_http_base, encoded);
+        brain_url_encode(enc_creator, sizeof(enc_creator), creator ? creator : "");
+        snprintf(f->url, sizeof(f->url), "%s/api/map-data?name=%s%s%s", g_http_base, encoded, enc_creator[0] ? "&creator=" : "", enc_creator);
         server_log("[brain] fetching published map '%s' from %s", name, g_http_base);
         pthread_t thread;
         if (pthread_create(&thread, NULL, brain_fetch_https_thread, f)) {
@@ -605,9 +606,10 @@ int brain_fetch_map(const uint32_t rid, const char *name) {
     if (rest[host_len] == ':') snprintf(f->port, sizeof(f->port), "%.*s", (int) strcspn(rest + host_len + 1, "/"), rest + host_len + 1);
     else snprintf(f->port, sizeof(f->port), "80");
     const char *prefix = strchr(rest, '/');
-    char encoded[256];
+    char encoded[256], enc_creator[192];
     brain_url_encode(encoded, sizeof(encoded), name);
-    snprintf(f->path, sizeof(f->path), "%s/api/map-data?name=%s", prefix ? prefix : "", encoded);
+    brain_url_encode(enc_creator, sizeof(enc_creator), creator ? creator : "");
+    snprintf(f->path, sizeof(f->path), "%s/api/map-data?name=%s%s%s", prefix ? prefix : "", encoded, enc_creator[0] ? "&creator=" : "", enc_creator);
 
     server_log("[brain] fetching published map '%s' from %s", name, g_http_base);
     pthread_t thread;
@@ -617,6 +619,55 @@ int brain_fetch_map(const uint32_t rid, const char *name) {
     }
     pthread_detach(thread); // f is the thread's from here on
     return 0;
+}
+
+// The brain's HTTP base for a config, without a running link (published maps load before
+// accounts_init starts the brain): gameserver.brain_http_url, else derived from brain_url.
+static int brain_http_base_of(const GsConfig *cfg, char *out, const size_t size) {
+    if (cfg && cfg->brain_http_url[0]) {
+        snprintf(out, size, "%s", cfg->brain_http_url);
+        return 1;
+    }
+    const char *url = cfg ? cfg->brain_url : "";
+    const int tls = !strncmp(url, "wss://", 6);
+    if (!tls && strncmp(url, "ws://", 5)) return 0;
+    const char *rest = url + (tls ? 6 : 5);
+    snprintf(out, size, "%s://%.*s", tls ? "https" : "http", (int) strcspn(rest, "/"), rest);
+    return 1;
+}
+
+cJSON *brain_fetch_map_sync(const GsConfig *cfg, const char *name, const char *creator, const int timeout_ms, int *missing,
+                            char *err, const size_t err_size) {
+    if (missing) *missing = 0;
+    char base[GS_STR_LARGE];
+    if (!brain_http_base_of(cfg, base, sizeof(base))) {
+        snprintf(err, err_size, "no brain configured (gameserver.brain_url or brain_http_url)");
+        return NULL;
+    }
+    char enc_name[256], enc_creator[192], url[GS_STR_LARGE + 512];
+    brain_url_encode(enc_name, sizeof(enc_name), name);
+    brain_url_encode(enc_creator, sizeof(enc_creator), creator ? creator : "");
+    snprintf(url, sizeof(url), "%s/api/map-data?name=%s%s%s", base, enc_name, enc_creator[0] ? "&creator=" : "", enc_creator);
+    server_log("[maps] fetching published map '%s' from %s", name, base);
+    HttpResult res;
+    cJSON *map = NULL;
+    if (http_request("GET", url, NULL, NULL, timeout_ms > 0 ? timeout_ms : 10000, BRAIN_MAP_FETCH_MAX, &res) != 0) {
+        snprintf(err, err_size, "%s", res.error[0] ? res.error : "cannot reach the brain");
+    } else if (res.status == 404) {
+        if (missing) *missing = 1;
+        snprintf(err, err_size, "map not found");
+    } else if (res.status != 200) {
+        snprintf(err, err_size, "map service error (HTTP %d)", res.status);
+    } else {
+        map = res.body ? cJSON_Parse(res.body) : NULL;
+        if (!cJSON_IsObject(map)) {
+            cJSON_Delete(map);
+            map = NULL;
+            snprintf(err, err_size, "not a Krunker map");
+        }
+    }
+    http_result_free(&res);
+    return map;
 }
 
 cJSON *brain_verify_ticket(const char *ticket, char *err, const size_t err_size) {
@@ -642,7 +693,14 @@ void brain_random_hex(char *out, const size_t size, const size_t bytes) {
 #else // ---------------------------------------------------------------- no knsvc
 
 void brain_set_http_base(const GsConfig *cfg) { (void) cfg; }
-int brain_fetch_map(const uint32_t rid, const char *name) { (void) rid; (void) name; return -1; }
+int brain_fetch_map(const uint32_t rid, const char *name, const char *creator) { (void) rid; (void) name; (void) creator; return -1; }
+cJSON *brain_fetch_map_sync(const GsConfig *cfg, const char *name, const char *creator, const int timeout_ms, int *missing,
+                            char *err, const size_t err_size) {
+    (void) cfg; (void) name; (void) creator; (void) timeout_ms;
+    if (missing) *missing = 0;
+    snprintf(err, err_size, "no brain link in this build");
+    return NULL;
+}
 
 int brain_start(const GsConfig *cfg) {
     if (cfg->brain_url[0]) server_log_error("[brain] gameserver.brain_url is set but this server_bin was built without knsvc (OpenSSL); running standalone");

@@ -46,7 +46,7 @@ typedef struct {
     int mode_max_players[MODE_COUNT];    // per mode override, 0 = max_players
     int team_size;                       // team modes: lobby size = 2 * team_size (0 = off)
     int mode_team_size[MODE_COUNT];
-    char maps[GS_MAX_LIST][GS_STR_SMALL];  // rotation: catalogue names / keys / indices ("" none = Krunker rotation)
+    char maps[GS_MAX_LIST][GS_STR_SMALL];  // rotation: catalogue names / keys / indices, published:<creator>/<name> ("" none = Krunker rotation)
     int map_count;
     int modes[GS_MAX_LIST];              // rotation mode ids (0 = FFA only)
     int mode_count;

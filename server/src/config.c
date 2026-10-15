@@ -17,6 +17,7 @@
 #include <server.h> // g_server (effective lobby size in the summary)
 #include <server_log.h>
 #include <map_catalog.h>
+#include <published_maps.h> // gameserver.maps = published:<creator>/<name>
 #include <game_config.h> // WP-E: v7 serverConfig table (game.<varN>)
 #include <ctype.h>
 #include <dirent.h>
@@ -1074,14 +1075,40 @@ const cJSON **gs_build_map_list(const GsConfig *cfg, size_t *count) {
 
     const cJSON **list = NULL;
     if (cfg->map_count) {
+        // catalogue maps by name / key, and published maps (published:<creator>/<name>: fetched
+        // from the brain, checked like v10, cached; published_maps.h), in the list's order
         int indices[GS_MAX_LIST];
-        size_t n = 0;
+        const cJSON *published[GS_MAX_LIST];
+        size_t n = 0, catalogue = 0;
         for (int i = 0; i < cfg->map_count; i++) {
+            char name[96], creator[64];
+            published[n] = NULL;
+            if (published_map_parse(cfg->maps[i], name, sizeof(name), creator, sizeof(creator))) {
+                char err[160];
+                published[n] = published_map_load(cfg, name, creator, 10000, err, sizeof(err));
+                if (!published[n]) {
+                    server_log_error("config: gameserver.maps: published map '%s' skipped (%s)", cfg->maps[i], err);
+                    continue;
+                }
+                indices[n++] = -1;
+                continue;
+            }
             const int index = map_catalog_find(cfg->maps[i]);
             if (index < 0) server_log_error("config: gameserver.maps: unknown map '%s' (skipped)", cfg->maps[i]);
-            else indices[n++] = index;
+            else {
+                indices[n++] = index;
+                catalogue++;
+            }
         }
-        list = n ? map_catalog_list(indices, n, count) : NULL;
+        if (n) {
+            size_t loaded = 0;
+            free(catalogue ? (void *) map_catalog_list(indices, n, &loaded) : NULL); // loads the catalogue maps
+            list = calloc(n, sizeof(cJSON *));
+            for (size_t i = 0; list && i < n; i++) {
+                const cJSON *json = indices[i] >= 0 ? map_catalog_json((size_t) indices[i]) : published[i];
+                if (json) list[(*count)++] = json;
+            }
+        }
     } else {
         // only custom dirs: they join Krunker's rotation
         int indices[GS_MAX_LIST];

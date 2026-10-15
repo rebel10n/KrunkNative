@@ -294,25 +294,38 @@ H(h_play_map) {
 }
 
 // selectHostMap(name, modURL, id, creator): Krunker remembers the community game for the
-// Host Game window (selectedCustomMapId). A catalogue map opens the Host Game flow at its Mode step
-// with that map chosen; a published map (kn_brain) is downloaded, checked and given a slot in the
-// client's map list (community_pick: the Host Game seam), which the menu selects.
-static void on_host_map_picked(void *user, const int slot) {
-    char *name = user;
-    if (slot >= 0) menu_select_map(slot);
-    menu_log("selectHostMap: %s -> slot %d", name ? name : "?", slot);
-    free(name);
+// Host Game window (selectedCustomMapId). KrunkNative opens the Host Game flow at its Mode step with
+// that map chosen: a catalogue map at once; a published map (kn_brain) once its copy is downloaded
+// and passes v10's checks (community_fetch), else v10's message in an alert.
+typedef struct {
+    char name[96], creator[64];
+} HostPick;
+
+static void on_host_map_fetched(void *user, const cJSON *json, const char *error) {
+    HostPick *pick = user;
+    if (json) {
+        menu_log("selectHostMap: %s -> host flow", pick->name);
+        host_flow_open_published(pick->name, pick->creator);
+    } else {
+        menu_log("selectHostMap: %s refused: %s", pick->name, error ? error : "?");
+        ui_alert(error ? error : I18N("matchmaker.InvalidGameId", "Game not found."));
+    }
+    free(pick);
 }
 
 H(h_select_host_map) {
     UNUSED;
-    const CommunityMapRef ref = {arg_str(ev, args, argc, 0, ""), arg_str(ev, args, argc, 3, "")};
-    const int index = community_catalogue_index(ref.name, ref.creator);
+    const char *name = arg_str(ev, args, argc, 0, ""), *creator = arg_str(ev, args, argc, 3, "");
+    const int index = community_catalogue_index(name, creator);
     if (index >= 0) {
         host_flow_open_map(index);
         return 1;
     }
-    community_pick(menu_ui()->client, &ref, on_host_map_picked, strdup(ref.name));
+    HostPick *pick = calloc(1, sizeof(*pick));
+    if (!pick) return 1;
+    snprintf(pick->name, sizeof(pick->name), "%s", name);
+    snprintf(pick->creator, sizeof(pick->creator), "%s", creator);
+    community_fetch(pick->name, on_host_map_fetched, pick);
     return 1;
 }
 

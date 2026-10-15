@@ -170,3 +170,58 @@ void community_host_slot(Client *client, const int slot, const int mode) {
     menu_host_offline();
     client->offline_start_map = NULL; // not consumed when a server connection took the request
 }
+
+// ---- the published maps a dedicated server can host (the Host Game flow's map step)
+
+static CommunityPublished *g_published;
+static size_t g_published_count;
+static int g_published_waiting;
+static void (*g_published_changed)(void); // the last refresh's listener
+
+static void published_clear(void) {
+    for (size_t i = 0; i < g_published_count; i++) free(g_published[i].image);
+    free(g_published);
+    g_published = NULL;
+    g_published_count = 0;
+}
+
+static void on_published(void *user, const int status, const char *body, const size_t length) {
+    (void) user;
+    g_published_waiting = 0;
+    cJSON *res = status == 200 && body ? cJSON_ParseWithLength(body, length) : NULL;
+    const cJSON *rows = cJSON_GetObjectItem(res, "data");
+    if (cJSON_IsArray(rows)) {
+        published_clear();
+        const int n = cJSON_GetArraySize(rows);
+        g_published = n > 0 ? calloc((size_t) n, sizeof(*g_published)) : NULL;
+        const cJSON *r, *list = g_published ? rows : NULL;
+        cJSON_ArrayForEach(r, list) {
+            const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(r, "map_name"));
+            const char *creator = cJSON_GetStringValue(cJSON_GetObjectItem(r, "creatorname"));
+            const char *image = cJSON_GetStringValue(cJSON_GetObjectItem(r, "map_image"));
+            if (!name || !name[0]) continue;
+            CommunityPublished *p = &g_published[g_published_count];
+            snprintf(p->name, sizeof(p->name), "%s", name);
+            snprintf(p->creator, sizeof(p->creator), "%s", creator ? creator : "");
+            if (!community_published_spec(p->spec, sizeof(p->spec), p->name, p->creator)) continue;
+            p->image = image && image[0] ? strdup(image) : NULL;
+            g_published_count++;
+        }
+        printf("[community] %zu published map(s) to host\n", g_published_count);
+    }
+    cJSON_Delete(res);
+    if (g_published_changed) g_published_changed();
+}
+
+size_t community_published_maps(const CommunityPublished **out) {
+    if (out) *out = g_published;
+    return g_published_count;
+}
+
+void community_published_refresh(void (*changed)(void)) {
+    g_published_changed = changed;
+    if (g_published_waiting || backend_available() != 1) return;
+    char path[128];
+    if (!community_search_path(path, sizeof(path), "", -1, COMMUNITY_SOURCE_PUBLISHED)) return;
+    g_published_waiting = backend_http_get(path, on_published, NULL) != 0;
+}

@@ -12,6 +12,7 @@
 #include <auth_join.h>
 #include <net_ext.h>  // NET_EXT_KN_ACCOUNT_AUTH / _RIGHTS: live sign-in
 #include <map_catalog.h>
+#include <published_maps.h> // a hosted published map: the check and the cache
 #include <map_validate.h>
 #include <game_config.h> // WP-E: v7 host types, setupGameConfig / applyConfig per round
 #include <ranked.h>      // RANKED_TEAM_SIZE
@@ -2721,6 +2722,19 @@ static const cJSON *acc_local_custom_map(const char *name) {
 
 static void acc_host_apply(const cJSON *frame, const cJSON *custom_map);
 
+// A host config's community map: customMap (or mapName) as a name, or "published:<creator>/<name>"
+// (published_maps.h); the creator also from config.mapCreator. Returns name ("" none) and fills
+// creator ("" any).
+static const char *acc_custom_map_name(const cJSON *config, char *name, const size_t name_size, char *creator, const size_t creator_size) {
+    const char *custom = acc_str(cJSON_GetObjectItem(config, "customMap"), acc_str(cJSON_GetObjectItem(config, "mapName"), ""));
+    creator[0] = 0;
+    if (!published_map_parse(custom, name, name_size, creator, creator_size)) {
+        snprintf(name, name_size, "%s", custom);
+        snprintf(creator, creator_size, "%s", acc_str(cJSON_GetObjectItem(config, "mapCreator"), ""));
+    }
+    return name;
+}
+
 static void acc_handle_host(const cJSON *frame) {
     const cJSON *config = cJSON_GetObjectItem(frame, "config");
     const char *err = NULL;
@@ -2733,13 +2747,16 @@ static void acc_handle_host(const cJSON *frame) {
         return;
     }
 
-    // v3.1.1 hosting a community map (playMap / Host Game "customMap")
-    const char *custom = acc_str(cJSON_GetObjectItem(config, "customMap"), acc_str(cJSON_GetObjectItem(config, "mapName"), NULL));
+    // v3.1.1 hosting a community map (playMap / Host Game "customMap"): a catalogue map, else a
+    // published one by name (and its creator: "published:<creator>/<name>", or config.mapCreator)
+    char name[96], creator[64];
+    const char *custom = acc_custom_map_name(config, name, sizeof(name), creator, sizeof(creator));
     if (custom && custom[0]) {
-        const cJSON *local = acc_local_custom_map(custom);
+        const cJSON *local = creator[0] ? NULL : acc_local_custom_map(custom);
+        if (!local) local = published_map_cached(custom, creator); // fetched and checked before
         if (!local) {
             g_acc.pending_rid = brain_next_rid();
-            if (brain_fetch_map(g_acc.pending_rid, custom)) {
+            if (brain_fetch_map(g_acc.pending_rid, custom, creator)) {
                 acc_host_reply_error(frame, "cannot fetch the map");
                 return;
             }
@@ -2758,26 +2775,35 @@ static void acc_handle_map_data(cJSON *frame) {
     if (!g_acc.pending_host || !cJSON_IsNumber(rid) || (uint32_t) rid->valuedouble != g_acc.pending_rid) return;
     cJSON *pending = g_acc.pending_host;
     g_acc.pending_host = NULL;
+    char name[96], creator[64];
+    acc_custom_map_name(cJSON_GetObjectItem(pending, "config"), name, sizeof(name), creator, sizeof(creator));
     cJSON *map = cJSON_IsTrue(cJSON_GetObjectItem(frame, "ok")) ? cJSON_DetachItemFromObject(frame, "map") : NULL;
     if (!map) {
         const char *err = acc_str(cJSON_GetObjectItem(frame, "err"), "map not found");
-        server_log_error("[brain] published map for a hosted game: %s", err);
-        acc_host_reply_error(pending, err);
-        cJSON_Delete(pending);
-        return;
+        // the brain could not answer (not a 404): the copy cached when it last passed
+        map = strcmp(err, "map not found") ? published_map_cache_read(name, creator) : NULL;
+        if (map && !published_map_verify(map)) {
+            server_log_error("[brain] published map '%s' for a hosted game: %s; playing the cached copy", name, err);
+        } else {
+            cJSON_Delete(map);
+            server_log_error("[brain] published map '%s' for a hosted game: %s", name, err);
+            acc_host_reply_error(pending, err);
+            cJSON_Delete(pending);
+            return;
+        }
+    } else {
+        // v7.1.4 / v10 game.prepareGame + customGameConfig.validateMap with a creator's limits
+        // (published_map_verify), then the copy is cached for a brain that cannot answer later
+        const char *invalid = published_map_verify(map);
+        if (invalid) {
+            server_log_error("[brain] published map for a hosted game rejected: %s", invalid);
+            acc_host_reply_error(pending, invalid);
+            cJSON_Delete(pending);
+            cJSON_Delete(map);
+            return;
+        }
+        published_map_cache_store(name, creator, map);
     }
-    // v7.1.4 game.prepareGame: "(" / ")" -> full-width, then customGameConfig.validateMap (a
-    // published map has a creator, so the featured limits apply) and the prefab / texture checks
-    map_prepare_custom_json(map);
-    const char *invalid = map_validate_error(map, 1);
-    if (invalid) {
-        server_log_error("[brain] published map for a hosted game rejected: %s", invalid);
-        acc_host_reply_error(pending, invalid);
-        cJSON_Delete(pending);
-        cJSON_Delete(map);
-        return;
-    }
-    map_sanitize_json(map);
     if (acc_player_count() > 0 || g_acc.custom || g_acc.draining) { // the lobby changed meanwhile
         acc_host_reply_error(pending, "lobby is not empty");
         cJSON_Delete(map);
@@ -2892,8 +2918,9 @@ static void acc_host_apply(const cJSON *frame, const cJSON *custom_map) {
     // WP6: a hosted published map is v7's customMap played with defaultSetts: GAME.STORAGE, Save /
     // Load Data and (host option krRewards, customGameConfig.js:438-445) KR rewards use its name.
     // [KN] defaultSetts is not modelled: every hosted published map counts.
-    const char *published = custom_map ? acc_str(cJSON_GetObjectItem(config, "customMap"), acc_str(cJSON_GetObjectItem(config, "mapName"), "")) : "";
-    snprintf(g_acc.published_map, sizeof(g_acc.published_map), "%s", published);
+    char published[96] = "", published_creator[64];
+    if (custom_map) acc_custom_map_name(config, published, sizeof(published), published_creator, sizeof(published_creator));
+    snprintf(g_acc.published_map, sizeof(g_acc.published_map), "%s", published); // the bare name (storage key)
     g_acc.kr_rewards = g_acc.published_map[0] && cJSON_IsTrue(cJSON_GetObjectItem(config, "krRewards"));
     g_acc.custom_had_players = 0;
     const cJSON *host_id = cJSON_GetObjectItem(frame, "hostAccountId");

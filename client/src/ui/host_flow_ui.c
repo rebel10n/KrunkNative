@@ -11,6 +11,7 @@
 #include <html_ui.h>
 #include <i18n.h>
 #include <map_catalog.h>
+#include <community_host.h> // published maps: the list, the download for practice (community_maps.c)
 #include <shared.h>
 #include <ui_host_config.h>
 #include <ui_logic.h>
@@ -32,14 +33,21 @@ typedef struct {
     const char *map_file;       // a map file the server loads (a positional argument), or NULL
     const MapCatalogEntry *entry; // the catalogue entry (thumbnail, practice), NULL for a map_file map
     int official;               // Krunker's own map (the Official filter)
+    const char *image;          // a published map's thumbnail (a data: URL), NULL none
+    const char *creator;        // a published map's creator, NULL for the catalogue's
 } HostFlowMap;
 
 // THE SEAM for the community map system: the map step lists exactly these maps. A community map the
 // server's catalogue knows (map_catalog.h, a custom_maps/ key) is an entry with `entry` set; a map
 // outside the catalogue sets `key` NULL and `map_file` to its JSON path (the server loads that file
 // as its map; that map has no practice play). Filters and the selection work on `key` / `map_file`.
+// Published maps (kn_brain, community_published_maps) follow the catalogue: their key is the spec
+// server_bin takes, "published:<creator>/<name>" (server/include/published_maps.h: the server
+// fetches, checks and caches the map), so the command's gameserver.maps names them.
 static size_t host_flow_map_entries(HostFlowMap *out, const size_t max) {
     size_t n = 0;
+    const CommunityPublished *published = NULL;
+    const size_t published_count = community_published_maps(&published);
     for (size_t i = 0; i < map_catalog_count() && n < max; i++) {
         const MapCatalogEntry *e = map_catalog_at(i);
         if (!e) continue;
@@ -50,9 +58,24 @@ static size_t host_flow_map_entries(HostFlowMap *out, const size_t max) {
         out[n].map_file = NULL;
         out[n].entry = e;
         out[n].official = official;
+        out[n].image = NULL;
+        out[n].creator = NULL;
+        n++;
+    }
+    for (size_t i = 0; i < published_count && n < max; i++) {
+        out[n] = (HostFlowMap) {published[i].name, published[i].spec, NULL, NULL, 0, published[i].image, published[i].creator};
         n++;
     }
     return n;
+}
+
+// A published map's spec: name and creator ("published:<creator>/<name>"), 0 for other keys
+static int published_key(const char *key, char *name, const size_t name_size, char *creator, const size_t creator_size) {
+    if (!key || strncmp(key, "published:", 10)) return 0;
+    const char *rest = key + 10, *slash = strchr(rest, '/');
+    snprintf(creator, creator_size, "%.*s", slash ? (int) (slash - rest) : 0, rest);
+    snprintf(name, name_size, "%s", slash ? slash + 1 : rest);
+    return name[0] != 0;
 }
 
 // The flow's state. Strings are the page's and the command's values; `request` is the last
@@ -92,9 +115,12 @@ static void flow_reset(const int host_type) {
 
 static void flow_show(void) { menu_show_window(HOST_FLOW_WINDOW, 1); }
 
+static void flow_render(void);
+
 void host_flow_open(const int host_type) {
     flow_reset(host_type);
     flow_show();
+    community_published_refresh(flow_render); // the published maps (the map step re-renders with them)
 }
 
 void host_flow_open_map(const int catalog_index) {
@@ -111,6 +137,14 @@ void host_flow_open_community(void) {
     flow_reset(GAME_HOST_CUSTOM);
     g_flow.filter = FLOW_FILTER_COMMUNITY;
     flow_show();
+    community_published_refresh(flow_render);
+}
+
+void host_flow_open_published(const char *name, const char *creator) {
+    flow_reset(GAME_HOST_CUSTOM);
+    if (community_published_spec(g_flow.map_key, sizeof(g_flow.map_key), name, creator)) g_flow.step = 1; // chosen: the Mode step
+    flow_show();
+    community_published_refresh(flow_render);
 }
 
 // ------------------------------------------------------------------ the state from the page
@@ -212,12 +246,30 @@ static void append_map_cards(StrBuf *sb) {
         if (g_flow.filter == FLOW_FILTER_COMMUNITY && m->official) continue;
         const int picked = !strcmp(m->key, g_flow.map_key);
         char thumb[48] = "";
-        const char *src = m->entry && map_catalog_thumb(m->entry, thumb, sizeof(thumb)) ? thumb : "./img/noimg.png";
+        const char *src = m->entry && map_catalog_thumb(m->entry, thumb, sizeof(thumb)) ? thumb : m->image ? m->image : "./img/noimg.png";
+        // the key as a JS string ('\\' and '\'' escaped: a published map's name may hold them), then
+        // HTML-escaped for the attribute
+        char js[sizeof(g_flow.map_key) * 2];
+        size_t j = 0;
+        for (const char *c = m->key; *c && j + 3 < sizeof(js); c++) {
+            if (*c == '\\' || *c == '\'') js[j++] = '\\';
+            js[j++] = *c;
+        }
+        js[j] = 0;
         sb_appendf(sb, "<div class='hostMap' style='display:inline-block;vertical-align:top;margin:0 10px 10px 0;width:160px;cursor:pointer;%s' onmouseenter='playTick()' "
-                       "onclick=\"playSelect(0.1);knHostFlow('map','%s')\"><div class='hostMapName blackShad'>",
-                   picked ? "outline:3px solid #2a7ae2;" : "", m->key);
+                       "onclick=\"playSelect(0.1);knHostFlow('map','", picked ? "outline:3px solid #2a7ae2;" : "");
+        sb_append_esc(sb, js);
+        sb_append(sb, "')\"");
+        if (m->creator) {
+            sb_append(sb, " title='");
+            sb_append_esc(sb, m->creator);
+            sb_append(sb, "'");
+        }
+        sb_append(sb, "><div class='hostMapName blackShad'>");
         sb_append_esc(sb, m->label);
-        sb_appendf(sb, "</div><img loading='lazy' draggable='false' class='hostMapImg' src='%s'></div>", src);
+        sb_append(sb, "</div><img loading='lazy' draggable='false' class='hostMapImg' src='");
+        sb_append_esc(sb, src);
+        sb_append(sb, "'></div>");
         shown++;
     }
     if (!shown) sb_append(sb, I18N("kn.hostflow.maps.none", "No maps for this filter."));
@@ -237,7 +289,7 @@ static void append_map_step(StrBuf *sb) {
         sb_append_esc(sb, I18N(labels[f], names[f]));
         sb_append(sb, "</span>");
     }
-    sb_append(sb, "</div><div style='max-height:430px;overflow-y:auto;padding-right:6px'>");
+    sb_append(sb, "</div><div id='hostFlowMaps' style='max-height:430px;overflow-y:auto;padding-right:6px'>");
     append_map_cards(sb);
     sb_append(sb, "</div>");
 }
@@ -305,7 +357,9 @@ static void append_server_step(StrBuf *sb) {
     sb_append(sb, I18N("kn.hostflow.command.hint", "Run it in the folder with server_bin. The map, mode and settings are in the command."));
     sb_append(sb, "</div><div style='margin-top:6px'>");
     append_button(sb, I18N("kn.hostflow.copy", "Copy command"), "knHostFlow('copy')", 1);
-    if (practice_index() >= 0) append_button(sb, I18N("kn.hostflow.practice", "Play this map offline"), "knHostFlow('practice')", 0);
+    char pub_name[96], pub_creator[64];
+    if (practice_index() >= 0 || published_key(g_flow.map_key, pub_name, sizeof(pub_name), pub_creator, sizeof(pub_creator)))
+        append_button(sb, I18N("kn.hostflow.practice", "Play this map offline"), "knHostFlow('practice')", 0);
     append_button(sb, I18N("kn.hostflow.download", "Get the dedicated server"), "knHostFlow('download')", 0);
     sb_append(sb, "</div>");
 }
@@ -389,9 +443,44 @@ static void choose_map(const char *key) {
     }
 }
 
-// The Practice (embedded offline game): the request's game config, then the chosen catalogue map.
+// A published map's practice: downloaded and checked (community_fetch), then given a slot
+static int g_practice_mode = -1;
+
+static void on_practice_slot(void *user, const int slot) {
+    (void) user;
+    Client *client = menu_ui()->client;
+    if (slot < 0) return; // community_fetch's answer already said why
+#ifdef LOCAL_GAME_HAVE_HOST_CONFIG
+    if (g_flow.request) local_game_host_config(client, g_flow.request, g_flow.host_type);
+#endif
+    community_host_slot(client, slot, g_practice_mode); // the offline game starts on it (closes this window)
+}
+
+static void on_practice_fetched(void *user, const cJSON *json, const char *error) {
+    char *name = user;
+    if (!json) {
+        snprintf(g_flow.message, sizeof(g_flow.message), "%s", error ? error : I18N("kn.games.loadFailed", "Failed to load the game."));
+        flow_render();
+    } else {
+        const CommunityMapRef ref = {name, ""};
+        community_pick(menu_ui()->client, &ref, on_practice_slot, NULL); // cached: at once
+    }
+    free(name);
+}
+
+// The Practice (embedded offline game): the request's game config, then the chosen catalogue map
+// (or a published one: kn_brain's copy, checked like v10).
 static void practice(void) {
     const int index = practice_index();
+    char pub_name[96], pub_creator[64];
+    if (index < 0 && published_key(g_flow.map_key, pub_name, sizeof(pub_name), pub_creator, sizeof(pub_creator))) {
+        g_practice_mode = -1;
+        const cJSON *modes = g_flow.request ? cJSON_GetObjectItemCaseSensitive(g_flow.request, "modes") : NULL;
+        const cJSON *first = cJSON_GetArrayItem(modes, 0);
+        if (cJSON_IsNumber(first)) g_practice_mode = first->valueint;
+        community_fetch(pub_name, on_practice_fetched, strdup(pub_name));
+        return;
+    }
     if (index < 0) {
         snprintf(g_flow.message, sizeof(g_flow.message), "%s", I18N("kn.hostflow.practice.none", "Pick a map of the catalogue to play it offline."));
         flow_render();

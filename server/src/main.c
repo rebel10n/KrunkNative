@@ -12,6 +12,7 @@
 #include <director_gate.h> // Krunker Strike director tickets
 #include <build_info.h>
 #include <map_catalog.h> // map_catalog_load_file
+#include <published_maps.h> // published:<creator>/<name> as the map argument
 #include <pthread.h>
 #include <pcg_basic.h>
 #include <errno.h>
@@ -434,13 +435,14 @@ static int parse_args(const int argc, char **argv, ServerArgs *args) {
 static void print_usage(FILE *stream, const char *argv0) {
     fprintf(stream,
             KN_PRODUCT_NAME " dedicated server (one lobby per process; doc/backend.md section 8).\n"
-            "Usage: %s [options] [map.json]\n"
+            "Usage: %s [options] [map.json | published:<creator>/<name>]\n"
             "       %s --rcon [HOST:]PORT --rcon-password PW [command ...]   (remote console client)\n"
             "\n"
             "Hosting: put a server.cfg next to the binary (or in ./cfg/) and run it with no flags.\n"
             "Example server.cfg (any gameserver key works; \"//\" comments):\n"
             "  hostname \"My Krunker Server\"     port 21015          maxplayers 8\n"
             "  mapcycle Burg,Sandstorm,Kanji     mode ffa,tdm        sv_password \"\"\n"
+            "  // a published map from the brain (brain_url / brain_http_url): mapcycle Burg,published:alice/Arena\n"
             "  rcon_password \"change-me\"       rcon_port 27015     region us-nj\n"
             "  online_mode 1                     // verify accounts with the central auth service (guests still join)\n"
             "  coordinator_url ws://coord.example:5050/mm/internal/ws   coordinator_secret \"...\"\n"
@@ -733,8 +735,17 @@ int main(int argc, char **argv) {
 
     cJSON *startup_map = NULL;
 
+    // published:<creator>/<name>: a published map from the brain (published_maps.h). When it
+    // cannot be had, the server says so and plays gameserver.maps / Krunker's rotation instead.
+    char published_name[96], published_creator[64];
+    if (args.map_path && published_map_parse(args.map_path, published_name, sizeof(published_name), published_creator, sizeof(published_creator))) {
+        char err[160];
+        const cJSON *published = published_map_load(cfg, published_name, published_creator, 10000, err, sizeof(err));
+        if (published) startup_map = cJSON_Duplicate(published, 1);
+        else server_log_error("Map %s unavailable (%s): playing the configured maps instead", args.map_path, err);
+    }
     // map_catalog_load_file: a renamed map's old path (assets/maps/burg.json) loads its 311_ file
-    if (args.map_path && map_catalog_load_file(args.map_path, &startup_map)) {
+    else if (args.map_path && map_catalog_load_file(args.map_path, &startup_map)) {
         fprintf(stderr, "Failed to load map JSON: %s\n", args.map_path);
         return 1;
     }

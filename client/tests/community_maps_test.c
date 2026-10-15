@@ -76,6 +76,16 @@ static void test_catalogue_index(void) {
     }
 }
 
+static void test_published_spec(void) {
+    char spec[64], path[128];
+    CHECK(community_published_spec(spec, sizeof(spec), "Arena", "alice") && !strcmp(spec, "published:alice/Arena"), "spec: %s", spec);
+    CHECK(community_published_spec(spec, sizeof(spec), "Arena", "") && !strcmp(spec, "published:Arena"), "no creator: %s", spec);
+    char tiny[12];
+    CHECK(community_published_spec(tiny, sizeof(tiny), "LongMapName", "alice") == 0 && !tiny[0], "a spec that does not fit: 0");
+    community_search_path(path, sizeof(path), "", -1, COMMUNITY_SOURCE_PUBLISHED);
+    CHECK(!strcmp(path, "/api/search?type=map&val=&source=published"), "the Host Game flow's list request: %s", path);
+}
+
 static void test_slot_of(void) {
     const cJSON **maps = NULL;
     size_t count = 0;
@@ -93,6 +103,7 @@ int main(void) {
     test_search_path();
     test_mode_names();
     test_catalogue_index();
+    test_published_spec();
     test_slot_of();
     printf("community_maps_test: %d checks, %d failed\n", g_checks, g_fails);
     return g_fails ? 1 : 0;

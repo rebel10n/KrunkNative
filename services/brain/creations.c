@@ -23,6 +23,8 @@
  * map_category (index, -1 none), category (its name, "" none), official (creator "Krunker"),
  * modes (the map's game mode ids: the Games window's mode tags). cat=<n> keeps the published maps
  * of that category (the catalogue has no categories, so a category keeps none of them);
+ * source=published keeps the published maps only (no catalogue map: what server_bin can host by
+ * name, published:<creator>/<name>);
  * source=official|community splits the catalogue's official maps from the rest (the bundled
  * community maps and published ones). Publishing (uploadM) checks the map like v10's publish:
  * the editor's validateMap rules (shared/src/map_validate.c), then the name is free.
@@ -123,13 +125,14 @@ static int contains_ci(const char *hay, const char *needle) {
     return 0;
 }
 
-/* SOURCE_*: the source= filter (0 all, 1 official maps, 2 community maps) */
-enum { SOURCE_ALL, SOURCE_OFFICIAL, SOURCE_COMMUNITY };
+/* SOURCE_*: the source= filter (0 all, 1 official maps, 2 community maps, 3 published maps only:
+ * the players' maps without the catalogue, the Host Game flow's list for a dedicated server) */
+enum { SOURCE_ALL, SOURCE_OFFICIAL, SOURCE_COMMUNITY, SOURCE_PUBLISHED };
 
 /* a catalogue row passes the filters: the source split, and no category (the catalogue has none) */
 static int catalog_wanted(size_t index, int category, int source) {
     const MapCatalogEntry *e = map_catalog_at(index);
-    if (!e || category >= 0) return 0;
+    if (!e || category >= 0 || source == SOURCE_PUBLISHED) return 0;
     const int official = map_catalog_is_official(e);
     return !(source == SOURCE_OFFICIAL && !official) && !(source == SOURCE_COMMUNITY && official);
 }
@@ -321,7 +324,8 @@ static ApiReq *api_req(kn_http_req *req, int kind) {
     if (a->category < 0 || a->category >= MAP_CATEGORY_COUNT) a->category = -1;
     char source[16] = "";
     kn_http_query_get(req, "source", source, sizeof source);
-    a->source = !strcmp(source, "official") ? SOURCE_OFFICIAL : !strcmp(source, "community") ? SOURCE_COMMUNITY : SOURCE_ALL;
+    a->source = !strcmp(source, "official") ? SOURCE_OFFICIAL : !strcmp(source, "community") ? SOURCE_COMMUNITY
+              : !strcmp(source, "published") ? SOURCE_PUBLISHED : SOURCE_ALL;
     return a;
 }
 
@@ -592,13 +596,16 @@ static void map_data_done(kn_db_result *res, void *ud) {
     }
 }
 
-/* GET /api/map-data?name=<map>|id=<map_id> (alias /api/published-map) -> the published
- * map JSON (playing / hosting community maps); 404 {"error":"not_found"}. */
+/* GET /api/map-data?name=<map>|id=<map_id>[&creator=<username>] (alias /api/published-map) ->
+ * the published map JSON (playing / hosting community maps: the client's Play, server_bin's
+ * published:<creator>/<name> maps and hosted games); 404 {"error":"not_found"}. creator= keeps
+ * the map only when that account published it (case-insensitive). */
 static void h_map_data(kn_http_req *req, void *ud) {
     (void) ud;
-    char name[64] = "", id[24] = "";
+    char name[64] = "", id[24] = "", creator[64] = "";
     const int has_name = kn_http_query_get(req, "name", name, sizeof name) > 0;
     const int has_id = kn_http_query_get(req, "id", id, sizeof id) > 0;
+    if (kn_http_query_get(req, "creator", creator, sizeof creator) < 0) creator[0] = 0;
     if (!has_name && !has_id) {
         kn_http_respond_error(req, 400, "name or id required");
         return;
@@ -613,12 +620,14 @@ static void h_map_data(kn_http_req *req, void *ud) {
         kn_http_respond_error(req, 404, "not_found");
         return;
     }
+#define MAP_DATA_CREATOR " AND ($3 = '' OR EXISTS (SELECT 1 FROM accounts a WHERE a.id = m.creator_id AND lower(a.username) = lower($3)))"
     kn_db_query_sql(g_acct_brain->db,
-                SQL(.pg = "SELECT map_data FROM published_maps WHERE deleted_at IS NULL AND "
-                          "(($1 <> '' AND lower(map_name) = lower($1)) OR ($2::int > 0 AND map_id = $2::int))",
-                    .any = "SELECT map_data FROM published_maps WHERE deleted_at IS NULL AND "
-                           "(($1 <> '' AND lower(map_name) = lower($1)) OR ({int:$2} > 0 AND map_id = {int:$2}))"),
-                KN_DB_ARGS(name, has_id ? id : "0"), map_data_done, req);
+                SQL(.pg = "SELECT m.map_data FROM published_maps m WHERE m.deleted_at IS NULL AND "
+                          "(($1 <> '' AND lower(m.map_name) = lower($1)) OR ($2::int > 0 AND m.map_id = $2::int))" MAP_DATA_CREATOR,
+                    .any = "SELECT m.map_data FROM published_maps m WHERE m.deleted_at IS NULL AND "
+                           "(($1 <> '' AND lower(m.map_name) = lower($1)) OR ({int:$2} > 0 AND m.map_id = {int:$2}))" MAP_DATA_CREATOR),
+                KN_DB_ARGS(name, has_id ? id : "0", creator), map_data_done, req);
+#undef MAP_DATA_CREATOR
 }
 
 int creations_init(Brain *b) {

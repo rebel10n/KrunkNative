@@ -31,7 +31,10 @@ size_t community_search_path(char *out, const size_t size, const char *query, co
     if (encode_into(enc, sizeof(enc), query ? query : "") < 0) return 0;
     char cat[24] = "";
     if (category >= 0 && category < MAP_CATEGORY_COUNT) snprintf(cat, sizeof(cat), "&cat=%d", category);
-    const char *src = source == COMMUNITY_SOURCE_OFFICIAL ? "&source=official" : source == COMMUNITY_SOURCE_COMMUNITY ? "&source=community" : "";
+    const char *src = source == COMMUNITY_SOURCE_OFFICIAL    ? "&source=official"
+                    : source == COMMUNITY_SOURCE_COMMUNITY ? "&source=community"
+                    : source == COMMUNITY_SOURCE_PUBLISHED ? "&source=published"
+                                                           : "";
     const int n = snprintf(out, size, "/api/search?type=map&val=%s%s%s", enc, cat, src);
     if (n <= 0 || (size_t) n >= size) {
         out[0] = 0;
@@ -88,4 +91,15 @@ int community_slot_of(const cJSON ***maps, size_t *count, const cJSON *json) {
     grown[*count] = json;
     *maps = grown;
     return (int) (*count)++;
+}
+
+size_t community_published_spec(char *out, const size_t size, const char *name, const char *creator) {
+    if (!out || !size) return 0;
+    const int n = creator && creator[0] ? snprintf(out, size, "published:%s/%s", creator, name ? name : "")
+                                        : snprintf(out, size, "published:%s", name ? name : "");
+    if (n <= 0 || (size_t) n >= size) {
+        out[0] = 0;
+        return 0;
+    }
+    return (size_t) n;
 }

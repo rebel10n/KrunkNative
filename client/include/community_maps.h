@@ -15,6 +15,7 @@ enum {
     COMMUNITY_SOURCE_ALL,
     COMMUNITY_SOURCE_OFFICIAL,  // the catalogue's official maps (creator "Krunker")
     COMMUNITY_SOURCE_COMMUNITY, // every other map: bundled community maps and published ones
+    COMMUNITY_SOURCE_PUBLISHED, // published maps only (no catalogue map): what a dedicated server can host by name
 };
 
 // A Games / Host row: what selectHostMap(name, modURL, id, creator) and playMap(name) carry.
@@ -54,3 +55,22 @@ int community_slot_of(const cJSON ***maps, size_t *count, const cJSON *json);
 // for a map that does not validate ("Missing spawn points.") or "Game not found.".
 typedef void (*CommunityFetchFn)(void *user, const cJSON *json, const char *error);
 void community_fetch(const char *name, CommunityFetchFn done, void *user);
+
+// The spec a game server takes for a published map: "published:<creator>/<name>" (or
+// "published:<name>" without a creator; server/include/published_maps.h). Returns its length, 0
+// when it does not fit.
+size_t community_published_spec(char *out, size_t size, const char *name, const char *creator);
+
+// The published maps a dedicated server can host (kn_brain's /api/search?source=published: the
+// players' maps, no catalogue map), for the Host Game flow's map step. community_published_maps()
+// returns the last list (empty until the first answer; owned here). community_published_refresh()
+// asks the brain again (once at a time; nothing without a brain) and runs changed() when the
+// answer is in.
+typedef struct {
+    char name[96];
+    char creator[64];
+    char spec[192];   // community_published_spec
+    char *image;      // map_image (a data: URL) or NULL
+} CommunityPublished;
+size_t community_published_maps(const CommunityPublished **out);
+void community_published_refresh(void (*changed)(void));

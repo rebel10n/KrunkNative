@@ -15,8 +15,8 @@ today's validateMap). One headless client_bin (EGL, no window on any display) on
      with a category (Parkour lists GOOD only, Puzzle BAD only); KrunkNative's Official /
      Community options (the category select's last two): Official hides it and finds Burg,
      Community finds it;
-  3. selectHostMap (the Host Game seam, community_pick): GOOD downloads and gets a map slot; BAD
-     is refused (-1) with v10's "Missing spawn points.";
+  3. selectHostMap: GOOD downloads and opens the Host Game flow with it; BAD is refused with v10's
+     "Missing spawn points.";
   4. playMap BAD: refused before any game starts; playMap GOOD: the offline game plays it.
 
 Exit 77 when the database or python websockets is missing.
@@ -247,10 +247,8 @@ def main():
         check("Official: Burg", grep_hits(text, "burg") >= 1, script_line(text, "grep", "burg"))
         check("Community: GOOD", grep_hits(text, "community") == 1, script_line(text, "grep", "community"))
         # 3. the Host Game seam
-        m = re.search(r"selectHostMap: %s -> slot (-?\d+)" % re.escape(good), text)
-        check("selectHostMap GOOD: downloaded, a map slot", m is not None and int(m.group(1)) >= 0, str(m and m.group(0)))
-        m = re.search(r"selectHostMap: %s -> slot (-?\d+)" % re.escape(bad), text)
-        check("selectHostMap BAD: refused (-1)", m is not None and int(m.group(1)) == -1, str(m and m.group(0)))
+        check("selectHostMap GOOD: downloaded, the Host Game flow opens with it", "selectHostMap: %s -> host flow" % good in text)
+        check("selectHostMap BAD: refused with v10's message", "selectHostMap: %s refused: Missing spawn points." % bad in text)
         check("BAD is refused with v10's validateMap message", "[community] %s: Missing spawn points." % bad in text)
         check("GOOD was downloaded once (the session cache serves Play)", text.count("[community] downloaded %s" % good) == 1,
               str(text.count("[community] downloaded %s" % good)))

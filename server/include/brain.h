@@ -39,10 +39,14 @@ int brain_next_event(BrainEvent*);
 // the socket and join the thread. Safe without a brain.
 void brain_stop(int wait_ms);
 
-// Published (DB) maps: GET <brain http>/api/map-data?name= on a worker thread; the answer
-// is a BRAIN_EV_FRAME {"type":"map-data","rid","ok","map"|"err"}. -1 = not started.
+// Published (DB) maps: GET <brain http>/api/map-data?name=[&creator=] on a worker thread; the
+// answer is a BRAIN_EV_FRAME {"type":"map-data","rid","ok","map"|"err"}. -1 = not started.
 void brain_set_http_base(const GsConfig*);
-int brain_fetch_map(uint32_t rid, const char *name);
+int brain_fetch_map(uint32_t rid, const char *name, const char *creator);
+// The same, blocking (startup map lists, published_maps.c), from cfg's brain URLs (no running link
+// needed): the parsed map (caller frees) or NULL with err; *missing = 1 when the brain answered
+// 404 (no such map, or not that creator's).
+cJSON *brain_fetch_map_sync(const GsConfig *cfg, const char *name, const char *creator, int timeout_ms, int *missing, char *err, size_t err_size);
 
 // Join ticket (seek-game clientId): HS256 JWS signed with gameserver.join_secret (default
 // brain_secret). Returns the claims (caller frees) when the signature and exp are valid.

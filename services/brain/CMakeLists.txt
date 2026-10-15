@@ -289,6 +289,13 @@ if (TARGET ${SERVER_BINARY} OR TARGET server_bin)
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/community_games_e2e.py ${CMAKE_BINARY_DIR}
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_community_games_e2e PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
+        # published maps hosted by server_bin (published:<creator>/<name>: the map argument, --set
+        # gameserver.maps, server.cfg's mapcycle, a brain host request, a missing map, the disk cache
+        # with the brain down) and picked in the Host Game flow; a client joins one
+        add_test(NAME brain_published_host_e2e
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/published_host_e2e.py ${CMAKE_BINARY_DIR}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_published_host_e2e PROPERTIES TIMEOUT 400 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
         # editor-ai: the editor's AI panel against kn_brain + a stub upstream / stub MCP (headless
         # client_bin --editor: guest gating, a streamed reply, editor tools, approvals, web search, history)
         add_test(NAME brain_editor_ai_e2e

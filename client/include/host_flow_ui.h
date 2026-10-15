@@ -16,6 +16,9 @@
 void host_flow_open(int host_type);
 // The Games window's Host button on a catalogue map (selectHostMap): the Mode step with that map.
 void host_flow_open_map(int catalog_index);
+// The Games window's Host button on a published map (selectHostMap): the Mode step with it chosen
+// (the command's gameserver.maps is published:<creator>/<name>).
+void host_flow_open_published(const char *name, const char *creator);
 // The chooser's Community Games card (showGames(true)): the Map step, community maps only.
 void host_flow_open_community(void);
 // windows[HOST_FLOW_WINDOW] (ui_windows.c): the window's markup for the current state.
