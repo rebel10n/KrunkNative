@@ -183,6 +183,7 @@ static struct {
     double end_val, end_target; // vLN01915 / vLN01911: the won rarity's slice fills the wheel
     double cam_x;               // v11662.position.x: 300 -> 30 (item fly-in)
     double bob_time;            // vLN01916
+    double rainbow;             // iííìíïí: the won Unobtainable slice's hue (rarityAnim), 0..360
     double last_time, step_time; // glfwGetTime of the last tick / the 60 Hz step clock
     int items[SPIN_ITEMS], item_count; // vA632: the won items, highest rarity first
     int next_item;              // vLN01913: the next item f1840 loads
@@ -294,6 +295,25 @@ static void hex_rgb(const char *hex, float *rgb) {
     rgb[0] = (float) ((value >> 16) & 255) / 255.0f;
     rgb[1] = (float) ((value >> 8) & 255) / 255.0f;
     rgb[2] = (float) (value & 255) / 255.0f;
+}
+
+// v10 iïîïîîï(h): the rgb of hue h (degrees, full saturation), written to rgb[0..2]
+static void hue_rgb(const double h, float *rgb) {
+    const double sector_f = h / 60.0;
+    const double x = 1.0 - fabs(fmod(sector_f, 2.0) - 1.0);
+    const int sector = (int) floor(sector_f);
+    double r = 0, g = 0, b = 0;
+    switch (sector < 0 || sector > 5 ? 0 : sector) {
+        case 0: r = 1; g = x; b = 0; break;
+        case 1: r = x; g = 1; b = 0; break;
+        case 2: r = 0; g = 1; b = x; break;
+        case 3: r = 0; g = x; b = 1; break;
+        case 4: r = x; g = 0; b = 1; break;
+        default: r = 1; g = 0; b = x; break;
+    }
+    rgb[0] = (float) r;
+    rgb[1] = (float) g;
+    rgb[2] = (float) b;
 }
 
 // store.getSpnItems(wheel, rarity, acc, wheel.season || config.currentSeason, wheel.bigRar)
@@ -659,7 +679,7 @@ static void spin_finished(const int next) {
     const UiWheel *w = current_wheel();
     const int rarity = g_wheel.win_rarity;
     g_wheel.end_val = 0;
-    g_wheel.end_target = 100 - wheel_rarity(w, rarity);
+    g_wheel.end_target = 100; // v10 f1847: iîiîîiï = 100 (the won slice then covers the whole wheel)
     printf("[store] wheel stopped on %s\n", rarity >= 0 && rarity < g_viewer_rarity_count ? g_viewer_rarities[rarity].name : "?");
     audio_play("reward", 0.3f, 0, 1.0f);
     spin_wheel_confetti_reset();
@@ -1558,10 +1578,13 @@ void store_ui_scenario_wheel(const int index, const int multi) { prize_wheel(ind
 // state.spinResult {rand, item} (numbers, or arrays for a multi-spin): the brain's spin reply,
 // then the spin itself skipped (every pointer at its target: the reveal runs on the next tick,
 // the item already flown in)
+// "live": true keeps the spin running from the first frame (pointers turn, the end animation and
+// the item's fly-in play on the scenario's clock: the sequence captures at several anim_time values)
 void store_ui_scenario_result(const cJSON *result) {
     const AccountInfo *acc = account_get();
     const cJSON *items = cJSON_GetObjectItem(result, "item");
     const int n = cJSON_IsArray(items) ? cJSON_GetArraySize(items) : 1;
+    const int live = cJSON_IsTrue(cJSON_GetObjectItem(result, "live"));
     cJSON *frame = cJSON_CreateArray();
     cJSON_AddItemToArray(frame, cJSON_CreateString("spin"));
     cJSON_AddItemToArray(frame, cJSON_CreateNull());
@@ -1570,6 +1593,7 @@ void store_ui_scenario_result(const cJSON *result) {
     cJSON_AddItemToArray(frame, cJSON_CreateNumber(acc ? acc->funds - (g_cur ? g_cur->price * n : 0) : 0));
     spin_response(frame);
     cJSON_Delete(frame);
+    if (live) return;
     for (int i = 0; i < g_wheel.pointers; i++) g_wheel.rotation[i] = g_wheel.target[i];
     spin_finished(0);
     g_wheel.end_val = g_wheel.end_target * 0.999999; // the next tick ends the slice fill: button gone, item shown
@@ -1755,12 +1779,20 @@ void store_ui_tick(void) {
         double share = wheel_rarity(wheel, z);
         if (g_wheel.end_target) {
             if (win == z) share += g_wheel.end_val;
-            else share -= g_wheel.end_val * (wheel_rarity(wheel, z) / g_wheel.end_target);
+            // v10 index.js: iìÌìiií -= endVal * (rarities[i] || 0 / endTarget): the operator
+            // precedence makes it endVal * rarity (no division), so the losing slices run past zero
+            else share -= g_wheel.end_val * wheel_rarity(wheel, z);
+        }
+        float rgb[3];
+        hex_rgb(g_viewer_rarities[z].color, rgb);
+        if (win == z && g_wheel.end_target && z == 6) { // RENDER.rarityAnim && rarity.animate (Unobtainable, as line ~419): fill = hue(round(anim)), anim += 0.3 dt
+            hue_rgb(round(g_wheel.rainbow), rgb);
+            if ((g_wheel.rainbow += 0.3 * delta_ms) >= 360) g_wheel.rainbow = 0;
         }
         if (share > 0) {
             d->slice_from[d->slices] = (float) hx;
             d->slice_to[d->slices] = (float) (hx + M_PI * 2 * (share / 100));
-            hex_rgb(g_viewer_rarities[z].color, d->slice_rgb[d->slices]);
+            memcpy(d->slice_rgb[d->slices], rgb, sizeof(rgb));
             d->slices++;
         }
         hx += M_PI * 2 * (share / 100);

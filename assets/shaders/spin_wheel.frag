@@ -51,12 +51,16 @@ float triangle_sdf(vec2 p, vec2 a, vec2 b, vec2 c) {
     return -sqrt(d.x) * sign(d.y);
 }
 
+// angle is the running angle, unreduced: v10 (index.js updateSpinUi) draws each slice from the
+// running sum of the shares, and once the end animation takes the losing rarities past zero that
+// sum goes negative. A slice covers the angles (angle - from) mod 2 PI < its span (a span of a full
+// turn or more covers the whole disc).
 vec3 slice_color(float angle, out float covered) {
     covered = 0.0;
     vec3 rgb = vec3(1.0);
     for (int i = 0; i < 8; i++) {
         if (i >= slice_count) break;
-        if (angle >= slice_from[i] && angle < slice_to[i]) {
+        if (mod(angle - slice_from[i], TAU) < slice_to[i] - slice_from[i]) {
             rgb = slice_rgb[i];
             covered = 1.0;
         }
@@ -70,7 +74,7 @@ vec4 wheel_sample(vec2 p) {
     vec4 dst = vec4(0.0);
     if (r < radius) dst = over(dst, DISC, 1.0);
     if (r < radius * 0.95) {
-        float angle = mod(atan(d.y, d.x) - slice_rotation, TAU);
+        float angle = atan(d.y, d.x) - slice_rotation;
         float covered;
         vec3 rgb = slice_color(angle, covered);
         dst = over(dst, rgb, covered);
