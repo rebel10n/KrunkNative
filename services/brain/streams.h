@@ -36,4 +36,26 @@ int streams_parse_token(const char *body, char *token, size_t cap, long *expires
 /* The id of the first game of GET /helix/games?name=: 1 = read, 0 = no such game. */
 int streams_parse_game_id(const char *body, char *id, size_t cap);
 
+/* ---- stream thumbnails (stream_thumbs.c: GET /streams/thumb?url=)
+ *
+ * The native client's HTML engine loads page and asset images only, so a card's Twitch preview
+ * (thumbnailUrl) reaches it through the brain: the brain fetches the image from an allow-listed
+ * Twitch CDN host (https only, no redirects, size-capped, cached) and answers it as a data: URL.
+ * Pure checks below (tests/test_streams.c). */
+
+int stream_thumbs_init(struct Brain *b);
+void stream_thumbs_shutdown(struct Brain *b);
+
+/* 1 when url is https://<host><path> with host one of hosts[0..n) (case-insensitive, exact: no
+ * user info, port or other host) and a plain image path: '/', then letters, digits and "-._~/"
+ * only (no query, fragment, escapes, "//" or dot segments), ending .jpg / .jpeg / .png, at most
+ * 400 characters in all. The path (from its '/') goes to path (cap bytes). */
+int streams_thumb_url_ok(const char *url, const char *const *hosts, size_t n, char *path, size_t cap);
+
+/* The image type of the first bytes: "image/jpeg", "image/png", or NULL (anything else). */
+const char *streams_image_mime(const unsigned char *bytes, size_t len);
+
+/* "data:<mime>;base64,<bytes>" (malloc'd), NULL when out of memory. */
+char *streams_data_url(const char *mime, const unsigned char *bytes, size_t len);
+
 #endif

@@ -71,6 +71,7 @@ static const BrainModule k_brain_modules[] = {
     {"ai-search", ai_search_init, ai_search_shutdown}, /* the AI's web search (ai_search.c) */
     {"streams", streams_init, streams_shutdown}, /* v10 Live Streams: /streams/top (streams.c) */
     {"avatar", avatar_init, avatar_shutdown}, /* profile pictures: upload, AI review, serving (avatar.c) */
+    {"stream-thumbs", stream_thumbs_init, stream_thumbs_shutdown}, /* the cards' previews: /streams/thumb */
 };
 #define BRAIN_MODULE_COUNT (sizeof(k_brain_modules) / sizeof(k_brain_modules[0]))
 

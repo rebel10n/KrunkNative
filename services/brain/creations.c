@@ -40,6 +40,7 @@
 #include "knsvc/log.h"
 #include "map_catalog.h"
 #include "map_validate.h"
+#include "youtube_link.h"
 
 #define MOD "creations"
 #define TAB_PAGE_SIZE 42
@@ -85,6 +86,7 @@ static cJSON *catalog_row(size_t index) {
     cJSON_AddNumberToObject(row, "map_category", -1);
     cJSON_AddBoolToObject(row, "official", map_catalog_is_official(e));
     cJSON_AddItemToObject(row, "modes", modes_array(json));
+    cJSON_AddStringToObject(row, "map_videolink", "");
     return row;
 }
 
@@ -216,7 +218,8 @@ static void db_rows_done(kn_db_result *res, void *ud) {
     "coalesce(m.map_image, '') AS map_image, m.map_votes, m.map_plays AS map_pl, m.map_updatecounter, " \
     "m.map_featured, " H0 "m.map_description" H1 " AS map_description, coalesce(a.username, 'Community') AS creatorname, " \
     "m.map_funds AS fund, (SELECT count(*) FROM creation_favs f WHERE f.kind = 0 AND f.creation_id = m.map_id) AS fav, " \
-    "'' AS mod_url, '' AS mod_id, m.map_category FROM published_maps m LEFT JOIN accounts a ON a.id = m.creator_id "
+    "'' AS mod_url, '' AS mod_id, m.map_category, coalesce(m.map_video, '') AS map_videolink " \
+    "FROM published_maps m LEFT JOIN accounts a ON a.id = m.creator_id "
 
 #define MAP_COLS MAP_COLS_("kn_html(", ")", "m.map_info::text AS map_info")
 #define MAP_COLS_ANY MAP_COLS_("{html:", "}", "m.map_info AS map_info__t")
@@ -426,13 +429,14 @@ static void publish_done(SocialSession *s, kn_db_result *res, void *extra) {
     cJSON_Delete(v);
 }
 
-/* ["uploadM", mapJson, thumbDataUrl|null, description, videoId, category, postToHub, mobile] ->
+/* ["uploadM", mapJson, thumbDataUrl|null, description, videoLink, category, postToHub, mobile] ->
  * ["pubMR", msg] | ["upMp", err]. The checks are the editor's publish (v10 editor publishMap /
  * uploadGame, validateMap; here shared/src/map_validate.c): the 500k data limit, a category in
  * the Games window's list, then the map itself (name 1-16 characters without < or >, spawns,
  * objects and the limits, first error as v7 words it). The name must not be a catalogue map.
  * Republishing your own map updates it (map_updatecounter + 1). postToHub / mobile are read and
- * not stored yet (no hub feed post, no mobile flag in the brain). */
+ * not stored yet (no hub feed post, no mobile flag in the brain). The video is stored as its
+ * YouTube id (v10's map_videolink, shared/include/youtube_link.h): any other text stores none. */
 void sh_upload_map(SocialSession *s, const cJSON *f) {
     if (s->account_id <= 0) {
         social_send_n(s, "upMp", 1, cJSON_CreateString("Must be logged in"));
@@ -477,9 +481,10 @@ void sh_upload_map(SocialSession *s, const cJSON *f) {
             return;
         }
     }
-    char me[24], c[24];
+    char me[24], c[24], vid[KN_YOUTUBE_ID_LEN + 1];
+    kn_youtube_id(video, vid, sizeof vid);
     social_call(s, &P_PUBLISH_MAP,
-                 KN_DB_ARGS(acct_itoa(me, s->account_id), nm, data, desc ? desc : "", video ? video : "",
+                 KN_DB_ARGS(acct_itoa(me, s->account_id), nm, data, desc ? desc : "", vid,
                             acct_itoa(c, cat), thumb, info_s ? info_s : "{}"),
                  publish_done, NULL);
     free(info_s);

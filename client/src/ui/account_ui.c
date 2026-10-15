@@ -474,8 +474,11 @@ static void clear_account(void) {
     memset(&g_email, 0, sizeof(g_email));
 }
 
-// WP-E part 2c: acc.badges from kn_brain's account info ("badges": badges.js indices)
+// WP-E part 2c: acc.badges from kn_brain's account info ("badges": badges.js indices); v10's
+// creatorBadge (~~creator_badge, v10:112770) comes with it
 static void set_badges(const cJSON *info) {
+    const cJSON *creator = cJSON_IsObject(info) ? cJSON_GetObjectItem(info, "creator_badge") : NULL;
+    if (creator) g_acc.creator = cJSON_IsNumber(creator) ? creator->valueint != 0 : cJSON_IsTrue(creator);
     const cJSON *badges = cJSON_IsObject(info) ? cJSON_GetObjectItem(info, "badges") : NULL;
     if (!cJSON_IsArray(badges)) return;
     cJSON_Delete(g_acc.badges);

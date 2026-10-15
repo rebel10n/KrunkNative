@@ -1,5 +1,6 @@
 /* Unit test of the pure parts of the Live Streams list (streams_norm.c): no network, no config. */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "streams.h"
@@ -64,6 +65,60 @@ int main(void) {
     CHECK(streams_parse_game_id("{\"data\":[{\"id\":\"512345\",\"name\":\"Krunker\"}]}", gid, sizeof gid));
     CHECK(!strcmp(gid, "512345"));
     CHECK(!streams_parse_game_id("{\"data\":[]}", gid, sizeof gid));
+
+    /* stream thumbnails: the allow-list (https, exact host, plain image path) */
+    const char *hosts[] = {"static-cdn.jtvnw.net", "clips-media-assets2.twitch.tv"};
+    char path[512];
+    CHECK(streams_thumb_url_ok("https://static-cdn.jtvnw.net/previews-ttv/live_user_zeta_one-440x248.jpg", hosts, 2, path, sizeof path));
+    CHECK(!strcmp(path, "/previews-ttv/live_user_zeta_one-440x248.jpg"));
+    CHECK(streams_thumb_url_ok("https://STATIC-CDN.jtvnw.net/a.PNG", hosts, 2, path, sizeof path));
+    CHECK(streams_thumb_url_ok("https://clips-media-assets2.twitch.tv/x/y-preview.jpeg", hosts, 2, NULL, 0));
+    static const char *const k_refused[] = {
+        "http://static-cdn.jtvnw.net/a.jpg",                       /* not https */
+        "https://static-cdn.jtvnw.net.evil.example/a.jpg",         /* another host */
+        "https://evil.example/static-cdn.jtvnw.net/a.jpg",
+        "https://xstatic-cdn.jtvnw.net/a.jpg",
+        "https://user@static-cdn.jtvnw.net/a.jpg",                 /* user info */
+        "https://static-cdn.jtvnw.net@evil.example/a.jpg",
+        "https://static-cdn.jtvnw.net:8443/a.jpg",                 /* a port */
+        "https://static-cdn.jtvnw.net/a.jpg?x=1",                  /* a query */
+        "https://static-cdn.jtvnw.net/a.jpg#f",                    /* a fragment */
+        "https://static-cdn.jtvnw.net/%2e%2e/a.jpg",               /* escapes */
+        "https://static-cdn.jtvnw.net/../a.jpg",                   /* dot segments */
+        "https://static-cdn.jtvnw.net/x/./a.jpg",
+        "https://static-cdn.jtvnw.net//evil.example/a.jpg",        /* "//" */
+        "https://static-cdn.jtvnw.net/a.gif",                      /* not jpg / png */
+        "https://static-cdn.jtvnw.net/a.svg",
+        "https://static-cdn.jtvnw.net/",
+        "https://static-cdn.jtvnw.net",
+        "https:///a.jpg",
+        "file:///etc/passwd.jpg",
+        "",
+    };
+    for (size_t i = 0; i < sizeof(k_refused) / sizeof(k_refused[0]); i++) {
+        if (streams_thumb_url_ok(k_refused[i], hosts, 2, path, sizeof path)) {
+            fprintf(stderr, "allowed but should not be: %s\n", k_refused[i]);
+            g_fail = 1;
+        }
+    }
+    CHECK(!streams_thumb_url_ok(NULL, hosts, 2, path, sizeof path));
+    CHECK(!streams_thumb_url_ok("https://static-cdn.jtvnw.net/a.jpg", hosts, 0, path, sizeof path)); /* no hosts: nothing */
+    char longurl[600];
+    snprintf(longurl, sizeof longurl, "https://static-cdn.jtvnw.net/%0450d.jpg", 0);
+    CHECK(!streams_thumb_url_ok(longurl, hosts, 2, path, sizeof path)); /* over 400 characters */
+    CHECK(!streams_thumb_url_ok("https://static-cdn.jtvnw.net/abcdef.jpg", hosts, 2, path, 8)); /* the path does not fit */
+
+    /* the image sniffing and the data: URL */
+    const unsigned char jpg[] = {0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10};
+    const unsigned char png[] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0};
+    CHECK(streams_image_mime(jpg, sizeof jpg) && !strcmp(streams_image_mime(jpg, sizeof jpg), "image/jpeg"));
+    CHECK(streams_image_mime(png, sizeof png) && !strcmp(streams_image_mime(png, sizeof png), "image/png"));
+    CHECK(!streams_image_mime((const unsigned char *) "<html>", 6));
+    CHECK(!streams_image_mime((const unsigned char *) "GIF89a", 6));
+    CHECK(!streams_image_mime(jpg, 2));
+    char *du = streams_data_url("image/jpeg", jpg, sizeof jpg);
+    CHECK(du && !strcmp(du, "data:image/jpeg;base64,/9j/4AAQ"));
+    free(du);
 
     if (g_fail) {
         fprintf(stderr, "streams test: FAILED\n");

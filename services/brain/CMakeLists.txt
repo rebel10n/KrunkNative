@@ -88,6 +88,8 @@ set(KN_BRAIN_SOURCES
     # v10 Live Streams: GET /streams/top from Twitch Helix (streams.c; streams_norm.c is pure)
     streams.c
     streams_norm.c
+    stream_thumbs.c                 # the Live Streams cards' Twitch previews: GET /streams/thumb (allow-listed, capped, cached)
+    ../../shared/src/youtube_link.c # map YouTube video ids (creations.c: uploadM stores the id)
     ../../shared/src/ai_proto.c
     # profile pictures (0123_account_avatars): intake (PNG / JPEG / WebP, libwebp encode), the
     # AI review's verdict rules, the rows; stb_image is the decoder (avatar_stb.c holds its body)
@@ -364,6 +366,15 @@ if (Python3_FOUND)
     add_test(NAME brain_v10_social_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/v10_social_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_v10_social_e2e PROPERTIES TIMEOUT 480 SKIP_RETURN_CODE 77 LABELS "brain;db;social;e2e")
+    # creators: v10's creator badge ("crt", 0210_creator_badge) and the maps' YouTube video ids
+    add_test(NAME brain_creator
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/creator_test.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_creator PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+    # the same in headless client_bin runs: the hub's Creator button, a map's YouTube link, the menu's
+    # creator mark and the Live Streams previews through /streams/thumb (stub Twitch + stub CDN)
+    add_test(NAME brain_creator_e2e
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/creator_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_creator_e2e PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77 LABELS "brain;db;social;e2e")
     # v10.0.2 Social hub backend: friends event bus + gapi tunnel (social_eb.c, social_gapi.c, 0112)
     add_test(NAME brain_social_v10
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/social_v10_test.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})

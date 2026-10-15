@@ -28,6 +28,7 @@
 #include <v10_social.h> // v10_gapi: the giveaway post (gapi POST /social/post)
 #include <ui_logic.h>
 #include <ui_vgrid.h> // the market / inventory / item lists are virtual grids
+#include <youtube_link.h> // a map's YouTube video (map_videolink / vl): the featured card and map page link
 #include <ctype.h>
 #include <math.h>
 #include <stdio.h>
@@ -167,6 +168,7 @@ typedef struct {
     char profile_name[64];  // profile.player_name (follow / followers)
     int profile_id;
     int profile_featured, profile_hack; // player_featured / player_hack of the profile (Verify, Flag)
+    int profile_creator;                // creator_badge of the profile (v10's creator badge: Creator / Uncreator)
     double profile_followed, profile_following;
     int giveaway;           // the post box's KR giveaway switch (togglPos)
     int posting;            // Ve: a post is being submitted
@@ -970,6 +972,20 @@ static void list_body(StrBuf *sb, HubList *list, const int is_mods, const HubTab
     }
 }
 
+// A map's YouTube video (map_videolink in the lists, vl on the map page: the id kn_brain stores,
+// shared/include/youtube_link.h). v10 embeds it (an iframe, v10:213293); natively a YouTube button
+// opens https://www.youtube.com/watch?v=<id> in the browser. Nothing without a valid id.
+static int append_video_link(StrBuf *sb, const char *stored, const char *id, const int big) {
+    char url[64];
+    if (!kn_youtube_watch_url(stored, url, sizeof(url))) return 0;
+    sb_appendf(sb, "<div id='%s' class='buttonR' title='%s' onclick='openLink(&quot;%s&quot;, &quot;_blank&quot;)' onmouseenter='playTick(0.1);' "
+                   "style='cursor:pointer;pointer-events:all;display:inline-flex;align-items:center;justify-content:center;gap:12px;"
+                   "background-color:#ff0000;color:#fff;border-radius:8px;padding:%s;font-size:%dpx;'>"
+                   "<img src='./img/youtube.png' style='width:%dpx;height:%dpx;' draggable='false'>Watch on YouTube</div>",
+               id, url, url, big ? "14px 26px" : "8px 16px", big ? 24 : 18, big ? 40 : 28, big ? 40 : 28);
+    return 1;
+}
+
 // windows[0].gen()
 static char *maps_gen(void) {
     HubList *list = &g_hub.maps;
@@ -1004,9 +1020,11 @@ static char *maps_gen(void) {
             sb_append(&out, image && *image ? image : "./img/noimg.png"); // KrunkNative: the catalogue thumbnail, no user-assets thumb
             sb_appendf(&out, ");'><div id='bigMFeatName'>%s</div><div id='bigMFeatVbar'><span style='color:#fff;'>%s</span><span class='material-icons' style='margin-top:-8px;margin-left:0px;font-size:46px;vertical-align:middle;color:rgba(255,255,255,0.5);margin-right:10px;'>play_arrow</span>%s<span class='material-icons' style='margin-left:10px;font-size:33px;vertical-align:top;color:rgba(255,255,255,0.5);'>thumb_up</span><div style='color:#7d7d7d;margin-left:20px;margin-top:-12px;display:inline-block;vertical-align:middle;'>by <a target='_blank' href='/social.html?p=profile&q=%s' style='color: #2196F3;'>%s</a></div></div><div id='bigMFeatDesc'>%s</div><div id='bigMFeatIBtn' class='button' onclick='openURL(&quot;/social.html?p=map&q=%s&quot;, 1)' style='color:#fff !important;'>?</div><div id='bigMFeatPBtn' class='btnAnim buttonS' onclick='openURL(&quot;/?play=%s&quot;, 1)' style='color:#fff !important;'>Play Now</div></div>",
                        name ? name : "", pl, vt, creator ? creator : "", creator ? creator : "", descr ? descr : "undefined", name ? name : "", name ? name : "");
-            // the featured video (config.fetMapVids / map_videolink) is a YouTube iframe: no
-            // embedded video natively, the box stays
-            sb_append(&out, "<div class='bigMFeatVid'></div>");
+            // the featured video (config.fetMapVids / map_videolink) is a YouTube iframe in v10: no
+            // embedded video natively, the box holds a link to the video instead (empty without one)
+            sb_append(&out, "<div class='bigMFeatVid' style='display:inline-flex;align-items:center;justify-content:center;'>");
+            append_video_link(&out, row_str2(f, "map_videolink", NULL), "bigMFeatVidLink", 1);
+            sb_append(&out, "</div>");
         }
         sb_appendf(&out, "<div id='mapList'>%s</div>", b);
         free(b);
@@ -1334,6 +1352,7 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
     g_hub.profile_id = (int) jnum(t, "player_id");
     g_hub.profile_featured = (int) jnum(t, "player_featured");
     g_hub.profile_hack = (int) jnum(t, "player_hack");
+    g_hub.profile_creator = (int) jnum(t, "creator_badge");
     g_hub.profile_followed = jnum(t, "player_followed");
     g_hub.profile_following = jnum(t, "player_following");
     cJSON *stats = NULL;
@@ -1363,7 +1382,9 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
     sb_appendf(&sb, "<div class='onStatus onStatProf' title='%s' style='background:%s'></div>",
                jnum(t, "st") ? (jstr(t, "sm") ? jstr(t, "sm") : "Online") : "Offline", jnum(t, "st") ? "#27ab32" : "#7f7f7f");
     sb_append(&sb, "<div class='leftTopHolder'>");
-    if (jnum(t, "partner_approved") >= 2) sb_append(&sb, "<i class='material-icons' style='margin-right:-2px;font-size:32px;color:#993299;vertical-align:middle;margin-top:-14px;'>verified</i>");
+    // v10's creator badge (creator_badge, #993299 verified: v10:109621) shares the legacy partner mark's icon
+    if (jnum(t, "creator_badge") > 0 || jnum(t, "partner_approved") >= 2)
+        sb_append(&sb, "<i class='material-icons' id='creatorBadge' title='Creator' style='margin-right:-2px;font-size:32px;color:#993299;vertical-align:middle;margin-top:-14px;'>verified</i>");
     if (premium) sb_append(&sb, "<i class='material-icons' style='margin-right:-2px;font-size:32px;color:#FBC02D;vertical-align:middle;margin-top:-14px;'>beenhere</i>");
     if (jnum(t, "player_featured")) sb_append(&sb, "<i class='material-icons' style='margin-right:1px;font-size:32px;color:#40C4FF;vertical-align:middle;margin-top:-14px;'>check_circle</i>");
     if (premium && alias && alias[0]) {
@@ -1408,6 +1429,9 @@ static void hub_render_profile(const cJSON *t, const cJSON *extra) {
                not_following ? I18N("generic.follow", "Follow") : I18N("generic.unfollow", "Unfollow"));
     sb_appendf(&sb, "<div class='bottomBtn canVerify%s' id='verifyBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='verifyPopup();'>%s</div>", acc && acc->is_dev ? "" : " hide", jnum(t, "player_featured") ? "Unverify" : "Verify");
     sb_appendf(&sb, "<div class='bottomBtn canBadge%s' id='badgeBtn' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='badgePopup();'>Give Badge</div>", acc && acc->is_dev ? "" : " hide");
+    // KrunkNative: v10's creator badge has no setter in the v10 page; developers give it here ("crt")
+    sb_appendf(&sb, "<div class='bottomBtn canVerify%s' id='creatorBtn' style='color:#993299;border-color:#993299' onmouseover=\"SOUND.play('tick_0',0.1)\" onclick='creatorPopup();'>%s</div>", acc && acc->is_dev ? "" : " hide",
+               g_hub.profile_creator ? "Uncreator" : "Creator");
     char *html = sb_finish(&sb);
     set_html("rightProfile", html);
     free(html);
@@ -1834,7 +1858,13 @@ static void hub_render_creation(const int is_mod, const cJSON *t) {
         comma_number(num, sizeof(num), jnum(t, "vt"));
         sb_appendf(&sb, "`)'><img src='./img/social/twitter.png' style='width:40px;margin-bottom:-30px;position:absolute;top:2px;left:11px;' /></div><div class='mapText' style='top:285px;right:20px;'>%s<span class='material-icons' style='margin-left:10px;color:rgba(255, 255, 255, 0.5);vertical-align:middle;margin-top:-6px;font-size:30px'>thumb_up</span></div></div><div id='mapTabsP'>", num);
         append_map_tabs(&sb, can_edit);
-        sb_appendf(&sb, "</div><div id='mapVid' style='display:none'></div><div id='mapDescr' style='padding-top:20px%s'>", g_map_tab ? ";display:none" : "");
+        // t.vl: v10's video embed; natively the YouTube link button (hidden without a video)
+        StrBuf vid = {0};
+        const int has_vid = append_video_link(&vid, jstr(t, "vl"), "mapVidLink", 0);
+        char *vid_s = sb_finish(&vid);
+        sb_appendf(&sb, "</div><div id='mapVid' style='%s'>%s</div><div id='mapDescr' style='padding-top:20px%s'>",
+                   has_vid && !g_map_tab ? "text-align:center" : "display:none", vid_s ? vid_s : "", g_map_tab ? ";display:none" : "");
+        free(vid_s);
         snprintf(key, sizeof(key), "%s_description", pre);
         const char *descr = jstr(t, key);
         if (descr && *descr) sb_append_served(&sb, descr);
@@ -3700,7 +3730,7 @@ static void chat_status_frame(const cJSON *s) {
 static void handle_reply_frame(const cJSON *frame) {
     const char *label = cJSON_GetStringValue(cJSON_GetArrayItem(frame, 0));
     if (!label) return;
-    if (!strcmp(label, "verr") || !strcmp(label, "fgr") || !strcmp(label, "sbdgr") || !strcmp(label, "rptr")) {
+    if (!strcmp(label, "verr") || !strcmp(label, "fgr") || !strcmp(label, "sbdgr") || !strcmp(label, "crtr") || !strcmp(label, "rptr")) {
         hub_action_result(cJSON_IsTrue(cJSON_GetArrayItem(frame, 1)), "SUCCESS");
         return;
     }
@@ -5604,7 +5634,7 @@ H(h_update_map_tab) {
     set_html("mapTabsP", html);
     free(html);
     set_display("mapDescr", g_map_tab == 0 ? "block" : "none");
-    set_display("mapVid", "none");
+    set_display("mapVid", g_map_tab == 0 && el("mapVidLink") ? "block" : "none"); // the video link is part of About
     set_display("activeGames", g_map_tab == 1 ? "block" : "none");
     set_display("mapLeaders", g_map_tab == 2 ? "block" : "none");
     if (el("mapData")) set_display("mapData", g_map_tab == 3 ? "block" : "none");
@@ -5930,7 +5960,7 @@ static void confirm_popup(const char *question, const char *onyes, const char *c
     free(html);
 }
 
-// ["ver" | "flg" | "sbdg", ...] over the social socket, then the waiting popup (io_wait)
+// ["ver" | "flg" | "sbdg" | "crt", ...] over the social socket, then the waiting popup (io_wait)
 static void hub_staff_send(const char *label, const char *name, const int64_t value, const int on, const int with_value) {
     cJSON *f = cJSON_CreateArray();
     cJSON_AddItemToArray(f, cJSON_CreateString(label));
@@ -5956,6 +5986,24 @@ H(h_verify_user) {
     UNUSED;
     if (!hub_is_dev() || !g_hub.profile_name[0]) return 1;
     hub_staff_send("ver", g_hub.profile_name, 0, g_hub.profile_featured ? 0 : 1, 0);
+    return 1;
+}
+
+// creatorPopup() / creatorUser(): v10's creator badge (dev only, the Creator button) -> "crt"
+// (name, !creator) -> "crtr"
+H(h_creator_popup) {
+    UNUSED;
+    if (!hub_is_dev() || !g_hub.profile_name[0]) return 1;
+    char q[192];
+    snprintf(q, sizeof(q), "Are you sure you want to %s the creator badge - %s?", g_hub.profile_creator ? "remove" : "give", g_hub.profile_name);
+    confirm_popup(q, "creatorUser()", "verifyPop"); // the Verify popup's box
+    return 1;
+}
+
+H(h_creator_user) {
+    UNUSED;
+    if (!hub_is_dev() || !g_hub.profile_name[0]) return 1;
+    hub_staff_send("crt", g_hub.profile_name, 0, g_hub.profile_creator ? 0 : 1, 0);
     return 1;
 }
 
@@ -6245,6 +6293,8 @@ static const HtmlHandlerEntry k_handlers[] = {
     {"itemListScroll", h_item_list_scroll},
     {"verifyPopup", h_verify_popup},
     {"verifyUser", h_verify_user},
+    {"creatorPopup", h_creator_popup},
+    {"creatorUser", h_creator_user},
     {"flagPopup", h_flag_popup},
     {"flagUser", h_flag_user},
     {"badgePopup", h_badge_popup},

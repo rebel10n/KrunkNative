@@ -11,8 +11,15 @@ token request's body and never in an answer or the brain log, the last good list
 fails, an empty list (the empty state), the cache (a second answer inside streams.cache_s makes no
 upstream call), and 503 StreamsUnavailable with no client secret configured.
 
+Thumbnails (stream_thumbs.c, GET /streams/thumb?url=) against a stub CDN (streams.thumbs.cdn_url):
+an allow-listed https://static-cdn.jtvnw.net/... preview comes back as its data: URL, byte for byte;
+a second ask is served from the cache; other hosts, http, user info, ports, queries and dot
+segments are refused (400) without reaching the CDN; a body over streams.thumbs.max_bytes, a body
+that is not an image, a redirect (never followed) and a CDN error answer 502.
+
 Database: as ai_test.py (sqlite here). 77 = skip (no database driver).
 """
+import base64
 import json
 import os
 import re
@@ -51,6 +58,71 @@ LIVE = [
     {"id": "4", "user_login": "big_streamer", "title": "Parkour", "viewer_count": 300, "type": "live",
      "language": "de", "thumbnail_url": "https://static-cdn.jtvnw.net/big-{width}x{height}.jpg"},
 ]
+
+
+# two small JPEGs (88x50 gradients), the stub CDN's previews
+THUMB_A = base64.b64decode(
+    "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAoHBwgHBgoICAgLCgoLDhgQDg0NDh0VFhEYIx8lJCIfIiEmKzcvJik0KSEiMEExNDk7Pj4+JS5ESUM8SDc9Pjv/"
+    "2wBDAQoLCw4NDhwQEBw7KCIoOzs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozv/wAARCAAyAFgDASIAAhEBAxEB/8QAFwAB"
+    "AQEBAAAAAAAAAAAAAAAAAAMCBf/EABUQAQEAAAAAAAAAAAAAAAAAAAAS/8QAFgEBAQEAAAAAAAAAAAAAAAAAAAUE/8QAFREBAQAAAAAAAAAAAAAAAAAAABP/"
+    "2gAMAwEAAhEDEQA/AOBJKkkrVVKKckqSSVIpySpJJUinJKkklSKckqSSVIpyKSFSKskqSSl1V4pySpJJUinJKkklSKckqSSVIpySpJJUinIpIVIqSSpJKXVX"
+    "inJKkklSKckqSSVIpySpJJUinJKkklSKcikhUi2AxtgAAAAAAAAAD//Z")
+THUMB_B = base64.b64decode(
+    "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAoHBwgHBgoICAgLCgoLDhgQDg0NDh0VFhEYIx8lJCIfIiEmKzcvJik0KSEiMEExNDk7Pj4+JS5ESUM8SDc9Pjv/"
+    "2wBDAQoLCw4NDhwQEBw7KCIoOzs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozv/wAARCAAyAFgDASIAAhEBAxEB/8QAFQAB"
+    "AQAAAAAAAAAAAAAAAAAAAAH/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAGQEBAAIDAAAAAAAAAAAAAAAAAAEFAwQG/8QAFREBAQAAAAAAAAAAAAAAAAAAABP/2gAM"
+    "AwEAAhEDEQA/AIIMEHEKIEBRAgKIEBRAgKIEAEFzBKiBAUQICiBAUQICiBABBdwSogQFECAogQFECAogQABvAAAAAAAAAAD/2Q==")
+
+
+class Cdn:
+    """The stub Twitch CDN (static-cdn.jtvnw.net's previews). Counts every request by path."""
+
+    def __init__(self, max_bytes):
+        self.hits = {}
+        self.lock = threading.Lock()
+        self.files = {
+            "/previews-ttv/live_user_big_streamer-440x248.jpg": ("image/jpeg", THUMB_A),
+            "/previews-ttv/live_user_zeta_one-440x248.jpg": ("image/jpeg", THUMB_B),
+            "/previews-ttv/huge-440x248.jpg": ("image/jpeg", b"\xff\xd8\xff\xe0" + b"\0" * (max_bytes + 4096)),
+            "/previews-ttv/page-440x248.jpg": ("text/html", b"<html><body>not an image</body></html>"),
+        }
+        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), self.handler())
+        self.url = "http://127.0.0.1:%d" % self.srv.server_address[1]
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def count(self, path):
+        with self.lock:
+            return self.hits.get(path, 0)
+
+    def handler(self):
+        cdn = self
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                with cdn.lock:
+                    cdn.hits[self.path] = cdn.hits.get(self.path, 0) + 1
+                if self.path == "/previews-ttv/moved-440x248.jpg":
+                    self.send_response(302)
+                    self.send_header("Location", "%s/previews-ttv/live_user_big_streamer-440x248.jpg" % cdn.url)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                f = cdn.files.get(self.path)
+                if not f:
+                    self.send_response(404)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", f[0])
+                self.send_header("Content-Length", str(len(f[1])))
+                self.end_headers()
+                self.wfile.write(f[1])
+
+        return H
 
 
 class Twitch:
@@ -139,13 +211,13 @@ def http_get(port, path, timeout=20):
         return e.code, e.read().decode()
 
 
-def run_brain(env, work, tw, cache_s, tag):
+def run_brain(env, work, tw, cache_s, tag, more=()):
     log_path = os.path.join(work, "brain-%s.log" % tag)
     extra = ["--brain.host=127.0.0.1", "--brain.port=0", "--brain.id=streams-%d" % os.getpid(),
              "--accounts.email.required=false", "--smtp.host=",
              "--streams.cache_s=%d" % cache_s,
              "--streams.twitch.auth_url=%s/oauth2/token" % tw.url,
-             "--streams.twitch.api_url=%s/helix" % tw.url]
+             "--streams.twitch.api_url=%s/helix" % tw.url] + list(more)
     with open(log_path, "a") as log:
         proc = subprocess.Popen([BRAIN] + extra, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
     return proc, log_path
@@ -213,6 +285,65 @@ def scenario_cache(port, tw):
     check(tw.streams_calls - before <= 1, "a cached answer makes no upstream call (%d calls)" % (tw.streams_calls - before))
 
 
+def thumb(port, url):
+    st, body = http_get(port, "/streams/thumb?url=" + urllib.parse.quote(url, safe=""))
+    try:
+        return st, json.loads(body)
+    except ValueError:
+        return st, {}
+
+
+def scenario_thumbs(port, cdn):
+    cdn_host = "https://static-cdn.jtvnw.net"
+    big = "/previews-ttv/live_user_big_streamer-440x248.jpg"
+    st, ans = thumb(port, cdn_host + big)
+    img = (ans.get("data") or {}).get("image") or ""
+    check(st == 200 and ans.get("success") is True, "an allow-listed preview is answered (HTTP %d)" % st)
+    check(img.startswith("data:image/jpeg;base64,") and base64.b64decode(img.split(",", 1)[1]) == THUMB_A,
+          "the answer is the preview's data: URL, byte for byte")
+    check((ans.get("data") or {}).get("url") == cdn_host + big, "the answer names the URL it is for")
+    check(cdn.count(big) == 1, "the CDN was asked once (%d)" % cdn.count(big))
+    for _ in range(3):
+        st2, ans2 = thumb(port, cdn_host + big)
+    check(st2 == 200 and ans2 == ans and cdn.count(big) == 1, "asked again: served from the cache (CDN hits %d)" % cdn.count(big))
+    st, ans = thumb(port, cdn_host + "/previews-ttv/live_user_zeta_one-440x248.jpg")
+    check(st == 200 and base64.b64decode(((ans.get("data") or {}).get("image") or ",").split(",", 1)[1]) == THUMB_B,
+          "a second stream's preview is its own")
+
+    before = sum(cdn.hits.values())
+    refused = [
+        "https://evil.example/previews-ttv/live_user_big_streamer-440x248.jpg",
+        "https://static-cdn.jtvnw.net.evil.example/a.jpg",
+        "http://static-cdn.jtvnw.net" + big,
+        "https://user@static-cdn.jtvnw.net" + big,
+        "https://static-cdn.jtvnw.net:444" + big,
+        "https://static-cdn.jtvnw.net" + big + "?x=1",
+        "https://static-cdn.jtvnw.net/../etc/passwd.jpg",
+        "https://static-cdn.jtvnw.net/previews-ttv/a.gif",
+        "file:///etc/passwd",
+        "",
+    ]
+    for u in refused:
+        st, ans = thumb(port, u)
+        check(st == 400 and ans.get("error") == "InvalidThumbnail", "refused: %r (HTTP %d)" % (u, st))
+    st, body = http_get(port, "/streams/thumb")
+    check(st == 400, "no url: 400 (HTTP %d)" % st)
+    check(sum(cdn.hits.values()) == before, "the refused URLs never reached the CDN")
+
+    st, ans = thumb(port, cdn_host + "/previews-ttv/huge-440x248.jpg")
+    check(st == 502 and ans.get("error") == "ThumbnailTooLarge", "a body over streams.thumbs.max_bytes: 502 ThumbnailTooLarge (HTTP %d %s)" % (st, ans.get("error")))
+    st, ans = thumb(port, cdn_host + "/previews-ttv/page-440x248.jpg")
+    check(st == 502 and ans.get("error") == "ThumbnailNotImage", "a body that is not a JPEG / PNG: 502 ThumbnailNotImage (HTTP %d)" % st)
+    hits_target = cdn.count(big)
+    st, ans = thumb(port, cdn_host + "/previews-ttv/moved-440x248.jpg")
+    check(st == 502 and cdn.count(big) == hits_target, "a redirect is not followed: 502 (HTTP %d)" % st)
+    st, ans = thumb(port, cdn_host + "/previews-ttv/gone-440x248.jpg")
+    check(st == 502 and ans.get("error") == "ThumbnailUnavailable", "a CDN 404: 502 ThumbnailUnavailable (HTTP %d)" % st)
+    gone = cdn.count("/previews-ttv/gone-440x248.jpg")
+    thumb(port, cdn_host + "/previews-ttv/gone-440x248.jpg")
+    check(cdn.count("/previews-ttv/gone-440x248.jpg") == gone, "a failure is cached too (the CDN is not asked again at once)")
+
+
 def scenario_unconfigured(port):
     st, body = http_get(port, "/streams/top?cb=2")
     ans = json.loads(body)
@@ -228,6 +359,7 @@ def main():
     dbenv = {"KN_DATABASE_" + k.upper(): str(v) for k, v in json.loads(r.stdout).items()}
     work = tempfile.mkdtemp(prefix="kn-streams.", dir=os.path.join(os.path.expanduser("~"), ".cache"))
     tw = Twitch()
+    cdn = Cdn(4096)
     procs = []
     try:
         env = base_env(dbenv, SECRET)
@@ -245,6 +377,13 @@ def main():
         scenario_cache(bound_port(log_path, proc), tw)
         proc.terminate()
 
+        print("thumbnails (stub CDN, streams.thumbs.max_bytes=4096):")
+        proc, log_path = run_brain(env, work, tw, 30, "thumbs",
+                                   ["--streams.thumbs.cdn_url=%s" % cdn.url, "--streams.thumbs.max_bytes=4096"])
+        procs.append(proc)
+        scenario_thumbs(bound_port(log_path, proc), cdn)
+        proc.terminate()
+
         print("no client secret:")
         proc, log_path = run_brain(base_env(dbenv, None), work, tw, 0, "unconfigured")
         procs.append(proc)
@@ -259,6 +398,7 @@ def main():
             if p.poll() is None:
                 p.terminate()
         tw.srv.shutdown()
+        cdn.srv.shutdown()
     if FAILS:
         print("streams test: %d FAILED" % len(FAILS))
         sys.exit(1)

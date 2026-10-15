@@ -9,6 +9,10 @@
 
 #include "streams.h"
 
+#include <strings.h>
+
+#include "knsvc/crypto.h"
+
 /* Twitch's thumbnail size for the card (the card is 180px wide, v10 svelte-60shhe) */
 #define THUMB_W 440
 #define THUMB_H 248
@@ -136,4 +140,68 @@ int streams_parse_game_id(const char *body, char *id, const size_t cap) {
     }
     cJSON_Delete(root);
     return ok;
+}
+
+/* ------------------------------------------------------------------ stream thumbnails */
+
+#define THUMB_URL_MAX 400
+
+static int ends_ci(const char *s, const size_t n, const char *suffix) {
+    const size_t l = strlen(suffix);
+    return n >= l && !strncasecmp(s + n - l, suffix, l);
+}
+
+int streams_thumb_url_ok(const char *url, const char *const *hosts, const size_t n, char *path, const size_t cap) {
+    if (path && cap) path[0] = 0;
+    if (!url || strncasecmp(url, "https://", 8) != 0) return 0;
+    const size_t len = strlen(url);
+    if (len > THUMB_URL_MAX) return 0;
+    const char *host = url + 8;
+    const char *slash = strchr(host, '/');
+    if (!slash || slash == host) return 0;
+    const size_t host_len = (size_t) (slash - host);
+    for (size_t i = 0; i < host_len; i++) { /* a plain DNS name: no user info, port, IPv6 brackets */
+        const unsigned char c = (unsigned char) host[i];
+        if (!isalnum(c) && c != '.' && c != '-') return 0;
+    }
+    int allowed = 0;
+    for (size_t i = 0; i < n && !allowed; i++)
+        allowed = hosts[i] && strlen(hosts[i]) == host_len && !strncasecmp(hosts[i], host, host_len);
+    if (!allowed) return 0;
+    const size_t path_len = len - (size_t) (slash - url);
+    for (size_t i = 0; i < path_len; i++) {
+        const unsigned char c = (unsigned char) slash[i];
+        if (!isalnum(c) && c != '-' && c != '.' && c != '_' && c != '~' && c != '/') return 0;
+        if (c == '/' && (slash[i + 1] == '/' || (slash[i + 1] == '.' && (slash[i + 2] == '/' || slash[i + 2] == 0 ||
+                                                                         (slash[i + 2] == '.' && (slash[i + 3] == '/' || slash[i + 3] == 0))))))
+            return 0;
+    }
+    if (!ends_ci(slash, path_len, ".jpg") && !ends_ci(slash, path_len, ".jpeg") && !ends_ci(slash, path_len, ".png")) return 0;
+    if (path) {
+        if (path_len >= cap) return 0;
+        memcpy(path, slash, path_len + 1);
+    }
+    return 1;
+}
+
+const char *streams_image_mime(const unsigned char *b, const size_t len) {
+    if (!b) return NULL;
+    if (len >= 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF) return "image/jpeg";
+    if (len >= 8 && !memcmp(b, "\x89PNG\r\n\x1a\n", 8)) return "image/png";
+    return NULL;
+}
+
+char *streams_data_url(const char *mime, const unsigned char *bytes, const size_t len) {
+    char head[48];
+    const int h = snprintf(head, sizeof(head), "data:%s;base64,", mime ? mime : "application/octet-stream");
+    if (h < 0 || (size_t) h >= sizeof(head)) return NULL;
+    const size_t b64 = 4 * ((len + 2) / 3) + 1;
+    char *out = malloc((size_t) h + b64);
+    if (!out) return NULL;
+    memcpy(out, head, (size_t) h);
+    if (kn_base64_encode(bytes, len, out + h, b64, 0, 1) < 0) {
+        free(out);
+        return NULL;
+    }
+    return out;
 }

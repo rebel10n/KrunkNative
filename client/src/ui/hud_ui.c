@@ -497,11 +497,13 @@ static void hb_append_clan(char *out, const size_t size, size_t *len, const char
     hb_append(out, size, len, "]</span>");
 }
 
-// premiumT "beenhere" / featured "check_circle" icons and the custom badge image of a board row
-// (acc: the player's account from NET_PACKET_PLAYER_INFO, NULL for guests; badge: badgeIndex,
-// -1 none); `top` is the icons' margin-top (f1984 5 px, f1985 3 px). The partner "verified"
-// icon needs partnerApp, which PLAYER_INFO does not carry.
+// creatorBadge "verified" (#993299, v10:219640 / 220512), premiumT "beenhere" / featured
+// "check_circle" icons and the custom badge image of a board row (acc: the player's account from
+// NET_PACKET_PLAYER_INFO, NULL for guests; badge: badgeIndex, -1 none); `top` is the icons'
+// margin-top (f1984 5 px, f1985 3 px).
 static void hb_append_badges(char *out, const size_t size, size_t *len, const NetPlayerInfoPacket *acc, const int badge, const int top) {
+    if (acc && acc->account_id > 0 && (acc->flags & NET_PLAYER_INFO_CREATOR))
+        hb_append(out, size, len, " <i class='material-icons' style='color:#993299;margin-top:%dpx;font-size:23px;vertical-align:middle;'>verified</i>", top);
     if (acc && acc->account_id > 0 && (acc->flags & NET_PLAYER_INFO_PREMIUM))
         hb_append(out, size, len, " <i class='material-icons' style='color:#FBC02D;margin-top:%dpx;font-size:23px;vertical-align:middle;'>beenhere</i>", top);
     if (acc && acc->account_id > 0 && (acc->flags & NET_PLAYER_INFO_VERIFIED))

@@ -585,6 +585,11 @@ else ()
     add_executable(server_names_test shared/include/server_names.h shared/src/server_names.c shared/tests/server_names_test.c)
     add_test(NAME server_names_test COMMAND server_names_test)
 
+    # map YouTube video ids (shared/src/youtube_link.c: kn_brain stores them, the client links them)
+    add_executable(youtube_link_test shared/include/youtube_link.h shared/src/youtube_link.c shared/tests/youtube_link_test.c)
+    target_include_directories(youtube_link_test PRIVATE shared/include)
+    add_test(NAME youtube_link_test COMMAND youtube_link_test)
+
     # official Krunker socket codec (shared/src/krunker_proto.c: msgpack + ahNum trailer, no I/O).
     # Built with ASan + UBSan whenever the toolchain links them: its malformed-frame and fuzz cases
     # are meant to run sanitized.

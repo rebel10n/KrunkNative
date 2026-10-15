@@ -1185,10 +1185,10 @@ void menu_update_class_box(void) {
     if (tag_el && police) {
         html_dom_set_html(tag_el, "Officer Buddy <i class='material-icons menuClassPlayerPremium'>beenhere</i>"); // vO349: no lvl / clan
     } else if (tag_el && account_get()) {
-        // account: level box, name, [clan], premium (beenhere), featured (check_circle) and the custom
-        // badge, each behind its privacy setting (premiumBadge / verifiedBadge / customBadge); v10
-        // also shows a creator badge (verified, creatorBadge), which the account model lacks. No
-        // partner mark: v10's box never had one.
+        // account: level box, name, [clan], creator (verified, creatorBadge), premium (beenhere),
+        // featured (check_circle) and the custom badge, each behind its privacy setting (the creator
+        // and featured marks behind verifiedBadge, as v10:210861). No partner mark: v10's box never
+        // had one.
         const AccountInfo *acc = account_get();
         const int premium = acc->premium && !ui_setting_is_false("premiumBadge");
         StrBuf sb = {0};
@@ -1200,6 +1200,7 @@ void menu_update_class_box(void) {
             sb_append_esc(&sb, acc->clan);
             sb_append(&sb, "]</span>");
         }
+        if (acc->creator && !ui_setting_is_false("verifiedBadge")) sb_append(&sb, "<i class='material-icons menuClassPlayerCreator'>verified</i>");
         if (premium) sb_append(&sb, "<i class='material-icons menuClassPlayerPremium'>beenhere</i>");
         if (acc->featured && !ui_setting_is_false("verifiedBadge")) sb_append(&sb, "<i class='material-icons menuClassPlayerVerified'>check_circle</i>");
         const int badge = account_custom_badge();

@@ -26,6 +26,7 @@ typedef struct {
     int level;
     double level_prog;    // v7.1.4 getLevelProg(): percent, linear in score (WP-E part 2c)
     int premium, featured, is_dev, is_mod, hack, has_2fa;
+    int creator;          // v10 creatorBadge: kn_brain's account info "creator_badge" (players.creator_badge)
     int following, followers;
     int mail_unread;
     cJSON *stats;         // acc.stats (object, owned)

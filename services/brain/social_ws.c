@@ -223,7 +223,8 @@ void social_push_account(int64_t account_id, cJSON *frame) { social_push_account
 
 cJSON *social_account_info(const cJSON *account) {
     cJSON *info = cJSON_CreateObject();
-    const char *keys[] = {"level", "levelProg", "alias", "premium", "funds", "score", "clan", "dev", "mod", "banned", "badges"};
+    const char *keys[] = {"level", "levelProg", "alias", "premium", "funds", "score", "clan", "dev", "mod", "banned", "badges",
+                          "creator_badge"}; /* v10's creatorBadge (0210_creator_badge) */
     for (size_t i = 0; i < sizeof keys / sizeof keys[0]; i++) {
         const cJSON *v = cJSON_GetObjectItemCaseSensitive(account, keys[i]);
         if (v) cJSON_AddItemToObject(info, keys[i], cJSON_Duplicate(v, 1));
@@ -581,6 +582,7 @@ static const SocialRoute k_routes[] = {
     {"rpt", sh_report},
     {"flg", sh_flag},
     {"ver", sh_verify},
+    {"crt", sh_creator},               /* KrunkNative: v10's creator badge on a profile (profiles.c) */
     {"sbdg", sh_staff_badge},          /* KrunkNative: Give Badge / Remove on a profile (profiles.c) */
     {"ps", sh_post},
     {"com", sh_comment},

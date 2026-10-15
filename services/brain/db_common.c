@@ -307,6 +307,9 @@ cJSON *db_account_json(Dbx *x, int64_t id) {
     cJSON_AddItemToObject(o, "mod", num_item(r, "player_moderator"));
     cJSON_AddItemToObject(o, "hack", num_item(r, "player_hack"));
     cJSON_AddItemToObject(o, "featured", num_item(r, "player_featured"));
+    /* 0210_creator_badge: v10's creator badge (players.creator_badge; not in player_rows) */
+    cJSON_AddNumberToObject(o, "creator_badge",
+        (double) dbx_int(x, SQL(.any = "SELECT creator_badge FROM players WHERE player_id = $1"), KN_DB_ARGS(I64S(id)), 0));
     cJSON_AddItemToObject(o, "elo", num_item(r, "player_elo"));
     cJSON_AddItemToObject(o, "elo2", num_item(r, "player_elo2"));
     cJSON_AddItemToObject(o, "elo4", num_item(r, "player_elo4"));

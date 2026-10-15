@@ -437,21 +437,22 @@ static void flag_done(SocialSession *s, kn_db_result *res, void *extra) {
 }
 
 /* ["flg", name, 0|1] -> ["fgr", ok] (mods/devs mark a hacker);
- * ["ver", name, 0|1] -> ["verr", ok] (devs verify). Logged in moderation_log. */
-static void staff_set(SocialSession *s, const cJSON *f, int verify) {
+ * ["ver", name, 0|1] -> ["verr", ok] (devs verify);
+ * ["crt", name, 0|1] -> ["crtr", ok] (devs give / take v10's creator badge, players.creator_badge).
+ * Logged in moderation_log. */
+static void staff_set(SocialSession *s, const cJSON *f, const kn_proc *proc, const char *label) {
     if (!social_require_auth(s)) return;
     FlagCtx *c = calloc(1, sizeof *c);
     if (!c) return;
-    snprintf(c->label, sizeof c->label, "%s", verify ? "verr" : "fgr");
+    snprintf(c->label, sizeof c->label, "%s", label);
     char me[24], v[24];
     const int64_t on = fa_int(f, 2, 0) ? 1 : 0;
-    social_call(s, verify ? &P_SET_FEATURED : &P_SET_HACK,
-                KN_DB_ARGS(social_viewer(s, me), fa_str(f, 1) ? fa_str(f, 1) : "", acct_itoa(v, on)),
-                 flag_done, c);
+    social_call(s, proc, KN_DB_ARGS(social_viewer(s, me), fa_str(f, 1) ? fa_str(f, 1) : "", acct_itoa(v, on)), flag_done, c);
 }
 
-void sh_flag(SocialSession *s, const cJSON *f) { staff_set(s, f, 0); }
-void sh_verify(SocialSession *s, const cJSON *f) { staff_set(s, f, 1); }
+void sh_flag(SocialSession *s, const cJSON *f) { staff_set(s, f, &P_SET_HACK, "fgr"); }
+void sh_verify(SocialSession *s, const cJSON *f) { staff_set(s, f, &P_SET_FEATURED, "verr"); }
+void sh_creator(SocialSession *s, const cJSON *f) { staff_set(s, f, &P_SET_CREATOR, "crtr"); }
 
 /* ["sbdg", name, badge, on] -> ["sbdgr", ok] (developers; see P_STAFF_BADGE) */
 void sh_staff_badge(SocialSession *s, const cJSON *f) {

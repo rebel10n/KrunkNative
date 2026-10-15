@@ -469,7 +469,8 @@ static void acc_fill_info(const ClientConnection *client, NetPlayerInfoPacket *i
     // WP-F: ENT showBadges (settings verifiedBadge / premiumBadge): the player may hide those badges
     // from others (players.js sync showBadges.verified / .premium)
     if (client->player && to != client) {
-        if (!(client->player->show_badges & PLAYER_SHOW_BADGE_VERIFIED)) info->flags &= (uint8_t) ~NET_PLAYER_INFO_VERIFIED;
+        if (!(client->player->show_badges & PLAYER_SHOW_BADGE_VERIFIED))
+            info->flags &= (uint8_t) ~(NET_PLAYER_INFO_VERIFIED | NET_PLAYER_INFO_CREATOR); // v10 gates both on verifiedBadge
         if (!(client->player->show_badges & PLAYER_SHOW_BADGE_PREMIUM)) info->flags &= (uint8_t) ~NET_PLAYER_INFO_PREMIUM;
     }
     snprintf(info->clan, sizeof(info->clan), "%s", client->acct.clan);
@@ -1993,6 +1994,7 @@ static void acc_apply_account(ClientConnection *client, const cJSON *account) {
     client->acct.flags = 0;
     if (client->acct.premium) client->acct.flags |= NET_PLAYER_INFO_PREMIUM;
     if (acc_truthy(cJSON_GetObjectItem(account, "featured"))) client->acct.flags |= NET_PLAYER_INFO_VERIFIED;
+    if (acc_truthy(cJSON_GetObjectItem(account, "creator_badge"))) client->acct.flags |= NET_PLAYER_INFO_CREATOR;
     if (acc_truthy(cJSON_GetObjectItem(account, "dev"))) client->acct.flags |= NET_PLAYER_INFO_DEV;
     if (acc_truthy(cJSON_GetObjectItem(account, "mod"))) client->acct.flags |= NET_PLAYER_INFO_MOD;
     // WP-F: the custom badge (v7 account.stats.bdg, badges.js index), when the brain supplies one

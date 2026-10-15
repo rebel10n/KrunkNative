@@ -217,6 +217,16 @@
       "game": "Krunker",
       "auth_url": "https://id.twitch.tv/oauth2/token",
       "api_url": "https://api.twitch.tv/helix"
+    },
+    "thumbs": {
+      "_comment": "GET /streams/thumb (services/brain/stream_thumbs.c): the cards' previews as data: URLs for the native client. Only https URLs on these hosts; cdn_url empty = fetch them directly.",
+      "enabled": true,
+      "hosts": ["static-cdn.jtvnw.net"],
+      "max_bytes": 262144,
+      "cache_s": 300,
+      "fail_cache_s": 30,
+      "timeout_ms": 5000,
+      "cdn_url": ""
     }
   },
   "ai": {

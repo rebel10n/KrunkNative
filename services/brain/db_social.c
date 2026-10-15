@@ -483,7 +483,8 @@ const kn_proc P_CHAT_THREAD = {
 
 #define PROFILE_SQL_PG \
     "SELECT jsonb_build_object(" \
-    " 'row', to_jsonb(r) - 'clan_role' - 'player_2fa' || jsonb_build_object('player_follow', 0)," \
+    " 'row', to_jsonb(r) - 'clan_role' - 'player_2fa' || jsonb_build_object('player_follow', 0," \
+    "     'creator_badge', (SELECT p.creator_badge FROM players p WHERE p.player_id = r.player_id))," \
     " 'games', coalesce((SELECT jsonb_agg(jsonb_build_object(" \
     "     'map_id', m.map_id, 'map_name', kn_html(m.map_name), 'map_date', m.map_date, 'map_info', m.map_info::text," \
     "     'map_votes', m.map_votes, 'creatorname', r.player_name, 'map_image', m.map_image, 'map_player', m.map_plays)" \
@@ -512,6 +513,9 @@ static kn_db_result *run_profile(kn_dbconn *c, int n, const char *const *p) {
     cJSON_DeleteItemFromObjectCaseSensitive(row, "clan_role");
     cJSON_DeleteItemFromObjectCaseSensitive(row, "player_2fa");
     cJSON_AddNumberToObject(row, "player_follow", 0);
+    /* 0210_creator_badge: v10's creator badge (the profile's purple verified icon) */
+    cJSON_AddNumberToObject(row, "creator_badge",
+        (double) dbx_int(&x, SQL(.any = "SELECT creator_badge FROM players WHERE player_id = $1"), KN_DB_ARGS(id), 0));
     /* the earned badges (player_badges, as kn_account_json's "badges"): the profile's Badges tab */
     cJSON *badge_rows = dbx_rows(&x, SQL(.any = "SELECT badge AS b__i FROM player_badges WHERE account_id = $1 ORDER BY badge"),
                                  KN_DB_ARGS(id));
@@ -636,23 +640,31 @@ const kn_proc P_PUBLISH_MAP = {
     "'taken', CASE WHEN EXISTS (SELECT 1 FROM taken) THEN kn_fail('Map name taken')::text END)",
     run_publish_map};
 
-/* staff flags: (actor, name, on) -> player_id row when changed */
-static kn_db_result *staff_set(kn_dbconn *c, int n, const char *const *p, int verify) {
+/* staff flags: (actor, name, on) -> player_id row when changed. kind 0 = flag (player_hack;
+ * moderators and developers), 1 = verify (player_featured; developers), 2 = v10's creator badge
+ * (creator_badge, 0210; developers). */
+enum { STAFF_FLAG, STAFF_VERIFY, STAFF_CREATOR };
+static kn_db_result *staff_set(kn_dbconn *c, int n, const char *const *p, int kind) {
     Dbx x = {c, NULL};
-    int allowed = verify ? dbx_exists(&x, SQL(.any = "SELECT 1 FROM players WHERE player_id = $1 AND player_developer > 0"),
-                                      KN_DB_ARGS(P(0)))
-                         : dbx_exists(&x, SQL(.any = "SELECT 1 FROM players WHERE player_id = $1"
-                                                     " AND (player_developer > 0 OR player_moderator > 0)"),
-                                      KN_DB_ARGS(P(0)));
+    int allowed = kind != STAFF_FLAG
+                      ? dbx_exists(&x, SQL(.any = "SELECT 1 FROM players WHERE player_id = $1 AND player_developer > 0"),
+                                   KN_DB_ARGS(P(0)))
+                      : dbx_exists(&x, SQL(.any = "SELECT 1 FROM players WHERE player_id = $1"
+                                                  " AND (player_developer > 0 OR player_moderator > 0)"),
+                                   KN_DB_ARGS(P(0)));
     int64_t target = allowed ? db_account_id(&x, nz(P(1))) : 0;
     const char *names[1] = {"player_id"};
     const kn_db_type types[1] = {KN_DB_T_INT};
     kn_db_result *r = kn_db_result_new(1, names, types);
-    if (target > 0 &&
-        dbx_exec(&x, verify ? SQL(.any = "UPDATE players SET player_featured = $2 WHERE player_id = $1")
-                            : SQL(.any = "UPDATE players SET player_hack = $2 WHERE player_id = $1"),
-                 KN_DB_ARGS(I64S(target), P(2))) > 0) {
-        const char *action = verify ? (PI(2) == 1 ? "verify" : "unverify") : (PI(2) == 1 ? "flag" : "unflag");
+    static const kn_sql k_update[] = {
+        [STAFF_FLAG] = {.any = "UPDATE players SET player_hack = $2 WHERE player_id = $1"},
+        [STAFF_VERIFY] = {.any = "UPDATE players SET player_featured = $2 WHERE player_id = $1"},
+        [STAFF_CREATOR] = {.any = "UPDATE players SET creator_badge = $2 WHERE player_id = $1"},
+    };
+    static const char *const k_action[][2] = {
+        [STAFF_FLAG] = {"unflag", "flag"}, [STAFF_VERIFY] = {"unverify", "verify"}, [STAFF_CREATOR] = {"uncreator", "creator"}};
+    if (target > 0 && dbx_exec(&x, &k_update[kind], KN_DB_ARGS(I64S(target), P(2))) > 0) {
+        const char *action = k_action[kind][PI(2) == 1];
         dbx_exec(&x, SQL(.any = "INSERT INTO moderation_log (actor_id, target_id, action) VALUES ($1, $2, $3)"),
                  KN_DB_ARGS(P(0), I64S(target), action));
         const char *row[1] = {I64S(target)};
@@ -660,8 +672,9 @@ static kn_db_result *staff_set(kn_dbconn *c, int n, const char *const *p, int ve
     }
     return dbx_finish(&x, r);
 }
-static kn_db_result *run_set_hack(kn_dbconn *c, int n, const char *const *p) { return staff_set(c, n, p, 0); }
-static kn_db_result *run_set_featured(kn_dbconn *c, int n, const char *const *p) { return staff_set(c, n, p, 1); }
+static kn_db_result *run_set_hack(kn_dbconn *c, int n, const char *const *p) { return staff_set(c, n, p, STAFF_FLAG); }
+static kn_db_result *run_set_featured(kn_dbconn *c, int n, const char *const *p) { return staff_set(c, n, p, STAFF_VERIFY); }
+static kn_db_result *run_set_creator(kn_dbconn *c, int n, const char *const *p) { return staff_set(c, n, p, STAFF_CREATOR); }
 const kn_proc P_SET_HACK = {
     "set_hack",
     "WITH ok AS (SELECT 1 FROM players WHERE player_id = $1 AND (player_developer > 0 OR player_moderator > 0)), "
@@ -676,3 +689,10 @@ const kn_proc P_SET_FEATURED = {
     "l AS (INSERT INTO moderation_log (actor_id, target_id, action) SELECT $1, player_id, "
     "CASE WHEN $3::int = 1 THEN 'verify' ELSE 'unverify' END FROM u) SELECT player_id FROM u",
     run_set_featured};
+const kn_proc P_SET_CREATOR = {
+    "set_creator",
+    "WITH ok AS (SELECT 1 FROM players WHERE player_id = $1 AND player_developer > 0), "
+    "u AS (UPDATE players SET creator_badge = $3 WHERE player_id = kn_account_id($2) AND EXISTS (SELECT 1 FROM ok) RETURNING player_id), "
+    "l AS (INSERT INTO moderation_log (actor_id, target_id, action) SELECT $1, player_id, "
+    "CASE WHEN $3::int = 1 THEN 'creator' ELSE 'uncreator' END FROM u) SELECT player_id FROM u",
+    run_set_creator};
