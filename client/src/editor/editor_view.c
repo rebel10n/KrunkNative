@@ -145,6 +145,7 @@ unsigned char *ed_render_project(EditorProject *p, const Camera *cam, const floa
                                  const int h, const int flags) {
     if (!p || w <= 0 || h <= 0 || w > 8192 || h > 8192) return NULL;
     if (!target_ensure(&g_render_target, w, h)) return NULL;
+    gl_release_texture(g_render_target.color); // never sampled while drawn into (WebGL / ANGLE feedback loop)
     glBindFramebuffer(GL_FRAMEBUFFER, g_render_target.fbo);
     draw_project(p, cam, yaw, pitch, ortho_half_h, w, h, flags);
     unsigned char *px = malloc((size_t) w * (size_t) h * 4);
@@ -510,6 +511,7 @@ void ed_view_frame(const float now, const float dt) {
         if (v->win) glfwGetFramebufferSize(v->win, &fw, &fh);
         if (fw <= 0 || fh <= 0) continue; // minimised
         if (!target_ensure(&v->target, fw, fh)) continue;
+        gl_release_texture(v->target.color); // never sampled while drawn into (WebGL / ANGLE feedback loop)
         glBindFramebuffer(GL_FRAMEBUFFER, v->target.fbo);
         draw_project(p, &v->cam, v->yaw, v->pitch, 0, fw, fh, 0);
         glBindFramebuffer(GL_FRAMEBUFFER, frame_target_framebuffer()); // the window (frame_target.h)

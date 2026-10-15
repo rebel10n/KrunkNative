@@ -406,6 +406,9 @@ void shadow_update(void) {
     glGetIntegerv(GL_VIEWPORT, viewport);
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previous_fbo);
 
+    // the depth map stays on SHADOW_TEXTURE_UNIT from the last lit pass (shadow_begin_world);
+    // drawing into it while bound is a feedback loop on WebGL / ANGLE
+    gl_release_texture(shadow.depth_texture);
     glBindFramebuffer(GL_FRAMEBUFFER, shadow.fbo);
     glViewport(0, 0, shadow.resolution, shadow.resolution);
     glDisable(GL_BLEND);

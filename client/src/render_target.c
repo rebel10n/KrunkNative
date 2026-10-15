@@ -18,7 +18,10 @@
 // GL state: begin() binds its framebuffer + viewport and clears colour/depth; end()
 // restores the previous draw framebuffer and the full viewport, leaves blending off,
 // depth test on (as scene_render leaves it) and records the program/texture it bound
-// in g_active_shader/g_active_texture. Texture unit 0 holds the scene texture.
+// in g_active_shader. The scene texture is bound to unit 0 only for the composite draw and
+// unbound right after it (unit 0 empty, g_active_texture 0), and begin() releases it from
+// every unit before binding its framebuffer: a sampler of the scene pass (an untextured sky's
+// `tex`) must never see its own target (WebGL / ANGLE "feedback loop", gl_feedback_check.h).
 //
 // Nettspend "laced" (client/include/nettspend.h): while nettspend_laced_intensity() > 0 the scene
 // goes through the target too and end() draws it with assets/shaders/laced.frag (the same
@@ -128,7 +131,8 @@ static int rt_allocate(const int width, const int height, int samples) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    g_active_texture = rt.color_tex; // loaders.c's unit-0 binding cache
+    glBindTexture(GL_TEXTURE_2D, 0); // the scene draws into it next: not left on unit 0
+    g_active_texture = 0;            // loaders.c's unit-0 binding cache
 
     glGenRenderbuffers(1, &rt.depth_rb);
     glBindRenderbuffer(GL_RENDERBUFFER, rt.depth_rb);
@@ -214,6 +218,7 @@ int render_target_begin(Client *client) {
         return 0;
     }
 
+    gl_release_texture(rt.color_tex); // no unit may hold the texture the scene draws into
     glBindFramebuffer(GL_FRAMEBUFFER, rt.samples ? rt.msaa_fbo : rt.fbo);
     glViewport(0, 0, width, height);
     glDepthMask(GL_TRUE);
@@ -300,6 +305,9 @@ void render_target_end(Client *client) {
     glBindVertexArray(rt.vao);
     glDrawArrays(GL_TRIANGLES, 0, 3);
     glBindVertexArray(0);
+    // the next frame's scene draws into this texture: unit 0 does not keep it
+    glBindTexture(GL_TEXTURE_2D, 0);
+    g_active_texture = 0;
 
     glEnable(GL_DEPTH_TEST);
     glClear(GL_DEPTH_BUFFER_BIT); // later passes start from an empty depth buffer, as with the direct path's fps clear

@@ -33,3 +33,15 @@
 #include <glad/glad.h> // client/lib/glad: desktop OpenGL 4.5
 #define kn_gl_load(loader) gladLoadGLLoader((GLADloadproc) (loader))
 #endif
+
+// Native debug builds assert before every glDraw* that no texture the current program
+// samples is attached to the bound draw framebuffer (WebGL/ANGLE reject such a draw as a
+// feedback loop; desktop GL draws garbage silently). See gl_feedback_check.h. Any build can
+// force it with -DKN_GL_FEEDBACK_CHECK=1 (a web probe build) or leave it out with
+// -DKN_GL_NO_FEEDBACK_CHECK.
+#if !defined(KN_GL_NO_FEEDBACK_CHECK) && (defined(KN_GL_FEEDBACK_CHECK) || (!defined(__EMSCRIPTEN__) && !defined(NDEBUG)))
+#ifndef KN_GL_FEEDBACK_CHECK
+#define KN_GL_FEEDBACK_CHECK 1
+#endif
+#include <gl_feedback_check.h>
+#endif

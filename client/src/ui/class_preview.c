@@ -634,6 +634,7 @@ void client_class_preview_render(Client *client) {
     const GLboolean prev_blend = glIsEnabled(GL_BLEND);
     const GLboolean prev_depth = glIsEnabled(GL_DEPTH_TEST);
 
+    gl_release_texture(preview->color_tex); // the page samples it (natively): not while drawing into it
     glBindFramebuffer(GL_FRAMEBUFFER, preview->fbo);
     glViewport(0, 0, width, height); // the projection's aspect (660/350 in Krunker's box)
     glDisable(GL_SCISSOR_TEST);

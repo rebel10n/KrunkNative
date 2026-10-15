@@ -1242,7 +1242,8 @@ unsigned char *vscene_capture(const int w, const int h, const int gradient) {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    g_active_texture = color;
+    glBindTexture(GL_TEXTURE_2D, 0); // the scene draws into it: not left on unit 0 (feedback loop)
+    g_active_texture = 0;
     glBindRenderbuffer(GL_RENDERBUFFER, depth);
     glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, w, h);
 

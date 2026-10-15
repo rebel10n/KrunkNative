@@ -6,6 +6,22 @@
 #include <stb_image.h>
 #include <pcg_basic.h>
 
+void gl_release_texture(const unsigned int texture) {
+    if (!texture) return;
+    GLint active = GL_TEXTURE0;
+    glGetIntegerv(GL_ACTIVE_TEXTURE, &active);
+    for (int unit = 0; unit < GL_RENDER_TEXTURE_UNITS; unit++) {
+        GLint bound = 0;
+        glActiveTexture(GL_TEXTURE0 + (GLenum) unit);
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &bound);
+        if ((unsigned int) bound != texture) continue;
+        glBindTexture(GL_TEXTURE_2D, 0);
+        if (unit == 0) g_active_texture = 0; // unit 0 is empty now, whatever the cache said
+    }
+    glActiveTexture((GLenum) active);
+    if (g_active_texture == texture) g_active_texture = 0;
+}
+
 static void cache_texture(const char *path, const unsigned int texture_id) {
     char *cache_path = strdup(path);
     if (cache_path) vt_insert(&g_texture_cache, cache_path, texture_id);

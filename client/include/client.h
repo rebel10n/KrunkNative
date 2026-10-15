@@ -68,6 +68,14 @@ extern unsigned int g_blank_texture;
 extern unsigned int g_active_texture;
 extern unsigned int g_active_shader;
 
+// Before drawing into a framebuffer that has `texture` attached: unbinds it (GL_TEXTURE_2D)
+// from the renderer's texture units 0..GL_RENDER_TEXTURE_UNITS-1 (and from g_active_texture's
+// unit-0 cache), so no sampler of the pass can read its own target. WebGL and ANGLE reject
+// such a draw as a feedback loop even when the shader never samples that unit on its path
+// (gl_feedback_check.h asserts it in debug builds). Keeps the active texture unit.
+#define GL_RENDER_TEXTURE_UNITS 8
+void gl_release_texture(unsigned int texture);
+
 typedef struct {
     vec4 ambient_color;
     vec4 light_color;

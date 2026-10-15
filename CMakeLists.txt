@@ -1222,6 +1222,17 @@ else ()
     endif ()
     add_test(NAME ks_vm_test COMMAND ks_vm_test ${CMAKE_SOURCE_DIR}/shared/tests/ks)
 
+    # gl_feedback_check_test: the debug build's framebuffer / texture feedback-loop assertion
+    # (client/include/gl_feedback_check.h, what WebGL and ANGLE reject) in a headless context;
+    # exits 77 (skipped) without GL or in a release build (no check)
+    add_executable(gl_feedback_check_test client/tests/gl_feedback_check_test.c client/src/headless.c)
+    target_include_directories(gl_feedback_check_test PRIVATE client/include)
+    target_link_libraries(gl_feedback_check_test PRIVATE glfw m)
+    krunknative_link_gl(gl_feedback_check_test)
+    krunknative_link_headless(gl_feedback_check_test)
+    add_test(NAME gl_feedback_check_test COMMAND gl_feedback_check_test)
+    set_tests_properties(gl_feedback_check_test PROPERTIES ENVIRONMENT "KRUNKNATIVE_HEADLESS=1" SKIP_RETURN_CODE 77)
+
     # kn_editor_mcp: Krunker map editor MCP server (tools/editor-mcp/README.md)
     add_subdirectory(tools/editor-mcp)
 

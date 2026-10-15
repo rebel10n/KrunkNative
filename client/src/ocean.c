@@ -248,6 +248,7 @@ void ocean_update(Scene *scene, Camera *camera, const float delta_ms) {
     mirror.rotation.x = -camera->rotation.x;
     mirror.aspect_override = viewport[3] > 0 ? (float) viewport[2] / (float) viewport[3] : 1.0f;
 
+    gl_release_texture(g_ocean.color); // last frame's water draw left it on unit 0: not while drawing into it
     glBindFramebuffer(GL_FRAMEBUFFER, g_ocean.fbo);
     glViewport(0, 0, g_ocean.resolution, g_ocean.resolution);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); // the renderer's clear colour (sky); no sky dome

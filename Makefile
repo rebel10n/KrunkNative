@@ -842,6 +842,11 @@ smoke-web: ## Load the web build offline in headless Chromium and screenshot it 
 	kill $$srv 2>/dev/null; \
 	[ -f /tmp/smoke-web.png ] && echo "smoke-web ok: /tmp/smoke-web.png ($$(wc -l < /tmp/smoke-web.log) console lines in /tmp/smoke-web.log)"
 
+.PHONY: web-gl-errors
+web-gl-errors: ## Play the web build offline for a minute in headless Chromium; fail on any GL_INVALID_* in the console (MAP=, PLAY_SECONDS=)
+	@[ -f $(DIST_WEB)/client.wasm ] || { echo "no web build yet: run 'make web' first"; exit 1; }
+	tools/kref/gl-errors-e2e.sh $(DIST_WEB) "offline=1&map=$(or $(MAP),kanji)" $(or $(PLAY_SECONDS),60)
+
 # --------------------------------------------------------------------------- housekeeping
 
 .PHONY: clean distclean help

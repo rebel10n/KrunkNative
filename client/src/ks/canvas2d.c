@@ -1720,6 +1720,9 @@ void c2d_flush(Canvas2D *c) {
         glBindVertexArray(c->vao);
         glActiveTexture(GL_TEXTURE0);
         gl_upload(c);
+        // solid-colour commands bind nothing: unit 0 must not keep the layer texture this
+        // draws into (gl_make_layer leaves it bound; a feedback loop on WebGL / ANGLE)
+        glBindTexture(GL_TEXTURE_2D, 0);
         glUniform2f(c->loc_viewport, (float) c->device_w, (float) c->device_h);
         glUniform1i(c->loc_tex, 0); // sampler: texture unit 0
         int cur_mode = -1;
