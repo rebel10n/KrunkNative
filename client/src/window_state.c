@@ -88,3 +88,25 @@ int window_state_steps(const WindowStartup *s, WindowStep *out) {
     out[n++] = WINDOW_STEP_SHOW;
     return n;
 }
+
+void window_state_center(const int wx, const int wy, const int ww, const int wh, const int w, const int h, const int frame[4], int *x,
+                         int *y) {
+    const int fl = frame && frame[0] > 0 ? frame[0] : 0, ft = frame && frame[1] > 0 ? frame[1] : 0;
+    const int fr = frame && frame[2] > 0 ? frame[2] : 0, fb = frame && frame[3] > 0 ? frame[3] : 0;
+    const int fw = w + fl + fr, fh = h + ft + fb; // the whole window, decorations included
+    int left = wx + (ww - fw) / 2, top = wy + (wh - fh) / 2;
+    if (left < wx) left = wx; // bigger than the work area: its title bar stays reachable
+    if (top < wy) top = wy;
+    *x = left + fl;
+    *y = top + ft;
+}
+
+int window_state_pick_monitor(const int (*wa)[4], const int n, const int primary, const int has_point, const int px, const int py) {
+    if (!wa || n <= 0) return -1;
+    if (has_point) {
+        for (int i = 0; i < n; i++) {
+            if (px >= wa[i][0] && px < wa[i][0] + wa[i][2] && py >= wa[i][1] && py < wa[i][1] + wa[i][3]) return i;
+        }
+    }
+    return primary >= 0 && primary < n ? primary : 0;
+}

@@ -690,10 +690,52 @@ static int position_on_a_monitor(const WindowState *s) {
     return 0;
 }
 
+int client_window_centered_pos(GLFWwindow *window, const int w, const int h, const int has_near, const int near_x, const int near_y,
+                               int *x, int *y) {
+    if (!can_position()) return 0; // Wayland: the compositor places windows
+    int count = 0;
+    GLFWmonitor **monitors = glfwGetMonitors(&count);
+    if (!monitors || count <= 0) return 0;
+    if (count > 16) count = 16;
+    int wa[16][4], primary = 0;
+    GLFWmonitor *prim = glfwGetPrimaryMonitor();
+    for (int i = 0; i < count; i++) {
+        glfwGetMonitorWorkarea(monitors[i], &wa[i][0], &wa[i][1], &wa[i][2], &wa[i][3]);
+        if (wa[i][2] <= 0 || wa[i][3] <= 0) { // no work area reported: the whole monitor
+            const GLFWvidmode *vid = glfwGetVideoMode(monitors[i]);
+            glfwGetMonitorPos(monitors[i], &wa[i][0], &wa[i][1]);
+            wa[i][2] = vid ? vid->width : 0;
+            wa[i][3] = vid ? vid->height : 0;
+        }
+        if (monitors[i] == prim) primary = i;
+    }
+    const int m = window_state_pick_monitor((const int (*)[4]) wa, count, primary, has_near, near_x, near_y);
+    if (m < 0 || wa[m][2] <= 0 || wa[m][3] <= 0) return 0;
+    int frame[4] = {0, 0, 0, 0};
+    if (window && glfwGetWindowAttrib(window, GLFW_DECORATED)) glfwGetWindowFrameSize(window, &frame[0], &frame[1], &frame[2], &frame[3]);
+    window_state_center(wa[m][0], wa[m][1], wa[m][2], wa[m][3], w, h, frame, x, y);
+    return 1;
+}
+
+// KRUNKNATIVE_WINDOW_NEAR=<x>,<y> (app_window.c: the opener's centre): the monitor a page window
+// opens on. Read once, not inherited by the windows this one opens.
+static int window_near(int *x, int *y) {
+    const char *near = getenv("KRUNKNATIVE_WINDOW_NEAR");
+    const int ok = near && sscanf(near, "%d,%d", x, y) == 2;
+    if (near) set_env("KRUNKNATIVE_WINDOW_NEAR", NULL);
+    return ok;
+}
+
 static void persist_window_state(const WindowState *s) {
     if (app_window_has_router()) return; // a page window (editor/viewer/...): the main window's geometry is the one kept
     char text[WINDOW_STATE_TEXT_MAX];
     if (window_state_encode(s, text, sizeof(text))) html_storage_set(WINDOW_STATE_STORAGE_KEY, text);
+}
+#else
+int client_window_centered_pos(GLFWwindow *window, const int w, const int h, const int has_near, const int near_x, const int near_y,
+                               int *x, int *y) {
+    (void) window, (void) w, (void) h, (void) has_near, (void) near_x, (void) near_y, (void) x, (void) y;
+    return 0; // the browser places the canvas
 }
 #endif
 
@@ -746,15 +788,23 @@ void client_render_window_created(Client *client) {
 #ifndef __EMSCRIPTEN__
     if (!g_ws_enabled || !client || !client->window) return;
     GLFWwindow *window = client->window;
-    const WindowState *s = &g_ws.state;
+    WindowState *s = &g_ws.state;
     g_ws_client = client;
+    if (g_ws.has_pos && (!can_position() || !position_on_a_monitor(s))) g_ws.has_pos = 0;
+    // no kept position (a first launch, page windows, a kept one off every monitor): centred on the
+    // work area, placed while hidden like a kept one, so the window maps where it stays
+    int near_x = 0, near_y = 0, centred = 0;
+    const int near = window_near(&near_x, &near_y);
+    if (!g_ws.has_pos && client_window_centered_pos(window, s->w, s->h, near, near_x, near_y, &s->x, &s->y)) {
+        g_ws.has_pos = 1;
+        centred = 1;
+    }
     client->windowed_rect.x = s->x;
     client->windowed_rect.y = s->y;
     client->windowed_rect.width = s->w;
     client->windowed_rect.height = s->h;
     client->windowed_maximized = s->maximized;
     g_track_rect = 1; // the rect above is the windowed one: set_window_mode must not read the hidden window's
-    if (g_ws.has_pos && (!can_position() || !position_on_a_monitor(s))) g_ws.has_pos = 0;
 
     WindowStep steps[WINDOW_STEPS_MAX];
     const int count = window_state_steps(&g_ws, steps);
@@ -770,27 +820,16 @@ void client_render_window_created(Client *client) {
             case WINDOW_STEP_SHOW: glfwShowWindow(window); break;
         }
     }
-    if (!g_ws.has_pos && can_position()) {
-        if (s->mode == RS_WINDOWED) {
-            glfwGetWindowPos(window, &client->windowed_rect.x, &client->windowed_rect.y); // where the window manager put it
-        } else {
-            // opened fullscreen / borderless: windowed mode later returns centred on the primary monitor
-            GLFWmonitor *monitor = glfwGetPrimaryMonitor();
-            const GLFWvidmode *vid = monitor ? glfwGetVideoMode(monitor) : NULL;
-            int mx = 0, my = 0;
-            if (monitor) glfwGetMonitorPos(monitor, &mx, &my);
-            if (vid) {
-                client->windowed_rect.x = mx + (vid->width - s->w) / 2;
-                client->windowed_rect.y = my + (vid->height - s->h) / 2;
-            }
-        }
-    }
+    if (!g_ws.has_pos && can_position()) // no monitor to centre on: where the window manager put it
+        glfwGetWindowPos(window, &client->windowed_rect.x, &client->windowed_rect.y);
     glfwSetWindowPosCallback(window, window_pos_cb);
     glfwSetWindowSizeCallback(window, window_size_cb);
     glfwSetWindowMaximizeCallback(window, window_maximize_cb);
+    char where[64] = "";
+    if (g_ws.has_pos) snprintf(where, sizeof(where), " at %d,%d (%s)", s->x, s->y, centred ? "centred on the work area" : "kept");
     printf("[window] opened %s%s, windowed %dx%d%s%s%s\n",
            s->mode == RS_FULLSCREEN ? "fullscreen" : s->mode == RS_BORDERLESS ? "borderless" : "windowed",
-           s->forced ? " (session)" : "", s->w, s->h, s->maximized ? " maximized" : "", g_ws.has_pos ? " at a kept position" : "",
+           s->forced ? " (session)" : "", s->w, s->h, s->maximized ? " maximized" : "", where,
            g_ws.restored ? " (restored after restart)" : "");
 #else
     (void) client;

@@ -7,7 +7,9 @@ finder_table.c): a base game server and a Krunker Strike server both register an
     unchanged;
   - a Strike client (GET /servers?flavor=strike) sees only the Strike server, carrying
     flavor:"strike";
-  - ?flavor=all lists both (dashboards).
+  - ?flavor=all lists both (dashboards);
+  - ?exclude=host:port,... (a seek's current / recent servers) leaves them out while another server
+    matches, and lists them when none does.
 
 No database: kn_brain --role finder --no-db. Ports come from server/tests/kn_proto.free_ports();
 the fake game servers are small UDP KNINFO responders here, so nothing links libpq and no real
@@ -187,6 +189,20 @@ def main():
                  % (base.polls, strike.polls))
             return 1
         ok("both servers verified and listed under ?flavor=all")
+
+        # ?exclude= (a seek leaving its current / recent servers, client recent_lobbies.h): left out
+        # while another server matches, listed again when none does
+        ex_one = http_json(finder_url + "/servers?flavor=all&exclude=127.0.0.1:%d" % base_q).get("servers", [])
+        if names(ex_one) == ["Strike Srv"]:
+            ok("?exclude= leaves the excluded server out while another one matches")
+        else:
+            fail("?exclude=<base> listing is %s, expected ['Strike Srv']" % names(ex_one))
+        ex_all = http_json(finder_url + "/servers?flavor=strike&exclude=127.0.0.1:%d,127.0.0.1:%d"
+                           % (strike_q, base_q)).get("servers", [])
+        if names(ex_all) == ["Strike Srv"]:
+            ok("?exclude= falls back to the excluded servers when nothing else matches")
+        else:
+            fail("?exclude=<all> strike listing is %s, expected ['Strike Srv']" % names(ex_all))
 
         # base client: no ?flavor -> only the base server, and the entry carries no "flavor" key
         base_list = http_json(finder_url + "/servers").get("servers", [])

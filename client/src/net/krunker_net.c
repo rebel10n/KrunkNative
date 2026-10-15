@@ -10,6 +10,8 @@
 #include <krunker_link.h>
 #include <krunker_altcha.h>
 #include <krunker_captcha.h>
+#include <recent_lobbies.h>
+#include <seek_prefs.h>
 #include <backend.h>
 #include <html_ui.h>
 #include <ui_logic.h>
@@ -45,9 +47,14 @@ static const char *const k_regions[] = {KRUNKER_REGIONS};
 // client->net_socket while the official socket is open: never a real descriptor (net.c's
 // shutdown() of it fails harmlessly), distinct from net_web.c's 1
 #define KRUNKER_FAKE_FD 0x4b524e00
+// Find New Game through the matchmaker (krunker_net_seek_new): krunker.io's seek-game takes ONE
+// excludeGame, so an answer that is another recent game is excluded in turn, at most this many
+// times more, before the best answer so far is taken (recent_lobbies.h)
+#define KRUNKER_SEEK_NEW_RETRIES 2
 
 typedef enum {
     KS_OFF = 0,    // not in an official game
+    KS_LIST,       // Find New Game: GET /game-list, to pick a game this client was not in lately
     KS_TOKEN,      // GET /generate-token (after a captcha: the retry's fresh validation token)
     KS_SEEK,       // GET /seek-game
     KS_CAPTCHA,    // seek-game said CaptchaRequired: the player is solving Turnstile (krunker_captcha.h)
@@ -67,6 +74,12 @@ static struct {
     KrunkerState state;
     unsigned generation; // bumped per join / leave: late callbacks of an older attempt are ignored
     char game_id[96], region[48], token[512], matchmaker[512];
+    // Find New Game (krunker_net_seek_new): the seek's excludeGame, the answers re-sought so far, and
+    // the best of them (the least recent, rank as recent_lobbies_rank) to fall back on
+    int seek_new, seek_new_retries;
+    char exclude[96], fallback[96];
+    int fallback_rank;
+    RecentLobbies recent; // the official games joined lately, most recent first (main thread)
     char ws_url[1024];
     int connected;       // on_client_socket_connect was reported for this socket
     KrunkerLink link;
@@ -848,7 +861,18 @@ static void seek(void) {
     append_param(url, sizeof(url), "autoChangeGame", "false");
     if (K.token[0]) append_param(url, sizeof(url), "validationToken", K.token);
     if (K.game_id[0]) append_param(url, sizeof(url), "game", K.game_id);
-    append_param(url, sizeof(url), "dataQuery", "{\"v\":\"" KRUNKER_BUILD_VERSION "\"}"); // iïîìîíì: {v: buildVersion}
+    else if (K.exclude[0]) append_param(url, sizeof(url), "excludeGame", K.exclude); // backToOrigin's ?exclude= (:141624, :222302)
+    if (K.seek_new && !K.game_id[0]) {
+        // iïîìîíì: {v: buildVersion} plus the saved seek_maps / seek_modes as dsma / dsmo (:222271-222275)
+        char dq[160];
+        int n = snprintf(dq, sizeof(dq), "{\"v\":\"%s\"", KRUNKER_BUILD_VERSION);
+        if (seek_prefs_map() >= 0) n += snprintf(dq + n, sizeof(dq) - (size_t) n, ",\"dsma\":[%d]", seek_prefs_map());
+        if (seek_prefs_mode() >= 0) n += snprintf(dq + n, sizeof(dq) - (size_t) n, ",\"dsmo\":[%d]", seek_prefs_mode());
+        snprintf(dq + n, sizeof(dq) - (size_t) n, "}");
+        append_param(url, sizeof(url), "dataQuery", dq);
+    } else {
+        append_param(url, sizeof(url), "dataQuery", "{\"v\":\"" KRUNKER_BUILD_VERSION "\"}"); // iïîìîíì: {v: buildVersion}
+    }
     const size_t logged = strlen(url); // the log stops before the captcha token: never logged
     K.captcha_sent = K.captcha[0] != 0;
     if (K.captcha_sent) append_param(url, sizeof(url), "captchaToken", K.captcha);
@@ -858,6 +882,44 @@ static void seek(void) {
     wipe(K.captcha, sizeof(K.captcha));          // single-use: never sent twice
     wipe(url, sizeof(url));
     if (!queued) fail_unreachable();
+}
+
+// Find New Game's lobby list (fetchGameList, game.deob.js :147591-147599): the busiest public game
+// with room in the region, for the seek preferences, that this client was not in lately. None (or
+// no list): the matchmaker picks, excluding the game the player leaves (seek(): excludeGame).
+static void on_game_list(void *user, const int status, const char *body, const size_t length) {
+    (void) length;
+    if (stale(user) || K.state != KS_LIST) return;
+    cJSON *res = status == 200 && body ? cJSON_Parse(body) : NULL;
+    const cJSON *g, *best = NULL;
+    double best_players = -1;
+    int listed = 0;
+    cJSON_ArrayForEach(g, cJSON_GetObjectItemCaseSensitive(res, "games")) {
+        // [id, region, players, max, data{i map, g mode, c custom, pw password}, timeLeft]
+        const char *id = cJSON_GetStringValue(cJSON_GetArrayItem(g, 0));
+        const char *region = cJSON_GetStringValue(cJSON_GetArrayItem(g, 1));
+        const cJSON *players = cJSON_GetArrayItem(g, 2), *max = cJSON_GetArrayItem(g, 3), *data = cJSON_GetArrayItem(g, 4);
+        if (!id || !id[0] || strlen(id) >= sizeof(K.game_id) || !cJSON_IsNumber(players) || !cJSON_IsNumber(max)) continue;
+        listed++;
+        if (players->valuedouble >= max->valuedouble || cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(data, "c")) ||
+            cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(data, "pw")) || !region || strcmp(region, K.region))
+            continue;
+        const cJSON *mode = cJSON_GetObjectItemCaseSensitive(data, "g");
+        if (!seek_prefs_match(cJSON_IsNumber(mode) ? mode->valueint : -1, cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(data, "i"))))
+            continue;
+        if (recent_lobbies_rank(&K.recent, id) || players->valuedouble <= best_players) continue;
+        best = g;
+        best_players = players->valuedouble;
+    }
+    if (best) {
+        snprintf(K.game_id, sizeof(K.game_id), "%s", cJSON_GetStringValue(cJSON_GetArrayItem(best, 0)));
+        printf("[krunker] game-list: %s (%.0f players), not one of the recent games\n", K.game_id, best_players);
+    } else {
+        printf("[krunker] game-list: %s: the matchmaker picks (excludeGame %s)\n",
+               res ? (listed ? "no other game with room in the region" : "no games") : "unavailable", K.exclude[0] ? K.exclude : "none");
+    }
+    cJSON_Delete(res);
+    seek();
 }
 
 // The player solved (or gave up on) the matchmaker's Turnstile: a fresh validation token, then the
@@ -942,8 +1004,31 @@ static void on_seek(void *user, const int status, const char *body, const size_t
         snprintf(code, sizeof(code), "%d", status);
         I18N_F(text, "kn.kio.seekRefused", "krunker.io's matchmaker turned the join down (HTTP {0}) {1}", code, detail);
         fail("%s", text);
+    } else if (K.seek_new && !K.game_id[0] && recent_lobbies_rank(&K.recent, game) &&
+               (K.seek_new_retries < KRUNKER_SEEK_NEW_RETRIES || (K.fallback[0] && strcmp(K.fallback, game) &&
+                                                                  recent_lobbies_rank(&K.recent, K.fallback) > recent_lobbies_rank(&K.recent, game)))) {
+        // Find New Game: the matchmaker answered a game this client was in lately (excludeGame keeps
+        // only one out). Keep the least recent answer, and seek again excluding this one; out of
+        // retries, that kept one (seek-game ?game=, its own fresh clientId)
+        const int rank = recent_lobbies_rank(&K.recent, game);
+        if (!K.fallback[0] || rank >= K.fallback_rank) {
+            snprintf(K.fallback, sizeof(K.fallback), "%s", game);
+            K.fallback_rank = rank;
+        }
+        if (K.seek_new_retries < KRUNKER_SEEK_NEW_RETRIES) {
+            K.seek_new_retries++;
+            snprintf(K.exclude, sizeof(K.exclude), "%s", game);
+            printf("[krunker] seek-game: %s is a recent game: seeking again without it\n", game);
+        } else {
+            snprintf(K.game_id, sizeof(K.game_id), "%s", K.fallback);
+            printf("[krunker] seek-game: only recent games have room: %s\n", K.fallback);
+        }
+        cJSON_Delete(res);
+        seek();
+        return;
     } else {
         snprintf(K.game_id, sizeof(K.game_id), "%s", game);
+        recent_lobbies_push(&K.recent, game);
         char query[600];
         snprintf(query, sizeof(query), "gameId=%s&clientKey=%s", game, client_id); // no clientUID / bpt / tc / at (guest) / dm
         if (is_production() || !port_s[0]) {
@@ -977,7 +1062,9 @@ static void stop_socket(void) {
     ws_close();
 }
 
-int krunker_net_join(Client *client, const char *game_id, const char *region) {
+// krunker_net_join, or (seek_new) Find New Game: no game asked for, excludeGame = exclude; seek_new 2:
+// the lobby list first (on_game_list).
+static int join(Client *client, const char *game_id, const char *region, const int seek_new, const char *exclude) {
     if (!client) return 0;
     if (!K.client) krunker_net_attach(client);
     if (K.state != KS_OFF) krunker_net_leave(client, NULL); // another official game: an intended switch
@@ -989,6 +1076,11 @@ int krunker_net_join(Client *client, const char *game_id, const char *region) {
 
     K.generation++;
     snprintf(K.game_id, sizeof(K.game_id), "%s", game_id ? game_id : "");
+    K.seek_new = seek_new;
+    K.seek_new_retries = 0;
+    K.fallback[0] = 0;
+    K.fallback_rank = 0;
+    snprintf(K.exclude, sizeof(K.exclude), "%s", exclude ? exclude : "");
     char r[48];
     if (region && region[0]) snprintf(K.region, sizeof(K.region), "%s", region);
     else if (option("KRUNKNATIVE_KRUNKER_REGION", "krunkerRegion", r, sizeof(r))) snprintf(K.region, sizeof(K.region), "%s", r);
@@ -1003,12 +1095,37 @@ int krunker_net_join(Client *client, const char *game_id, const char *region) {
     wipe(K.captcha, sizeof(K.captcha));
     load_texts();
     matchmaker();
-    printf("[krunker] joining official game %s (region %s) through %s\n", K.game_id[0] ? K.game_id : "(any)", K.region, K.matchmaker);
+    if (K.exclude[0]) printf("[krunker] finding a new official game (region %s, not %s) through %s\n", K.region, K.exclude, K.matchmaker);
+    else printf("[krunker] joining official game %s (region %s) through %s\n", K.game_id[0] ? K.game_id : "(any)", K.region, K.matchmaker);
+    if (seek_new == 2) {
+        K.state = KS_LIST;
+        char url[600];
+        snprintf(url, sizeof(url), "%s/game-list?hostname=krunker.io", K.matchmaker);
+        if (http_get(url, on_game_list)) return 1;
+    }
     // the live client's order: seek-game at once, no validation token; generate-token only before a
     // captcha retry (captcha_done)
     seek();
     return K.state != KS_CLOSED;
 }
+
+int krunker_net_join(Client *client, const char *game_id, const char *region) {
+    return join(client, game_id, region, 0, NULL);
+}
+
+// krunker.io's Find New Game (F4 / backToOrigin(false, {exclude: game}), game.deob.js :141618-141626,
+// :222300-222308): a seek in the same region with excludeGame = the game the player is in (or was in
+// last); recent ones the matchmaker still answers are re-sought (on_seek).
+int krunker_net_seek_new(Client *client, const char *region, const int use_list) {
+    char r[sizeof(K.region)] = "";
+    if (region && region[0]) snprintf(r, sizeof(r), "%s", region);
+    else if (K.region[0]) snprintf(r, sizeof(r), "%s", K.region); // the region the player is playing in
+    return join(client, NULL, r[0] ? r : NULL, use_list ? 2 : 1, K.recent.count ? K.recent.ids[0] : NULL);
+}
+
+int krunker_net_recent_rank(const char *game_id) { return recent_lobbies_rank(&K.recent, game_id); }
+
+const char *krunker_net_game(void) { return K.state == KS_OPEN || K.state == KS_CONNECTING ? K.game_id : ""; }
 
 void krunker_net_leave(Client *client, const char *reason) {
     if (K.state == KS_OFF) return;

@@ -561,9 +561,22 @@ static int rank_better(const PickRank *a, const PickRank *b) {
     return a->node_load < b->node_load;
 }
 
-/* Steps 2-4 of pickBestLobby over the public pool (optionally one region). */
+/* id is one of the comma-separated ids of list (whole entries only) */
+static int id_in_list(const char *id, const char *list) {
+    const size_t n = strlen(id);
+    for (const char *p = list; p && *p;) {
+        const char *end = strchr(p, ',');
+        const size_t len = end ? (size_t) (end - p) : strlen(p);
+        if (len == n && !strncmp(p, id, n)) return 1;
+        p = end ? end + 1 : NULL;
+    }
+    return 0;
+}
+
+/* Steps 2-4 of pickBestLobby over the public pool (optionally one region); exclude / recent:
+ * lobbies skipped (excludeGame, excludeRecent's list), NULL = none. */
 static int pick_public(Registry *r, const MmPolicy *p, const MmPickQuery *q, const char *region,
-                       int use_soft_cap, const char *exclude, MmPick *out) {
+                       int use_soft_cap, const char *exclude, const char *recent, MmPick *out) {
     MmNode *best_n = NULL;
     MmLobby *best = NULL;
     PickRank best_rank = {0};
@@ -575,7 +588,7 @@ static int pick_public(Registry *r, const MmPolicy *p, const MmPickQuery *q, con
             MmLobby *l = &n->lobbies[j];
             if (l->custom || l->no_seek || !lobby_joinable(n, l) || !lobby_auto_ok(n, l, q) ||
                 !version_ok(l, q->version) || !proto_ok(l, q) || !ruleset_ok(l, q) || !prefs_ok(l, q) ||
-                (exclude && !strcmp(l->game_id, exclude)))
+                (exclude && !strcmp(l->game_id, exclude)) || (recent && id_in_list(l->game_id, recent)))
                 continue;
             int taken = registry_lobby_taken(r, l, q->now_ms);
             int cap = registry_lobby_cap(l, p);
@@ -623,15 +636,17 @@ MmPickError registry_pick(Registry *r, const MmPolicy *p, const MmPickQuery *q, 
         out->changed = 1;
     }
     /* 2./3. the best public lobby with room (registry.h): region first, then all; with
-     * excludeGame (v10 Quick Match) every other lobby first, the excluded one last */
+     * excludeGame (v10 Quick Match) / excludeRecent every other lobby first, then the recent ones,
+     * the one the player leaves last */
     int soft = p->soft_cap > 0;
     const char *exclude = q->exclude_game && *q->exclude_game ? q->exclude_game : NULL;
-    for (int ex = exclude ? 0 : 1; ex < 2; ex++) {
-        const char *skip = ex == 0 ? exclude : NULL;
+    const char *recent = q->exclude_recent && *q->exclude_recent ? q->exclude_recent : NULL;
+    for (int ex = recent ? 0 : exclude ? 1 : 2; ex < 3; ex++) {
+        const char *skip = ex <= 1 ? exclude : NULL, *skip_recent = ex == 0 ? recent : NULL;
         for (int pass = soft ? 0 : 1; pass < 2; pass++) {
             int use_soft = pass == 0;
-            if (pick_public(r, p, q, q->region, use_soft, skip, out)) return MM_PICK_OK;
-            if (p->cross_region && q->region && *q->region && pick_public(r, p, q, NULL, use_soft, skip, out))
+            if (pick_public(r, p, q, q->region, use_soft, skip, skip_recent, out)) return MM_PICK_OK;
+            if (p->cross_region && q->region && *q->region && pick_public(r, p, q, NULL, use_soft, skip, skip_recent, out))
                 return MM_PICK_OK;
         }
     }

@@ -26,14 +26,18 @@
 // to start: kn_webview_captcha_open says so).
 int kn_webview_available(void);
 
-// Opens (or raises, when already open) the challenge window on url (NULL: the env override, else
-// KN_WEBVIEW_CAPTCHA_URL) with this sitekey. proxy: NULL / "" = none, else the proxy URI the window's
+// Starts the challenge on url (NULL: the env override, else KN_WEBVIEW_CAPTCHA_URL) with this sitekey,
+// HIDDEN: no window exists while Turnstile passes by itself. The window is created (centred on the
+// work area of the monitor under the pointer, above the game) only when the player is needed:
+// Turnstile's before-interactive-callback, Cloudflare's interstitial, a failure to retry, no token
+// within KRUNKNATIVE_WEBVIEW_REVEAL_MS (default 10000, -1 never), or a second call while it runs
+// hidden (the player asked to see it; when shown, a second call raises it). proxy: NULL / "" = none, else the proxy URI the window's
 // traffic goes through (http:// or socks5://, may hold user:password@; never logged): the caller passes
 // the one its matchmaker requests use, so the challenge is solved from the same network. Loopback hosts
 // never use it. 1 = the window is up; 0 = no webview (err says why: no display, the toolkit failed, not
 // built), use the fallback.
 int kn_webview_captcha_open(const char *url, const char *sitekey, const char *title, const char *proxy, char *err, size_t errn);
-int kn_webview_captcha_is_open(void);
+int kn_webview_captcha_is_open(void); // running, shown or hidden
 // Closes the window (no-op when closed). A token not yet polled is wiped.
 void kn_webview_captcha_close(void);
 

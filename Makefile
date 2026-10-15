@@ -300,6 +300,9 @@ native-auth-test: build ## Native client accounts e2e: register with email, veri
 resize-early-test: build ## Window resizes during startup / stale resize events reach the viewport and HTML layout (private Xvfb + xfwm4 + xdotool)
 	timeout 600 $(PYTHON) -I client/tests/resize_early_e2e.py $(DEBUG_DIR)
 
+window-center-test: build ## The client window maps where it stays: centred on the work area (launch, page windows) or at its kept position (F4 / F5), never moved after (private Xvfb)
+	timeout 600 $(PYTHON) -I client/tests/window_center_e2e.py $(DEBUG_DIR)
+
 asset-fetch-test: build ## Native on-demand content fetch: deleted airdrop files are downloaded from stub origins, verified and pop in; mismatch refused, 404 given up once (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/asset_fetch_e2e.py $(DEBUG_DIR)
 
@@ -320,7 +323,7 @@ ui-import: ## Regenerate ui/ from the Krunker v10 live site mirror (page, window
 assets-import: ## Copy the v3.1.1 content mod.zip lacks (textures/previews/) into assets/ (tools/ui-import/game_assets.py)
 	$(PYTHON) -I tools/ui-import/game_assets.py --assets assets
 
-.PHONY: store-import store-check assets-import-v7 assets-check-v7 assets-import-live assets-check-live gltf-test viewer-diff frame-yield-test offline-dead-test resize-early-test native-auth-test asset-fetch-test console-settings-test slowmo-arms-test spawn-camera-test piss-hose-test selection-test minimap-round-test preview-hole-test preview-hole-test-web
+.PHONY: store-import store-check assets-import-v7 assets-check-v7 assets-import-live assets-check-live gltf-test viewer-diff frame-yield-test offline-dead-test resize-early-test window-center-test native-auth-test asset-fetch-test console-settings-test slowmo-arms-test spawn-camera-test piss-hose-test selection-test minimap-round-test preview-hole-test preview-hole-test-web
 assets-import-v7: ## Import the Krunker content set into assets/ (models, textures, sounds, the v10 store table) and regenerate the store tables
 	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --assets assets
 	node tools/ui-import/gen_viewer_store.js

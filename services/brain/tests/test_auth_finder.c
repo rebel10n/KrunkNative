@@ -246,12 +246,51 @@ static void test_finder_flavor(void) {
     finder_table_free(t);
 }
 
+/* exclude (a seek's current and recent servers): left out while anything else matches the filter,
+ * listed again when nothing else does; whole host:port entries only */
+static void test_finder_exclude(void) {
+    FinderTable *t = finder_table_new(NULL);
+    int created = 0;
+    const char *err = NULL;
+    FinderEntry *a = finder_heartbeat(t, "10.2.0.1", 21015, 0, "A", "", 0, "10.2.0.1", 0, &created, &err);
+    FinderEntry *b = finder_heartbeat(t, "10.2.0.2", 21015, 0, "B", "", 0, "10.2.0.2", 0, &created, &err);
+    FinderEntry *c = finder_heartbeat(t, "10.2.0.3", 21015, 0, "C", "", 0, "10.2.0.3", 0, &created, &err);
+    CHECK(a && b && c);
+    finder_poll_stamp(t, a, "na", 0);
+    finder_poll_stamp(t, b, "nb", 0);
+    finder_poll_stamp(t, c, "nc", 0);
+    CHECK(finder_poll_reply(t, a, reply_flavor("na", "A", "strike"), 1, 1));
+    CHECK(finder_poll_reply(t, b, reply_flavor("nb", "B", "strike"), 1, 1));
+    CHECK(finder_poll_reply(t, c, reply_flavor("nc", "C", NULL), 1, 1));
+
+    FinderFilter f = {.online_mode = -1, .flavor = "strike", .exclude = "10.2.0.1:21015"};
+    cJSON *list = finder_list(t, &f, 2);
+    CHECK(cJSON_GetArraySize(list) == 1 && !strcmp(kn_json_str(cJSON_GetArrayItem(list, 0), "name", ""), "B"));
+    cJSON_Delete(list);
+    /* every Strike server excluded: they all come back (C is no Strike server: never) */
+    f.exclude = "10.2.0.2:21015,10.2.0.1:21015";
+    list = finder_list(t, &f, 2);
+    CHECK(cJSON_GetArraySize(list) == 2);
+    cJSON_Delete(list);
+    /* partial entries match nothing */
+    f.exclude = "10.2.0.1:2101,0.2.0.2:21015,";
+    list = finder_list(t, &f, 2);
+    CHECK(cJSON_GetArraySize(list) == 2);
+    cJSON_Delete(list);
+    f.exclude = "";
+    list = finder_list(t, &f, 2);
+    CHECK(cJSON_GetArraySize(list) == 2);
+    cJSON_Delete(list);
+    finder_table_free(t);
+}
+
 int main(void) {
     test_sha_and_hash();
     test_joins();
     test_limiter();
     test_finder();
     test_finder_flavor();
+    test_finder_exclude();
     if (g_fail) return 1;
     printf("auth/finder tests OK\n");
     return 0;

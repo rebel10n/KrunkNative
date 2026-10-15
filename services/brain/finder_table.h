@@ -85,6 +85,9 @@ typedef struct FinderFilter {
     int space;                     /* 1 = players < max */
     int online_mode;               /* -1 any, 0, 1 */
     int limit;                     /* 0 = 500 */
+    const char *exclude;           /* "host:port,host:port": servers a seek leaves (the client's current and
+                                    * recent ones, recent_lobbies.h). Left out of the list unless nothing
+                                    * else matches f, then listed as the fallback (NULL/"" = none) */
 } FinderFilter;
 
 /* Verified entries matching f, as the GET /servers array (caller frees). */

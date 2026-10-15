@@ -3,6 +3,14 @@
 // WebKitGTK's include paths, so GTK's and FreeType's system headers never reach the rest of the client.
 //
 // What the window does (and does not):
+//   - runs hidden first: the view lives in a GtkOffscreenWindow (no X / Wayland window at all, yet
+//     mapped and visible to WebKit, so the page and Cloudflare's widget run normally). A challenge that
+//     passes by itself (Turnstile's non-interactive / managed check) never shows anything. Only when
+//     the player is needed is the view moved into a real window, created centred on the work area of
+//     the monitor under the pointer and kept above the game (reveal()): Turnstile's
+//     before-interactive-callback, Cloudflare's own interstitial, a failure the widget offers "Try
+//     again" for, no token after KN_WEBVIEW_REVEAL_MS (KRUNKNATIVE_WEBVIEW_REVEAL_MS), or the player
+//     asking for it (kn_webview_captcha_open again: the modal's button);
 //   - navigates to a REAL krunker.io URL (https only; plain http only to a loopback host, for the
 //     tests' stub page) in an ephemeral web context (no cookies or storage on disk);
 //   - injects one user script, which does nothing unless the top document's origin is that URL's; it
@@ -31,18 +39,26 @@
 #define BRIDGE_WORLD "knCaptcha"      // the isolated script world holding the message handler
 #define BRIDGE_ATTR "data-kn-captcha" // on <html>: the message, read and removed at once by the bridge
 #define BRIDGE_EVENT "kn-captcha"
+#define WINDOW_W 520
+#define WINDOW_H 600
+#define KN_WEBVIEW_REVEAL_MS 10000 // no token by then: the window is shown (a stuck check needs the player)
 
 static struct {
     int gtk;            // 0 not tried, 1 up, -1 failed
     char gtk_err[160];
-    GtkWidget *window;
+    GtkWidget *offscreen; // the hidden host of the view (GtkOffscreenWindow) until reveal(), else NULL
+    GtkWidget *window;    // the real window, once revealed
     WebKitWebView *view;
+    char title[200];      // the window's title, for reveal()
+    gint64 opened_us;     // g_get_monotonic_time() of the open: KN_WEBVIEW_REVEAL_MS counts from it
+    int reveal_ms;
     int closing;        // we are destroying the window (not the player)
     int taken;          // this window gave its token
     unsigned http_err;  // the page's HTTP status when >= 400 (its note stays in the modal)
     char origin[200];   // scheme://host[:port] of the page
     // pending events, polled in this order
     int ev_token, ev_failed, ev_closed, ev_status;
+    const char *reveal; // a reason to show the window (static text), done by the next poll
     char token[KN_WEBVIEW_TOKEN_MAX + 1];
     char msg[300];
 } W;
@@ -237,21 +253,26 @@ static void on_message(WebKitUserContentManager *m, WebKitJavascriptResult *r, g
             W.ev_status = 1;
         }
         set_msg(text);
+        if (!W.ev_failed) W.reveal = "a failure the player can retry"; // its "Try again" is in the window
     } else if (!strncmp(s, "expired:", 8) || !strncmp(s, "timeout:", 8)) {
         printf("[webview] the challenge %s\n", s[0] == 'e' ? "expired" : "timed out");
         W.ev_status = 1;
+        W.reveal = s[0] == 'e' ? "the challenge expired" : "the challenge timed out";
         set_msg(s[0] == 'e' ? "The challenge expired: \"Try again\" in its window." : "The challenge timed out: \"Try again\" in its window.");
     } else if (!strncmp(s, "shown:", 6)) {
-        printf("[webview] Cloudflare's widget is up\n");
+        printf("[webview] Cloudflare's widget is up%s\n", W.window ? "" : " (hidden: shown only if it needs the player)");
         if (!W.http_err) {
             W.ev_status = 1;
-            set_msg("Cloudflare's widget is up in the challenge window.");
+            set_msg(W.window ? "Cloudflare's widget is up in the challenge window." : "Cloudflare is checking this computer\xe2\x80\xa6");
         }
     } else if (!strncmp(s, "interstitial:", 13)) {
         printf("[webview] Cloudflare checks the visit to %s first\n", W.origin);
         W.ev_status = 1;
+        W.reveal = "Cloudflare's interstitial";
         set_msg("Cloudflare checks your visit to krunker.io first: follow it in the challenge window.");
     } else if (!strncmp(s, "interactive:", 12)) {
+        printf("[webview] Turnstile needs the player\n");
+        W.reveal = "Turnstile needs the player";
         W.ev_status = 1;
         set_msg("Cloudflare wants you to tick the box in the challenge window.");
     }
@@ -343,6 +364,7 @@ static void on_terminated(WebKitWebView *view, WebKitWebProcessTerminationReason
     W.ev_failed = 1;
 }
 
+// the real window (after reveal()); the hidden host is only ever destroyed by us
 static void on_destroy(GtkWidget *w, gpointer user) {
     (void) w;
     (void) user;
@@ -352,6 +374,63 @@ static void on_destroy(GtkWidget *w, gpointer user) {
         printf("[webview] the player closed the challenge window\n");
         W.ev_closed = 1;
     }
+}
+
+// The work area (screen coordinates) of the monitor under the pointer (where the player looks: the
+// game window), else the primary one, else the first.
+static int work_area(GdkRectangle *wa) {
+    GdkDisplay *display = gdk_display_get_default();
+    if (!display) return 0;
+    GdkMonitor *monitor = NULL;
+    GdkSeat *seat = gdk_display_get_default_seat(display);
+    GdkDevice *pointer = seat ? gdk_seat_get_pointer(seat) : NULL;
+    if (pointer) {
+        int px = 0, py = 0;
+        gdk_device_get_position(pointer, NULL, &px, &py);
+        monitor = gdk_display_get_monitor_at_point(display, px, py);
+    }
+    if (!monitor) monitor = gdk_display_get_primary_monitor(display);
+    if (!monitor && gdk_display_get_n_monitors(display) > 0) monitor = gdk_display_get_monitor(display, 0);
+    if (!monitor) return 0;
+    gdk_monitor_get_workarea(monitor, wa);
+    return wa->width > 0 && wa->height > 0;
+}
+
+// Shows the challenge: the view leaves its hidden host for a real window, created at its final
+// place (centred on the work area, on top of the game) before it is mapped, so it never jumps.
+static void reveal(const char *why) {
+    if (W.window || !W.view || !W.offscreen) return;
+    GtkWidget *view = GTK_WIDGET(W.view);
+    W.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(W.window), W.title);
+    int w = WINDOW_W, h = WINDOW_H, x = 0, y = 0;
+    GdkRectangle wa = {0};
+    const int placed = work_area(&wa);
+    if (placed) {
+        if (w > wa.width) w = wa.width;
+        if (h > wa.height) h = wa.height;
+        x = wa.x + (wa.width - w) / 2;
+        y = wa.y + (wa.height - h) / 2;
+    }
+    gtk_window_set_default_size(GTK_WINDOW(W.window), w, h);
+    if (placed) gtk_window_move(GTK_WINDOW(W.window), x, y); // before the map: the first position is the final one
+    else gtk_window_set_position(GTK_WINDOW(W.window), GTK_WIN_POS_CENTER);
+    gtk_window_set_keep_above(GTK_WINDOW(W.window), TRUE); // over a fullscreen game window
+    g_signal_connect(W.window, "destroy", G_CALLBACK(on_destroy), NULL);
+    g_object_ref(view);
+    gtk_container_remove(GTK_CONTAINER(W.offscreen), view);
+    gtk_widget_set_size_request(view, -1, -1);
+    gtk_container_add(GTK_CONTAINER(W.window), view);
+    g_object_unref(view);
+    gtk_widget_destroy(W.offscreen);
+    W.offscreen = NULL;
+    gtk_widget_show_all(W.window);
+    gtk_window_present(GTK_WINDOW(W.window));
+    if (placed)
+        printf("[webview] challenge window shown (%s) at %d,%d %dx%d, centred on the work area %d,%d %dx%d\n", why, x, y, w, h, wa.x, wa.y,
+               wa.width, wa.height);
+    else
+        printf("[webview] challenge window shown (%s), centred by GTK\n", why);
 }
 
 // ---------------------------------------------------------------- API
@@ -393,6 +472,10 @@ int kn_webview_captcha_open(const char *url, const char *sitekey, const char *ti
         gtk_window_present(GTK_WINDOW(W.window));
         return 1;
     }
+    if (W.offscreen) { // running hidden: the player asks to see it (the modal's button)
+        reveal("the player asked for it");
+        return 1;
+    }
     if (!url || !url[0]) {
         const char *e = getenv("KRUNKNATIVE_KRUNKER_CAPTCHA_URL");
         url = e && e[0] ? e : KN_WEBVIEW_CAPTCHA_URL;
@@ -416,6 +499,7 @@ int kn_webview_captcha_open(const char *url, const char *sitekey, const char *ti
     W.taken = W.closing = 0;
     W.http_err = 0;
     W.ev_token = W.ev_failed = W.ev_closed = W.ev_status = 0;
+    W.reveal = NULL;
     wipe(W.token, sizeof(W.token));
 
     WebKitWebContext *ctx = webkit_web_context_new_ephemeral(); // nothing of it reaches the disk
@@ -453,36 +537,37 @@ int kn_webview_captcha_open(const char *url, const char *sitekey, const char *ti
     g_signal_connect(W.view, "load-failed-with-tls-errors", G_CALLBACK(on_tls_error), NULL);
     g_signal_connect(W.view, "web-process-terminated", G_CALLBACK(on_terminated), NULL);
 
-    W.window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    char wtitle[200];
-    snprintf(wtitle, sizeof(wtitle), "%s - krunker.io", title && title[0] ? title : "Security Challenge");
-    gtk_window_set_title(GTK_WINDOW(W.window), wtitle);
-    gtk_window_set_default_size(GTK_WINDOW(W.window), 520, 600);
-    gtk_window_set_position(GTK_WINDOW(W.window), GTK_WIN_POS_CENTER);
-    gtk_window_set_keep_above(GTK_WINDOW(W.window), TRUE); // over a fullscreen game window
-    g_signal_connect(W.window, "destroy", G_CALLBACK(on_destroy), NULL);
-    gtk_container_add(GTK_CONTAINER(W.window), GTK_WIDGET(W.view));
-    gtk_widget_show_all(W.window);
-    gtk_window_present(GTK_WINDOW(W.window));
+    // hidden first (see the top of this file): an offscreen toplevel, laid out at the window's size
+    snprintf(W.title, sizeof(W.title), "%s - krunker.io", title && title[0] ? title : "Security Challenge");
+    W.offscreen = gtk_offscreen_window_new();
+    gtk_widget_set_size_request(GTK_WIDGET(W.view), WINDOW_W, WINDOW_H);
+    gtk_container_add(GTK_CONTAINER(W.offscreen), GTK_WIDGET(W.view));
+    gtk_widget_show_all(W.offscreen);
+    W.opened_us = g_get_monotonic_time();
+    const char *rv = getenv("KRUNKNATIVE_WEBVIEW_REVEAL_MS");
+    W.reveal_ms = rv && rv[0] ? atoi(rv) : KN_WEBVIEW_REVEAL_MS;
 
-    printf("[webview] challenge window: %s (%s)%s\n", url, W.origin, proxy && proxy[0] ? ", through the client's proxy" : "");
+    printf("[webview] challenge running hidden: %s (%s)%s; shown only if it needs the player\n", url, W.origin,
+           proxy && proxy[0] ? ", through the client's proxy" : "");
     webkit_web_view_load_uri(W.view, url);
     kn_webview_pump();
     return 1;
 }
 
-int kn_webview_captcha_is_open(void) { return W.window != NULL; }
+int kn_webview_captcha_is_open(void) { return W.window != NULL || W.offscreen != NULL; }
 
 void kn_webview_captcha_close(void) {
-    if (W.window) {
+    if (W.window || W.offscreen) {
         W.closing = 1;
-        GtkWidget *w = W.window;
+        GtkWidget *w = W.window ? W.window : W.offscreen;
+        const int shown = W.window != NULL;
         if (W.view) webkit_web_view_stop_loading(W.view);
         gtk_widget_destroy(w); // the view, its context and web processes go with it
-        W.window = NULL;
+        W.window = W.offscreen = NULL;
         W.view = NULL;
         W.closing = 0;
-        printf("[webview] challenge window closed\n");
+        W.reveal = NULL;
+        printf("[webview] challenge window closed%s\n", shown ? "" : " (it was never shown)");
     }
     if (!W.ev_token) wipe(W.token, sizeof(W.token));
 }
@@ -496,6 +581,14 @@ void kn_webview_pump(void) {
 int kn_webview_captcha_poll(char *token, const size_t n, char *err, const size_t errn) {
     kn_webview_pump();
     if (err && errn) err[0] = 0;
+    if (W.offscreen && !W.ev_token && !W.ev_failed) {
+        if (!W.reveal && W.reveal_ms >= 0 && g_get_monotonic_time() - W.opened_us >= (gint64) W.reveal_ms * 1000)
+            W.reveal = "no token in time";
+        if (W.reveal) {
+            reveal(W.reveal);
+            W.reveal = NULL;
+        }
+    }
     if (W.ev_token) {
         W.ev_token = 0;
         const size_t len = strlen(W.token);

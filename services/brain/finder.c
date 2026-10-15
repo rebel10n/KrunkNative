@@ -245,6 +245,9 @@ static void h_list(kn_http_req *req, void *ud) {
     if (kn_http_query_get(req, "online_mode", tmp, sizeof(tmp)) > 0)
         f.online_mode = (!strcmp(tmp, "1") || !strcmp(tmp, "true")) ? 1 : 0;
     if (kn_http_query_get(req, "limit", tmp, sizeof(tmp)) > 0) f.limit = atoi(tmp);
+    /* a seek's servers to leave out (the client's current and recent ones): listed only when nothing else is */
+    char exclude[(FINDER_HOST_MAX + 8) * 4] = "";
+    if (kn_http_query_get(req, "exclude", exclude, sizeof(exclude)) > 0) f.exclude = exclude;
     cJSON *o = cJSON_CreateObject();
     cJSON_AddBoolToObject(o, "ok", 1);
     cJSON *servers = finder_list(g_f.t, &f, kn_now_ms());

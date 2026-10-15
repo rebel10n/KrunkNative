@@ -4,8 +4,10 @@
  *   POST /servers/heartbeat (alias /servers/submit, and both under /finder)
  *        {v, host, port, query_port, name, community, online_mode, shutdown?}
  *        -> {ok:true, interval}; host "" / absent = the request's IP.
- *   GET  /servers?map=&mode=&tag=&space=1&online_mode=0|1&community=&region=&q=&limit=
+ *   GET  /servers?map=&mode=&tag=&space=1&online_mode=0|1&community=&region=&q=&limit=&exclude=
  *        -> {ok:true, servers:[...]}
+ *        exclude=host:port[,host:port...]: a seek's servers to leave (the client's current and
+ *        recent ones): listed only when no other server matches.
  *
  * Nothing self-reported is listed: the finder polls each server's KNINFO query over
  * UDP (shared/include/server_info.h contract: 0xFF x4 "KNINFO" 0x00 nonce ->

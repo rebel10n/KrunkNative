@@ -333,8 +333,9 @@ static int webview_start(void) {
     show("knCaptchaSolve", 1);
     const HtmlElem m = html_dom_by_id("knCaptchaModal");
     if (m) html_dom_set_class(m, "kn-captcha-wide", 0);
-    set_text("knCaptchaText", I18N("kn.captcha.inWindow", "krunker.io wants a Cloudflare check first. Solve it in the window that opened:"
-                                                          " it shows krunker.io's own challenge."));
+    // the window runs hidden and shows itself only when Cloudflare needs the player (kn_webview.c)
+    set_text("knCaptchaText", I18N("kn.captcha.inWindow", "krunker.io wants a Cloudflare check first. It usually passes by itself; if it"
+                                                          " needs you, its window opens on top (\"Solve the challenge\" shows it now)."));
     return 1;
 }
 

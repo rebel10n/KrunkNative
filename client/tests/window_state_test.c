@@ -120,11 +120,35 @@ static void test_steps(void) {
     CHECK(steps_are(&s, (WindowStep[]) {WINDOW_STEP_CREATE_HIDDEN, WINDOW_STEP_BORDERLESS, WINDOW_STEP_SHOW}, 3), "borderless");
 }
 
+// A window without a kept position opens centred on the work area, decorations included.
+static void test_center(void) {
+    int x = 0, y = 0;
+    window_state_center(0, 0, 1920, 1080, 1280, 720, NULL, &x, &y);
+    CHECK(x == 320 && y == 180, "centred without decorations: %d,%d", x, y);
+    // a panel on top (work area from y 32) and a 4/30/4/4 frame: the whole frame is centred
+    const int frame[4] = {4, 30, 4, 4};
+    window_state_center(0, 32, 1920, 1048, 1280, 720, frame, &x, &y);
+    CHECK(x == 320 && y == 32 + (1048 - 754) / 2 + 30, "centred with a frame: %d,%d", x, y);
+    // a second monitor right of the first
+    window_state_center(1920, 0, 2560, 1440, 1280, 720, NULL, &x, &y);
+    CHECK(x == 1920 + 640 && y == 360, "second monitor: %d,%d", x, y);
+    // bigger than the work area: the frame's top-left at the work area's, so the title bar stays on it
+    window_state_center(0, 24, 1280, 776, 1280, 800, frame, &x, &y);
+    CHECK(x == 4 && y == 24 + 30, "oversized: %d,%d", x, y);
+    // the monitor a page window opens on: the one under its opener's centre, else the primary
+    const int wa[2][4] = {{0, 0, 1920, 1080}, {1920, 0, 2560, 1440}};
+    CHECK(window_state_pick_monitor(wa, 2, 0, 1, 2500, 700) == 1, "the opener's monitor");
+    CHECK(window_state_pick_monitor(wa, 2, 1, 1, -50, -50) == 1, "a point on no monitor: the primary");
+    CHECK(window_state_pick_monitor(wa, 2, 0, 0, 2500, 700) == 0, "no point: the primary");
+    CHECK(window_state_pick_monitor(wa, 0, 0, 0, 0, 0) == -1, "no monitors");
+}
+
 int main(void) {
     test_round_trip();
     test_decode();
     test_resolve();
     test_steps();
+    test_center();
     printf("window_state_test: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

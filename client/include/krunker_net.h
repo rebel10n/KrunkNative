@@ -75,6 +75,19 @@ void krunker_net_attach(Client *client); // startup (backend_startup.c): the cli
 // Seek and join an official game (game_id NULL / "": the matchmaker picks one in the region;
 // region NULL: the default). Stops the knet transport / the offline game first. 1 = started.
 int krunker_net_join(Client *client, const char *game_id, const char *region);
+// Find New Game for an official game (F4 / Quick Match): use_list = 1 first asks <matchmaker>/game-list
+// and joins the busiest public game with room in the same region (region NULL: the one the player is
+// in) for the saved seek mode / map that is not one of the recent games (recent_lobbies.h). Without
+// such a game (or a list) it seeks the way krunker.io's client does (backToOrigin's ?exclude=):
+// seek-game with excludeGame = the game the player is in (or was in last) and dataQuery dsmo / dsma.
+// krunker.io takes ONE excludeGame, so an answer that is another recent game is sought again excluding
+// it (twice at most) and the least recent answer is joined when only recent games come back; without
+// the list a bounce between two games can then remain (the matchmaker's choice). 1 = started.
+int krunker_net_seek_new(Client *client, const char *region, int use_list);
+// 1 = the official game this client is in (or joined last), 2.. older ones; 0 = not one of the last
+// RECENT_LOBBIES_MAX (recent_lobbies.h). krunker_lobbies_pick picks those last.
+int krunker_net_recent_rank(const char *game_id);
+const char *krunker_net_game(void); // the official game being joined / played, "" when none
 // Leave the official game (no-op when not in one). reason NULL: an intended switch (another
 // session follows); else the error screen shows it.
 void krunker_net_leave(Client *client, const char *reason);

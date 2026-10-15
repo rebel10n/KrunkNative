@@ -2,7 +2,7 @@
 """KN_KRUNKER_OFFICIAL end to end against a local stub of krunker.io (client/include/krunker_net.h):
 nothing leaves the machine.
 
-  python3 -I server/tests/krunker_official_e2e.py BUILD_DIR [WEB_DIST_DIR] [--native|--web|--webview]   (repo root)
+  python3 -I server/tests/krunker_official_e2e.py BUILD_DIR [WEB_DIST_DIR] [--native|--web|--webview|--exclude]   (repo root)
 
 Stubs (Python, ports from kn_proto.free_ports()):
   - Krunker's matchmaker: GET /generate-token (a token) and GET /seek-game (checks the exact query
@@ -19,6 +19,10 @@ Stubs (Python, ports from kn_proto.free_ports()):
     player), three "cc" (a script, garbage, an undefined result), a "cpt" ALTCHA challenge, "k"
     moving the stub player every 100 ms, "pi" every second; after the client's "en" its own "0",
     "l" and a "ch" line.
+Find New Game runs (--exclude alone): "native-exclude" (Quick Match with Server Type Official, the lobby
+list: never the game it leaves, no bouncing between two, the least recent once all are recent) and
+"native-exclude-mm" (no list from krunker_lobbies: krunker_net's own list pick, then the live client's
+excludeGame seeks around the recent games); the stub then has three lobbies and no captcha.
 Lobby runs (the default, no KRUNKNATIVE_KRUNKER_JOIN): "native-lobby" clicks the stub's official lobby
 (GET /game-list) in the server browser from the offline game: it is joined in-client (Cancel in the
 Security Challenge modal first ends the join saying so, a second click + a pasted token joins);
@@ -26,10 +30,13 @@ Security Challenge modal first ends the join saying so, a second click + a paste
 Captcha runs (krunker_captcha.h): native "callback" (the one-time 127.0.0.1 callback: a wrong secret,
 a foreign Origin, a body that is not a token, an expired listener, then the token, then a second
 token), native "paste" (a bad paste refused in the modal, then a good one), native "webview" (the
-challenge window of kn_webview.h, WebKitGTK under the run's own xvfb-run: it loads the test's stub
-krunker.io page, KRUNKNATIVE_KRUNKER_CAPTCHA_URL, whose stub `turnstile` widget "is solved" by firing
-its own callback; the first token is refused by the matchmaker, the window opens again, the second
-joins; a frame of another origin tries to post a forged token), web "widget" (the stub widget's
+challenge window of kn_webview.h, WebKitGTK on a private Xvfb of the run's own whose top-level windows
+x11_watch.py records: it loads the test's stub krunker.io page, KRUNKNATIVE_KRUNKER_CAPTCHA_URL, whose
+stub `turnstile` widget "is solved" by firing its own callback; it passes by itself, so the challenge
+runs hidden and nothing is ever mapped; the first token is refused by the matchmaker, the challenge runs
+again, the second joins; a frame of another origin tries to post a forged token), native
+"webview-interactive" (the stub widget calls before-interactive-callback first: only then is the window
+created, mapped once already centred on the work area, never moved), web "widget" (the stub widget's
 token) and web "domain" (110200: the modal says why and falls back to the paste box). Those native
 runs without a display (callback, paste) also cover a webview build falling back. Each
 checks the live client's order: seek-game (no validationToken), CaptchaRequired, generate-token,
@@ -46,7 +53,7 @@ script: play, W, `say`, `players`); the web run is the web build in headless Chr
 ?krunkerMM=, clicks and keys over the DevTools protocol). The native cheat check answers only when
 client_bin's QuickJS sandbox (krunker_cheat_qjs.c) answers natively, the page's eval on the web.
 Exit 0 when every check passed, 77 when nothing could run (--webview: when this build has no webview,
-WebKitGTK / xvfb-run are missing; a full run then only says the webview run was skipped); logs stay in
+WebKitGTK / Xvfb are missing; a full run then only says the webview run was skipped); logs stay in
 ~/.cache/kn-krunker-official-e2e-* on failure.
 """
 import asyncio
@@ -71,6 +78,7 @@ from http.server import BaseHTTPRequestHandler, SimpleHTTPRequestHandler, Thread
 
 sys.path.insert(0, os.path.join(os.getcwd(), "server/tests"))
 import kn_proto  # noqa: E402
+from x11_watch import PrivateXvfb, X11Watch  # noqa: E402
 
 try:
     import websockets
@@ -82,7 +90,7 @@ except ImportError:  # pragma: no cover
 ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
 BUILD = os.path.abspath(ARGS[0] if ARGS else "cmake-build-debug")
 DIST = os.path.abspath(ARGS[1]) if len(ARGS) > 1 else None
-ONLY = {"--native": "native", "--web": "web", "--webview": "webview"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude": "exclude"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -271,6 +279,12 @@ class Stub:
         self.captcha_ok = threading.Event()
         self.loop = None
         self.httpd = None
+        # the Find New Game runs (exclude): several lobbies, seeks without a captcha; seek-game answers
+        # the asked game, else (like the live matchmaker, which takes ONE excludeGame) the busiest
+        # lobby that is not excludeGame; list_fail: /game-list requests answered 503 (-1 = all)
+        self.lobbies = None   # [(gameId, players)], busiest first
+        self.list_fail = 0
+        self.list_requests = 0
 
     # matchmaker
     def start_http(self):
@@ -289,9 +303,22 @@ class Stub:
                     tok = "tok_e2e_%d_0123456789abcdefghijklmnopqrstuvwxyz0123456789" % len(stub.issued)
                     stub.issued.append(tok)
                     body, ctype = tok.encode(), "text/plain"
+                elif u.path == "/game-list" and stub.lobbies is not None:  # the exclude runs' lobbies
+                    stub.list_requests += 1
+                    if stub.list_fail < 0 or stub.list_requests <= stub.list_fail:
+                        status, body, ctype = 503, b"unavailable", "text/plain"
+                    else:
+                        body, ctype = json.dumps({"success": True, "totalPlayerCount": 9, "games": [
+                            [g, "de-fra", n, 8, {"i": "Kanji", "g": 0}, 240] for g, n in stub.lobbies]}).encode(), "application/json"
                 elif u.path == "/game-list":  # the server browser's official lobbies (krunker_lobbies.c)
                     body, ctype = json.dumps({"success": True, "totalPlayerCount": 3, "games": [
                         [GAME_ID, "de-fra", 3, 8, {"i": "Kanji", "g": 0}, 240]]}).encode(), "application/json"
+                elif u.path == "/seek-game" and stub.lobbies is not None:
+                    qd = dict(q)
+                    game = qd.get("game") or next((g for g, _ in stub.lobbies if g != qd.get("excludeGame")), None)
+                    body = json.dumps({"host": "127.0.0.1", "port": stub.ws_port, "gameId": game, "clientId": CLIENT_ID,
+                                       "data": {"i": "Kanji", "g": 0}}).encode()
+                    ctype = "application/json"
                 elif u.path == "/seek-game":
                     qd = dict(q)
                     cap, val = qd.get("captchaToken"), qd.get("validationToken")
@@ -768,9 +795,11 @@ def post(url, body, origin="https://krunker.io", ctype="text/plain"):
         return "refused"
 
 
-def launch_native(label, script_text, extra_env, args=("--krunker",), wrap=(), scenario="default"):
+def launch_native(label, script_text, extra_env, args=("--krunker",), wrap=(), scenario="default", stub_setup=None, display=None):
     mm, wsp = kn_proto.free_ports(2)
     stub = Stub(mm, wsp, scenario)
+    if stub_setup:
+        stub_setup(stub)
     stub.start_http()
     stub.start_ws()
     script = os.path.join(WORK, f"{label}.script")
@@ -782,6 +811,8 @@ def launch_native(label, script_text, extra_env, args=("--krunker",), wrap=(), s
                 "KRUNKNATIVE_NO_BROWSER": "1", "KRUNKNATIVE_AUDIO_BACKEND": "null", "KRUNKNATIVE_INPUT_SCRIPT": script,
                 "KRUNKNATIVE_WINDOW_SIZE": "960x540", "KRUNKNATIVE_KRUNKER_MATCHMAKER": "http://127.0.0.1:%d" % mm,
                 "KRUNKNATIVE_KRUNKER_TRACE": "1", "KRUNKNATIVE_ASSETS_DIR": ASSETS, "KRUNKNATIVE_ASSET_FETCH": "off"})
+    if display:
+        env["DISPLAY"] = display  # a private Xvfb of the test's own (the challenge window runs; the game stays headless)
     env.update(extra_env)
     out = open(log, "w")
     p = subprocess.Popen([*wrap, "stdbuf", "-oL", "-eL", f"{BUILD}/client_bin", *args], stdout=out, stderr=subprocess.STDOUT,
@@ -1132,6 +1163,75 @@ def run_native_optout():
           "joining official game" not in text, [pth for pth, _, _ in stub.http_log])
 
 
+# ---------------------------------------------------------------- native: Find New Game excludes (recent_lobbies.h)
+
+EXCLUDE_LOBBIES = [("FRA:aaaaa", 6), ("FRA:bbbbb", 5), ("FRA:ccccc", 4)]  # busiest first
+
+
+def find_new_game_script(times, first="0 menu\n", quit_at=None):
+    lines = [first, '100 call setSetting "knSeekServers" "official"\n']
+    lines += ["%d call backToOrigin\n" % t for t in times]
+    lines.append("%d quit\n" % (quit_at or times[-1] + 3500))
+    return "".join(lines)
+
+
+def run_native_exclude():
+    """Find New Game (Quick Match / F4, Settings > Quickplay > Official) from the lobby list
+    (krunker_lobbies_pick): never the game the player is in, never back to the one before it while
+    another has room; with every lobby recent, the least recent one."""
+    label = "native-exclude"
+    stub, p, out, log = launch_native(label, find_new_game_script([500, 4000, 7500, 11000]), {}, args=("--offline",),
+                                      stub_setup=lambda st: setattr(st, "lobbies", EXCLUDE_LOBBIES))
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    games = [dict(q).get("game") for pth, q, _ in stub.http_log if pth == "/seek-game"]
+    check(f"{label}: each Find New Game joins another lobby: the busiest, then the next ones, then the least recent "
+          "(never the one it leaves, no bouncing between two)", games == ["FRA:aaaaa", "FRA:bbbbb", "FRA:ccccc", "FRA:aaaaa"], games)
+    check(f"{label}: no excludeGame needed (the list picks)", not any("excludeGame" in dict(q) for pth, q, _ in stub.http_log if pth == "/seek-game"))
+    check(f"{label}: the last pick says it is a recent one", "[krunker] seek: official lobby FRA:aaaaa (a recent one: nothing else has room)" in text,
+          [l for l in lines if "[krunker] seek:" in l])
+    check(f"{label}: the list was fetched once (cached)", stub.list_requests == 1, stub.list_requests)
+    check(f"{label}: each join opened its game's socket", [pth.split("&")[0] for pth in stub.ws_paths] ==
+          ["/ws?gameId=" + g for g in games], stub.ws_paths)
+
+
+def run_native_exclude_mm():
+    """Find New Game with no lobby list from krunker_lobbies (its /game-list refused): krunker_net_seek_new
+    asks for the list itself and picks a game it was not in lately; once every listed game is recent, the
+    live client's way: seek-game with excludeGame (the game it leaves); an answer that is another recent
+    game is sought again excluding it, and the least recent answer is joined."""
+    label = "native-exclude-mm"
+
+    def setup(st):
+        st.lobbies = EXCLUDE_LOBBIES
+        st.list_fail = 1  # krunker_lobbies' request; krunker_net's own ones are answered
+
+    stub, p, out, log = launch_native(label, find_new_game_script([3000, 6500, 10000], first="0 boot\n"), {}, args=("--krunker",),
+                                      stub_setup=setup)
+    lines = finish_native(label, stub, p, out, log, timeout=180)
+    text = "\n".join(lines)
+    seeks = [dict(q) for pth, q, _ in stub.http_log if pth == "/seek-game"]
+    got = [(q.get("game"), q.get("excludeGame")) for q in seeks]
+    want = [(None, None),                 # --krunker: the matchmaker picks (aaaaa)
+            ("FRA:bbbbb", None),          # F4 1: the list (refused to krunker_lobbies, asked again): not aaaaa
+            ("FRA:ccccc", None),          # F4 2: nor bbbbb
+            (None, "FRA:ccccc"),          # F4 3: every listed game is recent: excludeGame = the one it leaves -> aaaaa
+            (None, "FRA:aaaaa"),          #   aaaaa is recent: again without it -> bbbbb
+            (None, "FRA:bbbbb")]          #   bbbbb is recent too: again -> aaaaa, the least recent answer: joined
+    check(f"{label}: list picks, then excludeGame seeks around the recent games", got == want, got)
+    excl = [q for q in seeks if q.get("excludeGame")]
+    check(f"{label}: an excludeGame seek has no game and keeps the live order (excludeGame before dataQuery)",
+          excl and all("game" not in q for q in excl) and all(r.index("excludeGame=") < r.index("dataQuery=")
+                                                              for pth, _, r in stub.http_log if pth == "/seek-game" and "excludeGame=" in r), excl[:1])
+    check(f"{label}: Find New Game's dataQuery carries the build version", excl and all(json.loads(q["dataQuery"]).get("v") == BUILD_VERSION
+                                                                                     for q in excl), excl[:1])
+    joins = re.findall(r"\[krunker\] seek-game: game (\S+) on", text)
+    check(f"{label}: the games joined: aaaaa, bbbbb, ccccc, then the least recent answer (aaaaa)",
+          joins == ["FRA:aaaaa", "FRA:bbbbb", "FRA:ccccc", "FRA:aaaaa"], joins)
+    check(f"{label}: krunker_lobbies' refused list led to the matchmaker path",
+          "[krunker] seek: no lobby list" in text and "[krunker] game-list: FRA:bbbbb" in text, [l for l in lines if "[krunker]" in l][-12:])
+
+
 # ---------------------------------------------------------------- native: the challenge window (kn_webview.h)
 
 WEBVIEW_SOLVE_MS = 1500  # the stub widget's "player" solves it this long after it is shown
@@ -1160,7 +1260,9 @@ WEBVIEW_PAGE = """<!doctype html>
       box.textContent = 'stub challenge: the player is solving it';
       el.appendChild(box);
       probe('render=1&sitekey=' + encodeURIComponent(o.sitekey) + '&appearance=' + encodeURIComponent(o.appearance) +
-            '&callback=' + (typeof o.callback));
+            '&callback=' + (typeof o.callback) + '&visibility=' + encodeURIComponent(document.visibilityState));
+      // interactive: Turnstile's managed mode wants the player first (the window must show)
+      if (%(interactive)s && o['before-interactive-callback']) o['before-interactive-callback']();
       setTimeout(function () { box.textContent = 'stub challenge: solved'; o.callback(%(token)s); }, %(delay)d);
       return 'stub-widget';
     },
@@ -1195,8 +1297,9 @@ class ChallengePage:
     """The test's krunker.io page (KRUNKNATIVE_KRUNKER_CAPTCHA_URL=http://127.0.0.1:<port>/robots.txt) and,
     on the same port as http://localhost:<port>, the frame of another origin."""
 
-    def __init__(self, port):
+    def __init__(self, port, interactive=False):
         self.port, self.loads, self.probes, self.paths = port, [], [], []
+        self.interactive = interactive
         self.httpd = None
 
     def start(self):
@@ -1212,7 +1315,8 @@ class ChallengePage:
                 if u.path == "/robots.txt":
                     page.loads.append(self.headers.get("User-Agent", ""))
                     body = WEBVIEW_PAGE % {"token": json.dumps(webview_token(len(page.loads))), "delay": WEBVIEW_SOLVE_MS,
-                                           "forge": "http://localhost:%d/forge" % page.port}
+                                           "forge": "http://localhost:%d/forge" % page.port,
+                                           "interactive": "true" if page.interactive else "false"}
                     ctype = "text/html; charset=utf-8"
                 elif u.path == "/forge":
                     body, ctype = FORGE_PAGE % {"token": json.dumps(FORGED_TOKEN)}, "text/html; charset=utf-8"
@@ -1243,8 +1347,8 @@ class ChallengePage:
 def webview_skip_reason():
     if not os.path.isfile(os.path.join(BUILD, "libkn_webview.a")):
         return "this client_bin was built without a webview (KN_WEBVIEW off, or webkit2gtk-4.1 not found)"
-    if not shutil.which("xvfb-run"):
-        return "xvfb-run is missing (the challenge window needs an X display of its own)"
+    if not shutil.which("Xvfb"):
+        return "Xvfb is missing (the challenge window needs an X display of its own)"
     return None
 
 
@@ -1258,29 +1362,56 @@ def session_alive(pgid):
         return True
 
 
+XVFB_W, XVFB_H = 1280, 800
+
+
+def webview_session(label, script, page, used_first):
+    """client_bin (headless game) with the challenge window on a private Xvfb whose top-level windows a
+    watcher records (x11_watch.py: no window manager, so a window maps where the client put it)."""
+    xvfb = PrivateXvfb("%dx%dx24" % (XVFB_W, XVFB_H))
+    watch = X11Watch(xvfb.display)
+    url = "http://127.0.0.1:%d/robots.txt" % page.port
+    p = None
+    try:
+        stub, p, out, log = launch_native(label, script, {"KRUNKNATIVE_KRUNKER_CAPTCHA_URL": url}, display=xvfb.display)
+        if used_first:
+            stub.used_captchas.add(webview_token(1))  # the matchmaker refuses the first one (used / expired)
+        lines = finish_native(label, stub, p, out, log, timeout=180)
+        left = session_alive(p.pid)
+        if left:
+            time.sleep(3)
+            left = session_alive(p.pid)
+        time.sleep(0.2)
+        maps = watch.maps(include_override=True)
+        moves = {m["window"]: watch.moves_after_map(m["window"]) for m in maps}
+    finally:
+        if p is not None and session_alive(p.pid):
+            os.killpg(p.pid, signal.SIGKILL)
+        page.stop()
+        watch.stop()
+        xvfb.stop()
+    return stub, lines, log, left, maps, moves
+
+
 def run_native_webview():
-    """The challenge window: a refused first token re-opens it, the second joins."""
+    """The challenge window when Turnstile passes by itself: it runs hidden and is never mapped; a
+    refused first token starts it again (hidden too), the second joins."""
     label = "native-webview"
     (page_port,) = kn_proto.free_ports(1)
     page = ChallengePage(page_port)
     page.start()
     script = ("0 boot\n1200 vis @modal knCaptchaHolder knCaptchaSolve knCaptchaManual knCaptchaOpen knCaptchaCbRow\n"
               "16000 play\n21000 players\n21200 quit\n")
-    url = "http://127.0.0.1:%d/robots.txt" % page_port
-    stub, p, out, log = launch_native(label, script, {"KRUNKNATIVE_KRUNKER_CAPTCHA_URL": url},
-                                      wrap=("xvfb-run", "-a", "-s", "-screen 0 1280x800x24 -nolisten tcp"))
-    stub.used_captchas.add(webview_token(1))  # the matchmaker refuses the first one (used / expired)
-    try:
-        lines = finish_native(label, stub, p, out, log, timeout=180)
-        left = session_alive(p.pid)
-        if left:
-            time.sleep(3)
-            left = session_alive(p.pid)
-    finally:
-        if session_alive(p.pid):
-            os.killpg(p.pid, signal.SIGKILL)
-        page.stop()
+    stub, lines, log, left, maps, moves = webview_session(label, script, page, True)
     text = "\n".join(lines)
+    check(f"{label}: the challenge passed by itself: no window was ever mapped on the display", not maps,
+          [(m["name"], m["x"], m["y"]) for m in maps])
+    check(f"{label}: ... it ran hidden both times and was never shown",
+          text.count("[webview] challenge running hidden") == 2 and "[webview] challenge window shown" not in text and
+          text.count("[webview] challenge window closed (it was never shown)") == 2,
+          [l for l in lines if "[webview]" in l][:12])
+    vis = [q.get("visibility") for q in page.probes if q.get("render")]
+    check(f"{label}: hidden, the page still runs as a visible one (Turnstile is not throttled)", vis and all(v == "visible" for v in vis), vis)
     client_text = "\n".join(l for l in lines if "[input_script] type" not in l)
     check(f"{label}: WebKitGTK came up on the run's own X display", "[webview] WebKitGTK " in text,
           next((l for l in lines if "[webview]" in l), log.path))
@@ -1311,6 +1442,37 @@ def run_native_webview():
     check_matchmaker(label, stub, [webview_token(1), webview_token(2)], client_text)
     check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
     check(f"{label}: nothing of the run is left (client_bin, WebKit's processes, Xvfb)", not left)
+
+
+def run_native_webview_interactive():
+    """Turnstile needs the player (before-interactive-callback): only then is the window created,
+    mapped once, already centred on the work area and above the game, never moved after; the
+    player's token joins."""
+    label = "native-webview-interactive"
+    (page_port,) = kn_proto.free_ports(1)
+    page = ChallengePage(page_port, interactive=True)
+    page.start()
+    script = "0 boot\n10000 play\n15000 players\n15200 quit\n"
+    stub, lines, log, left, maps, moves = webview_session(label, script, page, False)
+    text = "\n".join(lines)
+    wins = [m for m in maps if "krunker.io" in m["name"]]
+    check(f"{label}: one window, the challenge's, was mapped", len(maps) == 1 and len(wins) == 1,
+          [(m["name"], m["x"], m["y"], m["w"], m["h"]) for m in maps] or [l for l in lines if "[webview]" in l][:12])
+    want = ((XVFB_W - 520) // 2, (XVFB_H - 600) // 2, 520, 600)
+    if wins:
+        w = wins[0]
+        check(f"{label}: its first mapped position is centred on the work area {want}", (w["x"], w["y"], w["w"], w["h"]) == want,
+              (w["x"], w["y"], w["w"], w["h"]))
+        check(f"{label}: never moved after it was mapped", not moves[w["window"]], moves[w["window"]])
+    check(f"{label}: shown because Turnstile needs the player (it ran hidden until then)",
+          "[webview] challenge running hidden" in text and
+          "[webview] challenge window shown (Turnstile needs the player) at %d,%d %dx%d" % want in text,
+          [l for l in lines if "[webview]" in l][:12])
+    check(f"{label}: the token joins (one attempt), the window closes",
+          text.count("[krunker] captcha: solved in the challenge window") == 1 and "[webview] challenge window closed\n" in text + "\n",
+          [l for l in lines if "[webview]" in l or "captcha:" in l][:12])
+    check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+    check(f"{label}: nothing of the run is left (client_bin, WebKit's processes)", not left)
 
 
 class Cdp:
@@ -1562,7 +1724,12 @@ def main():
         run_native_sync()
         run_native_lobby()
         run_native_optout()
+        run_native_exclude()
+        run_native_exclude_mm()
         ran = True
+    if ONLY == "exclude" and os.path.isfile(f"{BUILD}/client_bin"):  # just Find New Game's runs
+        run_native_exclude()
+        run_native_exclude_mm()
     webview_skipped = None
     if ONLY in ("", "native", "webview") and os.path.isfile(f"{BUILD}/client_bin"):
         webview_skipped = webview_skip_reason()
@@ -1570,6 +1737,7 @@ def main():
             print(f"krunker_official_e2e: the native challenge-window run is SKIPPED: {webview_skipped}")
         else:
             run_native_webview()
+            run_native_webview_interactive()
             ran = True
     if ONLY in ("", "web") and DIST and CHROME and os.path.isfile(os.path.join(DIST, "client.wasm")):
         run_web("ok")

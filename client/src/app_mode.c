@@ -425,9 +425,7 @@ static void web_navigate(const AppMode mode, const char *query, const int new_ta
 
 void app_mode_start(Client *client) {
     g_app.client = client;
-#ifndef __EMSCRIPTEN__
-    app_window_place(client);
-#endif
+    // (a page window is placed before it is shown: client_render_window_created, KRUNKNATIVE_WINDOW_NEAR)
 #ifdef __EMSCRIPTEN__
     web_start_page();
 #endif

@@ -148,9 +148,14 @@ void client_render_toggle_fullscreen(Client *client);
 // (GLFW_VISIBLE false) for client_render_window_created; enabled = 0 (headless, the scenario
 // renderer) only clears the variable. Web: no-ops.
 int client_render_window_prepare(int *width, int *height, int enabled);
-// Right after glfwCreateWindow: place, switch to the mode / maximize, then show the window
-// (before any frame), and start tracking the windowed rect.
+// Right after glfwCreateWindow: place (the kept position, else centred on the work area:
+// client_window_centered_pos), switch to the mode / maximize, then show the window (before any frame),
+// and start tracking the windowed rect. It is never shown first and moved after.
 void client_render_window_created(Client *client);
+// Natively: the client-area position that centres a w x h window (window: its decorations, NULL =
+// none) on the work area of the monitor holding (near_x, near_y) when has_near, else the primary
+// one (window_state_center). 0 = no position (Wayland, no monitor, the web).
+int client_window_centered_pos(GLFWwindow *window, int w, int h, int has_near, int near_x, int near_y, int *x, int *y);
 // 1 when the window came from KRUNKNATIVE_RESTORE_WINDOW (its size wins over Resolution).
 int client_render_window_restored(void);
 // Right before exec (F4 app_reload, the Settings relaunch): KRUNKNATIVE_RESTORE_WINDOW for

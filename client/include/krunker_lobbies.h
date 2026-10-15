@@ -44,10 +44,14 @@ double krunker_lobbies_players(void);           // totalPlayerCount of the last 
 const char *krunker_region_name(const char *code);
 
 // The best official lobby for the seek preferences (seek_prefs.h): public (not custom, no
-// password), not full, the wanted mode and map, the most players. 1 = found (id written).
+// password), not full, the wanted mode and map, the most players; one this client was not in lately
+// first (krunker_net_recent_rank), else the least recent of those, the one it is in last. 1 = found
+// (id written).
 int krunker_lobbies_pick(char *id, size_t n);
 // Seek an official lobby: pick one now (a fresh enough list), or once the list arrives, and
-// open it (krunker_lobbies_open); none matching = a toast. 1 = started, 0 = not available.
+// open it (krunker_lobbies_open); none matching = a toast, only the one the player is in = a toast
+// (it stays). No list at all (krunker.io refused it) and joining in-client: the matchmaker picks
+// (krunker_net_seek_new). 1 = started, 0 = not available.
 int krunker_lobbies_seek(void);
 // Join official lobby <id> in this client (krunker_net_join; the Servers window closes, failures are
 // explained by krunker_net), or, when krunker_net_in_client() says no (the browser opt-out, Windows),

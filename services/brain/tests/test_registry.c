@@ -84,6 +84,19 @@ int main(void) {
     p.cross_region = 0;
     CHECK(registry_pick(r, &p, &qxf, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "FRA:ccccc")); /* the only one */
     p.cross_region = 1;
+    /* excludeRecent (the lobbies before it, recent_lobbies.h): skipped too, so F4 never bounces
+     * between the last two; when nothing else has room they come back before the one it leaves */
+    MmPickQuery qr = {.region = "us-nj", .auto_change = 1, .now_ms = 6000, .exclude_game = "NY2:bbbbb", .exclude_recent = "NY:aaaaa"};
+    CHECK(registry_pick(r, &p, &qr, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "FRA:ccccc"));
+    qr.exclude_recent = "FRA:ccccc,NY:aaaaa";
+    CHECK(registry_pick(r, &p, &qr, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "NY:aaaaa")); /* a recent one, not the current */
+    qr.exclude_recent = "NY:aaaa,Y:aaaaa,"; /* whole ids only */
+    CHECK(registry_pick(r, &p, &qr, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "NY:aaaaa"));
+    MmPickQuery qr2 = {.region = "de-fra", .auto_change = 1, .now_ms = 6000, .exclude_recent = "FRA:ccccc"}; /* no excludeGame */
+    CHECK(registry_pick(r, &p, &qr2, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "NY2:bbbbb"));
+    p.cross_region = 0;
+    CHECK(registry_pick(r, &p, &qr2, &pick) == MM_PICK_OK && !strcmp(pick.lobby->game_id, "FRA:ccccc")); /* the only one */
+    p.cross_region = 1;
 
     /* requested game */
     MmPickQuery qg = {.region = "us-nj", .game_id = "FRA:custm", .auto_change = 0, .now_ms = 2000};

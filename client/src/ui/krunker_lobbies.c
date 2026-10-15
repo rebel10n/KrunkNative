@@ -259,7 +259,11 @@ const char *krunker_lobbies_error(void) { return K.error; }
 double krunker_lobbies_players(void) { return K.players; }
 
 int krunker_lobbies_pick(char *id, const size_t n) {
-    const cJSON *t;
+    // the busiest match this client was not in lately; else the least recent of those it was in, the
+    // game it is in last (recent_lobbies.h, krunker_net_recent_rank): Find New Game never lands back
+    // in the game it leaves, nor bounces between the last two, while anything else has room
+    const cJSON *t, *best = NULL;
+    int best_rank = 0;
     cJSON_ArrayForEach(t, krunker_lobbies_list()) { // most players first
         const cJSON *meta = cJSON_GetArrayItem(t, 4);
         const int players = (int) cJSON_GetNumberValue(cJSON_GetArrayItem(t, 2));
@@ -267,10 +271,15 @@ int krunker_lobbies_pick(char *id, const size_t n) {
         if (players >= max || cJSON_IsTrue(cJSON_GetObjectItem(meta, "cs")) || cJSON_IsTrue(cJSON_GetObjectItem(meta, "pw"))) continue;
         const cJSON *mode = cJSON_GetObjectItem(meta, "mode");
         if (!seek_prefs_match(cJSON_IsNumber(mode) ? mode->valueint : -1, cJSON_GetStringValue(cJSON_GetObjectItem(meta, "i")))) continue;
-        snprintf(id, n, "%s", cJSON_GetStringValue(cJSON_GetArrayItem(t, 0)));
-        return 1;
+        const int rank = krunker_net_recent_rank(cJSON_GetStringValue(cJSON_GetArrayItem(t, 0)));
+        if (best && (!best_rank || (rank && rank <= best_rank))) continue;
+        best = t;
+        best_rank = rank;
+        if (!rank) break;
     }
-    return 0;
+    if (!best) return 0;
+    snprintf(id, n, "%s", cJSON_GetStringValue(cJSON_GetArrayItem(best, 0)));
+    return 1;
 }
 
 int krunker_lobbies_seek(void) {
@@ -285,12 +294,30 @@ int krunker_lobbies_seek(void) {
         }
         K.seek_pending = 0;
         if (!K.list) {
+            // no lobby list (krunker.io refused or dropped GET /game-list; this one retries only after
+            // KRUNKER_RETRY_MS): in-client, krunker_net_seek_new asks for the list once more itself, else
+            // the matchmaker picks, as krunker.io's own client lets it (excludeGame)
+            if (krunker_net_in_client() && g_lobbies_client) {
+                printf("[krunker] seek: no lobby list (%s): Find New Game through the matchmaker\n", K.error[0] ? K.error : "none");
+                menu_show_window(MENU_WINDOW_NONE, 0);
+                krunker_net_seek_new(g_lobbies_client, NULL, 1);
+                return 1;
+            }
             ui_notify(K.error[0] ? K.error : I18N("kn.kio.notReachableNow", "krunker.io is not reachable right now"));
             return 1;
         }
     }
     char id[80], want[128], text[256];
     if (krunker_lobbies_pick(id, sizeof(id))) {
+        if (!strcmp(id, krunker_net_game())) {
+            // the only official lobby with room is the one the player is in: stay, no rejoin
+            seek_prefs_describe(want, sizeof(want));
+            I18N_F(text, "kn.kio.noOtherLobby", "No other official krunker.io lobby has room for {0}: you stay in this one", want);
+            printf("[krunker] seek: no other official lobby has room, staying in %s\n", id);
+            ui_notify(text);
+            return 1;
+        }
+        printf("[krunker] seek: official lobby %s%s\n", id, krunker_net_recent_rank(id) ? " (a recent one: nothing else has room)" : "");
         krunker_lobbies_open(id);
     } else {
         seek_prefs_describe(want, sizeof(want));

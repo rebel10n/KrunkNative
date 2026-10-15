@@ -205,6 +205,10 @@ typedef struct MmPickQuery {
     const char *exclude_game;      /* seek ?excludeGame= (v10 Quick Match: the lobby the player leaves):
                                     * quick join picks another lobby when one has room, else this one
                                     * (NULL/"" = none) */
+    const char *exclude_recent;    /* seek ?excludeRecent= (KrunkNative, comma list): the lobbies the
+                                    * player was in before that one (client recent_lobbies.h). Skipped
+                                    * like excludeGame, but they come back before it when nothing else
+                                    * has room: never a bounce between the last two (NULL/"" = none) */
     /* v10 dataQuery dsmo / dsma (the saved seek_modes / seek_maps): quick join only takes lobbies
      * playing one of these mode indices (meta.mode) / map indices (meta.mapIndex); none = any.
      * A requested ?game= is not filtered. */

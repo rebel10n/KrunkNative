@@ -71,3 +71,14 @@ typedef enum {
 
 // Writes the steps for `s` into out (at least WINDOW_STEPS_MAX entries); returns the count.
 int window_state_steps(const WindowStartup *s, WindowStep *out);
+
+// Where a window without a kept position opens (launch, page windows, the editor's views): centred on
+// a monitor's work area (wx, wy, ww, wh: the desktop minus panels / docks) in screen coordinates.
+// w, h: the client area; frame: the decorations around it (left, top, right, bottom; NULL / 0 when
+// unknown). The whole frame is centred; one bigger than the work area keeps its title bar inside (the
+// top-left corner of the frame at the work area's). *x, *y: the client area's top-left, as
+// glfwSetWindowPos takes it.
+void window_state_center(int wx, int wy, int ww, int wh, int w, int h, const int frame[4], int *x, int *y);
+// The work area among n monitors (each wa[i] = {x, y, w, h}) a new window opens on: the one holding
+// the point (px, py) when has_point (the opener's centre), else `primary`. Returns that index, -1 when n <= 0.
+int window_state_pick_monitor(const int (*wa)[4], int n, int primary, int has_point, int px, int py);

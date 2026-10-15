@@ -44,7 +44,6 @@ extern char **environ;
 
 #define APP_WINDOW_QUERY_MAX 1024
 #define APP_WINDOW_LINE_MAX 2048
-#define APP_WINDOW_OFFSET 64 // px right/down of the opener
 
 // v3.1.1 subWin sizes (main.js): social 1200x600, editor 1200x800, viewer 800x600
 static const int k_window_size[APP_MODE_COUNT][2] = {{1280, 720}, {1200, 600}, {1200, 800}, {800, 600}};
@@ -139,19 +138,6 @@ void app_window_init(const char *argv0) {
 #endif
 }
 
-// KRUNKNATIVE_WINDOW_POS=<x>,<y> (set by the opener): place this window there, once.
-void app_window_place(Client *client) {
-    const char *pos = getenv("KRUNKNATIVE_WINDOW_POS");
-    int x, y;
-    if (!pos || !client || !client->window || sscanf(pos, "%d,%d", &x, &y) != 2) return;
-    glfwSetWindowPos(client->window, x, y);
-#ifdef _WIN32
-    SetEnvironmentVariableA("KRUNKNATIVE_WINDOW_POS", NULL);
-#else
-    unsetenv("KRUNKNATIVE_WINDOW_POS"); // not inherited by the windows this one opens
-#endif
-}
-
 int app_window_has_router(void) {
     return g_parent_out >= 0;
 }
@@ -176,13 +162,14 @@ static int child_alive(AppChild *c) {
 static int spawn_window(Client *client, const AppMode mode, const char *query) {
     char size[64];
     snprintf(size, sizeof(size), "KRUNKNATIVE_WINDOW_SIZE=%dx%d", k_window_size[mode][0], k_window_size[mode][1]);
-    // new windows open offset from the one that opened them, never fully covering it
-    // (window managers may still place them themselves)
+    // new windows open centred on the work area of the opener's monitor (its centre point,
+    // KRUNKNATIVE_WINDOW_NEAR; client_render_window_created), placed before they are shown
     char pos[64] = "";
     if (client && client->window) {
-        int x = 0, y = 0;
+        int x = 0, y = 0, w = 0, h = 0;
         glfwGetWindowPos(client->window, &x, &y);
-        snprintf(pos, sizeof(pos), "KRUNKNATIVE_WINDOW_POS=%d,%d", x + APP_WINDOW_OFFSET, y + APP_WINDOW_OFFSET);
+        glfwGetWindowSize(client->window, &w, &h);
+        snprintf(pos, sizeof(pos), "KRUNKNATIVE_WINDOW_NEAR=%d,%d", x + w / 2, y + h / 2);
     }
     const int offline = client && client->offline;
     fprintf(stderr, "[app] new %s window%s%s%s\n", app_mode_name(mode), query && *query ? " ?" : "", query ? query : "",
@@ -191,13 +178,13 @@ static int spawn_window(Client *client, const AppMode mode, const char *query) {
     char cmd[8192];
     snprintf(cmd, sizeof(cmd), "\"%s\" --windowed%s %s \"%s\"", g_exe, offline ? " --offline" : "", k_mode_flags[mode], query ? query : "");
     SetEnvironmentVariableA("KRUNKNATIVE_WINDOW_SIZE", size + strlen("KRUNKNATIVE_WINDOW_SIZE="));
-    if (pos[0]) SetEnvironmentVariableA("KRUNKNATIVE_WINDOW_POS", pos + strlen("KRUNKNATIVE_WINDOW_POS="));
+    if (pos[0]) SetEnvironmentVariableA("KRUNKNATIVE_WINDOW_NEAR", pos + strlen("KRUNKNATIVE_WINDOW_NEAR="));
     STARTUPINFOA si = {0};
     PROCESS_INFORMATION pi = {0};
     si.cb = sizeof(si);
     const BOOL ok = CreateProcessA(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi);
     SetEnvironmentVariableA("KRUNKNATIVE_WINDOW_SIZE", NULL);
-    SetEnvironmentVariableA("KRUNKNATIVE_WINDOW_POS", NULL);
+    SetEnvironmentVariableA("KRUNKNATIVE_WINDOW_NEAR", NULL);
     if (!ok) return 0;
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
@@ -226,7 +213,7 @@ static int spawn_window(Client *client, const AppMode mode, const char *query) {
     char **envp = calloc(n + 4, sizeof(char *));
     size_t e = 0;
     for (size_t i = 0; i < n; i++) {
-        if (!strncmp(environ[i], "KRUNKNATIVE_WINDOW_SIZE=", 24) || !strncmp(environ[i], "KRUNKNATIVE_WINDOW_POS=", 23) ||
+        if (!strncmp(environ[i], "KRUNKNATIVE_WINDOW_SIZE=", 24) || !strncmp(environ[i], "KRUNKNATIVE_WINDOW_NEAR=", 24) ||
             !strncmp(environ[i], "KRUNKNATIVE_APP_IPC=", 20)) continue;
         envp[e++] = environ[i];
     }

@@ -16,13 +16,15 @@ Headless client_bin runs (one at a time, input scripts clicking the page by elem
      tile the server list with both lobbies, and no frame from the click to the list takes over
      500 ms (`ft`: the main thread never freezes); Custom Games opens the Custom Games window with its
      map cards; Host Game opens v10's host chooser; More Krunker opens its popup;
-     Quick Match seeks again with excludeGame and joins the OTHER lobby
+     Quick Match seeks again with excludeGame and joins the OTHER lobby; a second one sends the first
+     lobby as excludeRecent too and, the two being the only ones, goes back to it (never the current)
   2. a guest: "Login or Register" opens v10's modal; Register here -> username, password, email
      -> Register: the account exists in the brain, the modal closes and the header is the
      signed-in bar without a restart; Logout -> the guest bar again; the modal again -> "(use
      username instead)" -> Login with that account's username -> signed in again
      (signing in with the email: v10_email_login_e2e.py)
-  3. brain: /mm/seek-game?excludeGame= never returns the excluded lobby while another has room
+  3. brain: /mm/seek-game?excludeGame= never returns the excluded lobby while another has room;
+     excludeRecent covering the rest falls back to the recent lobby before excludeGame's
 
 Needs a headless GL device (KRUNKNATIVE_HEADLESS=1: EGL). Exit 77 when the database is unavailable.
 """
@@ -195,7 +197,8 @@ SIGNED_IN_SCRIPT = """0 menu
 14600 call clearPops
 15000 clickid menuBtnQuickMatch
 21000 vis @after menuBtnQuickMatch :preview
-21100 quit
+21500 clickid menuBtnQuickMatch
+27000 quit
 """
 
 GUEST_SCRIPT = """0 menu
@@ -264,7 +267,14 @@ def signed_in_case(brain_port, games):
     qm = re.search(r"\[mm\] quick match: seeking a lobby other than (\S+)", text)
     check("1: Quick Match seeks with the current lobby excluded", qm and joins and qm.group(1) == joins[0],
           "%s %s" % (qm.group(1) if qm else None, joins))
-    check("1: Quick Match joins the other lobby", len(joins) >= 2 and joins[-1] != joins[0] and joins[-1] in games,
+    check("1: Quick Match joins the other lobby", len(joins) >= 2 and joins[1] != joins[0] and joins[1] in games,
+          str(joins))
+    # the second Quick Match: excludeGame = this lobby, excludeRecent = the one before it (recent_lobbies.h);
+    # with only those two, the brain falls back to the one before, never the one it leaves
+    qm2 = re.search(r"\[mm\] seek: excluding (\S+), then the recent (\S+)", text)
+    check("1: a second Quick Match also excludes the lobby before (excludeRecent)",
+          qm2 and len(joins) >= 2 and (qm2.group(1), qm2.group(2)) == (joins[1], joins[0]), "%s %s" % (qm2.groups() if qm2 else None, joins))
+    check("1: ... and with nothing else, joins the one before, not the one it leaves", len(joins) == 3 and joins[2] == joins[0],
           str(joins))
     a = vis(text, "after")
     check("1: back on the menu with the new game", a.get("menuBtnQuickMatch") == "1", str(a))
@@ -302,6 +312,12 @@ def brain_case(brain_port, games):
             if code == 200:
                 picked.add(rep.get("gameId"))
         check("3: excludeGame=%s never picks it" % g, picked and g not in picked, str(picked))
+    if len(games) >= 2:
+        # excludeRecent: skipped too; with every lobby excluded, the recent one comes back before excludeGame's
+        a, b = games[0], games[1]
+        code, rep = http(brain_port, "/mm/seek-game?hostname=krunknative&region=local&ruleset=v10&excludeGame=%s&excludeRecent=%s" % (a, b))
+        check("3: excludeGame + excludeRecent covering every lobby: the recent one, not excludeGame's",
+              code == 200 and rep.get("gameId") == b, "%s %s" % (code, rep))
 
 
 def main():

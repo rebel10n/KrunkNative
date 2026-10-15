@@ -24,6 +24,7 @@
 #include <headless.h>
 #include <frame_target.h>
 #include <sky.h>
+#include <render_settings.h> // client_window_centered_pos: a view opens centred, placed before it is shown
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -400,7 +401,7 @@ static void set_context_hints(void) {
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 5);
 #endif
-    glfwWindowHint(GLFW_VISIBLE, GLFW_TRUE);
+    glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE); // shown once placed (ed_view_open): never moved after it maps
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 }
 #endif
@@ -430,9 +431,12 @@ void ed_view_open(EditorProject *p) {
             editor_message("Could not open a view window.");
             return;
         }
-        int x = 0, y = 0;
-        glfwGetWindowPos(main, &x, &y);
-        glfwSetWindowPos(v->win, x + 80, y + 80);
+        // centred on the work area of the editor window's monitor, placed while hidden, then shown
+        int mx = 0, my = 0, mw = 0, mh = 0, x = 0, y = 0;
+        glfwGetWindowPos(main, &mx, &my);
+        glfwGetWindowSize(main, &mw, &mh);
+        if (client_window_centered_pos(v->win, 800, 600, 1, mx + mw / 2, my + mh / 2, &x, &y)) glfwSetWindowPos(v->win, x, y);
+        glfwShowWindow(v->win);
         glfwMakeContextCurrent(v->win);
         glfwSwapInterval(0); // views never hold up the shared loop
         glGenVertexArrays(1, &v->vao); // VAOs are per context

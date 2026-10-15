@@ -291,15 +291,33 @@ static void copy_str(cJSON *dst, const cJSON *info, const char *key) {
     cJSON_AddStringToObject(dst, key, clean);
 }
 
+/* host:port of e is one of the comma-separated entries of list */
+static int excluded(const FinderEntry *e, const char *list) {
+    char want[FINDER_HOST_MAX + 16];
+    const int n = snprintf(want, sizeof(want), "%s:%d", e->host, e->port);
+    if (n <= 0 || (size_t) n >= sizeof(want)) return 0;
+    for (const char *p = list; p && *p;) {
+        const char *end = strchr(p, ',');
+        const size_t len = end ? (size_t) (end - p) : strlen(p);
+        if (len == (size_t) n && !strncmp(p, want, len)) return 1;
+        p = end ? end + 1 : NULL;
+    }
+    return 0;
+}
+
 cJSON *finder_list(FinderTable *t, const FinderFilter *f, uint64_t now_ms) {
     cJSON *arr = cJSON_CreateArray();
     const int limit = f->limit > 0 && f->limit < 500 ? f->limit : 500;
     /* fresh = verified by a poll within two intervals plus the timeout */
     const uint64_t fresh = (uint64_t) t->cfg.poll_interval_ms * 2 + (uint64_t) t->cfg.poll_timeout_ms;
+    const char *exclude = f->exclude && *f->exclude ? f->exclude : NULL;
+    /* with an exclude list: first without those servers; only when that lists nothing, with them */
     int n = 0;
+    for (int pass = exclude ? 0 : 1; pass < 2 && n == 0; pass++)
     for (size_t i = 0; i < t->count && n < limit; i++) {
         const FinderEntry *e = t->items[i];
         if (!e->info || now_ms - e->last_ok_ms > fresh || !matches(e, f)) continue;
+        if (pass == 0 && excluded(e, exclude)) continue;
         const cJSON *info = e->info;
         cJSON *o = cJSON_CreateObject();
         cJSON_AddStringToObject(o, "host", e->host);

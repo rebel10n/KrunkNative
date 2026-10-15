@@ -30,6 +30,7 @@
 #include <krunker_net.h>     // krunker_net_in_client: official lobbies join here unless the browser opt-out
 #include <v10_party.h>     // the server password popup (ERROR 004005)
 #include <strike_director.h> // Krunker Strike: seek through the director, else the finder's Strike pool
+#include <recent_lobbies.h>  // F4 / Quick Match / quick join never land back in the lobby they leave
 #include <flavor.h>
 #include <strings.h>
 #include <ctype.h>
@@ -66,6 +67,10 @@ static char g_pending_play[96], g_pending_game[160]; // ?play= / ?game= (servers
 static double g_start_time;
 static char g_region[32];        // region id the client seeks in
 static char g_exclude_game[160]; // v10 Quick Match: the next seek's excludeGame (the lobby it leaves)
+// the lobbies (game ids) and servers (host:port, finder / Strike) this client was in lately, most
+// recent first: F4 / Quick Match send them as excludeRecent / the finder's exclude, quick join tries
+// them last, so a new seek never bounces between the last two (recent_lobbies.h)
+static RecentLobbies g_recent_games, g_recent_servers;
 static char g_game_id[160];      // gameId: the lobby this client is in (or joining), canonical (CHITOWN2:kz862)
 static char g_game_region[32];   // its region (the seek answer's), for the short link form ("" = unknown)
 static int g_seek_inflight;
@@ -248,6 +253,12 @@ static void join_server(const char *host, const int port, const char *game_id, c
     g_server_gone = 0;
     snprintf(g_game_id, sizeof(g_game_id), "%s", game_id ? game_id : "");
     snprintf(g_game_region, sizeof(g_game_region), "%s", region ? region : "");
+    recent_lobbies_push(&g_recent_games, g_game_id);
+    {
+        char server[RECENT_LOBBY_ID_MAX];
+        snprintf(server, sizeof(server), "%s:%d", host ? host : "", port);
+        if (host && host[0]) recent_lobbies_push(&g_recent_servers, server);
+    }
 
 #ifdef __EMSCRIPTEN__
     // web: the page connects once (the startup seek); later switches reload with ?game=
@@ -599,7 +610,15 @@ static void on_seek(void *user, const int status, const char *body, const size_t
     seek_req_free(req);
     const cJSON *host = cJSON_GetObjectItem(res, "host");
     const cJSON *port = cJSON_GetObjectItem(res, "port");
-    if (status == 200 && cJSON_IsString(host) && cJSON_IsNumber(port)) {
+    const cJSON *answer_game = cJSON_GetObjectItem(res, "gameId");
+    if (status == 200 && find && g_client->net_connected && g_find_prev_game[0] && cJSON_IsString(answer_game) &&
+        !strcmp(answer_game->valuestring, g_find_prev_game)) {
+        // Find New Game / Quick Match: the matchmaker had nothing but the lobby the player is in (its
+        // excludeGame fallback): stay in it, no reconnect
+        snprintf(g_game_id, sizeof(g_game_id), "%s", g_find_prev_game);
+        printf("[mm] find new game: no other lobby has room, staying in %s\n", g_find_prev_game);
+        ui_notify(I18N("kn.mm.noOtherLobby", "No other lobby has room: you stay in this one"));
+    } else if (status == 200 && cJSON_IsString(host) && cJSON_IsNumber(port)) {
         const cJSON *game = cJSON_GetObjectItem(res, "gameId");
         const cJSON *key = cJSON_GetObjectItem(res, "clientId");
         const cJSON *web = cJSON_GetObjectItem(res, "webUrl");
@@ -669,15 +688,25 @@ static void on_strike_finder(void *user, const int status, const char *body, con
     g_seek_inflight = 0;
     cJSON *res = status == 200 ? cJSON_Parse(body) : NULL;
     const cJSON *best = NULL, *srv;
-    int best_players = -1;
+    int best_players = -1, best_rank = 0;
     cJSON_ArrayForEach(srv, cJSON_GetObjectItem(res, "servers")) {
         const int players = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(srv, "players"));
         const int max = (int) cJSON_GetNumberValue(cJSON_GetObjectItem(srv, "max"));
         const char *flavor = cJSON_GetStringValue(cJSON_GetObjectItem(srv, "flavor"));
         if (!flavor || strcmp(flavor, "strike") || cJSON_IsTrue(cJSON_GetObjectItem(srv, "password")) || players >= max) continue;
-        if (!cJSON_IsString(cJSON_GetObjectItem(srv, "host")) || players <= best_players) continue;
+        if (!cJSON_IsString(cJSON_GetObjectItem(srv, "host"))) continue;
+        // F4 / Quick Match: a server this client was not in lately first (also with a finder that
+        // ignores ?exclude=), then the older recent ones; the fullest among equals
+        char server[RECENT_LOBBY_ID_MAX];
+        snprintf(server, sizeof(server), "%s:%d", cJSON_GetStringValue(cJSON_GetObjectItem(srv, "host")),
+                 (int) cJSON_GetNumberValue(cJSON_GetObjectItem(srv, "port")));
+        const int rank = g_find_seek ? recent_lobbies_rank(&g_recent_servers, server) : 0;
+        const int better = !best || (best_rank && (!rank || rank > best_rank)) ||
+                           (rank == best_rank && players > best_players);
+        if (!better) continue;
         best = srv;
         best_players = players;
+        best_rank = rank;
     }
     if (g_pin != PIN_NONE) {
         printf("[strike] finder answer ignored: %s\n", g_pin == PIN_DIRECT ? "pinned to a direct server" : "disconnected by the user");
@@ -699,8 +728,16 @@ static void on_strike_finder(void *user, const int status, const char *body, con
 static int strike_finder_seek(const char *error) {
     const char *finder = online_finder_url();
     if (!finder[0]) return 0;
-    char url[384];
-    snprintf(url, sizeof(url), "%s%cflavor=strike&space=1", finder, strchr(finder, '?') ? '&' : '?');
+    char url[2048];
+    const int n = snprintf(url, sizeof(url), "%s%cflavor=strike&space=1", finder, strchr(finder, '?') ? '&' : '?');
+    if (g_find_seek && g_recent_servers.count && n > 0 && (size_t) n < sizeof(url)) {
+        // F4 / Quick Match: the servers it leaves (this one and the recent ones), listed only when
+        // nothing else has room (finder.h ?exclude=)
+        char recent[RECENT_LOBBIES_MAX * RECENT_LOBBY_ID_MAX], enc[sizeof(url)];
+        recent_lobbies_join(&g_recent_servers, NULL, recent, sizeof(recent));
+        backend_url_encode(enc, sizeof(enc), recent);
+        snprintf(url + n, sizeof(url) - (size_t) n, "&exclude=%s", enc);
+    }
     char *copy = strdup(error ? error : "");
     g_seek_inflight = backend_http_request("GET", url, NULL, on_strike_finder, copy);
     if (!g_seek_inflight) free(copy);
@@ -746,7 +783,7 @@ static int strike_seek(const int priv, const char *code) {
 // Every caller is an explicit matchmaking action (the automatic ones check g_pin first):
 // it unpins.
 static void seek(const char *game_id, const int auto_change, void *quiet) {
-    char path[1024], enc[512];
+    char path[3072], enc[512];
     g_pin = PIN_NONE;
     g_rejoin_seek = g_rejoin_next;
     g_rejoin_next = 0;
@@ -775,6 +812,15 @@ static void seek(const char *game_id, const int auto_change, void *quiet) {
     } else if (g_exclude_game[0]) { // v10 matchmakerSeek(..., excludeGame, ...): any lobby but that one
         backend_url_encode(enc, sizeof(enc), g_exclude_game);
         n += snprintf(path + n, sizeof(path) - (size_t) n, "&excludeGame=%s", enc);
+        // KrunkNative: the lobbies before it too (the brain tries them before excludeGame's, after
+        // every other one: no bouncing between the last two; older brains ignore it)
+        char recent[RECENT_LOBBIES_MAX * RECENT_LOBBY_ID_MAX], recent_enc[sizeof(recent) * 3];
+        recent_lobbies_join(&g_recent_games, g_exclude_game, recent, sizeof(recent));
+        if (recent[0]) {
+            backend_url_encode(recent_enc, sizeof(recent_enc), recent);
+            n += snprintf(path + n, sizeof(path) - (size_t) n, "&excludeRecent=%s", recent_enc);
+            printf("[mm] seek: excluding %s, then the recent %s\n", g_exclude_game, recent);
+        }
     }
     g_exclude_game[0] = 0;
     // v10 dataQuery: the saved seek_modes / seek_maps (Settings > Quickplay) as dsmo / dsma; a
@@ -1726,6 +1772,7 @@ static void direct_join(const char *host, const int port) {
     page_game_url(NULL, NULL); // the lobby id (if a brain lists host:port) follows once connected
     char password[sizeof(g_client->net_join.password)] = "", target[160];
     snprintf(target, sizeof(target), "%s:%d", host, port);
+    recent_lobbies_push(&g_recent_servers, target);
     pthread_mutex_lock(&g_client->net_lock);
     if (!strcmp(target, g_password_game)) memcpy(password, g_client->net_join.password, sizeof(password));
     memset(&g_client->net_join, 0, sizeof(g_client->net_join));
@@ -2289,19 +2336,45 @@ static void quick_join_region(const int index) {
     const ServerGroup *g = &groups[index];
     g_quick_join = calloc((size_t) g->game_count + 1, sizeof(char *));
     int brain_rows = 0;
-    const cJSON *finder_pick = NULL; // the fullest joinable finder-only server (rows are sorted)
+    // the fullest joinable finder-only server (rows are sorted), one this client was not in lately
+    // first (recent_lobbies.h)
+    const cJSON *finder_pick = NULL;
+    int finder_pick_rank = 0;
     for (int i = 0; g_quick_join && i < g->game_count; i++) {
         const cJSON *t = g->games[i];
         const int players = row_players(t), max_players = tuple_int(t, 3);
         if (g_search[0] && !search_matches(t)) continue;
         if (!meta_flag(t, "finder")) brain_rows++;
         if (meta_flag(t, "finder")) {
-            if (!finder_pick && players < max_players) finder_pick = t;
+            const cJSON *meta = cJSON_GetArrayItem(t, 4);
+            const char *host = cJSON_GetStringValue(cJSON_GetObjectItem(meta, "host"));
+            char server[RECENT_LOBBY_ID_MAX];
+            snprintf(server, sizeof(server), "%s:%d", host ? host : "", (int) cJSON_GetNumberValue(cJSON_GetObjectItem(meta, "port")));
+            const int rank = recent_lobbies_rank(&g_recent_servers, server);
+            // not recent (0) beats any recent one; among recent ones the older (higher rank) wins
+            if (players < max_players && (!finder_pick || (finder_pick_rank && (!rank || rank > finder_pick_rank)))) {
+                finder_pick = t;
+                finder_pick_rank = rank;
+            }
             continue;
         }
         if (!(players < max_players && players > 0)) continue; // regionID.games.filter(p < max && p > 0)
         const cJSON *id = cJSON_GetArrayItem(t, 0);
         if (cJSON_IsString(id)) g_quick_join[g_quick_join_count++] = strdup(id->valuestring);
+    }
+    // lobbies this client was in lately go last, the older ones before the newer (a stable reorder:
+    // the list's order otherwise); the one it is in is skipped by servers_quick_join_next
+    for (int rank = RECENT_LOBBIES_MAX; rank >= 1 && g_quick_join; rank--) {
+        for (int i = 0, moved = 0; i + moved < g_quick_join_count;) {
+            if (recent_lobbies_rank(&g_recent_games, g_quick_join[i]) != rank) {
+                i++;
+                continue;
+            }
+            char *id = g_quick_join[i];
+            memmove(&g_quick_join[i], &g_quick_join[i + 1], sizeof(char *) * (size_t) (g_quick_join_count - i - 1));
+            g_quick_join[g_quick_join_count - 1] = id;
+            moved++;
+        }
     }
     if (!g_quick_join_count && finder_pick && !(brain_rows && backend_available() == 1 && strcmp(g->key, "custom"))) {
         // a region only finder-listed servers run in (or no brain): join the best one directly
@@ -3262,13 +3335,17 @@ int servers_ui_quick_match(void) {
 }
 
 // Find New Game (F4, Krunker's client) and Quick Match: Settings > Quickplay decides where
-// (seek_prefs.h): KrunkNative = a new seek here excluding this lobby (with the seek mode / map);
+// (seek_prefs.h): KrunkNative = a new seek here excluding this lobby and the recent ones
+// (recent_lobbies.h; with the seek mode / map);
 // Official = an official krunker.io lobby, joined in this client (native; krunker_lobbies_open, the
 // browser with the opt-out); Both = ours when one
 // matches, else an official one. A seek that finds nothing leaves the player in this game with a
 // toast. 0 = nothing to do (offline / direct server with KrunkNative only).
 int servers_ui_find_new_game(void) {
     const SeekServers type = seek_prefs_servers();
+    // in an official game with no lobby list to pick from (the web build: no Server Type row, no
+    // list): krunker.io's own Find New Game, a matchmaker seek excluding this game
+    if (krunker_net_active() && !krunker_lobbies_enabled()) return krunker_net_seek_new(g_client, NULL, 1);
     if (type == SEEK_SERVERS_OFFICIAL) return krunker_lobbies_seek();
     if ((!g_brain_mode && !g_director_mode) || g_pin == PIN_DIRECT || g_seek_inflight) {
         return type == SEEK_SERVERS_BOTH && !g_seek_inflight ? krunker_lobbies_seek() : g_seek_inflight;

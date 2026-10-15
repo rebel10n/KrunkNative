@@ -320,12 +320,13 @@ static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, co
         return;
     }
     char region[64] = "", game[MM_GAME_ID_MAX] = "", dq[512] = "", version[32] = "", proto[16] = "", ruleset[8] = "",
-         exclude[MM_GAME_ID_MAX] = "";
+         exclude[MM_GAME_ID_MAX] = "", recent[MM_GAME_ID_MAX * 4] = "";
     kn_http_query_get(req, "region", region, sizeof(region));
     kn_http_query_get(req, "ruleset", ruleset, sizeof(ruleset)); /* the client's Krunker version (ruleset.h), "" = v10 */
     kn_http_query_get(req, "proto", proto, sizeof(proto)); /* the client's protocol "M.m" */
     kn_http_query_get(req, "game", game, sizeof(game));
     kn_http_query_get(req, "excludeGame", exclude, sizeof(exclude)); /* v10 Quick Match: the lobby it leaves */
+    kn_http_query_get(req, "excludeRecent", recent, sizeof(recent)); /* the ones before it (recent_lobbies.h) */
     /* v10 dataQuery: {v} (require_version) and the saved seek_modes / seek_maps as dsmo / dsma */
     int modes[MM_SEEK_PREFS_MAX], maps[MM_SEEK_PREFS_MAX], mode_count = 0, map_count = 0;
     if (kn_http_query_get(req, "dataQuery", dq, sizeof(dq)) > 0) {
@@ -349,6 +350,7 @@ static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, co
         .ruleset = ruleset,
         .outdated = releases_lobby_outdated,
         .exclude_game = exclude,
+        .exclude_recent = recent,
         .modes = modes,
         .mode_count = mode_count,
         .maps = maps,

@@ -117,7 +117,6 @@ void app_window_init(const char *argv0);
 void app_window_open(Client *client, AppMode mode, const char *query);
 void app_window_poll(Client *client);   // per frame: messages between the windows, closed windows
 void app_window_fini(void);
-void app_window_place(Client *client);   // KRUNKNATIVE_WINDOW_POS from the opener (offset from it)
 int  app_window_has_router(void);        // 1 in a window opened by another one
 // Called by app_window.c: open `mode` with `query` from this process's point of view (its
 // own page reloads in place, other pages go to their windows), and a reload request for
