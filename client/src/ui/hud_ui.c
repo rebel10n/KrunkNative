@@ -2937,7 +2937,7 @@ static int hud_end_scenario_rows_html(const Client *client, const cJSON *rows, c
 // tabs.leaderboard: <table id="endTable"> filled like f1917 (endStats sid, name, score,
 // kills, deaths, reward).
 static void hud_end_leaderboard_html(const Client *client, char *out, const size_t size, size_t *len) {
-    hb_append(out, size, len, "<table id=\"endTable\"><tr><th id='endlb_rank'>Rank</th><th id='endlb_name'>Name</th><th id='endlb_score'>Score</th>"
+    hb_append(out, size, len, "<table id=\"endTable\"><tr><th id='endlb_rank'>#</th><th id='endlb_name'>Name</th><th id='endlb_score'>Score</th>"
                               "<th id='endlb_kills'>Kills</th><th id='endlb_deaths'>Deaths</th><th id='endlb_reward'>Reward</th><th></th></tr><tr height='20px;'></tr>");
     if (cJSON_IsArray(g_hud_override.scoreboard) && hud_end_scenario_rows_html(client, g_hud_override.scoreboard, out, size, len)) {
         hb_append(out, size, len, "</table>");
@@ -3100,6 +3100,12 @@ static void hud_end_card_html(const Client *client, char *out, const size_t size
             break;
     }
     hb_append(out, size, &len, "</div></div>");
+    // GUI.endScreen.show(): #endButtonsHolder after the card (v10:203140): the Double XP ad button
+    // (no ad in KrunkNative: no onclick) and the empty #collectRewardsButtonContainer (no items).
+    hb_append(out, size, &len, "<div id=\"endButtonsHolder\"><div id=\"doubleXPButton\" onmouseenter=\"playTick(0.1);\">"
+                              "<img style=\"vertical-align: middle;display:inline\" height=\"60px\" src=\"./img/frvr-ui/ad-icon.svg\">"
+                              "<div id=\"returnText\">Double XP</div></div>"
+                              "<div id=\"collectRewardsButtonContainer\" style=\"position: relative;\"></div></div>");
 }
 
 static void hud_end_card_render(const Client *client) {
@@ -3138,6 +3144,7 @@ void hud_ui_end_screen_tab(const char *tab) {
 // f1912 + f1913 + f1915 + f1916: the results after config.endAnim.
 static void hud_end_results(const Client *client) {
     dom_display("endInfo", "block");
+    dom_display("infoHolder", ""); // the results' footer: #infoHolder style="" in the v10 results capture (ingame-endscreen-late)
     v10_rewards_end_screen(); // v10.0.2 endScreen.init: a guest's #matchEndSignupIncentives (v10_rewards.c)
     dom_style("endUI", "background-color", "transparent");
     dom_display("victorySub", "");              // f1913
