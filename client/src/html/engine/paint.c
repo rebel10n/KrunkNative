@@ -1066,18 +1066,36 @@ static void paint_bg_layer(Painter *p, const CssComputed *s, const CssBgLayer *L
     } else if (L->image.kind == CSS_IMAGE_GRADIENT) {
         BgTiling t;
         bg_tiling(L, area, paint, 0, 0, &t);
+        if (!t.nx || !t.ny) return;
         memset(&it, 0, sizeof it);
         it.op = DL_GRADIENT;
-        it.u.gradient.rect = paint;
-        /* The gradient line is the positioned tile's (background-origin, padding box by
-         * default), not the first repeated tile's: with a border the first tile starts one
-         * tile to the left / above (bg_tiling), which put every pixel of the paint area past
-         * the gradient's end (a flat end colour). Repeats over the border are not drawn. */
-        it.u.gradient.box = dl_rect(t.px, t.py, t.tw, t.th);
         it.u.gradient.gradient = L->image.gradient;
         for (int i = 0; i < it.u.gradient.gradient.stop_count; i++)
             it.u.gradient.gradient.stops[i].color = paint_resolve_color(it.u.gradient.gradient.stops[i].color, s);
-        emit(p, &it);
+        /* Per axis: a no-repeat tile paints only itself (the lottery window's easter frame:
+         * four `linear-gradient(#000, #000) 0 0 / 100% 30px no-repeat` mask layers made one
+         * opaque mask over the whole box); tiles smaller than the area repeat, one item
+         * each; a repeating tile as large as the area is the old single item whose gradient
+         * line is the positioned tile's (background-origin, padding box by default), not
+         * the first repeated tile's (with a border bg_tiling starts one tile to the left /
+         * above, which put every pixel past the gradient's end): the border keeps the end
+         * colour instead of a repeat. */
+        const int rep_x = L->repeat_x != CSS_BG_REPEAT_NO_REPEAT, rep_y = L->repeat_y != CSS_BG_REPEAT_NO_REPEAT;
+        const int tile_x = rep_x && t.tw < area.w - 0.01f, tile_y = rep_y && t.th < area.h - 0.01f;
+        const int nx = tile_x ? t.nx : 1, ny = tile_y ? t.ny : 1;
+        for (int j = 0; j < ny; j++) {
+            for (int i = 0; i < nx; i++) {
+                const float bx = tile_x ? t.x0 + i * t.tw : t.px, by = tile_y ? t.y0 + j * t.th : t.py;
+                float x0 = rep_x && !tile_x ? paint.x : bx, x1 = rep_x && !tile_x ? paint.x + paint.w : bx + t.tw;
+                float y0 = rep_y && !tile_y ? paint.y : by, y1 = rep_y && !tile_y ? paint.y + paint.h : by + t.th;
+                x0 = fmaxf(x0, paint.x); x1 = fminf(x1, paint.x + paint.w);
+                y0 = fmaxf(y0, paint.y); y1 = fminf(y1, paint.y + paint.h);
+                if (x1 <= x0 || y1 <= y0) continue;
+                it.u.gradient.rect = dl_rect(x0, y0, x1 - x0, y1 - y0);
+                it.u.gradient.box = dl_rect(bx, by, t.tw, t.th);
+                emit(p, &it);
+            }
+        }
     }
 }
 
@@ -2186,6 +2204,8 @@ static void pop_group(Painter *p, int start, int children_before)
  * current backdrop root: the page, or the enclosing group) under its border
  * box, clipped to its border radii.  Emitted before the element's own group so
  * the backend reads the parent target; the element's opacity rides along. */
+static void paint_mask_layers(Painter *p, const Box *b);
+
 static void paint_backdrop(Painter *p, const Box *b)
 {
     const CssComputed *s = b->style;
@@ -2193,6 +2213,18 @@ static void paint_backdrop(Painter *p, const Box *b)
     if (!s || box_anon(b) || !s->backdrop_filter_count || !box_visible(b)) return;
     const DlRect r = box_rect(p, b);
     if (rect_empty(r)) return;
+    /* a mask applies to the filtered backdrop too (Chrome): the lottery window's easter frame
+     * blurs a 30 px border, not the whole window. The backdrop goes into a masked group of its
+     * own, reading the target under it. */
+    const int masked = s->mask_layer_count > 0;
+    if (masked) {
+        memset(&it, 0, sizeof it);
+        it.op = DL_PUSH_GROUP;
+        it.u.group.rect = r;
+        it.u.group.opacity = 1;
+        it.u.group.masked = 1;
+        emit(p, &it);
+    }
     memset(&it, 0, sizeof it);
     it.op = DL_BACKDROP;
     it.u.backdrop.rect = r;
@@ -2203,7 +2235,12 @@ static void paint_backdrop(Painter *p, const Box *b)
         if (f.kind == CSS_FILTER_DROP_SHADOW) f.shadow.color = paint_resolve_color(f.shadow.color, s);
         it.u.backdrop.filters[it.u.backdrop.n_filters++] = f;
     }
+    it.u.backdrop.from_parent = masked;
     emit(p, &it);
+    if (masked) {
+        paint_mask_layers(p, b);
+        emit_simple(p, DL_POP_GROUP);
+    }
 }
 
 /* mask-image layers (mask-origin / mask-clip: border-box): the group's mask,

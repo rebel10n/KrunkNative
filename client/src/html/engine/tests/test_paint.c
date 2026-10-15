@@ -1597,6 +1597,64 @@ static void test_backdrop_mask_clip_text_outline(void)
     }
 }
 
+/* Gradient layers tile like images: a no-repeat layer paints only its tile, a repeating tile
+ * smaller than the area repeats (the lottery window's easter frame: four
+ * `linear-gradient(#000, #000) 0 0 / 100% 30px no-repeat` mask layers). A masked element's
+ * backdrop-filter is masked too: its DL_BACKDROP sits in a masked group of its own and reads the
+ * target under that group. Chrome 152 draws the frame and blurs only the 30 px border. */
+static void set_grad_layer(CssBgLayer *L, CssLength x, CssLength y, CssLength w, CssLength h, int rx, int ry)
+{
+    memset(L, 0, sizeof(*L));
+    L->image.kind = CSS_IMAGE_GRADIENT;
+    L->image.gradient.angle_deg = 180;
+    L->image.gradient.stop_count = 2;
+    L->image.gradient.stops[0].color = rgba(0, 0, 0, 255);
+    L->image.gradient.stops[1].color = rgba(0, 0, 0, 255);
+    L->x = x; L->y = y;
+    L->size.kind = CSS_BG_SIZE_LENGTHS;
+    L->size.w = w; L->size.h = h;
+    L->repeat_x = (uint8_t) rx; L->repeat_y = (uint8_t) ry;
+}
+
+static void test_gradient_tiles_masked_backdrop(void)
+{
+    printf("gradient tiles, masked backdrop\n");
+    reset_tree(); fresh_ctx();
+    Box *root = mk_root();
+    Box *b = mk(root, BOX_BLOCK, 0, 0, 300, 200);
+    st(b)->bg_layer_count = 2;
+    set_grad_layer(&st(b)->bg_layers[0], px(0), pct(100), pct(100), px(30), CSS_BG_REPEAT_NO_REPEAT, CSS_BG_REPEAT_NO_REPEAT);
+    set_grad_layer(&st(b)->bg_layers[1], px(0), px(0), px(50), px(20), CSS_BG_REPEAT_REPEAT, CSS_BG_REPEAT_NO_REPEAT);
+    build(root);
+    int n = 0, bottom = 0, row = 0;
+    for (int i = 0; i < g_dl.n; i++) {
+        if (g_dl.items[i].op != DL_GRADIENT) continue;
+        const DlRect r = g_dl.items[i].u.gradient.rect;
+        n++;
+        if (r.y == 170 && r.h == 30 && r.w == 300) bottom++;
+        if (r.y == 0 && r.h == 20 && r.w == 50) row++;
+    }
+    CHECK(n == 7);        /* the bottom band once, the top row in six 50 px tiles */
+    CHECK(bottom == 1);
+    CHECK(row == 6);
+
+    reset_tree(); fresh_ctx();
+    root = mk_root();
+    Box *f = mk(root, BOX_BLOCK, 0, 0, 300, 200);
+    st(f)->background_color = rgba(180, 200, 225, 71);
+    st(f)->backdrop_filter_count = 1;
+    st(f)->backdrop_filters[0].kind = CSS_FILTER_BLUR;
+    st(f)->backdrop_filters[0].amount = 6;
+    st(f)->mask_layer_count = 1;
+    set_grad_layer(&st(f)->mask_layers[0], px(0), px(0), pct(100), px(30), CSS_BG_REPEAT_NO_REPEAT, CSS_BG_REPEAT_NO_REPEAT);
+    build(root);
+    const int g0 = find_op(&g_dl, DL_PUSH_GROUP, 0), bd = find_op(&g_dl, DL_BACKDROP, 0);
+    const int mb = find_op(&g_dl, DL_MASK_BEGIN, 0), pop = find_op(&g_dl, DL_POP_GROUP, 0), g1 = find_op(&g_dl, DL_PUSH_GROUP, 1);
+    CHECK(g0 >= 0 && g_dl.items[g0].u.group.masked);
+    CHECK(bd > g0 && g_dl.items[bd].u.backdrop.from_parent);
+    CHECK(mb > bd && pop > mb && g1 > pop);   /* then the element's own masked group */
+}
+
 int main(void)
 {
     paint_ctx_init(&g_ctx);
@@ -1625,6 +1683,7 @@ int main(void)
     test_inline_context_in_scroller();
     test_3d_transforms();
     test_backdrop_mask_clip_text_outline();
+    test_gradient_tiles_masked_backdrop();
     paint_ctx_free(&g_ctx);
     dl_free(&g_dl);
     printf("%d passed, %d failed\n", g_pass, g_fail);

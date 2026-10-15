@@ -1965,6 +1965,19 @@ static void draw_backdrop(GlBackend *b, const DlItem *it) {
         if (it->u.backdrop.filters[i].kind == CSS_FILTER_BLUR) pad += 3.0f * maxf(it->u.backdrop.filters[i].amount, 0.0f) * k;
     pad = ceilf(pad);
 
+    // from_parent: the item sits in its element's masked group; the backdrop is the target under
+    // that group, at the group's offset (a plain offscreen group: projective ones keep the old read)
+    Target src_t = b->target;
+    float sdx = 0.0f, sdy = 0.0f;
+    if (it->u.backdrop.from_parent && b->n_groups > 0) {
+        const GroupFrame *gf = &b->groups[b->n_groups - 1];
+        if (!gf->fast && !gf->skip && !gf->group.projective && gf->entry >= 0) {
+            src_t = gf->saved_target;
+            sdx = gf->bx;
+            sdy = gf->by;
+        }
+    }
+
     float r[4];
     local_rect_bounds(b, it->u.backdrop.rect, r);
     float vis[4] = {floorf(r[0]), floorf(r[1]), ceilf(r[2]), ceilf(r[3])};
@@ -1976,10 +1989,11 @@ static void draw_backdrop(GlBackend *b, const DlItem *it) {
     vis[0] = maxf(vis[0], lim[0]); vis[1] = maxf(vis[1], lim[1]);
     vis[2] = minf(vis[2], lim[2]); vis[3] = minf(vis[3], lim[3]);
     if (vis[2] <= vis[0] || vis[3] <= vis[1]) return;
-    const int x0 = (int) maxf(0.0f, vis[0] - pad), y0 = (int) maxf(0.0f, vis[1] - pad);
-    const int x1 = (int) minf((float) b->target.w, vis[2] + pad), y1 = (int) minf((float) b->target.h, vis[3] + pad);
+    const int x0 = (int) maxf(-sdx, vis[0] - pad), y0 = (int) maxf(-sdy, vis[1] - pad);
+    const int x1 = (int) minf((float) src_t.w - sdx, vis[2] + pad), y1 = (int) minf((float) src_t.h - sdy, vis[3] + pad);
     const int rw = x1 - x0, rh = y1 - y0;
     if (rw <= 0 || rh <= 0) return;
+    const int sx0 = x0 + (int) sdx, sy0 = y0 + (int) sdy, sx1 = x1 + (int) sdx, sy1 = y1 + (int) sdy;
 
     flush(b);
     GLint samples = 0;
@@ -1989,10 +2003,10 @@ static void draw_backdrop(GlBackend *b, const DlItem *it) {
     if (src < 0) return;
     const FboEntry *e = &b->fbos[src];
     glDisable(GL_SCISSOR_TEST);
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, b->target.fbo);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, src_t.fbo);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, e->fbo);
     // target rows are y-down from the top; GL rows count from the bottom
-    glBlitFramebuffer(x0, b->target.h - y1, x1, b->target.h - y0, 0, e->h - rh, rw, e->h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glBlitFramebuffer(sx0, src_t.h - sy1, sx1, src_t.h - sy0, 0, e->h - rh, rw, e->h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
     glBindFramebuffer(GL_FRAMEBUFFER, b->target.fbo);
     apply_scissor(b);
     b->frame_stats.fbo_passes++;

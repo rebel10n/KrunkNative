@@ -159,6 +159,8 @@ typedef struct {
             float opacity;          // the element's opacity (applies to the filtered backdrop too)
             CssFilterOp filters[CSS_MAX_FILTER_OPS];
             int n_filters;
+            int from_parent;        // inside the element's own masked group (a masked element): read
+                                    // the backdrop from the target under that group, not the group's
         } backdrop;
         struct { float dx, dy; } scroll;                                            // DL_SCROLL_OFFSET
     } u;
