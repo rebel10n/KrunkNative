@@ -99,6 +99,24 @@ void ai_register_server_tools(const AiServerTools *t);
 typedef void (*AiBanterDoneFn)(void *ud, const char *err, const cJSON *reply);
 void ai_bot_banter(Brain *b, const cJSON *frame, AiBanterDoneFn done, void *ud);
 
+/*
+ * Avatar moderation (avatar.c): one non-streamed vision completion on the moderation provider
+ * profile (ai_provider_get("moderation"): ai.moderation.provider, default "default" = the /cpa
+ * gateway's ai.upstream_url / ai.upstream_key), POST /chat/completions. model is sent as given
+ * unless the profile names its own; a -low/-medium/-high/-max suffix also sets reasoning_effort.
+ * system + question are the text parts, image_url a "data:image/webp;base64,..." URL. The
+ * profile's rpm / daily token budget admit the review (ai_provider_check / _begin / _charge).
+ * done(ud, err, text) runs exactly once on the loop thread: err NULL and text = the answer, else
+ * err = a short reason ("AI unavailable" when the proxy is off or the profile is not configured,
+ * "busy", "rate limited", "unreachable", "HTTP <status>: ...", the upstream's error). The key is
+ * never part of err or text.
+ */
+typedef void (*AiModerateDoneFn)(void *ud, const char *err, const char *text);
+/* 1 when a review can run: the AI proxy is on (ai.enabled) and the moderation profile is configured */
+int ai_moderation_available(void);
+void ai_moderate_image(const char *model, const char *system, const char *question, const char *image_url, int timeout_ms,
+                       AiModerateDoneFn done, void *ud);
+
 /* ai_search.c: web search (a DuckDuckGo MCP server as a stdio child; ai.search.command) */
 int ai_search_init(Brain *b);
 void ai_search_shutdown(Brain *b);

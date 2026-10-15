@@ -1558,6 +1558,125 @@ void ai_bot_banter(Brain *b, const cJSON *frame, AiBanterDoneFn done, void *ud) 
     BN.window_count++;
 }
 
+/* ------------------------------------------------------------------ avatar moderation
+ *
+ * ai.h "Avatar moderation": one non-streamed chat completion with an image on the moderation
+ * provider profile (ai_provider_get("moderation"); ai.moderation.provider, default "default").
+ * Always the chat style (/chat/completions), the one the moderation gateway serves. A -low /
+ * -medium / -high / -max model suffix becomes reasoning_effort (the way abulxt's gateway client
+ * sends gemini-3.8-flash-high). The profile's limits (rpm, daily token budget, shared with every
+ * consumer routed to it) admit each review; on top, up to AI_MOD_LIVE_MAX reviews run at once. */
+
+#define AI_MOD_LIVE_MAX 4
+#define AI_MOD_RAW_MAX (64u << 10)
+#define AI_MOD_TOKENS 400
+
+typedef struct {
+    AiModerateDoneFn done;
+    void *ud;
+    AiBuf raw;
+    const AiProvider *prov; /* the moderation profile the review was admitted on (charged its tokens) */
+} Moderate;
+
+static int moderate_live;   /* loop thread only */
+
+static void moderate_chunk(Up *u, const char *data, const size_t n) {
+    Moderate *m = u->ud;
+    if (m->raw.len + n <= AI_MOD_RAW_MAX) ai_buf_add(&m->raw, data, n);
+}
+
+static void moderate_done(Up *u) {
+    Moderate *m = u->ud;
+    char err[200] = "";
+    moderate_live--;
+    if (!u->status) snprintf(err, sizeof(err), "unreachable");
+    else if (u->status >= 400) {
+        char e[160];
+        ai_error_text(m->raw.data, m->raw.len, e, sizeof(e));
+        snprintf(err, sizeof(err), "HTTP %d: %.150s", u->status, e);
+    }
+    AiStream s;
+    ai_stream_init(&s, NULL, NULL);
+    if (!err[0]) {
+        if (strstr(u->ctype, "event-stream")) {
+            ai_stream_feed(&s, m->raw.data ? m->raw.data : "", m->raw.len);
+            ai_stream_finish(&s);
+        } else ai_parse_response(&s, m->raw.data ? m->raw.data : "", m->raw.len);
+        if (s.has_usage) ai_provider_charge(m->prov, "moderation", s.prompt_tokens + s.completion_tokens);
+        if (s.error[0]) snprintf(err, sizeof(err), "%.190s", s.error);
+    }
+    KN_DEBUG(MOD, "moderation answer: %s (%lld ms)", err[0] ? err : "ok", (long long) (kn_now_ms() - u->t0));
+    m->done(m->ud, err[0] ? err : NULL, err[0] ? NULL : (s.text.data ? s.text.data : ""));
+    ai_stream_free(&s);
+    ai_buf_free(&m->raw);
+    free(m);
+    up_free(u);
+}
+
+int ai_moderation_available(void) { return C.enabled && ai_provider_get("moderation") != NULL; }
+
+void ai_moderate_image(const char *model, const char *system, const char *question, const char *image_url, const int timeout_ms,
+                       AiModerateDoneFn done, void *ud) {
+    /* the moderation profile: endpoint, key, model and limits come from ai_provider_get, never
+     * from ai.upstream_* directly (that is only the "default" profile's legacy source) */
+    const AiProvider *p = ai_provider_get("moderation");
+    if (!C.enabled || !p) {
+        done(ud, "AI unavailable", NULL);
+        return;
+    }
+    if (p->model[0]) model = p->model; /* the profile's model; "" keeps the caller's (avatar.moderation_model) */
+    if (moderate_live >= AI_MOD_LIVE_MAX) {
+        done(ud, "busy", NULL);
+        return;
+    }
+    char lm[200];
+    int retry = 0;
+    if (ai_provider_check(p, lm, sizeof(lm), &retry)) {
+        done(ud, "rate limited", NULL);
+        return;
+    }
+    char effort[16] = "";
+    const char *suffix = model ? strrchr(model, '-') : NULL;
+    if (suffix && (!strcmp(suffix, "-low") || !strcmp(suffix, "-medium") || !strcmp(suffix, "-high") || !strcmp(suffix, "-max")))
+        copy_str(effort, sizeof(effort), suffix + 1);
+    cJSON *msgs = cJSON_CreateArray();
+    cJSON *m = cJSON_CreateObject();
+    cJSON_AddStringToObject(m, "role", "system");
+    cJSON_AddStringToObject(m, "content", system ? system : "");
+    cJSON_AddItemToArray(msgs, m);
+    m = cJSON_CreateObject();
+    cJSON_AddStringToObject(m, "role", "user");
+    cJSON *parts = cJSON_AddArrayToObject(m, "content");
+    cJSON *part = cJSON_CreateObject();
+    cJSON_AddStringToObject(part, "type", "text");
+    cJSON_AddStringToObject(part, "text", question ? question : "");
+    cJSON_AddItemToArray(parts, part);
+    part = cJSON_CreateObject();
+    cJSON_AddStringToObject(part, "type", "image_url");
+    cJSON_AddStringToObject(cJSON_AddObjectToObject(part, "image_url"), "url", image_url ? image_url : "");
+    cJSON_AddItemToArray(parts, part);
+    cJSON_AddItemToArray(msgs, m);
+    char *body = ai_request_body(AI_API_CHAT, model ? model : "", msgs, NULL, effort, 0, AI_MOD_TOKENS);
+    cJSON_Delete(msgs);
+    Moderate *mo = calloc(1, sizeof(*mo));
+    if (!body || !mo) {
+        free(body);
+        free(mo);
+        done(ud, "out of memory", NULL);
+        return;
+    }
+    mo->done = done;
+    mo->ud = ud;
+    mo->prov = p;
+    if (!up_start(p, ai_api_path(AI_API_CHAT), body, 0, timeout_ms, moderate_chunk, moderate_done, mo)) {
+        free(mo);
+        done(ud, "cannot start the upstream request", NULL);
+        return;
+    }
+    ai_provider_begin(p, "moderation");
+    moderate_live++;
+}
+
 /* ------------------------------------------------------------------ module */
 
 static void config_load(const struct kn_config *cfg) {

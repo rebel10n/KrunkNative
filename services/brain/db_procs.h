@@ -118,6 +118,8 @@ extern const kn_proc P_TURF_RECORD, P_TURF_SETTLE, P_TURF_LOOT_SET, P_TURF_VIEW,
 extern const kn_proc P_SEASON_ENSURE, P_BP_DATA, P_BP_CLAIM, P_BP_BUY, P_BP_SKIP, P_SEASON_STATS;
 /* ---- v10.0.2 one-time signup perks (db_rewards.c, 0116_v10_rewards) */
 extern const kn_proc P_SIGNUP_REWARDS, P_SIGNUP_PREMIUM_SWEEP;
+/* ---- profile pictures (db_avatar.c, 0123_account_avatars; avatar.c) */
+extern const kn_proc P_AVATAR_PUT, P_AVATAR_VERDICT, P_AVATAR_GET, P_AVATAR_PUBLIC, P_AVATAR_DELETE;
 /* The season's active pass (malloc'd; NULL when none / on failure); *row: its battlepasses row. */
 struct BattlePass *db_bp_load(Dbx *x, int season, cJSON **row);
 /* checkBadges with the season badges: adds every claimable badge whose rule holds (stats =

@@ -89,6 +89,13 @@ set(KN_BRAIN_SOURCES
     streams.c
     streams_norm.c
     ../../shared/src/ai_proto.c
+    # profile pictures (0123_account_avatars): intake (PNG / JPEG / WebP, libwebp encode), the
+    # AI review's verdict rules, the rows; stb_image is the decoder (avatar_stb.c holds its body)
+    avatar.c
+    avatar_image.c
+    avatar_verdict.c
+    db_avatar.c
+    avatar_stb.c
 )
 
 # The publish checks are the editor's validateMap (shared/src/map_validate.c): it needs the prefab,
@@ -106,7 +113,16 @@ endforeach ()
 # (knsvc_existing: services/common/CMakeLists.txt).
 knsvc_existing(KN_BRAIN_SOURCES ${KN_BRAIN_SOURCES})
 add_executable(kn_brain ${KN_BRAIN_SOURCES})
-target_include_directories(kn_brain PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(kn_brain PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/client/include)
+# avatar.c: WebP decode / encode for profile pictures (libwebp; without it uploads answer 503
+# AvatarsUnavailable and the rest of the brain is unchanged)
+if (PkgConfig_FOUND)
+    pkg_check_modules(KN_WEBP QUIET IMPORTED_TARGET libwebp)
+    if (KN_WEBP_FOUND)
+        target_link_libraries(kn_brain PRIVATE PkgConfig::KN_WEBP)
+        target_compile_definitions(kn_brain PRIVATE KN_HAVE_WEBP=1)
+    endif ()
+endif ()
 # svc-accounts: shared/include for map_catalog.h (creations.c; shim in shared_shim.c)
 target_include_directories(kn_brain PRIVATE ${CMAKE_SOURCE_DIR}/shared/include)
 target_link_libraries(kn_brain PRIVATE knsvc_db kn_build_info)
@@ -132,6 +148,20 @@ target_include_directories(kn_brain_ai_provider_test PRIVATE ${CMAKE_CURRENT_SOU
 target_link_libraries(kn_brain_ai_provider_test PRIVATE knsvc)
 add_test(NAME brain_ai_provider COMMAND kn_brain_ai_provider_test)
 set_tests_properties(brain_ai_provider PROPERTIES LABELS "knsvc;brain;ai")
+
+# profile pictures (pure, no DB): the verdict table and the picture intake (type, size, dimensions,
+# square WebP output). Fixtures are written to the build dir; WebP cases only with libwebp.
+add_executable(kn_brain_avatar_test
+    tests/test_avatar.c avatar_verdict.c avatar_image.c avatar_stb.c ${CMAKE_SOURCE_DIR}/client/src/png_write.c)
+target_include_directories(kn_brain_avatar_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/client/include)
+target_link_libraries(kn_brain_avatar_test PRIVATE knsvc)
+target_compile_definitions(kn_brain_avatar_test PRIVATE _GNU_SOURCE)
+if (KN_WEBP_FOUND)
+    target_link_libraries(kn_brain_avatar_test PRIVATE PkgConfig::KN_WEBP)
+    target_compile_definitions(kn_brain_avatar_test PRIVATE KN_HAVE_WEBP=1)
+endif ()
+add_test(NAME brain_avatar COMMAND kn_brain_avatar_test ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(brain_avatar PROPERTIES LABELS "knsvc;brain;avatar")
 
 # Registry unit test (pure, no DB).
 add_executable(kn_brain_registry_test tests/test_registry.c registry.c ${CMAKE_SOURCE_DIR}/shared/src/server_names.c)
@@ -313,6 +343,12 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/account_security_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_account_security PROPERTIES TIMEOUT 240 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;smtp")
+    # profile pictures: upload, the AI review through a stubbed gateway (pass / fail / hidden until
+    # reviewed), quota, delete, and the gateway key kept out of responses and logs (0123_account_avatars)
+    add_test(NAME brain_avatar_e2e
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/avatar_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_avatar_e2e PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db;avatar")
     # the economy (doc/v7/economy.md): gifts, market, trade offers, idempotency, bans, rate limits,
     # the ledger and parallel gifts / buys / offers / accepts at the same balance and items
     add_test(NAME brain_economy

@@ -35,6 +35,7 @@
 #include "../viewer/viewer_store.h" // WP-E part 2c: challenge reward skins (store.skins)
 #include "qr_code.h"                // v7.1.4 2FA: the otpauth:// QR code (QrCode.toDataURL)
 #include <ruleset.h>
+#include <avatar_ui.h>      // profile pictures: the "Change Picture" picker and its status line
 #include <v10_social.h> // the window's Friends tab (v10_social.c)
 #include <online_mode.h>  // auth_unreachable: offline mode
 
@@ -498,6 +499,7 @@ static void account_response(const cJSON *frame) {
     // updateAccount -> updateWindow(5); updateWindow(null, true): the open window re-renders
     rerender_windows();
     menu_update_class_box(); // dJ()
+    avatar_ui_refresh();     // the profile picture's review status (after the token is saved above)
 }
 
 // logoutAcc()
@@ -1391,6 +1393,10 @@ int account_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         backend_social_send_text("[\"las\"]");
         return 1;
     }
+    if (!strcmp(name, "knPfpPick")) { // "Change Picture": pick a PNG / JPEG / WebP, upload to kn_brain (avatar_ui.c)
+        avatar_ui_pick();
+        return 1;
+    }
     if (progress_handle(name, args, argc) >= 0) return 1; // WP-E part 2c: badges, windows[32]
     if (!strcmp(name, "windows.4.switchStat")) { // statTabB<n> shown, statTab<n> active
         const int t = argc > 0 && args[0].kind == HTML_ARG_NUM ? (int) args[0].num : 0;
@@ -1641,9 +1647,9 @@ static char *gen_account(void) {
     sb_append(&sb, "</div>");
     if (g_tab_index == 0) {
         sb_append(&sb, "<div class='setHed' style='margin-top:10px;margin-bottom:20px;'>Your Account</div>");
-        sb_append(&sb, "<div id='profilePicM' class='blurred'><img style='width: inherit;height: inherit;border-radius: inherit;' loading='lazy' src='textures/classes/icon_0.png'><a class='pfpAction' onmouseenter='playTick(0.1)' onclick='pfpPopup();'>");
+        sb_append(&sb, "<div id='profilePicM' class='blurred'><img style='width: inherit;height: inherit;border-radius: inherit;' loading='lazy' src='textures/classes/icon_0.png'><a class='pfpAction' onmouseenter='playTick(0.1)' onclick='knPfpPick();'>");
         sb_append(&sb, I18N("windows.profile.picture", "Change Picture"));
-        sb_append(&sb, "</a></div>");
+        sb_append(&sb, "</a></div><div id='pfpStatus' class='settName' style='width:181px;font-size:13px;margin-top:6px'></div>");
         sb_append(&sb, "<div class='setBodH' style='display:inline-block;padding-top:10px;vertical-align:top;width:1004px;margin-left:15px;margin-top:0px;'><div class='settName' style='width:100%;margin-top:0px'>");
         sb_append(&sb, I18N("generic.name", "Name"));
         sb_append(&sb, "<a href='/social.html?p=profile&q=");
