@@ -110,8 +110,8 @@ BRAIN_PORT ?= 5050
 # it as KRUNKNATIVE_BRAIN_URL (5050 is the client's own probed default); an explicit
 # KRUNKNATIVE_BRAIN_URL in the environment wins
 RUN_BRAIN_ENV = $(if $(KRUNKNATIVE_BRAIN_URL),,$(if $(filter-out 5050,$(BRAIN_PORT)),KRUNKNATIVE_BRAIN_URL=http://127.0.0.1:$(BRAIN_PORT)))
-# Dev runs pace the client so it doesn't peg the GPU/CPU: vsync on (also the client's own default)
-# and a frame cap. Override with VSYNC=0 FRAME_CAP=0 for an uncapped (competitive-feel) run.
+# Dev runs pace the client so it doesn't peg the GPU/CPU: vsync on and a frame cap. Override with
+# VSYNC=0 FRAME_CAP=0 for an uncapped (competitive-feel) run. The shipped defaults are unchanged.
 VSYNC ?= 1
 FRAME_CAP ?= 144
 RUN_PERF = KRUNKNATIVE_VSYNC=$(VSYNC) KRUNKNATIVE_FRAME_CAP=$(FRAME_CAP)
@@ -201,7 +201,6 @@ test: build ## Run the shared movement/collision test (+ the knet transport, off
 	./$(DEBUG_DIR)/krunker_proto_test
 	./$(DEBUG_DIR)/krunker_link_test
 	./$(DEBUG_DIR)/krunker_sync_test
-	./$(DEBUG_DIR)/krunker_maps_test
 	./$(DEBUG_DIR)/lagcomp_test
 	./$(DEBUG_DIR)/map_v7_test
 	./$(DEBUG_DIR)/map_v10_test
@@ -345,10 +344,6 @@ assets-import-v7: ## Import the Krunker content set into assets/ (models, textur
 	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --assets assets
 	node tools/ui-import/gen_viewer_store.js
 
-.PHONY: assets-link
-assets-link: ## In a linked git worktree: symlink the main checkout's gitignored game content (assets/*/*) into assets/ (KN_ASSETS_FROM=<dir> for another source)
-	@tools/assets/link-worktree-assets.sh
-
 assets-check-v7: ## Drift check of assets/ and the generated store tables against the Krunker content set (exit 1 on any difference)
 	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --check --assets assets
 	GEN_CHECK=1 node tools/ui-import/gen_viewer_store.js
@@ -387,16 +382,12 @@ branding-check: ## The verbatim krunker.io icons in the tree match tools/brandin
 # tables, cheat-check keystream) are extracted statically from Krunker's client bundle into the
 # committed shared/include/krunker_build.h + tools/krunker/build.json (tools/krunker/extract_build.py).
 # SRC=<path|url> reads another bundle (game.deob.js / game.debug.js / game.min.js / manifest).
-.PHONY: krunker-build krunker-build-check krunker-build-test krunker-maps
-krunker-build: ## Regenerate shared/include/krunker_build.h from Krunker's bundle (default https://kru.eli.gift/game.deob.js, cached by ETag; SRC=, FORCE=1) and krunker_maps.h (+ tools/krunker/maps.lock.json)
+.PHONY: krunker-build krunker-build-check krunker-build-test
+krunker-build: ## Regenerate shared/include/krunker_build.h from Krunker's bundle (default https://kru.eli.gift/game.deob.js, cached by ETag; SRC=, FORCE=1)
 	$(PYTHON) -I tools/krunker/extract_build.py $(SRC) $(if $(FORCE),--force,)
 
-krunker-build-check: ## Regenerate krunker_build.h from the current Krunker bundle into a temp file; exit 1 when the committed header / build.json differ, or krunker_maps.h / the official map files / the bundle's map anchors disagree with tools/krunker/maps.lock.json (bundle unreachable: header <-> build.json only, STRICT=1 fails)
+krunker-build-check: ## Regenerate krunker_build.h from the current Krunker bundle into a temp file; exit 1 when the committed header / build.json differ (bundle unreachable: header <-> build.json only, STRICT=1 fails)
 	$(PYTHON) -I tools/krunker/extract_build.py $(SRC) --check $(if $(STRICT),--strict,)
-
-krunker-maps: ## Fetch Krunker's official map list and every map JSON (GET <gapi>/maps, /maps/<i>; rate-limited, KN_FETCH_PROXY=) into assets/maps/official/ + tools/krunker/maps.lock.json, then regenerate krunker_maps.h
-	$(PYTHON) -I tools/krunker/fetch_maps.py fetch
-	$(PYTHON) -I tools/krunker/extract_build.py $(SRC)
 
 krunker-build-test: ## Extractor regression test: every local Krunker bundle (deob / debug / min / v10.js / the current one) incl. the per-player layouts, synthetic broken anchors, the header compiles
 	$(PYTHON) -I tools/krunker/test_extract.py
@@ -727,6 +718,9 @@ lint: ## Lint workflow YAML, presets and the web glue scripts (ui/js)
 	@# MinGW's C runtime has no timespec_get/TIME_UTC: use ks_wall_ms() or guard it with _WIN32
 	@bad=$$(grep -lE '\btimespec_get\(' $$(git ls-files '*.c') | xargs -r grep -L '_WIN32'); \
 		if [ -n "$$bad" ]; then echo "timespec_get without a _WIN32 path: $$bad"; exit 1; fi
+	@# nor timegm in what the Windows build compiles: #define timegm _mkgmtime under _WIN32 (account_ui.c)
+	@bad=$$(grep -lE '\btimegm\(' $$(git ls-files 'client/*.c' 'shared/*.c' 'server/*.c') | xargs -r grep -L '_WIN32'); \
+		if [ -n "$$bad" ]; then echo "timegm without a _WIN32 path: $$bad"; exit 1; fi
 	@echo "lint ok"
 
 .PHONY: ks-test
@@ -795,8 +789,6 @@ EGL_DEVICE ?=
 UI_DIR ?=
 
 smoke-native: build ## Run the native client offline headless (no window; EGL_DEVICE=nvidia|mesa, UI_DIR=<dir>) and screenshot the menu (/tmp/smoke-native.png)
-	@# the client needs the gitignored game content (fonts first): a fresh worktree links the main checkout's
-	@tools/assets/link-worktree-assets.sh --check || tools/assets/link-worktree-assets.sh
 	@rm -f /tmp/smoke-native.png
 	@env -u DISPLAY -u WAYLAND_DISPLAY KRUNKNATIVE_HEADLESS=1 $(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) \
 	  $(if $(UI_DIR),KRUNKNATIVE_UI_DIR=$(UI_DIR),) \
@@ -811,7 +803,6 @@ smoke-native: build ## Run the native client offline headless (no window; EGL_DE
 # Settings and Change Controls tabs, windows, store, social ...) rendered headless into
 # /tmp/smoke-ui/. Fails on a non-zero exit, an empty frame or a missing window template.
 smoke-ui: build ## Render the page's render-only scenarios headless (/tmp/smoke-ui/*.png)
-	@tools/assets/link-worktree-assets.sh --check || tools/assets/link-worktree-assets.sh
 	@rm -rf /tmp/smoke-ui && mkdir -p /tmp/smoke-ui/cfg
 	@for f in tools/uidiff/scenarios/*.json; do n=$$(basename $$f .json); [ -f tools/uidiff/regions/$$n.json ] && continue; \
 	  env -u DISPLAY -u WAYLAND_DISPLAY KRUNKNATIVE_HEADLESS=1 $(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) \

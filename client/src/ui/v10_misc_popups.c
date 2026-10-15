@@ -41,6 +41,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef _WIN32
+#define timegm _mkgmtime // MinGW has no timegm (same as account_ui.c, editor_net.c)
+#endif
 
 #include "../viewer/viewer_store.h"
 
