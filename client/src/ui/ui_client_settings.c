@@ -7,8 +7,8 @@
 // .setHed / .setBodH setBod_ folders, .settName rows, label.switch with its grooves,
 // select.inputGrey2, sliderVal + sliderM, settingsBtn; "<span style='color: #eb5656'>*</span>"
 // = needsRestart), so the tab looks like Krunker's other tabs. Every row does something real in KrunkNative; rows that do
-// not apply to the platform are not generated (the web build shows only Frame Cap, UI
-// Scale, the game options and the storage buttons).
+// not apply to the platform are not generated (the web build shows only Account Mode, Server
+// Finder URL, Auto-restart, the game options and the storage buttons).
 //
 // Exit: Krunker v7.1.4's #clientExit menu item -> clientExitPopup() ("Are you sure you
 // want to close krunker?" YES/NO, the #confPop popup natively) -> closeClient(), which
@@ -75,7 +75,7 @@ enum {
     CS_SOUND_TAB = 16,  // generated in the game's Sound tab (ui_client_settings_extend_tab), not in Client
 };
 
-typedef enum { CS_SWITCH, CS_SELECT, CS_TEXT, CS_SLIDER, CS_UISCALE, CS_BUTTON } CsKind;
+typedef enum { CS_SWITCH, CS_SELECT, CS_TEXT, CS_BUTTON } CsKind;
 
 typedef struct {
     const char *value, *label;
@@ -91,7 +91,6 @@ typedef struct {
     const char *info;     // title tooltip
     const CsOption *options; // static select options (NULL: generated, see select_options)
     int option_count;
-    double min, max, step;   // CS_SLIDER
     const char *button;      // label of the row's button (CS_BUTTON, or next to a switch)
     const char *action;      // knClientAction(...) of that button
 } ClientSetting;
@@ -117,15 +116,13 @@ static const CsOption PROXY_SCOPES[] = {{"krunker", "krunker.io only"}, {"all", 
 #endif
 
 static const ClientSetting SETTINGS[] = {
-    // ---- Display: window/presentation (glorp "Start Mode", "Uncap FPS"; the game's own rows surfaced)
+    // ---- Display: KrunkNative-only window rows. v10's Frame Cap (Render tab) and UI Scale (Display tab)
+    // are in the game's own settings windows, not here.
     {"windowMode", "Window Mode", "Display", CS_SELECT, CS_NATIVE | CS_GAME, "0",
      "F11 switches between windowed and the last fullscreen mode", WINDOW_MODES, COUNT(WINDOW_MODES)},
     {"resolution", "Resolution", "Display", CS_SELECT, CS_NATIVE, "",
      "Window size in windowed mode, display mode in fullscreen (borderless always covers the monitor)"},
     {"vsync", "V-Sync", "Display", CS_SWITCH, CS_NATIVE | CS_GAME, "false", "Wait for the display refresh (swap interval 1)"},
-    {"updateRate", "Frame Cap", "Display", CS_SLIDER, CS_NATIVE | CS_WEB | CS_GAME, "0",
-     "0 = uncapped (also Render > Frame Cap)", NULL, 0, 0, 1200, 10},
-    {"scaleUI", "UI Scale", "Display", CS_UISCALE, CS_NATIVE | CS_WEB | CS_GAME, "0.7", "Also Display > UI Scale"},
     // ---- System (glorp "Raw Input", "Webview Priority"; KRUNKNATIVE_AUDIO_BACKEND)
     {"rawInput", "Raw Input", "System", CS_SWITCH, CS_NATIVE, "true", "Unaccelerated mouse motion while the pointer is locked"},
     {"audioBackend", "Audio Backend", "System", CS_SELECT, CS_NATIVE | CS_RESTART, "",
@@ -140,11 +137,11 @@ static const ClientSetting SETTINGS[] = {
     {"discordRPC", "Discord Rich Presence", "Client", CS_SWITCH, CS_NATIVE, "true", "Show the mode and map you play on your Discord profile"},
     {"swapper", "Resource Swapper", "Client", CS_SWITCH, CS_NATIVE | CS_RESTART, "true",
      "Files in the swapper folder replace the game's files at the same path (css/main.css, img/..., textures/..., sound/...)",
-     NULL, 0, 0, 0, 0, "Open folder", "openSwapper"},
+     NULL, 0, "Open folder", "openSwapper"},
     {"autoRestart", "Auto-restart for updates", "Client", CS_SWITCH, CS_NATIVE | CS_WEB, "true",
      "Restart the client (reload the page on the web) when the game server restarts for an update or a newer client is ready; in a match it waits for the end"},
     {"customCSS", "Custom CSS", "Client", CS_SWITCH, CS_NATIVE, "true", "Applies custom.css from the client folder over the menu and HUD",
-     NULL, 0, 0, 0, 0, "Edit", "editCSS"},
+     NULL, 0, "Edit", "editCSS"},
     // ---- Startup (--offline; auto join; the matchmaker)
     {"startOffline", "Start Offline", "Startup", CS_SWITCH, CS_NATIVE | CS_RESTART, "false",
      "Start in an offline game on the built-in server (like --offline)"},
@@ -176,12 +173,12 @@ static const ClientSetting SETTINGS[] = {
     {"hsSound", "Always Play HS Sound on Kill", "Game", CS_SWITCH, CS_NATIVE | CS_WEB, "false", ""},
     // ---- Storage (glorp "Clear Cache & Storage"; the v3.1.1 client's Clear Cache / Reset Addons)
     {"openConfig", "Client Folder", "Storage", CS_BUTTON, CS_NATIVE, "", "Settings, swapper and custom.css",
-     NULL, 0, 0, 0, 0, "Open", "openConfig"},
+     NULL, 0, "Open", "openConfig"},
     {"clearCache", "Clear Cache & Storage", "Storage", CS_BUTTON, CS_NATIVE | CS_WEB, "",
      "Clears the game's stored data (settings, binds, account) and restarts; client settings are kept",
-     NULL, 0, 0, 0, 0, "Clear Now", "clearCache"},
+     NULL, 0, "Clear Now", "clearCache"},
     {"resetClient", "Reset Client Settings", "Storage", CS_BUTTON, CS_NATIVE | CS_WEB, "", "",
-     NULL, 0, 0, 0, 0, "Reset", "resetClient"},
+     NULL, 0, "Reset", "resetClient"},
 };
 
 // ---- localisation. The tab's strings are Krunker Box Office's own: kn.client.<row>.name / .info /
@@ -193,8 +190,6 @@ static const ClientSetting SETTINGS[] = {
 //   I18N("kn.client.windowMode.opt.0", "Windowed")  I18N("kn.client.windowMode.opt.2", "Borderless")  I18N("kn.client.windowMode.opt.1", "Fullscreen")
 //   I18N("settings.quality.res", "Resolution")  I18N("kn.client.resolution.info", "Window size in windowed mode, display mode in fullscreen (borderless always covers the monitor)")
 //   I18N("kn.client.vsync.name", "V-Sync")  I18N("kn.client.vsync.info", "Wait for the display refresh (swap interval 1)")
-//   I18N("settings.quality.updRate", "Frame Cap")  I18N("kn.client.updateRate.info", "0 = uncapped (also Render > Frame Cap)")
-//   I18N("settings.interface.scale", "UI Scale")  I18N("kn.client.scaleUI.info", "Also Display > UI Scale")
 //   I18N("kn.client.rawInput.name", "Raw Input")  I18N("kn.client.rawInput.info", "Unaccelerated mouse motion while the pointer is locked")
 //   I18N("kn.client.audioBackend.name", "Audio Backend")  I18N("kn.client.audioBackend.info", "Sound output (and voice chat input); Auto tries every backend of this build in order")
 //   I18N("kn.client.audioBackend.opt.auto", "Auto")  I18N("kn.client.audioBackend.opt.null", "None (silent)")
@@ -231,7 +226,7 @@ static const ClientSetting SETTINGS[] = {
 //   I18N("settings.network.header", "Network")  I18N("kn.client.cat.game", "Game")  I18N("kn.client.cat.storage", "Storage")  I18N("kn.client.cat.sound", "Sound")
 //   I18N("generic.default", "Default")  I18N("kn.client.requiresRestart", "Requires Restart")
 static const struct { const char *row, *key; } CS_V10_NAMES[] = {
-    {"resolution", "settings.quality.res"}, {"updateRate", "settings.quality.updRate"}, {"scaleUI", "settings.interface.scale"},
+    {"resolution", "settings.quality.res"},
     {"swapper", "settings.client.resourceSwapper"}, {"resetClient", "settings.client.resetSettings"},
 };
 
@@ -1054,15 +1049,6 @@ static const char *row_handler(const ClientSetting *s) {
     return (s->flags & CS_GAME) ? "window.setSetting" : "knClientSet";
 }
 
-static void append_slider(StrBuf *sb, const char *key, const char *value, const double min, const double max,
-                          const double step, const char *container_style) {
-    sb_appendf(sb, "<input type=\"number\" class=\"sliderVal\" id=\"slid_input_%s\" min=\"%g\" max=\"%g\" value=\"%s\" "
-                   "onkeypress=\"return window.delayExecute(&quot;%s&quot;, this, undefined)\" style=\"margin-right:0px;border-width:0px\">\n"
-                   "\t\t\t\t\t\t\t<div class=\"slidecontainer\" style=\"%s\"><input type=\"range\" id=\"slid_%s\" min=\"%g\" "
-                   "max=\"%g\" step=\"%g\" value=\"%s\" class=\"sliderM\" oninput=\"window.setSetting(&quot;%s&quot;, this.value)\"></div>",
-               key, min, max, value, key, container_style, key, min, max, step, value, key);
-}
-
 static void append_row(StrBuf *sb, const ClientSetting *s) {
     char value[256];
     setting_value(s, value, sizeof(value));
@@ -1101,18 +1087,6 @@ static void append_row(StrBuf *sb, const ClientSetting *s) {
             append_attr_escaped(sb, value);
             sb_appendf(sb, "\" onchange=\"knClientSet(&quot;%s&quot;, this.value)\">", s->key);
             break;
-        case CS_SLIDER:
-            append_slider(sb, s->key, value, s->min, s->max, s->step, "");
-            break;
-        case CS_UISCALE: {
-            // Display > Interface > UI Scale: the uiScaling switch + the scaleUI slider
-            const cJSON *on = ui_setting_value("uiScaling");
-            sb_appendf(sb, "<label class=\"switch\" style=\"margin-left:10px\"><input type=\"checkbox\" "
-                           "onclick=\"window.setSetting(&quot;uiScaling&quot;, this.checked)\"%s><span class=\"slider\"><span class=\"grooves\"></span></span></label>",
-                       cJSON_IsFalse(on) ? "" : " checked=\"\"");
-            append_slider(sb, "scaleUI", value, 0.1, 1.0, 0.1, "width: 244px;");
-            break;
-        }
         case CS_BUTTON:
             append_button(sb, cs_button(s), s->action);
             break;
