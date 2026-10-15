@@ -442,6 +442,13 @@ int hud_modes_handle_event(Client *client, const int packet_type, const void *pa
         }
         case NET_PACKET_TEAM_SCORE: {
             MODES_READ(NetTeamScorePacket, score);
+            if (score.team == 0) { // an official server's "ts" without a team (krunker_link.c): teamScores = {}
+                memset(g_modes.team_scores, 0, sizeof(g_modes.team_scores));
+                memset(g_modes.team_scores_v7, 0, sizeof(g_modes.team_scores_v7));
+                memset(g_modes.score_seen, 0, sizeof(g_modes.score_seen));
+                if (game->mode) memset(game->mode->team_scores, 0, sizeof(game->mode->team_scores));
+                return 1;
+            }
             if (score.team >= 1 && score.team <= 2) {
                 g_modes.team_scores[score.team - 1] = score.score;
                 g_modes.score_seen[score.team - 1] = 1; // io_teamScore: Game.teamScores[team] = score
@@ -454,11 +461,24 @@ int hud_modes_handle_event(Client *client, const int packet_type, const void *pa
         }
         case NET_PACKET_FLAG: {
             MODES_READ(NetFlagPacket, flag);
+            // official servers (krunker_link.c) send the flag line ("ufi") and the flag ("ufl" / "ufp")
+            // apart: index -1 is the team's line only; team 0 keeps the flag's team (else the map's), an
+            // empty info keeps the line
+            if (flag.index == -1 && flag.flag.team >= 1 && flag.flag.team <= 2) {
+                memcpy(g_modes.flag_info[flag.flag.team - 1], flag.info, NET_MODE_TEXT_SIZE);
+                g_modes.flag_info[flag.flag.team - 1][NET_MODE_TEXT_SIZE - 1] = 0;
+                return 1;
+            }
             if (flag.index >= 0 && flag.index < MODE_MAX_FLAGS) {
+                if (!flag.flag.team) {
+                    const GameMode *mode = game->mode;
+                    flag.flag.team = g_modes.flags[flag.index].team ? g_modes.flags[flag.index].team
+                                     : mode && flag.index < mode->flag_count ? mode->flags[flag.index].team : 0;
+                }
                 g_modes.flags[flag.index] = flag.flag;
                 if (flag.index >= g_modes.flag_count) g_modes.flag_count = flag.index + 1;
                 hud_modes_mirror_flag(client, flag.index);
-                if (flag.flag.team >= 1 && flag.flag.team <= 2) {
+                if (flag.flag.team >= 1 && flag.flag.team <= 2 && flag.info[0]) {
                     memcpy(g_modes.flag_info[flag.flag.team - 1], flag.info, NET_MODE_TEXT_SIZE);
                     g_modes.flag_info[flag.flag.team - 1][NET_MODE_TEXT_SIZE - 1] = 0;
                 }

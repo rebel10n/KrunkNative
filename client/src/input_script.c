@@ -139,6 +139,8 @@
 //                                text t=100 @label n=1 checked=0 value= text=K" (settings / binds tests)
 //   100 grep @label Unknown [id=killFeed]  how many matches' text contains the word (case-insensitive):
 //                                "[input_script] grep t=100 @label needle=Unknown n=1 hits=0"
+//   100 attr @label src #victorySub  log the first match's attribute: "[input_script] attr t=100 @label n=1
+//                                src=./img/vic.png" ("-" when absent or nothing matches)
 //   100 glyphs @label #menuWindow  log how many characters every match's rendered text draws without a glyph
 //                                (tofu, html_dom_missing_glyphs) and the first such code point: "[input_script]
 //                                glyphs t=100 @label n=1 missing=0 first=-" (localisation tests: i18n_e2e.py)
@@ -277,7 +279,7 @@ static void script_load(void) {
         if (!strcmp(e->cmd, "con") || script_probe(e->cmd) || !strcmp(e->cmd, "type") || !strcmp(e->cmd, "om") ||
             !strcmp(e->cmd, "call") || !strcmp(e->cmd, "setscroll") || !strcmp(e->cmd, "hit") || !strcmp(e->cmd, "ft") ||
             !strcmp(e->cmd, "nodes") || !strcmp(e->cmd, "rects") || !strcmp(e->cmd, "clicksel") || !strcmp(e->cmd, "wsel") ||
-            !strcmp(e->cmd, "text") || !strcmp(e->cmd, "grep") || !strcmp(e->cmd, "glyphs") || !strcmp(e->cmd, "locale") || !strcmp(e->cmd, "page") ||
+            !strcmp(e->cmd, "text") || !strcmp(e->cmd, "grep") || !strcmp(e->cmd, "attr") || !strcmp(e->cmd, "glyphs") || !strcmp(e->cmd, "locale") || !strcmp(e->cmd, "page") ||
             !strcmp(e->cmd, "netchat") || !strcmp(e->cmd, "builds") || !strcmp(e->cmd, "placewatch")) { // the whole rest of the line: `con bot_add 5 difficulty=hard`
             while (*rest == ' ' || *rest == '\t') rest++;
             snprintf(e->arg, sizeof(e->arg), "%s", rest);
@@ -630,6 +632,14 @@ static void script_run(Client *client, const ScriptEvent *e) {
         }
         free(text);
         fprintf(stderr, "[input_script] grep t=%.0f %s needle=%s n=%d hits=%d\n", g_script.time, label, needle, n, hits);
+    } else if (!strcmp(e->cmd, "attr")) {
+        // attr @label <name> <selector>: the first match's attribute ("-" when absent or no match)
+        char label[64] = "", name[64] = "", sel[192] = "", value[256] = "-";
+        sscanf(e->arg, "%63s %63s %191[^\n]", label, name, sel);
+        const int n = html_ui_available() && sel[0] ? html_dom_query_all(0, sel, NULL, 0) : 0;
+        const HtmlElem el = n > 0 ? html_dom_query(0, sel) : 0;
+        if (!el || html_dom_get_attr(el, name, value, sizeof(value)) < 0) snprintf(value, sizeof(value), "-");
+        fprintf(stderr, "[input_script] attr t=%.0f %s n=%d %s=%s\n", g_script.time, label, n, name, value);
     } else if (!strcmp(e->cmd, "glyphs")) {
         char label[64] = "", sel[192] = "";
         sscanf(e->arg, "%63s %191[^\n]", label, sel);

@@ -300,11 +300,13 @@ class Stub:
     def __init__(self, mm_port, ws_port, scenario="default", map_index=None, spawn=None):
         self.mm_port, self.ws_port = mm_port, ws_port
         self.scenario = scenario  # "sync": after "en", play the movement-lock / correction packets (sync_phases);
-        #                           "spawn": after "en", our player at `spawn` and nothing correcting it (run_native_hq)
+        #                           "spawn": after "en", our player at `spawn` and nothing correcting it (run_native_hq);
+        #                           "hud": a CTF game, the score / kill / objective / end packets (hud_phases)
         self.map_index = MAP_INDEX if map_index is None else map_index  # init's mapIndex
         self.spawn = spawn or (4.0, 0.0, 4.0)
         self.frame_t = []         # time.monotonic() of every client frame (parallel to self.frames)
-        self.sent = {}            # sync: what the stub sent when (name -> time.monotonic())
+        self.sent = {}            # sync / hud: what the stub sent when (name -> time.monotonic())
+        self.ended = False        # hud: "end" went out: the clock frames carry state 1 ("Next Round in")
         self.http_log = []      # (path, query list)
         self.ws_paths = []
         self.frames = []        # (name, args, ah) from the client
@@ -418,10 +420,12 @@ class Stub:
             ah[0] = (ah[0] + 0x11) & 0xff  # the server's own trailer (the client never checks it)
             await ws.send(frame(name, *args, ah=ah[0]))
 
-        def player(sock, sid, name, x, z, y=0):
+        def player(sock, sid, name, x, z, y=0, team=0):
             e = [None] * 53
-            e[0], e[1], e[2], e[3], e[4], e[5], e[6], e[7], e[8], e[9], e[18] = sock, sid, x, y, z, name, 0, None, 100, 0, 0.0
+            e[0], e[1], e[2], e[3], e[4], e[5], e[6], e[7], e[8], e[9], e[18] = sock, sid, x, y, z, name, 0, None, 100, team, 0.0
             return e
+
+        hud = self.scenario == "hud"
 
         stop = asyncio.Event()
 
@@ -441,7 +445,7 @@ class Stub:
                 if fmt != last_fmt:
                     last_fmt = fmt
                     self.timer_sent.append(remain)
-                    await send("t", fmt, 0, remain)
+                    await send("t", fmt, 1 if self.ended else 0, remain)
                 n += 1
                 if n % 10 == 0:
                     await send("pi")
@@ -499,8 +503,13 @@ class Stub:
                 if any(f[0] == "load" for f in self.frames):
                     break
                 await asyncio.sleep(0.1)
-            await send("init", self.map_index, 0, 0, None, None, None, {}, None, 0, None, {"gor": True}, None, False, True, False, None, None, 0)
-            await send("0", player("sockBOT", BOT_SID, "StubBot", 0.0, 0.0))
+            if hud:  # CTF (3, modes.c MODE_ID_CTF): the joiner's team scores + flag lines, syncData's flags (uids 40 / 41, map order)
+                await send("init", self.map_index, 3, 0, [[1, 0], [2, 0]], [[1, 3, "AT BASE"], [2, 1, "AT BASE"]], None, {}, None, 0, None, None,
+                           {"gor": True, "flg": [[40, 0.0, 0.0, 0.0, 0, None], [41, 20.0, 0.0, 20.0, 0, None]], "obj": [None, 0]},
+                           None, False, True, False, None, None, 0)
+            else:
+                await send("init", self.map_index, 0, 0, None, None, None, {}, None, 0, None, {"gor": True}, None, False, True, False, None, None, 0)
+            await send("0", player("sockBOT", BOT_SID, "StubBot", 0.0, 0.0, team=2 if hud else 0))
             for nonce, ct, _ in CC_CASES:
                 await send("cc", nonce, None, ct)
             await send("cpt", self.cpt)
@@ -534,6 +543,10 @@ class Stub:
                     if stop.is_set():
                         break
                     await asyncio.sleep(0.1)
+            elif self.got_en.is_set() and hud:
+                await send("frs")
+                await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0, team=1))
+                await self.hud_phases(send, stop)
             elif self.got_en.is_set():
                 await send("frs")
                 await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0))
@@ -664,6 +677,55 @@ class Stub:
             await asyncio.sleep(0.1)
         if stop.is_set():
             mark("closed")
+
+
+    async def hud_phases(self, send, stop):
+        """Packet-audit clusters C / D against a live client (run_native_hud): scores, kills, the
+        leaderboard, ammo, CTF flags, the action feed, localized chat, then the end of the match. An
+        "l" every 0.4 s keeps us where we spawned and acks the last isn."""
+        async def hold(seconds):
+            end = time.monotonic() + seconds
+            while time.monotonic() < end and not stop.is_set():
+                qs = [f for f in self.frames if f[0] == "q"]
+                isn = int(qs[-1][1][1]) if qs else 0
+                await send("l", [isn, 42, 4.0, 0, 4.0, 0, 0, 0, 0.0, True, False, False, 0, False, False, 0, 0, 0, 0, True, False, 0, 0, None, 0])
+                await asyncio.sleep(0.4)
+
+        await hold(3.0)
+        self.sent["hud"] = time.monotonic()
+        await send("ts", 1, 5)                        # TEAM_SCORE: team 1 = 5
+        await send("5", 120, False, False, 0)         # GET_SCORE: +120
+        await send("6", [9, 100, 0, 1], 0, 3, 1)      # GET_KILL: Headshot +100, totalKills 3
+        # the round popup goes early: the medal queue shows one medal at a time, and the end screen hides the HUD
+        await send("rds", 2, False, 1, {"1": 2, "2": 1})  # UPDATE_ROUNDS_DIS: Switching Sides, Alpha leads
+        await send("3", BOT_SID, 1, MY_SID, None, {"wId": 0}, False)  # KILL_PLAYER: the bot, by us
+        await send("7", [MY_SID, 1, 220, BOT_SID, 0, 40])  # UPDATE_LEADERS, CTF's [caps, score]
+        await send("ulb", 1, ["Alice", 500, "Bob", 1.5])   # UPDATE_LEADER_BOARD: a map board's rows
+        await send("lv", 3)                           # UPDATE_LIVES
+        await send("uamo", [17, None], [])            # UPDATE_AMMO: 17 in the primary
+        await send("st", 2, 1)                        # KILL_STREAK: our streak 2, one
+        await send("kst", BOT_SID, 5)                 # KILL_STREAK_M: the bot's 5 kill streak
+        await send("wstk", 3, 4)                      # UPDATE_WEAPON_STREAK
+        await send("10")                              # GET_ASSIST: the Assist medal
+        await send("am", [24, 20, 0, 1])              # ADD_MEDAL: Pickup +20
+        await send("krt", 3, 0)                       # UPDATE_KR_TAGS: 3 dog tags
+        await send("ufi", 2, "Guest_9")               # team 2's flag line: carried by us
+        await send("ufl", 40, 4.0, 10.0, 4.0, MY_SID)  # UPDATE_FLAG: team 2's flag (uid 40) carried by us
+        await send("ufp", 41, 20.0, 1.0, 20.0)        # UPDATE_FLAG_PING: team 1's flag (uid 41)
+        await send("ac", MY_SID, None, "got the Flag")  # ACTION_FEED
+        await send("chi", -1, None, "modes.round.win", 2, "#ff0000")
+        await send("chi", 0, None, ["player.killstreak", "Somebody", 7], 1)
+        await send("obj", 4, 60000, True)             # SET_OBJECTIVE
+        await send("uobj", 4, 2)                      # UPDATE_OBJECTIVE: on zone 2
+        await send("zn", [0.0, 0.0, 10.0, 10.0])      # UPDATE_ZONE
+        await hold(12.0)  # the medal queue shows one medal at a time (about 1.5 s each): the end screen hides the HUD
+        self.sent["end"] = time.monotonic()
+        self.ended = True
+        await send("end", 0, True, {"ed": [MY_SID, ["Guest_9", "Guest_9"], 220, 3, 0, 1, "<span style='color:#F8C55C'>+12</span> KR",
+                                           BOT_SID, ["StubBot", "StubBot"], 40, 0, 1, 0, "NONE"],
+                                    "tms": [[1, 5, None], [2, 1, None]], "mdls": [], "mts": [], "vo": {}, "modeIndex": 3}, 1, 3, 12, None, {})
+        await hold(12.0)
+        self.sent["done"] = time.monotonic()
 
     def start_ws(self):
         started = threading.Event()
@@ -1285,6 +1347,78 @@ def sync_rest_checks(label, stub, lines, text):
     check(f"{label}: h resetMax lowers maxHealth (120 / 120)", hr is not None)
     ingame = [r for r in seq[hr:] if r["throw"] != -1] if hr is not None else []  # (-1: we left the game)
     check(f"{label}: rfl: the knife is back (canThrow)", ingame and all(r["throw"] == 1 for r in ingame))
+
+
+def run_native_hud():
+    """Packet-audit clusters C / D (krunker_link.c): the stub (Stub.hud_phases) plays a CTF game's score,
+    kill, leaderboard, ammo, flag, action-feed and localized-chat packets, then "end" (victory, team 1).
+    The HUD probes (#myScoreVal, #killsVal, #ammoVal, #teamScores, #gameMessage, #leaderContainer,
+    #chatList, the end screen) show what the client made of them."""
+    label = "native-hud"
+    # the transient popups (the "+N" score, the medal queue, the round popup) show for about a second each:
+    # their own elements are sampled every 700 ms (#inGameUI's text is cut to 160 characters, and the popups
+    # are appended at its end); the other values stay until the next write, one probe per 3 s is enough
+    # icon medals (the medal's own badge) are #knMedal; text-only ones (the round popup) are #knChalName
+    dense = ["text @sc [id=knScoreText]", "text @medal [id=knMedal]", "text @chal [id=knChalName]"]
+    sparse = ["text @score [id=myScoreVal]", "text @kills [id=killsVal]", "text @ammo [id=ammoVal]",
+              "text @teams [id=teamScores]", "text @gmsg [id=gameMessage]", "text @lead [id=leaderContainer]",
+              "text @chat [id=chatList]", "vis @end endUI", "attr @vic src [id=victorySub]", "text @endtab [id=endTable]",
+              "attr @endmid style [id=endMidHolder]", "text @lives [id=livesDisp]", "text @tags [id=krTagHolder]",
+              "text @streak [id=killStreakHolder]", "text @rounds [id=roundsVal]"]
+    probes = "".join("%d %s\n" % (t + k, kind) for t in range(5000, 34000, 700) for k, kind in enumerate(dense))
+    probes += "".join("%d %s\n" % (t + k, kind) for t in range(5000, 34000, 3000) for k, kind in enumerate(sparse))
+    # the end screen opens on the Performance tab; the leaderboard (#endTable) is the first tab
+    tab = ("33750 nodes @tabfirst .tabHeader:first-child\n33760 nodes @tabs2 .tabHeader:nth-child(1)\n"
+           "33800 clicksel .tabHeader:first-child\n33900 text @endtab [id=endTable]\n"
+           "33950 text @tabs [id=tabHolder]\n34100 text @endtab [id=endTable]\n")
+    script = "0 boot\n1500 clickid knCaptchaToken\n1600 type %s\n1700 clickid knCaptchaUse\n3800 play\n%s%s34500 quit\n" % (PASTE_TOKEN, probes, tab)
+    events = sorted(script.strip().split("\n"), key=lambda l: int(l.split()[0]))
+    stub, p, out, log = launch_native(label, "\n".join(events) + "\n", {}, scenario="hud")
+    lines = finish_native(label, stub, p, out, log, timeout=240)
+    text = "\n".join(lines)
+    check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+    for name in ("hud", "end", "done"):
+        check(f"{label}: the stub got to send its \"{name}\" packets", name in stub.sent, sorted(stub.sent))
+    check(f"{label}: the server saw no ahNum / \"q\"-sequence violations", not stub.proto_errors, stub.proto_errors[:5])
+
+    def probe(name):  # every @name text probe, in order
+        return [m.group(1) for m in re.finditer(r"\[input_script\] text t=\d+ @%s n=\d+ checked=\d+ value=\S* text=(.*)" % name, text)]
+
+    clean = lambda t: t.replace("\u200e", "").replace("\u200f", "")  # noqa: E731 (fixStr's LRM / RLM marks)
+    score, kills, ammo = probe("score"), probe("kills"), probe("ammo")
+    check(f"{label}: GET_SCORE: #myScoreVal shows our 120", "120" in score, score[-3:])
+    check(f"{label}: GET_SCORE: the \"+120\" score popup (#knScoreText)", any("+120" in clean(t) for t in probe("sc")), probe("sc")[-1:])
+    check(f"{label}: GET_KILL / KILL_PLAYER: #killsVal shows totalKills 3", "3" in kills, kills[-3:])
+    check(f"{label}: UPDATE_AMMO: #ammoVal shows the primary's 17", "17" in ammo, ammo[-3:])
+    teams = probe("teams")
+    check(f"{label}: init + TEAM_SCORE: #teamScores goes from 3 to 5 for team 1", any(t.startswith("3") for t in teams) and
+          any(re.match(r"5\s*flag", t) for t in teams), teams[:1] + teams[-1:])
+    check(f"{label}: UPDATE_FLAG_INFO: team 2's flag line is our name", any("Guest_9" in t for t in teams), teams[-1:])
+    gmsg = probe("gmsg")
+    check(f"{label}: UPDATE_FLAG (carrier = us): #gameMessage \"You have the Flag\"", any("You have the Flag" in g for g in gmsg), gmsg[-3:])
+    lead = [clean(t) for t in probe("lead")]
+    check(f"{label}: UPDATE_LEADERS: the leaderboard lists both players", any("Guest_9" in t and "StubBot" in t for t in lead), lead[-1:])
+    chat = [clean(t) for t in probe("chat")]
+    check(f"{label}: ADD_CHATI18N: modes.round.win in English", any("Your Team has secured this round" in t for t in chat), chat[-1:])
+    check(f"{label}: ADD_CHATI18N with arguments: player.killstreak", any("Somebody on a 7 Kill Streak" in t for t in chat), chat[-1:])
+    check(f"{label}: KILL_STREAK_M: StubBot's 5 kill streak", any("StubBot is on a 5 Kill Streak" in t for t in chat), chat[-1:])
+    check(f"{label}: ACTION_FEED: \"You got the Flag\"", any("You got the Flag" in t for t in chat), chat[-1:])
+    lives, tags = probe("lives"), probe("tags")
+    pops = [clean(t).upper() for t in probe("medal") + probe("chal")]  # medal popups are upper-cased
+    check(f"{label}: UPDATE_LIVES: #livesDisp shows 3", "3" in lives, lives[-3:])
+    check(f"{label}: UPDATE_KR_TAGS: #krTagHolder shows x3", any("x3" in t for t in tags), tags[-1:])
+    check(f"{label}: ADD_MEDAL: the Pickup popup (+20)", any("PICKUP+20" in t for t in pops), pops[-1:])
+    check(f"{label}: GET_ASSIST: the Assist popup", any("ASSIST" in t for t in pops), pops[-1:])
+    check(f"{label}: UPDATE_ROUNDS_DIS: \"Switching Sides\" popup", any("SWITCHING SIDES" in t for t in pops), pops[-1:])
+    check(f"{label}: KILL_STREAK: #killStreakHolder is written", any(t.strip() for t in probe("streak")), probe("streak")[-1:])
+    ends = re.findall(r"\[input_script\] vis t=(\d+) @end endUI=(\d)", text)
+    shown = [int(t) for t, v in ends if v == "1"]
+    check(f"{label}: END_GAME shows the end screen (#endUI)", shown, ends[-3:])
+    vic = re.findall(r"\[input_script\] attr t=\d+ @vic n=\d+ src=(\S+)", text)
+    check(f"{label}: END_GAME: a victory (#victorySub vic.png)", "./img/vic.png" in vic, sorted(set(vic)))
+    endtab = [clean(t) for t in probe("endtab")]
+    check(f"{label}: END_GAME: the results list both players with our reward", any("Guest_9" in t and "StubBot" in t and "12" in t
+                                                                                     for t in endtab), endtab[-1:])
 
 
 def run_native_lobby():
@@ -2078,6 +2212,7 @@ def main():
         run_native_paste()
         run_native_sync()
         run_native_hq()
+        run_native_hud()
         run_native_lobby()
         run_native_badmap()
         run_native_kick()

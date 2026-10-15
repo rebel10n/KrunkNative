@@ -265,8 +265,10 @@ static void tags_tick(const Client *client) {
     const GameMode *mode = client->game.mode;
     const int limit = mode ? mode->config.tag_hold_limit : 0;
     const int tags = hud_modes_v7()->dog_tags;
-    if (!limit || (!g_v7.tags_shown && tags <= 0)) return; // "krt" fills the holder once tags count
-    const int full = tags >= limit;
+    // "krt" (io_updateKrTags) writes the holder for every mode; the limit only turns the item red. CTF has
+    // no tagHoldLimit, and its tags still show (official "krt" from a CTF server).
+    if (!g_v7.tags_shown && tags <= 0) return;
+    const int full = limit > 0 && tags >= limit;
     if (g_v7.tags_shown && tags == g_v7.tags && full == g_v7.tags_full) return;
     g_v7.tags = tags;
     g_v7.tags_full = full;

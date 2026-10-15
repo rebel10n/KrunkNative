@@ -84,6 +84,12 @@ typedef enum {
     // queues them into the client's own inbound stream, no server sends them
     NET_EXT_KN_INPUTS_DROPPED = 0x8020, // no body: Krunker's "f" SYNC_FAILED cleared tmpInpts (the
                                         // pending prediction inputs) (game.deob.js:220333)
+    // 0x8030 official krunker.io HUD (client/src/net/krunker_link.c -> client/src/net/game_events.c),
+    // client-local: the link turns an official packet our own NetPackets cannot carry into one of
+    // these for the client's inbound queue; no server sends or receives them
+    NET_EXT_KN_OFFICIAL_AMMO = 0x8030,         // "uamo" NetOfficialAmmoPacket
+    NET_EXT_KN_OFFICIAL_CHAT_I18N = 0x8031,    // "chi" NetOfficialChatI18nHeader + strings
+    NET_EXT_KN_OFFICIAL_LEADER_BOARD = 0x8032, // "ulb" NetOfficialLeaderBoardHeader + strings
 } NetExtSubtype;
 
 // NET_EXT_KN_ACCOUNT_AUTH (C -> S): the identity the player now has in the menu. The server verifies
@@ -157,6 +163,35 @@ typedef struct {
     int32_t uid;   // the player's sid
     char name[32]; // PLAYER_NAME_SIZE, NUL-terminated
 } NetPlayerNamePacket;
+
+// NET_EXT_KN_OFFICIAL_AMMO: Krunker "uamo" UPDATE_AMMO [ammos, reserveAmmos] (game.deob.js:220425 ->
+// players.updatePlayerAmmo): our player's magazine per loadout slot and, in finiteAmmo modes, its
+// reserve per slot. -1 = null in the array (a melee slot: no count).
+#define NET_OFFICIAL_AMMO_SLOTS 8
+typedef struct {
+    uint8_t count;                          // ammos.length (<= NET_OFFICIAL_AMMO_SLOTS)
+    uint8_t reserve_count;                  // reserveAmmos.length, 0 = none sent
+    int32_t ammo[NET_OFFICIAL_AMMO_SLOTS];
+    int32_t reserve[NET_OFFICIAL_AMMO_SLOTS];
+} NetOfficialAmmoPacket;
+
+// NET_EXT_KN_OFFICIAL_CHAT_I18N: Krunker "chi" ADD_CHATI18N [team, name, key | [key, ...args], kind,
+// color] (game.deob.js:221142): addChat with i18n.t(key, ...args), translated on the client's main
+// thread (i18n is its). The header is followed by `argc + 2` NUL-terminated UTF-8 strings: the
+// sender name ("" none), the key, then the arguments (numbers in JS String() form).
+typedef struct {
+    uint8_t kind;     // NetChatKind of the line (Krunker 1 / 4 game, 2 server, 0 player)
+    uint8_t argc;     // i18n arguments
+    char color[16];   // CSS colour of a kind-2 line ("" = the default #fc03ec)
+} NetOfficialChatI18nHeader;
+
+// NET_EXT_KN_OFFICIAL_LEADER_BOARD: Krunker "ulb" UPDATE_LEADER_BOARD [index, [player, value, ...]]
+// (game.deob.js:220065 -> map.manager.updatePendingLeader): the rows of a map's LEADERBOARD object.
+// The header is followed by `cells` NUL-terminated strings (player, value pairs).
+typedef struct {
+    int32_t index;    // the leaderboard (pendingLeaders key: the map's n-th LEADERBOARD object)
+    uint8_t cells;    // strings that follow
+} NetOfficialLeaderBoardHeader;
 #pragma pack(pop)
 // NET_EXT_KN_BOT_PATH (S -> C): the spectated bot's AI state for the show_navmeshes overlay
 // (client/src/nav_overlay.c) and the spectator HUD's state line (hud_spectate.c). The server

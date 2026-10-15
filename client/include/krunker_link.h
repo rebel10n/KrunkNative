@@ -65,6 +65,32 @@
 //   a       [error, id, name, data, ...]     ACCOUNT_RESPONSE (iîïïiii :210016): our krunker.io account
 //                                            signed in on this socket -> KRUNKER_LINK_EV_ACCOUNT (name,
 //                                            level = floor(0.03 * sqrt(data.player_score)))
+// Score / kill / ammo HUD (cluster C of the packet audit):
+//   ts      [team, score] | []               NET_PACKET_TEAM_SCORE; no team clears the scores (team 0) (:220857)
+//   5       [delta, relay, absolute, class]  NET_PACKET_SCORE: the popup unless absolute, our score unless relay (:220916)
+//   6       [medals, sound, totalKills, inc] NET_PACKET_KILL_MEDALS (kills = totalKills) (:220948)
+//   7       [sid, ...leaderStats]*           NET_PACKET_LEADERBOARD + NET_PACKET_LEADER_STATS (mode leaderStats) (:220727)
+//   ulb     [index, [player, value]*]        NET_EXT_KN_OFFICIAL_LEADER_BOARD: a map LEADERBOARD's rows (:220065)
+//   lv      [lives]                          NET_PACKET_LIVES (:220940)
+//   uamo    [ammos, reserveAmmos]            NET_EXT_KN_OFFICIAL_AMMO (:220425)
+//   st      [streakId, count]                NET_PACKET_STREAK (:220651)
+//   kst     [sid, streak]                    NET_PACKET_KILL_STREAK (:220705)
+//   wstk    [weapon, streak]                 NET_PACKET_WEAPON_STREAK (:220669)
+//   10      []                               NET_PACKET_ASSIST (:220957)
+//   am      [[medal, score, ?, count]*]      NET_PACKET_MEDAL per medal (:220960)
+//   krt     [dogTags, depositType]           NET_PACKET_MODE_COUNTER KR_TAGS (:220680)
+// Objectives / flags / rounds / end (cluster D):
+//   ufi     [team, text]                     NET_PACKET_FLAG index -1: the team's flag line only (:220911)
+//   ufl     [uid, x, y, z, carrier]          NET_PACKET_FLAG (game.updateFlag :188774); uid -> index by init's syncData.flg
+//   ufp     [uid, x, y, z]                   NET_PACKET_FLAG, the position only (game.updateFlagPing :188830)
+//   obj     [uid, ms, initial]               NET_PACKET_OBJECTIVE_V7 (game.setObjective :189407)
+//   uobj    [uid, onZone]                    NET_PACKET_OBJECTIVE_OCCUPANCY (game.updateObjective :189448)
+//   rds     [roundsLeft, false, win, wins]   NET_PACKET_ROUNDS (:219243)
+//   zn      [[x, z, w, l]]                   NET_PACKET_ZONE (game.updateZone :189401)
+//   end     [type, didWin, endData, winTeam, endIndex, kr, bp, items]  NET_PACKET_END + NET_PACKET_MODE_END (:219712)
+//   ac      [sid, sid2, text]                NET_PACKET_ACTION (:220711)
+//   chi     [team, name, key|[key, args], kind, color]  NET_EXT_KN_OFFICIAL_CHAT_I18N (:221142)
+//   init's team scores and syncData (flg, obj, zone) seed the same packets for a joiner.
 // Outbound: our NET_PACKET_ENT -> "en", NET_PACKET_INPUT(_BATCH) -> "q" (the delta-compressed
 // window of :221748-221830), NET_PACKET_CHAT_SEND / CHAT_V7 -> "ct", the player list's EXT
 // NET_EXT_VOTE_KICK -> "v2k" [alias, 1] / [alias] (kickVote :220193, the [2] key :221373) and
@@ -133,12 +159,33 @@ typedef struct {
     int busy;      // "busy" setBusy (a nametag icon; nothing in this client shows it)
 } KrunkerLinkPlayer;
 
+// what LEADERBOARD carries of a player that the official packets give piecemeal ("7" columns, "3"
+// deaths and kills, our "5" / "6")
+typedef struct {
+    int sid;
+    int score, kills, deaths;
+} KrunkerLinkStats;
+
+// a CTF flag by its map object uid ("ufl" / "ufp" / init syncData.flg)
+typedef struct {
+    int uid;
+    float position[3];
+    int carrier; // sid, 0 none
+} KrunkerLinkFlag;
+
 typedef struct {
     KrunkerLinkIO io;
     KrunkerSession codec;           // ahNum (krunker_proto.h)
     char socket_id[64];             // io-init
     int my_sid;                     // -1 until our "0"
     int joined;                     // "en" sent
+    // score / kill / objective HUD (clusters C / D): reset by every "init"
+    int mode;                       // init's modeIndex (mode_config: leaderStats / endStats), -1 before
+    int my_score;                   // "5": our score as the live client keeps it (myScoreVal)
+    KrunkerLinkStats stats[KRUNKER_LINK_MAX_PLAYERS];
+    int stats_count;
+    KrunkerLinkFlag flags[MODE_MAX_FLAGS]; // in map order (init syncData.flg): the index is our flag index
+    int flag_count;
     KrunkerLinkPlayer players[KRUNKER_LINK_MAX_PLAYERS];
     int kpd_case;       // startGame gave a K.P.D case (kpdData): a later one without clears it
     int player_count;

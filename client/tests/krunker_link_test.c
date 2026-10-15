@@ -44,6 +44,14 @@ const Weapon *rules_weapon(const int id) {
     return &k_weapons[id];
 }
 
+// ---- test double: the mode table (shared/src/modes/modes.c in the client): CTF (3)'s columns
+static const char *const k_ctf_lead[] = {"caps", "score", NULL};
+static const char *const k_ctf_end[] = {"sid", "name", "score", "kills", "deaths", "caps", "reward", NULL};
+const GameModeConfig *mode_config(const int id) {
+    static const GameModeConfig ctf = {.leader_stats = k_ctf_lead, .end_stats = k_ctf_end};
+    return id == 3 ? &ctf : NULL;
+}
+
 static int fake_cheat(void *user, const char *nonce, const char *ct, KrunkerCcr *out) {
     (void) user;
     memset(out, 0, sizeof(*out));
@@ -130,6 +138,308 @@ static size_t b64_decode(const char *in, char *out, const size_t n) {
     }
     out[o] = 0;
     return o;
+}
+
+// the body of an official-HUD EXT (net_ext.h NET_EXT_KN_OFFICIAL_*), NULL when the nth EXT is another
+static const uint8_t *ext_body(const int nth, const uint16_t subtype, uint16_t *len) {
+    const NetPacket *p = find_in(NET_PACKET_EXT, nth);
+    if (!p || p->length < 2 || (p->payload[0] | p->payload[1] << 8) != subtype) return NULL;
+    *len = (uint16_t) (p->length - 2);
+    return p->payload + 2;
+}
+
+#define READ_IN(type, var, kind, nth) \
+    type var; \
+    memset(&var, 0, sizeof(var)); \
+    const NetPacket *var##_p = find_in(NET_PACKET_##kind, nth); \
+    if (var##_p && var##_p->length == sizeof(type)) memcpy(&var, var##_p->payload, sizeof(type)); \
+    else var##_p = NULL
+
+// Clusters C / D of the packet audit: score / kills / ammo HUD, objectives / flags / rounds / end
+static void test_hud(void) {
+    KrunkerLink link;
+    const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
+    krunker_link_init(&link, &io, KRUNKER_AHKEY);
+    feed(&link, "io-init", (KrunkerValue[]) {KRUNKER_V_STR("sockA")}, 1);
+    clear();
+
+    // init: CTF (3), the joiner's team scores + flag lines, syncData flg / obj / zone
+    const KrunkerValue ts1[] = {KRUNKER_V_NUM(1), KRUNKER_V_NUM(3), KRUNKER_V_STR("AT BASE")};
+    const KrunkerValue ts2[] = {KRUNKER_V_NUM(2), KRUNKER_V_NUM(1), KRUNKER_V_STR("AWAY")};
+    const KrunkerValue scores[] = {KRUNKER_V_ARRAY(ts1, 3), KRUNKER_V_ARRAY(ts2, 3)};
+    const KrunkerValue f0[] = {KRUNKER_V_NUM(40), KRUNKER_V_NUM(1), KRUNKER_V_NUM(2), KRUNKER_V_NUM(3), KRUNKER_V_NUM(0), KRUNKER_V_NIL};
+    const KrunkerValue f1[] = {KRUNKER_V_NUM(41), KRUNKER_V_NUM(4), KRUNKER_V_NUM(5), KRUNKER_V_NUM(6), KRUNKER_V_NUM(7), KRUNKER_V_NUM(900)};
+    const KrunkerValue flg[] = {KRUNKER_V_ARRAY(f0, 6), KRUNKER_V_ARRAY(f1, 6)};
+    const KrunkerValue obj[] = {KRUNKER_V_NUM(3), KRUNKER_V_NUM(5000)};
+    const KrunkerValue zone[] = {KRUNKER_V_NUM(10), KRUNKER_V_NUM(20), KRUNKER_V_NUM(30), KRUNKER_V_NUM(40)};
+    const KrunkerValue sync[] = {KRUNKER_V_STR("gor"), KRUNKER_V_NUM(1), KRUNKER_V_STR("flg"), KRUNKER_V_ARRAY(flg, 2),
+                                 KRUNKER_V_STR("obj"), KRUNKER_V_ARRAY(obj, 2), KRUNKER_V_STR("zone"), KRUNKER_V_ARRAY(zone, 4)};
+    KrunkerValue init[12];
+    for (int i = 0; i < 12; i++) init[i] = KRUNKER_V_NIL;
+    init[0] = KRUNKER_V_NUM(10);
+    init[1] = KRUNKER_V_NUM(3);
+    init[4] = KRUNKER_V_ARRAY(scores, 2);
+    init[11] = KRUNKER_V_MAP(sync, 4);
+    feed(&link, "init", init, 12);
+    CHECK(link.mode == 3 && find_in(NET_PACKET_INIT, 0), "init: mode 3 (%d)", link.mode);
+    {
+        READ_IN(NetTeamScorePacket, a, TEAM_SCORE, 0);
+        const NetPacket *b = find_in(NET_PACKET_TEAM_SCORE, 1);
+        NetTeamScorePacket bb = {0};
+        if (b) memcpy(&bb, b->payload, sizeof(bb));
+        CHECK(a_p && a.team == 1 && a.score == 3 && b && bb.team == 2 && bb.score == 1, "init: team scores 3 / 1");
+        READ_IN(NetFlagPacket, line, FLAG, 1);
+        CHECK(line_p && line.index == -1 && line.flag.team == 2 && !strcmp(line.info, "AWAY"), "init: team 2's flag line");
+        READ_IN(NetFlagPacket, fl, FLAG, 3);
+        CHECK(fl_p && fl.index == 1 && fl.flag.carrier_uid == 7 && fl.flag.position[1] == 5.0f && fl.flag.team == 0 && !fl.info[0],
+              "init: flag uid 41 is index 1, carried by 7");
+        READ_IN(NetObjectiveV7Packet, o, OBJECTIVE_V7, 0);
+        CHECK(o_p && o.uid == 3 && o.time_ms == 5000 && !o.initial, "init: objective 3, 5 s");
+        READ_IN(NetZonePacket, z, ZONE, 0);
+        CHECK(z_p && z.x == 10 && z.z == 20 && z.size_x == 30 && z.size_z == 40, "init: zone");
+    }
+    clear();
+
+    // players: us (9), 7, 5
+    KrunkerValue add[3 * 53];
+    for (int i = 0; i < 3 * 53; i++) add[i] = KRUNKER_V_NIL;
+    add[0] = KRUNKER_V_STR("sockA"); add[1] = KRUNKER_V_NUM(9); add[8] = KRUNKER_V_NUM(100); add[9] = KRUNKER_V_NUM(1);
+    add[53] = KRUNKER_V_STR("sockB"); add[54] = KRUNKER_V_NUM(7); add[61] = KRUNKER_V_NUM(100); add[62] = KRUNKER_V_NUM(2);
+    add[106] = KRUNKER_V_STR("sockC"); add[107] = KRUNKER_V_NUM(5); add[114] = KRUNKER_V_NUM(100); add[115] = KRUNKER_V_NUM(2);
+    feed(&link, "0", (KrunkerValue[]) {KRUNKER_V_ARRAY(add, 3 * 53)}, 1);
+    CHECK(link.my_sid == 9, "joined as 9");
+    clear();
+
+    // ts
+    feed(&link, "ts", (KrunkerValue[]) {KRUNKER_V_NUM(1), KRUNKER_V_NUM(5)}, 2);
+    feed(&link, "ts", NULL, 0);
+    {
+        const NetPacket *a = find_in(NET_PACKET_TEAM_SCORE, 0), *b = find_in(NET_PACKET_TEAM_SCORE, 1);
+        NetTeamScorePacket x = {0}, y = {9, 9};
+        if (a) memcpy(&x, a->payload, sizeof(x));
+        if (b) memcpy(&y, b->payload, sizeof(y));
+        CHECK(a && x.team == 1 && x.score == 5 && b && y.team == 0 && y.score == 0, "ts: team 1 = 5, then cleared (team 0)");
+    }
+    clear();
+
+    // "5" GET_SCORE: delta, relay, absolute
+    feed(&link, "5", (KrunkerValue[]) {KRUNKER_V_NUM(10), KRUNKER_V_BOOL(0), KRUNKER_V_BOOL(0), KRUNKER_V_NUM(0)}, 4);
+    feed(&link, "5", (KrunkerValue[]) {KRUNKER_V_NUM(5)}, 1);
+    feed(&link, "5", (KrunkerValue[]) {KRUNKER_V_NUM(100), KRUNKER_V_BOOL(0), KRUNKER_V_BOOL(1)}, 3);
+    feed(&link, "5", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_NUM(1)}, 2);
+    {
+        NetScorePacket sc[4];
+        memset(sc, 0, sizeof(sc));
+        int ok = 1;
+        for (int i = 0; i < 4; i++) {
+            const NetPacket *p = find_in(NET_PACKET_SCORE, i);
+            if (!p || p->length != sizeof(NetScorePacket)) ok = 0;
+            else memcpy(&sc[i], p->payload, sizeof(sc[i]));
+        }
+        CHECK(ok && sc[0].delta == 10 && sc[0].score == 10 && sc[1].delta == 5 && sc[1].score == 15 && sc[2].delta == 0 &&
+              sc[2].score == 100 && sc[3].delta == 7 && sc[3].score == 100, "5: +10, +5, absolute 100 (no popup), relay +7 (score kept)");
+    }
+    clear();
+
+    // "6" GET_KILL: medals by index and by name, "" skipped; then our "3" does not count twice
+    const KrunkerValue medals[] = {KRUNKER_V_NUM(9), KRUNKER_V_NUM(100), KRUNKER_V_NUM(0), KRUNKER_V_NUM(1), KRUNKER_V_STR(""),
+                                   KRUNKER_V_NUM(50), KRUNKER_V_NUM(0), KRUNKER_V_NUM(1), KRUNKER_V_STR("Custom"), KRUNKER_V_STR("x2"),
+                                   KRUNKER_V_NUM(0), KRUNKER_V_NUM(1)};
+    feed(&link, "6", (KrunkerValue[]) {KRUNKER_V_ARRAY(medals, 12), KRUNKER_V_NUM(3), KRUNKER_V_NUM(4), KRUNKER_V_NUM(1)}, 4);
+    {
+        READ_IN(NetKillMedalsPacket, k, KILL_MEDALS, 0);
+        CHECK(k_p && k.count == 2 && !strcmp(k.medals[0].text, "Headshot") && k.medals[0].score == 100 && !strcmp(k.medals[1].text, "Custom") &&
+              k.medals[1].score == 0 && k.kills == 4, "6: Headshot +100, Custom (text score), kills 4");
+    }
+    feed(&link, "3", (KrunkerValue[]) {KRUNKER_V_NUM(5), KRUNKER_V_NUM(2), KRUNKER_V_NUM(9), KRUNKER_V_NIL, KRUNKER_V_MAP(NULL, 0)}, 5);
+    feed(&link, "3", (KrunkerValue[]) {KRUNKER_V_NUM(9), KRUNKER_V_NUM(1), KRUNKER_V_NUM(7), KRUNKER_V_NIL, KRUNKER_V_MAP(NULL, 0)}, 5);
+    {
+        const NetPacket *a = find_in(NET_PACKET_KILL, 0), *b = find_in(NET_PACKET_KILL, 1);
+        NetKillPacket x, y;
+        memset(&x, 0, sizeof(x));
+        memset(&y, 0, sizeof(y));
+        if (a) memcpy(&x, a->payload, sizeof(x));
+        if (b) memcpy(&y, b->payload, sizeof(y));
+        CHECK(a && x.killer_uid == 9 && x.killer_kills == 4 && b && y.killer_uid == 7 && y.killer_kills == 1 && y.victim_deaths == 1,
+              "3: our kill keeps the 6's 4, player 7 counts 1 (%d, %d)", x.killer_kills, y.killer_kills);
+    }
+    clear();
+
+    // "7" UPDATE_LEADERS with CTF's leaderStats [caps, score]
+    const KrunkerValue leaders[] = {KRUNKER_V_NUM(9), KRUNKER_V_NUM(2), KRUNKER_V_NUM(300), KRUNKER_V_NUM(7), KRUNKER_V_NUM(1), KRUNKER_V_NUM(150)};
+    feed(&link, "7", (KrunkerValue[]) {KRUNKER_V_ARRAY(leaders, 6)}, 1);
+    {
+        READ_IN(NetLeaderboardPacket, b, LEADERBOARD, 0);
+        CHECK(b_p && b.count == 2 && b.entries[0].uid == 9 && b.entries[0].score == 100 && b.entries[0].kills == 4 && b.entries[0].deaths == 1 &&
+              b.entries[1].uid == 7 && b.entries[1].score == 150 && b.entries[1].kills == 1, "7: board rows (score from the column, ours our \"5\" score; kills / deaths kept)");
+        READ_IN(NetLeaderStatsPacket, c, LEADER_STATS, 0);
+        CHECK(c_p && c.count == 2 && c.stat_count == 2 && c.uid[1] == 7 && c.values[0][0] == 2 && c.values[0][1] == 300 && c.values[1][0] == 1,
+              "7: leader stats caps / score");
+    }
+    clear();
+
+    // "ulb", "lv", "uamo", "st", "kst", "wstk", "10", "am", "krt"
+    const KrunkerValue rows[] = {KRUNKER_V_STR("Alice"), KRUNKER_V_NUM(500), KRUNKER_V_STR("Bob"), KRUNKER_V_NUM(1.5), KRUNKER_V_STR("odd")};
+    feed(&link, "ulb", (KrunkerValue[]) {KRUNKER_V_NUM(1), KRUNKER_V_ARRAY(rows, 5)}, 2);
+    {
+        uint16_t len = 0;
+        const uint8_t *body = ext_body(0, NET_EXT_KN_OFFICIAL_LEADER_BOARD, &len);
+        NetOfficialLeaderBoardHeader h = {0};
+        if (body) memcpy(&h, body, sizeof(h));
+        const char *c = body ? (const char *) body + sizeof(h) : "";
+        CHECK(body && h.index == 1 && h.cells == 4 && !strcmp(c, "Alice") && !strcmp(c + 6, "500") && !strcmp(c + 10, "Bob") && !strcmp(c + 14, "1.5") &&
+              len == sizeof(h) + 18, "ulb: whole rows, numbers as JS prints them");
+    }
+    clear();
+    feed(&link, "lv", (KrunkerValue[]) {KRUNKER_V_NUM(3)}, 1);
+    const KrunkerValue ammos[] = {KRUNKER_V_NUM(30), KRUNKER_V_NIL}, reserves[] = {KRUNKER_V_NUM(120)};
+    feed(&link, "uamo", (KrunkerValue[]) {KRUNKER_V_ARRAY(ammos, 2), KRUNKER_V_ARRAY(reserves, 1)}, 2);
+    feed(&link, "st", (KrunkerValue[]) {KRUNKER_V_NUM(2), KRUNKER_V_NUM(1)}, 2);
+    feed(&link, "kst", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_NUM(5)}, 2);
+    feed(&link, "wstk", (KrunkerValue[]) {KRUNKER_V_NUM(3), KRUNKER_V_NUM(4)}, 2);
+    feed(&link, "10", NULL, 0);
+    const KrunkerValue pickup[] = {KRUNKER_V_NUM(24), KRUNKER_V_NUM(20), KRUNKER_V_NUM(0), KRUNKER_V_NUM(1)};
+    feed(&link, "am", (KrunkerValue[]) {KRUNKER_V_ARRAY(pickup, 4)}, 1);
+    feed(&link, "krt", (KrunkerValue[]) {KRUNKER_V_NUM(3), KRUNKER_V_NUM(0)}, 2);
+    {
+        READ_IN(NetLivesPacket, lv, LIVES, 0);
+        CHECK(lv_p && lv.lives == 3, "lv");
+        uint16_t len = 0;
+        const uint8_t *body = ext_body(0, NET_EXT_KN_OFFICIAL_AMMO, &len);
+        NetOfficialAmmoPacket a;
+        memset(&a, 0, sizeof(a));
+        if (body && len == sizeof(a)) memcpy(&a, body, sizeof(a));
+        CHECK(body && len == sizeof(a) && a.count == 2 && a.ammo[0] == 30 && a.ammo[1] == -1 && a.reserve_count == 1 && a.reserve[0] == 120,
+              "uamo: magazines 30 / null, reserve 120");
+        READ_IN(NetStreakPacket, st, STREAK, 0);
+        READ_IN(NetKillStreakPacket, kst, KILL_STREAK, 0);
+        READ_IN(NetWeaponStreakPacket, ws, WEAPON_STREAK, 0);
+        CHECK(st_p && st.streak == 2 && st.count == 1 && kst_p && kst.uid == 7 && kst.streak == 5 && ws_p && ws.weapon == 3 && ws.count == 4,
+              "st / kst / wstk");
+        const NetPacket *as = find_in(NET_PACKET_ASSIST, 0);
+        CHECK(as && as->length == 0, "10: ASSIST");
+        READ_IN(NetMedalPacket, m, MEDAL, 0);
+        CHECK(m_p && !strcmp(m.text, "Pickup") && m.score == 20, "am: medalsList[24] Pickup +20");
+        READ_IN(NetModeCounterPacket, kr, MODE_COUNTER, 0);
+        CHECK(kr_p && kr.kind == NET_MODE_COUNTER_KR_TAGS && kr.uid == 9 && kr.value == 3.0f, "krt: our 3 tags");
+    }
+    clear();
+
+    // cluster D: ufi / ufl / ufp
+    feed(&link, "ufi", (KrunkerValue[]) {KRUNKER_V_NUM(2), KRUNKER_V_STR("Guest_9")}, 2);
+    feed(&link, "ufl", (KrunkerValue[]) {KRUNKER_V_NUM(41), KRUNKER_V_NUM(10), KRUNKER_V_NUM(11), KRUNKER_V_NUM(12), KRUNKER_V_NUM(9)}, 5);
+    feed(&link, "ufl", (KrunkerValue[]) {KRUNKER_V_NUM(99), KRUNKER_V_NUM(1), KRUNKER_V_NUM(1), KRUNKER_V_NUM(1), KRUNKER_V_NUM(0)}, 5);
+    feed(&link, "ufp", (KrunkerValue[]) {KRUNKER_V_NUM(40), KRUNKER_V_NUM(5), KRUNKER_V_NUM(6), KRUNKER_V_NUM(7)}, 4);
+    {
+        NetFlagPacket fp[4];
+        memset(fp, 0, sizeof(fp));
+        int ok = 1;
+        for (int i = 0; i < 4; i++) {
+            const NetPacket *p = find_in(NET_PACKET_FLAG, i);
+            if (!p || p->length != sizeof(NetFlagPacket)) ok = 0;
+            else memcpy(&fp[i], p->payload, sizeof(fp[i]));
+        }
+        CHECK(ok && fp[0].index == -1 && fp[0].flag.team == 2 && !strcmp(fp[0].info, "Guest_9"), "ufi: team 2's line");
+        CHECK(ok && fp[1].index == 1 && fp[1].flag.carrier_uid == 9 && fp[1].flag.position[2] == 12.0f && !fp[1].flag.team, "ufl: uid 41 = index 1, we carry it");
+        CHECK(ok && fp[2].index == 2 && fp[2].flag.carrier_uid == -1, "ufl: an unknown uid takes the next index");
+        CHECK(ok && fp[3].index == 0 && fp[3].flag.position[0] == 5.0f && fp[3].flag.carrier_uid == -1, "ufp: uid 40's ping");
+    }
+    clear();
+
+    // obj / uobj / rds / zn / ac
+    feed(&link, "obj", (KrunkerValue[]) {KRUNKER_V_NUM(4), KRUNKER_V_NUM(60000), KRUNKER_V_BOOL(1)}, 3);
+    feed(&link, "uobj", (KrunkerValue[]) {KRUNKER_V_NUM(4), KRUNKER_V_NUM(2)}, 2);
+    const KrunkerValue wins[] = {KRUNKER_V_STR("1"), KRUNKER_V_NUM(2), KRUNKER_V_STR("2"), KRUNKER_V_NUM(1)};
+    feed(&link, "rds", (KrunkerValue[]) {KRUNKER_V_NUM(2), KRUNKER_V_BOOL(0), KRUNKER_V_NUM(1), KRUNKER_V_MAP(wins, 2)}, 4);
+    feed(&link, "rds", (KrunkerValue[]) {KRUNKER_V_NUM(1), KRUNKER_V_BOOL(1), KRUNKER_V_NUM(1), KRUNKER_V_NIL}, 4);
+    feed(&link, "zn", (KrunkerValue[]) {KRUNKER_V_ARRAY(zone, 4)}, 1);
+    feed(&link, "ac", (KrunkerValue[]) {KRUNKER_V_NUM(7), KRUNKER_V_NIL, KRUNKER_V_STR("captured the Flag")}, 3);
+    {
+        READ_IN(NetObjectiveV7Packet, o, OBJECTIVE_V7, 0);
+        READ_IN(NetObjectiveOccupancyPacket, u, OBJECTIVE_OCCUPANCY, 0);
+        CHECK(o_p && o.uid == 4 && o.time_ms == 60000 && o.initial && u_p && u.uid == 4 && u.on_zone == 2, "obj / uobj");
+        READ_IN(NetRoundsPacket, r, ROUNDS, 0);
+        CHECK(r_p && r.rounds_left == 2 && r.win_team == 1 && r.has_round_wins && r.team_round_wins[1] == 2 && r.team_round_wins[2] == 1 &&
+              !find_in(NET_PACKET_ROUNDS, 1), "rds: switching sides, round wins 2 / 1; a noSwitch rds is dropped");
+        CHECK(find_in(NET_PACKET_ZONE, 0) != NULL, "zn");
+        READ_IN(NetActionPacket, ac, ACTION, 0);
+        CHECK(ac_p && ac.uid == 7 && ac.other_uid == -1 && !strcmp(ac.text, "captured the Flag"), "ac");
+    }
+    clear();
+
+    // chi: [key, ...args] and a bare key
+    const KrunkerValue chi_key[] = {KRUNKER_V_STR("event.easter.found.new"), KRUNKER_V_STR("Bob"), KRUNKER_V_NUM(3), KRUNKER_V_NUM(1.5)};
+    feed(&link, "chi", (KrunkerValue[]) {KRUNKER_V_NUM(0), KRUNKER_V_NIL, KRUNKER_V_ARRAY(chi_key, 4), KRUNKER_V_NUM(2), KRUNKER_V_STR("#61fff7")}, 5);
+    feed(&link, "chi", (KrunkerValue[]) {KRUNKER_V_NUM(-1), KRUNKER_V_NIL, KRUNKER_V_STR("modes.round.win"), KRUNKER_V_NUM(1)}, 4);
+    {
+        uint16_t len = 0;
+        const uint8_t *body = ext_body(0, NET_EXT_KN_OFFICIAL_CHAT_I18N, &len);
+        NetOfficialChatI18nHeader h;
+        memset(&h, 0, sizeof(h));
+        if (body) memcpy(&h, body, sizeof(h));
+        const char *c = body ? (const char *) body + sizeof(h) : "x";
+        CHECK(body && h.kind == NET_CHAT_SERVER && h.argc == 3 && !strcmp(h.color, "#61fff7") && !c[0] && !strcmp(c + 1, "event.easter.found.new") &&
+              !strcmp(c + 24, "Bob") && !strcmp(c + 28, "3") && !strcmp(c + 30, "1.5"), "chi: key + 3 arguments, kind 2, colour");
+        body = ext_body(1, NET_EXT_KN_OFFICIAL_CHAT_I18N, &len);
+        if (body) memcpy(&h, body, sizeof(h));
+        CHECK(body && h.kind == NET_CHAT_GAME && h.argc == 0 && !strcmp((const char *) body + sizeof(h) + 1, "modes.round.win"), "chi: a bare key");
+    }
+    clear();
+
+    // end: CTF's endStats + "reward" (official), team 1 won, we are on it
+    const KrunkerValue n9[] = {KRUNKER_V_STR("Guest_9"), KRUNKER_V_STR("Guest_9")}, n7[] = {KRUNKER_V_STR("Other"), KRUNKER_V_STR("Other")};
+    const KrunkerValue ed[] = {KRUNKER_V_NUM(9), KRUNKER_V_ARRAY(n9, 2), KRUNKER_V_NUM(300), KRUNKER_V_NUM(4), KRUNKER_V_NUM(1), KRUNKER_V_NUM(2),
+                               KRUNKER_V_STR("<span style='color:#F8C55C'>+12</span> KR"),
+                               KRUNKER_V_NUM(7), KRUNKER_V_ARRAY(n7, 2), KRUNKER_V_NUM(150), KRUNKER_V_NUM(1), KRUNKER_V_NUM(0), KRUNKER_V_NUM(1),
+                               KRUNKER_V_STR("NONE")};
+    const KrunkerValue tm1[] = {KRUNKER_V_NUM(1), KRUNKER_V_NUM(3), KRUNKER_V_NIL}, tm2[] = {KRUNKER_V_NUM(2), KRUNKER_V_NUM(1), KRUNKER_V_NIL};
+    const KrunkerValue tms[] = {KRUNKER_V_ARRAY(tm1, 3), KRUNKER_V_ARRAY(tm2, 3)};
+    const KrunkerValue end_data[] = {KRUNKER_V_STR("ed"), KRUNKER_V_ARRAY(ed, 14), KRUNKER_V_STR("tms"), KRUNKER_V_ARRAY(tms, 2),
+                                     KRUNKER_V_STR("mdls"), KRUNKER_V_ARRAY(NULL, 0)};
+    KrunkerValue end_args[] = {KRUNKER_V_NUM(0), KRUNKER_V_BOOL(1), KRUNKER_V_MAP(end_data, 3), KRUNKER_V_NUM(1), KRUNKER_V_NUM(3),
+                               KRUNKER_V_NUM(12), KRUNKER_V_NIL, KRUNKER_V_MAP(NULL, 0)};
+    feed(&link, "end", end_args, 8);
+    {
+        const NetPacket *ep = find_in(NET_PACKET_END, 0);
+        NetEndPacket e;
+        memset(&e, 0, sizeof(e));
+        if (ep && ep->length == sizeof(e)) memcpy(&e, ep->payload, sizeof(e));
+        CHECK(ep && ep->length == sizeof(e) && e.result == 1 && e.winner_uid == -1 && e.next_round == 25 && e.board.count == 2 &&
+              e.board.entries[0].uid == 9 && e.board.entries[0].score == 300 && e.board.entries[0].kills == 4 && e.board.entries[0].deaths == 1 &&
+              e.rewards[0] == 12 && e.board.entries[1].uid == 7 && e.rewards[1] == 0, "end: victory, the ed rows, rewards 12 / NONE");
+        READ_IN(NetModeEndPacket, me, MODE_END, 0);
+        CHECK(me_p && me.mode_id == 3 && me.winner_team == 1 && me.team_scores[0] == 3 && me.team_scores[1] == 1 && me.count == 2 &&
+              me.entries[0].stats[NET_MODE_STAT_CAPS] == 2 && me.entries[1].stats[NET_MODE_STAT_CAPS] == 1, "end: MODE_END team 1, caps");
+        CHECK(ep && me_p && ep < me_p, "end: END before MODE_END (as our server sends them)");
+    }
+    clear();
+    end_args[0] = KRUNKER_V_NUM(2); // no end screen: the board only
+    feed(&link, "end", end_args, 8);
+    CHECK(!find_in(NET_PACKET_END, 0) && find_in(NET_PACKET_LEADERBOARD, 0), "end type 2: no end screen, the board");
+    clear();
+    end_args[0] = KRUNKER_V_NUM(0);
+    end_args[1] = KRUNKER_V_NUM(-1);
+    end_args[3] = KRUNKER_V_NUM(-1);
+    feed(&link, "end", end_args, 8);
+    {
+        READ_IN(NetEndPacket, e, END, 0);
+        CHECK(e_p && e.result == -1 && e.winner_uid == -1, "end: didWin -1 is a draw");
+    }
+    clear();
+    // another build's endStats (FFA, 4 columns sent where ours has 6): the rows are found by the name cells
+    feed(&link, "init", (KrunkerValue[]) {KRUNKER_V_NUM(10), KRUNKER_V_NUM(0), KRUNKER_V_NUM(0)}, 3);
+    clear();
+    const KrunkerValue ed4[] = {KRUNKER_V_NUM(9), KRUNKER_V_ARRAY(n9, 2), KRUNKER_V_NUM(80), KRUNKER_V_NUM(2),
+                                KRUNKER_V_NUM(7), KRUNKER_V_ARRAY(n7, 2), KRUNKER_V_NUM(60), KRUNKER_V_NUM(1),
+                                KRUNKER_V_NUM(5), KRUNKER_V_ARRAY(n7, 2), KRUNKER_V_NUM(10), KRUNKER_V_NUM(0)};
+    const KrunkerValue end4[] = {KRUNKER_V_STR("ed"), KRUNKER_V_ARRAY(ed4, 12)};
+    feed(&link, "end", (KrunkerValue[]) {KRUNKER_V_NUM(0), KRUNKER_V_BOOL(0), KRUNKER_V_MAP(end4, 1), KRUNKER_V_NUM(-1)}, 4);
+    {
+        READ_IN(NetEndPacket, e, END, 0);
+        CHECK(e_p && e.result == 0 && e.board.count == 3 && e.board.entries[1].uid == 7 && e.board.entries[2].uid == 5 && e.winner_uid == 9,
+              "end: an unknown column list still finds the rows; FFA's winner is the first row (%d rows)", e.board.count);
+    }
+    clear();
 }
 
 int main(void) {
@@ -918,6 +1228,7 @@ int main(void) {
         CHECK(e && net_ext_unpack(e->payload, e->length, &sub, &b, &bl) && sub == NET_EXT_KPD_RESET, "kpdf -> KPD_RESET");
         clear();
     }
+    test_hud();
 
     printf("%d/%d passed\n", g_pass, g_pass + g_fail);
     return g_fail ? 1 : 0;

@@ -155,8 +155,12 @@ def online():
     check("online: `reload` reconnects to the same server", any(here in l for l in between(lines, r"\[reload\] console: full reload", r"state t=1")),
           "; ".join(l for l in after if "connected" in l))
     check("online: the server sees the client join again", read(server_log).count("connected from 127.0.0.1") >= 2)
+    # "spawned again": the client's own spawn camera (input_script `cam`, "@spawn0" = the first frame of a
+    # new Player of ours) logs after the rejoin. Not the position: a respawn on a map with one spawn
+    # point (Evacuation) lands on the same spot, so the position is the same and proves nothing.
+    spawned = [l for l in between(lines, r"\[reload\] rejoining the server") if "@spawn0" in l]
     check("online: still in the game after the reconnect (spawned again)",
-          len(st) >= 2 and in_game(st[1]) and st[1]["pos"] != st[0]["pos"], f"states {st}")
+          len(st) >= 2 and in_game(st[1]) and bool(spawned), f"states {st}; spawn lines {spawned[:1]}")
 
 
 def offline():

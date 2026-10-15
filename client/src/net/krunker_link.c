@@ -21,9 +21,11 @@
 #include <krunker_altcha.h>
 #include <cJSON.h>
 #include <game_config.h>
-#include <net_ext.h>
+#include <map_catalog.h>
+#include <net_ext.h>     // NET_EXT_KN_OFFICIAL_* (clusters C / D)
 #include <ruleset.h>
 #include <krunker_maps.h>
+#include <progression.h> // overlay.medalsList: the medals "6" / "am" give by index
 #include <social_v7.h>
 #include <zombies.h> // NET_PACKET_SHARING ("sic")
 #include <net_ext.h> // the player list's vote kick / K.P.D (NET_PACKET_EXT subtypes)
@@ -410,6 +412,8 @@ static void on_sync_player(KrunkerLink *l, const KrunkerFrame *f) {
     }
 }
 
+static KrunkerLinkStats *stats(KrunkerLink *l, int sid); // the HUD stats of clusters C / D (below)
+
 // "3" KILL_PLAYER [victimSid, victimDeaths, killerSid, deathStats, killInfo, hideFeed]
 // (game.deob.js:220579; killInfo {wId, fs, stk, pkg} at :220620's feed)
 static void on_kill(KrunkerLink *l, const KrunkerFrame *f) {
@@ -430,6 +434,13 @@ static void on_kill(KrunkerLink *l, const KrunkerFrame *f) {
     }
     k.killer_class = -1;
     k.respawn_delay = GAME_DEATH_DELAY;
+    // killer_kills (#killsVal, the board): the live server sends the killer its "6" (totalKills)
+    // right before this "3" (players.kill :174098), so ours is already counted; others count here
+    KrunkerLinkStats *ks = k.killer_uid != k.victim_uid && player(l, k.killer_uid, 0) ? stats(l, k.killer_uid) : NULL;
+    if (ks && k.killer_uid != l->my_sid) ks->kills++;
+    k.killer_kills = ks ? ks->kills : 0;
+    KrunkerLinkStats *vs = stats(l, k.victim_uid);
+    if (vs) vs->deaths = k.victim_deaths;
     emit(l, NET_PACKET_KILL, &k, sizeof(k));
 }
 
@@ -624,6 +635,618 @@ static void on_kpd_data(KrunkerLink *l, const KrunkerValue *kpd) {
     } else if (!l->kpd_case) return; // no case before, none now: nothing to say
     l->kpd_case = d.sus >= 0;
     emit_ext(l, NET_EXT_KPD_DATA, &d, sizeof(d));
+}
+
+// ---------------------------------------------------------------- score / kills / ammo HUD (audit cluster C)
+
+// JS String(v) of a value (i18n arguments, leaderboard cells): numbers without a trailing ".0"
+static void js_string(const KrunkerValue *v, char *out, const size_t n) {
+    out[0] = 0;
+    if (!v) {
+        snprintf(out, n, "undefined");
+    } else if (v->type == KRUNKER_STR) {
+        snprintf(out, n, "%s", krunker_str(v));
+    } else if (v->type == KRUNKER_BOOL) {
+        snprintf(out, n, "%s", v->u.boolean ? "true" : "false");
+    } else if (v->type == KRUNKER_NIL) {
+        snprintf(out, n, "null");
+    } else if (v->type == KRUNKER_NUM) {
+        const double d = v->u.num;
+        if (isnan(d)) snprintf(out, n, "NaN");
+        else if (isinf(d)) snprintf(out, n, "%sInfinity", d < 0 ? "-" : "");
+        else if (d == floor(d) && fabs(d) < 1e21) snprintf(out, n, "%.0f", d == 0 ? 0.0 : d); // -0 -> "0"
+        else {
+            for (int prec = 15; prec <= 17; prec++) { // the shortest form that reads back (Number.prototype.toString)
+                snprintf(out, n, "%.*g", prec, d);
+                if (strtod(out, NULL) == d) break;
+            }
+        }
+    }
+}
+
+static void emit_hud_ext(KrunkerLink *l, const uint16_t subtype, const void *body, const uint16_t length) {
+    uint8_t buf[NET_MAX_PAYLOAD];
+    const uint16_t n = net_ext_pack(buf, sizeof(buf), subtype, body, length);
+    if (n) emit(l, NET_PACKET_EXT, buf, n);
+}
+
+// The per-sid stats LEADERBOARD carries. A full table recycles a player who left.
+static KrunkerLinkStats *stats(KrunkerLink *l, const int sid) {
+    for (int i = 0; i < l->stats_count; i++) {
+        if (l->stats[i].sid == sid) return &l->stats[i];
+    }
+    KrunkerLinkStats *s = NULL;
+    if (l->stats_count < KRUNKER_LINK_MAX_PLAYERS) s = &l->stats[l->stats_count++];
+    for (int i = 0; !s && i < l->stats_count; i++) {
+        if (!player(l, l->stats[i].sid, 0)) s = &l->stats[i];
+    }
+    if (s) {
+        memset(s, 0, sizeof(*s));
+        s->sid = sid;
+    }
+    return s;
+}
+
+// mode.leaderStats ("7" columns) / mode.endStats ("end" ed columns, official servers append "reward")
+// of the mode "init" announced: our mode table carries Krunker's lists (shared/src/modes/modes.c)
+static const char *const k_default_leader_stats[] = {"score", NULL};
+static const char *const k_default_end_stats[] = {"sid", "name", "score", "kills", "deaths", "reward", NULL}; // game.deob.js:18307
+
+static int name_list(const char *const *list, const char *const **out) {
+    int n = 0;
+    while (list[n]) n++;
+    *out = list;
+    return n;
+}
+
+static int leader_stats(const KrunkerLink *l, const char *const **names) {
+    const GameModeConfig *c = mode_config(l->mode);
+    return name_list(c && c->leader_stats ? c->leader_stats : k_default_leader_stats, names);
+}
+
+// The medal queue's list (iîíìiïì, game.deob.js:220960): 4 values per medal, [name or overlay.medalsList
+// index, score, sound, count]; "" names are the plain kill score (no popup). A score that is a text
+// ("Lvl 5", "x2", "10 KR") shows no number here (NetMedalPacket scores are numbers).
+static int medals_from(const KrunkerValue *list, NetMedalPacket *out, const int max) {
+    int n = 0;
+    if (krunker_is(list, KRUNKER_STR) && list->len && max > 0) { // a bare text, as a trigger's "am"
+        memset(&out[0], 0, sizeof(out[0]));
+        snprintf(out[0].text, sizeof(out[0].text), "%s", krunker_str(list));
+        return 1;
+    }
+    if (!krunker_is(list, KRUNKER_ARRAY)) return 0;
+    for (uint32_t i = 0; i < list->len && n < max; i += 4) {
+        const KrunkerValue *name = &list->u.items[i];
+        const KrunkerValue *score = krunker_at(list, i + 1);
+        NetMedalPacket m;
+        memset(&m, 0, sizeof(m));
+        if (krunker_is(name, KRUNKER_NUM)) {
+            const int index = (int) name->u.num;
+            if (index < 0 || index >= PROGRESSION_MEDAL_COUNT) continue;
+            snprintf(m.text, sizeof(m.text), "%s", g_progression_medals[index]);
+        } else if (krunker_is(name, KRUNKER_STR) && name->len) {
+            snprintf(m.text, sizeof(m.text), "%s", krunker_str(name));
+        } else {
+            continue;
+        }
+        m.score = krunker_is(score, KRUNKER_NUM) && isfinite(score->u.num) ? (int32_t) score->u.num : 0;
+        out[n++] = m;
+    }
+    return n;
+}
+
+// "ts" TEAM_SCORE [team, score] (iïììïíì :220857): teamScores[team] = score || 0; no team (the
+// best-of round reset, broadcast('ts') :191172) clears them: our TEAM_SCORE with team 0.
+static void on_team_score(KrunkerLink *l, const KrunkerFrame *f) {
+    NetTeamScorePacket t = {.team = 0, .score = 0};
+    if (krunker_is(arg(f, 0), KRUNKER_NUM)) {
+        t.team = (int32_t) arg(f, 0)->u.num;
+        t.score = (int32_t) js_round(num(arg(f, 1), 0));
+        if (t.team <= 0) return;
+    }
+    emit(l, NET_PACKET_TEAM_SCORE, &t, sizeof(t));
+}
+
+// "5" GET_SCORE [delta, relay, absolute, classIndex] (iiìïíìî :220916): unless absolute the "+N"
+// popup; unless relay (a spectator's copy of the followed player's, :173709) our score becomes delta
+// (absolute) or score + delta. classIndex feeds account classScores only (not modelled).
+static void on_get_score(KrunkerLink *l, const KrunkerFrame *f) {
+    const double d = num(arg(f, KRUNKER_SCORE_ARG_DELTA), 0);
+    const int delta = isfinite(d) ? (int) js_round(d) : 0;
+    const int absolute = truthy(arg(f, KRUNKER_SCORE_ARG_ABSOLUTE));
+    if (!truthy(arg(f, KRUNKER_SCORE_ARG_RELAY))) {
+        l->my_score = absolute ? delta : l->my_score + delta;
+        KrunkerLinkStats *s = l->my_sid >= 0 ? stats(l, l->my_sid) : NULL;
+        if (s) s->score = l->my_score;
+    }
+    const NetScorePacket p = {.delta = absolute ? 0 : delta, .score = l->my_score};
+    emit(l, NET_PACKET_SCORE, &p, sizeof(p));
+}
+
+// "6" GET_KILL [medals, killSound, totalKills, inc] (iíïïîìí :220948), to the killer, right before
+// the "3" everyone gets (players.kill :174098): the medals, our kills = totalKills (killsVal)
+static void on_get_kill(KrunkerLink *l, const KrunkerFrame *f) {
+    NetKillMedalsPacket k;
+    memset(&k, 0, sizeof(k));
+    k.count = (uint8_t) medals_from(arg(f, 0), k.medals, NET_KILL_MEDALS_MAX);
+    KrunkerLinkStats *s = l->my_sid >= 0 ? stats(l, l->my_sid) : NULL;
+    if (s) {
+        if (krunker_is(arg(f, 2), KRUNKER_NUM)) s->kills = (int) arg(f, 2)->u.num;
+        else s->kills += (int) num(arg(f, 3), 1); // killsC += inc || 1
+    }
+    k.kills = s ? s->kills : (int32_t) num(arg(f, 2), 0);
+    emit(l, NET_PACKET_KILL_MEDALS, &k, sizeof(k));
+}
+
+// "7" UPDATE_LEADERS [sid, ...leaderStats values]* (iîììíìï :220727): the mode's leaderStats ("score"
+// by default) per row, in the server's board order. LEADERBOARD takes score / kills / deaths from
+// the columns that name them (else what "3" / "6" told us; ours is always our "5" score, as the live
+// client's myScoreVal), LEADER_STATS the columns as sent.
+static void on_update_leaders(KrunkerLink *l, const KrunkerFrame *f) {
+    const KrunkerValue *list = arg(f, 0);
+    if (!krunker_is(list, KRUNKER_ARRAY)) return;
+    const char *const *names;
+    const int columns = leader_stats(l, &names);
+    const uint32_t stride = (uint32_t) columns + 1;
+    NetLeaderboardPacket board;
+    NetLeaderStatsPacket cols;
+    memset(&board, 0, sizeof(board));
+    memset(&cols, 0, sizeof(cols));
+    cols.stat_count = (uint8_t) (columns < NET_LEADER_STATS_MAX ? columns : NET_LEADER_STATS_MAX);
+    for (uint32_t i = 0; i + stride <= list->len && board.count < GAME_LEADERBOARD_MAX; i += stride) {
+        const KrunkerValue *e = list->u.items + i;
+        if (!krunker_is(&e[0], KRUNKER_NUM)) continue;
+        const int sid = (int) e[0].u.num;
+        KrunkerLinkStats *s = stats(l, sid);
+        for (int c = 0; c < columns; c++) {
+            const double v = num(&e[1 + c], 0);
+            const int iv = isfinite(v) ? (int) js_round(v) : 0;
+            if (c < NET_LEADER_STATS_MAX) cols.values[cols.count][c] = iv;
+            if (!s) continue;
+            if (!strcmp(names[c], "score")) s->score = iv;
+            else if (!strcmp(names[c], "kills")) s->kills = iv;
+            else if (!strcmp(names[c], "deaths")) s->deaths = iv;
+        }
+        if (s && sid == l->my_sid) s->score = l->my_score; // the board never sets you.score (myScoreVal): "5" does
+        cols.uid[cols.count++] = sid;
+        board.entries[board.count++] = (NetLeaderboardEntry) {.uid = sid, .score = s ? s->score : 0, .kills = s ? s->kills : 0,
+                                                              .deaths = s ? s->deaths : 0};
+    }
+    emit(l, NET_PACKET_LEADERBOARD, &board, sizeof(board));
+    emit(l, NET_PACKET_LEADER_STATS, &cols, sizeof(cols));
+}
+
+// "ulb" UPDATE_LEADER_BOARD [index, [player, value, ...]] (iìïîìiï :220065, sent :178418): a map
+// LEADERBOARD object's rows (the leaderboard service's "pl" / "kv" pairs), whole rows that fit
+static void on_leader_board(KrunkerLink *l, const KrunkerFrame *f) {
+    const KrunkerValue *rows = arg(f, 1);
+    if (!krunker_is(arg(f, 0), KRUNKER_NUM) || !krunker_is(rows, KRUNKER_ARRAY)) return;
+    uint8_t body[NET_EXT_BODY_MAX];
+    NetOfficialLeaderBoardHeader h = {.index = (int32_t) arg(f, 0)->u.num, .cells = 0};
+    size_t len = sizeof(h);
+    for (uint32_t i = 0; i + 1 < rows->len && h.cells < 254; i += 2) {
+        char name[96], value[48];
+        js_string(&rows->u.items[i], name, sizeof(name));
+        js_string(&rows->u.items[i + 1], value, sizeof(value));
+        const size_t a = strlen(name) + 1, b = strlen(value) + 1;
+        if (len + a + b > sizeof(body)) break;
+        memcpy(body + len, name, a);
+        memcpy(body + len + a, value, b);
+        len += a + b;
+        h.cells += 2;
+    }
+    memcpy(body, &h, sizeof(h));
+    emit_hud_ext(l, NET_EXT_KN_OFFICIAL_LEADER_BOARD, body, (uint16_t) len);
+}
+
+// "uamo" UPDATE_AMMO [ammos, reserveAmmos] (iìíiiìì :220425): our magazines per loadout slot (and the
+// finiteAmmo reserves), then updatePlayerAmmo (#ammoVal / #ammoMax)
+static int ammo_list(const KrunkerValue *list, int32_t *out) {
+    int n = 0;
+    for (uint32_t i = 0; krunker_is(list, KRUNKER_ARRAY) && i < list->len && n < NET_OFFICIAL_AMMO_SLOTS; i++) {
+        const KrunkerValue *v = &list->u.items[i];
+        out[n++] = krunker_is(v, KRUNKER_NUM) && isfinite(v->u.num) ? (int32_t) v->u.num : -1;
+    }
+    return n;
+}
+
+static void on_update_ammo(KrunkerLink *l, const KrunkerFrame *f) {
+    if (!krunker_is(arg(f, 0), KRUNKER_ARRAY)) return;
+    NetOfficialAmmoPacket a;
+    memset(&a, 0, sizeof(a));
+    a.count = (uint8_t) ammo_list(arg(f, 0), a.ammo);
+    a.reserve_count = (uint8_t) ammo_list(arg(f, 1), a.reserve);
+    emit_hud_ext(l, NET_EXT_KN_OFFICIAL_AMMO, &a, sizeof(a));
+}
+
+// "lv" UPDATE_LIVES [lives] (iiiiíìí :220940): #livesDisp
+static void on_lives(KrunkerLink *l, const KrunkerFrame *f) {
+    if (!krunker_is(arg(f, 0), KRUNKER_NUM)) return;
+    const NetLivesPacket p = {.lives = (int32_t) arg(f, 0)->u.num};
+    emit(l, NET_PACKET_LIVES, &p, sizeof(p));
+}
+
+// "st" KILL_STREAK [streakId, count] (iìîiïiï :220651): our callable streaks (count 0 / null: gone)
+static void on_streak(KrunkerLink *l, const KrunkerFrame *f) {
+    const int id = (int) num(arg(f, 0), -1), count = (int) num(arg(f, 1), 0);
+    if (id < 0 || id > 255) return;
+    const NetStreakPacket p = {.streak = (uint8_t) id, .count = (uint8_t) (count < 0 ? 0 : count > 255 ? 255 : count)};
+    emit(l, NET_PACKET_STREAK, &p, sizeof(p));
+}
+
+// "kst" KILL_STREAK_M [sid, streak] (iiiïiíi :220705, sent every 5 kills :174120): the chat line
+// "player.killstreak"
+static void on_kill_streak_message(KrunkerLink *l, const KrunkerFrame *f) {
+    if (!krunker_is(arg(f, 0), KRUNKER_NUM)) return;
+    const NetKillStreakPacket p = {.uid = (int32_t) arg(f, 0)->u.num, .streak = (int32_t) num(arg(f, 1), 0)};
+    emit(l, NET_PACKET_KILL_STREAK, &p, sizeof(p));
+}
+
+// "wstk" UPDATE_WEAPON_STREAK [currentStreakWeapon, weaponStreak] (iìîíîîí :220669)
+static void on_weapon_streak(KrunkerLink *l, const KrunkerFrame *f) {
+    const NetWeaponStreakPacket p = {.weapon = (int32_t) num(arg(f, 0), -1), .count = (int32_t) num(arg(f, 1), 0)};
+    emit(l, NET_PACKET_WEAPON_STREAK, &p, sizeof(p));
+}
+
+// "am" ADD_MEDAL [[medal, score, sound, count]] (iîíìiïì :220960): one popup per medal
+static void on_add_medal(KrunkerLink *l, const KrunkerFrame *f) {
+    NetMedalPacket medals[NET_KILL_MEDALS_MAX];
+    const int n = medals_from(arg(f, 0), medals, NET_KILL_MEDALS_MAX);
+    for (int i = 0; i < n; i++) emit(l, NET_PACKET_MEDAL, &medals[i], sizeof(medals[i]));
+}
+
+// "krt" UPDATE_KR_TAGS [dogTags, depositType] (iííîïii :220680): our tag count (#krTagHolder). A
+// depositType (gift / event tags, the live client's #giftTagHolder) is not our HUD's: it is not ours
+// to show, so it must not overwrite the KR count.
+static void on_kr_tags(KrunkerLink *l, const KrunkerFrame *f) {
+    if (l->my_sid < 0 || num(arg(f, 1), 0) != 0) return;
+    const NetModeCounterPacket p = {.kind = NET_MODE_COUNTER_KR_TAGS, .uid = l->my_sid, .value = (float) num(arg(f, 0), 0)};
+    emit(l, NET_PACKET_MODE_COUNTER, &p, sizeof(p));
+}
+
+// ---------------------------------------------------------------- objectives / flags / rounds / end (audit cluster D)
+
+// The flag with that map object uid: its slot in init's syncData.flg order (= our map-order flag
+// index); a uid the init did not list takes the next slot
+static int flag_slot(KrunkerLink *l, const int uid) {
+    for (int i = 0; i < l->flag_count; i++) {
+        if (l->flags[i].uid == uid) return i;
+    }
+    if (l->flag_count >= MODE_MAX_FLAGS) return -1;
+    KrunkerLinkFlag *flag = &l->flags[l->flag_count];
+    memset(flag, 0, sizeof(*flag));
+    flag->uid = uid;
+    return l->flag_count++;
+}
+
+// NET_PACKET_FLAG of one slot: team 0 and info "" keep the client's (its map knows the flag's team,
+// "ufi" brings the line)
+static void emit_flag(KrunkerLink *l, const int slot) {
+    NetFlagPacket p;
+    memset(&p, 0, sizeof(p));
+    p.index = slot;
+    memcpy(p.flag.position, l->flags[slot].position, sizeof(p.flag.position));
+    p.flag.carrier_uid = l->flags[slot].carrier > 0 ? l->flags[slot].carrier : -1;
+    emit(l, NET_PACKET_FLAG, &p, sizeof(p));
+}
+
+static void flag_position(KrunkerLinkFlag *flag, const KrunkerValue *x, const KrunkerValue *y, const KrunkerValue *z) {
+    if (krunker_is(x, KRUNKER_NUM)) flag->position[0] = (float) x->u.num;
+    if (krunker_is(y, KRUNKER_NUM)) flag->position[1] = (float) y->u.num;
+    if (krunker_is(z, KRUNKER_NUM)) flag->position[2] = (float) z->u.num;
+}
+
+// "ufl" UPDATE_FLAG [uid, x, y, z, carrier || 0] (game.updateFlag :188774, syncFlag :188796)
+static void on_flag(KrunkerLink *l, const KrunkerFrame *f) {
+    if (!krunker_is(arg(f, 0), KRUNKER_NUM)) return;
+    const int slot = flag_slot(l, (int) arg(f, 0)->u.num);
+    if (slot < 0) return;
+    flag_position(&l->flags[slot], arg(f, 1), arg(f, 2), arg(f, 3));
+    l->flags[slot].carrier = (int) num(arg(f, 4), 0);
+    emit_flag(l, slot);
+}
+
+// "ufp" UPDATE_FLAG_PING [uid, x, y, z] (game.updateFlagPing :188830): where the HUD shows it (img)
+static void on_flag_ping(KrunkerLink *l, const KrunkerFrame *f) {
+    if (!krunker_is(arg(f, 0), KRUNKER_NUM)) return;
+    const int slot = flag_slot(l, (int) arg(f, 0)->u.num);
+    if (slot < 0) return;
+    flag_position(&l->flags[slot], arg(f, 1), arg(f, 2), arg(f, 3));
+    emit_flag(l, slot);
+}
+
+// "ufi" UPDATE_FLAG_INFO [team, text] (iïîíîíí :220911): teamFlags[team] ("AT BASE", "AWAY", the
+// carrier's name): our FLAG with index -1 updates that line only
+static void on_flag_info(KrunkerLink *l, const KrunkerFrame *f) {
+    if (!krunker_is(arg(f, 0), KRUNKER_NUM)) return;
+    NetFlagPacket p;
+    memset(&p, 0, sizeof(p));
+    p.index = -1;
+    p.flag.team = (int32_t) arg(f, 0)->u.num;
+    p.flag.carrier_uid = -1;
+    js_string(arg(f, 1), p.info, sizeof(p.info));
+    if (is_nil(arg(f, 1))) p.info[0] = 0;
+    emit(l, NET_PACKET_FLAG, &p, sizeof(p));
+}
+
+// "obj" SET_OBJECTIVE [uid, objtvTime ms, initial] (game.setObjective :189407, nextObjective :189433)
+static void on_objective(KrunkerLink *l, const KrunkerFrame *f) {
+    const NetObjectiveV7Packet p = {.uid = (int32_t) num(arg(f, 0), -1), .time_ms = (int32_t) num(arg(f, 1), 0),
+                                    .initial = (uint8_t) truthy(arg(f, 2))};
+    emit(l, NET_PACKET_OBJECTIVE_V7, &p, sizeof(p));
+}
+
+// "uobj" UPDATE_OBJECTIVE [uid, onZone] (game.updateObjective :189448)
+static void on_objective_occupancy(KrunkerLink *l, const KrunkerFrame *f) {
+    const NetObjectiveOccupancyPacket p = {.uid = (int32_t) num(arg(f, 0), -1), .on_zone = (int32_t) num(arg(f, 1), 0)};
+    emit(l, NET_PACKET_OBJECTIVE_OCCUPANCY, &p, sizeof(p));
+}
+
+// "rds" UPDATE_ROUNDS_DIS [roundCount, noSwitch, winTeam, teamRoundWins] (iïìíììî :219243, the server
+// always sends noSwitch false :191198): "Switching Sides", the lead, roundsVal and the round wins.
+// A noSwitch frame (none so far) only redraws roundsVal, which our ROUNDS cannot say: dropped.
+static void on_rounds(KrunkerLink *l, const KrunkerFrame *f) {
+    if (truthy(arg(f, 1))) return;
+    NetRoundsPacket p;
+    memset(&p, 0, sizeof(p));
+    p.rounds_left = (int32_t) num(arg(f, 0), 0);
+    p.win_team = (int32_t) num(arg(f, 2), 0);
+    const KrunkerValue *wins = arg(f, 3);
+    p.has_round_wins = (uint8_t) krunker_is(wins, KRUNKER_MAP);
+    for (int t = 1; p.has_round_wins && t < MODE_TEAMS; t++) {
+        char key[8];
+        snprintf(key, sizeof(key), "%d", t);
+        p.team_round_wins[t] = (int32_t) num(krunker_get(wins, key), 0);
+    }
+    emit(l, NET_PACKET_ROUNDS, &p, sizeof(p));
+}
+
+// "zn" UPDATE_ZONE [[x, z, sizeX, sizeZ]] (game.updateZone :189401 -> zone.update(0, data))
+static void zone_packet(KrunkerLink *l, const KrunkerValue *data) {
+    if (!krunker_is(data, KRUNKER_ARRAY) || data->len < 4) return;
+    const NetZonePacket p = {.x = (float) num(krunker_at(data, 0), 0), .z = (float) num(krunker_at(data, 1), 0),
+                             .size_x = (float) num(krunker_at(data, 2), 0), .size_z = (float) num(krunker_at(data, 3), 0)};
+    emit(l, NET_PACKET_ZONE, &p, sizeof(p));
+}
+
+// "ac" ACTION_FEED [sid, sid2, text] (iìîïiíí :220711): "<you|name> <text> <you|name2>"
+static void on_action(KrunkerLink *l, const KrunkerFrame *f) {
+    if (!krunker_is(arg(f, 0), KRUNKER_NUM)) return;
+    NetActionPacket p;
+    memset(&p, 0, sizeof(p));
+    p.uid = (int32_t) arg(f, 0)->u.num;
+    p.other_uid = krunker_is(arg(f, 1), KRUNKER_NUM) ? (int32_t) arg(f, 1)->u.num : -1;
+    const char *text = krunker_str(arg(f, 2));
+    snprintf(p.text, sizeof(p.text), "%s", text ? text : "");
+    emit(l, NET_PACKET_ACTION, &p, sizeof(p));
+}
+
+// "chi" ADD_CHATI18N [team, name, key | [key, ...args], kind, color, ...] (iïîíïîï :221142):
+// addChat(team, name, i18n.t(key, ...args), kind, color). Translated by the client (main thread).
+static void on_chat_i18n(KrunkerLink *l, const KrunkerFrame *f) {
+    const KrunkerValue *k = arg(f, 2);
+    const KrunkerValue *key = krunker_is(k, KRUNKER_ARRAY) ? krunker_at(k, 0) : k;
+    const uint32_t argc = krunker_is(k, KRUNKER_ARRAY) && k->len ? k->len - 1 : 0;
+    const char *ks = krunker_str(key);
+    const int kind = (int) num(arg(f, 3), 0);
+    if (!ks || !ks[0] || kind == 3) return;
+    uint8_t body[NET_EXT_BODY_MAX];
+    NetOfficialChatI18nHeader h;
+    memset(&h, 0, sizeof(h));
+    h.kind = (uint8_t) (kind == 0 ? NET_CHAT_PLAYER : kind == 2 ? NET_CHAT_SERVER : NET_CHAT_GAME);
+    const char *color = krunker_str(arg(f, 4));
+    if (color) snprintf(h.color, sizeof(h.color), "%s", color);
+    const char *name = krunker_str(arg(f, 1));
+    size_t len = sizeof(h);
+    const char *head[2] = {name ? name : "", ks};
+    for (int i = 0; i < 2; i++) {
+        const size_t n = strlen(head[i]) + 1;
+        if (len + n > sizeof(body)) return;
+        memcpy(body + len, head[i], n);
+        len += n;
+    }
+    for (uint32_t i = 0; i < argc && h.argc < 16; i++) {
+        char a[128];
+        js_string(krunker_at(k, i + 1), a, sizeof(a));
+        const size_t n = strlen(a) + 1;
+        if (len + n > sizeof(body)) break;
+        memcpy(body + len, a, n);
+        len += n;
+        h.argc++;
+    }
+    memcpy(body, &h, sizeof(h));
+    emit_hud_ext(l, NET_EXT_KN_OFFICIAL_CHAT_I18N, body, (uint16_t) len);
+}
+
+// endForm's reward cell: player.reward ? "<span style='color:#F8C55C'>+N</span> KR" : "NONE", or
+// [that, skin] with a skin reward; a number from a server that sends it raw
+static int end_reward(const KrunkerValue *v) {
+    if (krunker_is(v, KRUNKER_ARRAY)) v = krunker_at(v, 0);
+    if (krunker_is(v, KRUNKER_NUM)) return (int) v->u.num;
+    const char *s = krunker_str(v), *plus = s ? strchr(s, '+') : NULL;
+    return plus ? atoi(plus + 1) : 0;
+}
+
+// endForm's time cell: player.timer, the formatted clock ("1:23.4", "DNF"): tenths + 1, 0 = DNF
+static int end_time(const KrunkerValue *v) {
+    const char *s = krunker_str(v);
+    if (!s || !s[0] || !(s[0] >= '0' && s[0] <= '9')) return 0;
+    int total = 0, field = 0, tenths = 0;
+    for (; *s; s++) {
+        if (*s >= '0' && *s <= '9') field = field * 10 + (*s - '0');
+        else if (*s == ':') total = total * 60 + field, field = 0;
+        else if (*s == '.') {
+            tenths = s[1] >= '0' && s[1] <= '9' ? s[1] - '0' : 0;
+            break;
+        }
+    }
+    const int t = (total * 60 + field) * 10 + tenths + 1;
+    return t > 32767 ? 32767 : t;
+}
+
+// an "end" ed column -> NetModeStat (-1: none; score / kills / deaths / reward ride END's board)
+static int end_stat(const char *name) {
+    static const struct {
+        const char *name;
+        int stat;
+    } k[] = {{"caps", NET_MODE_STAT_CAPS}, {"confirms", NET_MODE_STAT_CONFIRMS}, {"denies", NET_MODE_STAT_DENIES},
+             {"obj", NET_MODE_STAT_OBJECTIVE}, {"objective", NET_MODE_STAT_OBJECTIVE}, {"weapon", NET_MODE_STAT_WEAPON_TIER},
+             {"setbacks", NET_MODE_STAT_SETBACKS}, {"melees", NET_MODE_STAT_MELEES}, {"infected", NET_MODE_STAT_CONVS},
+             {"found", NET_MODE_STAT_CONVS}, {"lives", NET_MODE_STAT_LIVES}, {"assists", NET_MODE_STAT_ASSISTS},
+             {"time", NET_MODE_STAT_TIME}, {"deposits", NET_MODE_STAT_DEPOSITS}, {"pickups", NET_MODE_STAT_PICKUPS}};
+    for (size_t i = 0; i < sizeof(k) / sizeof(k[0]); i++) {
+        if (!strcmp(name, k[i].name)) return k[i].stat;
+    }
+    return -1;
+}
+
+static int16_t clamp16(const double v) {
+    return (int16_t) (!isfinite(v) ? 0 : v > 32767 ? 32767 : v < -32768 ? -32768 : (int) v);
+}
+
+// "end" END_GAME [type, didWin, endData, winTeam, endIndex, reward, bpData, items] (iíiiiiì :219712,
+// sent per player :191402). endData {ed, tms, mdls, mts, vo, modeIndex}: ed is the end table, one row
+// of mode.endStats values per player in the server's end order (endStats + "reward" on official
+// servers, endForm applied: the name cell is [name, alias]). type 2 shows no end screen (iìÏïíîì);
+// didWin -1 is a draw. The "Next Round in" clock comes with the "t" frames that follow (endTimer
+// 25 s until then, our GAME_END_TIMER). Not mapped: the match vote (mts / vo), the KR / battle
+// pass / item rewards of the account (a guest has none), endData.mdls (END_MEDALS wants our medal
+// indexes; the medals tab stays empty).
+static void on_end_game(KrunkerLink *l, const KrunkerFrame *f) {
+    const KrunkerValue *data = arg(f, 2);
+    const KrunkerValue *ed = krunker_get(data, "ed");
+    const GameModeConfig *mode = mode_config(l->mode);
+    const char *const *cols;
+    int ncols = name_list(mode && mode->end_stats ? mode->end_stats : k_default_end_stats, &cols);
+    const char *names[24];
+    int n = 0;
+    for (; n < ncols && n < 23; n++) names[n] = cols[n];
+    int has_reward = 0;
+    for (int i = 0; i < n; i++) has_reward |= !strcmp(names[i], "reward");
+    if (!has_reward) names[n++] = "reward"; // isOfficial: endStats.push("reward") (:191350)
+    // the row length: the columns, unless they do not fit the rows (another build's endStats): then
+    // the distance between two name cells ([name, alias]), and only the sids are read
+    uint32_t stride = (uint32_t) n;
+    int fits = krunker_is(ed, KRUNKER_ARRAY) && ed->len % stride == 0;
+    for (uint32_t i = 0; fits && i < ed->len; i += stride) {
+        const KrunkerValue *name = &ed->u.items[i + 1];
+        fits = krunker_is(&ed->u.items[i], KRUNKER_NUM) && (krunker_is(name, KRUNKER_ARRAY) || krunker_is(name, KRUNKER_STR));
+    }
+    if (!fits && krunker_is(ed, KRUNKER_ARRAY)) {
+        uint32_t first = 0, second = 0;
+        for (uint32_t i = 1; i < ed->len && !second; i++) {
+            const KrunkerValue *v = &ed->u.items[i];
+            if (!krunker_is(v, KRUNKER_ARRAY) || !krunker_is(krunker_at(v, 0), KRUNKER_STR)) continue;
+            if (!first) first = i;
+            else second = i;
+        }
+        stride = second > first ? second - first : first ? ed->len : 0;
+        if (!stride) return;
+    }
+
+    NetEndPacket end;
+    NetModeEndPacket me;
+    memset(&end, 0, sizeof(end));
+    memset(&me, 0, sizeof(me));
+    for (uint32_t i = 0; krunker_is(ed, KRUNKER_ARRAY) && i + stride <= ed->len && end.board.count < GAME_LEADERBOARD_MAX; i += stride) {
+        const KrunkerValue *row = ed->u.items + i;
+        if (!krunker_is(&row[0], KRUNKER_NUM)) continue;
+        const int sid = (int) row[0].u.num;
+        KrunkerLinkStats *s = stats(l, sid);
+        NetLeaderboardEntry *e = &end.board.entries[end.board.count];
+        NetModeEndEntry *m = me.count < NET_MODE_END_MAX ? &me.entries[me.count] : NULL;
+        e->uid = sid;
+        if (m) m->uid = sid;
+        for (int c = 1; fits && c < n; c++) {
+            const KrunkerValue *v = &row[c];
+            if (!strcmp(names[c], "reward")) {
+                end.rewards[end.board.count] = end_reward(v);
+            } else if (!strcmp(names[c], "score") && s) {
+                s->score = (int) js_round(num(v, s->score));
+            } else if (!strcmp(names[c], "kills") && s) {
+                s->kills = (int) num(v, s->kills);
+            } else if (!strcmp(names[c], "deaths") && s) {
+                s->deaths = (int) num(v, s->deaths);
+            } else if (m) {
+                const int stat = end_stat(names[c]);
+                if (stat == NET_MODE_STAT_TIME) m->stats[stat] = (int16_t) end_time(v);
+                else if (stat >= 0) m->stats[stat] = clamp16(num(v, 0));
+            }
+        }
+        if (s) {
+            e->score = s->score;
+            e->kills = s->kills;
+            e->deaths = s->deaths;
+        }
+        end.board.count++;
+        if (m) me.count++;
+    }
+
+    const int type = (int) num(arg(f, 0), 0);
+    if (type == 2) { // no end screen: the table still updates the players
+        emit(l, NET_PACKET_LEADERBOARD, &end.board, sizeof(end.board));
+        return;
+    }
+    const KrunkerValue *won = arg(f, 1);
+    end.result = (int8_t) (krunker_is(won, KRUNKER_NUM) && won->u.num == -1 ? -1 : truthy(won) ? 1 : 0);
+    end.next_round = (int32_t) GAME_END_TIMER;
+    const int win_team = (int) num(arg(f, 3), -1);
+    end.winner_uid = win_team <= 0 && end.result != -1 && end.board.count ? end.board.entries[0].uid : -1; // FFA: the first row
+    emit(l, NET_PACKET_END, &end, sizeof(end));
+
+    me.mode_id = l->mode;
+    me.winner_team = win_team > 0 ? win_team : -1;
+    const KrunkerValue *tms = krunker_get(data, "tms"); // getTeamScores(true): [team, score, flag line]*
+    for (uint32_t i = 0; krunker_is(tms, KRUNKER_ARRAY) && i < tms->len; i++) {
+        const KrunkerValue *t = &tms->u.items[i];
+        const int team = (int) num(krunker_at(t, 0), 0);
+        if (team == 1 || team == 2) me.team_scores[team - 1] = (int32_t) num(krunker_at(t, 1), 0);
+    }
+    emit(l, NET_PACKET_MODE_END, &me, sizeof(me));
+}
+
+// "init" (INIT_GAME, game.deob.js:219289; sent :191450 / :222514) for clusters C / D: [3] the round
+// wins, [4] getTeamScores() [team, score, flag line]*, [11] getSyncData() {flg: [uid, x, y, z,
+// carrier, timer]* in map order, obj: [uid, ms], zone, ...}. The mode picks the "7" / "end" columns;
+// a joiner's team scores, flags, objective and zone come from here (the live client's initGame).
+static void on_init_hud(KrunkerLink *l, const KrunkerFrame *f) {
+    l->mode = (int) num(arg(f, 1), 0);
+    l->my_score = 0;
+    l->stats_count = 0;
+    l->flag_count = 0;
+    if (l->unsupported_map >= 0) return; // no INIT went out: nothing to seed
+    const KrunkerValue *scores = arg(f, 4);
+    for (uint32_t i = 0; krunker_is(scores, KRUNKER_ARRAY) && i < scores->len; i++) {
+        const KrunkerValue *t = &scores->u.items[i];
+        if (!krunker_is(krunker_at(t, 0), KRUNKER_NUM)) continue;
+        const NetTeamScorePacket ts = {.team = (int32_t) krunker_at(t, 0)->u.num, .score = (int32_t) num(krunker_at(t, 1), 0)};
+        if (ts.team > 0) emit(l, NET_PACKET_TEAM_SCORE, &ts, sizeof(ts));
+        if (ts.team > 0 && krunker_is(krunker_at(t, 2), KRUNKER_STR)) {
+            NetFlagPacket info;
+            memset(&info, 0, sizeof(info));
+            info.index = -1;
+            info.flag.team = ts.team;
+            info.flag.carrier_uid = -1;
+            snprintf(info.info, sizeof(info.info), "%s", krunker_str(krunker_at(t, 2)));
+            emit(l, NET_PACKET_FLAG, &info, sizeof(info));
+        }
+    }
+    const KrunkerValue *sync = arg(f, 11);
+    const KrunkerValue *flg = krunker_get(sync, "flg");
+    for (uint32_t i = 0; krunker_is(flg, KRUNKER_ARRAY) && i < flg->len && l->flag_count < MODE_MAX_FLAGS; i++) {
+        const KrunkerValue *e = &flg->u.items[i];
+        const int slot = flag_slot(l, (int) num(krunker_at(e, 0), -1 - (double) i));
+        if (slot < 0) continue;
+        flag_position(&l->flags[slot], krunker_at(e, 1), krunker_at(e, 2), krunker_at(e, 3));
+        l->flags[slot].carrier = (int) num(krunker_at(e, 4), 0);
+        emit_flag(l, slot);
+    }
+    const KrunkerValue *obj = krunker_get(sync, "obj");
+    if (krunker_is(krunker_at(obj, 0), KRUNKER_NUM)) {
+        const NetObjectiveV7Packet o = {.uid = (int32_t) krunker_at(obj, 0)->u.num, .time_ms = (int32_t) num(krunker_at(obj, 1), 0), .initial = 0};
+        emit(l, NET_PACKET_OBJECTIVE_V7, &o, sizeof(o));
+    }
+    zone_packet(l, krunker_get(sync, "zone"));
 }
 
 // "cc" CHEAT_CHECK [nonce, unused, ciphertextB64] -> "ccr" [nonce, payloadB64, fnvHex]
@@ -1014,7 +1637,7 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         case KRUNKER_S2C_INIT_LOAD: // iiïiîïí: the client answers "load" once it may load
             send_c2s(l, KRUNKER_C2S_LOAD, NULL, 0);
             break;
-        case KRUNKER_S2C_INIT_GAME: on_init(l, &f); locks_reset(l); break;
+        case KRUNKER_S2C_INIT_GAME: on_init(l, &f); locks_reset(l); on_init_hud(l, &f); break;
         case KRUNKER_S2C_ENTER_GAME: note(l, KRUNKER_LINK_EV_NOTE, "frs: the server took our en"); break;
         case KRUNKER_S2C_START_GAME: { // [formattedTimer, ...] (iìïìiìi :218939 -> iìíîiïì(arg0) :218948):
             // team / class ride our SPAWN; arg0 seeds the round clock so the HUD shows it before the
@@ -1077,6 +1700,20 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         case KRUNKER_S2C_CHANGE_HEALTH: on_health(l, &f); break;
         case KRUNKER_S2C_UPDATE_TIMER: on_timer(l, &f); break;
         case KRUNKER_S2C_ADD_CHAT: on_chat(l, &f); break;
+        // score / kills / ammo HUD (audit cluster C)
+        case KRUNKER_S2C_TEAM_SCORE: on_team_score(l, &f); break;
+        case KRUNKER_S2C_GET_SCORE: on_get_score(l, &f); break;
+        case KRUNKER_S2C_GET_KILL: on_get_kill(l, &f); break;
+        case KRUNKER_S2C_UPDATE_LEADERS: on_update_leaders(l, &f); break;
+        case KRUNKER_S2C_UPDATE_LEADER_BOARD: on_leader_board(l, &f); break;
+        case KRUNKER_S2C_UPDATE_LIVES: on_lives(l, &f); break;
+        case KRUNKER_S2C_UPDATE_AMMO: on_update_ammo(l, &f); break;
+        case KRUNKER_S2C_KILL_STREAK: on_streak(l, &f); break;
+        case KRUNKER_S2C_KILL_STREAK_M: on_kill_streak_message(l, &f); break;
+        case KRUNKER_S2C_UPDATE_WEAPON_STREAK: on_weapon_streak(l, &f); break;
+        case KRUNKER_S2C_GET_ASSIST: emit(l, NET_PACKET_ASSIST, NULL, 0); break; // iíîíiíï: the "Assist" medal
+        case KRUNKER_S2C_ADD_MEDAL: on_add_medal(l, &f); break;
+        case KRUNKER_S2C_UPDATE_KR_TAGS: on_kr_tags(l, &f); break;
         case KRUNKER_S2C_SOCKET_PING: send_c2s(l, KRUNKER_C2S_PING, NULL, 0); break; // iìîíîïí: "po"
         case KRUNKER_S2C_CHEAT_CHECK: on_cheat_check(l, &f); break;
         case KRUNKER_S2C_cpt: on_captcha(l, &f); break;
@@ -1087,6 +1724,17 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         case KRUNKER_S2C_KPD_RESET: emit_ext(l, NET_EXT_KPD_RESET, NULL, 0); break; // "kpdf" (iiíìîìi)
         case KRUNKER_S2C_DISCONNECT: note(l, KRUNKER_LINK_EV_ERROR, "the server disconnected us (dc)"); break;
         case KRUNKER_S2C_ACCOUNT_RESPONSE: on_account(l, &f); break;
+        // objectives / flags / rounds / end (audit cluster D)
+        case KRUNKER_S2C_UPDATE_FLAG_INFO: on_flag_info(l, &f); break;
+        case KRUNKER_S2C_UPDATE_FLAG: on_flag(l, &f); break;
+        case KRUNKER_S2C_UPDATE_FLAG_PING: on_flag_ping(l, &f); break;
+        case KRUNKER_S2C_SET_OBJECTIVE: on_objective(l, &f); break;
+        case KRUNKER_S2C_UPDATE_OBJECTIVE: on_objective_occupancy(l, &f); break;
+        case KRUNKER_S2C_UPDATE_ROUNDS_DIS: on_rounds(l, &f); break;
+        case KRUNKER_S2C_UPDATE_ZONE: zone_packet(l, arg(&f, 0)); break;
+        case KRUNKER_S2C_END_GAME: on_end_game(l, &f); break;
+        case KRUNKER_S2C_ACTION_FEED: on_action(l, &f); break;
+        case KRUNKER_S2C_ADD_CHATI18N: on_chat_i18n(l, &f); break;
         default: l->unknown_in++; break;
     }
     krunker_frame_free(&f);

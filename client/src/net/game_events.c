@@ -44,6 +44,8 @@
 #include <nav_overlay.h> // NET_EXT_KN_BOT_PATH: the spectated bot's route (show_navmeshes overlay)
 #include <object_manager.h> // KrunkNative Object Manager: NET_PACKET_SPAWN_RESULT / LOADOUT_EXTRA / SPAWNED_OBJ
 #include <strike_ui.h>       // Krunker Strike: its own in-game UI gets the same events (strike_hud.c)
+#include <i18n.h>     // NET_EXT_KN_OFFICIAL_CHAT_I18N: an official server's "chi" key, translated here
+#include <map_post.h> // NET_EXT_KN_OFFICIAL_LEADER_BOARD: a map LEADERBOARD's rows
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -654,6 +656,68 @@ static void events_map_data(Client *client, const void *payload, const uint16_t 
     map_download_finish(client, client_map_list_add(client, map));
 }
 
+// The NUL-terminated strings of an official-HUD body (net_ext.h): up to `max` of them, NULL when the
+// body ends first.
+static int official_strings(const uint8_t *p, size_t left, const char **out, const int max) {
+    int n = 0;
+    while (n < max && left) {
+        const uint8_t *end = memchr(p, 0, left);
+        if (!end) break;
+        out[n++] = (const char *) p;
+        left -= (size_t) (end - p) + 1;
+        p = end + 1;
+    }
+    return n;
+}
+
+// An official krunker.io server's HUD packets that our own NetPackets cannot carry (krunker_link.c
+// makes them, net_ext.h NET_EXT_KN_OFFICIAL_*).
+static void events_official_hud(Client *client, const uint16_t subtype, const uint8_t *body, const uint16_t length) {
+    if (subtype == NET_EXT_KN_OFFICIAL_AMMO && length == sizeof(NetOfficialAmmoPacket)) {
+        // "uamo" -> you.ammos / reserveAmmos per loadout slot, players.updatePlayerAmmo (the HUD reads them)
+        NetOfficialAmmoPacket a;
+        memcpy(&a, body, sizeof(a));
+        Player *me = client->me;
+        if (!me || !me->ammo) return;
+        for (int i = 0; i < a.count && i < NET_OFFICIAL_AMMO_SLOTS && i < me->loadout_size; i++) {
+            if (a.ammo[i] >= 0) me->ammo[i] = (unsigned int) a.ammo[i];
+        }
+        // finiteAmmo reserves: KN keys them by weapon id (shared.h reserve_weapons)
+        for (int i = 0; i < a.reserve_count && i < NET_OFFICIAL_AMMO_SLOTS && i < me->loadout_size && me->loadout; i++) {
+            if (a.reserve[i] < 0) continue;
+            int k = 0;
+            while (k < me->reserve_count && me->reserve_weapons[k] != me->loadout[i]) k++;
+            if (k == me->reserve_count) {
+                if (k >= PLAYER_RESERVE_MAX) continue;
+                me->reserve_count++;
+                me->reserve_weapons[k] = me->loadout[i];
+            }
+            me->reserve_ammo[k] = a.reserve[i];
+        }
+    } else if (subtype == NET_EXT_KN_OFFICIAL_CHAT_I18N && length >= sizeof(NetOfficialChatI18nHeader)) {
+        // "chi" -> addChat(team, name, i18n.t(key, ...args), kind, color)
+        NetOfficialChatI18nHeader h;
+        memcpy(&h, body, sizeof(h));
+        h.color[sizeof(h.color) - 1] = 0;
+        const char *str[2 + 16];
+        const int n = official_strings(body + sizeof(h), length - sizeof(h), str, 2 + (h.argc < 16 ? h.argc : 16));
+        if (n < 2) return;
+        char text[NET_CHAT_TEXT_SIZE];
+        i18n_format(text, sizeof(text), str[1], n - 2, str + 2);
+        const char *name = str[0][0] ? str[0] : NULL;
+        ui_console_on_chat(h.kind == NET_CHAT_PLAYER ? (name ? name : "unknown") : NULL, text, h.kind);
+        if (h.kind == NET_CHAT_PLAYER && name) hud_ui_add_chat(name, text, NULL);
+        else hud_ui_add_chat(NULL, text, h.kind == NET_CHAT_SERVER ? (h.color[0] ? h.color : SERVER_CHAT_COLOR) : NULL);
+    } else if (subtype == NET_EXT_KN_OFFICIAL_LEADER_BOARD && length >= sizeof(NetOfficialLeaderBoardHeader)) {
+        // "ulb" -> map.manager.updatePendingLeader(index, rows): the canvas of that LEADERBOARD object
+        NetOfficialLeaderBoardHeader h;
+        memcpy(&h, body, sizeof(h));
+        const char *cells[256];
+        const int n = official_strings(body + sizeof(h), length - sizeof(h), cells, h.cells);
+        if (client->game.ready && n >= 2) map_post_leaderboard_rows(client->scene, client->game.map, h.index, cells, n & ~1);
+    }
+}
+
 #define EVENTS_READ(type, var) \
     type var; \
     if (length != sizeof(type)) return 1; \
@@ -790,6 +854,7 @@ int client_handle_game_event(Client *client, const int type, const void *payload
         case NET_PACKET_KILL_MEDALS: { // "6" -> gk(): the kill's medals into the queue
             EVENTS_READ(NetKillMedalsPacket, medals);
             hud_popups_medals(medals.medals, medals.count < NET_KILL_MEDALS_MAX ? medals.count : NET_KILL_MEDALS_MAX);
+            if (client->me && medals.kills > 0) client->me->kills = (unsigned int) medals.kills; // gk(): killsVal = totalKills
             return 1;
         }
         case NET_PACKET_ASSIST: // "10" -> gl()
@@ -1018,6 +1083,7 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             }
             else if (subtype == NET_EXT_PLAYER_SPEED_BOOST || subtype == NET_EXT_PLAYER_NAME) events_player_ext(client, subtype, body, body_length);
             else if (subtype == NET_EXT_KN_BOT_PATH) nav_overlay_bot_path(client, body, body_length); // the spectated bot's route (nav_overlay.c)
+            else if (subtype >= NET_EXT_KN_OFFICIAL_AMMO && subtype <= NET_EXT_KN_OFFICIAL_LEADER_BOARD) events_official_hud(client, subtype, body, body_length);
             return 1;
         }
         default:
