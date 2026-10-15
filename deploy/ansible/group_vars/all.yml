@@ -27,6 +27,13 @@ kn_web_dist: "{{ kn_repo_root }}/dist/web"
 kn_domain: krunk.io
 kn_matchmaker_url: "https://matchmaker.{{ kn_domain }}"
 kn_coordinator_url: "https://coordinator.{{ kn_domain }}"
+# Krunker Strike (role kn_gameserver tasks/strike.yml): official Strike lobbies on every edge,
+# registered with the same coordinator in its Strike flavor pool (doc/backend.md "Flavor pools").
+# Their ports kn_strike_first_port .. +kn_strike_port_span-1 sit above the Box Office range
+# (21015 + vcpus - 1, at most 21025 on angeles); the edges' firewall opens what a host runs and
+# net-bridge (central) allowlists the whole span, so both sides agree without edge facts.
+kn_strike_first_port: 21115
+kn_strike_port_span: 4
 # Page origins allowed to call the brains (CORS): the front end (krunk.io, www.), its GitHub
 # Pages address (deploy/pages/README.md "Cutover") and the legacy domain, whose subdomains stay
 # up for old clients. The old Cloudflare Pages front end (krunknative.pages.dev) was deleted on

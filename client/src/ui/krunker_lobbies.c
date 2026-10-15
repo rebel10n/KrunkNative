@@ -8,6 +8,7 @@
 #include <server_names.h>
 #include <ui_logic.h>
 #include <backend.h>
+#include <flavor.h> // Krunker Strike lists and joins no official krunker.io lobby
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -67,6 +68,9 @@ static const char *matchmaker_url(void) {
 }
 
 int krunker_lobbies_enabled(void) {
+    // official krunker.io lobbies are Krunker Box Office's: the Krunker Strike app's server list,
+    // seek and Quick Match show Strike lobbies only (its coordinator pool, servers_ui.c)
+    if (flavor_get() != FLAVOR_BASE) return 0;
     const char *env = getenv("KRUNKNATIVE_KRUNKER_MATCHMAKER");
     if (env && (!strcmp(env, "off") || !strcmp(env, "0"))) return 0;
     if (env && env[0]) return 1;

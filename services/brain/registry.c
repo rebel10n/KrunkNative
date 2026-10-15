@@ -48,6 +48,15 @@ void registry_free(Registry *r) {
     free(r);
 }
 
+/* A flavor key as the registry keeps it (shared/include/flavor.h): lowercase, "base" = "" (the base
+ * game, Krunker Box Office: what every node and lobby announcing none plays). */
+static void flavor_norm(char *dst, size_t cap, const char *src) {
+    size_t n = 0;
+    for (const char *p = src ? src : ""; *p && n + 1 < cap; p++) dst[n++] = (char) tolower((unsigned char) *p);
+    dst[n] = 0;
+    if (!strcmp(dst, "base")) dst[0] = 0;
+}
+
 int registry_valid_node_id(const char *id) {
     if (!id || !*id) return 0;
     size_t n = 0;
@@ -105,6 +114,8 @@ MmNode *registry_node_hello(Registry *r, const char *node_id, const cJSON *hello
      * send it (1 with online_mode on); current ones admit everyone and omit it (0) */
     n->online_mode = kn_json_bool(hello, "onlineMode", 0);
     n->password = kn_json_bool(hello, "password", 0);
+    /* the product flavor pool (flavor.h): a Krunker Strike server_bin says "strike"; base ones say nothing */
+    flavor_norm(n->flavor, sizeof(n->flavor), kn_json_str(hello, "flavor", ""));
     /* lobbies kept from before a reconnect follow the node's current mode */
     for (size_t i = 0; i < n->lobby_count; i++) n->lobbies[i].online_mode = n->online_mode;
     n->draining = 0;
@@ -163,6 +174,8 @@ static void lobby_from_tuple(MmLobby *l, const MmNode *n, cJSON *tuple) {
     l->time_left = cJSON_IsNumber(tl) && tl->valuedouble >= 0 ? (int) tl->valuedouble : -1;
     /* v7.1.4 ServerManager.seek skips !meta.sk (AUTO_SEEK off); absent = seekable */
     l->no_seek = cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(meta, "sk"));
+    /* meta.flavor (flavor.h key; a Strike server_bin sends it, namespace_tuple stamps its node's) */
+    flavor_norm(l->flavor, sizeof(l->flavor), kn_json_str(meta, "flavor", n->flavor));
 }
 
 /* A node's report of a lobby counts every player whose player-join came before it (frames
@@ -214,6 +227,9 @@ static cJSON *namespace_tuple(const MmNode *n, const cJSON *tuple) {
             cJSON_DeleteItemFromObjectCaseSensitive(meta, "onlineMode");
             cJSON_AddBoolToObject(meta, "onlineMode", 1);
         }
+        /* the node's product flavor travels with the tuple too (federation, mm_lobbies.tuple), so
+         * every brain keeps the pools apart; base tuples stay exactly as the node sent them */
+        if (n->flavor[0] && !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(meta, "flavor"))) set_meta_str(meta, "flavor", n->flavor);
     }
     return out;
 }
@@ -314,6 +330,57 @@ MmLobby *registry_lobby_find(Registry *r, const char *id, MmNode **node_out) {
         }
     }
     return NULL;
+}
+
+/* ---- product flavor pools */
+
+int registry_flavor_match(const char *have, const char *want) {
+    char h[16], w[16];
+    flavor_norm(h, sizeof(h), have);
+    flavor_norm(w, sizeof(w), want);
+    if (!strcmp(w, "all") || !strcmp(w, "*")) return 1;
+    return !strcmp(h, w);
+}
+
+const char *registry_node_flavor(const MmNode *n) {
+    if (!n) return "";
+    if (n->flavor[0] || n->local) return n->flavor;
+    /* a remote node (federation): its mm_nodes row has no flavor, its lobby tuples do */
+    for (size_t j = 0; j < n->lobby_count; j++) {
+        if (n->lobbies[j].flavor[0]) return n->lobbies[j].flavor;
+    }
+    return "";
+}
+
+int registry_lobby_in_pool(const MmNode *n, const MmLobby *l, const char *want) {
+    return registry_flavor_match(l->flavor[0] ? l->flavor : registry_node_flavor(n), want);
+}
+
+MmLobby *registry_lobby_find_pool(Registry *r, const char *id, const char *flavor, MmNode **node_out) {
+    MmNode *n = NULL;
+    MmLobby *l = registry_lobby_find(r, id, &n);
+    if (l && !registry_lobby_in_pool(n, l, flavor)) {
+        /* the short link form may name lobbies of both pools (CH1:abcde of CHITOWN1 and of a Strike
+         * node CHITOWNSTRIKE1): look for one in this pool */
+        l = NULL;
+        const char *colon = id ? strchr(id, ':') : NULL;
+        for (size_t i = 0; colon && !l && i < r->node_count; i++) {
+            MmNode *c = r->nodes[i];
+            for (size_t j = 0; j < c->lobby_count; j++) {
+                MmLobby *cl = &c->lobbies[j];
+                if (strcmp(cl->local_id, colon + 1) != 0 || !registry_lobby_in_pool(c, cl, flavor)) continue;
+                const char *region = cJSON_GetStringValue(cJSON_GetArrayItem(cl->tuple, 1));
+                if (!strcmp(cl->game_id, id) || kn_game_id_matches(id, cl->game_id, region) ||
+                    kn_game_id_matches(id, cl->game_id, c->region)) {
+                    n = c;
+                    l = cl;
+                    break;
+                }
+            }
+        }
+    }
+    if (node_out) *node_out = l ? n : NULL;
+    return l;
 }
 
 /* ---- remote view */
@@ -586,7 +653,7 @@ static int pick_public(Registry *r, const MmPolicy *p, const MmPickQuery *q, con
         int load = -1; /* computed once per node, when one of its lobbies qualifies */
         for (size_t j = 0; j < n->lobby_count; j++) {
             MmLobby *l = &n->lobbies[j];
-            if (l->custom || l->no_seek || !lobby_joinable(n, l) || !lobby_auto_ok(n, l, q) ||
+            if (l->custom || l->no_seek || !registry_lobby_in_pool(n, l, q->flavor) || !lobby_joinable(n, l) || !lobby_auto_ok(n, l, q) ||
                 !version_ok(l, q->version) || !proto_ok(l, q) || !ruleset_ok(l, q) || !prefs_ok(l, q) ||
                 (exclude && !strcmp(l->game_id, exclude)) || (recent && id_in_list(l->game_id, recent)))
                 continue;
@@ -615,7 +682,9 @@ MmPickError registry_pick(Registry *r, const MmPolicy *p, const MmPickQuery *q, 
     /* 1. requested lobby */
     if (q->game_id && *q->game_id) {
         MmNode *n = NULL;
-        MmLobby *l = registry_lobby_find(r, q->game_id, &n);
+        /* another flavor's lobby is not found: a Box Office client is never ticketed into a Strike
+         * lobby (its server would refuse the HELLO) and the other way round */
+        MmLobby *l = registry_lobby_find_pool(r, q->game_id, q->flavor, &n);
         if (l && lobby_joinable(n, l) && !proto_ok(l, q)) {
             /* another protocol major: the client could not play there */
             if (!q->auto_change) return MM_PICK_INCOMPATIBLE;
@@ -657,7 +726,7 @@ MmPickError registry_pick(Registry *r, const MmPolicy *p, const MmPickQuery *q, 
     for (size_t i = 0; i < r->node_count; i++) {
         for (size_t j = 0; j < r->nodes[i]->lobby_count; j++) {
             const MmLobby *l = &r->nodes[i]->lobbies[j];
-            if (l->custom || l->no_seek || !lobby_auto_ok(r->nodes[i], l, q)) continue;
+            if (l->custom || l->no_seek || !registry_lobby_in_pool(r->nodes[i], l, q->flavor) || !lobby_auto_ok(r->nodes[i], l, q)) continue;
             any = 1;
             if (!version_ok(l, q->version) || !proto_ok(l, q) || !ruleset_ok(l, q)) continue;
             any_version = 1;
@@ -670,7 +739,7 @@ MmPickError registry_pick(Registry *r, const MmPolicy *p, const MmPickQuery *q, 
     /* the only lobby with room is the one the seek excludes: say so (the client stays put) */
     if (exclude) {
         MmNode *en = NULL;
-        const MmLobby *el = registry_lobby_find(r, exclude, &en);
+        const MmLobby *el = registry_lobby_find_pool(r, exclude, q->flavor, &en);
         if (el && !el->custom && !el->no_seek && lobby_joinable(en, el) && lobby_auto_ok(en, el, q) && version_ok(el, q->version) &&
             proto_ok(el, q) && ruleset_ok(el, q) && prefs_ok(el, q) && registry_lobby_taken(r, el, q->now_ms) < registry_lobby_cap(el, p))
             return MM_PICK_NO_OTHER_LOBBY;
@@ -705,7 +774,7 @@ static int node_load(const MmNode *n) {
 }
 
 MmNode *registry_pick_host_node(Registry *r, const char *region, const char *brain_id, int cross_region,
-                                int authed, int64_t now_ms) {
+                                int authed, int64_t now_ms, const char *flavor) {
     for (int pass = 0; pass < 2; pass++) {
         const char *reg = pass == 0 ? region : NULL;
         if (pass == 1 && (!cross_region || !region || !*region)) break;
@@ -713,7 +782,8 @@ MmNode *registry_pick_host_node(Registry *r, const char *region, const char *bra
         int best_score = 0;
         for (size_t i = 0; i < r->node_count; i++) {
             MmNode *n = r->nodes[i];
-            if (!region_eq(n, reg) || !node_host_free(r, n, authed, now_ms)) continue;
+            if (!region_eq(n, reg) || !registry_flavor_match(registry_node_flavor(n), flavor) ||
+                !node_host_free(r, n, authed, now_ms)) continue;
             /* own nodes first, then least loaded */
             int score = (brain_id && !strcmp(n->brain_id, brain_id) ? 0 : 100000) + node_load(n);
             if (!best || score < best_score) {
@@ -740,12 +810,17 @@ cJSON *registry_lobby_tuple(const Registry *r, const MmLobby *l, int64_t now_ms)
 }
 
 cJSON *registry_game_list(const Registry *r, int64_t now_ms, int *total_players) {
+    return registry_game_list_pool(r, now_ms, "all", total_players);
+}
+
+cJSON *registry_game_list_pool(const Registry *r, int64_t now_ms, const char *flavor, int *total_players) {
     cJSON *arr = cJSON_CreateArray();
     int total = 0;
     for (size_t i = 0; i < r->node_count; i++) {
         const MmNode *n = r->nodes[i];
         for (size_t j = 0; j < n->lobby_count; j++) {
             const MmLobby *l = &n->lobbies[j];
+            if (!registry_lobby_in_pool(n, l, flavor)) continue;
             cJSON *t = registry_lobby_tuple(r, l, now_ms);
             if (n->draining) {
                 cJSON *meta = cJSON_GetArrayItem(t, 4);

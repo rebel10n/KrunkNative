@@ -158,6 +158,30 @@ static int g_hide_full = -1;     // dK (krk_hideFull), -1 = not read yet
 
 static double now_ms(void) { return glfwGetTime() * 1000.0; }
 
+// The coordinator's product flavor pool (services/brain/public_routes.c ?flavor=, doc/backend.md
+// "Flavor pools"): Krunker Box Office and the Krunker Strike app share one coordinator and its
+// accounts, never a lobby. A base client sends nothing (its requests are unchanged); a Strike client
+// adds flavor=strike to every lobby request (seek, game list, game info, ping list, host), so it
+// only ever sees and joins Strike lobbies. `path` is the request so far (its '?' decides the joiner).
+static const char *mm_flavor_param(const char *path) {
+    static char param[40];
+    if (flavor_get() == FLAVOR_BASE) return "";
+    snprintf(param, sizeof(param), "%cflavor=%s", strchr(path, '?') ? '&' : '?', flavor_current()->key);
+    return param;
+}
+
+// GET a coordinator lobby path with the flavor pool appended (mm_flavor_param).
+static int mm_get(const char *path, BackendHttpFn fn, void *user) {
+    char full[512];
+    snprintf(full, sizeof(full), "%s%s", path, mm_flavor_param(path));
+    return backend_http_get(full, fn, user);
+}
+
+// Krunker Strike matchmakes through the director only without a coordinator: with one (the
+// default, coordinator.krunk.io) the coordinator's Strike pool is the matchmaker, its join tickets
+// the admission (doc/v10/strike-director.md "One coordinator").
+static int strike_via_director(void) { return strike_director_enabled() && !g_brain_mode; }
+
 // UTILS.commaNumber
 static void comma_number(char *out, const size_t n, const double value) {
     char digits[32];
@@ -546,7 +570,7 @@ static void link_tick(Client *client) {
     snprintf(key, sizeof(key), "%s:%u", client->net_address, (unsigned int) client->net_port);
     if (!strcmp(key, g_link_lookup) || backend_available() != 1) return;
     snprintf(g_link_lookup, sizeof(g_link_lookup), "%s", key);
-    backend_http_get("/mm/game-list?hostname=krunknative", on_link_list, NULL);
+    mm_get("/mm/game-list?hostname=krunknative", on_link_list, NULL);
 }
 
 // copyInviteLink: location.protocol + "//" + location.host + "/?game=" + gameId (native: the
@@ -843,8 +867,8 @@ static void seek(const char *game_id, const int auto_change, void *quiet) {
     if (!g_rejoin_seek) rejoin_cancel(); // any other matchmaking action replaces a pending rejoin
     snprintf(g_seek_game, sizeof(g_seek_game), "%s", game_id ? game_id : "");
     g_account_game[0] = 0;
-    if (strike_director_enabled()) {
-        // Krunker Strike: director game ids are not brain lobbies; the session's own private
+    if (strike_via_director()) {
+        // Krunker Strike without a coordinator: director game ids are not brain lobbies; the session's own private
         // lobby (a rejoin, a reconnect) is sought again by its code, anything else is a public seek
         const int same_private = g_strike_code[0] && game_id && game_id[0] && !strcmp(game_id, g_game_id);
         (void) auto_change;
@@ -859,6 +883,8 @@ static void seek(const char *game_id, const int auto_change, void *quiet) {
     n += snprintf(path + n, sizeof(path) - (size_t) n, "&proto=%s", kn_build_protocol());
     // the Krunker version (v10.0.2, the only one): quick join never picks a lobby announcing another
     n += snprintf(path + n, sizeof(path) - (size_t) n, "&ruleset=%s", ruleset_current()->key);
+    // the app's flavor pool: a Strike client is only ever matched into a Strike lobby
+    n += snprintf(path + n, sizeof(path) - (size_t) n, "%s", mm_flavor_param(path));
     if (game_id && game_id[0]) {
         backend_url_encode(enc, sizeof(enc), game_id);
         n += snprintf(path + n, sizeof(path) - (size_t) n, "&game=%s", enc);
@@ -1030,7 +1056,7 @@ static void start_seek(const char *game_id) {
         return;
     }
     char *copy = game_id && game_id[0] ? strdup(game_id) : NULL;
-    if (!backend_http_get("/mm/ping-list", on_ping_list, copy)) {
+    if (!mm_get("/mm/ping-list", on_ping_list, copy)) {
         free(copy);
         g_find_seek = g_find_both = 0;
         g_reload_next = 0;
@@ -1082,7 +1108,7 @@ static int strike_join_code(const char *text) {
     }
     code[n] = 0;
     while (*text == ' ') text++;
-    if (*text || n < 4 || n > 12 || !strike_director_enabled() || g_seek_inflight) return 0;
+    if (*text || n < 4 || n > 12 || !strike_via_director() || g_seek_inflight) return 0;
     printf("[strike] joining private lobby %s\n", code);
     menu_show_window(MENU_WINDOW_NONE, 0);
     g_pin = PIN_NONE;
@@ -2464,6 +2490,17 @@ static void on_game_list(void *user, const int status, const char *body, const s
         const cJSON *total = cJSON_GetObjectItem(res, "totalPlayerCount");
         g_total_players = cJSON_IsNumber(total) ? total->valuedouble : 0;
         g_list_start_ms = now_ms(); // windows[1].startTime
+        // the lobbies the Servers window lists (the Krunker Strike page has no such window; its
+        // list data is still this one, from the app's flavor pool: mm_flavor_param)
+        char ids[256] = "";
+        size_t len = 0;
+        const cJSON *g;
+        int count = 0;
+        cJSON_ArrayForEach(g, games) {
+            const char *id = cJSON_GetStringValue(cJSON_GetArrayItem(g, 0));
+            if (id && count++ < 4 && len + strlen(id) + 2 < sizeof(ids)) len += (size_t) snprintf(ids + len, sizeof(ids) - len, "%s%s", len ? "," : "", id);
+        }
+        printf("[mm] game list (%s): %d lobbies %s\n", flavor_current()->key, cJSON_GetArraySize(games), ids);
     }
     cJSON_Delete(res);
     g_loaded = 1;
@@ -2506,7 +2543,7 @@ char *servers_window_gen(const int id, const char **header) {
     if (now_ms() - g_last_load_ms < SERVER_BROWSER_RATE_MS && g_loaded) return gen_list();
     g_last_load_ms = now_ms();
     g_loaded = 0;
-    backend_http_get("/mm/game-list?hostname=krunknative", on_game_list, NULL);
+    mm_get("/mm/game-list?hostname=krunknative", on_game_list, NULL);
     backend_http_get("/api/player-count", on_player_count, NULL);
     // loadData()'s "<div style='padding-top:19px;>" lacks its closing quote, which swallows
     // the text in v7.1.4 (a blank window while loading): fixed
@@ -2842,7 +2879,7 @@ int servers_ui_handle(const char *name, const HtmlEvent *ev, const HtmlArg *args
         char path[256], enc[192];
         backend_url_encode(enc, sizeof(enc), id);
         snprintf(path, sizeof(path), "/mm/game-info?game=%s", enc);
-        backend_http_get(path, on_checked_info, NULL);
+        mm_get(path, on_checked_info, NULL);
         return 1;
     }
     return -1;
@@ -3018,7 +3055,7 @@ void servers_ui_fetch_matches(const ServersMatchesFn fn, void *user) {
     MatchesReq *req = malloc(sizeof(*req));
     if (!req) return;
     *req = (MatchesReq) {fn, user};
-    if (!backend_http_get("/mm/game-list?hostname=krunknative", on_matches, req)) {
+    if (!mm_get("/mm/game-list?hostname=krunknative", on_matches, req)) {
         free(req);
         cJSON *matches = cJSON_CreateObject();
         fn(user, matches);
@@ -3599,7 +3636,7 @@ int servers_ui_play_map(const char *name, const int catalogue) {
     snprintf(g_play_name, sizeof(g_play_name), "%s", name);
     g_play_catalogue = catalogue;
     if (g_brain_mode && !g_client->offline) {
-        backend_http_get("/mm/game-list?hostname=krunknative", on_play_list, NULL);
+        mm_get("/mm/game-list?hostname=krunknative", on_play_list, NULL);
         return 1;
     }
     if (catalogue) return 0; // the offline game hosts catalogue maps itself
@@ -3681,6 +3718,7 @@ int servers_ui_host_game(const char *config_json) {
     backend_url_encode(enc, strlen(config_json) * 3 + 1, config_json);
     backend_url_encode(region, sizeof(region), g_region[0] ? g_region : "local");
     int len = snprintf(path, n, "/mm/host-game?region=%s&config=%s", region, enc);
+    len += snprintf(path + len, n - (size_t) len, "%s", mm_flavor_param(path));
     if (account_get() && account_session_token()[0]) {
         char tok[256];
         backend_url_encode(tok, sizeof(tok), account_session_token());
@@ -3889,7 +3927,7 @@ void servers_ui_tick(Client *client) {
         char path[256], enc[192];
         backend_url_encode(enc, sizeof(enc), g_game_id);
         snprintf(path, sizeof(path), "/mm/game-info?game=%s", enc);
-        backend_http_get(path, on_game_info, NULL);
+        mm_get(path, on_game_info, NULL);
     }
     // the account changed while sitting in the menu of a lobby. A server that takes live sign-ins
     // (it pushed NET_EXT_KN_ACCOUNT_RIGHTS on this connection) re-verifies the connection in place

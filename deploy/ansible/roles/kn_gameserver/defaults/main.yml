@@ -68,3 +68,39 @@ kn_gameserver_coordinator_url: "wss://coordinator.{{ kn_domain }}/mm/internal/ws
 # {{ kn_etc_dir }}/secrets.env (role kn_brain) at deploy time, written only into the 0640
 # server-<n>.cfg. Never in git.
 kn_gameserver_secret_host: "{{ groups['central'] | first }}"
+
+# ---- Krunker Strike instances (tasks/strike.yml) ---------------------------------------------
+# Official Krunker Strike lobbies: server_bin --flavor strike with the Strike rotation (the modes
+# its menu offers, over FRVR's pool maps in assets/maps/strike/), linked to the same coordinator
+# as the Box Office instances and listed / sought / hosted in its Strike flavor pool only
+# (doc/backend.md "Flavor pools"), so the Strike app and Box Office share accounts, never a lobby.
+# Their own units (kn-strike@<n>), configs (strike-<n>.cfg), state, stop-reason file and restart
+# handler: the Box Office instances, their server-<n>.cfg and kn-gameserver@ units are untouched.
+# Count / ports: group_vars/edges/main.yml (kn_strike_count, shared with the firewall drop-in).
+kn_strike_enabled: false
+kn_strike_count: 0
+# Clients connect to the host's existing <edge>-1 A record (same address, Strike port): no new DNS.
+kn_strike_hostname: "{{ kn_edge_name }}-1.{{ kn_domain }}"
+kn_strike_name_prefix: "Krunker Strike {{ kn_edge_name | capitalize }}"
+# CHITOWNSTRIKE1: never one of the Box Office node ids (CHITOWN1). Its short link form is the
+# region's (CH1, shared/include/server_names.h), resolved inside the Strike pool only.
+kn_strike_node_id_fmt: "{{ kn_edge_name | upper }}STRIKE%d"
+# Strike's public lobby cap (flavor_max_players(): 10) and its own mode rotation ("rotation" under
+# --flavor strike). Bots fill like the Box Office lobbies (0 = none).
+kn_strike_max_players: 10
+kn_strike_modes: rotation
+kn_strike_bot_quota: "{{ kn_strike_max_players }}"
+kn_strike_stop_reason_file: /run/krunknative-deploy/strike-stop-reason
+# Memory budget. A server_bin uses ~100 MB RSS idle on one map: each Strike instance gets
+# MemoryHigh (reclaim pressure) / MemoryMax (hard cap, systemd kills and restarts it) so it can
+# never take memory from the Box Office servers. The role starts a Strike instance only while
+#   kn_strike_host_reserve_mb + Box Office count * kn_gameserver_memory_estimate_mb
+#   + Strike count * kn_strike_memory_max_mb  <=  the host's MemTotal
+# (host reserve: the OS and abulxt's relays; the estimate: a Box Office server_bin in play, which
+# has no cgroup cap of its own). CPU: a lower CPUWeight than the Box Office units (80) so under
+# contention the Box Office servers win.
+kn_strike_memory_high_mb: 192
+kn_strike_memory_max_mb: 256
+kn_strike_host_reserve_mb: 1024
+kn_gameserver_memory_estimate_mb: 160
+kn_strike_cpu_weight: 50

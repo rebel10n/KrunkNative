@@ -757,6 +757,7 @@ brain draining).
 | `proto`, `build`, `commit`, `commitTime` | string, string, string, int | build identity of the server (`proto` "M.m", git describe, 12-hex commit, unix s): see 8.12 |
 | `outdated`, `incompatible` | bool | added by `/mm/game-list` (8.12); not sent by servers |
 | `mapIndex` | int | the map catalogue index (`shared/include/map_catalog.h`; 0..31 = Krunker's mapIndex): seek-game `dataQuery.dsma` ([v10/matchmaker-token.md](v10/matchmaker-token.md)) |
+| `flavor` | string | product flavor pool (`shared/include/flavor.h` key): `"strike"` from a Krunker Strike `server_bin` (or stamped from its node's hello); absent = the base game. See "Flavor pools" (6.2) |
 
 ### Routes
 
@@ -1029,6 +1030,32 @@ in `mm_reservations`, with a `kn_mm_lobby` NOTIFY so the other brains count it a
 counts until the node reports the player (5.3). Tests: `brain_registry`,
 `brain_mm_fill_e2e` (`server/tests/mm_fill_e2e.py`: 3 `server_bin` nodes, sequential seekers
 inside the lobby-up debounce and concurrent seekers all land in one lobby).
+
+#### Flavor pools (Krunker Strike)
+
+One coordinator serves both apps: Krunker Box Office and the Krunker Strike app sign in to the same
+accounts and seek through the same brain, but never share a lobby. A Strike `server_bin`
+(`--flavor strike`, [v10/krunker-strike.md](v10/krunker-strike.md)) says `hello.flavor = "strike"`
+and `meta.flavor = "strike"` in its lobby tuples (the brain also stamps the node's flavor into the
+tuple, so federation's `mm_lobbies` rows carry it); base servers say nothing, so their frames and
+tuples are unchanged. Every lobby route takes `?flavor=` (`registry_flavor_match`): none / `base` =
+the base game only, `strike` = Strike only, `all` / `*` = both (dashboards).
+
+| route | per pool |
+| --- | --- |
+| `/mm/seek-game` | quick join over the pool only; `?game=` of another pool = not found (`InvalidGameId`, or the pool's best lobby with `autoChangeGame`) |
+| `/mm/game-list`, `/mm/game-info` | the pool's lobbies (the short link `CH1:abcde` resolves inside the pool) |
+| `/mm/ping-list`, `/mm/regions` | regions / nodes of the pool |
+| `/mm/host-game`, a node's `host-request` | a node of the pool (the requesting node's); ranked stays base |
+| finder `/servers` | the same split by the KNINFO `flavor` (`finder_table.c`) |
+
+The Box Office client sends no `flavor` (unchanged requests); the Strike client adds
+`flavor=strike` to each of them (`servers_ui.c` `mm_flavor_param`), lists no official krunker.io
+lobbies, and joins with the coordinator's signed join ticket (5.3) like any client. The standalone
+`kn_strike_director` (doc/v10/strike-director.md) is the matchmaker only where no coordinator runs.
+Official Strike servers: deploy/ansible/README.md "Krunker Strike servers". Tests: `brain_registry`
+(flavor block), `strike_coordinator_e2e` (`server/tests/strike_coordinator_e2e.py`: a Strike and a
+base `server_bin` on one brain, seeks / lists / joins per app, both clients).
 
 ### 6.3 Hosting custom games
 

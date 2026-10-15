@@ -1,0 +1,39 @@
+# Krunker Strike instance plan (tasks/strike.yml): kn_strike_run = how many Strike instances this
+# host starts (kn_strike_count, lowered to what its memory holds next to the Box Office servers),
+# kn_strike_active = whether they run. Pure set_fact / debug: deploy/ansible/tests/render_test.py
+# runs it against the inventory's hosts with given facts.
+- name: Strike instance plan (memory budget)
+  ansible.builtin.set_fact:
+    kn_strike_planned: "{{ kn_strike_count | int if kn_strike_enabled | bool else 0 }}"
+    kn_strike_mem_total: "{{ ansible_facts.memtotal_mb | default(0) | int }}"
+    kn_strike_mem_bo: "{{ (kn_gameserver_count | int) * (kn_gameserver_memory_estimate_mb | int) }}"
+
+- name: Strike instances that fit
+  ansible.builtin.set_fact:
+    kn_strike_run: >-
+      {{ [kn_strike_planned | int,
+          [((kn_strike_mem_total | int) - (kn_strike_host_reserve_mb | int) - (kn_strike_mem_bo | int))
+           // (kn_strike_memory_max_mb | int), 0] | max] | min }}
+
+- name: Strike instance plan
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: {{ kn_strike_run }} Krunker Strike instance(s) (planned {{ kn_strike_planned }}),
+      ports {{ kn_strike_first_port }}..{{ kn_strike_first_port + [kn_strike_run | int, 1] | max - 1 }} tcp+udp,
+      MemoryMax {{ kn_strike_memory_max_mb }} MB each; memory {{ kn_strike_mem_total }} MB =
+      reserve {{ kn_strike_host_reserve_mb }} + Box Office {{ kn_gameserver_count }} x {{ kn_gameserver_memory_estimate_mb }}
+      + Strike {{ kn_strike_run }} x {{ kn_strike_memory_max_mb }}
+      + free {{ (kn_strike_mem_total | int) - (kn_strike_host_reserve_mb | int) - (kn_strike_mem_bo | int) - (kn_strike_run | int) * (kn_strike_memory_max_mb | int) }},
+      active={{ (kn_gameserver_active | bool) and (kn_strike_run | int) > 0 }}
+
+- name: Strike instances left out for memory
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: only {{ kn_strike_run }} of {{ kn_strike_planned }} Krunker Strike instance(s)
+      fit in {{ kn_strike_mem_total }} MB next to {{ kn_gameserver_count }} Box Office servers
+      (raise the host's memory or lower kn_strike_memory_max_mb / kn_strike_count)
+  when: (kn_strike_run | int) < (kn_strike_planned | int)
+
+- name: Strike instances active
+  ansible.builtin.set_fact:
+    kn_strike_active: "{{ (kn_gameserver_active | bool) and (kn_strike_run | int) > 0 }}"

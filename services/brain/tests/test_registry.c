@@ -132,16 +132,16 @@ int main(void) {
     b->draining = 0;
 
     /* host target: custom-capable with spare capacity, own brain first */
-    MmNode *h = registry_pick_host_node(r, "us-nj", "brainA", 1, 0, 2000);
+    MmNode *h = registry_pick_host_node(r, "us-nj", "brainA", 1, 0, 2000, NULL);
     CHECK(h == NULL); /* NY2 has a lobby with players and max_lobbies 1; NY is not custom */
     registry_lobby_remove(r, b, "bbbbb");
-    h = registry_pick_host_node(r, "us-nj", "brainA", 1, 0, 2000);
+    h = registry_pick_host_node(r, "us-nj", "brainA", 1, 0, 2000, NULL);
     CHECK(h == b);
     add_lobby(r, b, "bbbbb", 0, 8, 0, "1.0");
-    CHECK(registry_pick_host_node(r, "us-nj", "brainA", 1, 0, 2000) == b); /* idle lobby */
+    CHECK(registry_pick_host_node(r, "us-nj", "brainA", 1, 0, 2000, NULL) == b); /* idle lobby */
     registry_reserve(r, "j2", "NY2:bbbbb", 3000);
-    CHECK(registry_pick_host_node(r, "us-nj", "brainA", 1, 0, 2000) == NULL); /* seat in flight */
-    CHECK(registry_pick_host_node(r, "us-nj", "brainA", 1, 0, 3500) == b);
+    CHECK(registry_pick_host_node(r, "us-nj", "brainA", 1, 0, 2000, NULL) == NULL); /* seat in flight */
+    CHECK(registry_pick_host_node(r, "us-nj", "brainA", 1, 0, 3500, NULL) == b);
 
     /* online_mode + password protected nodes (hello.onlineMode / hello.password) */
     {
@@ -218,10 +218,10 @@ int main(void) {
         registry_lobby_remove(o, on, "onl");
         registry_lobby_remove(o, off, "off");
         registry_lobby_remove(o, pw, "pwd");
-        CHECK(registry_pick_host_node(o, "us-nj", "brainA", 1, 0, 2000) == off);
+        CHECK(registry_pick_host_node(o, "us-nj", "brainA", 1, 0, 2000, NULL) == off);
         registry_node_remove(o, "CHITOWN2");
-        CHECK(registry_pick_host_node(o, "us-nj", "brainA", 1, 0, 2000) == NULL);
-        CHECK(registry_pick_host_node(o, "us-nj", "brainA", 1, 1, 2000) == on);
+        CHECK(registry_pick_host_node(o, "us-nj", "brainA", 1, 0, 2000, NULL) == NULL);
+        CHECK(registry_pick_host_node(o, "us-nj", "brainA", 1, 1, 2000, NULL) == on);
         /* an old server_bin reconnecting with the same id drops back to offline */
         cJSON *h1b = cJSON_Parse("{\"region\":\"us-nj\",\"publicHost\":\"chitown-1\",\"publicPort\":21015}");
         CHECK(registry_node_hello(o, "CHITOWN1", h1b, "brainA", "local", 3000) == on && !on->online_mode);
@@ -537,6 +537,93 @@ int main(void) {
     }
 
     /* remote refresh */
+    /* Product flavor pools (shared/include/flavor.h): Krunker Box Office and the Krunker Strike app
+     * share this coordinator, never a lobby. A Strike node says hello.flavor "strike" (its lobbies'
+     * meta then carry it), a base node says nothing. */
+    {
+        Registry *f = registry_new();
+        MmPolicy pf = {.cross_region = 1, .default_max_players = 8};
+        MmNode *base = add_node(f, "CHITOWN1", "CH", 1);
+        cJSON *sh = cJSON_Parse("{\"region\":\"CH\",\"publicHost\":\"h-s\",\"publicPort\":21115,\"custom\":true,"
+                                "\"maxPlayers\":10,\"flavor\":\"strike\"}");
+        MmNode *strike = registry_node_hello(f, "CHITOWNSTRIKE1", sh, "brainA", "local", 1000);
+        cJSON_Delete(sh);
+        CHECK(strike && !strcmp(strike->flavor, "strike") && !base->flavor[0]);
+        add_lobby(f, base, "kz862", 5, 8, 0, "1");
+        add_lobby(f, strike, "kz862", 2, 10, 0, "1"); /* same local id: CH1:kz862 names both */
+        MmLobby *bl = registry_lobby(f, "CHITOWN1:kz862", NULL), *sl = registry_lobby(f, "CHITOWNSTRIKE1:kz862", NULL);
+        CHECK(bl && sl && !bl->flavor[0] && !strcmp(sl->flavor, "strike"));
+        /* the node's flavor rides the tuple (federation); a base tuple is untouched */
+        CHECK(!strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(sl->tuple, 4), "flavor")), "strike"));
+        CHECK(cJSON_GetObjectItem(cJSON_GetArrayItem(bl->tuple, 4), "flavor") == NULL);
+        CHECK(registry_flavor_match("", NULL) && registry_flavor_match("", "base") && registry_flavor_match("", "BASE"));
+        CHECK(!registry_flavor_match("strike", NULL) && !registry_flavor_match("strike", "") && registry_flavor_match("strike", "Strike"));
+        CHECK(!registry_flavor_match("", "strike") && registry_flavor_match("strike", "all") && registry_flavor_match("", "*"));
+
+        /* a Box Office seek (no ?flavor=) takes the base lobby, a Strike seek the Strike one, even
+         * though the Strike lobby is emptier and the base one fuller */
+        MmPickQuery qb = {.region = "CH", .auto_change = 1, .now_ms = 2000};
+        CHECK(registry_pick(f, &pf, &qb, &pick) == MM_PICK_OK && pick.node == base);
+        MmPickQuery qbb = {.region = "CH", .auto_change = 1, .now_ms = 2000, .flavor = "base"};
+        CHECK(registry_pick(f, &pf, &qbb, &pick) == MM_PICK_OK && pick.node == base);
+        MmPickQuery qs = {.region = "CH", .auto_change = 1, .now_ms = 2000, .flavor = "strike"};
+        CHECK(registry_pick(f, &pf, &qs, &pick) == MM_PICK_OK && pick.node == strike);
+        /* other regions too (cross_region): still the app's own pool */
+        MmPickQuery qsx = {.region = "LA", .auto_change = 1, .now_ms = 2000, .flavor = "strike"};
+        CHECK(registry_pick(f, &pf, &qsx, &pick) == MM_PICK_OK && pick.node == strike);
+        /* by id: another pool's lobby is not found (InvalidGameId), never handed out */
+        MmPickQuery qid = {.region = "CH", .game_id = "CHITOWNSTRIKE1:kz862", .auto_change = 0, .now_ms = 2000};
+        CHECK(registry_pick(f, &pf, &qid, &pick) == MM_PICK_INVALID_GAME);
+        qid.auto_change = 1;
+        CHECK(registry_pick(f, &pf, &qid, &pick) == MM_PICK_OK && pick.node == base && pick.changed);
+        MmPickQuery qsid = {.region = "CH", .game_id = "CHITOWN1:kz862", .auto_change = 0, .now_ms = 2000, .flavor = "strike"};
+        CHECK(registry_pick(f, &pf, &qsid, &pick) == MM_PICK_INVALID_GAME);
+        qsid.game_id = "CHITOWNSTRIKE1:kz862";
+        CHECK(registry_pick(f, &pf, &qsid, &pick) == MM_PICK_OK && pick.node == strike && !pick.changed);
+        /* the short link CH1:kz862 resolves inside each app's pool */
+        MmNode *owner = NULL;
+        CHECK(registry_lobby_find_pool(f, "CH1:kz862", NULL, &owner) == bl && owner == base);
+        CHECK(registry_lobby_find_pool(f, "CH1:kz862", "strike", &owner) == sl && owner == strike);
+        CHECK(registry_lobby_find_pool(f, "CHITOWN1:kz862", "strike", &owner) == NULL && owner == NULL);
+        /* hosting: a Strike custom game only on a Strike node, a Box Office one on a base node */
+        CHECK(registry_pick_host_node(f, "CH", "brainA", 1, 1, 2000, "strike") == NULL); /* its lobby is not idle */
+        CHECK(registry_pick_host_node(f, "CH", "brainA", 1, 1, 2000, NULL) == NULL);
+        add_lobby(f, strike, "kz862", 0, 10, 0, "1");
+        add_lobby(f, base, "kz862", 0, 8, 0, "1");
+        CHECK(registry_pick_host_node(f, "CH", "brainA", 1, 1, 2000, "strike") == strike);
+        CHECK(registry_pick_host_node(f, "CH", "brainA", 1, 1, 2000, NULL) == base);
+        CHECK(registry_pick_host_node(f, "CH", "brainA", 1, 1, 2000, "base") == base);
+        /* the game lists: one pool each, "all" both */
+        int tot = 0;
+        cJSON *gl = registry_game_list_pool(f, 2000, NULL, &tot);
+        CHECK(cJSON_GetArraySize(gl) == 1 && !strcmp(cJSON_GetArrayItem(cJSON_GetArrayItem(gl, 0), 0)->valuestring, "CHITOWN1:kz862"));
+        cJSON_Delete(gl);
+        gl = registry_game_list_pool(f, 2000, "strike", &tot);
+        CHECK(cJSON_GetArraySize(gl) == 1 && !strcmp(cJSON_GetArrayItem(cJSON_GetArrayItem(gl, 0), 0)->valuestring, "CHITOWNSTRIKE1:kz862"));
+        cJSON_Delete(gl);
+        gl = registry_game_list(f, 2000, &tot);
+        CHECK(cJSON_GetArraySize(gl) == 2);
+        cJSON_Delete(gl);
+        /* only Strike lobbies left for a Box Office seek: nothing (never a Strike lobby) */
+        registry_node_remove(f, "CHITOWN1");
+        CHECK(registry_pick(f, &pf, &qb, &pick) == MM_PICK_NONE);
+        CHECK(registry_pick(f, &pf, &qs, &pick) == MM_PICK_OK && pick.node == strike);
+        /* a remote Strike node (federation: no hello, the flavor comes from its lobbies' tuples) */
+        registry_remote_begin(f);
+        MmNode *rs = registry_remote_node(f, "ANGELESSTRIKE1");
+        snprintf(rs->region, sizeof(rs->region), "LA");
+        rs->custom = 1;
+        cJSON *rt = cJSON_Parse("[\"ANGELESSTRIKE1:qqqqq\",\"LA\",3,10,{\"i\":\"Burg\",\"cs\":false,\"flavor\":\"strike\"}]");
+        CHECK(registry_lobby_upsert(f, rs, rt) == 0);
+        cJSON_Delete(rt);
+        registry_remote_end(f);
+        CHECK(!strcmp(registry_node_flavor(rs), "strike"));
+        MmPickQuery qla = {.region = "LA", .auto_change = 1, .now_ms = 2000, .flavor = "strike"};
+        CHECK(registry_pick(f, &pf, &qla, &pick) == MM_PICK_OK && pick.node == rs);
+        MmPickQuery qlab = {.region = "LA", .auto_change = 1, .now_ms = 2000};
+        CHECK(registry_pick(f, &pf, &qlab, &pick) == MM_PICK_NONE);
+        registry_free(f);
+    }
     registry_remote_begin(r);
     MmNode *rm = registry_remote_node(r, "SGP");
     CHECK(rm != NULL);

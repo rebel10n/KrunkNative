@@ -1,0 +1,11 @@
+- name: Stop kn-strike@{{ stale_n }}
+  ansible.builtin.systemd_service:
+    name: "kn-strike@{{ stale_n }}"
+    enabled: false
+    state: stopped
+  failed_when: false
+
+- name: Remove strike-{{ stale_n }}.cfg
+  ansible.builtin.file:
+    path: "{{ kn_etc_dir }}/strike-{{ stale_n }}.cfg"
+    state: absent

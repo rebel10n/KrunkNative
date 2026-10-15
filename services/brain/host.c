@@ -76,19 +76,19 @@ static void on_host_reply(void *ud, const cJSON *reply, const char *err) {
 }
 
 int brain_host_game(Brain *b, const char *region, const cJSON *config, int64_t account_id,
-                    const char *account_name, BrainHostCb cb, void *ud) {
-    return brain_host_game_ex(b, region, config, account_id, account_name, 1, cb, ud);
+                    const char *account_name, const char *flavor, BrainHostCb cb, void *ud) {
+    return brain_host_game_ex(b, region, config, account_id, account_name, 1, flavor, cb, ud);
 }
 
 int brain_host_game_ex(Brain *b, const char *region, const cJSON *config, int64_t account_id,
-                       const char *account_name, int ticket, BrainHostCb cb, void *ud) {
+                       const char *account_name, int ticket, const char *flavor, BrainHostCb cb, void *ud) {
     if (b->draining) {
         if (cb) cb(ud, "updating", NULL);
         return 0;
     }
     /* ticket == 0: ranked (every player holds an account ticket) */
     MmNode *n = registry_pick_host_node(b->registry, region, b->id, mm_settings()->policy.cross_region,
-                                        account_id > 0 || !ticket, kn_wall_ms());
+                                        account_id > 0 || !ticket, kn_wall_ms(), flavor);
     if (!n) {
         if (cb) cb(ud, "NoAvailableServers", NULL);
         return 0;

@@ -111,3 +111,7 @@
   loop: "{{ kn_gs_cfgs.files | map(attribute='path') | map('regex_replace', '^.*/server-(\\d+)\\.cfg$', '\\1') | map('int') | select('gt', kn_gameserver_count | int) | list }}"
   loop_control:
     loop_var: stale_n
+
+# Krunker Strike instances (kn-strike@, strike-<n>.cfg): after the Box Office ones, never instead.
+- name: Krunker Strike instances
+  ansible.builtin.include_tasks: strike.yml

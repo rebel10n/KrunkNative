@@ -17,6 +17,19 @@ kn_gameserver_port_range: >-
   {{ (kn_gameserver_first_port | string) if (kn_gameserver_count | int) == 1 else
      ((kn_gameserver_first_port | string) ~ '-' ~ ((kn_gameserver_first_port | int) + (kn_gameserver_count | int) - 1)) }}
 
+# Krunker Strike instances (role kn_gameserver tasks/strike.yml), beside the Box Office ones above,
+# which they never replace or renumber: 2 on hosts with 8+ vcpus (angeles), else 1; port
+# kn_strike_first_port+n-1 (group_vars/all.yml), TCP game + UDP knet + server-info like the others.
+# The role starts fewer (none) when the host's memory cannot hold them next to the Box Office
+# servers (kn_strike_memory_* in the role defaults). false = no Strike on the edges.
+kn_strike_enabled: true
+kn_strike_count: >-
+  {{ ([2 if (ansible_facts.processor_vcpus | default(ansible_facts.processor_nproc) | int) >= 8 else 1,
+       kn_strike_port_span | int] | min) if kn_strike_enabled | bool else 0 }}
+kn_strike_port_range: >-
+  {{ (kn_strike_first_port | string) if (kn_strike_count | int) <= 1 else
+     ((kn_strike_first_port | string) ~ '-' ~ ((kn_strike_first_port | int) + (kn_strike_count | int) - 1)) }}
+
 # --- Host firewall: vendored edge_firewall role (edge-firewall-contract v1) ---
 # README.md "Edge firewall". The same variables, in the same order, are set in
 # abulxt (deploy/ansible/inventory/group_vars/edge.yml) and KrunkNative
@@ -35,8 +48,9 @@ edge_firewall_dropins:
     source: deploy/ansible group_vars/edges/main.yml
     comment:
       - "krunknative game ports: one per server_bin instance (tcp game, udp knet + server-info)."
-    tcp: ["{{ kn_gameserver_port_range }}"]
-    udp: ["{{ kn_gameserver_port_range }}"]
+      - "Box Office instances first, then the Krunker Strike instances (kn_strike_first_port)."
+    tcp: "{{ [kn_gameserver_port_range] + ([kn_strike_port_range] if (kn_strike_count | int) > 0 else []) }}"
+    udp: "{{ [kn_gameserver_port_range] + ([kn_strike_port_range] if (kn_strike_count | int) > 0 else []) }}"
 
 # Live since 2026-10-11 (go-live): a plain `ansible-playbook edges.yml` keeps the units
 # running. Set false (or -e kn_gameserver_enabled=false) to take the edges down.

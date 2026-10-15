@@ -9,6 +9,7 @@
 #include <krunker_maps.h>
 #include <krunker_map_source.h> // the official list: names (krunker_maps.h)
 #include <modes.h>
+#include <flavor.h> // Krunker Strike: its own servers only
 #include <cJSON.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -49,6 +50,9 @@ SeekServers seek_prefs_servers(void) {
 #ifdef __EMSCRIPTEN__
     return SEEK_SERVERS_KN; // platform behaviour: the web client only lists and seeks our servers
 #else
+    // the Krunker Strike app seeks its own servers only (the coordinator's Strike pool): official
+    // krunker.io lobbies are Box Office's (krunker_lobbies_enabled), whatever a shared config says
+    if (flavor_get() != FLAVOR_BASE) return SEEK_SERVERS_KN;
     const char *s = cJSON_GetStringValue(ui_setting_saved(SEEK_SERVERS_KEY));
     if (s && !strcmp(s, "official")) return SEEK_SERVERS_OFFICIAL;
     if (s && !strcmp(s, "both")) return SEEK_SERVERS_BOTH;

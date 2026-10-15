@@ -48,6 +48,14 @@ static int query_bool(kn_http_req *req, const char *key, int def) {
     return !(strcasecmp(v, "false") == 0 || strcmp(v, "0") == 0 || strcasecmp(v, "no") == 0);
 }
 
+/* ?flavor= : the asking app's product flavor pool (shared/include/flavor.h key). Krunker Box Office
+ * clients send none (= "base": they never see, seek, host on or join a Krunker Strike lobby); the
+ * Krunker Strike app sends "strike" and gets Strike lobbies only; "all" = every flavor (dashboards).
+ * Both apps share this coordinator and its accounts, never a lobby (doc/backend.md "Flavor pools"). */
+static void query_flavor(kn_http_req *req, char *out, size_t cap) {
+    if (kn_http_query_get(req, "flavor", out, cap) < 0) out[0] = 0;
+}
+
 /* FORCE_ENTER=1 cookie (publicRoutes.ts hasForceEnterCookie) */
 static int has_force_enter(kn_http_req *req) {
     const char *c = kn_http_header_get(req, "Cookie");
@@ -112,10 +120,13 @@ static void h_ping(kn_http_req *req, void *ud) {
 static void h_ping_list(kn_http_req *req, void *ud) {
     Brain *b = ud;
     Registry *r = b->registry;
+    char flavor[16];
+    query_flavor(req, flavor, sizeof(flavor)); /* the regions where the app's own servers run */
     cJSON *o = cJSON_CreateObject();
     for (size_t i = 0; i < r->node_count; i++) {
         const MmNode *n = r->nodes[i];
         if (!n->region[0] || cJSON_GetObjectItemCaseSensitive(o, n->region)) continue;
+        if (!registry_flavor_match(registry_node_flavor(n), flavor)) continue;
         char host[300] = "";
         const cJSON *rc = region_conf(n->region);
         const char *ping = kn_json_str(rc, "ping_host", NULL);
@@ -165,8 +176,11 @@ static void h_regions(kn_http_req *req, void *ud) {
         region_entry(arr, kn_json_str(rc, "id", "?"), kn_json_str(rc, "name", NULL));
     }
     Registry *r = b->registry;
+    char flavor[16];
+    query_flavor(req, flavor, sizeof(flavor));
     for (size_t i = 0; i < r->node_count; i++) {
         const MmNode *n = r->nodes[i];
+        if (!registry_flavor_match(registry_node_flavor(n), flavor)) continue;
         cJSON *e = region_entry(arr, n->region, kn_json_str(region_conf(n->region), "name", NULL));
         bump(e, "nodes", 1);
         bump(e, "games", (int) n->lobby_count);
@@ -185,7 +199,9 @@ static void h_game_list(kn_http_req *req, void *ud) {
         return;
     }
     int total = 0;
-    cJSON *games = registry_game_list(b->registry, kn_wall_ms(), &total);
+    char flavor[16];
+    query_flavor(req, flavor, sizeof(flavor));
+    cJSON *games = registry_game_list_pool(b->registry, kn_wall_ms(), flavor, &total);
     cJSON *o = cJSON_CreateObject();
     cJSON_AddBoolToObject(o, "success", 1);
     cJSON_AddNumberToObject(o, "totalPlayerCount", total);
@@ -204,12 +220,13 @@ static void h_game_list(kn_http_req *req, void *ud) {
  * least populated public lobby (any lobby when there is no public one); 503 when
  * there is no lobby at all. Reported players only (it is informational: the
  * client shows FULL / n/max), every region. */
-static MmLobby *game_info_pick(Registry *r) {
+static MmLobby *game_info_pick(Registry *r, const char *flavor) {
     MmLobby *best = NULL, *least = NULL, *least_any = NULL;
     for (size_t i = 0; i < r->node_count; i++) {
         MmNode *n = r->nodes[i];
         for (size_t j = 0; j < n->lobby_count; j++) {
             MmLobby *l = &n->lobbies[j];
+            if (!registry_lobby_in_pool(n, l, flavor)) continue;
             if (!least_any || l->players < least_any->players) least_any = l;
             if (l->custom) continue;
             if (!least || l->players < least->players) least = l;
@@ -221,10 +238,11 @@ static MmLobby *game_info_pick(Registry *r) {
 
 static void h_game_info(kn_http_req *req, void *ud) {
     Brain *b = ud;
-    char game[MM_GAME_ID_MAX] = "";
+    char game[MM_GAME_ID_MAX] = "", flavor[16];
     kn_http_query_get(req, "game", game, sizeof(game));
-    MmLobby *l = game[0] ? registry_lobby_find(b->registry, game, NULL) : NULL; /* either id form */
-    if (!l) l = game_info_pick(b->registry);
+    query_flavor(req, flavor, sizeof(flavor));
+    MmLobby *l = game[0] ? registry_lobby_find_pool(b->registry, game, flavor, NULL) : NULL; /* either id form */
+    if (!l) l = game_info_pick(b->registry, flavor);
     if (!l) {
         reply_error(req, 503, "NoAvailableServers");
         return;
@@ -320,8 +338,9 @@ static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, co
         return;
     }
     char region[64] = "", game[MM_GAME_ID_MAX] = "", dq[512] = "", version[32] = "", proto[16] = "", ruleset[8] = "",
-         exclude[MM_GAME_ID_MAX] = "", recent[MM_GAME_ID_MAX * 4] = "";
+         exclude[MM_GAME_ID_MAX] = "", recent[MM_GAME_ID_MAX * 4] = "", flavor[16] = "";
     kn_http_query_get(req, "region", region, sizeof(region));
+    query_flavor(req, flavor, sizeof(flavor)); /* the app's flavor pool: "" = Box Office, "strike" */
     kn_http_query_get(req, "ruleset", ruleset, sizeof(ruleset)); /* the client's Krunker version (ruleset.h), "" = v10 */
     kn_http_query_get(req, "proto", proto, sizeof(proto)); /* the client's protocol "M.m" */
     kn_http_query_get(req, "game", game, sizeof(game));
@@ -355,6 +374,7 @@ static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, co
         .mode_count = mode_count,
         .maps = maps,
         .map_count = map_count,
+        .flavor = flavor,
     };
     MmPick pick;
     MmPickError e = registry_pick(b->registry, &mm_settings()->policy, &q, &pick);
@@ -369,8 +389,8 @@ static void seek_with_account(kn_http_req *req, Brain *b, int64_t account_id, co
         reply_error(req, 500, "internal");
         return;
     }
-    KN_DEBUG("routes", "seek region=%s game=%s %s -> %s (%s:%d%s)", region, game, account_id > 0 ? "account" : "guest",
-             pick.lobby->game_id, pick.node->public_host, pick.node->public_port,
+    KN_DEBUG("routes", "seek region=%s game=%s flavor=%s %s -> %s (%s:%d%s)", region, game, flavor[0] ? flavor : "base",
+             account_id > 0 ? "account" : "guest", pick.lobby->game_id, pick.node->public_host, pick.node->public_port,
              registry_lobby_needs_account(pick.node, pick.lobby) ? ", online_mode" : "");
     brain_reply_json(req, 200, reply);
     cJSON_Delete(reply);
@@ -440,6 +460,7 @@ static void h_generate_token(kn_http_req *req, void *ud) {
 typedef struct HostReq {
     kn_http_req *req;
     char region[64];
+    char flavor[16]; /* ?flavor= / body flavor: the node's product flavor pool */
     cJSON *config;
 } HostReq;
 
@@ -453,7 +474,7 @@ static void on_hosted(void *ud, const char *err, const cJSON *reply) {
 
 static void host_with_account(kn_http_req *req, Brain *b, int64_t account_id, const char *name, void *ctx) {
     HostReq *h = ctx;
-    brain_host_game(b, h->region, h->config, account_id, name, on_hosted, h);
+    brain_host_game(b, h->region, h->config, account_id, name, h->flavor, on_hosted, h);
 }
 
 static void h_host_game(kn_http_req *req, void *ud) {
@@ -472,11 +493,13 @@ static void h_host_game(kn_http_req *req, void *ud) {
     cJSON *body = req->body_len ? kn_http_body_json(req) : NULL;
     if (body) {
         snprintf(h->region, sizeof(h->region), "%s", kn_json_str(body, "region", ""));
+        snprintf(h->flavor, sizeof(h->flavor), "%s", kn_json_str(body, "flavor", ""));
         cJSON *cfg = cJSON_DetachItemFromObjectCaseSensitive(body, "config");
         h->config = cfg;
         cJSON_Delete(body);
     }
     if (!h->region[0]) kn_http_query_get(req, "region", h->region, sizeof(h->region));
+    if (!h->flavor[0]) query_flavor(req, h->flavor, sizeof(h->flavor));
     if (!h->config) {
         size_t cap = strlen(req->query) + 1; /* a decoded value is never longer than the raw query */
         char *cfg = malloc(cap);

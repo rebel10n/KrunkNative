@@ -1,0 +1,59 @@
+# Krunker Strike instances (defaults/main.yml "Krunker Strike instances"): kn-strike@1..N beside
+# the Box Office kn-gameserver@ units, which this file never touches. Needs main.yml's facts:
+# kn_gameserver_active and the coordinator secrets (kn_gs_internal_secret / kn_gs_join_secret).
+
+# Memory: start only what fits next to the Box Office servers (strike_plan.yml, also rendered by
+# deploy/ansible/tests/render_test.py).
+- name: Strike instance plan
+  ansible.builtin.include_tasks: strike_plan.yml
+
+- name: Per-instance strike.cfg
+  ansible.builtin.template:
+    src: strike.cfg.j2
+    dest: "{{ kn_etc_dir }}/strike-{{ n }}.cfg"
+    owner: root
+    group: "{{ kn_group }}"
+    mode: "0640"
+  loop: "{{ range(1, (kn_strike_run | int) + 1) | list }}"
+  loop_control:
+    loop_var: n
+    label: "strike-{{ n }}.cfg :{{ kn_strike_first_port + n - 1 }} {{ kn_strike_node_id_fmt | format(n) }}"
+  notify: Restart Strike servers
+  diff: false # carries the coordinator secret
+
+- name: Release changed -> restart Strike
+  ansible.builtin.debug:
+    msg: "current -> {{ kn_svc_release_id }}"
+  changed_when: (kn_release_changed | default(false) | bool) and (kn_strike_run | int) > 0
+  notify: Restart Strike servers
+
+- name: Strike template unit
+  ansible.builtin.template:
+    src: kn-strike@.service.j2
+    dest: /etc/systemd/system/kn-strike@.service
+    mode: "0644"
+  notify: Restart Strike servers
+
+- name: Strike instances enabled/started (or disabled/stopped while inactive)
+  ansible.builtin.systemd_service:
+    name: "kn-strike@{{ n }}"
+    enabled: "{{ kn_strike_active }}"
+    state: "{{ 'started' if kn_strike_active else 'stopped' }}"
+    daemon_reload: true
+  loop: "{{ range(1, (kn_strike_run | int) + 1) | list }}"
+  loop_control:
+    loop_var: n
+  ignore_errors: "{{ ansible_check_mode }}"
+
+# Instances beyond the current count (Strike off, fewer vcpus, less memory).
+- name: Find stale Strike configs
+  ansible.builtin.find:
+    paths: "{{ kn_etc_dir }}"
+    patterns: "strike-*.cfg"
+  register: kn_strike_cfgs
+
+- name: Stop and remove stale Strike instances
+  ansible.builtin.include_tasks: strike_stale.yml
+  loop: "{{ kn_strike_cfgs.files | map(attribute='path') | map('regex_replace', '^.*/strike-(\\d+)\\.cfg$', '\\1') | map('int') | select('gt', kn_strike_run | int) | list }}"
+  loop_control:
+    loop_var: stale_n

@@ -1,0 +1,20 @@
+# kn_bridge_targets (KRUNK_NATIVE_TARGETS, defaults/main.yml "Allowlist"): the Box Office edge game
+# servers by name and IP, then each edge's Krunker Strike port span. Pure set_fact:
+# deploy/ansible/tests/render_test.py evaluates it against the inventory.
+- name: Bridge allowlist (edge game servers by name and IP)
+  ansible.builtin.set_fact:
+    kn_bridge_targets: >-
+      {%- set out = [] -%}
+      {%- set ports = kn_bridge_target_port_lo ~ '-' ~ kn_bridge_target_port_hi -%}
+      {%- for h in kn_bridge_edge_hosts -%}
+        {%- for n in range(1, (kn_bridge_target_port_hi | int) - (kn_bridge_target_port_lo | int) + 2) -%}
+          {%- set _ = out.append(hostvars[h].kn_edge_name ~ '-' ~ n ~ '.' ~ kn_domain ~ ':' ~ ports) -%}
+        {%- endfor -%}
+        {%- set _ = out.append(hostvars[h].kn_public_ip ~ ':' ~ ports) -%}
+        {%- if kn_bridge_strike | bool -%}
+          {#- Krunker Strike instances (kn_gameserver tasks/strike.yml): <edge>-1 and the IP, their port span -#}
+          {%- set _ = out.append(hostvars[h].kn_edge_name ~ '-1.' ~ kn_domain ~ ':' ~ kn_bridge_strike_ports) -%}
+          {%- set _ = out.append(hostvars[h].kn_public_ip ~ ':' ~ kn_bridge_strike_ports) -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ out }}

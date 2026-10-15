@@ -40,6 +40,9 @@ typedef struct MmLobby {
     char ruleset[8];                 /* meta.ruleset "v10" (ruleset.h; "v7" a version-toggle server on v7.1.4; "" not announced) */
     int time_left;                   /* meta.timeLeft: seconds left in the round (0 = end screen, -1 unknown) */
     int no_seek;                     /* v7.1.4 meta.sk === false (AUTO_SEEK off): joined by id only */
+    char flavor[16];                 /* meta.flavor: the product flavor pool (shared/include/flavor.h key,
+                                      * "strike"); "" = the base game (Krunker Box Office). A node's
+                                      * hello flavor is stamped into meta of its lobbies (namespace_tuple) */
     cJSON *tuple;                    /* owned: [gameId, region, players, max, meta] */
 } MmLobby;
 
@@ -61,6 +64,8 @@ typedef struct MmNode {
                                       * server_bin builds before guest-welcome online_mode sent it; current
                                       * ones admit guests and accounts alike (Krunker's lobbies) and never do */
     int password;                    /* hello.password: joining needs the server password */
+    char flavor[16];                 /* hello.flavor (flavor.h key, "strike"); "" = base. Remote nodes:
+                                      * learnt from their lobbies' meta.flavor (registry_node_flavor) */
     int draining;
     int local;                       /* connected to this brain */
     struct NodeConn *conn;           /* internal_ws connection (local only) */
@@ -218,6 +223,11 @@ typedef struct MmPickQuery {
     int mode_count;
     const int *maps;
     int map_count;
+    /* seek ?flavor= (shared/include/flavor.h key): the product flavor pool. NULL/""/"base" = the base
+     * game (Krunker Box Office), never a Krunker Strike lobby; "strike" = Strike lobbies only. Also a
+     * requested ?game= of another flavor is not found (InvalidGameId): the two apps share the
+     * coordinator and the accounts, never a lobby. */
+    const char *flavor;
 } MmPickQuery;
 
 typedef struct MmPick {
@@ -246,9 +256,22 @@ int registry_lobby_protected(const MmNode *n, const MmLobby *l);
 
 /* Host target: custom-capable, non-draining, not password protected node with spare
  * capacity in region (then anywhere when cross_region), preferring brain_id's own
- * nodes; legacy onlineMode nodes only when authed. */
+ * nodes; legacy onlineMode nodes only when authed; only nodes of the flavor pool
+ * (registry_flavor_match: NULL/"" = base). */
 MmNode *registry_pick_host_node(Registry *r, const char *region, const char *brain_id, int cross_region,
-                                int authed, int64_t now_ms);
+                                int authed, int64_t now_ms, const char *flavor);
+
+/* ---- product flavor pools (shared/include/flavor.h; doc/backend.md "Flavor pools") */
+/* 1 when a lobby / node of flavor `have` ("" = base) belongs to the pool a client asked for with
+ * `want`: NULL / "" / "base" = the base game only; "all" / "*" = every flavor (dashboards); any other
+ * key = that flavor only (case-insensitive). */
+int registry_flavor_match(const char *have, const char *want);
+/* The flavor of a node: its hello's, else (a remote node) its lobbies'. "" = base. */
+const char *registry_node_flavor(const MmNode *n);
+/* The lobby is in that pool (lobby flavor, else its node's). */
+int registry_lobby_in_pool(const MmNode *n, const MmLobby *l, const char *want);
+/* registry_lobby_find limited to a flavor pool: another pool's lobby is "not found". */
+MmLobby *registry_lobby_find_pool(Registry *r, const char *id, const char *flavor, MmNode **node_out);
 
 /* Host a custom game (v3.1.1 game-socket "custom" / Host Game window): pick a
  * node (registry_pick_host_node), send it `host` (directly or through the
@@ -257,13 +280,17 @@ MmNode *registry_pick_host_node(Registry *r, const char *region, const char *bra
  * or an error name ("NoAvailableServers", "HostTimeout", ...). cb runs exactly
  * once, possibly synchronously; reply is borrowed for the call. Returns 0. */
 typedef void (*BrainHostCb)(void *ud, const char *err, const cJSON *reply);
+/* flavor: the host's product flavor pool (?flavor=, the requesting node's; NULL = base): a Strike
+ * game is only ever hosted on a Strike node and a Box Office one on a base node. */
 int brain_host_game(Brain *b, const char *region, const cJSON *config, int64_t account_id,
-                    const char *account_name, BrainHostCb cb, void *ud);
+                    const char *account_name, const char *flavor, BrainHostCb cb, void *ud);
 /* Players in every live lobby (/api/player-count). */
 int registry_player_count(Brain *b);
 
 /* JSON views (caller frees). */
-cJSON *registry_game_list(const Registry *r, int64_t now_ms, int *total_players); /* array of tuples */
+cJSON *registry_game_list(const Registry *r, int64_t now_ms, int *total_players); /* array of tuples, every flavor */
+/* The game list of one flavor pool (registry_flavor_match; NULL = base): /mm/game-list ?flavor=. */
+cJSON *registry_game_list_pool(const Registry *r, int64_t now_ms, const char *flavor, int *total_players);
 cJSON *registry_lobby_tuple(const Registry *r, const MmLobby *l, int64_t now_ms);  /* copy with live count */
 
 #endif

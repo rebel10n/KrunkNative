@@ -229,6 +229,9 @@ static cJSON *acc_lobby_tuple(void) {
     // the Krunker version this server plays ("v10", ruleset.h): the brain keeps quick join from
     // matching clients into lobbies of builds from before v10 was the only version
     cJSON_AddStringToObject(meta, "ruleset", ruleset_current()->key);
+    // the product flavor pool (flavor.h): the coordinator keeps Krunker Strike lobbies apart from
+    // Box Office ones (registry.c); omitted for base, so base tuples are unchanged
+    if (flavor_get() != FLAVOR_BASE) cJSON_AddStringToObject(meta, "flavor", flavor_current()->key);
     cJSON_AddStringToObject(meta, "build", kn_build_info()->describe);
     cJSON_AddStringToObject(meta, "commit", kn_build_info()->commit);
     cJSON_AddNumberToObject(meta, "commitTime", (double) kn_build_info()->commit_time);
@@ -306,6 +309,9 @@ static cJSON *acc_hello(void) {
     cJSON_AddStringToObject(hello, "buildTime", build->build_time);
     cJSON_AddStringToObject(hello, "protocol", kn_build_protocol());
     cJSON_AddStringToObject(hello, "ruleset", ruleset_current()->key);
+    // Krunker Strike node: the coordinator lists, seeks and hosts it in the Strike pool only
+    // (services/brain/registry.c); a base hello carries no flavor and stays as it was
+    if (flavor_get() != FLAVOR_BASE) cJSON_AddStringToObject(hello, "flavor", flavor_current()->key);
     cJSON_AddNumberToObject(hello, "maxPlayers", g_server->config.max_players);
     cJSON_AddBoolToObject(hello, "custom", g_gs_config.custom_games);
     cJSON_AddNumberToObject(hello, "maxLobbies", 1);

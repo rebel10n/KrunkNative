@@ -5,7 +5,7 @@ Ansible for the Krunker Box Office central node (`kru`) and the edge game server
 | playbook | hosts | what |
 | --- | --- | --- |
 | `central.yml` | `kru` | user `kn`, OpenResty 127.0.0.1:8081 (static web build), kn_brain finder :8082 + auth/community :8083, PostgreSQL 127.0.0.1:5434 + Redis 127.0.0.1:6380 for kn_brain (see [Database cutover](#database-cutover-postgresql--redis-on-kru)), net-bridge :8084 (`play.krunk.io`), WebRTC gateway :8085 + udp 21100 (`play.krunk.io/rtc`), edge origin (host nginx :443 vhost + OpenResty 127.0.0.1:8086, off until `kn_edge_origin_enabled`), download host `dl.krunk.io` (host nginx :80/:443 + Let's Encrypt + OpenResty 127.0.0.1:8087, off until `kn_dl_origin_enabled`), `/opt/krunknative` clone |
-| `edges.yml` | `edges` | host firewall drop-in (game ports), user `kn`, `server_bin` x (vcpus-1, min 1), `<edge>-<n>.krunk.io` DNS |
+| `edges.yml` | `edges` | host firewall drop-in (game ports), user `kn`, `server_bin` x (vcpus-1, min 1), Krunker Strike `server_bin --flavor strike` x (1, 2 with 8+ vcpus; see [Krunker Strike servers](#krunker-strike-servers)), `<edge>-<n>.krunk.io` DNS |
 | `firewall.yml` | `edges` | only the host firewall (vendored `edge_firewall` role), see [Edge firewall](#edge-firewall) |
 | `fail2ban.yml` | `kru`, `edges` | only fail2ban (vendored `fail2ban` role; base on kru, drop-ins on the edges), see [fail2ban](#fail2ban) |
 | `site.yml` | all | both |
@@ -389,6 +389,39 @@ The edges see WebRTC players as kru's address, as with the bridge (forwarded add
 trusted from loopback only). Phase 2, a gateway on each edge, removes both that and the extra
 hop (doc/transport.md).
 
+## Krunker Strike servers
+
+Every edge also runs official Krunker Strike lobbies (role `kn_gameserver`, `tasks/strike.yml`),
+next to the Box Office instances, whose units, `server-<n>.cfg` and ports stay exactly as they
+were (`deploy/ansible/tests/render_test.py` renders both). Each is `server_bin --headless --no-cli
+--flavor strike --cfg /etc/krunknative/strike-<n>.cfg` (unit `kn-strike@<n>`), playing the Strike
+rotation over FRVR's pool maps (`assets/maps/strike/`, shipped with `assets/maps`), linked to the
+same coordinator (`wss://coordinator.krunk.io/mm/internal/ws`, the same secrets) and heartbeating to
+the same finder. The coordinator keeps it in the Strike flavor pool (doc/backend.md "Flavor pools"):
+the Strike app seeks, lists and joins only these, Box Office never sees them.
+
+| | Box Office (unchanged) | Krunker Strike |
+| --- | --- | --- |
+| count | vcpus - 1 (min 1) | `kn_strike_count`: 2 with 8+ vcpus, else 1 (group_vars/edges), fewer when memory is short (below) |
+| port (tcp game + udp knet / query) | 21015 + n - 1 | `kn_strike_first_port` 21115 + n - 1 (group_vars/all, span `kn_strike_port_span` 4) |
+| node id / name | `CHITOWN2`, `Krunker Box Office Chitown #2` | `CHITOWNSTRIKE1`, `Krunker Strike Chitown #1` |
+| public host | `<edge>-<n>.krunk.io` | `<edge>-1.krunk.io` (the existing A record: no DNS change) |
+| lobby | 8, Krunker's rotation, bots to 8 | 10 (Strike's cap), the Strike rotation, bots to 10 |
+| unit limits | CPUWeight 80 | CPUWeight 50, MemoryHigh 192M, MemoryMax 256M, no swap |
+| state / stop reason | `gs-<n>`, `gameserver-stop-reason` | `strike-<n>`, `strike-stop-reason` |
+| restart handler | `Restart game servers` | `Restart Strike servers` (same drain, `kn_gameserver_drain_timeout`) |
+
+Memory budget per host (`kn_strike_memory_*`, `kn_gameserver_memory_estimate_mb`): a Strike
+instance starts only while `1024 (OS + abulxt's relays) + Box Office count x 160 + Strike count x
+256 <= MemTotal`; the play prints `Strike instance plan` with the numbers, and a host that cannot
+hold its planned count starts fewer (none: the firewall still opens 21115, nothing listens). An idle
+server_bin is ~100 MB RSS on one map; the 256 MB cap is a hard limit (systemd kills and restarts
+that instance), so a Strike lobby can never take memory from the Box Office servers. Off switch:
+`kn_strike_enabled: false` (group_vars/edges; the units are stopped and their configs removed, like
+stale Box Office instances). net-bridge allows `<edge>-1.krunk.io` and the edge IP on 21115-21118
+for the web Strike app (`kn_bridge_strike`). Deploy edges checks `<edge>-1.krunk.io:21115` after
+the Box Office health check and only warns when it does not answer as a Strike server.
+
 ## Edge firewall
 
 The edges run abulxt's OpenResty relays and Krunker Box Office's game servers, so their host
@@ -421,10 +454,12 @@ and their full edge play with tag `firewall`), with all inputs in group_vars, th
 - `edge_firewall_manage` (role off when false), `edge_firewall_ssh_port`,
   `edge_firewall_rollback_seconds`.
 
-This repo: the drop-in's range is `kn_gameserver_port_range`, derived from
+This repo: the drop-in's ranges are `kn_gameserver_port_range`, derived from
 `kn_gameserver_first_port` / `kn_gameserver_count` in the same file, which `kn_gameserver`
 also uses, so the open range always matches the instances (today clara/chitown/ashburn
-21015-21017, angeles 21015-21025). Verify with `nc -zv <ip> 21015` / `nc -zuv <ip> 21015`.
+21015-21017, angeles 21015-21025), then `kn_strike_port_range` for the Krunker Strike
+instances (21115, angeles 21115-21116). Verify with `nc -zv <ip> 21015` / `nc -zuv <ip> 21015`
+(and 21115).
 
 Safe apply (`roles/edge_firewall/tasks/apply.yml`), only when a rendered file changed: the files are
 tarred to `/etc/nftables.rollback.tgz` before rendering; `nft -c -f /etc/nftables.conf` (on

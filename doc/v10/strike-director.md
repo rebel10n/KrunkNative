@@ -17,6 +17,20 @@ game server plus a signed ticket that the game server checks.
 | server gate | `server/src/director_gate.c`, hooks in `server/src/accounts.c` | verifies the JOIN's `client_key`; private-lobby codes; the `private` server-info tag |
 | client | `client/src/net/strike_director.c`, `client/src/ui/servers_ui.c` | a Strike client seeks through the director, falls back to the finder's Strike pool |
 
+## One coordinator (production)
+
+Krunker Strike runs through **the same coordinator as Krunker Box Office** (kn_brain at
+`coordinator.krunk.io`): same accounts, same seek / game list / host routes, each app in its own
+flavor pool (doc/backend.md "Flavor pools"), so the apps share accounts but never a lobby. The
+coordinator's join tickets (doc/backend.md 5.3, signed with `brain.join_secret`, checked by the
+game server through its coordinator link) are the Strike admission there, so the director's own
+tickets add nothing on that path. The official Strike servers (deploy/ansible/README.md "Krunker
+Strike servers") link to the coordinator and set no `director_secret`. **The director is not
+deployed**: it stays the matchmaker for a Strike network without a kn_brain (LAN, self-hosting),
+and a Strike client uses it only when no coordinator is configured or reachable (`servers_ui.c`
+`strike_via_director`). With a coordinator, the Join window's private codes are not offered;
+private games are the coordinator's hosted games and game links (`?game=`), in the Strike pool.
+
 Only servers whose **verified** KNINFO reply says `"flavor":"strike"` are handed out. A base server
 may heartbeat to a director; it is polled and verified, then never given a player.
 
@@ -137,7 +151,8 @@ director's. Admitted players are guests (Strike accounts are S5's).
 
 ## Client
 
-A Strike client (`flavor_get() == FLAVOR_STRIKE`) with a director URL seeks through it: native
+A Strike client (`flavor_get() == FLAVOR_STRIKE`) with a director URL and no coordinator seeks
+through it: native
 `KRUNKNATIVE_STRIKE_DIRECTOR`, web `?director=`, else the `knStrikeDirector` storage key. Without a
 brain this is the startup matchmaking too (`backend_startup.c`: the transport starts once the
 director answers). On failure other than `GameVersionTooOld` / `LobbyNotFound` / `GameFull`, it falls
@@ -169,9 +184,10 @@ the web build goes through net-bridge as for any server.
 Game server (`server.cfg` or `gameserver.*`): `flavor strike`, `finder_url http://<director>`,
 `director_secret <secret>`, optionally `director_require_ticket true`, `region <id>`.
 
-## Deploy note (not deployed; no ansible / prod changes)
+## Deploy note (the director is not deployed)
 
-Krunker Strike is off prod until the coordinator says otherwise. When it goes on:
+Production Strike goes through the coordinator (above, "One coordinator"). A self-hosted Strike
+network without a kn_brain would run the director like this:
 
 1. Build `kn_strike_director` (`make` builds it with the services; OpenSSL only, no libpq).
 2. One director per region behind TLS (e.g. `strike-director.<region>.krunk.io` -> `127.0.0.1:8095`),

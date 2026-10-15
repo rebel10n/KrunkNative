@@ -1,0 +1,60 @@
+# {{ ansible_managed }} (deploy/ansible role kn_gameserver)
+# Krunker Strike official server instance %i: {{ kn_etc_dir }}/strike-%i.cfg (tasks/strike.yml).
+[Unit]
+Description=KrunkNative Krunker Strike server %i
+After=network-online.target
+Wants=network-online.target
+PartOf=krunknative.target
+
+[Service]
+Type=simple
+User={{ kn_user }}
+Group={{ kn_group }}
+# server_bin resolves ./assets (maps) relative to the working directory.
+WorkingDirectory={{ kn_svc_current }}
+ExecStart={{ kn_svc_current }}/bin/server_bin --headless --no-cli --flavor strike --cfg {{ kn_etc_dir }}/strike-%i.cfg
+# SIGTERM: drain the round (shutdown_grace = kn_gameserver_drain_timeout), finder shutdown
+# heartbeat, exit. The stop timeout leaves room for the drain.
+KillSignal=SIGTERM
+TimeoutStopSec={{ (kn_gameserver_drain_timeout | int) + 30 }}
+Restart=always
+RestartSec=3
+LimitNOFILE=65536
+StateDirectory=krunknative/strike-%i
+LogsDirectory=krunknative
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0027
+ReadOnlyPaths={{ kn_svc_base }} {{ kn_etc_dir }}
+# Below the Box Office units (CPUWeight 80): under contention they win. Memory: capped
+# (defaults kn_strike_memory_*), so a Strike instance can never take the Box Office servers' memory.
+CPUWeight={{ kn_strike_cpu_weight }}
+MemoryHigh={{ kn_strike_memory_high_mb }}M
+MemoryMax={{ kn_strike_memory_max_mb }}M
+MemorySwapMax=0
+Nice=0
+
+[Install]
+WantedBy=krunknative.target

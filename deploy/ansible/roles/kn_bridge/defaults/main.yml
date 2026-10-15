@@ -25,6 +25,11 @@ kn_bridge_node_dir: "{{ kn_bridge_node_root }}/node-v{{ kn_bridge_node_version }
 kn_bridge_target_port_lo: 21015
 kn_bridge_target_port_hi: 21025
 kn_bridge_edge_hosts: "{{ groups['edges'] | default([]) }}"
+# Krunker Strike servers on the edges (role kn_gameserver tasks/strike.yml): the web Strike app
+# reaches them at <edge>-1.krunk.io / the edge IP on kn_strike_first_port .. +kn_strike_port_span-1
+# (group_vars/all.yml). false = Box Office targets only.
+kn_bridge_strike: "{{ kn_strike_port_span | default(0) | int > 0 }}"
+kn_bridge_strike_ports: "{{ kn_strike_first_port | default(21115) }}-{{ (kn_strike_first_port | default(21115) | int) + (kn_strike_port_span | default(1) | int) - 1 }}"
 
 # Abuse limits (webBridge.ts). Cloudflare closes idle WebSockets after 100 s: the bridge
 # pings every 30 s; a session with no game byte either way for 90 s is closed.

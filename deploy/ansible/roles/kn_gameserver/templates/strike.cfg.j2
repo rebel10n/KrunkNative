@@ -1,0 +1,44 @@
+// {{ ansible_managed }} (deploy/ansible role kn_gameserver, tasks/strike.yml)
+// Krunker Strike official server instance {{ n }} of {{ kn_strike_run }} on {{ inventory_hostname }}:
+// server_bin --flavor strike, linked to the same coordinator as the Box Office instances and
+// listed / sought / hosted in its Strike flavor pool only (doc/backend.md "Flavor pools").
+hostname        "{{ kn_strike_name_prefix }} #{{ n }}"
+region          "{{ kn_gameserver_region }}"
+node_id         "{{ kn_strike_node_id_fmt | format(n) }}"
+flavor          strike
+port            {{ kn_strike_first_port + n - 1 }}
+query_port      0
+listen_host     "{{ kn_gameserver_listen_host }}"
+public_host     "{{ kn_strike_hostname }}"
+max_players     {{ kn_strike_max_players }}
+{% if kn_strike_modes %}
+// The Strike rotation ("rotation" under the Strike flavor: the modes its menu offers, over
+// FRVR's pool maps); each round end offers vote cards, no votes = a random card.
+modes           {{ kn_strike_modes | join(',') if (kn_strike_modes is iterable and kn_strike_modes is not string) else kn_strike_modes }}
+{% endif %}
+{% set kn_st_bots = kn_strike_bot_quota | int if kn_gameserver_bots_enabled | bool else 0 %}
+{% if kn_st_bots > 0 %}
+bot_quota       {{ [kn_st_bots, 16] | min }}
+bot_quota_grace {{ kn_gameserver_bot_quota_grace }}
+bot_difficulty  {{ kn_gameserver_bot_difficulty }}
+{% endif %}
+{% if kn_gameserver_billboard %}
+billboard       "{{ kn_gameserver_billboard }}"
+{% endif %}
+// Accounts verified (the coordinator's tickets: the same kn accounts as Box Office), guests welcome.
+online_mode     {{ 1 if kn_gameserver_online_mode | bool else 0 }}
+auth_url        "{{ kn_gameserver_auth_url }}"
+// The finder lists it with flavor "strike" (a Box Office listing never shows it).
+finder_url      "{{ kn_gameserver_finder_url }}"
+rcon_port       0
+// Writable: StateDirectory=krunknative/strike-%i of the unit.
+bans_file       "{{ kn_state_dir }}/strike-{{ n }}/bans.json"
+shutdown_reason_file "{{ kn_strike_stop_reason_file }}"
+shutdown_grace  {{ kn_gameserver_drain_timeout }}
+// Coordinator link: the same wss:// coordinator and secrets as the Box Office instances.
+{% set kn_st_link = kn_gameserver_coordinator_url %}
+coordinator_url "{{ kn_st_link }}"
+{% if kn_st_link %}
+coordinator_secret "{{ kn_gs_internal_secret }}"
+join_secret     "{{ kn_gs_join_secret or kn_gs_internal_secret }}"
+{% endif %}

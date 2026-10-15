@@ -249,6 +249,13 @@ if (TARGET ${SERVER_BINARY} OR TARGET server_bin)
             COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/mm_fill_e2e.py ${CMAKE_BINARY_DIR}
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
         set_tests_properties(brain_mm_fill_e2e PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
+        # strike-backend: one coordinator for both apps (doc/backend.md "Flavor pools"): a Krunker
+        # Strike and a base server_bin on one brain; seeks, lists and joins per flavor, both clients
+        # headless (skips 77 without a database; the client cases without client_bin / fonts)
+        add_test(NAME brain_strike_coordinator_e2e
+            COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_SOURCE_DIR}/server/tests/strike_coordinator_e2e.py ${CMAKE_BINARY_DIR}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+        set_tests_properties(brain_strike_coordinator_e2e PROPERTIES TIMEOUT 400 SKIP_RETURN_CODE 77 LABELS "brain;db;e2e")
         # shutdown-msg: server_bin's shutdown ERROR (SIGTERM / reason file "update" / quit restart)
         # and headless client_bin rejoining a restarted node with a fresh join ticket, also after
         # "Join key expired" (skips 77 without a database or client_bin)
