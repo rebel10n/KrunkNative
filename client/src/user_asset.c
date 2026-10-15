@@ -59,6 +59,8 @@ static unsigned int user_asset_texture(const UserAssetFlags *flags, const char *
     if (f) {
         fclose(f);
         texture = load_texture(path);
+    } else if (asset_prefetch(path) == 0) {
+        texture = load_texture(path); // still downloading (asset_fetch.h): its placeholder, filled when it arrives
     }
     free(path);
     return texture;

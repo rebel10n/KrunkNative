@@ -320,6 +320,9 @@ int mod_pack_load(const char *url) {
     }
     unsigned char *zip = NULL;
     size_t size = 0;
+    // natively a pack the asset tree lacks is downloaded from the user-asset host (asset_fetch.h)
+    const char *const wait[] = {zip_path};
+    asset_prefetch_wait(wait, 1);
     const int read_error = read_file(zip_path, &zip, &size);
     if (read_error || !zip) {
         printf("[mod] %s: cannot read %s\n", url, zip_path);

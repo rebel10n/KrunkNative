@@ -97,6 +97,8 @@ set(KN_BRAIN_SOURCES
     streams.c
     streams_norm.c
     stream_thumbs.c                 # the Live Streams cards' Twitch previews: GET /streams/thumb (allow-listed, capped, cached)
+    user_assets.c                   # GET /api/user-assets/<id>/<file>: Krunker's user-asset host, mirrored + cached
+    ../../shared/src/user_asset_path.c # the user-asset paths and content rules (shared with the client's fetch)
     ../../shared/src/youtube_link.c # map YouTube video ids (creations.c: uploadM stores the id)
     ../../shared/src/ai_proto.c
     # profile pictures (0123_account_avatars): intake (PNG / JPEG / WebP, libwebp encode), the
@@ -373,6 +375,11 @@ if (Python3_FOUND)
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/streams_test.py
                 $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
     set_tests_properties(brain_streams_e2e PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
+    # the clients' mirror of Krunker's user-asset host: /api/user-assets/<id>/<file> against a stub host
+    add_test(NAME brain_user_assets_e2e
+        COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/user_assets_test.py
+                $<TARGET_FILE:kn_brain> ${CMAKE_SOURCE_DIR})
+    set_tests_properties(brain_user_assets_e2e PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77 LABELS "knsvc;brain;db")
     # the same panel in the web client (headless Chromium on KN_WEB_DIST = a `make web` dist dir; else skips 77)
     add_test(NAME brain_ai_web_e2e
         COMMAND ${Python3_EXECUTABLE} -I ${CMAKE_CURRENT_SOURCE_DIR}/tests/ai_web_e2e.py ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR})

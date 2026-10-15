@@ -167,11 +167,15 @@ static void sky_build_geometry(void) {
 static unsigned int sky_texture(const char *relative) {
     char *path = concat(assets_path(), relative);
     if (!path) return 0;
+    const char *const wait[] = {path};
+    asset_prefetch_wait(wait, 1); // natively: a user asset being downloaded (asset_fetch.h)
     FILE *f = ensure_asset_file(path) ? fopen(path, "rb") : NULL;
     unsigned int texture = 0;
     if (f) {
         fclose(f);
         texture = load_texture(path); // cached by path; owned by the texture cache
+    } else if (asset_prefetch(path) == 0) {
+        texture = load_texture(path); // still downloading: its placeholder, filled when it arrives
     }
     free(path);
     return texture;

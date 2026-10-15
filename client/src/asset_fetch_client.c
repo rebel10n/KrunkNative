@@ -36,6 +36,10 @@ void asset_fetch_client_init(void) {
         .allow_checkout = env_flag("KRUNKNATIVE_ASSET_FETCH_CHECKOUT", 0),
         // only a launcher-managed content dir (its content manifest) unless forced
         .require_manifest = !env_flag("KRUNKNATIVE_ASSET_FETCH", 0),
+        // community maps' user assets (textures, models, sounds, resource packs Krunker hosts):
+        // always, even in a dev tree, unless KRUNKNATIVE_USER_ASSETS=0
+        .user_assets = env_flag("KRUNKNATIVE_USER_ASSETS", 1),
+        .user_asset_origins = getenv("KRUNKNATIVE_USER_ASSET_ORIGINS"),
     };
     char why[4096 + 128] = "";
     if (!asset_fetch_start(&cfg, why, sizeof(why))) {
@@ -45,7 +49,12 @@ void asset_fetch_client_init(void) {
     }
     AssetFetchStats st;
     asset_fetch_stats(&st);
-    printf("[assets] on-demand fetch for %s (%s)\n", dir, st.has_manifest ? "content manifest" : "no manifest: any missing file");
+    if (st.user_assets_only) {
+        if (mode || cfg.origins) fprintf(stderr, "[assets] on-demand fetch off: %s (user assets only)\n", why);
+        printf("[assets] user assets fetched on demand into %suser-assets/\n", dir);
+    } else {
+        printf("[assets] on-demand fetch for %s (%s)\n", dir, st.has_manifest ? "content manifest" : "no manifest: any missing file");
+    }
     asset_set_fetch_hook(fetch_hook);
 }
 

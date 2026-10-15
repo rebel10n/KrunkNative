@@ -71,6 +71,74 @@ make assets-import-live      # installs the new live_assets_v10.lock files into 
 cd deploy/ansible && ansible-playbook central.yml --tags web_assets   # assets/ -> kru, re-index
 ```
 
+## Community maps' user assets (2026-10-15)
+
+Report: "missing textures / the purple-black box thingy in custom maps". The box is render.js's
+`missingTexture` checker (`client/src/prefab.c` `prefab_missing_texture`), drawn for a texture that
+does not load.
+
+Sample: 109 maps rendered headless, each from its first spawn (4 directions) and from above: the 46
+official maps Krunker serves today (`assets/maps/official/`), the bundled community maps
+(`assets/maps/custom/`), every map of the v7.1.4 tree and the v7.1.9 viewer's `custom_maps/`, the
+v3.1.1 custom maps, and Zombie_Bulwark (Keybi, 10.7 M plays: a live custom game's map from the
+client's Krunker map cache). gapi has no public endpoint for a community map's data
+(`/maps/by-name/<name>` is metadata only; custom games send it inline), so live custom maps come
+only from games joined; the brain has no player-published map yet. Placeholder pixels are counted
+by rendering each view twice, the second time with the checker painted one flat colour
+(`KRUNKNATIVE_MISSING_TEXTURE=00ffff`), and counting the pixels only that run has in it; every
+failed open under the asset dir is logged (`misslog.c`, as above).
+
+Findings:
+
+- Every texture of Krunker's map texture table (`t`, `tv` variants) is in the asset tree: no map
+  misses a `textures/<src>.png`.
+- Every placeholder and every invisible object came from **Krunker user assets** the tree never
+  had: `user-assets/<id>/texture.png` (`at` textures) and `model.obj` + `model.png` / `model.gltf` /
+  `model.glb` (`aid` models; a missing model is not a checker, the object is just absent), a
+  resource pack (`md43867/mod.zip`) and a sound. 220 files of 171 asset ids in 8 maps: Zombie_Bulwark
+  (37), Khepri (44), Bastion (59), Piazza (11), Eterno Simulator (7), Vivo (5), Laboratory (2),
+  Tortuga (1), plus their model textures.
+- Cause: nothing fetched them. Natively the on-demand fetch only knew the launcher's content
+  manifest (and is off in a dev tree); the web asks the asset host, which has only the 397 imported
+  v7 assets. `user-assets.krunker.io` itself answers 403 (Cloudflare) to some networks, the dev
+  machine's among them, and sends no CORS headers, so a page on krunk.io cannot read it.
+- Formats: all 139 textures are real PNGs (no WebP, no JPEG); the GLTF / GLB models embed PNG
+  images (two use `EXT_meshopt_compression` / `KHR_texture_transform`, both supported). Nothing to
+  convert.
+- Krunker still serves every one of the 220 files. The only 404s are the optional companion maps
+  (`model_e.png` / `model_l.png`) of assets whose flags do not ask for them; nothing in the sample
+  is gone from Krunker's host.
+
+| map | placeholder pixels before | after |
+| --- | --- | --- |
+| Eterno Simulator (39) | 21,257 | 0 |
+| Khepri (35) | 13,263 | 0 |
+| Zombie_Bulwark | 2,817 | 0 |
+| Bastion (43) | 2,681 | 0 |
+| the other 105 | 0 | 0 |
+
+Fix: user assets are fetched on demand like game content.
+
+- Native (`client/src/net/asset_fetch.c`, `KRUNKNATIVE_USER_ASSETS`, `_USER_ASSET_ORIGINS`): a path
+  of `shared/include/user_asset_path.h` that the content set lacks comes from Krunker's host, then
+  the brain's mirror (`https://coordinator.krunk.io/api/user-assets/`), into
+  `<assets>/user-assets/<id>/`; also in a dev tree or without a manifest (user-assets/ is
+  git-ignored). A 403 takes an origin out for 5 minutes; an HTML page answered 200 is refused. The
+  map's load-time prefetch (`prefab.c`) now runs natively too and waits for them (at most
+  `KRUNKNATIVE_ASSET_WAIT_MS`, 10 s), so models (GLTF too) are built with their files; textures that
+  arrive later pop in. Sky, minimap image and resource pack wait the same way.
+- Web (`shared/src/utils.c`): a user asset the asset origins lack comes from the brain's mirror
+  (`<brain or this origin>/api/user-assets/<id>/<file>`; krunk.io's openresty sends `/api/` to the
+  brain).
+- Brain (`services/brain/user_assets.c`): `GET /api/user-assets/<id>/<file>` answers from the asset
+  tree, its cache (`user_assets.cache_dir`, on kru `/var/lib/krunknative/user-assets`), else
+  Krunker's host (`user_assets.proxy` / `KN_USER_ASSETS_PROXY` when kru's network is refused).
+
+Tests: `client/tests/user_assets_e2e.py` (`make user-assets-test`: the fixture map
+`client/tests/data/user_assets_map.json` from stub hosts), `asset_fetch_test` (user assets),
+`services/brain/tests/user_assets_test.py` (ctest `brain_user_assets_e2e`). Nothing is vendored:
+the files are fetched at run time, not committed.
+
 ## Re-running the audit
 
 ```sh

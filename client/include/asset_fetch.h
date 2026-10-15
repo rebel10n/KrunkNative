@@ -14,7 +14,9 @@
 // launcher/include/kn_assets.h) exactly the paths it lists; without one (a dev tree, a test fixture)
 // the fetch is off unless forced (require_manifest 0), then every safe path below the dir.
 // Never writes inside a git checkout (kn_install_dir_in_checkout, per target directory, symlinks
-// resolved) unless allow_checkout.
+// resolved) unless allow_checkout. Plus, with user_assets: Krunker user assets outside the content
+// set (community maps' textures / models / sounds / resource packs), from their own origins, also
+// in a dev tree (user-assets/ is git-ignored).
 //
 // Origins (by path: <url><rel>; "objects:<url>" = content-addressed <url><aa>/<sha256>, manifest
 // files only; "only=P+P@<url>" / "skip=P+P@<url>" = by path, only the paths below the prefixes P /
@@ -33,13 +35,19 @@
 #define ASSET_FETCH_ATTEMPTS 4         // rounds over the origins before a file is given up
 #define ASSET_FETCH_BACKOFF_MS 1000    // before round r: ASSET_FETCH_BACKOFF_MS << (r - 1)
 #define ASSET_FETCH_ORIGIN_DOWN_MS 30000 // at most this long out after transport failures
-#define ASSET_FETCH_MAX_ORIGINS 6
+#define ASSET_FETCH_ORIGIN_REFUSED_MS 300000 // out this long after a 401 / 403 / 429
+#define ASSET_FETCH_MAX_ORIGINS 8
 #define ASSET_FETCH_MAX_ENTRIES 8192   // distinct paths per session
 #define ASSET_FETCH_MAX_BYTES ((int64_t) 512 << 20) // a file without a manifest size
 // Without the launcher's list (KRUNKNATIVE_ASSET_ORIGINS): the Pages CDN's default project (it
 // 301s the other project's directories, kn_http follows that), then kru's whole tree
 // (launcher/include/kn_assets.h KN_ASSETS_DEFAULT_MIRROR, _ORIGIN; the web's kn-config.json).
 #define ASSET_FETCH_DEFAULT_ORIGINS "https://assets.krunk.io/assets/ https://dl.krunk.io/assets/"
+// Krunker user assets (shared/include/user_asset_path.h: user-assets/<id>/<file> a community map
+// names, outside the content set): Krunker's user-asset host (what Krunker's own client loads),
+// then the brain's mirror of it (services/brain/user_assets.c: it answers networks Cloudflare
+// turns away from krunker.io, and caches what it fetched). <url><id>/<file>.
+#define ASSET_FETCH_USER_ASSET_ORIGINS "https://user-assets.krunker.io/ https://coordinator.krunk.io/api/user-assets/"
 
 // The transport (tests): kn_http_get's contract. NULL = kn_http (POSIX sockets + OpenSSL, WinHTTP).
 typedef int (*AssetFetchGetFn)(void *user, const char *url, KnHttpSink *sink, char *err, size_t errn);
@@ -50,6 +58,13 @@ typedef struct {
     int workers;             // 0 = ASSET_FETCH_WORKERS_DEFAULT
     int allow_checkout;      // write into a git checkout's files anyway
     int require_manifest;    // off without <assets>/.kn-assets.json
+    // 1: Krunker user assets (user_asset_tree_rel_ok) that the content set does not list are fetched
+    // from user_asset_origins (NULL or "" = ASSET_FETCH_USER_ASSET_ORIGINS) and written below
+    // <assets>/user-assets/; where the content fetch is off (a git checkout, no manifest though one
+    // is required) the fetch still runs for them alone. Size-capped (user_asset_max_bytes) and
+    // checked (user_asset_content_ok) instead of a manifest's sha256.
+    int user_assets;
+    const char *user_asset_origins;
     int backoff_ms;          // 0 = ASSET_FETCH_BACKOFF_MS
     int timeout_ms;          // per request, 0 = 20000
     AssetFetchGetFn get;     // tests
@@ -78,12 +93,14 @@ typedef struct {
     size_t requests;    // HTTP requests
     size_t pending;     // queued + downloading + waiting now
     int has_manifest;
+    int user_assets_only; // the content fetch is off: only user assets are fetched
 } AssetFetchStats;
 void asset_fetch_stats(AssetFetchStats *out);
 
 // Client glue (client/src/asset_fetch_client.c, native only): reads KRUNKNATIVE_ASSET_FETCH (0 off,
 // 1 also without a content manifest), KRUNKNATIVE_ASSET_ORIGINS, KRUNKNATIVE_ASSET_FETCH_CHECKOUT
-// (1: allow a git checkout's assets/) and starts the fetch for assets_path(), installing the hook.
+// (1: allow a git checkout's assets/), KRUNKNATIVE_USER_ASSETS (0: no user-asset fetch),
+// KRUNKNATIVE_USER_ASSET_ORIGINS and starts the fetch for assets_path(), installing the hook.
 void asset_fetch_client_init(void);
 void asset_fetch_client_frame(void);    // once per frame: arrived files reach the loaders
 void asset_fetch_client_shutdown(void);

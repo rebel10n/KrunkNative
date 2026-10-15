@@ -3646,7 +3646,8 @@ char *asset_url(const char*);
 // download failed (ensure_asset_file() reports it). Native: the fetch hook's answer (1 without one).
 int asset_prefetch(const char*);
 // web: asset_prefetch() every path (full paths under assets_path()) and wait until all have
-// arrived or failed, so a load step pays one round trip instead of one per file. Native: no-op.
+// arrived or failed, so a load step pays one round trip instead of one per file. Native: the fetch
+// hook's downloads of those paths are waited for (KRUNKNATIVE_ASSET_WAIT_MS, default 10 s in all).
 void asset_prefetch_wait(const char *const *paths, size_t count);
 // Called with the path wherever an asset load may yield to the browser on the web (a blocking
 // ensure_asset_file() fetch, asset_prefetch_wait()), before it does; natively at every

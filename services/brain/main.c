@@ -26,6 +26,7 @@
 #include "releases.h"
 #include "ai.h"
 #include "streams.h"
+#include "user_assets.h"
 #include "avatar.h"
 #include "strike_econ.h"
 #include "build_info.h"
@@ -74,6 +75,7 @@ static const BrainModule k_brain_modules[] = {
     {"avatar", avatar_init, avatar_shutdown}, /* profile pictures: upload, AI review, serving (avatar.c) */
     {"stream-thumbs", stream_thumbs_init, stream_thumbs_shutdown}, /* the cards' previews: /streams/thumb */
     {"strike-econ", strike_econ_init, strike_econ_shutdown}, /* Krunker Strike's economy (strike_econ.h) */
+    {"user-assets", user_assets_init, user_assets_shutdown}, /* community maps' Krunker user assets (user_assets.c) */
 };
 #define BRAIN_MODULE_COUNT (sizeof(k_brain_modules) / sizeof(k_brain_modules[0]))
 

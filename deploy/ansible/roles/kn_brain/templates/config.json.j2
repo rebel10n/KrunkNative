@@ -16,6 +16,10 @@
     "_comment_store_season": "config.currentSeason of the store table / prize wheels (accounts.store_season, services/brain/store.c): the season their unseasoned items roll. 10 for Krunker v10.0.2.",
     "email": { "require_verified": {{ kn_brain_email_require_verified | to_json }} }
   },
+  "user_assets": {
+    "_comment": "GET /api/user-assets/<id>/<file> (services/brain/user_assets.c): the clients' mirror of Krunker's user-asset host for community maps. The cache lives in the state dir (the release is read-only and replaced). A network Krunker's CDN refuses: KN_USER_ASSETS_PROXY in {{ kn_etc_dir }}/secrets.env.",
+    "cache_dir": "{{ kn_state_dir }}/user-assets"
+  },
   "ai": {
     "_comment": "The map editor's AI (services/brain/ai.h). The upstream URL + key: {{ kn_etc_dir }}/ai.env. Web search: role kn_ai_search.",
     "search": { "command": {{ (kn_ai_search_command | default('')) | to_json }} }

@@ -1,4 +1,5 @@
 #include <shared.h>
+#include <user_asset_path.h> // web: a user asset's mirror URL
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -6,7 +7,9 @@
 
 #ifdef WIN32
 #include <direct.h>
+__declspec(dllimport) void __stdcall Sleep(unsigned long ms); // asset_prefetch_wait (no windows.h here)
 #else
+#include <time.h>
 #include <unistd.h>
 #endif
 
@@ -137,6 +140,29 @@ static char *web_asset_url(const char *path) {
     return web_asset_url_at(path, 0);
 }
 
+// A Krunker user asset ("/assets/user-assets/<id>/<file>", user_asset_path.h) the asset origins do
+// not have (a community map's texture / model): the brain's mirror of Krunker's user-asset host,
+// <Module.krunkNativeUserAssetBase>, else <Module.krunkNativeBrainUrl or this origin>/api/user-assets/,
+// + "<id>/<file>" (services/brain/user_assets.c). user-assets.krunker.io itself sends no CORS
+// headers, so the page cannot read it. NULL for any other path. malloc'd.
+EM_JS(char *, web_user_asset_url_js, (const char *rel_ptr), {
+    var rel = UTF8ToString(rel_ptr);
+    var base = Module.krunkNativeUserAssetBase;
+    if (!base) { // no backslash in EM_JS: the preprocessor's stringification would eat it
+        base = Module.krunkNativeBrainUrl || '';
+        while (base.charAt(base.length - 1) === '/') base = base.substring(0, base.length - 1);
+        base += '/api/user-assets/';
+    }
+    return stringToNewUTF8(base + rel);
+});
+
+static char *web_user_asset_url(const char *path) {
+    const char *rel = path && path[0] == '/' ? path + 1 : path;
+    if (rel && !strncmp(rel, "assets/", 7)) rel += 7;
+    if (!user_asset_tree_rel_ok(rel)) return NULL;
+    return web_user_asset_url_js(rel + sizeof(USER_ASSET_DIR) - 1);
+}
+
 char *asset_url(const char *path) {
     return path ? web_asset_url(path) : NULL;
 }
@@ -172,6 +198,16 @@ int ensure_asset_file(const char *path) {
         emscripten_wget_data(url, &data, &size, &error);
         if (!error && data) fprintf(stderr, "asset %s: loaded from the fallback origin\n", path);
     }
+    char *mirror = error || !data ? web_user_asset_url(path) : NULL;
+    if (mirror) { // a community map's user asset: the brain's mirror of Krunker's host
+        free(data);
+        data = NULL;
+        error = 0;
+        free(url);
+        url = mirror;
+        emscripten_wget_data(url, &data, &size, &error);
+        if (!error && data && !user_asset_content_ok(path, data, (size_t) size)) error = 1; // a block / error page
+    }
 
     if (error || !data) {
         fprintf(stderr, "failed to fetch asset %s (HTTP error or missing file)\n", url);
@@ -205,8 +241,9 @@ int ensure_asset_file(const char *path) {
 }
 
 // Background download straight into MEMFS (no call back into wasm, so nothing runs while
-// an ASYNCIFY fetch is suspended). The page keeps the in-flight / failed sets.
-EM_JS(int, web_asset_prefetch, (const char *path_ptr), {
+// an ASYNCIFY fetch is suspended). The page keeps the in-flight / failed sets. mirror_ptr: a user
+// asset's mirror URL (web_user_asset_url), tried last; NULL for other paths.
+EM_JS(int, web_asset_prefetch, (const char *path_ptr, const char *mirror_ptr), {
     var path = UTF8ToString(path_ptr);
     try { if (FS.analyzePath(path).exists) return 1; } catch (e) { return -1; }
     var state = Module.knPrefetch || (Module.knPrefetch = {pending: {}, failed: {}});
@@ -225,9 +262,23 @@ EM_JS(int, web_asset_prefetch, (const char *path_ptr), {
         });
     }
     // the second asset origin when the first fails (web_asset_url_at)
+    var mirror = mirror_ptr ? UTF8ToString(mirror_ptr) : '';
     get(primary).catch(function (e) {
         if (!Module.krunkNativeAssetFallback) throw e;
         return get(Module.krunkNativeAssetFallback);
+    }).catch(function (e) {
+        if (!mirror) throw e;
+        return fetch(mirror).then(function (r) {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.arrayBuffer();
+        }).then(function (buffer) {
+            var head = new Uint8Array(buffer, 0, Math.min(64, buffer.byteLength));
+            var text = String.fromCharCode.apply(null, head).toLowerCase();
+            text = text.trim(); // an HTML page (a CDN's block page) is never an asset (user_asset_content_ok)
+            if (['<!doctype', '<html', '<head', '<!--'].some(function (t) { return text.indexOf(t) === 0; }))
+                throw new Error('not an asset');
+            return buffer;
+        });
     }).then(function (buffer) {
         delete state.pending[path];
         if (FS.analyzePath(path).exists) return;
@@ -245,7 +296,10 @@ int asset_prefetch(const char *path) {
     char redirected[1024];
     path = file_redirect(path, redirected, sizeof(redirected)); // a resource pack's file (mod_pack.c)
     if (web_asset_known_missing(path)) return -1;
-    return web_asset_prefetch(path);
+    char *mirror = web_user_asset_url(path);
+    const int state = web_asset_prefetch(path, mirror);
+    free(mirror);
+    return state;
 }
 
 // Load-time batches: all downloads run in parallel and the caller waits once (ASYNCIFY
@@ -289,8 +343,32 @@ int asset_prefetch(const char *path) {
     return native_fetch_state(path);
 }
 
+// The web's batch wait, natively: every path the fetch hook is downloading (a community map's user
+// assets, game content the launcher's sync missed) is waited for, up to KRUNKNATIVE_ASSET_WAIT_MS
+// (default 10 s) in all, so a map is built with its files instead of placeholders that pop in (or,
+// for GLTF models, never do: the map object is built without one). Present / unmanaged paths cost
+// nothing; a path given up (-1) or still missing at the deadline is left to its loader.
 void asset_prefetch_wait(const char *const *paths, const size_t count) {
     if (g_asset_yield_hook && paths && count) g_asset_yield_hook(paths[0]);
+    if (!g_asset_fetch_hook || !paths || !count) return;
+    for (size_t i = 0; i < count; i++) native_fetch_state(paths[i]); // queues the missing ones
+    const char *env = getenv("KRUNKNATIVE_ASSET_WAIT_MS");
+    const long budget = env && *env ? atol(env) : 10000;
+    for (long waited = 0; waited < budget; waited += 10) {
+        int pending = 0;
+        for (size_t i = 0; i < count && !pending; i++) {
+            char redirected[1024];
+            if (!paths[i] || file_redirect(paths[i], redirected, sizeof(redirected)) != paths[i]) continue;
+            pending = g_asset_fetch_hook(paths[i], 0) == 0;
+        }
+        if (!pending) return;
+#ifdef WIN32
+        Sleep(10);
+#else
+        const struct timespec ts = {0, 10 * 1000 * 1000};
+        nanosleep(&ts, NULL);
+#endif
+    }
 }
 
 // KRUNKNATIVE_ASSETS_DIR (the launcher sets it: the game content in a user-writable data dir),

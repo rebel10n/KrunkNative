@@ -7,6 +7,7 @@
 #include <kn_update.h>  // KnAssetList, kn_update_path_ok, KN_ASSETS_STATE
 
 #include <auth_join.h> // KnSha256
+#include <user_asset_path.h> // user-assets/<id>/<file>: Krunker's user-asset host
 
 #include <pthread.h>
 #include <stdio.h>
@@ -34,6 +35,7 @@ typedef struct {
     char *rel;
     uint32_t hash;
     const KnAssetEntry *want; // manifest entry, NULL without one
+    int ua;                   // a Krunker user asset outside the content set: the user-asset origins
     EntryState state;
     int attempts;
     int64_t next_ms;
@@ -42,6 +44,7 @@ typedef struct {
 typedef struct {
     char url[KN_UPDATE_URL_MAX];
     int by_path;
+    int ua;              // a user-asset origin: <url><id>/<file> for user-assets/<id>/<file>
     KnPathFilter filter; // the paths it has (one Pages project of the split CDN)
     int fail_streak;   // transport failures in a row
     int64_t down_until;
@@ -63,6 +66,8 @@ static struct {
     void *get_user;
     KnAssetList list;
     int has_list;
+    int user_assets; // user-assets/<id>/<file> outside the content set come from the user-asset origins
+    int ua_only;     // no content fetch (dev tree, no manifest): only those
     Origin origins[ASSET_FETCH_MAX_ORIGINS];
     int origin_count;
     Entry *entries;
@@ -95,28 +100,30 @@ static uint32_t fnv1a(const char *s) {
 // ------------------------------------------------------------------ configuration
 
 // "[objects:][only=P+P@|skip=P+P@]URL" (kn_origin_spec_parse): a filter = the paths it has.
-static void add_origin(const char *spec) {
+static void add_origin(const char *spec, const int ua) {
     if (F.origin_count >= ASSET_FETCH_MAX_ORIGINS || !spec || !*spec) return;
     Origin *o = &F.origins[F.origin_count];
     memset(o, 0, sizeof(*o));
-    if (!kn_origin_spec_parse(spec, o->url, sizeof(o->url), &o->by_path, &o->filter)) {
-        fprintf(stderr, "[assets] ignoring asset origin %.200s (not [objects:|only=..@|skip=..@]http(s)://...)\n", spec);
+    if (!kn_origin_spec_parse(spec, o->url, sizeof(o->url), &o->by_path, &o->filter) || (ua && !o->by_path)) {
+        fprintf(stderr, "[assets] ignoring %s origin %.200s (not %shttp(s)://...)\n", ua ? "user-asset" : "asset", spec,
+                ua ? "" : "[objects:|only=..@|skip=..@]");
         return;
     }
+    o->ua = ua;
     for (int i = 0; i < F.origin_count; i++)
-        if (!strcmp(F.origins[i].url, o->url) && F.origins[i].by_path == o->by_path) return; // listed twice
+        if (!strcmp(F.origins[i].url, o->url) && F.origins[i].by_path == o->by_path && F.origins[i].ua == ua) return; // listed twice
     F.origin_count++;
 }
 
-static void setup_origins(const char *list) {
+static void setup_origins(const char *list, const char *fallback, const int ua) {
     char buf[4096];
-    snprintf(buf, sizeof(buf), "%s", list && *list ? list : ASSET_FETCH_DEFAULT_ORIGINS);
+    snprintf(buf, sizeof(buf), "%s", list && *list ? list : fallback);
     for (char *p = buf; *p;) {
         while (*p && strchr(" ,\t\r\n", *p)) p++;
         char *t = p;
         while (*p && !strchr(" ,\t\r\n", *p)) p++;
         if (*p) *p++ = 0;
-        if (*t) add_origin(t);
+        if (*t) add_origin(t, ua);
     }
 }
 
@@ -158,19 +165,26 @@ int asset_fetch_start(const AssetFetchConfig *cfg, char *why, const size_t whyn)
         return 0;
     }
     F.allow_checkout = cfg->allow_checkout;
+    F.user_assets = cfg->user_assets;
     char checkout[KN_PATH_MAX];
     if (!F.allow_checkout && kn_install_dir_in_checkout(F.dir, checkout, sizeof(checkout))) {
-        // a dev tree: never write into a repository (the launcher refuses to sync there too)
+        // a dev tree: never write into a repository (the launcher refuses to sync there too);
+        // user assets still: user-assets/ is never tracked (.gitignore assets/*/*)
         set_why(why, whyn, "%s is inside the git checkout %s", F.dir, checkout);
-        return 0;
+        if (!F.user_assets) return 0;
+        F.ua_only = 1;
     }
-    F.has_list = load_manifest();
-    if (cfg->require_manifest && !F.has_list) {
+    F.has_list = F.ua_only ? 0 : load_manifest();
+    if (cfg->require_manifest && !F.has_list && !F.ua_only) {
         set_why(why, whyn, "no content manifest %s%s", F.dir, KN_ASSETS_STATE);
-        kn_asset_list_free(&F.list);
-        return 0;
+        if (!F.user_assets) {
+            kn_asset_list_free(&F.list);
+            return 0;
+        }
+        F.ua_only = 1;
     }
-    setup_origins(cfg->origins);
+    if (!F.ua_only) setup_origins(cfg->origins, ASSET_FETCH_DEFAULT_ORIGINS, 0);
+    if (F.user_assets) setup_origins(cfg->user_asset_origins, ASSET_FETCH_USER_ASSET_ORIGINS, 1);
     if (!F.origin_count) {
         set_why(why, whyn, "%s%s", "no usable asset origin", NULL);
         kn_asset_list_free(&F.list);
@@ -181,6 +195,7 @@ int asset_fetch_start(const AssetFetchConfig *cfg, char *why, const size_t whyn)
     F.get = cfg->get;
     F.get_user = cfg->get_user;
     F.stats.has_manifest = F.has_list;
+    F.stats.user_assets_only = F.ua_only;
     pthread_mutex_init(&F.lock, NULL);
     pthread_cond_init(&F.wake, NULL);
     pthread_cond_init(&F.idle, NULL);
@@ -237,7 +252,7 @@ static Entry *entry_find(const char *rel, const uint32_t hash) {
 }
 
 // under the lock: a new queued entry (NULL when full / out of memory)
-static Entry *entry_add(const char *rel, const uint32_t hash, const KnAssetEntry *want) {
+static Entry *entry_add(const char *rel, const uint32_t hash, const KnAssetEntry *want, const int ua) {
     if (F.entry_count >= ASSET_FETCH_MAX_ENTRIES) return NULL;
     if (F.entry_count == F.entry_cap) {
         const size_t cap = F.entry_cap ? F.entry_cap * 2 : 64;
@@ -249,7 +264,7 @@ static Entry *entry_add(const char *rel, const uint32_t hash, const KnAssetEntry
     char *copy = strdup(rel);
     if (!copy) return NULL;
     Entry *e = &F.entries[F.entry_count++];
-    *e = (Entry) {.rel = copy, .hash = hash, .want = want, .state = ENTRY_QUEUED};
+    *e = (Entry) {.rel = copy, .hash = hash, .want = want, .ua = ua, .state = ENTRY_QUEUED};
     F.busy++;
     F.stats.queued++;
     pthread_cond_signal(&F.wake);
@@ -273,7 +288,11 @@ int asset_fetch_request(const char *path, const int enqueue) {
     // not ours: unsafe paths, the launcher's own files (.kn-assets.json, .kn-sync/, ...)
     if (!kn_update_path_ok(rel) || rel[0] == '.') return 1;
     const KnAssetEntry *want = F.has_list ? kn_asset_list_find(&F.list, rel) : NULL;
-    if (F.has_list && !want) return 1; // not part of the content set
+    // a Krunker user asset the content set does not have (a community map's texture / model):
+    // Krunker's user-asset host, else KrunkNative's mirror of it
+    const int ua = !want && F.user_assets && user_asset_tree_rel_ok(rel);
+    if (F.ua_only && !ua) return 1;
+    if (F.has_list && !want && !ua) return 1; // not part of the content set
     const uint32_t hash = fnv1a(rel);
 
     pthread_mutex_lock(&F.lock);
@@ -292,7 +311,7 @@ int asset_fetch_request(const char *path, const int enqueue) {
     if (!enqueue) return size >= 0 ? 1 : -1;
     pthread_mutex_lock(&F.lock);
     e = entry_find(rel, hash); // another thread may have queued it meanwhile
-    if (!e) e = entry_add(rel, hash, want);
+    if (!e) e = entry_add(rel, hash, want, ua);
     answer = e ? state_answer(e->state) : (size >= 0 ? 1 : -1);
     pthread_mutex_unlock(&F.lock);
     return answer;
@@ -360,6 +379,8 @@ typedef struct {
     KnSha256 sha;
     int64_t bytes, max;
     int overflow, write_error;
+    unsigned char head[64]; // the first bytes (user assets: user_asset_content_ok)
+    size_t head_len;
 } FileSink;
 
 static int file_write(void *user, const void *data, const size_t len) {
@@ -373,6 +394,11 @@ static int file_write(void *user, const void *data, const size_t len) {
         return 0;
     }
     kn_sha256_update(&s->sha, data, len);
+    if (s->head_len < sizeof(s->head)) {
+        const size_t n = len < sizeof(s->head) - s->head_len ? len : sizeof(s->head) - s->head_len;
+        memcpy(s->head + s->head_len, data, n);
+        s->head_len += n;
+    }
     s->bytes += (int64_t) len;
     return 1;
 }
@@ -396,11 +422,12 @@ static int make_dirs(const char *path) {
 
 // The directory of `target` (created) may be written: not inside a git checkout (symlinks
 // resolved, so a private dir whose subdirs link into a repository's assets/ is caught too).
-static int dir_writable(const char *target, char *why, const size_t whyn) {
+static int dir_writable(const char *target, const int ua, char *why, const size_t whyn) {
     char dir[KN_PATH_MAX];
     snprintf(dir, sizeof(dir), "%s", target);
     kn_fs_dirname(dir);
-    if (!F.allow_checkout) {
+    // user-assets/<id>/ holds no tracked file in any checkout (.gitignore assets/*/*)
+    if (!F.allow_checkout && !ua) {
         // the deepest directory that exists decides (symlinks resolved), before anything is created
         char probe[KN_PATH_MAX];
         snprintf(probe, sizeof(probe), "%s", dir);
@@ -450,6 +477,8 @@ static int dir_checked(const char *dir, char *why, const size_t whyn) {
 typedef enum {
     TRY_OK,       // written
     TRY_MISSING,  // the origin answered, without this file (404, other status)
+    TRY_REFUSED,  // 401 / 403 / 429: the origin turns this client away (Cloudflare blocks some
+                  // networks from user-assets.krunker.io): out for a while, the next one is asked
     TRY_BAD,      // content did not verify
     TRY_TRANSPORT,
     TRY_LOCAL,    // cannot write here: no point asking another origin
@@ -457,13 +486,14 @@ typedef enum {
 
 static TryResult try_origin(KnHttp *http, const Origin *o, const Entry *e, const char *target, char *msg, const size_t msgn) {
     char url[KN_UPDATE_URL_MAX + 512];
-    if (o->by_path) snprintf(url, sizeof(url), "%s%s", o->url, e->rel);
+    if (o->ua) snprintf(url, sizeof(url), "%s%s", o->url, e->rel + sizeof(USER_ASSET_DIR) - 1);
+    else if (o->by_path) snprintf(url, sizeof(url), "%s%s", o->url, e->rel);
     else snprintf(url, sizeof(url), "%s%.2s/%s", o->url, e->want->sha256, e->want->sha256);
 
     char tmp[KN_PATH_MAX + 64];
     static volatile int serial;
     snprintf(tmp, sizeof(tmp), "%s.kn-fetch-%d.part", target, __atomic_add_fetch(&serial, 1, __ATOMIC_RELAXED));
-    FileSink fs = {.max = e->want ? e->want->size : ASSET_FETCH_MAX_BYTES};
+    FileSink fs = {.max = e->want ? e->want->size : e->ua ? user_asset_max_bytes(e->rel) : ASSET_FETCH_MAX_BYTES};
     fs.f = kn_fs_fopen(tmp, "wb");
     if (!fs.f) {
         snprintf(msg, msgn, "cannot write %s", tmp);
@@ -493,12 +523,18 @@ static TryResult try_origin(KnHttp *http, const Origin *o, const Entry *e, const
             return TRY_TRANSPORT;
         }
         snprintf(msg, msgn, "%s: HTTP %d", o->url, status);
+        if (status == 401 || status == 403 || status == 429) return TRY_REFUSED;
         return status >= 500 ? TRY_TRANSPORT : TRY_MISSING;
     }
     uint8_t digest[32];
     char hex[65];
     kn_sha256_final(&fs.sha, digest);
     kn_sha256_hex(digest, hex);
+    if (e->ua && !user_asset_content_ok(e->rel, fs.head, fs.head_len)) {
+        kn_fs_remove(tmp);
+        snprintf(msg, msgn, "%s: not a %s (%lld bytes)", o->url, strrchr(e->rel, '/') + 1, (long long) fs.bytes);
+        return TRY_BAD;
+    }
     if (e->want && (fs.bytes != e->want->size || strcmp(hex, e->want->sha256) != 0)) {
         kn_fs_remove(tmp);
         snprintf(msg, msgn, "%s: content does not match the manifest (%lld bytes, sha256 %.12s; want %lld, %.12s)", o->url,
@@ -544,7 +580,7 @@ static void fetch_one(KnHttp *http, size_t index, char *rel) {
     if (!kn_fs_join(target, sizeof(target), F.dir, rel)) {
         snprintf(last, sizeof(last), "path too long");
         outcome = TRY_LOCAL;
-    } else if (!dir_writable(target, why, sizeof(why))) {
+    } else if (!dir_writable(target, snapshot.ua, why, sizeof(why))) {
         snprintf(last, sizeof(last), "refusing to write: %s", why);
         outcome = TRY_LOCAL;
     } else {
@@ -552,6 +588,7 @@ static void fetch_one(KnHttp *http, size_t index, char *rel) {
             // pass 0: the origins that are up, in order; pass 1: the ones taken out (last resort)
             for (int g = 0; g < F.origin_count && !__atomic_load_n(&F.stop, __ATOMIC_RELAXED); g++) {
                 Origin *o = &F.origins[g];
+                if (o->ua != snapshot.ua) continue; // user assets come from the user-asset origins only
                 if (!o->by_path && !snapshot.want) continue; // content-addressed: needs the sha256
                 if (!kn_path_filter_ok(&o->filter, rel)) continue; // not in its part of a split CDN
                 pthread_mutex_lock(&F.lock);
@@ -567,6 +604,8 @@ static void fetch_one(KnHttp *http, size_t index, char *rel) {
                     int64_t out = (int64_t) F.backoff_ms << (o->fail_streak < 6 ? o->fail_streak - 1 : 5);
                     if (out > ASSET_FETCH_ORIGIN_DOWN_MS) out = ASSET_FETCH_ORIGIN_DOWN_MS;
                     o->down_until = now_ms() + out;
+                } else if (r == TRY_REFUSED) {
+                    o->down_until = now_ms() + ASSET_FETCH_ORIGIN_REFUSED_MS; // asked last until then
                 } else if (r != TRY_LOCAL) {
                     o->fail_streak = 0;
                     o->down_until = 0;
@@ -576,7 +615,7 @@ static void fetch_one(KnHttp *http, size_t index, char *rel) {
                 snprintf(last, sizeof(last), "%s", msg);
                 if (r == TRY_BAD) fprintf(stderr, "[assets] %s: refused %s\n", rel, msg);
                 transport |= r == TRY_TRANSPORT;
-                outcome = r;
+                outcome = r == TRY_REFUSED ? TRY_MISSING : r;
                 if (r == TRY_OK || r == TRY_LOCAL) break;
             }
         }

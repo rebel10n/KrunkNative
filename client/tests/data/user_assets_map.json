@@ -1,0 +1,1 @@
+{"name":"User Assets Fixture","ambient":"#ffffff","light":"#ffffff","sky":"#dce8ed","fog":"#8d9aa0","fogD":4000,"objects":[{"p":[0,-10,0],"s":[300,10,300],"c":"#808080"},{"p":[-20,0,-40],"s":[90,70,4],"at":900001},{"p":[50,20,-20],"s":[24,24,24],"i":44,"aid":"900002"}],"spawns":[[0,0,40,0,0,0]],"creator":"KrunkNative tests","official":false}

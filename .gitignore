@@ -66,3 +66,5 @@ perf.data*
 
 # coordinator zero-config SQLite database (services, database.path)
 /data/coordinator.db*
+# kn_brain dev runs: the user-asset mirror's cache (user_assets.cache_dir)
+/cache/

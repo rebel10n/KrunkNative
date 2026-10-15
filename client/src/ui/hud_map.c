@@ -223,6 +223,8 @@ static void mm_update_image(const Map *map) {
     if (asset <= 0) return;
     char path[1024];
     snprintf(path, sizeof(path), "%suser-assets/%d/texture.png", assets_path(), asset);
+    const char *const wait[] = {path};
+    asset_prefetch_wait(wait, 1); // natively: a user asset the asset tree lacks is downloaded (asset_fetch.h)
     if (!ensure_asset_file(path)) {
         fprintf(stderr, "[minimap] %s: not found, drawing the map's blocks\n", path);
         return;

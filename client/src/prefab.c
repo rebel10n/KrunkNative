@@ -525,7 +525,19 @@ static unsigned int g_prefab_missing_texture;
 static unsigned int prefab_missing_texture(void) {
     if (g_prefab_missing_texture) return g_prefab_missing_texture;
     // rows bottom-up (GL): the PNG's palette indices are magenta / black, black / magenta
-    static const unsigned char pixels[16] = {0, 0, 0, 253, 255, 0, 219, 255, 255, 0, 219, 252, 0, 0, 0, 255};
+    unsigned char pixels[16] = {0, 0, 0, 253, 255, 0, 219, 255, 255, 0, 219, 252, 0, 0, 0, 255};
+    // KRUNKNATIVE_MISSING_TEXTURE=rrggbb (tools: counting placeholder pixels in a capture): one
+    // flat colour instead of the checker
+    const char *debug = getenv("KRUNKNATIVE_MISSING_TEXTURE");
+    unsigned int rgb;
+    if (debug && strlen(debug) == 6 && sscanf(debug, "%6x", &rgb) == 1) {
+        for (int i = 0; i < 4; i++) {
+            pixels[i * 4] = (unsigned char) (rgb >> 16);
+            pixels[i * 4 + 1] = (unsigned char) (rgb >> 8);
+            pixels[i * 4 + 2] = (unsigned char) rgb;
+            pixels[i * 4 + 3] = 255;
+        }
+    }
     glGenTextures(1, &g_prefab_missing_texture);
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, g_prefab_missing_texture);
@@ -583,7 +595,10 @@ static unsigned int prefab_texture(const char *src, const int asset, const int v
         snprintf(relative, sizeof(relative), "user-assets/%s/texture.png", id);
         char *path = concat(assets_path(), relative);
         FILE *f = path && ensure_asset_file(path) ? fopen(path, "rb") : NULL;
+        const int downloading = !f && path && asset_prefetch(path) == 0; // load_texture's placeholder
         free(path);
+        if (f) fclose(f);
+        if (downloading) return prefab_load_texture_file(relative);
         if (!f) {
             static unsigned int black;
             if (!black) {
@@ -598,7 +613,6 @@ static unsigned int prefab_texture(const char *src, const int asset, const int v
             }
             return black;
         }
-        fclose(f);
         return prefab_load_texture_file(relative);
     }
     snprintf(relative, sizeof(relative), "user-assets/%s.png", src);
@@ -1303,11 +1317,12 @@ static void prefab_model_src(const PrefabData *data, const Object *object, const
     snprintf(out->group, sizeof(out->group), "%s|%s", out->model, out->texture);
 }
 
-// ---- load-time prefetch (web): the textures and models prefab_init() is about to open,
-// collected from the raw objects and downloaded as one parallel batch (asset_prefetch_wait).
-// A hint only: whatever this misses is still fetched on demand, extras are just unused, and
-// it never draws random numbers (random billboards / texRange are left to prefab_init()).
-#ifdef __EMSCRIPTEN__
+// ---- load-time prefetch: the textures and models prefab_init() is about to open, collected from
+// the raw objects and downloaded as one parallel batch (asset_prefetch_wait). A hint only: whatever
+// this misses is still fetched on demand, extras are just unused, and it never draws random numbers
+// (random billboards / texRange are left to prefab_init()). On the web every file; natively the ones
+// the on-demand fetch is downloading (a community map's user assets: asset_fetch.h), so the map is
+// built with them rather than with placeholders (a GLTF asset missing at build time never shows).
 typedef struct {
     char **paths;
     size_t count;
@@ -1338,12 +1353,64 @@ static void prefab_prefetch_add(PrefabPrefetch *list, const char *format, const 
     list->paths[list->count++] = path;
 }
 
+// the digits of an asset id ("9356", 9356, "53581e", "12v"); 0 when it has none
+static int prefab_prefetch_asset_id(const cJSON *json, char *out, const size_t size, char *flags, const size_t flags_size) {
+    char text[48] = "";
+    if (cJSON_IsString(json)) snprintf(text, sizeof(text), "%s", cJSON_GetStringValue(json));
+    else if (cJSON_IsNumber(json) && cJSON_GetNumberValue(json) > 0) snprintf(text, sizeof(text), "%.0f", cJSON_GetNumberValue(json));
+    size_t n = 0, f = 0;
+    for (const char *c = text; *c; c++) {
+        if (*c >= '0' && *c <= '9') {
+            if (n + 1 < size) out[n++] = *c;
+        } else if (flags && f + 1 < flags_size) {
+            flags[f++] = *c;
+        }
+    }
+    out[n] = 0;
+    if (flags && flags_size) flags[f] = 0;
+    return n > 0 && strspn(out, "0") < n; // "0" is no asset
+}
+
+// user assets: "aid" (CUSTOM_ASSET, TRIGGER, AI: user_asset.c / ai_render.c) and "at" (a texture or
+// video asset of a cube / plane / ...: prefab_texture; a video shows its texture.png in KN)
+static void prefab_prefetch_user_assets(PrefabPrefetch *list, const cJSON *raw_obj, const ClientRenderSettings *settings) {
+    char id[24], flags[24];
+    if (prefab_prefetch_asset_id(cJSON_GetObjectItem(raw_obj, "aid"), id, sizeof(id), flags, sizeof(flags))) {
+        char rel[64];
+        if (strchr(flags, 'g') || strchr(flags, 'q')) {
+            snprintf(rel, sizeof(rel), "user-assets/%s/model.%s", id, strchr(flags, 'q') ? "glb" : "gltf");
+            prefab_prefetch_add(list, "%s", rel);
+        } else if (!strchr(flags, 'f')) {
+            snprintf(rel, sizeof(rel), "user-assets/%s/model.obj", id);
+            prefab_prefetch_add(list, "%s", rel);
+            if (!settings->no_textures) {
+                snprintf(rel, sizeof(rel), "user-assets/%s/model.png", id);
+                prefab_prefetch_add(list, "%s", rel);
+                if (strchr(flags, 'e')) {
+                    snprintf(rel, sizeof(rel), "user-assets/%s/model_e.png", id);
+                    prefab_prefetch_add(list, "%s", rel);
+                }
+                if (strchr(flags, 'l')) {
+                    snprintf(rel, sizeof(rel), "user-assets/%s/model_l.png", id);
+                    prefab_prefetch_add(list, "%s", rel);
+                }
+            }
+        }
+    }
+    if (!settings->no_textures && prefab_prefetch_asset_id(cJSON_GetObjectItem(raw_obj, "at"), id, sizeof(id), NULL, 0)) {
+        char rel[64];
+        snprintf(rel, sizeof(rel), "user-assets/%s/texture.png", id);
+        prefab_prefetch_add(list, "%s", rel);
+    }
+}
+
 static void prefab_prefetch_object(PrefabPrefetch *list, const cJSON *raw_obj, const ClientRenderSettings *settings) {
     const int prefab = map_raw_object_prefab(raw_obj);
     const PrefabInfo *info = prefab_info(prefab);
     const PrefabData *data = prefab_data(prefab);
     if (!info || !data) return;
     if (!settings->map_details && ((info->roles & PREFAB_R_MAP_DETAIL) || prefab_has_flag(prefab, PF_NODETAIL))) return;
+    prefab_prefetch_user_assets(list, raw_obj, settings);
 
     if (info->geometry == PREFAB_GEO_MODEL && data->model) {
         prefab_prefetch_add(list, "models/%s.obj", data->model);
@@ -1377,7 +1444,7 @@ static void prefab_prefetch_object(PrefabPrefetch *list, const cJSON *raw_obj, c
         info->geometry == PREFAB_GEO_SPHERE || info->geometry == PREFAB_GEO_RAMP || info->geometry == PREFAB_GEO_LADDER ||
         info->geometry == PREFAB_GEO_LIQUID || info->geometry == PREFAB_GEO_SPRITE) {
         const cJSON *at = cJSON_GetObjectItem(raw_obj, "at");
-        if (at && !cJSON_IsNull(at)) return; // user assets: fetched on demand
+        if (at && !cJSON_IsNull(at)) return; // a user asset: prefab_prefetch_user_assets
         const cJSON *t = cJSON_GetObjectItem(raw_obj, "t");
         const int texture = prefab_texture_resolve(prefab, t && !cJSON_IsNull(t), cJSON_IsNumber(t) ? (int) cJSON_GetNumberValue(t) : -1);
         const cJSON *tv = cJSON_GetObjectItem(raw_obj, "tv");
@@ -1400,11 +1467,6 @@ static void prefab_prefetch_map_assets(const cJSON *objects) {
     for (size_t i = 0; i < list.count; i++) free(list.paths[i]);
     free(list.paths);
 }
-#else
-static void prefab_prefetch_map_assets(const cJSON *objects) {
-    (void) objects; // native files are local: nothing to batch
-}
-#endif
 
 void prefab_begin_map(const cJSON *objects, const cJSON *colors) {
     free(g_prefab_model_materials);

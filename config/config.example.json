@@ -229,6 +229,16 @@
       "cdn_url": ""
     }
   },
+  "user_assets": {
+    "_comment": "GET /api/user-assets/<id>/<file> (services/brain/user_assets.c): the clients' mirror of Krunker's user-asset host (community maps' textures, models, sounds, resource packs; the web client cannot read the host itself: no CORS). Answers from <accounts.assets_dir>/user-assets/, then cache_dir, else fetches upstream (through proxy, curl syntax; KN_USER_ASSETS_PROXY overrides it) into cache_dir. An upstream 404 is remembered fail_cache_s, other failures error_cache_s.",
+    "enabled": true,
+    "upstream": "https://user-assets.krunker.io/",
+    "proxy": "",
+    "cache_dir": "cache/user-assets",
+    "timeout_ms": 20000,
+    "fail_cache_s": 600,
+    "error_cache_s": 10
+  },
   "ai": {
     "_comment": "The map editor's AI proxy (services/brain/ai.h). The upstream URL and key come from the KN_AI_UPSTREAM_URL / KN_AI_UPSTREAM_KEY environment (~/.config/kn-secrets/ai.env locally, /etc/krunknative/ai.env on kru): never put the key here. Unset = the AI routes answer 503.",
     "enabled": true,

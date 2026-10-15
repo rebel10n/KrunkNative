@@ -1053,7 +1053,8 @@ else ()
     if (NOT WIN32)
         add_executable(asset_fetch_test client/tests/asset_fetch_test.c client/src/net/asset_fetch.c
                        launcher/src/update_core.c launcher/src/http_fetch.c launcher/src/fs.c launcher/src/install.c
-                       launcher/src/archive.c client/src/net/http_conn.c client/src/net/http_proxy.c client/src/stb_image.c shared/src/auth_join.c)
+                       launcher/src/archive.c client/src/net/http_conn.c client/src/net/http_proxy.c client/src/stb_image.c shared/src/auth_join.c
+                       shared/src/user_asset_path.c)
         target_include_directories(asset_fetch_test PRIVATE launcher/include client/include shared/include)
         target_link_libraries(asset_fetch_test PRIVATE cJSON Threads::Threads m)
         if (OpenSSL_FOUND)
@@ -1069,7 +1070,8 @@ else ()
     if (NOT WIN32)
         add_executable(assets_bench launcher/tests/assets_bench.c launcher/src/assets_sync.c
                        launcher/src/update_core.c launcher/src/http_fetch.c launcher/src/fs.c launcher/src/archive.c
-                       client/src/net/http_conn.c client/src/net/http_proxy.c client/src/stb_image.c shared/src/auth_join.c)
+                       client/src/net/http_conn.c client/src/net/http_proxy.c client/src/stb_image.c shared/src/auth_join.c
+                       shared/src/user_asset_path.c)
         target_include_directories(assets_bench PRIVATE launcher/include client/include shared/include)
         target_link_libraries(assets_bench PRIVATE cJSON Threads::Threads m)
         if (OpenSSL_FOUND)

@@ -3,7 +3,8 @@
 // (a mismatch is refused, nothing written), atomic writes, 404 everywhere given up once, transport
 // failures retried with backoff, de-duplication, the concurrency cap, content-addressed origins, a
 // size mismatch of a present file refetched, the git checkout guard (root and per directory) and
-// stopping with a transfer in flight, and the split CDN's only=/skip= origins.
+// stopping with a transfer in flight, the split CDN's only=/skip= origins, and Krunker user assets
+// (their own origins, user-assets-only mode, 403s, block pages, inside a checkout, beside a manifest).
 #include <asset_fetch.h>
 #include <kn_fs.h>
 #include <kn_update.h>
@@ -453,6 +454,102 @@ static void test_split(void) {
     asset_fetch_stop();
 }
 
+#define UK "https://krunker.test/"
+#define UM "https://mirror.test/api/user-assets/"
+
+// Krunker user assets (user_asset_path.h): their own origins (<url><id>/<file>), also without a
+// manifest and inside a checkout (user-assets/ is git-ignored); a 403 takes an origin out; an HTML
+// page or a wrong kind of file is refused; with a manifest the listed ones keep the content origins.
+static void test_user_assets(void) {
+    printf("user assets: own origins, ua-only mode, 403, block pages, checkout...\n");
+    char dir[1100], why[1400], tex[1200], obj[1200], blocked[1200], other[1200], bad[1200], badname[1200];
+    make_dir(dir, sizeof(dir), "ua");
+    snprintf(tex, sizeof(tex), "%s/user-assets/9356/texture.png", dir);
+    snprintf(obj, sizeof(obj), "%s/user-assets/7282/model.obj", dir);
+    snprintf(blocked, sizeof(blocked), "%s/user-assets/5000/texture.png", dir);
+    snprintf(other, sizeof(other), "%s/textures/wall_0.png", dir);
+    snprintf(bad, sizeof(bad), "%s/user-assets/12a/texture.png", dir);
+    snprintf(badname, sizeof(badname), "%s/user-assets/9356/run.sh", dir);
+    routes_reset();
+    route(UK "9356/texture.png", 403, "<!DOCTYPE html><title>Krunker.io</title>", 0);
+    route(UK "7282/model.obj", 403, "<!DOCTYPE html>", 0);
+    route(UK "5000/texture.png", 403, "<!DOCTYPE html>", 0);
+    route(UM "9356/texture.png", 200, "\x89PNG\r\n\x1a\n texture", 0);
+    route(UM "7282/model.obj", 200, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n", 0);
+    route(UM "5000/texture.png", 200, "<!DOCTYPE html><html>blocked</html>", 0);
+
+    AssetFetchConfig cfg = config(dir); // no manifest, required: the content fetch is off
+    cfg.user_assets = 1;
+    cfg.user_asset_origins = UK " " UM;
+    cfg.workers = 1;
+    CHECK(asset_fetch_start(&cfg, why, sizeof(why)), "no manifest: user assets alone (%s)", why);
+    AssetFetchStats st;
+    asset_fetch_stats(&st);
+    CHECK(st.user_assets_only && !st.has_manifest, "stats: user assets only");
+    CHECK(asset_fetch_request(other, 1) == 1, "game content: not fetched in ua-only mode");
+    CHECK(asset_fetch_request(bad, 1) == 1 && asset_fetch_request(badname, 1) == 1, "not user-asset paths: not ours");
+    CHECK(asset_fetch_request(tex, 1) == 0, "a user asset: queued");
+    CHECK(settle(tex) == 1, "fetched");
+    char *got = read_text(tex);
+    CHECK(got && strstr(got, "texture"), "written (%s)", got ? got : "(none)");
+    free(got);
+    CHECK(T.url_count >= 2 && !strcmp(T.last_urls[0], UK "9356/texture.png") && !strcmp(T.last_urls[1], UM "9356/texture.png"),
+          "Krunker's host first, then the mirror, <url><id>/<file> (%s, %s)", T.last_urls[0], T.last_urls[1]);
+    CHECK(asset_fetch_request(obj, 1) == 0 && settle(obj) == 1, "the next file");
+    int krunker_obj = 0;
+    for (int i = 0; i < T.url_count; i++) krunker_obj |= !strcmp(T.last_urls[i], UK "7282/model.obj");
+    CHECK(!krunker_obj, "the 403'ing host is out: the mirror is asked first");
+    CHECK(asset_fetch_request(blocked, 1) == 0 && settle(blocked) == -1, "an HTML page answered 200 is refused");
+    CHECK(!kn_fs_exists(blocked), "nothing written for it");
+    asset_fetch_stats(&st);
+    CHECK(st.refused == 1 && st.fetched == 2, "stats refused %zu fetched %zu", st.refused, st.fetched);
+    CHECK(!has_part_files(dir), "no partial files left");
+    asset_fetch_stop();
+
+    // off: user_assets 0 keeps the old rule (no manifest: off)
+    cfg.user_assets = 0;
+    CHECK(!asset_fetch_start(&cfg, why, sizeof(why)), "user_assets 0: off without a manifest");
+
+    // inside a checkout: user assets still (user-assets/ is git-ignored), nothing else
+    char repo[1100], git[1200], rdir[1200], rtex[1300], rother[1300];
+    make_dir(repo, sizeof(repo), "uarepo");
+    snprintf(git, sizeof(git), "%s/.git", repo);
+    kn_fs_mkdirs(git);
+    snprintf(rdir, sizeof(rdir), "%s/assets", repo);
+    kn_fs_mkdirs(rdir);
+    snprintf(rtex, sizeof(rtex), "%s/user-assets/9356/texture.png", rdir);
+    snprintf(rother, sizeof(rother), "%s/textures/wall_0.png", rdir);
+    cfg = config(rdir);
+    cfg.user_assets = 1;
+    cfg.user_asset_origins = UM;
+    CHECK(asset_fetch_start(&cfg, why, sizeof(why)), "inside a checkout: user assets (%s)", why);
+    CHECK(asset_fetch_request(rother, 1) == 1, "inside a checkout: no game content");
+    CHECK(asset_fetch_request(rtex, 1) == 0 && settle(rtex) == 1, "inside a checkout: a user asset is written");
+    asset_fetch_stop();
+
+    // with a manifest: a listed user asset comes from the content origins, an unlisted one from its own
+    char mdir[1100], listed[1200], unlisted[1200];
+    make_dir(mdir, sizeof(mdir), "uamanifest");
+    const ManifestFile files[] = {{"user-assets/52268/texture.png", "PNG listed"}};
+    write_manifest(mdir, files, 1);
+    snprintf(listed, sizeof(listed), "%s/user-assets/52268/texture.png", mdir);
+    snprintf(unlisted, sizeof(unlisted), "%s/user-assets/9356/texture.png", mdir);
+    routes_reset();
+    route(A "user-assets/52268/texture.png", 200, "PNG listed", 0);
+    route(UM "9356/texture.png", 200, "\x89PNG\r\n\x1a\n texture", 0);
+    cfg = config(mdir);
+    cfg.user_assets = 1;
+    cfg.user_asset_origins = UM;
+    CHECK(asset_fetch_start(&cfg, why, sizeof(why)), "with a manifest (%s)", why);
+    asset_fetch_stats(&st);
+    CHECK(!st.user_assets_only && st.has_manifest, "the content fetch runs too");
+    CHECK(asset_fetch_request(listed, 1) == 0 && settle(listed) == 1, "a listed user asset");
+    CHECK(asset_fetch_request(unlisted, 1) == 0 && settle(unlisted) == 1, "an unlisted user asset");
+    CHECK(T.url_count == 2 && !strcmp(T.last_urls[0], A "user-assets/52268/texture.png") && !strcmp(T.last_urls[1], UM "9356/texture.png"),
+          "listed: the content origin; unlisted: the user-asset origin (%s, %s)", T.last_urls[0], T.last_urls[1]);
+    asset_fetch_stop();
+}
+
 int main(void) {
     const char *base = getenv("XDG_CACHE_HOME");
     char tmpl[900];
@@ -467,6 +564,7 @@ int main(void) {
     test_retry_and_cap();
     test_objects_and_guard();
     test_split();
+    test_user_assets();
     kn_fs_rmtree(g_root);
     printf("asset_fetch_test: %d checks, %d failed\n", g_checks, g_failed);
     return g_failed ? 1 : 0;

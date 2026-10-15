@@ -343,6 +343,9 @@ window-center-test: build ## The client window maps where it stays: centred on t
 asset-fetch-test: build ## Native on-demand content fetch: deleted airdrop files are downloaded from stub origins, verified and pop in; mismatch refused, 404 given up once (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/asset_fetch_e2e.py $(DEBUG_DIR)
 
+user-assets-test: build ## A community map's Krunker user assets (texture, OBJ model) fetched from stub hosts (a 403'ing Krunker, the mirror) and drawn; 404 / block page show the placeholder (headless; EGL_DEVICE=)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 600 $(PYTHON) -I client/tests/user_assets_e2e.py $(DEBUG_DIR)
+
 console-settings-test: build ## Dev console switch survives Settings opens / restarts, console clear / cls, chat /clear (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 900 $(PYTHON) -I client/tests/console_settings_e2e.py $(DEBUG_DIR)
 
@@ -360,7 +363,7 @@ ui-import: ## Regenerate ui/ from the Krunker v10 live site mirror (page, window
 assets-import: ## Copy the v3.1.1 content mod.zip lacks (textures/previews/) into assets/ (tools/ui-import/game_assets.py)
 	$(PYTHON) -I tools/ui-import/game_assets.py --assets assets
 
-.PHONY: store-import store-check assets-import-v7 assets-check-v7 assets-import-live assets-check-live gltf-test viewer-diff frame-yield-test offline-dead-test resize-early-test window-center-test native-auth-test asset-fetch-test console-settings-test slowmo-arms-test spawn-camera-test piss-hose-test weapons-client-test selection-test minimap-round-test preview-hole-test preview-hole-test-web class-preview-test
+.PHONY: store-import store-check assets-import-v7 assets-check-v7 assets-import-live assets-check-live gltf-test viewer-diff frame-yield-test offline-dead-test resize-early-test window-center-test native-auth-test asset-fetch-test console-settings-test slowmo-arms-test spawn-camera-test piss-hose-test weapons-client-test selection-test minimap-round-test preview-hole-test preview-hole-test-web class-preview-test user-assets-test
 assets-import-v7: ## Import the Krunker content set into assets/ (models, textures, sounds, the v10 store table) and regenerate the store tables
 	$(PYTHON) -I tools/ui-import/game_assets.py --v7 --assets assets
 	node tools/ui-import/gen_viewer_store.js
