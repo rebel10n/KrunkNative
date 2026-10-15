@@ -323,6 +323,8 @@ struct NetKpdDataPacket;
 void hud_votekick_on_kpd_data(Client*, const struct NetKpdDataPacket*);
 void hud_votekick_on_kpd_reset(Client*);
 int  hud_votekick_kpd_key(Client*, int yes);      // 1 when the case took the key (spectating)
+void hud_votekick_on_session_lost(void);          // a disconnect under a K.P.D call: the phone down now
+void hud_votekick_scenario_phone(int up);         // --render-scenario state.kpdPhone: the phone up, no request
 int  hud_votekick_kpd_sus(const Client*);         // the suspect's uid, -1 no case on this connection
 int  hud_votekick_kpd_caller(const Client*);      // the reporter's uid, -1 none
 int  hud_votekick_kpd_panel_visible(const Client*);

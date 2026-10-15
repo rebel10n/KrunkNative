@@ -1001,3 +1001,10 @@ body.kn-flavor-strike.kn-flavor-loading #instructionHolder::after {
   width: auto;
   margin: 0; /* main.css's -6px top / 6px right margins are for table cells, which Chromium ignores */
 }
+
+/* K.P.D confirm popup (hud_votekick.c confirm_police: #genericPop.polConfPop holds the message div,
+ * then the Call / Cancel buttons). The engine does not inherit line-height into the message, and
+ * Krunker's default line box is tighter than its 20px text, so its descenders touch the next line. */
+.polConfPop > div:first-child {
+  line-height: 32px;
+}

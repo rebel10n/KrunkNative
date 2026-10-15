@@ -5,6 +5,7 @@
 // net_connected updates and the page's connection state (menu_ui.c).
 #include <client.h>
 #include <krunker_net.h>
+#include <ui_logic.h> // hud_votekick_on_session_lost (a K.P.D call ends with the session)
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -63,6 +64,7 @@ void on_client_socket_disconnect(Client *client) {
     if (!client->net_session_connected) return;
 
     client->net_session_connected = 0;
+    hud_votekick_on_session_lost(); // a K.P.D call in flight: its answer can no longer arrive (the phone down)
 
     char reason[sizeof(client->net_disconnect_reason)];
     char code[sizeof(client->net_disconnect_code)];
@@ -121,6 +123,7 @@ void on_client_socket_failed(Client *client, const char *message) {
     static char last_logged[160];
 
     client->net_session_connected = 0;
+    hud_votekick_on_session_lost(); // a call made on the lost session gets no answer (the phone down)
     net_set_status(client, NET_STATUS_FAILED, message);
 
     // The transport retries every couple of seconds: log each distinct message once.

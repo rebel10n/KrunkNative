@@ -15,12 +15,21 @@
 #include <net_ext.h>
 #include <game_config.h> // game_config_is_custom: v10 isCustom
 #include <spectate.h> // the officer's suspect: focusPlayer(sus, false, true)
+#include <pthread.h> // client->net_lock: the socket check before a call goes out
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
 #define VOTED_MAX 32
+
+// K.P.D call with no answer: the phone comes down and the busy tone plays after this long. The
+// answer normally takes well under a second (the server answers at once; a call the brain records
+// waits one kn_brain round trip, accounts.c accounts_kpd_request). A reply that never comes (a
+// dropped brain request or socket, a packet the link cannot address) would otherwise leave the
+// phone up and the K.P.D button dead until the round ends. 15 s is about fifteen times the usual
+// answer and far below a player's patience with a phone that stays up.
+#define KPD_NO_ANSWER_MS 15000.0
 
 static struct {
     // io "vk": the running vote (voteToKick), who it targets and how it stands
@@ -35,6 +44,7 @@ static struct {
     int calling;
     char suspect[32];
     int suspect_uid;
+    int call_timer;            // the no-answer timer (html_timer_add), 0 none
     // K.P.D officer (v10 kpdData {sus, caller}, NET_EXT_KPD_DATA): the case of this connection
     int kpd_case;              // a case (iííiìíî != null)
     int kpd_conn;              // client->net_client_id it came on (a new connection: no case)
@@ -254,10 +264,48 @@ static void phone(const int up) {
     if (img) html_dom_set_style(img, "margin-bottom", up ? "0px" : "-700px");
 }
 
-// callPolice(alias, id): clearPops, the dial / whoosh, "Calling K.P.D ...", "kpd" 0 {id}
+// The call is over: the phone down, the no-answer timer cancelled (so it cannot end a later call)
+// and no call in flight. Every way out of a call comes through here: the answer, the timeout, a
+// new round (INIT) and a lost session.
+static void call_end(void) {
+    if (g_vk.call_timer) html_timer_cancel(g_vk.call_timer);
+    g_vk.call_timer = 0;
+    g_vk.calling = 0;
+    phone(0);
+}
+
+// The no-answer timeout fired: nothing came back in KPD_NO_ANSWER_MS, so the call ends as busy.
+static void call_no_answer(void *user) {
+    (void) user;
+    g_vk.call_timer = 0; // this timer has fired
+    if (!g_vk.calling) return;
+    call_end();
+    audio_stop("ring_0");
+    audio_play("busy_0", 0.1f, 0, 1.0f);
+    hud_ui_add_chat(NULL, "The K.P.D did not answer", "#fc03ec");
+    audio_play("whoosh_0", 0.1f, 0, 1.0f);
+}
+
+// A call goes out only on a live session: the socket (native, web or official), or the offline
+// sandbox. client_net_send drops a packet without a socket, and then no answer can come.
+static int call_reachable(Client *client) {
+    if (client->offline) return 1;
+    pthread_mutex_lock(&client->net_lock);
+    const int socket = client->net_socket;
+    pthread_mutex_unlock(&client->net_lock);
+    return socket >= 0;
+}
+
+// callPolice(alias, id): clearPops, the dial / whoosh, "Calling K.P.D ...", "kpd" 0 {id}. The phone
+// stays up until the answer or KPD_NO_ANSWER_MS, whichever comes first.
 static void call_police(Client *client, const char *alias, const int uid) {
-    if (g_vk.calling || !client) return;
-    ui_loadout_clear_pops();
+    if (!client) return;
+    ui_loadout_clear_pops(); // the confirm popup closes whatever happens to the call
+    if (g_vk.calling) return;
+    if (!call_reachable(client)) {
+        hud_ui_add_chat(NULL, "The K.P.D cannot be called while disconnected", "#fc03ec");
+        return;
+    }
     g_vk.calling = 1;
     g_vk.suspect_uid = uid;
     snprintf(g_vk.suspect, sizeof(g_vk.suspect), "%s", alias ? alias : "");
@@ -270,6 +318,7 @@ static void call_police(Client *client, const char *alias, const int uid) {
     req.tab = 0;
     req.uid = uid;
     send_ext(client, NET_EXT_KPD_CALL, &req, sizeof(req));
+    g_vk.call_timer = html_timer_add(KPD_NO_ANSWER_MS, call_no_answer, NULL);
 }
 
 // policeRes(code, message, data) (v10 :216287): code 0 ends the call (the siren for a report,
@@ -282,7 +331,7 @@ void hud_votekick_on_kpd(Client *client, const NetKpdResponsePacket *res, const 
     memcpy(name, res->name, sizeof(name));
     message[sizeof(message) - 1] = name[sizeof(name) - 1] = 0;
     if (res->code == 0) {
-        g_vk.calling = 0;
+        call_end(); // the phone down with the answer
         audio_stop("ring_0");
         if (res->status == NET_KPD_REPORTED) {
             audio_play("siren_1", 0.1f, 0, 1.0f);
@@ -292,7 +341,6 @@ void hud_votekick_on_kpd(Client *client, const NetKpdResponsePacket *res, const 
             if (!message[0]) snprintf(message, sizeof(message), "The K.P.D could not take the call");
         }
         hud_ui_add_chat(NULL, message, "#fc03ec");
-        phone(0);
         audio_play("whoosh_0", 0.1f, 0, 1.0f);
         return;
     }
@@ -507,9 +555,26 @@ void hud_votekick_reset(void) {
     g_vk.votes = g_vk.needed = 0;
     g_vk.initiated = 0;
     g_vk.voted_count = 0;
-    g_vk.calling = 0;
+    call_end(); // a call in flight does not survive the round: its answer would come too late to mean anything
     dom_display("voteToKick", "none");
-    phone(0);
+}
+
+// The session ended under a call (a disconnect, a failed reconnect, a server switch): no answer can
+// reach this page any more, so the phone comes down now rather than at the timeout. The call ends
+// silently; the connection screen already says what happened.
+void hud_votekick_on_session_lost(void) {
+    if (g_vk.calling) call_end();
+}
+
+// --render-scenario state.kpdPhone: the phone up with a call in flight and no request sent (the
+// captures of the phone; an answer from the offline sandbox would take it down at once)
+void hud_votekick_scenario_phone(const int up) {
+    if (up) {
+        g_vk.calling = 1;
+        phone(1);
+    } else {
+        call_end();
+    }
 }
 
 int hud_votekick_active(void) { return g_vk.active; }

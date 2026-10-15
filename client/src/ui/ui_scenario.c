@@ -307,6 +307,7 @@ static void warn_unknown_keys(void) {
         "v10responses", // {path: answer}: the brain's answers for the v10 popups (v10_competitive.c)
         "social",  // the v10 Social hub popup / views: {tab, sub, feed, friends, selected, messages, search, view} (v10_social.c)
         "clan",    // the Clans window (13): {data: clanData, tab, motd, loot, recruit} (clan_ui.c)
+        "kpdPhone", // in game: true = the K.P.D phone up with a call in flight, no request sent (hud_votekick.c)
         "gameCode", // v10 gameCode(): the server password popup (v10_party.c)
         "update",  // the menu's Outdated / Update now box (update_ui_scenario)
         "connectError", // with connected:false, the Lost Connection screen's error text (menu_ui.c)
@@ -1110,6 +1111,7 @@ static int ui_scenario_apply(Client *client) {
     clan_ui_scenario(st("clan"));       // the Clans window (clan_ui.c)
     if (menu_open) v10_market_scenario(st("market")); // the v10 Market & Trading popup (v10_market.c)
     update_ui_scenario(st("update"));   // the Outdated box without a network check
+    if (st_has("kpdPhone")) hud_votekick_scenario_phone(st_bool("kpdPhone", 0)); // after the game's INIT, which ends a call
     if (menu_open) apply_window(client);
     if (menu_open) v10_social_scenario(st("social")); // the v10 Social hub (v10_social.c)
     account_ui_scenario_post(); // account.c2fa: v7.1.4's 2FA popup over the window

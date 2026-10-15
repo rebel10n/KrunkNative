@@ -629,9 +629,14 @@ static struct {
     int conn_id;
     uint8_t tab;        // 0 a call, 1..3 an officer's list, ACC_KPD_RATE a verdict
     int suspect_id;     // a call's suspect connection (votekick_kpd_recorded)
+    float since;        // the request's server time (acc_kpd_expire)
     char name[SERVER_PLAYER_NAME_MAX];
 } g_kpd_pending[ACC_KPD_PENDING];
 #define ACC_KPD_RATE 0xff
+// A brain answer that never comes (the link dropped with the frame on it) would hold its slot, and the
+// caller's phone, for good: after this long the request is answered as unreachable and the slot freed.
+// The brain answers in well under a second; the client's own no-answer timeout is longer (15 s).
+#define ACC_KPD_TIMEOUT_S 10.0f
 
 static int acc_kpd_slot(void) {
     for (int i = 0; i < ACC_KPD_PENDING; i++) {
@@ -691,6 +696,7 @@ void accounts_kpd_request(ClientConnection *client, const int tab, const ClientC
     g_kpd_pending[slot].conn_id = client->id;
     g_kpd_pending[slot].tab = (uint8_t) tab;
     g_kpd_pending[slot].suspect_id = target ? target->id : -1;
+    g_kpd_pending[slot].since = g_server->now;
     snprintf(g_kpd_pending[slot].name, sizeof(g_kpd_pending[slot].name), "%s", name);
 }
 
@@ -717,7 +723,25 @@ void accounts_kpd_rate(ClientConnection *officer, const int64_t call_id, const i
     g_kpd_pending[slot].conn_id = officer->id;
     g_kpd_pending[slot].tab = ACC_KPD_RATE;
     g_kpd_pending[slot].suspect_id = -1;
+    g_kpd_pending[slot].since = g_server->now;
     snprintf(g_kpd_pending[slot].name, sizeof(g_kpd_pending[slot].name), "%s", suspect ? suspect : "");
+}
+
+// Pending K.P.D requests older than ACC_KPD_TIMEOUT_S: the caller gets the unreachable answer (a call's
+// code 0, an officer's list its tab with no rows) and the slot is free again. A late brain answer for
+// a freed request finds no slot and is ignored (acc_handle_kpd_reply).
+static void acc_kpd_expire(const float now) {
+    for (int i = 0; i < ACC_KPD_PENDING; i++) {
+        if (!g_kpd_pending[i].rid || now - g_kpd_pending[i].since < ACC_KPD_TIMEOUT_S) continue;
+        const int tab = g_kpd_pending[i].tab, conn_id = g_kpd_pending[i].conn_id;
+        char name[SERVER_PLAYER_NAME_MAX];
+        snprintf(name, sizeof(name), "%s", g_kpd_pending[i].name);
+        g_kpd_pending[i].rid = 0;
+        server_log("[kpd] no answer from the brain for %s (tab %d): released", name, tab);
+        if (tab == ACC_KPD_RATE) continue;
+        ClientConnection *client = acc_client_by_id(conn_id);
+        if (client) votekick_kpd_reply(client, (uint8_t) tab, NET_KPD_UNAVAILABLE, "K.P.D is unreachable right now", name, tab ? "[]" : NULL);
+    }
 }
 
 static int acc_handle_kpd_reply(const cJSON *frame) {
@@ -2893,6 +2917,7 @@ void accounts_tick(const float now) {
     if (g_acc.round_end_seen && !g_acc.round_committed && g_server->game.end_timer > 0.0f) acc_commit_round();
     acc_tick_ranked();
     acc_tick_custom();
+    acc_kpd_expire(now);
 
     if (g_acc.push_at && now >= g_acc.push_at) acc_push_lobby_now();
     if (now >= g_acc.next_snapshot) {

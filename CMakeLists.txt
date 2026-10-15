@@ -908,6 +908,15 @@ else ()
     target_include_directories(join_errors_test PRIVATE client/include shared/include)
     add_test(NAME join_errors_test COMMAND join_errors_test)
 
+    # kpd_phone_test: the K.P.D phone (client/src/ui/hud_votekick.c) under a call with no answer: it comes
+    # down at KPD_NO_ANSWER_MS, and so does every other way out of a call (an answer, a refusal, a new
+    # round, a lost session, no socket). The page, audio, chat and socket are stubs; the timers run on a
+    # fake clock (client/tests/kpd_phone_test.c). The headers only need the client's include tree.
+    add_executable(kpd_phone_test client/tests/kpd_phone_test.c client/src/ui/hud_votekick.c shared/src/net_ext.c)
+    target_include_directories(kpd_phone_test PRIVATE client/include client/lib shared/include)
+    target_link_libraries(kpd_phone_test PRIVATE cJSON freetype glfw m)
+    add_test(NAME kpd_phone_test COMMAND kpd_phone_test)
+
     # krunker_sync_test: our prediction (shared physics, the v10 "q" window, krunker_link, net_reconcile)
     # against a double-precision reimplementation of Krunker 10.0.3's procInputs as the official server
     add_executable(krunker_sync_test ${SHARED_HEADERS} ${SHARED_SOURCES} client/tests/krunker_sync_test.c client/src/net/krunker_link.c
