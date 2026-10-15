@@ -377,19 +377,26 @@ static void kid_open(void) {
     sb_append(&sb, "</p></div> <div class=\"kid-display-benefits svelte-lbi007\"><h3 class=\"svelte-lbi007\">");
     sb_append_esc(&sb, tr("gdc.kid.benefits.title", "Benefits of k-ID Integration"));
     sb_append(&sb, "</h3> <ul class=\"svelte-lbi007\">");
-    static const struct { const char *icon, *key, *english; } benefits[4] = {
-        {"shield", "gdc.kid.benefits.safety", "Safe, age-appropriate gaming environment"},
-        {"check", "gdc.kid.benefits.compliance", "Global regulatory compliance built-in"},
-        {"lock", "gdc.kid.benefits.privacy", "Privacy protection for younger players"},
-        {"family", "gdc.kid.benefits.parental", "Simplified parental controls and oversight"},
+    // v10's icons are the text emoji U+1F6E1 U+FE0F, U+2705, U+1F512 and U+1F46A (v10:117081), which Chrome draws
+    // with Noto Color Emoji; the engine has no colour emoji font, so they are that font's artwork as images
+    // (ui/img/kn/emoji/, the same rasters ranked_ui.c's emoji() draws; ui/README.md)
+    static const struct { const char *emoji, *key, *english; } benefits[4] = {
+        {"1f6e1-fe0f", "gdc.kid.benefits.safety", "Safe, age-appropriate gaming environment"},
+        {"2705", "gdc.kid.benefits.compliance", "Global regulatory compliance built-in"},
+        {"1f512", "gdc.kid.benefits.privacy", "Privacy protection for younger players"},
+        {"1f46a", "gdc.kid.benefits.parental", "Simplified parental controls and oversight"},
     };
     for (int i = 0; i < 4; i++) {
-        sb_appendf(&sb, "%s<li class=\"svelte-lbi007\"><div class=\"benefit-icon svelte-lbi007\"><img class=\"kid-icon\" src=\"img/kid/%s.svg\" alt=\"\"></div> <div class=\"benefit-text svelte-lbi007\">", i ? " " : "", benefits[i].icon);
+        sb_appendf(&sb, "%s<li class=\"svelte-lbi007\"><div class=\"benefit-icon svelte-lbi007\"><img class=\"kn-emoji kid-emoji\" src=\"./img/kn/emoji/%s.png\" alt=\"\"></div> <div class=\"benefit-text svelte-lbi007\">", i ? " " : "", benefits[i].emoji);
         sb_append_esc(&sb, tr(benefits[i].key, benefits[i].english));
         sb_append(&sb, "</div></li>");
     }
     sb_append(&sb, "</ul></div> <div class=\"partnership-info svelte-lbi007\"><div class=\"partnership-icon svelte-lbi007\">"
-                   "<svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" xmlns=\"http://www.w3.org/2000/svg\" class=\"svelte-lbi007\"><path d=\"M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM12 20C7.59 20 4 16.41 4 12C4 7.59 7.59 4 12 4C16.41 4 20 7.59 20 12C20 16.41 16.41 20 12 20ZM11 7H13V9H11V7ZM11 11H13V17H11V11Z\" fill=\"white\" class=\"svelte-lbi007\"></path></svg></div> <p class=\"svelte-lbi007\">");
+                   // v10's inline <svg> (24 x 24, the info circle): the engine draws no inline SVG, so it is
+                   // the same document as an image (the pattern of v10_news.c's Twitch icon)
+                   "<img class=\"svelte-lbi007\" width=\"24\" height=\"24\" alt=\"\" src=\"data:image/svg+xml,%3Csvg width='24' height='24' viewBox='0 0 24 24' fill='none' "
+                   "xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M12 2C6.48 2 2 6.48 2 12C2 17.52 6.48 22 12 22C17.52 22 22 17.52 22 12C22 6.48 17.52 2 12 2ZM12 20C7.59 20 "
+                   "4 16.41 4 12C4 7.59 7.59 4 12 4C16.41 4 20 7.59 20 12C20 16.41 16.41 20 12 20ZM11 7H13V9H11V7ZM11 11H13V17H11V11Z' fill='white'/%3E%3C/svg%3E\"></div> <p class=\"svelte-lbi007\">");
     sb_append_esc(&sb, tr("gdc.kid.partnership.text", "k-ID provides age verification and compliance technology that keeps Krunker safe for players of all ages"));
     sb_append(&sb, "</p></div></div> <div class=\"kid-display-right svelte-lbi007\"><div class=\"kid-display-character svelte-lbi007\"><div class=\"guide-gif svelte-lbi007\"></div></div> "
                    "<div class=\"kid-display-buttons svelte-lbi007\"><button class=\"kid-button kid-button-register svelte-lbi007\" onclick=\"knMiscKidRegister()\">");

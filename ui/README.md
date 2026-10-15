@@ -67,27 +67,36 @@ without its CDN): `img/mouse/10002.png` (controls), `img/backgrounds/gamecats/c_
 - `css/ranked-kn.css` — the Ranked window (slot 27) in Krunker v10.0.2's layout and the Turf Wars
   window (v10 shows both as Svelte popups whose styles live in its JS bundle), added at run time
   by `client/src/ui/ranked_ui.c` / `turf_ui.c` (doc/v10/ranked-impl.md).
-- `img/kn/emoji/{1f512,1f50d,2728,274c,2694-fe0f}.png` — the emoji of v10's ranked texts (Level
-  Required / Login Required lock U+1F512, the Searching magnifier U+1F50D, Match found sparkles
-  U+2728, Internal Error cross U+274C, Ready / in-game swords U+2694 U+FE0F), drawn by
-  `client/src/ui/ranked_ui.c` emoji(). The native engine has no colour emoji font, so the text
+- `img/kn/emoji/{1f512,1f50d,2728,274c,2694-fe0f,1f6e1-fe0f,2705,1f46a}.png` — the text emoji v10
+  writes in its Svelte popups: the ranked texts (Level Required / Login Required lock U+1F512, the
+  Searching magnifier U+1F50D, Match found sparkles U+2728, Internal Error cross U+274C, Ready /
+  in-game swords U+2694 U+FE0F; `client/src/ui/ranked_ui.c` emoji()) and the k-ID dialog's benefit
+  icons (shield U+1F6E1 U+FE0F, check mark U+2705, the lock again, family U+1F46A; v10:117081,
+  `client/src/ui/v10_misc_popups.c`). The native engine has no colour emoji font, so the text
   glyphs drew as missing-glyph boxes. v10 draws the same glyphs as text in Chrome through the
-  system Noto Color Emoji font, so these are that font's artwork rasterised once (256 px square,
-  glyph at 160 px, centred): Noto Color Emoji, `/usr/share/fonts/google-noto-color-emoji-fonts/
-  Noto-COLRv1.ttf` (sha256 94c6c870925aaafd3fdda338fc4b2e4dfb74260c9aefa87d4aa8a145a993a5a2),
-  headless Chrome 152 `--screenshot`, 2026-10-14. Noto Color Emoji is under the OFL 1.1. PNG sha256:
-  1f512 29326ab9943289f4c7c08eb381058b7c7a4d429a67d26253b82aba087e06fa2e, 1f50d
+  system Noto Color Emoji font, so these are that font's artwork rasterised once: the glyph at
+  160 px (line-height 1) in headless Chrome 152 `--screenshot` with a transparent background, in
+  a window tall enough for the whole glyph, then its ink box centred on a 256 px square. Noto
+  Color Emoji, `/usr/share/fonts/google-noto-color-emoji-fonts/Noto-COLRv1.ttf` (sha256
+  94c6c870925aaafd3fdda338fc4b2e4dfb74260c9aefa87d4aa8a145a993a5a2), OFL 1.1; 2026-10-14, and
+  2026-10-15 for the k-ID glyphs plus a redo of the lock, sparkles, cross and swords, whose first
+  rasters were cut off at the bottom (a 200 px tall capture viewport; the magnifier was whole
+  and the redo reproduces it byte for byte). PNG sha256:
+  1f512 bd595cff2222940d0012179c0f704664a24aa08d5ff202a4b281a7c16e942fdc, 1f50d
   7d32c8f2dcaa60336f16d0d366dc7a76fe1979d9934ce9119f6e55ef516f32bf, 2728
-  579e117ba7b50db524e3fe6f037c9d04ac496e8bf05de5412a547ebbf95f589f, 274c
-  3f2524bf89a93681223456982adf97973b11453902cc8a71c0a19d2cebcfaf4a, 2694-fe0f
-  3c38af66779655f39edb0f0be8141be402b2dc854132211630601f8d026a24fa. Not in `tools/ui-import/live_assets_v10.lock`:
-  v10 has no origin file for these glyphs (its page does not ship emoji images), so the lock's
-  fetch-and-verify model does not apply.
+  d3ef762dbced2aedb1142d45dec9cdc5e3cff080f261dbd87f2eb2923f08f772, 274c
+  f0bb857d8d185d9af4a1afedcd38edb5d62d7eefb98f69a16cc1cc08406e813d, 2694-fe0f
+  b5b2f5aa527458c44cedfa81f5182f5d2969f5007bccecf356a3537fcc934eee, 1f6e1-fe0f
+  ef5bc3b79cf333fdbd5d3c64251dbda78aecfd3ea287d51c9676928a2f35075b, 2705
+  25a1e68416fb386be591027d5d40dc93da6bdaa572ba26e3f6e7a53312641d0f, 1f46a
+  084efd3294649c86235975e8d2851fd297b92b099bdcb6fc7bf4bd725fed598e. Not in
+  `tools/ui-import/live_assets_v10.lock`: v10 has no origin file for these glyphs (its page does
+  not ship emoji images), so the lock's fetch-and-verify model does not apply.
   The Turf Wars emoji follow the same rule (`client/src/ui/v10_competitive.c` v10_emoji(), the
   table shared with the ranked texts): `img/kn/emoji/{1f3ae,1f3af,1f465,1f4b0,1f4ca,1f947,1f948,
   1f949,26a0-fe0f}.png` (the Turf Wars how-to's Earn Kills / Earn Rewards / Pro Tips / note icons,
-  the Top Grossing Clans card and the My Clan medals), the same Noto Color Emoji rasterisation
-  (256 px, glyph at 160 px). PNG sha256: 1f3ae a361b0ef9e16c1e0333d1c40ba65ac915876db3a7526a6828fdb820838e3c384,
+  the Top Grossing Clans card and the My Clan medals), the same Noto Color Emoji rasterisation.
+  PNG sha256: 1f3ae a361b0ef9e16c1e0333d1c40ba65ac915876db3a7526a6828fdb820838e3c384,
   1f3af 12f5f61e1eaf4a2277c58538b93fe41d61626cf61f5e66d30c4c992fad8d9153, 1f465
   1fdaf693e8cb4c4d4939b13a5d85c3639a006927981052ad1b3eead2ee093542, 1f4b0
   ed7694f0bc65fdfe7a6817a8da90dd27e7d6d74b15f03dacbd939694f8b49f89, 1f4ca

@@ -25,13 +25,26 @@ float layout_text_width(LayoutTree *t, TextFont *font, const char *s, size_t len
     return text_measure(font, s, len, letter_spacing);
 }
 
+/* Blink keeps the computed line height in LayoutUnits (1/64 px): a number is stored as a
+ * percentage (StyleBuilderConverter::ConvertLineHeight) and resolved against
+ * LayoutUnit(font-size) by ValueForLength, whose LayoutUnit(float) truncates; a length goes
+ * through LayoutUnit::FromFloatRound.  17px * 1.6 is then 27.1875, not 27.2, and the 1/64 lost
+ * per line shows as a 1 px baseline step after a few lines (v10's k-ID description). */
+static float lu_floor(const float px) { return floorf(px * 64.0f) / 64.0f; }
+static float lu_round(const float px) { return roundf(px * 64.0f) / 64.0f; }
+
 float layout_line_height(const Box *b)
 {
     const CssLength *lh = &b->style->line_height;
+    const float fs = lu_floor(b->style->font_size);
     switch (lh->kind) {
     case CSS_LEN_NORMAL: return b->fm.line_height > 0 ? b->fm.line_height : b->fm.ascent + b->fm.descent;
-    case CSS_LEN_NUMBER: return lh->px * b->style->font_size;
-    case CSS_LEN_VALUE: return lh->px + lh->pct * 0.01f * b->style->font_size;
+    case CSS_LEN_NUMBER: {
+        /* Blink's float steps: the percentage first (1.2 -> 120 exactly), so 20px * 1.2 stays 24 */
+        const float pct = lh->px * 100.0f;
+        return lu_floor(fs * pct / 100.0f);
+    }
+    case CSS_LEN_VALUE: return lh->pct != 0.0f ? lu_floor(lh->px + lh->pct * 0.01f * fs) : lu_round(lh->px);
     default: return b->fm.line_height;
     }
 }

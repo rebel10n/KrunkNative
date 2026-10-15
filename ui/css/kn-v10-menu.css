@@ -67,23 +67,8 @@
 	vertical-align: -0.15em;
 }
 
-/* KrunkNative: the ranked message overlay (Level Required, Login Required, Cooldown, ...; hash
- * svelte-jxc66d) shows like v10's Svelte transitions on its box (scale 0.9 to 1, duration 200 ms,
- * with the opacity ramp) and its backdrop (fade, 200 ms): js bundle, transition:scale / fade on
- * the overlay (game.deob.js:114154-114158). The popup re-renders its markup, so the rules are
- * plain CSS keyframes that run whenever the overlay is generated. */
-@keyframes kn-rk-overlay-fade {
-	from { opacity: 0; }
-}
-
-@keyframes kn-rk-overlay-scale {
-	from { opacity: 0; transform: scale(0.9); }
-}
-
-.overlay-container.svelte-jxc66d {
-	animation: kn-rk-overlay-fade 200ms linear;
-}
-
-.overlay-container.svelte-jxc66d .overlay-content.svelte-jxc66d {
-	animation: kn-rk-overlay-scale 200ms linear;
-}
+/* KrunkNative: the ranked message overlay's Svelte transitions (svelte-jxc66d: scale 0.9 to 1 with
+ * cubicOut and the backdrop's fade, 200 ms, both ways; g:114154-114158) are css/kn-v10-popups.css's
+ * kn-ranked-intro / kn-ranked-outro, which client/src/ui/ranked_ui.c sets only while the overlay
+ * mounts or unmounts. A rule on .overlay-container itself would outrank them (two classes against
+ * one: the outro ran the intro's keyframes) and restart on every re-render of the popup. */

@@ -251,12 +251,40 @@ static void test_page_icons(const char *root) {
     }
 }
 
+/* rgba() paints (svg.c svg_rewrite_rgba): nanosvg alone paints them opaque grey */
+static void test_rgba(void) {
+    static const struct { const char *doc; int r, g, b, a; } cases[] = {
+        /* v10's k-ID header pattern: 5 % white */
+        {"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"><path fill=\"rgba(255,255,255,0.05)\" d=\"M0 0H10V10H0Z\"/></svg>", 255, 255, 255, 12},
+        /* the colour's alpha times the element's own fill-opacity; a percentage alpha */
+        {"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"><rect fill-opacity=\"0.5\" fill=\"rgba(255, 0, 0, 50%)\" width=\"10\" height=\"10\"/></svg>", 255, 0, 0, 63},
+        /* a container's rgba() is left alone: the child's own opaque colour wins */
+        {"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"><g fill=\"rgba(0,0,255,0.5)\"><rect fill=\"red\" width=\"10\" height=\"10\"/></g></svg>", 255, 0, 0, 255},
+        /* only the stroke has an rgba(): the fill keeps full opacity */
+        {"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"10\" height=\"10\"><rect stroke=\"rgba(0,0,0,.2)\" fill=\"rgb(0,128,0)\" width=\"10\" height=\"10\"/></svg>", 0, 128, 0, 255},
+    };
+    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
+        SvgImage *s = mk(cases[i].doc);
+        unsigned char *px = s ? svg_image_rasterize(s, 10, 10) : NULL;
+        CHECK(px != NULL);
+        if (px) {
+            const unsigned char *c = px_at(px, 10, 5, 5);
+            const int ok = abs(c[0] - cases[i].r) <= 1 && abs(c[1] - cases[i].g) <= 1 && abs(c[2] - cases[i].b) <= 1 && abs(c[3] - cases[i].a) <= 1;
+            if (!ok) fprintf(stderr, "  rgba case %zu: got %d %d %d %d\n", i, c[0], c[1], c[2], c[3]);
+            CHECK(ok);
+        }
+        free(px);
+        svg_image_destroy(s);
+    }
+}
+
 int main(int argc, char **argv) {
     const char *root = argc > 1 ? argv[1] : ".";
     test_sniff();
     test_sizes();
     test_mapping();
     test_paint();
+    test_rgba();
     test_page_icons(root);
     printf("test_svg: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail ? 1 : 0;

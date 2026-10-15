@@ -2577,6 +2577,7 @@ void html_ui_backend_render(UI *ui, const int layers)
     const GLboolean depth_was_on = glIsEnabled(GL_DEPTH_TEST);
     g->decode_ms = 0.0;
     g->decodes = g->decodes_deferred = 0;
+    image_cache_set_clock(g->images, engine_now_ms()); /* animated GIFs: the frame due now */
     glb_begin(g->glb, g->fb_w, g->fb_h, g->paint.device_scale);
     if (g->dl.n) glb_submit(g->glb, &g->dl);
     if (layers & HTML_LAYER_TOP) { /* else html_ui_render_top() draws them after the client's GL */

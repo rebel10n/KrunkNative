@@ -159,6 +159,9 @@ int  image_entry_resident(const ImageEntry *entry);                 /* 1: no dec
 int  image_entry_load(ImageCache *cache, const ImageEntry *entry);  /* decode + upload now; 1 = has tex */
 void image_entry_touch(ImageCache *cache, const ImageEntry *entry);  /* drawn this frame (LRU) */
 void image_cache_frame(ImageCache *cache);                           /* once per frame: count, evict */
+/* Once per frame before the draws: the clock (engine_now_ms(), the scenario's pinned clock included)
+ * animated GIFs follow; each starts at its first decode and shows the frame due then (image.c ImageAnim). */
+void image_cache_set_clock(ImageCache *cache, double now_ms);
 /* Game content arrived (asset_arrival_generation(), the native on-demand fetch): images that
  * failed with "file not found" and whose asset file exists now are probed again. Returns how many
  * load now (the caller relayouts / repaints). */

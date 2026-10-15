@@ -62,10 +62,10 @@
 }
 
 
-/* ---- k-ID benefit icons: v10 draws these as colour emoji (the system's emoji font); the port has no colour
-   emoji font, so they are images (ui/img/kid/*.svg, drawn for this port, not v10's own artwork). */
-.kn-kid-layer .benefit-icon .kid-icon {
-    width: 1.2em;
-    height: 1.2em;
-    vertical-align: middle;
+/* ---- k-ID benefit icons: v10 writes them as text emoji (v10:117081) that Chrome draws with Noto Color Emoji; here
+   they are that artwork as images (.kn-emoji, css/kn-v10-menu.css: the glyph fills 160 of the image's 256 px, so a
+   1.6em image draws a 1em glyph). The negative margins give the image the glyph's own box: Noto Color Emoji's
+   advance (1.245em) and the line it would sit on, so the row keeps v10's layout. */
+.benefit-icon .kn-emoji.kid-emoji {
+    margin: -0.3em -0.1775em;
 }

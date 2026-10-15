@@ -22,6 +22,15 @@
 .io-button--accept { background-color: #29c90d; border: 2px solid #36e017; color: #fff; }
 .io-button--accept:hover { background-color: #31e610; }
 .io-button-group { display: flex; gap: 15px; justify-content: center; width: 100%; margin: 10px 0; }
+/* v10's modifiers (css/bundledStyles.css, same values) again after the base rules above: this sheet
+ * loads after bundledStyles.css, so its base rules otherwise beat the modifiers at equal specificity
+ * (the Usernames modal's slim header drew at 30 px instead of 18 px). */
+.io-popup-header--slim { padding: 8px; font-size: 18px; line-height: 2; }
+.io-button--accept-secondary { background-color: #0d97c9; border: 2px solid #0d81c9; color: #ffffff; }
+.io-button--accept-secondary:hover { background-color: #11a8d1; }
+.io-button--danger { background-color: #f92b2b; border: 2px solid #fa4747; color: #ffffff; }
+.io-button--danger:hover { background-color: #ff3a3a; }
+.io-button--slim { padding: 3px 15px; font-size: 0.85em; }
 
 /* 3. css/main.css's nested battle pass rules ("span {...}" inside .bpLevelNum, .bpCardRarityLabel,
  *    .bpBtn, .bpSeasonTime, .bpLevelText, .bpClaimB), flattened for the engine */

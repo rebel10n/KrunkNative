@@ -42,6 +42,24 @@ typedef struct ImageSvgTex {
     unsigned last_use;
 } ImageSvgTex;
 
+/* An animated GIF.  Chrome animates every multi-frame GIF (an <img> or a CSS background alike):
+ * stb decodes the frames already composited (disposal applied), they are kept premultiplied and
+ * the frame due at the cache clock is copied into entry.tex (image_anim_sync).  Blink's timing
+ * rules: a frame delay of 10 ms or less lasts 100 ms (ImageDecoder::FrameDurationAtIndex); a GIF
+ * without a NETSCAPE2.0 / ANIMEXTS1.0 loop extension plays once, loop count 0 loops forever and
+ * loop count n plays n + 1 times (SkCodec::getRepetitionCount: repetitions after the first);
+ * a finished animation stays on its last frame. */
+typedef struct ImageAnim {
+    unsigned char *frames; /* n frames of w x h RGBA8, premultiplied */
+    int *ends;             /* end of frame i within one loop, ms (cumulative) */
+    int n;
+    int plays;             /* 0 = forever, else the number of loops played */
+    int shown;             /* the frame entry.tex holds */
+} ImageAnim;
+
+#define IMAGE_GIF_MIN_DELAY_MS 10     /* Blink: a delay <= 10 ms ... */
+#define IMAGE_GIF_DEFAULT_DELAY_MS 100 /* ... lasts 100 ms */
+
 typedef struct ImageSlot {
     ImageEntry entry;      /* first so &slot->entry == slot                    */
     char *key;             /* root-relative path, or the raw URL when rejected */
@@ -53,6 +71,10 @@ typedef struct ImageSlot {
     unsigned last_frame;   /* image_cache_frame() count of its last draw (LRU)      */
     size_t bytes;          /* GL bytes held (level 0 + mips)   */
     uint8_t missing;       /* failed with "file not found" (image_cache_retry_missing) */
+    const struct ImageCache *owner; /* its cache (the animation clock)          */
+    ImageAnim *anim;       /* animated GIF, else NULL (freed with the texture)  */
+    uint8_t anim_started;  /* the timeline began at anim_start_ms (its first decode); */
+    double anim_start_ms;  /* kept across evictions, so a re-decode keeps the phase */
 } ImageSlot;
 
 struct ImageCache {
@@ -67,7 +89,17 @@ struct ImageCache {
     size_t bytes;          /* GL bytes of the resident lazy entries              */
     int decodes;           /* lazy decodes so far (profile)                      */
     unsigned arrivals;     /* asset_arrival_generation() last seen               */
+    double clock_ms;       /* image_cache_set_clock(): the animated GIFs' clock    */
+    int clock_set;
 };
+
+static void image_anim_free(ImageSlot *slot) {
+    if (!slot->anim) return;
+    stbi_image_free(slot->anim->frames); /* stb's allocation */
+    free(slot->anim->ends);
+    free(slot->anim);
+    slot->anim = NULL;
+}
 
 /* ------------------------------------------------------------------------- */
 /* Cache                                                                      */
@@ -107,6 +139,7 @@ static void image_slot_free(ImageSlot *slot) {
         if (slot->sized[i].tex) glDeleteTextures(1, &slot->sized[i].tex);
     }
     svg_image_destroy(slot->svg);
+    image_anim_free(slot);
 
     free(slot->key);
     free(slot);
@@ -178,6 +211,7 @@ static ImageSlot *image_cache_add(ImageCache *cache, const char *key, const uint
     }
 
     slot->hash = hash;
+    slot->owner = cache;
     cache->slots[cache->count++] = slot;
     image_index_put(cache, cache->count - 1);
 
@@ -450,6 +484,105 @@ static unsigned image_upload(const unsigned char *px, const int w, const int h, 
     return tex;
 }
 
+/* ---- animated GIF -------------------------------------------------------- */
+
+static int image_is_gif(const unsigned char *bytes, const size_t len) {
+    return len >= 6 && !memcmp(bytes, "GIF8", 4) && (bytes[4] == '7' || bytes[4] == '9') && bytes[5] == 'a';
+}
+
+/* Plays of a GIF from its loop extension (ImageAnim.plays): 1 without one, 0 = forever. */
+static int image_gif_plays(const unsigned char *bytes, const size_t len) {
+    static const char *const apps[2] = {"NETSCAPE2.0", "ANIMEXTS1.0"};
+    for (size_t i = 0; i + 19 <= len; i++) {
+        /* 0x21 0xFF 0x0B <11 bytes app id> 0x03 0x01 <loop count, u16 LE> */
+        if (bytes[i] != 0x21 || bytes[i + 1] != 0xFF || bytes[i + 2] != 0x0B) continue;
+        for (int a = 0; a < 2; a++) {
+            if (memcmp(bytes + i + 3, apps[a], 11) || bytes[i + 14] != 0x03 || bytes[i + 15] != 0x01) continue;
+            const int count = bytes[i + 16] | bytes[i + 17] << 8;
+            return count == 0 ? 0 : count + 1;
+        }
+    }
+    return 1;
+}
+
+/* Builds the animation of `n` decoded frames (stb: n x w x h RGBA8, straight alpha; taken over
+ * and premultiplied here).  NULL for a still image or on allocation failure. */
+static ImageAnim *image_anim_create(unsigned char *frames, const int *delays, const int n, const int w, const int h,
+                                    const int plays) {
+    if (n < 2) return NULL;
+    ImageAnim *anim = calloc(1, sizeof(*anim));
+    int *ends = malloc((size_t) n * sizeof(*ends));
+    if (!anim || !ends) {
+        free(anim);
+        free(ends);
+        return NULL;
+    }
+    int t = 0;
+    for (int i = 0; i < n; i++) {
+        const int d = delays ? delays[i] : 0;
+        t += d <= IMAGE_GIF_MIN_DELAY_MS ? IMAGE_GIF_DEFAULT_DELAY_MS : d;
+        ends[i] = t;
+    }
+    image_premultiply(frames, (size_t) w * (size_t) h * (size_t) n);
+    anim->frames = frames;
+    anim->ends = ends;
+    anim->n = n;
+    anim->plays = plays;
+    anim->shown = 0;
+    return anim;
+}
+
+/* The frame due `elapsed_ms` after the animation started. */
+static int image_anim_frame(const ImageAnim *anim, const double elapsed_ms) {
+    const int loop = anim->ends[anim->n - 1];
+    if (!(elapsed_ms > 0.0) || loop <= 0) return 0;
+    if (anim->plays > 0 && elapsed_ms >= (double) loop * anim->plays) return anim->n - 1;
+    const double t = fmod(elapsed_ms, (double) loop);
+    for (int i = 0; i < anim->n; i++) {
+        if (t < (double) anim->ends[i]) return i;
+    }
+    return anim->n - 1;
+}
+
+/* Puts the frame due at the cache clock into entry.tex (texture binding and unpack alignment
+ * of the active unit preserved).  The timeline starts at the first sync after a decode. */
+static void image_anim_sync(ImageSlot *slot) {
+    ImageAnim *anim = slot->anim;
+    const struct ImageCache *cache = slot->owner;
+    if (!anim || !slot->entry.tex || !cache || !cache->clock_set) return;
+    if (!slot->anim_started) {
+        slot->anim_started = 1;
+        slot->anim_start_ms = cache->clock_ms;
+    }
+    const int frame = image_anim_frame(anim, cache->clock_ms - slot->anim_start_ms);
+    if (frame == anim->shown) return;
+
+    const int w = slot->entry.w, h = slot->entry.h;
+    GLint prev_tex = 0, prev_align = 4;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &prev_tex);
+    glGetIntegerv(GL_UNPACK_ALIGNMENT, &prev_align);
+    glBindTexture(GL_TEXTURE_2D, slot->entry.tex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE,
+                    anim->frames + (size_t) frame * (size_t) w * (size_t) h * 4u);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, prev_align);
+    glBindTexture(GL_TEXTURE_2D, (GLuint) prev_tex);
+    anim->shown = frame;
+}
+
+void image_cache_set_clock(ImageCache *cache, const double now_ms) {
+    if (!cache) return;
+    cache->clock_ms = now_ms;
+    cache->clock_set = 1;
+    /* drawn entries sync in image_texture(); this keeps the ones whose texture id sits in a
+     * display list (eager data: URL GIFs, not resolved per draw) moving too */
+    for (int i = 0; i < cache->count; i++) {
+        ImageSlot *slot = cache->slots[i];
+        if (slot->anim && !slot->lazy) image_anim_sync(slot);
+    }
+}
+
 /* Reason of the latest image_fail(), for the KRUNKNATIVE_HTML_IMAGE_LOG line. */
 static const char *image_last_reason = "";
 
@@ -627,7 +760,29 @@ static void image_load(const ImageCache *cache, ImageSlot *slot, const char *dat
     int w = 0, h = 0, channels = 0;
     const int svg = svg_sniff(bytes, len);
     unsigned char *px = NULL;
-    if (svg) {
+    ImageAnim *anim = NULL;
+    image_anim_free(slot);
+    if (!svg && image_is_gif(bytes, len)) {
+        /* every frame (composited); a single-frame GIF is a still image */
+        int *delays = NULL, frames = 0;
+        unsigned char *all = stbi_load_gif_from_memory(bytes, (int) len, &delays, &w, &h, &frames, &channels, 4);
+        if (all && frames > 1 && w > 0 && h > 0) {
+            anim = image_anim_create(all, delays, frames, w, h, image_gif_plays(bytes, len));
+            if (anim) {
+                /* frame 0 is uploaded below (already premultiplied: skip that step) */
+                px = all;
+            } else {
+                stbi_image_free(all);
+                all = NULL;
+            }
+        } else {
+            px = all;
+        }
+        stbi_image_free(delays);
+    }
+    if (px) {
+        /* decoded above */
+    } else if (svg) {
         /* tex holds the intrinsic-size raster (the fallback);
          * paint draws device-size rasters through image_texture_sized() */
         slot->svg = svg_image_create(bytes, len);
@@ -653,13 +808,17 @@ static void image_load(const ImageCache *cache, ImageSlot *slot, const char *dat
         return;
     }
 
-    image_premultiply(px, (size_t) w * (size_t) h);
+    if (!anim) image_premultiply(px, (size_t) w * (size_t) h);
 
     const unsigned tex = image_upload(px, w, h, 1);
     if (svg) free(px);
-    else stbi_image_free(px);
+    else if (!anim) stbi_image_free(px); /* an animation keeps its frames (px is frame 0) */
 
     if (!tex) {
+        if (anim) {
+            slot->anim = anim;
+            image_anim_free(slot);
+        }
         image_fail(slot, "GL texture upload failed");
         return;
     }
@@ -669,6 +828,7 @@ static void image_load(const ImageCache *cache, ImageSlot *slot, const char *dat
     slot->entry.h = h;
     slot->entry.failed = 0;
     slot->entry.vector = svg;
+    slot->anim = anim;
 }
 
 /* A file image's natural size from its header (layout needs no pixels); the pixels are
@@ -715,6 +875,7 @@ int image_entry_load(ImageCache *cache, const ImageEntry *entry) {
         return 0;
     }
     slot->bytes = (size_t) slot->entry.w * (size_t) slot->entry.h * 4u * 4u / 3u;
+    if (slot->anim) slot->bytes += (size_t) slot->entry.w * (size_t) slot->entry.h * 4u * (size_t) slot->anim->n; /* its frames */
     cache->bytes += slot->bytes;
     slot->last_frame = cache->frame;
     return 1;
@@ -728,6 +889,7 @@ void image_entry_touch(ImageCache *cache, const ImageEntry *entry) {
 static void image_evict(ImageCache *cache, ImageSlot *slot) {
     if (slot->entry.tex) glDeleteTextures(1, &slot->entry.tex);
     slot->entry.tex = 0;
+    image_anim_free(slot);
     cache->bytes -= slot->bytes < cache->bytes ? slot->bytes : cache->bytes;
     slot->bytes = 0;
 }
@@ -828,6 +990,7 @@ const ImageEntry *image_get(ImageCache *cache, const char *url, const char *base
 unsigned image_texture(const ImageEntry *entry, const int nearest) {
     (void) nearest;
     if (!entry || entry->failed) return 0;
+    if (entry->tex && !entry->vector) image_anim_sync((ImageSlot *) entry); /* failed_entry has no tex */
     return entry->tex;
 }
 

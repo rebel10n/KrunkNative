@@ -20,9 +20,10 @@
       "popups": {
         "open": "kid"
       }
-    }
+    },
+    "after_ms": 33800
   },
   "frames": 3,
-  "note": "the k-ID GDC 2025 dialog (v10 capture: gdc-kid display mode, guest; fly y:20 500 ms, settled at 800 ms)",
+  "note": "the k-ID GDC 2025 dialog (v10 capture: gdc-kid display mode, guest; fly y:20 500 ms, settled at 800 ms) Two clocks show in the reference: capture-v10-popups.js pauses every CSS animation at 800 ms (the register button's 3 s infinite shine), while the guide GIF (img/guide/0.gif, 12 frames of 180 ms, not a CSS animation) kept running and shows its frame 7 (1260-1440 ms into its 2160 ms loop). after_ms 33800 meets both: 33800 mod 3000 = 800 and 33800 mod 2160 = 1400.",
   "ref": "doc/ref/krunker-v10/popups/popup-kid.png"
 }

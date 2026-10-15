@@ -592,6 +592,29 @@ static void test_geometry(void) {
 
 /* ---- main ------------------------------------------------------------------- */
 
+/* Animated GIFs (image.c ImageAnim): ui/img/guide/0.gif, 12 frames of 180 ms, loop count 0
+ * (forever). The texture follows image_cache_set_clock() from the entry's first draw. */
+static void test_animated_gif(ImageCache *cache) {
+    image_cache_set_clock(cache, 1000.0);
+    const ImageEntry *e = get_loaded(cache, "img/guide/0.gif", "index.html");
+    CHECK(!e->failed && e->w == 625 && e->h == 542 && e->tex, "guide gif: %dx%d tex %u", e->w, e->h, e->tex);
+    if (e->failed || !e->tex) return;
+    unsigned char *frames[3] = {0};
+    static const double at[3] = {0.0, 7.0 * 180.0 + 90.0, 12.0 * 180.0 + 7.0 * 180.0 + 90.0}; /* frame 0, 7, 7 a loop later */
+    for (int i = 0; i < 3; i++) {
+        image_cache_set_clock(cache, 1000.0 + at[i]);
+        CHECK(image_texture(e, 0) == e->tex, "guide gif: the texture id stays");
+        frames[i] = read_texture(e->tex, e->w, e->h);
+    }
+    const size_t bytes = (size_t) e->w * e->h * 4;
+    CHECK(memcmp(frames[0], frames[1], bytes) != 0, "guide gif: frame 7 differs from frame 0");
+    CHECK(memcmp(frames[1], frames[2], bytes) == 0, "guide gif: it loops (frame 7 again 2160 ms later)");
+    for (int i = 0; i < 3; i++) free(frames[i]);
+    image_cache_set_clock(cache, 1000.0); /* back to frame 0 for the checks that follow */
+    (void) image_texture(e, 0);
+    CHECK(glGetError() == GL_NO_ERROR, "guide gif: GL error");
+}
+
 int main(int argc, char **argv) {
     headless_parse_args(&argc, argv); // KRUNKNATIVE_HEADLESS=1 / --headless
     const char *ui_dir = argc > 1 ? argv[1] : "../ui/";
@@ -645,6 +668,7 @@ int main(int argc, char **argv) {
     test_lazy_nearest(cache);
     test_roots(cache);
     test_failures(cache);
+    test_animated_gif(cache);
 
     const int count = image_cache_count(cache);
     image_cache_destroy(cache);

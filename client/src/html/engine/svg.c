@@ -176,9 +176,196 @@ static void svg_parse_par(SvgImage *svg, const char *v, const size_t len) {
     svg->slice = !strncmp(p, "slice", 5);
 }
 
-SvgImage *svg_image_create(const unsigned char *bytes, const size_t len) {
-    if (!bytes || !len) return NULL;
-    const char *text = (const char *) bytes, *end = text + len;
+/* ---- rgba() paints ----------------------------------------------------------
+ * nanosvg reads no rgba(): it falls back to its named colours and paints opaque grey
+ * (v10's k-ID header pattern, fill="rgba(255,255,255,0.05)", drew as grey diamonds).  On
+ * the leaf elements below, a fill / stroke / stop-color attribute of rgba(r, g, b, a) is
+ * rewritten to rgb(r, g, b) with its alpha multiplied into fill-opacity / stroke-opacity /
+ * stop-opacity, which is what the colour's alpha means there (both multiply the paint).
+ * Containers (<g>, <svg>) are left alone: an opacity attribute set there would be
+ * inherited by children that name their own opaque colour. */
+
+typedef struct SvgBuf {
+    char *p;
+    size_t n, cap;
+    int oom;
+} SvgBuf;
+
+static void svg_buf_put(SvgBuf *b, const char *s, const size_t n) {
+    if (b->oom || !n) return;
+    if (b->n + n + 1 > b->cap) {
+        size_t cap = b->cap ? b->cap : 256;
+        while (b->n + n + 1 > cap) cap *= 2;
+        char *grown = realloc(b->p, cap);
+        if (!grown) {
+            b->oom = 1;
+            return;
+        }
+        b->p = grown;
+        b->cap = cap;
+    }
+    memcpy(b->p + b->n, s, n);
+    b->n += n;
+    b->p[b->n] = 0;
+}
+
+static void svg_buf_str(SvgBuf *b, const char *s) { svg_buf_put(b, s, strlen(s)); }
+
+static int svg_name_char(const char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == ':';
+}
+
+/* rgba(c, c, c, a) / rgba(c c c / a): the three channel tokens and the alpha (0..1). */
+static int svg_parse_rgba(const char *v, const size_t len, char chans[3][24], float *alpha) {
+    char buf[96];
+    if (len >= sizeof buf) return 0;
+    memcpy(buf, v, len);
+    buf[len] = 0;
+    char *p = buf;
+    while (svg_space(*p)) p++;
+    if (strncmp(p, "rgba(", 5)) return 0;
+    p += 5;
+    for (int i = 0; i < 4; i++) {
+        while (svg_space(*p) || *p == ',' || (i == 3 && *p == '/')) p++;
+        char *e = NULL;
+        const float f = strtof(p, &e);
+        if (e == p) return 0;
+        const int pct = *e == '%';
+        if (i < 3) {
+            const size_t tl = (size_t) (e + pct - p);
+            if (tl >= sizeof chans[i]) return 0;
+            memcpy(chans[i], p, tl);
+            chans[i][tl] = 0;
+        } else {
+            *alpha = pct ? f / 100.0f : f;
+        }
+        p = e + pct;
+    }
+    while (svg_space(*p)) p++;
+    if (*p != ')') return 0;
+    /* nanosvg's rgb() takes all-integer or all-percent channels: anything else stays as is */
+    const int pct0 = strchr(chans[0], '%') != NULL;
+    for (int i = 0; i < 3; i++) {
+        if ((strchr(chans[i], '%') != NULL) != pct0 || (!pct0 && strchr(chans[i], '.'))) return 0;
+    }
+    if (*alpha < 0.0f) *alpha = 0.0f;
+    if (*alpha > 1.0f) *alpha = 1.0f;
+    return 1;
+}
+
+/* One start tag [tag, tag_end) of a leaf element, rebuilt into `out`. */
+static void svg_rewrite_tag(SvgBuf *out, const char *tag, const char *tag_end, const char *name_end) {
+    static const char *const paints[3] = {"fill", "stroke", "stop-color"};
+    static const char *const opac[3] = {"fill-opacity", "stroke-opacity", "stop-opacity"};
+    float alpha[3] = {1, 1, 1}, own[3] = {1, 1, 1};
+    int has_alpha[3] = {0, 0, 0};
+    /* pass 0 reads the paints and opacities, pass 1 writes the tag */
+    for (int pass = 0; pass < 2; pass++) {
+        const char *p = name_end;
+        if (pass) svg_buf_put(out, tag, (size_t) (name_end - tag));
+        while (p < tag_end) {
+            const char *ws = p;
+            while (p < tag_end && svg_space(*p)) p++;
+            const char *nm = p;
+            while (p < tag_end && svg_name_char(*p)) p++;
+            const size_t nl = (size_t) (p - nm);
+            if (!nl) {
+                /* "/" or ">" (or junk): the rest of the tag is copied verbatim */
+                if (pass) {
+                    for (int k = 0; k < 3; k++) {
+                        if (!has_alpha[k]) continue;
+                        char a[64];
+                        snprintf(a, sizeof a, " %s=\"%.6g\"", opac[k], (double) (alpha[k] * own[k]));
+                        svg_buf_str(out, a);
+                    }
+                    svg_buf_put(out, ws, (size_t) (tag_end - ws));
+                }
+                break;
+            }
+            const char *q = p;
+            while (q < tag_end && svg_space(*q)) q++;
+            const char *v = NULL, *v_end = NULL;
+            if (q < tag_end && *q == '=') {
+                q++;
+                while (q < tag_end && svg_space(*q)) q++;
+                if (q < tag_end && (*q == '"' || *q == '\'')) {
+                    const char quote = *q++;
+                    v = q;
+                    while (q < tag_end && *q != quote) q++;
+                    v_end = q;
+                    if (q < tag_end) q++;
+                }
+            }
+            int handled = 0;
+            for (int k = 0; k < 3 && v; k++) {
+                char chans[3][24];
+                float a = 1;
+                if (strlen(paints[k]) == nl && !memcmp(nm, paints[k], nl) && svg_parse_rgba(v, (size_t) (v_end - v), chans, &a)) {
+                    if (!pass) {
+                        has_alpha[k] = 1;
+                        alpha[k] = a;
+                    } else {
+                        char attr[128];
+                        snprintf(attr, sizeof attr, "%.*s%s=\"rgb(%s,%s,%s)\"", (int) (nm - ws), ws, paints[k], chans[0], chans[1], chans[2]);
+                        svg_buf_str(out, attr);
+                    }
+                    handled = 1;
+                } else if (strlen(opac[k]) == nl && !memcmp(nm, opac[k], nl)) {
+                    if (!pass) own[k] = strtof(v, NULL);
+                    handled = has_alpha[k]; /* folded into the rewritten one */
+                }
+            }
+            if (pass && !handled) svg_buf_put(out, ws, (size_t) (q - ws));
+            p = q;
+        }
+    }
+}
+
+/* The document with the rgba() paints of its leaf elements rewritten; NULL when it has
+ * none (or on allocation failure: the original is used). */
+static char *svg_rewrite_rgba(const char *text, const size_t len, size_t *out_len) {
+    static const char *const leaves[] = {"path", "rect", "circle", "ellipse", "line", "polyline", "polygon", "stop"};
+    const char *end = text + len;
+    int found = 0;
+    for (const char *p = text; p + 5 <= end && !found; p++) found = !memcmp(p, "rgba(", 5);
+    if (!found) return NULL;
+    SvgBuf out = {0};
+    const char *copied = text;
+    for (const char *p = text; p < end; p++) {
+        if (*p != '<') continue;
+        const char *nm = p + 1, *ne = nm;
+        while (ne < end && svg_name_char(*ne)) ne++;
+        int leaf = 0;
+        for (size_t i = 0; i < sizeof leaves / sizeof leaves[0]; i++) {
+            const size_t l = strlen(leaves[i]);
+            if ((size_t) (ne - nm) == l && !memcmp(nm, leaves[i], l)) leaf = 1;
+        }
+        if (!leaf) continue;
+        const char *te = ne;
+        char quote = 0;
+        while (te < end && (quote || *te != '>')) {
+            if (quote && *te == quote) quote = 0;
+            else if (!quote && (*te == '"' || *te == '\'')) quote = *te;
+            te++;
+        }
+        if (te >= end) break;
+        te++; /* past '>' */
+        svg_buf_put(&out, copied, (size_t) (p - copied));
+        svg_rewrite_tag(&out, p, te, ne);
+        copied = te;
+        p = te - 1;
+    }
+    svg_buf_put(&out, copied, (size_t) (end - copied));
+    if (out.oom || !out.p) {
+        free(out.p);
+        return NULL;
+    }
+    *out_len = out.n;
+    return out.p;
+}
+
+static SvgImage *svg_image_parse(const char *text, const size_t len) {
+    const char *end = text + len;
     const char *root = svg_find_root(text, end);
     if (!root) return NULL;
     const char *tag_end = memchr(root, '>', (size_t) (end - root));
@@ -229,6 +416,15 @@ SvgImage *svg_image_create(const unsigned char *bytes, const size_t len) {
     /* blank width/height in the tail copy: each raster pass sets its own */
     if (wv) memset(svg->tail + (ws - (root + 4)), ' ', (size_t) (we - ws));
     if (hv) memset(svg->tail + (hs - (root + 4)), ' ', (size_t) (he - hs));
+    return svg;
+}
+
+SvgImage *svg_image_create(const unsigned char *bytes, const size_t len) {
+    if (!bytes || !len) return NULL;
+    size_t rewritten_len = 0;
+    char *rewritten = svg_rewrite_rgba((const char *) bytes, len, &rewritten_len);
+    SvgImage *svg = rewritten ? svg_image_parse(rewritten, rewritten_len) : svg_image_parse((const char *) bytes, len);
+    free(rewritten);
     return svg;
 }
 
