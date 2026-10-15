@@ -21,6 +21,7 @@
  * context's layer lists, whose containing-block chain is walked instead).
  */
 #include "paint.h"
+#include "css_values.h"
 #include "text.h"
 #include "image.h"
 #include "util.h"
@@ -177,10 +178,10 @@ static CssColor color_scale_alpha(CssColor c, float k)
 
 CssColor paint_resolve_color(CssColor c, const CssComputed *style)
 {
-    if (c.kind == CSS_COLOR_CURRENT) {
+    if (c.kind != CSS_COLOR_RGBA) {
         CssColor cur = style ? style->color : color_rgba(0, 0, 0, 255);
         cur.kind = CSS_COLOR_RGBA;
-        return cur;
+        return css_color_resolve(c, cur);   /* currentColor, color-mix(.. currentColor ..) */
     }
     return c;
 }
@@ -273,6 +274,9 @@ int paint_is_stacking_context(const Box *b)
     if (s->opacity < 1.0f || s->transform.count > 0 || s->transform.has_3d || s->filter_count > 0) return 1;
     if (s->will_change & CSS_WILL_CHANGE_TRANSFORM) return 1;
     if (s->clip_path.kind != CSS_CLIP_PATH_NONE) return 1;
+    /* grouping properties (CSS Transforms 2 / Filter Effects 2 / Masking) */
+    if (s->backdrop_filter_count > 0 || s->mask_layer_count > 0) return 1;
+    if (s->transform_style == CSS_TRANSFORM_STYLE_PRESERVE_3D) return 1;
     return 0;
 }
 
@@ -318,6 +322,7 @@ typedef struct Painter {
     /* inline boxes whose decorations were painted during the current line walk */
     const Box **seen;
     int n_seen, cap_seen;
+    int glyph_only;         /* background-clip: text mask pass: text runs as opaque glyphs, nothing else */
     int oom;
 } Painter;
 
@@ -1094,10 +1099,40 @@ static int bg_layer_needs_clip(Painter *p, const CssComputed *s, const CssBgLaye
     return !rect_contains(paint, dl_rect(t.x0, t.y0, t.nx * t.tw, t.ny * t.th));
 }
 
+static void walk_inline(Painter *p, Box *b);
+
+static void paint_background_layers(Painter *p, const Box *b, DlRect border_rect, DlRadii radii);
+
+/* background-clip: text (.vs-text): the background painted through the glyphs
+ * of the box's in-flow text (Chrome's text-clip phase), as a masked group
+ * whose mask is those glyphs.  The text itself is painted later as usual
+ * (shadows + -webkit-text-fill-color on top). */
 static void paint_background(Painter *p, const Box *b, DlRect border_rect, DlRadii radii)
 {
     const CssComputed *s = b->style;
+    DlItem it;
     if (!s) return;
+    if (s->background_clip != CSS_BG_BOX_TEXT || box_is_inline(b) || box_anon(b) || box_is_text(b)) {
+        paint_background_layers(p, b, border_rect, radii);
+        return;
+    }
+    memset(&it, 0, sizeof it);
+    it.op = DL_PUSH_GROUP;
+    it.u.group.rect = border_rect;
+    it.u.group.opacity = 1;
+    it.u.group.masked = 1;
+    emit(p, &it);
+    paint_background_layers(p, b, border_rect, radii);
+    emit_simple(p, DL_MASK_BEGIN);
+    p->glyph_only = 1;
+    walk_inline(p, (Box *) b);
+    p->glyph_only = 0;
+    emit_simple(p, DL_POP_GROUP);
+}
+
+static void paint_background_layers(Painter *p, const Box *b, DlRect border_rect, DlRadii radii)
+{
+    const CssComputed *s = b->style;
     emit_rrect(p, border_rect, radii, paint_resolve_color(s->background_color, s));
     if (!s->bg_layer_count) return;
 
@@ -1133,7 +1168,7 @@ static void paint_decorations_rect(Painter *p, const Box *b, DlRect rect, unsign
  * boxes paint one rect per line fragment. */
 static void paint_decorations(Painter *p, const Box *b)
 {
-    if (!box_visible(b) || box_anon(b)) return;
+    if (p->glyph_only || !box_visible(b) || box_anon(b)) return;
     if (box_is_inline(b)) {
         float dx, dy;
         if (!b->container || b->frag_count <= 0) return;
@@ -1298,8 +1333,25 @@ static void paint_text_run(Painter *p, const Box *tb, const TextRun *run, float 
         p->text_layer_snap_y = sy - uy;
     }
     const CssColor color = paint_resolve_color(s->color, s);
+    /* -webkit-text-fill-color fills the glyphs; `color` keeps decorations */
+    const CssColor fill = s->text_fill_color.kind == CSS_COLOR_CURRENT ? color : paint_resolve_color(s->text_fill_color, s);
     const unsigned synth = run->synth;
     const float fs = run->font_size > 0 ? run->font_size : s->font_size;
+
+    if (p->glyph_only) {    /* background-clip: text: the glyph shapes alone, opaque */
+        DlGlyphQuad *gq = (DlGlyphQuad *) parena(p, (size_t) n * sizeof *gq);
+        DlRect gb;
+        if (!gq) return;
+        const int gm = run_quads(p, run, synth, fs, rx, ry, 0, 0, gq, &gb);
+        if (gm == 0) return;
+        memset(&it, 0, sizeof it);
+        it.op = DL_GLYPHS;
+        it.u.glyphs.quads = gq;
+        it.u.glyphs.n = gm;
+        it.u.glyphs.color = color_rgba(255, 255, 255, 255);
+        emit(p, &it);
+        return;
+    }
 
     /* the page selection (selection.c): highlight under the selected glyphs */
     uint32_t sel_a = 0, sel_b = 0;
@@ -1372,12 +1424,12 @@ static void paint_text_run(Painter *p, const Box *tb, const TextRun *run, float 
                 for (int i = nu + ns; i < ma; i++) quads[nu++] = all[i];
             }
         }
-        if (color.a != 0 && nu > 0) {
+        if (fill.a != 0 && nu > 0) {
             memset(&it, 0, sizeof it);
             it.op = DL_GLYPHS;
             it.u.glyphs.quads = quads;
             it.u.glyphs.n = nu;
-            it.u.glyphs.color = color;
+            it.u.glyphs.color = fill;
             emit(p, &it);
         }
         const CssColor fg = paint_resolve_color(sel_fg, s);
@@ -1391,12 +1443,12 @@ static void paint_text_run(Painter *p, const Box *tb, const TextRun *run, float 
         }
         return;
     }
-    if (color.a == 0) return;
+    if (fill.a == 0) return;
     memset(&it, 0, sizeof it);
     it.op = DL_GLYPHS;
     it.u.glyphs.quads = quads;
     it.u.glyphs.n = m;
-    it.u.glyphs.color = color;
+    it.u.glyphs.color = fill;
     emit(p, &it);
 }
 
@@ -1446,6 +1498,7 @@ static void paint_replaced_content(Painter *p, const Box *b)
     const CssComputed *s = b->style;
     DlItem it;
     PbImage img;
+    if (p->glyph_only) return;
     if (!s || !box_visible(b) || (!box_is_image(b) && b->type != BOX_CANVAS && b->type != BOX_VIDEO)) return;
     const PaintHost *h = &p->ctx->host;
     const int nearest = s->image_rendering == CSS_IMAGE_RENDERING_PIXELATED ||
@@ -1552,7 +1605,7 @@ static void paint_scrollbars(Painter *p, const Box *b)
 {
     PaintScrollbarStyle st;
     const float vw = b->scrollbar_w, hh = b->scrollbar_h;
-    if ((vw <= 0 && hh <= 0) || !box_visible(b) || p->ctx->hide_scrollbars) return;
+    if ((vw <= 0 && hh <= 0) || !box_visible(b) || p->ctx->hide_scrollbars || p->glyph_only) return;
     paint_scrollbar_defaults(&st);
     const PaintHost *h = &p->ctx->host;
     if (h->scrollbar_style && !h->scrollbar_style(h->user, b, &st)) paint_scrollbar_defaults(&st);
@@ -1717,11 +1770,219 @@ static void pop_ancestor_clips(Painter *p, const Box *chain[PAINT_MAX_ANCESTOR_C
     for (int i = n - 1; i >= 0; i--) pop_overflow_clip(p, chain[i], marks[i]);
 }
 
+/* ---- 3D transforms (CSS Transforms 2) -------------------------------------
+ * 4x4 matrices are column-major (m[col * 4 + row]) like css_transform_to_mat4.
+ * Without `perspective` a 3D transform of the z = 0 plane is an affine map of
+ * x / y, so it flattens exactly into a Mat2D (.reward-card's rotateY flip:
+ * the x axis scales by cos(angle)).  Under a perspective ancestor the result is
+ * projective: the context is recorded untransformed and drawn through a
+ * DlGroup homography (gl_backend.c renders it offscreen and maps it as a mesh).
+ * Not modelled: depth sorting inside preserve-3d (DOM / z-order is kept), the
+ * transform-origin z component, and preserve-3d chains deeper than one level
+ * when flattening a child's matrix (backface-visibility walks the whole chain). */
+static void m4_identity(float m[16])
+{
+    memset(m, 0, 16 * sizeof(float));
+    m[0] = m[5] = m[10] = m[15] = 1.0f;
+}
+
+static void m4_mul(const float a[16], const float b[16], float out[16])   /* out = a * b */
+{
+    float r[16];
+    for (int c = 0; c < 4; c++)
+        for (int row = 0; row < 4; row++) {
+            float v = 0;
+            for (int k = 0; k < 4; k++) v += a[k * 4 + row] * b[c * 4 + k];
+            r[c * 4 + row] = v;
+        }
+    memcpy(out, r, sizeof r);
+}
+
+static void m4_translate(float tx, float ty, float out[16])
+{
+    m4_identity(out);
+    out[12] = tx;
+    out[13] = ty;
+}
+
+static void m4_from_mat2d(Mat2D m, float out[16])
+{
+    m4_identity(out);
+    out[0] = m.a; out[1] = m.b; out[4] = m.c; out[5] = m.d; out[12] = m.e; out[13] = m.f;
+}
+
+/* Inverse (cofactor expansion); 0 when singular. */
+static int m4_invert(const float m[16], float out[16])
+{
+    float inv[16];
+    inv[0] = m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15] + m[9] * m[7] * m[14] + m[13] * m[6] * m[11] - m[13] * m[7] * m[10];
+    inv[4] = -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] + m[8] * m[6] * m[15] - m[8] * m[7] * m[14] - m[12] * m[6] * m[11] + m[12] * m[7] * m[10];
+    inv[8] = m[4] * m[9] * m[15] - m[4] * m[11] * m[13] - m[8] * m[5] * m[15] + m[8] * m[7] * m[13] + m[12] * m[5] * m[11] - m[12] * m[7] * m[9];
+    inv[12] = -m[4] * m[9] * m[14] + m[4] * m[10] * m[13] + m[8] * m[5] * m[14] - m[8] * m[6] * m[13] - m[12] * m[5] * m[10] + m[12] * m[6] * m[9];
+    inv[1] = -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] + m[9] * m[2] * m[15] - m[9] * m[3] * m[14] - m[13] * m[2] * m[11] + m[13] * m[3] * m[10];
+    inv[5] = m[0] * m[10] * m[15] - m[0] * m[11] * m[14] - m[8] * m[2] * m[15] + m[8] * m[3] * m[14] + m[12] * m[2] * m[11] - m[12] * m[3] * m[10];
+    inv[9] = -m[0] * m[9] * m[15] + m[0] * m[11] * m[13] + m[8] * m[1] * m[15] - m[8] * m[3] * m[13] - m[12] * m[1] * m[11] + m[12] * m[3] * m[9];
+    inv[13] = m[0] * m[9] * m[14] - m[0] * m[10] * m[13] - m[8] * m[1] * m[14] + m[8] * m[2] * m[13] + m[12] * m[1] * m[10] - m[12] * m[2] * m[9];
+    inv[2] = m[1] * m[6] * m[15] - m[1] * m[7] * m[14] - m[5] * m[2] * m[15] + m[5] * m[3] * m[14] + m[13] * m[2] * m[7] - m[13] * m[3] * m[6];
+    inv[6] = -m[0] * m[6] * m[15] + m[0] * m[7] * m[14] + m[4] * m[2] * m[15] - m[4] * m[3] * m[14] - m[12] * m[2] * m[7] + m[12] * m[3] * m[6];
+    inv[10] = m[0] * m[5] * m[15] - m[0] * m[7] * m[13] - m[4] * m[1] * m[15] + m[4] * m[3] * m[13] + m[12] * m[1] * m[7] - m[12] * m[3] * m[5];
+    inv[14] = -m[0] * m[5] * m[14] + m[0] * m[6] * m[13] + m[4] * m[1] * m[14] - m[4] * m[2] * m[13] - m[12] * m[1] * m[6] + m[12] * m[2] * m[5];
+    inv[3] = -m[1] * m[6] * m[11] + m[1] * m[7] * m[10] + m[5] * m[2] * m[11] - m[5] * m[3] * m[10] - m[9] * m[2] * m[7] + m[9] * m[3] * m[6];
+    inv[7] = m[0] * m[6] * m[11] - m[0] * m[7] * m[10] - m[4] * m[2] * m[11] + m[4] * m[3] * m[10] + m[8] * m[2] * m[7] - m[8] * m[3] * m[6];
+    inv[11] = -m[0] * m[5] * m[11] + m[0] * m[7] * m[9] + m[4] * m[1] * m[11] - m[4] * m[3] * m[9] - m[8] * m[1] * m[7] + m[8] * m[3] * m[5];
+    inv[15] = m[0] * m[5] * m[10] - m[0] * m[6] * m[9] - m[4] * m[1] * m[10] + m[4] * m[2] * m[9] + m[8] * m[1] * m[6] - m[8] * m[2] * m[5];
+    const float det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12];
+    if (fabsf(det) < 1e-12f) return 0;
+    for (int i = 0; i < 16; i++) out[i] = inv[i] / det;
+    return 1;
+}
+
+/* The z = 0 plane under m is affine (no w terms). */
+static int m4_plane_affine(const float m[16])
+{
+    return fabsf(m[3]) < 1e-7f && fabsf(m[7]) < 1e-7f && fabsf(m[15]) > 1e-7f;
+}
+
+/* Flattened (z dropped) Mat2D of an affine m. */
+static Mat2D m4_flatten(const float m[16])
+{
+    const float w = m[15];
+    Mat2D r = {m[0] / w, m[1] / w, m[4] / w, m[5] / w, m[12] / w, m[13] / w};
+    return r;
+}
+
+/* Nearest non-anonymous ancestor (the element's parent box). */
+static const Box *style_parent(const Box *b)
+{
+    const Box *p = b->parent;
+    while (p && box_anon(p)) p = p->parent;
+    return p;
+}
+
+static void transform_origin_of(const Box *b, float *ox, float *oy)
+{
+    const CssComputed *s = b->style;
+    *ox = s->transform_origin_x.kind == CSS_LEN_VALUE ? length_resolve(s->transform_origin_x, b->w) : b->w * 0.5f;
+    *oy = s->transform_origin_y.kind == CSS_LEN_VALUE ? length_resolve(s->transform_origin_y, b->h) : b->h * 0.5f;
+}
+
+/* b's own 3D transform in its border-box space (transform-origin folded in),
+ * preceded by its containing block's `perspective` (perspective-origin seen
+ * from b).  0 when b's transform has no 3D function. */
+static int box_transform_m4(const Box *b, float out[16])
+{
+    const CssComputed *s = b->style;
+    if (!s || box_anon(b) || !css_transform_is_3d(&s->transform)) return 0;
+    float m[16], t[16];
+    float ox, oy;
+    css_transform_to_mat4(&s->transform, b->w, b->h, m);
+    transform_origin_of(b, &ox, &oy);
+    m4_translate(ox, oy, t);
+    m4_mul(t, m, out);
+    m4_translate(-ox, -oy, t);
+    m4_mul(out, t, out);
+    const Box *cb = b->container;
+    while (cb && box_anon(cb)) cb = cb->parent;
+    if (cb && cb->style && cb->style->perspective.kind == CSS_LEN_VALUE && cb->style->perspective.px > 0) {
+        const CssComputed *cs = cb->style;
+        const float d = fmaxf(cs->perspective.px, 1.0f);   /* Chrome clamps perspective to >= 1px */
+        const float qx = length_resolve(cs->perspective_origin_x, cb->w) - (b->x - cb->x);
+        const float qy = length_resolve(cs->perspective_origin_y, cb->h) - (b->y - cb->y);
+        float pm[16];
+        m4_translate(qx, qy, t);
+        m4_identity(pm);
+        pm[11] = -1.0f / d;
+        m4_mul(t, pm, pm);
+        m4_translate(-qx, -qy, t);
+        m4_mul(pm, t, pm);
+        m4_mul(pm, out, out);
+    }
+    return 1;
+}
+
+/* b's own transform as a 4x4 (2D transforms included); 0 when none. */
+static int box_own_m4(const Box *b, float out[16])
+{
+    if (box_transform_m4(b, out)) return 1;
+    const CssComputed *s = b->style;
+    if (!s || box_anon(b) || s->transform.count == 0) return 0;
+    m4_from_mat2d(paint_box_transform(b), out);
+    return 1;
+}
+
+/* The flattened Mat2D of a 3D-transformed box.  In a preserve-3d parent with
+ * its own 3D transform P the child's matrix is composed with P before
+ * flattening, expressed relative to the parent's already flattened frame:
+ * X = T(-off) * flat(P)^-1 * flat(P * T(off) * C).  Returns 0 when b's
+ * transform is not 3D, 2 when it is projective (*out = identity). */
+static int box_transform_3d_flat(const Box *b, Mat2D *out)
+{
+    float c[16];
+    if (!box_transform_m4(b, c)) return 0;
+    *out = mat_identity();
+    if (!m4_plane_affine(c)) return 2;
+    Mat2D flat = m4_flatten(c);
+    const Box *pb = style_parent(b);
+    float pm[16];
+    if (pb && pb->style && pb->style->transform_style == CSS_TRANSFORM_STYLE_PRESERVE_3D && box_transform_m4(pb, pm) &&
+        m4_plane_affine(pm)) {
+        const Mat2D fp = m4_flatten(pm);
+        const float det = fp.a * fp.d - fp.b * fp.c;
+        if (fabsf(det) > 1e-4f) {
+            const float offx = b->x - pb->x, offy = b->y - pb->y;
+            float t[16], full[16];
+            m4_translate(offx, offy, t);
+            m4_mul(pm, t, full);
+            m4_mul(full, c, full);
+            if (m4_plane_affine(full)) {
+                const Mat2D inv = {fp.d / det, -fp.b / det, -fp.c / det, fp.a / det,
+                                   (fp.c * fp.f - fp.d * fp.e) / det, (fp.b * fp.e - fp.a * fp.f) / det};
+                flat = mat_mul(mat_translate(-offx, -offy), mat_mul(inv, m4_flatten(full)));
+            }
+        }
+    }
+    *out = flat;
+    return 1;
+}
+
+/* Projective 3D transform of b: the homography (x, y, 1) -> (X, Y, W) into
+ * its parent frame.  0 when b is not projective. */
+static int box_transform_homography(const Box *b, float h[9])
+{
+    float m[16];
+    if (!box_transform_m4(b, m) || m4_plane_affine(m)) return 0;
+    h[0] = m[0]; h[1] = m[4]; h[2] = m[12];
+    h[3] = m[1]; h[4] = m[5]; h[5] = m[13];
+    h[6] = m[3]; h[7] = m[7]; h[8] = m[15];
+    return 1;
+}
+
+/* backface-visibility: hidden on a box whose accumulated transform in its 3D
+ * rendering context (through preserve-3d ancestors) shows its back: Chrome's
+ * IsBackFaceVisible(), the inverse's z-z element is negative. */
+static int box_backface_culled(const Box *b)
+{
+    const CssComputed *s = b->style;
+    if (!s || box_anon(b) || s->backface_visibility != CSS_BACKFACE_HIDDEN) return 0;
+    float acc[16], m[16], t[16], inv[16];
+    if (!box_own_m4(b, acc)) m4_identity(acc);
+    const Box *cur = b;
+    for (const Box *pb = style_parent(cur); pb && pb->style && pb->style->transform_style == CSS_TRANSFORM_STYLE_PRESERVE_3D;
+         cur = pb, pb = style_parent(pb)) {
+        m4_translate(cur->x - pb->x, cur->y - pb->y, t);
+        m4_mul(t, acc, acc);
+        if (box_own_m4(pb, m)) m4_mul(m, acc, acc);
+    }
+    if (!m4_invert(acc, inv)) return 0;
+    return inv[10] < 0.0f;
+}
+
 Mat2D paint_box_transform(const Box *b)
 {
     const CssComputed *s = b->style;
     Mat2D m = mat_identity();
     if (!s || s->transform.count == 0 || box_anon(b)) return m;
+    if (box_transform_3d_flat(b, &m)) return m;   /* 3D: layout's xform ignores rotateX/Y and perspective() */
     if (b->flags & BOXF_HAS_TRANSFORM) return b->xform;   /* layout_update_transform() */
     for (int i = 0; i < s->transform.count; i++) {
         const CssTransformOp *op = &s->transform.ops[i];
@@ -1793,6 +2054,8 @@ static DlRect own_bounds(const Painter *p, const Box *b)
     if (box_is_text(b)) return rect_expand(r, text_shadow_extent(s));
     if (b->overflow_r > b->overflow_l && b->overflow_b > b->overflow_t)
         r = rect_union(r, dl_rect(r.x + b->overflow_l, r.y + b->overflow_t, b->overflow_r - b->overflow_l, b->overflow_b - b->overflow_t));
+    if (s && s->outline_width > 0 && s->outline_style != CSS_BORDER_STYLE_NONE)
+        r = rect_union(r, rect_expand(r, fmaxf(0, s->outline_offset + s->outline_width)));
     for (int i = 0; s && i < s->box_shadow_count; i++) {
         const CssShadow *sh = box_shadow_at(s, i);
         if (sh->inset) continue;
@@ -1801,6 +2064,10 @@ static DlRect own_bounds(const Painter *p, const Box *b)
     }
     if (s)
         for (int i = 0; i < s->filter_count; i++) {
+            if (s->filters[i].kind == CSS_FILTER_BLUR) {    /* Skia's blur extent: 3 sigma */
+                r = rect_expand(r, 3.0f * fmaxf(s->filters[i].amount, 0));
+                continue;
+            }
             if (s->filters[i].kind != CSS_FILTER_DROP_SHADOW) continue;
             const CssShadow *sh = &s->filters[i].shadow;
             r = rect_union(r, rect_expand(rect_offset(r, sh->x, sh->y), sh->blur * 2));
@@ -1833,12 +2100,18 @@ static int push_group(Painter *p, const Box *b)
 {
     const CssComputed *s = b->style;
     DlItem it;
+    float h[9];
     if (!s || box_anon(b)) return 0;
-    if (s->opacity >= 1.0f && s->filter_count == 0) return 0;
+    const int proj = box_transform_homography(b, h);
+    const int masked = s->mask_layer_count > 0;
+    if (s->opacity >= 1.0f && s->filter_count == 0 && !proj && !masked) return 0;
     memset(&it, 0, sizeof it);
     it.op = DL_PUSH_GROUP;
     it.u.group.rect = subtree_bounds(p, b);
     it.u.group.opacity = s->opacity;
+    it.u.group.masked = (uint8_t) masked;
+    it.u.group.projective = (uint8_t) proj;
+    if (proj) memcpy(it.u.group.h, h, sizeof h);
     for (int i = 0; i < s->filter_count && it.u.group.n_filters < CSS_MAX_FILTER_OPS; i++) {
         CssFilterOp f = s->filters[i];
         if (f.kind == CSS_FILTER_DROP_SHADOW) f.shadow.color = paint_resolve_color(f.shadow.color, s);
@@ -1886,7 +2159,7 @@ static void pop_group(Painter *p, int start, int children_before)
 {
     DisplayList *dl = p->dl;
     DlItem *g = &dl->items[start];
-    if (g->u.group.n_filters == 0 && p->cache->n_children == children_before) {
+    if (g->u.group.n_filters == 0 && !g->u.group.masked && !g->u.group.projective && p->cache->n_children == children_before) {
         int prims = 0, prim_index = -1, other = 0;
         for (int i = start + 1; i < dl->n; i++) {
             if (item_is_primitive(&dl->items[i])) {
@@ -1904,6 +2177,93 @@ static void pop_group(Painter *p, int start, int children_before)
         }
     }
     emit_simple(p, DL_POP_GROUP);
+}
+
+/* backdrop-filter: filters what was painted before the element (in the
+ * current backdrop root: the page, or the enclosing group) under its border
+ * box, clipped to its border radii.  Emitted before the element's own group so
+ * the backend reads the parent target; the element's opacity rides along. */
+static void paint_backdrop(Painter *p, const Box *b)
+{
+    const CssComputed *s = b->style;
+    DlItem it;
+    if (!s || box_anon(b) || !s->backdrop_filter_count || !box_visible(b)) return;
+    const DlRect r = box_rect(p, b);
+    if (rect_empty(r)) return;
+    memset(&it, 0, sizeof it);
+    it.op = DL_BACKDROP;
+    it.u.backdrop.rect = r;
+    it.u.backdrop.radii = radii_for_rect(s, r.w, r.h);
+    it.u.backdrop.opacity = s->opacity;
+    for (int i = 0; i < s->backdrop_filter_count && i < CSS_MAX_FILTER_OPS; i++) {
+        CssFilterOp f = s->backdrop_filters[i];
+        if (f.kind == CSS_FILTER_DROP_SHADOW) f.shadow.color = paint_resolve_color(f.shadow.color, s);
+        it.u.backdrop.filters[it.u.backdrop.n_filters++] = f;
+    }
+    emit(p, &it);
+}
+
+/* mask-image layers (mask-origin / mask-clip: border-box): the group's mask,
+ * drawn after DL_MASK_BEGIN like background layers (alpha; mask-composite
+ * add == source-over of the layers). */
+static void paint_mask_layers(Painter *p, const Box *b)
+{
+    const CssComputed *s = b->style;
+    emit_simple(p, DL_MASK_BEGIN);
+    const DlRect r = box_rect(p, b);
+    const int n = s->mask_layer_count < CSS_MAX_MASK_LAYERS ? s->mask_layer_count : CSS_MAX_MASK_LAYERS;
+    for (int i = n - 1; i >= 0; i--) paint_bg_layer(p, s, &s->mask_layers[i], r, r, 0);
+}
+
+/* outline + outline-offset: outside the border box at outline-offset,
+ * following border-radius (Chrome >= 94: outer radius = radius + offset +
+ * width, square corners stay square).  outline-style: auto (the UA focus
+ * ring of focused inputs) is not drawn. */
+static void paint_outline(Painter *p, const Box *b)
+{
+    const CssComputed *s = b->style;
+    DlItem it;
+    if (p->glyph_only || !s || box_anon(b) || box_is_text(b) || box_is_inline(b) || !box_visible(b)) return;
+    if (s->outline_width <= 0 || s->outline_style == CSS_BORDER_STYLE_NONE || s->outline_style == CSS_BORDER_STYLE_HIDDEN ||
+        s->outline_style == CSS_BORDER_STYLE_AUTO)
+        return;
+    const CssColor c = paint_resolve_color(s->outline_color, s);
+    if (c.a == 0) return;
+    const DlRect br = box_rect(p, b);
+    const float w = s->outline_width, off = s->outline_offset;
+    const DlRect r = rect_expand(br, off + w);
+    if (rect_empty(r)) return;
+    const DlRadii in = radii_for_rect(s, br.w, br.h);
+    const float g = off + w;
+    DlRadii rad;
+    rad.tl = in.tl > 0 ? fmaxf(0, in.tl + g) : 0;
+    rad.tr = in.tr > 0 ? fmaxf(0, in.tr + g) : 0;
+    rad.br = in.br > 0 ? fmaxf(0, in.br + g) : 0;
+    rad.bl = in.bl > 0 ? fmaxf(0, in.bl + g) : 0;
+    memset(&it, 0, sizeof it);
+    it.op = DL_BORDER;
+    it.u.border.rect = r;
+    it.u.border.radii = rad;
+    for (int i = 0; i < 4; i++) {
+        it.u.border.width[i] = w;
+        it.u.border.color[i] = c;
+        it.u.border.style[i] = border_style_to_dl(s->outline_style);
+    }
+    emit(p, &it);
+}
+
+/* Outlines of `b`'s in-flow block descendants (they paint after the content
+ * they surround, inside the same overflow clips). */
+static void walk_outlines(Painter *p, Box *b)
+{
+    for (Box *c = b->first_child; c; c = c->next) {
+        if (box_layer_root(c) || box_inline_level(c)) continue;
+        paint_outline(p, c);
+        if (box_is_replaced(c)) continue;
+        const ClipMark clip = push_overflow_clip(p, c);
+        walk_outlines(p, c);
+        pop_overflow_clip(p, c, clip);
+    }
 }
 
 /* ------------------------------------------------------------------------- */
@@ -2027,7 +2387,7 @@ static void paint_widget(Painter *p, Box *b)
 {
     const PaintHost *h = &p->ctx->host;
     PaintWidgetArgs a;
-    if (!h->widget_paint || !box_visible(b)) return;
+    if (!h->widget_paint || !box_visible(b) || p->glyph_only) return;
     memset(&a, 0, sizeof a);
     a.ctx = p->ctx;
     a.box = b;
@@ -2062,12 +2422,21 @@ static void paint_content(Painter *p, Box *b)
  * descendants belong to the enclosing real context. */
 static void paint_pseudo_context(Painter *p, Box *b)
 {
+    if (box_backface_culled(b)) return;
     paint_decorations(p, b);
     if (box_is_inline(b)) {
         if (b->container) walk_lines(p, b->container, b);
         return;
     }
     paint_content(p, b);
+    if (p->glyph_only || box_is_replaced(b)) {
+        paint_outline(p, b);
+        return;
+    }
+    const ClipMark clip = push_overflow_clip(p, b);
+    walk_outlines(p, b);
+    pop_overflow_clip(p, b, clip);
+    paint_outline(p, b);
 }
 
 /* Collection of a real stacking context's layered descendants ------------ */
@@ -2228,6 +2597,7 @@ static void record_context(Painter *p, Box *b)
 
     /* opacity: 0 paints nothing (the whole context, nested ones included) */
     if (b->style && b->style->opacity <= 0.0f && b->parent && !box_anon(b)) return;
+    if (box_backface_culled(b)) return;
 
     memset(&col, 0, sizeof col);
     collect(&col, b, catches_fixed);
@@ -2253,6 +2623,7 @@ static void record_context(Painter *p, Box *b)
     const Mat2D m = paint_box_transform(b);
     const int tr = !mat_is_identity(m);
     if (tr) emit_transform(p, m);
+    paint_backdrop(p, b);
     const int group_start = p->dl->n;
     const int grp = push_group(p, b);
     const int poly = push_clip_path(p, b);
@@ -2273,11 +2644,14 @@ static void record_context(Painter *p, Box *b)
         walk_inline(p, b);
         paint_layer_list(p, &col.zero, 0);
         paint_layer_list(p, &col.pos, 1);
+        walk_outlines(p, b);
         pop_overflow_clip(p, b, clip);
         paint_scrollbars(p, b);
     }
+    paint_outline(p, b);
 
     if (poly) emit_simple(p, DL_POP_CLIP);
+    if (grp && b->style->mask_layer_count > 0 && !box_anon(b)) paint_mask_layers(p, b);
     if (grp) pop_group(p, group_start, children_before);
     if (tr) emit_simple(p, DL_POP_TRANSFORM);
     collector_free(&col);

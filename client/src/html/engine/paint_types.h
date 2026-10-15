@@ -45,6 +45,8 @@ typedef enum {
     DL_PUSH_GROUP,      // opacity / filter group -> offscreen FBO
     DL_POP_GROUP,
     DL_SCROLL_OFFSET,
+    DL_BACKDROP,        // backdrop-filter: filters what is already drawn under rect (clipped to radii)
+    DL_MASK_BEGIN,      // inside a masked group: the items up to its POP_GROUP draw the mask
     DL_OP_COUNT
 } DlOp;
 
@@ -72,15 +74,26 @@ typedef struct {
     float x, y, w, h;
 } DlGlyphQuad;
 
-// Opacity / filter group. Filters are applied in list order; the color
-// matrix filters (grayscale, brightness, contrast, saturate, hue-rotate,
-// opacity, invert, sepia) are folded into one 4x5 matrix, drop-shadow runs a
-// separable blur pass. blur() is not supported (ignored).
+// Opacity / filter / mask / perspective group. Filters are applied in list
+// order; runs of color matrix filters (grayscale, brightness, contrast,
+// saturate, hue-rotate, opacity, invert, sepia) fold into one 4x5 matrix,
+// drop-shadow and blur() run separable blur passes.
+// masked: a DL_MASK_BEGIN inside the group (at its nesting level) ends the
+// content; the items after it draw the mask (CSS mask-image layers, or the
+// glyphs of background-clip: text) into a second offscreen target, and the
+// group composites as content x mask alpha (after its filters).
+// projective: the content is recorded untransformed (local space) and `h`
+// (row-major 3x3, (x, y, 1) -> (X, Y, W)) maps it into the enclosing local
+// space: a 3D transform under `perspective` that no Mat2D can express. The
+// backend renders the content offscreen and draws it as a subdivided mesh.
 typedef struct {
     DlRect rect;            // bounds of the group's content in local space
     float opacity;          // 1 = opaque
     CssFilterOp filters[CSS_MAX_FILTER_OPS];
     int n_filters;
+    uint8_t masked;
+    uint8_t projective;
+    float h[9];
 } DlGroup;
 
 typedef struct {
@@ -140,6 +153,13 @@ typedef struct {
         struct { const float *pts; int n; } clip_poly;                              // DL_PUSH_CLIP_POLY, pts = x0,y0,x1,y1,... (n points)
         struct { Mat2D m; } transform;                                              // DL_PUSH_TRANSFORM
         DlGroup group;                                                              // DL_PUSH_GROUP
+        struct {                                                                    // DL_BACKDROP
+            DlRect rect;            // border box of the element (local space)
+            DlRadii radii;          // its border radii: the filtered backdrop is clipped to them
+            float opacity;          // the element's opacity (applies to the filtered backdrop too)
+            CssFilterOp filters[CSS_MAX_FILTER_OPS];
+            int n_filters;
+        } backdrop;
         struct { float dx, dy; } scroll;                                            // DL_SCROLL_OFFSET
     } u;
 } DlItem;

@@ -1871,6 +1871,27 @@ static void test_chrome_colors_and_typed_customs(void)
     CHECK(sample(311, &base, &out, 500, &r));
     CHECK_NEAR(r->border_color[CSS_TOP].r, 129.6, 1); CHECK_NEAR(r->border_color[CSS_TOP].g, 148.14, 1);
     CHECK_NEAR(r->border_color[CSS_TOP].b, 115.06, 1);
+    /* a plain color-mix() (no currentColor) is non-legacy too: color-mix(in srgb, red, blue) -> rgb(0, 255, 0)
+     * at 50% is Chrome 152's oklab(0.64308 -0.0347916 0.0391649) = sRGB 129.6 148.14 115.06 */
+    {
+        AnimKeyframeSet *pset = anim_keyframes_begin(&g_sys, "e1-pmix", 7);
+        AnimKeyframe *p0 = anim_keyframes_add_frame(pset, 0, NULL), *p1 = anim_keyframes_add_frame(pset, 1, NULL);
+        AnimValue pv;
+        memset(&pv, 0, sizeof pv);
+        pv.color = parse_col("color-mix(in srgb, red, blue)");
+        CHECK(pv.color.nonlegacy == 1 && pv.color.kind == CSS_COLOR_RGBA);
+        anim_keyframe_set_value(pset, p0, ANIM_BORDER_TOP_COLOR, &pv);
+        pv.color = css_color_rgba(0, 255, 0, 255);
+        anim_keyframe_set_value(pset, p1, ANIM_BORDER_TOP_COLOR, &pv);
+        base_init(&base);
+        base.color = css_color_rgba(0, 0, 255, 255);
+        run_anim(&base, "e1-pmix", 1, 1, timing_kind(CSS_TIMING_LINEAR), CSS_ANIM_DIRECTION_NORMAL, CSS_ANIM_FILL_NONE);
+        CHECK(anim_update_elem(&g_sys, 312, &base, 0) == 1);
+        CHECK(sample(312, &base, &out, 500, &r));
+        CHECK_NEAR(r->border_color[CSS_TOP].r, 129.6, 1.5); CHECK_NEAR(r->border_color[CSS_TOP].g, 148.14, 1.5);
+        CHECK_NEAR(r->border_color[CSS_TOP].b, 115.06, 1.5);
+        anim_remove_elem(&g_sys, 312);
+    }
     anim_remove_elem(&g_sys, 311);
 
     /* registered <length> / <color> custom properties: @keyframes { to { --x: ... } } */

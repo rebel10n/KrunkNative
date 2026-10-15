@@ -340,10 +340,9 @@ static void color_lerp(const CssColor *a, const CssColor *b, float t, CssColor *
         return;
     }
     /* CSS Color 4 section 12.1: legacy sRGB colors interpolate in sRGB, any
-     * other (a color-mix() result is color(srgb ...)) in Oklab, premultiplied
-     * both ways (Chrome).  Only color-mix() with currentColor still carries
-     * that; mixes of plain colors parse to RGBA and interpolate in sRGB. */
-    const int oklab = a->kind == CSS_COLOR_CURRENT_MIX || b->kind == CSS_COLOR_CURRENT_MIX;
+     * other (a color-mix() result is color(srgb ...), flagged nonlegacy, also
+     * when it mixes plain colors) in Oklab, premultiplied both ways (Chrome). */
+    const int oklab = a->nonlegacy || b->nonlegacy || a->kind == CSS_COLOR_CURRENT_MIX || b->kind == CSS_COLOR_CURRENT_MIX;
     CssColor ra, rb;
     if (a->kind != CSS_COLOR_RGBA) { ra = css_color_resolve(*a, *g_current_color); a = &ra; }
     if (b->kind != CSS_COLOR_RGBA) { rb = css_color_resolve(*b, *g_current_color); b = &rb; }

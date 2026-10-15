@@ -93,6 +93,9 @@ typedef struct CssColor {
     uint8_t kind;          /* CssColorKind                                    */
     uint8_t mix;           /* CURRENT_MIX: currentColor weight, 0..200 (0.5%) */
     uint8_t mix_space;     /* CURRENT_MIX: CssColorSpace                      */
+    uint8_t nonlegacy;     /* 1: a non-legacy colour (a color-mix() result):  */
+                           /* transitions interpolate it in Oklab, not sRGB   */
+                           /* (CSS Color 4 §12.1); 0 for #hex / rgb() / names */
 } CssColor;
 
 /* ------------------------------------------------------------------------- */
@@ -180,7 +183,8 @@ typedef enum CssAlignItems {
 typedef enum CssBorderStyle {
     CSS_BORDER_STYLE_NONE = 0, CSS_BORDER_STYLE_HIDDEN, CSS_BORDER_STYLE_SOLID,
     CSS_BORDER_STYLE_DASHED, CSS_BORDER_STYLE_DOTTED, CSS_BORDER_STYLE_DOUBLE,
-    CSS_BORDER_STYLE_GROOVE, CSS_BORDER_STYLE_RIDGE, CSS_BORDER_STYLE_INSET, CSS_BORDER_STYLE_OUTSET
+    CSS_BORDER_STYLE_GROOVE, CSS_BORDER_STYLE_RIDGE, CSS_BORDER_STYLE_INSET, CSS_BORDER_STYLE_OUTSET,
+    CSS_BORDER_STYLE_AUTO  /* outline-style: auto only (the UA focus ring, not painted) */
 } CssBorderStyle;
 
 typedef enum CssBorderCollapse { CSS_BORDER_COLLAPSE_SEPARATE = 0, CSS_BORDER_COLLAPSE_COLLAPSE } CssBorderCollapse;

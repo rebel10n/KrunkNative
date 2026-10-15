@@ -456,7 +456,17 @@ static void test_e2_values(void)
           c.bg_layers[0].image.gradient.stops[0].color.kind == CSS_COLOR_CURRENT_MIX);
     CHECK(apply(&c, NULL, "border-bottom", "2px solid color-mix(in srgb, currentColor 45%, transparent)") &&
           c.border_color[CSS_BOTTOM].kind == CSS_COLOR_CURRENT_MIX);
-    CHECK(!apply(&c, NULL, "color", "color-mix(in hsl, red, blue)") && !apply(&c, NULL, "color", "color-mix(red, blue)"));
+    CHECK(!apply(&c, NULL, "color", "color-mix(in hsl, red, blue)") && !apply(&c, NULL, "color", "color-mix(in srgb red, blue)"));
+    /* the interpolation method is optional (CSS Color 5 §2, default oklab; Chrome 152 accepts it) */
+    /* Chrome: color-mix(red, blue) == oklab(0.539974 0.0962086 -0.0928316) = sRGB (140, 83, 162) */
+    CHECK(apply(&c, NULL, "color", "color-mix(red, blue)") && c.color.nonlegacy == 1 && c.color.kind == CSS_COLOR_RGBA);
+    CHECK(c.color.r > 135 && c.color.r < 145 && c.color.g > 75 && c.color.g < 90 && c.color.b > 155 && c.color.b < 170);
+    /* non-legacy results (Oklab transitions); plain colours stay legacy */
+    CHECK(apply(&c, NULL, "color", "color-mix(in srgb, red 50%, blue)") && c.color.nonlegacy == 1);
+    CHECK(apply(&c, NULL, "background-color", "color-mix(in srgb, currentColor 30%, transparent)") && c.background_color.nonlegacy == 1 &&
+          css_color_resolve(c.background_color, css_color_rgba(255, 0, 0, 255)).nonlegacy == 1);
+    CHECK(apply(&c, NULL, "color", "#ff0000") && c.color.nonlegacy == 0);
+    CHECK(apply(&c, NULL, "color", "rgb(1 2 3 / 50%)") && c.color.nonlegacy == 0);
     {
         CssComputed parent = fresh(), child = fresh();
         parent.color = css_color_rgba(0, 0, 255, 255);
@@ -465,6 +475,8 @@ static void test_e2_values(void)
 
     /* outline-offset, accent-color */
     CHECK(apply(&c, NULL, "outline-offset", "-2px") && feq(c.outline_offset, -2));
+    CHECK(apply(&c, NULL, "outline-style", "auto") && c.outline_style == CSS_BORDER_STYLE_AUTO);
+    CHECK(apply(&c, NULL, "outline", "2px solid #4a9c0f") && c.outline_style == CSS_BORDER_STYLE_SOLID);
     CHECK(fresh().accent_color_auto == 1);
     CHECK(apply(&c, NULL, "accent-color", "#2196f3") && !c.accent_color_auto && color_is(c.accent_color, 0x21, 0x96, 0xf3, 255));
     CHECK(css_prop_is_inherited(CSS_PROP_ACCENT_COLOR) && css_prop_is_inherited(CSS_PROP_TEXT_FILL_COLOR));

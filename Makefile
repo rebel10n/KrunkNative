@@ -251,7 +251,7 @@ test: build ## Run the shared movement/collision test (+ the knet transport, off
 # These targets use the debug directory with HTML_ENGINE=ON (the default) so they also
 # work after a `make HTML_ENGINE=OFF`.
 
-.PHONY: ui-test ui-import assets-import uidiff html-engine-test html-engine-test-run
+.PHONY: ui-test ui-import assets-import uidiff uidiff-paint html-engine-test html-engine-test-run
 html-engine-test: build ## The engine's unit tests (client/src/html/engine/tests: html_<module>_test, ctest -L html-engine; the GL ones headless)
 	$(MAKE) --no-print-directory html-engine-test-run
 
@@ -406,6 +406,11 @@ SCENARIOS ?=
 UIDIFF_XVFB_SCREEN ?= 1920x1080x24
 UIDIFF_HEADLESS ?= 0
 UIDIFF_EGL_DEVICE ?=
+
+uidiff-paint: ## Pixel-diff the paint pages (tools/uidiff/paint: 3D flip, masks, backdrop-filter, color-mix) against their Chrome captures (ui_test render-page)
+	@$(MAKE) --no-print-directory configure HTML_ENGINE=ON
+	$(call BUILD,$(DEBUG_DIR)) --target ui_test
+	tools/uidiff/paint.sh $(DEBUG_DIR)/ui_test
 
 uidiff: ## Render tools/uidiff scenarios with client_bin --render-scenario (HTML_ENGINE=ON) and pixel-diff them (SCENARIOS=...)
 	@$(MAKE) --no-print-directory configure HTML_ENGINE=ON

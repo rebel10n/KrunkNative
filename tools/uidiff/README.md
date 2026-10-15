@@ -377,3 +377,14 @@ v7's `public/` read-only and never runs v7's npm server; how each state is reach
 shim, sandbox bots and kills, the stubbed social socket, the mocked server list) is in
 `doc/ref/krunker-v7.1.4/README.md`. Needs `chromium-browser` (`KN_CHROME=...`) and
 `net-bridge/node_modules` (ws).
+
+### Paint pages (`make uidiff-paint`)
+
+`tools/uidiff/paint.sh <ui_test>` renders each `tools/uidiff/paint/*.html` page with
+`ui_test render-page` (the whole `ui/` tree, its `index.html` swapped for the page) and pixel-diffs
+it against Chrome 152's capture in `doc/ref/krunknative/paint/`: `flip-mid` (a mid-flip
+`.reward-card` with `rotateY` under `perspective`), `mask-icons` (`mask` / `-webkit-mask` with
+`url()` and `linear-gradient`, `background-clip: text`, `color-mix()`, `outline-offset`) and
+`backdrop-tex` (a 30% black panel with `backdrop-filter: blur(10px)` and a 24px radius over the
+battle-pass art, like `.death-ui-bottom`). Chrome's capture: `google-chrome --headless=new
+--no-sandbox --disable-gpu --hide-scrollbars --window-size=1280,720 --screenshot=<png> <page>`.

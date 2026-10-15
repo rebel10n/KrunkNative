@@ -1993,7 +1993,7 @@ static void dump_display_list(const DisplayList *dl)
 {
     static const char *ops[] = {"RECT", "RRECT", "BORDER", "IMAGE", "GRADIENT", "GLYPHS", "BOX_SHADOW", "TEXT_SHADOW",
                                 "PUSH_CLIP_RECT", "PUSH_CLIP_RRECT", "PUSH_CLIP_POLY", "POP_CLIP", "PUSH_TRANSFORM",
-                                "POP_TRANSFORM", "PUSH_GROUP", "POP_GROUP", "SCROLL_OFFSET"};
+                                "POP_TRANSFORM", "PUSH_GROUP", "POP_GROUP", "SCROLL_OFFSET", "BACKDROP", "MASK_BEGIN"};
     fprintf(stderr, "[html_engine] display list: %d items\n", dl->n);
     for (int i = 0; i < dl->n; i++) {
         const DlItem *it = &dl->items[i];

@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="css/svelte.css">
+<style>
+html, body { margin: 0; width: 1280px; height: 720px; overflow: hidden; background: #2a2a40; }
+#tex { position: absolute; left: 0; top: 0; width: 1280px; height: 720px; background: url(img/battlepass/bg_window_5.png) center / cover no-repeat; }
+.row { position: absolute; left: 80px; top: 120px; display: flex; gap: 40px; perspective: 500px; }
+.row .reward-card { width: 160px; height: 160px; }
+.a { transform: rotateY(60deg); }
+.b { transform: rotateY(100deg); }
+.c { transform: rotateY(150deg); }
+.d { transform: rotateX(35deg) rotateY(20deg); }
+.plain { position: absolute; left: 80px; top: 400px; width: 200px; height: 120px; background: linear-gradient(90deg, #e33, #33e); transform: rotateY(60deg); }
+</style></head><body>
+<div id="tex"></div>
+<div class="row">
+  <div class="reward-card svelte-1sac6ik a"><div class="card-front svelte-1sac6ik" style="color:#fff;font-size:30px">?</div><div class="card-back svelte-1sac6ik" style="--rarity-color:#e5c100"><div class="card-back-content svelte-1sac6ik"><span class="reward-count svelte-1sac6ik">x5</span></div></div></div>
+  <div class="reward-card svelte-1sac6ik b"><div class="card-front svelte-1sac6ik" style="color:#fff;font-size:30px">?</div><div class="card-back svelte-1sac6ik" style="--rarity-color:#e5c100"><div class="card-back-content svelte-1sac6ik"><span class="reward-count svelte-1sac6ik">x5</span></div></div></div>
+  <div class="reward-card svelte-1sac6ik c"><div class="card-front svelte-1sac6ik" style="color:#fff;font-size:30px">?</div><div class="card-back svelte-1sac6ik" style="--rarity-color:#e5c100"><div class="card-back-content svelte-1sac6ik"><span class="reward-count svelte-1sac6ik">x5</span></div></div></div>
+  <div class="reward-card svelte-1sac6ik d"><div class="card-front svelte-1sac6ik" style="color:#fff;font-size:30px">?</div><div class="card-back svelte-1sac6ik" style="--rarity-color:#e5c100"><div class="card-back-content svelte-1sac6ik"><span class="reward-count svelte-1sac6ik">x5</span></div></div></div>
+</div>
+<div class="plain"></div>
+</body></html>

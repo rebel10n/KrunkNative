@@ -22,8 +22,21 @@
 //   changes; every GL state change flushes the pending batch first so that
 //   batch state == GL state.
 //
+// - filter: blur() and backdrop-filter blur through blur_entry_hq(): the
+//   7-tap separable pass of blur_entry() at sigma <= GLB_BLUR_MAX_SIGMA,
+//   larger sigmas on a 2x-box-downsampled copy (Skia does the same), then a
+//   bilinear upsample. Edges clamp (backdrop-filter: like Chrome's mirror).
+// - backdrop-filter (DL_BACKDROP): the target under the element (grown by
+//   the blur reach) is blitted to a pool entry, filtered, and drawn back
+//   through the element's rounded border box as a clip.
+// - masks (DlGroup.masked): DL_MASK_BEGIN switches the group to a second
+//   pool entry; the group composites as content x mask alpha (mode 10).
+// - perspective (DlGroup.projective): content rendered untransformed at the
+//   device scale, composited as a GLB_PROJ_GRID^2 mesh through the homography.
+//
 // Texture units: 0 = primary (image / glyph atlas / gradient LUT / group),
-// 1 = text gamma LUT (256x8 R8).
+// 1 = text gamma LUT (256x8 R8), 2 = group mask (mode 10, bound only around
+// the masked composite).
 #include <gl.h>
 #include <client.h>
 #include <math.h>
@@ -40,6 +53,14 @@
 #define GLB_GRADIENT_ROWS 64
 #define GLB_GRADIENT_W 256
 #define GLB_MAX_FBOS 24
+// Largest sigma (target px) the 7-tap pass blurs directly: taps stay <= 2 px
+// apart. Above it blur_entry_hq() halves the image first.
+#define GLB_BLUR_MAX_SIGMA 3.0f
+#define GLB_BLUR_MAX_LEVELS 5
+// Cells per axis of the mesh a projective (perspective) group is drawn with.
+#define GLB_PROJ_GRID 16
+// Largest offscreen side of a projective group (its content at device scale).
+#define GLB_PROJ_MAX 4096
 // Minification filter for image-rendering:auto images (DL_IMAGE, nearest = 0).
 // html_ui.frag picks the mip level itself (Skia's floored level, then
 // textureLod at an integer lod), so this only has to be a mipmap filter with
@@ -59,7 +80,8 @@ enum {
     MODE_BORDER = 6,
     MODE_GROUP = 7,
     MODE_BLUR = 8,
-    MODE_SHADOW_INSET = 9
+    MODE_SHADOW_INSET = 9,
+    MODE_GROUP_MASKED = 10
 };
 
 typedef struct {
@@ -119,6 +141,11 @@ typedef struct {
     int saved_n_xform;
     int entry;                  // pool entry rendered into
     float bx, by, bw, bh;       // device bounds of the group
+    float ox, oy;               // target origin the content (and mask) is rendered with
+    int in_mask;                // DL_MASK_BEGIN seen: drawing the mask
+    int mask_entry;             // pool entry of the mask, -1 = none
+    float pk;                   // projective: device px per local px of the content
+    DlRect prect;               // projective: local rect rendered (entry pixel 0 = prect origin)
 } GroupFrame;
 
 typedef struct {
@@ -134,6 +161,7 @@ struct GlBackend {
     void *lazy_resolver_user;
     void *image_resolver_user;
     GLint loc_viewport, loc_tex, loc_gamma, loc_cm, loc_cm_offset, loc_opacity, loc_blur_dir, loc_stencil_pass;
+    GLint loc_blur_clamp, loc_mask;
 
     // frame
     int in_frame;
@@ -491,6 +519,13 @@ static void intersect_scissor(GlBackend *b, const float r[4]) {
 
 static void set_target(GlBackend *b, const Target *t) {
     flush(b);
+    // WebGL refuses every draw while the render target's own texture is bound to a
+    // unit the program samples (a "feedback loop", even for modes that never read
+    // it): a pool entry is often still bound from fbo_acquire() or an earlier composite.
+    if (t->entry >= 0 && b->bound_tex == b->fbos[t->entry].tex) {
+        glBindTexture(GL_TEXTURE_2D, 0);
+        b->bound_tex = 0;
+    }
     b->target = *t;
     glBindFramebuffer(GL_FRAMEBUFFER, t->fbo);
     glViewport(0, 0, t->w, t->h);
@@ -627,10 +662,24 @@ static void emit_target_quad(GlBackend *b, const GlbVertex *tmpl, float x, float
     emit_quad(b, c);
 }
 
+// u_blur_clamp for a MODE_BLUR pass reading pool entry i: its (bw x bh)
+// content's outer texel centres (edge mode clamp), or no clamp at all.
+static void set_blur_clamp(GlBackend *b, int i, int bw, int bh, int clamp) {
+    if (!clamp) {
+        glUniform4f(b->loc_blur_clamp, -1e6f, -1e6f, 1e6f, 1e6f);
+        return;
+    }
+    const FboEntry *e = &b->fbos[i];
+    const float u0 = 0.5f / (float) e->w, u1 = ((float) bw - 0.5f) / (float) e->w;
+    const float v0 = 1.0f - ((float) bh - 0.5f) / (float) e->h, v1 = 1.0f - 0.5f / (float) e->h;
+    glUniform4f(b->loc_blur_clamp, u0, v0, maxf(u0, u1), maxf(v0, v1));
+}
+
 // Separable 7-tap Gaussian blur of entry `src` (content bw x bh) with the given
 // sigma in pixels. Returns a new pool entry holding the blurred content, or -1.
-// The caller's target/clip state is saved and restored.
-static int blur_entry(GlBackend *b, int src, int bw, int bh, float sigma) {
+// The caller's target/clip state is saved and restored. clamp: taps outside the
+// content repeat its edge texels (else they read the entry's transparent rest).
+static int blur_entry_ex(GlBackend *b, int src, int bw, int bh, float sigma, int clamp) {
     const Target saved_target = b->target;
     const ClipState saved_clip = b->clip;
 
@@ -654,6 +703,7 @@ static int blur_entry(GlBackend *b, int src, int bw, int bh, float sigma) {
         b->clip.scissor_on = 0;
         const FboEntry *fe = &b->fbos[from];
         glUniform2f(b->loc_blur_dir, pass ? 0.0f : step / (float) fe->w, pass ? step / (float) fe->h : 0.0f);
+        set_blur_clamp(b, from, bw, bh, clamp);
         entry_uv(b, from, (float) bw, (float) bh, uv);
         batch_texture(b, fe->tex, -1);
         GlbVertex tmpl = vertex_template(b, MODE_BLUR, white);
@@ -664,6 +714,67 @@ static int blur_entry(GlBackend *b, int src, int bw, int bh, float sigma) {
     fbo_release(b, tmp);
     restore_target(b, &saved_target, &saved_clip);
     return dst;
+}
+
+static int blur_entry(GlBackend *b, int src, int bw, int bh, float sigma) {
+    return blur_entry_ex(b, src, bw, bh, sigma, 0);
+}
+
+// Bilinear resample: the (span_w x span_h)-pixel region at the top-left of
+// entry `src` (content sw x sh, reads clamped to it) drawn over a new entry's
+// (dw x dh) top-left. Returns the new entry or -1.
+static int resample_entry(GlBackend *b, int src, int sw, int sh, float span_w, float span_h, int dw, int dh) {
+    const Target saved_target = b->target;
+    const ClipState saved_clip = b->clip;
+    const int dst = fbo_acquire(b, dw, dh);
+    if (dst < 0) return -1;
+    const uint8_t white[4] = {255, 255, 255, 255};
+    float uv[4];
+    begin_offscreen(b, dst, 0.0f, 0.0f, dw, dh);
+    glDisable(GL_SCISSOR_TEST);
+    b->clip.scissor_on = 0;
+    glUniform2f(b->loc_blur_dir, 0.0f, 0.0f);
+    set_blur_clamp(b, src, sw, sh, 1);
+    entry_uv(b, src, span_w, span_h, uv);
+    batch_texture(b, b->fbos[src].tex, -1);
+    GlbVertex tmpl = vertex_template(b, MODE_BLUR, white);
+    emit_target_quad(b, &tmpl, 0.0f, 0.0f, (float) dw, (float) dh, uv);
+    flush(b);
+    restore_target(b, &saved_target, &saved_clip);
+    return dst;
+}
+
+// Gaussian blur of any sigma (target px) for filter: blur() and
+// backdrop-filter: the content is halved (2x2 box, bilinear) until the sigma
+// left is <= GLB_BLUR_MAX_SIGMA, blurred there by blur_entry_ex() and scaled
+// back up bilinearly. Edges clamp. Returns a new entry with the blurred bw x bh
+// content at its top-left, or -1 (src untouched either way).
+static int blur_entry_hq(GlBackend *b, int src, int bw, int bh, float sigma) {
+    if (!(sigma > 0.0f) || bw <= 0 || bh <= 0) return -1;
+    int levels = 0;
+    float s = sigma;
+    while (s > GLB_BLUR_MAX_SIGMA && levels < GLB_BLUR_MAX_LEVELS) {
+        s *= 0.5f;
+        levels++;
+    }
+    if (!levels) return blur_entry_ex(b, src, bw, bh, s, 1);
+    int cur = src, cw = bw, ch = bh;
+    for (int l = 0; l < levels; l++) {
+        const int nw = (cw + 1) / 2, nh = (ch + 1) / 2;
+        const int next = resample_entry(b, cur, cw, ch, (float) (nw * 2), (float) (nh * 2), nw, nh);
+        if (cur != src) fbo_release(b, cur);
+        if (next < 0) return -1;
+        cur = next;
+        cw = nw;
+        ch = nh;
+    }
+    const int blurred = blur_entry_ex(b, cur, cw, ch, s, 1);
+    if (cur != src) fbo_release(b, cur);
+    if (blurred < 0) return -1;
+    const int f = 1 << levels;
+    const int up = resample_entry(b, blurred, cw, ch, (float) cw, (float) ch, cw * f, ch * f);
+    fbo_release(b, blurred);
+    return up;
 }
 
 // ---------------------------------------------------------------------------
@@ -1395,7 +1506,7 @@ static void filter_matrix(const DlGroup *g, float m[16], float off[4]) {
                 k[3][3] = clampf(a, 0.0f, 1.0f);
                 break;
             default:
-                continue;   // drop-shadow handled separately, blur unsupported
+                continue;   // drop-shadow and blur are passes of their own (filter_chain)
         }
         // cur = k * cur ; off = k * off + k_off
         float next[4][4], next_off[4];
@@ -1430,25 +1541,62 @@ static void push_group(GlBackend *b, const DisplayList *list, int index) {
     f->opacity = clampf(g->opacity, 0.0f, 1.0f);
     f->entry = -1;
 
+    f->mask_entry = -1;
+
     int prims = 0;
     find_group_end(list, index, &prims);
-    if (prims <= 1 && g->n_filters == 0) {
+    if (prims <= 1 && g->n_filters == 0 && !g->masked && !g->projective) {
         f->fast = 1;
         b->opacity_mul *= f->opacity;
         return;
     }
 
-    // Room for every drop-shadow of the chain (each one offsets/blurs the
-    // result of the previous one, so the extents add up).
+    // Room for every drop-shadow / blur of the chain (each one offsets/blurs
+    // the result of the previous one, so the extents add up).
     float pad = 0.0f;
     {
         const float k = group_device_scale(b);
         for (int i = 0; i < g->n_filters && i < CSS_MAX_FILTER_OPS; i++) {
             const CssFilterOp *ds = &g->filters[i];
+            if (ds->kind == CSS_FILTER_BLUR) pad += 3.0f * maxf(ds->amount, 0.0f) * k;
             if (ds->kind != CSS_FILTER_DROP_SHADOW) continue;
             pad += ds->shadow.blur * 1.5f * k + maxf(fabsf(ds->shadow.x), fabsf(ds->shadow.y)) * k;
         }
         if (pad > 0.0f) pad = ceilf(pad + 1.0f);
+    }
+
+    if (g->projective) {
+        // Perspective: the content renders untransformed at the enclosing
+        // device scale (local px * pk = entry px), the homography maps it at pop.
+        float pk = group_device_scale(b);
+        DlRect r = g->rect;
+        {   // + a transparent 2 px rim: the mesh's bilinear edge is its anti-aliasing
+            const float e = (pad + 2.0f) / pk;
+            r = dl_rect(r.x - e, r.y - e, r.w + 2.0f * e, r.h + 2.0f * e);
+        }
+        if (r.w * pk > GLB_PROJ_MAX) pk = GLB_PROJ_MAX / r.w;
+        if (r.h * pk > GLB_PROJ_MAX) pk = GLB_PROJ_MAX / r.h;
+        const int pw = (int) ceilf(r.w * pk), ph = (int) ceilf(r.h * pk);
+        const int entry = pw > 0 && ph > 0 && f->opacity > 0.0f ? fbo_acquire(b, pw, ph) : -1;
+        if (entry < 0) {
+            f->skip = 1;
+            b->skip_depth = 1;
+            return;
+        }
+        f->entry = entry;
+        f->bw = (float) pw; f->bh = (float) ph;
+        f->pk = pk;
+        f->prect = r;
+        f->saved_target = b->target;
+        f->saved_clip = b->clip;
+        f->saved_xform = b->xform;
+        f->saved_n_xform = b->n_xform;
+        f->ox = r.x * pk;
+        f->oy = r.y * pk;
+        const Mat2D content = {pk / b->scale, 0.0f, 0.0f, pk / b->scale, 0.0f, 0.0f};
+        b->xform = content;
+        begin_offscreen(b, entry, f->ox, f->oy, pw, ph);
+        return;
     }
 
     float bounds[4];
@@ -1487,8 +1635,26 @@ static void push_group(GlBackend *b, const DisplayList *list, int index) {
     f->saved_clip = b->clip;
     f->saved_xform = b->xform;
     f->saved_n_xform = b->n_xform;
+    f->ox = b->target.ox + f->bx;
+    f->oy = b->target.oy + f->by;
 
-    begin_offscreen(b, entry, b->target.ox + f->bx, b->target.oy + f->by, bw, bh);
+    begin_offscreen(b, entry, f->ox, f->oy, bw, bh);
+}
+
+// DL_MASK_BEGIN: the rest of the innermost group draws its mask, into a
+// second entry with the content's size and origin.
+static void begin_mask(GlBackend *b) {
+    if (!b->n_groups) return;
+    GroupFrame *f = &b->groups[b->n_groups - 1];
+    if (f->fast || f->skip || f->in_mask || !f->group.masked) return;
+    flush(b);
+    f->in_mask = 1;
+    f->mask_entry = fbo_acquire(b, (int) f->bw, (int) f->bh);
+    if (f->mask_entry < 0) {
+        b->skip_depth = 1;      // no room: drop the mask items, composite unmasked
+        return;
+    }
+    begin_offscreen(b, f->mask_entry, f->ox, f->oy, (int) f->bw, (int) f->bh);
 }
 
 // Device px per CSS px in the group's local space (device scale x transform).
@@ -1577,6 +1743,56 @@ static int filter_pass_drop_shadow(GlBackend *b, int src, int bw, int bh, const 
     return dst;
 }
 
+// blur(): src -> a blurred copy (src released); src unchanged when it fails.
+static int filter_pass_blur(GlBackend *b, int src, int bw, int bh, float sigma) {
+    const int dst = blur_entry_hq(b, src, bw, bh, sigma);
+    if (dst < 0) return src;
+    fbo_release(b, src);
+    return dst;
+}
+
+// Applies a filter chain to entry `cur` (content bw x bh): runs of color
+// matrix filters fold into one pass, drop-shadow and blur are passes of their
+// own. The last matrix run [*seg_out, n) is left for the caller's composite.
+static int filter_chain(GlBackend *b, int cur, int bw, int bh, const DlGroup *g, float k, int *seg_out) {
+    int seg = 0;
+    for (int i = 0; i < g->n_filters && i < CSS_MAX_FILTER_OPS; i++) {
+        const uint8_t kind = g->filters[i].kind;
+        if (kind != CSS_FILTER_DROP_SHADOW && kind != CSS_FILTER_BLUR) continue;
+        if (i > seg) cur = filter_pass_matrix(b, cur, bw, bh, g, seg, i);
+        if (kind == CSS_FILTER_DROP_SHADOW) cur = filter_pass_drop_shadow(b, cur, bw, bh, &g->filters[i], k);
+        else if (g->filters[i].amount > 0.0f) cur = filter_pass_blur(b, cur, bw, bh, g->filters[i].amount * k);
+        seg = i + 1;
+    }
+    *seg_out = seg;
+    return cur;
+}
+
+// Draws a projective group's entry through its homography as a mesh.
+static void composite_projective(GlBackend *b, const GroupFrame *f, int entry, const GlbVertex *tmpl) {
+    const FboEntry *e = &b->fbos[entry];
+    const float *h = f->group.h;
+    const DlRect r = f->prect;
+    const int n = GLB_PROJ_GRID;
+    for (int j = 0; j < n; j++) {
+        for (int i = 0; i < n; i++) {
+            GlbVertex c[4];
+            const int ci[4] = {i, i + 1, i + 1, i}, cj[4] = {j, j, j + 1, j + 1};
+            int ok = 1;
+            for (int q = 0; q < 4 && ok; q++) {
+                const float lx = r.x + r.w * (float) ci[q] / (float) n, ly = r.y + r.h * (float) cj[q] / (float) n;
+                const float w = h[6] * lx + h[7] * ly + h[8];
+                if (w <= 1e-4f) { ok = 0; break; }   // behind the eye
+                c[q] = *tmpl;
+                to_target(b, (h[0] * lx + h[1] * ly + h[2]) / w, (h[3] * lx + h[4] * ly + h[5]) / w, &c[q].x, &c[q].y);
+                c[q].u = (lx - r.x) * f->pk / (float) e->w;
+                c[q].v = 1.0f - (ly - r.y) * f->pk / (float) e->h;
+            }
+            if (ok) emit_quad(b, c);
+        }
+    }
+}
+
 static void pop_group(GlBackend *b) {
     if (!b->n_groups) return;
     GroupFrame *f = &b->groups[--b->n_groups];
@@ -1598,28 +1814,110 @@ static void pop_group(GlBackend *b) {
 
     // CSS Filter Effects: filters apply in order, each to the previous
     // result.  Runs of color-matrix filters fold into one matrix; every
-    // drop-shadow is its own offscreen pass (so 4-layer outline chains
-    // thicken progressively).  The last run + opacity composite to the target.
+    // drop-shadow / blur is its own offscreen pass (so 4-layer outline chains
+    // thicken progressively).  The last run + opacity composite to the target,
+    // through the mask when there is one (filter, then mask, then opacity).
     const DlGroup *g = &f->group;
-    const float k = group_device_scale(b);
-    int cur = f->entry, seg = 0;
-    for (int i = 0; i < g->n_filters && i < CSS_MAX_FILTER_OPS; i++) {
-        if (g->filters[i].kind != CSS_FILTER_DROP_SHADOW) continue;
-        if (i > seg) cur = filter_pass_matrix(b, cur, bw, bh, g, seg, i);
-        cur = filter_pass_drop_shadow(b, cur, bw, bh, &g->filters[i], k);
-        seg = i + 1;
-    }
+    const float k = g->projective ? f->pk : group_device_scale(b);
+    int seg = 0;
+    const int cur = filter_chain(b, f->entry, bw, bh, g, k, &seg);
 
     float m[16], off[4];
     filter_matrix_range(g, seg, g->n_filters, m, off);
     set_group_uniforms(b, m, off, f->opacity * b->opacity_mul);
 
+    const int masked = g->masked && f->mask_entry >= 0;
+    const uint8_t white[4] = {255, 255, 255, 255};
+    batch_texture(b, b->fbos[cur].tex, -1);
+    GlbVertex t = vertex_template(b, masked ? MODE_GROUP_MASKED : MODE_GROUP, white);
+    if (masked) {
+        const FboEntry *ce = &b->fbos[cur], *me = &b->fbos[f->mask_entry];
+        t.p1[0] = (float) ce->w / (float) me->w;
+        t.p1[1] = (float) ce->h / (float) me->h;
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, me->tex);
+        glActiveTexture(GL_TEXTURE0);
+    }
+    if (g->projective) composite_projective(b, f, cur, &t);
+    else {
+        entry_uv(b, cur, f->bw, f->bh, uv);
+        emit_target_quad(b, &t, f->bx, f->by, f->bw, f->bh, uv);
+    }
+    flush(b);
+    if (masked) {
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glActiveTexture(GL_TEXTURE0);
+    }
+    fbo_release(b, cur);
+    if (f->mask_entry >= 0) fbo_release(b, f->mask_entry);
+}
+
+// backdrop-filter: what is already in the target under the element's border
+// box (grown by the blur reach, clamped to the target) is copied to a pool
+// entry, filtered, and drawn back through the border box (rounded) as a clip.
+// Reads the current target, i.e. the backdrop root: the page, or the
+// enclosing group's offscreen content.
+static void draw_backdrop(GlBackend *b, const DlItem *it) {
+    const float op = clampf(it->u.backdrop.opacity, 0.0f, 1.0f) * b->opacity_mul;
+    const int n = it->u.backdrop.n_filters;
+    if (op <= 0.0f || n <= 0) return;
+    const float k = group_device_scale(b);
+    float pad = 0.0f;
+    for (int i = 0; i < n && i < CSS_MAX_FILTER_OPS; i++)
+        if (it->u.backdrop.filters[i].kind == CSS_FILTER_BLUR) pad += 3.0f * maxf(it->u.backdrop.filters[i].amount, 0.0f) * k;
+    pad = ceilf(pad);
+
+    float r[4];
+    local_rect_bounds(b, it->u.backdrop.rect, r);
+    float vis[4] = {floorf(r[0]), floorf(r[1]), ceilf(r[2]), ceilf(r[3])};
+    float lim[4] = {0.0f, 0.0f, (float) b->target.w, (float) b->target.h};
+    if (b->clip.scissor_on) {
+        lim[0] = maxf(lim[0], floorf(b->clip.scissor[0])); lim[1] = maxf(lim[1], floorf(b->clip.scissor[1]));
+        lim[2] = minf(lim[2], ceilf(b->clip.scissor[2]));  lim[3] = minf(lim[3], ceilf(b->clip.scissor[3]));
+    }
+    vis[0] = maxf(vis[0], lim[0]); vis[1] = maxf(vis[1], lim[1]);
+    vis[2] = minf(vis[2], lim[2]); vis[3] = minf(vis[3], lim[3]);
+    if (vis[2] <= vis[0] || vis[3] <= vis[1]) return;
+    const int x0 = (int) maxf(0.0f, vis[0] - pad), y0 = (int) maxf(0.0f, vis[1] - pad);
+    const int x1 = (int) minf((float) b->target.w, vis[2] + pad), y1 = (int) minf((float) b->target.h, vis[3] + pad);
+    const int rw = x1 - x0, rh = y1 - y0;
+    if (rw <= 0 || rh <= 0) return;
+
+    flush(b);
+    GLint samples = 0;
+    glGetIntegerv(GL_SAMPLES, &samples);
+    if (samples > 0) return;   // multisampled target: a resolving blit cannot move the region
+    const int src = fbo_acquire(b, rw, rh);
+    if (src < 0) return;
+    const FboEntry *e = &b->fbos[src];
+    glDisable(GL_SCISSOR_TEST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, b->target.fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, e->fbo);
+    // target rows are y-down from the top; GL rows count from the bottom
+    glBlitFramebuffer(x0, b->target.h - y1, x1, b->target.h - y0, 0, e->h - rh, rw, e->h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glBindFramebuffer(GL_FRAMEBUFFER, b->target.fbo);
+    apply_scissor(b);
+    b->frame_stats.fbo_passes++;
+
+    DlGroup g;
+    memset(&g, 0, sizeof(g));
+    g.n_filters = n < CSS_MAX_FILTER_OPS ? n : CSS_MAX_FILTER_OPS;
+    memcpy(g.filters, it->u.backdrop.filters, sizeof(g.filters));
+    int seg = 0;
+    const int cur = filter_chain(b, src, rw, rh, &g, k, &seg);
+
+    float m[16], off[4], uv[4];
+    filter_matrix_range(&g, seg, g.n_filters, m, off);
+    push_clip_rrect(b, it->u.backdrop.rect, it->u.backdrop.radii);
+    set_group_uniforms(b, m, off, op);
     const uint8_t white[4] = {255, 255, 255, 255};
     batch_texture(b, b->fbos[cur].tex, -1);
     GlbVertex t = vertex_template(b, MODE_GROUP, white);
-    entry_uv(b, cur, f->bw, f->bh, uv);
-    emit_target_quad(b, &t, f->bx, f->by, f->bw, f->bh, uv);
+    entry_uv(b, cur, (float) rw, (float) rh, uv);
+    emit_target_quad(b, &t, (float) x0, (float) y0, (float) rw, (float) rh, uv);
     flush(b);
+    pop_clip(b);
     fbo_release(b, cur);
 }
 
@@ -1694,6 +1992,8 @@ GlBackend *glb_create(void) {
     b->loc_opacity = glGetUniformLocation(b->program, "u_opacity");
     b->loc_blur_dir = glGetUniformLocation(b->program, "u_blur_dir");
     b->loc_stencil_pass = glGetUniformLocation(b->program, "u_stencil_pass");
+    b->loc_blur_clamp = glGetUniformLocation(b->program, "u_blur_clamp");
+    b->loc_mask = glGetUniformLocation(b->program, "u_mask");
 
     glGenVertexArrays(1, &b->vao);
     glBindVertexArray(b->vao);
@@ -1746,6 +2046,7 @@ GlBackend *glb_create(void) {
     glUseProgram(b->program);
     glUniform1i(b->loc_tex, 0);
     glUniform1i(b->loc_gamma, 1);
+    glUniform1i(b->loc_mask, 2);
     glUseProgram(0);
     g_active_shader = 0;
 
@@ -1978,6 +2279,12 @@ void glb_submit(GlBackend *b, const DisplayList *list) {
                 break;
             case DL_POP_GROUP:
                 pop_group(b);
+                break;
+            case DL_MASK_BEGIN:
+                begin_mask(b);
+                break;
+            case DL_BACKDROP:
+                draw_backdrop(b, it);
                 break;
             case DL_SCROLL_OFFSET: {
                 const Mat2D t = {1, 0, 0, 1, it->u.scroll.dx, it->u.scroll.dy};

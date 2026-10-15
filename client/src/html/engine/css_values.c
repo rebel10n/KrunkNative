@@ -1133,16 +1133,22 @@ CssColor css_color_mix(CssColor c1, CssColor c2, float w1, float alpha_mul, int 
         rgb_to_oklab(v2, t); memcpy(v2, t, sizeof t);
     }
     const double a = a1 * k1 + a2 * k2;
-    if (a <= 1e-9) return css_color_rgba(0, 0, 0, 0);
-    double o[3];
-    for (int i = 0; i < 3; i++) o[i] = (v1[i] * a1 * k1 + v2[i] * a2 * k2) / a;   /* premultiplied interpolation */
-    if (space == CSS_COLOR_SPACE_OKLAB) {
-        double t[3];
-        oklab_to_rgb(o, t);
-        memcpy(o, t, sizeof t);
+    CssColor res;
+    if (a <= 1e-9) {
+        res = css_color_rgba(0, 0, 0, 0);
+    } else {
+        double o[3];
+        for (int i = 0; i < 3; i++) o[i] = (v1[i] * a1 * k1 + v2[i] * a2 * k2) / a;   /* premultiplied interpolation */
+        if (space == CSS_COLOR_SPACE_OKLAB) {
+            double t[3];
+            oklab_to_rgb(o, t);
+            memcpy(o, t, sizeof t);
+        }
+        res = css_color_rgba(clamp_u8_fwd(o[0] * 255.0), clamp_u8_fwd(o[1] * 255.0), clamp_u8_fwd(o[2] * 255.0),
+                             clamp_u8_fwd(a * alpha_mul * 255.0));
     }
-    return css_color_rgba(clamp_u8_fwd(o[0] * 255.0), clamp_u8_fwd(o[1] * 255.0), clamp_u8_fwd(o[2] * 255.0),
-                          clamp_u8_fwd(a * alpha_mul * 255.0));
+    res.nonlegacy = 1;   /* a color-mix() result is non-legacy whatever the space (Chrome serialises color(srgb ...)) */
+    return res;
 }
 
 static uint8_t clamp_u8(double v)
@@ -1216,20 +1222,26 @@ static int parse_color_mix(const CssToken *body, int n, CssColor *out)
     CssToken t[64];
     int m = tokens_copy_nows(body, n, t, 64);
     int st[4], ln[4];
-    if (split_commas(t, m, st, ln, 4) != 3) return 0;
-    const CssToken *sp = t + st[0];
-    if (ln[0] < 2 || !tok_is_ident(&sp[0], "in")) return 0;
-    int space;
-    if (tok_is_ident(&sp[1], "srgb")) space = CSS_COLOR_SPACE_SRGB;
-    else if (tok_is_ident(&sp[1], "oklab")) space = CSS_COLOR_SPACE_OKLAB;
-    else return 0;
-    if (ln[0] != 2) return 0;
+    const int parts = split_commas(t, m, st, ln, 4);
+    /* CSS Color 5 §2: the interpolation method is optional and defaults to oklab
+     * (Chrome: color-mix(red, blue) == color-mix(in oklab, red, blue)) */
+    int space = CSS_COLOR_SPACE_OKLAB, first = 0;
+    if (parts == 3) {
+        const CssToken *sp = t + st[0];
+        if (ln[0] != 2 || !tok_is_ident(&sp[0], "in")) return 0;
+        if (tok_is_ident(&sp[1], "srgb")) space = CSS_COLOR_SPACE_SRGB;
+        else if (tok_is_ident(&sp[1], "oklab")) space = CSS_COLOR_SPACE_OKLAB;
+        else return 0;
+        first = 1;
+    } else if (parts != 2) {
+        return 0;
+    }
     CssColor c[2];
     float p[2];
     int has[2] = { 0, 0 };
     for (int k = 0; k < 2; k++) {
-        const CssToken *q = t + st[k + 1];
-        int ql = ln[k + 1], used = 0, i = 0;
+        const CssToken *q = t + st[k + first];
+        int ql = ln[k + first], used = 0, i = 0;
         if (ql > 0 && q[0].type == CSS_TOK_PERCENTAGE) { p[k] = q[0].num; has[k] = 1; i = 1; }
         if (!css_parse_color_item(q + i, ql - i, &c[k], &used) || used <= 0) return 0;
         i += used;
@@ -1253,6 +1265,7 @@ static int parse_color_mix(const CssToken *body, int n, CssColor *out)
         r.kind = CSS_COLOR_CURRENT_MIX;
         r.mix = clamp_u8(wc * 200.0);
         r.mix_space = (uint8_t)space;
+        r.nonlegacy = 1;
         *out = r;
         return 1;
     }
@@ -4227,7 +4240,7 @@ int css_computed_apply(CssComputed *d, int id, const CssToken *tokens, int n,
     }
     case CSS_PROP_OUTLINE_STYLE: {
         int v;
-        if (m == 1 && tok_is_ident(&t[0], "auto")) v = CSS_BORDER_STYLE_SOLID;
+        if (m == 1 && tok_is_ident(&t[0], "auto")) v = CSS_BORDER_STYLE_AUTO;
         else if (!css_parse_keyword(t, m, css_kw_border_style, &v)) return 0;
         d->outline_style = (uint8_t)v;
         return 1;
@@ -4661,8 +4674,12 @@ void css_typed_value_lerp(const CssTypedValue *a, const CssTypedValue *b, float 
     if (a->syntax == CSS_SYNTAX_INTEGER) r.num = roundf(r.num);
     len_lerp(&a->len, &b->len, t, &r.len);
     if (a->syntax == CSS_SYNTAX_COLOR) {
-        if (a->color.kind == CSS_COLOR_RGBA && b->color.kind == CSS_COLOR_RGBA)
-            r.color = css_color_mix(a->color, b->color, 1.0f - t, 1.0f, CSS_COLOR_SPACE_SRGB);
+        if (a->color.kind == CSS_COLOR_RGBA && b->color.kind == CSS_COLOR_RGBA) {
+            /* a non-legacy endpoint (color-mix()) makes the pair interpolate in Oklab */
+            const int ool = a->color.nonlegacy || b->color.nonlegacy;
+            r.color = css_color_mix(a->color, b->color, 1.0f - t, 1.0f, ool ? CSS_COLOR_SPACE_OKLAB : CSS_COLOR_SPACE_SRGB);
+            r.color.nonlegacy = (uint8_t) ool;
+        }
         else r.color = t < 0.5f ? a->color : b->color;
     }
     *out = r;

@@ -14,8 +14,11 @@
 //                      p2 = (box cx, box cy, box hw, box hh): the element box is cut out
 //   6 border           uv = local px from border-box center; p0 = outer radii; p1 = (hw, hh, style + 4*edge, period); p2 = widths t,r,b,l
 //   7 group composite  uv = texcoord of the group FBO; u_opacity x u_cm color matrix; p0.x = 1 -> shadow (color x alpha)
-//   8 blur pass        uv = texcoord; separable 7-tap Gaussian along u_blur_dir (internal)
+//   8 blur pass        uv = texcoord; separable 7-tap Gaussian along u_blur_dir (internal), taps clamped
+//                      to u_blur_clamp (edge mode clamp); u_blur_dir = 0 is a plain bilinear resample
 //   9 inset box-shadow like 5 with inverted shadow coverage, clipped to the box in p2
+//  10 masked group     mode 7 (color matrix path) x the alpha of u_mask (unit 2) at the same content pixel:
+//                      mask uv = (u * p1.x, 1 - (1 - v) * p1.y) (the two pool entries' size ratios)
 //
 // Clip: every fragment is also multiplied by the coverage of the per-vertex
 // rounded clip rect (v_clip, v_clip_radius) in target pixels.
@@ -35,6 +38,8 @@ uniform mat4 u_cm;              // group color matrix (rgba x rgba)
 uniform vec4 u_cm_offset;       // group color matrix translation column
 uniform float u_opacity;        // group opacity
 uniform vec2 u_blur_dir;        // blur pass: step between taps in texcoords
+uniform vec4 u_blur_clamp;      // blur pass: texcoord clamp rect (u0, v0, u1, v1)
+uniform sampler2D u_mask;       // unit 2: mask of a masked group (mode 10)
 uniform int u_stencil_pass;     // 1: discard fragments under half coverage (stencil shape pass)
 
 out vec4 frag_color;
@@ -65,6 +70,19 @@ float local_px() {
     vec2 dx = dFdx(v_uv);
     vec2 dy = dFdy(v_uv);
     return max(length(vec2(dx.x, dy.x)), 1e-4);
+}
+
+// Local units per pixel across the edge of distance field d: local_px() under
+// uniform scale / rotation; under an anisotropic transform (a rotateY flip
+// flattens x only, scaleX) the screen-space gradient of d, so edges along the
+// squeezed axis keep a one-pixel AA band instead of the larger axis' one.
+float edge_px(float d, float px) {
+    vec2 dx = dFdx(v_uv);
+    vec2 dy = dFdy(v_uv);
+    float lx = length(vec2(dx.x, dy.x));
+    float ly = length(vec2(dx.y, dy.y));
+    float g = length(vec2(dFdx(d), dFdy(d)));
+    return abs(lx - ly) > 0.02 * max(lx, ly) ? max(g, 1e-4) : px;
 }
 
 // Evan Wallace, "Fast Rounded Rectangle Shadows" (2016).
@@ -153,6 +171,10 @@ vec4 sample_image(vec2 uv) {
     return textureLod(u_tex, uv, max(lod, 0.0));
 }
 
+vec4 blur_tap(vec2 uv) {
+    return texture(u_tex, clamp(uv, u_blur_clamp.xy, u_blur_clamp.zw));
+}
+
 vec4 premul_rgba(vec4 c) {
     return vec4(c.rgb * c.a, c.a);
 }
@@ -167,7 +189,8 @@ void main() {
     float cov = 1.0;
 
     if (mode == 1) {
-        cov = aa(sd_rrect(v_uv, v_p1.xy, v_p0), local_px());
+        float d = sd_rrect(v_uv, v_p1.xy, v_p0);
+        cov = aa(d, edge_px(d, local_px()));
     } else if (mode == 2) {
         vec4 t = sample_image(v_uv);
         if (v_p0.x > 0.5) t = premul_rgba(t);
@@ -201,14 +224,15 @@ void main() {
         float px = local_px();
         vec2 h = v_p1.xy;
         vec4 w = v_p2;                                  // top, right, bottom, left
-        float outer = aa(sd_rrect(v_uv, h, v_p0), px);
+        float od = sd_rrect(v_uv, h, v_p0);
+        float outer = aa(od, edge_px(od, px));
         vec2 ih = h - 0.5 * vec2(w.w + w.y, w.x + w.z);
         vec2 ic = 0.5 * vec2(w.w - w.y, w.x - w.z);
+        vec4 ir = max(v_p0 - vec4(max(w.x, w.w), max(w.x, w.y), max(w.z, w.y), max(w.z, w.w)), vec4(0.0));
+        float id = sd_rrect(v_uv - ic, max(ih, vec2(1e-4)), ir);
+        float ipx = edge_px(id, px);                    // derivatives outside the branch below
         float inner = 0.0;
-        if (ih.x > 0.0 && ih.y > 0.0) {
-            vec4 ir = max(v_p0 - vec4(max(w.x, w.w), max(w.x, w.y), max(w.z, w.y), max(w.z, w.w)), vec4(0.0));
-            inner = aa(sd_rrect(v_uv - ic, ih, ir), px);
-        }
+        if (ih.x > 0.0 && ih.y > 0.0) inner = aa(id, ipx);
         float style = mod(v_p1.z, 4.0);
         float edge = floor(v_p1.z / 4.0);
         float s, t, ew;
@@ -227,11 +251,17 @@ void main() {
             color = premul_rgba(u) * u_opacity;
         }
     } else if (mode == 8) {
-        vec4 sum = texture(u_tex, v_uv) * 0.2707;
-        sum += (texture(u_tex, v_uv + u_blur_dir) + texture(u_tex, v_uv - u_blur_dir)) * 0.2168;
-        sum += (texture(u_tex, v_uv + 2.0 * u_blur_dir) + texture(u_tex, v_uv - 2.0 * u_blur_dir)) * 0.1113;
-        sum += (texture(u_tex, v_uv + 3.0 * u_blur_dir) + texture(u_tex, v_uv - 3.0 * u_blur_dir)) * 0.0366;
+        vec4 sum = blur_tap(v_uv) * 0.2707;
+        sum += (blur_tap(v_uv + u_blur_dir) + blur_tap(v_uv - u_blur_dir)) * 0.2168;
+        sum += (blur_tap(v_uv + 2.0 * u_blur_dir) + blur_tap(v_uv - 2.0 * u_blur_dir)) * 0.1113;
+        sum += (blur_tap(v_uv + 3.0 * u_blur_dir) + blur_tap(v_uv - 3.0 * u_blur_dir)) * 0.0366;
         color = sum;
+    } else if (mode == 10) {
+        vec4 t = texture(u_tex, v_uv);
+        vec4 u = unpremul(t);
+        u = clamp(u_cm * u + u_cm_offset * step(1e-5, t.a), 0.0, 1.0);
+        vec2 muv = vec2(v_uv.x * v_p1.x, 1.0 - (1.0 - v_uv.y) * v_p1.y);
+        color = premul_rgba(u) * (u_opacity * texture(u_mask, muv).a);
     }
 
     cov *= clip_coverage();

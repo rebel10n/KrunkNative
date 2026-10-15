@@ -3,8 +3,10 @@
  *
  * Build (throwaway, from the repository root):
  *   clang -std=c11 -g -fsanitize=address,undefined -Iclient/src/html/engine -Iclient/include \
- *      -Ishared/include -Ishared/lib/cJSON client/src/html/engine/paint.c client/src/html/engine/util.c \
+ *      -Ishared/include -Ishared/lib/cJSON -Iclient/lib/lexbor client/src/html/engine/paint.c \
+ *      client/src/html/engine/util.c client/src/html/engine/css_values.c \
  *      client/src/html/engine/tests/test_paint.c -lm -o test_paint && ./test_paint
+ * (css_values.c: colour resolution incl. color-mix, the 3D transform matrices.)
  * Text and image modules are stubbed here so no FreeType / GL is needed.
  */
 #include <limits.h>
@@ -87,7 +89,7 @@ static const char *op_name(int op)
     static const char *names[DL_OP_COUNT] = {
         "RECT", "RRECT", "BORDER", "IMAGE", "GRADIENT", "GLYPHS", "BOX_SHADOW", "TEXT_SHADOW",
         "PUSH_CLIP_RECT", "PUSH_CLIP_RRECT", "PUSH_CLIP_POLY", "POP_CLIP", "PUSH_TRANSFORM",
-        "POP_TRANSFORM", "PUSH_GROUP", "POP_GROUP", "SCROLL_OFFSET"};
+        "POP_TRANSFORM", "PUSH_GROUP", "POP_GROUP", "SCROLL_OFFSET", "BACKDROP", "MASK_BEGIN"};
     return op >= 0 && op < DL_OP_COUNT ? names[op] : "?";
 }
 
@@ -160,6 +162,11 @@ static void style_defaults(CssComputed *s)
     }
     s->max_width.kind = s->max_height.kind = CSS_LEN_NONE;
     s->flex_basis = len_auto();
+    s->text_fill_color.kind = CSS_COLOR_CURRENT;   /* initial: currentcolor */
+    s->accent_color_auto = 1;
+    s->perspective.kind = CSS_LEN_NONE;
+    s->perspective_origin_x = pct(50);
+    s->perspective_origin_y = pct(50);
 }
 
 static void reset_tree(void)
@@ -1392,6 +1399,204 @@ static void test_inline_context_in_scroller(void)
     CHECK_F(qy[1], 526 - 510 - 14.0f * 16.0f / 20.0f);   /* baseline in the span frame; stub y_off scales with size */
 }
 
+static void set_rotate_y(Box *b, float deg)
+{
+    st(b)->transform.count = 1;
+    st(b)->transform.has_3d = 1;
+    st(b)->transform.ops[0].kind = CSS_TRANSFORM_ROTATE_3D;
+    st(b)->transform.ops[0].angle_deg = deg;
+    st(b)->transform.ops[0].axis[0] = 0;
+    st(b)->transform.ops[0].axis[1] = 1;
+    st(b)->transform.ops[0].axis[2] = 0;
+}
+
+static void test_3d_transforms(void)
+{
+    printf("3D: rotateY flattens, backface-visibility in preserve-3d, perspective -> projective group\n");
+    reset_tree(); fresh_ctx();
+    Box *root = mk_root();
+    /* .reward-card mid-flip: rotateY(60deg), no perspective -> x scales by cos 60 about the centre */
+    Box *card = mk(root, BOX_BLOCK, 100, 100, 80, 80);
+    set_rotate_y(card, 60);
+    st(card)->transform_style = CSS_TRANSFORM_STYLE_PRESERVE_3D;
+    Box *front = mk(card, BOX_BLOCK, 100, 100, 80, 80);
+    set_positioned(front, 0);
+    front->z_auto = 1; st(front)->z_index_auto = 1;
+    front->flags &= ~BOXF_STACKING_CONTEXT;
+    st(front)->backface_visibility = CSS_BACKFACE_HIDDEN;
+    st(front)->background_color = rgba(255, 0, 0, 255);
+    Box *back = mk(card, BOX_BLOCK, 100, 100, 80, 80);
+    set_positioned(back, 0);
+    back->z_auto = 1; st(back)->z_index_auto = 1;
+    back->flags &= ~BOXF_STACKING_CONTEXT;
+    set_rotate_y(back, 180);
+    st(back)->backface_visibility = CSS_BACKFACE_HIDDEN;
+    st(back)->background_color = rgba(0, 0, 255, 255);
+    build(root);
+    int t = find_op(&g_dl, DL_PUSH_TRANSFORM, 1);   /* 0: translate to the card, 1: its own matrix */
+    CHECK(t >= 0);
+    if (t >= 0) {
+        const Mat2D *m = &g_dl.items[t].u.transform.m;
+        CHECK_F(m->a, 0.5f); CHECK_F(m->b, 0); CHECK_F(m->c, 0); CHECK_F(m->d, 1);
+        CHECK_F(m->a * 40 + m->e, 40);   /* the centre stays */
+    }
+    /* front faces the viewer (red painted), back shows its back (blue culled) */
+    int red = 0, blue = 0;
+    for (int i = 0; i < g_dl.n; i++)
+        if (g_dl.items[i].op == DL_RECT) {
+            red += g_dl.items[i].u.rect.color.r == 255;
+            blue += g_dl.items[i].u.rect.color.b == 255;
+        }
+    CHECK(red == 1 && blue == 0);
+    /* flipped: rotateY(180) -> the back (composed with the card: rotateY(360)) shows unmirrored */
+    set_rotate_y(card, 180);
+    card->paint_dirty = 1;
+    paint_invalidate_all(&g_ctx);
+    build(root);
+    red = blue = 0;
+    int bi = -1;
+    for (int i = 0; i < g_dl.n; i++)
+        if (g_dl.items[i].op == DL_RECT) {
+            red += g_dl.items[i].u.rect.color.r == 255;
+            if (g_dl.items[i].u.rect.color.b == 255) { blue++; bi = i; }
+        }
+    CHECK(red == 0 && blue == 1);
+    if (bi >= 0) {
+        int tb = -1;   /* the back's own matrix: the last transform before it */
+        for (int i = 0; i < bi; i++) if (g_dl.items[i].op == DL_PUSH_TRANSFORM) tb = i;
+        if (tb >= 0) CHECK_F(g_dl.items[tb].u.transform.m.a, -1);   /* card x(-1) * back x(-1) = +1 overall */
+    }
+
+    /* perspective on the containing block: a projective group, no Mat2D */
+    reset_tree(); fresh_ctx();
+    root = mk_root();
+    Box *scene = mk(root, BOX_BLOCK, 0, 0, 400, 300);
+    st(scene)->perspective = px(400);
+    Box *pl = mk(scene, BOX_BLOCK, 100, 50, 200, 100);
+    set_rotate_y(pl, 50);
+    st(pl)->background_color = rgba(9, 9, 9, 255);
+    build(root);
+    const int g = find_op(&g_dl, DL_PUSH_GROUP, 0);
+    CHECK(g >= 0 && g_dl.items[g].u.group.projective);
+    if (g >= 0) {
+        const float *h = g_dl.items[g].u.group.h;
+        CHECK(fabsf(h[6]) > 1e-4f);                       /* w depends on x */
+        const float w = h[6] * 100 + h[7] * 50 + h[8];   /* centre of the plane stays put */
+        CHECK_F((h[0] * 100 + h[1] * 50 + h[2]) / w, 100);
+        CHECK_F((h[3] * 100 + h[4] * 50 + h[5]) / w, 50);
+    }
+    CHECK(find_op(&g_dl, DL_PUSH_TRANSFORM, 1) < 0);    /* only the translate to the plane */
+}
+
+static void test_backdrop_mask_clip_text_outline(void)
+{
+    printf("backdrop-filter, mask, background-clip: text, -webkit-text-fill-color, outline-offset\n");
+    reset_tree(); fresh_ctx();
+    Box *root = mk_root();
+    /* .death-ui-bottom: the backdrop item precedes the element's own paint, outside its group */
+    Box *d = mk(root, BOX_BLOCK, 0, 380, 1280, 300);
+    st(d)->background_color = rgba(0, 0, 0, 77);
+    st(d)->opacity = 0.5f;
+    st(d)->border_radius[0] = px(10);
+    st(d)->backdrop_filter_count = 1;
+    st(d)->backdrop_filters[0].kind = CSS_FILTER_BLUR;
+    st(d)->backdrop_filters[0].amount = 10;
+    set_border(d, 1, rgba(255, 255, 255, 50));
+    build(root);
+    const int bd = find_op(&g_dl, DL_BACKDROP, 0), pg = find_op(&g_dl, DL_PUSH_GROUP, 0);
+    CHECK(bd >= 0 && pg > bd);
+    if (bd >= 0) {
+        CHECK_F(g_dl.items[bd].u.backdrop.rect.w, 1280);
+        CHECK_F(g_dl.items[bd].u.backdrop.radii.tl, 10);
+        CHECK_F(g_dl.items[bd].u.backdrop.opacity, 0.5f);
+        CHECK(g_dl.items[bd].u.backdrop.n_filters == 1 && g_dl.items[bd].u.backdrop.filters[0].kind == CSS_FILTER_BLUR);
+    }
+
+    /* .menuItemIconMask: background-color currentColor through a url() mask */
+    reset_tree(); fresh_ctx();
+    root = mk_root();
+    Box *m = mk(root, BOX_BLOCK, 10, 10, 40, 40);
+    st(m)->color = rgba(255, 255, 0, 255);
+    st(m)->background_color.kind = CSS_COLOR_CURRENT;
+    st(m)->mask_layer_count = 1;
+    st(m)->mask_layers[0].image.kind = CSS_IMAGE_URL;
+    st(m)->mask_layers[0].image.url = "b.png";
+    st(m)->mask_layers[0].size.kind = CSS_BG_SIZE_CONTAIN;
+    st(m)->mask_layers[0].repeat_x = st(m)->mask_layers[0].repeat_y = CSS_BG_REPEAT_NO_REPEAT;
+    build(root);
+    const int ops[] = {DL_PUSH_TRANSFORM, DL_PUSH_GROUP, DL_RECT, DL_MASK_BEGIN, DL_IMAGE, DL_POP_GROUP, DL_POP_TRANSFORM, -1};
+    if (expect_ops("mask", &g_dl, ops)) {
+        CHECK(g_dl.items[1].u.group.masked);
+        CHECK(g_dl.items[2].u.rect.color.r == 255 && g_dl.items[2].u.rect.color.b == 0);
+        CHECK_F(g_dl.items[4].u.image.dst.w, 40);   /* contain: 128x128 -> 40x40 */
+    }
+
+    /* .vs-text: background through the glyphs, then the transparent-filled text (nothing) */
+    reset_tree(); fresh_ctx();
+    root = mk_root();
+    Box *v = mk(root, BOX_BLOCK, 0, 0, 200, 40);
+    st(v)->background_clip = CSS_BG_BOX_TEXT;
+    st(v)->background_color = rgba(0, 200, 0, 255);
+    st(v)->text_fill_color = rgba(0, 0, 0, 0);
+    mk_text(v, 0, 30, "VS", 32);
+    build(root);
+    const int ops2[] = {DL_PUSH_GROUP, DL_RECT, DL_MASK_BEGIN, DL_GLYPHS, DL_POP_GROUP, -1};
+    if (expect_ops("background-clip text", &g_dl, ops2)) {
+        CHECK(g_dl.items[0].u.group.masked);
+        CHECK(g_dl.items[3].u.glyphs.color.a == 255 && g_dl.items[3].u.glyphs.n == 2);
+    }
+    /* text-fill-color only: glyphs in the fill colour */
+    st(v)->background_clip = CSS_BG_BOX_BORDER;
+    st(v)->text_fill_color = rgba(1, 2, 3, 255);
+    v->paint_dirty = 1;
+    paint_invalidate_all(&g_ctx);
+    build(root);
+    const int gi = find_op(&g_dl, DL_GLYPHS, 0);
+    CHECK(gi >= 0 && g_dl.items[gi].u.glyphs.color.r == 1 && g_dl.items[gi].u.glyphs.color.b == 3);
+
+    /* outline 2px + outline-offset 2px around a radius-8 box, after its content; auto is not drawn */
+    reset_tree(); fresh_ctx();
+    root = mk_root();
+    Box *o = mk(root, BOX_BLOCK, 100, 100, 60, 40);
+    st(o)->background_color = rgba(80, 80, 80, 255);
+    st(o)->border_radius[0] = st(o)->border_radius[1] = st(o)->border_radius[2] = st(o)->border_radius[3] = px(8);
+    st(o)->outline_width = 2;
+    st(o)->outline_style = CSS_BORDER_STYLE_SOLID;
+    st(o)->outline_color = rgba(74, 156, 15, 255);
+    st(o)->outline_offset = 2;
+    build(root);
+    const int ops3[] = {DL_RRECT, DL_BORDER, -1};
+    if (expect_ops("outline", &g_dl, ops3)) {
+        const DlRect r = g_dl.items[1].u.border.rect;
+        CHECK_F(r.x, 96); CHECK_F(r.y, 96); CHECK_F(r.w, 68); CHECK_F(r.h, 48);
+        CHECK_F(g_dl.items[1].u.border.width[0], 2);
+        CHECK_F(g_dl.items[1].u.border.radii.tl, 12);
+        CHECK(g_dl.items[1].u.border.color[0].g == 156);
+    }
+    st(o)->outline_style = CSS_BORDER_STYLE_AUTO;
+    o->paint_dirty = 1;
+    paint_invalidate_all(&g_ctx);
+    build(root);
+    CHECK(find_op(&g_dl, DL_BORDER, 0) < 0);
+
+    /* color-mix(in srgb, currentColor 30%, transparent) as a background */
+    st(o)->outline_style = CSS_BORDER_STYLE_NONE;
+    st(o)->color = rgba(200, 100, 0, 255);
+    st(o)->background_color = rgba(0, 0, 0, 0);
+    st(o)->background_color.kind = CSS_COLOR_CURRENT_MIX;
+    st(o)->background_color.mix = 60;   /* 30% in 0.5% units */
+    st(o)->background_color.mix_space = 0;
+    o->paint_dirty = 1;
+    paint_invalidate_all(&g_ctx);
+    build(root);
+    const int ri = find_op(&g_dl, DL_RRECT, 0);
+    CHECK(ri >= 0);
+    if (ri >= 0) {
+        const CssColor c = g_dl.items[ri].u.rrect.color;
+        CHECK(c.r == 200 && c.g == 100 && abs((int) c.a - 77) <= 1);   /* premultiplied mix keeps the hue */
+    }
+}
+
 int main(void)
 {
     paint_ctx_init(&g_ctx);
@@ -1418,6 +1623,8 @@ int main(void)
     test_url_base_and_cutout();
     test_three_dot_ellipsis();
     test_inline_context_in_scroller();
+    test_3d_transforms();
+    test_backdrop_mask_clip_text_outline();
     paint_ctx_free(&g_ctx);
     dl_free(&g_dl);
     printf("%d passed, %d failed\n", g_pass, g_fail);

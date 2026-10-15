@@ -1,0 +1,48 @@
+{
+  "scenario": "ingame-death-tex",
+  "defaults": {
+    "fuzz": 6,
+    "max_pct": 0.5
+  },
+  "regions": [
+    {
+      "name": "death-backdrop",
+      "rect": [
+        0,
+        380,
+        1280,
+        300
+      ],
+      "kind": "image",
+      "fuzz": 8,
+      "max_pct": 1.5,
+      "note": ".death-ui-bottom: 30% black over the blurred art (backdrop-filter blur 10px), rounded border box"
+    },
+    {
+      "name": "death-weapons",
+      "rect": [
+        380,
+        570,
+        470,
+        75
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "#deathUIHolder top row (text over the blurred backdrop)"
+    },
+    {
+      "name": "death-stats",
+      "rect": [
+        950,
+        595,
+        160,
+        90
+      ],
+      "kind": "text",
+      "fuzz": 12,
+      "max_pct": 3.0,
+      "note": "Shots Fired / Accuracy / Kills / Score rows over the backdrop"
+    }
+  ]
+}

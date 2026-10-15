@@ -1152,7 +1152,9 @@ else ()
             SOURCES ${KN_ENGINE_DIR}/tests/test_events.c ${KN_ENGINE_DIR}/events.c ${KN_ENGINE_DIR}/util.c
             DEFINES KN_EVENTS_STANDALONE LIBS lexbor ARGS ${CMAKE_SOURCE_DIR})
         krunknative_html_engine_test(html_paint_test
-            SOURCES ${KN_ENGINE_DIR}/tests/test_paint.c ${KN_ENGINE_DIR}/paint.c ${KN_ENGINE_DIR}/util.c)
+            SOURCES ${KN_ENGINE_DIR}/tests/test_paint.c ${KN_ENGINE_DIR}/paint.c ${KN_ENGINE_DIR}/css_values.c
+                    ${KN_ENGINE_DIR}/util.c
+            LIBS lexbor)
         krunknative_html_engine_test(html_svg_test
             SOURCES ${KN_ENGINE_DIR}/tests/test_svg.c ${KN_ENGINE_DIR}/svg.c ARGS ${CMAKE_SOURCE_DIR})
         file(GLOB KN_ENGINE_LAYOUT_SOURCES ${KN_ENGINE_DIR}/layout_*.c)

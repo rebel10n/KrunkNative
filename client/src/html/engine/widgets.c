@@ -43,6 +43,7 @@
 #include <time.h>
 
 #include "css_sheet.h"
+#include "css_values.h"
 #include "util.h"
 
 /* GLFW key codes (events.h mirrors only a few). */
@@ -239,11 +240,28 @@ static CssColor rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a)
 
 static CssColor resolve_color(CssColor c, const CssComputed *st)
 {
-    if (c.kind == CSS_COLOR_CURRENT) {
-        if (st) return st->color;
-        return rgba(0, 0, 0, 255);
+    if (c.kind != CSS_COLOR_RGBA) {   /* currentColor, color-mix(.. currentColor ..) */
+        CssColor cur = st ? st->color : rgba(0, 0, 0, 255);
+        cur.kind = CSS_COLOR_RGBA;
+        return css_color_resolve(c, cur);
     }
     return c;
+}
+
+/* accent-color: the author's colour, or the theme accent for `auto`. */
+static CssColor accent_of(const Widgets *w, const CssComputed *st)
+{
+    if (!st || st->accent_color_auto) return w->theme.control_accent;
+    return resolve_color(st->accent_color, st);
+}
+
+/* A light author accent (Chrome: !color_utils::IsDark, i.e. #202124 contrasts
+ * more than white): the checkbox tick turns #202124 and the slider's unfilled
+ * track takes the dark-scheme #3b3b3b / #858585 (measured, Chrome 152). */
+static int accent_is_light(const CssComputed *st, CssColor accent)
+{
+    if (!st || st->accent_color_auto) return 0;
+    return widgets_contrast_ratio(accent, rgba(0x20, 0x21, 0x24, 255)) > widgets_contrast_ratio(accent, rgba(255, 255, 255, 255));
 }
 
 static float resolve_len(CssLength l, float ref, float fallback)
@@ -1969,7 +1987,7 @@ static void paint_checkbox(Widgets *w, WidgetState *s, const CssComputed *st, co
     const float z = wz(st);
     float d = fminf(g->w, g->h);
     float x = g->x + (g->w - d) / 2, y = g->y + (g->h - d) / 2;
-    const CssColor accent = disabled ? rgba(0xd1, 0xd1, 0xd1, 255) : w->theme.control_accent;
+    const CssColor accent = disabled ? rgba(0xd1, 0xd1, 0xd1, 255) : accent_of(w, st);
     const CssColor border = disabled ? rgba(0xc5, 0xc5, 0xc5, 255) : w->theme.control_border;
     if (st && st->appearance == CSS_APPEARANCE_NONE) return; /* fully author-styled (.switch .slider) */
     if (d <= 0) return;
@@ -1985,7 +2003,8 @@ static void paint_checkbox(Widgets *w, WidgetState *s, const CssComputed *st, co
     }
     DlRadii r = dl_radii_all(w->theme.native_checkbox_radius * z);
     if (checked) {
-        const CssColor tick = disabled ? rgba(0xed, 0xed, 0xed, 255) : w->theme.control_bg;
+        CssColor tick = disabled ? rgba(0xed, 0xed, 0xed, 255) : w->theme.control_bg;
+        if (!disabled && accent_is_light(st, accent)) tick = rgba(0x20, 0x21, 0x24, 255);
         const float t = d * 0.16f;
         emit_rrect(a, x, y, d, d, r, accent);
         emit_segment(a, x + d * 0.2f, y + d * 0.5f, x + d * 0.4f, y + d * 0.7f, t, tick);
@@ -2140,7 +2159,7 @@ static void paint_range(Widgets *w, WidgetState *s, const CssComputed *st, const
     range_geom(w, s->elem, st, g, &rg);
     tx = widgets_range_thumb_x(min, max, value, rg.tc_x, rg.tc_w, rg.thumb_w);
     const int disabled = dom_has_attr(w->dom, s->elem, "disabled");
-    const CssColor accent = disabled ? rgba(0xc5, 0xc5, 0xc5, 255) : w->theme.control_accent;
+    const CssColor accent = disabled ? rgba(0xc5, 0xc5, 0xc5, 255) : accent_of(w, st);
     if (rg.native_input) {
         /* Chrome's themed slider (measured, Chrome 152): 8px track with a 1px
          * border, #efefef / #b2b2b2 right of the thumb centre, accent with a
@@ -2148,12 +2167,20 @@ static void paint_range(Widgets *w, WidgetState *s, const CssComputed *st, const
         const float z = wz(st), th = rg.track_h, ty = rg.track_y;
         const DlRadii r = dl_radii_all(th / 2);
         const float split = tx + rg.thumb_w / 2;
-        emit_rrect(a, rg.track_x, ty, rg.track_w, th, r, rgba(0xef, 0xef, 0xef, 255));
-        emit_border(a, rg.track_x, ty, rg.track_w, th, r, z, rgba(0xb2, 0xb2, 0xb2, 255));
+        /* author accent-color: the filled part's border is accent mixed 50% with #767676
+         * (#3b75ba for the default accent); a light accent darkens the whole track */
+        const int light = !disabled && accent_is_light(st, accent);
+        const CssColor track_border = light ? rgba(0x85, 0x85, 0x85, 255) : rgba(0xb2, 0xb2, 0xb2, 255);
+        CssColor fill_border = rgba(0x3b, 0x75, 0xba, 255);
+        if (light) fill_border = track_border;
+        else if (st && !st->accent_color_auto)
+            fill_border = rgba((uint8_t) ((accent.r + 0x76 + 1) / 2), (uint8_t) ((accent.g + 0x76 + 1) / 2), (uint8_t) ((accent.b + 0x76 + 1) / 2), 255);
+        emit_rrect(a, rg.track_x, ty, rg.track_w, th, r, light ? rgba(0x3b, 0x3b, 0x3b, 255) : rgba(0xef, 0xef, 0xef, 255));
+        emit_border(a, rg.track_x, ty, rg.track_w, th, r, z, track_border);
         if (split > rg.track_x) {
             emit_clip(a, rg.track_x, ty, split - rg.track_x, th);
             emit_rrect(a, rg.track_x, ty, rg.track_w, th, r, accent);
-            if (!disabled) emit_border(a, rg.track_x, ty, rg.track_w, th, r, z, rgba(0x3b, 0x75, 0xba, 255));
+            if (!disabled) emit_border(a, rg.track_x, ty, rg.track_w, th, r, z, fill_border);
             emit_pop_clip(a);
         }
     } else if (rg.rst) {
@@ -2477,7 +2504,7 @@ static CssColor color_over(CssColor c, CssColor under)
 
 static CssColor resolve_current(CssColor c, const CssComputed *st)
 {
-    if (c.kind == CSS_COLOR_CURRENT) c = st ? st->color : rgba(0, 0, 0, 255);
+    c = resolve_color(c, st);
     c.kind = CSS_COLOR_RGBA;
     return c;
 }
