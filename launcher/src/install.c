@@ -149,7 +149,9 @@ int kn_install_dir_in_checkout(const char *dir, char *root, const size_t n) {
         const size_t before = strlen(path);
         kn_fs_dirname(path);
         const size_t after = strlen(path);
-        if (!after || after >= before) return 0;
+        // the top: "/" (POSIX), or "." after a drive ("C:" has no slash): never the cwd's .git,
+        // which made the Windows launcher refuse any install started from inside a checkout
+        if (!after || after >= before || !strcmp(path, ".")) return 0;
     }
 }
 

@@ -2450,7 +2450,17 @@ Before the game it:
    "package":"tar.gz|zip|deb|rpm|app","channel","root"}`), rolls back an update a crash interrupted
    (journal in `<root>/.kn-update/`) and fetches the channel manifest (`--updates-url`,
    `KRUNKNATIVE_UPDATES_URL`, default `https://dl.krunk.io/updates/client/latest.json`, `off`
-   disables);
+   disables; launchers before 8a010d82 have `https://assets.krunk.io/updates/...` built in, which
+   302s there). A failed lookup / connection or a 5xx / 429 is tried 3 times (1 s, then 3 s
+   apart; a 404 or a manifest that does not parse is not), and the reason is what the window and
+   stderr show: `cannot resolve <host> (DNS: ...)`, `cannot connect to <host> port 443 (...)`,
+   `TLS handshake with <host> failed: ...`, `HTTP 404 from <url>` (POSIX: `http_conn_error()`;
+   Windows: the WinHTTP error named, e.g. `cannot resolve the host name (DNS) (WinHTTP error
+   12007)`). 2026-10-13's "the updater fails to connect to the server" was DNS: `assets.krunk.io`
+   had no record at Spaceship for a while after the move from Cloudflare. CI (`client.yml`, step
+   "Launcher reaches the updates server") runs every package's launcher `--check` against the live
+   manifest on its own platform (`tools/release/check-launcher.sh <package> [--old-url]`, also
+   locally; a Windows zip runs through wine);
 2. when the manifest's build is newer than its own (`kn_update_compare`, 8.12's rule: same commit or
    a newer commit_time = current; an older protocol, no build info or older than latest − grace =
    outdated; else update available) installs the update package: download (sha256 + size checked),

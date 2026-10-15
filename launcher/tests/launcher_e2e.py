@@ -18,6 +18,10 @@ launcher with their embedded commit id patched (same length), so they report ano
   4  deb install: no executable update (package manager), content synced into the user data dir
      ($XDG_DATA_HOME/krunknative/assets) together with the package's assets/ files
   5  corrupt package on the server: refused by its sha256, the install stays as it was
+  5b an unreachable updates server (the 2026-10-13 report: assets.krunk.io had no DNS record after
+     the move to Spaceship): the launcher retries a failed lookup / 5xx (3 tries), says why
+     ("cannot resolve <host> (DNS: ...)", "HTTP 404 from <url>") on stderr and in the window,
+     does not retry a 404, and a 503 that clears on the second try still finds the update
   6  the client itself (headless, --offline): detects "outdated" from the manifest and `update
      now` restarts through KRUNKNATIVE_LAUNCHER (a stand-in that records its arguments)
   7  Auto-restart for updates (Settings > Client, default on; client/include/game_reload.h), the
@@ -88,6 +92,7 @@ def run(cmd, env=None, cwd=None, timeout=120):
 
 AUTO_GATE = threading.Event()  # step 7: /auto/ answers 503 until set
 AUTO_GATE.set()
+FLAKY = {"left": 0}  # step 5b: /flaky/ answers 503 this many times, then serves
 
 
 class Log:
@@ -114,6 +119,13 @@ def serve(root, port, log):
             if self.path.startswith("/auto/") and not AUTO_GATE.is_set():
                 self.send_error(503)
                 return
+            if self.path.startswith("/flaky/"):
+                with log.lock:
+                    flaky = FLAKY["left"] > 0
+                    FLAKY["left"] -= 1 if flaky else 0
+                if flaky:
+                    self.send_error(503)
+                    return
             super().do_GET()
 
         def log_message(self, *a):
@@ -402,6 +414,7 @@ def main():
     srv_root = os.path.join(tmp, "srv")
     os.makedirs(srv_root)
     os.symlink(os.path.join(store, "public"), os.path.join(srv_root, "updates"))
+    os.symlink(os.path.join(store, "public"), os.path.join(srv_root, "flaky"))
     port = kn_proto.free_ports(1)[0]
     log = Log()
     srv = serve(srv_root, port, log)
@@ -517,6 +530,30 @@ def main():
         after = {k: v for k, v in tree_state(bad).items() if not k.startswith("assets/")}
         check(after == {k: v for k, v in before.items() if not k.startswith("assets/")}, "install unchanged")
         write(pkg_path, good)
+
+        # ------------------------------------------------------------ 5b unreachable server
+        print("5b unreachable updates server")
+        un = make_install("install-unreachable", "tar.gz")  # no game content yet: nothing playable
+        uenv = dict(env, KRUNKNATIVE_UPDATES_URL="https://nohost.invalid/updates/client/latest.json")  # RFC 6761: never resolves
+        code, out = run([os.path.join(un, "krunknative"), "--cli", "--no-launch"], env=uenv, cwd=tmp)
+        print("\n".join("     " + line for line in out.strip().splitlines() if "launcher]" in line and "Checking" not in line)[-600:])
+        check(code == 2, f"no manifest and no content: exit 2 ({code})")
+        check("cannot resolve nohost.invalid (DNS" in out, "the reason names the DNS lookup and the host")
+        check("Cannot reach the update server to download the game content: cannot resolve nohost.invalid" in out,
+              "the window's error line carries the reason, not the content dir")
+        check("try 3 of 3" in out, "a failed lookup is tried 3 times")
+        log.take()
+        code, out = run([os.path.join(un, "krunknative"), "--cli", "--check"],
+                        env=dict(env, KRUNKNATIVE_UPDATES_URL=f"http://127.0.0.1:{port}/updates/client/missing.json"), cwd=tmp)
+        paths = log.take()
+        check(code == 2 and f"HTTP 404 from http://127.0.0.1:{port}/updates/client/missing.json" in out, "a 404 says HTTP 404 and the URL")
+        check(paths == ["/updates/client/missing.json"], f"a 404 is not retried ({len(paths)} requests)")
+        FLAKY["left"] = 1
+        code, out = run([os.path.join(un, "krunknative"), "--cli", "--check"],
+                        env=dict(env, KRUNKNATIVE_UPDATES_URL=f"http://127.0.0.1:{port}/flaky/client/latest.json"), cwd=tmp)
+        paths = log.take()
+        check(code == 3 and "reached the server on try 2" in out, f"a 503 then 200: the second try finds the update (exit {code})")
+        check(paths == ["/flaky/client/latest.json"] * 2, f"two manifest requests ({paths})")
 
         # ------------------------------------------------------------ 6 the client's own check
         if not a.no_client:

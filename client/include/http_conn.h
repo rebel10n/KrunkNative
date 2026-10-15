@@ -31,6 +31,9 @@ typedef struct {
 // SOCKS5, for plain and TLS connections alike; the TLS handshake then runs end to end.
 // timeout_ms bounds the connect and every later send/receive (SO_SNDTIMEO / SO_RCVTIMEO).
 int http_conn_open(HttpConn *c, const HttpAddr *a, int timeout_ms);
+// Why the calling thread's last failed http_conn_open failed ("cannot resolve dl.krunk.io (DNS:
+// ...)", "cannot connect to <host> port 443 (timed out)", "TLS handshake with <host> failed: ...").
+const char *http_conn_error(void);
 void http_conn_close(HttpConn *c);
 int http_conn_send(HttpConn *c, const void *data, size_t len);
 // >0 bytes, 0 closed, <0 error (errno EAGAIN on a receive timeout)

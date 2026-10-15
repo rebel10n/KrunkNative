@@ -20,6 +20,22 @@
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
 #endif
+#include <stdarg.h>
+
+// Why the calling thread's last http_conn_open failed (http_conn_error): the launcher shows it
+// when it cannot reach the updates server, so a DNS failure does not read like a refused port.
+static _Thread_local char t_open_err[256];
+
+static void open_err(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(t_open_err, sizeof(t_open_err), fmt, ap);
+    va_end(ap);
+}
+
+const char *http_conn_error(void) {
+    return t_open_err;
+}
 
 // http(s)://host[:port][/base] (also ws:// / wss://); TLS needs KRUNKNATIVE_HAVE_TLS
 int http_url_parse(const char *url, HttpAddr *a) {
@@ -100,7 +116,11 @@ static int dns_lookup(const HttpAddr *a, DnsEntry *out) {
     struct addrinfo hints = {0}, *res = NULL;
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
-    if (getaddrinfo(a->host, a->port, &hints, &res) != 0 || !res) return 0;
+    const int gai = getaddrinfo(a->host, a->port, &hints, &res);
+    if (gai != 0 || !res) {
+        open_err("cannot resolve %s (DNS: %s)", a->host, gai ? gai_strerror(gai) : "no address");
+        return 0;
+    }
     memset(out, 0, sizeof(*out));
     snprintf(out->host, sizeof(out->host), "%s", a->host);
     snprintf(out->port, sizeof(out->port), "%s", a->port);
@@ -115,7 +135,10 @@ static int dns_lookup(const HttpAddr *a, DnsEntry *out) {
         out->n++;
     }
     freeaddrinfo(res);
-    if (!out->n) return 0;
+    if (!out->n) {
+        open_err("cannot resolve %s (DNS: no usable address)", a->host);
+        return 0;
+    }
     pthread_mutex_lock(&g_dns_lock);
     int slot = 0;
     for (int i = 0; i < DNS_CACHE_N; i++) {
@@ -141,19 +164,26 @@ static void dns_forget(const HttpAddr *a) {
 static int connect_to(const HttpAddr *a, const int timeout_ms) {
     DnsEntry d;
     if (!dns_lookup(a, &d)) return -1;
-    int fd = -1;
+    int fd = -1, why = 0;
     for (int i = 0; i < d.n && fd < 0; i++) {
         fd = (int) socket(d.a[i].family, d.a[i].socktype, d.a[i].protocol);
-        if (fd < 0) continue;
+        if (fd < 0) {
+            why = errno;
+            continue;
+        }
         struct timeval tv = {timeout_ms / 1000, (timeout_ms % 1000) * 1000};
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
         if (connect(fd, (const struct sockaddr *) &d.a[i].addr, d.a[i].len) != 0) {
+            why = errno;
             close(fd);
             fd = -1;
         }
     }
     if (fd < 0) {
         dns_forget(a);
+        // SO_SNDTIMEO expiring reports EINPROGRESS / EAGAIN
+        open_err("cannot connect to %s port %s (%s)", a->host, a->port,
+                 why == EINPROGRESS || why == EAGAIN || why == ETIMEDOUT ? "timed out" : why ? strerror(why) : "no address");
         return -1;
     }
     const int one = 1;
@@ -289,6 +319,8 @@ static SSL *tls_start(const int fd, SSL *under, const char *host) {
         const long verify = ssl ? SSL_get_verify_result(ssl) : X509_V_OK;
         fprintf(stderr, "[http] TLS to %s failed%s%s\n", host, verify != X509_V_OK ? ": " : "",
                 verify != X509_V_OK ? X509_verify_cert_error_string(verify) : "");
+        open_err("TLS handshake with %s failed%s%s", host, verify != X509_V_OK ? ": " : "",
+                 verify != X509_V_OK ? X509_verify_cert_error_string(verify) : "");
         ERR_clear_error();
         if (ssl) SSL_free(ssl);
         return NULL;
@@ -434,6 +466,7 @@ static int socks5_tunnel(HttpConn *c, const HttpProxy *px, const HttpAddr *a, co
 int http_conn_open(HttpConn *c, const HttpAddr *a, const int timeout_ms) {
     memset(c, 0, sizeof(*c));
     c->fd = -1;
+    t_open_err[0] = 0;
     HttpProxy px;
     const int via = http_proxy_for(a->host, a->tls, &px);
     char label[160] = "";
@@ -450,7 +483,12 @@ int http_conn_open(HttpConn *c, const HttpAddr *a, const int timeout_ms) {
         }
 #endif
         c->fd = connect_to(&pa, timeout_ms);
-        if (c->fd < 0) fprintf(stderr, "[http] proxy %s is not reachable (for %s)\n", label, a->host);
+        if (c->fd < 0) {
+            fprintf(stderr, "[http] proxy %s is not reachable (for %s)\n", label, a->host);
+            char why[sizeof(t_open_err)];
+            snprintf(why, sizeof(why), "%s", t_open_err);
+            open_err("proxy %s is not reachable: %s", label, why);
+        }
     } else {
         c->fd = connect_to(a, timeout_ms);
     }
@@ -463,7 +501,10 @@ int http_conn_open(HttpConn *c, const HttpAddr *a, const int timeout_ms) {
 #endif
         const int ok = px.kind == HTTP_PROXY_SOCKS5 || px.kind == HTTP_PROXY_SOCKS5H ? socks5_tunnel(c, &px, a, label)
                                                                                     : connect_tunnel(c, &px, a, label);
-        if (!ok) goto fail;
+        if (!ok) {
+            open_err("proxy %s did not open a tunnel to %s (see the log)", label, a->host);
+            goto fail;
+        }
     }
 #ifdef KRUNKNATIVE_HAVE_TLS
     if (a->tls) {

@@ -12,6 +12,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef _WIN32
+#include <direct.h>
+#define getcwd _getcwd
+#define chdir _chdir
+#else
+#include <unistd.h>
+#endif
 
 static int g_fail, g_checks;
 
@@ -725,6 +732,25 @@ static void test_swap(void) {
     CHECK(kn_install_package_assets(&pk, p, err, sizeof(err)) == 0);    // same dir: nothing
 }
 
+// kn_install_dir_in_checkout: a content dir inside a git checkout is refused (the sync deletes
+// what it does not list); one outside is not, whatever the cwd (the Windows launcher walked from
+// "C:" to "." and found the cwd's .git: started from a checkout, it refused every install).
+static void test_checkout(void) {
+    char repo[1024], assets[1024], git[1024], plain[1024], root[1024] = "", cwd[1024] = "";
+    kn_fs_join(repo, sizeof(repo), g_scratch, "repo");
+    kn_fs_join(git, sizeof(git), repo, ".git");
+    kn_fs_join(assets, sizeof(assets), repo, "assets/textures");
+    kn_fs_join(plain, sizeof(plain), g_scratch, "install/assets");
+    CHECK(kn_fs_mkdirs(git) && kn_fs_mkdirs(assets) && kn_fs_mkdirs(plain));
+    CHECK(kn_install_dir_in_checkout(assets, root, sizeof(root)));
+    CHECK(strstr(root, "repo") != NULL);
+    CHECK(!kn_install_dir_in_checkout(plain, root, sizeof(root)));
+    CHECK(getcwd(cwd, sizeof(cwd)) != NULL);
+    CHECK(chdir(repo) == 0); // the cwd is a checkout: an install elsewhere is still not in it
+    CHECK(!kn_install_dir_in_checkout(plain, root, sizeof(root)));
+    CHECK(chdir(cwd) == 0);
+}
+
 int main(int argc, char **argv) {
     if (argc > 1) snprintf(g_scratch, sizeof(g_scratch), "%s", argv[1]);
     else {
@@ -742,6 +768,7 @@ int main(int argc, char **argv) {
     test_compare();
     test_assets();
     test_marker();
+    test_checkout();
     test_archives();
     test_swap();
     if (!g_fail) kn_fs_rmtree(g_scratch);

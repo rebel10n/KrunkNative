@@ -45,6 +45,25 @@ static void set_err(char *err, const size_t errn, const char *fmt, const char *a
     if (err && errn) snprintf(err, errn, fmt, arg ? arg : "");
 }
 
+#ifdef _WIN32
+// The WinHTTP failures a player meets (winhttp.h ERROR_WINHTTP_*), in words: what the launcher
+// window shows when it cannot reach the updates server.
+static const char *winhttp_reason(const DWORD e) {
+    switch (e) {
+    case 12007: return "cannot resolve the host name (DNS)";            // NAME_NOT_RESOLVED
+    case 12029: return "cannot connect";                                // CANNOT_CONNECT
+    case 12002: return "timed out";                                     // TIMEOUT
+    case 12030: return "the connection was dropped";                    // CONNECTION_ERROR
+    case 12175: return "TLS failed (certificate or protocol)";          // SECURE_FAILURE
+    case 12157: return "TLS failed (secure channel)";                   // SECURE_CHANNEL_ERROR
+    case 12037: case 12038: case 12044: case 12045: return "certificate rejected"; // DATE / CN / ... INVALID
+    case 12180: return "proxy auto-detection failed";                   // AUTODETECTION_FAILED
+    case 12152: return "invalid server response";                       // INVALID_SERVER_RESPONSE
+    default: return "request failed";
+    }
+}
+#endif
+
 typedef struct {
     char *data;
     size_t len, max;
@@ -162,7 +181,7 @@ int kn_http_get(KnHttp *h, const char *url, KnHttpSink *sink, char *err, const s
     const DWORD flags = uc.nScheme == INTERNET_SCHEME_HTTPS ? WINHTTP_FLAG_SECURE : 0;
     HINTERNET req = WinHttpOpenRequest(conn, L"GET", path[0] ? path : L"/", NULL, WINHTTP_NO_REFERER,
                                        WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
-    char host8[256];
+    char host8[256] = "";
     if (req && WideCharToMultiByte(CP_UTF8, 0, host, -1, host8, sizeof(host8), NULL, NULL))
         http_proxy_winhttp_apply(req, host8, uc.nScheme == INTERNET_SCHEME_HTTPS);
     int status = 0;
@@ -220,8 +239,9 @@ int kn_http_get(KnHttp *h, const char *url, KnHttpSink *sink, char *err, const s
             }
         }
     } else {
-        char msg[96];
-        snprintf(msg, sizeof(msg), "%s (WinHTTP error %lu)", "request failed", (unsigned long) GetLastError());
+        const DWORD e = GetLastError();
+        char msg[384];
+        snprintf(msg, sizeof(msg), "%s: %s (WinHTTP error %lu)", host8[0] ? host8 : url, winhttp_reason(e), (unsigned long) e);
         set_err(err, errn, "%s", msg);
     }
     if (req) WinHttpCloseHandle(req);
@@ -344,7 +364,10 @@ static int ensure_open(KnHttp *h, const HttpAddr *a, char *err, const size_t err
     const int opened = http_conn_open(&h->conn, a, h->timeout_ms);
     STAT_ADD_N(g_stat_connect_us, now_us() - t0);
     if (!opened) {
-        set_err(err, errn, "cannot connect to %s", a->host);
+        // http_conn_error: a DNS failure, a refused / timed-out connection or a failed TLS handshake
+        const char *why = http_conn_error();
+        if (why[0]) set_err(err, errn, "%s", why);
+        else set_err(err, errn, "cannot connect to %s", a->host);
         return 0;
     }
     h->open = 1;

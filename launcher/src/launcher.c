@@ -58,6 +58,7 @@ typedef struct {
     char assets_dir[KN_PATH_MAX];
     KnUpdateState state;
     int manifest_ok;
+    char manifest_err[400]; // why the manifest could not be read ("" when it was)
     int updated;
     char latest[64];
     // shared view
@@ -185,6 +186,56 @@ static const char *updates_url(void) {
     if (L.updates_url[0]) return L.updates_url;
     const char *env = getenv("KRUNKNATIVE_UPDATES_URL");
     return env && *env ? env : KN_UPDATE_DEFAULT_URL;
+}
+
+static void sleep_ms(const int ms) {
+#ifdef _WIN32
+    Sleep((DWORD) ms);
+#else
+    const struct timespec ts = {ms / 1000, (long) (ms % 1000) * 1000000L};
+    nanosleep(&ts, NULL);
+#endif
+}
+
+// The channel manifest, up to MANIFEST_TRIES attempts: a host lookup or a connection that fails
+// once (a resolver catching up, Wi-Fi waking) or a 5xx / 429 from an origin restarting gets
+// another try 1 s, then 3 s later; a 404 or a manifest that does not parse does not. 1 = m is
+// filled; else L.manifest_err says why (the window shows it: "cannot resolve dl.krunk.io (DNS:
+// ...)", "HTTP 404 from https://...", "TLS handshake with ... failed: ...").
+#define MANIFEST_TRIES 3
+static int fetch_manifest(const char *url, KnUpdateManifest *m) {
+    static const int WAIT_MS[MANIFEST_TRIES - 1] = {1000, 3000};
+    L.manifest_err[0] = 0;
+    for (int attempt = 0; attempt < MANIFEST_TRIES; attempt++) {
+        if (attempt) {
+            for (int w = 0; w < WAIT_MS[attempt - 1] && !L.cancel; w += 100) sleep_ms(100);
+            if (L.cancel) return 0;
+            status(-1, L.manifest_err, "Checking for updates (try %d of %d)", attempt + 1, MANIFEST_TRIES);
+        }
+        KnHttp *http = kn_http_new(10000);
+        char *json = NULL, err[512] = "";
+        size_t len = 0;
+        const int code = http ? kn_http_get_mem(http, url, MANIFEST_MAX, &json, &len, err, sizeof(err)) : 0;
+        kn_http_free(http);
+        int ok = 0;
+        if (code == 200) {
+            ok = kn_update_manifest_parse(json, len, url, m, err, sizeof(err));
+            if (!ok) snprintf(L.manifest_err, sizeof(L.manifest_err), "bad manifest from %s: %s", url, err);
+        } else if (code > 0) {
+            snprintf(L.manifest_err, sizeof(L.manifest_err), "HTTP %d from %s", code, url);
+        } else {
+            snprintf(L.manifest_err, sizeof(L.manifest_err), "%s", err[0] ? err : "no answer");
+        }
+        free(json);
+        if (ok) {
+            if (attempt) printf("[launcher] update check: reached the server on try %d\n", attempt + 1);
+            return 1;
+        }
+        fprintf(stderr, "[launcher] update check failed: %s\n", L.manifest_err);
+        const int transient = code == 0 || code >= 500 || code == 429;
+        if (!transient) return 0;
+    }
+    return 0;
 }
 
 // ------------------------------------------------------------------ executable update
@@ -410,14 +461,7 @@ static void *work(void *arg) {
     L.manifest_ok = 0;
     if (strcmp(url, "off") != 0) {
         status(-1, NULL, "Checking for updates");
-        KnHttp *http = kn_http_new(10000);
-        char *json = NULL, err[512] = "";
-        size_t len = 0;
-        const int code = http ? kn_http_get_mem(http, url, MANIFEST_MAX, &json, &len, err, sizeof(err)) : 0;
-        kn_http_free(http);
-        if (code == 200 && kn_update_manifest_parse(json, len, url, &m, err, sizeof(err))) L.manifest_ok = 1;
-        else fprintf(stderr, "[launcher] update check failed: %s\n", code && code != 200 ? "HTTP error" : err);
-        free(json);
+        L.manifest_ok = fetch_manifest(url, &m);
     }
     KnUpdateBuild mine;
     self_build(&mine);
@@ -455,7 +499,7 @@ static void *work(void *arg) {
         }
         if (copied > 0) printf("[launcher] %d game file(s) from the package into %s\n", copied, L.assets_dir);
         if (!L.manifest_ok && !assets_present(L.assets_dir)) {
-            fail(0, L.assets_dir, "Cannot reach the update server to download the game content");
+            fail(0, L.manifest_err[0] ? L.manifest_err : L.assets_dir, "Cannot reach the update server to download the game content");
             goto out_m;
         }
     }
@@ -597,10 +641,15 @@ int main(int argc, char **argv) {
         } else L.client_args[L.client_argc++] = argv[i];
     }
 #ifdef _WIN32
-    // a GUI-subsystem exe: --cli prints to the console it was started from, if any
-    if (L.cli && AttachConsole(ATTACH_PARENT_PROCESS)) {
-        freopen("CONOUT$", "w", stdout);
-        freopen("CONOUT$", "w", stderr);
+    // a GUI-subsystem exe: --cli prints to the console it was started from, if any, unless the
+    // output already goes somewhere (`KrunkNative.exe --cli > log.txt`, a pipe in CI)
+    if (L.cli) {
+        const HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+        const int redirected = out && out != INVALID_HANDLE_VALUE && GetFileType(out) != FILE_TYPE_UNKNOWN;
+        if (!redirected && AttachConsole(ATTACH_PARENT_PROCESS)) {
+            freopen("CONOUT$", "w", stdout);
+            freopen("CONOUT$", "w", stderr);
+        }
     }
 #endif
     if (!L.assets_override[0]) {
@@ -627,7 +676,10 @@ int main(int argc, char **argv) {
     const int phase = run_phase(ui);
     if (L.check_only) {
         if (ui) launcher_ui_close(ui);
-        if (!L.manifest_ok) return 2;
+        if (!L.manifest_ok) {
+            printf("[launcher] cannot reach the update server: %s\n", L.manifest_err[0] ? L.manifest_err : "updates off");
+            return 2;
+        }
         printf("[launcher] %s\n", L.state == KN_UPDATE_CURRENT ? "up to date" : "update available");
         return L.state == KN_UPDATE_CURRENT ? 0 : 3;
     }
