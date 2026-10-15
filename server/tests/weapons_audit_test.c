@@ -377,9 +377,9 @@ static FireResult hold_fire(const int id, int slot, const int hold, const int sc
 static void run_case(const int id, const int path) {
     Cell *c = &g_cells[id][path];
     const Weapon *w = g_server->game.weapons[id];
-    // KrunkNative-only weapons (id >= WEAPON_COUNT) are in no class loadout; the unlisted ones (the
+    // KrunkNative-only weapons (id >= WEAPON_V10_COUNT) are in no class loadout; the unlisted ones (the
     // Tool Gun: the Object Manager's Tools pane) are object_manager_test's
-    if (w->bomb || (path != PATH_CLASS && !object_manager_weapon_listed(id)) || (id >= WEAPON_COUNT && (path == PATH_CLASS || !object_manager_weapon_listed(id)))) {
+    if (w->bomb || (path != PATH_CLASS && !object_manager_weapon_listed(id)) || (id >= WEAPON_V10_COUNT && (path == PATH_CLASS || !object_manager_weapon_listed(id)))) {
         c->na = 1;
         snprintf(c->how, sizeof(c->how), "n/a");
         return;
@@ -469,6 +469,16 @@ static void run_case(const int id, const int path) {
         snprintf(special, sizeof(special), "stream dmg %.0f, puddles %d -> %d", fr.damage, before, puddles);
         special_ok = fr.damage > 0.0f && puddles > before;
         cell(c, B_FIRE, fr.damage > 0.0f, "dmg %.0f", fr.damage);
+    } else if (!w->melee && w->ammo == 0 && !w->build) { // v10 Boulder: carried, never fires (no ammo, canThrow false; v10.js:101808)
+        fr = hold_fire(id, slot, 30, 0);
+        snprintf(special, sizeof(special), "carried: never fires");
+        special_ok = fr.damage <= 0.0f && fr.min_ammo == 0;
+        cell(c, B_FIRE, fr.damage <= 0.0f, "no shot (dmg %.0f)", fr.damage);
+    } else if (w->no_dmg && w->non_obj_impulse) { // v10 Compressor: no bullet, the shot pushes the shooter (v10.js:172807-172832)
+        fr = hold_fire(id, slot, 30, 0); // one shot (nAuto, 1 round); the push plays out over the hold
+        snprintf(special, sizeof(special), "shooter pushed %.1f, dmg %.0f", -fr.pulled, fr.damage);
+        special_ok = fr.damage <= 0.0f && fr.pulled < -5.0f; // left click: away from the target (+z)
+        cell(c, B_FIRE, fr.damage <= 0.0f && fr.pulled < -5.0f, "noDmg push %.1f", -fr.pulled);
     } else if (w->deploy_range > 0.0f) {
         g_pitch = -0.8f;
         fr = hold_fire(id, slot, 4, 0);
@@ -530,11 +540,11 @@ static void run_case(const int id, const int path) {
     // ammo accounting
     a = player_of(&g_a);
     slot = slot_of(a, id);
-    if (w->melee || w->build || w->grapple_range > 0.0f) cell(c, B_AMMO, 1, "no ammo use");
+    if (w->melee || w->build || w->grapple_range > 0.0f || w->ammo == 0) cell(c, B_AMMO, 1, "no ammo use");
     else if (fr.removed) cell(c, B_AMMO, w->remove_on_empty || w->deploy_range > 0.0f, "removed when empty");
     else cell(c, B_AMMO, fr.min_ammo < full, "%d -> %d", full, fr.min_ammo);
 
-    if (slot < 0 || w->melee || w->build || w->grapple_range > 0.0f) {
+    if (slot < 0 || w->melee || w->build || w->grapple_range > 0.0f || w->ammo == 0) {
         cell(c, B_RELOAD_TAC, 1, "n/a");
         cell(c, B_RELOAD_EMPTY, 1, "n/a");
         return;

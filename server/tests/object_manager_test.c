@@ -1582,10 +1582,12 @@ static void test_map_edits(TestClient *a, TestClient *b, TestClient *late) {
     CHECK(object_manager_editable(game, block) && object_manager_is_map_object(game, block) && !object_manager_map_edited(game, block),
           "the block is editable, as the map has it");
 
-    // the Physics Gun takes props, not the level: the block is refused, a crate and the pad are its
+    // the Physics Gun takes props, not the level: the block is refused, a crate and the pad are its (devs too)
     const int crate = map_object_of(game, PREFAB_CRATE, 0);
-    CHECK(!object_manager_physgun_takes(game, block) && object_manager_physgun_takes(game, pad) && (crate < 0 || object_manager_physgun_takes(game, crate)),
-          "Physics Gun reach: no map cube, the pad and a crate (%d)", crate);
+    for (int dev = 0; dev < 2; dev++) {
+        CHECK(!object_manager_physgun_takes(game, block, dev) && object_manager_physgun_takes(game, pad, dev) &&
+              (crate < 0 || object_manager_physgun_takes(game, crate, dev)), "Physics Gun reach (dev %d): no map cube, the pad and a crate (%d)", dev, crate);
+    }
     request(a, OM_ACTION_ADD_WEAPON, WEAPON_ID_PHYS_GUN, 0.0f);
     pump(4);
     hold(a, WEAPON_ID_PHYS_GUN);
@@ -2292,6 +2294,51 @@ static void test_dev_privileges(TestClient *a, TestClient *b) {
     clean_up(a);
 }
 
+// R185: a non-dev's Physics Gun carries props only, its own spawned blocks included; a dev's carries
+// every spawned object (and players: test_physgun_player)
+static void test_physgun_props(TestClient *a) {
+    printf("Physics Gun: props only for non-devs...\n");
+    Player *p = player_of(a);
+    if (!p) return;
+    Game *game = &g_server->game;
+    p->god_mode = 1;
+    clean_up(a);
+    pump(200);
+    request(a, OM_ACTION_ADD_WEAPON, WEAPON_ID_PHYS_GUN, 0.0f);
+    pump(4);
+    hold(a, WEAPON_ID_PHYS_GUN);
+    NetSpawnResultPacket r = request_at(a, OM_ACTION_SPAWN_OBJECT, entry_index(OM_TAB_OBJECTS, "Stone Block"), -0.6f, p->direction.y);
+    const int block = (int) game->map->object_count - 1;
+    pump(20);
+    NetSpawnResultPacket r2 = request_at(a, OM_ACTION_SPAWN_OBJECT, entry_index(OM_TAB_OBJECTS, "Crate"), -0.6f, p->direction.y + 0.8f);
+    const int crate = (int) game->map->object_count - 1;
+    CHECK(r.status == OM_STATUS_OK && r2.status == OM_STATUS_OK && block != crate, "a spawned block and crate (status %u %u)", r.status, r2.status);
+    CHECK(!object_manager_physgun_takes(game, block, 0) && object_manager_physgun_takes(game, crate, 0), "non-dev reach: the crate, not the block");
+    CHECK(object_manager_physgun_takes(game, block, 1) && object_manager_physgun_takes(game, crate, 1), "dev reach: both");
+    ObjectManagerPose from, to;
+    object_manager_pose(game, block, &from);
+    to = from;
+    to.position.y += 4.0f;
+    set_dev(a, 0);
+    pump(20);
+    r = edit_at(a, OM_EDIT_SOURCE_PHYSGUN, block, &to, OM_EDIT_BEGIN);
+    CHECK(r.status == OM_STATUS_GEOMETRY && fabsf(game->map->objects[block]->position.y - from.position.y) < 0.01f,
+          "a non-dev's Physics Gun on its own spawned block: refused (status %u)", r.status);
+    ObjectManagerPose cfrom, cto;
+    object_manager_pose(game, crate, &cfrom);
+    cto = cfrom;
+    cto.position.y += 4.0f;
+    pump(20);
+    r = edit_at(a, OM_EDIT_SOURCE_PHYSGUN, crate, &cto, OM_EDIT_BEGIN);
+    CHECK(r.status == OM_STATUS_OK && fabsf(game->map->objects[crate]->position.y - cto.position.y) < 0.06f, "its crate: carried (status %u)", r.status);
+    set_dev(a, 1);
+    pump(20);
+    r = edit_at(a, OM_EDIT_SOURCE_PHYSGUN, block, &to, OM_EDIT_BEGIN);
+    CHECK(r.status == OM_STATUS_OK && fabsf(game->map->objects[block]->position.y - to.position.y) < 0.06f, "a dev's: the block too (status %u)", r.status);
+    p->god_mode = 0;
+    clean_up(a);
+}
+
 // A connection in the menu (no Player yet): the cheats, give, spawn and tp land in its kept state and
 // the first spawn applies them; Object Manager requests run from its view (devs)
 static void join_menu(TestClient *c) {
@@ -2519,6 +2566,7 @@ int main(void) {
         test_public_refusals(&g_clients[0], &g_clients[1]);
         test_dev_privileges(&g_clients[0], &g_clients[1]);
         test_physgun_player(&g_clients[0], &g_clients[1]);
+        test_physgun_props(&g_clients[0]);
         test_menu_state(&g_clients[3], &g_clients[1]);
         test_entity_touch(&g_clients[0], &g_clients[1]); // last: power-ups change loadouts and scores
         for (int i = 0; i < CLIENTS; i++) leave(&g_clients[i]);

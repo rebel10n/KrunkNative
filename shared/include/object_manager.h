@@ -53,10 +53,10 @@
 // spawns at the dev's view (object_manager_request_view: the last life's eye, else the map's menu
 // camera) and the extra weapons into the connection's list for the next spawn.
 //
-// The Physics Gun (OM_EDIT_SOURCE_PHYSGUN) carries things, not the level: of the map's own objects
-// only props (object_manager_physgun_takes: model and special prefabs no bigger than
-// OM_PHYSGUN_MAP_SIZE_MAX; never cubes, planes, ramps, ladders, cylinders, liquids, zones or terrain:
-// OM_STATUS_GEOMETRY); every spawned object; and for devs other players (OM_EDIT_PLAYER: the server
+// The Physics Gun (OM_EDIT_SOURCE_PHYSGUN) carries props, not the level (object_manager_physgun_takes:
+// model and special prefabs, the map's own no bigger than OM_PHYSGUN_MAP_SIZE_MAX; never cubes, planes,
+// ramps, ladders, cylinders, liquids, zones or terrain: OM_STATUS_GEOMETRY), spawned or the map's; for
+// devs also every spawned object and other players (OM_EDIT_PLAYER: the server
 // holds the player at the carried feet, its input suspended, until the release or OM_HOLD_TIMEOUT
 // without an update). A carry turns freely about y (OM_EDIT_YAW: the record's "r" takes any yaw, the
 // AABB collision the nearest quarter turn's), snapped to 45 degrees and the grid while the client's
@@ -362,10 +362,12 @@ void object_manager_request_view(Game *game, const ObjectManagerView *view, cons
 void object_manager_hold_tick(Game *game, Player *player);
 void object_manager_hold_release(Game *game, Player *player); // let `player` go now (authority)
 
-// The Physics Gun may take object `uid` (both sides): any spawned object it may edit, and the map's
-// own props (prefab geometry model / special, every side at most OM_PHYSGUN_MAP_SIZE_MAX); never the
-// level's geometry (cubes, planes, ramps, ladders, cylinders, spheres, liquids, zones, canvases)
-int object_manager_physgun_takes(const Game *game, int uid);
+// The Physics Gun may take object `uid` (both sides): props only (prefab geometry model / special),
+// spawned ones it may edit and the map's own (every side at most OM_PHYSGUN_MAP_SIZE_MAX); never the
+// level's geometry (cubes, planes, ramps, ladders, cylinders, spheres, liquids, zones, canvases).
+// `dev` (OM_CAP_DEV): a dev's gun also takes every spawned object, blocks included (and players:
+// OM_EDIT_PLAYER).
+int object_manager_physgun_takes(const Game *game, int uid, int dev);
 uint16_t object_manager_yaw_pack(float yaw);     // [0, 2 pi) in 65536 steps
 float object_manager_yaw_unpack(uint16_t packed);
 int object_manager_yaw_quarter(float yaw);       // the nearest quarter turn, 0..3

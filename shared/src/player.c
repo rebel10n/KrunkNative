@@ -2952,9 +2952,10 @@ void player_melee(Player *player) {
     player->full_charge = 0;
 
     // TODO: gamepad rumble?
-    // isYou: weapon.anim(player, TWEEN, canThrow ? (throw ? 3 : 1) : 2), cancelInspect (swsh sounds: sound_events.c)
+    // isYou: weapon.anim(player, TWEEN, canThrow ? (throw ? 3 : 1) : 2, d), cancelInspect (v10.js:172423;
+    // swsh sounds: sound_events.c)
     if (player->is_you) {
-        if (player->weapon->melee_anim) player->weapon->melee_anim(player, player->can_throw ? (is_throw ? 3 : 1) : 2);
+        if (player->weapon->melee_anim) player->weapon->melee_anim(player, player->can_throw ? (is_throw ? 3 : 1) : 2, throw_d);
         player_cancel_inspect(player);
     }
 

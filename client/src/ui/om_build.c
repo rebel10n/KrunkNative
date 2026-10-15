@@ -8,8 +8,8 @@
 // The Tool Gun takes every object the crosshair is on (object_manager_pick: jump pads, teleporters,
 // ladders, ramps, triggers, pickups, zones, planes as well as solid ones): spawned objects (your
 // own, any for devs and the host) and, for devs and the host (OM_CAP_MAP), the map's own objects.
-// The Physics Gun takes things, not the level (object_manager_physgun_takes: spawned objects and the
-// map's props, never its cubes / planes / ramps / ladders / zones), and for devs other players.
+// The Physics Gun takes props, not the level (object_manager_physgun_takes: spawned and map props, never
+// cubes / planes / ramps / ladders / zones), and for devs every spawned object and other players.
 //
 // Physics Gun (WEAPON_ID_PHYS_GUN in hand): hold fire on an object to grab it; it follows the crosshair at its grab distance, the wheel changes the
 // distance (OM_PHYSGUN_DIST_*), the rotate key (R, cont_omRotateKey) held turns it about y with the
@@ -194,13 +194,13 @@ static int ob_axis_param(const vec3 eye, const vec3 dir, const vec3 origin, cons
 
 // The object the crosshair is on that this player may edit, -1 none; `point` where the ray met
 // it. The map's own objects only with OM_CAP_MAP (the authority checks again); the Physics Gun's
-// (`physgun`) only what it takes (object_manager_physgun_takes: no level geometry).
+// (`physgun`) only what it takes (object_manager_physgun_takes: props; a dev's every spawned object too).
 static int ob_pick_object(Client *client, const Player *me, const int physgun, vec3 *point) {
     ObjectManagerAim aim;
     if (!object_manager_pick(&client->game, me, me->direction.x, me->direction.y, &aim)) return -1;
     if (aim.object < 0 || !object_manager_editable(&client->game, aim.object)) return -1;
     if (object_manager_is_map_object(&client->game, aim.object) && !(object_manager_ui_caps() & OM_CAP_MAP)) return -1;
-    if (physgun && !object_manager_physgun_takes(&client->game, aim.object)) return -1;
+    if (physgun && !object_manager_physgun_takes(&client->game, aim.object, (object_manager_ui_caps() & OM_CAP_DEV) != 0)) return -1;
     *point = aim.point;
     return aim.object;
 }

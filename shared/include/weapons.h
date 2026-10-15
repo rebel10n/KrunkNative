@@ -128,9 +128,10 @@ typedef struct {
     // toward over 400 ms (Exponential.Out). Order: arZ, arX, arY, apZ, apX, apY, wpZ, wpY, wrY.
     unsigned char has_inspect_anim:1;
     float inspect_anim[9];
-    // JS `anim(player, TWEEN, type)` (players.js melee, local player only): tweens player->melee_anim.
-    // type 1 = swing with the knife, 2 = fists (knife thrown), 3 = throw release. NULL: no anim.
-    void (*melee_anim)(struct Player_t *player, int type);
+    // JS `anim(player, TWEEN, type, charge)` (players.js melee, local player only): tweens
+    // player->melee_anim. type 1 = swing with the knife, 2 = fists (knife thrown), 3 = throw release
+    // (charge: the throw's d, 0.1..1; v10.js:172423). NULL: no anim.
+    void (*melee_anim)(struct Player_t *player, int type, float charge);
 
     // JS `recoilAnim` (players.js shoot): the viewmodel kick tweens to these targets over
     // time * 0.15 (linear), then back to 0 over time * 0.95 (Back.Out). time 0 = `rate`;

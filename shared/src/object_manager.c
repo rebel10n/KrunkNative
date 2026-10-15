@@ -86,8 +86,9 @@ static const Weapon *om_weapon(const Game *game, const int id) {
 
 int object_manager_weapon_listed(const int weapon_id) {
     if (weapon_id < 0 || weapon_id >= WEAPON_TABLE_COUNT || !rules_weapon(weapon_id)) return 0;
-    // KrunkNative-only weapons: the Piss, Drank and Money Spread are Weapons tiles (the guns are the Tools pane's)
-    if (weapon_id >= WEAPON_COUNT) return weapon_id == WEAPON_ID_PISS || weapon_id == WEAPON_ID_DRANK || weapon_id == WEAPON_ID_MONEY_SPREAD;
+    // KrunkNative-only weapons: the Piss, Drank and Money Spread are Weapons tiles (the guns are the Tools pane's).
+    // v10.0.2's own 29 Boulder and 30 Compressor (WEAPON_V10_COUNT) are tiles like the rest of Krunker's table.
+    if (weapon_id >= WEAPON_V10_COUNT) return weapon_id == WEAPON_ID_PISS || weapon_id == WEAPON_ID_DRANK || weapon_id == WEAPON_ID_MONEY_SPREAD;
     return weapon_id != WEAPON_ID_KNIFE && !rules_weapon(weapon_id)->bomb; // every class has the knife; bombs are site-mode only
 }
 
@@ -2149,12 +2150,16 @@ static int om_level_geometry(const int prefab) {
     return !info || (info->geometry != PREFAB_GEO_MODEL && info->geometry != PREFAB_GEO_SPECIAL);
 }
 
-int object_manager_physgun_takes(const Game *game, const int uid) {
+int object_manager_physgun_takes(const Game *game, const int uid, const int dev) {
     if (!object_manager_editable(game, uid)) return 0;
-    if (!object_manager_is_map_object(game, uid)) return 1; // a spawned object: the spawner's to carry
     const Object *o = game->map->objects[uid];
+    const int spawned = !object_manager_is_map_object(game, uid);
+    // the user (R185): props only, spawned ones too; a dev's gun keeps every spawned object (and players,
+    // om_edit_player) as part of the dev privileges (R184)
+    if (spawned && dev) return 1;
     // a stand-in keeps the original's prefab; the size cap backstops big models (a whole building)
     if (om_level_geometry(o->prefab)) return 0;
+    if (spawned) return 1; // a spawned prop: the spawner's to carry, whatever its size
     const vec3 s = object_box_size(o);
     return s.x <= OM_PHYSGUN_MAP_SIZE_MAX && s.y <= OM_PHYSGUN_MAP_SIZE_MAX && s.z <= OM_PHYSGUN_MAP_SIZE_MAX;
 }
@@ -2206,7 +2211,7 @@ void object_manager_edit(Game *game, Player *player, const NetSpawnEditPacket *e
         out->status = (uint8_t) (target != OM_STATUS_OK ? target : OM_STATUS_INVALID);
         return;
     }
-    if (edit->req.item == OM_EDIT_SOURCE_PHYSGUN && !object_manager_physgun_takes(game, uid)) { // props, not the level
+    if (edit->req.item == OM_EDIT_SOURCE_PHYSGUN && !object_manager_physgun_takes(game, uid, dev)) { // props, not the level
         out->status = OM_STATUS_GEOMETRY;
         return;
     }

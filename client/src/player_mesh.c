@@ -1449,7 +1449,9 @@ void player_update_meshes(Player *player, const int is_preview) {
         nettspend_weapon_kind(player->loadout[player->loadout_index]) == NETTSPEND_WEAPON_DRANK) reload_anim = 0.0f;
 
     const float idle_anim = (1.0f - aim_val_mlt * 0.88f) * 1.75f * weapon_bobbing_mlt;
-    const float step_y = player->render_you && !third_person ? fabsf(step_anim_rotate * 0.5f) * anim_mlt_lean : fabsf(step_anim * 3.5f);
+    // renderYou && !thirdPerson ? |stepChase term * 0.5| * a0 : |sin(stepVal) * 6| (v10.js:170922, v7.1.4
+    // players.js:381; v3.1.1 bobbed other models by 3.5)
+    const float step_y = player->render_you && !third_person ? fabsf(step_anim_rotate * 0.5f) * anim_mlt_lean : fabsf(step_anim * 6.0f);
     const float step_yaw = player->render_you ? third_person ? -step_anim * 0.5f : 0.0f : -step_anim * 2.0f;
 
     // Every player's model follows its (server-updated) position; only the viewmodel offsets below are first-person.
@@ -1522,7 +1524,10 @@ void player_update_meshes(Player *player, const int is_preview) {
         player_arm_parts_set_visible(player_mesh->arms[player->loadout_index], settings->show_hands && !scoped_out);
     }
 
-    arm_anchor->rotation.x = -cosf(player->idle_anim) * bob_crouch_mlt * 0.01f * idle_anim +
+    // 1.5 * -stepHalfRotate * (renderYou && !thirdPerson ? 0 : 1): other players' (and a third-person
+    // model's) held weapon and arms swing with their steps (v10.js:170997, v7.1.4 players.js:499)
+    arm_anchor->rotation.x = (player->render_you && !third_person ? 0.0f : step_half_rotate * -1.5f) +
+        -cosf(player->idle_anim) * bob_crouch_mlt * 0.01f * idle_anim +
         player->weapon->rotation_offset * anim_mlt_lean + player->weapon->rotation_offset_aim * (1.0f - anim_mlt_lean) -
         player->swap_tween_r * 0.35f * anim_mlt_lean -
         player->land_bob_yr * 0.4f +

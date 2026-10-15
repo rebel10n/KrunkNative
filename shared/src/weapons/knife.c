@@ -4,9 +4,10 @@
 #define MA(channel) MELEE_ANIM_BIT(channel)
 #define MI(channel) MELEE_ANIM_##channel
 
-// v3.1.1 Combat Knife `anim` (27.js, verbatim in the comment below): the local player's swing
-// (1), fist punch once the knife is thrown (2) and throw release (3), all on player->melee_anim.
-static void knife_anim(Player *player, const int type) {
+// Krunker v10.0.2 Combat Knife `anim` (v10.js:100280-100345; v7.1.4 / v3.1.1 27.js the same but the
+// release time): the local player's swing (1), fist punch once the knife is thrown (2) and throw
+// release (3), all on player->melee_anim. `charge` is the throw's d (players.js melee, 0.1..1).
+static void knife_anim(Player *player, const int type, const float charge) {
     if (type == 1) {
         player->hand_anim_ind = (signed char) ((player->hand_anim_ind ? player->hand_anim_ind : 1) * -1);
         // j: a swing started while the last one's arm is still out (armM >= 2) is the backhand.
@@ -77,7 +78,8 @@ static void knife_anim(Player *player, const int type) {
         const MeleeAnimStep release = {
             .mask = MA(ARM_Y) | MA(ARM_S) | MA(ARM_E) | MA(ARM_M) | MA(L_ARM) | MA(WEA_R),
             .to = {[MI(ARM_Y)] = -9.0f, [MI(ARM_S)] = -0.1f, [MI(ARM_E)] = -7.5f, [MI(ARM_M)] = -1.5f, [MI(L_ARM)] = 0.5f, [MI(WEA_R)] = -3.0f},
-            .duration = 0.3f,
+            // 200 - 200 * (d || 1) + 300 ms (v10.js:100334): a quick (low-charge) throw's release is slower
+            .duration = (200.0f - 200.0f * (charge > 0.0f ? charge : 1.0f) + 300.0f) / 1000.0f,
             .ease = PLAYER_EASE_CUBIC_OUT,
         };
         const MeleeAnimStep back = {
