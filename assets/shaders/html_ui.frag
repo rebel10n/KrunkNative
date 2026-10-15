@@ -21,7 +21,8 @@
 //                      mask uv = (u * p1.x, 1 - (1 - v) * p1.y) (the two pool entries' size ratios)
 //
 // Clip: every fragment is also multiplied by the coverage of the per-vertex
-// rounded clip rect (v_clip, v_clip_radius) in target pixels.
+// rounded clip rect (v_clip, v_clip_radius) in target pixels, and by that of
+// the clip-path polygon in u_poly_edges (u_poly_n > 0), anti-aliased like Skia.
 in vec2 v_pos;
 in vec2 v_uv;
 in vec4 v_color;
@@ -41,6 +42,12 @@ uniform vec2 u_blur_dir;        // blur pass: step between taps in texcoords
 uniform vec4 u_blur_clamp;      // blur pass: texcoord clamp rect (u0, v0, u1, v1)
 uniform sampler2D u_mask;       // unit 2: mask of a masked group (mode 10)
 uniform int u_stencil_pass;     // 1: discard fragments under half coverage (stencil shape pass)
+// clip-path: polygon(): its boundary as edges (x0, y0, x1, y1) in target pixels, the two
+// traversals of a ring bridge (Krunker Strike's frames) cancelled out (gl_backend.c)
+#define POLY_MAX_EDGES 64
+uniform int u_poly_n;           // edges; 0 = no polygon clip
+uniform int u_poly_evenodd;     // fill rule: 0 nonzero, 1 evenodd
+uniform vec4 u_poly_edges[POLY_MAX_EDGES];
 
 out vec4 frag_color;
 
@@ -126,6 +133,31 @@ float rrect_shadow(vec2 p, vec2 half_size, vec4 radii, float sigma) {
 float shadow_coverage(vec2 p, vec2 half_size, vec4 radii, float sigma, float px) {
     if (sigma < 0.05) return aa(sd_rrect(p, half_size, radii), px);
     return rrect_shadow(p, half_size, radii, sigma);
+}
+
+// Coverage of the clip polygon at p: inside by the winding of its edges (nonzero or
+// evenodd), anti-aliased over one pixel by the distance to the nearest edge.
+float poly_coverage(vec2 p) {
+    int wind = 0;
+    float dmin = 1e9;   // distance to the nearest edge, in pixel-box units of its direction
+    for (int i = 0; i < POLY_MAX_EDGES; i++) {
+        if (i >= u_poly_n) break;
+        vec4 e = u_poly_edges[i];
+        vec2 a = e.xy, d = e.zw - e.xy, w = p - a;
+        float t = clamp(dot(w, d) / max(dot(d, d), 1e-12), 0.0, 1.0);
+        // a box-filtered (area) coverage ramp across an edge spans |nx| + |ny| pixels (1 when
+        // axis-aligned, sqrt 2 at 45 degrees), as Skia's analytic coverage does
+        vec2 n = abs(d) / max(length(d), 1e-6);
+        dmin = min(dmin, length(w - d * t) / (n.x + n.y));
+        float side = d.x * w.y - d.y * w.x;
+        if (a.y <= p.y) {
+            if (e.w > p.y && side > 0.0) wind++;
+        } else if (e.w <= p.y && side < 0.0) {
+            wind--;
+        }
+    }
+    bool inside = u_poly_evenodd != 0 ? (abs(wind) % 2) == 1 : wind != 0;
+    return clamp(0.5 + (inside ? dmin : -dmin), 0.0, 1.0);
 }
 
 float clip_coverage() {
@@ -265,6 +297,7 @@ void main() {
     }
 
     cov *= clip_coverage();
+    if (u_poly_n > 0) cov *= poly_coverage(v_pos);
 
     if (u_stencil_pass == 1) {
         if (cov < 0.5) discard;

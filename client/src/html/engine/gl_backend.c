@@ -50,6 +50,7 @@
 #define GLB_MAX_XFORMS 64
 #define GLB_MAX_GROUPS 16
 #define GLB_MAX_POLY 64
+#define GLB_POLY_EDGES 64       // html_ui.frag POLY_MAX_EDGES
 #define GLB_GRADIENT_ROWS 64
 #define GLB_GRADIENT_W 256
 #define GLB_MAX_FBOS 24
@@ -115,6 +116,10 @@ typedef struct {
     float shader_clip[4];
     float shader_clip_r;
     int stencil_ref;
+    // the anti-aliased clip-path polygon (html_ui.frag u_poly_*): edges x0 y0 x1 y1 in target px
+    int poly_n;                 // 0: none
+    int poly_evenodd;
+    float poly[GLB_POLY_EDGES * 4];
 } ClipState;
 
 typedef struct {
@@ -162,6 +167,9 @@ struct GlBackend {
     void *lazy_resolver_user;
     void *image_resolver_user;
     GLint loc_viewport, loc_tex, loc_gamma, loc_cm, loc_cm_offset, loc_opacity, loc_blur_dir, loc_stencil_pass;
+    GLint loc_poly_n, loc_poly_evenodd, loc_poly_edges;
+    int up_poly_n, up_poly_evenodd;          // the polygon clip the program holds (flush uploads changes)
+    float up_poly[GLB_POLY_EDGES * 4];
     GLint loc_blur_clamp, loc_mask;
 
     // frame
@@ -343,6 +351,15 @@ static void flush(GlBackend *b) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, b->batch_nearest ? GL_NEAREST : GL_LINEAR);
     }
 
+    if (b->clip.poly_n != b->up_poly_n || b->clip.poly_evenodd != b->up_poly_evenodd ||
+        (b->clip.poly_n && memcmp(b->clip.poly, b->up_poly, (size_t) b->clip.poly_n * 4 * sizeof(float)) != 0)) {
+        glUniform1i(b->loc_poly_n, b->clip.poly_n);
+        glUniform1i(b->loc_poly_evenodd, b->clip.poly_evenodd);
+        if (b->clip.poly_n) glUniform4fv(b->loc_poly_edges, b->clip.poly_n, b->clip.poly);
+        b->up_poly_n = b->clip.poly_n;
+        b->up_poly_evenodd = b->clip.poly_evenodd;
+        memcpy(b->up_poly, b->clip.poly, (size_t) b->clip.poly_n * 4 * sizeof(float));
+    }
     glDrawElements(GL_TRIANGLES, b->ni, GL_UNSIGNED_INT, (const void *) (uintptr_t) b->ibo_off);
     stats_draw(b, b->nv);
 
@@ -1420,6 +1437,39 @@ static void push_clip_rrect(GlBackend *b, DlRect rect, DlRadii radii) {
     stencil_push(b, f);
 }
 
+// The polygon (target px) as an edge list for html_ui.frag: zero-length edges dropped and
+// coincident opposite edges (the bridge between two rings of one path, drawn there and back)
+// removed in pairs: they cancel in the winding and are no boundary to anti-alias.  0 when the
+// edges do not fit (the stencil takes the clip).
+static int poly_clip_edges(const float *pts, const int n, float *out, int *out_n) {
+    float e[GLB_MAX_POLY][4];
+    int ne = 0;
+    for (int i = 0; i < n; i++) {
+        const int j = (i + 1) % n;
+        if (pts[i * 2] == pts[j * 2] && pts[i * 2 + 1] == pts[j * 2 + 1]) continue;
+        e[ne][0] = pts[i * 2]; e[ne][1] = pts[i * 2 + 1]; e[ne][2] = pts[j * 2]; e[ne][3] = pts[j * 2 + 1];
+        ne++;
+    }
+    char dead[GLB_MAX_POLY] = {0};
+    for (int i = 0; i < ne; i++) {
+        for (int j = i + 1; j < ne && !dead[i]; j++) {
+            if (dead[j]) continue;
+            if (fabsf(e[i][0] - e[j][2]) < 1e-3f && fabsf(e[i][1] - e[j][3]) < 1e-3f &&
+                fabsf(e[i][2] - e[j][0]) < 1e-3f && fabsf(e[i][3] - e[j][1]) < 1e-3f) dead[i] = dead[j] = 1;
+        }
+    }
+    int k = 0;
+    for (int i = 0; i < ne; i++) {
+        if (dead[i]) continue;
+        if (k == GLB_POLY_EDGES) return 0;
+        memcpy(out + k * 4, e[i], sizeof e[i]);
+        k++;
+    }
+    if (k < 2) return 0;
+    *out_n = k;
+    return 1;
+}
+
 static void push_clip_poly(GlBackend *b, const float *pts, int n, const int evenodd) {
     ClipFrame *f = clip_frame_begin(b);
     if (!f) return;
@@ -1442,6 +1492,21 @@ static void push_clip_poly(GlBackend *b, const float *pts, int n, const int even
         apply_scissor(b);
         return;
     }
+    // The outermost polygon clip is drawn by the shader, anti-aliased like Chrome's (Skia) clip
+    // paths; one nested in it (rare), or a program without u_poly_* (an older html_ui.frag),
+    // falls back to the stencil, aliased.
+    static float edges[GLB_POLY_EDGES * 4];
+    int ne = 0;
+    if (b->loc_poly_edges >= 0 && !b->clip.poly_n && !b->stencil_pass && poly_clip_edges(f->pts, n, edges, &ne)) {
+        flush(b);                                   // what is queued was clipped without it
+        memcpy(b->clip.poly, edges, (size_t) ne * 4 * sizeof(float));
+        b->clip.poly_n = ne;
+        b->clip.poly_evenodd = evenodd;
+        const float aa[4] = {floorf(bounds[0]) - 1.0f, floorf(bounds[1]) - 1.0f, ceilf(bounds[2]) + 1.0f, ceilf(bounds[3]) + 1.0f};
+        intersect_scissor(b, aa);
+        apply_scissor(b);
+        return;
+    }
     intersect_scissor(b, bounds);
     apply_scissor(b);
     stencil_push(b, f);
@@ -1450,6 +1515,7 @@ static void push_clip_poly(GlBackend *b, const float *pts, int n, const int even
 static void pop_clip(GlBackend *b) {
     if (!b->n_clips) return;
     ClipFrame *f = &b->clips[--b->n_clips];
+    if (b->clip.poly_n != f->saved.poly_n) flush(b);   // queued draws still carry this polygon
     if (f->stencil) stencil_pop(b, f);
     b->clip = f->saved;
     b->xform = f->saved_xform;
@@ -2023,6 +2089,9 @@ GlBackend *glb_create(void) {
     b->loc_opacity = glGetUniformLocation(b->program, "u_opacity");
     b->loc_blur_dir = glGetUniformLocation(b->program, "u_blur_dir");
     b->loc_stencil_pass = glGetUniformLocation(b->program, "u_stencil_pass");
+    b->loc_poly_n = glGetUniformLocation(b->program, "u_poly_n");
+    b->loc_poly_evenodd = glGetUniformLocation(b->program, "u_poly_evenodd");
+    b->loc_poly_edges = glGetUniformLocation(b->program, "u_poly_edges");
     b->loc_blur_clamp = glGetUniformLocation(b->program, "u_blur_clamp");
     b->loc_mask = glGetUniformLocation(b->program, "u_mask");
 

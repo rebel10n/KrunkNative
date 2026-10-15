@@ -372,6 +372,26 @@ static void build_list(DisplayList *dl, GLuint checker, GLuint disc, DlGlyphQuad
         dl_push(dl, &c);
         push_rect(dl, dl_rect(690, 590, 120, 120), orange);
         push_op(dl, DL_POP_CLIP);
+        // Krunker Strike's .frvr-button:after frame as Chrome lays it out (400 x 120 at 2 px per base unit):
+        // 20 points, two rings joined by a bridge drawn there and back
+        static float sframe[40];
+        static const float sf[40] = {0, 6, 7, 0, 391, 0, 400, 9, 400, 113, 393, 120, 9, 120, 5.5f, 113, 0, 111, 0, 6,
+                                     6, 8.758f, 6, 106.796f, 9.796f, 108.18f, 12.708f, 114, 390.516f, 114, 394, 110.516f, 394, 11.484f,
+                                     388.516f, 6, 9.218f, 6, 6, 8.758f};
+        for (int i = 0; i < 20; i++) { sframe[i * 2] = 1075.0f + sf[i * 2] * 0.5f; sframe[i * 2 + 1] = 645.0f + sf[i * 2 + 1] * 0.5f; }
+        // drawn in an offscreen group (FRVR's buttons have filter: drop-shadow), the polygon in its target
+        CssFilterOp fb;
+        memset(&fb, 0, sizeof fb);
+        fb.kind = CSS_FILTER_BRIGHTNESS;
+        fb.amount = 1.0f;
+        push_group(dl, dl_rect(1060, 630, 225, 90), 1.0f, &fb, 1);
+        DlItem cf = item(DL_PUSH_CLIP_POLY);
+        cf.u.clip_poly.pts = sframe;
+        cf.u.clip_poly.n = 20;
+        dl_push(dl, &cf);
+        push_rect(dl, dl_rect(1070, 640, 205, 70), orange);
+        push_op(dl, DL_POP_CLIP);
+        push_op(dl, DL_POP_GROUP);
         // a self-intersecting pentagram: evenodd leaves its centre out, nonzero fills it
         static float star[2][10];
         for (int k = 0; k < 2; k++)
@@ -643,6 +663,8 @@ int main(int argc, char **argv) {
     expect(img, 795, 605, 255, 112, 67, 2, "clip frame: top right corner");
     expect(img, 750, 650, BG.r, BG.g, BG.b, 2, "clip frame: the hole");
     expect(img, 695, 650, BG.r, BG.g, BG.b, 2, "clip frame: outside");
+    expect(img, 1175, 675, BG.r, BG.g, BG.b, 2, "Strike button frame: the hole");
+    expect(img, 1076, 675, 255, 112, 67, 40, "Strike button frame: left stroke");
     expect(img, 900, 655, BG.r, BG.g, BG.b, 2, "evenodd pentagram: centre out");
     expect(img, 900, 620, 255, 112, 67, 2, "evenodd pentagram: top point in");
     expect(img, 1020, 655, 255, 112, 67, 2, "nonzero pentagram: centre in");

@@ -20,6 +20,7 @@
 #include <html_dom.h> // html_dom_viewport
 #include <ui_logic.h> // ui_loadout_*, ui_police_active
 #include <strike_ui.h> // strike_ui_active(): Krunker Strike's viewer framing
+#include <ruleset.h> // game_constants_of: the constants the model is posed with
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -84,6 +85,8 @@
 //   (client/tests/class_preview_all_e2e.py).
 // - KRUNKNATIVE_PREVIEW_LOG=1 prints the canvas box in device px whenever it changes and
 //   the first frame the canvas shows (client/tests/preview_hole_e2e.py).
+// - KRUNKNATIVE_PREVIEW_BONES=1 prints the model's node chain (world and canvas positions) whenever
+//   it changes: the pose against Krunker's, node by node.
 // - KRUNKNATIVE_PREVIEW_WORLD=1 also keeps a copy of the third-person model in the
 //   world scene in front of the idle menu camera, animated like an in-game player
 //   (player_update_meshes(.., 0), map lighting), to compare with other players.
@@ -521,6 +524,42 @@ static int preview_target(ClassPreview *preview, const int width, const int heig
     return complete;
 }
 
+// KRUNKNATIVE_PREVIEW_BONES: the model's node chain in world space and on the canvas (device px), once
+// per change, to compare the pose with Krunker's (the same nodes: objInstances, lowerBody, upperBody,
+// the head, the arms and the assault rifle's muzzle at (0, muzOffY, -muzOff) of the arms anchor).
+static void preview_log_bones(const ClassPreview *preview, const int width, const int height) {
+    static char last[1024];
+    const Player *player = preview->player;
+    const PlayerMesh *mesh = player->mesh;
+    const Camera *cam = &preview->camera;
+    const PlayerArms *arms = mesh->arms ? mesh->arms[player->loadout_index] : NULL;
+    struct { const char *name; const MeshTransform *node; vec3 local; } nodes[] = {
+        {"objInstances", mesh->anchor, {0, 0, 0}},
+        {"lowerBody", mesh->body_anchor, {0, 0, 0}},
+        {"upperBody", mesh->upper_body_anchor, {0, 0, 0}},
+        {"head", mesh->head ? &mesh->head->transform : NULL, {0, 0, 0}},
+        {"arms", arms ? &arms->anchor : NULL, {0, 0, 0}},
+        {"muzzle", arms ? &arms->anchor : NULL, {0, -0.05f, -5.1f}}, // FRVR's assault rifle muzOffY / muzOff
+    };
+    char buf[1024];
+    int len = 0;
+    for (size_t i = 0; i < sizeof nodes / sizeof nodes[0] && len < (int) sizeof buf - 160; i++) {
+        if (!nodes[i].node) continue;
+        const vec3 w = transform_point_to(nodes[i].node, nodes[i].local, NULL);
+        const float *v = cam->world_inverse_matrix, *pm = cam->projection_matrix; // row-major (camera.c)
+        const float cx = v[0] * w.x + v[1] * w.y + v[2] * w.z + v[3], cy = v[4] * w.x + v[5] * w.y + v[6] * w.z + v[7];
+        const float cz = v[8] * w.x + v[9] * w.y + v[10] * w.z + v[11];
+        const float px = pm[0] * cx + pm[1] * cy + pm[2] * cz + pm[3], py = pm[4] * cx + pm[5] * cy + pm[6] * cz + pm[7];
+        const float pw = pm[12] * cx + pm[13] * cy + pm[14] * cz + pm[15];
+        len += snprintf(buf + len, sizeof buf - (size_t) len, " %s=(%.3f %.3f %.3f)@(%.1f %.1f)", nodes[i].name, (double) w.x, (double) w.y,
+                        (double) w.z, (double) ((px / pw * 0.5f + 0.5f) * (float) width), (double) ((0.5f - py / pw * 0.5f) * (float) height));
+    }
+    if (!strcmp(buf, last)) return;
+    snprintf(last, sizeof last, "%s", buf);
+    printf("[preview] bones%s\n", buf);
+    fflush(stdout);
+}
+
 // The page's canvas shows nothing (no frame yet, or none any more).
 static void preview_hide(ClassPreview *preview) {
     if (!preview->shown) return;
@@ -545,6 +584,7 @@ void client_class_preview_render(Client *client) {
     static int rect_log;
     static int world_dummy;
     static const char *dump_path;
+    static int bones_log;
     static int frames;
 
     if (test_rect < 0) {
@@ -552,6 +592,7 @@ void client_class_preview_render(Client *client) {
         rect_log = getenv("KRUNKNATIVE_PREVIEW_LOG") != NULL;
         world_dummy = getenv("KRUNKNATIVE_PREVIEW_WORLD") != NULL;
         dump_path = getenv("KRUNKNATIVE_PREVIEW_DUMP");
+        bones_log = getenv("KRUNKNATIVE_PREVIEW_BONES") != NULL;
     }
 
     if (test_rect) {
@@ -574,7 +615,9 @@ void client_class_preview_render(Client *client) {
     // framebuffer px, dpr 1; on the web dpr = devicePixelRatio), so the page draws the bitmap
     // 1:1 over the canvas box.
     const HtmlElem page_canvas = html_dom_by_id("classPreviewCanvas");
-    g_v10_mode = preview_mode(page_canvas);
+    // Krunker Strike's viewer is no v10 menu preview: its canvas is the screen (FRVR's renderer.setSize at
+    // the canvas's own size, aspect = clientWidth / clientHeight), not v10's 5:4 bitmap
+    g_v10_mode = strike_ui_active() ? 0 : preview_mode(page_canvas);
     const int height = (int) lroundf(preview->height * preview->dpr);
     // v10: a 5:4 bitmap whatever the box (renderer.setSize(750, 600)); the page covers the box with it
     const int width = g_v10_mode ? (int) lroundf((float) height * PREVIEW_V10_ASPECT) : (int) lroundf(preview->width * preview->dpr);
@@ -615,9 +658,10 @@ void client_class_preview_render(Client *client) {
     preview->player->crouch_val = strike ? 1.0f : 0.0f; // FRVR: crouchVal = options.crouch (true)
     player_update_meshes(preview->player, 1);
     if (strike && preview->player->mesh) {
-        // updateHeight's lean with Strike's crouchLean in place of the shared (v10) one: the lower body
-        // tilts by it and the upper body (arms, weapon) turns back by as much
-        const float lean = (PREVIEW_STRIKE_CROUCH_LEAN - game_constants.crouch_lean) * preview->player->crouch_val;
+        // updateHeight's lean with Strike's crouchLean in place of the one the model was posed with
+        // (the game's rules: Strike's own since its data-driven constants, then nothing is added): the
+        // lower body tilts by it and the upper body (arms, weapon) turns back by as much
+        const float lean = (PREVIEW_STRIKE_CROUCH_LEAN - game_constants_of(preview->player->game)->crouch_lean) * preview->player->crouch_val;
         PlayerMesh *mesh = preview->player->mesh;
         mesh->body_anchor->rotation.x += lean;
         mesh->upper_body_anchor->rotation.x -= lean;
@@ -648,6 +692,7 @@ void client_class_preview_render(Client *client) {
     preview_lighting_apply(&saved_lighting);
     scene_set_alpha_target(1);
     scene_render(preview->scene, &preview->camera); // aspect comes from the viewport
+    if (bones_log && preview->player->mesh) preview_log_bones(preview, width, height);
     scene_set_alpha_target(0);
     g_render_lighting = saved_lighting;
 
