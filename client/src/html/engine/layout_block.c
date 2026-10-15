@@ -917,6 +917,7 @@ void layout_box(LayoutTree *t, Box *b, const LayoutInput *in_, LayoutOutput *out
         else if (tentative_h >= 0) bh = tentative_h;
         else if (box_is_replaced(b)) bh = content_h + box_border_padding_h(b);
         else bh = content_h + layout_vertical_extras(b);
+        b->content_auto_h = box_is_replaced(b) ? content_h + box_border_padding_h(b) : content_h + layout_vertical_extras(b);
         if (in.override_h < 0) layout_apply_min_max_h(b, in.cb_h, &bh);
         b->h = bh;
 

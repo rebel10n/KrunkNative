@@ -1554,6 +1554,34 @@ static void t_incremental(void)
     fx_free(fx);
 }
 
+/* Flex shrink (CSS Flexbox 9.7) against Chrome 152: a width: Npx item shrinks down to its
+ * automatic minimum size, the min-content of its contents (not N); the shrink weight is
+ * flex-shrink x the inner (content-box) base size; flex factors summing below 1 take only that
+ * share of the overflow; a column item with a fixed height shrinks the same way. */
+static void t_flex_shrink_auto_min(void)
+{
+    Fx *fx = fx_html(
+        "<div style='display:flex;width:300px'><div id=a1 style='width:200px;height:4px'></div><div id=a2 style='width:200px;height:4px'></div></div>"
+        "<div style='display:flex;width:300px'><div id=b1 style='width:250px;padding-left:40px;height:4px'></div>"
+        "<div id=b2 style='width:200px;max-width:180px;height:4px'></div><div id=b3 style='flex:1 1 auto;width:24px;height:4px'></div></div>"
+        "<div style='display:flex;width:300px'><div id=c1 style='width:250px;flex-shrink:.25;height:4px'></div><div id=c2 style='width:150px;flex-shrink:.25;height:4px'></div></div>"
+        "<div style='display:flex;width:300px'><div id=d1 style='width:250px'><div style='width:220px;height:4px'></div></div><div id=d2 style='width:120px;height:4px'></div></div>"
+        "<div style='display:flex;flex-direction:column;height:100px'><div id=e1 style='height:80px'><div style='height:18px'></div></div>"
+        "<div id=e2 style='height:80px'><div style='height:18px'></div></div></div>", NULL);
+    CHECK_NEAR(rc(fx, "a1").w, 150, 0.01, "width: 200px items share the 100 px overflow");
+    CHECK_NEAR(rc(fx, "a2").w, 150, 0.01, "width: 200px items share the 100 px overflow (2)");
+    CHECK_NEAR(rc(fx, "b1").w, 177.125, 0.01, "shrink weight is the content-box base (210)");
+    CHECK_NEAR(rc(fx, "b2").w, 109.703, 0.01, "max-width 180 then shrink (weight 180)");
+    CHECK_NEAR(rc(fx, "b3").w, 13.172, 0.01, "flex: 1 1 auto 24 px item: weight 24");
+    CHECK_NEAR(rc(fx, "c1").w, 218.75, 0.01, "flex-shrink .25 + .25: half the overflow, by base");
+    CHECK_NEAR(rc(fx, "c2").w, 131.25, 0.01, "flex-shrink .25 + .25 (2)");
+    CHECK_NEAR(rc(fx, "d1").w, 220, 0.01, "stops at its min-content (a 220 px child)");
+    CHECK_NEAR(rc(fx, "d2").w, 80, 0.01, "the other item takes the rest of the overflow");
+    CHECK_NEAR(rc(fx, "e1").h, 50, 0.01, "column: height 80 items shrink to share 100 px");
+    CHECK_NEAR(rc(fx, "e2").h, 50, 0.01, "column: height 80 items shrink (2)");
+    fx_free(fx);
+}
+
 /* textContent of a flex container whose text sat in a child element (v10's #inviteButton:
  * <div class=match-action-btn style=display:flex><span>Invite</span></div> -> "Copied URL"):
  * the bare text becomes an anonymous flex item, laid out and sized like the span was. */
@@ -2058,6 +2086,7 @@ int main(int argc, char **argv)
     t_memo_equivalence();
     t_memo_auto_margin();
     t_flex_text_content();
+    t_flex_shrink_auto_min();
     t_innerhtml_detach();
     t_intrinsic_font_restyle();
     t_flex_column_scroll_panes();

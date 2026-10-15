@@ -14,6 +14,7 @@
 typedef struct FItem {
     Box *b;
     float base, hypo;          /* border-box main sizes                       */
+    float inner_base;          /* content-box flex base size (shrink weight)  */
     float min_main, max_main;  /* border-box                                  */
     float main;                /* final border-box main size                  */
     float cross;               /* border-box cross size                       */
@@ -139,13 +140,19 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
         float content_min;
         if (row) {
             content_main = layout_intrinsic_width(t, c, 1);
-            content_min = layout_intrinsic_width(t, c, 0);
+            /* the content size suggestion of the automatic minimum size (CSS Flexbox 4.5) is the
+             * min-content size of the item's contents: its own width (layout_intrinsic_width) would
+             * make a width: Npx item refuse to shrink below N (a Strike friend row's Join button
+             * pushed off the card); a replaced item's is its natural size */
+            content_min = box_is_replaced(c) ? layout_intrinsic_width(t, c, 0)
+                                             : layout_content_kw_width(t, c, CSS_LEN_MIN_CONTENT, -1.0f);
         } else {
             int stretch = item_align(s, cs) == CSS_ALIGN_ITEMS_STRETCH && cs->width.kind == CSS_LEN_AUTO && !it->auto_c0 && !it->auto_c1;
             float ow = stretch ? kn_maxf(0, cw - it->cm0 - it->cm1) : -1;
             item_layout(t, c, cw, LAYOUT_INDEFINITE, ow, -1, !stretch, cw, 1); /* the cross pass lays it out again */
             content_main = c->h;
-            content_min = c->h;
+            /* the content size suggestion: the height its contents give it, not its own height */
+            content_min = box_is_replaced(c) ? c->h : c->content_auto_h;
         }
         /* flex base size */
         const CssLength *basis = &cs->flex_basis;
@@ -164,6 +171,7 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
         }
         if (!have) base = content_main;
         it->base = base;
+        it->inner_base = kn_maxf(0.0f, base - (row ? box_border_padding_w(c) : box_border_padding_h(c)));
         /* min / max (border box) */
         const CssLength *mn = row ? &cs->min_width : &cs->min_height;
         const CssLength *mx = row ? &cs->max_width : &cs->max_height;
@@ -250,6 +258,7 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
             float f = grow ? cs->flex_grow : cs->flex_shrink;
             if (f == 0 || (grow && it->base > it->hypo) || (!grow && it->base < it->hypo)) { it->frozen = 1; it->target = it->hypo; }
         }
+        float init_free = 0;
         for (int iter = 0; iter < 16; iter++) {
             float used = line_gaps, sum_f = 0, sum_scaled = 0;
             int unfrozen = 0;
@@ -260,19 +269,22 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
                     used += it->base + it->mm0 + it->mm1;
                     unfrozen++;
                     sum_f += grow ? it->b->style->flex_grow : it->b->style->flex_shrink;
-                    sum_scaled += it->b->style->flex_shrink * it->base;
+                    sum_scaled += it->b->style->flex_shrink * it->inner_base;
                 }
             }
             if (!unfrozen) break;
             float free_sp = container_main - used;
-            if (grow && sum_f < 1.0f && sum_f * (container_main - sum_hypo) < free_sp) free_sp = sum_f * (container_main - sum_hypo);
+            if (iter == 0) init_free = free_sp;
+            /* CSS Flexbox 9.7 step 4b: unfrozen flex factors summing below 1 take only that share of
+             * the initial free space (growing and shrinking alike) */
+            if (sum_f < 1.0f && fabsf(sum_f * init_free) < fabsf(free_sp)) free_sp = sum_f * init_free;
             float total_violation = 0;
             for (int j = 0; j < ln->count; j++) {
                 FItem *it = &items[ln->first + j];
                 if (it->frozen) continue;
                 float v;
                 if (grow) v = it->base + (sum_f > 0 ? free_sp * it->b->style->flex_grow / sum_f : 0);
-                else v = it->base + (sum_scaled > 0 ? free_sp * (it->b->style->flex_shrink * it->base) / sum_scaled : 0);
+                else v = it->base + (sum_scaled > 0 ? free_sp * (it->b->style->flex_shrink * it->inner_base) / sum_scaled : 0);
                 float cl = clampf_mm(v, it->min_main, it->max_main);
                 total_violation += cl - v;
                 it->target = cl;
@@ -283,7 +295,7 @@ void layout_flex_contents(LayoutTree *t, Box *b, const LayoutInput *in, float *c
                 if (it->frozen) continue;
                 float v_unclamped;
                 if (grow) v_unclamped = it->base + (sum_f > 0 ? free_sp * it->b->style->flex_grow / sum_f : 0);
-                else v_unclamped = it->base + (sum_scaled > 0 ? free_sp * (it->b->style->flex_shrink * it->base) / sum_scaled : 0);
+                else v_unclamped = it->base + (sum_scaled > 0 ? free_sp * (it->b->style->flex_shrink * it->inner_base) / sum_scaled : 0);
                 float d = it->target - v_unclamped;
                 if (fabsf(total_violation) < 0.001f || (total_violation > 0 && d > 0) || (total_violation < 0 && d < 0)) { it->frozen = 1; any = 1; }
             }

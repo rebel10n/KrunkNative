@@ -290,6 +290,8 @@ struct Box {
 
     /* intrinsic size cache */
     float min_content_w, max_content_w;
+    float content_auto_h;     /* border-box height its contents give it (height: auto), from the
+                                 last layout: a column flex item's content size suggestion */
     uint32_t intrinsic_gen;
     float baseline_offset;                    /* last line baseline from border top, <0 none */
     float first_baseline;                     /* first line baseline, <0 none */
