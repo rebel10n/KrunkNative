@@ -842,10 +842,10 @@ void player_reset_step(Player *player, const int recon) {
         // config.slideTime * (slidTime || 1) * (slT || 1) * crouchVal, in v7's double ms
         movement_set_slide_ms(player, movement_js(game_constants.slide_time * 1000.0f) * movement_js(MOVEMENT_OR(game->config.slide_time, 1.0f)) *
                                       movement_js(class_config ? MOVEMENT_OR(class_config->slide_time_mlt, 1.0f) : 1.0f) * movement_js(player->crouch_val));
-        // Intentional difference: v7 reads the players manager's onTerrain here (always undefined,
-        // so terrain never weakens the slide boost); this reads the player's.
-        float slide_mlt = (player->on_terrain ? game_constants.player_terrain_slide_velocity_mlt : game_constants.player_slide_velocity_mlt) *
-                          (class_config ? MOVEMENT_OR(class_config->slide_accel_mlt, 1.0f) : 1.0f);
+        // (this.onTerrain ? 0.4 : 1.2) * slA (v10:171975): `this` is the players manager, whose
+        // onTerrain is always undefined, so every slide gets 1.2, on terrain too. Mirrored on purpose:
+        // official servers run it, and a 0.4 here desynced terrain slides against them.
+        float slide_mlt = game_constants.player_slide_velocity_mlt * (class_config ? MOVEMENT_OR(class_config->slide_accel_mlt, 1.0f) : 1.0f);
         slide_mlt *= game->config.slide_speed; // game.config.slidSpd || 0
         player->velocity.x *= slide_mlt;
         player->velocity.z *= slide_mlt;
@@ -1443,9 +1443,11 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
     // KrunkScript onPlayerUpdate + disableDefault masks; disablePlayerBehaviour skips the rest (PLJ:894-948)
     if (player->game->ks && ks_game_on_player_update(player->game, player, &rounded)) return;
 
-    // v7.1.4: Math.max(0.1, Math.min(input[1], config.dltMx)); NaN, 0 and negative deltas run as
-    // 0.1 ms (v3.1.1: 0).
-    const float delta = input->delta > game_constants.min_delta ? MIN(input->delta, game_constants.max_delta) : game_constants.min_delta;
+    // v10: Math.max(1 * config.deltaMlt, Math.min(input[1], dltMx)); NaN, 0 and negative deltas run as
+    // deltaMlt ms (v10:169582; v7.1.4: 0.1 ms, v3.1.1: 0). input[1] already carries deltaMlt (main.c).
+    const float delta_mlt = player->game && player->game->config.delta_mlt > 0.0f ? player->game->config.delta_mlt : 1.0f;
+    const float min_delta = game_constants.min_delta * delta_mlt;
+    const float delta = input->delta > min_delta ? MIN(input->delta, game_constants.max_delta) : min_delta;
     // config.movDirs[input[4]] + class movDrP * PI
     const float move_dir = -(float) M_PI / 2.0f + (float) M_PI / 4.0f * (float) input->move_dir + knobs->move_dir_offset * (float) M_PI;
 

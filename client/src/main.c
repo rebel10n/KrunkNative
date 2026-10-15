@@ -1891,6 +1891,9 @@ static void client_tick_game(Client *client, const float now, const float frame_
             g_look_sent.x = input.x_dir; // what me->direction takes (the resync test above)
             g_look_sent.y = input.y_dir;
             input.seq = client->net_next_input_seq++;
+            // input[1] = Math.round(inputFrameDelta * config.deltaMlt) (v10:221748): a time-scaled lobby
+            // runs (and sends) every frame scaled; player_proc_input rounds it to whole ms
+            if (client->game.config.delta_mlt > 0.0f && client->game.config.delta_mlt != 1.0f) input.delta *= client->game.config.delta_mlt;
             // KrunkScript: INPUTS.disableDefault (dontSendInputs) neither predicts nor sends,
             // DEFAULT.disablePrediction (noPred) sends without predicting (index.js:16840-16847)
             if (!ks_client_inputs_disabled() && !ks_client_no_prediction()) player_queue_input(client->me, &input); // prediction: procInputs(b9) this frame

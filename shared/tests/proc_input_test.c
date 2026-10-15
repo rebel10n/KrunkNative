@@ -508,8 +508,9 @@ static void run_input_rule_tests(Player *player) {
     player->crouch_val = 0.0f;
     input.delta = -0.01f;
     player_proc_input(player, &input, 0, 1);
-    // v7.1.4: Math.max(0.1, ...): a negative or zero delta runs as 0.1 ms (crouchVal 0.0007 -> 0.001)
-    RULE_CHECK(fabsf(player->crouch_val - 0.001f) < 1e-6f, "negative delta runs as 0.1 ms (crouch %.6f)", player->crouch_val);
+    // v10: Math.max(1 * deltaMlt, ...): a negative or zero delta runs as 1 ms (crouchVal 0.007), v10:169582
+    // (v7.1.4: 0.1 ms, crouchVal 0.0007 -> 0.001)
+    RULE_CHECK(fabsf(player->crouch_val - 0.007f) < 1e-6f, "negative delta runs as 1 ms (crouch %.6f)", player->crouch_val);
     input.delta = 0.0164f; // 16 ms
     input.x_dir = 0.0004f; // below 0.0005 rad: rounds to 0
     player_proc_input(player, &input, 0, 1);
@@ -574,7 +575,6 @@ static const char *v7_tests[] = {
     "v7_auto_jump_hold_60fps.json", "v7_auto_jump_hold_144fps.json", // autoJump with jump held
     "v7_border_jump_60fps.json", "v7_border_jump_144fps.json",   // jumping at a border wall
     "v7_border_drop_60fps.json",                                 // falling into a border's 500-unit extension
-    "v7_delta_zero_60fps.json",                                  // 0 ms frames run as 0.1 ms
     "v7_jump_pad_30fps.json", "v7_jump_pad_144fps.json",         // Kanji pad
     "v7_jump_pad_edge_60fps.json", "v7_jump_pad_edge_144fps.json", // pad box from the map scale
     "v7_soul_spawn_60fps.json", "v7_soul_spawn_30fps.json",      // Soul Sanctum's spawn disk (cylinder top)
@@ -596,6 +596,13 @@ static const char *v7_tests[] = {
     "v7_fall_damage_30fps.json", "v7_fall_damage_60fps.json",    // fallDmg 10 / fallDmgThr 0.1 (authority): landing damage
 };
 
+// v7.1.4 records that v10 deliberately differs from: replayed and printed, not asserted.
+//   v7_delta_zero_60fps.json  0 ms frames ran as 0.1 ms in v7.1.4; v10 runs them as 1 * deltaMlt ms
+//                             (v10:169582), so the trace parts from tick 32 on
+static const char *v7_records[] = {
+    "v7_delta_zero_60fps.json",
+};
+
 int main(const int argc, char **argv) {
     if (argc > 2) return replay_main(argc, argv);
 
@@ -613,6 +620,14 @@ int main(const int argc, char **argv) {
 
     for (size_t i = 0; i < sizeof(v7_tests) / sizeof(v7_tests[0]); i++) {
         run_test(v7_tests[i], player);
+        printf("\n");
+    }
+
+    for (size_t i = 0; i < sizeof(v7_records) / sizeof(v7_records[0]); i++) {
+        const int failures = g_failures;
+        printf("v7 record (v10 differs on purpose, not asserted): ");
+        run_test(v7_records[i], player);
+        g_failures = failures;
         printf("\n");
     }
 

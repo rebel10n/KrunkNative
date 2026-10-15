@@ -7,6 +7,12 @@
 //   - "k" carries no health, our STATE does: the last "0" / "h" health per sid is kept here.
 //   - "k" angles are degrees (iiïìííï: x * PI / 180), "0" yaw and "l" yaw radians.
 //   - "l" slideTimer / canSlideT are JS milliseconds; our RECON keeps seconds (+ slide_ms).
+//   - aimVal runs the other way: Krunker's 1 is hip fire and 0 fully aimed (procInputs: ADS
+//     lowers it, weapon.noAim sets 1), ours 0 hip and 1 aimed. "l" [15] and "k" [10] are 1 - v.
+//   - movement keys: Krunker's input[4] indexes movDirs[i] = -PI + (i + 1) * PI / 4 (:16415);
+//     our Input.move_dir m is the angle -PI / 2 + m * PI / 4 (forward 0), so input[4] = (m + 1) % 8.
+//   - init carries the lobby's config and network rates (arg 6, 7, 12): they become the same
+//     GAME_CONFIG / NETWORK_DATA our own server sends, so prediction runs the server's physics.
 //   - our client sends one NetInputPacket per input frame, batched per clientSendRate window
 //     (recon.c, NET_PACKET_INPUT_BATCH): that window becomes one delta-compressed "q".
 //   - cosmetics / skins / account fields are not mapped (a guest has none): SPAWNs carry none.
@@ -14,6 +20,7 @@
 #include <krunker_cheat.h>
 #include <krunker_altcha.h>
 #include <cJSON.h>
+#include <game_config.h>
 #include <map_catalog.h>
 #include <net_ext.h>
 #include <ruleset.h>
@@ -25,6 +32,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+// init's arguments read here (iíìííiî :219300, called with init's array): [6] the lobby config
+// (applyConfig), [7] {weps, cls, prks} (config.weps / cls / prks), [12] the networking rates
+// (applyNetworking :187250: snf, tf, sf, aist, los, adst)
+#define KRUNKER_INIT_ARG_CONFIG 6
+#define KRUNKER_INIT_ARG_CUSTOM 7
+#define KRUNKER_INIT_ARG_NETWORKING 12
 
 // ---------------------------------------------------------------- helpers
 
@@ -120,9 +134,79 @@ void krunker_link_reset(KrunkerLink *l) {
     l->my_sid = -1;
     l->unsupported_map = -1;
     l->game_state = -1;
+    l->send_hz = 10; // applyNetworking() defaults until init's networking
+    l->tick_hz = 30;
+    l->sync_hz = 1;
 }
 
 // ---------------------------------------------------------------- inbound
+
+// A Krunker value as cJSON (NULL: nil / not representable).
+static cJSON *value_json(const KrunkerValue *v) {
+    if (is_nil(v)) return NULL;
+    KrunkerBuf buf = {0};
+    cJSON *out = krunker_value_to_json(v, &buf) == KRUNKER_PROTO_OK && buf.data ? cJSON_ParseWithLength((const char *) buf.data, buf.len) : NULL;
+    krunker_buf_free(&buf);
+    return out;
+}
+
+// init's lobby settings (iíìííiî :219300): applyNetworking(arg 12) and applyConfig(arg 6, with
+// arg 7's weps / cls / prks replacing the config's own, :219365-219368), sent to the client the way
+// our own server does (game_config_send: GAME_CONFIG chunks, then NETWORK_DATA) ahead of the INIT,
+// whose game_config_on_init would otherwise fall back to the defaults. Physics reads them:
+// gravMlt, jumpMlt, strafeSpd, airStrf, fixMov, slidSpd / slidTime / canSlide, wallJP, autoJump,
+// headClipFix, ... and the per-class / per-weapon overrides (speed, spdMlt, ...). Host type 0
+// (applyConfig's third argument is undefined: hostTypes[0]); the server clamped already.
+static void emit_lobby_config(KrunkerLink *l, const KrunkerFrame *f) {
+    cJSON *msg = cJSON_CreateObject();
+    if (!msg) return;
+    cJSON_AddNumberToObject(msg, "host", GAME_HOST_CUSTOM);
+    cJSON *settings = value_json(arg(f, KRUNKER_INIT_ARG_CONFIG));
+    if (!cJSON_IsObject(settings)) {
+        cJSON_Delete(settings);
+        settings = cJSON_CreateObject();
+    }
+    static const char *const tables[] = {"weps", "cls", "prks"};
+    const KrunkerValue *custom = arg(f, KRUNKER_INIT_ARG_CUSTOM);
+    for (size_t i = 0; settings && i < sizeof(tables) / sizeof(tables[0]); i++) {
+        cJSON_DeleteItemFromObjectCaseSensitive(settings, tables[i]);
+        cJSON *table = krunker_is(custom, KRUNKER_MAP) ? value_json(krunker_get(custom, tables[i])) : NULL;
+        if (table) cJSON_AddItemToObject(msg, tables[i], table);
+    }
+    cJSON *classes = settings ? cJSON_DetachItemFromObjectCaseSensitive(settings, "classes") : NULL;
+    if (classes) cJSON_AddItemToObject(msg, "classes", classes);
+    l->config_keys = settings ? cJSON_GetArraySize(settings) : 0;
+    if (settings) cJSON_AddItemToObject(msg, "settings", settings);
+    char *text = cJSON_PrintUnformatted(msg);
+    cJSON_Delete(msg);
+    const size_t total = text ? strlen(text) : 0;
+    if (text && total <= NET_GAME_CONFIG_MAX) {
+        NetGameConfigChunk chunk;
+        chunk.total = (uint32_t) total;
+        for (size_t offset = 0; offset < total; offset += NET_GAME_CONFIG_CHUNK_SIZE) {
+            const size_t n = total - offset < NET_GAME_CONFIG_CHUNK_SIZE ? total - offset : NET_GAME_CONFIG_CHUNK_SIZE;
+            chunk.offset = (uint32_t) offset;
+            memcpy(chunk.data, text + offset, n);
+            emit(l, NET_PACKET_GAME_CONFIG, &chunk, (uint16_t) (NET_GAME_CONFIG_HEADER_SIZE + n));
+        }
+    }
+    cJSON_free(text);
+
+    // applyNetworking: snf || 10, tf || 30, sf || 1 (falsy -> the default, like JS ||)
+    const KrunkerValue *net = arg(f, KRUNKER_INIT_ARG_NETWORKING);
+    const double snf = num(krunker_is(net, KRUNKER_MAP) ? krunker_get(net, "snf") : NULL, 0);
+    const double tf = num(krunker_is(net, KRUNKER_MAP) ? krunker_get(net, "tf") : NULL, 0);
+    const double sf = num(krunker_is(net, KRUNKER_MAP) ? krunker_get(net, "sf") : NULL, 0);
+    NetNetworkDataPacket rates;
+    memset(&rates, 0, sizeof(rates));
+    rates.send_hz = (uint16_t) (snf > 0 && snf < 1000 ? snf : 10);
+    rates.tick_hz = (uint16_t) (tf > 0 && tf < 1000 ? tf : 30);
+    rates.sync_hz = (uint16_t) (sf > 0 && sf < 1000 ? sf : 1);
+    l->send_hz = rates.send_hz;
+    l->tick_hz = rates.tick_hz;
+    l->sync_hz = rates.sync_hz;
+    emit(l, NET_PACKET_NETWORK_DATA, &rates, sizeof(rates));
+}
 
 // init [mapIndex, modeIndex, eventIndex, ...] (INIT_GAME, game.deob.js:219289 -> 219300):
 // mapIndex indexes the server's map list (fetched by index from the API, :219292); our catalogue's
@@ -135,6 +219,7 @@ static void on_init(KrunkerLink *l, const KrunkerFrame *f) {
         return;
     }
     l->unsupported_map = -1;
+    emit_lobby_config(l, f);
     NetInitPacket init;
     memset(&init, 0, sizeof(init));
     init.major = NET_PROTOCOL_MAJOR;
@@ -142,11 +227,12 @@ static void on_init(KrunkerLink *l, const KrunkerFrame *f) {
     init.patch = NET_PROTOCOL_PATCH;
     init.map_index = map;
     init.mode_index = mode; // INIT carries the Krunker mode id (main.c client_apply_init)
-    init.tick_rate = 30;    // Krunker tickFrequency default (game.deob.js:186955)
+    init.tick_rate = l->tick_hz; // applyNetworking tf (tickFrequency, default 30, game.deob.js:186955)
     init.client_id = 0;
     init.ruleset = NET_INIT_RULESET;
     emit(l, NET_PACKET_INIT, &init, sizeof(init));
-    note(l, KRUNKER_LINK_EV_NOTE, "init: map %d, mode %d", map, mode);
+    note(l, KRUNKER_LINK_EV_NOTE, "init: map %d, mode %d, %d config keys, rates snf %d tf %d sf %d", map, mode, l->config_keys,
+         l->send_hz, l->tick_hz, l->sync_hz);
 }
 
 // "0" ADD_PLAYERS: a flat list, 53 (0x35) values per player (game.deob.js:220266-220330); the
@@ -227,7 +313,7 @@ static void on_update_players(KrunkerLink *l, const KrunkerFrame *f) {
         s.direction[0] = (float) (num(&e[KRUNKER_K_Y_DIRE], 0) * (M_PI / 180.0)); // pitch
         s.direction[1] = (float) (num(&e[KRUNKER_K_X_DIRE], 0) * (M_PI / 180.0)); // yaw
         s.health = p ? p->health : 100.0f;
-        s.aim_val = (float) num(&e[KRUNKER_K_AIM_VAL], 0);
+        s.aim_val = 1.0f - (float) num(&e[KRUNKER_K_AIM_VAL], 1); // Krunker 1 = hip, ours 0
         s.crouch_val = (float) num(&e[KRUNKER_K_CROUCH_VAL], 0);
         emit(l, NET_PACKET_STATE, &s, sizeof(s));
     }
@@ -254,8 +340,9 @@ static void on_sync_player(KrunkerLink *l, const KrunkerFrame *f) {
     r.velocity[2] = (float) num(A(KRUNKER_SYNC_VEL_Z), 0);
     r.yaw = (float) num(A(KRUNKER_SYNC_X_DIRE), 0);
     r.wall_jump_count = (uint16_t) num(A(KRUNKER_SYNC_WALL_JUMP_C), 0);
-    r.on_wall = truthy(A(KRUNKER_SYNC_ON_WALL)) ? 1 : 0;
-    r.aim_val = (float) num(A(KRUNKER_SYNC_AIM_VAL), 0);
+    const double on_wall = num(A(KRUNKER_SYNC_ON_WALL), 0); // the wall's side 1..4 (procInputs), 0 none
+    r.on_wall = (uint8_t) (on_wall >= 1 && on_wall <= 4 ? on_wall : 0);
+    r.aim_val = 1.0f - (float) num(A(KRUNKER_SYNC_AIM_VAL), 1); // Krunker 1 = hip, ours 0
     r.crouch_val = (float) num(A(KRUNKER_SYNC_CROUCH_VAL), 0);
     r.loadout_index = (int32_t) num(A(KRUNKER_SYNC_WEAPON), 0);
     r.slide_ms = num(A(KRUNKER_SYNC_SLIDE_TIMER), 0);
@@ -278,6 +365,7 @@ static void on_sync_player(KrunkerLink *l, const KrunkerFrame *f) {
     const KrunkerValue *ping = A(KRUNKER_SYNC_PING);
 #undef A
     emit(l, NET_PACKET_RECON, &r, sizeof(r));
+    l->syncs++;
     if (krunker_is(ping, KRUNKER_NUM)) {
         const NetPingResultPacket pr = {.ping_ms = (int32_t) ping->u.num};
         emit(l, NET_PACKET_PING_RESULT, &pr, sizeof(pr));
@@ -828,11 +916,18 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         case KRUNKER_S2C_ADD_PLAYERS: on_add_players(l, &f); break;
         case KRUNKER_S2C_UPDATE_PLAYERS: on_update_players(l, &f); break;
         case KRUNKER_S2C_SYNC_PLAYER: on_sync_player(l, &f); break;
-        case KRUNKER_S2C_SYNC_FAILED: // iiîïîìï: the server dropped our inputs; the next "q" restarts the deltas
+        case KRUNKER_S2C_SYNC_FAILED: { // iiîïîìï: the server dropped our inputs; the next "q" restarts the
+            // deltas, and tmpInpts (the pending prediction inputs) empties: none of them will be acked
             memset(l->last_set, 0, sizeof(l->last_set));
             l->prev_angle_count = 0;
             l->resync = 1;
+            l->sync_failed++;
+            uint8_t ext[NET_EXT_HEADER_SIZE];
+            const uint16_t n = net_ext_pack(ext, sizeof(ext), NET_EXT_KN_INPUTS_DROPPED, NULL, 0);
+            if (n) emit(l, NET_PACKET_EXT, ext, n);
+            note(l, KRUNKER_LINK_EV_NOTE, "input sync failed (%d): pending inputs dropped", (int) num(arg(&f, 0), -1));
             break;
+        }
         // movement locks / buffs of our player (packet-audit cluster A)
         case KRUNKER_S2C_LOCK_MOVE: on_lock_move(l, &f); break;
         case KRUNKER_S2C_UNLOCK_MOVE: on_unlock_move(l); break;
@@ -951,12 +1046,12 @@ static int send_enter(KrunkerLink *l, const void *payload, const uint16_t length
 // One input frame as the 15 fields of game.deob.js:221748:
 // [isn, dt ms, pitch*1000, yaw*1000, moveDir, shoot, ads, jump, reload, crouch, scroll, wSwap,
 //  1 - speedLmt, reset (2 last, 1 start), interact]
-static void input_fields(const NetInputPacket *in, double v[15]) {
+void krunker_link_input_fields(const NetInputPacket *in, double v[15]) {
     v[0] = in->seq;
     v[1] = js_round(in->delta * 1000.0); // * config.deltaMlt (1)
     v[2] = js_round(1000.0 * (js_round(in->x_dir * 1000.0) / 1000.0));
     v[3] = js_round(1000.0 * (js_round(in->y_dir * 1000.0) / 1000.0));
-    v[4] = in->move_dir >= -1 && in->move_dir <= 7 ? in->move_dir : -1;
+    v[4] = in->move_dir >= 0 && in->move_dir <= 7 ? (in->move_dir + 1) % 8 : -1; // movDirs index (see the top)
     v[5] = in->flags & NET_INPUT_SHOOT ? 1 : 0;
     v[6] = in->flags & NET_INPUT_SCOPE ? 1 : 0;
     v[7] = in->flags & NET_INPUT_JUMP ? 1 : 0;
@@ -990,7 +1085,7 @@ static int send_input_window(KrunkerLink *l, const NetInputPacket *frames, const
     double first_isn = 0;
     for (int j = 0; j < count && j < NET_INPUT_BATCH_MAX; j++) {
         double v[15];
-        input_fields(&frames[j], v);
+        krunker_link_input_fields(&frames[j], v);
         input_locks(l, v);
         if (j == 0) first_isn = v[0];
         dts[j] = v[1];

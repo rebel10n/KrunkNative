@@ -12,8 +12,10 @@
 //   frs     [...]                            ENTER_GAME acknowledgement: logged (the spawn is "0")
 //   0       [flat list, stride 53]           NET_PACKET_SPAWN per player (:220266, players.add :171902)
 //   k       [flat list, stride 13, rate, t]  NET_PACKET_STATE per other player (:220529)
+//   init    ... [6] config [7] weps/cls/prks [12] networking   NET_PACKET_GAME_CONFIG + NETWORK_DATA first
 //   l       [state array]                    NET_PACKET_RECON + NET_PACKET_PING_RESULT; answered "v" (:220335)
-//   f       [reason]                         SYNC_FAILED: the "q" compression state restarts (:220333)
+//   f       [reason]                         SYNC_FAILED: the "q" compression state restarts and
+//                                            NET_EXT_KN_INPUTS_DROPPED empties the pending inputs (:220333)
 //   2       [sid]                            NET_PACKET_LEAVE (:220567)
 //   3       [victim, deaths, killer, stats, info, hideFeed]  NET_PACKET_KILL (:220579)
 //   4       [sid, dmg, crit, kill, isAI]     NET_PACKET_HIT (:221254)
@@ -127,8 +129,12 @@ typedef struct {
     // window.locked, "noc" noclip): shapes the "q" frames and the "l" RECON flags
     int move_lock, locked, noclip;
     int game_state;                 // "gsc" game.gameState, -1 = not sent
-    // counters (tests, logs)
+    // init's lobby settings (emit_lobby_config): applyNetworking's rates (snf, tf, sf) and how many
+    // config keys the lobby set
+    int send_hz, tick_hz, sync_hz, config_keys;
+    // counters (tests, logs, the console's official_sync)
     unsigned frames_in, frames_out, cc_answered, cc_failed, captchas_solved, unknown_in;
+    unsigned syncs, sync_failed;    // "l" SYNC_PLAYER applied, "f" SYNC_FAILED received
 } KrunkerLink;
 
 void krunker_link_init(KrunkerLink *link, const KrunkerLinkIO *io, int64_t ahkey);
@@ -138,5 +144,9 @@ void krunker_link_reset(KrunkerLink *link);
 int krunker_link_on_frame(KrunkerLink *link, const uint8_t *data, size_t len);
 // One of our outbound packets: translated and sent, or dropped. 1 = something was sent.
 int krunker_link_send_ours(KrunkerLink *link, NetPacketType type, const void *payload, uint16_t length);
+// One of our input frames as the official client's 15 input fields (game.deob.js:221748):
+// [isn, dt ms, pitch*1000, yaw*1000, movDirs index, shoot, ads, jump, reload, crouch, scroll,
+//  wSwap, 1 - speedLmt, reset, interact]. What the "q" carries and the server's procInputs reads.
+void krunker_link_input_fields(const NetInputPacket *in, double v[15]);
 // Encode and send one Krunker packet (wire name + args). 1 = sent.
 int krunker_link_send(KrunkerLink *link, const char *wire, const KrunkerValue *args, size_t argc);

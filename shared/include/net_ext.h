@@ -76,6 +76,11 @@ typedef enum {
 
     // 0x8011 bots (KrunkNative): what a spectator following a bot sees of its AI (0x8010 is nettspend's NET_EXT_KN_LACED)
     NET_EXT_KN_BOT_PATH = 0x8011, // S -> C NetBotPathPacket (variable size, NET_BOT_PATH_SIZE(n))
+
+    // 0x8020 official krunker.io sessions (client/src/net/krunker_link.c), client-local: the link
+    // queues them into the client's own inbound stream, no server sends them
+    NET_EXT_KN_INPUTS_DROPPED = 0x8020, // no body: Krunker's "f" SYNC_FAILED cleared tmpInpts (the
+                                        // pending prediction inputs) (game.deob.js:220333)
 } NetExtSubtype;
 
 // NET_EXT_KN_ACCOUNT_AUTH (C -> S): the identity the player now has in the menu. The server verifies

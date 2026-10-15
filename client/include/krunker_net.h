@@ -97,3 +97,6 @@ int krunker_net_open(void);        // the WebSocket is open
 int krunker_net_send_packet(NetPacketType type, const void *payload, uint16_t length);
 void krunker_net_reconnect(Client *client); // the page's reconnect: seek the same game again
 void krunker_net_tick(Client *client);      // main thread, once per frame: notices, captcha
+// The console's official_sync: the link's sync counters and the lobby's rates as one line. 0 = no
+// official session (out is "").
+int krunker_net_sync_info(char *out, size_t n);

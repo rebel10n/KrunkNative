@@ -982,6 +982,7 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             if (!net_ext_unpack(payload, length, &subtype, &body, &body_length)) return 1;
             // entities, pose, locks ... land with their features; unknown subtypes are ignored, never an error
             if (subtype == NET_EXT_KN_ACCOUNT_RIGHTS) online_mode_on_rights(client, body, body_length); // live sign-in (online_mode.c)
+            else if (subtype == NET_EXT_KN_INPUTS_DROPPED) client_recon_drop_pending(client); // official "f" (krunker_link.c)
             else if (subtype == NET_EXT_KN_LACED) { // Nettspend: a bad pour (nettspend.h)
                 drank_apply_laced(&client->game, body, body_length); // the shared timer (Player.laced_timer, drank.h)
                 nettspend_on_laced(client, body, body_length);       // the local player's post-effect

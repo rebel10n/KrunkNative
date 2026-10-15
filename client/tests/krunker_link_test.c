@@ -7,6 +7,7 @@
 #include <net_ext.h>
 #include <ruleset.h>
 #include <zombies.h>
+#include <cJSON.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -147,6 +148,65 @@ int main(void) {
     CHECK(link.unsupported_map == 77, "the unknown map index is kept for the error screen (%d)", link.unsupported_map);
     clear();
 
+    // init's lobby settings: [6] config, [7] weps / cls / prks, [12] networking -> GAME_CONFIG + NETWORK_DATA before INIT
+    {
+        const KrunkerValue classes[] = {KRUNKER_V_NUM(0), KRUNKER_V_NUM(2)};
+        const KrunkerValue cfg_kv[] = {KRUNKER_V_STR("gravMlt"), KRUNKER_V_NUM(0.5), KRUNKER_V_STR("strafeSpd"), KRUNKER_V_NUM(1.5),
+                                       KRUNKER_V_STR("classes"), KRUNKER_V_ARRAY(classes, 2), KRUNKER_V_STR("weps"), KRUNKER_V_NUM(1)};
+        const KrunkerValue speed_kv[] = {KRUNKER_V_STR("speed"), KRUNKER_V_NUM(1.1)};
+        const KrunkerValue cls_kv[] = {KRUNKER_V_STR("0"), KRUNKER_V_MAP(speed_kv, 1)};
+        const KrunkerValue custom_kv[] = {KRUNKER_V_STR("cls"), KRUNKER_V_MAP(cls_kv, 1)};
+        const KrunkerValue net_kv[] = {KRUNKER_V_STR("snf"), KRUNKER_V_NUM(20), KRUNKER_V_STR("tf"), KRUNKER_V_NUM(60)};
+        KrunkerValue init_args[13];
+        for (int i = 0; i < 13; i++) init_args[i] = KRUNKER_V_NIL;
+        init_args[0] = KRUNKER_V_NUM(10);
+        init_args[1] = KRUNKER_V_NUM(0);
+        init_args[6] = KRUNKER_V_MAP(cfg_kv, 4);
+        init_args[7] = KRUNKER_V_MAP(custom_kv, 1);
+        init_args[12] = KRUNKER_V_MAP(net_kv, 2);
+        feed(&link, "init", init_args, 13);
+        int cfg_at = -1, net_at = -1, init_at = -1;
+        for (int i = 0; i < g_in_count; i++) {
+            if (g_in[i].type == NET_PACKET_GAME_CONFIG && cfg_at < 0) cfg_at = i;
+            if (g_in[i].type == NET_PACKET_NETWORK_DATA) net_at = i;
+            if (g_in[i].type == NET_PACKET_INIT) init_at = i;
+        }
+        CHECK(cfg_at >= 0 && net_at > cfg_at && init_at > net_at, "GAME_CONFIG, NETWORK_DATA, then INIT (%d %d %d)", cfg_at, net_at, init_at);
+        cJSON *msg = NULL;
+        if (cfg_at >= 0) {
+            NetGameConfigChunk chunk;
+            memcpy(&chunk, g_in[cfg_at].payload, g_in[cfg_at].length);
+            const size_t n = g_in[cfg_at].length - NET_GAME_CONFIG_HEADER_SIZE;
+            CHECK(chunk.offset == 0 && chunk.total == n, "one config chunk (%u of %u)", (unsigned) n, chunk.total);
+            msg = cJSON_ParseWithLength((const char *) chunk.data, n);
+        }
+        const cJSON *settings = cJSON_GetObjectItemCaseSensitive(msg, "settings");
+        const cJSON *cls0 = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(msg, "cls"), "0");
+        CHECK(cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(settings, "gravMlt")) == 0.5 &&
+              cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(settings, "strafeSpd")) == 1.5 &&
+              !cJSON_GetObjectItemCaseSensitive(settings, "weps") && !cJSON_GetObjectItemCaseSensitive(msg, "weps") &&
+              cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(msg, "classes")) == 2 &&
+              cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(cls0, "speed")) == 1.1 &&
+              cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(msg, "host")) == 0,
+              "the lobby config as our GAME_CONFIG message");
+        cJSON_Delete(msg);
+        NetNetworkDataPacket rates;
+        memset(&rates, 0, sizeof(rates));
+        if (net_at >= 0) memcpy(&rates, g_in[net_at].payload, sizeof(rates));
+        NetInitPacket init2;
+        memset(&init2, 0, sizeof(init2));
+        if (init_at >= 0) memcpy(&init2, g_in[init_at].payload, sizeof(init2));
+        CHECK(rates.send_hz == 20 && rates.tick_hz == 60 && rates.sync_hz == 1 && init2.tick_rate == 60 && link.tick_hz == 60,
+              "applyNetworking: snf 20, tf 60, sf || 1 (got %u %u %u, INIT %d)", rates.send_hz, rates.tick_hz, rates.sync_hz, init2.tick_rate);
+        clear();
+        // a bare init (no settings): the defaults (applyNetworking({}), applyConfig({}))
+        feed(&link, "init", (KrunkerValue[]) {KRUNKER_V_NUM(10), KRUNKER_V_NUM(0)}, 2);
+        p = find_in(NET_PACKET_NETWORK_DATA, 0);
+        if (p) memcpy(&rates, p->payload, sizeof(rates));
+        CHECK(p && find_in(NET_PACKET_GAME_CONFIG, 0) && rates.send_hz == 10 && rates.tick_hz == 30 && rates.sync_hz == 1, "bare init: default rates");
+    }
+    clear();
+
     // "0": two players, the second is us
     KrunkerValue add[2 * 53];
     for (int i = 0; i < 2 * 53; i++) add[i] = KRUNKER_V_NIL;
@@ -176,7 +236,7 @@ int main(void) {
     p = find_in(NET_PACKET_STATE, 0);
     if (p) memcpy(&st, p->payload, sizeof(st));
     CHECK(p && !find_in(NET_PACKET_STATE, 1) && st.uid == 7 && st.position[0] == 10.0f && fabsf(st.direction[1] - (float) (M_PI / 2)) < 1e-5f &&
-          fabsf(st.direction[0] + (float) (M_PI / 4)) < 1e-5f && st.health == 60.0f && st.aim_val == 1.0f, "STATE");
+          fabsf(st.direction[0] + (float) (M_PI / 4)) < 1e-5f && st.health == 60.0f && st.aim_val == 0.0f, "STATE (aimVal 1 = hip = our 0)");
     clear();
 
     // "l" -> RECON + PING_RESULT, answered "v"
@@ -184,12 +244,15 @@ int main(void) {
     for (int i = 0; i < 25; i++) l[i] = KRUNKER_V_NUM(0);
     l[0] = KRUNKER_V_NUM(41); l[1] = KRUNKER_V_NUM(63); l[2] = KRUNKER_V_NUM(5); l[5] = KRUNKER_V_NUM(-2); l[6] = KRUNKER_V_NUM(3);
     l[9] = KRUNKER_V_BOOL(1); l[18] = KRUNKER_V_NUM(250); l[23] = KRUNKER_V_NIL; l[24] = KRUNKER_V_NUM(100);
+    l[13] = KRUNKER_V_NUM(3); l[15] = KRUNKER_V_NUM(0.25); // onWall side 3, aimVal 0.25 (mostly aimed)
     feed(&link, "l", (KrunkerValue[]) {KRUNKER_V_ARRAY(l, 25)}, 1);
     NetReconPacket r;
     p = find_in(NET_PACKET_RECON, 0);
     if (p) memcpy(&r, p->payload, sizeof(r));
     CHECK(p && r.ack_seq == 41 && r.position[0] == 5.0f && r.velocity[0] == 3.0f && r.velocity[1] == -2.0f && (r.flags & NET_RECON_ON_GROUND) &&
           r.slide_ms == 250.0 && fabsf(r.slide_timer - 0.25f) < 1e-6f && fabsf(r.can_slide_timer - 0.1f) < 1e-6f && !r.grapple_active, "RECON");
+    CHECK(p && r.on_wall == 3 && fabsf(r.aim_val - 0.75f) < 1e-6f, "RECON onWall side %d, aimVal 0.25 -> ours 0.75 (%f)", p ? r.on_wall : -1,
+          p ? r.aim_val : -1.0f);
     p = find_in(NET_PACKET_PING_RESULT, 0);
     CHECK(p && ((const NetPingResultPacket *) p->payload)->ping_ms == 63, "PING_RESULT");
     CHECK(g_out_count == 1 && !strcmp(g_out[0].name, "v") && g_out[0].ah_echo == (int) NEXT_AH(), "PONG v");
@@ -335,7 +398,7 @@ int main(void) {
     CHECK(krunker_is(angles, KRUNKER_ARRAY) && angles->len == 6 && krunker_num(krunker_at(angles, 0), 0) == 100 &&
           krunker_num(krunker_at(angles, 1), 0) == 1000 && krunker_num(krunker_at(angles, 3), 0) == 10 && krunker_num(krunker_at(angles, 5), 0) == 10,
           "q angles");
-    CHECK(krunker_is(changes, KRUNKER_MAP) && changes->len == 12 && krunker_num(krunker_get(changes, "0-4"), -1) == 2 &&
+    CHECK(krunker_is(changes, KRUNKER_MAP) && changes->len == 12 && krunker_num(krunker_get(changes, "0-4"), -1) == 3 && // right: movDirs 3
           krunker_num(krunker_get(changes, "2-7"), -1) == 1 && krunker_num(krunker_get(changes, "0-12"), -1) == 0, "q changes (%u)",
           changes ? changes->len : 0);
     CHECK(q->ah_echo == (int) NEXT_AH(), "q ahNum");
@@ -358,7 +421,25 @@ int main(void) {
     krunker_link_send_ours(&link, NET_PACKET_INPUT_BATCH, batch, sizeof(batch));
     changes = g_out_count ? krunker_frame_arg(&g_out[0], 5) : NULL;
     CHECK(g_out_count == 1 && fnum(&g_out[0], 0) == 1 && krunker_is(changes, KRUNKER_MAP) && changes->len == 11, "q after SYNC_FAILED");
+    p = find_in(NET_PACKET_EXT, 0);
+    {
+        uint16_t subtype = 0, body_length = 1;
+        const uint8_t *drop_body = NULL;
+        CHECK(p && net_ext_unpack(p->payload, p->length, &subtype, &drop_body, &body_length) && subtype == NET_EXT_KN_INPUTS_DROPPED && body_length == 0 &&
+              link.sync_failed == 1, "SYNC_FAILED drops the pending inputs (NET_EXT_KN_INPUTS_DROPPED)");
+    }
     clear();
+
+    // movement keys: our move_dir m (angle -PI/2 + m PI/4, forward 0) -> movDirs index (m + 1) % 8, none -1
+    static const int dirs[][2] = {{-1, -1}, {0, 1}, {1, 2}, {2, 3}, {4, 5}, {6, 7}, {7, 0}};
+    for (size_t i = 0; i < sizeof(dirs) / sizeof(dirs[0]); i++) {
+        NetInputPacket one;
+        memset(&one, 0, sizeof(one));
+        one.move_dir = dirs[i][0];
+        double v[15];
+        krunker_link_input_fields(&one, v);
+        CHECK(v[4] == dirs[i][1], "move_dir %d -> input[4] %d (got %g)", dirs[i][0], dirs[i][1], v[4]);
+    }
 
     // chat out
     NetChatSendPacket chat;
@@ -399,7 +480,7 @@ int main(void) {
     memcpy(batch + 1, in, sizeof(in));
     krunker_link_send_ours(&link, NET_PACKET_INPUT_BATCH, batch, sizeof(batch));
     changes = g_out_count ? krunker_frame_arg(&g_out[g_out_count - 1], 5) : NULL;
-    CHECK(krunker_is(changes, KRUNKER_MAP) && krunker_num(krunker_get(changes, "0-4"), 9) == 0 && krunker_num(krunker_get(changes, "1-7"), 9) == 1,
+    CHECK(krunker_is(changes, KRUNKER_MAP) && krunker_num(krunker_get(changes, "0-4"), 9) == 1 && krunker_num(krunker_get(changes, "1-7"), 9) == 1, // our move_dir 0 = movDirs 1
           "q after ulm: moveDir and jump back");
     clear();
     // lock (window.locked): nothing pressed goes out, the frames keep their isn

@@ -16,6 +16,7 @@
 // offline map / mode / cycle versions (offlineServerCommands, below) stay local because
 // they are the sandbox host's controls (local_game_host).
 #include <console.h>
+#include <krunker_net.h> // official_sync: the official session's counters
 #include <ui_mods.h>
 #include <ui_logic.h>
 #include <backend_ui.h> // servers_ui_connect_direct / _disconnect / _reconnect
@@ -391,6 +392,7 @@ static const ConArg A_BOT_PLACE[] = {{"tfue|autoRespawn|key=value", ARG_STRING, 
 static const ConArg A_BOT_QUERY[] = {{"all|index|name", ARG_STRING, 1}};
 static const ConArg A_BOT_CONFIG[] = {{"key=value", ARG_STRING, 1}};
 static const ConArg A_BOT_DIFF[] = {{"value", ARG_NUMBER, 0}};
+static const ConArg A_SYNC_RESET[] = {{"reset", ARG_STRING, 1}}; // official_sync [reset]
 static const ConArg A_NAV_OFF[] = {{"off", ARG_STRING, 1}}; // show_navmeshes: [arg("off", "string", true)]
 // KrunkNative teleports (shared/src/chat_commands.c cmd_tp / cmd_bring)
 static const ConArg A_TP[] = {{"x|player", ARG_STRING, 0}, {"y", ARG_NUMBER, 1}, {"z", ARG_NUMBER, 1}};
@@ -1318,6 +1320,31 @@ static void cmd_netinfo(const int argc, char **argv, const char *rest) {
     }
 }
 
+// official_sync [reset] (KrunkNative): how well our prediction matches the server's physics. Every
+// "l" / RECON snaps our player to the server's state and replays the unacked inputs; the distance
+// that moved it is the correction (0 when the client ran the same physics on the same inputs).
+// Any server; on an official krunker.io game also the link's counters and the lobby's rates.
+static void cmd_official_sync(const int argc, char **argv, const char *rest) {
+    (void) rest;
+    Client *client = con_client();
+    if (!client) return;
+    if (argc > 1 && !strcmp(argv[1], "reset")) {
+        client_recon_stats_reset(client);
+        append("sync counters reset", COL_REPLY);
+        return;
+    }
+    char line[256];
+    const unsigned n = client->net_recon_count;
+    snprintf(line, sizeof(line), "%u reconciliations, %u corrections over %.2f units; distance last %.4f, mean %.4f, max %.4f", n,
+             client->net_recon_corrections, (double) NET_RECON_CORRECTION_EPS, (double) client->net_recon_error_last,
+             n ? client->net_recon_error_sum / n : 0.0, (double) client->net_recon_error_max);
+    append(line, COL_INFO);
+    snprintf(line, sizeof(line), "%zu inputs pending, %u pending lists dropped by the server", client->net_pending_count,
+             client->net_inputs_dropped);
+    append(line, COL_INFO);
+    if (krunker_net_sync_info(line, sizeof(line))) append(line, COL_INFO);
+}
+
 // thirdperson / firstperson (Source style, KrunkNative): the over-the-shoulder camera
 // (client/src/third_person.c). thirdperson asks the server ("/thirdperson on"), which grants it
 // offline, to devs and to custom games whose host allows it, and refuses it elsewhere with a
@@ -1388,6 +1415,7 @@ static void register_commands(void) {
     register_local("ping", NO_ARGS, "show current ping", cmd_ping_local);
     register_local("thirdperson", NO_ARGS, "over-the-shoulder camera (offline, devs, custom games that allow it)", cmd_thirdperson);
     register_local("firstperson", NO_ARGS, "back to the first-person camera", cmd_firstperson);
+    register_local("official_sync", ARGS(A_SYNC_RESET), "prediction sync: reconciliations, corrections and their distance (reset clears)", cmd_official_sync);
     register_local("netinfo", NO_ARGS, "show the game transport (WebRTC/WebSocket, UDP/TCP) and its state", cmd_netinfo);
     register_local("show_navmeshes", ARGS(A_NAV_OFF), "visualize generated source-style nav meshes in 3D (off to clear)", cmd_show_navmeshes);
     // Server commands (mirror server/packetHandlers.ts cmds table)

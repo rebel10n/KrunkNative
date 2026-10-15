@@ -49,7 +49,8 @@ boxes (`shared/src/rules/v10/constants_v10.c`). The other differing keys are men
 | crouchSpd | 0.007 | 0.007 | `var _7422 = 0.007`, `'crouchSpd': _7422` v10:19603 |
 | crouchDst | 3 | 3 | `'crouchDst': 3` v10:19600; `updateHeight` inlines `3 * crouchVal` v10:170860 |
 | playerHeight / legHeight / headScale | 11 / 4.2 / 2 | 11 / 4.2 / 2 | `_7418 = 11`, `_7420 = 4.2`; `9 + 2 * headMlt` v10:170866 (= 11 - 2 + 2*headMlt) |
-| slideTime / playerSlideVelMlt / playerTerrainSlideVelMlt | 350 / 1.2 / 0.4 | 350 / 1.2 / 0.4 | `350 * (slidTime...)`, `(onTerrain ? 0.4 : 1.2) * slA` v10:171975-171976 |
+| slideTime / playerSlideVelMlt / playerTerrainSlideVelMlt | 350 / 1.2 / 0.4 | 350 / 1.2 / 0.4 | `350 * (slidTime...)`, `(onTerrain ? 0.4 : 1.2) * slA` v10:171975-171976; `this` is the players manager (onTerrain undefined), so the 0.4 never applies: KN uses 1.2 on terrain too, as v10 and the official servers do |
+| delta floor (procInputs input[1], ms) | `max(0.1, min(input[1], 33))` (v7.1.4: 0.1 ms; NaN, 0 and negatives too) | `max(1 * deltaMlt, min(input[1], 33))` (1 ms at deltaMlt 1; NaN, 0 and negatives too) | `Math.max(1 * (config.deltaMlt \|\| 1), Math.min(input[1], dltMx))` v10:169581-169582; input[1] = `Math.round(frame ms * deltaMlt)` game.deob.js:221748 (the client scales it, main.c) |
 | airDecel, groundDecel, slideDecel, ladderSpeed, decelMin | v7 values | same | `_7416 = 0.9996`, `_7415 = 0.99`, `_7413 = 0.035`, `_7081 = 0.0001` |
 | hitBoxPad (game setting) | def 0.6, defC 0.1 (config.js:623) | def 0.6, defC 0.1 | v10:16921-16930 |
 

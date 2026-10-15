@@ -1,8 +1,10 @@
 // Client prediction + server reconciliation (Krunker v3.1.1 index.js).
 //
 //   gameLoop: every frame's input b9 gets CONTROLS.getISN(), is pushed onto CONTROLS.tmpInpts
-//     and run through procInputs at once (prediction); the frames of one clientSendRate window
-//     (1000 / 30 ms) leave together as one "q" packet.
+//     and run through procInputs at once (prediction); the frames of one window leave together
+//     as one "q" packet. v10 (game.deob.js:221735-221830): the window sums the frame time while
+//     our player is active (iiïïiïï += delta) and is sent from the first input frame that finds it
+//     >= tickRate (1000 / networkData tf, 30 Hz by default), then restarts at 0.
 //   reconcilePlayer ("l", 1 Hz + server-driven snaps): the player is snapped to the server's
 //     state after input l[0], the acked inputs leave tmpInpts and the rest replay through
 //     procInputs(input, Game, recon = true). No smoothing and no error threshold.
@@ -14,6 +16,7 @@
 // KRUNKNATIVE_NET_JITTER_MS=<+- ms> hold every received packet and every sent input batch
 // that long (order kept, like TCP). KRUNKNATIVE_RECON_LOG=1 prints each correction.
 #include <client.h>
+#include <game_config.h> // game_network_data: the "q" window (tickRate)
 #include <ks_client.h> // ks_client_no_prediction
 #include <ui_logic.h>  // ui_setting_number ("netRate")
 #include <ui_mobile.h> // ui_mobile_active (netRate's mobile default)
@@ -113,6 +116,21 @@ void client_recon_drain_delayed(Client *client, void (*handle)(Client*, const Ne
     delay_drain(&g_recon.out, client, send_now);
 }
 
+// Krunker's "f" SYNC_FAILED (NET_EXT_KN_INPUTS_DROPPED from krunker_link.c): tmpInpts.length = 0.
+// The server dropped them, so no "l" will ack them and none may be replayed.
+void client_recon_drop_pending(Client *client) {
+    client->net_pending_count = 0;
+    client->net_inputs_dropped++;
+}
+
+// official_sync reset: the counters above (net_recon_count keeps counting)
+void client_recon_stats_reset(Client *client) {
+    client->net_recon_corrections = 0;
+    client->net_recon_error_last = client->net_recon_error_max = 0.0f;
+    client->net_recon_error_sum = 0.0;
+    client->net_inputs_dropped = 0;
+}
+
 // CONTROLS.reset() on our (re)spawn and on a new session: no pending inputs, a fresh batch.
 void client_recon_reset(Client *client) {
     client->net_input_accum = 0.0f; // index.js "start": inputFrameDelta = 0
@@ -134,7 +152,16 @@ static int recon_net_rate_hz(void) {
 // Online and offline alike (v7's sandbox player samples the same frames). Returns the delta (s) of
 // the input frame to build this frame, or -1 when this frame samples none.
 float client_recon_sample(Client *client, const float frame_delta) {
+    // v10 gameLoop: iiïïiïï += gameTimeDiff on every frame our player is active (main.c only asks
+    // then), sampled or not; the "q" window closes on the next sampled frame past tickRate
+    if (!client->game.is_local && isfinite(frame_delta) && frame_delta > 0.0f) client->net_batch_time += frame_delta;
     return net_input_rate_take(&client->net_input_accum, frame_delta, recon_net_rate_hz());
+}
+
+// tickRate: 1000 / tickFrequency (applyNetworking tf; our server's NETWORK_DATA tick_hz)
+static float recon_window_seconds(const Client *client) {
+    const int hz = game_network_data(&client->game)->tick_hz;
+    return hz > 0 ? 1.0f / (float) hz : NET_INPUT_SEND_INTERVAL;
 }
 
 static void batch_flush(Client *client) {
@@ -191,11 +218,9 @@ void client_recon_record(Client *client, const Input *input) {
     if (client->net_batch_count >= NET_INPUT_BATCH_MAX) batch_flush(client);
     net_packet_from_input(&client->net_batch[client->net_batch_count++], input);
 
-    // bI += bo; if (bI >= clientSendRate) { bI -= clientSendRate; send "q" }
-    client->net_batch_time += input->delta;
-    if (client->net_batch_time >= NET_INPUT_SEND_INTERVAL) {
-        client->net_batch_time -= NET_INPUT_SEND_INTERVAL;
-        if (client->net_batch_time > NET_INPUT_SEND_INTERVAL) client->net_batch_time = 0.0f; // a long hitch
+    // iiïïiïï >= tickRate && (iiïïiïï = 0, send "q") (client_recon_sample sums the frame time)
+    if (client->net_batch_time >= recon_window_seconds(client)) {
+        client->net_batch_time = 0.0f;
         batch_flush(client);
     }
 }
@@ -220,6 +245,7 @@ void client_recon_apply(Client *client, const NetReconPacket *packet) {
     if (client->game.is_local || !me || !me->active) return;
 
     const vec3 predicted = me->position;
+    const int predicted_active = me->active;
     // KrunkScript DEFAULT.disablePrediction (Game.noPred): the snap applies, nothing is replayed
     if (ks_client_no_prediction()) client->net_pending_count = 0;
     const size_t before = client->net_pending_count;
@@ -227,9 +253,16 @@ void client_recon_apply(Client *client, const NetReconPacket *packet) {
     client->net_pending_count = net_reconcile(me, packet, client->net_pending_inputs, client->net_pending_count, move_lock);
     client->net_recon_count++;
 
+    // official_sync: what the snap + replay moved us (0 when the prediction ran the server's physics)
+    const float error = predicted_active && me->active ? sqrtf(powf(me->position.x - predicted.x, 2.0f) + powf(me->position.y - predicted.y, 2.0f) +
+                                                               powf(me->position.z - predicted.z, 2.0f))
+                                                       : 0.0f;
+    client->net_recon_error_last = error;
+    client->net_recon_error_sum += error;
+    if (error > client->net_recon_error_max) client->net_recon_error_max = error;
+    if (error > NET_RECON_CORRECTION_EPS) client->net_recon_corrections++;
+
     if (g_recon.log) {
-        const float error = sqrtf(powf(me->position.x - predicted.x, 2.0f) + powf(me->position.y - predicted.y, 2.0f) +
-                                  powf(me->position.z - predicted.z, 2.0f));
         printf("[recon] #%u ack %d replayed %zu/%zu error %.4f pos %.3f %.3f %.3f noclip %d\n", client->net_recon_count,
                (int) packet->ack_seq, client->net_pending_count, before, error, me->position.x, me->position.y, me->position.z,
                me->noclip);

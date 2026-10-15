@@ -902,6 +902,17 @@ else ()
     target_link_libraries(krunker_link_test PRIVATE cJSON m)
     add_test(NAME krunker_link_test COMMAND krunker_link_test)
 
+    # krunker_sync_test: our prediction (shared physics, the v10 "q" window, krunker_link, net_reconcile)
+    # against a double-precision reimplementation of Krunker 10.0.3's procInputs as the official server
+    add_executable(krunker_sync_test ${SHARED_HEADERS} ${SHARED_SOURCES} client/tests/krunker_sync_test.c client/src/net/krunker_link.c
+                   client/src/net/krunker_altcha.c)
+    target_include_directories(krunker_sync_test PRIVATE client/include)
+    target_link_libraries(krunker_sync_test PRIVATE m)
+    if (WIN32)
+        target_link_libraries(krunker_sync_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+    add_test(NAME krunker_sync_test COMMAND krunker_sync_test WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
     # update_test (launcher/, doc/backend.md "Client updates"): manifest parsing, version
     # comparison, asset diffing, URL resolution, package extraction and the journaled swap
     add_executable(update_test launcher/tests/update_test.c launcher/src/update_core.c launcher/src/archive.c
