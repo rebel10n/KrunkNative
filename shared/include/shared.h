@@ -2027,6 +2027,10 @@ typedef struct Game_t {
     unsigned char is_local:1;
     unsigned char ready:1;
     unsigned char is_sandbox:1;   // WP-E: v7 game.isSandbox (the offline sandbox server, server/src/sandbox.c): spray wheel, maxSpraysF
+    // 1 while this client plays an OFFICIAL krunker.io game (client/src/net/krunker_net.c sets it on join and
+    // clears it on leave): KrunkNative's own classes are not playable there (game_class_allowed). Never set
+    // on a server, in the offline sandbox or in a KrunkNative lobby.
+    unsigned char is_official:1;
 
     float end_timer;              // seconds of end screen left (> 0 = round over)
 

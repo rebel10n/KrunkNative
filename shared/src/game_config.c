@@ -1553,6 +1553,12 @@ int game_apply_map_config(Game *game, const Map *map) {
     return 1;
 }
 
+int game_class_allowed(const Game *game, const int class_index) {
+    const size_t count = game && game->class_count ? game->class_count : rules_class_count();
+    if (class_index < 0 || (size_t) class_index >= count) return 0;
+    return !(class_index >= CLASS_COUNT && game && game->is_official);
+}
+
 int game_config_class_for(const Game *game, const int class_index) {
     if (!game || game->config.class_list_count <= 0) return class_index;
     for (int i = 0; i < game->config.class_list_count; i++) {

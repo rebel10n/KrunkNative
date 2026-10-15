@@ -878,6 +878,11 @@ static void test_text_props(void)
     CHECK(apply(&c, NULL, "text-decoration", "none") && c.text_decoration == 0);
     CHECK(apply(&c, NULL, "text-overflow", "ellipsis") && c.text_overflow == CSS_TEXT_OVERFLOW_ELLIPSIS);
     CHECK(apply(&c, NULL, "white-space", "nowrap") && c.white_space == CSS_WHITE_SPACE_NOWRAP);
+    /* text-wrap (v10's .lockedClassText in a nowrap .classCard): auto wraps again, nowrap stops it */
+    CHECK(apply(&c, NULL, "text-wrap", "auto") && c.white_space == CSS_WHITE_SPACE_NORMAL);
+    CHECK(apply(&c, NULL, "white-space", "nowrap") && apply(&c, NULL, "text-wrap", "wrap") && c.white_space == CSS_WHITE_SPACE_NORMAL);
+    CHECK(apply(&c, NULL, "text-wrap", "nowrap") && c.white_space == CSS_WHITE_SPACE_NOWRAP);
+    CHECK(!apply(&c, NULL, "text-wrap", "sideways"));
     CHECK(apply(&c, NULL, "word-wrap", "break-word") && c.overflow_wrap == CSS_OVERFLOW_WRAP_BREAK_WORD);
     CHECK(apply(&c, NULL, "word-break", "break-all") && c.word_break == CSS_WORD_BREAK_BREAK_ALL);
     CHECK(apply(&c, NULL, "text-transform", "uppercase") && c.text_transform == CSS_TEXT_TRANSFORM_UPPERCASE);
@@ -1039,7 +1044,7 @@ static int known_gap(const char *name, size_t nl, const char *val, size_t vl)
     static const char *props[] = { "backdrop-filter", "transform-style", "scroll-behavior", "scrollbar-width",
                                    "background-origin", "align-content", "-webkit-tap-highlight-color", "fill",
                                    "text-decoration-color", "scrollbar-gutter", "resize", "aspect-ratio",
-                                   "object-position", "content-visibility", "contain-intrinsic-size", "text-wrap",
+                                   "object-position", "content-visibility", "contain-intrinsic-size",
                                    /* the v10 Svelte / hub / editor sheets: SVG presentation properties of
                                     * inline icons, @property descriptors, masks, form-control tints,
                                     * text stroke, line clamping and other visual extras */

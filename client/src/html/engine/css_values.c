@@ -1008,6 +1008,9 @@ static const CssKeyword kw_box_sizing[] = { { "content-box", CSS_BOX_SIZING_CONT
 static const CssKeyword kw_table_layout[] = { { "auto", CSS_TABLE_LAYOUT_AUTO }, { "fixed", CSS_TABLE_LAYOUT_FIXED }, { NULL, 0 } };
 static const CssKeyword kw_text_align[] = { { "start", CSS_TEXT_ALIGN_START }, { "left", CSS_TEXT_ALIGN_LEFT }, { "right", CSS_TEXT_ALIGN_RIGHT }, { "center", CSS_TEXT_ALIGN_CENTER }, { "justify", CSS_TEXT_ALIGN_JUSTIFY }, { "end", CSS_TEXT_ALIGN_END }, { "-webkit-center", CSS_TEXT_ALIGN_CENTER }, { NULL, 0 } };
 static const CssKeyword kw_text_transform[] = { { "none", CSS_TEXT_TRANSFORM_NONE }, { "uppercase", CSS_TEXT_TRANSFORM_UPPERCASE }, { "lowercase", CSS_TEXT_TRANSFORM_LOWERCASE }, { "capitalize", CSS_TEXT_TRANSFORM_CAPITALIZE }, { NULL, 0 } };
+/* text-wrap: 0 = wrap (the initial value and every wrap keyword: auto, balance, pretty, stable), 1 = nowrap */
+static const CssKeyword kw_text_wrap[] = { { "normal", 0 }, { "wrap", 0 }, { "auto", 0 }, { "balance", 0 }, { "pretty", 0 },
+                                           { "stable", 0 }, { "nowrap", 1 }, { NULL, 0 } };
 static const CssKeyword kw_white_space[] = { { "normal", CSS_WHITE_SPACE_NORMAL }, { "nowrap", CSS_WHITE_SPACE_NOWRAP }, { "pre", CSS_WHITE_SPACE_PRE }, { "pre-wrap", CSS_WHITE_SPACE_PRE_WRAP }, { "pre-line", CSS_WHITE_SPACE_PRE_LINE }, { "break-spaces", CSS_WHITE_SPACE_PRE_WRAP }, { NULL, 0 } };
 static const CssKeyword kw_overflow_wrap[] = { { "normal", CSS_OVERFLOW_WRAP_NORMAL }, { "break-word", CSS_OVERFLOW_WRAP_BREAK_WORD }, { "anywhere", CSS_OVERFLOW_WRAP_ANYWHERE }, { NULL, 0 } };
 static const CssKeyword kw_word_break[] = { { "normal", CSS_WORD_BREAK_NORMAL }, { "break-all", CSS_WORD_BREAK_BREAK_ALL }, { "keep-all", CSS_WORD_BREAK_KEEP_ALL }, { "break-word", CSS_WORD_BREAK_BREAK_WORD }, { NULL, 0 } };
@@ -3914,6 +3917,7 @@ void css_computed_copy_prop(CssComputed *d, const CssComputed *s, int id)
     case CSS_PROP_TEXT_ALIGN: CP(text_align); break;
     case CSS_PROP_TEXT_TRANSFORM: CP(text_transform); break;
     case CSS_PROP_WHITE_SPACE: CP(white_space); break;
+    case CSS_PROP_TEXT_WRAP: CP(white_space); break; /* text-wrap maps onto the wrap part of white-space */
     case CSS_PROP_OVERFLOW_WRAP: CP(overflow_wrap); break;
     case CSS_PROP_WORD_BREAK: CP(word_break); break;
     case CSS_PROP_VISIBILITY: CP(visibility); break;
@@ -4142,6 +4146,18 @@ int css_computed_apply(CssComputed *d, int id, const CssToken *tokens, int n,
         SET_KW(kw_text_align, text_align);
     case CSS_PROP_TEXT_TRANSFORM: SET_KW(kw_text_transform, text_transform);
     case CSS_PROP_WHITE_SPACE: SET_KW(kw_white_space, white_space);
+    case CSS_PROP_TEXT_WRAP: {
+        /* text-wrap (css-text-4): the wrap mode is what white-space's nowrap / pre decide. A shorthand
+         * value resets the mode (text-wrap: auto is wrap, as on v10's .lockedClassText, which sits in a
+         * nowrap card), so only nowrap and a wrap keyword change white_space here; the other white-space
+         * longhand (white-space-collapse) keeps its value. */
+        int v_;
+        if (!css_parse_keyword(t, m, kw_text_wrap, &v_)) return 0;
+        if (v_) d->white_space = CSS_WHITE_SPACE_NOWRAP;
+        else if (d->white_space == CSS_WHITE_SPACE_NOWRAP) d->white_space = CSS_WHITE_SPACE_NORMAL;
+        else if (d->white_space == CSS_WHITE_SPACE_PRE) d->white_space = CSS_WHITE_SPACE_PRE_WRAP;
+        return 1;
+    }
     case CSS_PROP_OVERFLOW_WRAP: SET_KW(kw_overflow_wrap, overflow_wrap);
     case CSS_PROP_WORD_BREAK: SET_KW(kw_word_break, word_break);
     case CSS_PROP_VISIBILITY: SET_KW(kw_visibility, visibility);

@@ -133,6 +133,8 @@ void player_spawn(Player *player) {
     if (player->class_index < 0 || player->class_index >= (int) class_count) {
         player->class_index = 0;
     }
+    // KrunkNative's own classes (the Nettspend) are out of an official krunker.io game only (game_class_allowed)
+    if (!game_class_allowed(player->game, player->class_index)) player->class_index = 0;
 
     const ClassConfig *class_config = &classes[player->class_index];
     int loadout[3] = {1, WEAPON_ID_KNIFE, WEAPON_ID_KNIFE};

@@ -1142,6 +1142,7 @@ static int join(Client *client, const char *game_id, const char *region, const i
     if (client->game.player_count) client_clear_players(client);
     client->in_game = 0;
     client->menu_play_pending = 0;
+    client->game.is_official = 1; // krunker.io's own lobby: the KrunkNative-only classes are out (game_class_allowed)
 
     K.generation++;
     snprintf(K.game_id, sizeof(K.game_id), "%s", game_id ? game_id : "");
@@ -1221,6 +1222,8 @@ void krunker_net_leave(Client *client, const char *reason) {
     }
     printf("[krunker] leaving the official game%s%s\n", reason ? ": " : "", reason ? reason : "");
     K.state = KS_OFF;
+    Client *owner = client ? client : K.client;
+    if (owner) owner->game.is_official = 0; // back in KrunkNative's lobbies (the KN-only classes are playable again)
     K.altcha_pending = K.pow_shown = 0;
     wipe(K.access, sizeof(K.access));
     if (!krunker_account_owns_captcha()) krunker_captcha_close(); // a pending Turnstile request ends with the session (not a sign-in's)

@@ -296,7 +296,7 @@ static void warn_unknown_keys(void) {
         "menu", "window", "settingsTab", "connected", "ready", "inGame", "mapName", "modeName", "region", "name",
         "gameName", "classIndex", "anim_time", "hud", "chat", "chatOpen", "chatInput", "killfeed", "scoreboard",
         "dead", "killcard", "endscreen", "hit", "preview", "scrollbars", "mobile", "page", "pageQuery", "pageActions",
-        "clientChrome", "settingsView", "windowActions", "after_ms", "customMap", "pose", "spectate", "mapFile",
+        "clientChrome", "settingsView", "windowActions", "after_ms", "customMap", "pose", "spectate", "mapFile", "official",
         "account", // WP-E part 2c: a stand-in logged-in account (account_ui_scenario)
         "playerList", // the Player List's rows [{uid, name, clan, ping, account, level, hacker, speaking, chatMuted, voiceMuted}] (hud_ui.c)
         "voteKick",   // {target, voter, votes, needed}: a running vote kick's prompt (hud_votekick.c)
@@ -1054,6 +1054,8 @@ static int ui_scenario_apply(Client *client) {
         menu_update_class_box();
     }
     if (st_has("classIndex")) menu_set_class_index(st_int("classIndex", 0), 1);
+    // official: a krunker.io lobby (krunker_net.c sets Game.is_official on join): the KrunkNative-only classes are locked
+    client->game.is_official = (unsigned char) st_bool("official", 0);
     menu_set_region_label(st_str("region"));
 
     // state.settings {key: value}: setSetting(key, value) first (a capture that changed a setting,

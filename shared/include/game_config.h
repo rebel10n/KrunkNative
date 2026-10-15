@@ -125,6 +125,14 @@ void game_config_host(Game*, const cJSON *request, int host_index);
 int game_config_is_custom(const Game*);  // hosted / sandbox (isCustom): mts are random config pairs
 void game_config_free(Game*);            // drops the state, the game back on the base tables
 
+// The one class gate of KrunkNative (doc/v7/decisions.md "Nettspend class"): 1 when `class_index` may be
+// played in this game, 0 out of range. Krunker's classes always may (their class-list and hide rules are
+// elsewhere). KrunkNative's own classes (past Krunker's CLASS_COUNT: the Nettspend) may in every KrunkNative
+// lobby (public, custom, comp, ranked, the offline sandbox, any mode) and not in an official krunker.io game
+// (Game.is_official, set by client/src/net/krunker_net.c). player_spawn falls back to class 0 where it says
+// no, the class picker locks the card (ui_loadout.c) and the ENT sent to an official game never carries it
+// (main.c client_enter_game).
+int game_class_allowed(const Game*, int class_index);
 // setClass: config.classes (classes[0] when not listed), then the mode's classes when forceC.
 int game_config_class_for(const Game*, int class_index);
 // The class's ClassOverrides, or the v7 defaults when no cls[id] touched it.

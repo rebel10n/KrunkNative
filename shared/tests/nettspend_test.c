@@ -3,7 +3,8 @@
 // way server_bin and the offline sandbox run it:
 //   the tables (ids 67 / 68 after the Physics Gun, class 16 after Krunker's, flags, Object Manager
 //   tiles and `give` names); a Nettspend spawn carries Drank + Money Spread + knife in every lobby
-//   (custom, public, comp) and bots may play it; the Drank's stream (60 ms, 4 a
+//   (custom, public, comp) and bots may play it, in every KrunkNative lobby type and mode, and is
+//   refused in an official krunker.io game (game_class_allowed, Game.is_official); the Drank's stream (60 ms, 4 a
 //   hit) and purple puddles (10 dps, 6 s) that slow the players standing in them (x0.55, not the
 //   owner, replicated to a client's copy); the Money Spread's 8 bills a throw fading with
 //   distance; the pour-up's laced roll (4% a reload on the seeded pcg32 stream: deterministic,
@@ -149,6 +150,94 @@ static void test_tables(const Game *game) {
 static int nettspend_loadout_ok(const Player *p) {
     return p->class_index == CLASS_ID_NETTSPEND && p->loadout_size == 3 && p->loadout[0] == WEAPON_ID_DRANK && p->loadout[1] == WEAPON_ID_MONEY_SPREAD &&
            p->loadout[2] == WEAPON_ID_KNIFE;
+}
+
+// A mode that sets the spawn's class itself (forceC with noWeap / forceClass / teamClass): the spawn's
+// class is the mode's, so the spawn check is for the pick only.
+static int mode_forces_class(const Game *game) {
+    if (!game->mode || !game->config.force_classes) return 0;
+    const GameModeConfig *m = &game->mode->config;
+    if (m->no_weapons || m->force_class >= 0) return 1;
+    for (int t = 0; t < MODE_TEAMS; t++) if (m->team_class[t] >= 0) return 1;
+    return 0;
+}
+
+// The gating rule (game_config.h game_class_allowed): the Nettspend is playable in every KrunkNative
+// lobby (public, custom, comp, ranked, rent, zombies, raid, the offline sandbox) in every mode, and is
+// NOT in an official krunker.io game (Game.is_official), where a spawn falls back to the Triggerman.
+static void test_gating(const cJSON **maps) {
+    printf("Gating: the Nettspend in every KrunkNative lobby and mode, never in an official krunker.io game...\n");
+    static const struct {
+        const char *name;
+        int host, comp, ranked, sandbox;
+    } lobbies[] = {
+        {"public", -1, 0, 0, 0}, {"custom", GAME_HOST_CUSTOM, 0, 0, 0}, {"comp", GAME_HOST_COMP, 1, 0, 0},
+        {"ranked", GAME_HOST_COMP, 1, 1, 0}, {"rent", GAME_HOST_RENT, 0, 0, 0}, {"zombies", GAME_HOST_ZOMBIES, 0, 0, 0},
+        {"raid", GAME_HOST_RAID, 0, 0, 0}, {"sandbox", GAME_HOST_CUSTOM, 0, 0, 1},
+    };
+    int lobby_checks = 0, lobby_bad = 0, official_checks = 0, official_bad = 0, spawn_checks = 0, spawn_bad = 0, skipped = 0;
+    unsigned char played[MODE_COUNT] = {0};
+    const int modes = mode_count(); // every Krunker mode id, each game's whole mode list (game_init picks the one)
+    for (size_t l = 0; l < sizeof(lobbies) / sizeof(lobbies[0]); l++) {
+        for (int mode = 0; mode < modes; mode++) {
+            Game *game = calloc(1, sizeof(Game));
+            int *list = malloc((size_t) modes * sizeof(int)); // the game owns it (game_configure / game_add_mode)
+            if (!game || !list) {
+                free(game);
+                free(list);
+                continue;
+            }
+            for (int m = 0; m < modes; m++) list[m] = m;
+            game_configure(game, NULL, maps, 1, list, (size_t) modes, NULL, 0, NULL, 0);
+            game->hooks.send = test_send;
+            game->lag_comp = 0;
+            if (lobbies[l].host >= 0) game_config_host(game, NULL, lobbies[l].host);
+            game->config.comp = (unsigned char) lobbies[l].comp;
+            game->is_ranked = (unsigned char) lobbies[l].ranked;
+            game->is_sandbox = (unsigned char) lobbies[l].sandbox;
+            game_init(game, 0, mode, 1);
+            if (!game->ready) {
+                skipped++;
+                free(game);
+                continue;
+            }
+            if (game_mode_id(game) >= 0 && game_mode_id(game) < MODE_COUNT) played[game_mode_id(game)] = 1;
+            // the lobby's own rule: KrunkNative's class is playable here
+            lobby_checks++;
+            if (!game_class_allowed(game, CLASS_ID_NETTSPEND)) lobby_bad++;
+            if (!mode_forces_class(game)) {
+                spawn_checks++;
+                Player *p = add_player(game, 1, CLASS_ID_NETTSPEND);
+                // the class and its Drank + Money Spread (+ the knife, unless the mode is noMelee: Classic)
+                const int knife = !mode_no_melee(game);
+                if (p->class_index != CLASS_ID_NETTSPEND || p->loadout_size != 2 + knife || p->loadout[0] != WEAPON_ID_DRANK ||
+                    p->loadout[1] != WEAPON_ID_MONEY_SPREAD || (knife && p->loadout[2] != WEAPON_ID_KNIFE)) spawn_bad++;
+            }
+            // the same lobby as an official krunker.io game: out, and a spawn falls back to the Triggerman
+            game->is_official = 1;
+            official_checks++;
+            if (game_class_allowed(game, CLASS_ID_NETTSPEND) || !game_class_allowed(game, 0)) official_bad++;
+            if (!mode_forces_class(game)) {
+                Player *q = add_player(game, 2, CLASS_ID_NETTSPEND);
+                if (q->class_index != 0) official_bad++;
+            }
+            free(game);
+        }
+    }
+    int distinct = 0;
+    for (int m = 0; m < MODE_COUNT; m++) distinct += played[m];
+    printf("  %d lobby x mode games (%d not ready), %d of %d modes played, %d spawn checks, %d official games\n", lobby_checks, skipped, distinct,
+           modes, spawn_checks, official_checks);
+    CHECK(distinct == modes, "every mode was played (%d of %d)", distinct, modes);
+    CHECK(lobby_checks > 0 && lobby_bad == 0, "KrunkNative lobbies: the Nettspend allowed in all %d lobby x mode games (%d not allowed, %d skipped)",
+          lobby_checks, lobby_bad, skipped);
+    CHECK(spawn_checks > 0 && spawn_bad == 0, "a Nettspend spawn keeps the class and its loadout in %d games (%d not)", spawn_checks, spawn_bad);
+    CHECK(official_checks > 0 && official_bad == 0, "official krunker.io games: the Nettspend refused in all %d games (%d not), the Triggerman spawns",
+          official_checks, official_bad);
+    Game plain = {0};
+    game_configure(&plain, NULL, maps, 1, NULL, 0, NULL, 0, NULL, 0);
+    CHECK(game_class_allowed(&plain, CLASS_ID_NETTSPEND) && !game_class_allowed(&plain, CLASS_TABLE_COUNT) && game_class_allowed(&plain, 0),
+          "game_class_allowed: Krunker's classes always, the Nettspend in a plain game, nothing past the table");
 }
 
 static void test_class_spawn(Game *custom, Game *pub) {
@@ -415,6 +504,7 @@ int main(void) {
 
     test_tables(&game);
     test_class_spawn(&game, &pub);
+    test_gating(maps);
 
     Player *p = add_player(&game, 1, CLASS_ID_NETTSPEND);
     Player *target = add_player(&game, 2, 0);

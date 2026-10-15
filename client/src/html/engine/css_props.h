@@ -72,6 +72,7 @@ extern "C" {
     X(CLEAR,                      "clear",                      0, "none") \
     X(BOX_SIZING,                 "box-sizing",                 0, "content-box") \
     X(TABLE_LAYOUT,               "table-layout",               0, "auto") \
+    X(TEXT_WRAP,                  "text-wrap",                  0, "normal") \
     X(OVERFLOW_X,                 "overflow-x",                 0, "visible") \
     X(OVERFLOW_Y,                 "overflow-y",                 0, "visible") \
     X(APPEARANCE,                 "appearance",                 0, "none") \
