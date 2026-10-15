@@ -48,6 +48,80 @@ const StrikeConfigDefault *strike_config_default(const StrikeRules *rules, const
     return NULL;
 }
 
+const StrikeBind *strike_bind(const StrikeRules *rules, const char *bind, const int index) {
+    rules = or_default(rules);
+    if (!bind) return NULL;
+    for (size_t i = 0; i < rules->bind_count; i++) {
+        if (rules->binds[i].index == index && !strcmp(rules->binds[i].bind, bind)) return &rules->binds[i];
+    }
+    return NULL;
+}
+
+const StrikeSetting *strike_setting(const StrikeRules *rules, const char *key) {
+    rules = or_default(rules);
+    if (!key) return NULL;
+    for (size_t i = 0; i < rules->setting_count; i++) {
+        if (!strcmp(rules->settings[i].key, key)) return &rules->settings[i];
+    }
+    return NULL;
+}
+
+// ---- engine config key -> GameConstants field. constants_v10.c keeps times in s and speeds per s
+// (the JS values x 1000: playerSpeed 0.00042 -> 0.42, gravity 0.00015 -> 0.15, slideTime 350 -> 0.35).
+enum { C_SAME, C_MS, C_X1000, C_INT };
+typedef struct {
+    const char *key;
+    size_t offset;
+    unsigned char unit;
+} ConstKey;
+
+#define K(key, field, unit) {key, offsetof(GameConstants, field), unit}
+static const ConstKey k_const_keys[] = {
+    K("billboardCnt", billboard_count, C_INT), K("mouseSens", mouse_sensitivity, C_SAME), K("worldUV", world_uv_scale, C_SAME),
+    K("playerHeight", player_height, C_SAME), K("borderH", border_height, C_SAME), K("cameraHeight", camera_height, C_SAME),
+    K("climbHeight", climb_height, C_SAME), K("dltMx", max_delta, C_MS), K("jumpVel", jump_velocity, C_SAME),
+    K("aimJumpSlow", jump_aim_slow, C_SAME), K("jumpPush", jump_push, C_SAME), K("crouchJump", crouch_jump, C_SAME),
+    K("crouchSpd", crouch_speed, C_X1000), K("crouchLean", crouch_lean, C_SAME), K("playerSpeed", player_speed, C_X1000),
+    K("slippingSpeed", slipping_speed, C_X1000), K("airSpeed", air_speed, C_X1000), K("aimSlow", aim_slow, C_SAME),
+    K("playerSlippingJumpCooldown", player_slipping_jump_cooldown, C_MS),
+    K("terrainSlideThreshold", terrain_slide_threshold, C_SAME), K("terrainSlipDecel", terrain_slip_decel, C_SAME),
+    K("terrainSlideDecel", terrain_slide_decel, C_SAME), K("terrainDecel", terrain_decel, C_SAME),
+    K("slideDecel", slide_decel, C_SAME), K("airDecel", air_decel, C_SAME), K("groundDecel", ground_decel, C_SAME),
+    K("ladderDecel", ladder_decel, C_SAME), K("crouchDst", crouch_distance, C_SAME), K("gravity", gravity, C_X1000),
+    K("armScale", arm_scale, C_SAME), K("armInset", arm_inset, C_SAME), K("chestWidth", chest_width, C_SAME),
+    K("chestScale", chest_scale, C_SAME), K("legScale", leg_scale, C_SAME), K("legHeight", leg_height, C_SAME),
+    K("headScale", head_scale, C_SAME), K("decelMin", min_decel, C_SAME), K("slideTime", slide_time, C_MS),
+    K("playerSlideVelMlt", player_slide_velocity_mlt, C_SAME),
+    K("playerTerrainSlideVelMlt", player_terrain_slide_velocity_mlt, C_SAME), K("idleAnimS", idle_anim_speed, C_X1000),
+    K("interpolation", interpolation, C_SAME), K("leanSens", lean_sensitivity, C_SAME), K("leanMax", lean_max, C_SAME),
+    K("leanPull", lean_pull, C_SAME), K("leanPullZ", lean_pull_z, C_SAME), K("leanMltZ", lean_mlt_z, C_SAME),
+    K("bobPullY", bob_pull_y, C_SAME), K("bobPullZ", bob_pull_z, C_SAME), K("bobMltY", bob_mlt_y, C_SAME),
+    K("bobMltZ", bob_mlt_z, C_SAME), K("crouchAnim", crouch_anim, C_X1000), K("collPad", collision_padding, C_SAME),
+    K("boosterSpd", booster_speed, C_X1000), K("ladderSpeed", ladder_speed, C_X1000), K("ladderScale", ladder_scale, C_SAME),
+    K("ladderWidth", ladder_width, C_SAME), K("deathY", death_y, C_SAME), K("recoilMlt", recoil_mlt, C_SAME),
+    K("spreadAdj", spread_adjustment, C_SAME), K("uArmLength", upper_arm_length, C_SAME),
+    K("lArmLength", lower_arm_length, C_SAME), K("armOff", arm_offset, C_SAME), K("animMult", anim_mlt, C_SAME),
+    K("aimAnimMlt", aim_anim_mlt, C_SAME), K("crouchAnimMlt", crouch_anim_mlt, C_SAME), K("stepAnim", step_anim, C_SAME),
+    K("stepPull", step_pull, C_SAME), K("diskSpin", disk_spin, C_X1000),
+};
+#undef K
+
+int strike_constants_apply(GameConstants *k, const char *key, const double value) {
+    if (!k || !key) return 0;
+    for (size_t i = 0; i < sizeof(k_const_keys) / sizeof(k_const_keys[0]); i++) {
+        const ConstKey *c = &k_const_keys[i];
+        if (strcmp(key, c->key)) continue;
+        if (c->unit == C_INT) {
+            *(int *) ((char *) k + c->offset) = (int) value;
+            return 1;
+        }
+        const double v = c->unit == C_MS ? value / 1000.0 : c->unit == C_X1000 ? value * 1000.0 : value;
+        *(float *) ((char *) k + c->offset) = (float) v;
+        return 1;
+    }
+    return 0;
+}
+
 // ---- weaponConfig key -> Weapon field (KN stores times in s and recoil per s, like weapons/*.c)
 
 enum { U_SAME, U_MS, U_X1000 };
@@ -122,6 +196,7 @@ static struct {
     int loadouts[CLASS_TABLE_COUNT][1];
     GameModeConfig modes[MODE_COUNT];
     GameConfig game_config;
+    GameConstants constants;
     int rotation_maps[64]; // FRVR's pool, each map listed by its weight (strike_map_rotation)
     Ruleset ruleset;
 } S;
@@ -206,6 +281,17 @@ static void build_modes(const Ruleset *rules_v10, const StrikeRules *rules) {
     }
 }
 
+// v10's constants with Strike's engine config applied (v7.1.4's: crouchLean -PI*0.1), the derived
+// sizes recomputed as constants_v10.c does, and procInputs' delta floor (v7's 0.1 ms, v10's 1 ms).
+static void build_constants(const StrikeRules *rules) {
+    GameConstants *k = &S.constants;
+    *k = game_constants;
+    for (size_t i = 0; i < rules->physics_count; i++) strike_constants_apply(k, rules->physics[i].key, rules->physics[i].value);
+    k->body_height = k->player_height - k->head_scale - k->leg_height;
+    k->player_scale = (k->arm_scale * 2.0f + k->chest_width + k->arm_inset) * 0.5f;
+    if (rules->delta_floor_ms > 0.0f) k->min_delta = rules->delta_floor_ms / 1000.0f;
+}
+
 // Krunker's lobby defaults with Strike's serverConfig defaults where they differ, and Strike's cap.
 static void build_game_config(const StrikeRules *rules) {
     S.game_config = g_default_game_config;
@@ -231,7 +317,14 @@ static void build(void) {
     build_classes(v10, rules);
     build_modes(v10, rules);
     build_game_config(rules);
+    build_constants(rules);
     S.ruleset = *v10; // same key / version: Strike rides v10's wire
+    S.ruleset.constants = &S.constants;
+    S.ruleset.posed_hitboxes = rules->posed_hitboxes;
+    S.ruleset.hit_zones_live = rules->hit_zones_live;
+    S.ruleset.delta_floor_scaled = 0; // v7's procInputs: max(0.1, ...), no deltaMlt term
+    if (rules->trigger_action_limit > 0) S.ruleset.trigger_action_limit = rules->trigger_action_limit;
+    if (rules->end_timer_ms > 0) S.ruleset.end_timer = (float) rules->end_timer_ms / 1000.0f;
     S.ruleset.weapons = S.weapon_table;
     S.ruleset.weapon_count = WEAPON_TABLE_COUNT;
     S.ruleset.krunker_weapon_count = (int) rules->weapon_count; // 29
@@ -256,6 +349,11 @@ static void ensure_built(void) {
 const Ruleset *strike_ruleset(void) {
     ensure_built();
     return &S.ruleset;
+}
+
+const GameConstants *strike_constants(void) {
+    ensure_built();
+    return &S.constants;
 }
 
 const GameConfig *strike_game_config(void) {

@@ -1615,6 +1615,9 @@ int player_class_model(const Player*);              // the class config mdl (0 d
 // minus the crouch drop. Used by hitscan, melee and projectiles.
 int player_hit_is_head(const Player *target, float base_y, float adjusted_height, float hit_y);
 int player_hit_is_leg(const Player *target, float base_y, float hit_y);
+// The zones' reference box of a hit: the lag-compensated `state` box (KrunkNative), or the target's
+// live position and adjustedHeight where the ruleset says so (Ruleset.hit_zones_live: v7 / Krunker Strike).
+void player_hit_zone_base(const Player *target, const PlayerStoredState *state, float *base_y, float *adjusted_height);
 // Damage of one weapon hit after head / leg multipliers (noHeadShot, per-weapon lsMlt, no leg
 // multiplier on a headshot) and headshotOnly; `damage` is after falloff.
 float player_hit_damage(const struct Game_t*, const Weapon*, float damage, int head, int leg);

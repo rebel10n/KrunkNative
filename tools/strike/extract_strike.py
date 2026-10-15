@@ -55,11 +55,12 @@ the run (exit 1) naming it; nothing is written then.
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import sys
 
-GENERATOR_REV = 1
+GENERATOR_REV = 2
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 OUT_JSON = os.path.join(ROOT, "tools", "strike", "strike_data.json")
@@ -1450,6 +1451,270 @@ def extract_mobile(s, const_obj, const_pos):
             "keyword_counts": keys}
 
 
+# The engine config object (constants `{updateMaxPlayers:...,gravity:...,jumpVel:...}`): every key whose
+# value resolves to a number. Krunker's units (ms, per-ms speeds); gen_rules.py maps the gameplay ones
+# onto KrunkNative's GameConstants.
+def _num_of(s, v, before):
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        return v
+    if not (isinstance(v, dict) and "$expr" in v):
+        return None
+    t = v["$expr"]
+    if re.fullmatch(IDENT, t):
+        r = resolve_ident(s, t, before)
+        if r is None:
+            return None
+        return _num_of(s, r[0], before)
+    rm = re.fullmatch(r"Math\.round\((.*)\)", t)
+    if rm:
+        c = calc(rm.group(1))
+        return None if c is None else int(math.floor(c + 0.5))
+    return calc(t)
+
+
+def extract_physics(s, const_obj, const_pos):
+    """Every numeric key of the engine config object, identifiers resolved (Krunker JS units)."""
+    out = {}
+    for k, v in const_obj.items():
+        n = _num_of(s, v, const_pos)
+        if n is not None and math.isfinite(n):
+            out[k] = _norm(float(n)) if isinstance(n, float) else n
+    for k in ("gravity", "jumpVel", "playerSpeed", "crouchLean", "mouseSens", "fov", "slideTime"):
+        if k not in out:
+            fail("physics", "config key %s did not resolve to a number" % k)
+    return dict(sorted(out.items()))
+
+
+# ----------------------------------------------------------------------------- input
+
+def _rx(s, pattern, anchor, flags=0):
+    m = re.search(pattern, s, flags)
+    if not m:
+        fail(anchor, "pattern %r not found" % pattern)
+    return m
+
+
+def _bind_rows(s):
+    """CONTROLS.binds: `this.binds.X=new C("name",def,altDef)` and arrays of them."""
+    m = _rx(s, r"this\.binds=\{\},this\.binds\.primary=new ([\w$]+)\(", "input.binds")
+    ctor = re.escape(m.group(1))
+    start = m.start()
+    end = s.find("this.scrollToSwap=", start)
+    if end < 0:
+        fail("input.binds", "no scrollToSwap after the binds")
+    body = s[start:end]
+    one = r'new ' + ctor + r'\("([^"]*)",(-?[\d.e]+),(-?[\d.e]+)\)'
+    rows = []
+    for bm in re.finditer(r"this\.binds\.(\w+)=(\[|new )", body):
+        name = bm.group(1)
+        if bm.group(2) == "new ":
+            em = re.match(one, body[bm.end() - 4:])
+            if not em:
+                fail("input.binds", "bind %s unreadable" % name)
+            rows.append({"bind": name, "index": -1, "name": em.group(1), "def": int(float(em.group(2))),
+                         "alt": int(float(em.group(3)))})
+        else:
+            arr_end = skip_balanced(body, bm.end() - 1)
+            for i, em in enumerate(re.finditer(one, body[bm.end():arr_end])):
+                rows.append({"bind": name, "index": i, "name": em.group(1), "def": int(float(em.group(2))),
+                             "alt": int(float(em.group(3)))})
+    if len(rows) < 30:
+        fail("input.binds", "only %d binds" % len(rows))
+    return rows
+
+
+def _settings_rows(s, physics):
+    """The settings window rows that drive input and the view (cats gameplay / controller / mobile, and
+    the two FOV sliders): default, range and the factor set() stores (`A.tmp[key]=h*5`)."""
+    out = {}
+    for m in re.finditer(r"(?<![\w$])(\w+):\{name:\"settings\.(\w+)\.\w+\"", s):
+        key, cat = m.group(1), m.group(2)
+        if cat not in ("gameplay", "controller", "mobile") and key not in ("fov", "fpsFOV"):
+            continue
+        st = m.end(1) + 1
+        obj, end = parse_object(s, st)
+        span = s[st:end]
+        row = {"cat": obj.get("cat")}
+        val = obj.get("val")
+        if isinstance(val, dict) and "$expr" in val:
+            em = re.fullmatch(r"[\w$]+\.(\w+)\+(\d+)", val["$expr"])
+            if em and em.group(1) in physics:
+                row["val_expr"] = "config.%s+%s" % (em.group(1), em.group(2))
+                val = physics[em.group(1)] + int(em.group(2))
+            else:
+                row["val_expr"] = val["$expr"]
+                val = None
+        row["val"] = val
+        for f in ("min", "max", "step", "pro"):
+            if f in obj and not isinstance(obj[f], dict):
+                row[f] = obj[f]
+        hide = obj.get("hide")
+        if isinstance(hide, dict) and "$expr" in hide:
+            row["hidden_on"] = "desktop" if hide["$expr"].startswith("!") else "mobile"
+        elif hide is True:
+            row["hidden_on"] = "always"
+        fm = re.search(r"\.tmp\[this\.key\]=(?:h\*([\d.]+)|([\d.]+)\*h)", span)
+        if fm:
+            row["store_mlt"] = num_value(fm.group(1) or fm.group(2))
+        if obj.get("perWepG") or obj.get("perWep"):
+            row["per_weapon"] = True
+        out[key] = row
+    for k in ("sensitivityX", "aimSensitivityX", "sensitivityXMbl", "autoFireMbl", "aimAssist", "fov", "fpsFOV",
+              "sensitivityXCntrl", "deadZoneL"):
+        if k not in out:
+            fail("input.settings", "setting %s not found" % k)
+    return dict(sorted(out.items()))
+
+
+def _aim_assist(s):
+    """The mobile aim assist / auto-fire module (gameLoop: target pick, look pull, auto-fire)."""
+    m = _rx(s, r"const ([\w$]+)=([\d.]+),([\w$]+)=([\d.]+);let ([\w$]+)=\{id:null,jumping:!1\}", "input.aim_assist.box")
+    grow = {m.group(1): num_value(m.group(2)), m.group(3): num_value(m.group(4))}
+    bm = _rx(s, r"const [\w$]+=[\w$]+\.playerScale\*([\d.]+)/[\w$]+\*[\w$]+\.zoomVal,[\w$]+=[\w$]+\.playerHeight\*([\d.]+)/"
+                r"[\w$]+\*[\w$]+\.zoomVal;let ([\w$]+)=[\w$]+\*[\w$]+,([\w$]+)=[\w$]+\*[\w$]+;.{0,200}?"
+                r"\3\*=([\w$]+),\4\*=([\w$]+)", "input.aim_assist.box_use", re.S)
+    g = _rx(s, r"const ([\w$]+)=([\d.]+),([\w$]+)=([\d.]+),([\w$]+)=([\d.]+),([\w$]+)=([\d.]+),([\w$]+)=([\d.]+),"
+               r"([\w$]+)=([\d.]+),([\w$]+)=([\d.]+);let ([\w$]+)=!1,([\w$]+)=!1;", "input.aim_assist.pull")
+    vals = {g.group(i): num_value(g.group(i + 1)) for i in range(1, 15, 2)}
+
+    def role(pattern, what):
+        r = re.search(pattern, s[g.start():g.start() + 1500])
+        if not r or r.group(1) not in vals:
+            fail("input.aim_assist", "role %s not found" % what)
+        return vals[r.group(1)]
+    pull = {
+        "pull_initial": role(r":\(Math\.abs\([^)]*\)<[\w$]+&&[^,]*,[\w$]+=([\w$]+)\)", "pull_initial"),
+        "pull_locked": role(r"\?\([\w$]+=([\w$]+),[\w$]+&&", "pull_locked"),
+        "center_threshold": role(r"Math\.abs\([^)]*\)<([\w$]+)&&", "center_threshold"),
+        "locked_vertical_mlt": role(r"\.jumping&&\([\w$]+=([\w$]+)\)", "locked_vertical_mlt"),
+        "locked_look_mlt": role(r"\?([\w$]+):1\}", "locked_look_mlt"),
+        "deadband_up": role(r"playerHeight\*([\w$]+)/[\w$]+\*[\w$]+\.zoomVal,[\w$]+=", "deadband_up"),
+        "deadband_down": role(r"playerHeight\*[\w$]+/[\w$]+\*[\w$]+\.zoomVal,[\w$]+=[\w$]+\.playerHeight\*([\w$]+)/", "deadband_down"),
+    }
+    cs = _rx(s, r"canSee\([\w$]+,[\w$]+\.x,[\w$]+\.y,[\w$]+\.z,[\w$]+<(\d+)\?([\d.]+):([\d.]+)\)", "input.aim_assist.cansee")
+    ctr = _rx(s, r"\.y\+=\([\w$]+\.playerHeight-[\w$]+\.crouchVal\*[\w$]+\.crouchDst\)/(\d+)", "input.aim_assist.aim_point")
+    act = _rx(s, r"const [\w$]+=![\w$]+\.joystick\.active&&![\w$]+\.moveJoystick\.active,[\w$]+=[\w$]+\.tmp\.autoFireMbl\|\|"
+                 r"[\w$]+\.tmp\.aimAssist", "input.aim_assist.active")
+    af = _rx(s, r"this\.autoFiring=!1,this\.autoFireBuffer=(\d+)", "input.autofire.buffer")
+    semi = _rx(s, r"\.nAuto\?[\w$]+\.semiAutoWeaponShouldFire&&\([^)]*\.keys\[[^\]]*\]=([\w$]+)\.keys\[[^\]]*\]\?"
+                  r"!\1\.keys\[[^\]]*\]:1\)", "input.autofire.semi_toggle")
+    return {
+        "box": {"base_half_width": "playerScale*%s/dist*zoom" % bm.group(1),
+                "base_half_height": "playerHeight*%s/dist*zoom" % bm.group(2),
+                "player_scale_mlt": num_value(bm.group(1)), "player_height_mlt": num_value(bm.group(2)),
+                "grow_height": grow[bm.group(5)], "grow_width": grow[bm.group(6)],
+                "rule": "semi-auto (nAuto) weapon: fire when the target's projected body centre is inside the base box "
+                        "around the screen centre; any weapon: on target inside the box grown by grow_width / grow_height"},
+        "pull": dict(pull, rule=("look += aimAssistDist * innerWidth|innerHeight * factor * dt / look_mlt; factor = "
+                                 "pull_initial until |dist.x| < center_threshold with no vertical pull, then pull_locked "
+                                 "(vertical x locked_vertical_mlt unless the target is airborne); no vertical pull while the "
+                                 "target's centre is within playerHeight*deadband_up/dist above .. deadband_down below the "
+                                 "screen centre; while locked every look input is x locked_look_mlt")),
+        "can_see_pad_near": num_value(cs.group(2)), "can_see_pad_far": num_value(cs.group(3)),
+        "can_see_near_dist": num_value(cs.group(1)),
+        "aim_point": "y + (playerHeight - crouchVal*crouchDst) / %s" % ctr.group(1),
+        "active_rule": "mobile, (autoFireMbl || aimAssist), and a joystick held or a target already tracked"
+                       if act else None,
+        "autofire": {"buffer_ms": int(af.group(1)), "semi_auto": "shoot key toggles every frame while the base box holds",
+                     "auto": "shoot key held while on target; released buffer_ms after the last on-target frame"},
+    }
+
+
+def _touch_controls(s):
+    """FRVR's touch layout (the control table the mobile HUD renders, 640x360 base scaled by height)."""
+    m = _rx(s, r"(?<![\w$])([\w$]{1,40})=\{crouch:\{", "input.touch")
+    obj, end = parse_object(s, m.end() - len("crouch:{") - 1)
+    rows = []
+    for key, c in obj.items():
+        row = {"id": key}
+        t = c.get("type")
+        row["type"] = t["$expr"].split(".")[-1] if isinstance(t, dict) and "$expr" in t else t
+        for f in ("icon", "iconActive", "action", "size", "width", "height", "class", "text"):
+            if f in c and not isinstance(c[f], dict):
+                row[f] = c[f]
+        row["pos"] = c.get("pos")
+        if isinstance(c.get("textPos"), dict):
+            row["textPos"] = c["textPos"]
+        row["disabled"] = bool(c.get("disabled"))
+        if c.get("interact") is False:
+            row["interact"] = False
+        rows.append(row)
+    base = _rx(s, r"[,\s]([\w$]+)=(\d+),([\w$]+)=(\d+);function [\w$]+\([\w$]+,[\w$]+,[\w$]+,[\w$]+\)\{switch\([\w$]+\.type\)",
+               "input.touch.base")
+    zone = _rx(s, r"[\w$]+==0\?[\w$]+\(\"\.joystick-zones\",\[[\w$]+\([\w$]+,\{size:(\d+),events:", "input.touch.move_size")
+    tap = _rx(s, r"[\w$]+=0,([\w$]+)<=(\d+)&&[\w$]+\.jump\.down\(\)", "input.touch.tap_jump")
+    dirs = _rx(s, r"[\w$]+>=(\d+)&&[\w$]+<=(\d+)\|\|[\w$]+>=(\d+)&&[\w$]+<=(\d+)\?\(_e\(null,[\w$]+\.binds\.move\[0\]", "input.touch.dirs")
+    side = re.search(r"[\w$]+>=(\d+)&&[\w$]+<=(\d+)\?\(_e\(null,[\w$]+\.binds\.move\[2\]", s)
+    return {"controls": rows, "base_width": int(base.group(2)), "base_height": int(base.group(4)),
+            "move_joystick": {"size": int(zone.group(1)), "mode": "dynamic", "zone": "left half"},
+            "aim_zone": {"zone": "right half", "drag": "look (mblInput)", "tap_jump_max_travel_px": int(tap.group(2))},
+            "aim_joystick": {"down": "aim, and shoot unless auto-fire is on", "drag": "look while aiming"},
+            "move_angles": {"no_forward_back": [[int(dirs.group(3)), int(dirs.group(4))], [int(dirs.group(1)), int(dirs.group(2))]],
+                            "no_strafe": [int(side.group(1)), int(side.group(2))] if side else None,
+                            "angle": "|nipple degree - 180|"}}
+
+
+def extract_combat(s):
+    """How a shot finds a player and its zone: Strike keeps Krunker v7's padded AABB (lineInRect over
+    x/z +-(scale + hitboxPadW), y .. ah + hitboxPadH; hitboxPadW = config.hitBoxPad + class hbS) and v7's
+    zones measured from the target's live position. v10's posed hit boxes are absent."""
+    posed = {k: len(re.findall(k, s)) for k in ("complexHitboxes", "hurtboxScale", "nearmiss", "torsoshot")}
+    pad = _rx(s, r"Object\.defineProperty\(this,\"hitboxPadW\",\{get\(\)\{return [\w$]+\.config\.hitBoxPad\+\(this\.config&&this\.config\.hbS\|\|0\)\}\}\)",
+              "combat.hitboxPadW")
+    aabb = len(re.findall(r"lineInRect\([^;]{0,200}?\.hitboxPadW,[^;]{0,200}?\.hitboxPadH\)", s))
+    zone = _rx(s, r"([\w$]+)=([\w$]+)\.obj\.y\+\2\.obj\.adjustedHeight-([\w$]+);([\w$]+)=\1<[\w$]+\.headScale\*\2\.obj\.headMlt,"
+                  r".{0,160}?\.hsMlt\|\|([\d.]+).{0,120}?\2\.obj\.y\+[\w$]+\.legHeight-[\w$]+\.crouchDst\*\2\.obj\.crouchVal>\3"
+                  r".{0,60}?\.lsMlt\|\|([\d.]+)", "combat.zones", re.S)
+    grav = _rx(s, r"\.velocity\.y-=[\w$]+\*\([\w$]+\.gravity\*\([\w$]+\.config\?[\w$]+\.config\.gravMlt:1\)\*"
+                  r"\([\w$]+\.mode\.gravMlt!=null\?[\w$]+\.mode\.gravMlt:1\)\)", "combat.gravity")
+    df = _rx(s, r"var ([\w$]+)=([\d.]+),[\w$]+,[\w$]+=\[\{name:\"any_interaction\"", "combat.delta_floor")
+    if not re.search(r"this\.procInputs=function\([^)]*\)\{[^;]{0,80};?[^;]{0,80}var [\w$]+=Math\.max\(" + re.escape(df.group(1)) +
+                     r",Math\.min\([\w$]+\[1\],[\w$]+\.dltMx\)\)", s[df.end():df.end() + 3000]):
+        fail("combat.delta_floor", "procInputs does not floor the delta with %s" % df.group(1))
+    if any(posed.values()) or not aabb:
+        fail("combat", "expected the v7 AABB hit test only: posed markers %r, aabb sites %d" % (posed, aabb))
+    return {"hit_test": "aabb", "aabb_sites": aabb, "posed_markers": posed,
+            "hitbox_pad": "config.hitBoxPad + class hbS (width) / hbH (height)" if pad else None,
+            "zones": {"from": "live target (d.obj.y / adjustedHeight), not the lag-compensated box",
+                      "head": "top - hitY < headScale * headMlt", "leg": "hitY < y + legHeight - crouchDst * crouchVal",
+                      "head_mlt_default": num_value(zone.group(5)), "leg_mlt_default": num_value(zone.group(6))},
+            "gravity": "gravity * config.gravMlt * mode.gravMlt (no weapon gravMlt term)" if grav else None,
+            "procinputs_delta_floor_ms": num_value(df.group(2))}
+
+
+def extract_input(s, physics):
+    """Inputs and look: default binds, the controls object (sensitivity containers, pitch limit, flick
+    clamp, scroll-to-swap), the input settings rows, the mobile aim assist / auto-fire and the touch layout."""
+    cm = _rx(s, r"this\.cntrlInput=\{", "input.controls")
+    cntrl, _ = parse_object(s, cm.end() - 1)
+    mm = _rx(s, r"this\.mblInput=\{", "input.controls.mbl")
+    mbl, _ = parse_object(s, mm.end() - 1)
+    km = _rx(s, r"this\.kbmInput=\{", "input.controls.kbm")
+    kbm, _ = parse_object(s, km.end() - 1)
+    pm = _rx(s, r"this\.xDr=0,this\.yDr=0;var ([\w$]+)=([^,;]+),", "input.pitch")
+    if not re.search(r"Math\.max\(-" + re.escape(pm.group(1)) + r",Math\.min\(" + re.escape(pm.group(1)) + r",", s[pm.end():pm.end() + 6000]):
+        fail("input.pitch", "pitch clamp not found")
+    pitch = calc(pm.group(2).replace("Math.PI", "3.141592653589793"))
+    fc = _rx(s, r"this\.mouseSkipFix=(!?[01]),this\.flickClamp=(\d+)", "input.flick")
+    scroll_true = len(re.findall(r"scrollToSwap=!0", s))
+    sens = _rx(s, r"=[\w$]+\.mouseSens\*[\w$]+\*\([\w$]+\.target\?[\w$]+\.camChaseSen:1\)\*\([\w$]+\.camera\.fov/[\w$]+\.fov\)\*([\w$]+)\(\)",
+               "input.look_formula")
+    return {
+        "binds": _bind_rows(s),
+        "scroll_to_swap": scroll_true > 0,
+        "controls": {"cntrlInput": cntrl, "mblInput": mbl, "kbmInput": kbm,
+                     "pitch_limit": pitch, "pitch_limit_expr": pm.group(2),
+                     "mouse_skip_fix": fc.group(1) == "!0", "flick_clamp": int(fc.group(2)),
+                     "look_formula": "config.mouseSens * sens * (camera.fov / fov) * %s()  (1, or aim assist's "
+                                     "locked_look_mlt while locked); pitch clamped to +-pitch_limit" % sens.group(1)},
+        "settings": _settings_rows(s, physics),
+        "aim_assist": _aim_assist(s),
+        "touch": _touch_controls(s),
+    }
+
+
 def extract_ui(s, css_text, entry_html, archive):
     """UI of the primary build; `archive` = {tag: (css_text|None, entry_html|None)} older builds."""
     ui = {"screens": extract_screens(s)}
@@ -1625,6 +1890,9 @@ def extract(build, live):
     maps = extract_maps(s, build, live, files)
     cdn = extract_cdn(s, new["weapons"], new["classes"], new["items"]["item_types"])
     constants, tables, modes = new["constants"], new["tables"], new["modes"]
+    physics = extract_physics(s, new["const_obj"], new["const_pos"])
+    inputs = extract_input(s, physics)
+    combat = extract_combat(s)
 
     server_cfg = {r["varN"]: r for r in tables["serverConfig"] if isinstance(r, dict) and "varN" in r}
     timing = {k: {f: server_cfg[k].get(f) for f in ("name", "def", "defC", "min", "max", "step") if f in server_cfg[k]}
@@ -1668,6 +1936,9 @@ def extract(build, live):
         "config": {"constants": constants, "player_cap": player_cap, "timing": timing,
                    "serverConfig": tables["serverConfig"], "classConfig": tables["classConfig"],
                    "weaponConfig": tables["weaponConfig"], "serverPresets": tables["serverPresets"]},
+        "physics": physics,
+        "combat": combat,
+        "input": inputs,
         "i18n": new["i18n"],
         "ui": ui,
         "cdn": cdn,

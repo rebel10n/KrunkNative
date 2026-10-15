@@ -33,6 +33,9 @@
 #include <app_mode.h>   // app_reload: the Reload Game / Reconnect keys on the web
 #include <game_reload.h> // the Reload Game key natively
 #include <object_manager.h> // the Object Manager's Undo / Remove binds
+#include <flavor.h>       // Krunker Strike: FRVR's default binds (strike_rules.h)
+#include <strike_rules.h>
+#include <strike_assist_client.h> // Krunker Strike's mobile aim assist / auto-fire
 #include <GLFW/glfw3.h>
 #include <math.h>
 #include <stdio.h>
@@ -584,10 +587,36 @@ static int v7_index_by_name(const char *name, int *alt) {
     return -1;
 }
 
+// KrunkNative's own binds (not Krunker ControlBinds): every flavor keeps their defaults.
+static int bind_kn_only(const V7Bind *b) {
+    static const char *const kn[] = {"gameReload", "reconnect", "objectManager", "omUndo", "omRemove", "omRotate",
+                                     "omPhysSnap", "omSnapDown", "omSnapUp", "thirdPerson", "omProps"};
+    for (size_t i = 0; i < sizeof(kn) / sizeof(kn[0]); i++) {
+        if (!strcmp(b->bind, kn[i])) return 1;
+    }
+    return 0;
+}
+
+// ControlBind def / altDef of V7_BINDS[i]. Krunker Strike ships its own table (strike_rules.h binds,
+// FRVR 1.37.2's CONTROLS.binds): aim's alternate is Shift (16) where v7 / v10 have ']' (221), and the
+// binds Strike does not define (swap, reset, resetLast, kickVote, kpd*, taunts, markPosition, the v10
+// sandbox extras) are unbound by default.
+static int bind_def(const int i, const int alt) {
+    const V7Bind *b = &V7_BINDS[i];
+    const StrikeRules *r = flavor_current()->rules;
+    if (r && !bind_kn_only(b)) {
+        const StrikeBind *sb = strike_bind(r, b->bind, b->index);
+        return sb ? (alt ? sb->alt : sb->def) : KEY_UNBOUND;
+    }
+    return alt ? b->alt_def : b->def;
+}
+
 // CONTROLS.checkScroll() (v10.0.2): scrollToSwap is off while any bind uses the wheel. v7 also
 // counted the middle button; v10 binds it by default (Ping Position) and only checks the wheel.
 static void check_for_scroll(void) {
-    g_ctl.scroll_bound = 0;
+    // Krunker Strike: checkScroll always leaves scrollToSwap false (the wheel never swaps weapons)
+    const StrikeRules *r = flavor_current()->rules;
+    g_ctl.scroll_bound = r && !r->scroll_to_swap;
     for (int i = 0; i < V7_BIND_COUNT; i++) {
         if (g_ctl.val[i] == KEY_SCROLL || g_ctl.alt[i] == KEY_SCROLL) g_ctl.scroll_bound = 1;
     }
@@ -638,9 +667,9 @@ void ui_controls_load(void) {
     char key[64];
     for (int i = 0; i < V7_BIND_COUNT; i++) {
         bind_storage_key(i, 0, key, sizeof(key));
-        g_ctl.val[i] = saved_int(key, V7_BINDS[i].def);
+        g_ctl.val[i] = saved_int(key, bind_def(i, 0));
         bind_storage_key(i, 1, key, sizeof(key));
-        g_ctl.alt[i] = saved_int(key, V7_BINDS[i].alt_def);
+        g_ctl.alt[i] = saved_int(key, bind_def(i, 1));
     }
     load_sets();
     sync_ids();
@@ -691,8 +720,8 @@ void ui_controls_reset(void) {
             bind_storage_key(i, alt, key, sizeof(key));
             html_storage_set(key, NULL);
         }
-        g_ctl.val[i] = V7_BINDS[i].def;
-        g_ctl.alt[i] = V7_BINDS[i].alt_def;
+        g_ctl.val[i] = bind_def(i, 0);
+        g_ctl.alt[i] = bind_def(i, 1);
     }
     for (int i = 0; i < TOGGLE_COUNT; i++) {
         snprintf(key, sizeof(key), "cont_%d_set", TOGGLE_FIRST + i);
@@ -722,15 +751,15 @@ cJSON *ui_controls_export_json(void) {
         if (b->index < 0) {
             char alt_name[64];
             snprintf(alt_name, sizeof(alt_name), "%s_alt", b->name);
-            if (g_ctl.val[i] != b->def) cJSON_AddNumberToObject(out, b->name, g_ctl.val[i]);
-            if (g_ctl.alt[i] != b->alt_def) cJSON_AddNumberToObject(out, alt_name, g_ctl.alt[i]);
+            if (g_ctl.val[i] != bind_def(i, 0)) cJSON_AddNumberToObject(out, b->name, g_ctl.val[i]);
+            if (g_ctl.alt[i] != bind_def(i, 1)) cJSON_AddNumberToObject(out, alt_name, g_ctl.alt[i]);
             continue;
         }
         if (b->index) continue; // each array once, from its element 0
         for (int alt = 0; alt < 2; alt++) {
             int last = -1, n = 0;
             for (int k = i; k < V7_BIND_COUNT && !strcmp(V7_BINDS[k].bind, b->bind); k++, n++) {
-                if ((alt ? g_ctl.alt[k] != V7_BINDS[k].alt_def : g_ctl.val[k] != V7_BINDS[k].def)) last = n;
+                if ((alt ? g_ctl.alt[k] : g_ctl.val[k]) != bind_def(k, alt)) last = n;
             }
             if (last < 0) continue;
             char name[64];
@@ -738,7 +767,7 @@ cJSON *ui_controls_export_json(void) {
             cJSON *arr = cJSON_AddArrayToObject(out, name);
             for (int k = 0; k <= last; k++) {
                 const int v = alt ? g_ctl.alt[i + k] : g_ctl.val[i + k];
-                const int d = alt ? V7_BINDS[i + k].alt_def : V7_BINDS[i + k].def;
+                const int d = bind_def(i + k, alt);
                 cJSON_AddItemToArray(arr, v != d ? cJSON_CreateNumber(v) : cJSON_CreateNull());
             }
         }
@@ -999,7 +1028,7 @@ void ui_controls_reset_bind(const char *bind, const int alt, const int index) {
     menu_show_window(7, 1);
     g_ctl.changer = -1;
     if (i < 0) return;
-    v7_update(i, !!alt, alt ? V7_BINDS[i].alt_def : V7_BINDS[i].def);
+    v7_update(i, !!alt, bind_def(i, !!alt));
     char name[32];
     set_cont_text(i, alt, ui_controls_key_name(g_ctl.val[i], name, sizeof(name))); // v7 writes the key's val in both cells
 }
@@ -1726,12 +1755,23 @@ void ui_controls_fill_look(Client *client, Input *input, const float dx, const f
     const float sens_x = g_ctl.input_cntrl ? (aiming ? c->aim_x : c->sens_x) : (aiming ? s->aim_sensitivity_x : s->sensitivity_x);
     const float sens_y = g_ctl.input_cntrl ? (aiming ? c->aim_y : c->sens_y) : (aiming ? s->aim_sensitivity_y : s->sensitivity_y);
     const int invert = g_ctl.input_cntrl ? c->invert : s->invert_y;
-    input->x_dir -= look_y * base * sens_y * (invert ? -1.0f : 1.0f);
-    input->y_dir -= look_x * base * sens_x;
+    // Krunker Strike on a phone (strike_assist_client.c): the aim assist's pull joins the touch look and
+    // fw() (0.75 while locked on) scales every look input; zeros and 1 otherwise
+    float pull_x, pull_y, assist_mlt;
+    strike_assist_client_look(&pull_x, &pull_y, &assist_mlt);
+    input->x_dir -= look_y * base * sens_y * (invert ? -1.0f : 1.0f) * assist_mlt;
+    input->y_dir -= look_x * base * sens_x * assist_mlt;
     float touch_x, touch_y; // fakeMouse(2, dx, dy, 0, "mblInput"): mobile sensitivities (ui_mobile.c)
     if (ui_mobile_take_look(aiming, &touch_x, &touch_y)) {
-        input->x_dir -= touch_y * base;
-        input->y_dir -= touch_x * base;
+        input->x_dir -= touch_y * base * assist_mlt;
+        input->y_dir -= touch_x * base * assist_mlt;
+    }
+    if (pull_x != 0.0f || pull_y != 0.0f) { // C += dist.x * innerWidth * GE / fw, scaled by mblInput like a drag
+        float msx, msy;
+        int minv;
+        ui_mobile_look_sens(aiming, &msx, &msy, &minv);
+        input->x_dir -= pull_y * msy * (minv ? -1.0f : 1.0f) * base * assist_mlt;
+        input->y_dir -= pull_x * msx * base * assist_mlt;
     }
 }
 
@@ -1756,6 +1796,9 @@ void ui_controls_fill_input(Client *client, Input *input, const float dx, const 
     input->crouch = ui_controls_down(UI_CONTROL_CROUCH);
     input->reload = ui_controls_down(UI_CONTROL_RELOAD);
     input->shoot = g_ctl.shoot || ui_controls_down(UI_CONTROL_SHOOT);
+    // Krunker Strike on a phone: auto-fire drives the shoot key while it is on a target (strike_assist.h)
+    const int auto_shoot = strike_assist_client_tick(client);
+    if (auto_shoot >= 0) input->shoot = (unsigned char) auto_shoot;
     input->scope = g_ctl.aim || ui_controls_down(UI_CONTROL_AIM);
     input->swap = input_swap(client ? client->me : NULL);
     input->select_slot = (unsigned char) g_ctl.pending_slot; // Object Manager slot pick (number keys)

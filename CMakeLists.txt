@@ -782,6 +782,14 @@ else ()
         target_link_libraries(sandbox_test PRIVATE ws2_32) # shared/src/net.c
     endif ()
 
+    # strike_sandbox_test: Krunker Strike in the offline sandbox, base vs FLAVOR_STRIKE (class pick, movement,
+    # Assault Rifle damage / headshot / recoil, the hit test) against FRVR 1.37.2's numbers
+    add_executable(strike_sandbox_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/strike_sandbox_test.c)
+    target_link_libraries(strike_sandbox_test PRIVATE kn_server_core m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(strike_sandbox_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+
     # social_test (player-viewer WP-E part 2b): v7 chat / voice channels, multi-spray, taunts over the sandbox
     add_executable(social_test ${SHARED_HEADERS} ${SHARED_SOURCES} ${SERVER_CORE_STANDALONE_SOURCES} server/tests/social_test.c)
     target_link_libraries(social_test PRIVATE kn_server_core m)
@@ -922,6 +930,17 @@ else ()
         target_link_libraries(editor_export_test PRIVATE ws2_32)
     endif ()
     add_test(NAME editor_export_test COMMAND editor_export_test ${CMAKE_SOURCE_DIR})
+
+    # strike_assist_test: Krunker Strike's mobile aim assist / auto-fire core (client/src/strike_assist.c)
+    # with FRVR 1.37.2's constants (strike_rules.h)
+    add_executable(strike_assist_test ${SHARED_HEADERS} ${SHARED_SOURCES} client/src/strike_assist.c client/include/strike_assist.h
+                   client/tests/strike_assist_test.c)
+    target_include_directories(strike_assist_test PRIVATE client/include)
+    target_link_libraries(strike_assist_test PRIVATE m)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        target_link_libraries(strike_assist_test PRIVATE ws2_32) # shared/src/net.c
+    endif ()
+    add_test(NAME strike_assist_test COMMAND strike_assist_test)
 
     # krunker_link_test (client/include/krunker_net.h, KN_KRUNKER_OFFICIAL): the official-Krunker
     # packet translation (client/src/net/krunker_link.c) over the codec, no sockets

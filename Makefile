@@ -221,6 +221,8 @@ test: build ## Run the shared movement/collision test (+ the knet transport, off
 	./$(DEBUG_DIR)/v10_gameplay_test
 	$(PYTHON) -I tools/strike/gen_rules.py --check
 	./$(DEBUG_DIR)/strike_rules_test
+	./$(DEBUG_DIR)/strike_assist_test
+	./$(DEBUG_DIR)/strike_sandbox_test
 	./$(DEBUG_DIR)/flavor_gameplay_test
 	./$(DEBUG_DIR)/strike_maps_test
 	./$(DEBUG_DIR)/projectiles_render_test

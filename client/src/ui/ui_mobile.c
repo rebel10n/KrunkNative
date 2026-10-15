@@ -673,6 +673,17 @@ void ui_mobile_tick(Client *client) {
     }
 }
 
+void ui_mobile_look_sens(const int aiming, float *sx, float *sy, int *invert) {
+    // mblInput: sensX = sensitivityXMbl * 4 (aimX with the right button), invert = invertYMbl
+    *sx = 4.0f * setting_number(aiming ? "aimSensitivityXMbl" : "sensitivityXMbl", 1.0f);
+    *sy = 4.0f * setting_number(aiming ? "aimSensitivityYMbl" : "sensitivityYMbl", 1.0f);
+    *invert = setting_truthy("invertYMbl", 0);
+}
+
+int ui_mobile_touch_active(void) {
+    return g_mb.stick_active || g_mb.touch_count > 0;
+}
+
 void ui_mobile_add_look(Client *client, const float dx, const float dy) {
     if (client) g_mb.client = client;
     look(dx, dy);
@@ -680,10 +691,9 @@ void ui_mobile_add_look(Client *client, const float dx, const float dy) {
 
 int ui_mobile_take_look(const int aiming, float *dx, float *dy) {
     if (!g_mb.look_pending) return 0;
-    // mblInput: sensX = sensitivityXMbl * 4 (aimX with the right button), invert = invertYMbl
-    const float sx = 4.0f * setting_number(aiming ? "aimSensitivityXMbl" : "sensitivityXMbl", 1.0f);
-    const float sy = 4.0f * setting_number(aiming ? "aimSensitivityYMbl" : "sensitivityYMbl", 1.0f);
-    const int invert = setting_truthy("invertYMbl", 0);
+    float sx, sy;
+    int invert;
+    ui_mobile_look_sens(aiming, &sx, &sy, &invert);
     *dx = g_mb.look_dx * sx;
     *dy = g_mb.look_dy * sy * (invert ? -1.0f : 1.0f);
     g_mb.look_dx = g_mb.look_dy = 0.0f;

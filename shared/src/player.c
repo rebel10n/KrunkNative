@@ -1482,9 +1482,12 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
 
     // v10: Math.max(1 * config.deltaMlt, Math.min(input[1], dltMx)); NaN, 0 and negative deltas run as
     // deltaMlt ms (v10:169582; v7.1.4: 0.1 ms, v3.1.1: 0). input[1] already carries deltaMlt (main.c).
+    // Krunker Strike keeps v7's unscaled 0.1 ms floor (Ruleset.delta_floor_scaled, strike_rules.h).
+    const Ruleset *rules = game_ruleset(player->game);
+    const GameConstants *k = game_constants_of(player->game);
     const float delta_mlt = player->game && player->game->config.delta_mlt > 0.0f ? player->game->config.delta_mlt : 1.0f;
-    const float min_delta = game_constants.min_delta * delta_mlt;
-    const float delta = input->delta > min_delta ? MIN(input->delta, game_constants.max_delta) : min_delta;
+    const float min_delta = k->min_delta * (rules->delta_floor_scaled ? delta_mlt : 1.0f);
+    const float delta = input->delta > min_delta ? MIN(input->delta, k->max_delta) : min_delta;
     // config.movDirs[input[4]] + class movDrP * PI
     const float move_dir = -(float) M_PI / 2.0f + (float) M_PI / 4.0f * (float) input->move_dir + knobs->move_dir_offset * (float) M_PI;
 
@@ -2318,6 +2321,18 @@ static const PlayerStoredState *player_state_entry(const Player *player, const i
 
 // v7.1.4 adjustedHeight (players.updateHeight): the height with the head band scaled by headMlt,
 // the top of the hit box (ah in stateHistory).
+static float combat_adjusted_height(const Player *player);
+
+void player_hit_zone_base(const Player *target, const PlayerStoredState *state, float *base_y, float *adjusted_height) {
+    if (game_ruleset(target->game)->hit_zones_live || !state) { // v7 / Strike: d.obj.y + d.obj.adjustedHeight
+        *base_y = target->position.y;
+        *adjusted_height = combat_adjusted_height(target);
+        return;
+    }
+    *base_y = state->position.y;
+    *adjusted_height = state->adjusted_height;
+}
+
 static float combat_adjusted_height(const Player *player) {
     // headMlt: the spawn value, or the Bighead FFA one (mode.head_mlt, WP-D); only one is ever set
     const float head_mlt = (player->head_mlt > 0.0f ? player->head_mlt : 1.0f) * mode_head_mlt(player);
@@ -3146,9 +3161,11 @@ static void combat_fire_ray(Player *player, const int ray, const float pitch, co
             // KN bug fixed: noHeadShot was ignored (Auto Pistol, 5.2). v7 bug fixed: v7 measures the
             // zones from the target's live position, not the rewound box the ray hit.
             // v10.0.2: the box's hitType instead (headshot / legshot; arms are torsoshot, v10:172979)
-            const int head = hit->zone ? hit->zone - 1 == HIT_KIND_HEAD
-                                       : player_hit_is_head(victim, hit->state.position.y, hit->state.adjusted_height, hit_y);
-            const int leg = hit->zone ? hit->zone - 1 == HIT_KIND_LEG : player_hit_is_leg(victim, hit->state.position.y, hit_y);
+            // Krunker Strike (Ruleset.hit_zones_live): v7's zones on the live target, not the rewound box
+            float zone_y, zone_ah;
+            player_hit_zone_base(victim, &hit->state, &zone_y, &zone_ah);
+            const int head = hit->zone ? hit->zone - 1 == HIT_KIND_HEAD : player_hit_is_head(victim, zone_y, zone_ah, hit_y);
+            const int leg = hit->zone ? hit->zone - 1 == HIT_KIND_LEG : player_hit_is_leg(victim, zone_y, hit_y);
             dealt = player_hit_damage(game, weapon, dealt, head, leg);
 
             // effectOnHit: floor(charge * 10) stacks (no stock hitscan weapon has one)

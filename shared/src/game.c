@@ -515,7 +515,8 @@ void game_send_end_late(Game *game, const int uid) {
 void game_end_round(Game *game) {
     if (game->end_timer > 0.0f) return;
 
-    game->end_timer = GAME_END_TIMER;
+    const float end_timer = game_ruleset(game)->end_timer; // config.endTimer (Krunker Strike: 30 s)
+    game->end_timer = end_timer > 0.0f ? end_timer : GAME_END_TIMER;
     game->round_timer = 0.0f;
     game->round_seconds_sent = -1;
     game->nuke_timer = 0.0f;

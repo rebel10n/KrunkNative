@@ -12,7 +12,9 @@
 #include <modes.h>
 #include <ruleset.h>
 #include <strike_rules.h>
+#include <hitboxes.h>
 #include <cJSON.h>
+#include <stddef.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -251,6 +253,104 @@ static void check_config(const cJSON *data) {
           "streaks / team select");
 }
 
+// physics: every engine config key strike_data.c carries lands in GameConstants, and Strike's constants
+// equal v10's except where Strike's config differs (crouchLean: v7's -PI*0.1, v10 0) and procInputs'
+// delta floor (0.1 ms): a unit slip in strike_constants_apply would show up as a difference here.
+static void check_physics(const cJSON *data) {
+    printf("physics...\n");
+    const StrikeRules *r = strike_rules();
+    const cJSON *ph = get(data, "physics");
+    CHECK(r->physics_count >= 60, "%zu physics keys", r->physics_count);
+    for (size_t i = 0; i < r->physics_count; i++) {
+        GameConstants scratch = game_constants;
+        CHECK(strike_constants_apply(&scratch, r->physics[i].key, r->physics[i].value), "physics key %s has a field", r->physics[i].key);
+        CHECK(near(r->physics[i].value, num(ph, r->physics[i].key, NAN)), "physics %s = %g (json %g)", r->physics[i].key,
+              r->physics[i].value, num(ph, r->physics[i].key, NAN));
+    }
+    const GameConstants *k = strike_constants(), *v10 = &game_constants;
+    CHECK(strike_ruleset()->constants == k && ruleset_v10()->constants == v10, "Ruleset.constants");
+    CHECK(near(k->crouch_lean, -M_PI * 0.1) && v10->crouch_lean == 0.0f, "crouchLean: Strike %g (v7 -PI*0.1), v10 %g", (double) k->crouch_lean,
+          (double) v10->crouch_lean);
+    CHECK(near(k->min_delta, 0.0001) && near(v10->min_delta, 0.001), "procInputs delta floor: Strike %g s, v10 %g s", (double) k->min_delta,
+          (double) v10->min_delta);
+    CHECK(k->billboard_count == 4 && v10->billboard_count == 6, "billboardCnt Strike %d, v10 %d", k->billboard_count, v10->billboard_count);
+    CHECK(!strike_ruleset()->delta_floor_scaled && ruleset_v10()->delta_floor_scaled, "delta floor x deltaMlt: v10 only");
+    // every other float constant: identical to v10 (the movement numbers of doc/strike/parity.md)
+    const float *a = (const float *) ((const char *) k + offsetof(GameConstants, mouse_sensitivity));
+    const float *b = (const float *) ((const char *) v10 + offsetof(GameConstants, mouse_sensitivity));
+    const size_t n = (sizeof(GameConstants) - offsetof(GameConstants, mouse_sensitivity)) / sizeof(float);
+    int differ = 0;
+    for (size_t i = 0; i < n; i++) {
+        const size_t off = offsetof(GameConstants, mouse_sensitivity) + i * sizeof(float);
+        if (off == offsetof(GameConstants, crouch_lean) || off == offsetof(GameConstants, min_delta)) continue;
+        if (!near(a[i], b[i])) {
+            differ++;
+            printf("  constant at offset %zu: Strike %g, v10 %g\n", off, (double) a[i], (double) b[i]);
+        }
+    }
+    CHECK(differ == 0, "%d other constants differ from v10", differ);
+    CHECK(near(k->jump_velocity, 0.072) && near(k->gravity, 0.15) && near(k->player_speed, 0.42) && near(k->air_speed, 0.047) &&
+              near(k->slide_time, 0.35) && near(k->crouch_speed, 7.0) && near(k->max_delta, 0.033),
+          "jumpVel / gravity / playerSpeed / airSpeed / slideTime / crouchSpd / dltMx");
+    CHECK(strike_ruleset()->trigger_action_limit == 5 && ruleset_v10()->trigger_action_limit == 8, "triggerActionLimit 5 (v10 8)");
+    CHECK(strike_ruleset()->end_timer == 30.0f && ruleset_v10()->end_timer == 25.0f && near(r->end_timer_ms, num(ph, "endTimer", NAN)),
+          "endTimer: Strike 30 s, v10 25 s");
+}
+
+static void check_combat(const cJSON *data) {
+    printf("combat...\n");
+    const cJSON *cb = get(data, "combat");
+    CHECK(str(cb, "hit_test") && !strcmp(str(cb, "hit_test"), "aabb"), "hit test aabb");
+    CHECK(!strike_ruleset()->posed_hitboxes && strike_ruleset()->hit_zones_live, "Strike: AABB, zones on the live target");
+    CHECK(ruleset_v10()->posed_hitboxes && !ruleset_v10()->hit_zones_live, "v10: posed hit boxes, zones on the rewound box");
+    Game game = {0};
+    game.rules = strike_ruleset();
+    CHECK(!hitboxes_active(&game), "hitboxes_active: off under Strike");
+    game.rules = ruleset_v10();
+    CHECK(hitboxes_active(&game), "hitboxes_active: on under v10");
+    CHECK(near(strike_rules()->delta_floor_ms, num(cb, "procinputs_delta_floor_ms", NAN)), "delta floor %g ms", (double) strike_rules()->delta_floor_ms);
+}
+
+static void check_input(const cJSON *data) {
+    printf("input...\n");
+    const StrikeRules *r = strike_rules();
+    const cJSON *in = get(data, "input");
+    const cJSON *binds = get(in, "binds");
+    CHECK((size_t) cJSON_GetArraySize(binds) == r->bind_count && r->bind_count == 56, "%zu binds", r->bind_count);
+    const cJSON *b;
+    cJSON_ArrayForEach(b, binds) {
+        const StrikeBind *sb = strike_bind(NULL, str(b, "bind"), (int) num(b, "index", -9));
+        CHECK(sb && sb->def == (int) num(b, "def", -9) && sb->alt == (int) num(b, "alt", -9) && !strcmp(sb->name, str(b, "name")),
+              "bind %s[%d]", str(b, "bind"), (int) num(b, "index", -9));
+    }
+    const StrikeBind *aim = strike_bind(NULL, "aim", -1), *shoot = strike_bind(NULL, "shoot", -1);
+    CHECK(aim && aim->def == 10003 && aim->alt == 16, "aim: right mouse, alternate Shift (16; v10 ']' 221)");
+    CHECK(shoot && shoot->def == 10001 && shoot->alt == 220, "shoot: left mouse / '\\'");
+    CHECK(!strike_bind(NULL, "swap", -1) && !strike_bind(NULL, "reset", -1) && !strike_bind(NULL, "markPosition", -1), "no swap / reset / ping binds");
+    CHECK(!r->scroll_to_swap && r->scroll_to_swap == (int) num(in, "scroll_to_swap", -1), "the wheel never swaps");
+    CHECK(near(r->pitch_limit, M_PI / 2.0) && r->flick_clamp == 500, "pitch +-PI/2, flick clamp 500");
+    const cJSON *settings = get(in, "settings");
+    for (size_t i = 0; i < r->setting_count; i++) {
+        const StrikeSetting *st = &r->settings[i];
+        const cJSON *row = get(settings, st->key);
+        CHECK(row && near(st->val, num(row, "val", NAN)) && near(st->store_mlt, num(row, "store_mlt", 1)), "setting %s = %g", st->key, st->val);
+    }
+    CHECK(near(strike_setting(NULL, "fov")->val, 70) && near(strike_setting(NULL, "fpsFOV")->val, 65), "fov 70 / fpsFOV 65 (config.fov 50 + 20 / 15)");
+    CHECK(near(strike_setting(NULL, "sensitivityXMbl")->val, 1.4) && near(strike_setting(NULL, "sensitivityXMbl")->store_mlt, 4),
+          "mobile look 1.4 x 4");
+    CHECK(strike_setting(NULL, "autoFireMbl")->val == 1 && strike_setting(NULL, "aimAssist")->val == 1, "auto-fire / aim assist on");
+    const StrikeAimAssist *a = &r->aim_assist;
+    CHECK(a->pull_initial == 2.0f && a->pull_locked == 3.0f && near(a->center_threshold, 0.005) && near(a->locked_look_mlt, 0.75) &&
+              near(a->locked_vertical_mlt, 0.3) && near(a->deadband_up, 0.4) && near(a->deadband_down, 0.3) && near(a->grow_width, 1.5) &&
+              near(a->grow_height, 1.1) && a->autofire_buffer_ms == 260 && a->aim_point_div == 2.0f,
+          "aim assist constants");
+    const StrikeTouch *t = &r->touch;
+    CHECK(t->base_width == 640 && t->base_height == 360 && t->move_joystick_size == 106 && t->tap_jump_max_travel == 9 &&
+              t->no_strafe[0] == 75 && t->no_strafe[1] == 105 && t->no_forward_back[1] == 15 && t->no_forward_back[2] == 165,
+          "touch layout base / joystick / tap jump / angles");
+    CHECK(t->control_count == (size_t) cJSON_GetArraySize(get(get(in, "touch"), "controls")) && t->control_count == 12, "%zu touch controls", t->control_count);
+}
+
 int main(const int argc, char **argv) {
     const char *path = "tools/strike/strike_data.json";
     for (int i = 1; i < argc; i++) {
@@ -275,6 +375,9 @@ int main(const int argc, char **argv) {
     check_weapons(data);
     check_modes(data);
     check_config(data);
+    check_physics(data);
+    check_combat(data);
+    check_input(data);
 
     flavor_set(FLAVOR_BASE);
     CHECK(ruleset_current() == ruleset_v10() && rules_classes()[0].health == 100 && rules_weapon(0)->damage == 100.0f, "base again: untouched");

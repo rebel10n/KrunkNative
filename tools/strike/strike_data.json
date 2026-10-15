@@ -1309,6 +1309,26 @@
    "v10_name": "Rocketeer"
   }
  ],
+ "combat": {
+  "aabb_sites": 3,
+  "gravity": "gravity * config.gravMlt * mode.gravMlt (no weapon gravMlt term)",
+  "hit_test": "aabb",
+  "hitbox_pad": "config.hitBoxPad + class hbS (width) / hbH (height)",
+  "posed_markers": {
+   "complexHitboxes": 0,
+   "hurtboxScale": 0,
+   "nearmiss": 0,
+   "torsoshot": 0
+  },
+  "procinputs_delta_floor_ms": 0.1,
+  "zones": {
+   "from": "live target (d.obj.y / adjustedHeight), not the lag-compensated box",
+   "head": "top - hitY < headScale * headMlt",
+   "head_mlt_default": 1.5,
+   "leg": "hitY < y + legHeight - crouchDst * crouchVal",
+   "leg_mlt_default": 0.5
+  }
+ },
  "config": {
   "classConfig": [
    {
@@ -3558,7 +3578,7 @@
   ]
  },
  "generator": {
-  "rev": 1,
+  "rev": 2,
   "tool": "tools/strike/extract_strike.py"
  },
  "i18n": {
@@ -5322,6 +5342,891 @@
   "windows.welcome.streak.title": "Krunker Spook'Fest new Limited Event",
   "windows.wrist.header": "Select Wrist",
   "winter.market.title": "Event"
+ },
+ "input": {
+  "aim_assist": {
+   "active_rule": "mobile, (autoFireMbl || aimAssist), and a joystick held or a target already tracked",
+   "aim_point": "y + (playerHeight - crouchVal*crouchDst) / 2",
+   "autofire": {
+    "auto": "shoot key held while on target; released buffer_ms after the last on-target frame",
+    "buffer_ms": 260,
+    "semi_auto": "shoot key toggles every frame while the base box holds"
+   },
+   "box": {
+    "base_half_height": "playerHeight*.5/dist*zoom",
+    "base_half_width": "playerScale*.5/dist*zoom",
+    "grow_height": 1.1,
+    "grow_width": 1.5,
+    "player_height_mlt": 0.5,
+    "player_scale_mlt": 0.5,
+    "rule": "semi-auto (nAuto) weapon: fire when the target's projected body centre is inside the base box around the screen centre; any weapon: on target inside the box grown by grow_width / grow_height"
+   },
+   "can_see_near_dist": 20,
+   "can_see_pad_far": 0.5,
+   "can_see_pad_near": 0.4,
+   "pull": {
+    "center_threshold": 0.005,
+    "deadband_down": 0.3,
+    "deadband_up": 0.4,
+    "locked_look_mlt": 0.75,
+    "locked_vertical_mlt": 0.3,
+    "pull_initial": 2,
+    "pull_locked": 3,
+    "rule": "look += aimAssistDist * innerWidth|innerHeight * factor * dt / look_mlt; factor = pull_initial until |dist.x| < center_threshold with no vertical pull, then pull_locked (vertical x locked_vertical_mlt unless the target is airborne); no vertical pull while the target's centre is within playerHeight*deadband_up/dist above .. deadband_down below the screen centre; while locked every look input is x locked_look_mlt"
+   }
+  },
+  "binds": [
+   {
+    "alt": -1,
+    "bind": "primary",
+    "def": 84,
+    "index": -1,
+    "name": "primKey"
+   },
+   {
+    "alt": -1,
+    "bind": "reload",
+    "def": 82,
+    "index": -1,
+    "name": "reloadKey"
+   },
+   {
+    "alt": -1,
+    "bind": "jump",
+    "def": 32,
+    "index": -1,
+    "name": "jumpKey"
+   },
+   {
+    "alt": -1,
+    "bind": "playerList",
+    "def": 18,
+    "index": -1,
+    "name": "pListKey"
+   },
+   {
+    "alt": -1,
+    "bind": "scoreBoard",
+    "def": 9,
+    "index": -1,
+    "name": "sBoardKey"
+   },
+   {
+    "alt": -1,
+    "bind": "interact",
+    "def": 71,
+    "index": -1,
+    "name": "interactKey"
+   },
+   {
+    "alt": -1,
+    "bind": "confirm",
+    "def": 75,
+    "index": -1,
+    "name": "confirmKey"
+   },
+   {
+    "alt": -1,
+    "bind": "secondaryInteract",
+    "def": 72,
+    "index": -1,
+    "name": "interactSecKey"
+   },
+   {
+    "alt": -1,
+    "bind": "spray",
+    "def": 70,
+    "index": -1,
+    "name": "sprayKey"
+   },
+   {
+    "alt": -1,
+    "bind": "sprayWheel",
+    "def": 70,
+    "index": -1,
+    "name": "sprayWheelKey"
+   },
+   {
+    "alt": -1,
+    "bind": "inspect",
+    "def": 88,
+    "index": -1,
+    "name": "inspKey"
+   },
+   {
+    "alt": 220,
+    "bind": "shoot",
+    "def": 10001,
+    "index": -1,
+    "name": "shoot1Key"
+   },
+   {
+    "alt": 16,
+    "bind": "aim",
+    "def": 10003,
+    "index": -1,
+    "name": "aim1Key"
+   },
+   {
+    "alt": -1,
+    "bind": "crouch",
+    "def": 16,
+    "index": -1,
+    "name": "crouchKey"
+   },
+   {
+    "alt": -1,
+    "bind": "melee",
+    "def": 81,
+    "index": -1,
+    "name": "meleeKey"
+   },
+   {
+    "alt": -1,
+    "bind": "equip",
+    "def": 67,
+    "index": -1,
+    "name": "equipKey"
+   },
+   {
+    "alt": -1,
+    "bind": "chat",
+    "def": 13,
+    "index": -1,
+    "name": "chatKey"
+   },
+   {
+    "alt": -1,
+    "bind": "voiceChat",
+    "def": 86,
+    "index": -1,
+    "name": "voiceKey"
+   },
+   {
+    "alt": -1,
+    "bind": "drop",
+    "def": 90,
+    "index": -1,
+    "name": "dropKey"
+   },
+   {
+    "alt": -1,
+    "bind": "wepVis",
+    "def": -1,
+    "index": -1,
+    "name": "wepVisKey"
+   },
+   {
+    "alt": -1,
+    "bind": "specFree",
+    "def": 70,
+    "index": -1,
+    "name": "specFreeKey"
+   },
+   {
+    "alt": -1,
+    "bind": "specObj",
+    "def": 72,
+    "index": -1,
+    "name": "specObjKey"
+   },
+   {
+    "alt": -1,
+    "bind": "specFirst",
+    "def": 82,
+    "index": -1,
+    "name": "specFirstKey"
+   },
+   {
+    "alt": -1,
+    "bind": "specNames",
+    "def": 77,
+    "index": -1,
+    "name": "specNamesKey"
+   },
+   {
+    "alt": -1,
+    "bind": "specFocus",
+    "def": 190,
+    "index": -1,
+    "name": "specFocusKey"
+   },
+   {
+    "alt": -1,
+    "bind": "hidePlayers",
+    "def": -1,
+    "index": -1,
+    "name": "hidePlayersKey"
+   },
+   {
+    "alt": -1,
+    "bind": "prop",
+    "def": 80,
+    "index": -1,
+    "name": "propKey"
+   },
+   {
+    "alt": -1,
+    "bind": "propRand",
+    "def": 77,
+    "index": -1,
+    "name": "propRandKey"
+   },
+   {
+    "alt": -1,
+    "bind": "propRot",
+    "def": 82,
+    "index": -1,
+    "name": "propRotKey"
+   },
+   {
+    "alt": -1,
+    "bind": "propRotR",
+    "def": 78,
+    "index": -1,
+    "name": "propRotRKey"
+   },
+   {
+    "alt": -1,
+    "bind": "noclipSB",
+    "def": -1,
+    "index": -1,
+    "name": "sandboxNoclip"
+   },
+   {
+    "alt": -1,
+    "bind": "godModeSB",
+    "def": -1,
+    "index": -1,
+    "name": "sandboxGodMode"
+   },
+   {
+    "alt": -1,
+    "bind": "killSB",
+    "def": -1,
+    "index": -1,
+    "name": "sandboxKill"
+   },
+   {
+    "alt": -1,
+    "bind": "streak",
+    "def": 49,
+    "index": 0,
+    "name": "18"
+   },
+   {
+    "alt": -1,
+    "bind": "streak",
+    "def": 50,
+    "index": 1,
+    "name": "19"
+   },
+   {
+    "alt": -1,
+    "bind": "streak",
+    "def": 51,
+    "index": 2,
+    "name": "20"
+   },
+   {
+    "alt": -1,
+    "bind": "move",
+    "def": 87,
+    "index": 0,
+    "name": "0"
+   },
+   {
+    "alt": -1,
+    "bind": "move",
+    "def": 83,
+    "index": 1,
+    "name": "1"
+   },
+   {
+    "alt": -1,
+    "bind": "move",
+    "def": 65,
+    "index": 2,
+    "name": "2"
+   },
+   {
+    "alt": -1,
+    "bind": "move",
+    "def": 68,
+    "index": 3,
+    "name": "3"
+   },
+   {
+    "alt": -1,
+    "bind": "toggle",
+    "def": -1,
+    "index": 0,
+    "name": "27"
+   },
+   {
+    "alt": -1,
+    "bind": "toggle",
+    "def": -1,
+    "index": 1,
+    "name": "28"
+   },
+   {
+    "alt": -1,
+    "bind": "toggle",
+    "def": -1,
+    "index": 2,
+    "name": "29"
+   },
+   {
+    "alt": -1,
+    "bind": "toggle",
+    "def": -1,
+    "index": 3,
+    "name": "30"
+   },
+   {
+    "alt": -1,
+    "bind": "toggle",
+    "def": -1,
+    "index": 4,
+    "name": "31"
+   },
+   {
+    "alt": -1,
+    "bind": "toggle",
+    "def": -1,
+    "index": 5,
+    "name": "32"
+   },
+   {
+    "alt": -1,
+    "bind": "premium",
+    "def": -1,
+    "index": 0,
+    "name": "34"
+   },
+   {
+    "alt": -1,
+    "bind": "premium",
+    "def": -1,
+    "index": 1,
+    "name": "35"
+   },
+   {
+    "alt": -1,
+    "bind": "premium",
+    "def": -1,
+    "index": 2,
+    "name": "36"
+   },
+   {
+    "alt": -1,
+    "bind": "premium",
+    "def": -1,
+    "index": 3,
+    "name": "37"
+   },
+   {
+    "alt": -1,
+    "bind": "message",
+    "def": -1,
+    "index": 0,
+    "name": "43"
+   },
+   {
+    "alt": -1,
+    "bind": "message",
+    "def": -1,
+    "index": 1,
+    "name": "44"
+   },
+   {
+    "alt": -1,
+    "bind": "message",
+    "def": -1,
+    "index": 2,
+    "name": "45"
+   },
+   {
+    "alt": -1,
+    "bind": "message",
+    "def": -1,
+    "index": 3,
+    "name": "46"
+   },
+   {
+    "alt": -1,
+    "bind": "message",
+    "def": -1,
+    "index": 4,
+    "name": "47"
+   },
+   {
+    "alt": -1,
+    "bind": "message",
+    "def": -1,
+    "index": 5,
+    "name": "48"
+   }
+  ],
+  "controls": {
+   "cntrlInput": {
+    "aimX": 15,
+    "aimY": 15,
+    "deadZoneL": 0.25,
+    "deadZoneR": 0.25,
+    "gradSpeed": false,
+    "invert": false,
+    "sensX": 20,
+    "sensY": 20,
+    "triggerThres": 0.1,
+    "vibration": true,
+    "vibrationMlt": 1
+   },
+   "flick_clamp": 500,
+   "kbmInput": {
+    "aimX": [
+     1
+    ],
+    "aimY": [
+     1
+    ],
+    "invert": [
+     false
+    ],
+    "scroll": [
+     1
+    ],
+    "sensX": [
+     1
+    ],
+    "sensY": [
+     1
+    ]
+   },
+   "look_formula": "config.mouseSens * sens * (camera.fov / fov) * fw()  (1, or aim assist's locked_look_mlt while locked); pitch clamped to +-pitch_limit",
+   "mblInput": {
+    "aimX": 1,
+    "aimY": 1,
+    "gradSpeed": false,
+    "invert": false,
+    "sensX": 1,
+    "sensY": 1,
+    "vibration": true,
+    "vibrationMlt": 1
+   },
+   "mouse_skip_fix": false,
+   "pitch_limit": 1.570796326794897,
+   "pitch_limit_expr": "Math.PI/2"
+  },
+  "scroll_to_swap": false,
+  "settings": {
+   "aimAssist": {
+    "cat": "mobile",
+    "hidden_on": "desktop",
+    "val": true
+   },
+   "aimSensitivityX": {
+    "cat": "gameplay",
+    "hidden_on": "mobile",
+    "max": 15,
+    "min": 0.1,
+    "per_weapon": true,
+    "pro": 0.69,
+    "step": 0.1,
+    "val": 1
+   },
+   "aimSensitivityXCntrl": {
+    "cat": "controller",
+    "max": 15,
+    "min": 0.1,
+    "step": 0.1,
+    "store_mlt": 5,
+    "val": 3
+   },
+   "aimSensitivityXMbl": {
+    "cat": "mobile",
+    "hidden_on": "desktop",
+    "max": 15,
+    "min": 0.1,
+    "step": 0.1,
+    "store_mlt": 4,
+    "val": 1.4
+   },
+   "aimSensitivityY": {
+    "cat": "gameplay",
+    "hidden_on": "mobile",
+    "max": 15,
+    "min": 0.1,
+    "per_weapon": true,
+    "pro": 0.69,
+    "step": 0.1,
+    "val": 1
+   },
+   "aimSensitivityYCntrl": {
+    "cat": "controller",
+    "max": 15,
+    "min": 0.1,
+    "step": 0.1,
+    "store_mlt": 5,
+    "val": 3
+   },
+   "aimSensitivityYMbl": {
+    "cat": "mobile",
+    "hidden_on": "desktop",
+    "max": 15,
+    "min": 0.1,
+    "step": 0.1,
+    "store_mlt": 4,
+    "val": 1.4
+   },
+   "autoFireMbl": {
+    "cat": "mobile",
+    "hidden_on": "desktop",
+    "val": true
+   },
+   "challMode": {
+    "cat": "gameplay",
+    "val": false
+   },
+   "deadZoneL": {
+    "cat": "controller",
+    "max": 1,
+    "min": 0,
+    "step": 0.05,
+    "val": 0.3
+   },
+   "deadZoneR": {
+    "cat": "controller",
+    "max": 1,
+    "min": 0,
+    "step": 0.05,
+    "val": 0.25
+   },
+   "disableCons": {
+    "cat": "controller",
+    "val": false
+   },
+   "fov": {
+    "cat": "viewmodel",
+    "max": 150,
+    "min": 60,
+    "per_weapon": true,
+    "pro": 110,
+    "step": 5,
+    "val": 70,
+    "val_expr": "config.fov+20"
+   },
+   "fpsFOV": {
+    "cat": "viewmodel",
+    "max": 150,
+    "min": 60,
+    "per_weapon": true,
+    "pro": 105,
+    "step": 5,
+    "val": 65,
+    "val_expr": "config.fov+15"
+   },
+   "gpSetts": {
+    "cat": "gameplay",
+    "val": 0
+   },
+   "gradSpeed": {
+    "cat": "controller",
+    "val": false
+   },
+   "gradSpeedMbl": {
+    "cat": "mobile",
+    "hidden_on": "desktop",
+    "val": false
+   },
+   "invertY": {
+    "cat": "gameplay",
+    "hidden_on": "mobile",
+    "per_weapon": true,
+    "val": false
+   },
+   "invertYCntrl": {
+    "cat": "controller",
+    "val": false
+   },
+   "invertYMbl": {
+    "cat": "mobile",
+    "hidden_on": "desktop",
+    "val": false
+   },
+   "scrollDir": {
+    "cat": "gameplay",
+    "per_weapon": true,
+    "val": true
+   },
+   "sensitivityX": {
+    "cat": "gameplay",
+    "hidden_on": "mobile",
+    "max": 15,
+    "min": 0.1,
+    "per_weapon": true,
+    "step": 0.1,
+    "val": 1
+   },
+   "sensitivityXCntrl": {
+    "cat": "controller",
+    "max": 15,
+    "min": 0.1,
+    "step": 0.1,
+    "store_mlt": 5,
+    "val": 4
+   },
+   "sensitivityXMbl": {
+    "cat": "mobile",
+    "hidden_on": "desktop",
+    "max": 15,
+    "min": 0.1,
+    "step": 0.1,
+    "store_mlt": 4,
+    "val": 1.4
+   },
+   "sensitivityY": {
+    "cat": "gameplay",
+    "hidden_on": "mobile",
+    "max": 15,
+    "min": 0.1,
+    "per_weapon": true,
+    "step": 0.1,
+    "val": 1
+   },
+   "sensitivityYCntrl": {
+    "cat": "controller",
+    "max": 15,
+    "min": 0.1,
+    "step": 0.1,
+    "store_mlt": 5,
+    "val": 4
+   },
+   "sensitivityYMbl": {
+    "cat": "mobile",
+    "hidden_on": "desktop",
+    "max": 15,
+    "min": 0.1,
+    "step": 0.1,
+    "store_mlt": 4,
+    "val": 1.4
+   },
+   "triggerThres": {
+    "cat": "controller",
+    "max": 1,
+    "min": 0,
+    "step": 0.05,
+    "val": 0.1
+   },
+   "vibration": {
+    "cat": "controller",
+    "hidden_on": "always",
+    "val": true
+   },
+   "vibrationMbl": {
+    "cat": "mobile",
+    "hidden_on": "desktop",
+    "val": true
+   },
+   "vibrationMlt": {
+    "cat": "controller",
+    "max": 1,
+    "min": 0,
+    "step": 0.1,
+    "val": 1
+   }
+  },
+  "touch": {
+   "aim_joystick": {
+    "down": "aim, and shoot unless auto-fire is on",
+    "drag": "look while aiming"
+   },
+   "aim_zone": {
+    "drag": "look (mblInput)",
+    "tap_jump_max_travel_px": 9,
+    "zone": "right half"
+   },
+   "base_height": 360,
+   "base_width": 640,
+   "controls": [
+    {
+     "action": "crouch",
+     "disabled": true,
+     "icon": "crouching",
+     "id": "crouch",
+     "pos": {
+      "right": 26,
+      "top": 152
+     },
+     "size": 46,
+     "type": "Button"
+    },
+    {
+     "action": "jump",
+     "disabled": false,
+     "icon": "jump",
+     "id": "jump",
+     "pos": {
+      "right": 26,
+      "top": 97
+     },
+     "size": 46,
+     "type": "Button"
+    },
+    {
+     "action": "reload",
+     "disabled": false,
+     "icon": "reload",
+     "id": "reload",
+     "pos": {
+      "bottom": 16,
+      "right": 190
+     },
+     "size": 46,
+     "type": "Button"
+    },
+    {
+     "action": "melee",
+     "disabled": false,
+     "icon": "knife",
+     "iconActive": "gun",
+     "id": "melee",
+     "pos": {
+      "bottom": 16,
+      "right": 100
+     },
+     "size": 46,
+     "type": "Toggle"
+    },
+    {
+     "action": "swap",
+     "disabled": true,
+     "icon": "weapon-switch",
+     "id": "swap",
+     "pos": {
+      "right": 26,
+      "top": 229
+     },
+     "size": 46,
+     "type": "Button"
+    },
+    {
+     "action": "shoot",
+     "disabled": false,
+     "icon": "shoot",
+     "id": "shoot",
+     "pos": {
+      "right": 190,
+      "top": 140
+     },
+     "size": 46,
+     "type": "Button"
+    },
+    {
+     "action": "shoot",
+     "disabled": false,
+     "icon": "shoot",
+     "id": "shootWhenAim",
+     "pos": {
+      "left": 52,
+      "top": 140
+     },
+     "size": 46,
+     "type": "Button"
+    },
+    {
+     "disabled": false,
+     "id": "fakeMoveJoystick",
+     "interact": false,
+     "pos": {
+      "bottom": 49,
+      "left": 69
+     },
+     "size": 106,
+     "type": "Joystick"
+    },
+    {
+     "class": "joystick--aim",
+     "disabled": false,
+     "id": "aimJoyStick",
+     "pos": {
+      "right": 97,
+      "top": 74
+     },
+     "size": 88,
+     "type": "Joystick"
+    },
+    {
+     "action": "menu",
+     "disabled": false,
+     "icon": "menu",
+     "id": "backToMenu",
+     "pos": {
+      "left": 24,
+      "top": 24
+     },
+     "size": 32,
+     "type": "Button"
+    },
+    {
+     "disabled": false,
+     "height": 55,
+     "icon": "jump",
+     "id": "tapToJump",
+     "pos": {
+      "right": 211,
+      "top": 125
+     },
+     "text": "windows.controls.tapToJump",
+     "textPos": {
+      "right": 0,
+      "top": 51
+     },
+     "type": "HintOnly",
+     "width": 90
+    },
+    {
+     "disabled": false,
+     "height": 119,
+     "icon": "drag-camera",
+     "id": "dragToMoveCamera",
+     "pos": {
+      "right": 59,
+      "top": 175
+     },
+     "text": "windows.controls.dragCamera",
+     "textPos": {
+      "right": 0,
+      "top": 45
+     },
+     "type": "HintOnly",
+     "width": 190
+    }
+   ],
+   "move_angles": {
+    "angle": "|nipple degree - 180|",
+    "no_forward_back": [
+     [
+      0,
+      15
+     ],
+     [
+      165,
+      195
+     ]
+    ],
+    "no_strafe": [
+     75,
+     105
+    ]
+   },
+   "move_joystick": {
+    "mode": "dynamic",
+    "size": 106,
+    "zone": "left half"
+   }
+  }
  },
  "items": {
   "crate_tiers": [
@@ -18509,6 +19414,290 @@
    "trailer_bytes": 2,
    "websocket_binary_type": "arraybuffer"
   }
+ },
+ "physics": {
+  "accAnnounceId": 0,
+  "accValidationTime": 60000,
+  "aiLimit": 40,
+  "aiSyncT": 5,
+  "aimAnimMlt": 0.18,
+  "aimJumpSlow": 0.85,
+  "aimSlow": 0.55,
+  "airDSyncT": 5,
+  "airDecel": 0.9996,
+  "airSpeed": 4.7e-05,
+  "ambBleed": 0,
+  "ambD": 2,
+  "ambDiv": 20,
+  "ambIntensity": 1,
+  "ambMlt": 15,
+  "ambOff": 0.09,
+  "ambSFactor": 1,
+  "ambScale": 8,
+  "ambientVal": 0.5,
+  "anchorLimit": 1000,
+  "animMult": 1.2,
+  "armInset": -0.1,
+  "armOff": -0.8,
+  "armScale": 1.2,
+  "assistMin": 20,
+  "assistScore": 25,
+  "assistTime": 5000,
+  "billboardCnt": 4,
+  "bobMltY": 0.024,
+  "bobMltZ": 0.02,
+  "bobPullY": 0.985,
+  "bobPullZ": 0.99,
+  "boostRange": 100,
+  "boosterSpd": 0.002,
+  "borderH": 500,
+  "bppCapDay": 300,
+  "camChaseDst": 24,
+  "camChaseSen": 0.2,
+  "camChaseSpd": 0.0012,
+  "camChaseTrn": 0.0022,
+  "cameraHeight": 1.5,
+  "challModeLvl": 30,
+  "chatInterval": 800,
+  "chatListLength": 35,
+  "chatMaxLength": 70,
+  "chestScale": 1.3,
+  "chestWidth": 2.6,
+  "climbHeight": 3,
+  "collPad": 1.1,
+  "cornerGlide": 4,
+  "cornerH": 7,
+  "cornerPad": 1,
+  "cornerScl": 2.5,
+  "crouchAnim": 0.0008,
+  "crouchAnimMlt": 0.5,
+  "crouchDst": 3,
+  "crouchJump": 0.25,
+  "crouchLean": -0.314159265358979,
+  "crouchSpd": 0.007,
+  "crouchSpread": 0.55,
+  "currentSeason": 6,
+  "custValLimit": 30,
+  "deathDelay": 2800,
+  "deathFollowD": 100,
+  "deathY": -100,
+  "decelMin": 0.0001,
+  "diskSpin": 0.0002,
+  "dltMx": 33,
+  "dropR": 0.1,
+  "emitterDistMax": 5000,
+  "emitterDistMin": 0,
+  "emitterRateMax": 4,
+  "emitterRateMin": 0.1,
+  "emitterRollMax": 1,
+  "emitterRollMin": 0,
+  "emitterVolMax": 2,
+  "emitterVolMin": 0.05,
+  "endAnim": 2500,
+  "endAnimSuperVictory": 4700,
+  "endTimer": 30000,
+  "eventObjectLimit": 10,
+  "explosionRange": 200,
+  "feedTimer": 2000,
+  "flagHOff": 15,
+  "flagIdle": 45000,
+  "flagOff": 6,
+  "flagScale": 12,
+  "flagUpdate": 2500,
+  "flagZoneH": 36,
+  "flagZoneS": 24,
+  "fov": 50,
+  "gameStartDelay": 60000,
+  "gamesPerServer": 2,
+  "gamesToCreate": 1,
+  "gravity": 0.00015,
+  "groundDecel": 0.99,
+  "guestMaxAdGrace": 360000,
+  "guiLimit": 80,
+  "guiLimitF": 80,
+  "headScale": 2,
+  "hitBoxPad": 5,
+  "hitBoxPadP": 0.5,
+  "hitLife": 2000,
+  "hostTransferLimit": 2,
+  "hpSegments": 7,
+  "idleAnimS": 0.0015,
+  "imgSessionTime": 3600000,
+  "inpBackTim": 3000,
+  "inpDirGran": 30,
+  "interactTimer": 100,
+  "interfaceIDMax": 2000,
+  "interfaceLimit": 30,
+  "interpPDelay": 3,
+  "interpolation": 1.1,
+  "jumpPush": 0.1,
+  "jumpVel": 0.072,
+  "kickTimer": 120000,
+  "lArmLength": 2.7,
+  "ladderDecel": 0.97,
+  "ladderScale": 0.5,
+  "ladderSpeed": 0.035,
+  "ladderWidth": 3.2,
+  "landOff": 0.15,
+  "landPull": 0.994,
+  "landPullV": 0.985,
+  "lbLimit": 2,
+  "leaderOSync": 5,
+  "leanMax": 0.16,
+  "leanMltZ": 0.03,
+  "leanPull": 0.99,
+  "leanPullZ": 0.99,
+  "leanSens": 0.05,
+  "legHeight": 4.2,
+  "legScale": 1.3,
+  "lightDistance": 500,
+  "lightIntensity": 1.3,
+  "matchPicks": 4,
+  "maxBots": 7,
+  "maxELOLevel": 8,
+  "maxHealth": 100,
+  "maxLevel": 102,
+  "maxMountainMlt": 5,
+  "maxNameLength": 16,
+  "maxObfPad": 55,
+  "maxObfPing": 100,
+  "maxParticles": 100,
+  "maxPassLength": 20,
+  "maxPayloadLength": 750000,
+  "maxShrinkSpeed": 50,
+  "maxSpdRChck": 6,
+  "maxSprays": 1,
+  "maxSpraysF": 3,
+  "maxSpraysP": 2,
+  "maxTerrainS": 4000,
+  "maxTerrainSize": 8000,
+  "maxZombiePerks": 4,
+  "maxZoneHeight": 10000,
+  "maxZoneSize": 10000,
+  "maxZoneStages": 10,
+  "maxZoneWait": 500,
+  "medalAnim": 1800,
+  "medalDelay": 900,
+  "menuCamAngle": -0.5,
+  "menuCamDist": 200,
+  "menuCamSpeed": 0.1,
+  "minChalLevel": 1,
+  "minDrop": 300,
+  "minMountainMlt": 0,
+  "minNameLength": 4,
+  "minObfPad": 20,
+  "minPassLength": 8,
+  "minShrinkSpeed": 1,
+  "minTerrainSize": 0,
+  "minZoneHeight": 100,
+  "minZoneSize": 0,
+  "minZoneStages": 0,
+  "minZoneWait": 5,
+  "mouseSens": 0.0024,
+  "mysteryBoxAnim": 5000,
+  "mysteryBoxDespawn": 15000,
+  "mysteryBoxDespawnTeddy": 8000,
+  "mysteryBoxOffset": 10,
+  "nameOffset": 0.6,
+  "nameOffsetHat": 0.8,
+  "nameVisRate": 200,
+  "newDataInterval": 120000,
+  "objectColLimit": 4500,
+  "objectColLimitF": 6000,
+  "objectLimit": 5000,
+  "objectLimitF": 7500,
+  "otherSoundMlt": 0.55,
+  "overCharge": 1.2,
+  "particleDist": 40,
+  "passiveInc": 500,
+  "pickupImgRange": 50,
+  "pickupOff": 1,
+  "pickupScale": 6,
+  "pickupTimer": 1000,
+  "pickupZoneH": 2,
+  "pickupZoneX": 12,
+  "pickupZoneZ": 4,
+  "pingCount": 10,
+  "playerHeight": 11,
+  "playerSlideVelMlt": 1.2,
+  "playerSlippingJumpCooldown": 500,
+  "playerSpeed": 0.00042,
+  "playerTerrainSlideVelMlt": 0.4,
+  "positionRange": 500000,
+  "quadSize": 150,
+  "raidMapId": 12,
+  "rankVar": 0.03,
+  "recoilMlt": 0.3,
+  "regenDelay": 5000,
+  "regenVal": 0.1,
+  "rewardMinLvl": 1,
+  "rewardTime": 3600000,
+  "rewardUpdate": 1200000,
+  "scoreStreak": 2000,
+  "serverBrowserRate": 10000,
+  "serverSendFrequency": 10,
+  "serverSpread": 3,
+  "serverSyncFrequency": 1,
+  "serverTickFrequency": 30,
+  "shadowDst": 1200,
+  "shadowOff": 0.004,
+  "shadowRes": 1024,
+  "signFontMax": 240,
+  "signFontMin": 1,
+  "signLimit": 100,
+  "signTextLimit": 1500,
+  "skyScale": 18000,
+  "slideDecel": 0.999,
+  "slideTime": 350,
+  "slippingSpeed": 0.0003,
+  "spawnLimit": 20,
+  "specMaxD": 160,
+  "specMinD": 10,
+  "spinTimer": 1800,
+  "sprayRange": 25,
+  "sprayScale": 15,
+  "sprayTimer": 1000,
+  "spreadAdj": 0.00063,
+  "spreadFall": 30,
+  "spreadMlt": 240,
+  "spreadMove": 25,
+  "spreadRecover": 0.985,
+  "stateHistory": 500,
+  "staticDlt": 50,
+  "stepAnim": 0.075,
+  "stepMlt": 0.25,
+  "stepPull": 0.995,
+  "sunAngleX": 90,
+  "sunAngleY": 54,
+  "teamLimit": 5,
+  "terrainDecel": 0.99,
+  "terrainGravityMlt": 1.85,
+  "terrainGrid": 8,
+  "terrainSlideDecel": 0.9996,
+  "terrainSlideThreshold": 1.9,
+  "terrainSlipDecel": 0.99,
+  "thrdPX": 5,
+  "thrdPY": 2,
+  "thrdPZ": 14,
+  "throwCharge": 900,
+  "tracerChance": 1,
+  "tracerMaxDst": 500,
+  "tracerMinDst": 20,
+  "triangleLimit": 5000,
+  "triggerActionLimit": 5,
+  "triggerLimit": 30,
+  "twoFAKeyLen": 6,
+  "uArmLength": 2.7,
+  "viewDist": 2000,
+  "voiceChatInterval": 2000,
+  "voiceChatMaxLength": 0.65,
+  "voiceDelay": 200,
+  "voiceRate": 500,
+  "wallH": 5,
+  "wallW": 0.8,
+  "wheelLimit": 10,
+  "worldUV": 60,
+  "wpnSpin": 0.018
  },
  "summary": {
   "class_ids": [

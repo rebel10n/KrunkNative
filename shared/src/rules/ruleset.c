@@ -16,6 +16,10 @@ static const Ruleset k_v10 = {
     .key = "v10",
     .version = "10.0.2",
     .constants = &game_constants,
+    .posed_hitboxes = 1, // v10.0.2: every mode but Prop Hunt traces the posed boxes (hitboxes.c)
+    .hit_zones_live = 0, // KrunkNative measures the zones on the rewound box (player.c combat)
+    .delta_floor_scaled = 1, // procInputs max(1 * deltaMlt, ...) (v10:169582)
+    .end_timer = GAME_END_TIMER, // config.endTimer 25000
     .weapons = g_weapons_v10,
     .weapon_count = WEAPON_TABLE_COUNT,
     .krunker_weapon_count = WEAPON_V10_COUNT, // 29 Boulder, 30 Compressor (weapons_v10.c)
@@ -59,6 +63,10 @@ const Weapon *rules_weapon(const int id) {
 
 const Ruleset *game_ruleset(const Game *game) { return game && game->rules ? game->rules : ruleset_current(); }
 int game_is_ranked(const Game *game) { return game && game->is_ranked; }
+const GameConstants *game_constants_of(const Game *game) {
+    const GameConstants *k = game_ruleset(game)->constants;
+    return k ? k : &game_constants;
+}
 
 float rules_reward_mlt(const Game *game) {
     const float mlt = game_ruleset(game)->ranked.kr_mlt;

@@ -32,6 +32,11 @@ int   ui_mobile_touch(UiTouchPhase phase, const UiTouch *changed, int count);
 // (sensitivityXMbl/YMbl * 4, aim sensitivities while the right button is held) and
 // invertYMbl; 0 when nothing moved. ui_controls_fill_input multiplies by mouseSens.
 int   ui_mobile_take_look(int aiming, float *dx, float *dy);
+// The mblInput look factors take_look applies (sensitivity*Mbl x 4, aim ones while aiming; invertYMbl).
+void  ui_mobile_look_sens(int aiming, float *sx, float *sy, int *invert);
+// A touch is held on the controls (the joystick or a look drag): Strike's joystick.active ||
+// moveJoystick.active for its aim assist (client/src/strike_assist_client.c).
+int   ui_mobile_touch_active(void);
 // Native mouse as the one touch (only while #mobileUI is up): the left button's press / drag /
 // release, 1 = consumed (the page and the game do not see it). KRUNKNATIVE_MOBILE=1 forces it.
 int   ui_mobile_mouse(UiTouchPhase phase, float x, float y);

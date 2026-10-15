@@ -6,6 +6,7 @@
 #include <skin_fx.h>
 #include <third_person.h> // the local third-person model
 #include <pets.h>
+#include <ruleset.h> // game_constants_of: the flavor's constants (Krunker Strike crouch lean)
 #include <vfx.h>
 #include "viewer/viewer_store.h" // game.store.skins: weapon / melee skins
 #include <math.h>
@@ -1629,7 +1630,8 @@ void player_update_meshes(Player *player, const int is_preview) {
 
     if (!player->render_you || third_person) {
         const float crouch_distance = game_constants.crouch_distance * player->crouch_val;
-        const float crouch_lean = game_constants.crouch_lean * player->crouch_val;
+        // v10 0; Krunker Strike keeps v7's -PI * 0.1 (the ruleset's constants, strike_rules.h)
+        const float crouch_lean = game_constants_of(player->game)->crouch_lean * player->crouch_val;
 
         player_mesh->body_anchor->rotation.y = player_mesh->body_anchor->rotation.z = 0.0f;
         player_mesh->body_anchor->rotation.x = crouch_lean + player->direction.x * 0.5f;

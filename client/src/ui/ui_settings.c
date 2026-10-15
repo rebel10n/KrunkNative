@@ -12,6 +12,8 @@
 #include <voice_chat.h> // audioInput: microphone list / selection (voice.c)
 #include <client_settings.h> // the Client tab's rows in searchList (ui_client_settings.c)
 #include <i18n.h>            // lang: settings.list.lang (setLocale / the locale it shows)
+#include <flavor.h>          // Krunker Strike's settings defaults (strike_rules.h)
+#include <strike_rules.h>
 #if defined(__has_include)
 #if __has_include(<render_settings.h>)
 #include <render_settings.h> // client_apply_render_setting (ui_render_settings.c)
@@ -277,6 +279,18 @@ void ui_settings_collect_defaults(void) {
         if (!COLOR_SETTINGS[i].def) continue;
         cJSON_DeleteItemFromObject(g_defaults, COLOR_SETTINGS[i].key);
         cJSON_AddStringToObject(g_defaults, COLOR_SETTINGS[i].key, COLOR_SETTINGS[i].def);
+    }
+    // Krunker Strike: FRVR 1.37.2's input / view defaults (strike_rules.h settings): fov 70 / fpsFOV 65
+    // (config.fov 50 + 20 / + 15; v10 100 / 95), and the mobile Auto Fire / Aim Assist switches (on)
+    // the v10 page does not have.
+    const StrikeRules *strike = flavor_current()->rules;
+    for (size_t i = 0; strike && i < strike->setting_count; i++) {
+        const StrikeSetting *st = &strike->settings[i];
+        const cJSON *had = cJSON_GetObjectItem(g_defaults, st->key);
+        const int as_bool = had ? cJSON_IsBool(had) : (st->min == 0.0 && st->max == 0.0);
+        cJSON_DeleteItemFromObject(g_defaults, st->key);
+        if (as_bool) cJSON_AddBoolToObject(g_defaults, st->key, st->val != 0.0);
+        else cJSON_AddNumberToObject(g_defaults, st->key, st->val);
     }
     settings_repair();
 }

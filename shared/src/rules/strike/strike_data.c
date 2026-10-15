@@ -383,6 +383,182 @@ static const StrikeConfigDefault k_config[] = {
     {"headClipFix", 0},
 };
 
+// ---- physics: engine config keys with a GameConstants field (Krunker JS units: ms, per-ms speeds)
+static const StrikeStat k_physics[] = {
+    {"billboardCnt", 4},
+    {"mouseSens", 0.0024},
+    {"worldUV", 60},
+    {"playerHeight", 11},
+    {"borderH", 500},
+    {"cameraHeight", 1.5},
+    {"climbHeight", 3},
+    {"dltMx", 33},
+    {"jumpVel", 0.072},
+    {"aimJumpSlow", 0.85},
+    {"jumpPush", 0.1},
+    {"crouchJump", 0.25},
+    {"crouchSpd", 0.007},
+    {"crouchLean", -0.314159265358979},
+    {"playerSpeed", 0.00042},
+    {"slippingSpeed", 0.0003},
+    {"airSpeed", 4.7e-05},
+    {"aimSlow", 0.55},
+    {"playerSlippingJumpCooldown", 500},
+    {"terrainSlideThreshold", 1.9},
+    {"terrainSlipDecel", 0.99},
+    {"terrainSlideDecel", 0.9996},
+    {"terrainDecel", 0.99},
+    {"slideDecel", 0.999},
+    {"airDecel", 0.9996},
+    {"groundDecel", 0.99},
+    {"ladderDecel", 0.97},
+    {"crouchDst", 3},
+    {"gravity", 0.00015},
+    {"armScale", 1.2},
+    {"armInset", -0.1},
+    {"chestWidth", 2.6},
+    {"chestScale", 1.3},
+    {"legScale", 1.3},
+    {"legHeight", 4.2},
+    {"headScale", 2},
+    {"decelMin", 0.0001},
+    {"slideTime", 350},
+    {"playerSlideVelMlt", 1.2},
+    {"playerTerrainSlideVelMlt", 0.4},
+    {"idleAnimS", 0.0015},
+    {"interpolation", 1.1},
+    {"leanSens", 0.05},
+    {"leanMax", 0.16},
+    {"leanPull", 0.99},
+    {"leanPullZ", 0.99},
+    {"leanMltZ", 0.03},
+    {"bobPullY", 0.985},
+    {"bobPullZ", 0.99},
+    {"bobMltY", 0.024},
+    {"bobMltZ", 0.02},
+    {"crouchAnim", 0.0008},
+    {"collPad", 1.1},
+    {"boosterSpd", 0.002},
+    {"ladderSpeed", 0.035},
+    {"ladderScale", 0.5},
+    {"ladderWidth", 3.2},
+    {"deathY", -100},
+    {"recoilMlt", 0.3},
+    {"spreadAdj", 0.00063},
+    {"uArmLength", 2.7},
+    {"lArmLength", 2.7},
+    {"armOff", -0.8},
+    {"animMult", 1.2},
+    {"aimAnimMlt", 0.18},
+    {"crouchAnimMlt", 0.5},
+    {"stepAnim", 0.075},
+    {"stepPull", 0.995},
+    {"diskSpin", 0.0002},
+};
+
+// ---- input: CONTROLS.binds defaults (keyCode, 10000 + mouse button, -1 unbound)
+static const StrikeBind k_binds[] = {
+    {"primary", -1, "primKey", 84, -1},
+    {"reload", -1, "reloadKey", 82, -1},
+    {"jump", -1, "jumpKey", 32, -1},
+    {"playerList", -1, "pListKey", 18, -1},
+    {"scoreBoard", -1, "sBoardKey", 9, -1},
+    {"interact", -1, "interactKey", 71, -1},
+    {"confirm", -1, "confirmKey", 75, -1},
+    {"secondaryInteract", -1, "interactSecKey", 72, -1},
+    {"spray", -1, "sprayKey", 70, -1},
+    {"sprayWheel", -1, "sprayWheelKey", 70, -1},
+    {"inspect", -1, "inspKey", 88, -1},
+    {"shoot", -1, "shoot1Key", 10001, 220},
+    {"aim", -1, "aim1Key", 10003, 16},
+    {"crouch", -1, "crouchKey", 16, -1},
+    {"melee", -1, "meleeKey", 81, -1},
+    {"equip", -1, "equipKey", 67, -1},
+    {"chat", -1, "chatKey", 13, -1},
+    {"voiceChat", -1, "voiceKey", 86, -1},
+    {"drop", -1, "dropKey", 90, -1},
+    {"wepVis", -1, "wepVisKey", -1, -1},
+    {"specFree", -1, "specFreeKey", 70, -1},
+    {"specObj", -1, "specObjKey", 72, -1},
+    {"specFirst", -1, "specFirstKey", 82, -1},
+    {"specNames", -1, "specNamesKey", 77, -1},
+    {"specFocus", -1, "specFocusKey", 190, -1},
+    {"hidePlayers", -1, "hidePlayersKey", -1, -1},
+    {"prop", -1, "propKey", 80, -1},
+    {"propRand", -1, "propRandKey", 77, -1},
+    {"propRot", -1, "propRotKey", 82, -1},
+    {"propRotR", -1, "propRotRKey", 78, -1},
+    {"noclipSB", -1, "sandboxNoclip", -1, -1},
+    {"godModeSB", -1, "sandboxGodMode", -1, -1},
+    {"killSB", -1, "sandboxKill", -1, -1},
+    {"streak", 0, "18", 49, -1},
+    {"streak", 1, "19", 50, -1},
+    {"streak", 2, "20", 51, -1},
+    {"move", 0, "0", 87, -1},
+    {"move", 1, "1", 83, -1},
+    {"move", 2, "2", 65, -1},
+    {"move", 3, "3", 68, -1},
+    {"toggle", 0, "27", -1, -1},
+    {"toggle", 1, "28", -1, -1},
+    {"toggle", 2, "29", -1, -1},
+    {"toggle", 3, "30", -1, -1},
+    {"toggle", 4, "31", -1, -1},
+    {"toggle", 5, "32", -1, -1},
+    {"premium", 0, "34", -1, -1},
+    {"premium", 1, "35", -1, -1},
+    {"premium", 2, "36", -1, -1},
+    {"premium", 3, "37", -1, -1},
+    {"message", 0, "43", -1, -1},
+    {"message", 1, "44", -1, -1},
+    {"message", 2, "45", -1, -1},
+    {"message", 3, "46", -1, -1},
+    {"message", 4, "47", -1, -1},
+    {"message", 5, "48", -1, -1},
+};
+// ---- input / view settings defaults (settings window rows)
+static const StrikeSetting k_settings[] = {
+    {"sensitivityX", 1, 0.1, 15, 1}, // gameplay
+    {"sensitivityY", 1, 0.1, 15, 1}, // gameplay
+    {"aimSensitivityX", 1, 0.1, 15, 1}, // gameplay
+    {"aimSensitivityY", 1, 0.1, 15, 1}, // gameplay
+    {"invertY", 0, 0, 0, 1}, // gameplay
+    {"scrollDir", 1, 0, 0, 1}, // gameplay
+    {"sensitivityXCntrl", 4, 0.1, 15, 5}, // controller
+    {"sensitivityYCntrl", 4, 0.1, 15, 5}, // controller
+    {"aimSensitivityXCntrl", 3, 0.1, 15, 5}, // controller
+    {"aimSensitivityYCntrl", 3, 0.1, 15, 5}, // controller
+    {"deadZoneL", 0.3, 0, 1, 1}, // controller
+    {"deadZoneR", 0.25, 0, 1, 1}, // controller
+    {"triggerThres", 0.1, 0, 1, 1}, // controller
+    {"invertYCntrl", 0, 0, 0, 1}, // controller
+    {"gradSpeed", 0, 0, 0, 1}, // controller
+    {"autoFireMbl", 1, 0, 0, 1}, // mobile
+    {"aimAssist", 1, 0, 0, 1}, // mobile
+    {"sensitivityXMbl", 1.4, 0.1, 15, 4}, // mobile
+    {"sensitivityYMbl", 1.4, 0.1, 15, 4}, // mobile
+    {"aimSensitivityXMbl", 1.4, 0.1, 15, 4}, // mobile
+    {"aimSensitivityYMbl", 1.4, 0.1, 15, 4}, // mobile
+    {"invertYMbl", 0, 0, 0, 1}, // mobile
+    {"gradSpeedMbl", 0, 0, 0, 1}, // mobile
+    {"fov", 70, 60, 150, 1}, // viewmodel config.fov+20
+    {"fpsFOV", 65, 60, 150, 1}, // viewmodel config.fov+15
+};
+// ---- FRVR's touch layout (640x360 base)
+static const StrikeTouchControl k_touch[] = {
+    {"crouch", "Button", "crouching", NULL, "crouch", -1, 26, 152, -1, 46, 0, 0, 1, 1},
+    {"jump", "Button", "jump", NULL, "jump", -1, 26, 97, -1, 46, 0, 0, 0, 1},
+    {"reload", "Button", "reload", NULL, "reload", -1, 190, -1, 16, 46, 0, 0, 0, 1},
+    {"melee", "Toggle", "knife", "gun", "melee", -1, 100, -1, 16, 46, 0, 0, 0, 1},
+    {"swap", "Button", "weapon-switch", NULL, "swap", -1, 26, 229, -1, 46, 0, 0, 1, 1},
+    {"shoot", "Button", "shoot", NULL, "shoot", -1, 190, 140, -1, 46, 0, 0, 0, 1},
+    {"shootWhenAim", "Button", "shoot", NULL, "shoot", 52, -1, 140, -1, 46, 0, 0, 0, 1},
+    {"fakeMoveJoystick", "Joystick", NULL, NULL, NULL, 69, -1, -1, 49, 106, 0, 0, 0, 0},
+    {"aimJoyStick", "Joystick", NULL, NULL, NULL, -1, 97, 74, -1, 88, 0, 0, 0, 1},
+    {"backToMenu", "Button", "menu", NULL, "menu", 24, -1, 24, -1, 32, 0, 0, 0, 1},
+    {"tapToJump", "HintOnly", "jump", NULL, NULL, -1, 211, 125, -1, 0, 90, 55, 0, 1},
+    {"dragToMoveCamera", "HintOnly", "drag-camera", NULL, NULL, -1, 59, 175, -1, 0, 190, 119, 0, 1},
+};
+
 #define COUNT(a) (sizeof(a) / sizeof((a)[0]))
 const StrikeRules g_strike_rules = {
     .game_version = "1.37.2",
@@ -403,4 +579,22 @@ const StrikeRules g_strike_rules = {
     .kick_timer_ms = 120000,
     .game_time_min = 3,      // serverConfig gameTime def (minutes)
     .intermission_s = 30,
+    .physics = k_physics, .physics_count = COUNT(k_physics),
+    .delta_floor_ms = 0.1f, // procInputs max(floor, min(input[1], dltMx))
+    .trigger_action_limit = 5,
+    .end_timer_ms = 30000,       // config.endTimer
+    .posed_hitboxes = 0, .hit_zones_live = 1, // live target (d.obj.y / adjustedHeight), not the lag-compensated box
+    .binds = k_binds, .bind_count = COUNT(k_binds), .scroll_to_swap = 0,
+    .pitch_limit = 1.570796326794897f, // Math.PI/2
+    .flick_clamp = 500,
+    .settings = k_settings, .setting_count = COUNT(k_settings),
+    .aim_assist = {
+        .box_scale_mlt = 0.5f, .box_height_mlt = 0.5f, .grow_width = 1.5f, .grow_height = 1.1f,
+        .pull_initial = 2.0f, .pull_locked = 3.0f, .center_threshold = 0.005f, .locked_look_mlt = 0.75f,
+        .locked_vertical_mlt = 0.3f, .deadband_up = 0.4f, .deadband_down = 0.3f,
+        .can_see_near_dist = 20.0f, .can_see_pad_near = 0.4f, .can_see_pad_far = 0.5f, .aim_point_div = 2.0f,
+        .autofire_buffer_ms = 260},
+    .touch = {.base_width = 640, .base_height = 360, .move_joystick_size = 106, .tap_jump_max_travel = 9,
+              .no_forward_back = {0, 15, 165, 195}, .no_strafe = {75, 105},
+              .controls = k_touch, .control_count = COUNT(k_touch)},
 };

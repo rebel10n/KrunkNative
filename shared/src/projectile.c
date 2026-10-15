@@ -323,8 +323,10 @@ static void projectile_tick(Game *game, GameProjectile *projectile, const float 
                 if (weapon) {
                     const float hit_y = projectile->position.y + projectile->velocity.y * dt_ms * hit.t;
                     // v10.0.2: the box's hitType (v10:180187)
-                    head = hit.zone ? hit.zone - 1 == HIT_KIND_HEAD : player_hit_is_head(hit.player, hit.state.position.y, hit.state.adjusted_height, hit_y);
-                    leg = hit.zone ? hit.zone - 1 == HIT_KIND_LEG : player_hit_is_leg(hit.player, hit.state.position.y, hit_y);
+                    float zone_y, zone_ah; // Krunker Strike: the live target (Ruleset.hit_zones_live)
+                    player_hit_zone_base(hit.player, &hit.state, &zone_y, &zone_ah);
+                    head = hit.zone ? hit.zone - 1 == HIT_KIND_HEAD : player_hit_is_head(hit.player, zone_y, zone_ah, hit_y);
+                    leg = hit.zone ? hit.zone - 1 == HIT_KIND_LEG : player_hit_is_leg(hit.player, zone_y, hit_y);
                     damage = player_hit_damage(game, weapon, damage, head, leg);
                 }
                 // effectInd (Zapper): Zapped stacks, credited to the owner, unless a teammate

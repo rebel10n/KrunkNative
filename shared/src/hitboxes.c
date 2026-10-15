@@ -138,7 +138,7 @@ static void arm_boxes(BoxSink *sink, const Xform *arms, const Weapon *w, const i
 
 int hitboxes_build(const HitPose *pose, HitBox *out, const int max) {
     if (!pose || !out || max <= 0) return 0;
-    const GameConstants *k = &game_constants;
+    const GameConstants *k = &game_constants; // only v10 (Ruleset.posed_hitboxes) poses these boxes
     const float hurtbox = pose->hurtbox_scale > 0.0f ? pose->hurtbox_scale : 1.0f;
     const float head_mlt = pose->head_mlt > 0.0f ? pose->head_mlt : 1.0f;
     const float c_v = pose->crouch_val;
@@ -307,6 +307,8 @@ void hitboxes_pose_player(const Player *target, const PlayerStoredState *state, 
 }
 
 int hitboxes_active(const Game *game) {
+    // Krunker Strike keeps v7's padded AABB (Ruleset.posed_hitboxes 0, strike_rules.h)
+    if (!game_ruleset(game)->posed_hitboxes) return 0;
     return !(game && game->mode && game->mode->config.prop);
 }
 

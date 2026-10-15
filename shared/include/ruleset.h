@@ -17,6 +17,15 @@ typedef struct Ruleset_t { // shared.h forward-declares the tag for Game.rules
     const char *version; // "10.0.2": what menus and logs show
 
     const GameConstants *constants;
+    // Hit test: v10.0.2 traces the posed hit boxes (shared/src/hitboxes.c); 0 keeps v7.1.4's padded
+    // AABB (players.js lineInRect), as Krunker Strike does. hit_zones_live: head / leg zones measured
+    // on the target's live position (v7 / Strike) rather than the lag-compensated box (KrunkNative's fix).
+    unsigned char posed_hitboxes;
+    unsigned char hit_zones_live;
+    // procInputs' delta floor is constants->min_delta x config.deltaMlt (v10: 1 * deltaMlt ms) when set,
+    // else the bare constant (v7.1.4 / Strike: 0.1 ms)
+    unsigned char delta_floor_scaled;
+    float end_timer;            // config.endTimer: the end screen / map vote, seconds (v10 25, Krunker Strike 30)
 
     // Weapon ids index this table: 0 .. krunker_weapon_count-1 are Krunker's own (wire ids),
     // WEAPON_ID_KN_BASE.. KrunkNative's; the ids in between are NULL.
@@ -67,6 +76,9 @@ size_t rules_class_count(void);
 
 // The ruleset a game was configured with (Game.rules), else ruleset_current(). Never NULL.
 const Ruleset *game_ruleset(const struct Game_t *game);
+// Its physics constants (Ruleset.constants). The global game_constants is v10's: code reading a
+// constant a flavor changes (crouch_lean, min_delta under Krunker Strike) goes through this.
+const GameConstants *game_constants_of(const struct Game_t *game);
 // 1 in a ranked match (Game.is_ranked, set by the server's ranked lobby setup).
 int game_is_ranked(const struct Game_t *game);
 // The end-game KR multiplier of `game`: ranked.kr_mlt in a ranked match, else 1.

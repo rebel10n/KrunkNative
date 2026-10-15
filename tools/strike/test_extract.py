@@ -141,6 +141,30 @@ def test_golden(d):
           and mob["frvr_menu_constant"] is True, "mobile detection")
     check(any(f["family"] == "ChakraPetch" for f in d["ui"]["css"]["build"]["fonts"]), "ChakraPetch font")
     check("loading-screen__curtains" in (d["ui"]["entries"]["build"]["body_markup"] or ""), "loading screen")
+    # gameplay-parity sections (strike-gameplay2): physics, combat, input
+    ph = d["physics"]
+    check(ph["jumpVel"] == 0.072 and ph["gravity"] == 0.00015 and ph["playerSpeed"] == 0.00042, "physics movement constants")
+    check(abs(ph["crouchLean"] + 0.1 * 3.141592653589793) < 1e-9, "crouchLean is v7's -(PI * 0.1): %r" % ph["crouchLean"])
+    check(ph["fov"] == 50 and ph["mouseSens"] == 0.0024 and ph["dltMx"] == 33, "fov / mouseSens / dltMx")
+    cb = d["combat"]
+    check(cb["hit_test"] == "aabb" and not any(cb["posed_markers"].values()), "combat: v7 AABB hit test, no posed boxes")
+    inp = d["input"]
+    binds = {(b["bind"], b["index"]): (b["def"], b["alt"]) for b in inp["binds"]}
+    check(binds.get(("aim", -1)) == (10003, 16) and binds.get(("shoot", -1)) == (10001, 220), "aim / shoot binds")
+    check(("swap", -1) not in binds and ("reset", -1) not in binds, "Strike has no swap / reset bind")
+    check(inp["scroll_to_swap"] is False, "scroll never swaps weapons")
+    st = inp["settings"]
+    check(st["fov"]["val"] == 70 and st["fpsFOV"]["val"] == 65, "fov defaults %r %r" % (st["fov"]["val"], st["fpsFOV"]["val"]))
+    check(st["sensitivityXMbl"]["val"] == 1.4 and st["sensitivityXMbl"]["store_mlt"] == 4, "mobile sensitivity")
+    check(st["autoFireMbl"]["val"] is True and st["aimAssist"]["val"] is True, "auto-fire / aim assist on by default")
+    aa = inp["aim_assist"]
+    check(aa["pull"]["pull_initial"] == 2 and aa["pull"]["pull_locked"] == 3 and aa["pull"]["locked_look_mlt"] == 0.75
+          and aa["box"]["grow_width"] == 1.5 and aa["box"]["grow_height"] == 1.1 and aa["autofire"]["buffer_ms"] == 260,
+          "aim assist constants %r" % aa)
+    check(abs(inp["controls"]["pitch_limit"] - 3.141592653589793 / 2) < 1e-9, "pitch limit PI/2")
+    t = inp["touch"]
+    check(t["base_width"] == 640 and t["base_height"] == 360 and t["move_joystick"]["size"] == 106
+          and t["aim_zone"]["tap_jump_max_travel_px"] == 9, "touch layout base")
     print("golden: %s" % json.dumps(s, ensure_ascii=False))
 
 

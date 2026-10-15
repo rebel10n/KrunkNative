@@ -82,6 +82,60 @@ typedef struct {
     double def;
 } StrikeConfigDefault;
 
+// A default key bind (CONTROLS.binds: new ControlBind(name, def, altDef)); keyCodes, 10000 + button
+// for the mouse, -1 unbound. `index` is the array element of an array bind (move, streak, ...), -1 scalar.
+typedef struct {
+    const char *bind;
+    int index;
+    const char *name;
+    int def, alt;
+} StrikeBind;
+
+// An input / view setting's default as Strike's settings window ships it (val, slider range, and the
+// factor its set() stores: sensitivityXMbl 1.4 stores mblInput.sensX = 1.4 * 4).
+typedef struct {
+    const char *key;
+    double val;
+    double min, max;  // 0 / 0: not a slider
+    double store_mlt; // 1 when set() stores the value as is
+} StrikeSetting;
+
+// The mobile aim assist and auto-fire (gameLoop; client/src/strike_assist.c plays it).
+typedef struct {
+    float box_scale_mlt, box_height_mlt; // base box half size: playerScale * m / dist * zoom, playerHeight * m / ...
+    float grow_width, grow_height;       // the "on target" box: base x grow
+    float pull_initial, pull_locked;     // look pull factor before / after the horizontal lock
+    float center_threshold;              // |dist.x| below this (and no vertical pull) locks
+    float locked_look_mlt;               // every look input while locked
+    float locked_vertical_mlt;           // the locked vertical pull unless the target is airborne
+    float deadband_up, deadband_down;    // no vertical pull while the centre is within playerHeight * x / dist
+    float can_see_near_dist;             // canSee pad: near (< dist) / far
+    float can_see_pad_near, can_see_pad_far;
+    float aim_point_div;                 // aim at y + (playerHeight - crouchVal * crouchDst) / div
+    int autofire_buffer_ms;              // auto-fire releases this long after the last on-target frame
+} StrikeAimAssist;
+
+// One control of FRVR's touch layout (640x360 base, scaled by the screen height). -1 = side unset.
+typedef struct {
+    const char *id;
+    const char *type;   // "Button", "Toggle", "Joystick", "HintOnly"
+    const char *icon, *icon_active, *action;
+    int left, right, top, bottom;
+    int size, width, height;
+    unsigned char disabled; // in the table but never rendered (crouch, swap)
+    unsigned char interact; // 0: drawn only (the fake move joystick)
+} StrikeTouchControl;
+
+typedef struct {
+    int base_width, base_height;      // 640 x 360
+    int move_joystick_size;           // the dynamic move joystick (left half)
+    int tap_jump_max_travel;          // right-half touch moving at most this (px) is a jump tap
+    int no_forward_back[4];           // |degree - 180| ranges with no forward/back: [lo0, hi0, lo1, hi1]
+    int no_strafe[2];                 // ... with no strafe
+    const StrikeTouchControl *controls;
+    size_t control_count;
+} StrikeTouch;
+
 typedef struct StrikeRules_t {
     const char *game_version;   // "1.37.2"
     const char *build_version;  // the bundle's build id
@@ -113,6 +167,29 @@ typedef struct StrikeRules_t {
     int kick_timer_ms;
     int game_time_min;          // match minutes (serverConfig gameTime default)
     int intermission_s;         // intermTmr default
+
+    // physics: the engine config keys GameConstants carries, Strike's values (Krunker JS units);
+    // strike_constants_apply() converts. Strike is v7.1.4's config (crouchLean -PI*0.1 where v10 has 0).
+    const StrikeStat *physics;
+    size_t physics_count;
+    float delta_floor_ms;       // procInputs: max(floor, min(input[1], dltMx)) (v7: 0.1 ms; v10: 1 * deltaMlt)
+    int trigger_action_limit;   // config.triggerActionLimit
+    int end_timer_ms;           // config.endTimer (the end screen)
+    // combat: Strike keeps v7's padded AABB hit test with zones measured on the live target (no v10
+    // posed hit boxes)
+    unsigned char posed_hitboxes;
+    unsigned char hit_zones_live;
+
+    // input and look
+    const StrikeBind *binds;    // the default binds (a Krunker bind not listed here is unbound)
+    size_t bind_count;
+    unsigned char scroll_to_swap; // the wheel swaps weapons (Strike: never)
+    float pitch_limit;          // look pitch clamp +-
+    int flick_clamp;            // mouseSkipFix flick clamp (px)
+    const StrikeSetting *settings;
+    size_t setting_count;
+    StrikeAimAssist aim_assist;
+    StrikeTouch touch;
 } StrikeRules;
 
 // The generated data (strike_data.c). Never NULL.
@@ -124,6 +201,8 @@ const StrikeClass *strike_class(const StrikeRules *rules, int class_id);
 const StrikeWeapon *strike_weapon(const StrikeRules *rules, int weapon_id);
 const StrikeMode *strike_mode(const StrikeRules *rules, int mode_id);
 const StrikeConfigDefault *strike_config_default(const StrikeRules *rules, const char *var);
+const StrikeBind *strike_bind(const StrikeRules *rules, const char *bind, int index);
+const StrikeSetting *strike_setting(const StrikeRules *rules, const char *key);
 
 // ---- the engine tables built from the data (strike_rules.c; built once, then read-only) ---------
 // Krunker v10.0.2's ruleset (ruleset.h) with Strike's weapon, class and mode tables: the same key /
@@ -135,3 +214,8 @@ const struct Ruleset_t *strike_ruleset(void);
 const GameConfig *strike_game_config(void);
 // Write one weaponConfig key (JS units) into a Weapon. Returns 0 for a key the engine has no field for.
 int strike_weapon_apply(Weapon *weapon, const char *key, double value);
+// Write one engine config key (JS units: ms, per-ms speeds) into GameConstants (s, per-s, as
+// constants_v10.c). Returns 0 for a key GameConstants has no field for.
+int strike_constants_apply(GameConstants *constants, const char *key, double value);
+// Strike's GameConstants: v10's with every `physics` key applied (Ruleset.constants of strike_ruleset()).
+const GameConstants *strike_constants(void);

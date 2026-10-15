@@ -14,6 +14,11 @@ regenerated, never hand-edited:
             = the modes Strike's menu describes (descriptionLang present in Strike's i18n)
   config    Strike's serverConfig defaults (custom game / lobby settings)
   limits    player cap, private-match capacity, bots, tick rates, timers
+  physics   the engine config keys KrunkNative's GameConstants carries (PHYSICS_KEYS), Strike's values,
+            the procInputs delta floor and triggerActionLimit
+  combat    the hit test (v7 padded AABB, zones on the live target; no v10 posed boxes)
+  input     default binds, scroll-to-swap, pitch limit, flick clamp, the input / FOV settings defaults,
+            the mobile aim assist + auto-fire constants and FRVR's touch layout
 
 Run from anywhere with `python3 -I tools/strike/gen_rules.py` (writes the file) or `--check`
 (exit 1 when the checked-in file is stale). Stdlib only; reads JSON, executes nothing.
@@ -47,6 +52,28 @@ WEAPON_NONSCALAR_NOTES = {
     "recoilData": "v10's Assault Rifle recoil pattern; KN does not implement recoilData, so dropping it "
                   "changes nothing",
 }
+
+
+# Engine config keys with a GameConstants field (strike_constants_apply in strike_rules.c converts the units).
+PHYSICS_KEYS = (
+    "billboardCnt", "mouseSens", "worldUV", "playerHeight", "borderH", "cameraHeight", "climbHeight", "dltMx",
+    "jumpVel", "aimJumpSlow", "jumpPush", "crouchJump", "crouchSpd", "crouchLean", "playerSpeed", "slippingSpeed",
+    "airSpeed", "aimSlow", "playerSlippingJumpCooldown", "terrainSlideThreshold", "terrainSlipDecel",
+    "terrainSlideDecel", "terrainDecel", "slideDecel", "airDecel", "groundDecel", "ladderDecel", "crouchDst",
+    "gravity", "armScale", "armInset", "chestWidth", "chestScale", "legScale", "legHeight", "headScale", "decelMin",
+    "slideTime", "playerSlideVelMlt", "playerTerrainSlideVelMlt", "idleAnimS", "interpolation", "leanSens",
+    "leanMax", "leanPull", "leanPullZ", "leanMltZ", "bobPullY", "bobPullZ", "bobMltY", "bobMltZ", "crouchAnim",
+    "collPad", "boosterSpd", "ladderSpeed", "ladderScale", "ladderWidth", "deathY", "recoilMlt", "spreadAdj",
+    "uArmLength", "lArmLength", "armOff", "animMult", "aimAnimMlt", "crouchAnimMlt", "stepAnim", "stepPull",
+    "diskSpin",
+)
+# The settings the client takes Strike's defaults for (client/src/ui/ui_settings.c under the flavor).
+INPUT_SETTINGS = (
+    "sensitivityX", "sensitivityY", "aimSensitivityX", "aimSensitivityY", "invertY", "scrollDir",
+    "sensitivityXCntrl", "sensitivityYCntrl", "aimSensitivityXCntrl", "aimSensitivityYCntrl", "deadZoneL",
+    "deadZoneR", "triggerThres", "invertYCntrl", "gradSpeed", "autoFireMbl", "aimAssist", "sensitivityXMbl",
+    "sensitivityYMbl", "aimSensitivityXMbl", "aimSensitivityYMbl", "invertYMbl", "gradSpeedMbl", "fov", "fpsFOV",
+)
 
 
 def die(msg):
@@ -292,6 +319,46 @@ def main():
     def val(x):
         return x["value"] if isinstance(x, dict) else x
 
+    # ---- physics
+    ph = d["physics"]
+    w("// ---- physics: engine config keys with a GameConstants field (Krunker JS units: ms, per-ms speeds)")
+    w("static const StrikeStat k_physics[] = {")
+    for key in PHYSICS_KEYS:
+        if key not in ph:
+            die("physics key %s missing from strike_data.json" % key)
+        w("    {%s, %s}," % (c_str(key), c_num(ph[key])))
+    w("};")
+    w("")
+
+    # ---- input
+    inp = d["input"]
+    w("// ---- input: CONTROLS.binds defaults (keyCode, 10000 + mouse button, -1 unbound)")
+    w("static const StrikeBind k_binds[] = {")
+    for b in inp["binds"]:
+        w("    {%s, %d, %s, %d, %d}," % (c_str(b["bind"]), b["index"], c_str(b["name"]), b["def"], b["alt"]))
+    w("};")
+    w("// ---- input / view settings defaults (settings window rows)")
+    w("static const StrikeSetting k_settings[] = {")
+    for key in INPUT_SETTINGS:
+        r = inp["settings"].get(key)
+        if r is None:
+            die("setting %s missing" % key)
+        v = r["val"]
+        w("    {%s, %s, %s, %s, %s}, // %s%s" % (c_str(key), c_num(num(v)), c_num(r.get("min", 0)), c_num(r.get("max", 0)),
+                                         c_num(r.get("store_mlt", 1)), r["cat"], (" " + r["val_expr"]) if r.get("val_expr") else ""))
+    w("};")
+    t = inp["touch"]
+    w("// ---- FRVR's touch layout (%dx%d base)" % (t["base_width"], t["base_height"]))
+    w("static const StrikeTouchControl k_touch[] = {")
+    for c in t["controls"]:
+        pos = c.get("pos") or {}
+        w("    {%s, %s, %s, %s, %s, %d, %d, %d, %d, %d, %d, %d, %d, %d}," % (
+            c_str(c["id"]), c_str(c["type"]), c_str(c.get("icon")), c_str(c.get("iconActive")), c_str(c.get("action")),
+            pos.get("left", -1), pos.get("right", -1), pos.get("top", -1), pos.get("bottom", -1),
+            c.get("size", 0), c.get("width", 0), c.get("height", 0), int(c["disabled"]), 0 if c.get("interact") is False else 1))
+    w("};")
+    w("")
+
     w("#define COUNT(a) (sizeof(a) / sizeof((a)[0]))")
     w("const StrikeRules g_strike_rules = {")
     w("    .game_version = %s," % c_str(meta["game_version"]))
@@ -312,6 +379,36 @@ def main():
     w("    .kick_timer_ms = %d," % val(k["kickTimer"]))
     w("    .game_time_min = %d,      // serverConfig gameTime def (minutes)" % timing["gameTime"]["def"])
     w("    .intermission_s = %d," % timing["intermTmr"]["def"])
+    cb = d["combat"]
+    w("    .physics = k_physics, .physics_count = COUNT(k_physics),")
+    w("    .delta_floor_ms = %s, // procInputs max(floor, min(input[1], dltMx))" % c_float(cb["procinputs_delta_floor_ms"]))
+    w("    .trigger_action_limit = %d," % ph["triggerActionLimit"])
+    w("    .end_timer_ms = %d,       // config.endTimer" % ph["endTimer"])
+    w("    .posed_hitboxes = %d, .hit_zones_live = %d, // %s" % (cb["hit_test"] != "aabb", cb["hit_test"] == "aabb", cb["zones"]["from"]))
+    c = inp["controls"]
+    w("    .binds = k_binds, .bind_count = COUNT(k_binds), .scroll_to_swap = %d," % int(inp["scroll_to_swap"]))
+    w("    .pitch_limit = %s, // %s" % (c_float(c["pitch_limit"]), c["pitch_limit_expr"]))
+    w("    .flick_clamp = %d," % c["flick_clamp"])
+    w("    .settings = k_settings, .setting_count = COUNT(k_settings),")
+    a = inp["aim_assist"]
+    w("    .aim_assist = {")
+    w("        .box_scale_mlt = %s, .box_height_mlt = %s, .grow_width = %s, .grow_height = %s," % (
+        c_float(a["box"]["player_scale_mlt"]), c_float(a["box"]["player_height_mlt"]), c_float(a["box"]["grow_width"]), c_float(a["box"]["grow_height"])))
+    p = a["pull"]
+    w("        .pull_initial = %s, .pull_locked = %s, .center_threshold = %s, .locked_look_mlt = %s," % (
+        c_float(p["pull_initial"]), c_float(p["pull_locked"]), c_float(p["center_threshold"]), c_float(p["locked_look_mlt"])))
+    w("        .locked_vertical_mlt = %s, .deadband_up = %s, .deadband_down = %s," % (
+        c_float(p["locked_vertical_mlt"]), c_float(p["deadband_up"]), c_float(p["deadband_down"])))
+    am = re.search(r"/ (\d+)$", a["aim_point"])
+    w("        .can_see_near_dist = %s, .can_see_pad_near = %s, .can_see_pad_far = %s, .aim_point_div = %s," % (
+        c_float(a["can_see_near_dist"]), c_float(a["can_see_pad_near"]), c_float(a["can_see_pad_far"]), c_float(am.group(1) if am else 2)))
+    w("        .autofire_buffer_ms = %d}," % a["autofire"]["buffer_ms"])
+    ma = t["move_angles"]
+    w("    .touch = {.base_width = %d, .base_height = %d, .move_joystick_size = %d, .tap_jump_max_travel = %d," % (
+        t["base_width"], t["base_height"], t["move_joystick"]["size"], t["aim_zone"]["tap_jump_max_travel_px"]))
+    w("              .no_forward_back = {%s}, .no_strafe = {%s}," % (
+        ", ".join(str(x) for r in ma["no_forward_back"] for x in r), ", ".join(str(x) for x in ma["no_strafe"])))
+    w("              .controls = k_touch, .control_count = COUNT(k_touch)},")
     w("};")
 
     text = "\n".join(lines) + "\n"
