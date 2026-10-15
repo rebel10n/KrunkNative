@@ -1117,7 +1117,10 @@ def run_native_lobby():
     script = ("0 menu\n300 call showWindow 2\n3000 text @status [id=kioStatus]\n3100 nodes @rows .quickJoin\n"
               "3200 call krunkerJoin \"%s\"\n4500 vis @ask1 knCaptchaHolder knCaptchaManual\n4600 clickid knCaptchaCancel\n"
               "5200 vis @cancelled knCaptchaHolder\n5300 call showWindow 2\n5800 call krunkerJoin \"%s\"\n7000 vis @ask2 knCaptchaHolder\n"
-              "7100 clickid knCaptchaToken\n7200 type %s\n7300 clickid knCaptchaUse\n8000 play\n13000 players\n13200 quit\n"
+              "7100 clickid knCaptchaToken\n7200 type %s\n7300 clickid knCaptchaUse\n8000 play\n13000 players\n"
+              # in the official game: the Invite link is krunker.io's, the serverinfo and the menu's region
+              # label name the official lobby (its list row: region, map, mode, players)
+              "13050 con status\n13100 call copyInviteLink\n13150 text @region [id=menuRegionLabel]\n13200 quit\n"
               % (GAME_ID, GAME_ID, PASTE_TOKEN))
     stub, p, out, log = launch_native(label, script, {}, args=("--offline",))
     lines = finish_native(label, stub, p, out, log, timeout=180)
@@ -1143,6 +1146,17 @@ def run_native_lobby():
     check(f"{label}: the matchmaker let the token through", stub.captcha_ok.is_set())
     check(f"{label}: WebSocket /ws?gameId=&clientKey=", stub.ws_paths[:1] == [f"/ws?gameId={GAME_ID}&clientKey={CLIENT_ID}"], stub.ws_paths)
     check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+    check(f"{label}: Invite in the official game copies krunker.io's link (?game= the id as it is)",
+          f"[party] invite link copied: https://krunker.io/?game={GAME_ID}" in text, text[-300:])
+    # the stub's lobby: [GAME_ID, "de-fra", 3, 8, {"i": "Kanji", "g": 0}] (krunker_region_name: Frankfurt)
+    check(f"{label}: the menu's region label names the official region", re.search(r"@region n=1 .*?text=Frankfurt\b", text) is not None,
+          re.search(r"@region.*", text).group(0) if re.search(r"@region.*", text) else None)
+    srv = re.search(r"\[console\] Lobby: (.*)", text)
+    check(f"{label}: serverinfo names the official lobby, its region, map and mode",
+          srv is not None and srv.group(1).startswith(f"{GAME_ID} | region Frankfurt (de-fra) | map Kanji | mode ") and srv.group(1).endswith("(0)"),
+          srv.group(1) if srv else None)
+    check(f"{label}: serverinfo's players are the official list's (3/8)", "[console] Players: 3/8 (krunker.io's list)" in text, "")
+    check(f"{label}: serverinfo's endpoint is krunker.io's game server", "[console] Endpoint: krunker.io official game server" in text, "")
     check(f"{label}: no Turnstile token reaches the log", PASTE_TOKEN not in "\n".join(l for l in lines if "[input_script]" not in l))
 
 

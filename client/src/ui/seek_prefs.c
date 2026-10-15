@@ -17,6 +17,7 @@
 #define SEEK_MODES_KEY "seek_modes"
 #define SEEK_MAPS_KEY "seek_maps"
 #define SEEK_SERVERS_KEY "knSeekServers"
+#define SEEK_ON_LAUNCH_KEY "knSeekOnLaunch"
 
 // The first index of a saved list ("3", "3,5", 3, [3]); -1 = none / Any.
 static int saved_first_index(const char *key) {
@@ -52,6 +53,16 @@ SeekServers seek_prefs_servers(void) {
     if (s && !strcmp(s, "both")) return SEEK_SERVERS_BOTH;
     return SEEK_SERVERS_KN;
 #endif
+}
+
+// The switch stores a boolean (checkbox onclick, setSetting); a script's 0 / "0" / "false" counts as
+// off too. Unset (no default in the tables) is on.
+int seek_prefs_on_launch(void) {
+    const cJSON *v = ui_setting_value(SEEK_ON_LAUNCH_KEY);
+    if (!v) return 1;
+    if (cJSON_IsFalse(v) || (cJSON_IsNumber(v) && v->valuedouble == 0)) return 0;
+    const char *s = cJSON_GetStringValue(v);
+    return !(s && (!strcmp(s, "false") || !strcmp(s, "0")));
 }
 
 void seek_prefs_data_query(char *out, const size_t n) {
@@ -116,6 +127,18 @@ static void server_type_html(StrBuf *sb) {
 }
 #endif
 
+// Auto Seek on Launch: a switch row like v10's settings switches (onclick setSetting, checked when on)
+static void launch_seek_html(StrBuf *sb) {
+    sb_append(sb, "<div class=\"settName\" title=\"");
+    sb_append_esc(sb, I18N("kn.quickplay.autoSeek.info", "When the game starts, seek a game with the Server Type, Seek Mode and Seek Map above, as Find New Game (F4) does"));
+    sb_append(sb, "\">");
+    sb_append_esc(sb, I18N("kn.quickplay.autoSeek", "Auto Seek on Launch"));
+    sb_append(sb, " <label class=\"switch\" style=\"margin-left:10px\"><input type=\"checkbox\" onclick=\"window.setSetting(&quot;" SEEK_ON_LAUNCH_KEY
+                  "&quot;, this.checked)\"");
+    if (seek_prefs_on_launch()) sb_append(sb, " checked=\"\"");
+    sb_append(sb, "><span class=\"slider\"><span class=\"grooves\"></span></span></label></div>");
+}
+
 static void section_html(StrBuf *sb) {
     char value[16];
     sb_append(sb, "<div class=\"setHed\" id=\"setHed_quickplay\" onclick=\"window.windows[0].collapseFolder(this)\">"
@@ -156,6 +179,7 @@ static void section_html(StrBuf *sb) {
 #ifndef __EMSCRIPTEN__
     server_type_html(sb);
 #endif
+    launch_seek_html(sb);
     sb_append(sb, "</div>");
 }
 

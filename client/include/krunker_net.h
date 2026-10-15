@@ -92,6 +92,13 @@ int krunker_net_seek_new(Client *client, const char *region, int use_list);
 // RECENT_LOBBIES_MAX (recent_lobbies.h). krunker_lobbies_pick picks those last.
 int krunker_net_recent_rank(const char *game_id);
 const char *krunker_net_game(void); // the official game being joined / played, "" when none
+// The official session (any state but off, the dropped one included): its game id ("" when none) and
+// the region it was asked for ("" when none). The server info reads both (ui_console.c, servers_ui.c).
+const char *krunker_net_session_game(void);
+const char *krunker_net_region(void);
+// copyInviteLink in an official game: <site>/?game=<id>, the id as krunker.io writes it ("NY:bbbbb"),
+// the site KRUNKNATIVE_KRUNKER_URL or https://krunker.io. 1 = written; 0 = no official session.
+int krunker_net_invite_link(char *out, size_t n);
 // Leave the official game (no-op when not in one). reason NULL: an intended switch (another
 // session follows); else the error screen shows it.
 void krunker_net_leave(Client *client, const char *reason);

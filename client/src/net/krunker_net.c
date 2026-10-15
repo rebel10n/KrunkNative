@@ -1193,6 +1193,20 @@ int krunker_net_recent_rank(const char *game_id) { return recent_lobbies_rank(&K
 
 const char *krunker_net_game(void) { return K.state == KS_OPEN || K.state == KS_CONNECTING ? K.game_id : ""; }
 
+// K.game_id outlives the session (KS_OFF keeps it): the session accessors check the state
+const char *krunker_net_session_game(void) { return K.state != KS_OFF ? K.game_id : ""; }
+const char *krunker_net_region(void) { return K.region; }
+
+// krunker_lobbies.c opens the same link for the browser opt-out (KRUNKER_DEFAULT_SITE); ids are
+// [A-Za-z0-9:_-] (krunker_lobbies.c id_ok), so they need no escaping
+int krunker_net_invite_link(char *out, const size_t n) {
+    const char *game = krunker_net_session_game();
+    if (!out || !n || !game[0]) return 0;
+    const char *site = getenv("KRUNKNATIVE_KRUNKER_URL");
+    snprintf(out, n, "%s/?game=%s", site && site[0] ? site : "https://krunker.io", game);
+    return 1;
+}
+
 void krunker_net_leave(Client *client, const char *reason) {
     if (K.state == KS_OFF) return;
     if (client && K.connected) {

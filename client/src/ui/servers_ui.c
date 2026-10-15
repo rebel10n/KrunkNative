@@ -542,8 +542,10 @@ static void link_tick(Client *client) {
 }
 
 // copyInviteLink: location.protocol + "//" + location.host + "/?game=" + gameId (native: the
-// public web client's origin), the id in its short link form (page_write_game).
+// public web client's origin), the id in its short link form (page_write_game). In an official
+// krunker.io game the link is krunker.io's own (krunker_net_invite_link: <site>/?game=NY:bbbbb).
 void servers_ui_invite_link(char *out, const size_t n) {
+    if (krunker_net_invite_link(out, n)) return;
     char origin[256], esc[480];
     html_page_origin(origin, sizeof(origin));
     link_escape(esc, sizeof(esc), g_link_game);
@@ -658,6 +660,7 @@ static void on_seek(void *user, const int status, const char *body, const size_t
                 printf("[mm] find new game: no KrunkNative server matches, trying krunker.io\n");
             } else {
                 printf("[mm] find new game failed: %s\n", cJSON_IsString(err) ? err->valuestring : "no response");
+                // (the launch's Both seek has no lobby to stay in: not connected, so the error screen)
                 servers_ui_seek_failed(seek_error_text(cJSON_IsString(err) ? err->valuestring : status ? "GameIssue" : NULL));
             }
             cJSON_Delete(res);
@@ -940,6 +943,50 @@ static void on_ping_list(void *user, const int status, const char *body, const s
     // instead of quietly landing somewhere else
     else seek(requested_game, !requested_game, NULL);
     free((void *) requested_game);
+}
+
+static void start_seek(const char *game_id);
+
+// Auto Seek on Launch (seek_prefs.h): the launch's one seek, the one F4 runs for the same Quickplay
+// settings. Official (or Both without a matchmaker) is krunker.io's list; ours is the startup seek
+// (start_seek: its dataQuery carries the Seek Mode / Seek Map). Both = ours when one matches, else
+// an official lobby (on_seek's Find New Game fallback, with no lobby to stay in).
+static int launch_seek(void) {
+    const SeekServers type = seek_prefs_servers();
+    printf("[mm] launch seek: Quickplay %s\n", type == SEEK_SERVERS_OFFICIAL ? "official krunker.io" : type == SEEK_SERVERS_BOTH ? "both" : "KrunkNative");
+    if (type == SEEK_SERVERS_OFFICIAL || (type == SEEK_SERVERS_BOTH && !g_brain_mode)) return krunker_lobbies_seek();
+    if (!g_brain_mode) return 0;
+    if (type == SEEK_SERVERS_BOTH) {
+        g_find_seek = g_find_both = 1;
+        g_find_prev_game[0] = 0;
+    }
+    start_seek(NULL);
+    return 1;
+}
+
+// The menu is up (its page and setup ran): the launch seek waits for it (seek_prefs_on_launch)
+static int menu_ready_for_launch(void) {
+    return !html_ui_available() || (html_ui_is_ready() && menu_ui()->dom_ready);
+}
+
+// The menu's region label for an official krunker.io game: the region's name as the official list
+// gives it ("New York", krunker_region_name), the game asked for when the list does not name it.
+// Left when the session ends (v10's setGameInstanceId shows the brain's region the same way).
+static char g_official_label[160];
+static void official_label_tick(void) {
+    const char *game = krunker_net_session_game();
+    if (!game[0]) {
+        if (g_official_label[0]) {
+            g_official_label[0] = 0;
+            menu_set_region_label("");
+        }
+        return;
+    }
+    if (!strcmp(game, g_official_label)) return;
+    snprintf(g_official_label, sizeof(g_official_label), "%s", game);
+    const cJSON *t = krunker_lobbies_find(game);
+    const char *region = t ? cJSON_GetStringValue(cJSON_GetArrayItem(t, 1)) : NULL;
+    menu_set_region_label(krunker_region_name(region && region[0] ? region : krunker_net_region()));
 }
 
 static void start_seek(const char *game_id) {
@@ -3581,6 +3628,7 @@ void servers_ui_tick(Client *client) {
     servers_timer_tick(); // windows[1] "Ends in" countdown
     if (backend_enabled()) direct_account_tick(client, !g_brain_mode || g_pin == PIN_DIRECT); // tracks the account either way
     if (g_pin != PIN_NONE) g_started = 1; // connected / disconnected by hand first: no startup seek
+    official_label_tick();
     // ?play= / ?game= requests once the startup seek is done (or right away without one)
     if ((g_pending_play[0] || g_pending_game[0]) && (!g_brain_mode || (g_started && !g_seek_inflight && client->net_connected))) {
         // (the startup seek took the page's own ?game=; a later one, e.g. a hub Join link,
@@ -3625,7 +3673,6 @@ void servers_ui_tick(Client *client) {
         static double brain_ready_at = -1.0;
         if (brain_ready_at < 0.0) brain_ready_at = glfwGetTime() > g_start_time ? glfwGetTime() : g_start_time;
         if (has_token && !account_get() && glfwGetTime() - brain_ready_at < RESTORE_WAIT_SECONDS) return;
-        g_started = 1;
         char *game = NULL;
         if (g_pending_game[0]) {
             // the page's ?game= / --game "game=<id>" (servers_ui_query) is this startup seek's
@@ -3644,6 +3691,13 @@ void servers_ui_tick(Client *client) {
         game = getenv("KRUNKNATIVE_GAME") ? strdup(getenv("KRUNKNATIVE_GAME")) : NULL;
 #endif
         }
+        if (!game && seek_prefs_on_launch()) { // Auto Seek on Launch: the Quickplay seek, once the menu is up
+            if (!menu_ready_for_launch()) return;
+            g_started = 1;
+            launch_seek();
+            return;
+        }
+        g_started = 1;
         start_seek(game);
         free(game);
         return;

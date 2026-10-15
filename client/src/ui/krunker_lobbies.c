@@ -255,6 +255,16 @@ void krunker_lobbies_network_changed(void) {
 }
 
 const cJSON *krunker_lobbies_list(void) { return krunker_lobbies_enabled() ? K.list : NULL; }
+
+const cJSON *krunker_lobbies_find(const char *id) {
+    const cJSON *t;
+    if (!id || !krunker_lobbies_enabled()) return NULL;
+    cJSON_ArrayForEach(t, K.list) {
+        const char *tid = cJSON_GetStringValue(cJSON_GetArrayItem(t, 0));
+        if (tid && !strcmp(tid, id)) return t;
+    }
+    return NULL;
+}
 int krunker_lobbies_loading(void) { return K.loading; }
 const char *krunker_lobbies_error(void) { return K.error; }
 double krunker_lobbies_players(void) { return K.players; }
@@ -375,6 +385,10 @@ void krunker_lobbies_open(const char *id) {
 int krunker_lobbies_enabled(void) { return 0; }
 void krunker_lobbies_refresh(const int force) { (void) force; }
 const cJSON *krunker_lobbies_list(void) { return NULL; }
+const cJSON *krunker_lobbies_find(const char *id) {
+    (void) id;
+    return NULL;
+}
 int krunker_lobbies_loading(void) { return 0; }
 const char *krunker_lobbies_error(void) { return ""; }
 void krunker_lobbies_network_changed(void) {}

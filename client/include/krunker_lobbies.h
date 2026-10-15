@@ -35,6 +35,8 @@ int krunker_lobbies_enabled(void);              // 0 on the web, with the matchm
 // window (menu_rerender_if_open(2)) and runs a pending seek (krunker_lobbies_seek).
 void krunker_lobbies_refresh(int force);
 const cJSON *krunker_lobbies_list(void);        // tuples, most players first; NULL = none yet
+// The tuple of lobby <id> in the current list ([id, region, players, max, meta, timeLeft]); NULL = not listed
+const cJSON *krunker_lobbies_find(const char *id);
 int krunker_lobbies_loading(void);
 const char *krunker_lobbies_error(void);        // "" = the last request answered; else a sentence for the player
 // The proxy setting changed (ui_client_settings.c): the next Servers window asks again at once.

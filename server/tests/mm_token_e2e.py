@@ -313,10 +313,14 @@ def in_game(st):
 
 
 def client_f4(port, game_a, game_b):
-    p, log = client("f4", port, "0 play\n1000 state\n2000 down F4\n2050 up F4\n9000 respawn\n15000 state\n16000 quit\n")
+    p, log = client("f4", port, "0 play\n1000 state\n2000 down F4\n2050 up F4\n9000 respawn\n12000 call copyInviteLink\n15000 state\n16000 quit\n")
     done = finish(p, 90)
     text = read_log(log)
     js = joined(text)
+    # a KrunkNative match: the Invite link is ours (the public origin, the lobby's short ?game= id)
+    inv = re.search(r"\[party\] invite link copied: (\S+)", text)
+    check("C1: Invite in a KrunkNative match copies our link", inv is not None and inv.group(1).startswith("https://krunk.io/?game=")
+          and "krunker.io/?game=" not in inv.group(1), inv.group(1) if inv else text[-300:])
     check("C1: the client fetched a validation token over HTTP", "[mm] validation token (" in text, text[-500:])
     check("C1: and joined a lobby with the ticket", len(js) >= 1 and js[0] in (game_a[0], game_b[0]), str(js))
     check("C1: F4 seeks a new game", "[controls] F4: find new game" in text and "[mm] quick match: seeking a lobby other than" in text,
@@ -325,6 +329,33 @@ def client_f4(port, game_a, game_b):
     check("C1: ... in the same process (no relaunch)", done and p.returncode == 0 and "[app] reload: restarting" not in text,
           "exit %s" % p.returncode)
     check("C1: in the game after F4", in_game(states(text)), str(states(text)))
+
+
+def client_launch(port, game_b):
+    """Auto Seek on Launch (Settings > Quickplay, on by default): the launch seeks once, the way F4 does,
+    after the menu is up; a launch that names a lobby (KRUNKNATIVE_GAME, ?game=) does not seek."""
+    p, log = client("launch", port, "0 play\n6000 state\n9000 quit\n")
+    finish(p, 60)
+    text = read_log(log)
+    js = joined(text)
+    check("L1: the launch seeks once (the option is on by default)", text.count("[mm] launch seek: Quickplay KrunkNative") == 1 and len(js) == 1,
+          "%s %s" % (text.count("[mm] launch seek"), str(js)))
+    check("L1: and plays the lobby it found", in_game(states(text)) and js and "[mm] joining %s at" % js[0] in text, str(states(text)))
+    p, log = client("launch_link", port, "0 play\n6000 state\n9000 quit\n", extra_env={"KRUNKNATIVE_GAME": game_b[0]})
+    finish(p, 60)
+    text = read_log(log)
+    check("L2: a launch that names a lobby does not seek (no launch seek line)", "[mm] launch seek" not in text, text[-300:])
+    check("L2: it joins the lobby it names, once", joined(text) == [game_b[0]], str(joined(text)))
+    # the switch saved off (knSettings.json, as Settings > Quickplay writes it): the launch is the startup seek
+    cfg = os.path.join(WORK, "launch-off-cfg")
+    os.makedirs(os.path.join(cfg, "krunknative"), exist_ok=True)
+    with open(os.path.join(cfg, "krunknative", "knSettings.json"), "w") as f:
+        json.dump({"knSeekOnLaunch": False}, f)
+    p, log = client("launch_off", port, "0 play\n6000 state\n9000 quit\n", cfg=cfg)
+    finish(p, 60)
+    text = read_log(log)
+    check("L3: Auto Seek on Launch switched off: the launch seeks no more (the startup seek as before)",
+          "[mm] launch seek" not in text and len(joined(text)) == 1, "%s %s" % (text.count("[mm] launch seek"), str(joined(text))))
 
 
 def client_f5(port):
@@ -485,6 +516,7 @@ def main():
             g[4]["g"] = {"Burg": MODES["a"], "Sandstorm": MODES["b"]}.get(g[4]["i"], MODES["kio"])
         protocol(port, env, node_a, node_b)
         client_f4(port, node_a[1], node_b[1])
+        client_launch(port, node_b[1])
         client_f5(port)
         client_settings(port, node_b[1])
         client_official(port)

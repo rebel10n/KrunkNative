@@ -365,6 +365,8 @@
  "kn.quickplay.any": "Any",
  "kn.quickplay.anyMap": "any map",
  "kn.quickplay.anyMode": "any mode",
+ "kn.quickplay.autoSeek": "Auto Seek on Launch",
+ "kn.quickplay.autoSeek.info": "When the game starts, seek a game with the Server Type, Seek Mode and Seek Map above, as Find New Game (F4) does",
  "kn.quickplay.header": "Quickplay",
  "kn.quickplay.seekMap": "Seek Map",
  "kn.quickplay.seekMap.info": "Quick Match, Find New Game (F4) and the server browser look for this map",

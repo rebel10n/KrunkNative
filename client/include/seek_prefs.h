@@ -19,6 +19,9 @@ typedef enum {
 int seek_prefs_mode(void);          // mode id (modes.h, = Krunker's mode index), -1 = any
 int seek_prefs_map(void);           // map catalogue index (map_catalog.h, 0..31 = Krunker's mapIndex), -1 = any
 SeekServers seek_prefs_servers(void);
+// Settings > Quickplay > Auto Seek on Launch (knSeekOnLaunch, default on; v10 has no such option):
+// the launch seeks the way F4 does, once the menu is up, unless it names a lobby or starts offline.
+int seek_prefs_on_launch(void);
 const char *seek_prefs_map_name(void);  // the wanted map's name, NULL = any
 
 // dataQuery JSON for /mm/seek-game ({"dsmo":[1],"dsma":[5]}), "" when both are Any.

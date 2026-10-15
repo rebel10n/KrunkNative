@@ -17,6 +17,7 @@
 // they are the sandbox host's controls (local_game_host).
 #include <console.h>
 #include <krunker_net.h> // official_sync: the official session's counters
+#include <krunker_lobbies.h> // serverinfo of an official game: its list row (region, players, map, mode)
 #include <ui_mods.h>
 #include <ui_logic.h>
 #include <backend_ui.h> // servers_ui_connect_direct / _disconnect / _reconnect
@@ -493,6 +494,34 @@ static void mode_label(const Game *game, char *out, const size_t n) {
     else snprintf(out, n, "(unknown)");
 }
 
+// An official krunker.io game (krunker_net.h): the lobby's own row of krunker.io's list gives its
+// region, map, mode and players (the server's values, not ours); a lobby the list does not name
+// (a link to a custom game) reports what this client plays.
+static void print_official_details(const Client *client, const int humans, const int active) {
+    const Game *game = &client->game;
+    const char *id = krunker_net_session_game();
+    const cJSON *t = krunker_lobbies_find(id);
+    const char *region = t ? cJSON_GetStringValue(cJSON_GetArrayItem(t, 1)) : NULL;
+    if (!region || !region[0]) region = krunker_net_region();
+    const cJSON *meta = t ? cJSON_GetArrayItem(t, 4) : NULL;
+    appendf(COL_INFO, "Endpoint: krunker.io official game server (secure WebSocket)");
+    if (t) {
+        const char *map = cJSON_GetStringValue(cJSON_GetObjectItem(meta, "i"));
+        const cJSON *mode = cJSON_GetObjectItem(meta, "mode");
+        const GameModeConfig *m = cJSON_IsNumber(mode) ? mode_config(mode->valueint) : NULL;
+        appendf(COL_INFO, "Lobby: %s | region %s (%s) | map %s | mode %s (%d)", id, krunker_region_name(region), region,
+                map ? map : "(unknown)", m && m->alias ? m->alias : "(unknown)", cJSON_IsNumber(mode) ? mode->valueint : -1);
+        appendf(COL_INFO, "Players: %d/%d (krunker.io's list)", (int) cJSON_GetNumberValue(cJSON_GetArrayItem(t, 2)),
+                (int) cJSON_GetNumberValue(cJSON_GetArrayItem(t, 3)));
+    } else {
+        char map[96], mode[64];
+        map_label(game, map, sizeof(map));
+        mode_label(game, mode, sizeof(mode));
+        appendf(COL_INFO, "Lobby: %s (not on krunker.io's list) | region %s (%s) | map %s | mode %s", id, krunker_region_name(region), region, map, mode);
+        appendf(COL_INFO, "Players: %d/%d (this client)", active, humans);
+    }
+}
+
 // printServerDetails
 static void print_server_details(void) {
     const Client *client = con_client();
@@ -515,6 +544,10 @@ static void print_server_details(void) {
     char socket_id[24] = "-1"; // io.socketId (-1 until the server assigns one; singleplayer too)
     if (client->net_connected && !client->offline && client->me) snprintf(socket_id, sizeof(socket_id), "%d", client->me->uid);
     appendf(COL_INFO, "Connection: %s | socket %s | state %s", status, socket_id, state);
+    if (!client->offline && krunker_net_session_game()[0]) {
+        print_official_details(client, humans, active);
+        return;
+    }
 #ifdef __EMSCRIPTEN__
     appendf(COL_INFO, "Endpoint: %s", emscripten_run_script_string("location.origin")); // socket?.url || location.origin
 #else
