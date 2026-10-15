@@ -15,6 +15,7 @@ NET_PACKET_HITs through the client's event handler (input script `nethit`):
   5. the end screen (`end`): a hit that lands during the end animation or on the results (the player
      is still active then) shows no marker: v7's showEndScreen -> hideUI hides the overlay canvas the
      marker is drawn on; here #inGameUI, which holds #knHitmarker, is down for the whole end screen
+     (on the results only magenta the hit adds counts: the guest signup banner has its own)
 Prints PASS/FAIL lines; exit code 0 only when everything passed. Needs a headless GL device
 (KRUNKNATIVE_HEADLESS=1: EGL; KRUNKNATIVE_EGL_DEVICE picks it).
 """
@@ -28,7 +29,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from kn_png import magenta_count  # noqa: E402
+from kn_png import is_magenta, magenta_count, read_rgba  # noqa: E402
 
 BUILD = sys.argv[1] if len(sys.argv) > 1 else "cmake-build-debug"
 CACHE = os.path.expanduser("~/.cache")
@@ -55,6 +56,28 @@ def frames(prefix):
     return sorted(glob.glob(os.path.join(WORK, prefix + "_*.png")))
 
 
+def magenta_new(path, base, box):
+    """magenta pixels in the box of `path` that are not magenta in `base` (the same view before the
+    hit): the results page has magenta of its own (the guest signup banner's purple card sits in the
+    box), only what the hit adds counts; -1 when a file cannot be read"""
+    try:
+        w, h, ch, rows = read_rgba(path)
+        bw, bh, bch, brows = read_rgba(base)
+    except (OSError, KeyError, ValueError):
+        return -1
+    if (w, h) != (bw, bh):
+        return -1
+    x0, y0, x1, y1 = box
+    hits = 0
+    for y in range(max(y0, 0), min(y1, h)):
+        row, brow = rows[y], brows[y]
+        for x in range(max(x0, 0), min(x1, w)):
+            if is_magenta(row[x * ch], row[x * ch + 1], row[x * ch + 2]) and \
+                    not is_magenta(brow[x * bch], brow[x * bch + 1], brow[x * bch + 2]):
+                hits += 1
+    return hits
+
+
 def main():
     cfg = os.path.join(WORK, "cfg", "krunknative")
     os.makedirs(cfg)
@@ -68,7 +91,7 @@ def main():
                 f"3000 vis @dead2 knHitmarker\n3000 frames {WORK}/later 1\n"
                 f"3100 respawn\n9000 state\n9000 nethit 0\n9016 vis @again knHitmarker\n9016 frames {WORK}/again 1\n"
                 f"9500 con end\n13500 nethit 1\n13516 vis @endanim knHitmarker endUI\n13516 frames {WORK}/endanim 3\n"
-                f"20000 vis @end endUI\n20000 state\n20100 nethit 1\n20116 vis @endhit knHitmarker\n"
+                f"20000 vis @end endUI\n20000 state\n20050 frames {WORK}/endpre 1\n20100 nethit 1\n20116 vis @endhit knHitmarker\n"
                 f"20116 frames {WORK}/endhit 3\n21000 vis @endlater knHitmarker\n21100 quit\n")
     log = os.path.join(WORK, "client.log")
     env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY", "KRUNKNATIVE_BRAIN_URL")}
@@ -107,9 +130,13 @@ def main():
     ended = [l for l in lines if "[input_script] state t=20" in l]
     check("the end screen is up (`end`)", any(re.search(r"@end endUI=1", l) for l in lines) and ended and "ended=1" in ended[0],
           f"{ended[:1]}")
+    endpre = frames("endpre")
     for label, prefix, what in (("endanim", "endanim", "during the end animation"), ("endhit", "endhit", "on the results")):
         shots = frames(prefix)
-        counts = [magenta_count(s, CENTRE) for s in shots]
+        if label == "endhit": # the results page is static: compare with its frame before the hit
+            counts = [magenta_new(s, endpre[0], CENTRE) if endpre else -1 for s in shots]
+        else:
+            counts = [magenta_count(s, CENTRE) for s in shots]
         later = vis(lines, "endlater") if label == "endhit" else "0"
         check(f"end screen: no marker (a hit that lands {what})",
               vis(lines, label) == "0" and later == "0" and shots and all(c == 0 for c in counts) and

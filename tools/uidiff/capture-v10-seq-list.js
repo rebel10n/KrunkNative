@@ -77,14 +77,14 @@ module.exports = function (seq, V) {
     note: 'Self-kill (what the native console `kill` does): the "You Died" card (.death-ui-bottom-empty, backdrop-filter blur over the checker) with death-ui-moveup / chat-moveup 1.5 s.',
   });
   seq('kill', {
-    bg: 'checker', prepare: withBot, times: [0, 100, 200, 300, 500, 700, 1000, 1500, 2000, 3500, 4000, 4200],
+    bg: 'checker', drawnOrigin: true, prepare: withBot, times: [0, 100, 200, 300, 500, 700, 1000, 1500, 2000, 3500, 4000, 4200],
     trigger: (c) => evalOk(c, `${SG}.players.kill(${BOT}, ${SP}, {})`, 'kill the bot'),
     probe: `killFeed.childNodes.length`, frameJs: V.PIN_TIMER,
     note: 'The local player kills a sandbox bot: the kill feed row (4 s, then gone: 3500 / 4000 / 4200), the score popup and the medal; native: `bot 1` then `kill @bots`.',
   });
   // v10:173750 players.changeHealth(victim, doer, dmg): DO_DAMAGE to the doer (hit marker + damage number)
   seq('hit', {
-    bg: 'checker', prepare: withBot, times: [0, 50, 100, 150, 200, 300, 500, 700, 1000],
+    bg: 'checker', drawnOrigin: true, prepare: withBot, times: [0, 50, 100, 150, 200, 300, 500, 700, 1000],
     trigger: (c) => evalOk(c, `${SG}.players.changeHealth(${BOT}, ${SP}, 40, null, false, {})`, 'damage the bot'),
     frameJs: V.PIN_TIMER,
     note: 'The local player deals 40 damage to a bot (DO_DAMAGE): the hit marker and the damage number over 1 s. The native has no damage command: its scenario injects the hit marker (state.hit) at the origin; damage numbers are not injectable there yet.',
@@ -111,14 +111,14 @@ module.exports = function (seq, V) {
   // ---- E. end of match
 
   seq('end-vic', {
-    bg: 'checker', prepare: inGame, times: range(0, 3000, 100),
+    bg: 'checker', drawnOrigin: true, prepare: inGame, times: range(0, 3000, 100),
     trigger: (c) => evalOk(c, `${SG}.endGame()`, 'endGame'),
     frameJs: V.PIN_TIMER,
     note: 'The sandbox game ends (the "end" packet): the victory title on the overlay canvas and #endUI, every 100 ms for 3 s. Native: console `end` (3 s timer), origin at the end packet.',
   });
   // results: v10 builds them (_72911, GUI.endScreen.init) only for a connected socket (v10:219684)
   seq('end-results', {
-    bg: 'checker', prepare: inGame, times: [0, 2000, 4000, 5000, 5500, 6000, 7000],
+    bg: 'checker', drawnOrigin: true, prepare: inGame, times: [0, 2000, 4000, 5000, 5500, 6000, 7000],
     trigger: (c) => evalOk(c, `window.__knScope().sock.connected = true; ${SG}.endGame()`, 'endGame'),
     frameJs: V.PIN_TIMER,
     note: 'The end animation, then the results (tabs, Combat Earnings) with the socket marked connected.',

@@ -272,7 +272,12 @@ diffs it against the reference frame captured at the same time after the same ev
   (the first multiple of 1.6 s after that: every infinite menu animation at its start), `boot`
   (clock 0), `init` (the first INIT), `spawn`, `death` (the local player's), `kill` (its next
   kill), `end` (the match end), `selector:<css>` (the first frame laying out a match: a page
-  timer or packet). Frames land exactly on origin + t on the 60 Hz virtual clock.
+  timer or packet). Frames land exactly on origin + t on the 60 Hz virtual clock. Every native
+  origin is the frame that processes the event and draws it; on the v10 side a sequence with a
+  `trigger`, no `origin` expression and `drawnOrigin: true` (kill, hit, end-vic, end-results) starts at
+  the end of the first 16.7 ms step after the trigger (the rAF that draws the overlay canvas: hit
+  marker, score popup, victory title), not at the trigger itself, whose screenshot shows the DOM
+  changes but not yet the canvas.
 - `background: "checker"` (`checker[:cell[:#light:#dark]]`, default 32 px `#8a8a8a` / `#343434`)
   replaces the hidden 3D view with a texture, so `backdrop-filter` and `filter: blur()` show; the
   v10 capture paints the same pixels (`capture-v10-seq.js` `checkerPng`).
@@ -319,8 +324,10 @@ spin reply), `store-tooltip` (the signed-in store list).
 
 ## Scenarios
 
-The JSON files are generated: edit `tools/uidiff/gen_scenarios.py` and run
-`python3 -I tools/uidiff/gen_scenarios.py`. Region rects come from each reference's
+The JSON files are generated. The v10 in-game ones (`ingame-*`) come from
+`python3 -I tools/uidiff/gen_v10_ingame.py`, which takes its states from `gen_scenarios.py`'s table
+and applies v10's values (edit both there); `gen_scenarios.py` run on its own writes the retired v7
+set and deletes the scenarios it does not know (history, do not run it). Region rects come from each reference's
 `<name>.rects.json` (viewport rects of the page's own elements, written by `capture-v7.js`),
 measured on the PNG only where no element exists (the death screen rows).
 

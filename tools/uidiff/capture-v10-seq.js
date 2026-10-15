@@ -22,9 +22,12 @@
 //     the animations already running at the origin to 0 (the infinite menu animations: the native page
 //     starts them at clock 0);
 //   - the origin is the virtual time of the first 16.7 ms step after which `origin` (a page expression)
-//     is true, or the moment `trigger` returned when there is no `origin`: the native side
-//     (client/src/ui/ui_scenario.c anim_origin) uses the same frame quantisation, and uidiff's timing check
-//     allows +-1 frame.
+//     is true, or the moment `trigger` returned when there is no `origin`; `drawnOrigin: true` moves the
+//     latter to the end of the first 16.7 ms step after the trigger: the frame whose rAF draws an event
+//     the game loop paints on the overlay canvas (hit marker, score popup, victory title), as the native
+//     origin frame is the one that processes and draws it (client/src/ui/ui_scenario.c anim_origin kill,
+//     end, applied); a shot right at the trigger shows the DOM changes but not yet the canvas, one frame
+//     behind the native. uidiff's timing check allows +-1 frame.
 // `bg: 'checker'` paints the transparent 3D canvas' place with the checker pattern of the native scenario
 // background "checker" (32 px cells #8a8a8a / #343434, from the top-left corner: checkerPng() and
 // ui_scenario.c checker_pixels() must stay identical), so backdrop-filter / blur show in the references.
@@ -173,7 +176,10 @@ async function runSequence(sq) {
     if (!sq.boot) { await c.eval(ANIM_DRIVER); await c.eval(`window.__knVT.adopt(${!!sq.restartAnims})`); }
     if (sq.trigger) await sq.trigger(c, vc);
     let origin = null;
-    if (!sq.origin) origin = await vc.now();
+    if (!sq.origin) {
+      if (sq.trigger && sq.drawnOrigin) await step(FRAME_MS); // the frame that draws the trigger's event (see the header)
+      origin = await vc.now();
+    }
     const limit = (sq.originTimeout || 15000);
     // until the origin: 60 Hz steps (with boot, the page's own load: virtual time waits for fetches)
     while (origin === null) {
@@ -206,7 +212,7 @@ async function runSequence(sq) {
     }
     const rafCalls = (await c.eval('window.__knRafCalls').catch(() => 0)) - raf0;
     fs.writeFileSync(path.join(dir, 'rects.json'), JSON.stringify(await c.eval(V.RECTS)) + '\n');
-    const meta = { name: sq.name, size: sq.size, background: sq.bg || 'page', times: sq.times, origin: sq.originNote || sq.origin || 'the trigger',
+    const meta = { name: sq.name, size: sq.size, background: sq.bg || 'page', times: sq.times, origin: sq.originNote || sq.origin || (sq.drawnOrigin ? 'the first frame after the trigger' : 'the trigger'),
       restartAnims: !!sq.restartAnims, frames, rafCalls, probe: sq.probe ? { expr: sq.probe, values: probes } : undefined, note: sq.note || '', pageErrors: errors.length, requestsRefused: blocked.length,
       tool: 'tools/uidiff/capture-v10-seq.js' };
     fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(meta, null, 1) + '\n');

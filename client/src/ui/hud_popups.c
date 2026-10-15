@@ -145,6 +145,11 @@ static HtmlElem popup_text_el(const HtmlElem parent) {
     html_dom_set_style(el, "font-family", "gamefont");
     html_dom_set_style(el, "line-height", "1");
     html_dom_set_style(el, "transform", "translate(-50%, -50%)"); // textAlign center, textBaseline middle
+    // textBaseline "middle" is the middle of the em box Chromium normalizes from the font's ascent +
+    // descent: GameFont (FrVrKrunkerBold2.ttf, upm 1000, ascent 1125, descent 250) puts the baseline
+    // (1125 - 250) / 1375 / 2 = 0.3182 em below the anchor. A line-height: 1 box centres the 1.375 em
+    // content area instead, baseline (1.125 - 0.25) / 2 = 0.4375 em below: up by the difference.
+    html_dom_set_style(el, "margin-top", "-0.1193em");
     html_dom_append(parent, el);
     return el;
 }
