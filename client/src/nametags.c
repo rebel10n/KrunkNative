@@ -80,6 +80,9 @@ typedef struct {
     char custom_ml[16];       // its margin-left
     int uid;                 // player sid, -1 = free slot, <= NT_DEMO_UID demo tags
     int visible;             // player.isSpectating (nameVisRate result)
+    int pass_los;            // diagnosis (KRUNKNATIVE_NAMETAG_LOG): the pass's Game.canSee result, -1 none
+    double pass_t;           // diagnosis: glfwGetTime of that pass
+    vec3 pass_me;            // diagnosis: the viewer's position at that pass
     int shown;               // last written root display
     int seen;                // still in the player list this frame
     int style;               // nametagStyle the geometry was written for (-1 none)
@@ -114,6 +117,7 @@ static struct {
     double last_tick_ms;     // watchdog: last nametags_tick
     int watchdog;            // timer id armed
     int demo;                // KRUNKNATIVE_NAMETAG_DEMO: -1 unread, 0 off, 1 account fields, 2 fixed tags
+    int alive;               // the local player was alive at the last nametags_tick (forcePos on a respawn)
 } g_nt = {.demo = -1};
 
 /* ------------------------------------------------------------------ small helpers */
@@ -200,6 +204,12 @@ static float nt_distance_scale(const vec3 camera, const vec3 p) {
     return s > NT_MIN_SCALE ? s : NT_MIN_SCALE;
 }
 
+// UTILS.getD3D (the Euclidean distance) between two points.
+static double nt_distance(const vec3 a, const vec3 b) {
+    const double dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+    return sqrt(dx * dx + dy * dy + dz * dz);
+}
+
 // UTILS.pointInBox3D(point, {x, y, z, width, height, length}) with half extents.
 static int nt_point_in_box(const vec3 p, const vec3 center, const vec3 half) {
     return p.x >= center.x - half.x && p.x <= center.x + half.x && p.y >= center.y - half.y &&
@@ -212,11 +222,12 @@ static int nt_point_in_box(const vec3 p, const vec3 center, const vec3 half) {
 static double js_min(const double a, const double b) { return a != a || b != b ? NAN : a < b ? a : b; }
 static double js_max(const double a, const double b) { return a != a || b != b ? NAN : a > b ? a : b; }
 
-// Map objects Game.canSee tests: active, not noShoot, not transparent (o != 1). KrunkNative
-// objects carry no noShoot for the special prefabs, so this is the hitscan filter
-// (player.c combat_object_shootable) plus the transparent material bit.
+// Map objects Game.canSee tests (v10 canSee: !isTri, !noShoot, !complexColl, active, and not
+// transparent unless the caller asks for transparent blockers, which the nametags never do).
+// KrunkNative objects carry no noShoot for the special prefabs, so this is the hitscan filter
+// (player.c combat_object_shootable) plus the complex-collision and transparent material bits.
 static int nt_blocks_sight(const Object *object) {
-    if (!object->active || object->no_shoot || object->collision_type == COLLISION_TYPE_NONE) return 0;
+    if (!object->active || object->no_shoot || object->complex_coll || object->collision_type == COLLISION_TYPE_NONE) return 0;
     if (object->kill || object->score_zone || object->team_zone || object->teleporter || object->checkpoint ||
         object->pickup || object->flag || object->premium || object->verified ||
         object->objective || object->bomb_site || object->ladder || object->ramp) return 0;
@@ -592,13 +603,24 @@ static void nt_info(const Player *player, TagInfo *info) {
     }
 }
 
+// KRUNKNATIVE_NAMETAG_LOG set: the pass also records its line-of-sight result per tag (diagnosis).
+static int nt_trace_on(void) {
+    static int on = -1;
+    if (on < 0) {
+        const char *path = getenv("KRUNKNATIVE_NAMETAG_LOG");
+        on = path && path[0];
+    }
+    return on;
+}
+
 // index.js gameLoop, every config.nameVisRate ms: player.isSpectating for every other
-// active player with a model.
-static void nt_visibility_pass(Client *client) {
+// active player with a model. v10.0.2 (v10.js:221735) runs it for every game, the offline
+// sandbox included (v10 has no singlePlayer gate; the v3.1.1 one froze the states and kept
+// the killer's tag up for good).
+static void nt_visibility_pass(Client *client, const vec3 camera) {
     const Game *game = &client->game;
     const Player *me = client->me;
     const int spectating = spectate_active();
-    if (client->offline) return;                        // !Game.singlePlayer (the offline sandbox game)
     if (!((me && me->active) || spectating)) return;    // dead: states (and the killer's tag) stay
 
     const ClientRenderSettings *rs = client_render_settings();
@@ -630,8 +652,57 @@ static void nt_visibility_pass(Client *client) {
             rs->hide_names == 3 || (mode && mode->hide_names)) {
             visible = 0;
         }
+        // nameDist (Trade): hidden beyond the mode's distance from the camera (v10.js:221746)
+        if (mode && mode->name_dist && nt_distance(camera, player->position) > mode->name_dist) visible = 0;
         tag->visible = visible;
+        if (nt_trace_on()) { // diagnosis: what this pass saw (the trace compares it with the frame's own sight line)
+            tag->pass_los = viewer ? nt_can_see(game, viewer, player->position) : -1;
+            tag->pass_t = glfwGetTime();
+            tag->pass_me = viewer ? viewer->position : player->position;
+        }
     }
+}
+
+// KRUNKNATIVE_NAMETAG_LOG=<file> (tests and diagnosis, like KRUNKNATIVE_PLAYER_LOG): one JSON
+// line per frame and other player: the pass's result (visible), the tag's state (shown), the
+// inputs of the decision (active, mesh, projection, distance, line of sight from the viewer).
+static void nt_trace(Client *client, const vec3 camera, const int hidden) {
+    static FILE *log;
+    static int state; // 0 unread, 1 open, -1 off
+    if (state == 0) {
+        const char *path = getenv("KRUNKNATIVE_NAMETAG_LOG");
+        log = path && path[0] ? fopen(path, "w") : NULL;
+        state = log ? 1 : -1;
+    }
+    if (state < 0) return;
+    static long frame;
+    frame++;
+    const Game *game = &client->game;
+    const Player *me = client->me;
+    for (size_t i = 0; i < game->player_count; i++) {
+        const Player *player = game->players[i];
+        if (!player || player == me) continue;
+        const Tag *tag = nt_tag_for(player->uid, 0);
+        double fx = -1.0, fy = -1.0;
+        vec3 anchor = player->position;
+        const PlayerMesh *pmesh = player->mesh;
+        if (pmesh) {
+            anchor = pmesh->anchor ? pmesh->anchor->position : player->position;
+            anchor.y += game_constants.player_height + NT_NAME_OFFSET - player->crouch_val * game_constants.crouch_distance;
+        }
+        const int in_view = nt_project(&client->camera, anchor, &fx, &fy);
+        const double dist = nt_distance(camera, anchor);
+        fprintf(log, "{\"f\":%ld,\"t\":%.3f,\"uid\":%d,\"team\":%d,\"active\":%d,\"mesh\":%d,\"hidden\":%d,\"tag\":%d,"
+                     "\"visible\":%d,\"shown\":%d,\"in_view\":%d,\"fx\":%.3f,\"fy\":%.3f,\"dist\":%.1f,\"los\":%d,"
+                     "\"me_active\":%d,\"me_team\":%d,\"pass_los\":%d,\"pass_t\":%.3f,\"pass_me\":[%.2f,%.2f,%.2f],"
+                     "\"me\":[%.2f,%.2f,%.2f]}\n",
+                frame, glfwGetTime(), player->uid, player->team, player->active, player->mesh != NULL, hidden, tag != NULL,
+                tag ? tag->visible : -1, tag ? tag->shown : -1, in_view, fx, fy, dist,
+                me ? nt_can_see(game, me, player->position) : -1, me ? me->active : -1, me ? me->team : -1,
+                tag ? tag->pass_los : -1, tag ? tag->pass_t : 0.0, tag ? tag->pass_me.x : 0.0f, tag ? tag->pass_me.y : 0.0f,
+                tag ? tag->pass_me.z : 0.0f, me ? me->position.x : 0.0f, me ? me->position.y : 0.0f, me ? me->position.z : 0.0f);
+    }
+    fflush(log);
 }
 
 static void nt_players(Client *client, const vec3 camera, const int hidden) {
@@ -643,6 +714,14 @@ static void nt_players(Client *client, const vec3 camera, const int hidden) {
     const int target_uid = spectate_target_uid();
     // aD = player && player.team ? player.team : window.spectating ? 1 : 0
     const int local_team = me && me->team ? me->team : spectating ? 1 : 0;
+
+    // players.js forcePos() on our spawn: every player's B8epi1 = false (v10.js:170705), so
+    // nothing is shown until the next nameVisRate pass decides again
+    const int alive = me && me->active;
+    if (alive && !g_nt.alive) {
+        for (int i = 0; i < NT_MAX_TAGS; i++) g_nt.tags[i].visible = 0;
+    }
+    g_nt.alive = alive;
 
     // g1(): the killer's isSpectating = true while the death camera runs
     const int killer = menu_view_killer_uid();
@@ -659,6 +738,9 @@ static void nt_players(Client *client, const vec3 camera, const int hidden) {
         Tag *tag = nt_tag_for(player->uid, 0);
         if (!tag) continue;
         tag->seen = 1;
+        // a player that is dead or has no model (before its spawn's mesh) loses its flag: the
+        // player init sets B8epi1 = false on every spawn (v10.js:169228), so a respawn starts hidden
+        if (!player->active || !player->mesh) tag->visible = 0;
 
         if (hidden || rs->nametag_opacity <= 0.0f || !player->active || player == me || player->is_you ||
             !player->mesh || (spectating && player->uid == target_uid) || !tag->visible) {
@@ -697,6 +779,7 @@ static void nt_players(Client *client, const vec3 camera, const int hidden) {
         tag->uid = -1;
         tag->visible = 0;
     }
+    nt_trace(client, camera, hidden);
 }
 
 /* ------------------------------------------------------------------ AI */
@@ -969,7 +1052,7 @@ void nametags_tick(Client *client) {
 
     if (now >= g_nt.next_vis) {
         g_nt.next_vis = now + NT_VIS_RATE_S;
-        nt_visibility_pass(client);
+        nt_visibility_pass(client, client->camera.position);
     }
 
     // aA: #endUI or #menuHolder up; aB: also no kill card

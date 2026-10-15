@@ -267,6 +267,9 @@ frame-yield-test: build ## Mid-frame asset loads (spray texture, joining players
 offline-dead-test: build ## Offline play: a dead local player gets no tracers / projectiles / player sync until it respawns, like online (headless; EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 300 $(PYTHON) -I client/tests/offline_dead_filter_e2e.py $(DEBUG_DIR)
 
+nametag-test: build ## Offline FFA bots: each bot's nametag shows when in view with line of sight, no random flips, the killer's tag clears on respawn (headless; EGL_DEVICE=)
+	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 1500 $(PYTHON) -I client/tests/nametag_visibility_e2e.py $(DEBUG_DIR)
+
 selection-test: build ## Page text selection (dev console): engine checks (ui_test selection) + a headless client drag / Ctrl+C / Ctrl+A run (EGL_DEVICE=)
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) env -u DISPLAY -u WAYLAND_DISPLAY timeout 120 ./$(DEBUG_DIR)/ui_test --headless selection
 	$(if $(EGL_DEVICE),KRUNKNATIVE_EGL_DEVICE=$(EGL_DEVICE),) timeout 300 $(PYTHON) -I client/tests/console_select_e2e.py $(DEBUG_DIR)
