@@ -648,6 +648,16 @@ static void locks_reset(KrunkerLink *l) {
     l->move_lock = l->locked = l->noclip = 0;
 }
 
+// The "q" encoder forgets what it sent: the delta bases and the previous angles. game.deob.js
+// startGame (:218971-218974) clears them (iîîíîîi = {}, iîiìîií = []) and sets resync 0; SYNC_FAILED
+// (:220333) clears them too and sets resync 1. The next window then carries every field and absolute
+// angles, so the server takes its state from that window and not from what it still holds from the
+// last life: a window the server dropped while we were dead (io_q) was never decoded on its side.
+static void input_encoder_forget(KrunkerLink *l) {
+    memset(l->last_set, 0, sizeof(l->last_set));
+    l->prev_angle_count = 0;
+}
+
 // "start" [timer, team, spectating, challMode, moveLock, ...] (iìïìiìi game.deob.js:218939, sent
 // :208260): moveLock != null -> lockMove() / unlockMove() (no position), then iíiiiïî(false): unlocked.
 static void on_start_locks(KrunkerLink *l, const KrunkerFrame *f) {
@@ -904,6 +914,9 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         case KRUNKER_S2C_START_GAME: { // [formattedTimer, ...] (iìïìiìi :218939 -> iìíîiïì(arg0) :218948):
             // team / class ride our SPAWN; arg0 seeds the round clock so the HUD shows it before the
             // first "t" arrives (the string only, no raw ms, like START_GAME's own timer call).
+            // startGame's input reset (:218971-218974, resync 0): the first "q" of the life is a full state
+            input_encoder_forget(l);
+            l->resync = 0;
             const KrunkerValue *s = arg(&f, 0);
             if (krunker_is(s, KRUNKER_STR)) {
                 const NetTimerPacket t = {.seconds = timer_seconds(NULL, s), .end = 0};
@@ -918,8 +931,7 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         case KRUNKER_S2C_SYNC_PLAYER: on_sync_player(l, &f); break;
         case KRUNKER_S2C_SYNC_FAILED: { // iiîïîìï: the server dropped our inputs; the next "q" restarts the
             // deltas, and tmpInpts (the pending prediction inputs) empties: none of them will be acked
-            memset(l->last_set, 0, sizeof(l->last_set));
-            l->prev_angle_count = 0;
+            input_encoder_forget(l);
             l->resync = 1;
             l->sync_failed++;
             uint8_t ext[NET_EXT_HEADER_SIZE];

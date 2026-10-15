@@ -429,6 +429,15 @@ int main(void) {
               link.sync_failed == 1, "SYNC_FAILED drops the pending inputs (NET_EXT_KN_INPUTS_DROPPED)");
     }
     clear();
+    // start (startGame, game.deob.js:218971-218974): the encoder forgets what it sent, so the next window
+    // repeats every field with absolute angles (resync 0), though nothing changed since the last one
+    feed(&link, "start", (KrunkerValue[]) {KRUNKER_V_STR("3:00")}, 1);
+    krunker_link_send_ours(&link, NET_PACKET_INPUT_BATCH, batch, sizeof(batch));
+    changes = g_out_count ? krunker_frame_arg(&g_out[0], 5) : NULL;
+    CHECK(g_out_count == 1 && fnum(&g_out[0], 0) == 0 && krunker_is(changes, KRUNKER_MAP) && changes->len == 11 &&
+              krunker_is(krunker_frame_arg(&g_out[0], 4), KRUNKER_ARRAY),
+          "q after start: every field and the angles again (changes %u)", changes ? changes->len : 0);
+    clear();
 
     // movement keys: our move_dir m (angle -PI/2 + m PI/4, forward 0) -> movDirs index (m + 1) % 8, none -1
     static const int dirs[][2] = {{-1, -1}, {0, 1}, {1, 2}, {2, 3}, {4, 5}, {6, 7}, {7, 0}};

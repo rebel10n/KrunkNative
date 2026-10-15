@@ -65,6 +65,7 @@ typedef struct {
     int prev_angle_count;
     // negative control: read input[4] as our raw move_dir (the link before the movDirs fix)
     int control_raw_move_dir;
+    int dead; // between our death and our respawn: the server ignores our "q" frames (io_q)
 } Server;
 
 static void server_defaults(Server *s) {
@@ -79,6 +80,21 @@ static void server_defaults(Server *s) {
     s->height = 11.0;
     s->on_ground = 1;
     s->last_vals[4] = -1;
+}
+
+// players.add / player.init for a new life at the spawn (flat floor, spawn at y 0): the physics
+// state from rest (onGround true, no velocity, inputSN 0). The "q" decoder keeps the last decoded
+// frame (last_vals: the keys and flags the server still holds). That is the assumption under test:
+// a window the server dropped while we were dead is never decoded, so the server's held inputs can
+// be stale when the new life starts. The official client answers that at its "start" (see below).
+static void server_respawn(Server *s) {
+    s->x = s->y = s->z = s->ox = s->oy = s->oz = 0.0;
+    s->vx = s->vy = s->vz = 0.0;
+    s->on_ground = 1, s->was_on_ground = 0, s->did_jump = s->did_jump_w = 0, s->on_terrain = 0;
+    s->can_slide = 1, s->can_slide_t = 0, s->slide = 0, s->jump_cd = 0, s->wall_jump_c = 0;
+    s->aim = 1.0, s->crouch = 0.0, s->height = 11.0;
+    s->input_sn = 0;
+    s->dead = 0;
 }
 
 // players.jump (:172028) with config.autoJump off (tryJump :172066)
@@ -356,10 +372,19 @@ static void io_send(void *user, const uint8_t *frame, const size_t len) {
     wire_push(&g_sim->up, g_sim->now + g_sim->latency, frame, len);
 }
 
+static void sim_apply_spawn(Sim *sim, const NetSpawnPacket *s);
+
 static void io_emit(void *user, const NetPacket *packet) {
     (void) user;
     Sim *sim = g_sim;
     switch (packet->type) {
+        case NET_PACKET_SPAWN: {
+            NetSpawnPacket spawn;
+            memset(&spawn, 0, sizeof(spawn));
+            memcpy(&spawn, packet->payload, packet->length < sizeof(spawn) ? packet->length : sizeof(spawn));
+            sim_apply_spawn(sim, &spawn);
+            break;
+        }
         case NET_PACKET_GAME_CONFIG:
             if (!sim->control_no_config) game_config_receive(&sim->game, packet->payload, packet->length);
             break;
@@ -370,6 +395,7 @@ static void io_emit(void *user, const NetPacket *packet) {
             break;
         }
         case NET_PACKET_RECON: {
+            if (!sim->me || !sim->me->active) break; // client_recon_apply: a dead player takes no "l"
             NetReconPacket recon;
             memset(&recon, 0, sizeof(recon));
             memcpy(&recon, packet->payload, packet->length < sizeof(recon) ? packet->length : sizeof(recon));
@@ -469,7 +495,8 @@ static void server_tick(Sim *sim) {
     size_t len;
     while (wire_pop(&sim->up, sim->now, &data, &len)) {
         KrunkerFrame f;
-        if (krunker_proto_decode(data, len, 0, &f) == KRUNKER_PROTO_OK) {
+        // io_q: a dead player's "q" is dropped before it is decoded (the decoder state is not updated)
+        if (!sim->server.dead && krunker_proto_decode(data, len, 0, &f) == KRUNKER_PROTO_OK) {
             if (f.name_len == 1 && f.name[0] == 'q') {
                 double frames[NET_INPUT_BATCH_MAX][15];
                 const int n = server_decode_q(&sim->server, &f, frames, NET_INPUT_BATCH_MAX);
@@ -479,12 +506,14 @@ static void server_tick(Sim *sim) {
         }
         free(data);
     }
-    if (sim->now >= sim->next_sync) { // sf 1: one "l" a second
+    if (sim->now >= sim->next_sync) { // sf 1: one "l" a second, to a living player
         sim->next_sync += 1.0;
-        KrunkerBuf buf = {0};
-        server_sync_frame(&sim->server, sim->control_aim_ours, &buf);
-        wire_push(&sim->down, sim->now + sim->latency, buf.data, buf.len);
-        krunker_buf_free(&buf);
+        if (!sim->server.dead) {
+            KrunkerBuf buf = {0};
+            server_sync_frame(&sim->server, sim->control_aim_ours, &buf);
+            wire_push(&sim->down, sim->now + sim->latency, buf.data, buf.len);
+            krunker_buf_free(&buf);
+        }
     }
 }
 
@@ -504,6 +533,10 @@ static void sim_step(Sim *sim, Input input, const float fps) {
     while (wire_pop(&sim->down, sim->now, &data, &len)) {
         krunker_link_on_frame(&sim->link, data, len);
         free(data);
+    }
+    if (!sim->me || !sim->me->active) { // dead or not spawned yet: no input frame leaves (main.c)
+        game_tick(&sim->game, (float) sim->now, delta);
+        return;
     }
     sim->batch_time += delta;
     const float input_delta = net_input_rate_take(&sim->input_accum, delta, 144);
@@ -541,6 +574,12 @@ static Input script_walk(const double t) { // every key in turn: straights and d
     Input in = base_input(t);
     static const int dirs[] = {0, 1, 2, 3, 4, 5, 6, 7, 0, 2, 6};
     in.move_dir = dirs[(int) (t / 0.7) % (int) (sizeof(dirs) / sizeof(dirs[0]))];
+    return in;
+}
+
+static Input script_hold(const double t) { // one key held the whole time (W), the look turning
+    Input in = base_input(t);
+    in.move_dir = 0;
     return in;
 }
 
@@ -588,6 +627,139 @@ static Result run(Script script, const double seconds, const double grav, const 
     return res;
 }
 
+// ---------------------------------------------------------------- the spawn path (no direct setup)
+
+static const char *k_socket = "sock1";
+
+// The spawn as the live server sends it: "0" ADD_PLAYERS with our own entry (the socket id io-init
+// gave, players.add :220269 / :171902), then "start" (startGame :218939). The link makes the SPAWN.
+static void sim_spawn_packets(Sim *sim, const double yaw) {
+    KrunkerValue add[KRUNKER_ADD_STRIDE];
+    for (int i = 0; i < KRUNKER_ADD_STRIDE; i++) add[i] = KRUNKER_V_NIL;
+    add[KRUNKER_ADD_ID] = KRUNKER_V_STR(k_socket);
+    add[KRUNKER_ADD_SID] = KRUNKER_V_NUM(1);
+    add[KRUNKER_ADD_X] = KRUNKER_V_NUM(0);
+    add[KRUNKER_ADD_Y] = KRUNKER_V_NUM(0);
+    add[KRUNKER_ADD_Z] = KRUNKER_V_NUM(0);
+    add[KRUNKER_ADD_NAME] = KRUNKER_V_STR("sync");
+    add[KRUNKER_ADD_CLASS_INDEX] = KRUNKER_V_NUM(0);
+    add[KRUNKER_ADD_MAX_HEALTH] = KRUNKER_V_NUM(100);
+    add[KRUNKER_ADD_TEAM] = KRUNKER_V_NUM(0);
+    add[KRUNKER_ADD_X_DIRE] = KRUNKER_V_NUM(yaw);
+    KrunkerValue list = KRUNKER_V_ARRAY(add, KRUNKER_ADD_STRIDE);
+    KrunkerBuf buf = {0};
+    krunker_proto_encode_ah(0, "0", &list, 1, &buf);
+    krunker_link_on_frame(&sim->link, buf.data, buf.len);
+    krunker_buf_free(&buf);
+    KrunkerValue st[7];
+    for (int i = 0; i < 7; i++) st[i] = KRUNKER_V_NIL;
+    st[0] = KRUNKER_V_STR("3:00"); // the clock; moveLock (4) and kpdData (6) absent
+    krunker_proto_encode_ah(0, "start", st, 7, &buf);
+    krunker_link_on_frame(&sim->link, buf.data, buf.len);
+    krunker_buf_free(&buf);
+}
+
+// The client's SPAWN (main.c client_apply_spawn: a dead player is spawned from rest) and the
+// recon reset of our own spawn (recon.c client_recon_reset: CONTROLS.reset()).
+static void sim_apply_spawn(Sim *sim, const NetSpawnPacket *s) {
+    if (!s->is_you || !s->active) return;
+    if (!sim->me) {
+        sim->me = player_init(&sim->game);
+        if (!sim->me) return;
+        sim->me->uid = s->uid;
+        sim->me->class_index = 0; // Triggerman
+        game_players_add(&sim->game, sim->me);
+    }
+    sim->me->is_you = 1;
+    player_spawn(sim->me);
+    sim->me->team = s->team;
+    sim->me->position = sim->me->last_position = (vec3) {s->position[0], s->position[1], s->position[2]};
+    sim->me->direction = (vec2) {s->direction[0], s->direction[1]};
+    sim->me->swap_timer = 0.0f;
+    sim->input_accum = 0.0f;
+    sim->pending_count = 0;
+    sim->batch_count = 0;
+    sim->batch_time = 0.0f;
+    sim->next_seq = 0;
+}
+
+// A new session: io-init (the socket id), then the spawn above. Nothing is set up by the test.
+static int sim_init_spawned(Sim *sim, const double grav, const double jump, const double strafe) {
+    memset(sim, 0, sizeof(*sim));
+    g_sim = sim;
+    const cJSON *map = cJSON_Parse(k_flat_map);
+    if (!map) return 0;
+    game_configure(&sim->game, NULL, &map, 1, NULL, 0, NULL, 0, NULL, 0);
+    game_init(&sim->game, 0, 0, 0);
+    const KrunkerLinkIO io = {.emit = io_emit, .send = io_send, .user = NULL};
+    krunker_link_init(&sim->link, &io, 3);
+    sim_init_frame(sim, grav, jump, strafe);
+    KrunkerValue sid = KRUNKER_V_STR(k_socket);
+    KrunkerBuf buf = {0};
+    krunker_proto_encode_ah(0, "io-init", &sid, 1, &buf);
+    krunker_link_on_frame(&sim->link, buf.data, buf.len);
+    krunker_buf_free(&buf);
+    server_defaults(&sim->server);
+    sim->server.grav_mlt = grav;
+    sim->server.jump_mlt = jump;
+    sim->server.strafe_spd = strafe;
+    sim->server.can_slide = 1;
+    sim->latency = 0.045;
+    sim->frame_rng = 5;
+    sim->next_sync = 1.0;
+    sim_spawn_packets(sim, 0.0);
+    return sim->me != NULL;
+}
+
+// A death and a respawn. The server kills us at kill_at and drops our "q" frames from then on (io_q);
+// we learn of the kill one latency later, so the windows we send in between are lost to the server.
+// The respawn: the server's new life at respawn_at, our ADD_PLAYERS / start one latency after that.
+static Result run_spawned(const Script script, const double seconds, const double kill_at, const double respawn_at, const double grav,
+                          const double jump, const double strafe) {
+    Sim *sim = calloc(1, sizeof(Sim));
+    Result res = {0};
+    if (!sim || !sim_init_spawned(sim, grav, jump, strafe)) {
+        CHECK(0, "spawned sim init");
+        free(sim);
+        return res;
+    }
+    int killed = 0, learned = 0, respawned = 0, spawned = 0;
+    while (sim->now < seconds) {
+        if (kill_at > 0 && !killed && sim->now >= kill_at) {
+            killed = 1;
+            sim->server.dead = 1;
+        }
+        if (killed && !learned && sim->now >= kill_at + sim->latency) { // the client's events_player_dead
+            learned = 1;
+            sim->me->active = 0;
+            sim->batch_count = 0; // client_recon_on_death
+            sim->batch_time = 0.0f;
+        }
+        if (killed && !respawned && sim->now >= respawn_at) {
+            respawned = 1;
+            server_respawn(&sim->server);
+        }
+        if (respawned && !spawned && sim->now >= respawn_at + sim->latency) {
+            spawned = 1;
+            sim_spawn_packets(sim, 0.0);
+        }
+        sim_step(sim, script(sim->now), 144.0f);
+    }
+    res.max = sim->max_correction;
+    res.recons = sim->recons;
+    res.over = sim->over;
+    res.mean = sim->recons ? sim->sum_correction / (float) sim->recons : 0.0f;
+    free(sim);
+    return res;
+}
+
+static Input script_release(const double t) { // W held; jump pressed at 1 s, released at 1.2 s
+    Input in = base_input(t);
+    in.move_dir = 0;
+    in.jump = t >= 1.0 && t < 1.2;
+    return in;
+}
+
 int main(void) {
     // Our tables against the live bundle's (the reference's constants): Triggerman, the AR
     {
@@ -609,6 +781,7 @@ int main(void) {
         double grav, jump, strafe;
     } cases[] = {
         {"walk (every key)", script_walk, 1, 1, 1.2},
+        {"walk one direction (W held)", script_hold, 1, 1, 1.2},
         {"walk + ADS", script_ads, 1, 1, 1.2},
         {"jumps", script_jump, 1, 1, 1.2},
         {"slides", script_slide, 1, 1, 1.2},
@@ -628,6 +801,35 @@ int main(void) {
         CHECK(r.recons >= 7, "%s: syncs %u", cases[i].name, r.recons);
         CHECK(r.over <= 1 && r.max < 0.25f, "%s: %u corrections above %.2f, max %.5f", cases[i].name, r.over, (double) SYNC_TOLERANCE,
               (double) r.max);
+    }
+
+    // the spawn through the link (ADD_PLAYERS -> SPAWN -> start): player.init's state from rest
+    {
+        Sim *sim = calloc(1, sizeof(Sim));
+        if (sim && sim_init_spawned(sim, 1, 1, 1.2)) {
+            CHECK(sim->me && sim->me->active && sim->me->is_you && sim->me->on_ground && sim->me->velocity.y == 0.0f && sim->me->velocity.x == 0.0f &&
+                      sim->me->velocity.z == 0.0f && sim->me->air_time == 0.0f && sim->me->position.y == 0.0f && sim->next_seq == 0,
+                  "spawn: onGround, no velocity, air time 0, inputSN 0 at the spawn");
+        }
+        free(sim);
+    }
+    {
+        const Result r = run_spawned(script_hold, 9.0, 0.0, 0.0, 1, 1, 1.2);
+        printf("%-58s %u syncs, correction max %.5f mean %.5f, over %.2f: %u\n", "spawn (ADD_PLAYERS path), walk one direction", r.recons,
+               (double) r.max, (double) r.mean, (double) SYNC_TOLERANCE, r.over);
+        CHECK(r.recons >= 7 && r.over <= 1 && r.max < 0.25f, "spawn walk: syncs %u, %u corrections above %.2f, max %.5f", r.recons, r.over,
+              (double) SYNC_TOLERANCE, (double) r.max);
+    }
+    // a death while a key changes in the 45 ms gap before the client learns of it (the release of
+    // jump, the window is dropped by the server), then the respawn holding W: the server kept jump
+    // held and jumps on spawn while the client thinks it stands. The official client's start resends
+    // every field (startGame clears its delta memory); without that the two stay apart.
+    {
+        const Result r = run_spawned(script_release, 4.0, 1.19, 1.5, 1, 1, 1.2);
+        printf("%-58s %u syncs, correction max %.5f mean %.5f, over %.2f: %u\n", "death in the gap, respawn walking W", r.recons, (double) r.max,
+               (double) r.mean, (double) SYNC_TOLERANCE, r.over);
+        CHECK(r.recons >= 3 && r.over <= 1 && r.max < 0.25f, "respawn: syncs %u, %u corrections above %.2f, max %.5f", r.recons, r.over,
+              (double) SYNC_TOLERANCE, (double) r.max);
     }
 
     // negative controls: each bug must show as corrections
