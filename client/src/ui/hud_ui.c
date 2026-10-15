@@ -143,6 +143,7 @@ typedef struct {
     int loadout_size;
     int loadout_base;                 // Object Manager: slots from here on are extra weapons (number keys)
     const Weapon *loadout[HUD_UI_LOADOUT_ALL];
+    const ViewerSkin *skin[HUD_UI_LOADOUT_ALL]; // the skin worn on each slot (getSkinForLoadout / meleeIndex), NULL none
     int can_throw;                    // player.canThrow: melee slot shows the knife, else fists (thrown)
     int melee_icon;                   // store.skins[meleeIndex].id || 0: melee/icon_<id> of the melee skin
 } HudUiExtra;
@@ -369,15 +370,19 @@ static const char *hud_weapon_key(const Weapon *w, char *out, const size_t size)
 
 // #weapHolder.innerHTML (players.js swapWeapon, isYou): one .weapItem per slot, the held one
 // at opacity 1, holstered ones at 0.5; inside .weapItemInner the key name (slots > 0), the
-// weapon (or skin, in its rarity colour) name, the per-weapon kill streak (hidden at 0) and
-// the icon. Only #weapItem_N's opacity changes on a swap.
-static void hud_weapon_rack_html(const Weapon *const *loadout, const int count, const int base, const int index, const int can_throw, const int melee_icon,
-                                 char *out, const size_t size) {
+// label (the worn skin's name in its rarity colour, else the weapon name in #fff), the per-weapon
+// kill streak (hidden at 0) and the icon. Only #weapItem_N's opacity changes on a swap.
+// v10's label span: class weapSkin (+ whiteShad on rarity 5), style color = rarities[rarity || 0].color,
+// text = skin.name || weapon.name. No rainbow class and no nametag here: the nametag branch
+// (a custom skin entry with a name in its metadata) has no KrunkNative counterpart.
+static void hud_weapon_rack_html(const Weapon *const *loadout, const ViewerSkin *const *skins, const int count, const int base, const int index,
+                                 const int can_throw, const int melee_icon, char *out, const size_t size) {
     size_t len = 0;
     out[0] = 0;
 
     for (int i = 0; i < count && i < HUD_UI_LOADOUT_ALL; i++) {
         const Weapon *w = loadout[i];
+        const ViewerSkin *skin = skins[i];
         char src[256], key[32];
         hb_append(out, size, &len, "<div class='weapItem' id='weapItem_%d' style='opacity:%s'><div class=\"weapItemInner\">", i, i == index ? "1" : "0.5");
         if (i >= base && i < 9) { // Object Manager extra slot: its number key (ui_controls.c)
@@ -387,8 +392,15 @@ static void hud_weapon_rack_html(const Weapon *const *loadout, const int count, 
             hb_append_escaped(out, size, &len, hud_weapon_key(w, key, sizeof(key)));
             hb_append(out, size, &len, "</div>");
         }
-        hb_append(out, size, &len, "<span class='weapSkin' style='color:#fff'>");
-        hb_append_escaped(out, size, &len, w && w->name ? w->name : "");
+        if (skin && skin->name) {
+            const int rarity = skin->rarity >= 0 && skin->rarity < g_viewer_rarity_count ? skin->rarity : 0;
+            const char *color = g_viewer_rarities[rarity].color ? g_viewer_rarities[rarity].color : "#fff";
+            hb_append(out, size, &len, "<span class='weapSkin%s' style='color:%s'>", skin->rarity == 5 ? " whiteShad" : "", color);
+            hb_append_escaped(out, size, &len, skin->name);
+        } else {
+            hb_append(out, size, &len, "<span class='weapSkin' style='color:#fff'>");
+            hb_append_escaped(out, size, &len, w && w->name ? w->name : "");
+        }
         hb_append(out, size, &len, "</span><div class='weapStreakHolder' data-weapon-index='%d' style='display:none'><div class='weapStreakInner'>"
                                    "<span class='weapStreak'>0</span><span style='color: var(--yellow)'>KS</span></div></div>",
                   w ? weapon_index_of(w) : 0);
@@ -1159,6 +1171,19 @@ static float hud_spread(const Player *me) {
     return fmaxf(weapon->min_spread, weapon->spread * hip);
 }
 
+// The skin a loadout slot wears (players.js getSkinForLoadout(slot), the melee skin on the melee
+// weapon): player.skins matched to the slot's weapon, the rule player_mesh.c player_slot_skin uses
+// for the model. NULL when none.
+static const ViewerSkin *hud_slot_skin(const Player *me, const int slot, const Weapon *weapon) {
+    if (!weapon) return NULL;
+    if (weapon->melee) {
+        const ViewerSkin *skin = viewer_skin(me->skins.melee);
+        return skin && skin->type == 3 ? skin : NULL;
+    }
+    const ViewerSkin *skin = viewer_skin(slot == 0 ? me->skins.primary : slot == 1 ? me->skins.secondary : -1);
+    return skin && skin->type == 0 && me->loadout && skin->weapon - 1 == me->loadout[slot] ? skin : NULL;
+}
+
 static void hud_loadout(const Player *me, HudUiExtra *extra) {
     const Game *game = me->game;
     const size_t weapon_count = game->weapon_count ? game->weapon_count : rules_weapon_count();
@@ -1173,7 +1198,9 @@ static void hud_loadout(const Player *me, HudUiExtra *extra) {
     const int shown = extra->loadout_base < me->loadout_size ? HUD_UI_LOADOUT_ALL : HUD_UI_LOADOUT_MAX; // every slot with extras
     for (int i = 0; i < me->loadout_size && i < shown; i++) {
         const int id = me->loadout ? me->loadout[i] : -1;
-        extra->loadout[extra->loadout_size++] = id >= 0 && (size_t) id < weapon_count ? weapons[id] : NULL;
+        const Weapon *weapon = id >= 0 && (size_t) id < weapon_count ? weapons[id] : NULL;
+        extra->skin[extra->loadout_size] = hud_slot_skin(me, i, weapon);
+        extra->loadout[extra->loadout_size++] = weapon;
     }
 }
 
@@ -2368,7 +2395,8 @@ static void hud_render_loadout(const HudUiExtra *extra, const int rebuild) {
         g_combat_hash = 0; // the new .weapStreakHolder counters start at 0: hud_combat_step rewrites them
         static char html[32768]; // up to HUD_UI_LOADOUT_ALL slots
         const int base = extra->loadout_base > 0 && extra->loadout_base < extra->loadout_size ? extra->loadout_base : extra->loadout_size;
-        hud_weapon_rack_html(extra->loadout, extra->loadout_size, base, extra->loadout_index, extra->can_throw, extra->melee_icon, html, sizeof(html));
+        hud_weapon_rack_html(extra->loadout, extra->skin, extra->loadout_size, base, extra->loadout_index, extra->can_throw, extra->melee_icon, html,
+                             sizeof(html));
         html_dom_set_class(host, "knManyWeaps", extra->loadout_size > 4); // Object Manager: the compact rack
         html_dom_set_html(host, html);
         g_hud_ui.rack_can_throw = extra->can_throw;
@@ -3353,6 +3381,8 @@ static void hud_apply_override(const Client *client, HtmlHudState *next, HudUiEx
         cJSON_ArrayForEach(slot, item) {
             if (extra->loadout_size >= HUD_UI_LOADOUT_ALL) break;
             const cJSON *name = cJSON_GetObjectItemCaseSensitive(slot, "name");
+            const cJSON *skin = cJSON_GetObjectItemCaseSensitive(slot, "skin"); // scenario: the worn store skin's index
+            extra->skin[extra->loadout_size] = cJSON_IsNumber(skin) ? viewer_skin(skin->valueint) : NULL;
             extra->loadout[extra->loadout_size++] = hud_weapon_by_name(&client->game, cJSON_IsString(name) ? name->valuestring : NULL);
         }
         // Object Manager scenarios: the slots from loadoutBase on are extra weapons; without it the
@@ -4028,6 +4058,7 @@ void client_hud_html_tick(Client *client, const float now_f) {
     const int aim_dot_changed = force || next.aim_dot != hud->aim_dot;
     const int loadout_rebuild = force || next_extra.loadout_size != ui->extra.loadout_size || next_extra.loadout_base != ui->extra.loadout_base ||
                                 memcmp(next_extra.loadout, ui->extra.loadout, sizeof(next_extra.loadout)) != 0 ||
+                                memcmp(next_extra.skin, ui->extra.skin, sizeof(next_extra.skin)) != 0 || // skins: the label (weapHolder lastSkins)
                                 next_extra.melee_icon != ui->extra.melee_icon;
     const int loadout_changed = loadout_rebuild || next_extra.loadout_index != ui->extra.loadout_index || next.weapon != hud->weapon ||
                                 next_extra.can_throw != ui->extra.can_throw;
