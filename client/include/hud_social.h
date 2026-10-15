@@ -24,6 +24,8 @@ void social_on_chat_v7(Client*, const NetChatV7Packet*);
 int social_quick_chat(Client*, const char *text);
 // "prpt", i: on the prop team of a prop-hunt mode only. 1 = sent.
 int social_taunt(Client*, int index);
+// markPositionKey: the official game's ping ("mpos" {x, y, z} of the camera ray's hit). 1 = sent.
+int social_mark_position(Client*);
 
 // pressButton / releaseButton for the spray keys: with the wheel (premium accounts and the
 // sandbox, v7 servers) the sprayWheel key opens the wheel and its release sprays the chosen item;

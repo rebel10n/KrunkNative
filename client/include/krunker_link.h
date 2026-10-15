@@ -98,6 +98,19 @@
 //   ac      [sid, sid2, text]                NET_PACKET_ACTION (:220711)
 //   chi     [team, name, key|[key, args], kind, color]  NET_EXT_KN_OFFICIAL_CHAT_I18N (:221142)
 //   init's team scores and syncData (flg, obj, zone) seed the same packets for a joiner.
+// Player actions (official-ingame-actions):
+//   init    after INIT: NET_PACKET_SOCIAL_V7 (the server takes "ct" channels, "spry", "prpt"), so the
+//           client sends its v7 shapes; [15] isComp, [16] isRanked kept
+//   start   [.., spectating (2), ..]          NET_PACKET_SPECTATE (window.spectating, :218944)
+//   end     endData.mts / vo                  NET_PACKET_MATCH_VOTE_STATE (the vote cards, :219805)
+//   mv      [vo, mts]                         NET_PACKET_MATCH_VOTE_STATE (updMatchVote :220107)
+//   sp      ["<sid>_<n>", sprayIndex, x, y, z, rotY, rotX, rotZ, dye]  NET_PACKET_SPRAY_V7 (addSpray :189765)
+//   mpos    [key, {x, y, z}]                  NET_EXT_MARK_POSITION (addPingIcon :160954)
+// Outbound actions: STREAK_SLOTS / PC_STAT kept for "en" [26..28] / [13]; USE_STREAK -> "k0".."k2"
+// (callInStreak :220943); SPECTATE_TARGET -> "fpSp" [sid] / [] (:209610); SPRAY_V7 -> "spry" [, index];
+// TAUNT -> "prpt" [i]; INTERACT -> "int" / "intSec" [type, id], "drpw", v3's spray "spry";
+// CONFIRM_INTERACT -> "cnfm" [, 2]; COMP_SET -> "cd" "t" team / "c" {c, s}; MATCH_VOTE -> "maVote"
+// [the option's own mts string]; NET_EXT_MARK_POSITION -> "mpos" [{x, y, z}] (ranked / comp only).
 // Outbound: our NET_PACKET_ENT -> "en", NET_PACKET_INPUT(_BATCH) -> "q" (the delta-compressed
 // window of :221748-221830), NET_PACKET_CHAT_SEND / CHAT_V7 -> "ct", the player list's EXT
 // NET_EXT_VOTE_KICK -> "v2k" [alias, 1] / [alias] (kickVote :220193, the [2] key :221373) and
@@ -246,6 +259,19 @@ typedef struct {
     // init after we had a player: v10 drops it (you = null, game.deob.js initGame) and builds no input
     // frame until our next "0" brings it back; the old round's player must not send into the new one
     int you_gone;
+    // init [15] isComp / [16] isRanked (initGame :219366-219367): "mpos" leaves only in such a game
+    int is_comp, is_ranked;
+    // the ENT's companions our client sends right before it (NET_PACKET_STREAK_SLOTS / PC_STAT) and the
+    // comp lobby's team pick ("cd" "t"): the next "en" carries them ([26..28], [13], [8])
+    int8_t streak_slots[3];
+    int streak_slots_set;
+    int pc_stat;                    // -1 none
+    int team_pick;                  // toggleTeam's iïíiîiì (default 1)
+    // the end screen's match vote: endData.mts as the server wrote each option ("mode,map[,name,id]"),
+    // echoed verbatim by "maVote"; the parsed ids are what the client's cards send back
+    char vote_mts[NET_MATCH_PICKS][96];
+    int vote_mode[NET_MATCH_PICKS], vote_map[NET_MATCH_PICKS];
+    int vote_count;
     // counters (tests, logs, the console's official_sync)
     unsigned frames_in, frames_out, cc_answered, cc_failed, captchas_solved, unknown_in;
     unsigned syncs, sync_failed;    // "l" SYNC_PLAYER applied, "f" SYNC_FAILED received

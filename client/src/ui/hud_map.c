@@ -626,6 +626,101 @@ static void dm_tick(Client *client, const double dt, const int drawn) {
     }
 }
 
+/* ------------------------------------------------------------ ping markers */
+
+// v10.0.2 overlay.pingMarkers (addPingIcon(key, position), game.deob.js:160954; drawn :160131): one per
+// key (the pinging player), life 4000 ms; hidden within 10 of the camera; at position.y + 2,
+// 100 * max(0.3, 1 - dist / 600) px, pulsing * (1 + 0.1 sin(now / 100)); alpha 0.3 near the
+// crosshair while aiming, else 0.8. /img/ping.png
+#define PING_MAX 16
+#define PING_LIFE_MS 4000.0
+typedef struct {
+    char key[48];
+    float x, y, z;
+    double life_ms;
+    HtmlElem el;
+    int shown;
+    char style[96];
+} PingMarker;
+static PingMarker g_ping[PING_MAX];
+
+void hud_ping_marker_add(const char *key, const vec3 position) {
+    PingMarker *m = NULL;
+    for (int i = 0; i < PING_MAX && !m; i++)
+        if (g_ping[i].life_ms > 0.0 && !strcmp(g_ping[i].key, key ? key : "")) m = &g_ping[i]; // pingMarkers[key] = ...
+    for (int i = 0; i < PING_MAX && !m; i++)
+        if (g_ping[i].life_ms <= 0.0) m = &g_ping[i];
+    if (!m) {
+        m = &g_ping[0];
+        for (int i = 1; i < PING_MAX; i++)
+            if (g_ping[i].life_ms < m->life_ms) m = &g_ping[i];
+    }
+    snprintf(m->key, sizeof(m->key), "%s", key ? key : "");
+    m->x = position.x;
+    m->y = position.y;
+    m->z = position.z;
+    m->life_ms = PING_LIFE_MS;
+}
+
+int hud_ping_markers_shown(void) {
+    int n = 0;
+    for (int i = 0; i < PING_MAX; i++) n += g_ping[i].shown;
+    return n;
+}
+
+static void ping_hide(PingMarker *m) {
+    if (m->el && m->shown) html_dom_set_display(m->el, "none");
+    m->shown = 0;
+}
+
+static void ping_tick(Client *client, const double dt, const int drawn) {
+    const vec3 cam = client->camera.position;
+    const float aim = client->me ? client->me->aim_val : 0.0f;
+    for (int i = 0; i < PING_MAX; i++) {
+        PingMarker *m = &g_ping[i];
+        if (m->life_ms <= 0.0 || !drawn) { // the overlay ages them only while it draws the game (as the death markers)
+            ping_hide(m);
+            continue;
+        }
+        m->life_ms -= dt;
+        const int near = fabsf(cam.x - m->x) <= DM_HIDE_DIST && fabsf(cam.y - m->y) <= DM_HIDE_DIST && fabsf(cam.z - m->z) <= DM_HIDE_DIST;
+        const float ty = m->y + 2.0f;
+        const float dx = cam.x - m->x, dy = cam.y - ty, dz = cam.z - m->z;
+        double size = fmax(0.3, 1.0 - sqrt(dx * dx + dy * dy + dz * dz) / 600.0) * 100.0;
+        double sx = 0.0, sy = 0.0;
+        if (m->life_ms <= 0.0 || near || size < 1.0 || !hud_ui_project(client, m->x, ty, m->z, &sx, &sy)) {
+            ping_hide(m);
+            continue;
+        }
+        if (!m->el) {
+            if (!overlay_holders()) continue;
+            m->el = html_dom_create("img", NULL);
+            html_dom_set_attr(m->el, "src", "./img/ping.png");
+            html_dom_set_attr(m->el, "class", "knPingMarker");
+            html_dom_set_style(m->el, "position", "absolute");
+            html_dom_set_style(m->el, "transform", "translate(-50%, -50%)");
+            html_dom_set_display(m->el, "none");
+            html_dom_append(g_ad_holder, m->el);
+        }
+        size *= 0.1 * sin(hud_ui_now_ms(client) / 100.0) + 1.0;
+        const int ads = sx >= 0.45 && sx <= 0.55 && sy >= 0.4 && sy <= 0.6 && aim != 0.0f;
+        char style[96], v[32];
+        snprintf(style, sizeof(style), "%.3f|%.3f|%.1f|%d", sx * 100.0, sy * 100.0, size, ads);
+        if (strcmp(style, m->style)) {
+            snprintf(m->style, sizeof(m->style), "%s", style);
+            snprintf(v, sizeof(v), "%.3f%%", sx * 100.0);
+            html_dom_set_style(m->el, "left", v);
+            snprintf(v, sizeof(v), "%.3f%%", sy * 100.0);
+            html_dom_set_style(m->el, "top", v);
+            snprintf(v, sizeof(v), "%.1fpx", size);
+            html_dom_set_style(m->el, "width", v);
+            html_dom_set_style(m->el, "opacity", ads ? "0.3" : "0.8");
+        }
+        if (!m->shown) html_dom_set_display(m->el, "block");
+        m->shown = 1;
+    }
+}
+
 /* ------------------------------------------------------------ airdrop markers */
 
 typedef struct {
@@ -725,6 +820,10 @@ void hud_map_on_init(Client *client) {
         g_dm[i].life_ms = 0.0;
         dm_hide(&g_dm[i]);
     }
+    for (int i = 0; i < PING_MAX; i++) {
+        g_ping[i].life_ms = 0.0;
+        ping_hide(&g_ping[i]);
+    }
     memset(g_mm.blips, 0, sizeof(g_mm.blips));
     g_mm.bounds_map = NULL; // reset(): setBounds on the new map
     g_mm.enabled = -1;
@@ -763,5 +862,6 @@ void hud_map_tick(Client *client) {
     const int drawn = game->ready && client->in_game && !html_ui_is_menu_open() && client->net_end_seconds < 0 && !dead;
     if (enabled && drawn) mm_update(client, dt);
     dm_tick(client, dt, drawn);
+    ping_tick(client, dt, drawn);
     ad_tick(client, dt, drawn);
 }

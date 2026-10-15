@@ -184,6 +184,7 @@
 #include <bots.h>         // `tpstate`: bot_object_blocks_player
 #include <menu_view.h>    // `cam`: menu_view_killer_uid (the death chase)
 #include <spectate.h>     // `cam`: spectate_active
+#include <hud_map.h>     // `pings`: the ping markers on screen
 #include <nettspend.h>    // `pour`, `laced`
 #include <ruleset.h>      // `class`: the class names
 #include <map_post.h>     // `builds`, `placewatch`
@@ -424,7 +425,7 @@ static void script_run(Client *client, const ScriptEvent *e) {
     } else if (!strcmp(e->cmd, "gpad")) {
         if (!gamepad_script_button(e->arg)) fprintf(stderr, "[input_script] gpad %s: unknown button\n", e->arg);
     } else if (!strcmp(e->cmd, "mdown") || !strcmp(e->cmd, "mup")) {
-        const int button = !strcmp(e->arg, "right") ? GLFW_MOUSE_BUTTON_RIGHT : GLFW_MOUSE_BUTTON_LEFT;
+        const int button = !strcmp(e->arg, "right") ? GLFW_MOUSE_BUTTON_RIGHT : !strcmp(e->arg, "middle") ? GLFW_MOUSE_BUTTON_MIDDLE : GLFW_MOUSE_BUTTON_LEFT;
         const int action = e->cmd[1] == 'd' ? GLFW_PRESS : GLFW_RELEASE;
         GLFWmousebuttonfun cb = glfwSetMouseButtonCallback(client->window, NULL);
         glfwSetMouseButtonCallback(client->window, cb);
@@ -734,6 +735,9 @@ static void script_run(Client *client, const ScriptEvent *e) {
         fprintf(stderr, "[input_script] om t=%.0f %s %d\n", g_script.time, what, id);
     } else if (!strcmp(e->cmd, "cam")) {
         script_log_cam(client, e->arg[0] ? e->arg : "-");
+    } else if (!strcmp(e->cmd, "pings")) {
+        // pings: the v10 ping markers ("mpos", hud_map.c) on screen now and whether we spectate
+        fprintf(stderr, "[input_script] pings t=%.0f shown=%d spect=%d\n", g_script.time, hud_ping_markers_shown(), spectate_active());
     } else if (!strcmp(e->cmd, "players")) {
         // players: every player of the session, "uid:name@x,y,z" (+ "*" for us, "-" inactive)
         char line[2048];

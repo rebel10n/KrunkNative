@@ -1354,6 +1354,7 @@ static void press_button(Client *client, const int code) {
     if (!me || !me->active) return;
     // sprayWheelKey (premium / sandbox): opens the wheel; else sprayKey: "spry" (v7) / "int" 0 (v3)
     social_spray_press(client, bind_is(UI_CONTROL_SPRAY, code), v7_is("sprayWheel", code));
+    if (v7_is("markPosition", code)) social_mark_position(client); // v10 ping (official ranked / comp: krunker_link.c)
     for (int i = 0; i < TAUNT_COUNT; i++) { // Prop team: "prpt", i
         if (v7_is_at("taunt", i, code)) social_taunt(client, i);
     }

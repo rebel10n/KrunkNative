@@ -100,7 +100,7 @@ ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
 BUILD = os.path.abspath(ARGS[0] if ARGS else "cmake-build-debug")
 DIST = os.path.abspath(ARGS[1]) if len(ARGS) > 1 else None
 ONLY = {"--native": "native", "--web": "web", "--webview": "webview", "--exclude": "exclude", "--reload": "reload", "--ingame": "ingame",
-        "--fx": "fx", "--world": "world"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
+        "--fx": "fx", "--world": "world", "--actions": "actions"}.get(next((a for a in sys.argv[1:] if a.startswith("--")), ""), "")
 ROOT = os.getcwd()
 CACHE = os.path.expanduser("~/.cache")
 WORK = tempfile.mkdtemp(prefix="kn-krunker-official-e2e-", dir=CACHE if os.path.isdir(CACHE) else None)
@@ -432,6 +432,7 @@ class Stub:
 
         hud = self.scenario == "hud"
         ingame = self.scenario == "ingame"
+        actions = self.scenario == "actions"
 
         stop = asyncio.Event()
 
@@ -514,6 +515,9 @@ class Stub:
                            {"gor": 1, "roundC": 2, "lockT": 0, "doms": [0, 2, 1, None, 2, None], "spwns": [[0, 601, -330.0, -143.0, -40.0, 2, {}]],
                             "dest": [4], "obj": [None, 0]},
                            None, False, True, False, None, None, 0)
+            elif actions:  # TDM (1), a ranked official game ([14] isOfficial, [16] isRanked): team chat, pings
+                await send("init", self.map_index, 1, 0, [[1, 0], [2, 0]], [[1, 0, None], [2, 0, None]], None, {}, None, 0, None, None,
+                           {"gor": True}, None, False, True, False, True, None, 0)
             elif hud:  # CTF (3, modes.c MODE_ID_CTF): the joiner's team scores + flag lines, syncData's flags (uids 40 / 41, map order)
                 await send("init", self.map_index, 3, 0, [[1, 0], [2, 0]], [[1, 3, "AT BASE"], [2, 1, "AT BASE"]], None, {}, None, 0, None, None,
                            {"gor": True, "flg": [[40, 0.0, 0.0, 0.0, 0, None], [41, 20.0, 0.0, 20.0, 0, None]], "obj": [None, 0]},
@@ -528,7 +532,7 @@ class Stub:
                 bot[6], bot[10], bot[11], bot[25], bot[28], bot[31] = 1, 33, "CLN", True, "AceBot", 777
                 await send("0", bot)
             else:
-                await send("0", player("sockBOT", BOT_SID, "StubBot", 0.0, 0.0, team=2 if hud else 0))
+                await send("0", player("sockBOT", BOT_SID, "StubBot", 0.0, 0.0, team=2 if hud or actions else 0))
             for nonce, ct, _ in CC_CASES:
                 await send("cc", nonce, None, ct)
             await send("cpt", self.cpt)
@@ -575,6 +579,11 @@ class Stub:
                 x, y, z = self.spawn
                 await send("0", player("sockME", MY_SID, "Guest_9", x, z, y, team=1))
                 await self.world_phases(send, stop)
+            elif self.got_en.is_set() and actions:
+                await send("frs")
+                sx, sy, sz = self.spawn
+                await send("0", player("sockME", MY_SID, "Guest_9", sx, sz, sy, team=1))
+                await self.actions_phases(send, stop)
             elif self.got_en.is_set() and hud:
                 await send("frs")
                 await send("0", player("sockME", MY_SID, "Guest_9", 4.0, 4.0, team=1))
@@ -858,6 +867,55 @@ class Stub:
         await send("rad", 1)                                       # REMOVE_AIRDROP_BY_SID
         await send("gmsg")                                         # cleared
         await hold(4.0)
+        self.sent["done"] = time.monotonic()
+
+    ACTION_MTS = ["0,1", "1,43,Bastion,0", "3,7"]  # endData.mts: two public options and an official one with its name
+
+    async def actions_phases(self, send, stop):
+        """Player actions in an official game (run_native_actions): the client's team chat, streak, spray, class
+        pick and ping go out in v10's shapes; the stub's spray and pings show; a "start" with spectating puts the
+        client in the spectator cam ("fpSp" back); "end" with mts / vo shows the vote cards, a click sends
+        "maVote" with the option's own string and "mv" moves the totals. Paced by the client's own frames."""
+        async def hold(seconds, until=None):
+            end = time.monotonic() + seconds
+            while time.monotonic() < end and not stop.is_set() and not (until and until()):
+                qs = [f for f in self.frames if f[0] == "q"]
+                isn = int(qs[-1][1][1]) if qs else 0
+                await send("l", [isn, 42, sx, sy, sz, 0, 0, 0, 0.0, True, False, False, 0, False, False, 0, 0, 0, 0, True, False, 0, 0, None, 0])
+                await asyncio.sleep(0.4)
+
+        sx, sy, sz = self.spawn
+
+        def got(name):
+            return any(f[0] == name for f in self.frames)
+
+        await hold(1.0)
+        self.sent["actions"] = time.monotonic()
+        await send("sp", "%d_0" % BOT_SID, 2490, sx + 4.0, sy + 2.0, sz + 4.0, 0, 0, 0, None)  # ADD_SPRAY: the bot's spray
+        # MARK_POSITION: pings around us (one per key) until our own ping comes, so one is in view
+        t0 = time.monotonic()
+        while not stop.is_set() and not got("mpos") and time.monotonic() - t0 < 7:
+            for k, (dx, dz) in enumerate(((0, -40), (40, 0), (0, 40), (-40, 0))):
+                await send("mpos", "sockP%d" % k, {"x": sx + dx, "y": sy, "z": sz + dz})
+            await hold(1.5)
+        # START_GAME with spectating: the client spectates, picks the bot ("1") and goes free cam ("F")
+        self.sent["spectate"] = time.monotonic()
+        await send("start", "4:00", 0, True, 0, None)
+        await hold(10, until=lambda: sum(1 for f in self.frames if f[0] == "fpSp") >= 2)
+        await hold(1.0)
+        self.sent["end"] = time.monotonic()
+        self.ended = True
+        vo = {"sockA": ["1,43,Bastion,0", 2], "sockB": ["0,1", 1]}
+        await send("end", 0, True, {"ed": [MY_SID, ["Guest_9", "Guest_9"], 0, 0, 0, 0, BOT_SID, ["StubBot", "StubBot"], 0, 0, 0, 0],
+                                    "tms": [[1, 0, None], [2, 0, None]], "mdls": [], "mts": self.ACTION_MTS, "vo": vo, "modeIndex": 1},
+                   1, 1, 12, None, {})
+        await hold(25, until=lambda: got("maVote"))
+        votes = [f[1][0] for f in self.frames if f[0] == "maVote" and f[1]]
+        if votes:  # updMatchVote: our pick counted (the server echoes it), the others stay
+            vo["sockME"] = [votes[-1], 1]
+            self.sent["mv"] = time.monotonic()
+            await send("mv", vo, self.ACTION_MTS)
+        await hold(6.0)
         self.sent["done"] = time.monotonic()
 
     def start_ws(self):
@@ -1777,6 +1835,69 @@ def run_native_badmap():
 KICK_TEXT, KICK_CODE = "Kicked for inactivity", "000005"
 
 
+def run_native_actions():
+    """Player actions in an official game (Stub.actions_phases): what our client sends for them and what it
+    shows of the server's. Out: "ct" on the team tab ([1, text]), "k0" (streak slot 1), "spry" (F), "cd" "c"
+    (a class pick in an official game), "mpos" {x, y, z} (M2 in a ranked game), "en" with v10's streak
+    fields, "fpSp" [sid] / [] (spectating: "1", then F), "maVote" with the option's own mts string. In: the
+    bot's spray decal, the ping markers, the spectator cam, the vote cards and their totals."""
+    label = "native-actions"
+    script = ["0 boot", "1500 clickid knCaptchaToken", "1600 type %s" % PASTE_TOKEN, "1700 clickid knCaptchaUse", "3800 play",
+              "7000 call switchChat", "7300 con say team hello", "7800 down 1", "7900 up 1", "8300 down F", "8400 up F",
+              "8800 call selectClass 2"]
+    script += ["%d pings" % t for t in range(6000, 10500, 500)]
+    script += ["10600 look 0 -1.2", "11100 state", "11200 mdown middle", "11300 mup middle"]
+    script += ["%d pings" % t for t in range(12000, 15000, 500)]
+    script += ["14500 down 1", "14600 up 1", "15500 down F", "15600 up F"]
+    script += ["%d text @votes [id=matchVoteHolder]" % t for t in range(17000, 34000, 1000)]
+    script += ["%d vis @end endUI" % t for t in range(17000, 34000, 1000)]
+    script += ["24000 clicksel .matchVote", "34500 quit"]
+    events = sorted(script, key=lambda l: int(l.split()[0]))
+    # on HQ at its spawn 4 (run_native_hq): a floor under us for the ping's ray
+    stub, p, out, log = launch_native(label, "\n".join(events) + "\n", {}, scenario="actions", map_index=HQ_INDEX, spawn=hq_spawn())
+    lines = finish_native(label, stub, p, out, log, timeout=240)
+    text = "\n".join(lines)
+    check(f"{label}: the client joined as the stub's sid", f"joined as sid {MY_SID}" in text)
+    for name in ("actions", "spectate", "end", "done"):
+        check(f"{label}: the stub got to send its \"{name}\" packets", name in stub.sent, sorted(stub.sent))
+    check(f"{label}: the server saw no ahNum / \"q\"-sequence violations", not stub.proto_errors, stub.proto_errors[:5])
+    frames = [(n, a) for n, a, _ in stub.frames]
+
+    def sent(name):
+        return [a for n, a in frames if n == name]
+
+    en = sent("en")
+    check(f"{label}: \"en\" carries v10's streak picks (numbers, not NaN) and the pcStat", en and all(
+        isinstance(v, int) for v in en[0][0][26:29]) and isinstance(en[0][0][13], int), en[0][0][13:14] + en[0][0][26:29] if en else None)
+    ct = sent("ct")
+    check(f"{label}: team chat: \"ct\" [1, text] on the team tab", any(a[:2] == [1, "team hello"] for a in ct), ct)
+    check(f"{label}: the streak key: \"k0\" with no args", [] in sent("k0"), sent("k0"))
+    check(f"{label}: the spray key: \"spry\" with no args", [] in sent("spry"), sent("spry"))
+    cd = sent("cd")
+    check(f"{label}: a class pick in an official game: \"cd\" \"c\" {{c: 2}}", any(a and a[0] == "c" and isinstance(a[1], dict) and a[1].get("c") == 2
+                                                                            for a in cd), cd)
+    mpos = sent("mpos")
+    check(f"{label}: the ping (M2, ranked): \"mpos\" {{x, y, z}}", any(a and isinstance(a[0], dict) and set(a[0]) == {"x", "y", "z"} for a in mpos), mpos)
+    fp = sent("fpSp")
+    check(f"{label}: spectating: \"fpSp\" [the bot's sid], then [] (free cam)", [BOT_SID] in fp and [] in fp, fp)
+    votes = sent("maVote")
+    check(f"{label}: the vote click: \"maVote\" with the option's own mts string", votes and votes[-1][0] in Stub.ACTION_MTS, votes)
+    check(f"{label}: the bot's spray decal (\"sp\")", "[sprays] decal %d_0 skin=2490" % BOT_SID in text)
+    pings = [int(m.group(1)) for m in re.finditer(r"\[input_script\] pings t=\d+ shown=(\d+) spect=0", text)]
+    check(f"{label}: \"mpos\" ping markers on screen", any(n >= 1 for n in pings), pings)
+    check(f"{label}: \"start\" spectating: the spectator cam", re.search(r"\[input_script\] pings t=\d+ shown=\d+ spect=1", text) is not None)
+    clean = lambda t: t.replace("\u200e", "").replace("\u200f", "")  # noqa: E731
+    cards = [clean(m.group(1)) for m in re.finditer(r"\[input_script\] text t=\d+ @votes n=\d+ checked=\d+ value=\S* text=(.*)", text)]
+    shown = [c for c in cards if "BASTION" in c.upper() and "LITTLETOWN" in c.upper()]
+    check(f"{label}: END: the vote cards (the official list's name for a public option, mts's own for the other)", shown, cards[-1:])
+    # the cards' totals: Bastion 2, Littletown 1, then (mv) our pick +1
+    check(f"{label}: END: the totals from vo", any(re.search(r"Bastion\D*2(?!\d)", c, re.I) and re.search(r"Littletown\D*1(?!\d)", c, re.I) for c in shown), shown[:1])
+    if votes and "mv" in stub.sent:
+        pick = votes[-1][0]
+        want = {"0,1": r"Littletown\D*2(?!\d)", "1,43,Bastion,0": r"Bastion\D*3(?!\d)", "3,7": r"Lostworld\D*1(?!\d)"}[pick]
+        check(f"{label}: \"mv\": our pick's total went up", any(re.search(want, c, re.I) for c in shown), (pick, shown[-1:]))
+
+
 def run_native_kick():
     """In an official game, the server's "error" (an idle kick) with the socket left open: the client
     closes the socket itself, the game stops, and v10's error screen says why (the server's text, v10's
@@ -2495,6 +2616,7 @@ def main():
         run_native_hud()
         run_native_ingame()
         run_native_world()
+        run_native_actions()
         run_native_lobby()
         run_native_badmap()
         run_native_kick()
@@ -2509,6 +2631,8 @@ def main():
         run_native_ingame()
     if ONLY == "world" and os.path.isfile(f"{BUILD}/client_bin"):  # just the mode-objective / world packets
         run_native_world()
+    if ONLY == "actions" and os.path.isfile(f"{BUILD}/client_bin"):  # just the player actions' run
+        run_native_actions()
     if ONLY == "exclude" and os.path.isfile(f"{BUILD}/client_bin"):  # just Find New Game's runs
         run_native_exclude()
         run_native_exclude_mm()

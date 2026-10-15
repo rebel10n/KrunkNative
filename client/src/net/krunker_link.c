@@ -144,6 +144,8 @@ void krunker_link_reset(KrunkerLink *l) {
     l->tick_hz = 30;
     l->sync_hz = 1;
     l->last_isn_sent = l->last_ack = -1;
+    l->pc_stat = -1;
+    l->team_pick = 1; // toggleTeam's default (iïíiîiì = 1, :210435)
 }
 
 int krunker_link_inputs_paused(const KrunkerLink *l) { return l->locked || l->you_gone; }
@@ -254,6 +256,9 @@ static void on_init(KrunkerLink *l, const KrunkerFrame *f) {
         return;
     }
     l->unsupported_map = -1;
+    l->is_comp = truthy(arg(f, 15));   // initGame iîIiiïï (:219366)
+    l->is_ranked = truthy(arg(f, 16)); // iiÎîîíî
+    l->vote_count = 0;
     emit_lobby_config(l, f);
     NetInitPacket init;
     memset(&init, 0, sizeof(init));
@@ -268,13 +273,19 @@ static void on_init(KrunkerLink *l, const KrunkerFrame *f) {
     note(l, KRUNKER_LINK_EV_NOTE, "init: map %d%s%s%s, mode %d, %d config keys, rates snf %d tf %d sf %d", map,
          info.custom_id[0] || info.custom ? " (custom " : "", info.custom_id[0] ? info.custom_id : info.custom ? "inline" : "",
          info.custom_id[0] || info.custom ? ")" : "", mode, l->config_keys, l->send_hz, l->tick_hz, l->sync_hz);
+    // after the INIT (the transport holds what follows io.map until it emits it): the official server
+    // takes the v7 social shapes, so our chat goes out with its channel ("ct" [tab, msg]), the spray
+    // as "spry", the prop taunt as "prpt" (hud_social.c social_server_v7; INIT resets it)
+    static const uint8_t social = NET_SOCIAL_V7_VERSION;
     if (l->io.map) {
         info.init = init;
         l->io.map(l->io.user, &info); // takes info.custom
+        emit(l, NET_PACKET_SOCIAL_V7, &social, 1);
         return;
     }
     cJSON_Delete(info.custom);
     emit(l, NET_PACKET_INIT, &init, sizeof(init));
+    emit(l, NET_PACKET_SOCIAL_V7, &social, 1);
 }
 
 // A player's account fields as v10 keeps them from its "0" entry (players.add :220273-220283): the
@@ -1237,11 +1248,14 @@ static int16_t clamp16(const double v) {
 // of mode.endStats values per player in the server's end order (endStats + "reward" on official
 // servers, endForm applied: the name cell is [name, alias]). type 2 shows no end screen (iìÏïíîì);
 // didWin -1 is a draw. The "Next Round in" clock comes with the "t" frames that follow (endTimer
-// 25 s until then, our GAME_END_TIMER). Not mapped: the match vote (mts / vo), the KR / battle
+// 25 s until then, our GAME_END_TIMER). mts / vo: on_match_vote. Not mapped: the KR / battle
 // pass / item rewards of the account (a guest has none), endData.mdls (END_MEDALS wants our medal
 // indexes; the medals tab stays empty).
+static void on_match_vote(KrunkerLink *l, const KrunkerValue *vo, const KrunkerValue *mts); // below
 static void on_end_game(KrunkerLink *l, const KrunkerFrame *f) {
     const KrunkerValue *data = arg(f, 2);
+    // the vote cards (:219805-219826, updMatchVote(vo, mts)) ahead of the END that shows them
+    if (krunker_is(krunker_get(data, "mts"), KRUNKER_ARRAY)) on_match_vote(l, krunker_get(data, "vo"), krunker_get(data, "mts"));
     const KrunkerValue *ed = krunker_get(data, "ed");
     const GameModeConfig *mode = mode_config(l->mode);
     const char *const *cols;
@@ -2090,6 +2104,106 @@ static int on_fx(KrunkerLink *l, const KrunkerS2C id, const KrunkerFrame *f) {
     }
 }
 
+// ---------------------------------------------------------------- player actions (inbound)
+
+// Krunker's official map list by index (krunker_maps.h): a public mts option carries no name
+static const char *official_map_name(const int index) {
+    static const char *const names[] = {
+#define X(i, name, file, objects) name,
+        KRUNKER_OFFICIAL_MAPS(X)
+#undef X
+    };
+    return index >= 0 && index < (int) (sizeof(names) / sizeof(names[0])) ? names[index] : NULL;
+}
+
+// endData.mts / "mv" [vo, mts] (updMatchVote :220107, the cards :219805-219826): mts is the option list,
+// "modeIndex,mapIndex[,mapName,communityMapId]" each; vo {socketId: [option, weight]}: a card's total
+// is the weights naming its option, ours is the option under our socket id. Our client's cards are
+// keyed (mode, map); "maVote" sends the option's own string back (krunker_link_send_ours).
+static void on_match_vote(KrunkerLink *l, const KrunkerValue *vo, const KrunkerValue *mts) {
+    if (krunker_is(mts, KRUNKER_ARRAY)) {
+        l->vote_count = 0;
+        for (uint32_t i = 0; i < mts->len && l->vote_count < NET_MATCH_PICKS; i++) {
+            char option[sizeof(l->vote_mts[0])];
+            js_string(&mts->u.items[i], option, sizeof(option));
+            int mode = -1, map = -1;
+            if (sscanf(option, "%d,%d", &mode, &map) != 2) continue;
+            snprintf(l->vote_mts[l->vote_count], sizeof(l->vote_mts[0]), "%s", option);
+            l->vote_mode[l->vote_count] = mode;
+            l->vote_map[l->vote_count] = map;
+            l->vote_count++;
+        }
+    }
+    NetMatchVoteStatePacket st;
+    memset(&st, 0, sizeof(st));
+    st.count = (uint8_t) l->vote_count;
+    st.voted = -1;
+    for (int i = 0; i < l->vote_count; i++) {
+        NetMatchVoteEntry *e = &st.entries[i];
+        e->mode_id = l->vote_mode[i];
+        e->map_index = l->vote_map[i];
+        // the third field (official games: iiIïîîì[2] || maps[i].name)
+        const char *name = strchr(l->vote_mts[i], ',');
+        name = name ? strchr(name + 1, ',') : NULL;
+        if (name && name[1] && name[1] != ',') {
+            const char *end = strchr(name + 1, ',');
+            const int len = end ? (int) (end - name - 1) : (int) strlen(name + 1);
+            snprintf(e->map_name, sizeof(e->map_name), "%.*s", len, name + 1);
+        } else if (official_map_name(e->map_index)) {
+            snprintf(e->map_name, sizeof(e->map_name), "%s", official_map_name(e->map_index));
+        }
+    }
+    for (uint32_t k = 0; krunker_is(vo, KRUNKER_MAP) && k < vo->len; k++) {
+        const KrunkerValue *key = &vo->u.items[2 * k], *v = &vo->u.items[2 * k + 1];
+        if (!krunker_is(v, KRUNKER_ARRAY)) continue; // a falsy entry: no vote
+        char option[sizeof(l->vote_mts[0])], who[64];
+        js_string(krunker_at(v, 0), option, sizeof(option));
+        id_string(key, who, sizeof(who));
+        for (int i = 0; i < l->vote_count; i++) {
+            if (strcmp(option, l->vote_mts[i]) != 0) continue;
+            const double w = num(krunker_at(v, 1), 0);
+            const double total = st.entries[i].votes + (w > 0 ? w : 0);
+            st.entries[i].votes = (uint16_t) (total < 65535 ? total : 65535);
+            if (l->socket_id[0] && !strcmp(who, l->socket_id)) st.voted = (int8_t) i;
+        }
+    }
+    emit(l, NET_PACKET_MATCH_VOTE_STATE, &st, sizeof(st));
+}
+
+// "sp" ADD_SPRAY [id "<sid>_<n>", sprayIndex, x, y, z, rotY, rotX, rotZ, dyeIndex] (addSpray :189765; the
+// server's broadcast :172286: rotations in degrees, positions round(2)): our v7 spray packet as is
+static void on_add_spray(KrunkerLink *l, const KrunkerFrame *f) {
+    char id[48];
+    js_string(arg(f, 0), id, sizeof(id));
+    int sid = -1;
+    unsigned slot = 0;
+    if (sscanf(id, "%d_%u", &sid, &slot) < 1 || sid < 0) return;
+    NetSprayV7Packet s;
+    memset(&s, 0, sizeof(s));
+    s.uid = sid;
+    s.slot = (uint16_t) slot;
+    s.skin = (int32_t) num(arg(f, 1), SPRAY_DEFAULT_INDEX);
+    for (int k = 0; k < 3; k++) s.position[k] = (float) num(arg(f, 2 + (uint32_t) k), 0);
+    s.y_rot = (int16_t) js_round(num(arg(f, 5), 0));
+    s.x_rot = (int16_t) js_round(num(arg(f, 6), 0));
+    s.z_rot = (int16_t) js_round(num(arg(f, 7), 0));
+    s.dye = (int32_t) num(arg(f, 8), -1);
+    emit(l, NET_PACKET_SPRAY_V7, &s, sizeof(s));
+}
+
+// "mpos" MARK_POSITION [key, {x, y, z}] (:223423 -> addPingIcon :160954): a ping marker per key
+static void on_mark_position(KrunkerLink *l, const KrunkerFrame *f) {
+    const KrunkerValue *p = arg(f, 1);
+    if (!krunker_is(p, KRUNKER_MAP)) return;
+    NetMarkPositionPacket m;
+    memset(&m, 0, sizeof(m));
+    js_string(arg(f, 0), m.key, sizeof(m.key));
+    m.x = (float) num(krunker_get(p, "x"), 0);
+    m.y = (float) num(krunker_get(p, "y"), 0);
+    m.z = (float) num(krunker_get(p, "z"), 0);
+    emit_ext(l, NET_EXT_MARK_POSITION, &m, sizeof(m));
+}
+
 int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len) {
     KrunkerFrame f;
     const int err = krunker_proto_decode(data, len, 0, &f);
@@ -2121,6 +2235,10 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
             }
             on_start_locks(l, &f);
             on_kpd_data(l, arg(&f, 6)); // iìIiîìí: kpdData {sus, caller} (socket ids) for a K.P.D officer
+            { // [2] window.spectating (:218944): the client's free cam / follow cam, or back to playing
+                const NetSpectatePacket sp = {.spectating = (uint8_t) truthy(arg(&f, 2))};
+                emit(l, NET_PACKET_SPECTATE, &sp, sizeof(sp));
+            }
             break;
         }
         case KRUNKER_S2C_ADD_PLAYERS: on_add_players(l, &f); break;
@@ -2204,6 +2322,10 @@ int krunker_link_on_frame(KrunkerLink *l, const uint8_t *data, const size_t len)
         case KRUNKER_S2C_END_GAME: on_end_game(l, &f); break;
         case KRUNKER_S2C_ACTION_FEED: on_action(l, &f); break;
         case KRUNKER_S2C_ADD_CHATI18N: on_chat_i18n(l, &f); break;
+        // player actions (official-ingame-actions)
+        case KRUNKER_S2C_UPD_MATCH_VOTE: on_match_vote(l, arg(&f, 0), arg(&f, 1)); break; // updMatchVote(vo, mts)
+        case KRUNKER_S2C_ADD_SPRAY: on_add_spray(l, &f); break;
+        case KRUNKER_S2C_MARK_POSITION: on_mark_position(l, &f); break;
         case KRUNKER_S2C_UPDATE_HOST: on_update_host(l, &f); break;
         default: { // combat visuals / sounds (fx); the mode objectives / world objects / AI / zombies / map triggers (krunker_link_world.c)
             const KrunkerS2C id = (KrunkerS2C) krunker_s2c_lookup(f.name, f.name_len);
@@ -2262,7 +2384,10 @@ static int send_enter(KrunkerLink *l, const void *payload, const uint16_t length
     if (length <= offsetof(NetEntPacket, secondary_index)) ent.secondary_index = -1;
     if (length <= offsetof(NetEntPacket, lag_comp)) ent.lag_comp = 1.0f;
     if (length <= offsetof(NetEntPacket, attach_index)) ent.attach_index = 0;
-    const double nan = NAN;
+    // streakIndex1..3 as the live client cleans them (:210481-210505): -1 none, the third slot 0 (the
+    // Nuke) when unset; our STREAK_SLOTS (sent right before the ENT) when it came
+    double streak[3] = {-1, -1, 0};
+    for (int i = 0; l->streak_slots_set && i < 3; i++) streak[i] = l->streak_slots[i];
     const int own = l->account; // the account's loadout, else a guest's
 #define OWN(v) ((own && (v) >= 0) ? (double) (v) : -1.0)
     const KrunkerValue skins[] = {KRUNKER_V_NUM(OWN(ent.skins.primary)), KRUNKER_V_NUM(OWN(ent.skins.secondary))};
@@ -2277,12 +2402,12 @@ static int send_enter(KrunkerLink *l, const void *payload, const uint16_t length
         KRUNKER_V_NUM(ent.secondary_index >= 0 ? ent.secondary_index : 2),// [5] secondaryInd
         KRUNKER_V_NUM(ent.spectate ? 1 : 0),                              // [6] spectate
         KRUNKER_V_NUM(ent.chall_mode ? 1 : 0),                            // [7] challenge mode
-        KRUNKER_V_NUM(1),                                                 // [8] team pick (iïíiîiì)
+        KRUNKER_V_NUM(l->team_pick),                                      // [8] team pick (iïíiîiì, toggleTeam)
         KRUNKER_V_NUM(OWN(ent.skins.melee)),                              // [9] meleeIndex
         KRUNKER_V_NUM(-1),                                                // [10] skinColIndex
         KRUNKER_V_NUM(ent.lag_comp),                                      // [11] lagComp
         KRUNKER_V_NUM(ent.attach_index >= 0 ? ent.attach_index : 0),      // [12] attachIndex
-        KRUNKER_V_NUM(-1),                                                // [13] pcStatIndex
+        KRUNKER_V_NUM(l->pc_stat),                                        // [13] pcStatIndex (PC_STAT, -1 none)
         KRUNKER_V_NUM(OWN(ent.cosmetics.dye)),                            // [14] dyeIndex
         KRUNKER_V_NUM(OWN(ent.cosmetics_v7.shoe)),                        // [15] shoeIndex
         KRUNKER_V_NUM(OWN(ent.cosmetics.waist)),                          // [16] waistIndex
@@ -2295,7 +2420,7 @@ static int send_enter(KrunkerLink *l, const void *payload, const uint16_t length
         KRUNKER_V_NUM(0),                                                 // [23] premiumBadge
         KRUNKER_V_NUM(0),                                                 // [24] customBadge
         KRUNKER_V_NUM(OWN(ent.cosmetics_v7.wrist)),                       // [25] wristIndex
-        KRUNKER_V_NUM(nan), KRUNKER_V_NUM(nan), KRUNKER_V_NUM(nan),       // [26..28] streakIndex1..3
+        KRUNKER_V_NUM(streak[0]), KRUNKER_V_NUM(streak[1]), KRUNKER_V_NUM(streak[2]), // [26..28] streakIndex1..3
         KRUNKER_V_ARRAY(charms, 2),                                       // [29] charms
         KRUNKER_V_NUM(OWN(ent.cosmetics_v7.back)),                        // [30] backIndex
         KRUNKER_V_NUM(OWN(ent.cosmetics_v7.head)),                        // [31] headIndex
@@ -2477,10 +2602,97 @@ int krunker_link_send_ours(KrunkerLink *l, const NetPacketType type, const void 
             const KrunkerValue args[] = {KRUNKER_V_NUM(c.channel == 1 ? 1 : 0), KRUNKER_V_STR(c.text)};
             return send_c2s(l, KRUNKER_C2S_CHAT_MESSAGE, args, 2);
         }
-        case NET_PACKET_EXT: { // the player list's vote kick / K.P.D call; other subtypes are KrunkNative's
+        // the ENT's companions: kept for the "en" that follows (send_enter [26..28], [13])
+        case NET_PACKET_STREAK_SLOTS:
+            if (length < sizeof(NetStreakSlotsPacket)) return 0;
+            memcpy(l->streak_slots, payload, sizeof(l->streak_slots));
+            l->streak_slots_set = 1;
+            return 0;
+        case NET_PACKET_PC_STAT:
+            if (length < sizeof(NetPcStatPacket)) return 0;
+            l->pc_stat = ((const int8_t *) payload)[0];
+            return 0;
+        case NET_PACKET_USE_STREAK: { // callInStreak(n) (:220943): "k" + n, no args
+            if (length < sizeof(NetUseStreakPacket)) return 0;
+            const int slot = ((const uint8_t *) payload)[0];
+            if (slot > 2) return 0;
+            return send_c2s(l, (KrunkerC2S) (KRUNKER_C2S_KILL_STREAK_0 + slot), NULL, 0);
+        }
+        case NET_PACKET_SPECTATE_TARGET: { // ["fpSp", sid] the followed player, ["fpSp"] the free cam (:209610 / :209618)
+            NetSpectateTargetPacket t = {.uid = -1};
+            memcpy(&t, payload, length < sizeof(t) ? length : sizeof(t));
+            const KrunkerValue args[] = {KRUNKER_V_NUM(t.uid)};
+            return send_c2s(l, KRUNKER_C2S_fpSp, args, t.uid >= 0 ? 1 : 0);
+        }
+        case NET_PACKET_SPRAY_V7: { // the spray key: ["spry"]; the premium wheel: ["spry", index] (:221434 / :221489)
+            NetSprayRequestPacket r = {.index = -1};
+            memcpy(&r, payload, length < sizeof(r) ? length : sizeof(r));
+            const KrunkerValue args[] = {KRUNKER_V_NUM(r.index)};
+            return send_c2s(l, KRUNKER_C2S_SPRAY, args, r.index >= 0 ? 1 : 0);
+        }
+        case NET_PACKET_TAUNT: { // the Prop team's taunt: ["prpt", i] (:221444)
+            if (length < sizeof(NetTauntPacket)) return 0;
+            const KrunkerValue args[] = {KRUNKER_V_NUM(((const uint8_t *) payload)[0])};
+            return send_c2s(l, KRUNKER_C2S_PROP_HUNT_TAUNT, args, 1);
+        }
+        case NET_PACKET_INTERACT: { // v7: action 1 ["int" / "intSec", type, id] (:221454), 2 ["drpw"]; 0 (v3's spray) ["spry"]
+            NetInteractV7Packet in = {.type = -1, .uid = -1};
+            if (length < sizeof(NetInteractPacket)) return 0;
+            memcpy(&in, payload, length < sizeof(in) ? length : sizeof(in));
+            if (in.action == 0) return send_c2s(l, KRUNKER_C2S_SPRAY, NULL, 0);
+            if (in.action == 2) return send_c2s(l, KRUNKER_C2S_DROP_WEAPON, NULL, 0);
+            if (in.action != 1) return 0;
+            if (length < sizeof(NetInteractV7Packet)) in.type = in.uid = -1; // v3's "int" 1: nothing scanned
+            const KrunkerValue args[] = {KRUNKER_V_NUM(in.type), KRUNKER_V_NUM(in.uid)};
+            return send_c2s(l, in.secondary ? KRUNKER_C2S_SECONDARY_INTERACT : KRUNKER_C2S_INTERACT, args, 2);
+        }
+        case NET_PACKET_CONFIRM_INTERACT: { // confirmKey: ["cnfm"] a pending trigger, ["cnfm", 2] a pending spin (:221452)
+            NetConfirmPacket c = {.uid = -1};
+            memcpy(&c, payload, length < sizeof(c) ? length : sizeof(c));
+            const KrunkerValue args[] = {KRUNKER_V_NUM(2)};
+            return send_c2s(l, KRUNKER_C2S_CUSTOM_TRIGGER_INTERACTION, args, c.kind == 2 ? 1 : 0);
+        }
+        case NET_PACKET_COMP_SET: { // updSyncDat (:219146): ["cd", "t", team] (toggleTeam), ["cd", "c", {c, s}] (selectClass :210761)
+            NetCompSetPacket c;
+            if (length < sizeof(c)) return 0;
+            memcpy(&c, payload, sizeof(c));
+            if (c.key == 't') {
+                l->team_pick = c.value; // iïíiîiì = team || 0: the next "en" [8]
+                const KrunkerValue args[] = {KRUNKER_V_STR("t"), KRUNKER_V_NUM(c.value)};
+                return send_c2s(l, KRUNKER_C2S_SYNC_CONNECTION_DATA, args, 2);
+            }
+            if (c.key != 'c') return 0;
+            // s: the class's secondary pick (parseInt(secondaryInd)) when it has one, else null; our
+            // COMP_SET carries no secondary, so the server keeps the one the next "en" [5] names
+            const KrunkerValue kv[] = {KRUNKER_V_STR("c"), KRUNKER_V_NUM(c.value), KRUNKER_V_STR("s"), KRUNKER_V_NIL};
+            const KrunkerValue args[] = {KRUNKER_V_STR("c"), KRUNKER_V_MAP(kv, 2)};
+            return send_c2s(l, KRUNKER_C2S_SYNC_CONNECTION_DATA, args, 2);
+        }
+        case NET_PACKET_MATCH_VOTE: { // voteOnMatch(option) (:220127): ["maVote", the option's own mts string]
+            NetMatchVotePacket v;
+            if (length < sizeof(v)) return 0;
+            memcpy(&v, payload, sizeof(v));
+            for (int i = 0; i < l->vote_count; i++) {
+                if (l->vote_mode[i] != v.mode_id || l->vote_map[i] != v.map_index) continue;
+                const KrunkerValue args[] = {KRUNKER_V_STR(l->vote_mts[i])};
+                return send_c2s(l, KRUNKER_C2S_MATCH_VOTE, args, 1);
+            }
+            return 0;
+        }
+        case NET_PACKET_EXT: { // the player list's vote kick / K.P.D call, the ping; other subtypes are KrunkNative's
             uint16_t subtype, body_length;
             const uint8_t *body;
             if (!net_ext_unpack(payload, length, &subtype, &body, &body_length)) return 0;
+            if (subtype == NET_EXT_MARK_POSITION && body_length >= sizeof(NetMarkPositionSendPacket)) {
+                // markPosition (:170208, sent :221369 only `isRanked || isComp`): ["mpos", {x, y, z}]
+                if (!l->is_ranked && !l->is_comp) return 0;
+                NetMarkPositionSendPacket m;
+                memcpy(&m, body, sizeof(m));
+                const KrunkerValue kv[] = {KRUNKER_V_STR("x"), KRUNKER_V_NUM(m.x), KRUNKER_V_STR("y"), KRUNKER_V_NUM(m.y),
+                                           KRUNKER_V_STR("z"), KRUNKER_V_NUM(m.z)};
+                const KrunkerValue args[] = {KRUNKER_V_MAP(kv, 3)};
+                return send_c2s(l, KRUNKER_C2S_MARK_POSITION, args, 1);
+            }
             if (subtype == NET_EXT_VOTE_KICK && body_length >= sizeof(NetVoteKickPacket)) {
                 NetVoteKickPacket v; // kickVote / [1]: ["v2k", alias, 1]; [2]: ["v2k", alias]
                 memcpy(&v, body, sizeof(v));

@@ -66,6 +66,9 @@ typedef enum {
     NET_EXT_ADMIN_ACTION = 0x0807,    // v10 ADMIN_ACTIONS C -> S NetAdminActionPacket: a DEV's kick / ban from the player list
     NET_EXT_KPD_APPLY = 0x0808,       // "kpdA" C -> S NetKpdApplyPacket: a K.P.D application (answer: NET_EXT_KPD_RESPONSE code 6)
 
+    // 0x0900 in-game actions of v10 without a NetPacket id
+    NET_EXT_MARK_POSITION = 0x0900, // "mpos" C -> S NetMarkPositionSendPacket / S -> C NetMarkPositionPacket (a ping)
+
     // 0x8000.. KrunkNative-only
     NET_EXT_BLOCK_KN = 0x8000,
 
@@ -325,6 +328,17 @@ typedef struct {
 typedef struct {
     uint8_t tagged;
 } NetKpdRatePacket;
+
+// NET_EXT_MARK_POSITION, v10's ping (ranked / comp: markPositionKey, M2): C -> S the camera ray's first
+// map hit (tmpPlayer.markPosition :170208, range 1000); S -> C addPingIcon(key, position) (:160954):
+// one marker per key (the pinging player's id), drawn 4 s at position.y + 2 (img/ping.png).
+typedef struct {
+    float x, y, z;
+} NetMarkPositionSendPacket;
+typedef struct {
+    char key[48];
+    float x, y, z;
+} NetMarkPositionPacket;
 #pragma pack(pop)
 
 // NET_EXT_GAME_ANNOUNCEMENT (S -> C): v10's GAME_ANNOUNCEMENT ("gameAnnouncement" {message, target,

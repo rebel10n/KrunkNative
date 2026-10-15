@@ -22,3 +22,6 @@ void hud_minimap_set_custom_override(int custom);
 
 // overlay.addDeathMarker(x, y, z, isYou): the deathMarkers setting filters it.
 void hud_death_marker_add(vec3 position, int is_you);
+// overlay.addPingIcon(key, position) (v10 "mpos"): one 4 s ping per key at position.y + 2
+void hud_ping_marker_add(const char *key, vec3 position);
+int hud_ping_markers_shown(void); // the ping markers on screen now (tests)

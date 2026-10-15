@@ -1091,6 +1091,12 @@ int client_handle_game_event(Client *client, const int type, const void *payload
             }
             else if (subtype == NET_EXT_PLAYER_SPEED_BOOST || subtype == NET_EXT_PLAYER_NAME) events_player_ext(client, subtype, body, body_length);
             else if (subtype == NET_EXT_KN_BOT_PATH) nav_overlay_bot_path(client, body, body_length); // the spectated bot's route (nav_overlay.c)
+            else if (subtype == NET_EXT_MARK_POSITION && body_length >= sizeof(NetMarkPositionPacket)) { // "mpos": addPingIcon (hud_map.c)
+                NetMarkPositionPacket ping;
+                memcpy(&ping, body, sizeof(ping));
+                ping.key[sizeof(ping.key) - 1] = 0;
+                hud_ping_marker_add(ping.key, (vec3) {ping.x, ping.y, ping.z});
+            }
             else if (subtype >= NET_EXT_KN_OFFICIAL_AMMO && subtype <= NET_EXT_KN_OFFICIAL_LEADER_BOARD) events_official_hud(client, subtype, body, body_length);
             else if (subtype == NET_EXT_KN_OFFICIAL_SHAKE && body_length == sizeof(NetOfficialShakePacket)) { // "shk"
                 NetOfficialShakePacket shake;

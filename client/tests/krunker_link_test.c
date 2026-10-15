@@ -1063,6 +1063,197 @@ static void test_world(void) {
     CHECK(link.unknown_in == 0, "every world packet was handled (%u unknown)", link.unknown_in);
 }
 
+// the last frame the link sent (NULL: none)
+static const KrunkerFrame *last_out(void) { return g_out_count ? &g_out[g_out_count - 1] : NULL; }
+
+// Player actions (official-ingame-actions): the social v7 announcement, spectating, the match vote, sprays,
+// pings and every outbound action translation
+static void test_actions(void) {
+    KrunkerLink link;
+    const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
+    krunker_link_init(&link, &io, KRUNKER_AHKEY);
+    feed(&link, "io-init", (KrunkerValue[]) {KRUNKER_V_STR("sockA")}, 1);
+    clear();
+
+    // init (a ranked game: [16]): INIT, then NET_PACKET_SOCIAL_V7 (the v7 chat / spray / taunt shapes)
+    KrunkerValue init[17];
+    for (int i = 0; i < 17; i++) init[i] = KRUNKER_V_NIL;
+    init[0] = KRUNKER_V_NUM(10);
+    init[1] = KRUNKER_V_NUM(0);
+    init[16] = KRUNKER_V_BOOL(1);
+    feed(&link, "init", init, 17);
+    int i_init = -1, i_social = -1;
+    for (int i = 0; i < g_in_count; i++) {
+        if (g_in[i].type == NET_PACKET_INIT) i_init = i;
+        if (g_in[i].type == NET_PACKET_SOCIAL_V7) i_social = i;
+    }
+    CHECK(i_init >= 0 && i_social > i_init && g_in[i_social].length == 1 && g_in[i_social].payload[0] == NET_SOCIAL_V7_VERSION,
+          "init: SOCIAL_V7 after the INIT (%d, %d)", i_init, i_social);
+    CHECK(link.is_ranked == 1 && link.is_comp == 0, "init: ranked [16]");
+    clear();
+
+    // "start" [timer, team, spectating]: NET_PACKET_SPECTATE both ways
+    feed(&link, "start", (KrunkerValue[]) {KRUNKER_V_STR("4:00"), KRUNKER_V_NUM(1), KRUNKER_V_BOOL(1)}, 3);
+    feed(&link, "start", (KrunkerValue[]) {KRUNKER_V_STR("4:00"), KRUNKER_V_NUM(1), KRUNKER_V_BOOL(0)}, 3);
+    {
+        READ_IN(NetSpectatePacket, a, SPECTATE, 0);
+        READ_IN(NetSpectatePacket, b, SPECTATE, 1);
+        CHECK(a_p && a.spectating == 1 && b_p && b.spectating == 0, "start: spectating 1, then 0");
+    }
+    clear();
+
+    // end: endData.mts / vo -> the vote cards; a public option has no name (the official list's), an
+    // official one "mode,map,name,id"; vo counts weights, ours (sockA) is the voted entry
+    const KrunkerValue mts[] = {KRUNKER_V_STR("0,1"), KRUNKER_V_STR("1,43,Bastion,0"), KRUNKER_V_STR("3,7")};
+    const KrunkerValue v1[] = {KRUNKER_V_STR("1,43,Bastion,0"), KRUNKER_V_NUM(1)};
+    const KrunkerValue v2[] = {KRUNKER_V_STR("1,43,Bastion,0"), KRUNKER_V_NUM(2)};
+    const KrunkerValue v3[] = {KRUNKER_V_STR("0,1"), KRUNKER_V_NUM(1)};
+    const KrunkerValue vo[] = {KRUNKER_V_STR("sockA"), KRUNKER_V_ARRAY(v1, 2), KRUNKER_V_STR("sockB"), KRUNKER_V_ARRAY(v2, 2),
+                               KRUNKER_V_STR("sockC"), KRUNKER_V_ARRAY(v3, 2), KRUNKER_V_STR("sockD"), KRUNKER_V_NIL};
+    const KrunkerValue end_kv[] = {KRUNKER_V_STR("ed"), KRUNKER_V_ARRAY(NULL, 0), KRUNKER_V_STR("mts"), KRUNKER_V_ARRAY(mts, 3),
+                                   KRUNKER_V_STR("vo"), KRUNKER_V_MAP(vo, 4)};
+    feed(&link, "end", (KrunkerValue[]) {KRUNKER_V_NUM(0), KRUNKER_V_BOOL(1), KRUNKER_V_MAP(end_kv, 3), KRUNKER_V_NUM(-1)}, 4);
+    {
+        READ_IN(NetMatchVoteStatePacket, st, MATCH_VOTE_STATE, 0);
+        int vote_first = 1;
+        for (int i = 0; i < g_in_count && g_in[i].type != NET_PACKET_MATCH_VOTE_STATE; i++)
+            if (g_in[i].type == NET_PACKET_END) vote_first = 0;
+        CHECK(st_p && st.count == 3 && st.voted == 1 && st.entries[0].mode_id == 0 && st.entries[0].map_index == 1 &&
+              !strcmp(st.entries[0].map_name, "Littletown") && st.entries[0].votes == 1 && st.entries[1].mode_id == 1 &&
+              st.entries[1].map_index == 43 && !strcmp(st.entries[1].map_name, "Bastion") && st.entries[1].votes == 3 &&
+              st.entries[2].votes == 0 && vote_first, "end: vote cards (%d entries, ours %d)", st.count, st.voted);
+    }
+    clear();
+    // "mv" [vo, mts]: our vote moves to "3,7"
+    const KrunkerValue v4[] = {KRUNKER_V_STR("3,7"), KRUNKER_V_NUM(1)};
+    const KrunkerValue vo2[] = {KRUNKER_V_STR("sockA"), KRUNKER_V_ARRAY(v4, 2)};
+    feed(&link, "mv", (KrunkerValue[]) {KRUNKER_V_MAP(vo2, 1), KRUNKER_V_ARRAY(mts, 3)}, 2);
+    {
+        READ_IN(NetMatchVoteStatePacket, st, MATCH_VOTE_STATE, 0);
+        CHECK(st_p && st.count == 3 && st.voted == 2 && st.entries[2].votes == 1 && st.entries[1].votes == 0, "mv: our vote on 3,7");
+    }
+    clear();
+    // our card click -> "maVote" with the option's own string; an unknown pick sends nothing
+    NetMatchVotePacket mv = {.mode_id = 1, .map_index = 43};
+    krunker_link_send_ours(&link, NET_PACKET_MATCH_VOTE, &mv, sizeof(mv));
+    CHECK(g_out_count == 1 && !strcmp(g_out[0].name, "maVote") && g_out[0].argc == 1 &&
+          !strcmp(krunker_str(krunker_frame_arg(&g_out[0], 0)), "1,43,Bastion,0"), "maVote: the raw option");
+    mv.map_index = 99;
+    CHECK(!krunker_link_send_ours(&link, NET_PACKET_MATCH_VOTE, &mv, sizeof(mv)) && g_out_count == 1, "maVote: not an option");
+    clear();
+
+    // "sp" ADD_SPRAY -> NET_PACKET_SPRAY_V7
+    feed(&link, "sp", (KrunkerValue[]) {KRUNKER_V_STR("7_1"), KRUNKER_V_NUM(2490), KRUNKER_V_NUM(1.5), KRUNKER_V_NUM(2), KRUNKER_V_NUM(-3.25),
+                                        KRUNKER_V_NUM(90), KRUNKER_V_NUM(0), KRUNKER_V_NUM(-90), KRUNKER_V_NIL}, 9);
+    {
+        READ_IN(NetSprayV7Packet, sp, SPRAY_V7, 0);
+        CHECK(sp_p && sp.uid == 7 && sp.slot == 1 && sp.skin == 2490 && sp.position[0] == 1.5f && sp.position[2] == -3.25f && sp.y_rot == 90 &&
+              sp.z_rot == -90 && sp.dye == -1, "sp: spray 7_1");
+    }
+    clear();
+
+    // "mpos" [key, {x, y, z}] -> NET_EXT_MARK_POSITION
+    const KrunkerValue pos[] = {KRUNKER_V_STR("x"), KRUNKER_V_NUM(1), KRUNKER_V_STR("y"), KRUNKER_V_NUM(2), KRUNKER_V_STR("z"), KRUNKER_V_NUM(3)};
+    feed(&link, "mpos", (KrunkerValue[]) {KRUNKER_V_STR("sockB"), KRUNKER_V_MAP(pos, 3)}, 2);
+    {
+        uint16_t n = 0;
+        const uint8_t *b = ext_body(0, NET_EXT_MARK_POSITION, &n);
+        NetMarkPositionPacket m = {0};
+        if (b && n == sizeof(m)) memcpy(&m, b, sizeof(m));
+        CHECK(b && !strcmp(m.key, "sockB") && m.x == 1 && m.y == 2 && m.z == 3, "mpos: ping of sockB");
+    }
+    clear();
+
+    // outbound: our ping -> "mpos" [{x, y, z}] (ranked); not outside ranked / comp
+    {
+        uint8_t ext[64];
+        const NetMarkPositionSendPacket m = {4, 5, 6};
+        const uint16_t n = net_ext_pack(ext, sizeof(ext), NET_EXT_MARK_POSITION, &m, sizeof(m));
+        krunker_link_send_ours(&link, NET_PACKET_EXT, ext, n);
+        const KrunkerValue *p = g_out_count ? krunker_frame_arg(&g_out[0], 0) : NULL;
+        CHECK(g_out_count == 1 && !strcmp(g_out[0].name, "mpos") && krunker_num(krunker_get(p, "x"), 0) == 4 &&
+              krunker_num(krunker_get(p, "z"), 0) == 6, "mpos out (ranked)");
+        clear();
+        link.is_ranked = 0;
+        CHECK(!krunker_link_send_ours(&link, NET_PACKET_EXT, ext, n) && g_out_count == 0, "mpos out: not in a casual game");
+        clear();
+    }
+
+    // STREAK_SLOTS / PC_STAT are kept (nothing sent) and fill the next "en" [26..28] / [13]; COMP_SET 't' -> [8]
+    const NetStreakSlotsPacket slots = {{3, -1, 5}};
+    const NetPcStatPacket pc = {.index = 2};
+    CHECK(!krunker_link_send_ours(&link, NET_PACKET_STREAK_SLOTS, &slots, sizeof(slots)) &&
+          !krunker_link_send_ours(&link, NET_PACKET_PC_STAT, &pc, sizeof(pc)) && g_out_count == 0, "STREAK_SLOTS / PC_STAT: not sent");
+    const NetCompSetPacket team = {.key = 't', .value = 2};
+    krunker_link_send_ours(&link, NET_PACKET_COMP_SET, &team, sizeof(team));
+    CHECK(g_out_count == 1 && !strcmp(g_out[0].name, "cd") && !strcmp(krunker_str(krunker_frame_arg(&g_out[0], 0)), "t") &&
+          fnum(&g_out[0], 1) == 2, "cd t 2");
+    clear();
+    const NetCompSetPacket cls = {.key = 'c', .value = 4};
+    krunker_link_send_ours(&link, NET_PACKET_COMP_SET, &cls, sizeof(cls));
+    {
+        const KrunkerValue *c = g_out_count ? krunker_frame_arg(&g_out[0], 1) : NULL;
+        CHECK(g_out_count == 1 && !strcmp(g_out[0].name, "cd") && !strcmp(krunker_str(krunker_frame_arg(&g_out[0], 0)), "c") &&
+              krunker_num(krunker_get(c, "c"), -1) == 4 && krunker_is(krunker_get(c, "s"), KRUNKER_NIL), "cd c {c: 4, s: null}");
+    }
+    clear();
+    NetEntPacket ent;
+    memset(&ent, 0, sizeof(ent));
+    ent.secondary_index = -1;
+    krunker_link_send_ours(&link, NET_PACKET_ENT, &ent, sizeof(ent));
+    {
+        const KrunkerValue *e = g_out_count ? krunker_frame_arg(&g_out[0], 0) : NULL;
+        CHECK(e && krunker_num(krunker_at(e, 26), 0) == 3 && krunker_num(krunker_at(e, 27), 0) == -1 && krunker_num(krunker_at(e, 28), 0) == 5 &&
+              krunker_num(krunker_at(e, 13), 0) == 2 && krunker_num(krunker_at(e, 8), 0) == 2, "en: streaks 3/-1/5, pcStat 2, team 2");
+    }
+    clear();
+
+    // USE_STREAK -> "k1" (no args)
+    const NetUseStreakPacket use = {.slot = 1};
+    krunker_link_send_ours(&link, NET_PACKET_USE_STREAK, &use, sizeof(use));
+    CHECK(g_out_count == 1 && !strcmp(g_out[0].name, "k1") && g_out[0].argc == 0, "USE_STREAK -> k1");
+    clear();
+    // SPECTATE_TARGET -> "fpSp" [sid] / []
+    NetSpectateTargetPacket tgt = {.uid = 7};
+    krunker_link_send_ours(&link, NET_PACKET_SPECTATE_TARGET, &tgt, sizeof(tgt));
+    tgt.uid = -1;
+    krunker_link_send_ours(&link, NET_PACKET_SPECTATE_TARGET, &tgt, sizeof(tgt));
+    CHECK(g_out_count == 2 && !strcmp(g_out[0].name, "fpSp") && g_out[0].argc == 1 && fnum(&g_out[0], 0) == 7 && !strcmp(g_out[1].name, "fpSp") &&
+          g_out[1].argc == 0, "fpSp 7, then the free cam");
+    clear();
+    // SPRAY_V7 -> "spry" [] / [index]; TAUNT -> "prpt" [i]
+    NetSprayRequestPacket spr = {.index = -1};
+    krunker_link_send_ours(&link, NET_PACKET_SPRAY_V7, &spr, sizeof(spr));
+    spr.index = 2500;
+    krunker_link_send_ours(&link, NET_PACKET_SPRAY_V7, &spr, sizeof(spr));
+    const NetTauntPacket taunt = {.index = 3};
+    krunker_link_send_ours(&link, NET_PACKET_TAUNT, &taunt, sizeof(taunt));
+    CHECK(g_out_count == 3 && !strcmp(g_out[0].name, "spry") && g_out[0].argc == 0 && !strcmp(g_out[1].name, "spry") && fnum(&g_out[1], 0) == 2500 &&
+          !strcmp(g_out[2].name, "prpt") && fnum(&g_out[2], 0) == 3, "spry, spry 2500, prpt 3");
+    clear();
+    // INTERACT: int / intSec [type, id], drpw, v3 spray
+    NetInteractV7Packet it = {.action = 1, .secondary = 0, .type = 2, .uid = 15};
+    krunker_link_send_ours(&link, NET_PACKET_INTERACT, &it, sizeof(it));
+    it.secondary = 1;
+    krunker_link_send_ours(&link, NET_PACKET_INTERACT, &it, sizeof(it));
+    it.action = 2;
+    krunker_link_send_ours(&link, NET_PACKET_INTERACT, &it, sizeof(it));
+    const NetInteractPacket v3spray = {.action = 0};
+    krunker_link_send_ours(&link, NET_PACKET_INTERACT, &v3spray, sizeof(v3spray));
+    CHECK(g_out_count == 4 && !strcmp(g_out[0].name, "int") && fnum(&g_out[0], 0) == 2 && fnum(&g_out[0], 1) == 15 &&
+          !strcmp(g_out[1].name, "intSec") && fnum(&g_out[1], 1) == 15 && !strcmp(g_out[2].name, "drpw") && g_out[2].argc == 0 &&
+          !strcmp(g_out[3].name, "spry") && g_out[3].argc == 0, "int, intSec, drpw, spry");
+    clear();
+    // CONFIRM_INTERACT -> "cnfm" [] / [2]
+    NetConfirmPacket cf = {.uid = 4, .kind = 0};
+    krunker_link_send_ours(&link, NET_PACKET_CONFIRM_INTERACT, &cf, sizeof(cf));
+    cf.kind = 2;
+    krunker_link_send_ours(&link, NET_PACKET_CONFIRM_INTERACT, &cf, sizeof(cf));
+    CHECK(g_out_count == 2 && !strcmp(g_out[0].name, "cnfm") && g_out[0].argc == 0 && g_out[1].argc == 1 && fnum(&g_out[1], 0) == 2 &&
+          last_out() == &g_out[1], "cnfm, cnfm 2");
+    clear();
+}
+
 int main(void) {
     KrunkerLink link;
     const KrunkerLinkIO io = {.emit = cap_emit, .send = cap_send, .event = cap_event, .cheat = fake_cheat};
@@ -1363,7 +1554,8 @@ int main(void) {
     const KrunkerValue *enter = g_out_count ? krunker_frame_arg(&g_out[0], 0) : NULL;
     CHECK(g_out_count == 1 && !strcmp(g_out[0].name, "en") && g_out[0].argc == 12 && krunker_is(enter, KRUNKER_ARRAY) && enter->len == 35 &&
           krunker_num(krunker_at(enter, 0), -1) == 3 && krunker_num(krunker_at(enter, 5), -1) == 2 && krunker_num(krunker_at(enter, 11), -1) == 0.5 &&
-          isnan(krunker_num(krunker_at(enter, 26), 0)) && fnum(&g_out[0], 1) == 16 && fnum(&g_out[0], 2) == 18 &&
+          krunker_num(krunker_at(enter, 26), 0) == -1 && krunker_num(krunker_at(enter, 28), -1) == 0 && // no STREAK_SLOTS: v10's clean defaults
+          krunker_num(krunker_at(enter, 13), 0) == -1 && krunker_num(krunker_at(enter, 8), 0) == 1 && fnum(&g_out[0], 1) == 16 && fnum(&g_out[0], 2) == 18 &&
           g_out[0].ah_echo == (int) NEXT_AH(), "en");
     clear();
 
@@ -1854,6 +2046,7 @@ int main(void) {
     test_combat();
     test_fx();
     test_world();
+    test_actions();
 
     printf("%d/%d passed\n", g_pass, g_pass + g_fail);
     return g_fail ? 1 : 0;

@@ -218,9 +218,13 @@ void comp_ui_message(const char *text) {
     if (el) html_dom_set_text(el, text);
 }
 
-// updSyncDat(key, value): NET_PACKET_COMP_SET to v7-protocol servers and offline
+// updSyncDat(key, value): NET_PACKET_COMP_SET to v7-protocol servers and offline (comp lobbies; official
+// krunker.io games always)
 static void comp_send(Client *client, const char key, const int value) {
-    if (!client || !client->game.config.comp || (!client->offline && client->net_server_minor < NET_PROTOCOL_MINOR_V7)) return;
+    // v10's selectClass sends its "c" in every game (game.deob.js:210761): an official krunker.io game
+    // gets it outside comp too (krunker_link.c "cd"); KrunkNative's servers keep it to comp lobbies
+    if (!client || (!client->game.config.comp && !client->game.is_official) || (!client->offline && client->net_server_minor < NET_PROTOCOL_MINOR_V7))
+        return;
     const NetCompSetPacket packet = {.key = (uint8_t) key, .value = value};
     client_net_send(client, NET_PACKET_COMP_SET, &packet, sizeof(packet));
 }

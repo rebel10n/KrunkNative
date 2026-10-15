@@ -10,6 +10,8 @@
 #include <html_dom.h>
 #include <ui_logic.h>
 #include <cJSON.h>
+#include <net_ext.h> // NET_EXT_MARK_POSITION
+#include <world.h>   // world_solid_fraction: the ping's camera ray
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -135,6 +137,31 @@ int social_taunt(Client *client, const int index) {
     const NetTauntPacket taunt = {.index = (uint8_t) index};
     client_net_send(client, NET_PACKET_TAUNT, &taunt, sizeof(taunt));
     return 1;
+}
+
+// ---------------------------------------------------------------- pings
+
+// v10.0.2 markPositionKey (M2), `(isRanked || isComp) && tmpPlayer.active` (game.deob.js:221369):
+// tmpPlayer.markPosition (:170208) raycasts the camera's world position along its direction through
+// the map collisions (range 1000) and sends ["mpos", {x, y, z}] of the first hit. Only an official
+// krunker.io game takes it (krunker_link.c sends it in ranked / comp only); KrunkNative's own servers
+// have no pings.
+int social_mark_position(Client *client) {
+    if (!client || !client->game.is_official || !client->me || !client->me->active || !client->game.map) return 0;
+    const float *m = client->camera.world_inverse_matrix; // row 2 is the view z axis
+    const vec3 origin = client->camera.position;
+    const vec3 seg = {-m[8] * 1000.0f, -m[9] * 1000.0f, -m[10] * 1000.0f};
+    const float t = world_solid_fraction(&client->game, origin, seg);
+    if (!(t > 0.0f && t < 1.0f)) { // raycast(...).length > 0
+        printf("[social] ping: nothing within 1000 along the view (from %.1f,%.1f,%.1f dir %.2f,%.2f,%.2f)\n", (double) origin.x, (double) origin.y, (double) origin.z, (double) seg.x / 1000.0, (double) seg.y / 1000.0, (double) seg.z / 1000.0);
+        return 0;
+    }
+    const NetMarkPositionSendPacket hit = {origin.x + seg.x * t, origin.y + seg.y * t, origin.z + seg.z * t};
+    uint8_t ext[NET_EXT_HEADER_SIZE + sizeof(hit)];
+    const uint16_t n = net_ext_pack(ext, sizeof(ext), NET_EXT_MARK_POSITION, &hit, sizeof(hit));
+    if (n) client_net_send(client, NET_PACKET_EXT, ext, n);
+    printf("[social] ping at %.2f,%.2f,%.2f\n", (double) hit.x, (double) hit.y, (double) hit.z);
+    return n != 0;
 }
 
 // ---------------------------------------------------------------- sprays
