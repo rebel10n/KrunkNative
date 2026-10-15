@@ -2850,3 +2850,14 @@ ui	img/backgrounds/gamecats/c_10.png	https://assets.krunker.io/img/backgrounds/g
 ui	img/backgrounds/gamecats/c_11.png	https://assets.krunker.io/img/backgrounds/gamecats/c_11.png	ba66728d6b92173a1ddd8e4d0d2397b7b253b93575de8f68d73fc263a454cc44	39243
 ui	img/backgrounds/gamecats/c_12.png	https://assets.krunker.io/img/backgrounds/gamecats/c_12.png	874146440050733e96b107014a26cb7bdab4f4e4ea3b6ce89c31dedea195fecc	43473
 ui	img/backgrounds/gamecats/c_13.png	https://assets.krunker.io/img/backgrounds/gamecats/c_13.png	732f2992aa5f9d079ec52e414425751080d0b766c5b3ff04b05ac875b86a6e69	26861
+# user-assets/707/model.obj + model.png: the Krunker Strike Habitat map's asset 707 (aid "707t", assets/maps/strike/habitat.json);
+# the 2026-10-15 per-map audit (doc/asset-audit.md) found it missing. user-assets.krunker.io answers 403 to direct requests
+# now: fetched with KN_FETCH_PROXY (fetch_live_assets.py fetch).
+assets	user-assets/707/model.obj	https://user-assets.krunker.io/707/model.obj	a3d64ea7a4609f15993b2de81f4d8eaa572c63b454e876d956f4ded317bfa756	2755
+assets	user-assets/707/model.png	https://user-assets.krunker.io/707/model.png	25ac70d29f2b92112b3415e953f4d77ef33d1944e7200986c3262e05434041fc	1508
+# textures/previews/weapons/weapon_30.png / weapon_31.png: v10's Boulder (29) and Compressor (30) previews in the Customize
+# secondary picker; img/mouse/10002.png: the middle mouse button of Settings > Controls (ui_controls.c). Missing per the
+# 2026-10-15 audit (doc/asset-audit.md: every uidiff scenario rendered against the launcher's content).
+assets	textures/previews/weapons/weapon_30.png	https://assets.krunker.io/textures/previews/weapons/weapon_30.png	2a0f5a5428050c0b14eaba3a4c21be4d4c23c31675d5b036472efb7b52532ac5	32167
+assets	textures/previews/weapons/weapon_31.png	https://assets.krunker.io/textures/previews/weapons/weapon_31.png	63fe4d282a92c899615a32457cae7eec289e2bd42570be700ecdc36be6ec207d	32039
+ui	img/mouse/10002.png	https://assets.krunker.io/img/mouse/10002.png	c85d64a5732cdbb179169184b35af4e9402234dbc820edcc95b1c4a972fb8661	2266

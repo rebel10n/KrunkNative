@@ -63,6 +63,10 @@
   when: kn_web_sync_assets | bool
   tags: [web_assets]
 
+- name: Git-tracked game assets (CI deploys, the full sync off)
+  ansible.builtin.include_tasks: tracked_assets.yml
+  when: not (kn_web_sync_assets | bool) and (kn_web_sync_tracked_assets | bool)
+
 # assets/version.txt: content hash of the tree. The web client appends it to every
 # asset URL (?v=), so the URLs are immutable and change exactly when the content does.
 # Rehashed on every run (~1 GB, a few seconds): CI does not sync assets but must not

@@ -13,7 +13,8 @@
 #
 # Layout: krunknative-client-<platform>/ holding client_bin (client.exe), server_bin (server.exe),
 # the bundled libraries (Windows DLLs; macOS ANGLE + non-system dylibs), ui/, the code-coupled
-# part of assets/ that is in git (shaders, maps, img, editor, skins.json, previews.json; the
+# part of assets/ that is in git (every tracked file: shaders, maps, img, editor, skins.json,
+# previews.json, titles.json, the KN-only sounds; the
 # rest of the game content comes separately, see --assets and package-assets.sh), kn-install.json
 # (the updater's install marker), README.txt, LICENSE-NOTICE.txt + licenses/, SHA256SUMS.
 # macOS archives hold KrunkNative.app (Contents/MacOS: binaries + dylibs, Contents/Resources: the
@@ -104,15 +105,29 @@ entry="$client"
 [ -n "$launcher" ] && entry="$launcher_name"
 
 # ---------------------------------------------------------------- the install tree
+# tracked_assets: the git-tracked files under assets/ (paths relative to it), without its README;
+# outside a git checkout (a source tarball) the code-coupled directories
+tracked_assets() {
+    if git -C "$repo" rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+        git -C "$repo" ls-files -- assets | sed 's|^assets/||' | grep -vx 'README.md'
+    else
+        (cd "$repo/assets" && find shaders maps img editor -type f && ls skins.json previews.json titles.json 2> /dev/null)
+    fi
+}
+
 # fill_root <dir> <package>: everything that lives at the install root (macOS: Contents/Resources)
 fill_root() {
     local root="$1" package="$2" rel="."
     [ "$package" = app ] && rel="../.."
     mkdir -p "$root/assets" "$root/licenses"
     cp -R "$repo/ui" "$root/ui"
-    # git-tracked, code-coupled content (assets/README.md: only these are in git)
-    for d in shaders maps img editor; do cp -R "$repo/assets/$d" "$root/assets/"; done
-    for f in skins.json previews.json; do cp "$repo/assets/$f" "$root/assets/"; done
+    # git-tracked, code-coupled content (assets/README.md: only these are in git): every tracked
+    # file, not a list of directories, so a new one (titles.json, the Nettspend sounds/kn_*.mp3)
+    # ships with the build that uses it; the launcher's content index leaves these out
+    tracked_assets | while IFS= read -r f; do
+        mkdir -p "$root/assets/$(dirname "$f")"
+        cp "$repo/assets/$f" "$root/assets/$f"
+    done
     if [ -n "$assets" ]; then
         # the whole content tree (package-assets.sh --list: the same filter as the assets bundle)
         "$repo/tools/release/package-assets.sh" --list "$assets" | (cd "$assets" && while IFS= read -r f; do

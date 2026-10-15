@@ -1,0 +1,49 @@
+# The git-tracked part of assets/ (maps, shaders, editor, img, skins / previews / titles.json, the
+# KN-only sounds; ~10 MB) when the full content sync is off, which is how CI deploys
+# (deploy-kru.yml: kn_web_sync_assets=false, its checkout has nothing else). A new or changed
+# tracked file then reaches the web client, the Pages CDN and the launcher's content index with
+# the commit that uses it. rsync --checksum over the listed files only, temp + rename (the
+# kn-updates objects are hardlinks into this tree), never --delete: the untracked 1.5 GB already
+# there stays as it is. Without this kru lagged main (doc/asset-audit.md, 2026-10-15: the Strike and
+# FTUE maps, laced / outline shaders, a stale spin_wheel.frag and html_ui.frag, titles.json and the
+# Nettspend sounds were missing there).
+- name: List the git-tracked game assets
+  ansible.builtin.shell: |
+    set -euo pipefail
+    list="$(mktemp "${TMPDIR:-/tmp}/kn-tracked-assets.XXXXXX")"
+    git -C {{ kn_repo_root | quote }} ls-files -z -- assets | tr '\0' '\n' | sed 's|^assets/||' \
+      | grep -vxF -f <(printf '%s\n' {{ kn_web_tracked_assets_skip | map('quote') | join(' ') }}) > "$list"
+    echo "$list"
+  args:
+    executable: /bin/bash
+  delegate_to: localhost
+  become: false
+  run_once: true
+  check_mode: false
+  changed_when: false
+  register: kn_web_tracked_list
+
+- name: Upload the git-tracked game assets
+  ansible.posix.synchronize:
+    src: "{{ kn_web_assets_src }}"
+    dest: "{{ kn_web_base }}/assets/"
+    archive: false
+    recursive: true
+    times: true
+    copy_links: true
+    use_ssh_args: true
+    rsync_opts:
+      - "--files-from={{ kn_web_tracked_list.stdout }}"
+      - "--chmod=D755,F644"
+      - "--chown=root:root"
+      - "--checksum"
+      - "--itemize-changes"
+
+- name: Remove the tracked-assets list
+  ansible.builtin.file:
+    path: "{{ kn_web_tracked_list.stdout }}"
+    state: absent
+  delegate_to: localhost
+  become: false
+  run_once: true
+  check_mode: false

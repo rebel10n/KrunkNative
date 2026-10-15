@@ -2421,12 +2421,17 @@ build_time, protocol},"outdated_grace_h":48,"page":<release page>,"platforms":{"
 `macos-aarch64`, `macos-amd64`; the update package is the `.zip` on Windows, else the `.tar.gz`.
 Full packages (with the game content) are not hosted: the launcher downloads the content.
 
-**Content split**. The packages ship the code-coupled, git-tracked part of `assets/` (shaders, maps,
-img, editor, `skins.json`, `previews.json`): those files belong to the executable update, and the
+**Content split**. The packages ship the code-coupled, git-tracked part of `assets/` (every tracked
+file but its README: shaders, maps, img, editor, `skins.json`, `previews.json`, `titles.json`, the
+KN-only sounds; `client.yml` fails a package that misses one): those files belong to the executable
+update, and the
 content index leaves them out (`kn-updates stage` lists them in `build.json` as `package_assets`, the
 manifest as `assets.packaged`, and a sync never removes them).
 Everything else (models, textures, sounds, fonts: the web asset tree on kru) is the content set,
-versioned by the hash of its file list.
+versioned by the hash of its file list. CI's kru deploy syncs the tracked files into that tree
+(role `kn_web`, `tasks/tracked_assets.yml`, whenever `kn_web_sync_assets` is off; never deleting), so the web client and the Pages CDN get them with the
+commit; the untracked rest only moves with a `--tags web_assets` run from a full checkout
+(doc/asset-audit.md).
 
 **Publishing** (CI, `client.yml` job `updates`, off until the repository variable
 `KN_UPDATES_UPLOAD` is `1`): `kn-updates stage` picks each platform's update package from the
