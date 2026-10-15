@@ -208,6 +208,7 @@ void player_spawn(Player *player) {
     player_reset_feel(player); // Player.reset: step/bob/lean/recoil feel from rest
 
     player->on_ground = 1;
+    player->noclip_prev = player->noclip; // a spawn is not a flip off
     player->on_wall = 0;
     player->on_terrain = 0;
     player->on_ladder = 0;
@@ -1452,6 +1453,10 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
     const float move_dir = -(float) M_PI / 2.0f + (float) M_PI / 4.0f * (float) input->move_dir + knobs->move_dir_offset * (float) M_PI;
 
     if (player->noclip) player->on_ground = 1;
+    // A flip off leaves that forced onGround behind: no collision test has run since, so the jump
+    // gate below must not read it as ground (KrunkNative; v10 jumped on that stale ground).
+    const int left_noclip = player->noclip_prev && !player->noclip;
+    player->noclip_prev = player->noclip;
 
     // UTILS.angleDistance(new, old) = old - new (players.js a7 and the pitch term)
     const float pitch_delta = normalize_angle(player->direction.x - input->x_dir);
@@ -1727,7 +1732,16 @@ void player_proc_input(Player *player, const Input *raw_input, const int recon, 
         player->jump_timer = MAX(0.0f, player->jump_timer - delta);
 
         if (ks_player_allows(player, KS_PLAYER_DEFAULT_MOVEMENT) && player->jump_timer <= 0.0f && !knobs->disable_jump && (player->on_ground || knobs->infinite_jump)) {
-            movement_try_jump(player, input->jump, recon);
+            // KrunkNative: noclip is flight and never jumps. Its forced onGround made every held or
+            // toggled jump a pop (auto bhop toggles the key each frame, and tryJump re-arms on each
+            // release), so with the flag on the impulses stacked, one per tick with autoJump. v10
+            // pops once per press here; this is a deliberate difference. A release still re-arms
+            // did_jump, as tryJump does.
+            if (!player->noclip) {
+                if (!left_noclip) movement_try_jump(player, input->jump, recon);
+            } else if (!input->jump) {
+                player->did_jump = 0;
+            }
         }
 
         if (!contact && !player->stuck_to_wall) { // v10: no gravity while stuck to a wall (v10:169754)

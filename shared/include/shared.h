@@ -1148,6 +1148,7 @@ typedef struct Player_t {
 
     unsigned char active:1;
     unsigned char noclip:1;
+    unsigned char noclip_prev:1; // the noclip flag of the previous input (player.c: a flip off is not ground)
     unsigned char god_mode:1;
     unsigned char unlimited_ammo:1;
     unsigned char force_hide:1;

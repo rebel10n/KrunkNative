@@ -536,6 +536,165 @@ static void run_input_rule_tests(Player *player) {
     if (g_failures == failures) printf("Test OK\n");
 }
 
+// Noclip + auto bhop (client ui_bhop.c, the SLIDEHOP / ALWAYS_JUMP modes): while the player moves
+// the mod toggles the jump slot every input frame (state ^= 1), and while noclip is on it returns
+// early, so the held key is the jump. The cases hold or tap the jump through a noclip flip. A jump
+// impulse is game_constants.jump_velocity * jump_mlt (one normal jump). Noclip never jumps, so the
+// jump key must not change the noclip flight, and a flip off must not jump on the stale noclip ground.
+#define NOCLIP_BHOP_DELTA 0.016f // seconds per input frame (60 fps)
+#define NOCLIP_BHOP_TICKS 90
+#define NOCLIP_IMPULSE_MIN 0.01f // a jump impulse adds 0.072 in one frame; decays add nothing
+
+// The jump key while noclip is on.
+enum { NOCLIP_KEY_RELEASED, NOCLIP_KEY_HELD, NOCLIP_KEY_TAPPED };
+
+typedef struct {
+    const char *label;
+    int auto_jump;   // Game.config.autoJump (the mod's bhop does not set it)
+    int ground_flip; // 1: flip on the first grounded frame the mod is about to jump on (did_jump 0)
+    int noclip_key;  // NOCLIP_KEY_*: the key while noclip is on (tapped: 15 frames down, 15 up)
+    int mod_lag;     // frames before the mod sees the noclip flag (it comes back from the server)
+    float lift;      // > 0: start this far above the floor with no bhop (a walk off, did_jump 0)
+} NoclipCase;
+
+typedef struct {
+    int ticks;
+    int impulses;   // ticks where vy rose by more than NOCLIP_IMPULSE_MIN (a jump impulse)
+    float max_vy;
+    float max_rise; // highest y over the phase minus the phase's start y
+} NoclipPhase;
+
+// The floor point every case starts from (the first case's landing), so runs compare exactly.
+static int g_noclip_have_floor = 0;
+static vec3 g_noclip_floor;
+
+// One input frame. `held` is the jump key. The mod (ui_bhop.c) rewrites the jump slot while
+// `mod_sees_noclip` is 0; once it sees noclip it returns early and the held key reaches the player.
+static void noclip_bhop_tick(Player *player, const Input *template, const int held, const int mod_sees_noclip, int *bhop_state, NoclipPhase *phase, const float start_y) {
+    const float prev_vy = player->velocity.y;
+    Input input = *template;
+    input.jump = (unsigned char) held;
+    if (!mod_sees_noclip) {
+        *bhop_state ^= 1;
+        input.jump = (unsigned char) *bhop_state;
+    } else {
+        *bhop_state = 0;
+    }
+    player_proc_input(player, &input, 0, 0);
+    phase->ticks++;
+    if (player->velocity.y > phase->max_vy) phase->max_vy = player->velocity.y;
+    if (player->velocity.y - prev_vy > NOCLIP_IMPULSE_MIN) phase->impulses++;
+    if (player->position.y - start_y > phase->max_rise) phase->max_rise = player->position.y - start_y;
+    if (getenv("KN_NOCLIP_TRACE")) {
+        printf("t %3d noc %d bhop %d jump %d | y %.4f vy %+.5f on_ground %d did_jump %d\n", phase->ticks, player->noclip,
+               *bhop_state, input.jump, player->position.y, player->velocity.y, player->on_ground, player->did_jump);
+    }
+}
+
+// One case: spawn on the floor point, land, then bhop (key held) until the flip, then noclip on. The
+// flight runs NOCLIP_BHOP_TICKS frames, then noclip goes off with the key held again. `end` (optional)
+// gets the position at the end of the noclip phase.
+static void run_noclip_bhop_case(Player *player, const NoclipCase *c, vec3 *end) {
+    Game *game = player->game;
+    const unsigned int saved_auto_jump = game->config.auto_jump;
+    game->config.auto_jump = (unsigned int) c->auto_jump;
+    use_map(game, "311_sandstorm");
+    player_spawn(player);
+    player->is_you = player->render_you = 0;
+    player->swap_timer = 0.0f;
+    player->noclip = 0;
+    if (g_noclip_have_floor) {
+        player->position = g_noclip_floor;
+        player->velocity = (vec3) {0};
+    }
+    player->direction = (vec2) {0};
+
+    Input input = {0};
+    input.move_dir = -1;
+    input.delta = NOCLIP_BHOP_DELTA;
+    for (int i = 0; i < 120; i++) player_proc_input(player, &input, 0, 0); // settle on the floor
+    if (!g_noclip_have_floor) {
+        g_noclip_floor = player->position;
+        g_noclip_have_floor = 1;
+    }
+    const float floor_y = g_noclip_floor.y;
+    input.move_dir = 1; // moving forward: the mod's auto modes are armed
+
+    int bhop_state = 0;
+    NoclipPhase bhop = {0}, noclip = {0}, after = {0};
+    int after_air_impulses = 0;
+    float start_y = player->position.y;
+    if (c->lift > 0.0f) {
+        player->position.y += c->lift;
+        player->on_ground = 0;
+    } else {
+        for (int i = 0; i < NOCLIP_BHOP_TICKS; i++) noclip_bhop_tick(player, &input, 1, 0, &bhop_state, &bhop, start_y);
+        if (c->ground_flip) {
+            for (int i = 0; i < 400 && !(player->on_ground && !player->did_jump && bhop_state == 0); i++) {
+                noclip_bhop_tick(player, &input, 1, 0, &bhop_state, &bhop, start_y);
+            }
+            RULE_CHECK(player->on_ground && !player->did_jump && bhop_state == 0, "%s: a grounded flip point (did_jump 0)", c->label);
+        }
+    }
+
+    player->noclip = 1;
+    start_y = player->position.y;
+    for (int i = 0; i < NOCLIP_BHOP_TICKS; i++) {
+        const int held = c->noclip_key == NOCLIP_KEY_HELD ? 1 : c->noclip_key == NOCLIP_KEY_TAPPED ? (i % 30) < 15 : 0;
+        noclip_bhop_tick(player, &input, held, i >= c->mod_lag, &bhop_state, &noclip, start_y);
+    }
+    if (end) *end = player->position;
+
+    // back to normal movement with the key held: the mod toggles again. In the first frames the
+    // player is still in the air (the flight does not fall), so a jump there is a jump in the air.
+    player->noclip = 0;
+    start_y = player->position.y;
+    for (int i = 0; i < 30; i++) {
+        const int airborne = player->position.y - floor_y > 0.5f;
+        const int before = after.impulses;
+        noclip_bhop_tick(player, &input, 1, 0, &bhop_state, &after, start_y);
+        if (i < 3 && airborne && after.impulses > before) after_air_impulses++;
+    }
+
+    const float jump_impulse = game_constants.jump_velocity * game->config.jump_mlt;
+    printf("  %s: bhop %d impulses | noclip %d impulses max vy %.5f rise %.4f | air impulses after the flip off %d (jump impulse %.4f)\n",
+           c->label, bhop.impulses, noclip.impulses, noclip.max_vy, noclip.max_rise, after_air_impulses, jump_impulse);
+
+    RULE_CHECK(noclip.max_vy <= jump_impulse + 1e-4f, "%s: noclip vy %.5f above one jump impulse %.5f", c->label, noclip.max_vy, jump_impulse);
+    RULE_CHECK(noclip.impulses == 0, "%s: %d jump impulses in noclip (noclip does not jump)", c->label, noclip.impulses);
+    RULE_CHECK(after_air_impulses == 0, "%s: %d jump impulses in the air after noclip is off", c->label, after_air_impulses);
+
+    player->noclip = 0;
+    game->config.auto_jump = saved_auto_jump;
+}
+
+static void run_noclip_bhop_tests(Player *player) {
+    printf("Running noclip + auto bhop tests (jump held through the noclip flip)... \n");
+    const int failures = g_failures;
+    const NoclipCase cases[] = {
+        {"ground flip, autoJump off", 0, 1, NOCLIP_KEY_HELD, 0, 0.0f},
+        {"air flip, autoJump off", 0, 0, NOCLIP_KEY_HELD, 0, 0.0f},
+        {"ground flip, autoJump on", 1, 1, NOCLIP_KEY_HELD, 0, 0.0f},
+        {"ground flip, key tapped in noclip", 0, 1, NOCLIP_KEY_TAPPED, 0, 0.0f},
+        {"ground flip, mod sees noclip 3 frames late", 0, 1, NOCLIP_KEY_HELD, 3, 0.0f},
+        {"walk off (no jump), key tapped in noclip", 0, 0, NOCLIP_KEY_TAPPED, 0, 5.0f},
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) run_noclip_bhop_case(player, &cases[i], NULL);
+
+    // the jump key does nothing in noclip: the flight with it held ends where the flight with it
+    // released does (same flip, same start)
+    const NoclipCase held = {"flight, key held", 1, 1, NOCLIP_KEY_HELD, 0, 0.0f};
+    const NoclipCase released = {"flight, key released", 1, 1, NOCLIP_KEY_RELEASED, 0, 0.0f};
+    vec3 held_end = {0}, released_end = {0};
+    run_noclip_bhop_case(player, &held, &held_end);
+    run_noclip_bhop_case(player, &released, &released_end);
+    const vec3 d = {held_end.x - released_end.x, held_end.y - released_end.y, held_end.z - released_end.z};
+    RULE_CHECK(fabsf(d.x) < EPSILON && fabsf(d.y) < EPSILON && fabsf(d.z) < EPSILON,
+               "noclip flight is the same with the jump held (off by %.6f %.6f %.6f)", d.x, d.y, d.z);
+
+    if (g_failures == failures) printf("Test OK\n");
+}
+
 // Generated from the real Krunker v7.1.4 client by tools/kref/movement-synth-v7.js at fixed
 // frame rates (33 / 17 / 7 ms = 30 / 60 / 144 fps). Each file names its map, class, weapon and
 // game settings (meta) and checks position, velocity, rampFix, the first-person feel values
@@ -633,6 +792,9 @@ int main(const int argc, char **argv) {
 
     if (!use_map(&game, "311_sandstorm")) return 1;
     run_input_rule_tests(player);
+    printf("\n");
+
+    run_noclip_bhop_tests(player);
     printf("\n");
 
     // Soul Sanctum's spawn stands on a cylinder top (y 3): v7 collides with it inclusively,
